@@ -52,6 +52,7 @@ import { createSchedulerRoutes } from "./routes/scheduler";
 import { ensureDailyTaskReviewJobs, ensureWeeklySelfLearningJob } from "./scheduler/core";
 import { renderAndRepoint } from "./lib/teamOsRender";
 import { installProgressHook } from "./runtimes/claude/launcher";
+import { writeMemberPersona } from "./lib/writeMemberPersona";
 import { createApprovalsApp } from "./routes/approvals";
 import { createPermissionGateRoutes } from "./routes/permissionGate";
 import { configureLeadActorDb } from "./lib/opAuth";
@@ -126,12 +127,27 @@ try {
   const claudeIds = agents.filter((a) => a.runtime === "claude_channel").map((a) => a.id);
   const rr = renderAndRepoint(ownerRow?.value ?? null, claudeIds);
   console.log(`[teamos-render] owner='${rr.owner}' repointed=${rr.repointed.join(",") || "none"}`);
-  // 공개 빌드: 기존 claude 멤버에도 progress("작업 중 ⏳") 훅 백필(멱등) — 업데이트 pull 한 공개 사용자의
-  //   기존 멤버도 재영입 없이 진행표시를 받게. 라이브(PUBLIC_BUILD=false)는 글로벌 telegram-progress.sh
-  //   배선이 있어 중복 방지 위해 skip(신규 멤버는 activation 에서 per-member 설치). OWNER 2026-07-19.
+  // 공개 빌드 부팅 백필(PUBLIC_BUILD 게이트) — 공개 사용자가 git 업데이트를 pull 한 뒤 재시작하면 기존
+  //   멤버도 재영입 없이 최신을 받게. 라이브(PUBLIC_BUILD=false)는 글로벌 배선/실멤버 보호로 skip.
   if (PUBLIC_BUILD) {
+    // ① progress("작업 중 ⏳") 훅 — claude 전용(글로벌 telegram-progress.sh 배선 대체).
     for (const cid of claudeIds) {
       try { installProgressHook(cid); } catch { /* best-effort */ }
+    }
+    // ② 룰 로딩파일(CLAUDE.md/AGENTS.md) 재생성 — pull 한 룰 업데이트(예: First contact 자기소개)를 기존
+    //    멤버에도 반영. skip-if-unchanged 라 멱등, SOUL.md(persona)는 안 건드림. b3os_native 는 정책 미확정이라 제외.
+    const teamName = (db.query("SELECT value FROM setting WHERE key = 'team_name'").get() as { value: string } | null)?.value ?? undefined;
+    for (const a of agents) {
+      if (a.runtime === "b3os_native") continue;
+      try {
+        writeMemberPersona({
+          id: a.id, display_name: a.display_name, role: a.role, runtime: a.runtime,
+          bot_username: a.telegram_bot_username ?? undefined,
+          workspace_path: a.workspace_path, persona_file: a.persona_file,
+          owner_name: ownerRow?.value ?? undefined, team_name: teamName,
+          team_collect_enabled: false,
+        });
+      } catch { /* best-effort */ }
     }
   }
 } catch (e) {

@@ -440,14 +440,15 @@ export function injectClaudeComms(personaText: string, tier2 = false): string {
 }
 
 
-function sectionTone(i: PersonaInput): string {
+// ★First contact — 신규 합류 후 첫 발화에서 자기소개+OT 확인. (이전 sectionTone 이 빌더에 배선 안 돼
+//   dead code였던 것을 고침: 제인 등 신규 멤버가 첫 메시지에 OT·persona 언급 안 하던 근본원인. OWNER 2026-07-19)★
+function sectionFirstContact(i: PersonaInput): string {
   return [
-    "## Tone",
+    "## First contact",
     "",
-    "- Friendly but technically precise.",
-    `- When introducing yourself, greet in the user's language (e.g. Korean "안녕하세요, ${i.display_name} 입니다").`,
-    `- **On the first exchange with someone, first give a brief self-intro (name·role), state in one line that you received the OT (team mission·rules·role·team skills) and joined the team, then answer the actual point.** After that, go straight to the point.`,
-    "- Short, clear answers. On the first appearance of jargon / English / an abbreviation, add a short gloss in the user's language in parentheses (e.g. API (the rules programs use to exchange requests)).",
+    `- **On your first exchange with someone (e.g. right after joining), open with a one-line self-intro — your name (${i.display_name}) and role — and confirm in one line that your onboarding (OT) is loaded: team mission · rules · role · team skills · your persona. Then answer the actual point.** Keep it to a line or two; after that first exchange, skip the intro and go straight to the point.`,
+    `- Greet in the user's language (e.g. Korean "안녕하세요, ${i.display_name} 입니다").`,
+    "- Friendly but technically precise. Short, clear answers. On the first appearance of jargon / English / an abbreviation, add a short gloss in the user's language in parentheses (e.g. API (the rules programs use to exchange requests)).",
   ].join("\n");
 }
 
@@ -562,6 +563,7 @@ export function buildPersona(i: PersonaInput): string {
     personaPointer(i), "",
     coreRuleFor(i.id, i.owner_name, i.team_name), "",
     (i.tier2_outbound ? SECTION_CLAUDE_COMMS_TIER2 : SECTION_CLAUDE_COMMS), "",   // ★ Core Rule 직후. tier2=마커 전송(malform 0), 기본=reply 도구.
+    sectionFirstContact(i), "",   // 신규 합류 첫 발화 자기소개+OT 확인 (이전 dead sectionTone 배선)
     sectionWorkspace(i), "",
     sectionTeamShare("claude_channel"), "",
     SECTION_GLOBAL,
@@ -606,6 +608,7 @@ export function buildAgentsMd(i: PersonaInput): string {
     `# AGENTS.md — ${i.display_name}`, "",
     personaPointer(i), "",
     coreRuleFor(i.id, i.owner_name, i.team_name), "",
+    sectionFirstContact(i), "",   // 신규 합류 첫 발화 자기소개+OT 확인 (이전 dead sectionTone 배선)
     sectionWorkspace(i), "",
     sectionTeamShare(i.runtime, i.id), "", // runtime+id — id는 i18n 파일럿 경로 override용. ruleLoadingBlock hermes 제외 처리.
     SECTION_GLOBAL, "",
