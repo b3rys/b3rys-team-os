@@ -412,9 +412,9 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void)
         body: JSON.stringify({ role: roleInput?.value ?? agent.role, persona: textarea.value }),
       });
       if (res.ok) {
-        const body = (await res.json()) as { updated?: string[]; runtime?: string };
+        await res.json().catch(() => ({}));
         if (statusEl) {
-          statusEl.textContent = pick(`✓ 저장됨 — ${(body.updated ?? []).length}개 파일 재생성 (재시작하면 반영)`, `✓ Saved — ${(body.updated ?? []).length} file(s) regenerated (restart to apply)`);
+          statusEl.textContent = pick(`✓ 저장됨 — 재시작하면 반영`, `✓ Saved — restart to apply`);
           statusEl.className = "text-[11px] mt-1.5 text-accent-greenSoft";
         }
       } else {
