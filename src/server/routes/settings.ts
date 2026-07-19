@@ -1023,7 +1023,9 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
   //   claude=CLAUDE.md(+SOUL.md) · codex/openclaw/hermes=AGENTS.md+SOUL.md.
   //   룰=템플릿(영문) / 능력(purpose)=사용자 입력 verbatim. divergence·codex gap·유실 근본해결(OWNER 2026-07-04).
   app.post("/members/:id/profile", async (c) => {
-    if (PUBLIC_BUILD) return c.json({ error: "live_only", hint: "프로필 편집은 라이브 전용입니다." }, 404);
+    // 프로필(역할·persona) 편집은 ★공개 빌드에서도 허용★ — 사용자가 자기 팀원 페르소나를 대시보드에서
+    // 편집하는 건 정상 기능이다(agents.json role + SOUL.md persona + 로딩파일 재생성뿐, 위험 op 아님).
+    // (구 live_only 게이트 제거 — 공개 사용자가 persona 저장 시 "실패: live_only" 나던 버그. OWNER 2026-07-19 맥북테스트.)
     const id = c.req.param("id");
     if (!/^[a-z0-9_-]+$/i.test(id)) return c.json({ error: "invalid_id" }, 400); // path traversal 방지
     const body = (await c.req.json().catch(() => ({}))) as { role?: unknown; persona?: unknown };
