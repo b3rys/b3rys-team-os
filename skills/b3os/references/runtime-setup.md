@@ -32,12 +32,17 @@ openclaw --version
 먼저 **어떤 구독으로 붙일지 사용자에게 물어봅니다.** onboard 흐름에서 그 구독 계정으로 **OAuth 로그인**합니다(브라우저) — API 키가 아니라 기존 구독 재사용:
 
 ```bash
-openclaw onboard --install-daemon    # 온보딩 중 구독 계정 OAuth 로그인(브라우저)
+# ChatGPT 구독 → --auth-choice openai (브라우저 OAuth 로그인). 완료 시
+#   ~/.openclaw/openclaw.json auth.profiles 에 openai:<email>(mode:oauth) 기록.
+openclaw onboard --auth-choice openai --install-daemon
 openclaw gateway status
 openclaw doctor
 ```
 
-> API 키로 붙이는 건 사용자가 명시적으로 원할 때만. 기본 안내는 구독 OAuth.
+> - 브라우저 없는 헤드리스: `--auth-choice openai-device-code`(URL+코드 페어링).
+> - ★`--auth-choice codex` 금지★ — `@openclaw/codex` 플러그인 wizard 로 라우팅되어 게이트웨이가 crash 한다(`openSyncKeyedStore` 부재 = 플러그인↔호스트 API 계약 불일치). ChatGPT 구독 OAuth 는 `openai` / `openai-device-code` 를 쓴다.
+> - 둘 다 ChatGPT 구독 OAuth 이며 **API 키가 아니다**(`OPENAI_API_KEY` 불필요). API 키로 붙이는 건 사용자가 명시적으로 원할 때만.
+> - **Node**: 25.9+ 허용. 위 openclaw/codex 플러그인 crash 는 플러그인↔호스트 API 문제이지 Node 버전 문제가 아니며 LTS 다운그레이드로 해결되지 않는다.
 
 b3os preflight가 보는 조건:
 - `openclaw` 바이너리가 PATH 또는 일반 설치 경로에 있음
@@ -46,7 +51,7 @@ b3os preflight가 보는 조건:
 
 막히면:
 - `openclaw CLI 미설치` → `npm install -g openclaw@latest` 후 새 터미널에서 `openclaw --version`
-- `openclaw 미인증` → `openclaw onboard --install-daemon` 또는 OpenClaw 설정 흐름에서 모델/OAuth 인증 완료
+- `openclaw 미인증` → `openclaw onboard --auth-choice openai --install-daemon`(ChatGPT 구독 OAuth). ★`--auth-choice codex` 는 crash 하니 쓰지 않는다.★
 - `python3 미설치` → macOS라면 Command Line Tools 또는 Homebrew Python 설치 후 재확인
 
 ## Hermes Agent

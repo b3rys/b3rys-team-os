@@ -554,6 +554,11 @@ function systemOpHtml(): string {
   // (관리자 PIN/접근제어는 System OP에서 제거 — OWNER 2026-06-28. 추후 소셜로긴/이메일로 독립 레벨 설계.)
   const form = `
     <div class="mt-4 space-y-3 border-t border-surface-3 pt-4">
+      <div class="text-[12px] text-slate-400 leading-relaxed bg-surface-0/40 rounded-md p-3 border border-surface-3/60">
+        <div class="text-slate-300 font-medium mb-1">${pick("System OP = 팀방(그룹방) 협업 + 팀 운영 알림 레이어", "System OP = team-room collaboration + team-ops alerts layer")}</div>
+        <div>${pick("팀방에서 여러 팀원이 <b>자동으로 대화에 끼어들게</b> 하고, digest·승인(approve)·상태(/status)·칸반(/board) 같은 <b>팀 운영 알림</b>을 받으려면 전용 'op 봇' 하나를 붙입니다.", "Attach one dedicated 'op bot' so teammates <b>auto-join the conversation in the team room</b>, and to receive <b>team-ops alerts</b> (digest·approve·/status·/board).")}</div>
+        <div class="mt-1.5 text-accent-greenSoft">${pick("★안 붙여도 됩니다 — 1:1 DM(각 팀원 봇에 직접)과 팀원끼리 협업(handoff·버스)은 이 설정 없이도 동작합니다.★ System OP는 '그룹방에서 자동 협업 + 운영 알림'을 원할 때만.", "★Optional — 1:1 DM (each teammate's own bot) and teammate-to-teammate collab (handoff·bus) work WITHOUT this.★ System OP is only for group-room auto-collab + ops alerts.")}</div>
+      </div>
       <div>
         <label class="${cLabel}">${pick("capture 봇 토큰", "capture bot token")} ${tokenSet ? `<span class="text-accent-greenSoft">${pick("설정됨", "Configured")} ✓</span>` : `<span class="text-txt-amber">${pick("미설정", "Not set")}</span>`} <span class="text-slate-600">${pick("· BotFather · 재시작 시 적용", "· BotFather · applied on restart")}</span></label>
         <input id="sysop-token" type="password" class="${cInput}" placeholder="${tokenSet ? pick("새 토큰으로 변경", "Change to a new token") : "123456:ABC..."}" autocomplete="off" />
@@ -566,6 +571,7 @@ function systemOpHtml(): string {
         <span class="text-[13px] font-medium text-slate-200">${pick("라우터 (agent 응답)", "Router (agent replies)")} <span class="${routerOn ? "text-accent-greenSoft" : "text-slate-500"} text-[11px]">${routerOn ? "ON" : "OFF · shadow"}</span></span>
         <button id="sysop-router" class="${routerOn ? "bg-accent-green/80" : "bg-slate-400/50"} shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors" role="switch" aria-checked="${routerOn}"><span class="${routerOn ? "translate-x-6" : "translate-x-1"} inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"></span></button>
       </div>
+      <div class="text-[11px] text-slate-500 -mt-1 leading-relaxed">${pick("ON = 팀방(그룹방)에서 팀원이 자동으로 응답 · OFF = 팀방에선 조용(결정만 기록). ★OFF여도 1:1 DM·팀원끼리 버스 협업은 그대로 동작★ — 라우터는 '그룹방 자동응답'만 켜고 끕니다.", "ON = teammates auto-reply in the team room · OFF = quiet in the room (decisions only logged). ★1:1 DM & teammate bus collab still work when OFF★ — the router only toggles group-room auto-reply.")}</div>
       <div class="flex items-center gap-3 pt-1">
         <button id="sysop-save" class="${btnPrimary}">${pick("저장", "Save")}</button>
         <button id="sysop-check" class="${btnGhost}">${pick("봇 연결 확인", "Check bot connection")}</button>

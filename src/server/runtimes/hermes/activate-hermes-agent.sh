@@ -217,6 +217,10 @@ env["HERMES_HOME"] = os.path.expanduser(f"~/.hermes/profiles/{profile}")
 # 팀장 chat_id 를 게이트웨이 process env allowlist 에 병합 주입 → hermes v0.18 페어링 게이트를 팀장은 통과
 #   (telegram/adapter.py 가 os.getenv("TELEGRAM_ALLOWED_USERS") 로 읽음). 값=설정 owner_chat_id(동적, 하드코딩 아님).
 #   기존 항목 보존 + 중복 제거. 미설정(빈 값)이면 건드리지 않음(open 게이트웨이 그대로).
+#   ★설계상 owner-DM-only★(하네스 검토 2026-07-19): 이 봇 게이트는 '팀장 1:1 DM' 을 여는 용도다. 그룹(팀방)
+#   협업은 이 봇 게이트가 아니라 ①System OP capture 봇이 그룹을 읽어 ②버스로 팀원을 깨우는 경로로 도달하므로
+#   (텔레그램은 bot→bot 그룹메시지를 전달 안 함), 여기에 그룹 chat_id 를 넣지 않는다. 그룹 내 non-owner '사람'
+#   발신이 이 봇에 직접 필요해지면 그때 TELEGRAM_GROUP_ALLOWED_CHATS 를 별도 주입한다(현재 미해당).
 owner = os.environ.get("OWNER_CHAT_ID", "").strip()
 if owner:
     ids = [u.strip() for u in env.get("TELEGRAM_ALLOWED_USERS", "").split(",") if u.strip()]
