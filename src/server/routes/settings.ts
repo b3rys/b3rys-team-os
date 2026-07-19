@@ -382,6 +382,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
 
   // ── 팀원: 목록·추가·퇴사 (agents.json) ───────────────────────────
   function readAgents(): any[] {
+    if (!existsSync(registryPath)) return []; // 추적 제외 파일 — 없으면 빈 레지스트리(부팅 부트스트랩이 곧 생성)
     return JSON.parse(readFileSync(registryPath, "utf-8"));
   }
   function writeAgents(list: any[]) {

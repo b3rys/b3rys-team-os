@@ -644,6 +644,7 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
 // 여기 전용 read/write 헬퍼(backup+0600, writeAgents와 동등)로 원자 갱신하고, 호출측(settings.ts 라우트)이
 // 성공/실패 무관하게 deps.onRegistryChanged?.()를 다시 불러 in-memory/DB 캐시를 재동기화한다.
 function readAgentsFile(registryPath: string): any[] {
+  if (!existsSync(registryPath)) return []; // 추적 제외 파일 — 없으면 빈 레지스트리
   return JSON.parse(readFileSync(registryPath, "utf-8"));
 }
 function writeAgentsFile(registryPath: string, list: any[]): void {

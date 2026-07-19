@@ -80,6 +80,10 @@ ensureWeeklySelfLearningJob(db);
 ensureDailyTaskReviewJobs(db);
 configureLeadActorDb(db);
 initGroupOwnerStore(db); // 그룹 owner DB 영속화: db 핸들 주입 + 저장된 owner 복원(재시작 유지)
+// agents.json 은 런타임 상태(영입된 팀원 레지스트리)라 git 추적에서 제외된다(.gitignore).
+// 공개 clone 엔 이 파일이 없으므로, 부팅 시 없으면 빈 레지스트리로 부트스트랩한다 —
+// 이 한 줄이 아래 syncRegistry·watchRegistry·readAgents(들)를 전부 안전하게 만든다.
+if (!existsSync(REGISTRY_PATH)) writeFileSync(REGISTRY_PATH, "[]\n", "utf-8");
 let agents = syncRegistry(db, REGISTRY_PATH);
 
 const { upgradeWebSocket, websocket } = createBunWebSocket<ServerWebSocket>();

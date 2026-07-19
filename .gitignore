@@ -13,6 +13,9 @@ slack-tokens/
 __pycache__/
 *.pyc
 logs/telegram-capture-offset.txt
+# agents.json = 런타임 팀원 레지스트리(영입 시 생성·갱신). 코드 아님 → 추적 제외.
+# 공개 clone 엔 없고, 서버가 부팅 시 빈 [] 로 부트스트랩한다(src/server/index.ts).
+agents.json
 agents.json.bak
 
 # 멤버 데이터(워크스페이스/세션/메모리)는 코드 repo에 두지 않음 — 데이터홈(B3RYS_HOME) 분리. 퍼블릭 안전망.
