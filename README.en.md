@@ -124,6 +124,10 @@ b3os is designed so a teammate's engine is swappable. Start on **claude** (no ex
 
 ---
 
+## 🆘 Support
+
+This is a personal, macOS-first project — issues and questions are welcome on [GitHub Issues](https://github.com/b3rys/b3rys-team-os/issues) (please include logs from `bun run start`).
+
 ## 📄 License
 
 [Apache License 2.0](LICENSE). b3os started as a personal open-source project by **gd.on** — use and modify freely; please keep the attribution (**gd.on**). If you use b3os in a commercial product, a "Powered by b3os" note is appreciated. The names/logos "b3os"·"b3rys" are trademarks of b3rys — code use is free, but ask before using the name/logo in a product name or branding.
