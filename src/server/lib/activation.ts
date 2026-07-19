@@ -18,7 +18,7 @@ import { writeMemberPersona, savePersonaFile } from "./writeMemberPersona";
 import { MANUALS_DIR } from "./paths";
 import { appendAuditFile } from "./auditFile";
 import { codexBridgePaths, placeCodexToken, writeCodexBridgeFiles, removeCodexBridgeFiles } from "../runtimes/codex/launcher";
-import { placeClaudeToken, writeClaudeBridgeFiles, seedClaudeTrust, seedClaudeAccess, killClaudeTmux, claudeBridgePaths, installReplyGuardHook, installOutboundHook, uninstallOutboundHook, uninstallReplyGuardHook, uninstallRecoveryHook, removeClaudeBridgeFiles } from "../runtimes/claude/launcher";
+import { placeClaudeToken, writeClaudeBridgeFiles, seedClaudeTrust, seedClaudeAccess, killClaudeTmux, claudeBridgePaths, installReplyGuardHook, installOutboundHook, installProgressHook, uninstallOutboundHook, uninstallReplyGuardHook, uninstallRecoveryHook, removeClaudeBridgeFiles } from "../runtimes/claude/launcher";
 import { isTier2Outbound, isTier2Shadow } from "../runtimes/claude/tier2Flag";
 import { setAgentEnabled, clearAgentOff } from "./agentControl";
 import { checkRuntimeAuth } from "./runtimeAuth";
@@ -550,6 +550,7 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       // reply-guard(reply 도구 미사용 감지 block)는 tier2 live(마커모드=reply 도구 안 씀)엔 미설치 — 안 그러면 매턴 block(Bill 하네스).
       //   shadow는 persona normal(reply 도구 유지)이라 reply-guard 유효 → 설치. live만 skip.
       if (!isTier2Outbound(id)) installReplyGuardHook(id);   // 워크스페이스 .claude/settings.json 에 reply-guard Stop 훅(send-drift 안전망)
+      installProgressHook(id);   // "작업 중 ⏳" 진행표시 훅(PreToolUse/Stop/PreCompact) — 공개 사용자·신규 멤버도 받게(글로벌 배선 대체). tier2 무관.
       // ★recovery 훅은 삭제됨(OWNER 2026-07-14) — 훅이 팀원 '대신' 보내는 [A] 패턴이라 제거.★
       //   이미 설치된 멤버에서도 걷어낸다(재활성화 때 self-heal). 안 보냈으면 안 보낸 것이고,
       //   그 사실을 팀원에게 되돌려 주는 것(reply-guard)까지가 시스템의 몫이다.

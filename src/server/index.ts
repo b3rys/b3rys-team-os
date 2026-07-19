@@ -51,6 +51,7 @@ import { createAcceptanceRoutes } from "./routes/acceptance";
 import { createSchedulerRoutes } from "./routes/scheduler";
 import { ensureDailyTaskReviewJobs, ensureWeeklySelfLearningJob } from "./scheduler/core";
 import { renderAndRepoint } from "./lib/teamOsRender";
+import { installProgressHook } from "./runtimes/claude/launcher";
 import { createApprovalsApp } from "./routes/approvals";
 import { createPermissionGateRoutes } from "./routes/permissionGate";
 import { configureLeadActorDb } from "./lib/opAuth";
@@ -125,6 +126,14 @@ try {
   const claudeIds = agents.filter((a) => a.runtime === "claude_channel").map((a) => a.id);
   const rr = renderAndRepoint(ownerRow?.value ?? null, claudeIds);
   console.log(`[teamos-render] owner='${rr.owner}' repointed=${rr.repointed.join(",") || "none"}`);
+  // 공개 빌드: 기존 claude 멤버에도 progress("작업 중 ⏳") 훅 백필(멱등) — 업데이트 pull 한 공개 사용자의
+  //   기존 멤버도 재영입 없이 진행표시를 받게. 라이브(PUBLIC_BUILD=false)는 글로벌 telegram-progress.sh
+  //   배선이 있어 중복 방지 위해 skip(신규 멤버는 activation 에서 per-member 설치). OWNER 2026-07-19.
+  if (PUBLIC_BUILD) {
+    for (const cid of claudeIds) {
+      try { installProgressHook(cid); } catch { /* best-effort */ }
+    }
+  }
 } catch (e) {
   console.error("[teamos-render] startup failed:", e instanceof Error ? e.message : String(e));
 }

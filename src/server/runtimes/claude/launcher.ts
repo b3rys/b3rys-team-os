@@ -123,6 +123,67 @@ export function installReplyGuardHook(id: string): void {
   } catch { /* best-effort */ }
 }
 
+/** telegram-progress 훅 설치 — 멤버 워크스페이스 `.claude/settings.json`(프로젝트 스코프)에 "작업 중 ⏳" 진행표시.
+ *  PreToolUse(pre)=매 툴마다 진행 한 줄 append · Stop(stop)=턴 끝 진행 삭제 · PreCompact(compact)=압축 알림.
+ *  봇 컨텍스트(어느 채팅에 쏠지)는 세션 env TELEGRAM_STATE_DIR(텔레그램 채널이 세팅)에서 읽으므로 별도
+ *  래퍼/봇-스코프 case 불필요 — 워크스페이스 스코프라 오너·타 봇 무영향(글로벌 telegram-progress.sh 래퍼를
+ *  ★공개 사용자·신규 멤버까지★ 대체). claude 런타임 전용. 멱등(evt별 includes 가드). best-effort. */
+export function installProgressHook(id: string): void {
+  assertId(id);
+  const dotClaude = `${MEMBERS_ROOT}/${id}/.claude`;
+  const hookDst = `${dotClaude}/hooks/telegram-progress.py`;
+  const settingsPath = `${dotClaude}/settings.json`;
+  const src = `${REPO_ROOT}/hooks/telegram-progress.py`;
+  try {
+    if (!existsSync(src)) return; // 소스 없으면 skip
+    mkdirSync(`${dotClaude}/hooks`, { recursive: true });
+    writeFileSync(hookDst, readFileSync(src, "utf-8"));
+    try { chmodSync(hookDst, 0o755); } catch { /* best-effort */ }
+    let settings: Record<string, unknown> = {};
+    if (existsSync(settingsPath)) {
+      try { const p = JSON.parse(readFileSync(settingsPath, "utf-8")); if (p && typeof p === "object") settings = p; } catch { /* keep {} */ }
+    }
+    const hooks = (settings.hooks && typeof settings.hooks === "object" ? settings.hooks : {}) as Record<string, unknown>;
+    const addOnce = (evt: string, matcher: string, mode: string) => {
+      const arr = Array.isArray(hooks[evt]) ? (hooks[evt] as unknown[]) : [];
+      if (!JSON.stringify(arr).includes("telegram-progress.py")) {
+        const entry: Record<string, unknown> = { hooks: [{ type: "command", command: `python3 "${hookDst}" ${mode}` }] };
+        if (matcher) entry.matcher = matcher; // Stop 은 matcher 없음(글로벌 배선과 동형)
+        arr.push(entry);
+      }
+      hooks[evt] = arr;
+    };
+    addOnce("PreToolUse", "*", "pre");
+    addOnce("Stop", "", "stop");
+    addOnce("PreCompact", "*", "compact");
+    settings.hooks = hooks;
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+  } catch { /* best-effort */ }
+}
+
+/** telegram-progress 훅 제거 — settings.json 의 PreToolUse/Stop/PreCompact 에서 progress 항목 제거 + 훅 파일 삭제. best-effort. */
+export function uninstallProgressHook(id: string): void {
+  assertId(id);
+  const dotClaude = `${MEMBERS_ROOT}/${id}/.claude`;
+  const settingsPath = `${dotClaude}/settings.json`;
+  const hookDst = `${dotClaude}/hooks/telegram-progress.py`;
+  try {
+    if (existsSync(settingsPath)) {
+      const p = JSON.parse(readFileSync(settingsPath, "utf-8"));
+      const hooks = (p?.hooks && typeof p.hooks === "object" ? p.hooks : {}) as Record<string, unknown>;
+      for (const evt of ["PreToolUse", "Stop", "PreCompact"]) {
+        if (Array.isArray(hooks[evt])) {
+          hooks[evt] = (hooks[evt] as unknown[]).filter((e) => !JSON.stringify(e).includes("telegram-progress.py"));
+          if ((hooks[evt] as unknown[]).length === 0) delete hooks[evt];
+        }
+      }
+      p.hooks = hooks;
+      writeFileSync(settingsPath, JSON.stringify(p, null, 2) + "\n");
+    }
+  } catch { /* best-effort */ }
+  try { rmSync(hookDst, { force: true }); } catch { /* best-effort */ }
+}
+
 // ★tg-reply-recovery 훅은 제거됨 (OWNER 2026-07-14).★ 훅이 팀원 '대신' 텔레그램에 보내는 [A] 패턴이었다 —
 // 서버가 팀원 턴 본문을 대신 게시하던 것을 걷어낸 것과 같은 이유로 삭제. 팀원이 안 보냈으면 안 보낸 것이고,
 // 그 사실을 팀원 본인에게 되돌려 주는 것(reply-guard)까지가 시스템의 몫이다. 대신 말해 주지는 않는다.
