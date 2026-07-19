@@ -56,6 +56,27 @@ curl -s -X PUT http://localhost:$PORT/team/api/mission \
 > ★멘션명은 항상 물어본다(질문 생략 금지). 사용자가 안 정하면 자동으로 `[id, 표시이름]` 이 별칭으로 들어가니 "안 넣어도 부를 수 있다"고 안내하되, 물음 자체는 건너뛰지 않는다.★
 > ★persona를 주면 SOUL.md 로 저장되고, 비우면 SOUL.md 없이 진행된다(나중에 대시보드에서 추가 가능). 물어는 보되 강요하지 않는다.★
 
+> **여러 명 한 번에 (배치 영입 폼)** — 사용자가 팀원을 한꺼번에 주려 하면 아래 형식으로 **팀원별로** 채워 달라고 안내한다(값은 예시 — 실제 값으로 교체). ★런타임은 구독으로 고른다: **Claude 구독 → `claude channel`**, **ChatGPT 구독 → `openclaw` 또는 `hermes`**(hermes·openclaw 는 ChatGPT 구독자용이 기본, claude 로 붙이는 용도가 아님).★
+>
+> **예제 ① — Claude 구독자**
+> ```
+> • 팀원 ID, 이름: alex, Alex
+> • 멘션명: alex, Alex, 알렉스
+> • Persona: 백엔드·인프라 담당 시니어 개발자. 구조 설계를 먼저 해 사이드이펙트를 줄인다.
+> • 런타임, 모델: claude channel, claude
+> • 봇토큰: 8090901234:AA-fake-example-교체필요   ← BotFather 값
+> ```
+> **예제 ② — ChatGPT 구독자**
+> ```
+> • 팀원 ID, 이름: sam, Sam
+> • 멘션명: sam, Sam, 샘
+> • Persona: 프론트·앱 개발 전문가. 사용자 관점에서 설계·구현한다.
+> • 런타임, 모델: openclaw, chatgpt   (또는 hermes, chatgpt)
+> • 봇토큰: 8123457890:AA-fake-example-교체필요   ← BotFather 값
+> ```
+> ★봇토큰 주의 — 토큰은 비밀번호 같은 값이라 대화 기록에 평문으로 남는다. ★예시는 가짜 형식이며, 실제 토큰을 채운 폼은 공유하지 말고 본인 CC 세션에서만 쓴다.★ 토큰은 파일(0600)로만 두고 화면에 다시 출력하지 않는다.
+> ★영입 순서 — claude 팀원을 먼저 영입·페어링해야 팀장 chat_id 가 잡히고, 그 다음 hermes 가 그 값으로 페어링 게이트를 통과한다. 순서 = claude → hermes → openclaw.★
+
 ```bash
 # 아래 값들은 형식 예시일 뿐 — 실제로는 사용자가 정한 id·이름·역할·별칭을 넣는다.
 curl -s -X POST http://localhost:$PORT/team/api/members/recruit \

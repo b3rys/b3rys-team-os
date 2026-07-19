@@ -273,10 +273,14 @@ curl -s -X PUT http://localhost:$PORT/team/api/mission \
 
 ### 5-1. 런타임 추천 + 나열
 
-**기본은 `claude_channel`을 추천**하고, 고급 사용자가 원할 때만 BYO 런타임을 고르게 한다:
+**런타임은 "어떤 구독을 쓰는지"로 추천한다 — 먼저 물어본다("Claude 구독이세요, ChatGPT 구독이세요?"):**
 
-- **Claude Code에서 이 스킬을 실행 중이면 → `claude_channel` 추천** ("이미 쓰시는 Claude 로그인을 그대로
-  재사용해요 — 추가 구독 없이 바로 됩니다").
+- **Claude 구독자 → `claude_channel`** — 기존 Claude 로그인을 그대로 재사용(추가 구독·키 없이 바로). Claude Code에서 이 스킬을 실행 중이면 특히 매끄럽다.
+- **ChatGPT 구독자 → `hermes_agent` 또는 `openclaw`** — ChatGPT 구독을 **OAuth**로 재사용(API 키 아님). 둘 다 BYO 고급 런타임이라 CLI·인증을 먼저 갖춘다(`references/runtime-setup.md`; hermes 는 `hermes auth add openai-codex --type oauth`). ★hermes·openclaw 는 ChatGPT 구독자용이 기본 — claude 로 붙이는 용도가 아니다.★
+- **모르거나 첫 팀원이면 → `claude_channel`** 이 가장 짧은 경로(AI가 설치·인증까지 몰아줄 수 있음).
+
+> ★인증은 항상 **구독(OAuth) 기본, API 키 아님**. 자동발견된 `*_API_KEY` 는 사용자가 명시적으로 원할 때만.★
+
 그리고 공개 표면의 목록을 보여준다:
 
 | # | runtime | 한 줄 설명 | 난이도 | 설치 주체 |
@@ -300,6 +304,8 @@ curl -s -X PUT http://localhost:$PORT/team/api/mission \
 ### 5-2. 런타임을 고른 순간 → 그 런타임만 인증 preflight
 
 **구독을 미리 캐묻지 않는다.** 고른 런타임의 CLI·로그인만 그때 확인한다.
+
+> **★인증은 "구독 모델"(OAuth)이 기본 — API 키가 아니다.★** claude/openclaw/hermes 모두 **이미 쓰는 구독을 OAuth 로그인으로 재사용**하는 게 기본 경로다(claude_channel 을 권한 이유와 동일). 어떤 구독으로 붙일지는 **사용자에게 물어본다**("Claude / ChatGPT / … 중 어느 구독?"). 환경에 `OPENAI_API_KEY` 같은 키가 이미 있어도, 사용자가 API 키를 원한다고 하지 않았으면 **구독(OAuth)으로 안내**하고 자동발견된 API 키 항목은 쓰지 않는다. API 키 방식은 **사용자가 명시적으로 원할 때만**의 예외 경로다. (BYO 런타임 인증 상세 = `references/runtime-setup.md`)
 
 - **`claude_channel` (쉬움, 대개 이미 로그인됨)**
   ```bash

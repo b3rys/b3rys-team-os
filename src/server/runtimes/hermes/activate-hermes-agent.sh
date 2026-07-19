@@ -37,7 +37,28 @@ if [ -z "${SRC_PROFILE:-}" ]; then
     SRC_PROFILE="$pname"; break
   done
 fi
-[ -n "${SRC_PROFILE:-}" ] || { echo "❌ 인증된 hermes 프로필이 최소 1개 필요합니다 (auth 복제 원본). 먼저 ~/.hermes/profiles/<name>/auth.json 이 있는 프로필을 만드세요"; exit 1; }
+
+# ★루트 폴백(preflight↔activate divergence 해소, OWNER 2026-07-19 맥북테스트)★
+#   현대 hermes(v0.18+)의 `hermes auth [add]` 는 인증을 글로벌 ~/.hermes/auth.json 에만 저장하고
+#   profiles/ 를 만들지 않는다. preflight(runtimeAuth.hermesAuthExists)는 글로벌 auth.json 을 인정하므로,
+#   "auth 보유 프로필이 없다"는 이유로 여기서 exit 1 하면 → preflight 통과했는데 activate 실패(갭).
+#   공개 hermes 사용자가 정상 인증하고도 전원 막히던 원인. 프로필이 없고 글로벌 auth 만 있으면,
+#   그 글로벌 auth 로 base 프로필을 자동 시드해 clone 원본으로 삼는다(preflight 가 인정한 것을 activate 도 인정).
+if [ -z "${SRC_PROFILE:-}" ] && [ -f "$HOME/.hermes/auth.json" ]; then
+  BASE_PROFILE="b3ryshermes"
+  [ "$BASE_PROFILE" = "$AGENT_ID" ] && BASE_PROFILE="b3os-base"   # 타겟명과 충돌 방지(희박)
+  say "■ 인증 프로필 없음 + 글로벌 auth 존재 → base 프로필 '$BASE_PROFILE' 자동 시드(글로벌 ~/.hermes/auth.json)"
+  if [ ! -d "$HOME/.hermes/profiles/$BASE_PROFILE" ]; then
+    # --clone: 활성(default) 프로필의 config/.env/SOUL/skills 복사 → 게이트웨이가 뜰 설정 확보.
+    hermes profile create "$BASE_PROFILE" --clone --description "b3os base (auto-seeded from global ~/.hermes/auth.json)" \
+      || hermes profile create "$BASE_PROFILE" --description "b3os base (auto-seeded from global ~/.hermes/auth.json)"
+  fi
+  # clone 은 auth.json 을 안 옮긴다 → 글로벌 auth 를 심링크(복사 아님 = 로테이션 시 stale 방지).
+  ln -sf "$HOME/.hermes/auth.json" "$HOME/.hermes/profiles/$BASE_PROFILE/auth.json"
+  SRC_PROFILE="$BASE_PROFILE"
+  say "  ✅ base 프로필 준비됨: $BASE_PROFILE (auth = 글로벌 ~/.hermes/auth.json 심링크)"
+fi
+[ -n "${SRC_PROFILE:-}" ] || { echo "❌ hermes 인증이 없습니다 — 구독 OAuth 로 인증한 뒤 다시 활성화하세요: 'hermes auth add <provider> --type oauth'. (~/.hermes/auth.json 또는 ~/.hermes/profiles/<name>/auth.json 필요)"; exit 1; }
 [ -d "$HOME/.hermes/profiles/$SRC_PROFILE" ] || { echo "❌ 원본 프로필 없음: $SRC_PROFILE"; exit 1; }
 say "■ 복제 원본 프로필: $SRC_PROFILE"
 
@@ -138,7 +159,7 @@ echo "  (대시보드 영입으로 등록됐으면 persona/경로 자동 — her
 
 say "■ 5) 게이트웨이 기동 (프로필별 독립 LaunchAgent — 재부팅 생존)"
 # ★팀장 텔레그램 chat_id 해석 — hermes v0.18 페어링 게이트를 팀장은 코드 없이 통과시키기 위해 게이트웨이
-#   plist EnvironmentVariables 의 TELEGRAM_ALLOWED_USERS 에 동적 주입한다(adapter.py os.getenv 로 읽음).
+#   plist EnvironmentVariables 의 TELEGRAM_ALLOWED_USERS 에 동적 주입한다(telegram/adapter.py os.getenv 로 읽음).
 #   ①activation.ts 가 넘긴 OWNER_CHAT_ID(설정 owner_chat_id/도출) ②수동 실행 폴백: team.db owner_chat_id 설정.
 #   ★하드코딩 금지 — 값은 항상 설정에서 동적으로.★ 없으면 미주입(팀장이 수동 pairing 필요).  OWNER 2026-07-19.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -156,6 +177,17 @@ HTMPL="$HOME/Library/LaunchAgents/ai.hermes.gateway-$SRC_PROFILE.plist"
 HPLIST="$HOME/Library/LaunchAgents/ai.hermes.gateway-$AGENT_ID.plist"
 GENERIC_PLIST="$HOME/Library/LaunchAgents/ai.hermes.gateway.plist"
 mkdir -p "$HOME/.hermes/profiles/$AGENT_ID/logs"
+# ★seed 전용 plist 폴백(자동시드 base 대응, OWNER 2026-07-19 맥북테스트)★ — 현대 hermes(v0.18+)의
+#   `hermes gateway install` 은 프로필별 plist 를 만들지 않고 generic ai.hermes.gateway.plist 하나만 만든다.
+#   그래서 자동시드된 base 프로필(b3ryshermes)엔 전용 plist(ai.hermes.gateway-b3ryshermes.plist)가 없어
+#   아래 per-profile 복제가 unmanaged 폴백으로 빠지고, 그 폴백의 `hermes gateway start` 는 generic(=default
+#   프로필) 게이트웨이만 띄워 'herm 프로필 게이트웨이 안 뜸' 으로 실패했다(preflight/base 시드는 통과한 뒤 여기서 막힘).
+#   → seed 전용 plist 가 없으면 generic 을 복제 템플릿으로 삼는다(generic 도 없으면 install 로 만든 뒤).
+#     복제 python 이 Label/--profile/HERMES_HOME 을 이 프로필용으로 바꿔 per-profile plist 를 만든다.
+if [ ! -f "$HTMPL" ]; then
+  [ -f "$GENERIC_PLIST" ] || HERMES_PROFILE="$SRC_PROFILE" hermes gateway install --no-start-now >/dev/null 2>&1 || true
+  [ -f "$GENERIC_PLIST" ] && HTMPL="$GENERIC_PLIST"
+fi
 if [ -f "$HTMPL" ] && [ "$AGENT_ID" != "$SRC_PROFILE" ]; then
   python3 - "$HTMPL" "$HPLIST" "$AGENT_ID" <<'PY'
 import os, plistlib, sys
@@ -211,9 +243,16 @@ else
   echo "  ⚠ seed($SRC_PROFILE) plist 템플릿 없음 — unmanaged 폴백"; HERMES_PROFILE="$AGENT_ID" ${OWNER_CHAT_ID:+TELEGRAM_ALLOWED_USERS=$OWNER_CHAT_ID} hermes gateway start 2>&1 | tail -5 || echo "  ⚠ gateway start 확인 필요"
 fi
 sleep 2
+# ★검증(OWNER 2026-07-19 맥북테스트)★ — b3os 는 per-profile launchd 서비스(ai.hermes.gateway-<id>)를 직접 만든다.
+#   modern hermes 의 `hermes gateway status` 는 generic 서비스만 봐 per-profile 를 'not running' 으로 오탐한다
+#   (게이트웨이가 실제 떠 있어도 activate 실패로 뜸 — `hermes gateway list` 엔 ✓ <id> — PID N 로 정상 표시).
+#   그래서 우리가 만든 그 launchd 서비스 상태를 직접 확인하고, 못 잡으면 예전 status 파서로 폴백한다.
+GW_LABEL="ai.hermes.gateway-$AGENT_ID"
+LC_OUT="$(launchctl print "gui/$(id -u)/$GW_LABEL" 2>/dev/null || true)"
 STATUS_OUT="$(HERMES_PROFILE="$AGENT_ID" hermes gateway status 2>&1 || true)"
-printf "%s\n" "$STATUS_OUT" | head -5
-if ! HERMES_STATUS_OUT="$STATUS_OUT" python3 - "$AGENT_ID" <<'PY'
+if printf "%s" "$LC_OUT" | grep -qE "state = running" && printf "%s" "$LC_OUT" | grep -qE "pid = [0-9]+"; then
+  say "  ✅ 게이트웨이 실행 확인(launchd: $GW_LABEL)"
+elif HERMES_STATUS_OUT="$STATUS_OUT" python3 - "$AGENT_ID" <<'PY'
 import os, re, sys
 
 profile = sys.argv[1]
@@ -253,7 +292,10 @@ ok = (any(healthy(line) for line in current) and has_profile_evidence(current)) 
 sys.exit(0 if ok else 1)
 PY
 then
+  say "  ✅ 게이트웨이 실행 확인(status 파서)"
+else
   echo "❌ hermes gateway not running for profile $AGENT_ID"
+  printf "%s\n" "$STATUS_OUT" | head -5
   exit 1
 fi
 

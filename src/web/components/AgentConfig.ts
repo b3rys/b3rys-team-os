@@ -447,9 +447,9 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void)
         body: JSON.stringify({ role: roleInput?.value ?? agent.role, persona: textarea.value }),
       });
       if (res.ok) {
-        const body = (await res.json()) as { updated?: string[]; runtime?: string };
+        await res.json().catch(() => ({})); // 응답 소비. '0개 파일 재생성' 문구 제거 — SOUL 저장돼도 로딩파일 렌더가 동일하면 0으로 떠 실패처럼 읽혔음(PR#1 04f7713).
         if (statusEl) {
-          statusEl.textContent = pick(`✓ 저장됨 (역할·페르소나·멘션명) — ${(body.updated ?? []).length}개 파일 재생성 (재시작하면 반영)`, `✓ Saved (role · persona · mention names) — ${(body.updated ?? []).length} file(s) regenerated (restart to apply)`);
+          statusEl.textContent = pick(`✓ 저장됨 (역할·페르소나·멘션명) — 재시작하면 반영`, `✓ Saved (role · persona · mention names) — restart to apply`);
           statusEl.className = "text-[11px] mt-1.5 text-accent-greenSoft";
         }
       } else {
