@@ -56,9 +56,11 @@ export function pickMergeApprover(db: Database, pool: string[], seed: string): s
 
 // 전용 캡처봇 토큰 — var/secrets/capture.bot-token(0600) → 없으면 env(CAPTURE_BOT_TOKEN) fallback.
 // (P0) UI(Settings▸시스템OP)로 설정 가능. 변경 적용은 워커 재init(restartCapture). 없으면 워커 inert — 라이브 흐름 안 건드림.
-const TOKEN = getCaptureToken();
-// 대상 그룹 (현재 supergroup). 비우면 모든 그룹. (P0) var/capture-group-id.txt → env fallback. UI 변경은 재시작 시 적용.
-const GROUP_ID = getCaptureGroupId() ?? "";
+// ★let (const 아님): startTelegramCapture 재init(대시보드 토큰/그룹 저장) 마다 파일에서 다시 읽어 갱신한다.
+//   const 로 두면 모듈 로드 시 1회만 평가돼, 재init 해도 옛 토큰/그룹으로 폴링(자동적용 no-op). OWNER 2026-07-19 하네스 BLOCKER 수정.
+let TOKEN = getCaptureToken();
+// 대상 그룹 (현재 supergroup). 비우면 모든 그룹. (P0) var/capture-group-id.txt → env fallback. 재init 시 갱신(아래 start 진입부).
+let GROUP_ID = getCaptureGroupId() ?? "";
 // injection 킬스위치 — 이제 *라이브 읽기*(isRouterEnabled(deps.db)). UI 토글 즉시 반영, 재시작 불요. (P0)
 // OFF면 결정 로깅만(shadow). store(setting router_enabled) 우선, 없으면 env(ROUTER_ENABLED) fallback.
 const OFFSET_PATH = process.env.CAPTURE_OFFSET_PATH ?? `${process.cwd()}/logs/telegram-capture-offset.txt`;
@@ -380,6 +382,10 @@ export function fmtMenu(db: Database): string {
 }
 
 export function startTelegramCapture(deps: CaptureDeps): () => void {
+  // ★재init 마다 토큰/그룹을 파일에서 다시 읽는다★ — 대시보드 저장(setCaptureToken/setCaptureGroupId) 후
+  //   restartCapture()가 이 함수를 재호출하면 새 값으로 갱신돼 서버 재시작 없이 즉시 적용된다(하네스 BLOCKER 수정).
+  TOKEN = getCaptureToken();
+  GROUP_ID = getCaptureGroupId() ?? "";
   if (!TOKEN) {
     console.log("[capture] disabled — CAPTURE_BOT_TOKEN 미설정 (inert)");
     return () => {};
@@ -401,6 +407,9 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
   })();
   let offset = 0;
   let stopped = false;
+  // ★in-flight getUpdates 롱폴(timeout=25s)을 stop() 에서 즉시 끊기 위한 abort★ — 이게 없으면 restartCapture 시
+  //   옛 루프가 25s 롱폴에 블록된 채 새 루프가 떠 같은 토큰 2폴러 → 텔레그램 409(conflict)·메시지 드롭. OWNER 2026-07-19 하네스 MAJOR 수정.
+  const captureAbort = new AbortController();
   // 간이 sticky: 직전 담당을 기억. 멀티 @owner 뒤 후속은 여러 owner가 유지되어야 한다.
   // 2026-06-05(OWNER 2798): 재시작 시 DB 영속 owner 로 seed. 이전엔 []로 시작해서 setGroupOwner(쓰기)만
   // 하고 DB값을 안 읽어, 재시작 직후 무-@멘션 메시지가 sticky 를 잃고 default_step(codex)으로 빠졌다.
@@ -1199,7 +1208,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     while (!stopped) {
       try {
         const url = `https://api.telegram.org/bot${TOKEN}/getUpdates?timeout=25&offset=${offset}&allowed_updates=["message","callback_query"]`;
-        const res = await fetch(url);
+        const res = await fetch(url, { signal: captureAbort.signal });
         const data = (await res.json()) as { ok?: boolean; result?: TgUpdate[] };
         for (const upd of data.result ?? []) {
           offset = upd.update_id + 1;
@@ -1245,6 +1254,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
         // 새 승인/권한 요청을 OWNER op DM에 즉시 push(매 폴 사이클). 독립 try/catch로 폴러 격리(하네스 Q6: push 경로 DB 오류가 메인 폴 사이클 못 흔들게).
         try { await pushNewApprovals(); } catch (e) { console.error("[capture] pushNewApprovals:", (e as Error).message); }
       } catch (e) {
+        if (stopped) break; // stop()의 abort로 fetch가 끊긴 정상 종료 — 에러 로깅·sleep 없이 즉시 탈출(이중폴 창 제거).
         console.error("[capture] poll error:", (e as Error).message);
         await sleep(3000);
       }
@@ -1254,5 +1264,6 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
   void loop();
   return () => {
     stopped = true;
+    try { captureAbort.abort(); } catch { /* best-effort — in-flight 롱폴 즉시 취소 */ }
   };
 }

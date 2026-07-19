@@ -557,7 +557,7 @@ function systemOpHtml(): string {
       <div>
         <label class="${cLabel}">${pick("capture 봇 토큰", "capture bot token")} ${tokenSet ? `<span class="text-accent-greenSoft">${pick("설정됨", "Configured")} ✓</span>` : `<span class="text-txt-amber">${pick("미설정", "Not set")}</span>`}</label>
         <input id="sysop-token" type="password" class="${cInput}" placeholder="${tokenSet ? pick("새 토큰으로 변경", "Change to a new token") : "123456:ABC..."}" autocomplete="off" />
-        <div class="text-[11px] text-slate-500 mt-1">${pick("BotFather 에서 <b>op 전용 봇</b>을 새로 만들어(팀원 봇과 별개) 받은 토큰을 붙여넣기 · 저장 후 재시작 시 적용.", "Create a <b>dedicated op bot</b> in BotFather (separate from member bots), paste its token · applied on restart after save.")}</div>
+        <div class="text-[11px] text-slate-500 mt-1">${pick("BotFather 에서 <b>op 전용 봇</b>을 새로 만들어(팀원 봇과 별개) 받은 토큰을 붙여넣기 · <b>저장하면 즉시 적용</b>(재시작 불필요).", "Create a <b>dedicated op bot</b> in BotFather (separate from member bots), paste its token · <b>applied immediately on save</b> (no restart).")}</div>
       </div>
       <div>
         <label class="${cLabel}">${pick("팀 그룹 chat_id", "team group chat_id")} <span class="text-slate-600">${pick("(비우면 모든 그룹)", "(empty = all groups)")}</span></label>
@@ -672,7 +672,7 @@ function wireSystemOp(): void {
     const j = await r.json();
     if (!r.ok) { setMsg(`${pick("실패:", "Failed:")} ${j.error ?? ""} ${j.hint ?? ""}`.trim()); return; }
     setState(j);
-    setMsg(j.needs_restart ? pick("저장됨 — 토큰/그룹은 서버 재시작 시 적용(라우터는 즉시)", "Saved — token/group apply on server restart (router immediately)") : `${pick("저장됨", "Saved")} ✓`);
+    setMsg(j.needs_restart ? pick("저장됨 — 토큰/그룹은 서버 재시작 시 적용(라우터는 즉시)", "Saved — token/group apply on server restart (router immediately)") : `${pick("저장됨 — 즉시 적용", "Saved — applied immediately")} ✓`);
     render();
   });
 

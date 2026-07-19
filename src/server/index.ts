@@ -106,7 +106,13 @@ const stopMetrics = startMetricsProbe(db, broadcast);
 const stopMaintenance = startMessageMaintenance(db);
 const stopSlackPoll = startSlackPoll({ db, broadcast, agents: () => agents });
 const stopSlackSocket = startSlackSocket({ db, broadcast, agents: () => agents });
-const stopCapture = startTelegramCapture({ agents: () => agents, db, broadcast });
+let stopCapture = startTelegramCapture({ agents: () => agents, db, broadcast });
+// capture 워커 재init — Settings ▸ System OP 에서 capture 토큰/그룹을 저장하면 서버 재시작 없이 즉시 적용한다
+//   (워커가 토큰을 부팅 시 1회 읽으므로, 새 토큰으로 텔레그램에 다시 붙으려면 재init 필요). OWNER 2026-07-19.
+const restartCapture = () => {
+  try { stopCapture(); } catch { /* best-effort */ }
+  stopCapture = startTelegramCapture({ agents: () => agents, db, broadcast });
+};
 // OWNER 1:1 DM sync 워커(준실시간 30초 폴링) — 각 런타임 저장소의 OWNER 1:1을 dm_message로 정규화 적재(recall용).
 const stopDmSync = startDmSyncWorker(db, () =>
   agents.map((a) => ({
@@ -388,6 +394,7 @@ const settingsApi = createSettingsApp({
   teamOsPath: join(RULES_DIR, "TEAM-OS.md"),
   appendAudit,
   onRegistryChanged: reloadRegistryFromDisk,
+  restartCapture, // capture 토큰/그룹 저장 시 서버 재시작 없이 즉시 적용
 });
 api.route("/", settingsApi);
 

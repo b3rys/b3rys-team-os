@@ -64,6 +64,8 @@ export interface SettingsDeps {
   teamOsPath: string; // rules/TEAM-OS.md
   appendAudit: (db: Database, actor: string, event: string, target: string, meta?: unknown) => void;
   onRegistryChanged?: () => void;
+  // capture 워커 재init(새 토큰/그룹 즉시 적용 — 서버 재시작 불필요). 미주입 시 재시작 필요(needs_restart 유지).
+  restartCapture?: () => void;
   // 퇴사 시 workspace 보관 함수(주입 가능). 기본=실제 archiveWorkspace(라이브 ~/Development/<id> mv).
   // 테스트는 noop을 주입해 실제 워크스페이스를 건드리지 않게 한다(test 격리 — 라이브 멤버 mv 사고 방지).
   archiveWorkspace?: (id: string, runtime: string) => string | null;
@@ -1687,12 +1689,19 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     if (group !== undefined && group !== "" && !CAPTURE_GROUP_RE.test(group)) {
       return c.json({ ok: false, error: "capture_group_id_invalid", hint: "그룹 chat_id는 숫자(슈퍼그룹은 -100…). 예: -1001234567890" }, 400);
     }
-    let needsRestart = false;
-    if (token) { setCaptureToken(token); needsRestart = true; }
-    if (group !== undefined) { setCaptureGroupId(group); needsRestart = true; } // 파일기반(captureConfig) — 재시작 시 적용
+    let changedTokenOrGroup = false;
+    if (token) { setCaptureToken(token); changedTokenOrGroup = true; }
+    if (group !== undefined) { setCaptureGroupId(group); changedTokenOrGroup = true; } // 파일기반(captureConfig)
     if (router !== undefined) setRouterEnabled(db, router); // 라이브 — 재시작 불요
-    appendAudit(db, "user", "system_op_updated", "system", { token_set: !!token, group_set: group !== undefined, router_enabled: router }); // ★토큰 값은 audit에 안 넣음
-    return c.json({ ok: true, ...captureConfigStatus(db), needs_restart: needsRestart, note: needsRestart ? "토큰/그룹 변경은 서버 재시작 시 적용(라우터는 즉시)" : "적용됨" });
+    // ★토큰/그룹 변경을 서버 재시작 없이 즉시 적용★(OWNER 2026-07-19): capture 워커를 재init 한다(새 토큰으로 텔레그램 재연결).
+    //   restartCapture 미주입(테스트 등)이면 종전대로 needs_restart=true 로 안내. 재init 은 best-effort(실패해도 저장은 유지).
+    let applied = false;
+    if (changedTokenOrGroup && deps.restartCapture) {
+      try { deps.restartCapture(); applied = true; } catch { /* best-effort — 실패 시 needs_restart 로 폴백 */ }
+    }
+    appendAudit(db, "user", "system_op_updated", "system", { token_set: !!token, group_set: group !== undefined, router_enabled: router, applied }); // ★토큰 값은 audit에 안 넣음
+    const needsRestart = changedTokenOrGroup && !applied;
+    return c.json({ ok: true, ...captureConfigStatus(db), needs_restart: needsRestart, note: !changedTokenOrGroup ? "적용됨" : applied ? "적용됨(즉시 반영 — 재시작 불필요)" : "토큰/그룹 변경은 서버 재시작 시 적용(라우터는 즉시)" });
   });
 
   // 저장된 토큰이 텔레그램에서 유효한지 확인(getMe). ★응답엔 bot_username 만, 토큰 값 노출 안 함.
