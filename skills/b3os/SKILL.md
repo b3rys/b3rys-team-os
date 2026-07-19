@@ -258,6 +258,8 @@ curl -s -X PUT http://localhost:$PORT/team/api/settings \
 
 ## [5] 첫 팀원 영입 — 런타임 추천 + 나열 + 런타임별 인증 preflight
 
+> ★★이 단계에 들어오면 **먼저 `references/recruit.md` 를 펼쳐 읽고** 진행한다★★ — SKILL 요약(§5-3)만 보고 즉흥으로 "이름·역할" 몇 개만 묻지 말 것. 물어볼 필드(id 포함)·질문 문구·배치 폼·기본값 처리가 recruit.md 에 다 있다.
+
 > **첫 팀원은 자동으로 "팀 리드"가 됩니다 — 사용자에게 한 줄로 알려준다.**
 >
 > "첫 팀원은 **팀 리드**가 되어, 팀원들의 메시지 맥락을 함께 봅니다. (담당자가 정해지지 않은 일도 이 팀원이 맡습니다)"
@@ -317,6 +319,16 @@ curl -s -X PUT http://localhost:$PORT/team/api/settings \
 > 사용자를 헷갈리게 하지 않는다.
 
 ### 5-3. 영입 API 순서 (요약)
+
+> ★★영입 전에 사용자에게 아래를 **먼저 다 물어본다 — 하나도 빼먹지 마라**★★ (recruit.md 를 안 펼치더라도 여기서 전부 묻는다. "이름·역할"만 묻고 넘어가지 말 것):
+> 1. **id** — 영문 소문자 slug(예: `alex`). 멘션·라우팅 키. ★display_name 과 별개이며 반드시 물어본다(빠뜨리기 쉬움).★
+> 2. **display_name** — 표시이름(예: `Alex`).
+> 3. **role** — 역할 한 줄(예: "백엔드 개발자").
+> 4. **멘션명(별칭)** — `@`로 부를 이름, 쉼표로 여러 개. 안 정하면 `[id, 표시이름]`이 기본(그래도 물어는 본다).
+> 5. **runtime + 모델** — ★구독으로 고른다★: **Claude 구독 → `claude_channel`** / **ChatGPT 구독 → `hermes_agent` 또는 `openclaw`**.
+> 6. **persona** — 성격·말투·전문성 한두 줄(선택). 주면 SOUL.md 로 저장.
+>
+> ★여러 명을 한꺼번에 받을 땐 recruit.md 의 **'배치 영입 폼'**(팀원별 id·이름·멘션명·persona·런타임/모델·봇토큰)을 쓴다.★ 정확한 질문 문구·기본값·검증 = **`references/recruit.md` Step B 를 이 단계 진입 시 반드시 펼쳐 읽는다.**
 
 ```
 POST /team/api/members/recruit  {id, display_name, role, runtime, persona?}   → ot_id
