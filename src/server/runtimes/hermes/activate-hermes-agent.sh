@@ -37,7 +37,28 @@ if [ -z "${SRC_PROFILE:-}" ]; then
     SRC_PROFILE="$pname"; break
   done
 fi
-[ -n "${SRC_PROFILE:-}" ] || { echo "❌ 인증된 hermes 프로필이 최소 1개 필요합니다 (auth 복제 원본). 먼저 ~/.hermes/profiles/<name>/auth.json 이 있는 프로필을 만드세요"; exit 1; }
+
+# ★루트 폴백(preflight↔activate divergence 해소, OWNER 2026-07-19 맥북테스트)★
+#   현대 hermes(v0.18+)의 `hermes auth [add]` 는 인증을 글로벌 ~/.hermes/auth.json 에만 저장하고
+#   profiles/ 를 만들지 않는다. preflight(runtimeAuth.hermesAuthExists)는 글로벌 auth.json 을 인정하므로,
+#   "auth 보유 프로필이 없다"는 이유로 여기서 exit 1 하면 → preflight 통과했는데 activate 실패(갭).
+#   공개 hermes 사용자가 정상 인증하고도 전원 막히던 원인. 프로필이 없고 글로벌 auth 만 있으면,
+#   그 글로벌 auth 로 base 프로필을 자동 시드해 clone 원본으로 삼는다(preflight 가 인정한 것을 activate 도 인정).
+if [ -z "${SRC_PROFILE:-}" ] && [ -f "$HOME/.hermes/auth.json" ]; then
+  BASE_PROFILE="b3ryshermes"
+  [ "$BASE_PROFILE" = "$AGENT_ID" ] && BASE_PROFILE="b3os-base"   # 타겟명과 충돌 방지(희박)
+  say "■ 인증 프로필 없음 + 글로벌 auth 존재 → base 프로필 '$BASE_PROFILE' 자동 시드(글로벌 ~/.hermes/auth.json)"
+  if [ ! -d "$HOME/.hermes/profiles/$BASE_PROFILE" ]; then
+    # --clone: 활성(default) 프로필의 config/.env/SOUL/skills 복사 → 게이트웨이가 뜰 설정 확보.
+    hermes profile create "$BASE_PROFILE" --clone --description "b3os base (auto-seeded from global ~/.hermes/auth.json)" \
+      || hermes profile create "$BASE_PROFILE" --description "b3os base (auto-seeded from global ~/.hermes/auth.json)"
+  fi
+  # clone 은 auth.json 을 안 옮긴다 → 글로벌 auth 를 심링크(복사 아님 = 로테이션 시 stale 방지).
+  ln -sf "$HOME/.hermes/auth.json" "$HOME/.hermes/profiles/$BASE_PROFILE/auth.json"
+  SRC_PROFILE="$BASE_PROFILE"
+  say "  ✅ base 프로필 준비됨: $BASE_PROFILE (auth = 글로벌 ~/.hermes/auth.json 심링크)"
+fi
+[ -n "${SRC_PROFILE:-}" ] || { echo "❌ hermes 인증이 없습니다 — 구독 OAuth 로 인증한 뒤 다시 활성화하세요: 'hermes auth add <provider> --type oauth'. (~/.hermes/auth.json 또는 ~/.hermes/profiles/<name>/auth.json 필요)"; exit 1; }
 [ -d "$HOME/.hermes/profiles/$SRC_PROFILE" ] || { echo "❌ 원본 프로필 없음: $SRC_PROFILE"; exit 1; }
 say "■ 복제 원본 프로필: $SRC_PROFILE"
 
