@@ -85,10 +85,13 @@ function settingsStep(db: Database): AcceptanceStep {
 
   items.push(teamName ? item("pass", "팀 이름", teamName) : item("fail", "팀 이름", "미설정"));
   items.push(ownerName ? item("pass", "팀장 이름", ownerName) : item("info", "팀장 이름", "미설정({{OWNER}} 유지)"));
+  // ★capture 봇·라우터는 그룹(팀방) 협업 전용 = 선택★ — 1:1 DM 영입엔 불필요하다.
+  //   fail 로 두면 정상적인 1:1 영입도 무조건 "검증 실패"로 떠서 사용자가 막힌 걸로 오해한다
+  //   (같은 그룹 기능인 바로 아래 '팀 그룹 chat_id' 는 이미 info). → info 로 낮추고 fix 안내를 단다.
   items.push(
     systemOp.has_capture_token
       ? item("pass", "capture 봇 토큰", "설정됨")
-      : item("fail", "capture 봇 토큰", "미설정 (그룹 협업 안 됨)"),
+      : item("info", "capture 봇 토큰", "미설정 — 그룹(팀방) 협업 시에만 필요(1:1 DM은 정상)", "그룹 협업하려면 Settings 에서 System OP(capture) 봇 토큰을 설정하세요."),
   );
   items.push(
     systemOp.capture_group_id
@@ -98,7 +101,7 @@ function settingsStep(db: Database): AcceptanceStep {
   items.push(
     systemOp.router_enabled
       ? item("pass", "라우터", "ON (agent 그룹 응답)")
-      : item("fail", "라우터", "OFF (agent 그룹 자동응답 안 함 - 토글 ON 필요)"),
+      : item("info", "라우터", "OFF — 그룹 자동응답용(1:1 DM엔 불필요)", "그룹 협업하려면 Settings 에서 라우터를 ON 하세요."),
   );
   items.push(item("info", "관리자 PIN", "System OP PIN 제거됨(현재 설계상 미사용)"));
 
