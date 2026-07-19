@@ -382,7 +382,15 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
 
   // ── 팀원: 목록·추가·퇴사 (agents.json) ───────────────────────────
   function readAgents(): any[] {
-    return JSON.parse(readFileSync(registryPath, "utf-8"));
+    // agents.json 은 런타임 상태(untracked) — 없으면 빈 로스터(공개 clone 첫 부팅/셋업 전). writeAgents 가 곧 생성.
+    let raw: string;
+    try {
+      raw = readFileSync(registryPath, "utf-8");
+    } catch (e: any) {
+      if (e?.code === "ENOENT") return [];
+      throw e;
+    }
+    return JSON.parse(raw);
   }
   function writeAgents(list: any[]) {
     backup(registryPath);

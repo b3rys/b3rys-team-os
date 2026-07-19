@@ -215,6 +215,15 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void)
         <input id="cfg-role" value="${escape(agent.role ?? "")}" spellcheck="false"
           class="w-full bg-surface-0 border border-surface-3 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-accent-green mb-3"
           placeholder="${pick("예: Step Engineer", "e.g. Step Engineer")}" />
+        <div class="text-[11px] text-slate-500 mb-1">${pick("멘션명 (별칭 — @로 부를 이름, 쉼표로 구분 · 공백 없이 · 최대 8개)", "Mention names (aliases — @-callable, comma-separated · no spaces · max 8)")}</div>
+        <div class="flex items-center gap-2 mb-1">
+          <input id="cfg-nicknames" value="${escape((agent.nicknames ?? []).join(", "))}" spellcheck="false"
+            class="flex-1 bg-surface-0 border border-surface-3 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-accent-green"
+            placeholder="${pick(`예: ${escape(agent.display_name)}, 리사`, `e.g. ${escape(agent.display_name)}, li`)}" autocomplete="off" />
+          <button id="cfg-nicknames-save"
+            class="text-sm font-semibold px-3 py-2 rounded-md border border-slate-400/40 bg-surface-3 text-txt-blue hover:bg-surface-0 hover:border-txt-blue/50 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">${pick("멘션명 적용", "Apply aliases")}</button>
+        </div>
+        <div id="cfg-nicknames-msg" class="text-[11px] text-slate-500 mb-3 empty:hidden">${pick("비워두면 id·표시이름으로만 부를 수 있습니다.", "If empty, callable only by id / display name.")}</div>
         <div class="text-[11px] text-slate-500 mb-1">${pick("페르소나 · 능력 (자유 입력 — 적은 그대로 반영)", "Persona · capability (free text — saved verbatim)")}</div>
         <textarea id="cfg-persona"
           class="w-full h-48 bg-surface-0 border border-surface-3 rounded-md p-3 text-[12px] text-slate-100 focus:outline-none focus:border-accent-green resize-y"
@@ -318,6 +327,42 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void)
     if (roleInput) roleInput.value = originalProfile.role;
     if (textarea) textarea.value = originalProfile.persona;
     if (statusEl) statusEl.textContent = "";
+  });
+
+  // 멘션명(별칭) 적용 — PATCH /members/:id {nicknames}. 라우터 owner 매칭용 별칭(id·표시이름 외 @로 부를 이름).
+  //   쉼표/공백으로 분리 → @접두 제거 후 저장. 빈 값이면 별칭 제거(id·display_name 만으로 호출).
+  const nicksInput = root.querySelector<HTMLInputElement>("#cfg-nicknames");
+  const nicksBtn = root.querySelector<HTMLButtonElement>("#cfg-nicknames-save");
+  const nicksMsg = root.querySelector<HTMLElement>("#cfg-nicknames-msg");
+  const setNicksMsg = (cls: string, text: string) => { if (nicksMsg) { nicksMsg.className = `text-[11px] mb-3 ${cls}`; nicksMsg.textContent = text; } };
+  nicksBtn?.addEventListener("click", async () => {
+    const nicknames = (nicksInput?.value ?? "")
+      .split(/[,\s]+/)
+      .map((s) => s.trim().replace(/^@+/, ""))
+      .filter(Boolean);
+    if (nicknames.length > 8) { setNicksMsg("text-status-blocked", pick("별칭은 최대 8개입니다.", "Up to 8 aliases.")); return; }
+    if (nicknames.some((n) => n.length > 32)) { setNicksMsg("text-status-blocked", pick("각 별칭은 32자 이하여야 합니다.", "Each alias must be ≤ 32 chars.")); return; }
+    nicksBtn.disabled = true;
+    setNicksMsg("text-slate-400", pick("적용 중…", "Applying…"));
+    try {
+      const res = await fetch(`${apiBase()}/api/members/${encodeURIComponent(agent.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nicknames }),
+      });
+      if (res.ok) {
+        setNicksMsg("text-accent-greenSoft", nicknames.length
+          ? pick(`✓ 저장됨 — 이제 @${nicknames.join(" · @")} 로 부를 수 있습니다.`, `✓ Saved — now callable as @${nicknames.join(" · @")}.`)
+          : pick("✓ 저장됨 — 별칭 없음(id·표시이름으로만 호출).", "✓ Saved — no aliases (callable by id / display name only)."));
+      } else {
+        const err = (await res.json().catch(() => ({}))) as { error?: string; hint?: string };
+        setNicksMsg("text-status-blocked", `${pick("✗ 실패: ", "✗ Failed: ")}${err.hint ?? err.error ?? res.status}`);
+      }
+    } catch (e) {
+      setNicksMsg("text-status-blocked", `${pick("✗ 오류: ", "✗ Error: ")}${String(e)}`);
+    } finally {
+      nicksBtn.disabled = false;
+    }
   });
 
   // 핵심룰 재적용 — 서버가 페르소나의 ⭐핵심룰만 현재 템플릿(멈춤장치·통신·conti)으로 교체(정체·능력 보존).

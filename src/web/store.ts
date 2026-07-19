@@ -20,6 +20,7 @@ export interface Agent {
   avatar_emoji: string;
   icon?: string | null;
   icon_color?: string | null; // 아이콘 색 키 (green/orange/yellow/blue/red/violet)
+  nicknames?: string[] | null; // @로 부를 추가 멘션 별칭(id·display_name 외). 라우터 owner 매칭에 사용.
   off?: boolean; // /onoff 로 의도적 정지 — '🔴 중지' 표시(WS hello 에 실림)
   hermes_profile?: string | null;
   hermes_alias?: string | null;

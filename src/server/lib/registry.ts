@@ -1,5 +1,5 @@
 import { readFileSync, statSync, watch as fsWatch } from "node:fs";
-import { join } from "node:path";
+import { join, dirname, basename } from "node:path";
 import type { Database } from "bun:sqlite";
 import type { AgentRecord } from "../types";
 import { upsertAgent, deleteAgentsNotIn, appendAudit } from "../db/queries";
@@ -7,7 +7,14 @@ import { validateCoordinators } from "./capabilities";
 import { isTeamOfficialMember } from "./agentMembership";
 
 export function loadRegistry(path: string): AgentRecord[] {
-  const raw = readFileSync(path, "utf-8");
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf-8");
+  } catch (e: any) {
+    // agents.json 은 런타임 상태(untracked). 없으면 빈 로스터 = 공개 clone 첫 부팅/셋업 전. 던지지 않는다.
+    if (e?.code === "ENOENT") return [];
+    throw e;
+  }
   const arr = JSON.parse(raw);
   if (!Array.isArray(arr)) throw new Error("agents.json must be an array");
   return arr.map((a) => {
@@ -99,7 +106,7 @@ export function watchRegistry(
   onReload: (agents: AgentRecord[]) => void,
 ): void {
   let pending: NodeJS.Timeout | null = null;
-  fsWatch(registryPath, () => {
+  const reload = () => {
     if (pending) clearTimeout(pending);
     pending = setTimeout(() => {
       try {
@@ -109,5 +116,16 @@ export function watchRegistry(
         console.error("[registry] reload failed:", e);
       }
     }, 300);
-  });
+  };
+  try {
+    fsWatch(registryPath, reload);
+  } catch (e: any) {
+    // 파일 미존재(untracked, 셋업 전 공개 clone) — fs.watch 가 ENOENT throw. 부모 디렉터리를 감시하다
+    // agents.json 이 생기면(writeAgents) reload. 그 외 에러는 그대로 던진다.
+    if (e?.code !== "ENOENT") throw e;
+    const base = basename(registryPath);
+    fsWatch(dirname(registryPath), (_event, filename) => {
+      if (filename === base) reload();
+    });
+  }
 }
