@@ -75,7 +75,7 @@ curl -s -X PUT http://localhost:$PORT/team/api/mission \
 > • 봇토큰: 8123457890:AA-fake-example-교체필요   ← BotFather 값
 > ```
 > ★봇토큰 주의 — 토큰은 비밀번호 같은 값이라 대화 기록에 평문으로 남는다. ★예시는 가짜 형식이며, 실제 토큰을 채운 폼은 공유하지 말고 본인 CC 세션에서만 쓴다.★ 토큰은 파일(0600)로만 두고 화면에 다시 출력하지 않는다.
-> ★영입 순서 — claude 팀원을 먼저 영입·페어링해야 팀장 chat_id 가 잡히고, 그 다음 hermes 가 그 값으로 페어링 게이트를 통과한다. 순서 = claude → hermes → openclaw.★
+> ★영입 순서 — 권장은 claude → hermes → openclaw (claude 페어링이 팀장 chat_id 를 자동으로 잡아주고, 그 값을 hermes 가 게이트 통과에 쓴다). 단 ★순서가 뒤집혀도 된다★: **openclaw 먼저** = pair-approve 라 무관. **hermes 먼저**(claude 없이) = owner_chat_id 가 아직 없으니, hermes activate 전에 팀장 chat_id 를 물어서 세팅(`PUT /settings {owner_chat_id}`)하거나, 안 되면 팀장이 코드 받고 `hermes pairing approve telegram <코드>` 로 승인 — 위 hermes 항목의 "먼저 영입 대비" 참고.★
 
 ```bash
 # 아래 값들은 형식 예시일 뿐 — 실제로는 사용자가 정한 id·이름·역할·별칭을 넣는다.
@@ -163,6 +163,10 @@ claude 봇이 텔레그램 메시지를 받으려면 telegram 플러그인이 **
   `POST /team/api/ot/<ot_id>/pair-approve` → 서버가 pending 요청을 읽어 executor로 승인(터미널 0).
 - **claude_channel** (★openclaw 와 승인법이 다르다★): 봇 DM 접근은 access.json allowlist. 첫 claude 팀원 = 봇에 첫 메시지 → 6자리 코드 응답 → 승인. ★승인법(항상 작동): **Claude Code 가 `~/.claude/channels/telegram-<id>/access.json` 의 `allowFrom` 에 본인 DM chat_id 를 추가하고 `dmPolicy` 를 `allowlist` 로** 바꾼다★(activate 가 출력하는 [F] 안내와 동일). `setup-claude-telegram-bot` 스킬이 있으면 `promote-pending.sh <id> <code>` 도 가능. ★`pair-approve`/대시보드 [접근 승인] 은 openclaw 전용이라 claude 엔 no-op(`skipped:true` 거짓성공)★ — claude 에 쓰면 안 된다. 2번째부터의 claude 팀원은 첫 팀원의 `allowFrom` 을 **자동 승계**(seedClaudeAccess = 기존 claude 멤버 access.json 참조)해 페어링 불필요(첫 멤버는 참조할 게 없어 `dmPolicy:pairing` 시드 = 수동 승인이 정상).
 - **hermes**(v0.18): ★텔레그램 DM 페어링 게이트가 있다★ — 게이트웨이가 미승인 사용자에게 페어링 코드를 요구한다. b3os activate 가 ★팀장 chat_id(설정 `owner_chat_id`/도출)를 게이트웨이 allowlist(`TELEGRAM_ALLOWED_USERS`, plist EnvironmentVariables)에 동적 시드★하므로 **팀장은 코드 없이 바로 대화 가능**. (팀장 외 사용자는 `hermes pairing approve <platform> <code>` 네이티브 페어링 필요.) owner_chat_id 미확보 시 시드 skip → 팀장도 수동 pairing 필요.
+  > ★hermes 를 **먼저(claude 없이)** 영입할 때 대비 — owner_chat_id 가 아직 없을 수 있다(claude 페어링이 자동 채우는데 아직 안 함):★
+  > - **권장 ①**: hermes **activate 전에 팀장 텔레그램 chat_id 를 확보해 세팅**한다. 사용자에게 물어본다("팀장님 텔레그램 chat_id 알려주세요 — @userinfobot 에게 DM하면 숫자로 나옵니다") → `curl -s -X PUT http://localhost:$PORT/team/api/settings -H 'content-type: application/json' -d '{"owner_chat_id":"<숫자>"}'` → 그 뒤 activate 하면 시드돼서 팀장이 코드 없이 통과. (대시보드/영입 API로 activate 하면 서버가 설정한 owner_chat_id 를 activate 에 자동으로 넘긴다. 스크립트를 터미널에서 수동 실행할 땐 team.db 의 owner_chat_id 를 읽는 폴백도 있다.)
+  > - **폴백 ②**: owner_chat_id 를 못 넣었으면 → 팀장이 hermes 봇 DM 에서 **페어링 코드**를 받는다 → 터미널에서 `hermes pairing approve telegram <코드>` 로 승인(네이티브). 이후 owner_chat_id 를 세팅해두면 재activate 시 자동.
+  > - **openclaw 를 먼저** 영입하는 건 문제없다 — openclaw 는 owner_chat_id 가 아니라 **pair-approve**(대시보드 [접근 승인])가 게이트라 순서와 무관하다.
 
 > **페어링 코드 vs 민감 실행 승인 (헷갈리지 말 것)** — 둘은 별개다:
 > - **페어링 코드** — 위 claude_channel 영입에서 봇이 응답하는 **6자리 텔레그램 페어링 코드**. 봇에 말 걸
