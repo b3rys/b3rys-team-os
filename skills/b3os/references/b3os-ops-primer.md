@@ -149,7 +149,7 @@ UI: Settings ▸ 시스템 OP 라우터 토글. 영구 고정은 `.env` `ROUTER_
 ## 6. 팀 세팅 바꾸기
 
 - **팀명·팀장ID·owner_name**: `PUT /team/api/settings` (팀명 ≤20자, lead_id 영문 slug).
-- **미션**: `PUT /team/api/mission` `{"mission":"..."}` (TEAM-OS §1 갱신, non-empty 필수). UI: Settings ▸ 미션 편집.
+- **미션**: 기본은 TEAM-OS.md §1 의 기본 미션(셋업에서 안 물어봄, 대시보드 편집칸 없음). 프로그래밍적으로 바꾸려면 `PUT /team/api/mission` `{"mission":"..."}`(TEAM-OS §1 갱신, non-empty 필수) — 이 API는 유지되나 UI 노출은 없다.
 - **팀원 아이콘/색**: `PATCH /team/api/members/<id>` `{icon, icon_color}` 또는 각자 Settings에서.
 
 ## 7. 삭제(uninstall)

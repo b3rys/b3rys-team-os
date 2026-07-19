@@ -1,6 +1,6 @@
 ---
 name: b3os
-description: b3rys TEAM OS(b3os) — 여러 AI를 한 팀으로 운영하는 멀티런타임 AI 팀 OS — 를 공개 저장소에서 clone·설치하고, 팀 기본정보를 채팅으로 세팅한 뒤 첫 팀원 1명을 영입(텔레그램 연결)해서 그 팀원에게 넘겨주는(handoff) 온보딩 스킬. Claude가 clone → install.sh → 대시보드 기동 → (채팅으로) 팀명·팀장ID·미션 세팅 → 첫 팀원 런타임 추천·영입·인증·활성화 → 라우터 ON 까지 대신 몰아주고, 사람만 할 수 있는 것(BotFather 토큰·활성화 승인·페어링)만 직접 요청한다. 첫 팀원이 응답하면 설치는 끝 — 이후 추가 영입·운영은 그 팀원이 이어받는다. 사용 시점 — 설치·세팅: "b3os 설치해줘", "b3os 세팅", "AI 팀 세팅해줘", "AI 팀 만들어줘", "b3rys 팀 만들어줘", "b3rys-team-os setup/install", "이 repo 설치하고 팀 세팅해줘(github.com/b3rys/b3rys-team-os)", "b3os 언인스톨/삭제"; 팀방·그룹 협업 세팅: "b3os 팀방 세팅 어떻게 해", "b3os 그룹방 세팅/연동", "팀 라우터(System OP) 붙여줘", "그룹방에서 팀 협업되게 해줘"; 운영·문제해결(트러블슈팅): "b3os 안 떠요/안 돼요", "team-os 상태/복구/재시작", "b3os 봇이 응답 안 해요", "b3os 리부팅 후 안 올라와요", "b3os 문제/에러/트러블슈팅", "b3os 업데이트/버전 올려줘"; 기본 시스템 잡·서비스 안내: "b3os 시스템 잡 목록", "b3os가 뭘 자동으로 돌려?", "b3os 백그라운드 서비스 뭐 있어", "b3os 기본 운영 서비스" 등을 언급할 때. macOS 권장(팀원 활성화가 launchd 기반). 운영·복구 상세는 references/b3os-ops-primer.md 참조.
+description: b3rys TEAM OS(b3os) — 여러 AI를 한 팀으로 운영하는 멀티런타임 AI 팀 OS — 를 공개 저장소에서 clone·설치하고, 팀 기본정보를 채팅으로 세팅한 뒤 첫 팀원 1명을 영입(텔레그램 연결)해서 그 팀원에게 넘겨주는(handoff) 온보딩 스킬. Claude가 clone → install.sh → 대시보드 기동 → (채팅으로) 팀명·팀장ID·팀장이름 세팅 → 첫 팀원 런타임 추천·영입·인증·활성화 → 라우터 ON 까지 대신 몰아주고, 사람만 할 수 있는 것(BotFather 토큰·활성화 승인·페어링)만 직접 요청한다. 첫 팀원이 응답하면 설치는 끝 — 이후 추가 영입·운영은 그 팀원이 이어받는다. 사용 시점 — 설치·세팅: "b3os 설치해줘", "b3os 세팅", "AI 팀 세팅해줘", "AI 팀 만들어줘", "b3rys 팀 만들어줘", "b3rys-team-os setup/install", "이 repo 설치하고 팀 세팅해줘(github.com/b3rys/b3rys-team-os)", "b3os 언인스톨/삭제"; 팀방·그룹 협업 세팅: "b3os 팀방 세팅 어떻게 해", "b3os 그룹방 세팅/연동", "팀 라우터(System OP) 붙여줘", "그룹방에서 팀 협업되게 해줘"; 운영·문제해결(트러블슈팅): "b3os 안 떠요/안 돼요", "team-os 상태/복구/재시작", "b3os 봇이 응답 안 해요", "b3os 리부팅 후 안 올라와요", "b3os 문제/에러/트러블슈팅", "b3os 업데이트/버전 올려줘"; 기본 시스템 잡·서비스 안내: "b3os 시스템 잡 목록", "b3os가 뭘 자동으로 돌려?", "b3os 백그라운드 서비스 뭐 있어", "b3os 기본 운영 서비스" 등을 언급할 때. macOS 권장(팀원 활성화가 launchd 기반). 운영·복구 상세는 references/b3os-ops-primer.md 참조.
 ---
 
 # b3os — b3rys TEAM OS 온보딩 스킬
@@ -42,8 +42,8 @@ macOS 권장(팀원 활성화가 launchd 기반이라 현재 macOS 전용, Linux
      ↓
 [3] bun run start → http://localhost:7878/team ▸ Settings 페이지가 열림       (bun PATH 주의)
      ↓
-[4] 팀 기본정보 세팅 = 채팅으로 물어봄  (팀명·팀장ID·팀장이름 필수 / 미션 선택+기본값)
-       └ PUT /team/api/settings {team_name, lead_id, owner_name}  +  PUT /team/api/mission
+[4] 팀 기본정보 세팅 = 채팅으로 물어봄  (팀명·팀장ID·팀장이름 필수 · 미션은 안 물어봄=기본값)
+       └ PUT /team/api/settings {team_name, lead_id, owner_name}   (미션은 안 물어봄=TEAM-OS 기본값)
          ※ 이거 안 하면 영입이 setup_incomplete(400)으로 막힘 — 하드 선행조건
      ↓
 [5] 첫 팀원 영입 = claude_channel 추천 + BYO 런타임 선택 → 고른 런타임만 인증 preflight
@@ -221,7 +221,7 @@ done
 ```
 
 사용자에게 브라우저로 **http://localhost:$PORT/team** (실포트, 기본 7878)을 열라고 안내한다. 이 페이지가 뜨면 **Settings(설정)
-탭**을 열어 두게 한다 — 다음 단계(팀 기본정보·미션)를 화면에서 눈으로 확인하며 진행할 수 있다.
+탭**을 열어 두게 한다 — 다음 단계(팀 기본정보)를 화면에서 눈으로 확인하며 진행할 수 있다.
 
 > 이대로 쓰면 된다. (재부팅해도 계속 돌게 하는 **선택** 옵션은 위 「🔌 서버가 안 떠 있을 때 + 상시가동」 참고 —
 > **안 해도 되고, 여기서 묻지 않는다.**)
@@ -235,32 +235,26 @@ done
 
 1. **팀명** (필수, ≤20자) — 예: "acme"
 2. **팀장 ID** (필수, `lead_id`) — 영문 slug(소문자/숫자/`-`/`_`, 1~40자). 멘션·라우팅에서 팀장을 가리키는 식별자. 예: `teamleader`
-3. **미션** (선택) — 팀의 한 줄 미션. **비우면 아래 기본값을 넣는다**(나중에 대시보드에서 편집 가능):
-   > ★기본 미션: **우리 팀은 각 팀원의 전문성을 살려, 팀장의 과제와 프로젝트를 최고의 팀워크로 수행합니다.**★
-4. **팀장 이름** (필수, `owner_name`, ≤40자, 사람 이름) — 페르소나/미션의 `{{OWNER}}` 자리표시자를 채운다. 반드시 물어본다(사용자가 준 이름을 넣되, 예시로는 실명 대신 `Alex` 같은 제네릭을 보여준다). 예: `Alex`
-5. (선택) **팀장 텔레그램 chat_id**(`owner_chat_id`, 숫자) — 그룹 캡처·라우팅용, 그리고 ★hermes DM 페어링 게이트 통과용 allowlist 시드값★. ★인바운드 DM 게이트는 런타임별로 다르다★(openclaw=pair-approve 페어링, hermes=DM 페어링 게이트 있음→activate가 owner_chat_id를 allowlist에 시드해 팀장은 통과 — 아래 🔐 참조). ★첫 claude 팀원 페어링 시 자동으로 채워진다.★
+3. **팀장 이름** (필수, `owner_name`, ≤40자, 사람 이름) — 페르소나·룰의 `{{OWNER}}` 자리표시자를 채운다. 반드시 물어본다(사용자가 준 이름을 넣되, 예시로는 실명 대신 `Alex` 같은 제네릭을 보여준다). 예: `Alex`
+4. (선택) **팀장 텔레그램 chat_id**(`owner_chat_id`, 숫자) — 그룹 캡처·라우팅용, 그리고 ★hermes DM 페어링 게이트 통과용 allowlist 시드값★. ★인바운드 DM 게이트는 런타임별로 다르다★(openclaw=pair-approve 페어링, hermes=DM 페어링 게이트 있음→activate가 owner_chat_id를 allowlist에 시드해 팀장은 통과 — 아래 🔐 참조). ★첫 claude 팀원 페어링 시 자동으로 채워진다.★
    - **claude_channel 은 이 값이 필요 없다** — claude 는 봇 DM 접근을 access.json 페어링(6자리 코드 승인)으로 관리한다(owner_chat_id 로 안 채워짐). claude 만 쓸 거면 생략.
    - **외부/BYO 런타임을 첫 팀원으로 영입할 땐** 이 값을 받아 넣는다. 팀장이 모르면 "텔레그램 @userinfobot 에게 DM하면 알려준다"고 안내.
 
-받은 값으로 **두 API를 호출한다** (팀명·팀장ID는 `/settings`, 미션은 별도 `/mission` 엔드포인트 — 실제 백엔드가 이렇게 분리돼 있다):
+받은 값으로 **`/settings` API 한 번 호출한다** (미션은 물어보지 않는다 — TEAM-OS.md §1 의 기본 미션을 그대로 쓴다):
 
 ```bash
-# ① 팀명 + 팀장ID (owner_name·owner_chat_id는 선택)
+# 팀명 + 팀장ID + 팀장이름 (owner_chat_id는 선택)
 curl -s -X PUT http://localhost:$PORT/team/api/settings \
   -H 'content-type: application/json' \
   -d '{"team_name":"acme","lead_id":"teamleader","owner_name":"Alex"}'
 #   응답에 "setup_complete": true 면 영입 가능 — 팀명·팀장ID·팀장이름 셋 다 채워져야 true. (team_name>20자·lead_id 형식오류면 400)
 #   외부/BYO 런타임을 첫 팀원으로 영입할 거면 owner_chat_id도 같이. claude 는 access.json 페어링으로 접근을 관리하므로 owner_chat_id 불필요(생략):
 #   -d '{"team_name":"acme","lead_id":"teamleader","owner_name":"Alex","owner_chat_id":"123456789"}'  # 숫자만, 빈값 허용
-
-# ② 미션 — 사용자가 준 값, 비었으면 기본 미션 문자열을 넣는다
-curl -s -X PUT http://localhost:$PORT/team/api/mission \
-  -H 'content-type: application/json' \
-  -d '{"mission":"우리 팀은 각 팀원의 전문성을 살려, 팀장의 과제와 프로젝트를 최고의 팀워크로 수행합니다."}'
 ```
 
-> **왜 채팅으로?** 팀명·팀장ID·미션은 사용자가 이미 머릿속에 답을 아는 짧은 질문이다. 화면 이동 없이
+> **왜 채팅으로?** 팀명·팀장ID·팀장이름은 사용자가 이미 머릿속에 답을 아는 짧은 질문이다. 화면 이동 없이
 > 대화에서 받아 API로 넣으면 마찰이 적다. 사용자가 "직접 화면에서 넣을게" 하면 Settings 탭에서 넣도록 코치만 한다.
+> ★미션은 물어보지 않는다★ — TEAM-OS.md §1 의 기본 미션을 그대로 쓴다(대시보드에도 미션 편집칸 없음).
 
 ## [5] 첫 팀원 영입 — 런타임 추천 + 나열 + 런타임별 인증 preflight
 

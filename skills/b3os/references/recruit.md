@@ -31,22 +31,15 @@ recruit 시 register=done, 나머지 pending. 각 API 호출이 다음 단계를
 
 ## Step A — 팀 기본정보 (1회, 안 하면 recruit가 400)
 
-**채팅으로 물어본다** — "화면에서 넣으세요"로 미루지 않는다. 팀명·팀장ID·팀장이름은 필수, 미션은 선택(비면 기본값).
-**팀명·팀장ID는 `/settings`, 미션은 별도 `/mission` 엔드포인트**로 나뉘어 있다(실제 백엔드 구조).
+**채팅으로 물어본다** — "화면에서 넣으세요"로 미루지 않는다. 팀명·팀장ID·팀장이름 3개만 물어본다. ★미션은 물어보지 않는다★ — TEAM-OS.md §1 의 기본 미션을 그대로 쓴다(대시보드에도 미션 편집칸 없음).
 
 ```bash
-# ① 팀명 + 팀장ID + 팀장이름(owner_name = 사람 이름)
+# 팀명 + 팀장ID + 팀장이름(owner_name = 사람 이름) — /settings API 한 번.
 curl -s -X PUT http://localhost:$PORT/team/api/settings \
   -H 'content-type: application/json' \
   -d '{"team_name":"acme","lead_id":"teamleader","owner_name":"Alex"}'
 # team_name ≤ 20자 · lead_id = 소문자/숫자/-/_ 1~40자(팀장 식별자, 영문 slug).
-# 응답에 "setup_complete": true 면 영입 가능.
-
-# ② 미션 (선택) — 사용자가 준 값. 비었으면 아래 기본 미션 문자열을 넣는다(대시보드에서 나중에 편집 가능).
-curl -s -X PUT http://localhost:$PORT/team/api/mission \
-  -H 'content-type: application/json' \
-  -d '{"mission":"우리 팀은 각 팀원의 전문성을 살려, 팀장의 과제와 프로젝트를 최고의 팀워크로 수행합니다."}'
-# PUT /mission 은 TEAM-OS §1 미션 블록을 갱신한다. non-empty string 필수(빈 값은 400) → 그래서 기본값을 넣음.
+# 응답에 "setup_complete": true 면 영입 가능. (미션은 안 넣는다 — 기본값 유지.)
 ```
 
 ## Step B — 영입(recruit)
