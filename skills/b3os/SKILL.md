@@ -328,7 +328,8 @@ curl -s -X PUT http://localhost:$PORT/team/api/settings \
 > 5. **runtime + 모델** — ★구독으로 고른다★: **Claude 구독 → `claude_channel`** / **ChatGPT 구독 → `hermes_agent` 또는 `openclaw`**.
 > 6. **persona** — 성격·말투·전문성 한두 줄(선택). 주면 SOUL.md 로 저장.
 >
-> ★여러 명을 한꺼번에 받을 땐 recruit.md 의 **'배치 영입 폼'**(팀원별 id·이름·멘션명·persona·런타임/모델·봇토큰)을 쓴다.★ 정확한 질문 문구·기본값·검증 = **`references/recruit.md` Step B 를 이 단계 진입 시 반드시 펼쳐 읽는다.**
+> ★설명만 늘어놓지 말고, recruit.md 의 **'복사-붙여넣기 예제 폼'**(• 팀원 ID: … • 이름: … • 멘션명: … • Persona: … • 봇토큰: …)을 같이 보여줘서 사용자가 **복사해 값만 바꿔** 주게 한다.★
+> ★첫 팀원이 응답까지 성공한 뒤엔, "런타임까지 아시면 여러 명 한꺼번에"라며 recruit.md 의 **'배치 영입 폼'**(팀원별 id·이름·멘션명·persona·런타임/모델·봇토큰)을 안내한다.★ 정확한 질문 문구·예제·기본값·검증 = **`references/recruit.md` Step B 를 이 단계 진입 시 반드시 펼쳐 읽는다.**
 
 ```
 POST /team/api/members/recruit  {id, display_name, role, runtime, persona?}   → ot_id
