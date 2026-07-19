@@ -229,7 +229,7 @@ done
 > ★예시는 제네릭 자리표시자다 — 사용자에게 실제 값을 물어보되, 예시로 **사용자의 실명·실제 팀명 등 개인정보를 쓰지 마라**. 아래 예시(acme/owner 등)를 그대로 쓴다.★
 
 1. **팀명** (필수, ≤20자) — 예: "acme"
-2. **팀장 ID** (필수, `lead_id`) — 영문 slug(소문자/숫자/`-`/`_`, 1~40자). 멘션·라우팅에서 팀장을 가리키는 식별자. 예: `owner`
+2. **팀장 ID** (필수, `lead_id`) — 영문 slug(소문자/숫자/`-`/`_`, 1~40자). 멘션·라우팅에서 팀장을 가리키는 식별자. 예: `lead`
 3. **미션** (선택) — 팀의 한 줄 미션. **비우면 아래 기본값을 넣는다**(나중에 대시보드에서 편집 가능):
    > ★기본 미션: **우리 팀은 각 팀원의 전문성을 살려, 팀장의 과제와 프로젝트를 최고의 팀워크로 수행합니다.**★
 4. **팀장 이름** (필수, `owner_name`, ≤40자, 사람 이름) — 페르소나/미션의 `{{OWNER}}` 자리표시자를 채운다. 반드시 물어본다(사용자가 준 이름을 넣되, 예시로는 실명 대신 `Alex` 같은 제네릭을 보여준다). 예: `Alex`
@@ -243,10 +243,10 @@ done
 # ① 팀명 + 팀장ID (owner_name·owner_chat_id는 선택)
 curl -s -X PUT http://localhost:$PORT/team/api/settings \
   -H 'content-type: application/json' \
-  -d '{"team_name":"acme","lead_id":"owner","owner_name":"Alex"}'
+  -d '{"team_name":"acme","lead_id":"lead","owner_name":"Alex"}'
 #   응답에 "setup_complete": true 면 영입 가능 — 팀명·팀장ID·팀장이름 셋 다 채워져야 true. (team_name>20자·lead_id 형식오류면 400)
 #   외부/BYO 런타임을 첫 팀원으로 영입할 거면 owner_chat_id도 같이. claude 는 access.json 페어링으로 접근을 관리하므로 owner_chat_id 불필요(생략):
-#   -d '{"team_name":"acme","lead_id":"owner","owner_name":"Alex","owner_chat_id":"123456789"}'  # 숫자만, 빈값 허용
+#   -d '{"team_name":"acme","lead_id":"lead","owner_name":"Alex","owner_chat_id":"123456789"}'  # 숫자만, 빈값 허용
 
 # ② 미션 — 사용자가 준 값, 비었으면 기본 미션 문자열을 넣는다
 curl -s -X PUT http://localhost:$PORT/team/api/mission \

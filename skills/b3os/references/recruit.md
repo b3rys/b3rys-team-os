@@ -38,7 +38,7 @@ recruit 시 register=done, 나머지 pending. 각 API 호출이 다음 단계를
 # ① 팀명 + 팀장ID + 팀장이름(owner_name = 사람 이름)
 curl -s -X PUT http://localhost:$PORT/team/api/settings \
   -H 'content-type: application/json' \
-  -d '{"team_name":"acme","lead_id":"owner","owner_name":"Alex"}'
+  -d '{"team_name":"acme","lead_id":"lead","owner_name":"Alex"}'
 # team_name ≤ 20자 · lead_id = 소문자/숫자/-/_ 1~40자(팀장 식별자, 영문 slug).
 # 응답에 "setup_complete": true 면 영입 가능.
 
