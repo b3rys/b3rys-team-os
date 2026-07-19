@@ -87,7 +87,6 @@ const LEAD_ID_RE = /^[a-z0-9_-]{1,40}$/;
 // 팀장 텔레그램ID 자동감지 버튼: detect-lead-id의 getUpdates가 capture worker 폴링과 경합 위험(Steve concern·Bill 확인)
 // → Codex 오프셋 안전화 후 true 로 켠다. 그 전까진 숨김(필드+배지+PUT은 배포 OK). Bill 2026-07-02.
 const DETECT_LEAD_ENABLED = false;
-let _mission = "";
 let _members: Member[] = [];
 let _capabilities: Capability[] = [];
 let _slack: SlackStatus | null = null;
@@ -159,9 +158,8 @@ export async function initTeamTitle(): Promise<void> {
 }
 
 async function loadAll(): Promise<void> {
-  const [s, m, mem, cap, slack, sysop, mgate] = await Promise.allSettled([
+  const [s, mem, cap, slack, sysop, mgate] = await Promise.allSettled([
     fetch(api("/settings"), { headers: { accept: "application/json" } }).then((r) => r.json()),
-    fetch(api("/mission"), { headers: { accept: "application/json" } }).then((r) => r.json()),
     fetch(api("/members"), { headers: { accept: "application/json" } }).then((r) => r.json()),
     fetch(api("/capabilities"), { headers: { accept: "application/json" } }).then((r) => r.json()),
     fetch(api("/slack/status"), { headers: { accept: "application/json" } }).then((r) => r.json()),
@@ -173,7 +171,6 @@ async function loadAll(): Promise<void> {
     _setupComplete = Boolean(s.value.setup_complete);
     _leadActorId = s.value.lead_actor_id ?? null;
   }
-  if (m.status === "fulfilled" && m.value) _mission = typeof m.value.mission === "string" ? m.value.mission : "";
   if (mem.status === "fulfilled" && Array.isArray(mem.value)) _members = mem.value;
   if (cap.status === "fulfilled" && Array.isArray(cap.value)) _capabilities = cap.value;
   if (slack.status === "fulfilled" && slack.value && Array.isArray(slack.value.members)) _slack = slack.value as SlackStatus;
@@ -744,10 +741,6 @@ function render(): void {
           </span>
         </label>
       </div>
-      <div>
-        <label class="${labelCls}">Mission <span class="text-slate-600">(TEAM-OS §1)</span></label>
-        <textarea id="set-mission" class="${inputCls} min-h-[120px] resize-y leading-relaxed" placeholder="${pick("팀의 핵심 임무", "The team's core mission")}">${escape(_mission)}</textarea>
-      </div>
       <div class="flex items-center gap-3 pt-3 mt-1 border-t border-surface-3">
         <button id="set-save" class="${btnPrimary}">${pick("저장", "Save")}</button>
         <span id="set-msg" class="text-[13px] text-slate-500 flex-1 leading-snug"></span>
@@ -791,7 +784,7 @@ function render(): void {
   _root.innerHTML = `
     <div data-scroll class="h-full overflow-y-auto">
       <div class="max-w-3xl mx-auto px-4 md:px-6 py-5 pb-20 space-y-5">
-        <div class="text-sm text-slate-500">${pick("팀 이름·태그라인·미션과 팀원을 직접 관리합니다. 처음엔 핵심만 — 자세한 운영 설정은 점차 추가됩니다.", "Manage your team name·tagline·mission and members directly. Just the essentials at first — detailed operational settings are added over time.")}</div>
+        <div class="text-sm text-slate-500">${pick("팀 이름·팀장·팀원을 직접 관리합니다. 처음엔 핵심만 — 자세한 운영 설정은 점차 추가됩니다.", "Manage your team name·lead·members directly. Just the essentials at first — detailed operational settings are added over time.")}</div>
         ${identity}
         ${slackChannelsHtml()}
         ${systemOpHtml()}
@@ -829,7 +822,6 @@ function wire(): void {
     const owner = (_root!.querySelector<HTMLInputElement>("#set-owner-name")?.value ?? "").trim();
     const ownerChatId = (_root!.querySelector<HTMLInputElement>("#set-owner-chat-id")?.value ?? "").trim();
     const dmCapture = _root!.querySelector<HTMLInputElement>("#set-dm-capture")?.checked ?? true;
-    const mission = (_root!.querySelector<HTMLTextAreaElement>("#set-mission")?.value ?? "").trim();
     const msg = _root!.querySelector<HTMLSpanElement>("#set-msg")!;
     if (!name || !leadId || !owner) { // 필수 3개 가드(버튼 비활성 우회 대비)
       msg.className = "text-[13px] text-txt-red flex-1 leading-snug";
@@ -852,16 +844,12 @@ function wire(): void {
       const r1 = await fetch(api("/settings"), { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ team_name: name, lead_id: leadId, owner_name: owner, owner_chat_id: ownerChatId, dm_capture: dmCapture }) });
       const j1 = await r1.json().catch(() => ({}));
       if (!r1.ok || !j1.ok) throw new Error(j1.error || "settings HTTP " + r1.status);
-      if (mission) {  // 비어있으면 mission은 건너뜀(서버 400 방지) — 안내만
-        const r2 = await fetch(api("/mission"), { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ mission }) });
-        const j2 = await r2.json().catch(() => ({}));
-        if (!r2.ok || !j2.ok) throw new Error(j2.error || "mission HTTP " + r2.status);
-      }
-      _settings = { team_name: name, lead_id: leadId, tagline: _settings.tagline, owner_name: owner, owner_chat_id: ownerChatId, locale: _settings.locale, dm_capture: dmCapture }; _mission = mission;
+      // ★미션은 대시보드에서 편집하지 않는다(OWNER 2026-07-19) — TEAM-OS.md §1 의 기본값을 쓴다.★ 필드·PUT /mission 호출 제거.
+      _settings = { team_name: name, lead_id: leadId, tagline: _settings.tagline, owner_name: owner, owner_chat_id: ownerChatId, locale: _settings.locale, dm_capture: dmCapture };
       _setupComplete = Boolean(j1.setup_complete); _leadActorId = j1.lead_actor_id ?? _leadActorId;
       applyTeamTitle(name);
       msg.className = "text-[13px] text-accent-greenSoft flex-1 leading-snug";
-      msg.textContent = mission ? `✅ ${pick("저장됨 (팀 정보 + 미션)", "Saved (team info + mission)")}` : `✅ ${pick("저장됨 — 미션은 비어 있어 변경 안 함", "Saved — mission left empty, unchanged")}`;
+      msg.textContent = `✅ ${pick("저장됨 (팀 정보)", "Saved (team info)")}`;
     } catch (e) {
       msg.className = "text-[13px] text-txt-red flex-1 leading-snug";
       msg.textContent = pick("저장 실패: ", "Save failed: ") + (e as Error).message;
