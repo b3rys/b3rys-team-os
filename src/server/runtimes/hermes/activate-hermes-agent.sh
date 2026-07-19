@@ -165,6 +165,17 @@ HTMPL="$HOME/Library/LaunchAgents/ai.hermes.gateway-$SRC_PROFILE.plist"
 HPLIST="$HOME/Library/LaunchAgents/ai.hermes.gateway-$AGENT_ID.plist"
 GENERIC_PLIST="$HOME/Library/LaunchAgents/ai.hermes.gateway.plist"
 mkdir -p "$HOME/.hermes/profiles/$AGENT_ID/logs"
+# ★seed 전용 plist 폴백(자동시드 base 대응, OWNER 2026-07-19 맥북테스트)★ — 현대 hermes(v0.18+)의
+#   `hermes gateway install` 은 프로필별 plist 를 만들지 않고 generic ai.hermes.gateway.plist 하나만 만든다.
+#   그래서 자동시드된 base 프로필(b3ryshermes)엔 전용 plist(ai.hermes.gateway-b3ryshermes.plist)가 없어
+#   아래 per-profile 복제가 unmanaged 폴백으로 빠지고, 그 폴백의 `hermes gateway start` 는 generic(=default
+#   프로필) 게이트웨이만 띄워 'herm 프로필 게이트웨이 안 뜸' 으로 실패했다(preflight/base 시드는 통과한 뒤 여기서 막힘).
+#   → seed 전용 plist 가 없으면 generic 을 복제 템플릿으로 삼는다(generic 도 없으면 install 로 만든 뒤).
+#     복제 python 이 Label/--profile/HERMES_HOME 을 이 프로필용으로 바꿔 per-profile plist 를 만든다.
+if [ ! -f "$HTMPL" ]; then
+  [ -f "$GENERIC_PLIST" ] || HERMES_PROFILE="$SRC_PROFILE" hermes gateway install --no-start-now >/dev/null 2>&1 || true
+  [ -f "$GENERIC_PLIST" ] && HTMPL="$GENERIC_PLIST"
+fi
 if [ -f "$HTMPL" ] && [ "$AGENT_ID" != "$SRC_PROFILE" ]; then
   python3 - "$HTMPL" "$HPLIST" "$AGENT_ID" <<'PY'
 import os, plistlib, sys
@@ -211,9 +222,16 @@ else
   echo "  ⚠ seed($SRC_PROFILE) plist 템플릿 없음 — unmanaged 폴백"; HERMES_PROFILE="$AGENT_ID" hermes gateway start 2>&1 | tail -5 || echo "  ⚠ gateway start 확인 필요"
 fi
 sleep 2
+# ★검증(OWNER 2026-07-19 맥북테스트)★ — b3os 는 per-profile launchd 서비스(ai.hermes.gateway-<id>)를 직접 만든다.
+#   modern hermes 의 `hermes gateway status` 는 generic 서비스만 봐 per-profile 를 'not running' 으로 오탐한다
+#   (게이트웨이가 실제 떠 있어도 activate 실패로 뜸 — `hermes gateway list` 엔 ✓ <id> — PID N 로 정상 표시).
+#   그래서 우리가 만든 그 launchd 서비스 상태를 직접 확인하고, 못 잡으면 예전 status 파서로 폴백한다.
+GW_LABEL="ai.hermes.gateway-$AGENT_ID"
+LC_OUT="$(launchctl print "gui/$(id -u)/$GW_LABEL" 2>/dev/null || true)"
 STATUS_OUT="$(HERMES_PROFILE="$AGENT_ID" hermes gateway status 2>&1 || true)"
-printf "%s\n" "$STATUS_OUT" | head -5
-if ! HERMES_STATUS_OUT="$STATUS_OUT" python3 - "$AGENT_ID" <<'PY'
+if printf "%s" "$LC_OUT" | grep -qE "state = running" && printf "%s" "$LC_OUT" | grep -qE "pid = [0-9]+"; then
+  say "  ✅ 게이트웨이 실행 확인(launchd: $GW_LABEL)"
+elif HERMES_STATUS_OUT="$STATUS_OUT" python3 - "$AGENT_ID" <<'PY'
 import os, re, sys
 
 profile = sys.argv[1]
@@ -253,7 +271,10 @@ ok = (any(healthy(line) for line in current) and has_profile_evidence(current)) 
 sys.exit(0 if ok else 1)
 PY
 then
+  say "  ✅ 게이트웨이 실행 확인(status 파서)"
+else
   echo "❌ hermes gateway not running for profile $AGENT_ID"
+  printf "%s\n" "$STATUS_OUT" | head -5
   exit 1
 fi
 
