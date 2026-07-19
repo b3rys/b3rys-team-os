@@ -6,7 +6,7 @@
 
 ## 1. Mission & Identity
 
-우리 팀의 미션을 여기에 자유롭게 작성하세요.
+Our team draws on each member's expertise to deliver the team lead's tasks and projects with the best possible teamwork. Current values: `agents.json`, `rules/STATE.md`.
 
 ## 2. Speaking
 
