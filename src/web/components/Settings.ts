@@ -552,17 +552,17 @@ function systemOpHtml(): string {
   const form = `
     <div class="mt-4 space-y-3 border-t border-surface-3 pt-4">
       <div class="text-[12px] text-slate-400 leading-relaxed bg-surface-0/40 rounded-md p-3 border border-surface-3/60">
-        <div class="text-slate-300 font-medium mb-1">${pick("System OP = 팀방(그룹방) 협업 + 팀 운영 알림 레이어", "System OP = team-room collaboration + team-ops alerts layer")}</div>
-        <div>${pick("팀방에서 여러 팀원이 <b>자동으로 대화에 끼어들게</b> 하고, digest·승인(approve)·상태(/status)·칸반(/board) 같은 <b>팀 운영 알림</b>을 받으려면 전용 'op 봇' 하나를 붙입니다.", "Attach one dedicated 'op bot' so teammates <b>auto-join the conversation in the team room</b>, and to receive <b>team-ops alerts</b> (digest·approve·/status·/board).")}</div>
-        <div class="mt-1.5 text-accent-greenSoft">${pick("★안 붙여도 됩니다 — 1:1 DM(각 팀원 봇에 직접)과 팀원끼리 협업(handoff·버스)은 이 설정 없이도 동작합니다.★ System OP는 '그룹방에서 자동 협업 + 운영 알림'을 원할 때만.", "★Optional — 1:1 DM (each teammate's own bot) and teammate-to-teammate collab (handoff·bus) work WITHOUT this.★ System OP is only for group-room auto-collab + ops alerts.")}</div>
+        ${pick("팀방(그룹방)에서 팀원이 <b>자동 협업</b>하고 <b>/status·/approve·/digest</b> 운영 명령을 쓰려면 전용 'op 봇'을 붙입니다. ★안 붙여도 1:1 DM·팀원끼리 협업은 됩니다★ — 그룹방 자동협업을 원할 때만.", "Attach a dedicated 'op bot' for <b>auto-collab in the team room</b> + ops commands (<b>/status·/approve·/digest</b>). ★1:1 DM & teammate collab work without it★ — only for group-room auto-collab.")}
       </div>
       <div>
-        <label class="${cLabel}">${pick("capture 봇 토큰", "capture bot token")} ${tokenSet ? `<span class="text-accent-greenSoft">${pick("설정됨", "Configured")} ✓</span>` : `<span class="text-txt-amber">${pick("미설정", "Not set")}</span>`} <span class="text-slate-600">${pick("· BotFather · 재시작 시 적용", "· BotFather · applied on restart")}</span></label>
+        <label class="${cLabel}">${pick("capture 봇 토큰", "capture bot token")} ${tokenSet ? `<span class="text-accent-greenSoft">${pick("설정됨", "Configured")} ✓</span>` : `<span class="text-txt-amber">${pick("미설정", "Not set")}</span>`}</label>
         <input id="sysop-token" type="password" class="${cInput}" placeholder="${tokenSet ? pick("새 토큰으로 변경", "Change to a new token") : "123456:ABC..."}" autocomplete="off" />
+        <div class="text-[11px] text-slate-500 mt-1">${pick("BotFather 에서 <b>op 전용 봇</b>을 새로 만들어(팀원 봇과 별개) 받은 토큰을 붙여넣기 · 저장 후 재시작 시 적용.", "Create a <b>dedicated op bot</b> in BotFather (separate from member bots), paste its token · applied on restart after save.")}</div>
       </div>
       <div>
         <label class="${cLabel}">${pick("팀 그룹 chat_id", "team group chat_id")} <span class="text-slate-600">${pick("(비우면 모든 그룹)", "(empty = all groups)")}</span></label>
         <input id="sysop-group" class="${cInput}" value="${escape(group)}" placeholder="-1001234567890" autocomplete="off" />
+        <div class="text-[11px] text-slate-500 mt-1">${pick("팀원 넣을 텔레그램 <b>그룹에 op 봇을 초대</b> → 그 그룹에 <b>@userinfobot</b> 을 잠깐 초대하면 그룹 id(<code>-100…</code>)를 알려줍니다.", "Invite the op bot to your Telegram <b>group</b> → briefly add <b>@userinfobot</b> there to get the group id (<code>-100…</code>).")}</div>
       </div>
       <div class="flex items-center justify-between rounded-md border border-surface-3 bg-surface-0/60 px-3 py-2">
         <span class="text-[13px] font-medium text-slate-200">${pick("라우터 (agent 응답)", "Router (agent replies)")} <span class="${routerOn ? "text-accent-greenSoft" : "text-slate-500"} text-[11px]">${routerOn ? "ON" : "OFF · shadow"}</span></span>
