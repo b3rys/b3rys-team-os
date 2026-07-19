@@ -34,9 +34,11 @@ _An AI team operating system for human-led multi-agent work._
 
 ## ⚡ 가장 빠른 시작 — b3os 스킬 (권장)
 
-**여러분의 Claude Code에게** 이렇게 말하면 됩니다.
+**여러분의 Claude Code에게** 아래 한 줄을 그대로 복붙하면 됩니다.
 
-> *"이 저장소의 b3os 스킬을 설치하고 실행해줘: github.com/b3rys/b3rys-team-os"*
+```text
+이 저장소의 b3os 스킬을 설치하고 실행해줘: github.com/b3rys/b3rys-team-os
+```
 
 그러면 Claude가 `skills/b3os/SKILL.md` 를 `~/.claude/skills/b3os/` 에 설치하고 실행합니다. **clone → 설치 → 대시보드 기동 → 첫 팀원 영입**까지 자동으로 진행합니다. 사용자는 [아래 "사용자가 해야 되는 것"](#사용자가-해야-되는-것-ai가-이건-직접-해주세요라고-안내합니다)(봇 토큰·활성화 승인)만 답하면 됩니다.
 
