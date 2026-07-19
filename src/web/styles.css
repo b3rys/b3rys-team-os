@@ -1,0 +1,667 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─────────────────────────────────────────────────────────────
+   b3rys 디자인 토큰 (리디자인 Phase 1)
+   다크 = :root 기본값 · 라이트 = prefers-color-scheme 자동 오버라이드.
+   tailwind 색(surface/slate/accent/status·border-surface-3)이 이 변수를 백킹.
+   ───────────────────────────────────────────────────────────── */
+:root {
+  color-scheme: dark light;
+  /* 표면 — 깊은 배경 → 카드 */
+  /* ⚠ 투명도(/12 /40 등) 쓰는 색은 'R G B' 채널 포맷 — Tailwind는 var(hex)엔 opacity 수식어를 못 만든다.
+     tailwind.config에서 rgb(var(--x) / <alpha-value>)로 감싼다. solid 전용(border/soft-text/on/btn/txt)은 hex 유지. */
+  --surface-0: 13 15 18;
+  --surface-1: 20 22 25;
+  --surface-2: 23 25 29;   /* body */
+  --surface-3: 33 36 42;   /* 카드 bg */
+  --border:    43 47 54;  /* 헤어라인(border-surface-3) — border-surface-3/50 등 opacity 쓰여 채널화 */
+  /* 텍스트 위계 — 다크: 밝음 */
+  --slate-50:  246 247 249;
+  --slate-100: 240 242 244;   /* 본문 강조 */
+  --slate-200: 218 220 225;
+  --slate-300: 188 191 198;
+  --slate-400: 157 161 169;   /* 보조 */
+  --slate-500: 144 151 160;   /* 흐림(가장 많이 쓰임) */
+  --slate-600: 117 123 133;
+  --slate-700: 94 99 109;
+  --slate-900: 58 62 69;
+  --slate-950: 42 45 51;
+  /* 액센트 */
+  --accent:      61 220 132;
+  --accent-hover: 47 191 111;
+  --accent-soft: #16271d;        /* solid 전용(소프트 채움) */
+  --accent-soft-text: #6fd9a0;   /* solid 전용(소프트 텍스트/아이콘) */
+  --on-accent: #04140a;          /* solid 전용(버튼 위 글자) */
+  --accent-btn: #3ddc84;         /* solid 전용(버튼 배경) */
+  --accent-btn-hover: #2fbf6f;
+  /* 상태 */
+  --status-running: 53 224 139;
+  --status-idle:    227 169 60;
+  --status-blocked: 255 107 96;
+  --status-offline: 107 113 128;
+  --status-info:    91 140 255;
+  /* 배지/칩 '텍스트' 전용 — 상태토큰은 dot/fill용, 이건 작은 라벨 가독(다크: 밝게) */
+  /* ⭐ 핵심내용 최소대비 원칙 (OWNER 상시규칙 2026-06-21) — 읽어야 하는 본문·라벨·값(=핵심내용)에는:
+     ① 흐린 초록/주황(text-emerald-200·amber-200 류 Tailwind 기본 밝은셰이드=다크전용) 금지 → deep 토큰(text-txt-green/amber 등)만.
+     ② 하드코딩 검은바탕(bg-[#020617]/#07101d/#050814] 류)+회색글씨 금지 → 테마 토큰(bg-surface-0 등).
+     ③ 작은 회색글씨(text-[10~11px]+slate-500 류)는 보조/메타에만, 핵심내용엔 금지(핵심=12px+ & slate-400/200+ 대비).
+     보조/메타(시각·색인·카운트 등)는 slate-500/600·10~11px 허용.
+     ※ 예외 — SVG 일러스트(다이어그램) 내부의 고정팔레트 fill(#a7f3d0·#e2e8f0·#94a3b8 등)은 self-contained
+        다크 배경 rect 위에 그려져 자체 대비를 갖는다(R4 #0b1220 rect). 이건 3원칙 위반 아님 — 다음 리뷰어/sweep
+        오탐 주의. HTML 클래스(text-emerald-200 등)만 deep 토큰 대상. */
+  --txt-green:#4ee599; --txt-red:#ff857e; --txt-blue:#7aa5ff; --txt-amber:#f0bd6a; --txt-violet:#b79dfb; --txt-orange:#f9a86a;
+  /* 스크롤바(반투명, 얇고 연하게) */
+  --scrollbar-thumb:       rgba(255,255,255,.15);
+  --scrollbar-thumb-hover: rgba(255,255,255,.27);
+  --float-shadow: 0 1px 2px rgba(0,0,0,.22), 0 10px 28px rgba(0,0,0,.16);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --surface-0: 236 238 241;
+    --surface-1: 243 244 246;
+    --surface-2: 247 248 250;   /* body */
+    --surface-3: 255 255 255;   /* 카드 = 흰색 */
+    --border:    231 232 236;  /* 옅은 헤어라인 — border-surface-3/50 등 opacity 쓰여 채널화 */
+    /* 텍스트 — 라이트: 어둡게(반전) */
+    --slate-50:  20 21 26;
+    --slate-100: 28 29 34;   /* 본문 강조 */
+    --slate-200: 51 53 60;
+    --slate-300: 74 77 85;
+    --slate-400: 80 83 91;    /* 보조 — 흰 배경서 또렷(OWNER: 상세설명 가독) */
+    --slate-500: 92 95 103;   /* 흐림(최다) ≥6:1 */
+    --slate-600: 109 112 121; /* ≥4.5:1 */
+    --slate-700: 130 133 142; /* very-muted */
+    --slate-900: 182 185 191; /* subtle */
+    --slate-950: 208 210 215;
+    --accent:      31 157 90;
+    --accent-hover: 23 128 73;
+    --accent-soft: #e6f5ec;        /* solid 전용 */
+    --accent-soft-text: #198a52;   /* solid 전용(흰 배경 위 가독) */
+    --on-accent: #ffffff;          /* solid 전용 */
+    --accent-btn: #178049;         /* solid 전용(깊은초록 버튼 → 흰글씨 4.98:1) */
+    --accent-btn-hover: #126c3d;
+    --status-running: 31 157 90;
+    --status-idle:    185 130 26;
+    --status-blocked: 212 73 63;
+    --status-offline: 138 143 153;
+    --status-info:    47 109 240;
+    /* 라이트: 작은 라벨 ≥4.5:1 위해 깊은 색(틴트 배경 위에서도 대비 확보) */
+    --txt-green:#15793f; --txt-red:#b83a30; --txt-blue:#1d5fd6; --txt-amber:#875a0e; --txt-violet:#6d3fc9; --txt-orange:#b25208;
+    /* 스크롤바(라이트: 어두운 반투명, 얇게 — 진한 다크바 제거) */
+    --scrollbar-thumb:       rgba(20,22,28,.20);
+    --scrollbar-thumb-hover: rgba(20,22,28,.32);
+    --float-shadow: 0 1px 2px rgba(20,22,28,.05), 0 8px 24px rgba(20,22,28,.08);
+  }
+}
+
+@layer base {
+  html {
+    font-size: 16.5px;
+  }
+  @media (min-width: 1280px) {
+    html {
+      font-size: 17px;
+    }
+  }
+  @media (max-width: 767px) {
+    html {
+      font-size: 16.25px;
+    }
+  }
+  body {
+    font-family: "Inter", system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer components {
+  .status-dot {
+    @apply inline-block w-2 h-2 rounded-full;
+  }
+  .status-dot.running {
+    background: #22c55e;
+    box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  .status-dot.idle {
+    background: #fbbf24;
+  }
+  .status-dot.idle.openclaw {
+    background: #94a3b8;
+  }
+  .status-dot.blocked {
+    background: #94a3b8;
+  }
+  .status-dot.offline {
+    background: #64748b;
+  }
+  .health-dot {
+    @apply inline-block w-2 h-2 rounded-full;
+  }
+  .health-dot.ok {
+    background: #22c55e;
+    box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+  }
+  .health-dot.warn {
+    background: #fbbf24;
+  }
+  .health-dot.pending {
+    background: #94a3b8;
+  }
+  .health-dot.danger {
+    background: #ef4444;
+    box-shadow: 0 0 6px rgba(239, 68, 68, 0.45);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.6; }
+}
+
+.tmux-line {
+  animation: fadeIn 150ms ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 스크롤바 완전 숨김 — 스크롤 기능은 유지, 막대만 아예 안 보이게(OWNER R6 2026-06-21:
+   '스크롤해도 안 나오게'). 패널 전반 일관 적용. */
+* {
+  scrollbar-width: none;        /* Firefox */
+  -ms-overflow-style: none;     /* old Edge/IE */
+}
+::-webkit-scrollbar {           /* Chrome/Safari/Edge */
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* 플로팅 둥둥이 패널: surface-2 바탕 위에 떠 있는 둥근 카드(하드 세로 구분선 대체). */
+.float-panel {
+  background: rgb(var(--surface-3));
+  border: 1px solid rgb(var(--border));
+  border-radius: 16px;
+  box-shadow: var(--float-shadow);
+}
+
+/* ----- Responsive layout: single source of truth via CSS media queries ----- */
+
+/* Desktop-only metric items hidden on mobile. */
+.metric-desktop-only {
+  display: none;
+}
+@media (min-width: 768px) {
+  .metric-desktop-only {
+    display: inline;
+  }
+}
+
+/* Mobile (<768px): single-pane based on body[data-mobile-pane]. */
+@media (max-width: 767px) {
+  body[data-mobile-pane="agents"] #main-panel-wrap,
+  body[data-mobile-pane="agents"] #activity-panel-wrap,
+  body[data-mobile-pane="main"] #agent-sidebar-wrap,
+  body[data-mobile-pane="main"] #activity-panel-wrap,
+  body[data-mobile-pane="threads"] #agent-sidebar-wrap,
+  body[data-mobile-pane="threads"] #main-panel-wrap {
+    display: none !important;
+  }
+  /* Active pane wrapper takes full width. */
+  #agent-sidebar-wrap, #main-panel-wrap, #activity-panel-wrap {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  #agent-sidebar, #activity-panel-wrap > div {
+    width: 100% !important;
+    border-left: none !important;
+    border-right: none !important;
+  }
+}
+
+/* Desktop: hide bottom mobile tabbar. */
+@media (min-width: 768px) {
+  #mobile-tabs {
+    display: none;
+  }
+}
+
+/* Desktop: draggable column widths. main.ts setupResizers() sets --sidebar-w / --thread-w;
+   consumed ONLY here (md+), so mobile single-pane layout is untouched. Thread default 300px
+   (reduced from 360). */
+@media (min-width: 768px) {
+  #agent-sidebar { width: var(--sidebar-w, 280px) !important; }
+  #activity-panel-wrap > div { width: var(--thread-w, 300px) !important; }
+  body.thread-panel-collapsed #activity-panel-wrap,
+  body.thread-panel-collapsed .resize-handle[data-resize="thread"] {
+    display: none !important;
+  }
+  .thread-panel-toggle {
+    position: fixed;
+    top: 4.75rem;
+    right: 0.75rem;
+    z-index: 30;
+    display: inline-flex;
+    height: 2rem;
+    width: 2rem;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #334155;
+    border-radius: 0.5rem;
+    background: rgba(15, 23, 42, 0.92);
+    color: #cbd5e1;
+    box-shadow: 0 8px 20px rgba(2, 6, 23, 0.28);
+  }
+  .thread-panel-toggle:hover {
+    border-color: rgba(52, 211, 153, 0.55);
+    color: #a7f3d0;
+  }
+  .resize-handle {
+    flex: 0 0 6px;
+    align-self: stretch;
+    cursor: col-resize;
+    position: relative;
+    background: transparent;
+  }
+  /* 패널 사이 핸들 — 기본은 '선' 없이 투명(둥둥이 패널끼리 인접 느낌). 드래그 영역은 유지,
+     hover/drag 시에만 초록 가이드. (OWNER 2026-06-21 R3: TEAM↔가운데 세로선 제거) */
+  .resize-handle::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 2px;
+    width: 2px;
+    border-radius: 2px;
+    background: transparent;
+    transition: background 0.12s;
+  }
+  .resize-handle:hover::after,
+  .resize-handle.dragging::after {
+    background: rgb(var(--accent));
+  }
+  /* Proposal 칸반↔상세 구분선 — 화려한 검정 바 X, 기본 흐린 회색으로 '구분만'.
+     (OWNER 2026-06-21 R3) */
+  .proposal-resize-handle {
+    align-self: stretch;
+    cursor: col-resize;
+    position: relative;
+    background: transparent;
+  }
+  .proposal-resize-handle::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 1px;
+    background: rgb(var(--border));
+    transition: background 0.12s;
+  }
+  .proposal-resize-handle:hover::after,
+  .proposal-resize-handle.dragging::after {
+    background: rgb(var(--accent));
+    width: 2px;
+  }
+}
+@media (max-width: 767px) {
+  .resize-handle {
+    display: none;
+  }
+  .proposal-resize-handle {
+    display: none;
+  }
+  .thread-panel-toggle {
+    display: none;
+  }
+  /* Proposal 탭 모바일 — 좌우 split(board|6px|448px detail) 인라인 그리드가 좁은 폭을 넘쳐
+     깨지던 문제(OWNER 아이폰 2026-06-22). 세로 1열로 펼치고(board → detail 스택) 전체 세로 스크롤.
+     인라인 grid-template-columns를 이기려 !important. */
+  [data-proposals-split] {
+    display: block !important;
+    overflow-y: auto;
+  }
+  [data-proposals-split] > div {
+    overflow: visible !important;
+    border-right: 0 !important;
+  }
+  [data-proposals-board-scroll] {
+    height: auto !important;
+    overflow: visible !important;
+  }
+}
+
+/* Doc pages are meant for reading, not dense operations scanning. Keep this
+   scoped so the live dashboard cards and metrics retain their compact layout. */
+.doc-content {
+  font-size: 15px;
+}
+.doc-content section {
+  padding: 1.25rem;
+}
+.doc-content h1 {
+  font-size: 1.75rem;
+  line-height: 2.2rem;
+}
+.doc-content h2 {
+  font-size: 1.15rem;
+  line-height: 1.65rem;
+}
+.doc-content p,
+.doc-content .text-sm {
+  font-size: 0.98rem;
+  line-height: 1.8rem;
+}
+.doc-content .text-xs,
+.doc-content .text-\[11px\],
+.doc-content .text-\[11\.5px\] {
+  font-size: 0.86rem;
+  line-height: 1.55rem;
+}
+.doc-content .text-\[10px\] {
+  font-size: 0.78rem;
+}
+.doc-content pre {
+  font-size: 0.9rem;
+  line-height: 1.75rem;
+}
+.doc-content .arch-click-target {
+  cursor: pointer;
+  fill: rgba(52, 211, 153, 0);
+  stroke: rgba(52, 211, 153, 0);
+  stroke-width: 3;
+}
+.doc-content .arch-click-target:hover,
+.doc-content .arch-click-target[data-selected] {
+  fill: rgba(52, 211, 153, 0.08);
+  stroke: rgba(52, 211, 153, 0.9);
+}
+/* 구조탭 click-target 칩 — 검은바탕(rgba navy 고정)+흐린연두 selected 글씨는 가독실패(OWNER 3원칙
+   2026-06-21). 테마 토큰 bg + selected는 deep 초록 글씨(txt-green)로 또렷하게. */
+.doc-content .arch-chip {
+  min-height: 2rem;
+  border: 1px solid rgb(var(--border));
+  border-radius: 0.45rem;
+  background: rgb(var(--surface-2));
+  color: rgb(var(--slate-200));
+  font-weight: 600;
+}
+.doc-content .arch-chip:hover,
+.doc-content .arch-chip[data-selected] {
+  border-color: rgb(var(--accent));
+  background: rgb(var(--accent) / 0.14);
+  color: var(--txt-green);
+}
+.doc-content [data-arch-info-files] code {
+  border: 1px solid rgb(var(--border));
+  border-radius: 0.4rem;
+  background: rgb(var(--surface-0));
+  padding: 0.2rem 0.45rem;
+}
+
+/* UX #2 — phone-first agent cards. On the phone the agents pane is OWNER's "누가 막혔나" glance:
+   collapse each card to a dense ~2 lines (name + health, then state-dot · last · ctx% · pending),
+   hiding the verbose desktop bits. Desktop layout is untouched (rules scoped to <768px; the mobile
+   meta row is display:none by default below). */
+.agent-card-mobile {
+  display: none;
+}
+.agent-card {
+  position: relative;
+}
+.agent-card-drag-handle {
+  position: absolute;
+  top: 0.45rem;
+  bottom: 0.45rem;
+  left: 0.25rem;
+  width: 0.45rem;
+  border-radius: 999px;
+  cursor: grab;
+  touch-action: none;
+}
+.agent-card-drag-handle::after {
+  content: "";
+  position: absolute;
+  top: 0.3rem;
+  bottom: 0.3rem;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: rgb(var(--slate-700));
+  opacity: 0.4;
+  transition: background 0.12s, opacity 0.12s;
+}
+.agent-card:hover .agent-card-drag-handle::after,
+.agent-card-drag-handle:hover::after,
+.agent-card-dragging .agent-card-drag-handle::after {
+  background: rgb(var(--accent));
+  opacity: 1;
+}
+.agent-card-drag-handle:active {
+  cursor: grabbing;
+}
+.agent-card-drop-target {
+  outline: 1px solid rgb(var(--accent));
+  outline-offset: -1px;
+  background: rgb(var(--accent) / 0.08);
+}
+@media (max-width: 767px) {
+  .agent-card {
+    padding: 0.5rem 0.625rem;
+    padding-left: 1rem;
+  }
+  .agent-card-role,
+  .agent-card-lastline,
+  .agent-card-ctxbar,
+  .agent-card-stats {
+    display: none;
+  }
+  .agent-card-mobile {
+    display: flex;
+  }
+}
+
+/* ----- iPhone Safari mobile fix: safe-area + touch targets -----
+   Symptom: the top nav overlapped Safari's status bar/notch and the tab
+   buttons (OWNER · Tasks · Bus · OS · Topo · Search · Doc) were too small and
+   cramped to tap reliably. Fix is CSS-only — no component/markup changes:
+   honor the safe-area insets, drop the bar below the notch, grow touch
+   targets to ~40px, and let the tab strip scroll when the row is too narrow.
+   Requires viewport-fit=cover (set in index.html) for env(safe-area-*) to
+   report non-zero values. Desktop (>=768px) is left untouched. */
+
+/* Dynamic viewport height so a 100vh shell doesn't hide content behind
+   Safari's collapsing toolbars. Progressive — on desktop 100dvh == 100vh. */
+@supports (height: 100dvh) {
+  body.h-screen,
+  #app.h-screen {
+    height: 100dvh;
+  }
+}
+
+/* Mac 네이티브 앱 모드 (b3os.app) — 신호등(traffic light) 클리어런스는 네이티브 셸이
+   top safe-area로 일원화해서 보장한다(AppShell.swift: .ignoresSafeArea(.container,
+   edges:[.horizontal,.bottom]) → SwiftUI가 webview를 타이틀바 높이만큼 내려 깔아 메뉴바가
+   신호등 밑에 위치). 따라서 웹은 추가 여백을 주지 않는다(padding-top:0) — 예전엔 웹 CSS가
+   28px를 더 주다가 네이티브 인셋과 '이중'이 되어 위 gap+바닥 잘림, 또는 인셋이 빠진 페이지에선
+   nav가 신호등에 가려지는 fragility가 있었다. 클리어런스 책임을 네이티브 한 곳으로 모았다.
+   data-b3rys-native는 셸이 WKUserScript로 주입하므로 일반 웹 대시보드엔 영향 0. */
+html[data-b3rys-native] .metric-bar {
+  padding-top: 0;
+}
+
+@media (max-width: 767px) {
+  /* Top bar: sit below the notch/status bar, honor side insets in landscape,
+     and WRAP to multiple rows so every control stays visible on a narrow
+     viewport (no horizontal clipping, no swipe-to-reach). height:auto lets the
+     bar grow with the wrapped rows + safe-area padding (Tailwind h-12 is
+     border-box, so padding alone can't push content below the notch). */
+  .metric-bar {
+    /* 모바일: 한 줄 + 가로 스크롤(OWNER 2026-06-23 '한줄로 나오면서 스크롤이 되야지'). 오른쪽 상태를
+       숨겨 항목이 적어 스크롤도 짧다. ★탭 문제 해결: 바 배경은 가로 팬(스크롤), 버튼은 즉시 탭으로
+       분리(touch-action) — 가로스크롤이어도 버튼이 확실히 눌린다(아래 .metric-bar button 참고). */
+    height: auto;
+    min-height: 3rem;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    touch-action: pan-x; /* 바 배경 = 가로 스크롤만 (탭 모호성 제거) */
+    padding-top: calc(0.4rem + env(safe-area-inset-top));
+    padding-bottom: 0.4rem;
+    padding-left: max(0.75rem, env(safe-area-inset-left));
+    padding-right: max(0.75rem, env(safe-area-inset-right));
+  }
+  .metric-bar::-webkit-scrollbar { display: none; }
+  .metric-bar > div:first-child {
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+  }
+  /* 오른쪽 상태 클러스터(CPU·RAM·Load·Ollama·alerts)는 모바일에서 숨긴다 — 항목 줄어 스크롤 짧고 슬림(OWNER). */
+  .metric-bar > div:last-child {
+    display: none;
+  }
+  /* ~40px touch targets + ★버튼 터치는 즉시 탭(touch-action:manipulation) — 바의 pan-x보다 우선해서
+     버튼 위 터치는 스크롤이 아니라 클릭으로 처리된다. 이게 '가로스크롤인데 버튼이 안 눌리던' 핵심 수정. */
+  .metric-bar button {
+    min-height: 2.5rem;
+    display: inline-flex;
+    align-items: center;
+    touch-action: manipulation;
+  }
+  /* 가로스크롤(overflow-x:auto → overflow-y도 auto)이 드롭다운(Tasks▾·Inbox▾·Doc▾, top-full)을
+     클립한다. fixed로 빼서 뷰포트 기준 바 아래에 띄워 클립 회피. */
+  #tasks-menu-dropdown,
+  #inbox-menu-dropdown,
+  #doc-menu-dropdown {
+    position: fixed;
+    left: max(0.75rem, env(safe-area-inset-left));
+    right: auto;
+    top: calc(0.4rem + env(safe-area-inset-top) + 2.6rem);
+  }
+  /* Bottom mobile tab bar clears the home indicator. */
+  #mobile-tabs {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Per-panel tab strip (#main-tabs) — 모바일에선 wrap 대신 한 줄 가로스크롤(탭이 2행으로
+     넘쳐 아래 콘텐츠와 겹쳐 클릭이 막히던 문제, OWNER 2026-06-24). 스크롤바 숨김 + 가로 팬 제스처.
+     탭 버튼은 ~40px 터치 타깃. */
+  #main-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    touch-action: pan-x;
+  }
+  #main-tabs::-webkit-scrollbar { display: none; }
+  #main-tabs button {
+    min-height: 2.5rem;
+    touch-action: manipulation;
+  }
+}
+
+/* ===== 첫 실행 빈 팀 온보딩 오버레이 (Onboarding.ts) =====
+   팀원 0명일 때 빈 대시보드를 덮어 "안내된 첫걸음"을 보여준다. 양테마 — 토큰을 rgb()로 참조. */
+#onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: none; /* JS가 flex로 토글 */
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(var(--surface-2));
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+.onb-card {
+  width: 100%;
+  max-width: 440px;
+  background: rgb(var(--surface-3));
+  border: 1px solid rgb(var(--border));
+  border-radius: 18px;
+  padding: 36px 32px 30px;
+  text-align: center;
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.30);
+}
+.onb-mark { color: rgb(var(--accent)); display: inline-flex; margin-bottom: 14px; }
+.onb-title { margin: 0 0 8px; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: rgb(var(--slate-100)); }
+.onb-sub { margin: 0 0 24px; font-size: 14.5px; color: rgb(var(--slate-400)); line-height: 1.55; }
+.onb-steps { list-style: none; margin: 0 0 26px; padding: 0; display: grid; gap: 12px; text-align: left; }
+.onb-step { display: flex; gap: 13px; align-items: flex-start; }
+.onb-step-num {
+  flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%;
+  background: rgb(var(--accent) / 0.16); color: rgb(var(--accent));
+  display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px;
+}
+.onb-step-title { font-size: 14.5px; font-weight: 600; color: rgb(var(--slate-100)); margin-bottom: 2px; }
+.onb-step-desc { font-size: 13px; color: rgb(var(--slate-400)); line-height: 1.5; }
+.onb-cta { display: flex; flex-direction: column; gap: 10px; }
+.onb-btn-primary {
+  width: 100%; padding: 12px 18px; border: none; border-radius: 10px; cursor: pointer;
+  background: var(--accent-btn); color: var(--on-accent, #04140a);
+  font-size: 15px; font-weight: 700; transition: background .15s ease;
+}
+.onb-btn-primary:hover { background: var(--accent-btn-hover); }
+.onb-btn-ghost {
+  width: 100%; padding: 10px 18px; border: 1px solid rgb(var(--border)); border-radius: 10px; cursor: pointer;
+  background: transparent; color: rgb(var(--slate-300)); font-size: 14px; font-weight: 500; transition: .15s ease;
+}
+.onb-btn-ghost:hover { border-color: rgb(var(--accent)); color: rgb(var(--slate-100)); }
+@media (max-width: 767px) {
+  .onb-card { padding: 30px 22px 24px; border-radius: 16px; }
+  .onb-title { font-size: 20px; }
+}
+
+/* ===== 업데이트 핀 (UpdateCheck.ts) — 새 배포 감지 시 오른쪽 상단에 작게 표시 =====
+   자동 reload 안 함(상태 유지). 누르면 새로고침. OWNER 2026-06-26. */
+#update-pill {
+  position: fixed;
+  top: calc(0.5rem + env(safe-area-inset-top));
+  right: calc(0.8rem + env(safe-area-inset-right));
+  z-index: 70;
+  display: none;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.28rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent-btn) 60%, transparent);
+  background: var(--accent-btn);
+  color: var(--on-accent, #04140a);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.28);
+  cursor: pointer;
+  transition: background .15s ease, transform .15s ease;
+}
+#update-pill.show { display: inline-flex; }
+#update-pill:hover { background: var(--accent-btn-hover); transform: translateY(-1px); }
+#update-pill .update-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor;
+  animation: update-pulse 1.6s ease-in-out infinite;
+}
+@keyframes update-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* 아코디언(details) chevron — 열림 시 90° 회전(▶→▼ 방향 표시). group-open 유틸 미적용 대체(OWNER 2026-07-01). */
+details[open] > summary .acc-chevron { transform: rotate(90deg); }
+
+/* select 을 input 과 동일 높이·스타일로 — WKWebView(b3rys.app)의 네이티브 select 가 py 패딩을 무시해
+   세로로 짧게 렌더되던 것 방지(OWNER 2026-07-01, 웹은 정상·앱만 작던 문제). appearance 제거 + 커스텀 화살표. */
+select.dash-select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.7rem center;
+  background-size: 0.75rem;
+  padding-right: 2rem;
+}

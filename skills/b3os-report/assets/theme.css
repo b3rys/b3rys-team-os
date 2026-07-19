@@ -1,0 +1,29 @@
+/* b3os-report 표준 테마 — 아이폰 반응형 다크. 자체완결(외부 의존 0). */
+:root{ --bg:#0b0f14; --card:#141b24; --ink:#e6edf3; --mut:#9aa7b4; --line:#243140;
+       --green:#22c55e; --orange:#f97316; --red:#ef4444; --blue:#38bdf8; --y:#fbbf24; }
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+     font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Apple SD Gothic Neo",sans-serif;
+     -webkit-text-size-adjust:100%}
+.wrap{max-width:760px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:22px;margin:.2em 0 .1em;line-height:1.25}
+h2{font-size:18px;margin:1.6em 0 .5em;padding-top:.5em;border-top:1px solid var(--line)}
+h3{font-size:16px;margin:1.2em 0 .4em;color:var(--blue)}
+p{margin:.6em 0}
+.meta{color:var(--mut);font-size:13px}
+blockquote{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--y);
+     border-radius:10px;padding:12px 16px;margin:1em 0;color:var(--ink)}
+blockquote strong,blockquote b{color:var(--y)}
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin:.6em 0;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+th{background:#0e151d;color:var(--mut);font-weight:600}
+code{background:#0e151d;padding:1px 5px;border-radius:4px;font-size:13px;color:var(--blue);
+     font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre{background:#0e151d;border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto}
+pre code{background:none;padding:0;color:var(--ink)}
+ul,ol{margin:.4em 0 .7em;padding-left:1.3em} li{margin:.25em 0}
+hr{border:0;border-top:1px solid var(--line);margin:1.4em 0}
+a{color:var(--blue)}
+svg{width:100%;height:auto;display:block;margin:.4em 0}
+.small{font-size:12px;color:var(--mut)}
+strong,b{color:var(--ink)}

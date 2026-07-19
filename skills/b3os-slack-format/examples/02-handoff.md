@@ -1,0 +1,8 @@
+## [핸드오프] Slack restart 라우트 머지 + 재시작
+
+> settings.ts에 fresh 플래그만 머지하고 서버 재시작 부탁해 (de-naming 보존).
+
+- 머지 델타: restart 핸들러 안 body.fresh 읽어 restartAgent(..., fresh)로
+- 프론트는 내가 끝냄 — web 파일 재checkout/재빌드 하지 말 것 (dist 충돌)
+
+**완료기준**: 재시작 후 완전재시작 버튼 실동작 · **owner**: maintainer · **기한**: 다음 사이클

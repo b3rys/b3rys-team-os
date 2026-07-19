@@ -1,0 +1,3 @@
+[test]
+# 전 테스트 격리: audit 파일 로그를 temp로 리다이렉트(라이브 logs/ 오염 방지). 팀 하드레슨.
+preload = ["./src/test/audit-isolation.ts"]

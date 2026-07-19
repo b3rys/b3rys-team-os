@@ -1,0 +1,32 @@
+{
+  "name": "team-collab",
+  "version": "0.5.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --hot src/server/index.ts",
+    "dev:web": "vite",
+    "build": "vite build",
+    "start": "bun run src/server/index.ts",
+    "service": "bun run src/server/cli/service.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "date-fns": "^3.6.0",
+    "hono": "^4.6.18",
+    "nanoid": "^5.0.9",
+    "zod": "^3.23.8",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "autoprefixer": "^10.4.20",
+    "happy-dom": "^20.9.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11"
+  }
+}
