@@ -268,10 +268,14 @@ curl -s -X PUT http://localhost:$PORT/team/api/mission \
 
 ### 5-1. 런타임 추천 + 나열
 
-**기본은 `claude_channel`을 추천**하고, 고급 사용자가 원할 때만 BYO 런타임을 고르게 한다:
+**런타임은 "어떤 구독을 쓰는지"로 추천한다 — 먼저 물어본다("Claude 구독이세요, ChatGPT 구독이세요?"):**
 
-- **Claude Code에서 이 스킬을 실행 중이면 → `claude_channel` 추천** ("이미 쓰시는 Claude 로그인을 그대로
-  재사용해요 — 추가 구독 없이 바로 됩니다").
+- **Claude 구독자 → `claude_channel`** — 기존 Claude 로그인을 그대로 재사용(추가 구독·키 없이 바로). Claude Code에서 이 스킬을 실행 중이면 특히 매끄럽다.
+- **ChatGPT 구독자 → `hermes_agent` 또는 `openclaw`** — ChatGPT/Codex 구독을 **OAuth**로 재사용(API 키 아님). 둘 다 BYO 고급 런타임이라 CLI·인증을 먼저 갖춘다(`references/runtime-setup.md`; hermes 는 `hermes auth add openai-codex --type oauth`).
+- **모르거나 첫 팀원이면 → `claude_channel`** 이 가장 짧은 경로(AI가 설치·인증까지 몰아줄 수 있음).
+
+> ★인증은 항상 **구독(OAuth) 기본, API 키 아님**. 자동발견된 `*_API_KEY` 는 사용자가 명시적으로 원할 때만.★
+
 그리고 공개 표면의 목록을 보여준다:
 
 | # | runtime | 한 줄 설명 | 난이도 | 설치 주체 |

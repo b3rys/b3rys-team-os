@@ -2,7 +2,7 @@
 
 `openclaw`와 `hermes_agent`는 b3os가 대신 설치·로그인해 주는 기본 경로가 아니라, 사용자가 이미 갖고 있는 런타임을 b3os 팀원으로 연결하는 BYO(Bring Your Own, 사용자가 준비해 오는) 고급 경로입니다.
 
-먼저 `claude_channel`을 권장합니다. 그래도 OpenClaw 또는 Hermes를 고르면 아래 준비를 마친 뒤 영입/런타임 교체의 preflight를 다시 확인하세요.
+**런타임은 구독으로 고릅니다:** **Claude 구독 → `claude_channel`**(기존 Claude 로그인 재사용), **ChatGPT 구독 → `hermes_agent` 또는 `openclaw`**(ChatGPT/Codex 구독을 OAuth로 재사용). Claude 구독자라면 `claude_channel`이 가장 짧습니다. ChatGPT 구독자거나 BYO 고급 런타임을 원하면 아래 준비를 마친 뒤 영입/런타임 교체의 preflight를 다시 확인하세요.
 
 공통 원칙:
 - 명령은 b3os 서버가 실행되는 같은 컴퓨터에서 실행합니다.
