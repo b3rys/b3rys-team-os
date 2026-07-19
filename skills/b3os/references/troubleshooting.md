@@ -22,7 +22,7 @@ claude 순서:
 4. **2번째+ 팀원인데 무응답** — 첫 팀원 allowlist 승계가 안 된 것 → 그 팀원 봇 DM 의 6자리 페어링도 승인.
 5. **openclaw·hermes(BYO) 첫 팀원인데 무응답** — 이들은 claude 의 6자리코드/access.json 방식이 ★아니다★:
    - **openclaw**: 페어링 승인이 필요하다 → 대시보드 **[접근 승인]** 버튼(또는 `POST /team/api/ot/<ot_id>/pair-approve`; 상세는 `recruit.md` Step G). 승인 전 무응답은 정상. 승인했는데도 무응답이면 openclaw 게이트웨이 기동 여부 확인(`recruit.md` Step E activate 재실행).
-   - **hermes**: ★페어링 게이트가 없다★ — activate 성공 = 양방향 가능이므로, 무응답이면 페어링이 아니라 **activate/게이트웨이(hermes 프로필 봇) 기동**을 의심한다(`recruit.md` Step E, activate 재실행).
+   - **hermes**(v0.18): ★DM 페어링 게이트가 있다★ — activate 가 팀장 chat_id(`owner_chat_id`)를 게이트웨이 allowlist(`TELEGRAM_ALLOWED_USERS`)에 시드해 팀장은 코드 없이 통과한다. **팀장인데 페어링 코드가 오면** = owner_chat_id 미확보(시드 skip) → `owner_chat_id` 설정을 채우고 activate 재실행. **무응답(코드도 안 옴)이면** 페어링이 아니라 activate/게이트웨이 기동을 의심(`recruit.md` Step E). 팀장 외 사용자는 `hermes pairing approve <platform> <code>` 로 승인.
    - 공통: `pair-approve` 를 claude 에 쓰면 no-op(위 1번 참고) — 런타임을 먼저 확인하고 맞는 승인법을 쓴다.
 
 ## 1) 봇이 팀 대화방(그룹)에 들어왔는데 응답이 없어요

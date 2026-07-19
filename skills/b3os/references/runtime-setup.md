@@ -86,4 +86,4 @@ curl -s -X POST http://localhost:${PORT:-7878}/team/api/ot/<ot_id>/preflight-rec
 
 preflight가 통과하면 활성화 버튼이 열립니다. 합류 완료 후에는 Telegram에서 새 팀원 봇(`@<bot_username>`)에게 DM으로 “안녕”처럼 짧게 인사해 보세요. 답이 오면 연동 성공입니다.
 
-런타임별로 첫 응답 조건이 다릅니다: **hermes** 는 페어링 게이트가 없어 activate 성공 = 바로 답합니다. **openclaw** 는 먼저 페어링 승인이 필요합니다 — 대시보드 **[접근 승인]** 버튼(또는 `POST /team/api/ot/<ot_id>/pair-approve`)으로 승인해야 그때부터 답합니다(승인 전 무응답은 정상). 무응답이 계속되면 `troubleshooting.md` §0 의 런타임별 항목을 봅니다.
+런타임별로 첫 응답 조건이 다릅니다: **hermes**(v0.18) 는 ★DM 페어링 게이트가 있습니다★ — 단 b3os activate 가 팀장 chat_id(`owner_chat_id`)를 게이트웨이 allowlist(`TELEGRAM_ALLOWED_USERS`)에 자동 시드하므로 **팀장은 코드 없이 바로 답합니다**(팀장 chat_id 를 못 잡으면 팀장에게도 코드가 오니 `owner_chat_id` 를 채우고 재activate; 팀장 외 사용자는 `hermes pairing approve` 로 승인). **openclaw** 는 먼저 페어링 승인이 필요합니다 — 대시보드 **[접근 승인]** 버튼(또는 `POST /team/api/ot/<ot_id>/pair-approve`)으로 승인해야 그때부터 답합니다(승인 전 무응답은 정상). 무응답이 계속되면 `troubleshooting.md` §0 의 런타임별 항목을 봅니다.

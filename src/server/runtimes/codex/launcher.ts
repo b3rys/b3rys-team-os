@@ -57,6 +57,28 @@ export function resolveCodexAllowFrom(): string {
   return [resolveOwnerDmId(), getCaptureGroupId()].filter(Boolean).join(",");
 }
 
+/**
+ * owner_chat_id 설정이 비어 있고 도출 가능(claude access.json allowFrom / OWNER_CHAT_ID env)하면 team.db 에 persist.
+ * 대시보드 도움말("claude 첫 팀원 영입 시 자동 채워집니다")과 실제 동작을 일치시키고, hermes activate 등이
+ * 안정적인 설정값을 읽게 한다(도출은 시점 의존적). 이미 값이 있으면 건드리지 않는다. OWNER 2026-07-19.
+ * @returns persist 됐거나 이미 있던 owner_chat_id (없으면 null).
+ */
+export function persistOwnerChatIdIfEmpty(db: Database): string | null {
+  try {
+    const existing = (db.query("SELECT value FROM setting WHERE key = 'owner_chat_id'").get() as { value?: string } | null)?.value?.trim();
+    if (existing) return existing; // 이미 설정됨 — 자동저장이 사용자 입력을 덮지 않는다.
+    const derived = resolveOwnerDmId(); // 설정이 비었으므로 access.json/env 에서 도출
+    if (!derived) return null;
+    db.query(
+      "INSERT INTO setting (key, value, updated_at) VALUES ('owner_chat_id', ?, datetime('now')) " +
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
+    ).run(derived);
+    return derived;
+  } catch {
+    return null; // best-effort — 실패해도 부팅/영입 막지 않음
+  }
+}
+
 // launchd 라벨 prefix (agentControl.teamosLaunchdPrefix와 동일 규약 — 순환참조 피하려 인라인).
 function launchdPrefix(): string {
   const override = process.env.TEAMOS_LAUNCHD_PREFIX?.trim();

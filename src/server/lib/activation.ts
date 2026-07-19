@@ -17,7 +17,7 @@ import { memberPaths, MEMBERS_ROOT, personaTargetsForRuntime, assertNotLiveMembe
 import { writeMemberPersona, savePersonaFile } from "./writeMemberPersona";
 import { MANUALS_DIR } from "./paths";
 import { appendAuditFile } from "./auditFile";
-import { codexBridgePaths, placeCodexToken, writeCodexBridgeFiles, removeCodexBridgeFiles } from "../runtimes/codex/launcher";
+import { codexBridgePaths, placeCodexToken, writeCodexBridgeFiles, removeCodexBridgeFiles, resolveOwnerDmId } from "../runtimes/codex/launcher";
 import { placeClaudeToken, writeClaudeBridgeFiles, seedClaudeTrust, seedClaudeAccess, killClaudeTmux, claudeBridgePaths, installReplyGuardHook, installOutboundHook, installProgressHook, uninstallOutboundHook, uninstallReplyGuardHook, uninstallRecoveryHook, removeClaudeBridgeFiles } from "../runtimes/claude/launcher";
 import { isTier2Outbound, isTier2Shadow } from "../runtimes/claude/tier2Flag";
 import { setAgentEnabled, clearAgentOff } from "./agentControl";
@@ -235,10 +235,13 @@ function runtimeScript(id: string, runtime: string): { script: string; tokenFile
     };
   }
   if (runtime === "hermes_agent") {
+    // 팀장 chat_id 를 스크립트에 넘겨 게이트웨이 plist allowlist(TELEGRAM_ALLOWED_USERS)에 동적 주입 →
+    //   hermes v0.18 페어링 게이트를 팀장은 코드 없이 통과. 값은 설정(owner_chat_id)/도출 — 하드코딩 아님. 없으면 미주입. OWNER 2026-07-19.
+    const ownerDm = resolveOwnerDmId();
     return {
       script: `${MANUALS_DIR}/hermes/activate-hermes-agent.sh`,
       tokenFile: `${HOME}/.hermes/credentials/${id}-token.txt`,
-      env: { AGENT_ID: id, WS: ws },
+      env: { AGENT_ID: id, WS: ws, ...(ownerDm ? { OWNER_CHAT_ID: ownerDm } : {}) },
     };
   }
   return null; // claude_channel 은 별도 런타임 활성화 없음(CLAUDE.md + tmux/LaunchAgent)

@@ -40,7 +40,7 @@ curl -s -X POST http://localhost:7878/team/api/ot/<ot_id>/activate
   (그 머신의 모든 claude 봇 공유). 이미 첫 팀원 세팅으로 깔았으면 skip. 안 깔렸으면 `setup-claude-telegram-bot`
   스킬 또는 수동(`tmux attach -t claude-<id>` → `/plugin install telegram@claude-plugins-official` → user scope → `/reload-plugins`).
 - **페어링(사람)**: claude_channel = 봇에 첫 DM → 6자리 페어링 코드 승인. openclaw = 봇에 DM 후
-  `POST /team/api/ot/<ot_id>/pair-approve`. hermes = 페어링 게이트 없음(activate 성공 = 양방향).
+  `POST /team/api/ot/<ot_id>/pair-approve`. hermes(v0.18) = DM 페어링 게이트 있음 — activate가 팀장 chat_id(`owner_chat_id`)를 게이트웨이 allowlist(`TELEGRAM_ALLOWED_USERS`)에 시드해 팀장은 코드 없이 통과(팀장 외=`hermes pairing approve`).
 - 상세는 온보딩 스킬의 `recruit.md`와 동일 — 그 문서가 있으면 참조.
 - **preflight 재확인**: 로그인 직후 `POST /team/api/ot/<ot_id>/preflight-recheck` 로 blocked 회복.
 - **UI로도 가능**: `http://localhost:7878/team` ▸ **Settings** 영입 마법사(스테퍼)가 같은 단계를 화면에서 안내.

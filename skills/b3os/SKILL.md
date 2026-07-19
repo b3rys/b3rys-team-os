@@ -238,7 +238,7 @@ done
 3. **미션** (선택) — 팀의 한 줄 미션. **비우면 아래 기본값을 넣는다**(나중에 대시보드에서 편집 가능):
    > ★기본 미션: **우리 팀은 각 팀원의 전문성을 살려, 팀장의 과제와 프로젝트를 최고의 팀워크로 수행합니다.**★
 4. **팀장 이름** (필수, `owner_name`, ≤40자, 사람 이름) — 페르소나/미션의 `{{OWNER}}` 자리표시자를 채운다. 반드시 물어본다(사용자가 준 이름을 넣되, 예시로는 실명 대신 `Alex` 같은 제네릭을 보여준다). 예: `Alex`
-5. (선택) **팀장 텔레그램 chat_id**(`owner_chat_id`, 숫자) — 그룹 캡처·라우팅용. ★인바운드 DM 게이트는 런타임별로 다르다★(openclaw=pair-approve 페어링, hermes=인바운드 게이트 없음 — 아래 🔐 참조). owner_chat_id 자체가 openclaw/hermes DM을 막지는 않는다.
+5. (선택) **팀장 텔레그램 chat_id**(`owner_chat_id`, 숫자) — 그룹 캡처·라우팅용, 그리고 ★hermes DM 페어링 게이트 통과용 allowlist 시드값★. ★인바운드 DM 게이트는 런타임별로 다르다★(openclaw=pair-approve 페어링, hermes=DM 페어링 게이트 있음→activate가 owner_chat_id를 allowlist에 시드해 팀장은 통과 — 아래 🔐 참조). ★첫 claude 팀원 페어링 시 자동으로 채워진다.★
    - **claude_channel 은 이 값이 필요 없다** — claude 는 봇 DM 접근을 access.json 페어링(6자리 코드 승인)으로 관리한다(owner_chat_id 로 안 채워짐). claude 만 쓸 거면 생략.
    - **외부/BYO 런타임을 첫 팀원으로 영입할 땐** 이 값을 받아 넣는다. 팀장이 모르면 "텔레그램 @userinfobot 에게 DM하면 알려준다"고 안내.
 
@@ -294,8 +294,8 @@ curl -s -X PUT http://localhost:$PORT/team/api/mission \
 > 🔐 **발신자 게이트 — claude 와 외부/BYO 런타임은 다르다:**
 > - **claude_channel (기본축)**: 봇 DM 접근 허용은 access.json allowlist 로 관리된다. ★첫 claude 팀원은 봇 DM의 6자리 페어링 코드를 사람이 승인하는 게 **정상 경로**★ — 활성화로 봇이 뜨면 봇에 "안녕" → 봇이 6자리 코드로 응답 → 사람이 승인하면 이후 대화된다. 2번째부터의 claude 팀원은 첫 팀원의 allowlist(`allowFrom`)를 **자동 승계**(seedClaudeAccess가 기존 claude 멤버 access.json을 참조)해 페어링 없이 바로 대화된다. **완료 검증 = 봇 DM에 답(또는 6자리 코드)이 오는지**로 본다 — `owner_chat_id`로 검증하지 않는다(페어링은 access.json에 쓰고 owner_chat_id를 채우지 않는다).
 > - **openclaw**: 인바운드 DM 게이트 = ★pair-approve 페어링★(대시보드 [접근 승인]). 승인 전에는 응답 안 함 = 그게 게이트다. `owner_chat_id`가 openclaw DM을 막는 값이 아니다.
-> - **hermes**: ★인바운드 DM 발신자 게이트가 없다(현재 한계)★ — activate 성공하면 아무 사람의 DM에도 응답할 수 있다. `owner_chat_id`를 넣어도 hermes DM은 제한되지 않으니, 신뢰할 수 있는 환경이나 그룹 위주로 쓴다.
-> - **`owner_chat_id`(팀장 chat_id)**: 그룹 캡처·라우팅 등에 쓰는 값이며 ★openclaw/hermes 인바운드 DM을 막는 게이트가 아니다★(위 두 항목이 실제 게이트). claude 페어링(access.json)과도 별개다.
+> - **hermes**(v0.18): 인바운드 DM = ★텔레그램 페어링 게이트가 있다★(`hermes pairing`). 게이트웨이가 미승인 사용자에게 코드를 요구한다. b3os activate 가 ★팀장 chat_id(`owner_chat_id`)를 게이트웨이 allowlist(`TELEGRAM_ALLOWED_USERS`, plist EnvironmentVariables)에 동적 시드★하므로 **팀장은 코드 없이 바로 대화된다**. 팀장 외 사용자는 `hermes pairing approve <platform> <code>` 네이티브 페어링으로 승인. owner_chat_id 미확보면 시드 skip → 팀장도 수동 페어링 필요.
+> - **`owner_chat_id`(팀장 chat_id)**: 그룹 캡처·라우팅에 쓰며, ★hermes 는 이 값을 게이트웨이 allowlist 로 시드해 팀장 DM 을 연다★(openclaw 는 pair-approve 가 게이트라 owner_chat_id 로 열리지 않음). claude 페어링(access.json)과도 별개다. ★첫 claude 팀원 페어링 시 자동으로 채워진다(도출→persist).★
 
 ### 5-2. 런타임을 고른 순간 → 그 런타임만 인증 preflight
 

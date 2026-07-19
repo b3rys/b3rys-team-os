@@ -141,7 +141,7 @@ claude 봇이 텔레그램 메시지를 받으려면 telegram 플러그인이 **
   사용자가 봇에 DM 1번 → 대시보드 **[접근 승인]** 또는
   `POST /team/api/ot/<ot_id>/pair-approve` → 서버가 pending 요청을 읽어 executor로 승인(터미널 0).
 - **claude_channel** (★openclaw 와 승인법이 다르다★): 봇 DM 접근은 access.json allowlist. 첫 claude 팀원 = 봇에 첫 메시지 → 6자리 코드 응답 → 승인. ★승인법(항상 작동): **Claude Code 가 `~/.claude/channels/telegram-<id>/access.json` 의 `allowFrom` 에 본인 DM chat_id 를 추가하고 `dmPolicy` 를 `allowlist` 로** 바꾼다★(activate 가 출력하는 [F] 안내와 동일). `setup-claude-telegram-bot` 스킬이 있으면 `promote-pending.sh <id> <code>` 도 가능. ★`pair-approve`/대시보드 [접근 승인] 은 openclaw 전용이라 claude 엔 no-op(`skipped:true` 거짓성공)★ — claude 에 쓰면 안 된다. 2번째부터의 claude 팀원은 첫 팀원의 `allowFrom` 을 **자동 승계**(seedClaudeAccess = 기존 claude 멤버 access.json 참조)해 페어링 불필요(첫 멤버는 참조할 게 없어 `dmPolicy:pairing` 시드 = 수동 승인이 정상).
-- **hermes**: 별도 pairing 게이트 없음 — activate 성공 = 양방향 가능.
+- **hermes**(v0.18): ★텔레그램 DM 페어링 게이트가 있다★ — 게이트웨이가 미승인 사용자에게 페어링 코드를 요구한다. b3os activate 가 ★팀장 chat_id(설정 `owner_chat_id`/도출)를 게이트웨이 allowlist(`TELEGRAM_ALLOWED_USERS`, plist EnvironmentVariables)에 동적 시드★하므로 **팀장은 코드 없이 바로 대화 가능**. (팀장 외 사용자는 `hermes pairing approve <platform> <code>` 네이티브 페어링 필요.) owner_chat_id 미확보 시 시드 skip → 팀장도 수동 pairing 필요.
 
 > **페어링 코드 vs 민감 실행 승인 (헷갈리지 말 것)** — 둘은 별개다:
 > - **페어링 코드** — 위 claude_channel 영입에서 봇이 응답하는 **6자리 텔레그램 페어링 코드**. 봇에 말 걸
@@ -156,7 +156,7 @@ claude 봇이 텔레그램 메시지를 받으려면 telegram 플러그인이 **
 새 팀원 봇 `@<bot_username>`에게 텔레그램 DM으로 "안녕"처럼 짧게 인사한다. ★1:1 DM 은 라우터 ON/OFF 와 무관하다★(라우터는 그룹 ingress 전용):
 - **claude_channel 첫 팀원**: 답 대신 **6자리 페어링 코드**가 오는 게 정상 — 사람이 승인(Step G 방식)하면 그때부터 대화된다(이게 완료 신호). 2번째 팀원부터는 첫 팀원 allowlist 승계로 페어링 없이 바로 답한다.
 - **openclaw 첫 팀원**: ★곧바로 답이 안 오는 게 정상★ — 먼저 **pair-approve**(Step G, 대시보드 [접근 승인])로 승인해야 한다. 승인 후 "안녕"에 답이 오면 완료.
-- **hermes 첫 팀원**: 페어링 게이트가 없어 activate 성공 시 "안녕"에 바로 답이 온다 = 완료.
+- **hermes 첫 팀원**(v0.18): ★페어링 게이트가 있다★ — activate 가 팀장 chat_id 를 게이트웨이 allowlist 에 시드하므로 팀장은 "안녕"에 ★바로 답이 온다 = 완료★. (팀장 chat_id 를 못 잡았으면 팀장에게도 페어링 코드가 오니, `owner_chat_id` 설정을 채우고 재activate.)
 - 2번째+ 팀원(claude): 첫 팀원 allowlist 승계로 바로 답한다.
 - 그래도 안 오면 `troubleshooting.md` (완료 검증은 **봇 DM에 답/코드가 오는지**로 보고, `owner_chat_id` 로 보지 않는다).
 
@@ -176,7 +176,7 @@ claude 봇이 텔레그램 메시지를 받으려면 telegram 플러그인이 **
 |---|---|---|---|---|
 | `claude_channel` | 쉬움 | 로컬 Claude Code 세션 연결, tmux 봇. 기존 Claude 로그인 재사용(추가 구독 X) | telegram 플러그인 페어링 | claude CLI·tmux·플러그인(user scope) |
 | `openclaw` | 고급 | OpenClaw gateway/session | pair-approve 필요 | openclaw CLI + auth 시드·python3 |
-| `hermes_agent` | 고급 | Hermes 프로필 게이트웨이 | 없음 | hermes CLI + base 프로필·python3 |
+| `hermes_agent` | 고급 | Hermes 프로필 게이트웨이 | DM 페어링 게이트(팀장은 activate가 allowlist 자동시드→코드 불필요) | hermes CLI + base 프로필·python3 |
 
 > **추가 영입 시 런타임별 구독 재사용** — claude 팀원 여러 명 = 한 머신의 Claude 로그인 하나 공유(봇 토큰만 다름).
 > openclaw = 공유 게이트웨이(에이전트마다 pair-approve). hermes = 프로필별(base 프로필 b3ryshermes는 auth 소스라 퇴사 대상 아님).

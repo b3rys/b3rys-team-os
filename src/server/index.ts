@@ -53,6 +53,7 @@ import { ensureDailyTaskReviewJobs, ensureWeeklySelfLearningJob } from "./schedu
 import { renderAndRepoint } from "./lib/teamOsRender";
 import { installProgressHook } from "./runtimes/claude/launcher";
 import { writeMemberPersona } from "./lib/writeMemberPersona";
+import { persistOwnerChatIdIfEmpty } from "./runtimes/codex/launcher";
 import { createApprovalsApp } from "./routes/approvals";
 import { createPermissionGateRoutes } from "./routes/permissionGate";
 import { configureLeadActorDb } from "./lib/opAuth";
@@ -121,6 +122,12 @@ const stopHealth = startHealthCheck({ db, agents: () => agents });
 const stopProposalSweeper = startProposalSweeper(db);
 const stopScheduler = startSchedulerWorker(db);
 const stopFollowupWorker = startFollowupWorker(db, broadcast);
+// owner_chat_id 자동저장 — 비어 있고 claude access.json(페어링) 등에서 도출되면 team.db 에 persist.
+//   대시보드 도움말("claude 첫 팀원 영입 시 자동 채워집니다")과 실제 동작 일치 + hermes activate 가 안정 설정값을 읽게. OWNER 2026-07-19.
+try {
+  if (persistOwnerChatIdIfEmpty(db)) console.log("[owner-chat-id] 도출값 자동저장됨(설정 비어있던 상태)");
+} catch { /* best-effort */ }
+
 // {{OWNER}} 렌더본 부팅 시 갱신 + claude_channel 에이전트 심링크 재지정 (렌더본 누락 시 룰 깨짐 방지).
 try {
   const ownerRow = db.query("SELECT value FROM setting WHERE key = 'owner_name'").get() as { value: string } | null;

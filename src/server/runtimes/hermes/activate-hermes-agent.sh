@@ -137,6 +137,18 @@ echo "  agents.json: runtime=hermes_agent, hermes_profile=$AGENT_ID, status_prov
 echo "  (대시보드 영입으로 등록됐으면 persona/경로 자동 — hermes_profile 필드만 추가 필요할 수 있음)"
 
 say "■ 5) 게이트웨이 기동 (프로필별 독립 LaunchAgent — 재부팅 생존)"
+# ★팀장 텔레그램 chat_id 해석 — hermes v0.18 페어링 게이트를 팀장은 코드 없이 통과시키기 위해 게이트웨이
+#   plist EnvironmentVariables 의 TELEGRAM_ALLOWED_USERS 에 동적 주입한다(adapter.py os.getenv 로 읽음).
+#   ①activation.ts 가 넘긴 OWNER_CHAT_ID(설정 owner_chat_id/도출) ②수동 실행 폴백: team.db owner_chat_id 설정.
+#   ★하드코딩 금지 — 값은 항상 설정에서 동적으로.★ 없으면 미주입(팀장이 수동 pairing 필요).  OWNER 2026-07-19.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TEAM_DB="${TEAM_DB_PATH:-$SCRIPT_DIR/../../../../team.db}"
+if [ -z "${OWNER_CHAT_ID:-}" ] && command -v sqlite3 >/dev/null 2>&1 && [ -f "$TEAM_DB" ]; then
+  OWNER_CHAT_ID="$(sqlite3 "$TEAM_DB" "SELECT value FROM setting WHERE key='owner_chat_id'" 2>/dev/null || true)"
+fi
+OWNER_CHAT_ID="$(printf '%s' "${OWNER_CHAT_ID:-}" | tr -d '[:space:]')"
+export OWNER_CHAT_ID
+if [ -n "$OWNER_CHAT_ID" ]; then say "  팀장 chat_id 확보 — 게이트웨이 allowlist 에 시드(페어링 게이트 통과)"; else echo "  ⚠ owner_chat_id 미확보 — 게이트웨이 allowlist 시드 skip(팀장이 봇에 수동 pairing 필요)"; fi
 # durability(2026-07-01): seed 프로필($SRC_PROFILE) plist 템플릿에서 프로필명만 치환해 프로필별 LaunchAgent 생성+bootstrap.
 #   unmanaged `hermes gateway start`는 재부팅·크래시 시 사라져 restart/auto-heal 대상 밖 → LaunchAgent(RunAtLoad/KeepAlive)로 관리.
 #   템플릿은 seed 프로필의 plist 사용(라이브=b3ryshermes); 없으면 아래 unmanaged 폴백.
@@ -170,6 +182,15 @@ data["ProgramArguments"] = args
 data["ThrottleInterval"] = 30
 env = dict(data.get("EnvironmentVariables") or {})
 env["HERMES_HOME"] = os.path.expanduser(f"~/.hermes/profiles/{profile}")
+# 팀장 chat_id 를 게이트웨이 process env allowlist 에 병합 주입 → hermes v0.18 페어링 게이트를 팀장은 통과
+#   (telegram/adapter.py 가 os.getenv("TELEGRAM_ALLOWED_USERS") 로 읽음). 값=설정 owner_chat_id(동적, 하드코딩 아님).
+#   기존 항목 보존 + 중복 제거. 미설정(빈 값)이면 건드리지 않음(open 게이트웨이 그대로).
+owner = os.environ.get("OWNER_CHAT_ID", "").strip()
+if owner:
+    ids = [u.strip() for u in env.get("TELEGRAM_ALLOWED_USERS", "").split(",") if u.strip()]
+    if owner not in ids:
+        ids.append(owner)
+    env["TELEGRAM_ALLOWED_USERS"] = ",".join(ids)
 data["EnvironmentVariables"] = env
 data["StandardErrorPath"] = os.path.expanduser(f"~/.hermes/profiles/{profile}/logs/gateway.error.log")
 data["StandardOutPath"] = os.path.expanduser(f"~/.hermes/profiles/{profile}/logs/gateway.log")
@@ -184,10 +205,10 @@ PY
   fi
   launchctl bootstrap "gui/$(id -u)" "$HPLIST" 2>/dev/null \
     || launchctl kickstart -k "gui/$(id -u)/ai.hermes.gateway-$AGENT_ID" 2>/dev/null \
-    || { echo "  ⚠ LaunchAgent bootstrap 실패 — unmanaged 폴백"; HERMES_PROFILE="$AGENT_ID" hermes gateway start 2>&1 | tail -3; }
+    || { echo "  ⚠ LaunchAgent bootstrap 실패 — unmanaged 폴백"; HERMES_PROFILE="$AGENT_ID" ${OWNER_CHAT_ID:+TELEGRAM_ALLOWED_USERS=$OWNER_CHAT_ID} hermes gateway start 2>&1 | tail -3; }
   say "  ✅ LaunchAgent 생성+기동: ai.hermes.gateway-$AGENT_ID (재부팅 생존)"
 else
-  echo "  ⚠ seed($SRC_PROFILE) plist 템플릿 없음 — unmanaged 폴백"; HERMES_PROFILE="$AGENT_ID" hermes gateway start 2>&1 | tail -5 || echo "  ⚠ gateway start 확인 필요"
+  echo "  ⚠ seed($SRC_PROFILE) plist 템플릿 없음 — unmanaged 폴백"; HERMES_PROFILE="$AGENT_ID" ${OWNER_CHAT_ID:+TELEGRAM_ALLOWED_USERS=$OWNER_CHAT_ID} hermes gateway start 2>&1 | tail -5 || echo "  ⚠ gateway start 확인 필요"
 fi
 sleep 2
 STATUS_OUT="$(HERMES_PROFILE="$AGENT_ID" hermes gateway status 2>&1 || true)"
