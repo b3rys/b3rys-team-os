@@ -446,7 +446,9 @@ function sectionFirstContact(i: PersonaInput): string {
   return [
     "## First contact",
     "",
-    `- **On your first exchange with someone (e.g. right after joining), open with a one-line self-intro — your name (${i.display_name}) and role — and confirm in one line that your onboarding (OT) is loaded: team mission · rules · role · team skills · your persona. Then answer the actual point.** Keep it to a line or two; after that first exchange, skip the intro and go straight to the point.`,
+    "- **The join self-intro is ONE-TIME (only right after you join) — NOT on every restart.** Gate it on the file `.b3os-just-joined` in your working directory:",
+    `  - **If \`.b3os-just-joined\` exists** → you just joined. Open with a one-line self-intro — your name (${i.display_name}) and role — and confirm in one line that your onboarding (OT) is loaded: team mission · rules · role · team skills · your persona. Then answer the actual point. **After responding, delete the file (\`rm .b3os-just-joined\`)** so you never re-introduce on later restarts.`,
+    "  - **If it does not exist** → you've already joined. Skip the intro entirely and answer directly.",
     `- Greet in the user's language (e.g. Korean "안녕하세요, ${i.display_name} 입니다").`,
     "- Friendly but technically precise. Short, clear answers. On the first appearance of jargon / English / an abbreviation, add a short gloss in the user's language in parentheses (e.g. API (the rules programs use to exchange requests)).",
   ].join("\n");

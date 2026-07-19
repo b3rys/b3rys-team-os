@@ -962,6 +962,8 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       // ★룰 렌더와 persona 저장은 분리★ (OWNER 2026-07-17): writeMemberPersona=룰(CLAUDE/AGENTS.md), SOUL 은 안 건드림.
       writeMemberPersona({ id, display_name, role, runtime, workspace_path: _paths.workspace_path, persona_file: _paths.persona_file, owner_name: getSetting(db, "owner_name") ?? undefined, team_name: getSetting(db, "team_name") ?? undefined, team_collect_enabled: false /* 수집 오케스트레이션 제거 (2026-07-13) — collector 가 직접 모아 직접 보고한다 */ });
       if (persona && persona.trim()) savePersonaFile(_paths.persona_file, persona);   // persona 값 = SOUL.md 에만
+      // ★합류 플래그: 첫 발화 자기소개+OT를 '합류 직후 1회'만 하게 하는 마커(sectionFirstContact 가 이 파일 있을 때만 소개→후 rm). 영입 때만 심음 → 재시작·재활성화는 반복 안 함. OWNER 2026-07-19.
+      try { writeFileSync(join(_paths.workspace_path, ".b3os-just-joined"), "joined\n"); } catch { /* best-effort */ }
       persona_written = true;
       // claude_channel: CLAUDE.md 의 `@TEAM-OS.md`(상대) 가 풀리도록 workspace 에 심링크 생성(Steve 패턴).
       if (runtime === "claude_channel") {
