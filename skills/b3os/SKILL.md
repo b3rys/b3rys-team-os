@@ -226,11 +226,13 @@ done
 **영입을 열려면 팀명·팀장ID·팀장이름(owner_name) 세 가지가 먼저 있어야 한다** — 하나라도 없으면 recruit가 `setup_incomplete`(400, missing 맵에 빠진 필드 표시)으로 막힌다(하드 선행조건).
 "대시보드 가서 입력하세요"라고 넘기지 말고, **Claude가 채팅에서 직접 물어본다:**
 
-1. **팀명** (필수, ≤20자) — 예: "b3rys"
+> ★예시는 제네릭 자리표시자다 — 사용자에게 실제 값을 물어보되, 예시로 **사용자의 실명·실제 팀명 등 개인정보를 쓰지 마라**. 아래 예시(acme/owner 등)를 그대로 쓴다.★
+
+1. **팀명** (필수, ≤20자) — 예: "acme"
 2. **팀장 ID** (필수, `lead_id`) — 영문 slug(소문자/숫자/`-`/`_`, 1~40자). 멘션·라우팅에서 팀장을 가리키는 식별자. 예: `owner`
 3. **미션** (선택) — 팀의 한 줄 미션. **비우면 아래 기본값을 넣는다**(나중에 대시보드에서 편집 가능):
    > ★기본 미션: **우리 팀은 각 팀원의 전문성을 살려, 팀장의 과제와 프로젝트를 최고의 팀워크로 수행합니다.**★
-4. **팀장 이름** (필수, `owner_name`, ≤40자, 사람 이름) — 페르소나/미션의 `{{OWNER}}` 자리표시자를 채운다. 반드시 물어본다. 예: `OWNER`
+4. **팀장 이름** (필수, `owner_name`, ≤40자, 사람 이름) — 페르소나/미션의 `{{OWNER}}` 자리표시자를 채운다. 반드시 물어본다(사용자가 준 이름을 넣되, 예시로는 실명 대신 `Alex` 같은 제네릭을 보여준다). 예: `Alex`
 5. (선택) **팀장 텔레그램 chat_id**(`owner_chat_id`, 숫자) — 그룹 캡처·라우팅용. ★인바운드 DM 게이트는 런타임별로 다르다★(openclaw=pair-approve 페어링, hermes=인바운드 게이트 없음 — 아래 🔐 참조). owner_chat_id 자체가 openclaw/hermes DM을 막지는 않는다.
    - **claude_channel 은 이 값이 필요 없다** — claude 는 봇 DM 접근을 access.json 페어링(6자리 코드 승인)으로 관리한다(owner_chat_id 로 안 채워짐). claude 만 쓸 거면 생략.
    - **외부/BYO 런타임을 첫 팀원으로 영입할 땐** 이 값을 받아 넣는다. 팀장이 모르면 "텔레그램 @userinfobot 에게 DM하면 알려준다"고 안내.
@@ -241,10 +243,10 @@ done
 # ① 팀명 + 팀장ID (owner_name·owner_chat_id는 선택)
 curl -s -X PUT http://localhost:$PORT/team/api/settings \
   -H 'content-type: application/json' \
-  -d '{"team_name":"b3rys","lead_id":"owner","owner_name":"OWNER"}'
+  -d '{"team_name":"acme","lead_id":"owner","owner_name":"Alex"}'
 #   응답에 "setup_complete": true 면 영입 가능 — 팀명·팀장ID·팀장이름 셋 다 채워져야 true. (team_name>20자·lead_id 형식오류면 400)
 #   외부/BYO 런타임을 첫 팀원으로 영입할 거면 owner_chat_id도 같이. claude 는 access.json 페어링으로 접근을 관리하므로 owner_chat_id 불필요(생략):
-#   -d '{"team_name":"b3rys","lead_id":"owner","owner_name":"OWNER","owner_chat_id":"EXAMPLE_TELEGRAM_BOT_ID"}'  # 숫자만, 빈값 허용
+#   -d '{"team_name":"acme","lead_id":"owner","owner_name":"Alex","owner_chat_id":"123456789"}'  # 숫자만, 빈값 허용
 
 # ② 미션 — 사용자가 준 값, 비었으면 기본 미션 문자열을 넣는다
 curl -s -X PUT http://localhost:$PORT/team/api/mission \
