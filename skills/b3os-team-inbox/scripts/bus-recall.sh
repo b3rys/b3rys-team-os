@@ -9,8 +9,8 @@
 # 사용:
 #   bus-recall.sh                      # 내가 최근 관여한 버스 맥락 (from/to=나) + 내 OWNER 1:1
 #   bus-recall.sh --about "맛집"        # '맛집' 관련 버스 메시지 (누가 뭐 했나)
-#   bus-recall.sh --with codex         # 나와 codex 사이 최근 오간 것
-#   bus-recall.sh --from-owner codex      # OWNER가 codex에게 최근 뭐 했나(1:1 dm + 버스)
+#   bus-recall.sh --with devon         # 나와 devon 사이 최근 오간 것
+#   bus-recall.sh --from-owner devon      # OWNER가 devon에게 최근 뭐 했나(1:1 dm + 버스)
 #   [--limit N] (기본 8)
 
 set -euo pipefail

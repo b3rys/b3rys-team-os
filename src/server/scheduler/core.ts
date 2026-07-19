@@ -71,7 +71,21 @@ export const WEEKLY_SELF_LEARNING_BODY = [
 
 export const DAILY_TASK_REVIEW_PING_JOB_ID = "sched_task_review_ping";
 export const DAILY_TASK_REVIEW_SUMMARY_JOB_ID = "sched_task_review_summary";
-export const DAILY_TASK_REVIEW_TIMEZONE = process.env.B3OS_SCHEDULER_TIMEZONE ?? "Asia/Seoul";
+// cron 엔진은 ★고정오프셋 존만★ 지원한다(DST 존은 nextCronRun 이 throw). 잘못된/DST env 로 부팅이
+// 크래시하지 않도록, 정의 시점에 한 번 probe 해서 실패하면 경고 후 Asia/Seoul 로 폴백한다. (OWNER 0719: README 예시가 크래시 유발)
+function validateSchedulerTimezone(tz: string | undefined): string {
+  if (!tz) return "Asia/Seoul";
+  try {
+    nextCronRun("0 6 * * *", new Date(0), { timezone: tz }); // 고정오프셋 아니면 throw
+    return tz;
+  } catch {
+    console.warn(
+      `[scheduler] B3OS_SCHEDULER_TIMEZONE="${tz}" 미지원(고정오프셋 존만 지원 · DST 존 불가) → Asia/Seoul 폴백`,
+    );
+    return "Asia/Seoul";
+  }
+}
+export const DAILY_TASK_REVIEW_TIMEZONE = validateSchedulerTimezone(process.env.B3OS_SCHEDULER_TIMEZONE);
 
 /**
  * Allowlist of ops scripts the scheduler may run. Keyed by a stable id stored in the

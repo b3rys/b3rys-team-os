@@ -94,7 +94,7 @@ export interface VerifiedClosureResult {
  *
  * ★semantics(Bill 리뷰 #2, W1 확정 대기)★: closed = ★task.closed "이벤트" raw count★(per-event).
  *   close→reopen→close면 task.closed 2건 → closed=2. "닫힌 카드 수"(per-card)와 다를 수 있음.
- *   W1은 raw event count로 둔다(문서화). per-card 집계·재close 인플레 보정은 후속(GD와 semantics 확정 시).
+ *   W1은 raw event count로 둔다(문서화). per-card 집계·재close 인플레 보정은 후속(OWNER와 semantics 확정 시).
  */
 export function verifiedClosure(events: LoopEvent[]): VerifiedClosureResult {
   const closed = by(events, EVENT.task_closed);

@@ -35,7 +35,7 @@ bun run build
 if [ ! -f .env ]; then
   cp .env.example .env
   say "✅ .env 생성 (.env.example 복사) — 기본값으로 대시보드는 바로 동작."
-  warn "  텔레그램 다중 에이전트까지 쓰려면 .env 에 채우세요: TEAM_GROUP_ID · OWNER_CHAT_ID · 각 봇 토큰(BotFather)."
+  say "  텔레그램 봇·팀장 chat_id·그룹 연결은 ★대시보드 Settings★에서 안내에 따라 넣으면 됩니다(수동 .env 편집 불필요). 봇 토큰은 BotFather에서 사람이 발급."
 else
   say "✅ .env 이미 있음 — 유지."
 fi
@@ -78,7 +78,7 @@ bun run typecheck >/dev/null 2>&1 && say "✅ typecheck OK" || warn "⚠ typeche
 echo ""
 say "■ 설치 완료! 실행:"
 echo "    bun run start                 # 서버 기동 (DB 자동 생성)"
-echo "    → 브라우저: http://localhost:7878/team"
+echo "    → 브라우저: http://localhost:${TEAM_HTTP_PORT:-7878}/team   # 포트 바꿨으면 그 포트(.env TEAM_HTTP_PORT)"
 echo "    → 상단 'Settings' 탭에서 팀명·미션·팀원(영입) 설정"
 echo ""
 echo "  개발 모드(코드 수정 핫리로드):  bun run dev"

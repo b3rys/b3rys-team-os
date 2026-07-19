@@ -5,7 +5,7 @@
 
 > **★ 포트 ($PORT)** — 아래 모든 `localhost:$PORT` 는 `.env` 의 `TEAM_HTTP_PORT`(기본 **7878**)를 뜻한다. curl 을 실행하기 전에 한 셸에서 실포트를 한 번 잡고, 그 셸에서 이어 실행한다(새 셸이면 이 줄을 다시):
 > ```bash
-> PORT=$(grep '^TEAM_HTTP_PORT=' "$B3OS/.env" 2>/dev/null | cut -d= -f2); PORT=${PORT:-7878}
+> PORT=$(grep '^TEAM_HTTP_PORT=' "${B3OS:-$HOME/b3rys-team-os}/.env" 2>/dev/null | cut -d= -f2); PORT=${PORT:-7878}   # 커스텀 설치 위치면 B3OS 를 먼저 export
 > ```
 
 > API base = `http://localhost:$PORT/team/api` (대시보드 `app`는 `/team`, 그 아래 REST는 `/api`).
@@ -121,9 +121,10 @@ curl -s -X POST http://localhost:$PORT/team/api/ot/<ot_id>/activate
 claude 봇이 텔레그램 메시지를 받으려면 telegram 플러그인이 **user scope로 한 번** 설치돼 있어야 한다
 (그 머신의 모든 Claude 봇이 공유). 이미 다른 Claude 봇 세팅으로 설치했으면 건너뛴다.
 
-- **가장 쉬운 길**: `setup-claude-telegram-bot` 스킬이 이 플러그인 설치를 자동 처리한다. 그 스킬이 있으면
-  거기에 맡기고, 없으면 아래 수동 설치.
-- **수동**: 활성화(Step E)로 뜬 tmux 세션 `claude-<id>` 안에서:
+> ★비개발 사용자도 tmux 를 직접 만지지 않는다 — 아래 명령은 **Claude Code(b3os 스킬)가 사용자 대신 실행**한다.★ 사용자는 지켜만 보면 된다.
+
+- **가장 쉬운 길**: `setup-claude-telegram-bot` 스킬이 있으면 Claude 가 거기에 맡겨 자동 설치한다.
+- **그 스킬이 없으면(공개 릴리스 기본)**: Claude 가 아래를 대신 실행한다 — 활성화(Step E)로 뜬 tmux 세션 `claude-<id>` 안에서:
   ```bash
   tmux attach -t claude-<id>
   # 세션 안에서:
@@ -152,7 +153,9 @@ claude 봇이 텔레그램 메시지를 받으려면 telegram 플러그인이 **
 
 새 팀원 봇 `@<bot_username>`에게 텔레그램 DM으로 "안녕"처럼 짧게 인사한다. ★1:1 DM 은 라우터 ON/OFF 와 무관하다★(라우터는 그룹 ingress 전용):
 - **claude_channel 첫 팀원**: 답 대신 **6자리 페어링 코드**가 오는 게 정상 — 사람이 승인(Step G 방식)하면 그때부터 대화된다(이게 완료 신호). 2번째 팀원부터는 첫 팀원 allowlist 승계로 페어링 없이 바로 답한다.
-- 그 외/2번째+: "안녕"에 곧바로 답이 오면 연동 성공.
+- **openclaw 첫 팀원**: ★곧바로 답이 안 오는 게 정상★ — 먼저 **pair-approve**(Step G, 대시보드 [접근 승인])로 승인해야 한다. 승인 후 "안녕"에 답이 오면 완료.
+- **hermes 첫 팀원**: 페어링 게이트가 없어 activate 성공 시 "안녕"에 바로 답이 온다 = 완료.
+- 2번째+ 팀원(claude): 첫 팀원 allowlist 승계로 바로 답한다.
 - 그래도 안 오면 `troubleshooting.md` (완료 검증은 **봇 DM에 답/코드가 오는지**로 보고, `owner_chat_id` 로 보지 않는다).
 
 > **(선택) 라우터 ON 은 그룹(팀방) 협업용** — 여러 팀원을 한 텔레그램 그룹에 모아 System OP 봇으로 라우팅할 때만 켠다. **1:1 DM 검증엔 필요 없다.** 그룹 셋업 상세는 SKILL 의 "System OP 봇" 절 참고.

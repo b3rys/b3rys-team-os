@@ -266,7 +266,7 @@ export function applyCollectMode(rendered: string, _runtime?: string): string {
 const CORE_RULE_COMPACT = [
   "## ⭐ Core Rules",
   "",
-  "> ⏰ **Show every time to the team lead in KST (Asia/Seoul).** Logs/DB are UTC; convert (+9h, including the minutes) before showing.",
+  "> ⏰ **Show every time to the team lead in the team lead's LOCAL timezone — the machine's, from `date +%z` — never UTC.** Logs/DB are UTC; convert by that offset's hours AND minutes before showing (e.g. +0900 Korea, +0530 India, -0500 US East).",
   "",
   "**Team**: {{TEAM}} · **Team lead**: {{OWNER}} — referred to below as 'the team' / 'the team lead'.",
   "",

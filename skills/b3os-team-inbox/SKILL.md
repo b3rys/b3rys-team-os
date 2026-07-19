@@ -64,7 +64,7 @@ skills/b3os-team-inbox/scripts/send.sh \
 
 ```bash
 skills/b3os-team-inbox/scripts/send.sh \
-  --to codex \
+  --to devon \
   --body "OpenClaw 중간 개입 테스트 결과를 OWNER님께 직접 보고해주세요." \
   --direct-to-owner \
   --source-thread tg--EXAMPLE_TELEGRAM_GROUP_ID
@@ -120,7 +120,7 @@ skills/b3os-team-inbox/scripts/send.sh --to steve --thread "$TH" \
 skills/b3os-team-inbox/scripts/send.sh --to dbak  --thread "$TH" \
   --body "제주 표선 맛집 조사해서 한 줄로 알려줘"
 
-# → steve·dbak 답이 ★각각★ codex 를 깨운다 → 마지막 답이 오면 codex 가 종합해 1회 보고
+# → steve·dbak 답이 ★각각★ devon 을 깨운다 → 마지막 답이 오면 devon 이 종합해 1회 보고
 ```
 
 > ⚠️ 옵션은 **`--thread <값>`** 형식이다. **`--thread=<값>` (등호) 는 `unknown arg` 로 실패한다.**
@@ -136,8 +136,8 @@ skills/b3os-team-inbox/scripts/ack.sh <message_id>
 ```bash
 skills/b3os-team-inbox/scripts/bus-recall.sh                    # 내가 최근 관여한 버스 맥락 + 내 OWNER 1:1
 skills/b3os-team-inbox/scripts/bus-recall.sh --about "맛집"      # 특정 주제 관련(누가 뭐 했나)
-skills/b3os-team-inbox/scripts/bus-recall.sh --with codex        # 나와 codex 사이 오간 것
-skills/b3os-team-inbox/scripts/bus-recall.sh --from-owner codex     # OWNER가 codex에게 최근 뭐 시켰나
+skills/b3os-team-inbox/scripts/bus-recall.sh --with devon        # 나와 devon 사이 오간 것
+skills/b3os-team-inbox/scripts/bus-recall.sh --from-owner devon     # OWNER가 devon에게 최근 뭐 시켰나
 # hermes/openclaw 세션은 자기 id 자동감지 안 되니 --me 명시:
 skills/b3os-team-inbox/scripts/bus-recall.sh --me ames --with bill
 ```

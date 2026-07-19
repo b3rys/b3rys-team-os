@@ -11,7 +11,7 @@ import {
 } from "../../lib/permissionGate";
 
 /**
- * ★관리자 설정 = 명시적 grant★ — GD가 agents.json(codex_sandbox / codex_network_access)에서 이 에이전트에
+ * ★관리자 설정 = 명시적 grant★ — OWNER가 agents.json(codex_sandbox / codex_network_access)에서 이 에이전트에
  * 부여한 sandbox/network를 permissionGate 가 인식하는 grant 집합으로 변환한다. 런타임 launch(브릿지/어댑터)가
  * 이 grants 를 permissionContext 에 실어야 preflight 가 통과한다(미주입 시 tier-a "ask"로 매 턴 차단 → 구조적 실행불가).
  * grant scope 는 askRule 이 만드는 것과 ★정확히 동일★해야 매칭된다: sandbox=`workspace-write:${root}`, network=`net:*`.

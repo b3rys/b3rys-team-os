@@ -21,7 +21,7 @@
 # ① 영입 등록 → ot_id 받기 (runtime = 기본 claude_channel, 고급 BYO: openclaw / hermes_agent)
 curl -s -X POST http://localhost:7878/team/api/members/recruit \
   -H 'content-type: application/json' \
-  -d '{"id":"steve","display_name":"Steve","role":"풀스택","runtime":"claude_channel"}'
+  -d '{"id":"alex","display_name":"Alex","role":"풀스택","runtime":"claude_channel"}'
 #   → {ok, ot_id, member, persona_file}. 이 ot_id 를 이후 단계에 쓴다. 중복 id=409, 잘못된 runtime=400.
 
 # ── 사람: BotFather(@BotFather → /newbot)로 봇 만들고 토큰 받기 → 팀장이 입력 ──
@@ -62,7 +62,7 @@ curl -s -X POST http://localhost:7878/team/api/ot/<ot_id>/activate
 # ② 실제 교체 — confirm_name은 display_name과 정확히 일치해야 한다(퇴사와 동일한 오발 방지 안전장치).
 curl -s -X POST http://localhost:7878/team/api/members/<id>/swap-runtime \
   -H 'content-type: application/json' \
-  -d '{"target_runtime":"hermes_agent","confirm_name":"Steve"}'
+  -d '{"target_runtime":"hermes_agent","confirm_name":"Alex"}'
 #   bot_token 생략 시 var/secrets/<id>.bot-token(퇴사해도 안 지워지는 토큰 파일)을 서버가 재사용한다.
 #   응답 = {ok, steps:[{step,ok,detail}, ...], error?, code?}. steps를 순서대로 사람에게 보여주면 진행상황이 된다.
 ```
@@ -94,7 +94,7 @@ curl -s -X POST http://localhost:7878/team/api/members/<id>/swap-runtime \
   서버가 **자동으로**: registry를 old runtime으로 되돌리고, `.swap-bak/`의 옛 persona를 복원한 뒤, old
   runtime으로 `activate`를 재시도(best-effort self-heal)한다. self-heal 성패와 무관하게 `ok:false` +
   `steps`에 각 단계 결과가 남으므로, **응답의 steps를 그대로 사람에게 보여주면 어디서 막혔는지 안다.**
-  self-heal도 실패하면 팀원이 양쪽 다 죽은 상태 — GD에게 명확히 알리고 수동 개입을 요청한다.
+  self-heal도 실패하면 팀원이 양쪽 다 죽은 상태 — OWNER에게 명확히 알리고 수동 개입을 요청한다.
 
 ### 알아둘 것
 
@@ -117,7 +117,7 @@ curl -s -X POST http://localhost:7878/team/api/members/<id>/swap-runtime \
 ```bash
 # confirm_name 은 display_name 과 정확히 일치해야 진행(오발 방지). runtime cleanup(봇 정지·토큰·plist·workspace archive) 자동.
 curl -s -X DELETE http://localhost:7878/team/api/members/<id> \
-  -H 'content-type: application/json' -d '{"confirm_name":"Steve"}'
+  -H 'content-type: application/json' -d '{"confirm_name":"Alex"}'
 ```
 - 마지막 1명은 못 지운다(`cannot_remove_last_member`). base hermes 프로필(`b3ryshermes`)은 퇴사 대상 아님(auth 소스).
 - 퇴사 = 봇·tmux/게이트웨이·슬랙 완전 disconnect + workspace는 삭제가 아니라 `.archived/<id>-<ts>`로 보관.

@@ -1,5 +1,11 @@
 # 트러블슈팅
 
+> **★ 변수 먼저** — 아래 명령의 `$B3OS`(clone 한 저장소 경로)와 `$PORT`(`.env` 의 `TEAM_HTTP_PORT`, 기본 7878)는 셸에서 먼저 잡는다. 새 셸이면 다시 실행:
+> ```bash
+> B3OS=~/b3rys-team-os   # ← clone 위치로(기본 디렉토리명)
+> PORT=$(grep '^TEAM_HTTP_PORT=' "$B3OS/.env" 2>/dev/null | cut -d= -f2); PORT=${PORT:-7878}
+> ```
+
 막히면 아래를 **순서대로** 확인·조치한다. 봇 무응답의 원인은 경로에 따라 다르다 — **1:1 DM = 페어링 승인/플러그인/poller** (라우터 무관), **그룹 = 라우터/capture/플러그인**. 먼저 어느 경로인지 가른다.
 
 ## 0) 첫 팀원 1:1 DM 봇이 6자리 코드만 보내거나 응답이 없어요 (런타임별)
@@ -76,4 +82,5 @@ claude 순서:
 - **대시보드가 안 뜸(`/health` 무응답)** — 서버가 안 떠 있거나 포트 충돌. `bun run start` 로그 확인.
   포트 변경은 `TEAM_HTTP_PORT` env(기본 7878).
 - **저장소 clone 실패** — 네트워크/깃 설치 확인(`command -v git`). URL = `https://github.com/b3rys/b3rys-team-os.git`.
-- 더 깊은 문제는 clone한 저장소의 `README.md` 하단 트러블슈팅과 `docs/` 를 참고.
+- **설치/빌드 실패(`install.sh` 또는 `bun run build` 중단)** — 대개 `bun` 미설치/구버전 또는 의존성 문제. `bun --version`(없으면 위 "bun 없음" 항목) → `bun install` 재실행 → `bun run build` 순으로 확인한다. 로그 마지막 에러 줄이 원인을 가리킨다.
+- 위로 안 풀리면 — 서버 로그(`bun run start` 출력)와 이 문서 위 항목들을 다시 확인하고, 재현되면 GitHub Issues(`github.com/b3rys/b3rys-team-os/issues`)에 로그와 함께 올린다.

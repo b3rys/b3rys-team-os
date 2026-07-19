@@ -322,7 +322,7 @@ function formatPmFollowups(
 /** op방(운영) 타겟 chat_id — ★단일 소스: setting `owner_chat_id`(팀장 텔레그램 chat_id) 동적 읽기★.
  *  우선순위: env override(TASK_REVIEW_SUMMARY_CHAT_ID) → setting(owner_chat_id, 동적) → 팀그룹 폴백 → undefined.
  *  ★퍼블릭: op 미셋업이면 owner_chat_id 비어있음→(팀그룹도 없으면)undefined→graceful skip★. op(팀장 DM) 나중
- *  셋업되면 owner_chat_id가 채워져 다음 실행이 자동으로 op방으로 라우팅(재시작·재배선 불필요 = GD가 원한 자동추가). */
+ *  셋업되면 owner_chat_id가 채워져 다음 실행이 자동으로 op방으로 라우팅(재시작·재배선 불필요 = OWNER가 원한 자동추가). */
 async function opTargetChatId(): Promise<string | undefined> {
   if (process.env.TASK_REVIEW_SUMMARY_CHAT_ID) return process.env.TASK_REVIEW_SUMMARY_CHAT_ID;
   try {

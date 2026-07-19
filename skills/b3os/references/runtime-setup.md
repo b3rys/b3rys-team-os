@@ -81,7 +81,9 @@ b3os preflight가 보는 조건:
 준비가 끝나면 대시보드 Settings의 OT 패널에서 `다시 확인`을 누르거나, API를 쓰는 경우 아래를 호출합니다.
 
 ```bash
-curl -s -X POST http://localhost:7878/team/api/ot/<ot_id>/preflight-recheck
+curl -s -X POST http://localhost:${PORT:-7878}/team/api/ot/<ot_id>/preflight-recheck   # 포트 바꿨으면 TEAM_HTTP_PORT 값
 ```
 
 preflight가 통과하면 활성화 버튼이 열립니다. 합류 완료 후에는 Telegram에서 새 팀원 봇(`@<bot_username>`)에게 DM으로 “안녕”처럼 짧게 인사해 보세요. 답이 오면 연동 성공입니다.
+
+런타임별로 첫 응답 조건이 다릅니다: **hermes** 는 페어링 게이트가 없어 activate 성공 = 바로 답합니다. **openclaw** 는 먼저 페어링 승인이 필요합니다 — 대시보드 **[접근 승인]** 버튼(또는 `POST /team/api/ot/<ot_id>/pair-approve`)으로 승인해야 그때부터 답합니다(승인 전 무응답은 정상). 무응답이 계속되면 `troubleshooting.md` §0 의 런타임별 항목을 봅니다.
