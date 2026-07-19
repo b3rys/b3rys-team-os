@@ -296,6 +296,8 @@ curl -s -X PUT http://localhost:$PORT/team/api/mission \
 
 **구독을 미리 캐묻지 않는다.** 고른 런타임의 CLI·로그인만 그때 확인한다.
 
+> **★인증은 "구독 모델"(OAuth)이 기본 — API 키가 아니다.★** claude/openclaw/hermes 모두 **이미 쓰는 구독을 OAuth 로그인으로 재사용**하는 게 기본 경로다(claude_channel 을 권한 이유와 동일). 어떤 구독으로 붙일지는 **사용자에게 물어본다**("Claude / ChatGPT / … 중 어느 구독?"). 환경에 `OPENAI_API_KEY` 같은 키가 이미 있어도, 사용자가 API 키를 원한다고 하지 않았으면 **구독(OAuth)으로 안내**하고 자동발견된 API 키 항목은 쓰지 않는다. API 키 방식은 **사용자가 명시적으로 원할 때만**의 예외 경로다. (BYO 런타임 인증 상세 = `references/runtime-setup.md`)
+
 - **`claude_channel` (쉬움, 대개 이미 로그인됨)**
   ```bash
   command -v claude >/dev/null || npm install -g @anthropic-ai/claude-code
