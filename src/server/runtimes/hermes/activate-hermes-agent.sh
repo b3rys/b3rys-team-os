@@ -227,6 +227,13 @@ if owner:
     if owner not in ids:
         ids.append(owner)
     env["TELEGRAM_ALLOWED_USERS"] = ",".join(ids)
+# ★그룹 무차별응답 차단(OWNER 2026-07-20)★: hermes 게이트웨이가 팀방에 직접 붙어 '모든' 그룹 메시지에
+#   응답하던 문제 수정. 원인 = telegram/adapter.py 의 require_mention 기본값 false(멘션 없이도 응답).
+#   위 owner-DM-only 설계(220~223줄)와 한 쌍 — 그룹 협업은 System OP capture(owner-gate) 경로로만
+#   도달해야 하므로 이 게이트웨이는 명시적 지목(@멘션/답장) 시에만 응답한다. OBSERVE_UNMENTIONED=true 로
+#   방 대화 맥락은 계속 관찰(응답만 억제). adapter.py 가 os.getenv 로 읽는다(config.extra 미설정 시 폴백).
+env.setdefault("TELEGRAM_REQUIRE_MENTION", "true")
+env.setdefault("TELEGRAM_OBSERVE_UNMENTIONED_GROUP_MESSAGES", "true")
 data["EnvironmentVariables"] = env
 data["StandardErrorPath"] = os.path.expanduser(f"~/.hermes/profiles/{profile}/logs/gateway.error.log")
 data["StandardOutPath"] = os.path.expanduser(f"~/.hermes/profiles/{profile}/logs/gateway.log")
