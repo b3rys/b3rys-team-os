@@ -21,7 +21,7 @@ import { storeTelegramMedia, type StoredMedia, type TelegramMediaRef } from "../
 import { BODY_MAX_CHARS, buildDedupeKey } from "../../shared/envelopeSchema";
 import { getCaptureToken, isRouterEnabled, getCaptureGroupId, getLocale } from "../lib/captureConfig";
 import { pick, type Locale } from "../lib/i18n";
-import { rememberCaptureNonBotSender } from "../lib/telegramLeadDetection";
+import { rememberCaptureNonBotSender, rememberDiscoveredGroup } from "../lib/telegramLeadDetection";
 import { decidePermissionRequest, getPermissionRequest, listPermissionRequests } from "../lib/permissionGate";
 
 // 승인 시스템 v2(OWNER 2026-07-08) — 신청자 알림 문구(순수·i18n). 승인/거절/보류 3종, 결정 승인자 명시 →
@@ -1220,6 +1220,12 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
           const isGroupMsg = GROUP_ID !== "" && msgChatId === GROUP_ID;
           // op 봇 방(OWNER 1:1 DM)에서 운영 슬래시 메뉴 허용(OWNER 2026-07-06). fail-closed: non-bot + private + chat.id===from.id(1:1) + allowlist(=OWNER).
           const isOwnerDm = !msg.from?.is_bot && msg.chat?.type === "private" && msgChatId === fromIdMsg && fromIdMsg !== "" && approvalAllowedIds().includes(fromIdMsg);
+          // ★첫 세팅 그룹 자동발견★ — 아직 그룹이 설정되지 않았는데(shadow) 그룹 메시지를 봤다면 그 chat 을
+          //   기록해 둔다. 그래야 detect-group 이 (getUpdates 경합 없이) 그룹 chat_id 를 꺼내 System OP 를
+          //   구성할 수 있다. 기록만 하고 ingest/injection 은 하지 않는다(그룹 미설정이므로).
+          if (GROUP_ID === "" && !msg.from?.is_bot) {
+            try { rememberDiscoveredGroup(deps.db, msg.chat, new Date().toISOString()); } catch { /* best-effort */ }
+          }
           if (!isGroupMsg && !isOwnerDm) continue;
           const msgId = msg.message_id != null ? String(msg.message_id) : undefined;
           if (msg.from?.is_bot) {

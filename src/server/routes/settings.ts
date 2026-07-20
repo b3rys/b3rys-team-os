@@ -52,7 +52,7 @@ import { hasCapability } from "../lib/capabilities";
 import { getNormalApprovers } from "../lib/approvals";
 import { hasSlackTokenFile, loadAgentCreds, saveAgentCreds, removeAgentCreds, slackTokensDir, postMessage } from "../lib/slack";
 import { renderAndRepoint, TEAM_OS_TEMPLATE_PATH, LIVE_TEAM_OS_PATH } from "../lib/teamOsRender";
-import { latestCaptureNonBotSender } from "../lib/telegramLeadDetection";
+import { latestCaptureNonBotSender, listDiscoveredGroups } from "../lib/telegramLeadDetection";
 
 // Phase1 리팩터: removePathWithRetries 구현은 activation.ts로 이관(teardownRuntime이 사용). 기존
 // import 경로(settings.test.ts의 `import { removePathWithRetries } from "./settings"`)는 재export로 보존.
@@ -1732,6 +1732,31 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       setSetting(db, "lead_telegram_id", sender.id);
       appendAudit(db, "user", "lead_telegram_id_detected", "system", { lead_telegram_id: sender.id, username: sender.username });
       return c.json({ ok: true, lead_telegram_id: sender.id, username: sender.username, note: "숫자 id는 non-secret입니다. 캡처 승인 allowlist는 lead_telegram_id setting을 함께 봅니다." });
+    } catch (e) {
+      return c.json({ ok: false, error: "detect_failed", detail: e instanceof Error ? e.message : String(e) }, 502);
+    }
+  });
+
+  // 캡처 worker가 그룹 미설정(shadow) 상태에서 관찰한 그룹 chat 을 돌려준다(첫 세팅 그룹 chat_id 발견).
+  // detect-lead-id 와 같은 원칙: 여기서 getUpdates 를 직접 호출하지 않는다(토큰당 단일 poller 경합 회피) —
+  // worker 가 setting 에 기록해 둔 값을 읽는다. 그룹이 정확히 1개면 capture_group_id 로 자동 설정.
+  app.post("/system-op/detect-group", async (c) => {
+    const tok = getCaptureToken();
+    if (!tok) return c.json({ ok: false, error: "no_token" }, 400);
+    try {
+      const groups = listDiscoveredGroups(db);
+      if (groups.length === 0) {
+        return c.json({ ok: false, error: "no_group_seen", hint: "op 봇을 그룹에 넣고(관리자 권장 — privacy mode 우회) 그룹에 메시지 1개를 보낸 뒤 다시 시도하세요. (capture worker 가 켜져 있어야 함)" }, 404);
+      }
+      let auto_set: string | null = null;
+      const only = groups.length === 1 ? groups[0] : undefined;
+      if (only) {
+        setCaptureGroupId(only.id); // 파일기반(captureConfig) — 재시작/restartCapture 시 적용
+        auto_set = only.id;
+        if (deps.restartCapture) { try { deps.restartCapture(); } catch { /* best-effort */ } }
+      }
+      appendAudit(db, "user", "capture_group_detected", "system", { count: groups.length, auto_set });
+      return c.json({ ok: true, groups, auto_set, note: auto_set ? "그룹 1개 자동 설정됨(재시작 불필요)." : "여러 그룹이 감지됨 — capture_group_id 를 골라 PATCH /system-op 로 설정하세요." });
     } catch (e) {
       return c.json({ ok: false, error: "detect_failed", detail: e instanceof Error ? e.message : String(e) }, 502);
     }
