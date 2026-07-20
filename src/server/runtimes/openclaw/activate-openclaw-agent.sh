@@ -29,8 +29,17 @@ import json, sys
 aid, disp, tok = sys.argv[1], sys.argv[2], sys.argv[3]
 p = f"{__import__('os').path.expanduser('~')}/.openclaw/openclaw.json"
 c = json.load(open(p))
-acc = c["channels"]["telegram"]["accounts"]
+tg = c["channels"]["telegram"]
+acc = tg["accounts"]
 acc[aid] = {"name": disp, "enabled": True, "tokenFile": tok}
+# ★그룹 무차별응답 차단(OWNER 2026-07-20)★: openclaw 게이트웨이가 팀방에 직접 붙어 '모든' 그룹
+#   메시지에 응답하던 문제 수정. 그룹은 봇 멘션(@)·답장일 때만 트리거하게 한다.
+#   (openclaw 문서 channels/telegram.md: "Plain group messages do not trigger the bot while
+#   requireMention: true".) hermes 의 TELEGRAM_REQUIRE_MENTION 과 동형 — 비-claude 게이트웨이는
+#   방 native 자동응답을 닫고, 그룹 협업은 System OP capture(owner-gate) 경로로만 도달한다.
+#   기존 groups 설정은 보존하고 "*"(모든 그룹) 엔트리에만 requireMention 을 보장.
+grp = tg.setdefault("groups", {})
+grp.setdefault("*", {})["requireMention"] = True
 json.dump(c, open(p, "w"), ensure_ascii=False, indent=2)
 json.load(open(p))  # 검증: 다시 파싱돼야 함
 print("  account 추가 + JSON 유효 ✓")
