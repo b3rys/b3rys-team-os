@@ -29,7 +29,9 @@ import json, sys
 aid, disp, tok = sys.argv[1], sys.argv[2], sys.argv[3]
 p = f"{__import__('os').path.expanduser('~')}/.openclaw/openclaw.json"
 c = json.load(open(p))
-acc = c["channels"]["telegram"]["accounts"]
+# openclaw ~v2026.7 의 fresh onboard(openclaw.json)에는 channels 키가 아직 없다.
+#   전제 대신 setdefault 로 channels.telegram.accounts 를 안전하게 확보(KeyError 방지).
+acc = c.setdefault("channels", {}).setdefault("telegram", {}).setdefault("accounts", {})
 acc[aid] = {"name": disp, "enabled": True, "tokenFile": tok}
 json.dump(c, open(p, "w"), ensure_ascii=False, indent=2)
 json.load(open(p))  # 검증: 다시 파싱돼야 함
@@ -50,22 +52,42 @@ if [ -d "$OC/agents/$AGENT_ID" ] && [[ "$AGENT_ID" =~ ^[a-z0-9_-]+$ ]] && [[ ! "
 fi
 openclaw agents add "$AGENT_ID" --workspace "$WS" --model "$MODEL" --non-interactive --bind "telegram:$AGENT_ID"
 
-say "■ 3) auth 프로필 복제 (살아있는 openclaw 에이전트 → $AGENT_ID; openai-codex 키)"
+say "■ 3) auth 프로필 (전역 auth.profiles 우선 · 없으면 per-agent 복제)"
 DEST="$OC/agents/$AGENT_ID/agent"
 mkdir -p "$DEST"
-# 동적 소스: auth-profiles.json 있는 다른 openclaw 에이전트에서 복제(특정 에이전트 하드코딩 X — 부재 시 silent 死봇 방지).
-#   소스 없으면 hard-fail(exit 1) → 영입이 조용히 죽은 봇 만드는 대신 실패를 명확히 보고(fail-safe, 2026-07-01).
-AUTH_SRC=""
-for cand in "$OC"/agents/*/agent/auth-profiles.json; do
-  [ -f "$cand" ] || continue
-  aname="$(basename "$(dirname "$(dirname "$cand")")")"
-  [ "$aname" = "$AGENT_ID" ] && continue
-  AUTH_SRC="$(dirname "$cand")"; break
-done
-if [ -z "$AUTH_SRC" ]; then echo "  ❌ auth-profiles 소스 없음(auth 보유 openclaw 에이전트 부재) — 활성화 중단(수동 auth 필요)"; exit 1; fi
-cp "$AUTH_SRC/auth-profiles.json" "$DEST/" || { echo "  ❌ auth-profiles 복사 실패 — 중단"; exit 1; }
-[ -d "$AUTH_SRC/codex-home" ] && cp -r "$AUTH_SRC/codex-home" "$DEST/" || true
-say "  (auth 소스: $(basename "$(dirname "$AUTH_SRC")"))"
+# openclaw ~v2026.6.11+ 는 구독 로그인(openai/codex OAuth)을 전역 ~/.openclaw/openclaw.json 의
+#   auth.profiles 에 저장하고 per-agent auth-profiles.json 을 만들지 않는다(신 레이아웃).
+#   이 경우 새 에이전트도 전역 auth 를 그대로 상속하므로 복제할 것이 없다 — server 의
+#   runtimeAuth.ts openclawAuthExists() 가 preflight 에서 인정하는 것과 같은 판정(값은 안 읽고 존재만).
+#   preflight 는 전역 auth 를 통과시키는데 여기서만 per-agent 복제를 강제하면 preflight OK인데
+#   activate 가 죽는 모순이 생긴다(2026-07 openclaw 2026.7.x 실측). 전역 auth 가 있으면 복제 생략.
+GLOBAL_AUTH="$(python3 - "$OC/openclaw.json" <<'PY'
+import json, sys
+try:
+    j = json.load(open(sys.argv[1]))
+    p = (j.get("auth") or {}).get("profiles") or {}
+    print("yes" if isinstance(p, dict) and len(p) > 0 else "no")
+except Exception:
+    print("no")
+PY
+)"
+if [ "$GLOBAL_AUTH" = "yes" ]; then
+  say "  (전역 openclaw.json auth.profiles 사용 — per-agent 복제 생략 · 신 레이아웃)"
+else
+  # (구 레이아웃) auth-profiles.json 있는 다른 openclaw 에이전트에서 복제(특정 에이전트 하드코딩 X — 부재 시 silent 死봇 방지).
+  #   소스 없으면 hard-fail(exit 1) → 영입이 조용히 죽은 봇 만드는 대신 실패를 명확히 보고(fail-safe, 2026-07-01).
+  AUTH_SRC=""
+  for cand in "$OC"/agents/*/agent/auth-profiles.json; do
+    [ -f "$cand" ] || continue
+    aname="$(basename "$(dirname "$(dirname "$cand")")")"
+    [ "$aname" = "$AGENT_ID" ] && continue
+    AUTH_SRC="$(dirname "$cand")"; break
+  done
+  if [ -z "$AUTH_SRC" ]; then echo "  ❌ auth 소스 없음(전역 auth.profiles 도 없고 auth 보유 openclaw 에이전트도 부재) — 활성화 중단(수동 auth 필요)"; exit 1; fi
+  cp "$AUTH_SRC/auth-profiles.json" "$DEST/" || { echo "  ❌ auth-profiles 복사 실패 — 중단"; exit 1; }
+  [ -d "$AUTH_SRC/codex-home" ] && cp -r "$AUTH_SRC/codex-home" "$DEST/" || true
+  say "  (auth 소스: $(basename "$(dirname "$AUTH_SRC")"))"
+fi
 
 say "■ 4) 게이트웨이 재시작 (⚠ 다른 openclaw 에이전트 잠깐 중단)"
 openclaw gateway restart
