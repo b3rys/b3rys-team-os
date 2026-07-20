@@ -88,6 +88,11 @@ function reviewSummaryText(db: Database, proposalId: string): string {
   return `review: ${fmt("peer")}${rows.some((r) => r.stage === "pm") ? `\nlegacy PM 리뷰: ${fmt("pm")}` : ""}`;
 }
 
+function noticeSummaryText(summary: string): string {
+  const oneLine = summary.replace(/\s+/g, " ").trim();
+  return oneLine.length <= 160 ? oneLine : `${oneLine.slice(0, 157)}...`;
+}
+
 function existingAgent(db: Database, id: string): boolean {
   return Boolean(db.prepare("SELECT 1 FROM agent WHERE id = ?").get(id));
 }
@@ -218,16 +223,6 @@ function followupSpec(db: Database, p: ProposalRow, status: ProposalStatus, agen
   };
 }
 
-// 표준 공통 API(OWNER 2026-07-04 '룰보다 표준 API'): 팀장 텔레그램 그룹 표면화 meta.
-// followup/wake 에 붙이면 owner 가 그 스레드에 답할 때 wakeDispatcher(resolveDirectToGd)가
-// OWNER 그룹에 직접 표면화한다. direct_to_gd 배선을 이 헬퍼 하나로 통일 — 개별 구현에서 빠뜨릴 수 없게.
-// (CAPTURE_GROUP_ID 미설정이면 undefined → 표면화 없이 팀버스에만, 안전 degrade.)
-export function gdSurfaceMeta(): Record<string, unknown> | undefined {
-  const gid = process.env.CAPTURE_GROUP_ID?.trim();
-  if (!gid) return undefined;
-  return { reply_mode: "direct_to_gd", source_thread_id: `tg-${gid}` };
-}
-
 function createLinkedFollowup(
   db: Database,
   p: ProposalRow,
@@ -238,7 +233,6 @@ function createLinkedFollowup(
   body: string,
   priority: "low" | "normal" | "high" = "normal",
   column: "plan" | "doing" | "done" = "doing",
-  gdSurface = false,
 ): { owner: string; taskId?: string; skipped?: boolean; messageId?: string } {
   const existing = db.prepare(
     `SELECT t.id
@@ -280,7 +274,6 @@ function createLinkedFollowup(
     hop_count: 0,
     priority,
     dedupe_key: `proposal-followup:${p.id}:${statusKey}:${owner}`,
-    meta: gdSurface ? gdSurfaceMeta() : undefined, // 팀장 컨펌 표면화(표준 API)
   });
   const recipient = db.prepare(
     `SELECT delivery_state FROM message_recipient WHERE message_id = ? AND agent_id = ?`,
@@ -347,7 +340,6 @@ function ensureGdDecisionNotices(
               : `해야 할 일: 최종 결정(반려) 사유를 확인하세요. 추가 액션은 없습니다.`),
       "high",
       isCodexPm || toStatus === "accepted" ? "doing" : "done",
-      !isCodexPm && ["accepted", "rejected"].includes(toStatus), // proposer 에게 승인/반려 알림 → 팀장 그룹 표면화(표준 API). concern/revise/approve 는 노티 X.
     );
   });
 }
@@ -569,7 +561,12 @@ async function notifyGdReportReached(db: Database, proposalId: string, _agents: 
   if (!chatId) return;
   const token = getCaptureToken();
   if (!token) return;
-  const p = db.prepare("SELECT title, source FROM proposal WHERE id = ?").get(proposalId) as { title: string; source: string | null } | undefined;
+  const p = db.prepare("SELECT title, summary, proposer_agent, source FROM proposal WHERE id = ?").get(proposalId) as {
+    title: string;
+    summary: string;
+    proposer_agent: string;
+    source: string | null;
+  } | undefined;
   if (!p) return;
   if (isTestProposalFixture(p)) {
     auditGdReportNotice(db, "gd_report_notice_skipped_test", proposalId, {
@@ -584,7 +581,8 @@ async function notifyGdReportReached(db: Database, proposalId: string, _agents: 
   const actionKey = noticeActionKey(proposalId, round);
   if (!claimAutomationAction(db, actionKey, proposalId, "gd_report_notice")) return;
   const text =
-    `[Proposal 팀장 결정 요청]\n대상: ${p.title}\nID: ${proposalId}\n` +
+    `[Proposal 팀장 결정 요청]\n대상: ${p.title}\n제안자: ${p.proposer_agent}\n` +
+    `한줄 요약: ${noticeSummaryText(p.summary)}\nID: ${proposalId}\n` +
     `리뷰 현황:\n${reviewSummaryText(db, proposalId)}\n` +
     `→ 승인/반려를 결정해 주세요(실행 지시 코멘트 필수). 고칠 게 있으면 반려 후 새로 올리게 하세요.`;
   let res: Response;

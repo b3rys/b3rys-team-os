@@ -325,6 +325,26 @@ echo ""
 hl "■ 4/4  완료"
 say "  런타임/서버/데이터 정리가 끝났습니다."
 echo ""
+
+# ★설치 스킬 심링크 해제 — repo(clone) 삭제 전에 풀어야 깨진 링크가 안 남는다★ (ames 반대리뷰).
+#   이 repo 를 가리키는 심링크일 때만 해제(다른 clone 을 가리키면 건드리지 않음).
+SKILL_DEST="$HOME/.claude/skills/b3os"
+if [ -L "$SKILL_DEST" ]; then
+  _mine=0
+  # ① inode 비교(-ef): 경로 철자 차이(/var↔/private/var·심링크 부모·$HOME 심링크)에도 이 repo 를 정확히 식별.
+  if [ "$SKILL_DEST" -ef "$SELF/skills/b3os" ]; then _mine=1; fi
+  # ② 문자열 폴백: 링크가 이미 깨져 -ef 가 해석 못 해도, 저장된 target 이 이 repo 면 해제(깨진 링크 방지).
+  if [ "$_mine" -eq 0 ]; then
+    case "$(readlink "$SKILL_DEST" 2>/dev/null)" in
+      "$SELF"/skills/b3os|"$SELF"/skills/b3os/) _mine=1 ;;
+    esac
+  fi
+  if [ "$_mine" -eq 1 ]; then
+    rm -f "$SKILL_DEST" && say "  ✓ 설치 스킬 심링크 해제: ${SKILL_DEST/#$HOME/~} (repo 삭제 시 깨진 링크 방지)"
+    say "    스킬을 다시 쓰려면: install-skill.sh 로 재설치 + /reload-skills."
+  fi
+fi
+
 warn "  이 스크립트는 실행 중인 자기 repo 폴더를 삭제할 수 없습니다. 마지막으로 아래를 실행하세요:"
 echo ""
 echo "이제 이 폴더를 삭제하세요:  rm -rf \"$SELF\""

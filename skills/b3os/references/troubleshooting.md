@@ -77,6 +77,19 @@ claude 순서:
   bun --version && bun run start
   ```
 
+## 5) 스킬이 옛날 흐름이에요 / git pull 했는데 업데이트가 안 반영돼요
+
+설치된 스킬(`~/.claude/skills/b3os`)이 최신인지 진단:
+```bash
+ls -ld ~/.claude/skills/b3os        # 심링크인지(→ clone/skills/b3os) 실디렉터리인지
+readlink ~/.claude/skills/b3os      # 심링크면 가리키는 clone 경로
+[ -f ~/.claude/skills/b3os/SKILL.md ] && echo "정상" || echo "★깨진 링크★(clone 이동/삭제 추정)"
+```
+- **심링크 정상**(→ clone) → clone 에서 `git pull` + Claude Code `/reload-skills` 만 하면 최신. (심링크라 pull 이 곧 스킬 최신 = 이게 정상 설치.)
+- **실디렉터리(옛 curl 복사본)** → pull 로 자동 갱신 안 됨. `install.sh` 를 다시 돌리면 이 clone 에 심링크로 전환된다(기존 사본은 백업). 또는 수동: `cp -R <clone>/skills/b3os/. ~/.claude/skills/b3os/` + `/reload-skills`.
+- **깨진 링크**(clone 이동/삭제) → `install-skill.sh` 다시 실행(깨진 링크 감지 후 재설치) 또는 `rm ~/.claude/skills/b3os` 후 `install.sh`.
+- **dirty/비-main pull 실패** → clone 에서 `git status`·`git stash` 확인 후 `git pull`. clone 을 옮겼으면 심링크가 깨지니 위 재설치.
+
 ## 그 밖에
 
 - **대시보드가 안 뜸(`/health` 무응답)** — 서버가 안 떠 있거나 포트 충돌. `bun run start` 로그 확인.

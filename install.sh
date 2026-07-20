@@ -31,6 +31,48 @@ bun install
 say "■ 대시보드 빌드 (bun run build)…"
 bun run build
 
+# ── 3a) 설치 스킬을 이 clone 에 심링크 (drift 영구해법) ───────────────
+# 설치된 스킬 사본(~/.claude/skills/b3os)은 git pull 로 자동 갱신되지 않는다(별개 복사본).
+#   → 이 clone 의 skills/b3os 로 심링크하면 pull 만 하면 스킬이 자동 최신. (OWNER 2026-07-20 proposal prop_11925c42fdfa)
+# ★안전(ames 반대리뷰 반영)★: target 존재 검증 → 기존 실디렉터리는 백업 → 임시링크 원자적 rename → 실패 시 복원.
+#   심링크 불가 환경(일부 Windows)은 안내만 하고 건너뜀(설치본 그대로 = 수동 갱신 필요).
+SKILL_SRC="$ROOT/skills/b3os"
+SKILL_DEST="$HOME/.claude/skills/b3os"
+if [ -f "$SKILL_SRC/SKILL.md" ]; then
+  if [ -L "$SKILL_DEST" ] && [ "$(readlink "$SKILL_DEST" 2>/dev/null)" = "$SKILL_SRC" ]; then
+    say "✅ 설치 스킬이 이미 이 clone 에 심링크됨 (pull 로 자동 최신) → ${SKILL_DEST/#$HOME/~}"
+  else
+    mkdir -p "$HOME/.claude/skills"
+    _tmp="$SKILL_DEST.tmp-$$"
+    _bak="$SKILL_DEST.bak-$(date +%s)-$$"   # $$ 포함 → 같은-초 재실행 시 백업 이름 충돌 방지
+    rm -rf "$_tmp" 2>/dev/null || true
+    if ln -s "$SKILL_SRC" "$_tmp" 2>/dev/null; then
+      # 기존 DEST(실디렉터리/링크)를 백업으로 옮겨 슬롯을 비운다. 실제로 옮겨졌을 때만 _moved 기록.
+      _moved=""
+      if [ -e "$SKILL_DEST" ] || [ -L "$SKILL_DEST" ]; then
+        if mv "$SKILL_DEST" "$_bak" 2>/dev/null; then _moved="$_bak"; fi
+      fi
+      # ★슬롯이 실제로 빈 경우에만 rename★ — 안 비었으면 'mv tmp DEST' 가 DEST 안에 nesting 돼
+      #   옛 사본이 그대로 남는데 -f SKILL.md 로는 거짓 성공이 된다(ames 반대리뷰). 성공검증은 -L(링크됨).
+      if [ ! -e "$SKILL_DEST" ] && [ ! -L "$SKILL_DEST" ] && mv "$_tmp" "$SKILL_DEST" 2>/dev/null && [ -L "$SKILL_DEST" ]; then
+        say "✅ 설치 스킬 → 이 clone 에 심링크 (이제 'git pull' 만 하면 스킬 자동 최신)"
+        [ -n "$_moved" ] && say "   (기존 사본 백업: ${_moved/#$HOME/~})"
+        warn "   Claude Code 에서 /reload-skills 한 번 실행하면 즉시 반영됩니다."
+      else
+        # 실패 → tmp 링크 제거 후, 옮긴 백업이 있고 슬롯이 비었으면 원위치 복원.
+        rm -rf "$_tmp" 2>/dev/null || true
+        if [ -n "$_moved" ] && [ ! -e "$SKILL_DEST" ] && [ ! -L "$SKILL_DEST" ]; then
+          mv "$_moved" "$SKILL_DEST" 2>/dev/null || true
+        fi
+        warn "⚠ 스킬 심링크 실패 — 기존 설치본 유지(수동 갱신 필요). git pull 후 'cp -R $SKILL_SRC/. $SKILL_DEST/' + /reload-skills."
+      fi
+    else
+      rm -rf "$_tmp" 2>/dev/null || true
+      warn "⚠ 심링크 미지원 환경 — 설치본 그대로. 업데이트 시 'cp -R $SKILL_SRC/. $SKILL_DEST/' + /reload-skills."
+    fi
+  fi
+fi
+
 # ── 4) .env 준비 ─────────────────────────────────────────────────
 if [ ! -f .env ]; then
   cp .env.example .env
