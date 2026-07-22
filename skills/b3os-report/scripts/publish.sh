@@ -6,7 +6,24 @@
 # 사용: publish.sh --title "제목" --author bill --summary "요약" [--md a.md] [--html a.html] [--id slug] [--project P]
 set -euo pipefail
 
-TEAM_COLLAB="${TEAM_COLLAB_DIR:-$HOME/Development/b3rys-team-os}"
+# team-collab 루트 해석 — 서버의 reportsDir(<team-os>/reports)와 반드시 일치해야 등록됨.
+# 예전 기본값($HOME/Development/b3rys-team-os)이 실제 설치 위치와 어긋나면 register 가
+# "path escapes reports root"(=파일 부재) 로 400 실패했다. env → 스크립트 상대 → 흔한 설치 순으로
+# agents.json/dist 마커가 있는 실제 team-os 루트를 자동 탐색한다.
+resolve_team_collab() {
+  if [ -n "${TEAM_COLLAB_DIR:-}" ]; then echo "$TEAM_COLLAB_DIR"; return; fi
+  local script_dir; script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # 스크립트가 <team-os>/skills/b3os-report/scripts 에 있을 때의 루트 후보
+  local from_script; from_script="$(cd "$script_dir/../../.." 2>/dev/null && pwd || true)"
+  local cand
+  for cand in "$from_script" "$HOME/b3rys-team-os" "$HOME/Development/b3rys-team-os"; do
+    [ -n "$cand" ] || continue
+    if [ -f "$cand/agents.json" ] || [ -d "$cand/dist/server" ]; then echo "$cand"; return; fi
+  done
+  # 마커 못 찾으면 흔한 설치 위치로 폴백(빈 레거시 경로 대신).
+  echo "$HOME/b3rys-team-os"
+}
+TEAM_COLLAB="$(resolve_team_collab)"
 API="${TEAM_BASE:-http://127.0.0.1:7878}/reports/api/register"
 
 TITLE=""; AUTHOR=""; SUMMARY=""; MD=""; HTML=""; ID=""; PROJECT=""; CATEGORY=""; DATE=""
@@ -20,7 +37,17 @@ while [ $# -gt 0 ]; do case "$1" in
 esac; done
 
 [ -z "$TITLE" ] && { echo "ERROR: --title 필요" >&2; exit 1; }
-[ -z "$ID" ] && ID="$(echo "$TITLE" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9가-힣-')-$(date +%y%m%d)"
+# id 슬러그 — tr 은 바이트 단위라 em대시(—) 같은 멀티바이트 구두점을 못 걸러 경로 오염을 냈다.
+# 유니코드 인식 파이썬으로 소문자화·비허용문자 하이픈화·중복/양끝 하이픈 정리한다.
+[ -z "$ID" ] && ID="$(python3 - "$TITLE" "$(date +%y%m%d)" <<'PY'
+import sys, re
+title, stamp = sys.argv[1], sys.argv[2]
+s = title.lower()
+s = re.sub(r'[^a-z0-9가-힣]+', '-', s)   # 허용: 영소문자·숫자·한글, 그 외는 하이픈
+s = re.sub(r'-{2,}', '-', s).strip('-')  # 중복·양끝 하이픈 제거
+print(f"{s}-{stamp}" if s else stamp)
+PY
+)"
 
 DEST="$TEAM_COLLAB/reports/$ID"
 mkdir -p "$DEST"
