@@ -1619,11 +1619,18 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
         if (t && !t.hermes_profile) { t.hermes_profile = agent.id; writeAgents(list); }
       } catch { /* best-effort */ }
     }
-    // claude_channel 활성화 성공 → tmux_session(claude-<id>) 레지스트리 기록. 봇 세션은 claude-<id> 관례로
+    // claude_channel → tmux_session(claude-<id>) 레지스트리 기록. 봇 세션은 claude-<id> 관례로
     //   뜨지만 recruit는 이 필드를 null로 남긴다. statusProbe(null이면 즉시 offline 판정)·wakeDispatcher(null이면
     //   no_tmux_session_for 로 버스 주입 실패) 둘 다 이 필드를 보므로, activate가 안 채우면 봇이 살아있어도
     //   빨강+라우팅 불통이 된다(OWNER 맥북 클린설치서 발견 2026-07-03). hermes_profile 패턴과 동형.
-    if (result.ok && agent.runtime === "claude_channel") {
+    // ★게이트는 result.ok 가 아니라 "runtime 단계 성공"으로 한다★ — 첫 claude 팀원은 activate 가 access.json 을
+    //   pairing(빈 allowFrom)으로 재시드하므로 essentials 단계가 실패해 result.ok=false 가 되지만, 이는 사람이
+    //   아직 DM 페어링을 승인하지 않은 정상 대기 상태일 뿐 봇 tmux 세션은 이미 결정적 이름 claude-<id> 로 떠 있다.
+    //   result.ok 로 게이팅하면 첫 팀원은 이 블록을 통째로 놓쳐 봇이 살아 응답해도 대시보드 빨강+라우팅 불통이 된다.
+    //   runtime 단계 성공 = 세션 기동 확인 이므로 페어링 게이트와 무관하게 필드를 채운다.
+    const claudeRuntimeUp = agent.runtime === "claude_channel"
+      && result.steps.some((s) => s.step === "runtime" && s.ok);
+    if (claudeRuntimeUp) {
       try {
         const list = readAgents();
         const t = list.find((a) => a.id === agent.id);
