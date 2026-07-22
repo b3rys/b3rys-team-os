@@ -442,12 +442,25 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
   // 승인 탭 인가: env allowlist + Settings 자동감지 lead_telegram_id(setting) 둘 다 허용.
   const APPROVAL_ALLOW = (process.env.APPROVAL_ALLOWED_USER_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   function approvalAllowedIds(): string[] {
-    let detected: string | null = null;
-    try {
-      const row = deps.db.prepare("SELECT value FROM setting WHERE key = 'lead_telegram_id'").get() as { value: string } | undefined;
-      detected = row?.value?.trim() ?? null;
-    } catch { /* best-effort */ }
-    return [...new Set([...APPROVAL_ALLOW, ...(detected ? [detected] : [])])];
+    const readSetting = (key: string): string | null => {
+      try {
+        const row = deps.db.prepare("SELECT value FROM setting WHERE key = ?").get(key) as { value: string } | undefined;
+        const v = row?.value?.trim();
+        return v && v.length ? v : null;
+      } catch { return null; }
+    };
+    const ids = [...APPROVAL_ALLOW];
+    const lead = readSetting("lead_telegram_id");
+    if (lead) ids.push(lead);
+    // 폴백: lead_telegram_id 미설정이어도 owner_chat_id(=팀장 텔레그램 user id, claude 페어링/설정에서 채워짐)로
+    //   op 승인·@all 콜백 인가. ★claude-only 팀은 detect-lead-id 를 돌리기 전까지 lead_telegram_id 가 비어
+    //   approvalAllowedIds()=[] → 모든 @all·승인 콜백이 fail-closed 로 "권한 없음" 막힘(owner_chat_id 는 이미
+    //   채워져 있는데 인가에 안 쓰였다). owner_chat_id 는 같은 팀장 텔레그램 id 라 안전한 폴백이고, 빈 값이면
+    //   아무것도 안 더해 fail-closed 불변식(empty=deny-all)은 유지된다. 음수 그룹 chat_id 는 콜백 from.id(양수
+    //   user id)와 일치할 수 없으니 오인가 방지로 숫자 user id 만 받는다.★
+    const owner = readSetting("owner_chat_id");
+    if (owner && /^\d+$/.test(owner)) ids.push(owner);
+    return [...new Set(ids)];
   }
   async function tg(method: string, payload: Record<string, unknown>): Promise<any> {
     try {
