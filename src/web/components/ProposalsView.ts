@@ -556,7 +556,7 @@ export function renderProposalsView(root: HTMLElement): void {
     root.querySelectorAll<HTMLButtonElement>("[data-owner-decision]").forEach((b) =>
       b.addEventListener("click", () => {
         if (!detail) return;
-        const to = b.dataset.gdDecision;
+        const to = b.dataset.ownerDecision;
         if (!to) return;
         const label = to === "accepted" ? pick("승인", "Approve") : to === "rejected" ? pick("반려", "Reject") : pick("수정요청", "Revise");
         const comment = window.prompt(pick(`${label} 사유/코멘트를 입력하세요.`, `Enter a reason/comment for ${label}.`), "");
