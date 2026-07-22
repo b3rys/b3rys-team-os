@@ -1,0 +1,27 @@
+node_modules
+dist
+.env
+.env.local
+team.db*
+logs/*.log
+var/
+.DS_Store
+.tmp
+reports/
+
+slack-tokens/
+__pycache__/
+*.pyc
+logs/telegram-capture-offset.txt
+agents.json.bak
+# agents.json = 런타임 팀 로스터(각 머신 고유 상태). 코드 아님 → untracked. 없으면 loadRegistry 가 []
+# 반환(공개 clone 첫 부팅). make-public-release 가 배포 스테이징엔 빈 []를 깔고, deploy-public 이 공개 repo에서 untrack.
+agents.json
+
+# 멤버 데이터(워크스페이스/세션/메모리)는 코드 repo에 두지 않음 — 데이터홈(B3RYS_HOME) 분리. 퍼블릭 안전망.
+/members/
+
+# 아카이브(루트 archiving/) — 폐기/이관된 스킬·파일 로컬 보관, 공개·커밋 제외
+archiving/
+.claude/worktrees/
+.git-worktrees/

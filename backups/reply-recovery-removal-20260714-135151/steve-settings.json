@@ -1,0 +1,22 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"/Users/you/Development/your-workspace/.claude/hooks/reply-guard.py\""
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "TG_RECOVERY_ENV=\"/Users/you/.claude/channels/telegram-steve/.env\" python3 \"/Users/you/Development/your-workspace/.claude/hooks/tg-reply-recovery.py\""
+          }
+        ]
+      }
+    ]
+  }
+}
