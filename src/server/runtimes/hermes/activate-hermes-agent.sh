@@ -153,6 +153,60 @@ open(cfgp, "w").write(txt)
 print("  ✓ 적용(" + os.path.basename(cfgp) + "):", ", ".join(changes) if changes else "(매칭 없음 — 이 hermes 버전의 " + os.path.basename(cfgp) + " 구조가 예상과 달라 cwd/멘션 자동적용 실패. 수동 확인 요망 — 활성화는 계속).")
 PY
 
+say "■ 3b) config.yaml — 메인 모델 명시(빈 model 이면 provider 기본모델로 채움)"
+# ★왜: b3os 는 그룹/버스 턴을 `hermes -z` one-shot 으로 spawn 한다(hermesBridge.ts). 지속 게이트웨이는
+#   빈 model 을 get_default_model_for_provider(active_provider) 로 자동 채우지만(gateway/run.py), -z exec
+#   경로는 안 채운다 → codex 가 '빈 모델' 거부 → openrouter 폴백 → 키 없으면 401 → 턴 실패(그룹 침묵).
+#   (2026-07-22 실측: herm — 1:1 은 되는데 그룹만 안 됨. 원인=빈 model.) clone 원본 config 의 빈 model 을
+#   그대로 물려받는 게 근본. 활성화 시 프로필 config 에 명시 model 을 박아 one-shot 도 모델을 갖게 한다.
+# 멱등: 이미 non-empty model 이면 건드리지 않는다. 실패 시 graceful skip(활성화는 계속).
+HERMES_PY="$(head -1 "$(command -v hermes 2>/dev/null)" 2>/dev/null | sed 's/^#!//' | awk '{print $1}')"
+[ -x "$HERMES_PY" ] || HERMES_PY="python3"
+"$HERMES_PY" - "$PROF_DIR" <<'PY'
+import sys, os, json
+prof = sys.argv[1]
+try:
+    import yaml
+except Exception:
+    print("  ⚠ pyyaml 없음 — 명시 model 자동설정 skip(활성화는 계속)"); sys.exit(0)
+cfgp = os.path.join(prof, "config.yaml")
+if not os.path.exists(cfgp):
+    alt = os.path.join(prof, "profile.yaml")
+    cfgp = alt if os.path.exists(alt) else cfgp
+if not os.path.exists(cfgp):
+    print("  ⚠ 프로필 설정 파일 없음 — 명시 model skip(활성화는 계속)"); sys.exit(0)
+try:
+    cfg = yaml.safe_load(open(cfgp)) or {}
+except Exception as e:
+    print(f"  ⚠ config 로드 실패({e}) — 명시 model skip(활성화는 계속)"); sys.exit(0)
+m = cfg.get("model")
+has = bool(m) and (m if isinstance(m, str) else (m.get("default") or m.get("model") or m.get("name")))
+if has:
+    print("  ✓ model 이미 설정됨 — skip(멱등)"); sys.exit(0)
+prov = None
+for ap in (os.path.join(prof, "auth.json"), os.path.expanduser("~/.hermes/auth.json")):
+    try:
+        prov = (json.load(open(ap)) or {}).get("active_provider") or prov
+        if prov: break
+    except Exception:
+        pass
+if not prov:
+    print("  ⚠ active_provider 판정 실패 — 명시 model skip(활성화는 계속)"); sys.exit(0)
+try:
+    from hermes_cli.models import get_default_model_for_provider
+    dm = get_default_model_for_provider(prov)
+except Exception as e:
+    print(f"  ⚠ 기본모델 조회 실패({e}) — 명시 model skip(활성화는 계속)"); sys.exit(0)
+if not dm:
+    print(f"  ⚠ provider={prov} 기본모델 없음 — 명시 model skip(활성화는 계속)"); sys.exit(0)
+cfg["model"] = {"provider": prov, "default": dm}
+try:
+    yaml.safe_dump(cfg, open(cfgp, "w"), allow_unicode=True, sort_keys=False, default_flow_style=False)
+    print(f"  ✓ 명시 model 설정: provider={prov}, default={dm} ({os.path.basename(cfgp)})")
+except Exception as e:
+    print(f"  ⚠ config 쓰기 실패({e}) — 활성화는 계속")
+PY
+
 say "■ 4) team-collab 등록 안내 (recruit 가 했으면 hermes_profile 만 확인)"
 echo "  agents.json: runtime=hermes_agent, hermes_profile=$AGENT_ID, status_provider=hermes_gateway"
 echo "  (대시보드 영입으로 등록됐으면 persona/경로 자동 — hermes_profile 필드만 추가 필요할 수 있음)"
