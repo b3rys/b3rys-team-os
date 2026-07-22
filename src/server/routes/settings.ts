@@ -41,7 +41,7 @@ function claudeCommsTargets(personaFile: string, wsPath: string, runtime: string
 }
 import { isAgentOff, restartAgent, setAgentEnabled, restartAll, stopAll, clearAgentOff } from "../lib/agentControl";
 import { removeCodexBridgeFiles } from "../runtimes/codex/launcher";
-import { removeClaudeBridgeFiles } from "../runtimes/claude/launcher";
+import { removeClaudeBridgeFiles, seedGroupIntoClaudeMembers } from "../runtimes/claude/launcher";
 import { rotateBotToken, validateBotToken } from "../lib/rotateToken";
 import {
   activateMember, approveOpenclawPairing, withInitialLeadCapabilities, withLeadCapabilities, archiveWorkspace, removeBusWake,
@@ -1877,7 +1877,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     }
     let changedTokenOrGroup = false;
     if (token) { setCaptureToken(token); changedTokenOrGroup = true; }
-    if (group !== undefined) { setCaptureGroupId(group); changedTokenOrGroup = true; } // 파일기반(captureConfig)
+    if (group !== undefined) { setCaptureGroupId(group); changedTokenOrGroup = true; if (group) seedGroupIntoClaudeMembers(group); } // 파일기반(captureConfig) + 기존 claude 멤버 access.json 에 그룹 비파괴 시드
     if (router !== undefined) setRouterEnabled(db, router); // 라이브 — 재시작 불요
     // ★토큰/그룹 변경을 서버 재시작 없이 즉시 적용★(OWNER 2026-07-19): capture 워커를 재init 한다(새 토큰으로 텔레그램 재연결).
     //   restartCapture 미주입(테스트 등)이면 종전대로 needs_restart=true 로 안내. 재init 은 best-effort(실패해도 저장은 유지).
@@ -1937,6 +1937,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       let applied = false;
       if (only) {
         setCaptureGroupId(only.id);
+        seedGroupIntoClaudeMembers(only.id); // 기존 claude 멤버 access.json 에 그룹 비파괴 시드(팀방 나중 셋업 갭)
         if (deps.restartCapture) { try { deps.restartCapture(); applied = true; } catch { /* best-effort */ } }
       }
       appendAudit(db, "user", "capture_group_detected", "system", { count: groups.length, auto_set });

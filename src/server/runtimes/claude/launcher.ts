@@ -340,3 +340,33 @@ export function seedClaudeAccess(id: string): void {
     }
   } catch { /* best-effort */ }
 }
+
+/** 팀방(capture group) 설정/변경 시, 이미 활성화된 claude 멤버들의 access.json `groups` 에 그 그룹을
+ *  ★비파괴 병합★ 한다(dmPolicy·allowFrom·pending·ackReaction·기존 groups 정책 보존). seedClaudeAccess 는
+ *  access.json 을 통째로 재작성하므로 페어링 상태를 날려 이 용도엔 못 쓴다.
+ *
+ *  왜 필요한가: 팀방 셋업을 팀원 영입 '이후' 에 하는 게 claude-only 팀의 일반 순서인데, 그러면 각 멤버
+ *  activate 시점엔 capture group id 가 아직 없어 access.json 이 groups={} 로 남는다. 그 결과 팀방을 나중에
+ *  붙여도 ① 그룹 원본 메시지 네이티브 리액션(setMessageReaction)이 플러그인 assertAllowedChat 게이트에
+ *  막히고(👀 안 붙음) ② server.ts 의 access.groups 체크로 그룹 참여 경로가 제한된다. setCaptureGroupId
+ *  호출 지점(대시보드 PATCH /system-op · detect-group)에서 이 헬퍼를 불러 기존 멤버 전원에 그룹을 시드한다.
+ *  best-effort — 실패해도 그룹 설정 자체는 유지된다. */
+export function seedGroupIntoClaudeMembers(gid: string): void {
+  const g = (gid ?? "").trim();
+  if (!g) return;
+  const chDir = `${HOME}/.claude/channels`;
+  if (!existsSync(chDir)) return;
+  for (const d of readdirSync(chDir)) {
+    if (!d.startsWith("telegram-")) continue;
+    const aj = `${chDir}/${d}/access.json`;
+    if (!existsSync(aj)) continue;
+    try {
+      const a = JSON.parse(readFileSync(aj, "utf-8"));
+      const groups: Record<string, unknown> = (a.groups && typeof a.groups === "object") ? a.groups : {};
+      if (groups[g]) continue; // 이미 있으면 기존 정책(멘션필수/allowFrom 등) 보존 — 덮어쓰지 않음
+      groups[g] = { requireMention: true, allowFrom: [] as string[] };
+      a.groups = groups;
+      writeFileSync(aj, JSON.stringify(a, null, 2), "utf-8");
+    } catch { /* skip bad file */ }
+  }
+}
