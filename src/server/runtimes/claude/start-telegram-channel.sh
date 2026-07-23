@@ -172,17 +172,29 @@ fi
 
 # ─── Spawn ────────────────────────────────────────────────────────────────
 
+# 권한 모드 — 봇 tmux 세션엔 사람이 붙어있지 않아 권한 프롬프트에 답할 수 없다.
+# 그래서 auto(분류기가 안전한 bash 는 자동 승인, 위험·유출·force-push 는 차단)로 기동한다.
+# ★CLI 플래그라 유저/프로젝트 settings.json 과 무관하게 확실히 적용★ — 프로젝트 스코프의
+# permissions.defaultMode:"auto" 는 Claude Code v2.1.142+ 에서 무시되므로 settings 로는 못 켠다.
+# env override: CLAUDE_PERMISSION_MODE=default(사람 승인)·acceptEdits·bypassPermissions 등.
+# 빈 문자열이면 플래그를 생략(멤버 settings.json 에 위임). fresh·resume(리스타트) 양쪽 다 적용.
+CLAUDE_PERMISSION_MODE="${CLAUDE_PERMISSION_MODE-auto}"
+PERM_FLAG=""
+if [[ -n "$CLAUDE_PERMISSION_MODE" ]]; then
+  PERM_FLAG=$(printf ' --permission-mode %q' "$CLAUDE_PERMISSION_MODE")
+fi
+
 # Quote-safe inline command for tmux: use printf %q on paths.
 # TELEGRAM_STATE_DIR tells the channels plugin which state dir to use.
 # --resume 시 --continue 추가 (working dir 의 마지막 세션 이어서)
 if [[ $RESUME_FLAG -eq 1 ]]; then
-  INNER_CMD=$(printf 'TELEGRAM_STATE_DIR=%q %q --channels plugin:%s --model %q --continue' \
-    "$STATE_DIR" "$CLAUDE_BIN" "$PLUGIN" "$CLAUDE_MODEL")
-  echo "RESUME mode — claude --continue --model $CLAUDE_MODEL (이전 세션 이어서)"
+  INNER_CMD="$(printf 'TELEGRAM_STATE_DIR=%q %q --channels plugin:%s --model %q' \
+    "$STATE_DIR" "$CLAUDE_BIN" "$PLUGIN" "$CLAUDE_MODEL")$PERM_FLAG --continue"
+  echo "RESUME mode — claude --continue --model $CLAUDE_MODEL --permission-mode ${CLAUDE_PERMISSION_MODE:-<none>} (이전 세션 이어서)"
 else
-  INNER_CMD=$(printf 'TELEGRAM_STATE_DIR=%q %q --channels plugin:%s --model %q' \
-    "$STATE_DIR" "$CLAUDE_BIN" "$PLUGIN" "$CLAUDE_MODEL")
-  echo "FRESH mode — claude --model $CLAUDE_MODEL"
+  INNER_CMD="$(printf 'TELEGRAM_STATE_DIR=%q %q --channels plugin:%s --model %q' \
+    "$STATE_DIR" "$CLAUDE_BIN" "$PLUGIN" "$CLAUDE_MODEL")$PERM_FLAG"
+  echo "FRESH mode — claude --model $CLAUDE_MODEL --permission-mode ${CLAUDE_PERMISSION_MODE:-<none>}"
 fi
 
 tmux new-session -d -s "$SESSION_NAME" -c "$WORKDIR" "$INNER_CMD"
