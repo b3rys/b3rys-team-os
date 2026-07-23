@@ -63,18 +63,8 @@ export function trustedActorFromHeaders(headers: Headers): AuthResult {
   const actor = String(headers.get("x-actor-id") ?? "").trim();
   if (!ACTOR_RE.test(actor)) return { ok: false, error: "x_actor_id_required", status: 403 };
   const provided = headers.get("x-op-token") ?? undefined;
-  let expected = "";
-  try {
-    const bindings = JSON.parse(process.env.OP_MESSAGE_TOKEN_BINDINGS ?? "{}") as Record<string, unknown>;
-    if (typeof bindings[actor] === "string") expected = bindings[actor] as string;
-  } catch {
-    return { ok: false, error: "op_auth_misconfigured", status: 503 };
-  }
-  if (!expected) {
-    const legacyActor = (process.env.OP_MESSAGE_ACTOR_ID ?? "system").trim();
-    if (actor === legacyActor) expected = process.env.OP_MESSAGE_TOKEN ?? "";
-  }
-  if (!expected) return { ok: false, error: "actor_token_unbound", status: 403 };
+  const expected = process.env.OP_MESSAGE_TOKEN ?? "";
+  if (!expected) return { ok: false, error: "op_auth_disabled", status: 503 };
   if (!tokenMatches(provided, expected)) return { ok: false, error: "unauthorized", status: 401 };
   return { ok: true, actor: { actor, source: "op_token" } };
 }
