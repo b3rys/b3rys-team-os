@@ -1,0 +1,74 @@
+node_modules
+dist
+.env
+.env.local
+team.db*
+logs/*.log
+var/
+.DS_Store
+.tmp
+reports/
+
+slack-tokens/
+__pycache__/
+*.pyc
+logs/telegram-capture-offset.txt
+agents.json.bak
+# agents.json = 런타임 팀 로스터(각 머신 고유 상태). 코드 아님 → untracked. 없으면 loadRegistry 가 []
+# 반환(공개 clone 첫 부팅). make-public-release 가 배포 스테이징엔 빈 []를 깔고, deploy-public 이 공개 repo에서 untrack.
+agents.json
+
+# 멤버 데이터(워크스페이스/세션/메모리)는 코드 repo에 두지 않음 — 데이터홈(B3RYS_HOME) 분리. 퍼블릭 안전망.
+/members/
+
+# 아카이브(루트 archiving/) — 폐기/이관된 스킬·파일 로컬 보관, 공개·커밋 제외
+archiving/
+.claude/worktrees/
+.git-worktrees/
+
+# ── 내부 ops 스크립트 · 내부 docs = 머신-로컬(공개 제품 아님) ──────────────
+# 공개=정본: 공개 트리엔 제품(src·install·rules템플릿·공개스킬)만 둔다. GD 머신 전용 ops
+# (launchd·배포·테스트 하네스·실 로스터)와 내부 docs(PLAN/REVIEW/내부운영)는 로컬 워킹파일로 유지(untrack)한다.
+# 버전관리는 은퇴하는 private repo(내부 유지)가 계속 tracked 로 보존 → 유실 없음. 공개엔 명시 allowlist 만 싣는다.
+# (기본=제외 + `!` allowlist. 새 공개용 스크립트/문서는 여기 `!` 로 추가.)
+/scripts/*
+!/scripts/task-review-ping.ts
+!/scripts/task-review-summary.ts
+/docs/*
+!/docs/SLACK_SETUP.md
+!/docs/remote-access.md
+!/docs/BUILD_MODES.md
+# 공개-참조되는 값-청결 워크플로우/카탈로그 문서 (tracked 코드·README·멤버 로드가 참조 — untrack 시 스킬발견/온보딩 깨짐)
+!/docs/B3OS_SKILLS.md
+!/docs/TEAM_LOOP_WORKFLOW.md
+!/docs/GROUP_ROOM_ROUTING.md
+!/docs/COMMUNICATION_FLOW.md
+!/docs/TEAM_COLLECT_ORCHESTRATION.md
+
+# ── 머신-로컬 상태·백업·스케줄러 설정 · 내부 프로젝트 파일 (공개 제품 아님) ──────
+# launchd plist(com.<user>.*)·백업·아카이브·프로젝트 관리문서는 GD 머신/내부 전용.
+# (현 make-public-release 도 launchd/·MEMORY·TODO·SPEC·*.bak 를 이미 제외 — 여기서 정본화.)
+/launchd/
+/backups/
+/MEMORY.md
+/TODO.md
+/SPEC.md
+rules/archive/
+/tools/
+/research/
+.env.bak*
+agents.json.bak*
+*.bak
+*.bak-*
+*.removed
+*.pre-*
+
+# rules/TEAM-OS.md = 렌더 output(rules/TEAM-OS.template.md 에서 startup·설정저장 시 생성). template 만 track.
+rules/TEAM-OS.md
+
+# 런타임 상태 로그 · 내부 draft/설계 문서 (공개 제품 아님)
+logs/*.json
+rules/*DRAFT*
+rules/*COVERAGE*
+rules/*.compaction-summary.md
+rules/design/

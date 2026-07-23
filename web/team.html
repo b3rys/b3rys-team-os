@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>팀 &amp; 스킬 — 멤버·런타임·온보딩·Learning Loop</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Geist+Mono:wght@300;400;500&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/tokens.css">
+  <link rel="stylesheet" href="assets/base.css">
+  <link rel="stylesheet" href="assets/components.css">
+</head>
+<body>
+  <div class="grid-bg"></div>
+
+  <nav style="position:sticky;top:0;z-index:50;backdrop-filter:blur(10px);background:var(--bg-primary);border-bottom:1px solid var(--border)">
+    <div class="container" style="display:flex;gap:20px;align-items:center;padding:14px 0;flex-wrap:wrap">
+      <a href="index.html" style="font-family:var(--heading);font-weight:700;color:var(--text-primary);text-decoration:none">b3rys</a>
+      <a href="team-os.html" style="color:var(--text-secondary);text-decoration:none;font-size:14px">팀 운영체계</a>
+      <a href="workflow.html" style="color:var(--text-secondary);text-decoration:none;font-size:14px">워크플로우</a>
+      <a href="b3os.html" style="color:var(--text-secondary);text-decoration:none;font-size:14px">b3os</a>
+      <a href="team.html" style="color:var(--text-secondary);text-decoration:none;font-size:14px">팀·스킬</a>
+    </div>
+  </nav>
+
+  <!-- ═══════════════ HERO ═══════════════ -->
+  <section class="hero">
+    <div class="hero-glow"></div>
+    <div class="container">
+      <div class="hero-label"><span>TEAM · RUNTIME · SKILLS</span></div>
+      <h1 class="hero-title">팀 &amp; 스킬 <em>한 팀, 여러 런타임</em></h1>
+      <p class="hero-sub">11 members · 4 runtimes · 8 skills · 15-step onboarding</p>
+      <p class="hero-desc">b3rys는 단일 실행환경이 아니라 <strong>Claude Channel · OpenClaw · Hermes · Codex CLI</strong>를 하나의 메시지 버스로 묶은 팀 운영 레이어다. 멤버·런타임·응답 규칙·스킬 생태계·온보딩·Learning Loop를 한 페이지에 정리한다.</p>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 01 멤버 ═══════════════ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">01 — MEMBERS</div>
+        <h2 class="section-title">팀 멤버 구성</h2>
+        <p class="section-subtitle">코어 5 · 전문 3 · 추가 3 — 총 11명. 각 멤버는 역할과 런타임(실행 환경)을 가진다. GD는 팀장·결정권자.</p>
+      </div>
+
+      <figure style="margin:48px 0;text-align:center">
+        <img src="assets/img/team-runtime-map.png" alt="팀·런타임 맵 — Claude Channel, OpenClaw, Hermes를 하나의 메시지 버스로 연결하는 다이어그램" style="max-width:100%;border-radius:12px;border:1px solid var(--border)" loading="lazy">
+        <figcaption style="margin-top:12px;color:var(--text-secondary);font-size:14px">팀·런타임 맵 — Claude Channel · OpenClaw · Hermes를 하나의 메시지 버스로 연결</figcaption>
+      </figure>
+
+      <div class="card-grid reveal">
+        <div class="card card--highlight">
+          <div class="card-title">Bill <span class="engine-badge">Claude Code</span></div>
+          <div class="card-text">리더 · GD's Step + Fullstack + Infra. infra admin, ops/infra 검증. coordinator(전체 맥락 관찰).</div>
+        </div>
+        <div class="card card--highlight">
+          <div class="card-title">Steve <span class="engine-badge">Claude Code</span></div>
+          <div class="card-text">Fullstack Dev. backend·frontend·infra·devops 자체 처리. coordinator(전체 맥락 관찰).</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Demis <span class="engine-badge">Claude Code</span></div>
+          <div class="card-text">AI Research. search·AI·model 전문 관점.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Dbak <span class="engine-badge">Claude Code</span></div>
+          <div class="card-text">CFO · 경제/투자 리서치.</div>
+        </div>
+        <div class="card card--highlight">
+          <div class="card-title">Codex <span class="engine-badge">OpenClaw</span></div>
+          <div class="card-text">GD's Step OpenClaw · PM/coordination. default intake(미언급 메시지 접수 판단), learning_loop_pm.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Hermes <span class="engine-badge">Hermes Agent</span></div>
+          <div class="card-text">CSO — Service &amp; Strategy. specialist(자기 메시지만). 2026-05-31 합류.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Brief <span class="engine-badge">OpenClaw</span></div>
+          <div class="card-text">Daily News Digest — 일일 뉴스 요약.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Devon <span class="engine-badge">OpenClaw</span></div>
+          <div class="card-text">Codex-based Staff Engineer · 주 개발 실행. 앱/프론트 전문(맥앱 포함).</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Lui <span class="engine-badge">OpenClaw</span></div>
+          <div class="card-text">AI 리서치·개발 + 풀스택.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Forin <span class="engine-badge">OpenClaw</span></div>
+          <div class="card-text">영어 코치 · 컨텐츠 크리에이터.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Codi <span class="engine-badge">Codex CLI</span></div>
+          <div class="card-text">스텝 · 풀스택 엔지니어. CLI 인터페이스.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 02 런타임 ═══════════════ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">02 — RUNTIMES</div>
+        <h2 class="section-title">런타임 플랫폼 분류</h2>
+        <p class="section-subtitle">런타임 = 멤버가 실제로 돌아가는 실행 환경. 4종이 서로 다른 status_provider(상태 제공자)와 라우팅을 쓰지만, 모두 같은 메시지 버스를 공유한다.</p>
+      </div>
+
+      <div class="card-grid reveal">
+        <div class="card card--highlight">
+          <div class="card-title">Claude Code <span class="engine-badge">claude_channel</span></div>
+          <div class="card-text">Bill · Steve · Demis · Dbak. tmux 세션 로컬 실행. status_provider=claude_tmux. full_context 가능, 기본 mention-only(직접 멘션만). Bill/Steve는 coordinator(전체 맥락 관찰).</div>
+        </div>
+        <div class="card card--highlight">
+          <div class="card-title">OpenClaw <span class="engine-badge">openclaw</span></div>
+          <div class="card-text">Codex · Brief · Devon · Lui · Forin. OpenAI GPT-5.5. status_provider=openclaw_gateway. webhook/socket. Codex는 native_routing · learning_loop_pm · default intake.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Hermes Agent <span class="engine-badge">hermes_agent</span></div>
+          <div class="card-text">Hermes. 자체 게이트웨이. status_provider=hermes_gateway. CSO 역할. specialist 기본(자기 메시지만, 확장은 GD 승인). 2026-05-31 합류.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Codex CLI <span class="engine-badge">codex</span></div>
+          <div class="card-text">Codi. CLI 인터페이스로 동작하는 풀스택 엔지니어 런타임.</div>
+        </div>
+      </div>
+
+      <div class="evolution reveal">
+        <div class="evo-box">
+          <div class="evo-label">4 RUNTIMES</div>
+          <div class="evo-text">서로 다른 게이트웨이</div>
+        </div>
+        <div class="evo-arrow">→</div>
+        <div class="evo-box">
+          <div class="evo-label">공통 레이어</div>
+          <div class="evo-text evo-text--active">Telegram · Slack · 메시지 버스</div>
+        </div>
+      </div>
+      <p class="section-subtitle reveal">공통: 모든 런타임이 Telegram 봇 네트워크 · Slack · 팀 메시지 버스(team bus)를 공유한다.</p>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 03 응답 규칙 ═══════════════ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">03 — RESPONSE &amp; COLLAB</div>
+        <h2 class="section-title">응답 규칙 &amp; 협업 구조</h2>
+        <p class="section-subtitle">누가 언제 응답하는가. 기본은 mention-only, Codex만 default-intake. 순수 결정·승인·판단은 ask_gd(GD에게 위임).</p>
+      </div>
+
+      <div class="context-grid reveal">
+        <div class="context-card">
+          <div class="context-label">DEFAULT MODE</div>
+          <div class="context-title">mention-only</div>
+          <div class="context-desc">직접 멘션 · 답장 · sticky owner · direct inbox 일 때만 응답. 그 외엔 침묵.</div>
+          <div class="context-example"><strong>"@스티브 이거 봐줘"</strong> — 멘션·답장·sticky·DM 시에만 owner</div>
+        </div>
+        <div class="context-card">
+          <div class="context-label">EXCEPTION</div>
+          <div class="context-title">Codex = default-intake</div>
+          <div class="context-desc">미언급 메시지를 local LLM(로컬 판단 모델)으로 접수자(owner) 판단. 조율 성격 기본 담당.</div>
+          <div class="context-example"><strong>"누구 멘션도 없는 요청"</strong> — Codex가 local LLM으로 owner 추론</div>
+        </div>
+        <div class="context-card">
+          <div class="context-label">INTAKE SCOPE</div>
+          <div class="context-title">담당 영역 분리</div>
+          <div class="context-desc">Bill = infra_ops, Codex = general_pm, 나머지 = none. 순수 결정/승인/판단 → ask_gd.</div>
+          <div class="context-example"><strong>infra 이슈 → Bill</strong> · <strong>PM 조율 → Codex</strong></div>
+        </div>
+        <div class="context-card">
+          <div class="context-label">OWNER PRIORITY</div>
+          <div class="context-title">explicit mention 우선</div>
+          <div class="context-desc">Sticky owner(직전 담당자) 유지. 단 본문 @멘션은 reply-to 담당자 우선권을 무시하고 가장 우선.</div>
+          <div class="context-example"><strong>A 답장 + 본문 @B</strong> — owner는 B, A는 침묵</div>
+        </div>
+        <div class="context-card">
+          <div class="context-label">VISIBILITY · COORDINATOR</div>
+          <div class="context-title">전체 맥락</div>
+          <div class="context-desc">Bill · Codex = 전체 맥락 관찰. 전 메시지 흐름을 보고 owner를 추론·조율한다.</div>
+          <div class="context-example"><strong>coordinator</strong> — 배정 안 된 메시지도 관찰 가능</div>
+        </div>
+        <div class="context-card">
+          <div class="context-label">VISIBILITY · SPECIALIST</div>
+          <div class="context-title">배정 + reply만</div>
+          <div class="context-desc">specialist는 배정된 메시지 + reply context(답장 맥락)만 본다. 확장은 coordinator/GD 승인.</div>
+          <div class="context-example"><strong>Hermes</strong> — 자기 메시지만, 나머지는 비가시</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 04 스킬 ═══════════════ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">04 — SKILLS</div>
+        <h2 class="section-title">b3rys 스킬 생태계</h2>
+        <p class="section-subtitle">스킬 = 런타임 중립 셸/노드 스크립트. 어느 런타임에서든 직접 실행. b3os-bwf(기본 과제 워크플로우)가 중심이고 나머지가 단계별 품질·인프라를 보조한다.</p>
+      </div>
+
+      <div class="flywheel reveal">
+        <div class="flywheel-step">
+          <div class="flywheel-num">01</div>
+          <div class="flywheel-label">PM 계획</div>
+          <div class="flywheel-desc">착수 + 칸반 카드 등록</div>
+        </div>
+        <div class="flywheel-step">
+          <div class="flywheel-num">02</div>
+          <div class="flywheel-label">팀 배정</div>
+          <div class="flywheel-desc">handoff ack 추적</div>
+        </div>
+        <div class="flywheel-step">
+          <div class="flywheel-num">03</div>
+          <div class="flywheel-label">실행 + 품질</div>
+          <div class="flywheel-desc">harness·judge 선택</div>
+        </div>
+        <div class="flywheel-step">
+          <div class="flywheel-num">04</div>
+          <div class="flywheel-label">검증</div>
+          <div class="flywheel-desc">테스트·리뷰 게이트</div>
+        </div>
+        <div class="flywheel-step">
+          <div class="flywheel-num">05</div>
+          <div class="flywheel-label">보고 + 카드</div>
+          <div class="flywheel-desc">closure + 학습 hook</div>
+        </div>
+      </div>
+
+      <div class="card-grid reveal">
+        <div class="card card--highlight">
+          <div class="card-title">b3os-bwf</div>
+          <div class="card-text">기본 과제 워크플로우(BWF). PM계획→팀배정→실행+품질→검증→보고+카드→학습hook. 2026-06-22 리뷰 완료.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">b3os-report</div>
+          <div class="card-text">MD → 반응형 HTML + SVG 보고서. /reports 포털로 게시.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">b3rys-harness</div>
+          <div class="card-text">sub agent 병렬 실행 가드레일. ready-run 레시피 + 7품질패턴.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">b3os-team-inbox</div>
+          <div class="card-text">메시지 버스 도구. inbox·send·reply·ack·thread 셸 스크립트.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">b3os-task-mgmt</div>
+          <div class="card-text">Tasks 칸반 · continuation guard(진행 지속 장치) · handoff.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">b3os-workloop</div>
+          <div class="card-text">작업루프 인프라. 스케줄로 코디네이터 깨우기. 런타임 무관.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">b3os-team-learning-loop</div>
+          <div class="card-text">주간 self-learning. SHARED→TEAM-OS 승격, compacting, 월간 지표.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">b3os-team-member-lifecycle</div>
+          <div class="card-text">온보딩 / 오프보딩 자동화.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 05 온보딩 15단계 ═══════════════ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">05 — ONBOARDING</div>
+        <h2 class="section-title">온보딩 프로세스 15단계</h2>
+        <p class="section-subtitle">5 그룹 × 3 단계. 역할 정의부터 검증까지. 자격증명은 .env/credential store에만, TEAM-OS는 참조(복붙 금지).</p>
+      </div>
+
+      <div class="card-grid card-grid--three reveal">
+        <div class="card card--highlight">
+          <div class="card-title">1–2 · 정의</div>
+          <div class="card-text">역할 정의 → 런타임 선택(claude_channel / openclaw / hermes_agent / b3os_native).</div>
+        </div>
+        <div class="card card--highlight">
+          <div class="card-title">3–4 · 셋업</div>
+          <div class="card-text">workspace · persona 파일 생성. TEAM-OS 참조(복붙 금지). 자격증명은 .env / credential store에만.</div>
+        </div>
+        <div class="card card--highlight">
+          <div class="card-title">5–6 · 등록</div>
+          <div class="card-text">텔레그램·Slack 연결 → agents.json 등록(id · display_name · role · runtime · status_provider · workspace · persona · telegram_bot_username).</div>
+        </div>
+        <div class="card">
+          <div class="card-title">7–9 · 라우팅</div>
+          <div class="card-text">라우터 alias · bus wake allowlist · 그룹방 응답 정책(기본 mention-only).</div>
+        </div>
+        <div class="card">
+          <div class="card-title">10–12 · 멘션 게이트</div>
+          <div class="card-text">멘션 패턴 매칭(공식 bot username + 팀 별칭) · self gate · reaction/ack gate.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">13–15 · 검증</div>
+          <div class="card-text">context visibility 정의 · 대시보드/문서 갱신 · 검증(one-shot → shadow test → bus DM smoke → 필요시 visible test).</div>
+        </div>
+      </div>
+
+      <div class="q-grid reveal">
+        <div class="q-card">
+          <div class="q-tag">DEVON 예시</div>
+          <div class="q-text">id=devon · runtime=openclaw · role=스태프 엔지니어 · PM owner=Codex · ops reviewer=Bill · mention-only + default intake=none.</div>
+        </div>
+        <div class="q-card">
+          <div class="q-tag">자격증명 원칙</div>
+          <div class="q-text">평문 노출 금지. .env / credential store에만 저장하고 경로로만 참조. TEAM-OS 규칙은 복붙하지 않고 참조.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 06 검증 기준 ═══════════════ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">06 — VERIFICATION</div>
+        <h2 class="section-title">온보딩 검증 기준</h2>
+        <p class="section-subtitle">생성됨 ≠ 동작함. 라우팅·반응·가시성을 실제 표시 기준으로 통과해야 활성화.</p>
+      </div>
+
+      <div class="card-grid reveal">
+        <div class="card card--highlight">
+          <div class="card-title">라우터 테스트</div>
+          <div class="card-text">멘션 · 답장 · sticky owner 정확도 확인.</div>
+        </div>
+        <div class="card card--highlight">
+          <div class="card-title">Bus DM smoke test</div>
+          <div class="card-text">메시지 버스 DM이 실제 도달·응답하는지 점검.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Team visible test</div>
+          <div class="card-text">텔레그램 팀방에 실제로 표시되는지 확인. bot 초대 필수.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Reaction 검증</div>
+          <div class="card-text">owner 메시지에만 반응. 비owner · 타팀원 명시멘션 · 예시영역 멘션엔 반응 없음.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">멘션 패턴</div>
+          <div class="card-text">@헤르메스 · @헤르 · @hermes 모두 작동(공식 username + 팀 별칭).</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Context visibility</div>
+          <div class="card-text">specialist는 배정 + reply만. coordinator 승인 시 전체 맥락.</div>
+        </div>
+      </div>
+
+      <div class="context-grid reveal">
+        <div class="context-card">
+          <div class="context-label">EXPLICIT MENTION WINS</div>
+          <div class="context-title">명시 멘션 우선</div>
+          <div class="context-desc">A에게 보낸 답장이어도 본문에 @B가 있으면 owner는 B. A는 침묵한다.</div>
+          <div class="context-example"><strong>reply→A, 본문 @B</strong> — owner=B, A silence</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 07 라이프사이클 ═══════════════ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">07 — LIFECYCLE</div>
+        <h2 class="section-title">멤버 라이프사이클</h2>
+        <p class="section-subtitle">온보딩 리허설 → 정식 온보딩 → 역할 계약 → 오프보딩. credential 삭제·token revoke는 항상 GD 확인 후.</p>
+      </div>
+
+      <div class="timeline reveal">
+        <div class="timeline-item">
+          <div class="timeline-phase">Phase 1 — REHEARSAL</div>
+          <div class="timeline-title">온보딩 리허설</div>
+          <div class="timeline-desc">임시 Claude Channel 멤버로 테스트 후 역방향 오프보딩. 실제 활성화 전 전체 흐름 검증.</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-phase">Phase 2 — ACTIVATION</div>
+          <div class="timeline-title">Devon 정식 온보딩</div>
+          <div class="timeline-desc">2026-06-01 dry-run / activation-ready. GD 승인 필수.</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-phase">Phase 3 — ROLE CONTRACT</div>
+          <div class="timeline-title">프로젝트-루프 역할 계약</div>
+          <div class="timeline-desc">Codex(PM · task 분해 · 단계 보고) · Devon(주 개발 실행) · Bill(ops/infra 검증) · Demis(search/AI/model 전문) · GD(결정권 · 승인).</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-phase">Phase 4 — OFFBOARDING</div>
+          <div class="timeline-title">오프보딩</div>
+          <div class="timeline-desc">openclaw는 telegram account · tokenFile 정리. credential 삭제 · token revoke는 GD 확인 후에만.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 08 Learning Loop & 인프라 ═══════════════ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">08 — LEARNING LOOP &amp; INFRA</div>
+        <h2 class="section-title">Learning Loop &amp; 운영 인프라</h2>
+        <p class="section-subtitle">주간 자가학습 사이클과 24/7 운영 인프라. 교훈은 SHARED에 append, 검증 후 TEAM-OS로 승격.</p>
+      </div>
+
+      <div class="flywheel reveal">
+        <div class="flywheel-step">
+          <div class="flywheel-num">01</div>
+          <div class="flywheel-label">Weekly Wake</div>
+          <div class="flywheel-desc">workloop이 매주 코디네이터(Bill) 깨우기</div>
+        </div>
+        <div class="flywheel-step">
+          <div class="flywheel-num">02</div>
+          <div class="flywheel-label">SHARED 기록</div>
+          <div class="flywheel-desc">rules/SHARED.md (append-only)</div>
+        </div>
+        <div class="flywheel-step">
+          <div class="flywheel-num">03</div>
+          <div class="flywheel-label">승격</div>
+          <div class="flywheel-desc">SHARED→TEAM-OS (compacting)</div>
+        </div>
+        <div class="flywheel-step">
+          <div class="flywheel-num">04</div>
+          <div class="flywheel-label">월간 지표</div>
+          <div class="flywheel-desc">응답속도·라우팅정확도·온보딩시간</div>
+        </div>
+      </div>
+
+      <div class="card-grid reveal">
+        <div class="card card--highlight">
+          <div class="card-title">대시보드</div>
+          <div class="card-text">https://your-team.example.com/team · localhost:7878/team. WebSocket 실시간 갱신.</div>
+        </div>
+        <div class="card card--highlight">
+          <div class="card-title">백엔드</div>
+          <div class="card-text">Bun + Hono + bun:sqlite. 포트 7878(loopback only). LaunchAgent com.you.team-collab 24/7.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">자가치유 3단계</div>
+          <div class="card-text">team-os restart → bot-liveness 자가치유(Bill 깨우기) → GD 알림.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">테스트 케이스</div>
+          <div class="card-text">docs/TEST_CASES.md. 라우팅·반응·가시성 회귀 검증.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">/reports 포털</div>
+          <div class="card-text">b3os-report 산출물 게시 포털.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">문서 정본</div>
+          <div class="card-text">TEAM-OS.md · SHARED.md · ROUTER_ARCHITECTURE.md · AGENT_SETUP.md.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 09 용어집 ═══════════════ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">09 — GLOSSARY</div>
+        <h2 class="section-title">용어집</h2>
+        <p class="section-subtitle">팀 운영에 자주 등장하는 핵심 용어.</p>
+      </div>
+
+      <div class="q-grid reveal">
+        <div class="q-card">
+          <div class="q-tag">런타임 · Runtime</div>
+          <div class="q-text">멤버가 실제로 실행되는 환경. Claude Code · OpenClaw · Hermes Agent · Codex CLI 4종.</div>
+        </div>
+        <div class="q-card">
+          <div class="q-tag">스킬 · Skill</div>
+          <div class="q-text">런타임 중립 셸/노드 스크립트로 된 재사용 워크플로우. b3rys-* 네이밍.</div>
+        </div>
+        <div class="q-card">
+          <div class="q-tag">온보딩 · Onboarding</div>
+          <div class="q-text">새 멤버를 역할 정의부터 검증까지 15단계로 활성화하는 과정.</div>
+        </div>
+        <div class="q-card">
+          <div class="q-tag">라우팅 · Routing</div>
+          <div class="q-text">들어온 메시지의 owner(담당자)를 멘션·답장·sticky·intake로 결정하는 규칙.</div>
+        </div>
+        <div class="q-card">
+          <div class="q-tag">응답 모드 · Response Mode</div>
+          <div class="q-text">mention-only(직접 멘션만) vs default-intake(미언급도 접수 판단, Codex).</div>
+        </div>
+        <div class="q-card">
+          <div class="q-tag">스티키 오너 · Sticky Owner</div>
+          <div class="q-text">직전 담당자가 후속 메시지 owner를 이어받음. explicit mention이 무시 우선.</div>
+        </div>
+        <div class="q-card">
+          <div class="q-tag">Learning Loop</div>
+          <div class="q-text">주간 self-learning. 교훈을 SHARED에 모아 검증 후 TEAM-OS로 승격하는 자가발전 루프.</div>
+        </div>
+        <div class="q-card">
+          <div class="q-tag">Coordinator</div>
+          <div class="q-text">전체 맥락을 관찰하며 owner 추론·조율. Bill · Codex(+Steve 관찰).</div>
+        </div>
+        <div class="q-card">
+          <div class="q-tag">Specialist</div>
+          <div class="q-text">배정 메시지 + reply context만 보는 멤버. 확장은 coordinator/GD 승인. 예) Hermes.</div>
+        </div>
+        <div class="q-card">
+          <div class="q-tag">b3os-bwf</div>
+          <div class="q-text">팀 기본 과제 워크플로우. PM계획→배정→실행+품질→검증→보고+카드→학습hook 6단계.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-brand"><strong>b3rys</strong> — 팀 &amp; 스킬</div>
+      <div class="footer-date">2026</div>
+    </div>
+  </footer>
+
+  <script>const o=new IntersectionObserver((es)=>es.forEach(e=>e.isIntersecting&&e.target.classList.add('visible')),{threshold:0.1,rootMargin:'0px 0px -40px 0px'});document.querySelectorAll('.reveal').forEach(el=>o.observe(el));</script>
+</body>
+</html>

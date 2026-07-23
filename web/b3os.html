@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>b3os — Self-Hosted AI Team OS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Geist+Mono:wght@300;400;500&family=Noto+Sans+KR:wght@300;400;500;700&display=swap">
+  <link rel="stylesheet" href="assets/tokens.css">
+  <link rel="stylesheet" href="assets/base.css">
+  <link rel="stylesheet" href="assets/components.css">
+</head>
+<body>
+  <div class="grid-bg"></div>
+
+  <nav style="position:sticky;top:0;z-index:50;backdrop-filter:blur(10px);background:var(--bg-primary);border-bottom:1px solid var(--border)"><div class="container" style="display:flex;gap:20px;align-items:center;padding:14px 0;flex-wrap:wrap"><a href="index.html" style="font-family:var(--heading);font-weight:700;color:var(--text-primary);text-decoration:none">b3rys</a><a href="team-os.html" style="color:var(--text-secondary);text-decoration:none;font-size:14px">팀 운영체계</a><a href="workflow.html" style="color:var(--text-secondary);text-decoration:none;font-size:14px">워크플로우</a><a href="b3os.html" style="color:var(--text-secondary);text-decoration:none;font-size:14px">b3os</a><a href="team.html" style="color:var(--text-secondary);text-decoration:none;font-size:14px">팀·스킬</a></div></nav>
+
+  <!-- ═══ HERO / 섹션1: 제품 비전 & 포지셔닝 ═══ -->
+  <section class="hero">
+    <div class="hero-glow"></div>
+    <div class="container">
+      <div class="hero-label"><span>Self-Hosted AI Team OS</span></div>
+      <h1 class="hero-title">b3os — 팀이 <em>일하는 방식</em>을 호스팅한다</h1>
+      <p class="hero-sub">Kraken gives agents a room. b3os gives them an operating doctrine.</p>
+      <p class="hero-desc">'AI 에이전트 채팅툴'이 아니라 <strong>self-hosted AI team operating system</strong>(직접 호스팅하는 AI 팀 운영체계). 유료 가치는 모델 성능이 아니라 <strong>신뢰·운영·감사·셀프서비스 영입·업데이트/지원</strong>. 본체는 대시보드 기반 운영(영입·OT·설정·과제·보고)이고, 텔레그램·슬랙은 대화 창구일 뿐이다.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">01 — VISION &amp; POSITIONING</div>
+        <h2 class="section-title">운영 도크트린을 파는 제품</h2>
+        <p class="section-subtitle">경쟁(크라켄)은 협업 '방'만 준다. b3os는 팀이 일하는 규칙과 운영체계 — 운영 도크트린(operating doctrine, 운영 교범) — 을 함께 제공한다.</p>
+      </div>
+
+      <figure class="reveal" style="margin:48px 0;text-align:center"><img src="assets/img/b3os-architecture.png" alt="b3os 아키텍처 — 대시보드, 라우터/버스/스케줄러, 네이티브+외부 런타임 3계층" style="max-width:100%;border-radius:12px;border:1px solid var(--border)" loading="lazy"><figcaption style="margin-top:12px;color:var(--text-secondary);font-size:14px">b3os 아키텍처 — 대시보드 · 라우터/버스/스케줄러 · 네이티브+외부 런타임 3계층</figcaption></figure>
+
+      <div class="card-grid reveal">
+        <div class="card card--highlight">
+          <div class="card-title">제품 본체 = 대시보드 운영</div>
+          <div class="card-text">영입 · OT(온보딩) · 설정 · 과제 · 보고를 대시보드에서 처리. 채널(텔레그램/슬랙)은 입출력 창구이지 제품이 아니다.</div>
+        </div>
+        <div class="card card--highlight">
+          <div class="card-title">유료 가치 = 운영 레이어</div>
+          <div class="card-text">신뢰 · 운영 · 감사 · 셀프서비스 영입 · 업데이트/지원. <strong>모델 성능은 과금 대상이 아니다.</strong> LLM API·호스팅은 고객 부담.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Kraken — 방만 준다</div>
+          <div class="card-text">협업할 공간(room)만 제공. 팀이 어떻게 일할지의 규칙·운영체계는 사용자가 알아서.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">b3os — 도크트린을 준다</div>
+          <div class="card-text">owner 규칙·과제 라이프사이클·신뢰 버스·감사·영입 절차까지 운영체계로 패키징.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 섹션2: 고객 세그먼트 & 가격 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">02 — SEGMENTS & PRICING</div>
+        <h2 class="section-title">누가 사는가, 얼마인가</h2>
+        <p class="section-subtitle">self-hosted + 상용 라이선스. b3os는 운영 레이어에만 과금하고, LLM API·호스팅 비용은 고객이 직접 부담한다.</p>
+      </div>
+
+      <div class="card-grid reveal">
+        <div class="card">
+          <div class="card-text"><span class="engine-badge">Community · 무료</span></div>
+          <div class="card-title" style="margin-top:14px">1 seat · 2 agent</div>
+          <div class="card-text">감사 · RBAC · 자동업데이트 <strong>없음</strong>. 평가·셀프호스트 입문용.</div>
+        </div>
+        <div class="card">
+          <div class="card-text"><span class="engine-badge">Starter · $79 / 월</span></div>
+          <div class="card-title" style="margin-top:14px">2 seat · 2 agent</div>
+          <div class="card-text">감사 30일 · 이메일 지원 · 자동업데이트.</div>
+        </div>
+        <div class="card card--highlight">
+          <div class="card-text"><span class="engine-badge">Team · $299 / 월 · 핵심 tier</span></div>
+          <div class="card-title" style="margin-top:14px">5 seat · 5 agent</div>
+          <div class="card-text">전체 감사 · RBAC · 우선지원 · 자동백업. 초과: seat <strong>+$30</strong>/명·월, agent <strong>+$40</strong>/명·월.</div>
+        </div>
+        <div class="card">
+          <div class="card-text"><span class="engine-badge">Business · custom $1,500+ / 월</span></div>
+          <div class="card-title" style="margin-top:14px">멀티테넌트</div>
+          <div class="card-text">SSO · 보안 리포트 · 전담 지원. 상담형 + paid pilot.</div>
+        </div>
+      </div>
+
+      <div class="reveal" style="margin-top:48px">
+        <h3 style="margin-bottom:24px">전환 게이트 (upgrade trigger)</h3>
+        <div class="flywheel">
+          <div class="flywheel-step">
+            <div class="flywheel-num">FREE → STARTER</div>
+            <div class="flywheel-label">3번째 agent · 감사</div>
+            <div class="flywheel-desc">agent cap 초과 또는 감사 로그가 필요해지는 순간.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">STARTER → TEAM</div>
+            <div class="flywheel-label">RBAC · 다인 협업</div>
+            <div class="flywheel-desc">권한 분리와 여러 seat 협업이 필요해질 때.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">TEAM → BUSINESS</div>
+            <div class="flywheel-label">멀티테넌트 · SSO</div>
+            <div class="flywheel-desc">고객 격리·SSO·보안 리포트 요구 시.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="reveal" style="margin-top:32px">
+        <h3 style="margin-bottom:24px">타깃 페르소나 3</h3>
+        <div class="card-grid card-grid--three">
+          <div class="card">
+            <div class="card-text"><span class="engine-badge">Robin · 빌더</span></div>
+            <div class="card-title" style="margin-top:14px">AI 개발자 · 빌더</div>
+            <div class="card-text">X·GitHub·HN·Discord로 모객. 가치 = <strong>30~60분 내 AI 개발팀 세팅</strong>. 셀프서비스 진입.</div>
+          </div>
+          <div class="card">
+            <div class="card-text"><span class="engine-badge">Yang · 소상공인</span></div>
+            <div class="card-title" style="margin-top:14px">비개발자 · 소규모 사업자</div>
+            <div class="card-text">'AI 비서'가 아니라 <strong>AI 팀원 관리 콘솔</strong>. managed setup + paid pilot.</div>
+          </div>
+          <div class="card">
+            <div class="card-text"><span class="engine-badge">Business · 조직</span></div>
+            <div class="card-title" style="margin-top:14px">보안 · 감사 · 고객분리</div>
+            <div class="card-text">SSO · RBAC · audit · 멀티테넌트. 상담형 + paid pilot.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 섹션3: 로드맵 Phase 1→2→3 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">03 — ROADMAP</div>
+        <h2 class="section-title">파일럿에서 상용까지</h2>
+        <p class="section-subtitle">설계 원칙 = <strong>no-Bill 셀프서비스</strong>: 고객이 곧 admin이고, 프로비저닝까지 대시보드가 자동화한다.</p>
+      </div>
+
+      <div class="timeline reveal">
+        <div class="timeline-item">
+          <div class="timeline-phase">Phase 1 — 로빈 파일럿 MVP</div>
+          <div class="timeline-title">신뢰 뼈대 + 표준 표면</div>
+          <div class="timeline-desc">발신자 위조 차단 · ack 루프(신뢰 뼈대) · 4화면 표준 표면(Inbox / Tasks / Agents / Audit) · 신규 OT 영입 · 실워크플로우 1~2개. 합격선 = 30~60분 세팅 + 실워크플로우 동작.</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-phase">Phase 2 — 신뢰·구매 전환</div>
+          <div class="timeline-title">인증된 버스 + 설치 GUI</div>
+          <div class="timeline-desc">인증된 버스(actor·credential·trace) · RBAC · tenant(테넌트, 고객 격리 단위) 시작 · 비개발자 설치 GUI · first-run 마법사(첫 실행 설정 위저드).</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-phase">Phase 3 — 멀티고객·상용</div>
+          <div class="timeline-title">격리 · 라이선스 · 내장 채팅</div>
+          <div class="timeline-desc">tenant 격리 · 클로즈드 바이너리(소스 비공개 배포) · 라이선스 · 멀티테넌시 · built-in 채팅.</div>
+        </div>
+      </div>
+
+      <div class="reveal" style="margin-top:40px">
+        <h3 style="margin-bottom:24px">영입 = 신규 OT(온보딩) 절차</h3>
+        <div class="flywheel">
+          <div class="flywheel-step">
+            <div class="flywheel-num">01</div>
+            <div class="flywheel-label">등록</div>
+            <div class="flywheel-desc">대시보드에서 신규 팀원 등록.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">02</div>
+            <div class="flywheel-label">프로비저닝</div>
+            <div class="flywheel-desc">런타임·연결·credential 자동 준비.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">03</div>
+            <div class="flywheel-label">OT 번들 전달</div>
+            <div class="flywheel-desc">운영규칙·페르소나·팀 현황·능력 카탈로그·연결정보·첫 액션 가이드.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">04</div>
+            <div class="flywheel-label">합류 확인</div>
+            <div class="flywheel-desc">ack 확인까지 owner가 추적.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 섹션4: 아키텍처 계층 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">04 — ARCHITECTURE</div>
+        <h2 class="section-title">3계층 운영 스택</h2>
+        <p class="section-subtitle">상단 대시보드 UI → 중간 라우터·버스·스케줄러 → 하단 네이티브 런타임 + 외부 런타임 어댑터.</p>
+      </div>
+
+      <div class="card-grid reveal" style="grid-template-columns:1fr">
+        <div class="card card--highlight">
+          <div class="card-text"><span class="engine-badge">상단 — UI LAYER</span></div>
+          <div class="card-title" style="margin-top:12px">대시보드 UI</div>
+          <div class="card-text">영입 · OT · 설정 · 과제. 고객(admin)이 직접 운영하는 표면.</div>
+        </div>
+      </div>
+
+      <div class="flywheel reveal" style="margin-top:2px">
+        <div class="flywheel-step">
+          <div class="flywheel-num">중간 — CONTROL</div>
+          <div class="flywheel-label">라우터</div>
+          <div class="flywheel-desc">메시지 결정 — 누가 답할지.</div>
+        </div>
+        <div class="flywheel-step">
+          <div class="flywheel-num">중간 — CONTROL</div>
+          <div class="flywheel-label">버스</div>
+          <div class="flywheel-desc">배달 — 수신자 wake·전달.</div>
+        </div>
+        <div class="flywheel-step">
+          <div class="flywheel-num">중간 — CONTROL</div>
+          <div class="flywheel-label">스케줄러</div>
+          <div class="flywheel-desc">반복 — 주기 잡 발사.</div>
+        </div>
+      </div>
+
+      <div class="card-grid reveal" style="margin-top:2px">
+        <div class="card">
+          <div class="card-text"><span class="engine-badge">하단 — RUNTIME</span></div>
+          <div class="card-title" style="margin-top:12px">네이티브 런타임</div>
+          <div class="card-text">b3os가 LLM을 직접 호출해 팀원을 구동.</div>
+        </div>
+        <div class="card">
+          <div class="card-text"><span class="engine-badge">하단 — RUNTIME</span></div>
+          <div class="card-title" style="margin-top:12px">외부 런타임 어댑터</div>
+          <div class="card-text">Claude · OpenClaw 등 외부 런타임 연결.</div>
+        </div>
+      </div>
+
+      <div class="card-grid card-grid--three reveal" style="margin-top:24px">
+        <div class="card">
+          <div class="card-title">상주 bun 서버</div>
+          <div class="card-text">team-collab 상주 프로세스. 단일 이벤트루프.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">SQLite team.db</div>
+          <div class="card-text">메시지·과제·ops_registry 정본 저장소.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">wake dispatcher</div>
+          <div class="card-text">1.5초 폴링으로 수신자 깨움.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 섹션5: 라우터 아키텍처 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">05 — ROUTER</div>
+        <h2 class="section-title">누가 답할지 결정한다</h2>
+        <p class="section-subtitle">단체방에서 필요한 1명(논의면 여럿)만 깨운다. 채택 엔진 = <strong>routeTeamMessageHybrid</strong> (regex + LLM, 2026-05-24).</p>
+      </div>
+
+      <div class="card-grid card-grid--three reveal">
+        <div class="card">
+          <div class="card-title">routeTeamMessage</div>
+          <div class="card-text">결정론 regex 폴백. LLM 없이 규칙으로 판정.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">routeTeamMessageLLM</div>
+          <div class="card-text">순수 LLM 판단.</div>
+        </div>
+        <div class="card card--highlight">
+          <div class="card-title">routeTeamMessageHybrid</div>
+          <div class="card-text">regex + LLM. <strong>채택 (2026-05-24).</strong></div>
+        </div>
+      </div>
+
+      <div class="reveal" style="margin-top:40px">
+        <h3 style="margin-bottom:24px">하이브리드 결정 흐름 (decision tree)</h3>
+        <div class="flywheel">
+          <div class="flywheel-step">
+            <div class="flywheel-num">①</div>
+            <div class="flywheel-label">@호출 감지</div>
+            <div class="flywheel-desc">detectExplicitTargets → 멘션 전원 wake.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">②</div>
+            <div class="flywheel-label">sticky 유효</div>
+            <div class="flywheel-desc">현재 담당자(직전 owner) 이어받기.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">③</div>
+            <div class="flywheel-label">default intake</div>
+            <div class="flywheel-desc">LLM이 agents.json 역할로 담당 판단.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">④</div>
+            <div class="flywheel-label">ask_gd</div>
+            <div class="flywheel-desc">애매·순수 결정은 GD에게 질의.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="context-grid reveal" style="margin-top:32px">
+        <div class="context-card">
+          <div class="context-label">NAME DETECTION</div>
+          <div class="context-title">이름 감지 — @ 붙은 경우만</div>
+          <div class="context-desc">substring 오탐 차단, 과거 참조 제외. 멘션 형태일 때만 wake.</div>
+          <div class="context-example"><strong>"빌딩 임대료" → []</strong> — '빌'이 들어가도 Bill을 깨우지 않음</div>
+        </div>
+        <div class="context-card">
+          <div class="context-label">LLM ENGINE</div>
+          <div class="context-title">로컬 Ollama exaone3.5:2.4b</div>
+          <div class="context-desc">온디바이스 판단 모델. 외부 전송 없이 역할 라우팅.</div>
+          <div class="context-example"><strong>exact 73% · acceptable 95%</strong> — 평균 0.9s</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 섹션6: 스케줄러 v2 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">06 — SCHEDULER v2</div>
+        <h2 class="section-title">상주 서버 안에서 시계를 챙긴다</h2>
+        <p class="section-subtitle">launchd 매번 spawn 방식을 버리고, 서버 내 in-process 워커가 주기 잡을 발사한다.</p>
+      </div>
+
+      <div class="evolution reveal">
+        <div class="evo-box">
+          <div class="evo-label">BEFORE — launchd plist</div>
+          <div class="evo-text">매번 새 프로세스 spawn</div>
+        </div>
+        <div class="evo-arrow">→</div>
+        <div class="evo-box">
+          <div class="evo-label">AFTER — in-process</div>
+          <div class="evo-text evo-text--active">schedulerWorker</div>
+        </div>
+      </div>
+
+      <div class="card-grid reveal">
+        <div class="card">
+          <div class="card-title">기존 문제</div>
+          <div class="card-text">you 하드코딩 · 퍼블릭 export 제외 → 퍼블릭 팀에서 안 돎. 매 실행마다 새 프로세스.</div>
+        </div>
+        <div class="card card--highlight">
+          <div class="card-title">신규 v2 동작</div>
+          <div class="card-text">서버 시작 시 워커 기동 → ~60초마다 <strong>ops_registry</strong>에서 enabled=true && next_run_at ≤ now 조회 → 해당 잡 wake 발사(inbox/wakeDispatcher 재사용) → next_run_at 갱신.</div>
+        </div>
+      </div>
+
+      <div class="card-grid reveal" style="margin-top:24px">
+        <div class="card">
+          <div class="card-title">동시성 격리</div>
+          <div class="card-text">단일 이벤트루프 · await 양보. '발사'만 하고 진짜 작업은 out-of-process. try/catch로 한 잡 실패 격리. launchd는 서버 supervisor 역할만.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">등록 잡 (jobs)</div>
+          <div class="card-text">칸반 PM 정리 · task-review-ping · self-learning(금) · digest · auto-heal · b3os_native 야간 스파이크.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 섹션7: 팀 메시지버스 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">07 — TEAM MESSAGE BUS</div>
+        <h2 class="section-title">봇 ↔ 봇 통신의 신뢰 레이어</h2>
+        <p class="section-subtitle">메시지 insert → 수신자 자동 wake. delivery(실전달)와 visibility(표시)를 분리하고, anti-pingpong 가드로 무한 루프를 막는다.</p>
+      </div>
+
+      <div class="flywheel reveal">
+        <div class="flywheel-step">
+          <div class="flywheel-num">01</div>
+          <div class="flywheel-label">pending 폴링</div>
+          <div class="flywheel-desc">ack_at IS NULL 인 메시지 조회.</div>
+        </div>
+        <div class="flywheel-step">
+          <div class="flywheel-num">02</div>
+          <div class="flywheel-label">runtime 재배치</div>
+          <div class="flywheel-desc">수신자 런타임으로 라우팅.</div>
+        </div>
+        <div class="flywheel-step">
+          <div class="flywheel-num">03</div>
+          <div class="flywheel-label">wake adapter</div>
+          <div class="flywheel-desc">claude=tmuxInject · openclaw=push-wake.</div>
+        </div>
+        <div class="flywheel-step">
+          <div class="flywheel-num">04</div>
+          <div class="flywheel-label">retry / backoff</div>
+          <div class="flywheel-desc">실패 시 1s / 2s / 4s, 최대 3회.</div>
+        </div>
+      </div>
+
+      <div class="context-grid reveal">
+        <div class="context-card">
+          <div class="context-label">DELIVERY vs VISIBILITY</div>
+          <div class="context-title">실전달과 표시의 분리</div>
+          <div class="context-desc">버스에 배달되는 것과 채널에 보이는 것은 다른 축. telegram sync 정책 = none / status / handoff / result.</div>
+        </div>
+        <div class="context-card">
+          <div class="context-label">ANTI-PINGPONG</div>
+          <div class="context-title">무한 왕복 차단</div>
+          <div class="context-desc">hop_count + parent_message_id 추적. BUS_MAX_AUTO_ROUNDS(기본 2) 초과 시 차단 + owner → GD 알림.</div>
+        </div>
+      </div>
+
+      <div class="reveal" style="margin-top:32px">
+        <h3 style="margin-bottom:24px">4 안전장치 (safety grid)</h3>
+        <div class="card-grid">
+          <div class="card">
+            <div class="card-title">원자적 dispatch 마킹</div>
+            <div class="card-text">delivery_state = dispatching 으로 중복 발사 방지.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">wake timeout + async 격리</div>
+            <div class="card-text">~10s 타임아웃, 비동기로 격리.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">dead-letter</div>
+            <div class="card-text">3회 초과 → failed + audit 기록.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">신뢰 출처만 wake</div>
+            <div class="card-text">위조 발신자는 깨우지 않음.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 섹션8: 네이티브 런타임 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">08 — NATIVE RUNTIME</div>
+        <h2 class="section-title">b3os가 LLM을 직접 호출한다</h2>
+        <p class="section-subtitle">외부 런타임 없이 팀원을 구동. 구독 OAuth는 3rd-party 불가이므로 합법 경로만 쓴다.</p>
+      </div>
+
+      <div class="context-grid reveal">
+        <div class="context-card">
+          <div class="context-label">접근 A — 기본</div>
+          <div class="context-title">API 키 (종량 · 깨끗)</div>
+          <div class="context-desc">공식 API 키로 종량 호출. 약관상 깨끗한 합법 경로.</div>
+        </div>
+        <div class="context-card">
+          <div class="context-label">접근 B — 회색</div>
+          <div class="context-title">공식 CLI 래핑 (구독)</div>
+          <div class="context-desc">구독 기반 공식 CLI 래핑. 회색 지대.</div>
+        </div>
+      </div>
+
+      <div class="card-grid reveal" style="grid-template-columns:1fr;margin-top:8px">
+        <div class="card card--highlight">
+          <div class="card-title">매니지드 비즈모델</div>
+          <div class="card-text">고객은 정액 지불 → 우리가 API 키로 종량 호출 → 마진 포함 정액. 비개발자가 키 관리 없이 팀을 굴리게 한다.</div>
+        </div>
+      </div>
+
+      <div class="reveal" style="margin-top:40px">
+        <h3 style="margin-bottom:24px">M1 MVP 메시지 흐름</h3>
+        <div class="flywheel">
+          <div class="flywheel-step">
+            <div class="flywheel-num">01</div>
+            <div class="flywheel-label">POST /api/inbox</div>
+            <div class="flywheel-desc">insertMessage 로 적재.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">02</div>
+            <div class="flywheel-label">wakeDispatcher.tick</div>
+            <div class="flywheel-desc">wake() 즉시 반환 (deferred).</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">03</div>
+            <div class="flywheel-label">백그라운드 runTurn</div>
+            <div class="flywheel-desc">buildPrompt → callClaude → 중복체크.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">04</div>
+            <div class="flywheel-label">insertMessage + 해제</div>
+            <div class="flywheel-desc">최종답 1회 게시, 잠금 해제.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="reveal" style="margin-top:32px">
+        <h3 style="margin-bottom:24px">M1 4 안전장치</h3>
+        <div class="card-grid">
+          <div class="card">
+            <div class="card-title">lease-safe async</div>
+            <div class="card-text">wake 즉시 반환, 작업은 백그라운드.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">in-flight 잠금</div>
+            <div class="card-text">message_id:agentId 키로 동시 처리 차단.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">at-most-once</div>
+            <div class="card-text">게시 전 중복체크 — 최종답 1회만.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">tool 없음</div>
+            <div class="card-text">M1은 Claude API 1개 · 1:1 DM · 텍스트만.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-grid reveal" style="margin-top:24px">
+        <div class="card">
+          <div class="card-title">핵심 함수</div>
+          <div class="card-text">callClaude · makeB3osNativeAdapter · runTurn · buildPrompt.</div>
+        </div>
+        <div class="card">
+          <div class="card-title">M2+ 확장</div>
+          <div class="card-text">OpenAI provider · 그룹채팅 · 텔레그램 visible · tool · 권한모델 · M4 매니지드.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 섹션9: 경쟁 분석 & 현황 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">09 — COMPETITION &amp; STATUS</div>
+        <h2 class="section-title">우리는 builder가 아니라 run layer</h2>
+        <p class="section-subtitle">피해야 할 말 = '우리도 agent builder'. builder(만드는 도구)와 run layer(운영하는 레이어)를 명확히 구분한다.</p>
+      </div>
+
+      <div class="q-grid reveal">
+        <div class="q-card"><div class="q-tag">Lindy · 노코드</div><div class="q-text">→ data 주권 · self-host · 감사로 차별화</div></div>
+        <div class="q-card"><div class="q-tag">Relevance · 기업 멀티에이전트</div><div class="q-text">→ 구축형 · 사내데이터 강조</div></div>
+        <div class="q-card"><div class="q-tag">CrewAI · 프레임워크</div><div class="q-text">→ 운영 UI · 조직 패키징</div></div>
+        <div class="q-card"><div class="q-tag">Agentforce · CRM</div><div class="q-text">→ 벤더 중립 · 프라이빗</div></div>
+        <div class="q-card"><div class="q-tag">n8n · self-host</div><div class="q-text">→ AI 팀 운영 OS로 포지셔닝</div></div>
+        <div class="q-card"><div class="q-tag">Dify · Flowise · 앱빌더</div><div class="q-text">→ 업무 실행 환경 제공</div></div>
+        <div class="q-card"><div class="q-tag">LangGraph · agent 인프라</div><div class="q-text">→ 운영 레이어로 차별화</div></div>
+        <div class="q-card"><div class="q-tag">Kraken · Corca · 직접경쟁</div><div class="q-text">→ 공개 가격 · 빠른 self-host · 업무 OS</div></div>
+      </div>
+
+      <div class="card-grid reveal" style="grid-template-columns:1fr;margin-top:24px">
+        <div class="card card--highlight">
+          <div class="card-text"><span class="engine-badge">STATUS · 2026-06-09</span></div>
+          <div class="card-title" style="margin-top:12px">Phase 1 OT 백엔드 라이브</div>
+          <div class="card-text">테스트 25 pass · 프로비저닝 자동화 완료 · 루이/포린 영입. <strong>착수:</strong> /메뉴 연동 (승인 메뉴 + 6자리 PIN).</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 섹션10: 용어집 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">10 — GLOSSARY</div>
+        <h2 class="section-title">용어집</h2>
+        <p class="section-subtitle">b3os 운영·아키텍처 핵심 용어.</p>
+      </div>
+
+      <div class="card-grid card-grid--three reveal">
+        <div class="card"><div class="card-title">self-hosted AI team OS</div><div class="card-text">직접 호스팅하는 AI 팀 운영체계.</div></div>
+        <div class="card"><div class="card-title">운영 도크트린</div><div class="card-text">팀이 일하는 규칙·운영 교범.</div></div>
+        <div class="card"><div class="card-title">run layer</div><div class="card-text">만드는 도구가 아닌 운영하는 레이어.</div></div>
+        <div class="card"><div class="card-title">영입 = OT</div><div class="card-text">온보딩 — 등록→프로비저닝→번들→합류.</div></div>
+        <div class="card"><div class="card-title">seat</div><div class="card-text">사람 사용자 슬롯(과금 단위).</div></div>
+        <div class="card"><div class="card-title">agent cap</div><div class="card-text">tier별 AI 에이전트 상한.</div></div>
+        <div class="card"><div class="card-title">lease-safe async</div><div class="card-text">wake 즉시 반환, 작업은 백그라운드.</div></div>
+        <div class="card"><div class="card-title">in-flight 잠금</div><div class="card-text">message_id:agentId 동시처리 차단.</div></div>
+        <div class="card"><div class="card-title">at-most-once</div><div class="card-text">게시 전 중복체크 — 최종답 1회.</div></div>
+        <div class="card"><div class="card-title">sticky</div><div class="card-text">직전 owner가 다음 메시지를 이어받음.</div></div>
+        <div class="card"><div class="card-title">default intake</div><div class="card-text">멘션·sticky 없을 때 역할 기반 배정.</div></div>
+        <div class="card"><div class="card-title">ask_gd</div><div class="card-text">애매·순수 결정은 GD에게 질의.</div></div>
+        <div class="card"><div class="card-title">hop_count</div><div class="card-text">메시지 왕복 횟수 — pingpong 가드.</div></div>
+        <div class="card"><div class="card-title">delivery vs visibility</div><div class="card-text">실전달과 채널 표시의 분리.</div></div>
+        <div class="card"><div class="card-title">anti-pingpong</div><div class="card-text">봇 간 무한 왕복 차단 가드.</div></div>
+        <div class="card"><div class="card-title">sync 정책</div><div class="card-text">none / status / handoff / result.</div></div>
+        <div class="card"><div class="card-title">wake dispatcher</div><div class="card-text">1.5초 폴링으로 수신자 깨움.</div></div>
+        <div class="card"><div class="card-title">schedulerWorker</div><div class="card-text">상주 서버 내 in-process 주기 워커.</div></div>
+        <div class="card"><div class="card-title">ops_registry</div><div class="card-text">주기 잡 등록·next_run_at 저장소.</div></div>
+        <div class="card"><div class="card-title">RBAC</div><div class="card-text">역할 기반 접근 제어.</div></div>
+        <div class="card"><div class="card-title">멀티테넌트</div><div class="card-text">고객별 격리된 tenant 운영.</div></div>
+        <div class="card"><div class="card-title">M1~M4</div><div class="card-text">네이티브 런타임 단계 마일스톤.</div></div>
+        <div class="card"><div class="card-title">callClaude</div><div class="card-text">Claude API 직접 호출 핵심 함수.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-brand"><strong>b3rys</strong> — b3os · Self-Hosted AI Team OS</div>
+      <div class="footer-date">2026</div>
+    </div>
+  </footer>
+
+  <script>const o=new IntersectionObserver((es)=>es.forEach(e=>e.isIntersecting&&e.target.classList.add('visible')),{threshold:0.1,rootMargin:'0px 0px -40px 0px'});document.querySelectorAll('.reveal').forEach(el=>o.observe(el));</script>
+</body>
+</html>

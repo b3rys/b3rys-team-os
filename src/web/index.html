@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="color-scheme" content="dark" />
+    <title>b3rys TEAM OS</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <style>
+      #boot-error {
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0; padding: 24px; overflow: auto;
+        background: #1a0000; color: #fca5a5; font: 13px/1.5 ui-monospace, Menlo, monospace;
+        white-space: pre-wrap; z-index: 9999; display: none;
+      }
+      #boot-error.show { display: block; }
+      #boot-error h2 { color: #f87171; font-size: 16px; margin: 0 0 12px; }
+    </style>
+  </head>
+  <body class="bg-surface-2 text-slate-100 font-sans antialiased h-screen overflow-hidden">
+    <div id="app" class="h-screen flex flex-col"></div>
+    <div id="boot-error"></div>
+    <script>
+      // Visible error catcher — if JS crashes the dashboard, show the error here instead of a silent black screen.
+      (function () {
+        var err = document.getElementById("boot-error");
+        function showError(label, e) {
+          if (!err) return;
+          var msg = "";
+          if (e && e.error) msg = (e.error.stack || e.error.message || String(e.error));
+          else if (e && e.reason) msg = (e.reason.stack || e.reason.message || String(e.reason));
+          else if (e && e.message) msg = e.message + (e.filename ? "\n  at " + e.filename + ":" + e.lineno + ":" + e.colno : "");
+          else msg = String(e);
+          err.innerHTML = "<h2>" + label + "</h2>" + (err.textContent ? err.textContent + "\n---\n" : "") + msg;
+          err.classList.add("show");
+        }
+        window.addEventListener("error", function (e) { showError("window error", e); });
+        window.addEventListener("unhandledrejection", function (e) { showError("unhandled promise rejection", e); });
+      })();
+    </script>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

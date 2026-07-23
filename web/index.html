@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>b3rys 시스템 가이드 — AI 팀 운영체계</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Geist+Mono:wght@300;400;500&family=Noto+Sans+KR:wght@300;400;500;700&display=swap">
+  <link rel="stylesheet" href="assets/tokens.css">
+  <link rel="stylesheet" href="assets/base.css">
+  <link rel="stylesheet" href="assets/components.css">
+</head>
+<body>
+  <div class="grid-bg"></div>
+
+  <nav style="position:sticky;top:0;z-index:50;backdrop-filter:blur(10px);background:var(--bg-primary);border-bottom:1px solid var(--border)"><div class="container" style="display:flex;gap:20px;align-items:center;padding:14px 0;flex-wrap:wrap"><a href="index.html" style="font-family:var(--heading);font-weight:700;color:var(--text-primary);text-decoration:none">b3rys</a><a href="team-os.html" style="color:var(--text-secondary);text-decoration:none;font-size:14px">팀 운영체계</a><a href="workflow.html" style="color:var(--text-secondary);text-decoration:none;font-size:14px">워크플로우</a><a href="b3os.html" style="color:var(--text-secondary);text-decoration:none;font-size:14px">b3os</a><a href="team.html" style="color:var(--text-secondary);text-decoration:none;font-size:14px">팀·스킬</a></div></nav>
+
+  <!-- ═══ 섹션1 — HERO ═══ -->
+  <section class="hero">
+    <div class="hero-glow"></div>
+    <div class="container">
+      <div class="hero-label"><span>AI TEAM OPERATING SYSTEM</span></div>
+      <h1 class="hero-title">b3rys — <em>AI 팀 운영체계</em></h1>
+      <p class="hero-sub">Claude Channel · OpenClaw · Hermes — 여러 runtime을 조율하는 팀 운영 레이어</p>
+      <p class="hero-desc">GD 팀장의 <strong>문제 해결과 프로젝트 수행</strong>을 전문적으로 돕는다. b3rys는 특정 runtime(실행 환경) 하나가 아니라, 여러 runtime을 하나의 팀으로 묶는 <strong>운영 레이어(operating layer)</strong>다.</p>
+
+      <p style="margin-top:32px;display:flex;gap:14px;flex-wrap:wrap">
+        <a href="team-os.html" class="engine-badge" style="text-decoration:none;padding:10px 18px;font-size:13px">팀 운영체계 보기 →</a>
+        <a href="b3os.html" class="engine-badge" style="text-decoration:none;padding:10px 18px;font-size:13px">b3os 제품 보기 →</a>
+      </p>
+
+      <p style="margin-top:28px;max-width:640px;padding:14px 18px;background:var(--green-soft);border-left:2px solid var(--green);border-radius:8px;font-family:var(--mono);font-size:13px;color:var(--text-secondary);line-height:1.6">
+        <strong style="color:var(--green);font-weight:500">Kraken gives agents a room. b3os gives them an operating doctrine.</strong>
+      </p>
+
+      <figure style="margin:48px 0 0;text-align:center"><img src="assets/img/hero-overview.png" alt="b3rys — 여러 runtime을 조율하는 AI 팀 운영 레이어 개념도" style="max-width:100%;border-radius:12px;border:1px solid var(--border)" loading="lazy"><figcaption style="margin-top:12px;color:var(--text-secondary);font-size:14px">b3rys — 여러 runtime을 조율하는 AI 팀 운영 레이어 개념도</figcaption></figure>
+    </div>
+  </section>
+
+  <!-- ═══ 섹션2 — b3rys란 무엇인가 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">01 — WHAT IS b3rys</div>
+        <h2 class="section-title">b3rys란 무엇인가</h2>
+        <p class="section-subtitle">하나의 실행 환경이 아니라, 여러 runtime을 한 팀으로 조율하는 운영 레이어. 각 팀원이 역할 관점을 내고 서로 검토해 최선의 결과를 만든다.</p>
+      </div>
+
+      <div class="context-grid reveal">
+        <div class="context-card">
+          <div class="context-label">운영 레이어</div>
+          <div class="context-title">Operating Layer</div>
+          <div class="context-desc">b3rys는 특정 runtime 하나가 아니라 여러 runtime(Claude Channel·OpenClaw·Hermes·Codex CLI)을 조율하는 팀 운영 레이어다. runtime은 갈아끼워도 팀 규칙·기억·과제는 유지된다.</div>
+          <div class="context-example"><strong>"runtime ≠ team"</strong> — 실행 환경은 교체 가능, 팀 운영체계는 영속</div>
+        </div>
+        <div class="context-card">
+          <div class="context-label">핵심 미션</div>
+          <div class="context-title">Multi-Perspective Review</div>
+          <div class="context-desc">각 팀원이 자기 역할(backend·frontend·infra·AI research·PM)의 관점을 내고, 서로의 의견을 교차 검토해 최선의 결과를 만든다. 단독 판단에 의존하지 않는다.</div>
+          <div class="context-example"><strong>"논의 → 결론 → GD 확인 → 실행"</strong> — 검증 기반 협업</div>
+        </div>
+        <div class="context-card">
+          <div class="context-label">공동 리더</div>
+          <div class="context-title">Co-Leaders</div>
+          <div class="context-desc">Bill(a001 · 전체 coordinator · 풀스택 · 인프라)과 Codex(a002 · PM · 조율)가 공동 리더. 멀티멘션 리드는 lead_priority / employee_id 순으로 1명을 정해 중복·누락을 막는다.</div>
+          <div class="context-example"><strong>Bill a001 · Codex a002</strong> — coordinator capability 기반 default owner</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 섹션3 — 5영역 요약 카드 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">02 — GUIDE MAP</div>
+        <h2 class="section-title">5개 영역 — 가이드 맵</h2>
+        <p class="section-subtitle">각 카드는 해당 가이드 페이지로 연결된다. 운영체계 → 워크플로우 → 제품 → 팀·스킬 → 용어집.</p>
+      </div>
+
+      <div class="card-grid card-grid--three reveal">
+        <a href="team-os.html" class="card card--highlight" style="text-decoration:none;color:inherit;display:block">
+          <div class="card-title">팀 운영체계 — TEAM-OS</div>
+          <div class="card-text">owner 판정 · 통신 우선순위 · 공통 응답규칙 · 안전/보안 규칙. 팀이 항상 로드하는 운영 정본.</div>
+          <p style="margin-top:14px"><span class="engine-badge">@멘션 &gt; 답장 &gt; sticky &gt; inference</span></p>
+        </a>
+        <a href="workflow.html" class="card" style="text-decoration:none;color:inherit;display:block">
+          <div class="card-title">워크플로우 — BWF</div>
+          <div class="card-text">BWF 6단계 · 칸반 현황판 · 자율주행 3단계(턴/주행/완전자율) · harness · 핸드오프 추적.</div>
+          <p style="margin-top:14px"><span class="engine-badge">계획→배정→실행→검증→보고→학습</span></p>
+        </a>
+        <a href="b3os.html" class="card" style="text-decoration:none;color:inherit;display:block">
+          <div class="card-title">b3os 제품</div>
+          <div class="card-text">self-hosted AI team OS · 가격/로드맵 · 라우터/스케줄러/메시지버스 · 네이티브 런타임.</div>
+          <p style="margin-top:14px"><span class="engine-badge">Community→Starter→Team→Business</span></p>
+        </a>
+        <a href="team.html" class="card" style="text-decoration:none;color:inherit;display:block">
+          <div class="card-title">팀 · 스킬</div>
+          <div class="card-text">11명 멤버 · 런타임 분류 · 스킬 생태계(b3rys-*) · 온보딩 · learning-loop 자가학습.</div>
+          <p style="margin-top:14px"><span class="engine-badge">Claude · OpenClaw · Hermes 런타임</span></p>
+        </a>
+        <a href="#glossary" class="card" style="text-decoration:none;color:inherit;display:block">
+          <div class="card-title">용어집 — Glossary</div>
+          <div class="card-text">runtime · owner · sticky · BWF · harness · handoff · learning-loop 등 핵심 용어 모음. 각 페이지 하단 앵커 안내.</div>
+          <p style="margin-top:14px"><span class="engine-badge">핵심 용어 한곳에</span></p>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 섹션4 — 팀 미션 & 가치 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">03 — MISSION &amp; VALUE</div>
+        <h2 class="section-title">팀 미션 &amp; 가치</h2>
+        <p class="section-subtitle">Main Mission — GD 팀장의 문제 해결과 프로젝트 수행을 전문적으로 돕는다. b3os 유료 가치는 모델 성능이 아니라 신뢰·운영·감사다.</p>
+      </div>
+
+      <div class="context-grid reveal">
+        <div class="context-card">
+          <div class="context-label">신뢰</div>
+          <div class="context-title">Trust</div>
+          <div class="context-desc">예측 가능한 owner 판정과 안전·보안 규칙. credential·외부 전송·삭제는 승인 게이트를 통과해야 실행된다.</div>
+        </div>
+        <div class="context-card">
+          <div class="context-label">운영</div>
+          <div class="context-title">Operations</div>
+          <div class="context-desc">칸반·작업루프·핸드오프 추적으로 끝나지 않은 일이 조용히 사라지지 않게 한다. 셀프서비스 영입·업데이트/지원 포함.</div>
+        </div>
+        <div class="context-card">
+          <div class="context-label">감사</div>
+          <div class="context-title">Audit</div>
+          <div class="context-desc">메시지 DB·audit log로 무엇을·왜·어디에 반영했는지 추적 가능. 변경은 되돌릴 수 있게 기록한다.</div>
+        </div>
+      </div>
+
+      <div class="card-grid card-grid--three reveal">
+        <div class="card">
+          <div class="card-title" style="color:var(--green);font-size:32px">11명</div>
+          <div class="card-text">팀원 — 역할별 풀스택/AI research/PM/Mac·Windows 전문가 구성</div>
+        </div>
+        <div class="card">
+          <div class="card-title" style="color:var(--green);font-size:32px">4종</div>
+          <div class="card-text">런타임 — Claude Code · OpenClaw · Hermes · Codex CLI</div>
+        </div>
+        <div class="card">
+          <div class="card-title" style="color:var(--green);font-size:32px">8종</div>
+          <div class="card-text">팀 스킬 — b3rys-* 스킬 생태계(inbox·bwf·harness·learning-loop 등)</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 섹션5 — 푸터 네비 ═══ -->
+  <section class="section" id="glossary">
+    <div class="container">
+      <div class="reveal" style="text-align:center">
+        <div class="section-number" style="opacity:0.7">NAVIGATE</div>
+        <p style="display:flex;gap:14px;flex-wrap:wrap;justify-content:center;margin-bottom:28px">
+          <a href="index.html" class="engine-badge" style="text-decoration:none;padding:8px 16px">홈</a>
+          <a href="team-os.html" class="engine-badge" style="text-decoration:none;padding:8px 16px">팀 운영체계</a>
+          <a href="workflow.html" class="engine-badge" style="text-decoration:none;padding:8px 16px">워크플로우</a>
+          <a href="b3os.html" class="engine-badge" style="text-decoration:none;padding:8px 16px">b3os</a>
+          <a href="team.html" class="engine-badge" style="text-decoration:none;padding:8px 16px">팀·스킬</a>
+        </p>
+        <p style="font-family:var(--mono);font-size:13px;color:var(--text-secondary);line-height:1.8">
+          대시보드 — <strong style="color:var(--green);font-weight:500">https://your-team.example.com/team</strong> · <strong style="color:var(--green);font-weight:500">localhost:7878/team</strong>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-brand"><strong>b3rys</strong> — AI 팀 운영체계 가이드</div>
+      <div class="footer-date">2026</div>
+    </div>
+  </footer>
+
+  <script>const o=new IntersectionObserver((es)=>es.forEach(e=>e.isIntersecting&&e.target.classList.add('visible')),{threshold:0.1,rootMargin:'0px 0px -40px 0px'});document.querySelectorAll('.reveal').forEach(el=>o.observe(el));</script>
+</body>
+</html>

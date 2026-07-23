@@ -1,0 +1,161 @@
+/* ═══════════════════════════════════════════════════════════
+   b3rys Design System — Tokens
+   CSS custom properties (color, typography, spacing, radius, transition)
+   Themes:
+     data-theme="dark"          (default — green accent on dark)
+     data-theme="light"         (green accent on light)
+     data-theme="orange-dark"   (orange accent on warm dark)
+     data-theme="orange-light"  (orange accent on warm light)
+
+   The "--green-*" token slot is the canonical brand-accent slot;
+   orange themes override it with orange values. Component CSS only
+   reads --green-* tokens, so swapping data-theme retunes the whole page.
+   ═══════════════════════════════════════════════════════════ */
+
+:root,
+[data-theme="dark"] {
+  /* ─── Color: Backgrounds ─── */
+  --bg-deep: #080b10;
+  --bg-primary: #0d1117;
+  --bg-card: #111820;
+  --bg-card-hover: #151d27;
+
+  /* ─── Color: Borders ─── */
+  --border: #1e2a38;
+  --border-accent: rgba(126, 231, 135, 0.2);
+
+  /* ─── Color: Accent (green) ─── */
+  --green: #7ee787;
+  --green-bright: #a5f3b4;
+  --green-dim: rgba(126, 231, 135, 0.08);
+  --green-glow: rgba(126, 231, 135, 0.15);
+  --green-glow-strong: rgba(126, 231, 135, 0.4);
+  --green-soft: rgba(126, 231, 135, 0.05);
+  --green-faint: rgba(126, 231, 135, 0.02);
+
+  /* ─── Color: Text ─── */
+  --text-primary: #fcfdfe;
+  --text-secondary: #c8d2dc;
+  --text-muted: #96a3b0;
+}
+
+[data-theme="light"] {
+  /* ─── Color: Backgrounds ─── */
+  --bg-deep: #f8faf9;
+  --bg-primary: #ffffff;
+  --bg-card: #f0f4f2;
+  --bg-card-hover: #e6ece8;
+
+  /* ─── Color: Borders ─── */
+  --border: #d4ddd8;
+  --border-accent: rgba(45, 160, 70, 0.25);
+
+  /* ─── Color: Accent (green) ─── */
+  --green: #2da046;
+  --green-bright: #1a7f37;
+  --green-dim: rgba(45, 160, 70, 0.06);
+  --green-glow: rgba(45, 160, 70, 0.12);
+  --green-glow-strong: rgba(45, 160, 70, 0.3);
+  --green-soft: rgba(45, 160, 70, 0.05);
+  --green-faint: rgba(45, 160, 70, 0.02);
+
+  /* ─── Color: Text ─── */
+  --text-primary: #000000;
+  --text-secondary: #111419;
+  --text-muted: #272d34;
+}
+
+[data-theme="orange-dark"] {
+  /* ─── Color: Backgrounds (warm dark) ─── */
+  --bg-deep: #100a08;
+  --bg-primary: #14110d;
+  --bg-card: #1c1812;
+  --bg-card-hover: #221c14;
+
+  /* ─── Color: Borders ─── */
+  --border: #2a2218;
+  --border-accent: rgba(255, 184, 119, 0.22);
+
+  /* ─── Color: Accent (orange — slightly brighter) ─── */
+  --green: #ffb877;
+  --green-bright: #ffd19a;
+  --green-dim: rgba(255, 184, 119, 0.09);
+  --green-glow: rgba(255, 184, 119, 0.18);
+  --green-glow-strong: rgba(255, 184, 119, 0.45);
+  --green-soft: rgba(255, 184, 119, 0.06);
+  --green-faint: rgba(255, 184, 119, 0.025);
+
+  /* ─── Color: Text ─── */
+  --text-primary: #fcfdfe;
+  --text-secondary: #d4ccc2;
+  --text-muted: #9c9286;
+}
+
+[data-theme="orange-light"] {
+  /* ─── Color: Backgrounds (warm light) ─── */
+  --bg-deep: #faf8f6;
+  --bg-primary: #ffffff;
+  --bg-card: #f5f0eb;
+  --bg-card-hover: #ede5dc;
+
+  /* ─── Color: Borders ─── */
+  --border: #ddd0c2;
+  --border-accent: rgba(234, 88, 12, 0.28);
+
+  /* ─── Color: Accent (orange — slightly brighter) ─── */
+  --green: #ea580c;
+  --green-bright: #c2410c;
+  --green-dim: rgba(234, 88, 12, 0.07);
+  --green-glow: rgba(234, 88, 12, 0.14);
+  --green-glow-strong: rgba(234, 88, 12, 0.34);
+  --green-soft: rgba(234, 88, 12, 0.06);
+  --green-faint: rgba(234, 88, 12, 0.025);
+
+  /* ─── Color: Text ─── */
+  --text-primary: #1a0f08;
+  --text-secondary: #2a1d12;
+  --text-muted: #4a3826;
+}
+
+:root {
+  /* ─── Typography: Font families ─── */
+  --heading: 'Outfit', 'Noto Sans KR', -apple-system, sans-serif;
+  --sans: 'Noto Sans KR', -apple-system, sans-serif;
+  --mono: 'Geist Mono', monospace;
+
+  /* ─── Typography: Sizes ─── */
+  --text-xs: 10px;
+  --text-sm: 11px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 15px;
+  --text-xl: 16px;
+  --text-2xl: 17px;
+  --text-3xl: 22px;
+
+  /* ─── Spacing ─── */
+  --space-xs: 6px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+  --space-3xl: 56px;
+  --space-section: 120px;
+  --space-section-mobile: 80px;
+  --card-padding: 32px 28px;
+  --container-padding: 0 32px;
+  --container-padding-mobile: 0 20px;
+  --container-max-width: 900px;
+
+  /* ─── Border Radius ─── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+
+  /* ─── Transitions ─── */
+  --transition-base: all 0.3s ease;
+  --transition-reveal: all 0.7s cubic-bezier(0.23, 1, 0.32, 1);
+  --easing-reveal: cubic-bezier(0.23, 1, 0.32, 1);
+}

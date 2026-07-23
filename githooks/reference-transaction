@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# merge-gate ② — reference-transaction 훅: main(refs/heads/main) 갱신을 승인 없이는 차단.
+#   커버: main 직접 커밋 + 무승인 머지 + reset/이동 등 main 을 바꾸는 모든 것.
+#
+# ★THREAT MODEL (Codex 리뷰 2026-07-08 반영)★:
+#   이 게이트는 "협조적 에이전트의 실수·정책 위반 방지"용이다. ★악의적 local shell 방어가 아니다★ —
+#   쉘 접근자는 `git config b3os.mergeGate false` / `git -c core.hooksPath=` / `--no-verify` 로 우회 가능.
+#   (그 계층 방어는 브랜치 보호 서버·CI 여야 함.) 여기 목적 = Ames 식 "무심코 main 직접작업" 차단.
+#
+# ★FAIL-OPEN (검증 불가 = 허용)★: 이 훅은 모든 ref 트랜잭션에 발동하므로, sqlite 없음·DB 없음·
+#   쿼리 에러 등 "검증 불가"는 전부 exit0(허용) 한다. → team.db 문제로 git 전체가 막히지 않는다.
+#   차단(exit1)은 "검증 성공 + 유효 nonce 없음 + main 갱신"을 확실히 판정했을 때만.
+#
+# ★per-repo★: repo-local git config 'b3os.mergeGate'=true 일 때만 작동. 미설정=OFF=무해.
+# ★토큰=nonce★: merge-to-main.sh 가 승인건마다 무작위 nonce 를 approval.result 에 기록+status=executing
+#   후 MERGE_APPROVAL_TOKEN=<nonce> 로 머지. 훅은 그 nonce+executing 을 대조 → 재사용/노출 id 만으론 불가.
+set -uo pipefail
+
+[ "${1:-}" = "prepared" ] || exit 0
+
+on="$(git config --get b3os.mergeGate 2>/dev/null || true)"
+[ "$on" = "true" ] || exit 0
+
+# ── main 갱신이 이 트랜잭션에 있는지 먼저 확인(없으면 즉시 통과) ──
+has_main=0
+inputs="$(cat)"
+while read -r _old _new ref; do
+  [ "$ref" = "refs/heads/main" ] && has_main=1
+done <<EOF
+$inputs
+EOF
+[ "$has_main" = "1" ] || exit 0
+
+DB="${TEAM_DB:-$HOME/Development/b3rys-team-os/team.db}"
+
+# ── FAIL-OPEN: 검증 불가(인프라)면 허용 ──
+command -v sqlite3 >/dev/null 2>&1 || exit 0
+[ -f "$DB" ] || exit 0
+
+tok="${MERGE_APPROVAL_TOKEN:-}"
+# nonce 형식(16진 32자)만 조회. 형식 불량이면 아래서 valid 비어 차단.
+if printf '%s' "$tok" | grep -qE '^[a-f0-9]{16,64}$'; then
+  valid="$(sqlite3 "$DB" "SELECT 1 FROM approval_request WHERE action_key='merge_to_main' AND status='executing' AND json_extract(result,'\$.nonce')='$tok' LIMIT 1" 2>/dev/null)"
+  rc=$?
+  # 쿼리 자체가 에러(잠금·손상 등) → 검증 불가 → FAIL-OPEN(허용)
+  [ "$rc" != "0" ] && exit 0
+else
+  valid=""
+fi
+
+if [ -n "$valid" ]; then exit 0; fi   # 유효 nonce → 통과
+
+{
+  echo ""
+  echo "✗ main 갱신 차단됨 (merge-gate ②) — 승인 없이 main 을 바꿀 수 없습니다."
+  echo "  · 직접 커밋/머지 금지. 브랜치에서 작업하세요."
+  echo "  · main 반영은:  scripts/merge-to-main.sh <branch>  (승인 요청 자동 등록)"
+  echo "  · 이 repo 에서 게이트 끄기:  scripts/install-merge-gate.sh disable"
+  echo ""
+} >&2
+exit 1

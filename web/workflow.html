@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>워크플로우 — BWF·칸반·자율주행·Harness</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Geist+Mono:wght@300;400;500&family=Noto+Sans+KR:wght@300;400;500;700&display=swap">
+  <link rel="stylesheet" href="assets/tokens.css">
+  <link rel="stylesheet" href="assets/base.css">
+  <link rel="stylesheet" href="assets/components.css">
+</head>
+<body>
+  <div class="grid-bg"></div>
+
+  <nav style="position:sticky;top:0;z-index:50;backdrop-filter:blur(10px);background:var(--bg-primary);border-bottom:1px solid var(--border)">
+    <div class="container" style="display:flex;gap:20px;align-items:center;padding:14px 0;flex-wrap:wrap">
+      <a href="index.html" style="font-family:var(--heading);font-weight:700;color:var(--text-primary);text-decoration:none">b3rys</a>
+      <a href="team-os.html" style="color:var(--text-secondary);text-decoration:none;font-size:14px">팀 운영체계</a>
+      <a href="workflow.html" style="color:var(--text-secondary);text-decoration:none;font-size:14px">워크플로우</a>
+      <a href="b3os.html" style="color:var(--text-secondary);text-decoration:none;font-size:14px">b3os</a>
+      <a href="team.html" style="color:var(--text-secondary);text-decoration:none;font-size:14px">팀·스킬</a>
+    </div>
+  </nav>
+
+  <!-- ═══ HERO ═══ -->
+  <section class="hero">
+    <div class="hero-glow"></div>
+    <div class="container">
+      <div class="hero-label"><span>WORKFLOW</span></div>
+      <h1 class="hero-title">일이 조용히 <em>사라지지 않게</em></h1>
+      <p class="hero-sub">BWF · Kanban · Autonomy · Handoff · Harness</p>
+      <p class="hero-desc">b3rys 팀이 과제를 받아 <strong>끝까지 닫는</strong> 실행 체계. 6단계 BWF, 3컬럼 칸반, 자율주행 3단계, 핸드오프 회수, Harness 병렬 실행, Proposal 거버넌스까지 <strong>continuation guard(진행 지속 장치)</strong>로 연결한다.</p>
+    </div>
+  </section>
+
+  <!-- ═══ 01 BWF 6단계 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">01 — BWF</div>
+        <h2 class="section-title">BWF 6단계 흐름</h2>
+        <p class="section-subtitle">BWF(b3os workflow, 팀 기본 과제 수행 흐름) — GD가 컨펌한 실행·위임 과제를 끝까지 닫는 6단계 사이클.</p>
+      </div>
+      <div class="reveal">
+        <div class="flywheel">
+          <div class="flywheel-step">
+            <div class="flywheel-num">01</div>
+            <div class="flywheel-label">PM 계획·착수</div>
+            <div class="flywheel-desc">착수 즉시 칸반 카드 등록. GD 리마인드 없이 자동.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">02</div>
+            <div class="flywheel-label">팀배정·handoff</div>
+            <div class="flywheel-desc">적임자 배정 + handoff ack(접수 확인) 추적.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">03</div>
+            <div class="flywheel-label">실행·품질방법</div>
+            <div class="flywheel-desc">harness / multi-ai / judge / 적대적 리뷰 중 선택.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">04</div>
+            <div class="flywheel-label">검증</div>
+            <div class="flywheel-desc">실제 검증 · 다관점 리뷰 · 빈틈없는 테스트.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">05</div>
+            <div class="flywheel-label">보고·closure</div>
+            <div class="flywheel-desc">사용자 가시 결과 기준으로 종료(closure).</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">06</div>
+            <div class="flywheel-label">학습 hook</div>
+            <div class="flywheel-desc">교훈을 SHARED.md로 흘려보내는 후크.</div>
+          </div>
+        </div>
+        <div class="card-grid">
+          <div class="card card--highlight">
+            <div class="card-title">Continuation Guard</div>
+            <div class="card-text">PM은 <strong>착수 · handoff · reviewer ack · gate 전이</strong>마다 <strong>GD-visible 1줄 보고</strong>로 진행 지속 장치를 세운다. 끝나지 않은 일이 조용히 사라지지 않게.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">BWF 예외</div>
+            <div class="card-text">단순 답변 · 조회 · 즉시 끝나는 일은 BWF를 돌리지 않는다. 6단계는 컨펌된 실행·위임 과제에만 적용.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 02 칸반 시스템 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">02 — KANBAN</div>
+        <h2 class="section-title">칸반 시스템</h2>
+        <p class="section-subtitle">Tasks 칸반(`task` DB 정본)은 PM 툴이 아니라 현황판. 3컬럼 plan / doing / done.</p>
+      </div>
+      <div class="reveal">
+        <div class="card-grid card-grid--three">
+          <div class="card">
+            <div class="card-title">plan</div>
+            <div class="card-text">착수 대기 · 보류 · 컨펌 대기 카드. 논의·구체화 단계는 칸반에 넣지 않는다.</div>
+          </div>
+          <div class="card card--highlight">
+            <div class="card-title">doing</div>
+            <div class="card-text">진행 중. owner가 직접 상태를 갱신. <span class="engine-badge">blocked</span> 는 별도 컬럼 없이 배지로 표시.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">done</div>
+            <div class="card-text">사용자 가시 결과까지 도달한 카드. 최근 중요 done 은 PM 요약의 한 축.</div>
+          </div>
+        </div>
+      </div>
+      <div class="reveal">
+        <div class="context-grid">
+          <div class="context-card">
+            <div class="context-label">CARD ANATOMY</div>
+            <div class="context-title">flat owner task</div>
+            <div class="context-desc">제목 / 담당자 1명 / 상태 / description. 공동작업은 description 에 적고, blocked 는 배지로. owner 가 자기 상태를 직접 갱신.</div>
+            <div class="context-example"><strong>"제목 · owner 1 · doing · desc"</strong> — 담당자는 항상 1명, 공동은 본문에</div>
+          </div>
+          <div class="context-card">
+            <div class="context-label">PM 상태 요약</div>
+            <div class="context-title">칸반 먼저 조회</div>
+            <div class="context-desc">GD가 진행 상황을 물으면 칸반을 먼저 조회 → <strong>doing / plan / 최근 중요 done / 보류·대기</strong>로 재구성. 칸반에 없다고 없는 일로 단정 금지.</div>
+            <div class="context-example"><strong>"누락 발견 = 즉시 카드화"</strong> — 06:00 KST task-review-ping 은 사후 점검</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 03 자율주행 3단계 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">03 — AUTONOMY</div>
+        <h2 class="section-title">자율주행 3단계</h2>
+        <p class="section-subtitle">실행 단계 기본값은 주행모드. harness 확장 개념과 1:1로 연결된다.</p>
+      </div>
+      <div class="reveal">
+        <figure style="margin:48px 0;text-align:center"><img src="assets/img/autonomy-levels.png" alt="자율주행 3단계 — 턴모드 · 주행모드 · 완전자율모드 (harness 확장 개념)" style="max-width:100%;border-radius:12px;border:1px solid var(--border)" loading="lazy"><figcaption style="margin-top:12px;color:var(--text-secondary);font-size:14px">자율주행 3단계 — 턴모드 · 주행모드 · 완전자율모드 (harness 확장 개념)</figcaption></figure>
+      </div>
+      <div class="reveal">
+        <div class="card-grid card-grid--three">
+          <div class="card">
+            <div class="card-title">턴모드 <span class="engine-badge">harness off</span></div>
+            <div class="card-text">한 번 묻고 한 번 답하는 대화·검토 단계. 솔로 실행, 확장 없음.</div>
+          </div>
+          <div class="card card--highlight">
+            <div class="card-title">주행모드 <span class="engine-badge">기본값 · limited</span></div>
+            <div class="card-text"><strong>다음액션 · 재개시각 · fallback · stop_rule</strong> 명시. 완료 / blocked / 컨펌대기까지 owner가 들고 간다. limited harness.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">완전자율모드 <span class="engine-badge">full</span></div>
+            <div class="card-text">기획~실행·검증·보고까지 넓게 위임. 범위·권한·stop_rule 을 더 명확히. full harness.</div>
+          </div>
+        </div>
+        <div class="card-grid">
+          <div class="card card--highlight">
+            <div class="card-title">목적</div>
+            <div class="card-text">일을 계속 만드는 게 아니라, <strong>끝나지 않은 일이 조용히 사라지는 걸 막기</strong>.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">모드 ↔ harness</div>
+            <div class="card-text">턴 → off · 주행 → limited · 완전자율 → full. 넓거나 교차검증 필요하면 harness, 좁고 순차면 솔로.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 04 핸드오프 & Continuation Guard ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">04 — HANDOFF</div>
+        <h2 class="section-title">핸드오프 &amp; Continuation Guard</h2>
+        <p class="section-subtitle">handoff(인수인계)는 보낸 것으로 끝나지 않는다. 성공 기준은 '전달 완료'가 아니라 <strong>회수 완료</strong>.</p>
+      </div>
+      <div class="reveal">
+        <div class="flywheel">
+          <div class="flywheel-step">
+            <div class="flywheel-num">01</div>
+            <div class="flywheel-label">봉투 발송</div>
+            <div class="flywheel-desc">to · source_thread · context · task · done_when · fallback.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">02</div>
+            <div class="flywheel-label">receiver ACK</div>
+            <div class="flywheel-desc">4선택 중 1회만. ACK 전까지 owner=sender.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">03</div>
+            <div class="flywheel-label">실행</div>
+            <div class="flywheel-desc">ACCEPT 후에도 sender가 closure 책임 유지.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">04</div>
+            <div class="flywheel-label">완료보고</div>
+            <div class="flywheel-desc">result · evidence · remaining_risk · reported_to.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">05</div>
+            <div class="flywheel-label">closure</div>
+            <div class="flywheel-desc">complete / blocked / confirm_wait 중 하나로 닫기.</div>
+          </div>
+        </div>
+      </div>
+      <div class="reveal">
+        <div class="context-grid">
+          <div class="context-card">
+            <div class="context-label">HANDOFF ENVELOPE</div>
+            <div class="context-title">인계 봉투</div>
+            <div class="context-desc">to / source_thread / user_visible_context / task / done_when / constraints / reply_by / fallback / visibility_target.</div>
+            <div class="context-example"><strong>"누구·맥락·할일·완료기준·기한"</strong> — 9개 필드를 한 봉투로</div>
+          </div>
+          <div class="context-card">
+            <div class="context-label">COMPLETION REPORT</div>
+            <div class="context-title">완료 보고</div>
+            <div class="context-desc">result / evidence / remaining_risk / reported_to. 생성됨과 GD에게 보임은 구분한다.</div>
+            <div class="context-example"><strong>"성공 = 회수 완료"</strong> — 전달 완료가 아니라 닫힘까지</div>
+          </div>
+        </div>
+      </div>
+      <div class="reveal">
+        <div class="q-grid">
+          <div class="q-card">
+            <div class="q-tag">ACK ①</div>
+            <div class="q-text">ACCEPT + 다음액션 + ETA</div>
+          </div>
+          <div class="q-card">
+            <div class="q-tag">ACK ②</div>
+            <div class="q-text">DECLINE + 사유 + 추천 owner</div>
+          </div>
+          <div class="q-card">
+            <div class="q-tag">ACK ③</div>
+            <div class="q-text">NEED_INFO + 질문</div>
+          </div>
+          <div class="q-card">
+            <div class="q-tag">ACK ④</div>
+            <div class="q-text">FIRST_TAKE (1차 의견)</div>
+          </div>
+        </div>
+      </div>
+      <div class="reveal">
+        <div class="card-grid">
+          <div class="card card--highlight">
+            <div class="card-title">Continuation Guard</div>
+            <div class="card-text"><strong>reply_by 내 ack 없으면</strong> sender 재알림. <strong>ETA 초과면</strong> receiver ping. complete / blocked / confirm_wait 로 닫을 때까지 추적.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">ACK는 1회만</div>
+            <div class="card-text">도배 금지. 수집형 피드백은 조용히 모은 뒤 종합 1회 보고로 루프를 닫는다.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 05 작업루프 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">05 — WORKLOOP</div>
+        <h2 class="section-title">작업루프 — 반복 운영</h2>
+        <p class="section-subtitle">정해진 시각에 담당자를 깨우고, 한 턴 안에서 루프를 닫는 반복 운영 사이클. 스킬: <span class="engine-badge">b3os-workloop</span></p>
+      </div>
+      <div class="reveal">
+        <div class="flywheel">
+          <div class="flywheel-step">
+            <div class="flywheel-num">01</div>
+            <div class="flywheel-label">wake</div>
+            <div class="flywheel-desc">운영 시스템이 정해진 시각에 담당자를 깨움.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">02</div>
+            <div class="flywheel-label">상태 조회·검증</div>
+            <div class="flywheel-desc">실제 상태 확인. 자동화 핑은 복구·완료가 아니다.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">03</div>
+            <div class="flywheel-label">한 턴 닫기</div>
+            <div class="flywheel-desc">완료 / 갱신 / 보고 / blocked / 컨펌대기 / 다음 wake 예약.</div>
+          </div>
+        </div>
+        <div class="card-grid">
+          <div class="card">
+            <div class="card-title">담당 결정</div>
+            <div class="card-text">capability / role 기준. 불명확하면 <strong>coordinator fallback</strong>, 없으면 가용 팀원(축소 운영임을 GD에 명시).</div>
+          </div>
+          <div class="card card--highlight">
+            <div class="card-title">무기한 금지</div>
+            <div class="card-text">stop_rule / 만료 없이 무기한 지속하지 않는다. <strong>실패가 반복되면 에스컬레이션</strong>.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 06 Harness ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">06 — HARNESS</div>
+        <h2 class="section-title">Harness — 병렬 실행</h2>
+        <p class="section-subtitle">한 팀원이 sub agent(보조 에이전트)를 병렬로 띄워 분리 가능한 일을 나눠 처리하는 실행 방식. 스킬: <span class="engine-badge">b3rys-harness</span></p>
+      </div>
+      <div class="reveal">
+        <div class="context-grid">
+          <div class="context-card">
+            <div class="context-label">MODE MAP</div>
+            <div class="context-title">모드 ↔ harness</div>
+            <div class="context-desc">턴 → off · 주행 → limited(병렬 실소스 커버가 기본) · 완전자율 → full.</div>
+            <div class="context-example"><strong>"넓거나 교차검증 → harness"</strong> — 좁고 순차면 솔로</div>
+          </div>
+          <div class="context-card">
+            <div class="context-label">SPEC FIELDS</div>
+            <div class="context-title">카드·지시 명시</div>
+            <div class="context-desc">harness · subagents · budget · scope · verify 를 카드/지시에 명시한다.</div>
+            <div class="context-example"><strong>"큰 fan-out · full = GD 고지 + stop_rule"</strong> — 실행 전 필수</div>
+          </div>
+        </div>
+        <div class="card-grid card-grid--three">
+          <div class="card">
+            <div class="card-title">off <span class="engine-badge">턴</span></div>
+            <div class="card-text">솔로 실행. 좁고 순차 작업.</div>
+          </div>
+          <div class="card card--highlight">
+            <div class="card-title">limited <span class="engine-badge">주행</span></div>
+            <div class="card-text">병렬 실소스 커버 모양이면 기본. 분리 가능한 일만 fan-out.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">full <span class="engine-badge">완전자율</span></div>
+            <div class="card-text">대량 병렬. 실행 전 GD 고지 + stop_rule 필수.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 07 Proposal 거버넌스 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">07 — PROPOSAL</div>
+        <h2 class="section-title">Proposal 거버넌스</h2>
+        <p class="section-subtitle">제안이 draft 에서 accepted/rejected 로 가는 상태기계. 3테이블: <span class="engine-badge">proposal</span> <span class="engine-badge">proposal_review</span> <span class="engine-badge">proposal_decision_log</span></p>
+      </div>
+      <div class="reveal">
+        <div class="flywheel">
+          <div class="flywheel-step">
+            <div class="flywheel-num">01</div>
+            <div class="flywheel-label">draft</div>
+            <div class="flywheel-desc">제안 초안 작성.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">02</div>
+            <div class="flywheel-label">peer_review</div>
+            <div class="flywheel-desc">동료 리뷰 + 반대리뷰 1건 이상.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">03</div>
+            <div class="flywheel-label">pm_review</div>
+            <div class="flywheel-desc">Bill 우선, 제안자면 Codex.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">04</div>
+            <div class="flywheel-label">gd_report</div>
+            <div class="flywheel-desc">Codex PM 만 GD에 보고.</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">05</div>
+            <div class="flywheel-label">accepted / rejected</div>
+            <div class="flywheel-desc">GD 만(actor=gd) 결정.</div>
+          </div>
+        </div>
+      </div>
+      <div class="reveal">
+        <div class="context-grid">
+          <div class="context-card">
+            <div class="context-label">PEER REVIEW</div>
+            <div class="context-title">리뷰 우선순위</div>
+            <div class="context-desc">Steve → Demis → Devon → Lui → Dbak → Hermes (Bill / Codex / 제안자 제외).</div>
+            <div class="context-example"><strong>"peer → pm 게이트"</strong> — 리뷰 수 + 반대리뷰(is_adversarial=1 또는 reject/concern/revise) 1건 이상 필수</div>
+          </div>
+          <div class="context-card">
+            <div class="context-label">REVIEW PATH</div>
+            <div class="context-title">PM·GD 경로</div>
+            <div class="context-desc">pm_review = Bill 우선(제안자면 Codex) · gd_report = Codex PM 만 · 결정 = GD 만.</div>
+            <div class="context-example"><strong>"revise_requested → draft"</strong> — 되돌림 가능. archived_duplicate = terminal(종료)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 08 Self-Learning ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">08 — SELF-LEARNING</div>
+        <h2 class="section-title">Self-Learning 주간 루프</h2>
+        <p class="section-subtitle">교훈을 팀 정책으로 승격시키는 금요일 루프. 메인 목적은 팀 정책·피드백 루프의 자가발전.</p>
+      </div>
+      <div class="reveal">
+        <div class="timeline">
+          <div class="timeline-item">
+            <div class="timeline-phase">STEP 1 — 발견</div>
+            <div class="timeline-title">교훈 발견 → SHARED.md append</div>
+            <div class="timeline-desc">작업 중 나온 교훈을 append-only(추가 전용)로 기록. 일회성 잡음은 제외.</div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-phase">STEP 2 — 큐레이션</div>
+            <div class="timeline-title">큐레이터 검토</div>
+            <div class="timeline-desc">반복·고정 교훈만 TEAM-OS 승격 후보로 추린다. 별도 후보 장부 없이 항목 상태로 관리.</div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-phase">FRI 05:00 KST</div>
+            <div class="timeline-title">후보 수집·정리·공동리뷰 요청</div>
+            <div class="timeline-desc">금요일 05시에 후보를 모으고 공동 리뷰를 요청. 지연되면 지연 상태와 임시 판단을 분리 보고.</div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-phase">FRI 10:00 KST</div>
+            <div class="timeline-title">learning-loop PM → GD 보고</div>
+            <div class="timeline-desc">learning_loop_pm 보유자(없으면 coordinator fallback)가 정리된 결과를 GD에 보고.</div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-phase">STEP 5 — 반영</div>
+            <div class="timeline-title">GD 승인 → TEAM-OS 반영</div>
+            <div class="timeline-desc">정책·보안·라우터·외부전송 관련은 GD 승인 없이 반영 금지. 월 1회 작업성과 개선지표 확인.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 09 용어집 ═══ -->
+  <section class="section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-number">09 — GLOSSARY</div>
+        <h2 class="section-title">용어집</h2>
+        <p class="section-subtitle">이 페이지에서 쓰인 핵심 용어 정리.</p>
+      </div>
+      <div class="reveal">
+        <div class="q-grid">
+          <div class="q-card"><div class="q-tag">BWF</div><div class="q-text">b3os workflow. 컨펌된 실행·위임 과제를 끝까지 닫는 팀 기본 6단계 흐름.</div></div>
+          <div class="q-card"><div class="q-tag">Harness</div><div class="q-text">한 팀원이 sub agent를 병렬로 띄워 분리 가능한 일을 나눠 처리하는 실행 방식.</div></div>
+          <div class="q-card"><div class="q-tag">Handoff</div><div class="q-text">인수인계. ack·거절·ETA 확인 전까지 owner가 넘어가지 않는다.</div></div>
+          <div class="q-card"><div class="q-tag">Proposal</div><div class="q-text">팀 제안. draft→peer→pm→gd_report→결정의 상태기계로 관리.</div></div>
+          <div class="q-card"><div class="q-tag">Peer Review</div><div class="q-text">동료 리뷰. 반대리뷰(is_adversarial) 1건 이상이 pm 게이트 통과 조건.</div></div>
+          <div class="q-card"><div class="q-tag">PM Review</div><div class="q-text">PM 검토. Bill 우선, 제안자가 Bill이면 Codex가 받음.</div></div>
+          <div class="q-card"><div class="q-tag">GD Report</div><div class="q-text">Codex PM만 수행하는 GD 보고 단계. 결정은 GD(actor=gd)만.</div></div>
+          <div class="q-card"><div class="q-tag">Revise Requested</div><div class="q-text">수정 요청 상태. draft로 되돌아간다.</div></div>
+          <div class="q-card"><div class="q-tag">Self-Learning</div><div class="q-text">교훈→SHARED.md→큐레이션→TEAM-OS 승격의 주간 자가학습 루프.</div></div>
+          <div class="q-card"><div class="q-tag">Continuation Guard</div><div class="q-text">진행 지속 장치. complete/blocked/confirm_wait로 닫을 때까지 추적.</div></div>
+          <div class="q-card"><div class="q-tag">Limited Harness</div><div class="q-text">주행모드 기본. 병렬 실소스 커버 모양에서 제한적 fan-out.</div></div>
+          <div class="q-card"><div class="q-tag">Full Harness</div><div class="q-text">완전자율모드. 대량 병렬, 실행 전 GD 고지 + stop_rule 필수.</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-brand"><strong>b3rys</strong> — 워크플로우</div>
+      <div class="footer-date">2026</div>
+    </div>
+  </footer>
+
+  <script>const o=new IntersectionObserver((es)=>es.forEach(e=>e.isIntersecting&&e.target.classList.add('visible')),{threshold:0.1,rootMargin:'0px 0px -40px 0px'});document.querySelectorAll('.reveal').forEach(el=>o.observe(el));</script>
+</body>
+</html>

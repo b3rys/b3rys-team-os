@@ -1,0 +1,443 @@
+<!doctype html>
+<!-- b3rys /reports 포털 — 팀 보고서 목록·열람. 자체완결(인라인 CSS/JS), b3rys 디자인 토큰.
+     마운트: <your-host>/reports (team-collab :7878, BASE=/reports).
+     실 API 우선 호출 → 실패 시 목업 폴백(standalone 미리보기/오프라인). -->
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>b3rys · 팀 보고서</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#020617; --bg-soft:#0b1220; --card:#0f172a; --card-hover:#131c30;
+  --border:#1e293b; --border-soft:#172033;
+  --green:#22c55e; --green-bright:#4ade80; --green-soft:rgba(34,197,94,.12); --green-glow:rgba(34,197,94,.06);
+  --text:#e2e8f0; --head:#f8fafc; --muted:#94a3b8; --muted-2:#64748b;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg)}
+body{font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",system-ui,-apple-system,sans-serif;
+  color:var(--text);line-height:1.5;min-height:100vh;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+a{color:inherit;text-decoration:none}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:#1e293b;border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:#334155}
+
+.wrap{max-width:880px;margin:0 auto;padding:clamp(16px,4vw,32px) clamp(14px,4vw,24px) 80px}
+
+/* 헤더 */
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
+.brand{display:flex;align-items:center;gap:10px}
+.brand .dot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 8px rgba(34,197,94,.5)}
+.brand h1{font-size:clamp(18px,3.2vw,24px);font-weight:700;color:var(--head);letter-spacing:-.01em}
+.brand .sub{color:var(--muted);font-size:13px;font-weight:500}
+.top .home{color:var(--muted);font-size:13px;padding:7px 12px;border:1px solid var(--border);
+  border-radius:9px;transition:.15s}
+.top .home:hover{color:var(--green);border-color:var(--green-soft);background:var(--green-glow)}
+.tagline{color:var(--muted);font-size:13.5px;margin:2px 0 22px}
+
+/* 검색 */
+.search{position:relative;margin-bottom:18px}
+.search input{width:100%;background:var(--card);border:1px solid var(--border);border-radius:11px;
+  color:var(--text);font:inherit;font-size:14.5px;padding:11px 14px 11px 38px;outline:none;transition:.15s}
+.search input:focus{border-color:var(--green-soft);box-shadow:0 0 0 3px var(--green-glow)}
+.search input::placeholder{color:var(--muted-2)}
+.search svg{position:absolute;left:13px;top:50%;transform:translateY(-50%);width:16px;height:16px;
+  stroke:var(--muted-2);fill:none}
+
+/* category 필터(pill) + 배지 */
+.catbar{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}
+.pill{font-size:13px;font-weight:600;padding:6px 13px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--border);color:var(--muted);background:var(--card);transition:.15s}
+.pill:hover{color:var(--text)}
+.pill.active{color:var(--green);border-color:var(--green-soft);background:var(--green-glow)}
+.pill .n{color:var(--muted-2);font-weight:500;margin-left:5px;font-size:11.5px}
+.pill.active .n{color:var(--green-bright)}
+.cat{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.02em;
+  padding:3px 9px;border-radius:6px;color:var(--green-bright);
+  background:var(--green-glow);border:1px solid var(--green-soft);margin-bottom:9px}
+
+/* 목록 */
+.list{display:flex;flex-direction:column;gap:10px}
+.row{display:block;background:var(--card);border:1px solid var(--border);border-radius:13px;
+  padding:16px 18px;transition:.15s;cursor:pointer;position:relative;overflow:hidden}
+.row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--green);
+  opacity:0;transition:.15s}
+.row:hover{background:var(--card-hover);border-color:var(--border)}
+.row:hover::before{opacity:1}
+.row .rtitle{font-size:16.5px;font-weight:600;color:var(--head);margin-bottom:5px;letter-spacing:-.01em}
+.row .meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-bottom:8px}
+.row .meta .author{color:var(--green-bright);font-weight:500}
+.row .meta .sep{color:var(--muted-2)}
+.row .summary{font-size:13.5px;color:var(--muted);line-height:1.55;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:11px}
+.badge{font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;
+  padding:3px 9px;border-radius:6px;border:1px solid var(--border);color:var(--muted);background:var(--bg-soft)}
+.badge.md{color:var(--green-bright);border-color:var(--green-soft);background:var(--green-glow)}
+.badge.html{color:#60a5fa;border-color:rgba(96,165,250,.25);background:rgba(96,165,250,.08)}
+.badge.pdf{color:#f87171;border-color:rgba(248,113,113,.25);background:rgba(248,113,113,.08)}
+.badge.pptx{color:#fbbf24;border-color:rgba(251,191,36,.25);background:rgba(251,191,36,.08)}
+.badge.audio{color:#c084fc;border-color:rgba(192,132,252,.25);background:rgba(192,132,252,.08)}
+
+/* 상태 */
+.state{text-align:center;color:var(--muted);padding:60px 20px;font-size:14px}
+.state .big{font-size:15px;color:var(--text);margin-bottom:6px;font-weight:500}
+.err{color:#f87171}
+
+/* 상세 */
+.back{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:13.5px;
+  padding:7px 0;margin-bottom:14px;cursor:pointer;transition:.15s}
+.back:hover{color:var(--green)}
+.dhead h2{font-size:clamp(20px,3.6vw,28px);font-weight:700;color:var(--head);letter-spacing:-.015em;line-height:1.25}
+.dhead .meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:8px}
+.dhead .meta .author{color:var(--green-bright);font-weight:500}
+.dhead .dsummary{color:var(--muted);font-size:14px;line-height:1.6;margin-top:12px;
+  padding-left:12px;border-left:2px solid var(--border)}
+
+.formbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:22px 0 14px;
+  padding-bottom:14px;border-bottom:1px solid var(--border)}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tab{font-size:13px;font-weight:600;padding:7px 14px;border-radius:9px;cursor:pointer;
+  border:1px solid var(--border);color:var(--muted);background:var(--card);transition:.15s;text-transform:uppercase;letter-spacing:.03em}
+.tab:hover{color:var(--text);border-color:var(--border)}
+.tab.active{color:var(--green);border-color:var(--green-soft);background:var(--green-glow)}
+.dl{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;
+  padding:8px 14px;border-radius:9px;border:1px solid var(--green-soft);color:var(--green);
+  background:var(--green-glow);cursor:pointer;transition:.15s}
+.dl:hover{background:var(--green-soft)}
+.dl svg{width:15px;height:15px;stroke:currentColor;fill:none}
+
+/* 요청하기 패널 */
+.reqbox{margin:18px 0 4px}
+.reqbtn{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;
+  padding:9px 16px;border-radius:10px;border:1px solid var(--green-soft);color:var(--green);
+  background:var(--green-glow);cursor:pointer;transition:.15s}
+.reqbtn:hover{background:var(--green-soft)}
+.reqform{margin-top:12px;background:var(--card);border:1px solid var(--border);border-radius:13px;padding:16px}
+.reqform[hidden]{display:none}
+.reqform .reqto{font-size:13px;color:var(--muted);margin-bottom:9px}
+.reqform .reqto b{color:var(--green-bright)}
+.reqform .reqto .hint{color:var(--muted-2)}
+.reqform textarea{width:100%;min-height:92px;resize:vertical;background:var(--bg-soft);
+  border:1px solid var(--border);border-radius:10px;color:var(--text);font:inherit;font-size:14px;
+  padding:11px 13px;outline:none;line-height:1.55;transition:.15s}
+.reqform textarea:focus{border-color:var(--green-soft);box-shadow:0 0 0 3px var(--green-glow)}
+.reqform textarea::placeholder{color:var(--muted-2)}
+.reqactions{display:flex;align-items:center;gap:12px;margin-top:11px}
+.reqmsg{font-size:13px;color:var(--muted);flex:1;line-height:1.4}
+.reqmsg.ok{color:var(--green-bright)} .reqmsg.err{color:#f87171}
+.reqsend{font-size:13.5px;font-weight:600;padding:9px 18px;border-radius:10px;border:0;
+  background:var(--green);color:#04140a;cursor:pointer;transition:.15s}
+.reqsend:hover{background:var(--green-bright)}
+.reqsend:disabled{opacity:.5;cursor:default}
+
+.viewer{background:var(--card);border:1px solid var(--border);border-radius:13px;overflow:hidden}
+.viewer iframe{width:100%;border:0;display:block;background:#fff;min-height:70vh}
+.md{padding:clamp(18px,4vw,32px);font-size:15px;line-height:1.75;color:var(--text)}
+.md h1,.md h2,.md h3,.md h4{color:var(--head);font-weight:700;line-height:1.3;margin:1.4em 0 .5em;letter-spacing:-.01em}
+.md h1{font-size:1.7em;border-bottom:1px solid var(--border);padding-bottom:.3em}
+.md h2{font-size:1.4em}.md h3{font-size:1.18em}.md h4{font-size:1.02em}
+.md h1:first-child,.md h2:first-child,.md h3:first-child{margin-top:0}
+.md p{margin:.7em 0}
+.md ul,.md ol{margin:.7em 0;padding-left:1.5em}
+.md li{margin:.3em 0}
+.md a{color:var(--green-bright);text-decoration:underline;text-underline-offset:2px}
+.md code{background:var(--bg-soft);border:1px solid var(--border-soft);border-radius:5px;
+  padding:.1em .4em;font-size:.88em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--green-bright)}
+.md pre{background:var(--bg-soft);border:1px solid var(--border);border-radius:10px;padding:14px 16px;
+  overflow-x:auto;margin:1em 0}
+.md pre code{background:none;border:0;padding:0;color:var(--text)}
+.md blockquote{border-left:3px solid var(--green-soft);padding:.2em 0 .2em 14px;margin:1em 0;color:var(--muted)}
+.md strong{color:var(--head);font-weight:600}
+.md hr{border:0;border-top:1px solid var(--border);margin:1.6em 0}
+.md table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.92em}
+.md th,.md td{border:1px solid var(--border);padding:7px 11px;text-align:left}
+.md th{background:var(--bg-soft);color:var(--head);font-weight:600}
+
+@media(max-width:520px){
+  .row{padding:14px 15px}
+  .dl{margin-left:0;width:100%;justify-content:center}
+  .formbar{flex-direction:column;align-items:stretch}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="brand">
+      <span class="dot"></span>
+      <h1>팀 보고서</h1>
+      <span class="sub">b3rys</span>
+    </div>
+    <a class="home" href="/team">← 대시보드</a>
+  </div>
+  <div class="tagline">b3rys 팀이 작성한 보고서 목록 · 클릭하면 본문을 봅니다.</div>
+  <div id="app"></div>
+</div>
+
+<script>
+(function(){
+"use strict";
+// ── API 계약 ─────────────────────────────────────────────────────
+//  GET <BASE>/api/list        → [{id,title,author,summary,created_at,forms:[type..]}]
+//  GET <BASE>/api/:id         → {id,title,author,summary,created_at,forms:[type..]}
+//  GET <BASE>/file/:id/:type  → 파일 내용 (md=text, html=full html)
+var BASE = location.pathname.replace(/\/+$/,"").replace(/\/(index\.html|reports\.html)$/,"") || "/reports";
+var app = document.getElementById("app");
+
+// ── 목업 (실 API 실패 시 폴백 — standalone 미리보기) ────────────────
+// ★공개 제품 화면에 들어가는 예시 데이터다 — 특정 팀의 실제 보고서·실명을 넣지 마라.★
+// 원래는 우리 팀의 실제 보고서 제목·작성자·본문이 그대로 있었고, 공개 사용자가 Reports 탭에서
+// ★남의 팀 내부 보고서 목록★을 예시로 보게 됐다. (2026-07-12)
+// 어떤 팀이든 그대로 말이 되는 일반 예시 + 예시 이름(Alice/Bob/Carol)만 쓴다.
+var MOCK = {
+  list: [
+    {id:"rpt-002",title:"주간 팀 활동 요약",author:"Alice",created_at:"2026-06-07T11:20:00+09:00",
+     category:"보고서",forms:["md","html"],
+     summary:"이번 주 처리한 과제와 남은 블로커를 한 장으로 정리. 완료 기준과 근거를 함께 표기."},
+    {id:"rpt-001",title:"검색 품질 A/B 비교",author:"Bob",created_at:"2026-06-07T10:05:00+09:00",
+     category:"리서치",forms:["md"],
+     summary:"두 가지 방식을 같은 질의 세트로 비교. 정확도·소요시간·비용을 표로 정리하고 선택 근거를 남김."},
+    {id:"rpt-003",title:"에이전트 팀과 일하는 법 — 입문",author:"Carol",created_at:"2026-06-07T09:10:00+09:00",
+     category:"교육자료",forms:["md","html"],
+     summary:"담당(owner) 지정, 인계(handoff), '완료 = 증거' 개념을 처음 접하는 사람을 위한 입문 가이드."},
+    {id:"rpt-000",title:"발표 자료 v2",author:"Alice",created_at:"2026-06-06T18:40:00+09:00",
+     forms:["md","html","pdf"],
+     summary:"레이아웃 자동 배치 + 발표 모드. 자체완결 HTML 1개로 발표 가능. (category 미지정 → 기본 '보고서')"}
+  ],
+  files: {
+    "rpt-002/md":"# 주간 팀 활동 요약\n\n**작성자:** Alice · **기간:** 2026-06-01 ~ 06-07\n\n## 이번 주 완료\n- 과제 A — 검증 통과(테스트 61 pass / 0 fail)\n- 과제 B — 리뷰 반영 후 머지\n\n## 남은 블로커\n| 항목 | 담당 | 상태 |\n|---|---|---|\n| 과제 C | Bob | 리뷰 대기 |\n\n> 완료는 '됐다'가 아니라 '무엇으로 확인됐다'로 적는다.\n",
+    "rpt-001/md":"# 검색 품질 A/B 비교\n\n## 수치\n- **방식 A**: 58s · 비용 1x · 정확도 기준선\n- **방식 B**: 92s · 비용 5x · 누락 항목 추가 검출\n\n## 결론\n누락 0이 목표면 B, 빠른 훑기에는 A. 선택 근거를 남겨 다음 사람이 다시 고민하지 않게 한다.\n",
+    "rpt-003/md":"# 에이전트 팀과 일하는 법\n\n**대상:** 에이전트 팀과 처음 일하는 사람\n\n## 핵심 개념\n- **owner**: 지금 이 일을 책임지는 한 사람\n- **handoff**: 받은 쪽이 ack 하기 전엔 넘어가지 않음\n- **완료 = 증거**: '됐다'가 아니라 '무엇으로 확인됐다'\n",
+    "rpt-003/html":"<!doctype html><meta charset=utf-8><body style='font-family:system-ui;padding:40px;color:#0f172a'><h1 style='color:#16a34a'>교육자료 (HTML form)</h1><p>category='교육자료' 예시.</p></body>",
+    "rpt-000/md":"# 발표 자료 v2\n\n레이아웃 자동 배치 + 발표 모드(`P`/`←→`/`F`) + 문장형 요약.\n",
+    "rpt-002/html":"<!doctype html><meta charset=utf-8><body style='font-family:system-ui;padding:40px;max-width:720px;margin:auto;color:#0f172a'><h1 style='color:#16a34a'>주간 요약 (HTML form)</h1><p>이 폼은 <b>html</b> 타입 — iframe 으로 그대로 렌더됩니다. 실제로는 보고서 스킬이 만든 풀 HTML 보고서가 들어갑니다.</p></body>",
+    "rpt-000/html":"<!doctype html><meta charset=utf-8><body style='font-family:system-ui;padding:40px;color:#0f172a'><h1 style='color:#16a34a'>발표 자료 (HTML form)</h1><p>발표 자료는 별도 self-contained HTML.</p></body>",
+    "rpt-000/pdf":"%PDF mock"
+  }
+};
+var usingMock = false;
+
+function api(path){
+  return fetch(BASE + path, {headers:{accept:"application/json"}})
+    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); });
+}
+function fileUrl(id,type){ return BASE + "/file/" + encodeURIComponent(id) + "/" + encodeURIComponent(type); }
+function fetchFile(id,type){
+  if(usingMock){ var k=id+"/"+type; return Promise.resolve(MOCK.files[k] != null ? MOCK.files[k] : "(목업에 "+k+" 없음)"); }
+  return fetch(fileUrl(id,type)).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.text(); });
+}
+
+// ── 유틸 ──────────────────────────────────────────────────────────
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+// SQLite 타임스탬프("YYYY-MM-DD HH:MM:SS")는 타임존 없는 UTC. 공백→T + "Z" 부착으로 UTC 명시 파싱.
+// (안 하면 new Date 가 로컬(KST)로 해석 → 9시간 오차. src/web/lib/datetime.ts 와 동일 규약을 인라인.)
+function parseSqliteDate(s){
+  if(!s) return null;
+  var n = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(s)
+    ? s.replace(" ","T") + (s.indexOf("Z")>=0 || s.indexOf("+")>=0 ? "" : "Z")
+    : s;
+  var d = new Date(n);
+  return isNaN(d.getTime()) ? null : d;
+}
+function fmtDate(s){
+  if(!s) return "";
+  var d = parseSqliteDate(s); if(!d) return esc(s);
+  var p=function(n){return (n<10?"0":"")+n;};
+  // 로컬 타임존 게터(getFullYear/getHours…)로 뷰어 현지 시각 렌더.
+  return d.getFullYear()+"."+p(d.getMonth()+1)+"."+p(d.getDate())+" "+p(d.getHours())+":"+p(d.getMinutes());
+}
+function byNewest(a,b){ return (parseSqliteDate(b.created_at)||0) - (parseSqliteDate(a.created_at)||0); }
+
+// ── 미니 마크다운 렌더러 (헤딩·불릿·인용·코드·표·링크·강조) ──────────
+function mdToHtml(src){
+  var lines = String(src).replace(/\r\n/g,"\n").split("\n");
+  var out=[], i=0;
+  function inline(t){
+    t = esc(t);
+    t = t.replace(/`([^`]+)`/g, function(_,c){return "<code>"+c+"</code>";});
+    t = t.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    t = t.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
+    t = t.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function(_,txt,href){return '<a href="'+esc(href)+'" target="_blank" rel="noopener">'+txt+"</a>";});
+    return t;
+  }
+  while(i<lines.length){
+    var ln = lines[i];
+    if(/^\s*$/.test(ln)){ i++; continue; }
+    var m;
+    if(m=ln.match(/^(#{1,4})\s+(.*)$/)){ out.push("<h"+m[1].length+">"+inline(m[2])+"</h"+m[1].length+">"); i++; continue; }
+    if(/^\s*```/.test(ln)){ i++; var code=[]; while(i<lines.length && !/^\s*```/.test(lines[i])){ code.push(esc(lines[i])); i++; } i++; out.push("<pre><code>"+code.join("\n")+"</code></pre>"); continue; }
+    if(/^\s*(-{3,}|\*{3,})\s*$/.test(ln)){ out.push("<hr>"); i++; continue; }
+    // 표
+    if(/^\s*\|.*\|\s*$/.test(ln) && i+1<lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i+1])){
+      var head = ln.split("|").slice(1,-1).map(function(c){return "<th>"+inline(c.trim())+"</th>";}).join("");
+      i+=2; var rows=[];
+      while(i<lines.length && /^\s*\|.*\|\s*$/.test(lines[i])){
+        rows.push("<tr>"+lines[i].split("|").slice(1,-1).map(function(c){return "<td>"+inline(c.trim())+"</td>";}).join("")+"</tr>");
+        i++;
+      }
+      out.push("<table><thead><tr>"+head+"</tr></thead><tbody>"+rows.join("")+"</tbody></table>");
+      continue;
+    }
+    if(/^\s*>\s?/.test(ln)){ var q=[]; while(i<lines.length && /^\s*>\s?/.test(lines[i])){ q.push(inline(lines[i].replace(/^\s*>\s?/,""))); i++; } out.push("<blockquote>"+q.join("<br>")+"</blockquote>"); continue; }
+    if(/^\s*[-*]\s+/.test(ln)){ var li=[]; while(i<lines.length && /^\s*[-*]\s+/.test(lines[i])){ li.push("<li>"+inline(lines[i].replace(/^\s*[-*]\s+/,""))+"</li>"); i++; } out.push("<ul>"+li.join("")+"</ul>"); continue; }
+    if(/^\s*\d+\.\s+/.test(ln)){ var ol=[]; while(i<lines.length && /^\s*\d+\.\s+/.test(lines[i])){ ol.push("<li>"+inline(lines[i].replace(/^\s*\d+\.\s+/,""))+"</li>"); i++; } out.push("<ol>"+ol.join("")+"</ol>"); continue; }
+    var para=[]; while(i<lines.length && !/^\s*$/.test(lines[i]) && !/^\s*(#{1,4}\s|>|[-*]\s|\d+\.\s|```|\|)/.test(lines[i])){ para.push(inline(lines[i])); i++; }
+    out.push("<p>"+para.join("<br>")+"</p>");
+  }
+  return out.join("\n");
+}
+
+// ── 렌더: 목록 ────────────────────────────────────────────────────
+var _all = [];
+var DEFAULT_CAT = "보고서";                                  // category null/미지정 시 기본 분류
+function catOf(r){ var c=(r&&r.category!=null)?String(r.category).trim():""; return c||DEFAULT_CAT; }
+function hashFor(q,cat){ var p=[]; if(q)p.push("q="+encodeURIComponent(q)); if(cat&&cat!=="전체")p.push("c="+encodeURIComponent(cat)); return "#/"+(p.length?"?"+p.join("&"):""); }
+
+function renderList(q, cat){
+  q = q||""; cat = cat||"전체";
+  // category pill 목록 — 데이터에 실제 등장하는 category 동적 생성 (+ 카운트)
+  var counts = {}; _all.forEach(function(r){ var c=catOf(r); counts[c]=(counts[c]||0)+1; });
+  var cats = Object.keys(counts).sort(function(a,b){ if(a===DEFAULT_CAT)return -1; if(b===DEFAULT_CAT)return 1; return a.localeCompare(b,"ko"); });
+  var pills = '<div class="catbar">'
+    + '<span class="pill'+(cat==="전체"?' active':'')+'" data-cat="전체">전체<span class="n">'+_all.length+'</span></span>'
+    + cats.map(function(c){ return '<span class="pill'+(cat===c?' active':'')+'" data-cat="'+esc(c)+'">'+esc(c)+'<span class="n">'+counts[c]+'</span></span>'; }).join("")
+    + '</div>';
+
+  var items = _all.slice().sort(byNewest);
+  if(cat && cat!=="전체") items = items.filter(function(r){ return catOf(r)===cat; });
+  if(q){ var ql=q.toLowerCase();
+    items = items.filter(function(r){ return ((r.title||"")+" "+(r.author||"")+" "+(r.summary||"")+" "+catOf(r)).toLowerCase().indexOf(ql)>=0; }); }
+
+  var search = ''
+    + '<div class="search"><svg viewBox="0 0 24 24" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>'
+    + '<input id="q" type="search" placeholder="제목·작성자·요약 검색" value="'+esc(q)+'"></div>';
+
+  var body;
+  if(!items.length){
+    var why = q ? "검색 결과가 없습니다" : (cat!=="전체" ? "'"+esc(cat)+"' 분류의 보고서가 없습니다" : "아직 보고서가 없습니다");
+    body = '<div class="state"><div class="big">'+why+'</div>'+(usingMock?"":"보고서가 등록되면 여기 나타납니다.")+'</div>';
+  } else {
+    body = '<div class="list">'+items.map(function(r){
+      var badges = (r.forms||[]).map(function(t){ var ft=(typeof t==="string"?t:t.type); return '<span class="badge '+esc(ft)+'">'+esc(ft)+'</span>'; }).join("");
+      return '<a class="row" href="#/r/'+encodeURIComponent(r.id)+'">'
+        + '<span class="cat">'+esc(catOf(r))+'</span>'
+        + '<div class="rtitle">'+esc(r.title)+'</div>'
+        + '<div class="meta"><span class="author">'+esc(r.author||"—")+'</span><span class="sep">·</span><span>'+fmtDate(r.created_at)+'</span></div>'
+        + (r.summary?'<div class="summary">'+esc(r.summary)+'</div>':'')
+        + (badges?'<div class="badges">'+badges+'</div>':'')
+        + '</a>';
+    }).join("")+'</div>';
+  }
+  app.innerHTML = pills + search + body + (usingMock?'<div class="state" style="padding:22px 0 0;font-size:12px;color:#64748b">· 목업 데이터 (API 미연결) ·</div>':'');
+
+  [].forEach.call(document.querySelectorAll(".pill"), function(el){
+    el.onclick=function(){ location.hash=hashFor(q, el.getAttribute("data-cat")); };
+  });
+  var qel=document.getElementById("q");
+  if(qel){ qel.oninput=function(){ var v=this.value; clearTimeout(qel._t); qel._t=setTimeout(function(){ location.hash=hashFor(v, cat); },180); };
+    if(q){ qel.focus(); qel.setSelectionRange(qel.value.length,qel.value.length); } }
+}
+
+// ── 렌더: 상세 ────────────────────────────────────────────────────
+function renderDetail(id){
+  app.innerHTML = '<div class="state">불러오는 중…</div>';
+  var getMeta = usingMock
+    ? Promise.resolve(_all.filter(function(r){return r.id===id;})[0] || null)
+    : api("/api/"+encodeURIComponent(id)).catch(function(){ return _all.filter(function(r){return r.id===id;})[0]||null; });
+  getMeta.then(function(meta){
+    if(meta && meta.report) meta = meta.report;          // bare/{report:..} 양형식 수용
+    if(!meta){ app.innerHTML = '<div class="back" onclick="location.hash=\'#/\'">← 목록</div><div class="state err"><div class="big">보고서를 찾을 수 없습니다</div>id: '+esc(id)+'</div>'; return; }
+    var forms = (meta.forms || []).map(function(t){ return typeof t==="string"?t:t.type; });
+    var head = ''
+      + '<div class="back" id="back">← 목록으로</div>'
+      + '<div class="dhead"><h2>'+esc(meta.title)+'</h2>'
+      + '<div class="meta"><span class="author">'+esc(meta.author||"—")+'</span><span>·</span><span>'+fmtDate(meta.created_at)+'</span></div>'
+      + (meta.summary?'<div class="dsummary">'+esc(meta.summary)+'</div>':'')+'</div>';
+    var author = meta.author || "담당자";
+    var reqHtml = '<div class="reqbox">'
+      + '<button class="reqbtn" id="reqtoggle">✉ 요청하기</button>'
+      + '<div class="reqform" id="reqform" hidden>'
+      +   '<div class="reqto">담당자: <b>'+esc(author)+'</b> <span class="hint">(보고서 작성자 기본)</span></div>'
+      +   '<textarea id="reqtext" placeholder="요청 내용을 입력하세요 — 예: 3장 수치 최신화 부탁드려요"></textarea>'
+      +   '<div class="reqactions"><span class="reqmsg" id="reqmsg"></span><button class="reqsend" id="reqsend">보내기</button></div>'
+      + '</div></div>';
+    var tabs = forms.map(function(t,k){ return '<div class="tab'+(k===0?' active':'')+'" data-type="'+esc(t)+'">'+esc(t)+'</div>'; }).join("");
+    var bar = '<div class="formbar"><div class="tabs">'+tabs+'</div>'
+      + (forms.length?'<a class="dl" id="dl"><svg viewBox="0 0 24 24" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 21h16"/></svg>다운로드</a>':'')+'</div>';
+    app.innerHTML = head + reqHtml + bar + '<div class="viewer" id="viewer"></div>';
+    document.getElementById("back").onclick=function(){ history.length>1?history.back():(location.hash="#/"); };
+
+    // 요청하기 — 토글 + POST /api/:id/request {text}
+    var rToggle=document.getElementById("reqtoggle"), rForm=document.getElementById("reqform");
+    rToggle.onclick=function(){
+      if(rForm.hasAttribute("hidden")){ rForm.removeAttribute("hidden"); document.getElementById("reqtext").focus(); }
+      else rForm.setAttribute("hidden","");
+    };
+    document.getElementById("reqsend").onclick=function(){
+      var txt=document.getElementById("reqtext").value.trim();
+      var msg=document.getElementById("reqmsg"); msg.className="reqmsg";
+      if(!txt){ msg.className="reqmsg err"; msg.textContent="요청 내용을 입력하세요."; return; }
+      var btn=this; btn.disabled=true; msg.className="reqmsg"; msg.textContent="전송 중…";
+      function ok(asg){ msg.className="reqmsg ok"; msg.textContent="✅ 요청 전송됨 — 담당자: "+(asg||author); document.getElementById("reqtext").value=""; btn.disabled=false; }
+      function fail(e){ msg.className="reqmsg err"; msg.textContent="전송 실패: "+e; btn.disabled=false; }
+      if(usingMock){ setTimeout(function(){ ok(author); },300); return; }
+      fetch(BASE+"/api/"+encodeURIComponent(id)+"/request",
+            {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({text:txt})})
+        .then(function(r){ return r.json().catch(function(){return {};}).then(function(j){ return {ok:r.ok,status:r.status,j:j}; }); })
+        .then(function(res){ if(res.ok&&res.j&&res.j.ok) ok(res.j.assignee); else fail((res.j&&res.j.error)||("HTTP "+res.status)); })
+        .catch(function(e){ fail(e.message); });
+    };
+
+    function show(type){
+      var viewer = document.getElementById("viewer");
+      [].forEach.call(document.querySelectorAll(".tab"), function(el){ el.classList.toggle("active", el.getAttribute("data-type")===type); });
+      var dl = document.getElementById("dl");
+      if(dl){ if(usingMock){ dl.removeAttribute("href"); dl.onclick=function(){ alert("목업 모드 — 실제 다운로드는 API 연결 후."); }; }
+              else { dl.href=fileUrl(id,type); dl.setAttribute("download",""); dl.onclick=null; } }
+      viewer.innerHTML = '<div class="md" style="color:#64748b">불러오는 중…</div>';
+      if(type==="html"){
+        if(usingMock){ fetchFile(id,type).then(function(txt){ viewer.innerHTML='<iframe sandbox="allow-same-origin"></iframe>'; viewer.querySelector("iframe").srcdoc=txt; }); }
+        else { viewer.innerHTML='<iframe sandbox="allow-same-origin allow-popups" src="'+fileUrl(id,type)+'"></iframe>'; }
+        return;
+      }
+      if(type==="md"){
+        fetchFile(id,type).then(function(txt){ viewer.innerHTML='<div class="md">'+mdToHtml(txt)+'</div>'; })
+          .catch(function(e){ viewer.innerHTML='<div class="md err">불러오기 실패: '+esc(e.message)+'</div>'; });
+        return;
+      }
+      // 기타 폼(pdf/pptx/audio…) — 미리보기 대신 다운로드 안내 (동적, 하드코딩 X)
+      viewer.innerHTML='<div class="md"><p style="color:#94a3b8">이 형식(<code>'+esc(type)+'</code>)은 미리보기를 지원하지 않습니다. 오른쪽 위 <b>다운로드</b>로 받으세요.</p></div>';
+    }
+    [].forEach.call(document.querySelectorAll(".tab"), function(el){ el.onclick=function(){ show(el.getAttribute("data-type")); }; });
+    if(forms.length) show(forms[0].type || forms[0]);
+    else app.querySelector("#viewer").innerHTML='<div class="md" style="color:#94a3b8">첨부된 형식이 없습니다.</div>';
+  });
+}
+
+// ── 라우팅 (해시) ────────────────────────────────────────────────
+function route(){
+  var h = location.hash || "#/";
+  var mDetail = h.match(/^#\/r\/(.+)$/);
+  if(mDetail){ renderDetail(decodeURIComponent(mDetail[1])); window.scrollTo(0,0); return; }
+  var qs = (h.split("?")[1]||"").split("&").reduce(function(o,kv){ var p=kv.split("="); if(p[0])o[p[0]]=decodeURIComponent(p[1]||""); return o; },{});
+  renderList(qs.q||"", qs.c||"전체");
+}
+
+// ── 부트 ──────────────────────────────────────────────────────────
+function boot(list){ _all = list || []; route(); }
+// 응답 언래핑: bare 배열 또는 {reports:[...]} 양형식 모두 수용 (라이브 API는 래핑됨).
+function asList(res){ return Array.isArray(res) ? res : (res && Array.isArray(res.reports) ? res.reports : []); }
+api("/api/list")
+  .then(function(res){ boot(asList(res)); })
+  .catch(function(){ usingMock=true; boot(MOCK.list); });
+window.addEventListener("hashchange", route);
+})();
+</script>
+</body>
+</html>
