@@ -36,6 +36,7 @@ archiving/
 !/scripts/auto-heal-core-harness.sh
 !/scripts/task-review-ping.ts
 !/scripts/task-review-summary.ts
+!/scripts/task-continuation-guard.ts
 /docs/*
 !/docs/AUTO_HEAL_CORE.md
 !/docs/SLACK_SETUP.md
