@@ -4,7 +4,14 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { migrate } from "../db/migrate";
+import type { TeamOsScheduled } from "../lib/teamosProbe";
 import { createAcceptanceRoutes } from "./acceptance";
+
+const healthyServices: TeamOsScheduled[] = [
+  { label: "com.test.team-collab", kind: "service", detail: "상시", description: "team-collab", source: "launchd", running: true, enabled: true },
+  { label: "com.test.caffeinate", kind: "service", detail: "상시", description: "caffeinate", source: "launchd", running: true, enabled: true },
+  { label: "ai.openclaw.gateway", kind: "service", detail: "상시", description: "gateway", source: "launchd", running: true, enabled: true },
+];
 
 function setSetting(db: Database, key: string, value: string) {
   db.query(
@@ -13,7 +20,7 @@ function setSetting(db: Database, key: string, value: string) {
   ).run(key, value);
 }
 
-function setup() {
+function setup(services: TeamOsScheduled[] = healthyServices) {
   const db = new Database(":memory:");
   migrate(db);
   const dir = mkdtempSync(join(tmpdir(), "acceptance-test-"));
@@ -81,8 +88,47 @@ Tasks 칸반 사용.
   setSetting(db, "owner_name", "Owner");
   setSetting(db, "router_enabled", "true");
 
-  const app = createAcceptanceRoutes({ db, registryPath, teamOsPath, rootDir: root, membersRoot });
+  const app = createAcceptanceRoutes({
+    db,
+    registryPath,
+    teamOsPath,
+    rootDir: root,
+    membersRoot,
+    teamOsSnapshot: () => ({ scheduled: services }),
+  });
   return { app, db, dir, root, membersRoot, novaWs };
+}
+
+function insertScheduledJob(db: Database, id: string, status: "failed" | "cancelled", enabled: 0 | 1) {
+  db.prepare(
+    `INSERT INTO scheduled_job
+       (id, kind, schedule_kind, status, enabled, title, created_by, timezone,
+        next_run_at, last_run_at, schedule_expr, payload_json)
+     VALUES (?, 'recurring', 'cron', ?, ?, ?, 'test', 'Asia/Seoul',
+             datetime('now', '+1 day'), '2026-07-23 12:34:00', '{}', '{}')`,
+  ).run(id, status, enabled, id);
+}
+
+function insertOrphanWakes(db: Database, count: number) {
+  db.prepare(
+    `INSERT INTO agent (id, display_name, role, runtime, status_provider, workspace_path, persona_file)
+     VALUES ('worker', 'Worker', 'dev', 'openclaw', 'openclaw_gateway', '/tmp/worker', '/tmp/worker/SOUL.md')`,
+  ).run();
+  db.prepare(
+    `INSERT INTO thread (id, title, kind, participants_json, opened_by)
+     VALUES ('infra-test', 'Infra test', 'dm', '[]', 'test')`,
+  ).run();
+  for (let i = 0; i < count; i += 1) {
+    const id = `orphan-${i}`;
+    db.prepare(
+      `INSERT INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source)
+       VALUES (?, 'infra-test', 'test', 'worker', 'dm', 'test', 'system')`,
+    ).run(id);
+    db.prepare(
+      `INSERT INTO message_recipient (message_id, agent_id, delivery_state, lease_until)
+       VALUES (?, 'worker', 'wake_dispatched', datetime('now', '-2 hours'))`,
+    ).run(id);
+  }
 }
 
 beforeEach(() => {
@@ -93,7 +139,7 @@ beforeEach(() => {
 });
 
 describe("acceptance-check routes", () => {
-  test("returns four staged checks for an onboarded member", async () => {
+  test("returns five staged checks including healthy infra for an onboarded member", async () => {
     const { app, dir } = setup();
     try {
       const res = await app.request("/members/nova/acceptance-check");
@@ -101,13 +147,112 @@ describe("acceptance-check routes", () => {
       const body = (await res.json()) as any;
       expect(body.ok).toBe(true);
       expect(body.member).toBe("nova");
-      expect(body.sections.map((section: any) => section.key)).toEqual(["settings", "rules", "ot", "portability"]);
+      expect(body.sections.map((section: any) => section.key)).toEqual(["settings", "rules", "ot", "portability", "infra"]);
       expect(body.sections.every((section: any) => Array.isArray(section.checks))).toBe(true);
       expect(body.sections.find((section: any) => section.key === "ot").checks).toContainEqual({
         label: "agents.json 등록",
         status: "pass",
         detail: "runtime=openclaw",
       });
+      const infra = body.sections.find((section: any) => section.key === "infra");
+      expect(infra.label).toBe("인프라/운영");
+      expect(
+        infra.checks
+          .filter((entry: any) => entry.label.endsWith("서비스: team-collab"))
+          .every((entry: any) => entry.status === "pass"),
+      ).toBe(true);
+      expect(infra.checks).toContainEqual({ label: "고아 wake", status: "info", detail: "없음" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("infra keeps stopped or missing optional services informational", async () => {
+    const optionalServices = healthyServices
+      .filter((service) => service.label !== "ai.openclaw.gateway")
+      .map((service) => service.label.endsWith("caffeinate") ? { ...service, running: false } : service);
+    const { app, dir } = setup(optionalServices);
+    try {
+      const body = (await (await app.request("/acceptance-check")).json()) as any;
+      const infra = body.sections.find((section: any) => section.key === "infra");
+      expect(infra.checks).toContainEqual({
+        label: "선택 서비스: caffeinate",
+        status: "info",
+        detail: "미설정 — 선택",
+      });
+      expect(infra.checks).toContainEqual({
+        label: "선택 서비스: gateway",
+        status: "info",
+        detail: "미설정 — 선택",
+      });
+      expect(body.ok).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("infra treats a missing team-collab launchd service as a healthy manual server run", async () => {
+    const manuallyStartedServices = healthyServices.filter((service) => !service.label.endsWith("team-collab"));
+    const { app, dir } = setup(manuallyStartedServices);
+    try {
+      const body = (await (await app.request("/acceptance-check")).json()) as any;
+      const infra = body.sections.find((section: any) => section.key === "infra");
+      expect(infra.checks).toContainEqual({
+        label: "필수 서비스: team-collab",
+        status: "pass",
+        detail: "수동 실행 — launchd 상시서비스 미설치(리부팅 자동복구 없음)",
+      });
+      expect(body.ok).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("infra keeps a stopped team-collab launchd service informational while failed jobs fail", async () => {
+    const stoppedServices = healthyServices.map((service) =>
+      service.label.endsWith("team-collab") ? { ...service, running: false } : service,
+    );
+    const { app, db, dir } = setup(stoppedServices);
+    try {
+      insertScheduledJob(db, "broken-recurring", "failed", 1);
+      insertOrphanWakes(db, 11);
+
+      const body = (await (await app.request("/acceptance-check")).json()) as any;
+      const infra = body.sections.find((section: any) => section.key === "infra");
+      expect(infra.checks).toContainEqual(
+        expect.objectContaining({
+          label: "필수 서비스: team-collab",
+          status: "info",
+          detail: "launchd 등록됨·stopped — 현재 서버는 수동 실행 중",
+        }),
+      );
+      expect(infra.checks).toContainEqual(
+        expect.objectContaining({
+          label: "예약 잡 실패",
+          status: "fail",
+          detail: expect.stringContaining("broken-recurring"),
+        }),
+      );
+      expect(infra.checks).toContainEqual(
+        { label: "고아 wake", status: "info", detail: "reconcile 후보 11개" },
+      );
+      expect(body.ok).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("infra reports retired jobs and a small orphan-wake backlog as info", async () => {
+    const { app, db, dir } = setup();
+    try {
+      insertScheduledJob(db, "retired-recurring", "cancelled", 0);
+      insertOrphanWakes(db, 3);
+
+      const body = (await (await app.request("/acceptance-check")).json()) as any;
+      const infra = body.sections.find((section: any) => section.key === "infra");
+      expect(infra.checks).toContainEqual({ label: "은퇴 잡", status: "info", detail: "은퇴 1개" });
+      expect(infra.checks).toContainEqual({ label: "고아 wake", status: "info", detail: "reconcile 후보 3개" });
+      expect(body.ok).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

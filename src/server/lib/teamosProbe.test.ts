@@ -25,4 +25,21 @@ describe("teamOsSnapshot scheduled_job rows", () => {
     expect(row?.detail).toContain("next=07-21 09:30 KST");
     expect(row?.detail).toContain("last=07-21 08:15 KST");
   });
+
+  test("excludes disabled cancelled jobs retired from the OS tab", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    createCronJob(db, {
+      id: "retired-job",
+      title: "Retired job",
+      cron: "0 21 * * *",
+      timezone: "Asia/Seoul",
+      createdBy: "test",
+      payload: { type: "exec", execKey: "task-review-ping" },
+    });
+    db.prepare("UPDATE scheduled_job SET enabled = 0, status = 'cancelled' WHERE id = 'retired-job'").run();
+    __resetTeamOsSnapshotCacheForTest();
+
+    expect(teamOsSnapshot(db).scheduled.some((job) => job.label === "retired-job")).toBe(false);
+  });
 });
