@@ -11,6 +11,7 @@ import { renderAgentSlack } from "./AgentSlack";
 import { renderIcon, agentIconName, downloadAgentIconJpg } from "../icons";
 import { AGENT_ICON_COLORS, renderAgentIcon, iconColorHex } from "../agentColors";
 import { pick } from "../i18n";
+import { showConfirm } from "./dialogs";
 
 // 아이콘 선택지(icons.ts ICONS 키 중 페르소나/역할에 어울리는 것).
 const ICON_CHOICES = [
@@ -75,33 +76,6 @@ function revealExpandedSection(section: HTMLElement): void {
         scroller.scrollBy({ top: bottomOverflow, behavior: "smooth" });
       }
     });
-  });
-}
-
-// 인앱 확인 모달 — native confirm() 대신(WKWebView 앱 호환 + 팀원명 크게·굵게 스타일 가능).
-// bodyHtml 은 신뢰된 문자열(호출부에서 escape 처리). 확인=resolve(true), 취소/backdrop/Esc=false.
-function confirmModal(bodyHtml: string, opts: { danger?: boolean; okLabel?: string } = {}): Promise<boolean> {
-  return new Promise((resolve) => {
-    const overlay = document.createElement("div");
-    overlay.className = "fixed inset-0 z-[100] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4";
-    const okCls = opts.danger ? "bg-status-blocked/90 hover:bg-status-blocked text-white" : "bg-accent-green/90 hover:bg-accent-green text-white";
-    const okLabel = opts.okLabel ?? pick("확인", "Confirm");
-    overlay.innerHTML = `
-      <div class="max-w-sm w-full rounded-xl bg-surface-2 border border-surface-3 shadow-2xl p-5" role="dialog" aria-modal="true">
-        <div class="text-sm text-slate-300 leading-relaxed mb-5">${bodyHtml}</div>
-        <div class="flex justify-end gap-2">
-          <button data-mc="cancel" class="px-4 py-2 rounded-md text-sm font-medium text-slate-300 border border-surface-3 hover:bg-surface-3">${pick("취소", "Cancel")}</button>
-          <button data-mc="ok" class="px-4 py-2 rounded-md text-sm font-semibold ${okCls}">${escape(okLabel)}</button>
-        </div>
-      </div>`;
-    const done = (v: boolean) => { overlay.remove(); document.removeEventListener("keydown", onKey); resolve(v); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") done(false); };
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) done(false); });
-    overlay.querySelector('[data-mc="ok"]')?.addEventListener("click", () => done(true));
-    overlay.querySelector('[data-mc="cancel"]')?.addEventListener("click", () => done(false));
-    document.addEventListener("keydown", onKey);
-    document.body.appendChild(overlay);
-    overlay.querySelector<HTMLButtonElement>('[data-mc="ok"]')?.focus();
   });
 }
 
@@ -353,7 +327,7 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
   const regenBtn = root.querySelector<HTMLButtonElement>("#cfg-regen");
   const regenMsg = root.querySelector<HTMLElement>("#cfg-regen-msg");
   regenBtn?.addEventListener("click", async () => {
-    if (!confirm(pick(`${agent.display_name}의 ⭐핵심룰(멈춤장치·통신·conti)을 현재 템플릿으로 재적용할까요?\n정체·능력 등 커스텀은 보존됩니다. (백업 자동)`, `Re-apply ${agent.display_name}'s ⭐core rules (stop-guard · comms · conti) from the current template?\nCustomizations like identity & capabilities are preserved. (auto backup)`))) return;
+    if (!await showConfirm(pick(`${agent.display_name}의 ⭐핵심룰(멈춤장치·통신·conti)을 현재 템플릿으로 재적용할까요?\n정체·능력 등 커스텀은 보존됩니다. (백업 자동)`, `Re-apply ${agent.display_name}'s ⭐core rules (stop-guard · comms · conti) from the current template?\nCustomizations like identity & capabilities are preserved. (auto backup)`))) return;
     const _busy = setBtnBusy(regenBtn, pick("⏳ 적용 중…", "⏳ Applying…"));
     if (regenMsg) { regenMsg.textContent = pick("재적용 중…", "Re-applying…"); regenMsg.className = "text-[11px] text-slate-400"; }
     try {
@@ -378,7 +352,7 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
   const restartBtn = root.querySelector<HTMLButtonElement>("#cfg-restart");
   restartBtn?.addEventListener("click", async () => {
     const gwNote = GATEWAY_RESTART_NOTE[agent.runtime];
-    if (!confirm(pick(`${agent.display_name} 런타임을 재시작할까요? (새 페르소나/상태 로드${gwNote ? `.${gwNote.ko}` : ""})`, `Restart the ${agent.display_name} runtime? (loads new persona/state${gwNote ? `.${gwNote.en}` : ""})`))) return;
+    if (!await showConfirm(pick(`${agent.display_name} 런타임을 재시작할까요? (새 페르소나/상태 로드${gwNote ? `.${gwNote.ko}` : ""})`, `Restart the ${agent.display_name} runtime? (loads new persona/state${gwNote ? `.${gwNote.en}` : ""})`))) return;
     const _busy = setBtnBusy(restartBtn, pick("⏳ 재시작 중…", "⏳ Restarting…"));
     if (regenMsg) { regenMsg.textContent = pick(`${agent.display_name} 재시작 중…`, `Restarting ${agent.display_name}…`); regenMsg.className = "text-[11px] text-slate-400"; }
     try {
@@ -394,7 +368,7 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
   // 🧹 완전 재시작 — 세션 컨텍스트(기억) 완전 비움 + 콜드 스타트(--fresh). 되돌릴 수 없는 작업이라 명시 경고.
   const restartFreshBtn = root.querySelector<HTMLButtonElement>("#cfg-restart-fresh");
   restartFreshBtn?.addEventListener("click", async () => {
-    if (!confirm(pick(`${agent.display_name}을(를) 완전 재시작할까요?\n\n⚠ 이 팀원의 대화 컨텍스트(그동안의 기억)가 완전히 비워지고, 새 CLAUDE.md로 콜드 스타트합니다.\n진행 중이던 작업 맥락이 사라집니다. 되돌릴 수 없습니다.`, `Fully restart ${agent.display_name}?\n\n⚠ This member's conversation context (all memory so far) will be completely wiped, and it will cold-start with the new CLAUDE.md.\nThe context of any in-progress work is lost. This cannot be undone.`))) return;
+    if (!await showConfirm({ message: pick(`${agent.display_name}을(를) 완전 재시작할까요?\n\n⚠ 이 팀원의 대화 컨텍스트(그동안의 기억)가 완전히 비워지고, 새 CLAUDE.md로 콜드 스타트합니다.\n진행 중이던 작업 맥락이 사라집니다. 되돌릴 수 없습니다.`, `Fully restart ${agent.display_name}?\n\n⚠ This member's conversation context (all memory so far) will be completely wiped, and it will cold-start with the new CLAUDE.md.\nThe context of any in-progress work is lost. This cannot be undone.`), danger: true })) return;
     const _busy = setBtnBusy(restartFreshBtn, pick("⏳ 완전 재시작 중…", "⏳ Full restarting…"));
     if (regenMsg) { regenMsg.textContent = pick(`${agent.display_name} 완전 재시작 중… (컨텍스트 비움)`, `Fully restarting ${agent.display_name}… (wiping context)`); regenMsg.className = "text-[11px] text-slate-400"; }
     try {
@@ -411,7 +385,7 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
   const onoffBtn = root.querySelector<HTMLButtonElement>("#cfg-onoff");
   onoffBtn?.addEventListener("click", async () => {
     const want = data.off === true; // off면 기동(true), on이면 정지(false)
-    if (!confirm(pick(`${agent.display_name}을(를) ${want ? "기동" : "정지"}할까요?`, `${want ? "Start" : "Stop"} ${agent.display_name}?`))) return;
+    if (!await showConfirm({ message: pick(`${agent.display_name}을(를) ${want ? "기동" : "정지"}할까요?`, `${want ? "Start" : "Stop"} ${agent.display_name}?`), danger: !want })) return;
     onoffBtn.disabled = true;
     if (regenMsg) { regenMsg.textContent = pick(`${agent.display_name} ${want ? "기동" : "정지"} 중…`, `${want ? "Starting" : "Stopping"} ${agent.display_name}…`); regenMsg.className = "text-[11px] text-slate-400"; }
     try {
@@ -488,9 +462,9 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
     const token = tokenInput?.value.trim() ?? "";
     if (!token) { setTokenMsg("text-txt-red", pick("토큰을 입력하세요.", "Enter a token.")); return; }
     // 엉뚱한 팀원에게 적용 방지 — 팀원명 크게 노출한 확인창(GD 2026-07-01).
-    if (!(await confirmModal(pick(
+    if (!(await showConfirm({ messageHtml: pick(
       `<b class="text-base text-slate-100">${escape(agent.display_name)}</b> 의 봇 토큰을 바꾸시겠습니까?<div class="text-[12px] text-slate-500 mt-1">이 팀원의 봇을 새 토큰으로 다시 연결합니다.</div>`,
-      `Change <b class="text-base text-slate-100">${escape(agent.display_name)}</b>'s bot token?<div class="text-[12px] text-slate-500 mt-1">Reconnects this member's bot with the new token.</div>`)))) { if (tokenInput) tokenInput.value = ""; return; }
+      `Change <b class="text-base text-slate-100">${escape(agent.display_name)}</b>'s bot token?<div class="text-[12px] text-slate-500 mt-1">Reconnects this member's bot with the new token.</div>`) }))) { if (tokenInput) tokenInput.value = ""; return; }
     if (tokenBtn) tokenBtn.disabled = true;
     setTokenMsg("text-slate-400", pick("검증 중…", "Verifying…"));
     try {
@@ -541,10 +515,10 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
     const confirmName = swapConfirm?.value.trim() ?? "";
     if (!target || confirmName !== agent.display_name) return;
     // 파괴적 작업(런타임 정지→재기동) — 팀원명 크게 노출한 확인창(offboard/토큰변경과 동일 패턴, GD 2026-07-01 관례).
-    if (!(await confirmModal(pick(
+    if (!(await showConfirm({ messageHtml: pick(
       `<b class="text-base text-slate-100">${escape(agent.display_name)}</b> 의 런타임을 <b class="text-txt-amber">${escape(runtimeLabel(agent.runtime))} → ${escape(runtimeLabel(target))}</b> 로 교체할까요?<div class="text-[12px] text-slate-500 mt-1">런타임을 정지했다 재기동합니다. 진행 중 작업이 있으면 중단될 수 있습니다. 메모리는 보존됩니다.</div>`,
       `Swap <b class="text-base text-slate-100">${escape(agent.display_name)}</b>'s runtime from <b class="text-txt-amber">${escape(runtimeLabel(agent.runtime))} → ${escape(runtimeLabel(target))}</b>?<div class="text-[12px] text-slate-500 mt-1">This stops and restarts the runtime. In-progress work may be interrupted. Memory is preserved.</div>`),
-      { danger: true, okLabel: pick("교체", "Swap") }))) return;
+      danger: true, okLabel: pick("교체", "Swap") }))) return;
     const _busy = setBtnBusy(swapBtn, pick("⏳ 교체 중…", "⏳ Swapping…"));
     if (swapMsg) { swapMsg.textContent = pick("런타임 교체 중… (정지→레지스트리 갱신→재기동)", "Swapping runtime… (stop → registry update → restart)"); swapMsg.className = "text-[12px] mt-2 leading-snug text-slate-400"; }
     renderSwapSteps(undefined);
@@ -599,9 +573,9 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
   });
   offBtn?.addEventListener("click", async () => {
     // 이름-타이핑 가드에 더해 명시적 확인창 — 엉뚱한 팀원 퇴사 방지, 팀원명 크게(GD 2026-07-01).
-    if (!(await confirmModal(pick(
+    if (!(await showConfirm({ messageHtml: pick(
       `정말 <b class="text-base text-slate-100">${escape(agent.display_name)}</b> 을(를) 퇴사시키겠습니까?<div class="text-[12px] text-slate-500 mt-1">팀원 목록에서 지우고, 지금까지 등록·진행한 내용을 정리합니다.</div>`,
-      `Really offboard <b class="text-base text-slate-100">${escape(agent.display_name)}</b>?<div class="text-[12px] text-slate-500 mt-1">Removes them from the team and clears what was set up so far.</div>`), { danger: true, okLabel: pick("퇴사", "Offboard") }))) return;
+      `Really offboard <b class="text-base text-slate-100">${escape(agent.display_name)}</b>?<div class="text-[12px] text-slate-500 mt-1">Removes them from the team and clears what was set up so far.</div>`), danger: true, okLabel: pick("퇴사", "Offboard") }))) return;
     offBtn.disabled = true;
     if (offMsg) {
       // openclaw는 게이트웨이 정리(bootout+프로필 제거)로 퇴사가 더 오래 걸림 → 눈에 띄게 안내(GD 2026-07-02).

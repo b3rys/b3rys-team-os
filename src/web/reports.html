@@ -159,6 +159,17 @@ a{color:inherit;text-decoration:none}
 .md th,.md td{border:1px solid var(--border);padding:7px 11px;text-align:left}
 .md th{background:var(--bg-soft);color:var(--head);font-weight:600}
 
+.dialogOverlay{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;
+  overflow-y:auto;background:rgba(0,0,0,.55);padding:24px 16px;backdrop-filter:blur(6px)}
+.dialogBox{width:100%;max-width:420px;background:var(--card);border:1px solid var(--border);
+  border-radius:10px;box-shadow:0 24px 80px rgba(0,0,0,.45);padding:18px}
+.dialogTitle{font-size:16px;font-weight:700;color:var(--head);margin-bottom:8px}
+.dialogMsg{white-space:pre-line;word-break:break-word;font-size:14px;line-height:1.65;color:var(--text)}
+.dialogActions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.dialogBtn{font-size:13px;font-weight:700;padding:8px 14px;border-radius:8px;border:1px solid var(--green-soft);
+  color:#04140a;background:var(--green);cursor:pointer}
+.dialogBtn:hover{background:var(--green-bright)}
+
 @media(max-width:520px){
   .row{padding:14px 15px}
   .dl{margin-left:0;width:100%;justify-content:center}
@@ -231,6 +242,24 @@ function fileUrl(id,type){ return BASE + "/file/" + encodeURIComponent(id) + "/"
 function fetchFile(id,type){
   if(usingMock){ var k=id+"/"+type; return Promise.resolve(MOCK.files[k] != null ? MOCK.files[k] : "(목업에 "+k+" 없음)"); }
   return fetch(fileUrl(id,type)).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.text(); });
+}
+function showNotice(message){
+  return new Promise(function(resolve){
+    var overlay = document.createElement("div");
+    overlay.className = "dialogOverlay";
+    overlay.innerHTML = '<div class="dialogBox" role="dialog" aria-modal="true" aria-labelledby="notice-title">'
+      + '<div class="dialogTitle" id="notice-title">알림</div>'
+      + '<div class="dialogMsg">'+esc(message)+'</div>'
+      + '<div class="dialogActions"><button type="button" class="dialogBtn" data-ok>닫기</button></div>'
+      + '</div>';
+    var done = function(){ overlay.remove(); document.removeEventListener("keydown", onKey); resolve(); };
+    var onKey = function(e){ if(e.key==="Escape" || e.key==="Enter") done(); };
+    overlay.addEventListener("click", function(e){ if(e.target===overlay) done(); });
+    overlay.querySelector("[data-ok]").addEventListener("click", done);
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(overlay);
+    overlay.querySelector("[data-ok]").focus();
+  });
 }
 
 // ── 유틸 ──────────────────────────────────────────────────────────
@@ -398,7 +427,7 @@ function renderDetail(id){
       var viewer = document.getElementById("viewer");
       [].forEach.call(document.querySelectorAll(".tab"), function(el){ el.classList.toggle("active", el.getAttribute("data-type")===type); });
       var dl = document.getElementById("dl");
-      if(dl){ if(usingMock){ dl.removeAttribute("href"); dl.onclick=function(){ alert("목업 모드 — 실제 다운로드는 API 연결 후."); }; }
+      if(dl){ if(usingMock){ dl.removeAttribute("href"); dl.onclick=function(e){ e.preventDefault(); showNotice("목업 모드 — 실제 다운로드는 API 연결 후."); }; }
               else { dl.href=fileUrl(id,type); dl.setAttribute("download",""); dl.onclick=null; } }
       viewer.innerHTML = '<div class="md" style="color:#64748b">불러오는 중…</div>';
       if(type==="html"){

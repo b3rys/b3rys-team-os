@@ -9,6 +9,7 @@ import { apiBase } from "../ws";
 import { setBtnBusy } from "./Settings";
 import { renderIcon } from "../icons";
 import { pick } from "../i18n";
+import { showAlert, showConfirm } from "./dialogs";
 
 const inputCls = "w-full bg-surface-0 border border-surface-3 rounded-lg text-sm text-slate-200 px-3 py-2.5 outline-none focus:border-accent-green/40 placeholder:text-slate-600";
 const labelCls = "block text-[13px] font-medium text-slate-300 mb-1.5";
@@ -267,14 +268,14 @@ export function renderAgentSlack(host: HTMLElement, agentId: string, _displayNam
 
     const revokeBtn = host.querySelector<HTMLButtonElement>("#sl-revoke");
     revokeBtn?.addEventListener("click", async () => {
-      if (!confirm(pick(`${agentId}의 Slack 연동을 해제할까요?\n저장된 봇 토큰이 삭제됩니다(신원도 함께 정리). 되돌리려면 재연동 필요.`, `Disconnect ${agentId}'s Slack integration?\nThe saved bot token will be deleted (identity cleared too). Reconnecting is needed to undo this.`))) return;
+      if (!await showConfirm({ message: pick(`${agentId}의 Slack 연동을 해제할까요?\n저장된 봇 토큰이 삭제됩니다(신원도 함께 정리). 되돌리려면 재연동 필요.`, `Disconnect ${agentId}'s Slack integration?\nThe saved bot token will be deleted (identity cleared too). Reconnecting is needed to undo this.`), danger: true })) return;
       const done = setBtnBusy(revokeBtn, pick("⏳ 해제 중…", "⏳ Disconnecting…"));
       try {
         const r = await fetch(`${apiBase()}/api/members/${encodeURIComponent(agentId)}/slack/revoke`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
         const j = await r.json().catch(() => ({}));
         if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
         me = await fetchStatus(); info = null; open = false; render();
-      } catch (e) { alert(pick("해제 실패: ", "Disconnect failed: ") + (e as Error).message); done(); }
+      } catch (e) { await showAlert(pick("해제 실패: ", "Disconnect failed: ") + (e as Error).message); done(); }
     });
 
     const saveBtn = host.querySelector<HTMLButtonElement>("#sl-save");

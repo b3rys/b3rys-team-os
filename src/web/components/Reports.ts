@@ -11,6 +11,7 @@
 
 import { pick } from "../i18n";
 import { parseSqliteDate } from "../lib/datetime";
+import { showAlert, showConfirm } from "./dialogs";
 
 const REPORTS_BASE = "/reports";
 const DEFAULT_CAT = "보고서";
@@ -430,7 +431,7 @@ function renderList(): void {
         await setReportImportant(id, next);
         await reloadList();
       } catch (err) {
-        alert(pick(`중요 표시 변경 실패: ${(err as Error).message}`, `Failed to update important mark: ${(err as Error).message}`));
+        await showAlert(pick(`중요 표시 변경 실패: ${(err as Error).message}`, `Failed to update important mark: ${(err as Error).message}`));
         el.disabled = false;
       }
     });
@@ -441,13 +442,13 @@ function renderList(): void {
       e.stopPropagation();
       const id = el.dataset.id || "";
       const title = el.dataset.title || id;
-      if (!id || !confirm(pick(`보고서 "${title}"을(를) 목록에서 삭제할까요?\n\n첨부 파일은 디스크에 남고, 대시보드 등록 정보만 삭제됩니다.`, `Delete report "${title}" from the list?\n\nThe attached files stay on disk; only the dashboard registration is removed.`))) return;
+      if (!id || !await showConfirm({ message: pick(`보고서 "${title}"을(를) 목록에서 삭제할까요?\n\n첨부 파일은 디스크에 남고, 대시보드 등록 정보만 삭제됩니다.`, `Delete report "${title}" from the list?\n\nThe attached files stay on disk; only the dashboard registration is removed.`), danger: true })) return;
       el.disabled = true;
       try {
         await deleteReport(id);
         await reloadList();
       } catch (err) {
-        alert(pick(`삭제 실패: ${(err as Error).message}`, `Delete failed: ${(err as Error).message}`));
+        await showAlert(pick(`삭제 실패: ${(err as Error).message}`, `Delete failed: ${(err as Error).message}`));
         el.disabled = false;
       }
     });
@@ -548,20 +549,20 @@ async function renderDetail(): Promise<void> {
       await loadReportsPage(true);
       void renderDetail();
     } catch (err) {
-      alert(pick(`중요 표시 변경 실패: ${(err as Error).message}`, `Failed to update important mark: ${(err as Error).message}`));
+      await showAlert(pick(`중요 표시 변경 실패: ${(err as Error).message}`, `Failed to update important mark: ${(err as Error).message}`));
       btn.disabled = false;
     }
   });
   _root.querySelector<HTMLButtonElement>("#reports-delete-detail")?.addEventListener("click", async () => {
     const btn = _root?.querySelector<HTMLButtonElement>("#reports-delete-detail");
-    if (!confirm(pick(`보고서 "${meta.title}"을(를) 목록에서 삭제할까요?\n\n첨부 파일은 디스크에 남고, 대시보드 등록 정보만 삭제됩니다.`, `Delete report "${meta.title}" from the list?\n\nThe attached files stay on disk; only the dashboard registration is removed.`))) return;
+    if (!await showConfirm({ message: pick(`보고서 "${meta.title}"을(를) 목록에서 삭제할까요?\n\n첨부 파일은 디스크에 남고, 대시보드 등록 정보만 삭제됩니다.`, `Delete report "${meta.title}" from the list?\n\nThe attached files stay on disk; only the dashboard registration is removed.`), danger: true })) return;
     if (btn) btn.disabled = true;
     try {
       await deleteReport(id);
       _view = "list";
       await reloadList();
     } catch (err) {
-      alert(pick(`삭제 실패: ${(err as Error).message}`, `Delete failed: ${(err as Error).message}`));
+      await showAlert(pick(`삭제 실패: ${(err as Error).message}`, `Delete failed: ${(err as Error).message}`));
       if (btn) btn.disabled = false;
     }
   });
