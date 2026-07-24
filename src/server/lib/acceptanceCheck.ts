@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { captureConfigStatus } from "./captureConfig";
 import { loadRegistry } from "./registry";
+import { teamOsSnapshot, type TeamOsSnapshot } from "./teamosProbe";
 import type { AgentRecord } from "../types";
 
 export type AcceptanceStatus = "pass" | "fail" | "info";
@@ -15,7 +16,7 @@ export interface AcceptanceItem {
 }
 
 export interface AcceptanceStep {
-  key: "settings" | "rules" | "ot" | "portability";
+  key: "settings" | "rules" | "ot" | "portability" | "infra";
   label: string;
   checks: AcceptanceItem[];
 }
@@ -35,6 +36,7 @@ export interface AcceptanceDeps {
   teamOsPath: string;
   rootDir?: string;
   membersRoot?: string;
+  teamOsSnapshot?: (db: Database) => Pick<TeamOsSnapshot, "scheduled">;
 }
 
 // 누출/포터빌리티 탐지는 ★포맷 기반★(토큰 shape · 절대경로)만 쓴다. 특정 팀의 실값(chat_id·봇핸들·
@@ -267,6 +269,64 @@ function portabilityStep(
   return { key: "portability", label: "포터빌리티 / 누출", checks: items };
 }
 
+const INFRA_SERVICES = [
+  { name: "team-collab", required: true, matches: (label: string) => label.endsWith(".team-collab") },
+  { name: "caffeinate", required: false, matches: (label: string) => label.endsWith(".caffeinate") },
+  { name: "gateway", required: false, matches: (label: string) => label === "ai.openclaw.gateway" || label.endsWith(".gateway") },
+] as const;
+
+function infraStep(deps: AcceptanceDeps): AcceptanceStep {
+  const items: AcceptanceItem[] = [];
+  const scheduled = (deps.teamOsSnapshot?.(deps.db) ?? teamOsSnapshot(deps.db)).scheduled;
+  const services = scheduled.filter((job) => job.kind === "service");
+
+  for (const expected of INFRA_SERVICES) {
+    const service = services.find((job) => expected.matches(job.label));
+    const running = service?.running === true;
+    const detail = running
+      ? `${service.label} running`
+      : expected.required
+        ? service?.running === false
+          ? `${service.label} stopped`
+          : service
+            ? `${service.label} 상태 미확인`
+            : "미등록"
+        : "미설정 — 선택";
+    items.push(item(running ? "pass" : expected.required ? "fail" : "info", `${expected.required ? "필수" : "선택"} 서비스: ${expected.name}`, detail));
+  }
+
+  const failedJobs = deps.db.prepare(
+    `SELECT id, last_run_at
+       FROM scheduled_job
+      WHERE kind = 'recurring' AND status = 'failed' AND enabled = 1
+      ORDER BY id`,
+  ).all() as Array<{ id: string; last_run_at: string | null }>;
+  if (failedJobs.length === 0) {
+    items.push(item("pass", "예약 잡 실패", "0개"));
+  } else {
+    for (const job of failedJobs) {
+      items.push(item("fail", "예약 잡 실패", `${job.id} · last_run=${job.last_run_at ?? "-"}`));
+    }
+  }
+
+  const retired = deps.db.prepare(
+    `SELECT COUNT(*) AS count
+       FROM scheduled_job
+      WHERE enabled = 0 AND status = 'cancelled'`,
+  ).get() as { count: number };
+  items.push(item("info", "은퇴 잡", `은퇴 ${retired.count}개`));
+
+  const orphanWakes = deps.db.prepare(
+    `SELECT COUNT(*) AS count
+       FROM message_recipient
+      WHERE delivery_state = 'wake_dispatched'
+        AND lease_until < datetime('now', '-1 hour')`,
+  ).get() as { count: number };
+  items.push(item("info", "고아 wake", orphanWakes.count === 0 ? "없음" : `reconcile 후보 ${orphanWakes.count}개`));
+
+  return { key: "infra", label: "인프라/운영", checks: items };
+}
+
 export function runAcceptanceCheck(deps: AcceptanceDeps, member: string | null): AcceptanceResult {
   const rootDir = deps.rootDir ?? dirname(dirname(deps.teamOsPath));
   const membersRoot = deps.membersRoot ?? defaultMembersRoot();
@@ -276,6 +336,7 @@ export function runAcceptanceCheck(deps: AcceptanceDeps, member: string | null):
     coreRulesStep(deps.teamOsPath),
     onboardingStep(member, agents, membersRoot),
     portabilityStep(rootDir, membersRoot, member, buildInternalIdRe(deps.db)),
+    infraStep(deps),
   ];
   const summary = sections.flatMap((section) => section.checks).reduce<Record<AcceptanceStatus, number>>(
     (acc, entry) => {
