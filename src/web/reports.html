@@ -379,7 +379,7 @@ function renderList(q, cat){
     qel.addEventListener("compositionend", function(){ composing = false; scheduleSearch(qel.value); });
     function scheduleSearch(v){
       clearTimeout(qel._t);
-      qel._t=setTimeout(function(){ location.hash=hashFor(v, cat); },260);
+      qel._t=setTimeout(function(){ location.hash=hashFor(v, cat); },650);
     }
     qel.oninput=function(){ if(composing || this.isComposing) return; scheduleSearch(this.value); };
     if(q){ qel.focus(); qel.setSelectionRange(qel.value.length,qel.value.length); }
