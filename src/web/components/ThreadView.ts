@@ -6,6 +6,7 @@ import { enUS } from "date-fns/locale/en-US";
 import { agentIconName, renderIcon } from "../icons";
 import { pick, getLocale } from "../i18n";
 import { parseSqliteDate } from "../lib/datetime";
+import { showAlert } from "./dialogs";
 
 function safeRelative(s: string | null): string {
   const d = parseSqliteDate(s);
@@ -91,7 +92,7 @@ export function renderThreadView(root: HTMLElement): void {
           source: "user",
         });
         if (!result.ok) {
-          alert(pick(`전송 실패: ${result.error}`, `Send failed: ${result.error}`));
+          await showAlert(pick(`전송 실패: ${result.error}`, `Send failed: ${result.error}`));
           input.value = body;
         }
       });

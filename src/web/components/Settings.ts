@@ -7,6 +7,7 @@ import { pick } from "../i18n";
 import { renderIcon, agentIconName } from "../icons";
 import { renderAgentIcon } from "../agentColors";
 import { FALLBACK_RUNTIME_OPTIONS, fetchRuntimeOptions, runtimeLabel as optionRuntimeLabel, runtimeSetupHref, type RuntimeOption } from "./runtimeOptions";
+import { showAlert, showConfirm } from "./dialogs";
 
 // 시간 걸리는 버튼: 클릭 즉시 "⏳ …중" + 흐려짐 + 다시 못 눌림(중복 클릭 방지). restore() 로 복구.
 export function setBtnBusy(btn: HTMLButtonElement, busyText: string): () => void {
@@ -924,7 +925,7 @@ function wire(): void {
   const regenAll = _root.querySelector<HTMLButtonElement>("#regen-all");
   const regenAllMsg = _root.querySelector<HTMLElement>("#regen-all-msg");
   regenAll?.addEventListener("click", async () => {
-    if (!confirm(pick("모든 팀원의 ⭐핵심룰을 현재 템플릿(멈춤장치·통신·conti)으로 재적용할까요?\n각자 정체·능력은 보존되고 백업이 남습니다. 적용된 규칙은 각 팀원 다음 세션부터 적용됩니다.\n적용 후 6시간 동안 되돌리기 버튼으로 되돌릴 수 있습니다.", "Reapply every member's ⭐core rules with the current template (stop guards·comms·conti)?\nEach member's identity·capabilities are preserved and a backup is kept. The applied rules take effect from each member's next session.\nYou can undo it with the Undo button for 6 hours after applying."))) return;
+    if (!await showConfirm(pick("모든 팀원의 ⭐핵심룰을 현재 템플릿(멈춤장치·통신·conti)으로 재적용할까요?\n각자 정체·능력은 보존되고 백업이 남습니다. 적용된 규칙은 각 팀원 다음 세션부터 적용됩니다.\n적용 후 6시간 동안 되돌리기 버튼으로 되돌릴 수 있습니다.", "Reapply every member's ⭐core rules with the current template (stop guards·comms·conti)?\nEach member's identity·capabilities are preserved and a backup is kept. The applied rules take effect from each member's next session.\nYou can undo it with the Undo button for 6 hours after applying."))) return;
     const _busy = setBtnBusy(regenAll, `⏳ ${pick("적용 중…", "Applying…")}`);
     if (regenAllMsg) { regenAllMsg.textContent = pick("전체 재적용 중…", "Reapplying to all…"); regenAllMsg.className = "text-[11px] text-slate-400 flex-1 leading-snug"; }
     try {
@@ -971,7 +972,7 @@ function wire(): void {
     _rollbackTimer = setInterval(tick, 30000);
   }
   rollbackBtn?.addEventListener("click", async () => {
-    if (!confirm(pick("직전 전체 핵심룰 재적용(가장 최근 1회분)을 되돌릴까요?\n각 팀원 페르소나가 재적용 직전 .bak 백업으로 복원됩니다.", "Undo the last reapply-all of core rules (the most recent batch)?\nEach member's persona is restored from the .bak backup taken just before reapplying."))) return;
+    if (!await showConfirm(pick("직전 전체 핵심룰 재적용(가장 최근 1회분)을 되돌릴까요?\n각 팀원 페르소나가 재적용 직전 .bak 백업으로 복원됩니다.", "Undo the last reapply-all of core rules (the most recent batch)?\nEach member's persona is restored from the .bak backup taken just before reapplying."))) return;
     // setBtnBusy는 버튼 child(#regen-rollback-label span)를 textContent로 날려 카운트다운이 깨짐(Devon P2).
     // disabled + label 텍스트만 바꿔 span을 보존 → 실패/재시도 경로에서도 tick()이 계속 라벨 갱신.
     rollbackBtn.disabled = true;
@@ -998,7 +999,7 @@ function wire(): void {
   // 🔄 전체 재시작 — 빌·정지팀원 제외 전원 재시작(빌 맨 마지막).
   const restartAll = _root.querySelector<HTMLButtonElement>("#restart-all");
   restartAll?.addEventListener("click", async () => {
-    if (!confirm(pick("정지 팀원 제외 전원을 재시작할까요?\n새 페르소나/상태를 로드합니다. openclaw 게이트웨이는 ~1분 깜빡, 복구 코디네이터는 맨 마지막(이 대화 ~15s 깜빡 후 복귀).", "Restart everyone except stopped members?\nThey reload fresh persona/state. The openclaw gateway blinks ~1 min; the recovery coordinator is last (this chat blinks ~15s, then returns)."))) return;
+    if (!await showConfirm(pick("정지 팀원 제외 전원을 재시작할까요?\n새 페르소나/상태를 로드합니다. openclaw 게이트웨이는 ~1분 깜빡, 복구 코디네이터는 맨 마지막(이 대화 ~15s 깜빡 후 복귀).", "Restart everyone except stopped members?\nThey reload fresh persona/state. The openclaw gateway blinks ~1 min; the recovery coordinator is last (this chat blinks ~15s, then returns)."))) return;
     const _busy = setBtnBusy(restartAll, `⏳ ${pick("재시작 중…", "Restarting…")}`);
     if (regenAllMsg) { regenAllMsg.textContent = pick("전체 재시작 중…", "Restarting all…"); regenAllMsg.className = "text-[11px] text-slate-400 flex-1 leading-snug"; }
     try {
@@ -1017,7 +1018,7 @@ function wire(): void {
   // 🔴 전체 정지 (비상) — 빌 제외 전원 정지. 더블컨펌(강한 경고).
   const stopAll = _root.querySelector<HTMLButtonElement>("#stop-all");
   stopAll?.addEventListener("click", async () => {
-    if (!confirm(pick("🔴 비상 정지\n\n복구 코디네이터를 제외한 모든 팀원을 즉시 정지합니다.\n폭주·이상 상황의 서킷브레이커입니다. 정말 전원 정지할까요?\n\n(다시 켜려면 각 팀원 🟢 기동 또는 /onoff)", "🔴 Emergency stop\n\nImmediately stops every member except the recovery coordinator.\nThis is the circuit breaker for runaway/abnormal situations. Really stop everyone?\n\n(To turn them back on, use each member's 🟢 Start or /onoff)"))) return;
+    if (!await showConfirm({ message: pick("🔴 비상 정지\n\n복구 코디네이터를 제외한 모든 팀원을 즉시 정지합니다.\n폭주·이상 상황의 서킷브레이커입니다. 정말 전원 정지할까요?\n\n(다시 켜려면 각 팀원 🟢 기동 또는 /onoff)", "🔴 Emergency stop\n\nImmediately stops every member except the recovery coordinator.\nThis is the circuit breaker for runaway/abnormal situations. Really stop everyone?\n\n(To turn them back on, use each member's 🟢 Start or /onoff)"), danger: true })) return;
     const _busy = setBtnBusy(stopAll, `⏳ ${pick("정지 중…", "Stopping…")}`);
     if (regenAllMsg) { regenAllMsg.textContent = `🔴 ${pick("비상 정지 중…", "Emergency stopping…")}`; regenAllMsg.className = "text-[11px] text-txt-red flex-1 leading-snug"; }
     try {
@@ -1272,7 +1273,7 @@ function wireOtZone(): void {
   _root.querySelector<HTMLButtonElement>("#ot-cancel")?.addEventListener("click", async () => {
     if (!_ot) return;
     const name = _ot.member.display_name;
-    if (!confirm(`${name} ${pick("영입을 취소할까요?\n\n지금까지 등록·진행한 것을 지우고, 자동으로 만들어진 빈 작업 폴더를 정리합니다.\n(직접 손댄 파일은 그대로 둡니다)", "onboarding — cancel it?\n\nClears what was registered and set up so far, and removes the empty auto-created work folder.\n(files you touched are kept)")}`)) return;
+    if (!await showConfirm({ message: `${name} ${pick("영입을 취소할까요?\n\n지금까지 등록·진행한 것을 지우고, 자동으로 만들어진 빈 작업 폴더를 정리합니다.\n(직접 손댄 파일은 그대로 둡니다)", "onboarding — cancel it?\n\nClears what was registered and set up so far, and removes the empty auto-created work folder.\n(files you touched are kept)")}`, danger: true })) return;
     const btn = _root!.querySelector<HTMLButtonElement>("#ot-cancel")!;
     btn.disabled = true; btn.textContent = pick("취소 중…", "Cancelling…");
     try {
@@ -1282,7 +1283,7 @@ function wireOtZone(): void {
       stopOtPolling(); resetOtVerify(); _ot = null; _activating = false; _activateMsg = ""; _pairing = false; _pairMsg = ""; _prechecking = false; _precheckMsg = ""; render();
     } catch (e) {
       btn.disabled = false; btn.textContent = `✕ ${pick("영입 취소 — 지금까지 등록한 것 지움", "Cancel onboarding — clear what was set up")}`;
-      alert(pick("취소 실패: ", "Cancel failed: ") + (e as Error).message);
+      await showAlert(pick("취소 실패: ", "Cancel failed: ") + (e as Error).message);
     }
   });
   // 합류 패키지(OT 번들) 보기
