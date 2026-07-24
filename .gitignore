@@ -32,9 +32,12 @@ archiving/
 # 버전관리는 은퇴하는 private repo(내부 유지)가 계속 tracked 로 보존 → 유실 없음. 공개엔 명시 allowlist 만 싣는다.
 # (기본=제외 + `!` allowlist. 새 공개용 스크립트/문서는 여기 `!` 로 추가.)
 /scripts/*
+!/scripts/auto-heal-core.sh
+!/scripts/auto-heal-core-harness.sh
 !/scripts/task-review-ping.ts
 !/scripts/task-review-summary.ts
 /docs/*
+!/docs/AUTO_HEAL_CORE.md
 !/docs/SLACK_SETUP.md
 !/docs/remote-access.md
 !/docs/BUILD_MODES.md
