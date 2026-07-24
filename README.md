@@ -306,8 +306,6 @@ b3os는 사람이 지휘하는 시스템입니다. 에이전트가 조율하고 
 | b3os-report | 팀 표준 보고서 (MD → 반응형 HTML) |
 | b3os-scheduler | durable 스케줄러 — cron·간격·1회성 리마인드 잡을 `team.db`에 등록, 서버 워커가 시각 맞춰 발화 |
 
-외부 스킬(호환): **humanize-korean** (epoko77-ai · MIT) — AI가 쓴 한글 텍스트를 사람이 쓴 것처럼 윤문.
-
 ---
 
 ## 📄 License
