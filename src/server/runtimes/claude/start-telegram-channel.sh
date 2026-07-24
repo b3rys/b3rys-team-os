@@ -118,7 +118,24 @@ if ! command -v tmux >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v bun >/dev/null 2>&1; then
+if command -v bun >/dev/null 2>&1; then
+  BUN_BIN="$(command -v bun)"
+else
+  # launchd/좁은 PATH: shell rc 를 source 하지 않아 bun(~/.bun/bin)이 PATH 에 없을 수 있다.
+  # claude 처럼 알려진 설치 위치를 순서대로 시도한다. (없으면 아래에서 에러)
+  BUN_BIN=""
+  for _candidate in \
+    "$HOME/.bun/bin/bun" \
+    "$HOME/.local/bin/bun" \
+    "/opt/homebrew/bin/bun" \
+    "/usr/local/bin/bun"; do
+    if [[ -x "$_candidate" ]]; then
+      BUN_BIN="$_candidate"
+      break
+    fi
+  done
+fi
+if [[ -z "$BUN_BIN" ]]; then
   echo "ERROR: Bun not installed. Channels Telegram plugin requires Bun."
   if command -v brew >/dev/null 2>&1; then
     echo "  brew install oven-sh/bun/bun"
@@ -128,6 +145,11 @@ if ! command -v bun >/dev/null 2>&1; then
   fi
   exit 1
 fi
+# ★MCP 텔레그램 서버는 claude 가 bun 으로 spawn 한다★ — 멤버 tmux 세션(non-interactive)의
+# PATH 에 bun 이 없으면 ENOENT 로 MCP 서버가 안 뜨고 poller 가 안 붙는다(deaf bot).
+# .zshrc 로만 bun PATH 를 넣은 fresh clone 에서 실측된 함정(GD 2026-07-24). bun 설치 dir 를
+# 아래 INNER_CMD 의 세션 PATH 에 prepend 해서 claude 와 그 MCP 자식이 항상 bun 을 찾게 한다.
+BUN_DIR="$(cd "$(dirname "$BUN_BIN")" && pwd)"
 
 if command -v claude >/dev/null 2>&1; then
   CLAUDE_BIN="$(command -v claude)"
@@ -187,12 +209,15 @@ fi
 # Quote-safe inline command for tmux: use printf %q on paths.
 # TELEGRAM_STATE_DIR tells the channels plugin which state dir to use.
 # --resume 시 --continue 추가 (working dir 의 마지막 세션 이어서)
+# bun 설치 dir 를 세션 PATH 에 prepend ($PATH 는 tmux 셸이 확장) — claude 가 spawn 하는 MCP
+# 텔레그램 서버가 non-interactive PATH 에서도 bun 을 찾게 한다(위 BUN_DIR 참고).
+BUN_PATH_ENV="$(printf 'PATH=%q:"$PATH" ' "$BUN_DIR")"
 if [[ $RESUME_FLAG -eq 1 ]]; then
-  INNER_CMD="$(printf 'TELEGRAM_STATE_DIR=%q %q --channels plugin:%s --model %q' \
+  INNER_CMD="${BUN_PATH_ENV}$(printf 'TELEGRAM_STATE_DIR=%q %q --channels plugin:%s --model %q' \
     "$STATE_DIR" "$CLAUDE_BIN" "$PLUGIN" "$CLAUDE_MODEL")$PERM_FLAG --continue"
   echo "RESUME mode — claude --continue --model $CLAUDE_MODEL --permission-mode ${CLAUDE_PERMISSION_MODE:-<none>} (이전 세션 이어서)"
 else
-  INNER_CMD="$(printf 'TELEGRAM_STATE_DIR=%q %q --channels plugin:%s --model %q' \
+  INNER_CMD="${BUN_PATH_ENV}$(printf 'TELEGRAM_STATE_DIR=%q %q --channels plugin:%s --model %q' \
     "$STATE_DIR" "$CLAUDE_BIN" "$PLUGIN" "$CLAUDE_MODEL")$PERM_FLAG"
   echo "FRESH mode — claude --model $CLAUDE_MODEL --permission-mode ${CLAUDE_PERMISSION_MODE:-<none>}"
 fi
