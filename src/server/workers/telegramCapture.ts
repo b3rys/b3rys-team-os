@@ -326,13 +326,11 @@ export function fmtBoard(db: Database): string {
   const locale = getLocale(db);
   const rows = allTasks(db);
   const out = [pick(locale, "📋 칸반 작업 보드", "📋 Kanban task board")];
-  const labels: Array<[string, string]> = [["plan", pick(locale, "📝 계획", "📝 Plan")], ["doing", pick(locale, "🔧 실행 중", "🔧 Doing")], ["done", pick(locale, "✅ 완료", "✅ Done")]];
+  const labels: Array<[string, string]> = [["plan", pick(locale, "📝 계획", "📝 Plan")], ["doing", pick(locale, "🔧 실행 중", "🔧 Doing")]];
   for (const [k, label] of labels) {
     const items = byLane(rows, k);
     out.push(`\n${label} (${items.length})`);
-    const show = k === "done" ? items.slice(-5) : items;
-    for (const t of show) out.push(taskLine(t));
-    if (k === "done" && items.length > 5) out.push(pick(locale, `  …외 ${items.length - 5}건`, `  …and ${items.length - 5} more`));
+    for (const t of items) out.push(taskLine(t));
     if (!items.length) out.push("  —");
   }
   return out.join("\n");
