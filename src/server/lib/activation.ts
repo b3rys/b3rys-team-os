@@ -599,9 +599,12 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       if (!res.ok) return { ok: false, steps, error: "claude 봇 기동 실패" };
       // ★poller 헬스게이트(GD 2026-07-02, 하네스 근본): 봇이 tmux로 떠도 텔레그램 플러그인 MCP(poller)가 실제 기동해 bot.pid를 써야 '진짜 대화됨'.
       //   bot.pid 미출현 = 죽은 봇이 '합류 완료'로 거짓표시되던 근본(lod: 첫 기동 STATE_DIR 갭으로 MCP exit). 여기서 확인 안 하면 귀머거리 봇이 합류로 보임.
-      // 기본 28s. TEAMOS_POLLER_WAIT_MS 로 오버라이드(테스트 격리 belt-and-suspenders — 실 activateMember가 우발적으로 실행돼도 28s hang 방지). 미설정·비숫자 → 28000.
+      // 기본 40s(GD 2026-07-24, 28→40). fresh clone 서 bun 콜드스타트(플러그인 첫 로드)로 MCP poller 가
+      //   28s 안에 안 붙어 첫 활성화가 실패하던 것 완화 — 성공(bot.pid 출현) 시 즉시 반환하니 정상(따뜻한)
+      //   활성화엔 지연이 없고, 콜드스타트만 첫 활성화서 통과한다. 비용=진짜 고장 감지가 28→40s 로 늦어짐.
+      //   TEAMOS_POLLER_WAIT_MS 로 오버라이드(테스트 격리 belt-and-suspenders). 미설정·비숫자 → 40000.
       const rawWait = process.env.TEAMOS_POLLER_WAIT_MS;
-      const pollerWaitMs = rawWait !== undefined && Number.isFinite(Number(rawWait)) ? Number(rawWait) : 28000;
+      const pollerWaitMs = rawWait !== undefined && Number.isFinite(Number(rawWait)) ? Number(rawWait) : 40000;
       const pollerOk = await waitForClaudePoller(id, pollerWaitMs);
       steps.push({ step: "poller", ok: pollerOk, detail: pollerOk ? "텔레그램 채널 poller 기동 확인(bot.pid)" : "poller 미기동(bot.pid 없음 — 봇이 메시지를 못 받음, 재활성화 필요)" });
       if (!pollerOk) return { ok: false, steps, error: "텔레그램 채널 poller 미기동 — 봇이 메시지를 받지 못합니다(재활성화하세요)" };
