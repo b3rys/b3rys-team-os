@@ -21,6 +21,8 @@ try {
   assert.match(html, /localStorage\.getItem\('b3os-report-theme'\)/);
   assert.match(html, /\.mobile-infographic\{display:none\}/);
   assert.match(html, /\.mi-card p\{[^}]*color:var\(--ink\)\}/);
+  assert.doesNotMatch(html, /\[data-theme="light"\] svg text\{fill:var\(--mut\)\}/);
+  assert.match(html, /\[data-theme="light"\] svg text\[fill="#e6edf3"\][^}]*\{fill:var\(--ink\)\}/);
   assert.match(html, /\.desktop-infographic\{display:none!important\}/);
   assert.match(html, /<div class="outer">[\s\S]*<div class="hint">안내<\/div>[\s\S]*<svg/);
   assert.match(html, /<figure><figcaption>한눈에 보기<\/figcaption><div class="mobile-infographic">[\s\S]*<svg class="desktop-infographic"/);

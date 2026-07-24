@@ -54,8 +54,7 @@ figure svg{width:100%;margin:.35em 0;background:transparent;border:0;border-radi
 .mi-card{border:1px solid var(--line);border-left:4px solid var(--blue);border-radius:14px;background:var(--card-2);padding:12px 13px;box-shadow:0 10px 26px rgba(0,0,0,.10)}
 .mi-card h4{font-size:14px;line-height:1.3;margin:0 0 5px;color:var(--ink)}.mi-card p{font-size:13px;line-height:1.5;margin:0;color:var(--ink)}.mi-card strong{color:var(--ink)}
 .mi-blue{border-left-color:var(--blue)}.mi-cyan{border-left-color:#22d3ee}.mi-green{border-left-color:var(--green)}.mi-amber{border-left-color:var(--y)}.mi-orange{border-left-color:var(--orange)}.mi-red{border-left-color:var(--red)}.mi-violet{border-left-color:#a78bfa}
-[data-theme="light"] svg text{fill:var(--mut)}
-[data-theme="light"] svg text[fill="#e6edf3"],[data-theme="light"] svg text[fill="#E6EDF3"]{fill:var(--ink)}
+[data-theme="light"] svg text[fill="#e6edf3"],[data-theme="light"] svg text[fill="#E6EDF3"],[data-theme="light"] svg text[fill="#fff"],[data-theme="light"] svg text[fill="#FFF"],[data-theme="light"] svg text[fill="#ffffff"],[data-theme="light"] svg text[fill="#FFFFFF"],[data-theme="light"] svg text[fill="white"],[data-theme="light"] svg text[fill="WHITE"]{fill:var(--ink)}
 strong,b{color:var(--ink)}em{color:var(--green);font-style:normal;font-weight:700}
 .report-footer{padding:26px 36px 32px;color:var(--subtle);font-size:12px;border-top:1px solid var(--line-soft);margin-top:28px}
 @media(max-width:640px){figure{overflow:visible!important}.desktop-infographic{display:none!important}.mobile-infographic{display:grid;gap:9px}.mi-card{padding:11px 12px}}
