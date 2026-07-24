@@ -283,6 +283,22 @@ function infraStep(deps: AcceptanceDeps): AcceptanceStep {
   for (const expected of INFRA_SERVICES) {
     const service = services.find((job) => expected.matches(job.label));
     const running = service?.running === true;
+
+    // 이 인수체크를 응답하는 서버 자체가 team-collab 생존 증거다. launchd 는 리부팅 자동복구를
+    // 위한 선택 옵션이므로, 미등록(수동 실행)이나 stopped 스냅샷이 전체 인수체크를 red 로 만들면 안 된다.
+    if (expected.name === "team-collab") {
+      const status = running || !service ? "pass" : "info";
+      const detail = running
+        ? "running (launchd)"
+        : !service
+          ? "수동 실행 — launchd 상시서비스 미설치(리부팅 자동복구 없음)"
+          : service.running === false
+            ? "launchd 등록됨·stopped — 현재 서버는 수동 실행 중"
+            : "launchd 등록됨·상태 미확인 — 현재 서버는 수동 실행 중";
+      items.push(item(status, "필수 서비스: team-collab", detail));
+      continue;
+    }
+
     const detail = running
       ? `${service.label} running`
       : expected.required

@@ -191,7 +191,24 @@ describe("acceptance-check routes", () => {
     }
   });
 
-  test("infra fails only for a stopped required service and enabled failed job", async () => {
+  test("infra treats a missing team-collab launchd service as a healthy manual server run", async () => {
+    const manuallyStartedServices = healthyServices.filter((service) => !service.label.endsWith("team-collab"));
+    const { app, dir } = setup(manuallyStartedServices);
+    try {
+      const body = (await (await app.request("/acceptance-check")).json()) as any;
+      const infra = body.sections.find((section: any) => section.key === "infra");
+      expect(infra.checks).toContainEqual({
+        label: "필수 서비스: team-collab",
+        status: "pass",
+        detail: "수동 실행 — launchd 상시서비스 미설치(리부팅 자동복구 없음)",
+      });
+      expect(body.ok).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("infra keeps a stopped team-collab launchd service informational while failed jobs fail", async () => {
     const stoppedServices = healthyServices.map((service) =>
       service.label.endsWith("team-collab") ? { ...service, running: false } : service,
     );
@@ -203,7 +220,11 @@ describe("acceptance-check routes", () => {
       const body = (await (await app.request("/acceptance-check")).json()) as any;
       const infra = body.sections.find((section: any) => section.key === "infra");
       expect(infra.checks).toContainEqual(
-        expect.objectContaining({ label: "필수 서비스: team-collab", status: "fail" }),
+        expect.objectContaining({
+          label: "필수 서비스: team-collab",
+          status: "info",
+          detail: "launchd 등록됨·stopped — 현재 서버는 수동 실행 중",
+        }),
       );
       expect(infra.checks).toContainEqual(
         expect.objectContaining({
