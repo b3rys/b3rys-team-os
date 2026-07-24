@@ -21,6 +21,7 @@
 | b3os-task-mgmt | skills | Deprecated compatibility stub — 신규 절차는 `b3os-task-loop` 사용. 기존 참조 호환용으로 유지. |
 | b3os-workloop | skills | Deprecated compatibility stub — scheduled wake 처리도 `b3os-task-loop` 사용. 기존 참조 호환용으로 유지. |
 | b3os-scheduler | skills | b3os durable 스케줄러 — 반복(cron 시·분·요일·월)·간격·1회성 리마인드 잡을 `team.db`(`scheduled_job`)에 durable 등록, 서버 워커가 시각 맞춰 인박스 wake. 잡별 휴일정책(run/skip/shift, KST 고정오프셋). 세션 cron(유실됨) 대신 팀 정본 반복작업·launchd 이관에. API=`src/server/scheduler/core.ts`(`createCronJob`·`scheduleReminder`). 라이브발사·launchd제거=GD/운영자 게이트 |
+| **b3os-release-ops** | **skills** | **공개 정본 배포·PR 머지·핫픽스·force-push 안전 게이트.** `docs/DEPLOY_MERGE_HOTFIX_WORKFLOW.md` 정본 문서 + `scripts/release-preflight.sh` 기계적 가드(clean worktree·noreply author·branch protection·live repo 확인). 봇 자율머지 범위와 live deploy acceptance/rollback 보고 기준. |
 | b3os-team-learning-loop | skills | 주간 self-learning — 팀 정책 자가발전, SHARED→TEAM-OS 승격, compacting, 프로젝트별 운영리뷰, 월간 개선지표 |
 | b3os-team-member-lifecycle | skills | 팀원 온보딩/lifecycle |
 | **b3os** | **skills** | b3os(팀 OS) **설치·세팅·운영** 스킬 — 공개 repo clone→install→대시보드→팀 기본정보 채팅 세팅→첫 팀원 영입(텔레그램)까지 몰아주고 handoff. **신규 사용자 설치용** + 팀원이 세팅·운영 질문("다음 팀원 어떻게 영입?") 받을 때 참조하는 **ops 레퍼런스**(`references/recruit.md`·`b3os-ops-primer.md`·`troubleshooting.md` = 온디맨드 운영 지식). "b3os 설치/세팅해줘" |
