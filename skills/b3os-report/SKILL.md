@@ -29,7 +29,7 @@ description: b3rys 팀 표준 보고서 스킬. 모든 보고서는 MD를 소스
 ## 단계
 1. **MD 소스 먼저** — Markdown 작성(`reports/<주제>-<YYYYMMDD>/<name>.md`). 재편집·버전관리·재렌더 원본.
 2. **humanize-korean 최종 윤문** — 렌더 전 `humanize-korean` 기준으로 번역투·기계적 병렬·영어 라벨 남발을 줄인다. 내용 추가/삭제가 아니라 문체·리듬·표현만 다듬는다.
-3. **HTML 렌더**(확인 시) — `scripts/render.sh <md> [out.html] [제목]` → 아이폰 반응형 HTML+SVG(자체완결, **라이트 기본 테마**).
+3. **HTML 렌더**(확인 시) — `scripts/render.sh <md> [out.html] [제목]` → 아이폰 반응형 HTML+SVG(자체완결, **다크/라이트 테마 토글**).
 4. **포털 게시**(확인 시) — `scripts/publish.sh --title "T" --author maintainer --summary "S" --md a.md --html a.html` → team-collab `reports/`에 복사 + 등록 → **<dashboard-url>/reports** 목록에 바로 뜬다. HTML이 있으면 포털 기본 form은 HTML이고, MD는 정본·다운로드용 보조 form으로 남는다.
 
 ```bash

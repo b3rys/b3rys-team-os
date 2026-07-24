@@ -369,8 +369,21 @@ function renderList(q, cat){
     el.onclick=function(){ location.hash=hashFor(q, el.getAttribute("data-cat")); };
   });
   var qel=document.getElementById("q");
-  if(qel){ qel.oninput=function(){ var v=this.value; clearTimeout(qel._t); qel._t=setTimeout(function(){ location.hash=hashFor(v, cat); },180); };
-    if(q){ qel.focus(); qel.setSelectionRange(qel.value.length,qel.value.length); } }
+  if(qel){
+    var composing = false;
+    var stopKeys = function(e){ e.stopPropagation(); };
+    qel.addEventListener("keydown", stopKeys);
+    qel.addEventListener("keypress", stopKeys);
+    qel.addEventListener("keyup", stopKeys);
+    qel.addEventListener("compositionstart", function(){ composing = true; });
+    qel.addEventListener("compositionend", function(){ composing = false; scheduleSearch(qel.value); });
+    function scheduleSearch(v){
+      clearTimeout(qel._t);
+      qel._t=setTimeout(function(){ location.hash=hashFor(v, cat); },260);
+    }
+    qel.oninput=function(){ if(composing || this.isComposing) return; scheduleSearch(this.value); };
+    if(q){ qel.focus(); qel.setSelectionRange(qel.value.length,qel.value.length); }
+  }
 }
 
 // ── 렌더: 상세 ────────────────────────────────────────────────────
