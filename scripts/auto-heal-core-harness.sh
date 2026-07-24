@@ -113,9 +113,13 @@ run_dry_case() {
 pid_alive="$TMP/pid-alive"
 pid_dead="$TMP/pid-dead"
 pid_ambiguous="$TMP/pid-ambiguous"
+pid_malformed="$TMP/pid-malformed"
+pid_multiline="$TMP/pid-multiline"
 printf '111\n' > "$pid_alive"
 printf '222\n' > "$pid_dead"
 printf '333\n' > "$pid_ambiguous"
+printf 'not-a-pid\n' > "$pid_malformed"
+printf '222\n223\n' > "$pid_multiline"
 
 config="$TMP/config"
 
@@ -129,11 +133,25 @@ assert_calls 1
 MOCK_SESSIONS=alive run_dry_case "$config" >/dev/null
 assert_calls 0
 
+MOCK_TMUX_FAIL=1 run_case "$config" >/dev/null
+assert_calls 0
+
+AUTO_HEAL_TMUX_BIN="$TMP/no-such-tmux" run_case "$config" >/dev/null
+assert_calls 0
+
 printf 'bot|dead-poller|alive|%s|on|%s/recover|poller-dead\n' "$pid_dead" "$MOCK" > "$config"
 MOCK_SESSIONS=alive run_case "$config" >/dev/null
 assert_calls 1
 
 printf 'bot|missing-pid|alive|%s/no-file|on|%s/recover|must-not-run\n' "$TMP" "$MOCK" > "$config"
+MOCK_SESSIONS=alive run_case "$config" >/dev/null
+assert_calls 0
+
+printf 'bot|malformed-pid|alive|%s|on|%s/recover|must-not-run\n' "$pid_malformed" "$MOCK" > "$config"
+MOCK_SESSIONS=alive run_case "$config" >/dev/null
+assert_calls 0
+
+printf 'bot|multiline-pid|alive|%s|on|%s/recover|must-not-run\n' "$pid_multiline" "$MOCK" > "$config"
 MOCK_SESSIONS=alive run_case "$config" >/dev/null
 assert_calls 0
 
@@ -153,6 +171,10 @@ printf 'gateway|dead|configured.label|-|on|%s/recover|gateway-dead\n' "$MOCK" > 
 MOCK_LAUNCHD_LIST=$'222\t0\tconfigured.label' run_case "$config" >/dev/null
 assert_calls 1
 
+printf 'gateway|stopped|configured.label|-|on|%s/recover|gateway-stopped\n' "$MOCK" > "$config"
+MOCK_LAUNCHD_LIST=$'-\t0\tconfigured.label' run_case "$config" >/dev/null
+assert_calls 1
+
 printf 'gateway|alive|configured.label|-|on|%s/recover|must-not-run\n' "$MOCK" > "$config"
 MOCK_LAUNCHD_LIST=$'111\t0\tconfigured.label' run_case "$config" >/dev/null
 assert_calls 0
@@ -163,6 +185,14 @@ assert_calls 0
 
 printf 'gateway|unknown|configured.label|-|on|%s/recover|must-not-run\n' "$MOCK" > "$config"
 MOCK_LAUNCHCTL_FAIL=1 run_case "$config" >/dev/null
+assert_calls 0
+
+cat > "$config" <<EOF
+bot|too-few|fields
+bot||alive|$pid_alive|on|$MOCK/recover|must-not-run
+bot|bad-mode|alive|$pid_alive|maybe|$MOCK/recover|must-not-run
+EOF
+MOCK_SESSIONS=alive run_case "$config" >/dev/null
 assert_calls 0
 
 printf 'bot|survey|alive|%s|on|%s/recover|must-not-run\n' "$pid_alive" "$MOCK" > "$config"

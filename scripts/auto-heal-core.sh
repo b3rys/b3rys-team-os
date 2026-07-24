@@ -19,6 +19,7 @@ EOF
 
 CONFIG=""
 DRY_RUN=0
+TMUX_BIN=${AUTO_HEAL_TMUX_BIN:-tmux}
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --config)
@@ -75,8 +76,8 @@ run_recovery() {
 
 capture_sessions() {
   local out status
-  command -v tmux >/dev/null 2>&1 || return 1
-  out=$(tmux list-sessions -F '#S' 2>&1)
+  command -v "$TMUX_BIN" >/dev/null 2>&1 || return 1
+  out=$("$TMUX_BIN" list-sessions -F '#S' 2>&1)
   status=$?
   if [ "$status" -eq 0 ]; then
     printf '%s\n' "$out"
@@ -109,11 +110,9 @@ pid_state() {
   ps_out=$("$ps_bin" -p "$pid" -o pid= 2>/dev/null)
   case "$?" in
     0)
-      if printf '%s\n' "$ps_out" | awk -v wanted="$pid" '$1 == wanted { found=1 } END { exit !found }'; then
-        echo ambiguous
-      else
-        echo ambiguous
-      fi
+      # Whether ps reports this PID or an unexpected row, a successful query
+      # contradicts kill's failure and therefore cannot prove death.
+      echo ambiguous
       ;;
     1)
       [ -z "$ps_out" ] && echo dead || echo ambiguous
@@ -136,12 +135,12 @@ dismiss_survey() {
     log "DRY-RUN [bot:$name] would dismiss Claude survey with literal 0"
     return 0
   fi
-  if ! tmux send-keys -l -t "$session" -- 0 2>/dev/null; then
+  if ! "$TMUX_BIN" send-keys -l -t "$session" -- 0 2>/dev/null; then
     log "FAILED [bot:$name] survey dismiss key was not sent; no retry attempted"
     return 0
   fi
   sleep "${AUTO_HEAL_SURVEY_WAIT_SECONDS:-1}"
-  after=$(tmux capture-pane -p -t "$session" 2>/dev/null) || {
+  after=$("$TMUX_BIN" capture-pane -p -t "$session" 2>/dev/null) || {
     log "FAILED [bot:$name] survey verification capture failed; no further input sent"
     return 0
   }
@@ -243,7 +242,7 @@ while IFS= read -r raw || [ -n "$raw" ]; do
         fi
       fi
 
-      pane=$(tmux capture-pane -p -t "$target" 2>/dev/null) || {
+      pane=$("$TMUX_BIN" capture-pane -p -t "$target" 2>/dev/null) || {
         log "NOOP [bot:$name] pane capture failed"
         continue
       }
