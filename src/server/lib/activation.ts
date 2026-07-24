@@ -587,7 +587,7 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       if (isTier2Outbound(id)) installOutboundHook(id, { dryRun: false }); // Phase1 live 실전송
       else if (isTier2Shadow(id)) installOutboundHook(id, { dryRun: true }); // Phase0 shadow: 훅 로그만(무영향)
       seedClaudeTrust(id);               // ~/.claude.json projects 시드 → 신규 workspace trust 프롬프트 hang 방지(하네스 #2)
-      seedClaudeAccess(id);              // access.json 시드(오너 DM 페어링) — 도출 불가 시 skip(버스/그룹 도달, DM 수동)(하네스 #1)
+      seedClaudeAccess(id);              // access.json 시드 — 재활성화 시 승인 allowFrom 보존, 미승인/첫 멤버만 pairing 기본값(하네스 #1)
       // ★재활성화 stale false-pass 차단(하네스 HIGH, GD 2026-07-02): 죽은 봇의 옛 tmux 세션·bot.pid가 남으면 poller-gate가 첫 iteration에서 즉시 거짓통과(귀머거리 봇이 합류로).
       //   재활성화 전에 세션 kill + stale bot.pid 제거 → idempotent 가드 우회하고 항상 fresh 기동 → 새로 쓰인 bot.pid만 게이트 통과(codex activation.ts:263 stale삭제와 동형).
       killClaudeTmux(id);

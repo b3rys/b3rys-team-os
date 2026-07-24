@@ -304,11 +304,21 @@ export function seedClaudeTrust(id: string): void {
 }
 
 /** GD DM 페어링 자동 시드(하네스 #1): 기존 claude 멤버 access.json 의 allowFrom(인스턴스 오너 DM id)을 새 봇 access.json 에 시드.
- *  도출 불가(첫 claude 멤버)면 skip — 봇은 뜨고 버스/그룹은 도달, GD DM은 수동 페어링(DM→code→promote). */
+ *  재활성화 대상에 이미 승인된 allowFrom 이 있으면 파일 전체를 보존한다. 도출 불가(첫 claude 멤버)면
+ *  pairing 기본값을 시드해 봇/그룹은 즉시 도달하고 GD DM은 수동 페어링(DM→code→promote)한다. */
 export function seedClaudeAccess(id: string): void {
   assertId(id);
   const p = claudeBridgePaths(id);
   try {
+    const targetAccess = `${p.stateDir}/access.json`;
+    if (existsSync(targetAccess)) {
+      try {
+        const current = JSON.parse(readFileSync(targetAccess, "utf-8"));
+        const approved = Array.isArray(current.allowFrom)
+          && current.allowFrom.some((senderId: unknown) => /^\d+$/.test(String(senderId).trim()));
+        if (approved) return; // 재활성화로 기존 승인·그룹·pending 정책을 초기값에 덮어쓰지 않는다.
+      } catch { /* 손상 파일은 아래 정상 시드로 복구 */ }
+    }
     let ownerId: string | null = null;
     let refGroups: Record<string, unknown> = {}; // ★참조봇의 팀방 groups 정책도 복사 — 안 하면 새 봇 access.groups={}라 팀방 응답 안 됨(server.ts:198 access.groups 체크). GD 2026-07-01 지적.
     const chDir = `${HOME}/.claude/channels`;
@@ -331,12 +341,12 @@ export function seedClaudeAccess(id: string): void {
     // ackReaction: 봇이 메시지 받으면 👀 리액션(server.ts:950 access.ackReaction 있어야 붙음). 없으면 claude 봇 리액션 안 뜸(codex는 브리지 경로라 별개). GD 2026-07-01.
     if (ownerId) {
       // 참조봇 있음: owner DM allowlist + 참조봇 groups 복사.
-      writeFileSync(`${p.stateDir}/access.json`, JSON.stringify({ dmPolicy: "allowlist", allowFrom: [ownerId], groups: refGroups, pending: {}, ackReaction: "👀" }, null, 2), "utf-8");
+      writeFileSync(targetAccess, JSON.stringify({ dmPolicy: "allowlist", allowFrom: [ownerId], groups: refGroups, pending: {}, ackReaction: "👀" }, null, 2), "utf-8");
     } else {
       // ★첫 claude 멤버(참조봇 없음): access.json 자체가 없으면 플러그인 assertAllowedChat이 그룹 응답을 거부(받되 답 못함, 하네스 Gap A HIGH). capture group id로 groups seed → 그룹 참여 가능. DM은 수동 페어링(pairing)로 안전 fallback. GD 2026-07-02.
       const gid = getCaptureGroupId();
       const groups = gid ? { [gid]: { requireMention: true, allowFrom: [] as string[] } } : {};
-      writeFileSync(`${p.stateDir}/access.json`, JSON.stringify({ dmPolicy: "pairing", allowFrom: [], groups, pending: {}, ackReaction: "👀" }, null, 2), "utf-8");
+      writeFileSync(targetAccess, JSON.stringify({ dmPolicy: "pairing", allowFrom: [], groups, pending: {}, ackReaction: "👀" }, null, 2), "utf-8");
     }
   } catch { /* best-effort */ }
 }
