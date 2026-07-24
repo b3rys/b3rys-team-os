@@ -222,6 +222,20 @@ else
   echo "FRESH mode — claude --model $CLAUDE_MODEL --permission-mode ${CLAUDE_PERMISSION_MODE:-<none>}"
 fi
 
+# ★2번째+ 팀원 영입 필수★ — 텔레그램 MCP 플러그인을 워크스페이스 project scope 로 설치/활성화한다.
+#   CC 2.1.218 fresh 세션은 플러그인이 ★project scope★ 여야 `--channels plugin:` 의 MCP(텔레그램)가 붙는다.
+#   user scope 만이면 조용히 안 붙어 'deaf bot'(poller 미기동)이 된다 — 첫 팀원은 옛 project-scope 잔재로 우연히
+#   되기도 해 2번째 영입에서만 터진다. Mac Studio 실측(2026-07-24): 같은 user-scope 설치가 있어도
+#   lisa(project scope)는 붙고 jane(user scope 만)은 실패. `plugin install --scope project` 는 ★설치+project enable★
+#   을 함께 하고 멱등이라 재활성화 안전. stdin 닫아 프롬프트 hang 방지, 실패해도 기동은 계속(best-effort).
+if [[ -x "$CLAUDE_BIN" && -d "$WORKDIR" ]]; then
+  if ( cd "$WORKDIR" && "$CLAUDE_BIN" plugin install "$PLUGIN" --scope project </dev/null >/dev/null 2>&1 ); then
+    echo "  MCP plugin  : $PLUGIN project-scope 설치/확인 ✓"
+  else
+    echo "  ⚠ MCP plugin project-scope 설치 실패(계속 진행) — 안 붙으면 세션서 /plugin install $PLUGIN (project scope) 수동"
+  fi
+fi
+
 tmux new-session -d -s "$SESSION_NAME" -c "$WORKDIR" "$INNER_CMD"
 
 echo "Started tmux session: $SESSION_NAME"
@@ -242,9 +256,9 @@ if [[ ! -s "$STATE_DIR/access.json" ]] \
   echo ""
   echo "[B] 안에서 trust 폴더 prompt 가 뜨면 'Enter' 로 trust 선택"
   echo ""
-  echo "[C] plugin 설치 + 활성화 (한 줄씩 입력):"
+  echo "[C] plugin 설치 + 활성화 (보통 위에서 자동 project-scope 설치됨 — 안 붙었을 때만 수동):"
   echo "    /plugin install $PLUGIN"
-  echo "    (user-scope 선택, Enter)"
+  echo "    (★project scope 선택★ — user scope 면 fresh 세션서 MCP 가 안 붙는다)"
   echo "    /reload-plugins"
   echo ""
   echo "[D] 텔레그램 폰에서 봇 채팅 열기:"
