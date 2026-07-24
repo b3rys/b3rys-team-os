@@ -588,26 +588,39 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       else if (isTier2Shadow(id)) installOutboundHook(id, { dryRun: true }); // Phase0 shadow: 훅 로그만(무영향)
       seedClaudeTrust(id);               // ~/.claude.json projects 시드 → 신규 workspace trust 프롬프트 hang 방지(하네스 #2)
       seedClaudeAccess(id);              // access.json 시드 — 재활성화 시 승인 allowFrom 보존, 미승인/첫 멤버만 pairing 기본값(하네스 #1)
-      // ★재활성화 stale false-pass 차단(하네스 HIGH, GD 2026-07-02): 죽은 봇의 옛 tmux 세션·bot.pid가 남으면 poller-gate가 첫 iteration에서 즉시 거짓통과(귀머거리 봇이 합류로).
-      //   재활성화 전에 세션 kill + stale bot.pid 제거 → idempotent 가드 우회하고 항상 fresh 기동 → 새로 쓰인 bot.pid만 게이트 통과(codex activation.ts:263 stale삭제와 동형).
-      killClaudeTmux(id);
-      try { rmSync(claudeBridgePaths(id).botPid, { force: true }); } catch { /* best-effort stale marker cleanup */ }
-      appendAuditFile("activation", "runtime_start", id, { runtime });
-      const res = await setAgentEnabled(id, "claude_channel", true); // plist bootstrap → RunAtLoad로 start-telegram-channel.sh <id> 기동(tmux claude-<id>)
-      appendAuditFile("activation", res.ok ? "runtime_done" : "runtime_failed", id, { runtime });
-      steps.push({ step: "runtime", ok: res.ok, detail: res.ok ? "claude 봇 tmux 기동(LaunchAgent)" : res.detail });
-      if (!res.ok) return { ok: false, steps, error: "claude 봇 기동 실패" };
-      // ★poller 헬스게이트(GD 2026-07-02, 하네스 근본): 봇이 tmux로 떠도 텔레그램 플러그인 MCP(poller)가 실제 기동해 bot.pid를 써야 '진짜 대화됨'.
-      //   bot.pid 미출현 = 죽은 봇이 '합류 완료'로 거짓표시되던 근본(lod: 첫 기동 STATE_DIR 갭으로 MCP exit). 여기서 확인 안 하면 귀머거리 봇이 합류로 보임.
-      // 기본 40s(GD 2026-07-24, 28→40). fresh clone 서 bun 콜드스타트(플러그인 첫 로드)로 MCP poller 가
-      //   28s 안에 안 붙어 첫 활성화가 실패하던 것 완화 — 성공(bot.pid 출현) 시 즉시 반환하니 정상(따뜻한)
-      //   활성화엔 지연이 없고, 콜드스타트만 첫 활성화서 통과한다. 비용=진짜 고장 감지가 28→40s 로 늦어짐.
-      //   TEAMOS_POLLER_WAIT_MS 로 오버라이드(테스트 격리 belt-and-suspenders). 미설정·비숫자 → 40000.
+      // ★poller 헬스게이트 + 자동 재시도(GD 2026-07-25 밤, 2번째 팀원 영입 실패 근본):
+      //   봇이 tmux로 떠도 텔레그램 플러그인 MCP(server.ts)가 실제 기동해 bot.pid를 써야 '진짜 대화됨'.
+      //   그런데 MCP는 첫 기동에서 콜드스타트·플러그인 start의 `bun install` 히컵·타이밍으로 bot.pid를 못 쓰고 죽는
+      //   ★transient 실패★가 있다(같은 config로 수동 실행하면 정상 폴링 = 봇/토큰/scope는 정상, 기동 순간만 실패).
+      //   예전엔 여기서 즉시 실패→사람이 수동 재활성화해야 했다(2번째 팀원이 반복적으로 여기 걸림). setAgentEnabled는
+      //   kickstart -k로 항상 fresh respawn하므로 [kill+respawn+게이트]를 N회 반복하면 transient는 자동 통과하고
+      //   진짜 고장만 최종 실패로 남는다. flapping 없음 — 활성화 1회 안에서 bounded(성공 시 즉시 break).
+      // ★매 시도 fresh 가드(하네스 HIGH, GD 2026-07-02)★: 죽은 봇의 옛 tmux 세션·stale bot.pid가 남으면 게이트가
+      //   첫 iteration에서 즉시 거짓통과(귀머거리 봇이 합류로). 매 시도 전 세션 kill + stale bot.pid 제거 → 항상 fresh 기동.
+      // 기본 40s 대기(GD 2026-07-24, 28→40, fresh clone bun 콜드스타트 완화) · 기본 2회 시도(1회 재시도).
+      //   TEAMOS_POLLER_WAIT_MS·TEAMOS_POLLER_ATTEMPTS로 오버라이드(테스트 격리·튜닝).
       const rawWait = process.env.TEAMOS_POLLER_WAIT_MS;
       const pollerWaitMs = rawWait !== undefined && Number.isFinite(Number(rawWait)) ? Number(rawWait) : 40000;
-      const pollerOk = await waitForClaudePoller(id, pollerWaitMs);
-      steps.push({ step: "poller", ok: pollerOk, detail: pollerOk ? "텔레그램 채널 poller 기동 확인(bot.pid)" : "poller 미기동(bot.pid 없음 — 봇이 메시지를 못 받음, 재활성화 필요)" });
-      if (!pollerOk) return { ok: false, steps, error: "텔레그램 채널 poller 미기동 — 봇이 메시지를 받지 못합니다(재활성화하세요)" };
+      const rawAttempts = process.env.TEAMOS_POLLER_ATTEMPTS;
+      const pollerAttempts = rawAttempts !== undefined && Number.isFinite(Number(rawAttempts)) && Number(rawAttempts) >= 1 ? Math.floor(Number(rawAttempts)) : 2;
+      let runtimeOk = false, runtimeDetail = "", pollerOk = false, usedAttempt = 0;
+      for (let attempt = 1; attempt <= pollerAttempts; attempt++) {
+        usedAttempt = attempt;
+        killClaudeTmux(id);
+        try { rmSync(claudeBridgePaths(id).botPid, { force: true }); } catch { /* best-effort stale marker cleanup */ }
+        appendAuditFile("activation", "runtime_start", id, { runtime, attempt });
+        const res = await setAgentEnabled(id, "claude_channel", true); // bootstrap→RunAtLoad, 이미 로드면 kickstart -k로 fresh respawn
+        appendAuditFile("activation", res.ok ? "runtime_done" : "runtime_failed", id, { runtime, attempt });
+        runtimeOk = res.ok; runtimeDetail = res.detail;
+        if (!res.ok) { if (attempt < pollerAttempts) continue; break; }  // 기동 자체 실패 → 재시도(마지막이면 탈출)
+        pollerOk = await waitForClaudePoller(id, pollerWaitMs);
+        if (pollerOk) break;                                            // poller 붙음 → 성공, 즉시 종료
+        appendAuditFile("activation", "poller_retry", id, { attempt, of: pollerAttempts }); // transient 의심 → 다음 시도서 fresh respawn
+      }
+      steps.push({ step: "runtime", ok: runtimeOk, detail: runtimeOk ? "claude 봇 tmux 기동(LaunchAgent)" : runtimeDetail });
+      if (!runtimeOk) return { ok: false, steps, error: "claude 봇 기동 실패" };
+      steps.push({ step: "poller", ok: pollerOk, detail: pollerOk ? `텔레그램 채널 poller 기동 확인(bot.pid${usedAttempt > 1 ? `, ${usedAttempt}회째 성공` : ""})` : `poller 미기동(bot.pid 없음 — ${pollerAttempts}회 재시도 후에도 실패, 봇이 메시지를 못 받음)` });
+      if (!pollerOk) return { ok: false, steps, error: `텔레그램 채널 poller 미기동(${pollerAttempts}회 재시도 실패) — 봇이 메시지를 받지 못합니다(수동 재활성화 필요)` };
       if (!await pushEssentialStep(steps, { id, runtime })) return { ok: false, steps, error: "claude 필수설정 누락 — 재활성화/설정 복구 필요" };
       // recall 주입(GD 2026-07-05): 활성화=새 claude 세션(맥락 빔)이니 --fresh 재시작과 동일하게 직전 대화 digest 주입.
       //   런타임 스왑/영입이 곧 '첫 로딩'이라 여기가 GD가 원한 '첫 로딩 시 주입' 지점. fire-forget best-effort(세션 준비는 스크립트 sleep이 대기, 실패해도 활성화 정상).

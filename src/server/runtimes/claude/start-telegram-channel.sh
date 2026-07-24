@@ -228,9 +228,14 @@ fi
 #   되기도 해 2번째 영입에서만 터진다. Mac Studio 실측(2026-07-24): 같은 user-scope 설치가 있어도
 #   lisa(project scope)는 붙고 jane(user scope 만)은 실패. `plugin install --scope project` 는 ★설치+project enable★
 #   을 함께 하고 멱등이라 재활성화 안전. stdin 닫아 프롬프트 hang 방지, 실패해도 기동은 계속(best-effort).
-if [[ -x "$CLAUDE_BIN" && -d "$WORKDIR" ]]; then
+# ★멱등★: 이미 워크스페이스 project-scope 에 등록돼 있으면 재설치 생략 — 매 기동/재시도마다 공유 플러그인 캐시를
+#   재접촉하지 않게 한다(재접촉이 세션 MCP 의 bun install 과 겹쳐 transient 기동실패에 기여할 수 있음).
+_WS_SETTINGS="$WORKDIR/.claude/settings.json"
+if [[ -f "$_WS_SETTINGS" ]] && grep -q "\"$PLUGIN\"" "$_WS_SETTINGS" 2>/dev/null; then
+  echo "  MCP plugin  : $PLUGIN 이미 project-scope 등록됨(skip)"
+elif [[ -x "$CLAUDE_BIN" && -d "$WORKDIR" ]]; then
   if ( cd "$WORKDIR" && "$CLAUDE_BIN" plugin install "$PLUGIN" --scope project </dev/null >/dev/null 2>&1 ); then
-    echo "  MCP plugin  : $PLUGIN project-scope 설치/확인 ✓"
+    echo "  MCP plugin  : $PLUGIN project-scope 설치 ✓"
   else
     echo "  ⚠ MCP plugin project-scope 설치 실패(계속 진행) — 안 붙으면 세션서 /plugin install $PLUGIN (project scope) 수동"
   fi
