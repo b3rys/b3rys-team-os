@@ -324,10 +324,8 @@ describe("ProposalsView — read-only list/detail", () => {
 
   test("archives a proposal from the detail pane and removes it from the visible list", async () => {
     const origFetch = globalThis.fetch;
-    const origConfirm = window.confirm;
     let archived = false;
     const methods: string[] = [];
-    window.confirm = () => true;
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       methods.push(init?.method ?? "GET");
@@ -401,6 +399,11 @@ describe("ProposalsView — read-only list/detail", () => {
       const archive = root.querySelector<HTMLButtonElement>("[data-archive-proposal='prop_delete']");
       expect(archive).toBeTruthy();
       archive?.click();
+
+      expect(root.querySelector("[data-proposal-action-modal]")?.textContent).toContain("proposal 보관 확인");
+      const form = root.querySelector<HTMLFormElement>("[data-proposal-action-form]");
+      expect(form).toBeTruthy();
+      form?.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
       await new Promise((r) => setTimeout(r, 40));
 
       expect(methods).toContain("DELETE");
@@ -409,7 +412,183 @@ describe("ProposalsView — read-only list/detail", () => {
       expect(root.querySelector("[data-proposal-id='prop_delete']")).toBeNull();
     } finally {
       globalThis.fetch = origFetch;
-      window.confirm = origConfirm;
+    }
+  });
+
+  test("opens an in-page modal for GD decisions and sends the typed comment", async () => {
+    const origFetch = globalThis.fetch;
+    let transitionPayload: Record<string, unknown> | null = null;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/proposals")) {
+        return new Response(
+          JSON.stringify({
+            proposals: [
+              {
+                id: "prop_decide",
+                title: "[test] decide me",
+                summary: "팀장 결정 대기",
+                source: "loop",
+                proposer_agent: "bill",
+                status: transitionPayload ? "accepted" : "gd_report",
+                priority: "high",
+                effort_minutes: 10,
+                expected_value: "승인 테스트",
+                risk_level: "low",
+                evidence_refs: "test",
+                north_star_alignment: "ops",
+                duplicate_of: null,
+                created_at: "2026-06-26 01:00:00",
+                updated_at: "2026-06-26 02:00:00",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (init?.method === "POST" && url.includes("/api/proposals/prop_decide/transition")) {
+        transitionPayload = JSON.parse(String(init.body));
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          proposal: {
+            id: "prop_decide",
+            title: "[test] decide me",
+            summary: "팀장 결정 대기",
+            source: "loop",
+            proposer_agent: "bill",
+            status: transitionPayload ? "accepted" : "gd_report",
+            priority: "high",
+            effort_minutes: 10,
+            expected_value: "승인 테스트",
+            risk_level: "low",
+            evidence_refs: "test",
+            north_star_alignment: "ops",
+            duplicate_of: null,
+            created_at: "2026-06-26 01:00:00",
+            updated_at: "2026-06-26 02:00:00",
+          },
+          reviews: [],
+          decision_log: [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    try {
+      const { renderProposalsView } = await import("./ProposalsView");
+      const root = document.createElement("div");
+      renderProposalsView(root);
+      await new Promise((r) => setTimeout(r, 40));
+
+      const approve = root.querySelector<HTMLButtonElement>("[data-gd-decision='accepted']");
+      expect(approve).toBeTruthy();
+      approve?.click();
+
+      const modal = root.querySelector("[data-proposal-action-modal]");
+      expect(modal?.textContent).toContain("승인 사유/코멘트");
+      const textarea = root.querySelector<HTMLTextAreaElement>("[data-proposal-action-comment]");
+      expect(textarea).toBeTruthy();
+      textarea!.value = "승인합니다. 실행하세요.";
+      root.querySelector<HTMLFormElement>("[data-proposal-action-form]")?.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 40));
+
+      expect(transitionPayload as Record<string, unknown> | null).toEqual({
+        to: "accepted",
+        actor: "gd",
+        reason: "승인합니다. 실행하세요.",
+        comment: "승인합니다. 실행하세요.",
+      });
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  test("shows GD decision failures inside the modal without native alert", async () => {
+    const origFetch = globalThis.fetch;
+    const origAlert = window.alert;
+    let alertCalled = false;
+    window.alert = () => { alertCalled = true; };
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/proposals")) {
+        return new Response(
+          JSON.stringify({
+            proposals: [
+              {
+                id: "prop_fail",
+                title: "[test] fail me",
+                summary: "팀장 결정 실패",
+                source: "loop",
+                proposer_agent: "bill",
+                status: "gd_report",
+                priority: "high",
+                effort_minutes: 10,
+                expected_value: "실패 테스트",
+                risk_level: "low",
+                evidence_refs: "test",
+                north_star_alignment: "ops",
+                duplicate_of: null,
+                created_at: "2026-06-26 01:00:00",
+                updated_at: "2026-06-26 02:00:00",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (init?.method === "POST" && url.includes("/api/proposals/prop_fail/transition")) {
+        return new Response(JSON.stringify({ error: "comment required" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          proposal: {
+            id: "prop_fail",
+            title: "[test] fail me",
+            summary: "팀장 결정 실패",
+            source: "loop",
+            proposer_agent: "bill",
+            status: "gd_report",
+            priority: "high",
+            effort_minutes: 10,
+            expected_value: "실패 테스트",
+            risk_level: "low",
+            evidence_refs: "test",
+            north_star_alignment: "ops",
+            duplicate_of: null,
+            created_at: "2026-06-26 01:00:00",
+            updated_at: "2026-06-26 02:00:00",
+          },
+          reviews: [],
+          decision_log: [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    try {
+      const { renderProposalsView } = await import("./ProposalsView");
+      const root = document.createElement("div");
+      renderProposalsView(root);
+      await new Promise((r) => setTimeout(r, 40));
+
+      root.querySelector<HTMLButtonElement>("[data-gd-decision='accepted']")?.click();
+      root.querySelector<HTMLFormElement>("[data-proposal-action-form]")?.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 40));
+
+      expect(alertCalled).toBe(false);
+      expect(root.querySelector("[data-proposal-action-modal]")).toBeTruthy();
+      expect(root.querySelector("[data-proposal-action-error]")?.textContent).toContain("comment required");
+    } finally {
+      globalThis.fetch = origFetch;
+      window.alert = origAlert;
     }
   });
 

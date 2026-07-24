@@ -67,6 +67,20 @@ interface StatusGroup {
   description: string;
 }
 
+type ProposalModalState =
+  | {
+      kind: "gd-decision";
+      proposalId: string;
+      title: string;
+      to: "accepted" | "rejected";
+      label: string;
+    }
+  | {
+      kind: "archive";
+      proposalId: string;
+      title: string;
+    };
+
 const STATUS_GROUPS: StatusGroup[] = [
   { key: "draft", label: "Draft", description: pick("초기 등록 · 수정", "New · editing") },
   { key: "peer_review", label: pick("Review", "Review"), description: pick("단일 동료 리뷰", "Single peer review") },
@@ -231,6 +245,49 @@ function gdDecisionPanel(p: ProposalRow): string {
         </div>
       </div>
       <div class="text-xs leading-5 text-slate-400">${pick("결정 후 decision_log와 관련 follow-up 알림이 자동으로 생성됩니다.", "After the decision, decision_log and related follow-up notifications are generated automatically.")}</div>
+    </div>`;
+}
+
+function actionModalHtml(modal: ProposalModalState | null, submitting: boolean, errorMessage: string | null): string {
+  if (!modal) return "";
+  const isDecision = modal.kind === "gd-decision";
+  const title = isDecision
+    ? pick(`${modal.label} 사유/코멘트`, `${modal.label} reason/comment`)
+    : pick("proposal 보관 확인", "Archive proposal");
+  const description = isDecision
+    ? pick("팀장 결정 로그와 후속 알림에 남길 코멘트를 입력하세요.", "Enter the comment to save in the decision log and follow-up notification.")
+    : pick("이 proposal을 목록에서 숨기고 보관합니다.", "This hides and archives the proposal from the list.");
+  const submitLabel = isDecision
+    ? modal.label
+    : pick("보관", "Archive");
+  const submitTone = isDecision && modal.to === "accepted"
+    ? "border-accent-green/40 bg-accent-green/18 text-txt-green hover:bg-accent-green/28"
+    : "border-status-blocked/40 bg-status-blocked/16 text-txt-red hover:bg-status-blocked/26";
+  return `
+    <div data-proposal-action-modal class="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/55 px-4 py-6 sm:items-center">
+      <form data-proposal-action-form class="w-full max-w-md max-h-[calc(100dvh-3rem)] overflow-y-auto rounded-md border border-surface-3 bg-surface-1 p-4 shadow-2xl">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <h3 class="text-base font-semibold text-slate-100">${escape(title)}</h3>
+            <div class="mt-1 text-xs leading-5 text-slate-400">${escape(description)}</div>
+          </div>
+          <button type="button" data-proposal-action-cancel class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-surface-3 bg-surface-2 text-slate-400 hover:text-slate-100" aria-label="${pick("닫기", "Close")}">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div class="mt-3 rounded border border-surface-3 bg-surface-0/60 px-3 py-2 text-sm font-semibold leading-5 text-slate-200 break-words">${escape(modal.title)}</div>
+        ${isDecision
+          ? `<label class="mt-3 block">
+              <span class="text-xs font-semibold text-slate-400">${pick("사유/코멘트", "Reason/comment")}</span>
+              <textarea data-proposal-action-comment rows="4" class="mt-1 w-full resize-y rounded-md border border-surface-3 bg-surface-0 px-3 py-2 text-sm leading-6 text-slate-100 outline-none focus:border-accent-green/60" placeholder="${pick("결정 사유나 실행 지시를 입력", "Enter decision reason or execution instruction")}"></textarea>
+            </label>`
+          : `<div class="mt-3 text-sm leading-6 text-slate-300">${pick("계속하면 상태가 archived_duplicate로 전환되고 현재 목록에서 사라집니다.", "Continuing changes the status to archived_duplicate and removes it from the current list.")}</div>`}
+        ${errorMessage ? `<div data-proposal-action-error class="mt-3 rounded-md border border-status-blocked/35 bg-status-blocked/12 px-3 py-2 text-xs leading-5 text-txt-red">${escape(errorMessage)}</div>` : ""}
+        <div class="mt-4 flex justify-end gap-2">
+          <button type="button" data-proposal-action-cancel class="rounded-md border border-surface-3 bg-surface-2 px-3 py-2 text-xs font-semibold text-slate-300 hover:text-slate-100" ${submitting ? "disabled" : ""}>${pick("취소", "Cancel")}</button>
+          <button type="submit" class="rounded-md border px-3 py-2 text-xs font-semibold disabled:opacity-50 ${submitTone}" ${submitting ? "disabled" : ""}>${submitting ? pick("처리 중...", "Working...") : escape(submitLabel)}</button>
+        </div>
+      </form>
     </div>`;
 }
 // 카드(목록)용 — 활성 상태가 정체 임계 넘으면 한눈에 보이는 작은 배지(리뷰 수는 list에 없어 시간 기준).
@@ -413,6 +470,9 @@ export function renderProposalsView(root: HTMLElement): void {
   const detailWidthDefault = 448;
   const detailWidthClamp = [320, 760] as const;
   let detailWidth = readDetailWidth();
+  let actionModal: ProposalModalState | null = null;
+  let actionSubmitting = false;
+  let actionError: string | null = null;
 
   function clampDetailWidth(px: number): number {
     const [min, max] = detailWidthClamp;
@@ -475,6 +535,57 @@ export function renderProposalsView(root: HTMLElement): void {
     render();
   }
 
+  async function submitGdDecision(modal: Extract<ProposalModalState, { kind: "gd-decision" }>, comment: string) {
+    const trimmed = comment.trim();
+    const res = await fetch(`${apiBase()}/api/proposals/${encodeURIComponent(modal.proposalId)}/transition`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: modal.to,
+        actor: "gd",
+        reason: trimmed || modal.label, // reason = 감사 로그용(라벨 fallback 유지)
+        comment: trimmed, // 지시 코멘트: 빈이면 빈 전송 → 서버 '지시 필수' 가드가 거부(GD 승인 시 지시 필수)
+      }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? `HTTP ${res.status}`);
+    }
+    actionModal = null;
+    await loadList();
+    if (selectedId) await loadDetail(selectedId);
+  }
+
+  async function submitArchive(modal: Extract<ProposalModalState, { kind: "archive" }>) {
+    const res = await fetch(`${apiBase()}/api/proposals/${encodeURIComponent(modal.proposalId)}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        actor: "gd",
+        reason: "proposal tab delete/archive",
+      }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? `HTTP ${res.status}`);
+    }
+    actionModal = null;
+    selectedId = null;
+    detail = null;
+    detailScroll = 0;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("proposal");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    await loadList();
+  }
+
+  function focusActionModal() {
+    const target = root.querySelector<HTMLTextAreaElement>("[data-proposal-action-comment]")
+      ?? root.querySelector<HTMLButtonElement>("[data-proposal-action-form] button[type='submit']");
+    target?.focus?.();
+    target?.scrollIntoView?.({ block: "center", inline: "nearest" });
+  }
+
   function listHtml(): string {
     if (!listLoaded) {
       return `<div class="flex-1 flex items-center justify-center text-sm text-slate-500">${pick("proposal 목록을 불러오는 중...", "Loading proposal list...")}</div>`;
@@ -524,6 +635,7 @@ export function renderProposalsView(root: HTMLElement): void {
           <div class="proposal-resize-handle" data-proposals-resize-detail title="${pick("드래그하여 상세 패널 너비 조절", "Drag to resize detail panel")}" aria-label="${pick("Proposal 상세 패널 너비 조절", "Resize proposal detail panel")}" role="separator"></div>
           <div id="proposals-detail" class="min-h-0 min-w-0 flex flex-col">${detailHtml(detail, detailLoading, detailError)}</div>
         </div>
+        ${actionModalHtml(actionModal, actionSubmitting, actionError)}
       </div>`;
 
     const board = root.querySelector<HTMLElement>("[data-proposals-board-scroll]");
@@ -557,72 +669,52 @@ export function renderProposalsView(root: HTMLElement): void {
       b.addEventListener("click", () => {
         if (!detail) return;
         const to = b.dataset.gdDecision;
-        if (!to) return;
+        if (to !== "accepted" && to !== "rejected") return;
         const label = to === "accepted" ? pick("승인", "Approve") : to === "rejected" ? pick("반려", "Reject") : pick("수정요청", "Revise");
-        const comment = window.prompt(pick(`${label} 사유/코멘트를 입력하세요.`, `Enter a reason/comment for ${label}.`), "");
-        if (comment === null) return;
-        b.disabled = true;
-        void fetch(`${apiBase()}/api/proposals/${encodeURIComponent(detail.proposal.id)}/transition`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            to,
-            actor: "gd",
-            reason: comment.trim() || label, // reason = 감사 로그용(라벨 fallback 유지)
-            comment: comment.trim(), // 지시 코멘트: 빈이면 빈 전송 → 서버 '지시 필수' 가드가 거부(GD 승인 시 지시 필수)
-          }),
-        })
-          .then(async (res) => {
-            if (!res.ok) {
-              const body = (await res.json().catch(() => ({}))) as { error?: string };
-              throw new Error(body.error ?? `HTTP ${res.status}`);
-            }
-            await loadList();
-            if (selectedId) await loadDetail(selectedId);
-          })
-          .catch((e) => {
-            window.alert(pick(`결정 처리 실패: ${e instanceof Error ? e.message : String(e)}`, `Decision failed: ${e instanceof Error ? e.message : String(e)}`));
-          })
-          .finally(() => {
-            b.disabled = false;
-          });
+        actionModal = { kind: "gd-decision", proposalId: detail.proposal.id, title: detail.proposal.title, to, label };
+        actionError = null;
+        render();
+        focusActionModal();
       }));
     root.querySelectorAll<HTMLButtonElement>("[data-archive-proposal]").forEach((b) =>
       b.addEventListener("click", () => {
         if (!detail) return;
         const id = b.dataset.archiveProposal;
         if (!id) return;
-        const ok = window.confirm(pick(`이 proposal을 목록에서 숨기고 보관할까요?\n\n${detail.proposal.title}`, `Hide and archive this proposal from the list?\n\n${detail.proposal.title}`));
-        if (!ok) return;
-        b.disabled = true;
-        void fetch(`${apiBase()}/api/proposals/${encodeURIComponent(id)}`, {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            actor: "gd",
-            reason: "proposal tab delete/archive",
-          }),
-        })
-          .then(async (res) => {
-            if (!res.ok) {
-              const body = (await res.json().catch(() => ({}))) as { error?: string };
-              throw new Error(body.error ?? `HTTP ${res.status}`);
-            }
-            selectedId = null;
-            detail = null;
-            detailScroll = 0;
-            const url = new URL(window.location.href);
-            url.searchParams.delete("proposal");
-            window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
-            await loadList();
-          })
-          .catch((e) => {
-            window.alert?.(pick(`proposal 보관 실패: ${e instanceof Error ? e.message : String(e)}`, `Failed to archive proposal: ${e instanceof Error ? e.message : String(e)}`));
-          })
-          .finally(() => {
-            b.disabled = false;
-          });
+        actionModal = { kind: "archive", proposalId: id, title: detail.proposal.title };
+        actionError = null;
+        render();
+        focusActionModal();
       }));
+    root.querySelectorAll<HTMLButtonElement>("[data-proposal-action-cancel]").forEach((b) =>
+      b.addEventListener("click", () => {
+        if (actionSubmitting) return;
+        actionModal = null;
+        actionError = null;
+        render();
+      }));
+    root.querySelector<HTMLFormElement>("[data-proposal-action-form]")?.addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (!actionModal || actionSubmitting) return;
+      const modal = actionModal;
+      const comment = root.querySelector<HTMLTextAreaElement>("[data-proposal-action-comment]")?.value ?? "";
+      actionSubmitting = true;
+      actionError = null;
+      render();
+      const task = modal.kind === "gd-decision" ? submitGdDecision(modal, comment) : submitArchive(modal);
+      void task
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          actionError = modal.kind === "gd-decision"
+            ? pick(`결정 처리 실패: ${msg}`, `Decision failed: ${msg}`)
+            : pick(`proposal 보관 실패: ${msg}`, `Failed to archive proposal: ${msg}`);
+        })
+        .finally(() => {
+          actionSubmitting = false;
+          render();
+          if (actionModal) focusActionModal();
+        });
+    });
     const resizeHandle = root.querySelector<HTMLElement>("[data-proposals-resize-detail]");
     resizeHandle?.addEventListener("mousedown", (e) => {
       e.preventDefault();
