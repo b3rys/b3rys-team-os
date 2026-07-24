@@ -48,11 +48,24 @@ say "■ 2) 에이전트 생성 (openclaw agents add)"
 #   보호 목록은 env OPENCLAW_PROTECTED_IDS(공백 구분)로 지정 — 기본은 시스템 id 만. 팀 운영 시 추가 id 를 넣어 함께 보호.
 OPENCLAW_PROTECTED_IDS="${OPENCLAW_PROTECTED_IDS:-gd main claude codex default}"
 PROTECTED_RE="^($(echo $OPENCLAW_PROTECTED_IDS | tr -s ' ' '|'))$"
-if [ -d "$OC/agents/$AGENT_ID" ] && [[ "$AGENT_ID" =~ ^[a-z0-9_-]+$ ]] && [[ ! "$AGENT_ID" =~ $PROTECTED_RE ]]; then
-  echo "  ⚠ 잔재 agent 폴더($OC/agents/$AGENT_ID) 제거 후 재생성"
-  openclaw agents remove "$AGENT_ID" --non-interactive 2>/dev/null; rm -rf "$OC/agents/$AGENT_ID"
+# ★재활성화 멱등★ — add 충돌의 실제 원인은 폴더가 아니라 openclaw.json 의 ★agents.list 등록 엔트리★다.
+#   폴더를 rm 해도 등록은 남아 `agents add` 가 "already exists"(비대화 error)로 exit≠0 → set -e 종료
+#   (2026-07-24 재활성화 실패 근본). 옛 `openclaw agents remove` 는 ★존재하지 않는 서브커맨드★라 no-op였고
+#   (정본=`agents delete`이나 delete 는 workspace 를 휴지통행 → 방금 쓴 persona/AGENTS.md 를 날리므로 금지).
+#   그래서: 이미 등록됐으면 add 생략(멱등, folder/auth 는 step3, 라우팅은 게이트웨이 재시작이 재적용),
+#   미등록(신규·폴더만 남은 잔재)일 때만 폴더 청소 후 add.
+if openclaw agents list --json 2>/dev/null \
+   | python3 -c 'import json,sys; aid=sys.argv[1]; d=json.load(sys.stdin); sys.exit(0 if isinstance(d,list) and any(a.get("id")==aid for a in d) else 1)' "$AGENT_ID" 2>/dev/null; then
+  say "  ↺ 이미 등록된 에이전트 — 재추가 생략(멱등). 텔레그램 바인딩만 보장."
+  openclaw agents bind --agent "$AGENT_ID" --bind "telegram:$AGENT_ID" >/dev/null 2>&1 \
+    && say "  바인딩 확인/추가 ✓" || say "  바인딩 이미 존재 — 변경 없음"
+else
+  if [ -d "$OC/agents/$AGENT_ID" ] && [[ "$AGENT_ID" =~ ^[a-z0-9_-]+$ ]] && [[ ! "$AGENT_ID" =~ $PROTECTED_RE ]]; then
+    echo "  ⚠ 미등록인데 폴더 잔재 존재 → 폴더 제거 후 생성"
+    rm -rf "$OC/agents/$AGENT_ID"
+  fi
+  openclaw agents add "$AGENT_ID" --workspace "$WS" --model "$MODEL" --non-interactive --bind "telegram:$AGENT_ID"
 fi
-openclaw agents add "$AGENT_ID" --workspace "$WS" --model "$MODEL" --non-interactive --bind "telegram:$AGENT_ID"
 
 say "■ 3) auth 프로필 (전역 auth.profiles 우선 · 없으면 per-agent 복제)"
 DEST="$OC/agents/$AGENT_ID/agent"
