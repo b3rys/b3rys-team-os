@@ -240,7 +240,10 @@ function listScheduledJobs(db: Database): TeamOsScheduled[] {
   try {
     const rows = db.prepare(
       `SELECT id, title, schedule_expr, enabled, status, next_run_at, last_run_at
-         FROM scheduled_job WHERE kind='recurring' ORDER BY id`,
+         FROM scheduled_job
+        WHERE kind='recurring'
+          AND NOT (enabled=0 AND status='cancelled')
+        ORDER BY id`,
     ).all() as Array<{
       id: string; title: string | null; schedule_expr: string | null;
       enabled: number; status: string | null; next_run_at: string | null; last_run_at: string | null;

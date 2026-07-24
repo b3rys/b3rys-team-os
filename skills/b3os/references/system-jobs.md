@@ -5,6 +5,16 @@
 
 > 원칙: **새 시스템 잡(워커·스케줄 잡)을 추가하면 반드시 이 표에 한 줄 넣는다.** 그래야 "뭐가 도는지" 한곳에서 보인다.
 
+## 0) 운영 잡 실행 계층 — 3종
+
+| 종류 | 정본·실행 주체 | 적합한 용도 | Team OS 탭의 상태 해석 |
+|---|---|---|---|
+| **launchd** | `~/Library/LaunchAgents/*.plist` · macOS `launchd` | `team-collab(:7878)`·`caffeinate`·gateway처럼 재부팅/크래시 뒤에도 살아야 하는 상시 서비스, macOS 런타임 브리지 | `KeepAlive` 서비스만 현재 PID 기반 `running=true/false`. `StartInterval`·`StartCalendarInterval` 잡은 실행 사이에 꺼져 있는 것이 정상이므로 `running=null` |
+| **scheduled_job** | `team.db`의 `scheduled_job`/`scheduled_job_run` · b3os `schedulerWorker` | 팀 공용 durable(세션 종료 후에도 보존되는) cron·interval·one-shot, inbox wake, allowlist된 ops 스크립트 | `next_run_at`·`last_run_at` 표시. `enabled=1 AND status=failed`는 인수테스트 실패. `enabled=0 AND status=cancelled`는 은퇴 잡으로 집계하되 OS 탭 목록에서는 제외 |
+| **openclaw_cron** | `~/.openclaw/cron/jobs.json` · OpenClaw 런타임 | OpenClaw 에이전트에 종속된 런타임 자체 예약 작업 | 예약 정의를 관측용으로 표시하며 상주 프로세스가 아니므로 `running=null`. 팀 공용 잡은 가능하면 `scheduled_job` 사용 |
+
+선택 기준: **상시 프로세스는 launchd**, **팀 공용 예약·리마인드는 scheduled_job**, **OpenClaw 한 런타임에만 귀속되는 작업은 openclaw_cron**이다. 같은 작업을 둘 이상의 계층에 중복 등록하지 않는다.
+
 ## 1) 항상 켜짐 (부팅 시 무조건 시작)
 
 | 잡 | 하는 일 | 주기 | 상태 로그 |
@@ -46,4 +56,6 @@
    ```
 3. **게이트는 env 로.** 위험하거나 실행부가 무거운 잡은 env 플래그로 켠다(예: scheduler 는 기본 OFF). 반대로 협업 필수 잡(wake dispatcher)은 기본 ON — 명시적 `=false` 로만 끈다.
 
-> 개선 후보(팀 리드 검토): 대시보드에 **"System Jobs" 패널**을 추가해 각 워커의 켜짐/주기/마지막 tick 을 한 화면에 노출하면, 로그를 grep 하지 않고도 "뭐가 도는지"를 볼 수 있다. (신규 엔드포인트 `GET /team/api/system/jobs` + 패널 — 승인 후 구현.)
+퍼블릭 인수테스트의 **인프라/운영** 섹션은 필수 KeepAlive 서비스 3종(`team-collab`·`caffeinate`·gateway), 활성 recurring 실패 잡, 1시간 넘은 `wake_dispatched` lease를 자동 점검한다. 고아 wake는 0개 pass, 1~10개 info, 10개 초과 fail이다.
+
+대시보드 **Team OS** 탭은 launchd·scheduled_job·openclaw_cron을 한 목록으로 합쳐 보여준다. 다만 서버 내부 워커의 마지막 tick은 아직 부팅 로그를 정본으로 확인한다.

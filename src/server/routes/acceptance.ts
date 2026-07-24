@@ -3,12 +3,10 @@ import type { Database } from "bun:sqlite";
 import { dirname } from "node:path";
 import { runAcceptanceCheck, type AcceptanceDeps } from "../lib/acceptanceCheck";
 
-export interface AcceptanceRouteDeps {
+export interface AcceptanceRouteDeps extends AcceptanceDeps {
   db: Database;
   registryPath: string;
   teamOsPath: string;
-  rootDir?: string;
-  membersRoot?: string;
 }
 
 function depsForCheck(deps: AcceptanceRouteDeps): AcceptanceDeps {
@@ -18,6 +16,7 @@ function depsForCheck(deps: AcceptanceRouteDeps): AcceptanceDeps {
     teamOsPath: deps.teamOsPath,
     rootDir: deps.rootDir ?? dirname(dirname(deps.teamOsPath)),
     membersRoot: deps.membersRoot,
+    teamOsSnapshot: deps.teamOsSnapshot,
   };
 }
 
