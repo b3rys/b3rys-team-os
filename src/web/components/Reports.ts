@@ -59,6 +59,8 @@ let _curType: string | null = null;
 let _query = "";
 let _cat = ALL_FILTER;
 let _listScrollTop = 0;
+let _detailScrollTop = 0;
+let _restoreSearchFocus = false;
 
 function escape(s: unknown): string {
   return String(s == null ? "" : s)
@@ -261,14 +263,24 @@ async function loadReportsPage(reset: boolean): Promise<void> {
     _loading = false;
   }
 }
-async function reloadList(): Promise<void> {
-  _listScrollTop = 0;
+async function reloadList(opts: { preserveScroll?: boolean; restoreSearchFocus?: boolean } = {}): Promise<void> {
+  if (opts.preserveScroll) rememberListScroll();
+  else _listScrollTop = 0;
+  if (opts.restoreSearchFocus) _restoreSearchFocus = true;
   _nextCursor = null;
   _hasMore = false;
   _loaded = false;
   renderList();
   await loadReportsPage(true);
+  if (opts.restoreSearchFocus) _restoreSearchFocus = true;
   renderList();
+  if (opts.restoreSearchFocus) {
+    const q = _root?.querySelector<HTMLInputElement>("#reports-q");
+    if (q) {
+      q.focus();
+      q.setSelectionRange(q.value.length, q.value.length);
+    }
+  }
 }
 async function deleteReport(id: string): Promise<void> {
   const r = await fetch(`${REPORTS_BASE}/api/${encodeURIComponent(id)}`, { method: "DELETE", headers: { accept: "application/json" } });
@@ -310,6 +322,54 @@ function openInSystemBrowser(url: string): boolean {
 function rememberListScroll(): void {
   const scroller = _root?.querySelector<HTMLElement>("[data-reports-list-scroll]");
   if (scroller) _listScrollTop = scroller.scrollTop;
+}
+
+function rememberDetailScroll(): void {
+  const scroller = _root?.querySelector<HTMLElement>("[data-reports-detail-scroll]");
+  if (scroller) _detailScrollTop = scroller.scrollTop;
+}
+
+function isParentDarkMode(): boolean {
+  const bg = getComputedStyle(document.body).backgroundColor.match(/\d+(?:\.\d+)?/g)?.slice(0, 3).map(Number) ?? [];
+  if (bg.length < 3) return true;
+  const r = bg[0] ?? 0;
+  const g = bg[1] ?? 0;
+  const b = bg[2] ?? 0;
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) < 128;
+}
+
+function toneDownHtmlFrame(frame: HTMLIFrameElement): void {
+  frame.addEventListener("load", () => {
+    try {
+      if (!isParentDarkMode()) return;
+      const doc = frame.contentDocument;
+      if (!doc || doc.getElementById("b3os-dark-frame-soften")) return;
+      const st = doc.createElement("style");
+      st.id = "b3os-dark-frame-soften";
+      st.textContent = `
+        html, body { background: #0b1118 !important; }
+        :not(svg):not(path):not(text)[style*="background:#fff"],
+        :not(svg):not(path):not(text)[style*="background: #fff"],
+        :not(svg):not(path):not(text)[style*="background-color:#fff"],
+        :not(svg):not(path):not(text)[style*="background-color: #fff"],
+        :not(svg):not(path):not(text)[style*="background:#ffffff"],
+        :not(svg):not(path):not(text)[style*="background: #ffffff"],
+        :not(svg):not(path):not(text)[style*="background-color:#ffffff"],
+        :not(svg):not(path):not(text)[style*="background-color: #ffffff"],
+        :not(svg):not(path):not(text)[style*="background:rgb(255,255,255)"],
+        :not(svg):not(path):not(text)[style*="background: rgb(255, 255, 255)"],
+        :not(svg):not(path):not(text)[style*="background-color:rgb(255,255,255)"],
+        :not(svg):not(path):not(text)[style*="background-color: rgb(255, 255, 255)"] { background: #182334 !important; background-color: #182334 !important; }
+        svg rect[fill="#fff"], svg rect[fill="#FFF"], svg rect[fill="#ffffff"], svg rect[fill="#FFFFFF"], svg rect[fill="white"],
+        svg path[fill="#fff"], svg path[fill="#FFF"], svg path[fill="#ffffff"], svg path[fill="#FFFFFF"], svg path[fill="white"],
+        svg [fill="#f8fafc"], svg [fill="#F8FAFC"], svg [fill="#f1f5f9"], svg [fill="#F1F5F9"], svg [fill="#f9fafb"], svg [fill="#F9FAFB"],
+        svg [fill="#eff6ff"], svg [fill="#EFF6FF"], svg [fill="#f0fdf4"], svg [fill="#F0FDF4"], svg [fill="#fffbeb"], svg [fill="#FFFBEB"],
+        svg [fill="#fef2f2"], svg [fill="#FEF2F2"], svg [fill="#eef2ff"], svg [fill="#EEF2FF"], svg [fill="#ecfeff"], svg [fill="#ECFEFF"] { fill: #d7e0ec !important; }`;
+      doc.head.appendChild(st);
+    } catch {
+      // Cross-origin or sandbox restrictions: leave the report as-is rather than breaking preview.
+    }
+  }, { once: true });
 }
 function isInteractiveTarget(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest("button,a,input,textarea,select,[role='button']"));
@@ -429,7 +489,7 @@ function renderList(): void {
       el.disabled = true;
       try {
         await setReportImportant(id, next);
-        await reloadList();
+        await reloadList({ preserveScroll: true });
       } catch (err) {
         await showAlert(pick(`중요 표시 변경 실패: ${(err as Error).message}`, `Failed to update important mark: ${(err as Error).message}`));
         el.disabled = false;
@@ -446,7 +506,7 @@ function renderList(): void {
       el.disabled = true;
       try {
         await deleteReport(id);
-        await reloadList();
+        await reloadList({ preserveScroll: true });
       } catch (err) {
         await showAlert(pick(`삭제 실패: ${(err as Error).message}`, `Delete failed: ${(err as Error).message}`));
         el.disabled = false;
@@ -457,8 +517,31 @@ function renderList(): void {
   _root.querySelector<HTMLButtonElement>("#reports-retry")?.addEventListener("click", () => void reloadList());
   if (q) {
     let t: ReturnType<typeof setTimeout>;
-    q.addEventListener("input", () => { clearTimeout(t); const v = q.value; t = setTimeout(() => { _query = v; void reloadList(); }, 180); });
-    if (_query) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+    let composing = false;
+    const stopKeys = (e: KeyboardEvent) => e.stopPropagation();
+    q.addEventListener("keydown", stopKeys);
+    q.addEventListener("keypress", stopKeys);
+    q.addEventListener("keyup", stopKeys);
+    q.addEventListener("compositionstart", () => { composing = true; });
+    q.addEventListener("compositionend", () => {
+      composing = false;
+      clearTimeout(t);
+      const v = q.value;
+      _restoreSearchFocus = true;
+      t = setTimeout(() => { _query = v; void reloadList({ restoreSearchFocus: true }); }, 900);
+    });
+    q.addEventListener("input", (e) => {
+      if (composing || (e as InputEvent).isComposing) return;
+      clearTimeout(t);
+      const v = q.value;
+      _restoreSearchFocus = true;
+      t = setTimeout(() => { _query = v; void reloadList({ restoreSearchFocus: true }); }, 900);
+    });
+    if (_restoreSearchFocus || _query) {
+      q.focus();
+      q.setSelectionRange(q.value.length, q.value.length);
+      _restoreSearchFocus = false;
+    }
   }
   scroller?.addEventListener("scroll", () => {
     if (!_hasMore || _loading) return;
@@ -498,7 +581,7 @@ async function renderDetail(): Promise<void> {
   ).join("");
 
   _root.innerHTML = `
-    <div class="h-full overflow-y-auto">
+    <div data-reports-detail-scroll class="h-full overflow-y-auto">
       <div class="max-w-3xl mx-auto px-4 md:px-6 pb-20">
         <!-- 상단 sticky 헤더: 스크롤해도 돌아가기·제목·폼토글 항상 노출 -->
         <div class="sticky top-0 z-20 -mx-4 md:-mx-6 px-4 md:px-6 bg-surface-1/95 backdrop-blur border-b border-surface-3">
@@ -539,10 +622,13 @@ async function renderDetail(): Promise<void> {
     </div>`;
 
   _root.querySelector("#reports-back")?.addEventListener("click", goList);
+  const detailScroller = _root.querySelector<HTMLElement>("[data-reports-detail-scroll]");
+  if (detailScroller && _detailScrollTop) detailScroller.scrollTop = _detailScrollTop;
   _root.querySelector<HTMLButtonElement>(".reports-star-detail")?.addEventListener("click", async () => {
     const btn = _root?.querySelector<HTMLButtonElement>(".reports-star-detail");
     if (!btn) return;
     const next = btn.dataset.important !== "1";
+    rememberDetailScroll();
     btn.disabled = true;
     try {
       await setReportImportant(id, next);
@@ -558,9 +644,11 @@ async function renderDetail(): Promise<void> {
     if (!await showConfirm({ message: pick(`보고서 "${meta.title}"을(를) 목록에서 삭제할까요?\n\n첨부 파일은 디스크에 남고, 대시보드 등록 정보만 삭제됩니다.`, `Delete report "${meta.title}" from the list?\n\nThe attached files stay on disk; only the dashboard registration is removed.`), danger: true })) return;
     if (btn) btn.disabled = true;
     try {
+      rememberDetailScroll();
       await deleteReport(id);
       _view = "list";
-      await reloadList();
+      setListHash();
+      await reloadList({ preserveScroll: true });
     } catch (err) {
       await showAlert(pick(`삭제 실패: ${(err as Error).message}`, `Delete failed: ${(err as Error).message}`));
       if (btn) btn.disabled = false;
@@ -640,7 +728,9 @@ async function renderDetail(): Promise<void> {
       };
     }
     if (type === "html") {
-      viewer.innerHTML = `<iframe class="w-full border-0 block bg-white min-h-[70vh]" sandbox="allow-same-origin allow-popups" src="${fileUrl(id, type)}"></iframe>`;
+      viewer.innerHTML = `<iframe class="w-full border-0 block bg-surface-1 min-h-[70vh]" sandbox="allow-same-origin allow-popups" src="${fileUrl(id, type)}"></iframe>`;
+      const frame = viewer.querySelector<HTMLIFrameElement>("iframe");
+      if (frame) toneDownHtmlFrame(frame);
       return;
     }
     if (type === "md") {
