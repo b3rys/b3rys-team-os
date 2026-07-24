@@ -47,6 +47,7 @@ archiving/
 !/docs/GROUP_ROOM_ROUTING.md
 !/docs/COMMUNICATION_FLOW.md
 !/docs/TEAM_COLLECT_ORCHESTRATION.md
+!/docs/DEPLOY_MERGE_HOTFIX_WORKFLOW.md
 
 # ── 머신-로컬 상태·백업·스케줄러 설정 · 내부 프로젝트 파일 (공개 제품 아님) ──────
 # launchd plist(com.<user>.*)·백업·아카이브·프로젝트 관리문서는 GD 머신/내부 전용.
