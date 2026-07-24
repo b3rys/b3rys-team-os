@@ -9,7 +9,7 @@
 set -euo pipefail
 
 AGENT_ID="${AGENT_ID:?AGENT_ID 필요 (예: myagent)}"
-DISPLAY="${DISPLAY:-${AGENT_ID^^}}"
+DISPLAY="${DISPLAY:-$(echo "$AGENT_ID" | tr '[:lower:]' '[:upper:]')}"   # ${var^^}는 bash 4+ 전용 → macOS 기본 bash 3.2 호환 위해 tr 사용
 WS="${WS:-$HOME/Development/$AGENT_ID}"
 MODEL="${MODEL:-openai/gpt-5.5}"      # 기본 모델(codex 런타임 라우팅). 공개 사용자는 자신의 provider/모델에 맞게 env MODEL 로 override.
 OC="$HOME/.openclaw"
