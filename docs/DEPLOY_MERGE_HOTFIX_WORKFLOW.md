@@ -30,12 +30,17 @@
 3. `skills/b3os-release-ops/scripts/release-preflight.sh --mode merge`를 실행한다.
    - clean worktree
    - `main`이 아닌 브랜치
-   - `origin/main..HEAD` commit author email이 `@users.noreply.github.com`
+   - `origin/main..HEAD` commit author·committer email이 GitHub noreply인지
    - `main` 브랜치 보호 설정을 GitHub API로 확인
 4. PR을 열고 Bill 또는 지정 리뷰어에게 리뷰를 요청한다.
-5. 리뷰 반영 뒤 squash/rebase 등으로 공개 기록을 정리한다. GD 명의가 필요한 공개 정본 merge는 `gd.on` noreply email로 재작성한다.
-6. branch protection(브랜치 보호)이 CI·리뷰·권한을 통과시키는 상태에서만 merge한다.
-7. merge 후 로컬 main을 fast-forward로 맞추고 필요 시 `scripts/deploy-live.sh`로 배포한다.
+5. merge 수행 계정의 GitHub commit email(커밋 이메일)을 먼저 비공개로 고정한다.
+   - GitHub Settings → Emails → “Keep my email addresses private”를 켠다.
+   - 웹/squash merge는 브랜치 commit이 all-noreply여도 merge commit author·committer를 머지 수행 계정 email로 찍을 수 있다.
+6. 리뷰 반영 뒤 squash/rebase 등으로 공개 기록을 정리한다. GD 명의가 필요한 공개 정본 merge는 `gd.on` noreply email로 재작성한다.
+   - rebase/amend/fast-forward merge도 committer email이 로컬 실명 email로 남을 수 있으므로 author와 committer를 모두 확인한다.
+7. branch protection(브랜치 보호)이 CI·리뷰·권한을 통과시키는 상태에서만 merge한다.
+8. merge 후 `git fetch origin main`을 실행하고 `skills/b3os-release-ops/scripts/release-preflight.sh --mode post-merge`로 `origin/main` tip의 author·committer email이 모두 noreply인지 검증한다.
+9. 검증 후 로컬 main을 fast-forward로 맞추고 필요 시 `scripts/deploy-live.sh`로 배포한다.
 
 ## 라이브 배포 흐름
 
@@ -90,9 +95,10 @@ skills/b3os-release-ops/scripts/release-preflight.sh --mode deploy --live-dir "$
 
 1. 현재 원격 SHA와 로컬 백업 tag/branch를 남긴다.
 2. secret scan을 돌리고 결과를 기록한다.
-3. 최소 2명 또는 하네스 리뷰가 전/후 diff와 복구 절차를 확인한다.
-4. branch protection이 재적용되어 있는지 확인한다.
-5. GD 승인 메시지, 전/후 SHA, 롤백 명령을 보고에 남긴다.
+3. 공개 범위의 commit author·committer와 annotated tag tagger email이 모두 GitHub noreply인지 확인한다.
+4. 최소 2명 또는 하네스 리뷰가 전/후 diff와 복구 절차를 확인한다.
+5. branch protection이 재적용되어 있는지 확인한다.
+6. GD 승인 메시지, 전/후 SHA, 롤백 명령을 보고에 남긴다.
 
 ## 봇 자율머지 정책
 
@@ -121,6 +127,7 @@ skills/b3os-release-ops/scripts/release-preflight.sh --mode deploy --live-dir "$
 
 ```bash
 skills/b3os-release-ops/scripts/release-preflight.sh --mode merge
+skills/b3os-release-ops/scripts/release-preflight.sh --mode post-merge
 skills/b3os-release-ops/scripts/release-preflight.sh --mode deploy --live-dir /path/to/live/b3rys-team-os
 ```
 
@@ -128,7 +135,9 @@ skills/b3os-release-ops/scripts/release-preflight.sh --mode deploy --live-dir /p
 
 - worktree가 clean인지
 - merge 대상 브랜치가 `main`이 아닌지
-- PR commit author email이 GitHub noreply인지
+- PR commit author·committer email이 GitHub noreply인지
+- post-merge 모드에서 `origin/main` tip author·committer email이 GitHub noreply인지
+- force-push 모드에서 annotated tag tagger email이 GitHub noreply인지
 - GitHub `main` branch protection이 존재하는지
 - deploy 대상 디렉터리가 b3rys-team-os 공개 repo인지
 - 배포 전 dry-run에서 반영 대상이 명확한지

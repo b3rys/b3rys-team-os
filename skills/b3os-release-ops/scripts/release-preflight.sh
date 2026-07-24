@@ -10,12 +10,14 @@ ALLOW_MAIN=0
 
 usage() {
   cat <<'USAGE'
-Usage: release-preflight.sh [--mode merge|deploy|hotfix|force-push] [--base origin/main] [--live-dir PATH] [--skip-branch-protection] [--allow-main]
+Usage: release-preflight.sh [--mode merge|deploy|hotfix|force-push|post-merge] [--base origin/main] [--live-dir PATH] [--skip-branch-protection] [--allow-main]
 
 Checks:
   - clean git worktree
   - non-main branch for merge/hotfix unless --allow-main
-  - commits in BASE..HEAD use GitHub noreply author email
+  - commits in BASE..HEAD use GitHub noreply author and committer email
+  - post-merge origin/main tip uses GitHub noreply author and committer email
+  - force-push annotated tags use GitHub noreply tagger email
   - GitHub main branch protection exists (via gh api) unless skipped
   - deploy live-dir is a b3rys-team-os public repo clone
 USAGE
@@ -37,8 +39,15 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+is_noreply_email() {
+  local email="$1"
+  email="${email#<}"
+  email="${email%>}"
+  [[ "$email" == *@users.noreply.github.com || "$email" == "noreply@github.com" ]]
+}
+
 case "$MODE" in
-  merge|deploy|hotfix|force-push) ;;
+  merge|deploy|hotfix|force-push|post-merge) ;;
   *) fail "invalid --mode: $MODE" ;;
 esac
 
@@ -67,7 +76,7 @@ fi
 ok "worktree clean"
 
 BRANCH="$(git branch --show-current)"
-if [ "$ALLOW_MAIN" -ne 1 ] && [ "$MODE" != "deploy" ]; then
+if [ "$ALLOW_MAIN" -ne 1 ] && [ "$MODE" != "deploy" ] && [ "$MODE" != "post-merge" ]; then
   [ "$BRANCH" != "main" ] || fail "do not merge/hotfix directly from main"
 fi
 ok "branch check: ${BRANCH:-detached}"
@@ -75,19 +84,39 @@ ok "branch check: ${BRANCH:-detached}"
 git fetch origin main -q || fail "git fetch origin main failed"
 git rev-parse --verify "$BASE" >/dev/null 2>&1 || fail "base not found: $BASE"
 
-if [ "$MODE" = "merge" ] || [ "$MODE" = "hotfix" ]; then
+if [ "$MODE" = "merge" ] || [ "$MODE" = "hotfix" ] || [ "$MODE" = "force-push" ]; then
   AHEAD_COUNT="$(git rev-list --count "$BASE"..HEAD)"
-  [ "$AHEAD_COUNT" -gt 0 ] || fail "no commits ahead of $BASE"
-  BAD_EMAILS="$(git log --format='%h %ae' "$BASE"..HEAD | while read -r sha email; do
-    if [[ "$email" != *@users.noreply.github.com ]]; then
-      printf '%s %s\n' "$sha" "$email"
+  if [ "$MODE" != "force-push" ]; then
+    [ "$AHEAD_COUNT" -gt 0 ] || fail "no commits ahead of $BASE"
+  fi
+  BAD_EMAILS="$(git log --format='%h%x09%ae%x09%ce' "$BASE"..HEAD | while IFS=$'\t' read -r sha author_email committer_email; do
+    if ! is_noreply_email "$author_email"; then
+      printf '%s author %s\n' "$sha" "$author_email"
+    fi
+    if ! is_noreply_email "$committer_email"; then
+      printf '%s committer %s\n' "$sha" "$committer_email"
     fi
   done)"
   if [ -n "$BAD_EMAILS" ]; then
     printf '%s\n' "$BAD_EMAILS" >&2
-    fail "non-noreply author email found in $BASE..HEAD"
+    fail "non-noreply author/committer email found in $BASE..HEAD"
   fi
-  ok "all $AHEAD_COUNT commit author emails are GitHub noreply"
+  ok "all $AHEAD_COUNT commit author/committer emails are GitHub noreply"
+fi
+
+if [ "$MODE" = "post-merge" ]; then
+  TIP_SHA="$(git rev-parse origin/main)"
+  AUTHOR_EMAIL="$(git log -1 --format='%ae' "$TIP_SHA")"
+  COMMITTER_EMAIL="$(git log -1 --format='%ce' "$TIP_SHA")"
+  if ! is_noreply_email "$AUTHOR_EMAIL"; then
+    printf '%s author %s\n' "$(git rev-parse --short "$TIP_SHA")" "$AUTHOR_EMAIL" >&2
+    fail "origin/main tip author email is not GitHub noreply"
+  fi
+  if ! is_noreply_email "$COMMITTER_EMAIL"; then
+    printf '%s committer %s\n' "$(git rev-parse --short "$TIP_SHA")" "$COMMITTER_EMAIL" >&2
+    fail "origin/main tip committer email is not GitHub noreply"
+  fi
+  ok "origin/main tip author/committer emails are GitHub noreply: $(git rev-parse --short "$TIP_SHA")"
 fi
 
 if [ "$MODE" = "deploy" ]; then
@@ -113,6 +142,23 @@ else
 fi
 
 if [ "$MODE" = "force-push" ]; then
+  BAD_TAGGERS="$(git for-each-ref --format='%(refname:short)%09%(objecttype)%09%(taggeremail)' refs/tags | while IFS=$'\t' read -r tag object_type tagger_email; do
+    [ "$object_type" = "tag" ] || continue
+    peeled="$(git rev-parse -q --verify "$tag^{}" 2>/dev/null || true)"
+    [ -n "$peeled" ] || continue
+    git merge-base --is-ancestor "$peeled" HEAD || continue
+    if git merge-base --is-ancestor "$peeled" "$BASE"; then
+      continue
+    fi
+    if ! is_noreply_email "$tagger_email"; then
+      printf '%s tagger %s\n' "$tag" "$tagger_email"
+    fi
+  done)"
+  if [ -n "$BAD_TAGGERS" ]; then
+    printf '%s\n' "$BAD_TAGGERS" >&2
+    fail "non-noreply tagger email found in tags reachable from $BASE..HEAD"
+  fi
+  ok "annotated tagger emails in $BASE..HEAD are GitHub noreply"
   warn "force-push/history rewrite still requires GD approval, backup, secret scan, 2-person or harness review, and rollback commands"
 fi
 
