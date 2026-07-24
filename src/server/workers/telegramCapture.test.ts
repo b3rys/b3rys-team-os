@@ -310,22 +310,14 @@ function dbWithTasks(): Database {
 }
 
 describe("slash command formatters (fmt*)", () => {
-  test("fmtBoard groups by lane with counts + owner", () => {
+  test("fmtBoard lists active lanes with counts + owner and excludes done", () => {
     const out = fmtBoard(dbWithTasks());
     expect(out).toContain("📋 칸반 작업 보드");
     expect(out).toContain("📝 계획 (1)");
     expect(out).toContain("🔧 실행 중 (1)");
-    expect(out).toContain("✅ 완료 (1)");
     expect(out).toContain("실행 작업B — @bill");
-  });
-  test("fmtBoard caps done list at 5 with overflow note", () => {
-    const db = new Database(":memory:");
-    migrate(db);
-    const ins = db.prepare(`INSERT INTO task (id, title, lane, owner, sort_order) VALUES (?, ?, 'done', NULL, ?)`);
-    for (let i = 0; i < 7; i++) ins.run(`d${i}`, `done${i}`, i);
-    const out = fmtBoard(db);
-    expect(out).toContain("✅ 완료 (7)");
-    expect(out).toContain("…외 2건");
+    expect(out).not.toContain("✅ 완료");
+    expect(out).not.toContain("완료 작업C");
   });
   test("fmtReview lists doing; empty message when none", () => {
     expect(fmtReview(dbWithTasks())).toContain("실행 작업B — @bill");
