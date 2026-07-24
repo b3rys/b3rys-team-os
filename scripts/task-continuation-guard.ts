@@ -2,7 +2,8 @@
 // 진행 지속 가드 (30분마다). 멈춘(stalled) doing 카드의 owner 를 버스 wake 로 핑해 재개/정리를 유도한다.
 //   - task-review-ping(매일 06:00)의 30분 버전. 리뷰핑은 "하루 한 번 전체 점검", 이 가드는 "카드가 조용해지면 바로 nudge".
 //   - 텔레그램 발신이 아니라 버스 wake(에이전트 깨우기) — 토큰 불필요.
-//   - ★이슈별 cooldown★: 같은 카드를 30분마다 다시 핑하지 않는다(기본 120분). var/ 상태파일로 마지막 핑시각 추적.
+//   - ★에피소드당 1회★: 한 번 핑한 카드는 owner 가 손댔다가(updated_at 갱신) 다시 stall 되기 전엔 재핑하지 않는다.
+//     방치 카드를 30분마다 영구 나그하지 않기 위함(상시 리마인드는 일일 review-ping 이 담당). var/ 상태파일로 마지막 핑시각 추적.
 //   - 실제로 멈춘 카드가 없으면 no-op(아무도 안 깨움). 신규/빈 칸반은 정상 no-op.
 // 스케줄: scheduled_job `sched_task_continuation_guard` (cron */30, execKey task-continuation-guard). launchd 아님 → OS 무관.
 
@@ -20,8 +21,7 @@ const FROM_AGENT = process.env.CONTINUATION_FROM_AGENT ?? "system";
 
 // doing 카드가 이 시간(분) 이상 손대지 않았으면 "멈춤"으로 본다.
 const STALL_MIN = Number(process.env.CONTINUATION_STALL_MIN ?? "60");
-// 같은 카드를 이 시간(분) 안에 다시 핑하지 않는다(이슈별 cooldown). owner 가 카드를 갱신하면 updated_at 이 올라 멈춤이 풀린다.
-const COOLDOWN_MIN = Number(process.env.CONTINUATION_COOLDOWN_MIN ?? "120");
+// 재핑은 에피소드당 1회(dueCards 참고) — 방치 카드는 최초 1회만 핑, owner 가 손댔다 다시 stall 되면 재핑.
 const STATE_PATH = process.env.CONTINUATION_STATE_PATH ?? join(ROOT, "var", "continuation-guard-state.json");
 
 const KST = (d: Date) => new Date(d.getTime() + 9 * 3600_000).toISOString().slice(0, 10);
@@ -62,11 +62,16 @@ export function stalledDoingCards(tasks: Task[], owners: Set<string>, nowMs: num
   );
 }
 
-// cooldown 이 지난(=핑 대상) 카드만. state 에 없거나 마지막 핑이 cooldownMs 이전이면 due.
-export function dueCards(stalled: Task[], state: State, nowMs: number, cooldownMs: number): Task[] {
+// 재핑 정책 = ★에피소드당 1회★. 방치 카드를 주기마다 영구 나그하지 않는다 — continuation-guard 는 "카드가 막
+// 조용해진 순간"만 잡고, 상시 리마인드는 일일 task-review-ping 이 담당(중복 나그 방지). 핑 대상:
+//   ① 이번 실행서 처음 stall 로 관측된 카드(state 에 없음), 또는
+//   ② 마지막 핑 이후 owner 가 손댔다가(updated_at 갱신) 다시 stall 된 카드(새 에피소드).
+// 손 안 댄 방치 카드는 최초 1회만 핑하고 조용해진다(updated_at ≤ 마지막 핑시각).
+export function dueCards(stalled: Task[], state: State): Task[] {
   return stalled.filter((t) => {
     const last = state[t.id] ? Date.parse(state[t.id]) : 0;
-    return nowMs - last >= cooldownMs;
+    if (!last) return true;                     // 이번 실행서 처음 stall 로 관측된 카드
+    return parseUtc(t.updated_at, 0) > last;    // 마지막 핑 이후 손댔다 다시 stall = 새 에피소드(파싱실패=0=재핑 안 함)
   });
 }
 
@@ -126,7 +131,6 @@ function saveState(state: State, liveIds: Set<string>): void {
 async function main(): Promise<void> {
   const nowMs = Date.now();
   const stallMs = STALL_MIN * 60_000;
-  const cooldownMs = COOLDOWN_MIN * 60_000;
 
   const res = await fetch(API_TASKS);
   if (!res.ok) throw new Error(`tasks API ${res.status}`);
@@ -135,7 +139,7 @@ async function main(): Promise<void> {
   const owners = new Set(await loadOwners(tasks));
   const stalled = stalledDoingCards(tasks, owners, nowMs, stallMs);
   const state = loadState();
-  const due = dueCards(stalled, state, nowMs, cooldownMs);
+  const due = dueCards(stalled, state);
 
   // owner 별로 due 카드 묶기
   const byOwner = new Map<string, Task[]>();
@@ -181,7 +185,7 @@ async function main(): Promise<void> {
   if (!process.env.DRY_RUN) saveState(state, new Set(stalled.map((t) => t.id)));
   console.log(
     `done: ${sent} owner(s) pinged · stalled=${stalled.length} due=${due.length} ` +
-      `(stall>${STALL_MIN}m, cooldown ${COOLDOWN_MIN}m)`,
+      `(stall>${STALL_MIN}m, 에피소드당 1회)`,
   );
 }
 
