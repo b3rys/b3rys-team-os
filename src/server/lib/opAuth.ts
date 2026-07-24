@@ -1,10 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { isPinSessionValid } from "./approvals";
 
 export interface TrustedActor {
   actor: string;
-  source: "pin_session" | "op_token" | "loopback_dashboard";
+  source: "op_token" | "loopback_dashboard";
 }
 
 export interface AuthResult {
@@ -57,9 +56,6 @@ export function tokenMatches(provided: string | undefined, expected: string): bo
 }
 
 export function trustedActorFromHeaders(headers: Headers): AuthResult {
-  const pinSession = headers.get("x-pin-session") ?? undefined;
-  if (isPinSessionValid(pinSession)) return { ok: true, actor: { actor: leadActorId(), source: "pin_session" } };
-
   const actor = String(headers.get("x-actor-id") ?? "").trim();
   if (!ACTOR_RE.test(actor)) return { ok: false, error: "x_actor_id_required", status: 403 };
   const provided = headers.get("x-op-token") ?? undefined;
@@ -74,10 +70,7 @@ export function trustedActorFromRequest(
   opts: { loopbackDashboardActor?: string } = {},
 ): AuthResult {
   const headers = request.headers;
-  const hasExplicitAuth =
-    headers.has("x-pin-session") ||
-    headers.has("x-op-token") ||
-    headers.has("x-actor-id");
+  const hasExplicitAuth = headers.has("x-op-token") || headers.has("x-actor-id");
   const fromHeaders = trustedActorFromHeaders(headers);
   if (fromHeaders.ok || hasExplicitAuth) return fromHeaders;
   const actor = opts.loopbackDashboardActor;
