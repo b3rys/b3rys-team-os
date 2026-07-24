@@ -55,6 +55,41 @@ openclaw doctor
 > - 둘 다 ChatGPT 구독 OAuth 이며 **API 키가 아니다**(`OPENAI_API_KEY` 불필요). API 키로 붙이는 건 사용자가 명시적으로 원할 때만.
 > - **Node**: 25.9+ 허용. 위 openclaw/codex 플러그인 crash 는 플러그인↔호스트 API 문제이지 Node 버전 문제가 아니며 LTS 다운그레이드로 해결되지 않는다.
 
+### ⚠️ Node 격리 — 런타임 간 node 얽힘 방지 (Hermes+OpenClaw 병행 시 필수)
+
+`openclaw onboard --install-daemon` 은 **그 순간 PATH에서 잡힌 node의 절대경로를 openclaw LaunchAgent(plist)에 그대로 박습니다.** 그 node가 다른 런타임 소유(예: Hermes 가 번들한 `~/.hermes/node/bin/node`)면, 나중에 그 런타임을 지울 때(`hermes uninstall --full` → `~/.hermes` 통째 삭제) **openclaw 게이트웨이가 다음 기동부터 죽습니다.** 실측: openclaw plist가 `~/.hermes/node/bin/node` 를 물고 있어 hermes 제거가 openclaw 를 깨뜨림(2026-07-24). 원칙 — **각 런타임 daemon 은 런타임-독립 시스템 node 로 돌려라.**
+
+**① 설치 전 — 시스템 node 가 먼저 잡히는지 확인**(daemon 설치 직전):
+```bash
+command -v node                        # 이게 ~/.hermes/node/... 등 특정 런타임 경로면 위험
+export PATH="$HOME/.local/bin:$PATH"   # 시스템 node 를 앞에(또는 Homebrew: /opt/homebrew/bin)
+command -v node                        # 이제 ~/.local/bin/node (또는 homebrew) 여야 함
+openclaw onboard --auth-choice openai --install-daemon
+```
+
+**② 설치 후 — plist 가 어떤 node 를 박았는지 검증**(경로만 봄, 시크릿 아님):
+```bash
+PLIST=$(ls "$HOME"/Library/LaunchAgents/*openclaw* 2>/dev/null | head -1)
+grep -i 'node' "$PLIST"                # ~/.hermes/node 등 런타임 경로면 ③으로 repoint
+```
+
+**③ 다른 런타임 node 를 물고 있으면 — 시스템 node 로 repoint(영구 수정)**:
+```bash
+SYS_NODE="$HOME/.local/bin/node"; [ -x "$SYS_NODE" ] || SYS_NODE="$(command -v node)"
+cp "$PLIST" "$PLIST.bak"               # 백업 먼저
+/usr/bin/sed -i '' "s#<string>[^<]*/bin/node</string>#<string>$SYS_NODE</string>#" "$PLIST"
+launchctl bootout "gui/$(id -u)/$(basename "$PLIST" .plist)" 2>/dev/null
+launchctl bootstrap "gui/$(id -u)" "$PLIST"
+openclaw gateway status                # RUNNING 확인
+```
+
+**④ 런타임 은퇴/삭제 순서 — 지우기 전에 의존성 먼저 확인**:
+```bash
+# hermes 등 런타임을 지우기 전, 다른 도구 plist 가 그 node 를 참조하는지 검사 → 걸리면 ③ 먼저
+grep -rl '\.hermes/node' "$HOME"/Library/LaunchAgents/*.plist 2>/dev/null
+```
+> 한 런타임의 번들 node 에 다른 런타임 daemon 이 의존하면, 은퇴 한 번이 연쇄로 다른 팀원을 깨뜨린다. 항상 시스템 node 로 격리해 두면 어느 런타임을 지워도 나머지가 안전하다.
+
 b3os preflight가 보는 조건:
 - `openclaw` 바이너리가 PATH 또는 일반 설치 경로에 있음
 - `python3` 사용 가능
