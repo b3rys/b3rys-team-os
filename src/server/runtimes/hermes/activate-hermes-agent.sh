@@ -12,7 +12,7 @@ set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 
 AGENT_ID="${AGENT_ID:?AGENT_ID 필요 (예: myagent)}"
-DISPLAY="${DISPLAY:-${AGENT_ID^^}}"
+DISPLAY="${DISPLAY:-$(echo "$AGENT_ID" | tr '[:lower:]' '[:upper:]')}"   # ${var^^}는 bash 4+ 전용 → macOS 기본 bash 3.2 호환 위해 tr 사용
 KO="${KO:-$AGENT_ID}"                     # 한글 멘션 별칭 (예: 별칭)
 DESC="${DESC:-b3rys 팀원 ($AGENT_ID)}"
 WS="${WS:-$HOME/Development/$AGENT_ID}"
