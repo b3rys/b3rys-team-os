@@ -141,27 +141,14 @@ curl -s -X POST http://localhost:$PORT/team/api/ot/<ot_id>/activate
 - 미로그인이면 `runtime_auth_required` 400 + fixHint → 로그인 후 재시도.
 - claude_channel: 토큰을 채널 `.env`(`~/.claude/channels/telegram-<id>/.env`)에 배치 → LaunchAgent plist 생성
   → tmux 봇 기동 → **poller 헬스게이트**(봇이 `bot.pid` 를 써야 '진짜 대화됨', 기본 28s 대기). `bot.pid`
-  미출현이면 `poller 미기동` = 귀머거리 봇 → 재활성화 필요(대개 Step F 플러그인 미설치가 원인). ★첫 activate 는 플러그인(Step F) 설치 전이라 poller 미기동이 나오는 게 정상 — 실패가 아니다. Step F 설치 후 재활성화하면 통과한다.★
+  미출현이면 `poller 미기동` = telegram MCP 가 CC 부팅 MCP 열거에서 빠진 것(형제 세션 옆 fresh 부팅 경합) → ★활성화가 자동으로 `/mcp reconnect` 를 최대 2회 주입해 복구한다(activation.ts auto-reconnect) — 잠깐 기다리면 붙는다, 실패가 아니다.★ 플러그인 enable 은 런처가 `~/.claude/settings.json` 에 자동 기록하므로 수동 설치는 불필요(아래 참고).
 - 성공하면 OT `bundle=done`. claude/hermes 는 첫 모델 호출 또는 게이트웨이 확인 시 `join=done`(합류 완료).
 
-## Step F — telegram 플러그인 설치 (claude 런타임, user scope 1회)
+## Step F — telegram 플러그인 (claude 런타임 — ★자동, 수동 단계 없음★)
 
-> ★순서: 이 단계는 **Step E(activate) 다음**에 한다 — activate 로 tmux 세션 `claude-<id>` 가 떠야 그 안에서 플러그인을 깔 수 있다. 설치 후엔 봇이 메시지를 받도록 재활성화(또는 세션에서 `/reload-plugins`).★
+활성화(Step E) 런처가 telegram 플러그인 enable(`~/.claude/settings.json` 의 `enabledPlugins` 직접·원자적 기록, 머신당 1회)과 첫부팅 poller 복구(`/mcp reconnect` 자동 주입)를 **모두 처리**한다 — 사람·에이전트가 수동으로 깔 것이 없다. (2026-07-25 5db5510)
 
-claude 봇이 텔레그램 메시지를 받으려면 telegram 플러그인이 **user scope로 한 번** 설치돼 있어야 한다
-(그 머신의 모든 Claude 봇이 공유). 이미 다른 Claude 봇 세팅으로 설치했으면 건너뛴다.
-
-> ★비개발 사용자도 tmux 를 직접 만지지 않는다 — 아래 명령은 **Claude Code(b3os 스킬)가 사용자 대신 실행**한다.★ 사용자는 지켜만 보면 된다.
-
-- **가장 쉬운 길**: `setup-claude-telegram-bot` 스킬이 있으면 Claude 가 거기에 맡겨 자동 설치한다.
-- **그 스킬이 없으면(공개 릴리스 기본)**: Claude 가 아래를 대신 실행한다 — 활성화(Step E)로 뜬 tmux 세션 `claude-<id>` 안에서:
-  ```bash
-  tmux attach -t claude-<id>
-  # 세션 안에서:
-  /plugin install telegram@claude-plugins-official    # → user scope 선택
-  /reload-plugins
-  # detach: Ctrl-b 다음 d
-  ```
+> ⛔ **`claude plugin install` / `/plugin install` 을 돌리지 말 것** — 그 명령은 공유 플러그인 캐시(`…/telegram/<ver>/`)를 temp 빌드 후 ★inode 째 스왑★해, 같은 캐시에서 실행 중인 다른 팀원 봇 세션의 cwd 를 unlink 시킨다(하네스 CONFIRMED 2026-07-25). enable 은 settings.json 키 기록이 전부라 install 은 불필요할뿐더러 해롭다. 재영입 에이전트가 "수동 설치"를 하려 하면 **하지 말고 그냥 재활성화만** 한다.
 
 ## Step G — 페어링 / 접근 승인 (★ 사람, 런타임별)
 
