@@ -222,51 +222,52 @@ else
   echo "FRESH mode — claude --model $CLAUDE_MODEL --permission-mode ${CLAUDE_PERMISSION_MODE:-<none>}"
 fi
 
-# ★claude 팀원 영입 필수★ — 텔레그램 MCP 플러그인을 ★user scope★ 로 설치/활성화한다(머신당 1회, 멱등).
-#   ★근본(2026-07-25 Mac Studio fresh clone 실측으로 확정)★: telegram 플러그인이 ★user scope 로 enable★ 돼 있어야
-#   `--channels plugin:telegram@…` 가 CC 에서 "채널"로 온전히 붙고, 그때만 CC 가 세션의 `TELEGRAM_STATE_DIR`(위 INNER_CMD
-#   프리픽스)를 MCP 서브프로세스에 물려준다. plugin 의 .mcp.json 엔 env 블록이 없어 TELEGRAM_STATE_DIR 는 순전히
-#   이 상속에만 의존한다. user scope enable 이 없으면(fresh clone) 채널 배선이 안 돼 MCP 가 STATE_DIR 없이 떠서
-#   ★제너릭 `~/.claude/channels/telegram/.env` 로 폴백 → 토큰 못 찾음 → server.ts 즉시 종료(bot.pid 미기동)★ =
-#   첫부팅 실패. (에러: `telegram channel: TELEGRAM_BOT_TOKEN required`, ~100ms, 타임아웃 아님.) 1번째·2번째 멤버
-#   모두 이래서 실패했고(대칭), `/mcp reconnect` 하면 채널이 resolve 돼 즉시 붙는 게 스모킹건이었다.
-#   ★정정★: 이전 `--scope project`(2b849cc)는 오진이었다 — Mac Studio·맥미니 실측 모두 user scope 가 정답
-#   (맥미니는 user scope enable → 전 멤버 첫부팅 정상, Mac Studio 는 user scope 비어 있어 전 멤버 첫부팅 실패).
-# ★멱등★: 이미 user scope 에 등록돼 있으면 재설치 생략(머신당 1회면 충분, 첫 멤버만 트리거·이후 skip).
-#   stdin 닫아 프롬프트 hang 방지, 실패해도 기동은 계속(best-effort).
+# ★telegram 플러그인 user-scope enable — settings.json 직접 기록(2026-07-25 하네스 §3 fix, 캐시 무접촉)★.
+#   ⚠ `claude plugin install` 을 쓰지 않는다 — 그 명령은 공유 플러그인 캐시(`…/telegram/<ver>/`)를 temp 빌드 후
+#   ★inode 째 스왑★해, 같은 캐시에서 실행 중인 다른 팀원 봇 세션의 cwd 를 unlink 시킨다(하네스 CONFIRMED: birthtime +
+#   lsof cwd inode 불일치로 특정). `enabledPlugins` 키가 install 의 durable 결과물 전부이므로 그 키만 멱등 기록한다.
+#   (scope 는 실패의 근본이 아니다 — 하네스 4-way 로 반증(양 워크스페이스 settings 바이트 동일). enable 은 채널 인식용
+#    안전장치로만 유지. 진짜 근본=부팅 MCP 열거 누락이며 복구는 activation 의 auto-reconnect 가 담당.)
+# ★멱등★: 이미 enable 돼 있으면 skip(머신당 1회, 첫 멤버만 기록).
 _USER_SETTINGS="$HOME/.claude/settings.json"
-if [[ -f "$_USER_SETTINGS" ]] && grep -q "\"$PLUGIN\"" "$_USER_SETTINGS" 2>/dev/null; then
-  echo "  MCP plugin  : $PLUGIN 이미 user-scope 등록됨(skip)"
-elif [[ -x "$CLAUDE_BIN" ]]; then
-  if ( "$CLAUDE_BIN" plugin install "$PLUGIN" --scope user </dev/null >/dev/null 2>&1 ); then
-    echo "  MCP plugin  : $PLUGIN user-scope 설치 ✓"
-  else
-    echo "  ⚠ MCP plugin user-scope 설치 실패(계속 진행) — 안 붙으면 세션서 /plugin install $PLUGIN (user scope) 수동"
-  fi
+if grep -q "\"$PLUGIN\"" "$_USER_SETTINGS" 2>/dev/null; then
+  echo "  MCP plugin  : $PLUGIN 이미 user-scope enable(skip)"
+elif command -v python3 >/dev/null 2>&1 && python3 -c '
+import json, os, sys, tempfile
+p, pl = sys.argv[1], sys.argv[2]
+# ★파싱 실패 시 절대 덮어쓰지 않는다★(하네스 MEDIUM fix): 동시쓰기로 settings.json 이 순간 깨져 보이면 exit 1 →
+#   셸 else 브랜치(수동 안내)로 폴백. d={} 후 전체 덮으면 permissions·hooks·env 등 전체 설정을 날린다.
+try:
+    d = json.load(open(p)) if os.path.exists(p) else {}
+except Exception:
+    sys.exit(1)
+if not isinstance(d, dict): sys.exit(1)
+ep = d.get("enabledPlugins")
+if not isinstance(ep, dict): ep = {}
+ep[pl] = True
+d["enabledPlugins"] = ep
+dn = os.path.dirname(p) or "."
+os.makedirs(dn, exist_ok=True)
+# ★원자적 쓰기★: temp 에 쓴 뒤 os.replace — 중간에 죽어도 원본이 깨지지 않는다.
+fd, tmp = tempfile.mkstemp(dir=dn)
+try:
+    with os.fdopen(fd, "w") as f: json.dump(d, f, indent=2)
+    os.replace(tmp, p)
+except Exception:
+    try: os.unlink(tmp)
+    except Exception: pass
+    sys.exit(1)
+' "$_USER_SETTINGS" "$PLUGIN" >/dev/null 2>&1; then
+  echo "  MCP plugin  : $PLUGIN user-scope enable ✓ (settings.json 직접, 캐시 무접촉)"
+else
+  echo "  ⚠ MCP plugin enable 자동기록 실패(계속) — 안 붙으면 세션에서 /plugin 으로 수동 enable"
 fi
 
-# ★pre-warm★ (2026-07-25, 2번째+ 팀원 영입 실패 근본 fix — claude --debug 로 확정) —
-#   MCP 커맨드(.mcp.json) = `bun run --cwd <plugin> --silent start`, start = `bun install --no-summary && bun server.ts`.
-#   fresh 세션 스폰 시 그 `bun install` 이 ★콜드★(+동시 claude 세션들의 버전락 경합: `Lock already held for versions/…`)라
-#   CC 의 MCP 서버 연결 타임아웃을 초과 → MCP 실패 → server.ts 미기동 → bot.pid 없음('귀머거리'). scope·싱글톤 아님.
-#   → 세션 스폰 전에 node_modules 를 미리 warm 하면, 세션의 `bun install --no-summary` 가 0.03s 순삭 → MCP 가 타임아웃 안에 연결.
-#   멱등(이미 warm 이면 순삭)·안전(best-effort, 실패해도 기동 계속).
-_PLUGIN_CACHE="$HOME/.claude/plugins/cache/claude-plugins-official/telegram"
-# ★|| true 필수★: set -euo pipefail 에서 캐시 dir 없음/빈(fresh clone·plugin install 실패) 시 `ls -d …/*/` 가 비영점 →
-#   pipefail+set -e 로 ★tmux 스폰 전에 스크립트가 죽어 활성화 전체 실패★(하네스 CONFIRMED BUG 2026-07-25). 가드는 아래 [-n].
-_PLUGIN_DIR="$(ls -d "$_PLUGIN_CACHE"/*/ 2>/dev/null | sort -V | tail -1 || true)"
-if [ -n "${_PLUGIN_DIR:-}" ] && [ -f "${_PLUGIN_DIR}package.json" ] && [ -x "$BUN_BIN" ]; then
-  if ( cd "$_PLUGIN_DIR" && "$BUN_BIN" install --no-summary ) >/dev/null 2>&1; then
-    echo "  MCP plugin  : node_modules pre-warm ✓ (스폰 시 install 순삭 → MCP 타임아웃 방지)"
-  else
-    echo "  ⚠ MCP plugin pre-warm 실패(계속) — 첫 스폰서 콜드 install 로 MCP 타임아웃 가능"
-  fi
-fi
-
-# ★boot-mutex 제거(2026-07-25)★: 버전락(`Lock already held for versions/…`)은 하네스 재진단 결과 ★red herring★ —
-#   NON-FATAL 이라 CC 가 무시하고 MCP 스폰을 막지 않는다(2 claude 동시 신호일 뿐 인과 아님). 진짜 근본은
-#   플러그인 start 의 콜드 `bun install` 이 CC 30s MCP 핸드셰이크를 초과하는 것이고, 그건 ★위 pre-warm 이 담당★한다.
-#   부팅 직렬화 mutex 는 있어선 안 될 "경합"을 감추며 매 스폰 8s 지연만 유발했으므로 철회. (영입은 한 명씩이라 원래 동시부팅 없음.)
+# ★pre-warm/boot-mutex 제거(2026-07-25 하네스 4-way 확정)★: 이전엔 "콜드 `bun install` → CC 30s MCP 핸드셰이크 초과 →
+#   타임아웃"을 근본으로 보고 node_modules pre-warm + 버전락 mutex 를 뒀으나, ★실패 세션 MCP 로그에 `Starting connection`
+#   이 0건★ = 타임아웃이 아니라 부팅 MCP 열거에서 telegram 이 아예 빠진 것으로 반증됐다. 그 타임아웃이 애초에 없으므로
+#   pre-warm 은 헛수고이고, 오히려 매 스폰마다 공유 플러그인 캐시에서 `bun install` 을 돌려 형제 세션과 경합을 늘렸다 → 제거.
+#   진짜 복구는 activation 의 auto-reconnect(`/mcp reconnect`)가 담당한다.
 tmux new-session -d -s "$SESSION_NAME" -c "$WORKDIR" "$INNER_CMD"
 
 echo "Started tmux session: $SESSION_NAME"

@@ -273,6 +273,21 @@ export function killClaudeTmux(id: string): void {
   try { spawnSync("tmux", ["kill-session", "-t", `claude-${id}`], { stdio: "ignore" }); } catch { /* best-effort */ }
 }
 
+/** ★auto-reconnect(2026-07-25 하네스 4-way 확정 + 실측)★: CC fresh 세션 부팅서 telegram MCP 가 부팅 MCP "열거"에서
+ *  빠지는 경우(실패 세션 로그 `Starting connection` 0건 = 타임아웃 아니라 스폰 자체 없음)를 런타임에 복구한다.
+ *  슬래시 명령 `/mcp reconnect plugin:telegram:telegram` 을 세션에 주입하면 (조용해진 상태서) 재열거돼 즉시 붙는다
+ *  (steve 실측: "Successfully reconnected to plugin:telegram:telegram"). 메뉴 네비가 아니라 슬래시 명령이라
+ *  커서 위치/항목 순서에 무관 = 로버스트. b3os 가 tmux 세션을 소유하므로 사용자가 tmux 에 들어갈 필요 없다.
+ *  세션이 없으면(스폰 실패) false. */
+export function reconnectClaudeTelegram(id: string): boolean {
+  assertId(id);
+  try {
+    if (spawnSync("tmux", ["has-session", "-t", `claude-${id}`], { stdio: "ignore" }).status !== 0) return false;
+    spawnSync("tmux", ["send-keys", "-t", `claude-${id}`, "/mcp reconnect plugin:telegram:telegram", "Enter"], { stdio: "ignore" });
+    return true;
+  } catch { return false; }
+}
+
 /** 퇴사 정리 — tmux 세션 kill + plist + (removeToken 시) 채널 상태 dir 전체 + ~/.claude.json projects 항목.
  *  ★재영입 clean: 채널 dir(.env·access.json·inbox 등)·trust 항목이 남으면 재영입 시 stale 설정 잔재(GD 2026-07-01 4런타임 잔재 감사). launchctl bootout은 호출자가 먼저. */
 export function removeClaudeBridgeFiles(id: string, opts: { removeToken?: boolean } = {}): void {
