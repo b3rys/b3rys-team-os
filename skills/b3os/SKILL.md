@@ -133,19 +133,33 @@ bun run service uninstall   # 되돌리기(등록 해제)
 
 ## 🛑 긴급 ALL-STOP (에이전트 폭주·이상 시)
 
-에이전트가 폭주하거나(대량 메시지·외부 API 무한호출·통제 불능) 이상이면, **전부 즉시 중지**하고 이 스킬/CLI로 복구한다. 긴급 시 **Claude Code + `team-os`/`/b3os` 가 최후의 통제 지점** — 봇·런타임이 다 죽어도 CLI·스킬로 되살린다.
+에이전트가 폭주하거나(대량 메시지·외부 API 무한호출·통제 불능) 이상이면, **전부 즉시 중지**하고 복구한다. 긴급 시 **Claude Code + 대시보드/API 가 최후의 통제 지점** — 봇·런타임이 다 죽어도 서버가 살아 있으면 되살릴 수 있다.
 
-**정지 (셋 중 하나 · 같은 메커니즘)**:
-- **CLI(권장)**: `team-os emergency-stop` (별칭 `allstop`·`panic`)
-- **대시보드 team op 메뉴**: All-Stop (준비 중)
-- **개별**: 대시보드 멤버 Settings → 정지(서킷브레이커)
+**① 유입 차단 (가장 빠름 · 재시작 불필요)** — 라우터를 끄면 팀원이 새 메시지를 **받지 못한다**:
+```bash
+curl -s -X PATCH http://localhost:7878/team/api/system-op \
+  -H 'content-type: application/json' -d '{"router_enabled":false}'
+```
+UI: Settings ▸ 시스템 OP 라우터 토글.
 
-**emergency-stop 이 하는 일**: ① `router_enabled=false` (team.db 직접 설정 — 서버가 폭주해도 동작하는 ingress 킬스위치) ② claude 봇 poller/tmux 정지 ③ openclaw·hermes 게이트웨이 정지. → 에이전트가 새 메시지를 **못 받고 못 보냄**. collab 서버(대시보드·API)는 유지 = 복구 surface (`--server` 로 서버까지 정지).
+**② 전원 정지**:
+```bash
+curl -s -X POST http://localhost:7878/team/api/members/stop-all
+```
+UI: 대시보드 빨강 **All-Stop** 버튼(더블 컨펌).
+→ 각 팀원의 세션/poller 를 내린다. **복구 코디 역할(coordinator) 팀원은 자동 제외**된다 — 복구 창구를 남기기 위해서다(정말 끄려면 그 팀원만 개별 정지).
+→ b3os 서버(대시보드·API)는 유지된다 = 복구 surface.
+
+**③ 개별 정지**: 대시보드 팀원 Settings ▸ 정지(서킷브레이커), 또는
+`POST /team/api/members/<id>/enabled` 본문 `{"enabled":false}`.
+
+> 위 정지·재시작 API 는 **실행 인가**(`APPROVAL_EXECUTION_ENABLED=1`)가 켜져 있어야 동작한다. 꺼져 있으면 "팀장 인가 필요" 를 돌려준다.
 
 **복구**:
-- `team-os resume` — router 재개 + `team-os up all`(런타임 기동).
-- 또는 Claude Code에서 이 스킬로 상태 진단(`team-os status`·`doctor`) 후 선별 기동.
-- 폭주 원인이 특정 멤버면 그 멤버만 Settings에서 정지 유지 + 나머지 `resume`.
+- 라우터 다시 ON: 위 PATCH 를 `{"router_enabled":true}` 로.
+- 팀원 기동: 대시보드에서 개별 기동, 또는 `POST /team/api/members/restart-all`.
+- 폭주 원인이 특정 팀원이면 **그 팀원만 정지 유지** + 나머지 기동.
+- 상태 확인은 `references/b3os-ops-primer.md` §9(상태 확인)·인수테스트를 쓴다.
 
 ## [0] 설치 위치 안내 + 확인
 
