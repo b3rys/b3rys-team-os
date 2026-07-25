@@ -138,6 +138,10 @@ export function syncDmOnce(
   let scanned = 0;
   const byMember: Record<string, number> = {};
   if (!dmCaptureEnabled(db)) return { inserted, scanned, byMember }; // 설정에서 껐음
+  // ★팀원 0명(새 설치)이면 캡처할 DM 자체가 없다★ — 아래 owner 미설정 경고까지 가면 새 사용자가
+  //   보는 첫 기동 로그에 경고가 찍혀 "설치가 깨졌나"로 읽힌다(2026-07-25 공개 클린설치 리허설).
+  //   members 가 비면 owner 가 있어도 루프가 아무 일도 안 하므로 조용히 빠지는 게 동작상 동일하다.
+  if (members.length === 0) return { inserted, scanned, byMember };
   const owner = ownerChatId(db);
   if (!owner) {
     if (!warnedNoOwner) {

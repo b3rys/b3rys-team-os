@@ -99,6 +99,36 @@ Tasks 칸반 사용.
   return { app, db, dir, root, membersRoot, novaWs };
 }
 
+/** 방금 install.sh 를 돌린 새 사용자 상태 — 팀원 0명 · 설정 전무(팀 이름·팀장·capture·라우터 미설정). */
+function setupFreshInstall() {
+  const db = new Database(":memory:");
+  migrate(db);
+  const dir = mkdtempSync(join(tmpdir(), "acceptance-fresh-"));
+  const root = join(dir, "repo");
+  const membersRoot = join(dir, "members");
+  const rulesDir = join(root, "rules");
+  mkdirSync(rulesDir, { recursive: true });
+  const teamOsPath = join(rulesDir, "TEAM-OS.md");
+  const registryPath = join(root, "agents.json");
+  writeFileSync(
+    teamOsPath,
+    "# TEAM-OS\n\nowner 판정은 @멘션 우선.\n\nBWF 정의.\n\nTasks 칸반 사용.\n",
+    "utf-8",
+  );
+  writeFileSync(registryPath, "[]\n", "utf-8");
+
+  const app = createAcceptanceRoutes({
+    db,
+    registryPath,
+    teamOsPath,
+    rootDir: root,
+    membersRoot,
+    // 새 설치엔 launchd 등록이 없다(수동 실행).
+    teamOsSnapshot: () => ({ scheduled: [] }),
+  });
+  return { app, db, dir, root, membersRoot };
+}
+
 function insertScheduledJob(db: Database, id: string, status: "failed" | "cancelled", enabled: 0 | 1) {
   db.prepare(
     `INSERT INTO scheduled_job
@@ -368,6 +398,38 @@ describe("acceptance-check routes", () => {
         status: "info",
         detail: "인자 없음 - OT 단계 스킵",
       });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ── 클린 설치 첫 경험: 정상 초기 상태를 fail 로 찍지 않는다 (2026-07-25 공개 리허설) ──
+  test("클린 설치(팀원 0명)는 fail 0 — '팀 이름 미설정'은 info + 다음 할 일 안내", async () => {
+    const { app, dir } = setupFreshInstall();
+    try {
+      const body = (await (await app.request("/acceptance-check")).json()) as any;
+      expect(body.summary.fail).toBe(0);
+      expect(body.ok).toBe(true);
+      const settings = body.sections.find((section: any) => section.key === "settings");
+      expect(settings.checks[0]).toEqual({
+        label: "팀 이름",
+        status: "info",
+        detail: "미설정 — 새 설치의 정상 상태(팀원 0명)",
+        fix: "다음 할 일: Settings 에서 팀 이름을 정하고 첫 팀원을 영입하세요.",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("팀이 구성된 뒤(팀원 존재) 팀 이름이 비면 그건 진짜 누락 — fail 유지", async () => {
+    const { app, db, dir } = setup();
+    try {
+      db.query("DELETE FROM setting WHERE key = 'team_name'").run();
+      const body = (await (await app.request("/acceptance-check")).json()) as any;
+      const settings = body.sections.find((section: any) => section.key === "settings");
+      expect(settings.checks).toContainEqual({ label: "팀 이름", status: "fail", detail: "미설정" });
+      expect(body.ok).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

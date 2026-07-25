@@ -106,13 +106,28 @@ function blockerCategory(line: string, internalIdRe: RegExp | null): string {
   return "blocker";
 }
 
-function settingsStep(db: Database): AcceptanceStep {
+function settingsStep(db: Database, freshInstall: boolean): AcceptanceStep {
   const items: AcceptanceItem[] = [];
   const teamName = getSetting(db, "team_name");
   const ownerName = getSetting(db, "owner_name");
   const systemOp = captureConfigStatus(db);
 
-  items.push(teamName ? item("pass", "팀 이름", teamName) : item("fail", "팀 이름", "미설정"));
+  // ★새 설치(팀원 0명)의 '팀 이름 미설정'은 결함이 아니라 정상 출발점★ — 방금 install.sh 를 돌린
+  //   사람은 당연히 팀 이름을 안 정했다. 이걸 fail 로 찍으면 첫 인수체크가 빨간불로 떠서 "설치가
+  //   잘못됐나"로 읽힌다(2026-07-25 공개 클린설치 리허설). → 초기 상태는 info + 다음 할 일 안내로,
+  //   팀이 구성된 뒤(팀원 1명 이상)에도 비어 있으면 그건 진짜 누락이라 fail 유지.
+  items.push(
+    teamName
+      ? item("pass", "팀 이름", teamName)
+      : freshInstall
+        ? item(
+            "info",
+            "팀 이름",
+            "미설정 — 새 설치의 정상 상태(팀원 0명)",
+            "다음 할 일: Settings 에서 팀 이름을 정하고 첫 팀원을 영입하세요.",
+          )
+        : item("fail", "팀 이름", "미설정"),
+  );
   items.push(ownerName ? item("pass", "팀장 이름", ownerName) : item("info", "팀장 이름", "미설정({{OWNER}} 유지)"));
   // ★capture 봇·라우터는 그룹(팀방) 협업 전용 = 선택★ — 1:1 DM 영입엔 불필요하다.
   //   fail 로 두면 정상적인 1:1 영입도 무조건 "검증 실패"로 떠서 사용자가 막힌 걸로 오해한다
@@ -398,7 +413,7 @@ export function runAcceptanceCheck(deps: AcceptanceDeps, member: string | null):
   const membersRoot = deps.membersRoot ?? defaultMembersRoot();
   const agents = loadAgents(deps.registryPath);
   const sections = [
-    settingsStep(deps.db),
+    settingsStep(deps.db, agents.length === 0),
     coreRulesStep(deps.teamOsPath),
     onboardingStep(member, agents, membersRoot),
     portabilityStep(rootDir, membersRoot, member, buildInternalIdRe(deps.db)),

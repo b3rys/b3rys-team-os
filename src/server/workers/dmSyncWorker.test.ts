@@ -6,7 +6,7 @@
 //      그래서 설정값(owner_chat_id)을 읽고, 없으면 ★캡처를 아예 하지 않는다★(무동작이 오동작보다 낫다).
 //   ② DM 적재는 팀원 세션 기록을 읽는 기능이라 ★끌 수 있어야★ 한다(dm_capture=off).
 //      끄면 적재만 멈추고 버스·위임·발신은 그대로여야 한다 — dm_message 는 크리티컬이 아니다.
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -124,6 +124,18 @@ describe("dmSyncWorker 게이트", () => {
     const ws = workspaceWithOneDm(OWNER);
     const db = freshDb({ owner_chat_id: OWNER });
     expect(syncDmOnce(db, member(ws)).inserted).toBe(1);
+  });
+
+  // ── 클린 설치 첫 기동: 팀원 0명이면 캡처 대상이 없으니 경고도 찍지 않는다 (2026-07-25 공개 리허설) ──
+  test("팀원 0명(새 설치) → 조용히 0건, owner 미설정 경고 없음", () => {
+    const db = freshDb({}); // owner_chat_id 미설정 = 방금 설치한 상태
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(syncDmOnce(db, []).inserted).toBe(0);
+      expect(warn.mock.calls.flat().join("\n")).not.toContain("팀장 chat_id");
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("한 멤버 파서 실패를 격리하고 health+audit에 남긴다", () => {
