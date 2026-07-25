@@ -12,13 +12,24 @@
 #   - best-effort teardown. 한 팀원/한 단계가 실패해도 전체를 멈추지 않는다(set -e 미사용).
 #   - $HOME 기준 상대경로만. 특정 사용자(/Users/xxx) 하드코딩 없음 — 어느 Mac 에서나 동작.
 #   - macOS 중심(launchctl). launchctl/tmux 가 없으면 해당 단계는 건너뛴다(크래시 없음).
-#   - ★ 안전: 확인 프롬프트 + base hermes 프로필(b3ryshermes) 보존 가드 + "알려진 경로만 삭제".
+#   - ★ 안전: 확인 프롬프트 + 설정된 base hermes 프로필 보존 가드 + "알려진 경로만 삭제".
 #     빈/루트일 수 있는 변수는 절대 rm -rf 하지 않는다.
 set -uo pipefail   # ★ -e 는 쓰지 않는다 — best-effort teardown 은 개별 실패를 넘어가야 한다.
 
 # ── 자기 위치 = repo 루트(BASH_SOURCE 기준, symlink 안전) ─────────────
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 cd "$SELF"
+
+# 공유 Hermes 인증 원본 프로필. 환경변수 우선, 없으면 .env의 해당 키만 읽고, 공개 기본값 b3os.
+HERMES_BASE_PROFILE="${HERMES_BASE_PROFILE:-}"
+if [ -z "${HERMES_BASE_PROFILE// }" ] && [ -f "$SELF/.env" ]; then
+  HERMES_BASE_PROFILE="$(grep -E '^[[:space:]]*HERMES_BASE_PROFILE=' "$SELF/.env" 2>/dev/null | tail -1 | cut -d= -f2- | sed -e 's/^["'\'' ]*//' -e 's/["'\'' ]*$//')"
+fi
+HERMES_BASE_PROFILE="${HERMES_BASE_PROFILE:-b3os}"
+if ! printf '%s' "$HERMES_BASE_PROFILE" | grep -Eq '^[A-Za-z0-9_-]+$'; then
+  echo "❌ HERMES_BASE_PROFILE은 안전한 프로필 slug여야 합니다: 영문/숫자/_/-" >&2
+  exit 1
+fi
 
 # ── 출력 헬퍼(install.sh 톤: green=say / yellow=warn) ─────────────────
 say()  { printf "\033[32m%s\033[0m\n" "$1"; }  # green
@@ -159,7 +170,7 @@ echo "    • 팀원 전원 오프보드 — tmux 종료 · LaunchAgent 해제 �
 echo "        claude  → ~/.claude/channels/telegram-<id> · $PREFIX.claude-telegram-<id> plist"
 echo "        openclaw→ ~/.openclaw/agents/<id> · ~/.openclaw/credentials/telegram-<id>-token.txt(+allowFrom)"
 echo "        hermes  → ~/.hermes/profiles/<프로필> · ai.hermes.gateway-<프로필> plist · credential 토큰"
-echo "                  ★ base 프로필 'b3ryshermes' 는 절대 삭제하지 않음(공유 auth 소스)"
+echo "                  ★ base 프로필 '$HERMES_BASE_PROFILE' 는 절대 삭제하지 않음(공유 auth 소스)"
 echo "    • 서버 정지 + LaunchAgent 해제 ($PREFIX.team-collab · $PREFIX.team-os-boot)"
 if [ "$KEEP_DATA" = 1 ]; then
   warn "    • 데이터 삭제는 건너뜁니다 (--keep-data): team.db · .env · var/ · team-media · slack-tokens${B3RYS_HOME_VAL:+ · B3RYS_HOME} 보존"
@@ -240,15 +251,15 @@ else
           ;;
         hermes_agent)
           _prof="${prof:-$id}"
-          if [ "$_prof" = "b3ryshermes" ]; then
+          if [ "$_prof" = "$HERMES_BASE_PROFILE" ]; then
             # ★★ CRITICAL 가드 — base 프로필은 모든 hermes 멤버의 공유 auth.json 소스 + clone 원본.
             #   삭제하면 hermes 런타임 전멸(auth dangling). 프로필 dir·게이트웨이·plist 를 절대 건드리지 않는다.
-            warn "    ★ base hermes 프로필 'b3ryshermes' 보존 — 게이트웨이/프로필/plist 삭제하지 않음(공유 auth 소스)."
+            warn "    ★ base hermes 프로필 '$HERMES_BASE_PROFILE' 보존 — 게이트웨이/프로필/plist 삭제하지 않음(공유 auth 소스)."
           else
             launchd_stop "ai.hermes.gateway-$_prof"
             rmf  "$HOME/Library/LaunchAgents/ai.hermes.gateway-$_prof.plist"
             # 프로필 dir 은 슬러그 가드된 프로필명 + base 제외 확인 후에만 삭제.
-            if valid_id "$_prof" && [ "$_prof" != "b3ryshermes" ]; then
+            if valid_id "$_prof" && [ "$_prof" != "$HERMES_BASE_PROFILE" ]; then
               rmrf "$HOME/.hermes/profiles/$_prof"
             fi
             # per-id credential 토큰(멤버 봇 토큰) 정리 — 공유 auth 아님(라이브 코드와 동일, non-base 만).

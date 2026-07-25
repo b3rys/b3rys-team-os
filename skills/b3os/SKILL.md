@@ -426,7 +426,7 @@ b3os는 팀 스킬 인덱스(`docs/B3OS_SKILLS.md`)에 등록된 **팀 스킬**�
 
 - **claude 팀원 여러 명** — 한 머신의 Claude 로그인 **하나를 공유**한다(각자 봇 토큰만 다름). telegram 플러그인은 user-scope 1회면 끝.
 - **openclaw 팀원** — 공유 게이트웨이. 새 에이전트마다 페어링(pair-approve) 필요.
-- **hermes 팀원** — 프로필별 게이트웨이. base 프로필(`b3ryshermes`)은 auth 소스라 퇴사/삭제 대상이 아님.
+- **hermes 팀원** — 프로필별 게이트웨이. base 프로필(`HERMES_BASE_PROFILE`, 기본 `b3os`)은 auth 소스라 퇴사/삭제 대상이 아님.
 
 > 다만 **추가 영입도 첫 팀원이 이어받는 게 이상적**이다(§7 handoff). 이 스킬은 "첫 팀원까지"가 기본 임무이고,
 > [8]은 사용자가 스킬에게 계속 맡기고 싶을 때의 편의 경로다.
@@ -538,7 +538,7 @@ cd "$B3OS" && bash uninstall.sh          # 확인 프롬프트 → 팀원 전원
 #   bash uninstall.sh --keep-data        # 오프보드+정지만, team.db/.env/데이터 보존
 ```
 마지막에 스크립트가 안내하는 `rm -rf "$B3OS"` 로 repo 폴더까지 지우면 끝.
-(uninstall.sh는 base hermes 프로필 `b3ryshermes`는 보존하고, 알려진 경로만 안전하게 지운다.)
+(uninstall.sh는 설정된 base hermes 프로필(`HERMES_BASE_PROFILE`, 기본 `b3os`)을 보존하고, 알려진 경로만 안전하게 지운다.)
 
 ## 참고 파일
 

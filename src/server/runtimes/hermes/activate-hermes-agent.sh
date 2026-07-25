@@ -18,18 +18,21 @@ DESC="${DESC:-b3rys 팀원 ($AGENT_ID)}"
 WS="${WS:-$HOME/Development/$AGENT_ID}"
 TOKEN_FILE="${TOKEN_FILE:-$HOME/.hermes/credentials/$AGENT_ID-token.txt}"
 PROF_DIR="$HOME/.hermes/profiles/$AGENT_ID"
+HERMES_BASE_PROFILE="${HERMES_BASE_PROFILE:-b3os}"
 say(){ printf "\033[32m%s\033[0m\n" "$1"; }
 
+[ -n "$HERMES_BASE_PROFILE" ] && [[ "$HERMES_BASE_PROFILE" =~ ^[a-zA-Z0-9_-]+$ ]] \
+  || { echo "❌ HERMES_BASE_PROFILE은 안전한 프로필 slug여야 합니다: 영문/숫자/_/-"; exit 1; }
 [ -s "$TOKEN_FILE" ] || { echo "❌ 봇 토큰 없음: $TOKEN_FILE (BotFather 토큰 먼저 저장)"; exit 1; }
 
 # 복제 원본(SRC_PROFILE) 결정 — activation.ts 는 SRC_PROFILE 를 주입하지 않으므로(AGENT_ID+WS 뿐),
-#   env 명시가 없으면 auth 보유 프로필을 동적 탐지한다. 특정 이름(b3ryshermes) 하드요구를 없애 →
+#   env 명시가 없으면 설정된 base 프로필을 먼저 보고, 이어 auth 보유 프로필을 동적 탐지한다.
 #   공개 사용자가 자기 이름 프로필(예: myhermes)만 인증돼 있어도 영입 가능(openclaw 스크립트의 동적 auth-소스 탐지와 동일 패턴).
-#   우선순위: ① env SRC_PROFILE 명시 → ② b3ryshermes(라이브 base, 있으면 먼저) → ③ auth.json 보유하는 첫 프로필(타겟 제외).
+#   우선순위: ① env SRC_PROFILE 명시 → ② HERMES_BASE_PROFILE(있으면 먼저) → ③ auth.json 보유하는 첫 프로필(타겟 제외).
 #   auth.json = 응답 생성 인증(공유 원본). 없으면 '메시지는 받지만 응답 못 하는' 死봇이 되므로 이를 가진 프로필만 원본으로 인정.
 if [ -z "${SRC_PROFILE:-}" ]; then
   SRC_PROFILE=""
-  for cand in "$HOME/.hermes/profiles/b3ryshermes" "$HOME"/.hermes/profiles/*; do
+  for cand in "$HOME/.hermes/profiles/$HERMES_BASE_PROFILE" "$HOME"/.hermes/profiles/*; do
     [ -d "$cand" ] || continue
     pname="$(basename "$cand")"
     [ "$pname" = "$AGENT_ID" ] && continue        # 타겟 자신은 원본이 될 수 없음
@@ -45,7 +48,7 @@ fi
 #   공개 hermes 사용자가 정상 인증하고도 전원 막히던 원인. 프로필이 없고 글로벌 auth 만 있으면,
 #   그 글로벌 auth 로 base 프로필을 자동 시드해 clone 원본으로 삼는다(preflight 가 인정한 것을 activate 도 인정).
 if [ -z "${SRC_PROFILE:-}" ] && [ -f "$HOME/.hermes/auth.json" ]; then
-  BASE_PROFILE="b3ryshermes"
+  BASE_PROFILE="$HERMES_BASE_PROFILE"
   [ "$BASE_PROFILE" = "$AGENT_ID" ] && BASE_PROFILE="b3os-base"   # 타겟명과 충돌 방지(희박)
   say "■ 인증 프로필 없음 + 글로벌 auth 존재 → base 프로필 '$BASE_PROFILE' 자동 시드(글로벌 ~/.hermes/auth.json)"
   if [ ! -d "$HOME/.hermes/profiles/$BASE_PROFILE" ]; then
@@ -75,7 +78,7 @@ if [ -d "$PROF_DIR" ] && { [ -f "$PROF_DIR/config.yaml" ] || [ -f "$PROF_DIR/pro
 else
   # 불완전 프로필 잔재(config.yaml·profile.yaml 둘 다 없음 = 이전 퇴사가 덜 정리한 half-state) 감지 시 제거 후 재클론.
   #   안 그러면 clone 건너뛰어 설정 없는 채로 진행→게이트웨이 못 뜸(2026-07-01 실측). 슬러그 가드+고정 prefix로 안전.
-  if [ -d "$PROF_DIR" ] && [[ "$AGENT_ID" =~ ^[a-z0-9_-]+$ ]] && [ "$AGENT_ID" != "b3ryshermes" ] && [ "$AGENT_ID" != "$SRC_PROFILE" ]; then
+  if [ -d "$PROF_DIR" ] && [[ "$AGENT_ID" =~ ^[a-z0-9_-]+$ ]] && [ "$AGENT_ID" != "$HERMES_BASE_PROFILE" ] && [ "$AGENT_ID" != "$SRC_PROFILE" ]; then
     echo "  ⚠ 불완전 프로필 잔재($PROF_DIR, config.yaml·profile.yaml 둘 다 없음) — 제거 후 재클론"
     rm -rf "$PROF_DIR"
   fi
@@ -469,14 +472,14 @@ export OWNER_CHAT_ID
 if [ -n "$OWNER_CHAT_ID" ]; then say "  팀장 chat_id 확보 — 게이트웨이 allowlist 에 시드(페어링 게이트 통과)"; else echo "  ⚠ owner_chat_id 미확보 — 게이트웨이 allowlist 시드 skip(팀장이 봇에 수동 pairing 필요)"; fi
 # durability(2026-07-01): seed 프로필($SRC_PROFILE) plist 템플릿에서 프로필명만 치환해 프로필별 LaunchAgent 생성+bootstrap.
 #   unmanaged `hermes gateway start`는 재부팅·크래시 시 사라져 restart/auto-heal 대상 밖 → LaunchAgent(RunAtLoad/KeepAlive)로 관리.
-#   템플릿은 seed 프로필의 plist 사용(라이브=b3ryshermes); 없으면 아래 unmanaged 폴백.
+#   템플릿은 seed 프로필의 plist 사용; 없으면 아래 unmanaged 폴백.
 HTMPL="$HOME/Library/LaunchAgents/ai.hermes.gateway-$SRC_PROFILE.plist"
 HPLIST="$HOME/Library/LaunchAgents/ai.hermes.gateway-$AGENT_ID.plist"
 GENERIC_PLIST="$HOME/Library/LaunchAgents/ai.hermes.gateway.plist"
 mkdir -p "$HOME/.hermes/profiles/$AGENT_ID/logs"
 # ★seed 전용 plist 폴백(자동시드 base 대응, OWNER 2026-07-19 맥북테스트)★ — 현대 hermes(v0.18+)의
 #   `hermes gateway install` 은 프로필별 plist 를 만들지 않고 generic ai.hermes.gateway.plist 하나만 만든다.
-#   그래서 자동시드된 base 프로필(b3ryshermes)엔 전용 plist(ai.hermes.gateway-b3ryshermes.plist)가 없어
+#   그래서 자동시드된 base 프로필엔 전용 plist가 없어
 #   아래 per-profile 복제가 unmanaged 폴백으로 빠지고, 그 폴백의 `hermes gateway start` 는 generic(=default
 #   프로필) 게이트웨이만 띄워 'herm 프로필 게이트웨이 안 뜸' 으로 실패했다(preflight/base 시드는 통과한 뒤 여기서 막힘).
 #   → seed 전용 plist 가 없으면 generic 을 복제 템플릿으로 삼는다(generic 도 없으면 install 로 만든 뒤).

@@ -68,7 +68,7 @@ flowchart TB
   subgraph Runtimes["에이전트 런타임"]
     Claude["Claude Channel<br/>tmux 세션 + poller"]
     OpenClaw["OpenClaw 게이트웨이<br/>:18789 세션 wake"]
-    Hermes["Hermes 게이트웨이/프로필<br/>b3ryshermes"]
+    Hermes["Hermes 게이트웨이/프로필<br/>HERMES_BASE_PROFILE"]
   end
 
   TG --> Capture

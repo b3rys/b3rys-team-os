@@ -180,7 +180,7 @@ describe("런타임 저장소 경로 매핑", () => {
       id: "hermes",
       runtime: "hermes_agent",
       workspacePath: "/unused",
-      hermesProfile: "b3ryshermes",
+      hermesProfile: "legacy-base",
       hermesStateDbPath: hermesDb,
     }]);
 
@@ -216,7 +216,7 @@ describe("런타임 저장소 경로 매핑", () => {
       id: "hermes",
       runtime: "hermes_agent",
       workspacePath: "/unused",
-      hermesProfile: "b3ryshermes",
+      hermesProfile: "legacy-base",
       hermesStateDbPath: hermesDb,
     }]);
 

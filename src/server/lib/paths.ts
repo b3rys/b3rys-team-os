@@ -23,6 +23,9 @@ export const LOCAL_BIN = `${HOME}/.local/bin`;
 /** hermes 런타임 홈(~/.hermes) — 프로필 .env / credentials 위치. */
 export const HERMES_ROOT = `${HOME}/.hermes`;
 
+/** 공유 Hermes 인증 원본 프로필. 공개 기본값은 중립적인 b3os이며 운영 환경에서 env로 재정의한다. */
+export const HERMES_BASE_PROFILE = process.env.HERMES_BASE_PROFILE?.trim() || "b3os";
+
 /** openclaw 런타임 홈(~/.openclaw) — openclaw.env / credentials 위치. */
 export const OPENCLAW_ROOT = `${HOME}/.openclaw`;
 

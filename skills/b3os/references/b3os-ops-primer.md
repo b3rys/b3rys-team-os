@@ -74,7 +74,7 @@ curl -s -X POST http://localhost:7878/team/api/members/<id>/swap-runtime \
 
 1. **검증(read-only)** — 대상 존재·no-op(같은 런타임)·공개 런타임(`claude_channel`/`openclaw`/
    `hermes_agent`) 우선. 오타·미지원 문자열은 여기서 즉시 400 `invalid_runtime`)·base hermes 프로필
-   (`b3ryshermes`) 가드·`APPROVAL_EXECUTION_ENABLED`(활성화 스위치) 확인. **여기서 막히면 아무것도 안 바뀐다**
+   (`HERMES_BASE_PROFILE`, 기본 `b3os`) 가드·`APPROVAL_EXECUTION_ENABLED`(활성화 스위치) 확인. **여기서 막히면 아무것도 안 바뀐다**
    (가장 안전한 실패).
 2. **preflight** — `checkRuntimeAuth(target_runtime)`. 미설치/미인증이면 여기서 중단 — 구 런타임은 아직
    살아 있어 다운타임 0. `error/code="preflight_blocked"`, `detail`에 조치법(fixHint)이 그대로 온다.
@@ -107,7 +107,7 @@ curl -s -X POST http://localhost:7878/team/api/members/<id>/swap-runtime \
   워크스페이스 밖에 있고 Claude 런타임에서만 주입된다. `claude_channel`에서 다른 런타임으로 바꾸면 파일은
   디스크에 남지만 다음 세션에 주입되지 않는다 — 교체 전 경고. 역방향(→`claude_channel`)으로 복귀하면 같은
   워크스페이스 경로 기준으로 다시 주입될 수 있다.
-- **base hermes 프로필(`b3ryshermes`)은 교체 대상 아님** — 모든 hermes 멤버의 공유 auth 소스라 어느 방향이든
+- **base hermes 프로필(`HERMES_BASE_PROFILE`, 기본 `b3os`)은 교체 대상 아님** — 모든 hermes 멤버의 공유 auth 소스라 어느 방향이든
   거부된다(`code:"base_hermes_guard"`).
 - **`APPROVAL_EXECUTION_ENABLED`가 꺼져 있으면 아예 시작 안 함** — `code:"execution_off"`. 팀장 인가(터미널
   y/n 또는 `/approve`) 후에만 켜져 있다.
@@ -122,7 +122,7 @@ curl -s -X POST http://localhost:7878/team/api/members/<id>/swap-runtime \
 curl -s -X DELETE http://localhost:7878/team/api/members/<id> \
   -H 'content-type: application/json' -d '{"confirm_name":"Alex"}'
 ```
-- 마지막 1명은 못 지운다(`cannot_remove_last_member`). base hermes 프로필(`b3ryshermes`)은 퇴사 대상 아님(auth 소스).
+- 마지막 1명은 못 지운다(`cannot_remove_last_member`). 설정된 base hermes 프로필은 퇴사 대상 아님(auth 소스).
 - 퇴사 = 봇·tmux/게이트웨이·슬랙 완전 disconnect + workspace는 삭제가 아니라 `.archived/<id>-<ts>`로 보관.
 - **UI**: Settings ▸ 팀원 목록에서 퇴사(이름 정확 입력 확인).
 
@@ -161,7 +161,7 @@ UI: Settings ▸ 시스템 OP 라우터 토글. 영구 고정은 `.env` `ROUTER_
 cd "$HOME/b3rys-team-os" && bash uninstall.sh     # 팀원 전원 오프보드 → 서버 정지 → 데이터 삭제
 #   --yes(확인 생략) · --keep-data(오프보드+정지만, team.db/.env 보존)
 ```
-스크립트가 안내하는 `rm -rf` 로 repo 폴더까지 지우면 끝. base hermes 프로필(`b3ryshermes`)은 보존된다.
+스크립트가 안내하는 `rm -rf` 로 repo 폴더까지 지우면 끝. 설정된 base hermes 프로필은 보존된다.
 
 ## 8. 어디까지가 사람(팀장) 몫인가
 
