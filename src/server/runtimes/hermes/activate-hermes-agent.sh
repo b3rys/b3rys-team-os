@@ -245,13 +245,17 @@ _hh="${HERMES_HOME:-$HOME/.hermes}"
 _hermes_py_cands="$_hermes_py_cands $_hh/hermes-agent/venv/bin/python3 $_hh/hermes-agent/venv/bin/python"
 if [ -n "$_hermes_bin" ]; then
   # ② 래퍼가 exec 하는 venv 경로에서 역산(위 실측 케이스)
-  _exec_target="$(sed -n 's/^[[:space:]]*exec[[:space:]]*"\([^"]*\)".*/\1/p' "$_hermes_bin" 2>/dev/null | head -1)"
+  # ★|| true 필수★ — set -euo pipefail 하에서 sed 가 비정상 종료하면(로케일 켜진 셸 + 바이너리
+  #   hermes = "illegal byte sequence", 또는 실행권한만 있고 읽기 불가) 그 상태가 대입문으로 전파돼
+  #   활성화가 ★여기서 조용히 죽는다★. 2>/dev/null 이라 에러도 안 남고, 프로필·토큰·config 는 이미
+  #   만들어졌는데 팀 등록·게이트웨이 기동은 안 된 반쪽 상태로 끝난다. (2026-07-25 하네스 실측)
+  _exec_target="$(sed -n 's/^[[:space:]]*exec[[:space:]]*"\([^"]*\)".*/\1/p' "$_hermes_bin" 2>/dev/null | head -1 || true)"
   [ -n "$_exec_target" ] && _hermes_py_cands="$_hermes_py_cands $(dirname "$_exec_target")/python3 $(dirname "$_exec_target")/python"
   # ③ hermes 자체가 venv bin 의 심링크/실행파일인 경우
   _real="$(realpath "$_hermes_bin" 2>/dev/null || readlink -f "$_hermes_bin" 2>/dev/null || echo "$_hermes_bin")"
   _hermes_py_cands="$_hermes_py_cands $(dirname "$_real")/python3 $(dirname "$_real")/python"
   # ④ shebang 이 진짜 python 인 설치
-  _sb="$(head -1 "$_hermes_bin" 2>/dev/null | sed 's/^#!//' | awk '{print $1}')"
+  _sb="$(head -1 "$_hermes_bin" 2>/dev/null | sed 's/^#!//' | awk '{print $1}' || true)"
   case "$_sb" in *python*) _hermes_py_cands="$_hermes_py_cands $_sb" ;; esac
 fi
 # ⑤ 최후 폴백 — hermes_cli 가 없으면 아래 블록이 보수적으로 skip 한다(종전과 동일 동작).
@@ -287,7 +291,15 @@ try:
 except Exception as e:
     print(f"  ⚠ config 로드 실패({e}) — 명시 model skip(활성화는 계속)"); sys.exit(0)
 m = cfg.get("model")
-cur = bool(m) and (m if isinstance(m, str) else (m.get("default") or m.get("model") or m.get("name")))
+# ★str·dict 이외(리스트·정수 등)는 '설정 안 됨'으로 본다★ — 종전엔 m.get() 을 그대로 불러
+#   AttributeError 트레이스백이 났다(셸 || 가 흡수해 활성화는 계속됐지만 로그가 지저분).
+if isinstance(m, str):
+    cur = m.strip() or False
+elif isinstance(m, dict):
+    cur = m.get("default") or m.get("model") or m.get("name") or False
+else:
+    cur = False
+known = None  # provider 의 라이브 모델 목록(호환성 검사에서 채워짐). 아래 dm 검증에 재사용.
 # ★active_provider 를 먼저 판정한다 — 아래 호환성 검사에 필요(종전엔 has 체크 뒤에 있었다).
 prov = None
 for ap in (os.path.join(prof, "auth.json"), os.path.expanduser("~/.hermes/auth.json")):
@@ -337,11 +349,39 @@ except Exception as e:
     print(f"  ⚠ 기본모델 조회 실패({e}) — 명시 model skip(활성화는 계속)"); sys.exit(0)
 if not dm:
     print(f"  ⚠ provider={prov} 기본모델 없음 — 명시 model skip(활성화는 계속)"); sys.exit(0)
-cfg["model"] = {"provider": prov, "default": dm}
+# ★자기가 써넣는 값이 호환성 검사를 통과하는지 확인한다★
+#   판정은 provider_model_ids(라이브 목록), 쓰기는 get_default_model_for_provider(정적 카탈로그)라
+#   출처가 다르다. 정적 기본모델이 그 계정의 라이브 목록에 없으면 '호환 불가 → 교체'를 매 활성화마다
+#   무한 반복하고 교체 결과도 여전히 호환 불가다. 목록을 아는 경우에만 교차확인한다.
+if known and dm not in known:
+    print(f"  ⚠ provider 기본모델({dm})이 실제 목록에 없음 — 목록 첫 항목({known[0]})으로 대체")
+    dm = known[0]
+# ★model 매핑을 통째로 갈지 않는다★ — 종전엔 {provider, default} 로 치환해서 형제 키
+#   (api_key·base_url·reasoning_effort·context_length 등 hermes 가 실제로 읽는 값)가 전량 소실됐다.
+#   복사 후 두 키만 갱신하고, 중복 표기인 별칭(model·name)만 정리한다.
+m2 = dict(m) if isinstance(m, dict) else {}
+m2["provider"] = prov
+m2["default"] = dm
+m2.pop("model", None)
+m2.pop("name", None)
+cfg["model"] = m2
+# ★쓰기 전 백업★ — safe_load→safe_dump 전체 재직렬화라 주석·YAML 앵커는 보존할 수 없다.
+#   값은 보존되지만 주석이 사라지므로, 되돌릴 자산을 남긴다(best-effort).
 try:
-    yaml.safe_dump(cfg, open(cfgp, "w"), allow_unicode=True, sort_keys=False, default_flow_style=False)
+    import shutil
+    shutil.copy2(cfgp, cfgp + ".bak")
+except Exception:
+    pass
+# ★원자적 쓰기★ — open(w) 는 먼저 truncate 하므로 쓰기 중 오류가 나면 config 가 잘린 채 남는다.
+try:
+    tmpp = cfgp + ".tmp"
+    with open(tmpp, "w") as fh:
+        yaml.safe_dump(cfg, fh, allow_unicode=True, sort_keys=False, default_flow_style=False)
+    os.replace(tmpp, cfgp)
     print(f"  ✓ 명시 model 설정: provider={prov}, default={dm} ({os.path.basename(cfgp)})")
 except Exception as e:
+    try: os.unlink(cfgp + ".tmp")
+    except Exception: pass
     print(f"  ⚠ config 쓰기 실패({e}) — 활성화는 계속")
 PY
 
