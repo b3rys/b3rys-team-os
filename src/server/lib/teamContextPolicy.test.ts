@@ -1,13 +1,12 @@
-// full_context 는 ★agents.json 의 capabilities 가 정본★ (GD 2026-07-12: "full context 는
-//   agents.json 설정을 따라야 함. bill, codex 로 박혀있으면 고쳐야 됨").
+// full_context 는 ★agents.json 의 capabilities 가 정본★ — 특정 멤버 id 가 아니다.
 //
 // ★이 테스트가 환경을 타면 안 되는 이유★
 //   agents.json 은 각 머신 고유 로스터라 .gitignore 대상이다 — ★clone 한 사람에겐 없다.★
 //   예전 이 파일은 (a) 실제 로스터가 있다고 전제하고 `ambientAgents().length > 0` 을 단언했고
-//   (b) 아래 테스트는 codex/bill 이 full_context 를 가진다고 ★멤버 이름을 하드코딩★ 했다
+//   (b) 아래 테스트는 특정 멤버 id 두 개가 full_context 를 가진다고 ★이름을 하드코딩★ 했다
 //       — 바로 위 주석이 하지 말라고 적어둔 그것을.
 //   그래서 라이브 폴더에서만 통과하고 clone 에서는 100% 깨졌고, 운영이 로스터를 바꾸면
-//   ★코드가 아니라 테스트가★ 깨졌다(steve 에 full_context 부여 시 실패).
+//   ★코드가 아니라 테스트가★ 깨졌다(다른 멤버에게 full_context 를 주면 실패).
 //   → 실제 로스터에 의존하지 말고 ★픽스처 로스터를 주입★해서 "capabilities 를 따르는가" 만 본다.
 //
 //   (registry 는 레지스트리 경로를 ★호출 시점★에 읽는다 — 모듈 로드 시점 const 였을 땐
