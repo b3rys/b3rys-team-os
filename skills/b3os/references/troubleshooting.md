@@ -45,11 +45,16 @@ claude 순서:
    ```bash
    ls ~/.claude/channels/telegram-<id>/bot.pid   # 있으면 poller 폴링 중(= 진짜 대화됨)
    ```
-   죽어 있으면(bot.pid 없음) — 대부분 **MCP(텔레그램 플러그인) 스폰 실패**다. 근본: 플러그인 start(`bun install --no-summary && bun server.ts`)의
-   ★콜드 install + 동시 claude 세션들의 CC 버전락 경합★(`Lock already held for versions/…`)이 MCP 연결 타임아웃을 초과한 것(2번째+ 영입·전체 리스타트에서 발생). server.ts·토큰·scope 는 정상(warm 상태로 수동 실행하면 폴링됨).
-   ★복구 = 세션 죽이지 말고 MCP reconnect★: `tmux attach -t claude-<id>` → `/mcp` → `telegram` → **Reconnect**. warm 이라 즉시 Reconnected + bot.pid 생성.
-   ★재활성화(activate 다시)는 지양★ — kill+respawn 이 콜드 부팅을 재유발하고 버전락 경합을 오히려 늘려 같은 실패를 반복한다. reconnect 로 안 되는 경우에만 최후수단으로 재활성화.
-   ※ 예방(2026-07-25 fix): activate 는 플러그인 node_modules 를 **pre-warm**(install 순삭)하고, **전체 리스타트는 claude 세션을 stagger 로 하나씩** 부팅해 버전락 경합을 피한다(`TEAMOS_RESTART_STAGGER_MS`). 버전락은 "부팅 순간"만의 문제 — running 세션엔 무관.
+   죽어 있으면(bot.pid 없음) — 대부분 **MCP(텔레그램 플러그인) 스폰 타임아웃**이다. ★진짜 근본(2026-07-25 하네스 재진단)★:
+   플러그인 start = `bun install --no-summary && bun server.ts`. **fresh clone 은 node_modules 가 콜드**라 그 `bun install` 이 네트워크
+   fetch 로 느려 → **CC 의 30초 MCP 핸드셰이크 안에 못 끝냄 → server.ts 가 아예 실행 안 됨**(bot.pid 는 server.ts 맨 첫줄에서 쓰므로,
+   bot.pid 없음 = server.ts 미실행 = install 단계에서 멈춤). warm 이면 전체 ~100ms(실측). ★`Lock already held for versions/…` 는 NON-FATAL
+   red herring — MCP 스폰을 막지 않는다(claude 2개 동시라는 상관신호일 뿐 인과 아님). 여기 꽂히지 말 것.★
+   ★예방(진짜 fix) = pre-warm★: activate 가 세션 스폰 전에 플러그인 node_modules 를 미리 `bun install` 해둔다(start-telegram-channel.sh) →
+   세션의 install 이 0.03s 순삭 → 핸드셰이크 통과. 영입은 한 명씩이라 순차면 1번째가 캐시를 데워 2번째는 warm. (CC/플러그인 auto-update 로
+   캐시가 콜드 재빌드되면 다시 느려질 수 있으니, 업데이트 후 첫 영입 전 캐시를 한 번 warm 하면 좋다.)
+   ★복구(이미 실패한 봇)★: `tmux attach -t claude-<id>` → `/mcp` → `telegram` → **Reconnect**. warm install(0.03s)이라 즉시 Reconnected + bot.pid.
+   (재활성화도 warm 이면 되지만 reconnect 가 더 가볍다.)
 
 ## 2) 팀원 활성화(영입)가 실패해요
 

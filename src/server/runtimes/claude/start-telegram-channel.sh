@@ -259,33 +259,11 @@ if [ -n "${_PLUGIN_DIR:-}" ] && [ -f "${_PLUGIN_DIR}package.json" ] && [ -x "$BU
   fi
 fi
 
-# ★claude 부팅 직렬화 mutex★ (2026-07-25, 버전락 경합 근본 fix — recruit·restart 공통 스폰 경로):
-#   claude 는 "부팅 순간" CC 버전락(`versions/<v>`)을 잡는다. 여러 claude 가 동시에 부팅하면 경합
-#   (`Lock already held for versions/…`) → CC 의 MCP 연결 타임아웃 초과 → poller 미기동('귀머거리',
-#   2번째+ 영입·전체 리스타트 근본). 이 스크립트는 recruit(LaunchAgent)·restart 공통 경로라 여기서 전역 mutex 로
-#   "한 번에 하나만 부팅"하게 직렬화한다. pre-warm 은 콜드 install 을, 이 mutex 는 버전락 경합을 각각 담당(둘 다 필요).
-#   스폰 후 버전락 창(초 단위)만큼 잡았다 놓는다. running 세션엔 무관 — 부팅 순간만. CLAUDE_BOOT_LOCK_HOLD_SEC=0 이면 끔.
-#   (버전락 파일을 직접 폴링하는 게 이상적이나 경로가 CC 내부라, 부팅 초반 창을 커버하는 고정 hold 로 근사. auto-update 시엔 더 필요할 수 있음.)
-_BOOT_LOCK="$HOME/.claude/.b3os-claude-boot.lock"
-_HOLD_SEC="${CLAUDE_BOOT_LOCK_HOLD_SEC:-8}"
-_HAVE_BOOT_LOCK=0
-if [ "$_HOLD_SEC" != "0" ]; then
-  mkdir -p "$HOME/.claude" 2>/dev/null || true
-  _n=0
-  while [ "$_n" -lt 160 ]; do   # 최대 ~80s 대기(다른 claude 부팅 중이면 순서 기다림) — 이후엔 락 없이 진행(무한대기 방지)
-    if mkdir "$_BOOT_LOCK" 2>/dev/null; then _HAVE_BOOT_LOCK=1; break; fi
-    if [ -n "$(find "$_BOOT_LOCK" -maxdepth 0 -mmin +3 2>/dev/null)" ]; then rmdir "$_BOOT_LOCK" 2>/dev/null || true; fi  # stale(3분+) 탈취
-    _n=$((_n + 1)); sleep 0.5
-  done
-fi
-
+# ★boot-mutex 제거(2026-07-25)★: 버전락(`Lock already held for versions/…`)은 하네스 재진단 결과 ★red herring★ —
+#   NON-FATAL 이라 CC 가 무시하고 MCP 스폰을 막지 않는다(2 claude 동시 신호일 뿐 인과 아님). 진짜 근본은
+#   플러그인 start 의 콜드 `bun install` 이 CC 30s MCP 핸드셰이크를 초과하는 것이고, 그건 ★위 pre-warm 이 담당★한다.
+#   부팅 직렬화 mutex 는 있어선 안 될 "경합"을 감추며 매 스폰 8s 지연만 유발했으므로 철회. (영입은 한 명씩이라 원래 동시부팅 없음.)
 tmux new-session -d -s "$SESSION_NAME" -c "$WORKDIR" "$INNER_CMD"
-
-# 스폰한 세션이 버전락 phase(부팅 초반)를 지나갈 시간만큼 mutex 유지 후 해제 → 다음 claude 부팅과 안 겹침.
-if [ "$_HAVE_BOOT_LOCK" = "1" ]; then
-  sleep "$_HOLD_SEC"
-  rmdir "$_BOOT_LOCK" 2>/dev/null || true
-fi
 
 echo "Started tmux session: $SESSION_NAME"
 echo "  State dir   : $STATE_DIR"
