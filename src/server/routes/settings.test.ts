@@ -876,7 +876,14 @@ describe("영입 OT / 능력 카탈로그", () => {
     expect(joinStep.detail).toContain("거의 완료 — 마지막 한 단계");
     expect(joinStep.detail).toMatch(/@[a-z0-9_]+에게/i); // 봇 username 이 찍히고 조사 앞에 공백이 없다
     expect(joinStep.detail).not.toContain("<bot_username>");
-    expect(joinStep.detail).not.toContain(" 에게");
+    // ★조사 앞 공백 검사는 사용자에게 나가는 문자열 ★전부★ 에 건다★ — joinStep.detail 만 보면
+    //   pairing_hint 가 ' 에게' 인 채로 남는다(Bill 지적: 절반만 고쳐졌다).
+    for (const text of [joinStep.detail, body.pairing_hint]) {
+      expect(text).not.toContain(" 에게");
+      expect(text).not.toContain(" 에서");
+      expect(text).not.toContain("DM 을");
+    }
+    expect(body.pairing_hint).toMatch(/@[a-z0-9_]+에게/i);
   });
 
   test("activate: 중앙 팀원 상한 가드 실패를 409로 전달", async () => {

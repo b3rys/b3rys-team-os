@@ -1692,7 +1692,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       //   다른 조합에서 재현된다. 그래서 ①확정 차단(구독/한도) ②첫 모델호출 실패 ③페어링 대기 순으로 본다.
       //   페어링은 감추지 않고 ★병기★ 한다 — 둘 다 사실이고, 둘 다 해야 끝난다.
       const pairingNote = result.needsPairing
-        ? ` (첫 연결 페어링도 남아 있습니다: Telegram 에서 ${botMention}에게 DM 을 한 번 보내주세요.)`
+        ? ` (첫 연결 페어링도 남아 있습니다: Telegram에서 ${botMention}에게 DM을 한 번 보내주세요.)`
         : "";
       const firstCallFailed = firstCall != null && !firstCall.ok;
       if (firstCall?.subscriptionNeeded) {
@@ -1703,7 +1703,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
         //   없어 DM 페어링 1회가 필요하다(두 번째 멤버부터는 첫 멤버 것을 시드받아 자동 통과). 재시도로는
         //   안 풀리는 상태라 '재시도 필요' 로 안내하면 사용자를 헛돌게 만든다.
         jn.state = "pending";
-        jn.detail = `거의 완료 — 마지막 한 단계: Telegram 에서 ${botMention}에게 DM 을 한 번 보내주세요(첫 연결 페어링). 승인하면 바로 연결됩니다. 다음 팀원부터는 이 단계가 없습니다.`;
+        jn.detail = `거의 완료 — 마지막 한 단계: Telegram에서 ${botMention}에게 DM을 한 번 보내주세요(첫 연결 페어링). 승인하면 바로 연결됩니다. 다음 팀원부터는 이 단계가 없습니다.`;
       } else if (result.ok && noPairingRuntime && (!firstCallRuntime || firstCall?.ok)) {
         const rtLabel = agent.runtime === "codex" ? "codex 브릿지" : agent.runtime === "claude_channel" ? "claude 봇" : "hermes 게이트웨이";
         jn.state = "done"; jn.detail = `활성화됨 (${rtLabel} 가동 + 첫 모델 호출 확인) — 합류. 이제 Telegram에서 ${botMention}에게 DM으로 인사해 보세요. 답이 오면 연동 성공입니다.`;
@@ -1722,7 +1722,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       subscription_needed: subscriptionNeeded,
       // 첫 claude 멤버 DM 페어링 대기 — 실패가 아니라 사람이 할 마지막 한 단계. hint 에 봇 username 을 실어 보낸다.
       needs_pairing: result.needsPairing === true,
-      ...(result.needsPairing ? { pairing_hint: `${botMention} 에게 Telegram DM 을 한 번 보내주세요(첫 연결 페어링). 다음 팀원부터는 이 단계가 없습니다.` } : {}),
+      ...(result.needsPairing ? { pairing_hint: `${botMention}에게 Telegram DM을 한 번 보내주세요(첫 연결 페어링). 다음 팀원부터는 이 단계가 없습니다.` } : {}),
       error: subscriptionNeeded ? "subscription_needed" : result.error,
       steps: result.steps,
       ot: { ot_id, member_id: row.member_id, stage, steps },

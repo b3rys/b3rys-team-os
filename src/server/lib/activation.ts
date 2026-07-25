@@ -201,12 +201,30 @@ export interface EssentialClassification {
   detail: string;
 }
 
+export interface EssentialTolerance {
+  tolerate?: string[];
+  tolerateWhenPairing?: string[];
+}
+
+/** ★claude_channel 활성화의 관용 정책 — 호출부와 테스트의 단일 출처★.
+ *  인라인 리터럴로 두면 ★호출부에서 옵션 하나만 지워도 어떤 테스트도 안 깨지는★ 갭이 생긴다
+ *  (Bill 교차검증 2026-07-25 M5a: tolerateWhenPairing 만 제거하면 essentials 가 하드실패로 돌아가
+ *   '필수설정 누락 — 재활성화 필요' 라는 원래 버그가 부활하는데 1631 테스트가 전부 통과했다).
+ *  판정부(classifyEssentials)만 고정하는 걸로는 부족하다 — ★그 함수를 어떤 옵션으로 부르는지★ 가
+ *  이 PR 의 계약이므로, 옵션 자체를 여기 한 곳에 두고 테스트가 이 상수를 통과시켜 검증한다.
+ *    · tolerate         : poller 미기동은 auto-reconnect 가 복구를 시도하므로 하드실패로 치지 않는다.
+ *    · tolerateWhenPairing: 첫 claude 멤버의 설계상 DM 페어링 대기일 때만 allowFrom 누락을 관용한다. */
+export const CLAUDE_ESSENTIAL_TOLERANCE: EssentialTolerance = {
+  tolerate: ["poller:"],
+  tolerateWhenPairing: ["allowFrom:"],
+};
+
 /** essentials 결과를 ★실패 / degraded / 페어링 대기★ 로 분류한다(순수 — 파일시스템·프로세스 접근 없음).
  *  pushEssentialStep 이 스텝을 push 하기 전에 쓰는 판정부를 분리한 것 = 활성화 전체를 돌리지 않고
  *  분류 규칙만 테스트로 고정할 수 있다(활성화는 tmux·launchd 를 건드려 유닛에서 못 돌린다). */
 export function classifyEssentials(
   essentials: EssentialCheckResult,
-  opts?: { tolerate?: string[]; tolerateWhenPairing?: string[] },
+  opts?: EssentialTolerance,
 ): EssentialClassification {
   const pendingPairing = essentials.pendingPairing === true;
   const tolerate = [...(opts?.tolerate ?? []), ...(pendingPairing ? opts?.tolerateWhenPairing ?? [] : [])];
@@ -236,7 +254,7 @@ export function classifyEssentials(
 async function pushEssentialStep(
   steps: ActivateResult["steps"],
   agent: { id: string; runtime: string; openclaw_agent_id?: string | null; hermes_profile?: string | null },
-  opts?: { tolerate?: string[]; tolerateWhenPairing?: string[] },
+  opts?: EssentialTolerance,
 ): Promise<{ ok: boolean; pendingPairing: boolean }> {
   const essentials = await checkEssentialSettings(agent as any);
   // ★degraded tolerate(2026-07-25 하네스 §4 fix)★: poller(bot.pid) 미기동은 poller 스텝이 이미 needs_reconnect 로
@@ -682,7 +700,7 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       //   ★tolerateWhenPairing(2026-07-25 맥스튜디오 실기)★: 첫 claude 멤버는 allowFrom 을 복사해올 참조봇이
       //   없어 access.json 이 pairing 대기로 시드된다 = 설계상 정상. 그걸 하드실패로 치면 봇이 살아 있는데도
       //   '활성화 실패 — 재시도 필요' 로 떠서, 재시도로는 절대 안 풀린다(해법은 봇에게 DM 1회).
-      const essentialsResult = await pushEssentialStep(steps, { id, runtime }, { tolerate: ["poller:"], tolerateWhenPairing: ["allowFrom:"] });
+      const essentialsResult = await pushEssentialStep(steps, { id, runtime }, CLAUDE_ESSENTIAL_TOLERANCE);
       if (!essentialsResult.ok) return { ok: false, steps, error: "claude 필수설정 누락 — 재활성화/설정 복구 필요" };
       pairingPending = essentialsResult.pendingPairing;
       // recall 주입(GD 2026-07-05): 활성화=새 claude 세션(맥락 빔)이니 --fresh 재시작과 동일하게 직전 대화 digest 주입.

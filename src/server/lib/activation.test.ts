@@ -20,7 +20,7 @@ import { buildPersona, buildAgentsMd } from "./personaTemplates";
 import {
   waitForClaudePoller, waitForCodexPoller, waitForHermesGateway,
   activateMember, teardownRuntime, swapRuntime, RUNTIMES, STATUS_BY_RUNTIME,
-  classifyEssentials,
+  classifyEssentials, CLAUDE_ESSENTIAL_TOLERANCE,
   type ActivateResult, type SwapDeps,
 } from "./activation";
 
@@ -722,5 +722,62 @@ describe("classifyEssentials — 페어링 대기 관용 경계", () => {
     );
     expect(v.ok).toBe(false);
     expect(v.pendingPairing).toBe(false);
+  });
+});
+
+// ── ★M5a 갭 차단★: 판정부만 고정하면 '그 함수를 어떤 옵션으로 부르는가' 는 무방비다 ──
+//
+// Bill 교차검증(2026-07-25): claude 호출부에서 tolerateWhenPairing 옵션 하나만 지우면
+//   essentials 가 하드실패로 돌아가 '필수설정 누락 — 재활성화/설정 복구 필요' 라는 ★이 PR 이 고친
+//   원래 버그가 그대로 부활★ 하는데도 1631개 테스트가 전부 통과했다. 순수함수(classifyEssentials)는
+//   잘 고정돼 있었지만 호출부 opts 는 인라인 리터럴이라 어떤 테스트도 보지 않았기 때문이다.
+//
+// 그래서 호출부 opts 를 공유 상수(CLAUDE_ESSENTIAL_TOLERANCE)로 빼고 ★그 상수를 통과시켜★ 검증한다.
+// 라우트 레벨로는 못 잡는다 — 라우트 테스트는 activateMember 를 주입 모킹해서 activation.ts 를 안 태운다.
+describe("CLAUDE_ESSENTIAL_TOLERANCE — claude 활성화 호출부의 관용 정책", () => {
+  const PAIRING_WAITING = {
+    ok: false,
+    missing: ["allowFrom:claude access.json"],
+    canAutoFix: true,
+    pendingPairing: true,
+  };
+
+  test("★호출부 옵션으로 페어링 대기가 관용된다★ (옵션이 빠지면 원래 버그가 부활한다)", () => {
+    const v = classifyEssentials(PAIRING_WAITING, CLAUDE_ESSENTIAL_TOLERANCE);
+    expect(v.ok).toBe(true);              // 실패로 떨어지면 '재활성화 필요' 안내가 되살아난다
+    expect(v.pendingPairing).toBe(true);
+    expect(v.detail).toContain("DM 페어링 대기");
+  });
+
+  test("호출부 옵션은 poller 미기동도 관용한다(auto-reconnect 복구 대상)", () => {
+    const v = classifyEssentials(
+      { ok: false, missing: ["poller:claude bot.pid"], canAutoFix: true },
+      CLAUDE_ESSENTIAL_TOLERANCE,
+    );
+    expect(v.ok).toBe(true);
+    expect(v.pendingPairing).toBe(false);
+  });
+
+  test("호출부 옵션이라도 토큰·채널 누락은 관용하지 않는다", () => {
+    for (const missing of ["token:claude .env TELEGRAM_BOT_TOKEN", "channel:claude LaunchAgent plist"]) {
+      const v = classifyEssentials(
+        { ...PAIRING_WAITING, missing: [missing, "allowFrom:claude access.json"] },
+        CLAUDE_ESSENTIAL_TOLERANCE,
+      );
+      expect(v.ok).toBe(false);
+      expect(v.pendingPairing).toBe(false);
+    }
+  });
+
+  // 위 세 건은 '상수의 내용' 을 고정한다. 이 건은 ★claude 분기가 실제로 그 상수를 쓰는지★ 를 고정한다 —
+  // 상수를 놔둔 채 호출부만 인라인 리터럴로 되돌리는 변형까지 막는 소스 레벨 가드.
+  test("claude 분기가 인라인 리터럴이 아니라 이 상수를 넘긴다(정적 가드)", () => {
+    const src = readFileSync(new URL("./activation.ts", import.meta.url), "utf-8");
+    const claudeCall = src.match(/pushEssentialStep\(steps, \{ id, runtime \}, ([^)]*)\)/g) ?? [];
+    // claude 분기 = 옵션을 넘기는 유일한 호출부. 그 인자가 반드시 공유 상수여야 한다.
+    const withOpts = claudeCall.filter((c) => !c.endsWith("{ id, runtime })"));
+    expect(withOpts.length).toBe(1);
+    expect(withOpts[0]).toContain("CLAUDE_ESSENTIAL_TOLERANCE");
+    expect(withOpts[0]).not.toContain("tolerateWhenPairing:"); // 인라인 리터럴 회귀 금지
   });
 });
