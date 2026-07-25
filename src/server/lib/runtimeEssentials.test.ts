@@ -139,7 +139,7 @@ describe("runtime essentials strategy registry", () => {
     // 소유자 allowlist 는 commands.ownerAllowFrom 에 저장된다.
     write(join(home, ".openclaw/openclaw.json"), JSON.stringify({
       channels: { telegram: { accounts: { [id]: { enabled: true, tokenFile } } } },
-      commands: { ownerAllowFrom: ["telegram:7066867819"] },
+      commands: { ownerAllowFrom: ["telegram:1234567890"] },
     }));
     const registry = createRuntimeEssentialsRegistry({ home, repoRoot: repo });
     const r = await checkEssentialSettings({ id, runtime: "openclaw" } as any, registry);
