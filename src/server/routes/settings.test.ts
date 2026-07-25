@@ -615,6 +615,24 @@ describe("영입 OT / 능력 카탈로그", () => {
     expect(body.message).toContain("먼저 팀명·팀장ID·팀장이름 세팅");
     expect(body.missing.owner_name).toBe(true);
   });
+
+  // ★'팀장ID' 가 뭔지 응답만 보고 알 수 있어야 한다★ (2026-07-25 맥스튜디오 실기).
+  //   전엔 placeholder 가 웹 UI 에만 있어서, API 응답만 본 사용자는 소스를 읽어야 알 수 있었다.
+  //   사용자가 코드를 읽어야 아는 건 결함이다 — 필드별 hint 를 응답에 싣는다.
+  test("setup_incomplete 응답에 필드별 hint — lead_id 는 형식 규칙 + 예시까지", async () => {
+    const { app } = setup();
+    const r = await app.request("/members/recruit", json({ id: "lui", display_name: "Lui", role: "fullstack", runtime: "openclaw" }));
+    const body = await r.json();
+    expect(Object.keys(body.hints).sort()).toEqual(["lead_id", "owner_name", "team_name"]);
+    expect(body.hints.lead_id).toContain("소문자/숫자/-/_, 1~40자");
+    expect(body.hints.lead_id).toContain("예: gd");
+    expect(body.hints.team_name).toContain("예:");
+    expect(body.hints.owner_name).toContain("예:");
+    // missing 인 필드에 대응하는 hint 가 반드시 있어야 한다(빠진 필드만 보고 hint 가 없으면 무용).
+    for (const [field, isMissing] of Object.entries(body.missing)) {
+      if (isMissing) expect(typeof body.hints[field]).toBe("string");
+    }
+  });
   test("capabilities 카탈로그", async () => {
     const { app } = setup();
     const caps = (await (await app.request("/capabilities")).json()) as any[];

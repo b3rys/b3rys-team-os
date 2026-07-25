@@ -187,4 +187,53 @@ describe("runtime essentials strategy registry", () => {
     expect(r.ok).toBe(true);
     expect(calls).toBe(3);
   });
+
+  // ── ★첫 claude 멤버의 DM 페어링 대기는 결함이 아니라 설계상 정상 경로★ (2026-07-25 맥스튜디오 실기) ──
+  //   allowFrom 은 '기존 claude 멤버의 것을 복사' 하는 방식이라 첫 멤버는 복사해올 데가 없다. 그래서
+  //   seedClaudeAccess 가 dmPolicy:"pairing" + allowFrom:[] 로 시드한다 = 사람이 DM 1회만 하면 끝난다.
+  //   이 상태와 ★진짜 설정 누락★(파일 부재·손상·다른 정책)을 구분하는 신호가 pendingPairing 이다.
+  describe("claude access.json — 페어링 대기 vs 진짜 누락", () => {
+    const claudeCase = async (access: string | null) => {
+      const { home, repo } = tmpRoot();
+      const id = "lisa";
+      const stateDir = join(home, ".claude/channels", `telegram-${id}`);
+      write(join(stateDir, ".env"), "TELEGRAM_BOT_TOKEN=123:abc\n");
+      if (access !== null) write(join(stateDir, "access.json"), access);
+      write(join(stateDir, "bot.pid"), "4242\n");
+      write(join(home, "Library/LaunchAgents", `com.${process.env.USER || "local"}.claude-telegram-${id}.plist`), "<plist />");
+      const registry = createRuntimeEssentialsRegistry({ home, repoRoot: repo, pidAlive: (pid) => pid === 4242 });
+      return await checkEssentialSettings({ id, runtime: "claude_channel" } as any, registry);
+    };
+
+    test("dmPolicy=pairing + allowFrom:[] → allowFrom 누락이되 pendingPairing (첫 멤버 정상 경로)", async () => {
+      const r = await claudeCase(JSON.stringify({ dmPolicy: "pairing", allowFrom: [], groups: {} }));
+      expect(r.ok).toBe(false);
+      expect(r.missing).toEqual(["allowFrom:claude access.json"]);
+      expect(r.pendingPairing).toBe(true);
+    });
+
+    test("access.json 부재 → 진짜 누락(pendingPairing 아님)", async () => {
+      const r = await claudeCase(null);
+      expect(r.missing).toContain("allowFrom:claude access.json");
+      expect(r.pendingPairing).toBe(false);
+    });
+
+    test("access.json 손상 → 진짜 누락(pendingPairing 아님)", async () => {
+      const r = await claudeCase('{"dmPolicy":"pairing", allowFrom');
+      expect(r.missing).toContain("allowFrom:claude access.json");
+      expect(r.pendingPairing).toBe(false);
+    });
+
+    test("dmPolicy=allowlist + allowFrom:[] → 페어링 대기 아님(승인 정책인데 비었다 = 진짜 문제)", async () => {
+      const r = await claudeCase(JSON.stringify({ dmPolicy: "allowlist", allowFrom: [] }));
+      expect(r.missing).toContain("allowFrom:claude access.json");
+      expect(r.pendingPairing).toBe(false);
+    });
+
+    test("allowFrom 승인 있음 → 누락 없음, pendingPairing 아님", async () => {
+      const r = await claudeCase(JSON.stringify({ dmPolicy: "allowlist", allowFrom: ["777"] }));
+      expect(r.ok).toBe(true);
+      expect(r.pendingPairing).toBe(false);
+    });
+  });
 });

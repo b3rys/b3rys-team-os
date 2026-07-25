@@ -111,6 +111,15 @@ function pickIcon(list: any[], requested: string): string {
 }
 const ID_RE = /^[a-z][a-z0-9_-]{1,31}$/;
 const LEAD_ID_RE = /^[a-z0-9_-]{1,40}$/;
+/** setup_incomplete 응답에 실어 보내는 필드별 안내 — ★단일 출처★.
+ *  lead_id 문구는 lead_id_invalid 검증 응답의 hint 와 같은 규칙을 쓴다(두 곳이 갈라지지 않게).
+ *  웹 UI placeholder 만 알고 API 응답은 모르던 갭을 닫는다(2026-07-25 맥스튜디오 실기). */
+const LEAD_ID_RULE = "소문자/숫자/-/_, 1~40자";
+const SETUP_FIELD_HINTS: Record<string, string> = {
+  team_name: "팀 이름 — 자유 텍스트, 예: b3rys",
+  lead_id: `팀장 ID — ${LEAD_ID_RULE}, 예: gd (팀장을 가리키는 짧은 식별자)`,
+  owner_name: "팀장 이름 — 팀원들이 부를 호칭, 예: GD",
+};
 const SLACK_USER_ID_RE = /^U[A-Z0-9]{8,}$/;
 const SLACK_APP_ID_RE = /^A[A-Z0-9]{8,}$/;
 const SLACK_BOT_TOKEN_RE = /^xoxb-[A-Za-z0-9-]+$/;
@@ -363,7 +372,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     }
     if (body.lead_id !== undefined) {
       if (typeof body.lead_id !== "string" || !LEAD_ID_RE.test(body.lead_id.trim()))
-        return c.json({ error: "lead_id_invalid", hint: "소문자/숫자/-/_, 1~40자" }, 400);
+        return c.json({ error: "lead_id_invalid", hint: LEAD_ID_RULE }, 400);
       const v = body.lead_id.trim();
       setSetting(db, "lead_id", v);
       out.lead_id = v;
@@ -1044,6 +1053,10 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
           lead_id: !getSetting(db, "lead_id")?.trim(),
           owner_name: !getSetting(db, "owner_name")?.trim(),
         },
+        // ★필드별 hint 를 응답에 실어 보낸다★ — 특히 '팀장ID' 는 이름만으로 뭘 넣는지 알 수 없다.
+        //   전엔 placeholder 가 웹 UI 에만 있어서, API 응답만 본 사용자는 ★소스를 읽어야★ 알 수 있었다
+        //   (2026-07-25 맥스튜디오 실기). 사용자가 코드를 읽어야 아는 건 결함이다.
+        hints: SETUP_FIELD_HINTS,
       }, 400);
     }
     const id = typeof body.id === "string" ? body.id.trim().toLowerCase() : "";
@@ -1548,6 +1561,17 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     } catch {
       return c.json({ error: "store_failed", hint: "토큰 저장에 실패했어요. 잠시 후 다시 시도해 주세요." }, 500);
     }
+    // ★getMe 로 검증된 봇 username 을 레지스트리에 영속화★ — 안내 문구가 '@<bot_username>' 같은
+    //   미치환 플레이스홀더로 나가지 않게 하는 단일 출처다(2026-07-25 실기: 사용자는 어느 봇에 DM 할지
+    //   알 수 없었다). 공개값이라 노출 안전(토큰은 파일로만). best-effort — 실패해도 영입은 계속.
+    try {
+      const list = readAgents();
+      const target = list.find((a: any) => a.id === row.member_id);
+      if (target && live.username && target.telegram_bot_username !== live.username) {
+        target.telegram_bot_username = live.username;
+        writeAgents(list);
+      }
+    } catch { /* best-effort — 안내 문구가 username 없이 나갈 뿐 */ }
     // 단계 진행: provision done, bundle done(자료 준비). join 은 런타임 기동 후 첫 ack 시.
     const steps = Array.isArray(parsed.steps) ? parsed.steps : initOtSteps();
     const pv = steps.find((s: any) => s.key === "provision"); if (pv) { pv.state = "done"; pv.detail = `봇 토큰 연결됨 (@${live.username})`; } // getMe로 검증된 실제 봇 username — 긍정 증거(공개값이라 노출 안전)
@@ -1644,6 +1668,9 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     const pf = steps.find((s: any) => s.key === "preflight"); if (pf) { pf.state = "done"; pf.detail = "런타임 인증 확인됨"; }
     const bd = steps.find((s: any) => s.key === "bundle");
     if (bd) { bd.state = result.ok ? "done" : "pending"; bd.detail = result.ok ? "런타임 활성화 + 팀지식 주입 완료" : "활성화 실패 — 재시도 필요"; }
+    // ★첫 claude 멤버 DM 페어링 안내(2026-07-25 맥스튜디오 실기)★ — 봇 username 은 provision 의 getMe 로
+    //   레지스트리에 저장돼 있다. 없으면 '봇' 으로만 안내한다(플레이스홀더를 그대로 내보내지 않는다).
+    const botMention = agent.telegram_bot_username ? `@${agent.telegram_bot_username}` : "봇";
     const jn = steps.find((s: any) => s.key === "join");
     if (jn) {
       // codex/claude/hermes 는 openclaw 같은 pairing 게이트가 없다 → preflight 인증 통과 + 봇/브릿지 기동 성공 =
@@ -1659,9 +1686,15 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
           detail: firstCall.subscriptionNeeded ? "subscription_needed: 구독/한도 확인 필요" : firstCall.detail,
         });
       }
-      if (result.ok && noPairingRuntime && (!firstCallRuntime || firstCall?.ok)) {
+      if (result.needsPairing && result.ok) {
+        // ★실패가 아니라 '거의 완료 — 마지막 한 단계'★. 첫 claude 멤버는 allowFrom 을 복사해올 참조봇이
+        //   없어 DM 페어링 1회가 필요하다(두 번째 멤버부터는 첫 멤버 것을 시드받아 자동 통과). 재시도로는
+        //   안 풀리는 상태라 '재시도 필요' 로 안내하면 사용자를 헛돌게 만든다.
+        jn.state = "pending";
+        jn.detail = `거의 완료 — 마지막 한 단계: Telegram 에서 ${botMention} 에게 DM 을 한 번 보내주세요(첫 연결 페어링). 승인하면 바로 연결됩니다. 다음 팀원부터는 이 단계가 없습니다.`;
+      } else if (result.ok && noPairingRuntime && (!firstCallRuntime || firstCall?.ok)) {
         const rtLabel = agent.runtime === "codex" ? "codex 브릿지" : agent.runtime === "claude_channel" ? "claude 봇" : "hermes 게이트웨이";
-        jn.state = "done"; jn.detail = `활성화됨 (${rtLabel} 가동 + 첫 모델 호출 확인) — 합류. 이제 Telegram에서 @<bot_username>에게 DM으로 인사해 보세요. 답이 오면 연동 성공입니다.`;
+        jn.state = "done"; jn.detail = `활성화됨 (${rtLabel} 가동 + 첫 모델 호출 확인) — 합류. 이제 Telegram에서 ${botMention} 에게 DM으로 인사해 보세요. 답이 오면 연동 성공입니다.`;
       } else if (firstCall?.subscriptionNeeded) {
         jn.state = "blocked";
         jn.detail = "subscription_needed: 구독 또는 사용 한도 때문에 첫 모델 호출이 실패했습니다. 결제/구독 상태를 확인한 뒤 다시 활성화하세요.";
@@ -1674,7 +1707,16 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     db.query("UPDATE ot SET steps_json = ?, stage = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(parsed), stage, ot_id);
     const subscriptionNeeded = steps.some((s: any) => s.key === "join" && s.state === "blocked" && /subscription_needed/i.test(String(s.detail ?? "")));
     appendAudit(db, "user", result.ok ? "ot_activated" : "ot_activate_failed", row.member_id, { ot_id, steps: result.steps.map((s) => ({ step: s.step, ok: s.ok })) });
-    return c.json({ ok: result.ok && !subscriptionNeeded, subscription_needed: subscriptionNeeded, error: subscriptionNeeded ? "subscription_needed" : result.error, steps: result.steps, ot: { ot_id, member_id: row.member_id, stage, steps } }, result.ok || subscriptionNeeded ? 200 : result.code === "member_limit" ? 409 : 502);
+    return c.json({
+      ok: result.ok && !subscriptionNeeded,
+      subscription_needed: subscriptionNeeded,
+      // 첫 claude 멤버 DM 페어링 대기 — 실패가 아니라 사람이 할 마지막 한 단계. hint 에 봇 username 을 실어 보낸다.
+      needs_pairing: result.needsPairing === true,
+      ...(result.needsPairing ? { pairing_hint: `${botMention} 에게 Telegram DM 을 한 번 보내주세요(첫 연결 페어링). 다음 팀원부터는 이 단계가 없습니다.` } : {}),
+      error: subscriptionNeeded ? "subscription_needed" : result.error,
+      steps: result.steps,
+      ot: { ot_id, member_id: row.member_id, stage, steps },
+    }, result.ok || subscriptionNeeded ? 200 : result.code === "member_limit" ? 409 : 502);
   });
 
   // ── preflight 재확인: GD가 터미널에서 codex login / claude 로그인한 직후 즉시 재점검 ──

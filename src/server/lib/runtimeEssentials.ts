@@ -8,6 +8,13 @@ export interface EssentialCheckResult {
   ok: boolean;
   missing: string[];
   canAutoFix: boolean;
+  /** ★설계상 예정된 '사람 1회 조작 대기' 상태★ — 결함이 아니다.
+   *  claude_channel 첫 멤버는 allowFrom 을 복사해올 참조봇이 없어 access.json 이
+   *  `dmPolicy:"pairing", allowFrom:[]` 로 시드된다(launcher.seedClaudeAccess). 남은 일은
+   *  팀장이 그 봇에게 DM 을 한 번 보내는 것뿐이므로, 활성화를 '실패' 로 표시해선 안 된다.
+   *  (2026-07-25 맥스튜디오 실기 클린테스트: 첫 멤버가 '활성화 실패 — 재시도 필요' 로 떴는데
+   *   DM 한 통으로 재시도 없이 통과했다. 두 번째 멤버는 첫 멤버 것을 시드받아 DM 없이 통과.) */
+  pendingPairing?: boolean;
 }
 
 export interface RuntimeEssentials {
@@ -69,6 +76,16 @@ function hasJsonArrayKey(path: string, key: string, deps: Required<Pick<RuntimeE
   if (!obj || typeof obj !== "object") return false;
   const value = (obj as Record<string, unknown>)[key];
   return Array.isArray(value) && value.length > 0;
+}
+
+/** claude access.json 이 ★첫 멤버 페어링 대기★ 상태인가 — 파일이 정상 존재하고 dmPolicy 가 "pairing"
+ *  이며 allowFrom 이 ★빈 배열★ 인 경우만. 파일 부재·손상·다른 정책은 진짜 설정 누락이라 false. */
+function isClaudePairingPending(path: string, deps: Required<Pick<RuntimeEssentialDeps, "exists" | "readText">>): boolean {
+  if (!deps.exists(path)) return false;
+  const obj = parseJson(deps.readText(path));
+  if (!obj || typeof obj !== "object") return false;
+  const access = obj as Record<string, unknown>;
+  return access.dmPolicy === "pairing" && Array.isArray(access.allowFrom) && access.allowFrom.length === 0;
 }
 
 function hasDotenvKey(path: string, key: string, deps: Required<Pick<RuntimeEssentialDeps, "exists" | "readText">>): boolean {
@@ -137,14 +154,20 @@ export function createRuntimeEssentialsRegistry(deps: RuntimeEssentialDeps = {})
         botPid: `${stateDir}/bot.pid`,
         plist: `${d.home}/Library/LaunchAgents/${launchdPrefix()}.claude-telegram-${agent.id}.plist`,
       };
+      const accessFile = `${paths.stateDir}/access.json`;
       const missing: string[] = [];
       if (!hasDotenvKey(paths.envFile, "TELEGRAM_BOT_TOKEN", d)) missing.push("token:claude .env TELEGRAM_BOT_TOKEN");
-      if (!hasJsonArrayKey(`${paths.stateDir}/access.json`, "allowFrom", d)) missing.push("allowFrom:claude access.json");
+      let pendingPairing = false;
+      if (!hasJsonArrayKey(accessFile, "allowFrom", d)) {
+        missing.push("allowFrom:claude access.json");
+        // 첫 claude 멤버는 시드 원본이 없어 pairing 대기로 시작한다 = 설계상 정상 경로.
+        pendingPairing = isClaudePairingPending(accessFile, d);
+      }
       const marker = readPidMarker(paths.botPid, d);
       if (marker == null) missing.push("poller:claude bot.pid");
       else if (!d.pidAlive(marker.pid)) missing.push("poller:claude bot.pid not alive");
       if (!d.exists(paths.plist)) missing.push("channel:claude LaunchAgent plist");
-      return result(missing, missing.length > 0);
+      return { ...result(missing, missing.length > 0), pendingPairing };
     }
   }
 

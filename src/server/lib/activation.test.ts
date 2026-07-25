@@ -20,6 +20,7 @@ import { buildPersona, buildAgentsMd } from "./personaTemplates";
 import {
   waitForClaudePoller, waitForCodexPoller, waitForHermesGateway,
   activateMember, teardownRuntime, swapRuntime, RUNTIMES, STATUS_BY_RUNTIME,
+  classifyEssentials,
   type ActivateResult, type SwapDeps,
 } from "./activation";
 
@@ -638,5 +639,88 @@ describe("activation: swap 후 persona 정합성의 근거 — buildPersona/buil
       expect(out).toContain("## ⭐ Core Rules");
       expect(out).not.toContain("## Communication note (Claude runtime)");
     }
+  });
+});
+
+// ── ★첫 claude 멤버 활성화는 '실패' 가 아니라 '거의 완료 — 마지막 한 단계'★ (2026-07-25 맥스튜디오 실기) ──
+//
+// 실기 증상: 첫 claude 멤버(lisa)가 봇 정상 기동·토큰 OK·poller OK 인데도
+//   'error: claude 필수설정 누락 — 재활성화/설정 복구 필요' + OT '활성화 실패 — 재시도 필요' 로 떴다.
+//   실제 남은 일은 팀장이 그 봇에게 DM 을 한 번 보내는 것뿐이라 ★재시도로는 절대 안 풀린다★
+//   (DM 한 통 보내니 재시도 없이 통과, 두 번째 멤버는 첫 멤버 것을 시드받아 DM 없이 통과).
+//
+// activateMember 전체는 tmux·launchd 를 건드려 유닛에서 못 돌리므로, 판정부(classifyEssentials)를
+// 순수 함수로 분리해 규칙을 고정한다. ★관용은 페어링 대기일 때, allowFrom 에만★ 적용돼야 한다.
+describe("classifyEssentials — 페어링 대기 관용 경계", () => {
+  const CLAUDE_OPTS = { tolerate: ["poller:"], tolerateWhenPairing: ["allowFrom:"] };
+
+  test("전부 정상 → ok, 페어링 대기 아님", () => {
+    const v = classifyEssentials({ ok: true, missing: [], canAutoFix: false }, CLAUDE_OPTS);
+    expect(v).toEqual({ ok: true, pendingPairing: false, detail: "필수설정 확인(토큰·allowFrom·채널·poller)" });
+  });
+
+  test("★allowFrom 만 누락 + 페어링 대기 → 실패 아님(대기)★ + 안내에 DM 문구", () => {
+    const v = classifyEssentials(
+      { ok: false, missing: ["allowFrom:claude access.json"], canAutoFix: true, pendingPairing: true },
+      CLAUDE_OPTS,
+    );
+    expect(v.ok).toBe(true);
+    expect(v.pendingPairing).toBe(true);
+    expect(v.detail).toContain("DM 페어링 대기");
+  });
+
+  test("allowFrom 누락이지만 페어링 대기 아님(access.json 부재·손상) → 종전대로 하드실패", () => {
+    const v = classifyEssentials(
+      { ok: false, missing: ["allowFrom:claude access.json"], canAutoFix: true },
+      CLAUDE_OPTS,
+    );
+    expect(v.ok).toBe(false);
+    expect(v.pendingPairing).toBe(false);
+    expect(v.detail).toContain("필수설정 누락");
+  });
+
+  test("★페어링 대기라도 토큰·채널이 같이 빠졌으면 실패★ (관용이 진짜 누락을 덮지 않는다)", () => {
+    const v = classifyEssentials(
+      {
+        ok: false,
+        missing: ["token:claude .env TELEGRAM_BOT_TOKEN", "allowFrom:claude access.json"],
+        canAutoFix: true,
+        pendingPairing: true,
+      },
+      CLAUDE_OPTS,
+    );
+    expect(v.ok).toBe(false);
+    expect(v.pendingPairing).toBe(false);
+    expect(v.detail).toContain("token:claude");
+    expect(v.detail).not.toContain("allowFrom:claude"); // 관용된 항목은 누락 목록에서 빠진다
+  });
+
+  test("poller 만 누락(페어링 무관) → 기존 degraded 동작 그대로, 페어링 문구 안 붙는다", () => {
+    const v = classifyEssentials(
+      { ok: false, missing: ["poller:claude bot.pid"], canAutoFix: true },
+      CLAUDE_OPTS,
+    );
+    expect(v.ok).toBe(true);
+    expect(v.pendingPairing).toBe(false);
+    expect(v.detail).toContain("needs_reconnect");
+  });
+
+  test("페어링 대기 + poller 도 미기동 → 대기로 보되 페어링 안내를 유지(둘 다 사람·자동복구 대상)", () => {
+    const v = classifyEssentials(
+      { ok: false, missing: ["allowFrom:claude access.json", "poller:claude bot.pid"], canAutoFix: true, pendingPairing: true },
+      CLAUDE_OPTS,
+    );
+    expect(v.ok).toBe(true);
+    expect(v.pendingPairing).toBe(true);
+    expect(v.detail).toContain("DM 페어링 대기");
+  });
+
+  test("codex 등 다른 런타임(tolerateWhenPairing 없음)은 allowFrom 누락을 관용하지 않는다", () => {
+    const v = classifyEssentials(
+      { ok: false, missing: ["allowFrom:codex CODEX_ALLOW_FROM seed"], canAutoFix: true, pendingPairing: true },
+      {},
+    );
+    expect(v.ok).toBe(false);
+    expect(v.pendingPairing).toBe(false);
   });
 });

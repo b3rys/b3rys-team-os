@@ -27,7 +27,7 @@ import { checkRuntimeAuth } from "./runtimeAuth";
 import { LIVE_TEAM_OS_PATH } from "./teamOsRender";
 import { linkHermesTeamSkill } from "./hermesSkills";
 import { resolveTokenStore } from "./rotateToken";
-import { checkEssentialSettings } from "./runtimeEssentials";
+import { checkEssentialSettings, type EssentialCheckResult } from "./runtimeEssentials";
 import { writeRegistrySafely } from "./registrySafety";
 
 const HOME = process.env.HOME ?? "";
@@ -181,6 +181,9 @@ export interface ActivateResult {
   code?: "member_limit";
   /** claude_channel: 세션·설정은 정상이나 telegram MCP poller 만 미기동(첫 부팅 핸드셰이크 실패) — recruit 는 degraded 완결, /mcp reconnect 로 poller 복구 필요. */
   needsReconnect?: boolean;
+  /** claude_channel 첫 멤버: 봇·토큰·채널 전부 정상이고 ★사람이 DM 1회★ 만 남은 상태.
+   *  실패가 아니라 '거의 완료 — 마지막 한 단계'다(2026-07-25 맥스튜디오 실기 클린테스트). */
+  needsPairing?: boolean;
 }
 
 function offMemberActivationLimitReached(agents: any[], id: string): boolean {
@@ -192,30 +195,59 @@ function offMemberActivationLimitReached(agents: any[], id: string): boolean {
 
 const COORDINATOR_CAPABILITY = "coordinator";
 
+export interface EssentialClassification {
+  ok: boolean;
+  pendingPairing: boolean;
+  detail: string;
+}
+
+/** essentials 결과를 ★실패 / degraded / 페어링 대기★ 로 분류한다(순수 — 파일시스템·프로세스 접근 없음).
+ *  pushEssentialStep 이 스텝을 push 하기 전에 쓰는 판정부를 분리한 것 = 활성화 전체를 돌리지 않고
+ *  분류 규칙만 테스트로 고정할 수 있다(활성화는 tmux·launchd 를 건드려 유닛에서 못 돌린다). */
+export function classifyEssentials(
+  essentials: EssentialCheckResult,
+  opts?: { tolerate?: string[]; tolerateWhenPairing?: string[] },
+): EssentialClassification {
+  const pendingPairing = essentials.pendingPairing === true;
+  const tolerate = [...(opts?.tolerate ?? []), ...(pendingPairing ? opts?.tolerateWhenPairing ?? [] : [])];
+  const hardMissing = essentials.missing.filter((m) => !tolerate.some((t) => m.startsWith(t)));
+  const degraded = !essentials.ok && hardMissing.length === 0;
+  const ok = essentials.ok || degraded;
+  // ★페어링 대기는 '관용된 누락이 allowFrom 뿐' 일 때만★ — 토큰·채널이 같이 빠졌으면 그건 진짜 실패다.
+  const pairingOnly = pendingPairing && degraded && essentials.missing.every((m) => m.startsWith("allowFrom:") || m.startsWith("poller:"));
+  const degradedDetail = pairingOnly
+    ? "필수설정 확인(토큰·채널) — DM 페어링 대기(첫 claude 멤버: 사람이 봇에게 DM 1회)"
+    : "필수설정 확인(토큰·allowFrom·채널) — poller 는 needs_reconnect(자동 복구 시도 중)";
+  return {
+    ok,
+    pendingPairing: pairingOnly,
+    detail: essentials.ok
+      ? "필수설정 확인(토큰·allowFrom·채널·poller)"
+      : degraded
+        ? degradedDetail
+        : `필수설정 누락: ${hardMissing.join(", ")}${essentials.canAutoFix ? " (자동복구 가능)" : ""}`,
+  };
+}
+
 async function pushEssentialStep(
   steps: ActivateResult["steps"],
   agent: { id: string; runtime: string; openclaw_agent_id?: string | null; hermes_profile?: string | null },
-  opts?: { tolerate?: string[] },
-): Promise<boolean> {
+  opts?: { tolerate?: string[]; tolerateWhenPairing?: string[] },
+): Promise<{ ok: boolean; pendingPairing: boolean }> {
   const essentials = await checkEssentialSettings(agent as any);
   // ★degraded tolerate(2026-07-25 하네스 §4 fix)★: poller(bot.pid) 미기동은 poller 스텝이 이미 needs_reconnect 로
   //   표면화하고 auto-reconnect 가 복구를 시도하므로, 그것만 빠졌으면 essentials 를 하드실패로 치지 않는다.
   //   그렇지 않으면 :620 이 recall·bus-wake·degraded 반환을 통째로 스킵해 746f6b3 의 degraded 완결이 무효가 된다.
   //   tolerate 에 없는 진짜 필수설정(token·allowFrom·채널)이 하나라도 빠지면 종전대로 하드실패.
-  const tolerate = opts?.tolerate ?? [];
-  const hardMissing = essentials.missing.filter((m) => !tolerate.some((t) => m.startsWith(t)));
-  const degraded = !essentials.ok && hardMissing.length === 0;
-  const stepOk = essentials.ok || degraded;
-  steps.push({
-    step: "essentials",
-    ok: stepOk,
-    detail: essentials.ok
-      ? "필수설정 확인(토큰·allowFrom·채널·poller)"
-      : degraded
-        ? "필수설정 확인(토큰·allowFrom·채널) — poller 는 needs_reconnect(자동 복구 시도 중)"
-        : `필수설정 누락: ${hardMissing.join(", ")}${essentials.canAutoFix ? " (자동복구 가능)" : ""}`,
-  });
-  return stepOk;
+  //
+  // ★tolerateWhenPairing(2026-07-25 맥스튜디오 실기)★: allowFrom 누락이 ★첫 claude 멤버의 설계상 pairing 대기★
+  //   (access.json 이 dmPolicy:"pairing" + allowFrom:[] 로 정상 시드된 상태)일 때만 추가로 관용한다.
+  //   그렇지 않으면 봇이 정상 기동했는데도 '활성화 실패 — 재시도 필요' 로 떠서, 사용자가 재시도해도 절대
+  //   해결되지 않는다(실제 해법은 재시도가 아니라 봇에게 DM 1회). access.json 부재·손상은 pendingPairing 이
+  //   false 라 종전대로 하드실패 — 진짜 누락을 관용하지 않는다.
+  const verdict = classifyEssentials(essentials, opts);
+  steps.push({ step: "essentials", ok: verdict.ok, detail: verdict.detail });
+  return { ok: verdict.ok, pendingPairing: verdict.pendingPairing };
 }
 
 /**
@@ -566,7 +598,7 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       const pollerOk = await waitForCodexPoller(id, pollerWaitMs);
       steps.push({ step: "poller", ok: pollerOk, detail: pollerOk ? "codex 브리지 poller 기동 확인(getUpdates ready marker)" : "codex 브리지 poller 미기동(ready marker 없음 — 봇이 메시지를 못 받음, 재활성화 필요)" });
       if (!pollerOk) return { ok: false, steps, error: "codex 브리지 poller 미기동 — 봇이 메시지를 받지 못합니다(재활성화하세요)" };
-      if (!await pushEssentialStep(steps, { id, runtime })) return { ok: false, steps, error: "codex 필수설정 누락 — 재활성화/설정 복구 필요" };
+      if (!(await pushEssentialStep(steps, { id, runtime })).ok) return { ok: false, steps, error: "codex 필수설정 누락 — 재활성화/설정 복구 필요" };
     } catch (e) {
       steps.push({ step: "runtime", ok: false, detail: (e as Error).message });
       return { ok: false, steps, error: "codex 브리지 셋업 오류" };
@@ -582,6 +614,7 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       steps.push({ step: "runtime", ok: false, detail: "실행 OFF(APPROVAL_EXECUTION_ENABLED≠1) — claude 봇 기동 건너뜀" });
       return { ok: false, steps, error: "런타임 활성화 권한 OFF(팀장 인가 필요)" };
     }
+    let pairingPending = false; // 첫 claude 멤버의 DM 페어링 대기 여부(essentials 에서 판정, 반환에 실어 라우트가 안내)
     try {
       placeClaudeToken(id, bot_token);   // ~/.claude/channels/telegram-<id>/.env (봇이 여기서 토큰 읽음)
       writeClaudeBridgeFiles(id);        // LaunchAgent plist 생성(setClaude bootstrap 대상)
@@ -642,7 +675,12 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       // ★early-return 제거 + degraded 완결(2026-07-25)★: poller 실패해도 essentials 를 tolerate(poller:) 로 통과시켜
       //   아래 recall·bus-wake·degraded 반환까지 진행한다(그렇지 않으면 :620 essentials 하드실패가 746f6b3 의 degraded 를 무효화).
       //   token·allowFrom·채널 등 진짜 필수설정이 빠지면 종전대로 하드실패.
-      if (!await pushEssentialStep(steps, { id, runtime }, { tolerate: ["poller:"] })) return { ok: false, steps, error: "claude 필수설정 누락 — 재활성화/설정 복구 필요" };
+      //   ★tolerateWhenPairing(2026-07-25 맥스튜디오 실기)★: 첫 claude 멤버는 allowFrom 을 복사해올 참조봇이
+      //   없어 access.json 이 pairing 대기로 시드된다 = 설계상 정상. 그걸 하드실패로 치면 봇이 살아 있는데도
+      //   '활성화 실패 — 재시도 필요' 로 떠서, 재시도로는 절대 안 풀린다(해법은 봇에게 DM 1회).
+      const essentialsResult = await pushEssentialStep(steps, { id, runtime }, { tolerate: ["poller:"], tolerateWhenPairing: ["allowFrom:"] });
+      if (!essentialsResult.ok) return { ok: false, steps, error: "claude 필수설정 누락 — 재활성화/설정 복구 필요" };
+      pairingPending = essentialsResult.pendingPairing;
       // recall 주입(GD 2026-07-05): 활성화=새 claude 세션(맥락 빔)이니 --fresh 재시작과 동일하게 직전 대화 digest 주입.
       //   런타임 스왑/영입이 곧 '첫 로딩'이라 여기가 GD가 원한 '첫 로딩 시 주입' 지점. fire-forget best-effort(세션 준비는 스크립트 sleep이 대기, 실패해도 활성화 정상).
       try { Bun.spawn(["bash", `${process.cwd()}/scripts/inject-recall.sh`, id], { stdout: "ignore", stderr: "ignore" }); } catch { /* best-effort */ }
@@ -656,7 +694,12 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
     // ★degraded 완결(2026-07-25)★: poller 실패는 하드 실패로 치지 않는다(recruit 는 완결, poller 만 needs_reconnect).
     //   ok 는 poller 를 제외한 스텝들로 판정 → runtime·essentials·bus-wake 가 되면 라우트가 OT 를 완결한다. needsReconnect 로 poller 상태 노출.
     const pollerFailed = steps.some((s) => s.step === "poller" && !s.ok);
-    return { ok: steps.filter((s) => s.step !== "poller").every((s) => s.ok), steps, needsReconnect: pollerFailed };
+    return {
+      ok: steps.filter((s) => s.step !== "poller").every((s) => s.ok),
+      steps,
+      needsReconnect: pollerFailed,
+      needsPairing: pairingPending,
+    };
   }
   const rs = runtimeScript(id, runtime);
   if (rs) {
@@ -688,7 +731,7 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
         steps.push({ step: "skills", ok: skill.linked, detail: skill.detail });
         if (!skill.linked) return { ok: false, steps, error: `팀 버스 스킬 링크 실패 — ${skill.detail} (스킬 없이는 팀원이 메시지를 보낼 수 없습니다)` };
       }
-      if (!await pushEssentialStep(steps, { id, runtime })) return { ok: false, steps, error: `${runtime} 필수설정 누락 — 재활성화/설정 복구 필요` };
+      if (!(await pushEssentialStep(steps, { id, runtime })).ok) return { ok: false, steps, error: `${runtime} 필수설정 누락 — 재활성화/설정 복구 필요` };
     } catch (e) {
       steps.push({ step: "runtime", ok: false, detail: (e as Error).message });
       return { ok: false, steps, error: "런타임 스크립트 실행 오류" };
