@@ -388,7 +388,7 @@ function claudeLauncherChecks(deps: AcceptanceDeps): AcceptanceItem[] {
       "fail",
       "런처 정본 일치",
       `정본(${CLAUDE_START_SCRIPT})과 다른 런처 ${drifted.length}건 — ${drifted.join(", ")}`,
-      "해당 멤버를 대시보드에서 비활성화→활성화 하면 plist 가 정본으로 재생성된다",
+      "해당 팀원을 대시보드에서 다시 활성화(activate)하면 plist 가 정본 경로로 재생성된다 — 정지→기동으로는 안 고쳐진다(등록 파일을 읽기만 한다)",
     ),
   ];
 }
