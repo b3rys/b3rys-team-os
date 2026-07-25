@@ -106,10 +106,11 @@ export function folderTree(): string {
 │  └─ SHARED.md                       # 팀 학습 로그
 └─ docs/
    ├─ COMMUNICATION_FLOW.md            # 채널, 라우터, 팀 버스, DB, 런타임 흐름
-   ├─ TEAM_SEARCH_SPEC_20260601.md     # 팀 검색 V0 구현 구조와 운영 게이트
-   ├─ ROUTER_ARCHITECTURE.md           # 메시지 라우터 구조
-   ├─ LIVE_INTEGRATION.md              # 텔레그램/Slack 라이브 연결
-   └─ HANDOFF_PLAYBOOK.md              # 에이전트끼리 넘길 때 규칙`, `b3rys-team-os/
+   ├─ TEAM_COMMUNICATION.md            # 팀 버스 동작, 주입문 형식, 루프 방지
+   ├─ GROUP_ROOM_ROUTING.md            # 그룹방 라우팅과 owner 판정
+   ├─ TEAM_COLLECT_ORCHESTRATION.md    # 취합 요청 vs 개별 보고
+   ├─ TEAM_LOOP_WORKFLOW.md            # 작업 루프와 핸드오프
+   └─ SLACK_SETUP.md                   # Slack 연동 셋업`, `b3rys-team-os/
 ├─ agents.json                         # Member roster: name, role, runtime, workspace folder
 ├─ src/server/
 │  ├─ index.ts                         # /team API, dashboard, docs links
@@ -125,10 +126,11 @@ export function folderTree(): string {
 │  └─ SHARED.md                       # Team learning log
 └─ docs/
    ├─ COMMUNICATION_FLOW.md            # Channel, router, team bus, DB, runtime flow
-   ├─ TEAM_SEARCH_SPEC_20260601.md     # Team Search V0 implementation structure and ops gate
-   ├─ ROUTER_ARCHITECTURE.md           # Message router structure
-   ├─ LIVE_INTEGRATION.md              # Telegram/Slack live integration
-   └─ HANDOFF_PLAYBOOK.md              # Rules for handing off between agents`));
+   ├─ TEAM_COMMUNICATION.md            # Team bus mechanics, injection format, loop guard
+   ├─ GROUP_ROOM_ROUTING.md            # Group-room routing and owner resolution
+   ├─ TEAM_COLLECT_ORCHESTRATION.md    # Collection requests vs individual reports
+   ├─ TEAM_LOOP_WORKFLOW.md            # Task loop and handoff
+   └─ SLACK_SETUP.md                   # Slack integration setup`));
 }
 
 export function sourceOfTruthPanel(): string {

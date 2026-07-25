@@ -1,10 +1,11 @@
 # 레시피 재현 evidence (관측 > 해석)
 
-이 스킬의 레시피(`mac-iphone-shell` 골격 + `package-macos-app.sh`)가 **실제로 동작하는 `.app`을 만든다**는 관측 증거.
+이 스킬의 레시피(골격 저장소 `mac-iphone-shell` + 그 안의 `package-macos-app.sh`)가 **실제로 동작하는 `.app`을 만든다**는 관측 증거.
+★골격은 b3rys 내부 비공개 저장소이며 이 저장소에 포함되어 있지 않다.★
 
 ## 실제 빌드 산출물 (이 레시피로 만든 것)
 
-- **`b3os.app`** — `mac-iphone-shell/.build/b3os.app` (2026-06-24 빌드).
+- **`b3os.app`** — 골격 저장소의 `.build/b3os.app` (2026-06-24 빌드).
   - 빌드 방법: `bash scripts/package-macos-app.sh` (= 이 스킬 §절차 7).
   - `APP_NAME=b3os.app`, `PRODUCT_NAME=B3rysMacApp`, webURL=`<dashboard-domain>/team`(테스트), ad-hoc 서명.
   - 배포본: `<dashboard-domain>/team/B3rys-unsigned-test.zip` (397KB).

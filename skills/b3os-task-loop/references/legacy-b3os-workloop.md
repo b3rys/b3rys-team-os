@@ -15,7 +15,7 @@ owner: maintainer (infra)
 
 이 루프는 **b3os(team-collab) 시스템이 구동**한다. 네가 openclaw든 claude든 hermes든 **상관없다.** 각 런타임 cron을 네가 직접 걸 필요 없다. b3os의 `workloop-driver`(launchd)가 스케줄 시각에 **코디네이터를 inbox 봉투로 깨워** 바운드 프롬프트를 준다. 너는 깨어나면 그 한 턴에 루프를 닫으면 된다.
 
-> 왜 b3os가 하나: 영입되는 런타임이 무엇일지 모른다. 각 런타임 native cron(openclaw cron / hermes cron / claude launchd)에 박으면 영입이 복잡해진다. b3os가 런타임-비종속으로 깨우면 영입은 심플(코디네이터 표식만)하고 루프는 어떤 런타임에서도 돈다. (설계: `docs/WORKLOOP_INFRA_DESIGN.md`)
+> 왜 b3os가 하나: 영입되는 런타임이 무엇일지 모른다. 각 런타임 native cron(openclaw cron / hermes cron / claude launchd)에 박으면 영입이 복잡해진다. b3os가 런타임-비종속으로 깨우면 영입은 심플(코디네이터 표식만)하고 루프는 어떤 런타임에서도 돈다. (설계: `rules/TEAM-OS.workloop.md`)
 
 ## 누가 도나 (작업 담당자를 깨운다)
 
