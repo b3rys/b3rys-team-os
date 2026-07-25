@@ -23,7 +23,7 @@ cd "$SELF"
 # 공유 Hermes 인증 원본 프로필. 환경변수 우선, 없으면 .env의 해당 키만 읽고, 공개 기본값 b3os.
 HERMES_BASE_PROFILE="${HERMES_BASE_PROFILE:-}"
 if [ -z "${HERMES_BASE_PROFILE// }" ] && [ -f "$SELF/.env" ]; then
-  HERMES_BASE_PROFILE="$(grep -E '^[[:space:]]*HERMES_BASE_PROFILE=' "$SELF/.env" 2>/dev/null | tail -1 | cut -d= -f2- | sed -e 's/^["'\'' ]*//' -e 's/["'\'' ]*$//')"
+  HERMES_BASE_PROFILE="$(grep -E '^[[:space:]]*HERMES_BASE_PROFILE=' "$SELF/.env" 2>/dev/null | tail -1 | cut -d= -f2- | sed -e 's/[[:space:]][[:space:]]*#.*$//' -e 's/^["'\'' ]*//' -e 's/["'\'' ]*$//')"
 fi
 HERMES_BASE_PROFILE="${HERMES_BASE_PROFILE:-b3os}"
 if ! printf '%s' "$HERMES_BASE_PROFILE" | grep -Eq '^[A-Za-z0-9_-]+$'; then

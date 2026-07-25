@@ -121,6 +121,25 @@ fi
 grep -q '^B3OS_SCHEDULER_ENABLED=' .env 2>/dev/null || printf 'B3OS_SCHEDULER_ENABLED=true\n' >> .env
 grep -q '^B3OS_SCHEDULER_DRY_RUN=' .env 2>/dev/null || printf 'B3OS_SCHEDULER_DRY_RUN=0\n' >> .env
 
+# 기존 설치 마이그레이션: 예전 .env에는 base 프로필 키가 없다. 이 상태로 새 중립 기본값을
+# 적용하면 실제 공유 auth 원본이 삭제 가드에서 빠지므로, 기존 auth 심링크 구조에서 보수적으로 추론해 backfill한다.
+if ! grep -q '^HERMES_BASE_PROFILE=' .env 2>/dev/null; then
+  _detector="$ROOT/src/server/runtimes/hermes/detect-base-profile.sh"
+  _detected_base=""
+  _detect_status=0
+  _detected_base="$(bash "$_detector" "$HOME/.hermes/profiles")" || _detect_status=$?
+  if [ "$_detect_status" -eq 0 ] && [ -n "$_detected_base" ]; then
+    printf 'HERMES_BASE_PROFILE=%s\n' "$_detected_base" >> .env
+    say "✅ 기존 Hermes base 프로필 감지·보존 설정 완료: $_detected_base"
+  elif [ "$_detect_status" -eq 0 ]; then
+    printf 'HERMES_BASE_PROFILE=b3os\n' >> .env
+  else
+    warn "❌ Hermes auth 원본 프로필을 하나로 판별할 수 없어 안전을 위해 설치를 중단합니다."
+    warn "   .env에 HERMES_BASE_PROFILE=<공유 auth 원본 프로필명>을 지정한 뒤 다시 실행하세요."
+    exit 1
+  fi
+fi
+
 # ── 4b) 팀원 활성화 허용 스위치 (APPROVAL_EXECUTION_ENABLED) ──────
 # 본인 전용 장비에서만 팀원(봇) 활성화를 허용. 대화형으로 물어보고 .env 에 자동 설정
 # (예전엔 사용자가 .env 를 수동 편집해야 했음 → 프롬프트로 자동화).

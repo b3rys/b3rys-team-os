@@ -7,6 +7,41 @@ trap 'rm -rf "$TMP"' EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
+# install migration detector: cloned auth symlinks identify the old shared source without a branded literal.
+DETECT_ROOT="$TMP/detect/profiles"
+mkdir -p "$DETECT_ROOT/old-base" "$DETECT_ROOT/member-a" "$DETECT_ROOT/member-b"
+touch "$DETECT_ROOT/old-base/auth.json"
+ln -s "$DETECT_ROOT/old-base/auth.json" "$DETECT_ROOT/member-a/auth.json"
+ln -s "$DETECT_ROOT/old-base/auth.json" "$DETECT_ROOT/member-b/auth.json"
+detected="$(bash "$ROOT/src/server/runtimes/hermes/detect-base-profile.sh" "$DETECT_ROOT")"
+[ "$detected" = "old-base" ] || fail "existing-install base detection failed"
+
+rm "$DETECT_ROOT/member-a/auth.json" "$DETECT_ROOT/member-b/auth.json"
+touch "$DETECT_ROOT/member-a/auth.json"
+set +e
+bash "$ROOT/src/server/runtimes/hermes/detect-base-profile.sh" "$DETECT_ROOT" >/dev/null 2>&1
+status=$?
+set -e
+[ "$status" -eq 2 ] || fail "ambiguous existing auth profiles did not fail closed"
+
+# install.sh backfills an existing .env from the detected shared auth source.
+INSTALL_ROOT="$TMP/install-repo"
+INSTALL_HOME="$TMP/install-home"
+INSTALL_BIN="$TMP/install-bin"
+mkdir -p "$INSTALL_ROOT/src/server/runtimes/hermes" "$INSTALL_ROOT/skills/b3os" "$INSTALL_HOME/.hermes/profiles/old-base" \
+  "$INSTALL_HOME/.hermes/profiles/member" "$INSTALL_BIN"
+cp "$ROOT/install.sh" "$INSTALL_ROOT/install.sh"
+cp "$ROOT/.env.example" "$INSTALL_ROOT/.env.example"
+cp "$ROOT/src/server/runtimes/hermes/detect-base-profile.sh" "$INSTALL_ROOT/src/server/runtimes/hermes/detect-base-profile.sh"
+touch "$INSTALL_ROOT/skills/b3os/SKILL.md" "$INSTALL_HOME/.hermes/profiles/old-base/auth.json"
+ln -s "$INSTALL_HOME/.hermes/profiles/old-base/auth.json" "$INSTALL_HOME/.hermes/profiles/member/auth.json"
+printf 'TEAM_HTTP_PORT=7878\n' > "$INSTALL_ROOT/.env"
+printf '#!/usr/bin/env bash\n[ "${1:-}" = "--version" ] && echo test\nexit 0\n' > "$INSTALL_BIN/bun"
+printf '#!/usr/bin/env bash\necho Linux\n' > "$INSTALL_BIN/uname"
+chmod +x "$INSTALL_BIN/bun" "$INSTALL_BIN/uname"
+HOME="$INSTALL_HOME" PATH="$INSTALL_BIN:/usr/bin:/bin" bash "$INSTALL_ROOT/install.sh" >/dev/null
+grep -q '^HERMES_BASE_PROFILE=old-base$' "$INSTALL_ROOT/.env" || fail "existing .env was not backfilled"
+
 # activate: configured base wins; when absent, another authenticated profile remains the fallback.
 ACT_HOME="$TMP/activate-home"
 mkdir -p "$ACT_HOME/.local/bin" "$ACT_HOME/.hermes/credentials" \
@@ -50,7 +85,7 @@ UN_HOME="$TMP/uninstall-home"
 mkdir -p "$UN_ROOT" "$UN_HOME/.hermes/profiles/configured-base" "$UN_HOME/.hermes/profiles/worker" \
   "$UN_HOME/.hermes/credentials" "$UN_HOME/Library/LaunchAgents"
 cp "$ROOT/uninstall.sh" "$UN_ROOT/uninstall.sh"
-printf 'HERMES_BASE_PROFILE=configured-base\n' > "$UN_ROOT/.env"
+printf 'HERMES_BASE_PROFILE=configured-base # preserved base\n' > "$UN_ROOT/.env"
 printf '[{"id":"base","runtime":"hermes_agent","hermes_profile":"configured-base"},{"id":"worker","runtime":"hermes_agent","hermes_profile":"worker"}]\n' > "$UN_ROOT/agents.json"
 touch "$UN_HOME/.hermes/credentials/base-token.txt" "$UN_HOME/.hermes/credentials/worker-token.txt"
 touch "$UN_HOME/Library/LaunchAgents/ai.hermes.gateway-configured-base.plist"

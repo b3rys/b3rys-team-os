@@ -49,7 +49,7 @@ fi
 #   그 글로벌 auth 로 base 프로필을 자동 시드해 clone 원본으로 삼는다(preflight 가 인정한 것을 activate 도 인정).
 if [ -z "${SRC_PROFILE:-}" ] && [ -f "$HOME/.hermes/auth.json" ]; then
   BASE_PROFILE="$HERMES_BASE_PROFILE"
-  [ "$BASE_PROFILE" = "$AGENT_ID" ] && BASE_PROFILE="b3os-base"   # 타겟명과 충돌 방지(희박)
+  while [ "$BASE_PROFILE" = "$AGENT_ID" ]; do BASE_PROFILE="${BASE_PROFILE}-base"; done
   say "■ 인증 프로필 없음 + 글로벌 auth 존재 → base 프로필 '$BASE_PROFILE' 자동 시드(글로벌 ~/.hermes/auth.json)"
   if [ ! -d "$HOME/.hermes/profiles/$BASE_PROFILE" ]; then
     # --clone: 활성(default) 프로필의 config/.env/SOUL/skills 복사 → 게이트웨이가 뜰 설정 확보.
