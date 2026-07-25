@@ -78,3 +78,9 @@ rules/*DRAFT*
 rules/*COVERAGE*
 rules/*.compaction-summary.md
 rules/design/
+
+# 서명·공증된 Mac 앱 번들은 저장소에 커밋하지 않는다.
+# 서명 바이너리에 서명 주체(Developer ID·Team ID)가 박혀 있어 공개 이력에 개발자 신원이 남는다.
+# 배포는 GitHub Releases 자산으로만 한다 (대시보드 링크도 releases/latest/download 를 가리킨다).
+src/web/public/*.app.zip
+*.app.zip
