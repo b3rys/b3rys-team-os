@@ -99,6 +99,34 @@ function loadAgents(registryPath: string): AgentRecord[] {
   }
 }
 
+/** ★'로드 성공, 0건' 과 '로드 실패' 를 반드시 구분한다★ — loadAgents 의 catch→[] 를 그대로 '팀원 0명'
+ *  으로 쓰면 손상된 agents.json(파싱 오류·권한 오류·배열 아님)에서 인수체크가 "새 설치입니다, 이상
+ *  없습니다" 라고 ★적극적 거짓 주장★ 을 한다(Bill 적대검증 2026-07-25: team.db 에 팀원 12명이 살아있는데
+ *  ok=true). 로드 실패는 fail 로 노출하고, freshInstall 신호에서도 제외한다.
+ *  파일 없음(ENOENT)은 loadRegistry 가 정상적으로 [] 를 주므로 실패가 아니다 — 공개 clone 첫 부팅. */
+interface RegistryLoad {
+  ok: boolean;
+  agents: AgentRecord[];
+  error?: string;
+}
+function loadAgentsChecked(registryPath: string): RegistryLoad {
+  try {
+    return { ok: true, agents: loadRegistry(registryPath) };
+  } catch (e: any) {
+    // 메시지에 경로/토큰이 섞일 수 있으므로 원인 코드·유형만 남긴다(값 노출 금지).
+    const code = e?.code ? String(e.code) : e instanceof SyntaxError ? "parse_error" : "load_error";
+    return { ok: false, agents: [], error: code };
+  }
+}
+
+function dbAgentCount(db: Database): number {
+  try {
+    return (db.query("SELECT COUNT(*) AS n FROM agent").get() as { n: number } | null)?.n ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
 function blockerCategory(line: string, internalIdRe: RegExp | null): string {
   if (SECRET_RE.test(line)) return "secret";
   if (ABSOLUTE_PATH_RE.test(line)) return "absolute-path";
@@ -106,11 +134,41 @@ function blockerCategory(line: string, internalIdRe: RegExp | null): string {
   return "blocker";
 }
 
-function settingsStep(db: Database, freshInstall: boolean): AcceptanceStep {
+function settingsStep(db: Database, registry: RegistryLoad, dbAgents: number): AcceptanceStep {
   const items: AcceptanceItem[] = [];
   const teamName = getSetting(db, "team_name");
   const ownerName = getSetting(db, "owner_name");
   const systemOp = captureConfigStatus(db);
+
+  // ★freshInstall = 레지스트리 ★로드 성공★ + 레지스트리 0건 + team.db 로스터 0명★.
+  //   세 조건을 모두 요구하는 이유(Bill 적대검증):
+  //     · 로드 실패(파싱·권한·배열아님)를 0명으로 세면 손상된 라이브에서 "새 설치입니다" 라고 거짓말한다.
+  //     · 파일만 사라진 경우는 loadRegistry 가 정상적으로 [] 를 주지만, team.db 에 팀원이 남아 있으면
+  //       그건 새 설치가 아니라 ★레지스트리 유실★ 이다(대시보드는 DB 기준으로 팀원을 계속 보여준다).
+  const freshInstall = registry.ok && registry.agents.length === 0 && dbAgents === 0;
+
+  // ★agents.json 로드 자체를 먼저 노출한다★ — 손상·권한 오류는 조용히 넘기지 않고 fail.
+  if (!registry.ok) {
+    items.push(
+      item(
+        "fail",
+        "agents.json 로드",
+        `실패(${registry.error ?? "load_error"}) — 로스터를 읽지 못했다(team.db 로스터 ${dbAgents}명)`,
+        "agents.json 의 JSON 형식·파일 권한을 확인하세요. 서버는 마지막으로 읽은 로스터로 계속 동작하며, 다음 sync 때 team.db 기준 자동복구를 시도합니다.",
+      ),
+    );
+  } else if (registry.agents.length === 0 && dbAgents > 0) {
+    items.push(
+      item(
+        "fail",
+        "agents.json 로드",
+        `레지스트리 0명인데 team.db 로스터 ${dbAgents}명 — 레지스트리 유실 의심(새 설치 아님)`,
+        "agents.json 을 복구하세요(서버는 다음 registry sync 에서 team.db/백업 기준 자동복구를 시도합니다).",
+      ),
+    );
+  } else {
+    items.push(item("pass", "agents.json 로드", `성공 — 팀원 ${registry.agents.length}명`));
+  }
 
   // ★새 설치(팀원 0명)의 '팀 이름 미설정'은 결함이 아니라 정상 출발점★ — 방금 install.sh 를 돌린
   //   사람은 당연히 팀 이름을 안 정했다. 이걸 fail 로 찍으면 첫 인수체크가 빨간불로 떠서 "설치가
@@ -411,9 +469,10 @@ function claudeLauncherChecks(deps: AcceptanceDeps): AcceptanceItem[] {
 export function runAcceptanceCheck(deps: AcceptanceDeps, member: string | null): AcceptanceResult {
   const rootDir = deps.rootDir ?? dirname(dirname(deps.teamOsPath));
   const membersRoot = deps.membersRoot ?? defaultMembersRoot();
-  const agents = loadAgents(deps.registryPath);
+  const registry = loadAgentsChecked(deps.registryPath);
+  const agents = registry.agents;
   const sections = [
-    settingsStep(deps.db, agents.length === 0),
+    settingsStep(deps.db, registry, dbAgentCount(deps.db)),
     coreRulesStep(deps.teamOsPath),
     onboardingStep(member, agents, membersRoot),
     portabilityStep(rootDir, membersRoot, member, buildInternalIdRe(deps.db)),

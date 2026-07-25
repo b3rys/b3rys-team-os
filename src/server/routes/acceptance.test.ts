@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { migrate } from "../db/migrate";
@@ -127,6 +127,16 @@ function setupFreshInstall() {
     teamOsSnapshot: () => ({ scheduled: [] }),
   });
   return { app, db, dir, root, membersRoot };
+}
+
+/** team.db 로스터에 팀원 N명을 심는다 — '레지스트리는 0/손상인데 DB엔 팀원이 있다'(=유실·손상) 재현용. */
+function insertDbAgents(db: Database, ids: string[]) {
+  for (const id of ids) {
+    db.prepare(
+      `INSERT INTO agent (id, display_name, role, runtime, status_provider, workspace_path, persona_file)
+       VALUES (?, ?, 'dev', 'openclaw', 'openclaw_gateway', ?, ?)`,
+    ).run(id, id, `/tmp/${id}`, `/tmp/${id}/SOUL.md`);
+  }
 }
 
 function insertScheduledJob(db: Database, id: string, status: "failed" | "cancelled", enabled: 0 | 1) {
@@ -404,19 +414,72 @@ describe("acceptance-check routes", () => {
   });
 
   // ── 클린 설치 첫 경험: 정상 초기 상태를 fail 로 찍지 않는다 (2026-07-25 공개 리허설) ──
+  const settingsCheck = (body: any, label: string) =>
+    body.sections.find((section: any) => section.key === "settings").checks.find((c: any) => c.label === label);
+
   test("클린 설치(팀원 0명)는 fail 0 — '팀 이름 미설정'은 info + 다음 할 일 안내", async () => {
     const { app, dir } = setupFreshInstall();
     try {
       const body = (await (await app.request("/acceptance-check")).json()) as any;
       expect(body.summary.fail).toBe(0);
       expect(body.ok).toBe(true);
-      const settings = body.sections.find((section: any) => section.key === "settings");
-      expect(settings.checks[0]).toEqual({
+      expect(settingsCheck(body, "팀 이름")).toEqual({
         label: "팀 이름",
         status: "info",
         detail: "미설정 — 새 설치의 정상 상태(팀원 0명)",
         fix: "다음 할 일: Settings 에서 팀 이름을 정하고 첫 팀원을 영입하세요.",
       });
+      expect(settingsCheck(body, "agents.json 로드")).toEqual({
+        label: "agents.json 로드",
+        status: "pass",
+        detail: "성공 — 팀원 0명",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ── ★major A(Bill 적대검증 2026-07-25)★ 레지스트리 로드 실패를 '팀원 0명 = 새 설치' 로 삼키면
+  //    손상된 라이브에서 인수체크가 "새 설치입니다, 이상 없습니다" 라고 적극적 거짓 주장을 한다.
+  //    → 로드 실패는 fail 로 노출하고 freshInstall 신호에서 제외한다. 네 가지 손상 유형 전부 고정. ──
+  const corruptions: Array<{ name: string; corrupt: (registryPath: string) => void }> = [
+    { name: "JSON 잘림", corrupt: (p) => writeFileSync(p, '[{"id":"bill",', "utf-8") },
+    { name: "배열 아닌 객체", corrupt: (p) => writeFileSync(p, '{"id":"bill"}', "utf-8") },
+    { name: "권한 없음(chmod 000)", corrupt: (p) => chmodSync(p, 0o000) },
+  ];
+  for (const { name, corrupt } of corruptions) {
+    test(`손상된 agents.json(${name}) → '새 설치' 라고 하지 않는다 (로드 fail + 팀 이름 fail)`, async () => {
+      const { app, db, dir, root } = setupFreshInstall();
+      try {
+        insertDbAgents(db, ["bill", "codex", "steve"]); // team.db 로스터는 살아있다(대시보드는 3명을 보여준다)
+        corrupt(join(root, "agents.json"));
+
+        const body = (await (await app.request("/acceptance-check")).json()) as any;
+        expect(body.ok).toBe(false);
+        const load = settingsCheck(body, "agents.json 로드");
+        expect(load.status).toBe("fail");
+        expect(load.detail).toContain("team.db 로스터 3명");
+        // 팀 이름은 '새 설치의 정상 상태' 로 둘 수 없다 — 새 설치가 아니다.
+        expect(settingsCheck(body, "팀 이름")).toEqual({ label: "팀 이름", status: "fail", detail: "미설정" });
+      } finally {
+        try { chmodSync(join(root, "agents.json"), 0o644); } catch { /* 이미 정상 */ }
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  test("agents.json 파일만 사라졌는데 team.db 에 팀원이 있으면 유실 의심 fail — '새 설치' 아님", async () => {
+    const { app, db, dir, root } = setupFreshInstall();
+    try {
+      insertDbAgents(db, ["bill", "codex"]);
+      rmSync(join(root, "agents.json"));
+
+      const body = (await (await app.request("/acceptance-check")).json()) as any;
+      expect(body.ok).toBe(false);
+      const load = settingsCheck(body, "agents.json 로드");
+      expect(load.status).toBe("fail");
+      expect(load.detail).toContain("레지스트리 유실 의심");
+      expect(settingsCheck(body, "팀 이름").status).toBe("fail");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

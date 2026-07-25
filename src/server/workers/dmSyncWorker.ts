@@ -133,6 +133,10 @@ export function syncDmOnce(
   db: Database,
   members: DmSyncMember[],
   parsers: Record<string, (m: DmSyncMember, ownerChatId: string) => DmMessageInput[]> = PARSERS,
+  // ★테스트 주입점★ — 기본 resolver 는 설정 미설정 시 resolveOwnerDmId() 로 ★실 파일시스템★
+  //   (~/.claude/channels/*/access.json)을 읽는다. 주입 없이 "owner 없음" 분기를 테스트하면 실행 머신의
+  //   실제 페어링 파일 때문에 owner 가 truthy 로 나와 분기를 아예 타지 않는다(= 공허한 테스트).
+  resolveOwner: (db: Database) => string = ownerChatId,
 ): DmSyncResult {
   let inserted = 0;
   let scanned = 0;
@@ -140,9 +144,11 @@ export function syncDmOnce(
   if (!dmCaptureEnabled(db)) return { inserted, scanned, byMember }; // 설정에서 껐음
   // ★팀원 0명(새 설치)이면 캡처할 DM 자체가 없다★ — 아래 owner 미설정 경고까지 가면 새 사용자가
   //   보는 첫 기동 로그에 경고가 찍혀 "설치가 깨졌나"로 읽힌다(2026-07-25 공개 클린설치 리허설).
-  //   members 가 비면 owner 가 있어도 루프가 아무 일도 안 하므로 조용히 빠지는 게 동작상 동일하다.
+  //   ★데이터 경로는 동일★(members 가 비면 owner 가 있어도 루프가 아무 일도 안 한다). 단 완전히
+  //   동일하진 않다 — 아래 warnedNoOwner 리셋(모듈 전역 플래그)을 건너뛰므로, owner 를 다시 찾은 tick 이
+  //   멤버 0명이면 경고 1회권이 재충전되지 않는다(경고가 덜 나올 뿐, 적재 결과는 불변). Bill 지적 반영.
   if (members.length === 0) return { inserted, scanned, byMember };
-  const owner = ownerChatId(db);
+  const owner = resolveOwner(db);
   if (!owner) {
     if (!warnedNoOwner) {
       warnedNoOwner = true;
