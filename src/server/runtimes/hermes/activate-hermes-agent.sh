@@ -228,12 +228,46 @@ say "■ 3b) config.yaml — 메인 모델 명시(빈 model 이면 provider 기�
 #   (2026-07-22 실측: herm — 1:1 은 되는데 그룹만 안 됨. 원인=빈 model.) clone 원본 config 의 빈 model 을
 #   그대로 물려받는 게 근본. 활성화 시 프로필 config 에 명시 model 을 박아 one-shot 도 모델을 갖게 한다.
 # 멱등: 이미 non-empty model 이면 건드리지 않는다. 실패 시 graceful skip(활성화는 계속).
-HERMES_PY="$(head -1 "$(command -v hermes 2>/dev/null)" 2>/dev/null | sed 's/^#!//' | awk '{print $1}')"
-# ★hermes 실행파일 shebang이 #!/usr/bin/env bash 면 awk가 /usr/bin/env 를 뽑는다 — 이건 -x 통과라
-#   `env - <PROF_DIR>` 로 디렉토리를 실행 시도→exit 126(2026-07-24 fresh-clone 실측). 이 인라인 블록은
-#   순수 python(+pyyaml)이므로 ★추출값이 python 계열일 때만 사용하고 아니면 python3 로 고정★한다.
-case "$HERMES_PY" in *python*) ;; *) HERMES_PY="python3" ;; esac
-[ -x "$HERMES_PY" ] || HERMES_PY="python3"
+# ★파이썬 선택 = '실제로 hermes_cli 를 import 할 수 있는' 인터프리터★
+#   이 블록은 provider 기본모델 조회를 위해 hermes_cli.models 를 import 한다. 따라서 아무 python3 나
+#   쓰면 안 되고 hermes 설치 venv 의 파이썬이어야 한다.
+#   ▸ 종전 로직(shebang 파싱 → python 계열 아니면 python3 고정)은 이 맥에서 조용히 무력화됐다:
+#     hermes 첫 줄이 `#!/usr/bin/env bash` → awk 가 `/usr/bin/env` 추출 → python 계열 아님 → python3 폴백
+#     → 그 python3(예: anaconda)엔 hermes_cli 가 없음 → import 실패 → 항상 skip.
+#     즉 '빈 model 채우기'조차 이런 머신에선 한 번도 실행된 적이 없다. (2026-07-25 실측)
+#   ▸ dirname(realpath(hermes))/python3 도 부족하다 — hermes 가 심링크가 아니라
+#     `exec "<HERMES_HOME>/hermes-agent/venv/bin/hermes" "$@"` 형태의 래퍼 스크립트인 설치가 있다(실측).
+#   그래서 후보를 나열하고 ★import 가 실제로 되는 첫 후보★를 고른다(추론 대신 검증).
+_hermes_bin="$(command -v hermes 2>/dev/null || true)"
+_hermes_py_cands=""
+# ① 알려진 설치 레이아웃(HERMES_HOME 우선)
+_hh="${HERMES_HOME:-$HOME/.hermes}"
+_hermes_py_cands="$_hermes_py_cands $_hh/hermes-agent/venv/bin/python3 $_hh/hermes-agent/venv/bin/python"
+if [ -n "$_hermes_bin" ]; then
+  # ② 래퍼가 exec 하는 venv 경로에서 역산(위 실측 케이스)
+  _exec_target="$(sed -n 's/^[[:space:]]*exec[[:space:]]*"\([^"]*\)".*/\1/p' "$_hermes_bin" 2>/dev/null | head -1)"
+  [ -n "$_exec_target" ] && _hermes_py_cands="$_hermes_py_cands $(dirname "$_exec_target")/python3 $(dirname "$_exec_target")/python"
+  # ③ hermes 자체가 venv bin 의 심링크/실행파일인 경우
+  _real="$(realpath "$_hermes_bin" 2>/dev/null || readlink -f "$_hermes_bin" 2>/dev/null || echo "$_hermes_bin")"
+  _hermes_py_cands="$_hermes_py_cands $(dirname "$_real")/python3 $(dirname "$_real")/python"
+  # ④ shebang 이 진짜 python 인 설치
+  _sb="$(head -1 "$_hermes_bin" 2>/dev/null | sed 's/^#!//' | awk '{print $1}')"
+  case "$_sb" in *python*) _hermes_py_cands="$_hermes_py_cands $_sb" ;; esac
+fi
+# ⑤ 최후 폴백 — hermes_cli 가 없으면 아래 블록이 보수적으로 skip 한다(종전과 동일 동작).
+_hermes_py_cands="$_hermes_py_cands python3"
+HERMES_PY=""
+for _c in $_hermes_py_cands; do
+  command -v "$_c" >/dev/null 2>&1 || [ -x "$_c" ] || continue
+  if "$_c" -c "import hermes_cli.models" >/dev/null 2>&1; then HERMES_PY="$_c"; break; fi
+done
+if [ -n "$HERMES_PY" ]; then
+  say "  파이썬: $HERMES_PY (hermes_cli import 확인됨)"
+else
+  HERMES_PY="python3"
+  echo "  ⚠ hermes_cli 를 import 할 수 있는 파이썬을 못 찾음 — provider 기본모델 조회 불가(아래에서 보수적 skip)"
+fi
+[ -x "$HERMES_PY" ] || command -v "$HERMES_PY" >/dev/null 2>&1 || HERMES_PY="python3"
 # set -e 하에서도 실패 시 graceful skip(활성화 계속) — 주석(위) 의도대로 || 로 흡수.
 "$HERMES_PY" - "$PROF_DIR" <<'PY' || echo "  ⚠ 명시 model 자동설정 스킵(활성화는 계속)"
 import sys, os, json
@@ -253,9 +287,8 @@ try:
 except Exception as e:
     print(f"  ⚠ config 로드 실패({e}) — 명시 model skip(활성화는 계속)"); sys.exit(0)
 m = cfg.get("model")
-has = bool(m) and (m if isinstance(m, str) else (m.get("default") or m.get("model") or m.get("name")))
-if has:
-    print("  ✓ model 이미 설정됨 — skip(멱등)"); sys.exit(0)
+cur = bool(m) and (m if isinstance(m, str) else (m.get("default") or m.get("model") or m.get("name")))
+# ★active_provider 를 먼저 판정한다 — 아래 호환성 검사에 필요(종전엔 has 체크 뒤에 있었다).
 prov = None
 for ap in (os.path.join(prof, "auth.json"), os.path.expanduser("~/.hermes/auth.json")):
     try:
@@ -264,7 +297,39 @@ for ap in (os.path.join(prof, "auth.json"), os.path.expanduser("~/.hermes/auth.j
     except Exception:
         pass
 if not prov:
+    if cur:
+        print("  ✓ model 이미 설정됨 — skip(멱등, active_provider 판정 실패로 호환성 미검사)"); sys.exit(0)
     print("  ⚠ active_provider 판정 실패 — 명시 model skip(활성화는 계속)"); sys.exit(0)
+# ★멱등 조건 = '비어있음'이 아니라 '비어있거나 active_provider 와 호환 불가'★
+#   종전엔 non-empty 면 무조건 skip 했다. 그런데 clone 원본이 전역 ~/.hermes/config.yaml 의 기본 model
+#   (예: anthropic/claude-opus-4.6)을 물려받으면 non-empty 라 skip → codex(ChatGPT) 구독에 Claude 모델이
+#   붙은 채로 활성화가 '성공'하고, 첫 메시지에서야 HTTP 400 으로 죽는다:
+#     "The 'anthropic/claude-opus-4.6' model is not supported when using Codex with a ChatGPT account."
+#   (2026-07-25 실측: herm — activate 전 단계 ✅ 통과 후 텔레그램 첫 턴에서 실패.)
+#   판정은 provider_model_ids(prov) 목록 대조로 한다 — detect_static_provider_for_model 은 슬래시
+#   네임스페이스 형태('anthropic/claude-opus-4.6')를 못 잡아 이 케이스에서 None 을 준다(실측).
+#   ★보수적으로: 목록을 못 얻거나 비면 판정 불가로 보고 종전대로 skip(멱등).★
+# ★교체는 '모델 집합이 닫힌' provider 로만 한정한다★
+#   provider_model_ids() 는 provider 에 따라 성격이 다르다:
+#     - openai-codex(n=10): 구독 엔드포인트가 서빙하는 ★전체 목록★ → 목록에 없으면 진짜로 호출 불가.
+#     - openrouter(n=36)·nous(n=32): 실제로는 수백 개를 서빙하는데 ★큐레이션 부분집합★만 반환.
+#       여기서 목록 대조로 교체하면 팀장이 일부러 지정한 정상 모델을 덮어쓴다(회귀).
+#   그래서 닫힌 집합이 확실한 provider 만 교체 대상으로 둔다. 나머지는 종전대로 멱등 skip.
+#   (새 provider 를 추가할 땐 그 provider 의 목록이 '전체'인지 먼저 확인할 것.)
+CLOSED_SET_PROVIDERS = {"openai-codex"}
+if cur:
+    if prov not in CLOSED_SET_PROVIDERS:
+        print(f"  ✓ model 이미 설정됨({cur}) — provider={prov} 는 모델목록이 부분집합일 수 있어 교체 안 함 · skip(멱등)"); sys.exit(0)
+    try:
+        from hermes_cli.models import provider_model_ids
+        known = [x for x in (provider_model_ids(prov) or []) if isinstance(x, str)]
+    except Exception as e:
+        print(f"  ✓ model 이미 설정됨 — skip(멱등, 호환성 조회 실패: {e})"); sys.exit(0)
+    if not known:
+        print(f"  ✓ model 이미 설정됨 — skip(멱등, provider={prov} 모델목록 비어 판정 불가)"); sys.exit(0)
+    if cur in known:
+        print(f"  ✓ model 이미 설정됨({cur}) — provider={prov} 와 호환 · skip(멱등)"); sys.exit(0)
+    print(f"  ⚠ model({cur}) 이 active_provider={prov} 와 호환 불가 — provider 기본모델로 교체")
 try:
     from hermes_cli.models import get_default_model_for_provider
     dm = get_default_model_for_provider(prov)
