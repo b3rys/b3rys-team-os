@@ -40,7 +40,12 @@ export function hermesProtectedProfiles(root = `${HERMES_ROOT}/profiles`): { nam
   return { names, ambiguous: false };
 }
 
-export function isHermesProfileProtected(profile: string): boolean {
-  const state = hermesProtectedProfiles();
+export function isHermesProfileProtected(profile: string, root?: string): boolean {
+  const state = hermesProtectedProfiles(root);
   return state.ambiguous || state.names.has(fold(profile));
+}
+
+/** 모호성 fail-closed는 Hermes 런타임에만 적용한다. 다른 런타임의 멤버 id는 프로필 판정 대상이 아니다. */
+export function isHermesMemberProtected(runtime: string, profile: string, root?: string): boolean {
+  return runtime === "hermes_agent" && isHermesProfileProtected(profile, root);
 }

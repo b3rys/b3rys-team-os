@@ -20,10 +20,19 @@ set -uo pipefail   # ★ -e 는 쓰지 않는다 — best-effort teardown 은 �
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 cd "$SELF"
 
+# 공유 Hermes 인증 원본 프로필. install.sh와 같은 문법(export/공백/따옴표/인라인 주석)을 읽는다.
+read_hermes_base_env() {
+  [ -f "$1" ] || return 0
+  { grep -E '^[[:space:]]*(export[[:space:]]+)?HERMES_BASE_PROFILE[[:space:]]*=' "$1" 2>/dev/null || true; } \
+    | tail -1 \
+    | sed -E -e 's/^[[:space:]]*(export[[:space:]]+)?HERMES_BASE_PROFILE[[:space:]]*=[[:space:]]*//' \
+      -e 's/[[:space:]]+#.*$//' -e 's/^["'\''][[:space:]]*//' -e 's/[[:space:]]*["'\'']$//' -e 's/[[:space:]]*$//'
+}
+
 # 공유 Hermes 인증 원본 프로필. 환경변수 우선, 없으면 .env의 해당 키만 읽고, 공개 기본값 b3os.
 HERMES_BASE_PROFILE="${HERMES_BASE_PROFILE:-}"
 if [ -z "${HERMES_BASE_PROFILE// }" ] && [ -f "$SELF/.env" ]; then
-  HERMES_BASE_PROFILE="$(grep -E '^[[:space:]]*HERMES_BASE_PROFILE=' "$SELF/.env" 2>/dev/null | tail -1 | cut -d= -f2- | sed -e 's/[[:space:]][[:space:]]*#.*$//' -e 's/^["'\'' ]*//' -e 's/["'\'' ]*$//')"
+  HERMES_BASE_PROFILE="$(read_hermes_base_env "$SELF/.env")"
 fi
 HERMES_BASE_PROFILE="${HERMES_BASE_PROFILE:-b3os}"
 if ! printf '%s' "$HERMES_BASE_PROFILE" | grep -Eq '^[A-Za-z0-9_-]+$'; then
@@ -216,6 +225,7 @@ echo ""
 # 2) 팀원 전원 오프보드 (런타임별 FS/launchctl 정리, best-effort)
 # ══════════════════════════════════════════════════════════════════════
 hl "■ 1/4  팀원 오프보드"
+HERMES_TEARDOWN_SKIPPED=0
 
 # 서버가 떠 있으면 원래는 대시보드(Settings 탭)의 오프보드가 graceful path.
 # 여기선 teardown 이므로 직접 FS/launchctl 정리를 수행한다.
@@ -271,6 +281,7 @@ else
         hermes_agent)
           _prof="${prof:-$id}"
           if [ "$HERMES_DETECT_STATUS" -ne 0 ]; then
+            HERMES_TEARDOWN_SKIPPED=1
             warn "    ⛔ 공유 auth 원본 프로필 판별 불가 — Hermes teardown 전체 건너뜀(fail-closed)."
           elif is_base_profile "$_prof"; then
             # ★★ CRITICAL 가드 — base 프로필은 모든 hermes 멤버의 공유 auth.json 소스 + clone 원본.
@@ -329,6 +340,10 @@ echo ""
 if [ "$KEEP_DATA" = 1 ]; then
   hl "■ 3/4  데이터 삭제 — 건너뜀(--keep-data)"
   say "  team.db · .env · var/ · team-media · slack-tokens 보존."
+elif [ "$HERMES_TEARDOWN_SKIPPED" = 1 ]; then
+  hl "■ 3/4  데이터 삭제 — 안전 중단"
+  warn "  ⛔ Hermes teardown이 완료되지 않아 복구에 필요한 team.db · .env · agents.json 및 데이터를 모두 보존합니다."
+  warn "     .env의 HERMES_BASE_PROFILE을 실제 공유 auth 원본 프로필명으로 설정한 뒤 uninstall을 다시 실행하세요."
 else
   hl "■ 3/4  데이터 삭제"
   # repo 내부 + 알려진 sibling(team-media) 만 삭제. 그 외 경로는 절대 건드리지 않는다.
@@ -355,8 +370,13 @@ echo ""
 # ══════════════════════════════════════════════════════════════════════
 # 5) repo 폴더 삭제 안내 (실행 중 자기 폴더는 못 지움)
 # ══════════════════════════════════════════════════════════════════════
-hl "■ 4/4  완료"
-say "  런타임/서버/데이터 정리가 끝났습니다."
+if [ "$HERMES_TEARDOWN_SKIPPED" = 1 ]; then
+  hl "■ 4/4  미완료 — 조치 필요"
+  warn "  Hermes 런타임 정리가 안전 중단되었습니다. 데이터는 보존했으며 위 안내대로 설정을 복구한 뒤 재실행하세요."
+else
+  hl "■ 4/4  완료"
+  say "  런타임/서버/데이터 정리가 끝났습니다."
+fi
 echo ""
 
 # ★설치 스킬 심링크 해제 — repo(clone) 삭제 전에 풀어야 깨진 링크가 안 남는다★ (ames 반대리뷰).
@@ -377,6 +397,8 @@ if [ -L "$SKILL_DEST" ]; then
     say "    스킬을 다시 쓰려면: install-skill.sh 로 재설치 + /reload-skills."
   fi
 fi
+
+[ "$HERMES_TEARDOWN_SKIPPED" = 0 ] || exit 2
 
 warn "  이 스크립트는 실행 중인 자기 repo 폴더를 삭제할 수 없습니다. 마지막으로 아래를 실행하세요:"
 echo ""

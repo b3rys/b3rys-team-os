@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { hermesProtectedProfiles } from "./hermesBaseProfile";
+import { hermesProtectedProfiles, isHermesMemberProtected } from "./hermesBaseProfile";
 
 describe("Hermes base profile defense-in-depth", () => {
   test("공유 auth 심링크 원본을 설정과 독립적으로 탐지하고 대소문자 없이 보호", () => {
@@ -23,5 +23,8 @@ describe("Hermes base profile defense-in-depth", () => {
       writeFileSync(join(root, profile, "auth.json"), "{}");
     }
     expect(hermesProtectedProfiles(root).ambiguous).toBe(true);
+    expect(isHermesMemberProtected("hermes_agent", "some-member", root)).toBe(true);
+    expect(isHermesMemberProtected("claude_channel", "some-member", root)).toBe(false);
+    expect(isHermesMemberProtected("codex", "some-member", root)).toBe(false);
   });
 });

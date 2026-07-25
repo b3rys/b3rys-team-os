@@ -16,7 +16,7 @@ import { dirname } from "node:path";
 import { memberPaths, MEMBERS_ROOT, personaTargetsForRuntime, assertNotLiveMemberFsUnderTest } from "./personaTemplates";
 import { writeMemberPersona, savePersonaFile } from "./writeMemberPersona";
 import { HERMES_BASE_PROFILE, MANUALS_DIR } from "./paths";
-import { isHermesProfileProtected } from "./hermesBaseProfile";
+import { isHermesMemberProtected, isHermesProfileProtected } from "./hermesBaseProfile";
 import { appendAuditFile } from "./auditFile";
 import { codexBridgePaths, placeCodexToken, writeCodexBridgeFiles, removeCodexBridgeFiles, resolveOwnerDmId } from "../runtimes/codex/launcher";
 import { placeClaudeToken, writeClaudeBridgeFiles, seedClaudeTrust, seedClaudeAccess, killClaudeTmux, reconnectClaudeTelegram, claudeBridgePaths, installReplyGuardHook, installOutboundHook, installProgressHook, uninstallOutboundHook, uninstallReplyGuardHook, uninstallRecoveryHook, removeClaudeBridgeFiles } from "../runtimes/claude/launcher";
@@ -869,11 +869,11 @@ export async function swapRuntime(db: Database, input: SwapInput, deps: SwapDeps
     return { ok: false, steps, error: `허용되지 않는 런타임: ${targetRuntime}`, code: "invalid_runtime" };
   }
 
-  // STEP0(e) — 설정된 base hermes 프로필 가드. 모든 hermes 멤버의 공유 auth 소스라 교체 대상이
-  //   아니다(offboard 가드와 동일 조건 재사용: target.runtime==="hermes_agent" && (hermes_profile??id)
-  //   === HERMES_BASE_PROFILE). swap 특유 추가: id 자체가 base 이름이면 방향 무관 거부한다.
-  const isBaseHermesTarget = target.runtime === "hermes_agent" && isHermesProfileProtected(target.hermes_profile ?? id);
-  if (isBaseHermesTarget || isHermesProfileProtected(id)) {
+  // STEP0(e) — 현재 런타임이 Hermes인 대상에만 프로필 보호 판정을 적용한다. 탐지가 모호할 때
+  //   모든 Hermes 프로필을 fail-closed로 보호하되, Claude/Codex/OpenClaw 멤버 id까지 Hermes
+  //   프로필로 오인해 모든 런타임 교체를 막아서는 안 된다.
+  const isBaseHermesTarget = isHermesMemberProtected(target.runtime, target.hermes_profile ?? id);
+  if (isBaseHermesTarget) {
     return {
       ok: false, steps,
       error: `${HERMES_BASE_PROFILE}는 모든 hermes 멤버가 공유하는 base 프로필(auth 소스)입니다. 런타임 교체 대상이 아닙니다.`,

@@ -135,9 +135,14 @@ else
 fi
 
 # 새 값을 확정한 뒤에만 기존 표기(export/공백/따옴표 포함)를 제거하고 원자적으로 교체한다.
+_env_mode=""
+if command -v stat >/dev/null 2>&1; then
+  _env_mode="$(stat -f '%Lp' .env 2>/dev/null || stat -c '%a' .env 2>/dev/null || true)"
+fi
 awk '!/^[[:space:]]*(export[[:space:]]+)?HERMES_BASE_PROFILE[[:space:]]*=/' .env > .env.tmp
 printf 'HERMES_BASE_PROFILE=%s\n' "$_selected_base" >> .env.tmp
 mv .env.tmp .env
+[ -z "$_env_mode" ] || chmod "$_env_mode" .env
 say "✅ Hermes base 프로필 보존 설정: $_selected_base"
 
 # ── 4a) B3RYS_HOME 데이터 루트 ────────────────────────────────────
