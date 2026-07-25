@@ -50,8 +50,13 @@ fi
 
 BOT_NAME="${ARGS[0]:-claude}"   # 비우면 default = "claude" (multi-bot ready)
 PLUGIN="telegram@claude-plugins-official"
-# 모델 명시 (2026-05-30 GD 결정): CLI default 가 아직 4.7 이라 명시 필요. env 로 override 가능.
-CLAUDE_MODEL="${CLAUDE_MODEL:-claude-opus-4-8}"
+# 모델: ★기본값 없음★ (2026-07-25 GD 결정). 비우면 --model 플래그를 아예 붙이지 않아
+#   claude 가 저장된 기본값(사용자가 /model 로 고른 값)을 그대로 쓴다.
+#   여기에 모델을 하드코딩하면 CLI 플래그가 저장 기본값을 항상 이겨서, /model 로 바꿔도
+#   재시작마다 하드코딩 값으로 되돌아간다(2026-07-25 실측: 4.8 고착).
+#   특정 봇만 모델을 고정하려면 CLAUDE_MODEL=<id> 로 실행.
+#   ※ --continue(resume) 는 이전 세션의 모델을 그대로 이어받으므로, 모델 교체는 fresh 기동에서 적용된다.
+CLAUDE_MODEL="${CLAUDE_MODEL:-}"
 
 SESSION_NAME="claude-$BOT_NAME"
 STATE_DIR="$HOME/.claude/channels/telegram-$BOT_NAME"
@@ -212,14 +217,20 @@ fi
 # bun 설치 dir 를 세션 PATH 에 prepend ($PATH 는 tmux 셸이 확장) — claude 가 spawn 하는 MCP
 # 텔레그램 서버가 non-interactive PATH 에서도 bun 을 찾게 한다(위 BUN_DIR 참고).
 BUN_PATH_ENV="$(printf 'PATH=%q:"$PATH" ' "$BUN_DIR")"
+# CLAUDE_MODEL 이 비어 있으면 --model 플래그 자체를 생략(= claude 저장 기본값 사용).
+MODEL_FLAG=""
+if [[ -n "$CLAUDE_MODEL" ]]; then
+  MODEL_FLAG=$(printf ' --model %q' "$CLAUDE_MODEL")
+fi
+MODEL_DESC="--model ${CLAUDE_MODEL:-생략(저장된 기본값)}"
 if [[ $RESUME_FLAG -eq 1 ]]; then
-  INNER_CMD="${BUN_PATH_ENV}$(printf 'TELEGRAM_STATE_DIR=%q %q --channels plugin:%s --model %q' \
-    "$STATE_DIR" "$CLAUDE_BIN" "$PLUGIN" "$CLAUDE_MODEL")$PERM_FLAG --continue"
-  echo "RESUME mode — claude --continue --model $CLAUDE_MODEL --permission-mode ${CLAUDE_PERMISSION_MODE:-<none>} (이전 세션 이어서)"
+  INNER_CMD="${BUN_PATH_ENV}$(printf 'TELEGRAM_STATE_DIR=%q %q --channels plugin:%s' \
+    "$STATE_DIR" "$CLAUDE_BIN" "$PLUGIN")$MODEL_FLAG$PERM_FLAG --continue"
+  echo "RESUME mode — claude --continue $MODEL_DESC --permission-mode ${CLAUDE_PERMISSION_MODE:-<none>} (이전 세션 이어서)"
 else
-  INNER_CMD="${BUN_PATH_ENV}$(printf 'TELEGRAM_STATE_DIR=%q %q --channels plugin:%s --model %q' \
-    "$STATE_DIR" "$CLAUDE_BIN" "$PLUGIN" "$CLAUDE_MODEL")$PERM_FLAG"
-  echo "FRESH mode — claude --model $CLAUDE_MODEL --permission-mode ${CLAUDE_PERMISSION_MODE:-<none>}"
+  INNER_CMD="${BUN_PATH_ENV}$(printf 'TELEGRAM_STATE_DIR=%q %q --channels plugin:%s' \
+    "$STATE_DIR" "$CLAUDE_BIN" "$PLUGIN")$MODEL_FLAG$PERM_FLAG"
+  echo "FRESH mode — claude $MODEL_DESC --permission-mode ${CLAUDE_PERMISSION_MODE:-<none>}"
 fi
 
 # ★telegram 플러그인 user-scope enable — settings.json 직접 기록(2026-07-25 하네스 §3 fix, 캐시 무접촉)★.
