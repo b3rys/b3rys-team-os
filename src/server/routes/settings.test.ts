@@ -648,11 +648,45 @@ describe("영입 OT / 능력 카탈로그", () => {
     expect(body.ot_id).toMatch(/^ot_/);
     expect(body.member.id).toBe("lui");
     expect(body.member.icon).toBeTruthy();
+    expect(body.persona_written).toBe(true);
+    expect(body.persona_file).toBeTruthy();
+    expect(existsSync(body.persona_file)).toBe(true);
     expect(JSON.parse(readFileSync(registryPath, "utf-8")).some((a: any) => a.id === "lui")).toBe(true);
     const ot = await (await app.request(`/ot/${body.ot_id}`)).json();
     expect(ot.stage).toBe("provision");
     expect(ot.steps.find((s: any) => s.key === "register").state).toBe("done");
     expect(ot.joined).toBe(false);
+  });
+  test("openclaw 영입 직후 AGENTS.md가 이름·역할·팀을 직접 제공하고, 없는 persona_file은 null", async () => {
+    const { app, registryPath } = setupReady();
+    const r = await app.request("/members/recruit", json({
+      id: "clo", display_name: "Clo", role: "프론트, 앱, 풀스택 개발자", runtime: "openclaw",
+    }));
+    expect(r.status).toBe(200);
+    const body = await r.json();
+    expect(body.persona_written).toBe(false);
+    expect(body.persona_file).toBeNull();
+
+    const clo = JSON.parse(readFileSync(registryPath, "utf-8")).find((a: any) => a.id === "clo");
+    const agents = readFileSync(join(clo.workspace_path, "AGENTS.md"), "utf-8");
+    expect(agents).toContain("You are **Clo** (clo) — 프론트, 앱, 풀스택 개발자.");
+    expect(agents).toContain("**로빈팀** team");
+    expect(existsSync(clo.persona_file)).toBe(false);
+  });
+  test("claude 영입도 CLAUDE.md에 이름·역할·팀을 유지하고 없는 persona_file을 반환하지 않는다", async () => {
+    const { app, registryPath } = setupReady();
+    const r = await app.request("/members/recruit", json({
+      id: "jane", display_name: "Jane", role: "기획/PM", runtime: "claude_channel",
+    }));
+    expect(r.status).toBe(200);
+    const body = await r.json();
+    expect(body.persona_written).toBe(false);
+    expect(body.persona_file).toBeNull();
+
+    const jane = JSON.parse(readFileSync(registryPath, "utf-8")).find((a: any) => a.id === "jane");
+    const claude = readFileSync(join(jane.workspace_path, "CLAUDE.md"), "utf-8");
+    expect(claude).toContain("You are **Jane** (jane) — 기획/PM.");
+    expect(claude).toContain("**로빈팀** team");
   });
   test("첫 recruit 멤버 → coordinator capability 자동 부여", async () => {
     const { app, registryPath } = setupReady([]);

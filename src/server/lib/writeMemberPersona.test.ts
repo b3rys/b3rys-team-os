@@ -44,12 +44,12 @@ describe("writeMemberPersona — 룰 렌더러(SOUL 은 안 건드린다)", () =
     expect(existsSync(join(ws, "SOUL.md.bak"))).toBe(false);               // 덮은 적이 없으니 .bak 도 없다
   });
 
-  test("★로딩파일(AGENTS.md openclaw) = 자동 정체성 없음 + 직접경로 참조(@ 아님) + 룰★", () => {
+  test("★로딩파일(AGENTS.md openclaw) = 등록 정체성 + 직접경로 참조(@ 아님) + 룰★", () => {
     const ws = mk();
     savePersonaFile(join(ws, "SOUL.md"), CUSTOM);
     writeMemberPersona(args(ws));
     const agents = readFileSync(join(ws, "AGENTS.md"), "utf-8");
-    expect(agents).not.toContain("You are");            // 자동 정체성 없음
+    expect(agents).toContain("You are **Lui** (lui) — AI.");
     expect(agents).not.toContain(CUSTOM);               // ★custom 을 로딩파일에 주입하지 않는다 — 참조만★
     expect(agents).toContain("## Role & Persona");
     expect(agents).toContain("SOUL.md");               // 직접 경로
@@ -57,14 +57,14 @@ describe("writeMemberPersona — 룰 렌더러(SOUL 은 안 건드린다)", () =
     expect(agents).toMatch(/Core Rules|핵심 룰/);
   });
 
-  test("★claude CLAUDE.md = @SOUL.md 참조 + 룰, 자동 정체성 없음★", () => {
+  test("★claude CLAUDE.md = 등록 정체성 + @SOUL.md 참조 + 룰★", () => {
     const ws = mk();
     savePersonaFile(join(ws, "SOUL.md"), CUSTOM);
     writeMemberPersona(args(ws, { id: "bill", display_name: "Bill", role: "dev", runtime: "claude_channel" }));
     const claude = readFileSync(join(ws, "CLAUDE.md"), "utf-8");
     expect(claude).toContain("@SOUL.md");              // 참조(로드는 Claude Code 가)
     expect(claude).not.toContain(CUSTOM);              // ★본문에 주입 안 함★
-    expect(claude).not.toContain("You are");
+    expect(claude).toContain("You are **Bill** (bill) — dev.");
     expect(claude).toMatch(/Core Rules|핵심 룰/);
   });
 
@@ -142,7 +142,7 @@ describe("writeMemberPersona — 기타", () => {
     writeMemberPersona({ id: "lui", display_name: "Lui", role: "AI 리서치", runtime: "openclaw", workspace_path: ws, persona_file: join(ws, "SOUL.md") });
     expect(existsSync(join(ws, "SOUL.md"))).toBe(false);   // ★껍데기도 안 만든다★
     const agents = readFileSync(join(ws, "AGENTS.md"), "utf-8");
-    expect(agents).not.toContain("You are");               // 자동 persona 생성 없음(원래 의도 유지)
+    expect(agents).toContain("You are **Lui** (lui) — AI 리서치."); // registry 정체성은 로딩파일에 존재
     expect(agents).toContain("SOUL.md");                   // 참조는 그대로(대상 없으면 조용히 증발)
   });
 });

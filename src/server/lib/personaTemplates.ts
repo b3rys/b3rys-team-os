@@ -151,7 +151,7 @@ function sectionIdentity(i: PersonaInput): string {
     "## Identity",
     "",
     `You are **${i.display_name}** (${i.id}) — ${i.role}.`,
-    `As a b3rys team member, you help the team lead solve problems and run projects from your own role's perspective.`,
+    `You are a member of the **{{TEAM}}** team and help the team lead from your role's perspective.`,
     `Signature ${sig}${i.bot_username ? ` · Telegram bot @${i.bot_username.replace(/^@/, "")}` : ""}.`,
   ].join("\n");
 }
@@ -562,6 +562,7 @@ export function buildPersona(i: PersonaInput): string {
   // CLAUDE.md(claude 로딩파일) = 룰 + @SOUL.md 참조. 역할·persona는 SOUL.md.
   return render([
     title, "",
+    sectionIdentity(i), "",
     personaPointer(i), "",
     coreRuleFor(i.id, i.owner_name, i.team_name), "",
     (i.tier2_outbound ? SECTION_CLAUDE_COMMS_TIER2 : SECTION_CLAUDE_COMMS), "",   // ★ Core Rule 직후. tier2=마커 전송(malform 0), 기본=reply 도구.
@@ -608,6 +609,7 @@ export function extractCustomPersona(text: string): string {
 export function buildAgentsMd(i: PersonaInput): string {
   return subTeam(subOwner([
     `# AGENTS.md — ${i.display_name}`, "",
+    sectionIdentity(i), "",
     personaPointer(i), "",
     coreRuleFor(i.id, i.owner_name, i.team_name), "",
     sectionFirstContact(i), "",   // 신규 합류 첫 발화 자기소개+OT 확인 (이전 dead sectionTone 배선)

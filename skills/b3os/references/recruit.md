@@ -97,7 +97,8 @@ curl -s -X POST http://localhost:$PORT/team/api/members/recruit \
   준비되지 않은 BYO도 목록에서 숨기지 않고 disabled+사유+연동 안내로 보여준다. 이 세 가지 외 내부/coming-soon 런타임은 온보딩에 노출하지 않는다.
   런타임을 고른 뒤 **그 런타임만** 인증 preflight(CLI·로그인) 점검 — 구독을 미리 캐묻지 않는다.
 - `persona`(선택): 능력/강점 — 페르소나 파일에 주입.
-- 응답: `{ ok, ot_id, member, persona_file }`. **이 `ot_id` 를 이후 단계에 쓴다.**
+- 응답: `{ ok, ot_id, member, persona_file, persona_written }`. **이 `ot_id` 를 이후 단계에 쓴다.**
+  - `persona_file`은 persona를 실제 저장했을 때만 `SOUL.md` 경로이며, persona가 비어 파일이 없으면 `null`이다.
   - 팀원 작업공간은 `$B3RYS_HOME/members/<팀원id>/` 에 생성된다(install.sh가 `B3RYS_HOME=$HOME/b3os` 세팅 → `~/b3os/members/<팀원id>/`. 페르소나 `SOUL.md` + 규칙 `CLAUDE.md`/`AGENTS.md` + `TEAM-OS.md` 심링크, **리포 밖 자체완결 루트**). B3RYS_HOME 미설정 시에만 `~/Development/<팀원id>` fallback(개발 머신).
 - 첫 영입 멤버는 자동으로 `coordinator` capability를 받는다(라우팅 안전망).
 - 중복 id = 409, 잘못된 runtime = 400.
