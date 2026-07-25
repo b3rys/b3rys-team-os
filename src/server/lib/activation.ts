@@ -18,7 +18,7 @@ import { writeMemberPersona, savePersonaFile } from "./writeMemberPersona";
 import { MANUALS_DIR } from "./paths";
 import { appendAuditFile } from "./auditFile";
 import { codexBridgePaths, placeCodexToken, writeCodexBridgeFiles, removeCodexBridgeFiles, resolveOwnerDmId } from "../runtimes/codex/launcher";
-import { placeClaudeToken, writeClaudeBridgeFiles, seedClaudeTrust, seedClaudeAccess, killClaudeTmux, claudeBridgePaths, installReplyGuardHook, installOutboundHook, installProgressHook, uninstallOutboundHook, uninstallReplyGuardHook, uninstallRecoveryHook, removeClaudeBridgeFiles } from "../runtimes/claude/launcher";
+import { placeClaudeToken, writeClaudeBridgeFiles, seedClaudeTrust, seedClaudeAccess, killClaudeTmux, reconnectClaudeTelegram, claudeBridgePaths, installReplyGuardHook, installOutboundHook, installProgressHook, uninstallOutboundHook, uninstallReplyGuardHook, uninstallRecoveryHook, removeClaudeBridgeFiles } from "../runtimes/claude/launcher";
 import { isTier2Outbound, isTier2Shadow } from "../runtimes/claude/tier2Flag";
 import { setAgentEnabled, clearAgentOff, isAgentOff } from "./agentControl";
 import { activeOfficialMemberCount, isTeamOfficialMember, MAX_OFFICIAL_TEAM_MEMBERS } from "./agentMembership";
@@ -195,16 +195,27 @@ const COORDINATOR_CAPABILITY = "coordinator";
 async function pushEssentialStep(
   steps: ActivateResult["steps"],
   agent: { id: string; runtime: string; openclaw_agent_id?: string | null; hermes_profile?: string | null },
+  opts?: { tolerate?: string[] },
 ): Promise<boolean> {
   const essentials = await checkEssentialSettings(agent as any);
+  // ★degraded tolerate(2026-07-25 하네스 §4 fix)★: poller(bot.pid) 미기동은 poller 스텝이 이미 needs_reconnect 로
+  //   표면화하고 auto-reconnect 가 복구를 시도하므로, 그것만 빠졌으면 essentials 를 하드실패로 치지 않는다.
+  //   그렇지 않으면 :620 이 recall·bus-wake·degraded 반환을 통째로 스킵해 746f6b3 의 degraded 완결이 무효가 된다.
+  //   tolerate 에 없는 진짜 필수설정(token·allowFrom·채널)이 하나라도 빠지면 종전대로 하드실패.
+  const tolerate = opts?.tolerate ?? [];
+  const hardMissing = essentials.missing.filter((m) => !tolerate.some((t) => m.startsWith(t)));
+  const degraded = !essentials.ok && hardMissing.length === 0;
+  const stepOk = essentials.ok || degraded;
   steps.push({
     step: "essentials",
-    ok: essentials.ok,
+    ok: stepOk,
     detail: essentials.ok
       ? "필수설정 확인(토큰·allowFrom·채널·poller)"
-      : `필수설정 누락: ${essentials.missing.join(", ")}${essentials.canAutoFix ? " (자동복구 가능)" : ""}`,
+      : degraded
+        ? "필수설정 확인(토큰·allowFrom·채널) — poller 는 needs_reconnect(자동 복구 시도 중)"
+        : `필수설정 누락: ${hardMissing.join(", ")}${essentials.canAutoFix ? " (자동복구 가능)" : ""}`,
   });
-  return essentials.ok;
+  return stepOk;
 }
 
 /**
@@ -607,17 +618,31 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       appendAuditFile("activation", res.ok ? "runtime_done" : "runtime_failed", id, { runtime });
       steps.push({ step: "runtime", ok: res.ok, detail: res.ok ? "claude 봇 tmux 기동(LaunchAgent)" : res.detail });
       if (!res.ok) return { ok: false, steps, error: "claude 봇 기동 실패" };
-      // poller 게이트: bot.pid 출현 = MCP(poller) 실기동. 기본 40s(TEAMOS_POLLER_WAIT_MS override).
-      //   ★CC 2.1.220 fresh 세션 부팅서 telegram MCP 첫 핸드셰이크가 실패해 bot.pid 미출현하는 케이스가 있다★(다른 claude 세션 가동 중 fresh 부팅).
-      //   세션·토큰·scope·install(0.012s warm) 다 정상 — reconnect 하면 즉시 붙음 = "첫 부팅 핸드셰이크"만의 문제.
+      // poller 게이트: bot.pid 출현 = MCP(poller) 실기동.
+      //   ★근본(2026-07-25 하네스 4-way + 실측 확정)★: CC fresh 세션 부팅서 telegram MCP 가 부팅 MCP "열거"에서 빠지는
+      //   케이스가 있다 — 실패 세션 MCP 로그에 `Starting connection` 이 0건(타임아웃 아니라 스폰 시도 자체가 없음).
+      //   살아있는 형제 claude 세션이 공유 `~/.claude.json`·플러그인 캐시를 쓰는 중 fresh 부팅하면 열거가 telegram 을 놓친다
+      //   (2번째+ 멤버가 "첫 봇으로 형제 옆에서 부팅"하는 게 유일한 결정적 차이 — 1번째는 형제 없이 혼자 부팅해 깨끗이 열거).
+      //   이건 CC 내부라 직접 못 고치지만, 런타임에 `/mcp reconnect` 하면 (조용해진 상태서) 재열거돼 즉시 붙는다 = 스모킹건.
+      //   pre-warm·버전락·30s 게이트 늘리기는 "타임아웃"을 겨냥한 헛수고였다(Starting connection 0건이 반증).
       const rawWait = process.env.TEAMOS_POLLER_WAIT_MS;
-      const pollerWaitMs = rawWait !== undefined && Number.isFinite(Number(rawWait)) ? Number(rawWait) : 30000;  // CC MCP 핸드셰이크 타임아웃과 동일한 30s(GD 2026-07-25, 40→30). 게이트 길이는 원인 아님 — 붙으면 즉시 반환.
-      const pollerOk = await waitForClaudePoller(id, pollerWaitMs);
-      steps.push({ step: "poller", ok: pollerOk, detail: pollerOk ? "텔레그램 채널 poller 기동 확인(bot.pid)" : "poller 미기동 → needs_reconnect(세션·토큰·scope 정상, MCP 첫 핸드셰이크만 실패). recruit 는 degraded 로 완결됨 — /mcp reconnect 로 poller 복구" });
-      // ★early-return 제거(2026-07-25 근본 fix, 교차검증됨)★: 예전엔 poller 실패 시 여기서 즉시 return → 아래(essentials·recall·bus-wake)와
-      //   라우트의 OT 완결이 ★통째로 스킵★돼, MCP 첫-핸드셰이크 삐끗이 recruit 를 하드 블록(stuck)으로 키웠다(reconnect 로 봇 살려도 미완결).
-      //   이제 poller 실패해도 나머지를 계속 진행(degraded 완결)하고 poller 만 needs_reconnect 로 노출한다. 반환 ok 는 poller 제외 스텝으로 판정.
-      if (!await pushEssentialStep(steps, { id, runtime })) return { ok: false, steps, error: "claude 필수설정 누락 — 재활성화/설정 복구 필요" };
+      const pollerWaitMs = rawWait !== undefined && Number.isFinite(Number(rawWait)) ? Number(rawWait) : 30000;
+      let pollerOk = await waitForClaudePoller(id, pollerWaitMs);
+      // ★auto-reconnect(하네스 확정 fix)★: 첫 부팅 열거 누락 시 b3os 가 세션에 `/mcp reconnect` 를 자동 주입(최대 2회, 각 12s 재확인).
+      //   사용자가 tmux 에 직접 들어가 reconnect 하던 걸 서버가 대신 = 공개 사용자는 아무것도 안 만짐. reconnect 는 항상 붙는다(실측).
+      let reconnected = false;
+      for (let attempt = 0; !pollerOk && attempt < 2; attempt++) {
+        if (!reconnectClaudeTelegram(id)) break; // tmux 세션 부재(스폰 실패)면 중단
+        pollerOk = await waitForClaudePoller(id, 12000);
+        reconnected = pollerOk;
+      }
+      steps.push({ step: "poller", ok: pollerOk, detail: pollerOk
+        ? (reconnected ? "텔레그램 채널 poller 기동(auto-reconnect 로 복구)" : "텔레그램 채널 poller 기동 확인(bot.pid)")
+        : "poller 미기동 → needs_reconnect(auto-reconnect 2회 시도했으나 미복구; 세션·토큰·scope 정상). 세션에서 /mcp reconnect 재시도 가능" });
+      // ★early-return 제거 + degraded 완결(2026-07-25)★: poller 실패해도 essentials 를 tolerate(poller:) 로 통과시켜
+      //   아래 recall·bus-wake·degraded 반환까지 진행한다(그렇지 않으면 :620 essentials 하드실패가 746f6b3 의 degraded 를 무효화).
+      //   token·allowFrom·채널 등 진짜 필수설정이 빠지면 종전대로 하드실패.
+      if (!await pushEssentialStep(steps, { id, runtime }, { tolerate: ["poller:"] })) return { ok: false, steps, error: "claude 필수설정 누락 — 재활성화/설정 복구 필요" };
       // recall 주입(GD 2026-07-05): 활성화=새 claude 세션(맥락 빔)이니 --fresh 재시작과 동일하게 직전 대화 digest 주입.
       //   런타임 스왑/영입이 곧 '첫 로딩'이라 여기가 GD가 원한 '첫 로딩 시 주입' 지점. fire-forget best-effort(세션 준비는 스크립트 sleep이 대기, 실패해도 활성화 정상).
       try { Bun.spawn(["bash", `${process.cwd()}/scripts/inject-recall.sh`, id], { stdout: "ignore", stderr: "ignore" }); } catch { /* best-effort */ }
