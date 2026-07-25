@@ -45,8 +45,11 @@ claude 순서:
    ```bash
    ls ~/.claude/channels/telegram-<id>/bot.pid   # 있으면 poller 폴링 중(= 진짜 대화됨)
    ```
-   죽어 있으면(bot.pid 없음) 대시보드에서 해당 팀원을 **재활성화**(activate 다시)하면 poller가 다시 뜬다.
-   재활성화 전 stale 세션/마커가 남아 거짓통과하지 않도록 서버가 tmux kill + bot.pid 제거 후 fresh 기동한다.
+   죽어 있으면(bot.pid 없음) — 대부분 **MCP(텔레그램 플러그인) 스폰 실패**다. 근본: 플러그인 start(`bun install --no-summary && bun server.ts`)의
+   ★콜드 install + 동시 claude 세션들의 CC 버전락 경합★(`Lock already held for versions/…`)이 MCP 연결 타임아웃을 초과한 것(2번째+ 영입·전체 리스타트에서 발생). server.ts·토큰·scope 는 정상(warm 상태로 수동 실행하면 폴링됨).
+   ★복구 = 세션 죽이지 말고 MCP reconnect★: `tmux attach -t claude-<id>` → `/mcp` → `telegram` → **Reconnect**. warm 이라 즉시 Reconnected + bot.pid 생성.
+   ★재활성화(activate 다시)는 지양★ — kill+respawn 이 콜드 부팅을 재유발하고 버전락 경합을 오히려 늘려 같은 실패를 반복한다. reconnect 로 안 되는 경우에만 최후수단으로 재활성화.
+   ※ 예방(2026-07-25 fix): activate 는 플러그인 node_modules 를 **pre-warm**(install 순삭)하고, **전체 리스타트는 claude 세션을 stagger 로 하나씩** 부팅해 버전락 경합을 피한다(`TEAMOS_RESTART_STAGGER_MS`). 버전락은 "부팅 순간"만의 문제 — running 세션엔 무관.
 
 ## 2) 팀원 활성화(영입)가 실패해요
 

@@ -241,7 +241,51 @@ elif [[ -x "$CLAUDE_BIN" && -d "$WORKDIR" ]]; then
   fi
 fi
 
+# ★pre-warm★ (2026-07-25, 2번째+ 팀원 영입 실패 근본 fix — claude --debug 로 확정) —
+#   MCP 커맨드(.mcp.json) = `bun run --cwd <plugin> --silent start`, start = `bun install --no-summary && bun server.ts`.
+#   fresh 세션 스폰 시 그 `bun install` 이 ★콜드★(+동시 claude 세션들의 버전락 경합: `Lock already held for versions/…`)라
+#   CC 의 MCP 서버 연결 타임아웃을 초과 → MCP 실패 → server.ts 미기동 → bot.pid 없음('귀머거리'). scope·싱글톤 아님.
+#   → 세션 스폰 전에 node_modules 를 미리 warm 하면, 세션의 `bun install --no-summary` 가 0.03s 순삭 → MCP 가 타임아웃 안에 연결.
+#   멱등(이미 warm 이면 순삭)·안전(best-effort, 실패해도 기동 계속).
+_PLUGIN_CACHE="$HOME/.claude/plugins/cache/claude-plugins-official/telegram"
+# ★|| true 필수★: set -euo pipefail 에서 캐시 dir 없음/빈(fresh clone·plugin install 실패) 시 `ls -d …/*/` 가 비영점 →
+#   pipefail+set -e 로 ★tmux 스폰 전에 스크립트가 죽어 활성화 전체 실패★(하네스 CONFIRMED BUG 2026-07-25). 가드는 아래 [-n].
+_PLUGIN_DIR="$(ls -d "$_PLUGIN_CACHE"/*/ 2>/dev/null | sort -V | tail -1 || true)"
+if [ -n "${_PLUGIN_DIR:-}" ] && [ -f "${_PLUGIN_DIR}package.json" ] && [ -x "$BUN_BIN" ]; then
+  if ( cd "$_PLUGIN_DIR" && "$BUN_BIN" install --no-summary ) >/dev/null 2>&1; then
+    echo "  MCP plugin  : node_modules pre-warm ✓ (스폰 시 install 순삭 → MCP 타임아웃 방지)"
+  else
+    echo "  ⚠ MCP plugin pre-warm 실패(계속) — 첫 스폰서 콜드 install 로 MCP 타임아웃 가능"
+  fi
+fi
+
+# ★claude 부팅 직렬화 mutex★ (2026-07-25, 버전락 경합 근본 fix — recruit·restart 공통 스폰 경로):
+#   claude 는 "부팅 순간" CC 버전락(`versions/<v>`)을 잡는다. 여러 claude 가 동시에 부팅하면 경합
+#   (`Lock already held for versions/…`) → CC 의 MCP 연결 타임아웃 초과 → poller 미기동('귀머거리',
+#   2번째+ 영입·전체 리스타트 근본). 이 스크립트는 recruit(LaunchAgent)·restart 공통 경로라 여기서 전역 mutex 로
+#   "한 번에 하나만 부팅"하게 직렬화한다. pre-warm 은 콜드 install 을, 이 mutex 는 버전락 경합을 각각 담당(둘 다 필요).
+#   스폰 후 버전락 창(초 단위)만큼 잡았다 놓는다. running 세션엔 무관 — 부팅 순간만. CLAUDE_BOOT_LOCK_HOLD_SEC=0 이면 끔.
+#   (버전락 파일을 직접 폴링하는 게 이상적이나 경로가 CC 내부라, 부팅 초반 창을 커버하는 고정 hold 로 근사. auto-update 시엔 더 필요할 수 있음.)
+_BOOT_LOCK="$HOME/.claude/.b3os-claude-boot.lock"
+_HOLD_SEC="${CLAUDE_BOOT_LOCK_HOLD_SEC:-8}"
+_HAVE_BOOT_LOCK=0
+if [ "$_HOLD_SEC" != "0" ]; then
+  mkdir -p "$HOME/.claude" 2>/dev/null || true
+  _n=0
+  while [ "$_n" -lt 160 ]; do   # 최대 ~80s 대기(다른 claude 부팅 중이면 순서 기다림) — 이후엔 락 없이 진행(무한대기 방지)
+    if mkdir "$_BOOT_LOCK" 2>/dev/null; then _HAVE_BOOT_LOCK=1; break; fi
+    if [ -n "$(find "$_BOOT_LOCK" -maxdepth 0 -mmin +3 2>/dev/null)" ]; then rmdir "$_BOOT_LOCK" 2>/dev/null || true; fi  # stale(3분+) 탈취
+    _n=$((_n + 1)); sleep 0.5
+  done
+fi
+
 tmux new-session -d -s "$SESSION_NAME" -c "$WORKDIR" "$INNER_CMD"
+
+# 스폰한 세션이 버전락 phase(부팅 초반)를 지나갈 시간만큼 mutex 유지 후 해제 → 다음 claude 부팅과 안 겹침.
+if [ "$_HAVE_BOOT_LOCK" = "1" ]; then
+  sleep "$_HOLD_SEC"
+  rmdir "$_BOOT_LOCK" 2>/dev/null || true
+fi
 
 echo "Started tmux session: $SESSION_NAME"
 echo "  State dir   : $STATE_DIR"
