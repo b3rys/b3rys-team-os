@@ -13,6 +13,10 @@ import { getCaptureGroupId } from "../../lib/captureConfig";
 const HOME = process.env.HOME ?? "";
 // ★vendored 시작 스크립트 — repo 내(src/, 공개 export 포함)에서 REPO_ROOT로 해석. 기존 ~/.claude/skills 개인스킬 의존 제거(퍼블릭 fresh 클론서 봇 안 뜨던 #1 blocker). GD 2026-07-02.
 const START_SCRIPT = `${REPO_ROOT}/src/server/runtimes/claude/start-telegram-channel.sh`;
+/** 정본 런처 경로 — plist drift 검사(인수테스트)가 이 값과 대조한다.
+ *  ★사본이 여러 벌 굴러다니면 "한 곳만 고치고 까먹는" 사고가 난다★ (2026-07-25 실측: 모델 하드코딩 fix 때
+ *  claude 멤버 plist 가 ~/.claude/skills 사본·구 team-collab 사본·정본 3곳으로 갈려 있었다). */
+export const CLAUDE_START_SCRIPT = START_SCRIPT;
 
 export interface ClaudeBridgePaths {
   id: string;
