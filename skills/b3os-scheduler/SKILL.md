@@ -74,12 +74,12 @@ createCronJob(db, { id:"sched_task_review_ping", title:"05:00 리뷰핑", cron:"
 
 **간격 잡:** `createScheduledJob(db, { kind:"recurring", scheduleKind:"interval", nextRunAt: new Date(Date.now()+30*60_000), scheduleExpr:{minutes:30}, ... })`. ※interval은 첫 `nextRunAt`(Date)를 **직접** 지정해야 함(cron/reminder는 자동계산).
 
-등록 전용 스크립트 패턴 = `scripts/seed-metrics-nightly-job.ts`(예시: 고정 id·존재 시 no-op·`--commit` 게이트). 라이브 team.db 대상은 `TEAM_DB_PATH` 지정, dry-run 기본. 실시간 스모크 = `scripts/scheduler-live-smoke.ts`.
+**등록 전용 스크립트 패턴**(잡을 한 번 심는 용도로 직접 작성한다 — 저장소에 기성 스크립트는 없다): 고정 id를 쓰고, 이미 있으면 no-op, 실제 쓰기는 `--commit` 게이트로 막고 dry-run을 기본값으로 둔다. 라이브 team.db를 대상으로 할 땐 `TEAM_DB_PATH`를 명시한다.
 
 ## 게이트 / 안전 (팀 규칙)
 - **라이브 발사**: 서버 워커가 `B3OS_SCHEDULER_ENABLED=true` + `B3OS_SCHEDULER_DRY_RUN=0`일 때만 실제 발화. 이 env 플립·라이브 team.db 잡 등록은 **공유 인프라 변경 → GD 승인 게이트**.
 - **launchd 이관**: per-job launchd를 스케줄러 잡으로 옮길 땐 ①새 잡 등록 ②발화 검증 ③그 다음 옛 launchd 제거(운영자) 순서. 순서 어기면 이중발화. launchd 제거=운영자 권한(GD 터미널/Bill).
-- **검증**: 시간 코드는 유닛테스트(주입 now)만으로 부족 — 실제 벽시계로 라이브 스모크(별도 temp DB + 진짜 워커)까지 돌린다. 유닛테스트엔 ms 붙은 non-round 시각 포함(정각만 쓰면 조기발화 버그 놓침). 참고 `scripts/scheduler-live-smoke.ts`.
+- **검증**: 시간 코드는 유닛테스트(주입 now)만으로 부족 — 실제 벽시계로 라이브 스모크(별도 temp DB + 진짜 워커)까지 돌린다. 유닛테스트엔 ms 붙은 non-round 시각 포함(정각만 쓰면 조기발화 버그 놓침). 라이브 스모크는 일회용 스크립트로 직접 돌린다(기성 스크립트 없음): 별도 temp DB를 만들고 `TEAM_DB_PATH`로 지정한 뒤 `B3OS_SCHEDULER_ENABLED=true B3OS_SCHEDULER_DRY_RUN=0`으로 실제 워커를 띄워 발화를 관찰한다. ★라이브 `team.db`를 절대 대상으로 삼지 않는다.★
 - AI 코드면 `b3os-ai-code-safety` + 하네스 검토 후 머지.
 
 ## 한계 (명시)

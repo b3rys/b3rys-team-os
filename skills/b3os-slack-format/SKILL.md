@@ -49,8 +49,9 @@ briefing-agent 스타일처럼 가볍고 읽히는 일반 메시지 패턴. Bloc
 - 짧은 메시지는 골격 강요하지 말고 mrkdwn(볼드·불릿)만 입혀도 됨.
 
 ## 사용법 (다듬기 → 변환 → 게시)
-0) **humanize 최종 패스(기본)**: 길거나 공유·게시용 본문은 슬랙 게시 전에 `humanize` 스킬로 자연스러운 한국어로 다듬는다(team-os 기본 품질 게이트 — docs·reports·slack 공통). 단 **긴급·짧은 ack·기계 출력·로그 원문은 예외**. (humanize는 산문을 다듬으므로 *아래 mrkdwn 변환 전*에 돌린다. humanize-korean = 카탈로그 등록 dependency, MIT, 원저자 epoko77-ai — 우리 원본 아님.)
-1) 마크다운/평문으로 내용 작성(+0의 humanize 결과) → 변환:
+0) **한국어 윤문 패스(선택)**: 길거나 공유·게시용 본문은 게시 전에 번역투·기계적 병렬·영어 라벨 남발을 줄인다. 단 **긴급·짧은 ack·기계 출력·로그 원문은 예외**. 산문을 다듬는 단계이므로 *아래 mrkdwn 변환 전*에 한다.
+   ★`humanize-korean` 스킬은 이 저장소에 포함되어 있지 않고 `install.sh`가 설치하지도 않는다★(외부 스킬 — MIT, 원저자 epoko77-ai). 이미 설치해 둔 사람만 그 스킬로 돌리고, 없으면 이 단계는 직접 읽어보며 다듬는 것으로 갈음한다. 이 단계가 없다고 게시가 막히지는 않는다.
+1) 마크다운/평문으로 내용 작성(+0의 윤문 결과) → 변환:
 ```
 python3 skills/b3os-slack-format/scripts/md-to-slack.py <input.md>     # 또는 stdin
 ```

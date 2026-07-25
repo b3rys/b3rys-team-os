@@ -20,7 +20,7 @@ description: b3rys 팀 표준 보고서 스킬. 모든 보고서는 MD를 소스
 
 ## 문체 원칙 — humanize-korean 최종 패스 (the team lead 2026-06-10)
 - 보고서는 **무조건 한글화하지 않는다**. 업계 표준 용어, 제품명, 모델명, API 이름, 검색/평가 용어처럼 영어가 더 정확한 표현은 살린다.
-- 대신 한국어 독자가 자연스럽게 읽을 수 있게 `humanize-korean` 스킬을 최종 검수 단계로 사용한다.
+- 대신 한국어 독자가 자연스럽게 읽을 수 있게 아래 기준으로 최종 검수한다. (`humanize-korean` 스킬을 이미 설치해 둔 사람은 그걸 써도 된다 — ★이 저장소에 포함되어 있지 않고 `install.sh`가 설치하지도 않는 외부 스킬★이다.)
 - 첫 등장 용어는 `영어 용어(한국어 뜻)`으로 설명한다. 이후에는 문맥상 자연스러운 쪽을 쓴다.
 - 장 제목·실행 계획·판단 문장은 한국어 흐름을 기본으로 한다. `Result`, `Decision`, `Step`, `Default criteria` 같은 기계적 영어 라벨은 그대로 남기지 말고 필요한 경우 한국어로 풀어쓴다.
 - 영어를 억지로 한국어로 바꾸지 않는다. 목표는 "영어 제거"가 아니라 **의미 보존 + 자연스러운 한국어 리듬**이다.
@@ -28,13 +28,15 @@ description: b3rys 팀 표준 보고서 스킬. 모든 보고서는 MD를 소스
 
 ## 단계
 1. **MD 소스 먼저** — Markdown 작성(`reports/<주제>-<YYYYMMDD>/<name>.md`). 재편집·버전관리·재렌더 원본.
-2. **humanize-korean 최종 윤문** — 렌더 전 `humanize-korean` 기준으로 번역투·기계적 병렬·영어 라벨 남발을 줄인다. 내용 추가/삭제가 아니라 문체·리듬·표현만 다듬는다.
+2. **최종 윤문** — 렌더 전에 위 “문체 원칙” 기준으로 번역투·기계적 병렬·영어 라벨 남발을 줄인다. 내용 추가/삭제가 아니라 문체·리듬·표현만 다듬는다. (외부 `humanize-korean` 스킬이 설치돼 있으면 그걸로 돌려도 된다.)
 3. **HTML 렌더**(확인 시) — `scripts/render.sh <md> [out.html] [제목]` → 아이폰 반응형 HTML+SVG(자체완결, **다크/라이트 테마 토글**).
 4. **포털 게시**(확인 시) — `scripts/publish.sh --title "T" --author maintainer --summary "S" --md a.md --html a.html` → team-collab `reports/`에 복사 + 등록 → **<dashboard-url>/reports** 목록에 바로 뜬다. HTML이 있으면 포털 기본 form은 HTML이고, MD는 정본·다운로드용 보조 form으로 남는다.
 
+두 스크립트는 **이 저장소 안에** 있다. clone 루트에서 실행한다(`install.sh`는 `~/.claude/skills/b3os`만 연결하므로 `~/.claude/skills/b3os-report/…` 경로는 없다).
+
 ```bash
-~/.claude/skills/b3os-report/scripts/render.sh report.md report.html "제목"
-~/.claude/skills/b3os-report/scripts/publish.sh --title "제목" --author maintainer --summary "한줄요약" --md report.md --html report.html
+skills/b3os-report/scripts/render.sh report.md report.html "제목"
+skills/b3os-report/scripts/publish.sh --title "제목" --author maintainer --summary "한줄요약" --md report.md --html report.html
 ```
 → Telegram `.html` 첨부(아이폰 Safari) + /reports 포털 둘 다 가능.
 

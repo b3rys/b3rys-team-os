@@ -1,6 +1,6 @@
 ---
 name: b3os-release-ops
-description: b3os 공개 정본 배포·PR 머지·핫픽스·force-push 안전 게이트. 팀원이 공개 main, live deploy, clean merge, GD noreply 재작성, 인수테스트, 봇 자율머지 범위를 판단할 때 invoke한다. scripts/release-preflight.sh 로 clean worktree·noreply author/committer·post-merge tip·branch protection·live repo 확인을 기계적으로 점검한다.
+description: b3os 공개 정본 배포·PR 머지·핫픽스·force-push 안전 게이트. 팀원이 공개 main, live deploy, clean merge, GD noreply 재작성, 인수테스트, 봇 자율머지 범위를 판단할 때 invoke한다. skills/b3os-release-ops/scripts/release-preflight.sh 로 clean worktree·noreply author/committer·post-merge tip·branch protection·live repo 확인을 기계적으로 점검한다.
 ---
 
 # b3os-release-ops — 공개 배포·머지·핫픽스 게이트
@@ -10,7 +10,7 @@ description: b3os 공개 정본 배포·PR 머지·핫픽스·force-push 안전 
 ## 언제 invoke하나
 
 - b3os 공개 `main`에 PR을 merge하기 전.
-- `scripts/deploy-live.sh`로 live deploy(라이브 배포)하기 전/후.
+- live deploy(라이브 배포)하기 전/후.
 - hotfix(긴급 수정)를 만들거나 머지할 때.
 - force-push/history rewrite/orphan public snapshot 같은 공개 기록 재작성 논의가 있을 때.
 - 봇이 “자동 머지해도 되는가?”를 판단해야 할 때.
@@ -57,12 +57,17 @@ bun run typecheck   # 코드 변경일 때
 ### 3. live deploy
 
 ```bash
-bash scripts/deploy-live.sh --dry-run
+git fetch origin main
+git --no-pager log --oneline HEAD..origin/main        # 반영될 commit 확인(dry-run)
 skills/b3os-release-ops/scripts/release-preflight.sh --mode deploy --live-dir "$PWD"
-bash scripts/deploy-live.sh
+
+PREV="$(git rev-parse HEAD)"                          # 롤백 지점 — 보고에 남긴다
+git reset --hard origin/main
+bun install && bun run build
+bun run service restart                               # 상시가동 미등록이면 `bun run start` 재기동
 ```
 
-`deploy-live.sh`는 실패 시 이전 commit으로 자동 롤백을 시도한다. 그래도 실패하면 출력된 수동 복구 명령을 따른다.
+검증(`/team` 200)이 실패하면 `git reset --hard "$PREV"` → `bun install && bun run build` → 재시작으로 되돌린다. 전체 절차와 인수테스트 기준은 `docs/DEPLOY_MERGE_HOTFIX_WORKFLOW.md`의 “라이브 배포 흐름”이 정본이다.
 
 ### 4. 배포 후 인수테스트
 

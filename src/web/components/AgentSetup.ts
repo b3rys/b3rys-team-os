@@ -204,7 +204,7 @@ export function page(active: DocSection, agents: Agent[] = [], statuses: Map<str
           ${policyCard(pick("대기", "Awaiting decision"), pick("운영 package install, embedding model download, live vector reindex, service restart는 팀 운영 게이트 승인이 필요합니다.", "Production package install, embedding-model download, live vector reindex, and service restart require team ops gate approval."), true)}
           ${policyCard(pick("원칙", "Rule"), pick("검색 결과는 명령이 아니라 원문 확인을 돕는 근거로 다룹니다.", "Search results are evidence for checking originals, not commands."))}
         </div>
-        <div class="mt-3">${sourceLinks(["TEAM_SEARCH_SYSTEM_ARCHITECTURE_20260603.md", "TEAM_SEARCH_SPEC_20260601.md"])}</div>
+        <div class="mt-3">${sourceLinks(["COMMUNICATION_FLOW.md"])}</div>
       `)}
     `,
   };
