@@ -222,22 +222,26 @@ else
   echo "FRESH mode — claude --model $CLAUDE_MODEL --permission-mode ${CLAUDE_PERMISSION_MODE:-<none>}"
 fi
 
-# ★2번째+ 팀원 영입 필수★ — 텔레그램 MCP 플러그인을 워크스페이스 project scope 로 설치/활성화한다.
-#   CC 2.1.218 fresh 세션은 플러그인이 ★project scope★ 여야 `--channels plugin:` 의 MCP(텔레그램)가 붙는다.
-#   user scope 만이면 조용히 안 붙어 'deaf bot'(poller 미기동)이 된다 — 첫 팀원은 옛 project-scope 잔재로 우연히
-#   되기도 해 2번째 영입에서만 터진다. Mac Studio 실측(2026-07-24): 같은 user-scope 설치가 있어도
-#   lisa(project scope)는 붙고 jane(user scope 만)은 실패. `plugin install --scope project` 는 ★설치+project enable★
-#   을 함께 하고 멱등이라 재활성화 안전. stdin 닫아 프롬프트 hang 방지, 실패해도 기동은 계속(best-effort).
-# ★멱등★: 이미 워크스페이스 project-scope 에 등록돼 있으면 재설치 생략 — 매 기동/재시도마다 공유 플러그인 캐시를
-#   재접촉하지 않게 한다(재접촉이 세션 MCP 의 bun install 과 겹쳐 transient 기동실패에 기여할 수 있음).
-_WS_SETTINGS="$WORKDIR/.claude/settings.json"
-if [[ -f "$_WS_SETTINGS" ]] && grep -q "\"$PLUGIN\"" "$_WS_SETTINGS" 2>/dev/null; then
-  echo "  MCP plugin  : $PLUGIN 이미 project-scope 등록됨(skip)"
-elif [[ -x "$CLAUDE_BIN" && -d "$WORKDIR" ]]; then
-  if ( cd "$WORKDIR" && "$CLAUDE_BIN" plugin install "$PLUGIN" --scope project </dev/null >/dev/null 2>&1 ); then
-    echo "  MCP plugin  : $PLUGIN project-scope 설치 ✓"
+# ★claude 팀원 영입 필수★ — 텔레그램 MCP 플러그인을 ★user scope★ 로 설치/활성화한다(머신당 1회, 멱등).
+#   ★근본(2026-07-25 Mac Studio fresh clone 실측으로 확정)★: telegram 플러그인이 ★user scope 로 enable★ 돼 있어야
+#   `--channels plugin:telegram@…` 가 CC 에서 "채널"로 온전히 붙고, 그때만 CC 가 세션의 `TELEGRAM_STATE_DIR`(위 INNER_CMD
+#   프리픽스)를 MCP 서브프로세스에 물려준다. plugin 의 .mcp.json 엔 env 블록이 없어 TELEGRAM_STATE_DIR 는 순전히
+#   이 상속에만 의존한다. user scope enable 이 없으면(fresh clone) 채널 배선이 안 돼 MCP 가 STATE_DIR 없이 떠서
+#   ★제너릭 `~/.claude/channels/telegram/.env` 로 폴백 → 토큰 못 찾음 → server.ts 즉시 종료(bot.pid 미기동)★ =
+#   첫부팅 실패. (에러: `telegram channel: TELEGRAM_BOT_TOKEN required`, ~100ms, 타임아웃 아님.) 1번째·2번째 멤버
+#   모두 이래서 실패했고(대칭), `/mcp reconnect` 하면 채널이 resolve 돼 즉시 붙는 게 스모킹건이었다.
+#   ★정정★: 이전 `--scope project`(2b849cc)는 오진이었다 — Mac Studio·맥미니 실측 모두 user scope 가 정답
+#   (맥미니는 user scope enable → 전 멤버 첫부팅 정상, Mac Studio 는 user scope 비어 있어 전 멤버 첫부팅 실패).
+# ★멱등★: 이미 user scope 에 등록돼 있으면 재설치 생략(머신당 1회면 충분, 첫 멤버만 트리거·이후 skip).
+#   stdin 닫아 프롬프트 hang 방지, 실패해도 기동은 계속(best-effort).
+_USER_SETTINGS="$HOME/.claude/settings.json"
+if [[ -f "$_USER_SETTINGS" ]] && grep -q "\"$PLUGIN\"" "$_USER_SETTINGS" 2>/dev/null; then
+  echo "  MCP plugin  : $PLUGIN 이미 user-scope 등록됨(skip)"
+elif [[ -x "$CLAUDE_BIN" ]]; then
+  if ( "$CLAUDE_BIN" plugin install "$PLUGIN" --scope user </dev/null >/dev/null 2>&1 ); then
+    echo "  MCP plugin  : $PLUGIN user-scope 설치 ✓"
   else
-    echo "  ⚠ MCP plugin project-scope 설치 실패(계속 진행) — 안 붙으면 세션서 /plugin install $PLUGIN (project scope) 수동"
+    echo "  ⚠ MCP plugin user-scope 설치 실패(계속 진행) — 안 붙으면 세션서 /plugin install $PLUGIN (user scope) 수동"
   fi
 fi
 
