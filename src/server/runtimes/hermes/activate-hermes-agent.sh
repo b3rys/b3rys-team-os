@@ -32,7 +32,10 @@ say(){ printf "\033[32m%s\033[0m\n" "$1"; }
 #   auth.json = 응답 생성 인증(공유 원본). 없으면 '메시지는 받지만 응답 못 하는' 死봇이 되므로 이를 가진 프로필만 원본으로 인정.
 if [ -z "${SRC_PROFILE:-}" ]; then
   SRC_PROFILE=""
-  for cand in "$HOME/.hermes/profiles/$HERMES_BASE_PROFILE" "$HOME"/.hermes/profiles/*; do
+  DETECTED_BASE=""
+  _detector="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/detect-base-profile.sh"
+  [ -f "$_detector" ] && DETECTED_BASE="$(bash "$_detector" "$HOME/.hermes/profiles" 2>/dev/null || true)"
+  for cand in ${DETECTED_BASE:+"$HOME/.hermes/profiles/$DETECTED_BASE"} "$HOME/.hermes/profiles/$HERMES_BASE_PROFILE" "$HOME"/.hermes/profiles/*; do
     [ -d "$cand" ] || continue
     pname="$(basename "$cand")"
     [ "$pname" = "$AGENT_ID" ] && continue        # 타겟 자신은 원본이 될 수 없음

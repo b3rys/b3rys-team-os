@@ -16,6 +16,7 @@ import { dirname } from "node:path";
 import { memberPaths, MEMBERS_ROOT, personaTargetsForRuntime, assertNotLiveMemberFsUnderTest } from "./personaTemplates";
 import { writeMemberPersona, savePersonaFile } from "./writeMemberPersona";
 import { HERMES_BASE_PROFILE, MANUALS_DIR } from "./paths";
+import { isHermesProfileProtected } from "./hermesBaseProfile";
 import { appendAuditFile } from "./auditFile";
 import { codexBridgePaths, placeCodexToken, writeCodexBridgeFiles, removeCodexBridgeFiles, resolveOwnerDmId } from "../runtimes/codex/launcher";
 import { placeClaudeToken, writeClaudeBridgeFiles, seedClaudeTrust, seedClaudeAccess, killClaudeTmux, reconnectClaudeTelegram, claudeBridgePaths, installReplyGuardHook, installOutboundHook, installProgressHook, uninstallOutboundHook, uninstallReplyGuardHook, uninstallRecoveryHook, removeClaudeBridgeFiles } from "../runtimes/claude/launcher";
@@ -134,7 +135,7 @@ export async function teardownRuntime(
   //   절대 정지/삭제하지 않는다(공유 인프라 보존, 멤버 레지스트리/per-id 토큰만 정리) — offboard 원본 로직 그대로.
   if (runtime === "hermes_agent") {
     const prof = agent?.hermes_profile ?? id;
-    const isBaseHermesProfile = prof === HERMES_BASE_PROFILE;
+    const isBaseHermesProfile = isHermesProfileProtected(prof);
     try { if (!isBaseHermesProfile) await doSetAgentEnabled(id, "hermes_agent", false); } catch { /* best-effort */ }
     await new Promise((r) => setTimeout(r, opts.sleepMs ?? 1500)); // 게이트웨이 bootout 후 프로필 dir 해제 대기(레이스 방지)
     if (/^[a-z0-9_-]+$/i.test(prof) && !isBaseHermesProfile) {
@@ -871,8 +872,8 @@ export async function swapRuntime(db: Database, input: SwapInput, deps: SwapDeps
   // STEP0(e) — 설정된 base hermes 프로필 가드. 모든 hermes 멤버의 공유 auth 소스라 교체 대상이
   //   아니다(offboard 가드와 동일 조건 재사용: target.runtime==="hermes_agent" && (hermes_profile??id)
   //   === HERMES_BASE_PROFILE). swap 특유 추가: id 자체가 base 이름이면 방향 무관 거부한다.
-  const isBaseHermesTarget = target.runtime === "hermes_agent" && ((target.hermes_profile ?? id) === HERMES_BASE_PROFILE);
-  if (isBaseHermesTarget || id === HERMES_BASE_PROFILE) {
+  const isBaseHermesTarget = target.runtime === "hermes_agent" && isHermesProfileProtected(target.hermes_profile ?? id);
+  if (isBaseHermesTarget || isHermesProfileProtected(id)) {
     return {
       ok: false, steps,
       error: `${HERMES_BASE_PROFILE}는 모든 hermes 멤버가 공유하는 base 프로필(auth 소스)입니다. 런타임 교체 대상이 아닙니다.`,

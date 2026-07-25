@@ -31,6 +31,25 @@ if ! printf '%s' "$HERMES_BASE_PROFILE" | grep -Eq '^[A-Za-z0-9_-]+$'; then
   exit 1
 fi
 
+# 설정과 독립된 defense-in-depth: 다른 프로필 auth.json이 가리키는 실제 공유 원본도 항상 보존한다.
+# 탐지가 모호하면 어느 프로필도 안전하게 삭제할 수 없으므로 Hermes teardown 전체를 건너뛴다.
+HERMES_DETECTED_BASE=""
+HERMES_DETECT_STATUS=0
+_detector="$SELF/src/server/runtimes/hermes/detect-base-profile.sh"
+if [ -f "$_detector" ]; then
+  HERMES_DETECTED_BASE="$(bash "$_detector" "$HOME/.hermes/profiles")" || HERMES_DETECT_STATUS=$?
+else
+  HERMES_DETECT_STATUS=2
+fi
+same_profile() {
+  [ "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "${2:-}" | tr '[:upper:]' '[:lower:]')" ]
+}
+is_base_profile() {
+  local p="${1:-}"
+  same_profile "$p" "$HERMES_BASE_PROFILE" && return 0
+  [ -n "$HERMES_DETECTED_BASE" ] && same_profile "$p" "$HERMES_DETECTED_BASE"
+}
+
 # ── 출력 헬퍼(install.sh 톤: green=say / yellow=warn) ─────────────────
 say()  { printf "\033[32m%s\033[0m\n" "$1"; }  # green
 warn() { printf "\033[33m%s\033[0m\n" "$1"; }  # yellow
@@ -251,7 +270,9 @@ else
           ;;
         hermes_agent)
           _prof="${prof:-$id}"
-          if [ "$_prof" = "$HERMES_BASE_PROFILE" ]; then
+          if [ "$HERMES_DETECT_STATUS" -ne 0 ]; then
+            warn "    ⛔ 공유 auth 원본 프로필 판별 불가 — Hermes teardown 전체 건너뜀(fail-closed)."
+          elif is_base_profile "$_prof"; then
             # ★★ CRITICAL 가드 — base 프로필은 모든 hermes 멤버의 공유 auth.json 소스 + clone 원본.
             #   삭제하면 hermes 런타임 전멸(auth dangling). 프로필 dir·게이트웨이·plist 를 절대 건드리지 않는다.
             warn "    ★ base hermes 프로필 '$HERMES_BASE_PROFILE' 보존 — 게이트웨이/프로필/plist 삭제하지 않음(공유 auth 소스)."
@@ -259,7 +280,7 @@ else
             launchd_stop "ai.hermes.gateway-$_prof"
             rmf  "$HOME/Library/LaunchAgents/ai.hermes.gateway-$_prof.plist"
             # 프로필 dir 은 슬러그 가드된 프로필명 + base 제외 확인 후에만 삭제.
-            if valid_id "$_prof" && [ "$_prof" != "$HERMES_BASE_PROFILE" ]; then
+            if valid_id "$_prof" && ! is_base_profile "$_prof"; then
               rmrf "$HOME/.hermes/profiles/$_prof"
             fi
             # per-id credential 토큰(멤버 봇 토큰) 정리 — 공유 auth 아님(라이브 코드와 동일, non-base 만).
@@ -315,6 +336,7 @@ else
   rmf  "$SELF/team.db-wal"
   rmf  "$SELF/team.db-shm"
   rmf  "$SELF/.env"
+  rmf  "$SELF/agents.json"
   rmrf "$SELF/var"
   rmrf "$SELF/slack-tokens"
   # TEAM_MEDIA_DIR 기본값 = <설치폴더>/../team-media (mediaStore.ts). sibling 만 삭제.

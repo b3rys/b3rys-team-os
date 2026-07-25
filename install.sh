@@ -100,6 +100,32 @@ if [ -f "$SKILL_SRC/SKILL.md" ]; then
 fi
 
 # ── 4) .env 준비 ─────────────────────────────────────────────────
+# .env 생성보다 먼저 기존 Hermes 공유 auth 원본을 판별한다. 먼저 example을 복사하면 그 안의
+# 중립 기본값이 "명시 설정"처럼 보여 기존 설치 마이그레이션이 영구히 건너뛰어진다.
+read_hermes_base_env() {
+  [ -f "$1" ] || return 0
+  { grep -E '^[[:space:]]*(export[[:space:]]+)?HERMES_BASE_PROFILE[[:space:]]*=' "$1" 2>/dev/null || true; } \
+    | tail -1 \
+    | sed -E -e 's/^[[:space:]]*(export[[:space:]]+)?HERMES_BASE_PROFILE[[:space:]]*=[[:space:]]*//' \
+      -e 's/[[:space:]]+#.*$//' -e 's/^["'\''][[:space:]]*//' -e 's/[[:space:]]*["'\'']$//' -e 's/[[:space:]]*$//'
+}
+
+_existing_base="$(read_hermes_base_env .env)"
+_selected_base=""
+if printf '%s' "$_existing_base" | grep -Eq '^[A-Za-z0-9_-]+$'; then
+  _selected_base="$_existing_base"
+else
+  _detector="$ROOT/src/server/runtimes/hermes/detect-base-profile.sh"
+  _detect_status=0
+  _selected_base="$(bash "$_detector" "$HOME/.hermes/profiles")" || _detect_status=$?
+  if [ "$_detect_status" -ne 0 ]; then
+    warn "❌ Hermes auth 원본 프로필을 하나로 판별할 수 없어 안전을 위해 설치를 중단합니다."
+    warn "   기존 .env에 HERMES_BASE_PROFILE=<공유 auth 원본 프로필명>을 지정한 뒤 다시 실행하세요."
+    exit 1
+  fi
+  _selected_base="${_selected_base:-b3os}"
+fi
+
 if [ ! -f .env ]; then
   cp .env.example .env
   say "✅ .env 생성 (.env.example 복사) — 기본값으로 대시보드는 바로 동작."
@@ -107,6 +133,12 @@ if [ ! -f .env ]; then
 else
   say "✅ .env 이미 있음 — 유지."
 fi
+
+# 새 값을 확정한 뒤에만 기존 표기(export/공백/따옴표 포함)를 제거하고 원자적으로 교체한다.
+awk '!/^[[:space:]]*(export[[:space:]]+)?HERMES_BASE_PROFILE[[:space:]]*=/' .env > .env.tmp
+printf 'HERMES_BASE_PROFILE=%s\n' "$_selected_base" >> .env.tmp
+mv .env.tmp .env
+say "✅ Hermes base 프로필 보존 설정: $_selected_base"
 
 # ── 4a) B3RYS_HOME 데이터 루트 ────────────────────────────────────
 # 팀원 워크스페이스는 $B3RYS_HOME/members/<id> 에 생성된다. 미설정 시 ~/Development/<id> 로
@@ -120,32 +152,6 @@ fi
 # explicit operator values; only append missing keys.
 grep -q '^B3OS_SCHEDULER_ENABLED=' .env 2>/dev/null || printf 'B3OS_SCHEDULER_ENABLED=true\n' >> .env
 grep -q '^B3OS_SCHEDULER_DRY_RUN=' .env 2>/dev/null || printf 'B3OS_SCHEDULER_DRY_RUN=0\n' >> .env
-
-# 기존 설치 마이그레이션: 예전 .env에는 base 프로필 키가 없다. 이 상태로 새 중립 기본값을
-# 적용하면 실제 공유 auth 원본이 삭제 가드에서 빠지므로, 기존 auth 심링크 구조에서 보수적으로 추론해 backfill한다.
-if ! grep -qE '^HERMES_BASE_PROFILE=[[:space:]]*[A-Za-z0-9_-]+[[:space:]]*(#.*)?$' .env 2>/dev/null; then
-  # 빈 값/잘못된 기존 줄은 중복 키를 남기지 않고 원자적으로 제거한 뒤 안전한 값만 기록한다.
-  grep -v '^HERMES_BASE_PROFILE=' .env > .env.tmp 2>/dev/null || true
-  mv .env.tmp .env
-  _detector="$ROOT/src/server/runtimes/hermes/detect-base-profile.sh"
-  _detected_base=""
-  _detect_status=0
-  _detected_base="$(bash "$_detector" "$HOME/.hermes/profiles")" || _detect_status=$?
-  if [ "$_detect_status" -eq 0 ] && [ -n "$_detected_base" ]; then
-    printf 'HERMES_BASE_PROFILE=%s\n' "$_detected_base" >> .env
-    say "✅ 기존 Hermes base 프로필 감지·보존 설정 완료: $_detected_base"
-  elif [ "$_detect_status" -eq 0 ]; then
-    printf 'HERMES_BASE_PROFILE=b3os\n' >> .env
-  elif ! grep -Eq '"runtime"[[:space:]]*:[[:space:]]*"hermes_agent"' "$ROOT/agents.json" 2>/dev/null; then
-    # Hermes를 쓰지 않는 설치에서 사용자 개인 auth 프로필이 여러 개라는 이유만으로 전체 설치를 막지 않는다.
-    printf 'HERMES_BASE_PROFILE=b3os\n' >> .env
-    warn "⚠ Hermes auth 원본이 여러 개지만 등록된 Hermes 팀원이 없어 중립 기본값 b3os를 사용합니다."
-  else
-    warn "❌ Hermes auth 원본 프로필을 하나로 판별할 수 없어 안전을 위해 설치를 중단합니다."
-    warn "   .env에 HERMES_BASE_PROFILE=<공유 auth 원본 프로필명>을 지정한 뒤 다시 실행하세요."
-    exit 1
-  fi
-fi
 
 # ── 4b) 팀원 활성화 허용 스위치 (APPROVAL_EXECUTION_ENABLED) ──────
 # 본인 전용 장비에서만 팀원(봇) 활성화를 허용. 대화형으로 물어보고 .env 에 자동 설정

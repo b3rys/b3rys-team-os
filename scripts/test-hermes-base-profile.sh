@@ -42,13 +42,27 @@ chmod +x "$INSTALL_BIN/bun" "$INSTALL_BIN/uname"
 HOME="$INSTALL_HOME" PATH="$INSTALL_BIN:/usr/bin:/bin" bash "$INSTALL_ROOT/install.sh" >/dev/null
 grep -q '^HERMES_BASE_PROFILE=old-base$' "$INSTALL_ROOT/.env" || fail "existing .env was not backfilled"
 
-# A present-but-empty key is also migrated; unrelated ambiguous Hermes auth does not block non-Hermes installs.
+# A newly created .env also uses detection before .env.example's neutral default is copied.
+rm "$INSTALL_ROOT/.env"
+HOME="$INSTALL_HOME" PATH="$INSTALL_BIN:/usr/bin:/bin" bash "$INSTALL_ROOT/install.sh" >/dev/null
+grep -q '^HERMES_BASE_PROFILE=old-base$' "$INSTALL_ROOT/.env" || fail "new .env skipped existing base detection"
+
+# Ambiguous auth fails before changing an invalid/empty existing setting.
 rm "$INSTALL_HOME/.hermes/profiles/member/auth.json"
 touch "$INSTALL_HOME/.hermes/profiles/member/auth.json"
 printf 'TEAM_HTTP_PORT=7878\nHERMES_BASE_PROFILE=\n' > "$INSTALL_ROOT/.env"
+cp "$INSTALL_ROOT/.env" "$INSTALL_ROOT/.env.before"
+set +e
+HOME="$INSTALL_HOME" PATH="$INSTALL_BIN:/usr/bin:/bin" bash "$INSTALL_ROOT/install.sh" >/dev/null 2>&1
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "ambiguous install did not fail closed"
+cmp -s "$INSTALL_ROOT/.env.before" "$INSTALL_ROOT/.env" || fail "failed migration modified existing config"
+
+# Quoted/exported valid settings are preserved and normalized only after selection.
+printf 'TEAM_HTTP_PORT=7878\n  export HERMES_BASE_PROFILE=\"old-base\"\n' > "$INSTALL_ROOT/.env"
 HOME="$INSTALL_HOME" PATH="$INSTALL_BIN:/usr/bin:/bin" bash "$INSTALL_ROOT/install.sh" >/dev/null
-[ "$(grep -c '^HERMES_BASE_PROFILE=' "$INSTALL_ROOT/.env")" -eq 1 ] || fail "empty key migration left duplicate settings"
-grep -q '^HERMES_BASE_PROFILE=b3os$' "$INSTALL_ROOT/.env" || fail "non-Hermes ambiguous install did not use neutral default"
+grep -q '^HERMES_BASE_PROFILE=old-base$' "$INSTALL_ROOT/.env" || fail "quoted/exported valid setting was not preserved"
 
 # activate: configured base wins; when absent, another authenticated profile remains the fallback.
 ACT_HOME="$TMP/activate-home"
@@ -90,11 +104,13 @@ set -e
 # uninstall: .env-configured base survives while a non-base Hermes profile is removed.
 UN_ROOT="$TMP/uninstall-repo"
 UN_HOME="$TMP/uninstall-home"
-mkdir -p "$UN_ROOT" "$UN_HOME/.hermes/profiles/configured-base" "$UN_HOME/.hermes/profiles/worker" \
+mkdir -p "$UN_ROOT/src/server/runtimes/hermes" "$UN_HOME/.hermes/profiles/configured-base" "$UN_HOME/.hermes/profiles/worker" "$UN_HOME/.hermes/profiles/configured-base-2" \
   "$UN_HOME/.hermes/credentials" "$UN_HOME/Library/LaunchAgents"
 cp "$ROOT/uninstall.sh" "$UN_ROOT/uninstall.sh"
-printf 'HERMES_BASE_PROFILE=configured-base # preserved base\n' > "$UN_ROOT/.env"
-printf '[{"id":"base","runtime":"hermes_agent","hermes_profile":"configured-base"},{"id":"worker","runtime":"hermes_agent","hermes_profile":"worker"}]\n' > "$UN_ROOT/agents.json"
+cp "$ROOT/src/server/runtimes/hermes/detect-base-profile.sh" "$UN_ROOT/src/server/runtimes/hermes/detect-base-profile.sh"
+printf 'HERMES_BASE_PROFILE=CONFIGURED-BASE # case-insensitive APFS guard\n' > "$UN_ROOT/.env"
+printf '[{"id":"base","runtime":"hermes_agent","hermes_profile":"configured-base"},{"id":"worker","runtime":"hermes_agent","hermes_profile":"worker"},{"id":"similar","runtime":"hermes_agent","hermes_profile":"configured-base-2"}]\n' > "$UN_ROOT/agents.json"
+touch "$UN_HOME/.hermes/profiles/configured-base/auth.json"
 touch "$UN_HOME/.hermes/credentials/base-token.txt" "$UN_HOME/.hermes/credentials/worker-token.txt"
 touch "$UN_HOME/Library/LaunchAgents/ai.hermes.gateway-configured-base.plist"
 touch "$UN_HOME/Library/LaunchAgents/ai.hermes.gateway-worker.plist"
@@ -107,11 +123,24 @@ HOME="$UN_HOME" USER="b3os-test" bash "$UN_ROOT/uninstall.sh" --yes --keep-data 
 [ ! -e "$UN_HOME/Library/LaunchAgents/ai.hermes.gateway-worker.plist" ] || fail "non-base plist was preserved"
 [ ! -e "$UN_HOME/.hermes/credentials/worker-token.txt" ] || fail "non-base credential was preserved"
 
+# Missing config on a retry still preserves the detected base; a similar name is not over-protected.
+rm "$UN_ROOT/.env"
+HOME="$UN_HOME" USER="b3os-test" bash "$UN_ROOT/uninstall.sh" --yes --keep-data >/dev/null
+[ -d "$UN_HOME/.hermes/profiles/configured-base" ] || fail "retry without .env deleted detected base"
+[ ! -e "$UN_HOME/.hermes/profiles/configured-base-2" ] || fail "similar non-base name was preserved"
+
 printf 'HERMES_BASE_PROFILE=../unsafe\n' > "$UN_ROOT/.env"
 set +e
 HOME="$UN_HOME" USER="b3os-test" bash "$UN_ROOT/uninstall.sh" --yes --keep-data >/dev/null 2>&1
 status=$?
 set -e
 [ "$status" -ne 0 ] || fail "uninstall accepted an unsafe base profile"
+
+# A full uninstall removes registry/config so a best-effort retry cannot replay stale members.
+printf 'HERMES_BASE_PROFILE=configured-base\n' > "$UN_ROOT/.env"
+HOME="$UN_HOME" USER="b3os-test" bash "$UN_ROOT/uninstall.sh" --yes >/dev/null
+[ ! -e "$UN_ROOT/.env" ] || fail "full uninstall preserved .env"
+[ ! -e "$UN_ROOT/agents.json" ] || fail "full uninstall preserved stale registry"
+[ -d "$UN_HOME/.hermes/profiles/configured-base" ] || fail "full uninstall deleted detected base"
 
 echo "PASS: Hermes base profile configuration"
