@@ -377,19 +377,47 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
 function starIcon(active: boolean): string {
   return `<svg class="h-4 w-4" viewBox="0 0 24 24" fill="${active ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.6l6.2-.9L12 3Z"/></svg>`;
 }
-function importantFilterLabel(count: number): string {
-  return `<span class="inline-flex items-center gap-1.5" title="${pick("중요 표시", "Important")}">${starIcon(true)}<span class="text-[11px] text-slate-500">${count}</span></span>`;
-}
 function starButton(r: Report, placement: "card" | "detail"): string {
   const active = isImportant(r);
   const title = active ? pick("중요 표시 해제", "Unmark important") : pick("중요 표시", "Mark important");
   const base = placement === "card"
-    ? "reports-star absolute right-12 top-3 inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-surface-1/90 shadow-sm transition-all"
+    ? "reports-star inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border bg-surface-1/70 transition-colors"
     : "reports-star-detail inline-flex h-9 w-9 items-center justify-center rounded-lg border cursor-pointer transition-colors";
   const tone = active
     ? "border-amber-400/40 text-txt-amber bg-amber-400/12 hover:bg-amber-400/18"
     : "border-surface-3 text-slate-400/80 bg-surface-1/70 hover:border-amber-400/40 hover:bg-amber-400/10 hover:text-txt-amber";
   return `<button class="${base} ${tone}" data-id="${escape(r.id)}" data-important="${active ? "1" : "0"}" title="${title}" aria-label="${title}">${starIcon(active)}</button>`;
+}
+
+function updateListCount(selector: string, count: number): void {
+  const el = _root?.querySelector<HTMLElement>(selector);
+  if (el) el.textContent = String(Math.max(0, count));
+}
+
+function updateCardStarButton(el: HTMLButtonElement, r: Report): void {
+  const replacement = document.createRange().createContextualFragment(starButton(r, "card")).firstElementChild;
+  if (!(replacement instanceof HTMLButtonElement)) return;
+  replacement.addEventListener("click", handleCardStarClick);
+  el.replaceWith(replacement);
+}
+
+async function handleCardStarClick(e: MouseEvent): Promise<void> {
+  e.preventDefault();
+  e.stopPropagation();
+  const el = e.currentTarget as HTMLButtonElement;
+  const id = el.dataset.id || "";
+  if (!id) return;
+  const next = el.dataset.important !== "1";
+  el.disabled = true;
+  try {
+    const report = await setReportImportant(id, next);
+    _importantCount += next ? 1 : -1;
+    updateListCount("[data-reports-important-count]", _importantCount);
+    updateCardStarButton(el, _all.find((r) => r.id === id) ?? report);
+  } catch (err) {
+    await showAlert(pick(`중요 표시 변경 실패: ${(err as Error).message}`, `Failed to update important mark: ${(err as Error).message}`));
+    el.disabled = false;
+  }
 }
 
 // ── 렌더: 목록 ────────────────────────────────────────────────────
@@ -404,9 +432,9 @@ function renderList(): void {
       ? "text-accent-green border-accent-green/35 bg-accent-green/10"
       : "text-slate-400 border-surface-3 bg-surface-2 hover:text-slate-200"}`;
   const pills =
-    `<button class="${pillCls(_cat === ALL_FILTER)}" data-cat="${ALL_FILTER}">${pick("전체", "All")}<span class="ml-1.5 text-[11px] text-slate-500">${allCount}</span></button>` +
-    `<button class="${pillCls(_cat === IMPORTANT_FILTER)}" data-cat="${IMPORTANT_FILTER}" title="${pick("중요 표시만 보기", "Show important only")}" aria-label="${pick("중요 표시만 보기", "Show important only")}">${importantFilterLabel(_importantCount)}</button>` +
-    cats.map((c) => `<button class="${pillCls(_cat === c)}" data-cat="${escape(c)}">${escape(c)}<span class="ml-1.5 text-[11px] text-slate-500">${counts[c]}</span></button>`).join("");
+    `<button class="${pillCls(_cat === ALL_FILTER)}" data-cat="${ALL_FILTER}">${pick("전체", "All")}<span class="ml-1.5 text-[11px] text-slate-500" data-reports-all-count>${allCount}</span></button>` +
+    `<button class="${pillCls(_cat === IMPORTANT_FILTER)}" data-cat="${IMPORTANT_FILTER}" title="${pick("중요 표시만 보기", "Show important only")}" aria-label="${pick("중요 표시만 보기", "Show important only")}"><span class="inline-flex items-center gap-1.5" title="${pick("중요 표시", "Important")}">${starIcon(true)}<span class="text-[11px] text-slate-500" data-reports-important-count>${_importantCount}</span></span></button>` +
+    cats.map((c) => `<button class="${pillCls(_cat === c)}" data-cat="${escape(c)}">${escape(c)}<span class="ml-1.5 text-[11px] text-slate-500" data-reports-category-count="${escape(c)}">${counts[c]}</span></button>`).join("");
 
   const items = _all.slice().sort(byNewest);
 
@@ -416,17 +444,20 @@ function renderList(): void {
       return `<button class="reports-form-badge px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide border ${badgeClass(ft)} hover:brightness-110" data-id="${escape(r.id)}" data-type="${escape(ft)}" title="${pick(`${escape(ft)} 형식으로 열기`, `Open as ${escape(ft)}`)}">${escape(ft)}</button>`;
     }).join("");
     return `
-      <div class="reports-card group relative w-full text-left rounded-xl border border-surface-3 bg-surface-2 p-4 hover:bg-surface-3/60 transition-colors overflow-hidden" data-id="${escape(r.id)}" role="button" tabindex="0">
+      <div class="reports-card group relative w-full text-left rounded-xl border border-surface-3 bg-surface-2 px-4 py-3 hover:bg-surface-3/60 transition-colors overflow-hidden" data-id="${escape(r.id)}" data-category="${escape(catOf(r))}" role="button" tabindex="0">
         <span class="absolute left-0 top-0 bottom-0 w-[3px] bg-accent-green opacity-0 group-hover:opacity-100 transition-opacity"></span>
-        ${starButton(r, "card")}
-        <button class="reports-delete absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-lg border border-surface-3 bg-surface-1/90 text-slate-500 shadow-sm transition-all hover:border-red-400/40 hover:bg-red-400/10 hover:text-txt-red" data-id="${escape(r.id)}" data-title="${escape(r.title)}" title="${pick("보고서 삭제", "Delete report")}" aria-label="${pick("보고서 삭제", "Delete report")}">
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>
-        </button>
-        <span class="inline-block mb-2 px-2 py-0.5 rounded text-[10px] font-semibold border text-txt-green border-accent-green/30 bg-accent-green/10">${escape(catOf(r))}</span>
-        <div class="pr-20 text-[15px] font-semibold text-slate-100 leading-snug">${escape(r.title)}</div>
-        <div class="flex items-center gap-2 flex-wrap text-xs text-slate-500 mt-1.5"><span class="text-accent-greenSoft font-medium">${escape(r.author || "—")}</span><span>·</span><span>${fmtDate(r.created_at)}</span></div>
-        ${r.summary ? `<div class="text-[13px] text-slate-400 leading-relaxed mt-2 line-clamp-2">${escape(r.summary)}</div>` : ""}
-        ${badges ? `<div class="flex gap-1.5 flex-wrap mt-3">${badges}</div>` : ""}
+        <div class="flex items-start gap-2">
+          <div class="min-w-0 flex-1 text-[15px] font-semibold text-slate-100 leading-snug">${escape(r.title)}</div>
+          <div class="flex shrink-0 items-center gap-1">
+            ${starButton(r, "card")}
+            <button class="reports-delete inline-flex h-7 w-7 items-center justify-center rounded-lg border border-surface-3 bg-surface-1/70 text-slate-500 transition-colors hover:border-red-400/40 hover:bg-red-400/10 hover:text-txt-red" data-id="${escape(r.id)}" data-title="${escape(r.title)}" title="${pick("보고서 삭제", "Delete report")}" aria-label="${pick("보고서 삭제", "Delete report")}">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 flex-wrap text-xs text-slate-500 mt-1"><span class="text-accent-greenSoft font-medium">${escape(r.author || "—")}</span><span>·</span><span>${fmtDate(r.created_at)}</span></div>
+        ${r.summary ? `<div class="text-[13px] text-slate-400 leading-relaxed mt-1.5 line-clamp-1">${escape(r.summary)}</div>` : ""}
+        ${badges ? `<div class="flex gap-1.5 flex-wrap mt-2">${badges}</div>` : ""}
       </div>`;
   }).join("");
 
@@ -480,21 +511,7 @@ function renderList(): void {
     });
   });
   _root.querySelectorAll<HTMLButtonElement>(".reports-star").forEach((el) => {
-    el.addEventListener("click", async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const id = el.dataset.id || "";
-      if (!id) return;
-      const next = el.dataset.important !== "1";
-      el.disabled = true;
-      try {
-        await setReportImportant(id, next);
-        await reloadList({ preserveScroll: true });
-      } catch (err) {
-        await showAlert(pick(`중요 표시 변경 실패: ${(err as Error).message}`, `Failed to update important mark: ${(err as Error).message}`));
-        el.disabled = false;
-      }
-    });
+    el.addEventListener("click", handleCardStarClick);
   });
   _root.querySelectorAll<HTMLButtonElement>(".reports-delete").forEach((el) => {
     el.addEventListener("click", async (e) => {
@@ -505,8 +522,20 @@ function renderList(): void {
       if (!id || !await showConfirm({ message: pick(`보고서 "${title}"을(를) 목록에서 삭제할까요?\n\n첨부 파일은 디스크에 남고, 대시보드 등록 정보만 삭제됩니다.`, `Delete report "${title}" from the list?\n\nThe attached files stay on disk; only the dashboard registration is removed.`), danger: true })) return;
       el.disabled = true;
       try {
+        const removed = _all.find((r) => r.id === id);
         await deleteReport(id);
-        await reloadList({ preserveScroll: true });
+        _totalCount = Math.max(0, _totalCount - 1);
+        updateListCount("[data-reports-all-count]", _totalCount);
+        if (removed) {
+          const category = catOf(removed);
+          _categoryCounts[category] = Math.max(0, (_categoryCounts[category] || 0) - 1);
+          updateListCount(`[data-reports-category-count="${CSS.escape(category)}"]`, _categoryCounts[category]!);
+          if (isImportant(removed)) {
+            _importantCount = Math.max(0, _importantCount - 1);
+            updateListCount("[data-reports-important-count]", _importantCount);
+          }
+        }
+        el.closest(".reports-card")?.remove();
       } catch (err) {
         await showAlert(pick(`삭제 실패: ${(err as Error).message}`, `Delete failed: ${(err as Error).message}`));
         el.disabled = false;
