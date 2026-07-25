@@ -301,13 +301,19 @@ else:
     cur = False
 known = None  # provider 의 라이브 모델 목록(호환성 검사에서 채워짐). 아래 dm 검증에 재사용.
 # ★active_provider 를 먼저 판정한다 — 아래 호환성 검사에 필요(종전엔 has 체크 뒤에 있었다).
+#   ★provider 의 '출처'를 함께 기억한다★ — 프로필 자체 auth.json 이 아니라 전역(~/.hermes/auth.json)으로
+#   폴백해 얻은 provider 로 ★교체★까지 하면, 멀티 프로필 환경에서 남의 provider 기준으로 이 프로필의
+#   모델을 덮어쓸 수 있다. 전역 폴백은 원본 동작인 '빈 model 채우기'에만 쓰고 교체에는 쓰지 않는다.
 prov = None
-for ap in (os.path.join(prof, "auth.json"), os.path.expanduser("~/.hermes/auth.json")):
+prov_from_profile = False
+for ap, is_prof in ((os.path.join(prof, "auth.json"), True), (os.path.expanduser("~/.hermes/auth.json"), False)):
     try:
-        prov = (json.load(open(ap)) or {}).get("active_provider") or prov
-        if prov: break
+        got = (json.load(open(ap)) or {}).get("active_provider")
     except Exception:
-        pass
+        got = None
+    if got:
+        prov, prov_from_profile = got, is_prof
+        break
 if not prov:
     if cur:
         print("  ✓ model 이미 설정됨 — skip(멱등, active_provider 판정 실패로 호환성 미검사)"); sys.exit(0)
@@ -332,11 +338,15 @@ CLOSED_SET_PROVIDERS = {"openai-codex"}
 if cur:
     if prov not in CLOSED_SET_PROVIDERS:
         print(f"  ✓ model 이미 설정됨({cur}) — provider={prov} 는 모델목록이 부분집합일 수 있어 교체 안 함 · skip(멱등)"); sys.exit(0)
+    if not prov_from_profile:
+        print(f"  ✓ model 이미 설정됨({cur}) — provider 를 전역 auth.json 에서 얻어(프로필 자체 값 아님) 교체 안 함 · skip(멱등)"); sys.exit(0)
     try:
         from hermes_cli.models import provider_model_ids
         known = [x for x in (provider_model_ids(prov) or []) if isinstance(x, str)]
     except Exception as e:
-        print(f"  ✓ model 이미 설정됨 — skip(멱등, 호환성 조회 실패: {e})"); sys.exit(0)
+        # ★예외 문자열을 그대로 찍지 않는다★ — 이 경로는 인증/토큰 갱신을 타므로(provider_model_ids →
+        #   resolve_codex_runtime_credentials) 예외 메시지에 토큰·URL 이 실릴 수 있다. 타입명만 남긴다.
+        print(f"  ✓ model 이미 설정됨 — skip(멱등, 호환성 조회 실패: {type(e).__name__})"); sys.exit(0)
     if not known:
         print(f"  ✓ model 이미 설정됨 — skip(멱등, provider={prov} 모델목록 비어 판정 불가)"); sys.exit(0)
     if cur in known:
@@ -354,8 +364,29 @@ if not dm:
 #   출처가 다르다. 정적 기본모델이 그 계정의 라이브 목록에 없으면 '호환 불가 → 교체'를 매 활성화마다
 #   무한 반복하고 교체 결과도 여전히 호환 불가다. 목록을 아는 경우에만 교차확인한다.
 if known and dm not in known:
-    print(f"  ⚠ provider 기본모델({dm})이 실제 목록에 없음 — 목록 첫 항목({known[0]})으로 대체")
-    dm = known[0]
+    # ★known[0] 로 바로 떨어지면 '요금 지뢰'가 된다★ — hermes 카탈로그는 provider 에 따라
+    #   '가장 강력한 순'으로 정렬돼 있어 0번이 ★최고가 모델★이다. hermes 자신도 이걸 막고 있다:
+    #     get_default_model_for_provider() docstring —
+    #     "silently defaulting to it is a billing footgun ... a missing model must never
+    #      auto-escalate to the flagship"
+    #   그래서 과금형(_SILENT_DEFAULT_PROVIDERS = openrouter·nous)은 카탈로그 0번 대신
+    #   비용안전 기본값으로 해석된다. 실측(2026-07-25):
+    #     openrouter  provider_model_ids[0]=anthropic/claude-fable-5  vs  기본값=z-ai/glm-5.2  ← 불일치
+    #     openai-codex 는 둘 다 gpt-5.6-sol 이라 현재 CLOSED_SET 에선 영향 없음(잠재 결함).
+    #   CLOSED_SET_PROVIDERS 에 과금형 provider 를 추가하는 순간 조용히 플래그십으로 승격되므로,
+    #   대체할 때도 ★비용안전 기본값을 먼저★ 시도한다.
+    alt = ""
+    try:
+        from hermes_cli.models import get_preferred_silent_default_model
+        alt = get_preferred_silent_default_model(prov) or ""
+    except Exception:
+        alt = ""
+    if alt and alt in known:
+        print(f"  ⚠ provider 기본모델({dm})이 실제 목록에 없음 — 비용안전 기본값({alt})으로 대체")
+        dm = alt
+    else:
+        print(f"  ⚠ provider 기본모델({dm})이 실제 목록에 없음 — 목록 첫 항목({known[0]})으로 대체(카탈로그 상단=고가일 수 있음)")
+        dm = known[0]
 # ★model 매핑을 통째로 갈지 않는다★ — 종전엔 {provider, default} 로 치환해서 형제 키
 #   (api_key·base_url·reasoning_effort·context_length 등 hermes 가 실제로 읽는 값)가 전량 소실됐다.
 #   복사 후 두 키만 갱신하고, 중복 표기인 별칭(model·name)만 정리한다.
