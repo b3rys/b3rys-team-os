@@ -96,6 +96,15 @@ function openclawConfig(home: string, deps: Required<Pick<RuntimeEssentialDeps, 
   return parsed && typeof parsed === "object" ? parsed : null;
 }
 
+// openclaw 소유자 allowlist 는 버전에 따라 위치가 다르다 — 정본(2026.7.x)은 `commands.ownerAllowFrom`,
+// 구 스키마는 `channels.telegram.ownerAllowFrom`. 둘 중 ★값이 있는 쪽★을 채택한다(빈 배열은 미설정으로 취급).
+function openclawOwnerAllowFrom(cfg: any): unknown[] | null {
+  for (const candidate of [cfg?.channels?.telegram?.ownerAllowFrom, cfg?.commands?.ownerAllowFrom]) {
+    if (Array.isArray(candidate) && candidate.length > 0) return candidate;
+  }
+  return null;
+}
+
 function openclawAccountTokenFile(account: string, home: string, deps: Required<Pick<RuntimeEssentialDeps, "exists" | "readText">>): string | null {
   const cfg = openclawConfig(home, deps);
   const raw = cfg?.channels?.telegram?.accounts?.[account]?.tokenFile;
@@ -183,8 +192,8 @@ export function createRuntimeEssentialsRegistry(deps: RuntimeEssentialDeps = {})
       const accountCfg = cfg?.channels?.telegram?.accounts?.[account];
       if (!accountCfg && !nativeCodexFallback) missing.push("channel:openclaw telegram account");
       if (accountCfg && accountCfg.enabled !== true) missing.push("channel:openclaw account disabled");
-      const ownerAllowFrom = cfg?.channels?.telegram?.ownerAllowFrom;
-      if ((!Array.isArray(ownerAllowFrom) || ownerAllowFrom.length === 0) && !nativeCodexFallback) {
+      const ownerAllowFrom = openclawOwnerAllowFrom(cfg);
+      if (!ownerAllowFrom && !nativeCodexFallback) {
         missing.push("allowFrom:openclaw ownerAllowFrom");
       }
       return result(missing, true);
