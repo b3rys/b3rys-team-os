@@ -6,7 +6,7 @@
 //      그래서 설정값(owner_chat_id)을 읽고, 없으면 ★캡처를 아예 하지 않는다★(무동작이 오동작보다 낫다).
 //   ② DM 적재는 팀원 세션 기록을 읽는 기능이라 ★끌 수 있어야★ 한다(dm_capture=off).
 //      끄면 적재만 멈추고 버스·위임·발신은 그대로여야 한다 — dm_message 는 크리티컬이 아니다.
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -124,6 +124,37 @@ describe("dmSyncWorker 게이트", () => {
     const ws = workspaceWithOneDm(OWNER);
     const db = freshDb({ owner_chat_id: OWNER });
     expect(syncDmOnce(db, member(ws)).inserted).toBe(1);
+  });
+
+  // ── 클린 설치 첫 기동: 팀원 0명이면 캡처 대상이 없으니 경고도 찍지 않는다 (2026-07-25 공개 리허설) ──
+  //
+  // ★이 테스트가 공허해지지 않게 하는 두 장치★ (Bill 적대검증 2026-07-25 반영):
+  //   ① owner resolver 를 주입한다 — 기본 resolver 는 설정이 없으면 resolveOwnerDmId() 로 ★실행 머신의
+  //      실제 ~/.claude 페어링 파일★ 을 읽는다. 그래서 주입 없이 freshDb({}) 만 쓰면 owner 가 truthy 로
+  //      나와 '경고 분기'를 아예 타지 않고, 수정을 되돌려도 테스트가 통과한다(= 회귀 방지 가치 0).
+  //   ② warnedNoOwner(모듈 전역 1회권 플래그)를 먼저 리셋하고, ★양성 대조군★ 을 같은 테스트에 둔다.
+  //      플래그가 이미 서 있으면 어떤 코드든 경고를 안 찍으므로, 그 상태의 '경고 없음'은 증거가 아니다.
+  test("팀원 0명(새 설치) → 조용히 0건, owner 미설정 경고 없음 (양성 대조군 포함)", () => {
+    const db = freshDb({});
+    const stubParsers = { claude_channel: () => [] }; // 파일시스템 접근 없는 파서
+    const oneMember: DmSyncMember[] = [{ id: "bill", runtime: "claude_channel", workspacePath: "/tmp/none" }];
+
+    // ① owner 를 찾은 tick 을 1회 흘려 warnedNoOwner=false 로 리셋(경고 1회권 재충전).
+    syncDmOnce(db, oneMember, stubParsers, () => OWNER);
+
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      // ② 팀원 0명 + owner 없음 → 경고 없어야 한다(early return 을 되돌리면 여기서 경고가 찍혀 실패).
+      expect(syncDmOnce(db, [], stubParsers, () => "").inserted).toBe(0);
+      expect(warn.mock.calls.flat().join("\n")).not.toContain("팀장 chat_id");
+
+      // ③ ★양성 대조군★ — 같은 조건에서 멤버만 1명이면 경고가 실제로 찍힌다.
+      //    이게 통과해야 위 ②의 '경고 없음'이 "분기를 탔지만 안 찍었다"는 증거가 된다.
+      syncDmOnce(db, oneMember, stubParsers, () => "");
+      expect(warn.mock.calls.flat().join("\n")).toContain("팀장 chat_id");
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("한 멤버 파서 실패를 격리하고 health+audit에 남긴다", () => {
