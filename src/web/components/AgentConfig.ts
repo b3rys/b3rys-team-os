@@ -302,6 +302,11 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
   const resetBtn = root.querySelector<HTMLButtonElement>("#cfg-reset");
   const statusEl = root.querySelector<HTMLElement>("#cfg-save-status");
   const originalProfile = { role: agent.role ?? "", persona: customPersona };
+  const updateLocalIcon = (patch: { icon?: string | null; icon_color?: string | null }) => {
+    Object.assign(agent, patch);
+    const st = store.getState();
+    st.setAgents(st.agents.map((a) => (a.id === agent.id ? { ...a, ...patch } : a)));
+  };
 
   resetBtn?.addEventListener("click", () => {
     if (roleInput) roleInput.value = originalProfile.role;
@@ -616,7 +621,8 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
   iconDl?.addEventListener("click", async () => {
     try {
       if (iconMsg) { iconMsg.textContent = pick("JPG 생성 중…", "Generating JPG…"); iconMsg.className = "text-[11px] text-slate-400 ml-2 align-middle"; }
-      const result = await downloadAgentIconJpg(agent.id, agent.icon || agentIconName(agent.id));
+      const iconFg = iconColorHex(selColor) ?? undefined;
+      const result = await downloadAgentIconJpg(agent.id, selIcon || agentIconName(agent.id), iconFg);
       if (iconMsg && result === "cancelled") {
         iconMsg.textContent = pick("JPG 저장 취소됨", "JPG save cancelled");
         iconMsg.className = "text-[11px] text-slate-400 ml-2 align-middle";
@@ -652,6 +658,7 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
           });
           if (res.ok) {
             selIcon = name;
+            updateLocalIcon({ icon: name });
             iconBtn.innerHTML = renderAgentIcon(selIcon, selColor, 18);
             iconPicker.querySelectorAll<HTMLButtonElement>("[data-icon]").forEach((x) => { x.className = choiceCls(x.dataset.icon === name); });
             if (iconMsg) { iconMsg.textContent = pick("✓ 변경됨", "✓ Changed"); iconMsg.className = "text-[11px] text-accent-greenSoft ml-2 align-middle"; }
@@ -688,6 +695,7 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
           });
           if (res.ok) {
             selColor = key;
+            updateLocalIcon({ icon_color: key });
             if (iconBtn) iconBtn.innerHTML = renderAgentIcon(selIcon, selColor, 18);
             colorPicker.querySelectorAll<HTMLButtonElement>("[data-color]").forEach((x) => { x.className = swatchCls(x.dataset.color === key); });
             if (iconMsg) { iconMsg.textContent = pick("✓ 색 변경됨", "✓ Color changed"); iconMsg.className = "text-[11px] text-accent-greenSoft ml-2 align-middle"; }
