@@ -29,10 +29,13 @@ read_hermes_base_env() {
       -e 's/[[:space:]]+#.*$//' -e 's/^["'\''][[:space:]]*//' -e 's/[[:space:]]*["'\'']$//' -e 's/[[:space:]]*$//'
 }
 
-# 공유 Hermes 인증 원본 프로필. 환경변수 우선, 없으면 .env의 해당 키만 읽고, 공개 기본값 b3os.
+# 공유 Hermes 인증 원본 프로필. 환경변수/.env의 유효한 명시값은 탐지 모호 시 운영자의 탈출구다.
+HERMES_BASE_EXPLICIT=0
 HERMES_BASE_PROFILE="${HERMES_BASE_PROFILE:-}"
+if [ -n "${HERMES_BASE_PROFILE// }" ]; then HERMES_BASE_EXPLICIT=1; fi
 if [ -z "${HERMES_BASE_PROFILE// }" ] && [ -f "$SELF/.env" ]; then
   HERMES_BASE_PROFILE="$(read_hermes_base_env "$SELF/.env")"
+  if [ -n "${HERMES_BASE_PROFILE// }" ]; then HERMES_BASE_EXPLICIT=1; fi
 fi
 HERMES_BASE_PROFILE="${HERMES_BASE_PROFILE:-b3os}"
 if ! printf '%s' "$HERMES_BASE_PROFILE" | grep -Eq '^[A-Za-z0-9_-]+$'; then
@@ -241,7 +244,15 @@ else
     warn "  agents.json 을 읽을 JSON 도구(node/bun/python3/jq)가 없거나 비어 있음 — 팀원 오프보드 건너뜀."
     warn "  필요 시 런타임 디렉토리를 수동 정리하세요: ~/.claude/channels · ~/.openclaw/agents · ~/.hermes/profiles"
   else
-    while IFS=$'\t' read -r id runtime prof; do
+    # 파괴 작업 전 선검사: Hermes 멤버가 있는데 자동 탐지가 모호하고 명시 설정도 없으면
+    # Claude/OpenClaw을 포함해 아무 멤버도 먼저 지우지 않는다. 명시 설정은 안내된 복구 탈출구다.
+    if [ "$HERMES_DETECT_STATUS" -ne 0 ] \
+      && [ "$HERMES_BASE_EXPLICIT" -ne 1 ] \
+      && printf '%s\n' "$_members" | awk -F '\t' '$2=="hermes_agent"{found=1} END{exit !found}'; then
+      HERMES_TEARDOWN_SKIPPED=1
+      warn "  ⛔ 공유 auth 원본 프로필 판별 불가 — 어떤 팀원도 삭제하기 전에 전체 오프보드를 안전 중단합니다."
+    else
+      while IFS=$'\t' read -r id runtime prof; do
       [ -n "${id:-}" ] || continue
       if ! valid_id "$id"; then warn "  ⚠ 비정상 id 건너뜀: '$id'"; continue; fi
       echo ""
@@ -280,13 +291,10 @@ else
           ;;
         hermes_agent)
           _prof="${prof:-$id}"
-          if [ "$HERMES_DETECT_STATUS" -ne 0 ]; then
-            HERMES_TEARDOWN_SKIPPED=1
-            warn "    ⛔ 공유 auth 원본 프로필 판별 불가 — Hermes teardown 전체 건너뜀(fail-closed)."
-          elif is_base_profile "$_prof"; then
+          if is_base_profile "$_prof"; then
             # ★★ CRITICAL 가드 — base 프로필은 모든 hermes 멤버의 공유 auth.json 소스 + clone 원본.
             #   삭제하면 hermes 런타임 전멸(auth dangling). 프로필 dir·게이트웨이·plist 를 절대 건드리지 않는다.
-            warn "    ★ base hermes 프로필 '$HERMES_BASE_PROFILE' 보존 — 게이트웨이/프로필/plist 삭제하지 않음(공유 auth 소스)."
+            warn "    ★ base hermes 프로필 '$_prof' 보존 — 게이트웨이/프로필/plist 삭제하지 않음(공유 auth 소스)."
           else
             launchd_stop "ai.hermes.gateway-$_prof"
             rmf  "$HOME/Library/LaunchAgents/ai.hermes.gateway-$_prof.plist"
@@ -302,7 +310,8 @@ else
           warn "    (알 수 없는 runtime '$runtime' — 런타임 정리 스킵)"
           ;;
       esac
-    done <<< "$_members"
+      done <<< "$_members"
+    fi
   fi
 fi
 echo ""
@@ -312,7 +321,9 @@ echo ""
 # ══════════════════════════════════════════════════════════════════════
 hl "■ 2/4  서버 정지"
 _srv_plist="$HOME/Library/LaunchAgents/$PREFIX.team-collab.plist"
-if owned_by_other_install "$_srv_plist"; then
+if [ "$HERMES_TEARDOWN_SKIPPED" = 1 ]; then
+  warn "  ⛔ 오프보드 선검사 실패 — 서버/LaunchAgent도 변경하지 않습니다."
+elif owned_by_other_install "$_srv_plist"; then
   # ★ 서버 LaunchAgent 가 다른 설치본(라이브) 것 — team-os.sh down·bootout 모두 건너뛴다(라이브 서버 정지 방지).
   warn "  ⛔ 다른 설치본($SELF 아님) 소유 서버 LaunchAgent — 서버 정지/해제 건너뜀(라이브 서버 보호)."
   warn "    이 머신에 다른 team-collab 설치본이 실행 중입니다. 서버를 내리려면 그 설치본에서 uninstall 하세요."
@@ -326,7 +337,9 @@ else
 fi
 # 부팅 재기동 plist(있으면) — 동일 소유 가드.
 _boot_plist="$HOME/Library/LaunchAgents/$PREFIX.team-os-boot.plist"
-if owned_by_other_install "$_boot_plist"; then
+if [ "$HERMES_TEARDOWN_SKIPPED" = 1 ]; then
+  :
+elif owned_by_other_install "$_boot_plist"; then
   warn "  ⛔ 다른 설치본 소유 부팅 LaunchAgent — 건너뜀(라이브 보호): $PREFIX.team-os-boot"
 else
   launchd_stop "$PREFIX.team-os-boot"
@@ -343,7 +356,8 @@ if [ "$KEEP_DATA" = 1 ]; then
 elif [ "$HERMES_TEARDOWN_SKIPPED" = 1 ]; then
   hl "■ 3/4  데이터 삭제 — 안전 중단"
   warn "  ⛔ Hermes teardown이 완료되지 않아 복구에 필요한 team.db · .env · agents.json 및 데이터를 모두 보존합니다."
-  warn "     .env의 HERMES_BASE_PROFILE을 실제 공유 auth 원본 프로필명으로 설정한 뒤 uninstall을 다시 실행하세요."
+  warn "     .env의 HERMES_BASE_PROFILE을 실제 공유 auth 원본 프로필명으로 설정하거나"
+  warn "     HERMES_BASE_PROFILE=<프로필명> bash uninstall.sh --yes 로 명시한 뒤 다시 실행하세요."
 else
   hl "■ 3/4  데이터 삭제"
   # repo 내부 + 알려진 sibling(team-media) 만 삭제. 그 외 경로는 절대 건드리지 않는다.
@@ -382,7 +396,7 @@ echo ""
 # ★설치 스킬 심링크 해제 — repo(clone) 삭제 전에 풀어야 깨진 링크가 안 남는다★ (ames 반대리뷰).
 #   이 repo 를 가리키는 심링크일 때만 해제(다른 clone 을 가리키면 건드리지 않음).
 SKILL_DEST="$HOME/.claude/skills/b3os"
-if [ -L "$SKILL_DEST" ]; then
+if [ "$HERMES_TEARDOWN_SKIPPED" = 0 ] && [ -L "$SKILL_DEST" ]; then
   _mine=0
   # ① inode 비교(-ef): 경로 철자 차이(/var↔/private/var·심링크 부모·$HOME 심링크)에도 이 repo 를 정확히 식별.
   if [ "$SKILL_DEST" -ef "$SELF/skills/b3os" ]; then _mine=1; fi

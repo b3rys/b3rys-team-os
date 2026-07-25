@@ -873,7 +873,9 @@ export async function swapRuntime(db: Database, input: SwapInput, deps: SwapDeps
   //   모든 Hermes 프로필을 fail-closed로 보호하되, Claude/Codex/OpenClaw 멤버 id까지 Hermes
   //   프로필로 오인해 모든 런타임 교체를 막아서는 안 된다.
   const isBaseHermesTarget = isHermesMemberProtected(target.runtime, target.hermes_profile ?? id);
-  if (isBaseHermesTarget) {
+  const wouldClaimConfiguredBase =
+    targetRuntime === "hermes_agent" && id.toLowerCase() === HERMES_BASE_PROFILE.toLowerCase();
+  if (isBaseHermesTarget || wouldClaimConfiguredBase) {
     return {
       ok: false, steps,
       error: `${HERMES_BASE_PROFILE}는 모든 hermes 멤버가 공유하는 base 프로필(auth 소스)입니다. 런타임 교체 대상이 아닙니다.`,

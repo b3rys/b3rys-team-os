@@ -110,9 +110,16 @@ read_hermes_base_env() {
       -e 's/[[:space:]]+#.*$//' -e 's/^["'\''][[:space:]]*//' -e 's/[[:space:]]*["'\'']$//' -e 's/[[:space:]]*$//'
 }
 
+_requested_base="${HERMES_BASE_PROFILE:-}"
 _existing_base="$(read_hermes_base_env .env)"
 _selected_base=""
-if printf '%s' "$_existing_base" | grep -Eq '^[A-Za-z0-9_-]+$'; then
+if [ -n "${_requested_base// }" ]; then
+  if ! printf '%s' "$_requested_base" | grep -Eq '^[A-Za-z0-9_-]+$'; then
+    warn "❌ HERMES_BASE_PROFILE은 안전한 프로필 slug여야 합니다: 영문/숫자/_/-"
+    exit 1
+  fi
+  _selected_base="$_requested_base"
+elif printf '%s' "$_existing_base" | grep -Eq '^[A-Za-z0-9_-]+$'; then
   _selected_base="$_existing_base"
 else
   _detector="$ROOT/src/server/runtimes/hermes/detect-base-profile.sh"
@@ -120,7 +127,7 @@ else
   _selected_base="$(bash "$_detector" "$HOME/.hermes/profiles")" || _detect_status=$?
   if [ "$_detect_status" -ne 0 ]; then
     warn "❌ Hermes auth 원본 프로필을 하나로 판별할 수 없어 안전을 위해 설치를 중단합니다."
-    warn "   기존 .env에 HERMES_BASE_PROFILE=<공유 auth 원본 프로필명>을 지정한 뒤 다시 실행하세요."
+    warn "   HERMES_BASE_PROFILE=<공유 auth 원본 프로필명> bash install.sh 로 명시 지정해 다시 실행하세요."
     exit 1
   fi
   _selected_base="${_selected_base:-b3os}"
@@ -128,6 +135,7 @@ fi
 
 if [ ! -f .env ]; then
   cp .env.example .env
+  chmod 600 .env
   say "✅ .env 생성 (.env.example 복사) — 기본값으로 대시보드는 바로 동작."
   say "  텔레그램 봇·팀장 chat_id·그룹 연결은 ★대시보드 Settings★에서 안내에 따라 넣으면 됩니다(수동 .env 편집 불필요). 봇 토큰은 BotFather에서 사람이 발급."
 else
@@ -137,7 +145,10 @@ fi
 # 새 값을 확정한 뒤에만 기존 표기(export/공백/따옴표 포함)를 제거하고 원자적으로 교체한다.
 _env_mode=""
 if command -v stat >/dev/null 2>&1; then
-  _env_mode="$(stat -f '%Lp' .env 2>/dev/null || stat -c '%a' .env 2>/dev/null || true)"
+  case "$(uname -s)" in
+    Darwin|FreeBSD) _env_mode="$(stat -f '%Lp' .env 2>/dev/null || true)" ;;
+    *) _env_mode="$(stat -c '%a' .env 2>/dev/null || true)" ;;
+  esac
 fi
 awk '!/^[[:space:]]*(export[[:space:]]+)?HERMES_BASE_PROFILE[[:space:]]*=/' .env > .env.tmp
 printf 'HERMES_BASE_PROFILE=%s\n' "$_selected_base" >> .env.tmp
@@ -169,8 +180,14 @@ if ! grep -q '^APPROVAL_EXECUTION_ENABLED=1' .env 2>/dev/null; then
   fi
   case "$ans" in
     y|Y)
+      _approval_env_mode=""
+      case "$(uname -s)" in
+        Darwin|FreeBSD) _approval_env_mode="$(stat -f '%Lp' .env 2>/dev/null || true)" ;;
+        *) _approval_env_mode="$(stat -c '%a' .env 2>/dev/null || true)" ;;
+      esac
       grep -v '^APPROVAL_EXECUTION_ENABLED=' .env > .env.tmp 2>/dev/null || true
       mv .env.tmp .env
+      [ -z "$_approval_env_mode" ] || chmod "$_approval_env_mode" .env
       printf 'APPROVAL_EXECUTION_ENABLED=1\n' >> .env
       say "✅ 팀원 활성화 허용됨 (APPROVAL_EXECUTION_ENABLED=1)."
       ;;

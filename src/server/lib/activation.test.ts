@@ -537,6 +537,27 @@ describe("activation: swapRuntime", () => {
     expect(teardownCalls).toBe(0);
   });
 
+  test("base 이름의 비-Hermes 멤버를 Hermes로 스왑 → base 프로필 점유 전 거부", async () => {
+    const { registryPath, db } = setupSwapFixture({
+      id: HERMES_BASE_PROFILE,
+      runtime: "claude_channel",
+      status_provider: "tmux",
+    });
+    let teardownCalls = 0;
+    const result = await swapRuntime(db, {
+      id: HERMES_BASE_PROFILE,
+      targetRuntime: "hermes_agent",
+      registryPath,
+    }, {
+      checkRuntimeAuth: authOk,
+      activateMember: activateOk,
+      teardownRuntime: async () => { teardownCalls++; return { ok: true, detail: "" }; },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("base_hermes_guard");
+    expect(teardownCalls).toBe(0);
+  });
+
   test("STEP5(activateMember) 실패 → 레지스트리·persona 원복 + old runtime self-heal 시도", async () => {
     const { registryPath, wsDir, db } = setupSwapFixture();
     const ORIGINAL_PERSONA = "# Nova\n\n원본 SOUL.md 커스텀 내용.\n";

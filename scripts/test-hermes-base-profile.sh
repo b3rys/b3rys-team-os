@@ -52,6 +52,8 @@ HOME="$INSTALL_HOME" PATH="$INSTALL_BIN:/usr/bin:/bin" bash "$INSTALL_ROOT/insta
 rm "$INSTALL_ROOT/.env"
 HOME="$INSTALL_HOME" PATH="$INSTALL_BIN:/usr/bin:/bin" bash "$INSTALL_ROOT/install.sh" >/dev/null
 grep -q '^HERMES_BASE_PROFILE=old-base$' "$INSTALL_ROOT/.env" || fail "new .env skipped existing base detection"
+[ "$(stat -f '%Lp' "$INSTALL_ROOT/.env" 2>/dev/null || stat -c '%a' "$INSTALL_ROOT/.env")" = "600" ] \
+  || fail "new .env was not created with restrictive permissions"
 
 # Ambiguous auth fails before changing an invalid/empty existing setting.
 rm "$INSTALL_HOME/.hermes/profiles/member/auth.json"
@@ -65,10 +67,30 @@ set -e
 [ "$status" -ne 0 ] || fail "ambiguous install did not fail closed"
 cmp -s "$INSTALL_ROOT/.env.before" "$INSTALL_ROOT/.env" || fail "failed migration modified existing config"
 
+# The documented environment override is a real escape hatch even while auto-detection is ambiguous.
+HOME="$INSTALL_HOME" PATH="$INSTALL_BIN:/usr/bin:/bin" HERMES_BASE_PROFILE=old-base \
+  bash "$INSTALL_ROOT/install.sh" >/dev/null
+grep -q '^HERMES_BASE_PROFILE=old-base$' "$INSTALL_ROOT/.env" || fail "explicit install override did not recover ambiguity"
+
 # Quoted/exported valid settings are preserved and normalized only after selection.
 printf 'TEAM_HTTP_PORT=7878\n  export HERMES_BASE_PROFILE=\"old-base\"\n' > "$INSTALL_ROOT/.env"
 HOME="$INSTALL_HOME" PATH="$INSTALL_BIN:/usr/bin:/bin" bash "$INSTALL_ROOT/install.sh" >/dev/null
 grep -q '^HERMES_BASE_PROFILE=old-base$' "$INSTALL_ROOT/.env" || fail "quoted/exported valid setting was not preserved"
+
+# The interactive approval rewrite is a second atomic replacement and must also retain mode 600.
+if command -v expect >/dev/null 2>&1; then
+  chmod 600 "$INSTALL_ROOT/.env"
+  HOME="$INSTALL_HOME" PATH="$INSTALL_BIN:/usr/bin:/bin" INSTALL_SCRIPT="$INSTALL_ROOT/install.sh" \
+    expect <<'EOF' >/dev/null
+set timeout 20
+spawn bash $env(INSTALL_SCRIPT)
+expect "허용할까요?"
+send "y\r"
+expect eof
+EOF
+  [ "$(stat -f '%Lp' "$INSTALL_ROOT/.env")" = "600" ] || fail "approval prompt weakened .env permissions"
+  grep -q '^APPROVAL_EXECUTION_ENABLED=1$' "$INSTALL_ROOT/.env" || fail "approval tty fixture did not take y branch"
+fi
 
 # activate: configured base wins; when absent, another authenticated profile remains the fallback.
 ACT_HOME="$TMP/activate-home"
@@ -167,14 +189,15 @@ AMB_ROOT="$TMP/ambiguous-uninstall-repo"
 AMB_HOME="$TMP/ambiguous-uninstall-home"
 mkdir -p "$AMB_ROOT/src/server/runtimes/hermes" \
   "$AMB_HOME/.hermes/profiles/base-a" "$AMB_HOME/.hermes/profiles/base-b" \
-  "$AMB_HOME/.hermes/profiles/member-a" "$AMB_HOME/.hermes/profiles/member-b"
+  "$AMB_HOME/.hermes/profiles/member-a" "$AMB_HOME/.hermes/profiles/member-b" \
+  "$AMB_HOME/.claude/channels/telegram-claude-member"
 cp "$ROOT/uninstall.sh" "$AMB_ROOT/uninstall.sh"
 cp "$ROOT/src/server/runtimes/hermes/detect-base-profile.sh" "$AMB_ROOT/src/server/runtimes/hermes/detect-base-profile.sh"
 touch "$AMB_HOME/.hermes/profiles/base-a/auth.json" "$AMB_HOME/.hermes/profiles/base-b/auth.json"
 ln -s "$AMB_HOME/.hermes/profiles/base-a/auth.json" "$AMB_HOME/.hermes/profiles/member-a/auth.json"
 ln -s "$AMB_HOME/.hermes/profiles/base-b/auth.json" "$AMB_HOME/.hermes/profiles/member-b/auth.json"
 printf 'HERMES_BASE_PROFILE=\n' > "$AMB_ROOT/.env"
-printf '[{"id":"member-a","runtime":"hermes_agent","hermes_profile":"member-a"},{"id":"member-b","runtime":"hermes_agent","hermes_profile":"member-b"}]\n' > "$AMB_ROOT/agents.json"
+printf '[{"id":"claude-member","runtime":"claude_channel"},{"id":"member-a","runtime":"hermes_agent","hermes_profile":"member-a"},{"id":"member-b","runtime":"hermes_agent","hermes_profile":"member-b"}]\n' > "$AMB_ROOT/agents.json"
 touch "$AMB_ROOT/team.db"
 set +e
 amb_out="$(HOME="$AMB_HOME" USER="b3os-test" bash "$AMB_ROOT/uninstall.sh" --yes 2>&1)"
@@ -187,6 +210,46 @@ for p in base-a base-b member-a member-b; do
 done
 [ -f "$AMB_ROOT/.env" ] && [ -f "$AMB_ROOT/agents.json" ] && [ -f "$AMB_ROOT/team.db" ] \
   || fail "ambiguous uninstall deleted recovery data"
+[ -d "$AMB_HOME/.claude/channels/telegram-claude-member" ] \
+  || fail "ambiguous preflight partially deleted a non-Hermes member"
+
+# The documented explicit setting is a real recovery path: it overrides ambiguous auto-detection.
+printf 'HERMES_BASE_PROFILE=base-a\n' > "$AMB_ROOT/.env"
+HOME="$AMB_HOME" USER="b3os-test" bash "$AMB_ROOT/uninstall.sh" --yes >/dev/null
+[ ! -e "$AMB_ROOT/.env" ] && [ ! -e "$AMB_ROOT/agents.json" ] \
+  || fail "explicit base setting did not recover ambiguous uninstall"
+
+# A keep-data run may remove member symlinks; the preserved explicit setting must still let full retry finish.
+KEEP_ROOT="$TMP/keep-uninstall-repo"
+KEEP_HOME="$TMP/keep-uninstall-home"
+mkdir -p "$KEEP_ROOT/src/server/runtimes/hermes" \
+  "$KEEP_HOME/.hermes/profiles/real-base" "$KEEP_HOME/.hermes/profiles/probe" \
+  "$KEEP_HOME/.hermes/profiles/member-a" "$KEEP_HOME/.hermes/profiles/member-b"
+cp "$ROOT/uninstall.sh" "$KEEP_ROOT/uninstall.sh"
+cp "$ROOT/src/server/runtimes/hermes/detect-base-profile.sh" "$KEEP_ROOT/src/server/runtimes/hermes/detect-base-profile.sh"
+touch "$KEEP_HOME/.hermes/profiles/real-base/auth.json" "$KEEP_HOME/.hermes/profiles/probe/auth.json"
+ln -s "$KEEP_HOME/.hermes/profiles/real-base/auth.json" "$KEEP_HOME/.hermes/profiles/member-a/auth.json"
+ln -s "$KEEP_HOME/.hermes/profiles/real-base/auth.json" "$KEEP_HOME/.hermes/profiles/member-b/auth.json"
+printf 'HERMES_BASE_PROFILE=real-base\n' > "$KEEP_ROOT/.env"
+printf '[{"id":"member-a","runtime":"hermes_agent","hermes_profile":"member-a"},{"id":"member-b","runtime":"hermes_agent","hermes_profile":"member-b"}]\n' > "$KEEP_ROOT/agents.json"
+HOME="$KEEP_HOME" USER="b3os-test" bash "$KEEP_ROOT/uninstall.sh" --yes --keep-data >/dev/null
+[ ! -e "$KEEP_HOME/.hermes/profiles/member-a" ] && [ -f "$KEEP_ROOT/.env" ] \
+  || fail "keep-data fixture did not preserve config while offboarding member"
+HOME="$KEEP_HOME" USER="b3os-test" bash "$KEEP_ROOT/uninstall.sh" --yes >/dev/null
+[ ! -e "$KEEP_ROOT/.env" ] && [ ! -e "$KEEP_ROOT/agents.json" ] \
+  || fail "full uninstall deadlocked after keep-data"
+
+# M2: config/registry/FS case drift must preserve the configured base even without detector help.
+CASE_ROOT="$TMP/case-uninstall-repo"
+CASE_HOME="$TMP/case-uninstall-home"
+mkdir -p "$CASE_ROOT/src/server/runtimes/hermes" "$CASE_HOME/.hermes/profiles/MyBase"
+cp "$ROOT/uninstall.sh" "$CASE_ROOT/uninstall.sh"
+cp "$ROOT/src/server/runtimes/hermes/detect-base-profile.sh" "$CASE_ROOT/src/server/runtimes/hermes/detect-base-profile.sh"
+printf 'HERMES_BASE_PROFILE=mybase\n' > "$CASE_ROOT/.env"
+printf '[{"id":"base","runtime":"hermes_agent","hermes_profile":"MYBASE"}]\n' > "$CASE_ROOT/agents.json"
+touch "$CASE_HOME/.hermes/profiles/MyBase/auth.json"
+HOME="$CASE_HOME" USER="b3os-test" bash "$CASE_ROOT/uninstall.sh" --yes --keep-data >/dev/null
+[ -f "$CASE_HOME/.hermes/profiles/MyBase/auth.json" ] || fail "case drift deleted configured base"
 
 # M7: with one resolvable shared target, activation must prefer it over an alphabetically earlier auth profile.
 RES_HOME="$TMP/resolved-activate-home"
