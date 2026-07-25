@@ -130,6 +130,38 @@ describe("runtime essentials strategy registry", () => {
     expect(r.missing).toContain("allowFrom:openclaw ownerAllowFrom");
   });
 
+  test("openclaw accepts canonical commands.ownerAllowFrom (openclaw 2026.7.x)", async () => {
+    const { home, repo } = tmpRoot();
+    const id = "lui";
+    const tokenFile = join(home, ".openclaw/credentials", `telegram-${id}-token.txt`);
+    write(tokenFile, "123:abc\n");
+    // 실제 openclaw 2026.7.x 가 쓰는 배치 — channels.telegram 에는 accounts/groups 만 있고
+    // 소유자 allowlist 는 commands.ownerAllowFrom 에 저장된다.
+    write(join(home, ".openclaw/openclaw.json"), JSON.stringify({
+      channels: { telegram: { accounts: { [id]: { enabled: true, tokenFile } } } },
+      commands: { ownerAllowFrom: ["telegram:7066867819"] },
+    }));
+    const registry = createRuntimeEssentialsRegistry({ home, repoRoot: repo });
+    const r = await checkEssentialSettings({ id, runtime: "openclaw" } as any, registry);
+    expect(r.ok).toBe(true);
+    expect(r.missing).toEqual([]);
+  });
+
+  test("openclaw fails when both ownerAllowFrom locations are empty", async () => {
+    const { home, repo } = tmpRoot();
+    const id = "lui";
+    const tokenFile = join(home, ".openclaw/credentials", `telegram-${id}-token.txt`);
+    write(tokenFile, "123:abc\n");
+    write(join(home, ".openclaw/openclaw.json"), JSON.stringify({
+      channels: { telegram: { ownerAllowFrom: [], accounts: { [id]: { enabled: true, tokenFile } } } },
+      commands: { ownerAllowFrom: [] },
+    }));
+    const registry = createRuntimeEssentialsRegistry({ home, repoRoot: repo });
+    const r = await checkEssentialSettings({ id, runtime: "openclaw" } as any, registry);
+    expect(r.ok).toBe(false);
+    expect(r.missing).toContain("allowFrom:openclaw ownerAllowFrom");
+  });
+
   test("hermes checks profile env, auth, and LaunchAgent", async () => {
     const { home, repo } = tmpRoot();
     const id = "mes";
