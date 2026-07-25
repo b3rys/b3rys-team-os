@@ -43,6 +43,39 @@ if ! printf '%s' "$HERMES_BASE_PROFILE" | grep -Eq '^[A-Za-z0-9_-]+$'; then
   exit 1
 fi
 
+same_profile() {
+  [ "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "${2:-}" | tr '[:upper:]' '[:lower:]')" ]
+}
+
+# 명시값은 자동 탐지 모호성의 탈출구다. 실제 비심링크 auth 원본과 일치할 때만 신뢰하고
+# 실제 디렉터리 표기로 정규화한다. 존재하지 않는 slug나 멤버 auth 심링크는 절대 삭제 근거가 아니다.
+if [ "$HERMES_BASE_EXPLICIT" = 1 ]; then
+  _explicit_match=""
+  _auth_origin_count=0
+  for _profile_dir in "$HOME"/.hermes/profiles/*; do
+    [ -d "$_profile_dir" ] || continue
+    _profile_name="$(basename "$_profile_dir")"
+    if [ -f "$_profile_dir/auth.json" ] && [ ! -L "$_profile_dir/auth.json" ]; then
+      _auth_origin_count=$((_auth_origin_count + 1))
+    fi
+    if same_profile "$_profile_name" "$HERMES_BASE_PROFILE" && [ -f "$_profile_dir/auth.json" ] \
+      && [ ! -L "$_profile_dir/auth.json" ]; then
+      [ -z "$_explicit_match" ] || { echo "❌ HERMES_BASE_PROFILE과 대소문자 없이 일치하는 auth 원본이 둘 이상입니다." >&2; exit 1; }
+      _explicit_match="$_profile_name"
+    fi
+  done
+  if [ -z "$_explicit_match" ] && [ "$_auth_origin_count" -gt 0 ]; then
+    echo "❌ 명시한 Hermes base '$HERMES_BASE_PROFILE'가 실제 비심링크 auth 원본 프로필이 아닙니다." >&2
+    echo "   후보(auth.json 원본 보유):" >&2
+    for _profile_dir in "$HOME"/.hermes/profiles/*; do
+      [ -d "$_profile_dir" ] && [ -f "$_profile_dir/auth.json" ] && [ ! -L "$_profile_dir/auth.json" ] \
+        && echo "     - $(basename "$_profile_dir")" >&2
+    done
+    exit 1
+  fi
+  [ -z "$_explicit_match" ] || HERMES_BASE_PROFILE="$_explicit_match"
+fi
+
 # 설정과 독립된 defense-in-depth: 다른 프로필 auth.json이 가리키는 실제 공유 원본도 항상 보존한다.
 # 탐지가 모호하면 어느 프로필도 안전하게 삭제할 수 없으므로 Hermes teardown 전체를 건너뛴다.
 HERMES_DETECTED_BASE=""
@@ -53,9 +86,6 @@ if [ -f "$_detector" ]; then
 else
   HERMES_DETECT_STATUS=2
 fi
-same_profile() {
-  [ "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "${2:-}" | tr '[:upper:]' '[:lower:]')" ]
-}
 is_base_profile() {
   local p="${1:-}"
   same_profile "$p" "$HERMES_BASE_PROFILE" && return 0
@@ -201,7 +231,8 @@ echo "    • 팀원 전원 오프보드 — tmux 종료 · LaunchAgent 해제 �
 echo "        claude  → ~/.claude/channels/telegram-<id> · $PREFIX.claude-telegram-<id> plist"
 echo "        openclaw→ ~/.openclaw/agents/<id> · ~/.openclaw/credentials/telegram-<id>-token.txt(+allowFrom)"
 echo "        hermes  → ~/.hermes/profiles/<프로필> · ai.hermes.gateway-<프로필> plist · credential 토큰"
-echo "                  ★ base 프로필 '$HERMES_BASE_PROFILE' 는 절대 삭제하지 않음(공유 auth 소스)"
+_display_base="${HERMES_DETECTED_BASE:-$HERMES_BASE_PROFILE}"
+echo "                  ★ base 프로필 '$_display_base' 는 절대 삭제하지 않음(공유 auth 소스)"
 echo "    • 서버 정지 + LaunchAgent 해제 ($PREFIX.team-collab · $PREFIX.team-os-boot)"
 if [ "$KEEP_DATA" = 1 ]; then
   warn "    • 데이터 삭제는 건너뜁니다 (--keep-data): team.db · .env · var/ · team-media · slack-tokens${B3RYS_HOME_VAL:+ · B3RYS_HOME} 보존"
@@ -251,6 +282,11 @@ else
       && printf '%s\n' "$_members" | awk -F '\t' '$2=="hermes_agent"{found=1} END{exit !found}'; then
       HERMES_TEARDOWN_SKIPPED=1
       warn "  ⛔ 공유 auth 원본 프로필 판별 불가 — 어떤 팀원도 삭제하기 전에 전체 오프보드를 안전 중단합니다."
+      warn "     후보(auth.json 원본 보유):"
+      for _profile_dir in "$HOME"/.hermes/profiles/*; do
+        [ -d "$_profile_dir" ] && [ -f "$_profile_dir/auth.json" ] && [ ! -L "$_profile_dir/auth.json" ] \
+          && warn "       - $(basename "$_profile_dir")"
+      done
     else
       while IFS=$'\t' read -r id runtime prof; do
       [ -n "${id:-}" ] || continue

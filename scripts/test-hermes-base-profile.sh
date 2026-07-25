@@ -37,8 +37,9 @@ touch "$INSTALL_ROOT/skills/b3os/SKILL.md" "$INSTALL_HOME/.hermes/profiles/old-b
 ln -s "$INSTALL_HOME/.hermes/profiles/old-base/auth.json" "$INSTALL_HOME/.hermes/profiles/member/auth.json"
 printf 'TEAM_HTTP_PORT=7878\n' > "$INSTALL_ROOT/.env"
 printf '#!/usr/bin/env bash\n[ "${1:-}" = "--version" ] && echo test\nexit 0\n' > "$INSTALL_BIN/bun"
-printf '#!/usr/bin/env bash\necho Linux\n' > "$INSTALL_BIN/uname"
-chmod +x "$INSTALL_BIN/bun" "$INSTALL_BIN/uname"
+printf '#!/usr/bin/env bash\nexec /usr/bin/uname "$@"\n' > "$INSTALL_BIN/uname"
+printf '#!/usr/bin/env bash\n[ "${1:-}" = "-V" ] && echo "tmux test"\nexit 0\n' > "$INSTALL_BIN/tmux"
+chmod +x "$INSTALL_BIN/bun" "$INSTALL_BIN/uname" "$INSTALL_BIN/tmux"
 HOME="$INSTALL_HOME" PATH="$INSTALL_BIN:/usr/bin:/bin" bash "$INSTALL_ROOT/install.sh" >/dev/null
 grep -q '^HERMES_BASE_PROFILE=old-base$' "$INSTALL_ROOT/.env" || fail "existing .env was not backfilled"
 
@@ -71,6 +72,15 @@ cmp -s "$INSTALL_ROOT/.env.before" "$INSTALL_ROOT/.env" || fail "failed migratio
 HOME="$INSTALL_HOME" PATH="$INSTALL_BIN:/usr/bin:/bin" HERMES_BASE_PROFILE=old-base \
   bash "$INSTALL_ROOT/install.sh" >/dev/null
 grep -q '^HERMES_BASE_PROFILE=old-base$' "$INSTALL_ROOT/.env" || fail "explicit install override did not recover ambiguity"
+cp "$INSTALL_ROOT/.env" "$INSTALL_ROOT/.env.before-invalid"
+set +e
+invalid_install_out="$(HOME="$INSTALL_HOME" PATH="$INSTALL_BIN:/usr/bin:/bin" HERMES_BASE_PROFILE=doesnotexist \
+  bash "$INSTALL_ROOT/install.sh" 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "install accepted nonexistent explicit base"
+grep -q 'old-base' <<< "$invalid_install_out" || fail "install did not show candidate base names"
+cmp -s "$INSTALL_ROOT/.env.before-invalid" "$INSTALL_ROOT/.env" || fail "invalid install override modified .env"
 
 # Quoted/exported valid settings are preserved and normalized only after selection.
 printf 'TEAM_HTTP_PORT=7878\n  export HERMES_BASE_PROFILE=\"old-base\"\n' > "$INSTALL_ROOT/.env"
@@ -160,6 +170,7 @@ cp "$ROOT/uninstall.sh" "$PARSE_ROOT/uninstall.sh"
 cp "$ROOT/src/server/runtimes/hermes/detect-base-profile.sh" "$PARSE_ROOT/src/server/runtimes/hermes/detect-base-profile.sh"
 printf '  export HERMES_BASE_PROFILE = "export-base" # comment\n' > "$PARSE_ROOT/.env"
 printf '[{"id":"base","runtime":"hermes_agent","hermes_profile":"export-base"},{"id":"worker","runtime":"hermes_agent","hermes_profile":"export-worker"}]\n' > "$PARSE_ROOT/agents.json"
+touch "$PARSE_HOME/.hermes/profiles/export-base/auth.json"
 HOME="$PARSE_HOME" USER="b3os-test" bash "$PARSE_ROOT/uninstall.sh" --yes --keep-data >/dev/null
 [ -d "$PARSE_HOME/.hermes/profiles/export-base" ] || fail "uninstall parser missed export/spaced/quoted base setting"
 [ ! -e "$PARSE_HOME/.hermes/profiles/export-worker" ] || fail "uninstall parser test did not remove worker"
@@ -212,6 +223,18 @@ done
   || fail "ambiguous uninstall deleted recovery data"
 [ -d "$AMB_HOME/.claude/channels/telegram-claude-member" ] \
   || fail "ambiguous preflight partially deleted a non-Hermes member"
+
+# A syntactically valid but nonexistent/member-symlink override must not disarm protection.
+for invalid_base in doesnotexist member-a; do
+  set +e
+  invalid_out="$(HOME="$AMB_HOME" USER="b3os-test" HERMES_BASE_PROFILE="$invalid_base" \
+    bash "$AMB_ROOT/uninstall.sh" --yes 2>&1)"
+  status=$?
+  set -e
+  [ "$status" -ne 0 ] || fail "uninstall accepted unverified explicit base: $invalid_base"
+  grep -q 'base-a' <<< "$invalid_out" || fail "uninstall did not show candidate base names"
+  [ -f "$AMB_HOME/.hermes/profiles/base-a/auth.json" ] || fail "invalid override deleted real shared auth source"
+done
 
 # The documented explicit setting is a real recovery path: it overrides ambiguous auto-detection.
 printf 'HERMES_BASE_PROFILE=base-a\n' > "$AMB_ROOT/.env"

@@ -118,7 +118,28 @@ if [ -n "${_requested_base// }" ]; then
     warn "❌ HERMES_BASE_PROFILE은 안전한 프로필 slug여야 합니다: 영문/숫자/_/-"
     exit 1
   fi
-  _selected_base="$_requested_base"
+  # 명시 override는 자동 탐지 실패의 탈출구이므로 문자열만 믿지 않는다. 실제 비심링크 auth 원본과
+  # 대소문자 없이 일치하는 디렉터리가 정확히 하나 있어야 한다.
+  _requested_match=""
+  for _profile_dir in "$HOME"/.hermes/profiles/*; do
+    [ -d "$_profile_dir" ] || continue
+    _profile_name="$(basename "$_profile_dir")"
+    if [ "$(printf '%s' "$_profile_name" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$_requested_base" | tr '[:upper:]' '[:lower:]')" ] \
+      && [ -f "$_profile_dir/auth.json" ] && [ ! -L "$_profile_dir/auth.json" ]; then
+      [ -z "$_requested_match" ] || { warn "❌ HERMES_BASE_PROFILE과 대소문자 없이 일치하는 auth 원본이 둘 이상입니다."; exit 1; }
+      _requested_match="$_profile_name"
+    fi
+  done
+  if [ -z "$_requested_match" ]; then
+    warn "❌ 명시한 Hermes base '$_requested_base'가 실제 비심링크 auth 원본 프로필이 아닙니다."
+    warn "   후보(auth.json 원본 보유):"
+    for _profile_dir in "$HOME"/.hermes/profiles/*; do
+      [ -d "$_profile_dir" ] && [ -f "$_profile_dir/auth.json" ] && [ ! -L "$_profile_dir/auth.json" ] \
+        && warn "     - $(basename "$_profile_dir")"
+    done
+    exit 1
+  fi
+  _selected_base="$_requested_match"
 elif printf '%s' "$_existing_base" | grep -Eq '^[A-Za-z0-9_-]+$'; then
   _selected_base="$_existing_base"
 else
@@ -127,6 +148,11 @@ else
   _selected_base="$(bash "$_detector" "$HOME/.hermes/profiles")" || _detect_status=$?
   if [ "$_detect_status" -ne 0 ]; then
     warn "❌ Hermes auth 원본 프로필을 하나로 판별할 수 없어 안전을 위해 설치를 중단합니다."
+    warn "   후보(auth.json 원본 보유):"
+    for _profile_dir in "$HOME"/.hermes/profiles/*; do
+      [ -d "$_profile_dir" ] && [ -f "$_profile_dir/auth.json" ] && [ ! -L "$_profile_dir/auth.json" ] \
+        && warn "     - $(basename "$_profile_dir")"
+    done
     warn "   HERMES_BASE_PROFILE=<공유 auth 원본 프로필명> bash install.sh 로 명시 지정해 다시 실행하세요."
     exit 1
   fi
