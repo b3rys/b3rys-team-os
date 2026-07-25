@@ -113,8 +113,13 @@ export function syncRegistry(db: Database, registryPath: string, repoRoot?: stri
   deleteAgentsNotIn(db, agents.map((a) => a.id));
   appendAudit(db, "system", "registry_synced", null, { count: agents.length });
   // load-time coordinator 검증 — 정확히 1명이 아니면 경고 + audit(공개 사용자 agents.json 오타/누락 가시화).
+  // ★단, 팀원 0명(새 설치)은 오타·누락이 아니라 정상 초기 상태★ — 그런데도 경고를 찍으면 새 사용자가
+  //   보는 첫 기동 로그 맨 첫 줄이 경고라 "설치가 깨졌나"로 읽힌다(2026-07-25 공개 클린설치 리허설).
+  //   → 0명은 안내 문구로 낮추고, agents 가 있는데 coordinator 가 0/2+ 인 진짜 오류만 경고 + audit.
   const cc = validateCoordinators(agents);
-  if (!cc.ok) {
+  if (!cc.ok && agents.length === 0) {
+    console.log("[registry] 팀원 0명 — 첫 팀원을 영입하면 coordinator 가 자동 지정됩니다.");
+  } else if (!cc.ok) {
     const reason = cc.issue === "none" ? "fallback_no_coordinator" : "multiple_coordinators";
     console.warn(
       `[registry] coordinator capability ${cc.count}개(${cc.coordinatorIds.join(", ") || "없음"}) — 정확히 1명이어야 함(${reason}).`,

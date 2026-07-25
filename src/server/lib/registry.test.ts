@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { openDb, migrate } from "../db/migrate";
 import { listAgents } from "../db/queries";
 import { detectExplicitTargets } from "./teamRouter";
@@ -201,6 +201,55 @@ describe("loadRegistry", () => {
       expect(syncRegistry(db, registryPath)).toEqual([]);
       expect(listAgents(db)).toEqual([]);
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ── 클린 설치 첫 기동: 팀원 0명은 정상 초기 상태라 경고를 찍지 않는다 (2026-07-25 공개 리허설) ──
+  test("syncRegistry 는 팀원 0명(새 설치)에 coordinator 경고를 찍지 않는다", () => {
+    const dir = mkdtempSync(join(tmpdir(), "team-registry-fresh-install-"));
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const registryPath = join(dir, "agents.json");
+      const db = openDb(join(dir, "team.db"));
+      migrate(db);
+      writeFileSync(registryPath, "[]\n");
+
+      expect(syncRegistry(db, registryPath, dir)).toEqual([]);
+      expect(warn.mock.calls.flat().join("\n")).not.toContain("coordinator capability");
+      // 경고 대신 안내 문구 1줄.
+      expect(log.mock.calls.flat().join("\n")).toContain("첫 팀원을 영입하면 coordinator");
+      // 오타·누락 audit 도 남기지 않는다(0명은 오류가 아니다).
+      const audits = db.prepare(`SELECT COUNT(*) AS n FROM audit_event WHERE action = 'fallback_no_coordinator'`)
+        .get() as { n: number };
+      expect(audits.n).toBe(0);
+    } finally {
+      warn.mockRestore();
+      log.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("syncRegistry 는 팀원이 있는데 coordinator 가 없으면 계속 경고한다(진짜 누락)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "team-registry-no-coordinator-"));
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const registryPath = join(dir, "agents.json");
+      const db = openDb(join(dir, "team.db"));
+      migrate(db);
+      writeFileSync(registryPath, JSON.stringify([{
+        id: "bill", display_name: "Bill", role: "Infra", runtime: "claude_channel",
+        status_provider: "claude_tmux", workspace_path: "/tmp/bill", persona_file: "/tmp/bill/CLAUDE.md",
+      }]));
+
+      expect(syncRegistry(db, registryPath, dir).map((a) => a.id)).toEqual(["bill"]);
+      expect(warn.mock.calls.flat().join("\n")).toContain("coordinator capability");
+      const audits = db.prepare(`SELECT COUNT(*) AS n FROM audit_event WHERE action = 'fallback_no_coordinator'`)
+        .get() as { n: number };
+      expect(audits.n).toBe(1);
+    } finally {
+      warn.mockRestore();
       rmSync(dir, { recursive: true, force: true });
     }
   });
