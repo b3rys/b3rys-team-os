@@ -179,6 +179,8 @@ export interface ActivateResult {
   steps: Array<{ step: string; ok: boolean; detail: string }>;
   error?: string;
   code?: "member_limit";
+  /** claude_channel: 세션·설정은 정상이나 telegram MCP poller 만 미기동(첫 부팅 핸드셰이크 실패) — recruit 는 degraded 완결, /mcp reconnect 로 poller 복구 필요. */
+  needsReconnect?: boolean;
 }
 
 function offMemberActivationLimitReached(agents: any[], id: string): boolean {
@@ -605,13 +607,16 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       appendAuditFile("activation", res.ok ? "runtime_done" : "runtime_failed", id, { runtime });
       steps.push({ step: "runtime", ok: res.ok, detail: res.ok ? "claude 봇 tmux 기동(LaunchAgent)" : res.detail });
       if (!res.ok) return { ok: false, steps, error: "claude 봇 기동 실패" };
-      // poller 게이트: bot.pid 출현 = MCP(poller) 실기동. 기본 40s(TEAMOS_POLLER_WAIT_MS override). pre-warm 덕에 정상 스폰은 곧 붙는다.
-      //   미출현 = MCP 스폰 실패(버전락 경합 등) → ★세션을 재스폰하지 말고 /mcp reconnect 로 복구★(재스폰은 경합 재유발). reconnect 자동화는 후속.
+      // poller 게이트: bot.pid 출현 = MCP(poller) 실기동. 기본 40s(TEAMOS_POLLER_WAIT_MS override).
+      //   ★CC 2.1.220 fresh 세션 부팅서 telegram MCP 첫 핸드셰이크가 실패해 bot.pid 미출현하는 케이스가 있다★(다른 claude 세션 가동 중 fresh 부팅).
+      //   세션·토큰·scope·install(0.012s warm) 다 정상 — reconnect 하면 즉시 붙음 = "첫 부팅 핸드셰이크"만의 문제.
       const rawWait = process.env.TEAMOS_POLLER_WAIT_MS;
-      const pollerWaitMs = rawWait !== undefined && Number.isFinite(Number(rawWait)) ? Number(rawWait) : 40000;
+      const pollerWaitMs = rawWait !== undefined && Number.isFinite(Number(rawWait)) ? Number(rawWait) : 30000;  // CC MCP 핸드셰이크 타임아웃과 동일한 30s(GD 2026-07-25, 40→30). 게이트 길이는 원인 아님 — 붙으면 즉시 반환.
       const pollerOk = await waitForClaudePoller(id, pollerWaitMs);
-      steps.push({ step: "poller", ok: pollerOk, detail: pollerOk ? "텔레그램 채널 poller 기동 확인(bot.pid)" : "poller 미기동(bot.pid 없음 — MCP 스폰 실패 의심; 세션 유지한 채 /mcp reconnect 로 복구, 재스폰 금지=버전락 경합 재유발)" });
-      if (!pollerOk) return { ok: false, steps, error: "텔레그램 채널 poller 미기동(MCP 스폰 실패 의심) — 세션은 떠 있으니 /mcp reconnect 로 복구하세요(재활성화=재스폰은 버전락 경합을 재유발합니다)" };
+      steps.push({ step: "poller", ok: pollerOk, detail: pollerOk ? "텔레그램 채널 poller 기동 확인(bot.pid)" : "poller 미기동 → needs_reconnect(세션·토큰·scope 정상, MCP 첫 핸드셰이크만 실패). recruit 는 degraded 로 완결됨 — /mcp reconnect 로 poller 복구" });
+      // ★early-return 제거(2026-07-25 근본 fix, 교차검증됨)★: 예전엔 poller 실패 시 여기서 즉시 return → 아래(essentials·recall·bus-wake)와
+      //   라우트의 OT 완결이 ★통째로 스킵★돼, MCP 첫-핸드셰이크 삐끗이 recruit 를 하드 블록(stuck)으로 키웠다(reconnect 로 봇 살려도 미완결).
+      //   이제 poller 실패해도 나머지를 계속 진행(degraded 완결)하고 poller 만 needs_reconnect 로 노출한다. 반환 ok 는 poller 제외 스텝으로 판정.
       if (!await pushEssentialStep(steps, { id, runtime })) return { ok: false, steps, error: "claude 필수설정 누락 — 재활성화/설정 복구 필요" };
       // recall 주입(GD 2026-07-05): 활성화=새 claude 세션(맥락 빔)이니 --fresh 재시작과 동일하게 직전 대화 digest 주입.
       //   런타임 스왑/영입이 곧 '첫 로딩'이라 여기가 GD가 원한 '첫 로딩 시 주입' 지점. fire-forget best-effort(세션 준비는 스크립트 sleep이 대기, 실패해도 활성화 정상).
@@ -623,7 +628,10 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
     }
     const wakeOkCl = addBusWake(id);
     steps.push({ step: "bus-wake", ok: wakeOkCl, detail: wakeOkCl ? "allowlist 추가" : "추가 실패" });
-    return { ok: steps.every((s) => s.ok), steps };
+    // ★degraded 완결(2026-07-25)★: poller 실패는 하드 실패로 치지 않는다(recruit 는 완결, poller 만 needs_reconnect).
+    //   ok 는 poller 를 제외한 스텝들로 판정 → runtime·essentials·bus-wake 가 되면 라우트가 OT 를 완결한다. needsReconnect 로 poller 상태 노출.
+    const pollerFailed = steps.some((s) => s.step === "poller" && !s.ok);
+    return { ok: steps.filter((s) => s.step !== "poller").every((s) => s.ok), steps, needsReconnect: pollerFailed };
   }
   const rs = runtimeScript(id, runtime);
   if (rs) {
