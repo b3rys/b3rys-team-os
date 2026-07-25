@@ -4,6 +4,7 @@ import { dirname, join, relative } from "node:path";
 import { captureConfigStatus } from "./captureConfig";
 import { loadRegistry } from "./registry";
 import { teamOsSnapshot, type TeamOsSnapshot } from "./teamosProbe";
+import { CLAUDE_START_SCRIPT, claudeBridgePaths } from "../runtimes/claude/launcher";
 import type { AgentRecord } from "../types";
 
 export type AcceptanceStatus = "pass" | "fail" | "info";
@@ -340,7 +341,56 @@ function infraStep(deps: AcceptanceDeps): AcceptanceStep {
   ).get() as { count: number };
   items.push(item("info", "고아 wake", orphanWakes.count === 0 ? "없음" : `reconcile 후보 ${orphanWakes.count}개`));
 
+  items.push(...claudeLauncherChecks(deps));
+
   return { key: "infra", label: "인프라/운영", checks: items };
+}
+
+/** plist 에서 ProgramArguments 의 첫 <string> 을 뽑는다. 못 뽑으면 null. */
+export function plistFirstProgramArgument(xml: string): string | null {
+  const m = /<key>\s*ProgramArguments\s*<\/key>\s*<array>\s*<string>([^<]*)<\/string>/.exec(xml);
+  return m?.[1]?.trim() ?? null;
+}
+
+/** ★런처 사본 drift 가드★ — claude 멤버의 LaunchAgent plist 가 정본 vendored 런처를 가리키는지 검사한다.
+ *  사본이 여러 벌이면 "한 곳만 고치고 나머지는 옛 동작" 사고가 난다(2026-07-25 실측: 모델 하드코딩 fix 때
+ *  멤버별로 개인 스킬 사본·구 repo 사본·정본 3곳으로 갈려 있었다). 사람이 기억하는 대신 여기서 잡는다. */
+function claudeLauncherChecks(deps: AcceptanceDeps): AcceptanceItem[] {
+  const agents = loadAgents(deps.registryPath).filter((a) => a.runtime === "claude_channel");
+  if (agents.length === 0) return [];
+
+  const drifted: string[] = [];
+  let checked = 0;
+  for (const agent of agents) {
+    let plistPath: string;
+    try {
+      plistPath = claudeBridgePaths(agent.id).plist;
+    } catch {
+      continue; // id 가드 위반 — 다른 체크가 잡는다
+    }
+    if (!existsSync(plistPath)) continue; // 미등록 = 이 검사 대상 아님(활성화 체크가 따로 본다)
+    checked += 1;
+    let program: string | null = null;
+    try {
+      program = plistFirstProgramArgument(readFileSync(plistPath, "utf-8"));
+    } catch {
+      program = null;
+    }
+    if (program !== CLAUDE_START_SCRIPT) drifted.push(`${agent.id}→${program ?? "파싱실패"}`);
+  }
+
+  if (checked === 0) return [item("info", "런처 정본 일치", "등록된 claude 멤버 plist 없음")];
+  if (drifted.length === 0) {
+    return [item("pass", "런처 정본 일치", `claude 멤버 ${checked}명 전원 정본 런처`)];
+  }
+  return [
+    item(
+      "fail",
+      "런처 정본 일치",
+      `정본(${CLAUDE_START_SCRIPT})과 다른 런처 ${drifted.length}건 — ${drifted.join(", ")}`,
+      "해당 팀원을 대시보드에서 다시 활성화(activate)하면 plist 가 정본 경로로 재생성된다 — 정지→기동으로는 안 고쳐진다(등록 파일을 읽기만 한다)",
+    ),
+  ];
 }
 
 export function runAcceptanceCheck(deps: AcceptanceDeps, member: string | null): AcceptanceResult {
