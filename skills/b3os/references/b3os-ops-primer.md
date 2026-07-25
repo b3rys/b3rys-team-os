@@ -175,31 +175,62 @@ cd "$HOME/b3rys-team-os" && bash uninstall.sh     # 팀원 전원 오프보드 �
 
 당신은 절대 페어링/승인을 대신 만들거나 우회하지 않는다. 토큰 값을 화면에 다시 출력하지 않는다.
 
-## 9. team-os CLI — 일상 운영 명령
+## 9. 일상 운영 — 서버·팀원 관리
 
-`team-os`는 팀 전체(봇·버스·게이트웨이·대시보드)를 관리하는 단일 진입점이다. 설치 폴더에서 실행한다 — `cd "$HOME/b3rys-team-os"` 후 `bash scripts/team-os.sh <명령>` (퍼블릭 설치 시 PATH에 심으면 어디서든 `team-os <명령>`).
+운영 진입점은 **둘**이다. 서버(b3os 자체)는 **package.json 스크립트**로, 팀원(봇)은 **대시보드 또는 API**로 다룬다.
+
+> ⚠️ `team-os` 라는 셸 CLI 는 **퍼블릭 b3os 에 없다.** 예전 문서가 그렇게 안내했지만 그 스크립트는 배포에 포함되지 않는다 — 아래 명령을 쓴다.
+
+**서버 (설치 폴더에서 실행 — `cd "$HOME/b3rys-team-os"`)**
 
 | 명령 | 하는 일 |
 |---|---|
-| `team-os status` | 전체 현황판 — 봇·버스·게이트웨이·대시보드 생사 |
-| `team-os up [target]` | 죽은 것만 **의존순서대로** 기동 (idempotent · 미등록이면 자동 등록). target 생략 = 전부 |
-| `team-os restart <target>` | 강제 재기동 + 생존검증 (예: `team-os restart collab`) |
-| `team-os doctor` | LaunchAgent 등록상태·plist 종합 점검 |
-| `team-os logs <target>` | 로그 tail (지원 대상: 봇들·collab·hermes) |
+| `bun run start` | 서버 기동 (이것만으로 b3os 는 완전히 동작한다) |
+| `bun run service status` | 상시가동(LaunchAgent) 등록·실행 상태 |
+| `bun run service install` | 재부팅해도 계속 돌게 등록 (+ 즉시 기동) · **선택 기능** |
+| `bun run service restart` | 서버 재시작 (등록돼 있을 때) |
+| `bun run service uninstall` | 등록 해제 (되돌리기) |
 
+**팀원 (봇)** — 대시보드 **팀원 설정** 패널의 버튼이 정본이다. 같은 동작의 API:
+
+| 동작 | API |
+|---|---|
+| 재시작 | `POST /team/api/members/<id>/restart` · 본문 `{"fresh":true}` 면 새 세션(대화 맥락 비움) |
+| 전원 재시작 | `POST /team/api/members/restart-all` |
+| 정지/기동 (서킷브레이커) | `POST /team/api/members/<id>/enabled` · 본문 `{"enabled":false\|true}` |
+
+> **재시작**과 **기동**은 서로 다른 경로를 탄다. 재시작은 repo 안의 기동 스크립트를 **직접** 실행하고, 기동(`enabled:true`)은 그 팀원의 **LaunchAgent 등록 파일**을 통해 띄운다. 그래서 등록 파일이 옛 경로를 가리키면(§10) 재시작은 최신 스크립트로 뜨는데 기동·로그인 자동기동은 옛 스크립트로 뜬다.
+
+**상태 확인**
+
+| 보고 싶은 것 | 방법 |
+|---|---|
+| 서버 생존 | `curl -s localhost:7878/health` |
+| 팀원 목록·상태 | 대시보드, 또는 `GET /team/api/agents` |
+| 서비스·예약잡 종합 | `GET /team/api/teamos` |
+| 설정·규칙·인프라 종합 점검 (구 `doctor`) | 대시보드 **인수테스트**, 또는 `GET /team/api/acceptance-check` |
+| 로그 | 서버 = LaunchAgent 의 `StandardOutPath` · 팀원 = `tmux attach -t claude-<id>` (분리는 `Ctrl-b d`) |
+
+> 포트는 기본 `7878`. 대시보드 경로는 `/team` 아래다 (`/api/...` 가 아니라 **`/team/api/...`**).
 > 에이전트 폭주 등 **긴급 정지**가 필요하면 SKILL.md의 "🛑 긴급 ALL-STOP" 절 참조.
 
 ## 10. 기동 실패·리부팅 후 복구
 
 **"b3os가 안 떠요 / 봇이 응답 안 해요"** — 순서대로:
-1. `team-os status` — 무엇이 죽었는지 본다
-2. `team-os up all` — 죽은 것을 의존순서로 살린다 (대부분 이걸로 해결)
-3. 그래도면 `team-os doctor`(등록/plist) → `team-os logs <target>`(에러 원인)
-4. 봇만 무응답이면 §4(라우터 토글)·§5(트러블슈팅)를 먼저 본다
+1. `curl -s localhost:7878/health` — 서버가 살아 있나 본다. 죽었으면 `bun run start` (또는 등록했다면 `bun run service restart`).
+2. 서버는 사는데 팀원이 무응답이면 대시보드에서 그 팀원 **재시작**, 또는 `POST /team/api/members/<id>/restart`.
+3. 그래도면 **인수테스트**(`GET /team/api/acceptance-check`)로 설정·인프라를 훑는다 — 필수 서비스·plist·런처 경로 어긋남을 잡아준다.
+4. 봇만 무응답이면 §4(라우터 토글)·§5(트러블슈팅)를 먼저 본다.
+
+**런처 경로 어긋남** — 인수테스트의 **런처 정본 일치** 항목이 fail 이면, 그 팀원의 LaunchAgent 등록 파일이 옛 런처 스크립트를 가리키고 있다는 뜻이다(예: 예전에 다른 도구로 등록한 봇, 또는 설치 경로를 옮긴 경우).
+
+증상이 헷갈린다 — **재시작 버튼은 멀쩡히 최신 스크립트로 뜨는데**, 로그인 후 자동기동이나 정지→기동은 옛 스크립트로 뜬다. 두 경로가 다르기 때문이다(§9).
+
+⚠️ **정지 → 기동으로는 안 고쳐진다.** 기동은 등록 파일을 *읽을* 뿐 다시 쓰지 않는다. 등록 파일은 팀원을 **활성화(activate)** 할 때 생성된다 — 대시보드 온보딩에서 그 팀원을 다시 활성화하면 정본 경로로 새로 쓰인다.
 
 **"리부팅 후 안 올라와요"** — macOS는 서비스(LaunchAgent)를 **로그인할 때** 올린다:
-- 리부팅 후 **로그인을 한 번** 하면 대부분 자동 기동된다. 안 뜬 게 있으면 `team-os up all`.
-- (선택 · opt-in) 로그인 시 `team-os up all`을 자동 실행하는 recovery LaunchAgent를 설치할 수 있다. **설치할지 사용자에게 물어보고** 진행한다.
+- 리부팅 후 **로그인을 한 번** 하면 대부분 자동 기동된다. 안 뜬 게 있으면 `bun run service status` 로 확인하고 필요하면 `bun run service restart`.
+- 서버를 아직 등록 안 했다면 `bun run service install` 로 등록할 수 있다(선택). **설치할지 사용자에게 물어보고** 진행한다.
 - ⚠️ **자동 로그인(auto-login)을 켜라고 권하지 않는다.** 상시 켜진 서버에 자동 로그인은 보안을 약화시킨다 — 리부팅은 드무니 "로그인 한 번 + 자동 복구"가 안전하고 충분하다.
 
 ## 11. b3os 업데이트 (버전 올리기)
@@ -209,14 +240,18 @@ cd "$HOME/b3rys-team-os" && bash uninstall.sh     # 팀원 전원 오프보드 �
 ```bash
 cd "$HOME/b3rys-team-os"
 cp team.db "team.db.bak-$(date +%Y%m%d-%H%M%S)"   # ★백업 먼저★ — 마이그레이션 실패 시 롤백 자산
-git pull                 # 새 코드
-bun install              # 새 의존성
-bun run build            # 대시보드(프론트) 재빌드
-team-os restart collab   # 서버 재시작 — 스키마 마이그레이션은 시작 시 자동 적용
-team-os status           # 전부 정상 기동됐는지 확인
+git pull                    # 새 코드
+bun install                 # 새 의존성
+bun run build               # 대시보드(프론트) 재빌드
+bun run service restart     # 서버 재시작 — 스키마 마이그레이션은 시작 시 자동 적용
+                            #   (상시가동 미등록이면: 기존 프로세스 종료 후 `bun run start`)
+curl -s localhost:7878/health   # 서버 생존 확인
 ```
+
+서버 코드(`src/`)를 바꿨으면 **서버 재시작**이 필요하고, 대시보드(`src/web/`)를 바꿨으면 **`bun run build`** 가 필요하다.
+팀원 기동 스크립트만 바뀐 경우엔 그 **팀원을 재시작**해야 새 스크립트가 적용된다(서버 재시작만으로는 이미 떠 있는 팀원이 안 바뀐다).
 
 - **업데이트 전에 반드시 `team.db`를 백업**한다(위 첫 줄). 스키마 마이그레이션은 서버 시작 시 자동 적용되는데, 실패·중단 시 백업이 유일한 롤백 자산이다.
 - 스키마 변경은 서버 시작 시 `migrate`가 자동 적용하므로 별도 마이그레이션 명령은 없다.
-- 업데이트 후 반드시 `team-os status`로 전원 생존을 확인한다.
+- 업데이트 후 반드시 대시보드(또는 `GET /team/api/agents`)로 전원 생존을 확인한다.
 - **이 설치·운영 스킬 자체도 매 b3os 버전에서 실제 절차와 어긋나지 않는지 함께 점검**한다(스킬↔버전 싱크).
