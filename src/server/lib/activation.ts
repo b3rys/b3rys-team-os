@@ -588,39 +588,30 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       else if (isTier2Shadow(id)) installOutboundHook(id, { dryRun: true }); // Phase0 shadow: 훅 로그만(무영향)
       seedClaudeTrust(id);               // ~/.claude.json projects 시드 → 신규 workspace trust 프롬프트 hang 방지(하네스 #2)
       seedClaudeAccess(id);              // access.json 시드 — 재활성화 시 승인 allowFrom 보존, 미승인/첫 멤버만 pairing 기본값(하네스 #1)
-      // ★poller 헬스게이트 + 자동 재시도(GD 2026-07-25 밤, 2번째 팀원 영입 실패 근본):
-      //   봇이 tmux로 떠도 텔레그램 플러그인 MCP(server.ts)가 실제 기동해 bot.pid를 써야 '진짜 대화됨'.
-      //   그런데 MCP는 첫 기동에서 콜드스타트·플러그인 start의 `bun install` 히컵·타이밍으로 bot.pid를 못 쓰고 죽는
-      //   ★transient 실패★가 있다(같은 config로 수동 실행하면 정상 폴링 = 봇/토큰/scope는 정상, 기동 순간만 실패).
-      //   예전엔 여기서 즉시 실패→사람이 수동 재활성화해야 했다(2번째 팀원이 반복적으로 여기 걸림). setAgentEnabled는
-      //   kickstart -k로 항상 fresh respawn하므로 [kill+respawn+게이트]를 N회 반복하면 transient는 자동 통과하고
-      //   진짜 고장만 최종 실패로 남는다. flapping 없음 — 활성화 1회 안에서 bounded(성공 시 즉시 break).
-      // ★매 시도 fresh 가드(하네스 HIGH, GD 2026-07-02)★: 죽은 봇의 옛 tmux 세션·stale bot.pid가 남으면 게이트가
-      //   첫 iteration에서 즉시 거짓통과(귀머거리 봇이 합류로). 매 시도 전 세션 kill + stale bot.pid 제거 → 항상 fresh 기동.
-      // 기본 40s 대기(GD 2026-07-24, 28→40, fresh clone bun 콜드스타트 완화) · 기본 2회 시도(1회 재시도).
-      //   TEAMOS_POLLER_WAIT_MS·TEAMOS_POLLER_ATTEMPTS로 오버라이드(테스트 격리·튜닝).
+      // ★단일 클린 스폰★ (2026-07-25, 2번째+ 팀원 영입 실패 근본 fix — claude --debug 로 확정):
+      //   봇이 tmux로 떠도 텔레그램 플러그인 MCP(server.ts)가 기동해 bot.pid를 써야 '진짜 대화됨'.
+      //   MCP 스폰 실패의 근본 = 플러그인 start(`bun install --no-summary && bun server.ts`)의 ★콜드 install★ +
+      //   ★동시 claude 세션들의 버전락 경합(`Lock already held for versions/…`)★이 CC의 MCP 연결 타임아웃을 초과
+      //   → MCP failed → server.ts 미기동 → bot.pid 없음('귀머거리'). scope·싱글톤 아님(warm에서 /mcp Reconnect 시 즉시 붙음).
+      //   ★버전락은 claude "부팅 순간"만 잡는다 — running 세션엔 무관.★ 그래서 예전의 kill+respawn 재시도(철회)는
+      //   매 시도마다 부팅을 재유발해 ★스스로 버전락 경합을 늘려★ 역효과였다. 대신:
+      //     ① 세션 스폰 전 플러그인 node_modules pre-warm(start-telegram-channel.sh) → 세션의 bun install 순삭(0.03s).
+      //     ② 여기선 ★한 번만 깨끗이 스폰★(재스폰 안 함 = 자기경합 없음)하고 poller 를 기다린다.
+      // ★fresh 가드(하네스 HIGH, GD 2026-07-02)★: 죽은 봇의 옛 tmux 세션·stale bot.pid 가 남으면 게이트 거짓통과 → 스폰 전 1회 kill + bot.pid 제거.
+      killClaudeTmux(id);
+      try { rmSync(claudeBridgePaths(id).botPid, { force: true }); } catch { /* best-effort stale marker cleanup */ }
+      appendAuditFile("activation", "runtime_start", id, { runtime });
+      const res = await setAgentEnabled(id, "claude_channel", true); // plist bootstrap → RunAtLoad로 start-telegram-channel.sh <id> 기동
+      appendAuditFile("activation", res.ok ? "runtime_done" : "runtime_failed", id, { runtime });
+      steps.push({ step: "runtime", ok: res.ok, detail: res.ok ? "claude 봇 tmux 기동(LaunchAgent)" : res.detail });
+      if (!res.ok) return { ok: false, steps, error: "claude 봇 기동 실패" };
+      // poller 게이트: bot.pid 출현 = MCP(poller) 실기동. 기본 40s(TEAMOS_POLLER_WAIT_MS override). pre-warm 덕에 정상 스폰은 곧 붙는다.
+      //   미출현 = MCP 스폰 실패(버전락 경합 등) → ★세션을 재스폰하지 말고 /mcp reconnect 로 복구★(재스폰은 경합 재유발). reconnect 자동화는 후속.
       const rawWait = process.env.TEAMOS_POLLER_WAIT_MS;
       const pollerWaitMs = rawWait !== undefined && Number.isFinite(Number(rawWait)) ? Number(rawWait) : 40000;
-      const rawAttempts = process.env.TEAMOS_POLLER_ATTEMPTS;
-      const pollerAttempts = rawAttempts !== undefined && Number.isFinite(Number(rawAttempts)) && Number(rawAttempts) >= 1 ? Math.floor(Number(rawAttempts)) : 2;
-      let runtimeOk = false, runtimeDetail = "", pollerOk = false, usedAttempt = 0;
-      for (let attempt = 1; attempt <= pollerAttempts; attempt++) {
-        usedAttempt = attempt;
-        killClaudeTmux(id);
-        try { rmSync(claudeBridgePaths(id).botPid, { force: true }); } catch { /* best-effort stale marker cleanup */ }
-        appendAuditFile("activation", "runtime_start", id, { runtime, attempt });
-        const res = await setAgentEnabled(id, "claude_channel", true); // bootstrap→RunAtLoad, 이미 로드면 kickstart -k로 fresh respawn
-        appendAuditFile("activation", res.ok ? "runtime_done" : "runtime_failed", id, { runtime, attempt });
-        runtimeOk = res.ok; runtimeDetail = res.detail;
-        if (!res.ok) { if (attempt < pollerAttempts) continue; break; }  // 기동 자체 실패 → 재시도(마지막이면 탈출)
-        pollerOk = await waitForClaudePoller(id, pollerWaitMs);
-        if (pollerOk) break;                                            // poller 붙음 → 성공, 즉시 종료
-        appendAuditFile("activation", "poller_retry", id, { attempt, of: pollerAttempts }); // transient 의심 → 다음 시도서 fresh respawn
-      }
-      steps.push({ step: "runtime", ok: runtimeOk, detail: runtimeOk ? "claude 봇 tmux 기동(LaunchAgent)" : runtimeDetail });
-      if (!runtimeOk) return { ok: false, steps, error: "claude 봇 기동 실패" };
-      steps.push({ step: "poller", ok: pollerOk, detail: pollerOk ? `텔레그램 채널 poller 기동 확인(bot.pid${usedAttempt > 1 ? `, ${usedAttempt}회째 성공` : ""})` : `poller 미기동(bot.pid 없음 — ${pollerAttempts}회 재시도 후에도 실패, 봇이 메시지를 못 받음)` });
-      if (!pollerOk) return { ok: false, steps, error: `텔레그램 채널 poller 미기동(${pollerAttempts}회 재시도 실패) — 봇이 메시지를 받지 못합니다(수동 재활성화 필요)` };
+      const pollerOk = await waitForClaudePoller(id, pollerWaitMs);
+      steps.push({ step: "poller", ok: pollerOk, detail: pollerOk ? "텔레그램 채널 poller 기동 확인(bot.pid)" : "poller 미기동(bot.pid 없음 — MCP 스폰 실패 의심; 세션 유지한 채 /mcp reconnect 로 복구, 재스폰 금지=버전락 경합 재유발)" });
+      if (!pollerOk) return { ok: false, steps, error: "텔레그램 채널 poller 미기동(MCP 스폰 실패 의심) — 세션은 떠 있으니 /mcp reconnect 로 복구하세요(재활성화=재스폰은 버전락 경합을 재유발합니다)" };
       if (!await pushEssentialStep(steps, { id, runtime })) return { ok: false, steps, error: "claude 필수설정 누락 — 재활성화/설정 복구 필요" };
       // recall 주입(GD 2026-07-05): 활성화=새 claude 세션(맥락 빔)이니 --fresh 재시작과 동일하게 직전 대화 digest 주입.
       //   런타임 스왑/영입이 곧 '첫 로딩'이라 여기가 GD가 원한 '첫 로딩 시 주입' 지점. fire-forget best-effort(세션 준비는 스크립트 sleep이 대기, 실패해도 활성화 정상).
