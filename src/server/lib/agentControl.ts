@@ -244,10 +244,9 @@ export async function restartAll(members: ControlMember[]): Promise<Array<{ id: 
     }
     const r = await restartAgent(m.id, m.runtime);
     out.push({ id: m.id, ok: r.ok, detail: r.detail });
-    // ★claude 부팅 직렬화는 start-telegram-channel.sh 의 전역 boot-mutex 가 담당★(2026-07-25): restartAgent 는 세션을
-    //   스폰만 하고 리턴하지만, 그 스폰 경로(start-telegram-channel.sh)가 CLAUDE_BOOT_LOCK 을 잡고 버전락 창만큼 hold 후
-    //   놓으므로, 여기 restartAll 의 순차 호출들은 자연히 직렬화된다(recruit 경로·recovery-멤버 루프도 같은 mutex 로 커버).
-    //   → 별도 stagger 불필요(중복). 버전락은 "부팅 순간"만 — running 세션엔 무관.
+    // stagger/mutex 없음(2026-07-25): 버전락 경합은 red herring 이었다(NON-FATAL, MCP 스폰 미차단). 재시작은
+    //   플러그인 캐시가 이미 warm 이라 세션 install 이 순삭 → MCP 가 30s 핸드셰이크 안에 붙는다. 콜드 install 대비는
+    //   start-telegram-channel.sh 의 pre-warm 이 담당. 별도 부팅 직렬화 불필요.
   }
   // 복구 코디는 맨 마지막(--resume 이라 이 대화 컨텍스트 유지하고 ~15s 후 복귀).
   for (const m of recoveryMembers) {
