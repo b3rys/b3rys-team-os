@@ -38,9 +38,10 @@ curl -s -X POST http://localhost:7878/team/api/ot/<ot_id>/activate
 #   미로그인=runtime_auth_required 400+fixHint. claude=poller 헬스게이트(bot.pid) 통과해야 '진짜 대화됨'.
 ```
 
-- **claude_channel 런타임**: telegram 플러그인이 **user scope로 1회** 설치돼 있어야 봇이 메시지를 받는다
-  (그 머신의 모든 claude 봇 공유). 이미 첫 팀원 세팅으로 깔았으면 skip. 안 깔렸으면 `setup-claude-telegram-bot`
-  스킬 또는 수동(`tmux attach -t claude-<id>` → `/plugin install telegram@claude-plugins-official` → user scope → `/reload-plugins`).
+- **claude_channel 런타임**: telegram 플러그인 enable + 첫부팅 poller 복구는 **활성화 런처가 자동 처리**한다
+  (`~/.claude/settings.json` 의 `enabledPlugins` 에 직접·원자적 기록 + poller 미기동 시 `/mcp reconnect` 자동 주입, 5db5510).
+  **수동 설치 단계 없음.** ⛔ `claude plugin install`/`/plugin install` 은 돌리지 말 것 — 공유 플러그인 캐시를 inode 째 스왑해
+  실행 중인 다른 팀원 봇 세션을 파괴한다(하네스 CONFIRMED 2026-07-25).
 - **페어링(사람)**: claude_channel = 봇에 첫 DM → 6자리 페어링 코드 승인. openclaw = 봇에 DM 후
   `POST /team/api/ot/<ot_id>/pair-approve`. hermes(v0.18) = DM 페어링 게이트 있음 — activate가 팀장 chat_id(`owner_chat_id`)를 게이트웨이 allowlist(`TELEGRAM_ALLOWED_USERS`)에 시드해 팀장은 코드 없이 통과(팀장 외=`hermes pairing approve`).
 - 상세는 온보딩 스킬의 `recruit.md`와 동일 — 그 문서가 있으면 참조.
