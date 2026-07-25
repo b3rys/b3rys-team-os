@@ -1686,20 +1686,30 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
           detail: firstCall.subscriptionNeeded ? "subscription_needed: 구독/한도 확인 필요" : firstCall.detail,
         });
       }
-      if (result.needsPairing && result.ok) {
+      // ★분기 순서 = 사용자가 먼저 해결해야 하는 것 순★ (Bill 교차검증 2026-07-25).
+      //   페어링 안내를 앞에 두면 '페어링 대기 + 구독/한도 실패' 조합에서 결제 문제를 덮어버린다 —
+      //   DM 을 보낸다고 결제가 풀리지 않으니, 이 PR 이 없애려던 바로 그 패턴('따라 해도 안 풀리는 안내')이
+      //   다른 조합에서 재현된다. 그래서 ①확정 차단(구독/한도) ②첫 모델호출 실패 ③페어링 대기 순으로 본다.
+      //   페어링은 감추지 않고 ★병기★ 한다 — 둘 다 사실이고, 둘 다 해야 끝난다.
+      const pairingNote = result.needsPairing
+        ? ` (첫 연결 페어링도 남아 있습니다: Telegram 에서 ${botMention}에게 DM 을 한 번 보내주세요.)`
+        : "";
+      const firstCallFailed = firstCall != null && !firstCall.ok;
+      if (firstCall?.subscriptionNeeded) {
+        jn.state = "blocked";
+        jn.detail = "subscription_needed: 구독 또는 사용 한도 때문에 첫 모델 호출이 실패했습니다. 결제/구독 상태를 확인한 뒤 다시 활성화하세요." + pairingNote;
+      } else if (result.needsPairing && result.ok && !firstCallFailed) {
         // ★실패가 아니라 '거의 완료 — 마지막 한 단계'★. 첫 claude 멤버는 allowFrom 을 복사해올 참조봇이
         //   없어 DM 페어링 1회가 필요하다(두 번째 멤버부터는 첫 멤버 것을 시드받아 자동 통과). 재시도로는
         //   안 풀리는 상태라 '재시도 필요' 로 안내하면 사용자를 헛돌게 만든다.
         jn.state = "pending";
-        jn.detail = `거의 완료 — 마지막 한 단계: Telegram 에서 ${botMention} 에게 DM 을 한 번 보내주세요(첫 연결 페어링). 승인하면 바로 연결됩니다. 다음 팀원부터는 이 단계가 없습니다.`;
+        jn.detail = `거의 완료 — 마지막 한 단계: Telegram 에서 ${botMention}에게 DM 을 한 번 보내주세요(첫 연결 페어링). 승인하면 바로 연결됩니다. 다음 팀원부터는 이 단계가 없습니다.`;
       } else if (result.ok && noPairingRuntime && (!firstCallRuntime || firstCall?.ok)) {
         const rtLabel = agent.runtime === "codex" ? "codex 브릿지" : agent.runtime === "claude_channel" ? "claude 봇" : "hermes 게이트웨이";
-        jn.state = "done"; jn.detail = `활성화됨 (${rtLabel} 가동 + 첫 모델 호출 확인) — 합류. 이제 Telegram에서 ${botMention} 에게 DM으로 인사해 보세요. 답이 오면 연동 성공입니다.`;
-      } else if (firstCall?.subscriptionNeeded) {
-        jn.state = "blocked";
-        jn.detail = "subscription_needed: 구독 또는 사용 한도 때문에 첫 모델 호출이 실패했습니다. 결제/구독 상태를 확인한 뒤 다시 활성화하세요.";
+        jn.state = "done"; jn.detail = `활성화됨 (${rtLabel} 가동 + 첫 모델 호출 확인) — 합류. 이제 Telegram에서 ${botMention}에게 DM으로 인사해 보세요. 답이 오면 연동 성공입니다.`;
       } else {
-        jn.detail = result.ok ? "활성화됨 — 첫 모델 호출 확인/첫 응답(ack) 대기" : "활성화 대기";
+        // 구독 무관 첫 모델호출 실패도 여기로 온다 — 페어링 안내로 가리지 않고, 페어링은 병기만 한다.
+        jn.detail = (result.ok ? "활성화됨 — 첫 모델 호출 확인/첫 응답(ack) 대기" : "활성화 대기") + pairingNote;
       }
     }
     parsed.steps = steps;

@@ -817,6 +817,68 @@ describe("영입 OT / 능력 카탈로그", () => {
     expect(joinStep.detail).toContain("subscription_needed");
     expect(body.ot.stage).toBe("join");
   });
+  // ── ★페어링 안내가 '더 먼저 풀어야 하는 차단'을 덮으면 안 된다★ (Bill 교차검증 2026-07-25) ──
+  //   DM 을 보낸다고 결제 문제가 풀리지 않는다. 페어링 안내를 앞에 두면 '따라 해도 절대 안 풀리는 안내' 라는
+  //   ★이 PR 이 없애려던 바로 그 패턴★ 이 다른 조합에서 재현된다. 순서: 구독차단 → 첫콜실패 → 페어링대기.
+  const pairingActivate = async () => ({
+    ok: true,
+    needsPairing: true,
+    steps: [{ step: "runtime", ok: true, detail: "mock runtime" }, { step: "bus-wake", ok: true, detail: "mock wake" }],
+  });
+  const authOkFn = async (runtime: string) => ({ runtime, loggedIn: true, detail: "auth ok", fixHint: "" });
+  const activateThenProvision = async (app: any, id: string, runtime: string) => {
+    const { ot_id } = await (await app.request("/members/recruit", json({ id, display_name: id, role: "dev", runtime }))).json();
+    expect((await app.request(`/ot/${ot_id}/provision`, json({ bot_token: "1234567:" + "A".repeat(35) }))).status).toBe(200);
+    return await (await app.request(`/ot/${ot_id}/activate`, json({}))).json();
+  };
+
+  test("★페어링 대기 + 구독/한도 실패 → 구독 차단이 이긴다★ (페어링은 병기하되 감추지 않는다)", async () => {
+    const quotaFail = async (input: { id: string; runtime: string }) => ({
+      runtime: input.runtime, ok: false, subscriptionNeeded: true, detail: "429 insufficient_quota billing",
+    });
+    const { app } = setupReady(AGENTS, { checkRuntimeAuth: authOkFn, activateMember: pairingActivate, firstModelCall: quotaFail, validateBotToken: okBotToken });
+    const body = await activateThenProvision(app, "lisa", "claude_channel");
+
+    expect(body.ok).toBe(false);                    // 구독 문제는 '거의 완료' 가 아니다
+    expect(body.subscription_needed).toBe(true);
+    expect(body.error).toBe("subscription_needed");
+    const joinStep = body.ot.steps.find((s: any) => s.key === "join");
+    expect(joinStep.state).toBe("blocked");
+    expect(joinStep.detail).toContain("subscription_needed");
+    expect(joinStep.detail).toContain("결제/구독");
+    expect(joinStep.detail).toContain("페어링도 남아 있습니다"); // 사실이니 병기는 한다
+    expect(joinStep.detail).not.toContain("거의 완료");          // 다만 '거의 완료' 로 읽히면 안 된다
+  });
+
+  test("페어링 대기 + 구독 무관 첫 모델호출 실패 → 페어링 안내가 실패를 가리지 않는다", async () => {
+    const plainFail = async (input: { id: string; runtime: string }) => ({
+      runtime: input.runtime, ok: false, subscriptionNeeded: false, detail: "첫 호출 응답 없음",
+    });
+    const { app } = setupReady(AGENTS, { checkRuntimeAuth: authOkFn, activateMember: pairingActivate, firstModelCall: plainFail, validateBotToken: okBotToken });
+    const body = await activateThenProvision(app, "jane", "claude_channel");
+
+    const joinStep = body.ot.steps.find((s: any) => s.key === "join");
+    expect(joinStep.state).not.toBe("done");
+    expect(joinStep.detail).not.toContain("거의 완료");
+    expect(joinStep.detail).toContain("페어링도 남아 있습니다");
+  });
+
+  test("페어링 대기 + 첫 모델호출 성공 → '거의 완료 — 마지막 한 단계' 안내(봇 username 포함, 조사 앞 공백 없음)", async () => {
+    const callOk = async (input: { id: string; runtime: string }) => ({ runtime: input.runtime, ok: true, subscriptionNeeded: false, detail: "첫 호출 확인" });
+    const { app } = setupReady(AGENTS, { checkRuntimeAuth: authOkFn, activateMember: pairingActivate, firstModelCall: callOk, validateBotToken: okBotToken });
+    const body = await activateThenProvision(app, "mina", "claude_channel");
+
+    expect(body.ok).toBe(true);
+    expect(body.needs_pairing).toBe(true);
+    expect(body.pairing_hint).toContain("DM");
+    const joinStep = body.ot.steps.find((s: any) => s.key === "join");
+    expect(joinStep.state).toBe("pending");        // 실패(blocked)도, 완료(done)도 아니다
+    expect(joinStep.detail).toContain("거의 완료 — 마지막 한 단계");
+    expect(joinStep.detail).toMatch(/@[a-z0-9_]+에게/i); // 봇 username 이 찍히고 조사 앞에 공백이 없다
+    expect(joinStep.detail).not.toContain("<bot_username>");
+    expect(joinStep.detail).not.toContain(" 에게");
+  });
+
   test("activate: 중앙 팀원 상한 가드 실패를 409로 전달", async () => {
     const authOk = async (runtime: string) => ({ runtime, loggedIn: true, detail: "auth ok", fixHint: "" });
     const activateLimited = async () => ({

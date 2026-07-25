@@ -213,8 +213,12 @@ export function classifyEssentials(
   const hardMissing = essentials.missing.filter((m) => !tolerate.some((t) => m.startsWith(t)));
   const degraded = !essentials.ok && hardMissing.length === 0;
   const ok = essentials.ok || degraded;
-  // ★페어링 대기는 '관용된 누락이 allowFrom 뿐' 일 때만★ — 토큰·채널이 같이 빠졌으면 그건 진짜 실패다.
-  const pairingOnly = pendingPairing && degraded && essentials.missing.every((m) => m.startsWith("allowFrom:") || m.startsWith("poller:"));
+  // ★페어링 대기 = 관용 후 남은 하드 누락이 0 일 때만★ — 토큰·채널이 같이 빠지면 degraded 가 false 라
+  //   그대로 실패로 떨어진다(경계는 degraded 가 지킨다).
+  //   초안엔 여기에 `missing.every(allowFrom|poller)` 절이 더 있었지만, degraded 가 이미 '하드 누락 0' 을
+  //   뜻해서 claude 호출부에선 항상 참인 ★도달 불가한 중복★ 이었다 — Bill 교차검증에서 그 절만 지워도
+  //   어떤 테스트도 안 깨진다는 게 드러나 제거했다(내가 그 절이 잡힌다고 보고한 건 부정확했다).
+  const pairingOnly = pendingPairing && degraded;
   const degradedDetail = pairingOnly
     ? "필수설정 확인(토큰·채널) — DM 페어링 대기(첫 claude 멤버: 사람이 봇에게 DM 1회)"
     : "필수설정 확인(토큰·allowFrom·채널) — poller 는 needs_reconnect(자동 복구 시도 중)";
