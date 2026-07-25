@@ -253,9 +253,8 @@ try:
 except Exception as e:
     print(f"  ⚠ config 로드 실패({e}) — 명시 model skip(활성화는 계속)"); sys.exit(0)
 m = cfg.get("model")
-has = bool(m) and (m if isinstance(m, str) else (m.get("default") or m.get("model") or m.get("name")))
-if has:
-    print("  ✓ model 이미 설정됨 — skip(멱등)"); sys.exit(0)
+cur = bool(m) and (m if isinstance(m, str) else (m.get("default") or m.get("model") or m.get("name")))
+# ★active_provider 를 먼저 판정한다 — 아래 호환성 검사에 필요(종전엔 has 체크 뒤에 있었다).
 prov = None
 for ap in (os.path.join(prof, "auth.json"), os.path.expanduser("~/.hermes/auth.json")):
     try:
@@ -264,7 +263,29 @@ for ap in (os.path.join(prof, "auth.json"), os.path.expanduser("~/.hermes/auth.j
     except Exception:
         pass
 if not prov:
+    if cur:
+        print("  ✓ model 이미 설정됨 — skip(멱등, active_provider 판정 실패로 호환성 미검사)"); sys.exit(0)
     print("  ⚠ active_provider 판정 실패 — 명시 model skip(활성화는 계속)"); sys.exit(0)
+# ★멱등 조건 = '비어있음'이 아니라 '비어있거나 active_provider 와 호환 불가'★
+#   종전엔 non-empty 면 무조건 skip 했다. 그런데 clone 원본이 전역 ~/.hermes/config.yaml 의 기본 model
+#   (예: anthropic/claude-opus-4.6)을 물려받으면 non-empty 라 skip → codex(ChatGPT) 구독에 Claude 모델이
+#   붙은 채로 활성화가 '성공'하고, 첫 메시지에서야 HTTP 400 으로 죽는다:
+#     "The 'anthropic/claude-opus-4.6' model is not supported when using Codex with a ChatGPT account."
+#   (2026-07-25 실측: herm — activate 전 단계 ✅ 통과 후 텔레그램 첫 턴에서 실패.)
+#   판정은 provider_model_ids(prov) 목록 대조로 한다 — detect_static_provider_for_model 은 슬래시
+#   네임스페이스 형태('anthropic/claude-opus-4.6')를 못 잡아 이 케이스에서 None 을 준다(실측).
+#   ★보수적으로: 목록을 못 얻거나 비면 판정 불가로 보고 종전대로 skip(멱등).★
+if cur:
+    try:
+        from hermes_cli.models import provider_model_ids
+        known = [x for x in (provider_model_ids(prov) or []) if isinstance(x, str)]
+    except Exception as e:
+        print(f"  ✓ model 이미 설정됨 — skip(멱등, 호환성 조회 실패: {e})"); sys.exit(0)
+    if not known:
+        print(f"  ✓ model 이미 설정됨 — skip(멱등, provider={prov} 모델목록 비어 판정 불가)"); sys.exit(0)
+    if cur in known:
+        print(f"  ✓ model 이미 설정됨({cur}) — provider={prov} 와 호환 · skip(멱등)"); sys.exit(0)
+    print(f"  ⚠ model({cur}) 이 active_provider={prov} 와 호환 불가 — provider 기본모델로 교체")
 try:
     from hermes_cli.models import get_default_model_for_provider
     dm = get_default_model_for_provider(prov)
