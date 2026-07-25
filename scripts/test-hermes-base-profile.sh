@@ -37,6 +37,13 @@ status=$?
 set -e
 [ "$status" -ne 0 ] || fail "activate accepted an unsafe base profile"
 
+# The server must also fail closed before destructive TypeScript cleanup paths can run.
+set +e
+HERMES_BASE_PROFILE='../unsafe' bun -e "await import('$ROOT/src/server/lib/paths.ts')" >/dev/null 2>&1
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "server config accepted an unsafe base profile"
+
 # uninstall: .env-configured base survives while a non-base Hermes profile is removed.
 UN_ROOT="$TMP/uninstall-repo"
 UN_HOME="$TMP/uninstall-home"
