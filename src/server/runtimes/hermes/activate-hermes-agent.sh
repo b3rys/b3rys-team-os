@@ -65,8 +65,13 @@ say "■ 복제 원본 프로필: $SRC_PROFILE"
 say "■ 1) 프로필 생성 (clone-from $SRC_PROFILE)"
 # ★완전-프로필 판정 version-aware(BUG8b): v0.17.0=config.yaml · v0.18.0+=profile.yaml → 둘 중 하나라도 있으면 완전.
 #   config.yaml 만 보면 v0.18.0 정상 프로필을 half-state 로 오판해 rm-rf+재클론(불필요·위험)하던 갭. OWNER 2026-07-03.
+PROF_PREEXISTING=0
+B3OS_MARKER="$PROF_DIR/.b3os-managed"
 if [ -d "$PROF_DIR" ] && { [ -f "$PROF_DIR/config.yaml" ] || [ -f "$PROF_DIR/profile.yaml" ]; }; then
-  echo "  이미 존재(완전): $PROF_DIR — 건너뜀(덮어쓰기 안 함)"
+  # ★"덮어쓰기 안 함"은 '재클론 안 함'이라는 뜻일 뿐★ — 아래 2)토큰·3)멘션/cwd·3b)model 단계는
+  #   이 프로필에 그대로 적용된다. 그래서 소유권 판정이 필요하다(아래 가드).
+  echo "  이미 존재(완전): $PROF_DIR — 재클론 건너뜀"
+  PROF_PREEXISTING=1
 else
   # 불완전 프로필 잔재(config.yaml·profile.yaml 둘 다 없음 = 이전 퇴사가 덜 정리한 half-state) 감지 시 제거 후 재클론.
   #   안 그러면 clone 건너뛰어 설정 없는 채로 진행→게이트웨이 못 뜸(2026-07-01 실측). 슬러그 가드+고정 prefix로 안전.
@@ -75,6 +80,35 @@ else
     rm -rf "$PROF_DIR"
   fi
   hermes profile create "$AGENT_ID" --clone-from "$SRC_PROFILE" --description "$DESC"
+  # ★소유권 마커★ — 이 프로필은 b3os 가 만들었다는 표시. 다음 활성화 때 '사용자 것'과 구별하는 근거.
+  : > "$B3OS_MARKER" 2>/dev/null || true
+fi
+
+# ★소유권 가드 — 남의 hermes 프로필을 덮어쓰지 않는다★
+#   b3os 팀원 id 가 사용자가 이미 쓰던 hermes 프로필 이름과 겹치면, 아래 단계들이 그 프로필을
+#   그대로 개조한다: .env 의 TELEGRAM_BOT_TOKEN 을 b3os 봇 토큰으로 교체(=원래 봇이 죽는다),
+#   멘션 패턴·terminal.cwd 재작성, model 재작성. 경고도 없이 조용히 일어난다.
+#   → 기존 프로필인데 b3os 소유 근거가 없으면 중단한다. 근거는 아래 둘 중 하나:
+#     ① 마커(.b3os-managed)  ② b3os 가 만든 게이트웨이 plist(= 과거에 b3os 가 활성화한 적 있음)
+#   ②는 마커 도입 이전에 이미 운영 중이던 프로필을 막지 않기 위한 grace 경로다(마커를 채워 넣고 통과).
+#   ※ 토큰 파일(~/.hermes/credentials/<id>-token.txt)은 근거가 될 수 없다 — provision 이 activate
+#     이전에 항상 써두므로 첫 충돌에서도 존재한다.
+if [ "$PROF_PREEXISTING" = 1 ] && [ ! -f "$B3OS_MARKER" ]; then
+  if [ -f "$HOME/Library/LaunchAgents/ai.hermes.gateway-$AGENT_ID.plist" ]; then
+    echo "  ℹ b3os 게이트웨이 plist 존재 — 기존 b3os 프로필로 인정하고 마커 생성(마커 도입 이전 프로필)"
+    : > "$B3OS_MARKER" 2>/dev/null || true
+  elif [ "${B3OS_ADOPT_PROFILE:-0}" = 1 ]; then
+    echo "  ℹ B3OS_ADOPT_PROFILE=1 — 기존 프로필을 b3os 소유로 인수(마커 생성)"
+    : > "$B3OS_MARKER" 2>/dev/null || true
+  else
+    echo "❌ hermes 프로필 '$AGENT_ID' 이(가) 이미 있는데 b3os 가 만든 것이 아닙니다 — 덮어쓰지 않고 중단합니다."
+    echo "   그대로 진행하면 이 프로필의 봇 토큰이 b3os 봇으로 교체되어 ★원래 쓰시던 봇이 응답을 멈춥니다.★"
+    echo "   조치(둘 중 하나):"
+    echo "     · 팀원 id 를 다른 이름으로 바꿔 다시 영입   ← 권장"
+    echo "     · 이 프로필이 정말 b3os 용이면 인수: B3OS_ADOPT_PROFILE=1 로 재실행"
+    echo "   대상 경로: $PROF_DIR"
+    exit 1
+  fi
 fi
 # auth.json 심링크 — clone-from은 모델 provider 인증(auth.json)을 복제하지 않아 새 프로필이 '메시지는 받지만 응답 생성서 인증실패'로 떨어짐(2026-07-01 실측).
 #   공유 인증($SRC_PROFILE)에 심링크(복사 아님=토큰 로테이션 시 stale 만료 방지·항상 현재).
