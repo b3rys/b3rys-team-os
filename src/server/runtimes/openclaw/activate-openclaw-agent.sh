@@ -77,6 +77,7 @@ else
 fi
 
 # OpenClaw scaffold보다 b3os가 영입 단계에서 렌더/저장한 파일이 정본이다.
+# set -e 때문에 신규 `agents add`가 실패하면 여기 도달하지 않는다. add 실패를 무시하도록 바꿀 경우 복원 조건도 함께 재검토한다.
 for managed in AGENTS.md SOUL.md; do
   [ -e "$WORKSPACE_BACKUP/$managed" ] && cp -Pp "$WORKSPACE_BACKUP/$managed" "$WS/$managed"
 done
