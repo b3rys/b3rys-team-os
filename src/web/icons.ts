@@ -181,9 +181,9 @@ function splitDataUrl(dataUrl: string): { mimeType: string; base64: string } | n
   return { mimeType, base64 };
 }
 
-/** 아이콘 JPG 를 파일로 다운로드 (<agentId>-icon.jpg). iconName=agents.json 저장 icon(없으면 기본맵). */
-export async function downloadAgentIconJpg(agentId: string, iconName?: string): Promise<DownloadResult> {
-  const dataUrl = await agentIconToJpegDataUrl(agentId, { icon: iconName });
+/** 아이콘 JPG 를 파일로 다운로드 (<agentId>-icon.jpg). iconName=agents.json 저장 icon(없으면 기본맵), fg=저장된 아이콘 색. */
+export async function downloadAgentIconJpg(agentId: string, iconName?: string, fg?: string): Promise<DownloadResult> {
+  const dataUrl = await agentIconToJpegDataUrl(agentId, { icon: iconName, fg });
   const filename = `${agentId}-icon.jpg`;
   const nativePayload = splitDataUrl(dataUrl);
   if (nativePayload && nativeBridge()) {
