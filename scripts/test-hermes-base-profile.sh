@@ -42,6 +42,14 @@ chmod +x "$INSTALL_BIN/bun" "$INSTALL_BIN/uname"
 HOME="$INSTALL_HOME" PATH="$INSTALL_BIN:/usr/bin:/bin" bash "$INSTALL_ROOT/install.sh" >/dev/null
 grep -q '^HERMES_BASE_PROFILE=old-base$' "$INSTALL_ROOT/.env" || fail "existing .env was not backfilled"
 
+# A present-but-empty key is also migrated; unrelated ambiguous Hermes auth does not block non-Hermes installs.
+rm "$INSTALL_HOME/.hermes/profiles/member/auth.json"
+touch "$INSTALL_HOME/.hermes/profiles/member/auth.json"
+printf 'TEAM_HTTP_PORT=7878\nHERMES_BASE_PROFILE=\n' > "$INSTALL_ROOT/.env"
+HOME="$INSTALL_HOME" PATH="$INSTALL_BIN:/usr/bin:/bin" bash "$INSTALL_ROOT/install.sh" >/dev/null
+[ "$(grep -c '^HERMES_BASE_PROFILE=' "$INSTALL_ROOT/.env")" -eq 1 ] || fail "empty key migration left duplicate settings"
+grep -q '^HERMES_BASE_PROFILE=b3os$' "$INSTALL_ROOT/.env" || fail "non-Hermes ambiguous install did not use neutral default"
+
 # activate: configured base wins; when absent, another authenticated profile remains the fallback.
 ACT_HOME="$TMP/activate-home"
 mkdir -p "$ACT_HOME/.local/bin" "$ACT_HOME/.hermes/credentials" \

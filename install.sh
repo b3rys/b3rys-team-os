@@ -123,7 +123,10 @@ grep -q '^B3OS_SCHEDULER_DRY_RUN=' .env 2>/dev/null || printf 'B3OS_SCHEDULER_DR
 
 # 기존 설치 마이그레이션: 예전 .env에는 base 프로필 키가 없다. 이 상태로 새 중립 기본값을
 # 적용하면 실제 공유 auth 원본이 삭제 가드에서 빠지므로, 기존 auth 심링크 구조에서 보수적으로 추론해 backfill한다.
-if ! grep -q '^HERMES_BASE_PROFILE=' .env 2>/dev/null; then
+if ! grep -qE '^HERMES_BASE_PROFILE=[[:space:]]*[A-Za-z0-9_-]+[[:space:]]*(#.*)?$' .env 2>/dev/null; then
+  # 빈 값/잘못된 기존 줄은 중복 키를 남기지 않고 원자적으로 제거한 뒤 안전한 값만 기록한다.
+  grep -v '^HERMES_BASE_PROFILE=' .env > .env.tmp 2>/dev/null || true
+  mv .env.tmp .env
   _detector="$ROOT/src/server/runtimes/hermes/detect-base-profile.sh"
   _detected_base=""
   _detect_status=0
@@ -133,6 +136,10 @@ if ! grep -q '^HERMES_BASE_PROFILE=' .env 2>/dev/null; then
     say "✅ 기존 Hermes base 프로필 감지·보존 설정 완료: $_detected_base"
   elif [ "$_detect_status" -eq 0 ]; then
     printf 'HERMES_BASE_PROFILE=b3os\n' >> .env
+  elif ! grep -Eq '"runtime"[[:space:]]*:[[:space:]]*"hermes_agent"' "$ROOT/agents.json" 2>/dev/null; then
+    # Hermes를 쓰지 않는 설치에서 사용자 개인 auth 프로필이 여러 개라는 이유만으로 전체 설치를 막지 않는다.
+    printf 'HERMES_BASE_PROFILE=b3os\n' >> .env
+    warn "⚠ Hermes auth 원본이 여러 개지만 등록된 Hermes 팀원이 없어 중립 기본값 b3os를 사용합니다."
   else
     warn "❌ Hermes auth 원본 프로필을 하나로 판별할 수 없어 안전을 위해 설치를 중단합니다."
     warn "   .env에 HERMES_BASE_PROFILE=<공유 auth 원본 프로필명>을 지정한 뒤 다시 실행하세요."
