@@ -1115,10 +1115,12 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     try {
       // ★룰 렌더와 persona 저장은 분리★ (GD 2026-07-17): writeMemberPersona=룰(CLAUDE/AGENTS.md), SOUL 은 안 건드림.
       writeMemberPersona({ id, display_name, role, runtime, workspace_path: _paths.workspace_path, persona_file: _paths.persona_file, owner_name: getSetting(db, "owner_name") ?? undefined, team_name: getSetting(db, "team_name") ?? undefined, team_collect_enabled: false /* 수집 오케스트레이션 제거 (2026-07-13) — collector 가 직접 모아 직접 보고한다 */ });
-      if (persona && persona.trim()) savePersonaFile(_paths.persona_file, persona);   // persona 값 = SOUL.md 에만
+      if (persona && persona.trim()) {
+        savePersonaFile(_paths.persona_file, persona);   // persona 값 = SOUL.md 에만
+        persona_written = true;
+      }
       // ★합류 플래그: 첫 발화 자기소개+OT를 '합류 직후 1회'만 하게 하는 마커(sectionFirstContact 가 이 파일 있을 때만 소개→후 rm). 영입 때만 심음 → 재시작·재활성화는 반복 안 함. GD 2026-07-19.
       try { writeFileSync(join(_paths.workspace_path, ".b3os-just-joined"), "joined\n"); } catch { /* best-effort */ }
-      persona_written = true;
       // claude_channel: CLAUDE.md 의 `@TEAM-OS.md`(상대) 가 풀리도록 workspace 에 심링크 생성(Steve 패턴).
       if (runtime === "claude_channel") {
         const link = join(_paths.workspace_path, "TEAM-OS.md");
@@ -1130,7 +1132,14 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       appendAudit(db, "user", "persona_write_failed", id, { error: e instanceof Error ? e.message : String(e) });
     }
     appendAudit(db, "user", "member_recruited", id, { display_name, role, runtime, ot_id: id_ot, persona_written });
-    return c.json({ ok: true, ot_id: id_ot, member: { id, display_name, role, runtime, icon }, persona_file: _paths.persona_file, persona_written });
+    return c.json({
+      ok: true,
+      ot_id: id_ot,
+      member: { id, display_name, role, runtime, icon },
+      // SOUL.md는 사용자가 persona를 준 경우에만 생긴다. 없는 경로를 성공 응답으로 돌려주지 않는다.
+      persona_file: persona_written && existsSync(_paths.persona_file) ? _paths.persona_file : null,
+      persona_written,
+    });
   });
 
   // 페르소나 핵심룰 재적용 — 기존 팀원 페르소나의 "## ⭐ 핵심 룰"만 현재 템플릿(멈춤장치·통신·conti)으로 교체.
