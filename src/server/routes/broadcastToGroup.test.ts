@@ -18,8 +18,21 @@ import { migrate } from "../db/migrate";
 import { createInboxRoutes } from "./inbox";
 import { channelRegistry } from "../channels/registry";
 import type { ChannelAdapter } from "../channels/types";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const GROUP_ID = "-2000000000001";
+// 라이브 상태파일 차단용 tmp 디렉터리(파일은 만들지 않는다 → getCaptureGroupId 가 env fallback 을 쓴다).
+const tmpGroupDir = mkdtempSync(join(tmpdir(), "b3os-bcast-"));
+const prevGroupFile = process.env.CAPTURE_GROUP_FILE;
+const prevGroupId = process.env.CAPTURE_GROUP_ID;
+function restoreEnv(): void {
+  if (prevGroupFile === undefined) delete process.env.CAPTURE_GROUP_FILE;
+  else process.env.CAPTURE_GROUP_FILE = prevGroupFile;
+  if (prevGroupId === undefined) delete process.env.CAPTURE_GROUP_ID;
+  else process.env.CAPTURE_GROUP_ID = prevGroupId;
+}
 let sent: Array<{ target: string; text: string }> = [];
 let realTelegram: ChannelAdapter | undefined;
 
@@ -78,11 +91,17 @@ describe("--to broadcast → 언제나 단톡방", () => {
   beforeEach(() => {
     sent = [];
     realTelegram = channelRegistry.get("telegram");
+    // ★env 만으로는 부족하다★ — getCaptureGroupId() 는 파일(var/capture-group-id.txt)을 ★먼저★ 보고
+    // env 는 fallback 이다. 라이브 폴더에는 그 파일이 실제 chat_id 로 존재하므로, env 만 세팅하면
+    // 픽스처가 무시되고 ★실제 팀방 chat_id 가 실패 출력에 찍힌다★(clone 에서만 green = 환경 의존).
+    // 그래서 파일 경로 자체를 tmp 의 존재하지 않는 파일로 돌려 라이브 상태를 차단한다.
+    process.env.CAPTURE_GROUP_FILE = join(tmpGroupDir, "capture-group-id.txt");
     process.env.CAPTURE_GROUP_ID = GROUP_ID;
     channelRegistry.set("telegram", fakeTelegram(true));
   });
   afterEach(() => {
     if (realTelegram) channelRegistry.set("telegram", realTelegram);
+    restoreEnv();
   });
 
   test("그룹 스레드(tg-<chatid>) → 게시된다 (기존에도 됐던 것 — 회귀 방지)", async () => {

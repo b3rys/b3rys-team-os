@@ -68,19 +68,27 @@ function isAgentCodexSandbox(value: unknown): value is AgentRecord["codex_sandbo
 // 기본값)는 agent id 문자열만 받고 AgentRecord 배열을 받지 못한다(공개 시그니처 보존 — 기존
 // 테스트가 string id 로 호출). 이런 경우만 여기서 agents.json 을 lazy 로드(mtime 캐시)해 capability
 // 를 조회한다. 인메모리 agents 배열을 받는 호출부는 그 배열을 직접 쓰고 ambient 를 쓰지 않는다.
-const AMBIENT_REGISTRY_PATH =
-  process.env.TEAM_AGENT_REGISTRY ?? join(import.meta.dir, "../../../agents.json");
-let _ambientCache: { mtimeMs: number; agents: AgentRecord[] } | null = null;
+// ★경로는 호출 시점에 읽는다(모듈 로드 시점 const 가 아니다).★ const 로 두면
+//   TEAM_AGENT_REGISTRY override 가 "이 모듈이 처음 import 되기 전에 env 를 세웠는가"라는
+//   import 순서에 좌우된다 — 한 프로세스에서 여러 테스트 파일이 도는 bun test 에선 사실상
+//   제어 불가라, 파일 단독 실행은 통과하고 전체 실행은 깨진다. 함수로 읽으면 순서와 무관하다.
+function ambientRegistryPath(): string {
+  return process.env.TEAM_AGENT_REGISTRY ?? join(import.meta.dir, "../../../agents.json");
+}
+// 캐시 키에 ★경로까지★ 넣는다 — 경로가 바뀌었는데 mtime 만 비교하면 옛 로스터를 돌려준다.
+let _ambientCache: { path: string; mtimeMs: number; agents: AgentRecord[] } | null = null;
 
 export function ambientAgents(): AgentRecord[] {
+  const path = ambientRegistryPath();
   try {
-    const mtimeMs = statSync(AMBIENT_REGISTRY_PATH).mtimeMs;
-    if (_ambientCache && _ambientCache.mtimeMs === mtimeMs) return _ambientCache.agents;
-    const agents = loadRegistry(AMBIENT_REGISTRY_PATH);
-    _ambientCache = { mtimeMs, agents };
+    const mtimeMs = statSync(path).mtimeMs;
+    if (_ambientCache && _ambientCache.path === path && _ambientCache.mtimeMs === mtimeMs) return _ambientCache.agents;
+    const agents = loadRegistry(path);
+    _ambientCache = { path, mtimeMs, agents };
     return agents;
   } catch {
-    return _ambientCache?.agents ?? [];
+    // 파일 없음(공개 clone 첫 부팅 등) → ★같은 경로★ 캐시가 있으면 그것, 없으면 빈 로스터.
+    return _ambientCache?.path === path ? _ambientCache.agents : [];
   }
 }
 

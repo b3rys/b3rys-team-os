@@ -9,7 +9,8 @@
  *   waitForClaudePoller에 opts.homeDir=temp dir + 짧은 intervalMs를 주입해 tmp 경로만 검사한다.
  *   process.env.HOME은 읽지도 쓰지도 않는다(opts.homeDir override가 우선).
  */
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { describe, expect, test, beforeAll, beforeEach, afterEach } from "bun:test";
+import { ensureRenderedTeamOs } from "./testSupport";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, lstatSync } from "node:fs";
 import { join } from "node:path";
@@ -35,6 +36,8 @@ function tmpHome(id: string, present: boolean): string {
 }
 
 describe("activation: claude poller 헬스게이트 (waitForClaudePoller)", () => {
+  // 워크스페이스 TEAM-OS.md 심링크 타깃(rules/TEAM-OS.md)은 런타임 렌더본이라 clone 엔 없다.
+  beforeAll(() => ensureRenderedTeamOs());
   test("bot.pid 존재 → true, 빠르게 반환(첫 검사에서 확인)", async () => {
     const id = "nova";
     const home = tmpHome(id, true);

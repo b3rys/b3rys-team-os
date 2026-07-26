@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
+import { ensureRenderedTeamOs } from "./testSupport";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildTmuxInjectionPrompt } from "./tmuxInject";
@@ -133,6 +134,8 @@ describe("buildTmuxInjectionPrompt", () => {
 
 describe("Korean runtime loading templates", () => {
   const rulesDir = join(import.meta.dir, "../../../rules");
+  // rules/TEAM-OS.md 는 런타임 렌더본(gitignore) — 깨끗한 clone 엔 없다. 없을 때만 부팅 렌더를 재현한다.
+  beforeAll(() => ensureRenderedTeamOs());
   const section = (text: string, start: string, next: string) => {
     const from = text.indexOf(start);
     const to = text.indexOf(next, from + start.length);
