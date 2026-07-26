@@ -195,16 +195,13 @@ export function renderAgentSlack(host: HTMLElement, agentId: string, _displayNam
          <div class="mb-2.5"><label class="${labelCls}">Signing Secret <span class="text-slate-600">(${pick("선택", "optional")})</span></label>
            <input class="sl-pf ${inputCls}" data-key="slack_signing_secret" type="password" autocomplete="off" spellcheck="false" placeholder="signing secret" /></div>`;
 
-    const seg = (m: string, label: string) =>
-      `<button data-wmode="${m}" class="px-3 py-1 text-[12px] font-medium transition-colors ${wizardMode === m ? "bg-accent-btn text-accent-on" : "text-slate-400 hover:text-slate-200"}">${label}</button>`;
 
     return `
       <div class="rounded-lg border border-accent-green/30 bg-surface-0/60 p-3.5">
         <div class="flex flex-wrap items-center gap-2 mb-3">
           <span class="text-[12px] text-slate-500">${pick("연결 방식", "Connection method")}</span>
-          <div class="inline-flex rounded-md border border-surface-3 overflow-hidden">${seg("socket", "Socket Mode")}${seg("webhook", "Event URL")}</div>
-          <span class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold" style="color:rgb(var(--accent)/.95);background:rgb(var(--accent)/.12)">${pick("Socket 권장", "Socket recommended")}</span>
-          <span class="text-[11px] text-slate-500">${isSocket ? pick("공개 URL 불필요 · 외부 사용자에 권장", "No public URL needed · recommended for external users") : pick("공개 URL(자동·고정) · 이미 호스팅 있으면", "Public URL (automatic·fixed) · if you already have hosting")}</span>
+          <span class="inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-semibold" style="color:rgb(var(--accent)/.95);background:rgb(var(--accent)/.12)">${isSocket ? "Socket Mode" : "Event URL"}</span>
+          <span class="text-[11px] text-slate-500">${isSocket ? pick("공개 URL 불필요", "No public URL needed") : pick("기존 설정 유지 중", "keeping existing setup")}</span>
         </div>
         ${unusableWebhook ? `<div class="rounded-md border border-txt-amber/40 bg-surface-0 p-3 mb-3 text-[12px] text-slate-300">
           <div class="font-semibold text-txt-amber mb-1">${pick("이 방식은 지금 쓸 수 없습니다 — Socket Mode 를 선택하세요", "This method is unavailable right now — choose Socket Mode")}</div>
@@ -362,21 +359,6 @@ export function renderAgentSlack(host: HTMLElement, agentId: string, _displayNam
       }
     });
 
-    // 마법사 안 연결 방식 선택 — 로컬 상태만 바꾸고 다시 그림(서버 persist는 '저장 & 검증' 때 함께).
-    // 모순(소켓인데 Event URL 절차) 제거: 고른 방식의 절차·매니페스트·입력칸만 보인다.
-    host.querySelectorAll<HTMLButtonElement>("[data-wmode]").forEach((b) => {
-      b.addEventListener("click", () => {
-        const m = b.dataset.wmode as "webhook" | "socket";
-        if (m === wizardMode) return;
-        // 입력 보존: 모드 전환 render가 innerHTML을 갈아엎어 입력값(특히 양모드 공유 Bot Token)이 날아가는 것 방지.
-        // 토큰은 value 속성 대신 .value(라이브 DOM)로만 재시드 → HTML/로그 노출 없음.
-        const draft: Record<string, string> = {};
-        host.querySelectorAll<HTMLInputElement>(".sl-pf").forEach((el) => { if (el.value) draft[el.dataset.key!] = el.value; });
-        wizardMode = m;
-        render();
-        host.querySelectorAll<HTMLInputElement>(".sl-pf").forEach((el) => { const v = draft[el.dataset.key!]; if (v != null) el.value = v; });
-      });
-    });
   };
 
   (async () => { me = await fetchStatus(); render(); loadInfo(); })();
