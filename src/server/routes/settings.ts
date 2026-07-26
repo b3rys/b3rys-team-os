@@ -1871,9 +1871,8 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     //   부팅 시 1회 자동 persist 에만 기대면 첫 페어링 직후에는 비어 있어 위 정합 경로가 항상 막힌다.
     //   ★기존 값은 덮지 않는다★ — 팀장이 Settings 에 직접 넣은 값이 정본이고, 나중 페어링이 그걸
     //   조용히 바꾸면 신뢰 기준이 흔들린다.
-    try {
-      db.query("INSERT INTO setting (key, value) SELECT 'owner_chat_id', ? WHERE NOT EXISTS (SELECT 1 FROM setting WHERE key = 'owner_chat_id' AND TRIM(COALESCE(value,'')) <> '')").run(senderId);
-    } catch { /* persist 실패는 승인 자체를 막지 않는다 — access.json 이 정본이다 */ }
+    //   ★승인이 실제로 기록된 뒤에 채운다★(코덱스 리뷰) — access.json 쓰기가 실패하면 승인은 없던 일인데
+    //   owner_chat_id 만 남으면 안 된다. 그래서 아래 원자적 교체가 성공한 다음에 persist 한다.
     state.access.allowFrom = [...new Set([...(Array.isArray(state.access.allowFrom) ? state.access.allowFrom.map(String) : []), senderId])];
     state.access.dmPolicy = "allowlist";
     delete state.access.pending[code];
@@ -1887,6 +1886,19 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       try { if (existsSync(tmp)) rmSync(tmp); } catch { /* ignore */ }
       return c.json({ error: "claude_access_write_failed", detail: e instanceof Error ? e.message : String(e) }, 500);
     }
+    // ★승인이 파일에 기록된 뒤에 팀장 chat_id 를 채운다★ — 위 원자적 교체가 성공한 다음이다.
+    //   먼저 채우면 access.json 쓰기가 실패했을 때 ★승인은 없는데 신원만 남는다.★
+    //   ★UPSERT 여야 한다★: INSERT…WHERE NOT EXISTS 로 쓰면 ★행은 있는데 값만 빈 경우★
+    //   (Settings 가 빈 값을 저장할 수 있다) NOT EXISTS 가 참이 되어 INSERT → PK 충돌 →
+    //   catch 가 삼켜서 ★값이 영영 안 채워진다.★ 조용히 실패하는 자리라 특히 나쁘다.
+    //   3케이스 동작: 행 없음→채움 · 빈 행→채움 · ★값 있음→보존★(팀장이 직접 넣은 값이 정본).
+    try {
+      db.query(
+        "INSERT INTO setting (key, value) VALUES ('owner_chat_id', ?) " +
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now') " +
+        "WHERE TRIM(COALESCE(setting.value,'')) = ''",
+      ).run(senderId);
+    } catch { /* persist 실패는 승인을 무르지 않는다 — access.json 이 정본이다 */ }
     markOtJoined(row, ot_id, "Claude Telegram 접근 승인 완료 — 합류");
     appendAudit(db, "user", "ot_claude_pair_approved", row.member_id, { ot_id });
     return c.json({ ok: true, pairing_required: false, pending: false, awaiting_input: null });

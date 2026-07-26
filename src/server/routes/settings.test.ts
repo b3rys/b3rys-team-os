@@ -220,6 +220,18 @@ describe("Claude pairing backend contract", () => {
     expect((await app.request("/ot/ot_persist/claude-pair-approve", json({ code: "abc123" }))).status).toBe(200);
     expect((db.query("SELECT value FROM setting WHERE key='owner_chat_id'").get() as any)?.value).toBe("1000000001");
 
+    // ★빈 행이 있어도 채워야 한다★ — INSERT…WHERE NOT EXISTS 로 쓰면 여기서 PK 충돌이 나고
+    //   catch 가 삼켜 값이 영영 안 채워진다(코덱스 리뷰). UPSERT 라야 통과한다.
+    db.query("DELETE FROM setting WHERE key='owner_chat_id'").run();
+    db.query("INSERT INTO setting (key, value) VALUES ('owner_chat_id','')").run();
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({
+      dmPolicy: "pairing", allowFrom: [], groups: {},
+      pending: { aaa111: { senderId: "1000000001", chatId: "1000000001", expiresAt: Date.now() + 60_000 } },
+    }));
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_empty','bill','join',?)").run(JSON.stringify({ steps }));
+    expect((await app.request("/ot/ot_empty/claude-pair-approve", json({ code: "aaa111" }))).status).toBe(200);
+    expect((db.query("SELECT value FROM setting WHERE key='owner_chat_id'").get() as any)?.value).toBe("1000000001");
+
     // 이미 값이 있으면 나중 페어링이 조용히 바꾸지 않는다
     writeFileSync(join(accessDir, "access.json"), JSON.stringify({
       dmPolicy: "pairing", allowFrom: [], groups: {},
