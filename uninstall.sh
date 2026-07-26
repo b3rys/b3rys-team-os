@@ -147,7 +147,9 @@ PREFIX="$(launchd_prefix)"
 #   해결: plist 의 경로 필드가 이 설치본($SELF)을 가리킬 때만 '내 것'으로 본다.
 #     - 서버 plist: WorkingDirectory=REPO_ROOT(=$SELF)  (serverService.ts)
 #     - claude/codex 멤버 plist: ProgramArguments·로그 경로가 $SELF/... (launcher.ts)
-#   hermes 게이트웨이 plist 는 레포 경로를 안 담고 프로필명으로 식별 → 이 가드 대상 아님(기존 base 가드 유지).
+#   hermes 게이트웨이 plist 는 레포 경로를 안 담아 이 함수로는 판별할 수 없다 → 그쪽은 "이 HOME 에
+#     plist 가 있는가" 로만 소유를 판단한다(아래 hermes_agent 분기). 라벨에 사용자·설치본 구분자가
+#     아예 없어서, 그 최소 증거마저 없으면 프로필명이 겹치는 순간 남의 게이트웨이를 내린다.
 plist_is_self() {
   local plist="${1:-}"
   [ -f "$plist" ] || return 1
@@ -159,12 +161,33 @@ plist_is_self() {
   return 1
 }
 # plist 가 존재하는데 내 것이 아니면 = 다른 설치본(라이브 포함) 소유 → true.
-#   없으면(미활성) false: bootout/rm 은 어차피 no-op, 데이터 정리는 기존 로직대로 진행.
+#   ※ 안내 문구 판별용. 실제 정지/삭제 분기는 아래 managed_by_this_install 을 쓴다.
 owned_by_other_install() {
   local plist="${1:-}"
   [ -f "$plist" ] || return 1
   plist_is_self "$plist" && return 1
   return 0
+}
+
+# ★정지·해제 분기의 기준 — "남의 것이 아니다" 가 아니라 "내 것임이 증명된다"★
+#   기존 가드는 plist 가 없으면 "남의 것이 아님"으로 보고 그대로 진행했다. 근거는
+#   "plist 가 없으면 bootout 은 어차피 no-op" 이라는 가정이었는데, ★그 가정이 틀렸다★.
+#   launchd 라벨은 gui/$UID 사용자 전역 네임스페이스라 plist 파일과 무관하게 동작한다.
+#   그래서 HOME 을 임시 디렉터리로 격리한 테스트에서도 같은 라벨의 ★라이브 서비스가 그대로
+#   내려갔다★ — 실측: 격리 fixture 로 uninstall 을 돌렸더니 com.<USER>.team-collab 과
+#   com.<USER>.team-os-boot 가 bootout 됐다(=라이브 b3os 정지). 멤버 봇·hermes 게이트웨이도 같다.
+#   판별 기준은 plist 다: plist 는 $HOME/Library/LaunchAgents 아래에 있으므로
+#   "이 HOME 에 있고 그 안이 $SELF 를 가리킨다" = "내가 만든 것". 증거가 없으면 손대지 않는다.
+managed_by_this_install() {
+  local plist="${1:-}"
+  [ -f "$plist" ] || return 1        # 이 HOME 에 없음 = 내 것이라는 증거 없음
+  plist_is_self "$plist"
+}
+# 건너뛴 이유를 구분해 알린다(없어서 vs 남의 것이라서) — 조용한 스킵은 디버깅을 어렵게 한다.
+skip_reason() {
+  local plist="${1:-}"
+  if [ -f "$plist" ]; then printf '다른 설치본 소유(plist 가 %s 아님)' "$SELF"
+  else printf '이 HOME 에 plist 없음 — 내 설치본이 만든 것이 아님'; fi
 }
 
 # ── B3RYS_HOME(멤버 워크스페이스·데이터 루트, 퍼블릭/members 모드) 조기 캡처 ──
@@ -296,8 +319,8 @@ else
       case "$runtime" in
         claude_channel)
           _plist="$HOME/Library/LaunchAgents/$PREFIX.claude-telegram-$id.plist"
-          if owned_by_other_install "$_plist"; then
-            warn "    ⛔ 다른 설치본 소유(plist 가 $SELF 아님) — '$id' 정리 건너뜀(라이브 봇 보호)."
+          if ! managed_by_this_install "$_plist"; then
+            warn "    ⛔ $(skip_reason "$_plist") — '$id' 정리 건너뜀(라이브 봇 보호)."
           else
             tmux_kill "claude-$id"
             launchd_stop "$PREFIX.claude-telegram-$id"
@@ -307,8 +330,8 @@ else
           ;;
         codex)
           _plist="$HOME/Library/LaunchAgents/$PREFIX.codex-bridge-$id.plist"
-          if owned_by_other_install "$_plist"; then
-            warn "    ⛔ 다른 설치본 소유(plist 가 $SELF 아님) — '$id' 정리 건너뜀(라이브 브리지 보호)."
+          if ! managed_by_this_install "$_plist"; then
+            warn "    ⛔ $(skip_reason "$_plist") — '$id' 정리 건너뜀(라이브 브리지 보호)."
           else
             launchd_stop "$PREFIX.codex-bridge-$id"
             rmf  "$_plist"
@@ -332,8 +355,18 @@ else
             #   삭제하면 hermes 런타임 전멸(auth dangling). 프로필 dir·게이트웨이·plist 를 절대 건드리지 않는다.
             warn "    ★ base hermes 프로필 '$_prof' 보존 — 게이트웨이/프로필/plist 삭제하지 않음(공유 auth 소스)."
           else
-            launchd_stop "ai.hermes.gateway-$_prof"
-            rmf  "$HOME/Library/LaunchAgents/ai.hermes.gateway-$_prof.plist"
+            # hermes 게이트웨이 라벨(ai.hermes.gateway-<프로필>)에는 사용자·설치본 구분자가 아예 없다.
+            #   프로필명이 라이브와 겹치면 격리 테스트가 라이브 게이트웨이를 bootout 한다 — 실제로
+            #   fixture 의 'ames' 가 라이브 ames 를 때리려 한 적이 있다(shim 덕에 피해는 없었다).
+            #   hermes plist 는 레포 경로를 안 담아 plist_is_self 로는 판별할 수 없으므로,
+            #   "이 HOME 에 plist 가 있는가" 만으로 소유를 판단한다(가능한 최선의 증거).
+            _hermes_plist="$HOME/Library/LaunchAgents/ai.hermes.gateway-$_prof.plist"
+            if [ -f "$_hermes_plist" ]; then
+              launchd_stop "ai.hermes.gateway-$_prof"
+              rmf  "$_hermes_plist"
+            else
+              warn "    ⛔ 이 HOME 에 plist 없음 — ai.hermes.gateway-$_prof 정지 건너뜀(라이브 게이트웨이 보호)."
+            fi
             # 프로필 dir 은 슬러그 가드된 프로필명 + base 제외 확인 후에만 삭제.
             if valid_id "$_prof" && ! is_base_profile "$_prof"; then
               rmrf "$HOME/.hermes/profiles/$_prof"
@@ -357,12 +390,14 @@ echo ""
 # ══════════════════════════════════════════════════════════════════════
 hl "■ 2/4  서버 정지"
 _srv_plist="$HOME/Library/LaunchAgents/$PREFIX.team-collab.plist"
+# 두 가드는 독립이고 둘 다 안전 방향이라 함께 둔다:
+#   ① hermes 선검사 실패 → 아무것도 건드리지 않는다(상태를 모르는 채로 teardown 하지 않는다)
+#   ② 내 설치본이 만든 plist 가 아니면 → 건드리지 않는다(라이브 서버 보호)
 if [ "$HERMES_TEARDOWN_SKIPPED" = 1 ]; then
   warn "  ⛔ 오프보드 선검사 실패 — 서버/LaunchAgent도 변경하지 않습니다."
-elif owned_by_other_install "$_srv_plist"; then
-  # ★ 서버 LaunchAgent 가 다른 설치본(라이브) 것 — team-os.sh down·bootout 모두 건너뛴다(라이브 서버 정지 방지).
-  warn "  ⛔ 다른 설치본($SELF 아님) 소유 서버 LaunchAgent — 서버 정지/해제 건너뜀(라이브 서버 보호)."
-  warn "    이 머신에 다른 team-collab 설치본이 실행 중입니다. 서버를 내리려면 그 설치본에서 uninstall 하세요."
+elif ! managed_by_this_install "$_srv_plist"; then
+  warn "  ⛔ $(skip_reason "$_srv_plist") — 서버 정지/해제 건너뜀(라이브 서버 보호)."
+  warn "    서버를 내리려면 그 서버를 설치한 폴더에서 uninstall 하세요."
 else
   # team-os.sh 가 있으면 best-effort 로 호출(정지 시도). 없거나 실패해도 아래 bootout 이 실제 정지.
   if [ -x "$SELF/scripts/team-os.sh" ] || [ -f "$SELF/scripts/team-os.sh" ]; then
@@ -375,8 +410,8 @@ fi
 _boot_plist="$HOME/Library/LaunchAgents/$PREFIX.team-os-boot.plist"
 if [ "$HERMES_TEARDOWN_SKIPPED" = 1 ]; then
   :
-elif owned_by_other_install "$_boot_plist"; then
-  warn "  ⛔ 다른 설치본 소유 부팅 LaunchAgent — 건너뜀(라이브 보호): $PREFIX.team-os-boot"
+elif ! managed_by_this_install "$_boot_plist"; then
+  warn "  ⛔ $(skip_reason "$_boot_plist") — 건너뜀(라이브 보호): $PREFIX.team-os-boot"
 else
   launchd_stop "$PREFIX.team-os-boot"
   rmf "$_boot_plist"
