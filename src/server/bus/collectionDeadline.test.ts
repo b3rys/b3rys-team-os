@@ -460,3 +460,70 @@ describe("★독촉 본문 — 개별보고면 무시하라고 알림이 직접 
     expect(sentBody(d, "demis")).toBeNull();
   });
 });
+
+/**
+ * ★감시하는 쪽이 자기가 요구한 것을 볼 수 있어야 한다★ (2026-07-26, steve 발견)
+ *
+ * 독촉 문구는 "지금 종합해서 요청자에게 보내세요" 다. 그런데 claude 멤버가 팀장 1:1 에 답하는
+ * ★정본 경로는 텔레그램 reply 도구★ 이고, 그 산출물은 dm_message 로 들어간다(thread_id 없음).
+ * 판정이 message 테이블만 보면 그 보고는 ★영원히 안 보인다★ → 이미 보고한 사람에게 또 보내라고 한다.
+ * 따르면 "같은 요청에 두 번 보고하지 마라" 를 어기게 된다 —
+ * ★규칙을 지킨 사람에게 규칙 위반을 유도하는 알림★ 이라 단순 노이즈가 아니다.
+ */
+describe("보고 인정 — 팀장 1:1 DM(dm_message)도 보고로 센다", () => {
+  let db: Database;
+
+  // 실제 스키마와 같은 모양(thread_id 없음 — 그래서 시각 기준이 될 수밖에 없다)
+  function withDm(d: Database) {
+    d.run(`CREATE TABLE dm_message (
+      id TEXT PRIMARY KEY, member_id TEXT NOT NULL, runtime TEXT,
+      direction TEXT NOT NULL, body TEXT, created_at TEXT NOT NULL,
+      dedupe_key TEXT NOT NULL, source_ref TEXT)`);
+    return d;
+  }
+  let dn = 0;
+  function dm(d: Database, member: string, direction: "in" | "out", minsAgo: number) {
+    d.run(
+      `INSERT INTO dm_message (id, member_id, runtime, direction, body, created_at, dedupe_key)
+       VALUES (?, ?, 'claude_channel', ?, 'x', datetime('now', '-' || ? || ' minutes'), ?)`,
+      [`d${++dn}`, member, direction, String(minsAgo), `k${dn}`],
+    );
+  }
+  /** 팬아웃 2명 + 1명만 답 = 마감 대상이 되는 표준 상황 */
+  function stalledFanout(d: Database) {
+    msg(d, "tg-dm", "steve", "demis", 20);
+    msg(d, "tg-dm", "steve", "hermes", 20);
+    msg(d, "tg-dm", "demis", "steve", 15);
+  }
+
+  beforeEach(() => { db = withDm(db0()); n = 0; dn = 0; });
+
+  it("dm_message 가 없으면 (기존 동작) 잡는다 — 대조군", () => {
+    stalledFanout(db);
+    expect(findStalledCollections(db, AGENTS)).toHaveLength(1);
+  });
+
+  it("★팬아웃 이후 팀장 1:1 로 보고했으면 독촉하지 않는다★ (이게 없어서 중복보고를 시켰다)", () => {
+    stalledFanout(db);
+    dm(db, "steve", "out", 10);          // 마지막 질문(20분 전) 이후 = 종합 보고
+    expect(findStalledCollections(db, AGENTS)).toHaveLength(0);
+  });
+
+  it("팬아웃 ★이전★ DM 은 보고가 아니다 (시각 경계)", () => {
+    stalledFanout(db);
+    dm(db, "steve", "out", 30);          // 질문보다 먼저 = 이번 수집의 보고일 수 없다
+    expect(findStalledCollections(db, AGENTS)).toHaveLength(1);
+  });
+
+  it("들어온 DM(direction='in')은 보고가 아니다", () => {
+    stalledFanout(db);
+    dm(db, "steve", "in", 10);
+    expect(findStalledCollections(db, AGENTS)).toHaveLength(1);
+  });
+
+  it("★다른 멤버의 DM 은 이 사람의 보고가 아니다★", () => {
+    stalledFanout(db);
+    dm(db, "bill", "out", 10);
+    expect(findStalledCollections(db, AGENTS)).toHaveLength(1);
+  });
+});

@@ -68,6 +68,60 @@ interface StalledCollection {
  *   · 마감 시간이 지났다
  *   → 깨운다. ★한 번만.★
  */
+/**
+ * ★"보고했나" 는 여기 한 곳에서만 판단한다.★
+ *
+ * 이 판정은 같은 병으로 이미 두 번 기워졌다 — 매번 ★어디로 간 보고를 인정할 것인가★ 였다:
+ *   2026-07-13  codex 가 팀장께 직보(to='user')했는데 팀원 발신만 보고 있어 ★불필요한 재촉 6건★
+ *               → `to_agent_id IN ('user','broadcast')` 를 추가해 기움
+ *   2026-07-26  claude 멤버가 ★텔레그램 reply 도구★ 로 팀장 1:1 에 종합을 보냈는데(그게 정본 경로다)
+ *               그 산출물은 `dm_message` 로 들어가고 thread_id 조차 없다 → message 조회로는 ★영원히 0★
+ *               → 이미 보고한 사람에게 "지금 종합해서 보내세요" 독촉이 갔다. 따르면 ★중복 보고★ 가 되어
+ *                 팀 규칙("같은 요청에 두 번 보고하지 마라")을 어기게 된다.
+ *                 ★규칙을 지킨 사람에게 규칙 위반을 유도하는 알림★ 이라 단순 노이즈가 아니다.
+ *
+ * 그래서 개별로 또 깁지 않고 경로를 여기로 모은다. ★새 보고 경로가 생기면 이 함수만 고친다.★
+ */
+export function hasReportedSince(
+  db: Database,
+  opts: { collector: string; thread_id: string; since: string; targets: string[] },
+): boolean {
+  const { collector, thread_id, since, targets } = opts;
+
+  // ① 버스 — 기여자가 아닌 ★어디로든★ 나갔으면 보고다(중간보고도 발신이다).
+  //   'gd' 리터럴은 옛 owner agent-id 표기의 잔재다. 실제로는 'user'(팀장 DM)·'broadcast'(방) 로 가고
+  //   바로 아래 NOT IN (targets) 가 '기여자가 아닌 어디로든' 을 이미 잡으므로 없어도 동작은 같다(하위호환).
+  const viaBus = (db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM message
+        WHERE thread_id = ? AND from_agent_id = ? AND created_at > ?
+          AND (to_agent_id IS NULL
+               OR to_agent_id IN ('user','broadcast','gd')
+               OR to_agent_id NOT IN (${targets.map(() => "?").join(",")}))`,
+    )
+    .get(thread_id, collector, since, ...targets) as { n: number }).n;
+  if (viaBus > 0) return true;
+
+  // ② 팀장 1:1 DM — claude 멤버가 팀장에게 답하는 ★정본 경로★(텔레그램 reply 도구)의 산출물.
+  //   dm_message 에는 thread_id 가 없어 ★시각 기준★ 이 될 수밖에 없다.
+  //   그래서 무관한 DM 을 보고로 오인할 수 있는데, 그 오탐은 ★독촉을 한 번 안 하는★ 쪽이다.
+  //   이미 보고한 사람을 독촉해 중복 보고를 시키는 지금의 오탐보다 안전 측이다.
+  //   ★테이블이 없어도 죽지 않는다★ — dm_message 는 뒤에 추가된 테이블이라 마이그레이션 이전 DB 에는
+  //   없다. 감시 루프가 그것 때문에 통째로 예외로 멈추면 ★수집 마감 감지 전체★ 가 죽는다.
+  //   없을 때의 결과(false)는 이 수정 이전 동작과 정확히 같으므로 회귀가 아니다.
+  try {
+    const viaDm = (db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM dm_message
+          WHERE member_id = ? AND direction = 'out' AND created_at > ?`,
+      )
+      .get(collector, since) as { n: number }).n;
+    return viaDm > 0;
+  } catch {
+    return false;
+  }
+}
+
 export function findStalledCollections(db: Database, agents: AgentRecord[]): StalledCollection[] {
   const ids = new Set(agents.map((a) => a.id));
   const collectors = [...ids];
@@ -166,26 +220,8 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
       //   (정상 경로는 5분에 잡힌다. 여기까지 온 건 감지가 뭔가 놓친 것이다 → ★조용히 넘긴다★)
       if (minsSince > MAX_DEADLINE_AGE_MIN) continue;
 
-      // 마지막 질문 이후 ★기여자가 아닌 누군가에게★ 보냈나 = 보고했다 (중간보고도 발신이다)
-      //
-      // ★sends 는 팀원에게 간 것만 본다★ — 그런데 보고는 ★팀장(user)·방(broadcast)★ 으로도 간다.
-      //   실측(2026-07-13): codex 가 팀장께 직보(to='user')했는데 sends 에 안 잡혀 ★불필요한 재촉★ 6건.
-      //   ★"보고했나" 는 수신자를 가리지 않는다.★ 기여자 아닌 ★어디로든★ 나갔으면 보고한 것이다.
-      // 'gd' 리터럴에 대하여:
-      //   아래 `IN ('user','broadcast','gd')` 의 'gd' 는 옛 owner agent-id 표기의 잔재다. 리포트는
-      //   'user'(owner DM)·'broadcast'(방) 로 가고 이 둘이 실제 케이스를 다 커버하므로 'gd' 는
-      //   매칭되지 않는 무해한 leftover다. 게다가 바로 아래 `NOT IN (targets)` 절이 '기여자가 아닌
-      //   어디로든' 을 이미 잡으므로 'gd' 없이도 동작은 동일하다(하위호환을 위해 남겨 둠).
-      const reportedElsewhere = (db
-        .prepare(
-          `SELECT COUNT(*) AS n FROM message
-            WHERE thread_id = ? AND from_agent_id = ? AND created_at > ?
-              AND (to_agent_id IS NULL
-                   OR to_agent_id IN ('user','broadcast','gd')
-                   OR to_agent_id NOT IN (${targets.map(() => "?").join(",")}))`,
-        )
-        .get(thread_id, C, lastAsk, ...targets) as { n: number }).n;
-      if (reportedElsewhere > 0) continue;
+      // 마지막 질문 이후 보고했나 — 판단은 hasReportedSince() 한 곳에서만 한다(아래 정의).
+      if (hasReportedSince(db, { collector: C, thread_id, since: lastAsk, targets })) continue;
 
       const missing: string[] = [];
       const answered: string[] = [];
