@@ -1051,3 +1051,56 @@ describe("settings: 전체 재적용 롤백 (6h .bak 복원)", () => {
     expect((await (await app.request("/members/regenerate-all-personas/rollback")).json()).available).toBe(false);
   });
 });
+
+/* 2026-07-26 맥스튜디오 실측: Slack 연동 마법사가 ★빈 매니페스트★({"settings":{"socket_mode_enabled":true}})와
+ * ★빈 scope★("—")를 그럴싸하게 그렸다. 원인은 이 엔드포인트가 TEAM_PUBLIC_BASE_URL 없으면 400 을 내고,
+ * 클라이언트가 r.ok 를 안 보고 그 본문을 정상 데이터로 썼기 때문. 사용자가 그 매니페스트를 붙여넣으면
+ * ★권한 0개짜리 Slack 앱★ 이 만들어진다 — 실패보다 나쁘다.
+ * UI 는 "Socket Mode = 공개 URL 불필요" 라고 안내하는데 서버가 공개 URL 을 필수로 요구한 자기모순도 있었다. */
+describe("slack reinstall-info", () => {
+  const withBase = (v: string | undefined, fn: () => Promise<void>) => async () => {
+    const old = process.env.TEAM_PUBLIC_BASE_URL;
+    if (v === undefined) delete process.env.TEAM_PUBLIC_BASE_URL; else process.env.TEAM_PUBLIC_BASE_URL = v;
+    try { await fn(); } finally {
+      if (old === undefined) delete process.env.TEAM_PUBLIC_BASE_URL; else process.env.TEAM_PUBLIC_BASE_URL = old;
+    }
+  };
+
+  test("★공개 URL 이 없어도 완전한 매니페스트를 준다★ (Socket Mode 는 그것 없이 되어야 한다)", withBase(undefined, async () => {
+    const { app } = setup();
+    const res = await app.request("/members/bill/slack/reinstall-info");
+    expect(res.status).toBe(200);
+    const b = await res.json() as any;
+    expect(b.ok).toBe(true);
+    // ★scope 가 비면 권한 없는 앱이 만들어진다★ — 이게 이번 사고의 핵심이라 개수까지 고정한다
+    expect(b.needed_scopes).toEqual(["app_mentions:read", "chat:write", "groups:history", "channels:history"]);
+    expect(b.manifest?.oauth_config?.scopes?.bot).toEqual(b.needed_scopes);
+    expect(b.manifest?.display_information?.name).toBeTruthy();
+    // 공개 URL 이 없으면 event_subscriptions 자체를 넣지 않는다(request_url:null 매니페스트는 Slack 이 거부)
+    expect(b.event_request_url).toBeNull();
+    expect(b.manifest?.settings?.event_subscriptions).toBeUndefined();
+    expect(b.public_base_missing).toBe(true);
+    expect(typeof b.public_base_hint).toBe("string");
+  }));
+
+  test("공개 URL 이 있으면 event_subscriptions 를 포함한다", withBase("https://example.test/", async () => {
+    const { app } = setup();
+    const b = await (await app.request("/members/bill/slack/reinstall-info")).json() as any;
+    expect(b.event_request_url).toBe("https://example.test/team/api/slack/events");
+    expect(b.manifest?.settings?.event_subscriptions?.request_url).toBe("https://example.test/team/api/slack/events");
+    expect(b.public_base_missing).toBe(false);
+  }));
+
+  test("★채널이 설정 안 됐으면 빈 문자열★ — 남의 채널명을 기본값으로 주지 않는다", withBase("https://example.test", async () => {
+    const old = process.env.TEAM_SLACK_POLL_CHANNELS;
+    delete process.env.TEAM_SLACK_POLL_CHANNELS;
+    try {
+      const { app } = setup();
+      const b = await (await app.request("/members/bill/slack/reinstall-info")).json() as any;
+      expect(b.channel).toBe("");
+      expect(JSON.stringify(b)).not.toContain("300-gd-ai-team");
+    } finally {
+      if (old === undefined) delete process.env.TEAM_SLACK_POLL_CHANNELS; else process.env.TEAM_SLACK_POLL_CHANNELS = old;
+    }
+  }));
+});
