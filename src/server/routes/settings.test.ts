@@ -12,6 +12,8 @@ import { appendAudit, listAgents } from "../db/queries";
 import { syncRegistry } from "../lib/registry";
 import { allowedRuntimes, createSettingsApp, MAX_OFFICIAL_TEAM_MEMBERS, publicRuntimeOptions, removePathWithRetries } from "./settings";
 import { MEMBERS_ROOT } from "../lib/personaTemplates";
+// 사용자가 붙여넣는 최종 JSON 은 서버 매니페스트 + 이 변환의 합성이다. 접합부를 검사하려고 가져온다.
+import { socketManifest } from "../../web/components/AgentSlack";
 
 // 테스트 격리: codex 퇴사 테스트의 off-file 기록이 라이브 var/agent-off.txt를 오염하지 않게 temp로.
 process.env.TEAMOS_AGENT_OFF_FILE = join(tmpdir(), "settings-test-off.txt");
@@ -1086,12 +1088,29 @@ describe("slack reinstall-info", () => {
     expect(typeof b.public_base_hint).toBe("string");
   }));
 
-  test("공개 URL 이 있으면 event_subscriptions 를 포함한다", withBase("https://example.test/", async () => {
+  test("공개 URL 이 있으면 request_url 과 ★bot_events 둘 다★ 포함한다", withBase("https://example.test/", async () => {
     const { app } = setup();
     const b = await (await app.request("/members/bill/slack/reinstall-info")).json() as any;
     expect(b.event_request_url).toBe("https://example.test/team/api/slack/events");
     expect(b.manifest?.settings?.event_subscriptions?.request_url).toBe("https://example.test/team/api/slack/events");
+    // ★이 줄이 없어서 기본 경로가 무방비였다★ — 마법사 기본 모드가 webhook 이라 '공개 URL 있음' 이
+    //   대부분 사용자의 경로다. 그런데 여기 bot_events 단언이 없어서, event_subscriptions 를 삼항으로
+    //   갈라 URL 있을 때 bot_events 를 빼도 ★전 테스트가 통과했다★(하네스 검증에서 변이로 실증).
+    //   #73 과 똑같은 피해가 다시 통과될 수 있었다.
+    expect(b.manifest?.settings?.event_subscriptions?.bot_events).toEqual(["app_mention"]);
     expect(b.public_base_missing).toBe(false);
+  }));
+
+  /* ★서버 산출물 → 클라이언트 변환★ 접합부. 양쪽을 따로만 검사하면, 서버가 모양을 바꿔도 클라이언트
+   * 테스트는 손으로 베낀 fixture 를 계속 통과시킨다(하네스 지적). 사용자가 붙여넣는 것은 이 합성 결과다. */
+  test("★사용자가 붙여넣는 최종 Socket JSON★ — 서버 응답을 그대로 변환해 확인한다", withBase(undefined, async () => {
+    const { app } = setup();
+    const b = await (await app.request("/members/bill/slack/reinstall-info")).json() as any;
+    const final = socketManifest(b.manifest) as any;
+    expect(final.settings.socket_mode_enabled).toBe(true);
+    expect(final.settings.event_subscriptions?.bot_events).toEqual(["app_mention"]);
+    expect(final.settings.event_subscriptions?.request_url).toBeUndefined();
+    expect(final.oauth_config?.scopes?.bot).toContain("app_mentions:read");
   }));
 
   test("★채널이 설정 안 됐으면 빈 문자열★ — 남의 채널명을 기본값으로 주지 않는다", withBase("https://example.test", async () => {
