@@ -1058,6 +1058,8 @@ function buildDispatchPlan(
       reason: verdict.reason,
       from: row.from_agent_id,
     });
+    // ★막았으면 보낸 사람에게 말해준다.★ 이게 없어서 오늘 4건이 조용히 사라졌다.
+    notifySenderOfBlock(db, row, agents, verdict.reason);
     return { kind: "skip" };
   }
 
@@ -1253,6 +1255,81 @@ function wakeFailurePolicy(runtime: string): WakeFailurePolicy {
  * RECORD — single place that maps the invoke outcome to the delivery state machine + audit + sync:
  * exception / deferred / ok / failure, with openclaw no-retry and unknown-side-effect expiry.
  */
+/**
+ * ★차단되면 발신자에게 알린다.★ (GD 승인 2026-07-26 · 스티브 종합)
+ *
+ * 무슨 일이 있었나: 빌이 스티브에게 보낸 4건이 pingpong 가드에 막혔다. 그런데
+ *   · 발신자 쪽 — send.sh 가 ★"✓ sent" 를 찍었다★
+ *   · 수신자 쪽 — ★아무것도 안 왔다★
+ *   · ★양쪽 다 몰랐다★
+ * 그래서 빌이 스티브를 무응답으로 판단하고 ★리뷰를 다른 사람에게 재배치했다.★
+ * 스티브는 그 4건을 몇 시간 뒤 DB 에서 처음 봤다.
+ *
+ * ★차단 자체는 그대로 둔다.★ 고치는 건 침묵이다 — 알려주면 발신자가 새 스레드로 옮겨
+ * 계속할 수 있다(체인은 부모가 없으면 0으로 리셋되므로 실제로 통한다).
+ *
+ * ★한도를 올리는 것은 답이 아니다★ — 2→6 으로 한 번 올렸고 오늘 6에서 또 걸렸다.
+ * 숫자만 올리면 다음엔 그 숫자에서 걸린다. 세 번째 반복을 하지 않는다.
+ *
+ * ★통보가 같은 가드에 안 걸리는 이유★
+ *   · source='system' — pingpong 검사는 source==='agent' 일 때만 돈다(antiPingpong.ts)
+ *   · in_reply_to 를 넣지 않는다 → parent_message_id 가 null → ★체인 밖★
+ *   · hop_count=0 → hop 한도와 무관
+ * 셋 다 있어야 안전하다. 하나라도 빠지면 통보가 통보를 막는 상황이 생긴다.
+ */
+export function notifySenderOfBlock(
+  db: Database,
+  row: PendingDispatchRow,
+  agents: AgentRecord[],
+  reason: string,
+): void {
+  try {
+    // 사람·시스템 발신은 알릴 대상이 아니다(발신자가 팀원이 아니면 받을 곳이 없다).
+    if (row.source !== "agent") return;
+    const sender = row.created_by ?? row.from_agent_id;
+    if (!sender || sender === row.agent_id) return;
+    // ★통보가 막혀서 통보하는 무한루프 방지★ — system/user 발신에는 통보하지 않는다.
+    if (sender === "system" || sender === "user" || sender === "moderator") return;
+    if (!agents.some((a) => a.id === sender)) return;
+
+    const body =
+      `[전달 차단] ${row.agent_id} 에게 보낸 메시지가 ★배달되지 않았습니다★ (${reason}). ` +
+      `차단된 메시지 id: ${row.message_id} · 스레드: ${row.thread_id}. ` +
+      `★send 는 성공으로 보였지만 실제로는 전달되지 않았습니다.★ ` +
+      `이어서 하려면 ★--in-reply-to 없이 새 스레드로★ 보내세요(체인 카운터가 리셋됩니다). ` +
+      `내용을 옮겨야 하면 위 id 로 원문을 찾을 수 있습니다.`;
+
+    // ★dedupe 는 여기서 직접 확인한다★ — insertMessage 에 dedupe_key 를 넘겨도 ★저장만 되고 막지 않는다★
+    //   (중복 차단은 acceptInbound 계층에서 한다). 테스트로 확인했다: 같은 차단을 두 번 알리면 2건이 들어갔다.
+    //   주석에 "두 번 안 알린다" 고 써놓고 실제로는 알리고 있었다 — 그래서 코드로 막는다.
+    const dedupeKey = `block-notice:${row.message_id}:${row.agent_id}`;
+    const dup = db.prepare(`SELECT 1 FROM message WHERE dedupe_key = ? LIMIT 1`).get(dedupeKey);
+    if (dup) return;
+
+    const msg = insertMessage(db, {
+      thread_id: row.thread_id,
+      from_agent_id: "system",
+      to_agent_id: sender,
+      type: "dm",
+      body,
+      source: "system",           // ★pingpong 검사를 안 탄다★
+      hop_count: 0,               // ★hop 체인 밖★
+      priority: "high",
+      // ★in_reply_to 를 넣지 않는다★ — 넣으면 parent_message_id 가 생겨 체인에 얹힌다
+      dedupe_key: dedupeKey,
+    } as Parameters<typeof insertMessage>[1]);
+
+    appendAudit(db, "bus_dispatcher", "block_notified_sender", row.message_id, {
+      sender, blocked_to: row.agent_id, notice_id: msg.id, reason,
+    });
+  } catch (e) {
+    // ★통보 실패가 원래 흐름을 막지 않는다★ — 차단은 이미 기록됐다.
+    appendAuditFile("bus_dispatcher", "block_notify_failed", row.message_id, {
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
 /**
  * ★깨우기가 죽었으면 ★요청자에게 알린다.★★ (2026-07-13 — 팀장 라이브 테스트에서 드러남)
  *
