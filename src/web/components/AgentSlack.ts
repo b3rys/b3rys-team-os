@@ -59,7 +59,8 @@ async function clip(text: string): Promise<boolean> {
 }
 
 // Socket Mode용 매니페스트 변환 — socket_mode_enabled=true + event_subscriptions.request_url 제거(공개 URL 불필요).
-function socketManifest(manifest: unknown): unknown {
+// ★bot_events 는 남긴다★ — 그게 없으면 앱은 만들어지는데 멘션을 못 받는다. export 는 최종 JSON 을 테스트하기 위한 것.
+export function socketManifest(manifest: unknown): unknown {
   try {
     const m = JSON.parse(JSON.stringify(manifest ?? {})) as Record<string, any>;
     m.settings = m.settings || {};

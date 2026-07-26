@@ -1076,9 +1076,12 @@ describe("slack reinstall-info", () => {
     expect(b.needed_scopes).toEqual(["app_mentions:read", "chat:write", "groups:history", "channels:history"]);
     expect(b.manifest?.oauth_config?.scopes?.bot).toEqual(b.needed_scopes);
     expect(b.manifest?.display_information?.name).toBeTruthy();
-    // 공개 URL 이 없으면 event_subscriptions 자체를 넣지 않는다(request_url:null 매니페스트는 Slack 이 거부)
     expect(b.event_request_url).toBeNull();
-    expect(b.manifest?.settings?.event_subscriptions).toBeUndefined();
+    // ★event_subscriptions 는 남아 있어야 한다★ — 처음엔 통째로 빼서 "undefined 여야 한다" 고 단언했는데
+    //   ★그게 잘못된 불변식이었다★(코덱스 리뷰). 구독이 없으면 앱은 만들어져도 멘션을 못 받는다.
+    //   request_url 만 없으면 된다.
+    expect(b.manifest?.settings?.event_subscriptions?.bot_events).toEqual(["app_mention"]);
+    expect(b.manifest?.settings?.event_subscriptions?.request_url).toBeUndefined();
     expect(b.public_base_missing).toBe(true);
     expect(typeof b.public_base_hint).toBe("string");
   }));
