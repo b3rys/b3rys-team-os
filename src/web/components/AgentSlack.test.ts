@@ -31,3 +31,34 @@ describe("socketManifest — 사용자가 붙여넣는 최종 JSON", () => {
     expect(m.oauth_config.scopes.bot).toContain("app_mentions:read");
   });
 });
+
+/* ★네 사분면 중 하나(공개URL 없음 × Event URL)를 아무도 안 찍어봤다★ — #73 을 놓친 것과 같은 종류의
+ * 사각이다. 그 조합의 매니페스트는 Slack 이 거부한다:
+ *   "Event Subscription requires either Request URL or Socket Mode Enabled"
+ * request_url 도 없고 socket_mode_enabled 도 false 면 event_subscriptions 블록 자체가 불법이다.
+ * 그래서 화면에서 그 조합을 못 고르게 막았고, 여기서는 ★왜 막아야 하는지(=불법 조합)★ 를 고정한다. */
+describe("공개 URL 없이 Event URL 모드 — Slack 이 거부하는 조합", () => {
+  const serverManifest = (withUrl: boolean) => ({
+    settings: {
+      event_subscriptions: { ...(withUrl ? { request_url: "https://x.test/e" } : {}), bot_events: ["app_mention"] },
+      org_deploy_enabled: false,
+      socket_mode_enabled: false,
+    },
+  });
+  // Slack 규격: event_subscriptions 가 있으면 request_url 또는 socket_mode_enabled 중 하나는 있어야 한다.
+  const slackAccepts = (m: any): boolean => {
+    const ev = m?.settings?.event_subscriptions;
+    if (!ev) return true;
+    return Boolean(ev.request_url) || m?.settings?.socket_mode_enabled === true;
+  };
+
+  test("★공개 URL 없음 × Event URL = 거부되는 조합★ (그래서 화면에서 막는다)", () => {
+    expect(slackAccepts(serverManifest(false))).toBe(false);
+  });
+
+  test("나머지 세 조합은 통과한다", () => {
+    expect(slackAccepts(serverManifest(true))).toBe(true);                          // URL 있음 × Event URL
+    expect(slackAccepts(socketManifest(serverManifest(false)))).toBe(true);         // URL 없음 × Socket
+    expect(slackAccepts(socketManifest(serverManifest(true)))).toBe(true);          // URL 있음 × Socket
+  });
+});
