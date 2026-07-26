@@ -4,6 +4,7 @@ import { buildDedupeKey } from "../../../shared/envelopeSchema";
 import { ensureThread, insertMessage } from "./messages";
 import { findRecentDuplicate } from "./lifecycle";
 import type { Broadcaster } from "../../workers/types";
+import { emitLoopEventSafe, EVENT, makeEpisodeId } from "../../metrics/loopEvent";
 
 // acceptInbound — 채널 ingress 공통 꼬리 (P2 ChannelAdapter: telegramCapture·routes/inbox·routes/slack에
 //   복붙돼 있던 동일 시퀀스를 단일 코어로 추출). dedupe → ensureThread → insertMessage → broadcast.
@@ -72,6 +73,29 @@ export function acceptInbound(
   });
   const stored = insertMessage(db, { ...env, thread_id, dedupe_key: dedupeKey });
   opts.onInserted?.(stored); // audit 등 — broadcast 전에 (기존 순서 보존)
+
+  // ③ [측정 W1] request.created loop_event emit — ★best-effort(측정 실패가 ingress 전달 절대 안 깸)★, 같은 db.
+  //   spec §30: acceptInbound ok:true + episode-first(원 요청). 가드: 원 발화(reply 아님)이고 directed(broadcast 아님)만
+  //   → episode_id는 이 stored.id(origin·first-seen). reply/broadcast는 요청 identity 아님 → 무emit(ack latency 분모 오염 방지).
+  //   ★broadcast 제외는 구현시점 정밀화(spec은 명시 안 함) — 공지는 per-recipient ack 대상 아님. Bill 리뷰 논점.★
+  const isOriginRequest = env.type !== "reply" && !env.in_reply_to && env.to_agent_id !== "broadcast";
+  if (isOriginRequest) {
+    emitLoopEventSafe(db, {
+      event_id: `req:${stored.id}`,
+      event_name: EVENT.request_created,
+      schema_version: "0.2",
+      occurred_at: new Date().toISOString(),
+      episode_id: makeEpisodeId(thread_id, { requestMessageId: stored.id }),
+      thread_id,
+      request_message_id: stored.id,
+      actor: env.from_agent_id,
+      target: env.to_agent_id,
+      owner: env.to_agent_id,
+      metric_scope: "both",
+      reason: `inbound ${env.source ?? "?"}`,
+    });
+  }
+
   opts.broadcast?.({ type: "message", message: stored });
   return { ok: true, stored };
 }

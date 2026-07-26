@@ -83,14 +83,17 @@ export interface LoopEvent {
 }
 
 /**
- * episode_id = thread_id : (task_id | proposal_id | request_message_id) (Lui 보강①).
- * ★'-' 금지: 카드 없는 요청도 request_message_id로 구분해 허수 방지.★ 셋 다 없을 때만 최후 '-'.
+ * episode_id = thread_id : (request_message_id | task_id | proposal_id) — origin·first-seen 고정.
+ * ★emit③ 결정(2026-07-11, spec §32):★ 키는 originating request_message_id 우선(first-seen). 카드 없이
+ * 시작한 뒤 task/proposal이 붙어도 키가 안 뒤집혀 같은 실episode가 2개로 분리되지 않는다. task_id/proposal_id는
+ * envelope 속성으로만 운반(키 승격 금지) — request_message_id가 없을 때만 fallback(회귀0: emit④ tasks는
+ * requestMessageId 미전달이라 기존대로 taskId 키 유지). ★'-' 금지★: 셋 다 없을 때만 최후 '-'.
  */
 export function makeEpisodeId(
   threadId: string,
   ids: { taskId?: string; proposalId?: string; requestMessageId?: string },
 ): string {
-  const key = ids.taskId || ids.proposalId || ids.requestMessageId || "-";
+  const key = ids.requestMessageId || ids.taskId || ids.proposalId || "-";
   return `${threadId}:${key}`;
 }
 
