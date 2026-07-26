@@ -683,12 +683,12 @@ export function srcModuleMapDiagram(): string {
         ${map("web/components/AgentSetup.ts", pick("문서 화면", "Docs screen"), "agentSetup/{ui-helpers · diagrams}", pick("지금 보는 운영 문서 탭을 조립하고, 다이어그램과 UI 헬퍼를 분리해 관리합니다.", "Assembles the operating-docs tab you are viewing now, keeping diagrams and UI helpers separated."))}
       </div>
       <p class="text-sm leading-7 text-slate-400">
-        ${pick("자세한 구현 근거와 테스트 목록은 <code>docs/SRC_REFACTOR.md</code>에서 확인할 수 있습니다.", "The detailed implementation rationale and test list are in <code>docs/SRC_REFACTOR.md</code>.")}
+        ${pick("각 파일 옆 테스트(<code>*.test.ts</code>)가 구현 근거의 정본입니다 — 바꾸려는 동작의 테스트를 먼저 읽으세요.", "The test beside each file (<code>*.test.ts</code>) is the source of truth for implementation rationale — read the test for the behavior you intend to change.")}
       </p>
     </div>`;
 }
 
-// 핵심 코드 스닛펫 + '무엇을·왜'. 변경 이력과 테스트 근거 = docs/SRC_REFACTOR.md.
+// 핵심 코드 스닛펫 + '무엇을·왜'. 변경 이력 = git log, 테스트 근거 = 각 파일 옆 *.test.ts.
 export function coreSnippets(): string {
   const snippet = (title: string, tag: string, code: string, what: string) => `
     <div class="rounded-xl border border-surface-3 bg-surface-0 p-4">

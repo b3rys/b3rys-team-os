@@ -78,7 +78,7 @@ export function page(active: DocSection, agents: Agent[] = [], statuses: Map<str
           ${pick("b3os는 채널 입력을 캡처하고, 중앙 서버가 라우팅·기록·깨우기를 맡은 뒤, 각 런타임의 AI 팀원이 일을 실행하는 구조입니다.", "b3os captures channel input, lets the central server route, record, and wake, then has AI teammates in each runtime execute the work.")}
         </p>
         ${manualSystemDiagram()}
-        <div class="mt-3">${sourceLinks(["ROUTER_ARCHITECTURE.md", "LIVE_INTEGRATION.md", "agents.json"])}</div>
+        <div class="mt-3">${sourceLinks(["COMMUNICATION_FLOW.md", "TEAM_COMMUNICATION.md", "agents.json"])}</div>
       `)}
       ${section(pick("src 폴더 구조", "src folder structure"), "module map", `
         <p class="mb-3 text-sm leading-6 text-slate-300">
@@ -95,15 +95,15 @@ export function page(active: DocSection, agents: Agent[] = [], statuses: Map<str
         </p>
         <div class="space-y-3">
           ${messageRoundTripDiagram()}
-          <div>${sourceLinks(["LIVE_INTEGRATION.md", "ROUTER_ARCHITECTURE.md"])}</div>
+          <div>${sourceLinks(["TEAM_COMMUNICATION.md", "GROUP_ROOM_ROUTING.md"])}</div>
           ${ownerResolutionDiagram()}
-          <div>${sourceLinks(["rules/TEAM-OS.md", "ROUTER_ARCHITECTURE.md"])}</div>
+          <div>${sourceLinks(["rules/TEAM-OS.md", "GROUP_ROOM_ROUTING.md"])}</div>
           ${collectionVsIndividualDiagram()}
-          <div>${sourceLinks(["rules/TEAM-OS.md", "HANDOFF_PLAYBOOK.md"])}</div>
+          <div>${sourceLinks(["rules/TEAM-OS.md", "TEAM_COLLECT_ORCHESTRATION.md"])}</div>
           ${oneToOneMemoryDiagram()}
-          <div>${sourceLinks(["LIVE_INTEGRATION.md", "rules/TEAM-OS.md"])}</div>
+          <div>${sourceLinks(["TEAM_COMMUNICATION.md", "rules/TEAM-OS.md"])}</div>
           ${sleepPreventionDiagram()}
-          <div>${sourceLinks(["HANDOFF_PLAYBOOK.md", "rules/TEAM-OS.md"])}</div>
+          <div>${sourceLinks(["TEAM_LOOP_WORKFLOW.md", "rules/TEAM-OS.md"])}</div>
           ${approvalGateDiagram()}
           <div>${sourceLinks(["rules/TEAM-OS.md"])}</div>
         </div>
@@ -120,7 +120,7 @@ export function page(active: DocSection, agents: Agent[] = [], statuses: Map<str
           ${pick("메시지는 외부 채널에서 capture, router, team bus, DB, runtime을 지나 보이는 답변으로 돌아옵니다. owner 판정은 답장 주소 선택보다 먼저입니다.", "A message travels from external channel through capture, router, team bus, DB, and runtime, then returns as a visible reply. Owner resolution comes before choosing the reply address.")}
         </p>
         ${flowDiagram()}
-        <div class="mt-3">${sourceLinks(["ROUTER_ARCHITECTURE.md", "LIVE_INTEGRATION.md"])}</div>
+        <div class="mt-3">${sourceLinks(["TEAM_COMMUNICATION.md", "GROUP_ROOM_ROUTING.md"])}</div>
         <p class="mt-2 text-xs leading-5 text-slate-400">
           ${pick("이 화면이 COMMUNICATION_FLOW.md의 대시보드 viewer입니다. 원문이 필요하면 ", "This screen is the dashboard viewer for COMMUNICATION_FLOW.md. For the raw source, open ")}
           ${rawSourceLink("COMMUNICATION_FLOW.md", pick("raw source", "raw source"))}.
@@ -172,7 +172,7 @@ export function page(active: DocSection, agents: Agent[] = [], statuses: Map<str
           ${policyCard(pick("대시보드 문서", "Dashboard docs"), pick("AgentSetup 테스트는 탭이 렌더되고 핵심 viewer 링크와 다이어그램이 남아 있는지 확인합니다.", "AgentSetup tests check that tabs render and the key viewer links and diagrams remain present."))}
           ${policyCard(pick("검증 원칙", "Verification rule"), pick("중요 변경은 typecheck, 관련 테스트, build, 양테마/모바일 실측을 통과한 뒤 리뷰로 넘깁니다.", "Important changes pass typecheck, relevant tests, build, and both-theme/mobile measurement before review."))}
         </div>
-        <div class="mt-3">${sourceLinks(["docs/TEST_CASES.md", "rules/TEAM-OS.md"])}</div>
+        <div class="mt-3">${sourceLinks(["rules/TEAM-OS.md"])}</div>
       `)}
     `,
     search: `

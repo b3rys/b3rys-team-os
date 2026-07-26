@@ -1,6 +1,8 @@
 # Viewport & 검증된 함정
 
-> 정본: `mac-iphone-shell/docs/Architecture.md` "주요 결정" Q/A. 여기는 스킬 사용자가 빨리 보는 요약.
+> 정본: 골격 저장소(`mac-iphone-shell`)의 `docs/Architecture.md` "주요 결정" Q/A.
+> ★그 저장소는 b3rys 내부 비공개이며 이 저장소에 포함되어 있지 않다★ — 접근 권한이 있는 팀원만 원문을 볼 수 있다.
+> 여기는 그 없이도 쓸 수 있게 정리한 요약이다.
 
 ## ⚠️ #1 — WebView 창 채움 버그 (제거 금지)
 

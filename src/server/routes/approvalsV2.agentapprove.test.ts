@@ -3,11 +3,33 @@
  * ★실제 머지(executeApproval)를 트리거하지 않는 경로만 검증★ — 승인 인가 실패(403/400/404)와
  * 거절(머지 실행 없음)에 집중. 유효 승인의 실행경로는 canApproveTier 단위테스트 + executeApproval 재사용으로 커버.
  */
-import { describe, expect, test, beforeEach } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
 import { enqueueApproval } from "../lib/approvals";
 import { createApprovalsApp } from "./approvals";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+// merge_to_main 은 실행 대상(scripts/merge-to-main.sh)이 있어야 큐에 적재된다 — 없으면 제시조차 안 된다.
+// 이 스위트는 ★적재 이후의 인가 게이팅★ 을 보는 것이므로, 실행 대상이 갖춰진 상태를 tmp 로 만들어 준다.
+// (라이브/clone 어디서 돌리든 같게 — 머신에 그 스크립트가 있든 없든 결과가 흔들리지 않는다.)
+let gateRoot: string;
+const prevCollabDir = process.env.TEAM_COLLAB_DIR;
+beforeAll(() => {
+  gateRoot = mkdtempSync(join(tmpdir(), "b3os-mergegate-"));
+  mkdirSync(join(gateRoot, "scripts"), { recursive: true });
+  writeFileSync(join(gateRoot, "scripts", "merge-to-main.sh"), "#!/usr/bin/env bash\nexit 0\n");
+  // deploy_public 도 "merge_to_main 이 아닌 액션" 대조군으로 적재되므로 같이 갖춰 둔다.
+  writeFileSync(join(gateRoot, "scripts", "deploy-public.sh"), "#!/usr/bin/env bash\nexit 0\n");
+  process.env.TEAM_COLLAB_DIR = gateRoot;
+});
+afterAll(() => {
+  if (prevCollabDir === undefined) delete process.env.TEAM_COLLAB_DIR;
+  else process.env.TEAM_COLLAB_DIR = prevCollabDir;
+  rmSync(gateRoot, { recursive: true, force: true });
+});
 
 function setup() {
   const db = new Database(":memory:");
