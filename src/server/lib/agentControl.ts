@@ -100,19 +100,46 @@ async function setClaude(id: string, enabled: boolean): Promise<ControlResult> {
   return { ok: r.code === 0, detail: r.code === 0 ? `claude ${id} 정지(봇 tmux kill + LaunchAgent bootout)` : `정지 실패: ${r.out.slice(-150)}` };
 }
 
+/** hermes 게이트웨이 LaunchAgent 라벨. ★기동·정지가 반드시 같은 값을 써야 한다★ —
+ *  정지만 bootout 하고 기동이 다른 라벨을 보면 되살아나지 않는다. 그래서 한 곳에서 도출한다.
+ *  gateway_service 가 있으면 그것이 정본(프로필명과 라벨이 다른 설치본 대응). */
+export function hermesLaunchdLabel(agent: { gateway_service?: string | null } | undefined, profile: string): string {
+  const explicit = agent?.gateway_service?.trim();
+  return explicit ? explicit : `ai.hermes.gateway-${profile}`;
+}
+
 /** hermes 에이전트: 프로필 게이트웨이 stop/start. */
 async function setHermes(id: string, enabled: boolean): Promise<ControlResult> {
   // 프로필 = agent.hermes_profile ?? id (restartAgent와 동일) — HERMES_PROFILE=id 하드코딩이면 프로필≠id일 때 on/off가 엉뚱한 프로필을 건드린다.
   const agent = ambientAgents().find((a) => a.id === id);
   const profile = agent?.hermes_profile ?? id;
+  const uid = process.getuid?.() ?? 0;
+  const label = hermesLaunchdLabel(agent, profile);
   if (enabled) {
+    // ★정지가 bootout 한 LaunchAgent 를 되돌린다★ — 이게 없어서 기동/정지가 비대칭이었다.
+    //   'hermes gateway start' 는 게이트웨이 프로세스를 띄우지만 ★launchd 관리 밖★ 이라
+    //   ①KeepAlive 보호 없음 ②재부팅 후 안 올라옴 ③상태 판정이 라벨을 보므로 계속 offline 이다.
+    //   (2026-07-26 맥스튜디오 실측: 비상정지 뒤 대시보드 '기동' 으로 hermes 를 살릴 수 없었다.
+    //    응답은 ok 인데 launchctl list 에 라벨이 없었다 — 즉 ok 가 복구를 뜻하지 않았다.)
+    //   ★start 와 bootstrap 을 같이 부르면 안 된다★ — 게이트웨이가 2개 떠서 텔레그램 폴링이
+    //   충돌한다(같은 날 수동 복구 중 실제로 재현). plist 가 있으면 bootstrap 으로 일원화한다.
+    const plist = `${HOME}/Library/LaunchAgents/${label}.plist`;
+    if (existsSync(plist)) {
+      const b = await run(["launchctl", "bootstrap", `gui/${uid}`, plist]);
+      // 이미 로드돼 있으면 bootstrap 이 실패한다 → kickstart 로 되살린다(codex 경로와 동일 패턴).
+      if (b.code !== 0) {
+        const k = await run(["launchctl", "kickstart", "-k", `gui/${uid}/${label}`]);
+        return { ok: k.code === 0, detail: k.code === 0 ? `hermes ${id} 기동(LaunchAgent kickstart, 프로필 ${profile})` : `기동 실패: ${k.out.slice(-150)}` };
+      }
+      return { ok: true, detail: `hermes ${id} 기동(LaunchAgent bootstrap, 프로필 ${profile})` };
+    }
+    // plist 가 없는 설치본(활성화 전·수동 구성) → 종전대로 게이트웨이만 띄운다. launchd 보호는 없으므로 그렇게 알린다.
     const r = await run(["hermes", "gateway", "start"], { HERMES_PROFILE: profile });
-    return { ok: r.code === 0, detail: r.code === 0 ? `hermes ${id} 기동(프로필 ${profile})` : `기동 실패: ${r.out.slice(-150)}` };
+    return { ok: r.code === 0, detail: r.code === 0 ? `hermes ${id} 기동(게이트웨이 직접 · LaunchAgent 없음 — 재부팅 후 수동 기동 필요, 프로필 ${profile})` : `기동 실패: ${r.out.slice(-150)}` };
   }
   // 정지: 게이트웨이 stop + LaunchAgent bootout. bootout 안 하면 KeepAlive LaunchAgent가 게이트웨이를 되살려 '퇴사해도 계속 응답'(GD 2026-07-01 mes 실측 버그). 프로필별 라벨 타겟.
   const stopR = await run(["hermes", "gateway", "stop"], { HERMES_PROFILE: profile });
-  const uid = process.getuid?.() ?? 0;
-  await run(["launchctl", "bootout", `gui/${uid}/ai.hermes.gateway-${profile}`]);
+  await run(["launchctl", "bootout", `gui/${uid}/${label}`]);
   return { ok: true, detail: `hermes ${id} 정지(게이트웨이 stop + LaunchAgent bootout, 프로필 ${profile})${stopR.code !== 0 ? " [stop 경고]" : ""}` };
 }
 
