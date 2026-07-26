@@ -8,11 +8,16 @@
 //   결과: 12명 중 7명이 어긋났고 — GD 가 손질한 5명은 ★렌더 한 번에 되돌아갈 위치★,
 //   lui·forin 은 purpose 가 비어 찍힌 24자 껍데기가 굳어 ★페르소나가 실제로 없었다.★
 //   ★렌더는 플래그 토글로도 돈다.★ → 소스를 하나(SOUL)로 두면 이 문제가 아예 생기지 않는다.
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, existsSync, writeFileSync, lstatSync, readlinkSync, mkdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { writeMemberPersona, savePersonaFile } from "./writeMemberPersona";
+import { ensureRenderedTeamOs } from "./testSupport";
+
+// 워크스페이스의 TEAM-OS.md 심링크는 rules/TEAM-OS.md(런타임 렌더본·gitignore)를 가리킨다.
+// 깨끗한 clone 엔 그 파일이 없어 심링크가 깨진 것으로 보인다 → 없을 때만 부팅 렌더를 재현.
+beforeAll(() => ensureRenderedTeamOs());
 
 describe("writeMemberPersona — 룰 렌더러(SOUL 은 안 건드린다)", () => {
   const mk = () => mkdtempSync(join(tmpdir(), "wmp-"));
