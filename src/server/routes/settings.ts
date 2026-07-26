@@ -987,15 +987,14 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     try { agent = readAgents().find((a) => a.id === id) ?? null; } catch { /* ignore */ }
     if (!agent) return c.json({ ok: false, error: "unknown_member", id }, 404);
     const creds = loadAgentCreds(id);
+    // ★공개 URL 이 없어도 매니페스트를 준다★ — 마법사가 권하는 Socket Mode 는 공개 URL 이 필요 없다.
+    //   예전엔 여기서 400 을 냈는데, 클라이언트가 그 400 을 정상 응답으로 받아 ★빈 매니페스트를
+    //   그럴싸하게 그렸다★ (실측: {"settings":{"socket_mode_enabled":true}} · 필요 scope "—").
+    //   사용자가 그걸 붙여넣으면 ★권한 0개짜리 Slack 앱이 조용히 만들어진다.★ 실패가 아니라
+    //   '망가진 걸 만들어 주는' 형태라 더 나쁘다. UI 가 "Socket Mode = 공개 URL 불필요" 라고
+    //   안내하면서 서버는 공개 URL 을 필수로 요구하던 ★자기모순★ 도 여기서 없앤다.
     const publicBase = (process.env.TEAM_PUBLIC_BASE_URL ?? "").replace(/\/$/, "");
-    if (!publicBase) {
-      return c.json({
-        ok: false,
-        error: "missing_public_base_url",
-        hint: "Slack 매니페스트 생성 전 TEAM_PUBLIC_BASE_URL을 공개 HTTPS 도메인/터널로 설정하세요",
-      }, 400);
-    }
-    const eventUrl = `${publicBase}/team/api/slack/events`;
+    const eventUrl = publicBase ? `${publicBase}/team/api/slack/events` : null;
     const channel = (process.env.TEAM_SLACK_POLL_CHANNELS ?? "").split(",")[0]!.trim();
     const scopes = ["app_mentions:read", "chat:write", "groups:history", "channels:history"];
     const appName = agent.slack_app_name || `gd ${id}`;
@@ -1008,13 +1007,21 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       slack_bot_user_id: agent.slack_bot_user_id ?? null,
       state: slackMemberStatus(agent).state,
       event_request_url: eventUrl,
+      // 공개 URL 이 없으면 Event URL 방식만 못 쓴다는 뜻 — Socket Mode 는 그대로 된다. 화면이 그렇게 안내하도록 알린다.
+      public_base_missing: !publicBase,
+      public_base_hint: publicBase ? null : "Event URL 방식을 쓰려면 TEAM_PUBLIC_BASE_URL 에 공개 HTTPS 주소(도메인/터널)를 설정하세요. Socket Mode 는 설정 없이 됩니다.",
       channel,
       needed_scopes: scopes,
       manifest: {
         display_information: { name: appName },
         features: { bot_user: { display_name: agent.slack_app_name || `gd_${id}`, always_online: true } },
         oauth_config: { scopes: { bot: scopes } },
-        settings: { event_subscriptions: { request_url: eventUrl, bot_events: ["app_mention"] }, org_deploy_enabled: false, socket_mode_enabled: false },
+        // 공개 URL 이 없으면 event_subscriptions 자체를 넣지 않는다 — request_url 이 null 인 매니페스트는 Slack 이 거부한다.
+        settings: {
+          ...(eventUrl ? { event_subscriptions: { request_url: eventUrl, bot_events: ["app_mention"] } } : {}),
+          org_deploy_enabled: false,
+          socket_mode_enabled: false,
+        },
       },
     });
   });
