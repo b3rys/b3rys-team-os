@@ -21,6 +21,7 @@ import { buildPersona, buildAgentsMd } from "./personaTemplates";
 import {
   waitForClaudePoller, waitForCodexPoller, waitForHermesGateway,
   activateMember, teardownRuntime, swapRuntime, RUNTIMES, STATUS_BY_RUNTIME,
+  classifyEssentials, CLAUDE_ESSENTIAL_TOLERANCE,
   type ActivateResult, type SwapDeps,
 } from "./activation";
 import { HERMES_BASE_PROFILE } from "./paths";
@@ -663,5 +664,145 @@ describe("activation: swap 후 persona 정합성의 근거 — buildPersona/buil
       expect(out).toContain("## ⭐ Core Rules");
       expect(out).not.toContain("## Communication note (Claude runtime)");
     }
+  });
+});
+
+// ── ★첫 claude 멤버 활성화는 '실패' 가 아니라 '거의 완료 — 마지막 한 단계'★ (2026-07-25 맥스튜디오 실기) ──
+//
+// 실기 증상: 첫 claude 멤버(lisa)가 봇 정상 기동·토큰 OK·poller OK 인데도
+//   'error: claude 필수설정 누락 — 재활성화/설정 복구 필요' + OT '활성화 실패 — 재시도 필요' 로 떴다.
+//   실제 남은 일은 팀장이 그 봇에게 DM 을 한 번 보내는 것뿐이라 ★재시도로는 절대 안 풀린다★
+//   (DM 한 통 보내니 재시도 없이 통과, 두 번째 멤버는 첫 멤버 것을 시드받아 DM 없이 통과).
+//
+// activateMember 전체는 tmux·launchd 를 건드려 유닛에서 못 돌리므로, 판정부(classifyEssentials)를
+// 순수 함수로 분리해 규칙을 고정한다. ★관용은 페어링 대기일 때, allowFrom 에만★ 적용돼야 한다.
+describe("classifyEssentials — 페어링 대기 관용 경계", () => {
+  const CLAUDE_OPTS = { tolerate: ["poller:"], tolerateWhenPairing: ["allowFrom:"] };
+
+  test("전부 정상 → ok, 페어링 대기 아님", () => {
+    const v = classifyEssentials({ ok: true, missing: [], canAutoFix: false }, CLAUDE_OPTS);
+    expect(v).toEqual({ ok: true, pendingPairing: false, detail: "필수설정 확인(토큰·allowFrom·채널·poller)" });
+  });
+
+  test("★allowFrom 만 누락 + 페어링 대기 → 실패 아님(대기)★ + 안내에 DM 문구", () => {
+    const v = classifyEssentials(
+      { ok: false, missing: ["allowFrom:claude access.json"], canAutoFix: true, pendingPairing: true },
+      CLAUDE_OPTS,
+    );
+    expect(v.ok).toBe(true);
+    expect(v.pendingPairing).toBe(true);
+    expect(v.detail).toContain("DM 페어링 대기");
+  });
+
+  test("allowFrom 누락이지만 페어링 대기 아님(access.json 부재·손상) → 종전대로 하드실패", () => {
+    const v = classifyEssentials(
+      { ok: false, missing: ["allowFrom:claude access.json"], canAutoFix: true },
+      CLAUDE_OPTS,
+    );
+    expect(v.ok).toBe(false);
+    expect(v.pendingPairing).toBe(false);
+    expect(v.detail).toContain("필수설정 누락");
+  });
+
+  test("★페어링 대기라도 토큰·채널이 같이 빠졌으면 실패★ (관용이 진짜 누락을 덮지 않는다)", () => {
+    const v = classifyEssentials(
+      {
+        ok: false,
+        missing: ["token:claude .env TELEGRAM_BOT_TOKEN", "allowFrom:claude access.json"],
+        canAutoFix: true,
+        pendingPairing: true,
+      },
+      CLAUDE_OPTS,
+    );
+    expect(v.ok).toBe(false);
+    expect(v.pendingPairing).toBe(false);
+    expect(v.detail).toContain("token:claude");
+    expect(v.detail).not.toContain("allowFrom:claude"); // 관용된 항목은 누락 목록에서 빠진다
+  });
+
+  test("poller 만 누락(페어링 무관) → 기존 degraded 동작 그대로, 페어링 문구 안 붙는다", () => {
+    const v = classifyEssentials(
+      { ok: false, missing: ["poller:claude bot.pid"], canAutoFix: true },
+      CLAUDE_OPTS,
+    );
+    expect(v.ok).toBe(true);
+    expect(v.pendingPairing).toBe(false);
+    expect(v.detail).toContain("needs_reconnect");
+  });
+
+  test("페어링 대기 + poller 도 미기동 → 대기로 보되 페어링 안내를 유지(둘 다 사람·자동복구 대상)", () => {
+    const v = classifyEssentials(
+      { ok: false, missing: ["allowFrom:claude access.json", "poller:claude bot.pid"], canAutoFix: true, pendingPairing: true },
+      CLAUDE_OPTS,
+    );
+    expect(v.ok).toBe(true);
+    expect(v.pendingPairing).toBe(true);
+    expect(v.detail).toContain("DM 페어링 대기");
+  });
+
+  test("codex 등 다른 런타임(tolerateWhenPairing 없음)은 allowFrom 누락을 관용하지 않는다", () => {
+    const v = classifyEssentials(
+      { ok: false, missing: ["allowFrom:codex CODEX_ALLOW_FROM seed"], canAutoFix: true, pendingPairing: true },
+      {},
+    );
+    expect(v.ok).toBe(false);
+    expect(v.pendingPairing).toBe(false);
+  });
+});
+
+// ── ★M5a 갭 차단★: 판정부만 고정하면 '그 함수를 어떤 옵션으로 부르는가' 는 무방비다 ──
+//
+// Bill 교차검증(2026-07-25): claude 호출부에서 tolerateWhenPairing 옵션 하나만 지우면
+//   essentials 가 하드실패로 돌아가 '필수설정 누락 — 재활성화/설정 복구 필요' 라는 ★이 PR 이 고친
+//   원래 버그가 그대로 부활★ 하는데도 1631개 테스트가 전부 통과했다. 순수함수(classifyEssentials)는
+//   잘 고정돼 있었지만 호출부 opts 는 인라인 리터럴이라 어떤 테스트도 보지 않았기 때문이다.
+//
+// 그래서 호출부 opts 를 공유 상수(CLAUDE_ESSENTIAL_TOLERANCE)로 빼고 ★그 상수를 통과시켜★ 검증한다.
+// 라우트 레벨로는 못 잡는다 — 라우트 테스트는 activateMember 를 주입 모킹해서 activation.ts 를 안 태운다.
+describe("CLAUDE_ESSENTIAL_TOLERANCE — claude 활성화 호출부의 관용 정책", () => {
+  const PAIRING_WAITING = {
+    ok: false,
+    missing: ["allowFrom:claude access.json"],
+    canAutoFix: true,
+    pendingPairing: true,
+  };
+
+  test("★호출부 옵션으로 페어링 대기가 관용된다★ (옵션이 빠지면 원래 버그가 부활한다)", () => {
+    const v = classifyEssentials(PAIRING_WAITING, CLAUDE_ESSENTIAL_TOLERANCE);
+    expect(v.ok).toBe(true);              // 실패로 떨어지면 '재활성화 필요' 안내가 되살아난다
+    expect(v.pendingPairing).toBe(true);
+    expect(v.detail).toContain("DM 페어링 대기");
+  });
+
+  test("호출부 옵션은 poller 미기동도 관용한다(auto-reconnect 복구 대상)", () => {
+    const v = classifyEssentials(
+      { ok: false, missing: ["poller:claude bot.pid"], canAutoFix: true },
+      CLAUDE_ESSENTIAL_TOLERANCE,
+    );
+    expect(v.ok).toBe(true);
+    expect(v.pendingPairing).toBe(false);
+  });
+
+  test("호출부 옵션이라도 토큰·채널 누락은 관용하지 않는다", () => {
+    for (const missing of ["token:claude .env TELEGRAM_BOT_TOKEN", "channel:claude LaunchAgent plist"]) {
+      const v = classifyEssentials(
+        { ...PAIRING_WAITING, missing: [missing, "allowFrom:claude access.json"] },
+        CLAUDE_ESSENTIAL_TOLERANCE,
+      );
+      expect(v.ok).toBe(false);
+      expect(v.pendingPairing).toBe(false);
+    }
+  });
+
+  // 위 세 건은 '상수의 내용' 을 고정한다. 이 건은 ★claude 분기가 실제로 그 상수를 쓰는지★ 를 고정한다 —
+  // 상수를 놔둔 채 호출부만 인라인 리터럴로 되돌리는 변형까지 막는 소스 레벨 가드.
+  test("claude 분기가 인라인 리터럴이 아니라 이 상수를 넘긴다(정적 가드)", () => {
+    const src = readFileSync(new URL("./activation.ts", import.meta.url), "utf-8");
+    const claudeCall = src.match(/pushEssentialStep\(steps, \{ id, runtime \}, ([^)]*)\)/g) ?? [];
+    // claude 분기 = 옵션을 넘기는 유일한 호출부. 그 인자가 반드시 공유 상수여야 한다.
+    const withOpts = claudeCall.filter((c) => !c.endsWith("{ id, runtime })"));
+    expect(withOpts.length).toBe(1);
+    expect(withOpts[0]).toContain("CLAUDE_ESSENTIAL_TOLERANCE");
+    expect(withOpts[0]).not.toContain("tolerateWhenPairing:"); // 인라인 리터럴 회귀 금지
   });
 });
