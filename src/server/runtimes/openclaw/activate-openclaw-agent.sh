@@ -23,6 +23,15 @@ cp "$OC/openclaw.json" "$OC/openclaw.json.bak.$AGENT_ID-$(date +%s)"
 say "■ baseline 에이전트: $(ls "$OC/agents/" | tr '\n' ' ')"
 mkdir -p "$WS"
 
+# `openclaw agents add`가 새 workspace에 기본 SOUL/AGENTS 파일 세트를 초기화할 수 있다.
+# b3os가 먼저 쓴 정체성·persona 정본을 임시 보관했다가 add 직후 복원해 기본 템플릿 덮어쓰기를 막는다.
+WORKSPACE_BACKUP="$(mktemp -d "${TMPDIR:-/tmp}/b3os-openclaw-workspace.XXXXXX")"
+cleanup_workspace_backup(){ rm -rf "$WORKSPACE_BACKUP"; }
+trap cleanup_workspace_backup EXIT
+for managed in AGENTS.md SOUL.md; do
+  [ -e "$WS/$managed" ] && cp -Pp "$WS/$managed" "$WORKSPACE_BACKUP/$managed"
+done
+
 say "■ 1) 텔레그램 account 추가 (openclaw.json)"
 python3 - "$AGENT_ID" "$DISPLAY" "$TOKEN_FILE" <<'PY'
 import json, sys
@@ -66,6 +75,12 @@ else
   fi
   openclaw agents add "$AGENT_ID" --workspace "$WS" --model "$MODEL" --non-interactive --bind "telegram:$AGENT_ID"
 fi
+
+# OpenClaw scaffold보다 b3os가 영입 단계에서 렌더/저장한 파일이 정본이다.
+# set -e 때문에 신규 `agents add`가 실패하면 여기 도달하지 않는다. add 실패를 무시하도록 바꿀 경우 복원 조건도 함께 재검토한다.
+for managed in AGENTS.md SOUL.md; do
+  [ -e "$WORKSPACE_BACKUP/$managed" ] && cp -Pp "$WORKSPACE_BACKUP/$managed" "$WS/$managed"
+done
 
 say "■ 3) auth 프로필 (전역 auth.profiles 우선 · 없으면 per-agent 복제)"
 DEST="$OC/agents/$AGENT_ID/agent"

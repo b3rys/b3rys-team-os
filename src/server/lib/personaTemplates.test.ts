@@ -28,10 +28,10 @@ test("buildPersona(claude)에 comms 섹션 포함", () => {
   expect((p.match(/## Communication note/g) || []).length).toBe(1);
 });
 
-test("단순모델: openclaw AGENTS.md엔 claude 전용 comms 미포함 + 자동 정체성 없음", () => {
+test("openclaw AGENTS.md엔 claude 전용 comms 미포함 + registry 정체성 포함", () => {
   const agentsMd = buildAgentsMd({ ...claudeInput, runtime: "openclaw" });
   expect(agentsMd.includes(COMMS_HEADER)).toBe(false); // claude 전용 comms는 AGENTS.md에 없음
-  expect(agentsMd.includes("You are")).toBe(false);     // 자동 정체성 wrapper 없음(IDENTITY.md 소유)
+  expect(agentsMd).toContain("You are **Tester** (tester) — QA.");
   expect(agentsMd.includes("## Role & Persona")).toBe(true); // 참조 링크만
 });
 

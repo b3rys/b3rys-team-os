@@ -650,11 +650,11 @@ describe("activation: swap 후 persona 정합성의 근거 — buildPersona/buil
     expect(out).toContain("## Communication note (Claude runtime)");
   });
 
-  test("단순모델: buildPersona = claude CLAUDE.md 전용(@SOUL.md 참조 + 룰, 자동 정체성 없음)", () => {
+  test("buildPersona = claude CLAUDE.md 전용(@SOUL.md 참조 + registry 정체성)", () => {
     // 단순 모델(GD 2026-07-05): buildPersona는 claude 로딩파일만. openclaw/hermes IDENTITY.md는 사용자 입력 verbatim(buildPersona 아님).
     const out = buildPersona({ ...base, runtime: "claude_channel" });
     expect(out).toContain("@SOUL.md");        // IDENTITY.md 참조(inline)
-    expect(out).not.toContain("You are");          // 자동 정체성 wrapper 없음
+    expect(out).toContain("You are **Nova** (nova) — design.");
     expect(out).toMatch(/Core Rules|핵심 룰/);      // 룰은 있음
   });
 
