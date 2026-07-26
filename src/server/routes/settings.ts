@@ -1838,9 +1838,17 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     //   승인이 이미 성립한 상태면 어느 경로였든 합류로 정합시킨다. access.json 은 건드리지 않는다.
     if (!pendingFresh) {
       const allowFrom = Array.isArray(state.access.allowFrom) ? state.access.allowFrom.map(String).filter(Boolean) : [];
-      const alreadyApproved = state.access.dmPolicy === "allowlist" && allowFrom.length > 0;
+      // ★팀장 chat_id 는 '비순환' 출처에서만 얻는다★ — resolveOwnerDmId() 는 못 찾으면 access.json 의
+      //   allowFrom[0] 을 읽는 폴백이 있어서, 그걸로 allowFrom 을 검증하면 ★자기 자신을 확인하는 순환★ 이
+      //   되어 무조건 통과한다. 검증이 검증처럼 보이기만 하는 게 이번 사고의 뿌리라 같은 형태를 만들지 않는다.
+      const ownerRow = db.query("SELECT value FROM setting WHERE key = 'owner_chat_id'").get() as { value?: string } | undefined;
+      const ownerChatId = (ownerRow?.value ?? "").trim() || (process.env.GD_CHAT_ID ?? "").trim();
+      // 팀장 id 를 알면 ★그가 실제 allowlist 에 있는지★ 까지 본다(남이 승인됐는데 합류로 처리하지 않도록).
+      // 모르면 그 조건은 뺀다 — 알 수 없다는 이유로 복구를 막으면 원래 고착으로 되돌아간다.
+      const leadReachable = ownerChatId === "" || allowFrom.includes(ownerChatId);
+      const alreadyApproved = state.access.dmPolicy === "allowlist" && allowFrom.length > 0 && leadReachable;
       if (alreadyApproved) {
-        markOtJoined(row, ot_id, "Claude Telegram 접근 승인 확인됨 — 합류");
+        markOtJoined(row, ot_id, ownerChatId ? "Claude Telegram 접근 승인 확인됨(팀장 DM 허용) — 합류" : "Claude Telegram 접근 승인 확인됨 — 합류");
         appendAudit(db, "user", "ot_claude_pair_reconciled", row.member_id, { ot_id, reason: "already_approved" });
         return c.json({ ok: true, already_approved: true, pairing_required: false, pending: false, awaiting_input: null });
       }

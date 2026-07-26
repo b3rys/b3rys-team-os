@@ -134,6 +134,43 @@ describe("Claude pairing backend contract", () => {
     delete process.env.CLAUDE_CHANNELS_DIR;
   });
 
+  /* 정합 조건을 '누군가 승인됨' 이 아니라 '★팀장이 실제로 닿을 수 있음★' 까지 좁힌다.
+   * 팀장 chat_id 는 setting(owner_chat_id)/env 같은 ★비순환★ 출처에서만 읽는다 — resolveOwnerDmId() 는
+   * 못 찾으면 access.json 의 allowFrom[0] 을 읽는 폴백이 있어서, 그걸로 allowFrom 을 검증하면
+   * 자기 자신을 확인하는 순환이 되어 무조건 통과한다. */
+  test("★팀장 id 를 아는데 allowlist 에 없으면 합류로 만들지 않는다★ (남이 승인된 경우)", async () => {
+    const oldEnv = process.env.GD_CHAT_ID; delete process.env.GD_CHAT_ID;
+    const { app, dir, db } = setup();
+    const channels = join(dir, "claude-channels");
+    process.env.CLAUDE_CHANNELS_DIR = channels;
+    const accessDir = join(channels, "telegram-bill");
+    mkdirSync(accessDir, { recursive: true });
+    // 승인은 돼 있지만 허용된 사람이 팀장이 아니다
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({
+      dmPolicy: "allowlist", allowFrom: ["999999999"], groups: {}, pending: {},
+    }));
+    db.query("INSERT INTO setting (key, value) VALUES ('owner_chat_id', '1000000001')").run();
+    const steps = [
+      { key: "register", state: "done" }, { key: "provision", state: "done" },
+      { key: "preflight", state: "done" }, { key: "bundle", state: "done" }, { key: "join", state: "pending" },
+    ];
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_other','bill','join',?)").run(JSON.stringify({ steps }));
+
+    const res = await app.request("/ot/ot_other/claude-pair-approve", json({ code: "abc123" }));
+    expect(res.status).toBe(409);
+    expect((db.query("SELECT stage FROM ot WHERE id='ot_other'").get() as any).stage).toBe("join");
+
+    // 같은 상태에서 팀장이 allowlist 에 들어가면 정합된다
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({
+      dmPolicy: "allowlist", allowFrom: ["999999999", "1000000001"], groups: {}, pending: {},
+    }));
+    const res2 = await app.request("/ot/ot_other/claude-pair-approve", json({ code: "abc123" }));
+    expect(res2.status).toBe(200);
+    expect((db.query("SELECT stage FROM ot WHERE id='ot_other'").get() as any).stage).toBe("joined");
+    delete process.env.CLAUDE_CHANNELS_DIR;
+    if (oldEnv === undefined) delete process.env.GD_CHAT_ID; else process.env.GD_CHAT_ID = oldEnv;
+  });
+
   test("승인도 pending 도 없으면 여전히 409 — 정합이 미승인을 합류로 만들지 않는다", async () => {
     const { app, dir, db } = setup();
     const channels = join(dir, "claude-channels");
