@@ -30,3 +30,10 @@
 - 교훈: dev/public, internal/external처럼 변형이 공존하는 작업은 대상 산출물의 성공만 보지 않는다. 비대상 변형의 핵심 식별자와 artifact hash가 바뀌지 않았음을 검증해야 변형 간 누출을 조기에 잡을 수 있다.
 - 반영처: 멀티 변형 빌드·릴리스 검증 패턴.
 - 상태: 관측됨 — 2026-07-23.
+
+## 2026-07-24 — 라이브 트리 정본 경로 = b3rys-team-os (구 team-collab)
+
+- 케이스: 여러 팀원(데미스·헤르메스·코덱스 등)이 계속 옛 `b3rys-team-collab`에서 git 작업·PR을 만들어 wrong-repo 사고 반복. 근본은 각 팀원 개인 memory에 옛 team-collab 경로가 라이브로 박혀 있어서다. 공유 문서(TEAM-OS·rules·README)엔 stale 경로 없음(STATE.md의 team-collab은 공개 템플릿 placeholder).
+- 교훈: b3os 라이브 트리 = `~/Development/b3rys-team-os`. 모든 신규 작업(git·PR·team.db·send.sh·skills·리포트)은 여기서. `b3rys-team-collab`은 은퇴한 옛 리포지토리(리포트 데이터 심링크 원본으로만 보관, 신규 작업 금지). 세션 시작 캐시가 옛 경로를 보일 수 있으니 각자 memory의 라이브 경로를 team-os로 갱신하고, 작업 전 `git remote -v`로 정본 확인.
+- 반영처: 온보딩·팀원 memory·wrong-repo 방지. 공유 항상로드 문서엔 라이브 경로를 못박을 자리가 없어(TEAM-OS=룰, STATE=온디맨드) 개인 memory가 사실상 authoritative — 갱신 필요.
+- 상태: 반복 관측됨 — 2026-07-18 ~ 2026-07-24.
