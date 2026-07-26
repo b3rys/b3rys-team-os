@@ -615,6 +615,24 @@ describe("영입 OT / 능력 카탈로그", () => {
     expect(body.message).toContain("먼저 팀명·팀장ID·팀장이름 세팅");
     expect(body.missing.owner_name).toBe(true);
   });
+
+  // ★'팀장ID' 가 뭔지 응답만 보고 알 수 있어야 한다★ (2026-07-25 맥스튜디오 실기).
+  //   전엔 placeholder 가 웹 UI 에만 있어서, API 응답만 본 사용자는 소스를 읽어야 알 수 있었다.
+  //   사용자가 코드를 읽어야 아는 건 결함이다 — 필드별 hint 를 응답에 싣는다.
+  test("setup_incomplete 응답에 필드별 hint — lead_id 는 형식 규칙 + 예시까지", async () => {
+    const { app } = setup();
+    const r = await app.request("/members/recruit", json({ id: "lui", display_name: "Lui", role: "fullstack", runtime: "openclaw" }));
+    const body = await r.json();
+    expect(Object.keys(body.hints).sort()).toEqual(["lead_id", "owner_name", "team_name"]);
+    expect(body.hints.lead_id).toContain("소문자/숫자/-/_, 1~40자");
+    expect(body.hints.lead_id).toContain("예: gd");
+    expect(body.hints.team_name).toContain("예:");
+    expect(body.hints.owner_name).toContain("예:");
+    // missing 인 필드에 대응하는 hint 가 반드시 있어야 한다(빠진 필드만 보고 hint 가 없으면 무용).
+    for (const [field, isMissing] of Object.entries(body.missing)) {
+      if (isMissing) expect(typeof body.hints[field]).toBe("string");
+    }
+  });
   test("capabilities 카탈로그", async () => {
     const { app } = setup();
     const caps = (await (await app.request("/capabilities")).json()) as any[];
@@ -799,6 +817,75 @@ describe("영입 OT / 능력 카탈로그", () => {
     expect(joinStep.detail).toContain("subscription_needed");
     expect(body.ot.stage).toBe("join");
   });
+  // ── ★페어링 안내가 '더 먼저 풀어야 하는 차단'을 덮으면 안 된다★ (Bill 교차검증 2026-07-25) ──
+  //   DM 을 보낸다고 결제 문제가 풀리지 않는다. 페어링 안내를 앞에 두면 '따라 해도 절대 안 풀리는 안내' 라는
+  //   ★이 PR 이 없애려던 바로 그 패턴★ 이 다른 조합에서 재현된다. 순서: 구독차단 → 첫콜실패 → 페어링대기.
+  const pairingActivate = async () => ({
+    ok: true,
+    needsPairing: true,
+    steps: [{ step: "runtime", ok: true, detail: "mock runtime" }, { step: "bus-wake", ok: true, detail: "mock wake" }],
+  });
+  const authOkFn = async (runtime: string) => ({ runtime, loggedIn: true, detail: "auth ok", fixHint: "" });
+  const activateThenProvision = async (app: any, id: string, runtime: string) => {
+    const { ot_id } = await (await app.request("/members/recruit", json({ id, display_name: id, role: "dev", runtime }))).json();
+    expect((await app.request(`/ot/${ot_id}/provision`, json({ bot_token: "1234567:" + "A".repeat(35) }))).status).toBe(200);
+    return await (await app.request(`/ot/${ot_id}/activate`, json({}))).json();
+  };
+
+  test("★페어링 대기 + 구독/한도 실패 → 구독 차단이 이긴다★ (페어링은 병기하되 감추지 않는다)", async () => {
+    const quotaFail = async (input: { id: string; runtime: string }) => ({
+      runtime: input.runtime, ok: false, subscriptionNeeded: true, detail: "429 insufficient_quota billing",
+    });
+    const { app } = setupReady(AGENTS, { checkRuntimeAuth: authOkFn, activateMember: pairingActivate, firstModelCall: quotaFail, validateBotToken: okBotToken });
+    const body = await activateThenProvision(app, "lisa", "claude_channel");
+
+    expect(body.ok).toBe(false);                    // 구독 문제는 '거의 완료' 가 아니다
+    expect(body.subscription_needed).toBe(true);
+    expect(body.error).toBe("subscription_needed");
+    const joinStep = body.ot.steps.find((s: any) => s.key === "join");
+    expect(joinStep.state).toBe("blocked");
+    expect(joinStep.detail).toContain("subscription_needed");
+    expect(joinStep.detail).toContain("결제/구독");
+    expect(joinStep.detail).toContain("페어링도 남아 있습니다"); // 사실이니 병기는 한다
+    expect(joinStep.detail).not.toContain("거의 완료");          // 다만 '거의 완료' 로 읽히면 안 된다
+  });
+
+  test("페어링 대기 + 구독 무관 첫 모델호출 실패 → 페어링 안내가 실패를 가리지 않는다", async () => {
+    const plainFail = async (input: { id: string; runtime: string }) => ({
+      runtime: input.runtime, ok: false, subscriptionNeeded: false, detail: "첫 호출 응답 없음",
+    });
+    const { app } = setupReady(AGENTS, { checkRuntimeAuth: authOkFn, activateMember: pairingActivate, firstModelCall: plainFail, validateBotToken: okBotToken });
+    const body = await activateThenProvision(app, "jane", "claude_channel");
+
+    const joinStep = body.ot.steps.find((s: any) => s.key === "join");
+    expect(joinStep.state).not.toBe("done");
+    expect(joinStep.detail).not.toContain("거의 완료");
+    expect(joinStep.detail).toContain("페어링도 남아 있습니다");
+  });
+
+  test("페어링 대기 + 첫 모델호출 성공 → '거의 완료 — 마지막 한 단계' 안내(봇 username 포함, 조사 앞 공백 없음)", async () => {
+    const callOk = async (input: { id: string; runtime: string }) => ({ runtime: input.runtime, ok: true, subscriptionNeeded: false, detail: "첫 호출 확인" });
+    const { app } = setupReady(AGENTS, { checkRuntimeAuth: authOkFn, activateMember: pairingActivate, firstModelCall: callOk, validateBotToken: okBotToken });
+    const body = await activateThenProvision(app, "mina", "claude_channel");
+
+    expect(body.ok).toBe(true);
+    expect(body.needs_pairing).toBe(true);
+    expect(body.pairing_hint).toContain("DM");
+    const joinStep = body.ot.steps.find((s: any) => s.key === "join");
+    expect(joinStep.state).toBe("pending");        // 실패(blocked)도, 완료(done)도 아니다
+    expect(joinStep.detail).toContain("거의 완료 — 마지막 한 단계");
+    expect(joinStep.detail).toMatch(/@[a-z0-9_]+에게/i); // 봇 username 이 찍히고 조사 앞에 공백이 없다
+    expect(joinStep.detail).not.toContain("<bot_username>");
+    // ★조사 앞 공백 검사는 사용자에게 나가는 문자열 ★전부★ 에 건다★ — joinStep.detail 만 보면
+    //   pairing_hint 가 ' 에게' 인 채로 남는다(Bill 지적: 절반만 고쳐졌다).
+    for (const text of [joinStep.detail, body.pairing_hint]) {
+      expect(text).not.toContain(" 에게");
+      expect(text).not.toContain(" 에서");
+      expect(text).not.toContain("DM 을");
+    }
+    expect(body.pairing_hint).toMatch(/@[a-z0-9_]+에게/i);
+  });
+
   test("activate: 중앙 팀원 상한 가드 실패를 409로 전달", async () => {
     const authOk = async (runtime: string) => ({ runtime, loggedIn: true, detail: "auth ok", fixHint: "" });
     const activateLimited = async () => ({
