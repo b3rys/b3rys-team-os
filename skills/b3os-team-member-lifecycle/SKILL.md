@@ -7,11 +7,31 @@ description: Use when adding, testing, disabling, offboarding, or archiving a b3
 
 Use this skill for team-member onboarding(영입), offboarding(퇴사/비활성화), runtime migration(실행 환경 이전), and lifecycle dry-runs.
 
-Authoritative context:
-- Team rules: `<repo>/rules/TEAM-OS.md`
-- Shared state: `<repo>/rules/SHARED.md`
-- Existing guide: `<repo>/docs/TEAM_MEMBER_ONBOARDING.md`
-- Registry: `<repo>/agents.json`
+## Onboarding(영입) — do NOT execute this file's checklist
+
+**The recruit flow is documented in full elsewhere, and that documentation is the current one. Go there first.**
+
+| What you need | Where |
+|---|---|
+| The recruit flow itself — dashboard wizard **and** API, OT stages, pairing | `skills/b3os/references/recruit.md` |
+| Runtime prerequisites — install, auth, what preflight actually checks | `skills/b3os/references/runtime-setup.md` |
+| A member that joined but won't answer | `skills/b3os/references/troubleshooting.md` |
+
+Fastest path is the dashboard: **Settings ▸ + 영입**. One form takes `id`, name, role, runtime, mention aliases and persona together; the bot token and the rest are collected during provisioning.
+
+For BYO runtimes (Hermes / OpenClaw) the runtime picker shows a setup link — **follow it before recruiting.** Preflight blocks activation until that runtime's auth exists, and finding that out mid-recruit wastes a cycle.
+
+The numbered onboarding steps further down are a **policy checklist, not a procedure**: read them for the gates the recruit flow does not decide for you (owner routing, context visibility, approval boundaries).
+
+Authoritative context — note which of these a fresh clone actually has:
+
+| File | Present in a fresh clone? |
+|---|---|
+| `<repo>/rules/SHARED.md` | yes |
+| `<repo>/rules/TEAM-OS.md` | **no** — render output, generated at startup from `rules/TEAM-OS.template.ko.md`. Edit the template, never the output. |
+| `<repo>/agents.json` | **no** — per-machine roster, deliberately untracked. `loadRegistry` returns `[]` until someone is recruited. |
+
+Never tell a reader to open a file their clone does not have.
 
 ## Principles
 
@@ -56,10 +76,15 @@ For every new runtime, verify the same owner policy at every possible inbound pa
 - context visibility: specialists receive only addressed message/reply context by default. Full team context is for approved coordinator roles.
 - observed context: disable gateway features that store unmentioned team-room messages unless the team lead explicitly approves them for the member's role.
 
-## Onboarding Workflow
+## Onboarding Policy Checklist
+
+> These are **gates to verify**, not steps to type. The actual recruit procedure lives in
+> `skills/b3os/references/recruit.md`; steps 1–6 below are handled by the dashboard form and
+> provisioning. Read them to know **what the flow assumes**, and spend your attention on 7–14,
+> which the flow does not decide for you.
 
 1. Define identity: `id`, display name, Korean name, role, aliases, owner, intended permanence.
-2. Choose runtime.
+2. Choose runtime. **BYO runtimes need their auth in place first** — see `runtime-setup.md`.
 3. Prepare workspace/persona; reference TEAM-OS and SHARED instead of copying common rules.
 4. Connect credentials/channel; store tokens only in approved runtime env/credential locations.
 5. For OpenClaw agents, verify `openclaw.json` Telegram account + `tokenFile` registration. The team-collab bridge reads this token for group reactions and visible replies.
@@ -128,10 +153,3 @@ Blocked: missing credentials, bot invite, service restart approval, etc.
 Rollback: how to undo safely
 Next: one concrete next step
 ```
-
-## Current Planned Cases
-
-- Temporary Claude Code channel member: first lifecycle rehearsal for external-user reproducibility; test onboard, verify, then offboard before developer live activation.
-- Skill hardening step: after the temporary Claude rehearsal, update this skill with any missing checks, unsafe ordering, offboarding gaps, approval gates, and verification evidence before using it for developer.
-- New developer agent: runtime OpenClaw (model-hosted); model-based Staff Engineer and primary development executor for design support, implementation, refactoring, tests, debugging, and code-review response; prefer a dedicated Telegram bot. Use this skill for a developer agent only after the temporary rehearsal lessons are folded back in.
-- Project-loop validation: use the temporary Claude test to validate lifecycle mechanics, then use developer-agent onboarding as the first real `b3rys-project-loop` handoff. The coordinator PMs the lifecycle, the developer agent takes development execution after activation, the maintainer reviews ops/infra gates, and the specialist stays reserved for search/AI-specialized work.
