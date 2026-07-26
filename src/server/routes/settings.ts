@@ -57,6 +57,8 @@ import { isHermesProfileProtected } from "../lib/hermesBaseProfile";
 import { latestCaptureNonBotSender, listDiscoveredGroups } from "../lib/telegramLeadDetection";
 import { activeOfficialMemberCount, isTeamOfficialMember, MAX_OFFICIAL_TEAM_MEMBERS } from "../lib/agentMembership";
 import { writeRegistrySafely, type RegistryWriteOptions } from "../lib/registrySafety";
+// persist 실패는 ★DB 밖★ 에 남겨야 한다 — 실패 원인이 DB 자체일 수 있다.
+import { appendAuditFile } from "../lib/auditFile";
 
 export { MAX_OFFICIAL_TEAM_MEMBERS } from "../lib/agentMembership";
 
@@ -1892,16 +1894,33 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     //   (Settings 가 빈 값을 저장할 수 있다) NOT EXISTS 가 참이 되어 INSERT → PK 충돌 →
     //   catch 가 삼켜서 ★값이 영영 안 채워진다.★ 조용히 실패하는 자리라 특히 나쁘다.
     //   3케이스 동작: 행 없음→채움 · 빈 행→채움 · ★값 있음→보존★(팀장이 직접 넣은 값이 정본).
+    //   ★실패하면 조용히 넘기지 않는다★(코덱스 리뷰) — 여기서 삼키면 나중에 정합 경로가
+    //   owner_identity_unknown 으로 막혔을 때 ★왜 막혔는지 알 방법이 없다.★ 승인은 이미 파일에
+    //   기록됐으므로 되돌릴 수 없고(500 부적절), 대신 ★사실을 남기고 응답에 밝힌다.★
+    //   기록은 DB 밖(auditFile)에 한다 — 실패 원인이 DB 자체일 수 있다.
+    let ownerIdentityPersisted = true;
     try {
       db.query(
         "INSERT INTO setting (key, value) VALUES ('owner_chat_id', ?) " +
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now') " +
         "WHERE TRIM(COALESCE(setting.value,'')) = ''",
       ).run(senderId);
-    } catch { /* persist 실패는 승인을 무르지 않는다 — access.json 이 정본이다 */ }
+    } catch (e) {
+      ownerIdentityPersisted = false;
+      appendAuditFile("settings", "owner_chat_id_persist_failed", row.member_id, {
+        ot_id, error: e instanceof Error ? e.message : String(e),
+      });
+    }
     markOtJoined(row, ot_id, "Claude Telegram 접근 승인 완료 — 합류");
     appendAudit(db, "user", "ot_claude_pair_approved", row.member_id, { ot_id });
-    return c.json({ ok: true, pairing_required: false, pending: false, awaiting_input: null });
+    return c.json({
+      ok: true, pairing_required: false, pending: false, awaiting_input: null,
+      // ★승인은 됐지만 신원 저장은 실패했다는 사실을 숨기지 않는다★ — 나중에 정합이 막힐 때 단서가 된다.
+      owner_identity_persisted: ownerIdentityPersisted,
+      ...(ownerIdentityPersisted ? {} : {
+        warning: "승인은 완료됐지만 팀장 chat_id 저장에 실패했습니다. Settings 에서 직접 설정하지 않으면 이후 합류 정합이 막힐 수 있습니다.",
+      }),
+    });
   });
 
   // ── OT 번들: 신규 영입이 합류 시 받는 패키지(무엇이 다운로드되나) ──

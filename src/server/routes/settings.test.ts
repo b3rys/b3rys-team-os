@@ -175,6 +175,39 @@ describe("Claude pairing backend contract", () => {
   /* 코덱스 리뷰: "모르면 조건을 뺀다" 는 ★강화한 척★ 이었다. owner_chat_id 는 부팅 시 1회만 자동
    * persist 되고 Settings 입력도 선택이라, 정작 필요한 순간(첫 페어링·수동 promote 직후)에는 비어 있다.
    * 그래서 팀장 id 를 모르면 정합하지 않고, 대신 ★무엇을 하면 열리는지★ 를 알려준다. */
+  /* ★persist 가 실패해도 조용히 넘기지 않는다★(코덱스 리뷰). 승인은 이미 access.json 에 기록됐으니
+   * 되돌릴 수 없다 — 대신 응답에 사실을 밝힌다. 안 그러면 나중에 정합이 owner_identity_unknown 으로
+   * 막혔을 때 ★왜 막혔는지 알 방법이 없다.★ 침묵을 고치는 PR 에서 침묵을 남길 뻔했다. */
+  test("★신원 저장이 실패해도 승인은 유지하되 사실을 알린다★", async () => {
+    const { app, dir, db } = setup();
+    const channels = join(dir, "claude-channels");
+    process.env.CLAUDE_CHANNELS_DIR = channels;
+    const accessDir = join(channels, "telegram-bill");
+    mkdirSync(accessDir, { recursive: true });
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({
+      dmPolicy: "pairing", allowFrom: [], groups: {},
+      pending: { fff999: { senderId: "1000000001", chatId: "1000000001", expiresAt: Date.now() + 60_000 } },
+    }));
+    const steps = [
+      { key: "register", state: "done" }, { key: "provision", state: "done" },
+      { key: "preflight", state: "done" }, { key: "bundle", state: "done" }, { key: "join", state: "pending" },
+    ];
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_pfail','bill','join',?)").run(JSON.stringify({ steps }));
+    // setting 테이블을 지워 persist 를 실패시킨다(승인 자체는 파일에 기록되므로 영향 없어야 한다)
+    db.query("DROP TABLE setting").run();
+
+    const res = await app.request("/ot/ot_pfail/claude-pair-approve", json({ code: "fff999" }));
+    expect(res.status).toBe(200);                       // ★승인은 유지된다★ — 되돌리면 안 된다
+    const b = await res.json() as any;
+    expect(b.ok).toBe(true);
+    expect(b.owner_identity_persisted).toBe(false);     // ★사실을 숨기지 않는다★
+    expect(typeof b.warning).toBe("string");
+    // 승인 자체는 파일에 기록됐다
+    const stored = JSON.parse(readFileSync(join(accessDir, "access.json"), "utf-8"));
+    expect(stored.allowFrom).toContain("1000000001");
+    delete process.env.CLAUDE_CHANNELS_DIR;
+  });
+
   test("★팀장 id 를 모르면 정합하지 않는다★ — owner_identity_unknown (막다른 길이 아니라 복구행동 명시)", async () => {
     const oldEnv = process.env.GD_CHAT_ID; delete process.env.GD_CHAT_ID;
     const { app, dir, db } = setup();
