@@ -102,30 +102,27 @@ export function hasReportedSince(
     .get(thread_id, collector, since, ...targets) as { n: number }).n;
   if (viaBus > 0) return true;
 
-  // ② 팀장 1:1 DM — claude 멤버가 팀장에게 답하는 ★정본 경로★(텔레그램 reply 도구)의 산출물.
-  //   dm_message 에는 thread_id 가 없어 ★시각 기준★ 이 될 수밖에 없다.
-  //   그래서 무관한 DM 을 보고로 오인할 수 있는데, 그 오탐은 ★독촉을 한 번 안 하는★ 쪽이다.
-  //   이미 보고한 사람을 독촉해 중복 보고를 시키는 지금의 오탐보다 안전 측이다.
-  //   ★테이블이 없어도 죽지 않는다★ — dm_message 는 뒤에 추가된 테이블이라 마이그레이션 이전 DB 에는
-  //   없다. 감시 루프가 그것 때문에 통째로 예외로 멈추면 ★수집 마감 감지 전체★ 가 죽는다.
-  //   없을 때의 결과(false)는 이 수정 이전 동작과 정확히 같으므로 회귀가 아니다.
-  try {
-    const viaDm = (db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM dm_message
-          WHERE member_id = ? AND direction = 'out' AND created_at > ?`,
-      )
-      .get(collector, since) as { n: number }).n;
-    return viaDm > 0;
-  } catch (e) {
-    // ★"테이블이 없다" 만 삼킨다★ — 그건 마이그레이션 이전 DB 의 ★정상 상태★ 다.
-    //   그 외(DB 손상·락·디스크 오류)는 ★진짜 고장★ 이라 조용히 묻으면 안 된다 → 다시 던진다.
-    //   같은 파일에서 넓은 삼킴이 무엇을 낳았는지 이미 봤다: 로스터 읽기 실패를 "0명" 으로 삼킨 탓에
-    //   ★"새 설치의 정상 상태입니다" 라는 적극적 거짓 주장★ 이 나갔다(2026-07-26 PR#49 에서 고침).
-    //   여기서 넓게 삼키면 같은 형태를 새로 만드는 것이다.
-    if (!/no such table/i.test(String((e as { message?: unknown })?.message ?? e))) throw e;
-    return false;
-  }
+  // ② 팀장 1:1 DM 은 ★근거로 쓰지 않는다★ (GD 2026-07-26 결정)
+  //
+  //   한 번 넣었다가 되돌렸다. 이유를 남긴다 —
+  //   claude 멤버가 팀장 1:1 에 답하는 정본 경로는 텔레그램 reply 도구이고 그 산출물은 dm_message 다.
+  //   그래서 여기서 dm_message 를 보면 오탐이 준다. 실제로 줄었다.
+  //   ★그런데 그 테이블을 신뢰할 수 없다.★ 2026-07-17 실측 기준:
+  //     · openclaw : 팀원 발신(out)이 ★영구 0건★ (sessionKey 불일치)
+  //     · hermes   : 프로필 경로 규칙 불일치로 대부분 유실
+  //     · claude   : 정상
+  //   즉 이걸 근거로 삼으면 ★claude 만 면제되고 openclaw·hermes 는 그대로 독촉받는다.★
+  //   오탐 하나를 고치면서 ★런타임별 불공평★ 을 새로 만드는 셈이다.
+  //   게다가 파서 상태(dm_sync_health)를 봐도 못 거른다 — openclaw 는 "성공" 인데 내용이 0건이다.
+  //
+  //   팀 결정: dm_message 의 소비처는 ★재시작 recall 주입★ 으로 한정한다(확대 금지).
+  //   보고 리마인드는 ★expect-report(pending_followup)★ 로 간다 — 팀원이 스스로 등록하므로
+  //   깨진 캡처에 의존하지 않는다.
+  //
+  //   ★이 자리를 비워두는 게 아니라, 붙일 곳을 명시해 둔다★ — 새 보고 인정 경로가 생기면
+  //   (예: expect-report 연계) 이 함수 안에 넣는다. 개별 호출부에 흩뿌리지 않는다.
+  return false;
+
 }
 
 export function findStalledCollections(db: Database, agents: AgentRecord[]): StalledCollection[] {
