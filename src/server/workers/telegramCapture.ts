@@ -13,7 +13,7 @@ import { aliasesFor } from "../lib/teamRouter";
 import { telegramChannel } from "../channels/telegram";
 import { insertMessage, recentThreadMessages, acceptInbound, ensureThread } from "../db/inboxQueries";
 import { applyActivityAutoAck } from "../bus/ackClose";
-import { listApprovals, listActions, getApproval, setApprovalStatus, approveByTrustedTap, isExecutionEnabled, enqueueApproval, getNormalApprovers, canApproveTier } from "../lib/approvals";
+import { listApprovals, listActions, listUnavailableActions, getApproval, setApprovalStatus, approveByTrustedTap, isExecutionEnabled, enqueueApproval, getNormalApprovers, canApproveTier } from "../lib/approvals";
 import { setAgentEnabled, isAgentOff, restartAgent, restartAll, stopAll } from "../lib/agentControl";
 import { listStatuses, getStatus } from "../db/queries";
 import { classifyHealth } from "../lib/health";
@@ -383,6 +383,12 @@ export function fmtMenu(db: Database, opts: { publicBuild?: boolean } = {}): str
     for (const a of listActions()) {
       const mark = a.danger === "high" ? "⚠" : "·";
       out.push(`${mark} ${a.label}  (${a.key})`);
+    }
+    // 실행 대상이 없어 제시하지 않는 액션 — 숨기되 왜 없는지는 말한다(조용히 사라지면 그게 더 나쁘다).
+    for (const { action, missing } of listUnavailableActions()) {
+      out.push(pick(locale,
+        `· (제외) ${action.label} — 실행 파일 없음: ${missing.join(", ")}`,
+        `· (hidden) ${action.label} — missing executable: ${missing.join(", ")}`));
     }
     const exec = process.env.APPROVAL_EXECUTION_ENABLED === "1" ? "ON" : pick(locale, "OFF(1단계: 승인만)", "OFF (stage 1: approve only)");
     out.push(pick(locale, `\n실행: ${exec}`, `\nExecution: ${exec}`));

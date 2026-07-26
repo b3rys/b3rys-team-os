@@ -9,6 +9,8 @@
 // blast radius: 이 파일 + routes/approvals.ts + telegramCapture /menu. message/agent 테이블 무관.
 
 import type { Database } from "bun:sqlite";
+import { existsSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import { appendAuditFile } from "./auditFile";
 import { MANUALS_DIR } from "./paths";
 
@@ -28,6 +30,27 @@ export interface ApprovalAction {
   /** true 면 전역 실행 OFF 여도 승인 탭 시 즉시 실행(액션별 opt-in). merge_to_main 등 저위험만.
    *  ⚠ deploy_public 같은 고위험은 false 유지 — 탭=승인만, 실행은 별도. (least privilege) */
   autoExec?: boolean;
+  /** ★실행에 반드시 있어야 하는 파일★(repo 루트 상대경로 또는 절대경로).
+   *  하나라도 없으면 이 액션은 큐에 ★제시되지 않고 enqueue 도 거부★된다 — "눌러도 실패하는 버튼"을
+   *  계속 보여주지 않기 위해서다. 액션 정의(키) 자체는 남긴다: 지우면 되살릴 때 설계를 다시
+   *  해야 하지만, 제시 차단은 ★파일이 생기면 저절로 풀린다★(호출 시점 검사).
+   *  cmd 문자열을 파싱하지 않고 여기 명시하는 이유 = 쉘 문자열 파싱은 조용히 틀리기 때문. */
+  requiresFiles?: string[];
+}
+
+/** 액션 실행이 기준으로 삼는 repo 루트. run.cmd 의 `${TEAM_COLLAB_DIR:-$HOME/...}` 와 같은 규칙. */
+function approvalsRepoRoot(): string {
+  return process.env.TEAM_COLLAB_DIR ?? join(process.env.HOME ?? "", "Development/b3rys-team-os");
+}
+
+/** 없는 필수 파일 목록(빈 배열 = 실행 가능). ★호출 시점★ 에 본다 — 파일이 생기면 즉시 반영된다. */
+export function missingRequirements(action: ApprovalAction): string[] {
+  const root = approvalsRepoRoot();
+  return (action.requiresFiles ?? []).filter((p) => !existsSync(isAbsolute(p) ? p : join(root, p)));
+}
+
+export function isActionAvailable(action: ApprovalAction): boolean {
+  return missingRequirements(action).length === 0;
 }
 
 export const ACTIONS: Record<string, ApprovalAction> = {
@@ -47,6 +70,7 @@ export const ACTIONS: Record<string, ApprovalAction> = {
       }),
     },
     paramHints: ["agent_id", "display", "ws?", "model?"],
+    requiresFiles: [`${MANUALS_DIR}/openclaw/activate-openclaw-agent.sh`],
   },
   restart_openclaw_gateway: {
     key: "restart_openclaw_gateway",
@@ -70,6 +94,7 @@ export const ACTIONS: Record<string, ApprovalAction> = {
       ],
     },
     paramHints: [],
+    requiresFiles: ["scripts/deploy-public.sh"],
   },
   permission_gate: {
     key: "permission_gate",
@@ -108,11 +133,20 @@ export const ACTIONS: Record<string, ApprovalAction> = {
       env: (p) => ({ MERGE_BRANCH: p.branch ?? "" }),
     },
     paramHints: ["branch", "author?", "tier?"],
+    requiresFiles: ["scripts/merge-to-main.sh"],
   },
 };
 
+/** ★실행 가능한 액션만★ 반환 — 승인 큐·메뉴·API 가 이걸 쓴다(눌러도 실패하는 걸 안 보여준다). */
 export function listActions(): ApprovalAction[] {
-  return Object.values(ACTIONS);
+  return Object.values(ACTIONS).filter(isActionAvailable);
+}
+
+/** 필수 파일이 없어 ★지금은 제시되지 않는★ 액션 + 그 이유. 진단·안내용(숨기되 침묵하지는 않는다). */
+export function listUnavailableActions(): Array<{ action: ApprovalAction; missing: string[] }> {
+  return Object.values(ACTIONS)
+    .map((action) => ({ action, missing: missingRequirements(action) }))
+    .filter((x) => x.missing.length > 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +190,11 @@ export function enqueueApproval(
 ): ApprovalRow {
   const action = ACTIONS[input.action_key];
   if (!action) throw new Error(`unknown action_key: ${input.action_key}`);
+  // ★UI 만 숨기면 API 로 그대로 들어온다★ — 큐 적재 단계에서 막는다(주석이 아니라 코드 가드).
+  const missing = missingRequirements(action);
+  if (missing.length > 0) {
+    throw new Error(`action_unavailable: ${action.key} — 실행 대상 없음: ${missing.join(", ")}`);
+  }
   const id = genId();
   const params = input.params ?? {};
   const title = input.title ?? action.label;

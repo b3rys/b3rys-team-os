@@ -12,6 +12,8 @@ import type { Database } from "bun:sqlite";
 import {
   ACTIONS,
   listActions,
+  listUnavailableActions,
+  missingRequirements,
   enqueueApproval,
   listApprovals,
   getApproval,
@@ -52,8 +54,12 @@ export function createApprovalsApp(deps: ApprovalsDeps): Hono {
   const { db } = deps;
   const app = new Hono();
 
+  // 제시되는 것 = 실행 가능한 것만. 제외된 건 ★숨기되 침묵하지 않는다★ — 이유를 함께 준다.
   app.get("/approvals/actions", (c) =>
-    c.json(listActions().map((a) => ({ key: a.key, label: a.label, description: a.description, danger: a.danger, paramHints: a.paramHints ?? [] }))),
+    c.json({
+      actions: listActions().map((a) => ({ key: a.key, label: a.label, description: a.description, danger: a.danger, paramHints: a.paramHints ?? [] })),
+      unavailable: listUnavailableActions().map(({ action, missing }) => ({ key: action.key, label: action.label, reason: "missing_files", missing })),
+    }),
   );
 
   app.get("/approvals", (c) => {
@@ -69,6 +75,11 @@ export function createApprovalsApp(deps: ApprovalsDeps): Hono {
     const body = await c.req.json().catch(() => ({}));
     const action_key = String(body.action_key ?? "");
     if (!ACTIONS[action_key]) return c.json({ error: `unknown action_key: ${action_key}` }, 400);
+    // 실행 대상이 없는 액션은 큐에 넣지 않는다(눌러도 실패하는 항목을 만들지 않는다).
+    const missing = missingRequirements(ACTIONS[action_key]);
+    if (missing.length > 0) {
+      return c.json({ error: "action_unavailable", action_key, missing, hint: "실행 스크립트가 없다. 파일이 생기면 자동으로 다시 제시된다." }, 409);
+    }
     const params = isPlainObject(body.params) ? sanitizeParams(body.params) : {};
     const row = enqueueApproval(db, {
       action_key,
