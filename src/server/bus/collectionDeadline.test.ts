@@ -526,4 +526,19 @@ describe("보고 인정 — 팀장 1:1 DM(dm_message)도 보고로 센다", () =
     dm(db, "bill", "out", 10);
     expect(findStalledCollections(db, AGENTS)).toHaveLength(1);
   });
+
+  it("★테이블이 없는 것(마이그레이션 이전)은 견딘다 — 예외 없이 기존 동작★", () => {
+    const bare = db0();                       // dm_message 없는 DB
+    stalledFanout(bare);
+    expect(() => findStalledCollections(bare, AGENTS)).not.toThrow();
+    expect(findStalledCollections(bare, AGENTS)).toHaveLength(1);   // 수정 이전과 동일
+  });
+
+  it("★진짜 DB 고장은 삼키지 않는다★ (넓은 catch 가 남으면 손상·락이 조용히 묻힌다)", () => {
+    stalledFanout(db);
+    // dm_message 를 조회 불가 상태로 만든다 — '테이블 없음' 이 아닌 다른 오류.
+    db.run("DROP TABLE dm_message");
+    db.run("CREATE VIEW dm_message AS SELECT 1 AS member_id WHERE 1=0");  // 컬럼 불일치 → no such column
+    expect(() => findStalledCollections(db, AGENTS)).toThrow();
+  });
 });
