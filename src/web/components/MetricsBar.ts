@@ -16,6 +16,13 @@ function isMacClient(): boolean {
   return /mac/i.test(platform) || /Macintosh|Mac OS X/i.test(navigator.userAgent);
 }
 
+// b3os.app 배포처 = GitHub Releases.
+// ★서명된 .app 을 저장소에 커밋하지 않는 이유★: 서명·공증 바이너리에는 서명 주체(Developer ID·Team ID)가
+//   박혀 있어, 저장소에 올리면 개발자 신원이 공개 이력에 영구히 남는다. 자산은 Releases 로만 배포한다.
+// `releases/latest/download/` 는 최신 릴리스로 자동 해석되므로 버전을 올려도 이 링크는 그대로다.
+const MAC_APP_DOWNLOAD_URL =
+  "https://github.com/b3rys/b3rys-team-os/releases/latest/download/b3os.app.zip";
+
 let alertsOpen = false;
 let tasksMenuOpen = false;
 let inboxMenuOpen = false;
@@ -115,10 +122,11 @@ export function renderMetricsBar(root: HTMLElement): void {
          </button>`;
     const macAppDownload = isMacClient()
       ? `<a id="b3os-app-download"
-            href="${apiBase()}/b3os.app.zip"
-            download="b3os.app.zip"
+            href="${MAC_APP_DOWNLOAD_URL}"
+            target="_blank"
+            rel="noopener noreferrer"
             class="hidden md:inline-flex items-center gap-1 text-[10px] md:text-[11px] font-medium text-slate-500 hover:text-accent-greenSoft whitespace-nowrap"
-            title="${pick("b3os.app 다운로드 — 현재 로컬 b3os를 Mac 앱으로 열기", "Download b3os.app — open this local b3os in a Mac app")}">
+            title="${pick("b3os.app 내려받기 (GitHub Releases) — 현재 로컬 b3os를 Mac 앱으로 열기", "Get b3os.app (GitHub Releases) — open this local b3os in a Mac app")}">
             ${renderIcon("download", { size: 11, className: "shrink-0 opacity-70" })}<span>b3os.app</span>
          </a>`
       : "";
@@ -250,9 +258,10 @@ export function renderMetricsBar(root: HTMLElement): void {
       docMenuOpen = false;
       update();
     });
-    // b3os.app zip 다운로드: 맥앱(WKWebView)에선 download 링크가 webview 네비게이션이 되어 화면이 갇힘
-    // → 시스템 브라우저(Safari)로 넘겨 받게 한다(GD 2026-07-02, reports 다운로드와 동일 패턴).
-    // 일반 브라우저는 bridge 없음 → 기본 download 동작.
+    // b3os.app 내려받기: 맥앱(WKWebView)에선 이 링크가 webview 네비게이션이 되어 화면이 갇힌다
+    // → 시스템 브라우저(Safari)로 넘겨 받게 한다(reports 다운로드와 동일 패턴).
+    // 배포처가 GitHub Releases(외부 도메인)로 바뀐 뒤로는 이 우회가 더 중요하다 — 앱 안에서 열면
+    // 릴리스 페이지가 webview 를 점유한다. 일반 브라우저는 bridge 가 없어 target=_blank 로 새 탭.
     const b3osDl = root.querySelector<HTMLAnchorElement>("#b3os-app-download");
     b3osDl?.addEventListener("click", (e) => {
       const bridge = (window as unknown as {
