@@ -21,7 +21,7 @@ function freshDb(): Database {
 describe("approval v2 — 스키마 'deferred'", () => {
   test("fresh DB 는 deferred 상태 허용", () => {
     const db = freshDb();
-    db.prepare("INSERT INTO approval_request(id,action_key,title,status) VALUES('t','merge_to_main','x','deferred')").run();
+    db.prepare("INSERT INTO approval_request(id,action_key,title,status) VALUES('t','noop_echo','x','deferred')").run();
     expect((db.query("SELECT status FROM approval_request WHERE id='t'").get() as any).status).toBe("deferred");
   });
 
@@ -32,7 +32,7 @@ describe("approval v2 — 스키마 'deferred'", () => {
         status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','executing','done','failed','rejected','expired')),
         requested_by TEXT NOT NULL DEFAULT 'system', created_at TEXT NOT NULL DEFAULT (datetime('now')), decided_at TEXT, result TEXT)`,
     );
-    db.prepare("INSERT INTO approval_request(id,action_key,title,status,requested_by) VALUES('keep','merge_to_main','k','approved','steve')").run();
+    db.prepare("INSERT INTO approval_request(id,action_key,title,status,requested_by) VALUES('keep','noop_echo','k','approved','steve')").run();
     expect(() => db.prepare("INSERT INTO approval_request(id,action_key,title,status) VALUES('x','a','x','deferred')").run()).toThrow();
     migrateApprovalDeferredStatus(db);
     db.prepare("INSERT INTO approval_request(id,action_key,title,status) VALUES('n','a','x','deferred')").run();
@@ -47,9 +47,9 @@ describe("approval v2 — 스키마 'deferred'", () => {
 describe("approval v2 — 10분 자동보류(deferStaleApprovals)", () => {
   test("10분 초과 pending 만 보류, 방금·이미결정은 유지 (id 특정)", () => {
     const db = freshDb();
-    db.prepare("INSERT INTO approval_request(id,action_key,title,status,requested_by,created_at) VALUES('old','merge_to_main','o','pending','steve',datetime('now','-11 minutes'))").run();
-    db.prepare("INSERT INTO approval_request(id,action_key,title,status,requested_by,created_at) VALUES('new','merge_to_main','n','pending','bill',datetime('now'))").run();
-    db.prepare("INSERT INTO approval_request(id,action_key,title,status,requested_by,created_at) VALUES('ok','merge_to_main','a','approved','codex',datetime('now','-20 minutes'))").run();
+    db.prepare("INSERT INTO approval_request(id,action_key,title,status,requested_by,created_at) VALUES('old','noop_echo','o','pending','steve',datetime('now','-11 minutes'))").run();
+    db.prepare("INSERT INTO approval_request(id,action_key,title,status,requested_by,created_at) VALUES('new','noop_echo','n','pending','bill',datetime('now'))").run();
+    db.prepare("INSERT INTO approval_request(id,action_key,title,status,requested_by,created_at) VALUES('ok','noop_echo','a','approved','codex',datetime('now','-20 minutes'))").run();
     const out = deferStaleApprovals(db, 10);
     expect(out.length).toBe(1);
     expect(out[0]!.id).toBe("old");

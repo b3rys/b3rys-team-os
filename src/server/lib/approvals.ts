@@ -27,8 +27,8 @@ export interface ApprovalAction {
   run?: { cmd: string[]; env?: (params: Record<string, string>) => Record<string, string> };
   /** 필요한 파라미터 힌트(검증·UI용). */
   paramHints?: string[];
-  /** true 면 전역 실행 OFF 여도 승인 탭 시 즉시 실행(액션별 opt-in). merge_to_main 등 저위험만.
-   *  ⚠ deploy_public 같은 고위험은 false 유지 — 탭=승인만, 실행은 별도. (least privilege) */
+  /** true 면 전역 실행 OFF 여도 승인 탭 시 즉시 실행(액션별 opt-in). ★저위험만★.
+   *  고위험 액션은 false 유지 — 탭=승인만, 실행은 별도(least privilege). 현재 이걸 켠 액션은 없다. */
   autoExec?: boolean;
   /** ★실행에 반드시 있어야 하는 파일★(repo 루트 상대경로 또는 절대경로).
    *  하나라도 없으면 이 액션은 큐에 ★제시되지 않고 enqueue 도 거부★된다 — "눌러도 실패하는 버튼"을
@@ -80,22 +80,6 @@ export const ACTIONS: Record<string, ApprovalAction> = {
     run: { cmd: ["openclaw", "gateway", "restart"] },
     paramHints: [],
   },
-  deploy_public: {
-    key: "deploy_public",
-    label: "공개 릴리스 배포",
-    description:
-      "HEAD export → 누출 검증 → 통과 시 공개 repo(main) push. ⚠ 공개 배포이므로 승인 큐와 실행 게이트를 반드시 지난다.",
-    danger: "high",
-    run: {
-      cmd: [
-        "bash",
-        "-lc",
-        "cd \"${TEAM_COLLAB_DIR:-$HOME/Development/b3rys-team-os}\" && bash scripts/deploy-public.sh",
-      ],
-    },
-    paramHints: [],
-    requiresFiles: ["scripts/deploy-public.sh"],
-  },
   permission_gate: {
     key: "permission_gate",
     label: "런타임 권한 요청",
@@ -112,28 +96,6 @@ export const ACTIONS: Record<string, ApprovalAction> = {
     danger: "low",
     run: { cmd: ["bash", "-c", "echo 'executed-ok ('\"$NOTE\"')'"], env: (p) => ({ NOTE: p.note ?? "ping" }) },
     paramHints: ["note?"],
-  },
-  // merge-gate: 승인된 브랜치를 main 에 머지. merge_gate_enabled=true 일 때만 enqueue/노출된다(merge-to-main.sh).
-  //   실행기 = merge-to-main.sh (승인 레코드를 토큰으로 --no-ff 머지 + Approved-by 트레일러). 승인=탭 인증.
-  merge_to_main: {
-    key: "merge_to_main",
-    label: "main 머지 승인",
-    description:
-      "승인된 브랜치를 main 에 머지한다(merge-to-main.sh). 탭 승인 = 인증. merge_gate ON repo 에서만 노출/실행. " +
-      "현재 승인 모델 = GD 탭 승인(승인자=GD, 작성자=에이전트 → self-approve 원천 불가). " +
-      "에이전트(Bill·Codex)도 승인자로 확장 시 self-approve 차단(byUserId≠params.author) 을 별도 구현해야 함(미구현).",
-    danger: "high",
-    autoExec: true, // 저위험(로컬 main, 롤백 쉬움) — 탭 승인 시 즉시 머지. deploy 등 고위험은 autoExec 없음.
-    run: {
-      cmd: [
-        "bash",
-        "-lc",
-        "cd \"${TEAM_COLLAB_DIR:-$HOME/Development/b3rys-team-os}\" && bash scripts/merge-to-main.sh \"$MERGE_BRANCH\"",
-      ],
-      env: (p) => ({ MERGE_BRANCH: p.branch ?? "" }),
-    },
-    paramHints: ["branch", "author?", "tier?"],
-    requiresFiles: ["scripts/merge-to-main.sh"],
   },
 };
 
@@ -452,7 +414,7 @@ async function finalizeApproval(
   const prevRes = (() => { try { const r = getApproval(db, id)?.result; return r ? JSON.parse(r) as Record<string, unknown> : {}; } catch { return {}; } })();
   setApprovalStatus(db, id, "approved", JSON.stringify({ ...prevRes, approver: by }));
   appendAuditFile("approvals", "approved", id, { by });
-  // 실행 조건: 액션별 autoExec(저위험 opt-in, 예: merge_to_main) 또는 전역 실행 ON.
+  // 실행 조건: 액션별 autoExec(저위험 opt-in) 또는 전역 실행 ON.
   // → merge 는 탭 승인 시 즉시 실행 / deploy 등 고위험은 전역 ON 아니면 승인만(실행 안 함).
   const act = ACTIONS[getApproval(db, id)?.action_key ?? ""];
   if (!(act?.autoExec || isExecutionEnabled())) {

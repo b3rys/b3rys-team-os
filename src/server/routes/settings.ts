@@ -50,7 +50,6 @@ import {
 import { checkRuntimeAuth, runtimeReadinessFromAuth, type RuntimeReadiness } from "../lib/runtimeAuth";
 import { verifyFirstModelCall, type FirstModelCallResult } from "../lib/runtimeSubscription";
 import { hasCapability } from "../lib/capabilities";
-import { getNormalApprovers } from "../lib/approvals";
 import { hasSlackTokenFile, loadAgentCreds, saveAgentCreds, removeAgentCreds, slackTokensDir, postMessage } from "../lib/slack";
 import { renderAndRepoint, TEAM_OS_TEMPLATE_PATH, LIVE_TEAM_OS_PATH } from "../lib/teamOsRender";
 import { HERMES_BASE_PROFILE } from "../lib/paths";
@@ -1900,37 +1899,6 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
   const CAPTURE_TOKEN_RE = /^\d+:[A-Za-z0-9_-]{30,120}$/; // 하네스 LOW-1: 길이 상한(DoS 방지)
   const CAPTURE_GROUP_RE = /^-?\d{1,20}$/; // telegram chat_id(음수 supergroup 포함). 하네스 LOW-1: group 검증
   app.get("/system-op", (c) => c.json(captureConfigStatus(db)));
-
-  // ── merge-gate (강제 머지 승인) ON/OFF ─────────────────────────────
-  // 라이브 전용. OFF(기본)=퍼블릭과 동일(게이트 없음). 토글은 install-merge-gate.sh 를 통해
-  // 훅 wiring(core.hooksPath)+flag(merge_gate_enabled)을 함께 켜고 끈다.
-  const mergeGateStatus = () => {
-    // flag = repo-local git config (b3os.mergeGate) · wired = core.hooksPath=githooks. 둘 다여야 실효.
-    // available = install-merge-gate.sh 존재(=내부 관리 repo). 공개판은 scripts/ 제외라 미존재 → UI 숨김.
-    const repo = process.env.TEAM_COLLAB_DIR ?? `${process.env.HOME}/Development/b3rys-team-os`;
-    const available = existsSync(`${repo}/scripts/install-merge-gate.sh`);
-    const cfg = (k: string) => { try { return Bun.spawnSync(["git", "-C", repo, "config", "--get", k]).stdout.toString().trim(); } catch { return ""; } };
-    const flag = cfg("b3os.mergeGate") === "true";
-    const wired = cfg("core.hooksPath") === "githooks";
-    // ★승인자는 설정에서 읽어 내려준다★ — UI 가 이름을 하드코딩하면(예: "Bill·Steve·Codex")
-    //   설정을 바꿔도 화면은 옛 이름을 말하고, 공개 사용자에겐 ★존재하지 않는 팀원 이름★을 보여주게 된다(거짓말).
-    return { available, enabled: flag && wired, flag, wired, approvers: getNormalApprovers(db) };
-  };
-  app.get("/merge-gate", (c) => c.json(mergeGateStatus()));
-  app.patch("/merge-gate", async (c) => {
-    // 공개판/비관리 repo(install 스크립트 없음) → 이 엔드포인트 비활성(404). live-only.
-    if (!mergeGateStatus().available) return c.json({ ok: false, error: "merge_gate_unavailable" }, 404);
-    let body: { enabled?: unknown };
-    try { body = await c.req.json(); } catch { return c.json({ ok: false, error: "invalid_json" }, 400); }
-    if (typeof body.enabled !== "boolean") return c.json({ ok: false, error: "enabled_bool_required" }, 400);
-    const repo = process.env.TEAM_COLLAB_DIR ?? `${process.env.HOME}/Development/b3rys-team-os`;
-    const sub = body.enabled ? "enable" : "disable";
-    const p = Bun.spawnSync(["bash", `${repo}/scripts/install-merge-gate.sh`, sub], { env: { ...process.env, TEAM_COLLAB_DIR: repo } });
-    const out = (p.stdout.toString() + p.stderr.toString()).trim().slice(-500);
-    const ok = p.exitCode === 0;
-    appendAudit(db, "user", "merge_gate_toggled", "system", { enabled: body.enabled, ok });
-    return c.json({ ok, ...mergeGateStatus(), output: out });
-  });
 
   app.patch("/system-op", async (c) => {
     let body: { capture_bot_token?: unknown; capture_group_id?: unknown; router_enabled?: unknown };
