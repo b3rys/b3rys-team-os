@@ -72,6 +72,20 @@ export function socketManifest(manifest: unknown): unknown {
   }
 }
 
+// ★기존 Event URL 멤버가 공개 URL 없이 마법사를 열면★ Slack 이 거부하는 매니페스트가 나온다:
+//   "Event Subscription requires either Request URL or Socket Mode Enabled"
+// 이때 안내는 ★그 사람이 실제로 할 수 있는 행동★ 이어야 한다. 처음엔 "Socket Mode 를 선택하세요" 라고
+// 썼는데, 방식 선택 토글을 없앤 뒤라 ★고를 버튼이 없었다★ — 막다른 안내였다(코덱스 리뷰).
+// 방식 전환은 App-Level Token 재발급이 필요한 별도 작업이라 이 화면에서 시킬 수 없다.
+// 그래서 공개 주소 설정을 안내한다. 그건 지금 바로 할 수 있는 일이다.
+export function webhookBlockedNotice(mode: "webhook" | "socket", eventRequestUrl: string | null): string | null {
+  if (mode === "socket" || eventRequestUrl) return null;
+  return pick(
+    "이 팀원은 Event URL 방식으로 설정돼 있는데 공개 HTTPS 주소가 없습니다. 그대로 두면 Slack 이 매니페스트를 거부합니다(Event Subscription requires either Request URL or Socket Mode Enabled). 서버에 TEAM_PUBLIC_BASE_URL 로 공개 HTTPS 주소를 설정한 뒤 이 화면을 다시 여세요.",
+    "This member is set up with Event URL mode but no public HTTPS address is configured. Slack will reject the manifest (Event Subscription requires either Request URL or Socket Mode Enabled). Set TEAM_PUBLIC_BASE_URL on the server to a public HTTPS address, then reopen this screen.",
+  );
+}
+
 export function renderAgentSlack(host: HTMLElement, agentId: string, _displayName: string): void {
   let open = false;
   let me: SlackMember | null = null;
@@ -130,13 +144,7 @@ export function renderAgentSlack(host: HTMLElement, agentId: string, _displayNam
     // ★기본값에 우리 채널명을 쓰지 않는다★ — 예전엔 "#300-gd-ai-team"(우리 채널)이 박혀 있어서, 채널이
     //   설정되지 않은 설치본에서 ★남의 채널로 초대하라는 안내★ 가 그대로 떴다(공개 소스·번들에도 포함).
     const channel = info.channel || "";
-    // ★공개 URL 없이 Event URL 방식은 성립하지 않는다★ — Slack 이 그 매니페스트를 거부한다:
-    //   "Event Subscription requires either Request URL or Socket Mode Enabled".
-    //   request_url 도 없고 socket_mode_enabled 도 false 면 event_subscriptions 블록 자체가 불법이다.
-    //   그런데 세그먼트 버튼에 아무 게이트가 없어서 누구나 이 조합을 고를 수 있었고, 화면은
-    //   "그대로 붙여넣기" 라고 안내했다 — ★실패가 우리 화면이 아니라 Slack 화면에서 터진다.★
-    //   그러면 사용자는 제품이 고장 난 건지 자기 설정이 틀린 건지 알 수 없다. 그래서 여기서 막는다.
-    const unusableWebhook = !isSocket && !info.event_request_url;
+    const blockedNotice = webhookBlockedNotice(wizardMode, info.event_request_url);
     const appLink = `<a class="text-accent-greenSoft underline" href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener">api.slack.com/apps</a>`;
 
     const steps = isSocket
@@ -203,10 +211,9 @@ export function renderAgentSlack(host: HTMLElement, agentId: string, _displayNam
           <span class="inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-semibold" style="color:rgb(var(--accent)/.95);background:rgb(var(--accent)/.12)">${isSocket ? "Socket Mode" : "Event URL"}</span>
           <span class="text-[11px] text-slate-500">${isSocket ? pick("공개 URL 불필요", "No public URL needed") : pick("기존 설정 유지 중", "keeping existing setup")}</span>
         </div>
-        ${unusableWebhook ? `<div class="rounded-md border border-txt-amber/40 bg-surface-0 p-3 mb-3 text-[12px] text-slate-300">
-          <div class="font-semibold text-txt-amber mb-1">${pick("이 방식은 지금 쓸 수 없습니다 — Socket Mode 를 선택하세요", "This method is unavailable right now — choose Socket Mode")}</div>
-          <div class="text-slate-400">${pick("공개 HTTPS 주소가 설정되지 않아 Request URL 을 만들 수 없습니다. 그 상태의 매니페스트는 Slack 이 거부합니다 — 「Event Subscription requires either Request URL or Socket Mode Enabled」.", "No public HTTPS address is configured, so a Request URL cannot be produced. Slack rejects that manifest — 「Event Subscription requires either Request URL or Socket Mode Enabled」.")}</div>
-          <div class="text-slate-500 mt-1.5">${esc(info.public_base_hint ?? "")}</div>
+        ${blockedNotice ? `<div class="rounded-md border border-txt-amber/40 bg-surface-0 p-3 mb-3 text-[12px] text-slate-300">
+          <div class="font-semibold text-txt-amber mb-1">${pick("지금은 설정을 진행할 수 없습니다", "Setup cannot proceed right now")}</div>
+          <div class="text-slate-400">${esc(blockedNotice)}</div>
         </div>` : `
         <div class="text-[13px] font-semibold text-slate-200 mb-2 flex items-center gap-1.5"><span class="text-slate-400 inline-flex">${renderIcon("user-circle", { size: 15 })}</span>${pick("Slack에서 (사람 단계 — 복붙만 하면 됩니다)", "In Slack (human step — just copy & paste)")}</div>
         <ol class="text-[13px] text-slate-300 leading-relaxed ml-4 list-decimal space-y-2 mb-3">
