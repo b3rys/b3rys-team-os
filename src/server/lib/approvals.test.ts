@@ -36,41 +36,46 @@ test("액션 레지스트리는 미리 정의된 안전 셋만", () => {
   // 레지스트리(정의)에는 남아 있다 — 실행 대상이 없다고 ★키를 지우지 않는다★.
   expect(Object.keys(ACTIONS)).toContain("activate_openclaw");
   expect(Object.keys(ACTIONS)).toContain("restart_openclaw_gateway");
-  expect(Object.keys(ACTIONS)).toContain("deploy_public");
   // high danger 표시
   expect(ACTIONS.activate_openclaw!.danger).toBe("high");
-  expect(ACTIONS.deploy_public!.danger).toBe("high");
 });
 
 // ★"눌러도 실패하는 버튼을 보여주지 않는다"★ — 실행 파일이 없으면 제시에서 빠지고,
 //   파일이 생기면 ★자동으로 다시 제시된다★(호출 시점 검사라 재시작 불필요).
+//   ★합성 액션으로 검증한다★: 특정 액션(과거엔 deploy_public)에 묶으면 그 액션이 은퇴할 때
+//   같이 죽는다 — 검증하려는 건 액션이 아니라 requiresFiles ★계약★ 이다.
 test("실행 대상이 없으면 제시에서 빠지고, 생기면 자동으로 돌아온다", () => {
+  const KEY = "__test_reversible__";
   const root = mkdtempSync(join(tmpdir(), "b3os-approv-"));
   const prev = process.env.TEAM_COLLAB_DIR;
   process.env.TEAM_COLLAB_DIR = root;
+  ACTIONS[KEY] = {
+    key: KEY, label: "테스트 전용", description: "requiresFiles 계약 검증용.", danger: "low",
+    run: { cmd: ["bash", "-c", "true"] }, requiresFiles: ["scripts/reversible.sh"],
+  };
   try {
-    const target = join(root, "scripts", "deploy-public.sh");
+    const target = join(root, "scripts", "reversible.sh");
 
     // (1) 파일 없음 → 목록에서 빠지고, 이유가 함께 보고된다
-    expect(listActions().map((a) => a.key)).not.toContain("deploy_public");
-    const hidden = listUnavailableActions().find((x) => x.action.key === "deploy_public");
-    expect(hidden?.missing).toEqual(["scripts/deploy-public.sh"]);
+    expect(listActions().map((a) => a.key)).not.toContain(KEY);
+    expect(listUnavailableActions().find((x) => x.action.key === KEY)?.missing).toEqual(["scripts/reversible.sh"]);
 
     // (2) API 로도 못 들어온다 — UI 만 숨기면 우회된다
     const db = freshDb();
-    expect(() => enqueueApproval(db, { action_key: "deploy_public" })).toThrow(/action_unavailable/);
+    expect(() => enqueueApproval(db, { action_key: KEY })).toThrow(/action_unavailable/);
 
     // (3) ★파일이 생기면 저절로 풀린다★ — 이게 '지우지 않고 숨기기'를 고른 이유다
     mkdirSync(join(root, "scripts"), { recursive: true });
     writeFileSync(target, "#!/usr/bin/env bash\nexit 0\n");
-    expect(listActions().map((a) => a.key)).toContain("deploy_public");
-    expect(listUnavailableActions().find((x) => x.action.key === "deploy_public")).toBeUndefined();
-    expect(enqueueApproval(db, { action_key: "deploy_public" }).status).toBe("pending");
+    expect(listActions().map((a) => a.key)).toContain(KEY);
+    expect(listUnavailableActions().find((x) => x.action.key === KEY)).toBeUndefined();
+    expect(enqueueApproval(db, { action_key: KEY }).status).toBe("pending");
 
     // (4) 다시 지우면 다시 숨는다(가역)
     rmSync(target);
-    expect(listActions().map((a) => a.key)).not.toContain("deploy_public");
+    expect(listActions().map((a) => a.key)).not.toContain(KEY);
   } finally {
+    delete ACTIONS[KEY];
     if (prev === undefined) delete process.env.TEAM_COLLAB_DIR;
     else process.env.TEAM_COLLAB_DIR = prev;
     rmSync(root, { recursive: true, force: true });

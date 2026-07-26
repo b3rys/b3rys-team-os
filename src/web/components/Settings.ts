@@ -93,7 +93,6 @@ let _slack: SlackStatus | null = null;
 let _slackHealth: SlackHealth | null = null; // auth.test 실측(2단계 갱신) — 배지 정확성용
 // 시스템 OP (P0 기본 협업 floor) — capture 토큰·router·그룹·PIN. 토큰값은 안 받음(has_*만).
 let _systemOp: { has_capture_token: boolean; capture_group_id: string | null; router_enabled: boolean } | null = null;
-let _mergeGate: { available: boolean; enabled: boolean; flag: boolean; wired: boolean; approvers?: string[] } | null = null;
 let _systemOpOpen = false; // 기본 접힘 — 클릭하면 펼침(설정 필요 느낌만 주고 평소엔 간결).
 let _addOpen = false;
 let _ot: OtState | null = null;          // 진행 중인 신규 OT(영입). null이면 폼/버튼 표시.
@@ -177,13 +176,12 @@ export async function initTeamTitle(): Promise<void> {
 }
 
 async function loadAll(): Promise<void> {
-  const [s, mem, cap, slack, sysop, mgate, runtimeOptions] = await Promise.allSettled([
+  const [s, mem, cap, slack, sysop, runtimeOptions] = await Promise.allSettled([
     fetch(api("/settings"), { headers: { accept: "application/json" } }).then((r) => r.json()),
     fetch(api("/members"), { headers: { accept: "application/json" } }).then((r) => r.json()),
     fetch(api("/capabilities"), { headers: { accept: "application/json" } }).then((r) => r.json()),
     fetch(api("/slack/status"), { headers: { accept: "application/json" } }).then((r) => r.json()),
     fetch(api("/system-op"), { headers: { accept: "application/json" } }).then((r) => r.json()),
-    fetch(api("/merge-gate"), { headers: { accept: "application/json" } }).then((r) => r.json()),
     fetchRuntimeOptions(),
   ]);
   if (s.status === "fulfilled" && s.value) {
@@ -195,7 +193,6 @@ async function loadAll(): Promise<void> {
   if (cap.status === "fulfilled" && Array.isArray(cap.value)) _capabilities = cap.value;
   if (slack.status === "fulfilled" && slack.value && Array.isArray(slack.value.members)) _slack = slack.value as SlackStatus;
   if (sysop.status === "fulfilled" && sysop.value && typeof sysop.value.router_enabled === "boolean") _systemOp = sysop.value;
-  if (mgate.status === "fulfilled" && mgate.value && typeof mgate.value.enabled === "boolean") _mergeGate = mgate.value;
   if (runtimeOptions.status === "fulfilled") _runtimeOptions = runtimeOptions.value;
   applyTeamTitle(_settings.team_name);
 }
@@ -616,66 +613,6 @@ function systemOpHtml(): string {
   return `<div class="rounded-xl border border-surface-3 bg-surface-2/60 p-5">${header}${form}</div>`;
 }
 
-/** 승인자 문구 — ★설정(merge_approvers_normal)에서 읽어 렌더한다.★
- *  화면 문구에 이름을 박아두면 설정을 바꿔도 화면은 옛 이름을 말하고,
- *  공개 사용자에겐 ★자기 팀에 없는 사람 이름★을 보여주게 된다 = 화면이 거짓말을 한다.
- *  설정이 비어 있으면 이름을 지어내지 말고 '아직 지정되지 않음'이라고 사실대로 말한다. */
-function approverText(): string {
-  const list = (_mergeGate?.approvers ?? []).filter(Boolean);
-  if (list.length === 0) {
-    return pick(
-      "main 머지는 승인제입니다. 아직 승인자가 지정되지 않아 승인할 수 있는 사람이 없습니다 — 먼저 승인자를 설정하세요.",
-      "Merging to main needs approval. No approver is configured yet, so nobody can approve — set the approver list first.",
-    );
-  }
-  const names = list.join(" · ");
-  return pick(
-    `main 머지는 승인제 — 승인자(${names})가 ✅ 해야 머지되고, 미승인 머지는 git 훅이 차단합니다.`,
-    `Merging to main needs approval — merges only after an approver (${names}) taps ✅; un-approved merges are blocked by a git hook.`,
-  );
-}
-
-// ── merge-gate (강제 머지 승인) 섹션 — 심플 ON/OFF + 핵심 설명 ──────────
-function mergeGateHtml(): string {
-  if (!_mergeGate?.available) return ""; // 공개판(scripts 제외)·비관리 repo 에선 섹션 숨김 → live-only.
-  const on = !!_mergeGate?.enabled;
-  const badge = on
-    ? `<span class="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded border border-accent-green/30 text-accent-greenSoft bg-accent-green/10">ON</span>`
-    : `<span class="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded border border-surface-3 text-slate-500 bg-surface-0/40">OFF · ${pick("퍼블릭 동일", "public default")}</span>`;
-  const toggle = `<button id="mgate-toggle" class="${on ? "bg-accent-green/80" : "bg-slate-400/50"} shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors" role="switch" aria-checked="${on}"><span class="${on ? "translate-x-6" : "translate-x-1"} inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"></span></button>`;
-  return `
-    <div class="rounded-xl border border-surface-3 bg-surface-2/60 p-5">
-      <div class="flex items-center gap-3">
-        <div class="flex-1 min-w-0">
-          <div class="text-base font-semibold text-slate-100">${pick("강제 머지 승인", "Enforced merge approval")} ${badge}</div>
-          <div class="text-[12px] text-slate-500 mt-0.5">${pick("에이전트가 승인 없이 main 에 머지하지 못하게 막습니다.", "Stops agents from merging to main without approval.")}</div>
-        </div>
-        ${toggle}
-      </div>
-      <div class="mt-3 border-t border-surface-3 pt-3 text-[12px] text-slate-400 leading-relaxed space-y-1.5">
-        <div><span class="text-slate-200 font-medium">${pick("무엇을 하나", "What it does")}:</span> ${approverText()}</div>
-        <div id="mgate-msg" class="text-[12px] text-slate-500 pt-1"></div>
-      </div>
-    </div>`;
-}
-
-function wireMergeGate(): void {
-  if (!_root) return;
-  const setMsg = (t: string) => { const m = _root!.querySelector<HTMLDivElement>("#mgate-msg"); if (m) m.textContent = t; };
-  _root.querySelector<HTMLButtonElement>("#mgate-toggle")?.addEventListener("click", async () => {
-    const next = !_mergeGate?.enabled;
-    setMsg(pick("적용 중…", "Applying…"));
-    try {
-      const r = await fetch(api("/merge-gate"), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: next }) });
-      const j = await r.json();
-      if (!j.ok) { setMsg(pick("실패: ", "Failed: ") + (j.output || j.error || "")); return; }
-      _mergeGate = { available: true, enabled: j.enabled, flag: j.flag, wired: j.wired };
-      setMsg(j.enabled ? pick("✅ 게이트 ON — 승인 없인 main 머지 불가", "✅ Gate ON — no un-approved main merges") : pick("게이트 OFF — 퍼블릭 동일(자유 머지)", "Gate OFF — public default (free merges)"));
-      render();
-    } catch (e) { setMsg(pick("오류: ", "Error: ") + (e as Error).message); }
-  });
-}
-
 function wireSystemOp(): void {
   if (!_root) return;
   _root.querySelector<HTMLButtonElement>("#sysop-toggle")?.addEventListener("click", () => { _systemOpOpen = !_systemOpOpen; render(); });
@@ -818,7 +755,6 @@ function render(): void {
         ${identity}
         ${slackChannelsHtml()}
         ${systemOpHtml()}
-        ${mergeGateHtml()}
         ${members}
       </div>
     </div>`;
@@ -830,7 +766,6 @@ function render(): void {
 function wire(): void {
   if (!_root) return;
   wireSystemOp(); // 시스템 OP 패널 핸들러(P0)
-  wireMergeGate(); // 강제 머지 승인 토글
   // 언어 토글은 우상단 헤더 깃발(MetricsBar #locale-flag)로 이전 — 여기선 제거(GD 2026-07-01).
   // 저장 + 필수 필드 검증(팀 이름·팀장 ID·팀장 이름) — GD 2026-07-10
   const save = _root.querySelector<HTMLButtonElement>("#set-save");

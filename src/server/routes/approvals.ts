@@ -24,8 +24,6 @@ import {
   setPin,
   verifyPin,
   verifyPinIssueSession,
-  canApproveTier,
-  getNormalApprovers,
   executeApproval,
 } from "../lib/approvals";
 import { ensureThread, insertMessage } from "../db/inboxQueries";
@@ -106,60 +104,6 @@ export function createApprovalsApp(deps: ApprovalsDeps): Hono {
     if (row.status !== "pending") return c.json({ error: `이미 처리됨(${row.status})` }, 400);
     setApprovalStatus(db, id, "rejected");
     return c.json({ ok: true, status: "rejected" });
-  });
-
-  // 승인 v2(GD 2026-07-08): 에이전트(승인자 풀)가 merge_to_main 을 승인/거절하는 경로(GD 텔레그램 탭과 별개).
-  //   보안: canApproveTier(자기승인 금지·풀 멤버십). merge_to_main 전용 — 다른 액션은 GD 탭 유지(일반 승인시스템 불변).
-  //   승인 성공 시 executeApproval(GD 탭과 동일 실행경로 — merge-to-main.sh nonce 흐름 재사용) + 신청자 버스 통지.
-  app.post("/approvals/:id/agent-approve", async (c) => {
-    const id = c.req.param("id");
-    const body = await c.req.json().catch(() => ({}));
-    const approver = String(body.approver ?? "").trim().toLowerCase();
-    if (!approver) return c.json({ ok: false, error: "approver required" }, 400);
-    const row = getApproval(db, id);
-    if (!row) return c.json({ ok: false, error: "not found" }, 404);
-    if (row.action_key !== "merge_to_main") return c.json({ ok: false, error: "이 경로는 merge_to_main 전용(다른 승인은 GD 탭)" }, 400);
-    if (row.status !== "pending") return c.json({ ok: false, error: `이미 처리됨(${row.status})`, status: row.status }, 400);
-    const params = safeParse(row.params_json);
-    const author = String(params.author ?? row.requested_by).toLowerCase();
-    // ★Devon 리뷰 #1: params.tier 를 실제로 읽는다. core 머지는 풀이 승인 불가(GD --lead 직접머지 경로). tier 고정 금지.
-    const tier = params.tier === "core" ? "core" : "normal";
-    if (tier === "core") return c.json({ ok: false, error: "core tier 머지는 풀 승인 불가 — GD 직접머지(--lead) 경로" }, 403);
-    const auth = canApproveTier({ tier, approver, author, isLead: false, normalApprovers: getNormalApprovers(db) });
-    if (!auth.ok) return c.json({ ok: false, error: auth.reason ?? "승인 권한 없음" }, 403);
-    // ★Devon 리뷰 #5: 원자적 claim — pending→approved 를 조건부 UPDATE 로. 동시 두 승인 중 하나만 승리(changes=1),
-    //   나머지는 409. read-then-write race + executeApproval executing 재사용 경합 예방.
-    const prev = safeParse(row.result ?? "{}");
-    const claim = db
-      .prepare("UPDATE approval_request SET status='approved', decided_at=datetime('now'), result=? WHERE id=? AND status='pending'")
-      .run(JSON.stringify({ ...prev, approver }), id); // ④실제 승인자 보존
-    if (claim.changes !== 1) return c.json({ ok: false, error: "동시 처리됨(경합)", status: getApproval(db, id)?.status }, 409);
-    const ex = await executeApproval(db, id);
-    notifyRequesterBus(db, row.requested_by, `✅ 머지 승인·처리됨 — ${row.title}\n승인: ${approver}`);
-    return c.json({ ok: ex.ok, status: ex.ok ? "done" : "failed", approver, output: ex.output });
-  });
-
-  app.post("/approvals/:id/agent-reject", async (c) => {
-    const id = c.req.param("id");
-    const body = await c.req.json().catch(() => ({}));
-    const approver = String(body.approver ?? "").trim().toLowerCase();
-    const row = getApproval(db, id);
-    if (!row) return c.json({ ok: false, error: "not found" }, 404);
-    if (row.action_key !== "merge_to_main") return c.json({ ok: false, error: "merge_to_main 전용" }, 400);
-    if (row.status !== "pending") return c.json({ ok: false, error: `이미 처리됨(${row.status})` }, 400);
-    const params = safeParse(row.params_json);
-    const author = String(params.author ?? row.requested_by).toLowerCase();
-    const tier = params.tier === "core" ? "core" : "normal"; // Devon 리뷰 #1: tier 실제 반영
-    if (tier === "core") return c.json({ ok: false, error: "core tier 머지는 풀 처리 불가 — GD 경로" }, 403);
-    const auth = canApproveTier({ tier, approver, author, isLead: false, normalApprovers: getNormalApprovers(db) });
-    if (!auth.ok) return c.json({ ok: false, error: auth.reason ?? "권한 없음" }, 403);
-    // Devon 리뷰 #5: 원자적 claim(동시 거절/승인 경합 예방)
-    const claim = db
-      .prepare("UPDATE approval_request SET status='rejected', decided_at=datetime('now'), result=? WHERE id=? AND status='pending'")
-      .run(JSON.stringify({ approver }), id);
-    if (claim.changes !== 1) return c.json({ ok: false, error: "동시 처리됨(경합)", status: getApproval(db, id)?.status }, 409);
-    notifyRequesterBus(db, row.requested_by, `❌ 머지 거절 — ${row.title}\n거절: ${approver}\n사유·재요청은 ${approver}에게 문의하세요.`);
-    return c.json({ ok: true, status: "rejected", approver });
   });
 
   app.get("/approvals/pin", (c) => c.json({ set: isPinSet() }));

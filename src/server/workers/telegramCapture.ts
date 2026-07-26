@@ -44,18 +44,6 @@ export function approvalDeferredNotice(title: string, approverHint: string, loca
     `⏳ Approval deferred — ${title}\nAuto-deferred: no response within 10 min.\nApprovers: ${approverHint}\nAsk ${approverHint} or re-submit.`);
 }
 
-// 승인 v2(GD 2026-07-08 토큰절약): 머지 승인은 풀 전원 알림이 아니라 ★한 명에게만 배정★(4명 중복분석=토큰낭비).
-//   살아있는(agent_status != offline) 승인자 우선, id 해시로 분산 배정(상태없는 라운드로빈 근사). 다 죽었으면
-//   풀 전체에서 배정(신청자가 나중에 수동 재배정). 배정된 1명만 리뷰 → 토큰 1인분.
-export function pickMergeApprover(db: Database, pool: string[], seed: string): string | undefined {
-  if (!pool.length) return undefined;
-  const live = pool.filter((a) => { const s = getStatus(db, a); return s && s.state !== "offline"; });
-  const cands = live.length ? live : pool;
-  let h = 0;
-  for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return cands[h % cands.length];
-}
-
 // 전용 캡처봇 토큰 — var/secrets/capture.bot-token(0600) → 없으면 env(CAPTURE_BOT_TOKEN) fallback.
 // (P0) UI(Settings▸시스템OP)로 설정 가능. 변경 적용은 워커 재init(restartCapture). 없으면 워커 inert — 라이브 흐름 안 건드림.
 // ★let (const 아님): startTelegramCapture 재init(대시보드 토큰/그룹 저장) 마다 파일에서 다시 읽어 갱신한다.
@@ -350,7 +338,7 @@ export function fmtDigest(db: Database): string {
 }
 export function slashCommands(publicBuild = PUBLIC_BUILD): string[] {
   const commands = ["/menu", "/board", "/review", "/status", "/onoff"];
-  if (!publicBuild) commands.push("/approve", "/digest", "/deploy");
+  if (!publicBuild) commands.push("/approve", "/digest");
   return commands;
 }
 export function fmtStatus(db: Database, agents: AgentRecord[]): string {
@@ -580,20 +568,6 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
         await tg("sendMessage", { chat_id: gdDm, text: pick(locale, `🔔 새 권한 요청\n${pr ? `${pr.runtime}${pr.agent_id ? `/${pr.agent_id}` : ""} · ${pr.action}\n${pr.target}` : r.title}`, `🔔 New permission request\n${pr ? `${pr.runtime}${pr.agent_id ? `/${pr.agent_id}` : ""} · ${pr.action}\n${pr.target}` : r.title}`), reply_markup: permButtons(r.id) });
         continue;
       }
-      if (r.action_key === "merge_to_main") {
-        // ★코드 머지 승인 = GD 아닌 승인자 '한 명'에게 배정(피어리뷰, GD 2026-07-08). GD op DM push 스킵.
-        //   전원 알림은 4명 중복분석=토큰낭비 → 살아있는 1명(author 제외)에게만 배정·알림. 그 사람이 안 하면
-        //   신청자가 수동 재배정(defer 없음). deploy 등 일반 승인은 아래 GD push 그대로.
-        const pool = getNormalApprovers(deps.db).filter((a) => a !== (approvalParams(r).author || r.requested_by).toLowerCase());
-        const author = (approvalParams(r).author || r.requested_by).toLowerCase();
-        const assignee = pickMergeApprover(deps.db, pool, r.id);
-        if (assignee) {
-          await notifyBus(assignee, pick(locale,
-            `🔔 머지 승인 요청 — ${r.title}\n올린이: ${author}\n당신에게 배정됐어요. 검토 후 승인/거절 부탁드립니다.`,
-            `🔔 Merge approval needed — ${r.title}\nBy: ${author}\nAssigned to you. Please review & approve/reject.`));
-        }
-        continue;
-      }
       const danger = listActions().find((a) => a.key === r.action_key)?.danger === "high" ? "⚠ " : "";
       await tg("sendMessage", { chat_id: gdDm, text: pick(locale, `🔔 새 승인 요청\n${danger}${r.title}\n〈${r.action_key}〉`, `🔔 New approval request\n${danger}${r.title}\n〈${r.action_key}〉`), reply_markup: { inline_keyboard: [[
         { text: pick(locale, "✅ 승인", "✅ Approve"), callback_data: `apv:${r.id}` },
@@ -660,22 +634,6 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
       reply_markup: onoffKeyboard(),
     });
   }
-  // /deploy — 공개 릴리스 배포 확인 버튼. owner 탭=인증(PIN 없이, /approve 패턴). 실제 push 전 export+ci-grep 하드어보트가 안전망.
-  async function sendDeployMenu(replyTo?: string, chatId: string = GROUP_ID): Promise<void> {
-    const locale = getLocale(deps.db);
-    await tg("sendMessage", {
-      chat_id: chatId,
-      text: pick(locale,
-        "🚀 공개 릴리스 배포\nHEAD export → 누출 검증(토큰·핸들·키·도메인·내부경로) → 통과 시에만 공개 repo(main) force-push.\n버튼을 누르면 서버가 실행하고 결과를 여기로 보고합니다.",
-        "🚀 Publish public release\nHEAD export → leak scan (tokens·handles·keys·domains·internal paths) → force-push to public repo (main) only if it passes.\nTap the button and the server runs it and reports the result here."),
-      ...(replyTo ? { reply_to_message_id: Number(replyTo) } : {}),
-      reply_markup: { inline_keyboard: [[
-        { text: pick(locale, "🚀 배포 실행", "🚀 Run deploy"), callback_data: "dep:go" },
-        { text: pick(locale, "❌ 취소", "❌ Cancel"), callback_data: "dep:no" },
-      ]] },
-    });
-  }
-
   // @all confirm (2026-06-18, GD): @all/전체멘션은 즉시 fan-out 하지 않고 GD 승인을 받는다(오발송 방지).
   //   broadcast_marker 감지 → 주입 보류 + pending 저장 + ✅/❌ 버튼 → GD ✅ 시 runInjection 재실행.
   const pendingBroadcasts = new Map<string, {
@@ -712,40 +670,6 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
       const inOwnerDm = cb.message?.chat?.type === "private" && chatId === fromId;
       return inGroup || inOwnerDm;
     };
-
-    // 배포 콜백 (dep:go / dep:no) — 직접 spawn 금지. danger:high approval action으로 큐에 넣어 PIN/실행 게이트를 지난다.
-    const dep = /^dep:(go|no)$/.exec(data);
-    if (dep) {
-      if (!isAuthorized()) { await tg("answerCallbackQuery", { callback_query_id: cb.id, text: pick(locale, "권한 없음", "Not authorized"), show_alert: true }); appendAuditFile("capture", "callback_denied", data, { from: fromId }); return; }
-      if (dep[1] === "no") {
-        await tg("answerCallbackQuery", { callback_query_id: cb.id, text: pick(locale, "취소됨", "Cancelled") });
-        if (mid) await tg("editMessageText", { chat_id: chatId, message_id: mid, text: pick(locale, "❌ 배포 취소됨", "❌ Deploy cancelled") });
-        appendAuditFile("capture", "deploy_cancelled", data, { from: fromId });
-        return;
-      }
-      // ★owner 탭 = 즉시 실행(별도 approve 스텝 제거, GD 2026-07-06). deploy_public 액션 내부의 export→ci-grep 누출검증 하드어보트가 진짜 안전장치라 approve 재확인은 중복.
-      await tg("answerCallbackQuery", { callback_query_id: cb.id, text: pick(locale, "배포 실행 중…", "Deploying…") });
-      try {
-        const row = enqueueApproval(deps.db, {
-          action_key: "deploy_public",
-          requested_by: `telegram:${fromId}`,
-          title: pick(locale, "공개 릴리스 배포", "Publish public release"),
-        });
-        if (mid) await tg("editMessageText", { chat_id: chatId, message_id: mid, text: pick(locale, "🚀 배포 실행 중… (export → 누출검증 → push)", "🚀 Deploying… (export → leak scan → push)") });
-        const res = await approveByTrustedTap(deps.db, row.id, fromId);
-        appendAuditFile("capture", res.ok ? "deploy_done" : "deploy_failed", row.id, { from: fromId, executed: res.executed });
-        const final = res.executed
-          ? (res.ok
-              ? pick(locale, `✅ 공개 릴리스 배포 완료\n${(res.output ?? "").slice(-800)}`, `✅ Public release deployed\n${(res.output ?? "").slice(-800)}`)
-              : pick(locale, `⚠ 배포 실패 (누출검증 실패면 push 안 함)\n${(res.error ?? res.output ?? "").slice(-800)}`, `⚠ Deploy failed (no push if leak scan failed)\n${(res.error ?? res.output ?? "").slice(-800)}`))
-          : pick(locale, "✅ 승인됨 (실행 OFF) — APPROVAL_EXECUTION_ENABLED=1 필요", "✅ Approved (execution OFF) — needs APPROVAL_EXECUTION_ENABLED=1");
-        if (mid) await tg("editMessageText", { chat_id: chatId, message_id: mid, text: final });
-      } catch (e) {
-        if (mid) await tg("editMessageText", { chat_id: chatId, message_id: mid, text: pick(locale, "✗ 배포 오류: ", "✗ Deploy error: ") + (e as Error).message });
-        appendAuditFile("capture", "deploy_error", data, { from: fromId });
-      }
-      return;
-    }
 
     // @all 전체전송 승인/취소 콜백 (bcapv:<pid> / bcrej:<pid>)
     const bc = /^(bcapv|bcrej):(.+)$/.exec(data);
@@ -940,7 +864,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     await tg("answerCallbackQuery", { callback_query_id: cb.id, text: pick(locale, "승인 — 처리 중…", "Approved — in progress…") });
     if (mid) await tg("editMessageText", { chat_id: chatId, message_id: mid, text: pick(locale, `⏳ 승인됨, 실행 중 — ${row.title}`, `⏳ Approved, running — ${row.title}`) });
     const res = await approveByTrustedTap(deps.db, id, fromId);
-    // 표시는 실제 실행결과(res.executed) 기준 — autoExec(merge_to_main 등)는 전역 OFF 여도 실행되므로
+    // 표시는 실제 실행결과(res.executed) 기준 — autoExec 액션은 전역 OFF 여도 실행되므로
     // 전역 플래그로 'OFF' 표시하면 오판. (Codex 리뷰 2026-07-08)
     let final: string;
     if (res.executed && res.ok) final = pick(locale, `✅ 완료 — ${row.title}\n${(res.output ?? "").slice(-500)}`, `✅ Done — ${row.title}\n${(res.output ?? "").slice(-500)}`);
@@ -959,11 +883,6 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     }
     if (cmd === "/onoff") {
       await sendOnoffMenu(msgId, targetChat);
-      appendAuditFile("capture", "slash_command", cmd, { msg: msgId ?? null, chat: targetChat });
-      return true;
-    }
-    if (cmd === "/deploy") {
-      await sendDeployMenu(msgId, targetChat);
       appendAuditFile("capture", "slash_command", cmd, { msg: msgId ?? null, chat: targetChat });
       return true;
     }
@@ -1280,7 +1199,6 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
       { command: "review", description: pick(locale, "리뷰 현황", "Review status") },
       { command: "digest", description: pick(locale, "다이제스트", "Digest") },
       { command: "status", description: pick(locale, "팀 상태 요약", "Team status summary") },
-      { command: "deploy", description: pick(locale, "🚀 공개 릴리스 배포 (검증 후 push)", "🚀 Publish public release (verify, then push)") },
     ];
     // ★ 그룹 채팅 자동완성은 all_group_chats / 특정 chat scope 가 default 보다 우선한다. default 만 갱신하면
     //   예전에 등록된 그룹 scope 목록이 남아 새 명령(onoff)이 그룹에서 안 뜬다(2026-06-11 GD 발견). → 셋 다 등록.
