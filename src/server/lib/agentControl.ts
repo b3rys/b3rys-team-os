@@ -102,7 +102,7 @@ async function setClaude(id: string, enabled: boolean): Promise<ControlResult> {
 
 /** hermes 에이전트: 프로필 게이트웨이 stop/start. */
 async function setHermes(id: string, enabled: boolean): Promise<ControlResult> {
-  // 프로필 = agent.hermes_profile ?? id (restartAgent와 동일) — HERMES_PROFILE=id 하드코딩이면 프로필≠id(기존 hermes=b3ryshermes)일 때 on/off가 엉뚱한 프로필을 건드림(Codex 크로스리뷰 지적). GD 2026-07-01.
+  // 프로필 = agent.hermes_profile ?? id (restartAgent와 동일) — HERMES_PROFILE=id 하드코딩이면 프로필≠id일 때 on/off가 엉뚱한 프로필을 건드린다.
   const agent = ambientAgents().find((a) => a.id === id);
   const profile = agent?.hermes_profile ?? id;
   if (enabled) {
@@ -158,7 +158,6 @@ export async function setAgentEnabled(agentId: string, runtime: string, enabled:
 // ── 재시작 (페르소나 reload·복구) ──────────────────────────────────────────
 //   정지(off)와 다름: off 는 끄는 것, 재시작은 켜둔 채 다시 띄워 최신 페르소나/상태 로드.
 //   런타임별: claude=restart-agent.sh --resume(컨텍스트 유지+새 CLAUDE.md) / openclaw·hermes=게이트웨이 in-place kickstart.
-const HERMES_LABEL = "ai.hermes.gateway-b3ryshermes";
 const OPENCLAW_LABEL = "ai.openclaw.gateway";
 
 /** 팀원 1명 재시작. off 상태는 거부(기동은 🟢). bill 도 가능 — claude_channel 이라 --resume(컨텍스트 유지)이고,
@@ -203,7 +202,7 @@ export async function restartAgent(agentId: string, runtime: string, fresh = fal
       return { ok: r.code === 0, detail: r.code === 0 ? `openclaw 게이트웨이 재시작(${agentId} 등 새 IDENTITY/AGENTS 로드 · 다른 openclaw 1~2분 깜빡 · 정지된 forin 은 그대로 off)` : `재시작 실패: ${r.out.slice(-150)}` };
     }
     if (runtime === "hermes_agent") {
-      // 프로필별 게이트웨이 타겟(기존 hermes=b3ryshermes, 신규 영입=id) — HERMES_LABEL 하드코딩이면 신규 hermes 재시작 불가였음(하네스). GD 2026-07-01.
+      // 프로필별 게이트웨이 타겟(profile≠id인 기존 멤버 포함).
       const agent = ambientAgents().find((a) => a.id === agentId);
       const label = agent?.gateway_service ?? `ai.hermes.gateway-${agent?.hermes_profile ?? agentId}`;
       const r = await run(["launchctl", "kickstart", "-k", `gui/${uid}/${label}`]);

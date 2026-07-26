@@ -15,7 +15,8 @@ import { existsSync, mkdirSync, writeFileSync, chmodSync, readFileSync, renameSy
 import { dirname } from "node:path";
 import { memberPaths, MEMBERS_ROOT, personaTargetsForRuntime, assertNotLiveMemberFsUnderTest } from "./personaTemplates";
 import { writeMemberPersona, savePersonaFile } from "./writeMemberPersona";
-import { MANUALS_DIR } from "./paths";
+import { HERMES_BASE_PROFILE, MANUALS_DIR } from "./paths";
+import { isHermesMemberProtected, isHermesProfileProtected } from "./hermesBaseProfile";
 import { appendAuditFile } from "./auditFile";
 import { codexBridgePaths, placeCodexToken, writeCodexBridgeFiles, removeCodexBridgeFiles, resolveOwnerDmId } from "../runtimes/codex/launcher";
 import { placeClaudeToken, writeClaudeBridgeFiles, seedClaudeTrust, seedClaudeAccess, killClaudeTmux, reconnectClaudeTelegram, claudeBridgePaths, installReplyGuardHook, installOutboundHook, installProgressHook, uninstallOutboundHook, uninstallReplyGuardHook, uninstallRecoveryHook, removeClaudeBridgeFiles } from "../runtimes/claude/launcher";
@@ -130,11 +131,11 @@ export async function teardownRuntime(
     return { ok: true, detail: "claude_channel teardown 완료(best-effort)" };
   }
   // hermes_agent teardown: 게이트웨이 stop + 프로필별 LaunchAgent plist + credential 토큰 + 프로필 dir 정리.
-  //   ★CRITICAL 가드: base 프로필(b3ryshermes)은 모든 hermes 멤버의 auth.json 심링크 소스+clone 원본이라
+  //   ★CRITICAL 가드: 설정된 base 프로필은 모든 hermes 멤버의 auth.json 심링크 소스+clone 원본이라
   //   절대 정지/삭제하지 않는다(공유 인프라 보존, 멤버 레지스트리/per-id 토큰만 정리) — offboard 원본 로직 그대로.
   if (runtime === "hermes_agent") {
     const prof = agent?.hermes_profile ?? id;
-    const isBaseHermesProfile = prof === "b3ryshermes";
+    const isBaseHermesProfile = isHermesProfileProtected(prof);
     try { if (!isBaseHermesProfile) await doSetAgentEnabled(id, "hermes_agent", false); } catch { /* best-effort */ }
     await new Promise((r) => setTimeout(r, opts.sleepMs ?? 1500)); // 게이트웨이 bootout 후 프로필 dir 해제 대기(레이스 방지)
     if (/^[a-z0-9_-]+$/i.test(prof) && !isBaseHermesProfile) {
@@ -266,7 +267,7 @@ function runtimeScript(id: string, runtime: string): { script: string; tokenFile
     return {
       script: `${MANUALS_DIR}/hermes/activate-hermes-agent.sh`,
       tokenFile: `${HOME}/.hermes/credentials/${id}-token.txt`,
-      env: { AGENT_ID: id, WS: ws, ...(ownerDm ? { OWNER_CHAT_ID: ownerDm } : {}) },
+      env: { AGENT_ID: id, WS: ws, HERMES_BASE_PROFILE, ...(ownerDm ? { OWNER_CHAT_ID: ownerDm } : {}) },
     };
   }
   return null; // claude_channel 은 별도 런타임 활성화 없음(CLAUDE.md + tmux/LaunchAgent)
@@ -868,15 +869,16 @@ export async function swapRuntime(db: Database, input: SwapInput, deps: SwapDeps
     return { ok: false, steps, error: `허용되지 않는 런타임: ${targetRuntime}`, code: "invalid_runtime" };
   }
 
-  // STEP0(e) — base hermes 프로필(b3ryshermes) 가드. 모든 hermes 멤버의 공유 auth 소스라 교체 대상이
-  //   아니다(offboard 가드와 동일 조건 재사용: target.runtime==="hermes_agent" && (hermes_profile??id)
-  //   === "b3ryshermes"). swap 특유 추가: id 자체가 b3ryshermes면 방향 무관 거부(STEP3에서 hermes_profile
-  //   이 id로 세팅되므로 "b3ryshermes로 교체해 들어가는" 경우도 이 한 줄로 커버됨).
-  const isBaseHermesTarget = target.runtime === "hermes_agent" && ((target.hermes_profile ?? id) === "b3ryshermes");
-  if (isBaseHermesTarget || id === "b3ryshermes") {
+  // STEP0(e) — 현재 런타임이 Hermes인 대상에만 프로필 보호 판정을 적용한다. 탐지가 모호할 때
+  //   모든 Hermes 프로필을 fail-closed로 보호하되, Claude/Codex/OpenClaw 멤버 id까지 Hermes
+  //   프로필로 오인해 모든 런타임 교체를 막아서는 안 된다.
+  const isBaseHermesTarget = isHermesMemberProtected(target.runtime, target.hermes_profile ?? id);
+  const wouldClaimConfiguredBase =
+    targetRuntime === "hermes_agent" && id.toLowerCase() === HERMES_BASE_PROFILE.toLowerCase();
+  if (isBaseHermesTarget || wouldClaimConfiguredBase) {
     return {
       ok: false, steps,
-      error: "b3ryshermes는 모든 hermes 멤버가 공유하는 base 프로필(auth 소스)입니다. 런타임 교체 대상이 아닙니다.",
+      error: `${HERMES_BASE_PROFILE}는 모든 hermes 멤버가 공유하는 base 프로필(auth 소스)입니다. 런타임 교체 대상이 아닙니다.`,
       code: "base_hermes_guard",
     };
   }
