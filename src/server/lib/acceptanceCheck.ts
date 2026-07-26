@@ -119,11 +119,15 @@ function loadAgentsChecked(registryPath: string): RegistryLoad {
   }
 }
 
-function dbAgentCount(db: Database): number {
+/** team.db 로스터 인원. ★조회 실패는 null — 0 으로 삼키지 않는다★.
+ *  0 은 freshInstall 신호의 한 축이라, 실패를 0 으로 반환하면 방금 고친 major A 와 똑같은
+ *  '실패를 정상 초기상태로 오판' 패턴이 여기서 되살아난다(Bill 후속지적 2026-07-25 minor 2).
+ *  null = "모른다" → freshInstall 은 성립하지 않고, 로드 체크가 fail 로 노출한다. */
+function dbAgentCount(db: Database): number | null {
   try {
-    return (db.query("SELECT COUNT(*) AS n FROM agent").get() as { n: number } | null)?.n ?? 0;
+    return (db.query("SELECT COUNT(*) AS n FROM agent").get() as { n: number } | null)?.n ?? null;
   } catch {
-    return 0;
+    return null;
   }
 }
 
@@ -134,7 +138,7 @@ function blockerCategory(line: string, internalIdRe: RegExp | null): string {
   return "blocker";
 }
 
-function settingsStep(db: Database, registry: RegistryLoad, dbAgents: number): AcceptanceStep {
+function settingsStep(db: Database, registry: RegistryLoad, dbAgents: number | null): AcceptanceStep {
   const items: AcceptanceItem[] = [];
   const teamName = getSetting(db, "team_name");
   const ownerName = getSetting(db, "owner_name");
@@ -145,7 +149,10 @@ function settingsStep(db: Database, registry: RegistryLoad, dbAgents: number): A
   //     · 로드 실패(파싱·권한·배열아님)를 0명으로 세면 손상된 라이브에서 "새 설치입니다" 라고 거짓말한다.
   //     · 파일만 사라진 경우는 loadRegistry 가 정상적으로 [] 를 주지만, team.db 에 팀원이 남아 있으면
   //       그건 새 설치가 아니라 ★레지스트리 유실★ 이다(대시보드는 DB 기준으로 팀원을 계속 보여준다).
+  //     · team.db 로스터 조회 자체가 실패하면(dbAgents === null) "0명" 이 아니라 "모른다" 다 —
+  //       모르는 상태를 새 설치로 단정하지 않는다(Bill 후속지적 minor 2, 같은 삼킴 패턴).
   const freshInstall = registry.ok && registry.agents.length === 0 && dbAgents === 0;
+  const dbRoster = dbAgents === null ? "조회 실패" : `${dbAgents}명`;
 
   // ★agents.json 로드 자체를 먼저 노출한다★ — 손상·권한 오류는 조용히 넘기지 않고 fail.
   if (!registry.ok) {
@@ -153,8 +160,17 @@ function settingsStep(db: Database, registry: RegistryLoad, dbAgents: number): A
       item(
         "fail",
         "agents.json 로드",
-        `실패(${registry.error ?? "load_error"}) — 로스터를 읽지 못했다(team.db 로스터 ${dbAgents}명)`,
+        `실패(${registry.error ?? "load_error"}) — 로스터를 읽지 못했다(team.db 로스터 ${dbRoster})`,
         "agents.json 의 JSON 형식·파일 권한을 확인하세요. 서버는 마지막으로 읽은 로스터로 계속 동작하며, 다음 sync 때 team.db 기준 자동복구를 시도합니다.",
+      ),
+    );
+  } else if (dbAgents === null) {
+    items.push(
+      item(
+        "fail",
+        "agents.json 로드",
+        "team.db 로스터 조회 실패 — 새 설치 여부를 판정할 수 없다(agents.json 자체는 로드됨)",
+        "team.db 파일 권한·스키마(agent 테이블)를 확인하세요.",
       ),
     );
   } else if (registry.agents.length === 0 && dbAgents > 0) {
