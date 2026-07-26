@@ -301,9 +301,10 @@ m6 디스패치 때 `countAutoRounds(parent=m5)`가 m5→…→m0을 걸어 에�
 다른 런타임은 "새 세션" 개념 없음 — openclaw/hermes는 게이트웨이 kickstart, codex는 매 wake에 AGENTS.md 재로드(무상태 두뇌).
 
 ### 5-2. recall 주입 (직전 대화 digest)
-활성화 시(=새 claude 세션=맥락 빔), `activation.ts:612`가 마지막 단계로 `inject-recall.sh <id>`를 fire-and-forget 실행 → 세션 준비되면 "recall 복구블록"(직전 대화 digest)을 tmux에 주입. 실패해도 활성화는 계속.
-- **데이터 소스**: team.db `message`(팀버스) + `dm_message`(GD 1:1). 수동판은 `bus-recall.sh`(읽기전용 SQL, `--about "맛집"`·`--with devon` 등).
-- ★공개 클론엔 `inject-recall.sh`가 빠져있음(릴리즈서 `/scripts/` 제외) — 트리거·의미·데이터소스는 문서화되나 주입블록 정확한 문구는 내부 트리에만.
+활성화 시(=새 claude 세션=맥락 빔), `activation.ts:648`이 마지막 단계로 `scripts/inject-recall.sh <id>`를 fire-and-forget 실행하도록 되어 있다 → 세션 준비되면 "recall 복구블록"(직전 대화 digest)을 tmux에 주입하는 설계다. 실패해도 활성화는 계속된다.
+- **데이터 소스**: team.db `message`(팀버스) + `dm_message`(GD 1:1).
+- ★현재 상태 — 이 자동 주입은 실제로는 동작하지 않는다.★ `scripts/inject-recall.sh`는 이 저장소에 없다. 호출부가 `Bun.spawn`을 `try`로 감싸고 종료 상태를 확인하지 않기 때문에, 파일이 없어도 **오류 없이 조용히 건너뛰고** 활성화는 성공한 것처럼 진행된다. 즉 아래 5-5의 7단계는 현재 no-op이다.
+- **지금 쓸 수 있는 방법**: `skills/b3os-team-inbox/scripts/bus-recall.sh`(읽기전용 SQL, `--about "맛집"`·`--with devon` 등)로 직전 맥락을 직접 조회한다. 자동 주입이 필요하면 위 경로에 스크립트를 만들어 넣어야 한다.
 
 ### 5-3. 첫 합류 OT 주입 (`.b3os-just-joined`)
 영입 때만 워크스페이스에 `.b3os-just-joined` 파일을 심음(재시작·재활성화는 반복 X). 멤버 로딩파일(`sectionFirstContact`)이 이걸 보고:
@@ -315,7 +316,7 @@ m6 디스패치 때 `countAutoRounds(parent=m5)`가 m5→…→m0을 걸어 에�
 - **openclaw/hermes/codex**: 로딩파일=AGENTS.md. ★@import 자동 인라인 없음★ → "📚 룰 로딩" 블록으로 "이 런타임은 TEAM-OS 자동주입 안 됨, 아래 정본 경로를 직접 읽어라"(TEAM-OS §2/§5 owner+handoff, §4 실행/안전, §10 kanban) 지시.
 
 ### 5-5. 활성화 순서 (claude, activateMember)
-1. 멤버제한/off-clear → 2. 워크스페이스+페르소나 렌더(CLAUDE.md·SOUL.md) → 3. preflight auth(안 되면 스폰 전 중단) → 4. 토큰·trust·access 시드 + stale tmux/bot.pid 제거(fresh 강제) + 활성화(plist bootstrap→tmux 스폰) → 5. **poller 헬스게이트(기본 40초** — 콜드스타트 대비 28→40, bot.pid=진짜 폴링 확인, 없으면 "귀머거리 봇"으로 중단) → 6. 필수설정 확인 → 7. **recall 주입** → 8. bus-wake 등록.
+1. 멤버제한/off-clear → 2. 워크스페이스+페르소나 렌더(CLAUDE.md·SOUL.md) → 3. preflight auth(안 되면 스폰 전 중단) → 4. 토큰·trust·access 시드 + stale tmux/bot.pid 제거(fresh 강제) + 활성화(plist bootstrap→tmux 스폰) → 5. **poller 헬스게이트(기본 40초** — 콜드스타트 대비 28→40, bot.pid=진짜 폴링 확인, 없으면 "귀머거리 봇"으로 중단) → 6. 필수설정 확인 → 7. **recall 주입**(5-2 참조 — 스크립트 부재로 현재 no-op) → 8. bus-wake 등록.
 
 ### 5-6. 실사례 — 멤버가 "깨어나서 보는 것"
 - **--resume 재시작**: 네이티브 `--continue`가 이전 tmux 대화 그대로 + 갱신된 CLAUDE.md 로드. 주입·OT 없이 그냥 이어감.
@@ -333,4 +334,4 @@ m6 디스패치 때 `countAutoRounds(parent=m5)`가 m5→…→m0을 걸어 에�
 - 활성화/recall: `src/server/lib/activation.ts`, `agentControl.ts`
 - 룰/페르소나: `src/server/lib/personaTemplates.ts`, `TEAM-OS.md`, `rules/TEAM-OS.task-mgmt.md`
 
-> ★주의: 멤버 대상 협업 룰은 `personaTemplates.ts`에서 렌더된다(repo 루트 CLAUDE.md는 프로젝트 개발용). `inject-recall.sh`는 공개 릴리즈서 제외되어 recall 블록 정확한 문구는 내부 트리에만 있다.
+> ★주의: 멤버 대상 협업 룰은 `personaTemplates.ts`에서 렌더된다(repo 루트 CLAUDE.md는 프로젝트 개발용). `scripts/inject-recall.sh`는 이 저장소에 없고 호출부가 실패를 무시하므로 자동 recall 주입은 현재 no-op이다(5-2 참조).

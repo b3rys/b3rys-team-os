@@ -18,9 +18,9 @@ Create a pipe-delimited file. Blank lines and lines beginning with `#` are
 ignored.
 
 ```text
-bot|worker|claude-worker|/path/to/worker.pid|on|/path/to/team-os.sh|up|worker
-gateway|openclaw|ai.openclaw.gateway|-|on|/path/to/team-os.sh|up|openclaw
-bot|paused-worker|claude-paused|/path/to/paused.pid|off|/path/to/team-os.sh|up|paused-worker
+bot|worker|claude-worker|/path/to/worker.pid|on|/path/to/your-recovery-command|up|worker
+gateway|openclaw|ai.openclaw.gateway|-|on|/path/to/your-recovery-command|up|openclaw
+bot|paused-worker|claude-paused|/path/to/paused.pid|off|/path/to/your-recovery-command|up|paused-worker
 ```
 
 Fields are:
@@ -31,6 +31,13 @@ Fields are:
 4. the poller PID file (`-` for gateways);
 5. `on` or `off`;
 6. an executable recovery program followed by zero or more argv fields.
+
+The recovery program in field 6 is **yours to supply** — this repository does not
+ship one. Point it at whatever already brings that service back up on your host
+(for example your own wrapper script, or `launchctl` / `tmux` invoked through a
+small executable). It is executed directly as argv, so it must be an executable
+file, not a shell one-liner. Until you provide a real path, the script reports
+`NOOP ... recovery program is missing or not executable` and changes nothing.
 
 The file is parsed as data and is never sourced or evaluated. Do not use `|` or
 newlines inside fields. Only configured records are inspected; an `off` record

@@ -209,7 +209,7 @@ flowchart LR
 - 팀원 지식은 raw private 메모리가 아니라 큐레이팅된 팀지식 export로 먼저 검색에 들어와야 한다.
 - raw 에이전트 `MEMORY.md`는 opt-in 전용 — 인덱싱 전 GD 승인·소스라벨·프라이버시 검토가 필요하다.
 
-상세 설계: `docs/TEAM_SEARCH_SYSTEM_ARCHITECTURE_20260603.md`.
+상세 설계 문서는 아직 없다. 구현이 정본이다 — `src/server/db/searchQueries.ts`(reindex·질의)와 `src/server/routes/search.ts`(검색 API)를 본다.
 
 ## 안전 게이트
 
@@ -228,5 +228,5 @@ flowchart LR
 - `src/server/workers/slackPoll.ts`, `src/server/routes/slack.ts`: Slack 경로.
 - `src/server/db/searchQueries.ts`: 검색 reindex·질의 구현.
 - `src/server/routes/search.ts`: 검색 API.
-- `docs/TEAM_SEARCH_SYSTEM_ARCHITECTURE_20260603.md`: 검색 범위·메모리 정책·벡터/하이브리드 아키텍처.
+- 검색 범위·메모리 정책은 위 “범위 정책” 절이 정본이다(별도 아키텍처 문서 없음).
 - `src/web/components/AgentSetup.ts`: 대시보드 문서 페이지.

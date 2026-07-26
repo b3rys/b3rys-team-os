@@ -17,7 +17,7 @@
 | **b3os-infra-safety** | **skills** | **b3os 인프라 변경 안전 규칙.** fresh 격리 clone·런타임 상태(`agents.json`/`team.db`) 심링크 금지·백업 우선·테스트 FS 격리·릴리스/배포 가드·격리 검증을 강제한다. b3os 소스·config·registry·릴리스를 수정할 때 필독. owner=maintainer |
 | b3os-team-inbox | **skills** | 팀 메시지 버스 도구(inbox·send·reply·ack·thread). `scripts/send.sh`·`scripts/reply.sh <message_id>`(답장 주소 자동: to=원발신자+in_reply_to+thread — 회신이 broadcast로 안 묻히게, V1.0 근본 fix)·`scripts/thread.sh <thread_id>`(위임 회신 추적 정본 — inbox는 directed unread만, thread.sh는 그 thread 전체) 등. 셸이라 전 런타임 사용 |
 | b3os-telegram-file-delivery | skills | Telegram 파일 전송 정본 — `message`/첨부 도구가 막을 때 Bot API `sendDocument`로 HTML·PDF·이미지·ZIP·문서 등 원본 전송(확장자별 MIME). "파일이 안 보내져" 반복 이슈 해결 |
-| **b3os-task-loop** | **skills** | **Tasks 칸반·주행모드·handoff·review-wait·scheduled workloop 통합 진입점.** 리뷰/응답/승인 대기 중 멈추지 않도록 `thread_id`·`recheck_at`·`fallback`·`next_safe_action`·`stop_rule`을 기록하고, `task-wait/check/close.sh`로 완료/blocked/승인대기까지 추적. |
+| **b3os-task-loop** | **skills** | **Tasks 칸반·주행모드·handoff·review-wait·scheduled workloop 통합 진입점.** 리뷰/응답/승인 대기 중 멈추지 않도록 `thread_id`·`recheck_at`·`fallback`·`next_safe_action`·`stop_rule`을 기록하고, `skills/b3os-task-loop/scripts/` 의 `task-wait.sh`·`task-check.sh`·`task-close.sh` 로 완료/blocked/승인대기까지 추적. |
 | b3os-task-mgmt | skills | Deprecated compatibility stub — 신규 절차는 `b3os-task-loop` 사용. 기존 참조 호환용으로 유지. |
 | b3os-workloop | skills | Deprecated compatibility stub — scheduled wake 처리도 `b3os-task-loop` 사용. 기존 참조 호환용으로 유지. |
 | b3os-scheduler | skills | b3os durable 스케줄러 — 반복(cron 시·분·요일·월)·간격·1회성 리마인드 잡을 `team.db`(`scheduled_job`)에 durable 등록, 서버 워커가 시각 맞춰 인박스 wake. 잡별 휴일정책(run/skip/shift, KST 고정오프셋). 세션 cron(유실됨) 대신 팀 정본 반복작업·launchd 이관에. API=`src/server/scheduler/core.ts`(`createCronJob`·`scheduleReminder`). 라이브발사·launchd제거=GD/운영자 게이트 |
@@ -29,7 +29,7 @@
 > 참고: 구 `team-inbox` 계열 이름은 일부 개인 런타임에 호환용으로 남아 있을 수 있습니다. 정본은 b3os-team-inbox(skills)입니다.
 
 ## 외부 스킬 (호환 — 출처 명시)
-b3rys 팀이 함께 쓰는 외부(third-party) 스킬입니다. 팀 워크플로우 스킬과 별개이며 각자 라이선스를 따릅니다.
+b3rys 팀이 함께 쓰는 외부(third-party) 스킬입니다. 팀 워크플로우 스킬과 별개이며 각자 라이선스를 따릅니다. ★이 저장소에 포함되어 있지 않고 `install.sh`가 설치하지도 않습니다★ — 쓰려면 각 출처에서 직접 설치해야 하며, 없어도 b3os 동작에는 지장이 없습니다.
 
 | 스킬 | 출처 / 라이선스 | 설명 |
 |---|---|---|

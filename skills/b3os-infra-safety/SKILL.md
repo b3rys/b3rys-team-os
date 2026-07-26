@@ -9,7 +9,7 @@ description: b3os 플랫폼 자체(설정·소스·registry·배포)를 수정�
 
 ## 언제 이 스킬을 보나
 
-팀원이 b3os의 소스·설정·runtime 상태·릴리스를 건드릴 때: 코드 수정, config 변경, `agents.json`/`team.db` 조작, 테스트/빌드 실행, `make-public-release`/`deploy-public`, 서버 재시작. **이 작업 전에 이 규칙을 적용한다.**
+팀원이 b3os의 소스·설정·runtime 상태·릴리스를 건드릴 때: 코드 수정, config 변경, `agents.json`/`team.db` 조작, 테스트/빌드 실행, 공개 릴리스·라이브 배포 작업, 서버 재시작. **이 작업 전에 이 규칙을 적용한다.**
 
 ## ① 브랜치·worktree 격리
 
@@ -26,7 +26,7 @@ description: b3os 플랫폼 자체(설정·소스·registry·배포)를 수정�
 
 ## ③ 백업 먼저
 
-- registry(`agents.json`)/DB(`team.db`) 변경, `make-public-release`/`deploy`, 상태를 건드릴 수 있는 테스트 실행 **전에** `agents.json`+`team.db`를 타임스탬프 백업한다. 유실돼도 즉시 복구된다.
+- registry(`agents.json`)/DB(`team.db`) 변경, 배포, 상태를 건드릴 수 있는 테스트 실행 **전에** `agents.json`+`team.db`를 타임스탬프 백업한다. 유실돼도 즉시 복구된다.
 
 ## ④ 테스트 FS 격리
 
@@ -35,7 +35,7 @@ description: b3os 플랫폼 자체(설정·소스·registry·배포)를 수정�
 
 ## ⑤ 릴리스·배포 가드
 
-- `make-public-release`/`deploy-public`의 출력(OUT)은 **항상 새 격리 dir**(예: `mktemp -d`)이며 **라이브 repo 루트가 아니어야** 한다.
+- 릴리스 산출물을 만드는 스크립트를 쓸 때, 출력(OUT)은 **항상 새 격리 dir**(예: `mktemp -d`)이며 **라이브 repo 루트가 아니어야** 한다. (`main`이 공개 정본이 된 뒤로는 별도 릴리스 생성 명령이 없다 — 배포 절차는 `docs/DEPLOY_MERGE_HOTFIX_WORKFLOW.md`의 “라이브 배포 흐름”.)
 - 배포 전: 관련 변경 커밋됨 · 테스트/타입체크/acceptance 통과 · 리뷰/게이트 완료 · 롤백/스냅샷 확보 · **시크릿 스크럽 스캔 통과** · 다른 멤버가 동시에 재시작/배포할 수 있으면 코디네이션 핑.
 
 ## ⑥ 오너 코디네이션
