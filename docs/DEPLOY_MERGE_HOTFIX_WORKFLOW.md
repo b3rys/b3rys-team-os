@@ -4,7 +4,7 @@
 
 ## 원칙
 
-1. `main`은 공개 정본이다. 라이브는 `scripts/deploy-live.sh`로 `origin/main`에 정렬한다.
+1. `main`은 공개 정본이다. 라이브는 `origin/main`에 정렬한다(절차는 아래 “라이브 배포 흐름”).
 2. 배포·머지·핫픽스는 채팅 합의만으로 닫지 않는다. 실제 테스트, 리뷰, 롤백 경로, 감사 로그가 있어야 닫힌다.
 3. 공개 배포 전에는 secret(시크릿)·로컬 상태(`.env`, `team.db`, `agents.json`)가 공개 기록에 섞이지 않는지 확인한다.
 4. 보고 시간은 팀장 로컬 시간 기준으로 쓴다. b3rys 운영 보고에서는 KST(한국 표준시)가 보이면 KST로, 로그·DB가 UTC면 변환해서 표시한다.
@@ -15,7 +15,7 @@
 | 등급 | 예 | 시작 조건 | 머지/배포 전 필수 조건 | 보고·감사 |
 |---|---|---|---|---|
 | Routine merge | 문서, 테스트, 작은 UI 텍스트, 명백한 버그픽스 | 별도 브랜치, clean worktree | 관련 테스트/빌드, PR 리뷰 1명, 작성자 email noreply 확인, 브랜치 보호 확인 | PR 링크, 변경 파일, 검증, 미검증, 롤백 |
-| Live deploy | 공개 `main`을 라이브에 반영 | `main` green, 배포 창·오너 확인 | `scripts/deploy-live.sh --dry-run`, build, launchd restart, `/team` 200, 인수테스트 | 배포 전/후 commit, 헬스체크, 롤백 commit |
+| Live deploy | 공개 `main`을 라이브에 반영 | `main` green, 배포 창·오너 확인 | 반영 대상 commit 확인(dry-run), `bun install`, `bun run build`, 서버 재시작, `/team` 200, 인수테스트 | 배포 전/후 commit, 헬스체크, 롤백 commit |
 | Hotfix | 운영 장애·공개 버그 긴급 수정 | 장애 범위·롤백 기준·오너 명시 | 작은 diff, 가능한 최소 테스트, member review 1명 이상, 배포 후 인수테스트 | 원인, 영향, 수정, 롤백, 후속 과제 |
 | Force-push / history rewrite | 공개 기록 재작성, orphan snapshot, secret 제거 | GD 승인, 백업, freeze 공지 | 하네스 또는 2명 이상 리뷰, secret scan, branch protection/권한 확인, 복구 명령 준비 | 승인 근거, 전/후 SHA, 영향 범위, 복구 절차 |
 
@@ -40,28 +40,62 @@
    - rebase/amend/fast-forward merge도 committer email이 로컬 실명 email로 남을 수 있으므로 author와 committer를 모두 확인한다.
 7. branch protection(브랜치 보호)이 CI·리뷰·권한을 통과시키는 상태에서만 merge한다.
 8. merge 후 `git fetch origin main`을 실행하고 `skills/b3os-release-ops/scripts/release-preflight.sh --mode post-merge`로 `origin/main` tip의 author·committer email이 모두 noreply인지 검증한다.
-9. 검증 후 로컬 main을 fast-forward로 맞추고 필요 시 `scripts/deploy-live.sh`로 배포한다.
+9. 검증 후 로컬 main을 fast-forward로 맞추고 필요 시 아래 “라이브 배포 흐름”으로 배포한다.
 
 ## 라이브 배포 흐름
 
-`deploy-live.sh`는 공개 `origin/main`을 라이브 디렉터리에 반영하는 표준 도구다.
+공개 `origin/main`을 라이브 디렉터리에 반영하는 절차다. 아래 명령은 모두 이 저장소를 clone한 상태에서 그대로 실행된다.
 
-흐름:
+### 1. 배포 전 확인 (dry-run)
 
-1. `git fetch origin main`
-2. 현재 HEAD와 `origin/main` 비교
-3. `git reset --hard <target>`
-4. `bun install`
-5. `bun run build`
-6. `launchctl kickstart -k <label>`
-7. `http://127.0.0.1:<port>/team` 200 확인
-8. 실패 시 이전 commit으로 자동 롤백 시도
-
-배포 전 체크:
+무엇이 반영되는지 먼저 눈으로 본다.
 
 ```bash
-bash scripts/deploy-live.sh --dry-run
+git fetch origin main
+git --no-pager log --oneline HEAD..origin/main        # 반영될 commit 목록 (비어 있으면 이미 최신)
 skills/b3os-release-ops/scripts/release-preflight.sh --mode deploy --live-dir "$PWD"
+```
+
+시크릿·로컬 상태(`.env`, `team.db`, `agents.json`)는 `.gitignore` 대상이라 아래 `reset`이 건드리지 않는다. 그래도 배포 전에 존재는 확인한다.
+
+```bash
+for f in .env team.db agents.json; do [ -e "$f" ] || echo "⚠ $f 없음(로컬 상태 확인 필요)"; done
+```
+
+### 2. 반영
+
+```bash
+PREV="$(git rev-parse HEAD)"          # 롤백 지점 — 배포 보고에 남긴다
+git reset --hard origin/main
+bun install
+bun run build
+```
+
+### 3. 서버 재시작
+
+상시가동(LaunchAgent)을 등록해 두었으면:
+
+```bash
+bun run service restart
+bun run service status                 # 등록·실행 상태 확인
+```
+
+등록하지 않았으면(기본값) `bun run start`로 띄운 프로세스를 직접 종료 후 다시 실행한다. 상시가동 등록은 선택이며 macOS 전용이다(`bun run service install`).
+
+### 4. 검증
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:${TEAM_HTTP_PORT:-7878}/team"   # 200 기대
+```
+
+### 5. 롤백
+
+검증이 실패하면 즉시 이전 commit으로 되돌린다.
+
+```bash
+git reset --hard "$PREV"
+bun install && bun run build
+bun run service restart                # 또는 bun run start 프로세스 재기동
 ```
 
 배포 후 인수테스트(acceptance test):
@@ -69,7 +103,9 @@ skills/b3os-release-ops/scripts/release-preflight.sh --mode deploy --live-dir "$
 - `/team` 대시보드가 200으로 뜬다.
 - `/team/api/agents`가 팀원 목록을 반환한다.
 - 이번 변경의 실제 사용자 경로를 1회 이상 확인한다.
-- 실패하면 `deploy-live.sh`가 출력한 이전 commit으로 롤백하거나, 수동으로 `git reset --hard <prev>; bun run build; launchctl kickstart -k ...`를 실행한다.
+- 실패하면 위 “5. 롤백”을 수행하고 결과를 보고한다.
+
+> b3rys 내부 운영 트리는 위 절차를 한 번에 돌리는 배포 스크립트를 쓴다. 그 스크립트는 `.gitignore`의 `/scripts/*` 정책에 따라 **공개 저장소에 포함되지 않는다**(내부 전용). 공개 저장소에서는 위 절차가 정본이다.
 
 ## 핫픽스 흐름
 

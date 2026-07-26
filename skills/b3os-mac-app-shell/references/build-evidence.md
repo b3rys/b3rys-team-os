@@ -10,10 +10,12 @@
   - 배포본: `<dashboard-domain>/team/B3rys-unsigned-test.zip` (397KB).
 - **실기 검증**: the team lead가 맥에서 실행 → "맥앱 잘 나온다 굿!!!"(2026-06-24). 창 채움(위 벌어짐/아래 잘림) 회귀 없음 확인 = viewport 3종세트가 실제로 효과.
 
-## 재현 절차 (누구나 다시 빌드)
+## 재현 절차 (골격 저장소 접근 권한이 있는 팀원)
+
+★골격 `mac-iphone-shell`은 내부 비공개 저장소이며 이 저장소에 포함되어 있지 않다.★ 먼저 clone한 뒤, 그 위치를 `$SHELL_SKELETON`으로 두고 실행한다.
 
 ```
-cd ~/Development/mac-iphone-shell
+cd "$SHELL_SKELETON"                     # 골격을 clone 한 경로
 bash scripts/package-macos-app.sh        # → .build/b3os.app
 # (서명/notarization은 references/build-sign-notarize.md)
 ```
