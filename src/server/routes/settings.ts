@@ -1016,9 +1016,14 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
         display_information: { name: appName },
         features: { bot_user: { display_name: agent.slack_app_name || `gd_${id}`, always_online: true } },
         oauth_config: { scopes: { bot: scopes } },
-        // 공개 URL 이 없으면 event_subscriptions 자체를 넣지 않는다 — request_url 이 null 인 매니페스트는 Slack 이 거부한다.
+        // ★event_subscriptions 는 항상 넣는다★ — bot_events 가 있어야 봇이 멘션을 받는다.
+        //   공개 URL 이 없을 때 이 블록을 통째로 빼봤더니(첫 시도), Socket 매니페스트에 app_mention 구독이
+        //   사라져서 ★앱은 만들어지는데 멘션에 반응하지 않는 상태★ 가 됐다(코덱스 리뷰에서 잡힘).
+        //   scope(app_mentions:read)만 있고 구독이 없으면 이벤트가 오지 않는다 — 둘 다 필요하다.
+        //   request_url 만 조건부로 넣는다: null 이 든 매니페스트는 Slack 이 거부하고,
+        //   Socket Mode 는 애초에 request_url 없이 bot_events 만으로 동작한다.
         settings: {
-          ...(eventUrl ? { event_subscriptions: { request_url: eventUrl, bot_events: ["app_mention"] } } : {}),
+          event_subscriptions: { ...(eventUrl ? { request_url: eventUrl } : {}), bot_events: ["app_mention"] },
           org_deploy_enabled: false,
           socket_mode_enabled: false,
         },
