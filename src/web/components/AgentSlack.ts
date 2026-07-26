@@ -27,8 +27,11 @@ interface SlackMember {
 interface ReinstallInfo {
   ok: boolean; id: string; display_name: string;
   slack_app_name: string | null; slack_app_id: string | null; slack_bot_user_id: string | null;
-  state: string; event_request_url: string; channel: string;
+  state: string; event_request_url: string | null; channel: string;
   needed_scopes: string[]; manifest: unknown;
+  // 공개 URL 미설정 = Event URL 방식만 불가. Socket Mode 는 그대로 된다.
+  public_base_missing?: boolean; public_base_hint?: string | null;
+  error?: string; hint?: string;
 }
 
 function esc(s: string): string {
@@ -73,6 +76,7 @@ export function renderAgentSlack(host: HTMLElement, agentId: string, _displayNam
   let me: SlackMember | null = null;
   let info: ReinstallInfo | null = null;
   let infoLoading = false;
+  let infoError: string | null = null;
   // 마법사 안에서 고르는 연결 방식(로컬). 저장 시 slack_connection_mode로 persist.
   // 마법사 열 때 현재 persist된 방식으로 초기화. (메인 화면엔 토글 없음 — 방식 선택은 마법사 안에서만)
   let wizardMode: "webhook" | "socket" = "webhook";
@@ -87,20 +91,44 @@ export function renderAgentSlack(host: HTMLElement, agentId: string, _displayNam
 
   const loadInfo = async () => {
     infoLoading = true;
+    infoError = null;
     try {
       const r = await fetch(`${apiBase()}/api/members/${encodeURIComponent(agentId)}/slack/reinstall-info`, { headers: { accept: "application/json" } });
-      info = await r.json();
-    } catch { info = null; }
+      const body = await r.json().catch(() => null) as ReinstallInfo | null;
+      // ★응답 성공 여부를 확인한다★ — 예전엔 r.ok 를 안 보고 body 를 그대로 info 에 넣었다. 그래서 400 이
+      //   와도 화면은 '정상' 으로 그려졌고, manifest/needed_scopes 가 undefined 인 채 ★빈 매니페스트와
+      //   빈 scope 를 그럴싸하게 표시★ 했다(실측). 사용자는 그걸 Slack 에 붙여넣어 ★권한 0개짜리 앱★ 을
+      //   만들게 된다 — 실패보다 나쁘다. 실패면 실패라고 보여준다.
+      if (!r.ok || !body || body.ok === false) {
+        info = null;
+        infoError = body?.hint || body?.error || `HTTP ${r.status}`;
+      } else {
+        info = body;
+      }
+    } catch (e) {
+      info = null;
+      infoError = e instanceof Error ? e.message : String(e);
+    }
     infoLoading = false;
     render();
   };
 
   const wizardHtml = (): string => {
-    if (infoLoading || !info) return `<div class="rounded-lg border border-surface-3 bg-surface-0/40 p-3.5 text-[12px] text-slate-500">${pick("설정 정보 불러오는 중…", "Loading settings…")}</div>`;
+    if (infoLoading) return `<div class="rounded-lg border border-surface-3 bg-surface-0/40 p-3.5 text-[12px] text-slate-500">${pick("설정 정보 불러오는 중…", "Loading settings…")}</div>`;
+    // 실패했으면 ★가짜 안내 대신 실패를 보여준다.★ 반쪽 매니페스트를 그리면 사용자가 그걸 붙여넣는다.
+    if (infoError || !info) {
+      return `<div class="rounded-lg border border-status-blocked/40 bg-surface-0/40 p-3.5 text-[12px] text-slate-300">
+        <div class="font-semibold text-status-blocked mb-1">${pick("설정 정보를 불러오지 못했습니다", "Could not load setup info")}</div>
+        <div class="text-slate-400">${esc(infoError ?? "unknown")}</div>
+        <div class="text-slate-500 mt-1.5">${pick("이 상태에서는 매니페스트가 불완전해 Slack 앱이 권한 없이 만들어집니다. 원인을 먼저 해결하세요.", "The manifest would be incomplete here and the Slack app would be created without permissions. Fix the cause first.")}</div>
+      </div>`;
+    }
     const isSocket = wizardMode === "socket";
     const manifestStr = JSON.stringify(isSocket ? socketManifest(info.manifest) : (info.manifest ?? {}), null, 2);
     const scopes = (info.needed_scopes ?? []).join(", ");
-    const channel = info.channel || "#300-gd-ai-team";
+    // ★기본값에 우리 채널명을 쓰지 않는다★ — 예전엔 "#300-gd-ai-team"(우리 채널)이 박혀 있어서, 채널이
+    //   설정되지 않은 설치본에서 ★남의 채널로 초대하라는 안내★ 가 그대로 떴다(공개 소스·번들에도 포함).
+    const channel = info.channel || "";
     const appLink = `<a class="text-accent-greenSoft underline" href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener">api.slack.com/apps</a>`;
 
     const steps = isSocket
@@ -118,8 +146,8 @@ export function renderAgentSlack(host: HTMLElement, agentId: string, _displayNam
             `<b>OAuth & Permissions</b> → <b>Bot User OAuth Token</b>(<code>xoxb-…</code>) 복사 → 아래 폼에 <b>xoxb</b>·<b>xapp</b> 붙여넣기.`,
             `<b>OAuth & Permissions</b> → copy the <b>Bot User OAuth Token</b>(<code>xoxb-…</code>) → paste <b>xoxb</b> and <b>xapp</b> into the form below.`),
           pick(
-            `봇을 <b>${esc(channel)}</b>에 초대: <code>/invite @봇이름</code>.`,
-            `Invite the bot to <b>${esc(channel)}</b>: <code>/invite @botname</code>.`),
+            `봇을 <b>${channel ? esc(channel) : pick("사용할 채널", "your channel")}</b>에 초대: <code>/invite @봇이름</code>.${channel ? "" : pick(" <span class=\"text-slate-500\">(채널이 아직 설정되지 않았습니다 — 아래 채널 칸에 입력하세요)</span>", "")}`,
+            `Invite the bot to <b>${channel ? esc(channel) : "your channel"}</b>: <code>/invite @botname</code>.${channel ? "" : " <span class=\"text-slate-500\">(no channel configured yet — set it in the Channel field below)</span>"}`),
         ]
       : [
           pick(
@@ -132,16 +160,21 @@ export function renderAgentSlack(host: HTMLElement, agentId: string, _displayNam
             `<b>Bot User OAuth Token</b>(<code>xoxb-…</code>)과 <b>Signing Secret</b> 복사 → 아래 폼에 붙여넣기.`,
             `Copy the <b>Bot User OAuth Token</b>(<code>xoxb-…</code>) and <b>Signing Secret</b> → paste into the form below.`),
           pick(
-            `봇을 <b>${esc(channel)}</b>에 초대: <code>/invite @봇이름</code>.`,
-            `Invite the bot to <b>${esc(channel)}</b>: <code>/invite @botname</code>.`),
+            `봇을 <b>${channel ? esc(channel) : pick("사용할 채널", "your channel")}</b>에 초대: <code>/invite @봇이름</code>.${channel ? "" : pick(" <span class=\"text-slate-500\">(채널이 아직 설정되지 않았습니다 — 아래 채널 칸에 입력하세요)</span>", "")}`,
+            `Invite the bot to <b>${channel ? esc(channel) : "your channel"}</b>: <code>/invite @botname</code>.${channel ? "" : " <span class=\"text-slate-500\">(no channel configured yet — set it in the Channel field below)</span>"}`),
           pick(
             `Event Subscriptions Request URL = 아래 값 등록 + <code>app_mention</code> 구독 (URL은 우리 서버 고정 주소 — 매니페스트에 이미 포함, 붙여넣으면 바로 Verified).`,
             `Event Subscriptions Request URL = register the value below + subscribe to <code>app_mention</code> (the URL is our server's fixed address — already in the manifest, so it turns Verified as soon as you paste it).`),
         ];
 
+    // Event URL 방식은 공개 HTTPS 주소가 있어야 한다. 없으면 "—" 만 띄우지 말고 ★무엇을 하면 되는지★ 알린다
+    // (Socket Mode 는 이 값 없이도 되므로 그쪽으로 안내). 예전엔 이 조건에서 화면 전체가 못 뜨고 있었다.
+    const eventUrlRow = info.event_request_url
+      ? copyRow("Event URL", info.event_request_url)
+      : `<div class="mb-1.5 rounded border border-txt-amber/30 bg-surface-0 px-2 py-1.5 text-[12px] text-txt-amber">${esc(info.public_base_hint ?? pick("Event URL 방식을 쓰려면 공개 HTTPS 주소 설정이 필요합니다. Socket Mode 는 설정 없이 됩니다.", "Event URL mode needs a public HTTPS address. Socket Mode works without it."))}</div>`;
     const copyRows = isSocket
       ? copyRow(pick("채널", "Channel"), channel, false)
-      : copyRow("Event URL", info.event_request_url || "—") + copyRow(pick("채널", "Channel"), channel, false);
+      : eventUrlRow + copyRow(pick("채널", "Channel"), channel, false);
 
     const tokenInputs = isSocket
       ? `<div class="mb-2.5"><label class="${labelCls}">Bot Token <span class="text-slate-600">(xoxb-…)</span></label>
