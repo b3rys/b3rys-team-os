@@ -24,10 +24,21 @@ set -u
 STATE_DIR="${B3OS_STATE_DIR:-$HOME/.b3os}"
 BASELINE="$STATE_DIR/runtime-baseline.tsv"
 MODE="check"
+# ★--accept 와 --json 은 배타다★ — 예전엔 마지막 인자가 MODE 를 덮어써서, 같은 두 옵션이
+#   순서에 따라 정반대로 동작하면서 ★둘 다 rc=0★ 이었다(`--accept --json` = 저장 안 함 / JSON,
+#   `--json --accept` = 저장함 / 텍스트). 호출자가 성공으로 읽는데 원하던 일이 안 된다.
+#   조합에 의미를 부여하는 대신 ★사용법 오류로 거부★ 한다 — 모드가 늘어도 같은 규칙이 선다.
+MODE_SET=""
+set_mode() {
+  if [ -n "$MODE_SET" ] && [ "$MODE_SET" != "$1" ]; then
+    echo "--$MODE_SET 와 --$1 은 함께 쓸 수 없다 (배타적 모드)" >&2; exit 3
+  fi
+  MODE_SET="$1"; MODE="$1"
+}
 for arg in "$@"; do
   case "$arg" in
-    --accept) MODE="accept" ;;
-    --json)   MODE="json" ;;
+    --accept) set_mode accept ;;
+    --json)   set_mode json ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "알 수 없는 인자: $arg" >&2; exit 3 ;;
   esac
