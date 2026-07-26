@@ -100,13 +100,87 @@ if [ -f "$SKILL_SRC/SKILL.md" ]; then
 fi
 
 # ── 4) .env 준비 ─────────────────────────────────────────────────
+# .env 생성보다 먼저 기존 Hermes 공유 auth 원본을 판별한다. 먼저 example을 복사하면 그 안의
+# 중립 기본값이 "명시 설정"처럼 보여 기존 설치 마이그레이션이 영구히 건너뛰어진다.
+read_hermes_base_env() {
+  [ -f "$1" ] || return 0
+  { grep -E '^[[:space:]]*(export[[:space:]]+)?HERMES_BASE_PROFILE[[:space:]]*=' "$1" 2>/dev/null || true; } \
+    | tail -1 \
+    | sed -E -e 's/^[[:space:]]*(export[[:space:]]+)?HERMES_BASE_PROFILE[[:space:]]*=[[:space:]]*//' \
+      -e 's/[[:space:]]+#.*$//' -e 's/^["'\''][[:space:]]*//' -e 's/[[:space:]]*["'\'']$//' -e 's/[[:space:]]*$//'
+}
+
+_requested_base="${HERMES_BASE_PROFILE:-}"
+_existing_base="$(read_hermes_base_env .env)"
+_selected_base=""
+if [ -n "${_requested_base// }" ]; then
+  if ! printf '%s' "$_requested_base" | grep -Eq '^[A-Za-z0-9_-]+$'; then
+    warn "❌ HERMES_BASE_PROFILE은 안전한 프로필 slug여야 합니다: 영문/숫자/_/-"
+    exit 1
+  fi
+  # 명시 override는 자동 탐지 실패의 탈출구이므로 문자열만 믿지 않는다. 실제 비심링크 auth 원본과
+  # 대소문자 없이 일치하는 디렉터리가 정확히 하나 있어야 한다.
+  _requested_match=""
+  for _profile_dir in "$HOME"/.hermes/profiles/*; do
+    [ -d "$_profile_dir" ] || continue
+    _profile_name="$(basename "$_profile_dir")"
+    if [ "$(printf '%s' "$_profile_name" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$_requested_base" | tr '[:upper:]' '[:lower:]')" ] \
+      && [ -f "$_profile_dir/auth.json" ] && [ ! -L "$_profile_dir/auth.json" ]; then
+      [ -z "$_requested_match" ] || { warn "❌ HERMES_BASE_PROFILE과 대소문자 없이 일치하는 auth 원본이 둘 이상입니다."; exit 1; }
+      _requested_match="$_profile_name"
+    fi
+  done
+  if [ -z "$_requested_match" ]; then
+    warn "❌ 명시한 Hermes base '$_requested_base'가 실제 비심링크 auth 원본 프로필이 아닙니다."
+    warn "   후보(auth.json 원본 보유):"
+    for _profile_dir in "$HOME"/.hermes/profiles/*; do
+      [ -d "$_profile_dir" ] && [ -f "$_profile_dir/auth.json" ] && [ ! -L "$_profile_dir/auth.json" ] \
+        && warn "     - $(basename "$_profile_dir")"
+    done
+    exit 1
+  fi
+  _selected_base="$_requested_match"
+elif printf '%s' "$_existing_base" | grep -Eq '^[A-Za-z0-9_-]+$'; then
+  _selected_base="$_existing_base"
+else
+  _detector="$ROOT/src/server/runtimes/hermes/detect-base-profile.sh"
+  _detect_status=0
+  _selected_base="$(bash "$_detector" "$HOME/.hermes/profiles")" || _detect_status=$?
+  if [ "$_detect_status" -ne 0 ]; then
+    warn "❌ Hermes auth 원본 프로필을 하나로 판별할 수 없어 안전을 위해 설치를 중단합니다."
+    warn "   후보(auth.json 원본 보유):"
+    for _profile_dir in "$HOME"/.hermes/profiles/*; do
+      [ -d "$_profile_dir" ] && [ -f "$_profile_dir/auth.json" ] && [ ! -L "$_profile_dir/auth.json" ] \
+        && warn "     - $(basename "$_profile_dir")"
+    done
+    warn "   HERMES_BASE_PROFILE=<공유 auth 원본 프로필명> bash install.sh 로 명시 지정해 다시 실행하세요."
+    exit 1
+  fi
+  _selected_base="${_selected_base:-b3os}"
+fi
+
 if [ ! -f .env ]; then
   cp .env.example .env
+  chmod 600 .env
   say "✅ .env 생성 (.env.example 복사) — 기본값으로 대시보드는 바로 동작."
   say "  텔레그램 봇·팀장 chat_id·그룹 연결은 ★대시보드 Settings★에서 안내에 따라 넣으면 됩니다(수동 .env 편집 불필요). 봇 토큰은 BotFather에서 사람이 발급."
 else
   say "✅ .env 이미 있음 — 유지."
 fi
+
+# 새 값을 확정한 뒤에만 기존 표기(export/공백/따옴표 포함)를 제거하고 원자적으로 교체한다.
+_env_mode=""
+if command -v stat >/dev/null 2>&1; then
+  case "$(uname -s)" in
+    Darwin|FreeBSD) _env_mode="$(stat -f '%Lp' .env 2>/dev/null || true)" ;;
+    *) _env_mode="$(stat -c '%a' .env 2>/dev/null || true)" ;;
+  esac
+fi
+awk '!/^[[:space:]]*(export[[:space:]]+)?HERMES_BASE_PROFILE[[:space:]]*=/' .env > .env.tmp
+printf 'HERMES_BASE_PROFILE=%s\n' "$_selected_base" >> .env.tmp
+mv .env.tmp .env
+[ -z "$_env_mode" ] || chmod "$_env_mode" .env
+say "✅ Hermes base 프로필 보존 설정: $_selected_base"
 
 # ── 4a) B3RYS_HOME 데이터 루트 ────────────────────────────────────
 # 팀원 워크스페이스는 $B3RYS_HOME/members/<id> 에 생성된다. 미설정 시 ~/Development/<id> 로
@@ -132,8 +206,14 @@ if ! grep -q '^APPROVAL_EXECUTION_ENABLED=1' .env 2>/dev/null; then
   fi
   case "$ans" in
     y|Y)
+      _approval_env_mode=""
+      case "$(uname -s)" in
+        Darwin|FreeBSD) _approval_env_mode="$(stat -f '%Lp' .env 2>/dev/null || true)" ;;
+        *) _approval_env_mode="$(stat -c '%a' .env 2>/dev/null || true)" ;;
+      esac
       grep -v '^APPROVAL_EXECUTION_ENABLED=' .env > .env.tmp 2>/dev/null || true
       mv .env.tmp .env
+      [ -z "$_approval_env_mode" ] || chmod "$_approval_env_mode" .env
       printf 'APPROVAL_EXECUTION_ENABLED=1\n' >> .env
       say "✅ 팀원 활성화 허용됨 (APPROVAL_EXECUTION_ENABLED=1)."
       ;;

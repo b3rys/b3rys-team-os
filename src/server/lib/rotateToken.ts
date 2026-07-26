@@ -111,7 +111,7 @@ export function resolveTokenStore(runtime: string, id: string, agent: AgentRecor
     return plainFileStore(file, `⚠ openclaw는 게이트웨이를 공유해서, 재시작 시 openclaw 팀원 전체가 1~2분 함께 재시작됩니다.${existsSync(file) ? "" : " (토큰파일이 없어 새로 생성합니다.)"}`);
   }
   if (runtime === "hermes_agent") {
-    // hermes = 격리(그 팀원 프로필만). 프로필 = agent.hermes_profile ?? id (기존 hermes=b3ryshermes, 신규=id). 다중설정 .env에서 TELEGRAM_BOT_TOKEN 키 라인만 교체.
+    // hermes = 격리(그 팀원 프로필만). 프로필 = agent.hermes_profile ?? id. 다중설정 .env에서 TELEGRAM_BOT_TOKEN 키 라인만 교체.
     const profile = agent.hermes_profile ?? id;
     if (!/^[a-z0-9_-]+$/i.test(profile)) return { unsupported: `hermes 프로필 형식이 올바르지 않아요 — 변경 미지원(기존 유지).` };
     return envFileStore(`${HOME}/.hermes/profiles/${profile}/.env`, "TELEGRAM_BOT_TOKEN");

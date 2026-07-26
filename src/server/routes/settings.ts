@@ -53,6 +53,8 @@ import { hasCapability } from "../lib/capabilities";
 import { getNormalApprovers } from "../lib/approvals";
 import { hasSlackTokenFile, loadAgentCreds, saveAgentCreds, removeAgentCreds, slackTokensDir, postMessage } from "../lib/slack";
 import { renderAndRepoint, TEAM_OS_TEMPLATE_PATH, LIVE_TEAM_OS_PATH } from "../lib/teamOsRender";
+import { HERMES_BASE_PROFILE } from "../lib/paths";
+import { isHermesProfileProtected } from "../lib/hermesBaseProfile";
 import { latestCaptureNonBotSender, listDiscoveredGroups } from "../lib/telegramLeadDetection";
 import { activeOfficialMemberCount, isTeamOfficialMember, MAX_OFFICIAL_TEAM_MEMBERS } from "../lib/agentMembership";
 import { writeRegistrySafely, type RegistryWriteOptions } from "../lib/registrySafety";
@@ -661,10 +663,10 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     if (typeof body.confirm_name !== "string" || body.confirm_name.trim() !== target.display_name)
       return c.json({ error: "confirm_name_mismatch", hint: `정확히 "${target.display_name}" 입력 필요` }, 400);
     if (list.length <= 1) return c.json({ error: "cannot_remove_last_member" }, 400);
-    // ★base hermes 프로필(b3ryshermes) 멤버 퇴사 차단 — 모든 hermes 멤버의 공유 auth.json 소스+clone 원본이라 정상 퇴사 대상이 아님(하네스 재검증 LOW-MED: 삭제 시 런타임 전멸, gateway만 정지해도 auth refresh 위험). 아래 프로필-dir 가드는 defense-in-depth. GD 2026-07-02.
-    if (target.runtime === "hermes_agent" && ((target as any).hermes_profile ?? id) === "b3ryshermes")
-      return c.json({ error: "cannot_offboard_base_hermes_profile", hint: "b3ryshermes는 모든 hermes 멤버가 공유하는 base 프로필(auth 소스)입니다. 이 멤버는 퇴사 대상이 아닙니다 — 필요 시 인프라 재구성으로 별도 처리하세요." }, 400);
-    // ⚠ 레지스트리 제거(writeAgents)는 런타임 cleanup 이후로 미룬다 — setAgentEnabled→setHermes가 ambientAgents()로 프로필을 조회하는데, 먼저 지우면 profile≠id(기존 hermes=b3ryshermes)일 때 오프로필을 stop함(Codex 크로스리뷰 #4). GD 2026-07-01.
+    // ★설정된 base hermes 프로필 멤버 퇴사 차단 — 공유 auth 소스+clone 원본 보존.
+    if (target.runtime === "hermes_agent" && isHermesProfileProtected((target as any).hermes_profile ?? id))
+      return c.json({ error: "cannot_offboard_base_hermes_profile", hint: `${HERMES_BASE_PROFILE}는 모든 hermes 멤버가 공유하는 base 프로필(auth 소스)입니다. 이 멤버는 퇴사 대상이 아닙니다 — 필요 시 인프라 재구성으로 별도 처리하세요.` }, 400);
+    // ⚠ 레지스트리 제거(writeAgents)는 런타임 cleanup 이후로 미룬다 — setAgentEnabled→setHermes가 ambientAgents()로 프로필을 조회하므로 먼저 지우면 profile≠id일 때 오프로필을 stop한다.
     // 4-branch 런타임 teardown(codex/claude_channel/hermes_agent/openclaw) = teardownRuntime()로 추출(activation.ts,
     // Phase1 리팩터) — swap-runtime(신규 엔드포인트)과 이 함수를 공유한다. 동작은 원본과 동일(각 분기·가드·retry 그대로).
     await teardownRuntime(id, target.runtime, target, { skip: skipRuntimeCleanup });
@@ -1497,7 +1499,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
         try { const af = `${HHc}/.openclaw/credentials/telegram-${member_id}-allowFrom.json`; if (existsSync(af)) rmSync(af); } catch { /* best-effort */ }
         try { const ad = `${HHc}/.openclaw/agents/${member_id}`; if (existsSync(ad)) rmSync(ad, { recursive: true }); } catch { /* best-effort */ }
       }
-      if (runtime === "hermes_agent" && hermes_profile !== "b3ryshermes") { // ★base 프로필 보존(공유 auth 소스)
+      if (runtime === "hermes_agent" && !isHermesProfileProtected(hermes_profile)) { // ★base 프로필 보존(공유 auth 소스)
         const prof = hermes_profile;
         try { await setAgentEnabled(member_id, "hermes_agent", false).catch(() => {}); } catch { /* best-effort */ }
         if (/^[a-z0-9_-]+$/i.test(prof)) { try { const hp = `${HHc}/Library/LaunchAgents/ai.hermes.gateway-${prof}.plist`; if (existsSync(hp)) rmSync(hp); } catch { /* best-effort */ } }

@@ -23,6 +23,7 @@ import {
   activateMember, teardownRuntime, swapRuntime, RUNTIMES, STATUS_BY_RUNTIME,
   type ActivateResult, type SwapDeps,
 } from "./activation";
+import { HERMES_BASE_PROFILE } from "./paths";
 
 /** tmp HOME을 만들고, present=true면 ~/.claude/channels/telegram-<id>/bot.pid 를 미리 쓴다(실 HOME 미접촉). */
 function tmpHome(id: string, present: boolean): string {
@@ -164,7 +165,7 @@ describe("activation: hermes gateway 헬스게이트 (waitForHermesGateway)", ()
           "✗ Gateway service is not loaded",
           "  Service definition exists locally but launchd has not loaded it.",
           "Other profiles:",
-          "  ✓ b3ryshermes      — PID 12325",
+          "  ✓ legacy-base     — PID 12325",
         ].join("\n"),
       }),
     });
@@ -181,7 +182,7 @@ describe("activation: hermes gateway 헬스게이트 (waitForHermesGateway)", ()
           "✓ Service definition matches the current Hermes install",
           "✓ Gateway is supervised by launchd (PID 43335)",
           "Other profiles:",
-          "  ✓ b3ryshermes      — PID 12325",
+          "  ✓ legacy-base     — PID 12325",
           "  ✓ mes              — PID 44736",
         ].join("\n"),
       }),
@@ -270,9 +271,9 @@ describe("activation: teardownRuntime (Phase1 offboard 4-branch 추출)", () => 
     expect(calls.some((c) => c.startsWith("removePathWithRetries:") && c.includes("/profiles/mes"))).toBe(true);
   });
 
-  test("hermes_agent(base b3ryshermes) → setAgentEnabled 호출 안 함(공유 auth 소스 보존)", async () => {
+  test("설정된 base hermes → setAgentEnabled 호출 안 함(공유 auth 소스 보존)", async () => {
     const calls: string[] = [];
-    const r = await teardownRuntime("mes", "hermes_agent", { hermes_profile: "b3ryshermes" }, {
+    const r = await teardownRuntime("mes", "hermes_agent", { hermes_profile: HERMES_BASE_PROFILE }, {
       sleepMs: 0,
       setAgentEnabled: async () => { calls.push("setAgentEnabled"); return { ok: true, detail: "" }; },
       existsSync: () => true,
@@ -527,11 +528,32 @@ describe("activation: swapRuntime", () => {
     }
   });
 
-  test("base hermes(b3ryshermes) 스왑 시도 → teardown 호출 전 거부(code=base_hermes_guard)", async () => {
-    const { registryPath, db } = setupSwapFixture({ id: "b3ryshermes", runtime: "hermes_agent", status_provider: "hermes_gateway", hermes_profile: "b3ryshermes" });
+  test("설정된 base hermes 스왑 시도 → teardown 호출 전 거부(code=base_hermes_guard)", async () => {
+    const { registryPath, db } = setupSwapFixture({ id: HERMES_BASE_PROFILE, runtime: "hermes_agent", status_provider: "hermes_gateway", hermes_profile: HERMES_BASE_PROFILE });
     let teardownCalls = 0;
-    const result = await swapRuntime(db, { id: "b3ryshermes", targetRuntime: "codex", registryPath }, {
+    const result = await swapRuntime(db, { id: HERMES_BASE_PROFILE, targetRuntime: "codex", registryPath }, {
       checkRuntimeAuth: authOk, activateMember: activateOk,
+      teardownRuntime: async () => { teardownCalls++; return { ok: true, detail: "" }; },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("base_hermes_guard");
+    expect(teardownCalls).toBe(0);
+  });
+
+  test("base 이름의 비-Hermes 멤버를 Hermes로 스왑 → base 프로필 점유 전 거부", async () => {
+    const { registryPath, db } = setupSwapFixture({
+      id: HERMES_BASE_PROFILE,
+      runtime: "claude_channel",
+      status_provider: "tmux",
+    });
+    let teardownCalls = 0;
+    const result = await swapRuntime(db, {
+      id: HERMES_BASE_PROFILE,
+      targetRuntime: "hermes_agent",
+      registryPath,
+    }, {
+      checkRuntimeAuth: authOk,
+      activateMember: activateOk,
       teardownRuntime: async () => { teardownCalls++; return { ok: true, detail: "" }; },
     });
     expect(result.ok).toBe(false);

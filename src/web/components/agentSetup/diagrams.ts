@@ -602,7 +602,7 @@ export function detailedSystemDiagram(): string {
           pick("session wake(세션 깨우기) 경로 사용", "Uses the session wake path"),
         ], false, "bot")}
         ${component("Hermes runtime", pick("Hermes 전용 실행 경로", "Hermes-only execution path"), [
-          "<code>b3ryshermes</code> profile",
+          "<code>HERMES_BASE_PROFILE</code> (default: <code>b3os</code>)",
           "Hermes gateway/status provider",
           pick("전략/CSO 역할의 별도 bridge", "A separate bridge for the strategy/CSO role"),
         ], false, "cpu")}

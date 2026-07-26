@@ -23,6 +23,14 @@ export const LOCAL_BIN = `${HOME}/.local/bin`;
 /** hermes 런타임 홈(~/.hermes) — 프로필 .env / credentials 위치. */
 export const HERMES_ROOT = `${HOME}/.hermes`;
 
+/** 공유 Hermes 인증 원본 프로필. 공개 기본값은 중립적인 b3os이며 운영 환경에서 env로 재정의한다.
+ *  삭제 가드의 기준이므로 잘못된 값은 기본값으로 조용히 폴백하지 않고 서버 시작 단계에서 fail-closed한다. */
+const configuredHermesBaseProfile = process.env.HERMES_BASE_PROFILE?.trim();
+if (configuredHermesBaseProfile && !/^[A-Za-z0-9_-]+$/.test(configuredHermesBaseProfile)) {
+  throw new Error("HERMES_BASE_PROFILE must be a safe profile slug (letters, numbers, underscore, hyphen)");
+}
+export const HERMES_BASE_PROFILE = configuredHermesBaseProfile || "b3os";
+
 /** openclaw 런타임 홈(~/.openclaw) — openclaw.env / credentials 위치. */
 export const OPENCLAW_ROOT = `${HOME}/.openclaw`;
 

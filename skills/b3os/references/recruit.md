@@ -198,4 +198,4 @@ curl -s -X POST http://localhost:$PORT/team/api/ot/<ot_id>/activate
 | `hermes_agent` | 고급 | Hermes 프로필 게이트웨이 | DM 페어링 게이트(팀장은 activate가 allowlist 자동시드→코드 불필요) | hermes CLI + base 프로필·python3 |
 
 > **추가 영입 시 런타임별 구독 재사용** — claude 팀원 여러 명 = 한 머신의 Claude 로그인 하나 공유(봇 토큰만 다름).
-> openclaw = 공유 게이트웨이(에이전트마다 pair-approve). hermes = 프로필별(base 프로필 b3ryshermes는 auth 소스라 퇴사 대상 아님).
+> openclaw = 공유 게이트웨이(에이전트마다 pair-approve). hermes = 프로필별(`HERMES_BASE_PROFILE`, 기본 `b3os`는 auth 소스라 퇴사 대상 아님).
