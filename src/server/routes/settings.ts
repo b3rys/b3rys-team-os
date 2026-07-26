@@ -1798,6 +1798,20 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ok: r.ok, detail: r.detail, reason: r.reason }, r.ok ? 200 : (r.reason === "no_request" ? 409 : 502));
   });
 
+  // join 스텝을 done 으로 닫고 stage 를 재도출한다. 승인 수행 경로와 이미-승인 정합 경로가 공유한다.
+  // steps_json 파싱 실패는 무시 — access.json 의 승인 상태가 정본이고 이건 표시 정합일 뿐이다.
+  const markOtJoined = (row: { steps_json?: string }, ot_id: string, detail: string) => {
+    try {
+      const parsed = JSON.parse(row.steps_json ?? "{}") as any;
+      const steps = Array.isArray(parsed.steps) ? parsed.steps : initOtSteps();
+      const joinStep = steps.find((s: any) => s.key === "join");
+      if (joinStep) { joinStep.state = "done"; joinStep.detail = detail; }
+      parsed.steps = steps; parsed.awaiting_input = null;
+      db.query("UPDATE ot SET steps_json = ?, stage = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(JSON.stringify(parsed), deriveStage(steps), ot_id);
+    } catch { /* access approval remains authoritative */ }
+  };
+
   // Claude telegram plugin promote-pending equivalent. Mutates only access.json,
   // validates the submitted code, and atomically replaces the file.
   app.post("/ot/:ot_id/claude-pair-approve", async (c) => {
@@ -1812,12 +1826,28 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     if (agent.runtime !== "claude_channel") return c.json({ error: "runtime_not_claude" }, 400);
     const body = await c.req.json().catch(() => ({})) as { code?: unknown };
     const code = typeof body.code === "string" ? body.code.trim().toLowerCase() : "";
-    if (!/^[a-f0-9]{6}$/.test(code)) return c.json({ error: "pairing_code_invalid" }, 400);
+    const codeWellFormed = /^[a-f0-9]{6}$/.test(code);
     let state: ReturnType<typeof readClaudePairing>;
     try { state = readClaudePairing(agent.id); } catch { return c.json({ error: "claude_access_invalid" }, 500); }
-    const pending = state.access.pending?.[code];
-    if (!pending || Number(pending.expiresAt ?? Infinity) <= Date.now()) return c.json({ error: "pairing_request_not_found" }, 409);
-    const senderId = String(pending.senderId ?? "").trim();
+    const pending = codeWellFormed ? state.access.pending?.[code] : undefined;
+    const pendingFresh = !!pending && Number(pending.expiresAt ?? Infinity) > Date.now();
+    // ★승인 판정 기준 = "내가 승인을 수행했는가" 가 아니라 "실제로 승인돼 있는가"★
+    //   이 라우트는 원래 승인을 수행한 부수효과로만 join 스텝을 닫았다. 그래서 승인이 다른 경로로
+    //   먼저 끝나면(우리 스킬 [6] 이 안내하는 access.json 수동 편집·플러그인 promote-pending) pending 이
+    //   비어 409 만 반복되고 위저드를 닫을 방법이 사라진다 — 실제로 고착 사례 발생(2026-07-26 리사).
+    //   승인이 이미 성립한 상태면 어느 경로였든 합류로 정합시킨다. access.json 은 건드리지 않는다.
+    if (!pendingFresh) {
+      const allowFrom = Array.isArray(state.access.allowFrom) ? state.access.allowFrom.map(String).filter(Boolean) : [];
+      const alreadyApproved = state.access.dmPolicy === "allowlist" && allowFrom.length > 0;
+      if (alreadyApproved) {
+        markOtJoined(row, ot_id, "Claude Telegram 접근 승인 확인됨 — 합류");
+        appendAudit(db, "user", "ot_claude_pair_reconciled", row.member_id, { ot_id, reason: "already_approved" });
+        return c.json({ ok: true, already_approved: true, pairing_required: false, pending: false, awaiting_input: null });
+      }
+      if (!codeWellFormed) return c.json({ error: "pairing_code_invalid" }, 400);
+      return c.json({ error: "pairing_request_not_found" }, 409);
+    }
+    const senderId = String(pending!.senderId ?? "").trim();
     if (!/^\d+$/.test(senderId)) return c.json({ error: "pairing_request_invalid" }, 409);
     state.access.allowFrom = [...new Set([...(Array.isArray(state.access.allowFrom) ? state.access.allowFrom.map(String) : []), senderId])];
     state.access.dmPolicy = "allowlist";
@@ -1832,15 +1862,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       try { if (existsSync(tmp)) rmSync(tmp); } catch { /* ignore */ }
       return c.json({ error: "claude_access_write_failed", detail: e instanceof Error ? e.message : String(e) }, 500);
     }
-    try {
-      const parsed = JSON.parse(row.steps_json ?? "{}") as any;
-      const steps = Array.isArray(parsed.steps) ? parsed.steps : initOtSteps();
-      const joinStep = steps.find((s: any) => s.key === "join");
-      if (joinStep) { joinStep.state = "done"; joinStep.detail = "Claude Telegram 접근 승인 완료 — 합류"; }
-      parsed.steps = steps; parsed.awaiting_input = null;
-      db.query("UPDATE ot SET steps_json = ?, stage = ?, updated_at = datetime('now') WHERE id = ?")
-        .run(JSON.stringify(parsed), deriveStage(steps), ot_id);
-    } catch { /* access approval remains authoritative */ }
+    markOtJoined(row, ot_id, "Claude Telegram 접근 승인 완료 — 합류");
     appendAudit(db, "user", "ot_claude_pair_approved", row.member_id, { ot_id });
     return c.json({ ok: true, pairing_required: false, pending: false, awaiting_input: null });
   });

@@ -103,6 +103,55 @@ describe("Claude pairing backend contract", () => {
     expect(after).toMatchObject({ pairing_required: false, pending: false, awaiting_input: null });
     delete process.env.CLAUDE_CHANNELS_DIR;
   });
+
+  /* 2026-07-26 리사 고착 재현. 승인이 이 라우트 밖에서 먼저 끝나면(스킬 [6] 이 안내하는 access.json
+   * 수동 편집·플러그인 promote-pending) pending 이 비어 409 만 반복되고 위저드를 닫을 길이 사라졌다.
+   * 승인이 이미 성립했으면 어느 경로였든 합류로 정합돼야 한다. */
+  test("이미 승인된 상태면 pending 이 없어도 합류로 정합된다 (access.json 은 불변)", async () => {
+    const { app, dir, db } = setup();
+    const channels = join(dir, "claude-channels");
+    process.env.CLAUDE_CHANNELS_DIR = channels;
+    const accessDir = join(channels, "telegram-bill");
+    mkdirSync(accessDir, { recursive: true });
+    // 수동 승인이 끝난 뒤의 실제 모양: allowlist + allowFrom 1건 + pending 비어 있음
+    const approvedAccess = { dmPolicy: "allowlist", allowFrom: ["1000000001"], groups: {}, pending: {} };
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify(approvedAccess));
+    const steps = [
+      { key: "register", state: "done" }, { key: "provision", state: "done" },
+      { key: "preflight", state: "done" }, { key: "bundle", state: "done" }, { key: "join", state: "pending" },
+    ];
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_done','bill','join',?)").run(JSON.stringify({ steps }));
+
+    const res = await app.request("/ot/ot_done/claude-pair-approve", json({ code: "abc123" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, already_approved: true });
+
+    // 위저드가 닫혔다
+    const row = db.query("SELECT stage FROM ot WHERE id='ot_done'").get() as any;
+    expect(row.stage).toBe("joined");
+    // 승인 파일은 건드리지 않는다 — 이 경로는 표시 정합일 뿐이다
+    expect(JSON.parse(readFileSync(join(accessDir, "access.json"), "utf-8"))).toEqual(approvedAccess);
+    delete process.env.CLAUDE_CHANNELS_DIR;
+  });
+
+  test("승인도 pending 도 없으면 여전히 409 — 정합이 미승인을 합류로 만들지 않는다", async () => {
+    const { app, dir, db } = setup();
+    const channels = join(dir, "claude-channels");
+    process.env.CLAUDE_CHANNELS_DIR = channels;
+    const accessDir = join(channels, "telegram-bill");
+    mkdirSync(accessDir, { recursive: true });
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({ dmPolicy: "pairing", allowFrom: [], groups: {}, pending: {} }));
+    const steps = [
+      { key: "register", state: "done" }, { key: "provision", state: "done" },
+      { key: "preflight", state: "done" }, { key: "bundle", state: "done" }, { key: "join", state: "pending" },
+    ];
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_none','bill','join',?)").run(JSON.stringify({ steps }));
+
+    const res = await app.request("/ot/ot_none/claude-pair-approve", json({ code: "abc123" }));
+    expect(res.status).toBe(409);
+    expect((db.query("SELECT stage FROM ot WHERE id='ot_none'").get() as any).stage).toBe("join");
+    delete process.env.CLAUDE_CHANNELS_DIR;
+  });
 });
 
 test("공개 빌드 runtime_invalid allowed는 live-only 런타임을 노출하지 않는다", () => {
