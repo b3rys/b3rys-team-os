@@ -116,6 +116,7 @@ describe("Claude pairing backend contract", () => {
     // 수동 승인이 끝난 뒤의 실제 모양: allowlist + allowFrom 1건 + pending 비어 있음
     const approvedAccess = { dmPolicy: "allowlist", allowFrom: ["1000000001"], groups: {}, pending: {} };
     writeFileSync(join(accessDir, "access.json"), JSON.stringify(approvedAccess));
+    db.query("INSERT INTO setting (key, value) VALUES ('owner_chat_id', '1000000001')").run();
     const steps = [
       { key: "register", state: "done" }, { key: "provision", state: "done" },
       { key: "preflight", state: "done" }, { key: "bundle", state: "done" }, { key: "join", state: "pending" },
@@ -169,6 +170,65 @@ describe("Claude pairing backend contract", () => {
     expect((db.query("SELECT stage FROM ot WHERE id='ot_other'").get() as any).stage).toBe("joined");
     delete process.env.CLAUDE_CHANNELS_DIR;
     if (oldEnv === undefined) delete process.env.GD_CHAT_ID; else process.env.GD_CHAT_ID = oldEnv;
+  });
+
+  /* 코덱스 리뷰: "모르면 조건을 뺀다" 는 ★강화한 척★ 이었다. owner_chat_id 는 부팅 시 1회만 자동
+   * persist 되고 Settings 입력도 선택이라, 정작 필요한 순간(첫 페어링·수동 promote 직후)에는 비어 있다.
+   * 그래서 팀장 id 를 모르면 정합하지 않고, 대신 ★무엇을 하면 열리는지★ 를 알려준다. */
+  test("★팀장 id 를 모르면 정합하지 않는다★ — owner_identity_unknown (막다른 길이 아니라 복구행동 명시)", async () => {
+    const oldEnv = process.env.GD_CHAT_ID; delete process.env.GD_CHAT_ID;
+    const { app, dir, db } = setup();
+    const channels = join(dir, "claude-channels");
+    process.env.CLAUDE_CHANNELS_DIR = channels;
+    const accessDir = join(channels, "telegram-bill");
+    mkdirSync(accessDir, { recursive: true });
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({
+      dmPolicy: "allowlist", allowFrom: ["999999999"], groups: {}, pending: {},
+    }));
+    const steps = [
+      { key: "register", state: "done" }, { key: "provision", state: "done" },
+      { key: "preflight", state: "done" }, { key: "bundle", state: "done" }, { key: "join", state: "pending" },
+    ];
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_noowner','bill','join',?)").run(JSON.stringify({ steps }));
+
+    const res = await app.request("/ot/ot_noowner/claude-pair-approve", json({ code: "abc123" }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "owner_identity_unknown" });
+    expect((db.query("SELECT stage FROM ot WHERE id='ot_noowner'").get() as any).stage).toBe("join");
+    delete process.env.CLAUDE_CHANNELS_DIR;
+    if (oldEnv === undefined) delete process.env.GD_CHAT_ID; else process.env.GD_CHAT_ID = oldEnv;
+  });
+
+  /* 위 fail-closed 가 막다른 길이 되지 않으려면 ★정상 승인이 owner_chat_id 를 채워야★ 한다.
+   * 정상 승인은 팀장 신원을 확인할 수 있는 유일한 지점이다(검증된 senderId). */
+  test("★정상 승인은 owner_chat_id 를 채운다★ — 단 팀장이 직접 넣은 값은 덮지 않는다", async () => {
+    const { app, dir, db } = setup();
+    const channels = join(dir, "claude-channels");
+    process.env.CLAUDE_CHANNELS_DIR = channels;
+    const accessDir = join(channels, "telegram-bill");
+    mkdirSync(accessDir, { recursive: true });
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({
+      dmPolicy: "pairing", allowFrom: [], groups: {},
+      pending: { abc123: { senderId: "1000000001", chatId: "1000000001", expiresAt: Date.now() + 60_000 } },
+    }));
+    const steps = [
+      { key: "register", state: "done" }, { key: "provision", state: "done" },
+      { key: "preflight", state: "done" }, { key: "bundle", state: "done" }, { key: "join", state: "pending" },
+    ];
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_persist','bill','join',?)").run(JSON.stringify({ steps }));
+
+    expect((await app.request("/ot/ot_persist/claude-pair-approve", json({ code: "abc123" }))).status).toBe(200);
+    expect((db.query("SELECT value FROM setting WHERE key='owner_chat_id'").get() as any)?.value).toBe("1000000001");
+
+    // 이미 값이 있으면 나중 페어링이 조용히 바꾸지 않는다
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({
+      dmPolicy: "pairing", allowFrom: [], groups: {},
+      pending: { def456: { senderId: "2222222222", chatId: "2222222222", expiresAt: Date.now() + 60_000 } },
+    }));
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_persist2','bill','join',?)").run(JSON.stringify({ steps }));
+    expect((await app.request("/ot/ot_persist2/claude-pair-approve", json({ code: "def456" }))).status).toBe(200);
+    expect((db.query("SELECT value FROM setting WHERE key='owner_chat_id'").get() as any)?.value).toBe("1000000001");
+    delete process.env.CLAUDE_CHANNELS_DIR;
   });
 
   test("승인도 pending 도 없으면 여전히 409 — 정합이 미승인을 합류로 만들지 않는다", async () => {

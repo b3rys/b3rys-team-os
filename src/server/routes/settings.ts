@@ -1843,10 +1843,20 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       //   되어 무조건 통과한다. 검증이 검증처럼 보이기만 하는 게 이번 사고의 뿌리라 같은 형태를 만들지 않는다.
       const ownerRow = db.query("SELECT value FROM setting WHERE key = 'owner_chat_id'").get() as { value?: string } | undefined;
       const ownerChatId = (ownerRow?.value ?? "").trim() || (process.env.GD_CHAT_ID ?? "").trim();
-      // 팀장 id 를 알면 ★그가 실제 allowlist 에 있는지★ 까지 본다(남이 승인됐는데 합류로 처리하지 않도록).
-      // 모르면 그 조건은 뺀다 — 알 수 없다는 이유로 복구를 막으면 원래 고착으로 되돌아간다.
-      const leadReachable = ownerChatId === "" || allowFrom.includes(ownerChatId);
-      const alreadyApproved = state.access.dmPolicy === "allowlist" && allowFrom.length > 0 && leadReachable;
+      // ★팀장 id 를 모르면 정합하지 않는다(fail-closed)★ — 코덱스 리뷰 반영.
+      //   처음엔 "모르면 조건을 뺀다" 로 했는데, 그게 ★강화한 척★ 이었다: owner_chat_id 는 서버 부팅
+      //   시 1회만 자동 persist 되고 Settings 입력도 선택이라, ★정작 필요한 순간(첫 페어링·수동 promote
+      //   직후)에는 비어 있다.★ 그 상태에서 조건을 빼면 타인 allowFrom 1건으로도 합류가 된다.
+      //   여기서 막아도 ★막다른 길이 아니다★ — 아래 정상 승인 경로가 owner_chat_id 를 채우고,
+      //   이미 어긋난 설치본은 Settings 에서 한 번 넣으면 이 경로가 열린다. 원래 버그(닫을 방법 자체가
+      //   없음)와 다르다: ★복구 행동이 명시된 거부★ 다.
+      if (ownerChatId === "") {
+        return c.json({
+          error: "owner_identity_unknown",
+          detail: "팀장 chat_id 를 확인할 수 없어 합류로 정합하지 않습니다. Settings 에서 팀장 chat_id 를 설정한 뒤 다시 시도하세요.",
+        }, 409);
+      }
+      const alreadyApproved = state.access.dmPolicy === "allowlist" && allowFrom.length > 0 && allowFrom.includes(ownerChatId);
       if (alreadyApproved) {
         markOtJoined(row, ot_id, ownerChatId ? "Claude Telegram 접근 승인 확인됨(팀장 DM 허용) — 합류" : "Claude Telegram 접근 승인 확인됨 — 합류");
         appendAudit(db, "user", "ot_claude_pair_reconciled", row.member_id, { ot_id, reason: "already_approved" });
@@ -1857,6 +1867,13 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     }
     const senderId = String(pending!.senderId ?? "").trim();
     if (!/^\d+$/.test(senderId)) return c.json({ error: "pairing_request_invalid" }, 409);
+    // ★정상 승인 = 팀장 신원을 확인할 수 있는 유일한 지점★ — 여기서 owner_chat_id 를 채워둔다(코덱스 리뷰).
+    //   부팅 시 1회 자동 persist 에만 기대면 첫 페어링 직후에는 비어 있어 위 정합 경로가 항상 막힌다.
+    //   ★기존 값은 덮지 않는다★ — 팀장이 Settings 에 직접 넣은 값이 정본이고, 나중 페어링이 그걸
+    //   조용히 바꾸면 신뢰 기준이 흔들린다.
+    try {
+      db.query("INSERT INTO setting (key, value) SELECT 'owner_chat_id', ? WHERE NOT EXISTS (SELECT 1 FROM setting WHERE key = 'owner_chat_id' AND TRIM(COALESCE(value,'')) <> '')").run(senderId);
+    } catch { /* persist 실패는 승인 자체를 막지 않는다 — access.json 이 정본이다 */ }
     state.access.allowFrom = [...new Set([...(Array.isArray(state.access.allowFrom) ? state.access.allowFrom.map(String) : []), senderId])];
     state.access.dmPolicy = "allowlist";
     delete state.access.pending[code];
