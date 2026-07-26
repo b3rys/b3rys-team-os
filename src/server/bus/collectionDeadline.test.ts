@@ -462,7 +462,14 @@ describe("★독촉 본문 — 개별보고면 무시하라고 알림이 직접 
 });
 
 /**
- * ★감시하는 쪽이 자기가 요구한 것을 볼 수 있어야 한다★ (2026-07-26, steve 발견)
+ * ★팀장 1:1 DM(dm_message)은 보고 근거로 쓰지 않는다★ (GD 2026-07-26 결정)
+ *
+ * 한 번 넣었다가 되돌렸다. 이 테스트들은 ★그 결정을 고정한다★ — 누가 다시 넣으면 여기서 잡힌다.
+ * 이유: dm_message 는 openclaw 에서 팀원 발신이 영구 0건, hermes 는 대부분 유실이다(2026-07-17 실측).
+ *       그걸 근거로 삼으면 claude 만 면제되고 나머지는 그대로 독촉받는 ★런타임별 불공평★ 이 생긴다.
+ *       보고 리마인드는 expect-report(pending_followup)로 간다.
+ *
+ * 아래는 원래 문제 기록 (2026-07-26, steve 발견) — 문제 자체는 여전히 유효하다:
  *
  * 독촉 문구는 "지금 종합해서 요청자에게 보내세요" 다. 그런데 claude 멤버가 팀장 1:1 에 답하는
  * ★정본 경로는 텔레그램 reply 도구★ 이고, 그 산출물은 dm_message 로 들어간다(thread_id 없음).
@@ -470,7 +477,7 @@ describe("★독촉 본문 — 개별보고면 무시하라고 알림이 직접 
  * 따르면 "같은 요청에 두 번 보고하지 마라" 를 어기게 된다 —
  * ★규칙을 지킨 사람에게 규칙 위반을 유도하는 알림★ 이라 단순 노이즈가 아니다.
  */
-describe("보고 인정 — 팀장 1:1 DM(dm_message)도 보고로 센다", () => {
+describe("보고 인정 — 팀장 1:1 DM(dm_message)은 근거로 쓰지 않는다", () => {
   let db: Database;
 
   // 실제 스키마와 같은 모양(thread_id 없음 — 그래서 시각 기준이 될 수밖에 없다)
@@ -503,10 +510,12 @@ describe("보고 인정 — 팀장 1:1 DM(dm_message)도 보고로 센다", () =
     expect(findStalledCollections(db, AGENTS)).toHaveLength(1);
   });
 
-  it("★팬아웃 이후 팀장 1:1 로 보고했으면 독촉하지 않는다★ (이게 없어서 중복보고를 시켰다)", () => {
+  it("★팀장 1:1 로 보고해도 이 판정은 인정하지 않는다★ — 신뢰할 수 없는 캡처라 근거로 안 쓴다", () => {
     stalledFanout(db);
-    dm(db, "steve", "out", 10);          // 마지막 질문(20분 전) 이후 = 종합 보고
-    expect(findStalledCollections(db, AGENTS)).toHaveLength(0);
+    dm(db, "steve", "out", 10);          // 마지막 질문(20분 전) 이후에 DM 이 나갔지만
+    expect(findStalledCollections(db, AGENTS)).toHaveLength(1);   // ★그래도 독촉 대상★
+    // 되돌린 이유는 오탐이 없어서가 아니다 — openclaw 는 out 이 영구 0건이라
+    // 이 근거를 쓰면 claude 만 면제되는 불공평이 생기기 때문이다.
   });
 
   it("팬아웃 ★이전★ DM 은 보고가 아니다 (시각 경계)", () => {
@@ -534,11 +543,4 @@ describe("보고 인정 — 팀장 1:1 DM(dm_message)도 보고로 센다", () =
     expect(findStalledCollections(bare, AGENTS)).toHaveLength(1);   // 수정 이전과 동일
   });
 
-  it("★진짜 DB 고장은 삼키지 않는다★ (넓은 catch 가 남으면 손상·락이 조용히 묻힌다)", () => {
-    stalledFanout(db);
-    // dm_message 를 조회 불가 상태로 만든다 — '테이블 없음' 이 아닌 다른 오류.
-    db.run("DROP TABLE dm_message");
-    db.run("CREATE VIEW dm_message AS SELECT 1 AS member_id WHERE 1=0");  // 컬럼 불일치 → no such column
-    expect(() => findStalledCollections(db, AGENTS)).toThrow();
-  });
 });
