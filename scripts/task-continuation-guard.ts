@@ -51,15 +51,34 @@ export function parseUtc(s: string | null | undefined, nowMs: number): number {
   return Number.isNaN(t) ? nowMs : t;
 }
 
-// 멈춘 doing 카드: column=doing · owner 존재 · owner 가 리뷰대상 · updated_at 이 stallMs 이상 지남.
+// ★가드가 시킨 표시를 가드가 읽어야 한다★
+//   guardBody() 는 "막혔으면 blocked 표시 + 다음 액션/재개 시각/fallback 을 description 에 남기라" 고
+//   시킨다. 그런데 판정부는 column/owner/updated_at 만 봤다 — description 을 아예 읽지 않았다.
+//   시킨 대로 해도 판정에 반영되는 경로가 없으니, 그 안내는 지킬 수 없는 약속이었다.
+//
+//   게다가 재핑이 에피소드 기준(dueCards)이라 유인이 거꾸로 섰다:
+//     · 성실히 상태를 갱신하는 blocked 카드 → 갱신할 때마다 새 에피소드 → 60분 뒤 또 핑(영구 나그)
+//     · 손 놓고 방치한 카드            → 최초 1회만 핑하고 조용
+//   "방치 카드 영구 나그" 를 막으려던 장치가, 방치가 아니라 ★관리 중인 카드★ 에서 재현됐다.
+//
+//   그래서 blocked 로 표시된 카드에는 훨씬 긴 임계를 준다. ★면제가 아니라 완화★ 다 —
+//   완전히 빼면 "blocked" 라고 적어두고 잊은 카드가 영원히 안 걸린다.
+const BLOCKED_STALL_MULTIPLIER = 6;
+
+// description 에 남긴 '막힘' 표시를 인정한다. 한국어/영어 둘 다 실제로 쓰인다.
+export function isBlockedCard(t: Task): boolean {
+  const d = t.description ?? "";
+  return /\bblocked\b/i.test(d) || /waiting[_\s-]?on/i.test(d) || /(대기|차단|보류)\s*중/.test(d);
+}
+
+// 멈춘 doing 카드: column=doing · owner 존재 · owner 가 리뷰대상 · updated_at 이 임계 이상 지남.
+//   임계 = 일반 stallMs, blocked 표시가 있으면 그 6배.
 export function stalledDoingCards(tasks: Task[], owners: Set<string>, nowMs: number, stallMs: number): Task[] {
-  return tasks.filter(
-    (t) =>
-      t.column === "doing" &&
-      t.owner != null &&
-      owners.has(t.owner) &&
-      nowMs - parseUtc(t.updated_at, nowMs) >= stallMs,
-  );
+  return tasks.filter((t) => {
+    if (t.column !== "doing" || t.owner == null || !owners.has(t.owner)) return false;
+    const threshold = isBlockedCard(t) ? stallMs * BLOCKED_STALL_MULTIPLIER : stallMs;
+    return nowMs - parseUtc(t.updated_at, nowMs) >= threshold;
+  });
 }
 
 // 재핑 정책 = ★에피소드당 1회★. 방치 카드를 주기마다 영구 나그하지 않는다 — continuation-guard 는 "카드가 막
@@ -81,7 +100,8 @@ export function guardBody(owner: string, cards: Task[], stallMin: number): strin
     `[진행 지속 가드] ${owner}님, ${stallMin}분+ 조용한 doing 카드가 ${cards.length}개 있습니다.\n${list}\n\n` +
     `각 카드의 실제 상태를 확인해 주세요 — 끝났으면 done 으로, 막혔으면 blocked 표시 + 다음 액션/재개 시각/fallback 을 description 에 남기고, ` +
     `계속 진행 중이면 다음 액션만 갱신하면 됩니다. 실제로 진행할 게 없는 카드는 plan 으로 내리거나 폐기하세요. ` +
-    `정리할 게 없으면 억지로 수정·보고하지 마세요.`
+    `정리할 게 없으면 억지로 수정·보고하지 마세요.\n` +
+    `(description 에 blocked 표시가 있으면 이 가드는 훨씬 뜸하게 확인합니다 — 표시해 두면 관리 중인 카드가 계속 알림을 받지 않습니다.)`
   );
 }
 

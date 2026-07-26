@@ -37,6 +37,12 @@ archiving/
 !/scripts/task-review-ping.ts
 !/scripts/task-review-summary.ts
 !/scripts/task-continuation-guard.ts
+# ★scripts 의 테스트는 ★클래스로★ 연다★ — /scripts/* 가 전부 무시하므로 .test.ts 를
+#   개별 등록하면, 다음 스크립트에 테스트를 붙일 때 git add -A 가 ★조용히 건너뛴다★.
+#   실제로 2026-07-26 에 그 일이 났다: 소스만 커밋되고 그 소스를 지키는 테스트는 리포에
+#   없는 상태로 PR 이 올라갔다(로직을 되돌려도 실패 0건). 조용한 누락이라 status 출력을
+#   보고도 못 본다. 개별 등록은 같은 사고를 다음 사람에게 넘기는 것이라 패턴으로 연다.
+!/scripts/*.test.ts
 /docs/*
 !/docs/AUTO_HEAL_CORE.md
 !/docs/SLACK_SETUP.md

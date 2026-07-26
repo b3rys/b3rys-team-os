@@ -1,0 +1,77 @@
+/**
+ * continuation-guard — 가드가 자기가 시킨 표시를 읽는가
+ *
+ * 배경: guardBody() 는 "막혔으면 blocked 표시를 description 에 남기라" 고 시키는데,
+ * 판정부(stalledDoingCards)는 column/owner/updated_at 만 보고 description 을 아예 읽지
+ * 않았다. 시킨 대로 해도 반영되는 경로가 없으니 지킬 수 없는 약속이었고, 재핑이 에피소드
+ * 기준이라 ★성실히 갱신하는 blocked 카드일수록 더 자주 핑을 받는★ 역유인까지 있었다.
+ */
+import { describe, expect, test } from "bun:test";
+import { isBlockedCard, stalledDoingCards, guardBody } from "./task-continuation-guard";
+
+const NOW = Date.parse("2026-07-26T00:00:00Z");
+const STALL = 60 * 60 * 1000; // 60분
+const OWNERS = new Set(["someone"]);
+
+// updated_at 형식은 실제 DB 와 같은 "YYYY-MM-DD HH:MM:SS"(UTC, TZ 표기 없음).
+const agoIso = (ms: number) => new Date(NOW - ms).toISOString().replace("T", " ").replace(/\.\d+Z$/, "");
+
+function card(over: Partial<Parameters<typeof stalledDoingCards>[0][number]> = {}) {
+  return {
+    id: "c1",
+    title: "카드",
+    owner: "someone",
+    column: "doing" as const,
+    description: null as string | null,
+    updated_at: agoIso(2 * STALL),
+    ...over,
+  };
+}
+
+describe("blocked 표시 인식", () => {
+  test("영어·한국어 표기를 모두 인정한다", () => {
+    for (const d of ["blocked on review", "waiting_on GD", "waiting on GD", "승인 대기 중", "차단 중", "보류 중"]) {
+      expect(isBlockedCard(card({ description: d }))).toBe(true);
+    }
+  });
+
+  test("표시가 없으면 blocked 가 아니다", () => {
+    expect(isBlockedCard(card({ description: null }))).toBe(false);
+    expect(isBlockedCard(card({ description: "다음 액션: 테스트 작성" }))).toBe(false);
+  });
+
+  test("★unblocked 를 blocked 로 읽지 않는다★ (부분일치 함정)", () => {
+    expect(isBlockedCard(card({ description: "unblocked, 재개함" }))).toBe(false);
+  });
+});
+
+describe("stall 판정 — 가드가 시킨 표시를 실제로 반영한다", () => {
+  test("표시 없는 카드는 기존대로 stallMs 로 걸린다", () => {
+    const t = card({ updated_at: agoIso(STALL + 1000) });
+    expect(stalledDoingCards([t], OWNERS, NOW, STALL)).toHaveLength(1);
+  });
+
+  test("★blocked 표시가 있으면 같은 경과시간에 걸리지 않는다★ (이게 없어서 영구 나그가 났다)", () => {
+    const t = card({ updated_at: agoIso(STALL + 1000), description: "blocked — GD 판단 대기" });
+    expect(stalledDoingCards([t], OWNERS, NOW, STALL)).toHaveLength(0);
+  });
+
+  test("★그래도 면제는 아니다★ — 6배를 넘기면 blocked 카드도 걸린다", () => {
+    const t = card({ updated_at: agoIso(6 * STALL + 1000), description: "blocked — GD 판단 대기" });
+    expect(stalledDoingCards([t], OWNERS, NOW, STALL)).toHaveLength(1);
+  });
+
+  test("doing 이 아니거나 owner 가 대상 밖이면 표시와 무관하게 제외", () => {
+    expect(stalledDoingCards([card({ column: "plan" })], OWNERS, NOW, STALL)).toHaveLength(0);
+    expect(stalledDoingCards([card({ owner: "other" })], OWNERS, NOW, STALL)).toHaveLength(0);
+    expect(stalledDoingCards([card({ owner: null })], OWNERS, NOW, STALL)).toHaveLength(0);
+  });
+});
+
+describe("안내 문구", () => {
+  test("표시하면 무엇이 달라지는지 알려준다 — 안 그러면 유인이 서지 않는다", () => {
+    const body = guardBody("someone", [card()], 60);
+    expect(body).toContain("blocked");
+    expect(body).toContain("뜸하게");
+  });
+});
