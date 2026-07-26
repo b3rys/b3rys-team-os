@@ -297,6 +297,7 @@ b3os는 사람이 지휘하는 시스템입니다. 에이전트가 조율하고 
 | **b3os-bwf** | 과제 수행 워크플로우 — 계획 → 배정 → 실행 → 검증 → 보고 → 종료 |
 | b3os-task-loop | Tasks 칸반 · 진행 추적 · 인계 검증 · 작업루프 wake |
 | b3os-team-inbox | 팀 메시지 버스 — 전송 · 답장 · 인계 추적 |
+| **b3os-github-workflow** | 변경을 PR로 — 격리 · 커밋 신원 · 팀 계정 PR · 검증 근거 기록 · 승인 · 머지 후 확인 |
 | b3os-team-learning-loop | 주간 self-learning — 팀 정책 자가발전 |
 | b3os-team-member-lifecycle | 팀원 온보딩 / lifecycle |
 | b3os-harness-playbook | 병렬 실행(harness) 플레이북 |
