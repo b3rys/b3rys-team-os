@@ -151,7 +151,13 @@ function dmPanel(d: DmHealth): string {
 }
 
 function runtimePanel(h: HermesRuntimeHealth, i: IngressStatus): string {
-  const hasIssue = h.offline > 0 || h.blocked > 0;
+  // ★blocked 를 이상으로 세지 않는다★ — blocked 는 "막혔다" 가 아니라 ★터미널 출력이 5분 넘게
+  //   갱신되지 않았다★ 는 뜻이다(statusProbe: 1분 running / 5분 idle / 그 뒤 blocked). 팀원은 메시지를
+  //   받을 때만 움직이므로 ★평상시가 blocked★ 이고, 이걸 이상으로 세면 패널이 거의 항상 "확인 필요" 가
+  //   된다 — 신호가 아니라 잡음이다. AgentCard 도 blocked 를 "최근 활동 시간" 으로 중립 표시하고
+  //   TopologyView 도 응답가능(healthy)으로 분류한다. 여기만 이상 취급하고 있었다.
+  //   진짜 이상은 offline(세션 없음·상태 확인 실패)이다.
+  const hasIssue = h.offline > 0;
   const hermesColor = h.total === 0 ? GRAY : hasIssue ? AMBER : GREEN;
   const hermesStatus = h.total === 0
     ? pick("Hermes 없음", "No Hermes agents")
