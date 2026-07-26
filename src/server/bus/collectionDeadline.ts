@@ -117,7 +117,13 @@ export function hasReportedSince(
       )
       .get(collector, since) as { n: number }).n;
     return viaDm > 0;
-  } catch {
+  } catch (e) {
+    // ★"테이블이 없다" 만 삼킨다★ — 그건 마이그레이션 이전 DB 의 ★정상 상태★ 다.
+    //   그 외(DB 손상·락·디스크 오류)는 ★진짜 고장★ 이라 조용히 묻으면 안 된다 → 다시 던진다.
+    //   같은 파일에서 넓은 삼킴이 무엇을 낳았는지 이미 봤다: 로스터 읽기 실패를 "0명" 으로 삼킨 탓에
+    //   ★"새 설치의 정상 상태입니다" 라는 적극적 거짓 주장★ 이 나갔다(2026-07-26 PR#49 에서 고침).
+    //   여기서 넓게 삼키면 같은 형태를 새로 만드는 것이다.
+    if (!/no such table/i.test(String((e as { message?: unknown })?.message ?? e))) throw e;
     return false;
   }
 }
