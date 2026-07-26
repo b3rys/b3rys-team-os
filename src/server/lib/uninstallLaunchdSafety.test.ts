@@ -42,6 +42,12 @@ function makeFixture(opts: { profile: string; plists: boolean }): Fixture {
   chmodSync(join(shims, "tmux"), 0o755);
 
   copyFileSync(UNINSTALL, join(repo, "uninstall.sh"));
+  // ★base 프로필 탐지기도 같이 넣는다★ — uninstall.sh 는 이 스크립트로 hermes 공유 auth 원본을
+  //   찾는다. 없으면 "탐지 불가 = 상태 모호" 로 보고 teardown 전체를 건너뛴다(그 가드의 의도).
+  //   fixture 가 repo 사본이라 이 파일을 빠뜨리면 무엇을 검증하든 항상 "아무것도 안 함" 이 된다.
+  const detRel = join("src", "server", "runtimes", "hermes", "detect-base-profile.sh");
+  mkdirSync(join(repo, "src", "server", "runtimes", "hermes"), { recursive: true });
+  copyFileSync(join(REPO_ROOT, detRel), join(repo, detRel));
   writeFileSync(
     join(repo, "agents.json"),
     JSON.stringify([{ id: "guardtest", runtime: "hermes_agent", hermes_profile: opts.profile }]),
@@ -68,6 +74,13 @@ function makeFixture(opts: { profile: string; plists: boolean }): Fixture {
       `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict>\n<key>Label</key><string>ai.hermes.gateway-${opts.profile}</string>\n</dict></plist>\n`,
     );
     mkdirSync(join(home, ".hermes", "profiles", opts.profile), { recursive: true });
+    // ★base 프로필을 auth.json 과 함께 만든다★ — 이게 없으면 hermes 선검사가 "auth 원본을
+    //   못 찾음 = 상태 모호" 로 판정해 teardown ★전체★ 를 건너뛴다(그게 그 가드의 의도다).
+    //   그러면 서버·부팅 LaunchAgent 도 안 내려서, 여기서 검증하려는 "정당한 uninstall 은
+    //   그대로 동작한다" 를 확인할 수 없다. 즉 이건 fixture 전제조건이지 우회가 아니다.
+    const base = join(home, ".hermes", "profiles", "b3os");
+    mkdirSync(base, { recursive: true });
+    writeFileSync(join(base, "auth.json"), "{}\n");   // 심링크 아닌 실제 원본이어야 인정된다
   }
   return { home, calls, repo };
 }
