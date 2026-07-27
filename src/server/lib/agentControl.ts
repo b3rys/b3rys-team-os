@@ -16,6 +16,7 @@ import { dirname } from "node:path";
 import { codexBridgeLaunchdLabel, writeCodexBridgeFiles } from "../runtimes/codex/launcher";
 import { REPO_ROOT } from "./personaTemplates";
 import { ambientAgents } from "./registry";
+import { ensureClaudePollerUp } from "../runtimes/claude/pollerHealth";
 
 const HOME = process.env.HOME ?? "";
 function execOn(): boolean { return process.env.APPROVAL_EXECUTION_ENABLED === "1"; }
@@ -187,6 +188,24 @@ export async function setAgentEnabled(agentId: string, runtime: string, enabled:
 //   런타임별: claude=restart-agent.sh --resume(컨텍스트 유지+새 CLAUDE.md) / openclaw·hermes=게이트웨이 in-place kickstart.
 const OPENCLAW_LABEL = "ai.openclaw.gateway";
 
+/**
+ * ★재시작 뒤 텔레그램 poller 가 실제로 붙었는지 확인하고, 안 붙었으면 자동 복구한다.★
+ *
+ * 이게 없어서 ★재시작 후 안 붙으면 아무도 안 고쳤다★(2026-07-27 GD 지적). 프로세스는 살아 있고
+ * 대시보드도 정상으로 보이는데 메시지만 안 들어온다 — 오류가 없으니 사람이 눈치챌 때까지 방치된다.
+ * 영입(activation)에는 같은 복구가 이미 있었다. ★한쪽에만 있는 안전장치는 없는 것과 같다.★
+ *
+ * 복구에 실패해도 ★재시작 자체는 성공★ 으로 보고한다(프로세스는 떴다). 대신 detail 에 미기동을
+ * 명시해 사람이 볼 수 있게 한다 — 조용히 성공이라고 말하지 않는 것이 이 수정의 핵심이다.
+ */
+async function withPollerRecovery(agentId: string, baseDetail: string): Promise<ControlResult> {
+  const raw = process.env.TEAMOS_RESTART_POLLER_WAIT_MS;
+  const waitMs = raw !== undefined && Number.isFinite(Number(raw)) ? Number(raw) : 30000;
+  const res = await ensureClaudePollerUp(agentId, { waitMs });
+  return { ok: true, detail: `${baseDetail} · ${res.detail}` };
+}
+
+
 /** 팀원 1명 재시작. off 상태는 거부(기동은 🟢). bill 도 가능 — claude_channel 이라 --resume(컨텍스트 유지)이고,
  *  재시작 실행 주체는 team-collab 서버(executor)지 bill 세션이 아니라서 bill 재시작이 작업을 끊지 않는다. */
 export async function restartAgent(agentId: string, runtime: string, fresh = false): Promise<ControlResult> {
@@ -206,7 +225,8 @@ export async function restartAgent(agentId: string, runtime: string, fresh = fal
       const opsScript = `${REPO_ROOT}/scripts/restart-agent.sh`;
       if (existsSync(opsScript)) {
         const r = await run(["bash", opsScript, agentId, flag]);
-        return { ok: r.code === 0, detail: r.code === 0 ? `claude ${agentId} 재시작(${mode})` : `재시작 실패: ${r.out.slice(-150)}` };
+        if (r.code !== 0) return { ok: false, detail: `재시작 실패: ${r.out.slice(-150)}` };
+        return withPollerRecovery(agentId, `claude ${agentId} 재시작(${mode})`);
       }
 
       // vendoring 경로(공개 설치본): repo 내 기동 스크립트로 재기동.
@@ -221,7 +241,8 @@ export async function restartAgent(agentId: string, runtime: string, fresh = fal
       try { await run(["tmux", "kill-session", "-t", `claude-${agentId}`]); } catch { /* 없으면 그만 */ }
       const args = fresh ? [agentId] : [agentId, "--resume"];
       const r = await run(["bash", starter, ...args]);
-      return { ok: r.code === 0, detail: r.code === 0 ? `claude ${agentId} 재시작(${mode})` : `재시작 실패: ${r.out.slice(-150)}` };
+      if (r.code !== 0) return { ok: false, detail: `재시작 실패: ${r.out.slice(-150)}` };
+      return withPollerRecovery(agentId, `claude ${agentId} 재시작(${mode})`);
     }
     // openclaw/hermes 는 게이트웨이 in-place 재시작이라 '새 세션' 개념이 claude 처럼 없음 — fresh 무시.
     if (runtime === "openclaw") {

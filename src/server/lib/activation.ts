@@ -19,6 +19,7 @@ import { HERMES_BASE_PROFILE, MANUALS_DIR, runtimeCwdForAgent } from "./paths";
 import { isHermesMemberProtected, isHermesProfileProtected } from "./hermesBaseProfile";
 import { appendAuditFile } from "./auditFile";
 import { codexBridgePaths, placeCodexToken, writeCodexBridgeFiles, removeCodexBridgeFiles, resolveOwnerDmId } from "../runtimes/codex/launcher";
+import { ensureClaudePollerUp } from "../runtimes/claude/pollerHealth";
 import { placeClaudeToken, writeClaudeBridgeFiles, seedClaudeTrust, seedClaudeAccess, killClaudeTmux, reconnectClaudeTelegram, claudeBridgePaths, installReplyGuardHook, installOutboundHook, installProgressHook, uninstallOutboundHook, uninstallReplyGuardHook, uninstallRecoveryHook, removeClaudeBridgeFiles } from "../runtimes/claude/launcher";
 import { isTier2Outbound, isTier2Shadow } from "../runtimes/claude/tier2Flag";
 import { setAgentEnabled, clearAgentOff, isAgentOff } from "./agentControl";
@@ -349,44 +350,9 @@ function placeToken(tokenFile: string, token: string): void {
   chmodSync(tokenFile, 0o600);
 }
 
-/** claude 텔레그램 채널 poller 기동 대기 — 플러그인 MCP(server.ts)가 토큰 확인 통과 후에만 bot.pid를 쓴다(server.ts:69).
- *  bot.pid 출현 = poller 실제 폴링 시작 = '진짜 대화됨'. 미출현 = 죽은 봇(귀머거리). timeoutMs 안에 file 확인. 슬러그 가드.
- *  opts = 테스트 격리용(실 HOME/~/.claude·라이브 봇 미접촉): homeDir로 base 경로를 tmp로 돌리고 intervalMs로 짧은 폴 간격.
- *  production은 opts 없이 호출 → HOME + 1500ms 그대로(동작 불변). */
-export async function waitForClaudePoller(
-  id: string,
-  timeoutMs: number,
-  opts?: { homeDir?: string; intervalMs?: number; pidAlive?: (pid: number) => boolean },
-): Promise<boolean> {
-  if (!/^[a-z0-9_-]+$/i.test(id)) return false;
-  const home = opts?.homeDir ?? process.env.HOME ?? "";
-  const intervalMs = opts?.intervalMs ?? 1500;
-  const pidFile = `${home}/.claude/channels/telegram-${id}/bot.pid`;
-  const pidAlive = opts?.pidAlive ?? ((pid: number) => {
-    try { process.kill(pid, 0); return true; } catch { return false; }
-  });
-  const markerAlive = (): boolean => {
-    try {
-      if (!existsSync(pidFile)) return false;
-      const raw = readFileSync(pidFile, "utf-8").trim();
-      let pid = Number(raw);
-      let agentId: string | undefined;
-      if (!Number.isInteger(pid)) {
-        const parsed = JSON.parse(raw) as { pid?: unknown; agentId?: unknown };
-        pid = Number(parsed.pid);
-        agentId = typeof parsed.agentId === "string" ? parsed.agentId : undefined;
-      }
-      if (agentId && agentId !== id) return false;
-      return Number.isInteger(pid) && pid > 0 && pidAlive(pid);
-    } catch { return false; }
-  };
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (markerAlive()) return true;
-    await new Promise((r) => setTimeout(r, intervalMs));
-  }
-  return markerAlive();
-}
+// claude poller 대기·자동복구는 ★runtimes/claude/pollerHealth.ts★ 가 정본이다(재시작 경로와 공유).
+// 기존 import 경로를 깨지 않도록 여기서 재-export 한다.
+export { waitForClaudePoller } from "../runtimes/claude/pollerHealth";
 
 /** codex per-member bridge 헬스게이트 — 첫 getUpdates 성공 후 bridge.ts가 쓰는 pid marker를 기다린다. */
 export async function waitForCodexPoller(
@@ -703,18 +669,10 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       //   pre-warm·버전락·30s 게이트 늘리기는 "타임아웃"을 겨냥한 헛수고였다(Starting connection 0건이 반증).
       const rawWait = process.env.TEAMOS_POLLER_WAIT_MS;
       const pollerWaitMs = rawWait !== undefined && Number.isFinite(Number(rawWait)) ? Number(rawWait) : 30000;
-      let pollerOk = await waitForClaudePoller(id, pollerWaitMs);
-      // ★auto-reconnect(하네스 확정 fix)★: 첫 부팅 열거 누락 시 b3os 가 세션에 `/mcp reconnect` 를 자동 주입(최대 2회, 각 12s 재확인).
-      //   사용자가 tmux 에 직접 들어가 reconnect 하던 걸 서버가 대신 = 공개 사용자는 아무것도 안 만짐. reconnect 는 항상 붙는다(실측).
-      let reconnected = false;
-      for (let attempt = 0; !pollerOk && attempt < 2; attempt++) {
-        if (!reconnectClaudeTelegram(id)) break; // tmux 세션 부재(스폰 실패)면 중단
-        pollerOk = await waitForClaudePoller(id, 12000);
-        reconnected = pollerOk;
-      }
-      steps.push({ step: "poller", ok: pollerOk, detail: pollerOk
-        ? (reconnected ? "텔레그램 채널 poller 기동(auto-reconnect 로 복구)" : "텔레그램 채널 poller 기동 확인(bot.pid)")
-        : "poller 미기동 → needs_reconnect(auto-reconnect 2회 시도했으나 미복구; 세션·토큰·scope 정상). 세션에서 /mcp reconnect 재시도 가능" });
+      // ★영입과 재시작이 같은 복구를 쓴다★(pollerHealth) — 한쪽에만 있는 안전장치는 없는 것과 같다.
+      const pollerRes = await ensureClaudePollerUp(id, { waitMs: pollerWaitMs });
+      const pollerOk = pollerRes.ok;
+      steps.push({ step: "poller", ok: pollerOk, detail: pollerRes.detail });
       // ★early-return 제거 + degraded 완결(2026-07-25)★: poller 실패해도 essentials 를 tolerate(poller:) 로 통과시켜
       //   아래 recall·bus-wake·degraded 반환까지 진행한다(그렇지 않으면 :620 essentials 하드실패가 746f6b3 의 degraded 를 무효화).
       //   token·allowFrom·채널 등 진짜 필수설정이 빠지면 종전대로 하드실패.
