@@ -68,6 +68,13 @@ export interface LoopEvent {
   quiet_hours?: boolean;
   visible_surface?: string;
   metric_scope?: string;
+  // 요청 성격 라벨 (§측정 W1 · Bill 리뷰 2026-07-27)
+  //   ★emit 여부에는 절대 쓰지 않는다★ — emit 은 "ack 가능한 open 행이 생겼는가" 하나로만 결정한다.
+  //   이건 분석에서 차원을 나누기 위한 ★라벨★ 이다: "위임→응답" 과 "말 걸면 언제 답하나" 는
+  //   둘 다 볼 가치가 있지만 섞이면 둘 다 못 본다. 라벨로 두면 나중에 재계산이 된다(정보를 안 버린다).
+  //     delegation — 새 일을 맡기는 것(선행 요청이 없거나, 있어도 내게 온 게 아님)
+  //     followup   — 내게 온 것에 답하면서 상대에게 open 행을 남긴 것(대화 왕복)
+  request_kind?: "delegation" | "followup";
   // 결과
   outcome?: string;
   reason?: string;
@@ -83,14 +90,17 @@ export interface LoopEvent {
 }
 
 /**
- * episode_id = thread_id : (task_id | proposal_id | request_message_id) (Lui 보강①).
- * ★'-' 금지: 카드 없는 요청도 request_message_id로 구분해 허수 방지.★ 셋 다 없을 때만 최후 '-'.
+ * episode_id = thread_id : (request_message_id | task_id | proposal_id) — origin·first-seen 고정.
+ * ★emit③ 결정(2026-07-11, spec §32):★ 키는 originating request_message_id 우선(first-seen). 카드 없이
+ * 시작한 뒤 task/proposal이 붙어도 키가 안 뒤집혀 같은 실episode가 2개로 분리되지 않는다. task_id/proposal_id는
+ * envelope 속성으로만 운반(키 승격 금지) — request_message_id가 없을 때만 fallback(회귀0: emit④ tasks는
+ * requestMessageId 미전달이라 기존대로 taskId 키 유지). ★'-' 금지★: 셋 다 없을 때만 최후 '-'.
  */
 export function makeEpisodeId(
   threadId: string,
   ids: { taskId?: string; proposalId?: string; requestMessageId?: string },
 ): string {
-  const key = ids.taskId || ids.proposalId || ids.requestMessageId || "-";
+  const key = ids.requestMessageId || ids.taskId || ids.proposalId || "-";
   return `${threadId}:${key}`;
 }
 
