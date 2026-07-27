@@ -66,6 +66,10 @@ escalation_after:
 
 행동 규칙:
 
+0. ★착수하면 먼저 칸반 카드를 만든다★ — `task-new.sh --title "..." [--owner <id>] [--lane doing]`
+   (owner 생략 = 자기 자신). BWF 가 "착수 즉시 등록(필수)" 이라고 못박은 그 단계다.
+   ★이 스크립트가 없어서 실제로 등록이 안 되고 있었다★(2026-07-27 실측 — 한 팀은 칸반 0건).
+   규칙이 아니라 도구가 없던 것이라, 이제 한 줄로 만든다.
 1. 요청을 보낸다.
 2. 팀장 visible 보고가 필요한 위임이면 `send.sh --direct-to-gd --source-thread <tg-...>`로 보낸다. 일반 리뷰·인계는 directed reply로만 보낸다.
 3. `task-wait.sh`로 wait record를 남긴다.
@@ -150,6 +154,7 @@ skills/b3os-task-loop/scripts/task-wait.sh \
   --stop-rule "2회 무응답이면 blocked 보고" \
   --escalation-after 2
 
+skills/b3os-task-loop/scripts/task-new.sh --title "[infra] openclaw 게이트웨이 재기동" --lane doing
 skills/b3os-task-loop/scripts/task-check.sh --thread M5bEuWyU --mark-check
 skills/b3os-task-loop/scripts/task-close.sh --thread M5bEuWyU --waiting-on steve --status completed --note "Steve approve 반영"
 ```
