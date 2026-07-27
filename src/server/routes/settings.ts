@@ -1018,14 +1018,18 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
         display_information: { name: appName },
         features: { bot_user: { display_name: agent.slack_app_name || `gd_${id}`, always_online: true } },
         oauth_config: { scopes: { bot: scopes } },
-        // ★event_subscriptions 는 항상 넣는다★ — bot_events 가 있어야 봇이 멘션을 받는다.
-        //   공개 URL 이 없을 때 이 블록을 통째로 빼봤더니(첫 시도), Socket 매니페스트에 app_mention 구독이
-        //   사라져서 ★앱은 만들어지는데 멘션에 반응하지 않는 상태★ 가 됐다(코덱스 리뷰에서 잡힘).
-        //   scope(app_mentions:read)만 있고 구독이 없으면 이벤트가 오지 않는다 — 둘 다 필요하다.
-        //   request_url 만 조건부로 넣는다: null 이 든 매니페스트는 Slack 이 거부하고,
-        //   Socket Mode 는 애초에 request_url 없이 bot_events 만으로 동작한다.
+        // ★event_subscriptions 는 request_url 이 있을 때만 넣는다.★
+        //   Slack 규격: 이 블록이 있으면 request_url 또는 socket_mode_enabled 중 하나가 반드시 있어야 한다
+        //   ("Event Subscription requires either Request URL or Socket Mode Enabled").
+        //   이 응답은 ★webhook 방식 매니페스트★ 이고 socket_mode_enabled=false 다. 그러므로 공개 URL 이
+        //   없는데 블록을 넣으면 ★Slack 이 거부하는 매니페스트★ 를 사용자에게 그대로 내주게 된다.
+        //   (2026-07-27 Steve 리뷰. 직전 판(#74)은 bot_events 를 살리려고 무조건 넣었는데,
+        //    그 주석이 "Socket Mode 는 request_url 없이 된다" 고 적어놓고 ★정작 여기서 false 를 내보냈다★ —
+        //    주석은 의도를, 코드는 다른 것을 말하고 있었다.)
+        //   ★Socket 쪽 bot_events 는 클라이언트 socketManifest() 가 주입한다★ — 서버가 안 내보내도 안전하다.
+        //   공개 URL 이 없는 webhook 사용자에겐 webhookBlockedNotice() 가 이미 안내한다.
         settings: {
-          event_subscriptions: { ...(eventUrl ? { request_url: eventUrl } : {}), bot_events: ["app_mention"] },
+          ...(eventUrl ? { event_subscriptions: { request_url: eventUrl, bot_events: ["app_mention"] } } : {}),
           org_deploy_enabled: false,
           socket_mode_enabled: false,
         },

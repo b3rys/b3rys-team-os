@@ -58,14 +58,23 @@ async function clip(text: string): Promise<boolean> {
   try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
 }
 
-// Socket Mode용 매니페스트 변환 — socket_mode_enabled=true + event_subscriptions.request_url 제거(공개 URL 불필요).
-// ★bot_events 는 남긴다★ — 그게 없으면 앱은 만들어지는데 멘션을 못 받는다. export 는 최종 JSON 을 테스트하기 위한 것.
+// Socket Mode용 매니페스트 변환 — socket_mode_enabled=true + request_url 제거(공개 URL 불필요).
+//
+// ★bot_events 를 "보존" 이 아니라 "주입" 한다★ (2026-07-27 Steve 리뷰).
+//   서버는 공개 URL 이 없으면 event_subscriptions 를 아예 안 내보낸다(그 조합은 Slack 이 거부한다).
+//   그래서 여기서 보존만 하면 ★공개 URL 없는 Socket 사용자가 구독을 못 받아 멘션에 반응하지 않는다★ —
+//   #74 가 고쳤던 그 버그가 다른 경로로 되살아난다. Socket 은 request_url 없이 bot_events 만으로 되므로
+//   이 자리에서 만들어 넣는 것이 맞다.
+// export 는 최종 JSON 을 테스트하기 위한 것.
 export function socketManifest(manifest: unknown): unknown {
   try {
     const m = JSON.parse(JSON.stringify(manifest ?? {})) as Record<string, any>;
     m.settings = m.settings || {};
     m.settings.socket_mode_enabled = true;
-    if (m.settings.event_subscriptions) delete m.settings.event_subscriptions.request_url;
+    const ev = m.settings.event_subscriptions || {};
+    delete ev.request_url;                                   // Socket 은 공개 URL 이 필요없다
+    if (!Array.isArray(ev.bot_events) || ev.bot_events.length === 0) ev.bot_events = ["app_mention"];
+    m.settings.event_subscriptions = ev;                     // 서버가 안 줬으면 여기서 만든다
     return m;
   } catch {
     return manifest;
