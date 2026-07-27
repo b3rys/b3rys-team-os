@@ -569,6 +569,9 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
 
   // 1) workspace + persona
   try {
+    // 가드를 mkdir ★앞★ 에 둔다 — writeMemberPersona 안쪽 가드에만 맡기면 그 전에 빈 워크스페이스가
+    // 이미 만들어진다. 실측(2026-07-27): 테스트가 실 팀원 루트에 빈 폴더 26개를 남긴 경로가 여기다.
+    assertNotLiveMemberFsUnderTest(paths.workspace_path, `recruit(${id})`);
     mkdirSync(paths.workspace_path, { recursive: true });
     // ★룰(로딩파일) 렌더와 persona 저장은 분리된 트랜잭션이다★ (GD 2026-07-17).
     //   writeMemberPersona = 룰 렌더러(CLAUDE.md/AGENTS.md). SOUL.md 는 건드리지 않는다.
