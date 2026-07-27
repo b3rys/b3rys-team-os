@@ -366,6 +366,13 @@ test("live-fs 가드 배선 — savePersonaFile 이 실 팀원 경로를 거부�
 // ★격리가 실제로 걸렸는지★ — preload 회귀 감지. ambient B3RYS_HOME/B3RYS_MEMBERS_ROOT 가 새어들어오면
 //   MEMBERS_ROOT 가 실 경로가 되고, 그 순간 가드가 정당한 테스트 쓰기를 막는다(Codex 재현 케이스).
 test("preload 격리 — MEMBERS_ROOT 는 항상 temp (ambient env 가 새어들지 않는다)", () => {
+  // ★opt-in 모드는 예외★ — B3OS_TEST_MEMBERS_ROOT 로 특정 루트를 겨냥한 실행은 temp 가 아닐 수 있다.
+  //   그 경우까지 "항상 temp" 를 요구하면 테스트가 opt-in 자체를 거짓 실패로 만든다(Codex 재리뷰).
+  if (process.env.B3OS_TEST_MEMBERS_ROOT) {
+    expect(MEMBERS_ROOT).toBe(process.env.B3OS_TEST_MEMBERS_ROOT);
+    expect(() => assertNotLiveMemberFsUnderTest(`${MEMBERS_ROOT}/anyone`, "t")).not.toThrow();
+    return;
+  }
   const t = tmpdir();
   const underTemp = MEMBERS_ROOT === t || MEMBERS_ROOT.startsWith(`${t}/`)
     || MEMBERS_ROOT.startsWith("/tmp/") || MEMBERS_ROOT.startsWith("/var/folders/");
@@ -385,4 +392,54 @@ test("live-fs 가드 — 이름만 겹치는 형제 경로는 막지 않는다",
 test("live-fs 가드 — 상대경로/.. 로 우회되지 않는다", () => {
   const home = process.env.HOME ?? "";
   expect(() => assertNotLiveMemberFsUnderTest(`${home}/b3os/members/../members/jane`, "t")).toThrow(/live-fs-guard/);
+});
+
+// ★opt-in override 실검증 (subprocess)★ — MEMBERS_ROOT 는 import 시점 상수라, 같은 프로세스 안에서는
+//   "다른 루트로 뜬 상태" 를 만들 수 없다. 그래서 별도 프로세스를 띄워 실제로 확인한다(Codex 재리뷰 요청).
+//   확인할 것 두 가지: ①지정한 non-temp 루트는 통과한다 ②그래도 실 팀원 루트는 여전히 막힌다.
+test("opt-in override — 지정 루트는 통과하되 실 팀원 루트 보호는 그대로", () => {
+  const optRoot = "/workspace/isolated-optin";           // non-temp. 존재하지 않아도 가드 판정엔 무관
+  const mod = join(import.meta.dir, "personaTemplates.ts");
+  const script = `
+    const m = await import(${JSON.stringify(mod)});
+    const home = process.env.HOME;
+    const r = { optIn: "?", legacy: "?", publicDefault: "?" };
+    try { m.assertNotLiveMemberFsUnderTest(process.env.B3RYS_MEMBERS_ROOT + "/jane", "p"); r.optIn = "pass"; }
+    catch { r.optIn = "blocked"; }
+    try { m.assertNotLiveMemberFsUnderTest(home + "/Development/steve", "p"); r.legacy = "pass"; }
+    catch { r.legacy = "blocked"; }
+    try { m.assertNotLiveMemberFsUnderTest(home + "/b3os/members/jane", "p"); r.publicDefault = "pass"; }
+    catch { r.publicDefault = "blocked"; }
+    console.log(JSON.stringify(r));
+  `;
+  const out = Bun.spawnSync({
+    cmd: ["bun", "-e", script],
+    env: { ...process.env, NODE_ENV: "test", B3OS_TEST_MEMBERS_ROOT: optRoot, B3RYS_MEMBERS_ROOT: optRoot },
+    stdout: "pipe", stderr: "pipe",
+  });
+  const stdout = out.stdout.toString().trim();
+  expect(out.exitCode, `stderr: ${out.stderr.toString().slice(0, 400)}`).toBe(0);
+  const r = JSON.parse(stdout.split("\n").pop() ?? "{}");
+  expect(r.optIn).toBe("pass");            // 지정 루트엔 쓸 수 있어야 opt-in 이 의미가 있다
+  expect(r.legacy).toBe("blocked");        // ★override 로도 실 팀원 보호는 안 풀린다★
+  expect(r.publicDefault).toBe("blocked");
+});
+
+// override 가 ★실 팀원 루트를 가리켜도★ 보호가 풀리면 안 된다 (이 변수로 우회 금지).
+test("opt-in override — 실 팀원 루트를 가리키면 무시하고 계속 막는다", () => {
+  const home = process.env.HOME ?? "";
+  const real = `${home}/b3os/members`;
+  const mod = join(import.meta.dir, "personaTemplates.ts");
+  const script = `
+    const m = await import(${JSON.stringify(mod)});
+    try { m.assertNotLiveMemberFsUnderTest(process.env.HOME + "/b3os/members/jane", "p"); console.log("pass"); }
+    catch { console.log("blocked"); }
+  `;
+  const out = Bun.spawnSync({
+    cmd: ["bun", "-e", script],
+    env: { ...process.env, NODE_ENV: "test", B3OS_TEST_MEMBERS_ROOT: real, B3RYS_MEMBERS_ROOT: real },
+    stdout: "pipe", stderr: "pipe",
+  });
+  expect(out.exitCode, `stderr: ${out.stderr.toString().slice(0, 400)}`).toBe(0);
+  expect(out.stdout.toString().trim().split("\n").pop()).toBe("blocked");
 });
