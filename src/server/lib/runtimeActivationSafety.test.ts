@@ -55,19 +55,22 @@ describe("runtime activation safety", () => {
   });
 
   test("Hermes activation expands HERMES_CWD=~/path under bash and zsh", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "../runtimes/hermes/activate-hermes-agent.sh"),
+      "utf-8",
+    );
+    const caseBlock = source.match(/case "\$HERMES_CWD" in[\s\S]*?\nesac/)?.[0];
+    expect(caseBlock).toBeDefined();
     const snippet = [
-      'HOME="/Users/gdmini"',
+      'HOME="/home/tester"',
       'HERMES_CWD="~/foo"',
-      'case "$HERMES_CWD" in',
-      '  "~/"*) HERMES_CWD="$HOME/${HERMES_CWD#\\~/}" ;;',
-      '  "~") HERMES_CWD="$HOME" ;;',
-      'esac',
+      caseBlock!,
       'printf "%s" "$HERMES_CWD"',
     ].join("\n");
     for (const shell of ["bash", "zsh"]) {
       const run = spawnSync(shell, ["-c", snippet], { encoding: "utf-8" });
       expect(run.status, `${shell}: ${run.stderr || run.stdout}`).toBe(0);
-      expect(run.stdout).toBe("/Users/gdmini/foo");
+      expect(run.stdout).toBe("/home/tester/foo");
     }
   });
 });

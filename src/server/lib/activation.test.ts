@@ -306,18 +306,18 @@ describe("activation: Hermes runtime CWD resolution", () => {
     expect(resolveActivationRuntimeCwd(
       "herm",
       undefined,
-      { workspace_path: "/Users/gd452/b3os/members/herm", runtime_cwd: null },
-      "/Users/gd452/Development/herm",
-    )).toBe("/Users/gd452/b3os/members/herm");
+      { workspace_path: "/home/tester/b3os/members/herm", runtime_cwd: null },
+      "/home/tester/Development/herm",
+    )).toBe("/home/tester/b3os/members/herm");
   });
 
   test("명시 runtime_cwd는 agents.json workspace_path보다 우선한다", () => {
     expect(resolveActivationRuntimeCwd(
       "herm",
-      "/Users/gd452/custom/herm",
-      { workspace_path: "/Users/gd452/b3os/members/herm", runtime_cwd: null },
-      "/Users/gd452/Development/herm",
-    )).toBe("/Users/gd452/custom/herm");
+      "/home/tester/custom/herm",
+      { workspace_path: "/home/tester/b3os/members/herm", runtime_cwd: null },
+      "/home/tester/Development/herm",
+    )).toBe("/home/tester/custom/herm");
   });
 });
 
