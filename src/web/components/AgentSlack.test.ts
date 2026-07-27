@@ -100,7 +100,7 @@ describe("webhookBlockedNotice — 실행 가능한 행동만 안내한다", () 
  * GD 는 Slack 화면에서 직접 Enable Events 토글을 올려야 했다. 꺼져 있으면 ★봇이 멘션을 무시하고 오류도 안 난다.★
  * 오늘 하루 반복된 형태 그대로다: 있는데 도달하지 못한다. 그래서 ★안내 문구 자체를 회귀로 고정한다.★ */
 describe("wizardSteps — 이벤트 구독 켜는 단계가 반드시 있다", () => {
-  const opts = { appLink: "<a>apps</a>", scopes: "app_mentions:read, chat:write", channel: "#team", eventUrl: "https://x.test/team/api/slack/events" };
+  const opts = { appLink: "<a>apps</a>", scopes: "app_mentions:read, chat:write", channel: "#team" };
   const joined = (isSocket: boolean) => wizardSteps({ ...opts, isSocket }).join("\n");
 
   for (const isSocket of [true, false]) {
@@ -139,37 +139,28 @@ describe("wizardSteps — 이벤트 구독 켜는 단계가 반드시 있다", (
   });
 });
 
-/* ★단계를 추가하면서 순서를 틀릴 뻔했다★ — 처음엔 'Enable Events' 를 2번, 'Request URL 등록' 을 마지막 6번에
- * 뒀다. 그런데 Event URL 방식은 Enable Events 를 켜는 순간 Slack 이 ★Request URL 검증부터★ 요구한다.
- * 그 순서면 사용자는 2번에서 저장을 못 하고 막힌 채 6번을 못 본다 — ★고치려던 것과 똑같은 막다른 안내★ 다.
- * 그래서 한 단계로 합쳤고, 여기서 그걸 고정한다. */
-describe("wizardSteps — Event URL 방식은 URL 검증이 구독 저장보다 먼저다", () => {
+/* ★슬랙 정본은 Socket Mode 다★ — Event URL(request_url) 방식은 지원 대상이 아니다(GD, 2026-07-27).
+ * 코드에 webhook 분기가 남아 있는 것은 ★기존에 그렇게 붙어 있는 멤버를 안 깨뜨리려는 것★ 일 뿐이다.
+ * 나는 이 구분을 놓치고 Socket 안내에까지 Request URL 을 끌어들일 뻔했다. 그래서 여기서 고정한다. */
+describe("Socket Mode 가 정본 — 안내에 Event URL 을 섞지 않는다", () => {
   const base = { appLink: "<a>apps</a>", scopes: "chat:write", channel: "#team" };
-  const url = "https://x.test/team/api/slack/events";
 
-  test("★Enable Events 와 Request URL 은 같은 단계다★ (쪼개면 저장에서 막힌다)", () => {
-    const steps = wizardSteps({ ...base, isSocket: false, eventUrl: url });
-    const step = steps.find((s) => s.includes("Enable Events"));
-    expect(step).toBeTruthy();
-    expect(step).toContain("Request URL");
-    expect(step).toContain(url);                       // 값까지 그 자리에 있어야 복붙으로 끝난다
-    expect(step!.indexOf("Request URL")).toBeLessThan(step!.indexOf("Save Changes"));
+  test("★Socket 안내에는 Request URL·Signing Secret 이 나오지 않는다★", () => {
+    const s = wizardSteps({ ...base, isSocket: true }).join("\n");
+    expect(s).not.toContain("Request URL");
+    expect(s).not.toContain("Signing Secret");
+    expect(s).toContain("xapp");                    // Socket 은 App-Level Token 을 쓴다
   });
 
-  test("Request URL 안내는 한 번만 나온다 (중복 단계가 남아 있지 않다)", () => {
-    const steps = wizardSteps({ ...base, isSocket: false, eventUrl: url });
-    expect(steps.filter((s) => s.includes("Request URL")).length).toBe(1);
-  });
-
-  test("공개 URL 이 아직 없으면 값 대신 어디서 찾는지 안내한다", () => {
-    const step = wizardSteps({ ...base, isSocket: false, eventUrl: null }).find((s) => s.includes("Enable Events"));
-    expect(step).toContain("Event URL");
-    expect(step).not.toContain("null");                 // ★빈 값을 그대로 그리지 않는다★
-  });
-
-  test("★Socket 방식엔 Request URL 이 아예 안 나온다★ (없는 걸 시키면 막다른 안내다)", () => {
-    const steps = wizardSteps({ ...base, isSocket: true, eventUrl: url });
-    expect(steps.join("\n")).toContain("Enable Events");
-    expect(steps.join("\n")).not.toContain("Request URL");
+  test("이벤트 구독 단계는 GD 가 준 4단계 그대로다 (덧붙이지 않는다)", () => {
+    const step = wizardSteps({ ...base, isSocket: true }).find((x) => x.includes("Enable Events"))!;
+    const order = ["Enable Events", "Subscribe to bot events", "Add Bot User Event", "app_mention", "Save Changes"];
+    let at = -1;
+    for (const token of order) {
+      const next = step.indexOf(token);
+      expect(next).toBeGreaterThan(at);             // 순서가 어긋나면 실패
+      at = next;
+    }
+    expect(step).not.toContain("Request URL");      // ★추측으로 끼워 넣지 않는다★
   });
 });
