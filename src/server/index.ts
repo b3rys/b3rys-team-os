@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { createBunWebSocket } from "hono/bun";
 import type { ServerWebSocket } from "bun";
-import { existsSync, readFileSync, writeFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openDb, migrate } from "./db/migrate";
@@ -52,7 +52,7 @@ import { createSchedulerRoutes } from "./routes/scheduler";
 import { ensureDailyTaskReviewJobs, ensureWeeklySelfLearningJobs } from "./scheduler/core";
 import { renderAndRepoint } from "./lib/teamOsRender";
 import { installProgressHook } from "./runtimes/claude/launcher";
-import { writeMemberPersona } from "./lib/writeMemberPersona";
+import { writeMemberPersona, savePersonaFile } from "./lib/writeMemberPersona";
 import { persistOwnerChatIdIfEmpty } from "./runtimes/codex/launcher";
 import { createApprovalsApp } from "./routes/approvals";
 import { createPermissionGateRoutes } from "./routes/permissionGate";
@@ -335,8 +335,10 @@ api.put("/agents/:id/persona", async (c) => {
     return c.json({ error: "too_large", max_bytes: MAX_PERSONA_BYTES }, 413);
   }
   // Scope guard: only ever write to the path declared in the registry for this agent.
+  // ★savePersonaFile 로 단일화★ (2026-07-27, Codex 리뷰 적발): 여기서 writeFileSync 로 직행하면
+  //   live-fs 가드도 backup-first(.bak)도 건너뛴다. persona 를 쓰는 통로가 둘이면 한쪽만 지켜진다.
   try {
-    writeFileSync(agent.persona_file, body.content, "utf-8");
+    savePersonaFile(agent.persona_file, body.content);
   } catch (e) {
     return c.json({ error: "write_failed", detail: e instanceof Error ? e.message : String(e) }, 500);
   }

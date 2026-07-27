@@ -2,7 +2,11 @@
 // churn 버그(comms가 마지막 섹션이면 매 실행 재기록) 재발 방지. (GD 2026-06-28)
 import { test, expect } from "bun:test";
 import { afterEach } from "bun:test";
-import { resolveMembersRoot } from "./personaTemplates";
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { resolveMembersRoot, MEMBERS_ROOT, assertNotLiveMemberFsUnderTest } from "./personaTemplates";
+import { savePersonaFile } from "./writeMemberPersona";
 import {
   buildPersona,
   buildAgentsMd,
@@ -306,4 +310,136 @@ test("resolveMembersRoot — env 우선순위: B3RYS_MEMBERS_ROOT > B3RYS_HOME/m
     if (save.bh === undefined) delete process.env.B3RYS_HOME; else process.env.B3RYS_HOME = save.bh;
     if (save.home === undefined) delete process.env.HOME; else process.env.HOME = save.home;
   }
+});
+
+// ─── live-fs 가드가 ★그 머신의 실 팀원 자리★ 를 지키는지 (2026-07-27 맥스튜디오 인시던트 회귀) ───
+//   사고: 가드가 `~/Development` 하나만 보고 있어서, 기본값이 퍼블릭-안전(`~/b3os/members`)으로 바뀐 뒤
+//   ★신규·공개 유저의 실 팀원이 통째로 가드 밖★ 이었다. 맥스튜디오 실 팀원(jane/lisa/clo)이 그 자리에
+//   살아 테스트가 정체성 파일을 덮어썼다. 두 루트 모두 지키는지 못박는다.
+test("live-fs 가드 — 레거시(~/Development)와 퍼블릭 기본(~/b3os/members) 둘 다 막는다", () => {
+  const home = process.env.HOME ?? "";
+  expect(home).not.toBe("");                        // 가드는 HOME 없으면 무동작 — 전제 확인
+  expect(process.env.NODE_ENV).toBe("test");        // 가드는 test 에서만 — 전제 확인
+
+  // ① 퍼블릭-안전 기본값 = 공개 유저의 실 팀원 자리. ★이게 뚫려 있던 구멍이다.★
+  expect(() => assertNotLiveMemberFsUnderTest(`${home}/b3os/members/jane`, "t")).toThrow(/live-fs-guard/);
+  // ② OWNER 레거시 레이아웃
+  expect(() => assertNotLiveMemberFsUnderTest(`${home}/Development/steve`, "t")).toThrow(/live-fs-guard/);
+  // ③ 루트 자기 자신도 (rm -rf <root> 류 차단)
+  expect(() => assertNotLiveMemberFsUnderTest(`${home}/b3os/members`, "t")).toThrow(/live-fs-guard/);
+  // ④ 에러는 ★어느 루트에 걸렸는지★ 알려줘야 고칠 수 있다
+  expect(() => assertNotLiveMemberFsUnderTest(`${home}/b3os/members/jane`, "t")).toThrow(/보호루트/);
+});
+
+test("live-fs 가드 — temp 경로는 막지 않는다 (격리된 테스트가 정상 동작해야 함)", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "guard-allow-"));
+  expect(() => assertNotLiveMemberFsUnderTest(`${tmp}/jane`, "t")).not.toThrow();
+  // preload 가 B3RYS_MEMBERS_ROOT 를 temp 로 세팅하므로, 격리 상태의 워크스페이스 생성은 통과해야 한다.
+  expect(() => assertNotLiveMemberFsUnderTest(`${MEMBERS_ROOT}/jane`, "t")).not.toThrow();
+});
+
+test("live-fs 가드 — 명시 opt-in(B3RYS_TEST_ALLOW_LIVE_FS=1)이면 통과", () => {
+  const home = process.env.HOME ?? "";
+  const save = process.env.B3RYS_TEST_ALLOW_LIVE_FS;
+  try {
+    process.env.B3RYS_TEST_ALLOW_LIVE_FS = "1";
+    expect(() => assertNotLiveMemberFsUnderTest(`${home}/b3os/members/jane`, "t")).not.toThrow();
+  } finally {
+    if (save === undefined) delete process.env.B3RYS_TEST_ALLOW_LIVE_FS; else process.env.B3RYS_TEST_ALLOW_LIVE_FS = save;
+  }
+});
+
+// ★배선 테스트★ — 가드 함수가 옳아도 writer 가 부르지 않으면 소용없다. 실제 writer 를 태워 확인한다.
+//   (savePersonaFile 은 SOUL.md 를 쓰는 유일한 통로인데 2026-07-27 까지 가드가 없었다.)
+test("live-fs 가드 배선 — savePersonaFile 이 실 팀원 경로를 거부한다(파일 안 만듦)", () => {
+  const home = process.env.HOME ?? "";
+  // ★경로를 실행마다 고유하게★ — 고정 이름이면 이전 실행이 남긴 흔적에 판정이 흔들린다
+  //   (실제로 겪음: 가드를 되돌린 뮤테이션 실행이 폴더를 만들자 이후 정상 실행까지 실패).
+  //   테스트가 머신의 과거 상태를 타면 그 테스트는 못 믿는다.
+  const target = `${home}/b3os/members/__guard_probe_${process.pid}_${Date.now()}__/SOUL.md`;
+  expect(existsSync(dirname(target))).toBe(false);   // 전제: 아직 없다
+  expect(() => savePersonaFile(target, "should never be written")).toThrow(/live-fs-guard/);
+  expect(existsSync(target)).toBe(false);
+  expect(existsSync(dirname(target))).toBe(false);   // 빈 폴더조차 남기지 않는다
+});
+
+// ★격리가 실제로 걸렸는지★ — preload 회귀 감지. ambient B3RYS_HOME/B3RYS_MEMBERS_ROOT 가 새어들어오면
+//   MEMBERS_ROOT 가 실 경로가 되고, 그 순간 가드가 정당한 테스트 쓰기를 막는다(Codex 재현 케이스).
+test("preload 격리 — MEMBERS_ROOT 는 항상 temp (ambient env 가 새어들지 않는다)", () => {
+  // ★opt-in 모드는 예외★ — B3OS_TEST_MEMBERS_ROOT 로 특정 루트를 겨냥한 실행은 temp 가 아닐 수 있다.
+  //   그 경우까지 "항상 temp" 를 요구하면 테스트가 opt-in 자체를 거짓 실패로 만든다(Codex 재리뷰).
+  if (process.env.B3OS_TEST_MEMBERS_ROOT) {
+    expect(MEMBERS_ROOT).toBe(process.env.B3OS_TEST_MEMBERS_ROOT);
+    expect(() => assertNotLiveMemberFsUnderTest(`${MEMBERS_ROOT}/anyone`, "t")).not.toThrow();
+    return;
+  }
+  const t = tmpdir();
+  const underTemp = MEMBERS_ROOT === t || MEMBERS_ROOT.startsWith(`${t}/`)
+    || MEMBERS_ROOT.startsWith("/tmp/") || MEMBERS_ROOT.startsWith("/var/folders/");
+  expect(underTemp).toBe(true);
+  // 격리된 루트는 보호목록에 들어가면 안 된다 — 들어가면 테스트가 자기 워크스페이스를 못 만든다.
+  expect(() => assertNotLiveMemberFsUnderTest(`${MEMBERS_ROOT}/anyone`, "t")).not.toThrow();
+});
+
+// ★경계 없는 prefix 비교 회귀★ (Codex 지적) — 이름이 겹치는 형제 폴더까지 막으면 오탐이다.
+test("live-fs 가드 — 이름만 겹치는 형제 경로는 막지 않는다", () => {
+  const home = process.env.HOME ?? "";
+  expect(() => assertNotLiveMemberFsUnderTest(`${home}/b3os/members-evil/jane`, "t")).not.toThrow();
+  expect(() => assertNotLiveMemberFsUnderTest(`${home}/Development-old/steve`, "t")).not.toThrow();
+});
+
+// `..` 로 우회되면 가드가 무의미하다.
+test("live-fs 가드 — 상대경로/.. 로 우회되지 않는다", () => {
+  const home = process.env.HOME ?? "";
+  expect(() => assertNotLiveMemberFsUnderTest(`${home}/b3os/members/../members/jane`, "t")).toThrow(/live-fs-guard/);
+});
+
+// ★opt-in override 실검증 (subprocess)★ — MEMBERS_ROOT 는 import 시점 상수라, 같은 프로세스 안에서는
+//   "다른 루트로 뜬 상태" 를 만들 수 없다. 그래서 별도 프로세스를 띄워 실제로 확인한다(Codex 재리뷰 요청).
+//   확인할 것 두 가지: ①지정한 non-temp 루트는 통과한다 ②그래도 실 팀원 루트는 여전히 막힌다.
+test("opt-in override — 지정 루트는 통과하되 실 팀원 루트 보호는 그대로", () => {
+  const optRoot = "/workspace/isolated-optin";           // non-temp. 존재하지 않아도 가드 판정엔 무관
+  const mod = join(import.meta.dir, "personaTemplates.ts");
+  const script = `
+    const m = await import(${JSON.stringify(mod)});
+    const home = process.env.HOME;
+    const r = { optIn: "?", legacy: "?", publicDefault: "?" };
+    try { m.assertNotLiveMemberFsUnderTest(process.env.B3RYS_MEMBERS_ROOT + "/jane", "p"); r.optIn = "pass"; }
+    catch { r.optIn = "blocked"; }
+    try { m.assertNotLiveMemberFsUnderTest(home + "/Development/steve", "p"); r.legacy = "pass"; }
+    catch { r.legacy = "blocked"; }
+    try { m.assertNotLiveMemberFsUnderTest(home + "/b3os/members/jane", "p"); r.publicDefault = "pass"; }
+    catch { r.publicDefault = "blocked"; }
+    console.log(JSON.stringify(r));
+  `;
+  const out = Bun.spawnSync({
+    cmd: ["bun", "-e", script],
+    env: { ...process.env, NODE_ENV: "test", B3OS_TEST_MEMBERS_ROOT: optRoot, B3RYS_MEMBERS_ROOT: optRoot },
+    stdout: "pipe", stderr: "pipe",
+  });
+  const stdout = out.stdout.toString().trim();
+  expect(out.exitCode, `stderr: ${out.stderr.toString().slice(0, 400)}`).toBe(0);
+  const r = JSON.parse(stdout.split("\n").pop() ?? "{}");
+  expect(r.optIn).toBe("pass");            // 지정 루트엔 쓸 수 있어야 opt-in 이 의미가 있다
+  expect(r.legacy).toBe("blocked");        // ★override 로도 실 팀원 보호는 안 풀린다★
+  expect(r.publicDefault).toBe("blocked");
+});
+
+// override 가 ★실 팀원 루트를 가리켜도★ 보호가 풀리면 안 된다 (이 변수로 우회 금지).
+test("opt-in override — 실 팀원 루트를 가리키면 무시하고 계속 막는다", () => {
+  const home = process.env.HOME ?? "";
+  const real = `${home}/b3os/members`;
+  const mod = join(import.meta.dir, "personaTemplates.ts");
+  const script = `
+    const m = await import(${JSON.stringify(mod)});
+    try { m.assertNotLiveMemberFsUnderTest(process.env.HOME + "/b3os/members/jane", "p"); console.log("pass"); }
+    catch { console.log("blocked"); }
+  `;
+  const out = Bun.spawnSync({
+    cmd: ["bun", "-e", script],
+    env: { ...process.env, NODE_ENV: "test", B3OS_TEST_MEMBERS_ROOT: real, B3RYS_MEMBERS_ROOT: real },
+    stdout: "pipe", stderr: "pipe",
+  });
+  expect(out.exitCode, `stderr: ${out.stderr.toString().slice(0, 400)}`).toBe(0);
+  expect(out.stdout.toString().trim().split("\n").pop()).toBe("blocked");
 });

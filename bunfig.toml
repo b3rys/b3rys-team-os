@@ -1,3 +1,4 @@
 [test]
-# 전 테스트 격리: audit 파일 로그를 temp로 리다이렉트(라이브 logs/ 오염 방지). 팀 하드레슨.
-preload = ["./src/test/audit-isolation.ts"]
+# 전 테스트 격리: audit 로그 + 멤버 워크스페이스 루트를 temp 로 리다이렉트(라이브 logs/·실 팀원 폴더 오염 방지).
+# 팀 하드레슨. ★import 시점 상수(MEMBERS_ROOT)를 갈아끼우려면 preload 여야 한다★ — 본문 = test-isolation.ts.
+preload = ["./src/test/test-isolation.ts"]
