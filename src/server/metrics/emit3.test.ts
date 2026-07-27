@@ -138,6 +138,63 @@ describe("emit③ request.created (acceptInbound)", () => {
     expect(byName(db, EVENT.ack_observed).length).toBe(0);
   });
 
+  // ─── 라벨(request_kind) — ★emit 여부에는 쓰지 않는다★ (Bill 판정 2026-07-27) ───────────
+  //   "위임→응답" 과 "말 걸면 언제 답하나" 는 둘 다 볼 가치가 있지만 섞이면 둘 다 못 본다.
+  //   그래서 emit 은 open 행 하나로 결정하고, 성격은 라벨로만 남겨 분석에서 나눈다.
+  test("라벨: 선행 요청이 없으면 delegation", () => {
+    const db = setup();
+    const r = acceptInbound(db, env() as never, { dedupeWindowSec: 60 });
+    expect(r.ok).toBe(true);
+    expect(byName(db, EVENT.request_created)[0]!.request_kind).toBe("delegation");
+  });
+
+  test("★라벨: 내게 온 것에 답하면 followup★", () => {
+    const db = setup();
+    // bill → steve 질문
+    const q = acceptInbound(db, env({ body: "질문" }) as never, { dedupeWindowSec: 60 });
+    expect(q.ok).toBe(true);
+    if (!q.ok) return;
+    // steve → bill 답 (부모의 수신자가 steve = 나 → 내게 온 것에 답하는 것)
+    const a = acceptInbound(
+      db,
+      env({ from_agent_id: "steve", to_agent_id: "bill", body: "답", in_reply_to: q.stored.id }) as never,
+      { dedupeWindowSec: 60 },
+    );
+    expect(a.ok).toBe(true);
+    if (!a.ok) return;
+    const ev = byName(db, EVENT.request_created).find((e) => e.request_message_id === a.stored.id);
+    expect(ev?.request_kind).toBe("followup");
+  });
+
+  test("★라벨: 스레드 안 새 위임은 in_reply_to 가 있어도 delegation★ (이번 HIGH 의 그 케이스)", () => {
+    const db = setup();
+    // bill → steve 선행
+    const prev = acceptInbound(db, env({ body: "prev" }) as never, { dedupeWindowSec: 60 });
+    expect(prev.ok).toBe(true);
+    if (!prev.ok) return;
+    // bill → steve 새 위임 (부모의 수신자는 steve 인데 발신자는 bill = 내게 온 게 아니다)
+    const r = acceptInbound(db, env({ body: "새 위임", in_reply_to: prev.stored.id }) as never, { dedupeWindowSec: 60 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const ev = byName(db, EVENT.request_created).find((e) => e.request_message_id === r.stored.id);
+    expect(ev?.request_kind).toBe("delegation");
+  });
+
+  test("★라벨은 emit 여부를 바꾸지 않는다★ — 두 종류 다 정확히 1건씩 emit", () => {
+    const db = setup();
+    const q = acceptInbound(db, env({ body: "질문" }) as never, { dedupeWindowSec: 60 });
+    expect(q.ok).toBe(true);
+    if (!q.ok) return;
+    acceptInbound(
+      db,
+      env({ from_agent_id: "steve", to_agent_id: "bill", body: "답", in_reply_to: q.stored.id }) as never,
+      { dedupeWindowSec: 60 },
+    );
+    const evs = byName(db, EVENT.request_created);
+    expect(evs.length).toBe(2); // 라벨이 달라도 둘 다 emit — 대칭은 open 행이 정한다
+    expect(evs.map((e) => e.request_kind).sort()).toEqual(["delegation", "followup"]);
+  });
+
   test("dedupe로 막힌 재inbound(ok:false)는 무emit", () => {
     const db = setup();
     acceptInbound(db, env() as never, { dedupeWindowSec: 60 });

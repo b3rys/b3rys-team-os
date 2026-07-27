@@ -17,6 +17,34 @@ import { emitLoopEventSafe, EVENT, makeEpisodeId } from "../../metrics/loopEvent
 
 export type InboundEnv = EnvelopeInbound & { explicit_recipients?: string[]; thread_id?: string };
 
+/**
+ * request.created 의 ★라벨★ — emit 여부에는 절대 쓰지 않는다(그건 open 행 하나로만 결정).
+ *
+ * ★왜 type / in_reply_to 로 안 나누나 (실측 근거)★
+ *   Bill 제안은 "type · in_reply_to 유무" 였는데, 실제 버스 2000건을 세어보니 판별력이 없다:
+ *     type="reply"  ▸ 2건 (0.1%)          — 우리 발신은 사실상 전부 type="dm"
+ *     in_reply_to 有 ▸ 1143건 (57%)        — 그런데 그 안에 ★스레드 안 새 위임★ 이 섞여 있다.
+ *                                            (그 배제가 바로 이번 HIGH 버그의 원인이었다)
+ *   즉 둘 다 "대화 후속" 을 가리키지 못한다. 같은 함정을 라벨에서 반복할 뻔했다.
+ *
+ * ★실제로 갈리는 기준: 부모 메시지가 '내게 온 것' 이었는가★
+ *   내게 온 것에 답하면서 상대에게 open 행을 남겼다 → 대화 왕복(followup)
+ *   선행 요청이 없거나, 있어도 내게 온 게 아니다  → 새 일을 맡기는 것(delegation)
+ *   실측 분포(directed 1879건): followup 1007 · delegation 857(부모없음 821 + 스레드안 새위임 36)
+ *                              · 부모 조회 실패 15 → delegation 으로 떨어짐(보수적 기본값)
+ */
+function classifyRequestKind(db: Database, env: InboundEnv): "delegation" | "followup" {
+  const parentId = env.in_reply_to;
+  if (!parentId) return "delegation";
+  const parent = db.prepare(`SELECT to_agent_id FROM message WHERE id = ?`).get(parentId) as
+    | { to_agent_id: string }
+    | undefined;
+  // 부모를 못 찾으면 delegation — 라벨이 없어서 분석에서 빠지는 것보다, 보수적으로 위임에 두고
+  // 필요하면 나중에 재계산하는 편이 낫다(정보를 버리지 않는다).
+  if (!parent) return "delegation";
+  return parent.to_agent_id === env.from_agent_id ? "followup" : "delegation";
+}
+
 export type AcceptInboundResult =
   | { ok: true; stored: EnvelopeStored }
   | { ok: false; duplicate: string; dedupeKey: string };
@@ -103,6 +131,7 @@ export function acceptInbound(
       actor: env.from_agent_id,
       target: env.to_agent_id,
       owner: env.to_agent_id,
+      request_kind: classifyRequestKind(db, env),
       metric_scope: "both",
       reason: `inbound ${env.source ?? "?"}`,
     });

@@ -68,6 +68,13 @@ export interface LoopEvent {
   quiet_hours?: boolean;
   visible_surface?: string;
   metric_scope?: string;
+  // 요청 성격 라벨 (§측정 W1 · Bill 리뷰 2026-07-27)
+  //   ★emit 여부에는 절대 쓰지 않는다★ — emit 은 "ack 가능한 open 행이 생겼는가" 하나로만 결정한다.
+  //   이건 분석에서 차원을 나누기 위한 ★라벨★ 이다: "위임→응답" 과 "말 걸면 언제 답하나" 는
+  //   둘 다 볼 가치가 있지만 섞이면 둘 다 못 본다. 라벨로 두면 나중에 재계산이 된다(정보를 안 버린다).
+  //     delegation — 새 일을 맡기는 것(선행 요청이 없거나, 있어도 내게 온 게 아님)
+  //     followup   — 내게 온 것에 답하면서 상대에게 open 행을 남긴 것(대화 왕복)
+  request_kind?: "delegation" | "followup";
   // 결과
   outcome?: string;
   reason?: string;
