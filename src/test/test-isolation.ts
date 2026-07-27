@@ -29,6 +29,13 @@ if (!process.env.B3OS_AUDIT_LOG_DIR) {
 process.env.B3RYS_MEMBERS_ROOT =
   process.env.B3OS_TEST_MEMBERS_ROOT ?? mkdtempSync(join(tmpdir(), "b3os-test-members-"));
 
+// ★Claude Code 세션 저장소 격리 (2026-07-27)★
+//   dmSyncWorker 계열 테스트가 세션 픽스처를 만들려고 실 `~/.claude/projects/` 에 폴더를 쌓았다
+//   (이 맥에 5,157개 누적). 이름이 고유해 덮어쓰기는 없지만 ★사용자 디렉터리 오염★이고,
+//   실 팀원 워크스페이스 사고와 같은 계열(테스트가 실제 사용자 경로에 쓴다)이다.
+process.env.B3OS_CLAUDE_PROJECTS_DIR =
+  process.env.B3OS_CLAUDE_PROJECTS_DIR || mkdtempSync(join(tmpdir(), "b3os-test-claude-projects-"));
+
 // 테스트는 ★라이브 모드★(B3OS_LIVE=1 → PUBLIC_BUILD=false)로 돈다 = 전 기능(codex 영입·런타임 swap·
 // 롤백 등 라이브 전용)을 검증한다. 공개 모드(PUBLIC_BUILD=true) 동작은 해당 테스트가 인자를 명시적으로
 // 넘겨(allowedRuntimes(true) 등) 따로 검증한다. (public=source 런타임 토글 — docs/BUILD_MODES.md)
