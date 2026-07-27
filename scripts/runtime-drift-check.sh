@@ -62,7 +62,9 @@ resolve_bin() {
 # 설치 위치가 표준을 벗어나는 환경(리눅스·nix·커스텀 prefix)을 위한 주입구.
 # 테스트에서 실패 경로를 재현할 때도 쓴다.
 CLAUDE_BIN="${B3OS_CLAUDE_BIN:-$(resolve_bin claude "$HOME/.local/bin/claude" "$HOME/.claude/local/claude" || true)}"
-OPENCLAW_BIN="${B3OS_OPENCLAW_BIN:-$(resolve_bin openclaw /opt/homebrew/bin/openclaw /usr/local/bin/openclaw || true)}"
+# ~/.local/bin 이 맨 앞 — openclaw 는 npm global 로 깔려 거기 들어간다(2026-07-27). 이게 빠져 있어
+# 서버(launchd, PATH 에 ~/.local/bin 없음)가 openclaw 를 못 찾은 적이 있다. 드리프트 감시도 같은 눈을 갖는다.
+OPENCLAW_BIN="${B3OS_OPENCLAW_BIN:-$(resolve_bin openclaw "$HOME/.local/bin/openclaw" /opt/homebrew/bin/openclaw /usr/local/bin/openclaw || true)}"
 HERMES_BIN="${B3OS_HERMES_BIN:-$(resolve_bin hermes /opt/homebrew/bin/hermes "$HOME/.local/bin/hermes" || true)}"
 BUN_BIN="${B3OS_BUN_BIN:-$(resolve_bin bun "$HOME/.bun/bin/bun" /opt/homebrew/bin/bun || true)}"
 NODE_BIN="${B3OS_NODE_BIN:-$(resolve_bin node /opt/homebrew/bin/node /usr/local/bin/node || true)}"
