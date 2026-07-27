@@ -53,4 +53,21 @@ describe("runtime activation safety", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("Hermes activation expands HERMES_CWD=~/path under bash and zsh", () => {
+    const snippet = [
+      'HOME="/Users/gdmini"',
+      'HERMES_CWD="~/foo"',
+      'case "$HERMES_CWD" in',
+      '  "~/"*) HERMES_CWD="$HOME/${HERMES_CWD#\\~/}" ;;',
+      '  "~") HERMES_CWD="$HOME" ;;',
+      'esac',
+      'printf "%s" "$HERMES_CWD"',
+    ].join("\n");
+    for (const shell of ["bash", "zsh"]) {
+      const run = spawnSync(shell, ["-c", snippet], { encoding: "utf-8" });
+      expect(run.status, `${shell}: ${run.stderr || run.stdout}`).toBe(0);
+      expect(run.stdout).toBe("/Users/gdmini/foo");
+    }
+  });
 });

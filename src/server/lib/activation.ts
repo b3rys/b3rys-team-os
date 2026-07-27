@@ -329,6 +329,19 @@ function runtimeScript(id: string, runtime: string, runtimeCwd?: string): { scri
   return null; // claude_channel 은 별도 런타임 활성화 없음(CLAUDE.md + tmux/LaunchAgent)
 }
 
+export function resolveActivationRuntimeCwd(
+  id: string,
+  inputRuntimeCwd: string | null | undefined,
+  configured: { workspace_path?: string | null; runtime_cwd?: string | null } | undefined,
+  fallbackWorkspacePath: string,
+): string {
+  return runtimeCwdForAgent({
+    id,
+    workspace_path: configured?.workspace_path ?? fallbackWorkspacePath,
+    runtime_cwd: inputRuntimeCwd ?? configured?.runtime_cwd ?? null,
+  });
+}
+
 /** 토큰을 스크립트가 기대하는 파일에 0600 저장(stdout 노출 없음). */
 function placeToken(tokenFile: string, token: string): void {
   mkdirSync(dirname(tokenFile), { recursive: true });
@@ -564,11 +577,7 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
   try { clearAgentOff(id); } catch { /* best-effort */ }
   const paths = memberPaths(id, runtime);
   const configured = activationAgents.find((a: any) => a.id === id);
-  const runtimeCwd = runtimeCwdForAgent({
-    id,
-    workspace_path: paths.workspace_path,
-    runtime_cwd: input.runtime_cwd ?? configured?.runtime_cwd ?? null,
-  });
+  const runtimeCwd = resolveActivationRuntimeCwd(id, input.runtime_cwd, configured, paths.workspace_path);
   // 라이브 생성 경로 → 핵심룰의 {{OWNER}}/{{TEAM}} 을 setting owner_name(="GD")/team_name(="b3rys")으로 치환. 미설정이면 undefined → 플레이스홀더 유지.
   const ownerRow = db.query("SELECT value FROM setting WHERE key = 'owner_name'").get() as { value: string } | null;
   const owner_name = ownerRow?.value || undefined;

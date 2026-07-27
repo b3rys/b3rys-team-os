@@ -622,6 +622,7 @@ export function widenAgentRuntimeChecks(db: Database): void {
         tmux_session TEXT,
         telegram_bot_username TEXT,
         workspace_path TEXT NOT NULL,
+        runtime_cwd TEXT,
         persona_file TEXT NOT NULL,
         moderator_eligible INTEGER NOT NULL DEFAULT 0,
         avatar_emoji TEXT NOT NULL DEFAULT '🤖',
@@ -633,7 +634,7 @@ export function widenAgentRuntimeChecks(db: Database): void {
       )`,
     );
     // ★ 데이터 보존(하네스 리뷰 발견): 고정 컬럼 목록으로 복사하면 나중에 추가된 컬럼(icon·hermes_profile·
-    // hermes_alias·gateway_service)이 재빌드 때 날아간다. 소스∩신규 '공통 컬럼'만 동적으로 복사해 드리프트 안전하게.
+    // hermes_alias·gateway_service·runtime_cwd)이 재빌드 때 날아간다. 소스∩신규 '공통 컬럼'만 동적으로 복사해 드리프트 안전하게.
     const srcCols = (db.prepare("PRAGMA table_info('agent')").all() as { name: string }[]).map((c) => c.name);
     const newCols = new Set(
       (db.prepare("PRAGMA table_info('agent_new')").all() as { name: string }[]).map((c) => c.name),

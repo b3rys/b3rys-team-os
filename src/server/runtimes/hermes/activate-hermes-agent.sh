@@ -18,7 +18,7 @@ DESC="${DESC:-b3rys 팀원 ($AGENT_ID)}"
 WS="${WS:-$HOME/Development/$AGENT_ID}"
 HERMES_CWD="${HERMES_CWD:-$WS}"
 case "$HERMES_CWD" in
-  "~/"*) HERMES_CWD="$HOME/${HERMES_CWD#~/}" ;;
+  "~/"*) HERMES_CWD="$HOME/${HERMES_CWD#\~/}" ;;
   "~") HERMES_CWD="$HOME" ;;
 esac
 TOKEN_FILE="${TOKEN_FILE:-$HOME/.hermes/credentials/$AGENT_ID-token.txt}"
