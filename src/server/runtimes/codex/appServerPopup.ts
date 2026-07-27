@@ -19,8 +19,12 @@ export const PROCESS_INSTANCE = randomUUID();
 /**
  * ★Phase1 ③: 승인 결정을 상관키 스토어 CAS로 마감해 안전 배달 여부를 정한다(순수 로직·테스트 가능).
  * - 거절류(denied/abort): decided+expire(중복 차단·grant 없음) 후 그대로 반환.
- * - 승인류(approved/approved_for_session): CAS pending→decided(중복 버튼=exactly-once) → delivered(operation_hash+process_instance 일치 시만=TOCTOU·재시작 재결합 금지).
- *   어느 단계든 실패=★fail-closed로 "denied"★(상관키 미기록·중복·불일치·orphan 전부 거부). */
+ * - 승인류(approved/approved_for_session): CAS pending→decided(중복 버튼=exactly-once) → delivered(operation_hash+process_instance 일치 시만).
+ *   어느 단계든 실패=★fail-closed로 "denied"★(상관키 미기록·중복·불일치·orphan 전부 거부).
+ *
+ * ★범위 주의★: 여기서 operation_hash 비교가 막는 것은 ★다른 요청의 결정이 이 슬롯에 배달되는 것★이다.
+ * 같은 요청의 작업이 승인 후 실행 직전에 바뀌는 것은 막지 못한다 — 비교 대상이 승인 ★전에 캡처한 같은 값★이기 때문.
+ * (approvalOperationHash 주석의 '알려진 갭' 참조) */
 export function finalizeApprovalDelivery(
   store: CodexApprovalCorrelationStore,
   requestId: string,
@@ -34,13 +38,25 @@ export function finalizeApprovalDelivery(
     return decision;
   }
   if (!store.markDecided(requestId)) return "denied";                              // 미기록/이미처리 → fail-closed
-  if (!store.markDelivered(requestId, operationHash, processInstance)) return "denied"; // TOCTOU/orphan/재시작 → 거부
+  if (!store.markDelivered(requestId, operationHash, processInstance)) return "denied"; // 요청 불일치/orphan/재시작 → 거부
   return decision;
 }
 
-/** ★Phase1 ③(TOCTOU/scope): 팝업 표시용 command/path는 잘리지만(2000/500), grant·audit는 ★전체 미절단★ 작업에
- *  묶여야 한다. 전체 command 배열 + 정렬 파일집합 + method로 sha256(16hex) → provenance.operation_hash.
- *  이후 상관키 테이블/CAS(별도 슬라이스)가 이 해시로 결정↔요청을 1:1 검증한다(잘린 요약 충돌로 grant 재사용 차단). */
+/** 승인 요청의 작업 지문(sha256 16hex) — 전체 command 배열 + 파일 ★이름★ 집합 + method + reason.
+ *  용도는 하나뿐이다: 상관키 테이블/CAS가 ★결정↔요청을 1:1로 맞추는 것★(다른 요청의 결정이 이 슬롯에 배달되는 것을 막는다).
+ *
+ *  ★이 해시가 하지 ★않는★ 것 — 알려진 갭(2026-07-28 Codex·Bill 리뷰에서 확인, 재현 테스트는 아래 파일 참조):★
+ *   1. ★권한 grant 재사용을 막지 못한다.★ grant scope는 permissionGate.scopeKeyForOperation이 따로 만들고
+ *      그 안에 이 해시가 들어가지 않는다(permissionGate.ts에 operation_hash 참조 0건). scope의 target은
+ *      ★앞 240자만★ 쓰므로(permissionGate.ts:216), 240자 prefix가 같고 뒤가 다른 두 작업은 ★같은 grant★로 취급된다.
+ *      게다가 이미 grant가 있으면 requestApprovalPopup이 조기 반환해 상관키·CAS·finalize를 ★전부 건너뛴다★.
+ *   2. ★승인 후 실행 직전의 변경을 잡지 못한다.★ 이 해시는 승인 ★전에 한 번★ 계산해 그 캡처값을 그대로
+ *      finalize에 넘긴다 — 실행 직전에 다시 계산해 비교하지 않는다.
+ *   3. ★같은 파일의 내용 변경을 구분하지 못한다.★ files는 Object.keys()라 ★이름만★ 담는다.
+ *      command 경로는 배열 전체가 들어가 구분되지만, fileChanges 경로는 이름 집합이 같으면 해시가 같다.
+ *
+ *  → 위 3건은 후속 작업에서 다룬다(전체 canonical operation을 grant scope에 결합 + 실행 직전 재해시 +
+ *     파일 내용 해시). ★그 전까지 B3OS_CODEX_APPSERVER를 켜지 않는다 — release blocker.★ */
 export function approvalOperationHash(req: ApprovalRequest): string {
   const p = req.params as Record<string, any>;
   const basis = {
@@ -65,7 +81,8 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
     cwd: cwd ?? p.cwd ?? null,
     // ★provenance에 origin 표식(팝업 표시 하드닝·audit). taint 전체는 M3b 공용 layer로 확장.★
     input_origin: "codex_turn",
-    // ★Phase1 ③: 전체(미절단) 작업 해시 — 잘린 command/path 요약과 무관하게 정확한 작업에 grant/audit를 묶는 근거.★
+    // 작업 지문 — ★audit/상관키 대조용으로만 기록된다.★ permissionGate는 이 값을 읽지 않으므로
+    // ★grant scope에는 반영되지 않는다★(알려진 갭 — approvalOperationHash 주석 참조).
     operation_hash: approvalOperationHash(req),
   };
   if (Array.isArray(p.command)) {
@@ -136,7 +153,7 @@ export async function requestApprovalPopup(db: Database, req: ApprovalRequest, a
     });
   } catch { /* best-effort */ }
   const decision = await pollDecision(db, requestId, ttlMs);
-  // ★결정을 CAS로 마감(중복·TOCTOU·orphan 차단) 후 반환.★
+  // ★결정을 CAS로 마감(중복 버튼·요청 불일치·orphan 거부) 후 반환. 실행 직전 변경 검출은 아님 — 위 갭 주석 참조.★
   return finalizeApprovalDelivery(store, requestId, opHash, decision);
 }
 

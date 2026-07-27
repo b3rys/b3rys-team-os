@@ -171,7 +171,8 @@ export interface CodexApprovalCorrelationRow {
 /**
  * codex app-server 승인 팝업 ↔ server-request 상관키 + CAS 상태(Phase1 ③).
  * 팝업(permission_request.id)과 실제 승인 요청을 1:1로 묶고, 상태전이를 CAS(원자적 UPDATE ... WHERE state=)로만 해
- * 중복 버튼(exactly-once)·TTL 늦은승인·서버재시작 orphan·TOCTOU(operation_hash 재검증)를 안전 처리한다.
+ * 중복 버튼(exactly-once)·TTL 늦은승인·서버재시작 orphan·요청 불일치(operation_hash 대조)를 안전 처리한다.
+ * ★operation_hash는 승인 전 캡처값이라 실행 직전 변경 검출이 아니고, 권한 grant scope에도 들어가지 않는다(알려진 갭).★
  */
 export class CodexApprovalCorrelationStore {
   constructor(private readonly db: Database) {}
@@ -209,7 +210,7 @@ export class CodexApprovalCorrelationStore {
   }
 
   /**
-   * delivery: decided→delivered. ★operation_hash 일치(TOCTOU) + process_instance 일치(재시작 재결합 금지)일 때만★ 성공.
+   * delivery: decided→delivered. ★operation_hash 일치(요청 대조) + process_instance 일치(재시작 재결합 금지)일 때만★ 성공.
    * true면 codex에 승인 전달 허용. false면 거부(불일치/orphan/재시작/이미처리).
    */
   markDelivered(requestId: string, operationHash: string, processInstance: string): boolean {

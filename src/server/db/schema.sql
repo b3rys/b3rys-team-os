@@ -171,7 +171,7 @@ CREATE TABLE IF NOT EXISTS codex_approval_correlation (
   thread_id TEXT,
   turn_id TEXT,
   item_id TEXT,
-  operation_hash TEXT NOT NULL,             -- 전체(미절단) 작업 해시 — delivery 시 재검증(TOCTOU)
+  operation_hash TEXT NOT NULL,             -- 작업 지문(승인 전 캡처) — delivery 시 결정↔요청 1:1 대조용. grant scope에는 미반영(알려진 갭)
   process_instance TEXT NOT NULL,           -- 서버 프로세스 인스턴스 id(재시작 감지)
   state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','decided','delivered','expired','orphaned')),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),

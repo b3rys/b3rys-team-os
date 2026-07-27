@@ -18,7 +18,7 @@ const base = (over: Partial<Parameters<CodexApprovalCorrelationStore["record"]>[
   threadId: "th1", turnId: "tn1", itemId: "it1", serverRequestId: "srv1", ...over,
 });
 
-describe("CodexApprovalCorrelationStore — CAS/TOCTOU/orphan", () => {
+describe("CodexApprovalCorrelationStore — CAS/요청대조/orphan", () => {
   let s: ReturnType<typeof setup>;
   beforeEach(() => { s = setup(); });
 
@@ -37,9 +37,9 @@ describe("CodexApprovalCorrelationStore — CAS/TOCTOU/orphan", () => {
     expect(s.store.get("req1")!.state).toBe("decided");
   });
 
-  test("markDelivered: hash+proc 일치할 때만 성공(TOCTOU + 재시작 재결합 금지)", () => {
+  test("markDelivered: hash+proc 일치할 때만 성공(다른 요청의 결정 배달 거부 + 재시작 재결합 금지)", () => {
     s.store.record(base()); s.store.markDecided("req1");
-    expect(s.store.markDelivered("req1", "WRONGHASH", "proc1")).toBe(false); // TOCTOU 불일치 거부
+    expect(s.store.markDelivered("req1", "WRONGHASH", "proc1")).toBe(false); // 요청 불일치 거부
     expect(s.store.get("req1")!.state).toBe("decided");
     expect(s.store.markDelivered("req1", "hashAAA", "proc2")).toBe(false);   // 다른 프로세스(재시작) 거부
     expect(s.store.markDelivered("req1", "hashAAA", "proc1")).toBe(true);    // 일치 → delivered
