@@ -89,9 +89,9 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
     return { runtime: "codex", agent_id: agentId, action: "shell", command: p.command.join(" ").slice(0, 2000), requested_by: agentId, provenance };
   }
   if (p.fileChanges && typeof p.fileChanges === "object") {
-    // scope_key(target)를 files[0]만이 아니라 '전체 파일집합(정렬)'으로 만든다 — 파일집합이 다르면 scope도 달라진다.
-    // ★단 일반 보장은 아니다★: target은 permissionGate에서 앞 240자만 쓰이므로(그리고 여기서도 500자로 자른다)
-    // 목록이 길면 서로 다른 파일집합이 같은 scope로 접힐 수 있다. 전체 결합은 미구현 — 이슈 #106.
+    // scope_key(target)의 입력을 files[0]에서 '정렬된 전체 파일목록'으로 넓힌다.
+    // ★단 target 절단 전까지만 구분력이 늘어날 뿐, '서로 다른 파일집합 → 서로 다른 scope'를 일반 보장하지 않는다.★
+    // (여기서 500자, permissionGate.targetForOperation에서 240자로 잘린다.) 전체 결합은 미구현 — 이슈 #106.
     const files = Object.keys(p.fileChanges).sort();
     return { runtime: "codex", agent_id: agentId, action: "write", path: files.join("|").slice(0, 500), text: files.join(", ").slice(0, 500), requested_by: agentId, provenance };
   }
