@@ -148,6 +148,17 @@ function isExecutableFile(path: string): boolean {
  * 규약은 resolve_bin 과 동일: 명시 env → 실경로 후보 → PATH.
  * spawn 시점마다 해석한다(서버 기동 후 설치된 경우도 재시작 없이 잡히게).
  */
+/**
+ * ★점검(preflight)이 볼 후보 목록★ — 실행부와 같은 우선순위를 순수 함수로 노출한다.
+ * 실행부는 OPENCLAW_BIN 을 최우선으로 존중하는데 점검이 후보 목록만 보면, 비표준 prefix 에 설치하고
+ * OPENCLAW_BIN 을 지정한 ★정상 환경을 "CLI 미설치" 로 오차단★ 한다(2026-07-27 Codex 리뷰).
+ * 파일시스템을 안 타는 순수 함수라 회귀 테스트가 머신 구성에 흔들리지 않는다.
+ */
+export function openclawCliCandidates(env: Record<string, string | undefined> = process.env): string[] {
+  const explicit = env.OPENCLAW_BIN?.trim();
+  return explicit ? [explicit, ...OPENCLAW_BIN_CANDIDATES] : [...OPENCLAW_BIN_CANDIDATES];
+}
+
 export function resolveOpenclawBin(
   env: Record<string, string | undefined> = process.env,
   candidates: readonly string[] = OPENCLAW_BIN_CANDIDATES,

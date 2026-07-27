@@ -9,7 +9,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { appendAuditFile } from "./auditFile";
 import { HOME, OPENCLAW_ROOT } from "./paths";
-import { OPENCLAW_BIN_CANDIDATES } from "./openclawBridge";
+import { openclawCliCandidates } from "./openclawBridge";
 
 // codex 풀패스(iTerm alias 깨짐 회피) — reference_codex_binary_path.
 const CODEX_BIN = "/opt/homebrew/bin/codex";
@@ -191,8 +191,12 @@ async function checkCodexAuth(runtime: string): Promise<RuntimeAuthResult> {
   const base: RuntimeAuthResult = { runtime, loggedIn: false, detail: "", fixHint: CODEX_FIX_HINT };
   // ① 바이너리 부재 감지 — 런타임별 CLI를 확인(openclaw는 codex가 아니라 openclaw 바이너리. 하네스: openclaw 미설치를 "brew reinstall codex"로 오안내하던 갭). 미설치 vs 미로그인 구분.
   if (runtime === "openclaw") {
-    // ★점검과 실행이 같은 목록을 본다★ — 이게 어긋나서 "설치됨(초록)인데 깨우기는 실패" 가 났다.
-    if (!binaryExists("openclaw", ...OPENCLAW_BIN_CANDIDATES)) {
+    // ★점검과 실행이 같은 해석을 쓴다★ — 이게 어긋나서 "설치됨(초록)인데 깨우기는 실패" 가 났다.
+    //   ★후보 목록만 맞추면 부족하다★ (2026-07-27 Codex 리뷰 적발): 실행부 resolveOpenclawBin() 은
+    //   OPENCLAW_BIN 을 ★최우선★ 으로 존중하는데, 점검이 후보 목록만 보면 비표준 prefix 에 설치하고
+    //   OPENCLAW_BIN 을 지정한 ★정상 지원 환경★ 을 "CLI 미설치" 로 오차단한다. 이번엔 방향만 반대일 뿐
+    //   같은 부류의 어긋남이다. 그래서 실행부가 고른 값 자체를 후보 맨 앞에 넣는다.
+    if (!binaryExists("openclaw", ...openclawCliCandidates())) {
       return { ...base, loggedIn: false, detail: "openclaw CLI 미설치(바이너리 없음)", fixHint: `openclaw CLI가 설치되지 않았습니다. 이 서버 컴퓨터에서 \`npm install -g openclaw@latest\` 로 설치하고 \`openclaw onboard --install-daemon\` 으로 인증/게이트웨이 준비 후 다시 활성화하세요. ${RUNTIME_SETUP_DOC}#openclaw` };
     }
     // openclaw enable/disable(setOpenclaw)·activate 스크립트는 openclaw.json 편집에 python3 를 쓴다 → 미설치면 토글이 조용히 실패. 사전 차단(GD 2026-07-02).
