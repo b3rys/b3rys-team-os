@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 보안 취약점 신고
+    url: https://github.com/b3rys/b3rys-team-os/security/advisories/new
+    about: 취약점은 공개 이슈가 아니라 비공개로 신고해 주세요.
