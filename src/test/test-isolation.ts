@@ -20,10 +20,14 @@ if (!process.env.B3OS_AUDIT_LOG_DIR) {
 //   맥스튜디오는 실 팀원이 정확히 그 기본 경로(`~/b3os/members/`)에 살아서 제인이 실제로 훼손됐다.
 //   ★"테스트가 실 팀원 id 를 피하게" 고치는 건 답이 아니다★ — 다음 사람이 또 겹치는 id 를 쓴다.
 //   루트 자체를 temp 로 옮겨 ★어떤 id 를 쓰든 실 팀원에 닿지 않게★ 한다.
-//   (이미 명시된 값은 존중 — 특정 루트를 겨냥한 의도적 실행을 막지 않는다.)
-if (!process.env.B3RYS_MEMBERS_ROOT && !process.env.B3RYS_HOME) {
-  process.env.B3RYS_MEMBERS_ROOT = mkdtempSync(join(tmpdir(), "b3os-test-members-"));
-}
+//
+//   ★ambient 값을 존중하지 않고 항상 덮는다★ (2026-07-27 Codex 리뷰 적발). 처음엔 "이미 값이 있으면
+//   존중" 으로 짰는데, 그러면 CI·컨테이너가 관례적으로 B3RYS_HOME=/workspace/b3os 를 주는 순간
+//   격리가 통째로 꺼지고, 넓힌 가드가 그 루트를 실 팀원 자리로 보아 ★정당한 테스트 쓰기를 막는다★
+//   (Codex 재현: B3RYS_HOME 을 준 채 실행 → 35 pass / 1 fail). "전 테스트 격리" 와 "ambient 존중" 은
+//   동시에 성립하지 않는다. 격리를 기본으로 두고, 특정 루트를 겨냥한 실행만 아래 전용 변수로 연다.
+process.env.B3RYS_MEMBERS_ROOT =
+  process.env.B3OS_TEST_MEMBERS_ROOT ?? mkdtempSync(join(tmpdir(), "b3os-test-members-"));
 
 // 테스트는 ★라이브 모드★(B3OS_LIVE=1 → PUBLIC_BUILD=false)로 돈다 = 전 기능(codex 영입·런타임 swap·
 // 롤백 등 라이브 전용)을 검증한다. 공개 모드(PUBLIC_BUILD=true) 동작은 해당 테스트가 인자를 명시적으로
