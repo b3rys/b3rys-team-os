@@ -173,10 +173,13 @@ Slack은 **Socket Mode**로 붙습니다 — 공개 URL·웹훅 엔드포인트�
 
 1. 대시보드 **Settings → Slack** 위저드를 엽니다.
 2. 안내되는 **매니페스트로 앱 생성** (*From a manifest* — Socket Mode가 켜진 매니페스트) → 워크스페이스 선택.
-3. **App-Level Token** (`xapp-…`, scope `connections:write`)을 발급해 대시보드에 붙여넣습니다. *(메시지 전송용 봇 토큰 `xoxb-…`는 별도)*
-4. 봇을 대상 채널에 초대합니다.
+3. **Event Subscriptions** → `Enable Events` **ON** → `Subscribe to bot events` → `app_mention` 추가 → **Save Changes**. *(매니페스트에 이미 있어도 실제로 켜져 있는지 확인하세요 — 꺼져 있으면 봇이 멘션에 반응하지 않고 오류도 나지 않습니다)*
+4. **App-Level Token** (`xapp-…`, scope `connections:write`)을 발급해 대시보드에 붙여넣습니다. *(메시지 전송용 봇 토큰 `xoxb-…`는 별도)*
+5. 봇을 대상 채널에 초대합니다.
 
-> 🛠️ 공개 URL 방식을 선호하면 위저드에서 **Event URL** 모드로 바꿔 `/team/api/slack/events` 를 쓸 수도 있습니다(선택).
+> 🛠️ **`@멘션`이 없으면 봇에게 전달되지 않습니다.** 서버는 멘션 이벤트만 받습니다. 멘션 없이 쓴 글은 들어가지 않고 오류도 나지 않으니, 답이 없을 때는 "무시"가 아니라 "안 들어간 것"일 수 있습니다.
+>
+> 자세한 절차는 [docs/SLACK_SETUP.md](docs/SLACK_SETUP.md).
 
 채널은 텔레그램·슬랙 중 하나만 연결해도 됩니다.
 
