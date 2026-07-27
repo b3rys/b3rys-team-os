@@ -286,7 +286,14 @@ export function makeCodexAdapter(
       // ok:true(no-retry) — 정지는 정상 상태지 실패 아님.
       if (isAgentOff(targetAgentId)) return { ok: true, detail: "codex_agent_off" };
 
-      const key = `${row.message_id}:${targetAgentId}`;
+      // ★동시성(concurrency) 잠금 = 팀원(agent) 단위 — 메시지(message_id) 단위가 아니다.★
+      //   이유(Ames 교차검증 2026-07-24 + 코드 재검증): wake()는 아래서 runTurn을 detach(즉시 반환)하고,
+      //   2026-07-16 dispatchRow '턴 완료까지 블록' 직렬화(wakeDispatcher)는 hermes/openclaw/claude만 커버하고
+      //   ★codex는 빠져 있었다.★ 키가 message_id별이면 같은 agent에 '다른 메시지'가 오면 동시 턴 2개가 떠
+      //   같은 Codex 세션을 동시 resume/기록 → 답 섞임·맥락 꼬임·중복 발신이 난다.
+      //   → agent 단위 잠금으로 앞 턴이 끝날 때(아래 finally)까지 다음 턴을 defer(연기)해 '한 팀원=한 번에 한 턴'을 보장.
+      //   (다른 런타임과 동일 계약. 공용 RuntimeTurnCoordinator 리팩터는 shared 코드라 별도 과제로 분리.)
+      const key = targetAgentId;
       if (inFlight.has(key)) return { ok: true, deferred: true, detail: "codex_in_flight" };
       inFlight.add(key);
 

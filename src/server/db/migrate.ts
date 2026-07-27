@@ -267,6 +267,24 @@ export function migrateCodexRuntimeState(db: Database): void {
      )`,
   );
   db.exec("CREATE INDEX IF NOT EXISTS idx_codex_inflight_started ON codex_inflight(started_at)");
+  // Phase1 ③: 승인 팝업 ↔ app-server request 상관키 + CAS 상태(codex-owned, additive).
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS codex_approval_correlation (
+       request_id TEXT PRIMARY KEY,
+       agent_id TEXT NOT NULL REFERENCES agent(id) ON DELETE CASCADE,
+       server_request_id TEXT,
+       thread_id TEXT,
+       turn_id TEXT,
+       item_id TEXT,
+       operation_hash TEXT NOT NULL,
+       process_instance TEXT NOT NULL,
+       state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','decided','delivered','expired','orphaned')),
+       created_at TEXT NOT NULL DEFAULT (datetime('now')),
+       decided_at TEXT
+     )`,
+  );
+  db.exec("CREATE INDEX IF NOT EXISTS idx_codex_approval_corr_state ON codex_approval_correlation(state, created_at)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_codex_approval_corr_proc ON codex_approval_correlation(process_instance)");
 }
 
 export function migrateSchedulerState(db: Database): void {

@@ -7,9 +7,50 @@
  * 매핑: allowed_once→approved · allowed_always→approved_for_session · denied/expired/timeout→denied.
  * ★안전: Tier-D는 여기 도달 전 judgeApproval에서 이미 denied(팝업 안 뜸). fail-closed: 에러/무응답→denied.★
  */
+import { createHash, randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { requestPermission, getPermissionRequest, type PermissionOperation } from "../../lib/permissionGate";
 import type { ApprovalRequest, ReviewDecision } from "./appServerClient";
+import { CodexApprovalCorrelationStore } from "./state";
+
+/** ★Phase1 ③: 이 서버 프로세스 인스턴스 id — 재시작 감지용(옛 팝업을 새 프로세스가 새 turn에 재결합 금지).★ */
+export const PROCESS_INSTANCE = randomUUID();
+
+/**
+ * ★Phase1 ③: 승인 결정을 상관키 스토어 CAS로 마감해 안전 배달 여부를 정한다(순수 로직·테스트 가능).
+ * - 거절류(denied/abort): decided+expire(중복 차단·grant 없음) 후 그대로 반환.
+ * - 승인류(approved/approved_for_session): CAS pending→decided(중복 버튼=exactly-once) → delivered(operation_hash+process_instance 일치 시만=TOCTOU·재시작 재결합 금지).
+ *   어느 단계든 실패=★fail-closed로 "denied"★(상관키 미기록·중복·불일치·orphan 전부 거부). */
+export function finalizeApprovalDelivery(
+  store: CodexApprovalCorrelationStore,
+  requestId: string,
+  operationHash: string,
+  decision: ReviewDecision,
+  processInstance: string = PROCESS_INSTANCE,
+): ReviewDecision {
+  if (decision === "denied" || decision === "abort") {
+    store.markDecided(requestId); // 중복 버튼 차단(CAS)
+    store.expire(requestId);      // 거절 = grant 없음 명시
+    return decision;
+  }
+  if (!store.markDecided(requestId)) return "denied";                              // 미기록/이미처리 → fail-closed
+  if (!store.markDelivered(requestId, operationHash, processInstance)) return "denied"; // TOCTOU/orphan/재시작 → 거부
+  return decision;
+}
+
+/** ★Phase1 ③(TOCTOU/scope): 팝업 표시용 command/path는 잘리지만(2000/500), grant·audit는 ★전체 미절단★ 작업에
+ *  묶여야 한다. 전체 command 배열 + 정렬 파일집합 + method로 sha256(16hex) → provenance.operation_hash.
+ *  이후 상관키 테이블/CAS(별도 슬라이스)가 이 해시로 결정↔요청을 1:1 검증한다(잘린 요약 충돌로 grant 재사용 차단). */
+export function approvalOperationHash(req: ApprovalRequest): string {
+  const p = req.params as Record<string, any>;
+  const basis = {
+    method: req.method,
+    command: Array.isArray(p.command) ? p.command : null,
+    files: p.fileChanges && typeof p.fileChanges === "object" ? Object.keys(p.fileChanges).sort() : null,
+    reason: typeof p.reason === "string" ? p.reason : null,
+  };
+  return createHash("sha256").update(JSON.stringify(basis)).digest("hex").slice(0, 16);
+}
 
 const POPUP_TTL_MS = Number(process.env.B3OS_CODEX_APPSERVER_POPUP_TTL_MS ?? 60 * 60 * 1000); // 1h (GD: 무응답→hold)
 const POLL_INTERVAL_MS = Number(process.env.B3OS_CODEX_APPSERVER_POLL_MS ?? 1500);
@@ -24,6 +65,8 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
     cwd: cwd ?? p.cwd ?? null,
     // ★provenance에 origin 표식(팝업 표시 하드닝·audit). taint 전체는 M3b 공용 layer로 확장.★
     input_origin: "codex_turn",
+    // ★Phase1 ③: 전체(미절단) 작업 해시 — 잘린 command/path 요약과 무관하게 정확한 작업에 grant/audit를 묶는 근거.★
+    operation_hash: approvalOperationHash(req),
   };
   if (Array.isArray(p.command)) {
     return { runtime: "codex", agent_id: agentId, action: "shell", command: p.command.join(" ").slice(0, 2000), requested_by: agentId, provenance };
@@ -65,19 +108,36 @@ export async function pollDecision(db: Database, requestId: string, ttlMs = POPU
  * ★반환 전까지 codex 턴이 대기하므로, 상위(runner)는 이 대기 동안 turn timeout을 연기해야 한다(M5.3 배선).★
  */
 export async function requestApprovalPopup(db: Database, req: ApprovalRequest, agentId: string, cwd?: string, ttlMs = POPUP_TTL_MS): Promise<ReviewDecision> {
+  const store = new CodexApprovalCorrelationStore(db);
+  const opHash = approvalOperationHash(req);
   let requestId: string | undefined;
   try {
     const op = buildOperationFromApproval(req, agentId, cwd);
     const res = requestPermission(db, op); // ★팝업 생성(telegramCapture가 렌더)★
     // requestPermission이 Tier-D면 deny로 즉시 반환(팝업 안 만듦) — 이중 안전.
     if (res.decision === "deny") return "denied";
-    if (res.decision === "allow") return "approved"; // 이미 grant 있으면 통과
+    if (res.decision === "allow") return "approved"; // 이미 grant 있으면 통과(기존 grant는 permissionGate가 벤팅)
     requestId = res.request?.id;
   } catch {
     return "denied"; // ★fail-closed: 팝업 생성 실패 → 거절★
   }
   if (!requestId) return "denied";
-  return pollDecision(db, requestId, ttlMs);
+  // ★Phase1 ③: 팝업↔app-server 요청 1:1 상관키 record(pending). best-effort — 미기록이면 finalize가 fail-closed.★
+  const p = req.params as Record<string, any>;
+  try {
+    store.record({
+      requestId, agentId,
+      serverRequestId: req.serverRequestId ?? null,
+      threadId: typeof p.threadId === "string" ? p.threadId : null,
+      turnId: typeof p.turnId === "string" ? p.turnId : null,
+      itemId: typeof p.itemId === "string" ? p.itemId : null,
+      operationHash: opHash,
+      processInstance: PROCESS_INSTANCE,
+    });
+  } catch { /* best-effort */ }
+  const decision = await pollDecision(db, requestId, ttlMs);
+  // ★결정을 CAS로 마감(중복·TOCTOU·orphan 차단) 후 반환.★
+  return finalizeApprovalDelivery(store, requestId, opHash, decision);
 }
 
 function sleep(ms: number): Promise<void> {

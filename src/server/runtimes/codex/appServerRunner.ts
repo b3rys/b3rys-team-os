@@ -8,7 +8,8 @@
 import type { Database } from "bun:sqlite";
 import { CodexAppServerClient, type ReviewDecision } from "./appServerClient";
 import { judgeApproval, resolveWithoutPopup, terminalGuidance } from "./appServerApproval";
-import { requestApprovalPopup } from "./appServerPopup";
+import { requestApprovalPopup, PROCESS_INSTANCE } from "./appServerPopup";
+import { CodexApprovalCorrelationStore } from "./state";
 import type { CodexCaller, CodexTurnResult, CodexTurnOptions } from "./runner";
 import type { PermissionAgent, PermissionContext } from "../../lib/permissionGate";
 
@@ -19,6 +20,9 @@ const TURN_TIMEOUT_MS = Number(process.env.B3OS_CODEX_APPSERVER_TIMEOUT_MS ?? 30
  * makeAppServerCaller(db)로 db 주입 = 팝업 경로. runCodexTurnViaAppServer = db 없는 안전 기본.
  */
 export function makeAppServerCaller(db: Database): CodexCaller {
+  // ★Phase1 ③: 부팅/모드 활성 시 1회 orphan sweep — 이전 프로세스의 pending/decided 팝업을 orphaned로
+  //   (재시작 후 옛 팝업이 새 turn에 재결합되지 않게). best-effort(스윕 실패가 caller 생성을 막지 않음).★
+  try { new CodexApprovalCorrelationStore(db).sweepOrphans(PROCESS_INSTANCE); } catch { /* best-effort */ }
   return (opts) => runViaAppServer(opts, db);
 }
 
@@ -73,6 +77,12 @@ async function runViaAppServer(opts: CodexTurnOptions, db?: Database): Promise<C
     const fresh = guidances.filter((g) => !r.finalText.includes(g.split("\n")[0]!));
     if (fresh.length) {
       r.finalText = r.finalText.trim() ? `${r.finalText}\n\n---\n${fresh.join("\n\n")}` : fresh.join("\n\n");
+    }
+    // ★Phase1 ③: 턴 종료 시 이 turn의 남은 pending/decided 팝업을 expire(cancel/interrupt/timeout 포함).
+    //   늦게 도착한 승인은 finalizeApprovalDelivery의 CAS가 expired 상태를 보고 이미 거부하지만, 여기서 상태를
+    //   확정 정리해 orphan 누적을 막는다. best-effort. (delivered/orphaned는 건드리지 않음.)★
+    if (db && threadId && r.turnId) {
+      try { new CodexApprovalCorrelationStore(db).expireTurn(threadId, r.turnId); } catch { /* best-effort */ }
     }
     const ok = r.status === "completed" && r.finalText.trim().length > 0;
     // ★#8 픽스: 실패면 detail에 실제 사유(에러 notification/stderr tail) 반영 — rate-limit 진단 가능.★

@@ -141,6 +141,117 @@ export class CodexInflightStore {
   }
 }
 
+export type CodexApprovalState = "pending" | "decided" | "delivered" | "expired" | "orphaned";
+
+export interface CodexApprovalCorrelationInput {
+  requestId: string; // = permission_request.id (팝업)
+  agentId: string;
+  serverRequestId?: string | null;
+  threadId?: string | null;
+  turnId?: string | null;
+  itemId?: string | null;
+  operationHash: string;
+  processInstance: string;
+}
+
+export interface CodexApprovalCorrelationRow {
+  request_id: string;
+  agent_id: string;
+  server_request_id: string | null;
+  thread_id: string | null;
+  turn_id: string | null;
+  item_id: string | null;
+  operation_hash: string;
+  process_instance: string;
+  state: CodexApprovalState;
+  created_at: string;
+  decided_at: string | null;
+}
+
+/**
+ * codex app-server 승인 팝업 ↔ server-request 상관키 + CAS 상태(Phase1 ③).
+ * 팝업(permission_request.id)과 실제 승인 요청을 1:1로 묶고, 상태전이를 CAS(원자적 UPDATE ... WHERE state=)로만 해
+ * 중복 버튼(exactly-once)·TTL 늦은승인·서버재시작 orphan·TOCTOU(operation_hash 재검증)를 안전 처리한다.
+ */
+export class CodexApprovalCorrelationStore {
+  constructor(private readonly db: Database) {}
+
+  /** 팝업 생성 시 pending 기록. 중복 request_id는 무시(INSERT OR IGNORE = exactly-once). */
+  record(input: CodexApprovalCorrelationInput): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO codex_approval_correlation
+           (request_id, agent_id, server_request_id, thread_id, turn_id, item_id, operation_hash, process_instance, state, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'))`,
+      )
+      .run(
+        input.requestId, input.agentId, input.serverRequestId ?? null,
+        input.threadId ?? null, input.turnId ?? null, input.itemId ?? null,
+        input.operationHash, input.processInstance,
+      );
+  }
+
+  get(requestId: string): CodexApprovalCorrelationRow | undefined {
+    return this.db
+      .prepare(`SELECT * FROM codex_approval_correlation WHERE request_id = ?`)
+      .get(requestId) as CodexApprovalCorrelationRow | undefined;
+  }
+
+  /** CAS pending→decided. 정확히 1회만 성공(true); 이미 decided/expired/orphaned면 false(중복/무효 차단). */
+  markDecided(requestId: string): boolean {
+    const r = this.db
+      .prepare(
+        `UPDATE codex_approval_correlation SET state='decided', decided_at=datetime('now')
+         WHERE request_id = ? AND state = 'pending'`,
+      )
+      .run(requestId);
+    return r.changes === 1;
+  }
+
+  /**
+   * delivery: decided→delivered. ★operation_hash 일치(TOCTOU) + process_instance 일치(재시작 재결합 금지)일 때만★ 성공.
+   * true면 codex에 승인 전달 허용. false면 거부(불일치/orphan/재시작/이미처리).
+   */
+  markDelivered(requestId: string, operationHash: string, processInstance: string): boolean {
+    const r = this.db
+      .prepare(
+        `UPDATE codex_approval_correlation SET state='delivered'
+         WHERE request_id = ? AND state = 'decided' AND operation_hash = ? AND process_instance = ?`,
+      )
+      .run(requestId, operationHash, processInstance);
+    return r.changes === 1;
+  }
+
+  /** 임의 상태(단 delivered 제외)→expired. TTL 늦은승인/무효화용. */
+  expire(requestId: string): void {
+    this.db
+      .prepare(`UPDATE codex_approval_correlation SET state='expired' WHERE request_id = ? AND state != 'delivered'`)
+      .run(requestId);
+  }
+
+  /** cancel/interrupt: 그 turn의 pending/decided 팝업 전부 expire. 반환=전이 수. */
+  expireTurn(threadId: string, turnId: string): number {
+    const r = this.db
+      .prepare(
+        `UPDATE codex_approval_correlation SET state='expired'
+         WHERE thread_id = ? AND turn_id = ? AND state IN ('pending','decided')`,
+      )
+      .run(threadId, turnId);
+    return r.changes;
+  }
+
+  /** 부팅 시: 다른 process_instance의 pending/decided를 orphaned로(재시작 → 옛 팝업을 새 turn에 재결합 금지). 반환=전이 수. */
+  sweepOrphans(currentProcessInstance: string): number {
+    const r = this.db
+      .prepare(
+        `UPDATE codex_approval_correlation SET state='orphaned'
+         WHERE process_instance != ? AND state IN ('pending','decided')`,
+      )
+      .run(currentProcessInstance);
+    return r.changes;
+  }
+}
+
 export function sha256Short(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 16);
 }

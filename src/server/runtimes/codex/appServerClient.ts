@@ -10,6 +10,9 @@
  * ★이 모듈은 순수 프로토콜 클라이언트다 — 팀 버스/permissionGate/텔레그램 배선은 상위(adapter)가 한다.★
  */
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import {
+  classifyServerRequest, isApprovalKind, toInternalDecision, encodeApproval, failSafeNonApproval,
+} from "./serverRequestCodec";
 
 const CODEX_BIN = process.env.CODEX_BIN ?? "codex";
 const HANDSHAKE_TIMEOUT_MS = Number(process.env.B3OS_CODEX_APPSERVER_HANDSHAKE_MS ?? 45_000);
@@ -18,6 +21,7 @@ const HANDSHAKE_TIMEOUT_MS = Number(process.env.B3OS_CODEX_APPSERVER_HANDSHAKE_M
 export interface ApprovalRequest {
   method: string; // execCommandApproval | applyPatchApproval | item/permissions/requestApproval | item/tool/requestUserInput ...
   params: Record<string, unknown>;
+  serverRequestId?: string; // ★Phase1 ③: app-server JSON-RPC 요청 id — 팝업↔요청 1:1 상관키.★
 }
 /** 승인 결정. codex ReviewDecision: approved(=이번만) | approved_for_session(=계속) | denied(=거절/이번만거절) | abort. */
 export type ReviewDecision = "approved" | "approved_for_session" | "denied" | "abort";
@@ -122,6 +126,7 @@ export class CodexAppServerClient {
     this.currentTurnId = null;
     this.lastFinal = "";
     this.deltaBuf = ""; // ★턴 경계 버퍼 리셋(이전 턴 텍스트 누출 방지)★
+    this.approvalWaits = 0; // ★턴 시작 시 승인 대기 ref-count 리셋(이전 턴 누수 방지)★
     return new Promise<TurnResult>((resolve) => {
       let settled = false;
       const finish = (r: TurnResult) => { if (settled) return; settled = true; this.clearTurnTimer(); this.turnResolve = null; this.activeHandlers = null; resolve(r); };
@@ -139,10 +144,14 @@ export class CodexAppServerClient {
   }
 
   private clearTurnTimer(): void { if (this.turnTimer) { clearTimeout(this.turnTimer); this.turnTimer = null; } }
-  /** ★M5.3: 승인 팝업 대기 시작 — 턴 타이머 정지(사람 대기 중엔 타임아웃 안 되게).★ */
-  private pauseTurnTimer(): void { this.clearTurnTimer(); }
-  /** ★M5.3: 승인 응답 후 — 턴 타이머 재개(codex 활성 작업에만 타임아웃 적용).★ */
-  private resumeTurnTimer(): void { if (this.turnResolve && !this.turnTimer && this.armTurnTimer) this.turnTimer = this.armTurnTimer(); }
+  /** ★M5.3: 승인 팝업 대기 시작 — 턴 타이머 정지(사람 대기 중엔 타임아웃 안 되게). ref-count 증가(Phase1 ③).★ */
+  private pauseTurnTimer(): void { this.approvalWaits++; this.clearTurnTimer(); }
+  /** ★M5.3+③: 승인 응답 후 — ref-count 감소, ★모든★ 승인 대기가 끝나야 턴 타이머 재개.
+   *  (Ames ③ 지적: ref-count 없으면 동시 승인 2건 중 첫 응답이 두 번째 사람-대기 중에 타이머를 조기 재개해 오타임아웃.) */
+  private resumeTurnTimer(): void {
+    if (this.approvalWaits > 0) this.approvalWaits--;
+    if (this.approvalWaits === 0 && this.turnResolve && !this.turnTimer && this.armTurnTimer) this.turnTimer = this.armTurnTimer();
+  }
 
   /** 진행 중 턴을 새 지시로 전환(중간 steer). expectedTurnId 필수(실측). */
   async steer(text: string): Promise<void> {
@@ -214,6 +223,10 @@ export class CodexAppServerClient {
   private respond(id: number | string, result: unknown): void {
     this.send({ id, result });
   }
+  /** JSON-RPC error 응답 — 잘못 매핑된 {decision} 대신 pending을 즉시 해소(unknown/제공불가 요청용). */
+  private respondError(id: number | string, code: number, message: string): void {
+    this.send({ id, error: { code, message } });
+  }
   private failAll(err: Error): void {
     for (const [, p] of this.pending) p.reject(err);
     this.pending.clear();
@@ -256,16 +269,32 @@ export class CodexAppServerClient {
   }
 
   private async handleServerRequest(id: number | string, method: string, params: Record<string, unknown>): Promise<void> {
-    const handler = this.activeHandlers?.onApproval;
-    let decision: ReviewDecision = "denied"; // ★fail-closed 기본★
-    // ★M5.3: 승인 판정(팝업 대기 가능) 동안 턴 타이머 정지 → 사람이 폰으로 승인하는 시간이 turn timeout에 안 잡힘.★
-    this.pauseTurnTimer();
-    try {
-      if (handler) decision = await handler({ method, params });
-    } catch { decision = "denied"; }
-    // ★하네스 HIGH 4(a) 픽스: respond가 EPIPE 등으로 throw해도 resume이 스킵되어 턴이 hang하지 않게 finally로.★
-    try { this.respond(id, { decision }); }
-    finally { this.resumeTurnTimer(); } // codex가 결정 받고 작업 재개 → 턴 타이머 재개(예외에도 보장)
+    // ★Phase1 ②: 모든 요청에 {decision} 반환하던 것을 method별 분기로 교체(11종 중 승인 4종만 decision류).★
+    // 근거=serverRequestCodec(Ames 0.144.6 schema 검증). 잘못된 result는 Codex pending을 오류/폴백에 의존시키거나 hang.
+    const kind = classifyServerRequest(method);
+    if (kind === "unknown") { this.respondError(id, -32601, `unknown server request: ${method}`); return; }
+
+    if (isApprovalKind(kind)) {
+      // 승인성: onApproval(사람 팝업 가능)로 내부 결정 → method별 codec 인코딩.
+      const handler = this.activeHandlers?.onApproval;
+      let decision: ReturnType<typeof toInternalDecision> = "decline"; // ★fail-closed 기본★
+      // ★M5.3: 승인 대기(팝업) 동안 턴 타이머 정지 → 사람이 폰으로 승인하는 시간이 turn timeout에 안 잡힘.★
+      this.pauseTurnTimer();
+      try {
+        if (handler) decision = toInternalDecision(await handler({ method, params, serverRequestId: String(id) }));
+      } catch { decision = "decline"; }
+      finally { this.resumeTurnTimer(); } // 결정 받으면 즉시 재개(예외에도 보장)
+      const out = encodeApproval(kind, decision, params);
+      if (out.kind === "result") this.respond(id, out.result);
+      else this.respondError(id, out.code, out.message);
+      return;
+    }
+
+    // 비승인성(6종): 사람 대기 불필요 → 즉시 fail-safe result 또는 JSON-RPC error(진짜 값 필요한 auth/attestation).
+    // (요청 종류별 정상 응답을 만드는 전용 provider는 후속; 현재는 검증된 fail-safe로 pending을 안전 해소.)
+    const out = failSafeNonApproval(kind, Date.now() / 1000);
+    if (out.kind === "result") this.respond(id, out.result);
+    else this.respondError(id, out.code, out.message);
   }
 
   private handleNotification(method: string, params: any): void {
@@ -322,6 +351,7 @@ export class CodexAppServerClient {
   private deltaBuf = "";
   private stderrTail = "";
   private rateLimitTail = "";
+  private approvalWaits = 0; // 동시 승인 대기 ref-count(Phase1 ③) — 0일 때만 턴 타이머 재개.
   private turnTimer: ReturnType<typeof setTimeout> | null = null;
   private turnTimeoutMs = 0;
   private armTurnTimer: (() => ReturnType<typeof setTimeout>) | null = null;

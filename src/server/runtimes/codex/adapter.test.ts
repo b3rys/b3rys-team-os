@@ -218,6 +218,27 @@ describe("codex adapter — 핵심 정확성", () => {
     expect(allMessages(db)).toEqual([]);                // 게시는 [B] 대로 0
   });
 
+  test("②-b in-flight 잠금은 ★agent 단위★: 같은 dex에 '다른 메시지'가 처리 중 와도 두 번째 턴이 안 뜬다 (동시성 회귀 가드)", async () => {
+    // Ames 교차검증(2026-07-24)이 짚은 버그: 잠금 키가 message_id별이면 같은 agent에 다른 메시지가
+    // 오면 동시 턴 2개가 떠 세션 resume/응답이 꼬인다. per-agent 키로 고쳤고 이 테스트가 회귀를 막는다.
+    const db = setup();
+    let release!: (r: CodexTurnResult) => void;
+    let calls = 0;
+    const blocking: CodexCaller = () => { calls += 1; return new Promise<CodexTurnResult>((res) => (release = res)); };
+    const adapter = makeCodexAdapter(db, agentsOf(db), { callCodex: blocking });
+    const r1 = await adapter.wake("cody", row({ message_id: "cc1" }), "");
+    expect(r1.detail).toBe("codex_dispatched");
+    // ★다른 message_id★ 로 같은 agent 재-wake — per-message 키였다면 여기서 동시 턴이 떴다.
+    const r2 = await adapter.wake("cody", row({ message_id: "cc2" }), "");
+    expect(r2.deferred, "다른 메시지라도 같은 agent 처리 중이면 defer돼야 한다").toBe(true);
+    expect(r2.detail).toBe("codex_in_flight");
+    expect(calls, "★같은 agent에 다른 메시지 = 동시 턴이 뜨면 안 됨★").toBe(1);
+    release(okResult("끝"));
+    await sleep(20);
+    expect(calls).toBe(1);                              // 완료 후에도 두 번째 턴 없음
+    expect(artifacts(db, "started").length).toBe(1);   // 턴은 정확히 하나만
+  });
+
   test("off 명단 멤버 → wake가 codex_agent_off(응답 차단, ok:true no-retry)", async () => {
     const db = setup();
     writeFileSync(OFF_FILE, "cody\n"); // cody를 off 명단에
