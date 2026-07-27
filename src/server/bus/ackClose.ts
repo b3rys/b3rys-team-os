@@ -11,6 +11,7 @@
  */
 import type { Database } from "bun:sqlite";
 import { appendAudit } from "../db/queries";
+import { emitLoopEventSafe, EVENT, makeEpisodeId } from "../metrics/loopEvent";
 import {
   classifyReplySignal,
   decideRecipientTransition,
@@ -218,6 +219,36 @@ export function applyAckClose(db: Database, reply: ReplyLike): AckCloseResult {
   // transition means we matched ambiguously, so we can't claim THIS wake was the right one.
   if (decision.next !== "needs_match_review") {
     closeOrphanedDelivery(db, target.messageId, target.agentId);
+  }
+
+  // ③ [측정 W1] ack.observed loop_event emit — ★best-effort·같은 db.★ spec §29·§32:
+  //   directed recipient 행을 'open'에서 처음 전이시킬 때만 1회(재-ack·이미 engaged 무emit → latency 분모/귀속 오염 방지).
+  //   ambiguous(needs_match_review) 매칭은 확정 ack 아님 → 무emit. actor=owner(수신자=응답자), target=원요청자.
+  //   ★episode 키는 원요청 행(target.messageId), reply.id 아님 — request.created와 같은 episode로 조인.★
+  //   event_id=ack:{원msgid}:{owner} 결정적 → idempotent UPDATE 재적용/재전달 중복은 recompute가 dedupe.
+  if (cur.recipient_state === "open" && decision.next !== "needs_match_review") {
+    // ★전체 블록 try/catch — origin SELECT까지 포함해 측정이 ack-close를 절대 못 깨게(emitLoopEventSafe 밖 읽기도 방어).★
+    try {
+      const origin = db
+        .prepare(`SELECT from_agent_id FROM message WHERE id = ?`)
+        .get(target.messageId) as { from_agent_id: string } | undefined;
+      emitLoopEventSafe(db, {
+        event_id: `ack:${target.messageId}:${target.agentId}`,
+        event_name: EVENT.ack_observed,
+        schema_version: "0.2",
+        occurred_at: new Date().toISOString(),
+        episode_id: makeEpisodeId(reply.thread_id, { requestMessageId: target.messageId }),
+        thread_id: reply.thread_id,
+        request_message_id: target.messageId,
+        message_id: reply.id,
+        actor: target.agentId,
+        owner: target.agentId,
+        target: origin?.from_agent_id,
+        metric_scope: "both",
+        outcome: decision.next,
+        reason: `ack via ${target.tier}`,
+      });
+    } catch { /* best-effort: 측정 실패는 ack-close 기능에 영향 없음 */ }
   }
 
   return {
