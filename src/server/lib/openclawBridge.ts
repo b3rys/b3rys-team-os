@@ -1,11 +1,13 @@
-import { existsSync, readFileSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync } from "node:fs";
 import type { AgentRecord } from "../types";
 import { pick, type Locale } from "./i18n";
 import { teamContextLabel } from "../channels/registry";
 import { appendAuditFile } from "./auditFile";
 import { hasCapability } from "./capabilities";
 import { clearRuntimeBlock, recordRuntimeBlock } from "./runtimeBlocks";
-import { openclawEnvPath } from "./paths";
+import { LOCAL_BIN, openclawEnvPath } from "./paths";
+
+const { X_OK } = constants;
 
 interface RunOpenclawTurnOptions {
   agent: AgentRecord;
@@ -119,7 +121,45 @@ async function describeOpenclawSessionStatus(key: string): Promise<string | unde
   return (await describeOpenclawSession(key))?.status;
 }
 
-const OPENCLAW_BIN = process.env.OPENCLAW_BIN ?? "openclaw";
+/** openclaw 바이너리 후보 — 실경로 우선순위. npm global(~/.local/bin)이 기본 설치 위치다. */
+export const OPENCLAW_BIN_CANDIDATES = [
+  `${LOCAL_BIN}/openclaw`, // npm global prefix — openclaw 기본 설치 위치
+  "/opt/homebrew/bin/openclaw", // homebrew (apple silicon)
+  "/usr/local/bin/openclaw", // homebrew (intel) · 수동 설치
+];
+
+function isExecutableFile(path: string): boolean {
+  try {
+    accessSync(path, X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ★PATH 만 믿지 않는다★ (2026-07-27 라이브) — launchd 로 뜨는 서버의 PATH 에는 npm global
+ * prefix(`~/.local/bin`)가 없다. 그래서 openclaw 가 정상 설치돼 있는데도 spawn 이
+ * `Executable not found in $PATH: "openclaw"` 로 죽었고, openclaw 런타임 팀원에게 가는
+ * ★모든 directed 버스 메시지의 wake 가 조용히 실패★했다(메시지 row 는 저장되므로 발신자에겐
+ * 보내진 것처럼 보인다). claude·hermes·bun 은 `scripts/runtime-drift-check.sh` 의 resolve_bin
+ * 이 실경로 후보를 먼저 보게 돼 있었는데 openclaw 만 그 방어가 없었다 — 그 비대칭을 없앤다.
+ *
+ * 규약은 resolve_bin 과 동일: 명시 env → 실경로 후보 → PATH.
+ * spawn 시점마다 해석한다(서버 기동 후 설치된 경우도 재시작 없이 잡히게).
+ */
+export function resolveOpenclawBin(
+  env: Record<string, string | undefined> = process.env,
+  candidates: readonly string[] = OPENCLAW_BIN_CANDIDATES,
+  executable: (path: string) => boolean = isExecutableFile,
+): string {
+  const explicit = env.OPENCLAW_BIN?.trim();
+  if (explicit) return explicit; // 비표준 prefix(리눅스·nix) 주입구. 존재검사 없이 그대로 존중.
+  for (const candidate of candidates) {
+    if (executable(candidate)) return candidate;
+  }
+  return "openclaw"; // 최후 폴백 — PATH 에 맡긴다(기존 동작).
+}
 // 2026-07-06 (GD live): 300초는 코드 수정·검증 같은 긴 turn에서 bridge가 먼저 포기해
 // "Codex가 끝까지 답했지만 Telegram에는 안 보이는" 상태를 만들었다. 팀방 visible reply는 실제 최종보고가
 // 보이는 것이 완료 기준이다. 팀 기본 과제 수행시간 단위에 맞춰 기본 대기 시간을 10분으로 둔다.
@@ -165,11 +205,30 @@ async function runOpenclawJson(args: string[], timeoutMs = 30_000): Promise<unkn
   //   timeoutMs(230s)와 무관하게 ★전송이 10초에 끊겨★ {ok:false,error:{kind:"timeout"}} 를 뱉는다
   //   (status 없음 → done?.status==="ok" false → codex 가 10초 넘는 턴을 정상 처리했는데도 '전달 실패' 오탐).
   //   → 전송 타임아웃 = spawn-kill 타임아웃(timeoutMs)으로 맞춘다.
-  const proc = Bun.spawn([OPENCLAW_BIN, "gateway", "call", ...args, "--timeout", String(timeoutMs), "--json"], {
-    stdout: "pipe",
-    stderr: "pipe",
-    env,
-  });
+  const bin = resolveOpenclawBin();
+  const spawnArgs = [bin, "gateway", "call", ...args, "--timeout", String(timeoutMs), "--json"];
+  const proc = (() => {
+    try {
+      // ★자식의 PATH 도 보강한다★ — 절대경로 해석은 openclaw 자신만 구한다. openclaw 는
+      //   `#!/usr/bin/env node` 셔뱅이라 ★node 를 상속 PATH 에서★ 찾는다. launchd PATH 에
+      //   node 가 없으면 바이너리를 제대로 찾아놓고도 셔뱅 단계에서 죽고, 아래 catch 가 그걸
+      //   "실행파일을 찾지 못했습니다" 로 ★오진★ 한다. activation.ts 의 openclaw spawn 이 이미
+      //   같은 방식으로 풀고 있다 — 두 call site 를 같은 규약으로 맞춘다.
+      const pathForChild = [`${LOCAL_BIN}`, "/opt/homebrew/bin", env.PATH ?? ""].filter(Boolean).join(":");
+      return Bun.spawn(spawnArgs, { stdout: "pipe", stderr: "pipe", env: { ...env, PATH: pathForChild } });
+    } catch (e) {
+      // ★원인 추적 가능한 실패로 바꾼다★ — 기존엔 Bun 의 `Executable not found in $PATH: "openclaw"`
+      //   가 그대로 올라와, 서버 PATH 문제인지 미설치인지 구분이 안 됐다(라이브에서 실제로 헤맴).
+      //   ★실제로 시도한 경로(bin)를 맨 앞에 적는다★ — OPENCLAW_BIN 이 설정돼 있으면 후보를
+      //   하나도 훑지 않으므로, 후보 목록만 적으면 ★가장 헷갈리는 케이스(명시 env 오설정)에서
+      //   거짓 정보★ 를 준다(lisa 리뷰 2026-07-27).
+      throw new Error(
+        `openclaw 실행파일을 찾지 못했습니다. 실행 시도: ${bin} ` +
+          `(${e instanceof Error ? e.message : String(e)}). ` +
+          `${process.env.OPENCLAW_BIN?.trim() ? "OPENCLAW_BIN 환경변수로 지정된 경로입니다 — 값이 맞는지 확인하세요." : `후보: ${OPENCLAW_BIN_CANDIDATES.join(", ")} → PATH. 비표준 위치에 설치했다면 OPENCLAW_BIN 환경변수로 절대경로를 지정하세요 (launchd 서비스면 plist 의 EnvironmentVariables 에 추가).`}`,
+      );
+    }
+  })();
   const timeout = setTimeout(() => proc.kill(), timeoutMs);
   try {
     const [stdout, stderr, exitCode] = await Promise.all([
