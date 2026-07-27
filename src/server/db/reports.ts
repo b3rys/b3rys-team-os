@@ -18,10 +18,17 @@ export interface ReportMeta {
   summary: string | null;
   category: string | null; // '보고서' | '교육자료' | '리서치' | ... (/research 통합)
   is_important: boolean;
+  tags: ReportTag[];
   forms: PortalForm[];
   project: string | null;
   created_at: string;
   updated_at: string;
+}
+export interface ReportTag {
+  id: string;
+  name: string;
+  color: string;
+  report_count?: number;
 }
 
 export interface ReportListPage {
@@ -31,6 +38,7 @@ export interface ReportListPage {
   total: number;
   important_count: number;
   category_counts: Record<string, number>;
+  tags: ReportTag[];
 }
 
 export interface ReportListOptions {
@@ -39,6 +47,7 @@ export interface ReportListOptions {
   category?: string | null;
   important?: boolean;
   q?: string | null;
+  tagIds?: string[];
 }
 
 interface ReportRow {
@@ -60,13 +69,75 @@ function rowToReport(r: ReportRow): ReportMeta {
     const p = JSON.parse(r.forms_json);
     if (Array.isArray(p)) forms = p;
   } catch {}
-  return { id: r.id, title: r.title, author: r.author, summary: r.summary, category: r.category ?? null, is_important: Boolean(r.is_important), forms, project: r.project, created_at: r.created_at, updated_at: r.updated_at };
+  return { id: r.id, title: r.title, author: r.author, summary: r.summary, category: r.category ?? null, is_important: Boolean(r.is_important), tags: [], forms, project: r.project, created_at: r.created_at, updated_at: r.updated_at };
+}
+
+function attachTags(db: Database, reports: ReportMeta[]): ReportMeta[] {
+  if (!reports.length) return reports;
+  const byId = new Map(reports.map((r) => [r.id, r]));
+  const marks = reports.map(() => "?").join(",");
+  const rows = db.query(
+    `SELECT m.report_id, t.id, t.name, t.color
+       FROM report_tag_map m JOIN report_tag t ON t.id = m.tag_id
+      WHERE m.report_id IN (${marks})
+      ORDER BY t.name COLLATE NOCASE`,
+  ).all(...reports.map((r) => r.id)) as Array<{ report_id: string } & ReportTag>;
+  for (const row of rows) byId.get(row.report_id)?.tags.push({ id: row.id, name: row.name, color: row.color });
+  return reports;
+}
+
+export function listReportTags(db: Database): ReportTag[] {
+  return db.query(
+    `SELECT t.id, t.name, t.color, COUNT(m.report_id) AS report_count
+       FROM report_tag t LEFT JOIN report_tag_map m ON m.tag_id = t.id
+      GROUP BY t.id ORDER BY t.name COLLATE NOCASE`,
+  ).all() as ReportTag[];
+}
+
+export function createReportTag(db: Database, input: { name: string; color?: string }): ReportTag {
+  const name = input.name.trim();
+  if (!name || name.length > 40) throw new Error("tag name must be 1-40 characters");
+  const id = nanoid(12);
+  db.query("INSERT INTO report_tag (id, name, color) VALUES (?, ?, ?)").run(id, name, input.color || "blue");
+  return db.query("SELECT id, name, color FROM report_tag WHERE id = ?").get(id) as ReportTag;
+}
+
+export function updateReportTag(db: Database, id: string, input: { name?: string; color?: string }): ReportTag | null {
+  const current = db.query("SELECT id, name, color FROM report_tag WHERE id = ?").get(id) as ReportTag | null;
+  if (!current) return null;
+  const name = input.name == null ? current.name : input.name.trim();
+  if (!name || name.length > 40) throw new Error("tag name must be 1-40 characters");
+  db.query("UPDATE report_tag SET name = ?, color = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(name, input.color ?? current.color, id);
+  return db.query("SELECT id, name, color FROM report_tag WHERE id = ?").get(id) as ReportTag;
+}
+
+export function deleteReportTag(db: Database, id: string): boolean {
+  return db.query("DELETE FROM report_tag WHERE id = ?").run(id).changes > 0;
+}
+
+export function setReportTags(db: Database, reportId: string, tagIds: string[]): ReportMeta | null {
+  if (!getReport(db, reportId)) return null;
+  const unique = [...new Set(tagIds)];
+  if (unique.length > 20) throw new Error("a report can have at most 20 tags");
+  if (unique.length) {
+    const marks = unique.map(() => "?").join(",");
+    const count = (db.query(`SELECT COUNT(*) AS c FROM report_tag WHERE id IN (${marks})`).get(...unique) as { c: number }).c;
+    if (count !== unique.length) throw new Error("unknown tag");
+  }
+  db.transaction(() => {
+    db.query("DELETE FROM report_tag_map WHERE report_id = ?").run(reportId);
+    const insert = db.query("INSERT INTO report_tag_map (report_id, tag_id) VALUES (?, ?)");
+    for (const tagId of unique) insert.run(reportId, tagId);
+    db.query("UPDATE report SET updated_at = datetime('now') WHERE id = ?").run(reportId);
+  })();
+  return getReport(db, reportId);
 }
 
 // ── report (/reports) ────────────────────────────────────────────────
 export function listReports(db: Database): ReportMeta[] {
   const rows = db.query("SELECT * FROM report ORDER BY created_at DESC, id DESC").all() as ReportRow[];
-  return rows.map(rowToReport);
+  return attachTags(db, rows.map(rowToReport));
 }
 
 const DEFAULT_REPORT_CATEGORY = "보고서";
@@ -121,6 +192,13 @@ export function listReportsPage(db: Database, options: ReportListOptions = {}): 
   if (options.important === true) {
     where.push("is_important = 1");
   }
+  const tagIds = [...new Set((options.tagIds ?? []).map((id) => id.trim()).filter(Boolean))];
+  if (tagIds.length > 20) throw new Error("too many tag filters");
+  if (tagIds.length) {
+    const marks = tagIds.map(() => "?").join(",");
+    where.push(`report.id IN (SELECT DISTINCT tm.report_id FROM report_tag_map tm WHERE tm.tag_id IN (${marks}))`);
+    args.push(...tagIds);
+  }
   const totalWhereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const total = countScalar(db, totalWhereSql, args);
 
@@ -135,7 +213,7 @@ export function listReportsPage(db: Database, options: ReportListOptions = {}): 
      ORDER BY created_at DESC, id DESC
      LIMIT ?`,
   ).all(...args, limit + 1) as ReportRow[];
-  const pageRows = rows.slice(0, limit).map(rowToReport);
+  const pageRows = attachTags(db, rows.slice(0, limit).map(rowToReport));
   const hasMore = rows.length > limit;
 
   const categoryRows = db.query(
@@ -155,12 +233,13 @@ export function listReportsPage(db: Database, options: ReportListOptions = {}): 
     total,
     important_count: importantCount,
     category_counts: categoryCounts,
+    tags: listReportTags(db),
   };
 }
 
 export function getReport(db: Database, id: string): ReportMeta | null {
   const row = db.query("SELECT * FROM report WHERE id = ?").get(id) as ReportRow | null;
-  return row ? rowToReport(row) : null;
+  return row ? attachTags(db, [rowToReport(row)])[0]! : null;
 }
 
 export function setReportImportant(db: Database, id: string, important: boolean): ReportMeta | null {

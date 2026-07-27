@@ -4,12 +4,14 @@ import { existsSync, realpathSync } from "node:fs";
 import { join, isAbsolute, resolve, extname } from "node:path";
 import {
   listReports, listReportsPage, getReport, upsertReport, deleteReport, setReportImportant,
+  listReportTags, createReportTag, updateReportTag, deleteReportTag, setReportTags,
   listResearch, getResearch, upsertResearch,
   type PortalForm,
 } from "../db/reports";
 import { ensureThread, insertMessage } from "../db/inbox/messages";
 import { createTask } from "../db/taskQueries";
 import { leadActorId, trustedActorFromRequest } from "../lib/opAuth";
+import { appendAudit } from "../db/queries";
 
 // 팀 결과물 포털 라우트 — rootApp 에 /reports, /research 로 마운트(BASE_PATH /team 형제).
 // 메타=DB, 본문=디스크 파일. report=Bill, research=Demis. 허브 next.config.ts rewrite 로 your-team.example.com 노출.
@@ -77,18 +79,65 @@ export function createReportsApp(deps: PortalDeps): Hono {
       c.req.query("cursor") != null ||
       c.req.query("category") != null ||
       c.req.query("important") != null ||
+      c.req.query("tags") != null ||
       c.req.query("q") != null;
     if (!hasPageQuery) return c.json({ reports: listReports(deps.db) });
     const limitRaw = Number(c.req.query("limit") ?? 30);
     const limit = Number.isFinite(limitRaw) ? limitRaw : 30;
     const importantRaw = c.req.query("important");
+    const tagIds = (c.req.query("tags") ?? "").split(",").filter(Boolean);
+    if (tagIds.length > 20) return c.json({ error: "at most 20 tag filters are allowed" }, 400);
     return c.json(listReportsPage(deps.db, {
       limit,
       cursor: c.req.query("cursor") ?? null,
       category: c.req.query("category") ?? null,
       important: importantRaw === "1" || importantRaw === "true",
       q: c.req.query("q") ?? null,
+      tagIds,
     }));
+  });
+
+  r.get("/api/tags", (c) => c.json({ tags: listReportTags(deps.db) }));
+  r.post("/api/tags", async (c) => {
+    try {
+      const auth = requireActor(c.req.raw);
+      if (!auth.ok || !auth.actor) return c.json({ error: auth.error }, (auth.status ?? 401) as 401);
+      const body = await c.req.json();
+      const tag = deps.db.transaction(() => {
+        const created = createReportTag(deps.db, { name: String(body?.name ?? ""), color: body?.color });
+        appendAudit(deps.db, auth.actor!.actor, "report_tag_created", created.id, { name: created.name, color: created.color });
+        return created;
+      })();
+      return c.json({ ok: true, tag }, 201);
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+  r.patch("/api/tags/:tagId", async (c) => {
+    try {
+      const auth = requireActor(c.req.raw);
+      if (!auth.ok || !auth.actor) return c.json({ error: auth.error }, (auth.status ?? 401) as 401);
+      const body = await c.req.json();
+      const tag = deps.db.transaction(() => {
+        const updated = updateReportTag(deps.db, c.req.param("tagId"), body ?? {});
+        if (updated) appendAudit(deps.db, auth.actor!.actor, "report_tag_updated", updated.id, { name: updated.name, color: updated.color });
+        return updated;
+      })();
+      return tag ? c.json({ ok: true, tag }) : c.json({ error: "tag not found" }, 404);
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+  r.delete("/api/tags/:tagId", (c) => {
+    const auth = requireActor(c.req.raw);
+    if (!auth.ok || !auth.actor) return c.json({ error: auth.error }, (auth.status ?? 401) as 401);
+    const id = c.req.param("tagId");
+    const ok = deps.db.transaction(() => {
+      const deleted = deleteReportTag(deps.db, id);
+      if (deleted) appendAudit(deps.db, auth.actor!.actor, "report_tag_deleted", id, {});
+      return deleted;
+    })();
+    return ok ? c.json({ ok: true }) : c.json({ error: "tag not found" }, 404);
   });
 
   r.get("/api/:id", (c) => {
@@ -139,6 +188,22 @@ export function createReportsApp(deps: PortalDeps): Hono {
     if (typeof body?.important !== "boolean") return c.json({ error: "important boolean required" }, 400);
     const rep = setReportImportant(deps.db, c.req.param("id"), body.important);
     return rep ? c.json({ ok: true, report: rep }) : c.json({ error: "report not found" }, 404);
+  });
+  r.put("/api/:id/tags", async (c) => {
+    try {
+      const auth = requireActor(c.req.raw);
+      if (!auth.ok || !auth.actor) return c.json({ error: auth.error }, (auth.status ?? 401) as 401);
+      const body = await c.req.json();
+      if (!Array.isArray(body?.tag_ids)) return c.json({ error: "tag_ids array required" }, 400);
+      const rep = deps.db.transaction(() => {
+        const updated = setReportTags(deps.db, c.req.param("id"), body.tag_ids.map(String));
+        if (updated) appendAudit(deps.db, auth.actor!.actor, "report_tags_updated", updated.id, { tag_ids: updated.tags.map((t) => t.id) });
+        return updated;
+      })();
+      return rep ? c.json({ ok: true, report: rep }) : c.json({ error: "report not found" }, 404);
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
   });
 
   // 요청 버튼: 보고서 + 요청내용을 담당자(기본=author)에게 버스로 directed 전달(깨움) + 추적 task.

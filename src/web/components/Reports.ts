@@ -23,6 +23,12 @@ interface ReportForm {
   type: string;
   path?: string;
 }
+interface ReportTag {
+  id: string;
+  name: string;
+  color: string;
+  report_count?: number;
+}
 interface Report {
   id: string;
   title: string;
@@ -30,6 +36,7 @@ interface Report {
   summary?: string | null;
   category?: string | null;
   is_important?: boolean | number | null;
+  tags?: ReportTag[];
   created_at?: string | null;
   forms?: (string | ReportForm)[];
 }
@@ -40,6 +47,7 @@ interface ReportListPage {
   total?: number;
   important_count?: number;
   category_counts?: Record<string, number>;
+  tags?: ReportTag[];
 }
 
 // 컴포넌트 로컬 상태 (대시보드는 store.mainView 기반, Reports 내부 list↔detail 은 자체 상태)
@@ -53,6 +61,8 @@ let _nextCursor: string | null = null;
 let _totalCount = 0;
 let _importantCount = 0;
 let _categoryCounts: Record<string, number> = {};
+let _tags: ReportTag[] = [];
+let _selectedTagIds = new Set<string>();
 let _view: "list" | "detail" = "list";
 let _curId: string | null = null;
 let _curType: string | null = null;
@@ -109,10 +119,11 @@ function asPage(res: unknown): ReportListPage {
       total: typeof page.total === "number" ? page.total : page.reports.length,
       important_count: typeof page.important_count === "number" ? page.important_count : page.reports.filter(isImportant).length,
       category_counts: page.category_counts ?? {},
+      tags: page.tags ?? [],
     };
   }
   const reports = asList(res);
-  return { reports, next_cursor: null, has_more: false, total: reports.length, important_count: reports.filter(isImportant).length, category_counts: {} };
+  return { reports, next_cursor: null, has_more: false, total: reports.length, important_count: reports.filter(isImportant).length, category_counts: {}, tags: [] };
 }
 // 정렬은 같은 방향으로 어긋나면 순서가 살아남지만, ★DB 형식과 ISO 가 섞이면 9시간짜리 오정렬이 난다.★
 // 같은 파서를 쓰면 그 위험 자체가 없어진다.
@@ -225,6 +236,7 @@ function pageQuery(reset: boolean): string {
   if (_cat === IMPORTANT_FILTER) params.set("important", "1");
   else if (_cat !== ALL_FILTER) params.set("category", _cat);
   if (_query.trim()) params.set("q", _query.trim());
+  if (_selectedTagIds.size) params.set("tags", [..._selectedTagIds].join(","));
   return "/api/list?" + params.toString();
 }
 async function loadReportsPage(reset: boolean): Promise<void> {
@@ -245,6 +257,9 @@ async function loadReportsPage(reset: boolean): Promise<void> {
     _totalCount = page.total ?? _all.length;
     _importantCount = page.important_count ?? _all.filter(isImportant).length;
     _categoryCounts = page.category_counts ?? {};
+    _tags = page.tags ?? _tags;
+    const availableTagIds = new Set(_tags.map((t) => t.id));
+    _selectedTagIds = new Set([..._selectedTagIds].filter((id) => availableTagIds.has(id)));
     _loaded = true;
     _loadError = null;
   } catch (err) {
@@ -256,6 +271,7 @@ async function loadReportsPage(reset: boolean): Promise<void> {
       _totalCount = 0;
       _importantCount = 0;
       _categoryCounts = {};
+      _tags = [];
       _loaded = true;
       _loadError = (err as Error).message || "load failed";
     }
@@ -301,6 +317,57 @@ async function setReportImportant(id: string, important: boolean): Promise<Repor
   if (!report) throw new Error("missing report");
   _all = _all.map((rep) => (rep.id === id ? { ...rep, is_important: report.is_important } : rep));
   return report;
+}
+async function mutateJson(path: string, method: string, body?: unknown): Promise<any> {
+  const r = await fetch(REPORTS_BASE + path, {
+    method,
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: body == null ? undefined : JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j?.ok === false) throw new Error(j?.error || "HTTP " + r.status);
+  return j;
+}
+async function editReportTags(report: Report): Promise<void> {
+  const current = (report.tags ?? []).map((t) => t.name).join(", ");
+  const raw = prompt(pick("태그 이름을 쉼표로 구분해 입력하세요. 비우면 모두 해제됩니다.", "Enter tag names separated by commas. Leave empty to clear."), current);
+  if (raw == null) return;
+  const names = [...new Set(raw.split(",").map((s) => s.trim()).filter(Boolean))];
+  const known = new Map(_tags.map((t) => [t.name.toLocaleLowerCase(), t]));
+  for (const name of names) {
+    if (!known.has(name.toLocaleLowerCase())) {
+      const created = (await mutateJson("/api/tags", "POST", { name })).tag as ReportTag;
+      _tags.push(created);
+      known.set(created.name.toLocaleLowerCase(), created);
+    }
+  }
+  await mutateJson(`/api/${encodeURIComponent(report.id)}/tags`, "PUT", {
+    tag_ids: names.map((name) => known.get(name.toLocaleLowerCase())!.id),
+  });
+}
+async function manageTags(): Promise<void> {
+  const action = prompt(pick("새 태그 이름 / ‘기존이름 → 새이름’ / 삭제는 ‘-태그이름’을 입력하세요.", "Enter a new name / 'old → new' / '-name' to delete."));
+  if (!action?.trim()) return;
+  const value = action.trim();
+  if (value.startsWith("-")) {
+    const tag = _tags.find((t) => t.name.toLocaleLowerCase() === value.slice(1).trim().toLocaleLowerCase());
+    if (!tag) throw new Error(pick("태그를 찾을 수 없습니다.", "Tag not found."));
+    if (!confirm(pick(`‘${tag.name}’ 태그를 삭제할까요? 보고서는 삭제되지 않습니다.`, `Delete '${tag.name}'? Reports remain.`))) return;
+    await mutateJson(`/api/tags/${encodeURIComponent(tag.id)}`, "DELETE");
+    _selectedTagIds.delete(tag.id);
+  } else if (value.includes("→")) {
+    const [from = "", to = ""] = value.split("→", 2).map((s) => s.trim());
+    const tag = _tags.find((t) => t.name.toLocaleLowerCase() === from.toLocaleLowerCase());
+    if (!tag || !to) throw new Error(pick("‘기존이름 → 새이름’ 형식으로 입력하세요.", "Use 'old → new'."));
+    await mutateJson(`/api/tags/${encodeURIComponent(tag.id)}`, "PATCH", { name: to });
+  } else {
+    await mutateJson("/api/tags", "POST", { name: value });
+  }
+  await reloadList();
+}
+function tagBadge(tag: ReportTag, interactive = false): string {
+  const tagName = interactive ? "button" : "span";
+  return `<${tagName} class="${interactive ? "reports-tag-filter " : ""}inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold border border-blue-400/25 bg-blue-400/10 text-txt-blue" data-tag-id="${escape(tag.id)}">#${escape(tag.name)}</${tagName}>`;
 }
 function fileUrl(id: string, type: string): string {
   return `${REPORTS_BASE}/file/${encodeURIComponent(id)}/${encodeURIComponent(type)}`;
@@ -435,6 +502,9 @@ function renderList(): void {
     `<button class="${pillCls(_cat === ALL_FILTER)}" data-cat="${ALL_FILTER}">${pick("전체", "All")}<span class="ml-1.5 text-[11px] text-slate-500" data-reports-all-count>${allCount}</span></button>` +
     `<button class="${pillCls(_cat === IMPORTANT_FILTER)}" data-cat="${IMPORTANT_FILTER}" title="${pick("중요 표시만 보기", "Show important only")}" aria-label="${pick("중요 표시만 보기", "Show important only")}"><span class="inline-flex items-center gap-1.5" title="${pick("중요 표시", "Important")}">${starIcon(true)}<span class="text-[11px] text-slate-500" data-reports-important-count>${_importantCount}</span></span></button>` +
     cats.map((c) => `<button class="${pillCls(_cat === c)}" data-cat="${escape(c)}">${escape(c)}<span class="ml-1.5 text-[11px] text-slate-500" data-reports-category-count="${escape(c)}">${counts[c]}</span></button>`).join("");
+  const tagPills = _tags.map((t) =>
+    `<button class="${pillCls(_selectedTagIds.has(t.id))} reports-tag-pill" data-tag-id="${escape(t.id)}">#${escape(t.name)}<span class="ml-1.5 text-[11px] text-slate-500">${t.report_count ?? 0}</span></button>`
+  ).join("");
 
   const items = _all.slice().sort(byNewest);
 
@@ -457,6 +527,7 @@ function renderList(): void {
         </div>
         <div class="flex items-center gap-2 flex-wrap text-xs text-slate-500 mt-1"><span class="text-accent-greenSoft font-medium">${escape(r.author || "—")}</span><span>·</span><span>${fmtDate(r.created_at)}</span></div>
         ${r.summary ? `<div class="text-[13px] text-slate-400 leading-relaxed mt-1.5 line-clamp-1">${escape(r.summary)}</div>` : ""}
+        ${(r.tags ?? []).length ? `<div class="flex gap-1.5 flex-wrap mt-2">${(r.tags ?? []).map((t) => tagBadge(t, true)).join("")}</div>` : ""}
         ${badges ? `<div class="flex gap-1.5 flex-wrap mt-2">${badges}</div>` : ""}
       </div>`;
   }).join("");
@@ -477,6 +548,10 @@ function renderList(): void {
       <div class="max-w-3xl mx-auto px-4 md:px-6 py-5 pb-20">
         <div class="text-sm text-slate-500 mb-4">${pick("b3rys 팀 보고서 — 클릭하면 본문을 봅니다.", "b3rys team reports — click to read the full text.")}</div>
         <div class="flex gap-2 flex-wrap mb-3">${pills}</div>
+        <div class="flex items-center gap-2 flex-wrap mb-3">
+          ${tagPills || `<span class="text-xs text-slate-600">${pick("등록된 태그 없음", "No tags yet")}</span>`}
+          <button id="reports-manage-tags" class="ml-auto px-3 py-1.5 rounded-full text-xs font-semibold border border-surface-3 bg-surface-2 text-slate-400 hover:text-slate-200">＋ ${pick("태그 관리", "Manage tags")}</button>
+        </div>
         <div class="relative mb-4">
           <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
           <input id="reports-q" type="search" placeholder="${pick("제목·작성자·요약 검색", "Search title · author · summary")}" value="${escape(_query)}"
@@ -488,8 +563,25 @@ function renderList(): void {
   const scroller = _root.querySelector<HTMLElement>("[data-reports-list-scroll]");
   if (scroller) scroller.scrollTop = _listScrollTop;
 
-  _root.querySelectorAll<HTMLButtonElement>(".reports-pill").forEach((el) => {
+  _root.querySelectorAll<HTMLButtonElement>(".reports-pill:not(.reports-tag-pill)").forEach((el) => {
     el.addEventListener("click", () => { _cat = el.dataset.cat || ALL_FILTER; void reloadList(); });
+  });
+  _root.querySelectorAll<HTMLButtonElement>(".reports-tag-pill").forEach((el) => {
+    el.addEventListener("click", () => {
+      const id = el.dataset.tagId || "";
+      if (_selectedTagIds.has(id)) _selectedTagIds.delete(id); else _selectedTagIds.add(id);
+      void reloadList();
+    });
+  });
+  _root.querySelectorAll<HTMLButtonElement>(".reports-tag-filter").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      _selectedTagIds = new Set([el.dataset.tagId || ""]);
+      void reloadList();
+    });
+  });
+  _root.querySelector<HTMLButtonElement>("#reports-manage-tags")?.addEventListener("click", () => {
+    void manageTags().catch((err) => alert(pick(`태그 관리 실패: ${err.message}`, `Tag management failed: ${err.message}`)));
   });
   _root.querySelectorAll<HTMLElement>(".reports-card").forEach((el) => {
     el.addEventListener("click", () => { rememberListScroll(); _curId = el.dataset.id || null; if (_curId) setDetailHash(_curId); _curType = null; _view = "detail"; renderDetail(); });
@@ -600,7 +692,7 @@ async function renderDetail(): Promise<void> {
     _root.querySelector("#reports-back")?.addEventListener("click", goList);
     return;
   }
-  _all = _all.map((r) => (r.id === meta!.id ? { ...r, is_important: meta!.is_important } : r));
+  _all = _all.map((r) => (r.id === meta!.id ? { ...r, is_important: meta!.is_important, tags: meta!.tags } : r));
 
   const forms = (meta.forms || []).map(formType);
   const activeType = preferredFormType(forms);
@@ -631,6 +723,10 @@ async function renderDetail(): Promise<void> {
           <span class="inline-block mb-2 px-2 py-0.5 rounded text-[10px] font-semibold border text-txt-green border-accent-green/30 bg-accent-green/10">${escape(catOf(meta))}</span>
           <div class="flex items-center gap-2 flex-wrap text-[13px] text-slate-500"><span class="text-accent-greenSoft font-medium">${escape(author)}</span><span>·</span><span>${fmtDate(meta.created_at)}</span></div>
           ${meta.summary ? `<div class="text-sm text-slate-400 leading-relaxed mt-3 pl-3 border-l-2 border-surface-3">${escape(meta.summary)}</div>` : ""}
+          <div class="flex items-center gap-2 flex-wrap mt-3">
+            ${(meta.tags ?? []).map((t) => tagBadge(t)).join("")}
+            <button id="reports-edit-tags" class="px-2.5 py-1 rounded-full text-[11px] font-semibold border border-surface-3 text-slate-400 hover:text-slate-200">＋ ${pick("태그 편집", "Edit tags")}</button>
+          </div>
 
           <div class="reports-reqbox mt-5">
             <button id="reports-reqtoggle" class="inline-flex items-center gap-2 text-[13px] font-semibold px-4 py-2 rounded-lg border border-accent-green/35 text-accent-green bg-accent-green/10 hover:bg-accent-green/20 transition-colors">${pick("✉ 요청하기", "✉ Request")}</button>
@@ -666,6 +762,15 @@ async function renderDetail(): Promise<void> {
     } catch (err) {
       await showAlert(pick(`중요 표시 변경 실패: ${(err as Error).message}`, `Failed to update important mark: ${(err as Error).message}`));
       btn.disabled = false;
+    }
+  });
+  _root.querySelector<HTMLButtonElement>("#reports-edit-tags")?.addEventListener("click", async () => {
+    try {
+      await editReportTags(meta);
+      await loadReportsPage(true);
+      void renderDetail();
+    } catch (err) {
+      await showAlert(pick(`태그 변경 실패: ${(err as Error).message}`, `Failed to update tags: ${(err as Error).message}`));
     }
   });
   _root.querySelector<HTMLButtonElement>("#reports-delete-detail")?.addEventListener("click", async () => {
