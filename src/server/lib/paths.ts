@@ -64,6 +64,28 @@ export function runtimeCwdForAgent(agent: Pick<AgentRecord, "id" | "workspace_pa
   return `${MEMBERS_ROOT}/${agent.id}`;
 }
 
+// ─── 자식 프로세스 PATH 보강 ──────────────────────────────────────────────
+// ★launchd 로 뜬 서버의 PATH 는 제한적★ 이라, bare name 으로 도구를 부르는 코드가 그대로 실패한다.
+// openclaw 실행파일 자체는 openclawBridge.resolveOpenclawBin() 이 절대경로로 풀지만,
+// ★approvals 가 spawn 하는 쉘 스크립트(activate-openclaw-agent.sh) 안의 bare name 은 그걸로 안 풀린다.★
+// spawn 하는 쪽에서 PATH 를 씌우면 자식이 실행하는 스크립트 내부까지 한 번에 커버된다.
+// agentControl·activation 이 각자 PATH 문자열을 손으로 적고 있어 ★/usr/local/bin 이 빠지는 식으로
+// 조용히 어긋나 있었다★ — 목록을 여기 하나로 모은다.
+export const RUNTIME_BIN_DIRS = [
+  LOCAL_BIN,              // npm -g · hermes 프로필
+  `${HOME}/.bun/bin`,     // bun 공식 인스톨러
+  "/opt/homebrew/bin",    // Apple Silicon homebrew
+  "/usr/local/bin",       // Intel homebrew
+];
+
+/** 자식 프로세스용 env — PATH 앞에 RUNTIME_BIN_DIRS 를 붙인다(기존 PATH 는 뒤에 보존). */
+export function withRuntimePath(base: Record<string, string | undefined> = process.env): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(base)) if (v !== undefined) out[k] = v;
+  out.PATH = [...RUNTIME_BIN_DIRS, base.PATH ?? ""].filter(Boolean).join(":");
+  return out;
+}
+
 /** 공유 openclaw env 파일 경로. OPENCLAW_ENV env override, 기본 = ~/.openclaw/openclaw.env. */
 export function openclawEnvPath(): string {
   return process.env.OPENCLAW_ENV ?? `${OPENCLAW_ROOT}/openclaw.env`;
