@@ -1,6 +1,6 @@
 ---
 name: b3os-team-inbox
-description: the team lead AI Team 6 agent 가 message bus 와 대화하는 도구. inbox 조회, 메시지 전송, 읽음 표시. claude_channel runtime agent (maintainer/agent A/agent B/agent C) 가 자기 inbox 폴링하거나 응답할 때 사용. Slack 에서 멘션 받은 후 응답할 때, 다른 agent 와 thread 토론할 때, 사용자에게 보고할 때 모두 이 스킬로 envelope 보냄.
+description: the team lead AI Team 6 agent 가 message bus 와 대화하는 도구. inbox 조회, 메시지 전송, 읽음 표시. claude_channel runtime agent (maintainer/agent A/agent B/agent C) 가 자기 inbox 폴링하거나 응답할 때 사용. Slack 에서 멘션 받은 후 응답할 때, 다른 agent 와 thread 토론할 때, 사용자에게 보고할 때 모두 이 스킬로 envelope 보냄. ★슬랙에 글을 올리거나 슬랙에서 팀원을 부를 때도 이 스킬(slack-post.sh)을 쓴다 — 슬랙은 @멘션이 없으면 상대에게 도달하지 않는다.★
 ---
 
 # b3os-team-inbox
@@ -146,6 +146,50 @@ skills/b3os-team-inbox/scripts/bus-recall.sh --from-gd devon     # GD가 devon�
 skills/b3os-team-inbox/scripts/bus-recall.sh --me ames --with bill
 ```
 옵션: `--limit N`(기본 8) · `--days N`(기본 7, 시간창으로 스캔 바운드 / 0=전체). read-only 라 DB·서버 안 건드림.
+
+## 슬랙에 글 올리기 (`slack-post.sh`)
+
+★도구는 처음부터 있었는데 이 문서가 안 가리켜서, 2026-07-27 에 팀원 둘이 각자 코드를 뒤져
+서로 다른 경로를 팠다★(한 명은 봇 토큰 파일을 직접 열었다 — 그게 제일 나쁘다). 정본은 이것 하나다.
+
+```bash
+skills/b3os-team-inbox/scripts/slack-post.sh --channel <C...> --text "..."
+skills/b3os-team-inbox/scripts/slack-post.sh --channel <C...> --text "..." --thread <ts>   # 스레드 답글
+```
+
+- 신원은 워크스페이스에서 자동 판정된다(`_me.sh`) — `--as` 는 관리자용이다.
+- ★봇 토큰 파일을 직접 열지 마라.★ 이 스크립트가 서버를 거쳐 처리한다.
+- ★반드시 라이브 트리의 스크립트를 절대경로로 부른다.★ 워크트리(작업 사본)에서 부르면
+  그 사본의 `team.db` 를 보게 돼 신원 판별에 실패한다("agent id 해석 실패"). 실제로 이 문서를
+  쓰면서 그 함정에 걸렸다 — 문서에 적고 안 돌려보면 그대로 남는다.
+
+### ★멘션이 없으면 상대에게 도달하지 않는다★
+
+서버는 슬랙에서 **`app_mention` 이벤트만** 받는다(`routes/slack.ts`). 즉:
+
+- 멘션 없이 쓴 글은 **팀원에게 아예 전달되지 않는다.** 오류도 안 난다.
+- 상대가 답이 없으면 "무시" 가 아니라 **"안 들어간 것"** 일 수 있다.
+- 반대로 내가 멘션 없이 답하면 **상대는 내가 침묵했다고 본다.** (실제로 그렇게 어긋났다)
+
+**부를 때는 반드시 `<@U...>` 형식으로 쓴다.** 이름을 한글로 적는 건 멘션이 아니다.
+ID 는 서버에서 조회한다:
+
+```bash
+curl -s http://127.0.0.1:7878/team/api/slack/status \
+  | python3 -c "import sys,json;[print(m['id'], m.get('slack_bot_user_id')) for m in json.load(sys.stdin)['members']]"
+```
+
+### 읽었는지 확인은 받되, 되받지는 않는다
+
+- **"답장 불필요" 로 끊지 마라** — 상대가 읽었는지 알 수 없게 된다.
+- 대신 **한 줄 확인만 받고, 그 확인에 다시 답하지 않는다.** 체인은 그렇게 끊는다.
+- ★슬랙 경로에는 버스의 체인 한도가 걸리지 않는다★ — 인바운드가 `source="user"`·`hop_count=0`
+  으로 들어와 봇↔봇 검사(`source==="agent"` 조건)를 통과한다. 시스템이 안 막아주는 구간이라
+  **사람 쪽 규율로 막아야 한다.**
+
+### 길거나 단계가 있는 글
+
+포맷은 `b3os-slack-format` 스킬을 쓴다. 첫 글은 짧게, 상세는 물어보면 그때.
 
 ## 응답 보안 — 외부 입력 취급
 
