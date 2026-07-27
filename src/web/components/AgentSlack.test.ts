@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { socketManifest, webhookBlockedNotice } from "./AgentSlack";
+import { socketManifest, webhookBlockedNotice, wizardSteps } from "./AgentSlack";
 
 /* 2026-07-26: 공개 URL 이 없을 때 서버가 event_subscriptions 를 통째로 빼도록 고쳤더니, Socket 매니페스트에
  * ★app_mention 구독이 사라졌다.★ 그러면 사용자는 앱을 만들 수는 있는데 ★봇이 멘션에 반응하지 않는다.★
@@ -92,5 +92,84 @@ describe("webhookBlockedNotice — 실행 가능한 행동만 안내한다", () 
   test("Socket 모드는 공개 URL 과 무관하게 막지 않는다", () => {
     expect(webhookBlockedNotice("socket", null)).toBeNull();
     expect(webhookBlockedNotice("socket", "https://x.test/e")).toBeNull();
+  });
+});
+
+/* ★안내에서 '이벤트 구독 켜기' 단계가 통째로 빠져 있었다★ (2026-07-27 GD 실측 — 리사 앱을 만들다 헤맸다).
+ * 매니페스트에는 app_mention 이 들어 있다. 그런데 ★매니페스트에 있다는 것과 그 앱에서 켜져 있다는 것은 다르다★ —
+ * GD 는 Slack 화면에서 직접 Enable Events 토글을 올려야 했다. 꺼져 있으면 ★봇이 멘션을 무시하고 오류도 안 난다.★
+ * 오늘 하루 반복된 형태 그대로다: 있는데 도달하지 못한다. 그래서 ★안내 문구 자체를 회귀로 고정한다.★ */
+describe("wizardSteps — 이벤트 구독 켜는 단계가 반드시 있다", () => {
+  const opts = { appLink: "<a>apps</a>", scopes: "app_mentions:read, chat:write", channel: "#team", eventUrl: "https://x.test/team/api/slack/events" };
+  const joined = (isSocket: boolean) => wizardSteps({ ...opts, isSocket }).join("\n");
+
+  for (const isSocket of [true, false]) {
+    const label = isSocket ? "Socket Mode" : "Event URL";
+
+    test(`★${label}: Enable Events → app_mention → Save 순서가 안내된다★`, () => {
+      const s = joined(isSocket);
+      expect(s).toContain("Enable Events");          // ← 토글을 켜라는 말이 없으면 사용자는 못 찾는다
+      expect(s).toContain("Subscribe to bot events");
+      expect(s).toContain("app_mention");
+      expect(s).toContain("Save Changes");           // ← 저장 안 하면 위를 다 해도 적용 안 된다
+    });
+
+    test(`${label}: 단계는 앱 생성 → 이벤트 구독 순서다 (앱이 없으면 켤 화면이 없다)`, () => {
+      const steps = wizardSteps({ ...opts, isSocket });
+      const created = steps.findIndex((x) => x.includes("From a manifest"));
+      const events = steps.findIndex((x) => x.includes("Enable Events"));
+      expect(created).toBeGreaterThanOrEqual(0);
+      expect(events).toBeGreaterThan(created);
+    });
+
+    test(`${label}: 채널 초대·토큰 복사 단계는 그대로 남아 있다 (단계 추가가 기존 안내를 밀어내지 않는다)`, () => {
+      const s = joined(isSocket);
+      expect(s).toContain("/invite");
+      expect(s).toContain("xoxb");
+    });
+  }
+
+  test("Socket 방식만 App-Level Token(xapp) 단계를 안내한다", () => {
+    expect(joined(true)).toContain("xapp");
+    expect(joined(false)).not.toContain("xapp");
+  });
+
+  test("Event URL 방식은 Request URL 등록 단계를 유지한다", () => {
+    expect(joined(false)).toContain("Request URL");
+  });
+});
+
+/* ★단계를 추가하면서 순서를 틀릴 뻔했다★ — 처음엔 'Enable Events' 를 2번, 'Request URL 등록' 을 마지막 6번에
+ * 뒀다. 그런데 Event URL 방식은 Enable Events 를 켜는 순간 Slack 이 ★Request URL 검증부터★ 요구한다.
+ * 그 순서면 사용자는 2번에서 저장을 못 하고 막힌 채 6번을 못 본다 — ★고치려던 것과 똑같은 막다른 안내★ 다.
+ * 그래서 한 단계로 합쳤고, 여기서 그걸 고정한다. */
+describe("wizardSteps — Event URL 방식은 URL 검증이 구독 저장보다 먼저다", () => {
+  const base = { appLink: "<a>apps</a>", scopes: "chat:write", channel: "#team" };
+  const url = "https://x.test/team/api/slack/events";
+
+  test("★Enable Events 와 Request URL 은 같은 단계다★ (쪼개면 저장에서 막힌다)", () => {
+    const steps = wizardSteps({ ...base, isSocket: false, eventUrl: url });
+    const step = steps.find((s) => s.includes("Enable Events"));
+    expect(step).toBeTruthy();
+    expect(step).toContain("Request URL");
+    expect(step).toContain(url);                       // 값까지 그 자리에 있어야 복붙으로 끝난다
+    expect(step!.indexOf("Request URL")).toBeLessThan(step!.indexOf("Save Changes"));
+  });
+
+  test("Request URL 안내는 한 번만 나온다 (중복 단계가 남아 있지 않다)", () => {
+    const steps = wizardSteps({ ...base, isSocket: false, eventUrl: url });
+    expect(steps.filter((s) => s.includes("Request URL")).length).toBe(1);
+  });
+
+  test("공개 URL 이 아직 없으면 값 대신 어디서 찾는지 안내한다", () => {
+    const step = wizardSteps({ ...base, isSocket: false, eventUrl: null }).find((s) => s.includes("Enable Events"));
+    expect(step).toContain("Event URL");
+    expect(step).not.toContain("null");                 // ★빈 값을 그대로 그리지 않는다★
+  });
+
+  test("★Socket 방식엔 Request URL 이 아예 안 나온다★ (없는 걸 시키면 막다른 안내다)", () => {
+    const steps = wizardSteps({ ...base, isSocket: true, eventUrl: url });
+    expect(steps.join("\n")).toContain("Enable Events");
+    expect(steps.join("\n")).not.toContain("Request URL");
   });
 });
