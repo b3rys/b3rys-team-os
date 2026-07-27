@@ -567,13 +567,19 @@ export async function injectOpenclawDirectedTurn(opts: InjectOpenclawDirectedOpt
       opts.attachments.map((a, i) => `${i + 1}. ${a.kind}: ${a.value}${a.note ? ` (${a.note})` : ""}`).join("\n") +
       "\n\n"
     : "";
-  const nextHop = (opts.hopCount ?? 0) + 1;
+  // ★봉투에는 '지금 이 메시지의 hop' 을 그대로 싣는다★ (2026-07-27, GD 결정 (b)안).
+  //   룰은 팀원에게 `--hop <hop_count+1>` 을 시킨다. 그런데 여기서 미리 +1 해서 보내면
+  //   팀원이 그 값에 또 +1 해서 ★메시지당 2씩★ 올랐다(실측: 0→2→4→6…).
+  //   그래서 MAX_HOPS=16 이 실제로는 8메시지 한도로 동작했다.
+  //   고치는 방향은 둘이었다 — 룰 문구를 바꾸거나(룰 문서 여러 벌), 여기서 저장값을 그대로 보여주거나.
+  //   ★후자를 택했다: 범위가 좁고 되돌리기 쉽다.★ 룰은 그대로 두고 봉투만 사실을 말하게 한다.
+  const currentHop = opts.hopCount ?? 0;
   const replyToMeta = opts.inReplyTo ? ` in_reply_to="${opts.inReplyTo}"` : "";
   const owner = pick(locale, "팀장", "the team lead");
   const prompt =
     teamContextBlock +
     attachmentBlock +
-    `<external_message source="bus" kind="${opts.kind}" from="${opts.fromLabel ?? "team"}" thread="${opts.threadId}" msg="${opts.messageId}"${replyToMeta} hop_count=${nextHop}>\n` +
+    `<external_message source="bus" kind="${opts.kind}" from="${opts.fromLabel ?? "team"}" thread="${opts.threadId}" msg="${opts.messageId}"${replyToMeta} hop_count=${currentHop}>\n` +
     `${opts.body}\n` +
     `</external_message>\n\n` +
     // ★수집(collect) fan-out ask 는 in_reply_to 를 반드시 ★이 ask 자신의 id(messageId)★ 로 써야 한다 —
@@ -596,9 +602,9 @@ export async function injectOpenclawDirectedTurn(opts: InjectOpenclawDirectedOpt
       const replyId = opts.inReplyTo ?? opts.messageId;
       return pick(locale,
         `이건 팀 버스의 directed(지정) 메시지입니다 — ${opts.fromLabel ?? "팀원"} 이(가) thread=${opts.threadId} 로 당신에게 보냈습니다 ` +
-        `(msg=${replyId}, hop_count=${nextHop}).`,
+        `(msg=${replyId}, hop_count=${currentHop}).`,
         `This is a directed message on the team bus — ${opts.fromLabel ?? "a member"} sent it to you on thread=${opts.threadId} ` +
-        `(msg=${replyId}, hop_count=${nextHop}).`);
+        `(msg=${replyId}, hop_count=${currentHop}).`);
     })();
   // ★sessions.send(fire-and-forget) → agent + agent.wait★ (2026-07-16, GD)
   //   sessions.send 는 "밀어넣었다(ack)"만 돌려줘 서버가 '턴 돌았다'로 착각했다 → codex 침묵 턴의 4분
@@ -640,14 +646,20 @@ export async function injectOpenclawTelegramTurn(opts: InjectOpenclawTelegramOpt
       "\n\n"
     : "";
   // v1.2 issue 3: include anti-pingpong hop metadata in prompt — same convention as tmux adapter.
-  const nextHop = (opts.hopCount ?? 0) + 1;
+  // ★봉투에는 '지금 이 메시지의 hop' 을 그대로 싣는다★ (2026-07-27, GD 결정 (b)안).
+  //   룰은 팀원에게 `--hop <hop_count+1>` 을 시킨다. 그런데 여기서 미리 +1 해서 보내면
+  //   팀원이 그 값에 또 +1 해서 ★메시지당 2씩★ 올랐다(실측: 0→2→4→6…).
+  //   그래서 MAX_HOPS=16 이 실제로는 8메시지 한도로 동작했다.
+  //   고치는 방향은 둘이었다 — 룰 문구를 바꾸거나(룰 문서 여러 벌), 여기서 저장값을 그대로 보여주거나.
+  //   ★후자를 택했다: 범위가 좁고 되돌리기 쉽다.★ 룰은 그대로 두고 봉투만 사실을 말하게 한다.
+  const currentHop = opts.hopCount ?? 0;
   const replyToMeta = opts.inReplyTo ? ` in_reply_to="${opts.inReplyTo}"` : "";
-  const hopMeta = `hop_count=${nextHop}`;
+  const hopMeta = `hop_count=${currentHop}`;
   const owner = pick(locale, "팀장", "the team lead");
   const hopInstruction = opts.inReplyTo !== undefined
     ? pick(locale,
-        ` 응답 시 공유 버스에 올릴 때 반드시 in_reply_to=${opts.inReplyTo ?? opts.messageId}, hop_count=${nextHop} 를 포함하세요(무한루프 방지).`,
-        ` When you post to the shared bus, you MUST include in_reply_to=${opts.inReplyTo ?? opts.messageId}, hop_count=${nextHop} (loop prevention).`)
+        ` 응답 시 공유 버스에 올릴 때 반드시 in_reply_to=${opts.inReplyTo ?? opts.messageId}, hop_count=${currentHop} 를 포함하세요(무한루프 방지).`,
+        ` When you post to the shared bus, you MUST include in_reply_to=${opts.inReplyTo ?? opts.messageId}, hop_count=${currentHop} (loop prevention).`)
     : "";
   // 사실만: 이 보고는 ${owner} 가 직접 볼 것이다 → --direct-to-gd. 보내는 법의 상세는 룰에 있다.
   const directReportNote = opts.directReport
