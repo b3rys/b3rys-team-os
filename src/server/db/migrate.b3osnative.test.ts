@@ -16,6 +16,7 @@ function oldHermesWidenedDb(): Database {
     tmux_session TEXT,
     telegram_bot_username TEXT,
     workspace_path TEXT NOT NULL,
+    runtime_cwd TEXT,
     persona_file TEXT NOT NULL,
     moderator_eligible INTEGER NOT NULL DEFAULT 0,
     avatar_emoji TEXT NOT NULL DEFAULT '🤖',
@@ -26,16 +27,16 @@ function oldHermesWidenedDb(): Database {
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`);
   db.prepare(
-    `INSERT INTO agent (id, display_name, role, runtime, status_provider, workspace_path, persona_file,
+    `INSERT INTO agent (id, display_name, role, runtime, status_provider, workspace_path, runtime_cwd, persona_file,
        hermes_profile, hermes_alias, gateway_service, icon)
-     VALUES ('herm','Herm','cso','hermes_agent','hermes_gateway','/tmp','p.md',
+     VALUES ('herm','Herm','cso','hermes_agent','hermes_gateway','/tmp/ws','/tmp/runtime','p.md',
        'b3hermes','헤르메스','com.x.hermes','hexagon')`,
   ).run();
   return db;
 }
 
 describe("b3os_native CHECK 위든 마이그레이션", () => {
-  test("★데이터 보존: 재빌드 후 hermes_profile·alias·gateway·icon 데이터 살아있음", () => {
+  test("★데이터 보존: 재빌드 후 hermes_profile·alias·gateway·icon·runtime_cwd 데이터 살아있음", () => {
     const db = oldHermesWidenedDb();
     widenAgentRuntimeChecks(db); // b3os_native 위해 1회 재빌드 발생
     const herm = db.prepare(`SELECT * FROM agent WHERE id='herm'`).get() as Record<string, unknown>;
@@ -43,6 +44,7 @@ describe("b3os_native CHECK 위든 마이그레이션", () => {
     expect(herm.hermes_alias).toBe("헤르메스");
     expect(herm.gateway_service).toBe("com.x.hermes");
     expect(herm.icon).toBe("hexagon"); // ← 하네스가 잡은 손실 컬럼들
+    expect(herm.runtime_cwd).toBe("/tmp/runtime");
   });
 
   test("재빌드 후 b3os_native / b3os_native_runner INSERT 가능", () => {

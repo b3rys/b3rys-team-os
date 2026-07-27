@@ -316,9 +316,14 @@ test("resolveMembersRoot — env 우선순위: B3RYS_MEMBERS_ROOT > B3RYS_HOME/m
 //   사고: 가드가 `~/Development` 하나만 보고 있어서, 기본값이 퍼블릭-안전(`~/b3os/members`)으로 바뀐 뒤
 //   ★신규·공개 유저의 실 팀원이 통째로 가드 밖★ 이었다. 맥스튜디오 실 팀원(jane/lisa/clo)이 그 자리에
 //   살아 테스트가 정체성 파일을 덮어썼다. 두 루트 모두 지키는지 못박는다.
-test("live-fs 가드 — 레거시(~/Development)와 퍼블릭 기본(~/b3os/members) 둘 다 막는다", () => {
+// ★HOME 이 없으면 가드는 설계상 무동작★ (보호 대상이 전부 HOME 기준이라 지킬 것이 없다).
+//   그 환경(HOME 없는 컨테이너/CI)에서 이 테스트들을 그냥 돌리면 ★수트가 통째로 빨간불★ 이 된다 —
+//   결함이 아니라 전제 불성립이므로 명시적으로 건너뛴다. 조용히 통과시키지는 않는다.
+const HAS_HOME = Boolean(process.env.HOME);
+const guardTest = HAS_HOME ? test : test.skip;
+
+guardTest("live-fs 가드 — 레거시(~/Development)와 퍼블릭 기본(~/b3os/members) 둘 다 막는다", () => {
   const home = process.env.HOME ?? "";
-  expect(home).not.toBe("");                        // 가드는 HOME 없으면 무동작 — 전제 확인
   expect(process.env.NODE_ENV).toBe("test");        // 가드는 test 에서만 — 전제 확인
 
   // ① 퍼블릭-안전 기본값 = 공개 유저의 실 팀원 자리. ★이게 뚫려 있던 구멍이다.★
@@ -351,7 +356,7 @@ test("live-fs 가드 — 명시 opt-in(B3RYS_TEST_ALLOW_LIVE_FS=1)이면 통과"
 
 // ★배선 테스트★ — 가드 함수가 옳아도 writer 가 부르지 않으면 소용없다. 실제 writer 를 태워 확인한다.
 //   (savePersonaFile 은 SOUL.md 를 쓰는 유일한 통로인데 2026-07-27 까지 가드가 없었다.)
-test("live-fs 가드 배선 — savePersonaFile 이 실 팀원 경로를 거부한다(파일 안 만듦)", () => {
+guardTest("live-fs 가드 배선 — savePersonaFile 이 실 팀원 경로를 거부한다(파일 안 만듦)", () => {
   const home = process.env.HOME ?? "";
   // ★경로를 실행마다 고유하게★ — 고정 이름이면 이전 실행이 남긴 흔적에 판정이 흔들린다
   //   (실제로 겪음: 가드를 되돌린 뮤테이션 실행이 폴더를 만들자 이후 정상 실행까지 실패).
@@ -389,7 +394,7 @@ test("live-fs 가드 — 이름만 겹치는 형제 경로는 막지 않는다",
 });
 
 // `..` 로 우회되면 가드가 무의미하다.
-test("live-fs 가드 — 상대경로/.. 로 우회되지 않는다", () => {
+guardTest("live-fs 가드 — 상대경로/.. 로 우회되지 않는다", () => {
   const home = process.env.HOME ?? "";
   expect(() => assertNotLiveMemberFsUnderTest(`${home}/b3os/members/../members/jane`, "t")).toThrow(/live-fs-guard/);
 });
@@ -397,7 +402,7 @@ test("live-fs 가드 — 상대경로/.. 로 우회되지 않는다", () => {
 // ★opt-in override 실검증 (subprocess)★ — MEMBERS_ROOT 는 import 시점 상수라, 같은 프로세스 안에서는
 //   "다른 루트로 뜬 상태" 를 만들 수 없다. 그래서 별도 프로세스를 띄워 실제로 확인한다(Codex 재리뷰 요청).
 //   확인할 것 두 가지: ①지정한 non-temp 루트는 통과한다 ②그래도 실 팀원 루트는 여전히 막힌다.
-test("opt-in override — 지정 루트는 통과하되 실 팀원 루트 보호는 그대로", () => {
+guardTest("opt-in override — 지정 루트는 통과하되 실 팀원 루트 보호는 그대로", () => {
   const optRoot = "/workspace/isolated-optin";           // non-temp. 존재하지 않아도 가드 판정엔 무관
   const mod = join(import.meta.dir, "personaTemplates.ts");
   const script = `
@@ -426,7 +431,7 @@ test("opt-in override — 지정 루트는 통과하되 실 팀원 루트 보호
 });
 
 // override 가 ★실 팀원 루트를 가리켜도★ 보호가 풀리면 안 된다 (이 변수로 우회 금지).
-test("opt-in override — 실 팀원 루트를 가리키면 무시하고 계속 막는다", () => {
+guardTest("opt-in override — 실 팀원 루트를 가리키면 무시하고 계속 막는다", () => {
   const home = process.env.HOME ?? "";
   const real = `${home}/b3os/members`;
   const mod = join(import.meta.dir, "personaTemplates.ts");

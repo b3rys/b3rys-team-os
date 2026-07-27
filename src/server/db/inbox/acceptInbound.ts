@@ -4,6 +4,7 @@ import { buildDedupeKey } from "../../../shared/envelopeSchema";
 import { ensureThread, insertMessage } from "./messages";
 import { findRecentDuplicate } from "./lifecycle";
 import type { Broadcaster } from "../../workers/types";
+import { emitLoopEventSafe, EVENT, makeEpisodeId } from "../../metrics/loopEvent";
 
 // acceptInbound — 채널 ingress 공통 꼬리 (P2 ChannelAdapter: telegramCapture·routes/inbox·routes/slack에
 //   복붙돼 있던 동일 시퀀스를 단일 코어로 추출). dedupe → ensureThread → insertMessage → broadcast.
@@ -15,6 +16,44 @@ import type { Broadcaster } from "../../workers/types";
 //   acceptInbound는 코어를 건드리지 않는 얇은 composition일 뿐(코어 불가침).
 
 export type InboundEnv = EnvelopeInbound & { explicit_recipients?: string[]; thread_id?: string };
+
+/**
+ * request.created 의 ★라벨★ — emit 여부에는 절대 쓰지 않는다(그건 open 행 하나로만 결정).
+ *
+ * ★왜 type / in_reply_to 로 안 나누나 (실측 근거)★
+ *   Bill 제안은 "type · in_reply_to 유무" 였는데, 실제 버스 2000건을 세어보니 판별력이 없다:
+ *     type="reply"  ▸ 2건 (0.1%)          — 우리 발신은 사실상 전부 type="dm"
+ *     in_reply_to 有 ▸ 1143건 (57%)        — 그런데 그 안에 ★스레드 안 새 위임★ 이 섞여 있다.
+ *                                            (그 배제가 바로 이번 HIGH 버그의 원인이었다)
+ *   즉 둘 다 "대화 후속" 을 가리키지 못한다. 같은 함정을 라벨에서 반복할 뻔했다.
+ *
+ * ★실제로 갈리는 기준: 부모 메시지를 '내가 받았는가'★
+ *   내가 받은 것에 답하며 상대에게 open 행을 남겼다 → 대화 왕복(followup)
+ *   선행 요청이 없거나, 있어도 내가 받은 게 아니다  → 새 일을 맡기는 것(delegation)
+ *   실측 분포(directed 1879건): followup 1007 · delegation 857(부모없음 821 + 스레드안 새위임 36)
+ *
+ * ★수신 사실은 message.to_agent_id 가 아니라 message_recipient 행으로 본다★ (Codex 리뷰 2026-07-27)
+ *   처음엔 `parent.to_agent_id === env.from_agent_id` 로 판정했는데, 부모가 broadcast 이거나
+ *   explicit multi-recipient 면 to_agent_id 가 'broadcast' 라 ★실제 수신자가 답해도 delegation 으로
+ *   오분류★ 된다(재현 확인). to_agent_id 는 '어디로 보냈나' 의 ★대리값★ 일 뿐이고,
+ *   ★받았다는 사실★ 은 message_recipient 행의 존재다.
+ *   — 이 파일 위쪽 emit 가드에서 이미 배운 교훈(추정 대신 사실)을 ★라벨에서 그대로 반복★ 했다.
+ *     한 층 아래에서 같은 실수를 했고 리뷰가 잡았다.
+ */
+function classifyRequestKind(db: Database, env: InboundEnv): "delegation" | "followup" {
+  const parentId = env.in_reply_to;
+  if (!parentId) return "delegation";
+  // 부모를 내가 ★받았는가★ — direct·broadcast·multi-recipient 를 한 기준으로 덮는다.
+  //   수신 행의 상태(open/acknowledged/completed)는 보지 않는다: 이미 닫힌 뒤에 답해도
+  //   "내가 받은 것에 답한다" 는 사실은 같다.
+  const received = db
+    .prepare(`SELECT 1 FROM message_recipient WHERE message_id = ? AND agent_id = ? LIMIT 1`)
+    .get(parentId, env.from_agent_id);
+  // 수신 행이 없으면 delegation — 부모를 못 찾았거나(조회 실패), 내가 받은 게 아니거나(스레드 안 새 위임).
+  // 라벨이 없어 분석에서 빠지는 것보다 보수적으로 위임에 두는 편이 낫다(정보를 버리지 않는다).
+  return received ? "followup" : "delegation";
+}
+
 
 export type AcceptInboundResult =
   | { ok: true; stored: EnvelopeStored }
@@ -72,6 +111,42 @@ export function acceptInbound(
   });
   const stored = insertMessage(db, { ...env, thread_id, dedupe_key: dedupeKey });
   opts.onInserted?.(stored); // audit 등 — broadcast 전에 (기존 순서 보존)
+
+  // ③ [측정 W1] request.created loop_event emit — ★best-effort(측정 실패가 ingress 전달 절대 안 깸)★, 같은 db.
+  //   spec §30: acceptInbound ok:true + episode-first(원 요청) → episode_id는 이 stored.id(origin·first-seen).
+  //
+  // ★가드는 "ack 이 날 수 있는 open 수신자 행을 실제로 만들었는가" 를 직접 본다.★ (Bill 리뷰 2026-07-27)
+  //   왜 heuristic 을 버렸나 — 이전 가드는 `type !== "reply" && !in_reply_to && to !== "broadcast"` 로
+  //   "ack 가능성" 을 ★간접 추정★ 했는데, 우리 핵심룰이 버스 발신에 항상 `--in-reply-to` 를 붙이라고 해서
+  //   ★스레드 안에서 오는 새 위임(= 실제 요청의 대다수)이 통째로 배제★ 됐다. 그런데 ack 쪽은 그 배제를
+  //   모르므로 수신자 행은 open 으로 생기고, 답이 오면 ack.observed 가 그대로 뜬다 →
+  //   ★request.created=0 / ack.observed=1 = 고아 ack + 분모 누락★ (Bill·Demis 각각 재현).
+  //   emit 짝은 같은 사실에서 나와야 어긋나지 않는다. 그 사실 = ★open 수신자 행의 존재★ 다.
+  //   부수효과로 특수 케이스가 별도 조건 없이 따라온다:
+  //     · broadcast      → 수신자 행이 'acknowledged'(close_reason=broadcast_fyi) 로 생성돼 open 이 아니다 → 무emit
+  //     · completed-on-insert(user source·비dispatch) → open 아님 → 무emit
+  //   즉 "ack 이 날 수 없는 것은 request 로도 세지 않는다" 가 ★정의상★ 보장된다(추정이 아니라).
+  const ackable = db
+    .prepare(`SELECT COUNT(*) AS n FROM message_recipient WHERE message_id = ? AND recipient_state = 'open'`)
+    .get(stored.id) as { n: number } | undefined;
+  if ((ackable?.n ?? 0) > 0) {
+    emitLoopEventSafe(db, {
+      event_id: `req:${stored.id}`,
+      event_name: EVENT.request_created,
+      schema_version: "0.2",
+      occurred_at: new Date().toISOString(),
+      episode_id: makeEpisodeId(thread_id, { requestMessageId: stored.id }),
+      thread_id,
+      request_message_id: stored.id,
+      actor: env.from_agent_id,
+      target: env.to_agent_id,
+      owner: env.to_agent_id,
+      request_kind: classifyRequestKind(db, env),
+      metric_scope: "both",
+      reason: `inbound ${env.source ?? "?"}`,
+    });
+  }
+
   opts.broadcast?.({ type: "message", message: stored });
   return { ok: true, stored };
 }

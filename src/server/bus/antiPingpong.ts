@@ -3,7 +3,7 @@
  *
  * Prevents bot↔bot infinite loops by counting automatic agent rounds in a
  * message chain (via parent_message_id) and blocking dispatch when the count
- * exceeds BUS_MAX_AUTO_ROUNDS (default 6).
+ * exceeds BUS_MAX_AUTO_ROUNDS (default 8).
  *
  * 2026-06-04: default 2→6. max=2 는 1 round-trip(Q→A) 후 후속을 막아서,
  * GD 가 지시한 정당한 다단계 기술 협의(질문→답→재질문→답…)까지 dispatch_blocked
@@ -19,7 +19,12 @@ import type { Database } from "bun:sqlite";
 import type { PendingDispatchRow } from "./types";
 import { countAutoRounds } from "../db/inboxQueries";
 
-export const MAX_AUTO_ROUNDS = Number(process.env.BUS_MAX_AUTO_ROUNDS ?? 6);
+// 2026-07-27: 기본 6→8 (GD 결정). ★홉 이중증가 수정(#86)이 배포된 뒤에 올렸다★ —
+//   그 전엔 홉이 메시지당 2씩 올라 실효 한도가 8메시지였고, 체인을 먼저 올리면 ★홉이 먼저 걸려★
+//   체인 상향이 아무 효과가 없었다. 순서를 지켜야 계산이 맞는다.
+//   실측 근거: 어제 스티브의 정당한 리뷰 왕복이 6에서 끊겼다(dispatch_blocked).
+//   8 = 4 round-trip. 진짜 runaway 는 여전히 8에서 bounded 다.
+export const MAX_AUTO_ROUNDS = Number(process.env.BUS_MAX_AUTO_ROUNDS ?? 8);
 
 // Agents registered in agents.json at runtime (passed in by dispatcher)
 export type AgentRoster = ReadonlySet<string>;

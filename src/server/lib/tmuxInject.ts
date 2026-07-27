@@ -174,17 +174,23 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
   // Anti-pingpong hop metadata (issue 1 A+C):
   // Include in_reply_to and hop instructions so the agent can propagate them on its response.
   // The server also enforces hop_count server-side (routes/inbox.ts) as a backstop.
-  const nextHop = (opts.hopCount ?? 0) + 1;
+  // ★봉투에는 '지금 이 메시지의 hop' 을 그대로 싣는다★ (2026-07-27, GD 결정 (b)안).
+  //   룰은 팀원에게 `--hop <hop_count+1>` 을 시킨다. 그런데 여기서 미리 +1 해서 보내면
+  //   팀원이 그 값에 또 +1 해서 ★메시지당 2씩★ 올랐다(실측: 0→2→4→6…).
+  //   그래서 MAX_HOPS=16 이 실제로는 8메시지 한도로 동작했다.
+  //   고치는 방향은 둘이었다 — 룰 문구를 바꾸거나(룰 문서 여러 벌), 여기서 저장값을 그대로 보여주거나.
+  //   ★후자를 택했다: 범위가 좁고 되돌리기 쉽다.★ 룰은 그대로 두고 봉투만 사실을 말하게 한다.
+  const currentHop = opts.hopCount ?? 0;
   const replyToMeta = opts.inReplyTo
     ? ` in_reply_to="${opts.inReplyTo}"`
     : "";
-  const hopMeta = `hop_count=${nextHop}`;
+  const hopMeta = `hop_count=${currentHop}`;
   const locale = opts.locale;
   const owner = pick(locale, "팀장", "the team lead");
   const hopInstruction = opts.hopCount !== undefined
     ? pick(locale,
-        ` 버스 응답에는 in_reply_to=${opts.inReplyTo ?? opts.messageId}, hop_count=${nextHop} 필수(루프방지).`,
-        ` Bus replies MUST include in_reply_to=${opts.inReplyTo ?? opts.messageId}, hop_count=${nextHop} (loop prevention).`)
+        ` 버스 응답에는 in_reply_to=${opts.inReplyTo ?? opts.messageId}, hop_count=${currentHop} 필수(루프방지).`,
+        ` Bus replies MUST include in_reply_to=${opts.inReplyTo ?? opts.messageId}, hop_count=${currentHop} (loop prevention).`)
     : "";
 
   const replyInstruction = opts.directReport

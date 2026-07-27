@@ -7,6 +7,7 @@
 //   ② DM 적재는 팀원 세션 기록을 읽는 기능이라 ★끌 수 있어야★ 한다(dm_capture=off).
 //      끄면 적재만 멈추고 버스·위임·발신은 그대로여야 한다 — dm_message 는 크리티컬이 아니다.
 import { describe, expect, spyOn, test } from "bun:test";
+import { claudeProjectsDir } from "../runtimes/claude/dmSource";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,7 +35,9 @@ function interruptEvent(chatId: string, mid: string, body: string) {
 function writeSession(events: unknown[]): string {
   const ws = mkdtempSync(join(tmpdir(), "dmsync-ws-"));
   // dmSource 는 ~/.claude/projects/<워크스페이스경로의 / 를 - 로> 에서 세션을 찾는다.
-  const sessionDir = join(process.env.HOME ?? tmpdir(), ".claude", "projects", ws.replace(/\//g, "-"));
+  // ★실 HOME 이 아니라 격리된 저장소 루트를 쓴다★ — preload(test-isolation.ts)가 temp 로 세팅한다.
+  //   전엔 process.env.HOME 을 직접 조립해서 팀장 실제 세션 저장소에 폴더를 쌓았다(5,157개 누적).
+  const sessionDir = join(claudeProjectsDir(), ws.replace(/\//g, "-"));
   mkdirSync(sessionDir, { recursive: true });
   writeFileSync(join(sessionDir, "s1.jsonl"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
   return ws;

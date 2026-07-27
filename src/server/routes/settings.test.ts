@@ -105,6 +105,197 @@ describe("Claude pairing backend contract", () => {
     expect(after).toMatchObject({ pairing_required: false, pending: false, awaiting_input: null });
     delete process.env.CLAUDE_CHANNELS_DIR;
   });
+
+  /* 2026-07-26 리사 고착 재현. 승인이 이 라우트 밖에서 먼저 끝나면(스킬 [6] 이 안내하는 access.json
+   * 수동 편집·플러그인 promote-pending) pending 이 비어 409 만 반복되고 위저드를 닫을 길이 사라졌다.
+   * 승인이 이미 성립했으면 어느 경로였든 합류로 정합돼야 한다. */
+  test("이미 승인된 상태면 pending 이 없어도 합류로 정합된다 (access.json 은 불변)", async () => {
+    const { app, dir, db } = setup();
+    const channels = join(dir, "claude-channels");
+    process.env.CLAUDE_CHANNELS_DIR = channels;
+    const accessDir = join(channels, "telegram-bill");
+    mkdirSync(accessDir, { recursive: true });
+    // 수동 승인이 끝난 뒤의 실제 모양: allowlist + allowFrom 1건 + pending 비어 있음
+    const approvedAccess = { dmPolicy: "allowlist", allowFrom: ["1000000001"], groups: {}, pending: {} };
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify(approvedAccess));
+    db.query("INSERT INTO setting (key, value) VALUES ('owner_chat_id', '1000000001')").run();
+    const steps = [
+      { key: "register", state: "done" }, { key: "provision", state: "done" },
+      { key: "preflight", state: "done" }, { key: "bundle", state: "done" }, { key: "join", state: "pending" },
+    ];
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_done','bill','join',?)").run(JSON.stringify({ steps }));
+
+    const res = await app.request("/ot/ot_done/claude-pair-approve", json({ code: "abc123" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, already_approved: true });
+
+    // 위저드가 닫혔다
+    const row = db.query("SELECT stage FROM ot WHERE id='ot_done'").get() as any;
+    expect(row.stage).toBe("joined");
+    // 승인 파일은 건드리지 않는다 — 이 경로는 표시 정합일 뿐이다
+    expect(JSON.parse(readFileSync(join(accessDir, "access.json"), "utf-8"))).toEqual(approvedAccess);
+    delete process.env.CLAUDE_CHANNELS_DIR;
+  });
+
+  /* 정합 조건을 '누군가 승인됨' 이 아니라 '★팀장이 실제로 닿을 수 있음★' 까지 좁힌다.
+   * 팀장 chat_id 는 setting(owner_chat_id)/env 같은 ★비순환★ 출처에서만 읽는다 — resolveOwnerDmId() 는
+   * 못 찾으면 access.json 의 allowFrom[0] 을 읽는 폴백이 있어서, 그걸로 allowFrom 을 검증하면
+   * 자기 자신을 확인하는 순환이 되어 무조건 통과한다. */
+  test("★팀장 id 를 아는데 allowlist 에 없으면 합류로 만들지 않는다★ (남이 승인된 경우)", async () => {
+    const oldEnv = process.env.GD_CHAT_ID; delete process.env.GD_CHAT_ID;
+    const { app, dir, db } = setup();
+    const channels = join(dir, "claude-channels");
+    process.env.CLAUDE_CHANNELS_DIR = channels;
+    const accessDir = join(channels, "telegram-bill");
+    mkdirSync(accessDir, { recursive: true });
+    // 승인은 돼 있지만 허용된 사람이 팀장이 아니다
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({
+      dmPolicy: "allowlist", allowFrom: ["999999999"], groups: {}, pending: {},
+    }));
+    db.query("INSERT INTO setting (key, value) VALUES ('owner_chat_id', '1000000001')").run();
+    const steps = [
+      { key: "register", state: "done" }, { key: "provision", state: "done" },
+      { key: "preflight", state: "done" }, { key: "bundle", state: "done" }, { key: "join", state: "pending" },
+    ];
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_other','bill','join',?)").run(JSON.stringify({ steps }));
+
+    const res = await app.request("/ot/ot_other/claude-pair-approve", json({ code: "abc123" }));
+    expect(res.status).toBe(409);
+    expect((db.query("SELECT stage FROM ot WHERE id='ot_other'").get() as any).stage).toBe("join");
+
+    // 같은 상태에서 팀장이 allowlist 에 들어가면 정합된다
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({
+      dmPolicy: "allowlist", allowFrom: ["999999999", "1000000001"], groups: {}, pending: {},
+    }));
+    const res2 = await app.request("/ot/ot_other/claude-pair-approve", json({ code: "abc123" }));
+    expect(res2.status).toBe(200);
+    expect((db.query("SELECT stage FROM ot WHERE id='ot_other'").get() as any).stage).toBe("joined");
+    delete process.env.CLAUDE_CHANNELS_DIR;
+    if (oldEnv === undefined) delete process.env.GD_CHAT_ID; else process.env.GD_CHAT_ID = oldEnv;
+  });
+
+  /* 코덱스 리뷰: "모르면 조건을 뺀다" 는 ★강화한 척★ 이었다. owner_chat_id 는 부팅 시 1회만 자동
+   * persist 되고 Settings 입력도 선택이라, 정작 필요한 순간(첫 페어링·수동 promote 직후)에는 비어 있다.
+   * 그래서 팀장 id 를 모르면 정합하지 않고, 대신 ★무엇을 하면 열리는지★ 를 알려준다. */
+  /* ★persist 가 실패해도 조용히 넘기지 않는다★(코덱스 리뷰). 승인은 이미 access.json 에 기록됐으니
+   * 되돌릴 수 없다 — 대신 응답에 사실을 밝힌다. 안 그러면 나중에 정합이 owner_identity_unknown 으로
+   * 막혔을 때 ★왜 막혔는지 알 방법이 없다.★ 침묵을 고치는 PR 에서 침묵을 남길 뻔했다. */
+  test("★신원 저장이 실패해도 승인은 유지하되 사실을 알린다★", async () => {
+    const { app, dir, db } = setup();
+    const channels = join(dir, "claude-channels");
+    process.env.CLAUDE_CHANNELS_DIR = channels;
+    const accessDir = join(channels, "telegram-bill");
+    mkdirSync(accessDir, { recursive: true });
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({
+      dmPolicy: "pairing", allowFrom: [], groups: {},
+      pending: { fff999: { senderId: "1000000001", chatId: "1000000001", expiresAt: Date.now() + 60_000 } },
+    }));
+    const steps = [
+      { key: "register", state: "done" }, { key: "provision", state: "done" },
+      { key: "preflight", state: "done" }, { key: "bundle", state: "done" }, { key: "join", state: "pending" },
+    ];
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_pfail','bill','join',?)").run(JSON.stringify({ steps }));
+    // setting 테이블을 지워 persist 를 실패시킨다(승인 자체는 파일에 기록되므로 영향 없어야 한다)
+    db.query("DROP TABLE setting").run();
+
+    const res = await app.request("/ot/ot_pfail/claude-pair-approve", json({ code: "fff999" }));
+    expect(res.status).toBe(200);                       // ★승인은 유지된다★ — 되돌리면 안 된다
+    const b = await res.json() as any;
+    expect(b.ok).toBe(true);
+    expect(b.owner_identity_persisted).toBe(false);     // ★사실을 숨기지 않는다★
+    expect(typeof b.warning).toBe("string");
+    // 승인 자체는 파일에 기록됐다
+    const stored = JSON.parse(readFileSync(join(accessDir, "access.json"), "utf-8"));
+    expect(stored.allowFrom).toContain("1000000001");
+    delete process.env.CLAUDE_CHANNELS_DIR;
+  });
+
+  test("★팀장 id 를 모르면 정합하지 않는다★ — owner_identity_unknown (막다른 길이 아니라 복구행동 명시)", async () => {
+    const oldEnv = process.env.GD_CHAT_ID; delete process.env.GD_CHAT_ID;
+    const { app, dir, db } = setup();
+    const channels = join(dir, "claude-channels");
+    process.env.CLAUDE_CHANNELS_DIR = channels;
+    const accessDir = join(channels, "telegram-bill");
+    mkdirSync(accessDir, { recursive: true });
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({
+      dmPolicy: "allowlist", allowFrom: ["999999999"], groups: {}, pending: {},
+    }));
+    const steps = [
+      { key: "register", state: "done" }, { key: "provision", state: "done" },
+      { key: "preflight", state: "done" }, { key: "bundle", state: "done" }, { key: "join", state: "pending" },
+    ];
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_noowner','bill','join',?)").run(JSON.stringify({ steps }));
+
+    const res = await app.request("/ot/ot_noowner/claude-pair-approve", json({ code: "abc123" }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "owner_identity_unknown" });
+    expect((db.query("SELECT stage FROM ot WHERE id='ot_noowner'").get() as any).stage).toBe("join");
+    delete process.env.CLAUDE_CHANNELS_DIR;
+    if (oldEnv === undefined) delete process.env.GD_CHAT_ID; else process.env.GD_CHAT_ID = oldEnv;
+  });
+
+  /* 위 fail-closed 가 막다른 길이 되지 않으려면 ★정상 승인이 owner_chat_id 를 채워야★ 한다.
+   * 정상 승인은 팀장 신원을 확인할 수 있는 유일한 지점이다(검증된 senderId). */
+  test("★정상 승인은 owner_chat_id 를 채운다★ — 단 팀장이 직접 넣은 값은 덮지 않는다", async () => {
+    const { app, dir, db } = setup();
+    const channels = join(dir, "claude-channels");
+    process.env.CLAUDE_CHANNELS_DIR = channels;
+    const accessDir = join(channels, "telegram-bill");
+    mkdirSync(accessDir, { recursive: true });
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({
+      dmPolicy: "pairing", allowFrom: [], groups: {},
+      pending: { abc123: { senderId: "1000000001", chatId: "1000000001", expiresAt: Date.now() + 60_000 } },
+    }));
+    const steps = [
+      { key: "register", state: "done" }, { key: "provision", state: "done" },
+      { key: "preflight", state: "done" }, { key: "bundle", state: "done" }, { key: "join", state: "pending" },
+    ];
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_persist','bill','join',?)").run(JSON.stringify({ steps }));
+
+    expect((await app.request("/ot/ot_persist/claude-pair-approve", json({ code: "abc123" }))).status).toBe(200);
+    expect((db.query("SELECT value FROM setting WHERE key='owner_chat_id'").get() as any)?.value).toBe("1000000001");
+
+    // ★빈 행이 있어도 채워야 한다★ — INSERT…WHERE NOT EXISTS 로 쓰면 여기서 PK 충돌이 나고
+    //   catch 가 삼켜 값이 영영 안 채워진다(코덱스 리뷰). UPSERT 라야 통과한다.
+    db.query("DELETE FROM setting WHERE key='owner_chat_id'").run();
+    db.query("INSERT INTO setting (key, value) VALUES ('owner_chat_id','')").run();
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({
+      dmPolicy: "pairing", allowFrom: [], groups: {},
+      pending: { aaa111: { senderId: "1000000001", chatId: "1000000001", expiresAt: Date.now() + 60_000 } },
+    }));
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_empty','bill','join',?)").run(JSON.stringify({ steps }));
+    expect((await app.request("/ot/ot_empty/claude-pair-approve", json({ code: "aaa111" }))).status).toBe(200);
+    expect((db.query("SELECT value FROM setting WHERE key='owner_chat_id'").get() as any)?.value).toBe("1000000001");
+
+    // 이미 값이 있으면 나중 페어링이 조용히 바꾸지 않는다
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({
+      dmPolicy: "pairing", allowFrom: [], groups: {},
+      pending: { def456: { senderId: "2222222222", chatId: "2222222222", expiresAt: Date.now() + 60_000 } },
+    }));
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_persist2','bill','join',?)").run(JSON.stringify({ steps }));
+    expect((await app.request("/ot/ot_persist2/claude-pair-approve", json({ code: "def456" }))).status).toBe(200);
+    expect((db.query("SELECT value FROM setting WHERE key='owner_chat_id'").get() as any)?.value).toBe("1000000001");
+    delete process.env.CLAUDE_CHANNELS_DIR;
+  });
+
+  test("승인도 pending 도 없으면 여전히 409 — 정합이 미승인을 합류로 만들지 않는다", async () => {
+    const { app, dir, db } = setup();
+    const channels = join(dir, "claude-channels");
+    process.env.CLAUDE_CHANNELS_DIR = channels;
+    const accessDir = join(channels, "telegram-bill");
+    mkdirSync(accessDir, { recursive: true });
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({ dmPolicy: "pairing", allowFrom: [], groups: {}, pending: {} }));
+    const steps = [
+      { key: "register", state: "done" }, { key: "provision", state: "done" },
+      { key: "preflight", state: "done" }, { key: "bundle", state: "done" }, { key: "join", state: "pending" },
+    ];
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_none','bill','join',?)").run(JSON.stringify({ steps }));
+
+    const res = await app.request("/ot/ot_none/claude-pair-approve", json({ code: "abc123" }));
+    expect(res.status).toBe(409);
+    expect((db.query("SELECT stage FROM ot WHERE id='ot_none'").get() as any).stage).toBe("join");
+    delete process.env.CLAUDE_CHANNELS_DIR;
+  });
 });
 
 test("공개 빌드 runtime_invalid allowed는 live-only 런타임을 노출하지 않는다", () => {
@@ -436,6 +627,23 @@ describe("settings: 팀원 추가/퇴사", () => {
     // 빈 배열 → 별칭 제거(undefined)
     expect((await app.request("/members/steve", patch({ nicknames: [] }))).status).toBe(200);
     expect(read("steve").nicknames).toBeUndefined();
+  });
+  test("PATCH runtime_cwd — Hermes 시작 CWD를 멤버별로 저장·초기화한다", async () => {
+    const { app, registryPath, db } = setup([
+      ...AGENTS,
+      { id: "mes", display_name: "Mes", nicknames: ["mes"], role: "strategy", runtime: "hermes_agent", status_provider: "hermes_gateway", avatar_emoji: "✦", moderator_eligible: false, workspace_path: "/tmp/mes", persona_file: "/tmp/mes/SOUL.md" },
+    ]);
+    const read = () => JSON.parse(readFileSync(registryPath, "utf-8")).find((a: any) => a.id === "mes");
+
+    const saved = await app.request("/members/mes", patch({ runtime_cwd: "~/b3os/members/mes" }));
+    expect(saved.status).toBe(200);
+    expect(read().runtime_cwd).toBe("~/b3os/members/mes");
+    syncRegistry(db, registryPath);
+    expect(listAgents(db).find((a) => a.id === "mes")?.runtime_cwd).toBe("~/b3os/members/mes");
+
+    expect((await app.request("/members/mes", patch({ runtime_cwd: "bad\0path" }))).status).toBe(400);
+    expect((await app.request("/members/mes", patch({ runtime_cwd: null }))).status).toBe(200);
+    expect(read().runtime_cwd).toBeNull();
   });
   test("중복 id 409", async () => {
     const { app } = setup();
@@ -1059,6 +1267,34 @@ describe("settings: 전체 재적용 롤백 (6h .bak 복원)", () => {
  * 클라이언트가 r.ok 를 안 보고 그 본문을 정상 데이터로 썼기 때문. 사용자가 그 매니페스트를 붙여넣으면
  * ★권한 0개짜리 Slack 앱★ 이 만들어진다 — 실패보다 나쁘다.
  * UI 는 "Socket Mode = 공개 URL 불필요" 라고 안내하는데 서버가 공개 URL 을 필수로 요구한 자기모순도 있었다. */
+// ★생산자에 대한 검증★ — 앞서 이 불변식은 손으로 쓴 픽스처(AgentSlack.test.ts)에만 있었고,
+// ★서버가 실제로 무엇을 내보내는지는 아무도 안 봤다.★ 그래서 #74 가 불법 매니페스트를 내보내는데도
+// 전 수트가 초록이었다(2026-07-27 Steve 리뷰). 규칙은 만드는 쪽에 걸어야 한다.
+describe("★서버가 내보내는 매니페스트는 어떤 경우에도 Slack 규격을 만족한다★", () => {
+  // Slack: event_subscriptions 가 있으면 request_url 또는 socket_mode_enabled 중 하나가 필수.
+  //   ("Event Subscription requires either Request URL or Socket Mode Enabled")
+  const slackAccepts = (m: any): boolean => {
+    const ev = m?.settings?.event_subscriptions;
+    if (!ev) return true;
+    return Boolean(ev.request_url) || m?.settings?.socket_mode_enabled === true;
+  };
+
+  for (const [label, base] of [["공개 URL 없음", undefined], ["공개 URL 있음", "https://example.test/"]] as const) {
+    test(`${label} — 서버 매니페스트가 Slack 규격을 만족한다`, async () => {
+      const old = process.env.TEAM_PUBLIC_BASE_URL;
+      if (base === undefined) delete process.env.TEAM_PUBLIC_BASE_URL; else process.env.TEAM_PUBLIC_BASE_URL = base;
+      try {
+        const { app } = setup();
+        const b = await (await app.request("/members/bill/slack/reinstall-info")).json() as any;
+        expect(b.ok).toBe(true);
+        expect(slackAccepts(b.manifest)).toBe(true);
+      } finally {
+        if (old === undefined) delete process.env.TEAM_PUBLIC_BASE_URL; else process.env.TEAM_PUBLIC_BASE_URL = old;
+      }
+    });
+  }
+});
+
 describe("slack reinstall-info", () => {
   const withBase = (v: string | undefined, fn: () => Promise<void>) => async () => {
     const old = process.env.TEAM_PUBLIC_BASE_URL;
@@ -1079,11 +1315,14 @@ describe("slack reinstall-info", () => {
     expect(b.manifest?.oauth_config?.scopes?.bot).toEqual(b.needed_scopes);
     expect(b.manifest?.display_information?.name).toBeTruthy();
     expect(b.event_request_url).toBeNull();
-    // ★event_subscriptions 는 남아 있어야 한다★ — 처음엔 통째로 빼서 "undefined 여야 한다" 고 단언했는데
-    //   ★그게 잘못된 불변식이었다★(코덱스 리뷰). 구독이 없으면 앱은 만들어져도 멘션을 못 받는다.
-    //   request_url 만 없으면 된다.
-    expect(b.manifest?.settings?.event_subscriptions?.bot_events).toEqual(["app_mention"]);
-    expect(b.manifest?.settings?.event_subscriptions?.request_url).toBeUndefined();
+    // ★event_subscriptions 블록 자체가 없어야 한다★ (2026-07-27 Steve 리뷰).
+    //   이 응답은 webhook 매니페스트(socket_mode_enabled=false)다. Slack 규격상 이 블록이 있으면
+    //   request_url 또는 socket_mode_enabled 중 하나가 필수라, 공개 URL 없이 블록을 넣으면
+    //   ★Slack 이 거부하는 매니페스트를 사용자에게 내주게 된다.★
+    //   앞선 판(#74)은 "구독이 없으면 멘션을 못 받는다" 를 이유로 무조건 넣었는데, 그건
+    //   ★Socket 매니페스트가 풀 문제를 webhook 매니페스트에서 풀려 한 것★ 이었다.
+    //   Socket 쪽 구독은 클라이언트 socketManifest() 가 주입한다(AgentSlack.test.ts 에서 고정).
+    expect(b.manifest?.settings?.event_subscriptions).toBeUndefined();
     expect(b.public_base_missing).toBe(true);
     expect(typeof b.public_base_hint).toBe("string");
   }));

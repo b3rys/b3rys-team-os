@@ -58,14 +58,23 @@ async function clip(text: string): Promise<boolean> {
   try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
 }
 
-// Socket Mode용 매니페스트 변환 — socket_mode_enabled=true + event_subscriptions.request_url 제거(공개 URL 불필요).
-// ★bot_events 는 남긴다★ — 그게 없으면 앱은 만들어지는데 멘션을 못 받는다. export 는 최종 JSON 을 테스트하기 위한 것.
+// Socket Mode용 매니페스트 변환 — socket_mode_enabled=true + request_url 제거(공개 URL 불필요).
+//
+// ★bot_events 를 "보존" 이 아니라 "주입" 한다★ (2026-07-27 Steve 리뷰).
+//   서버는 공개 URL 이 없으면 event_subscriptions 를 아예 안 내보낸다(그 조합은 Slack 이 거부한다).
+//   그래서 여기서 보존만 하면 ★공개 URL 없는 Socket 사용자가 구독을 못 받아 멘션에 반응하지 않는다★ —
+//   #74 가 고쳤던 그 버그가 다른 경로로 되살아난다. Socket 은 request_url 없이 bot_events 만으로 되므로
+//   이 자리에서 만들어 넣는 것이 맞다.
+// export 는 최종 JSON 을 테스트하기 위한 것.
 export function socketManifest(manifest: unknown): unknown {
   try {
     const m = JSON.parse(JSON.stringify(manifest ?? {})) as Record<string, any>;
     m.settings = m.settings || {};
     m.settings.socket_mode_enabled = true;
-    if (m.settings.event_subscriptions) delete m.settings.event_subscriptions.request_url;
+    const ev = m.settings.event_subscriptions || {};
+    delete ev.request_url;                                   // Socket 은 공개 URL 이 필요없다
+    if (!Array.isArray(ev.bot_events) || ev.bot_events.length === 0) ev.bot_events = ["app_mention"];
+    m.settings.event_subscriptions = ev;                     // 서버가 안 줬으면 여기서 만든다
     return m;
   } catch {
     return manifest;
@@ -84,6 +93,62 @@ export function webhookBlockedNotice(mode: "webhook" | "socket", eventRequestUrl
     "이 팀원은 Event URL 방식으로 설정돼 있는데 공개 HTTPS 주소가 없습니다. 그대로 두면 Slack 이 매니페스트를 거부합니다(Event Subscription requires either Request URL or Socket Mode Enabled). 서버에 TEAM_PUBLIC_BASE_URL 로 공개 HTTPS 주소를 설정한 뒤 이 화면을 다시 여세요.",
     "This member is set up with Event URL mode but no public HTTPS address is configured. Slack will reject the manifest (Event Subscription requires either Request URL or Socket Mode Enabled). Set TEAM_PUBLIC_BASE_URL on the server to a public HTTPS address, then reopen this screen.",
   );
+}
+
+// ★이벤트 구독을 켜는 단계가 안내에 아예 없었다★ (2026-07-27 GD 실측 — 리사 앱을 만들다 여기서 헤맸다).
+// 매니페스트에는 event_subscriptions.bot_events=["app_mention"] 이 들어 있다. 그런데 ★그게 들어 있다는 것과
+// 그 앱에서 실제로 켜져 있다는 것은 다르다★ — 실제로 GD 는 Slack 화면에서 직접 토글을 올려야 했다.
+// 이게 꺼져 있으면 ★봇은 멘션에 아무 반응을 하지 않는다. 오류도 안 난다.★ 사용자는 "봇이 무시한다" 로만 본다.
+// 그래서 매니페스트를 믿지 말고 ★눈으로 확인하는 단계★ 를 안내에 넣는다(양쪽 방식 공통).
+export function enableEventsStep(): string {
+  return pick(
+    `<b>Event Subscriptions</b> → <b>Enable Events</b> 토글 <b>ON</b> → 아래로 내려서 <b>Subscribe to bot events</b> → <b>Add Bot User Event</b> → <code>app_mention</code> 추가 → <b>Save Changes</b>. <span class="text-slate-500">(매니페스트에 이미 있어도 실제로 켜져 있는지 확인하세요 — 꺼져 있으면 봇이 멘션에 반응하지 않고 오류도 나지 않습니다)</span>`,
+    `<b>Event Subscriptions</b> → turn <b>Enable Events</b> <b>ON</b> → scroll down to <b>Subscribe to bot events</b> → <b>Add Bot User Event</b> → add <code>app_mention</code> → <b>Save Changes</b>. <span class="text-slate-500">(it is already in the manifest, but confirm it is actually on — if it is off the bot ignores mentions and no error is shown)</span>`,
+  );
+}
+
+/** 마법사의 사람 단계 목록. 렌더에서 분리해 ★안내 내용 자체를 테스트할 수 있게★ 한다
+ *  (빠진 단계는 화면을 봐야만 드러났다 — 그래서 회귀로 고정한다). */
+export function wizardSteps(opts: { isSocket: boolean; appLink: string; scopes: string; channel: string }): string[] {
+  const { isSocket, appLink, scopes, channel } = opts;
+  const inviteStep = pick(
+    `봇을 <b>${channel ? esc(channel) : pick("사용할 채널", "your channel")}</b>에 초대: <code>/invite @봇이름</code>.${channel ? "" : pick(" <span class=\"text-slate-500\">(채널이 아직 설정되지 않았습니다 — 아래 채널 칸에 입력하세요)</span>", "")}`,
+    `Invite the bot to <b>${channel ? esc(channel) : "your channel"}</b>: <code>/invite @botname</code>.${channel ? "" : " <span class=\"text-slate-500\">(no channel configured yet — set it in the Channel field below)</span>"}`);
+  const installStep = pick(
+    `<b>Install to Workspace</b> → Allow (권한 승인). 필요 scope: <code>${esc(scopes || "—")}</code>.`,
+    `<b>Install to Workspace</b> → Allow (approve permissions). Scopes needed: <code>${esc(scopes || "—")}</code>.`);
+
+  return isSocket
+    ? [
+        pick(
+          `Slack 앱 생성: ${appLink} → <b>From a manifest</b> → 워크스페이스 선택 → 아래 <b>매니페스트</b> 붙여넣기. <span class="text-slate-500">(Socket Mode 켜진 매니페스트 — 공개 URL 불필요)</span>`,
+          `Create the Slack app: ${appLink} → <b>From a manifest</b> → select a workspace → paste the <b>manifest</b> below. <span class="text-slate-500">(manifest with Socket Mode on — no public URL needed)</span>`),
+        enableEventsStep(),
+        installStep,
+        pick(
+          `<b>Basic Information</b> → <b>App-Level Tokens</b> → Generate Token → scope <code>connections:write</code> 추가 → <b>App-Level Token</b>(<code>xapp-…</code>) 복사.`,
+          `<b>Basic Information</b> → <b>App-Level Tokens</b> → Generate Token → add scope <code>connections:write</code> → copy the <b>App-Level Token</b>(<code>xapp-…</code>).`),
+        pick(
+          `<b>OAuth & Permissions</b> → <b>Bot User OAuth Token</b>(<code>xoxb-…</code>) 복사 → 아래 폼에 <b>xoxb</b>·<b>xapp</b> 붙여넣기.`,
+          `<b>OAuth & Permissions</b> → copy the <b>Bot User OAuth Token</b>(<code>xoxb-…</code>) → paste <b>xoxb</b> and <b>xapp</b> into the form below.`),
+        inviteStep,
+      ]
+    : [
+        pick(
+          `Slack 앱 생성: ${appLink} → <b>From a manifest</b> → 워크스페이스 선택 → 아래 <b>매니페스트</b> 붙여넣기.`,
+          `Create the Slack app: ${appLink} → <b>From a manifest</b> → select a workspace → paste the <b>manifest</b> below.`),
+        enableEventsStep(),
+        installStep,
+        pick(
+          `<b>Bot User OAuth Token</b>(<code>xoxb-…</code>)과 <b>Signing Secret</b> 복사 → 아래 폼에 붙여넣기.`,
+          `Copy the <b>Bot User OAuth Token</b>(<code>xoxb-…</code>) and <b>Signing Secret</b> → paste into the form below.`),
+        inviteStep,
+        // 이 분기는 ★기존에 Event URL 로 붙어 있는 멤버를 위해 남아 있을 뿐★ 이다(슬랙 정본 = Socket Mode).
+        // 그래서 여기는 손대지 않는다 — 새로 설계하거나 확장하지 않고 기존 문구 그대로 둔다.
+        pick(
+          `Event Subscriptions Request URL = 아래 값 등록 + <code>app_mention</code> 구독 (URL은 우리 서버 고정 주소 — 매니페스트에 이미 포함, 붙여넣으면 바로 Verified).`,
+          `Event Subscriptions Request URL = register the value below + subscribe to <code>app_mention</code> (the URL is our server's fixed address — already in the manifest, so it turns Verified as soon as you paste it).`),
+      ];
 }
 
 export function renderAgentSlack(host: HTMLElement, agentId: string, _displayName: string): void {
@@ -147,41 +212,7 @@ export function renderAgentSlack(host: HTMLElement, agentId: string, _displayNam
     const blockedNotice = webhookBlockedNotice(wizardMode, info.event_request_url);
     const appLink = `<a class="text-accent-greenSoft underline" href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener">api.slack.com/apps</a>`;
 
-    const steps = isSocket
-      ? [
-          pick(
-            `Slack 앱 생성: ${appLink} → <b>From a manifest</b> → 워크스페이스 선택 → 아래 <b>매니페스트</b> 붙여넣기. <span class="text-slate-500">(Socket Mode 켜진 매니페스트 — 공개 URL 불필요)</span>`,
-            `Create the Slack app: ${appLink} → <b>From a manifest</b> → select a workspace → paste the <b>manifest</b> below. <span class="text-slate-500">(manifest with Socket Mode on — no public URL needed)</span>`),
-          pick(
-            `<b>Install to Workspace</b> → Allow (권한 승인). 필요 scope: <code>${esc(scopes || "—")}</code>.`,
-            `<b>Install to Workspace</b> → Allow (approve permissions). Scopes needed: <code>${esc(scopes || "—")}</code>.`),
-          pick(
-            `<b>Basic Information</b> → <b>App-Level Tokens</b> → Generate Token → scope <code>connections:write</code> 추가 → <b>App-Level Token</b>(<code>xapp-…</code>) 복사.`,
-            `<b>Basic Information</b> → <b>App-Level Tokens</b> → Generate Token → add scope <code>connections:write</code> → copy the <b>App-Level Token</b>(<code>xapp-…</code>).`),
-          pick(
-            `<b>OAuth & Permissions</b> → <b>Bot User OAuth Token</b>(<code>xoxb-…</code>) 복사 → 아래 폼에 <b>xoxb</b>·<b>xapp</b> 붙여넣기.`,
-            `<b>OAuth & Permissions</b> → copy the <b>Bot User OAuth Token</b>(<code>xoxb-…</code>) → paste <b>xoxb</b> and <b>xapp</b> into the form below.`),
-          pick(
-            `봇을 <b>${channel ? esc(channel) : pick("사용할 채널", "your channel")}</b>에 초대: <code>/invite @봇이름</code>.${channel ? "" : pick(" <span class=\"text-slate-500\">(채널이 아직 설정되지 않았습니다 — 아래 채널 칸에 입력하세요)</span>", "")}`,
-            `Invite the bot to <b>${channel ? esc(channel) : "your channel"}</b>: <code>/invite @botname</code>.${channel ? "" : " <span class=\"text-slate-500\">(no channel configured yet — set it in the Channel field below)</span>"}`),
-        ]
-      : [
-          pick(
-            `Slack 앱 생성: ${appLink} → <b>From a manifest</b> → 워크스페이스 선택 → 아래 <b>매니페스트</b> 붙여넣기.`,
-            `Create the Slack app: ${appLink} → <b>From a manifest</b> → select a workspace → paste the <b>manifest</b> below.`),
-          pick(
-            `<b>Install to Workspace</b> → Allow (권한 승인). 필요 scope: <code>${esc(scopes || "—")}</code>.`,
-            `<b>Install to Workspace</b> → Allow (approve permissions). Scopes needed: <code>${esc(scopes || "—")}</code>.`),
-          pick(
-            `<b>Bot User OAuth Token</b>(<code>xoxb-…</code>)과 <b>Signing Secret</b> 복사 → 아래 폼에 붙여넣기.`,
-            `Copy the <b>Bot User OAuth Token</b>(<code>xoxb-…</code>) and <b>Signing Secret</b> → paste into the form below.`),
-          pick(
-            `봇을 <b>${channel ? esc(channel) : pick("사용할 채널", "your channel")}</b>에 초대: <code>/invite @봇이름</code>.${channel ? "" : pick(" <span class=\"text-slate-500\">(채널이 아직 설정되지 않았습니다 — 아래 채널 칸에 입력하세요)</span>", "")}`,
-            `Invite the bot to <b>${channel ? esc(channel) : "your channel"}</b>: <code>/invite @botname</code>.${channel ? "" : " <span class=\"text-slate-500\">(no channel configured yet — set it in the Channel field below)</span>"}`),
-          pick(
-            `Event Subscriptions Request URL = 아래 값 등록 + <code>app_mention</code> 구독 (URL은 우리 서버 고정 주소 — 매니페스트에 이미 포함, 붙여넣으면 바로 Verified).`,
-            `Event Subscriptions Request URL = register the value below + subscribe to <code>app_mention</code> (the URL is our server's fixed address — already in the manifest, so it turns Verified as soon as you paste it).`),
-        ];
+    const steps = wizardSteps({ isSocket, appLink, scopes, channel });
 
     // Event URL 방식은 공개 HTTPS 주소가 있어야 한다. 없으면 "—" 만 띄우지 말고 ★무엇을 하면 되는지★ 알린다
     // (Socket Mode 는 이 값 없이도 되므로 그쪽으로 안내). 예전엔 이 조건에서 화면 전체가 못 뜨고 있었다.

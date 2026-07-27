@@ -49,6 +49,20 @@ export function hermesBinary(agent: Pick<AgentRecord, "id" | "hermes_profile">):
   return agent.hermes_profile ? `${LOCAL_BIN}/${agent.hermes_profile}` : `${LOCAL_BIN}/b3rys${agent.id}`;
 }
 
+/** Expand a machine-local path stored in agents.json/runtime config. */
+export function expandHomePath(path: string): string {
+  if (path === "~") return HOME;
+  if (path.startsWith("~/")) return `${HOME}${path.slice(1)}`;
+  return path;
+}
+
+/** Gateway/CLI working directory for a member. Defaults to workspace_path for backward compatibility. */
+export function runtimeCwdForAgent(agent: Pick<AgentRecord, "id" | "workspace_path" | "runtime_cwd">): string {
+  const configured = agent.runtime_cwd?.trim();
+  if (configured) return expandHomePath(configured);
+  if (agent.workspace_path) return expandHomePath(agent.workspace_path);
+  return `${MEMBERS_ROOT}/${agent.id}`;
+}
 
 // ─── 자식 프로세스 PATH 보강 ──────────────────────────────────────────────
 // ★launchd 로 뜬 서버의 PATH 는 제한적★ 이라, bare name 으로 도구를 부르는 코드가 그대로 실패한다.

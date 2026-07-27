@@ -37,6 +37,7 @@ export function loadRegistry(path: string): AgentRecord[] {
     tmux_session: a.tmux_session ?? null,
     telegram_bot_username: a.telegram_bot_username ?? null,
     workspace_path: String(a.workspace_path),
+    runtime_cwd: typeof a.runtime_cwd === "string" && a.runtime_cwd.trim() ? String(a.runtime_cwd) : null,
     persona_file: String(a.persona_file),
     moderator_eligible: Boolean(a.moderator_eligible),
     avatar_emoji: a.avatar_emoji ?? "🤖",

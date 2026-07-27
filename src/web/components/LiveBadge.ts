@@ -1,12 +1,15 @@
-// LiveBadge — 배포된(비-localhost) 대시보드 상단 구별 스트립. (GD 2026-07-02)
-// 로컬 개발(localhost/127.0.0.1)에는 렌더하지 않고, 배포 origin이면 #app 최상단에 초록 바 +
-// ★자기 hostname★ + 빌드 식별자를 띄운다 → 로컬 dev 와 배포 인스턴스를 한눈에 구별.
-// (특정 도메인 하드코딩 없이 origin 기준으로 판단 — public=source: 어느 배포처든 자기 hostname 표시.)
+// LiveBadge — 라이브(정본) 대시보드 상단 구별 스트립. (GD 2026-07-02)
+// dev.b3rys.com에서만 #app 최상단에 초록 바 + 빌드 식별자를 띄운다.
+// 퍼블릭(studio.b3rys.com)·로컬·기타 origin에는 렌더하지 않는다.
 // 색: #23895C(GD 확정 B) + 하얀 글씨. 빌드 식별자 = 로드된 번들 해시(index-XXXX.js).
 
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1", ""]);
+const LIVE_HOSTS = new Set(["dev.b3rys.com"]);
 // b3os 제품 버전. package.json version과 맞춰 관리.
 const APP_VERSION = "0.5.0";
+
+export function shouldShowLiveBadge(hostname: string): boolean {
+  return LIVE_HOSTS.has(hostname);
+}
 
 function buildTag(): string {
   const s = document.querySelector<HTMLScriptElement>('script[src*="/assets/index-"]');
@@ -15,7 +18,7 @@ function buildTag(): string {
 }
 
 export function renderLiveBadge(app: HTMLElement): void {
-  if (LOCAL_HOSTS.has(location.hostname)) return;
+  if (!shouldShowLiveBadge(location.hostname)) return;
   if (document.getElementById("live-badge")) return; // 멱등
   const bar = document.createElement("div");
   bar.id = "live-badge";

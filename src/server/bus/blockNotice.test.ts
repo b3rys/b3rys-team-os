@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { migrate } from "../db/migrate";
 import { insertMessage } from "../db/inboxQueries";
-import { checkPingpong } from "./antiPingpong";
+import { checkPingpong, MAX_AUTO_ROUNDS } from "./antiPingpong";
 import { notifySenderOfBlock } from "./wakeDispatcher";
 import type { PendingDispatchRow } from "./types";
 import type { AgentRecord } from "../types";
@@ -65,9 +65,11 @@ function row(over: Partial<PendingDispatchRow>): PendingDispatchRow {
 }
 
 describe("★차단 통보 — 실제로 막히고, 실제로 통보가 나가고, 그 통보는 안 막힌다★", () => {
-  test("① 6왕복 넘으면 실제로 차단된다 (전제 확인)", () => {
+  // ★한도를 하드코딩하지 않는다★ — 6 을 박아뒀더니 기본값이 8 로 바뀔 때 이 테스트가 깨졌다(2026-07-27).
+  //   검증하려는 건 "한도를 넘으면 막힌다" 이지 "6에서 막힌다" 가 아니다. 상수를 따라가게 한다.
+  test(`① 한도(${MAX_AUTO_ROUNDS})를 넘으면 실제로 차단된다 (전제 확인)`, () => {
     const db = freshDb();
-    const parent = buildChain(db, 6);
+    const parent = buildChain(db, MAX_AUTO_ROUNDS);
     const v = checkPingpong(db, row({ parent_message_id: parent }), ROSTER);
     expect(v.allowed).toBe(false);
     expect(v.reason).toContain("pingpong_limit_exceeded");
@@ -75,9 +77,9 @@ describe("★차단 통보 — 실제로 막히고, 실제로 통보가 나가�
 
   test("② 차단되면 ★발신자에게★ 통보가 실제로 들어간다", () => {
     const db = freshDb();
-    const parent = buildChain(db, 6);
+    const parent = buildChain(db, MAX_AUTO_ROUNDS);
     const blocked = row({ parent_message_id: parent, message_id: "m-blocked" });
-    notifySenderOfBlock(db, blocked, AGENTS, "pingpong_limit_exceeded:rounds=6,max=6");
+    notifySenderOfBlock(db, blocked, AGENTS, `pingpong_limit_exceeded:rounds=${MAX_AUTO_ROUNDS},max=${MAX_AUTO_ROUNDS}`);
 
     const n = db.query("SELECT * FROM message WHERE from_agent_id='system' ORDER BY rowid DESC LIMIT 1").get() as any;
     expect(n).toBeTruthy();
@@ -89,8 +91,8 @@ describe("★차단 통보 — 실제로 막히고, 실제로 통보가 나가�
 
   test("③ ★그 통보 자체는 같은 가드에 안 걸린다★ — 이게 핵심이다", () => {
     const db = freshDb();
-    const parent = buildChain(db, 6);
-    notifySenderOfBlock(db, row({ parent_message_id: parent }), AGENTS, "pingpong_limit_exceeded:rounds=6,max=6");
+    const parent = buildChain(db, MAX_AUTO_ROUNDS);
+    notifySenderOfBlock(db, row({ parent_message_id: parent }), AGENTS, `pingpong_limit_exceeded:rounds=${MAX_AUTO_ROUNDS},max=${MAX_AUTO_ROUNDS}`);
     const n = db.query("SELECT * FROM message WHERE from_agent_id='system' ORDER BY rowid DESC LIMIT 1").get() as any;
 
     // ★체인 밖★ — parent 가 없어야 한다. 있으면 통보가 통보를 막는다.
@@ -114,10 +116,10 @@ describe("★차단 통보 — 실제로 막히고, 실제로 통보가 나가�
 
   test("⑤ 같은 차단으로 두 번 알리지 않는다 (dedupe)", () => {
     const db = freshDb();
-    const parent = buildChain(db, 6);
+    const parent = buildChain(db, MAX_AUTO_ROUNDS);
     const r = row({ parent_message_id: parent, message_id: "m-dup" });
-    notifySenderOfBlock(db, r, AGENTS, "pingpong_limit_exceeded:rounds=6,max=6");
-    notifySenderOfBlock(db, r, AGENTS, "pingpong_limit_exceeded:rounds=6,max=6");
+    notifySenderOfBlock(db, r, AGENTS, `pingpong_limit_exceeded:rounds=${MAX_AUTO_ROUNDS},max=${MAX_AUTO_ROUNDS}`);
+    notifySenderOfBlock(db, r, AGENTS, `pingpong_limit_exceeded:rounds=${MAX_AUTO_ROUNDS},max=${MAX_AUTO_ROUNDS}`);
     const cnt = db.query("SELECT COUNT(*) c FROM message WHERE from_agent_id='system'").get() as any;
     expect(cnt.c).toBe(1);
   });
