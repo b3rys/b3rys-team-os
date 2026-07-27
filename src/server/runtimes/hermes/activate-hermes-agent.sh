@@ -16,6 +16,11 @@ DISPLAY="${DISPLAY:-$(echo "$AGENT_ID" | tr '[:lower:]' '[:upper:]')}"   # ${var
 KO="${KO:-$AGENT_ID}"                     # 한글 멘션 별칭 (예: 별칭)
 DESC="${DESC:-b3rys 팀원 ($AGENT_ID)}"
 WS="${WS:-$HOME/Development/$AGENT_ID}"
+HERMES_CWD="${HERMES_CWD:-$WS}"
+case "$HERMES_CWD" in
+  "~/"*) HERMES_CWD="$HOME/${HERMES_CWD#~/}" ;;
+  "~") HERMES_CWD="$HOME" ;;
+esac
 TOKEN_FILE="${TOKEN_FILE:-$HOME/.hermes/credentials/$AGENT_ID-token.txt}"
 PROF_DIR="$HOME/.hermes/profiles/$AGENT_ID"
 HERMES_BASE_PROFILE="${HERMES_BASE_PROFILE:-b3os}"
@@ -162,9 +167,9 @@ say "■ 3) config.yaml — 멘션 별칭(=$KO/$AGENT_ID) + cwd + Telegram UX �
 #   팀마다 다르므로 env HERMES_EXCLUDE_ANCHOR 로 지정(예: 마지막 멤버 id). 미지정이면 (c) 스킵 —
 #   (b)에서 이미 멘션 패턴을 자기 이름으로 좁히므로 안전(제외 목록은 belt-and-suspenders).
 HERMES_EXCLUDE_ANCHOR="${HERMES_EXCLUDE_ANCHOR:-}"
-python3 - "$PROF_DIR" "$AGENT_ID" "$KO" "$WS" "$HERMES_EXCLUDE_ANCHOR" <<'PY'
+python3 - "$PROF_DIR" "$AGENT_ID" "$KO" "$WS" "$HERMES_CWD" "$HERMES_EXCLUDE_ANCHOR" <<'PY'
 import sys, os, re
-prof, aid, ko, ws, anchor = sys.argv[1:6]
+prof, aid, ko, ws, hermes_cwd, anchor = sys.argv[1:7]
 # ★hermes 버전드리프트(BUG8b, OWNER 2026-07-03): v0.17.0은 프로필별 config.yaml, v0.18.0+는 profile.yaml 을 쓴다.
 #   config.yaml 있으면(구버전) 그걸, 없으면 profile.yaml(신버전) 을 편집 = 두 버전 커버(라이브 v0.17.0 동작 불변).
 #   둘 다 없으면 예전엔 여기서 FileNotFoundError→exit1 로 activate 전체가 죽었다 → graceful skip 으로 바꿔 활성화는 계속.
@@ -179,7 +184,7 @@ txt = open(cfgp).read()
 changes = []
 # config.yaml 은 한글을 \uXXXX 로 저장 → 영문 리터럴을 타겟해야 escape 무관하게 매칭됨(2026-06-11).
 # (a) cwd → 이 에이전트 workspace
-new, n = re.subn(r"(terminal:\s*\n\s*cwd:\s*).*", r"\g<1>" + ws, txt, count=1)
+new, n = re.subn(r"(terminal:\s*\n\s*cwd:\s*).*", r"\g<1>" + hermes_cwd, txt, count=1)
 if n: txt = new; changes.append("cwd")
 # (b) 자기 멘션: @(?:<원본이름>|hermes) → @(?:ko|aid)  자기 이름에만 응답
 new, n = re.subn(r"@\(\?:[^)]*\|hermes\)", f"@(?:{ko}|{aid})", txt)

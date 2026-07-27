@@ -12,7 +12,7 @@ import { pick, type Locale } from "./i18n";
 import { teamContextLabel } from "../channels/registry";
 import { isRuntimeFailureOutput, readTurnFailure } from "./runtimeFailureOutput";
 import { appendAuditFile } from "./auditFile";
-import { hermesBinary, HERMES_ROOT, MEMBERS_ROOT } from "./paths";
+import { hermesBinary, HERMES_ROOT, runtimeCwdForAgent } from "./paths";
 
 export interface HermesTurnOptions {
   agent: AgentRecord;
@@ -227,6 +227,7 @@ export const HERMES_TURN_TIMEOUT_MS = Number(process.env.HERMES_TURN_TIMEOUT_MS 
 export async function runHermesTeamTurn(opts: HermesTurnOptions): Promise<string> {
   const cmd = hermesCommand(opts.agent);
   const prompt = buildPrompt(opts);
+  const runtimeCwd = runtimeCwdForAgent(opts.agent);
   // ★턴 상한은 ★한 곳★ 에서만 정한다.★ (GD 2026-07-15: "턴 상한도 한 군데서 수정하게")
   //   예전엔 호출부마다 따로 넘겨서 ★슬랙만 이 기본값(150s)이 그대로 적용★됐다 — 버스·단톡방은
   //   HERMES_TURN_TIMEOUT_MS(300s)를 명시했는데 슬랙(routes/slack.ts)은 안 넘겨서 ★절반★ 이었다.
@@ -242,7 +243,7 @@ export async function runHermesTeamTurn(opts: HermesTurnOptions): Promise<string
   const usagePath = join(tmpdir(), `hermes-usage-${opts.agent.id}-${opts.messageId}-${process.pid}.json`);
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd, ["-z", prompt, "--usage-file", usagePath], {
-      cwd: opts.agent.workspace_path || `${MEMBERS_ROOT}/hermes`,
+      cwd: runtimeCwd,
       // ★팀원의 정체를 ★명시적으로★ 알려준다 — 추측하게 두지 않는다.★ (2026-07-13 실측 사고)
       //
       // ═══ 무슨 일이 있었나 ═══
@@ -259,6 +260,8 @@ export async function runHermesTeamTurn(opts: HermesTurnOptions): Promise<string
         ...process.env,
         GD_AGENT_ID: opts.agent.id,          // 나는 누구인가 (스크립트가 tmux 세션으로 추측하지 않게)
         TEAM_DB_PATH: process.env.TEAM_DB_PATH ?? DB_PATH_FOR_SCRIPTS,
+        TERMINAL_CWD: runtimeCwd,
+        MESSAGING_CWD: runtimeCwd,
       },
     });
     let stdout = "";

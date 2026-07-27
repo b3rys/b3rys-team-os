@@ -32,6 +32,12 @@ export function migrate(db: Database): void {
   } catch {
     /* 이미 존재 */
   }
+  // Gateway runtime 실행 CWD(예: Hermes terminal.cwd). 없으면 workspace_path를 쓴다.
+  try {
+    db.exec("ALTER TABLE agent ADD COLUMN runtime_cwd TEXT");
+  } catch {
+    /* 이미 존재 */
+  }
   // 그룹 owner 영속화(2026-06-05 GD): 재시작에도 owner 유지. 단일 작은 행(thread_id='group').
   db.exec(
     `CREATE TABLE IF NOT EXISTS group_owner (
