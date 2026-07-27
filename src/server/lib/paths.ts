@@ -49,6 +49,21 @@ export function hermesBinary(agent: Pick<AgentRecord, "id" | "hermes_profile">):
   return agent.hermes_profile ? `${LOCAL_BIN}/${agent.hermes_profile}` : `${LOCAL_BIN}/b3rys${agent.id}`;
 }
 
+/** Expand a machine-local path stored in agents.json/runtime config. */
+export function expandHomePath(path: string): string {
+  if (path === "~") return HOME;
+  if (path.startsWith("~/")) return `${HOME}${path.slice(1)}`;
+  return path;
+}
+
+/** Gateway/CLI working directory for a member. Defaults to workspace_path for backward compatibility. */
+export function runtimeCwdForAgent(agent: Pick<AgentRecord, "id" | "workspace_path" | "runtime_cwd">): string {
+  const configured = agent.runtime_cwd?.trim();
+  if (configured) return expandHomePath(configured);
+  if (agent.workspace_path) return expandHomePath(agent.workspace_path);
+  return `${MEMBERS_ROOT}/${agent.id}`;
+}
+
 /** 공유 openclaw env 파일 경로. OPENCLAW_ENV env override, 기본 = ~/.openclaw/openclaw.env. */
 export function openclawEnvPath(): string {
   return process.env.OPENCLAW_ENV ?? `${OPENCLAW_ROOT}/openclaw.env`;

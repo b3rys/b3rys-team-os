@@ -29,6 +29,8 @@ export interface AgentRecord {
   tmux_session: string | null;
   telegram_bot_username: string | null;
   workspace_path: string;
+  /** Optional machine-local runtime launch CWD. Defaults to workspace_path. */
+  runtime_cwd?: string | null;
   persona_file: string;
   moderator_eligible: boolean;
   avatar_emoji: string;

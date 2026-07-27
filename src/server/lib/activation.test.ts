@@ -21,7 +21,7 @@ import { buildPersona, buildAgentsMd } from "./personaTemplates";
 import {
   waitForClaudePoller, waitForCodexPoller, waitForHermesGateway,
   activateMember, teardownRuntime, swapRuntime, RUNTIMES, STATUS_BY_RUNTIME,
-  classifyEssentials, CLAUDE_ESSENTIAL_TOLERANCE,
+  classifyEssentials, CLAUDE_ESSENTIAL_TOLERANCE, resolveActivationRuntimeCwd,
   type ActivateResult, type SwapDeps,
 } from "./activation";
 import { HERMES_BASE_PROFILE } from "./paths";
@@ -298,6 +298,26 @@ describe("activation: teardownRuntime (Phase1 offboard 4-branch 추출)", () => 
     expect(calls.some((c) => c.includes("telegram-lui-token.txt"))).toBe(true);
     expect(calls.some((c) => c.includes("telegram-lui-allowFrom.json"))).toBe(true);
     expect(calls.some((c) => c.includes("/agents/lui") && c.includes('"recursive":true'))).toBe(true);
+  });
+});
+
+describe("activation: Hermes runtime CWD resolution", () => {
+  test("runtime_cwd 미설정이면 canonical fallback 전에 agents.json workspace_path를 쓴다", () => {
+    expect(resolveActivationRuntimeCwd(
+      "herm",
+      undefined,
+      { workspace_path: "/home/tester/b3os/members/herm", runtime_cwd: null },
+      "/home/tester/Development/herm",
+    )).toBe("/home/tester/b3os/members/herm");
+  });
+
+  test("명시 runtime_cwd는 agents.json workspace_path보다 우선한다", () => {
+    expect(resolveActivationRuntimeCwd(
+      "herm",
+      "/home/tester/custom/herm",
+      { workspace_path: "/home/tester/b3os/members/herm", runtime_cwd: null },
+      "/home/tester/Development/herm",
+    )).toBe("/home/tester/custom/herm");
   });
 });
 
