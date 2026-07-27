@@ -21,7 +21,10 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          # ★고정한다★ — lockfile 은 고정했는데 런타임이 latest 면 재현성이 반쪽이다.
+          #   우리 변경과 무관한 bun 릴리즈만으로 깨질 수 있다. (빌·코덱스 리뷰가 독립적으로 같은 지적)
+          #   값은 현재 개발 머신과 동일한 버전이다 — CI 와 로컬이 같은 런타임을 봐야 한다.
+          bun-version: 1.3.14
 
       # lockfile 을 그대로 쓴다 — CI 가 로컬과 다른 의존성으로 초록이 되면 의미가 없다.
       - name: 의존성 설치
