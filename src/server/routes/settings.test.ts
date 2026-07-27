@@ -628,6 +628,23 @@ describe("settings: 팀원 추가/퇴사", () => {
     expect((await app.request("/members/steve", patch({ nicknames: [] }))).status).toBe(200);
     expect(read("steve").nicknames).toBeUndefined();
   });
+  test("PATCH runtime_cwd — Hermes 시작 CWD를 멤버별로 저장·초기화한다", async () => {
+    const { app, registryPath, db } = setup([
+      ...AGENTS,
+      { id: "mes", display_name: "Mes", nicknames: ["mes"], role: "strategy", runtime: "hermes_agent", status_provider: "hermes_gateway", avatar_emoji: "✦", moderator_eligible: false, workspace_path: "/tmp/mes", persona_file: "/tmp/mes/SOUL.md" },
+    ]);
+    const read = () => JSON.parse(readFileSync(registryPath, "utf-8")).find((a: any) => a.id === "mes");
+
+    const saved = await app.request("/members/mes", patch({ runtime_cwd: "~/b3os/members/mes" }));
+    expect(saved.status).toBe(200);
+    expect(read().runtime_cwd).toBe("~/b3os/members/mes");
+    syncRegistry(db, registryPath);
+    expect(listAgents(db).find((a) => a.id === "mes")?.runtime_cwd).toBe("~/b3os/members/mes");
+
+    expect((await app.request("/members/mes", patch({ runtime_cwd: "bad\0path" }))).status).toBe(400);
+    expect((await app.request("/members/mes", patch({ runtime_cwd: null }))).status).toBe(200);
+    expect(read().runtime_cwd).toBeNull();
+  });
   test("중복 id 409", async () => {
     const { app } = setup();
     expect((await app.request("/members", json({ id: "bill", display_name: "X", role: "r" }))).status).toBe(409);

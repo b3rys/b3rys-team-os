@@ -12,8 +12,8 @@ const MAX_METRIC_ROWS = 720;
 
 export function upsertAgent(db: Database, a: AgentRecord): void {
   db.prepare(
-    `INSERT INTO agent (id, display_name, role, runtime, status_provider, tmux_session, telegram_bot_username, workspace_path, persona_file, moderator_eligible, avatar_emoji, icon, hermes_profile, hermes_alias, gateway_service)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO agent (id, display_name, role, runtime, status_provider, tmux_session, telegram_bot_username, workspace_path, runtime_cwd, persona_file, moderator_eligible, avatar_emoji, icon, hermes_profile, hermes_alias, gateway_service)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        display_name=excluded.display_name,
        role=excluded.role,
@@ -22,6 +22,7 @@ export function upsertAgent(db: Database, a: AgentRecord): void {
        tmux_session=excluded.tmux_session,
        telegram_bot_username=excluded.telegram_bot_username,
        workspace_path=excluded.workspace_path,
+       runtime_cwd=excluded.runtime_cwd,
        persona_file=excluded.persona_file,
        moderator_eligible=excluded.moderator_eligible,
        avatar_emoji=excluded.avatar_emoji,
@@ -38,6 +39,7 @@ export function upsertAgent(db: Database, a: AgentRecord): void {
     a.tmux_session,
     a.telegram_bot_username,
     a.workspace_path,
+    a.runtime_cwd ?? null,
     a.persona_file,
     a.moderator_eligible ? 1 : 0,
     a.avatar_emoji,
@@ -60,7 +62,7 @@ export function deleteAgentsNotIn(db: Database, ids: string[]): void {
 export function listAgents(db: Database): AgentRecord[] {
   const rows = db
     .prepare(
-      `SELECT id, display_name, role, runtime, status_provider, tmux_session, telegram_bot_username, workspace_path, persona_file, moderator_eligible, avatar_emoji, icon, hermes_profile, hermes_alias, gateway_service FROM agent ORDER BY id`,
+      `SELECT id, display_name, role, runtime, status_provider, tmux_session, telegram_bot_username, workspace_path, runtime_cwd, persona_file, moderator_eligible, avatar_emoji, icon, hermes_profile, hermes_alias, gateway_service FROM agent ORDER BY id`,
     )
     .all() as Array<Omit<AgentRecord, "moderator_eligible"> & { moderator_eligible: number }>;
   return rows.map((r) => ({ ...r, moderator_eligible: r.moderator_eligible === 1 }));

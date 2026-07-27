@@ -128,6 +128,7 @@ const SLACK_APP_ID_RE = /^A[A-Z0-9]{8,}$/;
 const SLACK_BOT_TOKEN_RE = /^xoxb-[A-Za-z0-9-]+$/;
 const SLACK_APP_TOKEN_RE = /^xapp-[A-Za-z0-9-]+$/;
 const SLACK_SECRET_RE = /^[A-Za-z0-9]{24,}$/;
+const RUNTIME_CWD_MAX = 1024;
 // §1 Mission 블록: 헤더 다음부터 "## 2." 직전까지(lookahead 로 다음 절은 소비 안 함).
 // 제목 텍스트는 무관하게 "## 1." 만 매칭 — 운영판("Mission & Identity")·공개 템플릿("정체성 (팀마다 채움)") 양쪽 동작.
 const MISSION_RE = /(## 1\.[^\n]*\n)([\s\S]*?)(?=\n## 2\.)/;
@@ -141,6 +142,17 @@ function setSetting(db: Database, key: string, value: string) {
     "INSERT INTO setting (key, value, updated_at) VALUES (?, ?, datetime('now')) " +
       "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
   ).run(key, value);
+}
+
+function parseRuntimeCwd(value: unknown): { ok: true; value: string | null } | { ok: false; error: string; hint: string } {
+  if (value === null || value === "") return { ok: true, value: null };
+  if (typeof value !== "string") return { ok: false, error: "runtime_cwd_invalid", hint: "문자열 경로여야 합니다" };
+  const path = value.trim();
+  if (!path) return { ok: true, value: null };
+  if (path.length > RUNTIME_CWD_MAX || path.includes("\0")) {
+    return { ok: false, error: "runtime_cwd_invalid", hint: `경로는 ${RUNTIME_CWD_MAX}자 이하이고 NUL 문자를 포함할 수 없습니다` };
+  }
+  return { ok: true, value: path };
 }
 
 // 전체 핵심룰 재적용 롤백 가능 시간(6시간). 지나면 롤백 버튼/엔드포인트가 거부.
@@ -601,10 +613,10 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ok: true, member: { id, display_name, role, runtime, icon: entry.icon }, note: "봇·tmux·slack 연결은 lifecycle 스킬로 별도 설정" });
   });
 
-  // 아이콘 교체: SVG icon(ICONS 키) 그리고/또는 icon_color(팔레트 키) 갱신(본인 Settings 페이지에서 클릭→선택).
+  // 아이콘/별칭/런타임 CWD 교체: 가벼운 agents.json 필드 업데이트.
   app.patch("/members/:id", async (c) => {
     const id = c.req.param("id");
-    let body: { icon?: unknown; icon_color?: unknown; nicknames?: unknown };
+    let body: { icon?: unknown; icon_color?: unknown; nicknames?: unknown; runtime_cwd?: unknown };
     try {
       body = await c.req.json();
     } catch {
@@ -613,7 +625,8 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     const hasIcon = body.icon !== undefined;
     const hasColor = body.icon_color !== undefined;
     const hasNicks = body.nicknames !== undefined;
-    if (!hasIcon && !hasColor && !hasNicks) return c.json({ error: "no_change" }, 400);
+    const hasRuntimeCwd = body.runtime_cwd !== undefined;
+    if (!hasIcon && !hasColor && !hasNicks && !hasRuntimeCwd) return c.json({ error: "no_change" }, 400);
 
     const icon = typeof body.icon === "string" ? body.icon.trim() : "";
     if (hasIcon && !ICON_RE.test(icon)) return c.json({ error: "icon_invalid" }, 400);
@@ -633,6 +646,9 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       if (nicknames.length > 8) return c.json({ error: "nicknames_invalid", hint: "최대 8개" }, 400);
     }
 
+    const runtimeCwd = hasRuntimeCwd ? parseRuntimeCwd(body.runtime_cwd) : null;
+    if (runtimeCwd?.ok === false) return c.json({ error: runtimeCwd.error, hint: runtimeCwd.hint }, 400);
+
     let list: any[];
     try {
       list = readAgents();
@@ -644,13 +660,14 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     if (hasIcon) target.icon = icon;
     if (hasColor) target.icon_color = iconColor;
     if (hasNicks) target.nicknames = nicknames.length ? nicknames : undefined;
+    if (runtimeCwd?.ok) target.runtime_cwd = runtimeCwd.value;
     try {
       writeAgents(list);
     } catch (e) {
       return c.json({ error: "write_failed", detail: e instanceof Error ? e.message : String(e) }, 500);
     }
-    appendAudit(db, "user", "member_icon_updated", id, { ...(hasIcon ? { icon } : {}), ...(hasColor ? { icon_color: iconColor } : {}), ...(hasNicks ? { nicknames } : {}) });
-    return c.json({ ok: true, id, ...(hasIcon ? { icon } : {}), ...(hasColor ? { icon_color: iconColor } : {}), ...(hasNicks ? { nicknames } : {}) });
+    appendAudit(db, "user", "member_config_updated", id, { ...(hasIcon ? { icon } : {}), ...(hasColor ? { icon_color: iconColor } : {}), ...(hasNicks ? { nicknames } : {}), ...(runtimeCwd?.ok ? { runtime_cwd: runtimeCwd.value } : {}) });
+    return c.json({ ok: true, id, ...(hasIcon ? { icon } : {}), ...(hasColor ? { icon_color: iconColor } : {}), ...(hasNicks ? { nicknames } : {}), ...(runtimeCwd?.ok ? { runtime_cwd: runtimeCwd.value } : {}) });
   });
 
   // 퇴사: confirm_name 이 display_name 과 정확히 일치해야 진행(오발 방지).

@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, writeFileSync, chmodSync, readFileSync, renameSy
 import { dirname } from "node:path";
 import { memberPaths, MEMBERS_ROOT, personaTargetsForRuntime, assertNotLiveMemberFsUnderTest } from "./personaTemplates";
 import { writeMemberPersona, savePersonaFile } from "./writeMemberPersona";
-import { HERMES_BASE_PROFILE, MANUALS_DIR } from "./paths";
+import { HERMES_BASE_PROFILE, MANUALS_DIR, runtimeCwdForAgent } from "./paths";
 import { isHermesMemberProtected, isHermesProfileProtected } from "./hermesBaseProfile";
 import { appendAuditFile } from "./auditFile";
 import { codexBridgePaths, placeCodexToken, writeCodexBridgeFiles, removeCodexBridgeFiles, resolveOwnerDmId } from "../runtimes/codex/launcher";
@@ -169,6 +169,8 @@ export interface ActivateInput {
   display_name: string;
   role: string;
   runtime: string;
+  /** Optional machine-local CWD for gateway runtimes; defaults to workspace_path. */
+  runtime_cwd?: string | null;
   bot_username?: string;
   persona?: string; // 능력/강점(영입 입력)
   bot_token: string; // provisioning 에서 받은 BotFather 토큰
@@ -304,7 +306,7 @@ export function withInitialLeadCapabilities<T extends Record<string, unknown>>(
 }
 
 /** 런타임 활성화 스크립트 경로 + 토큰 파일 경로(스크립트가 기대하는 위치). */
-function runtimeScript(id: string, runtime: string): { script: string; tokenFile: string; env: Record<string, string> } | null {
+function runtimeScript(id: string, runtime: string, runtimeCwd?: string): { script: string; tokenFile: string; env: Record<string, string> } | null {
   // ★WS=MEMBERS_ROOT/id 명시 주입 — 스크립트 default(WS=~/Development/id)는 퍼블릭 모드(MEMBERS_ROOT=$B3RYS_HOME/members)서 persona/AGENTS.md 위치와 어긋남(claude WORKDIR과 같은 계열, 하네스 HIGH). 스크립트가 WS env 이미 존중. GD 2026-07-02.
   const ws = `${MEMBERS_ROOT}/${id}`;
   if (runtime === "openclaw") {
@@ -321,10 +323,23 @@ function runtimeScript(id: string, runtime: string): { script: string; tokenFile
     return {
       script: `${MANUALS_DIR}/hermes/activate-hermes-agent.sh`,
       tokenFile: `${HOME}/.hermes/credentials/${id}-token.txt`,
-      env: { AGENT_ID: id, WS: ws, HERMES_BASE_PROFILE, ...(ownerDm ? { OWNER_CHAT_ID: ownerDm } : {}) },
+      env: { AGENT_ID: id, WS: ws, HERMES_CWD: runtimeCwd || ws, HERMES_BASE_PROFILE, ...(ownerDm ? { OWNER_CHAT_ID: ownerDm } : {}) },
     };
   }
   return null; // claude_channel 은 별도 런타임 활성화 없음(CLAUDE.md + tmux/LaunchAgent)
+}
+
+export function resolveActivationRuntimeCwd(
+  id: string,
+  inputRuntimeCwd: string | null | undefined,
+  configured: { workspace_path?: string | null; runtime_cwd?: string | null } | undefined,
+  fallbackWorkspacePath: string,
+): string {
+  return runtimeCwdForAgent({
+    id,
+    workspace_path: configured?.workspace_path ?? fallbackWorkspacePath,
+    runtime_cwd: inputRuntimeCwd ?? configured?.runtime_cwd ?? null,
+  });
 }
 
 /** 토큰을 스크립트가 기대하는 파일에 0600 저장(stdout 노출 없음). */
@@ -561,6 +576,8 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
   // ★재영입 belt-and-suspenders: off-list에서 제거 — openclaw/hermes는 setAgentEnabled(true) 경로를 안 타서, 이거 없으면 재영입해도 stale off로 버스 suppress(하네스 #1). GD 2026-07-01.
   try { clearAgentOff(id); } catch { /* best-effort */ }
   const paths = memberPaths(id, runtime);
+  const configured = activationAgents.find((a: any) => a.id === id);
+  const runtimeCwd = resolveActivationRuntimeCwd(id, input.runtime_cwd, configured, paths.workspace_path);
   // 라이브 생성 경로 → 핵심룰의 {{OWNER}}/{{TEAM}} 을 setting owner_name(="GD")/team_name(="b3rys")으로 치환. 미설정이면 undefined → 플레이스홀더 유지.
   const ownerRow = db.query("SELECT value FROM setting WHERE key = 'owner_name'").get() as { value: string } | null;
   const owner_name = ownerRow?.value || undefined;
@@ -727,7 +744,7 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       needsPairing: pairingPending,
     };
   }
-  const rs = runtimeScript(id, runtime);
+  const rs = runtimeScript(id, runtime, runtimeCwd);
   if (rs) {
     if (process.env.APPROVAL_EXECUTION_ENABLED !== "1") {
       steps.push({ step: "runtime", ok: false, detail: "실행 OFF(APPROVAL_EXECUTION_ENABLED≠1) — 런타임 활성화 건너뜀" });
@@ -873,6 +890,7 @@ async function rollbackSwap(db: Database, ctx: RollbackCtx): Promise<{ steps: Sw
       const heal = await ctx.doActivateMember(db, {
         id: ctx.id, display_name: ctx.target.display_name, role: ctx.target.role,
         runtime: ctx.oldRuntime, bot_username: ctx.target.telegram_bot_username,
+        runtime_cwd: ctx.target.runtime_cwd ?? null,
         bot_token: token, // ★persona 미전달: SOUL.md 는 STEP1 백업에서 복원된다(아래 copyFileSync). purpose 는 제거됨(cfe8bf7)
         registryPath: ctx.registryPath,
       });
@@ -1115,6 +1133,7 @@ export async function swapRuntime(db: Database, input: SwapInput, deps: SwapDeps
     role: target.role,
     runtime: targetRuntime,
     bot_username: target.telegram_bot_username,
+    runtime_cwd: updatedEntry.runtime_cwd ?? null,
     // ★persona 를 전달하지 않는다 — SOUL.md 는 이미 제자리에 있다(위에서 경로가 바뀌면 옮겼다).★
     //   purpose 필드는 제거됐고(cfe8bf7) persona 값의 유일한 집은 SOUL.md 다.
     //   전달하면 savePersonaFile 이 같은 내용을 다시 써서 무의미한 .bak 만 남는다.

@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS agent (
   tmux_session TEXT,
   telegram_bot_username TEXT,
   workspace_path TEXT NOT NULL,
+  runtime_cwd TEXT,
   persona_file TEXT NOT NULL,
   moderator_eligible INTEGER NOT NULL DEFAULT 0,
   avatar_emoji TEXT NOT NULL DEFAULT '🤖',

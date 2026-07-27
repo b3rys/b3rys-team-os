@@ -25,6 +25,7 @@ interface ConfigResponse {
     slack_bot_user_id?: string | null;
     slack_app_name?: string | null;
     openclaw_agent_id?: string | null;
+    runtime_cwd?: string | null;
   };
   persona: { path: string; content: string | null; exists: boolean; bytes: number };
   custom_persona?: string | null; // 편집기 pre-fill용 커스텀 블록(룰 섹션 제거·추출) — 파일 통짜 대신 이걸 편집
@@ -91,6 +92,7 @@ const REGISTRY_FIELDS: Array<[string, (a: ConfigResponse["agent"]) => string]> =
   ["tmux_session", (a) => a.tmux_session ?? "—"],
   ["telegram_bot", (a) => a.telegram_bot_username ?? "—"],
   ["workspace_path", (a) => a.workspace_path],
+  ["runtime_cwd", (a) => a.runtime_cwd ?? "—"],
   ["persona_file", (a) => a.persona_file],
   ["slack_bot_user_id", (a) => a.slack_bot_user_id ?? "—"],
   ["openclaw_agent_id", (a) => a.openclaw_agent_id ?? "—"],
@@ -170,6 +172,18 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
       </tr>`;
 
   const personaContent = persona.content ?? "";
+  const runtimeCwdSection = agent.runtime === "hermes_agent" ? `
+        <div class="mt-6 mb-6 rounded-lg border border-txt-blue/25 bg-txt-blue/5 p-3">
+          <div class="text-xs font-semibold uppercase tracking-widest text-txt-blue/80 mb-2">${pick("Hermes CWD", "Hermes CWD")}</div>
+          <div class="text-[12px] text-slate-400 mb-2">${pick("Hermes가 시작/응답할 작업 폴더입니다. 비우면 workspace_path를 씁니다. AGENTS.md를 읽게 하려면 팀원 폴더로 맞추세요.", "Working directory for Hermes startup/turns. Empty uses workspace_path. Set it to the member folder so AGENTS.md is loaded.")}</div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <input id="cfg-runtime-cwd" value="${escape(agent.runtime_cwd ?? "")}" spellcheck="false" autocomplete="off"
+              class="flex-1 min-w-[260px] bg-surface-0 border border-surface-3 rounded-md px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-txt-blue/50 font-mono"
+              placeholder="${escape(agent.workspace_path)}" />
+            <button id="cfg-runtime-cwd-save" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-400/40 bg-surface-3 text-txt-blue text-sm font-medium hover:bg-surface-0 hover:border-txt-blue/50">${renderIcon("save", { size: 13, className: "shrink-0" })}${pick("CWD 저장", "Save CWD")}</button>
+          </div>
+          <div id="cfg-runtime-cwd-msg" class="text-[11px] text-slate-500 mt-1.5"></div>
+        </div>` : "";
   // 런타임 교체 select 옵션 — 서버 화이트리스트(SWAP_TARGETS)와 교집합 + 현재 런타임 제외 + 공개빌드 b3os_native 숨김.
   // 공개빌드에선 아래 '런타임 교체' 섹션 전체를 렌더하지 않는다(LIVE_ONLY_OPS=false) — 공개판은 UI에서만 swap 숨김(GD 0721). 서버 엔드포인트는 유지되며 codex target·미준비는 publicRuntimeGate/runtime_not_ready 가 막는다.
   const swapTargetOptions = runtimeOptions
@@ -188,6 +202,7 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
       <div class="p-4">
         <div class="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-2">${pick("레지스트리 (agents.json · icon만 변경 가능)", "Registry (agents.json · icon only)")}</div>
         <table class="w-full text-xs mb-6"><tbody>${rows}${iconRow}</tbody></table>
+        ${runtimeCwdSection}
 
         <div class="flex items-center justify-between mb-2">
           <div class="text-xs font-semibold uppercase tracking-widest text-slate-500">${pick("역할 · 페르소나 (agents.json)", "Role · Persona (agents.json)")}</div>
@@ -302,11 +317,40 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
   const resetBtn = root.querySelector<HTMLButtonElement>("#cfg-reset");
   const statusEl = root.querySelector<HTMLElement>("#cfg-save-status");
   const originalProfile = { role: agent.role ?? "", persona: customPersona };
+  const runtimeCwdInput = root.querySelector<HTMLInputElement>("#cfg-runtime-cwd");
+  const runtimeCwdSave = root.querySelector<HTMLButtonElement>("#cfg-runtime-cwd-save");
+  const runtimeCwdMsg = root.querySelector<HTMLElement>("#cfg-runtime-cwd-msg");
   const updateLocalIcon = (patch: { icon?: string | null; icon_color?: string | null }) => {
     Object.assign(agent, patch);
     const st = store.getState();
     st.setAgents(st.agents.map((a) => (a.id === agent.id ? { ...a, ...patch } : a)));
   };
+
+  runtimeCwdSave?.addEventListener("click", async () => {
+    const value = runtimeCwdInput?.value.trim() ?? "";
+    const _busy = setBtnBusy(runtimeCwdSave, pick("저장 중…", "Saving…"));
+    if (runtimeCwdMsg) { runtimeCwdMsg.textContent = pick("CWD 저장 중…", "Saving CWD…"); runtimeCwdMsg.className = "text-[11px] text-slate-400 mt-1.5"; }
+    try {
+      const res = await fetch(`${apiBase()}/api/members/${encodeURIComponent(agent.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runtime_cwd: value || null }),
+      });
+      const j = (await res.json().catch(() => ({}))) as { ok?: boolean; runtime_cwd?: string | null; error?: string; hint?: string };
+      if (!res.ok || !j.ok) {
+        if (runtimeCwdMsg) { runtimeCwdMsg.textContent = `✗ ${j.hint ?? j.error ?? res.status}`; runtimeCwdMsg.className = "text-[11px] text-status-blocked mt-1.5"; }
+        return;
+      }
+      agent.runtime_cwd = j.runtime_cwd ?? null;
+      const st = store.getState();
+      st.setAgents(st.agents.map((a) => (a.id === agent.id ? { ...a, runtime_cwd: agent.runtime_cwd } : a)));
+      if (runtimeCwdMsg) { runtimeCwdMsg.textContent = pick("✓ 저장됨 — 다음 Hermes 재시작/턴부터 적용", "✓ Saved — applies from the next Hermes restart/turn"); runtimeCwdMsg.className = "text-[11px] text-accent-greenSoft mt-1.5"; }
+    } catch (e) {
+      if (runtimeCwdMsg) { runtimeCwdMsg.textContent = pick("실패: ", "Failed: ") + (e as Error).message; runtimeCwdMsg.className = "text-[11px] text-status-blocked mt-1.5"; }
+    } finally {
+      _busy();
+    }
+  });
 
   resetBtn?.addEventListener("click", () => {
     if (roleInput) roleInput.value = originalProfile.role;
