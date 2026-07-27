@@ -1304,40 +1304,35 @@ describe("slack reinstall-info", () => {
     }
   };
 
-  test("★공개 URL 이 없어도 완전한 매니페스트를 준다★ (Socket Mode 는 그것 없이 되어야 한다)", withBase(undefined, async () => {
+  /* ★서버는 언제나 Socket 매니페스트를 낸다★ (GD 2026-07-27 — 슬랙 정본 = Socket Mode).
+   * 예전엔 공개 URL 이 있으면 request_url + socket_mode_enabled:false 를 내보냈다. 화면에서는
+   * 클라이언트 socketManifest() 가 Socket 으로 바꿔줘 멀쩡해 보였지만, ★그건 화면을 거칠 때만★ 이다.
+   * 이 엔드포인트를 직접 받아가면 ★지원하지 않는 Event URL 앱을 만드는 매니페스트★ 가 그대로 나갔다.
+   * 그래서 ★공개 URL 유무와 무관하게 같은 Socket 매니페스트★ 가 나오는 것을 고정한다. */
+  const expectSocketManifest = (b: any) => {
+    expect(b.manifest?.settings?.socket_mode_enabled).toBe(true);
+    expect(b.manifest?.settings?.event_subscriptions?.bot_events).toEqual(["app_mention"]);
+    // ★request_url 이 있으면 Event URL 앱이 만들어진다★ — 공개 URL 이 설정돼 있어도 넣지 않는다
+    expect(b.manifest?.settings?.event_subscriptions?.request_url).toBeUndefined();
+  };
+
+  test("★공개 URL 이 없어도 Socket 매니페스트를 완전하게 준다★", withBase(undefined, async () => {
     const { app } = setup();
     const res = await app.request("/members/bill/slack/reinstall-info");
     expect(res.status).toBe(200);
     const b = await res.json() as any;
     expect(b.ok).toBe(true);
-    // ★scope 가 비면 권한 없는 앱이 만들어진다★ — 이게 이번 사고의 핵심이라 개수까지 고정한다
+    // ★scope 가 비면 권한 없는 앱이 만들어진다★ — 이게 이전 사고의 핵심이라 개수까지 고정한다
     expect(b.needed_scopes).toEqual(["app_mentions:read", "chat:write", "groups:history", "channels:history"]);
     expect(b.manifest?.oauth_config?.scopes?.bot).toEqual(b.needed_scopes);
     expect(b.manifest?.display_information?.name).toBeTruthy();
-    expect(b.event_request_url).toBeNull();
-    // ★event_subscriptions 블록 자체가 없어야 한다★ (2026-07-27 Steve 리뷰).
-    //   이 응답은 webhook 매니페스트(socket_mode_enabled=false)다. Slack 규격상 이 블록이 있으면
-    //   request_url 또는 socket_mode_enabled 중 하나가 필수라, 공개 URL 없이 블록을 넣으면
-    //   ★Slack 이 거부하는 매니페스트를 사용자에게 내주게 된다.★
-    //   앞선 판(#74)은 "구독이 없으면 멘션을 못 받는다" 를 이유로 무조건 넣었는데, 그건
-    //   ★Socket 매니페스트가 풀 문제를 webhook 매니페스트에서 풀려 한 것★ 이었다.
-    //   Socket 쪽 구독은 클라이언트 socketManifest() 가 주입한다(AgentSlack.test.ts 에서 고정).
-    expect(b.manifest?.settings?.event_subscriptions).toBeUndefined();
-    expect(b.public_base_missing).toBe(true);
-    expect(typeof b.public_base_hint).toBe("string");
+    expectSocketManifest(b);
   }));
 
-  test("공개 URL 이 있으면 request_url 과 ★bot_events 둘 다★ 포함한다", withBase("https://example.test/", async () => {
+  test("★공개 URL 이 있어도 request_url 을 넣지 않는다★ (Event URL 방식은 지원하지 않는다)", withBase("https://example.test/", async () => {
     const { app } = setup();
     const b = await (await app.request("/members/bill/slack/reinstall-info")).json() as any;
-    expect(b.event_request_url).toBe("https://example.test/team/api/slack/events");
-    expect(b.manifest?.settings?.event_subscriptions?.request_url).toBe("https://example.test/team/api/slack/events");
-    // ★이 줄이 없어서 기본 경로가 무방비였다★ — 마법사 기본 모드가 webhook 이라 '공개 URL 있음' 이
-    //   대부분 사용자의 경로다. 그런데 여기 bot_events 단언이 없어서, event_subscriptions 를 삼항으로
-    //   갈라 URL 있을 때 bot_events 를 빼도 ★전 테스트가 통과했다★(하네스 검증에서 변이로 실증).
-    //   #73 과 똑같은 피해가 다시 통과될 수 있었다.
-    expect(b.manifest?.settings?.event_subscriptions?.bot_events).toEqual(["app_mention"]);
-    expect(b.public_base_missing).toBe(false);
+    expectSocketManifest(b);
   }));
 
   /* ★서버 산출물 → 클라이언트 변환★ 접합부. 양쪽을 따로만 검사하면, 서버가 모양을 바꿔도 클라이언트

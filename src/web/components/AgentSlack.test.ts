@@ -101,13 +101,13 @@ describe("webhookBlockedNotice — 실행 가능한 행동만 안내한다", () 
  * 오늘 하루 반복된 형태 그대로다: 있는데 도달하지 못한다. 그래서 ★안내 문구 자체를 회귀로 고정한다.★ */
 describe("wizardSteps — 이벤트 구독 켜는 단계가 반드시 있다", () => {
   const opts = { appLink: "<a>apps</a>", scopes: "app_mentions:read, chat:write", channel: "#team" };
-  const joined = (isSocket: boolean) => wizardSteps({ ...opts, isSocket }).join("\n");
+  const joined = () => wizardSteps(opts).join("\n");
 
   for (const isSocket of [true, false]) {
     const label = isSocket ? "Socket Mode" : "Event URL";
 
     test(`★${label}: Enable Events → app_mention → Save 순서가 안내된다★`, () => {
-      const s = joined(isSocket);
+      const s = joined();
       expect(s).toContain("Enable Events");          // ← 토글을 켜라는 말이 없으면 사용자는 못 찾는다
       expect(s).toContain("Subscribe to bot events");
       expect(s).toContain("app_mention");
@@ -115,7 +115,7 @@ describe("wizardSteps — 이벤트 구독 켜는 단계가 반드시 있다", (
     });
 
     test(`${label}: 단계는 앱 생성 → 이벤트 구독 순서다 (앱이 없으면 켤 화면이 없다)`, () => {
-      const steps = wizardSteps({ ...opts, isSocket });
+      const steps = wizardSteps(opts);
       const created = steps.findIndex((x) => x.includes("From a manifest"));
       const events = steps.findIndex((x) => x.includes("Enable Events"));
       expect(created).toBeGreaterThanOrEqual(0);
@@ -123,19 +123,19 @@ describe("wizardSteps — 이벤트 구독 켜는 단계가 반드시 있다", (
     });
 
     test(`${label}: 채널 초대·토큰 복사 단계는 그대로 남아 있다 (단계 추가가 기존 안내를 밀어내지 않는다)`, () => {
-      const s = joined(isSocket);
+      const s = joined();
       expect(s).toContain("/invite");
       expect(s).toContain("xoxb");
     });
   }
 
-  test("Socket 방식만 App-Level Token(xapp) 단계를 안내한다", () => {
-    expect(joined(true)).toContain("xapp");
-    expect(joined(false)).not.toContain("xapp");
+  test("★App-Level Token(xapp) 단계를 안내한다★ — Socket Mode 에 필수다", () => {
+    expect(joined()).toContain("xapp");
   });
 
-  test("Event URL 방식은 Request URL 등록 단계를 유지한다", () => {
-    expect(joined(false)).toContain("Request URL");
+  test("★Request URL·Signing Secret 은 안내하지 않는다★ (Event URL 방식은 지원하지 않는다)", () => {
+    expect(joined()).not.toContain("Request URL");
+    expect(joined()).not.toContain("Signing Secret");
   });
 });
 
@@ -146,14 +146,14 @@ describe("Socket Mode 가 정본 — 안내에 Event URL 을 섞지 않는다", 
   const base = { appLink: "<a>apps</a>", scopes: "chat:write", channel: "#team" };
 
   test("★Socket 안내에는 Request URL·Signing Secret 이 나오지 않는다★", () => {
-    const s = wizardSteps({ ...base, isSocket: true }).join("\n");
+    const s = wizardSteps(base).join("\n");
     expect(s).not.toContain("Request URL");
     expect(s).not.toContain("Signing Secret");
     expect(s).toContain("xapp");                    // Socket 은 App-Level Token 을 쓴다
   });
 
   test("이벤트 구독 단계는 GD 가 준 4단계 그대로다 (덧붙이지 않는다)", () => {
-    const step = wizardSteps({ ...base, isSocket: true }).find((x) => x.includes("Enable Events"))!;
+    const step = wizardSteps(base).find((x) => x.includes("Enable Events"))!;
     const order = ["Enable Events", "Subscribe to bot events", "Add Bot User Event", "app_mention", "Save Changes"];
     let at = -1;
     for (const token of order) {
