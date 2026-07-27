@@ -57,6 +57,8 @@ import { isHermesProfileProtected } from "../lib/hermesBaseProfile";
 import { latestCaptureNonBotSender, listDiscoveredGroups } from "../lib/telegramLeadDetection";
 import { activeOfficialMemberCount, isTeamOfficialMember, MAX_OFFICIAL_TEAM_MEMBERS } from "../lib/agentMembership";
 import { writeRegistrySafely, type RegistryWriteOptions } from "../lib/registrySafety";
+// persist 실패는 ★DB 밖★ 에 남겨야 한다 — 실패 원인이 DB 자체일 수 있다.
+import { appendAuditFile } from "../lib/auditFile";
 
 export { MAX_OFFICIAL_TEAM_MEMBERS } from "../lib/agentMembership";
 
@@ -1810,6 +1812,20 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ok: r.ok, detail: r.detail, reason: r.reason }, r.ok ? 200 : (r.reason === "no_request" ? 409 : 502));
   });
 
+  // join 스텝을 done 으로 닫고 stage 를 재도출한다. 승인 수행 경로와 이미-승인 정합 경로가 공유한다.
+  // steps_json 파싱 실패는 무시 — access.json 의 승인 상태가 정본이고 이건 표시 정합일 뿐이다.
+  const markOtJoined = (row: { steps_json?: string }, ot_id: string, detail: string) => {
+    try {
+      const parsed = JSON.parse(row.steps_json ?? "{}") as any;
+      const steps = Array.isArray(parsed.steps) ? parsed.steps : initOtSteps();
+      const joinStep = steps.find((s: any) => s.key === "join");
+      if (joinStep) { joinStep.state = "done"; joinStep.detail = detail; }
+      parsed.steps = steps; parsed.awaiting_input = null;
+      db.query("UPDATE ot SET steps_json = ?, stage = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(JSON.stringify(parsed), deriveStage(steps), ot_id);
+    } catch { /* access approval remains authoritative */ }
+  };
+
   // Claude telegram plugin promote-pending equivalent. Mutates only access.json,
   // validates the submitted code, and atomically replaces the file.
   app.post("/ot/:ot_id/claude-pair-approve", async (c) => {
@@ -1824,13 +1840,53 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     if (agent.runtime !== "claude_channel") return c.json({ error: "runtime_not_claude" }, 400);
     const body = await c.req.json().catch(() => ({})) as { code?: unknown };
     const code = typeof body.code === "string" ? body.code.trim().toLowerCase() : "";
-    if (!/^[a-f0-9]{6}$/.test(code)) return c.json({ error: "pairing_code_invalid" }, 400);
+    const codeWellFormed = /^[a-f0-9]{6}$/.test(code);
     let state: ReturnType<typeof readClaudePairing>;
     try { state = readClaudePairing(agent.id); } catch { return c.json({ error: "claude_access_invalid" }, 500); }
-    const pending = state.access.pending?.[code];
-    if (!pending || Number(pending.expiresAt ?? Infinity) <= Date.now()) return c.json({ error: "pairing_request_not_found" }, 409);
-    const senderId = String(pending.senderId ?? "").trim();
+    const pending = codeWellFormed ? state.access.pending?.[code] : undefined;
+    const pendingFresh = !!pending && Number(pending.expiresAt ?? Infinity) > Date.now();
+    // ★승인 판정 기준 = "내가 승인을 수행했는가" 가 아니라 "실제로 승인돼 있는가"★
+    //   이 라우트는 원래 승인을 수행한 부수효과로만 join 스텝을 닫았다. 그래서 승인이 다른 경로로
+    //   먼저 끝나면(우리 스킬 [6] 이 안내하는 access.json 수동 편집·플러그인 promote-pending) pending 이
+    //   비어 409 만 반복되고 위저드를 닫을 방법이 사라진다 — 실제로 고착 사례 발생(2026-07-26 리사).
+    //   승인이 이미 성립한 상태면 어느 경로였든 합류로 정합시킨다. access.json 은 건드리지 않는다.
+    if (!pendingFresh) {
+      const allowFrom = Array.isArray(state.access.allowFrom) ? state.access.allowFrom.map(String).filter(Boolean) : [];
+      // ★팀장 chat_id 는 '비순환' 출처에서만 얻는다★ — resolveOwnerDmId() 는 못 찾으면 access.json 의
+      //   allowFrom[0] 을 읽는 폴백이 있어서, 그걸로 allowFrom 을 검증하면 ★자기 자신을 확인하는 순환★ 이
+      //   되어 무조건 통과한다. 검증이 검증처럼 보이기만 하는 게 이번 사고의 뿌리라 같은 형태를 만들지 않는다.
+      const ownerRow = db.query("SELECT value FROM setting WHERE key = 'owner_chat_id'").get() as { value?: string } | undefined;
+      const ownerChatId = (ownerRow?.value ?? "").trim() || (process.env.GD_CHAT_ID ?? "").trim();
+      // ★팀장 id 를 모르면 정합하지 않는다(fail-closed)★ — 코덱스 리뷰 반영.
+      //   처음엔 "모르면 조건을 뺀다" 로 했는데, 그게 ★강화한 척★ 이었다: owner_chat_id 는 서버 부팅
+      //   시 1회만 자동 persist 되고 Settings 입력도 선택이라, ★정작 필요한 순간(첫 페어링·수동 promote
+      //   직후)에는 비어 있다.★ 그 상태에서 조건을 빼면 타인 allowFrom 1건으로도 합류가 된다.
+      //   여기서 막아도 ★막다른 길이 아니다★ — 아래 정상 승인 경로가 owner_chat_id 를 채우고,
+      //   이미 어긋난 설치본은 Settings 에서 한 번 넣으면 이 경로가 열린다. 원래 버그(닫을 방법 자체가
+      //   없음)와 다르다: ★복구 행동이 명시된 거부★ 다.
+      if (ownerChatId === "") {
+        return c.json({
+          error: "owner_identity_unknown",
+          detail: "팀장 chat_id 를 확인할 수 없어 합류로 정합하지 않습니다. Settings 에서 팀장 chat_id 를 설정한 뒤 다시 시도하세요.",
+        }, 409);
+      }
+      const alreadyApproved = state.access.dmPolicy === "allowlist" && allowFrom.length > 0 && allowFrom.includes(ownerChatId);
+      if (alreadyApproved) {
+        markOtJoined(row, ot_id, ownerChatId ? "Claude Telegram 접근 승인 확인됨(팀장 DM 허용) — 합류" : "Claude Telegram 접근 승인 확인됨 — 합류");
+        appendAudit(db, "user", "ot_claude_pair_reconciled", row.member_id, { ot_id, reason: "already_approved" });
+        return c.json({ ok: true, already_approved: true, pairing_required: false, pending: false, awaiting_input: null });
+      }
+      if (!codeWellFormed) return c.json({ error: "pairing_code_invalid" }, 400);
+      return c.json({ error: "pairing_request_not_found" }, 409);
+    }
+    const senderId = String(pending!.senderId ?? "").trim();
     if (!/^\d+$/.test(senderId)) return c.json({ error: "pairing_request_invalid" }, 409);
+    // ★정상 승인 = 팀장 신원을 확인할 수 있는 유일한 지점★ — 여기서 owner_chat_id 를 채워둔다(코덱스 리뷰).
+    //   부팅 시 1회 자동 persist 에만 기대면 첫 페어링 직후에는 비어 있어 위 정합 경로가 항상 막힌다.
+    //   ★기존 값은 덮지 않는다★ — 팀장이 Settings 에 직접 넣은 값이 정본이고, 나중 페어링이 그걸
+    //   조용히 바꾸면 신뢰 기준이 흔들린다.
+    //   ★승인이 실제로 기록된 뒤에 채운다★(코덱스 리뷰) — access.json 쓰기가 실패하면 승인은 없던 일인데
+    //   owner_chat_id 만 남으면 안 된다. 그래서 아래 원자적 교체가 성공한 다음에 persist 한다.
     state.access.allowFrom = [...new Set([...(Array.isArray(state.access.allowFrom) ? state.access.allowFrom.map(String) : []), senderId])];
     state.access.dmPolicy = "allowlist";
     delete state.access.pending[code];
@@ -1844,17 +1900,39 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       try { if (existsSync(tmp)) rmSync(tmp); } catch { /* ignore */ }
       return c.json({ error: "claude_access_write_failed", detail: e instanceof Error ? e.message : String(e) }, 500);
     }
+    // ★승인이 파일에 기록된 뒤에 팀장 chat_id 를 채운다★ — 위 원자적 교체가 성공한 다음이다.
+    //   먼저 채우면 access.json 쓰기가 실패했을 때 ★승인은 없는데 신원만 남는다.★
+    //   ★UPSERT 여야 한다★: INSERT…WHERE NOT EXISTS 로 쓰면 ★행은 있는데 값만 빈 경우★
+    //   (Settings 가 빈 값을 저장할 수 있다) NOT EXISTS 가 참이 되어 INSERT → PK 충돌 →
+    //   catch 가 삼켜서 ★값이 영영 안 채워진다.★ 조용히 실패하는 자리라 특히 나쁘다.
+    //   3케이스 동작: 행 없음→채움 · 빈 행→채움 · ★값 있음→보존★(팀장이 직접 넣은 값이 정본).
+    //   ★실패하면 조용히 넘기지 않는다★(코덱스 리뷰) — 여기서 삼키면 나중에 정합 경로가
+    //   owner_identity_unknown 으로 막혔을 때 ★왜 막혔는지 알 방법이 없다.★ 승인은 이미 파일에
+    //   기록됐으므로 되돌릴 수 없고(500 부적절), 대신 ★사실을 남기고 응답에 밝힌다.★
+    //   기록은 DB 밖(auditFile)에 한다 — 실패 원인이 DB 자체일 수 있다.
+    let ownerIdentityPersisted = true;
     try {
-      const parsed = JSON.parse(row.steps_json ?? "{}") as any;
-      const steps = Array.isArray(parsed.steps) ? parsed.steps : initOtSteps();
-      const joinStep = steps.find((s: any) => s.key === "join");
-      if (joinStep) { joinStep.state = "done"; joinStep.detail = "Claude Telegram 접근 승인 완료 — 합류"; }
-      parsed.steps = steps; parsed.awaiting_input = null;
-      db.query("UPDATE ot SET steps_json = ?, stage = ?, updated_at = datetime('now') WHERE id = ?")
-        .run(JSON.stringify(parsed), deriveStage(steps), ot_id);
-    } catch { /* access approval remains authoritative */ }
+      db.query(
+        "INSERT INTO setting (key, value) VALUES ('owner_chat_id', ?) " +
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now') " +
+        "WHERE TRIM(COALESCE(setting.value,'')) = ''",
+      ).run(senderId);
+    } catch (e) {
+      ownerIdentityPersisted = false;
+      appendAuditFile("settings", "owner_chat_id_persist_failed", row.member_id, {
+        ot_id, error: e instanceof Error ? e.message : String(e),
+      });
+    }
+    markOtJoined(row, ot_id, "Claude Telegram 접근 승인 완료 — 합류");
     appendAudit(db, "user", "ot_claude_pair_approved", row.member_id, { ot_id });
-    return c.json({ ok: true, pairing_required: false, pending: false, awaiting_input: null });
+    return c.json({
+      ok: true, pairing_required: false, pending: false, awaiting_input: null,
+      // ★승인은 됐지만 신원 저장은 실패했다는 사실을 숨기지 않는다★ — 나중에 정합이 막힐 때 단서가 된다.
+      owner_identity_persisted: ownerIdentityPersisted,
+      ...(ownerIdentityPersisted ? {} : {
+        warning: "승인은 완료됐지만 팀장 chat_id 저장에 실패했습니다. Settings 에서 직접 설정하지 않으면 이후 합류 정합이 막힐 수 있습니다.",
+      }),
+    });
   });
 
   // ── OT 번들: 신규 영입이 합류 시 받는 패키지(무엇이 다운로드되나) ──
