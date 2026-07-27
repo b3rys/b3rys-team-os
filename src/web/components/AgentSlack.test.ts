@@ -11,7 +11,7 @@ describe("socketManifest — 사용자가 붙여넣는 최종 JSON", () => {
     features: { bot_user: { display_name: "gd_lisa", always_online: true } },
     oauth_config: { scopes: { bot: ["app_mentions:read", "chat:write"] } },
     settings: {
-      event_subscriptions: { ...(withUrl ? { request_url: "https://x.test/team/api/slack/events" } : {}), bot_events: ["app_mention"] },
+      ...(withUrl ? { event_subscriptions: { request_url: "https://x.test/team/api/slack/events", bot_events: ["app_mention"] } } : {}),
       org_deploy_enabled: false,
       socket_mode_enabled: false,
     },
@@ -32,19 +32,15 @@ describe("socketManifest — 사용자가 붙여넣는 최종 JSON", () => {
   });
 });
 
-/* ★네 사분면 중 하나(공개URL 없음 × Event URL)를 아무도 안 찍어봤다★ — #73 을 놓친 것과 같은 종류의
- * 사각이다. 그 조합의 매니페스트는 Slack 이 거부한다:
+/* ★네 사분면 중 하나(공개URL 없음 × Event URL)를 아무도 안 찍어봤다★ — #73 을 놓친 것과 같은 사각이다.
+ * 그 조합의 매니페스트는 Slack 이 거부한다:
  *   "Event Subscription requires either Request URL or Socket Mode Enabled"
- * request_url 도 없고 socket_mode_enabled 도 false 면 event_subscriptions 블록 자체가 불법이다.
- * 그래서 화면에서 그 조합을 못 고르게 막았고, 여기서는 ★왜 막아야 하는지(=불법 조합)★ 를 고정한다. */
-describe("공개 URL 없이 Event URL 모드 — Slack 이 거부하는 조합", () => {
-  const serverManifest = (withUrl: boolean) => ({
-    settings: {
-      event_subscriptions: { ...(withUrl ? { request_url: "https://x.test/e" } : {}), bot_events: ["app_mention"] },
-      org_deploy_enabled: false,
-      socket_mode_enabled: false,
-    },
-  });
+ *
+ * ★그런데 앞선 판의 이 테스트는 손으로 쓴 픽스처만 검사했다★ — "그 조합은 불법이다" 는 알지만
+ * ★서버가 실제로 그걸 내보내는지는 아무도 안 봤다.★ 그래서 #74 가 불법 매니페스트를 내보내게 됐는데도
+ * 여기는 초록이었다(2026-07-27 Steve 리뷰). 실제 서버 출력에 대한 검증은 settings.test.ts 에 있다.
+ * 여기서는 ★클라이언트 변환(socketManifest)이 어떤 입력을 받아도 유효한 결과를 낸다★ 를 고정한다. */
+describe("Slack 규격 — 어떤 입력이 와도 최종 JSON 은 유효해야 한다", () => {
   // Slack 규격: event_subscriptions 가 있으면 request_url 또는 socket_mode_enabled 중 하나는 있어야 한다.
   const slackAccepts = (m: any): boolean => {
     const ev = m?.settings?.event_subscriptions;
@@ -52,14 +48,27 @@ describe("공개 URL 없이 Event URL 모드 — Slack 이 거부하는 조합",
     return Boolean(ev.request_url) || m?.settings?.socket_mode_enabled === true;
   };
 
-  test("★공개 URL 없음 × Event URL = 거부되는 조합★ (그래서 화면에서 막는다)", () => {
-    expect(slackAccepts(serverManifest(false))).toBe(false);
+  // 서버가 낼 수 있는 두 형태 (수정 후: URL 없으면 블록 자체가 없다)
+  const serverWithUrl = { settings: { event_subscriptions: { request_url: "https://x.test/e", bot_events: ["app_mention"] }, org_deploy_enabled: false, socket_mode_enabled: false } };
+  const serverNoUrl = { settings: { org_deploy_enabled: false, socket_mode_enabled: false } };
+
+  test("webhook 매니페스트는 두 경우 다 유효하다", () => {
+    expect(slackAccepts(serverWithUrl)).toBe(true);   // URL 있음 → request_url 로 성립
+    expect(slackAccepts(serverNoUrl)).toBe(true);     // URL 없음 → 블록이 없어서 성립
   });
 
-  test("나머지 세 조합은 통과한다", () => {
-    expect(slackAccepts(serverManifest(true))).toBe(true);                          // URL 있음 × Event URL
-    expect(slackAccepts(socketManifest(serverManifest(false)))).toBe(true);         // URL 없음 × Socket
-    expect(slackAccepts(socketManifest(serverManifest(true)))).toBe(true);          // URL 있음 × Socket
+  test("★Socket 변환은 서버가 블록을 안 줘도 구독을 만들어 넣는다★ (보존이 아니라 주입)", () => {
+    const m = socketManifest(serverNoUrl) as any;
+    expect(m.settings.socket_mode_enabled).toBe(true);
+    expect(m.settings.event_subscriptions?.bot_events).toEqual(["app_mention"]);  // ← 없으면 멘션 못 받는다
+    expect(slackAccepts(m)).toBe(true);
+  });
+
+  test("Socket 변환은 URL 이 있던 경우에도 유효하다", () => {
+    const m = socketManifest(serverWithUrl) as any;
+    expect(m.settings.event_subscriptions?.request_url).toBeUndefined();
+    expect(m.settings.event_subscriptions?.bot_events).toEqual(["app_mention"]);
+    expect(slackAccepts(m)).toBe(true);
   });
 });
 
