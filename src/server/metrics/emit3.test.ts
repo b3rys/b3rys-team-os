@@ -180,6 +180,51 @@ describe("emit③ request.created (acceptInbound)", () => {
     expect(ev?.request_kind).toBe("delegation");
   });
 
+  // ★Codex 리뷰(2026-07-27) 회귀★ — 부모가 broadcast/다중수신이면 to_agent_id 가 'broadcast' 라
+  //   실제 수신자가 답해도 delegation 으로 오분류됐다. 수신 사실은 message_recipient 행이 정본이다.
+  test("★부모가 broadcast 여도 실제 수신자가 답하면 followup★ (to_agent_id 대리값 금지)", () => {
+    const db = setup();
+    const b = acceptInbound(db, env({ to_agent_id: "broadcast" }) as never, { dedupeWindowSec: 60 });
+    expect(b.ok).toBe(true);
+    if (!b.ok) return;
+    // 부모의 to_agent_id 는 'broadcast' 지만, steve 는 수신자 행을 갖는다 = 받았다
+    expect(
+      (db.prepare(`SELECT to_agent_id FROM message WHERE id = ?`).get(b.stored.id) as { to_agent_id: string })
+        .to_agent_id,
+    ).toBe("broadcast");
+    expect(
+      db.prepare(`SELECT 1 FROM message_recipient WHERE message_id = ? AND agent_id = 'steve'`).get(b.stored.id),
+    ).toBeTruthy();
+
+    const r = acceptInbound(
+      db,
+      env({ from_agent_id: "steve", to_agent_id: "bill", body: "공지 답", in_reply_to: b.stored.id }) as never,
+      { dedupeWindowSec: 60 },
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const ev = byName(db, EVENT.request_created).find((e) => e.request_message_id === r.stored.id);
+    expect(ev?.request_kind).toBe("followup");
+  });
+
+  test("★안 받은 사람이 그 부모를 인용해 보내면 delegation★ (수신 사실이 없으면 위임)", () => {
+    const db = setup();
+    // bill → steve 직접 (demis 는 수신자가 아니다)
+    const q = acceptInbound(db, env({ body: "질문" }) as never, { dedupeWindowSec: 60 });
+    expect(q.ok).toBe(true);
+    if (!q.ok) return;
+    // demis 가 그 메시지를 인용해 steve 에게 새 지시 → demis 는 부모 수신자가 아니므로 delegation
+    const r = acceptInbound(
+      db,
+      env({ from_agent_id: "demis", to_agent_id: "steve", body: "이거 이어서 해줘", in_reply_to: q.stored.id }) as never,
+      { dedupeWindowSec: 60 },
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const ev = byName(db, EVENT.request_created).find((e) => e.request_message_id === r.stored.id);
+    expect(ev?.request_kind).toBe("delegation");
+  });
+
   test("★라벨은 emit 여부를 바꾸지 않는다★ — 두 종류 다 정확히 1건씩 emit", () => {
     const db = setup();
     const q = acceptInbound(db, env({ body: "질문" }) as never, { dedupeWindowSec: 60 });

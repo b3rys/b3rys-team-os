@@ -27,23 +27,33 @@ export type InboundEnv = EnvelopeInbound & { explicit_recipients?: string[]; thr
  *                                            (그 배제가 바로 이번 HIGH 버그의 원인이었다)
  *   즉 둘 다 "대화 후속" 을 가리키지 못한다. 같은 함정을 라벨에서 반복할 뻔했다.
  *
- * ★실제로 갈리는 기준: 부모 메시지가 '내게 온 것' 이었는가★
- *   내게 온 것에 답하면서 상대에게 open 행을 남겼다 → 대화 왕복(followup)
- *   선행 요청이 없거나, 있어도 내게 온 게 아니다  → 새 일을 맡기는 것(delegation)
+ * ★실제로 갈리는 기준: 부모 메시지를 '내가 받았는가'★
+ *   내가 받은 것에 답하며 상대에게 open 행을 남겼다 → 대화 왕복(followup)
+ *   선행 요청이 없거나, 있어도 내가 받은 게 아니다  → 새 일을 맡기는 것(delegation)
  *   실측 분포(directed 1879건): followup 1007 · delegation 857(부모없음 821 + 스레드안 새위임 36)
- *                              · 부모 조회 실패 15 → delegation 으로 떨어짐(보수적 기본값)
+ *
+ * ★수신 사실은 message.to_agent_id 가 아니라 message_recipient 행으로 본다★ (Codex 리뷰 2026-07-27)
+ *   처음엔 `parent.to_agent_id === env.from_agent_id` 로 판정했는데, 부모가 broadcast 이거나
+ *   explicit multi-recipient 면 to_agent_id 가 'broadcast' 라 ★실제 수신자가 답해도 delegation 으로
+ *   오분류★ 된다(재현 확인). to_agent_id 는 '어디로 보냈나' 의 ★대리값★ 일 뿐이고,
+ *   ★받았다는 사실★ 은 message_recipient 행의 존재다.
+ *   — 이 파일 위쪽 emit 가드에서 이미 배운 교훈(추정 대신 사실)을 ★라벨에서 그대로 반복★ 했다.
+ *     한 층 아래에서 같은 실수를 했고 리뷰가 잡았다.
  */
 function classifyRequestKind(db: Database, env: InboundEnv): "delegation" | "followup" {
   const parentId = env.in_reply_to;
   if (!parentId) return "delegation";
-  const parent = db.prepare(`SELECT to_agent_id FROM message WHERE id = ?`).get(parentId) as
-    | { to_agent_id: string }
-    | undefined;
-  // 부모를 못 찾으면 delegation — 라벨이 없어서 분석에서 빠지는 것보다, 보수적으로 위임에 두고
-  // 필요하면 나중에 재계산하는 편이 낫다(정보를 버리지 않는다).
-  if (!parent) return "delegation";
-  return parent.to_agent_id === env.from_agent_id ? "followup" : "delegation";
+  // 부모를 내가 ★받았는가★ — direct·broadcast·multi-recipient 를 한 기준으로 덮는다.
+  //   수신 행의 상태(open/acknowledged/completed)는 보지 않는다: 이미 닫힌 뒤에 답해도
+  //   "내가 받은 것에 답한다" 는 사실은 같다.
+  const received = db
+    .prepare(`SELECT 1 FROM message_recipient WHERE message_id = ? AND agent_id = ? LIMIT 1`)
+    .get(parentId, env.from_agent_id);
+  // 수신 행이 없으면 delegation — 부모를 못 찾았거나(조회 실패), 내가 받은 게 아니거나(스레드 안 새 위임).
+  // 라벨이 없어 분석에서 빠지는 것보다 보수적으로 위임에 두는 편이 낫다(정보를 버리지 않는다).
+  return received ? "followup" : "delegation";
 }
+
 
 export type AcceptInboundResult =
   | { ok: true; stored: EnvelopeStored }
