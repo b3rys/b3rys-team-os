@@ -13,7 +13,8 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import type { AgentRecord } from "../types";
 
-const PROJECTS_DIR = join(homedir(), ".claude", "projects");
+// ★단일 정본 재사용★ — 경로를 두 곳에 적으면 한쪽만 격리돼 어긋난다(dmSource 와 같은 저장소를 본다).
+import { claudeProjectsDir } from "../runtimes/claude/dmSource";
 
 // Max 5x rolling-window message ceiling (approx, per Anthropic docs as of 2026-05).
 export const MAX5X_REQUESTS_5H_CEILING = 225;
@@ -70,7 +71,7 @@ async function readAgentUsage(agent: AgentRecord, now: number): Promise<AgentUsa
     tokens_7d: 0,
     last_activity_at: null,
   };
-  const dir = join(PROJECTS_DIR, encodeWorkspace(agent.workspace_path));
+  const dir = join(claudeProjectsDir(), encodeWorkspace(agent.workspace_path));
   let files: string[];
   try {
     files = readdirSync(dir).filter((f) => f.endsWith(".jsonl"));

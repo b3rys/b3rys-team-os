@@ -33,10 +33,20 @@ export function readTail(fp: string, tailBytes: number = TAIL_BYTES): string {
   }
 }
 
+/**
+ * Claude Code 세션 저장소 루트. 기본 `~/.claude/projects` — ★운영 동작 불변★.
+ * env override 는 ★테스트 격리용★ (2026-07-27): 이 경로를 하드코딩해 두니 세션 픽스처를 만드는
+ * 테스트가 팀장 실제 세션 저장소에 폴더를 쌓았다(이 맥에 5,157개 누적). 파괴적이진 않지만
+ * 사용자 디렉터리를 오염시킨다. 호출 시점에 읽는다 — preload 가 세팅한 값이 반영되게.
+ */
+export function claudeProjectsDir(): string {
+  return process.env.B3OS_CLAUDE_PROJECTS_DIR || `${homedir()}/.claude/projects`;
+}
+
 function sessionDirFor(workspacePath: string): string {
-  // Claude Code 세션 저장 경로: ~/.claude/projects/<workspace의 / 를 - 로 치환>/
+  // Claude Code 세션 저장 경로: <projects루트>/<workspace의 / 를 - 로 치환>/
   const encoded = workspacePath.replace(/\//g, "-");
-  return `${homedir()}/.claude/projects/${encoded}`;
+  return `${claudeProjectsDir()}/${encoded}`;
 }
 
 // 최근 세션 jsonl (mtime 최신 N개). fresh 재시작으로 세션이 갈리므로 여러 개 스캔.
