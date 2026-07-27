@@ -93,6 +93,9 @@ function ensureTeamOsLink(workspace: string): void {
  * backup-first: 덮기 전 1세대 .bak.
  */
 export function savePersonaFile(personaFile: string, content: string): void {
+  // writeMemberPersona 와 ★같은 가드★ — 여기가 SOUL.md 를 쓰는 유일한 통로인데 가드가 없어서,
+  // 로딩파일(CLAUDE.md)만 막히고 persona 값은 실 팀원 파일에 그대로 써지던 구멍이 있었다 (2026-07-27).
+  assertNotLiveMemberFsUnderTest(personaFile, "savePersonaFile");
   if (existsSync(personaFile)) copyFileSync(personaFile, `${personaFile}.bak`);
   else mkdirSync(dirname(personaFile), { recursive: true });
   writeFileSync(personaFile, content.endsWith("\n") ? content : `${content}\n`, "utf-8");

@@ -9,6 +9,7 @@
 //   - openclaw/hermes/codex → loadingFile=AGENTS.md(buildAgentsMd, 풀 템플릿+참조) / persona_file=SOUL.md.
 
 import { resolve } from "node:path";
+import { tmpdir } from "node:os";
 
 const HOME = process.env.HOME ?? "";
 // 정본 경로 = team-os repo 루트 기준 (퍼블릭 포터블 — 하드코딩 금지, GD 2026-06-27 Q3).
@@ -63,19 +64,36 @@ export const MEMBERS_ROOT = resolveMembersRoot();
 //   - prod(NODE_ENV≠"test"): 완전 무동작 — 실 런타임 동작 불변.
 //   - test: 라이브 `~/Development/<id>` 를 건드리면 조용한 삭제 대신 즉시 throw(시끄러운 실패)로
 //     "temp workspace_path(mkdtempSync) 주입" 을 강제. 정당한 예외만 B3RYS_TEST_ALLOW_LIVE_FS=1.
-// ★가드 대상 = OWNER 의 실제 라이브 멤버 경로(항상 `~/Development`)★. 기본값을 퍼블릭-안전으로 뒤집어도
-//   (2026-07-12) OWNER 실멤버는 B3RYS_MEMBERS_ROOT=`~/Development` 로 그 자리에 보존되므로 여기를 지키는 게 맞다.
-//   ★resolved MEMBERS_ROOT 를 넣지 않는다★: 테스트는 B3RYS_HOME=temp 등으로 자기 temp 루트를 정당하게 쓰는데,
-//   그걸 가드에 넣으면 테스트의 정상 워크스페이스 생성까지 막는다(실 팀원 트리가 아님). 지킬 건 라이브 `~/Development` 뿐.
-const LIVE_MEMBERS_ROOT = `${HOME}/Development`;
+// ★가드 대상 = "그 머신에서 실 팀원이 사는 곳" 전부★ (2026-07-27 Bill).
+//   이전 판은 `~/Development` 하나만 지켰다. 그건 ★OWNER 머신의 레거시 레이아웃★일 뿐이라,
+//   2026-07-12 에 기본값을 퍼블릭-안전(`~/b3os/members`)으로 뒤집은 뒤로는
+//   **신규·공개 유저의 실 팀원이 통째로 가드 밖에** 있었다. 실측(2026-07-27): 맥스튜디오의 실 팀원은
+//   `~/b3os/members/{jane,lisa,clo,herm}` 이고 `~/Development` 엔 팀원이 0명 — 즉 그 머신에서
+//   이 가드는 ★한 번도 울릴 수 없는 구조★였다. 지켜지던 머신은 OWNER 하나뿐이었던 셈.
+//
+//   ★"resolved MEMBERS_ROOT 를 넣으면 테스트의 정당한 temp 루트까지 막힌다"는 이전 우려는
+//   temp 경로 제외로 해소한다★:
+//     - 테스트가 런타임에 env 를 바꿔 쓰는 경로는 `resolveMembersRoot()`(호출시점 해석)라 temp 로 빠지고,
+//       그 temp 는 보호목록에 없다. `B3RYS_MEMBERS_ROOT=/tmp/... bun test` 처럼 프로세스째 temp 로
+//       격리해 돌리는 방식도 isTempPath 로 제외되어 그대로 동작한다.
+//     - `MEMBERS_ROOT` 는 import 시점 1회 해석 = ★그 프로세스의 ambient(=머신의 진짜 루트)★ 라,
+//       테스트가 런타임에 env 를 바꿔치기해도 가드 기준선은 흔들리지 않는다.
+const isTempPath = (p: string): boolean =>
+  p === "/tmp" || p.startsWith("/tmp/") || p.startsWith("/var/folders/") || p.startsWith(tmpdir());
+const PROTECTED_MEMBER_ROOTS: string[] = [...new Set([
+  `${HOME}/Development`,    // OWNER 레거시(B3RYS_MEMBERS_ROOT=~/Development)
+  `${HOME}/b3os/members`,   // 퍼블릭-안전 기본값 = 신규·공개 유저의 실 팀원 자리
+  MEMBERS_ROOT,             // 이 프로세스의 ambient 루트(위 둘과 다른 커스텀 배치도 커버)
+])].filter((p) => Boolean(HOME) && p !== HOME && p !== "" && !isTempPath(p));
 export function assertNotLiveMemberFsUnderTest(p: string, op: string): void {
   if (process.env.NODE_ENV !== "test") return;            // 운영에선 무동작
   if (process.env.B3RYS_TEST_ALLOW_LIVE_FS === "1") return; // 명시 opt-in 탈출구
   if (!HOME) return;
-  if (p === LIVE_MEMBERS_ROOT || p.startsWith(`${LIVE_MEMBERS_ROOT}/`)) {
+  const hit = PROTECTED_MEMBER_ROOTS.find((root) => p === root || p.startsWith(`${root}/`));
+  if (hit) {
     throw new Error(
-      `[live-fs-guard] '${op}' 가 테스트에서 라이브 멤버 경로를 mutate 하려 함: ${p} — ` +
-      `테스트는 workspace_path 를 mkdtempSync 임시경로로 주입해야 합니다(fixture id ↔ ~/Development/<id> 충돌). ` +
+      `[live-fs-guard] '${op}' 가 테스트에서 라이브 멤버 경로를 mutate 하려 함: ${p} (보호루트: ${hit}) — ` +
+      `테스트는 workspace_path 를 mkdtempSync 임시경로로 주입해야 합니다(fixture id ↔ 실 팀원 id 충돌). ` +
       `정당하면 B3RYS_TEST_ALLOW_LIVE_FS=1 로 opt-in.`,
     );
   }
