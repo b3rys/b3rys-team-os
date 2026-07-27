@@ -12,7 +12,7 @@ import type { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { appendAuditFile } from "./auditFile";
-import { MANUALS_DIR } from "./paths";
+import { MANUALS_DIR, withRuntimePath } from "./paths";
 
 // ---------------------------------------------------------------------------
 // 액션 레지스트리 — 미리 정의된 안전 셋. (Stage 2에서 script/buildEnv 로 실행)
@@ -438,7 +438,10 @@ export async function executeApproval(db: Database, id: string): Promise<{ ok: b
   }
   setApprovalStatus(db, id, "executing");
   const params = (() => { try { return JSON.parse(row.params_json) as Record<string, string>; } catch { return {}; } })();
-  const env = { ...process.env, ...(action.run.env ? action.run.env(params) : {}) };
+  // ★PATH 를 런타임 설치 자리로 보강★ (2026-07-27): 이 실행부는 bare name 커맨드
+  //   ("openclaw gateway restart")와 bare name 을 쓰는 쉘 스크립트(activate-openclaw-agent.sh)를 둘 다 spawn 한다.
+  //   launchd 서버의 제한 PATH 를 그대로 물려주면 그 맥에서 승인 액션·openclaw 영입이 통째로 실패한다(맥스튜디오 실측).
+  const env = { ...withRuntimePath(process.env), ...(action.run.env ? action.run.env(params) : {}) };
   appendAuditFile("approvals", "execute_start", id, { action_key: action.key });
   try {
     const proc = Bun.spawn(action.run.cmd, { env, stdout: "pipe", stderr: "pipe" });
