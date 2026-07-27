@@ -1035,20 +1035,15 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
         display_information: { name: appName },
         features: { bot_user: { display_name: agent.slack_app_name || `gd_${id}`, always_online: true } },
         oauth_config: { scopes: { bot: scopes } },
-        // ★event_subscriptions 는 request_url 이 있을 때만 넣는다.★
-        //   Slack 규격: 이 블록이 있으면 request_url 또는 socket_mode_enabled 중 하나가 반드시 있어야 한다
-        //   ("Event Subscription requires either Request URL or Socket Mode Enabled").
-        //   이 응답은 ★webhook 방식 매니페스트★ 이고 socket_mode_enabled=false 다. 그러므로 공개 URL 이
-        //   없는데 블록을 넣으면 ★Slack 이 거부하는 매니페스트★ 를 사용자에게 그대로 내주게 된다.
-        //   (2026-07-27 Steve 리뷰. 직전 판(#74)은 bot_events 를 살리려고 무조건 넣었는데,
-        //    그 주석이 "Socket Mode 는 request_url 없이 된다" 고 적어놓고 ★정작 여기서 false 를 내보냈다★ —
-        //    주석은 의도를, 코드는 다른 것을 말하고 있었다.)
-        //   ★Socket 쪽 bot_events 는 클라이언트 socketManifest() 가 주입한다★ — 서버가 안 내보내도 안전하다.
-        //   공개 URL 이 없는 webhook 사용자에겐 webhookBlockedNotice() 가 이미 안내한다.
+        // ★슬랙 정본은 Socket Mode 다 — Event URL(request_url) 방식은 지원하지 않는다★ (GD 2026-07-27).
+        //   예전엔 공개 URL 이 있으면 request_url + socket_mode_enabled:false 를 내보냈다. 화면에서는
+        //   클라이언트 socketManifest() 가 Socket 으로 바꿔줘서 멀쩡해 보였지만, ★그건 화면을 거칠 때만★ 이다.
+        //   이 엔드포인트를 직접 받아가면 ★지원하지 않는 Event URL 앱을 만드는 매니페스트★ 가 그대로 나갔다.
+        //   서버가 처음부터 옳은 것을 낸다. 클라이언트 변환은 이제 안전망일 뿐이다.
         settings: {
-          ...(eventUrl ? { event_subscriptions: { request_url: eventUrl, bot_events: ["app_mention"] } } : {}),
+          event_subscriptions: { bot_events: ["app_mention"] },  // request_url 없음 — Socket 에는 필요없다
           org_deploy_enabled: false,
-          socket_mode_enabled: false,
+          socket_mode_enabled: true,
         },
       },
     });

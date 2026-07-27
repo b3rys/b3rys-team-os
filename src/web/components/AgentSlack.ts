@@ -109,8 +109,8 @@ export function enableEventsStep(): string {
 
 /** 마법사의 사람 단계 목록. 렌더에서 분리해 ★안내 내용 자체를 테스트할 수 있게★ 한다
  *  (빠진 단계는 화면을 봐야만 드러났다 — 그래서 회귀로 고정한다). */
-export function wizardSteps(opts: { isSocket: boolean; appLink: string; scopes: string; channel: string }): string[] {
-  const { isSocket, appLink, scopes, channel } = opts;
+export function wizardSteps(opts: { appLink: string; scopes: string; channel: string }): string[] {
+  const { appLink, scopes, channel } = opts;
   const inviteStep = pick(
     `봇을 <b>${channel ? esc(channel) : pick("사용할 채널", "your channel")}</b>에 초대: <code>/invite @봇이름</code>.${channel ? "" : pick(" <span class=\"text-slate-500\">(채널이 아직 설정되지 않았습니다 — 아래 채널 칸에 입력하세요)</span>", "")}`,
     `Invite the bot to <b>${channel ? esc(channel) : "your channel"}</b>: <code>/invite @botname</code>.${channel ? "" : " <span class=\"text-slate-500\">(no channel configured yet — set it in the Channel field below)</span>"}`);
@@ -118,37 +118,21 @@ export function wizardSteps(opts: { isSocket: boolean; appLink: string; scopes: 
     `<b>Install to Workspace</b> → Allow (권한 승인). 필요 scope: <code>${esc(scopes || "—")}</code>.`,
     `<b>Install to Workspace</b> → Allow (approve permissions). Scopes needed: <code>${esc(scopes || "—")}</code>.`);
 
-  return isSocket
-    ? [
-        pick(
-          `Slack 앱 생성: ${appLink} → <b>From a manifest</b> → 워크스페이스 선택 → 아래 <b>매니페스트</b> 붙여넣기. <span class="text-slate-500">(Socket Mode 켜진 매니페스트 — 공개 URL 불필요)</span>`,
-          `Create the Slack app: ${appLink} → <b>From a manifest</b> → select a workspace → paste the <b>manifest</b> below. <span class="text-slate-500">(manifest with Socket Mode on — no public URL needed)</span>`),
-        enableEventsStep(),
-        installStep,
-        pick(
-          `<b>Basic Information</b> → <b>App-Level Tokens</b> → Generate Token → scope <code>connections:write</code> 추가 → <b>App-Level Token</b>(<code>xapp-…</code>) 복사.`,
-          `<b>Basic Information</b> → <b>App-Level Tokens</b> → Generate Token → add scope <code>connections:write</code> → copy the <b>App-Level Token</b>(<code>xapp-…</code>).`),
-        pick(
-          `<b>OAuth & Permissions</b> → <b>Bot User OAuth Token</b>(<code>xoxb-…</code>) 복사 → 아래 폼에 <b>xoxb</b>·<b>xapp</b> 붙여넣기.`,
-          `<b>OAuth & Permissions</b> → copy the <b>Bot User OAuth Token</b>(<code>xoxb-…</code>) → paste <b>xoxb</b> and <b>xapp</b> into the form below.`),
-        inviteStep,
-      ]
-    : [
-        pick(
-          `Slack 앱 생성: ${appLink} → <b>From a manifest</b> → 워크스페이스 선택 → 아래 <b>매니페스트</b> 붙여넣기.`,
-          `Create the Slack app: ${appLink} → <b>From a manifest</b> → select a workspace → paste the <b>manifest</b> below.`),
-        enableEventsStep(),
-        installStep,
-        pick(
-          `<b>Bot User OAuth Token</b>(<code>xoxb-…</code>)과 <b>Signing Secret</b> 복사 → 아래 폼에 붙여넣기.`,
-          `Copy the <b>Bot User OAuth Token</b>(<code>xoxb-…</code>) and <b>Signing Secret</b> → paste into the form below.`),
-        inviteStep,
-        // 이 분기는 ★기존에 Event URL 로 붙어 있는 멤버를 위해 남아 있을 뿐★ 이다(슬랙 정본 = Socket Mode).
-        // 그래서 여기는 손대지 않는다 — 새로 설계하거나 확장하지 않고 기존 문구 그대로 둔다.
-        pick(
-          `Event Subscriptions Request URL = 아래 값 등록 + <code>app_mention</code> 구독 (URL은 우리 서버 고정 주소 — 매니페스트에 이미 포함, 붙여넣으면 바로 Verified).`,
-          `Event Subscriptions Request URL = register the value below + subscribe to <code>app_mention</code> (the URL is our server's fixed address — already in the manifest, so it turns Verified as soon as you paste it).`),
-      ];
+  // ★Event URL 분기를 없앤다★ — 지원하지 않는 경로가 화면에 남아 있으면 사용자는 그걸 선택지로 읽는다.
+  return [
+    pick(
+      `Slack 앱 생성: ${appLink} → <b>From a manifest</b> → 워크스페이스 선택 → 아래 <b>매니페스트</b> 붙여넣기. <span class="text-slate-500">(Socket Mode 켜진 매니페스트 — 공개 URL 불필요)</span>`,
+      `Create the Slack app: ${appLink} → <b>From a manifest</b> → select a workspace → paste the <b>manifest</b> below. <span class="text-slate-500">(manifest with Socket Mode on — no public URL needed)</span>`),
+    enableEventsStep(),
+    installStep,
+    pick(
+      `<b>Basic Information</b> → <b>App-Level Tokens</b> → Generate Token → scope <code>connections:write</code> 추가 → <b>App-Level Token</b>(<code>xapp-…</code>) 복사.`,
+      `<b>Basic Information</b> → <b>App-Level Tokens</b> → Generate Token → add scope <code>connections:write</code> → copy the <b>App-Level Token</b>(<code>xapp-…</code>).`),
+    pick(
+      `<b>OAuth & Permissions</b> → <b>Bot User OAuth Token</b>(<code>xoxb-…</code>) 복사 → 아래 폼에 <b>xoxb</b>·<b>xapp</b> 붙여넣기.`,
+      `<b>OAuth & Permissions</b> → copy the <b>Bot User OAuth Token</b>(<code>xoxb-…</code>) → paste <b>xoxb</b> and <b>xapp</b> into the form below.`),
+    inviteStep,
+  ];
 }
 
 export function renderAgentSlack(host: HTMLElement, agentId: string, _displayName: string): void {
@@ -212,7 +196,7 @@ export function renderAgentSlack(host: HTMLElement, agentId: string, _displayNam
     const blockedNotice = webhookBlockedNotice(wizardMode, info.event_request_url);
     const appLink = `<a class="text-accent-greenSoft underline" href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener">api.slack.com/apps</a>`;
 
-    const steps = wizardSteps({ isSocket, appLink, scopes, channel });
+    const steps = wizardSteps({ appLink, scopes, channel });
 
     // Event URL 방식은 공개 HTTPS 주소가 있어야 한다. 없으면 "—" 만 띄우지 말고 ★무엇을 하면 되는지★ 알린다
     // (Socket Mode 는 이 값 없이도 되므로 그쪽으로 안내). 예전엔 이 조건에서 화면 전체가 못 뜨고 있었다.
@@ -337,12 +321,11 @@ export function renderAgentSlack(host: HTMLElement, agentId: string, _displayNam
 
     host.querySelector<HTMLButtonElement>("#sl-open")?.addEventListener("click", () => {
       open = !open;
-      // 열 때 방식 초기화: 신규 연결은 Socket 기본(권장 — 공개 URL 불필요), 기존 연결은 현 방식 유지(working webhook 안 깨뜨림).
-      if (open) {
-        wizardMode = me?.state === "not_connected"
-          ? "socket"
-          : (me?.slack_connection_mode === "socket" ? "socket" : "webhook");
-      }
+      // ★슬랙 정본은 Socket Mode 뿐이다★ (GD 2026-07-27). 예전엔 기존 멤버의 저장된 방식을 따라가서
+      //   ★지원하지 않는 Event URL 안내가 계속 떴다.★ 저장값은 과거 잔재이지 현재 정책이 아니다.
+      //   기존 멤버의 ★런타임 수신 동작은 그대로다★ — 서버 경로는 안 건드린다. 앱을 다시 만들 때만 Socket 이 된다.
+      //   (이 값이 항상 "socket" 이므로 아래 isSocket 분기·webhookBlockedNotice 는 자연히 Socket 쪽만 탄다.)
+      if (open) wizardMode = "socket";
       if (open && !info) { render(); loadInfo(); } else render();
     });
     host.querySelector<HTMLButtonElement>("#sl-cancel")?.addEventListener("click", () => { open = false; render(); });
