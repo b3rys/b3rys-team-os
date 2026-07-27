@@ -83,11 +83,26 @@ const isUnder = (p: string, root: string): boolean =>
   root !== "" && (p === root || p.startsWith(`${root}/`));
 const isTempPath = (p: string): boolean =>
   isUnder(p, "/tmp") || isUnder(p, "/var/folders") || isUnder(p, tmpdir());
-const PROTECTED_MEMBER_ROOTS: string[] = [...new Set([
+// ★테스트 전용 루트 지정(B3OS_TEST_MEMBERS_ROOT)은 보호목록에서 뺀다★ (2026-07-27 Codex 재리뷰 적발).
+//   안 빼면 opt-in 이 자기 모순이 된다: preload 가 그 값을 MEMBERS_ROOT 로 넣는데, 그게 non-temp 면
+//   곧바로 보호목록에도 들어가 ★그 루트에 대한 정당한 테스트 쓰기를 자기 가드가 막는다.★
+//   (Codex 재현: B3OS_TEST_MEMBERS_ROOT=/workspace/isolated → 37 pass / 2 fail)
+//   ★단 HOME 의 실 팀원 루트 둘은 목록에 그대로 남는다★ — 이 변수로 실 팀원 보호를 풀 수는 없다.
+const TEST_ROOT_OVERRIDE = process.env.B3OS_TEST_MEMBERS_ROOT ?? "";
+const REAL_MEMBER_ROOTS = [
   `${HOME}/Development`,    // OWNER 레거시(B3RYS_MEMBERS_ROOT=~/Development)
   `${HOME}/b3os/members`,   // 퍼블릭-안전 기본값 = 신규·공개 유저의 실 팀원 자리
+];
+// ★실 팀원 루트는 이 변수로 절대 못 푼다★ — override 가 그 둘 중 하나를 가리키면 제외하지 않는다.
+//   (Set 은 중복을 한 항목으로 합치므로, 값으로 거르면 실 루트 보호까지 같이 날아간다.)
+const EXCLUDED_ROOT =
+  TEST_ROOT_OVERRIDE !== "" && !REAL_MEMBER_ROOTS.includes(TEST_ROOT_OVERRIDE) ? TEST_ROOT_OVERRIDE : "";
+const PROTECTED_MEMBER_ROOTS: string[] = [...new Set([
+  ...REAL_MEMBER_ROOTS,
   MEMBERS_ROOT,             // 이 프로세스의 ambient 루트(위 둘과 다른 커스텀 배치도 커버)
-])].filter((p) => Boolean(HOME) && p !== HOME && p !== "" && !isTempPath(p));
+])].filter((p) =>
+  Boolean(HOME) && p !== HOME && p !== "" && !isTempPath(p) && p !== EXCLUDED_ROOT,
+);
 export function assertNotLiveMemberFsUnderTest(p: string, op: string): void {
   if (process.env.NODE_ENV !== "test") return;            // 운영에선 무동작
   if (process.env.B3RYS_TEST_ALLOW_LIVE_FS === "1") return; // 명시 opt-in 탈출구
