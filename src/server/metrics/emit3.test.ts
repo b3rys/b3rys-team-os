@@ -89,16 +89,53 @@ describe("emit③ request.created (acceptInbound)", () => {
     expect(evs[0]!.event_id).toBe(`req:${r.stored.id}`);
   });
 
-  test("reply 인바운드(in_reply_to) → request.created 무emit", () => {
+  // ★리뷰(Bill 2026-07-27)로 계약이 바뀐 지점★ — 예전엔 `in_reply_to` 가 있으면 무조건 무emit 이었다.
+  //   그런데 우리 핵심룰이 버스 발신에 항상 `--in-reply-to` 를 붙이라고 해서, ★스레드 안에서 오는
+  //   새 위임(실제 요청의 대다수)이 통째로 배제★ 됐다. ack 쪽은 그 배제를 모르니 ack.observed 는 그대로 떠서
+  //   ★request 0 / ack 1 = 고아 ack + 분모 누락★ 이 됐다. 그래서 기준을 "ack 가능한 open 수신자 행을
+  //   만들었는가" 로 바꿨다. 아래 두 테스트가 그 계약을 못박는다.
+  test("★스레드 안 새 위임(in_reply_to 있음)도 request.created 1건★ — open 행을 만들면 요청이다", () => {
     const db = setup();
-    acceptInbound(db, env({ type: "reply", in_reply_to: "someorig" }) as never, { dedupeWindowSec: 60 });
+    const prev = acceptInbound(db, env({ body: "prev" }) as never, { dedupeWindowSec: 60 });
+    expect(prev.ok).toBe(true);
+    if (!prev.ok) return;
+    const before = byName(db, EVENT.request_created).length;
+
+    const r = acceptInbound(db, env({ body: "새 위임", in_reply_to: prev.stored.id }) as never, { dedupeWindowSec: 60 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // 이 메시지는 steve 에게 open 행을 만든다 = ack 이 날 수 있다 → request 로도 세어야 대칭이다
+    const openRows = db
+      .prepare(`SELECT COUNT(*) AS n FROM message_recipient WHERE message_id = ? AND recipient_state = 'open'`)
+      .get(r.stored.id) as { n: number };
+    expect(openRows.n).toBeGreaterThan(0);
+    expect(byName(db, EVENT.request_created).length).toBe(before + 1);
+  });
+
+  test("★ack 이 불가능한 것은 request 로도 안 센다★ — open 행이 없으면 무emit", () => {
+    const db = setup();
+    // broadcast 수신자 행은 'acknowledged'(broadcast_fyi)로 생성돼 애초에 open 이 아니다.
+    const r = acceptInbound(db, env({ to_agent_id: "broadcast" }) as never, { dedupeWindowSec: 60 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const openRows = db
+      .prepare(`SELECT COUNT(*) AS n FROM message_recipient WHERE message_id = ? AND recipient_state = 'open'`)
+      .get(r.stored.id) as { n: number };
+    expect(openRows.n).toBe(0);
     expect(byName(db, EVENT.request_created).length).toBe(0);
   });
 
-  test("broadcast → request.created 무emit (per-recipient ack 대상 아님)", () => {
+  // ★Bill 권고★: broadcast 의 대칭을 request 쪽만 단언하면, 다른 모듈의 불변식(broadcast_fyi)이
+  //   바뀔 때 ★조용히 깨진다★. request 와 ack 을 ★한 테스트에서 함께★ 못박는다.
+  test("broadcast → request.created 0 ★그리고★ ack.observed 0 (대칭을 한 곳에서 고정)", () => {
     const db = setup();
-    acceptInbound(db, env({ to_agent_id: "broadcast" }) as never, { dedupeWindowSec: 60 });
+    const r = acceptInbound(db, env({ to_agent_id: "broadcast" }) as never, { dedupeWindowSec: 60 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // 수신자 전원이 이미 acknowledged 라 ack 전이가 일어날 수 없다
+    for (const who of ["steve", "demis"]) applyAckClose(db, { messageId: r.stored.id, agentId: who } as never);
     expect(byName(db, EVENT.request_created).length).toBe(0);
+    expect(byName(db, EVENT.ack_observed).length).toBe(0);
   });
 
   test("dedupe로 막힌 재inbound(ok:false)는 무emit", () => {

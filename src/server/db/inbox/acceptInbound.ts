@@ -75,11 +75,23 @@ export function acceptInbound(
   opts.onInserted?.(stored); // audit 등 — broadcast 전에 (기존 순서 보존)
 
   // ③ [측정 W1] request.created loop_event emit — ★best-effort(측정 실패가 ingress 전달 절대 안 깸)★, 같은 db.
-  //   spec §30: acceptInbound ok:true + episode-first(원 요청). 가드: 원 발화(reply 아님)이고 directed(broadcast 아님)만
-  //   → episode_id는 이 stored.id(origin·first-seen). reply/broadcast는 요청 identity 아님 → 무emit(ack latency 분모 오염 방지).
-  //   ★broadcast 제외는 구현시점 정밀화(spec은 명시 안 함) — 공지는 per-recipient ack 대상 아님. Bill 리뷰 논점.★
-  const isOriginRequest = env.type !== "reply" && !env.in_reply_to && env.to_agent_id !== "broadcast";
-  if (isOriginRequest) {
+  //   spec §30: acceptInbound ok:true + episode-first(원 요청) → episode_id는 이 stored.id(origin·first-seen).
+  //
+  // ★가드는 "ack 이 날 수 있는 open 수신자 행을 실제로 만들었는가" 를 직접 본다.★ (Bill 리뷰 2026-07-27)
+  //   왜 heuristic 을 버렸나 — 이전 가드는 `type !== "reply" && !in_reply_to && to !== "broadcast"` 로
+  //   "ack 가능성" 을 ★간접 추정★ 했는데, 우리 핵심룰이 버스 발신에 항상 `--in-reply-to` 를 붙이라고 해서
+  //   ★스레드 안에서 오는 새 위임(= 실제 요청의 대다수)이 통째로 배제★ 됐다. 그런데 ack 쪽은 그 배제를
+  //   모르므로 수신자 행은 open 으로 생기고, 답이 오면 ack.observed 가 그대로 뜬다 →
+  //   ★request.created=0 / ack.observed=1 = 고아 ack + 분모 누락★ (Bill·Demis 각각 재현).
+  //   emit 짝은 같은 사실에서 나와야 어긋나지 않는다. 그 사실 = ★open 수신자 행의 존재★ 다.
+  //   부수효과로 특수 케이스가 별도 조건 없이 따라온다:
+  //     · broadcast      → 수신자 행이 'acknowledged'(close_reason=broadcast_fyi) 로 생성돼 open 이 아니다 → 무emit
+  //     · completed-on-insert(user source·비dispatch) → open 아님 → 무emit
+  //   즉 "ack 이 날 수 없는 것은 request 로도 세지 않는다" 가 ★정의상★ 보장된다(추정이 아니라).
+  const ackable = db
+    .prepare(`SELECT COUNT(*) AS n FROM message_recipient WHERE message_id = ? AND recipient_state = 'open'`)
+    .get(stored.id) as { n: number } | undefined;
+  if ((ackable?.n ?? 0) > 0) {
     emitLoopEventSafe(db, {
       event_id: `req:${stored.id}`,
       event_name: EVENT.request_created,
