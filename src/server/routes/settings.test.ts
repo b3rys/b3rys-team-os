@@ -1059,6 +1059,34 @@ describe("settings: 전체 재적용 롤백 (6h .bak 복원)", () => {
  * 클라이언트가 r.ok 를 안 보고 그 본문을 정상 데이터로 썼기 때문. 사용자가 그 매니페스트를 붙여넣으면
  * ★권한 0개짜리 Slack 앱★ 이 만들어진다 — 실패보다 나쁘다.
  * UI 는 "Socket Mode = 공개 URL 불필요" 라고 안내하는데 서버가 공개 URL 을 필수로 요구한 자기모순도 있었다. */
+// ★생산자에 대한 검증★ — 앞서 이 불변식은 손으로 쓴 픽스처(AgentSlack.test.ts)에만 있었고,
+// ★서버가 실제로 무엇을 내보내는지는 아무도 안 봤다.★ 그래서 #74 가 불법 매니페스트를 내보내는데도
+// 전 수트가 초록이었다(2026-07-27 Steve 리뷰). 규칙은 만드는 쪽에 걸어야 한다.
+describe("★서버가 내보내는 매니페스트는 어떤 경우에도 Slack 규격을 만족한다★", () => {
+  // Slack: event_subscriptions 가 있으면 request_url 또는 socket_mode_enabled 중 하나가 필수.
+  //   ("Event Subscription requires either Request URL or Socket Mode Enabled")
+  const slackAccepts = (m: any): boolean => {
+    const ev = m?.settings?.event_subscriptions;
+    if (!ev) return true;
+    return Boolean(ev.request_url) || m?.settings?.socket_mode_enabled === true;
+  };
+
+  for (const [label, base] of [["공개 URL 없음", undefined], ["공개 URL 있음", "https://example.test/"]] as const) {
+    test(`${label} — 서버 매니페스트가 Slack 규격을 만족한다`, async () => {
+      const old = process.env.TEAM_PUBLIC_BASE_URL;
+      if (base === undefined) delete process.env.TEAM_PUBLIC_BASE_URL; else process.env.TEAM_PUBLIC_BASE_URL = base;
+      try {
+        const { app } = setup();
+        const b = await (await app.request("/members/bill/slack/reinstall-info")).json() as any;
+        expect(b.ok).toBe(true);
+        expect(slackAccepts(b.manifest)).toBe(true);
+      } finally {
+        if (old === undefined) delete process.env.TEAM_PUBLIC_BASE_URL; else process.env.TEAM_PUBLIC_BASE_URL = old;
+      }
+    });
+  }
+});
+
 describe("slack reinstall-info", () => {
   const withBase = (v: string | undefined, fn: () => Promise<void>) => async () => {
     const old = process.env.TEAM_PUBLIC_BASE_URL;
@@ -1079,11 +1107,14 @@ describe("slack reinstall-info", () => {
     expect(b.manifest?.oauth_config?.scopes?.bot).toEqual(b.needed_scopes);
     expect(b.manifest?.display_information?.name).toBeTruthy();
     expect(b.event_request_url).toBeNull();
-    // ★event_subscriptions 는 남아 있어야 한다★ — 처음엔 통째로 빼서 "undefined 여야 한다" 고 단언했는데
-    //   ★그게 잘못된 불변식이었다★(코덱스 리뷰). 구독이 없으면 앱은 만들어져도 멘션을 못 받는다.
-    //   request_url 만 없으면 된다.
-    expect(b.manifest?.settings?.event_subscriptions?.bot_events).toEqual(["app_mention"]);
-    expect(b.manifest?.settings?.event_subscriptions?.request_url).toBeUndefined();
+    // ★event_subscriptions 블록 자체가 없어야 한다★ (2026-07-27 Steve 리뷰).
+    //   이 응답은 webhook 매니페스트(socket_mode_enabled=false)다. Slack 규격상 이 블록이 있으면
+    //   request_url 또는 socket_mode_enabled 중 하나가 필수라, 공개 URL 없이 블록을 넣으면
+    //   ★Slack 이 거부하는 매니페스트를 사용자에게 내주게 된다.★
+    //   앞선 판(#74)은 "구독이 없으면 멘션을 못 받는다" 를 이유로 무조건 넣었는데, 그건
+    //   ★Socket 매니페스트가 풀 문제를 webhook 매니페스트에서 풀려 한 것★ 이었다.
+    //   Socket 쪽 구독은 클라이언트 socketManifest() 가 주입한다(AgentSlack.test.ts 에서 고정).
+    expect(b.manifest?.settings?.event_subscriptions).toBeUndefined();
     expect(b.public_base_missing).toBe(true);
     expect(typeof b.public_base_hint).toBe("string");
   }));
