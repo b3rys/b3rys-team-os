@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { socketManifest, webhookBlockedNotice } from "./AgentSlack";
+import { socketManifest, webhookBlockedNotice, wizardSteps } from "./AgentSlack";
 
 /* 2026-07-26: 공개 URL 이 없을 때 서버가 event_subscriptions 를 통째로 빼도록 고쳤더니, Socket 매니페스트에
  * ★app_mention 구독이 사라졌다.★ 그러면 사용자는 앱을 만들 수는 있는데 ★봇이 멘션에 반응하지 않는다.★
@@ -92,5 +92,75 @@ describe("webhookBlockedNotice — 실행 가능한 행동만 안내한다", () 
   test("Socket 모드는 공개 URL 과 무관하게 막지 않는다", () => {
     expect(webhookBlockedNotice("socket", null)).toBeNull();
     expect(webhookBlockedNotice("socket", "https://x.test/e")).toBeNull();
+  });
+});
+
+/* ★안내에서 '이벤트 구독 켜기' 단계가 통째로 빠져 있었다★ (2026-07-27 GD 실측 — 리사 앱을 만들다 헤맸다).
+ * 매니페스트에는 app_mention 이 들어 있다. 그런데 ★매니페스트에 있다는 것과 그 앱에서 켜져 있다는 것은 다르다★ —
+ * GD 는 Slack 화면에서 직접 Enable Events 토글을 올려야 했다. 꺼져 있으면 ★봇이 멘션을 무시하고 오류도 안 난다.★
+ * 오늘 하루 반복된 형태 그대로다: 있는데 도달하지 못한다. 그래서 ★안내 문구 자체를 회귀로 고정한다.★ */
+describe("wizardSteps — 이벤트 구독 켜는 단계가 반드시 있다", () => {
+  const opts = { appLink: "<a>apps</a>", scopes: "app_mentions:read, chat:write", channel: "#team" };
+  const joined = (isSocket: boolean) => wizardSteps({ ...opts, isSocket }).join("\n");
+
+  for (const isSocket of [true, false]) {
+    const label = isSocket ? "Socket Mode" : "Event URL";
+
+    test(`★${label}: Enable Events → app_mention → Save 순서가 안내된다★`, () => {
+      const s = joined(isSocket);
+      expect(s).toContain("Enable Events");          // ← 토글을 켜라는 말이 없으면 사용자는 못 찾는다
+      expect(s).toContain("Subscribe to bot events");
+      expect(s).toContain("app_mention");
+      expect(s).toContain("Save Changes");           // ← 저장 안 하면 위를 다 해도 적용 안 된다
+    });
+
+    test(`${label}: 단계는 앱 생성 → 이벤트 구독 순서다 (앱이 없으면 켤 화면이 없다)`, () => {
+      const steps = wizardSteps({ ...opts, isSocket });
+      const created = steps.findIndex((x) => x.includes("From a manifest"));
+      const events = steps.findIndex((x) => x.includes("Enable Events"));
+      expect(created).toBeGreaterThanOrEqual(0);
+      expect(events).toBeGreaterThan(created);
+    });
+
+    test(`${label}: 채널 초대·토큰 복사 단계는 그대로 남아 있다 (단계 추가가 기존 안내를 밀어내지 않는다)`, () => {
+      const s = joined(isSocket);
+      expect(s).toContain("/invite");
+      expect(s).toContain("xoxb");
+    });
+  }
+
+  test("Socket 방식만 App-Level Token(xapp) 단계를 안내한다", () => {
+    expect(joined(true)).toContain("xapp");
+    expect(joined(false)).not.toContain("xapp");
+  });
+
+  test("Event URL 방식은 Request URL 등록 단계를 유지한다", () => {
+    expect(joined(false)).toContain("Request URL");
+  });
+});
+
+/* ★슬랙 정본은 Socket Mode 다★ — Event URL(request_url) 방식은 지원 대상이 아니다(GD, 2026-07-27).
+ * 코드에 webhook 분기가 남아 있는 것은 ★기존에 그렇게 붙어 있는 멤버를 안 깨뜨리려는 것★ 일 뿐이다.
+ * 나는 이 구분을 놓치고 Socket 안내에까지 Request URL 을 끌어들일 뻔했다. 그래서 여기서 고정한다. */
+describe("Socket Mode 가 정본 — 안내에 Event URL 을 섞지 않는다", () => {
+  const base = { appLink: "<a>apps</a>", scopes: "chat:write", channel: "#team" };
+
+  test("★Socket 안내에는 Request URL·Signing Secret 이 나오지 않는다★", () => {
+    const s = wizardSteps({ ...base, isSocket: true }).join("\n");
+    expect(s).not.toContain("Request URL");
+    expect(s).not.toContain("Signing Secret");
+    expect(s).toContain("xapp");                    // Socket 은 App-Level Token 을 쓴다
+  });
+
+  test("이벤트 구독 단계는 GD 가 준 4단계 그대로다 (덧붙이지 않는다)", () => {
+    const step = wizardSteps({ ...base, isSocket: true }).find((x) => x.includes("Enable Events"))!;
+    const order = ["Enable Events", "Subscribe to bot events", "Add Bot User Event", "app_mention", "Save Changes"];
+    let at = -1;
+    for (const token of order) {
+      const next = step.indexOf(token);
+      expect(next).toBeGreaterThan(at);             // 순서가 어긋나면 실패
+      at = next;
+    }
+    expect(step).not.toContain("Request URL");      // ★추측으로 끼워 넣지 않는다★
   });
 });
