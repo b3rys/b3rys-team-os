@@ -34,7 +34,7 @@ beforeAll(() => {
 });
 afterAll(() => {
   // ★지우면 안 된다 — 되돌려야 한다.★ (2026-07-14)
-  //   전역 preload(src/test/audit-isolation.ts)가 B3OS_AUDIT_LOG_DIR 을 temp 로 세팅해 ★모든★ 테스트를
+  //   전역 preload(src/test/test-isolation.ts)가 B3OS_AUDIT_LOG_DIR 을 temp 로 세팅해 ★모든★ 테스트를
   //   라이브 logs/ 에서 격리한다. 여기서 delete 하면 ★그 격리가 통째로 풀리고★, 같은 프로세스에서
   //   ★뒤에 도는 모든 테스트가 라이브 감사로그에 쓴다.★
   //   실측: 라이브 로그에 테스트 이벤트 ★1619건★ (actor='nova', thread='t1' — 존재하지 않는 팀원/스레드).
