@@ -245,6 +245,22 @@ CREATE TABLE IF NOT EXISTS report (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_report_created ON report(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_report_created_id ON report(created_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS report_tag (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  color TEXT NOT NULL DEFAULT 'blue',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS report_tag_map (
+  report_id TEXT NOT NULL REFERENCES report(id) ON DELETE CASCADE,
+  tag_id TEXT NOT NULL REFERENCES report_tag(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (report_id, tag_id)
+);
+CREATE INDEX IF NOT EXISTS idx_report_tag_map_tag ON report_tag_map(tag_id, report_id);
 
 -- 팀 셀프 커스터마이즈 설정 (key-value). 팀명/태그라인 등. Mission·팀원은 파일이 정본.
 CREATE TABLE IF NOT EXISTS setting (

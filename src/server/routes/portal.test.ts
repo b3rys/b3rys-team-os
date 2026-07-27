@@ -20,6 +20,7 @@ function setup() {
 }
 const json = (b: unknown) => ({ method: "POST", body: JSON.stringify(b), headers: { "content-type": "application/json" } });
 const patchJson = (b: unknown) => ({ method: "PATCH", body: JSON.stringify(b), headers: { "content-type": "application/json" } });
+const putJson = (b: unknown) => ({ method: "PUT", body: JSON.stringify(b), headers: { "content-type": "application/json" } });
 
 describe("portal 리포트 요청 — 접수회신 플로우", () => {
   test("요청 제출 → {ok, assignee, thread_id} 반환 (대시보드 인라인 확인 근거)", async () => {
@@ -107,5 +108,40 @@ describe("portal 리포트 요청 — 접수회신 플로우", () => {
     const searched = await app.request(`/api/list?limit=10&q=${encodeURIComponent("중요 릴리즈")}`);
     const searchedJson = (await searched.json()) as { reports: { id: string }[] };
     expect(searchedJson.reports.map((r) => r.id)).toEqual(["star1"]);
+  });
+
+  test("태그 CRUD, 복수 태깅, OR 필터와 삭제 연결 해제", async () => {
+    const { app, db } = setup();
+    upsertReport(db, { id: "rep2", title: "두 번째", forms: [] } as never);
+    const a = await app.request("/api/tags", json({ name: "AI", color: "violet" }));
+    const b = await app.request("/api/tags", json({ name: "전략" }));
+    const tagA = ((await a.json()) as any).tag;
+    const tagB = ((await b.json()) as any).tag;
+    expect(a.status).toBe(201);
+
+    const marked = await app.request("/api/rep1/tags", putJson({ tag_ids: [tagA.id, tagB.id] }));
+    expect(marked.status).toBe(200);
+    expect(((await marked.json()) as any).report.tags.map((t: any) => t.name)).toEqual(["AI", "전략"]);
+    await app.request("/api/rep2/tags", putJson({ tag_ids: [tagB.id] }));
+
+    const filtered = await app.request(`/api/list?limit=10&tags=${tagA.id},${tagB.id}`);
+    expect(((await filtered.json()) as any).reports.map((r: any) => r.id).sort()).toEqual(["rep1", "rep2"]);
+
+    const renamed = await app.request(`/api/tags/${tagA.id}`, patchJson({ name: "에이전트" }));
+    expect(((await renamed.json()) as any).tag.name).toBe("에이전트");
+    await app.request(`/api/tags/${tagA.id}`, { method: "DELETE" });
+    const afterDelete = await app.request("/api/rep1");
+    expect(((await afterDelete.json()) as any).tags.map((t: any) => t.name)).toEqual(["전략"]);
+  });
+
+  test("태그 필터·보고서 태깅은 20개를 상한으로 제한한다", async () => {
+    const { app } = setup();
+    const ids = Array.from({ length: 21 }, (_, i) => `tag-${i}`);
+    const list = await app.request(`/api/list?limit=10&tags=${ids.join(",")}`);
+    expect(list.status).toBe(400);
+    const put = await app.request("/api/rep1/tags", putJson({ tag_ids: ids }));
+    expect(put.status).toBe(400);
+    const report = await app.request("/api/rep1");
+    expect(((await report.json()) as any).tags).toEqual([]);
   });
 });
