@@ -34,6 +34,15 @@ const AGENTS = [
   { id: "steve", display_name: "Steve", nicknames: ["steve"], role: "fullstack", runtime: "claude_channel", status_provider: "claude_tmux", avatar_emoji: "🧑‍💻", moderator_eligible: false },
 ];
 
+// ★런타임 인증 검사 기본 스텁 — 테스트가 실제 머신을 탐침하지 않게 한다.★
+//   publicRuntimeGate(settings.ts) 가 openclaw/hermes 영입 때 checkRuntimeAuth 를 부르는데,
+//   주입이 없으면 ★실 머신의 openclaw 바이너리·~/.hermes 프로필을 찾는다.★
+//   그래서 그 런타임이 깔린 기기에서만 통과하는 ★환경결합 테스트★ 가 됐다 —
+//   fresh clone(=CI·외부 기여자 조건)에서 10건이 400 으로 떨어졌다(2026-07-27 실측).
+//   archiveWorkspace=noop · skipRuntimeCleanup=true 와 같은 이유의 격리다: 테스트는 이 기기 상태를 읽지 않는다.
+//   ★미준비 상태를 검증하는 테스트는 각자 notReady 를 주입한다★ — 그쪽이 의도적으로 덮어쓴다.
+const readyAuth = async (runtime: string) => ({ runtime, loggedIn: true, detail: "테스트 스텁(준비됨)", fixHint: "" });
+
 function setup(agents: any[] = AGENTS, overrides: Partial<Parameters<typeof createSettingsApp>[0]> = {}) {
   const db = new Database(":memory:");
   migrate(db);
@@ -55,7 +64,7 @@ function setup(agents: any[] = AGENTS, overrides: Partial<Parameters<typeof crea
   syncRegistry(db, registryPath);
   // ⚠️ archiveWorkspace=noop 주입: 퇴사(DELETE) 테스트가 실제 ~/Development/<id>를 mv하지 않게 격리.
   // (이게 빠지면 full suite 실행 시 라이브 멤버 워크스페이스가 진짜 archive로 날아감 — high-sev 회귀)
-  const app = createSettingsApp({ db, registryPath, teamOsPath, appendAudit, onRegistryChanged: () => syncRegistry(db, registryPath), archiveWorkspace: () => null, skipRuntimeCleanup: true, ...overrides });
+  const app = createSettingsApp({ db, registryPath, teamOsPath, appendAudit, onRegistryChanged: () => syncRegistry(db, registryPath), archiveWorkspace: () => null, skipRuntimeCleanup: true, checkRuntimeAuth: readyAuth, ...overrides });
   return { app, teamOsPath, registryPath, dir, db };
 }
 /** 팀 세팅이 '완료'된 상태 — 영입(recruit)은 setupComplete() 를 통과해야 열린다.
