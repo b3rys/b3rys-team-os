@@ -66,7 +66,13 @@ fi
 {
   echo "✖ agent id 해석 실패."
   echo "  시도: GD_AGENT_ID → 현재 폴더($(pwd -P)) ↔ agent.workspace_path → tmux 세션(${SESSION:-없음})"
-  echo "  해결: 자기 워크스페이스에서 실행하거나 --me <agent id> 를 명시하라."
+  # ★안내는 그 사람이 실제로 할 수 있는 행동이어야 한다★ (2026-07-27).
+  #   전엔 "--me <agent id> 를 명시하라" 고 했는데 ★send.sh 는 --me 를 받지 않는다.★
+  #   막힌 사람에게 없는 해결책을 알려주는 꼴이었다(코덱스 적발). 실제 복구법으로 바꾼다.
+  #   (--me 는 bus-recall.sh 등 일부 스크립트 전용이라 공통 문구로 쓰면 안 된다.)
+  echo "  해결: ★자기 워크스페이스로 이동한 뒤★ 스크립트를 ★절대경로로★ 호출하라."
+  echo "        예) cd <내 워크스페이스> && <team-os>/skills/b3os-team-inbox/scripts/send.sh --to ... --body ..."
+  echo "        (신원은 현재 폴더로 판별한다 — 공용 저장소 폴더에서 실행하면 누구인지 알 수 없다)"
   echo "  (DB: $DB)"
 } >&2
 exit 1
