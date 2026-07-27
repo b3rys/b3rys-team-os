@@ -183,8 +183,46 @@ if not os.path.exists(cfgp):
 txt = open(cfgp).read()
 changes = []
 # config.yaml 은 한글을 \uXXXX 로 저장 → 영문 리터럴을 타겟해야 escape 무관하게 매칭됨(2026-06-11).
-# (a) cwd → 이 에이전트 workspace
-new, n = re.subn(r"(terminal:\s*\n\s*cwd:\s*).*", r"\g<1>" + hermes_cwd, txt, count=1)
+# (a) cwd → Hermes 실행 CWD. terminal: 바로 아래에 cwd가 있다는 인접 가정은 금지한다
+#     (예: backend/timeout 이 사이에 있으면 기존 정규식은 n=0 이었다).
+def _set_terminal_cwd(src, cwd):
+    lines = src.splitlines()
+    keep_newline = src.endswith("\n")
+
+    def indent_of(line):
+        return len(line) - len(line.lstrip(" "))
+
+    terminal_idx = None
+    terminal_indent = 0
+    for i, line in enumerate(lines):
+        m = re.match(r"^(\s*)terminal:\s*(?:#.*)?$", line)
+        if m:
+            terminal_idx = i
+            terminal_indent = len(m.group(1))
+            break
+    if terminal_idx is None:
+        return src, 0
+
+    end = len(lines)
+    for i in range(terminal_idx + 1, len(lines)):
+        stripped = lines[i].strip()
+        if stripped and not stripped.startswith("#") and indent_of(lines[i]) <= terminal_indent:
+            end = i
+            break
+
+    child_indent = " " * (terminal_indent + 2)
+    for i in range(terminal_idx + 1, end):
+        m = re.match(r"^(\s*)cwd:\s*.*$", lines[i])
+        if m and len(m.group(1)) > terminal_indent:
+            lines[i] = f"{m.group(1)}cwd: {cwd}"
+            out = "\n".join(lines) + ("\n" if keep_newline else "")
+            return out, 1
+
+    lines.insert(terminal_idx + 1, f"{child_indent}cwd: {cwd}")
+    out = "\n".join(lines) + ("\n" if keep_newline else "")
+    return out, 1
+
+new, n = _set_terminal_cwd(txt, hermes_cwd)
 if n: txt = new; changes.append("cwd")
 # (b) 자기 멘션: @(?:<원본이름>|hermes) → @(?:ko|aid)  자기 이름에만 응답
 new, n = re.subn(r"@\(\?:[^)]*\|hermes\)", f"@(?:{ko}|{aid})", txt)
