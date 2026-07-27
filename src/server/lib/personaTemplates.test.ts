@@ -362,3 +362,27 @@ test("live-fs 가드 배선 — savePersonaFile 이 실 팀원 경로를 거부�
   expect(existsSync(target)).toBe(false);
   expect(existsSync(dirname(target))).toBe(false);   // 빈 폴더조차 남기지 않는다
 });
+
+// ★격리가 실제로 걸렸는지★ — preload 회귀 감지. ambient B3RYS_HOME/B3RYS_MEMBERS_ROOT 가 새어들어오면
+//   MEMBERS_ROOT 가 실 경로가 되고, 그 순간 가드가 정당한 테스트 쓰기를 막는다(Codex 재현 케이스).
+test("preload 격리 — MEMBERS_ROOT 는 항상 temp (ambient env 가 새어들지 않는다)", () => {
+  const t = tmpdir();
+  const underTemp = MEMBERS_ROOT === t || MEMBERS_ROOT.startsWith(`${t}/`)
+    || MEMBERS_ROOT.startsWith("/tmp/") || MEMBERS_ROOT.startsWith("/var/folders/");
+  expect(underTemp).toBe(true);
+  // 격리된 루트는 보호목록에 들어가면 안 된다 — 들어가면 테스트가 자기 워크스페이스를 못 만든다.
+  expect(() => assertNotLiveMemberFsUnderTest(`${MEMBERS_ROOT}/anyone`, "t")).not.toThrow();
+});
+
+// ★경계 없는 prefix 비교 회귀★ (Codex 지적) — 이름이 겹치는 형제 폴더까지 막으면 오탐이다.
+test("live-fs 가드 — 이름만 겹치는 형제 경로는 막지 않는다", () => {
+  const home = process.env.HOME ?? "";
+  expect(() => assertNotLiveMemberFsUnderTest(`${home}/b3os/members-evil/jane`, "t")).not.toThrow();
+  expect(() => assertNotLiveMemberFsUnderTest(`${home}/Development-old/steve`, "t")).not.toThrow();
+});
+
+// `..` 로 우회되면 가드가 무의미하다.
+test("live-fs 가드 — 상대경로/.. 로 우회되지 않는다", () => {
+  const home = process.env.HOME ?? "";
+  expect(() => assertNotLiveMemberFsUnderTest(`${home}/b3os/members/../members/jane`, "t")).toThrow(/live-fs-guard/);
+});

@@ -78,8 +78,11 @@ export const MEMBERS_ROOT = resolveMembersRoot();
 //       격리해 돌리는 방식도 isTempPath 로 제외되어 그대로 동작한다.
 //     - `MEMBERS_ROOT` 는 import 시점 1회 해석 = ★그 프로세스의 ambient(=머신의 진짜 루트)★ 라,
 //       테스트가 런타임에 env 를 바꿔치기해도 가드 기준선은 흔들리지 않는다.
+// ★경계 있는 하위경로 판정★ — 맨 startsWith 는 `/tmp-evil` 을 `/tmp` 하위로 오판한다(Codex 리뷰).
+const isUnder = (p: string, root: string): boolean =>
+  root !== "" && (p === root || p.startsWith(`${root}/`));
 const isTempPath = (p: string): boolean =>
-  p === "/tmp" || p.startsWith("/tmp/") || p.startsWith("/var/folders/") || p.startsWith(tmpdir());
+  isUnder(p, "/tmp") || isUnder(p, "/var/folders") || isUnder(p, tmpdir());
 const PROTECTED_MEMBER_ROOTS: string[] = [...new Set([
   `${HOME}/Development`,    // OWNER 레거시(B3RYS_MEMBERS_ROOT=~/Development)
   `${HOME}/b3os/members`,   // 퍼블릭-안전 기본값 = 신규·공개 유저의 실 팀원 자리
@@ -89,7 +92,10 @@ export function assertNotLiveMemberFsUnderTest(p: string, op: string): void {
   if (process.env.NODE_ENV !== "test") return;            // 운영에선 무동작
   if (process.env.B3RYS_TEST_ALLOW_LIVE_FS === "1") return; // 명시 opt-in 탈출구
   if (!HOME) return;
-  const hit = PROTECTED_MEMBER_ROOTS.find((root) => p === root || p.startsWith(`${root}/`));
+  // 상대경로·`..` 로 새지 않게 정규화 후 비교. (심링크 canonicalize 는 하지 않는다 — 아직 없는 경로엔
+  //  realpath 를 걸 수 없고, 이건 실수 방지용 안전망이지 악의적 우회를 막는 보안 경계가 아니다.)
+  const target = resolve(p);
+  const hit = PROTECTED_MEMBER_ROOTS.find((root) => isUnder(target, resolve(root)));
   if (hit) {
     throw new Error(
       `[live-fs-guard] '${op}' 가 테스트에서 라이브 멤버 경로를 mutate 하려 함: ${p} (보호루트: ${hit}) — ` +
