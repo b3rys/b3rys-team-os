@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { CodexApprovalCorrelationStore } from "./state";
 import { finalizeApprovalDelivery } from "./appServerPopup";
 
-// finalizeApprovalDelivery: 결정을 상관키 CAS로 마감(중복·TOCTOU·orphan 차단) — Phase1 ③.
+// finalizeApprovalDelivery: 결정을 상관키 CAS로 마감(중복 결정·요청 불일치·orphan 거부) — Phase1 ③.
 function setup() {
   const db = new Database(":memory:");
   db.exec(`CREATE TABLE codex_approval_correlation (
@@ -38,7 +38,7 @@ describe("finalizeApprovalDelivery — CAS 배달 게이트", () => {
     expect(finalizeApprovalDelivery(s.store, "r1", "H", "approved", "P")).toBe("denied");
   });
 
-  test("★TOCTOU: operation_hash 불일치 → denied★", () => {
+  test("요청 지문 불일치(다른 요청의 결정) → denied", () => {
     s.rec("r1", "H", "P");
     expect(finalizeApprovalDelivery(s.store, "r1", "WRONG", "approved", "P")).toBe("denied");
     expect(s.store.get("r1")!.state).toBe("decided"); // decided까진 갔으나 delivered 거부

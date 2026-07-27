@@ -89,8 +89,9 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
     return { runtime: "codex", agent_id: agentId, action: "shell", command: p.command.join(" ").slice(0, 2000), requested_by: agentId, provenance };
   }
   if (p.fileChanges && typeof p.fileChanges === "object") {
-    // ★하네스 CRITICAL 1-B 픽스: scope_key(target)를 files[0]만이 아니라 '전체 파일집합(정렬)'으로 →
-    // [a.ts,b.ts] 승인이 [a.ts,evil.sh]로 재사용되는 grant 우회 차단(다른 파일집합=다른 scope).★
+    // scope_key(target)를 files[0]만이 아니라 '전체 파일집합(정렬)'으로 만든다 — 파일집합이 다르면 scope도 달라진다.
+    // ★단 일반 보장은 아니다★: target은 permissionGate에서 앞 240자만 쓰이므로(그리고 여기서도 500자로 자른다)
+    // 목록이 길면 서로 다른 파일집합이 같은 scope로 접힐 수 있다. 전체 결합은 미구현 — 이슈 #106.
     const files = Object.keys(p.fileChanges).sort();
     return { runtime: "codex", agent_id: agentId, action: "write", path: files.join("|").slice(0, 500), text: files.join(", ").slice(0, 500), requested_by: agentId, provenance };
   }

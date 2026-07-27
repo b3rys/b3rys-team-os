@@ -2,7 +2,7 @@ import { test, expect, describe, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { CodexApprovalCorrelationStore } from "./state";
 
-// codex_approval_correlation 스토어 CAS/TOCTOU/orphan 실증(Phase1 ③).
+// codex_approval_correlation 스토어 CAS/요청 불일치/orphan 실증(Phase1 ③).
 function setup(): { db: Database; store: CodexApprovalCorrelationStore } {
   const db = new Database(":memory:");
   db.exec(`CREATE TABLE codex_approval_correlation (
