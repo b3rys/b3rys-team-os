@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { AgentRecord } from "../types";
-import { __setOpenclawBridgeTestDeps, injectOpenclawTelegramTurn } from "./openclawBridge";
+import {
+  OPENCLAW_BIN_CANDIDATES,
+  __setOpenclawBridgeTestDeps,
+  injectOpenclawTelegramTurn,
+  resolveOpenclawBin,
+} from "./openclawBridge";
 import { clearRuntimeBlock } from "./runtimeBlocks";
 
 const codex: AgentRecord = {
@@ -44,6 +49,51 @@ afterEach(() => {
   if (originalTimeoutNotice === undefined) delete process.env.OPENCLAW_TIMEOUT_NOTICE;
   else process.env.OPENCLAW_TIMEOUT_NOTICE = originalTimeoutNotice;
   delete process.env.OPENCLAW_TURN_FAIL_GRACE_MS;
+});
+
+/**
+ * ★2026-07-27 라이브 회귀★ — 서버가 launchd 로 뜨면 PATH 에 npm global prefix(`~/.local/bin`)가
+ * 없다. openclaw 가 멀쩡히 설치돼 있는데도 spawn 이 `Executable not found in $PATH` 로 죽었고,
+ * openclaw 런타임 팀원에게 가는 ★모든 directed 버스 메시지의 wake 가 조용히 실패★했다
+ * (message row 는 저장되므로 발신자에겐 "보냈다"로 보인다 — 그래서 몇 시간 안 들켰다).
+ *
+ * 실 FS 를 건드리지 않도록 후보 목록·실행가능 판정을 주입해서 고정한다(b3os-infra-safety ④).
+ */
+describe("resolveOpenclawBin — PATH 만 믿지 않는다", () => {
+  const never = () => false;
+  const always = () => true;
+
+  test("기본 후보 맨 앞은 ~/.local/bin — openclaw 의 npm global 설치 위치", () => {
+    expect(OPENCLAW_BIN_CANDIDATES[0]).toBe(`${process.env.HOME ?? ""}/.local/bin/openclaw`);
+  });
+
+  test("OPENCLAW_BIN 이 있으면 그대로 존중한다 (비표준 prefix 주입구)", () => {
+    expect(resolveOpenclawBin({ OPENCLAW_BIN: "/nix/store/xyz/bin/openclaw" }, [], never)).toBe(
+      "/nix/store/xyz/bin/openclaw",
+    );
+  });
+
+  test("OPENCLAW_BIN 이 공백뿐이면 무시하고 후보 탐색으로 넘어간다", () => {
+    expect(resolveOpenclawBin({ OPENCLAW_BIN: "   " }, ["/a/openclaw"], always)).toBe("/a/openclaw");
+  });
+
+  test("★핵심★ env 가 없어도 실경로 후보에서 찾는다 — PATH 에 없어도 산다", () => {
+    const seen: string[] = [];
+    const found = resolveOpenclawBin({}, ["/miss/openclaw", "/hit/openclaw"], (p) => {
+      seen.push(p);
+      return p === "/hit/openclaw";
+    });
+    expect(found).toBe("/hit/openclaw");
+    expect(seen).toEqual(["/miss/openclaw", "/hit/openclaw"]); // 순서대로, 첫 히트에서 멈춤
+  });
+
+  test("실행 불가(존재하지만 +x 없음)는 건너뛴다", () => {
+    expect(resolveOpenclawBin({}, ["/no-x/openclaw"], never)).toBe("openclaw");
+  });
+
+  test("후보를 다 놓치면 기존 동작(PATH 폴백)을 유지한다 — 회귀 0", () => {
+    expect(resolveOpenclawBin({}, OPENCLAW_BIN_CANDIDATES, never)).toBe("openclaw");
+  });
 });
 
 describe("injectOpenclawTelegramTurn visible reply bridge", () => {
