@@ -19,9 +19,15 @@ function isMacClient(): boolean {
 // b3os.app 배포처 = GitHub Releases.
 // ★서명된 .app 을 저장소에 커밋하지 않는 이유★: 서명·공증 바이너리에는 서명 주체(Developer ID·Team ID)가
 //   박혀 있어, 저장소에 올리면 개발자 신원이 공개 이력에 영구히 남는다. 자산은 Releases 로만 배포한다.
-// `releases/latest/download/` 는 최신 릴리스로 자동 해석되므로 버전을 올려도 이 링크는 그대로다.
-const MAC_APP_DOWNLOAD_URL =
-  "https://github.com/b3rys/b3rys-team-os/releases/latest/download/b3os.app.zip";
+// ★`latest` 를 쓰지 않고 태그를 고정한다★ — 2026-07-28 라이브 404 의 원인이었다.
+//   `releases/latest/download/` 는 URL 은 그대로 두지만 ★가리키는 릴리스에 자산이 없으면 조용히 404★ 가 된다.
+//   실제로 v0.5.1 태그가 앱 자산 없이 올라가면서(07-27 12:07) latest 가 빈 릴리스를 가리켰고,
+//   외부 사용자가 신고할 때까지 ★하루 동안 아무 경고도 없었다.★
+//   그래서 ★자산이 실제로 붙어 있는 태그★ 를 가리킨다. 앱을 새로 공증해 릴리스에 첨부할 때 이 값을 올린다.
+//   (release-preflight 에 'latest 에 b3os.app.zip 이 있는가' 가드를 넣기 전까지는 latest 로 되돌리지 않는다)
+export const MAC_APP_DOWNLOAD_TAG = "v0.5.0";
+export const MAC_APP_DOWNLOAD_URL =
+  `https://github.com/b3rys/b3rys-team-os/releases/download/${MAC_APP_DOWNLOAD_TAG}/b3os.app.zip`;
 
 let alertsOpen = false;
 let tasksMenuOpen = false;
