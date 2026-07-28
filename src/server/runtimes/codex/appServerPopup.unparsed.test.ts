@@ -59,6 +59,28 @@ describe("S0 — 해석 실패 payload 의 권한 열쇠", () => {
       .toBe(scopeKeyForOperation(buildOperationFromApproval(b, "dex")));
   });
 
+  test("★'__proto__' 키만 다른 payload 도 갈린다★ — 해석 실패 경로의 우회 통로였다", () => {
+    // Codex 리뷰(2026-07-29)에서 잡힌 실제 충돌. 일반 객체에 acc["__proto__"]=... 로 대입하면
+    // ★프로토타입이 바뀔 뿐 own property 가 되지 않아 JSON.stringify 에서 통째로 사라진다.★
+    // → "__proto__" 값만 다른 두 payload 가 ★같은 지문·같은 열쇠★ 였다(재현: 둘 다 #5353b5b6…).
+    // JSON-RPC payload 에 이 키가 오는 것은 유효하므로 ★해석 실패 경로에서 우회 통로★ 가 된다.
+    // JSON.parse 로 만들어야 실제 수신 경로와 같다(리터럴로 쓰면 파서가 프로토타입으로 처리한다).
+    const a = { method: "item/tool/requestUserInput", params: JSON.parse('{"x":1,"__proto__":{"a":1}}') } as ApprovalRequest;
+    const b = { method: "item/tool/requestUserInput", params: JSON.parse('{"x":1,"__proto__":{"a":2}}') } as ApprovalRequest;
+    expect(scopeKeyForOperation(buildOperationFromApproval(a, "dex")))
+      .not.toBe(scopeKeyForOperation(buildOperationFromApproval(b, "dex")));
+  });
+
+  test("reason 은 500자까지 text 에 남는다 — Tier-D 스캔 범위를 줄이지 않는다", () => {
+    const long = "x".repeat(600);
+    const op = buildOperationFromApproval(
+      { method: "item/permissions/requestApproval", params: { reason: long, itemId: "i1" } } as ApprovalRequest,
+      "dex",
+    );
+    // 합친 문자열을 다시 자르면 reason 끝이 스캔에서 빠진다. 500자는 온전히 남아야 한다.
+    expect(op.text).toContain("x".repeat(500));
+  });
+
   test("★approvalOperationHash 로는 못 가른다★ — 왜 payload 전체 지문이 필요한지의 근거", () => {
     // 신세대는 command 가 문자열이라 basis 의 Array.isArray 가 false → command:null.
     // fileChanges 도 reason 도 없으니 basis 가 {method, null, null, null} 로 같아진다.

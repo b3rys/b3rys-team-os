@@ -111,12 +111,15 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
   //    = 해석 못 한 요청은 ★매번 묻는다★. 그게 이 단계가 노린 보수적 동작이다.
   //  ※ reason 을 text 에 남기는 이유: permissionGate.operationText 가 text 도 Tier-D 스캔에 쓴다.
   //    빼면 위험 문자열이 reason 에 있을 때 하드 차단이 약해진다.
-  const reason = typeof p.reason === "string" ? p.reason.slice(0, 300) : "";
+  // reason 은 ★기존과 같은 500자★ 를 유지한다 — 여기서 줄이면 Tier-D 스캔 범위가 좁아진다(Codex 리뷰).
+  // 합친 문자열을 다시 자르지도 않는다: method 는 프로토콜 상수(방어적으로 64자), 지문은 16자라
+  // 전체가 유계이고, 자르면 그만큼 reason 끝이 스캔에서 빠진다.
+  const reason = typeof p.reason === "string" ? p.reason.slice(0, 500) : "";
   return {
     runtime: "codex",
     agent_id: agentId,
     action: "approval_unparsed",
-    text: `${req.method} #${unparsedPayloadDigest(req)}${reason ? ` ${reason}` : ""}`.slice(0, 500),
+    text: `${req.method.slice(0, 64)} #${unparsedPayloadDigest(req)}${reason ? ` ${reason}` : ""}`,
     requested_by: agentId,
     provenance,
   };
@@ -135,9 +138,16 @@ function unparsedPayloadDigest(req: ApprovalRequest): string {
   const stable = (v: unknown): unknown => {
     if (Array.isArray(v)) return v.map(stable);
     if (v && typeof v === "object") {
-      return Object.keys(v as Record<string, unknown>)
-        .sort()
-        .reduce<Record<string, unknown>>((acc, k) => { acc[k] = stable((v as Record<string, unknown>)[k]); return acc; }, {});
+      // ★Object.fromEntries 를 쓴다 — 일반 객체에 acc["__proto__"]=... 로 대입하면 ★프로토타입이 바뀔 뿐
+      //  own property 가 되지 않아 JSON.stringify 에서 통째로 사라진다.★ 그러면 "__proto__" 값만 다른 두
+      //  payload 가 ★같은 지문·같은 열쇠★ 가 된다(Codex 리뷰에서 지적, 재현 확인: 둘 다 #5353b5b6…).
+      //  JSON-RPC payload 에 그 키가 오는 것은 유효하므로, ★해석 실패 경로에서 이건 우회 통로★ 가 된다.
+      //  fromEntries 는 CreateDataProperty 라 "__proto__" 도 평범한 키로 보존한다.
+      return Object.fromEntries(
+        Object.keys(v as Record<string, unknown>)
+          .sort()
+          .map((k) => [k, stable((v as Record<string, unknown>)[k])] as const),
+      );
     }
     return v;
   };
