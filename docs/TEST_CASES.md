@@ -18,6 +18,11 @@
 | **여러 명이 동시에 쓸 때** | 대부분의 테스트가 단일 요청이다. 경합·중복 배달은 대체로 사고가 난 뒤에 알게 된다 | 사고가 나면 그때 회귀 테스트를 추가 |
 | **오래 돌았을 때** (며칠 연속) | 누수·상태 누적·스케줄러 드리프트는 짧은 테스트로 안 잡힌다 | 모니터가 사후에 잡는다 |
 | **실제 배포 결과물** | 빌드 성공은 *사용자가 받는 것*과 다르다. 2026-07-28 앱 다운로드 404 는 코드가 아니라 **릴리스에 파일이 안 붙어서** 났고 **하루 동안 아무 경고가 없었다** | 배포 후 사람이 실제 URL 을 받아본다 |
+| **링크가 실제로 열리는가** | 위와 다른 축이다. 산출물은 있는데 **링크가 자산 없는 태그를 가리켰다.** URL 은 멀쩡해 보였고 **하루 동안 아무도 몰랐다** | 없음 — 릴리스 절차에 넣는 것을 검토 중 |
+| **새 사용자의 빈 환경** | Linux 와 다른 축이다. 같은 테스트가 **개발 머신 6 fail → fresh clone 10 fail** 이었다. **환경 결합이 층층이 있고 실제로 돌려보기 전엔 안 보인다** | 공개 전 수동 clone 점검 |
+| **기존 사용자의 업그레이드 경로** | 우리는 늘 **새 설치만** 본다. 구버전 `team.db`·설정을 그대로 두고 올리는 경로는 아무도 안 본다 | 없음 |
+| **공개 문서의 사실성** | 코드가 맞아도 **설명이 틀리면 사용자는 자기가 틀린 줄 안다.** 2026-07-28 하루에만 3건(CI 헤더·원인 분류·낡은 수치) | 사람 리뷰뿐. 자동 검사 없음 |
+| **자격증명이 비었을 때의 동작** | 토큰이 비면 **에러 없이 다른 계정으로 나간다.** 실패가 아니라 *조용히 다른 일*을 한다 | 없음 |
 
 > **이 표에 줄을 추가하는 것은 부끄러운 일이 아닙니다.** 안 적힌 사각지대가 훨씬 위험합니다.
 > 무언가를 검사하기 시작하면 그 줄을 지우고, 아래 '지키는 것' 에서 확인하세요.
@@ -155,8 +160,14 @@
 - `src/server/db/auditRecent.test.ts`
   - auditRecent — Audit screen feed
   - busFlowRecent — Inbox screen now carries semantic state
+- `src/server/db/dmCapture.test.ts`
+  - _(최상위 describe 없음 — test/it 5개. 이름은 파일에서 확인하세요)_
 - `src/server/db/dmDedupe.test.ts`
   - dm_message dedup — 멤버별 격리 (Devon MUST-FIX)
+- `src/server/db/dmQuery.test.ts`
+  - _(최상위 describe 없음 — test/it 7개. 이름은 파일에서 확인하세요)_
+- `src/server/db/dmRuntimeParsers.test.ts`
+  - _(최상위 describe 없음 — test/it 6개. 이름은 파일에서 확인하세요)_
 - `src/server/db/inbox/acceptInbound.test.ts`
   - acceptInbound — 채널 ingress 공통 꼬리 (P2)
 - `src/server/db/inbox/broadcastComplete.test.ts`
@@ -190,6 +201,8 @@
 
 ### 서버 공용 — 신원·권한·활성화
 
+- `src/server/lib/acceptanceLauncherDrift.test.ts`
+  - _(최상위 describe 없음 — test/it 5개. 이름은 파일에서 확인하세요)_
 - `src/server/lib/activation.test.ts`
   - activation: claude poller 헬스게이트 (waitForClaudePoller)
   - activation: codex bridge poller 헬스게이트 (waitForCodexPoller)
@@ -205,6 +218,8 @@
   - claudeTelegramLaunchdLabel
 - `src/server/lib/agentMembership.test.ts`
   - official team member limit
+- `src/server/lib/approvals.test.ts`
+  - _(최상위 describe 없음 — test/it 8개. 이름은 파일에서 확인하세요)_
 - `src/server/lib/approvalsV2.test.ts`
   - approval v2 — 스키마 'deferred'
   - approval v2 — 10분 자동보류(deferStaleApprovals)
@@ -267,6 +282,8 @@
 - `src/server/lib/permissionGate.test.ts`
   - permissionGate — public runtime blockers
   - permissionGate — DB request/grant/audit
+- `src/server/lib/personaTemplates.test.ts`
+  - _(최상위 describe 없음 — test/it 36개. 이름은 파일에서 확인하세요)_
 - `src/server/lib/registry.test.ts`
   - loadRegistry
 - `src/server/lib/registrySafety.test.ts`
@@ -280,6 +297,8 @@
   - rotateToken: fail-safe(검증 실패 시 기존 안 건드림)
 - `src/server/lib/runtimeActivationSafety.test.ts`
   - runtime activation safety
+- `src/server/lib/runtimeAuth.readiness.test.ts`
+  - _(최상위 describe 없음 — test/it 1개. 이름은 파일에서 확인하세요)_
 - `src/server/lib/runtimeBlocks.test.ts`
   - runtimeBlocks
 - `src/server/lib/runtimeEssentials.test.ts`
@@ -288,6 +307,8 @@
   - ★1차 — 구조화 신호(usage-file)가 실패를 판정한다★
   - ★2차 그물 — usage-file 을 못 읽었을 때만 의미가 있다★
   - ★배선 — 모듈만 있고 안 쓰면 아무것도 안 고쳐진다★
+- `src/server/lib/runtimePath.test.ts`
+  - _(최상위 describe 없음 — test/it 6개. 이름은 파일에서 확인하세요)_
 - `src/server/lib/senderIdentity.test.ts`
   - 발신자 신원 — ★모델에게 묻지 않는다★
 - `src/server/lib/serverService.test.ts`
@@ -295,8 +316,12 @@
   - serverServicePaths
   - renderServerPlist
   - 플랫폼 가드 (Windows 미지원)
+- `src/server/lib/skillPathAbsolute.test.ts`
+  - _(최상위 describe 없음 — test/it 4개. 이름은 파일에서 확인하세요)_
 - `src/server/lib/teamContextPolicy.test.ts`
   - teamContextPolicy
+- `src/server/lib/teamOsRenderAtomic.test.ts`
+  - _(최상위 describe 없음 — test/it 3개. 이름은 파일에서 확인하세요)_
 - `src/server/lib/teamRouter.characterization.test.ts`
   - hasTopicShift
   - stripExampleRegions
@@ -362,6 +387,8 @@
   - emit ↔ project 왕복 + route_decision projection (§7)
   - 정렬·dedupe (§7 contract)
   - recomputeAll — 통합 episode(gold-style)
+- `src/server/personaWriteWiring.test.ts`
+  - _(최상위 describe 없음 — test/it 1개. 이름은 파일에서 확인하세요)_
 
 ### HTTP 라우트 — 대시보드·API 가 지키는 계약
 
@@ -444,13 +471,23 @@
   - readTail — tail-only 세션 읽기
 - `src/server/runtimes/claude/pollerHealth.test.ts`
   - ensureClaudePollerUp — 재시작 뒤 poller 자동복구
+- `src/server/runtimes/claude/seedClaudeAccess.test.ts`
+  - _(최상위 describe 없음 — test/it 3개. 이름은 파일에서 확인하세요)_
+- `src/server/runtimes/claude/seedGroupIntoClaudeMembers.test.ts`
+  - _(최상위 describe 없음 — test/it 7개. 이름은 파일에서 확인하세요)_
 - `src/server/runtimes/codex/adapter.test.ts`
   - codex adapter — 핵심 정확성
+- `src/server/runtimes/codex/appServerApproval.test.ts`
+  - _(최상위 describe 없음 — test/it 11개. 이름은 파일에서 확인하세요)_
+- `src/server/runtimes/codex/appServerClient.smoke.test.ts`
+  - _(최상위 describe 없음 — test/it 4개. 이름은 파일에서 확인하세요)_
 - `src/server/runtimes/codex/appServerPopup.finalize.test.ts`
   - finalizeApprovalDelivery — CAS 배달 게이트
 - `src/server/runtimes/codex/appServerPopup.opHash.test.ts`
   - approvalOperationHash — 지문의 결정성·충돌저항(권한 결합은 미구현)
   - 알려진 갭 (후속 작업에서 닫히면 이 테스트가 실패해야 한다)
+- `src/server/runtimes/codex/appServerPopup.test.ts`
+  - _(최상위 describe 없음 — test/it 7개. 이름은 파일에서 확인하세요)_
 - `src/server/runtimes/codex/bridge.test.ts`
   - codex bridge (M2) — 채널 I/O
   - 발신자 게이트(allowlist) — parseAllowFrom + 통과 판정
@@ -505,6 +542,8 @@
   - 런타임 저장소 경로 매핑
   - 인터럽트 메시지 (턴 중 도착)
   - 버스 배제 가드는 앵커로 판정한다
+- `src/server/workers/slackSocket.test.ts`
+  - _(최상위 describe 없음 — test/it 6개. 이름은 파일에서 확인하세요)_
 - `src/server/workers/statusProbe.test.ts`
   - extractCtxPercent — Claude Code 'ctx N%' footer 파싱
   - computeStateFromActivity — 마지막 활동 시각 → 상태
@@ -566,9 +605,13 @@
   - activity_assumed never masquerades as a real ack (category chip)
 - `src/web/components/macAppDownloadUrl.test.ts`
   - b3os.app 다운로드 링크
+- `src/web/components/runtimeOptions.test.ts`
+  - _(최상위 describe 없음 — test/it 4개. 이름은 파일에서 확인하세요)_
 - `src/web/components/settingsPairing.test.ts`
   - Settings Claude pairing panel visibility
   - awaitingPollPlan — 어떤 마커가 폴링을 멈추나
   - isPairingCodeWellFormed — 코드는 16진수다
+- `src/web/icons.test.ts`
+  - _(최상위 describe 없음 — test/it 1개. 이름은 파일에서 확인하세요)_
 
 <!-- END GENERATED -->

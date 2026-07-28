@@ -21,7 +21,22 @@ BEGIN="<!-- BEGIN GENERATED: 지키는 것 -->"
 END="<!-- END GENERATED -->"
 
 [ -f "$DOC" ] || { echo "ERROR: $DOC 가 없습니다. 먼저 만들어 주세요(손으로 쓰는 절이 있습니다)." >&2; exit 2; }
-grep -qF "$BEGIN" "$DOC" || { echo "ERROR: $DOC 에 생성 구간 표시가 없습니다: $BEGIN" >&2; exit 2; }
+
+# ★마커 검증 — BEGIN·END 각각 정확히 1개 (2026-07-29, steve 리뷰에서 재현된 사고)★
+#   ★END 를 검사하지 않으면 이 스크립트가 손으로 쓴 절을 조용히 지운다.★
+#   실측: END 에 하이픈 하나만 더해도(`-->` → `--->`) awk 의 skip 이 영원히 안 풀려
+#   ★BEGIN 이후 전부 삭제★ 되고, 그러면서 종료코드 0 에 "'안 보는 것' 절은 그대로 두었습니다" 를 출력했다.
+#   ★성공했다고 말하면서 지운다★ — 이 문서가 다루려는 사고 유형 그 자체다.
+#   BEGIN 이 2개여도 생성 블록이 둘로 갈라지므로 개수까지 본다.
+nb="$(grep -cF "$BEGIN" "$DOC" || true)"
+ne="$(grep -cF "$END"   "$DOC" || true)"
+if [ "$nb" != "1" ] || [ "$ne" != "1" ]; then
+  echo "ERROR: 생성 구간 표시가 정확히 1쌍이어야 합니다 (BEGIN=${nb}개, END=${ne}개)." >&2
+  echo "  BEGIN: $BEGIN" >&2
+  echo "  END  : $END" >&2
+  echo "  ★한 글자라도 다르면 이 스크립트가 손으로 쓴 절을 지웁니다 — 그래서 여기서 멈춥니다.★" >&2
+  exit 2
+fi
 
 TMP="$(mktemp)"; trap 'rm -f "$TMP" "$TMP.body"' EXIT
 
@@ -49,20 +64,45 @@ area_of() {
   echo
 } > "$TMP.body"
 
-# 최상위 describe 만 뽑는다(중첩은 세부라 목록이 길어지기만 한다).
+# 최상위 describe 를 뽑는다(중첩은 세부라 목록이 길어지기만 한다).
+#
+# ★describe 가 없는 파일도 반드시 싣는다 (2026-07-29, steve 리뷰)★
+#   이전 판은 `^describe("` 에 안 걸리는 파일을 ★통째로 빼버렸다★ — 155개 중 19개(12%).
+#   그중 personaTemplates.test.ts 는 테스트가 36개인데 지도에서 안 보였다.
+#   ★이게 이 문서의 목적과 정면으로 어긋난다★ — 지도에 없는 영역을 읽는 사람은
+#   "여긴 테스트가 없구나" 로 읽는다. ★없는 것보다 나쁜 게, 있는데 없다고 보이는 것이다.★
+#   완벽히 뽑을 필요는 없다. ★빠졌다는 사실이 보이면 된다.★
 LAST_AREA=""
 find src -name '*.test.ts' -type f 2>/dev/null | sort | while read -r f; do
-  names="$(grep -hoE '^describe\("[^"]+"' "$f" 2>/dev/null | sed 's/^describe("//; s/"$//' || true)"
-  [ -n "$names" ] || continue
   a="$(area_of "$f")"
   if [ "$a" != "$LAST_AREA" ]; then printf '\n### %s\n\n' "$a"; LAST_AREA="$a"; fi
   # ★'-' 로 시작하는 형식문자열은 printf 가 옵션으로 읽는다★ — `--` 로 끊어준다.
   printf -- '- `%s`\n' "$f"
-  # 따옴표·파이프는 표를 깨뜨리므로 그대로 두되 목록으로만 낸다.
-  printf '%s\n' "$names" | sed 's/^/  - /'
+  names="$(grep -hoE '^describe\("[^"]+"' "$f" 2>/dev/null | sed 's/^describe("//; s/"$//' || true)"
+  if [ -n "$names" ]; then
+    # 따옴표·파이프는 표를 깨뜨리므로 그대로 두되 목록으로만 낸다.
+    printf '%s\n' "$names" | sed 's/^/  - /'
+  else
+    n="$(grep -cE '^[[:space:]]*(test|it)\(' "$f" 2>/dev/null || true)"
+    printf -- '  - _(최상위 describe 없음 — test/it %s개. 이름은 파일에서 확인하세요)_\n' "${n:-0}"
+  fi
 done >> "$TMP.body"
 
 printf '\n%s\n' "$END" >> "$TMP.body"
+
+# ★자기검사 — 테스트 파일이 하나라도 지도에서 빠지면 여기서 멈춘다★
+#   이전 판은 19개를 ★말없이★ 빠뜨렸고, 아무 신호도 없어서 리뷰어가 직접 세어보고서야 찾았다.
+#   추출 규칙을 다음에 누가 바꿔도 ★같은 누락이 조용히 재발하지 않게★ 개수를 맞춰본다.
+found="$(find src -name '*.test.ts' -type f 2>/dev/null | wc -l | tr -d ' ')"
+listed="$(grep -cE '^- `src/.*\.test\.ts`$' "$TMP.body" || true)"
+if [ "$found" != "$listed" ]; then
+  echo "ERROR: 테스트 파일 $found 개 중 지도에 실린 것이 $listed 개입니다 — ★말없이 빠진 파일이 있습니다.★" >&2
+  echo "  빠진 파일:" >&2
+  find src -name '*.test.ts' -type f | sort | while read -r m; do
+    grep -qF -- "- \`$m\`" "$TMP.body" || echo "    $m" >&2
+  done
+  exit 3
+fi
 
 # 생성 구간만 교체 — ★손으로 쓴 절('안 보는 것')은 절대 건드리지 않는다.★
 awk -v b="$BEGIN" -v e="$END" -v bodyfile="$TMP.body" '
