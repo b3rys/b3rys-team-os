@@ -38,7 +38,7 @@ if [ "$nb" != "1" ] || [ "$ne" != "1" ]; then
   exit 2
 fi
 
-TMP="$(mktemp)"; trap 'rm -f "$TMP" "$TMP.body"' EXIT
+TMP="$(mktemp)"; trap 'rm -f "$TMP" "$TMP.body" "$TMP.nodesc"' EXIT
 
 # 영역 = 경로에서 도출. 사람이 유지하는 매핑이 아니라 ★파일이 있는 곳★ 이 곧 영역이다.
 area_of() {
@@ -85,23 +85,50 @@ find src -name '*.test.ts' -type f 2>/dev/null | sort | while read -r f; do
   else
     n="$(grep -cE '^[[:space:]]*(test|it)\(' "$f" 2>/dev/null || true)"
     printf -- '  - _(최상위 describe 없음 — test/it %s개. 이름은 파일에서 확인하세요)_\n' "${n:-0}"
+    echo "$f" >> "$TMP.nodesc"   # 기준선 대조용 (아래 자기검사)
   fi
 done >> "$TMP.body"
 
 printf '\n%s\n' "$END" >> "$TMP.body"
 
-# ★자기검사 — 테스트 파일이 하나라도 지도에서 빠지면 여기서 멈춘다★
-#   이전 판은 19개를 ★말없이★ 빠뜨렸고, 아무 신호도 없어서 리뷰어가 직접 세어보고서야 찾았다.
-#   추출 규칙을 다음에 누가 바꿔도 ★같은 누락이 조용히 재발하지 않게★ 개수를 맞춰본다.
-found="$(find src -name '*.test.ts' -type f 2>/dev/null | wc -l | tr -d ' ')"
-listed="$(grep -cE '^- `src/.*\.test\.ts`$' "$TMP.body" || true)"
-if [ "$found" != "$listed" ]; then
-  echo "ERROR: 테스트 파일 $found 개 중 지도에 실린 것이 $listed 개입니다 — ★말없이 빠진 파일이 있습니다.★" >&2
-  echo "  빠진 파일:" >&2
-  find src -name '*.test.ts' -type f | sort | while read -r m; do
-    grep -qF -- "- \`$m\`" "$TMP.body" || echo "    $m" >&2
-  done
+# ★자기검사 — '이름을 못 뽑은 파일' 이 늘어나면 멈춘다★
+#
+#   ★이 검사는 한 번 무력화된 적이 있다 (2026-07-29, steve 리뷰).★
+#   처음엔 '파일 개수'(found vs listed)를 봤다. 그런데 같은 PR 의 다른 수정으로
+#   ★describe 가 없어도 파일은 항상 싣게★ 되면서 listed == found 가 ★항상 참★ 이 됐다 —
+#   ★검사가 설계상 실패할 수 없는 상태★ 였다. 그런데도 PR 검증란에는 "추출규칙 파손 → ERROR"
+#   라고 적혀 있었다. ★감시기가 자기가 요구하는 신호를 못 보고 있었다.★
+#
+#   그래서 재는 대상을 바꿨다: 개수가 아니라 ★'이름을 못 뽑은 파일의 목록'★ 이다.
+#   추출이 나빠지면 그 목록이 늘어나고, ★늘어난 이름을 찍고 멈춘다.★
+#   목록을 늘리려면 기준선 파일을 ★고의로★ 고쳐야 하므로 리뷰에 걸린다.
+#
+#   ★이 검사가 잡는 것과 못 잡는 것 (실측)★ — 여기를 부풀리면 같은 사고를 반복한다:
+#     · 파일이 이름을 ★전부★ 잃음 → ★이 검사가 잡는다★ (exit 3, 파일명 출력)
+#     · 파일이 이름을 ★일부만★ 잃음 → ★이 검사는 못 잡는다.★ 대신 지도가 리포에 커밋돼 있어서
+#       `--check` 가 diff 로 잡는다(exit 1). 그래서 pre-push 훅에 `--check` 를 거는 게 맞다.
+#     · 마커 파손 → 위 마커 검증이 잡는다 (exit 2, 손으로 쓴 절 보존)
+BASELINE="scripts/test-map-nodescribe.txt"
+touch "$TMP.nodesc"
+if [ ! -f "$BASELINE" ]; then
+  echo "ERROR: 기준선 파일이 없습니다: $BASELINE" >&2
+  echo "  현재 '이름을 못 뽑은' 파일 목록으로 만들려면:" >&2
+  echo "    sort -u '$TMP.nodesc' > '$BASELINE'   # (경로가 임시라 직접 다시 생성하세요)" >&2
   exit 3
+fi
+NEW="$(sort -u "$TMP.nodesc" | comm -23 - <(grep -vE '^\s*(#|$)' "$BASELINE" | sort -u) || true)"
+if [ -n "$NEW" ]; then
+  echo "ERROR: ★이름을 못 뽑은 테스트 파일이 늘었습니다★ — 추출이 나빠졌거나, 새 파일이 최상위 describe 없이 쓰였습니다." >&2
+  printf '%s\n' "$NEW" | sed 's/^/    /' >&2
+  echo "  고칠 방법 둘 중 하나:" >&2
+  echo "    · 그 파일에 최상위 describe 를 준다(권장 — 지도에 이름이 실린다)" >&2
+  echo "    · 정말 예외면 $BASELINE 에 추가한다(리뷰에서 이유를 묻게 된다)" >&2
+  exit 3
+fi
+GONE="$(grep -vE '^\s*(#|$)' "$BASELINE" | sort -u | comm -23 - <(sort -u "$TMP.nodesc") || true)"
+if [ -n "$GONE" ]; then
+  echo "참고: 아래 파일은 이제 이름이 뽑힙니다 — $BASELINE 에서 지워도 됩니다(줄어드는 건 좋은 일입니다)." >&2
+  printf '%s\n' "$GONE" | sed 's/^/    /' >&2
 fi
 
 # 생성 구간만 교체 — ★손으로 쓴 절('안 보는 것')은 절대 건드리지 않는다.★

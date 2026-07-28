@@ -1,0 +1,22 @@
+# 최상위 describe 가 없어 지도에 '이름' 을 못 싣는 테스트 파일들.
+# ★이 목록이 늘어나면 gen-test-map.sh 가 멈춘다★ — 추출 품질이 나빠졌다는 뜻이다.
+# 줄을 추가하려면 리뷰에서 이유를 밝혀야 한다. ★줄어드는 건 좋은 일이다.★
+src/server/db/dmCapture.test.ts
+src/server/db/dmQuery.test.ts
+src/server/db/dmRuntimeParsers.test.ts
+src/server/lib/acceptanceLauncherDrift.test.ts
+src/server/lib/approvals.test.ts
+src/server/lib/personaTemplates.test.ts
+src/server/lib/runtimeAuth.readiness.test.ts
+src/server/lib/runtimePath.test.ts
+src/server/lib/skillPathAbsolute.test.ts
+src/server/lib/teamOsRenderAtomic.test.ts
+src/server/personaWriteWiring.test.ts
+src/server/runtimes/claude/seedClaudeAccess.test.ts
+src/server/runtimes/claude/seedGroupIntoClaudeMembers.test.ts
+src/server/runtimes/codex/appServerApproval.test.ts
+src/server/runtimes/codex/appServerClient.smoke.test.ts
+src/server/runtimes/codex/appServerPopup.test.ts
+src/server/workers/slackSocket.test.ts
+src/web/components/runtimeOptions.test.ts
+src/web/icons.test.ts
