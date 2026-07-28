@@ -165,7 +165,6 @@ skills/b3os-task-loop/scripts/task-close.sh --thread M5bEuWyU --waiting-on steve
 
 ```bash
 skills/b3os-team-inbox/scripts/send.sh \
-  --from hermes \
   --to codex \
   --body "OpenClaw 중간 개입 테스트 결과를 확인하고, ★결과는 팀장께 직접 보고★해주세요
           (당신의 답에 --direct-to-gd 를 붙이면 됩니다)."
