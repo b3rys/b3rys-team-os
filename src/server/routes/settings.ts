@@ -1481,8 +1481,14 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     //   로 활성화 버튼을 그린다. 이 마커는 fields 가 있으므로, bundle 대기 중에 내보내면 ★버튼이 숨는다★ —
     //   페어링은 활성화 뒤에 생기는 단계라 사용자는 활성화도 페어링도 못 하고 갇힌다(원래 버그보다 나쁘다).
     if (steps.find((s) => s.key === "bundle")?.state !== "done") return null;
+    // ★join 이 'pending' 일 때만 낸다 — 'blocked' 를 포함하면 더 급한 안내를 덮는다.★
+    //   web/Settings.ts 의 footer 삼항은 pairing 분기가 ★needsSubscription 분기보다 앞★ 이다(:432 vs :436).
+    //   subscription_needed 는 join.state="blocked" 로 오는데(:1774), 이때 마커를 내면
+    //   앰버 경고와 '🔄 해결 후 다시 활성화' 버튼이 ★통째로 가려진다★ — 결제를 못 고치니 영영 못 푼다.
+    //   서버는 이미 ①구독 ②첫 모델호출 ③페어링 순서로 안내하도록 만들어져 있고(:1765~ 주석),
+    //   페어링은 그 문구에 ★병기★ 된다. 마커까지 앞세우면 그 설계를 UI 에서 뒤집는 셈이다.
     const joinStep = steps.find((s) => s.key === "join");
-    if (!joinStep || joinStep.state === "done") return null; // 합류 끝난 화면에 입력창이 남으면 안 된다
+    if (joinStep?.state !== "pending") return null; // done(끝남)·blocked(더 급한 게 있음) 둘 다 제외
     let agent: any;
     try { agent = readAgents().find((a: any) => a.id === memberId); } catch { return null; }
     if (!agent || agent.runtime !== "claude_channel") return null;

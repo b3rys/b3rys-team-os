@@ -1454,6 +1454,26 @@ describe("OT 조회가 claude 페어링 대기를 표면화한다", () => {
     expect(ot.awaiting_input).toBeNull();
   });
 
+  test("★join 이 blocked(구독/한도) 면 안 띄운다 — 더 급한 안내를 가리면 안 된다★", async () => {
+    // web footer 삼항은 pairing 분기가 needsSubscription 분기보다 ★앞★ 이다(Settings.ts:432 vs :436).
+    // subscription_needed 는 join.state="blocked" 로 온다 → 마커를 내면 앰버 경고와
+    // '🔄 해결 후 다시 활성화' 버튼이 ★통째로 가려진다★. 결제를 못 고치니 영영 못 푼다.
+    const { app, dir, db } = setup();
+    const channels = join(dir, "claude-channels");
+    process.env.CLAUDE_CHANNELS_DIR = channels;
+    const accessDir = join(channels, "telegram-bill");
+    mkdirSync(accessDir, { recursive: true });
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({ dmPolicy: "pairing", allowFrom: [], groups: {}, pending: {} }));
+    const steps = [
+      { key: "register", state: "done" }, { key: "provision", state: "done" },
+      { key: "preflight", state: "done" }, { key: "bundle", state: "done" },
+      { key: "join", state: "blocked", detail: "subscription_needed: 구독 확인 필요" },
+    ];
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_sub','bill','join',?)").run(JSON.stringify({ steps }));
+    const ot = await (await app.request("/ot/ot_sub")).json() as any;
+    expect(ot.awaiting_input).toBeNull();
+  });
+
   test("claude 가 아닌 런타임엔 영향 없다", async () => {
     const agents = [{ ...AGENTS[0], id: "bill", runtime: "openclaw" }, AGENTS[1]];
     const { app, dir, db } = setup(agents);

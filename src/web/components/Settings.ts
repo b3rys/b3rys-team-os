@@ -129,6 +129,34 @@ function escape(s: unknown): string {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+/** 페어링 코드 형식 검사 — ★16진수 6자리다. 숫자 6자리가 아니다.★
+ *
+ *  플러그인이 코드를 이렇게 만든다: `randomBytes(3).toString('hex')` → `a4f91c` 같은 값.
+ *  그런데 이 화면의 검사는 오래도록 `/^\d{6}$/`(숫자만) 이었다. 서버는 `/^[a-f0-9]{6}$/` 로 받는데
+ *  ★클라이언트가 먼저 막아 POST 조차 나가지 않았다.★ 글자가 하나도 안 섞일 확률이 (10/16)^6 ≈ 6% 이니
+ *  ★사용자 약 94% 는 맞는 코드를 넣고도 "코드가 틀렸다" 를 본다.★
+ *  게다가 재요청도 막힌다 — 플러그인은 미만료 코드가 있으면 같은 코드를 다시 주고, DM 2회부터는 침묵한다.
+ *
+ *  ★이 불일치는 원래 있었지만 도달할 수 없었다★ — 입력 박스 자체가 안 떴기 때문이다(이 PR 이 고친 것).
+ *  즉 박스를 띄우는 순간 이 버그가 ★주 경로로 승격★ 된다. 그래서 같은 PR 에서 고친다.
+ *  (서버는 받은 값을 소문자로 정규화하므로 대문자 입력도 통과시킨다.) */
+export function isPairingCodeWellFormed(code: string): boolean {
+  return /^[a-f0-9]{6}$/i.test(code.trim());
+}
+
+/** 입력 대기 마커를 만났을 때 폴링을 멈출지 / 어떤 패널이 이미 떠 있는지 볼지 결정한다.
+ *  ★페어링 마커만 폴링을 유지한다★ — 자세한 이유는 pollOt 의 호출부 주석. */
+export function awaitingPollPlan(awaiting: Pick<AwaitingInput, "kind"> | null | undefined): {
+  stopPolling: boolean;
+  panelSelector: string;
+} {
+  const pairing = String(awaiting?.kind ?? "").toLowerCase() === "claude_pairing_code";
+  return {
+    stopPolling: !pairing,
+    panelSelector: pairing ? "#ot-claude-pair-code" : "#ot-provision-submit",
+  };
+}
+
 export function shouldShowClaudePairingPanel(runtime: string, awaiting: Pick<AwaitingInput, "kind"> | null | undefined): boolean {
   if (runtime !== "claude_channel") return false;
   const kind = String(awaiting?.kind ?? "").toLowerCase();
@@ -141,7 +169,8 @@ function claudePairingPanelHtml(aw: AwaitingInput): string {
       <div class="text-[12px] font-semibold text-slate-200 mb-1">${pick("Claude 접근 승인", "Claude access approval")}</div>
       <div class="text-[11px] text-slate-400 leading-relaxed mb-2">${escape(aw.hint || pick("봇 DM에서 받은 6자리 코드를 입력해 승인하세요. 이 박스는 서버가 승인 필요 상태를 내려줄 때만 보입니다.", "Enter the 6-digit code from the bot DM to approve access. This box appears only when the server reports that pairing is required."))}</div>
       <div class="flex flex-col sm:flex-row gap-2">
-        <input id="ot-claude-pair-code" class="${inputCls} sm:flex-1" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="123456" />
+        <!-- ★16진수 6자리다★ — inputmode/pattern 을 숫자로 두면 모바일에서 a~f 를 못 친다. placeholder 도 숫자 예시면 안 된다. -->
+        <input id="ot-claude-pair-code" class="${inputCls} sm:flex-1" inputmode="text" autocapitalize="off" autocorrect="off" spellcheck="false" pattern="[A-Fa-f0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="a4f91c" />
         <button id="ot-claude-pair-approve" class="${btnPrimary}"${_pairing ? " disabled" : ""}>${_pairing ? `⏳ ${pick("승인 중…", "Approving…")}` : `🔓 ${pick("승인", "Approve")}`}</button>
       </div>
       <div class="text-[11px] text-slate-600 mt-2">${pick("두 번째 이후 Claude 팀원은 보통 기존 Telegram plugin access.json 승인을 자동 승계하므로 이 박스가 뜨지 않는 것이 정상입니다.", "Later Claude teammates usually inherit the existing Telegram plugin access.json approval automatically, so it is normal for this box not to appear.")}</div>
@@ -1129,8 +1158,8 @@ function wireOtZone(): void {
     if (!_ot || _pairing) return;
     const input = _root!.querySelector<HTMLInputElement>("#ot-claude-pair-code");
     const code = (input?.value ?? "").trim();
-    if (!/^\d{6}$/.test(code)) {
-      _pairMsg = `<div class="text-txt-red">${pick("6자리 숫자 코드를 입력하세요.", "Enter the 6-digit numeric code.")}</div>`;
+    if (!isPairingCodeWellFormed(code)) {
+      _pairMsg = `<div class="text-txt-red">${pick("6자리 코드를 입력하세요 (숫자와 a~f).", "Enter the 6-character code (0-9 and a-f).")}</div>`;
       refreshOtZone();
       return;
     }
@@ -1267,9 +1296,22 @@ async function pollOt(): Promise<void> {
   }
   if (d.awaiting_input && d.awaiting_input.fields?.length) {
     // 입력 대기 — 서버는 제출 전엔 진행 안 함. 폴링 정지(타이핑 중 입력칸 클로버 방지).
-    stopOtPolling();
-    // 패널이 아직 안 떠 있을 때만 렌더(이미 입력 중이면 건드리지 않음).
-    if (!_root?.querySelector("#ot-provision-submit")) refreshOtZone();
+    //
+    // ★페어링 마커는 폴링을 멈추면 안 된다 (2026-07-28, Demis 리뷰 + 하네스 2건이 독립 지적).★
+    //   위 전제("제출 전엔 서버가 진행 안 함")는 ★봇 토큰 마커에만 참★ 이다. 페어링 마커는
+    //   access.json 에서 ★파생된 상태★ 라 이 패널을 거치지 않고도 바뀐다:
+    //     · 설치 동반자(claude code)가 access.json 을 직접 편집해 승인
+    //     · promote-pending.sh 등 다른 경로 승인
+    //   그때 서버는 마커를 내리는데 ★폴링이 멈춰 있으면 화면이 코드 입력칸에 굳는다★
+    //   (새로고침 전까지. 그리고 새로고침하라는 신호가 어디에도 없다 — 이 PR 이 고치려던 침묵과 같은 종류).
+    //   ★첫 claude 멤버는 access.json 이 페어링 대기로 시드되는 게 설계상 정상★ 이라
+    //   (activation.ts 'tolerateWhenPairing') 이 창은 CC 경로에서도 실제로 열린다.
+    const plan = awaitingPollPlan(d.awaiting_input);
+    if (plan.stopPolling) stopOtPolling();
+    // 패널이 아직 안 떠 있을 때만 렌더(이미 떠 있으면 입력값·포커스를 건드리지 않는다).
+    //   ★패널마다 요소 id 가 다르다★ — 페어링 패널을 provision id 로 찾으면 항상 '없음' 이 되어
+    //   매 폴링마다 재렌더 → 입력칸이 날아간다.
+    if (!_root?.querySelector(plan.panelSelector)) refreshOtZone();
     return;
   }
   void maybeAutoRecheckPreflight(d); // preflight blocked면 throttle로 자동 재점검(로그인되면 done→다음 렌더에서 활성화 버튼 노출)
