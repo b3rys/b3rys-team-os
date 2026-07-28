@@ -19,7 +19,12 @@ send.sh --to <물어본 사람> --thread <온 thread> --in-reply-to <그 메시�
 ```
 - **inbox 확인** ("새 메시지 있나?") → `inbox.sh`
 - **다른 agent 와 토론 시작** → `send.sh --to <other_agent> --body "..."`
-- **팀장에게 직접 보이는 보고를 위임** → `send.sh --direct-to-gd --source-thread <tg-...>`
+- **팀장께 최종 보고** → `send.sh --to <요청자> --thread <온 thread> --in-reply-to <그 메시지 id> --direct-to-gd --body "..."`
+  ★`--direct-to-gd` 는 '★내가★ 하는 최종 보고' 전용이다★ — 서버가 이 봉투의 본문을 팀장 1:1 DM 에 게시한다.
+  · **`--to` 와 `--in-reply-to` 가 둘 다 필요하다.** 보고는 '받은 요청에 대한 답' 이라서다.
+    `--in-reply-to` 없이 붙이면 서버가 400(`protocol_direct_to_gd_on_delegation`)으로 거부한다.
+  · **팀원에게 "팀장께 보고해줘" 를 시키는 위임이면 이 플래그를 쓰지 않는다** — `--to <팀원>` 으로 보내고
+    본문에 그렇게 쓴다. 플래그는 그 팀원이 ★자기 답에★ 붙인다.
 - **메시지 읽음 처리** → `ack.sh`
 - **팀버스 맥락 조회** ("팀버스 그거 어떻게 됐어?", "GD가 코덱스한테 뭐 시켰어?") → `bus-recall.sh` (read-only, team.db 조회. 뒤지기 대신 요점 확인)
 
@@ -58,21 +63,28 @@ skills/b3os-team-inbox/scripts/send.sh \
 ```
 **Slack 발신 thread 에 응답하면 서버가 자동으로 Slack 채널에 댓글 post.**
 
-### 팀장에게 직접 보고하게 위임하기
-팀원에게 맡기되 결과를 팀장이 바로 봐야 하면 일반 broadcast를 쓰지 않는다. directed 메시지에
-`direct_to_gd` meta를 붙여 수신 런타임이 GD-visible surface로 답하게 한다.
+### 팀장께 최종 보고하기 — `--direct-to-gd`
+
+`--direct-to-gd` 는 **이 봉투의 본문이 팀장 1:1 DM 에 게시된다**는 뜻이다(서버가 `owner_chat_id` 로 보낸다).
+★내가 하는 최종 보고에 붙이는 플래그다.★
 
 ```bash
 skills/b3os-team-inbox/scripts/send.sh \
   --to devon \
-  --body "OpenClaw 중간 개입 테스트 결과를 GD님께 직접 보고해주세요." \
+  --thread openclaw-midrun-0728 \
+  --in-reply-to <devon 이 요청한 메시지 id> \
   --direct-to-gd \
-  --source-thread tg--2000000000001
+  --body "OpenClaw 중간 개입 테스트 결과: ..."
 ```
 
-- `--source-thread`는 `tg-<CAPTURE_GROUP_ID>` 형식이다. 숫자 group id만 넘기면 스크립트가 `tg-`를 붙인다.
-- `CAPTURE_GROUP_ID` 환경변수가 있으면 `--source-thread`를 생략할 수 있다.
-- `--direct-to-gd` 는 **이 봉투의 본문이 팀장 DM 으로 릴레이된다**는 뜻이다. 팀원에게 "팀장께 보고해줘" 를 시키려면 플래그 없이 본문에 그렇게 쓴다.
+- ★`--in-reply-to` 가 필수다★ — 보고는 '받은 요청에 대한 답' 이기 때문이다. 없으면 서버가
+  400 `protocol_direct_to_gd_on_delegation` 으로 거부한다. (그래야 "어느 요청에 대한 보고인지" 가 남는다)
+- ★`--to` 는 그 요청자다★ — 버스 라우팅 주소이지 '팀장께 보고할 사람' 이 아니다. 보고는 요청자에게 가고,
+  **동시에** 서버가 팀장 DM 에도 게시한다.
+- ★위임에는 붙이지 않는다★ — 팀원에게 "팀장께 보고해줘" 를 시키는 것이면 **플래그 없이** `--to <팀원>` 으로
+  보내고 본문에 그렇게 쓴다. 플래그는 그 팀원이 **자기 답에** 붙인다. (위임에 붙이면 위 400 에 걸린다)
+- ★fan-out(수집 요청)에는 절대 붙이지 않는다★ — N 명에게 붙이면 개별 보고가 N 개 나간다.
+- `--source-thread` 는 더 이상 필수가 아니다(호환용으로 받기만 하고 서버는 무시한다).
 
 ### 단톡방에 말하기 — `--to broadcast`
 
