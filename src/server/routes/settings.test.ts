@@ -1369,3 +1369,116 @@ describe("slack reinstall-info", () => {
     }
   }));
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+// ★영입 위저드가 페어링 코드 입력창을 못 띄우던 회귀 (2026-07-28 외부 사용자 신고)★
+//
+// 증상: 대시보드로 claude 팀원을 영입하면 마지막 '합류 확인' 에서 영원히 멈춘다.
+//   위저드는 "봇에게 DM 을 한 번 보내주세요" 라고 안내하고, 사용자가 DM 을 보내면
+//   봇이 6자리 코드를 답한다. ★그런데 그 코드를 넣을 입력창이 뜨지 않는다.★
+//
+// 원인: 입력창은 `awaiting_input.kind === "claude_pairing_code"` 일 때만 렌더된다
+//   (web/components/Settings.ts shouldShowClaudePairingPanel). 그 값을 만드는 곳은
+//   `GET /members/:id/pairing-status` 뿐인데 ★웹은 그 엔드포인트를 한 번도 부르지 않는다★.
+//   위저드가 폴링하는 `GET /ot/:ot_id` 는 steps_json 에 저장된 awaiting_input 만 돌려주고,
+//   그 값은 봇 토큰 단계에서만 채워지고 그 뒤로는 계속 null 이다.
+//   → 승인 라우트도·입력창도·검증 로직도 다 있는데 ★"지금 필요하다" 는 신호만 도달하지 않았다.★
+//
+// 클로드 코드로 영입하면 성공하던 이유: 동반자가 access.json 을 직접 편집해 승인해서
+//   이 입력창을 아예 거치지 않기 때문. ★대시보드만 쓰는 사용자는 통과할 방법이 없었다.★
+describe("OT 조회가 claude 페어링 대기를 표면화한다", () => {
+  const claudeOt = (db: any, dir: string, opts: { allowFrom?: string[]; joinState?: string; stored?: unknown } = {}) => {
+    const channels = join(dir, "claude-channels");
+    process.env.CLAUDE_CHANNELS_DIR = channels;
+    const accessDir = join(channels, "telegram-bill");
+    mkdirSync(accessDir, { recursive: true });
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({
+      dmPolicy: "pairing", allowFrom: opts.allowFrom ?? [], groups: {},
+      pending: { abc123: { senderId: "1000000001", chatId: "1000000001", expiresAt: Date.now() + 60_000 } },
+    }));
+    const steps = [
+      { key: "register", state: "done" }, { key: "provision", state: "done" },
+      { key: "preflight", state: "done" }, { key: "bundle", state: "done" },
+      { key: "join", state: opts.joinState ?? "pending" },
+    ];
+    const payload: any = { steps };
+    if (opts.stored !== undefined) payload.awaiting_input = opts.stored;
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_ui','bill','join',?)").run(JSON.stringify(payload));
+  };
+
+  test("★핵심★ 합류 대기 + allowFrom 비어 있으면 코드 입력 마커를 내려준다", async () => {
+    const { app, dir, db } = setup();
+    claudeOt(db, dir);
+    const ot = await (await app.request("/ot/ot_ui")).json() as any;
+    // 이 한 줄이 실패하면 사용자는 코드를 받고도 넣을 곳이 없다.
+    expect(ot.awaiting_input?.kind).toBe("claude_pairing_code");
+  });
+
+  test("이미 승인된(allowFrom 있음) 팀원에겐 안 띄운다 — 승인 끝난 화면에 입력창이 남으면 안 된다", async () => {
+    const { app, dir, db } = setup();
+    claudeOt(db, dir, { allowFrom: ["1000000001"] });
+    const ot = await (await app.request("/ot/ot_ui")).json() as any;
+    expect(ot.awaiting_input).toBeNull();
+  });
+
+  test("합류가 이미 done 이면 안 띄운다", async () => {
+    const { app, dir, db } = setup();
+    claudeOt(db, dir, { joinState: "done" });
+    const ot = await (await app.request("/ot/ot_ui")).json() as any;
+    expect(ot.awaiting_input).toBeNull();
+  });
+
+  test("★봇 토큰 대기를 덮어쓰지 않는다★ — 같은 칸을 쓰므로 앞 단계가 우선이다", async () => {
+    const { app, dir, db } = setup();
+    claudeOt(db, dir, { stored: { kind: "bot_token", fields: [{ key: "bot_token" }] } });
+    const ot = await (await app.request("/ot/ot_ui")).json() as any;
+    expect(ot.awaiting_input.kind).toBe("bot_token");
+  });
+
+  test("★활성화 전에는 안 띄운다 — 띄우면 활성화 버튼이 사라져 진행이 막힌다★", async () => {
+    // web/Settings.ts: needsActivate = provisionDone && bundlePending && … && !(awaiting?.fields?.length)
+    //   이 마커는 fields 가 있으므로, bundle 대기 중에 내보내면 ★활성화 버튼이 숨는다★.
+    //   페어링은 활성화 뒤에 생기는 단계라, 그러면 사용자는 활성화도 페어링도 못 하고 갇힌다.
+    const { app, dir, db } = setup();
+    const channels = join(dir, "claude-channels");
+    process.env.CLAUDE_CHANNELS_DIR = channels;
+    const accessDir = join(channels, "telegram-bill");
+    mkdirSync(accessDir, { recursive: true });
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({ dmPolicy: "pairing", allowFrom: [], groups: {}, pending: {} }));
+    const steps = [
+      { key: "register", state: "done" }, { key: "provision", state: "done" },
+      { key: "preflight", state: "done" }, { key: "bundle", state: "pending" }, { key: "join", state: "pending" },
+    ];
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_preact','bill','bundle',?)").run(JSON.stringify({ steps }));
+    const ot = await (await app.request("/ot/ot_preact")).json() as any;
+    expect(ot.awaiting_input).toBeNull();
+  });
+
+  test("★join 이 blocked(구독/한도) 면 안 띄운다 — 더 급한 안내를 가리면 안 된다★", async () => {
+    // web footer 삼항은 pairing 분기가 needsSubscription 분기보다 ★앞★ 이다(Settings.ts:432 vs :436).
+    // subscription_needed 는 join.state="blocked" 로 온다 → 마커를 내면 앰버 경고와
+    // '🔄 해결 후 다시 활성화' 버튼이 ★통째로 가려진다★. 결제를 못 고치니 영영 못 푼다.
+    const { app, dir, db } = setup();
+    const channels = join(dir, "claude-channels");
+    process.env.CLAUDE_CHANNELS_DIR = channels;
+    const accessDir = join(channels, "telegram-bill");
+    mkdirSync(accessDir, { recursive: true });
+    writeFileSync(join(accessDir, "access.json"), JSON.stringify({ dmPolicy: "pairing", allowFrom: [], groups: {}, pending: {} }));
+    const steps = [
+      { key: "register", state: "done" }, { key: "provision", state: "done" },
+      { key: "preflight", state: "done" }, { key: "bundle", state: "done" },
+      { key: "join", state: "blocked", detail: "subscription_needed: 구독 확인 필요" },
+    ];
+    db.query("INSERT INTO ot(id,member_id,stage,steps_json) VALUES('ot_sub','bill','join',?)").run(JSON.stringify({ steps }));
+    const ot = await (await app.request("/ot/ot_sub")).json() as any;
+    expect(ot.awaiting_input).toBeNull();
+  });
+
+  test("claude 가 아닌 런타임엔 영향 없다", async () => {
+    const agents = [{ ...AGENTS[0], id: "bill", runtime: "openclaw" }, AGENTS[1]];
+    const { app, dir, db } = setup(agents);
+    claudeOt(db, dir);
+    const ot = await (await app.request("/ot/ot_ui")).json() as any;
+    expect(ot.awaiting_input).toBeNull();
+  });
+});

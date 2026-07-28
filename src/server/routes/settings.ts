@@ -1462,6 +1462,47 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ot_id: null });
   });
 
+  // ★영입 위저드에 페어링 코드 입력 마커를 표면화한다 (2026-07-28 외부 사용자 신고 수정).★
+  //   증상: 대시보드로 claude 팀원을 영입하면 '합류 확인' 에서 영원히 멈춘다. 위저드는 "봇에게 DM 을
+  //   한 번 보내주세요" 라고 안내하고, 사용자가 DM 을 보내면 봇이 6자리 코드를 답한다.
+  //   ★그런데 그 코드를 넣을 입력창이 뜨지 않았다.★
+  //   입력창(web/Settings.ts shouldShowClaudePairingPanel)은 `awaiting_input.kind==="claude_pairing_code"`
+  //   일 때만 렌더되는데, 그 값을 만드는 곳이 `GET /members/:id/pairing-status` 뿐이고
+  //   ★웹은 그 엔드포인트를 한 번도 부르지 않았다.★ 위저드가 폴링하는 이 라우트는 steps_json 에
+  //   저장된 값만 돌려주고, 그 값은 봇 토큰 단계에서만 채워진 뒤 계속 null 이었다.
+  //   → 승인 라우트도·입력창도·검증 로직도 다 있는데 ★"지금 필요하다"는 신호만 도달하지 않았다.★
+  //   (클로드 코드로 영입하면 동반자가 access.json 을 직접 편집해 승인해서 이 화면을 안 거친다.
+  //    그래서 그 경로만 성공했고, ★대시보드만 쓰는 사용자는 통과할 방법이 없었다.★)
+  //
+  //   저장된 마커가 우선이다 — 봇 토큰 대기와 같은 칸을 쓰므로 앞 단계를 덮어쓰면 안 된다.
+  function claudePairingAwaitingInput(memberId: string, steps: Array<{ key: string; state: string }>) {
+    // ★활성화(bundle) 전에는 절대 내지 않는다 — 안 그러면 활성화 버튼이 사라져 진행이 막힌다.★
+    //   web/Settings.ts 는 `needsActivate = provisionDone && bundlePending && … && !(awaiting?.fields?.length)`
+    //   로 활성화 버튼을 그린다. 이 마커는 fields 가 있으므로, bundle 대기 중에 내보내면 ★버튼이 숨는다★ —
+    //   페어링은 활성화 뒤에 생기는 단계라 사용자는 활성화도 페어링도 못 하고 갇힌다(원래 버그보다 나쁘다).
+    if (steps.find((s) => s.key === "bundle")?.state !== "done") return null;
+    // ★join 이 'pending' 일 때만 낸다 — 'blocked' 를 포함하면 더 급한 안내를 덮는다.★
+    //   web/Settings.ts 의 footer 삼항은 pairing 분기가 ★needsSubscription 분기보다 앞★ 이다(:432 vs :436).
+    //   subscription_needed 는 join.state="blocked" 로 오는데(:1774), 이때 마커를 내면
+    //   앰버 경고와 '🔄 해결 후 다시 활성화' 버튼이 ★통째로 가려진다★ — 결제를 못 고치니 영영 못 푼다.
+    //   서버는 이미 ①구독 ②첫 모델호출 ③페어링 순서로 안내하도록 만들어져 있고(:1765~ 주석),
+    //   페어링은 그 문구에 ★병기★ 된다. 마커까지 앞세우면 그 설계를 UI 에서 뒤집는 셈이다.
+    const joinStep = steps.find((s) => s.key === "join");
+    if (joinStep?.state !== "pending") return null; // done(끝남)·blocked(더 급한 게 있음) 둘 다 제외
+    let agent: any;
+    try { agent = readAgents().find((a: any) => a.id === memberId); } catch { return null; }
+    if (!agent || agent.runtime !== "claude_channel") return null;
+    let state: ReturnType<typeof readClaudePairing>;
+    try { state = readClaudePairing(memberId); } catch { return null; } // access.json 깨짐 = 표시 안 함(승인 라우트가 정본)
+    if (!state.pairing_required) return null; // allowFrom 이 차면 승인 완료 → 마커 내림
+    const mention = agent.telegram_bot_username ? `@${agent.telegram_bot_username}` : "봇";
+    return {
+      kind: "claude_pairing_code",
+      fields: ["code"],
+      hint: `Telegram 에서 ${mention} 에게 DM 을 한 번 보내면 6자리 코드가 옵니다. 그 코드를 여기에 넣어 승인하세요.`,
+    };
+  }
+
   // ── OT 상태 조회 (Steve 스테퍼가 ~1.5s 폴링) ─────────────────────
   app.get("/ot/:ot_id", (c) => {
     const ot_id = c.req.param("ot_id");
@@ -1471,7 +1512,8 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     try { parsed = JSON.parse(row.steps_json); } catch { /* corrupt → 빈 */ }
     const steps = Array.isArray(parsed.steps) ? parsed.steps : [];
     const stage = deriveStage(steps);
-    return c.json({ ot_id: row.id, member_id: row.member_id, stage, steps, awaiting_input: parsed.awaiting_input ?? null, done: stage === "joined" || stage === "failed", joined: stage === "joined", error: row.error ?? undefined });
+    const awaitingInput = parsed.awaiting_input ?? claudePairingAwaitingInput(row.member_id, steps);
+    return c.json({ ot_id: row.id, member_id: row.member_id, stage, steps, awaiting_input: awaitingInput, done: stage === "joined" || stage === "failed", joined: stage === "joined", error: row.error ?? undefined });
   });
 
   // ── OT 단계 진행 (프로비저닝/합류 완료 시 갱신) ──────────────────
