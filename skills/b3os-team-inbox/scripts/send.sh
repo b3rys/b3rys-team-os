@@ -84,7 +84,7 @@ if [ "$FROM" = "$TO" ]; then
   echo "  '내가 보낸 메시지'가 아니라 '상대가 보낸 메시지 id'로 답하세요 (reply.sh <상대_msg_id>)." >&2
   echo "  종합·보고는 ★요청자에게★ 보냅니다 → --to <요청자>" >&2
   echo "  팀장께 하는 최종 보고도 마찬가지입니다 → --to <요청자> --in-reply-to <그 요청 msg id> --direct-to-gd" >&2
-  echo "    (--direct-to-gd 는 '수신자' 를 바꾸는 게 아니라, 서버가 그 본문을 팀장 DM 에도 게시하게 합니다)" >&2
+  echo "    (--direct-to-gd 의 --to 는 '어느 요청에 대한 보고인지' 를 남기는 주소입니다 — 본문은 팀장 DM 에 게시됩니다)" >&2
   exit 3
 fi
 
