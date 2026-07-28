@@ -161,6 +161,26 @@ CREATE TABLE IF NOT EXISTS codex_inflight (
 );
 CREATE INDEX IF NOT EXISTS idx_codex_inflight_started ON codex_inflight(started_at);
 
+-- codex app-server 승인 팝업 ↔ server-request 상관키 + CAS 상태(Phase1 ③).
+-- 팝업(permission_request.id)과 실제 app-server 승인 요청을 1:1로 묶어 TTL 늦은승인·서버재시작 orphan·
+-- 중복 결정·요청 불일치를 안전 처리. process_instance로 재시작을 감지해 옛 pending을 새 turn에 재결합 안 함.
+-- ★operation_hash는 승인 전 캡처값이라 실행 직전 변경 검출이 아니고, 권한 grant scope에도 반영되지 않는다(알려진 갭 → 이슈 #106).★
+CREATE TABLE IF NOT EXISTS codex_approval_correlation (
+  request_id TEXT PRIMARY KEY,              -- = permission_request.id (팝업)
+  agent_id TEXT NOT NULL REFERENCES agent(id) ON DELETE CASCADE,
+  server_request_id TEXT,                   -- app-server JSON-RPC request id
+  thread_id TEXT,
+  turn_id TEXT,
+  item_id TEXT,
+  operation_hash TEXT NOT NULL,             -- 작업 지문(승인 전 캡처) — delivery 시 결정↔요청 1:1 대조용. grant scope에는 미반영(알려진 갭)
+  process_instance TEXT NOT NULL,           -- 서버 프로세스 인스턴스 id(재시작 감지)
+  state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','decided','delivered','expired','orphaned')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  decided_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_codex_approval_corr_state ON codex_approval_correlation(state, created_at);
+CREATE INDEX IF NOT EXISTS idx_codex_approval_corr_proc ON codex_approval_correlation(process_instance);
+
 CREATE TABLE IF NOT EXISTS scheduled_job (
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL CHECK(kind IN ('oneshot','recurring')),
