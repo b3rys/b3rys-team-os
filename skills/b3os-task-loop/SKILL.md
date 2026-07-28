@@ -71,7 +71,7 @@ escalation_after:
    ★이 스크립트가 없어서 실제로 등록이 안 되고 있었다★(2026-07-27 실측 — 한 팀은 칸반 0건).
    규칙이 아니라 도구가 없던 것이라, 이제 한 줄로 만든다.
 1. 요청을 보낸다.
-2. 팀장 visible 보고가 필요한 위임이면 `send.sh --direct-to-gd --source-thread <tg-...>`로 보낸다. 일반 리뷰·인계는 directed reply로만 보낸다.
+2. ★위임에는 `--direct-to-gd` 를 붙이지 않는다★ — `--to <팀원>` 으로 보내고, 결과를 팀장이 바로 봐야 하면 **본문에** "결과는 팀장께 직접 보고해주세요" 라고 쓴다. 플래그는 **그 팀원이 자기 답에** 붙인다. (위임에 붙이면 서버가 400 `protocol_direct_to_gd_on_delegation` 으로 거부한다 — `routes/inbox.ts:100~110`)
 3. `task-wait.sh`로 wait record를 남긴다.
 4. 답을 기다리는 동안 `next_safe_action`을 바로 수행한다.
 5. `recheck_at`이 지났으면 `task-check.sh`로 thread/status를 확인한다.
@@ -90,7 +90,8 @@ escalation_after:
 - “답 기다리겠습니다”만 말하고 아무 기록/다음 액션 없이 멈춤
 - thread id 없이 “보냈다”고만 함
 - fallback 없이 무기한 대기
-- “GD님께 직접 보고”를 자연어로만 쓰고 `direct_to_gd` meta를 붙이지 않아 발신자에게만 답이 돌아옴
+- 위임 메시지에 `--direct-to-gd` 를 붙임 → 서버가 400 으로 거부(그 위임 자체가 안 나감). 플래그는 **받은 쪽이 자기 답에** 붙이는 것이다
+- 반대로, 팀장께 하는 **내 최종 보고**에 플래그를 안 붙여서 팀장 DM 에 안 올라감 (요청자 DB 행만 남고 아무도 못 봄)
 - 동의/감사/확인 ping-pong을 반복해서 메시지를 늘림
 
 ## Scheduled Workloop Wake 계약
@@ -159,15 +160,14 @@ skills/b3os-task-loop/scripts/task-check.sh --thread M5bEuWyU --mark-check
 skills/b3os-task-loop/scripts/task-close.sh --thread M5bEuWyU --waiting-on steve --status completed --note "Steve approve 반영"
 ```
 
-팀장에게 직접 보여야 하는 보고를 위임할 때:
+팀장에게 직접 보여야 하는 보고를 위임할 때 — ★`--direct-to-gd` 를 붙이지 않는다★
+(붙이면 서버가 400 `protocol_direct_to_gd_on_delegation`. 플래그는 codex 가 **자기 답에** 붙인다):
 
 ```bash
 skills/b3os-team-inbox/scripts/send.sh \
-  --from hermes \
   --to codex \
-  --body "OpenClaw 중간 개입 테스트 결과를 GD님께 직접 보고해주세요." \
-  --direct-to-gd \
-  --source-thread tg--2000000000001
+  --body "OpenClaw 중간 개입 테스트 결과를 확인하고, ★결과는 팀장께 직접 보고★해주세요
+          (당신의 답에 --direct-to-gd 를 붙이면 됩니다)."
 
 skills/b3os-task-loop/scripts/task-wait.sh \
   --owner hermes \

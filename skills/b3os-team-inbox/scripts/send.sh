@@ -73,10 +73,18 @@ FROM="${FROM:-$($HERE/_me.sh)}"
 
 # self-route 가드 (GD 2026-07-09, steve 발견): directed 메시지의 발신자==수신자면 자기 자신에게 보내는
 # 것 → 상대는 못 받는다. 보통 '내가 보낸 메시지'에 reply.sh 로 답할 때 발생(reply 대상=원발신자=나).
-# direct_to_gd 는 실제 전달이 GD DM 이라 예외(--to 는 위임자). 그 외 from==to 는 거의 항상 실수라 차단.
-if [ -z "$DIRECT_TO_GD" ] && [ "$FROM" = "$TO" ]; then
+#
+# ★direct_to_gd 예외를 걷어냈다 (2026-07-28, codex 리뷰로 확인).★ 예전 주석은 "direct_to_gd 는 실제
+# 전달이 GD DM 이라 예외" 라고 했지만, ★서버는 direct_to_gd 여도 from==to 를 먼저 막는다★
+# (routes/inbox.ts:91 `protocol_self_report` — reply_mode 를 보기 ★전에★ 무조건 400).
+# 즉 이 예외는 ★스크립트만 통과시키고 서버가 거부하던 죽은 코드★ 였다. 여기서 바로 막고 대안을 알려준다.
+# (`--direct-to-gd` 자체는 정상이다 — 내 최종 보고에 붙이는 플래그이고, `--to` 는 그 요청자다.)
+if [ "$FROM" = "$TO" ]; then
   echo "ERROR: self-route 차단 — 발신자와 수신자가 모두 '$FROM' 입니다(자기 자신에게 directed)." >&2
   echo "  '내가 보낸 메시지'가 아니라 '상대가 보낸 메시지 id'로 답하세요 (reply.sh <상대_msg_id>)." >&2
+  echo "  종합·보고는 ★요청자에게★ 보냅니다 → --to <요청자>" >&2
+  echo "  팀장께 하는 최종 보고도 마찬가지입니다 → --to <요청자> --in-reply-to <그 요청 msg id> --direct-to-gd" >&2
+  echo "    (--direct-to-gd 의 --to 는 '어느 요청에 대한 보고인지' 를 남기는 주소입니다 — 본문은 팀장 DM 에 게시됩니다)" >&2
   exit 3
 fi
 
