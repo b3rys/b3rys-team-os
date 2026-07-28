@@ -38,6 +38,10 @@ archiving/
 !/scripts/task-review-summary.ts
 !/scripts/task-continuation-guard.ts
 !/scripts/runtime-drift-check.sh
+# 테스트 지도 생성기 — docs/TEST_CASES.md 가 본문에서 이 스크립트를 실행하라고 안내한다.
+#   ★문서가 가리키는 도구가 리포에 없으면 그 안내는 거짓말이 된다★ (이 문서가 고치려던 바로 그 문제).
+!/scripts/gen-test-map.sh
+!/scripts/test-map-nodescribe.txt
 # ★scripts 의 테스트는 ★클래스로★ 연다★ — /scripts/* 가 전부 무시하므로 .test.ts 를
 #   개별 등록하면, 다음 스크립트에 테스트를 붙일 때 git add -A 가 ★조용히 건너뛴다★.
 #   실제로 2026-07-26 에 그 일이 났다: 소스만 커밋되고 그 소스를 지키는 테스트는 리포에
@@ -57,6 +61,8 @@ archiving/
 !/docs/TEAM_COLLECT_ORCHESTRATION.md
 !/docs/DEPLOY_MERGE_HOTFIX_WORKFLOW.md
 !/docs/TEAM_COMMUNICATION.md
+# 대시보드 Doc 탭(TeamOS.ts CANONICAL_DOCS)이 링크한다 — 없으면 그 링크가 404 다(2026-07-28 실측).
+!/docs/TEST_CASES.md
 
 # ── 머신-로컬 상태·백업·스케줄러 설정 · 내부 프로젝트 파일 (공개 제품 아님) ──────
 # launchd plist(com.<user>.*)·백업·아카이브·프로젝트 관리문서는 GD 머신/내부 전용.

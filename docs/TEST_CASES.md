@@ -1,0 +1,617 @@
+# 무엇을 검사하고, 무엇을 안 보는가
+
+> 이 문서의 목적은 **"뭘 믿어도 되나"** 에 답하는 것입니다.
+> 그래서 **안 보는 것을 먼저** 적습니다. 검사 목록만 있으면 안심만 주고, 사고는 늘 *아무도 안 보던 자리*에서 납니다.
+
+---
+
+## ⚠️ 안 보는 것 — 여기가 먼저입니다
+
+**아래 항목은 자동 검사가 없습니다.** 초록불이어도 이 항목들은 **아무것도 보증하지 않습니다.**
+여기 있는 것이 줄어드는 것이 이 문서의 목표입니다.
+
+| 안 보는 것 | 왜 문제인가 | 지금 어떻게 대신하나 |
+|---|---|---|
+| **브라우저에서 실제로 눌러보기** | 화면 코드가 맞아도 *사용자가 완주하는지*는 다른 문제다. 2026-07-28 영입 위저드 건은 서버·테스트 다 초록인데 **입력창이 안 떠서 아무도 통과할 수 없었다** | 위험한 화면 변경 때만 사람이 수동으로. 매번은 안 한다 |
+| **Linux** | 실패가 남아 있고 **일부는 원인 미확정**이다. CI 는 타입체크만 돌아서 이 실패를 아무도 매일 보지 않는다 | CI 에 넣기 전 원인 분류 중 |
+| **봇과의 실제 왕복** (DM → 코드 수신 → 승인) | 텔레그램·플러그인은 전부 스텁으로 대체한다. **실제 봇이 죽어 있어도 테스트는 초록이다** | 영입할 때 사람이 한 번 확인 |
+| **여러 명이 동시에 쓸 때** | 대부분의 테스트가 단일 요청이다. 경합·중복 배달은 대체로 사고가 난 뒤에 알게 된다 | 사고가 나면 그때 회귀 테스트를 추가 |
+| **오래 돌았을 때** (며칠 연속) | 누수·상태 누적·스케줄러 드리프트는 짧은 테스트로 안 잡힌다 | 모니터가 사후에 잡는다 |
+| **실제 배포 결과물** | 빌드 성공은 *사용자가 받는 것*과 다르다. 2026-07-28 앱 다운로드 404 는 코드가 아니라 **릴리스에 파일이 안 붙어서** 났고 **하루 동안 아무 경고가 없었다** | 배포 후 사람이 실제 URL 을 받아본다 |
+| **링크가 실제로 열리는가** | 위와 다른 축이다. 산출물은 있는데 **링크가 자산 없는 태그를 가리켰다.** URL 은 멀쩡해 보였고 **하루 동안 아무도 몰랐다** | 없음 — 릴리스 절차에 넣는 것을 검토 중 |
+| **새 사용자의 빈 환경** | Linux 와 다른 축이다. 같은 테스트가 **개발 머신 6 fail → fresh clone 10 fail** 이었다. **환경 결합이 층층이 있고 실제로 돌려보기 전엔 안 보인다** | 공개 전 수동 clone 점검 |
+| **기존 사용자의 업그레이드 경로** | 우리는 늘 **새 설치만** 본다. 구버전 `team.db`·설정을 그대로 두고 올리는 경로는 아무도 안 본다 | 없음 |
+| **공개 문서의 사실성** | 코드가 맞아도 **설명이 틀리면 사용자는 자기가 틀린 줄 안다.** 2026-07-28 하루에만 3건(CI 헤더·원인 분류·낡은 수치) | 사람 리뷰뿐. 자동 검사 없음 |
+| **자격증명이 비었을 때의 동작** | 토큰이 비면 **에러 없이 다른 계정으로 나간다.** 실패가 아니라 *조용히 다른 일*을 한다 | 없음 |
+
+> **이 표에 줄을 추가하는 것은 부끄러운 일이 아닙니다.** 안 적힌 사각지대가 훨씬 위험합니다.
+> 무언가를 검사하기 시작하면 그 줄을 지우고, 아래 '지키는 것' 에서 확인하세요.
+
+---
+
+## 읽는 법
+
+- 아래 **지키는 것** 은 테스트 이름을 그대로 뽑은 것입니다. 우리 테스트 이름은
+  *"UTC 를 로컬로 오독하지 않는다 (이게 틀리면 9시간 거짓말)"* 처럼 **약속** 으로 쓰여 있습니다.
+- **통과 개수는 일부러 적지 않습니다.** 테스트가 계속 늘어서 며칠이면 낡고, 낡은 숫자는
+  읽는 사람이 *자기 환경을 의심하게* 만듭니다. 봐야 할 것은 개수가 아니라 **macOS 에서 0 fail** 입니다.
+- 목록을 다시 뽑으려면: `bash scripts/gen-test-map.sh`
+  (**'안 보는 것' 절은 건드리지 않습니다** — 그건 사람이 씁니다)
+
+---
+
+<!-- BEGIN GENERATED: 지키는 것 -->
+<!-- ★손으로 고치지 마세요★ — bash scripts/gen-test-map.sh 가 이 구간을 다시 씁니다. -->
+
+각 줄은 **테스트가 지키는 약속**입니다. 깨지면 그 줄이 빨간불이 됩니다.
+
+
+### 팀 버스 — 메시지가 실제로 배달되는가
+
+- `src/server/bus/ackClose.test.ts`
+  - resolveReplyTarget — matching priority (req#4)
+  - applyAckClose — 2-stage close, no false-green
+- `src/server/bus/ackCloseActivity.test.ts`
+  - applyActivityAutoAck
+- `src/server/bus/ackCloseDelivery.test.ts`
+  - transport coupling — activity-ack closes the orphaned wake
+  - transport coupling — reply ack-close closes the orphaned wake
+- `src/server/bus/antiPingpong.test.ts`
+  - hop_limit (max_hop=16 정렬, hop cap이 pingpong cap보다 높아야)
+- `src/server/bus/blockNotice.test.ts`
+  - ★차단 통보 — 실제로 막히고, 실제로 통보가 나가고, 그 통보는 안 막힌다★
+  - ★배선 — 차단 지점이 실제로 통보를 부른다★
+- `src/server/bus/buildTeamContext.test.ts`
+  - buildTeamContext — 자기것만·5건 (그룹·버스 통일, GD 2026-07-16)
+- `src/server/bus/collectionDeadline.test.ts`
+  - ★막힌 수집을 찾는다 — 정확히 그것만★
+  - ★다 왔는데 종합이 안 나갔다 — 그것도 막힌 것이다★
+  - ★윈도 경계 — 훼손된 시야로 멀쩡한 팀원을 고발하지 않는다★
+  - ★하드캡 — 수집 하나당 최대 1회★
+  - ★--individual 플래그 — 뿌리는 순간 개별보고를 안다★
+  - ★독촉 본문 — 개별보고면 무시하라고 알림이 직접 말한다★
+  - 보고 인정 — 팀장 1:1 DM(dm_message)은 근거로 쓰지 않는다
+- `src/server/bus/deliveryCoverage.test.ts`
+  - ★계약★ 에이전트 답을 내보내는 모든 통로는 배달 기록을 남긴다
+- `src/server/bus/deliveryRecord.test.ts`
+  - 배달 기록 — 무엇을 누구에게 보냈나
+  - ★시크릿 마스킹★ — 감사로그는 오래 남는다. 토큰이 본문에 섞이면 영구 기록된다
+  - ★fail-soft★ — 관측이 통신을 죽이면 안 된다
+  - ★thread_id = 원 위임 thread★ (목적지가 아니다 — 추적의 키다)
+- `src/server/bus/directReplyFlag.test.ts`
+  - resolveDirectToGd — case 6 플래그 계약 (DM 릴레이, 2026-07-08 GD)
+  - resolveChannelSurfaceTarget — visible surface 좌표
+- `src/server/bus/expiryNotice.test.ts`
+  - ★만료 통지 — 요청자가 영원히 기다리지 않게★
+- `src/server/bus/followupTracker.test.ts`
+  - followupTracker — duration parsing
+  - followupTracker — creation gate (all-of: one-shot + direct_to_gd + expect_report_by)
+  - followupTracker — deadline check (step 3)
+  - createSelfFollowup (응답가드 자가등록, GD 2026-07-18)
+- `src/server/bus/routingTeammateDirected.test.ts`
+  - 라우팅 판정 — 팀원간 directed 는 버스로
+  - --direct-to-gd 는 막히면 안 된다
+- `src/server/bus/systemNoticeRoute.test.ts`
+  - 시스템 알림 — ★--to system 블랙홀★ (kind 로 표현)
+  - 배선 — ★디스패처가 system 알림을 알아보나★
+- `src/server/bus/threadContext.test.ts`
+  - ★스레드 문맥 — 전 팀원, 같은 형식★
+  - ★내가 이미 보낸 것이 눈에 띄는가★
+  - ★문맥의 크기·잘림·빈 문맥★
+- `src/server/bus/turnReplyTarget.test.ts`
+  - turnReplyTarget
+  - 복붙 역-가드 — ★수신자 판정은 한 곳에서만★
+  - ★그룹에서도 위임자를 찾는다 — '가장 최근 요청'★
+- `src/server/bus/turnSerialize.test.ts`
+  - ★턴 직렬화 — 도는 중이면 미룬다★
+- `src/server/bus/wakeDispatcher.characterization.test.ts`
+  - resolveDirectToGd
+  - 3c wake 경계 — comm 매트릭스
+  - dispatchRow — plan early-returns (enabled-independent)
+  - dispatchRow — plan (needs dispatch enabled)
+  - dispatchRow — invoke + record
+  - dispatchRow — ack_only wake-gate (team-comm 왕복 축소)
+  - dispatchRow — ack_loop guard (deterministic)
+- `src/server/bus/wakeDispatcher.test.ts`
+  - lease/grace ladder — blocking-wake 런타임은 turnCap < lease < grace
+  - markDispatching — atomic claim
+  - collect-only feedback replies
+  - recoverStaleClaims — crash recovery
+  - markFailed — retry and dead_letter
+  - markAck — agent acknowledgment
+  - pendingDispatch — query
+  - checkPingpong — anti-pingpong guard
+  - Bus: full dispatch flow (mock adapter)
+  - [v1.1] markDeferred — lock-busy does not consume retry_count
+  - [v1.1] markFailed — retry exactly 3 times then dead_letter, with backoff lease
+  - [v1.1] pendingDispatch — lease backoff and priority ordering
+  - [v1.1] broadcast partial dead_letter isolation (issue 6)
+  - [v1.1] policy block → immediate terminal (no retry)
+  - [v1.1] mass-wake backfill idempotence
+  - [v1.2] execute_timeout_maybe_partial — cooldown backoff (no retry_count increment)
+  - [v1.2] inFlight self-healing — Map<key, startedAt>
+  - [v1.2] source='agent' filter — user-broadcast rows excluded from dispatch
+  - [v1.2] parent_message_id derived from in_reply_to in insertMessage
+  - [v1.2] aggregateDeliveryStatus — message_recipient aggregation (issue 6)
+  - [v1.2] 'blocked' delivery_state — policy blocks distinct from dead_letter
+  - [v1.2] deferred_count starvation warning threshold
+  - [pre-widen] deferred hard cap → 'blocked' terminal (BUS_MAX_DEFER)
+  - [pre-widen] basic message dispatch regression — source='agent', no special fields
+  - [pre-widen] busStatusSnapshot — /bus/status read endpoint
+  - [expire] allowlist_not_enabled → 'expired' (not pending, no retry)
+  - [expire] execute_timeout_maybe_partial → 'expired' (not pending, no retry)
+  - [openclaw] adapter timeout policy
+
+### 서버 기타
+
+- `src/server/channels/p3Seam.characterization.test.ts`
+  - replyAuthorAgentId — 라이브 신원해석(resolveAgentId 위임 후 legacy와 byte-동일)
+  - 카카오 = 1파일 증명 — kakaoChannel이 ChannelAdapter 계약 완전 충족
+- `src/server/channels/registry.test.ts`
+  - resolveThreadKind — startsWith('tg-')와 byte-동일(제어흐름 불변)
+  - channelRegistry
+  - send 입력 가드(behavior-preserving — 잘못된 호출은 ok:false, 예외 안 던짐)
+  - resolveAgentId — P3 신원 seam (legacy 폴백 byte-동일 + channel_identities 우선)
+
+### 저장소 — 기록이 남고 안 깨지는가
+
+- `src/server/db/ackCloseIntegration.test.ts`
+  - ack-close e2e — real insertMessage path
+- `src/server/db/auditRecent.test.ts`
+  - auditRecent — Audit screen feed
+  - busFlowRecent — Inbox screen now carries semantic state
+- `src/server/db/dmCapture.test.ts`
+  - _(최상위 describe 없음 — test/it 5개. 이름은 파일에서 확인하세요)_
+- `src/server/db/dmDedupe.test.ts`
+  - dm_message dedup — 멤버별 격리 (Devon MUST-FIX)
+- `src/server/db/dmQuery.test.ts`
+  - _(최상위 describe 없음 — test/it 7개. 이름은 파일에서 확인하세요)_
+- `src/server/db/dmRuntimeParsers.test.ts`
+  - _(최상위 describe 없음 — test/it 6개. 이름은 파일에서 확인하세요)_
+- `src/server/db/inbox/acceptInbound.test.ts`
+  - acceptInbound — 채널 ingress 공통 꼬리 (P2)
+- `src/server/db/inbox/broadcastComplete.test.ts`
+  - broadcast complete — FYI 수신행은 action-required로 안 쌓임
+  - broadcastOpenBackfill — 기존 open broadcast 행 일회 정리
+- `src/server/db/inbox/normalizeNewlines.test.ts`
+  - ★깨진 이스케이프를 편다★
+  - ★★멀쩡한 본문은 절대 건드리지 않는다★★ (이쪽이 더 중요하다)
+- `src/server/db/inbox/replyAddressAudit.test.ts`
+  - 답 주소 — ★서버는 고치지 않는다. 기록만 한다★
+  - 계기판 — ★추측하지 않는다★
+- `src/server/db/inbox/systemWake.test.ts`
+  - ★system 알림 — 깨우되, 오래된 건 깨우지 않는다★
+- `src/server/db/inboxQueries.test.ts`
+  - ensureThread
+  - insertMessage
+  - inboxFor + markRead
+  - findRecentDuplicate
+  - dispatch claim / retry / defer / recovery
+  - toIso — UTC→KST display (regression guard, 2026-05-25)
+- `src/server/db/migrate.b3osnative.test.ts`
+  - b3os_native CHECK 위든 마이그레이션
+- `src/server/db/migrate.codexRuntime.test.ts`
+  - migrateCodexRuntimeState
+- `src/server/db/orphanedDeliveryBackfill.test.ts`
+  - orphanedDeliveryBackfill
+- `src/server/db/outOfBandRecipientBackfill.test.ts`
+  - outOfBandRecipientBackfill
+- `src/server/db/searchQueries.test.ts`
+  - team search V0
+
+### 서버 공용 — 신원·권한·활성화
+
+- `src/server/lib/acceptanceLauncherDrift.test.ts`
+  - _(최상위 describe 없음 — test/it 5개. 이름은 파일에서 확인하세요)_
+- `src/server/lib/activation.test.ts`
+  - activation: claude poller 헬스게이트 (waitForClaudePoller)
+  - activation: codex bridge poller 헬스게이트 (waitForCodexPoller)
+  - activation: hermes gateway 헬스게이트 (waitForHermesGateway)
+  - activation: teardownRuntime (Phase1 offboard 4-branch 추출)
+  - activation: Hermes runtime CWD resolution
+  - activation: swapRuntime
+  - activation: swap 후 persona 정합성의 근거 — buildPersona/buildAgentsMd 직접 검증
+  - classifyEssentials — 페어링 대기 관용 경계
+  - CLAUDE_ESSENTIAL_TOLERANCE — claude 활성화 호출부의 관용 정책
+- `src/server/lib/agentControl.test.ts`
+  - hermesLaunchdLabel
+  - claudeTelegramLaunchdLabel
+- `src/server/lib/agentMembership.test.ts`
+  - official team member limit
+- `src/server/lib/approvals.test.ts`
+  - _(최상위 describe 없음 — test/it 8개. 이름은 파일에서 확인하세요)_
+- `src/server/lib/approvalsV2.test.ts`
+  - approval v2 — 스키마 'deferred'
+  - approval v2 — 10분 자동보류(deferStaleApprovals)
+  - approval v2 — tier 인가(canApproveTier) [보안-핵심]
+  - approval v2 — 승인자 풀 설정(getNormalApprovers) config-driven
+- `src/server/lib/capabilities.test.ts`
+  - learningLoopPmId
+- `src/server/lib/captureConfig.test.ts`
+  - captureConfig — 토큰(0600 파일, write-only)
+  - captureConfig — router/group (setting DB, 라이브 읽기)
+  - captureConfig — 상태 마스킹(★토큰 값 노출 금지)
+- `src/server/lib/collectDelivery.test.ts`
+  - ★수집 룰 — 런타임 변종이 없다★ ([B])
+  - ★모든 런타임이 '어디로·어떻게 보내는지' 를 읽는다★
+  - ★★룰이 [A] 로 돌아가면 빨개진다★★
+  - ★보고 시점 룰(REPORT_WHEN)은 런타임 무관 — 전원이 받는다★
+  - ★재팬아웃 금지 — 전 런타임★
+  - ★실제 팀원 파일에 자가발신 룰이 실린다★ (렌더 경로 회귀 가드)
+- `src/server/lib/collectRemoved.test.ts`
+  - ★수집 잔재 — 없는 기능을 시키지 않는다★
+- `src/server/lib/groupOwner.test.ts`
+  - groupOwner — DB 영속화 (재시작 유지)
+- `src/server/lib/health.test.ts`
+  - classifyHealth
+  - classifyAll
+- `src/server/lib/hermesBaseProfile.test.ts`
+  - Hermes base profile defense-in-depth
+- `src/server/lib/hermesBridge.test.ts`
+  - buildPrompt — 봉투 kind 노출 + source=bus (2026-07-15)
+  - buildPrompt — direct_to_gd 자가발송 금지 지시
+  - buildPrompt — 수집 계약은 봉투에서 빠졌다 (룰 이관)
+  - thread id injection 방어 (allowlist)
+  - buildPrompt — ★답 주소는 호출부가 준다 → 봉투 kind★
+  - reactTelegramAsHermes
+  - postTelegramAsHermes
+- `src/server/lib/hermesSkills.test.ts`
+  - linkHermesTeamSkill
+  - findHermesSkillCopies (doctor)
+- `src/server/lib/identityNoGuess.contract.test.ts`
+  - ★계약★ 신원은 추측하지 않는다 — 모르면 실패한다
+- `src/server/lib/leadCapabilities.test.ts`
+  - LEAD_CAPABILITIES — 팀 리드 능력 묶음
+  - withInitialLeadCapabilities — 첫 영입
+  - withLeadCapabilities — 승계(heir)도 같은 규칙
+- `src/server/lib/mediaStore.test.ts`
+  - mediaStore
+- `src/server/lib/monitoringStatus.dmHealth.test.ts`
+  - readDmHealth member-level 판정
+- `src/server/lib/opAuth.test.ts`
+  - op auth shared token
+- `src/server/lib/openclawBridge.test.ts`
+  - resolveOpenclawBin — PATH 만 믿지 않는다
+  - injectOpenclawTelegramTurn visible reply bridge
+- `src/server/lib/opsRegistry.test.ts`
+  - opsRegistry — predicate 평가
+  - opsRegistry — desired / effective
+  - opsRegistry — 카탈로그
+- `src/server/lib/ownerRoutingLiveCases.test.ts`
+  - owner routing — GD 라이브 케이스 회귀 (결정론)
+- `src/server/lib/permissionGate.test.ts`
+  - permissionGate — public runtime blockers
+  - permissionGate — DB request/grant/audit
+- `src/server/lib/personaTemplates.test.ts`
+  - _(최상위 describe 없음 — test/it 36개. 이름은 파일에서 확인하세요)_
+- `src/server/lib/registry.test.ts`
+  - loadRegistry
+- `src/server/lib/registrySafety.test.ts`
+  - writeRegistrySafely
+- `src/server/lib/restartSafety.test.ts`
+  - restartAgent(claude_channel) — 되살릴 수 없으면 죽이지 않는다
+- `src/server/lib/rotateToken.test.ts`
+  - rotateToken: resolveTokenStore 런타임별 격리
+  - rotateToken: openclawConfiguredTokenFile 파일기반 판별(fixture 격리)
+  - rotateToken: validateBotToken 형식(네트워크 전 차단)
+  - rotateToken: fail-safe(검증 실패 시 기존 안 건드림)
+- `src/server/lib/runtimeActivationSafety.test.ts`
+  - runtime activation safety
+- `src/server/lib/runtimeAuth.readiness.test.ts`
+  - _(최상위 describe 없음 — test/it 1개. 이름은 파일에서 확인하세요)_
+- `src/server/lib/runtimeBlocks.test.ts`
+  - runtimeBlocks
+- `src/server/lib/runtimeEssentials.test.ts`
+  - runtime essentials strategy registry
+- `src/server/lib/runtimeFailureOutput.test.ts`
+  - ★1차 — 구조화 신호(usage-file)가 실패를 판정한다★
+  - ★2차 그물 — usage-file 을 못 읽었을 때만 의미가 있다★
+  - ★배선 — 모듈만 있고 안 쓰면 아무것도 안 고쳐진다★
+- `src/server/lib/runtimePath.test.ts`
+  - _(최상위 describe 없음 — test/it 6개. 이름은 파일에서 확인하세요)_
+- `src/server/lib/senderIdentity.test.ts`
+  - 발신자 신원 — ★모델에게 묻지 않는다★
+- `src/server/lib/serverService.test.ts`
+  - serverServiceLabel — generic prefix (조직/사용자 하드코딩 금지)
+  - serverServicePaths
+  - renderServerPlist
+  - 플랫폼 가드 (Windows 미지원)
+- `src/server/lib/skillPathAbsolute.test.ts`
+  - _(최상위 describe 없음 — test/it 4개. 이름은 파일에서 확인하세요)_
+- `src/server/lib/teamContextPolicy.test.ts`
+  - teamContextPolicy
+- `src/server/lib/teamOsRenderAtomic.test.ts`
+  - _(최상위 describe 없음 — test/it 3개. 이름은 파일에서 확인하세요)_
+- `src/server/lib/teamRouter.characterization.test.ts`
+  - hasTopicShift
+  - stripExampleRegions
+  - detectAddressedNamesLoose
+  - leadingAddressee
+  - routeTeamMessage — priority ladder (sync fallback)
+- `src/server/lib/teamRouter.llm.test.ts`
+  - LLM team router (EXAONE)
+  - HYBRID team router (regex 확실신호 + LLM 도메인)
+- `src/server/lib/teamRouter.test.ts`
+  - team router
+  - owner inference fallback
+  - broadcast marker (@all / @b3rys / @group)
+  - recipient scope (explicit targets count)
+  - reply-owner (답장 원문 작성자)
+  - nicknames registry (agents.json 자동 로드)
+  - owner-gate regression (2026-06-02 GD 검증 세트)
+  - example-separator @멘션 억제 (—- 아래는 예시)
+  - owner-gate suppress 규칙 — shouldSuppress 단일 출처 (커뮤니케이션 룰 spec)
+  - 인용/예시 멘션 무시 (stripQuotedForRouting, GD 2026-06-25)
+  - hybrid 라우터도 인용/펜스 멘션 무시 (routeTeamMessageHybrid, GD 2026-06-25)
+- `src/server/lib/teamRouter/gate.test.ts`
+  - isConfidentOwner — 확실 owner reason 판정
+  - shouldSuppress — 비-owner 응답 억제 판정
+- `src/server/lib/teamosProbe.test.ts`
+  - teamOsSnapshot scheduled_job rows
+- `src/server/lib/telegramLeadDetection.test.ts`
+  - telegram group discovery
+- `src/server/lib/timeAgo.test.ts`
+  - ★UTC 를 로컬로 오독하지 않는다★ (이게 틀리면 9시간 거짓말)
+  - ★라이브 형식 — envelope 은 이미 오프셋이 붙어 있다★
+  - ★사람 말로 옳게 옮긴다★
+  - ★계약: 시각을 손으로 파싱하지 않는다★
+- `src/server/lib/tmuxInject.test.ts`
+  - buildTmuxInjectionPrompt — 수집 fan-out 은 그룹이어도 버스로 답한다
+  - buildTmuxInjectionPrompt
+  - Korean runtime loading templates
+- `src/server/lib/uninstallLaunchdSafety.test.ts`
+  - uninstall.sh — 다른 설치본의 LaunchAgent 를 내리지 않는다
+  - uninstall.sh — 정지 분기가 '내 것임이 증명될 때만' 기준을 쓴다
+- `src/server/lib/utcTimestamp.contract.test.ts`
+  - ★계약★ DB 시각(Z 없는 UTC)을 로컬로 오독하지 않는다
+- `src/server/lib/writeMemberPersona.test.ts`
+  - writeMemberPersona — 룰 렌더러(SOUL 은 안 건드린다)
+  - savePersonaFile — persona 저장의 유일한 지점
+  - writeMemberPersona — 기타
+  - ★TEAM-OS.md 심링크 — persona 를 쓰면 항상 걸린다★
+
+### 서버 기타
+
+- `src/server/metrics/emit3.test.ts`
+  - emit③ request.created (acceptInbound)
+  - emit③ ack.observed (applyAckClose)
+  - emit③ best-effort (측정 실패가 라이브 기능 안 깸)
+  - emit③ makeEpisodeId 통일 (spec §32)
+- `src/server/metrics/metrics.test.ts`
+  - makeEpisodeId (Lui 보강① — '-' 금지)
+  - 핵심① ack latency (parent 우선·quiet 제외)
+  - 핵심② handoff loss (parent 조인·window)
+  - 핵심③ verified closure (evidence+visible, 사후정정 강등)
+  - 보조① reopen/rework rate (72h close 기준)
+  - 보조② routing correctness (resolved_owner vs 응답자)
+  - emit ↔ project 왕복 + route_decision projection (§7)
+  - 정렬·dedupe (§7 contract)
+  - recomputeAll — 통합 episode(gold-style)
+- `src/server/personaWriteWiring.test.ts`
+  - _(최상위 describe 없음 — test/it 1개. 이름은 파일에서 확인하세요)_
+
+### HTTP 라우트 — 대시보드·API 가 지키는 계약
+
+- `src/server/routes/acceptance.test.ts`
+  - acceptance-check routes
+- `src/server/routes/approvals.test.ts`
+  - approvals: PIN 설정/변경 가드
+  - 실행 대상 없는 액션 — POST /approvals 는 409 + 사유
+- `src/server/routes/broadcastToGroup.test.ts`
+  - --to broadcast → 언제나 단톡방
+- `src/server/routes/emit-tasks.test.ts`
+  - tasks lane emit (측정 W1 ④)
+- `src/server/routes/permissionGate.test.ts`
+  - permission gate routes
+- `src/server/routes/portal.test.ts`
+  - portal 리포트 요청 — 접수회신 플로우
+- `src/server/routes/proposalAutomation.test.ts`
+  - 자동화 — 생성 = 즉시 진입 (B)
+  - 자동화 — 리뷰 등록 = 자동 전이
+  - 자동화 — 원자·멱등 코어 (race 차단)
+  - 자동화 — sweeper 정체 안전망
+  - 자동화 — 승인 후 실행 (지시 필수 + 유형)
+  - 자동화 — 교차검토 결함 회귀 방어
+- `src/server/routes/proposalRoutingSim.steve.test.ts`
+  - [Steve sim] 공개 팀 proposal 라우팅 — 유령배정 0 (적대적)
+- `src/server/routes/proposals.test.ts`
+  - proposals — 품질 하한선 (생성 게이트)
+  - proposals — 상태기계 + Guard
+  - proposals — test fixture gate
+  - proposals — GD 심플 모델 (팀 크기별 라우팅)
+- `src/server/routes/scheduler.test.ts`
+  - scheduler routes
+- `src/server/routes/settings.test.ts`
+  - Claude pairing backend contract
+  - settings: 시스템 OP (P0 floor — capture/router)
+  - settings: 팀명/태그라인
+  - settings: Mission(TEAM-OS §1)
+  - settings: 팀원 추가/퇴사
+  - settings: 런타임 스왑(POST /members/:id/swap-runtime) — HTTP 배선
+  - 영입 OT / 능력 카탈로그
+  - settings: Slack 지원 채널
+  - settings: 전체 재적용 롤백 (6h .bak 복원)
+  - ★서버가 내보내는 매니페스트는 어떤 경우에도 Slack 규격을 만족한다★
+  - slack reinstall-info
+  - OT 조회가 claude 페어링 대기를 표면화한다
+- `src/server/routes/systemMessage.test.ts`
+  - POST /api/system-message
+- `src/server/routes/tasks.test.ts`
+  - tasks DELETE — audit 계측
+  - tasks — 카드변경 담당자 알림
+
+### 런타임 — 팀원 봇을 켜고 끄는 경로
+
+- `src/server/runtimes/b3osNative/adapter.test.ts`
+  - b3os_native adapter (M1) — 핵심 정확성
+- `src/server/runtimes/b3osNative/m2a.test.ts`
+  - buildMessages (M2a 역할 배열)
+  - callOpenAICompatible — messages 우선/prompt fallback
+- `src/server/runtimes/b3osNative/m2c.test.ts`
+  - resolveCallerChain (M2c 라우팅·회귀0)
+  - isRetryableError (에러 분류)
+  - runCallerChain (fallback 로직)
+  - runTurn 통합 (M2c audit)
+- `src/server/runtimes/b3osNative/m2d.test.ts`
+  - checkB3osNativePreflight (배정 전 검사)
+  - adapter wake-contract 통합 (디스패처가 부르는 wake 경로, 주입 caller)
+- `src/server/runtimes/b3osNative/m3a.test.ts`
+  - parseToolCall (H1)
+  - validateToolCall (G2)
+  - stripToolMarkers (G1)
+  - accessibleThreads (G3)
+  - list_tasks (read-only 칸반)
+  - runTurn M3a 루프 통합
+- `src/server/runtimes/b3osNative/recovery.test.ts`
+  - b3os_native M1.5 recovery
+- `src/server/runtimes/b3osNative/runner.test.ts`
+  - callOpenAICompatible (M2b)
+  - resolveCaller 게이팅(플래그가드)
+- `src/server/runtimes/claude/dmSourceTail.test.ts`
+  - readTail — tail-only 세션 읽기
+- `src/server/runtimes/claude/pollerHealth.test.ts`
+  - ensureClaudePollerUp — 재시작 뒤 poller 자동복구
+- `src/server/runtimes/claude/seedClaudeAccess.test.ts`
+  - _(최상위 describe 없음 — test/it 3개. 이름은 파일에서 확인하세요)_
+- `src/server/runtimes/claude/seedGroupIntoClaudeMembers.test.ts`
+  - _(최상위 describe 없음 — test/it 7개. 이름은 파일에서 확인하세요)_
+- `src/server/runtimes/codex/adapter.test.ts`
+  - codex adapter — 핵심 정확성
+- `src/server/runtimes/codex/appServerApproval.test.ts`
+  - _(최상위 describe 없음 — test/it 11개. 이름은 파일에서 확인하세요)_
+- `src/server/runtimes/codex/appServerClient.smoke.test.ts`
+  - _(최상위 describe 없음 — test/it 4개. 이름은 파일에서 확인하세요)_
+- `src/server/runtimes/codex/appServerPopup.finalize.test.ts`
+  - finalizeApprovalDelivery — CAS 배달 게이트
+- `src/server/runtimes/codex/appServerPopup.opHash.test.ts`
+  - approvalOperationHash — 지문의 결정성·충돌저항(권한 결합은 미구현)
+  - 알려진 갭 (후속 작업에서 닫히면 이 테스트가 실패해야 한다)
+- `src/server/runtimes/codex/appServerPopup.test.ts`
+  - _(최상위 describe 없음 — test/it 7개. 이름은 파일에서 확인하세요)_
+- `src/server/runtimes/codex/bridge.test.ts`
+  - codex bridge (M2) — 채널 I/O
+  - 발신자 게이트(allowlist) — parseAllowFrom + 통과 판정
+- `src/server/runtimes/codex/envelope.test.ts`
+  - CodexTurnEnvelopeBuilder
+- `src/server/runtimes/codex/launcher.test.ts`
+  - persistOwnerChatIdIfEmpty — 자동저장(자연 도출값 persist, 사용자 입력 보호)
+  - codex launcher (M4) — 순수 렌더러
+- `src/server/runtimes/codex/permissions.test.ts`
+  - codexConfiguredGrants ↔ codexRuntimePreflight round-trip
+- `src/server/runtimes/codex/recovery.test.ts`
+  - codex inflight recovery
+- `src/server/runtimes/codex/runner.test.ts`
+  - codex runner args
+  - extractSessionId
+- `src/server/runtimes/codex/serverRequestCodec.test.ts`
+  - classifyServerRequest — 11종 + unknown
+  - toInternalDecision (legacy ReviewDecision → 내부)
+  - encodeApproval — method별 결정값 codec
+  - failSafeNonApproval — 비승인 6종
+- `src/server/runtimes/codex/state.approvalCorrelation.test.ts`
+  - CodexApprovalCorrelationStore — CAS/요청대조/orphan
+
+### 서버 기타
+
+- `src/server/scheduler/core.test.ts`
+  - b3os scheduler core
+  - b3os scheduler exec jobs
+- `src/server/scheduler/cron.test.ts`
+  - parseCron
+  - tzOffsetMs
+  - DST timezone rejection
+  - nextCronRun (KST)
+  - nextCronRun holiday policy
+- `src/server/scheduler/execAvailability.test.ts`
+  - execSpecScriptPath — argv 에서 스크립트 경로를 뽑는다
+  - isExecSpecAvailable — 설치본에 스크립트가 실제로 있는가
+  - EXEC_ALLOWLIST 전 항목이 가용성 판정 대상이다
+- `src/server/scheduler/timezoneCronScheduler.test.ts`
+  - TimezoneCronScheduler
+- `src/server/search/hybridRank.test.ts`
+  - hybrid ranking
+- `src/server/search/lanceVectorStore.test.ts`
+  - LanceVectorSearchStore
+- `src/server/search/searchQuality.test.ts`
+  - team search quality gates
+- `src/server/search/vectorStore.test.ts`
+  - vector search scaffold
+- `src/server/workers/dmSyncWorker.test.ts`
+  - dmSyncWorker 게이트
+  - 런타임 저장소 경로 매핑
+  - 런타임 저장소 경로 매핑
+  - 인터럽트 메시지 (턴 중 도착)
+  - 버스 배제 가드는 앵커로 판정한다
+- `src/server/workers/slackSocket.test.ts`
+  - _(최상위 describe 없음 — test/it 6개. 이름은 파일에서 확인하세요)_
+- `src/server/workers/statusProbe.test.ts`
+  - extractCtxPercent — Claude Code 'ctx N%' footer 파싱
+  - computeStateFromActivity — 마지막 활동 시각 → 상태
+  - offlineStatus — 오프라인 AgentStatus 생성
+  - buildClaudeStatus — claude_tmux 상태 생성
+  - hasStatusChanged — broadcast 변경 판단
+  - buildOpenclawStatus — openclaw_gateway 상태 생성
+  - buildCodexStatus — codex_cli 상태 생성
+  - codexBridgeLiveness
+  - buildHermesStatus — hermes_gateway 상태 생성
+  - LIVENESS_PROBES 레지스트리 (Steve Q2: openclaw 캐시 live-binding)
+- `src/server/workers/telegramCapture.test.ts`
+  - telegramCapture Codex injection gating
+  - telegramCapture Telegram origin metadata
+  - telegramCapture media refs
+  - replyAuthorAgentId — reply-owner mapping
+  - telegramCapture out-of-band agent activity
+  - slash command formatters (fmt*)
+
+### 공용 규약 — 서버와 화면이 같이 쓰는 것
+
+- `src/shared/publicSafeExamples.test.ts`
+  - 검색 예시 시드 — 공개 화면 데이터
+  - 팀 구성 다이어그램 — 공개 화면 데이터
+- `src/shared/recipientState.test.ts`
+  - state→color contract (Bill gate guard)
+  - classifyReplySignal
+  - decideRecipientTransition — 2-stage close (no false-green)
+  - false-red clears but stays honest
+  - activity-based auto-ack (Inbox-refined)
+  - closeReasonCategory — explicit_reply vs activity_assumed never mixed
+- `src/shared/timeKST.test.ts`
+  - formatKST — UTC→Asia/Seoul 고정 변환
+
+### 화면 — 사용자가 실제로 보는 것
+
+- `src/web/components/AgentCard.test.ts`
+  - AgentCard drag reorder
+- `src/web/components/AgentSlack.test.ts`
+  - socketManifest — 사용자가 붙여넣는 최종 JSON
+  - Slack 규격 — 어떤 입력이 와도 최종 JSON 은 유효해야 한다
+  - webhookBlockedNotice — 실행 가능한 행동만 안내한다
+  - wizardSteps — 이벤트 구독 켜는 단계가 반드시 있다
+  - Socket Mode 가 정본 — 안내에 Event URL 을 섞지 않는다
+- `src/web/components/LiveBadge.test.ts`
+  - LiveBadge host gating
+  - APP_VERSION — package.json 과 어긋나면 실패한다
+- `src/web/components/agentSetup/agentSetup.test.ts`
+  - AgentSetup ui-helpers
+  - AgentSetup diagrams
+  - AgentSetup page()
+- `src/web/components/inboxAudit.dom.test.ts`
+  - InboxView — recipient_state rendering (②④⑤)
+  - AuditView — suspicious-close highlight (③⑤)
+  - ProposalsView — read-only list/detail
+  - ① 화면이 MainView로 존재
+- `src/web/components/inboxRefined.dom.test.ts`
+  - Inbox default filter = action-required (open + needs_match_review)
+  - activity_assumed never masquerades as a real ack (category chip)
+- `src/web/components/macAppDownloadUrl.test.ts`
+  - b3os.app 다운로드 링크
+- `src/web/components/runtimeOptions.test.ts`
+  - _(최상위 describe 없음 — test/it 4개. 이름은 파일에서 확인하세요)_
+- `src/web/components/settingsPairing.test.ts`
+  - Settings Claude pairing panel visibility
+  - awaitingPollPlan — 어떤 마커가 폴링을 멈추나
+  - isPairingCodeWellFormed — 코드는 16진수다
+- `src/web/icons.test.ts`
+  - _(최상위 describe 없음 — test/it 1개. 이름은 파일에서 확인하세요)_
+
+<!-- END GENERATED -->
