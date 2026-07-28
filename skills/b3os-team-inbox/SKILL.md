@@ -224,8 +224,9 @@ curl -s http://127.0.0.1:7878/team/api/slack/status \
 - `--in-reply-to <msg_id>` (옵션, 메시지 참조)
 - `--type dm|reply|status` (옵션, 기본 dm)
 - `--priority low|normal|high` (옵션, 기본 normal)
-- `--direct-to-gd` (옵션, 수신자가 GD-visible report로 답하게 함)
-- `--source-thread <tg-...|group_id>` (옵션, `--direct-to-gd`의 표면화 대상)
+- `--direct-to-gd` (옵션, ★이 본문을 팀장 1:1 DM 에 최종 보고★ — `--to <요청자>`·`--in-reply-to` 필수.
+  ★위임이 아니다★: 팀원에게 시키는 것이면 붙이지 않는다)
+- `--source-thread <tg-...|group_id>` (옵션·★사실상 폐기★ — 호환용으로 받기만 하고 서버는 무시한다)
 
 ## 응답가드 자가등록 (긴 작업 중 팀장 보고 잊지 않기)
 
