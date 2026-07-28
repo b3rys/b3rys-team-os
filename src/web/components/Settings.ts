@@ -167,7 +167,7 @@ function claudePairingPanelHtml(aw: AwaitingInput): string {
   return `
     <div class="rounded-lg border border-accent-green/30 bg-surface-0/60 p-3.5 mt-3">
       <div class="text-[12px] font-semibold text-slate-200 mb-1">${pick("Claude 접근 승인", "Claude access approval")}</div>
-      <div class="text-[11px] text-slate-400 leading-relaxed mb-2">${escape(aw.hint || pick("봇 DM에서 받은 6자리 코드를 입력해 승인하세요. 이 박스는 서버가 승인 필요 상태를 내려줄 때만 보입니다.", "Enter the 6-digit code from the bot DM to approve access. This box appears only when the server reports that pairing is required."))}</div>
+      <div class="text-[11px] text-slate-400 leading-relaxed mb-2">${escape(aw.hint || pick("봇 DM에서 받은 6자리 코드(숫자와 a~f)를 입력해 승인하세요. 이 박스는 서버가 승인 필요 상태를 내려줄 때만 보입니다.", "Enter the 6-character code (0-9 and a-f) from the bot DM to approve access. This box appears only when the server reports that pairing is required."))}</div>
       <div class="flex flex-col sm:flex-row gap-2">
         <!-- ★16진수 6자리다★ — inputmode/pattern 을 숫자로 두면 모바일에서 a~f 를 못 친다. placeholder 도 숫자 예시면 안 된다. -->
         <input id="ot-claude-pair-code" class="${inputCls} sm:flex-1" inputmode="text" autocapitalize="off" autocorrect="off" spellcheck="false" pattern="[A-Fa-f0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="a4f91c" />
@@ -445,7 +445,7 @@ function otStepperHtml(): string {
   const joinedGreeting = joined ? `
        <div class="rounded-lg border border-accent-green/30 bg-accent-green/10 p-3 mt-3 text-[12px] text-accent-greenSoft leading-relaxed">
          ${pick("이제 Telegram에서 새 팀원 봇에게 DM으로 인사해 보세요 — 답이 오면 연동 성공입니다.", "Now DM the new member bot on Telegram and say hello — if it replies, the connection works.")}
-         ${m.runtime === "claude_channel" ? `<div class="mt-1 text-[11px] text-slate-400">${pick("첫 Claude 팀원은 Claude Code Telegram plugin의 access.json에 팀장 DM chat_id를 허용해야 합니다. 서버가 6자리 승인 필요 상태를 내려주면 입력 박스가 뜨고, 2번째 이후 Claude 팀원은 보통 기존 승인(access.json)을 자동 승계해 박스가 뜨지 않습니다.", "The first Claude teammate must allow the team lead's DM chat_id in the Claude Code Telegram plugin access.json. If the server reports that a 6-digit approval is required, an input box appears; later Claude teammates usually inherit the existing access.json approval automatically, so no box appears.")}</div>` : ""}
+         ${m.runtime === "claude_channel" ? `<div class="mt-1 text-[11px] text-slate-400">${pick("첫 Claude 팀원은 Claude Code Telegram plugin의 access.json에 팀장 DM chat_id를 허용해야 합니다. 서버가 6자리 승인 필요 상태를 내려주면 입력 박스가 뜨고, 2번째 이후 Claude 팀원은 보통 기존 승인(access.json)을 자동 승계해 박스가 뜨지 않습니다.", "The first Claude teammate must allow the team lead's DM chat_id in the Claude Code Telegram plugin access.json. If the server reports that a 6-character approval code (0-9 and a-f) is required, an input box appears; later Claude teammates usually inherit the existing access.json approval automatically, so no box appears.")}</div>` : ""}
        </div>` : "";
   const footer = joined
     ? `${joinedGreeting}
