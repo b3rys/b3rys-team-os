@@ -332,6 +332,15 @@ b3os는 사람이 지휘하는 시스템입니다. 에이전트가 조율하고 
 
 ---
 
+## 🤝 기여하기
+
+이슈·PR 환영합니다. 개발 환경 세팅, 보내기 전 확인할 것, PR 절차는 [`CONTRIBUTING.md`](CONTRIBUTING.md)에 있습니다.
+
+> 큰 변경은 **먼저 이슈로 이야기해 주세요.** 다 만들고 나서 방향이 안 맞으면 서로 아깝습니다.
+> 보안 취약점은 공개 이슈 대신 [`SECURITY.md`](.github/SECURITY.md)의 절차를 따라주세요.
+
+---
+
 ## 📄 License
 
 라이선스는 [Apache License 2.0](LICENSE) 입니다 — 자세한 내용은 [`LICENSE`](LICENSE) 파일을 참고하세요.
