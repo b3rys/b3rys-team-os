@@ -95,7 +95,66 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
     const files = Object.keys(p.fileChanges).sort();
     return { runtime: "codex", agent_id: agentId, action: "write", path: files.join("|").slice(0, 500), text: files.join(", ").slice(0, 500), requested_by: agentId, provenance };
   }
-  return { runtime: "codex", agent_id: agentId, action: req.method.slice(0, 64), text: typeof p.reason === "string" ? p.reason.slice(0, 500) : undefined, requested_by: agentId, provenance };
+  // ★S0(#106) — 여기까지 왔다는 것은 payload 를 해석하지 못했다는 뜻이다. 그 사실을 명시한다.★
+  //
+  //  예전에는 action 에 req.method 를, text 에 reason 만 넣었다. reason 이 없으면 targetForOperation 이
+  //  action 으로 떨어지므로 ★target = method 이름★ 이 되어 ★그 method 로 오는 모든 요청이 같은 scope★ 였다.
+  //  → 한 번 allowed_always 를 받으면 이후 ★내용이 전혀 다른 요청도 팝업 없이 통과★ 한다.
+  //  실측(2026-07-28): item/commandExecution/requestApproval 로 온 'rm -rf /tmp/x' 와 'cat ~/.ssh/id_rsa' 가
+  //  ★같은 scope_key★ 를 가졌다.
+  //
+  //  ★팀 리드 원칙(2026-07-28): "애매하면 통과가 아니고 ask 로."★
+  //  해석에 실패했으면 넓은 열쇠를 만들지 않는다 — payload 지문을 target 에 넣어 ★payload 가 다르면 열쇠도 다르게★ 한다.
+  //  저장된 grant 는 자기와 똑같은 payload 에만 적용되고, 조금이라도 다르면 다시 사람에게 묻는다.
+  //
+  //  ※ ★실제 효과: 신세대 payload 는 itemId·turnId·startedAtMs 가 요청마다 달라서 사실상 매번 새 열쇠가 된다★
+  //    = 해석 못 한 요청은 ★매번 묻는다★. 그게 이 단계가 노린 보수적 동작이다.
+  //  ※ reason 을 text 에 남기는 이유: permissionGate.operationText 가 text 도 Tier-D 스캔에 쓴다.
+  //    빼면 위험 문자열이 reason 에 있을 때 하드 차단이 약해진다.
+  // reason 은 ★기존과 같은 500자★ 를 유지한다 — 여기서 줄이면 Tier-D 스캔 범위가 좁아진다(Codex 리뷰).
+  // 합친 문자열을 다시 자르지도 않는다: method 는 프로토콜 상수(방어적으로 64자), 지문은 16자라
+  // 전체가 유계이고, 자르면 그만큼 reason 끝이 스캔에서 빠진다.
+  const reason = typeof p.reason === "string" ? p.reason.slice(0, 500) : "";
+  return {
+    runtime: "codex",
+    agent_id: agentId,
+    action: "approval_unparsed",
+    text: `${req.method.slice(0, 64)} #${unparsedPayloadDigest(req)}${reason ? ` ${reason}` : ""}`,
+    requested_by: agentId,
+    provenance,
+  };
+}
+
+/** 해석하지 못한 요청을 ★받은 payload 전체★ 로 묶는 지문(sha256 16hex).
+ *
+ *  approvalOperationHash 를 쓰지 않는 이유: 그 basis 는 {method, command(배열만), files, reason} 라
+ *  ★신세대 payload 를 하나도 담지 못한다★ — command 가 문자열이면 Array.isArray 가 false 라 null 이 되고,
+ *  fileChanges 는 신세대에 아예 없다. 그래서 서로 다른 두 명령이 ★같은 지문★ 을 갖는다(테스트로 고정해 뒀다).
+ *  해석에 실패한 마당에 '무엇이 중요한 필드인지' 를 고를 근거가 없으므로 ★전부★ 를 담는다.
+ *
+ *  키 순서에 흔들리지 않도록 재귀 정렬해 직렬화한다 — JSON.stringify 는 삽입 순서를 따르므로,
+ *  같은 내용이 다른 순서로 오면 지문이 달라져 ★같은 작업에 열쇠가 두 개★ 생긴다. */
+function unparsedPayloadDigest(req: ApprovalRequest): string {
+  const stable = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(stable);
+    if (v && typeof v === "object") {
+      // ★Object.fromEntries 를 쓴다 — 일반 객체에 acc["__proto__"]=... 로 대입하면 ★프로토타입이 바뀔 뿐
+      //  own property 가 되지 않아 JSON.stringify 에서 통째로 사라진다.★ 그러면 "__proto__" 값만 다른 두
+      //  payload 가 ★같은 지문·같은 열쇠★ 가 된다(Codex 리뷰에서 지적, 재현 확인: 둘 다 #5353b5b6…).
+      //  JSON-RPC payload 에 그 키가 오는 것은 유효하므로, ★해석 실패 경로에서 이건 우회 통로★ 가 된다.
+      //  fromEntries 는 CreateDataProperty 라 "__proto__" 도 평범한 키로 보존한다.
+      return Object.fromEntries(
+        Object.keys(v as Record<string, unknown>)
+          .sort()
+          .map((k) => [k, stable((v as Record<string, unknown>)[k])] as const),
+      );
+    }
+    return v;
+  };
+  return createHash("sha256")
+    .update(JSON.stringify(stable({ method: req.method, params: req.params ?? null })))
+    .digest("hex")
+    .slice(0, 16);
 }
 
 /** M5.2 — permission_request 상태를 폴링해 GD 결정을 ReviewDecision으로. 무응답 TTL→denied(hold). */
