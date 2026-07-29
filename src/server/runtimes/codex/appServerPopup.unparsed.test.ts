@@ -19,36 +19,46 @@ import type { ApprovalRequest } from "./appServerClient";
  *
  * 팀 리드 원칙(2026-07-28): ★"애매하면 통과가 아니고 ask 로."★
  * 아래 테스트들이 그 원칙을 코드에 고정한다.
+ *
+ * ★2026-07-29 S1 이후 — 이 파일의 fixture 를 바꿨다(보장은 그대로다).★
+ *   S1 이 신세대 ★명령★ 승인(item/commandExecution/requestApproval)을 실제로 해석하게 되면서,
+ *   그 payload 는 더 이상 '해석 실패' 가 아니다. 그래서 원래 쓰던 신세대 명령 fixture 로는
+ *   ★이 파일이 주장하는 것(해석 실패 경로)을 더 이상 검사하지 못한다.★
+ *   → fixture 를 ★지금도 해석되지 않는 method★(item/tool/requestUserInput)로 바꿨다.
+ *   ★테스트를 약하게 만든 게 아니라, 검사 대상이 옮겨간 것을 따라간 것이다.★
+ *   (신세대 명령이 제대로 해석되는지는 appServerPopup.s1.test.ts 가 따로 고정한다.)
  */
 describe("S0 — 해석 실패 payload 의 권한 열쇠", () => {
-  const newGenCmd = (command: string): ApprovalRequest => ({
-    method: "item/commandExecution/requestApproval",
-    params: { command, cwd: "/tmp", itemId: "i1", turnId: "t1", threadId: "th1", startedAtMs: 1 },
+  // ★해석되지 않는 승인 요청★ — 사람 입력을 요구하는 종류라 command/fileChanges 가 없다.
+  //   (신세대 '명령' 승인은 S1 이 해석하므로 더 이상 이 경로를 타지 않는다 — 위 주석 참조)
+  const unparsed = (note: string): ApprovalRequest => ({
+    method: "item/tool/requestUserInput",
+    params: { note, itemId: "i1", turnId: "t1", threadId: "th1", startedAtMs: 1 },
   });
 
-  test("★서로 다른 명령은 서로 다른 열쇠를 갖는다★ — 하나를 '항상 허용' 해도 다른 하나는 다시 묻는다", () => {
-    const safe = buildOperationFromApproval(newGenCmd("rm -rf /tmp/x"), "dex");
-    const evil = buildOperationFromApproval(newGenCmd("cat ~/.ssh/id_rsa"), "dex");
+  test("★내용이 다르면 다른 열쇠를 갖는다★ — 하나를 '항상 허용' 해도 다른 하나는 다시 묻는다", () => {
+    const a = buildOperationFromApproval(unparsed("A"), "dex");
+    const b = buildOperationFromApproval(unparsed("B"), "dex");
 
-    // 이 단언이 S0 의 본체다. 수정 전에는 두 값이 ★같았다★.
-    expect(scopeKeyForOperation(safe)).not.toBe(scopeKeyForOperation(evil));
+    // 이 단언이 S0 의 본체다. 수정 전에는 같은 method 면 내용과 무관하게 ★열쇠가 같았다★.
+    expect(scopeKeyForOperation(a)).not.toBe(scopeKeyForOperation(b));
   });
 
   test("target 이 더 이상 method 이름이 아니다", () => {
-    const op = buildOperationFromApproval(newGenCmd("ls -la"), "dex");
-    expect(targetForOperation(op)).not.toBe("item/commandExecution/requestApproval");
+    const op = buildOperationFromApproval(unparsed("x"), "dex");
+    expect(targetForOperation(op)).not.toBe("item/tool/requestUserInput");
     expect(op.action).toBe("approval_unparsed"); // 해석 실패를 이름으로 밝힌다
   });
 
   test("payload 지문이 target 안에 살아남는다 (240자 절단 뒤에도)", () => {
-    const op = buildOperationFromApproval(newGenCmd("echo hi"), "dex");
+    const op = buildOperationFromApproval(unparsed("echo hi"), "dex");
     // 지문이 절단에 잘려나가면 열쇠가 다시 뭉개진다. 그래서 method 바로 뒤에 둔다.
     expect(targetForOperation(op)).toMatch(/#[0-9a-f]{16}/);
   });
 
   test("같은 payload 는 같은 열쇠 — 결정적이다", () => {
-    const a = buildOperationFromApproval(newGenCmd("git status"), "dex");
-    const b = buildOperationFromApproval(newGenCmd("git status"), "dex");
+    const a = buildOperationFromApproval(unparsed("git status"), "dex");
+    const b = buildOperationFromApproval(unparsed("git status"), "dex");
     expect(scopeKeyForOperation(a)).toBe(scopeKeyForOperation(b));
   });
 
@@ -82,11 +92,12 @@ describe("S0 — 해석 실패 payload 의 권한 열쇠", () => {
   });
 
   test("★approvalOperationHash 로는 못 가른다★ — 왜 payload 전체 지문이 필요한지의 근거", () => {
-    // 신세대는 command 가 문자열이라 basis 의 Array.isArray 가 false → command:null.
-    // fileChanges 도 reason 도 없으니 basis 가 {method, null, null, null} 로 같아진다.
+    // 이 fixture(item/tool/requestUserInput)는 command 도 fileChanges 도 reason 도 없어
+    // basis 가 {method, null, null, null} 로 ★내용과 무관하게 같아진다★.
     // ★즉 기존 지문을 그대로 썼다면 위 첫 테스트가 통과하지 못한다.★ (실제로 처음에 그렇게 짰다가 잡혔다)
-    expect(approvalOperationHash(newGenCmd("rm -rf /tmp/x")))
-      .toBe(approvalOperationHash(newGenCmd("cat ~/.ssh/id_rsa")));
+    // ※ 신세대 '명령' 은 S1 에서 지문 basis 에 포함되도록 고쳤다 — appServerPopup.s1.test.ts 참조.
+    expect(approvalOperationHash(unparsed("rm -rf /tmp/x")))
+      .toBe(approvalOperationHash(unparsed("cat ~/.ssh/id_rsa")));
   });
 
   test("★reason 은 text 에 남는다★ — permissionGate 가 text 를 Tier-D 스캔에 쓰기 때문", () => {
