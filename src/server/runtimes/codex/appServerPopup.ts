@@ -11,6 +11,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { requestPermission, getPermissionRequest, type PermissionOperation } from "../../lib/permissionGate";
 import type { ApprovalRequest, ReviewDecision } from "./appServerClient";
+import type { ObservedFileChange } from "./appServerItemIndex";
 import { CodexApprovalCorrelationStore } from "./state";
 
 /** ★Phase1 ③: 이 서버 프로세스 인스턴스 id — 재시작 감지용(옛 팝업을 새 프로세스가 새 turn에 재결합 금지).★ */
@@ -59,7 +60,7 @@ export function finalizeApprovalDelivery(
  *     파일 내용 해시). ★그 전까지 B3OS_CODEX_APPSERVER를 켜지 않는다 — release blocker.★ */
 export function approvalOperationHash(req: ApprovalRequest): string {
   const p = req.params as Record<string, any>;
-  const basis = {
+  const basis: Record<string, unknown> = {
     method: req.method,
     // ★신세대 문자열 command 도 담는다★ — 예전엔 Array.isArray 만 봐서 신세대는 null 이 됐고,
     //   그 결과 ★서로 다른 신세대 명령이 같은 지문★ 을 가졌다(Codex 리뷰 2026-07-29에서 재현).
@@ -69,6 +70,15 @@ export function approvalOperationHash(req: ApprovalRequest): string {
     files: p.fileChanges && typeof p.fileChanges === "object" ? Object.keys(p.fileChanges).sort() : null,
     reason: typeof p.reason === "string" ? p.reason : null,
   };
+  // ★S2 — 신세대 파일변경 승인은 위 4개가 ★전부 비어 있다★(method 말고는 command·files·reason 모두 null).
+  //   그래서 한 턴에 두 건이 오면 ★서로 다른 요청이 같은 지문★ 을 갖는다 — S1 에서 문자열 command 로 겪은
+  //   것과 같은 형태다. 상관키·audit 이 둘을 구분해야 하므로 payload 에 있을 때만 덧붙인다.
+  //   ★있을 때만 넣는 이유★: 무조건 키를 추가하면 null 로라도 직렬화에 끼어들어 ★구세대 지문 값이 바뀐다★
+  //   (진행 중 승인의 상관키가 어긋난다). 구세대 params 에는 itemId·grantRoot 가 없다(스키마 실측).
+  const itemId = typeof p.itemId === "string" && p.itemId ? p.itemId : null;
+  if (itemId) basis.item_id = itemId;
+  const grantRoot = grantRootOf(p);
+  if (grantRoot) basis.grant_root = grantRoot;
   return createHash("sha256").update(JSON.stringify(basis)).digest("hex").slice(0, 16);
 }
 
@@ -156,14 +166,137 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
   // ★명령 승인이라고 밝혔는데 명령을 못 읽었다 → 여기서 멈춘다.★ 아래 fileChanges 분기로 흘려보내면
   //   혼합 payload 가 write 로 처리되어 fail-closed 계약이 깨진다(Codex 리뷰 2026-07-29).
   if (parsed.kind === "invalid") return unparsedOperation(req, agentId, provenance);
+  // ★S2(#106) — 신세대 파일변경 승인을 실제 내용으로 해석한다.★
+  //
+  //  신세대 `item/fileChange/requestApproval` 은 ★무엇을 바꾸는지 payload 에 담지 않는다★(itemId 만 준다).
+  //  그리고 ★벤더 프로토콜에 item 을 id 로 조회하는 요청이 없다★ — 처음 계획서에 "itemId 로 조회한다" 고
+  //  적었던 것이 ★없는 기능★ 이었다(2026-07-29 스키마 전수 확인에서 발견).
+  //  대신 내용이 ★알림으로 먼저 온다★(item/started · item/fileChange/patchUpdated). 그래서 클라이언트가
+  //  같은 turn 안에서 itemId 로 색인해 두었다가 여기에 실어 준다(ApprovalRequest.observedItem).
+  //
+  //  ★짝이 없으면 내용을 지어내지 않는다★ — 알림을 못 봤거나 순서가 뒤집혔으면 해석 실패로 보내
+  //  매번 묻게 한다. 여기서 "파일 변경입니다" 라고만 뭉뚱그리면 ★그 method 로 오는 모든 변경이 한 열쇠★ 가
+  //  되어 S0 이 닫은 구멍이 다시 열린다.
+  if (req.method === "item/fileChange/requestApproval") {
+    const observed = req.observedItem;
+    if (!observed || observed.changes.length === 0) return unparsedOperation(req, agentId, provenance);
+    return fileChangeOperation(agentId, provenance, observed.changes, grantRootOf(p), observed.itemId);
+  }
   if (p.fileChanges && typeof p.fileChanges === "object") {
     // scope_key(target)의 입력을 files[0]에서 '정렬된 전체 파일목록'으로 넓힌다.
     // ★단 target 절단 전까지만 구분력이 늘어날 뿐, '서로 다른 파일집합 → 서로 다른 scope'를 일반 보장하지 않는다.★
     // (여기서 500자, permissionGate.targetForOperation에서 240자로 잘린다.) 전체 결합은 미구현 — 이슈 #106.
     const files = Object.keys(p.fileChanges).sort();
+    // ★S2: grantRoot 는 구세대 applyPatchApproval 에도 있다★ — 지금까지 통째로 무시하고 있었다.
+    //   있으면 '이 파일들' 이 아니라 ★'이 루트 하위 전부' 를 세션 동안 허용해 달라는 요청★ 이다.
+    //   열쇠에 반영하지 않으면 파일 몇 개에 준 '항상 허용' 이 루트 전체 승인으로 재사용된다.
+    const grantRoot = grantRootOf(p);
+    if (grantRoot) {
+      return {
+        runtime: "codex", agent_id: agentId, action: "write",
+        path: `grant_root=${grantRoot} | ${files.join("|")}`.slice(0, 500),
+        text: `${GRANT_ROOT_WARNING}${grantRoot} · 파일 ${files.length}개: ${files.join(", ")}`.slice(0, 500),
+        requested_by: agentId, provenance: { ...provenance, grant_root: grantRoot },
+      };
+    }
     return { runtime: "codex", agent_id: agentId, action: "write", path: files.join("|").slice(0, 500), text: files.join(", ").slice(0, 500), requested_by: agentId, provenance };
   }
   return unparsedOperation(req, agentId, provenance);
+}
+
+/** ★팝업에서 '이건 파일 몇 개가 아니다' 를 사람이 놓치지 않게 하는 머리말.★ 문구가 두 곳에서 같아야
+ *  하므로 상수로 둔다(구세대·신세대 경로 모두 같은 위험을 같은 말로 알린다). */
+const GRANT_ROOT_WARNING = "⚠ 세션 동안 아래 폴더 하위 전체에 쓰기 허용 요청 · ";
+
+/** grantRoot 를 꺼낸다. 빈 문자열·공백뿐이면 없는 것으로 본다.
+ *  ★벤더 설명: "the agent is asking the user to allow writes under this root for the remainder of the
+ *  session"★ — 즉 파일 단위 승인이 아니라 ★루트 단위 세션 승인★ 이다. UNSTABLE 표기지만 payload 에
+ *  실려 오는 이상 ★우리 쪽 열쇠와 표시는 이걸 반영해야 한다.★ */
+function grantRootOf(p: Record<string, any> | undefined): string | null {
+  const raw = p?.grantRoot;
+  if (typeof raw !== "string") return null;
+  const t = raw.trim();
+  return t.length > 0 ? t.slice(0, 300) : null;
+}
+
+/** 변경 규모(추가/삭제 줄수) — 사람이 ★'한 줄인지 삼백 줄인지'★ 를 가늠하게 하는 용도.
+ *
+ *  ★실측(2026-07-29, codex-cli 0.144.6 라이브)에서 diff 모양이 ★종류마다 다르다★ 는 것을 확인했다:★
+ *    update → 진짜 통일diff        `@@ -1,4 +1,3 @@\n alpha\n-bravo\n+BRAVO\n charlie\n-delta\n`
+ *    add    → ★파일 원문 그대로★   `HELLO\n`   (`+` 접두어도 `@@` 헤더도 없다)
+ *  처음엔 둘 다 통일diff 라고 가정하고 `+`/`-` 만 셌는데, 그러면 ★새 파일 생성이 전부 "(+0/-0)"★ 로 보인다 —
+ *  ★사람에게 "아무것도 안 바뀐다" 로 읽히는 것이 제일 나쁜 거짓말이다.★ 그래서 모양을 판별해서 센다.
+ *  (delete 는 라이브로 못 봤다 — 통일diff 가 아니면 삭제 규모로 센다.) */
+function changeStat(kind: string, diff: string): { added: number; removed: number } {
+  const lines = diff.split("\n");
+  const isUnified = lines.some((l) => l.startsWith("@@"));
+  if (isUnified) {
+    let added = 0, removed = 0;
+    for (const line of lines) {
+      if (line.startsWith("+++") || line.startsWith("---")) continue;
+      if (line.startsWith("+")) added++;
+      else if (line.startsWith("-")) removed++;
+    }
+    return { added, removed };
+  }
+  // 통일diff 가 아니면 ★원문★ 이다. 끝 개행 때문에 생기는 빈 줄은 빼고 센다.
+  const n = lines.filter((l, i) => l.length > 0 || i < lines.length - 1).length;
+  return kind === "delete" ? { added: 0, removed: n } : { added: n, removed: 0 };
+}
+
+/**
+ * ★S2 — 관측된 파일변경으로 write operation 을 만든다.★
+ *
+ * ■ 열쇠(scope)는 ★파일 경로 집합★ 이다 — 내용(diff)이 아니다.
+ *   내용까지 열쇠에 넣으면 같은 파일을 두 번 고칠 때마다 다른 열쇠가 되어 ★'항상 허용' 이 영원히 안 붙는다★
+ *   (S0 의 지문 열쇠가 정확히 그랬다 — 안전하지만 쓸 수 없었다). 사람이 '항상 허용' 으로 뜻하는 단위는
+ *   ★"이 파일들에 쓰는 것"★ 이고, 그건 구세대 동작과도 같다. ★단, grantRoot 가 있으면 단위가 통째로
+ *   달라지므로 열쇠 맨 앞에 넣는다★ — permissionGate 가 target 을 ★앞 240자만★ 쓰기 때문에
+ *   ★제일 위험한 정보가 잘려나가면 안 된다.★
+ *
+ * ■ 내용(diff)은 ★사람이 보는 요약★ 과 ★audit 지문★ 에만 쓴다.
+ *   diff 원문을 text 에 그대로 실으면 permissionGate.operationText 를 통해 ★파일 내용이 Tier-D 스캔에
+ *   걸려★ 멀쩡한 코드가 차단될 수 있다. 그래서 ★경로·종류·줄수 요약만★ 싣는다.
+ */
+function fileChangeOperation(
+  agentId: string,
+  provenance: Record<string, unknown>,
+  changes: ObservedFileChange[],
+  grantRoot: string | null,
+  itemId: string,
+): PermissionOperation {
+  const paths = [...new Set(changes.map((c) => c.path))].sort();
+  const summary = changes
+    .slice()
+    .sort((a, b) => a.path.localeCompare(b.path))
+    .map((c) => {
+      const { added, removed } = changeStat(c.kind, c.diff);
+      const dest = c.movePath ? `→${c.movePath}` : "";
+      return `${c.kind} ${c.path}${dest}(+${added}/-${removed})`;
+    })
+    .join(", ");
+  const head = grantRoot ? `grant_root=${grantRoot} | ` : "";
+  const textHead = grantRoot ? `${GRANT_ROOT_WARNING}${grantRoot} · ` : "";
+  return {
+    runtime: "codex",
+    agent_id: agentId,
+    action: "write",
+    path: `${head}${paths.join("|")}`.slice(0, 500),
+    text: `${textHead}파일 ${paths.length}개: ${summary}`.slice(0, 500),
+    requested_by: agentId,
+    provenance: {
+      ...provenance,
+      item_id: itemId,
+      grant_root: grantRoot,
+      // 관측 경로를 남긴다 — 나중에 "이 내용을 어디서 알았나" 를 답할 수 있어야 한다.
+      file_changes_source: "notification_index",
+      // ★audit 전용 내용 지문.★ 열쇠에는 안 들어간다(위 설명) — permissionGate 는 provenance 를 읽지 않는다.
+      file_changes_digest: createHash("sha256")
+        .update(JSON.stringify(changes.map((c) => [c.path, c.kind, c.movePath, c.diff]).sort()))
+        .digest("hex")
+        .slice(0, 16),
+    },
+  };
 }
 
 /** ★해석하지 못한 승인 요청의 operation.★ 두 곳에서 쓴다 — 아무 분기에도 안 걸린 경우와,
