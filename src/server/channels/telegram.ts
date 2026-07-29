@@ -23,7 +23,7 @@ export const telegramChannel: ChannelAdapter = {
     //   ★완성된 보고(서귀포 날씨)가 팀장께 안 갔다.★ telegram_send_failed 로만 남고 끝.
     //   ★"팀원이 직접 보낸다" 로 바꿨으면 ★모든 런타임이 실제로 보낼 수 있어야 한다.★★
     //   → ★자기 봇 토큰이 있으면 Bot API 로 직접 보낸다★ (런타임 무관, 가장 확실한 경로).
-    if (canSendAsBot(req.agent.id)) {
+    if (canSendAsBot(req.agent)) {
       const r = await sendAsAgentBot(req.agent, req.target, req.text);
       if (r.ok) return { ok: true };
       // 토큰은 있는데 실패 → ★조용히 묻지 않는다.★ 이유를 올려보낸다(토큰 값은 안 실린다).
