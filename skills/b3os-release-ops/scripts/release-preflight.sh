@@ -221,18 +221,22 @@ if [ "$MODE" = "merge" ] && [ "$CHECK_APPROVER" -eq 1 ]; then
   #   → ★예전에 승인받은 아무 PR 번호★ 하나면 ★리뷰 안 받은 브랜치가 통과★ 했다.
   #   번호를 안 주면 현재 브랜치에서 유도하므로 원래 묶여 있다 — ★손으로 주는 순간 끊겼다.★
   #   ★그래서 손으로 준 경우에만 대조한다★ (유도한 경우는 이미 같은 것이다).
+  PR_HEAD_REF="$(gh pr view "$PR_NUMBER" --json headRefName --jq .headRefName 2>/dev/null || true)"
+  PR_HEAD_SHA="$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid 2>/dev/null || true)"
+  # 브랜치 대조는 ★손으로 준 경우에만★ 의미가 있다(유도한 경우는 이미 이 브랜치의 PR 이다).
   if [ "$PR_WAS_EXPLICIT" -eq 1 ]; then
-    PR_HEAD_REF="$(gh pr view "$PR_NUMBER" --json headRefName --jq .headRefName 2>/dev/null || true)"
-    PR_HEAD_SHA="$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid 2>/dev/null || true)"
     [ -n "$PR_HEAD_REF" ] || fail "could not read PR #$PR_NUMBER head branch — cannot tie the approval to what is being merged"
     if [ "$PR_HEAD_REF" != "$BRANCH" ]; then
       fail "PR #$PR_NUMBER is for branch '$PR_HEAD_REF' but you are on '$BRANCH' — an approval on a different PR does not approve this branch (drop --pr to use this branch's own PR)"
     fi
-    if [ -n "$PR_HEAD_SHA" ] && [ "$PR_HEAD_SHA" != "$(git rev-parse HEAD)" ]; then
-      fail "PR #$PR_NUMBER head is $(printf '%.7s' "$PR_HEAD_SHA") but local HEAD is $(git rev-parse --short HEAD) — push first so the approval refers to these commits"
-    fi
-    ok "PR #$PR_NUMBER matches this branch ($BRANCH)"
   fi
+  # ★커밋 대조는 어느 쪽이든 한다★ (codex): 번호를 유도했더라도 ★로컬에 안 올린 커밋★ 이 있으면
+  #   승인은 ★올라간 커밋★ 에 대한 것이고 머지되는 건 다른 것이 된다. 유도했다고 묶인 게 아니다.
+  [ -n "$PR_HEAD_SHA" ] || fail "could not read PR #$PR_NUMBER head commit — cannot tie the approval to these commits"
+  if [ "$PR_HEAD_SHA" != "$(git rev-parse HEAD)" ]; then
+    fail "PR #$PR_NUMBER head is $(printf '%.7s' "$PR_HEAD_SHA") but local HEAD is $(git rev-parse --short HEAD) — push first so the approval refers to the commits being merged"
+  fi
+  ok "PR #$PR_NUMBER is this branch ($BRANCH) at $(git rev-parse --short HEAD)"
 
   SETTINGS_JSON="$(curl -fsS "$SETTINGS_URL" 2>/dev/null || true)"
   # ★설정을 못 읽으면 통과시키지 않는다★ — '확인 불가' 는 '통과' 가 아니다.

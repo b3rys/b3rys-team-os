@@ -86,11 +86,11 @@ mutate "⑨ ★마지막 줄 제한을 버리고 아무 줄이나 허용★ (예
 
 # ══ 2026-07-29 하네스 실측으로 넣은 가드들 — ★이것도 되돌려서 빨개지는지 본다★ ══
 mutate "⑩ ★안 닫힌 코드펜스 검사 제거★ (화면엔 예시, 원문엔 서명)" \
-  '    if len(re.findall(r"^[ \t]*(?:```|~~~)", body, re.M)) % 2:' \
+  '    if unclosed:' \
   '    if False:'
 
 mutate "⑪ ★안 닫힌 HTML 주석 검사 제거★ (화면에서 사라지는 서명)" \
-  '    if body.count("<!--") != body.count("-->"):' \
+  '    if visible.count("<!--") > visible.count("-->"):' \
   '    if False:'
 
 mutate "⑫ ★모호한 마크업이어도 그냥 진행★ (가드 호출 자체를 무력화)" \
@@ -114,6 +114,33 @@ mutate "⑮ ★계정 대조를 다시 대소문자 구분으로★" \
 mutate "⑯ ★'승인 없음' 원인 구분 제거★ (셋이 같은 말)" \
   '    if any(s == "DISMISSED" for s in final_states):' \
   '    if False:'
+
+# ══ PR#125 리뷰 반영분 — ★네 명이 같은 곳을 짚은 자리★ (codex·steve·hermes·demis) ══
+# ★주의: 설명·문자열에 백틱을 쓰지 마라.★ 큰따옴표 안의 백틱은 셸이 ★명령으로 실행★ 해서
+#   이 스크립트가 문법 오류로 죽는다(여기서 실제로 한 번 죽였다). 펜스는 '펜스' 라고 쓴다.
+mutate "⑰ ★펜스 문자 구분 제거★ (백틱 펜스를 물결 펜스로 닫히게 — codex BLOCKER)" \
+  '        closer = re.compile(r"^ {0,3}" + re.escape(char) + "{" + str(width) + r",}[ \t]*$")' \
+  '        closer = re.compile(r"^ {0,3}(?:" + chr(96) + "{3,}|~{3,})[ \t]*$")'
+
+mutate "⑱ ★펜스 길이 조건 제거★ (긴 펜스를 짧은 펜스로 닫히게 — codex BLOCKER)" \
+  '"{" + str(width) + r",}[ \t]*$")' \
+  '"{3,}[ \t]*$")'
+
+mutate "⑲ ★들여쓰기 3칸 제한을 풀기★ (들여쓴 코드블록을 펜스로 오인)" \
+  'r"^(?P<indent> {0,3})(?P<fence>' \
+  'r"^(?P<indent>[ \t]*)(?P<fence>'
+
+mutate "⑳ ★주석 균형을 다시 양방향(!=)으로★ (화살표 하나로 정당 승인 차단 — steve·demis)" \
+  '    if visible.count("<!--") > visible.count("-->"):' \
+  '    if visible.count("<!--") != visible.count("-->"):'
+
+mutate "㉑ ★주석 검사를 원문에 하기★ (펜스 안 예시가 다시 막음 — hermes)" \
+  '    visible = strip_examples(body)' \
+  '    visible = body'
+
+mutate "㉒ ★인라인 코드를 안 걷어냄★ (코드 안 토큰 언급이 막힘 — steve)" \
+  '    text = INLINE_CODE.sub("", text)' \
+  '    text = text'
 
 echo
 if [ "$bad" = "0" ]; then

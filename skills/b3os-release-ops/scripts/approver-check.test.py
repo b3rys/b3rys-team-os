@@ -116,7 +116,7 @@ case("★작성자 조회 실패(빈값) → 막는다★", False, SETTINGS,
 case("★안 닫힌 코드펜스 뒤 서명 → 막는다★ (열려 있으면 화면엔 예시로 보인다)", False, SETTINGS,
      [review("질문: 형식이 이거 맞나요?\n\n```\nApproved-by: steve\n")], expect_msg="UNCLOSED code fence")
 case("★안 닫힌 HTML 주석 뒤 서명 → 막는다★ (화면에서는 통째로 사라진다)", False, SETTINGS,
-     [review("리뷰 안 했습니다.\n<!-- 메모\nApproved-by: bill")], expect_msg="UNBALANCED HTML comment")
+     [review("리뷰 안 했습니다.\n<!-- 메모\nApproved-by: bill")], expect_msg="UNCLOSED HTML comment")
 case("★닫힌 주석은 정상 통과★ (막는 건 '안 닫힌 것' 이지 주석 자체가 아니다)", True, SETTINGS,
      [review("<!-- 메모 -->\n확인했습니다.\n\nApproved-by: bill")])
 case("★줄 끝 백슬래시로 중복서명 가드를 우회하지 못한다★", False, SETTINGS,
@@ -144,6 +144,42 @@ case("원인구분: ★push 로 폐기됨(dismiss_stale_reviews)★", False, SET
 case("원인구분: 실제 철회", False, SETTINGS,
      [review("Approved-by: bill", at="2026-07-01T00:00:00Z"),
       review("되돌립니다", state="CHANGES_REQUESTED", at="2026-07-05T00:00:00Z")], expect_msg="withdrawn")
+
+# ══ PR#125 리뷰 — ★네 명이 같은 곳을 짚었다★ (codex·steve·hermes·demis, 2026-07-29) ══
+# ★내가 이 PR 에서 고친 결함을 이 PR 이 새로 만들었다.★ 그래서 여기 전부 시험으로 박는다.
+_B = "`"
+_OPEN, _CLOSE = "<!" + "--", "--" + ">"
+
+# ── 펜스를 ★마크다운 규칙대로★ 세지 않아 뚫렸던 것 (codex BLOCKER, 내가 실측 재현) ──
+#   전에는 ```/~~~ 를 같은 토글로 보고 길이를 안 봐서 ★아래 둘이 통과했다.★
+case("★``` 열고 ~~~ 로 '닫고' 서명 → 막는다★ (여는 문자를 유지해야 한다)", False, SETTINGS,
+     [review(_B * 3 + "\n~~~\nApproved-by: bill")], expect_msg="UNCLOSED code fence")
+case("★```` 열고 ``` 로 '닫고' 서명 → 막는다★ (닫는 펜스가 더 짧으면 안 닫힌다)", False, SETTINGS,
+     [review(_B * 4 + "\n" + _B * 3 + "\nApproved-by: bill")], expect_msg="UNCLOSED code fence")
+# ★4백틱으로 3백틱 예시를 감싸는 건 마크다운에서 펜스를 인용하는 정석이다★ (demis)
+case("★4백틱으로 3백틱 예시를 감싸고 진짜 서명 → 통과★", True, SETTINGS,
+     [review(_B * 4 + "\n예시:\n" + _B * 3 + "\nApproved-by: <이름>\n" + _B * 3 + "\n" + _B * 4 +
+             "\n\nApproved-by: bill")])
+# ★들여쓰기 4칸부터는 펜스가 아니라 '들여쓴 코드블록' 이다★ (마크다운 규칙 · codex·demis)
+#   느슨하게 잡으면 이게 ★안 닫힌 펜스★ 로 보여서 ★뒤의 진짜 서명이 통째로 막힌다.★
+#   ★이 시험이 없으면 들여쓰기 제한을 지워도 아무도 모른다★ (뮤턴트가 잡아줬다).
+case("★4칸 들여쓴 줄은 펜스가 아니다 → 뒤의 서명이 살아있다★", True, SETTINGS,
+     [review("    " + _B * 3 + "\n\nApproved-by: bill")])
+
+# ── ★닫는 토큰만 있으면 아무것도 안 가려진다★ (steve·demis) ──
+#   전에는 `!=` 라 ★표에 흔히 쓰는 화살표 하나로 정당한 승인이 통째로 막혔다★ —
+#   게다가 메시지는 있지도 않은 여는 토큰을 찾으라고 했다(원인을 정반대로 지목).
+case("★산문 속 화살표 하나로 막히지 않는다★", True, SETTINGS,
+     [review("A " + _CLOSE + " B 로 바뀝니다\n\nApproved-by: bill")])
+case("★화살표 여러 개여도 통과★", True, SETTINGS,
+     [review("a " + _CLOSE + " b\nc " + _CLOSE + " d\n\nApproved-by: bill")])
+case("★인라인 코드로 여는 토큰을 언급해도 통과★ (코드 안은 주석을 열지 않는다)", True, SETTINGS,
+     [review("`" + _OPEN + "` 는 주석 시작입니다\n\nApproved-by: bill")])
+case("★닫힌 펜스 안에 주석 예시를 넣어도 통과★ (hermes)", True, SETTINGS,
+     [review(_B * 3 + "\n" + _OPEN + " 숨김 예시\n" + _B * 3 + "\n\nApproved-by: bill")])
+# ★진짜 공격은 그대로 막혀야 한다★ — 위 완화가 방어를 깎지 않았는지 같이 잰다
+case("★여는 토큰이 실제로 남으면 막는다★ (완화가 방어를 깎지 않았다)", False, SETTINGS,
+     [review("리뷰 안 했습니다.\n" + _OPEN + " 메모\nApproved-by: bill")], expect_msg="UNCLOSED HTML comment")
 
 # ★'모양은 맞는데 안 맞다' 를 구분해 말한다★ — 사용자 눈에는 정확히 그 줄이라 원인을 못 찾았다
 for _tag, _body in [("@멘션", "Approved-by: @bill"), ("기호", "Approved-by: bill ✦"),

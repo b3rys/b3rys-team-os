@@ -42,22 +42,64 @@ TRAILER = re.compile(r"^approved-by[ \t]*:[ \t]*([A-Za-z0-9._-]+)[ \t]*$", re.I 
 LOOSE_TRAILER = re.compile(r"^[ \t>*_`#\-]*approved-by[ \t]*:", re.I | re.M)
 
 
-def strip_examples(body: str) -> str:
-    """★닫힌 코드펜스·닫힌 HTML 주석 안은 '예시' 다★ — 서명 후보에서 뺀다.
+#: 펜스 여는 줄. ★들여쓰기 3칸까지만 펜스다★ — 4칸부터는 마크다운에서 '들여쓴 코드블록' 이라
+#  펜스가 아니다. 이걸 `[ \t]*` 로 느슨하게 잡았더니 ★들여쓴 코드 안의 진짜 서명을 지웠다.★
+FENCE_OPEN = re.compile(r"^(?P<indent> {0,3})(?P<fence>`{3,}|~{3,})(?P<info>[^\n]*)$")
 
-    ★왜 필요한가★ (하네스 실측 2026-07-29): 중복 검사가 본문 전체를 세다 보니
-    ★규약을 알려주는 SKILL.md 의 형식 예시를 인용하면 '서명이 두 줄' 로 막혔다.★
-    ★규칙을 지키려고 문서를 인용한 사람이 막히는 형태다.★
+#: 인라인 코드(`...`). ★코드 안의 토큰은 렌더링에서 주석을 열지 않는다★ (steve).
+INLINE_CODE = re.compile(r"(?P<t>`+)(?:(?!(?P=t)).)*(?P=t)", re.S)
+
+
+def fence_spans(body: str):
+    """(닫힌 펜스 구간 [(시작줄, 끝줄)], 안 닫힌 펜스가 있나)
+
+    ★마크다운 규칙대로 센다★ (codex BLOCKER, 2026-07-29):
+      · ★여는 문자를 유지한다★ — ``` 은 ~~~ 로 닫히지 않는다
+      · ★닫는 펜스는 여는 것 이상으로 길어야 한다★ — ```` 는 ``` 로 닫히지 않는다
+      · ★닫는 줄에는 그 문자 말고 아무것도 없어야 한다★
+    ★전에는 셋 다 무시하고 '펜스처럼 생긴 줄' 을 켜고 끄기만 했다★ — 그래서
+    ```` ```(열고) → ~~~ → 서명 ````  이 통과했다(실측). 화면에서는 전부 코드 안인데.
     """
-    body = re.sub(r"<!--.*?-->", "", body, flags=re.S)
-    out, in_fence = [], False
-    for line in body.split("\n"):
-        if re.match(r"^[ \t]*(?:```|~~~)", line):
-            in_fence = not in_fence
+    lines = body.split("\n")
+    spans, i, unclosed = [], 0, False
+    while i < len(lines):
+        m = FENCE_OPEN.match(lines[i])
+        if not m:
+            i += 1
             continue
-        if not in_fence:
-            out.append(line)
-    return "\n".join(out)
+        fence = m.group("fence")
+        char, width = fence[0], len(fence)
+        # 백틱 펜스의 info 문자열에 백틱이 있으면 펜스가 아니다(마크다운 규칙)
+        if char == "`" and "`" in m.group("info"):
+            i += 1
+            continue
+        closer = re.compile(r"^ {0,3}" + re.escape(char) + "{" + str(width) + r",}[ \t]*$")
+        j = i + 1
+        while j < len(lines) and not closer.match(lines[j]):
+            j += 1
+        if j < len(lines):
+            spans.append((i, j))
+            i = j + 1
+        else:
+            unclosed = True
+            break
+    return spans, unclosed
+
+
+def strip_examples(body: str) -> str:
+    """★예시로 보이는 것을 서명 후보에서 뺀다★ — 닫힌 펜스 · 인라인 코드 · 닫힌 HTML 주석.
+
+    ★순서가 중요하다★ (steve·hermes): 펜스를 먼저 걷어내야
+    ★펜스 안의 `<!--` 예시가 펜스 밖 `-->` 와 짝지어 본문을 지우는 일★ 이 안 생긴다.
+    """
+    lines = body.split("\n")
+    spans, _ = fence_spans(body)
+    drop = set()
+    for a, b in spans:
+        drop.update(range(a, b + 1))
+    text = "\n".join(l for k, l in enumerate(lines) if k not in drop)
+    text = INLINE_CODE.sub("", text)
+    return re.sub(r"<!--.*?-->", "", text, flags=re.S)
 
 
 def ambiguous_markup(body: str):
@@ -67,14 +109,22 @@ def ambiguous_markup(body: str):
       · 안 닫힌 코드펜스 → 화면엔 예시로 보이는데 원문에선 ★마지막 줄★ 이라 서명이 된다
       · 안 닫힌 `<!--`   → ★화면에서는 통째로 사라지는데★ 원문에는 남아 서명이 된다
     변종마다 막지 않고 ★'갈릴 수 있는 상태' 자체를 거부한다★ — 이 파일의 계약이 '모르면 막는다' 다.
+
+    ★단, 넓게 막으면 규칙을 지키려는 사람이 막힌다★ (steve 실측):
+      · 안 닫힌 펜스는 ★원문에서★ 본다 — 안 닫혔으면 스트립 결과 자체를 믿을 수 없다
+      · 주석은 ★펜스·인라인 코드를 걷어낸 뒤★ 보고, ★여는 게 닫는 것보다 많을 때만★ 막는다.
+        `!=` 로 보면 ★표에 쓰는 화살표(닫는 토큰 모양)만 있어도 막혔다★ — 여는 토큰이 하나도 없는데.
+        ★가리는 것은 여는 토큰뿐이다.★ 닫는 토큰만 떠 있으면 아무것도 안 가려진다.
     """
-    if len(re.findall(r"^[ \t]*(?:```|~~~)", body, re.M)) % 2:
+    _, unclosed = fence_spans(body)
+    if unclosed:
         return True, ("the approval body has an UNCLOSED code fence (``` or ~~~) — "
                       "what a reader sees and what this tool reads can differ, so the signature is not trusted; "
                       "close the fence and re-approve")
-    if body.count("<!--") != body.count("-->"):
-        return True, ("the approval body has an UNBALANCED HTML comment (<!-- without -->) — "
-                      "a signature can be hidden from the rendered view; "
+    visible = strip_examples(body)
+    if visible.count("<!--") > visible.count("-->"):
+        return True, ("the approval body has an UNCLOSED HTML comment (<!-- without -->) outside code — "
+                      "everything after it disappears from the rendered view while this tool still reads it; "
                       "close the comment and re-approve")
     return False, ""
 
