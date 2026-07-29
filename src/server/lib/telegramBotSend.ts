@@ -52,15 +52,18 @@ function claudeChannelToken(agentId: string): string | null {
 
 /** codex 규약: <repo>/var/secrets/<id>.bot-token — ★raw 토큰 한 줄★ (launcher.ts:233 이 그렇게 쓴다).
  *
+ *  ★루트를 인자로 받는다 — 여기서 process.env 를 다시 읽지 않는다.★
+ *  lib/paths.ts 머리말이 "★process.env 는 여기서 한 번만 읽는다(단일 출처)★" 를 못박고,
+ *  REPO_ROOT 를 재정의 없이 personaTemplates 것으로 re-export 한다(divergence 방지).
+ *  호출부에서 env 를 또 읽으면 ★값은 같아도 규약 밖★ 이고, 다음 사람이 "여기서도 읽어도 되는구나"
+ *  로 따라 하는 순간 갈린다. 테스트는 root 를 직접 주고, 운영은 정본 상수 기본값을 쓴다.
+ *  (Demis 리뷰 2026-07-29 — 내가 처음에 없는 이름 B3OS_REPO_ROOT 를 만들어 쓴 것과 같은 계열이다)
+ *
  *  ★경로는 반드시 쓰는 쪽과 같은 출처로 구한다★ — codexBridgePaths 가 personaTemplates 의 REPO_ROOT 로
  *  이 파일을 쓰므로, 읽는 쪽도 같은 REPO_ROOT 를 쓴다. 여기서 cwd 나 다른 env 로 따로 구하면
  *  ★서버가 다른 디렉토리에서 뜨는 순간 조용히 어긋난다★ — 오늘 아침 launchd plist 가 코드 기본값을
  *  덮어 '체인 8' 이 안 먹던 것과 같은 계열의 사고다(설정처가 둘이면 언젠가 갈린다). */
-function codexSecretToken(agentId: string): string | null {
-  // ★같은 env 변수를 호출 시점에 읽는다★ — REPO_ROOT 는 import 시점 상수라
-  //   테스트가 격리된 루트를 주입할 수 없다. 출처는 ★그대로 하나★(TEAM_COLLAB_ROOT)이고,
-  //   미설정이면 정본 REPO_ROOT 로 떨어지므로 ★운영 동작은 동일★ 하다.
-  const root = process.env.TEAM_COLLAB_ROOT ?? REPO_ROOT;
+function codexSecretToken(agentId: string, root: string = REPO_ROOT): string | null {
   const p = `${root}/var/secrets/${agentId}.bot-token`;
   if (!existsSync(p)) return null;
   try {
@@ -73,14 +76,14 @@ function codexSecretToken(agentId: string): string | null {
 /** 이 팀원의 봇 토큰. 없으면 null. ★값은 반환만 하고 절대 로깅하지 않는다.★
  *  ★런타임별로 두는 자리가 다르다★ — claude 경로를 먼저 보고, codex 런타임일 때만 var/secrets 를 본다.
  *  hermes 계열을 여기 넣지 않는 이유는 파일 머리말 참고(지금 CLI 경로로 정상 동작 중이라 안 건드린다). */
-function botTokenFor(agent: BotTokenLookup): string | null {
+function botTokenFor(agent: BotTokenLookup, root: string = REPO_ROOT): string | null {
   return claudeChannelToken(agent.id)
-    ?? (agent.runtime === "codex" ? codexSecretToken(agent.id) : null);
+    ?? (agent.runtime === "codex" ? codexSecretToken(agent.id, root) : null);
 }
 
 /** 이 팀원이 자기 봇으로 보낼 수 있나 (토큰이 있나). */
-export function canSendAsBot(agent: BotTokenLookup): boolean {
-  return botTokenFor(agent) !== null;
+export function canSendAsBot(agent: BotTokenLookup, root: string = REPO_ROOT): boolean {
+  return botTokenFor(agent, root) !== null;
 }
 
 /**
