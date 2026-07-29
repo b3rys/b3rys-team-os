@@ -46,6 +46,16 @@ BILL="${_B%%|*}";   BILL_PLIST="${_B#*|}"
 #   RunAtLoad 만으로 거르면 안 된다 — KeepAlive 는 RunAtLoad 를 암묵적으로 포함하므로
 #   KeepAlive 만 있고 RunAtLoad 키가 없는 정상 상주 서비스가 빠진다. (codex 지적)
 has_key() { /usr/libexec/PlistBuddy -c "Print :$2" "$1" >/dev/null 2>&1; }
+plist_val() { /usr/libexec/PlistBuddy -c "Print :$2" "$1" 2>/dev/null; }
+
+# KeepAlive 는 키가 있는지가 아니라 값을 봐야 한다 — 우리 팀원 plist 가 실제로 KeepAlive=false 다.
+#   false 면 상주가 아니다. true 이거나 조건 dict 면 상주다. (codex 지적)
+keepalive_on() {
+  case "$(plist_val "$1" KeepAlive)" in
+    true|Dict*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 boot_services() {
   local f lbl
@@ -56,14 +66,45 @@ boot_services() {
     grep -Fq -- "$REPO" "$f" 2>/dev/null || continue
     has_key "$f" StartCalendarInterval && continue
     has_key "$f" StartInterval && continue
-    [ "$(/usr/libexec/PlistBuddy -c 'Print :RunAtLoad' "$f" 2>/dev/null)" = "true" ] \
-      || has_key "$f" KeepAlive || continue
+    [ "$(plist_val "$f" RunAtLoad)" = "true" ] || keepalive_on "$f" || continue
     lbl="$(label_of "$f")"; [ -n "$lbl" ] || lbl="$(basename "$f" .plist)"
+    # 라벨은 launchd 관례 문자만 지원한다고 명시한다. 아래에서 | 로 구분해 넘기므로
+    #   임의 문자열을 지원한다고 말할 수 없다 — 지원 범위를 좁히고 밝히는 쪽을 택했다. (codex 지적)
+    case "$lbl" in
+      *[!A-Za-z0-9._-]*)
+        echo "  ! 건너뜀 — 라벨에 예상 밖 문자가 있습니다: $lbl ($f)" >&2
+        continue ;;
+    esac
     printf '%s|%s\n' "$lbl" "$f"
   done
 }
 
 loaded() { launchctl print "gui/$(id -u)/$1" >/dev/null 2>&1; }
+
+# 팀원 런처인가. 런처는 팀원을 tmux 로 띄우고 자기는 끝난다 — 그래서 launchd 상태로는
+#   살았는지 알 수 없다. 세션 이름은 런처에 넘기는 이름에서 나온다 (claude-<이름>).
+member_of() {
+  plist_val "$1" ProgramArguments \
+    | awk '/start-telegram-channel\.sh/ { hit = 1; next }
+           hit && NF && $1 !~ /^[{}]$/ { gsub(/^[ \t]+|[ \t]+$/, "", $0); print; exit }'
+}
+
+tmux_session_up() { tmux has-session -t "$1" 2>/dev/null; }
+
+# 지금 실제로 살아 있나. 서비스 종류마다 답이 다르다.
+#   런처 계열 = tmux 세션이 있나          (launchd 는 exit 0 인 채로 남는다)
+#   상주 계열 = state = running 인가
+# ★last exit code 0 은 과거 사실이다.★ 그걸로 판정하면 tmux 가 죽은 뒤에도 정상으로 보인다 —
+#   이 도구가 잡으라고 만들어진 바로 그 상황을 놓친다. (codex 지적, 실제로 그렇게 짰다가 고침)
+service_healthy() {  # service_healthy <라벨> <plist>
+  local m
+  m="$(member_of "$2")"
+  if [ -n "$m" ]; then
+    tmux_session_up "claude-$m"
+    return $?
+  fi
+  launchctl print "gui/$(id -u)/$1" 2>/dev/null | grep -q "state = running"
+}
 
 alive() { [ "$(curl -s -o /dev/null -m 3 -w '%{http_code}' "$URL" 2>/dev/null || echo 000)" = "200" ]; }
 bill_up() { tmux ls 2>/dev/null | grep -q "claude-bill"; }
@@ -102,10 +143,25 @@ case "${1:-up}" in
     while IFS='|' read -r _lbl _plist; do
       [ -n "$_lbl" ] || continue
       if loaded "$_lbl"; then
-        echo "  · $_lbl (이미 등록됨)"
+        # 등록돼 있다고 살아 있는 건 아니다. 실제 상태를 보고 죽었으면 다시 올린다.
+        #   런처는 자기 안에 '이미 떠 있으면 아무것도 안 한다' 가드가 있어 다시 불러도 안전하다.
+        if service_healthy "$_lbl" "$_plist"; then
+          echo "  · $_lbl (정상)"
+        else
+          launchctl kickstart -k "gui/$(id -u)/$_lbl" >/dev/null 2>&1
+          echo "  → $_lbl 다시 올림"
+        fi
         continue
       fi
-      # bootstrap 의 종료코드를 본다. 안 보면 다른 도메인 충돌·Disabled·깨진 plist 가
+      # 다른 도메인에 같은 라벨이 있으면 gui 에 또 올리지 않는다 — 같은 것이 둘로 돈다.
+      #   gui 와 user 는 서로 다른 서비스 집합이라 gui 조회로는 안 보인다. (codex 지적)
+      if launchctl print "user/$(id -u)/$_lbl" >/dev/null 2>&1; then
+        echo "  ✗ $_lbl — user 도메인에 이미 있습니다. gui 에 또 올리면 둘로 돕니다."
+        echo "     먼저 확인하세요: launchctl print user/$(id -u)/$_lbl"
+        FAILED="$FAILED $_lbl"
+        continue
+      fi
+      # bootstrap 의 종료코드를 본다. 안 보면 Disabled·권한·깨진 plist 가
       #   전부 '등록됨' 으로 찍힌다 — 복구 도구가 거짓말을 하는 것이 제일 나쁘다. (codex·steve 지적)
       if _err="$(launchctl bootstrap "gui/$(id -u)" "$_plist" 2>&1)"; then
         echo "  → $_lbl 등록"
@@ -114,52 +170,30 @@ case "${1:-up}" in
         FAILED="$FAILED $_lbl"
       fi
     done < <(boot_services)
-    # 등록돼 있어도 응답이 없으면 죽은 것이다 — 그때만 다시 올린다.
+    # 서버는 등록·상태와 별개로 실제 응답이 진짜 상태다.
     if alive; then
       echo "  · 서버 응답 정상"
     else
       need "$SERVER" "서버" && { start "$SERVER" "$SERVER_PLIST"; echo "  → 서버 재시작"; }
     fi
-    # 빌은 tmux 로 돈다 — 등록돼 있어도 세션이 없으면 안 떠 있는 것이다.
-    #   이미 켜져 있으면 건드리지 않는다. 또 띄우면 빌이 둘이 된다.
-    if bill_up; then
-      echo "  · 빌 세션 정상"
-    else
-      need "$BILL" "빌" && { start "$BILL" "$BILL_PLIST"; echo "  → 빌 재시작"; }
-    fi
     echo "■ 20초 기다립니다…"; sleep 20
     echo "■ 결과"; show
-    # 전부 실제로 살아 있는지 다시 본다. 등록만 되고 바로 죽어도 '됐습니다' 가 나오면
+    # 전부 지금 살아 있는지 다시 본다. 등록만 되고 죽어 있어도 '됐습니다' 가 나오면
     #   이 도구는 쓸모가 없다 — 안 뜬 걸 찾으라고 만든 도구다. (codex 지적)
-    #
-    # 두 종류를 다르게 봐야 한다. 실측으로 확인한 것:
-    #   서버·다리 = 계속 떠 있는다        → state = running
-    #   팀원       = 띄워놓고 자기는 끝난다 → state = not running + last exit code = 0
-    #   그래서 running 만 보면 ★정상인 팀원 5명을 전부 죽었다고 보고한다.★ (실제로 그랬다)
-    #   문제인 경우는 하나다 — 마지막 종료코드가 0 이 아닌 것.
     NOTUP=""
     while IFS='|' read -r _lbl _plist; do
       [ -n "$_lbl" ] || continue
-      if ! loaded "$_lbl"; then NOTUP="$NOTUP $_lbl"; continue; fi
-      _st="$(launchctl print "gui/$(id -u)/$_lbl" 2>/dev/null)"
-      case "$_st" in *"state = running"*) continue ;; esac
-      case "$_st" in *"last exit code = 0"*) continue ;; esac
-      NOTUP="$NOTUP $_lbl"
+      loaded "$_lbl" && service_healthy "$_lbl" "$_plist" || NOTUP="$NOTUP $_lbl"
     done < <(boot_services)
-    if [ -n "$FAILED" ]; then
-      echo; echo "  등록 실패:$FAILED"
-    fi
-    if [ -n "$NOTUP" ]; then
-      echo; echo "  아직 안 떴습니다:$NOTUP"
+    [ -n "$FAILED" ] && { echo; echo "  등록 실패:$FAILED"; }
+    if [ -n "$NOTUP" ] || [ -n "$FAILED" ] || ! alive; then
+      echo
+      [ -n "$NOTUP" ] && echo "  아직 안 떴습니다:$NOTUP"
+      alive || echo "  서버가 아직 응답하지 않습니다"
       echo "  → team-os doctor 를 돌리고 나온 내용을 팀원에게 주세요."
       exit 1
     fi
-    if alive; then
-      echo; echo "  됐습니다. 텔레그램으로 팀원에게 말 거세요."
-    else
-      echo; echo "  서버가 아직 응답하지 않습니다 → team-os doctor"
-      exit 1
-    fi
+    echo; echo "  됐습니다. 텔레그램으로 팀원에게 말 거세요."
     ;;
   down)
     # up 은 전부 올리는데 down 은 서버·빌만 내린다. 일부러 비대칭이다 — 고치지 마라. (steve)
