@@ -224,6 +224,13 @@ export interface ScheduleReminderInput {
   title?: string;
   directToGd?: boolean;
   timezone?: string;
+  /**
+   * 'catch_up_once' delivers this reminder however late it is, bypassing the misfire grace.
+   * Only matters when the grace is enabled (SCHEDULER_MISFIRE_GRACE_SEC, off by default):
+   * with it on, a stale one-shot is dropped and never comes back, so set this on the
+   * reminder that must arrive even if the machine was off.
+   */
+  misfirePolicy?: "coalesce" | "skip" | "catch_up_once";
 }
 
 export interface SchedulerRunResult {
@@ -296,6 +303,7 @@ export function scheduleReminder(db: Database, input: ScheduleReminderInput): Sc
     createdBy: input.createdBy,
     timezone: input.timezone ?? "Asia/Seoul",
     maxRuns: 1,
+    misfirePolicy: input.misfirePolicy,
     dedupeKey,
     payload: {
       type: "inbox",
@@ -675,10 +683,16 @@ export function skipScheduledJob(
      VALUES (?, ?, ?, ?, ?, 'skipped', ?)`,
   ).run(runId, job.id, job.next_run_at, nowSql, nowSql, JSON.stringify({ reason, ...(opts.detail ?? {}) }));
   const nextRun = job.kind === "recurring" ? computeNextRun(db, job, now) : null;
-  // A dry-run is still a consumed occurrence. Leaving a one-shot pending with its
-  // past next_run_at makes every worker tick claim and record it forever.
-  const nextStatus = job.kind === "oneshot" ? "succeeded" : "pending";
-  const enabled = job.kind === "oneshot" ? 0 : job.enabled;
+  // A skip is still a consumed occurrence — it bumps run_count. So it must honor max_runs
+  // exactly like completeScheduledJob does, or the last allowed slot being skipped lets
+  // the job run one MORE time and overshoot its cap. (codex review; latent since dry-run,
+  // reachable in practice now that misfire skipping exists.)
+  const exhausted = job.max_runs != null && job.run_count + 1 >= job.max_runs;
+  // Leaving a one-shot pending with its past next_run_at makes every worker tick claim
+  // and record it forever.
+  const done = job.kind === "oneshot" || exhausted || nextRun == null;
+  const nextStatus = done ? "succeeded" : "pending";
+  const enabled = done ? 0 : job.enabled;
   db.prepare(
     `UPDATE scheduled_job
        SET status = ?,
@@ -881,6 +895,39 @@ export async function execScheduledJob(
 const DEFAULT_LEASE_SEC = 120;
 const EXEC_LEASE_MARGIN_SEC = 60;
 
+/**
+ * Misfire grace: a slot missed by more than this many seconds is skipped, not run late.
+ *
+ * OFF BY DEFAULT. Set SCHEDULER_MISFIRE_GRACE_SEC to a positive number of seconds
+ * (7200 = the 2 hours we discussed) to turn it on.
+ *
+ * The problem it addresses: after the Mac is off for days every job's next_run_at is in
+ * the past, so they all come due in one tick and a "06:00 ping" lands at 14:00.
+ *
+ * Why it ships off (GD, 2026-07-29): the burst is smaller than it looks — next_run_at is
+ * recomputed forward from `now` and missed slots are never backfilled, so a 30-minute job
+ * idle for three days fires ONCE, not 144 times. So the cost of leaving it off is a dozen
+ * late messages at boot. The cost of turning it on is that things silently do not happen:
+ * a one-shot has no next occurrence, and our four Friday learning-loop jobs would skip a
+ * whole week. Noisy beats silently missing, so this stays opt-in.
+ *
+ * Per-job opt-out when it IS on: misfire_policy = 'catch_up_once' runs however late.
+ */
+const DEFAULT_MISFIRE_GRACE_SEC = 0;
+
+function misfireGraceSec(): number {
+  const raw = process.env.SCHEDULER_MISFIRE_GRACE_SEC;
+  if (raw == null || raw === "") return DEFAULT_MISFIRE_GRACE_SEC;
+  const n = Number(raw);
+  // A malformed value must fall back to the default (off), never to "skip everything".
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_MISFIRE_GRACE_SEC;
+}
+
+/** How late this job's due slot is, in seconds. Negative/zero means on time. */
+function lateBySec(job: ScheduledJobRow, now: Date): number {
+  return (now.getTime() - fromSqliteDate(job.next_run_at).getTime()) / 1000;
+}
+
 export async function runDueSchedulerJobsOnce(
   db: Database,
   opts: {
@@ -932,6 +979,35 @@ export async function runDueSchedulerJobsOnce(
     const claimed = getScheduledJob(db, job.id)!;
     if (opts.dryRun) {
       skipScheduledJob(db, claimed, "dry_run", { now });
+      results.push({ jobId: job.id, status: "skipped" });
+      continue;
+    }
+    // Stale slot → skip forward instead of firing late. skipScheduledJob records a
+    // 'skipped' run (so this is visible in history, not a silent disappearance) and
+    // advances next_run_at, exactly like any other consumed occurrence.
+    //
+    // One rule for every job kind: if the machine was off when the slot came round,
+    // the job does not fire. GD chose this over a recurring-only carve-out, having been
+    // told that a one-shot has no next occurrence and is therefore dropped for good
+    // (2026-07-29): a notification that arrives at the wrong time is noise either way,
+    // and one predictable rule beats two.
+    //
+    // Escape hatch for the rare job that MUST run however late: misfire_policy = 'catch_up_once'.
+    const graceSec = misfireGraceSec();
+    const lateSec = lateBySec(claimed, now);
+    if (graceSec > 0 && lateSec > graceSec && claimed.misfire_policy !== "catch_up_once") {
+      skipScheduledJob(db, claimed, "misfire_stale", {
+        now,
+        // Both timestamps, not just "late by N": a long preceding exec delays this
+        // decision, and without the decision time you cannot tell a genuinely stale slot
+        // from one that went stale waiting behind a slow job. (steve review)
+        detail: {
+          lateSec: Math.round(lateSec),
+          graceSec,
+          dueAt: claimed.next_run_at,
+          decidedAt: toSqliteDate(now),
+        },
+      });
       results.push({ jobId: job.id, status: "skipped" });
       continue;
     }

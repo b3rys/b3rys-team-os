@@ -21,6 +21,10 @@ const reminderSchema = z
     thread_id: z.string().min(4).max(32).optional(),
     title: z.string().min(1).max(200).optional(),
     direct_to_gd: z.boolean().default(false),
+    // Opt out of the misfire grace: deliver however late. Only matters when the grace is
+    // enabled (off by default) — with it on, a reminder whose slot passed while the machine
+    // was off is dropped and never comes back.
+    misfire_policy: z.enum(["coalesce", "skip", "catch_up_once"]).optional(),
   })
   .refine((v) => Boolean(v.run_at) !== Boolean(v.delay_seconds), {
     message: "provide exactly one of run_at or delay_seconds",
@@ -129,6 +133,7 @@ export function createSchedulerRoutes(deps: SchedulerRouteDeps): Hono {
       threadId: input.thread_id,
       title: input.title,
       directToGd: input.direct_to_gd,
+      misfirePolicy: input.misfire_policy,
     });
     appendAudit(deps.db, actor, "scheduled_reminder_created", job.id, {
       target_agent_id: input.target_agent_id,
