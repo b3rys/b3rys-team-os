@@ -274,12 +274,88 @@ else
   echo "  ⚠ MCP plugin enable 자동기록 실패(계속) — 안 붙으면 세션에서 /plugin 으로 수동 enable"
 fi
 
-# ★pre-warm/boot-mutex 제거(2026-07-25 하네스 4-way 확정)★: 이전엔 "콜드 `bun install` → CC 30s MCP 핸드셰이크 초과 →
+# ★pre-warm 제거는 유지(2026-07-25 하네스 4-way 확정)★: 이전엔 "콜드 `bun install` → CC 30s MCP 핸드셰이크 초과 →
 #   타임아웃"을 근본으로 보고 node_modules pre-warm + 버전락 mutex 를 뒀으나, ★실패 세션 MCP 로그에 `Starting connection`
 #   이 0건★ = 타임아웃이 아니라 부팅 MCP 열거에서 telegram 이 아예 빠진 것으로 반증됐다. 그 타임아웃이 애초에 없으므로
 #   pre-warm 은 헛수고이고, 오히려 매 스폰마다 공유 플러그인 캐시에서 `bun install` 을 돌려 형제 세션과 경합을 늘렸다 → 제거.
 #   진짜 복구는 activation 의 auto-reconnect(`/mcp reconnect`)가 담당한다.
+#   ⚠ 아래 stagger 는 그 pre-warm 의 부활이 아니다 — 공유 캐시를 ★건드리지 않는다★(bun install 없음). 스폰 순서만 직렬화한다.
+
+# ─── Spawn stagger (공유 플러그인 캐시 binlink 경합 가드) ────────────────────
+# 2026-07-30 실측(리사 28분 무응답): jane·lisa launchd 잡이 RunAtLoad 로 ★같은 초★(08:03:33)에 떠서
+#   두 세션의 claude 가 공유 플러그인 캐시(…/telegram/<ver>/)에 `bun run` 을 동시에 걸었다.
+#   bun 이 node_modules/.bin binlink 를 동시 생성 → 한쪽이 `error: Failed to link which: EEXIST` 로 죽고
+#   `MCP error -32000: Connection closed`(144ms) → bot.pid 미생성 → 그 멤버는 텔레그램을 아예 못 받는다.
+#   jane 은 경합을 이겨 정상, lisa 만 탈락 = 부팅마다 뽑기.
+# ★2026-07-25 케이스와 실패 서명이 다르다★: 그땐 MCP 로그에 `Starting connection` 0건(열거 누락),
+#   이번엔 `Starting connection` 있고 144ms 뒤 `Connection closed`(링크 실패). 그래서 다른 처방이 맞다.
+# 처방: 머신 단위 mutex 로 ★스폰만★ 직렬화하고, 새 세션의 poller 가 bot.pid 를 쓸 때까지 기다렸다 락을 놓는다.
+#   → 두 번째 멤버의 claude 는 캐시 링크가 끝난 뒤에 뜨므로 링크할 게 없다(경합 소멸).
+# flock(1) 은 macOS 기본 미포함 → mkdir 원자성으로 구현. 락 획득 실패는 ★기동을 막지 않는다★(경고 후 진행).
+STAGGER_LOCK="${CLAUDE_START_STAGGER_LOCK:-$HOME/.claude/channels/.spawn.lock}"
+STAGGER_ACQUIRE_MAX="${CLAUDE_START_STAGGER_ACQUIRE:-60}"  # 락 대기 상한(초)
+STAGGER_SETTLE_MAX="${CLAUDE_START_STAGGER_SETTLE:-25}"    # 내 poller 안착(bot.pid) 대기 상한(초)
+_stagger_held=0
+_stagger_release() { [[ $_stagger_held -eq 1 ]] && rm -rf "$STAGGER_LOCK" 2>/dev/null || true; }
+
+if [[ "${CLAUDE_START_NO_STAGGER:-}" == "1" || "${CLAUDE_START_NO_STAGGER:-}" == "true" ]]; then
+  echo "  Stagger     : OFF (CLAUDE_START_NO_STAGGER)"
+else
+  mkdir -p "$(dirname "$STAGGER_LOCK")" 2>/dev/null || true
+  _waited=0
+  while (( _waited < STAGGER_ACQUIRE_MAX )); do
+    if mkdir "$STAGGER_LOCK" 2>/dev/null; then
+      _stagger_held=1
+      echo "$$" > "$STAGGER_LOCK/pid" 2>/dev/null || true
+      trap _stagger_release EXIT
+      break
+    fi
+    # stale 회수: 락 소유 프로세스가 이미 죽었으면(부팅 중 kill·크래시) 락을 회수한다.
+    #   pid 파일이 아직 안 쓰인 찰나일 수 있으므로 pid 가 읽히지 않는 동안은 기다린다(성급한 탈취 방지).
+    _owner="$(cat "$STAGGER_LOCK/pid" 2>/dev/null || true)"
+    if [[ -n "$_owner" ]] && ! kill -0 "$_owner" 2>/dev/null; then
+      echo "  Stagger     : stale 락 회수 (죽은 pid=$_owner)"
+      rm -rf "$STAGGER_LOCK" 2>/dev/null || true
+      continue
+    fi
+    sleep 1
+    _waited=$(( _waited + 1 ))
+  done
+  if [[ $_stagger_held -eq 1 ]]; then
+    if (( _waited > 0 )); then
+      echo "  Stagger     : 락 확보 (앞 세션 대기 ${_waited}s) — 스폰 직렬화"
+    else
+      echo "  Stagger     : 락 확보 (즉시) — 스폰 직렬화"
+    fi
+  else
+    echo "  ⚠ Stagger   : 락 대기 ${STAGGER_ACQUIRE_MAX}s 초과 — 경합 위험을 안고 계속 진행"
+  fi
+fi
+
+_spawn_t0=$(date +%s)
 tmux new-session -d -s "$SESSION_NAME" -c "$WORKDIR" "$INNER_CMD"
+
+# 내 poller 가 bot.pid 를 ★새로★ 쓸 때까지 락을 쥔 채 기다린다(= 캐시 링크 완료 신호).
+#   기존 bot.pid 가 남아있을 수 있으므로 mtime 이 스폰 이후인지 본다(오래된 파일로 조기 통과 방지).
+#   bot.pid 를 미리 지우지 않는다 — 플러그인이 그 값으로 stale orphan poller 를 죽이기 때문(server.ts PID_FILE).
+if [[ $_stagger_held -eq 1 ]]; then
+  _settled=0
+  for (( i = 0; i < STAGGER_SETTLE_MAX; i++ )); do
+    if [[ -f "$STATE_DIR/bot.pid" ]]; then
+      _mt=$(stat -f %m "$STATE_DIR/bot.pid" 2>/dev/null || stat -c %Y "$STATE_DIR/bot.pid" 2>/dev/null || echo 0)
+      if (( _mt >= _spawn_t0 )); then _settled=1; break; fi
+    fi
+    sleep 1
+  done
+  if [[ $_settled -eq 1 ]]; then
+    echo "  Poller      : bot.pid 확인 ✓ (${i}s) — 다음 멤버 스폰 안전"
+  else
+    echo "  ⚠ Poller    : bot.pid 미확인 (${STAGGER_SETTLE_MAX}s) — MCP 미기동 가능, activation auto-reconnect 대상"
+  fi
+  _stagger_release
+  _stagger_held=0
+  trap - EXIT
+fi
 
 echo "Started tmux session: $SESSION_NAME"
 echo "  State dir   : $STATE_DIR"
