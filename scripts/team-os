@@ -9,7 +9,28 @@
 set -uo pipefail
 
 URL="http://127.0.0.1:7878/team/"
-REPO="${TEAM_OS_REPO:-$HOME/Development/b3rys-team-os}"
+
+# 저장소 위치를 짐작하지 않는다 — ★이 스크립트 자신이 저장소 안에 있다.★
+#   경로가 `<저장소>/scripts/team-os` 이므로 자기 위치의 한 단계 위가 저장소다.
+#   짐작하면 틀린다: 우리는 ~/Development/ 밑에 두지만 공개 사용자는 README 대로
+#   아무 데서나 `git clone` 하므로 대개 홈 바로 밑이다. 그 경우 예전 기본값으로는
+#   ★자기 서비스를 하나도 못 찾는다.★
+#   ~/team-os 같은 심링크로 부를 수 있으니 심링크를 끝까지 따라간다.
+_self="$0"
+while [ -L "$_self" ]; do
+  _link="$(readlink "$_self")"
+  case "$_link" in
+    /*) _self="$_link" ;;
+    *)  _self="$(dirname "$_self")/$_link" ;;
+  esac
+done
+REPO="${TEAM_OS_REPO:-$(cd "$(dirname "$_self")/.." 2>/dev/null && pwd)}"
+if [ -z "$REPO" ] || [ ! -d "$REPO/src/server" ]; then
+  echo "✗ 저장소를 못 찾았습니다 (찾은 곳: ${REPO:-없음})"
+  echo "  이 스크립트는 <저장소>/scripts/team-os 자리에 있어야 합니다."
+  echo "  다른 데서 쓰시려면: TEAM_OS_REPO=<저장소 경로> team-os $*"
+  exit 1
+fi
 
 # plist 안의 :Label 을 실제로 읽는다 — ★파일명이 곧 라벨이 아니다.★ (codex 지적)
 label_of() { /usr/libexec/PlistBuddy -c 'Print :Label' "$1" 2>/dev/null; }
