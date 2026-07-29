@@ -71,6 +71,32 @@ export function approvalOperationHash(req: ApprovalRequest): string {
 const POPUP_TTL_MS = Number(process.env.B3OS_CODEX_APPSERVER_POPUP_TTL_MS ?? 60 * 60 * 1000); // 1h (GD: 무응답→hold)
 const POLL_INTERVAL_MS = Number(process.env.B3OS_CODEX_APPSERVER_POLL_MS ?? 1500);
 
+/** 명령 승인 요청에서 ★실행될 명령 문자열★ 을 꺼낸다. 명령 승인이 아니면 null.
+ *
+ *  ★판정을 payload 모양이 아니라 method 로 한다.★ 모양은 세대마다 바뀌지만 method 는 계약이다 —
+ *  예전 코드가 `Array.isArray(p.command)` 로 판정한 탓에 신세대(command 가 문자열)가 통째로
+ *  해석 실패로 떨어졌다. ★모양으로 판정하면 다음 세대에서 또 조용히 미끄러진다.★
+ *
+ *  세대별 실제 모양(codex-cli 0.144.6 벤더 스키마 실측):
+ *    execCommandApproval                     → command: string[]   (구세대)
+ *    item/commandExecution/requestApproval   → command: string|null (신세대)
+ *
+ *  ★method 는 아는데 command 가 비어 있으면 null 을 돌려준다★ — 그러면 호출부가 해석 실패 분기로
+ *  보내 S0 의 보수적 처리(payload 지문 + 매번 묻기)를 받는다. ★모르면 넓게 통과가 아니라 좁게 묻는다.★ */
+function commandTextFromApproval(req: ApprovalRequest): string | null {
+  if (req.method !== "execCommandApproval" && req.method !== "item/commandExecution/requestApproval") return null;
+  const raw = (req.params as Record<string, unknown>)?.command;
+  if (Array.isArray(raw)) {
+    const joined = raw.map((x) => String(x)).join(" ").trim();
+    return joined.length > 0 ? joined : null;
+  }
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  return null;
+}
+
 /** M5.1 — codex 승인요청 → PermissionOperation(requestPermission 입력). */
 export function buildOperationFromApproval(req: ApprovalRequest, agentId: string, cwd?: string): PermissionOperation {
   const p = req.params as Record<string, any>;
@@ -85,8 +111,23 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
     // ★grant scope에는 반영되지 않는다★(알려진 갭 — approvalOperationHash 주석 참조).
     operation_hash: approvalOperationHash(req),
   };
-  if (Array.isArray(p.command)) {
-    return { runtime: "codex", agent_id: agentId, action: "shell", command: p.command.join(" ").slice(0, 2000), requested_by: agentId, provenance };
+  // ★S1(#106) — 명령 승인을 세대 무관하게 해석한다.★
+  //
+  //  구세대 execCommandApproval 은 command 가 ★배열★, 신세대 item/commandExecution/requestApproval 은
+  //  ★문자열★ 이다(codex-cli 0.144.6 벤더 스키마 실측). 예전에는 Array.isArray 만 봐서 ★신세대가 통째로
+  //  해석 실패 분기로 떨어졌다★ — S0 이 그 분기를 안전하게 만들었지만, 안전할 뿐 ★사람이 읽을 수는 없었다★
+  //  (열쇠도 팝업도 지문 문자열이라 무슨 명령인지 안 보인다).
+  //
+  //  여기서는 ★method 로 명령 승인임을 먼저 판정★ 하고, command 가 배열이든 문자열이든 같은 모양으로 만든다.
+  //  판정 기준을 payload 모양이 아니라 method 로 둔 이유: 모양은 세대마다 바뀌지만 ★method 는 계약★ 이다.
+  //  모양으로 판정하면 다음 세대에서 또 조용히 미끄러진다(그게 이 버그의 원인이었다).
+  //
+  //  ★교환 관계를 명시한다★: 해석되면 열쇠가 '명령' 단위가 되어 '항상 허용' 이 의미를 갖는다(쓸 만해진다).
+  //  대신 그 열쇠는 permissionGate 에서 ★앞 240자만★ 쓰므로, 240자 prefix 가 같고 뒤가 다른 긴 명령은
+  //  같은 열쇠가 된다 — ★구세대가 원래 갖고 있던 노출이고, S5(공용 결합)에서 닫힌다.★ #106 참조.
+  const commandText = commandTextFromApproval(req);
+  if (commandText !== null) {
+    return { runtime: "codex", agent_id: agentId, action: "shell", command: commandText.slice(0, 2000), requested_by: agentId, provenance };
   }
   if (p.fileChanges && typeof p.fileChanges === "object") {
     // scope_key(target)의 입력을 files[0]에서 '정렬된 전체 파일목록'으로 넓힌다.
