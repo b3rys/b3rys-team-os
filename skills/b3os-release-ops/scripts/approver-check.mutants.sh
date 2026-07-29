@@ -42,8 +42,8 @@ PY
 echo "── 뮤턴트: 되돌리면 빨개져야 그 시험이 살아있다 ──"
 
 mutate "① ★줄 전체 앵커를 버리고 아무 데나 매칭★" \
-  'TRAILER = re.compile(r"^\s*approved-by\s*:\s*([A-Za-z0-9._-]+)\s*$", re.I | re.M)' \
-  'TRAILER = re.compile(r"([a-z]+)\s*(?:승인|approved)", re.I | re.M)'
+  'TRAILER = re.compile(r"^approved-by[ \t]*:[ \t]*([A-Za-z0-9._-]+)[ \t]*$", re.I | re.M)' \
+  'TRAILER = re.compile(r"approved-by[ \t]*:[ \t]*([A-Za-z0-9._-]+)", re.I | re.M)'
 
 mutate "② 시간순 접기 제거 (철회를 못 봄)" \
   '    ordered = sorted(
@@ -57,7 +57,11 @@ mutate "③ 명부 대조 제거" \
   '        if False:'
 
 mutate "④ ★작성자 계정 검사 제거 (#119 증상)★" \
-  '    if author and author != team:' \
+  '    if author != team:' \
+  '    if False:'
+
+mutate "④b ★작성자 조회 실패를 통과시킴 (ames BLOCKER)★" \
+  '    if not author:' \
   '    if False:'
 
 mutate "⑤ 승인 계정 검사 제거" \
@@ -72,13 +76,13 @@ mutate "⑦ ★배열 아닌 응답을 '승인 없음' 으로 삼킴★" \
   '    if not isinstance(reviews, list):' \
   '    if False:'
 
-mutate "⑧ Approved-by 여러 줄 검사 제거" \
-  '        if len(names) > 1:' \
+mutate "⑧ ★본문 전체의 중복 서명 검사 제거★" \
+  '        if len(all_hits) > 1:' \
   '        if False:'
 
-mutate "⑨ 이스케이프 개행 정규화 제거" \
-  '    return body.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\r\n", "\n")' \
-  '    return body'
+mutate "⑨ ★마지막 줄 제한을 버리고 아무 줄이나 허용★ (예시가 서명이 됨)" \
+  '    for line in reversed(body.replace("\r\n", "\n").split("\n")):' \
+  '    for line in body.replace("\r\n", "\n").split("\n"):'
 
 echo
 if [ "$bad" = "0" ]; then

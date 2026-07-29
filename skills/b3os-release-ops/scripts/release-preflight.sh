@@ -9,6 +9,7 @@ CHECK_BRANCH_PROTECTION=1
 ALLOW_MAIN=0
 PR_NUMBER=""
 CHECK_APPROVER=1
+SKIP_REASON=""
 SETTINGS_URL="${B3OS_SETTINGS_URL:-http://127.0.0.1:7878/team/api/settings}"
 
 usage() {
@@ -41,7 +42,7 @@ while [ "$#" -gt 0 ]; do
     --live-dir) LIVE_DIR="${2:-}"; shift 2 ;;
     --pr) PR_NUMBER="${2:-}"; shift 2 ;;
     --settings-url) SETTINGS_URL="${2:-}"; shift 2 ;;
-    --skip-approver-check) CHECK_APPROVER=0; shift ;;
+    --skip-approver-check) CHECK_APPROVER=0; SKIP_REASON="${2:-}"; shift 2 ;;
     --skip-branch-protection) CHECK_BRANCH_PROTECTION=0; shift ;;
     --allow-main) ALLOW_MAIN=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -172,6 +173,16 @@ fi
 #
 # ★명부·계정을 여기에 적지 않는다★ — 전부 설정에서 읽는다. 하드코딩하면 그 순간 갈리고,
 #   ★더 느슨한 쪽이 게이트가 된다.★ (실제로 별도 도구에서 17명 명단을 만들어 3명 정본과 갈렸다)
+# ★우회로는 남기되 숨기지 않는다★ (demis·steve)
+#   빼면 사람들이 ★게이트 자체를 안 돌린다★ — 그게 더 나쁘다. 진짜 비상(설정 서버 다운 + 핫픽스)도 실재한다.
+#   대신 ★조용한 우회는 자기부정★ 이다: 기록을 남기는 게 목적인 게이트인데 우회가 기록을 안 남기면
+#   ★통과와 우회가 출력상 구분이 안 된다.★ 그래서 이유를 필수로 받고 크게 찍는다.
+if [ "$MODE" = "merge" ] && [ "$CHECK_APPROVER" -eq 0 ]; then
+  [ -n "$SKIP_REASON" ] || fail "--skip-approver-check requires a reason: --skip-approver-check \"why\""
+  warn "★★ APPROVER CHECK SKIPPED ★★ reason: $SKIP_REASON"
+  warn "   누가 승인했는지 확인하지 않았습니다 — 이 실행은 '승인 확인됨' 이 아닙니다."
+  SKIPPED_NOTE="  ⚠ approver check SKIPPED — $SKIP_REASON"
+fi
 if [ "$MODE" = "merge" ] && [ "$CHECK_APPROVER" -eq 1 ]; then
   command -v gh >/dev/null 2>&1 || fail "gh CLI missing; needed to read PR reviews"
   if [ -z "$PR_NUMBER" ]; then
@@ -191,7 +202,7 @@ if [ "$MODE" = "merge" ] && [ "$CHECK_APPROVER" -eq 1 ]; then
   # ★판정은 부품으로 뺐다★ — 네트워크·계정 없이 시험할 수 있어야 하기 때문이다.
   #   ★게이트는 여전히 이 스크립트 하나다.★ (진입점을 늘리지 않는다)
   #   ★stdin 으로 넘긴다★ — argv 면 리뷰가 많은 PR 에서 Argument list too long 이 난다.
-  APPROVER_REPORT="$(printf '%s' "$(SETTINGS_JSON="$SETTINGS_JSON" REVIEWS_JSON="$REVIEWS_JSON" PR_AUTHOR="$PR_AUTHOR" python3 -c '
+  APPROVER_REPORT="$(printf '%s' "$(SETTINGS_JSON="$SETTINGS_JSON" REVIEWS_JSON="$REVIEWS_JSON" PR_AUTHOR="$PR_AUTHOR" "${B3OS_PYTHON:-python3}" -c '
 import json, os, sys
 json.dump({"settings": json.loads(os.environ["SETTINGS_JSON"]),
            "reviews": json.loads(os.environ["REVIEWS_JSON"] or "[]"),
@@ -207,6 +218,8 @@ json.dump({"settings": json.loads(os.environ["SETTINGS_JSON"]),
   [ "$APPROVER_STATUS" = "OK" ] || fail "approver check: $APPROVER_MSG"
   ok "approver check: $APPROVER_MSG"
 fi
+# 성공 요약에서도 우회 사실이 보이게 한다 — 스크롤을 놓쳐도 마지막에 다시 뜬다.
+[ -n "${SKIPPED_NOTE:-}" ] && printf '%s\n' "$SKIPPED_NOTE" >&2
 
 if [ "$MODE" = "force-push" ]; then
   BAD_TAGGERS="$(git for-each-ref --format='%(refname:short)%09%(objecttype)%09%(taggeremail)' refs/tags | while IFS=$'\t' read -r tag object_type tagger_email; do

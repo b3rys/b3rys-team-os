@@ -35,8 +35,12 @@ def case(name, expect_ok, settings, reviews, author="gdb3rys", expect_msg=None):
 case("정상 — Approved-by 한 줄", True, SETTINGS,
      [review("확인했습니다. 테스트 통과.\n\nApproved-by: bill")])
 case("정상 — 대소문자 무관", True, SETTINGS, [review("APPROVED-BY: Steve")])
-case("정상 — 이스케이프 개행으로 와도 찾는다", True, SETTINGS,
+# ★이 시험은 뒤집혔다 (ames)★: GitHub API 응답은 json.loads 단계에서 이미 진짜 개행으로 복원된다.
+#   두 글자 `\n` 을 개행으로 바꿔주던 것은 ★계약을 문서보다 넓히기만 했다★ — 이제 안 한다.
+case("★두 글자 백슬래시-n 은 개행이 아니다★ (계약을 넓히지 않는다)", False, SETTINGS,
      [review("확인했습니다.\\n\\nApproved-by: codex")])
+case("정상 — 진짜 개행이면 찾는다", True, SETTINGS,
+     [review("확인했습니다.\n\nApproved-by: codex")])
 
 # ── ★산문 파싱을 그만둔 이유 — 오늘 5명이 찾은 반례가 전부 여기서 죽는다★ ────────
 case("★언급만★ 'Bill 지적대로 고쳤습니다'", False, SETTINGS, [review("Bill 지적대로 고쳤습니다")])
@@ -88,8 +92,20 @@ case("코멘트는 상태를 안 바꾼다", True, SETTINGS,
 # ── ★모르면 막는다★ ─────────────────────────────────────────────────────────
 case("★응답이 배열이 아님 → 승인없음이 아니라 확인불가★", False, SETTINGS, {"oops": 1},
      expect_msg="unknown")
-case("★Approved-by 가 두 줄★", False, SETTINGS,
+case("★Approved-by 가 두 줄 — 다른 이름★", False, SETTINGS,
      [review("Approved-by: bill\nApproved-by: steve")], expect_msg="more than one")
+# ★set 으로 접으면 이게 통과했다★ (ames) — 줄 수를 세야 잡힌다.
+case("★Approved-by 가 두 줄 — 같은 이름★", False, SETTINGS,
+     [review("Approved-by: bill\nApproved-by: bill")], expect_msg="more than one")
+# ★steve 가 찾은 것 — 예시가 서명이 되던 문제★
+case("★들여쓴 예시는 서명이 아니다★", False, SETTINGS, [review("   Approved-by: steve")])
+case("★코드펜스 안 예시는 서명이 아니다★", False, SETTINGS,
+     [review("형식은 이렇습니다:\n\n```\nApproved-by: steve\n```")])
+case("★마지막 줄이 아니면 서명이 아니다★", False, SETTINGS,
+     [review("Approved-by: bill\n\n덧붙임: 나중에 확인 필요")])
+# ★ames BLOCKER — 작성자 조회 실패를 통과시키지 않는다★
+case("★작성자 조회 실패(빈값) → 막는다★", False, SETTINGS,
+     [review("Approved-by: bill")], author="", expect_msg="author unknown")
 
 
 def main():
