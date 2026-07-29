@@ -114,11 +114,16 @@ case("★작성자 조회 실패(빈값) → 막는다★", False, SETTINGS,
 # ★이 넷은 전부 같은 부류다★: 사람이 보는 렌더 결과와 이 도구가 읽는 원문이 다르다.
 #   그래서 변종마다 막지 않고 ★'갈릴 수 있는 상태' 자체를 거부★ 하게 바꿨다.
 case("★안 닫힌 코드펜스 뒤 서명 → 막는다★ (열려 있으면 화면엔 예시로 보인다)", False, SETTINGS,
-     [review("질문: 형식이 이거 맞나요?\n\n```\nApproved-by: steve\n")], expect_msg="UNCLOSED code fence")
+     [review("질문: 형식이 이거 맞나요?\n\n```\nApproved-by: steve\n")], expect_msg="never closed")
 case("★안 닫힌 HTML 주석 뒤 서명 → 막는다★ (화면에서는 통째로 사라진다)", False, SETTINGS,
-     [review("리뷰 안 했습니다.\n<!-- 메모\nApproved-by: bill")], expect_msg="UNCLOSED HTML comment")
+     [review("리뷰 안 했습니다.\n<!-- 메모\nApproved-by: bill")], expect_msg="never closed")
 case("★닫힌 주석은 정상 통과★ (막는 건 '안 닫힌 것' 이지 주석 자체가 아니다)", True, SETTINGS,
      [review("<!-- 메모 -->\n확인했습니다.\n\nApproved-by: bill")])
+# ★위 케이스는 '주석을 걷어낸다' 를 안 재고 있었다★ (내 회귀 하네스가 잡았다):
+#   주석 안에 서명이 없어서 ★걷어내든 말든 결과가 같았다.★ 가드를 지워도 초록이었다.
+#   ★주석 안에 서명을 넣어야 그 가드가 일하는 자리가 된다.★
+case("★닫힌 주석 안의 서명은 세지 않는다★ (주석 제거 가드가 실제로 일하는 자리)", True, SETTINGS,
+     [review("형식 예시입니다:\n<!--\nApproved-by: dex\n-->\n\n확인했습니다.\n\nApproved-by: bill")])
 case("★줄 끝 백슬래시로 중복서명 가드를 우회하지 못한다★", False, SETTINGS,
      [review("Approved-by: dex\\\nApproved-by: bill")], expect_msg="more than one")
 
@@ -139,8 +144,11 @@ case("★작성자 표기가 대문자여도 통과★", True, SETTINGS, [review
 
 # ★'승인 없음' 의 원인을 갈라 말한다★ — 셋이 같은 문장을 내면서 원인을 단언했다
 case("원인구분: 리뷰가 아예 없음", False, SETTINGS, [], expect_msg="no review on this PR at all")
+# ★이 시험은 'DISMISSED' 만 봐서 가드를 안 재고 있었다★ (뮤턴트가 잡았다):
+#   구분을 지워도 폴백 문장에 그 단어가 들어 있어 ★지우든 말든 초록★ 이었다.
+#   ★그 원인일 때만 나오는 안내 문구★ 로 재야 그 갈래가 살아있는지 알 수 있다.
 case("원인구분: ★push 로 폐기됨(dismiss_stale_reviews)★", False, SETTINGS,
-     [review("Approved-by: bill", state="DISMISSED")], expect_msg="DISMISSED")
+     [review("Approved-by: bill", state="DISMISSED")], expect_msg="dismiss_stale_reviews")
 case("원인구분: 실제 철회", False, SETTINGS,
      [review("Approved-by: bill", at="2026-07-01T00:00:00Z"),
       review("되돌립니다", state="CHANGES_REQUESTED", at="2026-07-05T00:00:00Z")], expect_msg="withdrawn")
@@ -153,9 +161,9 @@ _OPEN, _CLOSE = "<!" + "--", "--" + ">"
 # ── 펜스를 ★마크다운 규칙대로★ 세지 않아 뚫렸던 것 (codex BLOCKER, 내가 실측 재현) ──
 #   전에는 ```/~~~ 를 같은 토글로 보고 길이를 안 봐서 ★아래 둘이 통과했다.★
 case("★``` 열고 ~~~ 로 '닫고' 서명 → 막는다★ (여는 문자를 유지해야 한다)", False, SETTINGS,
-     [review(_B * 3 + "\n~~~\nApproved-by: bill")], expect_msg="UNCLOSED code fence")
+     [review(_B * 3 + "\n~~~\nApproved-by: bill")], expect_msg="never closed")
 case("★```` 열고 ``` 로 '닫고' 서명 → 막는다★ (닫는 펜스가 더 짧으면 안 닫힌다)", False, SETTINGS,
-     [review(_B * 4 + "\n" + _B * 3 + "\nApproved-by: bill")], expect_msg="UNCLOSED code fence")
+     [review(_B * 4 + "\n" + _B * 3 + "\nApproved-by: bill")], expect_msg="never closed")
 # ★4백틱으로 3백틱 예시를 감싸는 건 마크다운에서 펜스를 인용하는 정석이다★ (demis)
 case("★4백틱으로 3백틱 예시를 감싸고 진짜 서명 → 통과★", True, SETTINGS,
      [review(_B * 4 + "\n예시:\n" + _B * 3 + "\nApproved-by: <이름>\n" + _B * 3 + "\n" + _B * 4 +
@@ -179,7 +187,48 @@ case("★닫힌 펜스 안에 주석 예시를 넣어도 통과★ (hermes)", Tr
      [review(_B * 3 + "\n" + _OPEN + " 숨김 예시\n" + _B * 3 + "\n\nApproved-by: bill")])
 # ★진짜 공격은 그대로 막혀야 한다★ — 위 완화가 방어를 깎지 않았는지 같이 잰다
 case("★여는 토큰이 실제로 남으면 막는다★ (완화가 방어를 깎지 않았다)", False, SETTINGS,
-     [review("리뷰 안 했습니다.\n" + _OPEN + " 메모\nApproved-by: bill")], expect_msg="UNCLOSED HTML comment")
+     [review("리뷰 안 했습니다.\n" + _OPEN + " 메모\nApproved-by: bill")], expect_msg="never closed")
+
+# ══ 2차 리뷰 — ★개수를 세면 순서를 못 본다★ (codex·hermes BLOCKER) ═══════════════
+# ★고아 닫는 토큰이 뒤에 오는 여는 토큰을 개수상 상쇄했다.★ 렌더링은 앞의 닫는 토큰을
+#   뒤의 여는 토큰에 쓸 수 없는데, 개수 비교는 균형으로 봤다 → ★서명이 화면에서 사라지는데 통과★.
+case("★닫는 토큰이 먼저 나온 뒤 여는 토큰이 열리면 막는다★ (개수는 균형)", False, SETTINGS,
+     [review("표: A " + _CLOSE + " B\n" + _OPEN + " 숨김 시작\nApproved-by: bill")],
+     expect_msg="never closed")
+case("★고아 닫는 토큰만 있으면 통과★ (완화가 살아있는지 같이 잰다)", True, SETTINGS,
+     [review("표: A " + _CLOSE + " B\n\nApproved-by: bill")])
+
+# ── ★내 적대 하네스가 찾은 것 — 내가 이 PR 로 새로 만든 구멍·오차단★ ──
+# ①인라인 코드 제거가 ★줄을 넘어 원문에 없던 서명을 만들어냈다★
+case("★인라인 코드가 줄을 넘어 서명을 만들어내지 않는다★", False, SETTINGS,
+     [review("Approved-by: `\n검토 안 했습니다\n`bill")])
+# ②목록 표시가 붙은 서명이 ★중복으로 안 세어져 두 이름이 통과했다★
+for _mark in ("+ ", "1. ", "　"):
+    case(f"★목록·전각 표시 {_mark.strip() or '전각공백'} 가 붙어도 중복으로 센다★", False, SETTINGS,
+         [review(_mark + "Approved-by: steve\n\nApproved-by: bill")], expect_msg="more than one")
+# ③남의 서명을 ★인용★ 하면 중복으로 세어져 막혔다 — 인용은 내 서명이 아니다
+case("★남의 서명을 인용해도 막히지 않는다★", True, SETTINGS,
+     [review("> Approved-by: steve 라고 하셨는데 그 줄 확인했습니다.\n\nApproved-by: bill")])
+# ④들여쓴 예시를 중복으로 셌다 — TRAILER 는 예시로 보는데 LOOSE 는 안 그래서 ★자기모순★ 이었다
+case("★들여쓴 예시는 중복으로 세지 않는다★ (엄격·느슨 판정이 어긋나면 안 된다)", True, SETTINGS,
+     [review("예시:\n\n    Approved-by: steve\n\nApproved-by: bill")])
+# ★위 둘은 그 가드를 안 재고 있었다★ (뮤턴트가 잡았다): 인용줄·들여쓴 줄은 어차피
+#   느슨 정규식에도 안 걸려서 ★건너뛰기를 지워도 결과가 같았다.★
+#   ★그 건너뛰기가 실제로 일하는 자리는 '서명 뒤에 그런 줄이 올 때'★ 다 — 마지막 줄이 바뀐다.
+case("★서명 뒤의 인용줄은 마지막 줄로 안 친다★ (건너뛰기가 실제로 일하는 자리)", True, SETTINGS,
+     [review("확인했습니다.\n\nApproved-by: bill\n\n> 참고: 위 줄이 서명입니다")])
+case("★서명 뒤의 들여쓴 코드는 마지막 줄로 안 친다★", True, SETTINGS,
+     [review("확인했습니다.\n\nApproved-by: bill\n\n    참고용 코드 조각")])
+# ⑤화면에 없는 주석 안의 펜스 때문에 ★정상 승인이 '펜스를 닫아라' 로 막혔다★ (따를 수 없는 지시)
+case("★주석 안의 펜스는 세지 않는다★ (화면에 없는 것으로 막지 않는다)", True, SETTINGS,
+     [review(_OPEN + "\n" + _B * 3 + "\n" + _CLOSE + "\nApproved-by: bill")])
+# ⑥원인 단언 — ★남이 DISMISS 된 걸 보고 "당신 승인이 폐기됐다" 고 말했다★
+# ★남의 리뷰가 '나중' 이어야 이 가드를 잰다★ (뮤턴트가 잡았다): 남의 것이 앞서면
+#   섞든 안 섞든 마지막이 내 것이라 ★결과가 같아 가드를 안 재고 있었다.★
+case("★남의 리뷰가 나중에 DISMISSED 여도 내 반려를 반려라고 말한다★", False, SETTINGS,
+     [review("고쳐주세요", state="CHANGES_REQUESTED", at="2026-07-02T00:00:00Z"),
+      review("검토중", acct="randomdev", state="DISMISSED", at="2026-07-03T00:00:00Z")],
+     expect_msg="withdrawn")
 
 # ★'모양은 맞는데 안 맞다' 를 구분해 말한다★ — 사용자 눈에는 정확히 그 줄이라 원인을 못 찾았다
 for _tag, _body in [("@멘션", "Approved-by: @bill"), ("기호", "Approved-by: bill ✦"),

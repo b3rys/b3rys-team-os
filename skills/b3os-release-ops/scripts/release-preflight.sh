@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# b3os release preflight — merge/deploy/hotfix/force-push gate checks.
+# b3os release preflight — merge/deploy/force-push/post-merge gate checks.
 set -euo pipefail
 
 MODE="merge"
@@ -117,14 +117,14 @@ ok "worktree clean"
 
 BRANCH="$(git branch --show-current)"
 if [ "$ALLOW_MAIN" -ne 1 ] && [ "$MODE" != "deploy" ] && [ "$MODE" != "post-merge" ]; then
-  [ "$BRANCH" != "main" ] || fail "do not merge/hotfix directly from main"
+  [ "$BRANCH" != "main" ] || fail "do not merge directly from main"
 fi
 ok "branch check: ${BRANCH:-detached}"
 
 git fetch origin main -q || fail "git fetch origin main failed"
 git rev-parse --verify "$BASE" >/dev/null 2>&1 || fail "base not found: $BASE"
 
-if [ "$MODE" = "merge" ] || [ "$MODE" = "hotfix" ] || [ "$MODE" = "force-push" ]; then
+if [ "$MODE" = "merge" ] || [ "$MODE" = "force-push" ]; then
   AHEAD_COUNT="$(git rev-list --count "$BASE"..HEAD)"
   if [ "$MODE" != "force-push" ]; then
     [ "$AHEAD_COUNT" -gt 0 ] || fail "no commits ahead of $BASE"
@@ -307,7 +307,7 @@ fi
 #   ★stdout 만 캡처하거나 종료코드만 보는 호출자에겐 우회가 안 보였다.★
 SUMMARY="release preflight passed (mode=$MODE"
 [ "$MODE" = "deploy" ] || [ "$MODE" = "post-merge" ] || SUMMARY="$SUMMARY, base=$BASE"
-[ -n "${SKIPPED_NOTE:-}" ] && SUMMARY="$SUMMARY, ★APPROVER CHECK SKIPPED: $SKIP_REASON★"
-[ "$SETTINGS_URL" = "http://127.0.0.1:7878/team/api/settings" ] || SUMMARY="$SUMMARY, ★non-default settings source: $SETTINGS_URL★"
-[ -z "${B3OS_PYTHON:-}" ] || SUMMARY="$SUMMARY, ★non-default python: $B3OS_PYTHON★"
+[ -n "${SKIPPED_NOTE:-}" ] && SUMMARY="$SUMMARY, ★APPROVER CHECK SKIPPED: ${SKIP_REASON}★"
+[ "$SETTINGS_URL" = "http://127.0.0.1:7878/team/api/settings" ] || SUMMARY="$SUMMARY, ★non-default settings source: ${SETTINGS_URL}★"
+[ -z "${B3OS_PYTHON:-}" ] || SUMMARY="$SUMMARY, ★non-default python: ${B3OS_PYTHON}★"
 ok "$SUMMARY)"

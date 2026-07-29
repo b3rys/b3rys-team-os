@@ -109,9 +109,15 @@ skills/b3os-release-ops/scripts/release-preflight.sh --mode deploy --live-dir /p
 
 옵션:
 
-- `--mode merge|deploy|hotfix|force-push|post-merge`
+- `--mode merge|deploy|force-push|post-merge`
+  - ★`hotfix` 는 없앴다★ (2026-07-29): 받아주기만 하고 ★승인 확인부에는 없어서 조용히 건너뛰고 "passed" 를 찍었다.★
+    ★핫픽스도 `--mode merge` 를 쓴다★ — 급해도 승인은 받는다.
+- `--pr <n>` (생략하면 현재 브랜치의 PR 을 찾는다. ★주면 그 PR 이 이 브랜치·이 커밋의 것인지 대조한다★)
 - `--base origin/main`
 - `--live-dir <path>`
+- `--settings-url <url>` (기본값이 아니면 마지막 요약 줄에 크게 찍힌다)
+- `--skip-approver-check "<이유>"` — ★이유가 필수다★. 진짜 비상(설정 서버 다운 + 핫픽스)에만.
+  ★크게 찍히고 요약 줄에도 남는다★ — 통과와 우회가 출력에서 구분돼야 하기 때문이다.
 - `--skip-branch-protection` (GitHub API를 쓸 수 없는 로컬 dry-run 때만)
 - `--allow-main` (deploy 모드처럼 main worktree 검사가 필요한 때만)
 

@@ -39,7 +39,9 @@ TRAILER = re.compile(r"^approved-by[ \t]*:[ \t]*([A-Za-z0-9._-]+)[ \t]*$", re.I 
 #  ★`Approved-by: dex\` 처럼 백슬래시로 끝나면 매칭이 안 돼 '중복' 으로 세어지지 않았다.★
 #  그래서 서명 두 줄을 넣고도 통과했다 — ★가드가 막으려던 "누가 승인했는지 갈리는" 상태 그대로.★
 #  ★잡는 그물(중복)은 넓게, 인정하는 형식(서명)은 좁게.★
-LOOSE_TRAILER = re.compile(r"^[ \t>*_`#\-]*approved-by[ \t]*:", re.I | re.M)
+#  ★목록 표시(+ · 1.)와 전각공백도 넣는다★ — 안 넣었더니 `+ Approved-by: steve` 가
+#  중복으로 안 세어져 ★두 이름이 든 본문이 통과했다★ (내 적대 하네스 실측).
+LOOSE_TRAILER = re.compile(r"^[ \t*_`#+\-　]*(?:\d+[.)][ \t]*)?approved-by[ \t]*:", re.I | re.M)
 
 
 #: 펜스 여는 줄. ★들여쓰기 3칸까지만 펜스다★ — 4칸부터는 마크다운에서 '들여쓴 코드블록' 이라
@@ -47,86 +49,77 @@ LOOSE_TRAILER = re.compile(r"^[ \t>*_`#\-]*approved-by[ \t]*:", re.I | re.M)
 FENCE_OPEN = re.compile(r"^(?P<indent> {0,3})(?P<fence>`{3,}|~{3,})(?P<info>[^\n]*)$")
 
 #: 인라인 코드(`...`). ★코드 안의 토큰은 렌더링에서 주석을 열지 않는다★ (steve).
-INLINE_CODE = re.compile(r"(?P<t>`+)(?:(?!(?P=t)).)*(?P=t)", re.S)
+#  ★줄을 넘지 않는다★ — re.S 를 붙였더니 ★원문에 없던 서명 줄을 만들어냈다★ (내 적대 하네스 실측):
+#    "Approved-by: `" + 개행 + "검토 안 했습니다" + 개행 + "`bill"  → 이어붙어 서명이 됐다.
+#    화면에는 "Approved-by: 검토 안 했습니다bill" 로 보이는데 도구는 bill 이 승인했다고 기록했다.
+INLINE_CODE = re.compile(r"(?P<t>`+)(?:(?!(?P=t))[^\n])*(?P=t)")
 
 
-def fence_spans(body: str):
-    """(닫힌 펜스 구간 [(시작줄, 끝줄)], 안 닫힌 펜스가 있나)
 
-    ★마크다운 규칙대로 센다★ (codex BLOCKER, 2026-07-29):
-      · ★여는 문자를 유지한다★ — ``` 은 ~~~ 로 닫히지 않는다
-      · ★닫는 펜스는 여는 것 이상으로 길어야 한다★ — ```` 는 ``` 로 닫히지 않는다
-      · ★닫는 줄에는 그 문자 말고 아무것도 없어야 한다★
-    ★전에는 셋 다 무시하고 '펜스처럼 생긴 줄' 을 켜고 끄기만 했다★ — 그래서
-    ```` ```(열고) → ~~~ → 서명 ````  이 통과했다(실측). 화면에서는 전부 코드 안인데.
+def visible_text(body: str):
+    """(사람이 화면에서 읽는 것에 가까운 텍스트, 차단사유 or "")
+
+    ★이 게이트의 결함은 전부 한 부류였다★ — ★화면과 원문이 갈리는 것.★
+    그래서 변종마다 막지 않고 ★'화면에서 사라지는 상태' 를 거부하고, 나머지는 화면 기준으로 본다.★
+
+    ★펜스와 주석을 따로 훑으면 반드시 어느 한쪽이 틀린다★ (2026-07-29, 두 번 겪었다):
+      · 펜스를 먼저 걷으면 ★펜스 안의 여는 토큰이 펜스 밖 닫는 토큰과 짝지어 본문을 지운다★ (hermes)
+      · 주석을 먼저 걷으면 ★인라인 코드·펜스 안의 토큰이 주석을 여는 것으로 잡혀 정당한 승인이 막힌다★ (steve)
+    ★둘은 서로를 가리므로 한 번에 훑어야 한다.★ 아래는 위에서 아래로 한 번 지나가며
+    ★그 자리에서 무엇이 먼저 열렸는지★ 를 따라간다 — 마크다운 파서가 하는 일과 같은 순서다.
+
+    걷어내는 것: 펜스 블록 · 안 닫힌 주석 뒤 전부 · 닫힌 주석 안 · 인라인 코드 ·
+                 들여쓴 코드블록(4칸+) · 인용줄(>)  — ★전부 '예시' 이거나 '안 보이는 것' 이다.★
     """
     lines = body.split("\n")
-    spans, i, unclosed = [], 0, False
+    out, i = [], 0
+    fence = None            # (문자, 길이) — 열려 있는 펜스
+    in_comment = False      # 여는 주석 안 (닫는 토큰을 기다리는 중)
     while i < len(lines):
-        m = FENCE_OPEN.match(lines[i])
-        if not m:
-            i += 1
+        line = lines[i]
+        i += 1
+        if fence is not None:
+            if re.match(r"^ {0,3}" + re.escape(fence[0]) + "{" + str(fence[1]) + r",}[ \t]*$", line):
+                fence = None
+            continue                                  # 펜스 안은 통째로 예시다
+        if in_comment:
+            j = line.find("-->")
+            if j < 0:
+                continue                              # 아직 주석 안 — 화면에 없다
+            in_comment = False
+            line = line[j + 3:]                       # 닫힌 뒤부터는 다시 본문이다
+        m = FENCE_OPEN.match(line)
+        if m and not (m.group("fence")[0] == "`" and "`" in m.group("info")):
+            fence = (m.group("fence")[0], len(m.group("fence")))
             continue
-        fence = m.group("fence")
-        char, width = fence[0], len(fence)
-        # 백틱 펜스의 info 문자열에 백틱이 있으면 펜스가 아니다(마크다운 규칙)
-        if char == "`" and "`" in m.group("info"):
-            i += 1
-            continue
-        closer = re.compile(r"^ {0,3}" + re.escape(char) + "{" + str(width) + r",}[ \t]*$")
-        j = i + 1
-        while j < len(lines) and not closer.match(lines[j]):
-            j += 1
-        if j < len(lines):
-            spans.append((i, j))
-            i = j + 1
-        else:
-            unclosed = True
+        # ★인라인 코드를 먼저 지운다★ — 코드 안의 토큰은 주석을 열지 않는다
+        line = INLINE_CODE.sub("", line)
+        while True:
+            a = line.find("<!--")
+            if a < 0:
+                break
+            b = line.find("-->", a + 4)
+            if b >= 0:
+                line = line[:a] + line[b + 3:]        # 한 줄 안에서 닫혔다
+                continue
+            line = line[:a]                           # 여기서부터 안 보인다
+            in_comment = True
             break
-    return spans, unclosed
+        if re.match(r"^ {4,}\S", line):               # ★4칸 이상 들여쓴 줄 = 들여쓴 코드블록★
+            continue
+        if re.match(r"^ {0,3}>", line):               # ★인용줄★ — 남의 서명을 인용한 것이다
+            continue
+        out.append(line)
 
-
-def strip_examples(body: str) -> str:
-    """★예시로 보이는 것을 서명 후보에서 뺀다★ — 닫힌 펜스 · 인라인 코드 · 닫힌 HTML 주석.
-
-    ★순서가 중요하다★ (steve·hermes): 펜스를 먼저 걷어내야
-    ★펜스 안의 `<!--` 예시가 펜스 밖 `-->` 와 짝지어 본문을 지우는 일★ 이 안 생긴다.
-    """
-    lines = body.split("\n")
-    spans, _ = fence_spans(body)
-    drop = set()
-    for a, b in spans:
-        drop.update(range(a, b + 1))
-    text = "\n".join(l for k, l in enumerate(lines) if k not in drop)
-    text = INLINE_CODE.sub("", text)
-    return re.sub(r"<!--.*?-->", "", text, flags=re.S)
-
-
-def ambiguous_markup(body: str):
-    """★사람이 보는 화면과 이 도구가 읽는 원문이 갈릴 수 있으면 (True, 이유).★
-
-    ★이 게이트의 결함은 전부 이 한 가지 부류였다★ (하네스 실측 2026-07-29):
-      · 안 닫힌 코드펜스 → 화면엔 예시로 보이는데 원문에선 ★마지막 줄★ 이라 서명이 된다
-      · 안 닫힌 `<!--`   → ★화면에서는 통째로 사라지는데★ 원문에는 남아 서명이 된다
-    변종마다 막지 않고 ★'갈릴 수 있는 상태' 자체를 거부한다★ — 이 파일의 계약이 '모르면 막는다' 다.
-
-    ★단, 넓게 막으면 규칙을 지키려는 사람이 막힌다★ (steve 실측):
-      · 안 닫힌 펜스는 ★원문에서★ 본다 — 안 닫혔으면 스트립 결과 자체를 믿을 수 없다
-      · 주석은 ★펜스·인라인 코드를 걷어낸 뒤★ 보고, ★여는 게 닫는 것보다 많을 때만★ 막는다.
-        `!=` 로 보면 ★표에 쓰는 화살표(닫는 토큰 모양)만 있어도 막혔다★ — 여는 토큰이 하나도 없는데.
-        ★가리는 것은 여는 토큰뿐이다.★ 닫는 토큰만 떠 있으면 아무것도 안 가려진다.
-    """
-    _, unclosed = fence_spans(body)
-    if unclosed:
-        return True, ("the approval body has an UNCLOSED code fence (``` or ~~~) — "
-                      "what a reader sees and what this tool reads can differ, so the signature is not trusted; "
-                      "close the fence and re-approve")
-    visible = strip_examples(body)
-    if visible.count("<!--") > visible.count("-->"):
-        return True, ("the approval body has an UNCLOSED HTML comment (<!-- without -->) outside code — "
-                      "everything after it disappears from the rendered view while this tool still reads it; "
-                      "close the comment and re-approve")
-    return False, ""
+    if fence is not None:
+        return "", ("the approval body opens a code fence (``` or ~~~) that is never closed — "
+                    "everything after it renders as code, so what a reader sees is not a signature. "
+                    "Close the fence and re-approve")
+    if in_comment:
+        return "", ("the approval body opens an HTML comment (<!--) that is never closed — "
+                    "everything after it disappears from the rendered view while this tool still reads it. "
+                    "If you meant to mention the token, wrap it in `backticks`; otherwise close the comment")
+    return "\n".join(out), ""
 
 
 def last_line(body: str) -> str:
@@ -184,12 +177,16 @@ def why_no_approval(reviews, final_states) -> str:
     """
     if not reviews:
         return "no review on this PR at all — request a review and get an approval first"
-    if any(s == "DISMISSED" for s in final_states):
+    if not final_states:
+        return "no review from the approver account on this PR — request a review and get an approval first"
+    # ★마지막 상태가 원인이다★ — any() 로 보면 앞선 상태가 나중 상태를 이겨 ★틀린 원인을 단언한다.★
+    last = final_states[-1]
+    if last == "DISMISSED":
         return ("the approval was DISMISSED — a push after the approval dismisses it "
                 "(branch protection: dismiss_stale_reviews). Ask for a re-approval on the current commits")
-    if any(s == "CHANGES_REQUESTED" for s in final_states):
+    if last == "CHANGES_REQUESTED":
         return "the approval was withdrawn — a later CHANGES_REQUESTED supersedes the earlier approval"
-    return "no standing approval on this PR (reviews exist, but none of them is a current APPROVED)"
+    return f"no standing approval from the approver account (its latest review state is {last or 'unknown'})"
 
 
 def check(settings, reviews, pr_author):
@@ -236,11 +233,15 @@ def check(settings, reviews, pr_author):
         if others:
             return False, (f"no approval from the approver account {appr} — "
                            f"these accounts approved but do not count: {', '.join(others)}")
-        states = [(r.get("state") or "") for r in
-                  {((rr.get("user") or {}).get("login")) or "?": rr
-                   for rr in sorted([x for x in reviews if isinstance(x, dict)],
-                                    key=lambda x: x.get("submitted_at") or "")}.values()]
-        return False, why_no_approval(reviews, states)
+        # ★원인은 '승인 계정이 무엇을 했나' 로 판단한다★ — 아무 계정의 상태나 섞으면
+        #   ★남이 DISMISS 된 것을 보고 "당신 승인이 폐기됐다" 고 단언한다★ (내 적대 하네스 실측).
+        #   COMMENTED 를 빼는 것도 standing_approvals 와 맞춘다 — 안 맞추면 원인 구분이 어긋난다.
+        mine_states = [(r.get("state") or "")
+                       for r in sorted([x for x in reviews if isinstance(x, dict)],
+                                       key=lambda x: x.get("submitted_at") or "")
+                       if ((r.get("user") or {}).get("login") or "").lower() == appr.lower()
+                       and (r.get("state") or "") != "COMMENTED"]
+        return False, why_no_approval(reviews, mine_states)
 
     signed = []
     for acct, r in mine:
@@ -248,13 +249,10 @@ def check(settings, reviews, pr_author):
         #   ★'서명이 여럿' 검사를 조용히 통과했다.★
         body = (r.get("body") or "").replace("\\r\\n", "\n").replace("\\n", "\n").replace("\r\n", "\n")
 
-        # ★화면과 원문이 갈릴 수 있으면 여기서 멈춘다★ — 서명을 읽기 전에 본다.
-        bad, why = ambiguous_markup(body)
-        if bad:
+        # ★화면과 원문이 갈릴 수 있으면 여기서 멈추고, 아니면 화면 기준으로 본다.★
+        candidate, why = visible_text(body)
+        if why:
             return False, why
-
-        # ★예시(닫힌 펜스·닫힌 주석)를 뺀 뒤에 센다★ — 규약 문서를 인용해도 막히지 않게.
-        candidate = strip_examples(body)
 
         # ★서명 모양이 둘 이상이면 모호하다★ (ames): 마지막 줄만 보면 앞의 것이 조용히 무시돼
         #   ★누가 승인했는지가 갈린다.★ ★엄격 형식이 아니라 '시도한 줄' 을 센다★ — 엄격 정규식으로 세면
