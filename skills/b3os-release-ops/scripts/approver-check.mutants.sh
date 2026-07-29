@@ -130,9 +130,11 @@ mutate "⑱ ★펜스 길이 조건 제거★ (긴 펜스를 짧은 펜스로 �
   '+ "{" + str(fence[1]) + r",}[ \t]*$"' \
   '+ "{3,}[ \t]*$"'
 
-mutate "⑲ ★들여쓰기 3칸 제한을 풀기★ (들여쓴 코드블록을 펜스로 오인)" \
-  'r"^(?P<indent> {0,3})(?P<fence>' \
-  'r"^(?P<indent>[ \t]*)(?P<fence>'
+# ⑲ ★펜스 정규식의 '들여쓰기 3칸 제한' 은 이제 뮤턴트로 못 잰다 — 그래서 안 넣는다.★
+#   ★들여쓴 코드블록을 먼저 걷어내는 가드(㉘)가 그 줄을 이미 건너뛴다.★ 제한을 풀어도
+#   그 줄이 펜스 판정에 도달하지 못해 ★결과가 안 바뀐다.★
+#   ★가드 둘이 같은 것을 덮으면 변이가 결과를 못 바꾸고, 그건 '시험이 없다' 와 구분이 안 된다.★
+#   (동작 자체는 ㉘ 이 덮는다 — 앞선 건너뛰기를 지우면 빨개진다)
 
 mutate "⑳ ★주석을 왼쪽부터 훑지 않고 개수로 판정★ (고아 닫는 토큰이 상쇄 — codex·hermes BLOCKER)" \
   '            line = line[:a]                           # 여기서부터 안 보인다
@@ -144,9 +146,19 @@ mutate "㉑ ★펜스와 주석을 한 번에 훑지 않음★ (펜스 안 토�
   '            continue                                  # 펜스 안은 통째로 예시다' \
   '            pass'
 
-mutate "㉒ ★인라인 코드를 안 걷어냄★ (코드 안 토큰 언급이 막힘 — steve)" \
-  '        line = INLINE_CODE.sub("", line)' \
-  '        line = line'
+mutate "㉒ ★코드 스팬 가림막을 안 씀★ (코드 안 토큰 언급이 막힘 — steve)" \
+  '        probe, span = blank_code_spans(line, span)' \
+  '        probe, span = line, span'
+
+mutate "㉓ ★가림막이 아니라 본문을 지움★ (화면에 없는 서명을 만들어냄 — demis 3차)" \
+  '                line = line[:a] + line[b + 3:]        # 한 줄 안에서 닫혔다
+                probe = probe[:a] + probe[b + 3:]' \
+  '                line = probe[:a] + probe[b + 3:]
+                probe = probe[:a] + probe[b + 3:]'
+
+mutate "㉘ ★들여쓴 코드블록을 주석보다 늦게 걷어냄★ (코드 안 토큰이 주석을 염 — codex 3차)" \
+  '        elif span == 0 and re.match(r"^ {4,}' \
+  '        elif False and re.match(r"^ {4,}'
 
 # ㉓ ★'인라인 코드가 줄을 넘는다' 는 이제 뮤턴트로 못 잰다 — 그래서 안 넣는다.★
 #   예전엔 정규식 플래그(re.S)가 막았지만, 지금은 ★스캐너가 한 줄씩 처리하는 구조★ 가 막는다.
@@ -160,11 +172,7 @@ mutate "㉔ ★인용줄을 중복으로 셈★ (남의 서명을 인용하면 �
   '        if False:
             continue'
 
-mutate "㉕ ★들여쓴 코드블록을 중복으로 셈★ (엄격·느슨 판정이 어긋남 — 내 하네스)" \
-  '        if re.match(r"^ {4,}\S", line):               # ★4칸 이상 들여쓴 줄 = 들여쓴 코드블록★
-            continue' \
-  '        if False:
-            continue'
+# ㉕ 는 ㉘ 로 대체됐다 — 들여쓴 코드블록 처리가 주석보다 앞으로 옮겨가 대상 줄이 사라졌다.
 
 mutate "㉖ ★목록 표시가 붙은 서명을 중복으로 안 셈★ (두 이름이 통과 — 내 하네스)" \
   'LOOSE_TRAILER = re.compile(r"^[ \t*_`#+\-　]*(?:\d+[.)][ \t]*)?approved-by[ \t]*:", re.I | re.M)' \

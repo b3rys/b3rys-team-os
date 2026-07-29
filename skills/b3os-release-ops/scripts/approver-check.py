@@ -56,7 +56,33 @@ INLINE_CODE = re.compile(r"(?P<t>`+)(?:(?!(?P=t))[^\n])*(?P=t)")
 
 
 
-def visible_text(body: str):
+def blank_code_spans(line: str, span: int):
+    """(코드 스팬 내용을 공백으로 바꾼 줄, 줄 끝에 아직 열려 있는 백틱 개수)
+
+    ★지우지 않고 공백으로 바꾼다★ (codex 3차): 양끝을 이어붙이면
+    ★원문에 없던 서명 줄★ 이 생긴다 — 내가 앞 라운드에서 실제로 그렇게 만들었다.
+    ★닫는 백틱 런은 여는 것과 개수가 같아야 한다★ (CommonMark).
+    """
+    out, i, n = [], 0, len(line)
+    while i < n:
+        if line[i] != "`":
+            out.append(" " if span else line[i])
+            i += 1
+            continue
+        m = i
+        while m < n and line[m] == "`":
+            m += 1
+        run = m - i
+        out.append(" " * run)
+        if span == 0:
+            span = run
+        elif run == span:
+            span = 0                     # 같은 개수로 닫혔다
+        i = m
+    return "".join(out), span
+
+
+def visible_text(body: str, use_code_spans: bool = True):
     """(사람이 화면에서 읽는 것에 가까운 텍스트, 차단사유 or "")
 
     ★이 게이트의 결함은 전부 한 부류였다★ — ★화면과 원문이 갈리는 것.★
@@ -75,6 +101,7 @@ def visible_text(body: str):
     out, i = [], 0
     fence = None            # (문자, 길이) — 열려 있는 펜스
     in_comment = False      # 여는 주석 안 (닫는 토큰을 기다리는 중)
+    span = 0                # 열려 있는 인라인 코드의 백틱 개수 (0 = 없음)
     while i < len(lines):
         line = lines[i]
         i += 1
@@ -88,25 +115,40 @@ def visible_text(body: str):
                 continue                              # 아직 주석 안 — 화면에 없다
             in_comment = False
             line = line[j + 3:]                       # 닫힌 뒤부터는 다시 본문이다
-        m = FENCE_OPEN.match(line)
-        if m and not (m.group("fence")[0] == "`" and "`" in m.group("info")):
-            fence = (m.group("fence")[0], len(m.group("fence")))
+        elif span == 0 and re.match(r"^ {4,}\S", line):
+            # ★들여쓴 코드블록은 주석 토큰보다 먼저 걷어낸다★ (codex 3차 BLOCKER):
+            #   나중에 걷으면 ★코드 안의 여는 토큰이 먼저 주석을 열어★ 뒤의 정당한 서명이 막혔다.
+            #   ★이미 주석 안이면 주석 상태가 이긴다★ — 주석 안에서는 코드블록이 안 열린다.
             continue
-        # ★인라인 코드를 먼저 지운다★ — 코드 안의 토큰은 주석을 열지 않는다
-        line = INLINE_CODE.sub("", line)
+        if span == 0:
+            m = FENCE_OPEN.match(line)
+            if m and not (m.group("fence")[0] == "`" and "`" in m.group("info")):
+                fence = (m.group("fence")[0], len(m.group("fence")))
+                continue
+        # ★코드 스팬은 '가림막' 으로만 쓰고 본문은 그대로 둔다★ (demis 3차 BLOCKER)
+        #   ★렌더링에서 코드 스팬은 사라지지 않는다.★ 지우거나 공백으로 바꾸면 ★양옆이 붙어
+        #   화면에 없는 서명이 만들어진다★ — demis 실측:
+        #     화면 "Approved-by: (백틱)x(백틱)bill"  → 도구가 "Approved-by: bill" 로 읽고 통과
+        #     화면 "Approved(백틱)z(백틱)-by: bill"  → ★화면엔 서명 형식으로 보이지도 않는데★ 통과
+        #   → ★주석 토큰을 찾을 때만 같은 길이로 가리고, 서명 판정은 원문으로 한다.★
+        #     길이를 보존하므로 probe 에서 찾은 위치를 line 에 그대로 쓸 수 있다.
+        #   코드 스팬은 ★줄을 넘을 수 있다★ (codex 3차: CommonMark 가 인정한다).
+        probe, span = blank_code_spans(line, span)
+        if span > 0:
+            out.append(line)                          # 아직 코드 스팬 안 — 주석 토큰은 안 센다
+            continue
         while True:
-            a = line.find("<!--")
+            a = probe.find("<!--")
             if a < 0:
                 break
-            b = line.find("-->", a + 4)
+            b = probe.find("-->", a + 4)
             if b >= 0:
                 line = line[:a] + line[b + 3:]        # 한 줄 안에서 닫혔다
+                probe = probe[:a] + probe[b + 3:]
                 continue
             line = line[:a]                           # 여기서부터 안 보인다
             in_comment = True
             break
-        if re.match(r"^ {4,}\S", line):               # ★4칸 이상 들여쓴 줄 = 들여쓴 코드블록★
-            continue
         if re.match(r"^ {0,3}>", line):               # ★인용줄★ — 남의 서명을 인용한 것이다
             continue
         out.append(line)

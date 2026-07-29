@@ -230,6 +230,22 @@ case("★남의 리뷰가 나중에 DISMISSED 여도 내 반려를 반려라고 
       review("검토중", acct="randomdev", state="DISMISSED", at="2026-07-03T00:00:00Z")],
      expect_msg="withdrawn")
 
+# ══ 3차 리뷰 — ★코드 스팬은 '가림막' 이지 '지우는 것' 이 아니다★ (codex·demis) ══
+# ★렌더링에서 코드 스팬은 사라지지 않는다.★ 지우면 양옆이 붙어 ★화면에 없는 서명★ 이 생긴다.
+case("★들여쓴 코드블록 안의 여는 토큰은 주석을 열지 않는다★ (codex)", True, SETTINGS,
+     [review("예시:\n\n    " + _OPEN + "\n\n확인했습니다.\nApproved-by: bill")])
+case("★여러 줄 코드 스팬 안의 여는 토큰도 주석을 열지 않는다★ (codex)", True, SETTINGS,
+     [review("예시: " + _B + _OPEN + "\n여전히 코드" + _B + "\n\nApproved-by: bill")])
+# ★아래 둘은 화면에 백틱이 그대로 보인다★ — 사람은 서명으로 안 읽는데 도구만 서명으로 읽으면 안 된다
+case("★서명 안에 코드 스팬이 있으면 막는다★ (지우면 통과했다 — demis)", False, SETTINGS,
+     [review("Approved-by: " + _B + "x" + _B + "bill")])
+case("★서명 형식이 코드로 쪼개져 있으면 막는다★ (화면엔 서명으로 보이지도 않는다 — demis)", False, SETTINGS,
+     [review("Approved" + _B + "z" + _B + "-by: bill")])
+# ★주석을 잘라낼 때도 가림막이 아니라 원문을 남겨야 한다★ — 가림막을 본문에 쓰면
+#   코드 스팬이 공백이 되어 ★화면에 없는 서명★ 이 만들어진다(같은 결함의 다른 경로).
+case("★주석이 같은 줄에서 닫혀도 서명은 원문으로 판정한다★", False, SETTINGS,
+     [review("Approved-by: " + _B + "x" + _B + "bill " + _OPEN + " 메모 " + _CLOSE)])
+
 # ★'모양은 맞는데 안 맞다' 를 구분해 말한다★ — 사용자 눈에는 정확히 그 줄이라 원인을 못 찾았다
 for _tag, _body in [("@멘션", "Approved-by: @bill"), ("기호", "Approved-by: bill ✦"),
                     ("NBSP", "Approved-by: bill\xa0"), ("볼드", "**Approved-by: bill**"),
