@@ -675,10 +675,16 @@ export function skipScheduledJob(
      VALUES (?, ?, ?, ?, ?, 'skipped', ?)`,
   ).run(runId, job.id, job.next_run_at, nowSql, nowSql, JSON.stringify({ reason, ...(opts.detail ?? {}) }));
   const nextRun = job.kind === "recurring" ? computeNextRun(db, job, now) : null;
-  // A dry-run is still a consumed occurrence. Leaving a one-shot pending with its
-  // past next_run_at makes every worker tick claim and record it forever.
-  const nextStatus = job.kind === "oneshot" ? "succeeded" : "pending";
-  const enabled = job.kind === "oneshot" ? 0 : job.enabled;
+  // A skip is still a consumed occurrence — it bumps run_count. So it must honor max_runs
+  // exactly like completeScheduledJob does, or the last allowed slot being skipped lets
+  // the job run one MORE time and overshoot its cap. (codex review; latent since dry-run,
+  // reachable in practice now that misfire skipping exists.)
+  const exhausted = job.max_runs != null && job.run_count + 1 >= job.max_runs;
+  // Leaving a one-shot pending with its past next_run_at makes every worker tick claim
+  // and record it forever.
+  const done = job.kind === "oneshot" || exhausted || nextRun == null;
+  const nextStatus = done ? "succeeded" : "pending";
+  const enabled = done ? 0 : job.enabled;
   db.prepare(
     `UPDATE scheduled_job
        SET status = ?,
@@ -966,12 +972,26 @@ export async function runDueSchedulerJobsOnce(
     // Stale slot → skip forward instead of firing late. skipScheduledJob records a
     // 'skipped' run (so this is visible in history, not a silent disappearance) and
     // advances next_run_at, exactly like any other consumed occurrence.
+    //
+    // Recurring ONLY. A one-shot has no next occurrence, so skipping it does not defer
+    // the notification — it destroys it, permanently, and the user never sees the history
+    // row. "결제 마감" arriving late beats never arriving. Opt a one-shot into skipping
+    // with misfire_policy = 'skip'. (codex review)
     const graceSec = misfireGraceSec();
     const lateSec = lateBySec(claimed, now);
-    if (graceSec > 0 && lateSec > graceSec && claimed.misfire_policy !== "catch_up_once") {
+    const misfireSkippable = claimed.kind === "recurring" || claimed.misfire_policy === "skip";
+    if (misfireSkippable && graceSec > 0 && lateSec > graceSec && claimed.misfire_policy !== "catch_up_once") {
       skipScheduledJob(db, claimed, "misfire_stale", {
         now,
-        detail: { lateSec: Math.round(lateSec), graceSec },
+        // Both timestamps, not just "late by N": a long preceding exec delays this
+        // decision, and without the decision time you cannot tell a genuinely stale slot
+        // from one that went stale waiting behind a slow job. (steve review)
+        detail: {
+          lateSec: Math.round(lateSec),
+          graceSec,
+          dueAt: claimed.next_run_at,
+          decidedAt: toSqliteDate(now),
+        },
       });
       results.push({ jobId: job.id, status: "skipped" });
       continue;

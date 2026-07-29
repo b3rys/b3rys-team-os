@@ -617,6 +617,66 @@ describe("b3os scheduler misfire grace", () => {
     expect(results[0]?.status).toBe("succeeded");
   });
 
+  // A one-shot has no next occurrence. Skipping it does not defer the notification,
+  // it destroys it — and the user never sees the history row. (codex review)
+  test("a stale one-shot reminder still fires — late beats never", async () => {
+    const d = db();
+    scheduleReminder(d, {
+      targetAgentId: "dex",
+      body: "[예약 알림] 결제 마감",
+      runAt: new Date(NOW.getTime() - 48 * 3600_000),
+      createdBy: "dex",
+    });
+    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    expect(results[0]?.status).toBe("succeeded");
+    expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 1 });
+  });
+
+  test("a one-shot can opt into skipping with misfire_policy 'skip'", async () => {
+    const d = db();
+    const job = scheduleReminder(d, {
+      targetAgentId: "dex",
+      body: "[예약 알림] 지나면 의미 없음",
+      runAt: new Date(NOW.getTime() - 48 * 3600_000),
+      createdBy: "dex",
+    });
+    d.prepare(`UPDATE scheduled_job SET misfire_policy = 'skip' WHERE id = ?`).run(job.id);
+    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    expect(results[0]?.status).toBe("skipped");
+    expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 0 });
+  });
+
+  // A skip bumps run_count, so it must end the job at max_runs exactly like a real run.
+  // Otherwise skipping the last allowed slot buys the job one extra run. (codex review)
+  test("skipping the last allowed slot does not let a max_runs job overshoot", async () => {
+    const d = db();
+    const job = overdueDailyJob(d, "m_cap", 8, NOW);
+    d.prepare(`UPDATE scheduled_job SET max_runs = 1, run_count = 0 WHERE id = ?`).run(job.id);
+    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    expect(results[0]?.status).toBe("skipped");
+    const after = getScheduledJob(d, job.id)!;
+    expect(after.run_count).toBe(1);
+    // Cap consumed → the job is done, not waiting for one more turn.
+    expect(after.enabled).toBe(0);
+    expect(after.status).toBe("succeeded");
+    // And a later tick must not resurrect it.
+    const later = await withGrace(undefined, () =>
+      runDueSchedulerJobsOnce(d, { now: new Date(NOW.getTime() + 7 * 24 * 3600_000) }),
+    );
+    expect(later).toEqual([]);
+    expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 0 });
+  });
+
+  test("a recurring job under its max_runs cap keeps going after a skip", async () => {
+    const d = db();
+    const job = overdueDailyJob(d, "m_cap_ok", 8, NOW);
+    d.prepare(`UPDATE scheduled_job SET max_runs = 5, run_count = 0 WHERE id = ?`).run(job.id);
+    await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    const after = getScheduledJob(d, job.id)!;
+    expect(after.enabled).toBe(1);
+    expect(after.status).toBe("pending");
+  });
+
   test("many overdue jobs in one tick are all skipped — the boot burst is why this exists", async () => {
     const d = db();
     for (let i = 0; i < 5; i++) overdueDailyJob(d, `m_burst${i}`, 24 + i, NOW, i % 2 === 0 ? undefined : "coalesce");
