@@ -881,6 +881,34 @@ export async function execScheduledJob(
 const DEFAULT_LEASE_SEC = 120;
 const EXEC_LEASE_MARGIN_SEC = 60;
 
+/**
+ * Misfire grace: a slot missed by more than this is skipped, not run late.
+ *
+ * Why (GD, 2026-07-29): the Mac gets shut down for days at a time. Every job's next_run_at
+ * goes into the past, so on the next boot they ALL become due in the same tick. Each one
+ * fires only once — next_run_at is recomputed forward from `now` and there is no backfill —
+ * but 11 jobs landing together is still a burst, and a "06:00 task review ping" delivered
+ * at 14:00 is noise, not a reminder. What is useful is the NEXT occurrence, not the stale one.
+ *
+ * Escape hatches, both pre-existing concepts:
+ *   SCHEDULER_MISFIRE_GRACE_SEC=0   → never skip (run every late slot, old behavior)
+ *   misfire_policy = 'catch_up_once' → this job runs however late it is
+ */
+const DEFAULT_MISFIRE_GRACE_SEC = 2 * 60 * 60;
+
+function misfireGraceSec(): number {
+  const raw = process.env.SCHEDULER_MISFIRE_GRACE_SEC;
+  if (raw == null || raw === "") return DEFAULT_MISFIRE_GRACE_SEC;
+  const n = Number(raw);
+  // A malformed value must fall back to the default, not to some accidental behavior.
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_MISFIRE_GRACE_SEC;
+}
+
+/** How late this job's due slot is, in seconds. Negative/zero means on time. */
+function lateBySec(job: ScheduledJobRow, now: Date): number {
+  return (now.getTime() - fromSqliteDate(job.next_run_at).getTime()) / 1000;
+}
+
 export async function runDueSchedulerJobsOnce(
   db: Database,
   opts: {
@@ -932,6 +960,19 @@ export async function runDueSchedulerJobsOnce(
     const claimed = getScheduledJob(db, job.id)!;
     if (opts.dryRun) {
       skipScheduledJob(db, claimed, "dry_run", { now });
+      results.push({ jobId: job.id, status: "skipped" });
+      continue;
+    }
+    // Stale slot → skip forward instead of firing late. skipScheduledJob records a
+    // 'skipped' run (so this is visible in history, not a silent disappearance) and
+    // advances next_run_at, exactly like any other consumed occurrence.
+    const graceSec = misfireGraceSec();
+    const lateSec = lateBySec(claimed, now);
+    if (graceSec > 0 && lateSec > graceSec && claimed.misfire_policy !== "catch_up_once") {
+      skipScheduledJob(db, claimed, "misfire_stale", {
+        now,
+        detail: { lateSec: Math.round(lateSec), graceSec },
+      });
       results.push({ jobId: job.id, status: "skipped" });
       continue;
     }

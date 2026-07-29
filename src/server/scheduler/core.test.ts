@@ -519,3 +519,110 @@ describe("b3os scheduler exec jobs", () => {
 function toSqliteDateForTest(d: Date): string {
   return d.toISOString().slice(0, 19).replace("T", " ");
 }
+
+// Misfire grace — the Mac is off for days, then every overdue job comes due in one tick.
+// A stale slot must skip forward instead of firing late (GD, 2026-07-29).
+describe("b3os scheduler misfire grace", () => {
+  const GRACE_ENV = "SCHEDULER_MISFIRE_GRACE_SEC";
+
+  async function withGrace<T>(value: string | undefined, fn: () => Promise<T>): Promise<T> {
+    const prev = process.env[GRACE_ENV];
+    if (value === undefined) delete process.env[GRACE_ENV];
+    else process.env[GRACE_ENV] = value;
+    try {
+      return await fn();
+    } finally {
+      if (prev === undefined) delete process.env[GRACE_ENV];
+      else process.env[GRACE_ENV] = prev;
+    }
+  }
+
+  /** A recurring daily job whose due slot sits `lateHours` hours in the past. */
+  function overdueDailyJob(
+    d: ReturnType<typeof db>,
+    id: string,
+    lateHours: number,
+    now: Date,
+    misfirePolicy?: "coalesce" | "catch_up_once",
+  ) {
+    const job = createCronJob(d, {
+      id,
+      title: "daily ping",
+      cron: "0 6 * * *",
+      payload: {
+        type: "inbox",
+        envelope: { from_agent_id: "dex", to_agent_id: "dex", body: "[예약] daily", thread_id: "misfire" },
+      } as never,
+      targetAgentId: "dex",
+      createdBy: "dex",
+      misfirePolicy,
+    });
+    d.prepare(`UPDATE scheduled_job SET next_run_at = ? WHERE id = ?`).run(
+      toSqliteDateForTest(new Date(now.getTime() - lateHours * 3600_000)),
+      job.id,
+    );
+    return getScheduledJob(d, job.id)!;
+  }
+
+  const NOW = new Date("2026-07-29T05:00:00Z");
+
+  test("a slot missed by more than the grace window is skipped, not fired late", async () => {
+    const d = db();
+    const job = overdueDailyJob(d, "m_stale", 8, NOW);
+    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    expect(results).toHaveLength(1);
+    expect(results[0]?.status).toBe("skipped");
+    // No bus message — the whole point is that a stale reminder is noise, not a reminder.
+    expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 0 });
+    // Still scheduled: skipping advances the slot, it does not disable the job.
+    const after = getScheduledJob(d, job.id)!;
+    expect(after.enabled).toBe(1);
+    expect(fromSqliteDate(after.next_run_at).getTime()).toBeGreaterThan(NOW.getTime());
+    // Visible in history rather than silently vanishing.
+    const run = d
+      .prepare(`SELECT outcome, detail_json FROM scheduled_job_run WHERE job_id = ?`)
+      .get(job.id) as { outcome: string; detail_json: string };
+    expect(run.outcome).toBe("skipped");
+    expect(JSON.parse(run.detail_json).reason).toBe("misfire_stale");
+  });
+
+  test("a slot inside the grace window still fires", async () => {
+    const d = db();
+    overdueDailyJob(d, "m_fresh", 1, NOW);
+    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    expect(results[0]?.status).toBe("succeeded");
+    expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 1 });
+  });
+
+  test("misfire_policy catch_up_once still runs however late", async () => {
+    const d = db();
+    overdueDailyJob(d, "m_catchup", 72, NOW, "catch_up_once");
+    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    expect(results[0]?.status).toBe("succeeded");
+    expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 1 });
+  });
+
+  test("grace 0 disables skipping — every late slot fires (previous behavior)", async () => {
+    const d = db();
+    overdueDailyJob(d, "m_off", 72, NOW);
+    const results = await withGrace("0", () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    expect(results[0]?.status).toBe("succeeded");
+    expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 1 });
+  });
+
+  test("a malformed grace value falls back to the default, it does not skip everything", async () => {
+    const d = db();
+    overdueDailyJob(d, "m_bad", 1, NOW);
+    const results = await withGrace("nonsense", () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    expect(results[0]?.status).toBe("succeeded");
+  });
+
+  test("many overdue jobs in one tick are all skipped — the boot burst is why this exists", async () => {
+    const d = db();
+    for (let i = 0; i < 5; i++) overdueDailyJob(d, `m_burst${i}`, 24 + i, NOW, i % 2 === 0 ? undefined : "coalesce");
+    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW, limit: 20 }));
+    expect(results).toHaveLength(5);
+    expect(results.every((r) => r.status === "skipped")).toBe(true);
+    expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 0 });
+  });
+});
