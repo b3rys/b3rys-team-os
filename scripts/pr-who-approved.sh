@@ -18,7 +18,11 @@
 #
 # ★쓰는 쪽도 새고 있긴 하다★: 승인 본문 ★첫 줄에 이름★ 을 쓴다
 #   (skills/b3os-github-workflow/SKILL.md). 그런데 지키는 자리가 없었다.
-#   ★실측(최근 PR 45건 · 승인 35건): 이름 있음 17 / ★이름 없음 18 = 51%★★
+#   ★실측 — 창 크기에 따라 답이 달라진다(하네스 지적). 하나만 인용하면 오해를 만든다★
+#     최근 20 PR: 승인 17 · 모름  5 = ★29%★     최근 45 PR: 승인 35 · 모름 21 = 60%
+#     최근 60 PR: 승인 45 · 모름 31 = 68%
+#   ★규율은 뚜렷이 개선 중이다.★ 정직한 문장은 "최근에도 3~4건 중 1건은 누가 봤는지 모른다".
+#   (내가 처음 적은 51% 는 ★고치기 전 매처가 만든 값★ 이라 철회했다 — 그 매처는 언급을 서명으로 셌다)
 #   ★본문은 다들 충실했다.★ 리뷰를 안 한 게 아니라 ★이름만 안 적은 것★ 이다
 #   → 그래서 '더 잘 기억하기' 가 아니라 ★머지 직전에 보여주는 것★ 으로 푼다.
 #
@@ -29,13 +33,24 @@
 # ★이 스크립트는 아무것도 바꾸지 않는다★ — 읽기 전용이다. 머지도 안 한다.
 set -uo pipefail
 
-PR="${1:-}"
+# ★인자는 위치가 아니라 루프로 읽는다★ (하네스 실측):
+#   이전 판은 `[ "$2" = "--gate" ]` 라서 ★--gate 를 $2 에 안 쓰면 조용히 안 막았다.★
+#   `--Gate`·`--gate=1`·`-gate`·`<PR> --repo x --gate` 전부 통과했다.
+#   ★게이트를 끄는 데 오타 하나면 됐다.★ 모르는 인자는 이제 오류다.
+PR=""
 GATE=0
-[ "${2:-}" = "--gate" ] && GATE=1
-if [ -z "$PR" ]; then
-  echo "사용법: bash scripts/pr-who-approved.sh <PR번호> [--gate]" >&2
-  exit 2
-fi
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --gate) GATE=1 ;;
+    -h|--help) echo "사용법: bash scripts/pr-who-approved.sh <PR번호> [--gate]"; exit 0 ;;
+    -*) echo "✖ 모르는 인자: $1  (--gate 만 있습니다)" >&2; exit 2 ;;
+    *)  [ -n "$PR" ] && { echo "✖ PR 번호가 둘입니다: $PR, $1" >&2; exit 2; }; PR="$1" ;;
+  esac
+  shift
+done
+case "$PR" in
+  ''|*[!0-9]*) echo "사용법: bash scripts/pr-who-approved.sh <PR번호> [--gate]" >&2; exit 2 ;;
+esac
 
 REPO="${B3OS_REPO:-b3rys/b3rys-team-os}"
 
@@ -61,10 +76,17 @@ fi
 
 printf '  PR#%s · %s\n' "$PR" "$REPO"
 
-RESULT="$(MEMBERS="$MEMBERS" python3 - "$JSON" <<'PY'
+# ★JSON 은 argv 가 아니라 파일로 넘긴다★ — argv 면 리뷰가 많은 PR 에서
+#   `Argument list too long`(E2BIG) 이 나고, 그게 아래 '조용한 통과' 와 겹치면 최악이었다.
+TMPJSON="$(mktemp)"; trap 'rm -f "$TMPJSON"' EXIT
+printf '%s' "$JSON" > "$TMPJSON"
+
+# ★B3OS_PYTHON 은 시험 주입구★ — 판정기가 죽었을 때 게이트가 통과하지 않는지를
+#   시험으로 고정하려면 ★실패하는 판정기★ 를 넣어볼 수 있어야 한다.
+RESULT="$(MEMBERS="$MEMBERS" "${B3OS_PYTHON:-python3}" - "$TMPJSON" <<'PY'
 import json, os, sys, re
 try:
-    reviews = json.loads(sys.argv[1] or "[]")
+    reviews = json.load(open(sys.argv[1]))
 except Exception:
     print("PARSE_FAIL"); raise SystemExit(0)
 if not isinstance(reviews, list):
@@ -77,7 +99,10 @@ for tok in os.environ["MEMBERS"].split():
     MEMBERS[canon] = [canon] + [a for a in aka.split(",") if a]
 
 # ★승인 동사★ — 우리 관례가 "<이름> 승인합니다" 라 그 모양만 신뢰한다.
-VERB = r'(승인|approve[sd]?|lgtm)'
+VERB = r'(승인|재검증\s*완료|검토\s*완료|approve[sd]?|lgtm)'
+# ★동사 뒤에 이런 말이 오면 서명이 아니다★ (하네스 실측):
+#   '승인 필요' '승인 요청' '승인 이후 머지' '승인 안 했지만' — 전부 ★남의 승인 이야기★ 다.
+NOT_SIG = r'\s*(필요|요청|보류|대기|전|이후|후|안|못|없)' 
 
 def first_line(body: str) -> str:
     """첫 줄을 뽑는다.
@@ -90,7 +115,11 @@ def first_line(body: str) -> str:
     s = body.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\r\n", "\n")
     for line in s.split("\n"):
         # 마크다운 장식은 벗긴다 — `**Bill 승인합니다**`, `> Bill 승인`, `## Bill 승인`
-        t = re.sub(r'^[\s>#*_`\-]+', '', line)
+        # ★'>' 는 벗기지 않는다★ (하네스 실측): '> Steve 승인합니다' 는 ★남의 승인을 인용★ 한 것이라
+        #   벗기면 내 서명과 구분이 안 된다. 인용줄은 서명 후보에서 통째로 제외한다.
+        if re.match(r'^\s*>', line):
+            continue
+        t = re.sub(r'^[\s#*_`\-]+', '', line)
         t = re.sub(r'[\s*_`]+$', '', t)
         if t.strip():
             return t.strip()
@@ -111,8 +140,13 @@ def who_approved(first: str):
     # ★그 밖은 전부 '모름' 이다.★ 넓히면 언급이 서명으로 새고, 그게 이 도구를 쓸모없게 만든다.
     def anchored_hit(a: str) -> bool:
         a = re.escape(a.lower())
-        return bool(re.match(rf'^{a}\b[^\n]{{0,12}}?{VERB}', low)          # A
-                    or re.match(rf'^리뷰어\s*[:：]\s*{a}\b', low))          # B
+        # ★이름과 동사 사이를 '조사' 로만 좁힌다★ — 이전엔 12자를 아무거나 허용해서
+        #   'Bill 의 승인 이후 머지합니다' 가 bill 의 서명으로 잡혔다.
+        #   ★'의·은·는' 은 뺀다★ — 그건 대개 ★남의 승인을 말하는 어법★ 이다.
+        m = re.match(rf'^{a}\s*(님)?\s*(이|가)?\s*{VERB}', low)
+        if m and not re.match(NOT_SIG, low[m.end():]):
+            return True
+        return bool(re.match(rf'^리뷰어\s*[:：]\s*{a}\b', low))              # B
     # ★앵커가 둘 이상일 수는 없다★ — A·B 둘 다 ★줄 맨 앞★ 을 요구하므로 한 줄에 하나뿐이다.
     #   처음엔 '이름 여럿 → 모름' 분기를 뒀는데, 뮤턴트로 확인해보니 ★도달 불가능한 죽은 분기★ 였다
     #   (되돌려도 아무 시험이 안 빨개졌다 = 그 분기를 타는 입력이 존재하지 않는다).
@@ -128,7 +162,17 @@ def who_approved(first: str):
         return None, f"이름이 보이지만 서명 형태가 아님({'·'.join(mentioned)})"
     return None, "이름 없음"
 
-approvals = [r for r in reviews if isinstance(r, dict) and r.get("state") == "APPROVED"]
+# ★시간순으로 접는다★ (하네스 실측): 같은 계정이 승인 뒤 CHANGES_REQUESTED 를 내면
+#   GitHub 은 나중 것을 따르는데, 이전 판은 ★'Bill 이 승인함' 이라고 답했다.★
+def _ts(r): return (r or {}).get("submitted_at") or ""
+ordered = sorted([r for r in reviews if isinstance(r, dict)], key=_ts)
+final = {}
+for r in ordered:
+    st = r.get("state") or ""
+    if st == "COMMENTED":                      # 코멘트는 상태를 안 바꾼다
+        continue
+    final[((r.get("user") or {}).get("login")) or "?"] = r
+approvals = [r for r in final.values() if r.get("state") == "APPROVED"]
 if not approvals:
     print("NO_APPROVAL"); raise SystemExit(0)
 
@@ -154,6 +198,19 @@ case "$RESULT" in
     echo "  ★승인 0건★ — 아직 아무도 승인하지 않았습니다."
     [ "$GATE" = "1" ] && exit 1
     exit 0 ;;
+esac
+
+# ★★판정이 아예 안 일어났으면 '통과' 가 아니라 '확인 불가' 다★★ (하네스가 잡은 최악의 결함)
+#   `set -e` 가 없어서, python3 가 없거나 죽으면 RESULT 가 ★빈 문자열★ 이 되고
+#   아래 루프가 한 번도 안 돌아 UNKNOWN 이 0 인 채 ★exit 0 — 게이트가 조용히 통과★ 했다.
+#   ★검증이 0건 일어났는데 초록불★ — 이 스크립트가 막겠다고 선언한 바로 그 실패 방식이다.
+#   그래서 판정기가 마지막에 반드시 찍는 ★COUNT 센티넬★ 을 확인한다. 없으면 멈춘다.
+case "$RESULT" in
+  *"COUNT	"*) : ;;
+  *)
+    echo "  ✖ 판정이 실행되지 않았습니다 (python3 없음·비정상 종료 등) — ★'확인 불가' 입니다.★" >&2
+    echo "  ★승인 상태를 확인하지 못했으므로 통과시키지 않습니다.★" >&2
+    exit 2 ;;
 esac
 
 UNKNOWN=0
