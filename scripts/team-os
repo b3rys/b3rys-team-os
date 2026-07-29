@@ -37,21 +37,33 @@ _B="$(find_svc "com.$(id -un).claude-telegram-bill" "claude-telegram-bill" || tr
 SERVER="${_S%%|*}"; SERVER_PLIST="${_S#*|}"
 BILL="${_B%%|*}";   BILL_PLIST="${_B#*|}"
 
-# ★이 저장소에 속하고 '부팅 때 떠야 하는' 자동실행 전부★ — "라벨|plist" 줄들.
-#   ★이름을 고정하지 않는다★: 팀원 이름은 설치마다 다르다(공개 사용자·다른 맥).
-#   ★일정 작업(StartCalendarInterval)은 제외한다★ — 그건 때 되면 알아서 돈다.
-#   다시 등록하면 ★같은 일이 두 번 돈다.★
+# 이 저장소에 속하고 '켜 두면 계속 떠 있어야 하는' 자동실행 전부 — "라벨|plist" 줄들.
+#   이름을 고정하지 않는다: 팀원 이름은 설치마다 다르다(공개 사용자·다른 맥).
+#
+# 판별 기준 — 시간 트리거가 있으면 예약 작업, 없으면 상주 서비스.
+#   StartCalendarInterval / StartInterval 이 있으면 제외한다. 그건 때 되면 알아서 돌고,
+#   다시 등록하면 같은 일이 두 번 돈다. (codex 지적)
+#   RunAtLoad 만으로 거르면 안 된다 — KeepAlive 는 RunAtLoad 를 암묵적으로 포함하므로
+#   KeepAlive 만 있고 RunAtLoad 키가 없는 정상 상주 서비스가 빠진다. (codex 지적)
+has_key() { /usr/libexec/PlistBuddy -c "Print :$2" "$1" >/dev/null 2>&1; }
+
 boot_services() {
   local f lbl
   for f in "$HOME/Library/LaunchAgents"/*.plist; do
     [ -f "$f" ] || continue
     case "$f" in *.bak*) continue ;; esac
-    grep -q "$REPO" "$f" 2>/dev/null || continue
-    [ "$(/usr/libexec/PlistBuddy -c 'Print :RunAtLoad' "$f" 2>/dev/null)" = "true" ] || continue
+    # -F: 경로의 . 등이 정규식으로 해석되어 엉뚱한 파일에 맞는 것을 막는다 (codex 지적)
+    grep -Fq -- "$REPO" "$f" 2>/dev/null || continue
+    has_key "$f" StartCalendarInterval && continue
+    has_key "$f" StartInterval && continue
+    [ "$(/usr/libexec/PlistBuddy -c 'Print :RunAtLoad' "$f" 2>/dev/null)" = "true" ] \
+      || has_key "$f" KeepAlive || continue
     lbl="$(label_of "$f")"; [ -n "$lbl" ] || lbl="$(basename "$f" .plist)"
     printf '%s|%s\n' "$lbl" "$f"
   done
 }
+
+loaded() { launchctl print "gui/$(id -u)/$1" >/dev/null 2>&1; }
 
 alive() { [ "$(curl -s -o /dev/null -m 3 -w '%{http_code}' "$URL" 2>/dev/null || echo 000)" = "200" ]; }
 bill_up() { tmux ls 2>/dev/null | grep -q "claude-bill"; }
@@ -86,17 +98,22 @@ case "${1:-up}" in
     echo "■ 올립니다"
     # 안 떠 있는 것만 올린다. 이미 떠 있는 걸 다시 올리면 막 올라오던 것을 죽인다 (steve 지적).
     #   20초 안에 안 뜨면 사람은 up 을 다시 누르므로, 보호가 없으면 그 행동이 제일 나쁜 결과를 낸다.
+    FAILED=""
     while IFS='|' read -r _lbl _plist; do
       [ -n "$_lbl" ] || continue
-      if launchctl print "gui/$(id -u)/$_lbl" >/dev/null 2>&1; then
+      if loaded "$_lbl"; then
         echo "  · $_lbl (이미 등록됨)"
-      else
-        launchctl bootstrap "gui/$(id -u)" "$_plist" >/dev/null 2>&1
-        echo "  → $_lbl 등록"
+        continue
       fi
-    done <<EOF
-$(boot_services)
-EOF
+      # bootstrap 의 종료코드를 본다. 안 보면 다른 도메인 충돌·Disabled·깨진 plist 가
+      #   전부 '등록됨' 으로 찍힌다 — 복구 도구가 거짓말을 하는 것이 제일 나쁘다. (codex·steve 지적)
+      if _err="$(launchctl bootstrap "gui/$(id -u)" "$_plist" 2>&1)"; then
+        echo "  → $_lbl 등록"
+      else
+        echo "  ✗ $_lbl 등록 실패 — ${_err:-(메시지 없음)}"
+        FAILED="$FAILED $_lbl"
+      fi
+    done < <(boot_services)
     # 등록돼 있어도 응답이 없으면 죽은 것이다 — 그때만 다시 올린다.
     if alive; then
       echo "  · 서버 응답 정상"
@@ -112,10 +129,45 @@ EOF
     fi
     echo "■ 20초 기다립니다…"; sleep 20
     echo "■ 결과"; show
-    alive && echo && echo "  ★됐습니다. 텔레그램으로 빌한테 말 거세요.★"
+    # 전부 실제로 살아 있는지 다시 본다. 등록만 되고 바로 죽어도 '됐습니다' 가 나오면
+    #   이 도구는 쓸모가 없다 — 안 뜬 걸 찾으라고 만든 도구다. (codex 지적)
+    #
+    # 두 종류를 다르게 봐야 한다. 실측으로 확인한 것:
+    #   서버·다리 = 계속 떠 있는다        → state = running
+    #   팀원       = 띄워놓고 자기는 끝난다 → state = not running + last exit code = 0
+    #   그래서 running 만 보면 ★정상인 팀원 5명을 전부 죽었다고 보고한다.★ (실제로 그랬다)
+    #   문제인 경우는 하나다 — 마지막 종료코드가 0 이 아닌 것.
+    NOTUP=""
+    while IFS='|' read -r _lbl _plist; do
+      [ -n "$_lbl" ] || continue
+      if ! loaded "$_lbl"; then NOTUP="$NOTUP $_lbl"; continue; fi
+      _st="$(launchctl print "gui/$(id -u)/$_lbl" 2>/dev/null)"
+      case "$_st" in *"state = running"*) continue ;; esac
+      case "$_st" in *"last exit code = 0"*) continue ;; esac
+      NOTUP="$NOTUP $_lbl"
+    done < <(boot_services)
+    if [ -n "$FAILED" ]; then
+      echo; echo "  등록 실패:$FAILED"
+    fi
+    if [ -n "$NOTUP" ]; then
+      echo; echo "  아직 안 떴습니다:$NOTUP"
+      echo "  → team-os doctor 를 돌리고 나온 내용을 팀원에게 주세요."
+      exit 1
+    fi
+    if alive; then
+      echo; echo "  됐습니다. 텔레그램으로 팀원에게 말 거세요."
+    else
+      echo; echo "  서버가 아직 응답하지 않습니다 → team-os doctor"
+      exit 1
+    fi
     ;;
   down)
-    echo "■ 내립니다"
+    # up 은 전부 올리는데 down 은 서버·빌만 내린다. 일부러 비대칭이다 — 고치지 마라. (steve)
+    #   up 은 복구라서 넓게 거는 쪽이 안전하다(멱등이고 떠 있는 건 안 건드린다).
+    #   down 은 파괴라서 좁게 거는 쪽이 안전하다. 7개를 다 내리면
+    #   '서버만 잠깐 끄려던' 사람이 감시기까지 죽여놓고 되살리는 법을 모른다.
+    #   이 주석이 없으면 다음 사람이 '비대칭이네' 하고 맞춰버린다.
+    echo "■ 내립니다 (서버와 빌만)"
     need "$SERVER" "서버" && { launchctl bootout "gui/$(id -u)/$SERVER" >/dev/null 2>&1; echo "  → 서버"; }
     # ★자동실행으로 안 떠 있을 수도 있다★ (codex 실측): 지금 빌은 tmux 로 돈다.
     #   등록돼 있으면 내리고, tmux 세션도 남아 있으면 같이 닫는다.
