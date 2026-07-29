@@ -78,7 +78,7 @@ b3os에는 사람이 쓰는 채팅앱이 없다. AI 팀원들은 **팀버스(tea
    - `buildDispatchPlan`이 스킵 게이트들 통과: unknown→dead_letter, owner-set→completed, ack-only→completed, 핑퐁→blocked(§4), broadcast인데 `@all/@group` 마커 없음→inbox-only(안 깨움).
    - 런타임→어댑터: `claude_channel`→tmux 주입 / `openclaw`→게이트웨이 브리지 / `hermes`→one-shot 스폰 / `codex`·`b3os_native`→브리지.
    - `buildTeamContext`가 최근 대화 ≤6건을 붙임(§2-3).
-5. **결과 기록** — 성공→`wake_dispatched`, 미룸→`deferred`(backoff, 20회 초과→blocked), 예외→`failed`(재시도 backoff 1→2→4초, 3회 초과→dead_letter). openclaw/hermes는 ★expire-no-retry★(턴이 이미 발신했을 수 있어 재시도하면 중복). 실패 시 요청자에게 "[전달 실패]" 시스템 메시지 주입(영원히 안 기다리게).
+5. **결과 기록** — 성공→`wake_dispatched`, 미룸→`deferred`(backoff, 20회 초과→blocked), 예외→`failed`(재시도 backoff 1→2→4초, 3회 초과→dead_letter). openclaw/hermes는 ★expire-no-retry★(턴이 이미 발신했을 수 있어 재시도하면 중복). 응답이 시간 안에 안 오면 요청자에게 ★"[응답 대기]"★ 시스템 메시지 주입(영원히 안 기다리게). ★"실패" 가 아니라 "아직 안 왔다" 다★ — 상대가 작업 중일 수 있으므로 그 메시지는 ★재위임 전에 상대 작업물(브랜치·PR·카드)을 먼저 확인하라★ 고 안내한다 (2026-07-29 실사고: 옛 문구가 "응답하지 못했다" 라 요청자가 재위임했고 상대는 이미 끝내놓은 상태였다).
 
 ### 1-5. 실사례 A — "Bill이 Steve에게 질문"
 
