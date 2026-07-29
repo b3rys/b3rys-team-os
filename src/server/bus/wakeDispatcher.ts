@@ -599,7 +599,12 @@ function makeOpenclawAdapter(db: Database, agents: () => AgentRecord[]): WakeAda
             hopCount: row.hop_count,
             kind: oDirectedKind,
             });
-          return { ok, detail: "openclaw_directed_injected" };
+          // ★성공과 실패가 같은 코드를 쓰면 안 된다★ (리사 실측, 2026-07-29)
+          //   ok 가 false 여도 detail 이 "…injected" 라서 ★실패 통지에 성공 코드가 박혀 나갔다.★
+          //   받는 사람은 원인을 알 수 없고, 기록으로도 성공·실패를 못 가른다.
+          return ok
+            ? { ok, detail: "openclaw_directed_injected" }
+            : { ok, detail: "openclaw_directed_no_response_in_window" };
         } catch (e) {
           return { ok: false, detail: `openclaw_directed_error:${e instanceof Error ? e.message : String(e)}` };
         }
@@ -1362,9 +1367,16 @@ function notifyRequesterOfExpiry(
     if (!requester || requester === row.agent_id) return;
     if (!agents.some((a) => a.id === requester)) return;
 
+    // ★문구가 사실과 달라서 실제 중복작업을 낼 뻔했다★ (리사 실측, 2026-07-29)
+    //   리사가 clo 에게 위임 → clo 는 ★받아서 작업 중★ → 이 통지가 "응답하지 못했습니다" 를 보냄
+    //   → 리사가 미착수로 판단해 herm 에게 ★재위임★ → 그 사이 clo 가 ★정상 완료(PR 생성)★
+    //   → herm 이 중복 작업 직전, 리사가 저장소를 직접 확인해서 막았다.
+    //   ★실제 뜻은 "정해진 대기 시간 안에 응답이 안 왔다" 이지 "못 했다" 가 아니다.★
+    //   그리고 이 문구가 ★"없이 마감해도 된다" 고 권했다★ — 리사는 그 말대로 한 것이다.
     const body =
-      `[전달 실패] ${row.agent_id} 가 응답하지 못했습니다 (${reason}). ` +
-      `이 요청은 재시도되지 않습니다 — ${row.agent_id} 없이 마감하셔도 됩니다. ` +
+      `[응답 대기] ${row.agent_id} 에게서 아직 응답이 없습니다 — 대기 시간 초과 (${reason}). ` +
+      `${row.agent_id} 가 작업 중일 수 있습니다: ★다시 시키기 전에 그쪽 작업물(브랜치·PR·카드)을 먼저 확인하세요.★ ` +
+      `이 요청은 자동 재시도되지 않습니다 — 확인 후 ${row.agent_id} 없이 마감하셔도 됩니다. ` +
       `(수집이면 ${row.agent_id} 를 '미응답' 으로 명시하고 나머지로 종합하세요)`;
 
     const msg = insertMessage(db, {
