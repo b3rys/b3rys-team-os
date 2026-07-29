@@ -973,14 +973,16 @@ export async function runDueSchedulerJobsOnce(
     // 'skipped' run (so this is visible in history, not a silent disappearance) and
     // advances next_run_at, exactly like any other consumed occurrence.
     //
-    // Recurring ONLY. A one-shot has no next occurrence, so skipping it does not defer
-    // the notification — it destroys it, permanently, and the user never sees the history
-    // row. "결제 마감" arriving late beats never arriving. Opt a one-shot into skipping
-    // with misfire_policy = 'skip'. (codex review)
+    // One rule for every job kind: if the machine was off when the slot came round,
+    // the job does not fire. GD chose this over a recurring-only carve-out, having been
+    // told that a one-shot has no next occurrence and is therefore dropped for good
+    // (2026-07-29): a notification that arrives at the wrong time is noise either way,
+    // and one predictable rule beats two.
+    //
+    // Escape hatch for the rare job that MUST run however late: misfire_policy = 'catch_up_once'.
     const graceSec = misfireGraceSec();
     const lateSec = lateBySec(claimed, now);
-    const misfireSkippable = claimed.kind === "recurring" || claimed.misfire_policy === "skip";
-    if (misfireSkippable && graceSec > 0 && lateSec > graceSec && claimed.misfire_policy !== "catch_up_once") {
+    if (graceSec > 0 && lateSec > graceSec && claimed.misfire_policy !== "catch_up_once") {
       skipScheduledJob(db, claimed, "misfire_stale", {
         now,
         // Both timestamps, not just "late by N": a long preceding exec delays this

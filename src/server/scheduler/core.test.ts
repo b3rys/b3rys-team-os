@@ -617,33 +617,36 @@ describe("b3os scheduler misfire grace", () => {
     expect(results[0]?.status).toBe("succeeded");
   });
 
-  // A one-shot has no next occurrence. Skipping it does not defer the notification,
-  // it destroys it — and the user never sees the history row. (codex review)
-  test("a stale one-shot reminder still fires — late beats never", async () => {
-    const d = db();
-    scheduleReminder(d, {
-      targetAgentId: "dex",
-      body: "[예약 알림] 결제 마감",
-      runAt: new Date(NOW.getTime() - 48 * 3600_000),
-      createdBy: "dex",
-    });
-    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
-    expect(results[0]?.status).toBe("succeeded");
-    expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 1 });
-  });
-
-  test("a one-shot can opt into skipping with misfire_policy 'skip'", async () => {
+  // One rule for every kind — off at the slot means it does not arrive. (GD, 2026-07-29)
+  test("a stale one-shot reminder is skipped too — same rule for every kind", async () => {
     const d = db();
     const job = scheduleReminder(d, {
       targetAgentId: "dex",
-      body: "[예약 알림] 지나면 의미 없음",
+      body: "[예약 알림] 지난 알림",
       runAt: new Date(NOW.getTime() - 48 * 3600_000),
       createdBy: "dex",
     });
-    d.prepare(`UPDATE scheduled_job SET misfire_policy = 'skip' WHERE id = ?`).run(job.id);
     const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
     expect(results[0]?.status).toBe("skipped");
     expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 0 });
+    // Consumed, not left pending — otherwise every tick re-claims it forever.
+    const after = getScheduledJob(d, job.id)!;
+    expect(after.enabled).toBe(0);
+    expect(after.status).toBe("succeeded");
+  });
+
+  test("a one-shot that must arrive however late opts out with catch_up_once", async () => {
+    const d = db();
+    const job = scheduleReminder(d, {
+      targetAgentId: "dex",
+      body: "[예약 알림] 늦어도 와야 함",
+      runAt: new Date(NOW.getTime() - 48 * 3600_000),
+      createdBy: "dex",
+    });
+    d.prepare(`UPDATE scheduled_job SET misfire_policy = 'catch_up_once' WHERE id = ?`).run(job.id);
+    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    expect(results[0]?.status).toBe("succeeded");
+    expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 1 });
   });
 
   // A skip bumps run_count, so it must end the job at max_runs exactly like a real run.
