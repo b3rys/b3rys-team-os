@@ -53,7 +53,7 @@ export function finalizeApprovalDelivery(
  *   2. ★승인 후 실행 직전의 변경을 잡지 못한다.★ 이 해시는 승인 ★전에 한 번★ 계산해 그 캡처값을 그대로
  *      finalize에 넘긴다 — 실행 직전에 다시 계산해 비교하지 않는다.
  *   3. ★같은 파일의 내용 변경을 구분하지 못한다.★ files는 Object.keys()라 ★이름만★ 담는다.
- *      command 경로는 배열 전체가 들어가 구분되지만, fileChanges 경로는 이름 집합이 같으면 해시가 같다.
+ *      command 경로는 (배열이든 문자열이든) 전체가 들어가 구분되지만, fileChanges 경로는 이름 집합이 같으면 해시가 같다.
  *
  *  → 위 3건은 후속 작업에서 다룬다(전체 canonical operation을 grant scope에 결합 + 실행 직전 재해시 +
  *     파일 내용 해시). ★그 전까지 B3OS_CODEX_APPSERVER를 켜지 않는다 — release blocker.★ */
@@ -61,7 +61,11 @@ export function approvalOperationHash(req: ApprovalRequest): string {
   const p = req.params as Record<string, any>;
   const basis = {
     method: req.method,
-    command: Array.isArray(p.command) ? p.command : null,
+    // ★신세대 문자열 command 도 담는다★ — 예전엔 Array.isArray 만 봐서 신세대는 null 이 됐고,
+    //   그 결과 ★서로 다른 신세대 명령이 같은 지문★ 을 가졌다(Codex 리뷰 2026-07-29에서 재현).
+    //   S1 이 그 문자열을 실제 shell operation 으로 승격하므로, 상관키·audit 지문도 구분해야 한다.
+    //   ★배열은 배열 그대로 둔다★ — 구세대 지문 값을 바꾸지 않기 위해서다(변경 범위 최소).
+    command: Array.isArray(p.command) ? p.command : (typeof p.command === "string" ? p.command.trim() || null : null),
     files: p.fileChanges && typeof p.fileChanges === "object" ? Object.keys(p.fileChanges).sort() : null,
     reason: typeof p.reason === "string" ? p.reason : null,
   };
@@ -83,18 +87,38 @@ const POLL_INTERVAL_MS = Number(process.env.B3OS_CODEX_APPSERVER_POLL_MS ?? 1500
  *
  *  ★method 는 아는데 command 가 비어 있으면 null 을 돌려준다★ — 그러면 호출부가 해석 실패 분기로
  *  보내 S0 의 보수적 처리(payload 지문 + 매번 묻기)를 받는다. ★모르면 넓게 통과가 아니라 좁게 묻는다.★ */
-function commandTextFromApproval(req: ApprovalRequest): string | null {
-  if (req.method !== "execCommandApproval" && req.method !== "item/commandExecution/requestApproval") return null;
+type CommandParse =
+  | { kind: "not_command" }          // 명령 승인 method 가 아니다 — 다음 분기로 넘긴다
+  | { kind: "invalid" }              // 명령 승인 method 인데 command 를 못 읽었다 — ★즉시 해석 실패로★
+  | { kind: "ok"; command: string };
+
+/** 명령 승인 요청을 파싱한다. ★'명령 method 가 아님' 과 '명령 method 인데 못 읽음' 을 구분한다.★
+ *
+ *  ★왜 구분해야 하나 (2026-07-29 Codex 리뷰에서 잡힌 실제 구멍):★
+ *  둘을 같은 null 로 합치면 호출부가 이어서 fileChanges 를 검사한다. 그래서
+ *  `item/commandExecution/requestApproval` + `command: ""` + `fileChanges: {...}` 같은
+ *  ★혼합 payload 가 approval_unparsed 가 아니라 write 로 처리됐다★ — 주석과 테스트가 약속한
+ *  fail-closed 계약과 반대다. ★명령 승인이라고 밝힌 요청은 명령을 못 읽는 순간 거기서 멈춰야 한다.★
+ *  (정상 스키마에서는 안 생기는 조합이지만, ★malformed 입력에서 좁게 묻기 불변식★ 이 깨지면 안 된다.)
+ *
+ *  세대별 모양(codex-cli 0.144.6 벤더 스키마 실측):
+ *    execCommandApproval                     → command: string[]   (구세대)
+ *    item/commandExecution/requestApproval   → command: string|null (신세대)
+ *  ★판정은 payload 모양이 아니라 method 로 한다★ — 모양은 세대마다 바뀌지만 method 는 계약이다. */
+function parseCommandApproval(req: ApprovalRequest): CommandParse {
+  if (req.method !== "execCommandApproval" && req.method !== "item/commandExecution/requestApproval") {
+    return { kind: "not_command" };
+  }
   const raw = (req.params as Record<string, unknown>)?.command;
   if (Array.isArray(raw)) {
     const joined = raw.map((x) => String(x)).join(" ").trim();
-    return joined.length > 0 ? joined : null;
+    return joined.length > 0 ? { kind: "ok", command: joined } : { kind: "invalid" };
   }
   if (typeof raw === "string") {
     const trimmed = raw.trim();
-    return trimmed.length > 0 ? trimmed : null;
+    return trimmed.length > 0 ? { kind: "ok", command: trimmed } : { kind: "invalid" };
   }
-  return null;
+  return { kind: "invalid" };
 }
 
 /** M5.1 — codex 승인요청 → PermissionOperation(requestPermission 입력). */
@@ -125,10 +149,13 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
   //  ★교환 관계를 명시한다★: 해석되면 열쇠가 '명령' 단위가 되어 '항상 허용' 이 의미를 갖는다(쓸 만해진다).
   //  대신 그 열쇠는 permissionGate 에서 ★앞 240자만★ 쓰므로, 240자 prefix 가 같고 뒤가 다른 긴 명령은
   //  같은 열쇠가 된다 — ★구세대가 원래 갖고 있던 노출이고, S5(공용 결합)에서 닫힌다.★ #106 참조.
-  const commandText = commandTextFromApproval(req);
-  if (commandText !== null) {
-    return { runtime: "codex", agent_id: agentId, action: "shell", command: commandText.slice(0, 2000), requested_by: agentId, provenance };
+  const parsed = parseCommandApproval(req);
+  if (parsed.kind === "ok") {
+    return { runtime: "codex", agent_id: agentId, action: "shell", command: parsed.command.slice(0, 2000), requested_by: agentId, provenance };
   }
+  // ★명령 승인이라고 밝혔는데 명령을 못 읽었다 → 여기서 멈춘다.★ 아래 fileChanges 분기로 흘려보내면
+  //   혼합 payload 가 write 로 처리되어 fail-closed 계약이 깨진다(Codex 리뷰 2026-07-29).
+  if (parsed.kind === "invalid") return unparsedOperation(req, agentId, provenance);
   if (p.fileChanges && typeof p.fileChanges === "object") {
     // scope_key(target)의 입력을 files[0]에서 '정렬된 전체 파일목록'으로 넓힌다.
     // ★단 target 절단 전까지만 구분력이 늘어날 뿐, '서로 다른 파일집합 → 서로 다른 scope'를 일반 보장하지 않는다.★
@@ -136,26 +163,23 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
     const files = Object.keys(p.fileChanges).sort();
     return { runtime: "codex", agent_id: agentId, action: "write", path: files.join("|").slice(0, 500), text: files.join(", ").slice(0, 500), requested_by: agentId, provenance };
   }
-  // ★S0(#106) — 여기까지 왔다는 것은 payload 를 해석하지 못했다는 뜻이다. 그 사실을 명시한다.★
-  //
-  //  예전에는 action 에 req.method 를, text 에 reason 만 넣었다. reason 이 없으면 targetForOperation 이
-  //  action 으로 떨어지므로 ★target = method 이름★ 이 되어 ★그 method 로 오는 모든 요청이 같은 scope★ 였다.
-  //  → 한 번 allowed_always 를 받으면 이후 ★내용이 전혀 다른 요청도 팝업 없이 통과★ 한다.
-  //  실측(2026-07-28): item/commandExecution/requestApproval 로 온 'rm -rf /tmp/x' 와 'cat ~/.ssh/id_rsa' 가
-  //  ★같은 scope_key★ 를 가졌다.
-  //
-  //  ★팀 리드 원칙(2026-07-28): "애매하면 통과가 아니고 ask 로."★
-  //  해석에 실패했으면 넓은 열쇠를 만들지 않는다 — payload 지문을 target 에 넣어 ★payload 가 다르면 열쇠도 다르게★ 한다.
-  //  저장된 grant 는 자기와 똑같은 payload 에만 적용되고, 조금이라도 다르면 다시 사람에게 묻는다.
-  //
-  //  ※ ★실제 효과: 신세대 payload 는 itemId·turnId·startedAtMs 가 요청마다 달라서 사실상 매번 새 열쇠가 된다★
-  //    = 해석 못 한 요청은 ★매번 묻는다★. 그게 이 단계가 노린 보수적 동작이다.
-  //  ※ reason 을 text 에 남기는 이유: permissionGate.operationText 가 text 도 Tier-D 스캔에 쓴다.
-  //    빼면 위험 문자열이 reason 에 있을 때 하드 차단이 약해진다.
-  // reason 은 ★기존과 같은 500자★ 를 유지한다 — 여기서 줄이면 Tier-D 스캔 범위가 좁아진다(Codex 리뷰).
-  // 합친 문자열을 다시 자르지도 않는다: method 는 프로토콜 상수(방어적으로 64자), 지문은 16자라
-  // 전체가 유계이고, 자르면 그만큼 reason 끝이 스캔에서 빠진다.
-  const reason = typeof p.reason === "string" ? p.reason.slice(0, 500) : "";
+  return unparsedOperation(req, agentId, provenance);
+}
+
+/** ★해석하지 못한 승인 요청의 operation.★ 두 곳에서 쓴다 — 아무 분기에도 안 걸린 경우와,
+ *  ★명령 승인이라고 밝혔지만 명령을 못 읽은 경우★(그 경우 fileChanges 분기로 흘리면 안 된다).
+ *
+ *  예전에는 action 에 req.method 를, text 에 reason 만 넣었다. reason 이 없으면 targetForOperation 이
+ *  action 으로 떨어지므로 ★target = method 이름★ 이 되어 ★그 method 로 오는 모든 요청이 같은 scope★ 였다.
+ *  → 한 번 allowed_always 를 받으면 이후 ★내용이 전혀 다른 요청도 팝업 없이 통과★ 한다.
+ *
+ *  ★팀 리드 원칙(2026-07-28): "애매하면 통과가 아니고 ask 로."★
+ *  해석에 실패했으면 넓은 열쇠를 만들지 않는다 — payload 지문을 target 에 넣어 payload 가 다르면 열쇠도 다르게.
+ *
+ *  ※ reason 을 text 에 남기는 이유: permissionGate.operationText 가 text 도 Tier-D 스캔에 쓴다. */
+function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Record<string, unknown>): PermissionOperation {
+  const p = req.params as Record<string, any>;
+  const reason = typeof p?.reason === "string" ? p.reason.slice(0, 500) : "";
   return {
     runtime: "codex",
     agent_id: agentId,

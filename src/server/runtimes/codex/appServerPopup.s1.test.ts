@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { buildOperationFromApproval } from "./appServerPopup";
+import { buildOperationFromApproval, approvalOperationHash } from "./appServerPopup";
 import { scopeKeyForOperation, targetForOperation } from "../../lib/permissionGate";
 import type { ApprovalRequest } from "./appServerClient";
 
@@ -61,6 +61,33 @@ describe("S1 — 신세대 명령 승인 해석", () => {
     };
     // 신세대 파일 변경은 아직 해석 대상이 아니다(S2). S0 의 보수적 처리를 그대로 받아야 한다.
     expect(buildOperationFromApproval(fileReq, "dex").action).toBe("approval_unparsed");
+  });
+
+  test("★혼합 payload — 명령 method + 빈 command + fileChanges 는 write 가 아니라 unparsed★", () => {
+    // Codex 리뷰(2026-07-29)에서 잡힌 실제 구멍. '명령 method 아님' 과 '명령 method 인데 못 읽음' 을
+    // 같은 null 로 합쳤더니, 호출부가 이어서 fileChanges 를 검사해 ★write 로 처리★ 됐다.
+    // ★명령 승인이라고 밝힌 요청은 명령을 못 읽는 순간 거기서 멈춰야 한다★ — fail-closed 계약.
+    const mixed: ApprovalRequest = {
+      method: "item/commandExecution/requestApproval",
+      params: { command: "", fileChanges: { "x.ts": {} }, itemId: "i", turnId: "t", threadId: "th", startedAtMs: 1 },
+    };
+    expect(buildOperationFromApproval(mixed, "dex").action).toBe("approval_unparsed");
+  });
+
+  test("★서로 다른 신세대 명령은 서로 다른 작업 지문을 갖는다★ — 상관키가 둘을 구분해야 한다", () => {
+    // S1 이 문자열 command 를 실제 shell operation 으로 승격하는데, 지문 basis 가 Array.isArray 만 보면
+    // ★신세대는 전부 command:null★ 이 되어 서로 다른 명령이 ★같은 지문★ 을 갖는다(Codex 리뷰에서 재현).
+    // 상관키·audit 이 두 요청을 구분하지 못하면 결정이 엉뚱한 요청에 배달될 수 있다.
+    expect(approvalOperationHash(newGen("rm -rf /tmp/x")))
+      .not.toBe(approvalOperationHash(newGen("cat /etc/shadow")));
+  });
+
+  test("구세대 배열 지문은 값이 그대로다 — 변경 범위 최소화 확인", () => {
+    // 배열은 배열 그대로 basis 에 넣어 구세대 지문 값을 바꾸지 않았다.
+    const a = approvalOperationHash(oldGen(["ls", "-la"]));
+    const b = approvalOperationHash(oldGen(["ls", "-la"]));
+    expect(a).toBe(b);
+    expect(a).not.toBe(approvalOperationHash(oldGen(["ls", "-l"])));
   });
 
   test("구세대 배열 경로 불변 — 회귀 가드", () => {

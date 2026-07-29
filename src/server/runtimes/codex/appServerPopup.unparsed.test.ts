@@ -92,9 +92,10 @@ describe("S0 — 해석 실패 payload 의 권한 열쇠", () => {
   });
 
   test("★approvalOperationHash 로는 못 가른다★ — 왜 payload 전체 지문이 필요한지의 근거", () => {
-    // 신세대는 command 가 문자열이라 basis 의 Array.isArray 가 false → command:null.
-    // fileChanges 도 reason 도 없으니 basis 가 {method, null, null, null} 로 같아진다.
+    // 이 fixture(item/tool/requestUserInput)는 command 도 fileChanges 도 reason 도 없어
+    // basis 가 {method, null, null, null} 로 ★내용과 무관하게 같아진다★.
     // ★즉 기존 지문을 그대로 썼다면 위 첫 테스트가 통과하지 못한다.★ (실제로 처음에 그렇게 짰다가 잡혔다)
+    // ※ 신세대 '명령' 은 S1 에서 지문 basis 에 포함되도록 고쳤다 — appServerPopup.s1.test.ts 참조.
     expect(approvalOperationHash(unparsed("rm -rf /tmp/x")))
       .toBe(approvalOperationHash(unparsed("cat ~/.ssh/id_rsa")));
   });
