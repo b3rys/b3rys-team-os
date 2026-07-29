@@ -47,10 +47,14 @@ def last_line(body: str) -> str:
       ★실제로 이 기능을 설명하는 SKILL.md 자체가 그 예시를 담고 있다★ — 그걸 인용하며 승인하면
       ★남의 이름이 서명으로 기록된다.★ trailer 는 원래 끝에 붙는 관례이므로 마지막 줄로 좁힌다.
 
-    ★이스케이프된 개행은 되돌리지 않는다★ (ames): GitHub API 응답은 json.loads 단계에서
-      이미 진짜 개행으로 복원된다. 추가 치환은 ★계약을 문서보다 넓히기만 한다.★
-      (`\r\n` 만 정규화한다 — 이건 실제 줄바꿈이다)
+    ★이스케이프된 개행도 되돌린다★ — 한 번 뺐다가 ★실측으로 되돌렸다★:
+      ames 가 "GitHub API 응답은 json.loads 에서 이미 복원되므로 불필요" 라 했고 나도 받아들였다.
+      ★우리 데이터에서는 거짓이었다★ — 하네스가 전수 조사: ★PR#103 승인 본문은 진짜 개행 0개,
+      리터럴 `\n` 두 글자가 11개★ 다. 우리 팀 도구 중 그런 본문을 만드는 게 있다.
+      정규화가 없으면 그런 본문은 ★전체가 한 줄★ 이라 ★서명 자체가 불가능★ 해진다.
+      ★"규격상 그럴 리 없다" 가 아니라 실제 데이터를 세어야 한다.★
     """
+    body = body.replace("\\r\\n", "\n").replace("\\n", "\n")
     for line in reversed(body.replace("\r\n", "\n").split("\n")):
         if line.strip():
             return line
@@ -112,7 +116,7 @@ def check(settings, reviews, pr_author):
             return False, f"approval came from account {acct}, expected the approver account {appr}"
         # ★set 이 아니라 줄 수를 센다★ (ames): 같은 이름이 두 줄이어도 set 은 1개로 접혀
         #   ★'서명이 여럿' 검사를 조용히 통과했다.★
-        body = (r.get("body") or "").replace("\r\n", "\n")
+        body = (r.get("body") or "").replace("\\r\\n", "\n").replace("\\n", "\n").replace("\r\n", "\n")
         # ★본문 어디든 서명 모양이 둘 이상이면 모호하다★ (ames): 마지막 줄만 보면
         #   앞의 것이 조용히 무시돼 ★누가 승인했는지가 갈린다.★ set 으로 접으면
         #   같은 이름 두 줄이 1개로 세어져 이 검사를 통과했다 — ★줄 수를 센다.★
@@ -121,8 +125,9 @@ def check(settings, reviews, pr_author):
             return False, "approval has more than one Approved-by line: " + ", ".join(sorted({h.lower() for h in all_hits}))
         names = [h.lower() for h in TRAILER.findall(last_line(body))]
         if not names:
-            return False, ("approval has no 'Approved-by: <name>' line — the account is shared, "
-                           "so the account alone does not say who reviewed")
+            return False, ("the LAST line of the approval is not 'Approved-by: <name>' — "
+                           "put it on the final line (a signature elsewhere in the body is not read; "
+                           "the account is shared, so the account alone does not say who reviewed)")
         # (여기서 len(names) > 1 은 ★불가능★ 하다 — last_line 은 한 줄이다.
         #  중복은 위 all_hits 에서 이미 걸렀다. ★실패할 수 없는 검사는 두지 않는다.★)
         if names[0] not in pool:

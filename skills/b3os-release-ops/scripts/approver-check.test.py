@@ -35,9 +35,12 @@ def case(name, expect_ok, settings, reviews, author="gdb3rys", expect_msg=None):
 case("정상 — Approved-by 한 줄", True, SETTINGS,
      [review("확인했습니다. 테스트 통과.\n\nApproved-by: bill")])
 case("정상 — 대소문자 무관", True, SETTINGS, [review("APPROVED-BY: Steve")])
-# ★이 시험은 뒤집혔다 (ames)★: GitHub API 응답은 json.loads 단계에서 이미 진짜 개행으로 복원된다.
-#   두 글자 `\n` 을 개행으로 바꿔주던 것은 ★계약을 문서보다 넓히기만 했다★ — 이제 안 한다.
-case("★두 글자 백슬래시-n 은 개행이 아니다★ (계약을 넓히지 않는다)", False, SETTINGS,
+# ★이 시험은 두 번 뒤집혔다 — 두 번째는 실측이 이겼다★
+#   ①처음: 리터럴 \n 도 개행으로 봤다 → ②ames: "json.loads 가 복원하니 계약만 넓힌다" → 뺐다
+#   → ③하네스 전수조사: ★PR#103 승인 본문이 진짜 개행 0개 · 리터럴 11개★ 였다.
+#   ★우리 도구 중에 그런 본문을 만드는 게 실제로 있다.★ 안 되돌리면 그 클라이언트로는 서명이 불가능하다.
+#   ★"규격상 그럴 리 없다" 를 실제 데이터가 이겼다.★
+case("★리터럴 백슬래시-n 본문도 서명을 찾는다★ (PR#103 실측 형태)", True, SETTINGS,
      [review("확인했습니다.\\n\\nApproved-by: codex")])
 case("정상 — 진짜 개행이면 찾는다", True, SETTINGS,
      [review("확인했습니다.\n\nApproved-by: codex")])
