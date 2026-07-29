@@ -47,12 +47,23 @@ run --mode bogus
   ok "$RC" 1 "④ 모르는 모드는 거부"
   ok "$(has 'invalid --mode')" yes "④ 이유를 말한다"
 
+# ★hotfix 는 '모르는 모드' 로 뭉뚱그리지 않는다★ (하네스 실측 2026-07-29)
+#   이 모드는 ★받아주는 목록에는 있는데 승인 확인부에는 없어서★ 조용히 건너뛰고 "passed" 를 찍었다.
+#   지우기만 하면 쓰던 사람이 ★"오타인가?" 하고 헤맨다★ — ★무엇으로 바꿔야 하는지까지 말한다.★
+run --mode hotfix
+  ok "$RC" 1 "★④b --mode hotfix 는 거부한다★ (조용한 스킵 경로였다)"
+  ok "$(has 'was removed')" yes "★④b 지웠다고 말한다★"
+  ok "$(has 'Use --mode merge')" yes "★④b 무엇을 쓰라고 알려준다★ (안 알려주면 못 따른다)"
+  ok "$(has 'invalid --mode')" no "④b '모르는 모드' 로 뭉뚱그리지 않는다"
+
 run --nosuchflag
   ok "$RC" 1 "⑤ 모르는 인자는 거부 — 조용히 무시하지 않는다"
 
 run --help
   ok "$RC" 0 "⑥ --help 는 정상 종료"
   ok "$(has 'skip-approver-check')" yes "★⑦ usage 가 이유 필수를 알려준다★ (steve: 안 알려주면 못 따른다)"
+  ok "$(has 'hotfix was REMOVED')" yes "★⑧ usage 가 hotfix 제거를 알려준다★"
+  ok "$(has "must be this branch's own PR")" yes "★⑨ usage 가 --pr 대조를 알려준다★"
 
 echo "  통과 $pass · 실패 $fail"
 [ "$fail" = "0" ]

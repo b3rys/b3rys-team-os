@@ -57,16 +57,16 @@ mutate "③ 명부 대조 제거" \
   '        if False:'
 
 mutate "④ ★작성자 계정 검사 제거 (#119 증상)★" \
-  '    if author != team:' \
+  '    if author.lower() != team.lower():' \
   '    if False:'
 
 mutate "④b ★작성자 조회 실패를 통과시킴 (ames BLOCKER)★" \
   '    if not author:' \
   '    if False:'
 
-mutate "⑤ 승인 계정 검사 제거" \
-  '        if acct != appr:' \
-  '        if False:'
+mutate "⑤ ★승인 자격 제거 (아무 계정의 승인이나 인정)★" \
+  '    mine = [(a, r) for a, r in approvals if a.lower() == appr.lower()]' \
+  '    mine = list(approvals)'
 
 mutate "⑥ ★설정 누락 검사 제거 (기본값으로 때움)★" \
   '    if missing:' \
@@ -76,13 +76,44 @@ mutate "⑦ ★배열 아닌 응답을 '승인 없음' 으로 삼킴★" \
   '    if not isinstance(reviews, list):' \
   '    if False:'
 
-mutate "⑧ ★본문 전체의 중복 서명 검사 제거★" \
-  '        if len(all_hits) > 1:' \
+mutate "⑧ ★중복 서명 검사 제거★" \
+  '        if len(attempts) > 1:' \
   '        if False:'
 
 mutate "⑨ ★마지막 줄 제한을 버리고 아무 줄이나 허용★ (예시가 서명이 됨)" \
   '    for line in reversed(body.replace("\r\n", "\n").split("\n")):' \
   '    for line in body.replace("\r\n", "\n").split("\n"):'
+
+# ══ 2026-07-29 하네스 실측으로 넣은 가드들 — ★이것도 되돌려서 빨개지는지 본다★ ══
+mutate "⑩ ★안 닫힌 코드펜스 검사 제거★ (화면엔 예시, 원문엔 서명)" \
+  '    if len(re.findall(r"^[ \t]*(?:```|~~~)", body, re.M)) % 2:' \
+  '    if False:'
+
+mutate "⑪ ★안 닫힌 HTML 주석 검사 제거★ (화면에서 사라지는 서명)" \
+  '    if body.count("<!--") != body.count("-->"):' \
+  '    if False:'
+
+mutate "⑫ ★모호한 마크업이어도 그냥 진행★ (가드 호출 자체를 무력화)" \
+  '        if bad:
+            return False, why' \
+  '        if False:
+            return False, why'
+
+mutate "⑬ ★중복 세기를 다시 엄격 정규식으로★ (백슬래시 우회 부활)" \
+  '        attempts = LOOSE_TRAILER.findall(candidate)' \
+  '        attempts = TRAILER.findall(candidate)'
+
+mutate "⑭ ★예시 제거를 안 함★ (규약 문서 인용이 다시 막힘)" \
+  '        candidate = strip_examples(body)' \
+  '        candidate = body'
+
+mutate "⑮ ★계정 대조를 다시 대소문자 구분으로★" \
+  '    mine = [(a, r) for a, r in approvals if a.lower() == appr.lower()]' \
+  '    mine = [(a, r) for a, r in approvals if a == appr]'
+
+mutate "⑯ ★'승인 없음' 원인 구분 제거★ (셋이 같은 말)" \
+  '    if any(s == "DISMISSED" for s in final_states):' \
+  '    if False:'
 
 echo
 if [ "$bad" = "0" ]; then

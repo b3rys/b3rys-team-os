@@ -14,12 +14,15 @@ SETTINGS_URL="${B3OS_SETTINGS_URL:-http://127.0.0.1:7878/team/api/settings}"
 
 usage() {
   cat <<'USAGE'
-Usage: release-preflight.sh [--mode merge|deploy|hotfix|force-push|post-merge] [--base origin/main] [--live-dir PATH]
+Usage: release-preflight.sh [--mode merge|deploy|force-push|post-merge] [--base origin/main] [--live-dir PATH]
        [--pr N] [--settings-url URL] [--skip-approver-check REASON] [--skip-branch-protection] [--allow-main]
+
+  NOTE: --mode hotfix was REMOVED (it skipped the approver check silently). A hotfix uses --mode merge.
+  NOTE: --pr N must be this branch's own PR — it is checked. Omit --pr to derive it from the branch.
 
 Checks:
   - clean git worktree
-  - non-main branch for merge/hotfix unless --allow-main
+  - non-main branch for merge unless --allow-main
   - commits in BASE..HEAD use GitHub noreply author and committer email
   - post-merge origin/main tip uses GitHub noreply author and committer email
   - force-push annotated tags use GitHub noreply tagger email
@@ -79,7 +82,12 @@ is_noreply_email() {
 }
 
 case "$MODE" in
-  merge|deploy|hotfix|force-push|post-merge) ;;
+  merge|deploy|force-push|post-merge) ;;
+  # ★hotfix 를 없앴다★ (하네스 실측 2026-07-29): 받아주는 목록에는 있는데 ★승인 확인부에는 없어서★
+  #   `--mode hotfix` 를 쓰면 ★승인 확인을 조용히 건너뛰고 "passed" 를 찍었다.★ 경고 한 줄도 없었다.
+  #   ★문서 어디에도 이 모드를 쓰라는 절차가 없었다★ — 급할 때도 merge 를 쓰라고 적혀 있다.
+  #   ★안 쓰이는데 받아주기만 하는 이름은 지운다★ (이름만 보고 집기 딱 좋은 자리였다).
+  hotfix) fail "--mode hotfix was removed: it skipped the approver check silently. Use --mode merge (a hotfix still needs an approval); for a real emergency use --mode merge --skip-approver-check \"why\" — that path is loud and recorded" ;;
   *) fail "invalid --mode: $MODE" ;;
 esac
 
@@ -201,16 +209,41 @@ if [ "$MODE" = "merge" ] && [ "$CHECK_APPROVER" -eq 0 ]; then
 fi
 if [ "$MODE" = "merge" ] && [ "$CHECK_APPROVER" -eq 1 ]; then
   command -v gh >/dev/null 2>&1 || fail "gh CLI missing; needed to read PR reviews"
+  PR_WAS_EXPLICIT=1
   if [ -z "$PR_NUMBER" ]; then
+    PR_WAS_EXPLICIT=0
     PR_NUMBER="$(gh pr view --json number --jq .number 2>/dev/null || true)"
   fi
   [ -n "$PR_NUMBER" ] || fail "PR number unknown; pass --pr <n> (or run on a branch with an open PR)"
+
+  # ★승인을 지금 머지하려는 것에 묶는다★ (하네스 실측 2026-07-29)
+  #   예전엔 `--pr N` 을 주면 ★그 PR 이 이 브랜치의 것인지 한 번도 묻지 않았다.★
+  #   → ★예전에 승인받은 아무 PR 번호★ 하나면 ★리뷰 안 받은 브랜치가 통과★ 했다.
+  #   번호를 안 주면 현재 브랜치에서 유도하므로 원래 묶여 있다 — ★손으로 주는 순간 끊겼다.★
+  #   ★그래서 손으로 준 경우에만 대조한다★ (유도한 경우는 이미 같은 것이다).
+  if [ "$PR_WAS_EXPLICIT" -eq 1 ]; then
+    PR_HEAD_REF="$(gh pr view "$PR_NUMBER" --json headRefName --jq .headRefName 2>/dev/null || true)"
+    PR_HEAD_SHA="$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid 2>/dev/null || true)"
+    [ -n "$PR_HEAD_REF" ] || fail "could not read PR #$PR_NUMBER head branch — cannot tie the approval to what is being merged"
+    if [ "$PR_HEAD_REF" != "$BRANCH" ]; then
+      fail "PR #$PR_NUMBER is for branch '$PR_HEAD_REF' but you are on '$BRANCH' — an approval on a different PR does not approve this branch (drop --pr to use this branch's own PR)"
+    fi
+    if [ -n "$PR_HEAD_SHA" ] && [ "$PR_HEAD_SHA" != "$(git rev-parse HEAD)" ]; then
+      fail "PR #$PR_NUMBER head is $(printf '%.7s' "$PR_HEAD_SHA") but local HEAD is $(git rev-parse --short HEAD) — push first so the approval refers to these commits"
+    fi
+    ok "PR #$PR_NUMBER matches this branch ($BRANCH)"
+  fi
 
   SETTINGS_JSON="$(curl -fsS "$SETTINGS_URL" 2>/dev/null || true)"
   # ★설정을 못 읽으면 통과시키지 않는다★ — '확인 불가' 는 '통과' 가 아니다.
   [ -n "$SETTINGS_JSON" ] || fail "settings unreadable at $SETTINGS_URL — cannot verify approver (this is 'unknown', not 'ok')"
 
-  REVIEWS_JSON="$(gh api "repos/$(repo_slug)/pulls/$PR_NUMBER/reviews" --paginate 2>/dev/null || true)"
+  # ★--slurp 를 붙인다★ (하네스 실측 2026-07-29): `--paginate` 는 ★페이지마다 별개 JSON★ 을 이어 붙인다
+  #   (gh 자체 도움말: "Each page is a separate JSON array or object. Pass --slurp to wrap all pages").
+  #   그래서 ★리뷰가 30건 넘는 PR★ 에서 json 파싱이 깨지고 "could not run" 으로 막혔다 —
+  #   ★가장 리뷰가 많은(=가장 중요한) PR 에서 원인불명으로 막히고 --skip 으로 몰린다.★
+  #   --slurp 는 [[page1],[page2]] 로 감싸므로 아래 인코딩 단계에서 평탄화한다.
+  REVIEWS_JSON="$(gh api "repos/$(repo_slug)/pulls/$PR_NUMBER/reviews" --paginate --slurp 2>/dev/null || true)"
   [ -n "$REVIEWS_JSON" ] || fail "could not read reviews for PR #$PR_NUMBER — cannot verify approver"
 
   PR_AUTHOR="$(gh pr view "$PR_NUMBER" --json author --jq .author.login 2>/dev/null || true)"
@@ -220,8 +253,13 @@ if [ "$MODE" = "merge" ] && [ "$CHECK_APPROVER" -eq 1 ]; then
   #   ★stdin 으로 넘긴다★ — argv 면 리뷰가 많은 PR 에서 Argument list too long 이 난다.
   APPROVER_REPORT="$(printf '%s' "$(SETTINGS_JSON="$SETTINGS_JSON" REVIEWS_JSON="$REVIEWS_JSON" PR_AUTHOR="$PR_AUTHOR" "${B3OS_PYTHON:-python3}" -c '
 import json, os, sys
+# ★--slurp 는 페이지를 [[...],[...]] 로 감싼다★ — 한 겹 벗겨서 리뷰 목록으로 만든다.
+#   ★리스트가 아닌 응답은 손대지 않고 그대로 넘긴다★ — 판정기가 "모르면 막는다" 로 처리해야 한다.
+reviews = json.loads(os.environ["REVIEWS_JSON"] or "[]")
+if isinstance(reviews, list) and reviews and all(isinstance(p, list) for p in reviews):
+    reviews = [r for page in reviews for r in page]
 json.dump({"settings": json.loads(os.environ["SETTINGS_JSON"]),
-           "reviews": json.loads(os.environ["REVIEWS_JSON"] or "[]"),
+           "reviews": reviews,
            "pr_author": os.environ.get("PR_AUTHOR", "")}, sys.stdout)
 ' 2>/dev/null)" | "${B3OS_PYTHON:-python3}" "$(dirname "$0")/approver-check.py" 2>/dev/null || true)"
   # ★판정이 안 일어났으면 통과가 아니다★ — 파이썬이 없거나 죽으면 빈 문자열이 온다.
@@ -258,4 +296,14 @@ if [ "$MODE" = "force-push" ]; then
   warn "force-push/history rewrite still requires GD approval, backup, secret scan, 2-person or harness review, and rollback commands"
 fi
 
-ok "release preflight passed"
+# ★마지막 줄에 '무엇을 어떤 범위로 봤나' 를 같이 찍는다★ (하네스 실측 2026-07-29)
+#   예전엔 "release preflight passed" 한 줄이라 ★--base 로 범위를 좁혔는지 보고만 봐서는 알 수 없었다★
+#   (--base HEAD~1 이면 그 앞 커밋의 실메일 유출이 감사에서 통째로 빠지는데 출력은 똑같았다).
+#   ★우회 사실도 stdout 에 남긴다★ — 예전엔 stderr 에만 있어서
+#   ★stdout 만 캡처하거나 종료코드만 보는 호출자에겐 우회가 안 보였다.★
+SUMMARY="release preflight passed (mode=$MODE"
+[ "$MODE" = "deploy" ] || [ "$MODE" = "post-merge" ] || SUMMARY="$SUMMARY, base=$BASE"
+[ -n "${SKIPPED_NOTE:-}" ] && SUMMARY="$SUMMARY, ★APPROVER CHECK SKIPPED: $SKIP_REASON★"
+[ "$SETTINGS_URL" = "http://127.0.0.1:7878/team/api/settings" ] || SUMMARY="$SUMMARY, ★non-default settings source: $SETTINGS_URL★"
+[ -z "${B3OS_PYTHON:-}" ] || SUMMARY="$SUMMARY, ★non-default python: $B3OS_PYTHON★"
+ok "$SUMMARY)"

@@ -72,19 +72,19 @@ for key in ("github_team_account", "github_approver_account", "merge_approvers_n
          expect_msg="settings missing")
 
 # ── 승인 상태 ────────────────────────────────────────────────────────────────
-case("승인 0건", False, SETTINGS, [], expect_msg="no standing approval")
+case("승인 0건", False, SETTINGS, [], expect_msg="no review on this PR at all")
 case("반려만 있음", False, SETTINGS, [review("Approved-by: bill", state="CHANGES_REQUESTED")])
 case("★승인 뒤 철회 — 나중 것이 이긴다★", False, SETTINGS,
      [review("Approved-by: bill", at="2026-07-01T00:00:00Z"),
       review("되돌립니다", state="CHANGES_REQUESTED", at="2026-07-05T00:00:00Z")],
-     expect_msg="no standing approval")
+     expect_msg="withdrawn")
 # ★위 케이스만으로는 '시간순 정렬' 을 안 재고 있었다★ (뮤턴트로 발견):
 #   시험 데이터가 이미 시간순이라 정렬을 지워도 결과가 같았다.
 #   ★정렬이 실제로 일하는 곳은 API 가 순서를 뒤섞어 줄 때★ 다 — GitHub 은 순서를 보장하지 않는다.
 case("★순서가 뒤섞여 와도 나중 철회가 이긴다★", False, SETTINGS,
      [review("되돌립니다", state="CHANGES_REQUESTED", at="2026-07-05T00:00:00Z"),
       review("Approved-by: bill", at="2026-07-01T00:00:00Z")],   # ← 승인이 배열 뒤에 있지만 ★더 이르다★
-     expect_msg="no standing approval")
+     expect_msg="withdrawn")
 case("★철회 뒤 재승인 — 이번엔 통과★", True, SETTINGS,
      [review("되돌립니다", state="CHANGES_REQUESTED", at="2026-07-01T00:00:00Z"),
       review("Approved-by: bill", at="2026-07-05T00:00:00Z")])
@@ -109,6 +109,48 @@ case("★마지막 줄이 아니면 서명이 아니다★", False, SETTINGS,
 # ★ames BLOCKER — 작성자 조회 실패를 통과시키지 않는다★
 case("★작성자 조회 실패(빈값) → 막는다★", False, SETTINGS,
      [review("Approved-by: bill")], author="", expect_msg="author unknown")
+
+# ══ 하네스 실측 2026-07-29 — ★화면과 원문이 갈리는 자리★ ═══════════════════════
+# ★이 넷은 전부 같은 부류다★: 사람이 보는 렌더 결과와 이 도구가 읽는 원문이 다르다.
+#   그래서 변종마다 막지 않고 ★'갈릴 수 있는 상태' 자체를 거부★ 하게 바꿨다.
+case("★안 닫힌 코드펜스 뒤 서명 → 막는다★ (열려 있으면 화면엔 예시로 보인다)", False, SETTINGS,
+     [review("질문: 형식이 이거 맞나요?\n\n```\nApproved-by: steve\n")], expect_msg="UNCLOSED code fence")
+case("★안 닫힌 HTML 주석 뒤 서명 → 막는다★ (화면에서는 통째로 사라진다)", False, SETTINGS,
+     [review("리뷰 안 했습니다.\n<!-- 메모\nApproved-by: bill")], expect_msg="UNBALANCED HTML comment")
+case("★닫힌 주석은 정상 통과★ (막는 건 '안 닫힌 것' 이지 주석 자체가 아니다)", True, SETTINGS,
+     [review("<!-- 메모 -->\n확인했습니다.\n\nApproved-by: bill")])
+case("★줄 끝 백슬래시로 중복서명 가드를 우회하지 못한다★", False, SETTINGS,
+     [review("Approved-by: dex\\\nApproved-by: bill")], expect_msg="more than one")
+
+# ★규약을 알려주는 문서를 인용해도 막히지 않는다★ — 규칙을 지키려는 사람이 막히던 자리
+case("★SKILL.md 형식 예시(닫힌 펜스)를 인용하고 진짜 서명 → 통과★", True, SETTINGS,
+     [review("형식이 이건가요?\n\n```\nApproved-by: bill\n```\n\n확인했습니다.\n\nApproved-by: codex")])
+
+# ★남의 승인이 있어도 내 승인을 막지 않는다★ — public repo 라 아무나 APPROVED 를 남길 수 있다
+case("★제3자 APPROVED 가 있어도 승인계정 서명이 있으면 통과★", True, SETTINGS,
+     [review("looks fine", acct="randomdev", at="2026-07-01T00:00:00Z"),
+      review("Approved-by: bill", at="2026-07-02T00:00:00Z")], expect_msg="ignored approvals from")
+case("★제3자 승인만 있으면 통과 못 한다★ (자격은 승인계정에만 있다)", False, SETTINGS,
+     [review("looks fine", acct="randomdev")], expect_msg="do not count")
+
+# ★계정 대소문자★ — GitHub 로그인은 대소문자 무관인데 설정 표기가 갈리면 영구 차단됐다
+case("★승인계정 표기가 대문자여도 통과★", True, SETTINGS, [review("Approved-by: bill", acct="GD452")])
+case("★작성자 표기가 대문자여도 통과★", True, SETTINGS, [review("Approved-by: bill")], author="GDB3rys")
+
+# ★'승인 없음' 의 원인을 갈라 말한다★ — 셋이 같은 문장을 내면서 원인을 단언했다
+case("원인구분: 리뷰가 아예 없음", False, SETTINGS, [], expect_msg="no review on this PR at all")
+case("원인구분: ★push 로 폐기됨(dismiss_stale_reviews)★", False, SETTINGS,
+     [review("Approved-by: bill", state="DISMISSED")], expect_msg="DISMISSED")
+case("원인구분: 실제 철회", False, SETTINGS,
+     [review("Approved-by: bill", at="2026-07-01T00:00:00Z"),
+      review("되돌립니다", state="CHANGES_REQUESTED", at="2026-07-05T00:00:00Z")], expect_msg="withdrawn")
+
+# ★'모양은 맞는데 안 맞다' 를 구분해 말한다★ — 사용자 눈에는 정확히 그 줄이라 원인을 못 찾았다
+for _tag, _body in [("@멘션", "Approved-by: @bill"), ("기호", "Approved-by: bill ✦"),
+                    ("NBSP", "Approved-by: bill\xa0"), ("볼드", "**Approved-by: bill**"),
+                    ("리스트", "- Approved-by: bill")]:
+    case(f"★{_tag} → 막되 이유를 말한다★", False, SETTINGS, [review(_body)],
+         expect_msg="looks like a signature but does not match exactly")
 
 
 def main():

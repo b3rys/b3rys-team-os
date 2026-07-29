@@ -34,6 +34,50 @@ import sys
 #  그 사람의 승인으로 기록된다. (그리고 이 기능을 설명하는 SKILL.md 자체가 그 예시를 담고 있다)
 TRAILER = re.compile(r"^approved-by[ \t]*:[ \t]*([A-Za-z0-9._-]+)[ \t]*$", re.I | re.M)
 
+#: ★서명을 '시도한' 줄★ — 엄격 형식에 안 맞아도 잡는다. ★중복 검사는 이걸로 센다.★
+#  이유(하네스 실측 2026-07-29): 엄격 정규식은 줄 끝이 `[ \t]*$` 라
+#  ★`Approved-by: dex\` 처럼 백슬래시로 끝나면 매칭이 안 돼 '중복' 으로 세어지지 않았다.★
+#  그래서 서명 두 줄을 넣고도 통과했다 — ★가드가 막으려던 "누가 승인했는지 갈리는" 상태 그대로.★
+#  ★잡는 그물(중복)은 넓게, 인정하는 형식(서명)은 좁게.★
+LOOSE_TRAILER = re.compile(r"^[ \t>*_`#\-]*approved-by[ \t]*:", re.I | re.M)
+
+
+def strip_examples(body: str) -> str:
+    """★닫힌 코드펜스·닫힌 HTML 주석 안은 '예시' 다★ — 서명 후보에서 뺀다.
+
+    ★왜 필요한가★ (하네스 실측 2026-07-29): 중복 검사가 본문 전체를 세다 보니
+    ★규약을 알려주는 SKILL.md 의 형식 예시를 인용하면 '서명이 두 줄' 로 막혔다.★
+    ★규칙을 지키려고 문서를 인용한 사람이 막히는 형태다.★
+    """
+    body = re.sub(r"<!--.*?-->", "", body, flags=re.S)
+    out, in_fence = [], False
+    for line in body.split("\n"):
+        if re.match(r"^[ \t]*(?:```|~~~)", line):
+            in_fence = not in_fence
+            continue
+        if not in_fence:
+            out.append(line)
+    return "\n".join(out)
+
+
+def ambiguous_markup(body: str):
+    """★사람이 보는 화면과 이 도구가 읽는 원문이 갈릴 수 있으면 (True, 이유).★
+
+    ★이 게이트의 결함은 전부 이 한 가지 부류였다★ (하네스 실측 2026-07-29):
+      · 안 닫힌 코드펜스 → 화면엔 예시로 보이는데 원문에선 ★마지막 줄★ 이라 서명이 된다
+      · 안 닫힌 `<!--`   → ★화면에서는 통째로 사라지는데★ 원문에는 남아 서명이 된다
+    변종마다 막지 않고 ★'갈릴 수 있는 상태' 자체를 거부한다★ — 이 파일의 계약이 '모르면 막는다' 다.
+    """
+    if len(re.findall(r"^[ \t]*(?:```|~~~)", body, re.M)) % 2:
+        return True, ("the approval body has an UNCLOSED code fence (``` or ~~~) — "
+                      "what a reader sees and what this tool reads can differ, so the signature is not trusted; "
+                      "close the fence and re-approve")
+    if body.count("<!--") != body.count("-->"):
+        return True, ("the approval body has an UNBALANCED HTML comment (<!-- without -->) — "
+                      "a signature can be hidden from the rendered view; "
+                      "close the comment and re-approve")
+    return False, ""
+
 
 def last_line(body: str) -> str:
     """★본문의 마지막 비어있지 않은 줄★ 만 서명 후보다.
@@ -80,6 +124,24 @@ def standing_approvals(reviews):
     return [(a, r) for a, r in final.items() if (r.get("state") or "") == "APPROVED"]
 
 
+def why_no_approval(reviews, final_states) -> str:
+    """★'승인 없음' 의 원인을 갈라서 말한다.★
+
+    ★왜★ (하네스 실측 2026-07-29): 서로 다른 세 원인이 ★완전히 같은 문장★ 을 내고 있었고,
+    그 문장은 ★"나중 CHANGES_REQUESTED 가 앞선 승인을 덮었다"★ 라고 ★원인을 단언★ 했다.
+    라이브 브랜치 보호가 `dismiss_stale_reviews: true` 라 ★push 할 때마다 승인이 폐기된다★ —
+    ★가장 흔한 실패에 대해 게이트가 틀린 원인을 말하고 있었다.★
+    """
+    if not reviews:
+        return "no review on this PR at all — request a review and get an approval first"
+    if any(s == "DISMISSED" for s in final_states):
+        return ("the approval was DISMISSED — a push after the approval dismisses it "
+                "(branch protection: dismiss_stale_reviews). Ask for a re-approval on the current commits")
+    if any(s == "CHANGES_REQUESTED" for s in final_states):
+        return "the approval was withdrawn — a later CHANGES_REQUESTED supersedes the earlier approval"
+    return "no standing approval on this PR (reviews exist, but none of them is a current APPROVED)"
+
+
 def check(settings, reviews, pr_author):
     """(ok: bool, message: str). ★모르면 ok=False.★"""
     if not isinstance(reviews, list):
@@ -100,34 +162,68 @@ def check(settings, reviews, pr_author):
                        "-d '{\"github_team_account\":\"...\",\"github_approver_account\":\"...\",\"merge_approvers_normal\":\"bill,codex,steve\"}' "
                        "http://127.0.0.1:7878/team/api/settings   (do not hardcode)")
 
-    if team == appr:
+    # ★계정 비교는 대소문자를 가리지 않는다★ (하네스 실측 2026-07-29): GitHub 로그인은 대소문자 무관인데
+    #   설정에 `GD452` 로 저장하면(PUT 검증이 대문자를 허용한다) ★그 순간부터 머지가 영구 차단★ 됐다.
+    #   ★이름(Approved-by)만 소문자로 접고 계정은 안 접은 비일관★ 이 원인이었다.
+    if team.lower() == appr.lower():
         return False, f"author account and approver account are the same ({team}) — the review requirement cannot hold"
     if not author:
         # ★조회 실패·빈값을 통과시키지 않는다★ (ames BLOCKER) — 이 도구의 계약은 '모르면 막는다' 다.
         return False, "PR author unknown (lookup failed or empty) — cannot verify the author account"
-    if author != team:
+    if author.lower() != team.lower():
         return False, (f"PR author is {author}, expected the team account {team} — "
                        f"recreate the PR with the team account (a PR authored by the approver account cannot be approved)")
 
     approvals = standing_approvals(reviews)
-    if not approvals:
-        return False, "no standing approval (a later CHANGES_REQUESTED supersedes an earlier approval)"
+    # ★승인 계정의 승인 하나를 찾는다★ — 남의 승인은 세지 않되 ★조용히 버리지도 않는다.★
+    #   ★왜 바꿨나★ (하네스 실측 2026-07-29): 예전엔 '모든 승인이 승인 계정이어야' 통과였다.
+    #   ★이 저장소는 public 이라 아무나 APPROVED 를 남길 수 있고★, 그러면 gd452 가 규격대로 서명해도
+    #   ★하드 실패★ 했다. 게다가 메시지가 "승인 계정에서 승인이 안 왔다" 로 읽혀 ★원인을 정반대로 지목★ 했다.
+    #   자격은 여전히 승인 계정에만 있다 — 남의 승인은 ★통과의 근거가 되지 못한다.★
+    mine = [(a, r) for a, r in approvals if a.lower() == appr.lower()]
+    others = sorted({a for a, _ in approvals if a.lower() != appr.lower()})
+    if not mine:
+        if others:
+            return False, (f"no approval from the approver account {appr} — "
+                           f"these accounts approved but do not count: {', '.join(others)}")
+        states = [(r.get("state") or "") for r in
+                  {((rr.get("user") or {}).get("login")) or "?": rr
+                   for rr in sorted([x for x in reviews if isinstance(x, dict)],
+                                    key=lambda x: x.get("submitted_at") or "")}.values()]
+        return False, why_no_approval(reviews, states)
 
     signed = []
-    for acct, r in approvals:
-        if acct != appr:
-            return False, f"approval came from account {acct}, expected the approver account {appr}"
+    for acct, r in mine:
         # ★set 이 아니라 줄 수를 센다★ (ames): 같은 이름이 두 줄이어도 set 은 1개로 접혀
         #   ★'서명이 여럿' 검사를 조용히 통과했다.★
         body = (r.get("body") or "").replace("\\r\\n", "\n").replace("\\n", "\n").replace("\r\n", "\n")
-        # ★본문 어디든 서명 모양이 둘 이상이면 모호하다★ (ames): 마지막 줄만 보면
-        #   앞의 것이 조용히 무시돼 ★누가 승인했는지가 갈린다.★ set 으로 접으면
-        #   같은 이름 두 줄이 1개로 세어져 이 검사를 통과했다 — ★줄 수를 센다.★
-        all_hits = TRAILER.findall(body)
-        if len(all_hits) > 1:
-            return False, "approval has more than one Approved-by line: " + ", ".join(sorted({h.lower() for h in all_hits}))
-        names = [h.lower() for h in TRAILER.findall(last_line(body))]
+
+        # ★화면과 원문이 갈릴 수 있으면 여기서 멈춘다★ — 서명을 읽기 전에 본다.
+        bad, why = ambiguous_markup(body)
+        if bad:
+            return False, why
+
+        # ★예시(닫힌 펜스·닫힌 주석)를 뺀 뒤에 센다★ — 규약 문서를 인용해도 막히지 않게.
+        candidate = strip_examples(body)
+
+        # ★서명 모양이 둘 이상이면 모호하다★ (ames): 마지막 줄만 보면 앞의 것이 조용히 무시돼
+        #   ★누가 승인했는지가 갈린다.★ ★엄격 형식이 아니라 '시도한 줄' 을 센다★ — 엄격 정규식으로 세면
+        #   백슬래시로 끝나는 줄이 안 세어져 ★두 줄을 넣고도 통과★ 했다(하네스 실측).
+        attempts = LOOSE_TRAILER.findall(candidate)
+        if len(attempts) > 1:
+            shown = ", ".join(sorted({h.strip().lower() for h in TRAILER.findall(candidate)})) or "(unparsable)"
+            return False, (f"the approval has more than one Approved-by line ({len(attempts)}): {shown} — "
+                           "leave exactly one, on the final line")
+
+        tail = last_line(candidate)
+        names = [h.lower() for h in TRAILER.findall(tail)]
         if not names:
+            if LOOSE_TRAILER.match(tail):
+                # ★'모양은 맞는데 안 맞다' 를 구분해 말한다★ — 사용자 눈에는 정확히 그 줄이다.
+                #   실측으로 확인된 것: @멘션 · ✦ 같은 기호 · NBSP · 전각공백 · **볼드** · 리스트 하이픈
+                return False, (f"the last line looks like a signature but does not match exactly: {tail!r} — "
+                               "it must be exactly 'Approved-by: <name>' with no @, bold, list marker, "
+                               "trailing punctuation, emoji, or non-breaking/full-width space")
             return False, ("the LAST line of the approval is not 'Approved-by: <name>' — "
                            "put it on the final line (a signature elsewhere in the body is not read; "
                            "the account is shared, so the account alone does not say who reviewed)")
@@ -137,7 +233,9 @@ def check(settings, reviews, pr_author):
             return False, f"Approved-by: {names[0]} is not in merge_approvers_normal ({', '.join(pool)})"
         signed.append(names[0])
 
-    return True, f"approved by {', '.join(signed)} (account {appr}, author {author or '?'})"
+    # ★남의 승인이 있었으면 통과할 때도 말한다★ — 조용히 버리면 '없었던 것' 이 된다.
+    extra = f" [ignored approvals from: {', '.join(others)}]" if others else ""
+    return True, f"approved by {', '.join(signed)} (account {appr}, author {author}){extra}"
 
 
 def main() -> int:
@@ -147,9 +245,12 @@ def main() -> int:
         ok, msg = check(payload.get("settings") or {}, payload.get("reviews"), payload.get("pr_author"))
     except Exception as e:  # 판정 자체가 실패한 것 — 통과가 아니다
         print(f"FAIL\tapprover check could not run: {e}")
-        return 0
+        return 1
     print(("OK\t" if ok else "FAIL\t") + msg)
-    return 0
+    # ★FAIL 이면 종료코드도 실패다★ (하네스 실측 2026-07-29): 예전엔 FAIL 도 0 이라
+    #   ★`if approver-check.py; then merge; fi` 로 쓰면 조용히 통과★ 했다.
+    #   지금 호출부(release-preflight.sh)는 stdout 접두사를 보므로 이 변경에 영향받지 않는다.
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
