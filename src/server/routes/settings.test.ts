@@ -459,6 +459,62 @@ describe("settings: 시스템 OP (P0 floor — capture/router)", () => {
   });
 });
 
+// ★GitHub 계정·승인자 ★쓰기★ 경로 (2026-07-29, 하네스가 잡은 차단 사유)★
+//   읽기만 열었더니 ★값을 넣을 방법이 아예 없었다★ — DB 에 행조차 없고 PUT 이 그 키를 안 받았다.
+//   그러면 머지 게이트가 ★항상 '설정 누락' 으로 실패★ 하고 탈출구는 --skip-approver-check 하나뿐이다.
+//   ★도달 가능한 상태가 '건너뛰기' 뿐인 게이트는 사람에게 건너뛰기를 훈련시킨다.★
+describe("settings: 머지 승인자 설정 쓰기", () => {
+  test("★쓰고 다시 읽을 수 있다★ — 없으면 머지 게이트를 켤 방법이 없다", async () => {
+    const { app } = setup();
+    const r = await app.request("/settings", put({
+      github_team_account: "gdb3rys",
+      github_approver_account: "gd452",
+      merge_approvers_normal: "bill, codex,  steve",
+    }));
+    expect(r.status).toBe(200);
+    const j = await (await app.request("/settings")).json() as any;
+    expect(j.github_team_account).toBe("gdb3rys");
+    expect(j.github_approver_account).toBe("gd452");
+    expect(j.merge_approvers_normal).toBe("bill,codex,steve");   // 공백 정리 + 소문자
+  });
+
+  test("★쓰는 시점에 막는다★ — 안 그러면 '머지 때 알 수 없는 이유로 막힘' 이 된다", async () => {
+    const { app } = setup();
+    // 판정기는 [a-z0-9._-] 로 매칭한다 → 한글·@ 는 ★영원히 불일치★ 한다
+    expect((await app.request("/settings", put({ merge_approvers_normal: "빌,steve" }))).status).toBe(400);
+    expect((await app.request("/settings", put({ merge_approvers_normal: "@bill" }))).status).toBe(400);
+    expect((await app.request("/settings", put({ github_approver_account: "not a name" }))).status).toBe(400);
+    expect((await app.request("/settings", put({ github_team_account: "-leadinghyphen" }))).status).toBe(400);
+  });
+
+  test("★거부되면 아무것도 안 바뀐다★ — 반쯤 바뀐 보안 설정이 제일 위험하다", async () => {
+    const { app } = setup();
+    await app.request("/settings", put({ github_team_account: "old-team", github_approver_account: "old-appr" }));
+    // 세 번째 키가 잘못됐다 — ★앞의 두 개도 저장되면 안 된다★ (ames 실측: 저장됐었다)
+    const r = await app.request("/settings", put({
+      github_team_account: "new-team", github_approver_account: "new-appr", merge_approvers_normal: "@invalid",
+    }));
+    expect(r.status).toBe(400);
+    const j = await (await app.request("/settings")).json() as any;
+    expect(j.github_team_account).toBe("old-team");
+    expect(j.github_approver_account).toBe("old-appr");
+  });
+
+  test("★문자열이 아니면 거부★ — String() 강제변환이 숫자·배열을 삼켰다", async () => {
+    const { app } = setup();
+    expect((await app.request("/settings", put({ github_team_account: 123 }))).status).toBe(400);
+    expect((await app.request("/settings", put({ merge_approvers_normal: ["bill", "steve"] }))).status).toBe(400);
+    expect((await app.request("/settings", put({ github_approver_account: null }))).status).toBe(400);
+  });
+
+  test("빈 문자열은 '해제' 로 허용 — 설정을 되돌릴 수 있어야 한다", async () => {
+    const { app } = setup();
+    await app.request("/settings", put({ github_approver_account: "gd452" }));
+    expect((await app.request("/settings", put({ github_approver_account: "" }))).status).toBe(200);
+    expect(((await (await app.request("/settings")).json()) as any).github_approver_account).toBe("");
+  });
+});
+
 describe("settings: 팀명/태그라인", () => {
   test("기본 빈값 → PUT → 반영", async () => {
     const { app } = setup();
@@ -473,6 +529,13 @@ describe("settings: 팀명/태그라인", () => {
       owner_chat_id: "",
       locale: "ko",
       dm_capture: true, // 기본 on
+      // ★GitHub 계정·승인자 — 셸 절차(release-preflight --mode merge)가 읽는 값 (2026-07-29)★
+      //   ★기본이 빈 문자열인 게 핵심이다★ — 절차는 비면 진행하지 않는다.
+      //   기본값으로 때우면 팀장 개인 계정으로 나가고, 그게 이 절차가 막으려는 일이다.
+      github_team_account: "",
+      github_team_commit_email: "",
+      github_approver_account: "",
+      merge_approvers_normal: "",
     });
     // ★필수 3필드 = team_name · lead_id · owner_name (2c0f363, GD 2026-07-10).★
     //   2개만 채우면 아직 setup_complete=false 여야 한다 — 이 테스트는 옛 2필드 규칙을 기대해서 깨져 있었다.
@@ -489,6 +552,13 @@ describe("settings: 팀명/태그라인", () => {
       owner_chat_id: "",
       locale: "ko",
       dm_capture: true, // 기본 on
+      // ★GitHub 계정·승인자 — 셸 절차(release-preflight --mode merge)가 읽는 값 (2026-07-29)★
+      //   ★기본이 빈 문자열인 게 핵심이다★ — 절차는 비면 진행하지 않는다.
+      //   기본값으로 때우면 팀장 개인 계정으로 나가고, 그게 이 절차가 막으려는 일이다.
+      github_team_account: "",
+      github_team_commit_email: "",
+      github_approver_account: "",
+      merge_approvers_normal: "",
     });
     // 3번째 필드(owner_name)까지 채워야 완료된다.
     expect((await app.request("/settings", put({ owner_name: "GD" }))).status).toBe(200);
