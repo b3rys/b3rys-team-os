@@ -250,12 +250,16 @@ case "${1:-up}" in
     else echo "  (로그 파일 없음: $REPO/logs/stderr.log)"; fi
     echo
     # 팀원 이름을 고정하지 않는다 — 빌이 없는 설치에서도 맞는 판정이어야 한다. (codex 지적)
-    _bad=""
+    #   하나도 못 찾은 것도 비정상이다. 안 세면 위에서는 "하나도 못 찾음" 이라 해놓고
+    #   여기서는 "정상" 이라고 말한다 — 설치가 덜 된 사람에게 제일 나쁜 답이다. (codex 지적)
+    _bad=""; _found=0
     while IFS='|' read -r _lbl _plist; do
       [ -n "$_lbl" ] || continue
+      _found=$((_found + 1))
       [ "$_lbl" = "!지원밖" ] && { _bad=1; continue; }
       loaded "$_lbl" && service_healthy "$_lbl" "$_plist" || _bad=1
     done < <(boot_services)
+    [ "$_found" -eq 0 ] && _bad=1
     if alive && [ -z "$_bad" ]; then
       echo "  정상입니다. 할 것 없습니다."
     else
