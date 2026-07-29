@@ -225,9 +225,10 @@ export interface ScheduleReminderInput {
   directToGd?: boolean;
   timezone?: string;
   /**
-   * 'catch_up_once' delivers this reminder however late it is, bypassing the misfire
-   * grace. Use it for the reminder that must arrive even if the machine was off — under
-   * the default policy a stale one-shot is dropped and never comes back.
+   * 'catch_up_once' delivers this reminder however late it is, bypassing the misfire grace.
+   * Only matters when the grace is enabled (SCHEDULER_MISFIRE_GRACE_SEC, off by default):
+   * with it on, a stale one-shot is dropped and never comes back, so set this on the
+   * reminder that must arrive even if the machine was off.
    */
   misfirePolicy?: "coalesce" | "skip" | "catch_up_once";
 }
