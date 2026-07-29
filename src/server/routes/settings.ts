@@ -411,8 +411,13 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       out.lead_id = v;
     }
     // ★GitHub 계정·승인자 — 쓰기 경로 (2026-07-29)★
-    //   ★전부 검증한 뒤 한 번에 쓴다★ (ames 실측): 키마다 검증→저장을 하면
+    //   ★이 블록의 3키에 한해★ 전부 검증한 뒤 한 번에 쓴다 (ames 실측): 키마다 검증→저장을 하면
     //   ★세 번째에서 400 이 나도 앞의 두 개는 이미 저장돼 있다.★ 보안성 설정이 ★반쯤 바뀐 상태★ 로 남는다.
+    //
+    //   ★★엔드포인트 전체가 원자적이라는 뜻이 아니다★★ (steve 지적) — team_name·lead_id·tagline 등
+    //   ★다른 키들은 여전히 즉시 저장★ 된다. 그래서 team_name 과 잘못된 github 키를 한 요청에 같이 보내면
+    //   ★team_name 은 저장되고 400 이 난다.★ 이 PR 범위 밖이라 안 고쳤다 — ★다음 사람이 '여기는 원자적' 으로
+    //   읽고 다른 키까지 그렇다고 믿지 않도록 한정해서 적는다.★
     //   ★타입도 본다★: String() 강제 변환이라 숫자 123 이나 배열 ["bill"] 도 200 으로 저장됐다.
     {
       const keys = ["github_team_account", "github_approver_account", MERGE_APPROVERS_SETTING_KEY] as const;
