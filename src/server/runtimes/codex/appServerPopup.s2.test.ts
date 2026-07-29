@@ -54,6 +54,19 @@ describe("S2 — 신세대 파일변경 승인 해석", () => {
     expect(targetForOperation(op)).toMatch(/#[0-9a-f]{16}/);
   });
 
+  test("★혼합 payload — 파일변경 method + 짝 없음 + fileChanges 는 write 가 아니라 unparsed★", () => {
+    // ★뮤턴트가 살아남아 드러난 구멍(2026-07-29).★ 짝이 없을 때 '그냥 다음 분기로 흘려보내도' 신세대
+    // 정상 payload 에는 fileChanges 가 없어서 결과가 같다 — 그래서 아무 시험도 안 깨졌다.
+    // 그런데 malformed 입력이 fileChanges 를 달고 오면 ★그대로 write 로 처리된다.★
+    // S1 에서 Codex 가 명령 승인에 대해 잡았던 것과 ★같은 계열★ 이다: 파일변경 승인이라고 밝힌 요청은
+    // 내용을 못 찾는 순간 거기서 멈춰야 한다. ★못 찾음을 다른 경로의 입력으로 재활용하지 않는다.★
+    const mixed: ApprovalRequest = {
+      method: "item/fileChange/requestApproval",
+      params: { itemId: "i1", turnId: "t1", threadId: "th1", startedAtMs: 1, fileChanges: { "x.ts": {} } },
+    };
+    expect(buildOperationFromApproval(mixed, "dex").action).toBe("approval_unparsed");
+  });
+
   test("★관측은 됐는데 변경이 비어 있으면 '내용 없는 쓰기 승인' 을 만들지 않는다★", () => {
     const empty: ObservedItem = { itemId: "i1", turnId: "t1", threadId: "th1", changes: [] };
     expect(buildOperationFromApproval(fileReq(empty), "dex").action).toBe("approval_unparsed");
