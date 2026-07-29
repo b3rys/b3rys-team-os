@@ -48,10 +48,17 @@ while [ "$#" -gt 0 ]; do
     #   ①이유 필수 가드가 무력화되고 ②사용자 인자가 소리 없이 증발한다.
     #   ★우회 경로는 이 게이트의 마지막 방어선이라 거기가 제일 튼튼해야 한다.★
     --skip-approver-check)
-      case "${2:-}" in
-        ''|-*) fail "--skip-approver-check needs a reason (not a flag): --skip-approver-check \"why\"" ;;
+      # ★공백만 있는 이유도 이유가 아니다★ (ames 2차 실측): `--skip-approver-check "   "` 가
+      #   ★rc=0 · reason:"   " 로 통과★ 했다. ★'왜 우회했는지 기록' 계약이 빈 기록으로 무력화된다.★
+      #   ★앞뒤 공백을 벗긴 뒤★ 판정한다 — 벗기고 나서 비었거나 `-` 로 시작하면 거부.
+      #   (bash 3.2 호환 트림 — macOS 기본 셸이 3.2 다)
+      _r="${2:-}"
+      _r="${_r#"${_r%%[![:space:]]*}"}"
+      _r="${_r%"${_r##*[![:space:]]}"}"
+      case "$_r" in
+        ''|-*) fail "--skip-approver-check needs a real reason (not a flag, not blank): --skip-approver-check REASON" ;;
       esac
-      CHECK_APPROVER=0; SKIP_REASON="$2"; shift 2 ;;
+      CHECK_APPROVER=0; SKIP_REASON="$_r"; shift 2 ;;
     --skip-branch-protection) CHECK_BRANCH_PROTECTION=0; shift ;;
     --allow-main) ALLOW_MAIN=1; shift ;;
     -h|--help) usage; exit 0 ;;

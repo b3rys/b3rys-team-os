@@ -23,13 +23,25 @@ echo "── release-preflight.sh 인자 파싱 ──"
 
 run --mode merge --skip-approver-check --allow-main --skip-branch-protection
   ok "$RC" 1 "① ★이유 자리가 플래그를 삼키지 않는다★ (steve 실측 케이스)"
-  ok "$(has 'needs a reason')" yes "① 이유가 필요하다고 말한다"
+  ok "$(has 'needs a real reason')" yes "① 이유가 필요하다고 말한다"
 
 run --mode merge --skip-approver-check
-  ok "$RC" 1 "② 이유 없이 우회 불가"
+  ok "$(has 'needs a real reason')" yes "② 이유 없이 우회 불가"
 
 run --mode merge --skip-approver-check --pr
-  ok "$RC" 1 "③ 뒤에 다른 플래그가 와도 삼키지 않는다"
+  ok "$(has 'needs a real reason')" yes "③ 뒤에 다른 플래그가 와도 삼키지 않는다"
+
+# ★공백만 있는 이유도 이유가 아니다★ (ames 2차): rc=0 · reason:"   " 로 통과했다.
+#   ★'왜 우회했는지 기록' 이 목적인데 빈 기록이면 목적이 죽는다.★
+# ★rc 만 보면 안 된다★ — 이 스크립트는 gh·설정이 없으면 ★하류에서도 rc=1★ 이라
+#   가드가 죽어도 시험이 통과한다(실제로 처음에 그렇게 짰다가 뮤턴트가 안 잡혀서 알았다).
+#   ★어느 이유로 실패했는지를 메시지로 확인한다.★
+run --mode merge --skip-approver-check "   " --allow-main --skip-branch-protection
+  ok "$(has 'needs a real reason')" yes "★③b 공백만 있는 이유는 거부★ (ames 실측)"
+run --mode merge --skip-approver-check "	" --skip-branch-protection
+  ok "$(has 'needs a real reason')" yes "★③c 탭만 있는 이유도 거부★"
+run --mode merge --skip-approver-check "  --allow-main  " --skip-branch-protection
+  ok "$(has 'needs a real reason')" yes "★③d 공백으로 감싼 플래그도 거부★ (트림 후 판정)"
 
 run --mode bogus
   ok "$RC" 1 "④ 모르는 모드는 거부"
