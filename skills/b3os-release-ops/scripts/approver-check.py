@@ -95,7 +95,10 @@ def check(settings, reviews, pr_author):
                               ("github_approver_account", appr),
                               ("merge_approvers_normal", pool)) if not v]
     if missing:
-        return False, "settings missing: " + ", ".join(missing) + " — set them in the dashboard; do not hardcode"
+        return False, ("settings missing: " + ", ".join(missing) +
+                       " — set with: curl -X PUT -H 'Content-Type: application/json' "
+                       "-d '{\"github_team_account\":\"...\",\"github_approver_account\":\"...\",\"merge_approvers_normal\":\"bill,codex,steve\"}' "
+                       "http://127.0.0.1:7878/team/api/settings   (do not hardcode)")
 
     if team == appr:
         return False, f"author account and approver account are the same ({team}) — the review requirement cannot hold"

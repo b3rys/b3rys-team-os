@@ -487,6 +487,26 @@ describe("settings: 머지 승인자 설정 쓰기", () => {
     expect((await app.request("/settings", put({ github_team_account: "-leadinghyphen" }))).status).toBe(400);
   });
 
+  test("★거부되면 아무것도 안 바뀐다★ — 반쯤 바뀐 보안 설정이 제일 위험하다", async () => {
+    const { app } = setup();
+    await app.request("/settings", put({ github_team_account: "old-team", github_approver_account: "old-appr" }));
+    // 세 번째 키가 잘못됐다 — ★앞의 두 개도 저장되면 안 된다★ (ames 실측: 저장됐었다)
+    const r = await app.request("/settings", put({
+      github_team_account: "new-team", github_approver_account: "new-appr", merge_approvers_normal: "@invalid",
+    }));
+    expect(r.status).toBe(400);
+    const j = await (await app.request("/settings")).json() as any;
+    expect(j.github_team_account).toBe("old-team");
+    expect(j.github_approver_account).toBe("old-appr");
+  });
+
+  test("★문자열이 아니면 거부★ — String() 강제변환이 숫자·배열을 삼켰다", async () => {
+    const { app } = setup();
+    expect((await app.request("/settings", put({ github_team_account: 123 }))).status).toBe(400);
+    expect((await app.request("/settings", put({ merge_approvers_normal: ["bill", "steve"] }))).status).toBe(400);
+    expect((await app.request("/settings", put({ github_approver_account: null }))).status).toBe(400);
+  });
+
   test("빈 문자열은 '해제' 로 허용 — 설정을 되돌릴 수 있어야 한다", async () => {
     const { app } = setup();
     await app.request("/settings", put({ github_approver_account: "gd452" }));

@@ -38,6 +38,21 @@ TEAM_ACCOUNT=$(printf '%s' "$S" | python3 -c 'import json,sys;print(json.load(sy
 [ -n "$TEAM_ACCOUNT" ] || { echo "설정이 비어 있다 — 중단"; exit 1; }
 ```
 
+**설정하는 법** — 읽는 법만 적고 **쓰는 법을 안 적으면 같은 일이 반복된다**
+(이 PR 이 고치는 문제를 이 PR 이 쓰기 쪽에서 다시 만들 뻔했다 — ames 지적):
+
+```bash
+curl -X PUT -H 'Content-Type: application/json' \
+  -d '{"github_team_account":"gdb3rys","github_approver_account":"gd452","merge_approvers_normal":"bill,codex,steve"}' \
+  http://127.0.0.1:7878/team/api/settings
+# 성공하면 반드시 다시 읽어 확인한다 — 쓰기 성공이 반영을 뜻하지 않는다
+curl -fsS http://127.0.0.1:7878/team/api/settings | python3 -m json.tool | grep github
+```
+
+**세 값은 한 번에 검증되고 한 번에 저장된다** — 하나가 틀리면 **아무것도 안 바뀐다**
+(반쯤 바뀐 보안 설정이 제일 위험하다). 이름에 한글·`@` 를 쓰면 **쓰는 시점에 400** 이다 —
+판정기가 못 읽는 값을 넣어두면 **머지할 때 알 수 없는 이유로 막힌다.**
+
 **API 응답에 그 키가 없으면 아직 이 변경이 배포되기 전이다.** 그때 한해 DB 에서 직접 읽어 진행할 수 있다
 (실제로 이 기능을 올린 PR 자신이 그랬다 — 자기를 못 쓰는 부트스트랩 상황).
 **배포 후에는 API 만 쓴다** — DB 직접 읽기는 정상 경로가 아니다.

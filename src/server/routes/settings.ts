@@ -410,32 +410,36 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       setSetting(db, "lead_id", v);
       out.lead_id = v;
     }
-    // ★GitHub 계정·승인자 — 쓰기 경로 (2026-07-29, 하네스가 잡은 차단 사유)★
-    //   읽기만 열었더니 ★값을 넣을 방법이 아예 없었다.★ github_approver_account 는 DB 에 행조차 없고
-    //   PUT 이 그 키를 안 받아서 ★수동 sqlite 쓰기 말고는 설정이 불가능★ 했다.
-    //   그러면 게이트는 ★항상 "설정 누락" 으로 실패★ 하고, 문서화된 탈출구는 --skip-approver-check 하나뿐이다.
-    //   ★도달 가능한 상태가 '건너뛰기' 뿐인 게이트는 사람에게 건너뛰기를 훈련시킨다.★
-    // body 의 선언 타입엔 이 키들이 없다 — 값 검증은 아래에서 직접 하므로 조회용으로만 넓힌다.
-    const extra = body as Record<string, unknown>;
-    for (const key of ["github_team_account", "github_approver_account"] as const) {
-      if (extra[key] === undefined) continue;
-      const v = String(extra[key] ?? "").trim();
-      // GitHub 사용자명 규칙: 영숫자·하이픈, 39자 이하. 빈 문자열은 '해제' 로 허용한다.
-      if (v && !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(v))
-        return c.json({ error: `${key}: GitHub 사용자명 형식이 아닙니다` }, 400);
-      setSetting(db, key, v);
-      out[key] = v;
-    }
-    if (extra[MERGE_APPROVERS_SETTING_KEY] !== undefined) {
-      const raw = String(extra[MERGE_APPROVERS_SETTING_KEY] ?? "");
-      const pool = raw.split(/[\s,]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
-      // ★쓰는 시점에 검증한다★ — 안 하면 머지 시점에 '알 수 없는 이유로 막힘' 이 된다.
-      //   판정기가 [A-Za-z0-9._-] 로 매칭하므로 그 밖의 값(한글·@)은 ★영원히 불일치★ 한다.
-      const bad = pool.filter((x) => !/^[a-z0-9._-]+$/.test(x));
-      if (bad.length)
-        return c.json({ error: `${MERGE_APPROVERS_SETTING_KEY}: 사용할 수 없는 이름 — ${bad.join(", ")} (영숫자·. _ - 만)` }, 400);
-      setSetting(db, MERGE_APPROVERS_SETTING_KEY, pool.join(","));
-      out[MERGE_APPROVERS_SETTING_KEY] = pool.join(",");
+    // ★GitHub 계정·승인자 — 쓰기 경로 (2026-07-29)★
+    //   ★전부 검증한 뒤 한 번에 쓴다★ (ames 실측): 키마다 검증→저장을 하면
+    //   ★세 번째에서 400 이 나도 앞의 두 개는 이미 저장돼 있다.★ 보안성 설정이 ★반쯤 바뀐 상태★ 로 남는다.
+    //   ★타입도 본다★: String() 강제 변환이라 숫자 123 이나 배열 ["bill"] 도 200 으로 저장됐다.
+    {
+      const keys = ["github_team_account", "github_approver_account", MERGE_APPROVERS_SETTING_KEY] as const;
+      const extra = body as Record<string, unknown>;
+      const staged: Array<[string, string]> = [];
+      for (const key of keys) {
+        const raw = extra[key];
+        if (raw === undefined) continue;
+        if (typeof raw !== "string")
+          return c.json({ error: `${key}: 문자열이어야 합니다` }, 400);
+        if (key === MERGE_APPROVERS_SETTING_KEY) {
+          const pool = raw.split(/[\s,]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
+          // ★쓰는 시점에 검증한다★ — 안 하면 머지 시점에 '알 수 없는 이유로 막힘' 이 된다.
+          //   판정기가 [a-z0-9._-] 로 매칭하므로 그 밖의 값(한글·@)은 ★영원히 불일치★ 한다.
+          const bad = pool.filter((x) => !/^[a-z0-9._-]+$/.test(x));
+          if (bad.length)
+            return c.json({ error: `${key}: 사용할 수 없는 이름 — ${bad.join(", ")} (영숫자·. _ - 만)` }, 400);
+          staged.push([key, pool.join(",")]);
+        } else {
+          const v = raw.trim();
+          // GitHub 사용자명 규칙: 영숫자·하이픈, 39자 이하. 빈 문자열은 '해제' 로 허용한다.
+          if (v && !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(v))
+            return c.json({ error: `${key}: GitHub 사용자명 형식이 아닙니다` }, 400);
+          staged.push([key, v]);
+        }
+      }
+      for (const [k, v] of staged) { setSetting(db, k, v); out[k] = v; }
     }
     if (body.tagline !== undefined) {
       if (typeof body.tagline !== "string" || body.tagline.length > 200)
