@@ -10,6 +10,8 @@ import { join, dirname } from "node:path";
 import { writeMemberPersona, savePersonaFile } from "../lib/writeMemberPersona";
 import { memberPaths, personaTargetsForRuntime, injectCoreRule, stripCoreRule, coreRuleFor, injectClaudeComms, stripClaudeComms } from "../lib/personaTemplates";
 import { captureConfigStatus, setCaptureToken, setCaptureGroupId, setRouterEnabled, getCaptureToken } from "../lib/captureConfig";
+// ★설정 키 이름은 approvals.ts 정본을 쓴다★ — 문자열을 여기 다시 적으면 그 순간 갈린다.
+import { MERGE_APPROVERS_SETTING_KEY } from "../lib/approvals";
 import { configureLeadActorDb, leadActorId, leadActorSource, trustedActorFromRequest } from "../lib/opAuth";
 
 type PersonaRuleTarget = { file: string; op: "inject" | "strip" };
@@ -368,6 +370,22 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       // dm_capture: 팀원↔팀장 1:1 DM 을 dm_message 로 적재할지. 팀원 세션 기록을 읽는 기능이라 끌 수 있어야 한다(GD 2026-07-14).
       //   끄면 대시보드 DM 통계와 bus-recall 의 1:1 조회만 비고, 버스·위임·발신은 전부 그대로 돈다(크리티컬 아님).
       dm_capture: getSetting(db, "dm_capture") !== "off",
+      // ★GitHub 계정·승인자 — 셸 절차가 읽어야 하는 값들 (2026-07-29 GD 지시)★
+      //   이 값들은 DB 에 ★있었는데 조회할 길이 없었다.★ 그래서 b3os-github-workflow 스킬에는
+      //   "설정에서 조회한다" 고만 적혀 있고 ★조회 명령이 없었다.★
+      //   ★따를 방법이 안 적혀 있으면 안 따라진다★ — 실제로 그 단계가 건너뛰어져
+      //   PR 을 승인 계정으로 만들어 머지가 막혔다(#119).
+      //
+      //   ★비밀이 아니다★: GitHub 사용자명과 noreply 이메일은 모든 PR·커밋에 이미 공개로 찍힌다.
+      //   ★토큰류는 여기 넣지 않는다.★
+      github_team_account: getSetting(db, "github_team_account") ?? "",
+      github_team_commit_email: getSetting(db, "github_team_commit_email") ?? "",
+      // 승인용 계정 — ★작성 계정과 달라야 리뷰 요건이 성립한다.★
+      //   비어 있으면 절차가 멈춘다(기본값으로 때우면 팀장 개인 계정으로 나간다).
+      github_approver_account: getSetting(db, "github_approver_account") ?? "",
+      // 머지 승인자(사람) 명부 — ★판정 정본은 approvals.ts★. 여기서는 셸이 읽을 수 있게 값만 내보낸다.
+      //   ★두 번째 명부를 만들지 않기 위해서다★ — 셸이 자기 목록을 하드코딩하면 그게 갈린다.
+      merge_approvers_normal: getSetting(db, MERGE_APPROVERS_SETTING_KEY) ?? "",
     });
   });
 

@@ -7,10 +7,14 @@ BASE="origin/main"
 LIVE_DIR=""
 CHECK_BRANCH_PROTECTION=1
 ALLOW_MAIN=0
+PR_NUMBER=""
+CHECK_APPROVER=1
+SETTINGS_URL="${B3OS_SETTINGS_URL:-http://127.0.0.1:7878/team/api/settings}"
 
 usage() {
   cat <<'USAGE'
-Usage: release-preflight.sh [--mode merge|deploy|hotfix|force-push|post-merge] [--base origin/main] [--live-dir PATH] [--skip-branch-protection] [--allow-main]
+Usage: release-preflight.sh [--mode merge|deploy|hotfix|force-push|post-merge] [--base origin/main] [--live-dir PATH]
+       [--pr N] [--settings-url URL] [--skip-approver-check] [--skip-branch-protection] [--allow-main]
 
 Checks:
   - clean git worktree
@@ -20,6 +24,9 @@ Checks:
   - force-push annotated tags use GitHub noreply tagger email
   - GitHub main branch protection exists (via gh api) unless skipped
   - deploy live-dir is a b3rys-team-os public repo clone
+  - merge: the standing approval carries 'Approved-by: <name>' and that name is in merge_approvers_normal,
+    the approving account matches github_approver_account, and the PR author matches github_team_account
+    (all read from settings — nothing about accounts or approvers is hardcoded here)
 USAGE
 }
 
@@ -32,12 +39,20 @@ while [ "$#" -gt 0 ]; do
     --mode) MODE="${2:-}"; shift 2 ;;
     --base) BASE="${2:-}"; shift 2 ;;
     --live-dir) LIVE_DIR="${2:-}"; shift 2 ;;
+    --pr) PR_NUMBER="${2:-}"; shift 2 ;;
+    --settings-url) SETTINGS_URL="${2:-}"; shift 2 ;;
+    --skip-approver-check) CHECK_APPROVER=0; shift ;;
     --skip-branch-protection) CHECK_BRANCH_PROTECTION=0; shift ;;
     --allow-main) ALLOW_MAIN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) fail "unknown arg: $1" ;;
   esac
 done
+
+# origin URL → owner/repo. ★두 곳에서 쓰므로 함수로 둔다★ (승인자 검사 · 브랜치 보호).
+repo_slug() {
+  printf '%s\n' "$REMOTE_URL" | sed -E 's#^git@github.com:##; s#^https://github.com/##; s#\.git$##'
+}
 
 is_noreply_email() {
   local email="$1"
@@ -139,6 +154,58 @@ if [ "$CHECK_BRANCH_PROTECTION" -eq 1 ]; then
   fi
 else
   warn "branch protection check skipped"
+fi
+
+# ────────────────────────────────────────────────────────────────────────────
+# ★머지 전: 누가 승인했는지 — 계정이 아니라 사람으로 확인한다★  (2026-07-29)
+#
+# ★왜 필요했나★ 우리 승인 계정은 여럿이 공유한다. GitHub 기록에는 ★계정만 남고 사람은 안 남는다.★
+#   그래서 #117 을 머지하면서 "Demis 도장이라 머지했다" 고 알았는데 ★내 도장이었다.★
+#   ★'누가 봤는지' 를 잘못 알고 머지를 판단하면, 다음엔 아무도 안 본 걸 머지하게 된다.★
+#
+# ★왜 산문을 파싱하지 않나★ 처음엔 승인 본문에서 이름을 뽑으려 했다. 리뷰 3인 + 하네스 2인이
+#   찾은 결함이 ★전부 같은 원인★ 이었다 — 인용문(`> Steve 승인합니다`)·부정문(`Bill 은 승인 안 했지만`)·
+#   할일(`- Bill 승인 필요`)·조사·역할어(`GD 승인 후`)·이스케이프 개행.
+#   ★사람이 쓴 문장에서 기계가 쓸 값을 되찾으려 한 것 자체가 원인이다.★
+#   → 승인자는 그 순간 자기가 누군지 안다. ★그때 기계용 한 줄을 남긴다:  Approved-by: <이름>★
+#     그러면 판정이 ★정확 일치★ 가 되고 위 오탐 클래스가 통째로 사라진다.
+#
+# ★명부·계정을 여기에 적지 않는다★ — 전부 설정에서 읽는다. 하드코딩하면 그 순간 갈리고,
+#   ★더 느슨한 쪽이 게이트가 된다.★ (실제로 별도 도구에서 17명 명단을 만들어 3명 정본과 갈렸다)
+if [ "$MODE" = "merge" ] && [ "$CHECK_APPROVER" -eq 1 ]; then
+  command -v gh >/dev/null 2>&1 || fail "gh CLI missing; needed to read PR reviews"
+  if [ -z "$PR_NUMBER" ]; then
+    PR_NUMBER="$(gh pr view --json number --jq .number 2>/dev/null || true)"
+  fi
+  [ -n "$PR_NUMBER" ] || fail "PR number unknown; pass --pr <n> (or run on a branch with an open PR)"
+
+  SETTINGS_JSON="$(curl -fsS "$SETTINGS_URL" 2>/dev/null || true)"
+  # ★설정을 못 읽으면 통과시키지 않는다★ — '확인 불가' 는 '통과' 가 아니다.
+  [ -n "$SETTINGS_JSON" ] || fail "settings unreadable at $SETTINGS_URL — cannot verify approver (this is 'unknown', not 'ok')"
+
+  REVIEWS_JSON="$(gh api "repos/$(repo_slug)/pulls/$PR_NUMBER/reviews" --paginate 2>/dev/null || true)"
+  [ -n "$REVIEWS_JSON" ] || fail "could not read reviews for PR #$PR_NUMBER — cannot verify approver"
+
+  PR_AUTHOR="$(gh pr view "$PR_NUMBER" --json author --jq .author.login 2>/dev/null || true)"
+
+  # ★판정은 부품으로 뺐다★ — 네트워크·계정 없이 시험할 수 있어야 하기 때문이다.
+  #   ★게이트는 여전히 이 스크립트 하나다.★ (진입점을 늘리지 않는다)
+  #   ★stdin 으로 넘긴다★ — argv 면 리뷰가 많은 PR 에서 Argument list too long 이 난다.
+  APPROVER_REPORT="$(printf '%s' "$(SETTINGS_JSON="$SETTINGS_JSON" REVIEWS_JSON="$REVIEWS_JSON" PR_AUTHOR="$PR_AUTHOR" python3 -c '
+import json, os, sys
+json.dump({"settings": json.loads(os.environ["SETTINGS_JSON"]),
+           "reviews": json.loads(os.environ["REVIEWS_JSON"] or "[]"),
+           "pr_author": os.environ.get("PR_AUTHOR", "")}, sys.stdout)
+' 2>/dev/null)" | "${B3OS_PYTHON:-python3}" "$(dirname "$0")/approver-check.py" 2>/dev/null || true)"
+  # ★판정이 안 일어났으면 통과가 아니다★ — 파이썬이 없거나 죽으면 빈 문자열이 온다.
+  case "$APPROVER_REPORT" in
+    OK*|FAIL*) : ;;
+    *) fail "approver check did not run (python3 missing or crashed) — this is 'unknown', not 'ok'" ;;
+  esac
+  APPROVER_STATUS="${APPROVER_REPORT%%$'\t'*}"
+  APPROVER_MSG="${APPROVER_REPORT#*$'\t'}"
+  [ "$APPROVER_STATUS" = "OK" ] || fail "approver check: $APPROVER_MSG"
+  ok "approver check: $APPROVER_MSG"
 fi
 
 if [ "$MODE" = "force-push" ]; then

@@ -473,6 +473,13 @@ describe("settings: 팀명/태그라인", () => {
       owner_chat_id: "",
       locale: "ko",
       dm_capture: true, // 기본 on
+      // ★GitHub 계정·승인자 — 셸 절차(release-preflight --mode merge)가 읽는 값 (2026-07-29)★
+      //   ★기본이 빈 문자열인 게 핵심이다★ — 절차는 비면 진행하지 않는다.
+      //   기본값으로 때우면 팀장 개인 계정으로 나가고, 그게 이 절차가 막으려는 일이다.
+      github_team_account: "",
+      github_team_commit_email: "",
+      github_approver_account: "",
+      merge_approvers_normal: "",
     });
     // ★필수 3필드 = team_name · lead_id · owner_name (2c0f363, GD 2026-07-10).★
     //   2개만 채우면 아직 setup_complete=false 여야 한다 — 이 테스트는 옛 2필드 규칙을 기대해서 깨져 있었다.
@@ -489,6 +496,13 @@ describe("settings: 팀명/태그라인", () => {
       owner_chat_id: "",
       locale: "ko",
       dm_capture: true, // 기본 on
+      // ★GitHub 계정·승인자 — 셸 절차(release-preflight --mode merge)가 읽는 값 (2026-07-29)★
+      //   ★기본이 빈 문자열인 게 핵심이다★ — 절차는 비면 진행하지 않는다.
+      //   기본값으로 때우면 팀장 개인 계정으로 나가고, 그게 이 절차가 막으려는 일이다.
+      github_team_account: "",
+      github_team_commit_email: "",
+      github_approver_account: "",
+      merge_approvers_normal: "",
     });
     // 3번째 필드(owner_name)까지 채워야 완료된다.
     expect((await app.request("/settings", put({ owner_name: "GD" }))).status).toBe(200);
