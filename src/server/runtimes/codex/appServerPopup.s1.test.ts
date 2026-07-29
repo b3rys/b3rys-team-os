@@ -82,12 +82,14 @@ describe("S1 — 신세대 명령 승인 해석", () => {
       .not.toBe(approvalOperationHash(newGen("cat /etc/shadow")));
   });
 
-  test("구세대 배열 지문은 값이 그대로다 — 변경 범위 최소화 확인", () => {
-    // 배열은 배열 그대로 basis 에 넣어 구세대 지문 값을 바꾸지 않았다.
-    const a = approvalOperationHash(oldGen(["ls", "-la"]));
-    const b = approvalOperationHash(oldGen(["ls", "-la"]));
-    expect(a).toBe(b);
-    expect(a).not.toBe(approvalOperationHash(oldGen(["ls", "-l"])));
+  test("★구세대 배열 지문 값이 S1 이전과 동일하다★ — golden 값으로 고정", () => {
+    // ★Codex 재리뷰(2026-07-29) 지적 반영★: 앞선 판에서 이 테스트는 '결정성 + 다른 입력 구분' 만
+    // 검사하면서 이름은 "값이 그대로다" 라고 주장했다. ★테스트 이름이 검사하는 것보다 많이 주장했다.★
+    // 커밋 메시지에도 "구세대 지문 값은 바꾸지 않았다" 고 적었으므로, ★그 주장을 실제로 고정한다.★
+    //
+    // golden 값은 ★S1 이전 정본(9903b3d)에서 같은 입력으로 실측★ 해 얻었다. 두 판이 같은 값을 냈다.
+    // 이 값이 바뀌면 = 배열 경로를 건드린 것이고, 진행 중인 승인의 상관키가 어긋날 수 있다.
+    expect(approvalOperationHash(oldGen(["ls", "-la"]))).toBe("b1a8a5879bc13205");
   });
 
   test("구세대 배열 경로 불변 — 회귀 가드", () => {
