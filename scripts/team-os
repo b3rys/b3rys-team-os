@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # team-os — 팀 서버와 빌을 올리거나 내린다.
 #
-#   team-os up      올린다
+#   team-os up      안 떠 있는 것을 올린다 (서버·팀원·다리 전부)
 #   team-os doctor  왜 안 뜨는지 본다
 #   team-os down    내린다
 #
@@ -37,6 +37,22 @@ _B="$(find_svc "com.$(id -un).claude-telegram-bill" "claude-telegram-bill" || tr
 SERVER="${_S%%|*}"; SERVER_PLIST="${_S#*|}"
 BILL="${_B%%|*}";   BILL_PLIST="${_B#*|}"
 
+# ★이 저장소에 속하고 '부팅 때 떠야 하는' 자동실행 전부★ — "라벨|plist" 줄들.
+#   ★이름을 고정하지 않는다★: 팀원 이름은 설치마다 다르다(공개 사용자·다른 맥).
+#   ★일정 작업(StartCalendarInterval)은 제외한다★ — 그건 때 되면 알아서 돈다.
+#   다시 등록하면 ★같은 일이 두 번 돈다.★
+boot_services() {
+  local f lbl
+  for f in "$HOME/Library/LaunchAgents"/*.plist; do
+    [ -f "$f" ] || continue
+    case "$f" in *.bak*) continue ;; esac
+    grep -q "$REPO" "$f" 2>/dev/null || continue
+    [ "$(/usr/libexec/PlistBuddy -c 'Print :RunAtLoad' "$f" 2>/dev/null)" = "true" ] || continue
+    lbl="$(label_of "$f")"; [ -n "$lbl" ] || lbl="$(basename "$f" .plist)"
+    printf '%s|%s\n' "$lbl" "$f"
+  done
+}
+
 alive() { [ "$(curl -s -o /dev/null -m 3 -w '%{http_code}' "$URL" 2>/dev/null || echo 000)" = "200" ]; }
 bill_up() { tmux ls 2>/dev/null | grep -q "claude-bill"; }
 
@@ -68,19 +84,31 @@ start() {  # start <라벨> <plist경로>
 case "${1:-up}" in
   up)
     echo "■ 올립니다"
-    # ★이미 떠 있으면 건드리지 않는다★ (steve 지적): 20초 안에 안 뜨면 사람은 up 을 다시 누른다.
-    #   그때 무조건 재시작하면 ★막 올라오던 서버를 죽이고 처음부터 시작★ 한다 —
-    #   ★제일 그럴듯한 행동이 제일 나쁜 결과★ 가 된다. 빌과 같은 모양으로 맞춘다.
+    # 안 떠 있는 것만 올린다. 이미 떠 있는 걸 다시 올리면 막 올라오던 것을 죽인다 (steve 지적).
+    #   20초 안에 안 뜨면 사람은 up 을 다시 누르므로, 보호가 없으면 그 행동이 제일 나쁜 결과를 낸다.
+    while IFS='|' read -r _lbl _plist; do
+      [ -n "$_lbl" ] || continue
+      if launchctl print "gui/$(id -u)/$_lbl" >/dev/null 2>&1; then
+        echo "  · $_lbl (이미 등록됨)"
+      else
+        launchctl bootstrap "gui/$(id -u)" "$_plist" >/dev/null 2>&1
+        echo "  → $_lbl 등록"
+      fi
+    done <<EOF
+$(boot_services)
+EOF
+    # 등록돼 있어도 응답이 없으면 죽은 것이다 — 그때만 다시 올린다.
     if alive; then
-      echo "  · 서버는 이미 떠 있습니다 (그대로 둡니다)"
+      echo "  · 서버 응답 정상"
     else
-      need "$SERVER" "서버" && { start "$SERVER" "$SERVER_PLIST"; echo "  → 서버"; }
+      need "$SERVER" "서버" && { start "$SERVER" "$SERVER_PLIST"; echo "  → 서버 재시작"; }
     fi
-    # ★이미 떠 있으면 건드리지 않는다★ — 또 띄우면 빌이 둘이 된다.
+    # 빌은 tmux 로 돈다 — 등록돼 있어도 세션이 없으면 안 떠 있는 것이다.
+    #   이미 켜져 있으면 건드리지 않는다. 또 띄우면 빌이 둘이 된다.
     if bill_up; then
-      echo "  · 빌은 이미 켜져 있습니다 (그대로 둡니다)"
+      echo "  · 빌 세션 정상"
     else
-      need "$BILL" "빌" && { start "$BILL" "$BILL_PLIST"; echo "  → 빌"; }
+      need "$BILL" "빌" && { start "$BILL" "$BILL_PLIST"; echo "  → 빌 재시작"; }
     fi
     echo "■ 20초 기다립니다…"; sleep 20
     echo "■ 결과"; show
