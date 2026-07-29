@@ -15,7 +15,7 @@ SETTINGS_URL="${B3OS_SETTINGS_URL:-http://127.0.0.1:7878/team/api/settings}"
 usage() {
   cat <<'USAGE'
 Usage: release-preflight.sh [--mode merge|deploy|hotfix|force-push|post-merge] [--base origin/main] [--live-dir PATH]
-       [--pr N] [--settings-url URL] [--skip-approver-check] [--skip-branch-protection] [--allow-main]
+       [--pr N] [--settings-url URL] [--skip-approver-check REASON] [--skip-branch-protection] [--allow-main]
 
 Checks:
   - clean git worktree
@@ -42,7 +42,16 @@ while [ "$#" -gt 0 ]; do
     --live-dir) LIVE_DIR="${2:-}"; shift 2 ;;
     --pr) PR_NUMBER="${2:-}"; shift 2 ;;
     --settings-url) SETTINGS_URL="${2:-}"; shift 2 ;;
-    --skip-approver-check) CHECK_APPROVER=0; SKIP_REASON="${2:-}"; shift 2 ;;
+    # ★이유 자리가 다음 플래그를 삼키면 안 된다★ (steve 실측):
+    #   `--skip-approver-check --allow-main` 이 ★reason="--allow-main" 으로 통과★ 했고,
+    #   ★사용자가 준 --allow-main 은 조용히 사라졌다★ — 적용도 경고도 없이.
+    #   ①이유 필수 가드가 무력화되고 ②사용자 인자가 소리 없이 증발한다.
+    #   ★우회 경로는 이 게이트의 마지막 방어선이라 거기가 제일 튼튼해야 한다.★
+    --skip-approver-check)
+      case "${2:-}" in
+        ''|-*) fail "--skip-approver-check needs a reason (not a flag): --skip-approver-check \"why\"" ;;
+      esac
+      CHECK_APPROVER=0; SKIP_REASON="$2"; shift 2 ;;
     --skip-branch-protection) CHECK_BRANCH_PROTECTION=0; shift ;;
     --allow-main) ALLOW_MAIN=1; shift ;;
     -h|--help) usage; exit 0 ;;
