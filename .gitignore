@@ -40,6 +40,9 @@ archiving/
 !/scripts/runtime-drift-check.sh
 # 테스트 지도 생성기 — docs/TEST_CASES.md 가 본문에서 이 스크립트를 실행하라고 안내한다.
 #   ★문서가 가리키는 도구가 리포에 없으면 그 안내는 거짓말이 된다★ (이 문서가 고치려던 바로 그 문제).
+# ★공개 사용자가 부팅 후 안 뜰 때 쓰는 도구★ — README 가 이 파일을 가리킨다.
+#   /scripts/* 가 전부 무시하므로 ★여기 없으면 조용히 빠진다★ (실제로 한 번 빠뜨렸다 — codex 가 잡음)
+!/scripts/team-os
 !/scripts/gen-test-map.sh
 !/scripts/test-map-nodescribe.txt
 # ★scripts 의 테스트는 ★클래스로★ 연다★ — /scripts/* 가 전부 무시하므로 .test.ts 를

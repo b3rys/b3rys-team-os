@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# team-os — 팀 서버와 빌을 올리거나 내린다.
+#
+#   team-os up      올린다
+#   team-os doctor  왜 안 뜨는지 본다
+#   team-os down    내린다
+#
+# ★전원을 껐다 켜면 저절로 올라온다.★ 이건 그게 안 됐을 때 쓴다.
+set -uo pipefail
+
+URL="http://127.0.0.1:7878/team/"
+REPO="${TEAM_OS_REPO:-$HOME/Development/b3rys-team-os}"
+
+# ★이름을 고정하지 않는다★ — 설치마다 다르다(com.<사용자>.… 는 우리 관례일 뿐).
+#   ①흔한 관례로 먼저 찾고 ②없으면 LaunchAgents 를 실제로 뒤진다.
+# "<라벨>|<plist경로>" 를 돌려준다. ★파일명이 곧 라벨이 아니다★ (codex 지적) —
+#   plist 안의 :Label 을 실제로 읽는다. bootstrap 에 쓸 경로도 같이 들고 간다.
+label_of() { /usr/libexec/PlistBuddy -c 'Print :Label' "$1" 2>/dev/null; }
+
+find_svc() {  # find_svc <관례이름> <plist 안에서 찾을 문자열>
+  local f lbl
+  if launchctl print "gui/$(id -u)/$1" >/dev/null 2>&1; then
+    printf '%s|%s\n' "$1" "$HOME/Library/LaunchAgents/$1.plist"; return 0
+  fi
+  for f in "$HOME/Library/LaunchAgents"/*.plist; do
+    [ -f "$f" ] || continue
+    case "$f" in *.bak*) continue ;; esac
+    grep -q "$2" "$f" 2>/dev/null || continue
+    lbl="$(label_of "$f")"; [ -n "$lbl" ] || lbl="$(basename "$f" .plist)"
+    printf '%s|%s\n' "$lbl" "$f"; return 0
+  done
+  return 1
+}
+
+_S="$(find_svc "com.$(id -un).team-collab" "$REPO/src/server/index.ts" || true)"
+_B="$(find_svc "com.$(id -un).claude-telegram-bill" "claude-telegram-bill" || true)"
+SERVER="${_S%%|*}"; SERVER_PLIST="${_S#*|}"
+BILL="${_B%%|*}";   BILL_PLIST="${_B#*|}"
+
+alive() { [ "$(curl -s -o /dev/null -m 3 -w '%{http_code}' "$URL" 2>/dev/null || echo 000)" = "200" ]; }
+bill_up() { tmux ls 2>/dev/null | grep -q "claude-bill"; }
+
+show() {
+  if alive; then
+    local n; n="$(curl -s -m 3 "${URL}api/agents" 2>/dev/null \
+      | /usr/bin/python3 -c 'import sys,json;print(len(json.load(sys.stdin)["agents"]))' 2>/dev/null || echo '?')"
+    echo "  ✓ 서버 정상 (팀원 ${n}명)"
+  else
+    echo "  ✗ 서버 응답 없음"
+  fi
+  bill_up && echo "  ✓ 빌 켜져 있음" || echo "  ✗ 빌 없음"
+}
+
+need() {  # need <라벨> <이름>
+  [ -n "$1" ] || { echo "  ✗ ${2} 자동실행을 못 찾았습니다 — ls ~/Library/LaunchAgents/ 로 확인"; return 1; }
+}
+
+# ★kickstart 는 '등록된 것' 에만 듣는다★ — 재부팅 후엔 등록 자체가 없을 수 있어
+#   그때는 ★먼저 등록(bootstrap)하고★ 올린다.
+start() {  # start <라벨> <plist경로>
+  if launchctl print "gui/$(id -u)/$1" >/dev/null 2>&1; then
+    launchctl kickstart -k "gui/$(id -u)/$1" >/dev/null 2>&1
+  else
+    launchctl bootstrap "gui/$(id -u)" "$2" >/dev/null 2>&1
+  fi
+}
+
+case "${1:-up}" in
+  up)
+    echo "■ 올립니다"
+    # ★이미 떠 있으면 건드리지 않는다★ (steve 지적): 20초 안에 안 뜨면 사람은 up 을 다시 누른다.
+    #   그때 무조건 재시작하면 ★막 올라오던 서버를 죽이고 처음부터 시작★ 한다 —
+    #   ★제일 그럴듯한 행동이 제일 나쁜 결과★ 가 된다. 빌과 같은 모양으로 맞춘다.
+    if alive; then
+      echo "  · 서버는 이미 떠 있습니다 (그대로 둡니다)"
+    else
+      need "$SERVER" "서버" && { start "$SERVER" "$SERVER_PLIST"; echo "  → 서버"; }
+    fi
+    # ★이미 떠 있으면 건드리지 않는다★ — 또 띄우면 빌이 둘이 된다.
+    if bill_up; then
+      echo "  · 빌은 이미 켜져 있습니다 (그대로 둡니다)"
+    else
+      need "$BILL" "빌" && { start "$BILL" "$BILL_PLIST"; echo "  → 빌"; }
+    fi
+    echo "■ 20초 기다립니다…"; sleep 20
+    echo "■ 결과"; show
+    alive && echo && echo "  ★됐습니다. 텔레그램으로 빌한테 말 거세요.★"
+    ;;
+  down)
+    echo "■ 내립니다"
+    need "$SERVER" "서버" && { launchctl bootout "gui/$(id -u)/$SERVER" >/dev/null 2>&1; echo "  → 서버"; }
+    # ★자동실행으로 안 떠 있을 수도 있다★ (codex 실측): 지금 빌은 tmux 로 돈다.
+    #   등록돼 있으면 내리고, tmux 세션도 남아 있으면 같이 닫는다.
+    [ -n "$BILL" ] && launchctl bootout "gui/$(id -u)/$BILL" >/dev/null 2>&1
+    if bill_up; then
+      tmux kill-session -t claude-bill >/dev/null 2>&1
+      echo "  → 빌 (tmux 세션 닫음)"
+    else
+      echo "  → 빌"
+    fi
+    sleep 3
+    echo "■ 결과"; show
+    echo
+    echo "  다시 올릴 때: team-os up"
+    ;;
+  doctor)
+    echo "■ 점검"
+    show
+    echo
+    echo "■ 자동으로 뜨게 돼 있나"
+    for pair in "$SERVER 서버" "$BILL 빌"; do
+      set -- $pair
+      if [ -z "${1:-}" ]; then
+        echo "  ✗ ${2:-?} — 자동실행 파일이 없습니다 (설치가 덜 된 상태)"
+      elif launchctl print "gui/$(id -u)/$1" >/dev/null 2>&1; then
+        echo "  ✓ ${2} — 등록됨 ($1)"
+      else
+        echo "  ! ${2} — 파일은 있는데 등록이 안 됨 → team-os up 하면 등록됩니다"
+      fi
+    done
+    echo
+    echo "■ 마지막 오류 3줄"
+    if [ -f "$REPO/logs/stderr.log" ]; then tail -3 "$REPO/logs/stderr.log" | sed 's/^/  /'
+    else echo "  (로그 파일 없음: $REPO/logs/stderr.log)"; fi
+    echo
+    if alive && bill_up; then
+      echo "  ★정상입니다. 할 것 없습니다.★"
+    else
+      echo "  ★team-os up 을 먼저 해보세요.★ 그래도 안 되면 위 오류를 빌에게 주세요."
+    fi
+    ;;
+  *)
+    echo "사용법: team-os up | team-os doctor | team-os down"
+    echo "  up      올린다"
+    echo "  doctor  왜 안 뜨는지 본다"
+    echo "  down    내린다"
+    exit 1 ;;
+esac
