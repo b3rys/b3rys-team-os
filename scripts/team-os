@@ -11,31 +11,8 @@ set -uo pipefail
 URL="http://127.0.0.1:7878/team/"
 REPO="${TEAM_OS_REPO:-$HOME/Development/b3rys-team-os}"
 
-# ★이름을 고정하지 않는다★ — 설치마다 다르다(com.<사용자>.… 는 우리 관례일 뿐).
-#   ①흔한 관례로 먼저 찾고 ②없으면 LaunchAgents 를 실제로 뒤진다.
-# "<라벨>|<plist경로>" 를 돌려준다. ★파일명이 곧 라벨이 아니다★ (codex 지적) —
-#   plist 안의 :Label 을 실제로 읽는다. bootstrap 에 쓸 경로도 같이 들고 간다.
+# plist 안의 :Label 을 실제로 읽는다 — ★파일명이 곧 라벨이 아니다.★ (codex 지적)
 label_of() { /usr/libexec/PlistBuddy -c 'Print :Label' "$1" 2>/dev/null; }
-
-find_svc() {  # find_svc <관례이름> <plist 안에서 찾을 문자열>
-  local f lbl
-  if launchctl print "gui/$(id -u)/$1" >/dev/null 2>&1; then
-    printf '%s|%s\n' "$1" "$HOME/Library/LaunchAgents/$1.plist"; return 0
-  fi
-  for f in "$HOME/Library/LaunchAgents"/*.plist; do
-    [ -f "$f" ] || continue
-    case "$f" in *.bak*) continue ;; esac
-    grep -q "$2" "$f" 2>/dev/null || continue
-    lbl="$(label_of "$f")"; [ -n "$lbl" ] || lbl="$(basename "$f" .plist)"
-    printf '%s|%s\n' "$lbl" "$f"; return 0
-  done
-  return 1
-}
-
-_S="$(find_svc "com.$(id -un).team-collab" "$REPO/src/server/index.ts" || true)"
-_B="$(find_svc "com.$(id -un).claude-telegram-bill" "claude-telegram-bill" || true)"
-SERVER="${_S%%|*}"; SERVER_PLIST="${_S#*|}"
-BILL="${_B%%|*}";   BILL_PLIST="${_B#*|}"
 
 # 이 저장소에 속하고 '켜 두면 계속 떠 있어야 하는' 자동실행 전부 — "라벨|plist" 줄들.
 #   이름을 고정하지 않는다: 팀원 이름은 설치마다 다르다(공개 사용자·다른 맥).
@@ -106,7 +83,6 @@ service_healthy() {  # service_healthy <라벨> <plist>
 }
 
 alive() { [ "$(curl -s -o /dev/null -m 3 -w '%{http_code}' "$URL" 2>/dev/null || echo 000)" = "200" ]; }
-bill_up() { tmux ls 2>/dev/null | grep -q "claude-bill"; }
 
 show() {
   if alive; then
@@ -130,10 +106,6 @@ show() {
   else
     echo "  ✗ 자동실행 ${total}개 중 ${ok}개만 정상"
   fi
-}
-
-need() {  # need <라벨> <이름>
-  [ -n "$1" ] || { echo "  ✗ ${2} 자동실행을 못 찾았습니다 — ls ~/Library/LaunchAgents/ 로 확인"; return 1; }
 }
 
 case "${1:-up}" in
@@ -207,10 +179,17 @@ case "${1:-up}" in
     # up 과 대칭이다 — up 이 올리는 것을 down 이 전부 내린다. (GD 판단, 2026-07-29)
     #   맥을 끄기 전에 팀을 통째로 세우는 것이 이 명령의 목적이다.
     #   예약 작업은 여기서도 대상이 아니다 — 애초에 상주가 아니다.
+    # 사람이 터미널에서 실행하십시오. 팀원에게 시키면 그 팀원이 자기 세션을 닫는 도중
+    #   끊겨서, 나머지가 다 내려갔는지 확인할 사람이 사라집니다. (steve 지적)
     echo "■ 내립니다"
+    DOWNFAIL=""
     while IFS='|' read -r _lbl _plist; do
       [ -n "$_lbl" ] || continue
-      [ "$_lbl" = "!지원밖" ] && continue
+      if [ "$_lbl" = "!지원밖" ]; then
+        echo "  ✗ 다룰 수 없는 자동실행 파일 — $_plist"
+        DOWNFAIL="$DOWNFAIL $(basename "$_plist")"
+        continue
+      fi
       launchctl bootout "gui/$(id -u)/$_lbl" >/dev/null 2>&1
       # 런처 계열은 자기가 이미 끝났고 tmux 세션만 남아 있다 — 그것도 같이 닫는다.
       #   자동실행만 내리면 팀원은 계속 살아 있다.
@@ -223,9 +202,26 @@ case "${1:-up}" in
       fi
     done < <(boot_services)
     sleep 3
+    # 정말 내려갔는지 확인한다. 내리는 명령이 실패해도 성공처럼 끝나면
+    #   맥을 끄는 사람이 다 세운 줄 안다 — 파괴 동작의 실패를 숨기면 안 된다. (codex 지적)
+    while IFS='|' read -r _lbl _plist; do
+      [ -n "$_lbl" ] || continue
+      [ "$_lbl" = "!지원밖" ] && continue
+      _m="$(member_of "$_plist")"
+      if loaded "$_lbl"; then
+        DOWNFAIL="$DOWNFAIL $_lbl"
+      elif [ -n "$_m" ] && tmux_session_up "claude-$_m"; then
+        DOWNFAIL="$DOWNFAIL claude-$_m(세션)"
+      fi
+    done < <(boot_services)
     echo "■ 결과"; show
     echo
-    echo "  다시 올릴 때: team-os up"
+    if [ -n "$DOWNFAIL" ]; then
+      echo "  ✗ 아직 안 내려간 것:$DOWNFAIL"
+      echo "  → 다시 한 번 team-os down 을 해보고, 그래도 남으면 team-os doctor 출력을 팀원에게 주세요."
+      exit 1
+    fi
+    echo "  전부 내렸습니다. 다시 올릴 때: team-os up"
     ;;
   doctor)
     echo "■ 점검"
@@ -253,10 +249,17 @@ case "${1:-up}" in
     if [ -f "$REPO/logs/stderr.log" ]; then tail -3 "$REPO/logs/stderr.log" | sed 's/^/  /'
     else echo "  (로그 파일 없음: $REPO/logs/stderr.log)"; fi
     echo
-    if alive && bill_up; then
-      echo "  ★정상입니다. 할 것 없습니다.★"
+    # 팀원 이름을 고정하지 않는다 — 빌이 없는 설치에서도 맞는 판정이어야 한다. (codex 지적)
+    _bad=""
+    while IFS='|' read -r _lbl _plist; do
+      [ -n "$_lbl" ] || continue
+      [ "$_lbl" = "!지원밖" ] && { _bad=1; continue; }
+      loaded "$_lbl" && service_healthy "$_lbl" "$_plist" || _bad=1
+    done < <(boot_services)
+    if alive && [ -z "$_bad" ]; then
+      echo "  정상입니다. 할 것 없습니다."
     else
-      echo "  ★team-os up 을 먼저 해보세요.★ 그래도 안 되면 위 오류를 빌에게 주세요."
+      echo "  team-os up 을 먼저 해보세요. 그래도 안 되면 위 내용을 팀원에게 주세요."
     fi
     ;;
   *)
