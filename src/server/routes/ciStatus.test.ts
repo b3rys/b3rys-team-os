@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { createCiStatusRoutes, normalizeRuns } from "./ciStatus";
+import { createCiStatusRoutes, normalizeRuns, parseRateLimit, RateLimitedError } from "./ciStatus";
 
 const sample = {
   workflow_runs: [
@@ -60,11 +60,86 @@ describe("CI 결과 표시 — ★모르는 것을 정상으로 보여주지 않
     expect(j.cached).toBe(true);
   });
 
-  test("응답이 이상해도 터지지 않고 빈 목록 — ★추측하지 않는다★", () => {
-    expect(normalizeRuns(null)).toEqual([]);
-    expect(normalizeRuns({})).toEqual([]);
-    expect(normalizeRuns({ workflow_runs: "nope" })).toEqual([]);
+  // ★이 테스트는 뒤집혔다 (Codex 반려, 2026-07-29)★
+  //   예전엔 "이상한 응답 → 빈 목록" 을 옳다고 봤다. ★틀렸다.★
+  //   빈 목록은 화면에 ★"실행 0건 = 정상"★ 으로 보이고, ★진짜 0건과 구분이 안 된다.★
+  //   상류가 깨진 것은 ★모르는 상태★ 지 정상이 아니다 — 이 파일의 존재 이유가 그것이다.
+  test("★상류 응답이 우리가 아는 모양이 아니면 '확인 불가' 다 — 빈 목록으로 삼키지 않는다★", () => {
+    expect(() => normalizeRuns(null)).toThrow();
+    expect(() => normalizeRuns({})).toThrow();
+    expect(() => normalizeRuns({ workflow_runs: "nope" })).toThrow();
+    // 배열이면 항목이 비어 있어도 정상 — ★진짜 0건은 0건이다★
+    expect(normalizeRuns({ workflow_runs: [] })).toEqual([]);
     expect(normalizeRuns({ workflow_runs: [{}] })[0]?.name).toBe("");
+  });
+
+  test("★깨진 응답은 ok:false 로 나간다 — 초록 0건이 아니다★", async () => {
+    const app = createCiStatusRoutes({ fetchRuns: async () => ({ oops: 1 }), now: () => 1000 });
+    const j = await (await app.request("/ci-status")).json() as any;
+    expect(j.ok).toBe(false);
+    expect(j.reason).toContain("workflow_runs");
+  });
+});
+
+// ★한도(rate limit) 를 지키는가 — 토큰 없는 GitHub API 는 IP 당 60 req/hr★
+// 캐시만으로는 못 막는 두 구멍을 고정한다(Codex 반려, 2026-07-29).
+describe("한도 보호 — ★캐시가 못 막는 두 경로★", () => {
+  test("★동시 요청 10개 → 실제 호출 1회★ (캐시는 '응답 후' 라 동시엔 무력하다)", async () => {
+    let calls = 0;
+    let release: (v: unknown) => void = () => {};
+    const gate = new Promise((r) => { release = r; });
+    const app = createCiStatusRoutes({
+      fetchRuns: async () => { calls++; await gate; return sample; },
+      now: () => 1000,
+    });
+    // 캐시가 빈 상태에서 한꺼번에 들어온다 — 아무도 아직 응답을 못 받았다.
+    const all = Promise.all(Array.from({ length: 10 }, () => app.request("/ci-status")));
+    await Promise.resolve();
+    release(null);
+    const res = await all;
+    expect(calls).toBe(1);                       // ★10 이 아니라 1★
+    for (const r of res) expect(((await r.json()) as any).ok).toBe(true);
+  });
+
+  test("★한도에 걸리면 리셋까지 한 번도 안 부른다★ — 계속 두드리면 차단이 늘어난다", async () => {
+    let calls = 0;
+    let t = 1_000_000;
+    const resetMs = t + 10 * 60_000;
+    const app = createCiStatusRoutes({
+      fetchRuns: async () => {
+        calls++;
+        throw new RateLimitedError(resetMs, "github 403 rate limited");
+      },
+      now: () => t,
+    });
+    const first = await (await app.request("/ci-status")).json() as any;
+    expect(first.ok).toBe(false);
+    expect(first.retry_after).toBe(new Date(resetMs).toISOString());  // ★언제 풀리는지 밝힌다★
+    expect(calls).toBe(1);
+
+    // 리셋 전 — 캐시가 만료돼도(6분 뒤) ★추가 호출 0★
+    t += 6 * 60_000;
+    for (let i = 0; i < 5; i++) await app.request("/ci-status");
+    expect(calls).toBe(1);                       // ★여전히 1★
+
+    // 리셋 후 — 다시 한 번만 시도한다
+    t = resetMs + 1;
+    await app.request("/ci-status");
+    expect(calls).toBe(2);
+  });
+
+  test("★403 을 전부 한도로 보지 않는다★ — 권한 오류도 403 이다", () => {
+    const h = (m: Record<string, string>) => ({ get: (k: string) => m[k.toLowerCase()] ?? null });
+    // remaining 이 0 이 아니면 한도가 아니다 → null
+    expect(parseRateLimit(403, h({ "x-ratelimit-remaining": "42" }), 0)).toBeNull();
+    expect(parseRateLimit(404, h({}), 0)).toBeNull();
+    // 한도 맞음 — retry-after 우선
+    expect(parseRateLimit(403, h({ "x-ratelimit-remaining": "0", "retry-after": "60" }), 1000))
+      .toBe(1000 + 60_000);
+    // retry-after 없으면 x-ratelimit-reset(초 단위 epoch)
+    expect(parseRateLimit(429, h({ "x-ratelimit-reset": "500" }), 1000)).toBe(500_000);
+    // 리셋이 과거면 신뢰하지 않고 기본 백오프로 — ★즉시 재시도로 떨어지지 않는다★
+    expect(parseRateLimit(429, h({ "x-ratelimit-reset": "1" }), 10_000_000)).toBeGreaterThan(10_000_000);
   });
 });
 
