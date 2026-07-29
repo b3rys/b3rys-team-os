@@ -210,7 +210,8 @@ describe("S2 — grantRoot 는 별개 승인이다", () => {
     const rooted = buildOperationFromApproval(fileReq(observed(many), { grantRoot: "/repo" }), "dex");
     const plain = buildOperationFromApproval(fileReq(observed(many)), "dex");
     expect(targetForOperation(rooted).length).toBe(240); // 실제로 잘렸다
-    expect(targetForOperation(rooted)).toContain("grant_root=/repo");
+    // 열쇠에는 ★전체 루트의 지문★ 이 맨 앞에 온다(P2 수정) — 원문만 앞에 두면 긴 루트끼리 충돌한다.
+    expect(targetForOperation(rooted)).toMatch(/^grant_root#[0-9a-f]{16}=\/repo/);
     expect(scopeKeyForOperation(rooted)).not.toBe(scopeKeyForOperation(plain));
   });
 
@@ -221,6 +222,91 @@ describe("S2 — grantRoot 는 별개 승인이다", () => {
       expect(op.path).toBe("src/a.ts");
       expect(op.provenance?.grant_root).toBeNull();
     }
+  });
+});
+
+/**
+ * ★Codex 리뷰(2026-07-29) 차단 2건 — 둘 다 내가 재현해서 확인했다.★
+ *
+ * 공통 원인이 하나다: ★팝업이 보여주는 것과 열쇠가 뜻하는 것이 어긋났다.★
+ * 어긋나면 보여준 쪽은 아무 힘이 없다 — '항상 허용' 이 한 번 붙는 순간 ★두 번째 팝업은 안 뜨기 때문에★
+ * 사람은 차이를 볼 기회조차 없다.
+ */
+describe("S2 — 이동 목적지(P1)", () => {
+  const moveReq = (movePath: string): ApprovalRequest => ({
+    method: "item/fileChange/requestApproval",
+    params: { itemId: "i1", turnId: "t1", threadId: "th1", startedAtMs: 1 },
+    observedItem: {
+      itemId: "i1", turnId: "t1", threadId: "th1",
+      changes: [{ path: "a.ts", kind: "update", movePath, diff: "@@ -1 +1 @@\n-x\n+y\n" }],
+    },
+  });
+
+  test("★목적지가 다르면 열쇠가 다르다★ — 안전한 이동에 준 허용이 임의 목적지에 재사용되면 안 된다", () => {
+    const safe = buildOperationFromApproval(moveReq("safe.ts"), "dex");
+    const evil = buildOperationFromApproval(moveReq("outside/target.ts"), "dex");
+    // 재현(수정 전): 팝업 문구는 달랐는데 scopeKey 가 완전히 같았다.
+    expect(safe.text).not.toBe(evil.text);
+    expect(scopeKeyForOperation(safe)).not.toBe(scopeKeyForOperation(evil));
+    expect(safe.path).toBe("a.ts>safe.ts");
+  });
+
+  test("★구세대에도 같은 구멍이 있었다★ — UpdateFileChange.move_path", () => {
+    const mk = (movePath: string): ApprovalRequest => ({
+      method: "applyPatchApproval",
+      params: { fileChanges: { "a.ts": { type: "update", unified_diff: "d", move_path: movePath } }, callId: "c1" },
+    });
+    const safe = mk("safe.ts"), evil = mk("outside/target.ts");
+    expect(scopeKeyForOperation(buildOperationFromApproval(safe, "dex")))
+      .not.toBe(scopeKeyForOperation(buildOperationFromApproval(evil, "dex")));
+    expect(approvalOperationHash(safe)).not.toBe(approvalOperationHash(evil)); // 지문도 갈려야 한다
+  });
+
+  test("이동이 아니면 표기가 예전과 똑같다 — 구세대 값 불변 조건", () => {
+    const op = buildOperationFromApproval({
+      method: "applyPatchApproval",
+      params: { fileChanges: { "b.ts": { type: "add", content: "x" }, "a.ts": {} }, callId: "c1" },
+    }, "dex");
+    expect(op.path).toBe("a.ts|b.ts");
+  });
+});
+
+describe("S2 — 긴 grantRoot(P2)", () => {
+  const longRoot = (suffix: string) => "/" + "x".repeat(309) + suffix;
+  const mkNew = (root: string): ApprovalRequest => ({
+    method: "item/fileChange/requestApproval",
+    params: { itemId: "i1", turnId: "t1", threadId: "th1", startedAtMs: 1, grantRoot: root },
+    observedItem: {
+      itemId: "i1", turnId: "t1", threadId: "th1",
+      changes: [{ path: "a.ts", kind: "update", movePath: null, diff: "@@ -1 +1 @@\n-x\n+y\n" }],
+    },
+  });
+
+  test("★공통 prefix 가 길어도 서로 다른 루트는 서로 다른 열쇠·지문★", () => {
+    // 재현(수정 전): grantRoot 를 300자로 ★먼저 잘라서★ 두 루트가 같은 값이 됐고, 열쇠도 지문도 같았다.
+    // 이제 열쇠에는 ★전체의 지문★ 을 맨 앞에 넣는다 — 240자 절단이 지문을 못 자른다.
+    const one = mkNew(longRoot("/one")), two = mkNew(longRoot("/two"));
+    expect(scopeKeyForOperation(buildOperationFromApproval(one, "dex")))
+      .not.toBe(scopeKeyForOperation(buildOperationFromApproval(two, "dex")));
+    expect(approvalOperationHash(one)).not.toBe(approvalOperationHash(two));
+    expect(targetForOperation(buildOperationFromApproval(one, "dex"))).toMatch(/^grant_root#[0-9a-f]{16}=/);
+  });
+
+  test("구세대도 같다", () => {
+    const mk = (root: string): ApprovalRequest => ({
+      method: "applyPatchApproval",
+      params: { fileChanges: { "a.ts": {} }, callId: "c1", grantRoot: root },
+    });
+    const one = mk(longRoot("/one")), two = mk(longRoot("/two"));
+    expect(scopeKeyForOperation(buildOperationFromApproval(one, "dex")))
+      .not.toBe(scopeKeyForOperation(buildOperationFromApproval(two, "dex")));
+    expect(approvalOperationHash(one)).not.toBe(approvalOperationHash(two));
+  });
+
+  test("긴 루트여도 사람이 볼 경고는 남는다", () => {
+    const op = buildOperationFromApproval(mkNew(longRoot("/one")), "dex");
+    expect(op.text).toContain("세션 동안");
+    expect(op.provenance?.grant_root).toBe(longRoot("/one")); // audit 에는 전체가 남는다
   });
 });
 

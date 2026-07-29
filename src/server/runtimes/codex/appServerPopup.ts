@@ -67,7 +67,9 @@ export function approvalOperationHash(req: ApprovalRequest): string {
     //   S1 이 그 문자열을 실제 shell operation 으로 승격하므로, 상관키·audit 지문도 구분해야 한다.
     //   ★배열은 배열 그대로 둔다★ — 구세대 지문 값을 바꾸지 않기 위해서다(변경 범위 최소).
     command: Array.isArray(p.command) ? p.command : (typeof p.command === "string" ? p.command.trim() || null : null),
-    files: p.fileChanges && typeof p.fileChanges === "object" ? Object.keys(p.fileChanges).sort() : null,
+    // ★이동 목적지도 담는다(Codex 리뷰 P1)★ — 예전엔 출발지만 담아 목적지만 다른 두 요청이 같은 지문이었다.
+    //   move_path 가 없으면 결과가 Object.keys().sort() 와 완전히 같다(golden 고정).
+    files: p.fileChanges && typeof p.fileChanges === "object" ? fileChangeEntries(p.fileChanges) : null,
     reason: typeof p.reason === "string" ? p.reason : null,
   };
   // ★S2 — 신세대 파일변경 승인은 위 4개가 ★전부 비어 있다★(method 말고는 command·files·reason 모두 null).
@@ -186,7 +188,8 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
     // scope_key(target)의 입력을 files[0]에서 '정렬된 전체 파일목록'으로 넓힌다.
     // ★단 target 절단 전까지만 구분력이 늘어날 뿐, '서로 다른 파일집합 → 서로 다른 scope'를 일반 보장하지 않는다.★
     // (여기서 500자, permissionGate.targetForOperation에서 240자로 잘린다.) 전체 결합은 미구현 — 이슈 #106.
-    const files = Object.keys(p.fileChanges).sort();
+    // ★구세대에도 이동 목적지가 있다★ — UpdateFileChange.move_path. 신세대와 같은 구멍이었다(P1).
+    const files = fileChangeEntries(p.fileChanges);
     // ★S2: grantRoot 는 구세대 applyPatchApproval 에도 있다★ — 지금까지 통째로 무시하고 있었다.
     //   있으면 '이 파일들' 이 아니라 ★'이 루트 하위 전부' 를 세션 동안 허용해 달라는 요청★ 이다.
     //   열쇠에 반영하지 않으면 파일 몇 개에 준 '항상 허용' 이 루트 전체 승인으로 재사용된다.
@@ -194,8 +197,8 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
     if (grantRoot) {
       return {
         runtime: "codex", agent_id: agentId, action: "write",
-        path: `grant_root=${grantRoot} | ${files.join("|")}`.slice(0, 500),
-        text: `${GRANT_ROOT_WARNING}${grantRoot} · 파일 ${files.length}개: ${files.join(", ")}`.slice(0, 500),
+        path: `${grantRootKey(grantRoot)} | ${files.join("|")}`.slice(0, 500),
+        text: `${GRANT_ROOT_WARNING}${grantRoot.slice(0, 200)} · 파일 ${files.length}개: ${files.join(", ")}`.slice(0, 500),
         requested_by: agentId, provenance: { ...provenance, grant_root: grantRoot },
       };
     }
@@ -216,7 +219,43 @@ function grantRootOf(p: Record<string, any> | undefined): string | null {
   const raw = p?.grantRoot;
   if (typeof raw !== "string") return null;
   const t = raw.trim();
-  return t.length > 0 ? t.slice(0, 300) : null;
+  // ★여기서 자르지 않는다(Codex 리뷰 2026-07-29 P2).★ 앞선 판은 300자로 잘랐는데, 그러면
+  //   ★공통 prefix 가 긴 서로 다른 루트가 같은 값이 되어 열쇠·지문이 합쳐졌다★
+  //   (310자 공통 + `/one` vs `/two` 로 재현 확인). 자르는 것은 ★표시할 때만★ 한다.
+  return t.length > 0 ? t : null;
+}
+
+/** 열쇠에 넣을 grantRoot 표현. ★지문을 맨 앞에 둔다★ — permissionGate 가 target 을 앞 240자만 쓰므로,
+ *  원문만 넣으면 ★잘려서 서로 다른 루트가 같은 열쇠★ 가 된다. 사람이 읽을 원문도 뒤에 조금 남긴다. */
+function grantRootKey(root: string): string {
+  const digest = createHash("sha256").update(root).digest("hex").slice(0, 16);
+  return `grant_root#${digest}=${root.slice(0, 120)}`;
+}
+
+/**
+ * ★쓰기 대상 한 건의 표기 — 이동이면 목적지까지 포함한다(Codex 리뷰 2026-07-29 P1).★
+ *
+ * 앞선 판은 출발지만 열쇠에 넣고 목적지는 ★팝업 글자에만★ 넣었다. 그래서 `a.ts→safe.ts` 와
+ * `a.ts→outside/target.ts` 가 ★팝업 문구는 다른데 열쇠가 완전히 같았다.★
+ * ★그게 특히 나쁜 이유★: 안전한 이동에 '항상 허용' 을 한 번 주면 위험한 목적지로의 이동은
+ * ★팝업 자체가 안 뜬다★ — 사람이 그 차이를 볼 기회가 없다. ★팝업이 보여주는 것과 열쇠가 뜻하는 것이
+ * 어긋나면, 보여준 쪽은 아무 힘이 없다.★
+ */
+function writeTargetEntry(path: string, movePath: string | null): string {
+  return movePath ? `${path}>${movePath}` : path;
+}
+
+/** 구세대 fileChanges(경로 → FileChange) → 정렬된 쓰기 대상 표기 목록.
+ *  ★move_path 는 UpdateFileChange 에만 있다★(0.144.6 스키마 실측) — 구세대에도 P1 과 ★같은 구멍★ 이
+ *  있었다(지금까지 Object.keys 만 봤다). move_path 가 없으면 결과가 예전 Object.keys().sort() 와
+ *  ★완전히 동일★ 하다 — 구세대 열쇠·지문 값 불변 조건이고 golden 으로 고정해 뒀다. */
+function fileChangeEntries(fileChanges: Record<string, unknown>): string[] {
+  return Object.entries(fileChanges)
+    .map(([path, ch]) => {
+      const mv = ch && typeof ch === "object" && typeof (ch as any).move_path === "string" ? (ch as any).move_path : null;
+      return writeTargetEntry(path, mv && mv.trim() ? mv : null);
+    })
+    .sort();
 }
 
 /** 변경 규모(추가/삭제 줄수) — 사람이 ★'한 줄인지 삼백 줄인지'★ 를 가늠하게 하는 용도.
@@ -265,7 +304,8 @@ function fileChangeOperation(
   grantRoot: string | null,
   itemId: string,
 ): PermissionOperation {
-  const paths = [...new Set(changes.map((c) => c.path))].sort();
+  // ★이동은 목적지까지가 쓰기 대상이다★ — 출발지만 넣으면 목적지가 달라도 같은 열쇠가 된다(P1).
+  const entries = [...new Set(changes.map((c) => writeTargetEntry(c.path, c.movePath)))].sort();
   const summary = changes
     .slice()
     .sort((a, b) => a.path.localeCompare(b.path))
@@ -275,14 +315,14 @@ function fileChangeOperation(
       return `${c.kind} ${c.path}${dest}(+${added}/-${removed})`;
     })
     .join(", ");
-  const head = grantRoot ? `grant_root=${grantRoot} | ` : "";
-  const textHead = grantRoot ? `${GRANT_ROOT_WARNING}${grantRoot} · ` : "";
+  const head = grantRoot ? `${grantRootKey(grantRoot)} | ` : "";
+  const textHead = grantRoot ? `${GRANT_ROOT_WARNING}${grantRoot.slice(0, 200)} · ` : "";
   return {
     runtime: "codex",
     agent_id: agentId,
     action: "write",
-    path: `${head}${paths.join("|")}`.slice(0, 500),
-    text: `${textHead}파일 ${paths.length}개: ${summary}`.slice(0, 500),
+    path: `${head}${entries.join("|")}`.slice(0, 500),
+    text: `${textHead}파일 ${entries.length}개: ${summary}`.slice(0, 500),
     requested_by: agentId,
     provenance: {
       ...provenance,
