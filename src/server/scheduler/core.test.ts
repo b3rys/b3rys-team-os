@@ -524,6 +524,7 @@ function toSqliteDateForTest(d: Date): string {
 // A stale slot must skip forward instead of firing late (GD, 2026-07-29).
 describe("b3os scheduler misfire grace", () => {
   const GRACE_ENV = "SCHEDULER_MISFIRE_GRACE_SEC";
+  const GRACE_2H = "7200";   // 기본은 꺼져 있다 — 켜야 검사할 수 있다
 
   async function withGrace<T>(value: string | undefined, fn: () => Promise<T>): Promise<T> {
     const prev = process.env[GRACE_ENV];
@@ -569,7 +570,7 @@ describe("b3os scheduler misfire grace", () => {
   test("a slot missed by more than the grace window is skipped, not fired late", async () => {
     const d = db();
     const job = overdueDailyJob(d, "m_stale", 8, NOW);
-    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    const results = await withGrace(GRACE_2H, () => runDueSchedulerJobsOnce(d, { now: NOW }));
     expect(results).toHaveLength(1);
     expect(results[0]?.status).toBe("skipped");
     // No bus message — the whole point is that a stale reminder is noise, not a reminder.
@@ -589,7 +590,7 @@ describe("b3os scheduler misfire grace", () => {
   test("a slot inside the grace window still fires", async () => {
     const d = db();
     overdueDailyJob(d, "m_fresh", 1, NOW);
-    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    const results = await withGrace(GRACE_2H, () => runDueSchedulerJobsOnce(d, { now: NOW }));
     expect(results[0]?.status).toBe("succeeded");
     expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 1 });
   });
@@ -597,12 +598,12 @@ describe("b3os scheduler misfire grace", () => {
   test("misfire_policy catch_up_once still runs however late", async () => {
     const d = db();
     overdueDailyJob(d, "m_catchup", 72, NOW, "catch_up_once");
-    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    const results = await withGrace(GRACE_2H, () => runDueSchedulerJobsOnce(d, { now: NOW }));
     expect(results[0]?.status).toBe("succeeded");
     expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 1 });
   });
 
-  test("grace 0 disables skipping — every late slot fires (previous behavior)", async () => {
+  test("grace 0 disables skipping explicitly too", async () => {
     const d = db();
     overdueDailyJob(d, "m_off", 72, NOW);
     const results = await withGrace("0", () => runDueSchedulerJobsOnce(d, { now: NOW }));
@@ -626,7 +627,7 @@ describe("b3os scheduler misfire grace", () => {
       runAt: new Date(NOW.getTime() - 48 * 3600_000),
       createdBy: "dex",
     });
-    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    const results = await withGrace(GRACE_2H, () => runDueSchedulerJobsOnce(d, { now: NOW }));
     expect(results[0]?.status).toBe("skipped");
     expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 0 });
     // Consumed, not left pending — otherwise every tick re-claims it forever.
@@ -635,18 +636,33 @@ describe("b3os scheduler misfire grace", () => {
     expect(after.status).toBe("succeeded");
   });
 
-  test("a one-shot that must arrive however late opts out with catch_up_once", async () => {
+  // Through the PUBLIC creation API, not a post-hoc SQL UPDATE. Patching the row directly
+  // would pass even if scheduleReminder dropped the option on the floor — which it did,
+  // and the SQL-UPDATE version of this test hid exactly that. (codex review)
+  test("a one-shot that must arrive however late opts out via the creation API", async () => {
     const d = db();
     const job = scheduleReminder(d, {
       targetAgentId: "dex",
       body: "[예약 알림] 늦어도 와야 함",
       runAt: new Date(NOW.getTime() - 48 * 3600_000),
       createdBy: "dex",
+      misfirePolicy: "catch_up_once",
     });
-    d.prepare(`UPDATE scheduled_job SET misfire_policy = 'catch_up_once' WHERE id = ?`).run(job.id);
-    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    expect(getScheduledJob(d, job.id)!.misfire_policy).toBe("catch_up_once");
+    const results = await withGrace(GRACE_2H, () => runDueSchedulerJobsOnce(d, { now: NOW }));
     expect(results[0]?.status).toBe("succeeded");
     expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 1 });
+  });
+
+  test("a reminder created without the option keeps the default policy", async () => {
+    const d = db();
+    const job = scheduleReminder(d, {
+      targetAgentId: "dex",
+      body: "[예약 알림] 기본",
+      runAt: new Date(NOW.getTime() + 3600_000),
+      createdBy: "dex",
+    });
+    expect(getScheduledJob(d, job.id)!.misfire_policy).toBe("coalesce");
   });
 
   // A skip bumps run_count, so it must end the job at max_runs exactly like a real run.
@@ -655,7 +671,7 @@ describe("b3os scheduler misfire grace", () => {
     const d = db();
     const job = overdueDailyJob(d, "m_cap", 8, NOW);
     d.prepare(`UPDATE scheduled_job SET max_runs = 1, run_count = 0 WHERE id = ?`).run(job.id);
-    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    const results = await withGrace(GRACE_2H, () => runDueSchedulerJobsOnce(d, { now: NOW }));
     expect(results[0]?.status).toBe("skipped");
     const after = getScheduledJob(d, job.id)!;
     expect(after.run_count).toBe(1);
@@ -674,16 +690,38 @@ describe("b3os scheduler misfire grace", () => {
     const d = db();
     const job = overdueDailyJob(d, "m_cap_ok", 8, NOW);
     d.prepare(`UPDATE scheduled_job SET max_runs = 5, run_count = 0 WHERE id = ?`).run(job.id);
-    await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    await withGrace(GRACE_2H, () => runDueSchedulerJobsOnce(d, { now: NOW }));
     const after = getScheduledJob(d, job.id)!;
     expect(after.enabled).toBe(1);
     expect(after.status).toBe("pending");
   });
 
+  // 기본은 꺼져 있다. 이게 뒤집히면 "며칠 껐다 켰더니 아무것도 안 왔다" 가 된다.
+  test("misfire skipping is OFF by default — a stale slot still fires", async () => {
+    const d = db();
+    overdueDailyJob(d, "m_default_off", 72, NOW);
+    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    expect(results[0]?.status).toBe("succeeded");
+    expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 1 });
+  });
+
+  test("a stale one-shot also fires by default", async () => {
+    const d = db();
+    scheduleReminder(d, {
+      targetAgentId: "dex",
+      body: "[예약 알림] 기본은 켜져 온다",
+      runAt: new Date(NOW.getTime() - 48 * 3600_000),
+      createdBy: "dex",
+    });
+    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW }));
+    expect(results[0]?.status).toBe("succeeded");
+    expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 1 });
+  });
+
   test("many overdue jobs in one tick are all skipped — the boot burst is why this exists", async () => {
     const d = db();
     for (let i = 0; i < 5; i++) overdueDailyJob(d, `m_burst${i}`, 24 + i, NOW, i % 2 === 0 ? undefined : "coalesce");
-    const results = await withGrace(undefined, () => runDueSchedulerJobsOnce(d, { now: NOW, limit: 20 }));
+    const results = await withGrace(GRACE_2H, () => runDueSchedulerJobsOnce(d, { now: NOW, limit: 20 }));
     expect(results).toHaveLength(5);
     expect(results.every((r) => r.status === "skipped")).toBe(true);
     expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 0 });

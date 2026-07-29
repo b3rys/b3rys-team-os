@@ -224,6 +224,12 @@ export interface ScheduleReminderInput {
   title?: string;
   directToGd?: boolean;
   timezone?: string;
+  /**
+   * 'catch_up_once' delivers this reminder however late it is, bypassing the misfire
+   * grace. Use it for the reminder that must arrive even if the machine was off — under
+   * the default policy a stale one-shot is dropped and never comes back.
+   */
+  misfirePolicy?: "coalesce" | "skip" | "catch_up_once";
 }
 
 export interface SchedulerRunResult {
@@ -296,6 +302,7 @@ export function scheduleReminder(db: Database, input: ScheduleReminderInput): Sc
     createdBy: input.createdBy,
     timezone: input.timezone ?? "Asia/Seoul",
     maxRuns: 1,
+    misfirePolicy: input.misfirePolicy,
     dedupeKey,
     payload: {
       type: "inbox",
@@ -888,25 +895,30 @@ const DEFAULT_LEASE_SEC = 120;
 const EXEC_LEASE_MARGIN_SEC = 60;
 
 /**
- * Misfire grace: a slot missed by more than this is skipped, not run late.
+ * Misfire grace: a slot missed by more than this many seconds is skipped, not run late.
  *
- * Why (GD, 2026-07-29): the Mac gets shut down for days at a time. Every job's next_run_at
- * goes into the past, so on the next boot they ALL become due in the same tick. Each one
- * fires only once — next_run_at is recomputed forward from `now` and there is no backfill —
- * but 11 jobs landing together is still a burst, and a "06:00 task review ping" delivered
- * at 14:00 is noise, not a reminder. What is useful is the NEXT occurrence, not the stale one.
+ * OFF BY DEFAULT. Set SCHEDULER_MISFIRE_GRACE_SEC to a positive number of seconds
+ * (7200 = the 2 hours we discussed) to turn it on.
  *
- * Escape hatches, both pre-existing concepts:
- *   SCHEDULER_MISFIRE_GRACE_SEC=0   → never skip (run every late slot, old behavior)
- *   misfire_policy = 'catch_up_once' → this job runs however late it is
+ * The problem it addresses: after the Mac is off for days every job's next_run_at is in
+ * the past, so they all come due in one tick and a "06:00 ping" lands at 14:00.
+ *
+ * Why it ships off (GD, 2026-07-29): the burst is smaller than it looks — next_run_at is
+ * recomputed forward from `now` and missed slots are never backfilled, so a 30-minute job
+ * idle for three days fires ONCE, not 144 times. So the cost of leaving it off is a dozen
+ * late messages at boot. The cost of turning it on is that things silently do not happen:
+ * a one-shot has no next occurrence, and our four Friday learning-loop jobs would skip a
+ * whole week. Noisy beats silently missing, so this stays opt-in.
+ *
+ * Per-job opt-out when it IS on: misfire_policy = 'catch_up_once' runs however late.
  */
-const DEFAULT_MISFIRE_GRACE_SEC = 2 * 60 * 60;
+const DEFAULT_MISFIRE_GRACE_SEC = 0;
 
 function misfireGraceSec(): number {
   const raw = process.env.SCHEDULER_MISFIRE_GRACE_SEC;
   if (raw == null || raw === "") return DEFAULT_MISFIRE_GRACE_SEC;
   const n = Number(raw);
-  // A malformed value must fall back to the default, not to some accidental behavior.
+  // A malformed value must fall back to the default (off), never to "skip everything".
   return Number.isFinite(n) && n >= 0 ? n : DEFAULT_MISFIRE_GRACE_SEC;
 }
 
