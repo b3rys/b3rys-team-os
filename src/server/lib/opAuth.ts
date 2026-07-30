@@ -163,17 +163,22 @@ function isLoopbackDashboardRequest(request: Request): boolean {
     }
     return false;
   }
-  let urlHost = "";
-  try {
-    urlHost = new URL(request.url).hostname;
-  } catch {
-    return false;
-  }
+  // ★앞서 여기에 "url 의 host 도 loopback 이어야 한다" 는 조건이 하나 더 있었다.★
+  //   의도는 "요청이 진짜 이 서버 소켓에 닿았나" 였는데, ★그 둘은 같은 값이다.★
+  //   Bun 은 `request.url` 의 authority 를 ★Host 헤더로 만든다★ (2026-07-30 실측 — 최소 서버로 확인):
+  //     Host: dev.b3rys.com → req.url = http://dev.b3rys.com/x
+  //     Host: 127.0.0.1     → req.url = http://127.0.0.1:7999/x
+  //   그래서 두 조건이 ★서로 배타적★ 이었다 — 도메인으로 오면 앞이 거짓, 루프백으로 오면 뒤가 무의미.
+  //   ★즉 등록 기능은 켜질 수가 없었다.★ 문서·안내 페이지·팀 안내가 전부 안 되는 방법을 말하고 있었다.
+  //
+  //   "진짜 이 서버에 닿았나" 는 위의 TEAM_BIND 검사가 이미 답한다 — 루프백 바인딩이면 소켓 자체가
+  //   로컬에서만 연결을 받는다. 중복이었고, 그 중복이 기능을 죽였다. 그래서 뺀다.
+  //
+  //   ★Host 헤더가 아예 없으면 통과시킨다★ — 앞서와 같은 동작이다. HTTP/1.1 은 Host 를 요구하므로
+  //   실제로는 거의 없고, 있더라도 소켓이 로컬 전용이라 로컬에서 온 요청이다.
   const trusted = trustedDashboardHosts();
   const hostHeader = request.headers.get("host") ?? "";
-  // urlHost 는 여전히 loopback 이어야 한다 — 요청이 실제로 이 서버 소켓에 닿았다는 뜻이다.
-  //   등록된 주소는 ★Host 헤더★ 쪽에서만 허용한다(터널이 남기는 이름이 그것뿐이다).
-  return isLoopbackHost(urlHost) && (!hostHeader || isTrustedDashboardHost(hostHeaderName(hostHeader), trusted));
+  return !hostHeader || isTrustedDashboardHost(hostHeaderName(hostHeader), trusted);
 }
 
 function hostHeaderName(value: string): string {
