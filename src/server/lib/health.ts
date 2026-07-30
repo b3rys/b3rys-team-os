@@ -67,11 +67,19 @@ function runtimeBlockedReason(line: string | null | undefined): { level: HealthL
 }
 
 // sqlite datetime('now') 은 "YYYY-MM-DD HH:MM:SS" UTC (Z 없음) — UTC 로 파싱.
-function parseUtc(ts: string | null): number | null {
+// 저장소 관행은 "2026-07-24 13:31:36" (UTC, 표시자 없음) 이다.
+//
+// 판정 기준은 시간대 표시자(`Z` 또는 `±HH:MM`)의 유무다.
+// `/[Z+]/` 는 두 가지를 놓쳤다:
+//   · 음수 오프셋 — `…-05:00` 에 `Z` 도 `+` 도 없어 `Z` 가 덧붙고 파싱이 실패한다
+//   · 소문자 `z` — 같은 이유로 파싱이 실패한다
+// 표시자가 없는 문자열은 `Date.parse` 가 로컬 시각으로 읽으므로, 표시자를 붙여야 한다.
+export function parseUtc(ts: string | null): number | null {
   if (!ts) return null;
-  const iso = ts.includes("T") ? ts : ts.replace(" ", "T");
-  const withZ = /[Z+]/.test(iso) ? iso : iso + "Z";
-  const n = Date.parse(withZ);
+  const trimmed = ts.trim();
+  const iso = trimmed.includes("T") ? trimmed : trimmed.replace(" ", "T");
+  const withZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(iso) ? iso : `${iso}Z`;
+  const n = Date.parse(withZone);
   return Number.isNaN(n) ? null : n;
 }
 

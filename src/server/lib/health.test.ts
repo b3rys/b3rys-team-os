@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { classifyAll, classifyHealth } from "./health";
+import { classifyAll, classifyHealth, parseUtc } from "./health";
 import type { AgentStatus, AgentRecord } from "../types";
 
 const claudeAgent = {
@@ -194,5 +194,30 @@ describe("classifyAll", () => {
     expect(verdicts.find((v) => v.agentId === "demis")?.level).toBe("ok");
     expect(verdicts.find((v) => v.agentId === "demis")?.reasons.join(" ")).not.toContain("Claude 한도 대기");
     expect(verdicts.find((v) => v.agentId === "codex")?.level).toBe("ok");
+  });
+});
+
+describe("parseUtc — 시간대 표시자", () => {
+  const iso = (v: string) => { const n = parseUtc(v); return n == null ? null : new Date(n).toISOString(); };
+
+  test("표시자가 없으면 UTC 로 읽는다", () => {
+    expect(iso("2026-07-30 18:10:00")).toBe("2026-07-30T18:10:00.000Z");
+    expect(iso("2026-07-30T18:10:00")).toBe("2026-07-30T18:10:00.000Z");
+  });
+
+  test("음수 오프셋과 소문자 z 도 읽는다 — 앞서는 null 이었다", () => {
+    expect(iso("2026-07-30T18:10:00-05:00")).toBe("2026-07-30T23:10:00.000Z");
+    expect(iso("2026-07-30T18:10:00z")).toBe("2026-07-30T18:10:00.000Z");
+  });
+
+  test("양수 오프셋과 Z 는 그대로", () => {
+    expect(iso("2026-07-30T18:10:00+09:00")).toBe("2026-07-30T09:10:00.000Z");
+    expect(iso("2026-07-30T18:10:00Z")).toBe("2026-07-30T18:10:00.000Z");
+  });
+
+  test("빈 값과 파싱 실패는 null", () => {
+    expect(parseUtc(null)).toBe(null);
+    expect(parseUtc("")).toBe(null);
+    expect(parseUtc("not-a-date")).toBe(null);
   });
 });
