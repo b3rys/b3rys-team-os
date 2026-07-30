@@ -66,6 +66,8 @@ export function untrustedHostPage(host: string): string {
   <div class="why">
     등록은 서버의 <code>.env</code> 에 <code>TEAM_TRUSTED_DASHBOARD_HOSTS</code> 한 줄을 넣고
     서버를 다시 띄우면 됩니다. 콤마로 여러 개, <code>*.</code> 로 하위 주소 전체를 적을 수 있습니다.
+    단, <code>TEAM_BIND</code> 가 루프백(<code>127.0.0.1</code>·<code>localhost</code>)일 때만 적용되며,
+    서버를 외부에 직접 열어둔 상태에서는 등록해도 무시됩니다.
     <div class="warn">등록하는 순간 <b>그 주소로 들어온 사람은 누구든 팀리드 권한</b>을 얻습니다.
     내부망 주소이거나, 앞에 로그인 관문(Cloudflare Access·사내 SSO 등)이 있는 주소만 등록하세요.</div>
   </div>

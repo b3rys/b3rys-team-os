@@ -65,6 +65,9 @@ describe("신뢰하지 않는 주소 — 막는다", () => {
     //   그날 실제로 그런 주소가 있었고, 쓰기를 막던 유일한 장치가 이 검사였다.
     expect(html).toContain("팀리드 권한");
     expect(html).toContain("로그인 관문");
+    // ★등록해도 안 열리는 조건도 같이★ (hermes 교차검증) — 이 문단만 읽는 사람은
+    //   "등록 + 재시작 = 열린다" 로 읽는다. TEAM_BIND 가 루프백이 아니면 무시된다.
+    expect(html).toContain("TEAM_BIND");
   });
 
   test("★안내 페이지는 자체 포함이어야 한다★ — 이 상황에선 assets 도 막힌다", async () => {
