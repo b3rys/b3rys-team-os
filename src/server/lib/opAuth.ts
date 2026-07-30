@@ -174,11 +174,21 @@ function isLoopbackDashboardRequest(request: Request): boolean {
   //   "진짜 이 서버에 닿았나" 는 위의 TEAM_BIND 검사가 이미 답한다 — 루프백 바인딩이면 소켓 자체가
   //   로컬에서만 연결을 받는다. 중복이었고, 그 중복이 기능을 죽였다. 그래서 뺀다.
   //
-  //   ★Host 헤더가 아예 없으면 통과시킨다★ — 앞서와 같은 동작이다. HTTP/1.1 은 Host 를 요구하므로
-  //   실제로는 거의 없고, 있더라도 소켓이 로컬 전용이라 로컬에서 온 요청이다.
+  //   ★Host 헤더가 없으면 url 에서 읽는다. 둘 다 없으면 통과시키지 않는다.★
+  //   앞선 판에서 `!hostHeader || …` 로 뒀다가 ★없으면 무조건 통과★ 가 됐다 —
+  //   손으로 만든 Request 는 Host 헤더가 안 붙어서, `http://example.com/…` 요청이 통과했다
+  //   (proposals 테스트가 잡았다). 실제 서버에서는 Host 가 늘 있으므로 평소 동작은 같지만,
+  //   "없으면 믿는다" 는 방향이 틀렸다 — 모르면 안 믿는 쪽이다.
   const trusted = trustedDashboardHosts();
-  const hostHeader = request.headers.get("host") ?? "";
-  return !hostHeader || isTrustedDashboardHost(hostHeaderName(hostHeader), trusted);
+  let host = request.headers.get("host") ?? "";
+  if (!host) {
+    try {
+      host = new URL(request.url).host;
+    } catch {
+      return false;
+    }
+  }
+  return !!host && isTrustedDashboardHost(hostHeaderName(host), trusted);
 }
 
 function hostHeaderName(value: string): string {
