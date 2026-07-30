@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { createBunWebSocket } from "hono/bun";
 import type { ServerWebSocket } from "bun";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, copyFileSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openDb, migrate } from "./db/migrate";
@@ -140,6 +140,24 @@ try {
   const claudeIds = agents.filter((a) => a.runtime === "claude_channel").map((a) => a.id);
   const rr = renderAndRepoint(ownerRow?.value ?? null, claudeIds);
   console.log(`[teamos-render] owner='${rr.owner}' repointed=${rr.repointed.join(",") || "none"}`);
+
+  // ★팀 학습 로그도 없으면 만든다★ — TEAM-OS.md 와 같은 방식(템플릿만 track, 실사용 파일은 생성).
+  //   #148 이 rules/SHARED.md 를 추적 제외하면서, 그 커밋을 pull 한 ★기존 설치본에서 파일이 삭제★ 됐다
+  //   (채워둔 팀은 git 이 막아주지만, 템플릿 그대로였던 팀은 fast-forward 로 지워진다).
+  //   그런데 문서화된 업데이트 절차는 `git pull → build → restart` 라 ★install.sh 를 다시 돌지 않는다★ →
+  //   설치 스크립트에만 생성 로직을 두면 기존 설치본은 영영 파일이 없고, TEAM-OS 의 "교훈은 SHARED.md 로"
+  //   안내가 없는 파일을 가리킨다. 재시작은 어차피 하므로 여기서 덮는다. (steve 교차검증)
+  //   ★이미 있으면 절대 건드리지 않는다★ — 팀이 쌓아온 기록이다.
+  try {
+    const sharedPath = join(RULES_DIR, "SHARED.md");
+    const sharedTemplate = join(RULES_DIR, "SHARED.template.md");
+    if (!existsSync(sharedPath) && existsSync(sharedTemplate)) {
+      copyFileSync(sharedTemplate, sharedPath);
+      console.log("[teamos-render] rules/SHARED.md 생성(템플릿 복사) — 팀 학습 로그, 추적되지 않습니다");
+    }
+  } catch (e) {
+    console.warn("[teamos-render] SHARED.md 생성 실패(계속):", e instanceof Error ? e.message : e);
+  }
   // 공개 빌드 부팅 백필(PUBLIC_BUILD 게이트) — 공개 사용자가 git 업데이트를 pull 한 뒤 재시작하면 기존
   //   멤버도 재영입 없이 최신을 받게. 라이브(PUBLIC_BUILD=false)는 글로벌 배선/실멤버 보호로 skip.
   if (PUBLIC_BUILD) {
