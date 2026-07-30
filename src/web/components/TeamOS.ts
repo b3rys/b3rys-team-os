@@ -55,10 +55,19 @@ async function loadCi(root: HTMLElement): Promise<void> {
 export function ciBlockHtml(d: {
   ok: boolean; reason?: string; runs: { name: string; event: string; status: string;
   conclusion: string | null; branch: string; created_at: string; url: string }[];
-  fetched_at: string | null; cached?: boolean;
+  fetched_at: string | null; cached?: boolean; configured?: boolean;
 } | null): string {
   if (!d) {
     return `<div class="text-[12px] text-slate-400">${pick("불러오는 중…", "Loading…")}</div>`;
+  }
+  // ★설정이 안 된 것은 오류가 아니다.★ GitHub 을 안 쓰는 설치본에서 빨간 ✖ 와
+  //   "직접 확인하세요" 가 뜨면, 아무 문제 없는 사람에게 ★고장 신호★ 를 보내는 것이다.
+  //   그래서 미설정만 중립(회색)으로 갈라 놓는다.
+  if (d.configured === false) {
+    return `<div class="rounded-md border border-surface-3 bg-surface-1/50 p-2.5">
+      <div class="text-[12px] text-slate-400">${pick("GitHub CI 미설정", "GitHub CI not configured")}</div>
+      <div class="text-[11px] text-slate-500 mt-0.5">${escape(d.reason || "")}</div>
+    </div>`;
   }
   if (!d.ok) {
     return `<div class="rounded-md border border-txt-red/40 bg-txt-red/5 p-2.5">

@@ -22,11 +22,85 @@
 //   ★이 둘은 "실패를 초록으로 만들지 않는다" 와 충돌하지 않는다★ — 여전히 ok:false 를 내려보내고,
 //   다만 ★이유에 '언제 다시 시도하는지' 를 같이 적는다.★
 import { Hono } from "hono";
+import { readFileSync } from "node:fs";
+import { REPO_ROOT } from "../lib/paths";
 
 const CACHE_MS = 5 * 60_000;
 const FETCH_TIMEOUT_MS = 6_000;
-const RUNS_URL =
-  "https://api.github.com/repos/b3rys/b3rys-team-os/actions/runs?per_page=10";
+
+/**
+ * ★어느 저장소의 CI 인가 — 설치본마다 다르다.★ (hermes 교차검증 2026-07-30 에서 출발, 빌 실측)
+ *
+ *  앞선 판은 `https://api.github.com/repos/★b3rys/b3rys-team-os★/actions/runs` 로 ★박아놨다.★
+ *  그러면 공개 설치본에서 이런 일이 난다:
+ *    · 자기 CI 가 아니라 ★우리 CI 가 자기 대시보드에 뜬다★ — 화면에 거짓을 표시하는 것이다
+ *    · GitHub 를 안 쓰는 설치본도 ★5분마다 GitHub API 를 친다★(미인증 한도는 IP 공유)
+ *  "우리 맥 사정을 저장소 기본값으로 박는" 형태이고, 이 저장소에서 이미 겪은 종류다.
+ *
+ *  → 순서: ①`TEAM_CI_REPO`(owner/repo) ②설치본 자신의 git origin ③★못 찾으면 기능을 끈다.★
+ *    ③에서 추측하지 않는다 — 모르면 "미설정" 이라고 말하고 ★네트워크를 아예 안 탄다.★
+ */
+export function parseRepoFromRemote(url: string): string | null {
+  const t = url.trim();
+  // git@github.com:owner/repo.git · https://github.com/owner/repo(.git) · ssh://git@github.com/owner/repo
+  const m = t.match(/github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i);
+  if (!m) return null;
+  const [, owner, repo] = m;
+  if (!owner || !repo || owner === "." || repo === ".") return null;
+  return `${owner}/${repo}`;
+}
+
+/** 설치본의 origin 을 `.git/config` 에서 읽는다. ★git 을 실행하지 않는다★(요청마다 프로세스를 띄우지 않으려고).
+ *
+ *  ★워크트리에서는 `.git` 이 디렉토리가 아니라 파일이다★ (2026-07-30 실측) — 안에 `gitdir: <경로>` 한 줄이 있고
+ *  진짜 config 는 그 경로의 `commondir` 쪽에 있다. 정상 클론만 상정하면 ★팀원이 워크트리에서 볼 때
+ *  "미설정" 으로 보인다★ — 기능이 멀쩡한데 고장난 것처럼 읽힌다. 그래서 파일 형태도 따라간다. */
+export function repoFromGitConfig(root: string): string | null {
+  try {
+    let gitDir = `${root}/.git`;
+    // `.git` 이 파일이면 `gitdir: …` 포인터다 → 그 안의 commondir 를 따라 진짜 저장소로 간다
+    let head: string;
+    try {
+      head = readFileSync(gitDir, "utf8");
+    } catch {
+      head = "";
+    }
+    const ptr = head.match(/^gitdir:\s*(.+)$/m)?.[1]?.trim();
+    if (ptr) {
+      const abs = ptr.startsWith("/") ? ptr : `${root}/${ptr}`;
+      // 워크트리 gitdir 안의 commondir 가 공용 저장소를 가리킨다(대개 `../..`)
+      let common = "";
+      try {
+        common = readFileSync(`${abs}/commondir`, "utf8").trim();
+      } catch {
+        common = "";
+      }
+      gitDir = common ? (common.startsWith("/") ? common : `${abs}/${common}`) : abs;
+    }
+    const cfg = readFileSync(`${gitDir}/config`, "utf8");
+    // [remote "origin"] 블록의 url 한 줄만 본다
+    const block = cfg.split(/^\[/m).find((b) => /^remote\s+"origin"\]/.test(b));
+    const url = block?.match(/^\s*url\s*=\s*(.+)$/m)?.[1];
+    return url ? parseRepoFromRemote(url) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 설정 → git origin → null. null 이면 기능이 꺼진다. */
+export function resolveCiRepo(root = REPO_ROOT): string | null {
+  const env = (process.env.TEAM_CI_REPO ?? "").trim();
+  if (env) return /^[^/\s]+\/[^/\s]+$/.test(env) ? env : null;
+  return repoFromGitConfig(root);
+}
+
+export const CI_UNCONFIGURED_REASON =
+  "GitHub CI 미설정 — 이 설치본의 git origin 이 GitHub 이 아니거나 확인되지 않습니다. " +
+  "표시하려면 .env 에 TEAM_CI_REPO=owner/repo 를 적어 주세요.";
+
+function runsUrl(repo: string): string {
+  return `https://api.github.com/repos/${repo}/actions/runs?per_page=10`;
+}
 
 /** 리셋 시각을 못 읽었을 때 쓰는 보수적 기본 대기. 한도 창이 1시간이라 그 절반. */
 const DEFAULT_BACKOFF_MS = 30 * 60_000;
@@ -51,6 +125,9 @@ export interface CiStatusBody {
   cached: boolean;
   /** 한도에 걸려 쉬는 중이면 다시 시도할 시각(UTC ISO). 평소에는 없다. */
   retry_after?: string;
+  /** ★설정 자체가 안 된 상태★ — 실패가 아니다. GitHub 을 안 쓰는 설치본의 정상 상태이므로
+   *  화면이 ★빨간 오류★ 가 아니라 중립으로 그려야 한다(false 일 때만 실린다). */
+  configured?: boolean;
 }
 
 /** 한도 초과를 ★다른 실패와 구분★ 하기 위한 전용 오류.
@@ -129,9 +206,12 @@ export function createCiStatusRoutes(deps?: {
   /** 테스트 주입용 — 실제 네트워크를 타지 않게 한다(테스트가 환경을 타면 안 된다). */
   fetchRuns?: () => Promise<unknown>;
   now?: () => number;
+  /** 테스트 주입용 — ★주변 git 설정에 결과가 달라지면 안 된다.★ 기본은 실제 해석기. */
+  ciRepo?: () => string | null;
 }): Hono {
   const app = new Hono();
   const now = deps?.now ?? (() => Date.now());
+  const ciRepo = deps?.ciRepo ?? (() => resolveCiRepo());
   let cache: { at: number; body: CiStatusBody } | null = null;
   /** ★single-flight★ — 진행중인 요청. 동시 요청은 이걸 함께 기다린다(추가 호출 0). */
   let inFlight: Promise<CiRun[]> | null = null;
@@ -139,7 +219,10 @@ export function createCiStatusRoutes(deps?: {
   let blockedUntil = 0;
 
   const defaultFetch = async (): Promise<unknown> => {
-    const res = await fetch(RUNS_URL, {
+    const repo = ciRepo();
+    // ★여기 오면 안 된다★ — 핸들러가 미설정을 먼저 걸러낸다. 방어적으로 한 번 더 막는다.
+    if (!repo) throw new Error(CI_UNCONFIGURED_REASON);
+    const res = await fetch(runsUrl(repo), {
       headers: {
         accept: "application/vnd.github+json",
         // ★버전을 고정한다★ — 안 보내면 GitHub 이 기본값을 바꿀 때 응답 모양이 조용히 달라진다.
@@ -161,6 +244,18 @@ export function createCiStatusRoutes(deps?: {
 
   app.get("/ci-status", async (c) => {
     const t = now();
+    // ★미설정이면 네트워크를 아예 안 탄다.★ 캐시보다도 앞이다 — 켜지지도 않은 기능이
+    //   한 번이라도 GitHub 을 치면 안 된다. deps.fetchRuns 를 주입한 테스트는 이 관문을 지난다.
+    if (!deps?.fetchRuns && !ciRepo()) {
+      return c.json({
+        ok: false,
+        reason: CI_UNCONFIGURED_REASON,
+        runs: [],
+        fetched_at: null,
+        cached: false,
+        configured: false,
+      } satisfies CiStatusBody);
+    }
     if (cache && t - cache.at < CACHE_MS) {
       return c.json({ ...cache.body, cached: true });
     }

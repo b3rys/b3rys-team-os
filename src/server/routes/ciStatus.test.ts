@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { createCiStatusRoutes, normalizeRuns, parseRateLimit, RateLimitedError } from "./ciStatus";
+import { createCiStatusRoutes, normalizeRuns, parseRateLimit, RateLimitedError, parseRepoFromRemote, repoFromGitConfig, resolveCiRepo } from "./ciStatus";
 
 const sample = {
   workflow_runs: [
@@ -173,5 +173,99 @@ describe("ciBlockHtml — 실패가 초록으로 보이지 않는다", () => {
       { name: "CI", event: "push", status: "in_progress", conclusion: null,
         branch: "main", created_at: "2026-07-29T00:00:00Z", url: "https://x" }]});
     expect(h).toContain("text-txt-amber");
+  });
+});
+
+// ─── 어느 저장소의 CI 인가 (2026-07-30, hermes 교차검증에서 출발) ────────────────
+describe("저장소 해석 — 우리 저장소를 박아두지 않는다", () => {
+  test("★git origin 에서 owner/repo 를 읽는다★ — 형태가 여러 가지다", () => {
+    const cases: Array<[string, string | null]> = [
+      ["git@github.com:acme/widgets.git", "acme/widgets"],
+      ["https://github.com/acme/widgets.git", "acme/widgets"],
+      ["https://github.com/acme/widgets", "acme/widgets"],
+      ["ssh://git@github.com/acme/widgets.git", "acme/widgets"],
+      ["https://github.com/acme/widgets/", "acme/widgets"],
+      // ★GitHub 이 아니면 null★ — 추측하지 않는다
+      ["git@gitlab.com:acme/widgets.git", null],
+      ["https://bitbucket.org/acme/widgets.git", null],
+      ["/some/local/path", null],
+      ["", null],
+    ];
+    for (const [url, want] of cases) {
+      expect([url, parseRepoFromRemote(url)]).toEqual([url, want]);
+    }
+  });
+
+  test("★.git/config 이 없으면 null★ — 던지지 않는다(설치본이 tarball 일 수 있다)", () => {
+    expect(repoFromGitConfig("/nonexistent/path/that/does/not/exist")).toBe(null);
+  });
+
+  test("★TEAM_CI_REPO 가 설정을 이긴다★ · 모양이 틀리면 켜지지 않는다", () => {
+    const prev = process.env.TEAM_CI_REPO;
+    try {
+      process.env.TEAM_CI_REPO = "acme/widgets";
+      expect(resolveCiRepo("/nonexistent")).toBe("acme/widgets");
+      process.env.TEAM_CI_REPO = "이건-owner/repo-모양이-아니다/셋";
+      expect(resolveCiRepo("/nonexistent")).toBe(null);
+      process.env.TEAM_CI_REPO = "";
+      expect(resolveCiRepo("/nonexistent")).toBe(null);
+    } finally {
+      if (prev === undefined) delete process.env.TEAM_CI_REPO;
+      else process.env.TEAM_CI_REPO = prev;
+    }
+  });
+
+  test("★미설정이면 GitHub 을 한 번도 안 친다★ — 화면에는 이유가 나간다", async () => {
+    const prev = process.env.TEAM_CI_REPO;
+    let calls = 0;
+    try {
+      process.env.TEAM_CI_REPO = "";
+      // fetchRuns 는 주입하지 않는다(실제 경로). ciRepo 만 "못 찾음" 으로 고정한다 —
+      // ★주변 git 설정에 테스트 결과가 달라지면 안 된다★(워크트리·클론에서 다르게 나왔다).
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = (async () => { calls += 1; throw new Error("★불렀다★"); }) as unknown as typeof fetch;
+      try {
+        const app = createCiStatusRoutes({ ciRepo: () => null });
+        const res = await app.request("/ci-status");
+        const body = await res.json() as { ok: boolean; reason?: string; runs: unknown[] };
+        expect(body.ok).toBe(false);
+        expect(body.runs).toEqual([]);
+        expect(body.reason).toContain("TEAM_CI_REPO");
+        expect(calls).toBe(0); // ★네트워크 0회★
+      } finally {
+        globalThis.fetch = origFetch;
+      }
+    } finally {
+      if (prev === undefined) delete process.env.TEAM_CI_REPO;
+      else process.env.TEAM_CI_REPO = prev;
+    }
+  });
+});
+
+// ★2층 방어를 둘 다 검증한다.★ 관문(핸들러)만 지우면 defaultFetch 안의 재확인이 잡아내서
+//   결과가 같다 — 즉 관문 하나만 지우는 뮤턴트는 ★살아남는다(2026-07-30 실측).★
+//   그건 방어가 겹쳐 있다는 뜻이고 나쁘지 않다. 다만 "관문이 검증됐다" 고 말할 수는 없으므로,
+//   ★둘 다 지웠을 때 실제로 GitHub 을 치는지★ 를 여기서 못 박는다.
+describe("미설정 방어는 2층이다", () => {
+  test("★어느 층이든 남아 있으면 네트워크가 안 나간다★ — 같은 응답, 호출 0회", async () => {
+    const prev = process.env.TEAM_CI_REPO;
+    let calls = 0;
+    const origFetch = globalThis.fetch;
+    try {
+      process.env.TEAM_CI_REPO = "";
+      globalThis.fetch = (async () => { calls += 1; throw new Error("★불렀다★"); }) as unknown as typeof fetch;
+      const app = createCiStatusRoutes({ ciRepo: () => null });
+      // 두 번 불러도(캐시 없음) 호출은 0 이어야 한다
+      for (let i = 0; i < 2; i++) {
+        const body = await (await app.request("/ci-status")).json() as { ok: boolean; reason?: string };
+        expect(body.ok).toBe(false);
+        expect(body.reason).toContain("TEAM_CI_REPO");
+      }
+      expect(calls).toBe(0);
+    } finally {
+      globalThis.fetch = origFetch;
+      if (prev === undefined) delete process.env.TEAM_CI_REPO;
+      else process.env.TEAM_CI_REPO = prev;
+    }
   });
 });
