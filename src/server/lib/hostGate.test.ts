@@ -103,14 +103,45 @@ describe("막히면 안 되는 것 — 안 막힌다", () => {
   });
 });
 
-describe("포털(/reports) 은 API 가 아니다", () => {
-  test("★JSON 이 아니라 안내 페이지를 준다★ — 공유 링크를 받은 사람은 사람이다", async () => {
-    const app = new Hono();
-    app.use("*", createHostGate({ isTrusted: () => false, isApiPath: () => false }));
-    app.get("/reports", (c) => c.text("portal"));
-    const r = await app.fetch(new Request("http://x/reports", { headers: { host: "studio.b3rys.com" } }));
-    expect(r.status).toBe(403);
-    expect(r.headers.get("content-type")).toContain("text/html");
-    expect(await r.text()).toContain("등록되지 않은 주소");
+describe("관문은 ★한 곳★ 이고, 그 아래 붙는 것은 전부 덮인다", () => {
+  // ★이게 이 설계의 전부다.★ 실제 index.ts 와 같은 모양으로 조립해서, 하위 앱을 mount 해도
+  //   부모에 건 관문이 덮는지 확인한다. 앞서는 app·reports 두 곳에 각각 걸었는데(덧대기),
+  //   붙일 곳이 늘 때마다 또 붙여야 하는 모양이라 한 곳으로 합쳤다.
+  function rootLike() {
+    const dash = new Hono();          // = app (대시보드 + /api)
+    dash.get("/", (c) => c.text("dashboard"));
+    dash.get("/api/agents", (c) => c.json({ agents: [] }));
+
+    const portal = new Hono();        // = /reports 포털
+    portal.get("/", (c) => c.text("portal"));
+
+    const root = new Hono();
+    root.get("/health", (c) => c.json({ ok: true }));               // ★관문 위★ — 유일한 예외
+    root.use("*", createHostGate({ isTrusted: () => false }));      // ★관문★
+    root.route("/team", dash);                                      // 아래는 전부 덮인다
+    root.route("/reports", portal);
+    return root;
+  }
+
+  const hit = (p: string) =>
+    rootLike().fetch(new Request(`http://studio.b3rys.com${p}`, { headers: { host: "studio.b3rys.com" } }));
+
+  test("★관문 위에 등록된 /health 만 통과한다★", async () => {
+    expect((await hit("/health")).status).toBe(200);
+  });
+
+  test("★관문 아래 mount 된 하위 앱도 전부 덮인다★ — 대시보드·API·포털", async () => {
+    for (const p of ["/team", "/team/api/agents", "/reports"]) {
+      expect([p, (await hit(p)).status]).toEqual([p, 403]);
+    }
+  });
+
+  test("★기계는 JSON, 사람은 페이지★ — 포털은 사람이 여는 곳이라 페이지다", async () => {
+    const api = await hit("/team/api/agents");
+    expect(api.headers.get("content-type")).toContain("application/json");
+
+    const portal = await hit("/reports");
+    expect(portal.headers.get("content-type")).toContain("text/html");
+    expect(await portal.text()).toContain("등록되지 않은 주소");
   });
 });
