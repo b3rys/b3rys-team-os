@@ -466,7 +466,22 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       )
       .get(id) as Record<string, unknown> | undefined;
     if (!m) return c.json({ error: "not_found", id }, 404);
-    return c.json({ message: m });
+    // ★수신자별 배달 상태를 함께 준다★ (2026-07-30) — send.sh --confirm 의 판정 근거.
+    //   POST /api/inbox 는 행 삽입만 하고 ok 를 주므로 그 시점엔 배달 여부를 알 수 없다(차단 판정은
+    //   dispatcher 가 비동기로 한다). 보낸 사람이 사실을 확인할 경로가 없어서 미배달이 '성공' 으로
+    //   보였다 — 실측으로 메시지가 그렇게 사라졌다.
+    //   ★delivery_state 를 준다. delivery_status·recipient_state 는 주지 않는다★ — 그 둘은 미배달에도
+    //   각각 delivered·acknowledged 로 박혀 있어(같은 행에서 실측) 판정 근거로 쓰면 거짓말을 되풀이한다.
+    //   last_error 를 같이 주는 이유: 차단 사유가 거기에만 있다(예: pingpong_limit_exceeded:rounds=8).
+    const recipients = deps.db
+      .prepare(
+        `SELECT agent_id, delivery_state, last_error, retry_count
+         FROM message_recipient WHERE message_id = ? ORDER BY agent_id`,
+      )
+      .all(id) as Array<Record<string, unknown>>;
+    // recipients 는 ★항상 배열★ 이다. 빈 배열은 '수신자가 0명' 이라는 사실이며 '모름' 이 아니다 —
+    //   호출부가 그 둘을 구분할 수 있어야 수신자 미연결 사고를 '아직 안 왔음' 으로 흘리지 않는다.
+    return c.json({ message: m, recipients });
   });
 
   return r;
