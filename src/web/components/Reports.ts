@@ -11,6 +11,7 @@
 
 import { pick } from "../i18n";
 import { parseSqliteDate } from "../lib/datetime";
+import { humanizeApiError } from "../lib/apiErrorMessage";
 import { showAlert, showConfirm, showPrompt } from "./dialogs";
 
 const REPORTS_BASE = "/reports";
@@ -396,7 +397,8 @@ export function tagPillsHtml(
 function reportTagFailure(err: unknown): void {
   void showAlert({
     title: pick("태그를 저장하지 못했습니다", "Could not save the tag"),
-    message: String((err as Error)?.message ?? err),
+    // ★코드가 아니라 사람 말로 보여준다★ — `x_actor_id_required` 만 뜨면 원인도 해결도 알 수 없다.
+    message: humanizeApiError(err),
   });
 }
 
