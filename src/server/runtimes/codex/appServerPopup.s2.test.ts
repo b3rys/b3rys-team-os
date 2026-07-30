@@ -36,8 +36,10 @@ describe("S2 — 신세대 파일변경 승인 해석", () => {
   test("★짝지어진 알림이 있으면 실제 파일을 쓰기 작업으로 해석한다★", () => {
     const op = buildOperationFromApproval(fileReq(observed([["src/a.ts", "update", 3]])), "dex");
     expect(op.action).toBe("write");
-    expect(op.path).toBe("src/a.ts");
-    expect(targetForOperation(op)).toBe("src/a.ts"); // 지문이 아니라 사람이 읽는 경로
+    // ★S3 — 이 한 줄이 화면이다.★ targetForOperation 이 text 가 아니라 path 를 쓰므로(우선순위
+    //   command > path > egress_url > text), path 자체가 사람이 읽을 말이어야 한다.
+    expect(op.path).toMatch(/^파일 1개 · update src\/a\.ts #[0-9a-f]{12}$/);
+    expect(targetForOperation(op)).toBe(op.path); // 화면에 그대로 나온다(240자 안)
   });
 
   test("사람이 규모를 볼 수 있다 — 종류·경로·줄수 요약", () => {
@@ -163,7 +165,7 @@ describe("S2 — 라이브 실측 재생", () => {
     expect(hit).not.toBeNull(); // ★여기가 깨지면 실물에서 전부 ask 로 떨어진다★
     const op = buildOperationFromApproval({ ...LIVE_APPROVAL, observedItem: hit! }, "dex");
     expect(op.action).toBe("write");
-    expect(op.path).toBe("/tmp/s2probe/target.txt");
+    expect(op.path).toMatch(/^파일 1개 · update \/tmp\/s2probe\/target\.txt #[0-9a-f]{12}$/);
     expect(op.text).toContain("update /tmp/s2probe/target.txt(+1/-2)");
     expect(op.provenance?.grant_root).toBeNull();
   });
@@ -209,9 +211,13 @@ describe("S2 — grantRoot 는 별개 승인이다", () => {
     const many = Array.from({ length: 40 }, (_, i) => [`src/very/long/path/file${i}.ts`, "update", 1] as [string, string, number]);
     const rooted = buildOperationFromApproval(fileReq(observed(many), { grantRoot: "/repo" }), "dex");
     const plain = buildOperationFromApproval(fileReq(observed(many)), "dex");
-    expect(targetForOperation(rooted).length).toBe(240); // 실제로 잘렸다
-    // 열쇠에는 ★전체 루트의 지문★ 이 맨 앞에 온다(P2 수정) — 원문만 앞에 두면 긴 루트끼리 충돌한다.
-    expect(targetForOperation(rooted)).toMatch(/^grant_root#[0-9a-f]{16}=\/repo/);
+    // ★파일 목록이 예산을 넘겼다★ — 예전엔 단어 중간에서 잘려 "몇 개를 못 보고 있는지" 가 사라졌다.
+    expect(targetForOperation(rooted)).toContain("…외");
+    expect(targetForOperation(rooted).length).toBeLessThanOrEqual(240);
+    // ★사람이 볼 경고가 맨 앞에 남는다★ — 이건 '파일 몇 개' 가 아니라 '폴더 전체' 요청이다.
+    expect(targetForOperation(rooted).startsWith("⚠")).toBe(true);
+    // ★열쇠 지문이 절단선 안에 살아남는다★ — 이게 P2 재발 방지의 조건이다(뒤에 두되 예산을 먼저 뗀다).
+    expect(targetForOperation(rooted)).toMatch(/#[0-9a-f]{12}$/);
     expect(scopeKeyForOperation(rooted)).not.toBe(scopeKeyForOperation(plain));
   });
 
@@ -219,7 +225,8 @@ describe("S2 — grantRoot 는 별개 승인이다", () => {
     const item = observed([["src/a.ts", "update", 1]]);
     for (const blank of ["", "   ", null, undefined, 123]) {
       const op = buildOperationFromApproval(fileReq(item, { grantRoot: blank }), "dex");
-      expect(op.path).toBe("src/a.ts");
+      expect(op.path).toMatch(/^파일 1개 · update src\/a\.ts #[0-9a-f]{12}$/);
+      expect(op.path.startsWith("⚠")).toBe(false); // 경고를 남발하지 않는다
       expect(op.provenance?.grant_root).toBeNull();
     }
   });
@@ -248,7 +255,7 @@ describe("S2 — 이동 목적지(P1)", () => {
     // 재현(수정 전): 팝업 문구는 달랐는데 scopeKey 가 완전히 같았다.
     expect(safe.text).not.toBe(evil.text);
     expect(scopeKeyForOperation(safe)).not.toBe(scopeKeyForOperation(evil));
-    expect(safe.path).toBe("a.ts>safe.ts");
+    expect(safe.path).toMatch(/^파일 1개 · update a\.ts→safe\.ts #[0-9a-f]{12}$/); // 목적지가 화면에 보인다
   });
 
   test("★구세대에도 같은 구멍이 있었다★ — UpdateFileChange.move_path", () => {
@@ -267,7 +274,8 @@ describe("S2 — 이동 목적지(P1)", () => {
       method: "applyPatchApproval",
       params: { fileChanges: { "b.ts": { type: "add", content: "x" }, "a.ts": {} }, callId: "c1" },
     }, "dex");
-    expect(op.path).toBe("a.ts|b.ts");
+    // ★S3 에서 표시 형식이 바뀌었다(의도)★ — 파일집합·정렬은 그대로, 사람이 읽을 종류·개수와 지문이 붙었다.
+    expect(op.path).toMatch(/^파일 2개 · change a\.ts, add b\.ts #[0-9a-f]{12}$/);
   });
 });
 
@@ -289,7 +297,8 @@ describe("S2 — 긴 grantRoot(P2)", () => {
     expect(scopeKeyForOperation(buildOperationFromApproval(one, "dex")))
       .not.toBe(scopeKeyForOperation(buildOperationFromApproval(two, "dex")));
     expect(approvalOperationHash(one)).not.toBe(approvalOperationHash(two));
-    expect(targetForOperation(buildOperationFromApproval(one, "dex"))).toMatch(/^grant_root#[0-9a-f]{16}=/);
+    // ★루트 원문은 표시용으로 줄어들지만(뒤 71자) 지문이 전체를 담아 열쇠를 가른다.★
+    expect(targetForOperation(buildOperationFromApproval(one, "dex"))).toMatch(/#[0-9a-f]{12}$/);
   });
 
   test("구세대도 같다", () => {
@@ -319,8 +328,10 @@ describe("S2 — 구세대 불변", () => {
     const apply: ApprovalRequest = { method: "applyPatchApproval", params: { fileChanges: { "b.ts": {}, "a.ts": {} }, callId: "c1" } };
     expect(approvalOperationHash(apply)).toBe("c7fa63459c642993");
     const op = buildOperationFromApproval(apply, "dex");
-    expect(op.path).toBe("a.ts|b.ts"); // 표시·열쇠 모두 그대로
-    expect(op.text).toBe("a.ts, b.ts");
+    // ★지문(approvalOperationHash) 은 그대로다★ — 진행 중 승인의 상관키가 어긋나지 않는다.
+    //   ★열쇠(scope) 는 S3 에서 의도적으로 바뀐다★ — 저장된 grant 는 0행이라 무효화될 것이 없다(실측 2026-07-30).
+    expect(op.path).toMatch(/^파일 2개 · change a\.ts, change b\.ts #[0-9a-f]{12}$/);
+    expect(op.text).toBe("파일 2개: change a.ts, change b.ts");
   });
 
   test("★구세대 명령 지문 값도 그대로다★ — S1 golden 재확인(basis 에 키를 무조건 추가하지 않았다)", () => {

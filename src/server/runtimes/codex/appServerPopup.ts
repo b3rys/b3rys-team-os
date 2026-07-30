@@ -11,7 +11,6 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { requestPermission, getPermissionRequest, type PermissionOperation } from "../../lib/permissionGate";
 import type { ApprovalRequest, ReviewDecision } from "./appServerClient";
-import type { ObservedFileChange } from "./appServerItemIndex";
 import { CodexApprovalCorrelationStore } from "./state";
 
 /** ★Phase1 ③: 이 서버 프로세스 인스턴스 id — 재시작 감지용(옛 팝업을 새 프로세스가 새 turn에 재결합 금지).★ */
@@ -182,27 +181,20 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
   if (req.method === "item/fileChange/requestApproval") {
     const observed = req.observedItem;
     if (!observed || observed.changes.length === 0) return unparsedOperation(req, agentId, provenance);
-    return fileChangeOperation(agentId, provenance, observed.changes, grantRootOf(p), observed.itemId);
+    return writeOperation(agentId, provenance, observed.changes, grantRootOf(p), observed.itemId);
   }
+  // ★S3(#106) — 구세대도 신세대와 ★같은 것을 보여준다.★
+  //
+  //  지금까지 구세대 팝업은 ★파일 이름만★ 보여줬다("무엇이 어떻게 바뀌는지" 없이). 재료가 없어서가 아니었다 —
+  //  ★벤더 스키마(0.144.6)를 실제로 읽어보니 구세대 payload 에도 내용이 실려 있다:★
+  //    AddFileChange    { type: "add",    content }        DeleteFileChange { type: "delete", content }
+  //    UpdateFileChange { type: "update", unified_diff, move_path? }
+  //  ★모양을 짐작하지 않고 벤더 스키마에서 읽었다★ — 앞서 patchUpdated 를 짐작해 한 번 틀렸던 자리다.
   if (p.fileChanges && typeof p.fileChanges === "object") {
-    // scope_key(target)의 입력을 files[0]에서 '정렬된 전체 파일목록'으로 넓힌다.
-    // ★단 target 절단 전까지만 구분력이 늘어날 뿐, '서로 다른 파일집합 → 서로 다른 scope'를 일반 보장하지 않는다.★
-    // (여기서 500자, permissionGate.targetForOperation에서 240자로 잘린다.) 전체 결합은 미구현 — 이슈 #106.
-    // ★구세대에도 이동 목적지가 있다★ — UpdateFileChange.move_path. 신세대와 같은 구멍이었다(P1).
-    const files = fileChangeEntries(p.fileChanges);
     // ★S2: grantRoot 는 구세대 applyPatchApproval 에도 있다★ — 지금까지 통째로 무시하고 있었다.
     //   있으면 '이 파일들' 이 아니라 ★'이 루트 하위 전부' 를 세션 동안 허용해 달라는 요청★ 이다.
     //   열쇠에 반영하지 않으면 파일 몇 개에 준 '항상 허용' 이 루트 전체 승인으로 재사용된다.
-    const grantRoot = grantRootOf(p);
-    if (grantRoot) {
-      return {
-        runtime: "codex", agent_id: agentId, action: "write",
-        path: `${grantRootKey(grantRoot)} | ${files.join("|")}`.slice(0, 500),
-        text: `${GRANT_ROOT_WARNING}${grantRoot.slice(0, 200)} · 파일 ${files.length}개: ${files.join(", ")}`.slice(0, 500),
-        requested_by: agentId, provenance: { ...provenance, grant_root: grantRoot },
-      };
-    }
-    return { runtime: "codex", agent_id: agentId, action: "write", path: files.join("|").slice(0, 500), text: files.join(", ").slice(0, 500), requested_by: agentId, provenance };
+    return writeOperation(agentId, provenance, oldGenChanges(p.fileChanges), grantRootOf(p), null);
   }
   return unparsedOperation(req, agentId, provenance);
 }
@@ -210,6 +202,10 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
 /** ★팝업에서 '이건 파일 몇 개가 아니다' 를 사람이 놓치지 않게 하는 머리말.★ 문구가 두 곳에서 같아야
  *  하므로 상수로 둔다(구세대·신세대 경로 모두 같은 위험을 같은 말로 알린다). */
 const GRANT_ROOT_WARNING = "⚠ 세션 동안 아래 폴더 하위 전체에 쓰기 허용 요청 · ";
+
+/** ★해석 실패 팝업의 첫 말.★ 팝업 앞줄(`… · approval_unparsed`)은 공용 코드가 만들어 여기서 못 바꾼다 —
+ *  그래서 뒷줄이 사람에게 상황을 말한다. ★상수라서 열쇠 구분력에 영향이 없다.★ */
+const UNPARSED_NOTICE = "내용 해석 실패 — 원문 확인 필요 · ";
 
 /** grantRoot 를 꺼낸다. 빈 문자열·공백뿐이면 없는 것으로 본다.
  *  ★벤더 설명: "the agent is asking the user to allow writes under this root for the remainder of the
@@ -223,13 +219,6 @@ function grantRootOf(p: Record<string, any> | undefined): string | null {
   //   ★공통 prefix 가 긴 서로 다른 루트가 같은 값이 되어 열쇠·지문이 합쳐졌다★
   //   (310자 공통 + `/one` vs `/two` 로 재현 확인). 자르는 것은 ★표시할 때만★ 한다.
   return t.length > 0 ? t : null;
-}
-
-/** 열쇠에 넣을 grantRoot 표현. ★지문을 맨 앞에 둔다★ — permissionGate 가 target 을 앞 240자만 쓰므로,
- *  원문만 넣으면 ★잘려서 서로 다른 루트가 같은 열쇠★ 가 된다. 사람이 읽을 원문도 뒤에 조금 남긴다. */
-function grantRootKey(root: string): string {
-  const digest = createHash("sha256").update(root).digest("hex").slice(0, 16);
-  return `grant_root#${digest}=${root.slice(0, 120)}`;
 }
 
 /**
@@ -283,8 +272,60 @@ function changeStat(kind: string, diff: string): { added: number; removed: numbe
   return kind === "delete" ? { added: 0, removed: n } : { added: n, removed: 0 };
 }
 
+/** 쓰기 승인 한 건의 공통 내부 표현. 세대마다 payload 모양은 다르지만(신세대=알림 색인, 구세대=fileChanges)
+ *  ★사람이 봐야 하는 것은 같다★ — 무슨 파일을, 어떤 종류로, 얼마나 바꾸는가. 한 곳에서 만든다. */
+export interface WriteChange {
+  path: string;
+  kind: string;
+  movePath: string | null;
+  diff: string;
+}
+
+/** 구세대 `fileChanges`(경로 → FileChange) → WriteChange[].
+ *
+ *  ★벤더 스키마 0.144.6 실측(짐작 아님):★
+ *    AddFileChange    `{ type: "add",    content: string }`
+ *    DeleteFileChange `{ type: "delete", content: string }`
+ *    UpdateFileChange `{ type: "update", unified_diff: string, move_path?: string|null }`
+ *
+ *  ★내용이 없으면 규모를 지어내지 않는다★ — `diff: ""` 로 두면 표시에서 `(+n/-n)` 자체가 빠진다.
+ *  `(+0/-0)` 으로 채우면 사람에게 ★"아무것도 안 바뀐다"★ 로 읽힌다(S2 에서 새 파일 생성이 그렇게 보였던 것과 같은 거짓말). */
+function oldGenChanges(fileChanges: Record<string, unknown>): WriteChange[] {
+  return Object.entries(fileChanges).map(([path, raw]) => {
+    const ch = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    const mv = typeof ch.move_path === "string" && ch.move_path.trim() ? ch.move_path : null;
+    const diff = typeof ch.unified_diff === "string" ? ch.unified_diff : typeof ch.content === "string" ? ch.content : "";
+    return { path, kind: typeof ch.type === "string" && ch.type ? ch.type : "change", movePath: mv, diff };
+  });
+}
+
+/** ★팝업에서 사람이 실제로 읽는 한 줄의 예산.★ permissionGate.targetForOperation 이 target 을
+ *  ★앞 240자만★ 쓰고, 텔레그램 팝업은 그 target 을 그대로 한 줄로 보여준다(telegramCapture 의
+ *  `${pr.runtime}/${pr.agent_id} · ${pr.action}\n${pr.target}`). ★즉 240자가 화면이다.★ */
+const VISIBLE_BUDGET = 240;
+
+/** 파일 목록을 예산 안에 담고, 넘치면 ★몇 개가 잘렸는지 말한다.★
+ *  예전에는 500자로 이어붙인 뒤 permissionGate 가 240자에서 ★단어 중간을 잘랐다★ —
+ *  화면에는 `…component/fil` 처럼 끝나고 ★"12개 중 5개만 보고 있다" 는 사실이 사라졌다.★ */
+function fitEntries(display: string[], budget: number): string {
+  const out: string[] = [];
+  let used = 0;
+  for (let i = 0; i < display.length; i++) {
+    const piece = display[i]!;
+    const cost = piece.length + (out.length ? 2 : 0);
+    const rest = display.length - i;
+    const tail = rest > 1 ? ` …외 ${rest}개`.length : 0;
+    if (used + cost + tail > budget && out.length > 0) {
+      return `${out.join(", ")} …외 ${rest}개`;
+    }
+    out.push(piece);
+    used += cost;
+  }
+  return out.join(", ");
+}
+
 /**
- * ★S2 — 관측된 파일변경으로 write operation 을 만든다.★
+ * ★S2 — 관측된 파일변경으로 write operation 을 만든다. S3 에서 ★그 한 줄이 읽히게★ 다시 짰다.★
  *
  * ■ 열쇠(scope)는 ★파일 경로 집합★ 이다 — 내용(diff)이 아니다.
  *   내용까지 열쇠에 넣으면 같은 파일을 두 번 고칠 때마다 다른 열쇠가 되어 ★'항상 허용' 이 영원히 안 붙는다★
@@ -296,40 +337,67 @@ function changeStat(kind: string, diff: string): { added: number; removed: numbe
  * ■ 내용(diff)은 ★사람이 보는 요약★ 과 ★audit 지문★ 에만 쓴다.
  *   diff 원문을 text 에 그대로 실으면 permissionGate.operationText 를 통해 ★파일 내용이 Tier-D 스캔에
  *   걸려★ 멀쩡한 코드가 차단될 수 있다. 그래서 ★경로·종류·줄수 요약만★ 싣는다.
+ *
+ * ■ ★S3 — path 는 열쇠이면서 ★동시에 사람이 읽는 유일한 한 줄★ 이다.★
+ *   targetForOperation 의 우선순위가 command > path > egress_url > text 이므로, write 승인에서는
+ *   ★path 가 target 이 되고 text 는 화면에 안 나온다★(실측 확인). 그래서 path 를 열쇠로만 짜면
+ *   사람은 `grant_root#…=/Users/… | a.ts|b.ts` 를 보게 된다 — ★열쇠를 사람에게 읽히는 셈★ 이다.
+ *   → 한 문자열이 두 일을 해야 하므로 순서를 이렇게 고정한다:
+ *     ①경고(사람) ②지문(열쇠 — 잘려도 구분됨) ③파일 개수·종류·경로(사람+열쇠)
+ *   ★규모(+n/-n)는 여기 못 넣는다★ — 내용이 바뀔 때마다 열쇠가 달라져 '항상 허용' 이 영원히 안 붙는다.
+ *   규모는 text 에 남고, 그것을 화면에 띄우려면 렌더러(codex 폴더 밖)를 고쳐야 한다 — ★팀 리드 판단 대기.★
  */
-function fileChangeOperation(
+function writeOperation(
   agentId: string,
   provenance: Record<string, unknown>,
-  changes: ObservedFileChange[],
+  changes: WriteChange[],
   grantRoot: string | null,
-  itemId: string,
+  itemId: string | null,
 ): PermissionOperation {
   // ★이동은 목적지까지가 쓰기 대상이다★ — 출발지만 넣으면 목적지가 달라도 같은 열쇠가 된다(P1).
   const entries = [...new Set(changes.map((c) => writeTargetEntry(c.path, c.movePath)))].sort();
-  const summary = changes
-    .slice()
-    .sort((a, b) => a.path.localeCompare(b.path))
+  const sorted = changes.slice().sort((a, b) => a.path.localeCompare(b.path));
+  // ★열쇠 지문 — 잘림이 서로 다른 요청을 합치지 못하게 한다.★ 예산 안에 못 들어간 파일이 있어도
+  //   집합이 다르면 지문이 다르다. 내용이 아니라 ★경로 집합 + grantRoot 전문★ 만 담으므로, 같은 파일을
+  //   다시 고칠 때는 같은 지문이다('항상 허용' 이 계속 유효). ★이 지문이 있어야 뒤쪽을 사람 말로 줄일 수 있다.★
+  //
+  //   ★grantRoot 를 반드시 지문에 넣는다(Codex 리뷰 P2 의 재발 방지).★ 표시용 grantRootDisplay 는
+  //   뒤 71자만 남기므로, 지문이 없으면 ★앞부분만 다른 두 루트가 같은 열쇠★ 가 된다 —
+  //   그게 P2 에서 실제로 재현했던 사고다(공통 prefix 가 긴 서로 다른 루트).
+  const setDigest = createHash("sha256")
+    .update(JSON.stringify({ grant_root: grantRoot, entries }))
+    .digest("hex")
+    .slice(0, 12);
+  const kindByEntry = new Map(sorted.map((c) => [writeTargetEntry(c.path, c.movePath), c.kind]));
+  const display = entries.map((e) => `${kindByEntry.get(e) ?? "change"} ${e.replace(">", "→")}`);
+  // ★사람이 읽는 순서로 놓는다 — 경고 → 개수 → 파일. 지문은 ★맨 뒤★ 다.★
+  //   지문을 앞에 두면 화면 첫 글자가 `#77b435181b45` 로 시작해 ★사람은 못 읽고 열쇠만 보인다.★
+  //   뒤로 보내도 안전한 이유: 아래에서 지문 길이만큼 예산을 ★먼저 떼어놓고★ 파일 목록을 채우므로
+  //   240자 절단선 안에 지문이 반드시 남는다(그게 P2 재발 방지의 조건이다).
+  const head = grantRoot ? `${GRANT_ROOT_WARNING}${grantRootDisplay(grantRoot)} · ` : "";
+  const prefix = `${head}파일 ${entries.length}개 · `;
+  const suffix = ` #${setDigest}`;
+  const scale = sorted
     .map((c) => {
-      const { added, removed } = changeStat(c.kind, c.diff);
+      const stat = c.diff ? changeStat(c.kind, c.diff) : null;
       const dest = c.movePath ? `→${c.movePath}` : "";
-      return `${c.kind} ${c.path}${dest}(+${added}/-${removed})`;
+      return `${c.kind} ${c.path}${dest}${stat ? `(+${stat.added}/-${stat.removed})` : ""}`;
     })
     .join(", ");
-  const head = grantRoot ? `${grantRootKey(grantRoot)} | ` : "";
-  const textHead = grantRoot ? `${GRANT_ROOT_WARNING}${grantRoot.slice(0, 200)} · ` : "";
   return {
     runtime: "codex",
     agent_id: agentId,
     action: "write",
-    path: `${head}${entries.join("|")}`.slice(0, 500),
-    text: `${textHead}파일 ${entries.length}개: ${summary}`.slice(0, 500),
+    // ★화면 = 앞 240자★ 이므로 예산을 그 기준으로 잡고, 열쇠용 전체는 500자까지 남긴다.
+    path: `${prefix}${fitEntries(display, Math.max(0, VISIBLE_BUDGET - prefix.length - suffix.length))}${suffix}`.slice(0, 500),
+    text: `${grantRoot ? `${GRANT_ROOT_WARNING}${grantRoot.slice(0, 200)} · ` : ""}파일 ${entries.length}개: ${scale}`.slice(0, 500),
     requested_by: agentId,
     provenance: {
       ...provenance,
       item_id: itemId,
       grant_root: grantRoot,
       // 관측 경로를 남긴다 — 나중에 "이 내용을 어디서 알았나" 를 답할 수 있어야 한다.
-      file_changes_source: "notification_index",
+      file_changes_source: itemId ? "notification_index" : "approval_payload",
       // ★audit 전용 내용 지문.★ 열쇠에는 안 들어간다(위 설명) — permissionGate 는 provenance 를 읽지 않는다.
       file_changes_digest: createHash("sha256")
         .update(JSON.stringify(changes.map((c) => [c.path, c.kind, c.movePath, c.diff]).sort()))
@@ -337,6 +405,14 @@ function fileChangeOperation(
         .slice(0, 16),
     },
   };
+}
+
+/** grantRoot 를 ★사람이 구별할 수 있게★ 줄인다. 열쇠 구분은 지문(setDigest)이 하므로
+ *  여기서는 읽히는 것만 신경 쓴다 — ★뿌리는 앞이 아니라 뒤가 다르다★
+ *  (`/Users/gdmini/Development/a` vs `…/b` 는 앞 60자가 똑같다). 그래서 길면 ★뒤를 남긴다.★ */
+function grantRootDisplay(root: string): string {
+  if (root.length <= 72) return root;
+  return `…${root.slice(-71)}`;
 }
 
 /** ★해석하지 못한 승인 요청의 operation.★ 두 곳에서 쓴다 — 아무 분기에도 안 걸린 경우와,
@@ -357,7 +433,12 @@ function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Re
     runtime: "codex",
     agent_id: agentId,
     action: "approval_unparsed",
-    text: `${req.method.slice(0, 64)} #${unparsedPayloadDigest(req)}${reason ? ` ${reason}` : ""}`,
+    // ★S3 — 화면 첫 글자를 사람 말로 시작한다.★ 팝업이 보여주는 두 줄은
+    //   `codex/dex · approval_unparsed` / `<target>` 인데, 앞줄의 action 은 codex 계층에서 바꿀 수 없다
+    //   (permissionGate 가 만든다 = 공용). ★그러면 최소한 뒷줄이 사람에게 상황을 말해야 한다.★
+    //   내부 식별자만 두 줄 연달아 보여주면 사람은 무엇을 승인/거절하는지 모른 채 버튼을 누른다.
+    //   지문은 그 뒤에 온다 — 앞머리는 ★모든 해석 실패에서 같은 상수★ 라 열쇠 구분력을 줄이지 않는다.
+    text: `${UNPARSED_NOTICE}${req.method.slice(0, 64)} #${unparsedPayloadDigest(req)}${reason ? ` ${reason}` : ""}`,
     requested_by: agentId,
     provenance,
   };
