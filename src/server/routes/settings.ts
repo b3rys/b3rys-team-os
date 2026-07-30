@@ -396,6 +396,29 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     } catch {
       return c.json({ error: "invalid_json" }, 400);
     }
+    // ★모르는 키를 조용히 버리지 않는다★ (2026-07-30)
+    //   이 핸들러는 아는 키만 골라 처리하고 나머지는 ★무시한 뒤 ok:true 를 돌려줬다.★ 그래서
+    //   ① 오타(`github_team_email`) ② 아직 구현 안 된 키 ③ 이름이 바뀐 키 가 전부 ★성공으로 보였다.★
+    //   실측: 읽기만 구현돼 있던 키를 PUT 했더니 ok:true 를 받고 저장이 안 됐다. 호출자는 저장된 줄 알고
+    //   넘어가고, 문제는 한참 뒤 다른 증상으로 나타난다.
+    //   ★쓰기 가능한 키를 여기 한 곳에 적고, 그 밖의 키는 400 으로 거절한다.★ 새 키를 추가하는 사람이
+    //   이 목록에 넣는 것을 잊으면 ★조용히 무시되는 대신 즉시 실패한다★ — 실패는 고칠 수 있다.
+    const WRITABLE_KEYS = new Set<string>([
+      "team_name", "lead_id", "tagline", "owner_name", "owner_chat_id", "locale", "dm_capture",
+      "github_team_account", "github_team_commit_email", "github_approver_account",
+      MERGE_APPROVERS_SETTING_KEY,
+    ]);
+    {
+      const unknown = Object.keys(body as Record<string, unknown>).filter((k) => !WRITABLE_KEYS.has(k));
+      if (unknown.length) {
+        return c.json({
+          error: "unknown_settings_key",
+          unknown,
+          hint: `쓸 수 없는 키입니다: ${unknown.join(", ")} — 쓰기 가능: ${[...WRITABLE_KEYS].join(", ")}`,
+        }, 400);
+      }
+    }
+
     const out: Record<string, string> = {};
     if (body.team_name !== undefined) {
       if (typeof body.team_name !== "string" || body.team_name.length > 20)
@@ -420,7 +443,16 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     //   읽고 다른 키까지 그렇다고 믿지 않도록 한정해서 적는다.★
     //   ★타입도 본다★: String() 강제 변환이라 숫자 123 이나 배열 ["bill"] 도 200 으로 저장됐다.
     {
-      const keys = ["github_team_account", "github_approver_account", MERGE_APPROVERS_SETTING_KEY] as const;
+      // ★github_team_commit_email 을 추가한다 (2026-07-30)★ — 이 키는 ★읽기만★ 구현돼 있었다.
+      //   GET 은 값을 돌려주는데 PUT 핸들러에 없어서, 보내면 ok:true 를 받고 ★저장되지 않았다.★
+      //   증상이 조용하다: 호출자는 성공 응답을 받고 저장된 줄 안다. 다음 커밋에서야 이메일이
+      //   설정되지 않은 채 나간다 — 그때는 원인이 여기라는 걸 알기 어렵다.
+      const keys = [
+        "github_team_account",
+        "github_team_commit_email",
+        "github_approver_account",
+        MERGE_APPROVERS_SETTING_KEY,
+      ] as const;
       const extra = body as Record<string, unknown>;
       const staged: Array<[string, string]> = [];
       for (const key of keys) {
@@ -436,6 +468,14 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
           if (bad.length)
             return c.json({ error: `${key}: 사용할 수 없는 이름 — ${bad.join(", ")} (영숫자·. _ - 만)` }, 400);
           staged.push([key, pool.join(",")]);
+        } else if (key === "github_team_commit_email") {
+          const v = raw.trim();
+          // 이메일 형식만 본다(빈 문자열은 '해제'). GitHub 는 noreply 형식도 받으므로 넓게 허용한다.
+          //   ★형식 검증을 여기서 하는 이유★: 잘못된 값은 커밋 시점에야 드러나고, 그때는
+          //   "push 가 거부됐다" 로만 보여 원인이 이 설정이라는 걸 찾기 어렵다.
+          if (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))
+            return c.json({ error: `${key}: 이메일 형식이 아닙니다` }, 400);
+          staged.push([key, v]);
         } else {
           const v = raw.trim();
           // GitHub 사용자명 규칙: 영숫자·하이픈, 39자 이하. 빈 문자열은 '해제' 로 허용한다.
