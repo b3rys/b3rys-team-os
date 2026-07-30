@@ -8,6 +8,8 @@ var/
 .DS_Store
 .tmp
 reports/
+# 리포트를 사람이 손으로 보관한 폴더. 내용은 reports/ 와 같은 계열이라 같이 제외한다.
+.archived-reports/
 
 slack-tokens/
 __pycache__/
