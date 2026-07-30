@@ -1,4 +1,6 @@
 import { describe, test, expect } from "bun:test";
+import { Hono } from "hono";
+import { CI_URL } from "../../web/components/TeamOS";
 import { createCiStatusRoutes, normalizeRuns, parseRateLimit, RateLimitedError, parseRepoFromRemote, repoFromGitConfig, resolveCiRepo } from "./ciStatus";
 
 const sample = {
@@ -308,5 +310,23 @@ describe("미설정 방어는 2층이다", () => {
       if (prev === undefined) delete process.env.TEAM_CI_REPO;
       else process.env.TEAM_CI_REPO = prev;
     }
+  });
+});
+
+// ─── 화면이 부르는 주소가 실제로 이 라우트에 닿나 (2026-07-30) ──────────────────
+// ★상수를 상수와 비교하는 것으로는 부족하다.★ 화면이 `${apiBase()}/ci-status` 로 불러
+//   SPA 의 index.html 을 받고 있었고(라이브 실측), 서버·파싱·표시 테스트는 전부 통과했다.
+//   그래서 여기서는 ★index.ts 와 같은 방식으로 mount 한 뒤 그 주소로 실제 요청★ 을 보낸다.
+describe("화면이 쓰는 주소가 라우트에 닿는다", () => {
+  test("★CI_URL 로 요청하면 이 라우트가 응답한다★ — index.ts 와 같은 mount 구성", async () => {
+    const api = new Hono();
+    api.route("/", createCiStatusRoutes({ ciRepo: () => null }));  // index.ts:397
+    const app = new Hono();
+    app.route("/api", api);                                       // index.ts:473
+
+    const res = await app.request(CI_URL);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { configured?: boolean };
+    expect(body.configured).toBe(false); // 라우트가 실제로 답한 것(404 HTML 이 아니다)
   });
 });
