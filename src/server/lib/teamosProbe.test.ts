@@ -171,3 +171,38 @@ describe("judgeScheduledJob — 재시도 대기와 실행 중을 구분한다",
     expect(v.problem).toBe("overdue");
   });
 });
+
+// ★배포 4분 만에 나온 거짓 경보★ (2026-07-30 실측)
+//   2주 전에 꺼둔 sched_b3os_native_nightly 가 "22195분 밀림" 으로 떴다. 꺼진 잡의 next_run_at 은
+//   끈 시점에 멈춰 있어서 ★끄면 끌수록 더 빨갛게★ 된다.
+//   원래 시험이 왜 못 잡았나: 꺼진 잡 사례를 ★미래 시각★ 으로 썼다. 실제 모양은 '꺼짐 + 과거 시각' 이다.
+describe("judgeScheduledJob — 꺼둔 잡은 고장이 아니다", () => {
+  const NOW = Date.parse("2026-07-30T01:00:00Z");
+
+  test("★꺼둔 잡 + 한참 지난 시각 = 밀림 아님★ (실제로 라이브에 있던 모양)", () => {
+    const v = judgeScheduledJob(
+      { enabled: 0, status: "pending", next_run_at: "2026-07-14 16:00:00" }, // 15일 전
+      NOW,
+    );
+    expect(v.problem).toBeNull();
+    expect(v.running).toBe(false); // 꺼져 있으니 초록불도 아니다 — '문제'가 아닐 뿐
+  });
+
+  test("꺼둔 잡이 failed 로 남아 있어도 고장으로 안 띄운다 — 끈 시점의 잔재다", () => {
+    const v = judgeScheduledJob({ enabled: 0, status: "failed", next_run_at: "2026-07-14 16:00:00" }, NOW);
+    expect(v.problem).toBeNull();
+  });
+
+  test("꺼둔 잡에 last_error 가 남아 있어도 재시도 대기로 안 띄운다", () => {
+    const v = judgeScheduledJob(
+      { enabled: 0, status: "pending", next_run_at: "2026-07-30 01:30:00", last_error: "old" },
+      NOW,
+    );
+    expect(v.problem).toBeNull();
+  });
+
+  test("켜져 있으면 그대로 잡는다 — 이 수정이 판정을 무디게 만들지 않았다", () => {
+    const v = judgeScheduledJob({ enabled: 1, status: "pending", next_run_at: "2026-07-14 16:00:00" }, NOW);
+    expect(v.problem).toBe("overdue");
+  });
+});
