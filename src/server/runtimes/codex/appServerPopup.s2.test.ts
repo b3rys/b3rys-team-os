@@ -39,7 +39,7 @@ describe("S2 — 신세대 파일변경 승인 해석", () => {
     // ★S3 — 이 한 줄이 화면이다.★ targetForOperation 이 text 가 아니라 path 를 쓰므로(우선순위
     //   command > path > egress_url > text), path 자체가 사람이 읽을 말이어야 한다.
     expect(op.path).toMatch(/^파일 1개 · update src\/a\.ts #[0-9a-f]{12}$/);
-    expect(targetForOperation(op)).toBe(op.path); // 화면에 그대로 나온다(240자 안)
+    expect(targetForOperation(op)).toBe(op.path ?? ""); // 화면에 그대로 나온다(240자 안)
   });
 
   test("사람이 규모를 볼 수 있다 — 종류·경로·줄수 요약", () => {
@@ -226,7 +226,7 @@ describe("S2 — grantRoot 는 별개 승인이다", () => {
     for (const blank of ["", "   ", null, undefined, 123]) {
       const op = buildOperationFromApproval(fileReq(item, { grantRoot: blank }), "dex");
       expect(op.path).toMatch(/^파일 1개 · update src\/a\.ts #[0-9a-f]{12}$/);
-      expect(op.path.startsWith("⚠")).toBe(false); // 경고를 남발하지 않는다
+      expect(op.path?.startsWith("⚠")).toBe(false); // 경고를 남발하지 않는다
       expect(op.provenance?.grant_root).toBeNull();
     }
   });

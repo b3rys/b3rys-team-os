@@ -40,7 +40,7 @@ describe("S3 — 화면이 곧 열쇠라는 계약", () => {
   test("★화면에 나오는 줄은 text 가 아니라 path 다★ — 이 우선순위가 바뀌면 S3 전체 전제가 무너진다", () => {
     const op = buildOperationFromApproval(fileReq(observed([{ path: "src/a.ts", kind: "update" }])), "dex");
     expect(op.text).toContain("(+1/-1)");        // 규모는 text 에 있다
-    expect(screenLine(op)).toBe(op.path);        // ★그런데 화면은 path 다★
+    expect(screenLine(op)).toBe(op.path ?? "");  // ★그런데 화면은 path 다★
     expect(screenLine(op)).not.toContain("(+");  // → 규모는 화면에 안 나온다(렌더러 변경 대기)
   });
 
@@ -135,6 +135,21 @@ describe("S3 — 폴더 전체 요청은 경고가 먼저 보인다", () => {
     expect(screenLine(a)).toContain("alpha");   // 사람이 구별할 수 있다
     expect(screenLine(b)).toContain("bravo");
     expect(scopeKeyForOperation(a)).not.toBe(scopeKeyForOperation(b)); // 열쇠도 갈린다(P2)
+  });
+
+  test("★표시에 안 보이는 부분만 다른 두 루트도 열쇠가 갈린다★ — 지문이 루트 전문을 담는 이유", () => {
+    // ★이 시험은 뮤턴트가 살아남아서 추가했다(2026-07-30).★ 앞 시험은 두 루트의 ★뒤★ 가 달라서
+    //   표시 문자열만으로도 열쇠가 갈렸다 — 즉 지문을 지워도 초록이었다. ★기계가 아니라 입력이 문제였다.★
+    //   여기서는 ★뒤 71자가 완전히 같고 앞만 다른★ 두 루트를 쓴다. 표시로는 구별이 불가능하므로
+    //   지문이 grantRoot 전문을 담지 않으면 ★서로 다른 폴더 승인이 같은 열쇠★ 가 된다(P2 그 사고).
+    const tail = "/" + "x".repeat(300);
+    const a = root(`/alpha${tail}`);
+    const b = root(`/bravo${tail}`);
+    // ★사람이 읽는 부분(지문 앞까지)이 글자 하나까지 같다★ — 눈으로는 구별할 방법이 없다.
+    const readable = (s: string) => s.replace(/ #[0-9a-f]{12}$/, "");
+    expect(readable(screenLine(a))).toBe(readable(screenLine(b)));
+    // → 즉 ★이 두 요청을 가르는 것은 지문뿐이다★. 그래서 지문이 루트 전문을 담아야 한다.
+    expect(scopeKeyForOperation(a)).not.toBe(scopeKeyForOperation(b)); // ★그래도 열쇠는 갈려야 한다★
   });
 
   test("루트가 같으면 열쇠가 같다 — 세션 승인이 재사용된다", () => {
