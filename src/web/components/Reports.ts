@@ -414,30 +414,15 @@ export function tagPillsHtml(
   selected: Set<string>,
   pillCls: (active: boolean) => string,
 ): string {
-  // opacity 만으로 숨기면 안 보이는데 눌린다 — 투명해도 그 자리는 여전히 클릭을 받는다.
-  // 마우스가 없는 환경(터치·아이패드 웹뷰)에서 태그 옆을 탭하면 안 보이는 연필·휴지통이 눌려
-  // "누르지도 않은 창" 이 뜬다. pointer-events 를 같이 꺼서 숨김 상태에선 클릭 자체를 안 받게 한다.
-  const hoverOnlyCls = "opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto";
-  // ★자리를 차지하지 않게 띄운다★ (팀장님 실측 2026-07-30: "너무 떨어져 있어. 이럴 바엔 예전 UI 가 더 나아")
-  //   처음엔 아이콘을 알약 옆에 ★흐름 안에★ 두고 opacity 로만 숨겼다. 그러면 마우스를 올리지 않아도
-  //   태그마다 아이콘 두 개 만큼의 빈칸이 ★항상 남는다.★ 쉬는 상태가 흉해진다.
-  //   ★그리고 우리 검증이 그걸 통과시켰다★ — 확인 항목이 "아이콘이 나타날 때 줄이 흔들리지 않는다" 였고,
-  //   흔들리지 않는 이유가 바로 "자리를 미리 비워둬서" 였다. 기준을 통과했는데 기준이 부족했다.
-  //   absolute 로 흐름에서 빼면 ★쉬는 상태는 예전 UI 와 동일★ 하고 hover 에서도 줄이 흔들리지 않는다.
-  //   대신 hover 중에는 옆 알약 위로 떠서 겹치므로 배경을 불투명하게 두고 z-10 을 준다.
-  const iconCls = "inline-flex h-6 w-6 items-center justify-center rounded-md border border-surface-3 bg-surface-1 text-slate-500 transition-colors";
+  // ★알약은 오직 필터다.★ 이름 바꾸기·지우기는 "태그 편집" 버튼 → 팝업으로 간다.
+  //
+  // 여기 hover 아이콘을 붙였다가 두 번 실패하고 걷어냈다(팀장님 실측 2026-07-30):
+  //   1차 — 흐름 안에 두니 ★마우스를 안 올려도 아이콘 두 개 만큼 빈칸이 항상 남았다★
+  //   2차 — absolute 로 빼니 알약과 아이콘 사이 4px 틈에서 hover 가 풀려 ★누를 수가 없었다★
+  // ★두 번 다 마크업 시험은 통과했다.★ "자리를 차지하나" 는 잴 수 있어도 "실제로 누를 수 있나" 는
+  // 마크업만 봐서는 못 잰다. hover 로만 나타나는 조작은 그 간극이 구조적으로 크므로 쓰지 않는다.
   return tags.map((t) =>
-    `<span class="group relative inline-flex items-center">
-      <button class="${pillCls(selected.has(t.id))} reports-tag-pill" data-tag-id="${escape(t.id)}">#${escape(t.name)}<span class="ml-1.5 text-[11px] text-slate-500">${t.report_count ?? 0}</span></button>
-      <span class="absolute left-full top-1/2 z-10 ml-1 -translate-y-1/2 inline-flex items-center gap-0.5 ${hoverOnlyCls} transition-opacity">
-        <button class="reports-tag-edit ${iconCls} hover:border-accent-green/40 hover:bg-accent-green/10 hover:text-accent-green" data-tag-id="${escape(t.id)}" data-tag-name="${escape(t.name)}" title="${pick("태그 이름 바꾸기", "Rename tag")}" aria-label="${pick("태그 이름 바꾸기", "Rename tag")}">
-          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-        </button>
-        <button class="reports-tag-del ${iconCls} hover:border-red-400/40 hover:bg-red-400/10 hover:text-txt-red" data-tag-id="${escape(t.id)}" data-tag-name="${escape(t.name)}" title="${pick("태그 삭제", "Delete tag")}" aria-label="${pick("태그 삭제", "Delete tag")}">
-          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>
-        </button>
-      </span>
-    </span>`
+    `<button class="${pillCls(selected.has(t.id))} reports-tag-pill" data-tag-id="${escape(t.id)}" data-tag-name="${escape(t.name)}">#${escape(t.name)}<span class="ml-1.5 text-[11px] text-slate-500">${t.report_count ?? 0}</span></button>`
   ).join("");
 }
 
@@ -456,22 +441,93 @@ function reportTagFailure(err: unknown): void {
  * 예전에는 이 팝업 하나가 만들기·이름바꾸기·삭제를 다 받았고, 그래서 한 입력칸에 문법 세 가지가
  * 섞여 있었다("이름" / "기존 -> 새이름" / "-이름"). 팀장님 실측(2026-07-30)에서 `aaa->bbb` 가
  * 이름 변경이 아니라 ★그 이름의 새 태그★ 로 만들어졌다 — 화살표를 U+2192 한 종류만 봤기 때문이다.
- * 이름 바꾸기·삭제를 ★태그 옆 아이콘★ 으로 옮기면서 여기서 문법을 없앴다. 이제 입력은 항상
- * ★이름 그대로★ 다. `aaa->bbb` 를 적으면 그 이름의 태그가 만들어지는 게 맞는 동작이 된다.
+ * 지금은 ★고르는 것과 적는 것을 분리★ 했다(무엇을 할지는 고르고, 이름만 적는다). 그래서 여기 들어오는
+ * 값은 항상 ★이름 그대로★ 다 — `aaa->bbb` 를 적으면 그 이름의 태그가 만들어지는 게 맞는 동작이 된다.
  */
-async function createTag(): Promise<void> {
-  const name = await showPrompt({
-    title: pick("태그 만들기", "New tag"),
-    message: pick(
-      "만들 태그 이름을 적어 주세요.\n\n이름 바꾸기와 삭제는 태그에 마우스를 올리면 나오는 아이콘으로 합니다.",
-      "Type the name for the new tag.\n\nTo rename or delete, hover a tag and use the icons that appear.",
-    ),
-    placeholder: pick("예: 주간보고", "e.g. weekly"),
-    okLabel: pick("만들기", "Create"),
-  });
-  if (!name?.trim()) return;
+async function createTag(name: string): Promise<void> {
+  if (!name.trim()) return;
   await mutateJson("/api/tags", "POST", { name: name.trim() });
   await reloadList();
+}
+
+/**
+ * ★태그 편집 — 한 팝업에서 만들기·이름 바꾸기·지우기를 다 받는다.★ (팀장님 지시 2026-07-30)
+ *
+ * ■ 왜 hover 아이콘을 버렸나
+ * 태그 옆에 연필·휴지통을 띄우는 방식을 두 번 고쳤는데 두 번 다 못 쓰는 물건이 나왔다.
+ *   1차 — 아이콘을 흐름 안에 두니 ★마우스를 안 올려도 빈칸이 항상 남았다★ ("이럴 바엔 예전 UI 가 더 나아")
+ *   2차 — 흐름 밖으로 빼니 알약과 아이콘 사이 4px 틈에서 hover 가 풀려 ★도달 자체가 불가능했다★
+ *          ("옆에 태그가 없어도 마우스를 옮기면 바로 삭제/수정이 없어짐")
+ * ★두 번 다 우리 시험은 통과한 상태였다.★ 마크업만 보는 시험은 "자리를 차지하나" 는 재도
+ * "사람이 실제로 누를 수 있나" 는 재지 못한다. 그래서 hover 에 기대는 UI 자체를 그만둔다 —
+ * 팝업은 마우스 위치와 무관해서 이 실패 모드가 아예 없다.
+ */
+export function tagEditBodyHtml(all: ReportTag[]): string {
+  const chip = "inline-flex cursor-pointer items-center rounded-full border border-surface-3 bg-surface-2 px-2.5 py-1 text-xs text-slate-400 transition-colors peer-checked:border-accent-green/50 peer-checked:bg-accent-green/10 peer-checked:text-accent-green";
+  // ★작은 회색 글씨를 쓰지 않는다★ (팀장님 상시 규칙) — 이 라벨은 "무엇을 하는 칸인가" 를 알려주는
+  // 핵심 안내다. 흐리게 두면 고를 것만 보이고 무엇을 고르는지가 안 보인다.
+  // uppercase·tracking 도 뺐다 — 한글에는 효과가 없고 ①② 같은 기호는 11px 에서 읽히지 않았다(실측).
+  const label = "text-xs font-semibold text-slate-300";
+  const tagChoices = all.length
+    ? all.map((t, i) => `<label class="inline-flex">
+        <input type="radio" name="tag-edit-target" class="peer sr-only" data-tag-target value="${escape(t.id)}" data-tag-name="${escape(t.name)}"${i === 0 ? " checked" : ""} />
+        <span class="${chip}">#${escape(t.name)}</span>
+      </label>`).join("")
+    : `<span class="text-xs text-slate-600">${escape(pick("아직 만들어진 태그가 없습니다.", "No tags yet."))}</span>`;
+  const action = (value: string, ko: string, en: string, checked: boolean) =>
+    `<label class="inline-flex">
+      <input type="radio" name="tag-edit-action" class="peer sr-only" data-tag-action value="${value}"${checked ? " checked" : ""} />
+      <span class="${chip}">${escape(pick(ko, en))}</span>
+    </label>`;
+  return `<div class="mt-4 space-y-4 text-left">
+      <div>
+        <div class="${label}">${escape(pick("어떤 태그를", "Which tag"))}</div>
+        <div class="mt-1.5 flex flex-wrap gap-1.5">${tagChoices}</div>
+      </div>
+      <div>
+        <div class="${label}">${escape(pick("어떻게 할까요", "Do what"))}</div>
+        <div class="mt-1.5 flex flex-wrap gap-1.5">
+          ${action("rename", "이름 바꾸기", "Rename", true)}
+          ${action("delete", "지우기", "Delete", false)}
+        </div>
+      </div>
+      <div class="border-t border-surface-3 pt-3">
+        <div class="${label}">${escape(pick("또는 — 새 태그 만들기", "Or — create a new tag"))}</div>
+        <input type="text" data-tag-new class="mt-1.5 w-full rounded-md border border-surface-3 bg-surface-2 px-3 py-2 text-sm text-slate-100 outline-none focus:border-accent-green/40 placeholder:text-slate-600"
+          placeholder="${escape(pick("여기에 이름을 적으면 위 선택 대신 새로 만듭니다", "Type a name here to create one instead"))}" />
+      </div>
+    </div>`;
+}
+
+/** 위 본문에서 고른 태그·동작과 새로 적은 이름을 읽어낸다. */
+export function collectTagEdit(root: HTMLElement): { tagId: string; tagName: string; action: string; newName: string } {
+  const target = root.querySelector<HTMLInputElement>("input[data-tag-target]:checked");
+  const action = root.querySelector<HTMLInputElement>("input[data-tag-action]:checked");
+  return {
+    tagId: target?.value ?? "",
+    tagName: target?.dataset.tagName ?? "",
+    action: action?.value ?? "",
+    newName: (root.querySelector<HTMLInputElement>("input[data-tag-new]")?.value ?? "").trim(),
+  };
+}
+
+async function manageTags(): Promise<void> {
+  const picked = await showForm<{ tagId: string; tagName: string; action: string; newName: string }>({
+    title: pick("태그 편집", "Edit tags"),
+    message: pick(
+      "태그를 고르고 무엇을 할지 고르세요. 새로 만들려면 맨 아래에 이름만 적으면 됩니다.",
+      "Pick a tag and what to do with it. To create one instead, just type a name at the bottom.",
+    ),
+    bodyHtml: tagEditBodyHtml(_tags),
+    collect: collectTagEdit,
+    okLabel: pick("다음", "Next"),
+  });
+  if (picked == null) return;
+  // ★새 이름을 적었으면 그게 우선★ — 태그가 하나도 없을 때는 고를 것 자체가 없다.
+  if (picked.newName) { await createTag(picked.newName); return; }
+  if (!picked.tagId) return;
+  if (picked.action === "delete") { await deleteTag(picked.tagId, picked.tagName); return; }
+  await renameTag(picked.tagId, picked.tagName);
 }
 
 /** 태그 이름 바꾸기 — 지금 이름을 채워서 띄운다(다시 타이핑하지 않게). */
@@ -703,7 +759,7 @@ function renderList(): void {
         <div class="flex items-center gap-2 flex-wrap mb-3">
           <span class="shrink-0 text-[11px] font-semibold text-slate-500">${pick("태그", "Tags")}</span>
           ${tagPills || `<span class="text-xs text-slate-600">${pick("등록된 태그 없음", "No tags yet")}</span>`}
-          <button id="reports-manage-tags" class="ml-auto px-3 py-1.5 rounded-full text-xs font-semibold border border-surface-3 bg-surface-2 text-slate-400 hover:text-slate-200">＋ ${pick("태그 만들기", "New tag")}</button>
+          <button id="reports-manage-tags" class="ml-auto px-3 py-1.5 rounded-full text-xs font-semibold border border-surface-3 bg-surface-2 text-slate-400 hover:text-slate-200">${pick("태그 편집", "Edit tags")}</button>
         </div>
         <div class="relative mb-4">
           <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
@@ -729,13 +785,6 @@ function renderList(): void {
       void reloadList();
     });
   });
-  // 태그 옆 아이콘 — 알약(필터 토글)과 형제라 stopPropagation 은 필요 없지만, 실패는 인페이지 창으로 알린다.
-  _root.querySelectorAll<HTMLButtonElement>(".reports-tag-edit").forEach((el) => {
-    el.addEventListener("click", () => void renameTag(el.dataset.tagId || "", el.dataset.tagName || "").catch(reportTagFailure));
-  });
-  _root.querySelectorAll<HTMLButtonElement>(".reports-tag-del").forEach((el) => {
-    el.addEventListener("click", () => void deleteTag(el.dataset.tagId || "", el.dataset.tagName || "").catch(reportTagFailure));
-  });
   _root.querySelectorAll<HTMLButtonElement>(".reports-tag-filter").forEach((el) => {
     el.addEventListener("click", (e) => {
       e.preventDefault(); e.stopPropagation();
@@ -744,7 +793,7 @@ function renderList(): void {
     });
   });
   _root.querySelector<HTMLButtonElement>("#reports-manage-tags")?.addEventListener("click", () => {
-    void createTag().catch(reportTagFailure);
+    void manageTags().catch(reportTagFailure);
   });
   _root.querySelectorAll<HTMLElement>(".reports-card").forEach((el) => {
     el.addEventListener("click", () => { rememberListScroll(); _curId = el.dataset.id || null; if (_curId) setDetailHash(_curId); _curType = null; _view = "detail"; renderDetail(); });
