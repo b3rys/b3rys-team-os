@@ -227,11 +227,24 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       if (slackMeta) {
         const creds = loadAgentCreds(env.from_agent_id);
         if (creds) {
+          // ★슬랙 멘션은 여기서 붙인다★ (2026-07-30) — 발신 스크립트가 본문에 미리 넣으면
+          //   `<@U…>` 가 ★텔레그램 그룹방에도 그대로 찍힌다★(실측: 팀장님이 단체방에서 발견).
+          //   슬랙 문법은 슬랙에서만 뜻이 있고, 다른 채널에는 의미 없는 문자열이다.
+          //   즉 ★채널마다 다른 것은 채널로 나갈 때 붙여야★ 한다. 저장되는 본문은 채널 중립으로 둔다.
+          //   meta.slack_mentions = ["U…", …] (send.sh --mention 이 이름을 ID 로 풀어 넣는다)
+          const mentions = ((env as { meta?: { slack_mentions?: unknown } }).meta?.slack_mentions ?? []) as unknown[];
+          const prefix = mentions
+            .filter((m): m is string => typeof m === "string" && /^[UW][A-Z0-9]+$/.test(m))
+            .filter((id) => !env.body.includes(`<@${id}>`))   // 본문에 이미 있으면 중복 안 붙인다
+            .map((id) => `<@${id}>`)
+            .join(" ");
+          // 멘션은 ★자기 줄에★ — 같은 줄이면 본문이 ``` 로 시작할 때 여는 펜스가 줄 맨 앞이 아니게 된다.
+          const slackText = prefix ? `${prefix}\n${env.body}` : env.body;
           void getChannel("slack")
             .send({
               botToken: creds.bot_token,
               target: slackMeta.channel,
-              text: env.body,
+              text: slackText,
               threadRef: slackMeta.thread_ts,
             })
             .then((r) => {
