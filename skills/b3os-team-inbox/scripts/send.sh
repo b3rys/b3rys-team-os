@@ -194,6 +194,11 @@ else:
     sys.exit(1)
 ")
 
+# ★메시지 id 를 stdout 으로 내보낸다★ — 사용법 주석이 "stdout=메시지 id" 라고 적어놨는데 실제로는
+#   위 명령치환이 id 를 ★내부 변수로만★ 받고 stdout 에는 아무것도 안 나갔다. 실측: MSGID=$(send.sh …)
+#   가 빈 문자열이 됐다. 문서가 약속한 것을 코드가 지키지 않으면 그 문서를 믿은 쪽이 조용히 깨진다.
+printf '%s\n' "$MSG_ID"
+
 [ -z "$CONFIRM" ] && exit 0
 
 # ─── --confirm: 판정이 날 때까지 기다렸다 사실을 말한다 ────────────────────
@@ -202,7 +207,10 @@ else:
 #   (2026-07-30 실측: 차단된 메시지가 각각 그 값이었다). 그 둘을 근거로 쓰면 이 기능이 무의미해진다.
 CONF_DEADLINE=$(( $(date +%s) + CONFIRM ))
 while :; do
-  STATE_JSON=$(curl -sS "$BASE/api/inbox/messages/$MSG_ID" 2>/dev/null || echo '{}')
+  # ★경로 주의★: inbox 라우트는 api 아래 "/" 에 마운트된다(index.ts: api.route("/", inboxApi)).
+  #   그래서 올바른 경로는 $BASE/api/messages/<id> 다. "/api/inbox/messages/..." 로 쓰면 SPA fallback 이
+  #   ★HTML 을 200 으로★ 돌려주고 JSON 파싱이 깨진다 — 실측으로 그렇게 조용히 타임아웃까지 돌았다.
+  STATE_JSON=$(curl -sS "$BASE/api/messages/$MSG_ID" 2>/dev/null || echo '{}')
   VERDICT=$(STATE_JSON="$STATE_JSON" python3 -c "
 import os, json, sys
 try: d = json.loads(os.environ['STATE_JSON'])
@@ -210,7 +218,10 @@ except Exception: print('unknown'); sys.exit(0)
 rs = d.get('recipients')
 if rs is None: print('noapi'); sys.exit(0)
 if len(rs) == 0: print('norecipient'); sys.exit(0)
-bad = [r for r in rs if r.get('delivery_state') in ('blocked', 'dead_letter')]
+# ★expired 도 미배달이다★ — 실측으로 이 상태가 21건 있었다(blocked 는 1건). expired 를 실패로
+#   보지 않으면 ★가장 흔한 미배달이 '아직 판정 전' 으로 흘러★ 타임아웃 메시지만 남는다.
+#   wake_dispatched 는 진행 중이라 pending 으로 둔다(곧 completed 가 된다).
+bad = [r for r in rs if r.get('delivery_state') in ('blocked', 'dead_letter', 'expired')]
 if bad:
     r = bad[0]
     print('failed\t' + str(r.get('delivery_state')) + '\t' + str(r.get('last_error') or '(사유 없음)'))
@@ -228,7 +239,15 @@ print('pending')
     # ★빈 배열과 '아직 판정 전' 을 구분한다★: 둘을 뭉치면 수신자가 아예 안 붙은
     #   사고(진짜 문제)를 "아직 안 왔네" 로 흘린다. 빈 배열은 경고로 낸다.
     norecipient) echo "⚠ 수신자가 붙지 않았습니다 ($MSG_ID) — 배달 대상이 0명입니다. --to 값과 registry 를 확인하세요." >&2; exit 1 ;;
-    noapi) echo "⚠ 이 서버는 recipients 를 주지 않습니다 — --confirm 을 쓸 수 없습니다(서버 업데이트 필요)." >&2; exit 0 ;;
+    noapi) echo "⚠ 이 서버는 recipients 를 주지 않습니다 — --confirm 을 쓸 수 없습니다(서버 재시작 필요)." >&2; exit 0 ;;
+    # ★응답을 못 읽은 경우를 반드시 처리한다★ — 이 분기가 없어서 경로 오류(HTML 200)가 'unknown' 을
+    #   내는데 아무 case 에도 안 걸리고 ★조용히 타임아웃까지 루프★ 했다. 실측으로 그렇게 6초를 돌았고,
+    #   원인(경로 오류)은 타임아웃 메시지에 전혀 드러나지 않았다. 판정 도구가 자기 고장을
+    #   '아직 판정 전' 으로 흘리면 이 기능을 만든 이유가 없어진다.
+    unknown)
+      echo "⚠ 배달 상태를 읽지 못했습니다 ($MSG_ID) — 응답이 JSON 이 아닙니다." >&2
+      echo "  확인: curl -sS \"$BASE/api/messages/$MSG_ID\"  (HTML 이 오면 경로·서버 상태 문제입니다)" >&2
+      exit 0 ;;
   esac
   [ "$(date +%s)" -ge "$CONF_DEADLINE" ] && {
     echo "⚠ ${CONFIRM}초 안에 판정이 나지 않았습니다 ($MSG_ID) — 아직 처리 중일 수 있습니다(미배달 단정 아님)." >&2

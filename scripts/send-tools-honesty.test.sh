@@ -200,6 +200,53 @@ out="$(PATH="$SLACKSTUB:$PATH" SLACK_MEMBERS_FILE="$MEMBERS" \
 [ $rc -ne 0 ] && pass "못 푸는 이름은 에러 (exit $rc)" || fail "못 푸는 이름을 조용히 넘겼다"
 grep -q "SLACK_SETUP" <<<"$out" && pass "ID 얻는 방법을 알려준다" || fail "안내 없음: $out"
 
+echo "── A2-2: 메시지 id 가 ★stdout★ 으로 나온다 (사용법이 약속한 것) ──"
+# 실측으로 MSGID=$(send.sh …) 가 빈 문자열이었다 — id 를 내부 변수로만 받고 stdout 에 안 내보냈다.
+mid="$(PATH="$FAKEBIN:$PATH" "$SEND" --to lisa --body-file "$FIX" 2>/dev/null)"
+[ "$mid" = "testid" ] && pass "stdout 에서 id 를 받을 수 있다 ($mid)" \
+                      || fail "stdout 이 비었다 — 사용법은 id 를 약속하는데 코드가 안 지킨다 (받은 값: '$mid')"
+
+echo "── A2-3: --confirm 이 ★JSON 이 아닌 응답★ 을 조용히 넘기지 않는다 ──"
+# 실측 사고: 경로 오류로 SPA 가 HTML 을 200 으로 돌려줬고, 판정기가 'unknown' 을 냈지만 처리 분기가
+#   없어서 ★조용히 타임아웃까지 루프★ 했다. 원인(경로)은 타임아웃 메시지에 전혀 드러나지 않았다.
+HTMLBIN="$TMP/hbin"; mkdir -p "$HTMLBIN"
+cat > "$HTMLBIN/curl" <<'STUB'
+#!/usr/bin/env bash
+# POST(접수)에는 정상 JSON, GET(조회)에는 HTML 을 준다 — 경로 오류 상황 재현
+for a in "$@"; do [ "$a" = "-X" ] && { printf '{"ok":true,"message":{"id":"testid","thread_id":"t","hop_count":0}}'; exit 0; }; done
+printf '<!doctype html><html><body>SPA</body></html>'
+STUB
+chmod +x "$HTMLBIN/curl"
+start=$(date +%s)
+out="$(PATH="$HTMLBIN:$PATH" "$SEND" --to lisa --body-file "$FIX" --confirm 6 2>&1)"; rc=$?
+elapsed=$(( $(date +%s) - start ))
+if grep -qE "JSON 이 아닙니다|읽지 못했습니다" <<<"$out"; then
+  pass "JSON 아님을 즉시 알린다 (${elapsed}s)"
+else
+  fail "조용히 넘겼다 — 출력: $(head -3 <<<"$out" | tr '\n' ' ')"
+fi
+[ "$elapsed" -lt 5 ] && pass "타임아웃까지 기다리지 않는다 (${elapsed}s < 5s)" \
+                     || fail "타임아웃까지 루프했다 (${elapsed}s) — 자기 고장을 '아직 판정 전' 으로 흘린다"
+
+echo "── A2-4: --confirm 조회 경로가 올바른가 (SPA fallback 이 아닌 API) ──"
+# inbox 라우트는 api 아래 "/" 에 마운트된다 → /api/messages/<id> 가 맞다.
+grep -q 'api/messages/\$MSG_ID' "$SEND" && pass "\$BASE/api/messages/<id> 를 쓴다" \
+  || { fail "조회 경로가 틀렸다 — /api/inbox/messages 는 SPA HTML 을 200 으로 준다"; grep -n 'api/.*messages' "$SEND" | sed 's/^/    /'; }
+
+echo "── A2-5: --confirm 이 ★expired★ 를 미배달로 본다 (실측 21건) ──"
+# expired 를 실패로 안 보면 ★가장 흔한 미배달이 '아직 판정 전' 으로 흘러★ 타임아웃만 남는다.
+EXPBIN="$TMP/ebin"; mkdir -p "$EXPBIN"
+cat > "$EXPBIN/curl" <<'STUB'
+#!/usr/bin/env bash
+for a in "$@"; do [ "$a" = "-X" ] && { printf '{"ok":true,"message":{"id":"testid","thread_id":"t","hop_count":0}}'; exit 0; }; done
+printf '{"message":{"id":"testid"},"recipients":[{"agent_id":"lisa","delivery_state":"expired","last_error":null}]}'
+STUB
+chmod +x "$EXPBIN/curl"
+out="$(PATH="$EXPBIN:$PATH" "$SEND" --to lisa --body-file "$FIX" --confirm 6 2>&1)"; rc=$?
+[ $rc -ne 0 ] && pass "expired 를 실패로 보고 (exit $rc)" || fail "expired 를 성공/보류로 흘렸다 (exit $rc)"
+grep -q "미배달" <<<"$out" && pass "미배달이라고 말한다" || fail "미배달 표현 없음: $(head -2 <<<"$out")"
+
+
 echo
 if [ $FAILED -eq 0 ]; then echo "ALL PASS — send tools honesty"; else echo "FAILED — send tools honesty"; fi
 exit $FAILED
