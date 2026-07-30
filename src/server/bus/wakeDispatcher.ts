@@ -1401,6 +1401,14 @@ function notifyRequesterOfExpiry(
   }
 }
 
+export function recipientAlreadyAnswered(db: Database, messageId: string, agentId: string): boolean {
+  const current = db.prepare(
+    `SELECT recipient_state FROM message_recipient
+      WHERE message_id = ? AND agent_id = ?`,
+  ).get(messageId, agentId) as { recipient_state: string } | undefined;
+  return Boolean(current && current.recipient_state !== "open");
+}
+
 function recordDispatchOutcome(
   db: Database,
   row: PendingDispatchRow,
@@ -1421,6 +1429,13 @@ function recordDispatchOutcome(
     // the exception path was the last retry gap; the !result.ok path below already expires no-retry).
     // Same policy: expire (no retry), leave the bus message in the inbox for next-turn/manual collection.
     if (wakeFailurePolicy(targetAgent.runtime) === "expire_no_retry") {
+      if (recipientAlreadyAnswered(db, row.message_id, row.agent_id)) {
+        appendAudit(db, "bus_dispatcher", "late_wake_failure_ignored_after_reply", row.message_id, {
+          agent_id: row.agent_id,
+          detail: `exception:${errMsg}`.slice(0, 200),
+        });
+        return;
+      }
       db.prepare(
         `UPDATE message_recipient
          SET delivery_state = 'expired',
@@ -1507,6 +1522,13 @@ function recordDispatchOutcome(
     // OpenClaw gateway failures are ambiguous: the turn may already be queued or partially
     // visible to the native session. Retrying creates duplicate Codex turns, so expire and
     // leave the bus message in the inbox for manual/next-turn collection.
+    if (recipientAlreadyAnswered(db, row.message_id, row.agent_id)) {
+      appendAudit(db, "bus_dispatcher", "late_wake_failure_ignored_after_reply", row.message_id, {
+        agent_id: row.agent_id,
+        detail: lastError,
+      });
+      return;
+    }
     db.prepare(
       `UPDATE message_recipient
        SET delivery_state = 'expired',

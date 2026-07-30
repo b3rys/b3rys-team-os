@@ -190,6 +190,29 @@ describe("proposals — 상태기계 + Guard", () => {
     expect(r.status).toBe(409);
   });
 
+  test("authz: loopback dashboard는 현재 배정된 reviewer 명의의 리뷰만 등록할 수 있다", async () => {
+    const current = await fresh();
+    const assigned = current.db.prepare(
+      "SELECT owner FROM proposal_followup_task WHERE proposal_id = ? AND status LIKE 'peer_review:%' AND closed_at IS NULL",
+    ).get(current.id) as { owner: string };
+    const ok = await current.app.request(`/proposals/${current.id}/reviews`, json({
+      reviewer_agent: assigned.owner,
+      stage: "peer",
+      verdict: "concern",
+      comments: "팀 공통 이슈 여부 검토",
+    }));
+    expect(ok.status).toBe(201);
+
+    const next = await fresh();
+    const unassigned = ["steve", "demis", "devon"].find((id) => id !== next.followup?.owner)!;
+    const denied = await next.app.request(`/proposals/${next.id}/reviews`, json({
+      reviewer_agent: unassigned,
+      stage: "peer",
+      verdict: "approve",
+    }));
+    expect(denied.status).toBe(403);
+  });
+
   test("PATCH /proposals/:id updates draft text fields through standard API", async () => {
     const { app, db } = setup();
     const id = createProposalRow(db, {
@@ -365,7 +388,7 @@ describe("proposals — 상태기계 + Guard", () => {
     expect(openTasks.c).toBe(0);
   });
 
-  test("peer review는 제안자를 제외하고 나머지 팀원 중 랜덤 1명에게 보낸다", async () => {
+  test("peer review는 제안자를 제외하고 현재 부담이 가장 적은 1명에게 보낸다", async () => {
     const { app, db } = setup();
     seedAgent(db, "lui");
     seedAgent(db, "hermes");
@@ -376,11 +399,11 @@ describe("proposals — 상태기계 + Guard", () => {
       author_agent: "lui",
     })).json()) as { id: string };
 
-    // 생성=peer 진입 시점에 peer 1명(랜덤) 배정.
+    // 생성=peer 진입 시점에 peer 1명 배정.
     const peerTasks = db.prepare(
       "SELECT owner, status FROM proposal_followup_task WHERE proposal_id = ? AND status LIKE 'peer_review:%' ORDER BY owner",
     ).all(id) as { owner: string; status: string }[];
-    expect(peerTasks).toHaveLength(1); // 새 모델: peer 1명(랜덤)
+    expect(peerTasks).toHaveLength(1);
     expect(peerTasks[0]!.owner).not.toBe("lui"); // 제안자 제외
     expect(peerTasks[0]!.owner).toBeTruthy();
   });
@@ -584,8 +607,11 @@ describe("proposals — 상태기계 + Guard", () => {
     const { app, db, id } = await fresh();
     await transition(app, id, "peer_review", "codex");
     const before = db.prepare("SELECT COUNT(*) AS c FROM task WHERE description LIKE ?").get(`%proposal:${id} status:peer_review%`) as { c: number };
-    const r = await transition(app, id, "gd_report", "bill", { emergency_override: true });
-    expect(r.status).toBe(200);
+    const assigned = db.prepare(
+      "SELECT owner FROM proposal_followup_task WHERE proposal_id = ? AND status LIKE 'peer_review:%' AND closed_at IS NULL",
+    ).get(id) as { owner: string };
+    const r = await review(app, id, { reviewer_agent: assigned.owner, verdict: "concern" });
+    expect(r.status).toBe(201);
     // 같은 상태 재호출이 아니라 다음 상태 task는 새로 생기되, peer_review task는 팀 규모 기준 2개만 유지된다.
     const after = db.prepare("SELECT COUNT(*) AS c FROM task WHERE description LIKE ?").get(`%proposal:${id} status:peer_review%`) as { c: number };
     expect(before.c).toBe(1); // 새 모델: peer 1명
@@ -900,11 +926,11 @@ describe("proposals — 상태기계 + Guard", () => {
     expect(statusOf(db, id)).toBe("gd_report"); // review 1건 = 자동 전이
   });
 
-  test("Guard A 우회: emergency_override=true면 통과", async () => {
+  test("Guard A: emergency_override도 peer review 의무를 우회하지 못한다", async () => {
     const { app, id } = await fresh();
     await transition(app, id, "peer_review", "codex");
     const r = await transition(app, id, "gd_report", "bill", { emergency_override: true });
-    expect(r.status).toBe(200);
+    expect(r.status).toBe(409);
   });
 
   test("Guard C: legacy pm_review row는 PM review 1건 없으면 gd_report 금지", async () => {
@@ -972,7 +998,7 @@ describe("proposals — test fixture gate", () => {
       staleMinutes: 30,
       limit: 10,
     });
-    expect(out).toEqual({ advanced: [], reassigned: [], degraded: [] });
+    expect(out).toEqual({ advanced: [], reassigned: [], degraded: [], blocked: [] });
     expect(statusOf(db, id)).toBe("peer_review");
     const openTasks = db.prepare(
       "SELECT COUNT(*) AS c FROM proposal_followup_task WHERE proposal_id = ? AND closed_at IS NULL",
@@ -982,6 +1008,20 @@ describe("proposals — test fixture gate", () => {
 });
 
 describe("proposals — GD 심플 모델 (팀 크기별 라우팅)", () => {
+  test("4인 팀: 연속 제안의 peer review를 세 후보에게 least-loaded 순환 배정", async () => {
+    const { app, db } = setupTeam(["alice", "bob", "carol", "dave"]);
+    const owners: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const id = await createBy(app, "alice");
+      const row = db.prepare(
+        "SELECT owner FROM proposal_followup_task WHERE proposal_id = ? AND status LIKE 'peer_review:%'",
+      ).get(id) as { owner: string };
+      owners.push(row.owner);
+    }
+    expect(new Set(owners).size).toBe(3);
+    expect(owners).not.toContain("alice");
+  });
+
   test("1인 팀: draft → gd_report 직행 → 팀장(gd) accepted", async () => {
     const { app, db } = setupTeam(["alice"], { coordinator: "alice" });
     const id = await createBy(app, "alice");

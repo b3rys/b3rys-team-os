@@ -17,6 +17,8 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { Database } from "bun:sqlite";
+import { recipientAlreadyAnswered } from "./wakeDispatcher";
 
 const SRC = readFileSync(join(import.meta.dir, "wakeDispatcher.ts"), "utf8");
 
@@ -49,5 +51,20 @@ describe("★만료 통지 — 요청자가 영원히 기다리지 않게★", (
   it("★재시도는 여전히 안 한다★ (통지를 넣었다고 재시도를 되살리면 중복 팬아웃이 난다)", () => {
     expect(SRC).toMatch(/\["hermes_agent", "expire_no_retry"\]/);
     expect(SRC).toMatch(/\["openclaw", "expire_no_retry"\]/);
+  });
+
+  it("명시 답변으로 닫힌 recipient는 늦게 끝난 wake 실패가 무응답으로 덮지 않는다", () => {
+    const db = new Database(":memory:");
+    db.exec(
+      `CREATE TABLE message_recipient (
+        message_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        recipient_state TEXT NOT NULL
+      )`,
+    );
+    db.prepare("INSERT INTO message_recipient VALUES ('ask-1','devon','completed')").run();
+    expect(recipientAlreadyAnswered(db, "ask-1", "devon")).toBe(true);
+    db.prepare("UPDATE message_recipient SET recipient_state='open'").run();
+    expect(recipientAlreadyAnswered(db, "ask-1", "devon")).toBe(false);
   });
 });

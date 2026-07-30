@@ -228,7 +228,7 @@ export function updateProposal(
 
 /** 상태 전이 — 상태기계 밖 전이 금지 + 단계별 가드 + decision_log 자동 기록.
  *  Codex 교차검토 가드(2026-06-12):
- *   - peer→gd_report: 리뷰 1건 의무(팀장보고 전 review 생략 방지). emergency_override로만 예외(사유 기록).
+ *   - peer→gd_report: 리뷰 1건 의무(팀장보고 전 review 생략 방지). emergency_override도 우회 불가.
  *   - gd_report→accepted/rejected: team lead actor만(감사 무결성). PM은 pm-stage 리뷰로 recommend만. */
 export function transitionProposal(
   db: Database, id: string, actor: string, toStatus: string, reason: string,
@@ -262,7 +262,8 @@ export function transitionProposal(
   }
 
   // Guard A — review 의무: peer_review→gd_report는 실제 peer review 1건 이상 필요.
-  if (from === "peer_review" && toStatus === "gd_report" && !opts.emergency_override) {
+  // 팀장 결정 화면에는 검토를 마친 제안만 올라가야 하므로 emergency override도 이 가드를 우회하지 못한다.
+  if (from === "peer_review" && toStatus === "gd_report") {
     const requiredPeer = requiredPeerReviewCount(db, row.proposer_agent);
     const peerCount = eligiblePeerReviewCount(db, id, row.proposer_agent);
     if (peerCount < requiredPeer) {

@@ -141,17 +141,28 @@ describe("자동화 — sweeper 정체 안전망", () => {
     expect(statusOf(db, id)).toBe("peer_review"); // 3+팀 → peer 자동 제출
   });
 
-  test("peer 무응답 → 1차 재배정 → 2차 리뷰 skip degraded 진행", async () => {
+  test("peer 무응답 → 1차 재배정 → 재대기 후에도 리뷰 없으면 blocked 유지", async () => {
     const { app, db } = setup();
     const { id } = (await (await create(app)).json()) as { id: string };
     expect(statusOf(db, id)).toBe("peer_review");
+    const firstOwner = (db.prepare(
+      "SELECT owner FROM proposal_followup_task WHERE proposal_id = ? AND status LIKE 'peer_review:%' ORDER BY created_at LIMIT 1",
+    ).get(id) as { owner: string }).owner;
     ageProposal(db, id, 40);
     const r1 = sweepStaleProposals(db, ambientAgents());
     expect(r1.reassigned).toContain(id);
     expect(statusOf(db, id)).toBe("peer_review"); // 재배정만, 아직 peer
-    const r2 = sweepStaleProposals(db, ambientAgents()); // 여전히 stale → degraded
-    expect(r2.degraded).toContain(id);
-    expect(statusOf(db, id)).toBe("gd_report"); // 리뷰 없이 자동 진행(degraded)
+    const reassignedOwner = (db.prepare(
+      "SELECT owner FROM proposal_followup_task WHERE proposal_id = ? AND status LIKE 'peer_review:%' AND closed_at IS NULL",
+    ).get(id) as { owner: string }).owner;
+    expect(reassignedOwner).not.toBe(firstOwner);
+    const immediate = sweepStaleProposals(db, ambientAgents());
+    expect(immediate.blocked).not.toContain(id); // 재배정 시 대기시계가 초기화된다
+    ageProposal(db, id, 40);
+    const r2 = sweepStaleProposals(db, ambientAgents());
+    expect(r2.degraded).toEqual([]);
+    expect(r2.blocked).toContain(id);
+    expect(statusOf(db, id)).toBe("peer_review"); // 리뷰 없이 gd_report 금지
   });
 
   test("정체 아닌(최근) 제안은 sweeper가 건드리지 않는다", async () => {
@@ -244,14 +255,16 @@ describe("자동화 — 교차검토 결함 회귀 방어", () => {
     expect(statusOf(db, id)).toBe("draft"); // 가로채기 실패
   });
 
-  test("P1: sweeper degraded는 risk_level=high 제안을 자동 진행하지 않는다", () => {
+  test("P1: sweeper는 risk와 무관하게 리뷰 없는 제안을 자동 진행하지 않는다", () => {
     const { db } = setup();
     const id = createProposal(db, { ...VALID_NEW, risk_level: "high" }).id!;
     advanceProposalIfCurrent(db, { proposalId: id, expectedFrom: "draft", to: "peer_review", actionKey: "k", kind: "t" });
     ageProposal(db, id, 40);
     sweepStaleProposals(db, ambientAgents()); // 1차 재배정
-    const r2 = sweepStaleProposals(db, ambientAgents()); // 2차: high-risk → skip
+    ageProposal(db, id, 40);
+    const r2 = sweepStaleProposals(db, ambientAgents());
     expect(r2.degraded).not.toContain(id);
+    expect(r2.blocked).toContain(id);
     expect(statusOf(db, id)).toBe("peer_review"); // 사람 리뷰 대기(무검토 승격 안 함)
   });
 });
