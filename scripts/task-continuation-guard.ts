@@ -55,7 +55,8 @@ type State = Record<string, string>; // cardId -> 마지막 핑 ISO(UTC)
 export function toUtcIso(s: string): string {
   const trimmed = s.trim();
   const iso = trimmed.includes("T") ? trimmed : trimmed.replace(" ", "T");
-  return /(?:Z|[+-]\d{2}:?\d{2})$/.test(iso) ? iso : `${iso}Z`;
+  // 대소문자를 가리지 않는다. `18:10:00z` 를 놓치면 `z` 뒤에 `Z` 가 더 붙어 파싱이 실패한다.
+  return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(iso) ? iso : `${iso}Z`;
 }
 
 // → epoch ms. 파싱 실패하면 now 를 돌려준다(아주 오래된 것으로 취급하지 않게).
