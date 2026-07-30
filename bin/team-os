@@ -9,7 +9,7 @@
 set -uo pipefail
 
 # 저장소 위치를 짐작하지 않는다 — ★이 스크립트 자신이 저장소 안에 있다.★
-#   경로가 `<저장소>/scripts/team-os` 이므로 자기 위치의 한 단계 위가 저장소다.
+#   경로가 `<저장소>/bin/team-os` 이므로 자기 위치의 한 단계 위가 저장소다.
 #   짐작하면 틀린다: 우리는 ~/Development/ 밑에 두지만 공개 사용자는 README 대로
 #   아무 데서나 `git clone` 하므로 대개 홈 바로 밑이다. 그 경우 예전 기본값으로는
 #   ★자기 서비스를 하나도 못 찾는다.★ (팀장님이 잡으신 결함)
@@ -26,7 +26,7 @@ while [ -L "$_self" ] && [ "$_hops" -lt 40 ]; do
   _hops=$((_hops + 1))
 done
 #   pwd -P 로 심링크를 푼 실제 경로를 쓴다. 파일이 아니라 ★상위 폴더가 심링크★ 인 경우
-#   (예: ~/repo -> /실제/경로, 그 안의 scripts/team-os 는 일반 파일)
+#   (예: ~/repo -> /실제/경로, 그 안의 bin/team-os 는 일반 파일)
 #   위 while 은 걸리지 않고 pwd 는 심링크 경로를 그대로 준다.
 #   plist 에는 실제 경로가 적혀 있으니 그대로 두면 ★또 0건★ 이 된다. (codex 실측)
 # ★root 로 돌리지 않는다★ (GD 2026-07-30) — 경고가 아니라 거부한다.
@@ -48,7 +48,7 @@ fi
 REPO="${TEAM_OS_REPO:-$(cd "$(dirname "$_self")/.." 2>/dev/null && pwd -P)}"
 if [ -z "$REPO" ] || [ ! -d "$REPO/src/server" ] || [ ! -f "$REPO/package.json" ]; then
   echo "✗ 저장소를 못 찾았습니다 (찾은 곳: ${REPO:-없음})"
-  echo "  이 스크립트는 <저장소>/scripts/team-os 자리에 있어야 합니다."
+  echo "  이 스크립트는 <저장소>/bin/team-os 자리에 있어야 합니다."
   echo "  다른 데서 쓰시려면: TEAM_OS_REPO=<저장소 경로> team-os $*"
   exit 1
 fi

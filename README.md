@@ -246,9 +246,9 @@ Slack은 **Socket Mode**로 붙습니다 — 공개 URL·웹훅 엔드포인트�
 **보통은 맥을 켜면 저절로 올라옵니다.** 아래는 그게 안 됐을 때만 씁니다.
 
 ```bash
-bash scripts/team-os up       # 올린다
-bash scripts/team-os doctor   # 왜 안 뜨는지 본다
-bash scripts/team-os down     # 내린다
+bash bin/team-os up       # 올린다
+bash bin/team-os doctor   # 왜 안 뜨는지 본다
+bash bin/team-os down     # 내린다
 ```
 
 **순서는 이렇게** — `up` 먼저, 그래도 안 되면 `doctor`.
@@ -320,7 +320,7 @@ bun run src/server/index.ts
 > - **자동실행 이름**(`com.<사용자>.…`)은 설치마다 다릅니다 →
 >   `~/Library/LaunchAgents/*.plist` 를 열어 안에 적힌 `Label` 을 그대로 읽습니다.
 > - **저장소 위치**도 설치마다 다릅니다 →
->   이 스크립트가 `<저장소>/scripts/team-os` 자리에 있으므로 **자기 위치에서 알아냅니다.**
+>   이 스크립트가 `<저장소>/bin/team-os` 자리에 있으므로 **자기 위치에서 알아냅니다.**
 >   바로가기(심링크)로 불러도 끝까지 따라갑니다.
 >
 > 스크립트를 저장소 밖으로 복사해서 쓰신다면 그때만 알려주세요:

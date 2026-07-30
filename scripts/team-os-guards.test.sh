@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # team-os 의 두 가드(root 거부 · off 명단 존중)를 검증한다. ★서버 미기동·라이브 무접촉★
 set -uo pipefail
-SRC="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/team-os}"
+SRC="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../bin/team-os}"
 FAIL=0
 ok(){ echo "  ✓ $1"; }; bad(){ echo "  ✗ $1"; FAIL=1; }
 

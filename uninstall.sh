@@ -400,8 +400,10 @@ elif ! managed_by_this_install "$_srv_plist"; then
   warn "    서버를 내리려면 그 서버를 설치한 폴더에서 uninstall 하세요."
 else
   # team-os.sh 가 있으면 best-effort 로 호출(정지 시도). 없거나 실패해도 아래 bootout 이 실제 정지.
-  if [ -x "$SELF/scripts/team-os.sh" ] || [ -f "$SELF/scripts/team-os.sh" ]; then
-    bash "$SELF/scripts/team-os.sh" down >/dev/null 2>&1 || true
+  # ★이 조건은 오래 거짓이었다★ — 파일명이 team-os.sh 로 적혀 있었는데 실제 파일은 확장자가 없다.
+  #   그래서 이 "곱게 내리기" 단계는 한 번도 실행된 적이 없다(아래 bootout 이 실제로 내렸다).
+  if [ -f "$SELF/bin/team-os" ]; then
+    bash "$SELF/bin/team-os" down >/dev/null 2>&1 || true
   fi
   launchd_stop "$PREFIX.team-collab"
   rmf "$_srv_plist"

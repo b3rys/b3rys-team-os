@@ -1,4 +1,4 @@
-// ★드리프트 가드★ — scripts/team-os 의 셸 poller 판정이 정본(runtimeEssentials.ts)과 같은 답을 내나.
+// ★드리프트 가드★ — bin/team-os 의 셸 poller 판정이 정본(runtimeEssentials.ts)과 같은 답을 내나.
 //
 // 왜 두 곳에 같은 판정이 있나:
 //   team-os 는 ★서버가 죽었을 때★ 쓰는 복구 도구다. 서버 API 를 부를 수 없으니 셸로 다시 짤 수밖에
@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { checkEssentialSettings, createRuntimeEssentialsRegistry } from "./runtimeEssentials";
 import type { AgentRecord } from "../types";
 
-const TEAM_OS = join(import.meta.dir, "../../../scripts/team-os");
+const TEAM_OS = join(import.meta.dir, "../../../bin/team-os");
 const NAME = "drifttest";
 
 /** 살아있는 pid — 이 테스트 프로세스 자신. 죽은 pid — 쓰이지 않을 큰 값. */

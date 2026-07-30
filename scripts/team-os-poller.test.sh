@@ -19,7 +19,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
-SCRIPT="$HERE/team-os"
+SCRIPT="$HERE/../bin/team-os"
 [ -x "$SCRIPT" ] || { echo "FAIL: $SCRIPT 없음/실행권한 없음"; exit 1; }
 
 FAILED=0

@@ -2,7 +2,7 @@
 # member_booting 의 '세션 없는 창' 보호를 검증한다. ★서버는 안 띄운다.★
 #   판정 함수만 떼어 돌리고, 런처는 이름만 흉내낸 sleep 프로세스로 만든다.
 set -uo pipefail
-SRC="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/team-os}"
+SRC="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../bin/team-os}"
 TMP="$(mktemp)"; PIDS=""
 cleanup() { for p in $PIDS; do kill "$p" 2>/dev/null || true; done; rm -f "$TMP"; }
 trap cleanup EXIT
