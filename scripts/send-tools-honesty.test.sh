@@ -247,6 +247,26 @@ out="$(PATH="$EXPBIN:$PATH" "$SEND" --to lisa --body-file "$FIX" --confirm 6 2>&
 grep -q "미배달" <<<"$out" && pass "미배달이라고 말한다" || fail "미배달 표현 없음: $(head -2 <<<"$out")"
 
 
+echo "── A2-6: 타임아웃에도 ★현재 상태★ 를 보여준다 (진행 중 vs 막힘 구분) ──"
+# 상태 없이 "판정이 안 났다" 만 내면 진행 중인지 막힌 건지 알 수 없다. 실측으로 그 문구가
+#   "정상 처리 중" 으로 오독돼 잘못된 보고가 나갔다.
+WDBIN="$TMP/wbin"; mkdir -p "$WDBIN"
+cat > "$WDBIN/curl" <<'STUB'
+#!/usr/bin/env bash
+for a in "$@"; do [ "$a" = "-X" ] && { printf '{"ok":true,"message":{"id":"testid","thread_id":"t","hop_count":0}}'; exit 0; }; done
+printf '{"message":{"id":"testid"},"recipients":[{"agent_id":"lisa","delivery_state":"wake_dispatched","last_error":null}]}'
+STUB
+chmod +x "$WDBIN/curl"
+out="$(PATH="$WDBIN:$PATH" "$SEND" --to lisa --body-file "$FIX" --confirm 2 2>&1)"; rc=$?
+# ★설명문에도 'wake_dispatched' 가 들어있다★ — 그 단어만 grep 하면 상태 출력을 지우고도 통과한다
+#   (실제로 그렇게 거짓 통과했다). 상태만 만드는 형식 `<agent>=<state>` 로 단정한다.
+grep -qE "현재:[^\n]*lisa=wake_dispatched" <<<"$out" \
+  && pass "현재 상태를 <agent>=<state> 형식으로 출력한다" \
+  || fail "상태가 안 나온다: $(tail -3 <<<"$out")"
+grep -q "미배달이 아닙니다" <<<"$out" && pass "미배달로 오독하지 않게 명시한다" || fail "구분 문구 없음"
+[ $rc -eq 0 ] && pass "타임아웃은 실패로 단정하지 않는다 (exit 0)" || fail "타임아웃을 실패로 만들었다 (exit $rc)"
+
+
 echo
 if [ $FAILED -eq 0 ]; then echo "ALL PASS — send tools honesty"; else echo "FAILED — send tools honesty"; fi
 exit $FAILED
