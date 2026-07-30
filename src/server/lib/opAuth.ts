@@ -135,9 +135,28 @@ function isTrustedDashboardHost(value: string, trusted: Set<string>): boolean {
   return false;
 }
 
+/** 아래 경고를 요청마다 찍지 않는다 — 한 번만 말하면 된다. */
+let warnedBindNotLoopback = false;
+
+/** 테스트 격리용 — '한 번만 경고' 상태를 비운다(앞 테스트가 소모하면 뒤 테스트가 못 본다). */
+export function __resetAuthWarningsForTest(): void {
+  warnedBindNotLoopback = false;
+}
+
 function isLoopbackDashboardRequest(request: Request): boolean {
   const bind = process.env.TEAM_BIND ?? "127.0.0.1";
-  if (!isLoopbackHost(bind)) return false;
+  if (!isLoopbackHost(bind)) {
+    // ★등록했는데 안 켜지면 사람은 "설정이 안 먹네" 로 읽고 원인을 못 찾는다★ (bill 리뷰).
+    //   조용히 거부하지 않고 왜 안 켜지는지 한 번 말한다. 오늘 우리가 반복해서 만난 실패 모양이다.
+    if (!warnedBindNotLoopback && trustedDashboardHosts().size > 0) {
+      warnedBindNotLoopback = true;
+      console.warn(
+        "[auth] TEAM_TRUSTED_DASHBOARD_HOSTS 가 설정돼 있지만 적용되지 않습니다 —" +
+          ` TEAM_BIND(${bind}) 가 loopback 이 아닙니다. 오리진이 직접 노출된 상태에서는 이 예외를 켜지 않습니다.`,
+      );
+    }
+    return false;
+  }
   let urlHost = "";
   try {
     urlHost = new URL(request.url).hostname;

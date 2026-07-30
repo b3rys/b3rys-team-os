@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { trustedActorFromHeaders, trustedActorFromRequest } from "./opAuth";
+import { trustedActorFromHeaders, trustedActorFromRequest, __resetAuthWarningsForTest } from "./opAuth";
 
 afterEach(() => {
   delete process.env.OP_MESSAGE_TOKEN;
@@ -90,6 +90,23 @@ describe("대시보드 loopback 예외 + 등록한 주소", () => {
     process.env.TEAM_TRUSTED_DASHBOARD_HOSTS = "dev.b3rys.com";
     process.env.TEAM_BIND = "0.0.0.0";
     expect(trustedActorFromRequest(req("dev.b3rys.com"), { loopbackDashboardActor: "gd" })).toMatchObject({ ok: false });
+  });
+
+  test("★안 켜질 때 조용히 끝내지 않고 이유를 말한다★ (bill 리뷰 — '설정이 안 먹네' 방지)", () => {
+    process.env.TEAM_TRUSTED_DASHBOARD_HOSTS = "dev.b3rys.com";
+    process.env.TEAM_BIND = "0.0.0.0";
+    __resetAuthWarningsForTest();
+    const warned: string[] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => { warned.push(args.map(String).join(" ")); };
+    try {
+      trustedActorFromRequest(req("dev.b3rys.com"), { loopbackDashboardActor: "gd" });
+    } finally {
+      console.warn = original;
+    }
+    // 등록이 있는데 TEAM_BIND 때문에 못 켜는 상황을 한 줄로 알린다(경고 문구에 두 이름이 다 들어간다).
+    expect(warned.join("\n")).toContain("TEAM_TRUSTED_DASHBOARD_HOSTS");
+    expect(warned.join("\n")).toContain("TEAM_BIND");
   });
 
   test("인증 헤더가 있으면 이 예외는 시도되지 않는다 (fail-fast 유지)", () => {
