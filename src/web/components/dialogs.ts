@@ -22,9 +22,13 @@ interface DialogOptions {
 interface PromptOptions extends DialogOptions {
   defaultValue?: string;
   placeholder?: string;
+  /** form 모드 전용 — 본문에 그대로 넣을 마크업. 호출부가 만든다. */
+  bodyHtml?: string;
+  /** form 모드 전용 — 확인을 눌렀을 때 모달 DOM 에서 결과를 읽어낸다. */
+  collect?: (root: HTMLElement) => unknown;
 }
 
-type DialogMode = "alert" | "confirm" | "prompt";
+type DialogMode = "alert" | "confirm" | "prompt" | "form";
 
 /** 모드별 차이를 분기 대신 표로 둔다 — 모드가 늘 때 고칠 곳이 한 군데다. */
 const MODE_SPEC: Record<DialogMode, {
@@ -39,6 +43,8 @@ const MODE_SPEC: Record<DialogMode, {
   confirm: { title: () => pick("확인", "Confirm"), okLabel: () => pick("확인", "Confirm"), cancel: true, cancelValue: false },
   // prompt 의 취소는 false 가 아니라 ★null★ 이다 — 빈 문자열 입력("지우기")과 취소를 구분해야 한다.
   prompt: { title: () => pick("입력", "Input"), okLabel: () => pick("확인", "Confirm"), cancel: true, cancelValue: null },
+  // form 도 취소는 null 이다 — "아무것도 안 고름"(빈 배열)과 "취소"를 구분해야 한다.
+  form: { title: () => pick("선택", "Select"), okLabel: () => pick("저장", "Save"), cancel: true, cancelValue: null },
 };
 
 function dialogShell(opts: PromptOptions, mode: DialogMode): Promise<boolean | string | null> {
@@ -56,7 +62,7 @@ function dialogShell(opts: PromptOptions, mode: DialogMode): Promise<boolean | s
     const inputHtml = mode === "prompt"
       ? `<input type="text" data-dialog-input value="${escape(opts.defaultValue ?? "")}" placeholder="${escape(opts.placeholder ?? "")}"
            class="mt-3 w-full rounded-md border border-surface-3 bg-surface-2 px-3 py-2 text-sm text-slate-100 outline-none focus:border-accent-green/40 placeholder:text-slate-600" />`
-      : "";
+      : mode === "form" ? (opts.bodyHtml ?? "") : "";
 
     overlay.innerHTML = `
       <div class="w-full max-w-md rounded-md border border-surface-3 bg-surface-1 p-4 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="app-dialog-title">
@@ -86,11 +92,15 @@ function dialogShell(opts: PromptOptions, mode: DialogMode): Promise<boolean | s
       resolve(value);
     };
     // 확인을 눌렀을 때 무엇을 돌려주나 — prompt 는 입력값, 나머지는 true.
-    const accept = () => done(mode === "prompt" ? (input?.value ?? "") : true);
+    const accept = () => {
+      if (mode === "form") { done((opts.collect?.(overlay) ?? null) as string | null); return; }
+      done(mode === "prompt" ? (input?.value ?? "") : true);
+    };
     const cancel = () => done(spec.cancelValue);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") cancel();
-      if (e.key === "Enter" && mode !== "confirm") accept();
+      // form 은 안에 입력칸·체크가 섞여 있어 Enter 로 즉시 확정하면 실수가 난다(confirm 과 같이 제외).
+      if (e.key === "Enter" && mode !== "confirm" && mode !== "form") accept();
     };
     overlay.addEventListener("click", (e) => { if (e.target === overlay) cancel(); });
     overlay.querySelectorAll("[data-dialog-cancel]").forEach((el) => el.addEventListener("click", cancel));
@@ -119,4 +129,21 @@ export async function showAlert(opts: DialogOptions | string): Promise<void> {
  */
 export function showPrompt(opts: PromptOptions | string): Promise<string | null> {
   return dialogShell(typeof opts === "string" ? { message: opts } : opts, "prompt") as Promise<string | null>;
+}
+
+/**
+ * 본문 마크업을 호출부가 만들고, 확인 시 그 DOM 에서 결과를 읽어오는 모달.
+ *
+ * ★왜 필요했나★ (팀장님 실측 2026-07-30): 보고서에 태그를 붙이는 창이 ★쉼표로 이름을 적는 칸★ 이었다.
+ * "이미 추가된 태그가 없으니 외워서 넣기도 그렇고" — 있는 태그를 보여주지 않으면 사람은 외워야 한다.
+ * 목록을 보여주고 눌러서 고르게 하려면 본문에 마크업이 필요한데, shell 은 문자열 한 줄만 받았다.
+ *
+ * shell(overlay·Escape·바깥클릭·settled·포커스)은 그대로 재사용하고 ★본문과 수집만 주입★ 한다.
+ * showConfirm·showAlert·showPrompt 시그니처는 건드리지 않았다.
+ * @returns collect 의 반환값, 취소 시 null. ★빈 선택과 취소는 다르다.★
+ */
+export function showForm<T>(
+  opts: DialogOptions & { bodyHtml: string; collect: (root: HTMLElement) => T },
+): Promise<T | null> {
+  return dialogShell(opts as PromptOptions, "form") as Promise<T | null>;
 }

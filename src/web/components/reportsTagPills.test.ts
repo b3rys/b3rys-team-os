@@ -29,8 +29,25 @@ describe("tagPillsHtml", () => {
 
   test("hover 로만 보이게 하는 클래스가 실려 있다 (group + opacity 전환)", () => {
     const html = tagPillsHtml([tag("t1", "a")], new Set(), pillCls);
-    expect(html).toContain('class="group inline-flex');
+    // ★클래스를 붙어 있는 순서로 단정하지 않는다★ — 사이에 하나 끼우면 깨진다(실제로 깨졌다).
+    //   'group' 이 있고 'opacity-0 group-hover:opacity-100' 쌍이 있다는 것만 본다.
+    const wrapper = html.slice(0, html.indexOf(">") + 1);
+    expect(wrapper).toContain("group");
     expect(html).toContain("opacity-0 group-hover:opacity-100");
+  });
+
+  test("★아이콘이 자리를 차지하지 않는다★ — 쉬는 상태에 빈칸이 생기면 안 된다", () => {
+    // 팀장님 실측(2026-07-30): "너무 떨어져 있어. 이럴 바엔 예전 UI 가 더 나아."
+    //   흐름 안에 두고 opacity 로만 숨기면 마우스를 안 올려도 아이콘 두 개 만큼 빈칸이 항상 남는다.
+    //   ★그리고 우리 검증은 "줄이 흔들리지 않는다" 를 통과시켰다★ — 흔들리지 않는 이유가 그 빈칸이었다.
+    //   absolute 로 흐름에서 빼야 쉬는 상태가 예전 UI 와 같아진다.
+    const html = tagPillsHtml([tag("t1", "a")], new Set(), pillCls);
+    const wrapper = html.slice(0, html.indexOf(">") + 1);
+    expect(wrapper, "아이콘을 띄우려면 래퍼가 relative 여야 한다").toContain("relative");
+    const iconBox = html.slice(html.indexOf("<span", html.indexOf("</button>")));
+    expect(iconBox, "아이콘 묶음이 absolute 가 아니면 자리를 차지한다").toContain("absolute");
+    // 흐름 안에 두던 옛 방식의 흔적(알약 뒤 margin) 이 남아 있으면 빈칸이 다시 생긴다.
+    expect(iconBox).not.toContain("ml-0.5 inline-flex");
   });
 
   test("★안 보일 때는 눌리지도 않는다★ — opacity 만으로는 클릭이 안 막힌다", () => {
