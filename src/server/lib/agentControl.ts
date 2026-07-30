@@ -239,7 +239,11 @@ export async function restartAgent(agentId: string, runtime: string, fresh = fal
       }
       // 기동 수단이 확보된 뒤에야 기존 세션을 정리한다. start-telegram-channel.sh 는 --resume 지원(없으면 새 세션).
       try { await run(["tmux", "kill-session", "-t", `claude-${agentId}`]); } catch { /* 없으면 그만 */ }
-      const args = fresh ? [agentId] : [agentId, "--resume"];
+      // ★--force 를 항상 실어 보낸다★ — 위 kill 이 실패/경합하면(세션은 살아있고 poller 만 죽은 상태가 바로 그 케이스)
+      //   기동 스크립트의 idempotent 가드가 'Session already running' 으로 no-op 이 되어 ★재시작이 조용히 안 된다★.
+      //   2026-07-30 실측: launchctl kickstart 로 스크립트를 다시 돌렸더니 정확히 이 no-op 에 걸려 리사가 계속 죽어 있었다.
+      //   --force 는 스크립트 안에서 kill 후 기동을 보장하므로 kill 성공 여부와 무관하게 복구가 성립한다(멱등).
+      const args = fresh ? [agentId, "--force"] : [agentId, "--resume", "--force"];
       const r = await run(["bash", starter, ...args]);
       if (r.code !== 0) return { ok: false, detail: `재시작 실패: ${r.out.slice(-150)}` };
       return withPollerRecovery(agentId, `claude ${agentId} 재시작(${mode})`);
