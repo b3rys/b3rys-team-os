@@ -356,6 +356,40 @@ async function editReportTags(report: Report): Promise<void> {
     tag_ids: names.map((name) => known.get(name.toLocaleLowerCase())!.id),
   });
 }
+/**
+ * 태그 관리 입력 한 줄을 무슨 동작인지로 해석한다.
+ *
+ * ★분기를 흘리지 않고 한 곳에서 판정한다★ — 예전엔 `value.startsWith("-")` / `includes("→")` 를
+ * 호출부에 늘어놓았고, 화살표가 ★U+2192 한 종류만★ 이라 키보드로 흔히 치는 `->` 는 rename 이 아니라
+ * ★create 로 떨어졌다.★ 팀장님 실측(2026-07-30): `aaa->bbb` 를 넣었더니 이름이 바뀌는 대신
+ * `#aaa->bbb` 라는 태그가 새로 생겼다.
+ *
+ * ★그리고 `->` 를 통째로 `→` 로 치환하면 안 된다★ — 내가 처음 그렇게 고쳤다가 잡았다.
+ * 그러면 `-aaa->bbb`(그 쓰레기 태그를 지우려는 입력)가 `-aaa→bbb` 로 변해서 ★실제 이름과 달라져
+ * 삭제가 실패한다.★ 그래서 치환하지 않고, rename 판정에서만 두 화살표를 모두 받는다.
+ *
+ * 알려진 한계: 이름에 `->` 나 `→` 를 넣어 태그를 ★만들 수는 없다★(구분자로 먹힌다). 이것이
+ * 팝업에 문법을 쓰는 방식의 본질적 한계이고, 목록형 모달로 가면 사라진다(카드 8mB1bKiC).
+ */
+export type TagAction =
+  | { kind: "none" }
+  | { kind: "delete"; name: string }
+  | { kind: "rename"; from: string; to: string }
+  | { kind: "create"; name: string };
+
+export function parseTagAction(raw: string | null | undefined): TagAction {
+  const value = (raw ?? "").trim();
+  if (!value) return { kind: "none" };
+  // 삭제를 먼저 본다 — 이름에 화살표가 들어 있어도 '지우기' 의도를 잃지 않는다.
+  if (value.startsWith("-")) {
+    const name = value.slice(1).trim();
+    return name ? { kind: "delete", name } : { kind: "none" };
+  }
+  const m = /^(.*?)\s*(?:→|->)\s*(.*)$/.exec(value);
+  if (m) return { kind: "rename", from: (m[1] ?? "").trim(), to: (m[2] ?? "").trim() };
+  return { kind: "create", name: value };
+}
+
 async function manageTags(): Promise<void> {
   // ★문구는 문법을 나열하지 않는다★ — 동작 이름 + 그대로 베껴 쓸 예시를 준다(팀장님 피드백 2026-07-30:
   //   "팝업 설명이 무슨 얘기인지 모르겠는데"). 예전 문구는 한 칸에 문법 3개를 슬래시로 붙여 놓아서,
@@ -400,11 +434,10 @@ async function manageTags(): Promise<void> {
     ),
     placeholder: pick("예: 주간보고", "e.g. weekly"),
   });
-  if (!action?.trim()) return;
-  // ASCII '->' 도 받는다 — 키보드에 없는 화살표(→)를 요구하면 조용히 새 태그가 만들어졌다.
-  const value = action.trim().replace(/->/g, "→");
-  if (value.startsWith("-")) {
-    const wanted = value.slice(1).trim();
+  const parsed = parseTagAction(action);
+  if (parsed.kind === "none") return;
+  if (parsed.kind === "delete") {
+    const wanted = parsed.name;
     const tag = _tags.find((t) => t.name.toLocaleLowerCase() === wanted.toLocaleLowerCase());
     if (!tag) throw new Error(pick(`‘${wanted}’ 이라는 태그가 없습니다. 태그 목록의 이름과 똑같이 적어 주세요.`, `No tag named '${wanted}'. Use the exact name shown in the tag list.`));
     const yes = await showConfirm({
@@ -420,13 +453,12 @@ async function manageTags(): Promise<void> {
     if (!yes) return;
     await mutateJson(`/api/tags/${encodeURIComponent(tag.id)}`, "DELETE");
     _selectedTagIds.delete(tag.id);
-  } else if (value.includes("→")) {
-    const [from = "", to = ""] = value.split("→", 2).map((s) => s.trim());
-    const tag = _tags.find((t) => t.name.toLocaleLowerCase() === from.toLocaleLowerCase());
-    if (!tag || !to) throw new Error(pick("바꿀 이름과 새 이름을 함께 적어 주세요. 예) 주간보고 -> 주간리포트", "Give both names. e.g. weekly -> weekly report"));
-    await mutateJson(`/api/tags/${encodeURIComponent(tag.id)}`, "PATCH", { name: to });
+  } else if (parsed.kind === "rename") {
+    const tag = _tags.find((t) => t.name.toLocaleLowerCase() === parsed.from.toLocaleLowerCase());
+    if (!tag || !parsed.to) throw new Error(pick("바꿀 이름과 새 이름을 함께 적어 주세요. 예) 주간보고 -> 주간리포트", "Give both names. e.g. weekly -> weekly report"));
+    await mutateJson(`/api/tags/${encodeURIComponent(tag.id)}`, "PATCH", { name: parsed.to });
   } else {
-    await mutateJson("/api/tags", "POST", { name: value });
+    await mutateJson("/api/tags", "POST", { name: parsed.name });
   }
   await reloadList();
 }
