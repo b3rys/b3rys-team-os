@@ -17,6 +17,7 @@ function appWith(trusted: boolean) {
   app.delete("/team/api/members/:id", (c) => c.json({ ok: true }));
   app.post("/team/api/slack/events", (c) => c.json({ ok: true }));
   app.get("/team/health", (c) => c.json({ ok: true }));
+  app.get("/team/ws", (c) => c.text("ws"));
   return app;
 }
 
@@ -40,6 +41,11 @@ describe("신뢰하지 않는 주소 — 막는다", () => {
       const r = await app.fetch(req(path, method));
       expect([path, r.status]).toEqual([path, 403]);
     }
+  });
+
+  test("★WebSocket 도 막는다★ — 실시간 채널로 읽기가 새면 관문이 무의미하다", async () => {
+    const r = await appWith(false).fetch(req("/team/ws"));
+    expect(r.status).toBe(403);
   });
 
   test("★사람이 보는 화면은 조각내지 않고 한 장으로 말한다★", async () => {
