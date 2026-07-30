@@ -6,7 +6,7 @@
  * (초록으로 위장하지 않는다 / 미설정은 오류가 아니다) 여기서 못 박는다.
  */
 import { describe, expect, test } from "bun:test";
-import { ciBlockHtml } from "./TeamOS";
+import { CI_URL, ciBlockHtml } from "./TeamOS";
 
 const base = {
   ok: false,
@@ -60,5 +60,16 @@ describe("빈 결과를 초록으로 위장하지 않는다", () => {
     const html = ciBlockHtml({ ...base, reason: '<img src=x onerror="alert(1)">' });
     expect(html).not.toContain("<img");
     expect(html).toContain("&lt;img");
+  });
+});
+
+describe("CI 를 부르는 주소", () => {
+  // ★이 한 줄이 없어서 블록이 한 번도 동작하지 않았다★ (2026-07-30 라이브 실측)
+  //   `${apiBase()}/ci-status` 는 SPA 의 index.html 을 받아온다 → JSON 파싱 실패 →
+  //   화면에 `✖ 확인 불가 · Unexpected token '<'`. 서버·표시 테스트가 전부 통과하는데도 그랬다.
+  //   부르는 주소는 ★그 주소로 실제 요청이 가는지★ 를 봐야 알 수 있다.
+  test("★/api 접두가 있어야 한다★ — 저장소의 다른 호출과 같은 규칙", () => {
+    expect(CI_URL.startsWith("/api/")).toBe(true);
+    expect(CI_URL).toBe("/api/ci-status");
   });
 });

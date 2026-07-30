@@ -38,9 +38,16 @@ let _ciData: Parameters<typeof ciBlockHtml>[0] = null;
 
 /** CI 결과를 가져와 ★그 블록만★ 갈아끼운다(전체 재렌더 안 함 — 스크롤 튐 방지).
  *  ★실패해도 화면을 비우지 않는다★ — 서버가 ok:false 와 이유를 주고 블록이 빨간 줄로 보여준다. */
+/** ★API 주소는 `${apiBase()}/api/...` 다★ — `apiBase()` 는 BASE_PATH(`/team`) 만 준다.
+ *  앞선 판은 `${apiBase()}/ci-status` 로 불러 ★SPA 의 index.html 을 받았다★. 그래서 화면은
+ *  줄곧 `✖ 확인 불가 · Unexpected token '<'` 였다 — ★이 블록은 한 번도 동작한 적이 없다.★
+ *  서버·파싱·표시 테스트는 전부 통과했고 교차검증도 코드를 읽어 "화면이 이유를 보여준다" 로 봤다.
+ *  ★부르는 주소를 실제로 부른 사람이 없었다.★ 그래서 아래 CI_URL 을 테스트가 직접 단정한다. */
+export const CI_URL = "/api/ci-status";
+
 async function loadCi(root: HTMLElement): Promise<void> {
   try {
-    const r = await fetch(`${apiBase()}/ci-status`);
+    const r = await fetch(`${apiBase()}${CI_URL}`);
     _ciData = await r.json();
   } catch (e) {
     _ciData = { ok: false, reason: e instanceof Error ? e.message : String(e), runs: [], fetched_at: null };
