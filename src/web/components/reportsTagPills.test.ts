@@ -33,6 +33,14 @@ describe("tagPillsHtml", () => {
     expect(html).toContain("opacity-0 group-hover:opacity-100");
   });
 
+  test("★안 보일 때는 눌리지도 않는다★ — opacity 만으로는 클릭이 안 막힌다", () => {
+    // 투명한 요소도 그 자리는 클릭을 받는다. 마우스가 없는 환경(터치·아이패드 웹뷰)에서
+    // 태그 옆을 탭하면 안 보이는 연필·휴지통이 눌려 "누르지도 않은 창" 이 뜬다.
+    const html = tagPillsHtml([tag("t1", "a")], new Set(), pillCls);
+    expect(html).toContain("pointer-events-none");
+    expect(html).toContain("group-hover:pointer-events-auto");
+  });
+
   test("★태그 이름이 속성을 깨지 않는다★ — 이름은 사용자 입력이다", () => {
     const html = tagPillsHtml([tag("t1", '따옴표" <b>태그</b>')], new Set(), pillCls);
     // 원문 그대로 속성에 들어가면 data-tag-name 이 조기 종료돼 마크업이 깨진다.
