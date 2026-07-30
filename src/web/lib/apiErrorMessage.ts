@@ -40,7 +40,14 @@ const RAW_MAX = 300;
 export function humanizeApiError(raw: unknown): string {
   const code = String((raw as Error)?.message ?? raw ?? "").trim();
 
-  if (code === "x_actor_id_required") {
+  // ★이름이 바뀌어도 이 문장이 살아 있어야 한다(steve 교차검증 2026-07-30).★
+  //   서버의 이 실패는 지금 `x_actor_id_required` 로 나오지만, 그 이름은 실제 원인을 가리키지 않는다
+  //   (주소를 한 번도 안 본 헤더 검사 함수가 만든 값이 그대로 돌아온다 — 팀장님이 잡으셨다).
+  //   그래서 서버 쪽 이름을 `dashboard_host_not_trusted` 로 바꾸는 별건이 예정돼 있다.
+  //   ★정확히 일치로만 분기해 두면, 그 별건이 들어오는 순간 이 문장이 조용히 사라지고
+  //   사용자 화면에 새 코드가 원문으로 뜬다 — 이 PR 이 없애려던 상태로 되돌아간다.★
+  //   테스트도 안 깨진다(옛 이름만 단정하므로). 그래서 ★두 이름을 다 받는다.★
+  if (code === "x_actor_id_required" || code === "dashboard_host_not_trusted") {
     // 주소를 못 읽는 환경(테스트 등)에서는 괄호를 아예 넣지 않는다 — "이 주소()" 는 사람이 읽기 나쁘다.
     const host = currentHost();
     const koWhere = host ? `이 주소(${host})에서는` : "이 주소에서는";

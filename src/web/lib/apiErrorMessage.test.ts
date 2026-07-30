@@ -15,6 +15,17 @@ describe("서버 오류 코드를 사람 말로", () => {
     expect(m).toContain("로컬에만");
   });
 
+  test("★서버가 이름을 바꿔도 문장이 살아 있다★ — 뒤 고침이 앞 고침을 지우지 않게", () => {
+    // 서버 쪽 이름을 dashboard_host_not_trusted 로 바꾸는 별건이 예정돼 있다.
+    // 정확히 일치로만 분기해 두면 그 순간 이 문장이 사라지고 코드가 원문으로 뜬다.
+    const m = humanizeApiError("dashboard_host_not_trusted");
+    expect(m).not.toContain("dashboard_host_not_trusted");
+    expect(m).toContain("쓰기 권한");
+    expect(m).toContain("등록");
+    // 옛 이름과 같은 문장이어야 한다 — 둘이 갈리면 나중에 하나만 고치게 된다
+    expect(m).toBe(humanizeApiError("x_actor_id_required"));
+  });
+
   test("Error 가 아니라 문자열로 와도 같다", () => {
     expect(humanizeApiError("x_actor_id_required")).toContain("쓰기 권한");
   });
