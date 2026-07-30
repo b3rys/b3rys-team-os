@@ -49,14 +49,23 @@ b3os는 이 `Host` 를 보고 "로컬이 아니다" 라고 판단해서 막습�
                                             여기만 바꾼다 (터널 설정)
 ```
 
-**Cloudflare Tunnel 기준 경로:**
+**Cloudflare Tunnel:** 찾을 것은 그 hostname 의 **HTTP Host Header** 칸 하나입니다.
+거기에 `127.0.0.1` 을 넣고 저장합니다.
 
-1. Cloudflare **Zero Trust** 대시보드를 엽니다
-2. **Networks → Tunnels & Mesh** → 해당 터널을 고릅니다
-3. 상단 탭 **Published application routes**
-4. 그 hostname 줄을 클릭합니다
-5. 맨 아래 **Origin request and connection settings** 를 펼칩니다
-6. **HTTP Host Header** 에 `127.0.0.1` 을 넣고 **Save**
+Cloudflare **Zero Trust** 대시보드에서 들어갑니다. UI 개편에 따라 메뉴 이름이 다를 수 있어
+두 경로를 적습니다 — 둘 다 같은 화면입니다.
+
+```
+Networks → Connectors → Cloudflare Tunnels → 터널 Edit
+  → Published application routes → 애플리케이션 Edit
+  → Additional application settings → HTTP Host Header
+
+Networks → Tunnels & Mesh → 터널 선택
+  → Published application routes → hostname 줄
+  → Origin request and connection settings → HTTP Host Header
+```
+
+둘 다 안 보이면 **터널 → 그 hostname 의 설정 → 고급/추가 설정** 안에서 `HTTP Host Header` 를 찾습니다.
 
 > **Service 는 건드리지 마세요.** `http://localhost:7878` 그대로 둡니다.
 > 바꾸는 건 **HTTP Host Header** 한 칸뿐입니다.
@@ -103,7 +112,9 @@ bun run start
 
 ## 설정한 뒤 — 실제로 열리는지 확인하세요
 
-설정을 바꾼 것과 실제로 적용된 것은 다릅니다. **반드시 눈으로 확인하세요.**
+설정을 바꾼 것과 실제로 적용된 것은 다릅니다. **반드시 확인하세요.**
+
+### 브라우저로 — 두 방법 모두 이걸로 확인합니다
 
 1. 그 주소로 대시보드를 엽니다
 2. **Doc → Reports** 로 가서 태그를 하나 만들어 봅니다
@@ -111,12 +122,20 @@ bun run start
 
 **"등록되지 않은 주소입니다" 페이지가 그대로 뜬다면 아직 적용되지 않은 것입니다.**
 
-터미널에서 확인하려면 (`dash.example.com` 과 포트는 본인 것으로 바꾸세요):
+이게 끝까지 확인하는 유일한 방법입니다. 요청이 앞단 관문·터널을 다 거쳐 서버에 닿기 때문입니다.
+
+### 터미널로 — **방법 ② 만** 확인됩니다
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" -H "Host: dash.example.com" http://127.0.0.1:7878/team/
-# 200 이면 열린 것, 403 이면 아직입니다
+# 200 이면 그 주소가 서버에 등록된 것, 403 이면 아직입니다
 ```
+
+이 요청은 **서버로 직접 갑니다.** 터널을 거치지 않으므로 **방법 ① 은 판별하지 못합니다** —
+①을 제대로 해뒀어도 이 명령은 403 이 나옵니다. ①을 썼다면 위 브라우저 확인을 쓰세요.
+
+도메인으로 보내는 `curl` 도 권하지 않습니다. 앞단에 로그인 관문이 있으면 대시보드가 아니라
+관문의 로그인 페이지가 돌아오고, 그 응답 코드로는 아무것도 판별할 수 없습니다.
 
 ---
 
@@ -126,7 +145,8 @@ curl -s -o /dev/null -w "%{http_code}\n" -H "Host: dash.example.com" http://127.
 |---|---|
 | 안내 페이지가 계속 뜬다 | ①을 썼다면 터널의 **HTTP Host Header** 가 저장됐는지. ②를 썼다면 서버를 다시 띄웠는지 |
 | ② 를 적었는데 무시된다 | `TEAM_BIND` 가 루프백인지. 아니면 서버 로그에 경고가 남아 있습니다 |
-| 화면은 뜨는데 저장·삭제가 안 된다 | 읽기만 통과하는 경로일 수 있습니다. 위 `curl` 로 `/team/` 응답 코드를 먼저 확인하세요 |
+| 화면은 뜨는데 저장·삭제가 안 된다 | 브라우저에서 태그를 하나 만들어 보세요. 안내 페이지가 뜨면 주소가 아직 통과하지 못한 것입니다 |
+| `curl` 은 403 인데 브라우저는 된다 | 방법 ①을 쓴 경우 정상입니다. `curl` 은 터널을 거치지 않아 ①을 판별하지 못합니다 |
 | 주소는 맞는데 막힌다 | 대소문자·포트는 상관없지만, 오타와 `*.` 규칙(하위 주소만)을 다시 보세요 |
 
 ---
