@@ -12,7 +12,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TARGET="$HERE/team-os"
+TARGET="$HERE/../bin/team-os"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

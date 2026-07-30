@@ -31,6 +31,8 @@ archiving/
 # (launchd·배포·테스트 하네스·실 로스터)와 내부 docs(PLAN/REVIEW/내부운영)는 로컬 워킹파일로 유지(untrack)한다.
 # 버전관리는 은퇴하는 private repo(내부 유지)가 계속 tracked 로 보존 → 유실 없음. 공개엔 명시 allowlist 만 싣는다.
 # (기본=제외 + `!` allowlist. 새 공개용 스크립트/문서는 여기 `!` 로 추가.)
+# bin/ = ★사람이 직접 치는 명령★ 만 둔다(팀장님 방침). scripts/ 와 달리 ignore 대상이 아니다 —
+#   여기 넣는 순간 공개된다. 자동화·테스트·내부 ops 는 scripts/ 에 남긴다.
 /scripts/*
 !/scripts/auto-heal-core.sh
 !/scripts/auto-heal-core-harness.sh
@@ -42,7 +44,6 @@ archiving/
 #   ★문서가 가리키는 도구가 리포에 없으면 그 안내는 거짓말이 된다★ (이 문서가 고치려던 바로 그 문제).
 # ★공개 사용자가 부팅 후 안 뜰 때 쓰는 도구★ — README 가 이 파일을 가리킨다.
 #   /scripts/* 가 전부 무시하므로 ★여기 없으면 조용히 빠진다★ (실제로 한 번 빠뜨렸다 — codex 가 잡음)
-!/scripts/team-os
 !/scripts/gen-test-map.sh
 !/scripts/test-map-nodescribe.txt
 # ★scripts 의 테스트는 ★클래스로★ 연다★ — /scripts/* 가 전부 무시하므로 .test.ts 를
