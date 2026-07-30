@@ -12,7 +12,7 @@
 import { pick } from "../i18n";
 import { parseSqliteDate } from "../lib/datetime";
 import { humanizeApiError } from "../lib/apiErrorMessage";
-import { showAlert, showConfirm, showPrompt } from "./dialogs";
+import { showAlert, showConfirm, showForm, showPrompt } from "./dialogs";
 
 const REPORTS_BASE = "/reports";
 const DEFAULT_CAT = "보고서";
@@ -56,6 +56,11 @@ let _root: HTMLElement | null = null;
 let _all: Report[] = [];
 let _loaded = false;
 let _loading = false;
+// ★목록을 다시 받는 중인지 — 로딩 띠 전용 플래그★
+//   _loading 을 그대로 쓸 수 없다: loadReportsPage 가 그것을 ★재진입 가드★ 로도 쓰고(`if (_loading) return`),
+//   값을 켜는 시점도 renderList 다음이다. 그래서 _loading 으로 띠를 그리면 ★첫 페인트에 꺼져 있고,
+//   미리 켜면 로딩 자체가 막힌다.★ 신호가 판정부에 도달하지 않는 그 형태라 플래그를 따로 둔다.
+let _reloading = false;
 let _loadError: string | null = null;
 let _hasMore = false;
 let _nextCursor: string | null = null;
@@ -287,8 +292,13 @@ async function reloadList(opts: { preserveScroll?: boolean; restoreSearchFocus?:
   _nextCursor = null;
   _hasMore = false;
   _loaded = false;
+  _reloading = true;
   renderList();
-  await loadReportsPage(true);
+  try {
+    await loadReportsPage(true);
+  } finally {
+    _reloading = false;
+  }
   if (opts.restoreSearchFocus) _restoreSearchFocus = true;
   renderList();
   if (opts.restoreSearchFocus) {
@@ -329,33 +339,64 @@ async function mutateJson(path: string, method: string, body?: unknown): Promise
   if (!r.ok || j?.ok === false) throw new Error(j?.error || "HTTP " + r.status);
   return j;
 }
+/**
+ * 보고서에 붙일 태그를 ★목록에서 골라★ 정한다.
+ *
+ * ★왜 바꿨나★ (팀장님 실측 2026-07-30): 전에는 쉼표로 이름을 적는 칸 하나였다.
+ * "이미 추가된 태그가 없으니 외워서 넣기도 그렇고.. 이 추가된 태그를 좀 보여주면 좋지 안나? 선택해서 넣을 수 있게?"
+ * ★맞는 지적이다.★ 있는 것을 보여주지 않으면 사람은 외워야 하고, 오타를 내면 같은 뜻의 태그가 하나 더 생긴다
+ * (오늘 카테고리에서 리서치/research/AI 리서치/AI Research 로 갈린 것이 그 결과다).
+ *
+ * 체크박스를 쓴 이유: 칩을 눌러 켜고 끄려면 이벤트를 걸어야 하는데, shell 은 본문에 리스너를 안 걸어준다.
+ * `peer` + 숨긴 checkbox 면 ★자바스크립트 없이★ 켜짐/꺼짐이 되고, 확인 시 :checked 만 읽으면 된다.
+ */
+export function tagChoiceBodyHtml(all: ReportTag[], selected: Set<string>): string {
+  const chip = "inline-flex cursor-pointer items-center rounded-full border border-surface-3 bg-surface-2 px-2.5 py-1 text-xs text-slate-400 transition-colors peer-checked:border-accent-green/50 peer-checked:bg-accent-green/10 peer-checked:text-accent-green";
+  const choices = all.length
+    ? all.map((t) => `<label class="inline-flex">
+        <input type="checkbox" class="peer sr-only" data-tag-choice value="${escape(t.id)}"${selected.has(t.id) ? " checked" : ""} />
+        <span class="${chip}">#${escape(t.name)}</span>
+      </label>`).join("")
+    : `<span class="text-xs text-slate-600">${pick("아직 만들어진 태그가 없습니다. 아래에 이름을 적으면 새로 만들어집니다.", "No tags yet. Type a name below to create one.")}</span>`;
+  return `<div class="mt-3 flex flex-wrap gap-1.5">${choices}</div>
+    <input type="text" data-tag-new class="mt-3 w-full rounded-md border border-surface-3 bg-surface-2 px-3 py-2 text-sm text-slate-100 outline-none focus:border-accent-green/40 placeholder:text-slate-600"
+      placeholder="${escape(pick("새 태그로 만들 이름 (쉼표로 여러 개)", "New tag names (comma separated)"))}" />`;
+}
+
+/** 위 본문에서 고른 태그 id 와 새로 만들 이름을 읽어낸다. */
+export function collectTagChoice(root: HTMLElement): { ids: string[]; newNames: string[] } {
+  const ids = [...root.querySelectorAll<HTMLInputElement>("input[data-tag-choice]")]
+    .filter((el) => el.checked)
+    .map((el) => el.value);
+  const raw = root.querySelector<HTMLInputElement>("input[data-tag-new]")?.value ?? "";
+  const newNames = [...new Set(raw.split(",").map((x) => x.trim()).filter(Boolean))];
+  return { ids, newNames };
+}
+
 async function editReportTags(report: Report): Promise<void> {
-  const current = (report.tags ?? []).map((t) => t.name).join(", ");
-  // ★네이티브 prompt() 를 쓰지 않는다★ — 앱 웹뷰에서 억제되면 눌러도 아무 일이 없다(2026-07-30 실측).
-  //   문구 원칙: 범위('이 보고서')를 먼저, 기호는 우리말 이름과 함께, 결과를 말한다(팀장님 피드백).
-  const raw = await showPrompt({
+  const selected = new Set((report.tags ?? []).map((t) => t.id));
+  const picked = await showForm<{ ids: string[]; newNames: string[] }>({
     title: pick("이 보고서의 태그", "Tags for this report"),
     message: pick(
-      "붙일 태그 이름을 쉼표(,)로 구분해 적어 주세요.\n\n칸에서 이름을 지우면 그 태그가 이 보고서에서만 떨어집니다. 태그 자체와 보고서는 그대로 있습니다.\n목록에 없는 이름을 적으면 그 이름의 태그가 새로 만들어집니다.",
-      "List the tag names for this report, separated by commas (,).\n\nRemoving a name only unlabels this report — the tag and the report both stay.\nA name that isn't in the list yet becomes a new tag.",
+      "붙일 태그를 눌러서 켜고 끄세요. 끄면 이 보고서에서만 떨어집니다 — 태그 자체와 보고서는 그대로 있습니다.",
+      "Tap tags to turn them on or off. Turning one off only unlabels this report — the tag and the report both stay.",
     ),
-    placeholder: pick("예: 주간보고, 인프라", "e.g. weekly, infra"),
-    defaultValue: current,
+    bodyHtml: tagChoiceBodyHtml(_tags, selected),
+    collect: collectTagChoice,
     okLabel: pick("저장", "Save"),
   });
-  if (raw == null) return;
-  const names = [...new Set(raw.split(",").map((s) => s.trim()).filter(Boolean))];
+  if (picked == null) return;
+  const ids = [...picked.ids];
   const known = new Map(_tags.map((t) => [t.name.toLocaleLowerCase(), t]));
-  for (const name of names) {
-    if (!known.has(name.toLocaleLowerCase())) {
-      const created = (await mutateJson("/api/tags", "POST", { name })).tag as ReportTag;
-      _tags.push(created);
-      known.set(created.name.toLocaleLowerCase(), created);
-    }
+  for (const name of picked.newNames) {
+    const hit = known.get(name.toLocaleLowerCase());
+    if (hit) { if (!ids.includes(hit.id)) ids.push(hit.id); continue; }
+    const created = (await mutateJson("/api/tags", "POST", { name })).tag as ReportTag;
+    _tags.push(created);
+    known.set(created.name.toLocaleLowerCase(), created);
+    ids.push(created.id);
   }
-  await mutateJson(`/api/${encodeURIComponent(report.id)}/tags`, "PUT", {
-    tag_ids: names.map((name) => known.get(name.toLocaleLowerCase())!.id),
-  });
+  await mutateJson(`/api/${encodeURIComponent(report.id)}/tags`, "PUT", { tag_ids: [...new Set(ids)] });
 }
 /**
  * 태그 알약 + ★마우스 올리면 나오는 이름바꾸기·삭제 아이콘★ (팀장님 지시 2026-07-30).
@@ -377,11 +418,18 @@ export function tagPillsHtml(
   // 마우스가 없는 환경(터치·아이패드 웹뷰)에서 태그 옆을 탭하면 안 보이는 연필·휴지통이 눌려
   // "누르지도 않은 창" 이 뜬다. pointer-events 를 같이 꺼서 숨김 상태에선 클릭 자체를 안 받게 한다.
   const hoverOnlyCls = "opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto";
-  const iconCls = "inline-flex h-6 w-6 items-center justify-center rounded-md border border-surface-3 bg-surface-1/70 text-slate-500 transition-colors";
+  // ★자리를 차지하지 않게 띄운다★ (팀장님 실측 2026-07-30: "너무 떨어져 있어. 이럴 바엔 예전 UI 가 더 나아")
+  //   처음엔 아이콘을 알약 옆에 ★흐름 안에★ 두고 opacity 로만 숨겼다. 그러면 마우스를 올리지 않아도
+  //   태그마다 아이콘 두 개 만큼의 빈칸이 ★항상 남는다.★ 쉬는 상태가 흉해진다.
+  //   ★그리고 우리 검증이 그걸 통과시켰다★ — 확인 항목이 "아이콘이 나타날 때 줄이 흔들리지 않는다" 였고,
+  //   흔들리지 않는 이유가 바로 "자리를 미리 비워둬서" 였다. 기준을 통과했는데 기준이 부족했다.
+  //   absolute 로 흐름에서 빼면 ★쉬는 상태는 예전 UI 와 동일★ 하고 hover 에서도 줄이 흔들리지 않는다.
+  //   대신 hover 중에는 옆 알약 위로 떠서 겹치므로 배경을 불투명하게 두고 z-10 을 준다.
+  const iconCls = "inline-flex h-6 w-6 items-center justify-center rounded-md border border-surface-3 bg-surface-1 text-slate-500 transition-colors";
   return tags.map((t) =>
-    `<span class="group inline-flex items-center">
+    `<span class="group relative inline-flex items-center">
       <button class="${pillCls(selected.has(t.id))} reports-tag-pill" data-tag-id="${escape(t.id)}">#${escape(t.name)}<span class="ml-1.5 text-[11px] text-slate-500">${t.report_count ?? 0}</span></button>
-      <span class="ml-0.5 inline-flex items-center gap-0.5 ${hoverOnlyCls} transition-opacity">
+      <span class="absolute left-full top-1/2 z-10 ml-1 -translate-y-1/2 inline-flex items-center gap-0.5 ${hoverOnlyCls} transition-opacity">
         <button class="reports-tag-edit ${iconCls} hover:border-accent-green/40 hover:bg-accent-green/10 hover:text-accent-green" data-tag-id="${escape(t.id)}" data-tag-name="${escape(t.name)}" title="${pick("태그 이름 바꾸기", "Rename tag")}" aria-label="${pick("태그 이름 바꾸기", "Rename tag")}">
           <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
         </button>
@@ -633,6 +681,13 @@ function renderList(): void {
     <div class="text-xs text-slate-500 mb-4">${escape(_loadError || "unknown error")}</div>
     <button id="reports-retry" class="px-3 py-1.5 rounded-lg border border-surface-3 bg-surface-2 text-sm text-slate-200 hover:bg-surface-3">${pick("다시 시도", "Retry")}</button>
   </div>`;
+  // ★분류·태그를 누르면 목록을 다시 받아오는데, 그 사이 화면이 예전 목록을 그대로 보여줬다★
+  //   (팀장님: "카테고리를 누르거나 하면 느린데.. 로딩되는 바도 좀 넣어봐"). 눌렀는데 아무 반응이 없으면
+  //   사람은 안 눌린 줄 알고 또 누른다 — 오늘 우리가 계속 만난 '무증상' 과 같은 모양이다.
+  //   새 키프레임을 만들지 않고 이미 쓰는 animate-pulse 로 얇은 띠 하나만 둔다.
+  const loadingBar = _reloading
+    ? `<div class="mb-3 h-0.5 w-full overflow-hidden rounded-full bg-surface-3"><div class="h-full w-full animate-pulse bg-accent-green"></div></div>`
+    : "";
   const loadMore = items.length
     ? `<div class="py-4 text-center text-[12px] text-slate-500" data-reports-page-status>${_loading ? pick("더 불러오는 중…", "Loading more…") : _hasMore ? pick("아래로 스크롤하면 더 불러옵니다", "Scroll down to load more") : pick("마지막 보고서입니다", "End of reports")}</div>`
     : "";
@@ -641,8 +696,12 @@ function renderList(): void {
     <div data-reports-list-scroll class="h-full overflow-y-auto">
       <div class="max-w-3xl mx-auto px-4 md:px-6 py-5 pb-20">
         <div class="text-sm text-slate-500 mb-4">${pick("b3rys 팀 보고서 — 클릭하면 본문을 봅니다.", "b3rys team reports — click to read the full text.")}</div>
-        <div class="flex gap-2 flex-wrap mb-3">${pills}</div>
         <div class="flex items-center gap-2 flex-wrap mb-3">
+          <span class="shrink-0 text-[11px] font-semibold text-slate-500">${pick("분류", "Category")}</span>
+          ${pills}
+        </div>
+        <div class="flex items-center gap-2 flex-wrap mb-3">
+          <span class="shrink-0 text-[11px] font-semibold text-slate-500">${pick("태그", "Tags")}</span>
           ${tagPills || `<span class="text-xs text-slate-600">${pick("등록된 태그 없음", "No tags yet")}</span>`}
           <button id="reports-manage-tags" class="ml-auto px-3 py-1.5 rounded-full text-xs font-semibold border border-surface-3 bg-surface-2 text-slate-400 hover:text-slate-200">＋ ${pick("태그 만들기", "New tag")}</button>
         </div>
@@ -651,7 +710,10 @@ function renderList(): void {
           <input id="reports-q" type="search" placeholder="${pick("제목·작성자·요약 검색", "Search title · author · summary")}" value="${escape(_query)}"
             class="w-full bg-surface-2 border border-surface-3 rounded-xl text-sm text-slate-200 pl-9 pr-3 py-2.5 outline-none focus:border-accent-green/40 placeholder:text-slate-600" />
         </div>
+        ${loadingBar}
+        <div class="${_reloading ? "opacity-50 transition-opacity" : "transition-opacity"}">
         ${_loadError ? error : items.length ? `<div class="flex flex-col gap-2.5">${cards}</div>${loadMore}` : empty}
+        </div>
       </div>
     </div>`;
   const scroller = _root.querySelector<HTMLElement>("[data-reports-list-scroll]");
