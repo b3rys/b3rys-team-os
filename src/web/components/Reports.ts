@@ -11,7 +11,7 @@
 
 import { pick } from "../i18n";
 import { parseSqliteDate } from "../lib/datetime";
-import { showAlert, showConfirm } from "./dialogs";
+import { showAlert, showConfirm, showPrompt } from "./dialogs";
 
 const REPORTS_BASE = "/reports";
 const DEFAULT_CAT = "보고서";
@@ -330,7 +330,18 @@ async function mutateJson(path: string, method: string, body?: unknown): Promise
 }
 async function editReportTags(report: Report): Promise<void> {
   const current = (report.tags ?? []).map((t) => t.name).join(", ");
-  const raw = prompt(pick("태그 이름을 쉼표로 구분해 입력하세요. 비우면 모두 해제됩니다.", "Enter tag names separated by commas. Leave empty to clear."), current);
+  // ★네이티브 prompt() 를 쓰지 않는다★ — 앱 웹뷰에서 억제되면 눌러도 아무 일이 없다(2026-07-30 실측).
+  //   문구 원칙: 범위('이 보고서')를 먼저, 기호는 우리말 이름과 함께, 결과를 말한다(팀장님 피드백).
+  const raw = await showPrompt({
+    title: pick("이 보고서의 태그", "Tags for this report"),
+    message: pick(
+      "붙일 태그 이름을 쉼표(,)로 구분해 적어 주세요.\n\n칸에서 이름을 지우면 그 태그가 이 보고서에서만 떨어집니다. 태그 자체와 보고서는 그대로 있습니다.\n목록에 없는 이름을 적으면 그 이름의 태그가 새로 만들어집니다.",
+      "List the tag names for this report, separated by commas (,).\n\nRemoving a name only unlabels this report — the tag and the report both stay.\nA name that isn't in the list yet becomes a new tag.",
+    ),
+    placeholder: pick("예: 주간보고, 인프라", "e.g. weekly, infra"),
+    defaultValue: current,
+    okLabel: pick("저장", "Save"),
+  });
   if (raw == null) return;
   const names = [...new Set(raw.split(",").map((s) => s.trim()).filter(Boolean))];
   const known = new Map(_tags.map((t) => [t.name.toLocaleLowerCase(), t]));
@@ -345,26 +356,105 @@ async function editReportTags(report: Report): Promise<void> {
     tag_ids: names.map((name) => known.get(name.toLocaleLowerCase())!.id),
   });
 }
-async function manageTags(): Promise<void> {
-  const action = prompt(pick("새 태그 이름 / ‘기존이름 → 새이름’ / 삭제는 ‘-태그이름’을 입력하세요.", "Enter a new name / 'old → new' / '-name' to delete."));
-  if (!action?.trim()) return;
-  const value = action.trim();
-  if (value.startsWith("-")) {
-    const tag = _tags.find((t) => t.name.toLocaleLowerCase() === value.slice(1).trim().toLocaleLowerCase());
-    if (!tag) throw new Error(pick("태그를 찾을 수 없습니다.", "Tag not found."));
-    if (!confirm(pick(`‘${tag.name}’ 태그를 삭제할까요? 보고서는 삭제되지 않습니다.`, `Delete '${tag.name}'? Reports remain.`))) return;
-    await mutateJson(`/api/tags/${encodeURIComponent(tag.id)}`, "DELETE");
-    _selectedTagIds.delete(tag.id);
-  } else if (value.includes("→")) {
-    const [from = "", to = ""] = value.split("→", 2).map((s) => s.trim());
-    const tag = _tags.find((t) => t.name.toLocaleLowerCase() === from.toLocaleLowerCase());
-    if (!tag || !to) throw new Error(pick("‘기존이름 → 새이름’ 형식으로 입력하세요.", "Use 'old → new'."));
-    await mutateJson(`/api/tags/${encodeURIComponent(tag.id)}`, "PATCH", { name: to });
-  } else {
-    await mutateJson("/api/tags", "POST", { name: value });
-  }
+/**
+ * 태그 알약 + ★마우스 올리면 나오는 이름바꾸기·삭제 아이콘★ (팀장님 지시 2026-07-30).
+ *
+ * 전에는 이 두 동작이 팝업 안의 ★문법★ 이었다 — `기존 -> 새이름` 으로 바꾸고 `-이름` 으로 지웠다.
+ * 그래서 팀장님이 `aaa->bbb` 를 넣었을 때 이름이 바뀌는 대신 그 이름의 태그가 새로 생겼다.
+ * 동작을 그 태그 옆에 두면 ★문법이 필요 없어지고 그 사고가 구조적으로 불가능해진다.★
+ *
+ * 아이콘은 알약과 ★형제★ 다 — 알약이 button 이라 그 안에 button 을 넣을 수 없다(중첩 금지).
+ * 렌더를 모듈 수준으로 올린 이유: 이 마크업이 ★유일한 진입점★ 이라 테스트가 여기밖에 붙을 곳이 없다.
+ * 태그 이름은 사용자 입력이므로 ★속성에 넣을 때 반드시 escape★ 한다.
+ */
+export function tagPillsHtml(
+  tags: ReportTag[],
+  selected: Set<string>,
+  pillCls: (active: boolean) => string,
+): string {
+  const iconCls = "inline-flex h-6 w-6 items-center justify-center rounded-md border border-surface-3 bg-surface-1/70 text-slate-500 transition-colors";
+  return tags.map((t) =>
+    `<span class="group inline-flex items-center">
+      <button class="${pillCls(selected.has(t.id))} reports-tag-pill" data-tag-id="${escape(t.id)}">#${escape(t.name)}<span class="ml-1.5 text-[11px] text-slate-500">${t.report_count ?? 0}</span></button>
+      <span class="ml-0.5 inline-flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button class="reports-tag-edit ${iconCls} hover:border-accent-green/40 hover:bg-accent-green/10 hover:text-accent-green" data-tag-id="${escape(t.id)}" data-tag-name="${escape(t.name)}" title="${pick("태그 이름 바꾸기", "Rename tag")}" aria-label="${pick("태그 이름 바꾸기", "Rename tag")}">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        </button>
+        <button class="reports-tag-del ${iconCls} hover:border-red-400/40 hover:bg-red-400/10 hover:text-txt-red" data-tag-id="${escape(t.id)}" data-tag-name="${escape(t.name)}" title="${pick("태그 삭제", "Delete tag")}" aria-label="${pick("태그 삭제", "Delete tag")}">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>
+        </button>
+      </span>
+    </span>`
+  ).join("");
+}
+
+/** 태그 동작 실패는 인페이지 창으로 — 네이티브 alert 는 앱 웹뷰에서 억제된다. */
+function reportTagFailure(err: unknown): void {
+  void showAlert({
+    title: pick("태그를 저장하지 못했습니다", "Could not save the tag"),
+    message: String((err as Error)?.message ?? err),
+  });
+}
+
+/**
+ * ★태그 만들기 — 문법 없이 이름만 받는다.★
+ *
+ * 예전에는 이 팝업 하나가 만들기·이름바꾸기·삭제를 다 받았고, 그래서 한 입력칸에 문법 세 가지가
+ * 섞여 있었다("이름" / "기존 -> 새이름" / "-이름"). 팀장님 실측(2026-07-30)에서 `aaa->bbb` 가
+ * 이름 변경이 아니라 ★그 이름의 새 태그★ 로 만들어졌다 — 화살표를 U+2192 한 종류만 봤기 때문이다.
+ * 이름 바꾸기·삭제를 ★태그 옆 아이콘★ 으로 옮기면서 여기서 문법을 없앴다. 이제 입력은 항상
+ * ★이름 그대로★ 다. `aaa->bbb` 를 적으면 그 이름의 태그가 만들어지는 게 맞는 동작이 된다.
+ */
+async function createTag(): Promise<void> {
+  const name = await showPrompt({
+    title: pick("태그 만들기", "New tag"),
+    message: pick(
+      "만들 태그 이름을 적어 주세요.\n\n이름 바꾸기와 삭제는 태그에 마우스를 올리면 나오는 아이콘으로 합니다.",
+      "Type the name for the new tag.\n\nTo rename or delete, hover a tag and use the icons that appear.",
+    ),
+    placeholder: pick("예: 주간보고", "e.g. weekly"),
+    okLabel: pick("만들기", "Create"),
+  });
+  if (!name?.trim()) return;
+  await mutateJson("/api/tags", "POST", { name: name.trim() });
   await reloadList();
 }
+
+/** 태그 이름 바꾸기 — 지금 이름을 채워서 띄운다(다시 타이핑하지 않게). */
+async function renameTag(tagId: string, currentName: string): Promise<void> {
+  if (!tagId) return;
+  const next = await showPrompt({
+    title: pick("태그 이름 바꾸기", "Rename tag"),
+    message: pick(`‘${currentName}’ 의 새 이름을 적어 주세요.`, `New name for '${currentName}'.`),
+    defaultValue: currentName,
+    placeholder: pick("예: 주간리포트", "e.g. weekly report"),
+    okLabel: pick("저장", "Save"),
+  });
+  const name = next?.trim();
+  if (!name || name === currentName) return;
+  await mutateJson(`/api/tags/${encodeURIComponent(tagId)}`, "PATCH", { name });
+  await reloadList();
+}
+
+/** 태그 삭제 — 보고서는 남는다는 것을 확인창에서 먼저 말한다. */
+async function deleteTag(tagId: string, name: string): Promise<void> {
+  if (!tagId) return;
+  const yes = await showConfirm({
+    title: pick("태그를 지울까요?", "Delete this tag?"),
+    message: pick(
+      `‘${name}’ 태그를 지웁니다. 이 태그가 붙어 있던 보고서는 그대로 남고, 이름표만 떨어집니다.`,
+      `'${name}' will be removed. The reports keep existing — they just lose this label.`,
+    ),
+    okLabel: pick("지우기", "Delete"),
+    cancelLabel: pick("그대로 두기", "Keep it"),
+    danger: true,
+  });
+  if (!yes) return;
+  await mutateJson(`/api/tags/${encodeURIComponent(tagId)}`, "DELETE");
+  _selectedTagIds.delete(tagId);
+  await reloadList();
+}
+
 function tagBadge(tag: ReportTag, interactive = false): string {
   const tagName = interactive ? "button" : "span";
   return `<${tagName} class="${interactive ? "reports-tag-filter " : ""}inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold border border-blue-400/25 bg-blue-400/10 text-txt-blue" data-tag-id="${escape(tag.id)}">#${escape(tag.name)}</${tagName}>`;
@@ -502,9 +592,7 @@ function renderList(): void {
     `<button class="${pillCls(_cat === ALL_FILTER)}" data-cat="${ALL_FILTER}">${pick("전체", "All")}<span class="ml-1.5 text-[11px] text-slate-500" data-reports-all-count>${allCount}</span></button>` +
     `<button class="${pillCls(_cat === IMPORTANT_FILTER)}" data-cat="${IMPORTANT_FILTER}" title="${pick("중요 표시만 보기", "Show important only")}" aria-label="${pick("중요 표시만 보기", "Show important only")}"><span class="inline-flex items-center gap-1.5" title="${pick("중요 표시", "Important")}">${starIcon(true)}<span class="text-[11px] text-slate-500" data-reports-important-count>${_importantCount}</span></span></button>` +
     cats.map((c) => `<button class="${pillCls(_cat === c)}" data-cat="${escape(c)}">${escape(c)}<span class="ml-1.5 text-[11px] text-slate-500" data-reports-category-count="${escape(c)}">${counts[c]}</span></button>`).join("");
-  const tagPills = _tags.map((t) =>
-    `<button class="${pillCls(_selectedTagIds.has(t.id))} reports-tag-pill" data-tag-id="${escape(t.id)}">#${escape(t.name)}<span class="ml-1.5 text-[11px] text-slate-500">${t.report_count ?? 0}</span></button>`
-  ).join("");
+  const tagPills = tagPillsHtml(_tags, _selectedTagIds, pillCls);
 
   const items = _all.slice().sort(byNewest);
 
@@ -550,7 +638,7 @@ function renderList(): void {
         <div class="flex gap-2 flex-wrap mb-3">${pills}</div>
         <div class="flex items-center gap-2 flex-wrap mb-3">
           ${tagPills || `<span class="text-xs text-slate-600">${pick("등록된 태그 없음", "No tags yet")}</span>`}
-          <button id="reports-manage-tags" class="ml-auto px-3 py-1.5 rounded-full text-xs font-semibold border border-surface-3 bg-surface-2 text-slate-400 hover:text-slate-200">＋ ${pick("태그 관리", "Manage tags")}</button>
+          <button id="reports-manage-tags" class="ml-auto px-3 py-1.5 rounded-full text-xs font-semibold border border-surface-3 bg-surface-2 text-slate-400 hover:text-slate-200">＋ ${pick("태그 만들기", "New tag")}</button>
         </div>
         <div class="relative mb-4">
           <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
@@ -573,6 +661,13 @@ function renderList(): void {
       void reloadList();
     });
   });
+  // 태그 옆 아이콘 — 알약(필터 토글)과 형제라 stopPropagation 은 필요 없지만, 실패는 인페이지 창으로 알린다.
+  _root.querySelectorAll<HTMLButtonElement>(".reports-tag-edit").forEach((el) => {
+    el.addEventListener("click", () => void renameTag(el.dataset.tagId || "", el.dataset.tagName || "").catch(reportTagFailure));
+  });
+  _root.querySelectorAll<HTMLButtonElement>(".reports-tag-del").forEach((el) => {
+    el.addEventListener("click", () => void deleteTag(el.dataset.tagId || "", el.dataset.tagName || "").catch(reportTagFailure));
+  });
   _root.querySelectorAll<HTMLButtonElement>(".reports-tag-filter").forEach((el) => {
     el.addEventListener("click", (e) => {
       e.preventDefault(); e.stopPropagation();
@@ -581,7 +676,7 @@ function renderList(): void {
     });
   });
   _root.querySelector<HTMLButtonElement>("#reports-manage-tags")?.addEventListener("click", () => {
-    void manageTags().catch((err) => alert(pick(`태그 관리 실패: ${err.message}`, `Tag management failed: ${err.message}`)));
+    void createTag().catch(reportTagFailure);
   });
   _root.querySelectorAll<HTMLElement>(".reports-card").forEach((el) => {
     el.addEventListener("click", () => { rememberListScroll(); _curId = el.dataset.id || null; if (_curId) setDetailHash(_curId); _curType = null; _view = "detail"; renderDetail(); });
