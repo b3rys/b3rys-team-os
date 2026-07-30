@@ -49,6 +49,7 @@ import { createReportsApp } from "./routes/portal";
 import { createSettingsApp, PUBLIC_BUILD } from "./routes/settings";
 import { createAcceptanceRoutes } from "./routes/acceptance";
 import { createSchedulerRoutes } from "./routes/scheduler";
+import { createCiStatusRoutes } from "./routes/ciStatus";
 import { ensureDailyTaskReviewJobs, ensureWeeklySelfLearningJobs } from "./scheduler/core";
 import { renderAndRepoint } from "./lib/teamOsRender";
 import { installProgressHook } from "./runtimes/claude/launcher";
@@ -390,6 +391,10 @@ api.route("/", busApi);
 
 const monitoringApi = createMonitoringRoutes({ db });
 api.route("/", monitoringApi);
+
+// CI 결과는 ★읽기 전용★ — 여기서 테스트를 돌리지 않는다(routes/ciStatus.ts 주석 참고).
+const ciStatusApi = createCiStatusRoutes();
+api.route("/", ciStatusApi);
 
 const taskApi = createTaskRoutes({ db });
 api.route("/", taskApi);

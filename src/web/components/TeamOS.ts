@@ -33,6 +33,82 @@ const CANONICAL_DOCS: { file: string; label: string; desc: string }[] = [
   { file: "TEST_CASES.md", label: pick("TEST_CASES — 룰별 기대동작", "TEST_CASES — expected behavior per rule"), desc: pick("각 운영 룰을 '상황→기대동작→실패예시' 표로. 회귀 점검표.", "Each operating rule as a 'situation→expected behavior→failure example' table. Regression checklist.") },
 ];
 
+/** CI 결과 캐시(모듈 상태). null = 아직 안 가져옴 → 화면은 "불러오는 중". */
+let _ciData: Parameters<typeof ciBlockHtml>[0] = null;
+
+/** CI 결과를 가져와 ★그 블록만★ 갈아끼운다(전체 재렌더 안 함 — 스크롤 튐 방지).
+ *  ★실패해도 화면을 비우지 않는다★ — 서버가 ok:false 와 이유를 주고 블록이 빨간 줄로 보여준다. */
+async function loadCi(root: HTMLElement): Promise<void> {
+  try {
+    const r = await fetch(`${apiBase()}/ci-status`);
+    _ciData = await r.json();
+  } catch (e) {
+    _ciData = { ok: false, reason: e instanceof Error ? e.message : String(e), runs: [], fetched_at: null };
+  }
+  const slot = root.querySelector<HTMLElement>("#teamos-ci");
+  if (slot) slot.innerHTML = ciBlockHtml(_ciData);
+}
+
+/** CI 결과 블록 — ★가져오지 못했으면 '확인 불가' 라고 말한다.★
+ *  ★비어 있는 초록★ 이 제일 위험하다: 사람은 아무것도 안 보이면 '문제 없구나' 로 읽는다.
+ *  그래서 실패는 이유와 함께 ★빨간 줄★ 로 남기고, 데이터는 ★언제 기준★ 인지 항상 밝힌다. */
+export function ciBlockHtml(d: {
+  ok: boolean; reason?: string; runs: { name: string; event: string; status: string;
+  conclusion: string | null; branch: string; created_at: string; url: string }[];
+  fetched_at: string | null; cached?: boolean; configured?: boolean;
+} | null): string {
+  if (!d) {
+    return `<div class="text-[12px] text-slate-400">${pick("불러오는 중…", "Loading…")}</div>`;
+  }
+  // ★설정이 안 된 것은 오류가 아니다.★ GitHub 을 안 쓰는 설치본에서 빨간 ✖ 와
+  //   "직접 확인하세요" 가 뜨면, 아무 문제 없는 사람에게 ★고장 신호★ 를 보내는 것이다.
+  //   그래서 미설정만 중립(회색)으로 갈라 놓는다.
+  if (d.configured === false) {
+    return `<div class="rounded-md border border-surface-3 bg-surface-1/50 p-2.5">
+      <div class="text-[12px] text-slate-400">${pick("GitHub CI 미설정", "GitHub CI not configured")}</div>
+      <div class="text-[11px] text-slate-500 mt-0.5">${escape(d.reason || "")}</div>
+    </div>`;
+  }
+  if (!d.ok) {
+    return `<div class="rounded-md border border-txt-red/40 bg-txt-red/5 p-2.5">
+      <div class="text-[12px] text-txt-red font-semibold">✖ ${pick("확인 불가", "Cannot verify")}</div>
+      <div class="text-[11px] text-slate-400 mt-0.5">${escape(d.reason || "unknown")}</div>
+      <div class="text-[11px] text-slate-500 mt-1">${pick(
+        "★결과를 모르는 것이지 '정상' 이 아닙니다.★ GitHub Actions 화면에서 직접 확인하세요.",
+        "This means unknown, not green. Check GitHub Actions directly.")}</div>
+    </div>`;
+  }
+  if (!d.runs.length) {
+    return `<div class="text-[12px] text-slate-400">${pick("최근 실행 기록이 없습니다.", "No recent runs.")}</div>`;
+  }
+  const mark = (r: { status: string; conclusion: string | null }) =>
+    r.status !== "completed" ? '<span class="text-txt-amber">●</span>'
+    : r.conclusion === "success" ? '<span class="text-accent-greenSoft">✓</span>'
+    : '<span class="text-txt-red">✖</span>';
+  const rows = d.runs.slice(0, 6).map((r) => `
+    <a href="${escape(r.url)}" target="_blank" rel="noopener"
+       class="flex items-center gap-2 py-1 text-[12px] hover:text-white">
+      ${mark(r)}
+      <span class="text-slate-300 truncate flex-1">${escape(r.branch || "-")}</span>
+      <span class="text-[11px] text-slate-500">${escape(r.event)}</span>
+      <span class="text-[11px] text-slate-500">${escape(fmtKst(r.created_at))}</span>
+    </a>`).join("");
+  return `${rows}
+    <div class="text-[11px] text-slate-500 mt-2">
+      ${pick("기준 시각", "As of")}: ${escape(fmtKst(d.fetched_at))}${d.cached ? pick(" (캐시)", " (cached)") : ""}
+      · ${pick("여기서 테스트를 돌리지 않습니다 — GitHub 결과를 읽어올 뿐입니다.",
+               "Tests are not run here — this only reads GitHub results.")}
+    </div>`;
+}
+
+/** UTC ISO → 사용자 로컬(KST) 표시. ★UTC 를 그대로 보여주면 9시간 거짓말이 된다.★ */
+function fmtKst(iso: string | null): string {
+  if (!iso) return "-";
+  const t = new Date(iso);
+  if (Number.isNaN(t.getTime())) return "-";
+  return t.toLocaleString(undefined, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
 function docsBlock(): string {
   const base = apiBase();
   const links = CANONICAL_DOCS.map(
@@ -182,6 +258,8 @@ function renderInto(root: HTMLElement, snap: TeamOsSnapshot | null): void {
 
       ${section(pick("정본 문서", "Canonical docs"), "source of truth", docsBlock())}
 
+        ${section(pick("CI 결과", "CI results"), "read-only · github", `<div id="teamos-ci">${ciBlockHtml(_ciData)}</div>`)}
+
       ${section(
         pick(`스케줄 · 서비스 (${snap.scheduled.length})`, `Schedules · services (${snap.scheduled.length})`),
         "launchd · openclaw cron",
@@ -234,6 +312,9 @@ export function renderTeamOs(root: HTMLElement): void {
       : "";
     return `${sched}|${tasks}|${s.scripts.length}|${s.tasks_pending_total}|${ingress}`;
   };
+  void loadCi(root);
+  setInterval(() => void loadCi(root), 5 * 60_000);
+
   const sync = () => {
     const cur = store.getState().teamOs;
     const s = sig(cur);
