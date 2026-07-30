@@ -29,9 +29,28 @@ const TEAM = [
 ];
 
 describe("pickOpNoticeRecipient — 알림은 살아있는 사람에게", () => {
+  // ★이 단정을 지우지 마라★ (리사 리뷰 B1, 2026-07-30): 한 번 삭제했다가 사고가 났다.
+  //   R4 가중치를 넣을 때 런타임 다양성(+2)이 coordinator(+1)를 이기게 되어 기본 라우팅이
+  //   coordinator → clo 로 ★뒤집혔는데★, 마침 이 단정을 같이 지워서 무보고로 통과했다.
+  //   'claude 봇 poller 사망' 이 이 알림의 가장 흔한 시나리오이므로 기본 라우팅이 곧 본선이다.
+  test("★기본은 coordinator 로 간다★ — 전원 건강 + 같은 런타임 상황의 불변식", () => {
+    expect(pickOpNoticeRecipient(TEAM, "jane")).toBe("lisa");
+  });
+
   test("★고장난 본인에게는 절대 안 보낸다★ (블랙홀 방지)", () => {
     const to = pickOpNoticeRecipient(TEAM, "lisa");
     expect(to).not.toBe("lisa");
+  });
+
+  // 가중치를 건드리면 여기가 먼저 빨개진다 — 표 전체를 못으로 박아둔다.
+  test("실팀 구성 라우팅 표 전체", () => {
+    const pick = (affected: string, down: string[] = []) =>
+      pickOpNoticeRecipient(TEAM, affected, (id) => down.includes(id));
+    expect(pick("jane")).toBe("lisa");                      // coordinator 기본
+    expect(pick("lisa")).toBe("clo");                       // 같은 런타임 jane 탈락
+    expect(pick("clo")).toBe("lisa");                       // coordinator
+    expect(pick("jane", ["clo", "herm"])).toBe("lisa");     // 건강한 coordinator
+    expect(pick("lisa", ["clo", "herm"])).toBe("jane");     // 유일한 건강 멤버
   });
 
   test("coordinator 가 없으면 남은 아무 멤버", () => {

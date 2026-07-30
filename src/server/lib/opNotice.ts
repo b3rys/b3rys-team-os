@@ -34,8 +34,17 @@ const RESERVED = new Set(["user", "system", "moderator", "broadcast"]);
  *   1순위가 jane, 즉 ★같은 경합을 공유하는 런타임★ 이었다.
  * 그래서 점수로 고른다:
  *   +4 현재 down streak 이 아니다 (살아있을 가능성)
- *   +2 고장난 멤버와 ★다른 런타임★ (clo=openclaw, herm=hermes 는 이 경합에 안 걸린다)
- *   +1 coordinator (TEAM-OS §11)
+ *   +2 coordinator (TEAM-OS §11 — 기본 라우팅)
+ *   +1 고장난 멤버와 ★다른 런타임★ (clo=openclaw, herm=hermes 는 이 경합에 안 걸린다)
+ *
+ * ★가중치 순서가 중요하다★ (리사 리뷰 B1, 2026-07-30): 처음엔 런타임 +2 / coordinator +1 로 뒀는데
+ *   그러면 동일 건강 후보 중 coordinator 가 ★항상 진다★. 실측: jane 고장·전원 건강이면
+ *   [lisa=5 clo=6 herm=6] → clo 로 갔다. 'claude 봇 poller 사망' 은 이 알림의 가장 흔한
+ *   시나리오인데, 그때 알림이 coordinator 가 아니라 프론트 담당에게 가버린다.
+ *   '다른 런타임' 은 상관 고장에 대한 ★대리 지표★ 일 뿐이고 실제 건강은 +4(isDown)가 이미 직접
+ *   재고 있으므로, 둘 다 건강할 때 런타임 다양성이 coordinator 를 이길 근거가 없다. 그래서 교환했다.
+ *   두 의도가 다 보존된다 — lisa 고장 시엔 [jane=4 clo=5 herm=5] 로 여전히 같은 런타임 jane 이 진다.
+ *
  * 동점은 등록 순서. 전원 down 이어도 null 을 주지 않고 최선을 골라 시도한다(호출부가 audit 에
  * 수신자 상태를 남긴다) — 아무것도 안 보내는 것보다 낫다.
  *
@@ -53,8 +62,8 @@ export function pickOpNoticeRecipient(
   for (const a of eligible) {
     let score = 0;
     if (!isDown?.(a.id)) score += 4;
-    if (affected && a.runtime !== affected.runtime) score += 2;
-    if ((a.capabilities ?? []).includes("coordinator")) score += 1;
+    if ((a.capabilities ?? []).includes("coordinator")) score += 2;
+    if (affected && a.runtime !== affected.runtime) score += 1;
     if (best === null || score > best.score) best = { id: a.id, score };
   }
   return best?.id ?? null;
