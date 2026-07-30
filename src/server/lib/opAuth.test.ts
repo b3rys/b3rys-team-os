@@ -63,8 +63,22 @@ describe("대시보드 loopback 예외 + 등록한 주소", () => {
       actor: { actor: "gd", source: "loopback_dashboard" },
     });
     expect(trustedActorFromRequest(req("studio.b3rys.com"), { loopbackDashboardActor: "gd" })).toMatchObject({ ok: true });
-    // 등록하지 않은 다른 도메인은 그대로 막힌다 — 목록이 아니라 와일드카드가 되면 안 된다.
+    // 등록하지 않은 다른 도메인은 그대로 막힌다.
     expect(trustedActorFromRequest(req("evil.example.com"), { loopbackDashboardActor: "gd" })).toMatchObject({ ok: false });
+  });
+
+  test("★와일드카드는 하위 주소 전체를 받는다★ (팀장님 지시 — 소유 도메인)", () => {
+    process.env.TEAM_TRUSTED_DASHBOARD_HOSTS = "*.b3rys.com";
+    for (const h of ["dev.b3rys.com", "studio.b3rys.com", "a.b.b3rys.com", "DEV.B3RYS.COM:443"]) {
+      expect(trustedActorFromRequest(req(h), { loopbackDashboardActor: "gd" }).ok, h).toBe(true);
+    }
+  });
+
+  test("★와일드카드가 접미사만 같은 남의 도메인에 걸리지 않는다★ (단순 endsWith 금지)", () => {
+    process.env.TEAM_TRUSTED_DASHBOARD_HOSTS = "*.b3rys.com";
+    for (const h of ["evilb3rys.com", "b3rys.com.attacker.net", "b3rys.com", "notb3rys.com"]) {
+      expect(trustedActorFromRequest(req(h), { loopbackDashboardActor: "gd" }).ok, h).toBe(false);
+    }
   });
 
   test("Host 대소문자·포트가 붙어도 등록 판정은 같다", () => {

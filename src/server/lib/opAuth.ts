@@ -112,10 +112,27 @@ function trustedDashboardHosts(): Set<string> {
   );
 }
 
-/** loopback 이거나, 운영자가 명시로 등록한 대시보드 주소인가. */
+/**
+ * loopback 이거나, 운영자가 등록한 대시보드 주소인가.
+ *
+ * 등록 형식 두 가지 — 정확한 이름(`dev.b3rys.com`) 또는 ★하위 주소 전체(`*.b3rys.com`)★.
+ * 와일드카드는 팀장님 지시(2026-07-30)다: 소유한 도메인의 하위 주소를 새로 열 때마다 설정을 고치지
+ * 않아도 되게. 대가는 ★그 도메인 아래 새로 생기는 주소가 자동으로 신뢰된다★ 는 것이다.
+ *
+ * ★접미사 오매치를 막는다★ — `*.b3rys.com` 은 `evilb3rys.com` 이나 `b3rys.com.attacker.net` 에
+ * 걸리면 안 된다. 그래서 단순 endsWith 가 아니라 ★점 경계★ 로 본다. 그리고 와일드카드는 ★하위 주소만★
+ * 이므로 맨 도메인(`b3rys.com`)은 따로 적어야 통과한다(의도를 흐리지 않는다).
+ */
 function isTrustedDashboardHost(value: string, trusted: Set<string>): boolean {
-  if (isLoopbackHost(value)) return true;
-  return trusted.has(value.trim().toLowerCase());
+  const host = value.trim().toLowerCase();
+  if (isLoopbackHost(host)) return true;
+  if (trusted.has(host)) return true;
+  for (const entry of trusted) {
+    if (!entry.startsWith("*.")) continue;
+    const suffix = entry.slice(1); // "*.b3rys.com" → ".b3rys.com"
+    if (host.length > suffix.length && host.endsWith(suffix)) return true;
+  }
+  return false;
 }
 
 function isLoopbackDashboardRequest(request: Request): boolean {
