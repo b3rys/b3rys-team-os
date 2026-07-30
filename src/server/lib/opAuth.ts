@@ -191,9 +191,24 @@ function isLoopbackDashboardRequest(request: Request): boolean {
   return !!host && isTrustedDashboardHost(hostHeaderName(host), trusted);
 }
 
+/**
+ * Host 헤더에서 ★이름만★ 뽑는다(포트 제거). IPv6 는 `[::1]:7878` 처럼 대괄호로 온다.
+ *
+ * ★형식이 깨지면 이름을 지어내지 않고 빈 값을 돌려준다.★ (codex·hermes 지적 2026-07-30)
+ * 앞선 판은 대괄호 안만 잘라 읽어서 `[::1]junk` → `::1` 이 됐고, ★등록 없이 통과★ 했다 —
+ * 신뢰를 주는 쪽으로 관대한 파서였다. 실제 서버는 이 Host 를 그대로 넘긴다(막지 않는다).
+ * 그리고 그때 `req.url` 은 ★파싱 자체가 실패★ 하므로 url 쪽으로 되돌아가 확인할 수도 없다.
+ * 판정이 애매하면 믿지 않는 쪽으로 간다.
+ */
 function hostHeaderName(value: string): string {
   const v = value.trim();
-  if (v.startsWith("[")) return v.slice(1, v.indexOf("]") >= 0 ? v.indexOf("]") : undefined);
+  if (v.startsWith("[")) {
+    const end = v.indexOf("]");
+    if (end < 0) return ""; // 닫는 괄호가 없다
+    const after = v.slice(end + 1);
+    if (after && !after.startsWith(":")) return ""; // `]` 뒤에 포트가 아닌 것이 붙어 있다
+    return v.slice(1, end);
+  }
   return v.split(":")[0] ?? "";
 }
 
