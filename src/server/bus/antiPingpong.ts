@@ -74,9 +74,22 @@ export function checkPingpong(
   if (row.source === "agent" && row.parent_message_id) {
     const rounds = countAutoRounds(db, row.parent_message_id);
     if (rounds >= MAX_AUTO_ROUNDS) {
+      // ★"rounds" 는 왕복 횟수가 아니라 체인에 쌓인 agent 메시지 개수다.★
+      // countAutoRounds 는 parent 체인을 거슬러 올라가며 source='agent' 인 것을 하나씩 센다.
+      // 그래서 rounds=8 은 ★왕복 8회가 아니라 메시지 8건 = 왕복 4회★ 다.
+      // 2026-07-30: 이 숫자를 왕복으로 읽은 팀원 둘이 "8왕복이나 했다" 로 판단했다.
+      // 실제로는 4왕복·53분짜리 코드리뷰였다. 숫자 자체는 맞으므로 세는 법은 그대로 두고,
+      // ★읽는 사람이 오해하지 않게 단위를 같이 적는다.★
+      //
+      // ★환산 횟수는 일부러 넣지 않는다(Codex 리뷰 2026-07-30).★ 처음엔 Math.floor(rounds/2) 로
+      //   "왕복 약 N회" 를 붙였는데, 홀수에서 과소표시한다 — 7건은 3왕복 + 편도 1건인데 "약 3회" 가 된다.
+      //   ★그건 내가 고치려던 것과 같은 종류의 오해를 새로 만드는 것이다★ — 사람은 반올림된 숫자도
+      //   정확한 값으로 읽는다. 그래서 유도 숫자를 빼고 ★센 것과 그 단위만★ 말한다.
       return {
         allowed: false,
-        reason: `pingpong_limit_exceeded:rounds=${rounds},max=${MAX_AUTO_ROUNDS}`,
+        reason:
+          `pingpong_limit_exceeded:messages=${rounds},max=${MAX_AUTO_ROUNDS}` +
+          `(체인에 쌓인 agent 메시지 개수다 — 왕복 횟수가 아니다. 한 왕복은 메시지 2건)`,
       };
     }
   }

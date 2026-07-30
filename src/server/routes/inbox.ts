@@ -492,7 +492,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     //   보였다 — 실측으로 메시지가 그렇게 사라졌다.
     //   ★delivery_state 를 준다. delivery_status·recipient_state 는 주지 않는다★ — 그 둘은 미배달에도
     //   각각 delivered·acknowledged 로 박혀 있어(같은 행에서 실측) 판정 근거로 쓰면 거짓말을 되풀이한다.
-    //   last_error 를 같이 주는 이유: 차단 사유가 거기에만 있다(예: pingpong_limit_exceeded:rounds=8).
+    //   last_error 를 같이 주는 이유: 차단 사유가 거기에만 있다(예: pingpong_limit_exceeded:messages=8).
     const recipients = deps.db
       .prepare(
         `SELECT agent_id, delivery_state, last_error, retry_count
