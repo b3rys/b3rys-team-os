@@ -124,6 +124,12 @@ export function startHealthCheck(deps: HealthDeps): () => void {
         lastLevel.set(v.agentId, v.level);
       }
       for (const agent of agents) {
+        // ★꺼둔 멤버는 고장이 아니다★ — 사람이 내린 결정이지 사고가 아니다.
+        //   이 갈래가 없어서, 오래전에 안 쓰게 된 멤버가 ★2분마다 high 알림★ 을 냈다(2026-07-30 brief).
+        //   설정이 아예 없는 멤버는 영원히 회복되지 않으므로 ★끝나지 않는 반복★ 이 된다.
+        //   registry 는 disabled 멤버도 목록에 남긴다(ambientAgents: enabled = a.enabled !== false)
+        //   → 여기서 명시적으로 건너뛰지 않으면 검사 대상에 그대로 들어온다.
+        if (agent.enabled === false) continue;
         const essentials = await checkEssentialSettings(agent);
         const key = essentials.ok ? "ok" : JSON.stringify({ runtime: agent.runtime, missing: essentials.missing });
         const prevKey = lastEssentialsKey.get(agent.id);
