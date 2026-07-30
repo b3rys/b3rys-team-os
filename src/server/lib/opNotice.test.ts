@@ -42,15 +42,13 @@ describe("pickOpNoticeRecipient — 알림은 살아있는 사람에게", () => 
     expect(to).not.toBe("lisa");
   });
 
-  // 가중치를 건드리면 여기가 먼저 빨개진다 — 표 전체를 못으로 박아둔다.
-  test("실팀 구성 라우팅 표 전체", () => {
-    const pick = (affected: string, down: string[] = []) =>
-      pickOpNoticeRecipient(TEAM, affected, (id) => down.includes(id));
-    expect(pick("jane")).toBe("lisa");                      // coordinator 기본
-    expect(pick("lisa")).toBe("clo");                       // 같은 런타임 jane 탈락
-    expect(pick("clo")).toBe("lisa");                       // coordinator
-    expect(pick("jane", ["clo", "herm"])).toBe("lisa");     // 건강한 coordinator
-    expect(pick("lisa", ["clo", "herm"])).toBe("jane");     // 유일한 건강 멤버
+  // 라우팅을 건드리면 여기가 먼저 빨개진다 — 표 전체를 못으로 박아둔다.
+  test("실팀 구성 라우팅 표 전체 (팀장님 결정: 단순 규칙)", () => {
+    const pick = (affected: string) => pickOpNoticeRecipient(TEAM, affected);
+    expect(pick("jane")).toBe("lisa");   // coordinator 기본
+    expect(pick("lisa")).toBe("jane");   // ★coordinator 부재 시 등록 순서 첫 멤버★
+    expect(pick("clo")).toBe("lisa");    // coordinator
+    expect(pick("herm")).toBe("lisa");   // coordinator
   });
 
   test("coordinator 가 없으면 남은 아무 멤버", () => {
@@ -65,33 +63,19 @@ describe("pickOpNoticeRecipient — 알림은 살아있는 사람에게", () => 
     expect(pickOpNoticeRecipient([agent("jane")], "jane")).toBeNull();
   });
 
-  // ── R4: 대칭 경합에서 죽은 쪽으로 알림이 들어가는 걸 막는다 ──
-  test("★같이 죽은 멤버는 수신자에서 제외한다★ — lisa·jane 동시 탈락(08:03:37 실측)", () => {
-    // lisa 가 고장이고 jane 도 down 이면, jane 에게 보내면 아무도 못 읽는다.
-    const to = pickOpNoticeRecipient(TEAM, "lisa", (id) => id === "jane");
-    expect(to).not.toBe("jane");
-    expect(to).not.toBe("lisa");
-    expect(to).not.toBeNull();
-    expect(["clo", "herm"]).toContain(to as string);
+  // ★팀장님 결정(2026-07-30)을 못으로 박는다★
+  //   lisa 가 죽으면 jane 으로 간다 — 런타임 다양성으로 clo·herm 을 선호하지 않는다.
+  //   알려진 트레이드오프: lisa·jane 이 동시에 죽으면 죽은 jane 에게 가서 아무도 못 읽는다.
+  //   팀장님이 그 경우를 직접 처리하겠다고 명시했으므로 ★이건 의도된 동작이다★.
+  //   '버그' 로 보고 점수제(다른 런타임 선호)를 되살리지 마라 — 팀장님 승인이 필요하다.
+  test("★lisa 가 죽으면 jane 으로 간다★ (팀장님 결정 — 다른 런타임 선호 금지)", () => {
+    expect(pickOpNoticeRecipient(TEAM, "lisa")).toBe("jane");
   });
 
-  test("★폴백은 같은 경합을 공유하지 않는 다른 런타임을 우선한다★", () => {
-    // lisa(claude_channel) 고장 → 같은 claude_channel 인 jane 보다 다른 런타임이 안전하다.
-    const to = pickOpNoticeRecipient(TEAM, "lisa");
-    expect(to).not.toBe("jane");
-    expect(to).not.toBeNull();
-    expect(["clo", "herm"]).toContain(to as string);
-  });
-
-  test("다른 런타임 후보들 중에서는 coordinator 를 고른다", () => {
+  test("coordinator 가 등록 순서보다 우선한다", () => {
+    // herm 이 coordinator 면 등록 순서상 앞인 clo 보다 herm 이 뽑힌다.
     const team = [agent("jane"), agent("clo", [], "openclaw"), agent("herm", ["coordinator"], "hermes_agent")];
     expect(pickOpNoticeRecipient(team, "jane")).toBe("herm");
-  });
-
-  test("전원 down 이어도 null 대신 최선을 골라 시도한다 (아무것도 안 보내는 것보다 낫다)", () => {
-    const to = pickOpNoticeRecipient(TEAM, "lisa", () => true);
-    expect(to).not.toBeNull();
-    expect(to).not.toBe("lisa");
   });
 });
 
@@ -203,16 +187,6 @@ describe("EssentialsOpNotifier — 부팅 오탐 억제 + 1회 발행", () => {
   test("빈 missing 배열은 정상으로 취급한다", () => {
     const n = new EssentialsOpNotifier(1);
     expect(n.observe("jane", [])).toBeNull();
-  });
-
-  test("isDown 은 알림을 보낸 멤버만 true (수신자 선정 입력)", () => {
-    const n = new EssentialsOpNotifier(2);
-    n.observe("lisa", ["x"]);
-    expect(n.isDown("lisa")).toBe(false); // 아직 임계 미달
-    n.observe("lisa", ["x"]);
-    expect(n.isDown("lisa")).toBe(true);
-    n.observe("lisa", null);
-    expect(n.isDown("lisa")).toBe(false);
   });
 
   // ── N3: 본문의 경과 초가 실측이어야 한다 ──

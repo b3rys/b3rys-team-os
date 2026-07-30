@@ -25,48 +25,28 @@ export const OP_NOTICE_AFTER_TICKS = Number(process.env.OP_NOTICE_AFTER_TICKS ??
 const RESERVED = new Set(["user", "system", "moderator", "broadcast"]);
 
 /**
- * op 알림을 받을 멤버를 고른다.
+ * op 알림을 받을 멤버를 고른다 — ★단순 규칙: coordinator 우선, 없으면 등록 순서 첫 멤버★.
+ *   고장난 본인만 제외한다(못 듣는 상태가 사고 본체이므로 블랙홀 방지).
+ *   받을 사람이 아무도 없으면 null → 호출부는 audit 만 남긴다.
  *
- * ★고장난 본인 제외만으로는 부족하다★ (리사 리뷰 R4, 2026-07-30):
- *   근본 경합(bun binlink)은 lisa·jane 사이에서 ★대칭★ 이라 둘이 동시에 탈락할 수 있다 —
- *   실제로 08:03:37 에 둘 다 같은 항목이 잡혔다. 그 경우 알림이 죽은 쪽으로 들어가 아무도
- *   못 읽는다 = 막으려던 블랙홀의 다른 얼굴이다. 게다가 등록 순서상 lisa 가 고장이면 폴백
- *   1순위가 jane, 즉 ★같은 경합을 공유하는 런타임★ 이었다.
- * 그래서 점수로 고른다:
- *   +4 현재 down streak 이 아니다 (살아있을 가능성)
- *   +2 coordinator (TEAM-OS §11 — 기본 라우팅)
- *   +1 고장난 멤버와 ★다른 런타임★ (clo=openclaw, herm=hermes 는 이 경합에 안 걸린다)
- *
- * ★가중치 순서가 중요하다★ (리사 리뷰 B1, 2026-07-30): 처음엔 런타임 +2 / coordinator +1 로 뒀는데
- *   그러면 동일 건강 후보 중 coordinator 가 ★항상 진다★. 실측: jane 고장·전원 건강이면
- *   [lisa=5 clo=6 herm=6] → clo 로 갔다. 'claude 봇 poller 사망' 은 이 알림의 가장 흔한
- *   시나리오인데, 그때 알림이 coordinator 가 아니라 프론트 담당에게 가버린다.
- *   '다른 런타임' 은 상관 고장에 대한 ★대리 지표★ 일 뿐이고 실제 건강은 +4(isDown)가 이미 직접
- *   재고 있으므로, 둘 다 건강할 때 런타임 다양성이 coordinator 를 이길 근거가 없다. 그래서 교환했다.
- *   두 의도가 다 보존된다 — lisa 고장 시엔 [jane=4 clo=5 herm=5] 로 여전히 같은 런타임 jane 이 진다.
- *
- * 동점은 등록 순서. 전원 down 이어도 null 을 주지 않고 최선을 골라 시도한다(호출부가 audit 에
- * 수신자 상태를 남긴다) — 아무것도 안 보내는 것보다 낫다.
- *
- * @param isDown 그 멤버가 현재 down 으로 관측되는지. 생략 시 전원 정상으로 본다.
+ * ★가중치 방식을 쓰지 않는다 — 팀장님 결정(2026-07-30)★
+ *   한때 점수제(down 여부 +4 / coordinator +2 / 다른 런타임 +1)를 넣었다. 동기는 리사 리뷰 R4 였다:
+ *   근본 경합(bun binlink)은 lisa·jane 사이에서 대칭이라 둘이 동시에 탈락할 수 있고(08:03:37 실측),
+ *   그러면 알림이 죽은 쪽으로 들어가 아무도 못 읽는다. 그래서 다른 런타임(clo·herm)을 폴백으로
+ *   선호하게 만들었다.
+ *   그런데 그 점수제가 ★coordinator 기본 라우팅을 뒤집는 사고★ 를 냈고(B1), 팀장님이
+ *   "coordinator 기본은 건드리지 마라 / lisa 가 죽으면 jane 으로, 그냥 원래대로 가라" 로 정리했다.
+ *   ★알려진 트레이드오프★: lisa·jane 이 ★동시에★ 죽으면 알림이 죽은 jane 에게 가서 아무도 못 읽는다.
+ *   팀장님이 이 경우를 직접 처리하겠다고 명시했다("정 안되면 내가 처리하면 돼"). 그래서 단순 규칙이
+ *   의도된 동작이며, 이걸 '버그' 로 보고 점수제를 되살리지 마라 — 되살리려면 팀장님 승인이 필요하다.
  */
 export function pickOpNoticeRecipient(
   agents: AgentRecord[],
   affectedId: string,
-  isDown?: (agentId: string) => boolean,
 ): string | null {
-  const affected = agents.find((a) => a.id === affectedId);
   const eligible = agents.filter((a) => a.id !== affectedId && !RESERVED.has(a.id));
-  if (eligible.length === 0) return null;
-  let best: { id: string; score: number } | null = null;
-  for (const a of eligible) {
-    let score = 0;
-    if (!isDown?.(a.id)) score += 4;
-    if ((a.capabilities ?? []).includes("coordinator")) score += 2;
-    if (affected && a.runtime !== affected.runtime) score += 1;
-    if (best === null || score > best.score) best = { id: a.id, score };
-  }
-  return best?.id ?? null;
+  const coordinator = eligible.find((a) => (a.capabilities ?? []).includes("coordinator"));
+  return coordinator?.id ?? eligible[0]?.id ?? null;
 }
 
 /**
@@ -151,11 +131,6 @@ export class EssentialsOpNotifier {
   /** 현재 미충족 연속 tick (테스트·디버그용) */
   streakOf(agentId: string): number {
     return this.streak.get(agentId) ?? 0;
-  }
-
-  /** 그 멤버가 현재 down 으로 관측되는지 — 수신자 선정에서 죽은 멤버를 피하는 데 쓴다(R4). */
-  isDown(agentId: string): boolean {
-    return this.notified.has(agentId);
   }
 
   /**
