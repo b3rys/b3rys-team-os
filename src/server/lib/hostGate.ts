@@ -23,18 +23,27 @@
 import type { Context, Next } from "hono";
 import { untrustedHostPage } from "./untrustedHostPage";
 
-/** 관문을 태우면 안 되는 인바운드. ★자체 검증이 있는 것만★ 넣는다. */
-export const GATE_EXEMPT_SUFFIX = [
-  // Slack 이 밖에서 보내는 이벤트. 서명(x-slack-signature)으로 자체 검증한다 — routes/slack.ts.
-  //   여기서 막으면 Event URL 방식을 쓰는 설치본의 슬랙이 끊긴다.
-  "/slack/events",
-  // 감시용. 아무 내용도 안 알려주고, 막으면 바깥 모니터가 서버를 죽은 것으로 본다.
-  "/health",
-];
-
-export function isGateExempt(path: string): boolean {
-  return GATE_EXEMPT_SUFFIX.some((sfx) => path.endsWith(sfx));
-}
+/**
+ * ★예외는 없다.★ (2026-07-30 · codex·hermes 교차검증에서 둘 다 같은 결론)
+ *
+ *  처음엔 두 개를 뒀는데 ★둘 다 전제가 거짓이었다.★
+ *
+ *  · `/slack/events` — "서명으로 자체 검증한다" 고 적었는데 아니었다.
+ *    `url_verification` 은 ★서명 검사 전에★ challenge 를 그대로 돌려주고,
+ *    `api_app_id` 가 등록된 앱이 아니면 검사 블록을 ★통째로 건너뛴다★ — signing_secret 이
+ *    없어도 마찬가지다. hermes 가 무서명 요청으로 실측했다: 200 OK.
+ *    ★내가 "자체 검증이 있다" 고 믿고 예외를 뚫었으면, 그게 유일한 공개 구멍이 됐을 것이다.★
+ *    Event URL 방식을 쓰는 설치본은 ★그 도메인을 TEAM_TRUSTED_DASHBOARD_HOSTS 에 등록★ 하면 된다
+ *    (대시보드를 그 주소로 여는 것과 같은 조건이다).
+ *
+ *  · `/health` — "아무것도 안 알려준다" 고 적었는데 `/team/health` 는
+ *    `{ok, port, base_path, agents}` 를 준다. 게다가 접미사로 걸어서 `…/health` 로 끝나는
+ *    어떤 경로도 앞으로 자동 면제됐다. ★바깥 감시는 `rootApp` 의 `/health`(= `{ok:true}`)를 쓰는데 그건 이 관문
+ *    바깥이라 영향이 없다★ — 예외가 애초에 필요 없었다.
+ *
+ *  ★"예외에는 자체 방어가 있다" 는 말은 그 방어를 실제로 읽고 나서만 참이다.★
+ *  둘 다 내가 안 읽고 적었고, 둘 다 틀렸다. 그래서 예외를 두지 않는다.
+ */
 
 export interface HostGateDeps {
   /** 이 요청을 신뢰하는가. 실제로는 `trustedActorFromRequest(...).ok` 를 넘긴다. */
@@ -47,7 +56,6 @@ export function createHostGate(deps: HostGateDeps) {
   const isApiPath = deps.isApiPath ?? ((path: string) => path.includes("/api/"));
   return async (c: Context, next: Next) => {
     const path = c.req.path;
-    if (isGateExempt(path)) return next();
     if (deps.isTrusted(c.req.raw)) return next();
     if (isApiPath(path)) {
       return c.json({ error: "dashboard_host_not_trusted" }, 403);

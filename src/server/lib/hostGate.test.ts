@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
-import { createHostGate, isGateExempt } from "./hostGate";
+import { createHostGate } from "./hostGate";
 
 /** 신뢰 판정을 주입해 테스트가 환경(git·env·소켓)에 안 걸리게 한다. */
 function appWith(trusted: boolean) {
@@ -94,24 +94,12 @@ describe("막히면 안 되는 것 — 안 막힌다", () => {
     }
   });
 
-  test("★slack 이벤트는 신뢰 안 해도 통과★ — 자체 서명 검증이 있고, 막으면 슬랙이 끊긴다", async () => {
-    const r = await appWith(false).fetch(req("/team/api/slack/events", "POST"));
-    expect(r.status).toBe(200);
-  });
-
-  test("★health 는 통과★ — 막으면 바깥 모니터가 서버를 죽은 것으로 본다", async () => {
-    const r = await appWith(false).fetch(req("/team/health"));
-    expect(r.status).toBe(200);
-  });
-
-  test("예외 판정은 접미사로 본다 — 경로 앞에 무엇이 붙어도 같다", () => {
-    expect(isGateExempt("/team/api/slack/events")).toBe(true);
-    expect(isGateExempt("/slack/events")).toBe(true);
-    expect(isGateExempt("/team/health")).toBe(true);
-    // ★비슷하지만 다른 경로는 예외가 아니다★
-    expect(isGateExempt("/team/api/slack/eventsX")).toBe(false);
-    expect(isGateExempt("/team/api/slack")).toBe(false);
-    expect(isGateExempt("/team/api/agents")).toBe(false);
+  test("★예외는 없다★ — 앞서 뚫으려던 둘도 막힌다(전제가 거짓이었다)", async () => {
+    const app = appWith(false);
+    // /slack/events: "서명 자체검증" 이 전제였는데, 무서명 요청이 200 으로 통과한다(hermes 실측).
+    expect((await app.fetch(req("/team/api/slack/events", "POST"))).status).toBe(403);
+    // /team/health: "아무것도 안 알려준다" 가 전제였는데 port·base_path·agents 를 준다.
+    expect((await app.fetch(req("/team/health"))).status).toBe(403);
   });
 });
 
