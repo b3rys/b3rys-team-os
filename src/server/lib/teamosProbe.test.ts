@@ -122,3 +122,52 @@ describe("teamOsSnapshot 이 문제를 화면 데이터에 실어 보낸다", ()
     expect(row?.detail).toContain("실패로 정지");
   });
 });
+
+// steve 리뷰의 블로커성 지적: A(실패 시 재예약)가 들어오면 ★방금 실패한 잡이 화면상 초록불★ 이 된다.
+//   연속 3회를 채워야 빨개지는데 일간 잡은 그게 3일이다. 이 화면이 고치려던 문제를 작게 다시 만드는 것.
+describe("judgeScheduledJob — 재시도 대기와 실행 중을 구분한다", () => {
+  const NOW = Date.parse("2026-07-30T01:00:00Z"); // 10:00 KST
+
+  test("★직전 시도가 실패했으면 초록불이 아니다★ — 재예약됐어도 amber", () => {
+    const v = judgeScheduledJob(
+      { enabled: 1, status: "pending", next_run_at: "2026-07-30 01:30:00", last_error: "exec_failed:..." },
+      NOW,
+    );
+    expect(v.running).toBe(false);
+    expect(v.problem).toBe("retrying");
+  });
+
+  test("성공해서 에러가 지워졌으면 초록불", () => {
+    const v = judgeScheduledJob(
+      { enabled: 1, status: "pending", next_run_at: "2026-07-30 01:30:00", last_error: null },
+      NOW,
+    );
+    expect(v.running).toBe(true);
+    expect(v.problem).toBeNull();
+  });
+
+  test("정지(failed)가 재시도보다 우선한다 — 더 나쁜 쪽을 보여준다", () => {
+    const v = judgeScheduledJob(
+      { enabled: 1, status: "failed", next_run_at: "2026-07-30 01:30:00", last_error: "boom" },
+      NOW,
+    );
+    expect(v.problem).toBe("failed");
+  });
+
+  test("★실행 중인 잡을 밀림으로 잡지 않는다★ — claim 은 next_run_at 을 안 옮긴다", () => {
+    // 긴 exec 가 도는 중: 예정 시각은 이미 지났지만 리스가 살아 있다.
+    const v = judgeScheduledJob(
+      { enabled: 1, status: "running", next_run_at: "2026-07-30 00:50:00", lock_until: "2026-07-30 01:05:00" },
+      NOW,
+    );
+    expect(v.problem).toBeNull();
+  });
+
+  test("리스가 만료된 채 running 이면 밀림이 맞다 — 죽은 워커가 물고 있는 것", () => {
+    const v = judgeScheduledJob(
+      { enabled: 1, status: "running", next_run_at: "2026-07-30 00:00:00", lock_until: "2026-07-30 00:10:00" },
+      NOW,
+    );
+    expect(v.problem).toBe("overdue");
+  });
+});

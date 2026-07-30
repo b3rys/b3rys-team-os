@@ -645,8 +645,12 @@ export function completeScheduledJob(
 }
 
 /**
- * 연속 실패를 몇 번까지 봐주고 재예약할지. 이 횟수에 도달하면 park(=status 'failed' 로 정지)한다.
- * 0·음수·NaN 은 1 로 올린다 — 0 을 허용하면 "실패 즉시 영구 정지"(고치기 전 동작)로 조용히 되돌아간다.
+ * 연속 실패를 몇 번까지 봐주고 재예약할지. 이 횟수에 ★도달하면★ park(=status 'failed' 로 정지)한다.
+ *
+ * 하한은 1 이다. ★1 은 "첫 실패에 바로 park" = 고치기 전 동작을 의도적으로 되사는 값★ 이므로
+ * 막지 않는다(그렇게 쓰고 싶은 운영자가 있을 수 있다). 다만 ★기본값이 아니라 명시적으로 골라야★ 한다.
+ * 막는 것은 0·음수·NaN 뿐 — 그건 설정 실수이지 선택이 아니고, 그대로 두면 루프가 아예 안 돈다.
+ * (처음 주석은 "1 로 올린다 = 옛 동작 방지" 라고 적었는데 ★1 이 바로 그 옛 동작★ 이라 앞뒤가 안 맞았다. steve 지적.)
  */
 export const DEFAULT_FAILURE_RETRY_LIMIT = 3;
 export function failureRetryLimit(): number {
@@ -654,17 +658,30 @@ export function failureRetryLimit(): number {
   return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : DEFAULT_FAILURE_RETRY_LIMIT;
 }
 
-/** 이 잡의 가장 최근 실행부터 거슬러 올라가며 연속 'failed' 개수를 센다(이번 실패 포함). */
+/**
+ * 이 잡의 가장 최근 실행부터 거슬러 올라가며 연속 'failed' 개수를 센다(이번 실패 포함).
+ *
+ * ★'failed 가 아니면 멈춘다' 가 아니라 'succeeded 에서만 리셋한다'★ (steve 리뷰).
+ * 처음엔 outcome 이 failed 가 아니면 즉시 break 했는데, 그러면 ★skip 이 카운트를 리셋한다.★
+ * `skipScheduledJob` 은 outcome='skipped' 행을 넣으므로 fail·skip·fail·skip 이 섞이면
+ * 연속 카운트가 매번 1 로 돌아가 ★진짜 고장이 영원히 park 되지 않는다.★
+ * 오늘은 잠복이다(미스파이어 유예가 기본 꺼짐이라 skip 행이 안 생긴다) — 그 env 를 켜는 순간 살아난다.
+ * 같은 구멍이 하나 더 있다: 스키마 CHECK 가 outcome 에 'started' 를 이미 허용한다(지금 writer 는 없다).
+ * → 조회를 'succeeded'·'failed' 로 좁히면 두 구멍이 같이 닫힌다.
+ *   skip 은 "돌려보지도 않았다" 라서 ★잡이 나아졌다는 증거가 아니다★ — 세지도 리셋하지도 않는 중립이 맞다.
+ */
 export function consecutiveFailures(db: Database, jobId: string, limit: number): number {
   const rows = db
     .prepare(
       // rowid = 삽입 순서. started_at 은 같은 초에 여러 건이 들어갈 수 있어 정렬 기준으로 불안정하다.
-      `SELECT outcome FROM scheduled_job_run WHERE job_id = ? ORDER BY rowid DESC LIMIT ?`,
+      `SELECT outcome FROM scheduled_job_run
+        WHERE job_id = ? AND outcome IN ('succeeded','failed')
+        ORDER BY rowid DESC LIMIT ?`,
     )
     .all(jobId, limit) as Array<{ outcome: string }>;
   let n = 0;
   for (const r of rows) {
-    if (r.outcome !== "failed") break;
+    if (r.outcome === "succeeded") break; // 성공에서만 연속이 끊긴다
     n += 1;
   }
   return n;

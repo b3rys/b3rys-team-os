@@ -20,6 +20,8 @@ import {
   scheduleReminder,
   failScheduledJob,
   completeScheduledJob,
+  skipScheduledJob,
+  consecutiveFailures,
 } from "./core";
 import { nextCronRun } from "./cron";
 
@@ -832,5 +834,54 @@ describe("실패한 반복 잡은 다음 슬롯으로 되살아난다", () => {
     expect(row.status).toBe("failed");
     const audit = d.prepare(`SELECT detail_json FROM audit_event WHERE action='scheduler_job_parked'`).get() as { detail_json: string };
     expect(JSON.parse(audit.detail_json)).toMatchObject({ reason: "max_runs_reached" });
+  });
+});
+
+// steve 리뷰에서 나온 실질 위험: skip 이 연속 카운트를 리셋해 ★진짜 고장이 영원히 park 되지 않는다.★
+// 오늘은 잠복(미스파이어 유예 기본 꺼짐)이지만 그 env 를 켜면 살아난다.
+describe("연속 실패 카운트는 성공에서만 끊긴다", () => {
+  const T0 = new Date(Date.UTC(2026, 6, 30, 0, 0, 0));
+  function guard(d: ReturnType<typeof db>) {
+    const j = createCronJob(d, {
+      id: "skipmix", title: "30분 가드", cron: "*/30 * * * *", timezone: "Asia/Seoul",
+      createdBy: "system", payload: { type: "exec", execKey: "task-review-ping" }, from: T0,
+    });
+    return getScheduledJob(d, j.id)!;
+  }
+
+  test("★skip 이 섞여도 연속 카운트가 리셋되지 않는다★ — 실패·skip·실패·skip·실패 = park", () => {
+    const d = db();
+    let job = guard(d);
+    for (let i = 0; i < 3; i++) {
+      job = getScheduledJob(d, job.id)!;
+      failScheduledJob(d, job, `깨짐 ${i + 1}`, { now: new Date(T0.getTime() + i * 2 * 60_000) });
+      if (i < 2) {
+        job = getScheduledJob(d, job.id)!;
+        skipScheduledJob(d, job, "misfire", { now: new Date(T0.getTime() + (i * 2 + 1) * 60_000) });
+      }
+    }
+    // skip 이 리셋했다면 연속은 1 이라 계속 살아 있다 = 영원히 park 안 됨.
+    expect(getScheduledJob(d, job.id)!.status).toBe("failed");
+  });
+
+  test("skip 자체는 실패로 세지 않는다 — '돌려보지도 않았다' 는 고장의 증거가 아니다", () => {
+    const d = db();
+    let job = guard(d);
+    for (let i = 0; i < 3; i++) {
+      job = getScheduledJob(d, job.id)!;
+      skipScheduledJob(d, job, "misfire", { now: new Date(T0.getTime() + i * 60_000) });
+    }
+    expect(consecutiveFailures(d, job.id, 5)).toBe(0);
+  });
+
+  test("성공은 연속을 끊는다", () => {
+    const d = db();
+    let job = guard(d);
+    failScheduledJob(d, job, "1", { now: T0 });
+    job = getScheduledJob(d, job.id)!;
+    completeScheduledJob(d, job, { now: new Date(T0.getTime() + 60_000) });
+    job = getScheduledJob(d, job.id)!;
+    failScheduledJob(d, job, "2", { now: new Date(T0.getTime() + 120_000) });
+    expect(consecutiveFailures(d, job.id, 5)).toBe(1);
   });
 });

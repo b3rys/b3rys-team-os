@@ -42,10 +42,11 @@ export interface TeamOsScheduled {
   /**
    * 초록불이 아닌 ★이유★. null/undefined 면 문제 없음.
    * running 이 boolean 하나뿐이라 "꺼둔 것"과 "죽은 것"이 화면에서 같게 보였다.
-   *  - "failed"  : 실행하다 실패해 정지된 상태
-   *  - "overdue" : 다음 실행 시각이 이미 지났는데 안 돌고 있다(밀림)
+   *  - "failed"   : 실행하다 실패해 정지된 상태
+   *  - "overdue"  : 다음 실행 시각이 이미 지났는데 안 돌고 있다(밀림)
+   *  - "retrying" : 직전 시도가 실패했고 다음 차례에 다시 해본다(죽지는 않았지만 정상도 아니다)
    */
-  problem?: "failed" | "overdue" | null;
+  problem?: "failed" | "overdue" | "retrying" | null;
 }
 
 /**
@@ -259,22 +260,47 @@ function listLaunchd(running: Map<string, boolean>): TeamOsScheduled[] {
  *   실제로 08:00 에 정지한 잡이 "next=00:30" 이라고 적힌 채 running=true 로 9시간을 버텼다.
  *   ★사람이 화면을 보고도 못 본다. 화면이 잘못된 판단에 동의해준다.★
  *
+ * ★'retrying' 이 왜 필요한가★ (steve 리뷰의 블로커성 지적)
+ *   같은 PR 의 A(실패 시 재예약)가 들어오면 실패한 잡이 곧바로 status='pending' + 미래 시각이 된다.
+ *   그러면 이 판정은 problem=null → ★초록불★ 이다. 즉 ★방금 실패한 잡이 화면상 정상★ 이고,
+ *   연속 3회를 채워야 빨개진다. 30분 잡은 90분, ★일간 잡은 3일★ 이 걸린다.
+ *   그건 이 함수가 고치려는 명제("화면이 고장을 정상이라 말했다")를 작은 판으로 다시 만드는 것이다.
+ *   → 직전 시도가 실패했다는 신호(last_error)를 받아 amber 로 표시한다. 죽은 건 아니지만 정상도 아니다.
+ *
+ * ★'running' 상태를 밀림에서 빼는 이유★
+ *   claim 은 status='running' 으로 바꾸면서 next_run_at 을 ★안 옮긴다★. 그래서 실행 중인 잡은
+ *   next_run_at 이 과거인 채로 있다. 유예가 최대 실행시간보다 짧으면 ★정상 실행 중인 잡이 밀림으로 뜬다.★
+ *   지금 수치로는 245s < 300s 라 아슬아슬하게 안전한데, timeout 이 긴 exec 키가 하나 추가되면 깨진다.
+ *   유예 값을 키우는 대신 ★"지금 돌고 있다"는 사실 자체★ 로 거른다(리스가 살아 있는 동안만).
+ *
  * now 를 인자로 받는 이유: 시각 판정은 테스트에서 시각을 고정할 수 있어야 검증이 된다.
  */
 export function judgeScheduledJob(
-  row: { enabled: number; status: string | null; next_run_at: string | null },
+  row: {
+    enabled: number;
+    status: string | null;
+    next_run_at: string | null;
+    last_error?: string | null;
+    lock_until?: string | null;
+  },
   nowMs: number,
-): { running: boolean; problem: "failed" | "overdue" | null; overdueMin: number } {
+): { running: boolean; problem: "failed" | "overdue" | "retrying" | null; overdueMin: number } {
   // ★새 시각 파서를 만들지 않는다★ — 스케줄러가 자기 컬럼을 읽는 방식(fromSqliteDate)을 그대로 쓴다.
   //   판정과 저장이 다른 규칙을 쓰면 KST 서버에서 정확히 9시간 어긋난다(utcTimestamp.contract.test 의 교훈).
   const overdueMs = row.next_run_at ? nowMs - fromSqliteDate(row.next_run_at).getTime() : Number.NaN;
   const isFailed = row.status === "failed";
+  // 리스가 아직 살아 있는 실행 중 = 늦은 게 아니라 ★지금 하는 중★ 이다.
+  const leaseMs = row.lock_until ? fromSqliteDate(row.lock_until).getTime() : Number.NaN;
+  const isRunningNow = row.status === "running" && Number.isFinite(leaseMs) && leaseMs > nowMs;
   // 시각이 없거나 파싱 불가면 ★밀림으로 단정하지 않는다★ — 모르는 것은 모른다고 둔다(거짓 경보 금지).
-  const isOverdue = Number.isFinite(overdueMs) && overdueMs > OVERDUE_GRACE_SEC * 1000;
+  const isOverdue = !isRunningNow && Number.isFinite(overdueMs) && overdueMs > OVERDUE_GRACE_SEC * 1000;
+  // 재시도 대기: 다음 차례는 잡혀 있는데 ★직전 시도가 실패했다.★
+  //   last_error 는 성공 시 NULL 로 지워지고 실패 시 채워지므로 "직전 시도 결과" 신호가 된다.
+  const isRetrying = !isFailed && !isOverdue && row.status === "pending" && !!row.last_error;
   return {
-    // "예정대로 살아있나" = 켜져 있고 · 다음 실행이 잡혀 있고 · 실패로 정지하지 않았고 · 밀리지 않았나.
-    running: row.enabled === 1 && !!row.next_run_at && !isFailed && !isOverdue,
-    problem: isFailed ? "failed" : isOverdue ? "overdue" : null,
+    // "예정대로 살아있나" = 켜져 있고 · 다음 실행이 잡혀 있고 · 정지/밀림/재시도 중이 아니다.
+    running: row.enabled === 1 && !!row.next_run_at && !isFailed && !isOverdue && !isRetrying,
+    problem: isFailed ? "failed" : isOverdue ? "overdue" : isRetrying ? "retrying" : null,
     overdueMin: Number.isFinite(overdueMs) ? Math.floor(overdueMs / 60000) : 0,
   };
 }
@@ -282,7 +308,9 @@ export function judgeScheduledJob(
 function listScheduledJobs(db: Database): TeamOsScheduled[] {
   try {
     const rows = db.prepare(
-      `SELECT id, title, schedule_expr, enabled, status, next_run_at, last_run_at
+      // ★판정에 쓸 값은 전부 가져온다★ — 이 SELECT 에 last_error 가 없어서 화면은 "직전 시도가 실패했다"를
+      //   ★알 방법 자체가 없었다.★ 신호가 판정부에 도달하지 않는 것은 status 를 안 쓰던 것과 같은 결함이다.
+      `SELECT id, title, schedule_expr, enabled, status, next_run_at, last_run_at, last_error, lock_until
          FROM scheduled_job
         WHERE kind='recurring'
           AND NOT (enabled=0 AND status='cancelled')
@@ -290,6 +318,7 @@ function listScheduledJobs(db: Database): TeamOsScheduled[] {
     ).all() as Array<{
       id: string; title: string | null; schedule_expr: string | null;
       enabled: number; status: string | null; next_run_at: string | null; last_run_at: string | null;
+      last_error: string | null; lock_until: string | null;
     }>;
     const nowMs = Date.now();
     return rows.map((r) => {
@@ -307,6 +336,7 @@ function listScheduledJobs(db: Database): TeamOsScheduled[] {
           `last=${last ?? "-"}`,
           v.problem === "failed" && "★실패로 정지★",
           v.problem === "overdue" && `★${v.overdueMin}분 밀림★`,
+          v.problem === "retrying" && "★직전 시도 실패 — 다음 차례에 재시도★",
         ].filter(Boolean).join(" · "),
         description: r.title ?? "",
         source: "scheduled_job" as const,
