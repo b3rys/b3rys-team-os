@@ -37,30 +37,26 @@ MEMBERS_FILE="$T/none.env"
 [ "$(resolve_mention U0BL1UYHLV7)" = "U0BL1UYHLV7" ] && ok "원시 ID 는 통과" || bad "원시 ID 실패"
 MEMBERS_FILE="$T/members.env"
 
-echo "── T5: 본문 부착 (중복 방지 포함) ──"
-# ★부착 로직을 손으로 베끼지 않는다★ — 베끼면 그 사본이 원본과 갈라져도 시험은 통과한다
-#   (#149 에서 같은 형태로 당했다: 대조 대상이 자기 복사본이었다).
-#   그래서 send.sh 의 for 루프를 ★그대로 떼어★ 쓴다.
-eval "prepend() {  # prepend <본문> <멘션들...>
-  local BODY=\"\$1\"; shift
-  local MENTIONS=\"\$*\"
-$(sed -n '/^for _m in \$MENTIONS; do$/,/^done$/p' "$SRC")
-  printf '%s' \"\$BODY\"
-}"
-r="$(prepend "본문" lisa)"
-[ "$r" = "$(printf '<@U0BL1UYHLV7>\n본문')" ] && ok "맨 앞 ★자기 줄★ 에 붙음" || bad "부착: $r"
-r="$(prepend "<@U0BL1UYHLV7> 이미 있음" lisa)"
-[ "$r" = "<@U0BL1UYHLV7> 이미 있음" ] && ok "★중복으로 안 붙임★" || bad "중복: $r"
-# ★코드블록이 깨지지 않는지★ — 여는 펜스가 줄 맨 앞에 그대로 있어야 한다
-r="$(prepend '```
-code
-```' lisa)"
-case "$r" in
-  "<@U0BL1UYHLV7>"*$'\n''```'*) ok "코드블록 여는 펜스가 줄 맨 앞에 유지됨" ;;
-  *) bad "★펜스가 밀렸다★: $(printf '%s' "$r" | head -2 | tr '\n' '|')" ;;
-esac
-r="$(prepend "본문" lisa jane)"
-case "$r" in *"<@U0BL1UYHLV7>"*) case "$r" in *"<@U0BKJR2G8MD>"*) ok "여러 명 부착" ;; *) bad "두 번째 누락" ;; esac ;; *) bad "첫 번째 누락" ;; esac
+echo "── T5: ★본문을 오염시키지 않는다★ (broadcast 는 텔레그램 그룹방으로도 나간다) ──"
+# ★이 시험이 존재하는 이유★: 처음엔 send.sh 가 본문 맨 앞에 <@U…> 를 박았다.
+#   그 결과 ★텔레그램 단체방에 <@U0BL1UYHLV7> 이 그대로 찍혔다★(2026-07-30, 팀장님 발견).
+#   슬랙 문법은 슬랙에서만 뜻이 있다 — 그래서 지금은 ID 만 풀어 meta 로 넘기고,
+#   실제 부착은 슬랙으로 릴레이하는 서버가 한다.
+grep -q 'BODY="<@' "$SRC" && bad "★본문에 멘션을 박는 코드가 남아 있다★" || ok "본문 부착 코드 없음"
+grep -q "meta\['slack_mentions'\]" "$SRC" && ok "meta.slack_mentions 로 넘긴다" || bad "meta 전달 코드가 없다"
+grep -q 'MENTION_IDS="\$MENTION_IDS \$_id"' "$SRC" && ok "ID 로 풀어 모은다" || bad "ID 수집 코드가 없다"
+
+echo "── T6: 서버가 슬랙 릴레이에서만 붙이나 (소스 확인) ──"
+SRV="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/src/server/routes/inbox.ts"
+if [ -f "$SRV" ]; then
+  grep -q 'slack_mentions' "$SRV" && ok "릴레이가 meta 를 읽는다" || bad "서버가 meta 를 안 읽는다"
+  # 부착이 슬랙 send 블록 안에 있는지 — text: slackText 로 넘어가야 한다
+  grep -q 'text: slackText' "$SRV" && ok "슬랙 발신 text 에만 적용" || bad "슬랙 발신에 안 걸려 있다"
+  # 형식 검증: U/W 로 시작하는 것만 받아야 한다(임의 문자열 주입 방지)
+  grep -q 'UW\]\[A-Z0-9\]' "$SRV" && ok "ID 형식 검증 있음" || bad "★형식 검증 없음 — 임의 문자열이 붙는다★"
+else
+  bad "서버 소스를 못 찾음: $SRV"
+fi
 
 echo
 [ "$FAIL" -eq 0 ] && echo "ALL PASS" || echo "FAIL"

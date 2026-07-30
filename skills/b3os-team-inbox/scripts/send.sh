@@ -162,6 +162,12 @@ resolve_mention() {  # resolve_mention <원시ID|이름> -> ID 또는 빈 문자
     { k=$1; gsub(/^[[:space:]]+|[[:space:]]+$/, "", k); v2=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", v2)
       if (tolower(k) == want) { print v2; exit } }' "$MEMBERS_FILE"
 }
+# ★본문에 넣지 않는다★ (2026-07-30 실측) — `--to broadcast` 는 슬랙만이 아니라
+#   ★텔레그램 그룹방으로도 나간다.★ 본문에 미리 `<@U…>` 를 박으면 그 문자열이
+#   ★단체방에 그대로 찍힌다★(팀장님이 발견). 슬랙 문법은 슬랙에서만 뜻이 있다.
+#   → ID 로 풀기만 하고 ★meta 로 넘긴다.★ 실제 부착은 ★슬랙으로 릴레이하는 서버★ 가 한다
+#     (채널마다 다른 것은 그 채널로 나갈 때 붙인다. 저장 본문은 채널 중립으로 둔다).
+MENTION_IDS=""
 for _m in $MENTIONS; do
   _id="$(resolve_mention "$_m")"
   if [ -z "$_id" ]; then
@@ -169,16 +175,11 @@ for _m in $MENTIONS; do
     echo "  원시 ID(U…)를 직접 주거나, $MEMBERS_FILE 에 '이름=U01234567' 을 추가하세요." >&2
     exit 1
   fi
-  case "$BODY" in *"<@$_id>"*) continue ;; esac   # 본문에 이미 있으면 중복으로 안 붙인다
-  # ★멘션은 자기 줄에 둔다★ (steve 지적) — 같은 줄에 붙이면 본문이 ``` 로 시작할 때
-  #   여는 펜스가 줄 맨 앞이 아니게 되어 멘션이 코드블록 안으로 끌려들어갈 수 있다.
-  #   사람이 쓰는 모양과도 같다.
-  BODY="<@$_id>
-$BODY"
+  MENTION_IDS="$MENTION_IDS $_id"
 done
 
 # Build JSON via python to handle escaping safely.
-PAYLOAD=$(BODY="$BODY" FROM="$FROM" TO="$TO" THREAD="$THREAD" REPLY_TO="$REPLY_TO" TYPE="$TYPE" PRIORITY="$PRIORITY" HOP="$HOP" SYNC="$SYNC" DIRECT_TO_GD="$DIRECT_TO_GD" SOURCE_THREAD="$SOURCE_THREAD" EXPECT_REPORT_BY="$EXPECT_REPORT_BY" INDIVIDUAL="$INDIVIDUAL" EPISODE="$EPISODE" python3 -c "
+PAYLOAD=$(MENTION_IDS="$MENTION_IDS" BODY="$BODY" FROM="$FROM" TO="$TO" THREAD="$THREAD" REPLY_TO="$REPLY_TO" TYPE="$TYPE" PRIORITY="$PRIORITY" HOP="$HOP" SYNC="$SYNC" DIRECT_TO_GD="$DIRECT_TO_GD" SOURCE_THREAD="$SOURCE_THREAD" EXPECT_REPORT_BY="$EXPECT_REPORT_BY" INDIVIDUAL="$INDIVIDUAL" EPISODE="$EPISODE" python3 -c "
 import json, os
 p = {
   'from_agent_id': os.environ['FROM'],
@@ -211,6 +212,11 @@ if os.environ.get('INDIVIDUAL'):
 #   판정기가 json_extract(meta_json,'\$.episode') 로 그 수집만 묶는다(measure=deploy·codex-d).
 if os.environ.get('EPISODE', '').strip():
     meta['episode'] = os.environ['EPISODE'].strip()
+# slack_mentions: 슬랙으로 릴레이될 때만 서버가 본문 앞에 <@ID> 를 붙인다.
+#   ★본문에 직접 넣지 않는 이유★ — broadcast 는 텔레그램 그룹방으로도 나가고, 거기선 이 문법이
+#   의미 없는 문자열로 그대로 보인다(실측). 채널별 표현은 그 채널로 나갈 때 붙인다.
+if os.environ.get('MENTION_IDS', '').strip():
+    meta['slack_mentions'] = os.environ['MENTION_IDS'].split()
 if meta:
     p['meta'] = meta
 print(json.dumps(p, ensure_ascii=False))
