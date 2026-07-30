@@ -55,10 +55,18 @@ export function humanizeApiError(raw: unknown): string {
     return pick(
       `${koWhere} 쓰기 권한이 없습니다. ` +
         `b3os 는 서버가 로컬에만 열려 있을 때, 그 컴퓨터에서 연 화면(127.0.0.1 또는 localhost)만 팀리드로 인정합니다. ` +
-        `도메인으로 쓰려면 관리자가 이 주소를 신뢰 목록에 등록해야 합니다.`,
+        `도메인으로 쓰려면 관리자가 이 주소를 신뢰 목록에 등록해야 합니다.\n\n` +
+        // ★사용자는 "뭘 물어야 할지" 를 몰라서 막힌다.★ 그대로 붙여넣을 문장을 준다 —
+        //   자기 주소가 이미 들어 있어서 팀원이 되물을 것도 없다.
+        `팀원에게 이대로 물어보세요:\n` +
+        `"대시보드를 ${host || "이 주소"} 로 여는데 쓰기가 막힙니다. ` +
+        `TEAM_TRUSTED_DASHBOARD_HOSTS 에 이 주소를 등록해 주세요."`,
       `${enWhere} has no write permission. ` +
         `When the server is bound to loopback, b3os only grants team-lead rights to the dashboard opened on that machine (127.0.0.1 or localhost). ` +
-        `To use a domain, an administrator must add this address to the trusted list.`,
+        `To use a domain, an administrator must add this address to the trusted list.\n\n` +
+        `Ask a teammate, copying this as-is:\n` +
+        `"The dashboard at ${host || "this address"} blocks writes. ` +
+        `Please add this address to TEAM_TRUSTED_DASHBOARD_HOSTS."`,
     );
   }
 

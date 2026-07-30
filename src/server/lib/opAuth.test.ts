@@ -33,7 +33,7 @@ describe("op auth shared token", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // 대시보드 신원 — ★주소창만 달라도 결과가 갈렸다★ (2026-07-30 팀장님 실측)
 //   대시보드는 인증 헤더를 하나도 안 보내므로 loopback 예외 하나에만 의존한다. 그래서 도메인·앱으로
-//   들어오면 태그·보고서·제안 쓰기 9군데가 전부 403(x_actor_id_required) 이었다.
+//   들어오면 태그·보고서·제안 쓰기가 전부 403 이었다(이름은 2026-07-30 에 dashboard_host_not_trusted 로 정정).
 //   ★여기에 테스트가 없어서 코드 리뷰·CI 로 잡히지 않았다★ — 그래서 양방향을 못박는다.
 // ─────────────────────────────────────────────────────────────────────────────
 describe("대시보드 loopback 예외 + 등록한 주소", () => {
@@ -52,6 +52,20 @@ describe("대시보드 loopback 예외 + 등록한 주소", () => {
     expect(trustedActorFromRequest(req("dev.b3rys.com"), { loopbackDashboardActor: "gd" })).toMatchObject({
       ok: false,
       status: 403,
+      // ★이름이 실패 이유를 가리켜야 한다★ — 앞서는 헤더 검사의 실패값(x_actor_id_required)이
+      //   그대로 돌아왔다. 대시보드는 그 헤더를 아예 안 쓰는데도.
+      error: "dashboard_host_not_trusted",
+    });
+  });
+
+  test("★헤더를 보냈는데 형식이 틀린 경우는 여전히 x_actor_id_required★ — 두 실패를 섞지 않는다", () => {
+    // 이름을 바꾼 건 "주소를 못 믿는다" 쪽뿐이다. 헤더 경로의 실패는 그대로여야 한다.
+    const r = new Request("http://127.0.0.1:7878/team/api/x", {
+      method: "PATCH",
+      headers: { host: "127.0.0.1:7878", "x-actor-id": "!!not-a-valid-id!!" },
+    });
+    expect(trustedActorFromRequest(r, { loopbackDashboardActor: "gd" })).toMatchObject({
+      ok: false,
       error: "x_actor_id_required",
     });
   });
