@@ -250,7 +250,21 @@ print('pending')
       exit 0 ;;
   esac
   [ "$(date +%s)" -ge "$CONF_DEADLINE" ] && {
-    echo "⚠ ${CONFIRM}초 안에 판정이 나지 않았습니다 ($MSG_ID) — 아직 처리 중일 수 있습니다(미배달 단정 아님)." >&2
+    # ★타임아웃에도 현재 상태를 보여준다★ — 상태 없이 "판정이 안 났다" 만 내면 ★진행 중인지 막힌
+    #   건지 구분할 수 없다.★ 실측으로 이 문구를 "정상 처리 중" 으로 읽고 잘못 보고한 사례가 있었다.
+    #   ★--confirm 은 실패는 빨리 잡지만 성공은 짧은 창에서 확인할 수 없다★:
+    #     wake_dispatched = 서버가 전달을 시도함(초 단위)
+    #     completed       = ★수신자가 실제로 처리함★ — 수신자 차례가 돌아야 하므로 분 단위가 될 수 있다
+    #   그래서 타임아웃은 '미배달' 이 아니라 '아직 성공을 확인하지 못함' 이다. 그 구분을 문구로 남긴다.
+    _cur_state=$(STATE_JSON="$STATE_JSON" python3 -c "
+import os, json
+try: rs = json.loads(os.environ['STATE_JSON']).get('recipients') or []
+except Exception: rs = []
+print(', '.join(f\"{r.get('agent_id')}={r.get('delivery_state')}\" for r in rs) or '(상태 없음)')
+" 2>/dev/null || echo '(상태 없음)')
+    echo "⚠ ${CONFIRM}초 안에 배달 확인이 안 됐습니다 ($MSG_ID) — 현재: $_cur_state" >&2
+    echo "  ★미배달이 아닙니다★ — wake_dispatched 는 전달 시도까지 됐다는 뜻이고, 수신자가 처리하면 completed 가 됩니다." >&2
+    echo "  실패(blocked·expired·dead_letter)는 이 시간 안에 잡힙니다. 성공 확인만 더 걸립니다." >&2
     exit 0
   }
   sleep 1
