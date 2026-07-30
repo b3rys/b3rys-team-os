@@ -185,11 +185,28 @@ describe("저장소 해석 — 우리 저장소를 박아두지 않는다", () =
       ["https://github.com/acme/widgets", "acme/widgets"],
       ["ssh://git@github.com/acme/widgets.git", "acme/widgets"],
       ["https://github.com/acme/widgets/", "acme/widgets"],
+      ["ssh://git@github.com/acme/widgets", "acme/widgets"],
+      ["git@GitHub.com:acme/widgets.git", "acme/widgets"],   // 호스트는 대소문자 무관
+      ["https://github.com./acme/widgets", "acme/widgets"],  // 트레일링 점은 같은 호스트
+      ["https://github.com/acme/my.repo-1.git", "acme/my.repo-1"],
       // ★GitHub 이 아니면 null★ — 추측하지 않는다
       ["git@gitlab.com:acme/widgets.git", null],
       ["https://bitbucket.org/acme/widgets.git", null],
       ["/some/local/path", null],
       ["", null],
+      // ★부분일치로 뚫리던 것들(hermes 교차검증 2026-07-30 · 전부 통과했었다)★
+      //   호스트를 문자열 안에서 "찾으면" 접두·접미·경로가 다 뚫린다.
+      ["git@notgithub.com:acme/widgets.git", null],
+      ["https://notgithub.com/acme/widgets.git", null],
+      ["https://xgithub.com/acme/widgets.git", null],
+      ["https://github.com.attacker.net/acme/widgets", null],
+      ["https://evil.com/github.com/acme/widgets", null],    // 경로 안에 있어도 잡혔었다
+      // 조각 개수가 안 맞으면 GitHub 원격이 아니다
+      ["https://github.com/acme", null],
+      ["https://github.com/acme/widgets/extra", null],
+      // 이름 규칙 밖
+      ["https://github.com/-bad/widgets", null],
+      ["https://github.com/acme/..", null],
     ];
     for (const [url, want] of cases) {
       expect([url, parseRepoFromRemote(url)]).toEqual([url, want]);
@@ -205,10 +222,25 @@ describe("저장소 해석 — 우리 저장소를 박아두지 않는다", () =
     try {
       process.env.TEAM_CI_REPO = "acme/widgets";
       expect(resolveCiRepo("/nonexistent")).toBe("acme/widgets");
-      process.env.TEAM_CI_REPO = "이건-owner/repo-모양이-아니다/셋";
-      expect(resolveCiRepo("/nonexistent")).toBe(null);
-      process.env.TEAM_CI_REPO = "";
-      expect(resolveCiRepo("/nonexistent")).toBe(null);
+      process.env.TEAM_CI_REPO = "acme/my.repo-1";
+      expect(resolveCiRepo("/nonexistent")).toBe("acme/my.repo-1");
+      // ★이 값은 그대로 요청 URL 의 path 가 된다★ — 넓히면 의도와 다른 요청이 나간다.
+      //   아래는 전부 통과했었다(hermes 교차검증 2026-07-30):
+      //     https://api.github.com/repos/★owner/repo?x=1★/actions/runs?per_page=10
+      for (const bad of [
+        "이건-owner/repo-모양이-아니다/셋",
+        "owner/repo?x=1",
+        "owner/repo#frag",
+        "owner/repo%2f..",
+        ".git/config",
+        "owner/",
+        "/repo",
+        "owner repo/x",
+        "",
+      ]) {
+        process.env.TEAM_CI_REPO = bad;
+        expect([bad, resolveCiRepo("/nonexistent")]).toEqual([bad, null]);
+      }
     } finally {
       if (prev === undefined) delete process.env.TEAM_CI_REPO;
       else process.env.TEAM_CI_REPO = prev;

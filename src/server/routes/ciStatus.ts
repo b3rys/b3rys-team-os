@@ -40,14 +40,52 @@ const FETCH_TIMEOUT_MS = 6_000;
  *  → 순서: ①`TEAM_CI_REPO`(owner/repo) ②설치본 자신의 git origin ③★못 찾으면 기능을 끈다.★
  *    ③에서 추측하지 않는다 — 모르면 "미설정" 이라고 말하고 ★네트워크를 아예 안 탄다.★
  */
+/** GitHub 이 실제로 허용하는 모양만 받는다. 여기서 넓히면 그대로 요청 URL 이 된다. */
+const OWNER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/;
+const REPO_RE = /^[A-Za-z0-9._-]+$/;
+
+/** `owner/repo` 두 조각이 GitHub 이름 규칙에 맞나. 아니면 null(추측하지 않는다). */
+export function normalizeRepoSlug(owner: string, repo: string): string | null {
+  const r = repo.replace(/\.git$/i, "");
+  if (!OWNER_RE.test(owner) || !REPO_RE.test(r)) return null;
+  if (r === "." || r === "..") return null;
+  return `${owner}/${r}`;
+}
+
 export function parseRepoFromRemote(url: string): string | null {
   const t = url.trim();
-  // git@github.com:owner/repo.git · https://github.com/owner/repo(.git) · ssh://git@github.com/owner/repo
-  const m = t.match(/github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i);
-  if (!m) return null;
-  const [, owner, repo] = m;
-  if (!owner || !repo || owner === "." || repo === ".") return null;
-  return `${owner}/${repo}`;
+  if (!t) return null;
+
+  // ★호스트를 문자열 안에서 "찾지" 않는다 — 파싱해서 정확히 일치시킨다.★
+  //   앞선 판은 /github\.com[:/]+…/ 로 ★어디에 있든★ 잡았다. 그래서 전부 통과했다(전부 실측):
+  //     git@★not★github.com:acme/widgets.git · https://★x★github.com/acme/widgets
+  //     https://evil.com/★github.com★/acme/widgets   ← 경로 안에 있어도 잡혔다
+  //   GitHub 이 아닌 origin 인데 기능이 켜지고 GitHub API 를 친다.
+  //   ★부분일치는 호스트 판정이 될 수 없다★ — 경계를 안 고정하면 접두·접미·경로가 다 뚫린다.
+  const host = (h: string): boolean => h.toLowerCase().replace(/\.$/, "") === "github.com";
+
+  // ① scp 형식: [user@]host:owner/repo(.git)   ★스킴이 없을 때만★ (ssh:// 는 ②가 본다)
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) {
+    const m = t.match(/^(?:[^@\s/]+@)?([^:/\s]+):([^/\s]+)\/([^/\s]+?)\/?$/);
+    if (m) {
+      const [, h, owner, repo] = m;
+      return h && host(h) && owner && repo ? normalizeRepoSlug(owner, repo) : null;
+    }
+    return null;
+  }
+
+  // ② 스킴이 있는 형식: https:// · ssh:// · git://
+  let u: URL;
+  try {
+    u = new URL(t);
+  } catch {
+    return null;
+  }
+  if (!host(u.hostname)) return null;
+  // ★path 만 본다★ — query·fragment 는 버린다(원격 주소에 있을 이유가 없다)
+  const seg = u.pathname.split("/").filter(Boolean);
+  if (seg.length !== 2) return null; // owner/repo 정확히 둘. 더 깊으면 GitHub 원격이 아니다
+  return normalizeRepoSlug(seg[0]!, seg[1]!);
 }
 
 /** 설치본의 origin 을 `.git/config` 에서 읽는다. ★git 을 실행하지 않는다★(요청마다 프로세스를 띄우지 않으려고).
@@ -90,7 +128,15 @@ export function repoFromGitConfig(root: string): string | null {
 /** 설정 → git origin → null. null 이면 기능이 꺼진다. */
 export function resolveCiRepo(root = REPO_ROOT): string | null {
   const env = (process.env.TEAM_CI_REPO ?? "").trim();
-  if (env) return /^[^/\s]+\/[^/\s]+$/.test(env) ? env : null;
+  if (env) {
+    // ★설정값도 같은 규칙으로 좁힌다.★ 앞선 판은 `[^/\s]+/[^/\s]+` 라서
+    //   `owner/repo?x=1` · `owner/repo#frag` · `.git/config` 이 통과했고(실측),
+    //   그대로 요청 URL 의 path·query 가 됐다:
+    //     https://api.github.com/repos/★owner/repo?x=1★/actions/runs?per_page=10
+    //   호스트를 벗어나진 않지만 ★의도와 다른 요청★ 이다. 이름 규칙으로 막는다.
+    const parts = env.split("/");
+    return parts.length === 2 ? normalizeRepoSlug(parts[0]!, parts[1]!) : null;
+  }
   return repoFromGitConfig(root);
 }
 
