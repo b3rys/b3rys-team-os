@@ -181,6 +181,9 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
   if (req.method === "item/fileChange/requestApproval") {
     const observed = req.observedItem;
     if (!observed || observed.changes.length === 0) return unparsedOperation(req, agentId, provenance);
+    // ★grantRoot 로 보이는 낯선 키가 있으면 여기서 멈춘다★ — 폴더 전체 요청이 평범한 파일 쓰기로
+    //   보이는 것보다 매번 묻는 게 낫다(벤더 개명 대비 · Bill 리뷰 후속).
+    if (hasUnreadGrantRootKey(p)) return unparsedOperation(req, agentId, provenance);
     return writeOperation(agentId, provenance, observed.changes, grantRootOf(p), observed.itemId);
   }
   // ★S3(#106) — 구세대도 신세대와 ★같은 것을 보여준다.★
@@ -196,6 +199,7 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
     // ★S2: grantRoot 는 구세대 applyPatchApproval 에도 있다★ — 지금까지 통째로 무시하고 있었다.
     //   있으면 '이 파일들' 이 아니라 ★'이 루트 하위 전부' 를 세션 동안 허용해 달라는 요청★ 이다.
     //   열쇠에 반영하지 않으면 파일 몇 개에 준 '항상 허용' 이 루트 전체 승인으로 재사용된다.
+    if (hasUnreadGrantRootKey(p)) return unparsedOperation(req, agentId, provenance); // 위와 같은 이유
     const oldChanges = oldGenChanges(p.fileChanges);
     // ★빈 목록은 '파일 0개 쓰기' 가 아니라 해석 실패다★ — 신세대(관측된 변경 0건)와 정책을 맞춘다.
     //   앞선 판은 `fileChanges: {}` 를 write 로 만들어 ★내용 없는 넓은 열쇠★ 를 하나 만들었다.
@@ -217,6 +221,22 @@ const UNPARSED_NOTICE = "내용 해석 실패 — 원문 확인 필요 · ";
  *  ★벤더 설명: "the agent is asking the user to allow writes under this root for the remainder of the
  *  session"★ — 즉 파일 단위 승인이 아니라 ★루트 단위 세션 승인★ 이다. UNSTABLE 표기지만 payload 에
  *  실려 오는 이상 ★우리 쪽 열쇠와 표시는 이걸 반영해야 한다.★ */
+/** ★grantRoot 로 보이는데 우리가 안 읽는 키가 있으면 해석 실패로 보낸다(Bill 리뷰 2026-07-30 후속).★
+ *
+ *  ★왜 필요한가 — 실패가 조용하기 때문이다.★ Bill 이 리뷰 중 payload 를 `grant_root` 로 잘못 만들어
+ *  돌려보니, ★"⚠ 세션 동안 폴더 하위 전체 쓰기 허용" 경고가 화면에서 사라지고★ 서로 다른 폴더 요청
+ *  두 건이 ★같은 열쇠★ 가 됐다. 0.144.6 에서는 도달 불가다(Bill 이 바이너리 문자열로 직접 확인:
+ *  `grantRoot` 3건 / `grant_root` 0건). 그러나 ★벤더가 다음 버전에서 이름을 바꾸면 에러 하나 없이★
+ *  폴더 전체 권한이 평범한 파일 쓰기로 보인다.
+ *
+ *  이 저장소에서 같은 형태로 두 번 데였다 — `patchUpdated` 를 짐작했고(안 오는 알림이었다),
+ *  `Array.isArray(command)` 로 세대를 판정했다(신세대가 통째로 미끄러졌다). ★모양이 바뀌면
+ *  조용히 미끄러지는 자리에는 가드를 둔다.★ 배열·빈 목록에 이미 같은 정책(모르면 ask)을 쓰고 있다. */
+function hasUnreadGrantRootKey(p: Record<string, any> | undefined): boolean {
+  if (!p || typeof p !== "object") return false;
+  return Object.keys(p).some((k) => k !== "grantRoot" && /grant.?root/i.test(k));
+}
+
 function grantRootOf(p: Record<string, any> | undefined): string | null {
   const raw = p?.grantRoot;
   if (typeof raw !== "string") return null;

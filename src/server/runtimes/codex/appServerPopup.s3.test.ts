@@ -152,6 +152,28 @@ describe("S3 — 폴더 전체 요청은 경고가 먼저 보인다", () => {
     expect(scopeKeyForOperation(a)).not.toBe(scopeKeyForOperation(b)); // ★그래도 열쇠는 갈려야 한다★
   });
 
+  test("★grantRoot 로 보이는 낯선 키가 있으면 해석 실패로 보낸다★ — 벤더 개명이 조용히 경고를 지우지 못하게", () => {
+    // ★빌 리뷰 후속(2026-07-30).★ 빌이 payload 를 `grant_root` 로 잘못 만들어 돌려보니
+    //   ★경고가 화면에서 사라지고 서로 다른 폴더 요청이 같은 열쇠★ 가 됐다. 0.144.6 에서는 도달 불가
+    //   (빌이 바이너리 문자열로 직접 확인: grantRoot 3건 / grant_root 0건). 그러나 ★벤더가 이름을
+    //   바꾸면 에러 없이★ 폴더 전체 권한이 평범한 파일 쓰기로 보인다 — 그래서 모르면 묻는다.
+    for (const key of ["grant_root", "GrantRoot", "grantroot", "grant-root"]) {
+      const op = buildOperationFromApproval(
+        fileReq(observed([{ path: "src/a.ts", kind: "update" }]), { [key]: "/some/root" }),
+        "dex",
+      );
+      expect(op.action).toBe("approval_unparsed");
+    }
+    // 우리가 읽는 이름은 정상 처리된다 — 가드가 정상 경로를 막지 않는다.
+    expect(root("/repo").action).toBe("write");
+    // 구세대도 같은 정책이다.
+    const old = buildOperationFromApproval(
+      { method: "applyPatchApproval", params: { fileChanges: { "a.ts": { type: "add", content: "x\n" } }, grant_root: "/r" } },
+      "dex",
+    );
+    expect(old.action).toBe("approval_unparsed");
+  });
+
   test("루트가 같으면 열쇠가 같다 — 세션 승인이 재사용된다", () => {
     expect(scopeKeyForOperation(root("/repo"))).toBe(scopeKeyForOperation(root("/repo")));
   });
