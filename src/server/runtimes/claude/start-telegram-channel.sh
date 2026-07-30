@@ -307,7 +307,19 @@ done
 STAGGER_ACQUIRE_MAX="${CLAUDE_START_STAGGER_ACQUIRE:-$(( (_claude_members - 1) * STAGGER_SETTLE_MAX + 20 ))}"
 STAGGER_STALE_CONFIRM="${CLAUDE_START_STAGGER_STALE_CONFIRM:-5}"  # 같은 죽은 pid 를 연속 관찰해야 하는 초
 _stagger_held=0
-_stagger_release() { [[ $_stagger_held -eq 1 ]] && rm -rf "$STAGGER_LOCK" 2>/dev/null || true; }
+# release 도 ★내 락인지 확인하고★ 지운다. 회수 로직이 창을 극단적으로 좁혔어도 완전히 닫지는
+#   못하므로(오회수 → 되돌리기 실패 경로가 이론상 남는다), 그 최악 결과가 '해제할 때 남의 락을
+#   지운다' 로 연쇄되는 걸 여기서 끊는다. 좁은 경합을 더 쫓는 대신 최악 결과를 없애는 쪽.
+#   (리사 리뷰 F1, 2026-07-30)
+_stagger_release() {
+  [[ $_stagger_held -eq 1 ]] || return 0
+  local _cur
+  _cur="$(cat "$STAGGER_LOCK/pid" 2>/dev/null || true)"
+  if [[ "$_cur" == "$$" ]]; then
+    rm -rf "$STAGGER_LOCK" 2>/dev/null || true
+  fi
+  return 0
+}
 
 if [[ "${CLAUDE_START_NO_STAGGER:-}" == "1" || "${CLAUDE_START_NO_STAGGER:-}" == "true" ]]; then
   echo "  Stagger     : OFF (CLAUDE_START_NO_STAGGER)"

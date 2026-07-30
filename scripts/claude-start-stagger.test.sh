@@ -129,6 +129,12 @@ for _f in outA outB; do
     || pass "$_f 상한 초과 없음"
 done
 
+# F1 회귀 가드: release 에 pid 일치 확인을 넣었으니 ★정상 경로에서는 여전히 해제돼야★ 한다.
+#   여기서 락이 남으면 다음 부팅의 모든 멤버가 상한까지 헛기다린다 — 고치려던 것보다 나쁘다.
+[[ ! -d "$TMPROOT/spawn.lock" ]] \
+  && pass "정상 종료 후 락 해제됨 (F1 이 정상 release 를 막지 않는다)" \
+  || fail "락이 남았다 — 다음 기동이 상한까지 헛기다린다"
+
 for n in "$A" "$B"; do tmux kill-session -t "claude-$n" 2>/dev/null || true; done
 
 echo "── T2: CLAUDE_START_NO_STAGGER=1 탈출구 ──"
