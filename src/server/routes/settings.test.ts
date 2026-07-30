@@ -507,6 +507,65 @@ describe("settings: 머지 승인자 설정 쓰기", () => {
     expect((await app.request("/settings", put({ github_approver_account: null }))).status).toBe(400);
   });
 
+  // ★읽기만 구현돼 있던 키 (2026-07-30)★ — GET 은 값을 주는데 PUT 이 안 받아서, 보내면
+  //   ok:true 를 받고 저장이 안 됐다. 증상이 조용해서 호출자는 저장된 줄 알고 넘어간다.
+  test("★github_team_commit_email 을 쓰고 다시 읽을 수 있다★ (읽기만 열려 있던 키)", async () => {
+    const { app } = setup();
+    const r = await app.request("/settings", put({ github_team_commit_email: "1234+bot@users.noreply.github.com" }));
+    expect(r.status).toBe(200);
+    const j = await (await app.request("/settings")).json() as any;
+    expect(j.github_team_commit_email).toBe("1234+bot@users.noreply.github.com");
+  });
+
+  test("커밋 이메일 형식 검증 — 잘못된 값은 커밋 시점에야 드러나므로 여기서 막는다", async () => {
+    const { app } = setup();
+    expect((await app.request("/settings", put({ github_team_commit_email: "not-an-email" }))).status).toBe(400);
+    expect((await app.request("/settings", put({ github_team_commit_email: "a@b" }))).status).toBe(400);
+    expect((await app.request("/settings", put({ github_team_commit_email: 123 }))).status).toBe(400);
+    // 빈 문자열은 '해제' 로 허용
+    expect((await app.request("/settings", put({ github_team_commit_email: "" }))).status).toBe(200);
+  });
+});
+
+// ★모르는 키를 조용히 버리지 않는다 (2026-07-30)★
+//   핸들러가 아는 키만 골라 처리하고 나머지를 무시한 뒤 ok:true 를 돌려줬다. 그래서 오타·미구현 키·
+//   이름이 바뀐 키가 전부 ★성공으로 보였다.★ 실패는 고칠 수 있지만 조용한 성공은 고칠 기회가 없다.
+describe("settings: 모르는 키는 400 으로 거절한다", () => {
+  test("★오타 키가 성공으로 보이지 않는다★", async () => {
+    const { app } = setup();
+    const r = await app.request("/settings", put({ github_team_email: "x@y.com" }));  // 실제 키는 _commit_email
+    expect(r.status).toBe(400);
+    const j = await r.json() as any;
+    expect(j.error).toBe("unknown_settings_key");
+    expect(j.unknown).toContain("github_team_email");
+    expect(String(j.hint)).toContain("github_team_commit_email");   // 올바른 키를 알려준다
+  });
+
+  test("아는 키와 모르는 키를 같이 보내면 ★아무것도 저장되지 않는다★", async () => {
+    const { app } = setup();
+    await app.request("/settings", put({ team_name: "before" }));
+    const r = await app.request("/settings", put({ team_name: "after", bogus_key: "x" }));
+    expect(r.status).toBe(400);
+    const j = await (await app.request("/settings")).json() as any;
+    expect(j.team_name).toBe("before");   // 모르는 키 때문에 거절 → 아는 키도 안 바뀐다
+  });
+
+  test("쓰기 가능한 키는 전부 통과한다 (거절 목록이 과하지 않다)", async () => {
+    const { app } = setup();
+    const r = await app.request("/settings", put({
+      team_name: "t", tagline: "g", owner_name: "o", owner_chat_id: "123",
+      locale: "ko", dm_capture: true,
+      github_team_account: "acct", github_team_commit_email: "a@b.co",
+      github_approver_account: "appr", merge_approvers_normal: "bill",
+    }));
+    expect(r.status).toBe(200);
+  });
+
+  test("빈 본문은 거절하지 않는다 (바꿀 게 없는 요청은 유효하다)", async () => {
+    const { app } = setup();
+    expect((await app.request("/settings", put({}))).status).toBe(200);
+  });
+
   test("빈 문자열은 '해제' 로 허용 — 설정을 되돌릴 수 있어야 한다", async () => {
     const { app } = setup();
     await app.request("/settings", put({ github_approver_account: "gd452" }));
