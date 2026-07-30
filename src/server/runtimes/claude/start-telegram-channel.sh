@@ -330,9 +330,18 @@ else
   _stale_seen=0      # 그 pid 를 연속 관찰한 횟수(초)
   while (( _waited < STAGGER_ACQUIRE_MAX )); do
     if mkdir "$STAGGER_LOCK" 2>/dev/null; then
-      _stagger_held=1
-      echo "$$" > "$STAGGER_LOCK/pid" 2>/dev/null || true
-      trap _stagger_release EXIT
+      # ★pid 를 못 적으면 락을 쥔 채로 진행하지 않는다★ — 그 상태가 ★영구 고아 락★ 을 만든다.
+      #   아래 회수 로직은 pid 를 읽어 죽었는지 보는데, ★pid 가 없으면 그 판정이 성립하지 않는다.★
+      #   실측(2026-07-30 격리 재현): pid 없는 락 폴더 하나면 그 뒤 모든 기동이 상한까지 기다렸다가
+      #   ★경합을 안고 뜨고 폴더는 영구 잔존★ 한다. 우리 기계 기준 매 기동 120초 + 경합 무방비.
+      #   적기에 실패하면 ★내가 만든 폴더를 즉시 지우고★ 락 없이 간다 — 경합 위험은 감수하되 영구화는 막는다.
+      if echo "$$" > "$STAGGER_LOCK/pid" 2>/dev/null; then
+        _stagger_held=1
+        trap _stagger_release EXIT
+        break
+      fi
+      rm -rf "$STAGGER_LOCK" 2>/dev/null || true
+      echo "  ⚠ Stagger   : 락 pid 기록 실패 — 고아 락을 안 남기려 되돌리고 락 없이 진행합니다"
       break
     fi
     # ─ stale 회수 (부팅 중 크래시가 락을 영구 점유하지 않게) ─
@@ -382,6 +391,22 @@ else
     fi
   else
     echo "  ⚠ Stagger   : 락 대기 ${STAGGER_ACQUIRE_MAX}s 초과(멤버 ${_claude_members}명 기준) — 경합 위험을 안고 계속 진행"
+    # ★락 없이 뜬 사실을 흔적으로 남긴다★ — 지금까지 이 경로는 launchd 의 /tmp 로그 한 줄이 전부였다.
+    #   고아 락 하나로 이 경로가 ★상시화★ 될 수 있는데(위 재현), 그러면 보호장치가 사실상 꺼진 채
+    #   아무도 모른다. 파일 한 줄이면 doctor·헬스체크가 나중에 주워갈 수 있다. (codex 교차검증)
+    printf '%s %s acquire_timeout=%ss members=%s\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BOT_NAME" "$STAGGER_ACQUIRE_MAX" "$_claude_members" \
+      >> "$(dirname "$STAGGER_LOCK")/.spawn-failopen.log" 2>/dev/null || true
+  fi
+  # ★스폰 직전에 '내가 아직 주인인가' 를 한 번 더 본다★ (codex HIGH1).
+  #   회수 절차가 락을 mv 로 들어내는 순간 경로가 잠깐 빈다. 그 틈에 제3자가 mkdir 로 선점하면
+  #   ★원 소유자와 선점자가 동시에 스폰★ 한다 — 이 장치가 막으려던 바로 그 상황이다.
+  #   처음 잡을 때만 확인하면 이 창을 못 막는다. 확인 지점을 ★쓰기 직전★ 으로 한 번 더 둔다.
+  #   내 것이 아니면 홀더 자격을 내려놓는다(그래야 뒤에서 남의 락을 지우지도 않는다).
+  if [[ $_stagger_held -eq 1 ]] && [[ "$(cat "$STAGGER_LOCK/pid" 2>/dev/null || true)" != "$$" ]]; then
+    _stagger_held=0
+    trap - EXIT
+    echo "  ⚠ Stagger   : 스폰 직전 확인 결과 락이 남의 것으로 바뀌었습니다 — 홀더 자격을 내려놓고 진행합니다"
   fi
 fi
 
