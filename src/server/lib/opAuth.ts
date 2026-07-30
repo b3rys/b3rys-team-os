@@ -84,7 +84,13 @@ export function trustedActorFromRequest(
   if (actor && isLoopbackDashboardRequest(request) && ACTOR_RE.test(actor)) {
     return { ok: true, actor: { actor, source: "loopback_dashboard" } };
   }
-  return fromHeaders;
+  // ★여기서 실패한 이유는 "헤더가 없다" 가 아니라 "이 주소를 못 믿는다" 다.★ (팀장님 지적 2026-07-30)
+  //   앞서는 위에서 만들어둔 `fromHeaders`(= x_actor_id_required)를 그대로 돌려줬다. 그런데
+  //   그 값을 만든 함수는 ★주소를 한 번도 안 본다★ — 헤더만 본다. 그래서 화면에도 로그에도
+  //   ★대시보드가 쓰지도 않는 헤더 이름★ 이 남았고, 원인을 찾는 사람을 엉뚱한 데로 보냈다.
+  //   이름은 `not_local_dashboard` 가 아니라 `dashboard_host_not_trusted` 다(steve) —
+  //   이 검사는 loopback ★또는 등록된 주소★ 면 통과하므로, 로컬만 조건인 것처럼 읽히면 안 된다.
+  return { ok: false, error: "dashboard_host_not_trusted", status: 403 };
 }
 
 /**

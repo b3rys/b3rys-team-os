@@ -57,7 +57,8 @@ import { writeMemberPersona, savePersonaFile } from "./lib/writeMemberPersona";
 import { persistOwnerChatIdIfEmpty } from "./runtimes/codex/launcher";
 import { createApprovalsApp } from "./routes/approvals";
 import { createPermissionGateRoutes } from "./routes/permissionGate";
-import { configureLeadActorDb } from "./lib/opAuth";
+import { configureLeadActorDb, leadActorId, trustedActorFromRequest } from "./lib/opAuth";
+import { createHostGate } from "./lib/hostGate";
 import { DEFAULT_MEDIA_DIR, contentTypeForMediaFile, resolveMediaPath } from "./lib/mediaStore";
 import type { WsEvent } from "./types";
 
@@ -218,6 +219,17 @@ api.use("*", async (c, next) => {
   await next();
   c.header("Cache-Control", "no-store, max-age=0, must-revalidate");
 });
+
+/**
+ * ★신뢰하지 않는 주소는 한 곳에서 막는다 — 읽기까지.★ (팀장님 지시 2026-07-30)
+ * 판정과 응답 형태는 lib/hostGate.ts 에 있다(그쪽에 왜 이렇게 하는지 적어뒀다).
+ * 여기서는 "어디에 거는가" 만 정한다 — `app` 전체(대시보드 + `/api`)와 `/reports` 포털.
+ */
+function requestIsTrusted(request: Request): boolean {
+  return trustedActorFromRequest(request, { loopbackDashboardActor: leadActorId(db) }).ok;
+}
+
+app.use("*", createHostGate({ isTrusted: requestIsTrusted }));
 
 api.get("/agents", (c) => {
   const all = listAgents(db);
@@ -622,7 +634,12 @@ rootApp.route(BASE_PATH, app);
 // 팀 결과물 포털 — /team 형제로 노출. 허브 next.config.ts rewrite 로 your-team.example.com/reports.
 // (2026-06-07 GD: /research 취소 — 모든 팀 산출물을 /reports 에 category 로 구분해 통합.)
 const portalDeps = { db, reportsDir: REPORTS_DIR, researchDir: RESEARCH_DIR, webDir: WEB_DIR };
-rootApp.route("/reports", createReportsApp(portalDeps));
+// ★포털에도 같은 관문★ — 보고서 공유 링크가 여기로 온다. 등록되지 않은 주소에서는 같은 안내를 보여준다.
+//   (팀장님 판단: 링크는 받아서 전달할 수 있고, 필요하면 그 주소를 등록해서 열어주면 된다)
+const reportsApp = new Hono();
+reportsApp.use("*", createHostGate({ isTrusted: requestIsTrusted, isApiPath: () => false }));
+reportsApp.route("/", createReportsApp(portalDeps));
+rootApp.route("/reports", reportsApp);
 rootApp.get("/reports/", (c) => c.redirect("/reports"));
 
 // ★포트 점유 가드 (fresh-user 막다름 방지)★ — Bun.serve 는 포트 사용중이면 EADDRINUSE 를 던진다.

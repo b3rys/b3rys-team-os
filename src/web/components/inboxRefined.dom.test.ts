@@ -2,7 +2,7 @@
  * Inbox-refined — DOM proof: default action-required filter + activity_assumed category.
  * (Separate file from inboxAudit.dom.test.ts to avoid stepping on concurrent Phase2 edits.)
  */
-import { describe, expect, test, beforeAll, afterEach } from "bun:test";
+import { describe, expect, test, beforeAll, afterAll, afterEach } from "bun:test";
 import { Window } from "happy-dom";
 
 // Good citizen: clear any roots we mounted so a later test file (shared global document)
@@ -12,15 +12,39 @@ afterEach(() => {
   if (b) b.innerHTML = "";
 });
 
+// ★여기서 심은 전역은 여기서 걷는다.★ (2026-07-30)
+//   앞서는 `g.Response = win.Response` 를 심어놓고 되돌리지 않았다. bun test 는 파일들을 한 프로세스에서
+//   돌리므로, 그 뒤에 도는 ★다른 파일의 서버 테스트가 happy-dom 의 Response 를 쓰게 된다.★
+//   그러면 Hono 가 붙인 헤더가 사라진다 — 실측: content-type 이 text/html 대신 text/plain 이 됐다.
+//   ★단독 실행은 통과하고 전체 실행만 깨진다★ 는 형태라, 원인을 코드에서 찾으면 못 찾는다
+//   (hostGate 테스트가 그렇게 깨져서 여기까지 왔다).
+const installedGlobals: string[] = [];
+const savedGlobals: Record<string, unknown> = {};
+
 beforeAll(() => {
   const g = globalThis as Record<string, unknown>;
   if (!g.document) {
     const win = new Window();
-    g.window = win;
-    g.document = win.document;
-    g.MutationObserver = win.MutationObserver;
-    g.Response = win.Response ?? globalThis.Response;
+    for (const [k, v] of [
+      ["window", win],
+      ["document", win.document],
+      ["MutationObserver", win.MutationObserver],
+      ["Response", win.Response ?? globalThis.Response],
+    ] as const) {
+      savedGlobals[k] = g[k];
+      installedGlobals.push(k);
+      g[k] = v;
+    }
   }
+});
+
+afterAll(() => {
+  const g = globalThis as Record<string, unknown>;
+  for (const k of installedGlobals) {
+    if (savedGlobals[k] === undefined) delete g[k];
+    else g[k] = savedGlobals[k];
+  }
+  installedGlobals.length = 0;
 });
 
 function mkMsg(id: string, recipients: Array<{ agent_id: string; recipient_state: string; close_reason: string | null }>) {
