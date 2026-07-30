@@ -47,6 +47,24 @@ ID 없이 이름만 적어 올리면 **채널에는 보이지만 알림이 아�
 
 **ID 를 어디에 두나 — 저장소에 넣지 마세요.**
 member ID 는 워크스페이스 고유 값이고 공개 저장소에 둘 값이 아닙니다.
+### 이름 사전 만들기 — `bash bin/slack-members-sync.sh --apply`
+
+`--mention <이름>` 을 쓰려면 이름→ID 사전이 있어야 합니다. **손으로 만들지 마세요** —
+슬랙 UI 에서 멤버 ID 를 찾는 건 메뉴 위치가 앱이 아니라 `api.slack.com` 이라 실제로 못 찾습니다.
+
+```bash
+bash bin/slack-members-sync.sh          # 미리보기
+bash bin/slack-members-sync.sh --apply  # slack-tokens/members.env 갱신
+```
+
+`users.list` API 로 워크스페이스 전원을 받아 씁니다. 봇 접두사를 뗀 짧은 이름(`lisa`)과
+원본 이름(`gdlisa`) 을 **둘 다** 넣으므로 어느 쪽으로 불러도 됩니다.
+사람이 늘거나 이름이 바뀌면 다시 돌리면 됩니다.
+
+> `missing_scope` 가 나오면 봇에 `users:read` 가 없는 것입니다 —
+> `https://api.slack.com/apps` → 앱 → **OAuth & Permissions** → Bot Token Scopes →
+> `users:read` 추가 → 페이지 위 **Reinstall**.
+
 `slack-post.sh` 는 `slack-tokens/members.env` 에서 이름→ID 를 읽습니다(이 폴더는 `.gitignore` 에
 있어 커밋되지 않습니다):
 
