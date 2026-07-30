@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { canonicalCategory, DEFAULT_REPORT_CATEGORY, REPORT_CATEGORIES } from "../lib/reportCategory";
 import { Buffer } from "node:buffer";
 import { nanoid } from "nanoid";
 
@@ -140,7 +141,7 @@ export function listReports(db: Database): ReportMeta[] {
   return attachTags(db, rows.map(rowToReport));
 }
 
-const DEFAULT_REPORT_CATEGORY = "보고서";
+// 기본 분류는 lib/reportCategory 의 정본을 쓴다 — 여기 따로 두면 두 곳이 갈린다(오늘 고치는 게 그 문제다).
 const CATEGORY_EXPR = `COALESCE(NULLIF(TRIM(category), ''), '${DEFAULT_REPORT_CATEGORY}')`;
 const MAX_REPORT_PAGE_SIZE = 100;
 type DbArg = string | number | boolean | null;
@@ -257,6 +258,15 @@ export function upsertReport(
   // date = 실제 작성일(있으면 created_at 으로). 없으면 INSERT 시 now / 갱신 시 기존값 유지.
   // created_at = 정렬·표시 기준(보고서 작성일). 등록시각은 updated_at 으로 충분.
   const date = input.date ?? null;
+  // ★분류는 세 개(보고서·리서치·교육자료)로만 저장한다★ (팀장님 지시 2026-07-30).
+  //   자유 문자열이던 탓에 같은 뜻이 표기별로 갈렸다 — 리서치/research/AI 리서치/AI Research 가
+  //   전부 따로 세어져 화면 알약이 9개로 늘었고, 팀장님이 그것을 태그로 오인하셨다.
+  //   ★db 층에 두는 이유★: 라우트 두 곳·정리 스크립트가 각자 접으면 또 갈린다. 넣는 문이 하나여야 한다.
+  //   모르는 표기는 기본값으로 접되 ★조용히 하지 않는다★ — 올린 사람이 자기 분류가 사라진 걸 모르면
+  //   그게 오늘 하루 우리를 괴롭힌 '무증상' 이다.
+  const category = canonicalCategory(input.category, (original) => {
+    console.warn(`[reports] 알 수 없는 분류 "${original}" → "${DEFAULT_REPORT_CATEGORY}" 로 저장합니다 (분류는 ${REPORT_CATEGORIES.join("·")} 만 씁니다)`);
+  });
   db.query(
     `INSERT INTO report (id, title, author, summary, category, forms_json, project, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
@@ -264,7 +274,7 @@ export function upsertReport(
        title=excluded.title, author=excluded.author, summary=excluded.summary,
        category=excluded.category, forms_json=excluded.forms_json, project=excluded.project,
        created_at=COALESCE(?, report.created_at), updated_at=datetime('now')`,
-  ).run(id, input.title, input.author ?? null, input.summary ?? null, input.category ?? null, forms_json, input.project ?? null, date, date);
+  ).run(id, input.title, input.author ?? null, input.summary ?? null, category, forms_json, input.project ?? null, date, date);
   return getReport(db, id)!;
 }
 
