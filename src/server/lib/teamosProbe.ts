@@ -288,18 +288,25 @@ export function judgeScheduledJob(
   // ★새 시각 파서를 만들지 않는다★ — 스케줄러가 자기 컬럼을 읽는 방식(fromSqliteDate)을 그대로 쓴다.
   //   판정과 저장이 다른 규칙을 쓰면 KST 서버에서 정확히 9시간 어긋난다(utcTimestamp.contract.test 의 교훈).
   const overdueMs = row.next_run_at ? nowMs - fromSqliteDate(row.next_run_at).getTime() : Number.NaN;
-  const isFailed = row.status === "failed";
+  // ★꺼둔 잡은 고장이 아니다★ — 사람이 내린 결정이지 늦은 게 아니다.
+  //   끈 잡의 next_run_at 은 끈 시점에 멈춰 있어서 시간이 갈수록 저절로 과거가 된다. 그래서 이 갈래가 없으면
+  //   ★끄면 끌수록 더 빨갛게★ 된다. 실측: 2주 전에 꺼둔 sched_b3os_native_nightly 가 배포 4분 만에
+  //   "★22195분 밀림★" 으로 떴다(2026-07-30). ★거짓 경보를 막겠다고 만든 판정이 첫 배포에서 거짓 경보를 냈다.★
+  //   내 시험이 왜 못 잡았나: 꺼진 잡 사례를 ★미래 시각★ 으로 썼다. 실제로 존재하는 모양은 '꺼짐 + 과거 시각' 이다.
+  const isEnabled = row.enabled === 1;
+  const isFailed = isEnabled && row.status === "failed";
   // 리스가 아직 살아 있는 실행 중 = 늦은 게 아니라 ★지금 하는 중★ 이다.
   const leaseMs = row.lock_until ? fromSqliteDate(row.lock_until).getTime() : Number.NaN;
   const isRunningNow = row.status === "running" && Number.isFinite(leaseMs) && leaseMs > nowMs;
   // 시각이 없거나 파싱 불가면 ★밀림으로 단정하지 않는다★ — 모르는 것은 모른다고 둔다(거짓 경보 금지).
-  const isOverdue = !isRunningNow && Number.isFinite(overdueMs) && overdueMs > OVERDUE_GRACE_SEC * 1000;
+  const isOverdue =
+    isEnabled && !isRunningNow && Number.isFinite(overdueMs) && overdueMs > OVERDUE_GRACE_SEC * 1000;
   // 재시도 대기: 다음 차례는 잡혀 있는데 ★직전 시도가 실패했다.★
   //   last_error 는 성공 시 NULL 로 지워지고 실패 시 채워지므로 "직전 시도 결과" 신호가 된다.
-  const isRetrying = !isFailed && !isOverdue && row.status === "pending" && !!row.last_error;
+  const isRetrying = isEnabled && !isFailed && !isOverdue && row.status === "pending" && !!row.last_error;
   return {
     // "예정대로 살아있나" = 켜져 있고 · 다음 실행이 잡혀 있고 · 정지/밀림/재시도 중이 아니다.
-    running: row.enabled === 1 && !!row.next_run_at && !isFailed && !isOverdue && !isRetrying,
+    running: isEnabled && !!row.next_run_at && !isFailed && !isOverdue && !isRetrying,
     problem: isFailed ? "failed" : isOverdue ? "overdue" : isRetrying ? "retrying" : null,
     overdueMin: Number.isFinite(overdueMs) ? Math.floor(overdueMs / 60000) : 0,
   };
