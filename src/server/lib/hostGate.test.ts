@@ -60,6 +60,14 @@ describe("신뢰하지 않는 주소 — 막는다", () => {
     expect(html).toContain("studio.b3rys.com");
     expect(html).toContain("팀원에게 이대로 물어보세요");
     expect(html).toContain("TEAM_TRUSTED_DASHBOARD_HOSTS");
+    // ★등록이 무엇을 뜻하는지 같이 말해야 한다★ (팀장님 2026-07-30)
+    //   "등록하면 열린다" 만 알려주면, 인터넷에 그냥 열린 주소를 등록하게 된다.
+    //   그날 실제로 그런 주소가 있었고, 쓰기를 막던 유일한 장치가 이 검사였다.
+    expect(html).toContain("팀리드 권한");
+    expect(html).toContain("로그인 관문");
+    // ★등록해도 안 열리는 조건도 같이★ (hermes 교차검증) — 이 문단만 읽는 사람은
+    //   "등록 + 재시작 = 열린다" 로 읽는다. TEAM_BIND 가 루프백이 아니면 무시된다.
+    expect(html).toContain("TEAM_BIND");
   });
 
   test("★안내 페이지는 자체 포함이어야 한다★ — 이 상황에선 assets 도 막힌다", async () => {
