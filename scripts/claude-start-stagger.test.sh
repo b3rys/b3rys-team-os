@@ -182,6 +182,9 @@ grep -q "경합 위험을 안고 계속 진행" <<<"$out" \
   && pass "상한까지 기다린 뒤 경고 경로 (기동은 막지 않음)" \
   || fail "예상한 상한 초과 경로가 아니다"
 [[ -d "$TMPROOT/spawn.lock" ]] && pass "선점 락이 그대로 남아있다" || fail "선점 락이 사라졌다"
+# ★락 없이 뜬 사실이 기록으로 남는가★ — 지금까지 이 경로는 launchd /tmp 로그 한 줄이 전부였다.
+#   보호장치가 꺼진 채 도는 상황을 ★나중에 재서 판단하려면★ 흔적이 남아야 한다. (codex 교차검증)
+[[ -s "$TMPROOT/.spawn-failopen.log" ]] && pass "fail-open 기록 남음" || fail "락 없이 떴는데 기록이 없다"
 kill "$LIVE_PID" 2>/dev/null || true
 tmux kill-session -t "claude-$A" 2>/dev/null || true
 
