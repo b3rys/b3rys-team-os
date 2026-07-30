@@ -184,10 +184,27 @@ session_age_sec() {  # session_age_sec <세션이름> — 못 구하면 빈 문�
 }
 
 # 갓 뜬 세션인가 (= 아직 poller 를 쓸 시간이 없었을 수 있다)
+# ★세션이 '아직 없는' 창도 기동 중이다★ (steve 교차검증, 2026-07-30)
+#   유예는 세션 생성 시각부터 잰다. 그런데 ★위험한 창은 세션이 생기기 전에 시작된다.★
+#   부팅 때 launchd 가 claude 멤버를 동시에 띄우면 런처가 스폰 mutex 로 직렬화하고,
+#   대기 상한은 (멤버수-1)×SETTLE+20 이다 — 우리 기계 5명 기준 ★최대 120초★.
+#   그동안 그 멤버는 ★tmux 세션이 아예 없는 상태로 락을 기다린다.★
+#   전에는 이 창이 'age 를 못 구함 → 기동 중 아님' 으로 떨어져 ★보호가 0★ 이었고,
+#   up 은 정확히 부팅 직후에 쓰는 도구라 오탐 인구가 거기 몰려 있었다.
+#   ★그런데 '세션 없음 = 항상 기동 중' 으로 두면 안 된다★ — 진짜 영구 다운을 영영 안 고치게 된다.
+#   그래서 ★그 멤버의 런처가 실제로 돌고 있는지★ 를 본다. 돌고 있으면 기다리는 중이고, 아니면 다운이다.
+launcher_running() {  # launcher_running <팀원이름> — 그 멤버의 런처 프로세스가 떠 있나
+  pgrep -f "start-telegram-channel\.sh.*[[:space:]]$1([[:space:]]|$)" >/dev/null 2>&1
+}
+
 member_booting() {  # member_booting <팀원이름>
   local age
   age="$(session_age_sec "claude-$1")"
-  [ -n "$age" ] || return 1
+  if [ -z "$age" ]; then
+    # 세션이 없다 — 런처가 돌고 있으면 '기동 중'(락 대기), 아니면 진짜 다운이다.
+    launcher_running "$1"
+    return $?
+  fi
   [ "$age" -lt "$POLLER_BOOT_GRACE" ]
 }
 
