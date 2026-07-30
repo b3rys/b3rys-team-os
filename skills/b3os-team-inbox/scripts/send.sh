@@ -1,6 +1,9 @@
 #!/bin/bash
 # Send a message via the team-collab inbox.
 # Usage: send.sh --to <agent_id> (--body "..." | --body-file <경로>) [--thread <id>] [--in-reply-to <msg_id>]
+#                [--mention <U…|이름>]              ★슬랙 스레드일 때만★ — 알림 받을 사람(반복 가능).
+#                                                   안 주면 슬랙엔 올라가도 알림이 아무에게도 안 갑니다(경고함).
+#                                                   이름 사전 = slack-tokens/members.env (slack-post.sh 와 공유)
 #                [--confirm [초]]                  배달됐는지 실제로 확인하고 사실을 말한다.
 #                                                   ★본문에 홑따옴표·백틱·$(cmd)·$VAR 가 있으면 --body-file 을 쓰세요★
 #                                                   — --body 로 넘기면 셸이 해석해서 본문이 조용히 훼손됩니다(실측 2건).
@@ -22,7 +25,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 BASE="${TEAM_BASE:-http://127.0.0.1:7878/team}"
 
 TO=""; BODY=""; THREAD=""; REPLY_TO=""; TYPE="dm"; PRIORITY="normal"; FROM=""; HOP=""; SYNC=""; DIRECT_TO_GD=""; SOURCE_THREAD=""; EXPECT_REPORT_BY=""; INDIVIDUAL=""; EPISODE=""
-BODY_FILE=""; BODY_SET=""; CONFIRM=""
+BODY_FILE=""; BODY_SET=""; CONFIRM=""; MENTIONS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -34,6 +37,9 @@ while [ $# -gt 0 ]; do
     #   · 홑따옴표가 문자열을 끊어 인자 파싱 오류로 죽었다 — 이건 죽어서 오히려 알아챌 수 있었다
     #   회피법(--body "$(cat 파일)")이 있었지만 ★아는 사람만 안전한 것은 고쳐진 게 아니다.★
     --body-file) BODY_FILE="$2"; shift 2 ;;
+    # --mention <U…|이름>: 반복 가능. ★슬랙 스레드로 나갈 때만★ 본문 맨 앞에 <@ID> 를 붙인다.
+    #   slack-post.sh 와 ★같은 옵션 이름·같은 값 형식·같은 사전★ 이다(두 도구의 규약을 하나로).
+    --mention) MENTIONS="$MENTIONS $2"; shift 2 ;;
     --thread) THREAD="$2"; shift 2 ;;
     --in-reply-to) REPLY_TO="$2"; shift 2 ;;
     --type) TYPE="$2"; shift 2 ;;
@@ -136,6 +142,41 @@ if [ -z "$BODY_FILE" ]; then
   BODY=$(BODY="$BODY" python3 -c 'import os, sys; sys.stdout.write(os.environ["BODY"].replace("\\n", "\n").replace("\\t", "\t"))')
 fi
 
+# ─── 슬랙 멘션 ────────────────────────────────────────────────────────────
+# ★멘션이 없으면 슬랙에 글은 올라가도 알림이 아무에게도 안 간다.★
+#   실측(2026-07-30): 내가 이 경로로 올린 7건 중 6건이 멘션 없이 나갔고, 답을 기다리던 사람에게
+#   ★알림이 한 번도 안 갔다.★ slack-post.sh 에는 --mention 도 경고도 있는데 ★이 경로에만 없었다★ —
+#   즉 그 경고를 봐야 할 사람이 경고가 없는 쪽으로만 다녔다.
+#   ★막지는 않는다★: "슬랙에 정리해서 올려줘" 처럼 받는 사람이 없는 게시도 정당하다(slack-post 와 같은 판단).
+#   그래서 옵션은 선택이고, 안 줬을 때 ★알려만 준다★.
+#   ID 는 저장소에 두지 않는다 — slack-tokens/members.env(.gitignore)에서 이름→ID 를 찾고,
+#   원시 ID(U…/W…)는 그대로 받는다. slack-post.sh 와 ★같은 사전·같은 해석★ 이다.
+MEMBERS_FILE="${SLACK_MEMBERS_FILE:-$(cd "$HERE/../../.." && pwd)/slack-tokens/members.env}"
+resolve_mention() {  # resolve_mention <원시ID|이름> -> ID 또는 빈 문자열
+  local v="$1"
+  v="${v#<@}"; v="${v%>}"
+  case "$v" in [UW][A-Z0-9]*) printf '%s' "$v"; return 0 ;; esac
+  [ -f "$MEMBERS_FILE" ] || return 1
+  awk -F= -v want="$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')" '
+    /^[[:space:]]*#/ || !/=/ { next }
+    { k=$1; gsub(/^[[:space:]]+|[[:space:]]+$/, "", k); v2=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", v2)
+      if (tolower(k) == want) { print v2; exit } }' "$MEMBERS_FILE"
+}
+for _m in $MENTIONS; do
+  _id="$(resolve_mention "$_m")"
+  if [ -z "$_id" ]; then
+    echo "ERROR: --mention '$_m' 을 member ID 로 풀 수 없습니다." >&2
+    echo "  원시 ID(U…)를 직접 주거나, $MEMBERS_FILE 에 '이름=U01234567' 을 추가하세요." >&2
+    exit 1
+  fi
+  case "$BODY" in *"<@$_id>"*) continue ;; esac   # 본문에 이미 있으면 중복으로 안 붙인다
+  # ★멘션은 자기 줄에 둔다★ (steve 지적) — 같은 줄에 붙이면 본문이 ``` 로 시작할 때
+  #   여는 펜스가 줄 맨 앞이 아니게 되어 멘션이 코드블록 안으로 끌려들어갈 수 있다.
+  #   사람이 쓰는 모양과도 같다.
+  BODY="<@$_id>
+$BODY"
+done
+
 # Build JSON via python to handle escaping safely.
 PAYLOAD=$(BODY="$BODY" FROM="$FROM" TO="$TO" THREAD="$THREAD" REPLY_TO="$REPLY_TO" TYPE="$TYPE" PRIORITY="$PRIORITY" HOP="$HOP" SYNC="$SYNC" DIRECT_TO_GD="$DIRECT_TO_GD" SOURCE_THREAD="$SOURCE_THREAD" EXPECT_REPORT_BY="$EXPECT_REPORT_BY" INDIVIDUAL="$INDIVIDUAL" EPISODE="$EPISODE" python3 -c "
 import json, os
@@ -198,6 +239,28 @@ else:
 #   위 명령치환이 id 를 ★내부 변수로만★ 받고 stdout 에는 아무것도 안 나갔다. 실측: MSGID=$(send.sh …)
 #   가 빈 문자열이 됐다. 문서가 약속한 것을 코드가 지키지 않으면 그 문서를 믿은 쪽이 조용히 깨진다.
 printf '%s\n' "$MSG_ID"
+
+# ★멘션이 없으면 알려준다★ — 실패로 만들지는 않는다.
+#   "슬랙에 정리해서 올려줘" 처럼 받는 사람이 없는 게시는 멘션이 없는 게 맞다(slack-post 와 같은 판단).
+#   문제는 ★받는 사람이 있는데 안 붙인 경우★ 이고, 그건 보낸 사람만 안다 — 판단을 대신하지 않고 사실만 알린다.
+#
+# ★슬랙인지 서버에 물어보지 않는다★ (steve 교차검증, 2026-07-30):
+#   처음엔 `GET /api/messages/<id>` 응답에 "slack 이 있는지" 로 판정했다. 그 응답에는
+#   ★슬랙을 뜻하는 필드가 아예 없다★ — 슬랙 발신 판단은 message 행이 아니라 디스패처가 런타임에 한다.
+#   실측 결과 판정이 ★정확히 뒤집혀 있었다★: thread_id 가 slack 으로 시작하는 평범한 팀 DM(라이브 16건)에는
+#   경고가 뜨고, ★진짜 슬랙 발신에서는 안 떴다.★ 즉 잔소리는 엉뚱한 데 하고 정작 막으려던 자리에선 침묵한다.
+#   알 수 없는 것을 아는 척하면 사람이 곧 경고를 무시하게 되고, 그게 이 기능을 무력화한다.
+#   → ★모르는 것은 흉내내지 않는다.★ 슬랙으로 릴레이되는 실제 경로(--to broadcast)에서 멘션이 없으면
+#     그냥 안내한다. 거짓 경보도 놓침도 사라지고, 조회 실패 시 침묵하는 문제도 같이 없어진다.
+if [ -z "$MENTIONS" ] && [ "$TO" = "broadcast" ]; then
+  case "$BODY" in
+    *"<@"*) : ;;   # 본문에 직접 넣었다 — 알릴 것 없음
+    *)
+      echo "⚠ 멘션이 없습니다 — 슬랙 스레드였다면 ★아무에게도 알림이 가지 않습니다★." >&2
+      echo "  받는 사람이 있으면: --mention <이름|U…>  (받는 사람 없는 공지면 그대로 두셔도 됩니다)" >&2
+      ;;
+  esac
+fi
 
 [ -z "$CONFIRM" ] && exit 0
 
