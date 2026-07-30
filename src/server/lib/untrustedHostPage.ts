@@ -46,12 +46,14 @@ export function untrustedHostPage(host: string): string {
         white-space:pre-wrap; word-break:break-word; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
         font-size:13px; color:#dfe3ec; }
   .why { margin-top:22px; padding-top:16px; border-top:1px solid #262b36; font-size:13px; color:#8d94a3; }
+  .warn { margin-top:10px; padding:10px 12px; border-radius:6px; background:#2a2118; border:1px solid #4a3a22; color:#d9c08a; }
   code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
   @media (prefers-color-scheme: light) {
     body { background:#f6f7f9; color:#1b1f27; }
     .card { background:#fff; border-color:#e2e5ea; }
     p { color:#4d5563; } .host, pre { background:#f1f3f6; color:#1b1f27; } pre { border-color:#e2e5ea; }
     .why { color:#6b7280; border-top-color:#e2e5ea; }
+    .warn { background:#fdf6e3; border-color:#e8d9a8; color:#7a5c14; }
   }
 </style></head>
 <body><div class="card">
@@ -64,6 +66,8 @@ export function untrustedHostPage(host: string): string {
   <div class="why">
     등록은 서버의 <code>.env</code> 에 <code>TEAM_TRUSTED_DASHBOARD_HOSTS</code> 한 줄을 넣고
     서버를 다시 띄우면 됩니다. 콤마로 여러 개, <code>*.</code> 로 하위 주소 전체를 적을 수 있습니다.
+    <div class="warn">등록하는 순간 <b>그 주소로 들어온 사람은 누구든 팀리드 권한</b>을 얻습니다.
+    내부망 주소이거나, 앞에 로그인 관문(Cloudflare Access·사내 SSO 등)이 있는 주소만 등록하세요.</div>
   </div>
 </div></body></html>`;
 }
