@@ -82,10 +82,18 @@ export function parseRepoFromRemote(url: string): string | null {
     return null;
   }
   if (!host(u.hostname)) return null;
-  // ★path 만 본다★ — query·fragment 는 버린다(원격 주소에 있을 이유가 없다)
-  const seg = u.pathname.split("/").filter(Boolean);
-  if (seg.length !== 2) return null; // owner/repo 정확히 둘. 더 깊으면 GitHub 원격이 아니다
-  return normalizeRepoSlug(seg[0]!, seg[1]!);
+  // ★query·fragment 가 있으면 거절한다 — 버리지 않는다.★ (hermes 교차검증 3회전, 2026-07-30)
+  //   앞선 판은 pathname 만 보고 나머지를 조용히 버려서 `…/widgets.git?x=1` 이 정상 원격으로 통과했다.
+  //   scp 형식에서는 같은 입력이 null 이라 ★두 형식의 규칙이 서로 달랐다.★
+  //   원격 주소에 query·fragment 가 있을 이유가 없으므로 ★모르는 입력으로 보고 거절한다★
+  //   (버리면 "우리가 이해한 주소" 를 지어내는 것이고, 그건 이 함수가 하지 않기로 한 일이다).
+  if (u.search || u.hash) return null;
+  // ★빈 조각도 실패다★ — `acme//widgets` 를 filter 로 지우면 없던 주소를 정상으로 만든다.
+  //   맨 끝 슬래시 하나만 흔한 표기라 허용한다.
+  const path = u.pathname.replace(/\/$/, "");
+  const seg = path.split("/").slice(1); // 맨 앞은 항상 "" (pathname 은 / 로 시작)
+  if (seg.length !== 2 || !seg[0] || !seg[1]) return null;
+  return normalizeRepoSlug(seg[0], seg[1]);
 }
 
 /** 설치본의 origin 을 `.git/config` 에서 읽는다. ★git 을 실행하지 않는다★(요청마다 프로세스를 띄우지 않으려고).

@@ -207,6 +207,15 @@ describe("저장소 해석 — 우리 저장소를 박아두지 않는다", () =
       // 이름 규칙 밖
       ["https://github.com/-bad/widgets", null],
       ["https://github.com/acme/..", null],
+      // ★query·fragment 는 버리지 않고 거절한다★ (hermes 3회전) — 버리면 없던 주소를 지어내는 것이고,
+      //   scp 형식(git@github.com:acme/widgets?x=1 → null)과 규칙이 갈렸다.
+      ["https://github.com/acme/widgets.git?x=1", null],
+      ["https://github.com/acme/widgets#frag", null],
+      ["git@github.com:acme/widgets?x=1", null],
+      // ★빈 조각도 실패★ — filter 로 지우면 acme//widgets 가 정상 주소가 된다
+      ["https://github.com/acme//widgets", null],
+      ["https://github.com/acme/widgets//", null],
+      ["https://github.com//widgets", null],
     ];
     for (const [url, want] of cases) {
       expect([url, parseRepoFromRemote(url)]).toEqual([url, want]);
