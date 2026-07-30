@@ -61,6 +61,7 @@ archiving/
 !/docs/AUTO_HEAL_CORE.md
 !/docs/SLACK_SETUP.md
 !/docs/remote-access.md
+!/docs/public-dashboard.md
 !/docs/BUILD_MODES.md
 # 공개-참조되는 값-청결 워크플로우/카탈로그 문서 (tracked 코드·README·멤버 로드가 참조 — untrack 시 스킬발견/온보딩 깨짐)
 !/docs/B3OS_SKILLS.md
