@@ -48,12 +48,14 @@ import { untrustedHostPage } from "./untrustedHostPage";
 export interface HostGateDeps {
   /** 이 요청을 신뢰하는가. 실제로는 `trustedActorFromRequest(...).ok` 를 넘긴다. */
   isTrusted: (request: Request) => boolean;
-  /** true 면 API 로 보고 JSON 을 돌려준다. 기본은 경로에 `/api/` 가 있는지. */
-  isApiPath?: (path: string) => boolean;
+}
+
+/** 기계가 부르는 자리인가 — 그러면 JSON, 아니면 사람이 읽을 페이지. */
+function isApiPath(path: string): boolean {
+  return path.includes("/api/");
 }
 
 export function createHostGate(deps: HostGateDeps) {
-  const isApiPath = deps.isApiPath ?? ((path: string) => path.includes("/api/"));
   return async (c: Context, next: Next) => {
     const path = c.req.path;
     if (deps.isTrusted(c.req.raw)) return next();
