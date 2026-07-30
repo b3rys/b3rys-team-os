@@ -56,6 +56,11 @@ let _root: HTMLElement | null = null;
 let _all: Report[] = [];
 let _loaded = false;
 let _loading = false;
+// ★목록을 다시 받는 중인지 — 로딩 띠 전용 플래그★
+//   _loading 을 그대로 쓸 수 없다: loadReportsPage 가 그것을 ★재진입 가드★ 로도 쓰고(`if (_loading) return`),
+//   값을 켜는 시점도 renderList 다음이다. 그래서 _loading 으로 띠를 그리면 ★첫 페인트에 꺼져 있고,
+//   미리 켜면 로딩 자체가 막힌다.★ 신호가 판정부에 도달하지 않는 그 형태라 플래그를 따로 둔다.
+let _reloading = false;
 let _loadError: string | null = null;
 let _hasMore = false;
 let _nextCursor: string | null = null;
@@ -287,8 +292,13 @@ async function reloadList(opts: { preserveScroll?: boolean; restoreSearchFocus?:
   _nextCursor = null;
   _hasMore = false;
   _loaded = false;
+  _reloading = true;
   renderList();
-  await loadReportsPage(true);
+  try {
+    await loadReportsPage(true);
+  } finally {
+    _reloading = false;
+  }
   if (opts.restoreSearchFocus) _restoreSearchFocus = true;
   renderList();
   if (opts.restoreSearchFocus) {
@@ -671,6 +681,13 @@ function renderList(): void {
     <div class="text-xs text-slate-500 mb-4">${escape(_loadError || "unknown error")}</div>
     <button id="reports-retry" class="px-3 py-1.5 rounded-lg border border-surface-3 bg-surface-2 text-sm text-slate-200 hover:bg-surface-3">${pick("다시 시도", "Retry")}</button>
   </div>`;
+  // ★분류·태그를 누르면 목록을 다시 받아오는데, 그 사이 화면이 예전 목록을 그대로 보여줬다★
+  //   (팀장님: "카테고리를 누르거나 하면 느린데.. 로딩되는 바도 좀 넣어봐"). 눌렀는데 아무 반응이 없으면
+  //   사람은 안 눌린 줄 알고 또 누른다 — 오늘 우리가 계속 만난 '무증상' 과 같은 모양이다.
+  //   새 키프레임을 만들지 않고 이미 쓰는 animate-pulse 로 얇은 띠 하나만 둔다.
+  const loadingBar = _reloading
+    ? `<div class="mb-3 h-0.5 w-full overflow-hidden rounded-full bg-surface-3"><div class="h-full w-full animate-pulse bg-accent-green"></div></div>`
+    : "";
   const loadMore = items.length
     ? `<div class="py-4 text-center text-[12px] text-slate-500" data-reports-page-status>${_loading ? pick("더 불러오는 중…", "Loading more…") : _hasMore ? pick("아래로 스크롤하면 더 불러옵니다", "Scroll down to load more") : pick("마지막 보고서입니다", "End of reports")}</div>`
     : "";
@@ -693,7 +710,10 @@ function renderList(): void {
           <input id="reports-q" type="search" placeholder="${pick("제목·작성자·요약 검색", "Search title · author · summary")}" value="${escape(_query)}"
             class="w-full bg-surface-2 border border-surface-3 rounded-xl text-sm text-slate-200 pl-9 pr-3 py-2.5 outline-none focus:border-accent-green/40 placeholder:text-slate-600" />
         </div>
+        ${loadingBar}
+        <div class="${_reloading ? "opacity-50 transition-opacity" : "transition-opacity"}">
         ${_loadError ? error : items.length ? `<div class="flex flex-col gap-2.5">${cards}</div>${loadMore}` : empty}
+        </div>
       </div>
     </div>`;
   const scroller = _root.querySelector<HTMLElement>("[data-reports-list-scroll]");
