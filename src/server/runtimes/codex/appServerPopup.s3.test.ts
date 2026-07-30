@@ -197,11 +197,43 @@ describe("S3 — 코덱스 리뷰 반례 (회귀 가드)", () => {
     expect(scopeKeyForOperation(x)).not.toBe(scopeKeyForOperation(y));
   });
 
-  test("★240 경계가 이모지를 반 토막 내지 않는다★ — 고아 서로게이트로 끝나면 안 된다", () => {
-    for (const pad of [220, 222, 224, 226]) {
+  test("★같은 요청의 두 쓰기가 한 개로 합쳐지지 않는다★ — 합치면 하나가 화면에서 사라진다", () => {
+    // ★뮤턴트로 찾은 자리(2026-07-30).★ 지문·중복제거 재료가 이어붙인 문자열이면
+    //   `a>b` 새 파일과 `a`→`b` 이동이 ★같은 항목★ 이 되어 화면이 "파일 1개 · add a>b" 로 나온다 —
+    //   ★이동 쓰기가 통째로 안 보이는 채로 승인된다.★ 개수까지 거짓이 되므로 사람이 알아챌 수도 없다.
+    const op = buildOperationFromApproval(
+      fileReq({
+        itemId: "i1", turnId: "t1", threadId: "th1",
+        changes: [
+          { path: "a>b", kind: "add", movePath: null, diff: "X\n" },
+          { path: "a", kind: "update", movePath: "b", diff: "@@ -1 +1 @@\n-a\n+b\n" },
+        ],
+      }),
+      "dex",
+    );
+    expect(screenLine(op)).toContain("파일 2개");
+    expect(screenLine(op)).toContain("add a>b");
+    expect(screenLine(op)).toContain("update a → b");
+  });
+
+  test("★이모지가 반 토막 나지 않는다★ — 짝 없는 서로게이트가 문자열 어디에도 없다", () => {
+    // ★판정을 두 번 틀렸다(2026-07-30).★ 처음엔 ★끝 글자만★ 봤는데 잘린 조각은 ★중간★ 에 남는다.
+    //   다음엔 검사 함수가 ★정상 쌍에서 i 를 2 칸 건너뛰지 않아★ 뒷 짝을 고아로 오판했다.
+    //   ★재는 도구가 틀리면 초록도 빨강도 뜻이 없다.★ 고친 뒤 pad=208 에서 수정 전 코드가 깨지는 것을 확인했다.
+    const loneSurrogateAt = (s: string): number => {
+      for (let i = 0; i < s.length; i++) {
+        const c = s.charCodeAt(i);
+        if (c >= 0xd800 && c <= 0xdbff) {
+          const n = s.charCodeAt(i + 1);
+          if (!(n >= 0xdc00 && n <= 0xdfff)) return i;
+          i++; // 정상 쌍은 두 칸 건너뛴다
+        } else if (c >= 0xdc00 && c <= 0xdfff) return i;
+      }
+      return -1;
+    };
+    for (let pad = 180; pad <= 250; pad++) {
       const t = targetForOperation(one("a".repeat(pad) + "😀" + ".ts"));
-      const last = t.charCodeAt(t.length - 1);
-      expect(last >= 0xd800 && last <= 0xdbff).toBe(false);
+      expect({ pad, at: loneSurrogateAt(t) }).toEqual({ pad, at: -1 });
     }
   });
 
