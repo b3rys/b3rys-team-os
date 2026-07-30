@@ -372,11 +372,15 @@ export function tagPillsHtml(
   selected: Set<string>,
   pillCls: (active: boolean) => string,
 ): string {
+  // opacity 만으로 숨기면 안 보이는데 눌린다 — 투명해도 그 자리는 여전히 클릭을 받는다.
+  // 마우스가 없는 환경(터치·아이패드 웹뷰)에서 태그 옆을 탭하면 안 보이는 연필·휴지통이 눌려
+  // "누르지도 않은 창" 이 뜬다. pointer-events 를 같이 꺼서 숨김 상태에선 클릭 자체를 안 받게 한다.
+  const hoverOnlyCls = "opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto";
   const iconCls = "inline-flex h-6 w-6 items-center justify-center rounded-md border border-surface-3 bg-surface-1/70 text-slate-500 transition-colors";
   return tags.map((t) =>
     `<span class="group inline-flex items-center">
       <button class="${pillCls(selected.has(t.id))} reports-tag-pill" data-tag-id="${escape(t.id)}">#${escape(t.name)}<span class="ml-1.5 text-[11px] text-slate-500">${t.report_count ?? 0}</span></button>
-      <span class="ml-0.5 inline-flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+      <span class="ml-0.5 inline-flex items-center gap-0.5 ${hoverOnlyCls} transition-opacity">
         <button class="reports-tag-edit ${iconCls} hover:border-accent-green/40 hover:bg-accent-green/10 hover:text-accent-green" data-tag-id="${escape(t.id)}" data-tag-name="${escape(t.name)}" title="${pick("태그 이름 바꾸기", "Rename tag")}" aria-label="${pick("태그 이름 바꾸기", "Rename tag")}">
           <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
         </button>
