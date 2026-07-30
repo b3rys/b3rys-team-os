@@ -105,6 +105,7 @@ describe("S1 — 신세대 명령 승인 해석", () => {
     };
     const op = buildOperationFromApproval(req, "dex");
     expect(op.action).toBe("write");
-    expect(op.path).toBe("a.ts|b.ts"); // 정렬된 전체 파일집합
+    // ★S3 에서 표시 형식이 바뀌었다★ — 파일집합(정렬)은 그대로이고 사람이 읽을 말과 지문이 붙었다.
+    expect(op.path).toMatch(/^파일 2개 · change a\.ts, change b\.ts #[0-9a-f]{12}$/);
   });
 });
