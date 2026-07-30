@@ -232,10 +232,17 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
           //   슬랙 문법은 슬랙에서만 뜻이 있고, 다른 채널에는 의미 없는 문자열이다.
           //   즉 ★채널마다 다른 것은 채널로 나갈 때 붙여야★ 한다. 저장되는 본문은 채널 중립으로 둔다.
           //   meta.slack_mentions = ["U…", …] (send.sh --mention 이 이름을 ID 로 풀어 넣는다)
-          const mentions = ((env as { meta?: { slack_mentions?: unknown } }).meta?.slack_mentions ?? []) as unknown[];
-          const prefix = mentions
+          // ★meta 는 발신자가 채우는 값이다 — 배열이라고 믿지 않는다★ (codex 교차검증).
+          //   `slack_mentions: "U123"` 이나 `{}` 가 오면 `.filter is not a function` 으로 ★POST 가 500★ 난다.
+          //   메시지는 이미 저장된 뒤라 ★"보냈는데 서버가 터진" 상태★ 가 된다. 배열이 아니면 조용히 무시한다.
+          const rawMentions = (env as { meta?: { slack_mentions?: unknown } }).meta?.slack_mentions;
+          // 개수 상한: 멘션 하나가 알림 하나다. 상한이 없으면 한 메시지로 워크스페이스 전체를 울릴 수 있다.
+          const MAX_MENTIONS = 10;
+          const prefix = (Array.isArray(rawMentions) ? rawMentions : [])
             .filter((m): m is string => typeof m === "string" && /^[UW][A-Z0-9]+$/.test(m))
+            .filter((id, i, arr) => arr.indexOf(id) === i)    // 같은 사람을 두 번 부르지 않는다
             .filter((id) => !env.body.includes(`<@${id}>`))   // 본문에 이미 있으면 중복 안 붙인다
+            .slice(0, MAX_MENTIONS)
             .map((id) => `<@${id}>`)
             .join(" ");
           // 멘션은 ★자기 줄에★ — 같은 줄이면 본문이 ``` 로 시작할 때 여는 펜스가 줄 맨 앞이 아니게 된다.
