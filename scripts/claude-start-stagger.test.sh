@@ -11,7 +11,7 @@
 #   claude 바이너리는 stub(실제 CC 안 뜬다). tmux 는 실물을 쓰되 세션 이름에 PID 를 붙여 격리하고
 #   종료 시 반드시 kill 한다.
 #
-# 실행: scripts/test-claude-start-stagger.sh   (0=통과, 1=실패)
+# 실행: scripts/claude-start-stagger.test.sh   (0=통과, 1=실패)
 set -uo pipefail
 
 SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/src/server/runtimes/claude/start-telegram-channel.sh"
@@ -111,8 +111,23 @@ else
   fail "stamp 부족 — A(start=$sA pid=$pA) B(start=$sB pid=$pB)"
 fi
 
-grep -q "Stagger     : 락 확보" "$TMPROOT/outA" "$TMPROOT/outB" \
-  && pass "락 확보 로그 노출" || fail "락 확보 로그 없음"
+# ★파일별로 각각 단정한다★ — `grep -q pat fileA fileB` 는 ★한 파일만 맞아도 exit 0★ 이다.
+#   두 파일을 한 번에 주면 두번째 세션이 락 획보에 실패해 ⚠ 경로로 빠져도 통과한다.
+#   직렬화의 핵심 증거인데 절반만 보게 되므로, 반드시 각각 본다. (리사 리뷰 R2, 2026-07-30)
+for _f in outA outB; do
+  if grep -q "Stagger     : 락 확보" "$TMPROOT/$_f"; then
+    pass "$_f 락 확보 로그 노출"
+  else
+    fail "$_f 락 확보 실패 — ⚠ 경로로 빠졌다(직렬화 안 됨)"
+    grep -E "Stagger" "$TMPROOT/$_f" | sed 's/^/    /'
+  fi
+done
+# 어느 세션도 '경합 위험을 안고 진행' 으로 빠지지 않았어야 한다.
+for _f in outA outB; do
+  grep -q "경합 위험을 안고 계속 진행" "$TMPROOT/$_f" \
+    && fail "$_f 가 락 대기 상한을 초과했다(경합 안고 진행)" \
+    || pass "$_f 상한 초과 없음"
+done
 
 for n in "$A" "$B"; do tmux kill-session -t "claude-$n" 2>/dev/null || true; done
 
@@ -142,6 +157,26 @@ else
 fi
 [[ -s "$TMPROOT/home/.claude/channels/telegram-$A/bot.pid" ]] \
   && pass "회수 후 정상 기동" || fail "회수 후에도 기동 실패"
+tmux kill-session -t "claude-$A" 2>/dev/null || true
+
+echo "── T4: ★살아있는 소유자의 락은 절대 회수하지 않는다★ (상호배제 붕괴 방지) ──"
+# R1(TOCTOU) 이 지키는 불변식. 살아있는 pid 가 적힌 락을 선점해두고, 회수하지 않고 상한까지
+# 기다렸다 ⚠ 경로로 빠지는지 본다. 여기서 회수해버리면 두 세션이 동시에 락을 쥔다.
+rm -rf "$TMPROOT/home" "$TMPROOT/spawn.lock"; prep_home
+sleep 120 & LIVE_PID=$!
+disown "$LIVE_PID" 2>/dev/null || true   # kill 시 'Terminated' job 알림이 출력에 섞이지 않게
+mkdir -p "$TMPROOT/spawn.lock"; echo "$LIVE_PID" > "$TMPROOT/spawn.lock/pid"
+out="$(run_start "$A" CLAUDE_START_STAGGER_ACQUIRE=8 CLAUDE_START_STAGGER_STALE_CONFIRM=2)"
+if grep -q "stale 락 회수" <<<"$out"; then
+  fail "★살아있는 소유자의 락을 회수했다★ — 상호배제가 깨진다"
+else
+  pass "살아있는 락 회수 안 함"
+fi
+grep -q "경합 위험을 안고 계속 진행" <<<"$out" \
+  && pass "상한까지 기다린 뒤 경고 경로 (기동은 막지 않음)" \
+  || fail "예상한 상한 초과 경로가 아니다"
+[[ -d "$TMPROOT/spawn.lock" ]] && pass "선점 락이 그대로 남아있다" || fail "선점 락이 사라졌다"
+kill "$LIVE_PID" 2>/dev/null || true
 tmux kill-session -t "claude-$A" 2>/dev/null || true
 
 echo

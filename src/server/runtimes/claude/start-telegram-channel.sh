@@ -293,8 +293,19 @@ fi
 #   → 두 번째 멤버의 claude 는 캐시 링크가 끝난 뒤에 뜨므로 링크할 게 없다(경합 소멸).
 # flock(1) 은 macOS 기본 미포함 → mkdir 원자성으로 구현. 락 획득 실패는 ★기동을 막지 않는다★(경고 후 진행).
 STAGGER_LOCK="${CLAUDE_START_STAGGER_LOCK:-$HOME/.claude/channels/.spawn.lock}"
-STAGGER_ACQUIRE_MAX="${CLAUDE_START_STAGGER_ACQUIRE:-60}"  # 락 대기 상한(초)
 STAGGER_SETTLE_MAX="${CLAUDE_START_STAGGER_SETTLE:-25}"    # 내 poller 안착(bot.pid) 대기 상한(초)
+# ★ACQUIRE 는 SETTLE 에서 유도한다★ — 고정 60 으로 두면 claude 멤버가 3명 이상일 때 마지막 멤버의
+#   대기가 (N-1)×SETTLE 로 상한을 넘겨 '락 미확보 → 경합 안고 진행' = 고치려던 그 경합으로 되돌아간다.
+#   (N-1)×SETTLE + 여유. N 은 claude 봇 LaunchAgent plist 수로 센다(없으면 2로 가정).
+#   ※ `ls … | wc -l` 로 세지 않는다 — 매칭 0건이면 ls 가 실패하고 set -o pipefail + set -e 때문에
+#     ★스크립트가 그 자리에서 죽는다★(기동 자체가 안 된다). 순수 glob 으로 센다.
+_claude_members=0
+for _p in "$HOME/Library/LaunchAgents/"*.claude-telegram-*.plist; do
+  [[ -e "$_p" ]] && _claude_members=$(( _claude_members + 1 ))
+done
+(( _claude_members < 2 )) && _claude_members=2
+STAGGER_ACQUIRE_MAX="${CLAUDE_START_STAGGER_ACQUIRE:-$(( (_claude_members - 1) * STAGGER_SETTLE_MAX + 20 ))}"
+STAGGER_STALE_CONFIRM="${CLAUDE_START_STAGGER_STALE_CONFIRM:-5}"  # 같은 죽은 pid 를 연속 관찰해야 하는 초
 _stagger_held=0
 _stagger_release() { [[ $_stagger_held -eq 1 ]] && rm -rf "$STAGGER_LOCK" 2>/dev/null || true; }
 
@@ -303,6 +314,8 @@ if [[ "${CLAUDE_START_NO_STAGGER:-}" == "1" || "${CLAUDE_START_NO_STAGGER:-}" ==
 else
   mkdir -p "$(dirname "$STAGGER_LOCK")" 2>/dev/null || true
   _waited=0
+  _stale_pid=""      # 연속 관찰 중인 '죽은 소유자' pid
+  _stale_seen=0      # 그 pid 를 연속 관찰한 횟수(초)
   while (( _waited < STAGGER_ACQUIRE_MAX )); do
     if mkdir "$STAGGER_LOCK" 2>/dev/null; then
       _stagger_held=1
@@ -310,13 +323,41 @@ else
       trap _stagger_release EXIT
       break
     fi
-    # stale 회수: 락 소유 프로세스가 이미 죽었으면(부팅 중 kill·크래시) 락을 회수한다.
-    #   pid 파일이 아직 안 쓰인 찰나일 수 있으므로 pid 가 읽히지 않는 동안은 기다린다(성급한 탈취 방지).
+    # ─ stale 회수 (부팅 중 크래시가 락을 영구 점유하지 않게) ─
+    # ★TOCTOU 를 막는다★: "pid 읽고 죽었으면 rm" 은 위험하다 — 읽고 rm 하는 사이에 원 소유자가
+    #   정상 release 하고 다른 멤버가 mkdir 로 획득하면 ★남의 살아있는 락을 지운다★(상호배제 붕괴).
+    #   그래서 두 겹으로 막는다:
+    #   ① 같은 죽은 pid 를 STAGGER_STALE_CONFIRM 초 ★연속★ 관찰해야 회수 후보가 된다.
+    #      살아있는 소유자나 새 획득자는 이 조건을 만들 수 없다(새 획득자는 자기 살아있는 pid 를 쓰므로
+    #      관찰이 리셋된다). 즉 '방금 갈아치워진 락' 은 후보에서 자동 탈락한다.
+    #   ② 회수는 rm 이 아니라 ★원자적 mv★ 로 들어낸 뒤, 들어낸 것의 pid 를 다시 확인한다. mv 는
+    #      주어진 디렉토리를 정확히 한 프로세스만 옮길 수 있다. 옮긴 게 알고 보니 살아있는 주인의
+    #      락이면 즉시 제자리로 되돌린다.
+    #   ③ 회수했다고 스스로 락을 주지 않는다 — 루프 위로 돌아가 mkdir 로 공정하게 다시 경쟁한다.
     _owner="$(cat "$STAGGER_LOCK/pid" 2>/dev/null || true)"
     if [[ -n "$_owner" ]] && ! kill -0 "$_owner" 2>/dev/null; then
-      echo "  Stagger     : stale 락 회수 (죽은 pid=$_owner)"
-      rm -rf "$STAGGER_LOCK" 2>/dev/null || true
-      continue
+      if [[ "$_owner" == "$_stale_pid" ]]; then
+        _stale_seen=$(( _stale_seen + 1 ))
+      else
+        _stale_pid="$_owner"; _stale_seen=1
+      fi
+      if (( _stale_seen >= STAGGER_STALE_CONFIRM )); then
+        _stale_dir="${STAGGER_LOCK}.stale.$$"
+        if mv "$STAGGER_LOCK" "$_stale_dir" 2>/dev/null; then
+          _moved_pid="$(cat "$_stale_dir/pid" 2>/dev/null || true)"
+          if [[ -n "$_moved_pid" ]] && kill -0 "$_moved_pid" 2>/dev/null; then
+            # 살아있는 주인의 락을 잘못 들어냈다 → 제자리로. 되돌리기 실패(그새 남이 획득)면 버린다.
+            mv "$_stale_dir" "$STAGGER_LOCK" 2>/dev/null || rm -rf "$_stale_dir" 2>/dev/null || true
+          else
+            rm -rf "$_stale_dir" 2>/dev/null || true
+            echo "  Stagger     : stale 락 회수 (죽은 pid=$_owner, ${_stale_seen}s 연속 확인)"
+          fi
+        fi
+        _stale_pid=""; _stale_seen=0
+      fi
+    else
+      # 소유자가 살아있다 / pid 파일이 아직 안 쓰인 찰나 → 관찰 리셋(성급한 탈취 방지)
+      _stale_pid=""; _stale_seen=0
     fi
     sleep 1
     _waited=$(( _waited + 1 ))
@@ -328,7 +369,7 @@ else
       echo "  Stagger     : 락 확보 (즉시) — 스폰 직렬화"
     fi
   else
-    echo "  ⚠ Stagger   : 락 대기 ${STAGGER_ACQUIRE_MAX}s 초과 — 경합 위험을 안고 계속 진행"
+    echo "  ⚠ Stagger   : 락 대기 ${STAGGER_ACQUIRE_MAX}s 초과(멤버 ${_claude_members}명 기준) — 경합 위험을 안고 계속 진행"
   fi
 fi
 
