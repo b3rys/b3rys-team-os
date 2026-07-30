@@ -576,8 +576,10 @@ describe("checkPingpong — anti-pingpong guard", () => {
     // ★숫자가 무슨 단위인지 문구가 말해야 한다★ — 2026-07-30 에 팀원 둘이 이 숫자를
     // 왕복 횟수로 읽고 "8왕복이나 했다" 로 판단했다(실제로는 메시지 8건 = 왕복 4회).
     expect(v.reason).toContain("messages=");
-    expect(v.reason).toContain("왕복");
+    expect(v.reason).toContain("왕복 횟수가 아니다");
     expect(v.reason).not.toContain("rounds=");
+    // ★환산 횟수를 붙이지 않는다★ — 홀수에서 과소표시해 새 오해를 만든다(Codex 리뷰).
+    expect(v.reason).not.toMatch(/왕복 약 \d+/);
   });
 
   test("countAutoRounds returns 0 for null parent", () => {
