@@ -17,7 +17,7 @@ _An AI team operating system for human-led multi-agent work._
 지시  →  담당자 배정  →  작업 카드  →  실행  →  검증  →  보고  →  종료
 ```
 
-> ⚠️ **본인 전용 장비에만 설치하세요.** 대시보드·API는 로컬(`127.0.0.1`) 전용이고 **앱 레벨 인증이 없습니다.** 공용·공개 서버에 열려면 Cloudflare Access 같은 **엣지 인증을 반드시 앞단에** 두세요.
+> ⚠️ **본인 전용 장비에만 설치하세요.** 대시보드·API는 로컬(`127.0.0.1`) 전용이고 **앱 레벨 인증이 없습니다.** 공용·공개 서버에 열려면 Cloudflare Access 같은 **엣지 인증을 반드시 앞단에** 두세요. → [대시보드를 도메인으로 열기](docs/public-dashboard.md)
 
 ---
 
@@ -471,3 +471,5 @@ b3os는 **gd.on**의 개인 프로젝트로 시작한 오픈소스입니다. 마
 ---
 
 🔌 **원격 접근** — b3os 머신(맥미니)에 밖에서 붙는 법(Tailscale VPN + SSH·화면 공유): [원격 접근 가이드](docs/remote-access.md)
+
+🌐 **대시보드를 도메인으로 열기** — `dash.example.com` 같은 주소로 대시보드를 여는 법(터널 Host 설정 · 신뢰 주소 등록): [가이드](docs/public-dashboard.md)
