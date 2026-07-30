@@ -14,6 +14,8 @@ interface ReadOnlyJob {
   source: JobSource;
   running: boolean | null;
   enabled: boolean;
+  // 초록불이 아닌 이유. 서버가 안 보내는 구버전이면 undefined — 그땐 예전처럼 running 만 본다.
+  problem?: "failed" | "overdue" | "retrying" | null;
 }
 
 interface JobGroup {
@@ -92,6 +94,19 @@ function jobBadge(kind: JobKind): string {
 function jobState(j: ReadOnlyJob): string {
   if (!j.enabled) {
     return `<span class="inline-flex items-center gap-1 text-xs text-status-blocked"><span class="w-2 h-2 rounded-full bg-status-blocked"></span>disabled</span>`;
+  }
+  // ★"꺼둔 것"과 "죽은 것"을 구분한다★ — 이 갈래가 없어서 실패로 정지한 잡이 초록불로 떴다(2026-07-30).
+  //   disabled 를 먼저 보는 이유: 사람이 의도적으로 끈 것은 고장이 아니다.
+  if (j.problem === "failed") {
+    return `<span class="inline-flex items-center gap-1 text-xs text-status-blocked"><span class="w-2 h-2 rounded-full bg-status-blocked"></span>${pick("실패", "failed")}</span>`;
+  }
+  // 재시도 대기 = 죽지는 않았지만 초록불도 아니다. 이게 없으면 A(실패 시 재예약)가
+  //   "방금 실패한 잡을 화면상 정상" 으로 만들어, 이 화면이 고치려던 문제를 작게 다시 만든다.
+  if (j.problem === "retrying") {
+    return `<span class="inline-flex items-center gap-1 text-xs text-txt-amber"><span class="w-2 h-2 rounded-full bg-amber-400"></span>${pick("재시도 대기", "retrying")}</span>`;
+  }
+  if (j.problem === "overdue") {
+    return `<span class="inline-flex items-center gap-1 text-xs text-txt-amber"><span class="w-2 h-2 rounded-full bg-amber-500"></span>${pick("밀림", "overdue")}</span>`;
   }
   if (j.running === true) {
     return `<span class="inline-flex items-center gap-1 text-xs text-slate-300"><span class="w-2 h-2 rounded-full bg-accent-green"></span>running</span>`;

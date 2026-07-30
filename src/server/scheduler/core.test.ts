@@ -18,6 +18,10 @@ import {
   pickCapabilityWorkloopTarget,
   runDueSchedulerJobsOnce,
   scheduleReminder,
+  failScheduledJob,
+  completeScheduledJob,
+  skipScheduledJob,
+  consecutiveFailures,
 } from "./core";
 import { nextCronRun } from "./cron";
 
@@ -725,5 +729,159 @@ describe("b3os scheduler misfire grace", () => {
     expect(results).toHaveLength(5);
     expect(results.every((r) => r.status === "skipped")).toBe(true);
     expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 0 });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 실패한 반복 잡의 재예약 (2026-07-30 사고)
+//   사고: 부팅 경합으로 한 번 실패한 30분 주기 잡이 ★9시간 정지★. 원인은 일시적인데 결과가 영구적.
+//   근본: failScheduledJob 이 next_run_at 을 안 옮기는데 dueScheduledJobs 는 status='pending' 만 고른다.
+//   ★검증은 "행 값이 바뀌었나" 가 아니라 "스케줄러가 다시 뽑나" 로 한다★ — 값만 보면 선정 쿼리와
+//   어긋나도 통과한다(그게 원래 사고의 모양이었다: 값은 멀쩡해 보이는데 아무도 안 뽑았다).
+// ─────────────────────────────────────────────────────────────────────────────
+describe("실패한 반복 잡은 다음 슬롯으로 되살아난다", () => {
+  const T0 = new Date(Date.UTC(2026, 6, 30, 0, 0, 0)); // 2026-07-30 09:00 KST
+  function every30(d: ReturnType<typeof db>, id = "guard") {
+    const job = createCronJob(d, {
+      id,
+      title: "30분 가드",
+      cron: "*/30 * * * *",
+      timezone: "Asia/Seoul",
+      createdBy: "system",
+      payload: { type: "exec", execKey: "task-review-ping" },
+      from: T0,
+    });
+    return getScheduledJob(d, job.id)!;
+  }
+  const due = (d: ReturnType<typeof db>, at: Date) => dueScheduledJobs(d, at).map((j) => j.id);
+
+  test("★한 번 실패해도 스케줄러가 다시 뽑는다★ (사고 회귀)", () => {
+    const d = db();
+    const job = every30(d);
+    failScheduledJob(d, job, "boot race: Unable to connect", { now: T0 });
+
+    const after = getScheduledJob(d, job.id)!;
+    expect(after.status).toBe("pending");
+    // 다음 시각이 ★앞으로★ 갔는지 — 실패 시각보다 미래여야 한다.
+    expect(fromSqliteDate(after.next_run_at!).getTime()).toBeGreaterThan(T0.getTime());
+    // ★공개 경로 검증★: 그 시각이 되면 선정 쿼리가 실제로 이 잡을 집는다.
+    expect(due(d, fromSqliteDate(after.next_run_at!))).toContain(job.id);
+    // 실패 기록 자체는 남는다(원인 추적용).
+    expect(after.last_error).toContain("Unable to connect");
+  });
+
+  test("고치기 전 동작(영구 정지)이 되살아나면 실패한다 — 한도 전에는 park 하지 않는다", () => {
+    const d = db();
+    const job = every30(d);
+    failScheduledJob(d, job, "일시적", { now: T0 });
+    expect(getScheduledJob(d, job.id)!.status).not.toBe("failed");
+  });
+
+  test("★연속 3회 실패하면 park★ — 진짜 고장이 30분마다 영원히 헛돌지 않게", () => {
+    const d = db();
+    let job = every30(d);
+    for (let i = 0; i < 3; i++) {
+      job = getScheduledJob(d, job.id)!;
+      failScheduledJob(d, job, `계속 깨짐 #${i + 1}`, { now: new Date(T0.getTime() + i * 60_000) });
+    }
+    const parked = getScheduledJob(d, job.id)!;
+    expect(parked.status).toBe("failed");
+    // park 된 뒤에는 시각이 지나도 아무도 안 뽑는다 = 헛돌지 않는다.
+    expect(due(d, new Date(T0.getTime() + 24 * 3600_000))).not.toContain(job.id);
+    // park 은 흔적을 남긴다(조용히 죽지 않는다).
+    const audit = d
+      .prepare(`SELECT detail_json FROM audit_event WHERE action = 'scheduler_job_parked'`)
+      .all() as Array<{ detail_json: string }>;
+    expect(audit).toHaveLength(1);
+    expect(JSON.parse(audit[0]!.detail_json)).toMatchObject({ job_id: job.id, reason: "retry_limit", limit: 3 });
+  });
+
+  test("중간에 성공하면 연속 카운트가 리셋된다 — 가끔 실패하는 잡이 park 되지 않게", () => {
+    const d = db();
+    let job = every30(d);
+    failScheduledJob(d, job, "1", { now: T0 });
+    job = getScheduledJob(d, job.id)!;
+    failScheduledJob(d, job, "2", { now: new Date(T0.getTime() + 60_000) });
+    job = getScheduledJob(d, job.id)!;
+    completeScheduledJob(d, job, { now: new Date(T0.getTime() + 120_000) });   // ← 한 번 성공
+    job = getScheduledJob(d, job.id)!;
+    failScheduledJob(d, job, "3", { now: new Date(T0.getTime() + 180_000) });
+    // 누적 3회지만 연속은 1회 → 아직 살아 있어야 한다.
+    expect(getScheduledJob(d, job.id)!.status).toBe("pending");
+  });
+
+  test("oneshot 은 재예약하지 않는다 — 다음 차례라는 게 없다", () => {
+    const d = db();
+    const job = execJob(d, "echo-ok");
+    failScheduledJob(d, job, "한 번짜리", { now: T0 });
+    expect(getScheduledJob(d, job.id)!.status).toBe("failed");
+  });
+
+  test("cron 표현식이 깨졌으면 park 한다 — 되살려봐야 매번 같은 자리에서 죽는다", () => {
+    const d = db();
+    const job = every30(d, "broken");
+    d.prepare(`UPDATE scheduled_job SET schedule_expr = '{"cron":""}' WHERE id = ?`).run(job.id);
+    failScheduledJob(d, getScheduledJob(d, job.id)!, "표현식 깨짐", { now: T0 });
+    expect(getScheduledJob(d, job.id)!.status).toBe("failed");
+  });
+
+  test("max_runs 를 다 쓴 잡은 재예약하지 않는다", () => {
+    const d = db();
+    const job = every30(d, "capped");
+    d.prepare(`UPDATE scheduled_job SET max_runs = 2, run_count = 2 WHERE id = ?`).run(job.id);
+    failScheduledJob(d, getScheduledJob(d, job.id)!, "상한 소진", { now: T0 });
+    const row = getScheduledJob(d, job.id)!;
+    expect(row.status).toBe("failed");
+    const audit = d.prepare(`SELECT detail_json FROM audit_event WHERE action='scheduler_job_parked'`).get() as { detail_json: string };
+    expect(JSON.parse(audit.detail_json)).toMatchObject({ reason: "max_runs_reached" });
+  });
+});
+
+// steve 리뷰에서 나온 실질 위험: skip 이 연속 카운트를 리셋해 ★진짜 고장이 영원히 park 되지 않는다.★
+// 오늘은 잠복(미스파이어 유예 기본 꺼짐)이지만 그 env 를 켜면 살아난다.
+describe("연속 실패 카운트는 성공에서만 끊긴다", () => {
+  const T0 = new Date(Date.UTC(2026, 6, 30, 0, 0, 0));
+  function guard(d: ReturnType<typeof db>) {
+    const j = createCronJob(d, {
+      id: "skipmix", title: "30분 가드", cron: "*/30 * * * *", timezone: "Asia/Seoul",
+      createdBy: "system", payload: { type: "exec", execKey: "task-review-ping" }, from: T0,
+    });
+    return getScheduledJob(d, j.id)!;
+  }
+
+  test("★skip 이 섞여도 연속 카운트가 리셋되지 않는다★ — 실패·skip·실패·skip·실패 = park", () => {
+    const d = db();
+    let job = guard(d);
+    for (let i = 0; i < 3; i++) {
+      job = getScheduledJob(d, job.id)!;
+      failScheduledJob(d, job, `깨짐 ${i + 1}`, { now: new Date(T0.getTime() + i * 2 * 60_000) });
+      if (i < 2) {
+        job = getScheduledJob(d, job.id)!;
+        skipScheduledJob(d, job, "misfire", { now: new Date(T0.getTime() + (i * 2 + 1) * 60_000) });
+      }
+    }
+    // skip 이 리셋했다면 연속은 1 이라 계속 살아 있다 = 영원히 park 안 됨.
+    expect(getScheduledJob(d, job.id)!.status).toBe("failed");
+  });
+
+  test("skip 자체는 실패로 세지 않는다 — '돌려보지도 않았다' 는 고장의 증거가 아니다", () => {
+    const d = db();
+    let job = guard(d);
+    for (let i = 0; i < 3; i++) {
+      job = getScheduledJob(d, job.id)!;
+      skipScheduledJob(d, job, "misfire", { now: new Date(T0.getTime() + i * 60_000) });
+    }
+    expect(consecutiveFailures(d, job.id, 5)).toBe(0);
+  });
+
+  test("성공은 연속을 끊는다", () => {
+    const d = db();
+    let job = guard(d);
+    failScheduledJob(d, job, "1", { now: T0 });
+    job = getScheduledJob(d, job.id)!;
+    completeScheduledJob(d, job, { now: new Date(T0.getTime() + 60_000) });
+    job = getScheduledJob(d, job.id)!;
+    failScheduledJob(d, job, "2", { now: new Date(T0.getTime() + 120_000) });
+    expect(consecutiveFailures(d, job.id, 5)).toBe(1);
   });
 });
