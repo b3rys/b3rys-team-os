@@ -553,6 +553,33 @@ describe("checkPingpong — anti-pingpong guard", () => {
     }
   });
 
+  // ★위 테스트는 MAX_AUTO_ROUNDS <= 2 일 때만 차단 경로를 단정한다 — 기본값은 8 이다.★
+  // 즉 평소 실행에서는 ★차단 경로를 아무도 보지 않는다.★ 2026-07-30 에 뮤턴트로 확인했다:
+  // 판정 문구를 되돌려도 이 파일 89개가 전부 통과했다.
+  // 그래서 한도가 몇이든 반드시 차단이 나는 체인을 만들어 단정한다.
+  test("anti-pingpong: 한도를 넘긴 체인은 ★한도 값과 무관하게★ 차단되고, 문구가 단위를 밝힌다", () => {
+    seedThread(db);
+    // user 1건 + agent (한도+1)건 → countAutoRounds 가 반드시 MAX_AUTO_ROUNDS 이상이 된다
+    let prev = seedMessage(db, { id: "p0", from: "user", to: "bill", source: "user" });
+    for (let i = 1; i <= MAX_AUTO_ROUNDS + 1; i++) {
+      prev = seedMessage(db, {
+        id: `p${i}`,
+        from: i % 2 === 1 ? "bill" : "codex",
+        to: i % 2 === 1 ? "codex" : "bill",
+        source: "agent",
+        parentId: prev,
+      });
+    }
+    const v = checkPingpong(db, makeRow({ source: "agent", parent_message_id: prev }), agentRoster);
+    expect(v.allowed).toBe(false);
+    expect(v.reason).toContain("pingpong_limit_exceeded");
+    // ★숫자가 무슨 단위인지 문구가 말해야 한다★ — 2026-07-30 에 팀원 둘이 이 숫자를
+    // 왕복 횟수로 읽고 "8왕복이나 했다" 로 판단했다(실제로는 메시지 8건 = 왕복 4회).
+    expect(v.reason).toContain("messages=");
+    expect(v.reason).toContain("왕복");
+    expect(v.reason).not.toContain("rounds=");
+  });
+
   test("countAutoRounds returns 0 for null parent", () => {
     expect(countAutoRounds(db, null)).toBe(0);
   });
