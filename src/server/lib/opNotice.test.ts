@@ -6,34 +6,32 @@
 //   ③ 알림은 고장난 본인에게 가지 않는다 — 그 멤버가 못 듣는 상태가 사고 본체다(블랙홀 금지).
 //   ④ coordinator 가 고장이면 다른 멤버로 폴백한다.
 import { describe, test, expect } from "bun:test";
+import { Database } from "bun:sqlite";
 import {
   EssentialsOpNotifier,
+  emitOpNotice,
   pickOpNoticeRecipient,
   buildEssentialsDownBody,
   buildEssentialsRecoveredBody,
 } from "./opNotice";
+import { migrate } from "../db/migrate";
 import type { AgentRecord } from "../types";
 
-const agent = (id: string, capabilities: string[] = []): AgentRecord =>
-  ({ id, runtime: "claude_channel", capabilities } as unknown as AgentRecord);
+const agent = (id: string, capabilities: string[] = [], runtime = "claude_channel"): AgentRecord =>
+  ({ id, runtime, capabilities } as unknown as AgentRecord);
 
+// 실제 팀 구성을 반영한다 — lisa·jane 은 claude_channel(같은 경합 공유), clo·herm 은 다른 런타임.
 const TEAM = [
   agent("lisa", ["coordinator", "full_context"]),
   agent("jane"),
-  agent("clo"),
-  agent("herm"),
+  agent("clo", [], "openclaw"),
+  agent("herm", [], "hermes_agent"),
 ];
 
 describe("pickOpNoticeRecipient — 알림은 살아있는 사람에게", () => {
-  test("기본은 coordinator 로 간다", () => {
-    expect(pickOpNoticeRecipient(TEAM, "jane")).toBe("lisa");
-  });
-
   test("★고장난 본인에게는 절대 안 보낸다★ (블랙홀 방지)", () => {
-    // lisa 가 고장이면 lisa 에게 보내면 아무도 못 듣는다 → 다른 멤버로.
     const to = pickOpNoticeRecipient(TEAM, "lisa");
     expect(to).not.toBe("lisa");
-    expect(to).toBe("jane");
   });
 
   test("coordinator 가 없으면 남은 아무 멤버", () => {
@@ -46,6 +44,92 @@ describe("pickOpNoticeRecipient — 알림은 살아있는 사람에게", () => 
 
   test("혼자인 팀에서 그 1인이 고장이면 null (호출부가 audit 만 남긴다)", () => {
     expect(pickOpNoticeRecipient([agent("jane")], "jane")).toBeNull();
+  });
+
+  // ── R4: 대칭 경합에서 죽은 쪽으로 알림이 들어가는 걸 막는다 ──
+  test("★같이 죽은 멤버는 수신자에서 제외한다★ — lisa·jane 동시 탈락(08:03:37 실측)", () => {
+    // lisa 가 고장이고 jane 도 down 이면, jane 에게 보내면 아무도 못 읽는다.
+    const to = pickOpNoticeRecipient(TEAM, "lisa", (id) => id === "jane");
+    expect(to).not.toBe("jane");
+    expect(to).not.toBe("lisa");
+    expect(to).not.toBeNull();
+    expect(["clo", "herm"]).toContain(to as string);
+  });
+
+  test("★폴백은 같은 경합을 공유하지 않는 다른 런타임을 우선한다★", () => {
+    // lisa(claude_channel) 고장 → 같은 claude_channel 인 jane 보다 다른 런타임이 안전하다.
+    const to = pickOpNoticeRecipient(TEAM, "lisa");
+    expect(to).not.toBe("jane");
+    expect(to).not.toBeNull();
+    expect(["clo", "herm"]).toContain(to as string);
+  });
+
+  test("다른 런타임 후보들 중에서는 coordinator 를 고른다", () => {
+    const team = [agent("jane"), agent("clo", [], "openclaw"), agent("herm", ["coordinator"], "hermes_agent")];
+    expect(pickOpNoticeRecipient(team, "jane")).toBe("herm");
+  });
+
+  test("전원 down 이어도 null 대신 최선을 골라 시도한다 (아무것도 안 보내는 것보다 낫다)", () => {
+    const to = pickOpNoticeRecipient(TEAM, "lisa", () => true);
+    expect(to).not.toBeNull();
+    expect(to).not.toBe("lisa");
+  });
+});
+
+// ★R3 — 고쳐진 그 결함 자체에 붙는 테스트★
+// 원 사고의 본체는 '감지는 했는데 message 테이블에 안 넣었다' 다. emitOpNotice 를 실제로 호출해
+// 행이 들어갔는지 보지 않으면, 이 함수를 통째로 no-op 으로 만들어도 테스트가 전부 초록이다
+// — 사고가 그대로 재현되는데. (리사 리뷰 R3, 2026-07-30)
+describe("emitOpNotice — message 테이블에 실제로 적재되는가", () => {
+  const setup = (): Database => {
+    const db = new Database(":memory:");
+    migrate(db);
+    for (const a of ["lisa", "jane", "clo"]) {
+      db.prepare(
+        `INSERT OR IGNORE INTO agent (id, display_name, role, runtime, status_provider, workspace_path, persona_file)
+         VALUES (?, ?, 'r', 'claude_channel', 'claude_tmux', '/tmp', 'P.md')`,
+      ).run(a, a);
+    }
+    return db;
+  };
+
+  test("★행이 실제로 들어간다★ — to_agent_id·source='system'·body 확인", () => {
+    const db = setup();
+    const id = emitOpNotice(db, { to: "lisa", body: "[team op] jane down", threadKey: "op-health-jane" });
+    expect(id).not.toBeNull();
+
+    const row = db
+      .prepare(`SELECT to_agent_id, from_agent_id, source, body, priority FROM message WHERE id = ?`)
+      .get(id as string) as Record<string, unknown>;
+    expect(row).toBeTruthy();
+    expect(row.to_agent_id).toBe("lisa");
+    expect(row.from_agent_id).toBe("system");
+    expect(row.source).toBe("system"); // ★op 메시지는 정직하게 system 발신★ (agent 사칭 금지)
+    expect(String(row.body)).toContain("jane down");
+    expect(row.priority).toBe("high"); // 기본 high
+  });
+
+  test("registry 에 없는 id 면 넣지 않는다 (깨울 대상이 없다)", () => {
+    const db = setup();
+    expect(emitOpNotice(db, { to: "nobody", body: "x", threadKey: "op-health-nobody" })).toBeNull();
+    expect((db.prepare(`SELECT COUNT(*) c FROM message`).get() as { c: number }).c).toBe(0);
+  });
+
+  test("같은 threadKey 로 두 번 보내도 둘 다 적재된다 (down → autofix 결과 2연발)", () => {
+    const db = setup();
+    const a = emitOpNotice(db, { to: "lisa", body: "down", threadKey: "op-health-jane" });
+    const b = emitOpNotice(db, { to: "lisa", body: "autofix 성공", threadKey: "op-health-jane" });
+    expect(a).not.toBeNull();
+    expect(b).not.toBeNull();
+    expect(a).not.toBe(b);
+    expect((db.prepare(`SELECT COUNT(*) c FROM message`).get() as { c: number }).c).toBe(2);
+  });
+
+  test("priority 를 넘기면 반영된다", () => {
+    const db = setup();
+    const id = emitOpNotice(db, { to: "lisa", body: "회복", threadKey: "op-health-jane", priority: "normal" });
+    const row = db.prepare(`SELECT priority FROM message WHERE id = ?`).get(id as string) as { priority: string };
+    expect(row.priority).toBe("normal");
   });
 });
 
@@ -100,6 +184,42 @@ describe("EssentialsOpNotifier — 부팅 오탐 억제 + 1회 발행", () => {
   test("빈 missing 배열은 정상으로 취급한다", () => {
     const n = new EssentialsOpNotifier(1);
     expect(n.observe("jane", [])).toBeNull();
+  });
+
+  test("isDown 은 알림을 보낸 멤버만 true (수신자 선정 입력)", () => {
+    const n = new EssentialsOpNotifier(2);
+    n.observe("lisa", ["x"]);
+    expect(n.isDown("lisa")).toBe(false); // 아직 임계 미달
+    n.observe("lisa", ["x"]);
+    expect(n.isDown("lisa")).toBe(true);
+    n.observe("lisa", null);
+    expect(n.isDown("lisa")).toBe(false);
+  });
+
+  // ── N3: 본문의 경과 초가 실측이어야 한다 ──
+  test("★실경과를 쓴다★ — afterTicks×interval 로 계산하면 항상 90 이 나온다", () => {
+    let clock = 1_000_000;
+    const n = new EssentialsOpNotifier(3, () => clock);
+    n.observe("lisa", ["x"]);          // t=0 첫 관측
+    clock += 30_000;
+    n.observe("lisa", ["x"]);
+    clock += 200_000;                  // tick 스킵/autofix await 로 크게 벌어진 구간
+    expect(n.observe("lisa", ["x"])).toBe("down");
+    // 고정계산이면 90, 실측이면 230.
+    expect(n.elapsedSecOf("lisa")).toBe(230);
+    expect(n.elapsedSecOf("lisa")).not.toBe(90);
+  });
+
+  test("회복하면 경과가 리셋된다 (다음 고장은 그때부터 센다)", () => {
+    let clock = 0;
+    const n = new EssentialsOpNotifier(1, () => clock);
+    n.observe("lisa", ["x"]);
+    clock += 50_000;
+    expect(n.elapsedSecOf("lisa")).toBe(50);
+    n.observe("lisa", null);
+    expect(n.elapsedSecOf("lisa")).toBe(0);
+    n.observe("lisa", ["x"]);
+    expect(n.elapsedSecOf("lisa")).toBe(0);
   });
 });
 

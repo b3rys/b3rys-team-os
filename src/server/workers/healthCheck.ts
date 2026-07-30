@@ -57,8 +57,11 @@ export function startHealthCheck(deps: HealthDeps): () => void {
     missing: string[],
     agents: AgentRecord[],
   ): Promise<void> {
-    const elapsedSec = OP_NOTICE_AFTER_TICKS * (INTERVAL_MS / 1000);
-    const to = pickOpNoticeRecipient(agents, agent.id);
+    // 실측 경과를 쓴다 — afterTicks × interval 은 항상 90 이 나오고, 스킵된 tick 만큼 실제로는 더 길다.
+    const elapsedSec = notifier.elapsedSecOf(agent.id);
+    // 수신자 선정에 '그 멤버도 지금 down 인가' 를 넘긴다 — lisa·jane 이 동시 탈락하는 대칭 경합에서
+    // 죽은 쪽으로 알림이 들어가는 블랙홀을 막는다.
+    const to = pickOpNoticeRecipient(agents, agent.id, (id) => notifier.isDown(id));
     if (to) {
       const id = emitOpNotice(deps.db, {
         to,
@@ -146,7 +149,8 @@ export function startHealthCheck(deps: HealthDeps): () => void {
         if (verdict === "down") {
           await handleEssentialsDown(agent, essentials.missing, agents);
         } else if (verdict === "recovered") {
-          const to = pickOpNoticeRecipient(agents, agent.id);
+          // 회복 알림도 같은 규칙으로 살아있는 수신자에게. (여기선 자신은 이미 회복 상태)
+          const to = pickOpNoticeRecipient(agents, agent.id, (id) => notifier.isDown(id));
           if (to) {
             const id = emitOpNotice(deps.db, {
               to,

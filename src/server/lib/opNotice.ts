@@ -26,17 +26,38 @@ const RESERVED = new Set(["user", "system", "moderator", "broadcast"]);
 
 /**
  * op 알림을 받을 멤버를 고른다.
- * coordinator capability 보유자 우선 — 단 ★고장난 본인은 제외★(못 듣는 상태가 사고 본체).
- * coordinator 가 곧 고장난 멤버면 다른 멤버로 폴백한다(TEAM-OS §11 coordinator fallback 취지).
- * 받을 사람이 아무도 없으면 null → 호출부는 audit 만 남긴다.
+ *
+ * ★고장난 본인 제외만으로는 부족하다★ (리사 리뷰 R4, 2026-07-30):
+ *   근본 경합(bun binlink)은 lisa·jane 사이에서 ★대칭★ 이라 둘이 동시에 탈락할 수 있다 —
+ *   실제로 08:03:37 에 둘 다 같은 항목이 잡혔다. 그 경우 알림이 죽은 쪽으로 들어가 아무도
+ *   못 읽는다 = 막으려던 블랙홀의 다른 얼굴이다. 게다가 등록 순서상 lisa 가 고장이면 폴백
+ *   1순위가 jane, 즉 ★같은 경합을 공유하는 런타임★ 이었다.
+ * 그래서 점수로 고른다:
+ *   +4 현재 down streak 이 아니다 (살아있을 가능성)
+ *   +2 고장난 멤버와 ★다른 런타임★ (clo=openclaw, herm=hermes 는 이 경합에 안 걸린다)
+ *   +1 coordinator (TEAM-OS §11)
+ * 동점은 등록 순서. 전원 down 이어도 null 을 주지 않고 최선을 골라 시도한다(호출부가 audit 에
+ * 수신자 상태를 남긴다) — 아무것도 안 보내는 것보다 낫다.
+ *
+ * @param isDown 그 멤버가 현재 down 으로 관측되는지. 생략 시 전원 정상으로 본다.
  */
 export function pickOpNoticeRecipient(
   agents: AgentRecord[],
   affectedId: string,
+  isDown?: (agentId: string) => boolean,
 ): string | null {
+  const affected = agents.find((a) => a.id === affectedId);
   const eligible = agents.filter((a) => a.id !== affectedId && !RESERVED.has(a.id));
-  const coordinator = eligible.find((a) => (a.capabilities ?? []).includes("coordinator"));
-  return coordinator?.id ?? eligible[0]?.id ?? null;
+  if (eligible.length === 0) return null;
+  let best: { id: string; score: number } | null = null;
+  for (const a of eligible) {
+    let score = 0;
+    if (!isDown?.(a.id)) score += 4;
+    if (affected && a.runtime !== affected.runtime) score += 2;
+    if ((a.capabilities ?? []).includes("coordinator")) score += 1;
+    if (best === null || score > best.score) best = { id: a.id, score };
+  }
+  return best?.id ?? null;
 }
 
 /**
@@ -85,9 +106,12 @@ export function emitOpNotice(
 export class EssentialsOpNotifier {
   private streak = new Map<string, number>();
   private notified = new Set<string>();
+  /** 멤버별 ★첫 미충족 관측 시각(ms)★ — 본문에 쓸 실경과를 계산하려면 이게 필요하다. */
+  private firstSeen = new Map<string, number>();
 
   constructor(
     private readonly afterTicks: number = OP_NOTICE_AFTER_TICKS,
+    private readonly now: () => number = () => Date.now(),
   ) {}
 
   /**
@@ -98,6 +122,7 @@ export class EssentialsOpNotifier {
     if (missing && missing.length > 0) {
       const n = (this.streak.get(agentId) ?? 0) + 1;
       this.streak.set(agentId, n);
+      if (!this.firstSeen.has(agentId)) this.firstSeen.set(agentId, this.now());
       if (n >= this.afterTicks && !this.notified.has(agentId)) {
         this.notified.add(agentId);
         return "down";
@@ -106,6 +131,7 @@ export class EssentialsOpNotifier {
     }
     // 정상 — 부팅 중 잠깐 미충족이었다면 조용히 리셋(오탐 억제).
     this.streak.delete(agentId);
+    this.firstSeen.delete(agentId);
     if (this.notified.has(agentId)) {
       this.notified.delete(agentId);
       return "recovered";
@@ -116,6 +142,24 @@ export class EssentialsOpNotifier {
   /** 현재 미충족 연속 tick (테스트·디버그용) */
   streakOf(agentId: string): number {
     return this.streak.get(agentId) ?? 0;
+  }
+
+  /** 그 멤버가 현재 down 으로 관측되는지 — 수신자 선정에서 죽은 멤버를 피하는 데 쓴다(R4). */
+  isDown(agentId: string): boolean {
+    return this.notified.has(agentId);
+  }
+
+  /**
+   * ★첫 미충족 관측 이후 실제 경과 초★.
+   * afterTicks × interval 로 계산하면 ★항상 90★ 이 나오는데, tick 에 `if (ticking) return` 가드가
+   * 있어 스킵된 tick 동안 streak 는 안 늘고 실경과는 더 길다. 특히 autofix 가 restartAgent 를
+   * await 하며 최대 (acquire + settle)초를 잡으면 그 사이 tick 이 통째로 드롭된다.
+   * 틀린 수치는 사람에게 ★오보★ 로 읽히므로 실측값을 쓴다. (리사 리뷰 N3, 2026-07-30)
+   */
+  elapsedSecOf(agentId: string): number {
+    const t0 = this.firstSeen.get(agentId);
+    if (t0 == null) return 0;
+    return Math.max(0, Math.round((this.now() - t0) / 1000));
   }
 }
 
