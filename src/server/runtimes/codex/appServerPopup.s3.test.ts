@@ -245,6 +245,19 @@ describe("S3 — 코덱스 리뷰 반례 (회귀 가드)", () => {
     expect(one("c.md", "add", null, "@@ heading\nhello\n").text).toContain("add c.md(+2/-0)"); // 신세대도
   });
 
+  test("★종류와 필드가 어긋난 payload 에서 규모를 지어내지 않는다★ — 재료를 종류에 맞춰 고른다", () => {
+    // ★코덱스 2회전 지적(2026-07-30).★ 앞선 판은 type 과 무관하게 unified_diff 를 먼저 집었고,
+    //   세는 쪽은 kind 로 판정하므로 ★짝이 어긋나면 규모를 지어냈다★ — 셋 다 실측 재현했다.
+    const t = (fileChanges: unknown) => buildOperationFromApproval(oldGen(fileChanges), "dex").text ?? "";
+    // update 인데 content 만 있다 → 예전엔 (+0/-0) = "아무것도 안 바뀐다" 는 거짓말
+    expect(t({ "x.txt": { type: "update", content: "hello\n" } })).toBe("파일 1개: update x.txt");
+    // add 인데 unified_diff 만 있다 → 예전엔 (+3/-0) = 없는 내용에서 규모를 만들었다
+    expect(t({ "x.txt": { type: "add", unified_diff: "@@ -1 +1 @@\n-a\n+b\n" } })).toBe("파일 1개: add x.txt");
+    // 둘 다 있으면 ★종류에 맞는 필드★ 를 쓴다 — content 1줄이 정답이고 예전엔 +3 이었다
+    expect(t({ "x.txt": { type: "add", content: "one\n", unified_diff: "@@ -1 +1 @@\n-a\n+b\n" } }))
+      .toBe("파일 1개: add x.txt(+1/-0)");
+  });
+
   test("★빈 목록·배열은 '파일 0개 쓰기' 가 아니라 해석 실패다★ — 넓은 열쇠를 만들지 않는다", () => {
     expect(buildOperationFromApproval(oldGen({}), "dex").action).toBe("approval_unparsed");
     const arr = buildOperationFromApproval(oldGen(["src/z.ts"]), "dex");

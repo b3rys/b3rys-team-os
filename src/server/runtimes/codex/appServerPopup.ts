@@ -305,8 +305,21 @@ function oldGenChanges(fileChanges: Record<string, unknown>): WriteChange[] {
   return Object.entries(fileChanges).map(([path, raw]) => {
     const ch = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
     const mv = typeof ch.move_path === "string" && ch.move_path.trim() ? ch.move_path : null;
-    const diff = typeof ch.unified_diff === "string" ? ch.unified_diff : typeof ch.content === "string" ? ch.content : "";
-    return { path, kind: typeof ch.type === "string" && ch.type ? ch.type : "change", movePath: mv, diff };
+    const kind = typeof ch.type === "string" && ch.type ? ch.type : "change";
+    // ★필드를 종류에 맞춰 고른다(Codex 리뷰 2026-07-30, 2회전).★ 앞선 판은 type 과 무관하게
+    //   unified_diff 를 먼저 집었다. changeStat 은 kind 로 세는데 재료는 kind 를 안 보고 골랐으니
+    //   ★짝이 어긋난 payload 에서 규모를 지어냈다★ (전부 실측):
+    //     {type:"update", content:"hello\n"}            → update x(+0/-0)  ← "아무것도 안 바뀐다" 거짓말
+    //     {type:"add", unified_diff:"@@ …"}             → add x(+3/-0)     ← 없는 내용에서 규모를 만듦
+    //     {type:"add", content:"one\n", unified_diff:…} → add x(+3/-0)     ← 맞는 필드를 두고 틀린 걸 씀
+    //   ★모르면 비워 둔다★ — diff="" 면 표시에서 (+n/-n) 자체가 빠진다. 모르는 종류만 휴리스틱을 쓴다.
+    const diff =
+      kind === "update"
+        ? typeof ch.unified_diff === "string" ? ch.unified_diff : ""
+        : kind === "add" || kind === "delete"
+          ? typeof ch.content === "string" ? ch.content : ""
+          : typeof ch.unified_diff === "string" ? ch.unified_diff : typeof ch.content === "string" ? ch.content : "";
+    return { path, kind, movePath: mv, diff };
   });
 }
 
