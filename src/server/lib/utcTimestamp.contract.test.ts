@@ -39,13 +39,40 @@ const NORMALIZED = /parseSqliteDate|parseCapturedAt|toUtcIso|Date\.UTC|\+\s*"Z"|
 /**
  * ★허용 — 확인해서 안전한 곳만. 이유를 반드시 적는다.★
  * ★근거 없이 목록에 넣는 순간 이 가드는 아무것도 막지 못한다.★ (오늘 내가 판정기를 다섯 번 잘못 믿었다)
+ *
+ * ★줄번호로 키를 잡지 않는다★ — 이 가드가 실제로 새어나간 방식이 그거였다.
+ *   `routes/scheduler.ts:116` 으로 등록해뒀는데 그 위에 코드가 추가되면서 대상이 120 줄로 밀렸고,
+ *   키가 안 맞으니 ★이미 확인해서 안전하다고 판정한 곳이 다시 위반으로 잡혀 main 이 빨개졌다.★
+ *   코드는 그대로인데 기록만 떨어져 나간 것이다. (2026-07-30 데미스 발견 · 도입 55ddc12)
+ *   그래서 ★파일 + 그 줄의 특징적인 조각★ 으로 잡는다. 위에 무엇이 삽입돼도 안 깨지고,
+ *   같은 파일에 ★진짜 새 위반★ 이 생기면 조각이 다르므로 그건 그대로 잡힌다.
  */
-const ALLOW: Record<string, string> = {
-  // startedAt 은 Date.now() 가 넣은 ★숫자★ 다 (inFlight Map, wakeDispatcher:1515). new Date(number) 는 UTC 로 정확하다.
-  "server/bus/wakeDispatcher.ts:1540": "startedAt: number (Date.now) — 문자열이 아니다",
-  // run_at 은 API 입력이고 zod `z.string().datetime()` 이 ★ISO-8601(Z 포함)을 강제★ 한다 (scheduler.ts:18). DB 값이 아니다.
-  "server/routes/scheduler.ts:116": "zod .datetime() 이 ISO-Z 를 강제 — DB 문자열이 아니다",
-};
+interface AllowEntry {
+  file: string;
+  /** 그 줄에 반드시 들어 있는 조각. ★좁게★ 적는다 — 넓으면 다른 위반까지 같이 덮는다. */
+  snippet: string;
+  reason: string;
+}
+const ALLOW: AllowEntry[] = [
+  {
+    // startedAt 은 Date.now() 가 넣은 ★숫자★ 다 (inFlight Map). new Date(number) 는 UTC 로 정확하다.
+    file: "server/bus/wakeDispatcher.ts",
+    snippet: "new Date(startedAt)",
+    reason: "startedAt: number (Date.now) — 문자열이 아니다",
+  },
+  {
+    // run_at 은 API 입력이고 zod `z.string().datetime()` 이 ★ISO-8601(Z 포함)을 강제★ 한다.
+    // 실측(2026-07-30, 이 저장소의 zod): "…T12:00:00Z" 만 통과하고 "… 12:00:00"·naked ISO·"+09:00" 은 전부 거부된다.
+    // 즉 여기 도달하는 문자열엔 항상 Z 가 붙어 있어 new Date() 가 UTC 로 읽는다. DB 값이 아니다.
+    file: "server/routes/scheduler.ts",
+    snippet: "new Date(input.run_at)",
+    reason: "zod .datetime() 이 ISO-Z 를 강제 — DB 문자열이 아니다",
+  },
+];
+
+function isAllowed(file: string, line: string): boolean {
+  return ALLOW.some((a) => file === a.file && line.includes(a.snippet));
+}
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of readdirSync(dir)) {
@@ -69,9 +96,9 @@ describe("★계약★ DB 시각(Z 없는 UTC)을 로컬로 오독하지 않는�
         if (!arg.trim()) return;                    // new Date() = 현재시각, 안전
         if (!TS_FIELD.test(arg)) return;            // DB 시각 필드가 아니다
         if (NORMALIZED.test(line)) return;          // UTC 로 명시했다
-        const where = `${file.slice(ROOT.length + 1)}:${i + 1}`;
-        if (ALLOW[where]) return;                   // 확인해서 안전 (이유는 ALLOW 에)
-        offenders.push(`${where}  ${line.trim().slice(0, 90)}`);
+        const rel = file.slice(ROOT.length + 1);
+        if (isAllowed(rel, line)) return;           // 확인해서 안전 (이유는 ALLOW 에)
+        offenders.push(`${rel}:${i + 1}  ${line.trim().slice(0, 90)}`);
       });
     }
     expect(
