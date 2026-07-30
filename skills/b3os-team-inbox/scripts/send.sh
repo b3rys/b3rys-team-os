@@ -218,7 +218,10 @@ except Exception: print('unknown'); sys.exit(0)
 rs = d.get('recipients')
 if rs is None: print('noapi'); sys.exit(0)
 if len(rs) == 0: print('norecipient'); sys.exit(0)
-bad = [r for r in rs if r.get('delivery_state') in ('blocked', 'dead_letter')]
+# ★expired 도 미배달이다★ — 실측으로 이 상태가 21건 있었다(blocked 는 1건). expired 를 실패로
+#   보지 않으면 ★가장 흔한 미배달이 '아직 판정 전' 으로 흘러★ 타임아웃 메시지만 남는다.
+#   wake_dispatched 는 진행 중이라 pending 으로 둔다(곧 completed 가 된다).
+bad = [r for r in rs if r.get('delivery_state') in ('blocked', 'dead_letter', 'expired')]
 if bad:
     r = bad[0]
     print('failed\t' + str(r.get('delivery_state')) + '\t' + str(r.get('last_error') or '(사유 없음)'))

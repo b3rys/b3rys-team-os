@@ -233,6 +233,20 @@ echo "── A2-4: --confirm 조회 경로가 올바른가 (SPA fallback 이 아
 grep -q 'api/messages/\$MSG_ID' "$SEND" && pass "\$BASE/api/messages/<id> 를 쓴다" \
   || { fail "조회 경로가 틀렸다 — /api/inbox/messages 는 SPA HTML 을 200 으로 준다"; grep -n 'api/.*messages' "$SEND" | sed 's/^/    /'; }
 
+echo "── A2-5: --confirm 이 ★expired★ 를 미배달로 본다 (실측 21건) ──"
+# expired 를 실패로 안 보면 ★가장 흔한 미배달이 '아직 판정 전' 으로 흘러★ 타임아웃만 남는다.
+EXPBIN="$TMP/ebin"; mkdir -p "$EXPBIN"
+cat > "$EXPBIN/curl" <<'STUB'
+#!/usr/bin/env bash
+for a in "$@"; do [ "$a" = "-X" ] && { printf '{"ok":true,"message":{"id":"testid","thread_id":"t","hop_count":0}}'; exit 0; }; done
+printf '{"message":{"id":"testid"},"recipients":[{"agent_id":"lisa","delivery_state":"expired","last_error":null}]}'
+STUB
+chmod +x "$EXPBIN/curl"
+out="$(PATH="$EXPBIN:$PATH" "$SEND" --to lisa --body-file "$FIX" --confirm 6 2>&1)"; rc=$?
+[ $rc -ne 0 ] && pass "expired 를 실패로 보고 (exit $rc)" || fail "expired 를 성공/보류로 흘렸다 (exit $rc)"
+grep -q "미배달" <<<"$out" && pass "미배달이라고 말한다" || fail "미배달 표현 없음: $(head -2 <<<"$out")"
+
+
 echo
 if [ $FAILED -eq 0 ]; then echo "ALL PASS — send tools honesty"; else echo "FAILED — send tools honesty"; fi
 exit $FAILED
