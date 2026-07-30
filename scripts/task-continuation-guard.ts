@@ -43,11 +43,26 @@ interface Agent {
 
 type State = Record<string, string>; // cardId -> 마지막 핑 ISO(UTC)
 
-// "2026-07-24 13:31:36"(UTC, TZ 없음) → epoch ms. 파싱 실패하면 0(=아주 오래됨으로 취급하지 않게 now 반환).
+// 저장소 관행은 "2026-07-24 13:31:36" (UTC, 표시자 없음) 이다.
+//
+// 판정 기준은 시간대 표시자(`Z` 또는 `±HH:MM`)의 유무다. 구분자(공백/`T`)가 아니다.
+// 표시자가 없는 ISO 문자열은 `Date.parse` 가 로컬 시각으로 읽는다. `2026-07-30T18:10:00` 은
+// `Asia/Seoul` 머신에서 `2026-07-30T09:10:00Z` 가 되어 9시간 이르게 잡히고, 카드가 실제보다
+// 오래된 것으로 보여 임계를 넘긴다.
+//
+// 문자열 정규화를 따로 내보낸다. `Date.parse` 결과로 단정하면 프로세스 시간대에 따라
+// 결과가 달라져서(테스트 러너는 UTC 로 돈다) 이 판정을 검사할 수 없다.
+export function toUtcIso(s: string): string {
+  const trimmed = s.trim();
+  const iso = trimmed.includes("T") ? trimmed : trimmed.replace(" ", "T");
+  // 대소문자를 가리지 않는다. `18:10:00z` 를 놓치면 `z` 뒤에 `Z` 가 더 붙어 파싱이 실패한다.
+  return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(iso) ? iso : `${iso}Z`;
+}
+
+// → epoch ms. 파싱 실패하면 now 를 돌려준다(아주 오래된 것으로 취급하지 않게).
 export function parseUtc(s: string | null | undefined, nowMs: number): number {
   if (!s) return nowMs;
-  const iso = /[TZ]/.test(s) ? s : s.replace(" ", "T") + "Z";
-  const t = Date.parse(iso);
+  const t = Date.parse(toUtcIso(s));
   return Number.isNaN(t) ? nowMs : t;
 }
 

@@ -7,7 +7,7 @@
  * 기준이라 ★성실히 갱신하는 blocked 카드일수록 더 자주 핑을 받는★ 역유인까지 있었다.
  */
 import { describe, expect, test } from "bun:test";
-import { isBlockedCard, stalledDoingCards, guardBody } from "./task-continuation-guard";
+import { isBlockedCard, stalledDoingCards, guardBody, parseUtc, toUtcIso } from "./task-continuation-guard";
 
 const NOW = Date.parse("2026-07-26T00:00:00Z");
 const STALL = 60 * 60 * 1000; // 60분
@@ -73,5 +73,47 @@ describe("안내 문구", () => {
     const body = guardBody("someone", [card()], 60);
     expect(body).toContain("blocked");
     expect(body).toContain("뜸하게");
+  });
+});
+
+describe("parseUtc — 시간대 표시자", () => {
+  // 문자열로 단정한다. Date.parse 결과는 프로세스 시간대를 타고, 테스트 러너는 UTC 로 돌아서
+  // 표시자를 빠뜨려도 결과가 같아진다 — 그러면 이 판정을 검사할 수 없다.
+
+  test("표시자가 없으면 Z 를 붙인다 — 구분자가 공백이든 T 든 같다", () => {
+    expect(toUtcIso("2026-07-24 13:31:36")).toBe("2026-07-24T13:31:36Z");
+    expect(toUtcIso("2026-07-30T18:10:00")).toBe("2026-07-30T18:10:00Z");
+  });
+
+  test("표시자가 있으면 그대로 둔다", () => {
+    for (const v of [
+      "2026-07-30T18:10:00Z",
+      "2026-07-30T18:10:00+09:00",
+      "2026-07-30T18:10:00-05:00",
+      "2026-07-30T18:10:00+0900",
+      "2026-07-30T18:10:00z",
+      "2026-07-30T18:10:00.123Z",
+      "2026-07-30T18:10Z",
+    ]) {
+      expect(toUtcIso(v)).toBe(v);
+    }
+  });
+
+  test("표시자가 없는 변형에도 Z 를 하나만 붙인다", () => {
+    expect(toUtcIso("2026-07-30T18:10")).toBe("2026-07-30T18:10Z");
+    expect(toUtcIso("2026-07-30T18:10:00.123")).toBe("2026-07-30T18:10:00.123Z");
+    expect(toUtcIso("  2026-07-30 18:10:00  ")).toBe("2026-07-30T18:10:00Z");
+  });
+
+  test("결과에는 항상 표시자가 있다", () => {
+    for (const v of ["2026-07-24 13:31:36", "2026-07-30T18:10:00", "2026-07-30T18:10:00Z"]) {
+      expect(toUtcIso(v)).toMatch(/(?:Z|[+-]\d{2}:?\d{2})$/);
+    }
+  });
+
+  test("빈 값과 파싱 실패는 now 를 돌려준다", () => {
+    expect(parseUtc("", 12345)).toBe(12345);
+    expect(parseUtc(null, 12345)).toBe(12345);
+    expect(parseUtc("not-a-date", 12345)).toBe(12345);
   });
 });
