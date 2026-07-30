@@ -274,12 +274,141 @@ else
   echo "  ⚠ MCP plugin enable 자동기록 실패(계속) — 안 붙으면 세션에서 /plugin 으로 수동 enable"
 fi
 
-# ★pre-warm/boot-mutex 제거(2026-07-25 하네스 4-way 확정)★: 이전엔 "콜드 `bun install` → CC 30s MCP 핸드셰이크 초과 →
+# ★pre-warm 제거는 유지(2026-07-25 하네스 4-way 확정)★: 이전엔 "콜드 `bun install` → CC 30s MCP 핸드셰이크 초과 →
 #   타임아웃"을 근본으로 보고 node_modules pre-warm + 버전락 mutex 를 뒀으나, ★실패 세션 MCP 로그에 `Starting connection`
 #   이 0건★ = 타임아웃이 아니라 부팅 MCP 열거에서 telegram 이 아예 빠진 것으로 반증됐다. 그 타임아웃이 애초에 없으므로
 #   pre-warm 은 헛수고이고, 오히려 매 스폰마다 공유 플러그인 캐시에서 `bun install` 을 돌려 형제 세션과 경합을 늘렸다 → 제거.
 #   진짜 복구는 activation 의 auto-reconnect(`/mcp reconnect`)가 담당한다.
+#   ⚠ 아래 stagger 는 그 pre-warm 의 부활이 아니다 — 공유 캐시를 ★건드리지 않는다★(bun install 없음). 스폰 순서만 직렬화한다.
+
+# ─── Spawn stagger (공유 플러그인 캐시 binlink 경합 가드) ────────────────────
+# 2026-07-30 실측(리사 28분 무응답): jane·lisa launchd 잡이 RunAtLoad 로 ★같은 초★(08:03:33)에 떠서
+#   두 세션의 claude 가 공유 플러그인 캐시(…/telegram/<ver>/)에 `bun run` 을 동시에 걸었다.
+#   bun 이 node_modules/.bin binlink 를 동시 생성 → 한쪽이 `error: Failed to link which: EEXIST` 로 죽고
+#   `MCP error -32000: Connection closed`(144ms) → bot.pid 미생성 → 그 멤버는 텔레그램을 아예 못 받는다.
+#   jane 은 경합을 이겨 정상, lisa 만 탈락 = 부팅마다 뽑기.
+# ★2026-07-25 케이스와 실패 서명이 다르다★: 그땐 MCP 로그에 `Starting connection` 0건(열거 누락),
+#   이번엔 `Starting connection` 있고 144ms 뒤 `Connection closed`(링크 실패). 그래서 다른 처방이 맞다.
+# 처방: 머신 단위 mutex 로 ★스폰만★ 직렬화하고, 새 세션의 poller 가 bot.pid 를 쓸 때까지 기다렸다 락을 놓는다.
+#   → 두 번째 멤버의 claude 는 캐시 링크가 끝난 뒤에 뜨므로 링크할 게 없다(경합 소멸).
+# flock(1) 은 macOS 기본 미포함 → mkdir 원자성으로 구현. 락 획득 실패는 ★기동을 막지 않는다★(경고 후 진행).
+STAGGER_LOCK="${CLAUDE_START_STAGGER_LOCK:-$HOME/.claude/channels/.spawn.lock}"
+STAGGER_SETTLE_MAX="${CLAUDE_START_STAGGER_SETTLE:-25}"    # 내 poller 안착(bot.pid) 대기 상한(초)
+# ★ACQUIRE 는 SETTLE 에서 유도한다★ — 고정 60 으로 두면 claude 멤버가 3명 이상일 때 마지막 멤버의
+#   대기가 (N-1)×SETTLE 로 상한을 넘겨 '락 미확보 → 경합 안고 진행' = 고치려던 그 경합으로 되돌아간다.
+#   (N-1)×SETTLE + 여유. N 은 claude 봇 LaunchAgent plist 수로 센다(없으면 2로 가정).
+#   ※ `ls … | wc -l` 로 세지 않는다 — 매칭 0건이면 ls 가 실패하고 set -o pipefail + set -e 때문에
+#     ★스크립트가 그 자리에서 죽는다★(기동 자체가 안 된다). 순수 glob 으로 센다.
+_claude_members=0
+for _p in "$HOME/Library/LaunchAgents/"*.claude-telegram-*.plist; do
+  [[ -e "$_p" ]] && _claude_members=$(( _claude_members + 1 ))
+done
+(( _claude_members < 2 )) && _claude_members=2
+STAGGER_ACQUIRE_MAX="${CLAUDE_START_STAGGER_ACQUIRE:-$(( (_claude_members - 1) * STAGGER_SETTLE_MAX + 20 ))}"
+STAGGER_STALE_CONFIRM="${CLAUDE_START_STAGGER_STALE_CONFIRM:-5}"  # 같은 죽은 pid 를 연속 관찰해야 하는 초
+_stagger_held=0
+# release 도 ★내 락인지 확인하고★ 지운다. 회수 로직이 창을 극단적으로 좁혔어도 완전히 닫지는
+#   못하므로(오회수 → 되돌리기 실패 경로가 이론상 남는다), 그 최악 결과가 '해제할 때 남의 락을
+#   지운다' 로 연쇄되는 걸 여기서 끊는다. 좁은 경합을 더 쫓는 대신 최악 결과를 없애는 쪽.
+#   (리사 리뷰 F1, 2026-07-30)
+_stagger_release() {
+  [[ $_stagger_held -eq 1 ]] || return 0
+  local _cur
+  _cur="$(cat "$STAGGER_LOCK/pid" 2>/dev/null || true)"
+  if [[ "$_cur" == "$$" ]]; then
+    rm -rf "$STAGGER_LOCK" 2>/dev/null || true
+  fi
+  return 0
+}
+
+if [[ "${CLAUDE_START_NO_STAGGER:-}" == "1" || "${CLAUDE_START_NO_STAGGER:-}" == "true" ]]; then
+  echo "  Stagger     : OFF (CLAUDE_START_NO_STAGGER)"
+else
+  mkdir -p "$(dirname "$STAGGER_LOCK")" 2>/dev/null || true
+  _waited=0
+  _stale_pid=""      # 연속 관찰 중인 '죽은 소유자' pid
+  _stale_seen=0      # 그 pid 를 연속 관찰한 횟수(초)
+  while (( _waited < STAGGER_ACQUIRE_MAX )); do
+    if mkdir "$STAGGER_LOCK" 2>/dev/null; then
+      _stagger_held=1
+      echo "$$" > "$STAGGER_LOCK/pid" 2>/dev/null || true
+      trap _stagger_release EXIT
+      break
+    fi
+    # ─ stale 회수 (부팅 중 크래시가 락을 영구 점유하지 않게) ─
+    # ★TOCTOU 를 막는다★: "pid 읽고 죽었으면 rm" 은 위험하다 — 읽고 rm 하는 사이에 원 소유자가
+    #   정상 release 하고 다른 멤버가 mkdir 로 획득하면 ★남의 살아있는 락을 지운다★(상호배제 붕괴).
+    #   그래서 두 겹으로 막는다:
+    #   ① 같은 죽은 pid 를 STAGGER_STALE_CONFIRM 초 ★연속★ 관찰해야 회수 후보가 된다.
+    #      살아있는 소유자나 새 획득자는 이 조건을 만들 수 없다(새 획득자는 자기 살아있는 pid 를 쓰므로
+    #      관찰이 리셋된다). 즉 '방금 갈아치워진 락' 은 후보에서 자동 탈락한다.
+    #   ② 회수는 rm 이 아니라 ★원자적 mv★ 로 들어낸 뒤, 들어낸 것의 pid 를 다시 확인한다. mv 는
+    #      주어진 디렉토리를 정확히 한 프로세스만 옮길 수 있다. 옮긴 게 알고 보니 살아있는 주인의
+    #      락이면 즉시 제자리로 되돌린다.
+    #   ③ 회수했다고 스스로 락을 주지 않는다 — 루프 위로 돌아가 mkdir 로 공정하게 다시 경쟁한다.
+    _owner="$(cat "$STAGGER_LOCK/pid" 2>/dev/null || true)"
+    if [[ -n "$_owner" ]] && ! kill -0 "$_owner" 2>/dev/null; then
+      if [[ "$_owner" == "$_stale_pid" ]]; then
+        _stale_seen=$(( _stale_seen + 1 ))
+      else
+        _stale_pid="$_owner"; _stale_seen=1
+      fi
+      if (( _stale_seen >= STAGGER_STALE_CONFIRM )); then
+        _stale_dir="${STAGGER_LOCK}.stale.$$"
+        if mv "$STAGGER_LOCK" "$_stale_dir" 2>/dev/null; then
+          _moved_pid="$(cat "$_stale_dir/pid" 2>/dev/null || true)"
+          if [[ -n "$_moved_pid" ]] && kill -0 "$_moved_pid" 2>/dev/null; then
+            # 살아있는 주인의 락을 잘못 들어냈다 → 제자리로. 되돌리기 실패(그새 남이 획득)면 버린다.
+            mv "$_stale_dir" "$STAGGER_LOCK" 2>/dev/null || rm -rf "$_stale_dir" 2>/dev/null || true
+          else
+            rm -rf "$_stale_dir" 2>/dev/null || true
+            echo "  Stagger     : stale 락 회수 (죽은 pid=$_owner, ${_stale_seen}s 연속 확인)"
+          fi
+        fi
+        _stale_pid=""; _stale_seen=0
+      fi
+    else
+      # 소유자가 살아있다 / pid 파일이 아직 안 쓰인 찰나 → 관찰 리셋(성급한 탈취 방지)
+      _stale_pid=""; _stale_seen=0
+    fi
+    sleep 1
+    _waited=$(( _waited + 1 ))
+  done
+  if [[ $_stagger_held -eq 1 ]]; then
+    if (( _waited > 0 )); then
+      echo "  Stagger     : 락 확보 (앞 세션 대기 ${_waited}s) — 스폰 직렬화"
+    else
+      echo "  Stagger     : 락 확보 (즉시) — 스폰 직렬화"
+    fi
+  else
+    echo "  ⚠ Stagger   : 락 대기 ${STAGGER_ACQUIRE_MAX}s 초과(멤버 ${_claude_members}명 기준) — 경합 위험을 안고 계속 진행"
+  fi
+fi
+
+_spawn_t0=$(date +%s)
 tmux new-session -d -s "$SESSION_NAME" -c "$WORKDIR" "$INNER_CMD"
+
+# 내 poller 가 bot.pid 를 ★새로★ 쓸 때까지 락을 쥔 채 기다린다(= 캐시 링크 완료 신호).
+#   기존 bot.pid 가 남아있을 수 있으므로 mtime 이 스폰 이후인지 본다(오래된 파일로 조기 통과 방지).
+#   bot.pid 를 미리 지우지 않는다 — 플러그인이 그 값으로 stale orphan poller 를 죽이기 때문(server.ts PID_FILE).
+if [[ $_stagger_held -eq 1 ]]; then
+  _settled=0
+  for (( i = 0; i < STAGGER_SETTLE_MAX; i++ )); do
+    if [[ -f "$STATE_DIR/bot.pid" ]]; then
+      _mt=$(stat -f %m "$STATE_DIR/bot.pid" 2>/dev/null || stat -c %Y "$STATE_DIR/bot.pid" 2>/dev/null || echo 0)
+      if (( _mt >= _spawn_t0 )); then _settled=1; break; fi
+    fi
+    sleep 1
+  done
+  if [[ $_settled -eq 1 ]]; then
+    echo "  Poller      : bot.pid 확인 ✓ (${i}s) — 다음 멤버 스폰 안전"
+  else
+    echo "  ⚠ Poller    : bot.pid 미확인 (${STAGGER_SETTLE_MAX}s) — MCP 미기동 가능, activation auto-reconnect 대상"
+  fi
+  _stagger_release
+  _stagger_held=0
+  trap - EXIT
+fi
 
 echo "Started tmux session: $SESSION_NAME"
 echo "  State dir   : $STATE_DIR"

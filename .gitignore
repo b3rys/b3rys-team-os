@@ -51,6 +51,11 @@ archiving/
 #   없는 상태로 PR 이 올라갔다(로직을 되돌려도 실패 0건). 조용한 누락이라 status 출력을
 #   보고도 못 본다. 개별 등록은 같은 사고를 다음 사람에게 넘기는 것이라 패턴으로 연다.
 !/scripts/*.test.ts
+# 셸 인수테스트도 같은 이유로 ★클래스로★ 연다(`*.test.sh`). 위 .test.ts 주석의 사고가 셸에서도
+#   그대로 난다 — 2026-07-30 stagger fix 때 실측: scripts/test-*.sh 로 짰더니 /scripts/* 에 걸려
+#   git status 에 아예 안 나타났고, 그대로 커밋하면 "소스만 있고 지키는 테스트는 없는" PR 이 된다.
+#   ※ 기존 GD 머신 전용 ops 테스트는 `test-*.sh` 라 이 패턴에 걸리지 않는다(공개 노출 없음).
+!/scripts/*.test.sh
 /docs/*
 !/docs/AUTO_HEAL_CORE.md
 !/docs/SLACK_SETUP.md
