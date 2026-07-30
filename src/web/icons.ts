@@ -135,6 +135,37 @@ function nativeBridge(): { postMessage: (body: unknown) => void } | null {
   }).webkit?.messageHandlers?.bridge ?? null;
 }
 
+type BridgeReply = { id?: string; result?: { ok?: boolean; cancelled?: boolean }; error?: string };
+
+/**
+ * ★기다리는 호출을 id 로 찾는 표★ — 수신부를 호출마다 갈아끼우지 않는다.
+ *
+ * 고치기 전: 호출마다 `window.__appShellBridge` 를 자기 수신부로 덮고, 끝나면 자기가 기억한 previous 로
+ * 되돌렸다. 그래서 ★호출이 겹치면 먼저 끝난 쪽이 나중 호출의 수신부까지 지웠다★ — 앱이 정상으로
+ * 회신해도 나중 호출은 응답을 받을 곳이 없어 120초 타임아웃이 났다. (해소 경로에는 타임아웃 경로와 달리
+ * '아직 내 것인가' 검사도 없었다.) 수신부를 하나만 두고 id 로 찾으면 이 갈래가 아예 사라진다.
+ */
+const pendingBridgeCalls = new Map<string, (body: BridgeReply) => void>();
+let bridgeReceiverInstalled = false;
+
+function installBridgeReceiver(): void {
+  if (bridgeReceiverInstalled) return;
+  const host = window as unknown as { __appShellBridge?: AppShellBridgeReceiver };
+  const previous = host.__appShellBridge;
+  const previousReceive = previous?.receive;
+  host.__appShellBridge = {
+    ...previous,
+    receive: (body: BridgeReply) => {
+      const settle = body?.id ? pendingBridgeCalls.get(body.id) : undefined;
+      // 내 것이 아니면 원래 수신부로 넘긴다(다른 기능이 같은 창구를 쓰고 있을 수 있다).
+      if (!settle) { previousReceive?.call(previous, body); return; }
+      pendingBridgeCalls.delete(body.id!);
+      settle(body);
+    },
+  };
+  bridgeReceiverInstalled = true;
+}
+
 function sendNativeBridge(
   command: string,
   payload: Record<string, unknown>,
@@ -142,35 +173,30 @@ function sendNativeBridge(
   const bridge = nativeBridge();
   if (!bridge) return Promise.reject(new Error("native bridge unavailable"));
 
-  const host = window as unknown as { __appShellBridge?: AppShellBridgeReceiver };
-  const previous = host.__appShellBridge;
-  const previousReceive = previous?.receive;
+  installBridgeReceiver();
   const id = `b3rys-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   return new Promise((resolve, reject) => {
+    // 앱이 파일 저장 패널을 띄우고 ★사람이 거기서 고르는 시간★ 까지 기다려야 해서 넉넉히 둔다.
     const timer = window.setTimeout(() => {
-      if (host.__appShellBridge?.receive === receive) {
-        if (previous) host.__appShellBridge = previous;
-        else delete host.__appShellBridge;
-      }
+      pendingBridgeCalls.delete(id);
       reject(new Error("native bridge timeout"));
     }, 120000);
 
-    const receive = (body: { id?: string; result?: { ok?: boolean; cancelled?: boolean }; error?: string }) => {
-      if (body?.id !== id) {
-        previousReceive?.call(previous, body);
-        return;
-      }
+    pendingBridgeCalls.set(id, (body) => {
       window.clearTimeout(timer);
-      if (previous) host.__appShellBridge = previous;
-      else delete host.__appShellBridge;
       if (body.error) reject(new Error(body.error));
       else resolve(body.result ?? {});
-    };
+    });
 
-    host.__appShellBridge = { ...previous, receive };
     bridge.postMessage({ id, command, payload });
   });
+}
+
+/** 테스트 격리용 — 설치 상태와 대기 목록을 비운다. */
+export function __resetNativeBridgeForTest(): void {
+  pendingBridgeCalls.clear();
+  bridgeReceiverInstalled = false;
 }
 
 function splitDataUrl(dataUrl: string): { mimeType: string; base64: string } | null {

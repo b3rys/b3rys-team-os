@@ -11,7 +11,7 @@
 
 import { pick } from "../i18n";
 import { parseSqliteDate } from "../lib/datetime";
-import { showAlert, showConfirm } from "./dialogs";
+import { showAlert, showConfirm, showPrompt } from "./dialogs";
 
 const REPORTS_BASE = "/reports";
 const DEFAULT_CAT = "보고서";
@@ -330,7 +330,18 @@ async function mutateJson(path: string, method: string, body?: unknown): Promise
 }
 async function editReportTags(report: Report): Promise<void> {
   const current = (report.tags ?? []).map((t) => t.name).join(", ");
-  const raw = prompt(pick("태그 이름을 쉼표로 구분해 입력하세요. 비우면 모두 해제됩니다.", "Enter tag names separated by commas. Leave empty to clear."), current);
+  // ★네이티브 prompt() 를 쓰지 않는다★ — 앱 웹뷰에서 억제되면 눌러도 아무 일이 없다(2026-07-30 실측).
+  //   문구 원칙: 범위('이 보고서')를 먼저, 기호는 우리말 이름과 함께, 결과를 말한다(팀장님 피드백).
+  const raw = await showPrompt({
+    title: pick("이 보고서의 태그", "Tags for this report"),
+    message: pick(
+      "붙일 태그 이름을 쉼표(,)로 구분해 적어 주세요.\n\n칸에서 이름을 지우면 그 태그가 이 보고서에서만 떨어집니다. 태그 자체와 보고서는 그대로 있습니다.\n목록에 없는 이름을 적으면 그 이름의 태그가 새로 만들어집니다.",
+      "List the tag names for this report, separated by commas (,).\n\nRemoving a name only unlabels this report — the tag and the report both stay.\nA name that isn't in the list yet becomes a new tag.",
+    ),
+    placeholder: pick("예: 주간보고, 인프라", "e.g. weekly, infra"),
+    defaultValue: current,
+    okLabel: pick("저장", "Save"),
+  });
   if (raw == null) return;
   const names = [...new Set(raw.split(",").map((s) => s.trim()).filter(Boolean))];
   const known = new Map(_tags.map((t) => [t.name.toLocaleLowerCase(), t]));
@@ -346,19 +357,41 @@ async function editReportTags(report: Report): Promise<void> {
   });
 }
 async function manageTags(): Promise<void> {
-  const action = prompt(pick("새 태그 이름 / ‘기존이름 → 새이름’ / 삭제는 ‘-태그이름’을 입력하세요.", "Enter a new name / 'old → new' / '-name' to delete."));
+  // ★문구는 문법을 나열하지 않는다★ — 동작 이름 + 그대로 베껴 쓸 예시를 준다(팀장님 피드백 2026-07-30:
+  //   "팝업 설명이 무슨 얘기인지 모르겠는데"). 예전 문구는 한 칸에 문법 3개를 슬래시로 붙여 놓아서,
+  //   사용자가 '지금 무슨 모드인지' 를 스스로 정하고 문법까지 골라야 했다.
+  const action = await showPrompt({
+    title: pick("태그 관리", "Manage tags"),
+    message: pick(
+      "한 번에 한 가지만 합니다. 아래 세 줄 중 하나를 그대로 베껴 고쳐 쓰세요.\n\n만들기 — 이름만 적습니다.  예) 주간보고\n이름 바꾸기 — 예) 주간보고 -> 주간리포트\n지우기 — 이름 앞에 빼기표(-).  예) -주간보고\n\n태그를 지워도 보고서는 지워지지 않습니다.",
+      "One thing at a time. Copy one of these lines and edit it.\n\nCreate — just the name.  e.g. weekly\nRename — e.g. weekly -> weekly report\nDelete — put a minus (-) in front.  e.g. -weekly\n\nDeleting a tag never deletes a report.",
+    ),
+    placeholder: pick("예: 주간보고", "e.g. weekly"),
+  });
   if (!action?.trim()) return;
-  const value = action.trim();
+  // ASCII '->' 도 받는다 — 키보드에 없는 화살표(→)를 요구하면 조용히 새 태그가 만들어졌다.
+  const value = action.trim().replace(/->/g, "→");
   if (value.startsWith("-")) {
-    const tag = _tags.find((t) => t.name.toLocaleLowerCase() === value.slice(1).trim().toLocaleLowerCase());
-    if (!tag) throw new Error(pick("태그를 찾을 수 없습니다.", "Tag not found."));
-    if (!confirm(pick(`‘${tag.name}’ 태그를 삭제할까요? 보고서는 삭제되지 않습니다.`, `Delete '${tag.name}'? Reports remain.`))) return;
+    const wanted = value.slice(1).trim();
+    const tag = _tags.find((t) => t.name.toLocaleLowerCase() === wanted.toLocaleLowerCase());
+    if (!tag) throw new Error(pick(`‘${wanted}’ 이라는 태그가 없습니다. 태그 목록의 이름과 똑같이 적어 주세요.`, `No tag named '${wanted}'. Use the exact name shown in the tag list.`));
+    const yes = await showConfirm({
+      title: pick("태그를 지울까요?", "Delete this tag?"),
+      message: pick(
+        `‘${tag.name}’ 태그를 지웁니다. 이 태그가 붙어 있던 보고서는 그대로 남고, 이름표만 떨어집니다.`,
+        `'${tag.name}' will be removed. The reports keep existing — they just lose this label.`,
+      ),
+      okLabel: pick("지우기", "Delete"),
+      cancelLabel: pick("그대로 두기", "Keep it"),
+      danger: true,
+    });
+    if (!yes) return;
     await mutateJson(`/api/tags/${encodeURIComponent(tag.id)}`, "DELETE");
     _selectedTagIds.delete(tag.id);
   } else if (value.includes("→")) {
     const [from = "", to = ""] = value.split("→", 2).map((s) => s.trim());
     const tag = _tags.find((t) => t.name.toLocaleLowerCase() === from.toLocaleLowerCase());
-    if (!tag || !to) throw new Error(pick("‘기존이름 → 새이름’ 형식으로 입력하세요.", "Use 'old → new'."));
+    if (!tag || !to) throw new Error(pick("바꿀 이름과 새 이름을 함께 적어 주세요. 예) 주간보고 -> 주간리포트", "Give both names. e.g. weekly -> weekly report"));
     await mutateJson(`/api/tags/${encodeURIComponent(tag.id)}`, "PATCH", { name: to });
   } else {
     await mutateJson("/api/tags", "POST", { name: value });
@@ -581,7 +614,11 @@ function renderList(): void {
     });
   });
   _root.querySelector<HTMLButtonElement>("#reports-manage-tags")?.addEventListener("click", () => {
-    void manageTags().catch((err) => alert(pick(`태그 관리 실패: ${err.message}`, `Tag management failed: ${err.message}`)));
+    // 실패도 인페이지 창으로 — 같은 화면의 다른 실패 알림과 모양을 맞춘다(네이티브 alert 는 앱 웹뷰에서 억제된다).
+    void manageTags().catch((err) => void showAlert({
+      title: pick("태그를 저장하지 못했습니다", "Could not save the tag"),
+      message: String((err as Error).message ?? err),
+    }));
   });
   _root.querySelectorAll<HTMLElement>(".reports-card").forEach((el) => {
     el.addEventListener("click", () => { rememberListScroll(); _curId = el.dataset.id || null; if (_curId) setDetailHash(_curId); _curType = null; _view = "detail"; renderDetail(); });
