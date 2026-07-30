@@ -190,11 +190,17 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
   //    AddFileChange    { type: "add",    content }        DeleteFileChange { type: "delete", content }
   //    UpdateFileChange { type: "update", unified_diff, move_path? }
   //  ★모양을 짐작하지 않고 벤더 스키마에서 읽었다★ — 앞서 patchUpdated 를 짐작해 한 번 틀렸던 자리다.
-  if (p.fileChanges && typeof p.fileChanges === "object") {
+  // ★배열은 파일 목록이 아니다(Codex 리뷰 2026-07-30).★ `typeof [] === "object"` 라 그냥 통과했고,
+  //   그 결과 ★인덱스 0 을 파일 경로로 표시★ 했다(실측: `change 0`). 모양이 아니면 해석 실패로 보낸다.
+  if (p.fileChanges && typeof p.fileChanges === "object" && !Array.isArray(p.fileChanges)) {
     // ★S2: grantRoot 는 구세대 applyPatchApproval 에도 있다★ — 지금까지 통째로 무시하고 있었다.
     //   있으면 '이 파일들' 이 아니라 ★'이 루트 하위 전부' 를 세션 동안 허용해 달라는 요청★ 이다.
     //   열쇠에 반영하지 않으면 파일 몇 개에 준 '항상 허용' 이 루트 전체 승인으로 재사용된다.
-    return writeOperation(agentId, provenance, oldGenChanges(p.fileChanges), grantRootOf(p), null);
+    const oldChanges = oldGenChanges(p.fileChanges);
+    // ★빈 목록은 '파일 0개 쓰기' 가 아니라 해석 실패다★ — 신세대(관측된 변경 0건)와 정책을 맞춘다.
+    //   앞선 판은 `fileChanges: {}` 를 write 로 만들어 ★내용 없는 넓은 열쇠★ 를 하나 만들었다.
+    if (oldChanges.length === 0) return unparsedOperation(req, agentId, provenance);
+    return writeOperation(agentId, provenance, oldChanges, grantRootOf(p), null);
   }
   return unparsedOperation(req, agentId, provenance);
 }
@@ -257,7 +263,12 @@ function fileChangeEntries(fileChanges: Record<string, unknown>): string[] {
  *  (delete 는 라이브로 못 봤다 — 통일diff 가 아니면 삭제 규모로 센다.) */
 function changeStat(kind: string, diff: string): { added: number; removed: number } {
   const lines = diff.split("\n");
-  const isUnified = lines.some((l) => l.startsWith("@@"));
+  // ★모양이 아니라 종류로 판정한다(Codex 리뷰 2026-07-30 P2).★ 앞선 판은 `@@` 로 시작하는 줄이
+  //   있으면 통일diff 로 봤는데, add/delete 의 `content` 는 ★파일 원문★ 이라 마크다운 제목 `@@ heading`
+  //   같은 줄이 들어오면 통일diff 로 오판해 ★(+0/-0)★ 을 만든다(실측 재현: add·delete·신세대 add 전부).
+  //   ★그게 이 함수가 애초에 막으려 했던 거짓말 그 자체다.★ 벤더 스키마상 통일diff 는 update 뿐이므로
+  //   update 면 diff 로 세고, add/delete 면 원문 줄수로 센다. ★모르는 종류만 모양으로 추정한다.★
+  const isUnified = kind === "update" ? true : kind === "add" || kind === "delete" ? false : lines.some((l) => l.startsWith("@@"));
   if (isUnified) {
     let added = 0, removed = 0;
     for (const line of lines) {
@@ -304,9 +315,27 @@ function oldGenChanges(fileChanges: Record<string, unknown>): WriteChange[] {
  *  `${pr.runtime}/${pr.agent_id} · ${pr.action}\n${pr.target}`). ★즉 240자가 화면이다.★ */
 const VISIBLE_BUDGET = 240;
 
+/** 코드포인트 경계에서 자른다. ★UTF-16 code unit 으로 자르면 이모지 한 자를 반 토막 낸다★ —
+ *  `a×224 + 😀` 경로에서 target 끝이 고아 서로게이트(U+D83D)로 끝나는 것을 재현했다(Codex 리뷰 2026-07-30).
+ *  화면에 깨진 글자가 뜨는 것 자체도 문제지만, ★"내가 지금 무엇을 승인하는가" 를 흐리는 것★ 이 더 나쁘다. */
+function cutCodePoints(s: string, max: number): string {
+  if (s.length <= max) return s;
+  let out = "";
+  for (const cp of s) {
+    if (out.length + cp.length > max) break;
+    out += cp;
+  }
+  return out;
+}
+
 /** 파일 목록을 예산 안에 담고, 넘치면 ★몇 개가 잘렸는지 말한다.★
  *  예전에는 500자로 이어붙인 뒤 permissionGate 가 240자에서 ★단어 중간을 잘랐다★ —
- *  화면에는 `…component/fil` 처럼 끝나고 ★"12개 중 5개만 보고 있다" 는 사실이 사라졌다.★ */
+ *  화면에는 `…component/fil` 처럼 끝나고 ★"12개 중 5개만 보고 있다" 는 사실이 사라졌다.★
+ *
+ *  ★첫 항목도 예산을 지킨다(Codex 리뷰 2026-07-30 P1).★ 앞선 판은 `out.length > 0` 일 때만 줄여서
+ *  ★첫 경로가 길면 통째로 밀어넣었다★ — 그러면 뒤에 붙는 지문이 permissionGate 의 240자 절단에서
+ *  ★사라지고, 앞 240자가 같은 서로 다른 긴 경로가 한 열쇠로 합쳐진다★(400자 단일 경로로 재현).
+ *  ★지문을 뒤에 두기로 한 결정이 성립하려면 "예산은 무조건 지킨다" 가 예외 없이 참이어야 한다.★ */
 function fitEntries(display: string[], budget: number): string {
   const out: string[] = [];
   let used = 0;
@@ -315,8 +344,12 @@ function fitEntries(display: string[], budget: number): string {
     const cost = piece.length + (out.length ? 2 : 0);
     const rest = display.length - i;
     const tail = rest > 1 ? ` …외 ${rest}개`.length : 0;
-    if (used + cost + tail > budget && out.length > 0) {
-      return `${out.join(", ")} …외 ${rest}개`;
+    if (used + cost + tail > budget) {
+      if (out.length > 0) return `${out.join(", ")} …외 ${rest}개`;
+      // ★첫 항목 하나도 안 들어간다 → 그 항목 자체를 예산에 맞춰 자르고 잘렸음을 표시한다.★
+      const room = Math.max(0, budget - (rest > 1 ? tail : 1));
+      const cut = `${cutCodePoints(piece, Math.max(0, room - 1))}…`;
+      return rest > 1 ? `${cut} …외 ${rest}개` : cut;
     }
     out.push(piece);
     used += cost;
@@ -355,7 +388,19 @@ function writeOperation(
   itemId: string | null,
 ): PermissionOperation {
   // ★이동은 목적지까지가 쓰기 대상이다★ — 출발지만 넣으면 목적지가 달라도 같은 열쇠가 된다(P1).
-  const entries = [...new Set(changes.map((c) => writeTargetEntry(c.path, c.movePath)))].sort();
+  //
+  // ★지문의 재료는 구조화 tuple 이다 — 이어붙인 문자열이 아니다(Codex 리뷰 2026-07-30 P1).★
+  //   앞선 판은 `path + ">" + movePath` 문자열 집합을 해시했다. 그래서
+  //     경로 이름이 그대로 `a>b` 인 파일  vs  `a` 를 `b` 로 옮기는 이동
+  //     `a>b` → `c`                      vs  `a` → `b>c`
+  //   가 ★완전히 같은 재료★ 가 됐다 — 뒤 쌍은 ★실제로 같은 열쇠★ 임을 재현했다.
+  //   ★"지문이 갈라준다" 는 지문의 재료가 모호하지 않을 때만 참이다.★ 내가 그 전제를 확인하지 않고
+  //   코덱스에게 단언했고, 그게 틀렸다. 이제 [path, movePath] 로 담아 구분이 구조에서 나온다.
+  const keyOf = (c: WriteChange) => JSON.stringify([c.path, c.movePath]);
+  const byKey = new Map<string, WriteChange>();
+  for (const c of changes) if (!byKey.has(keyOf(c))) byKey.set(keyOf(c), c);
+  const uniq = [...byKey.values()].sort((a, b) => keyOf(a).localeCompare(keyOf(b)));
+  const entries = uniq.map((c) => [c.path, c.movePath] as const);
   const sorted = changes.slice().sort((a, b) => a.path.localeCompare(b.path));
   // ★열쇠 지문 — 잘림이 서로 다른 요청을 합치지 못하게 한다.★ 예산 안에 못 들어간 파일이 있어도
   //   집합이 다르면 지문이 다르다. 내용이 아니라 ★경로 집합 + grantRoot 전문★ 만 담으므로, 같은 파일을
@@ -368,8 +413,9 @@ function writeOperation(
     .update(JSON.stringify({ grant_root: grantRoot, entries }))
     .digest("hex")
     .slice(0, 12);
-  const kindByEntry = new Map(sorted.map((c) => [writeTargetEntry(c.path, c.movePath), c.kind]));
-  const display = entries.map((e) => `${kindByEntry.get(e) ?? "change"} ${e.replace(">", "→")}`);
+  // ★표시도 원본 필드에서 조립한다★ — 이어붙인 문자열에서 `>` 를 `→` 로 바꾸면
+  //   이름에 `>` 가 든 평범한 파일이 ★"옮긴다" 로 거짓 표시된다★(실측: `a>b.ts` → `add a→b.ts`).
+  const display = uniq.map((c) => `${c.kind} ${c.path}${c.movePath ? ` → ${c.movePath}` : ""}`);
   // ★사람이 읽는 순서로 놓는다 — 경고 → 개수 → 파일. 지문은 ★맨 뒤★ 다.★
   //   지문을 앞에 두면 화면 첫 글자가 `#77b435181b45` 로 시작해 ★사람은 못 읽고 열쇠만 보인다.★
   //   뒤로 보내도 안전한 이유: 아래에서 지문 길이만큼 예산을 ★먼저 떼어놓고★ 파일 목록을 채우므로
@@ -380,7 +426,7 @@ function writeOperation(
   const scale = sorted
     .map((c) => {
       const stat = c.diff ? changeStat(c.kind, c.diff) : null;
-      const dest = c.movePath ? `→${c.movePath}` : "";
+      const dest = c.movePath ? ` → ${c.movePath}` : "";
       return `${c.kind} ${c.path}${dest}${stat ? `(+${stat.added}/-${stat.removed})` : ""}`;
     })
     .join(", ");

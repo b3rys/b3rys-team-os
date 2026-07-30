@@ -115,7 +115,7 @@ describe("S3 — 구세대도 같은 것을 보여준다", () => {
       oldGen({ "a.ts": { type: "update", unified_diff: "@@ -1 +1 @@\n-a\n+b\n", move_path: "b/c.ts" } }),
       "dex",
     );
-    expect(screenLine(op)).toContain("a.ts→b/c.ts");
+    expect(screenLine(op)).toContain("a.ts → b/c.ts");
   });
 });
 
@@ -154,6 +154,70 @@ describe("S3 — 폴더 전체 요청은 경고가 먼저 보인다", () => {
 
   test("루트가 같으면 열쇠가 같다 — 세션 승인이 재사용된다", () => {
     expect(scopeKeyForOperation(root("/repo"))).toBe(scopeKeyForOperation(root("/repo")));
+  });
+});
+
+/**
+ * ★코덱스 리뷰(2026-07-30)가 잡은 반례 — 전부 내가 직접 재현한 뒤 고쳤다.★
+ *
+ * 앞의 시험 39건은 전부 초록이었는데 아래 여섯 가지가 다 깨져 있었다. ★내 시험이 내가 주장한 것을
+ * 재고 있지 않았다★ — 오늘 M2 뮤턴트가 살아남은 것과 같은 형태다(입력이 메커니즘을 안 건드렸다).
+ * 그리고 두 번째 시험은 내가 코덱스에게 ★"열쇠는 지문이 갈라준다" 고 단언한 자리★ 다.
+ * 지문의 재료가 모호했으므로 그 단언이 틀렸다 — ★단언 전에 재료를 봐야 했다.★
+ */
+describe("S3 — 코덱스 리뷰 반례 (회귀 가드)", () => {
+  const one = (path: string, kind = "update", movePath: string | null = null, diff?: string) =>
+    buildOperationFromApproval(fileReq(observed([{ path, kind, movePath, diff }])), "dex");
+  const oldGen = (fileChanges: unknown): ApprovalRequest => ({
+    method: "applyPatchApproval",
+    params: { fileChanges, callId: "c1" },
+  });
+
+  test("★첫 항목이 예산을 넘어도 지문이 살아남는다★ — 안 그러면 긴 경로들이 한 열쇠로 합쳐진다", () => {
+    const a = one("src/" + "x".repeat(400) + ".ts");
+    const b = one("src/" + "x".repeat(400) + "-DIFFERENT.ts");
+    expect(targetForOperation(a).length).toBeLessThanOrEqual(240);
+    expect(targetForOperation(a)).toMatch(/#[0-9a-f]{12}$/);           // 지문 생존
+    expect(targetForOperation(a)).toContain("…");                      // 잘렸음을 말한다
+    expect(scopeKeyForOperation(a)).not.toBe(scopeKeyForOperation(b)); // ★앞 240자가 같아도 갈린다★
+  });
+
+  test("★이름에 '>' 가 든 파일과 '이동' 이 같은 열쇠가 되지 않는다★ — 지문 재료가 구조화 tuple 이라서", () => {
+    const plain = one("a>b.ts", "add", null, "X\n");
+    const move = one("a", "update", "b.ts");
+    expect(scopeKeyForOperation(plain)).not.toBe(scopeKeyForOperation(move));
+    // 표시도 원본 필드에서 조립한다 — 평범한 파일이 '옮긴다' 로 거짓 표시되지 않는다.
+    expect(screenLine(plain)).toContain("add a>b.ts");
+    expect(screenLine(plain)).not.toContain("→");
+  });
+
+  test("★'a>b'→'c' 와 'a'→'b>c' 는 서로 다른 쓰기다★ — 이어붙인 문자열로 해시하면 같은 열쇠였다", () => {
+    const x = one("a>b", "update", "c");
+    const y = one("a", "update", "b>c");
+    expect(scopeKeyForOperation(x)).not.toBe(scopeKeyForOperation(y));
+  });
+
+  test("★240 경계가 이모지를 반 토막 내지 않는다★ — 고아 서로게이트로 끝나면 안 된다", () => {
+    for (const pad of [220, 222, 224, 226]) {
+      const t = targetForOperation(one("a".repeat(pad) + "😀" + ".ts"));
+      const last = t.charCodeAt(t.length - 1);
+      expect(last >= 0xd800 && last <= 0xdbff).toBe(false);
+    }
+  });
+
+  test("★새 파일 내용에 '@@' 줄이 있어도 (+0/-0) 이 안 된다★ — 모양이 아니라 종류로 판정한다", () => {
+    expect(buildOperationFromApproval(oldGen({ "a.md": { type: "add", content: "@@ heading\nhello\n" } }), "dex").text)
+      .toContain("add a.md(+2/-0)");
+    expect(buildOperationFromApproval(oldGen({ "b.md": { type: "delete", content: "@@ x\ny\n" } }), "dex").text)
+      .toContain("delete b.md(+0/-2)");
+    expect(one("c.md", "add", null, "@@ heading\nhello\n").text).toContain("add c.md(+2/-0)"); // 신세대도
+  });
+
+  test("★빈 목록·배열은 '파일 0개 쓰기' 가 아니라 해석 실패다★ — 넓은 열쇠를 만들지 않는다", () => {
+    expect(buildOperationFromApproval(oldGen({}), "dex").action).toBe("approval_unparsed");
+    const arr = buildOperationFromApproval(oldGen(["src/z.ts"]), "dex");
+    expect(arr.action).toBe("approval_unparsed");
+    expect(screenLine(arr)).not.toContain("change 0"); // 인덱스를 경로로 표시하지 않는다
   });
 });
 

@@ -255,7 +255,7 @@ describe("S2 — 이동 목적지(P1)", () => {
     // 재현(수정 전): 팝업 문구는 달랐는데 scopeKey 가 완전히 같았다.
     expect(safe.text).not.toBe(evil.text);
     expect(scopeKeyForOperation(safe)).not.toBe(scopeKeyForOperation(evil));
-    expect(safe.path).toMatch(/^파일 1개 · update a\.ts→safe\.ts #[0-9a-f]{12}$/); // 목적지가 화면에 보인다
+    expect(safe.path).toMatch(/^파일 1개 · update a\.ts → safe\.ts #[0-9a-f]{12}$/); // 목적지가 화면에 보인다
   });
 
   test("★구세대에도 같은 구멍이 있었다★ — UpdateFileChange.move_path", () => {
