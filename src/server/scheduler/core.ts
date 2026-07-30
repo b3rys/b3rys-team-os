@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { nanoid } from "nanoid";
 import type { EnvelopeInbound } from "../../shared/envelopeSchema";
 import { acceptInbound } from "../db/inbox/acceptInbound";
+import { appendAudit } from "../db/queries";
 import { ambientAgents } from "../lib/registry";
 import { hasCapability } from "../lib/capabilities";
 import { isTeamOfficialMember } from "../lib/agentMembership";
@@ -643,6 +644,47 @@ export function completeScheduledJob(
   ).run(nowSql, nowSql, job.id);
 }
 
+/**
+ * 연속 실패를 몇 번까지 봐주고 재예약할지. 이 횟수에 도달하면 park(=status 'failed' 로 정지)한다.
+ * 0·음수·NaN 은 1 로 올린다 — 0 을 허용하면 "실패 즉시 영구 정지"(고치기 전 동작)로 조용히 되돌아간다.
+ */
+export const DEFAULT_FAILURE_RETRY_LIMIT = 3;
+export function failureRetryLimit(): number {
+  const raw = Number(process.env.SCHEDULER_FAILURE_RETRY_LIMIT ?? DEFAULT_FAILURE_RETRY_LIMIT);
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : DEFAULT_FAILURE_RETRY_LIMIT;
+}
+
+/** 이 잡의 가장 최근 실행부터 거슬러 올라가며 연속 'failed' 개수를 센다(이번 실패 포함). */
+export function consecutiveFailures(db: Database, jobId: string, limit: number): number {
+  const rows = db
+    .prepare(
+      // rowid = 삽입 순서. started_at 은 같은 초에 여러 건이 들어갈 수 있어 정렬 기준으로 불안정하다.
+      `SELECT outcome FROM scheduled_job_run WHERE job_id = ? ORDER BY rowid DESC LIMIT ?`,
+    )
+    .all(jobId, limit) as Array<{ outcome: string }>;
+  let n = 0;
+  for (const r of rows) {
+    if (r.outcome !== "failed") break;
+    n += 1;
+  }
+  return n;
+}
+
+/**
+ * ★실패해도 다음 시각은 잡아준다★ (2026-07-30 사고 수정)
+ *
+ * 고치기 전: status='failed' 로 두고 next_run_at 을 ★안 옮겼다★. 그런데 `dueScheduledJobs` 는
+ * status='pending' 만 고른다 → ★반복 잡이 한 번 실패하면 영구 정지★ 했다. 재시도도 재스케줄도 없고
+ * 복구 API 도 없어서(취소만 있다) 사람이 DB 를 직접 고쳐야 살아났다.
+ * 실제 사고: 부팅 직후 서버가 아직 안 떠서 실패한 `sched_task_continuation_guard`(30분 주기) 가 9시간 정지.
+ * ★원인은 일시적이었는데 결과가 영구적이었다.★
+ *
+ * 고친 뒤: 성공 경로(completeScheduledJob)와 같은 계산으로 다음 슬롯을 잡고 'pending' 으로 되돌린다.
+ * 단 ★무한 재시도는 안 된다★ — 진짜 고장(스크립트 깨짐 등)이면 30분마다 영원히 실패만 반복하고
+ * 아무도 모른다. 그래서 연속 실패가 한도에 닿으면 park 하고, park 사실을 audit 으로 남긴다.
+ * (park 를 사람에게 ★알리는★ 경로는 여기서 새로 만들지 않는다 — 알림 경로는 opNotice 쪽 작업과
+ *  겹치므로 그 위에 얹는 게 맞다. 지금은 대시보드 표시 + acceptance-check 가 잡는다.)
+ */
 export function failScheduledJob(
   db: Database,
   job: ScheduledJobRow,
@@ -652,11 +694,42 @@ export function failScheduledJob(
   const now = opts.now ?? new Date();
   const nowSql = toSqliteDate(now);
   const runId = `sjr_${nanoid(10)}`;
+  const err = error.slice(0, 500);
   db.prepare(
     `INSERT INTO scheduled_job_run
        (id, job_id, scheduled_for, started_at, finished_at, outcome, error, detail_json)
      VALUES (?, ?, ?, ?, ?, 'failed', ?, ?)`,
-  ).run(runId, job.id, job.next_run_at, nowSql, nowSql, error.slice(0, 500), opts.detail ? JSON.stringify(opts.detail) : null);
+  ).run(runId, job.id, job.next_run_at, nowSql, nowSql, err, opts.detail ? JSON.stringify(opts.detail) : null);
+
+  const limit = failureRetryLimit();
+  const failures = consecutiveFailures(db, job.id, limit);
+  // 재예약 자격: 반복 잡이고 · 아직 한도 전이고 · 실행 횟수 상한이 남아 있고 · 다음 시각이 계산되어야 한다.
+  // run_count 는 성공/skip 만 올린다(실패는 소비로 치지 않는다). 그래서 상한 판정은 run_count 그대로 본다.
+  const capLeft = job.max_runs == null || job.run_count < job.max_runs;
+  let nextRun: string | null = null;
+  if (job.kind === "recurring" && failures < limit && capLeft) {
+    // cron 표현식이 깨져 있으면 computeNextRun 이 throw 한다 → 재예약 대상이 아니다(park).
+    try {
+      nextRun = computeNextRun(db, job, now);
+    } catch {
+      nextRun = null;
+    }
+  }
+
+  if (nextRun) {
+    db.prepare(
+      `UPDATE scheduled_job
+       SET status = 'pending',
+           next_run_at = ?,
+           lock_until = NULL,
+           lock_owner = NULL,
+           updated_at = ?,
+           last_error = ?
+       WHERE id = ? AND (lock_owner = ? OR ? IS NULL)`,
+    ).run(nextRun, nowSql, err, job.id, job.lock_owner, job.lock_owner);
+    return;
+  }
+
   db.prepare(
     `UPDATE scheduled_job
      SET status = 'failed',
@@ -665,7 +738,15 @@ export function failScheduledJob(
          updated_at = ?,
          last_error = ?
      WHERE id = ? AND (lock_owner = ? OR ? IS NULL)`,
-  ).run(nowSql, error.slice(0, 500), job.id, job.lock_owner, job.lock_owner);
+  ).run(nowSql, err, job.id, job.lock_owner, job.lock_owner);
+  // park 은 "이제 아무도 안 돌린다" 는 뜻이라 흔적을 남긴다. 재시도로 넘어간 실패는 남기지 않는다(소음).
+  appendAudit(db, "scheduler", "scheduler_job_parked", null, {
+    job_id: job.id,
+    consecutive_failures: failures,
+    limit,
+    reason: job.kind !== "recurring" ? "not_recurring" : !capLeft ? "max_runs_reached" : failures >= limit ? "retry_limit" : "no_next_run",
+    error: err,
+  });
 }
 
 export function skipScheduledJob(

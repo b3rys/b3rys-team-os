@@ -14,6 +14,8 @@ interface ReadOnlyJob {
   source: JobSource;
   running: boolean | null;
   enabled: boolean;
+  // 초록불이 아닌 이유. 서버가 안 보내는 구버전이면 undefined — 그땐 예전처럼 running 만 본다.
+  problem?: "failed" | "overdue" | null;
 }
 
 interface JobGroup {
@@ -92,6 +94,14 @@ function jobBadge(kind: JobKind): string {
 function jobState(j: ReadOnlyJob): string {
   if (!j.enabled) {
     return `<span class="inline-flex items-center gap-1 text-xs text-status-blocked"><span class="w-2 h-2 rounded-full bg-status-blocked"></span>disabled</span>`;
+  }
+  // ★"꺼둔 것"과 "죽은 것"을 구분한다★ — 이 갈래가 없어서 실패로 정지한 잡이 초록불로 떴다(2026-07-30).
+  //   disabled 를 먼저 보는 이유: 사람이 의도적으로 끈 것은 고장이 아니다.
+  if (j.problem === "failed") {
+    return `<span class="inline-flex items-center gap-1 text-xs text-status-blocked"><span class="w-2 h-2 rounded-full bg-status-blocked"></span>${pick("실패", "failed")}</span>`;
+  }
+  if (j.problem === "overdue") {
+    return `<span class="inline-flex items-center gap-1 text-xs text-txt-amber"><span class="w-2 h-2 rounded-full bg-amber-500"></span>${pick("밀림", "overdue")}</span>`;
   }
   if (j.running === true) {
     return `<span class="inline-flex items-center gap-1 text-xs text-slate-300"><span class="w-2 h-2 rounded-full bg-accent-green"></span>running</span>`;

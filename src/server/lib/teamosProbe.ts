@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { teamosLaunchdPrefix } from "./agentControl";
 import { captureConfigStatus } from "./captureConfig";
+import { fromSqliteDate } from "../scheduler/core";
 
 // teamosProbe.ts lives in src/server/lib → three levels up is the repo root.
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -38,7 +39,20 @@ export interface TeamOsScheduled {
   source: "launchd" | "openclaw_cron" | "scheduled_job";
   running: boolean | null;
   enabled: boolean;
+  /**
+   * 초록불이 아닌 ★이유★. null/undefined 면 문제 없음.
+   * running 이 boolean 하나뿐이라 "꺼둔 것"과 "죽은 것"이 화면에서 같게 보였다.
+   *  - "failed"  : 실행하다 실패해 정지된 상태
+   *  - "overdue" : 다음 실행 시각이 이미 지났는데 안 돌고 있다(밀림)
+   */
+  problem?: "failed" | "overdue" | null;
 }
+
+/**
+ * 다음 실행 시각이 이 초 이상 지났을 때만 "밀림"으로 본다.
+ * 0 이면 스케줄러 tick 간격(기본 60s) 안의 정상적인 찰나까지 밀림으로 잡아 매 화면마다 거짓 경보가 난다.
+ */
+export const OVERDUE_GRACE_SEC = 300;
 
 // What each launchd job does, in human terms (labels are cryptic).
 function launchdDesc(): Record<string, string> {
@@ -236,6 +250,35 @@ function listLaunchd(running: Map<string, boolean>): TeamOsScheduled[] {
  *
  * launchd 와 달리 next_run_at/last_run_at 이 DB 에 있으므로 "언제 돌았나" 까지 같이 보여준다.
  */
+/**
+ * ★죽은 잡을 초록불로 보여주던 판정을 여기로 모았다★ (2026-07-30 사고).
+ *
+ * 고치기 전: `running = enabled === 1 && !!next_run_at`.
+ *   - `status` 를 SELECT 해놓고 ★판정에 쓰지 않았다★ → 실패로 정지한 잡도 초록불
+ *   - `next_run_at` 은 "값이 있나" 만 봤다 → ★9시간 전 시각★ 이 적혀 있어도 "다음 실행 잡힘" 으로 통과
+ *   실제로 08:00 에 정지한 잡이 "next=00:30" 이라고 적힌 채 running=true 로 9시간을 버텼다.
+ *   ★사람이 화면을 보고도 못 본다. 화면이 잘못된 판단에 동의해준다.★
+ *
+ * now 를 인자로 받는 이유: 시각 판정은 테스트에서 시각을 고정할 수 있어야 검증이 된다.
+ */
+export function judgeScheduledJob(
+  row: { enabled: number; status: string | null; next_run_at: string | null },
+  nowMs: number,
+): { running: boolean; problem: "failed" | "overdue" | null; overdueMin: number } {
+  // ★새 시각 파서를 만들지 않는다★ — 스케줄러가 자기 컬럼을 읽는 방식(fromSqliteDate)을 그대로 쓴다.
+  //   판정과 저장이 다른 규칙을 쓰면 KST 서버에서 정확히 9시간 어긋난다(utcTimestamp.contract.test 의 교훈).
+  const overdueMs = row.next_run_at ? nowMs - fromSqliteDate(row.next_run_at).getTime() : Number.NaN;
+  const isFailed = row.status === "failed";
+  // 시각이 없거나 파싱 불가면 ★밀림으로 단정하지 않는다★ — 모르는 것은 모른다고 둔다(거짓 경보 금지).
+  const isOverdue = Number.isFinite(overdueMs) && overdueMs > OVERDUE_GRACE_SEC * 1000;
+  return {
+    // "예정대로 살아있나" = 켜져 있고 · 다음 실행이 잡혀 있고 · 실패로 정지하지 않았고 · 밀리지 않았나.
+    running: row.enabled === 1 && !!row.next_run_at && !isFailed && !isOverdue,
+    problem: isFailed ? "failed" : isOverdue ? "overdue" : null,
+    overdueMin: Number.isFinite(overdueMs) ? Math.floor(overdueMs / 60000) : 0,
+  };
+}
+
 function listScheduledJobs(db: Database): TeamOsScheduled[] {
   try {
     const rows = db.prepare(
@@ -248,21 +291,28 @@ function listScheduledJobs(db: Database): TeamOsScheduled[] {
       id: string; title: string | null; schedule_expr: string | null;
       enabled: number; status: string | null; next_run_at: string | null; last_run_at: string | null;
     }>;
+    const nowMs = Date.now();
     return rows.map((r) => {
       let cron = "";
       try { cron = String((JSON.parse(r.schedule_expr ?? "{}") as { cron?: string }).cron ?? ""); } catch { /* 표시용이라 실패해도 넘어간다 */ }
       const next = r.next_run_at ? formatKst(r.next_run_at) : null;
       const last = r.last_run_at ? formatKst(r.last_run_at) : null;
+      const v = judgeScheduledJob(r, nowMs);
       return {
         label: r.id,
         kind: "scheduled" as const,
-        detail: [cron && `cron=${cron}`, `next=${next ?? "-"}`, `last=${last ?? "-"}`].filter(Boolean).join(" · "),
+        detail: [
+          cron && `cron=${cron}`,
+          `next=${next ?? "-"}`,
+          `last=${last ?? "-"}`,
+          v.problem === "failed" && "★실패로 정지★",
+          v.problem === "overdue" && `★${v.overdueMin}분 밀림★`,
+        ].filter(Boolean).join(" · "),
         description: r.title ?? "",
         source: "scheduled_job" as const,
-        // ★running 은 launchd 처럼 프로세스 상주 여부가 아니다★ — 잡은 평소엔 안 떠 있는 게 정상이다.
-        //   여기선 "예정대로 살아있나" = enabled && 다음 실행이 잡혀 있나 로 본다.
-        running: r.enabled === 1 && !!r.next_run_at,
+        running: v.running,
         enabled: r.enabled === 1,
+        problem: v.problem,
       };
     });
   } catch {
