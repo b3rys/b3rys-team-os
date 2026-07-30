@@ -4,6 +4,7 @@
  */
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
+import { MERGE_APPROVERS_SETTING_KEY } from "../lib/approvals";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -550,15 +551,54 @@ describe("settings: 모르는 키는 400 으로 거절한다", () => {
     expect(j.team_name).toBe("before");   // 모르는 키 때문에 거절 → 아는 키도 안 바뀐다
   });
 
-  test("쓰기 가능한 키는 전부 통과한다 (거절 목록이 과하지 않다)", async () => {
+  // ★200 만 보면 이 PR 이 죽이려던 결함이 목록의 반대쪽에서 살아남는다★ (steve 교차검증)
+  //   WRITABLE_KEYS 와 핸들러 분기가 ★따로 관리★ 되므로 방향별 결과가 비대칭이다:
+  //     핸들러는 있는데 목록에 없다 → 400 (시끄럽게 실패, 이 PR 이 노린 것)
+  //     ★목록에는 있는데 핸들러가 없다 → 200 + 저장 안 됨★ (조용한 무시 — 고치려던 그 결함)
+  //   실측: WRITABLE_KEYS 에 키 한 줄만 추가(핸들러 없음)해도 ★기존 106개가 전부 통과★ 했다.
+  //   그래서 상태코드가 아니라 ★되읽어서 값이 실제로 반영됐는지★ 를 본다.
+  //   옛 검사는 11개 중 10개만 손으로 나열했고 ★lead_id 가 빠져 있었다★(이름은 '전부' 인데 아니었다).
+  test("★쓰기 가능한 키는 실제로 저장된다★ — 200 이 아니라 되읽어서 확인한다", async () => {
+    const SAMPLES: Record<string, { send: unknown; expect: string }> = {
+      team_name: { send: "팀이름", expect: "팀이름" },
+      lead_id: { send: "leadslug", expect: "leadslug" },
+      tagline: { send: "한 줄 소개", expect: "한 줄 소개" },
+      owner_name: { send: "오너", expect: "오너" },
+      owner_chat_id: { send: "123456", expect: "123456" },
+      locale: { send: "en", expect: "en" },
+      dm_capture: { send: true, expect: "on" },   // 불리언은 "on"/"off" 로 저장된다
+      github_team_account: { send: "acct", expect: "acct" },
+      github_team_commit_email: { send: "a@b.co", expect: "a@b.co" },
+      github_approver_account: { send: "appr", expect: "appr" },
+      [MERGE_APPROVERS_SETTING_KEY]: { send: "bill", expect: "bill" },
+    };
+    for (const [key, sample] of Object.entries(SAMPLES)) {
+      const { app, db } = setup();
+      const r = await app.request("/settings", put({ [key]: sample.send }));
+      expect(r.status, `${key}: PUT 이 거절됐다`).toBe(200);
+      const row = db.prepare("SELECT value FROM setting WHERE key = ?").get(key) as { value: string } | undefined;
+      expect(row?.value, `★${key}: 200 을 받았는데 저장이 안 됐다 (조용한 무시)★`).toBe(sample.expect);
+    }
+  });
+
+  test("★샘플 목록이 쓰기 가능한 키 전부를 덮는다★ — 키가 늘면 이 검사가 먼저 깨진다", async () => {
+    // 위 검사는 SAMPLES 를 순회한다. 새 키를 WRITABLE_KEYS 에만 넣고 SAMPLES 에 안 넣으면
+    // 위 검사는 ★그 키를 아예 안 보고 통과★ 한다 — 커버리지 구멍이 조용히 생긴다.
+    // 거절 응답의 hint 가 쓰기 가능 키 전체를 실어 보내므로 그걸로 목록을 얻어 대조한다.
     const { app } = setup();
-    const r = await app.request("/settings", put({
-      team_name: "t", tagline: "g", owner_name: "o", owner_chat_id: "123",
-      locale: "ko", dm_capture: true,
-      github_team_account: "acct", github_team_commit_email: "a@b.co",
-      github_approver_account: "appr", merge_approvers_normal: "bill",
-    }));
-    expect(r.status).toBe(200);
+    const r = await app.request("/settings", put({ __definitely_unknown__: "x" }));
+    expect(r.status).toBe(400);
+    const body = (await r.json()) as { hint?: string };
+    const listed = (body.hint ?? "").split("쓰기 가능:")[1] ?? "";
+    const writable = listed.split(",").map((s) => s.trim()).filter(Boolean);
+    expect(writable.length, "hint 에서 쓰기 가능 키 목록을 못 읽었다").toBeGreaterThan(0);
+    const sampled = [
+      "team_name", "lead_id", "tagline", "owner_name", "owner_chat_id", "locale", "dm_capture",
+      "github_team_account", "github_team_commit_email", "github_approver_account",
+      MERGE_APPROVERS_SETTING_KEY,
+    ];
+    const missing = writable.filter((k) => !sampled.includes(k));
+    expect(missing, `★위 저장 검사에 빠진 키가 있다: ${missing.join(", ")}★`).toEqual([]);
   });
 
   test("빈 본문은 거절하지 않는다 (바꿀 게 없는 요청은 유효하다)", async () => {
