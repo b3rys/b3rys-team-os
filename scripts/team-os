@@ -108,19 +108,123 @@ member_of() {
 
 tmux_session_up() { tmux has-session -t "$1" 2>/dev/null; }
 
+# 런처 경로를 plist 에서 읽는다 — 여기 하드코딩하면 정본(launcher.ts CLAUDE_START_SCRIPT)과
+#   조용히 갈라진다. plist 가 실제로 부르는 것이 진실이다.
+member_script() { plist_val "$1" ProgramArguments:0; }
+
+# ─── 팀원 poller 판정 ──────────────────────────────────────────────────────
+# ★tmux 세션이 있는 것과 봇이 들리는 것은 다르다.★ 2026-07-30 실측: 리사 세션은 08:03:33 에
+#   정상 생성됐는데 poller(MCP 텔레그램 서버)가 링크 경합으로 죽어 bot.pid 가 없었다. 08:31 까지
+#   28분간 텔레그램을 한 통도 못 받았는데, 세션만 보면 ★정상★ 이다. 팀장님이 사람 손으로
+#   "리사가 응답이 없어" 라고 알려줘야 발견됐다. 세션만 보는 판정은 그 28분을 정상이라고 말한다.
+#
+# 판정 의미는 ★정본과 같아야 한다★ — src/server/lib/runtimeEssentials.ts 의 claude 분기:
+#     marker = readPidMarker(botPid);  marker == null        -> "poller:claude bot.pid"
+#                                      !pidAlive(marker.pid) -> "poller:claude bot.pid not alive"
+#   즉 (bot.pid 없음) OR (pid 죽음) => unhealthy. 여기 셸 구현이 그 의미를 재현한다.
+#   ※ 왜 재구현하나: 이 도구는 ★서버가 죽었을 때★ 쓴다. 서버 API 를 부를 수 없어 셸로 다시 짤 수밖에
+#     없다. 그래서 드리프트가 구조적으로 남는다 — scripts/team-os-poller.test.sh 가 두 판정이 같은
+#     케이스 표에서 같은 답을 내는지 못박는다. 한쪽만 고치면 그 테스트가 빨개진다.
+#   bot.pid 형식은 정본과 같이 두 가지를 받는다: 평문 정수, 또는 {"pid":123,...} JSON.
+poller_healthy() {  # poller_healthy <팀원이름>
+  local f raw pid
+  f="$HOME/.claude/channels/telegram-$1/bot.pid"
+  [ -f "$f" ] || return 1
+  raw="$(tr -d '[:space:]' < "$f" 2>/dev/null)"
+  [ -n "$raw" ] || return 1
+  case "$raw" in
+    [0-9]*) pid="$raw" ;;
+    *) pid="$(printf '%s' "$raw" | sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9]\{1,\}\).*/\1/p')" ;;
+  esac
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$pid" -gt 0 ] 2>/dev/null || return 1
+  kill -0 "$pid" 2>/dev/null   # 죽은 pid = unhealthy (정본 'not alive' 와 같은 의미)
+}
+
 # 지금 실제로 살아 있나. 서비스 종류마다 답이 다르다.
-#   런처 계열 = tmux 세션이 있나          (launchd 는 exit 0 인 채로 남는다)
+#   런처 계열 = tmux 세션이 있나 ★그리고 poller 가 들리나★  (launchd 는 exit 0 인 채로 남는다)
 #   상주 계열 = state = running 인가
 # ★last exit code 0 은 과거 사실이다.★ 그걸로 판정하면 tmux 가 죽은 뒤에도 정상으로 보인다 —
 #   이 도구가 잡으라고 만들어진 바로 그 상황을 놓친다. (codex 지적, 실제로 그렇게 짰다가 고침)
+# ★같은 함정이 한 겹 안쪽에 또 있었다★: tmux 세션 존재도 '과거 사실' 에 가깝다 — 세션은 살아있는데
+#   그 안의 poller 만 죽는 조합이 실제로 났다(위 poller_healthy 주석). 그래서 둘 다 본다.
 service_healthy() {  # service_healthy <라벨> <plist>
   local m
   m="$(member_of "$2")"
   if [ -n "$m" ]; then
-    tmux_session_up "claude-$m"
+    tmux_session_up "claude-$m" || return 1
+    poller_healthy "$m"
     return $?
   fi
   launchctl print "gui/$(id -u)/$1" 2>/dev/null | grep -q "state = running"
+}
+
+# ─── 파괴적 복구 앞의 확인 단계 ───────────────────────────────────────────
+# ★수정 전에는 오판정이 무해했다. 수정 후에는 살아있는 세션을 죽인다.★ (리사 지적, 2026-07-30)
+#   전: 건강한 멤버를 unhealthy 로 잘못 봐도 kickstart 가 런처 가드에 no-op 되니 아무 일도 없었다.
+#   후: 복구가 --force 를 실으니 런처가 기존 세션을 kill 한다 → 오판정 1건 = 일하던 팀원 강제 종료.
+#   그리고 up 은 ★부팅 직후★ 에 쓰는 도구라, 아직 bot.pid 를 안 쓴 정상 기동 중인 멤버가 정확히
+#   그 오판정 대상이다 — 2026-07-30 08:03:37 에 jane 이 같은 항목으로 잡혔고 34초 뒤 스스로 회복했다.
+#   그 34초 창에 up 을 돌렸으면 멀쩡한 세션을 죽였다.
+# 그래서 두 겹으로 막는다:
+#   ① 세션이 갓 떴으면(기본 90초 이내) 복구하지 않는다 — '기동 중' 으로 보고만 한다. 오탐 인구가
+#      정확히 여기 몰려 있고, 이 게이트는 도구를 느리게 하지 않는다.
+#   ② 그래도 복구로 내려갈 때는 간격을 두고 재확인한다. 그 사이 poller 가 뜨면 자동 탈락한다.
+#      (#132 의 STALE_CONFIRM 과 같은 원리 — 한 번 본 상태로 남의 것을 없애지 않는다)
+POLLER_BOOT_GRACE="${TEAMOS_POLLER_BOOT_GRACE:-90}"   # 세션 나이가 이 안이면 '기동 중'
+POLLER_CONFIRM_TRIES="${TEAMOS_POLLER_CONFIRM_TRIES:-3}"
+POLLER_CONFIRM_GAP="${TEAMOS_POLLER_CONFIRM_GAP:-3}"
+
+session_age_sec() {  # session_age_sec <세션이름> — 못 구하면 빈 문자열
+  local c now
+  c="$(tmux display-message -p -t "$1" '#{session_created}' 2>/dev/null)"
+  case "$c" in ''|*[!0-9]*) printf '' ; return ;; esac
+  now="$(date +%s)"
+  printf '%s' "$(( now - c ))"
+}
+
+# 갓 뜬 세션인가 (= 아직 poller 를 쓸 시간이 없었을 수 있다)
+member_booting() {  # member_booting <팀원이름>
+  local age
+  age="$(session_age_sec "claude-$1")"
+  [ -n "$age" ] || return 1
+  [ "$age" -lt "$POLLER_BOOT_GRACE" ]
+}
+
+# 복구해도 되는가 — 간격을 두고 재확인해서 그 사이 살아나면 복구하지 않는다.
+poller_dead_confirmed() {  # poller_dead_confirmed <팀원이름>
+  local i=1
+  while [ "$i" -le "$POLLER_CONFIRM_TRIES" ]; do
+    poller_healthy "$1" && return 1     # 그 사이 떴다 → 복구 불필요
+    [ "$i" -lt "$POLLER_CONFIRM_TRIES" ] && sleep "$POLLER_CONFIRM_GAP"
+    i=$(( i + 1 ))
+  done
+  return 0
+}
+
+# ─── 팀원 복구 ────────────────────────────────────────────────────────────
+# ★launchctl kickstart 로는 이 상태를 복구할 수 없다.★ kickstart 는 plist 의 ProgramArguments 를
+#   그대로 다시 실행하는데 그 인자에 --force 가 없다. 그러면 런처의 idempotent 가드
+#   ("Session already running" -> exit 0)에 걸려 ★no-op★ 이 된다. 세션은 살아있고 poller 만
+#   죽은 상태가 정확히 그 케이스다 — 2026-07-30 08:28 에 실제로 kickstart 로 복구를 시도했다가
+#   이 가드에 걸려 아무 일도 일어나지 않았고, 사람이 --force 를 붙여야 끝났다.
+#   그래서 런처를 직접 부른다. env 는 plist 에서 읽어 kickstart 와 같은 환경을 준다.
+# ★--resume 를 --force 와 반드시 같이 싣는다★ (리사 지적): --force 만 실으면 세션을 죽이고 fresh 로
+#   띄워서 ★그 멤버의 작업 컨텍스트가 사라진다.★ 복구 도구가 작업 기억을 날리면 안 된다.
+#   정본도 같은 조합이다 — agentControl.restartAgent 는 fresh=false 에서 [id, --resume] 이고
+#   #133 이 여기에 --force 를 더해 [id, --resume, --force] 로 만든다. 여기도 같아야 한다.
+member_restart() {  # member_restart <plist> <팀원이름>
+  local sc _path _wd _b3
+  sc="$(member_script "$1")"
+  [ -n "$sc" ] && [ -f "$sc" ] || return 1
+  _path="$(plist_val "$1" EnvironmentVariables:PATH)"
+  _wd="$(plist_val "$1" EnvironmentVariables:WORKDIR)"
+  _b3="$(plist_val "$1" EnvironmentVariables:B3RYS_HOME)"
+  env HOME="$HOME" \
+      ${_path:+PATH="$_path"} \
+      ${_wd:+WORKDIR="$_wd"} \
+      ${_b3:+B3RYS_HOME="$_b3"} \
+      bash "$sc" "$2" --resume --force >/dev/null 2>&1
 }
 
 alive() { [ "$(curl -s -o /dev/null -m 3 -w '%{http_code}' "$URL" 2>/dev/null || echo 000)" = "200" ]; }
@@ -174,6 +278,11 @@ USAGE
 #   그때 설명 대신 기동이 시작되고 20초를 기다린다. 설명을 기대한 자리에서 시스템이 바뀌는 것은
 #   ★놀람★ 이고, 공개 사용자에게는 그게 첫인상이다.
 #   설명을 본 것은 잘못이 아니므로 exit 0 이다(모르는 명령을 친 경우만 exit 1).
+# ★판정 함수만 가져다 쓸 수 있게 한다★ — 이 아래는 서브커맨드 실행이라 source 하면 같이 돈다.
+#   드리프트 가드 테스트(pollerHealthDrift.test.ts)가 poller_healthy 를 정본과 대조하려면
+#   부작용 없이 함수만 로드해야 한다. 테스트가 못 부르는 판정은 조용히 갈라진다.
+[ -n "${TEAMOS_LIB_ONLY:-}" ] && return 0
+
 case "${1:-help}" in
   help|-h|--help)
     usage
@@ -192,12 +301,40 @@ case "${1:-help}" in
       fi
       if loaded "$_lbl"; then
         # 등록돼 있다고 살아 있는 건 아니다. 실제 상태를 보고 죽었으면 다시 올린다.
-        #   런처는 자기 안에 '이미 떠 있으면 아무것도 안 한다' 가드가 있어 다시 불러도 안전하다.
+        # ★런처의 '이미 떠 있으면 아무것도 안 한다' 가드를 안전장치로 믿으면 안 된다★ — 그 가드는
+        #   이미 건강한 경우엔 안전하지만, up 이 복구하려는 바로 그 케이스(세션 살아있고 poller 죽음)
+        #   에서는 그 '안전' 이 ★아무것도 안 함★ 이다. 그래서 복구는 --resume --force 로 런처를
+        #   직접 부른다(member_restart). 여기 kickstart 를 다시 넣으면 복구가 조용히 no-op 이 된다.
         if service_healthy "$_lbl" "$_plist"; then
           echo "  · $_lbl (정상)"
-        else
-          launchctl kickstart -k "gui/$(id -u)/$_lbl" >/dev/null 2>&1
+          continue
+        fi
+        _m="$(member_of "$_plist")"
+        if [ -n "$_m" ]; then
+          # 갓 뜬 세션은 건드리지 않는다 — 아직 poller 를 쓸 시간이 없었을 수 있다(오탐 인구).
+          if member_booting "$_m"; then
+            echo "  · $_lbl (기동 중 — poller 대기, 건드리지 않음)"
+            continue
+          fi
+          if ! poller_dead_confirmed "$_m"; then
+            echo "  · $_lbl (확인 중 살아남 — 복구 불필요)"
+            continue
+          fi
+          if member_restart "$_plist" "$_m" && service_healthy "$_lbl" "$_plist"; then
+            echo "  → $_lbl 다시 올림 ✓"
+          else
+            # ★복구했다고 거짓말하지 않는다.★ 확인해서 안 살아났으면 그렇게 말한다.
+            echo "  ✗ $_lbl 복구 실패 — 수동 확인 필요: $(member_script "$_plist") $_m --resume --force"
+            FAILED="$FAILED $_lbl"
+          fi
+          continue
+        fi
+        # 상주 서비스는 kickstart 가 맞다(런처 가드 문제가 없다).
+        if launchctl kickstart -k "gui/$(id -u)/$_lbl" >/dev/null 2>&1; then
           echo "  → $_lbl 다시 올림"
+        else
+          echo "  ✗ $_lbl 다시 올리기 실패"
+          FAILED="$FAILED $_lbl"
         fi
         continue
       fi
