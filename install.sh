@@ -168,6 +168,18 @@ else
   say "✅ .env 이미 있음 — 유지."
 fi
 
+# ★팀 학습 기록은 각 팀 것이다 — 설치 때 템플릿에서 한 번만 만든다.★ (GD 2026-07-30)
+#   track 된 파일이면 채우는 순간 공개 저장소로 나간다. 그래서 .gitignore 에 두고 여기서 만든다.
+#   이미 있으면 ★건드리지 않는다★ — 팀이 쌓아온 기록을 업데이트가 덮으면 안 된다.
+if [ ! -f rules/SHARED.md ]; then
+  if [ -f rules/SHARED.template.md ]; then
+    cp rules/SHARED.template.md rules/SHARED.md
+    say "✅ rules/SHARED.md 생성 (템플릿 복사) — 팀 학습 기록입니다. 공개 저장소로 나가지 않습니다."
+  fi
+else
+  say "✅ rules/SHARED.md 이미 있음 — 유지(팀 기록이라 덮지 않습니다)."
+fi
+
 # 새 값을 확정한 뒤에만 기존 표기(export/공백/따옴표 포함)를 제거하고 원자적으로 교체한다.
 _env_mode=""
 if command -v stat >/dev/null 2>&1; then
