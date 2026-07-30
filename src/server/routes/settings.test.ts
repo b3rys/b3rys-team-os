@@ -558,8 +558,12 @@ describe("settings: 모르는 키는 400 으로 거절한다", () => {
   //   실측: WRITABLE_KEYS 에 키 한 줄만 추가(핸들러 없음)해도 ★기존 106개가 전부 통과★ 했다.
   //   그래서 상태코드가 아니라 ★되읽어서 값이 실제로 반영됐는지★ 를 본다.
   //   옛 검사는 11개 중 10개만 손으로 나열했고 ★lead_id 가 빠져 있었다★(이름은 '전부' 인데 아니었다).
-  test("★쓰기 가능한 키는 실제로 저장된다★ — 200 이 아니라 되읽어서 확인한다", async () => {
-    const SAMPLES: Record<string, { send: unknown; expect: string }> = {
+  // ★손으로 유지하는 목록을 하나로 줄인다★ (steve 리뷰)
+  //   전에는 SAMPLES 와 아래 대조용 배열이 ★같은 키를 두 벌★ 갖고 있었다. 새 키를 대조용에만 넣으면
+  //   커버리지 검사는 통과하고 저장 검사는 그 키를 아예 안 본다 — ★막으려던 구멍이 그대로 재개통★ 된다.
+  //   이제 대조는 Object.keys(SAMPLES) 에서 유도하므로 손으로 맞출 목록은 WRITABLE_KEYS ↔ SAMPLES 둘뿐이고,
+  //   커버리지 검사가 실제로 ★그 둘을★ 비교한다(자기 복사본이 아니라).
+  const SAMPLES: Record<string, { send: unknown; expect: string }> = {
       team_name: { send: "팀이름", expect: "팀이름" },
       lead_id: { send: "leadslug", expect: "leadslug" },
       tagline: { send: "한 줄 소개", expect: "한 줄 소개" },
@@ -571,7 +575,9 @@ describe("settings: 모르는 키는 400 으로 거절한다", () => {
       github_team_commit_email: { send: "a@b.co", expect: "a@b.co" },
       github_approver_account: { send: "appr", expect: "appr" },
       [MERGE_APPROVERS_SETTING_KEY]: { send: "bill", expect: "bill" },
-    };
+  };
+
+  test("★쓰기 가능한 키는 실제로 저장된다★ — 200 이 아니라 되읽어서 확인한다", async () => {
     for (const [key, sample] of Object.entries(SAMPLES)) {
       const { app, db } = setup();
       const r = await app.request("/settings", put({ [key]: sample.send }));
@@ -592,11 +598,8 @@ describe("settings: 모르는 키는 400 으로 거절한다", () => {
     const listed = (body.hint ?? "").split("쓰기 가능:")[1] ?? "";
     const writable = listed.split(",").map((s) => s.trim()).filter(Boolean);
     expect(writable.length, "hint 에서 쓰기 가능 키 목록을 못 읽었다").toBeGreaterThan(0);
-    const sampled = [
-      "team_name", "lead_id", "tagline", "owner_name", "owner_chat_id", "locale", "dm_capture",
-      "github_team_account", "github_team_commit_email", "github_approver_account",
-      MERGE_APPROVERS_SETTING_KEY,
-    ];
+    // ★세 번째 목록을 만들지 않는다★ — 위 SAMPLES 에서 유도한다(steve 리뷰).
+    const sampled = Object.keys(SAMPLES);
     const missing = writable.filter((k) => !sampled.includes(k));
     expect(missing, `★위 저장 검사에 빠진 키가 있다: ${missing.join(", ")}★`).toEqual([]);
   });
