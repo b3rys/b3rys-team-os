@@ -54,12 +54,10 @@ interface AllowEntry {
   reason: string;
 }
 const ALLOW: AllowEntry[] = [
-  {
-    // startedAt 은 Date.now() 가 넣은 ★숫자★ 다 (inFlight Map). new Date(number) 는 UTC 로 정확하다.
-    file: "server/bus/wakeDispatcher.ts",
-    snippet: "new Date(startedAt)",
-    reason: "startedAt: number (Date.now) — 문자열이 아니다",
-  },
+  // ※ wakeDispatcher 의 `new Date(startedAt)` 항목은 ★삭제했다★ — 저장소 전체에서 그 호출이 0건이다.
+  //   #127·#75 를 거치며 `now - entry.startedAt` 숫자 연산으로 바뀌어 가드에 걸릴 줄 자체가 없어졌는데
+  //   면제 기록만 남아 있었다. ★이 파일이 고치려던 것(코드는 변했는데 기록이 안 따라갔다)의 거울상★ 이다.
+  //   그래서 아래 "죽은 항목" 시험을 같이 넣었다 — 다시 생기면 그때 잡힌다. (steve 리뷰)
   {
     // run_at 은 API 입력이고 zod `z.string().datetime()` 이 ★ISO-8601(Z 포함)을 강제★ 한다.
     // 실측(2026-07-30, 이 저장소의 zod): "…T12:00:00Z" 만 통과하고 "… 12:00:00"·naked ISO·"+09:00" 은 전부 거부된다.
@@ -121,5 +119,38 @@ describe("★계약★ DB 시각(Z 없는 UTC)을 로컬로 오독하지 않는�
     expect(hit(bad)).toBe(true);        // ★실제로 오늘 고친 그 줄★
     expect(hit(good)).toBe(false);
     expect(hit(alsoGood)).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ★면제 목록 자체를 지킨다★ (steve 리뷰)
+//   면제는 시간이 지나면 ★조용히 썩는다★ — 코드가 변해 대상이 사라져도 기록은 남고,
+//   그 순간부터 "확인했다"는 문장은 아무것도 가리키지 않는다. 이 파일이 고친 결함과 같은 계열이다.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("★면제 목록이 썩지 않는가★", () => {
+  test("모든 면제 항목은 실제로 최소 한 줄을 덮는다 — 안 덮으면 죽은 기록이다", () => {
+    const dead: string[] = [];
+    for (const a of ALLOW) {
+      const path = join(ROOT, a.file);
+      let hit = false;
+      try {
+        hit = readFileSync(path, "utf-8").split("\n").some((l) => l.includes(a.snippet));
+      } catch {
+        /* 파일 자체가 사라졌다 → 죽은 항목 */
+      }
+      if (!hit) dead.push(`${a.file}  snippet=${JSON.stringify(a.snippet)}  (${a.reason})`);
+    }
+    expect(
+      dead,
+      `★아무 줄도 안 덮는 면제 항목★ — 코드가 변했는데 면제 기록만 남았다.\n  ${dead.join("\n  ")}\n\n` +
+        `지우거나, 대상이 옮겨갔으면 snippet 을 맞춰라.`,
+    ).toEqual([]);
+  });
+
+  test("★면제의 전제까지 못박는다★ — run_at 면제는 zod .datetime() 이 Z 를 강제한다는 전제 위에 서 있다", () => {
+    // 이 전제가 사라지면(누가 .datetime() 을 떼면) 면제는 그대로 유지되는데 ★근거만 없어진다.★
+    // 실측(2026-07-30, 이 저장소 zod): "…Z" 만 통과 · "YYYY-MM-DD HH:MM:SS"·naked ISO·"+09:00" 은 거부.
+    const src = readFileSync(join(ROOT, "server/routes/scheduler.ts"), "utf-8");
+    expect(src).toContain("run_at: z.string().datetime()");
   });
 });
