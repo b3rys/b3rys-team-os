@@ -138,10 +138,10 @@ describe("S5 — 너무 긴 요청은 승인 흐름에 태우지 않는다", () 
   // 스캔 상한(자르기)은 없앴다 — 자르면 잘린 뒤가 검사에서 빠져서 "얼마면 안전한가" 를 영원히 못 정한다.
   // 대신 ★사람이 읽고 판단할 수 없는 길이는 팝업을 만들지 않는다.★
 
-  test("★1,000자를 넘으면 팝업 없이 거절되고 기록이 남는다★", async () => {
+  test("★2,000자를 넘으면 팝업 없이 거절되고 기록이 남는다★", async () => {
     const db = freshDb();
-    const long = "echo " + "a".repeat(1_200);
-    expect(oversizedForReview(newGen(long))).toBeGreaterThan(1_000);
+    const long = "echo " + "a".repeat(2_500);
+    expect(oversizedForReview(newGen(long))).toBeGreaterThan(2_000);
 
     expect(await requestApprovalPopup(db, newGen(long), "dex")).toBe("denied");
     // ★팝업 자체가 안 만들어져야 한다★ — 사람에게 못 읽을 것을 들이밀지 않는다.
@@ -156,6 +156,9 @@ describe("S5 — 너무 긴 요청은 승인 흐름에 태우지 않는다", () 
     // 실측 45자. 이 규칙이 평소 동작을 건드리면 안 된다.
     expect(oversizedForReview(newGen("bun test src/server/runtimes/codex/adapter.ts"))).toBeNull();
     expect(oversizedForReview(oldGen(["npm", "run", "build"]))).toBeNull();
+    // ★현실 최대 모양★ — 설정 파일을 heredoc 으로 명령 안에 통째로 써 넣는 경우(루이 실측 724자).
+    // 한도를 1,000 에서 2,000 으로 올린 이유가 이것이다. 이 줄이 그 여유를 지킨다.
+    expect(oversizedForReview(newGen("bash -c 'cat <<EOF > /tmp/x.yml\n" + "b".repeat(900) + "\nEOF'"))).toBeNull();
   });
 
   test("★자르지 않으므로 아무리 뒤에 있어도 위험어는 스캔된다★", () => {
@@ -211,7 +214,7 @@ describe("S5 — 1,000자 규칙은 ★명령에만★ 적용된다", () => {
     await done;  // TTL 로 끝나게 두고 정리(결정은 이 시험의 관심사가 아니다)
   });
 
-  test("명령은 여전히 1,000자 규칙을 받는다", () => {
-    expect(oversizedForReview(newGen("echo " + "a".repeat(1_200)))).toBeGreaterThan(1_000);
+  test("명령은 여전히 길이 규칙을 받는다", () => {
+    expect(oversizedForReview(newGen("echo " + "a".repeat(2_500)))).toBeGreaterThan(2_000);
   });
 });
