@@ -104,6 +104,25 @@ describe("갭2 닫힘 — 같은 파일이라도 내용이 다르면 지문이 �
     expect(approvalOperationHash(added)).not.toBe(approvalOperationHash(updated));
   });
 
+  test("★신세대도 종류가 지문에 들어간다★ — 같은 파일·같은 내용이라도 add 와 update 는 다르다", () => {
+    // ★뮤턴트가 살아남아 추가했다(M3).★ 앞 시험은 구세대만 봐서, 신세대 kind 를 상수로 바꿔도 초록이었다.
+    const req = (kind: string): ApprovalRequest => ({
+      method: "item/fileChange/requestApproval",
+      params: { itemId: "i1", turnId: "t1" },
+      observedItem: { itemId: "i1", turnId: "t1", threadId: "th", changes: [{ path: "a.ts", kind, movePath: null, diff: "x\n" }] },
+    });
+    expect(approvalOperationHash(req("add"))).not.toBe(approvalOperationHash(req("update")));
+  });
+
+  test("★종류와 필드가 어긋나면 내용을 안 읽는다★ — 엉뚱한 값을 지문에 넣지 않는다", () => {
+    // ★뮤턴트가 살아남아 추가했다(M4).★ 앞 시험은 kind 가 달라서 통과했고, ★필드 선택 자체는 재지 않았다.★
+    // update 인데 content 만 있는 payload 는 ★내용을 모르는 것★ 으로 본다(S3 에서 표시 쪽에 한 정정과 같다).
+    // 그러므로 content 가 A 든 B 든 지문이 같아야 한다 — 다르면 없는 내용을 읽고 있다는 뜻이다.
+    const a = oldGen({ "a.ts": { type: "update", content: "AAA" } });
+    const b = oldGen({ "a.ts": { type: "update", content: "BBB" } });
+    expect(approvalOperationHash(a)).toBe(approvalOperationHash(b));
+  });
+
   test("★내용을 모르면 지문을 바꾸지 않는다★ — 구세대 golden 이 그대로여야 한다", () => {
     // 내용 없는 payload 에 빈 문자열을 해시하면 "내용을 안다" 는 거짓 신호가 되고 골든도 깨진다.
     expect(approvalOperationHash(oldGen({ "b.ts": {}, "a.ts": {} }))).toBe("c7fa63459c642993");
