@@ -97,6 +97,16 @@ function existingAgent(db: Database, id: string): boolean {
   return Boolean(db.prepare("SELECT 1 FROM agent WHERE id = ?").get(id));
 }
 
+function isAssignedReviewer(db: Database, proposalId: string, stage: string, reviewer: string): boolean {
+  const statusPrefix = stage === "peer" ? "peer_review:" : stage === "pm" ? "pm_review:" : "";
+  if (!statusPrefix) return false;
+  return Boolean(db.prepare(
+    `SELECT 1 FROM proposal_followup_task
+      WHERE proposal_id = ? AND owner = ? AND status = ? AND closed_at IS NULL
+      LIMIT 1`,
+  ).get(proposalId, reviewer, `${statusPrefix}${reviewer}`));
+}
+
 function firstAvailableAgent(db: Database, candidates: string[], fallback: string): string {
   return candidates.find((id) => existingAgent(db, id)) ?? fallback;
 }
@@ -120,9 +130,22 @@ function otherReviewers(db: Database, proposer: string, agents: AgentRecord[]): 
     });
 }
 
-// 팀 크기(제안자 제외 리뷰 후보 수)로 draft 이후 첫 단계 결정.
-function firstReviewStage(otherCount: number): "peer_review" | "gd_report" {
-  if (otherCount <= 0) return "gd_report"; // 1인 팀: 리뷰 없이 팀장 보고 직행
+// 현재 상태와 무관한 실제 공식 팀원 수. blocked는 "지금 배정 불가"일 뿐 팀 탈퇴가 아니다.
+function otherTeamMembers(db: Database, proposer: string, agents: AgentRecord[]): string[] {
+  const nonInteractive = new Set(agentsWith(agents, "non_interactive").map((a) => a.id));
+  const registry = new Map(agents.map((a) => [a.id, a]));
+  const rows = db.prepare("SELECT id FROM agent WHERE id != ?").all(proposer) as { id: string }[];
+  return rows
+    .map((r) => r.id)
+    .filter((id) => {
+      const agent = registry.get(id);
+      return !nonInteractive.has(id) && isTeamOfficialMember(agent);
+    });
+}
+
+// 실제 1인 팀만 gd_report 직행. 다인 팀인데 현재 후보가 0명이면 peer_review에 blocked로 남긴다.
+function firstReviewStage(actualOtherCount: number): "peer_review" | "gd_report" {
+  if (actualOtherCount <= 0) return "gd_report";
   return "peer_review"; // 2+인 팀: 단일 review → gd_report
 }
 
@@ -144,12 +167,46 @@ function coordinatorOwner(db: Database, agents: AgentRecord[], proposer: string)
   return otherReviewers(db, proposer, agents)[0] ?? proposer;
 }
 
-// peer_review 담당 = 나머지 팀원 중 랜덤 1명. 2+ 팀부터 팀장 보고 전 단일 review가 필수.
-function peerReviewOwners(db: Database, proposer: string, agents: AgentRecord[]): string[] {
+// peer_review 담당 = 제안자 제외 후보 중 열린/최근 배정이 가장 적은 1명.
+// 재배정 때는 이 proposal의 기존 담당자를 먼저 제외한다.
+function peerReviewOwners(db: Database, proposalId: string, proposer: string, agents: AgentRecord[]): string[] {
   const others = otherReviewers(db, proposer, agents);
   if (others.length < 1) return [];
-  const pick = others[Math.floor(Math.random() * others.length)];
-  return pick ? [pick] : [];
+  const prior = new Set(
+    (db.prepare(
+      `SELECT owner FROM proposal_followup_task
+        WHERE proposal_id = ? AND status LIKE 'peer_review:%'`,
+    ).all(proposalId) as { owner: string }[]).map((r) => r.owner),
+  );
+  const fresh = others.filter((id) => !prior.has(id));
+  const candidates = fresh.length > 0 ? fresh : others;
+  const load = db.prepare(
+    `SELECT
+       SUM(CASE WHEN pft.closed_at IS NULL THEN 1 ELSE 0 END) AS open_count,
+       SUM(CASE WHEN pft.created_at >= datetime('now', '-7 days') THEN 1 ELSE 0 END) AS recent_count,
+       MAX(pft.created_at) AS last_assigned_at
+      FROM proposal_followup_task pft
+      WHERE pft.owner = ? AND pft.status LIKE 'peer_review:%'`,
+  );
+  const ranked = candidates.map((id) => {
+    const row = load.get(id) as {
+      open_count: number | null;
+      recent_count: number | null;
+      last_assigned_at: string | null;
+    };
+    return {
+      id,
+      open: Number(row.open_count ?? 0),
+      recent: Number(row.recent_count ?? 0),
+      last: row.last_assigned_at ?? "",
+    };
+  }).sort((a, b) =>
+    a.open - b.open ||
+    a.recent - b.recent ||
+    a.last.localeCompare(b.last) ||
+    a.id.localeCompare(b.id),
+  );
+  return ranked[0] ? [ranked[0].id] : [];
 }
 
 // pm_review 담당 = coordinator(PM 역량) 우선, 없으면 랜덤 1명. peer 리뷰어와는 다른 사람.
@@ -175,7 +232,7 @@ function followupSpec(db: Database, p: ProposalRow, status: ProposalStatus, agen
   const marker = `proposal:${p.id} status:${status}`;
   if (status === "draft") {
     const owner = existingAgent(db, p.proposer_agent) ? p.proposer_agent : coordinatorOwner(db, agents, p.proposer_agent);
-    const stage = firstReviewStage(otherReviewers(db, p.proposer_agent, agents).length);
+    const stage = firstReviewStage(otherTeamMembers(db, p.proposer_agent, agents).length);
     return {
       owner,
       title: `[Proposal] Draft ready: ${p.title}`,
@@ -208,7 +265,7 @@ function followupSpec(db: Database, p: ProposalRow, status: ProposalStatus, agen
     };
   }
   const owner = existingAgent(db, p.proposer_agent) ? p.proposer_agent : coordinatorOwner(db, agents, p.proposer_agent);
-  const reviseStage = firstReviewStage(otherReviewers(db, p.proposer_agent, agents).length);
+  const reviseStage = firstReviewStage(otherTeamMembers(db, p.proposer_agent, agents).length);
   return {
     owner,
     title: `[Proposal] Revise requested: ${p.title}`,
@@ -358,21 +415,21 @@ function ensureProposalFollowup(db: Database, proposalId: string, status: string
     return { owner: "system", skipped: true };
   }
   if (status === "peer_review") {
-    const owners = peerReviewOwners(db, p.proposer_agent, agents);
+    const owners = peerReviewOwners(db, p.id, p.proposer_agent, agents);
     if (owners.length === 0) {
-      // 방어: 팀 규모가 줄어 peer 후보가 없으면 coordinator 가 다음 단계를 판단(정상 경로에선 3+ 팀에서만 peer 진입).
+      // 다인 팀인데 현재 리뷰 가능 후보가 없으면 무검토 gd_report로 보내지 않고 blocked로 유지한다.
       return createLinkedFollowup(
         db,
         p,
         "review_route_decision",
         coordinatorOwner(db, agents, p.proposer_agent),
-        `[Proposal] 다음 단계 판단 필요: ${p.title}`,
+        `[Proposal] Peer review blocked: ${p.title}`,
         `proposal:${p.id} status:review_route_decision\n` +
-          `목표: review 후보가 없어 다음 단계(gd_report)를 판단한다.\n` +
-          `완료 기준: /api/proposals/${p.id}/transition 으로 gd_report/revise_requested/rejected 중 하나 실행.`,
-        `[Proposal 다음 단계 판단 요청]\n` +
+          `blocked: 현재 review 가능 후보가 없어 peer_review에 유지한다.\n` +
+          `완료 기준: 리뷰 가능 팀원이 복귀하면 peer reviewer를 재배정한다. 무검토 gd_report 직행 금지.`,
+        `[Proposal peer review blocked]\n` +
           `대상: ${p.title}\nID: ${p.id}\n` +
-          `상태: peer 후보가 없습니다. 다음 단계를 판단해 주세요.`,
+          `상태: 현재 peer 후보가 없습니다. 리뷰 가능 팀원이 복귀하면 재배정해 주세요. 무검토 팀장 보고는 금지됩니다.`,
         "high",
       );
     }
@@ -390,7 +447,9 @@ function ensureProposalFollowup(db: Database, proposalId: string, status: string
         `[Proposal peer review 요청]\n` +
           `대상: ${p.title}\nID: ${p.id}\n` +
           `역할: reviewer(${owner})\n` +
-          `해야 할 일: 팀장 보고 전에 실제 리스크와 개선점을 포함해 review를 남겨 주세요.`,
+          `해야 할 일: 팀장 보고 전에 아래 기준으로 실제 리스크와 개선점을 포함해 review를 남겨 주세요.\n` +
+          `1) 정말 팀에 필요한가?\n2) 팀 전체의 공통 이슈인가?\n3) 팀원 개인 수준의 learning인가?\n` +
+          `팀 공통 제안이 아니거나 개인 learning이면 reject(drop)하고 사유를 남겨 주세요.`,
       ));
     return { owner: followups.map((f) => f.owner).join(","), taskId: followups[0]?.taskId, messageId: followups[0]?.messageId };
   }
@@ -436,7 +495,7 @@ function ensureProposalFollowup(db: Database, proposalId: string, status: string
     // 적대검토 F1/F3: owner를 comma-join 하지 않는다(owner="a,b"는 agent 조회 실패→500+롤백·카드 미아).
     // → createLinkedFollowup을 각각 1회씩 호출. proposer===coordinator면 dedup(1건만).
     const spec = followupSpec(db, p, status as ProposalStatus, agents);
-    const reviseStage = firstReviewStage(otherReviewers(db, p.proposer_agent, agents).length);
+    const reviseStage = firstReviewStage(otherTeamMembers(db, p.proposer_agent, agents).length);
     const proposerFollowup = createLinkedFollowup(db, p, "revise_requested", spec.owner, spec.title, spec.description, spec.body);
     const coordOwner = coordinatorOwner(db, agents, p.proposer_agent);
     if (coordOwner !== spec.owner) {
@@ -642,18 +701,23 @@ function notifyGdReportReachedSafely(db: Database, proposalId: string, agents: A
 export function sweepStaleProposals(
   db: Database, agents: AgentRecord[],
   opts: { staleMinutes?: number; limit?: number } = {},
-): { advanced: string[]; reassigned: string[]; degraded: string[] } {
+): { advanced: string[]; reassigned: string[]; degraded: string[]; blocked: string[] } {
   const staleMinutes = opts.staleMinutes ?? 30;
   const limit = opts.limit ?? 20; // thundering herd 방지: 한 tick 당 처리량 제한.
   const rows = db.prepare(
-    `SELECT id, title, source, status, proposer_agent, risk_level
+    `SELECT id, title, source, status, proposer_agent
        FROM proposal
       WHERE status IN ('draft','revise_requested','peer_review','pm_review')
         AND (julianday('now') - julianday(updated_at)) * 24 * 60 >= ?
       ORDER BY updated_at ASC
       LIMIT ?`,
-  ).all(staleMinutes, limit) as { id: string; title: string; source: string | null; status: string; proposer_agent: string; risk_level: string | null }[];
-  const out = { advanced: [] as string[], reassigned: [] as string[], degraded: [] as string[] };
+  ).all(staleMinutes, limit) as { id: string; title: string; source: string | null; status: string; proposer_agent: string }[];
+  const out = {
+    advanced: [] as string[],
+    reassigned: [] as string[],
+    degraded: [] as string[],
+    blocked: [] as string[],
+  };
   for (const row of rows) {
     if (isTestProposalFixture(row)) continue;
     // 제안 단위 트랜잭션 + try/catch(F1): 부분 실패 시 전이·카드·wake 전부 롤백 → 다음 tick 깨끗한 재시도.
@@ -662,7 +726,7 @@ export function sweepStaleProposals(
     try {
       db.transaction(() => {
         if (row.status === "draft" || row.status === "revise_requested") {
-          const stage = firstReviewStage(otherReviewers(db, row.proposer_agent, agents).length);
+          const stage = firstReviewStage(otherTeamMembers(db, row.proposer_agent, agents).length);
           const r = tryAutoAdvance(db, row.id, row.status, stage, agents, { reason: "sweeper: 정체 제안 자동 제출" });
           if (r.advanced) {
             out.advanced.push(row.id);
@@ -671,31 +735,30 @@ export function sweepStaleProposals(
           return;
         }
         // peer_review / legacy pm_review 무응답
-        const to = "gd_report";
         const round = stageEntryCount(db, row.id, row.status);
         const reassignKey = `sweeper_reassign:${row.id}:${row.status}:${round}`;
         if (claimAutomationAction(db, reassignKey, row.id, "sweeper_reassign")) {
           // 1차: 담당 재배정(기존 카드 닫고 다른 후보 wake).
           closeProposalFollowups(db, row.id, row.status);
           ensureProposalFollowup(db, row.id, row.status, agents);
+          db.prepare("UPDATE proposal SET updated_at = datetime('now') WHERE id = ?").run(row.id);
           out.reassigned.push(row.id);
           return;
         }
-        // 2차: 여전히 무응답 → 리뷰 skip degraded 진행.
-        // 고위험(risk_level=high)은 무검토 자동 진행 금지(P1). reject/revise verdict 있으면 사람 판단 보존.
-        if (String(row.risk_level ?? "").toLowerCase() === "high") return;
-        const stageName = row.status === "peer_review" ? "peer" : "pm";
-        const blocking = db.prepare(
-          `SELECT 1 FROM proposal_review WHERE proposal_id = ? AND stage = ? AND verdict IN ('reject','revise') LIMIT 1`,
-        ).get(row.id, stageName);
-        if (blocking) return;
-        const r = tryAutoAdvance(db, row.id, row.status, to, agents, {
-          emergency_override: true,
-          reason: "sweeper: 무응답 자동 진행(review_missing)",
-        });
-        if (r.advanced) {
-          out.degraded.push(row.id);
-          if (to === "gd_report") gdReached = true;
+        // 2차: 여전히 무응답이어도 리뷰 게이트는 건너뛰지 않는다.
+        // 팀장 결정 화면에 무검토 제안을 올리는 대신 현재 단계에서 blocked로 남긴다.
+        const blockKey = `sweeper_blocked:${row.id}:${row.status}:${round}`;
+        if (claimAutomationAction(db, blockKey, row.id, "sweeper_blocked")) {
+          db.prepare(
+            `UPDATE task
+                SET description = description || char(10) || 'blocked: peer review 미확보',
+                    updated_at = datetime('now')
+              WHERE id IN (
+                SELECT task_id FROM proposal_followup_task
+                 WHERE proposal_id = ? AND status LIKE ? AND closed_at IS NULL
+              )`,
+          ).run(row.id, `${row.status}:%`);
+          out.blocked.push(row.id);
         }
       })();
     } catch (e) {
@@ -791,7 +854,7 @@ export function createProposalRoutes(deps: ProposalRouteDeps): Hono {
         // (B, GD 2026-07-04): 생성 성공 = 곧 제출. 품질 하한선(근거+예상효과)이 이미 미완성을 막으므로
         // draft에 고이지 않고 팀 규모별 첫 리뷰 단계로 자동 진입(+담당자 배정/wake). 사람이 버튼 누를 필요 없음.
         const proposer = String(body.proposer_agent ?? "").trim();
-        const stage = firstReviewStage(otherReviewers(deps.db, proposer, agents).length);
+        const stage = firstReviewStage(otherTeamMembers(deps.db, proposer, agents).length);
         const auto = tryAutoAdvance(deps.db, proposalId, "draft", stage, agents);
         return { ok: true as const, id: proposalId, stage, advanced: auto.advanced, followup: auto.followup };
       });
@@ -873,17 +936,22 @@ export function createProposalRoutes(deps: ProposalRouteDeps): Hono {
     if (!auth.ok || !auth.actor) return authError(c, auth);
     try {
       const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+      const proposalId = c.req.param("id");
+      const stage = String(body.stage ?? "");
       const suppliedReviewer = String(body.reviewer_agent ?? "").trim();
-      if (suppliedReviewer && suppliedReviewer !== auth.actor.actor) {
+      const assignedDashboardReviewer =
+        auth.actor.source === "loopback_dashboard" &&
+        suppliedReviewer &&
+        isAssignedReviewer(deps.db, proposalId, stage, suppliedReviewer);
+      if (suppliedReviewer && suppliedReviewer !== auth.actor.actor && !assignedDashboardReviewer) {
         return c.json({ error: "reviewer_actor_mismatch" }, 403);
       }
-      const proposalId = c.req.param("id");
+      const effectiveReviewer = assignedDashboardReviewer ? suppliedReviewer : auth.actor.actor;
       const agents = deps.agents?.() ?? ambientAgents();
       const runReview = deps.db.transaction(() => {
-        const stage = String(body.stage ?? "");
         const res = addReview(deps.db, {
           proposal_id: proposalId,
-          reviewer_agent: auth.actor!.actor,
+          reviewer_agent: effectiveReviewer,
           stage,
           verdict: body.verdict as string | undefined,
           is_adversarial: Boolean(body.is_adversarial),

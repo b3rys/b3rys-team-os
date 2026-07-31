@@ -114,9 +114,16 @@ function eligiblePeerReviewerCapacity(db: Database, proposer: string): number {
   return rows.filter((r) => !skip.has(r.id)).length;
 }
 
-// GD 심플 모델: 팀장 보고 전 review는 필수. 단, 제안자 제외 리뷰 후보가 0명이면 gd_report 직행.
+// blocked 상태를 포함한 실제 공식 팀원 수. 실제 1인 팀인지 판정할 때만 사용한다.
+function actualPeerReviewerCapacity(db: Database, proposer: string): number {
+  const skip = reviewSkipIds();
+  const rows = db.prepare("SELECT id FROM agent WHERE id != ?").all(proposer) as { id: string }[];
+  return rows.filter((r) => !skip.has(r.id)).length;
+}
+
+// GD 심플 모델: 팀장 보고 전 review는 필수. 단, 실제 공식 팀원이 제안자 1명뿐이면 gd_report 직행.
 function requiredPeerReviewCount(db: Database, proposer: string): number {
-  return eligiblePeerReviewerCapacity(db, proposer) >= 1 ? 1 : 0;
+  return actualPeerReviewerCapacity(db, proposer) >= 1 ? 1 : 0;
 }
 
 // GD 모델: pm_review 는 2+ 팀(제안자 제외 후보 1명+)에서 1건 필요.
@@ -228,7 +235,7 @@ export function updateProposal(
 
 /** 상태 전이 — 상태기계 밖 전이 금지 + 단계별 가드 + decision_log 자동 기록.
  *  Codex 교차검토 가드(2026-06-12):
- *   - peer→gd_report: 리뷰 1건 의무(팀장보고 전 review 생략 방지). emergency_override로만 예외(사유 기록).
+ *   - peer→gd_report: 리뷰 1건 의무(팀장보고 전 review 생략 방지). emergency_override도 우회 불가.
  *   - gd_report→accepted/rejected: team lead actor만(감사 무결성). PM은 pm-stage 리뷰로 recommend만. */
 export function transitionProposal(
   db: Database, id: string, actor: string, toStatus: string, reason: string,
@@ -252,6 +259,9 @@ export function transitionProposal(
     if (actor !== row.proposer_agent && actor !== SYSTEM_ACTOR) {
       return { ok: false, error: `draft → ${toStatus} 제출은 proposer_agent 또는 system만 가능(현재 actor=${actor}, proposer=${row.proposer_agent})` };
     }
+    if (toStatus === "gd_report" && actualPeerReviewerCapacity(db, row.proposer_agent) > 0) {
+      return { ok: false, error: "draft → gd_report 직행은 실제 1인 팀에서만 가능" };
+    }
   }
   // revise_requested→draft는 proposer-only이되, proposer 무응답/rate-limited 시 coordinator가
   // emergency_override로 대리 전이 가능(영구 stuck 방지). override는 이 전이로 한정, decision_log 기록.
@@ -262,7 +272,8 @@ export function transitionProposal(
   }
 
   // Guard A — review 의무: peer_review→gd_report는 실제 peer review 1건 이상 필요.
-  if (from === "peer_review" && toStatus === "gd_report" && !opts.emergency_override) {
+  // 팀장 결정 화면에는 검토를 마친 제안만 올라가야 하므로 emergency override도 이 가드를 우회하지 못한다.
+  if (from === "peer_review" && toStatus === "gd_report") {
     const requiredPeer = requiredPeerReviewCount(db, row.proposer_agent);
     const peerCount = eligiblePeerReviewCount(db, id, row.proposer_agent);
     if (peerCount < requiredPeer) {
