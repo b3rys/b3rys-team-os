@@ -74,6 +74,7 @@ type ProposalModalState =
       title: string;
       to: "accepted" | "rejected";
       label: string;
+      comment: string;
     }
   | {
       kind: "archive";
@@ -507,6 +508,8 @@ export function renderProposalsView(root: HTMLElement): void {
   }
 
   async function refreshCurrent() {
+    // 결정/보관 입력 중에는 5초 폴링이 모달 DOM을 교체해 포커스를 빼앗지 않게 멈춘다.
+    if (actionModal) return;
     if (pollInFlight) return;
     pollInFlight = true;
     try {
@@ -671,11 +674,18 @@ export function renderProposalsView(root: HTMLElement): void {
         const to = b.dataset.gdDecision;
         if (to !== "accepted" && to !== "rejected") return;
         const label = to === "accepted" ? pick("승인", "Approve") : to === "rejected" ? pick("반려", "Reject") : pick("수정요청", "Revise");
-        actionModal = { kind: "gd-decision", proposalId: detail.proposal.id, title: detail.proposal.title, to, label };
+        actionModal = { kind: "gd-decision", proposalId: detail.proposal.id, title: detail.proposal.title, to, label, comment: "" };
         actionError = null;
         render();
         focusActionModal();
       }));
+    const actionComment = root.querySelector<HTMLTextAreaElement>("[data-proposal-action-comment]");
+    if (actionComment && actionModal?.kind === "gd-decision") actionComment.value = actionModal.comment;
+    actionComment?.addEventListener("input", (e) => {
+      if (actionModal?.kind === "gd-decision") {
+        actionModal.comment = (e.currentTarget as HTMLTextAreaElement).value;
+      }
+    });
     root.querySelectorAll<HTMLButtonElement>("[data-archive-proposal]").forEach((b) =>
       b.addEventListener("click", () => {
         if (!detail) return;
@@ -715,6 +725,7 @@ export function renderProposalsView(root: HTMLElement): void {
           if (actionModal) focusActionModal();
         });
     });
+    if (actionModal) focusActionModal();
     const resizeHandle = root.querySelector<HTMLElement>("[data-proposals-resize-detail]");
     resizeHandle?.addEventListener("mousedown", (e) => {
       e.preventDefault();
