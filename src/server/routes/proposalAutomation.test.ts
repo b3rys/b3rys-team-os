@@ -200,6 +200,23 @@ describe("자동화 — sweeper 정체 안전망", () => {
     expect(ownerOf()).not.toBe(first);
   });
 
+  test("blocked 로 후보가 비면 draft 를 팀장 보고로 직행시키지 않는다", () => {
+    // jane 리뷰(2026-07-31): otherReviewers 가 blocked 를 빼므로, 상대가 잠깐 blocked 이면
+    // 진짜 1인 팀과 구분되지 않고 리뷰 0건이 팀장 게이트에 도달한다.
+    const { db } = setup();
+    const id = createProposal(db, VALID_NEW).id!;
+    expect(statusOf(db, id)).toBe("draft");
+    db.prepare(
+      `INSERT INTO agent_status (agent_id, state) SELECT id, 'blocked' FROM agent WHERE id != ?
+         ON CONFLICT(agent_id) DO UPDATE SET state = 'blocked'`,
+    ).run(VALID_NEW.proposer_agent);
+    ageProposal(db, id, 40);
+
+    const r = sweepStaleProposals(db, ambientAgents());
+    expect(r.advanced).not.toContain(id);
+    expect(statusOf(db, id)).toBe("draft"); // 직행하지 않고 다음 tick 을 기다린다
+  });
+
   test("정체 아닌(최근) 제안은 sweeper가 건드리지 않는다", async () => {
     const { app, db } = setup();
     const { id } = (await (await create(app)).json()) as { id: string };

@@ -120,6 +120,27 @@ function otherReviewers(db: Database, proposer: string, agents: AgentRecord[]): 
     });
 }
 
+/**
+ * 지금은 제외됐지만 ★원래는 리뷰 후보인★ 팀원이 있나 — blocked 때문에 후보가 빈 경우다.
+ *
+ * otherReviewers 는 state='blocked' 를 뺀다. 그래서 상대가 잠깐 blocked 이면 후보 0명이 되고,
+ * 진짜 1인 팀과 구분되지 않아 리뷰 0건인 채로 팀장 보고 직행이 된다(jane 리뷰 2026-07-31,
+ * 실측: registry 4명 중 1명 blocked). 일시 제외면 직행시키지 않기 위해 둘을 구분한다.
+ */
+function hasBlockedReviewers(db: Database, proposer: string, agents: AgentRecord[]): boolean {
+  const nonInteractive = new Set(agentsWith(agents, "non_interactive").map((a) => a.id));
+  const registry = new Map(agents.map((a) => [a.id, a]));
+  const rows = db
+    .prepare(
+      `SELECT a.id
+         FROM agent a
+         LEFT JOIN agent_status s ON s.agent_id = a.id
+        WHERE a.id != ? AND COALESCE(s.state, 'idle') = 'blocked'`,
+    )
+    .all(proposer) as { id: string }[];
+  return rows.some((r) => !nonInteractive.has(r.id) && isTeamOfficialMember(registry.get(r.id)));
+}
+
 // 팀 크기(제안자 제외 리뷰 후보 수)로 draft 이후 첫 단계 결정.
 function firstReviewStage(otherCount: number): "peer_review" | "gd_report" {
   if (otherCount <= 0) return "gd_report"; // 1인 팀: 리뷰 없이 팀장 보고 직행
@@ -716,6 +737,10 @@ export function sweepStaleProposals(
       db.transaction(() => {
         if (row.status === "draft" || row.status === "revise_requested") {
           const stage = firstReviewStage(otherReviewers(db, row.proposer_agent, agents).length);
+          // ★후보가 "지금" 비었다고 1인 팀은 아니다.★ blocked 로 잠깐 빈 것이라면 직행시키지 않는다 —
+          // 직행하면 리뷰 0건이 그대로 팀장 게이트에 도착한다(이 PR 이 막으려는 바로 그 경로).
+          // 다음 tick 에 다시 본다. 사람이 풀리면 정상적으로 peer_review 로 간다.
+          if (stage === "gd_report" && hasBlockedReviewers(db, row.proposer_agent, agents)) return;
           const r = tryAutoAdvance(db, row.id, row.status, stage, agents, { reason: "sweeper: 정체 제안 자동 제출" });
           if (r.advanced) {
             out.advanced.push(row.id);
@@ -730,6 +755,9 @@ export function sweepStaleProposals(
           (id) => !tried.includes(id),
         );
         const reassignKey = `sweeper_reassign:${row.id}:${row.status}:${round}:${tried.length}`;
+        // ★순서를 바꾸지 말 것★: untried 검사가 먼저여야 한다. claim 을 먼저 호출하면 후보 소진
+        // 시점에도 키가 소모돼, 나중에 새 팀원이 들어와도 영영 재배정되지 않는다. 단락 평가가
+        // 그걸 막고 있다(jane 리뷰 2026-07-31). 아래 테스트가 이 순서를 고정한다.
         if (untried.length > 0 && claimAutomationAction(db, reassignKey, row.id, "sweeper_reassign")) {
           // 아직 담당한 적 없는 후보로 재배정(기존 카드 닫고 wake).
           //
@@ -801,7 +829,8 @@ function escalateReviewMissing(
     `proposal:${p.id} status:${status} review_missing\n` +
       `상황: 후보를 다 돌았는데 리뷰가 한 건도 없다. 무응답 담당: ${triedText}\n` +
       `목표: 리뷰를 받아오거나, 판정 기준에 안 맞으면 드랍한다. ★팀장에게 자동으로 올라가지 않는다.★${selfNote}\n` +
-      `완료 기준: /api/proposals/${p.id}/reviews 에 stage=peer 리뷰 등록, 또는 transition to=rejected.`,
+      `완료 기준: /api/proposals/${p.id}/reviews 에 stage=peer 리뷰 등록, 또는 transition to=rejected.\n` +
+      `참고: 새 리뷰어가 배정되면 이 카드는 자동으로 닫힌다(사라져도 이상 아님).`,
     `[Proposal 리뷰 미완 — 처리 필요]\n` +
       `대상: ${p.title}\nID: ${p.id}\n` +
       `무응답 담당: ${triedText}\n` +
