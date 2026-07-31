@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../../db/migrate";
-import { decidePermissionRequest, evaluatePermission, requestPermission, targetForOperation, tierDReasons } from "../../lib/permissionGate";
+import { decidePermissionRequest, evaluatePermission, requestPermission, scopeKeyForOperation, targetForOperation, tierDReasons } from "../../lib/permissionGate";
 import { buildOperationFromApproval } from "./appServerPopup";
 import type { ApprovalRequest } from "./appServerClient";
 
@@ -144,5 +144,36 @@ describe("S5 — 스캔 상한 경계", () => {
     // 해석 실패로 보내면 팝업이 원문 확인을 요구하고 ★매번 묻는다★.
     const op = buildOperationFromApproval(newGen("echo " + "w".repeat(1_000_100) + " ; sudo id"), "dex");
     expect(op.action).not.toBe("shell");
+  });
+});
+
+describe("S5 — 해석 실패로 보내도 위험 검사는 면제되지 않는다", () => {
+  // ★내가 만든 회귀였다★ (루이가 잡음): 상한 초과·규격 밖 argv 를 해석 실패로 보내면서
+  // 그 payload 의 Tier-D 스캔 입력이 0 이 됐다. 열쇠는 좁혔는데 ★검사 범위를 없앴다.★
+  // Tier-D 는 사람도 승인 못 하는 등급이라, 스캔이 비면 위험 명령이 '누를 수 있는 팝업' 으로 내려온다.
+  const danger = "sudo rm -rf /tmp/x ; ";
+
+  test("★상한을 넘겨 해석 실패로 간 payload 도 스캔된다★", () => {
+    const op = buildOperationFromApproval(newGen(danger + "a".repeat(1_000_000)), "dex");
+    expect(op.action).toBe("approval_unparsed");
+    expect(tierDReasons(op)).toContain("sudo");
+  });
+
+  test("★규격 밖 argv 로 해석 실패로 간 payload 도 스캔된다★", () => {
+    const op = buildOperationFromApproval(oldGen([1 as unknown as string, "; " + danger]), "dex");
+    expect(op.action).toBe("approval_unparsed");
+    expect(tierDReasons(op)).toContain("sudo");
+  });
+
+  test("팝업 첫 줄은 여전히 사람 말로 시작한다 — payload 는 맨 뒤에만 붙인다", () => {
+    const op = buildOperationFromApproval(oldGen([1 as unknown as string, "ls"]), "dex");
+    expect(op.text!.startsWith("내용 해석 실패")).toBe(true);
+    expect(targetForOperation(op).startsWith("내용 해석 실패")).toBe(true);
+  });
+
+  test("해석 실패끼리도 payload 가 다르면 열쇠가 갈린다", () => {
+    const a = buildOperationFromApproval(oldGen([1 as unknown as string, "ls"]), "dex");
+    const b = buildOperationFromApproval(oldGen([1 as unknown as string, "pwd"]), "dex");
+    expect(scopeKeyForOperation(a)).not.toBe(scopeKeyForOperation(b));
   });
 });

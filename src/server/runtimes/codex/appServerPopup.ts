@@ -651,7 +651,21 @@ function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Re
     //   (permissionGate 가 만든다 = 공용). ★그러면 최소한 뒷줄이 사람에게 상황을 말해야 한다.★
     //   내부 식별자만 두 줄 연달아 보여주면 사람은 무엇을 승인/거절하는지 모른 채 버튼을 누른다.
     //   지문은 그 뒤에 온다 — 앞머리는 ★모든 해석 실패에서 같은 상수★ 라 열쇠 구분력을 줄이지 않는다.
-    text: `${UNPARSED_NOTICE}${req.method.slice(0, 64)} #${unparsedPayloadDigest(req)}${reason ? ` ${reason}` : ""}`,
+    //  ★해석에 실패했다고 위험 검사까지 건너뛰지 않는다.★
+    //   해석 실패로 보내는 것은 ★열쇠를 좁히려는 것★ 이지 ★검사를 면제하려는 것★ 이 아니다.
+    //   payload 를 안 실으면 이 요청의 Tier-D 스캔 입력이 ★0★ 이 되고, 그러면
+    //   `[1, "; sudo rm -rf /tmp/x"]` 같은 규격 밖 요청이 ★사람이 누를 수 있는 평범한 팝업★ 으로 내려온다
+    //   (Tier-D 는 사람도 승인 못 하는 등급인데, 스캔이 비면 그 등급이 붙을 근거가 없어진다 — 루이 실측).
+    //   ★알아볼 수 없는 것을 넓게 통과시키지 않는다★ 는 이 경로의 원래 취지와도 맞다.
+    //
+    //   ★부작용은 명시한다★: 거대 payload 안에 'sudo' 같은 문자열이 ★우연히★ 들어 있으면 hard-deny 가 된다.
+    //   해석조차 못 한 payload 에 대해서는 fail-closed 가 맞는 방향이라고 봤다.
+    //
+    //   붙이는 자리는 ★맨 뒤★ 다 — 앞은 사람이 읽는 안내문이어야 하고(팝업 첫 줄),
+    //   target 은 command > path > egress > text 순이라 이 필드는 열쇠를 바꾸지 않는다.
+    text:
+      `${UNPARSED_NOTICE}${req.method.slice(0, 64)} #${unparsedPayloadDigest(req)}${reason ? ` ${reason}` : ""}` +
+      ` ${stablePayloadJson(req).slice(0, SCAN_TEXT_LIMIT)}`,
     requested_by: agentId,
     provenance,
   };
@@ -666,7 +680,8 @@ function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Re
  *
  *  키 순서에 흔들리지 않도록 재귀 정렬해 직렬화한다 — JSON.stringify 는 삽입 순서를 따르므로,
  *  같은 내용이 다른 순서로 오면 지문이 달라져 ★같은 작업에 열쇠가 두 개★ 생긴다. */
-function unparsedPayloadDigest(req: ApprovalRequest): string {
+/** 받은 payload 를 ★키 순서에 흔들리지 않게★ 문자열로 굳힌다. 지문과 위험 스캔이 ★같은 재료★ 를 쓴다. */
+function stablePayloadJson(req: ApprovalRequest): string {
   const stable = (v: unknown): unknown => {
     if (Array.isArray(v)) return v.map(stable);
     if (v && typeof v === "object") {
@@ -683,10 +698,11 @@ function unparsedPayloadDigest(req: ApprovalRequest): string {
     }
     return v;
   };
-  return createHash("sha256")
-    .update(JSON.stringify(stable({ method: req.method, params: req.params ?? null })))
-    .digest("hex")
-    .slice(0, 16);
+  return JSON.stringify(stable({ method: req.method, params: req.params ?? null }));
+}
+
+function unparsedPayloadDigest(req: ApprovalRequest): string {
+  return createHash("sha256").update(stablePayloadJson(req)).digest("hex").slice(0, 16);
 }
 
 /** M5.2 — permission_request 상태를 폴링해 GD 결정을 ReviewDecision으로. 무응답 TTL→denied(hold). */
