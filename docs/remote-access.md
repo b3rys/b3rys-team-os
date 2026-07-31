@@ -148,10 +148,6 @@ b3os.app은 보안전송(App Transport Security)이 켜져 있어 **원격 주�
 
 (사설망만 쓰고 싶으면 Tailscale + 앱 ATS 예외라는 대안도 있지만 앱 코드 수정이 필요하므로, 이 가이드는 표준인 Cloudflare Tunnel을 씁니다.)
 
-### b3os.app 여러 개 동시 설치
-
-라이브(dev)용 `b3os-dev.app`과 퍼블릭용 `b3os.app`은 번들 식별자가 달라(`com.b3rys.b3os.dev` / `com.b3rys.b3os`) 한 맥에 **동시에 설치·실행**됩니다. 접속 주소(Web URL) 설정도 앱마다 따로 저장되므로, 한 맥북에서 `b3os-dev.app`은 맥미니를, `b3os.app`은 맥스튜디오를 가리키게 둘 수 있습니다.
-
 ### 준비물
 
 - 서버 맥에서 b3os 서버가 돌고 있어야 함 (`bun run start` → `http://localhost:7878/team` 열림).
@@ -241,11 +237,11 @@ curl -I https://studio.example.com/team
 
 ### 10. 접속 기기(맥북)에서 b3os.app 연결
 
-1. 맥북에 해당 앱 설치 (퍼블릭이면 `b3os.app`).
+1. 맥북에 `b3os.app` 을 설치합니다.
 2. 앱 실행 → `⌘,`(설정) → **Web URL** 필드에 `https://studio.example.com/team` 입력 → 저장.
 3. 앱을 다시 로드하면 원격 대시보드가 뜹니다. (Access 인증 화면이 앱 웹뷰에 뜨면 로그인)
 
-`b3os-dev.app`(→ 맥미니)과 `b3os.app`(→ 맥스튜디오)을 각각 다른 Web URL로 두면, 한 맥북에서 두 팀을 나눠 관리할 수 있습니다.
+설정에 주소를 최대 3개까지 저장해 두고 골라 쓸 수 있습니다. 한 앱에서 맥미니와 맥스튜디오를 오가며 볼 수 있습니다.
 
 ### Tailscale과의 차이 (무엇을 언제)
 
