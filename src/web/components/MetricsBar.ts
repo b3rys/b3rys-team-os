@@ -25,7 +25,7 @@ function isMacClient(): boolean {
 //   외부 사용자가 신고할 때까지 ★하루 동안 아무 경고도 없었다.★
 //   그래서 ★자산이 실제로 붙어 있는 태그★ 를 가리킨다. 앱을 새로 공증해 릴리스에 첨부할 때 이 값을 올린다.
 //   (release-preflight 에 'latest 에 b3os.app.zip 이 있는가' 가드를 넣기 전까지는 latest 로 되돌리지 않는다)
-export const MAC_APP_DOWNLOAD_TAG = "v0.5.0";
+export const MAC_APP_DOWNLOAD_TAG = "v0.6.0";
 export const MAC_APP_DOWNLOAD_URL =
   `https://github.com/b3rys/b3rys-team-os/releases/download/${MAC_APP_DOWNLOAD_TAG}/b3os.app.zip`;
 
