@@ -755,9 +755,15 @@ export function sweepStaleProposals(
           (id) => !tried.includes(id),
         );
         const reassignKey = `sweeper_reassign:${row.id}:${row.status}:${round}:${tried.length}`;
-        // ★순서를 바꾸지 말 것★: untried 검사가 먼저여야 한다. claim 을 먼저 호출하면 후보 소진
-        // 시점에도 키가 소모돼, 나중에 새 팀원이 들어와도 영영 재배정되지 않는다. 단락 평가가
-        // 그걸 막고 있다(jane 리뷰 2026-07-31). 아래 테스트가 이 순서를 고정한다.
+        // untried 검사를 claim 보다 앞에 둔다: 후보 소진 시점에 키를 소모하지 않기 위해서다
+        // (jane 리뷰 2026-07-31).
+        //
+        // ★단, 이 순서는 테스트로 고정되어 있지 않다.★ 순서를 뒤집는 변이를 걸어도 테스트가
+        // 통과한다 — 실측으로 확인했다. 이유는 escalateReviewMissing 이 남기는 review_missing
+        // 카드가 previousReviewOwners(LIKE 'peer_review%')에 잡혀 tried.length 를 1 늘리고,
+        // 그래서 키가 달라지기 때문이다. 즉 오늘은 두 순서의 동작이 같다.
+        // 그 우연에 기대지 않으려고 순서를 이렇게 둔다. review_missing 카드의 status 접두사나
+        // previousReviewOwners 의 매칭을 바꾸면 이 우연이 사라지므로, 그때 순서가 실제로 중요해진다.
         if (untried.length > 0 && claimAutomationAction(db, reassignKey, row.id, "sweeper_reassign")) {
           // 아직 담당한 적 없는 후보로 재배정(기존 카드 닫고 wake).
           //

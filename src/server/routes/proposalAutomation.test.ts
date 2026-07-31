@@ -217,6 +217,22 @@ describe("자동화 — sweeper 정체 안전망", () => {
     expect(statusOf(db, id)).toBe("draft"); // 직행하지 않고 다음 tick 을 기다린다
   });
 
+  test("후보 소진 뒤 새 팀원이 오면 재배정이 다시 시작된다", async () => {
+    // 후보가 다 무응답이어도 파이프라인이 영구히 멈추지는 않는다는 것을 고정한다.
+    // (조건문 순서 자체는 이 테스트가 잡지 못한다 — proposals.ts 의 주석 참조)
+    const { app, db } = setup();
+    const { id } = (await (await create(app)).json()) as { id: string };
+    for (let i = 0; i < 10; i++) {
+      ageProposal(db, id, 40);
+      if (sweepStaleProposals(db, ambientAgents()).degraded.includes(id)) break;
+    }
+    expect(statusOf(db, id)).toBe("peer_review"); // 에스컬레이션까지 갔다
+
+    seedAgent(db, "newbie"); // 새 팀원 합류
+    ageProposal(db, id, 40);
+    expect(sweepStaleProposals(db, ambientAgents()).reassigned).toContain(id);
+  });
+
   test("정체 아닌(최근) 제안은 sweeper가 건드리지 않는다", async () => {
     const { app, db } = setup();
     const { id } = (await (await create(app)).json()) as { id: string };
