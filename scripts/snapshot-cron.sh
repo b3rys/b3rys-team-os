@@ -27,8 +27,9 @@ log "=== 시작 ==="
 B3OS_SNAPSHOT_DEST="$LOCAL" "$BASH" "$HERE/snapshot-team.sh" >>"$LOG" 2>&1 \
   || { log "✗ 스냅샷 실패 — 여기서 멈춘다"; exit 1; }
 
-# ls 는 무늬에 맞는 것이 없으면 실패한다. 그러면 set -e 가 여기서 끝내고
-# ★바로 아래 안내가 실행되지 않는다.★ 안내를 살리려면 이 줄이 실패하지 않아야 한다.
+# ls 는 무늬에 맞는 것이 없으면 실패한다. 파이프의 종료코드는 마지막 명령(head)이라 0 인데,
+# ★pipefail★ 이 그 실패를 밖으로 내보내고 set -e 가 대입문에서 끝낸다(8행에 pipefail 이 있다).
+# 그러면 ★바로 아래 안내가 실행되지 않는다.★ 안내를 살리려면 이 줄이 실패하지 않아야 한다.
 NEW="$(ls -1t "$LOCAL"/b3os-snapshot-*.tar.gz 2>/dev/null | head -1 || true)"
 [ -n "$NEW" ] || { log "✗ 산출물을 찾지 못했다"; exit 1; }
 log "떴다: $(basename "$NEW") ($(du -h "$NEW" | cut -f1))"
@@ -38,7 +39,9 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 DB="$(tar -tzf "$NEW" | grep -m1 'tree/team\.db$' || true)"
 [ -n "$DB" ] || { log "✗ 검증 실패 — 묶음 안에 team.db 가 없다"; exit 1; }
 tar -xzf "$NEW" -C "$TMP" "$DB"
-INTEG="$(sqlite3 "$TMP/$DB" 'PRAGMA integrity_check;' 2>&1 | head -1)"
+# 손상된 db 면 sqlite3 가 실패한다(rc 26). pipefail 이 그 실패를 파이프 밖으로 내보내고
+# set -e 가 대입문에서 끝낸다 — ★손상을 알리라고 둔 검사가, 손상됐을 때만 침묵한다.★
+INTEG="$(sqlite3 "$TMP/$DB" 'PRAGMA integrity_check;' 2>&1 | head -1 || true)"
 [ "$INTEG" = "ok" ] || { log "✗ 검증 실패 — integrity_check=$INTEG"; exit 1; }
 # team.db 만 보면 부족하다. 도구가 PATH 에 없어 한 구획이 통째로 빠져도 그건 멀쩡하다.
 # 그리고 수집 쪽 rsync 는 실패를 삼키므로(|| true) ★이 목록이 유일한 방어다.★
