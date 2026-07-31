@@ -36,6 +36,7 @@ archiving/
 # bin/ = ★사람이 직접 치는 명령★ 만 둔다(팀장님 방침). scripts/ 와 달리 ignore 대상이 아니다 —
 #   여기 넣는 순간 공개된다. 자동화·테스트·내부 ops 는 scripts/ 에 남긴다.
 /scripts/*
+!/scripts/rules-drift-check.sh
 !/scripts/auto-heal-core.sh
 !/scripts/auto-heal-core-harness.sh
 !/scripts/task-review-ping.ts
