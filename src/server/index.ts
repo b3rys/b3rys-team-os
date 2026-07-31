@@ -167,14 +167,22 @@ try {
   //   그래서 규칙이 바뀌어도 받는 쪽은 모른다 — 실제로 한 기계만 옛 규칙으로 돈 적이 있다.
   //   배포 게이트에도 같은 검사가 있지만 ★게이트를 안 쓰는 설치본이 있다★(손으로 업데이트하는 팀).
   //   서버는 어느 설치본에나 있으므로 여기서 한 번 더 본다. 고치지는 않는다 — 팀 사정 차이일 수 있다.
+  //
+  //   ★의도된 사각지대★: 정본에만 있는 줄은 세지 않는다. 그 대가로 ★공개본에서 삭제된 규칙이
+  //   그 팀에 계속 남아도 알리지 않는다.★ 팀 고유 규칙과 구분할 방법이 없어서 택한 쪽이다.
+  //   버그가 아니라 선택이다 — 반대로 하면 고유 규칙을 더한 팀이 영구 경고를 받는다.
   try {
     const rulesLive = join(RULES_DIR, "TEAM-OS.md");
     const rulesTemplate = join(RULES_DIR, "TEAM-OS.template.md");
     if (existsSync(rulesLive) && existsSync(rulesTemplate)) {
       const live = readFileSync(rulesLive, "utf8");
       const tmpl = readFileSync(rulesTemplate, "utf8");
-      if (live !== tmpl) {
-        const missing = missingFromLive(live, tmpl);
+      // ★게이트는 "다르다" 가 아니라 "안 받은 규칙이 있다" 여야 한다.★
+      //   팀이 고유 규칙을 한 줄만 더해도 live !== tmpl 은 늘 참이다. 그걸로 경고하면
+      //   "안 받은 줄 0개" 라는 ★할 일 없는 경고★ 가 재시작마다 영구히 뜬다.
+      //   사람은 매번 뜨는 경고를 안 읽게 되고, 정작 새 규칙이 왔을 때도 안 읽는다.
+      const missing = missingFromLive(live, tmpl);
+      if (missing.length > 0) {
         console.warn(
           `[teamos-rules] 규칙 정본이 공개 템플릿과 다릅니다 — 템플릿에만 있는 줄 ${missing.length}개.` +
             " 팀 사정에 맞춘 차이면 그대로 두고, 공개본의 새 규칙이면 rules/TEAM-OS.md 에 옮기세요." +
