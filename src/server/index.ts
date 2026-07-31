@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { createBunWebSocket } from "hono/bun";
 import type { ServerWebSocket } from "bun";
 import { existsSync, readFileSync, statSync, copyFileSync } from "node:fs";
+import { missingFromLive } from "./lib/rulesDrift";
 import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openDb, migrate } from "./db/migrate";
@@ -159,6 +160,31 @@ try {
     }
   } catch (e) {
     console.warn("[teamos-render] SHARED.md 생성 실패(계속):", e instanceof Error ? e.message : e);
+  }
+
+  // ★규칙 정본이 공개 템플릿과 벌어졌는지 부팅 때 본다.★
+  //   rules/TEAM-OS.md 는 추적 대상이 아니라 업데이트와 함께 오지 않는다. 템플릿만 온다.
+  //   그래서 규칙이 바뀌어도 받는 쪽은 모른다 — 실제로 한 기계만 옛 규칙으로 돈 적이 있다.
+  //   배포 게이트에도 같은 검사가 있지만 ★게이트를 안 쓰는 설치본이 있다★(손으로 업데이트하는 팀).
+  //   서버는 어느 설치본에나 있으므로 여기서 한 번 더 본다. 고치지는 않는다 — 팀 사정 차이일 수 있다.
+  try {
+    const rulesLive = join(RULES_DIR, "TEAM-OS.md");
+    const rulesTemplate = join(RULES_DIR, "TEAM-OS.template.md");
+    if (existsSync(rulesLive) && existsSync(rulesTemplate)) {
+      const live = readFileSync(rulesLive, "utf8");
+      const tmpl = readFileSync(rulesTemplate, "utf8");
+      if (live !== tmpl) {
+        const missing = missingFromLive(live, tmpl);
+        console.warn(
+          `[teamos-rules] 규칙 정본이 공개 템플릿과 다릅니다 — 템플릿에만 있는 줄 ${missing.length}개.` +
+            " 팀 사정에 맞춘 차이면 그대로 두고, 공개본의 새 규칙이면 rules/TEAM-OS.md 에 옮기세요." +
+            " (scripts/rules-drift-check.sh 로 전체 diff 확인)",
+        );
+        appendAudit(db, "system", "rules_drift_detected", null, { missing_from_live: missing.length });
+      }
+    }
+  } catch (e) {
+    console.warn("[teamos-rules] 규칙 대조 실패(계속):", e instanceof Error ? e.message : e);
   }
   // 공개 빌드 부팅 백필(PUBLIC_BUILD 게이트) — 공개 사용자가 git 업데이트를 pull 한 뒤 재시작하면 기존
   //   멤버도 재영입 없이 최신을 받게. 라이브(PUBLIC_BUILD=false)는 글로벌 배선/실멤버 보호로 skip.
