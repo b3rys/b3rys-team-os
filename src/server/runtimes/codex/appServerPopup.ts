@@ -213,16 +213,16 @@ function parseCommandApproval(req: ApprovalRequest): CommandParse {
 }
 
 /**
- * 위험 스캔용 전문의 상한.
+ * 위험 스캔·표시에 싣는 명령 본문의 상한.
  *
- * ★이 상한 너머는 사각지대가 아니라 Tier-D 우회다.★ 상한+1 번째에 sudo 를 두면
- * (1) 스캔 밖 (2) 화면 밖 → ★사람이 '허용' 을 누를 수 있는 평범한 팝업★ 이 되고,
- * 승인 시점의 Tier-D 재검사(decidePermissionRequest)도 ★같은 잘린 text★ 를 보므로 같이 뚫린다.
+ * ★값의 근거는 실측이다★ — 지금까지 실제로 온 승인요청 5건의 명령 길이는 전부 45자다.
+ * 64,000자는 그보다 1400배다. heredoc·`bash -c` 스크립트를 통째로 넣어도 남는다.
+ * ★이보다 긴 것은 사람이 팝업을 읽고 판단할 수 있는 명령이 아니다★ — 해석 실패로 보내 매번 묻는다.
  *
- * 그래서 상한을 성능이 아니라 ★안전★ 기준으로 정했다. 스캔 실측(루이): 100k=0.6ms · 1M=3.7ms · 5M=18.5ms —
- * ★낮은 상한이 사주는 성능이 없다.★ 1M 로 올리고, ★그 너머는 해석 실패로 보낸다★(아래 참조).
+ * (이 값을 1M 까지 올렸다가 되돌렸다. 팀 리드: *"명령이 10만자???? 그런 가정을 왜해?"* —
+ *  아무도 안 보내는 길이를 놓고 정책을 정하고 있었다. 한도는 ★실제 데이터★ 에서 잡는다.)
  */
-const SCAN_TEXT_LIMIT = 1_000_000;
+const SCAN_TEXT_LIMIT = 64_000;
 
 /**
  * ★S5 — 긴 명령 두 개가 한 열쇠로 묶이던 것을 닫는다.★
@@ -661,11 +661,13 @@ function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Re
     //   ★부작용은 명시한다★: 거대 payload 안에 'sudo' 같은 문자열이 ★우연히★ 들어 있으면 hard-deny 가 된다.
     //   해석조차 못 한 payload 에 대해서는 fail-closed 가 맞는 방향이라고 봤다.
     //
-    //   붙이는 자리는 ★맨 뒤★ 다 — 앞은 사람이 읽는 안내문이어야 하고(팝업 첫 줄),
-    //   target 은 command > path > egress > text 순이라 이 필드는 열쇠를 바꾸지 않는다.
+    //   붙이는 자리는 ★맨 뒤★ 다 — 앞은 사람이 읽는 안내문이어야 한다(팝업 첫 줄).
+    //   ★주의: 이 op 은 command·path·egress 가 없어서 text 가 곧 target(=열쇠) 이다.★
+    //   (앞선 주석에 "우선순위상 열쇠를 안 바꾼다" 고 적었는데 틀렸다 — 루이 지적. 지금은 안내문·지문이
+    //    앞에 있어 해롭지 않지만, ★이 필드에 뭘 더 실으면 화면과 열쇠가 같이 바뀐다.★)
     text:
       `${UNPARSED_NOTICE}${req.method.slice(0, 64)} #${unparsedPayloadDigest(req)}${reason ? ` ${reason}` : ""}` +
-      ` ${stablePayloadJson(req).slice(0, SCAN_TEXT_LIMIT)}`,
+      ` ${payloadScanText(req).slice(0, SCAN_TEXT_LIMIT)}`,
     requested_by: agentId,
     provenance,
   };
@@ -680,7 +682,33 @@ function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Re
  *
  *  키 순서에 흔들리지 않도록 재귀 정렬해 직렬화한다 — JSON.stringify 는 삽입 순서를 따르므로,
  *  같은 내용이 다른 순서로 오면 지문이 달라져 ★같은 작업에 열쇠가 두 개★ 생긴다. */
-/** 받은 payload 를 ★키 순서에 흔들리지 않게★ 문자열로 굳힌다. 지문과 위험 스캔이 ★같은 재료★ 를 쓴다. */
+/**
+ * 받은 payload 에서 ★문자열 값만 모아 공백으로 잇는다★ — 위험 스캔에 넣을 용도.
+ *
+ * ★JSON 을 그대로 스캔에 쓰면 안 된다.★ JSON.stringify 는 줄바꿈을 ★역슬래시+n 두 글자★ 로 바꾼다.
+ * 그러면 `"...\n" + "sudo"` 가 스캔 문자열에서 `nsudo` 가 되고, Tier-D 규칙 대부분이 쓰는
+ * 단어 경계(\b)가 안 맞아 ★줄바꿈 하나로 검사를 통과한다.★ 실측(루이):
+ *   'echo hi<개행>sudo id' → 해석 실패 경로 [] · 정상 경로 ["sudo"]
+ * codex 명령은 heredoc·`bash -c` 라 ★여러 줄이 기본★ 이므로, 공격이 아니어도 그냥 샌다.
+ *
+ * ★지문은 여전히 JSON 을 쓴다★(stablePayloadJson) — 거기서는 키 순서 안정성이 목적이라 JSON 이 맞다.
+ * 같은 payload 를 ★목적에 따라 다른 표현★ 으로 본다.
+ */
+function payloadScanText(req: ApprovalRequest): string {
+  const out: string[] = [];
+  const walk = (v: unknown): void => {
+    if (typeof v === "string") out.push(v);
+    else if (typeof v === "number" || typeof v === "boolean") out.push(String(v));
+    else if (Array.isArray(v)) v.forEach(walk);
+    //  ★키를 정렬해서 돈다★ — 안 하면 같은 내용이 다른 순서로 왔을 때 스캔 문자열이 달라지고,
+    //  이 경로에서는 text 가 곧 target 이라 ★같은 작업에 열쇠가 두 개★ 생긴다(S0 정본 시험이 잡았다).
+    else if (v && typeof v === "object") for (const k of Object.keys(v as Record<string, unknown>).sort()) walk((v as Record<string, unknown>)[k]);
+  };
+  walk(req.params ?? null);
+  return out.join(" ");
+}
+
+/** 받은 payload 를 ★키 순서에 흔들리지 않게★ 문자열로 굳힌다. ★지문 전용★ — 스캔은 payloadScanText 를 쓴다. */
 function stablePayloadJson(req: ApprovalRequest): string {
   const stable = (v: unknown): unknown => {
     if (Array.isArray(v)) return v.map(stable);
