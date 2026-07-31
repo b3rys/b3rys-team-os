@@ -39,14 +39,19 @@ tar -xzf "$NEW" -C "$TMP" "$DB"
 INTEG="$(sqlite3 "$TMP/$DB" 'PRAGMA integrity_check;' 2>&1 | head -1)"
 [ "$INTEG" = "ok" ] || { log "✗ 검증 실패 — integrity_check=$INTEG"; exit 1; }
 # team.db 만 보면 부족하다. 도구가 PATH 에 없어 한 구획이 통째로 빠져도 그건 멀쩡하다.
-for part in tree/team.db tree/agents.json home/.claude/channels; do
+# 그리고 수집 쪽 rsync 는 실패를 삼키므로(|| true) ★이 목록이 유일한 방어다.★
+#   .env — 없으면 복원해도 서버가 안 뜬다(토큰·바인드·신뢰 주소가 여기 있다)
+#   rules/SHARED.md — 추적도 이력도 없는 단일 사본
+#   .claude/projects — 팀원 장기기억. 코드로 다시 만들 수 없다
+for part in tree/team.db tree/agents.json tree/.env tree/rules/SHARED.md \
+            home/.claude/channels home/.claude/projects; do
   n="$(tar -tzf "$NEW" | grep -c "/$part" || true)"
   [ "$n" -gt 0 ] || { log "✗ 검증 실패 — 묶음에 $part 가 0건이다"; exit 1; }
 done
 
 # 멤버 워크스페이스는 "있나" 로 세면 안 된다 — 빈 디렉토리도 1건으로 잡혀 통과한다.
 # ★몇 명 것이 들어갔나★ 를 세서 등록부의 기대값과 맞춘다.
-LIVE_DIR="$(cd "$HERE/.." && pwd)"
+LIVE_DIR="${B3OS_LIVE_DIR:-$(cd "$HERE/.." && pwd)}"
 EXPECT="$(python3 -c 'import json,os,sys
 a=json.load(open(sys.argv[1]))
 print(sum(1 for x in a if os.path.isdir(x.get("workspace_path") or os.path.expanduser("~/Development/"+x["id"]))))' "$LIVE_DIR/agents.json" 2>/dev/null || echo 0)"

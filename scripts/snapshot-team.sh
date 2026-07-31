@@ -15,24 +15,34 @@ say(){ printf "\033[32m%s\033[0m\n" "$1"; }
 warn(){ printf "\033[33m%s\033[0m\n" "$1"; }
 mkdir -p "$DEST" "$STAGE"/{tree,home/Development,home/.claude,home/.hermes,launchd}
 
-# ★재생성 가능 대용량 제외 목록★
-EX=(--exclude='.git' --exclude='node_modules' --exclude='backups' --exclude='migration-backups-*'
+# ★제외 목록은 구획마다 다르다★
+#   하나로 합쳐 쓰면 이름이 같은 것까지 같이 걸린다. hermes 프로필의 재생성 가능한 reports·decks 를
+#   지우려던 패턴이 ★멤버 워크스페이스의 reports·decks(작업물)까지★ 걸어 백업에서 빼고 있었다.
+#   백업 도구가 조용히 작업물을 버리는 형태라, 구획별로 나눈다.
+
+# 어디서나 안전한 것 — 재생성물·임시물
+EX_COMMON=(--exclude='.git' --exclude='node_modules' --exclude='backups' --exclude='migration-backups-*'
     --exclude='*.pre-*' --exclude='*.bak' --exclude='*.bak-*' --exclude='*.log' --exclude='.DS_Store'
-    --exclude='state.db' --exclude='state.db-*' --exclude='state-snapshots' --exclude='audio_cache'
-    --exclude='lsp' --exclude='.cache' --exclude='dist' --exclude='decks' --exclude='team.db.pre-*'
-    # hermes 프로필의 대용량 런타임(재생성 가능): 대화state·홈·캐시·bin·모델·세션·미디어·스킬(repo서 옴)
-    --exclude='home' --exclude='models' --exclude='sessions' --exclude='media' --exclude='tmp'
-    --exclude='*.wal' --exclude='*.sqlite-*' --exclude='reports' --exclude='images'
-    --exclude='bin' --exclude='cache' --exclude='skills'
-    # var 대용량 재생성물(모델·검색eval·벡터인덱스) + 멤버 전송/임시(재생성)
-    --exclude='models' --exclude='team-search-eval' --exclude='*.lancedb'
-    --exclude='scratchpad' --exclude='outbox')
+    --exclude='dist' --exclude='.cache' --exclude='scratchpad' --exclude='outbox'
+    --exclude='team.db.pre-*' --exclude='*.wal' --exclude='*.sqlite-*')
+
+# 트리(var) 대용량 재생성물 — 모델·검색eval·벡터인덱스
+EX_TREE=("${EX_COMMON[@]}" --exclude='models' --exclude='team-search-eval' --exclude='*.lancedb')
+
+# 멤버 워크스페이스 — ★작업물을 지우지 않는다.★ 공통 제외만 건다.
+EX_MEMBER=("${EX_COMMON[@]}")
+
+# hermes 프로필 — 대화state·홈·캐시·bin·모델·세션·미디어·스킬(repo서 옴)은 재생성 가능
+EX_HERMES=("${EX_COMMON[@]}" --exclude='state.db' --exclude='state.db-*' --exclude='state-snapshots'
+    --exclude='audio_cache' --exclude='lsp' --exclude='home' --exclude='models' --exclude='sessions'
+    --exclude='media' --exclude='tmp' --exclude='reports' --exclude='images' --exclude='decks'
+    --exclude='bin' --exclude='cache' --exclude='skills')
 
 say "■ 팀 핵심 상태 수집 ($STAMP)"
 # ① 트리 gitignored (team.db 는 핵심이라 통째)
 cd "$LIVE_DIR"
 for p in .env agents.json team.db var slack-tokens scripts rules/STATE.md rules/SHARED.md rules/TEAM-OS.md; do
-  [ -e "$p" ] && { mkdir -p "$STAGE/tree/$(dirname "$p")"; rsync -a "${EX[@]}" "$p" "$STAGE/tree/$(dirname "$p")/" 2>/dev/null || true; }
+  [ -e "$p" ] && { mkdir -p "$STAGE/tree/$(dirname "$p")"; rsync -a "${EX_TREE[@]}" "$p" "$STAGE/tree/$(dirname "$p")/" 2>/dev/null || true; }
 done
 say "  ✓ 트리 (team.db $(du -h team.db 2>/dev/null|cut -f1))"
 
@@ -44,21 +54,50 @@ MEMBERS="$(python3 -c 'import json,os,sys
 a=json.load(open(sys.argv[1]))
 print("\n".join(x.get("workspace_path") or os.path.join(os.path.expanduser("~/Development"), x["id"]) for x in a))' "$LIVE_DIR/agents.json")" \
   || { printf '\033[31m✗ agents.json 에서 멤버 워크스페이스를 읽지 못했다 — 스냅샷을 중단한다\033[0m\n' >&2; exit 1; }
-COPIED=0
+EXPECTED=0; COPIED=0
 while IFS= read -r ws; do
+  [ -n "$ws" ] && EXPECTED=$((EXPECTED+1))
   [ -n "$ws" ] && [ -d "$ws" ] || continue
-  rsync -a "${EX[@]}" "$ws" "$STAGE/home/Development/" 2>/dev/null || true
+  rsync -a "${EX_MEMBER[@]}" "$ws" "$STAGE/home/Development/" 2>/dev/null || true
   COPIED=$((COPIED+1))
 done <<EOF
 $MEMBERS
 EOF
-[ "$COPIED" -gt 0 ] || { printf '\033[31m✗ 멤버 워크스페이스가 0건이다 — 백업이 반쪽이므로 중단한다\033[0m\n' >&2; exit 1; }
-say "  ✓ 멤버 워크스페이스 $COPIED개 (대용량 제외)"
+# ★기대 0 과 유실 0 은 다르다.★ 새로 설치해 워크스페이스가 아직 없는 팀은 기대도 0 이라 그냥 넘어간다.
+# 기대가 있는데 하나도 못 담았으면 경로가 어긋난 것이다 — 그때 멈춘다(묶기 전이라 반쪽 산출물이 안 남는다).
+if [ "$EXPECTED" -gt 0 ] && [ "$COPIED" -eq 0 ]; then
+  printf '\033[31m✗ 멤버 워크스페이스 %s곳을 찾았는데 하나도 담지 못했다 — 중단한다\033[0m\n' "$EXPECTED" >&2
+  printf '   확인: agents.json 의 workspace_path (없으면 ~/Development/<id> 로 본다)\n' >&2
+  exit 1
+fi
+say "  ✓ 멤버 워크스페이스 $COPIED/$EXPECTED (작업물 포함)"
 
 # ③ 페어링 ④ hermes auth (대용량 state 제외)
-[ -d "$HOME/.claude/channels" ] && rsync -a "${EX[@]}" "$HOME/.claude/channels" "$STAGE/home/.claude/" 2>/dev/null||true
-[ -d "$HOME/.hermes/profiles" ] && rsync -a "${EX[@]}" "$HOME/.hermes/profiles" "$STAGE/home/.hermes/" 2>/dev/null||true
+[ -d "$HOME/.claude/channels" ] && rsync -a "${EX_COMMON[@]}" "$HOME/.claude/channels" "$STAGE/home/.claude/" 2>/dev/null||true
+[ -d "$HOME/.hermes/profiles" ] && rsync -a "${EX_HERMES[@]}" "$HOME/.hermes/profiles" "$STAGE/home/.hermes/" 2>/dev/null||true
 say "  ✓ .claude/channels + .hermes/profiles(auth만)"
+# ★클로드 팀원의 장기기억★ — 코드로 다시 만들 수 없는 유일본이다. 이게 빠지면 팀원이 배운 것이 사라진다.
+#   projects 전체는 대화 기록까지 있어 크다 → memory 디렉토리만 담는다.
+MEM=0
+for d in "$HOME"/.claude/projects/*/memory; do
+  [ -d "$d" ] || continue
+  t="$STAGE/home/.claude/projects/$(basename "$(dirname "$d")")"
+  mkdir -p "$t"; rsync -a "${EX_COMMON[@]}" "$d" "$t/" 2>/dev/null || true
+  MEM=$((MEM+1))
+done
+say "  ✓ 팀원 장기기억 ${MEM}개 디렉토리"
+# openclaw · codex 런타임 인증 — 없으면 그 런타임 팀원이 인증을 못 한다.
+#   두 홈 모두 대용량 캐시가 있으므로 ★설정·인증 파일만★ 담는다.
+[ -f "$HOME/.openclaw/openclaw.json" ] && { mkdir -p "$STAGE/home/.openclaw"; cp "$HOME/.openclaw/openclaw.json" "$STAGE/home/.openclaw/"; }
+# ★파일을 이름으로 집는다.★ rsync 의 --include 는 --exclude='*' 가 뒤에 없으면 아무것도 안 걸러서,
+#   플러그인·세션·캐시까지 통째로 딸려온다(여기서 760MB 중 대부분이 재생성 가능한 것들이다).
+if [ -d "$HOME/.codex" ]; then
+  mkdir -p "$STAGE/home/.codex"
+  for f in auth.json config.toml version.json; do
+    [ -f "$HOME/.codex/$f" ] && cp "$HOME/.codex/$f" "$STAGE/home/.codex/"
+  done
+fi
+say "  ✓ openclaw·codex 인증 설정"
 # ⑤ launchd
 cp "$HOME/Library/LaunchAgents/com.$(id -un)."*.plist "$STAGE/launchd/" 2>/dev/null||true
 say "  ✓ launchd ($(ls "$STAGE/launchd/" 2>/dev/null|wc -l|tr -d ' ')개)"
@@ -72,7 +111,7 @@ tar -czf "$OUT" -C "$(dirname "$STAGE")" "b3os-snapshot-$STAMP"
 rm -rf "$(dirname "$STAGE")"
 say "  ✓ $(du -h "$OUT"|cut -f1)"
 
-# GFS 로테이션 (7일/4주/3개월)
+# GFS 로테이션 — 최근 7개 · 주 4개 · 월 3개 (하루 한 번 돌면 '7일' 과 같다)
 # ★bash 3.2 에서도 돌아야 한다★ — macOS 기본 셸이 3.2 이고, launchd 는 최소 PATH 라
 #   `env bash` 가 그쪽으로 잡힌다. mapfile·declare -A(bash 4)를 쓰면 그 자리에서 깨진다.
 cd "$DEST"
@@ -83,7 +122,7 @@ i=0; for f in $ALL; do [ $i -lt 7 ] && keep "$f"; i=$((i+1)); done
 seen=""; n=0
 for f in $ALL; do
   d="$(echo "$f" | grep -oE '[0-9]{8}' | head -1)"; [ -z "$d" ] && continue
-  k="w$(date -j -f '%Y%m%d' "$d" '+%Y-W%V' 2>/dev/null || echo "$d")"
+  k="w$(date -j -f '%Y%m%d' "$d" '+%G-W%V' 2>/dev/null || echo "$d")"
   case " $seen " in *" $k "*) ;; *) seen="$seen $k"; keep "$f"; n=$((n+1)); [ $n -ge 4 ] && break ;; esac
 done
 seen=""; n=0
