@@ -1,16 +1,16 @@
-#!/opt/homebrew/bin/bash
+#!/usr/bin/env bash
 # snapshot-cron.sh — snapshot-team.sh 를 예약 실행용으로 감싼다.
 #   ① 로컬을 정본으로 뜬다  ② 되읽어 검증한다  ③ iCloud 로는 best-effort 복사하고 성패를 남긴다.
 #
 # 왜 로컬이 정본인가: 예약 실행에서 iCloud 쓰기가 실패하는 것이 실측됐다("Operation not permitted").
 #   목적지를 iCloud 하나로 두면 그 실패가 조용히 지나간다. 백업이 안 된 것을 모르는 상태가 제일 나쁘다.
-# 왜 bash 경로를 박는가: snapshot-team.sh 는 mapfile·declare -A 를 쓴다(bash 4+).
-#   launchd 는 최소 PATH 라 `env bash` 가 /bin/bash 3.2 로 잡히고, 그러면 로테이션이 깨진다.
+#   둘 다 bash 3.2 에서 돈다 — launchd 의 최소 PATH 에서 `env bash` 가 /bin/bash 로 잡히기 때문이다.
 set -euo pipefail
 
-# launchd 는 최소 PATH(/usr/bin:/bin:/usr/sbin:/sbin)로 돈다. snapshot-team.sh 는 멤버 워크스페이스 목록을
-# node 로 읽고 실패를 삼킨다 — PATH 에 node 가 없으면 ★목록이 비고 워크스페이스가 통째로 빠진 채 성공한다.★
-export PATH="/opt/homebrew/bin:$PATH"
+# launchd 는 최소 PATH(/usr/bin:/bin:/usr/sbin:/sbin)로 돈다. 쓰는 도구(python3·sqlite3·tar·rsync)는
+# 전부 /usr/bin 에 있지만, 홈브루로 덮어 쓴 기계도 있으므로 있으면 앞에 둔다(없으면 무해).
+for d in /opt/homebrew/bin /usr/local/bin; do [ -d "$d" ] && PATH="$d:$PATH"; done
+export PATH
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LOCAL="${B3OS_SNAPSHOT_LOCAL:-$HOME/.b3os-backups}"
@@ -43,11 +43,17 @@ INTEG="$(sqlite3 "$TMP/$DB" 'PRAGMA integrity_check;' 2>&1 | head -1)"
 #   .env — 없으면 복원해도 서버가 안 뜬다(토큰·바인드·신뢰 주소가 여기 있다)
 #   rules/SHARED.md — 추적도 이력도 없는 단일 사본
 #   .claude/projects — 팀원 장기기억. 코드로 다시 만들 수 없다
+#   .codex — 인증. 이름이 바뀌어도 줄어든 것을 알아채게 ★건수 하한★ 으로 본다
 for part in tree/team.db tree/agents.json tree/.env tree/rules/SHARED.md \
             home/.claude/channels home/.claude/projects; do
   n="$(tar -tzf "$NEW" | grep -c "/$part" || true)"
   [ "$n" -gt 0 ] || { log "✗ 검증 실패 — 묶음에 $part 가 0건이다"; exit 1; }
 done
+# 인증 파일은 "있나" 가 아니라 "몇 개인가" 로 본다. 최소 auth 와 설정 두 개는 있어야 한다.
+if [ -d "$HOME/.codex" ]; then
+  n="$(tar -tzf "$NEW" | grep -c 'home/\.codex/[^/]\+$' || true)"
+  [ "$n" -ge 2 ] || { log "✗ 검증 실패 — .codex 인증 파일이 ${n}개다(2개 미만). 이름 규칙이 바뀌었는지 보라"; exit 1; }
+fi
 
 # 멤버 워크스페이스는 "있나" 로 세면 안 된다 — 빈 디렉토리도 1건으로 잡혀 통과한다.
 # ★몇 명 것이 들어갔나★ 를 세서 등록부의 기대값과 맞춘다.
@@ -55,9 +61,17 @@ LIVE_DIR="${B3OS_LIVE_DIR:-$(cd "$HERE/.." && pwd)}"
 EXPECT="$(python3 -c 'import json,os,sys
 a=json.load(open(sys.argv[1]))
 print(sum(1 for x in a if os.path.isdir(x.get("workspace_path") or os.path.expanduser("~/Development/"+x["id"]))))' "$LIVE_DIR/agents.json" 2>/dev/null || echo 0)"
-GOT="$(tar -tzf "$NEW" | grep -oE 'home/Development/[^/]+/' | sort -u | wc -l | tr -d ' ')"
-[ "$EXPECT" -gt 0 ] || { log "✗ 검증 실패 — 기대 워크스페이스 수를 못 구했다(agents.json 확인)"; exit 1; }
-[ "$GOT" -ge "$EXPECT" ] || { log "✗ 검증 실패 — 워크스페이스 $GOT/$EXPECT 만 들어갔다"; exit 1; }
+# ★|| true 를 떼지 마라★ — grep 이 0건이면 pipefail 로 파이프가 실패하고, set -e 가 ★이 대입문에서★
+# 스크립트를 끝낸다. 아래 판정은 실행되지 않고 아무 표시도 남지 않는다(워크스페이스 0인 새 설치가 그 경우다).
+GOT="$(tar -tzf "$NEW" | grep -oE 'home/Development/[^/]+/' | sort -u | wc -l | tr -d ' ' || true)"
+GOT="${GOT:-0}"
+# ★기대 0 은 실패가 아니다★ — 워크스페이스가 아직 없는 새 설치본이다. snapshot-team.sh 도 같은 판정으로 넘어간다.
+#   두 곳이 반대로 말하면, 백업 도구를 처음 받는 팀이 첫날부터 빨간 로그를 본다.
+if [ "$EXPECT" -eq 0 ]; then
+  log "워크스페이스 기대 0 — 아직 만들어진 것이 없다(새 설치). 이 검사는 건너뛴다"
+else
+  [ "$GOT" -ge "$EXPECT" ] || { log "✗ 검증 실패 — 워크스페이스 $GOT/$EXPECT 만 들어갔다"; exit 1; }
+fi
 log "검증 ok — agent=$(sqlite3 "$TMP/$DB" 'SELECT COUNT(*) FROM agent;') message=$(sqlite3 "$TMP/$DB" 'SELECT COUNT(*) FROM message;') 워크스페이스=$(tar -tzf "$NEW" | grep -c '/home/Development' || true)건"
 
 # ③ iCloud 는 best-effort. 실패해도 로컬 정본은 이미 있다 — 다만 조용히 지나가지 않게 남긴다.

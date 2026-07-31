@@ -63,12 +63,12 @@ while IFS= read -r ws; do
 done <<EOF
 $MEMBERS
 EOF
-# ★기대 0 과 유실 0 은 다르다.★ 새로 설치해 워크스페이스가 아직 없는 팀은 기대도 0 이라 그냥 넘어간다.
-# 기대가 있는데 하나도 못 담았으면 경로가 어긋난 것이다 — 그때 멈춘다(묶기 전이라 반쪽 산출물이 안 남는다).
-if [ "$EXPECTED" -gt 0 ] && [ "$COPIED" -eq 0 ]; then
-  printf '\033[31m✗ 멤버 워크스페이스 %s곳을 찾았는데 하나도 담지 못했다 — 중단한다\033[0m\n' "$EXPECTED" >&2
-  printf '   확인: agents.json 의 workspace_path (없으면 ~/Development/<id> 로 본다)\n' >&2
-  exit 1
+# 등록부에 있는데 디스크에 없는 것은 ★아직 안 만들어진 것★ 이지 유실이 아니다(새 설치가 그렇다).
+# 담을 게 없는 상태로 중단하면 백업 도구를 처음 받는 팀이 첫날부터 못 쓴다 → 여기서는 알리기만 한다.
+# ★유실 판정은 래퍼가 한다★ — 실제로 있는 디렉토리 수와 묶음 안의 수를 비교한다. 판정은 한 곳에만 둔다.
+if [ "$COPIED" -lt "$EXPECTED" ]; then
+  warn "  ⚠ 멤버 워크스페이스 $COPIED/$EXPECTED — 등록부에 있으나 디스크에 없는 것이 있다"
+  warn "     확인: agents.json 의 workspace_path (없으면 ~/Development/<id> 로 본다)"
 fi
 say "  ✓ 멤버 워크스페이스 $COPIED/$EXPECTED (작업물 포함)"
 
@@ -91,10 +91,12 @@ say "  ✓ 팀원 장기기억 ${MEM}개 디렉토리"
 [ -f "$HOME/.openclaw/openclaw.json" ] && { mkdir -p "$STAGE/home/.openclaw"; cp "$HOME/.openclaw/openclaw.json" "$STAGE/home/.openclaw/"; }
 # ★파일을 이름으로 집는다.★ rsync 의 --include 는 --exclude='*' 가 뒤에 없으면 아무것도 안 걸러서,
 #   플러그인·세션·캐시까지 통째로 딸려온다(여기서 760MB 중 대부분이 재생성 가능한 것들이다).
+#   이름을 하나씩 박으면 이름이 바뀔 때 조용히 빠진다(이 디렉토리는 이미 auth.json.<런타임>-backup-<날짜>
+#   같은 이름이 늘어난 적이 있다). ★최상위 파일만★ 을 무늬로 집는다 — 하위 디렉토리는 안 따라온다.
 if [ -d "$HOME/.codex" ]; then
   mkdir -p "$STAGE/home/.codex"
-  for f in auth.json config.toml version.json; do
-    [ -f "$HOME/.codex/$f" ] && cp "$HOME/.codex/$f" "$STAGE/home/.codex/"
+  for f in "$HOME"/.codex/auth* "$HOME"/.codex/*.toml "$HOME"/.codex/*.json; do
+    [ -f "$f" ] && cp "$f" "$STAGE/home/.codex/"
   done
 fi
 say "  ✓ openclaw·codex 인증 설정"
@@ -121,13 +123,13 @@ keep(){ case " $KEEP " in *" $1 "*) ;; *) KEEP="$KEEP $1" ;; esac; }
 i=0; for f in $ALL; do [ $i -lt 7 ] && keep "$f"; i=$((i+1)); done
 seen=""; n=0
 for f in $ALL; do
-  d="$(echo "$f" | grep -oE '[0-9]{8}' | head -1)"; [ -z "$d" ] && continue
+  d="$(echo "$f" | grep -oE '[0-9]{8}' | head -1 || true)"; [ -z "$d" ] && continue
   k="w$(date -j -f '%Y%m%d' "$d" '+%G-W%V' 2>/dev/null || echo "$d")"
   case " $seen " in *" $k "*) ;; *) seen="$seen $k"; keep "$f"; n=$((n+1)); [ $n -ge 4 ] && break ;; esac
 done
 seen=""; n=0
 for f in $ALL; do
-  d="$(echo "$f" | grep -oE '[0-9]{8}' | head -1)"; [ -z "$d" ] && continue
+  d="$(echo "$f" | grep -oE '[0-9]{8}' | head -1 || true)"; [ -z "$d" ] && continue
   k="m$(echo "$d" | cut -c1-6)"
   case " $seen " in *" $k "*) ;; *) seen="$seen $k"; keep "$f"; n=$((n+1)); [ $n -ge 3 ] && break ;; esac
 done
