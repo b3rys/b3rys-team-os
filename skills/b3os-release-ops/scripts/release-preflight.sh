@@ -156,6 +156,16 @@ if [ "$MODE" = "deploy" ]; then
   TARGET_SHA="$(git rev-parse origin/main)"
   printf 'live HEAD=%s origin/main=%s\n' "$(git rev-parse --short "$HEAD_SHA")" "$(git rev-parse --short "$TARGET_SHA")"
   ok "deploy target resolved"
+
+  # 규칙 정본은 추적 대상이 아니라 배포와 함께 오지 않는다. 템플릿만 온다.
+  # 그래서 규칙을 바꿔도 받는 쪽은 모른다 — 여기서 대조해 알린다. 고치지는 않는다.
+  # 게이트를 막지는 않는다(팀 사정에 맞춘 차이일 수 있다). 다만 조용히 지나가지도 않는다.
+  DRIFT="$ROOT/scripts/rules-drift-check.sh"
+  if [ -x "$DRIFT" ] || [ -f "$DRIFT" ]; then
+    bash "$DRIFT" || warn "규칙 정본이 템플릿과 다르다 — 위 diff 를 보고 판단하라"
+  else
+    warn "rules-drift-check.sh 없음 — 규칙 정본/템플릿 대조를 건너뛴다"
+  fi
 fi
 
 if [ "$CHECK_BRANCH_PROTECTION" -eq 1 ]; then
