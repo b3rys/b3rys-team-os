@@ -187,14 +187,24 @@ function parseCommandApproval(req: ApprovalRequest): CommandParse {
   //  → material 은 ★원본 구조(배열은 배열대로) + method(세대 표식)★ 를 JSON 으로 굳혀 쓴다.
   //  구세대와 신세대를 method 로 가르는 것도 의도다 — 같아 보여도 경로가 다르면 ★따로 묻는다★(애매하면 ask).
   if (Array.isArray(raw)) {
-    const argv = raw.map((x) => String(x));
+    //  ★문자열이 아닌 원소는 해석 성공으로 받지 않는다.★
+    //  String(x) 로 강제변환하면 ★서로 다른 payload 가 같은 재료가 된다★ (아메스가 DB 경로에서 재현):
+    //    [1] 승인 뒤 ["1"] → allow · [null] 과 ["null"] → allow · [{}] 는 "[object Object]" 가 된다.
+    //  이건 규격에 없는 payload 를 ★넓게 통과★ 시키는 자리다. 모르면 좁게 묻는다 —
+    //  invalid 로 보내면 해석 실패 경로(S0: payload 지문 + 매번 묻기)를 받는다.
+    const argv = raw.every((x) => typeof x === "string") ? (raw as string[]) : null;
+    if (argv === null) return { kind: "invalid" };
     const joined = argv.join(" ").trim();
+    if (joined.length > SCAN_TEXT_LIMIT) return { kind: "invalid" };  // 위 문자열 경로와 같은 이유
     return joined.length > 0
       ? { kind: "ok", command: joined, material: JSON.stringify([req.method, argv]) }
       : { kind: "invalid" };
   }
   if (typeof raw === "string") {
     const trimmed = raw.trim();
+    //  ★스캔 상한을 넘는 명령은 해석 성공으로 받지 않는다.★ 받으면 상한 너머가 Tier-D 우회 통로가 된다.
+    //  해석 실패로 보내면 팝업이 '내용 해석 실패 — 원문 확인 필요' 라고 말하고 ★매번 묻는다.★
+    if (trimmed.length > SCAN_TEXT_LIMIT) return { kind: "invalid" };
     return trimmed.length > 0
       ? { kind: "ok", command: trimmed, material: JSON.stringify([req.method, trimmed]) }
       : { kind: "invalid" };
@@ -202,8 +212,17 @@ function parseCommandApproval(req: ApprovalRequest): CommandParse {
   return { kind: "invalid" };
 }
 
-/** 스캔용 전문을 담을 때의 상한. 이 너머는 ★다시 Tier-D 사각지대★ 다 — 실무 명령 길이보다 훨씬 크게 잡았다. */
-const SCAN_TEXT_LIMIT = 100_000;
+/**
+ * 위험 스캔용 전문의 상한.
+ *
+ * ★이 상한 너머는 사각지대가 아니라 Tier-D 우회다.★ 상한+1 번째에 sudo 를 두면
+ * (1) 스캔 밖 (2) 화면 밖 → ★사람이 '허용' 을 누를 수 있는 평범한 팝업★ 이 되고,
+ * 승인 시점의 Tier-D 재검사(decidePermissionRequest)도 ★같은 잘린 text★ 를 보므로 같이 뚫린다.
+ *
+ * 그래서 상한을 성능이 아니라 ★안전★ 기준으로 정했다. 스캔 실측(루이): 100k=0.6ms · 1M=3.7ms · 5M=18.5ms —
+ * ★낮은 상한이 사주는 성능이 없다.★ 1M 로 올리고, ★그 너머는 해석 실패로 보낸다★(아래 참조).
+ */
+const SCAN_TEXT_LIMIT = 1_000_000;
 
 /**
  * ★S5 — 긴 명령 두 개가 한 열쇠로 묶이던 것을 닫는다.★
@@ -238,7 +257,13 @@ function commandOperationFields(material: string, command: string): { command: s
   const digest = createHash("sha256").update(material).digest("hex");
   // 공백 정규화 후 잘리므로(normalizeText → slice) ★지문 안에는 공백이 없어야 한다.★
   const suffix = ` #${digest}`;
-  const visible = cutCodePoints(command, Math.max(0, VISIBLE_BUDGET - suffix.length));
+  const budget = Math.max(0, VISIBLE_BUDGET - suffix.length);
+  //  ★잘랐으면 잘랐다고 말한다.★ 표시가 없으면 사람은 ★이게 명령 전부인 줄★ 안다 —
+  //  "kubectl delete ns prod " 뒤에 500자가 더 있어도 화면은 그냥 174자에서 끊긴다(루이 실측).
+  //  전문이 text 로 빠진 지금은 ★사람 눈에 닿는 경로가 이 한 줄뿐★ 이라 더 중요해졌다.
+  //  S3 가 쓰기 경로에서 세운 규칙과도 같다 — 넘치면 몇 개가 잘렸는지 말한다.
+  const truncated = command.length > budget;
+  const visible = truncated ? `${cutCodePoints(command, Math.max(0, budget - 1))}…` : command;
   return { command: `${visible}${suffix}`, text: command.slice(0, SCAN_TEXT_LIMIT) };
 }
 
