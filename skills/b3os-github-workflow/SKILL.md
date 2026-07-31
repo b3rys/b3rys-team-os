@@ -140,6 +140,7 @@ git worktree add <경로> -b <브랜치> origin/main
 **이 값은 worktree 별로 갈리지 않는다.** worktree 는 저장소의 `.git/config` 하나를 같이 쓴다
 (`extensions.worktreeConfig` 를 켜지 않는 한). 즉 **다른 팀원이 자기 worktree 에서 설정하면 내 것도 바뀐다.**
 실제로 그렇게 두 번 어긋났다 — 그래서 **설정하고 끝내지 말고 커밋 직전에 다시 확인한다.**
+확인은 **틀린 것을 잡을 뿐 경합을 막지는 않는다.** 두 사람이 같은 시각에 쓰면 나중에 쓴 값이 남는다.
 
 전역(`--global`)은 건드리지 않는다:
 
