@@ -52,7 +52,8 @@ Safety and security rules always win.
 - Approval gate: before big changes, DB schema changes, restarts, self-mod, external sends, public posts, payments, deletion, security config, or credentials, announce scope/reason and get team lead approval.
 - **"External send" means leaving the team**: public post, outsider email/DM, or third-party API call. **Team-bus messaging is NOT an external send** — fan-out, requester synthesis, and `--direct-to-gd` need no approval. Self-mod also needs direct terminal instruction or explicit confirmation.
 - Reports include changed files, verification, unverified scope, and rollback where relevant; distinguish created from visible.
-- SECTION_CORE_RULE: verify before deploy, merge, publish, or public release; scale member review/harness to risk, and use both for critical external/public work. After deploying, confirm it actually runs live; if you cannot reach live, verify the closest way and record what you could not measure. Trivial mechanical edits are exempt.
+- SECTION_CORE_RULE: verify before deploy, merge, publish, or public release; scale member review/harness to risk, and use both for critical external/public work. Trivial mechanical edits are exempt.
+- After deploying, confirm it actually runs live; if you cannot reach live, verify in the closest way you can and record what you could not measure. No exemption.
 - AI code: non-trivial AI-generated/modified code needs applicable safety review before merge/deploy; solo tests are insufficient for risky changes.
 - BWF closes team-lead-confirmed execution/delegation: plan/card -> assign/ack -> execute+quality -> verify -> report/close -> learning. Detail: `skills/b3os-bwf/SKILL.md`.
 
