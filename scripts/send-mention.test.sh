@@ -58,6 +58,23 @@ else
   bad "서버 소스를 못 찾음: $SRV"
 fi
 
+echo "── T7: ★풀리지 않는 멘션은 조용히 죽지 않고 에러를 낸다★ ──"
+# 라이브 회귀(2026-07-31): send.sh 는 `set -e` 다. resolve_mention 이 members 파일이 없어
+# `return 1` 하면 대입문의 명령치환이 실패로 끝나고 set -e 가 그 줄에서 스크립트를 죽였다.
+# 아래 에러 분기가 한 번도 실행되지 않아 stdout·stderr 0바이트 · 종료코드 1 · 메시지 미생성 —
+# 보내는 사람에게는 아무 표시가 없었다. 실제로 5건이 이렇게 사라졌다.
+grep -q 'resolve_mention "\$_m" || true' "$SRC" \
+  && ok "명령치환에 || true 가 있어 set -e 가 죽이지 않는다" \
+  || bad "★|| true 가 없다 — set -e 가 에러 분기 전에 스크립트를 죽인다★"
+
+# 껍데기로 재현: 같은 패턴이 정말 조용히 죽는지 확인한다(고정용).
+SILENT_OUT="$(bash -c 'set -e; f(){ return 1; }; x="$(f)"; echo REACHED' 2>&1 || true)"
+[ -z "$SILENT_OUT" ] && ok "set -e + 실패 치환은 아무 출력 없이 죽는다(전제 확인)" \
+  || bad "전제가 깨졌다: '$SILENT_OUT'"
+GUARDED_OUT="$(bash -c 'set -e; f(){ return 1; }; x="$(f || true)"; echo REACHED' 2>&1 || true)"
+[ "$GUARDED_OUT" = "REACHED" ] && ok "|| true 를 붙이면 다음 줄이 실행된다" \
+  || bad "|| true 인데 도달 못함: '$GUARDED_OUT'"
+
 echo
 [ "$FAIL" -eq 0 ] && echo "ALL PASS" || echo "FAIL"
 exit "$FAIL"

@@ -169,10 +169,22 @@ resolve_mention() {  # resolve_mention <원시ID|이름> -> ID 또는 빈 문자
 #     (채널마다 다른 것은 그 채널로 나갈 때 붙인다. 저장 본문은 채널 중립으로 둔다).
 MENTION_IDS=""
 for _m in $MENTIONS; do
-  _id="$(resolve_mention "$_m")"
+  # ★`|| true` 를 떼지 말 것★ (2026-07-31 실측). 이 스크립트는 `set -e` 다.
+  #   resolve_mention 은 members 파일이 없으면 `return 1` 한다. 그러면 대입문의 명령치환이
+  #   0 이 아닌 값으로 끝나고 `set -e` 가 ★바로 이 줄에서 스크립트를 죽인다★ — 아래 에러
+  #   분기가 ★한 번도 실행되지 않는다.★ 결과는 stdout 0바이트 · stderr 0바이트 · 종료코드 1.
+  #   보내는 사람 눈에는 아무 일도 안 일어난 것처럼 보이고, 메시지는 생성되지 않는다.
+  #   라이브에서 이렇게 5건이 조용히 사라졌다(맥스튜디오 보고 2건 · 카드 정리 1건 포함).
+  _id="$(resolve_mention "$_m" || true)"
   if [ -z "$_id" ]; then
-    echo "ERROR: --mention '$_m' 을 member ID 로 풀 수 없습니다." >&2
-    echo "  원시 ID(U…)를 직접 주거나, $MEMBERS_FILE 에 '이름=U01234567' 을 추가하세요." >&2
+    echo "ERROR: --mention '$_m' 을 member ID 로 풀 수 없습니다 — ★메시지를 보내지 않았습니다.★" >&2
+    if [ -f "$MEMBERS_FILE" ]; then
+      echo "  '$MEMBERS_FILE' 에 '$_m=U01234567' 줄이 없습니다. 추가하거나 원시 ID(U…)를 직접 주세요." >&2
+    else
+      echo "  members 파일이 없습니다: $MEMBERS_FILE" >&2
+      echo "  파일을 만들어 '이름=U01234567' 을 넣거나, 원시 ID(U…)를 직접 주세요." >&2
+    fi
+    echo "  멘션 없이 보내려면 --mention 을 빼세요(알림은 안 갑니다)." >&2
     exit 1
   fi
   MENTION_IDS="$MENTION_IDS $_id"
