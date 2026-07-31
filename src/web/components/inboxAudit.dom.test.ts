@@ -422,9 +422,9 @@ describe("ProposalsView — read-only list/detail", () => {
     let listFetchCount = 0;
     let pollTick: (() => void) | null = null;
     globalThis.setInterval = ((handler: TimerHandler) => {
-      if (typeof handler === "function") pollTick = handler;
-      return 1 as unknown as ReturnType<typeof setInterval>;
-    }) as typeof setInterval;
+      if (typeof handler === "function") pollTick = handler as () => void;
+      return 1;
+    }) as unknown as typeof setInterval;
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/api/proposals")) {
@@ -515,7 +515,8 @@ describe("ProposalsView — read-only list/detail", () => {
       // 5초 자동 폴링 콜백은 열린 모달의 fetch와 DOM을 건드리지 않는다.
       const listFetchCountBeforePoll = listFetchCount;
       const textareaBeforePoll = textarea;
-      pollTick?.();
+      expect(pollTick).toBeTruthy();
+      (pollTick as unknown as () => void)();
       await new Promise((r) => setTimeout(r, 0));
       expect(listFetchCount).toBe(listFetchCountBeforePoll);
       expect(root.querySelector("[data-proposal-action-comment]")).toBe(textareaBeforePoll);
