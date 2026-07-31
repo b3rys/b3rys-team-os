@@ -12,6 +12,7 @@ import type { Database } from "bun:sqlite";
 import { requestPermission, getPermissionRequest, type PermissionOperation } from "../../lib/permissionGate";
 import type { ApprovalRequest, ReviewDecision } from "./appServerClient";
 import { CodexApprovalCorrelationStore } from "./state";
+import { appendAudit } from "../../db/queries";
 
 /** ★Phase1 ③: 이 서버 프로세스 인스턴스 id — 재시작 감지용(옛 팝업을 새 프로세스가 새 turn에 재결합 금지).★ */
 export const PROCESS_INSTANCE = randomUUID();
@@ -195,16 +196,12 @@ function parseCommandApproval(req: ApprovalRequest): CommandParse {
     const argv = raw.every((x) => typeof x === "string") ? (raw as string[]) : null;
     if (argv === null) return { kind: "invalid" };
     const joined = argv.join(" ").trim();
-    if (joined.length > SCAN_TEXT_LIMIT) return { kind: "invalid" };  // 위 문자열 경로와 같은 이유
     return joined.length > 0
       ? { kind: "ok", command: joined, material: JSON.stringify([req.method, argv]) }
       : { kind: "invalid" };
   }
   if (typeof raw === "string") {
     const trimmed = raw.trim();
-    //  ★스캔 상한을 넘는 명령은 해석 성공으로 받지 않는다.★ 받으면 상한 너머가 Tier-D 우회 통로가 된다.
-    //  해석 실패로 보내면 팝업이 '내용 해석 실패 — 원문 확인 필요' 라고 말하고 ★매번 묻는다.★
-    if (trimmed.length > SCAN_TEXT_LIMIT) return { kind: "invalid" };
     return trimmed.length > 0
       ? { kind: "ok", command: trimmed, material: JSON.stringify([req.method, trimmed]) }
       : { kind: "invalid" };
@@ -213,20 +210,20 @@ function parseCommandApproval(req: ApprovalRequest): CommandParse {
 }
 
 /**
- * 위험 스캔·표시에 싣는 명령 본문의 상한.
+ * ★이보다 긴 명령은 승인 흐름에 태우지 않는다 — 거절하고 따로 검토한다.★ (팀 리드 결정)
  *
- * ★실측에서 잡았다★ — 지금까지 실제로 온 승인요청 5건의 명령 길이는 ★전부 45자★ 다.
- * 가장 긴 현실 케이스는 `bash -c` 나 heredoc 으로 스크립트를 통째로 넘기는 것인데,
- * 100줄짜리 스크립트가 3~4천 자다. ★8,000자면 그것도 통째로 들어간다★ (실측 45자의 약 180배).
+ * 앞서 이 자리에 ★스캔 상한★ 을 뒀다가 없앴다. 자르면 잘린 뒤가 검사에서 빠지고,
+ * 그래서 "얼마나 잘라야 안전한가" 를 놓고 100k → 1M → 64k → 8k 로 헤맸다.
+ * ★자르지 않으면 그 문제가 통째로 사라진다★ — 받은 명령은 이미 우리 손에 있으니 전부 검사하면 된다.
  *
- * 이보다 긴 것은 사람이 팝업을 읽고 판단할 수 있는 명령이 아니다 — 해석 실패로 보내 매번 묻는다.
- * ('항상 허용' 이 안 붙을 뿐 실행이 막히지는 않는다. 안전한 방향의 손해다.)
+ * 대신 ★비정상적으로 긴 명령은 사람이 팝업으로 판단할 수 있는 대상이 아니다.★
+ * 실측: 실제로 온 승인요청 5건의 명령 길이는 전부 45자. 1,000자는 그 20배가 넘는다.
+ * 팀 리드: *"그냥 없애고 천자가 넘으면 그냥 에러를 내서 따로 검토하게 만들어."*
  *
- * ★이 값을 100k → 1M 까지 올렸다가 두 번 되돌렸다.★ 팀 리드가 두 번 끊었다 —
- * *"명령이 10만자???? 그런 가정을 왜해?"* · *"6만4천자?????"*
- * 아무도 안 보내는 길이를 놓고 정책을 정하고 있었다. ★한도는 가정이 아니라 실제 데이터에서 잡는다.★
+ * → 넘으면 ★팝업을 만들지 않고 거절★ 하고, `audit_event` 에 남겨 별도 검토로 보낸다.
+ *   (조용히 통과시키지도, 사람에게 못 읽을 것을 들이밀지도 않는다.)
  */
-const SCAN_TEXT_LIMIT = 8_000;
+const COMMAND_REVIEW_LIMIT = 1_000;
 
 /**
  * ★S5 — 긴 명령 두 개가 한 열쇠로 묶이던 것을 닫는다.★
@@ -268,7 +265,7 @@ function commandOperationFields(material: string, command: string): { command: s
   //  S3 가 쓰기 경로에서 세운 규칙과도 같다 — 넘치면 몇 개가 잘렸는지 말한다.
   const truncated = command.length > budget;
   const visible = truncated ? `${cutCodePoints(command, Math.max(0, budget - 1))}…` : command;
-  return { command: `${visible}${suffix}`, text: command.slice(0, SCAN_TEXT_LIMIT) };
+  return { command: `${visible}${suffix}`, text: command };
 }
 
 /** M5.1 — codex 승인요청 → PermissionOperation(requestPermission 입력). */
@@ -671,7 +668,7 @@ function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Re
     //    앞에 있어 해롭지 않지만, ★이 필드에 뭘 더 실으면 화면과 열쇠가 같이 바뀐다.★)
     text:
       `${UNPARSED_NOTICE}${req.method.slice(0, 64)} #${unparsedPayloadDigest(req)}${reason ? ` ${reason}` : ""}` +
-      ` ${payloadScanText(req).slice(0, SCAN_TEXT_LIMIT)}`,
+      ` ${payloadScanText(req)}`,
     requested_by: agentId,
     provenance,
   };
@@ -761,12 +758,40 @@ export async function pollDecision(db: Database, requestId: string, ttlMs = POPU
 }
 
 /**
+ * 승인 흐름에 태우기엔 ★너무 긴★ 요청인지 본다. 넘으면 그 길이를, 아니면 null.
+ *
+ * 재는 대상은 ★사람이 판단해야 할 내용★ 이다 — 해석되면 명령, 해석 안 되면 payload 안의 값들.
+ * (지문·안내문 같은 우리가 붙인 것은 빼고 잰다. 그걸 세면 기준이 우리 포맷에 흔들린다.)
+ */
+export function oversizedForReview(req: ApprovalRequest): number | null {
+  const parsed = parseCommandApproval(req);
+  const len = parsed.kind === "ok" ? parsed.command.length : payloadScanText(req).length;
+  return len > COMMAND_REVIEW_LIMIT ? len : null;
+}
+
+/**
  * M5.3 진입점 — ask-tier 승인요청을 팝업으로 처리. onApproval에서 needsApproval일 때 호출.
  * ★반환 전까지 codex 턴이 대기하므로, 상위(runner)는 이 대기 동안 turn timeout을 연기해야 한다(M5.3 배선).★
  */
 export async function requestApprovalPopup(db: Database, req: ApprovalRequest, agentId: string, cwd?: string, ttlMs = POPUP_TTL_MS): Promise<ReviewDecision> {
   const store = new CodexApprovalCorrelationStore(db);
   const opHash = approvalOperationHash(req);
+
+  //  ★너무 긴 요청은 팝업을 만들지 않고 거절한다★ — 사람이 읽고 판단할 수 있는 대상이 아니다.
+  //  조용히 통과시키지도, 못 읽을 것을 사람에게 들이밀지도 않는다. 기록을 남겨 ★따로 검토★ 하게 한다.
+  const oversized = oversizedForReview(req);
+  if (oversized !== null) {
+    try {
+      appendAudit(db, agentId, "codex_approval_oversized", req.method, {
+        length: oversized,
+        limit: COMMAND_REVIEW_LIMIT,
+        operation_hash: opHash,
+        note: "명령이 너무 길어 승인 팝업을 만들지 않고 거절했습니다. 원문을 따로 검토하세요.",
+      });
+    } catch { /* 기록 실패가 거절을 막지 않는다 */ }
+    return "denied";
+  }
+
   let requestId: string | undefined;
   try {
     const op = buildOperationFromApproval(req, agentId, cwd);

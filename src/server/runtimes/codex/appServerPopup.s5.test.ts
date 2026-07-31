@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../../db/migrate";
 import { decidePermissionRequest, evaluatePermission, requestPermission, scopeKeyForOperation, targetForOperation, tierDReasons } from "../../lib/permissionGate";
-import { buildOperationFromApproval } from "./appServerPopup";
+import { buildOperationFromApproval, oversizedForReview, requestApprovalPopup } from "./appServerPopup";
 import type { ApprovalRequest } from "./appServerClient";
 
 /**
@@ -133,32 +133,36 @@ describe("S5 — 사람이 보는 한 줄", () => {
   });
 });
 
-describe("S5 — 스캔 상한 경계", () => {
-  test("★위험어 앞에 줄바꿈·탭이 있어도 잡는다★ — codex 명령은 여러 줄이 기본이다", () => {
-    // ★이 시험이 없으면 스캔이 '붙어 있는데 안 읽히는' 상태를 못 잡는다.★
-    // JSON 직렬화는 줄바꿈을 역슬래시+n 두 글자로 바꾸고, 그러면 "nsudo" 가 되어
-    // Tier-D 규칙의 단어 경계가 안 맞는다 — ★줄바꿈 하나로 검사를 통과한다★(루이 실측).
-    // 앞선 시험들이 전부 ★공백 앞★ 케이스여서 초록이었다.
-    for (const [sep, expected] of [["\n", "sudo"], ["\t", "sudo"], ["\r", "sudo"], ["\n", "chmod_777"]] as const) {
-      const cmd = expected === "sudo" ? `echo hi${sep}sudo id` : `echo hi${sep}chmod 777 /tmp/x`;
-      const unparsed = buildOperationFromApproval(oldGen([1 as unknown as string, cmd]), "dex");
-      expect(unparsed.action).toBe("approval_unparsed");
-      // ★해석 실패 경로가 정상 경로와 같은 것을 잡아야 한다★ — 기준을 정상 경로에서 가져온다.
-      expect(tierDReasons(unparsed)).toContain(expected);
-      expect(tierDReasons(buildOperationFromApproval(oldGen([cmd]), "dex"))).toContain(expected);
-    }
+describe("S5 — 너무 긴 요청은 승인 흐름에 태우지 않는다", () => {
+  // 팀 리드 결정: "그냥 없애고 천자가 넘으면 그냥 에러를 내서 따로 검토하게 만들어."
+  // 스캔 상한(자르기)은 없앴다 — 자르면 잘린 뒤가 검사에서 빠져서 "얼마면 안전한가" 를 영원히 못 정한다.
+  // 대신 ★사람이 읽고 판단할 수 없는 길이는 팝업을 만들지 않는다.★
+
+  test("★1,000자를 넘으면 팝업 없이 거절되고 기록이 남는다★", async () => {
+    const db = freshDb();
+    const long = "echo " + "a".repeat(1_200);
+    expect(oversizedForReview(newGen(long))).toBeGreaterThan(1_000);
+
+    expect(await requestApprovalPopup(db, newGen(long), "dex")).toBe("denied");
+    // ★팝업 자체가 안 만들어져야 한다★ — 사람에게 못 읽을 것을 들이밀지 않는다.
+    expect((db.query("SELECT COUNT(*) c FROM permission_request").get() as any).c).toBe(0);
+    // ★조용히 사라지지도 않아야 한다★ — 따로 검토할 수 있게 기록이 남는다.
+    const row = db.query("SELECT action, detail_json FROM audit_event ORDER BY id DESC LIMIT 1").get() as any;
+    expect(row.action).toBe("codex_approval_oversized");
+    expect(JSON.parse(row.detail_json).length).toBe(long.length);
   });
 
-  test("★상한 안쪽의 위험어는 잡는다★", () => {
-    const op = buildOperationFromApproval(newGen("echo " + "w".repeat(7_000) + " ; sudo id"), "dex");
+  test("현실 길이 명령은 그대로 팝업으로 간다", () => {
+    // 실측 45자. 이 규칙이 평소 동작을 건드리면 안 된다.
+    expect(oversizedForReview(newGen("bun test src/server/runtimes/codex/adapter.ts"))).toBeNull();
+    expect(oversizedForReview(oldGen(["npm", "run", "build"]))).toBeNull();
+  });
+
+  test("★자르지 않으므로 아무리 뒤에 있어도 위험어는 스캔된다★", () => {
+    // 예전엔 상한에서 잘라 그 뒤가 검사 밖이었다. 이제 자르지 않는다(길면 위에서 거절된다).
+    const op = buildOperationFromApproval(newGen("echo " + "w".repeat(900) + " ; sudo id"), "dex");
     expect(tierDReasons(op)).toContain("sudo");
-  });
-
-  test("★상한을 넘으면 해석 실패로 보낸다★ — 넘긴 만큼이 우회 통로가 되지 않게", () => {
-    // 상한 너머를 '해석 성공' 으로 받으면 그 지점 뒤의 sudo 가 스캔 밖 + 화면 밖이 된다.
-    // 해석 실패로 보내면 팝업이 원문 확인을 요구하고 ★매번 묻는다★.
-    const op = buildOperationFromApproval(newGen("echo " + "w".repeat(8_100) + " ; sudo id"), "dex");
-    expect(op.action).not.toBe("shell");
+    expect(op.text!.length).toBeGreaterThan(900);
   });
 });
 
@@ -167,12 +171,6 @@ describe("S5 — 해석 실패로 보내도 위험 검사는 면제되지 않는
   // 그 payload 의 Tier-D 스캔 입력이 0 이 됐다. 열쇠는 좁혔는데 ★검사 범위를 없앴다.★
   // Tier-D 는 사람도 승인 못 하는 등급이라, 스캔이 비면 위험 명령이 '누를 수 있는 팝업' 으로 내려온다.
   const danger = "sudo rm -rf /tmp/x ; ";
-
-  test("★상한을 넘겨 해석 실패로 간 payload 도 스캔된다★", () => {
-    const op = buildOperationFromApproval(newGen(danger + "a".repeat(8_100)), "dex");
-    expect(op.action).toBe("approval_unparsed");
-    expect(tierDReasons(op)).toContain("sudo");
-  });
 
   test("★규격 밖 argv 로 해석 실패로 간 payload 도 스캔된다★", () => {
     const op = buildOperationFromApproval(oldGen([1 as unknown as string, "; " + danger]), "dex");
