@@ -121,7 +121,7 @@ describe("S5 — 사람이 보는 한 줄", () => {
       ["이모지 40개", "echo " + "🙂".repeat(40)],
       ["탭·CR", "echo\t" + "b\r".repeat(200)],
       ["전각 공백", "echo " + "　".repeat(300)],
-      ["장문 60k(상한 안)", "echo " + "c".repeat(60_000)],
+      ["장문 7천자(상한 안)", "echo " + "c".repeat(7_000)],
     ];
     for (const [label, cmd] of cases) {
       const t = target(cmd);
@@ -150,14 +150,14 @@ describe("S5 — 스캔 상한 경계", () => {
   });
 
   test("★상한 안쪽의 위험어는 잡는다★", () => {
-    const op = buildOperationFromApproval(newGen("echo " + "w".repeat(63_000) + " ; sudo id"), "dex");
+    const op = buildOperationFromApproval(newGen("echo " + "w".repeat(7_000) + " ; sudo id"), "dex");
     expect(tierDReasons(op)).toContain("sudo");
   });
 
   test("★상한을 넘으면 해석 실패로 보낸다★ — 넘긴 만큼이 우회 통로가 되지 않게", () => {
     // 상한 너머를 '해석 성공' 으로 받으면 그 지점 뒤의 sudo 가 스캔 밖 + 화면 밖이 된다.
     // 해석 실패로 보내면 팝업이 원문 확인을 요구하고 ★매번 묻는다★.
-    const op = buildOperationFromApproval(newGen("echo " + "w".repeat(64_100) + " ; sudo id"), "dex");
+    const op = buildOperationFromApproval(newGen("echo " + "w".repeat(8_100) + " ; sudo id"), "dex");
     expect(op.action).not.toBe("shell");
   });
 });
@@ -169,7 +169,7 @@ describe("S5 — 해석 실패로 보내도 위험 검사는 면제되지 않는
   const danger = "sudo rm -rf /tmp/x ; ";
 
   test("★상한을 넘겨 해석 실패로 간 payload 도 스캔된다★", () => {
-    const op = buildOperationFromApproval(newGen(danger + "a".repeat(64_100)), "dex");
+    const op = buildOperationFromApproval(newGen(danger + "a".repeat(8_100)), "dex");
     expect(op.action).toBe("approval_unparsed");
     expect(tierDReasons(op)).toContain("sudo");
   });
