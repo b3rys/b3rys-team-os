@@ -123,6 +123,28 @@ describe("갭2 닫힘 — 같은 파일이라도 내용이 다르면 지문이 �
     expect(approvalOperationHash(a)).toBe(approvalOperationHash(b));
   });
 
+  test("★빈 파일도 '아는 내용' 이다★ — 빈 파일 생성과 빈 파일 삭제는 다른 작업이다", () => {
+    // ★코덱스 리뷰 P1(재현 확인).★ 길이로 "내용을 얻었나" 를 재면 ★정상적인 빈 파일 작업이 '모름' 과 합쳐진다.★
+    // basis.files 에는 kind 가 없어서 그 둘을 갈라줄 다른 재료도 없었다 → 같은 지문이 됐다.
+    const addEmpty = oldGen({ "a.ts": { type: "add", content: "" } });
+    const delEmpty = oldGen({ "a.ts": { type: "delete", content: "" } });
+    expect(approvalOperationHash(addEmpty)).not.toBe(approvalOperationHash(delEmpty));
+  });
+
+  test("★'비어 있다' 와 '모른다' 는 다르다★ — 내용 필드가 아예 없는 것과 구분된다", () => {
+    const known = oldGen({ "a.ts": { type: "add", content: "" } });   // 빈 파일을 만든다(아는 것)
+    const unknown = oldGen({ "a.ts": { type: "add" } });               // 내용 필드가 없다(모르는 것)
+    expect(approvalOperationHash(known)).not.toBe(approvalOperationHash(unknown));
+  });
+
+  test("모르는 종류에서 필드 우선순위를 고정한다 — 먼저 선언된 쪽을 믿는다", () => {
+    // 비차단 지적(코덱스): type 없음 + unified_diff:"" + content:"X" 에서 ★빈 diff 가 X 를 가린다.★
+    // 그게 의도인지 사고인지 코드만 봐선 모르므로 ★계약으로 못박는다★ — 종류를 모를 때는 unified_diff 를 먼저 본다.
+    const a = oldGen({ "a.ts": { unified_diff: "", content: "X" } });
+    const b = oldGen({ "a.ts": { unified_diff: "", content: "Y" } });
+    expect(approvalOperationHash(a)).toBe(approvalOperationHash(b)); // content 는 안 본다
+  });
+
   test("★내용을 모르면 지문을 바꾸지 않는다★ — 구세대 golden 이 그대로여야 한다", () => {
     // 내용 없는 payload 에 빈 문자열을 해시하면 "내용을 안다" 는 거짓 신호가 되고 골든도 깨진다.
     expect(approvalOperationHash(oldGen({ "b.ts": {}, "a.ts": {} }))).toBe("c7fa63459c642993");

@@ -105,11 +105,14 @@ export function approvalOperationHash(req: ApprovalRequest): string {
  */
 function approvalContentDigest(req: ApprovalRequest): string | null {
   const p = req.params as Record<string, any>;
-  const rows: Array<[string, string, string | null, string]> = [];
+  // ★body 는 string | null 이다 — ""(빈 내용을 안다) 와 null(내용을 모른다) 은 다른 상태다.★
+  //   앞선 판은 둘을 "" 하나로 합쳐서 ★빈 파일 생성과 빈 파일 삭제가 같은 지문★ 이었다(코덱스 리뷰 P1, 재현 확인).
+  //   basis.files 에는 kind 가 없으므로 그 둘을 갈라줄 다른 재료도 없었다.
+  const rows: Array<[string, string, string | null, string | null]> = [];
 
-  // 신세대 — 관측해 둔 변경(내용 포함)
+  // 신세대 — 관측해 둔 변경(내용 포함). 관측이 있으면 그 내용은 ★아는 것★ 이다(빈 문자열도 포함).
   for (const c of req.observedItem?.changes ?? []) {
-    rows.push([c.path, c.kind, c.movePath, c.diff]);
+    rows.push([c.path, c.kind, c.movePath, typeof c.diff === "string" ? c.diff : null]);
   }
   // 구세대 — payload 안에 내용이 있다
   const fc = p?.fileChanges;
@@ -120,18 +123,22 @@ function approvalContentDigest(req: ApprovalRequest): string | null {
       const mv = typeof ch.move_path === "string" && ch.move_path.trim() ? ch.move_path : null;
       // ★종류에 맞는 필드만 본다★ — 짝이 어긋난 payload 에서 엉뚱한 값을 지문에 넣지 않기 위해서다
       //   (S3 에서 표시 쪽에 같은 정정을 했다: 재료를 고르는 기준과 쓰는 기준이 달라 규모를 지어냈다).
+      //   ★필드가 없으면 null★ — "내용이 비어 있다" 가 아니라 "내용을 모른다" 다.
       const body =
         kind === "update"
-          ? typeof ch.unified_diff === "string" ? ch.unified_diff : ""
+          ? typeof ch.unified_diff === "string" ? ch.unified_diff : null
           : kind === "add" || kind === "delete"
-            ? typeof ch.content === "string" ? ch.content : ""
-            : typeof ch.unified_diff === "string" ? ch.unified_diff : typeof ch.content === "string" ? ch.content : "";
+            ? typeof ch.content === "string" ? ch.content : null
+            // 모르는 종류만 휴리스틱 — 있는 쪽을 쓴다. ★빈 문자열도 '있는 것' 으로 센다★
+            //   (unified_diff:"" 가 content:"X" 를 가리는 것은 의도된 우선순위다: 종류를 모를 때
+            //    먼저 선언된 필드를 믿는다. 시험으로 고정한다.)
+            : typeof ch.unified_diff === "string" ? ch.unified_diff : typeof ch.content === "string" ? ch.content : null;
       rows.push([path, kind, mv, body]);
     }
   }
-  // ★내용을 하나도 못 얻었으면 null★ — 이름만 아는 상태에서 빈 문자열을 해시하면
-  //   "내용을 안다" 는 거짓 신호가 되고, 구세대 골든 지문도 바뀐다.
-  if (!rows.some((r) => r[3].length > 0)) return null;
+  // ★하나라도 '아는' 내용이 있으면 지문화한다★ — 길이가 아니라 ★null 여부★ 로 판정한다.
+  //   길이로 재면 ★빈 파일 작업이 "모름" 과 합쳐진다★(P1). 아무것도 모르면 키를 안 붙여 구세대 골든을 지킨다.
+  if (!rows.some((r) => r[3] !== null)) return null;
   rows.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   return createHash("sha256").update(JSON.stringify(rows)).digest("hex").slice(0, 16);
 }
