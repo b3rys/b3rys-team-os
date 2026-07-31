@@ -93,7 +93,7 @@ function noticeSummaryText(summary: string): string {
   return oneLine.length <= 160 ? oneLine : `${oneLine.slice(0, 157)}...`;
 }
 
-function existingAgent(db: Database, id: string): boolean {
+export function existingAgent(db: Database, id: string): boolean {
   return Boolean(db.prepare("SELECT 1 FROM agent WHERE id = ?").get(id));
 }
 
@@ -172,7 +172,9 @@ export function coordinatorOwner(db: Database, agents: AgentRecord[], proposer: 
   const coord = coordinatorId(agents);
   if (coord && existingAgent(db, coord)) return coord;
   if (existingAgent(db, proposer)) return proposer;
-  return otherReviewers(db, proposer, agents).find((id) => id !== exclude) ?? proposer;
+  // 남은 후보가 없으면 exclude 를 그대로 돌려준다. 여기까지 왔다는 건 제안자가 DB 에 없다는 뜻이라,
+  // 제안자를 넣으면 ★존재하지 않는 사람★ 이 담당이 된다 — 무응답이어도 실재하는 사람이 낫다.
+  return otherReviewers(db, proposer, agents).find((id) => id !== exclude) ?? exclude ?? proposer;
 }
 
 // peer_review 담당 = 제안자 제외 후보 중 열린/최근 배정이 가장 적은 1명.
@@ -772,15 +774,19 @@ export function sweepStaleProposals(
                 SET owner = ?,
                     description = description || char(10)
                       || 'blocked: peer review 미확보 — 후보를 모두 돌았으나 리뷰 0건.' || char(10)
-                      || '다음 행동: 리뷰할 팀원을 직접 지정하거나, 제안을 접을지 판단한다.' || char(10)
-                      || '판단 기준: 팀 전체의 이슈가 아니거나 개인 수준의 learning 이면 드랍한다.',
+                      || ?,
                     updated_at = datetime('now')
               WHERE id IN (
                 SELECT task_id FROM proposal_followup_task
                  WHERE proposal_id = ? AND status LIKE ? AND closed_at IS NULL
               )`,
           );
-          const cardChanges = cardUpdate.run(rescuer, row.id, `${row.status}:%`).changes ?? 0;
+          // 조율자도 제안자도 DB 에 없어 담당이 그대로면(명부와 DB 어긋남), 다음 행동이 아니라
+          // 그 사실을 적어야 사람이 고칠 수 있다. 조율자가 마침 그 담당인 정상 경우와 구분된다.
+          const nextAction = rescuer === stalled && !existingAgent(db, row.proposer_agent)
+            ? "담당 없음 — 팀 명부와 DB 가 어긋나 있다. 명부를 맞춘 뒤 리뷰어를 지정한다."
+            : `다음 행동: 리뷰할 팀원을 직접 지정하거나, 제안을 접을지 판단한다.\n판단 기준: 팀 전체의 이슈가 아니거나 개인 수준의 learning 이면 드랍한다.`;
+          const cardChanges = cardUpdate.run(rescuer, nextAction, row.id, `${row.status}:%`).changes ?? 0;
           const ledgerChanges = db.prepare(
             `UPDATE proposal_followup_task
                 SET owner = ?

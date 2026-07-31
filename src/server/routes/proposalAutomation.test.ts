@@ -372,4 +372,59 @@ describe("후보를 다 돌아도 리뷰가 없을 때", () => {
     expect(coordinatorOwner(db, agents, "codex", tail[0])).not.toBe(tail[0]);
     expect(coordinatorOwner(db, agents, "codex", tail[0])).toBe(tail[1]!);
   });
+
+  test("넘길 사람이 없으면 카드에 명부가 어긋났다고 적는다", async () => {
+    const { app, db } = setup();
+    const agents = agentsWithCoordinator("__none__");
+    const { id } = (await (await create(app)).json()) as { id: string };
+
+    let reassigned = false;
+    for (let i = 0; i < 12 && !reassigned; i += 1) {
+      ageProposal(db, id, 40);
+      reassigned = sweepStaleProposals(db, agents).reassigned.includes(id);
+    }
+    expect(reassigned).toBe(true);
+
+    // 명부에는 있는데 DB 에는 없다 — 현재 담당 한 명만 남기고 제안자까지 지운다.
+    const owner = (db
+      .prepare(
+        `SELECT owner FROM proposal_followup_task
+          WHERE proposal_id = ? AND status LIKE 'peer_review:%' AND closed_at IS NULL
+          ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(id) as { owner: string }).owner;
+    db.prepare("DELETE FROM agent WHERE id != ?").run(owner);
+
+    let blocked = false;
+    for (let i = 0; i < 12 && !blocked; i += 1) {
+      ageProposal(db, id, 40);
+      blocked = sweepStaleProposals(db, agents).blocked.includes(id);
+    }
+    expect(blocked).toBe(true);
+
+    const card = db
+      .prepare(
+        `SELECT t.owner AS owner, t.description AS description FROM proposal_followup_task pft
+           JOIN task t ON t.id = pft.task_id
+          WHERE pft.proposal_id = ? AND pft.closed_at IS NULL`,
+      )
+      .get(id) as { owner: string; description: string };
+    expect(card.owner).toBe(owner); // 존재하지 않는 사람으로 바뀌지 않는다
+    expect(card.description).toContain("담당 없음");
+    expect(card.description).not.toContain("다음 행동");
+  });
+
+  test("남은 후보가 그 사람뿐이면, DB 에 없는 제안자를 담당으로 넣지 않는다", () => {
+    const { db } = setup();
+    const agents = agentsWithCoordinator("__none__");
+    db.prepare("DELETE FROM agent WHERE id IN ('bill','codex')").run();
+    // 후보를 한 명만 남긴다 — 그 한 명이 방금 무응답한 사람이다.
+    const only = otherReviewers(db, "codex", agents)[0]!;
+    db.prepare("DELETE FROM agent WHERE id NOT IN (?)").run(only);
+    expect(otherReviewers(db, "codex", agents)).toEqual([only]);
+
+    // 무응답이어도 실재하는 사람이, 존재하지 않는 사람보다 낫다.
+    expect(coordinatorOwner(db, agents, "codex", only)).toBe(only);
+    expect(coordinatorOwner(db, agents, "codex", only)).not.toBe("codex");
+  });
 });
