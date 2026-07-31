@@ -190,3 +190,28 @@ describe("S5 — 해석 실패로 보내도 위험 검사는 면제되지 않는
     expect(scopeKeyForOperation(a)).not.toBe(scopeKeyForOperation(b));
   });
 });
+
+describe("S5 — 1,000자 규칙은 ★명령에만★ 적용된다", () => {
+  // ★내가 잘 되던 기능을 죽였던 자리다★ (아메스 실측): 모든 승인에 길이 규칙을 걸어서
+  // 1,200자짜리 파일을 만드는 ★평범한 파일 변경 승인이 거절★ 됐고, 기록까지 '명령이 너무 길다' 로 남았다.
+  // 팀 리드가 말한 것은 "1000자를 넘는 ★명령★ 은 이상한거야" 다 — 파일 내용은 길어도 이상하지 않다.
+  const patch = (content: string): ApprovalRequest => ({
+    method: "applyPatchApproval",
+    params: { fileChanges: { "src/x.ts": { type: "add", content } }, cwd: "/tmp" },
+  });
+
+  test("★긴 파일을 만드는 변경은 그대로 승인 흐름으로 간다★", async () => {
+    const db = freshDb();
+    const req = patch("// " + "a".repeat(1_200));
+    expect(oversizedForReview(req)).toBeNull();
+
+    // 실제 흐름까지 확인한다 — 판정 함수만 보면 호출부가 딴 짓 해도 초록이다.
+    const done = requestApprovalPopup(db, req, "dex", "/tmp", 50);
+    expect((db.query("SELECT COUNT(*) c FROM permission_request").get() as any).c).toBe(1);
+    await done;  // TTL 로 끝나게 두고 정리(결정은 이 시험의 관심사가 아니다)
+  });
+
+  test("명령은 여전히 1,000자 규칙을 받는다", () => {
+    expect(oversizedForReview(newGen("echo " + "a".repeat(1_200)))).toBeGreaterThan(1_000);
+  });
+});

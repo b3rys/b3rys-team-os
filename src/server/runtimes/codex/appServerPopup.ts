@@ -758,13 +758,20 @@ export async function pollDecision(db: Database, requestId: string, ttlMs = POPU
 }
 
 /**
- * 승인 흐름에 태우기엔 ★너무 긴★ 요청인지 본다. 넘으면 그 길이를, 아니면 null.
+ * 승인 흐름에 태우기엔 ★너무 긴 '명령'★ 인지 본다. 넘으면 그 길이를, 아니면 null.
  *
- * 재는 대상은 ★사람이 판단해야 할 내용★ 이다 — 해석되면 명령, 해석 안 되면 payload 안의 값들.
+ * ★명령 승인에만 적용한다.★ 팀 리드가 말한 것은 *"1000자를 넘는 명령은 이상한거야"* 이고,
+ * ★파일 변경 승인의 '내용' 은 길어도 이상하지 않다★ — 1,200자짜리 파일은 평범하다.
+ * (처음엔 모든 승인에 걸어서 ★평범한 파일 변경이 거절됐다★. 아메스가 실측으로 잡았다:
+ *  applyPatchApproval 에 1,200자 파일을 넣으면 denied · permission_request 0행 ·
+ *  기록은 '명령이 너무 길다' — 잘 되던 기능이 죽고 기록까지 틀린 이유를 댔다.)
+ *
+ * 재는 대상은 ★사람이 판단해야 할 내용★ 이다 — 해석되면 명령, 명령 method 인데 해석이 안 되면 payload 값들.
  * (지문·안내문 같은 우리가 붙인 것은 빼고 잰다. 그걸 세면 기준이 우리 포맷에 흔들린다.)
  */
 export function oversizedForReview(req: ApprovalRequest): number | null {
   const parsed = parseCommandApproval(req);
+  if (parsed.kind === "not_command") return null;   // ★파일 변경·그 밖의 승인은 이 규칙 대상이 아니다★
   const len = parsed.kind === "ok" ? parsed.command.length : payloadScanText(req).length;
   return len > COMMAND_REVIEW_LIMIT ? len : null;
 }
