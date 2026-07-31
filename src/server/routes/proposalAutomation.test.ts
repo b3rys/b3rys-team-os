@@ -9,6 +9,7 @@ import { migrate } from "../db/migrate";
 import { createProposalRoutes, sweepStaleProposals } from "./proposals";
 import { advanceProposalIfCurrent, createProposal, SYSTEM_ACTOR } from "../db/proposal";
 import { ambientAgents } from "../lib/registry";
+import type { AgentRecord } from "../types";
 
 const OP_TOKEN = "proposal-auto-test-op-token";
 
@@ -266,5 +267,64 @@ describe("자동화 — 교차검토 결함 회귀 방어", () => {
     expect(r2.degraded).not.toContain(id);
     expect(r2.blocked).toContain(id);
     expect(statusOf(db, id)).toBe("peer_review"); // 사람 리뷰 대기(무검토 승격 안 함)
+  });
+});
+
+describe("후보를 다 돌아도 리뷰가 없을 때", () => {
+  // 막아두는 것과 멈춰두는 것은 다르다. blocked 로 남기면 팀장 보고로는 안 가지만,
+  // 카드 소유자가 무응답한 리뷰어 그대로면 다음 행동을 할 사람이 없다.
+  const ageProposal = (db: Database, id: string, minutes: number) =>
+    db.prepare("UPDATE proposal SET updated_at = datetime('now', ?) WHERE id = ?").run(`-${minutes} minutes`, id);
+
+  const agentsWithCoordinator = (coord: string): AgentRecord[] =>
+    ["bill", "codex", "steve", "demis", "devon"].map((id) => ({
+      id,
+      display_name: id,
+      role: "role",
+      runtime: "claude_channel",
+      status_provider: "claude_tmux",
+      tmux_session: null,
+      telegram_bot_username: null,
+      workspace_path: "/tmp",
+      persona_file: "P.md",
+      capabilities: id === coord ? ["coordinator"] : [],
+    })) as unknown as AgentRecord[];
+
+  // 조율자만 바꿔 같은 시나리오를 돌린다. 배정은 결정적이라, 재배정이 없으면
+  // 두 번 모두 같은 사람이 남는다 — 조율자를 따라가면 재배정이 실제로 일어난 것이다.
+  async function ownerAfterBlocked(coord: string) {
+    const { app, db } = setup();
+    const agents = agentsWithCoordinator(coord);
+    const { id } = (await (await create(app)).json()) as { id: string };
+    expect(statusOf(db, id)).toBe("peer_review");
+
+    let blocked = false;
+    for (let i = 0; i < 12 && !blocked; i += 1) {
+      ageProposal(db, id, 40);
+      blocked = sweepStaleProposals(db, agents).blocked.includes(id);
+    }
+    expect(blocked).toBe(true);
+
+    // 리뷰 0건인 채로 팀장 보고 단계로 가지 않는다
+    expect(statusOf(db, id)).toBe("peer_review");
+    expect(
+      (db.prepare("SELECT COUNT(*) AS n FROM proposal_review WHERE proposal_id = ?").get(id) as { n: number }).n,
+    ).toBe(0);
+
+    return db
+      .prepare(
+        `SELECT t.owner AS owner, t.description AS description
+           FROM proposal_followup_task pft JOIN task t ON t.id = pft.task_id
+          WHERE pft.proposal_id = ? AND pft.closed_at IS NULL`,
+      )
+      .get(id) as { owner: string; description: string } | undefined;
+  }
+
+  test("카드가 coordinator 에게 넘어가고 다음 행동이 적힌다", async () => {
+    const a = await ownerAfterBlocked("demis");
+    const b = await ownerAfterBlocked("bill");
+    expect(a?.owner).toBe("demis");
+    expect(b?.owner).toBe("bill");
+    expect(a?.description).toContain("다음 행동");
   });
 });

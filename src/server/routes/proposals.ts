@@ -159,6 +159,10 @@ function isTestProposalFixture(p: { title?: string | null; source?: string | nul
   return isTestProposalTitle(p.title) || isTestProposalSource(p.source);
 }
 
+// 통과 판정 기준. 리뷰 요청과 조율자 카드가 같은 문구를 쓴다 — 기준이 없으면 통과가 기본값이 된다.
+const REVIEW_CRITERIA =
+  `1) 정말 팀에 필요한가?\n2) 팀 전체의 공통 이슈인가?\n3) 팀원 개인 수준의 learning인가?`;
+
 // 팀장 보고/조율 owner = coordinator(PM 역량) 우선 → 제안자 → 첫 후보 순 폴백(하드코딩 id 없음).
 function coordinatorOwner(db: Database, agents: AgentRecord[], proposer: string): string {
   const coord = coordinatorId(agents);
@@ -448,7 +452,7 @@ function ensureProposalFollowup(db: Database, proposalId: string, status: string
           `대상: ${p.title}\nID: ${p.id}\n` +
           `역할: reviewer(${owner})\n` +
           `해야 할 일: 팀장 보고 전에 아래 기준으로 실제 리스크와 개선점을 포함해 review를 남겨 주세요.\n` +
-          `1) 정말 팀에 필요한가?\n2) 팀 전체의 공통 이슈인가?\n3) 팀원 개인 수준의 learning인가?\n` +
+          `${REVIEW_CRITERIA}\n` +
           `팀 공통 제안이 아니거나 개인 learning이면 reject(drop)하고 사유를 남겨 주세요.`,
       ));
     return { owner: followups.map((f) => f.owner).join(","), taskId: followups[0]?.taskId, messageId: followups[0]?.messageId };
@@ -747,17 +751,31 @@ export function sweepStaleProposals(
         }
         // 2차: 여전히 무응답이어도 리뷰 게이트는 건너뛰지 않는다.
         // 팀장 결정 화면에 무검토 제안을 올리는 대신 현재 단계에서 blocked로 남긴다.
+        //
+        // 그리고 카드를 coordinator 에게 넘긴다. blocked 표시만 하고 소유자를 그대로 두면
+        // 그 소유자는 이미 두 번 무응답한 사람이고, 아무도 이 제안을 풀어줄 책임을 지지 않는다.
+        // 막아두는 것과 멈춰두는 것은 다르다 — 막은 뒤에는 누군가 다음 행동을 해야 한다.
         const blockKey = `sweeper_blocked:${row.id}:${row.status}:${round}`;
         if (claimAutomationAction(db, blockKey, row.id, "sweeper_blocked")) {
+          const rescuer = coordinatorOwner(db, agents, row.proposer_agent);
           db.prepare(
             `UPDATE task
-                SET description = description || char(10) || 'blocked: peer review 미확보',
+                SET owner = ?,
+                    description = description || char(10)
+                      || 'blocked: peer review 미확보 — 후보를 모두 돌았으나 리뷰 0건.' || char(10)
+                      || '다음 행동: 리뷰할 팀원을 직접 지정하거나, 제안을 접을지 판단한다.' || char(10)
+                      || '판단 기준: 팀 전체의 이슈가 아니거나 개인 수준의 learning 이면 드랍한다.',
                     updated_at = datetime('now')
               WHERE id IN (
                 SELECT task_id FROM proposal_followup_task
                  WHERE proposal_id = ? AND status LIKE ? AND closed_at IS NULL
               )`,
-          ).run(row.id, `${row.status}:%`);
+          ).run(rescuer, row.id, `${row.status}:%`);
+          db.prepare(
+            `UPDATE proposal_followup_task
+                SET owner = ?
+              WHERE proposal_id = ? AND status LIKE ? AND closed_at IS NULL`,
+          ).run(rescuer, row.id, `${row.status}:%`);
           out.blocked.push(row.id);
         }
       })();
