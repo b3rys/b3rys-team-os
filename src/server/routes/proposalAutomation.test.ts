@@ -6,9 +6,10 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
-import { createProposalRoutes, sweepStaleProposals } from "./proposals";
+import { coordinatorOwner, createProposalRoutes, otherReviewers, sweepStaleProposals } from "./proposals";
 import { advanceProposalIfCurrent, createProposal, SYSTEM_ACTOR } from "../db/proposal";
 import { ambientAgents } from "../lib/registry";
+import type { AgentRecord } from "../types";
 
 const OP_TOKEN = "proposal-auto-test-op-token";
 
@@ -141,17 +142,28 @@ describe("자동화 — sweeper 정체 안전망", () => {
     expect(statusOf(db, id)).toBe("peer_review"); // 3+팀 → peer 자동 제출
   });
 
-  test("peer 무응답 → 1차 재배정 → 2차 리뷰 skip degraded 진행", async () => {
+  test("peer 무응답 → 1차 재배정 → 재대기 후에도 리뷰 없으면 blocked 유지", async () => {
     const { app, db } = setup();
     const { id } = (await (await create(app)).json()) as { id: string };
     expect(statusOf(db, id)).toBe("peer_review");
+    const firstOwner = (db.prepare(
+      "SELECT owner FROM proposal_followup_task WHERE proposal_id = ? AND status LIKE 'peer_review:%' ORDER BY created_at LIMIT 1",
+    ).get(id) as { owner: string }).owner;
     ageProposal(db, id, 40);
     const r1 = sweepStaleProposals(db, ambientAgents());
     expect(r1.reassigned).toContain(id);
     expect(statusOf(db, id)).toBe("peer_review"); // 재배정만, 아직 peer
-    const r2 = sweepStaleProposals(db, ambientAgents()); // 여전히 stale → degraded
-    expect(r2.degraded).toContain(id);
-    expect(statusOf(db, id)).toBe("gd_report"); // 리뷰 없이 자동 진행(degraded)
+    const reassignedOwner = (db.prepare(
+      "SELECT owner FROM proposal_followup_task WHERE proposal_id = ? AND status LIKE 'peer_review:%' AND closed_at IS NULL",
+    ).get(id) as { owner: string }).owner;
+    expect(reassignedOwner).not.toBe(firstOwner);
+    const immediate = sweepStaleProposals(db, ambientAgents());
+    expect(immediate.blocked).not.toContain(id); // 재배정 시 대기시계가 초기화된다
+    ageProposal(db, id, 40);
+    const r2 = sweepStaleProposals(db, ambientAgents());
+    expect(r2.degraded).toEqual([]);
+    expect(r2.blocked).toContain(id);
+    expect(statusOf(db, id)).toBe("peer_review"); // 리뷰 없이 gd_report 금지
   });
 
   test("정체 아닌(최근) 제안은 sweeper가 건드리지 않는다", async () => {
@@ -244,14 +256,175 @@ describe("자동화 — 교차검토 결함 회귀 방어", () => {
     expect(statusOf(db, id)).toBe("draft"); // 가로채기 실패
   });
 
-  test("P1: sweeper degraded는 risk_level=high 제안을 자동 진행하지 않는다", () => {
+  test("P1: sweeper는 risk와 무관하게 리뷰 없는 제안을 자동 진행하지 않는다", () => {
     const { db } = setup();
     const id = createProposal(db, { ...VALID_NEW, risk_level: "high" }).id!;
     advanceProposalIfCurrent(db, { proposalId: id, expectedFrom: "draft", to: "peer_review", actionKey: "k", kind: "t" });
     ageProposal(db, id, 40);
     sweepStaleProposals(db, ambientAgents()); // 1차 재배정
-    const r2 = sweepStaleProposals(db, ambientAgents()); // 2차: high-risk → skip
+    ageProposal(db, id, 40);
+    const r2 = sweepStaleProposals(db, ambientAgents());
     expect(r2.degraded).not.toContain(id);
+    expect(r2.blocked).toContain(id);
     expect(statusOf(db, id)).toBe("peer_review"); // 사람 리뷰 대기(무검토 승격 안 함)
+  });
+});
+
+describe("후보를 다 돌아도 리뷰가 없을 때", () => {
+  // 막아두는 것과 멈춰두는 것은 다르다. blocked 로 남기면 팀장 보고로는 안 가지만,
+  // 카드 소유자가 무응답한 리뷰어 그대로면 다음 행동을 할 사람이 없다.
+  const ageProposal = (db: Database, id: string, minutes: number) =>
+    db.prepare("UPDATE proposal SET updated_at = datetime('now', ?) WHERE id = ?").run(`-${minutes} minutes`, id);
+
+  const agentsWithCoordinator = (coord: string): AgentRecord[] =>
+    ["bill", "codex", "steve", "demis", "devon"].map((id) => ({
+      id,
+      display_name: id,
+      role: "role",
+      runtime: "claude_channel",
+      status_provider: "claude_tmux",
+      tmux_session: null,
+      telegram_bot_username: null,
+      workspace_path: "/tmp",
+      persona_file: "P.md",
+      capabilities: id === coord ? ["coordinator"] : [],
+    })) as unknown as AgentRecord[];
+
+  // 조율자만 바꿔 같은 시나리오를 돌린다. 배정은 결정적이라, 재배정이 없으면
+  // 두 번 모두 같은 사람이 남는다 — 조율자를 따라가면 재배정이 실제로 일어난 것이다.
+  async function ownerAfterBlocked(coord: string) {
+    const { app, db } = setup();
+    const agents = agentsWithCoordinator(coord);
+    const { id } = (await (await create(app)).json()) as { id: string };
+    expect(statusOf(db, id)).toBe("peer_review");
+
+    let blocked = false;
+    for (let i = 0; i < 12 && !blocked; i += 1) {
+      ageProposal(db, id, 40);
+      blocked = sweepStaleProposals(db, agents).blocked.includes(id);
+    }
+    expect(blocked).toBe(true);
+
+    // 리뷰 0건인 채로 팀장 보고 단계로 가지 않는다
+    expect(statusOf(db, id)).toBe("peer_review");
+    expect(
+      (db.prepare("SELECT COUNT(*) AS n FROM proposal_review WHERE proposal_id = ?").get(id) as { n: number }).n,
+    ).toBe(0);
+
+    return db
+      .prepare(
+        `SELECT t.owner AS owner, t.description AS description
+           FROM proposal_followup_task pft JOIN task t ON t.id = pft.task_id
+          WHERE pft.proposal_id = ? AND pft.closed_at IS NULL`,
+      )
+      .get(id) as { owner: string; description: string } | undefined;
+  }
+
+  test("카드가 coordinator 에게 넘어가고 다음 행동이 적힌다", async () => {
+    const a = await ownerAfterBlocked("demis");
+    const b = await ownerAfterBlocked("bill");
+    expect(a?.owner).toBe("demis");
+    expect(b?.owner).toBe("bill");
+    expect(a?.description).toContain("다음 행동");
+  });
+
+  test("카드가 없어진 채로 넘기면 기록을 남긴다", async () => {
+    const { app, db } = setup();
+    const agents = agentsWithCoordinator("demis");
+    const { id } = (await (await create(app)).json()) as { id: string };
+
+    // 1차 재배정까지 진행시킨 뒤, 카드(task)만 지운다 — 장부(followup)는 열려 있다.
+    let reassigned = false;
+    for (let i = 0; i < 12 && !reassigned; i += 1) {
+      ageProposal(db, id, 40);
+      reassigned = sweepStaleProposals(db, agents).reassigned.includes(id);
+    }
+    expect(reassigned).toBe(true);
+    db.prepare(
+      `DELETE FROM task WHERE id IN (
+         SELECT task_id FROM proposal_followup_task WHERE proposal_id = ? AND closed_at IS NULL)`,
+    ).run(id);
+
+    let blocked = false;
+    for (let i = 0; i < 12 && !blocked; i += 1) {
+      ageProposal(db, id, 40);
+      blocked = sweepStaleProposals(db, agents).blocked.includes(id);
+    }
+    expect(blocked).toBe(true);
+
+    // 장부는 조율자로 바뀌는데 보드에는 아무것도 안 보인다. 남아야 설명이 된다.
+    const audit = db
+      .prepare("SELECT COUNT(*) AS n FROM audit_event WHERE action = ? AND target = ?")
+      .get("sweeper_blocked_card_missing", id) as { n: number };
+    expect(audit.n).toBe(1);
+  });
+
+  test("조율자도 제안자도 없으면, 방금 무응답한 그 사람에게 되돌리지 않는다", () => {
+    const { db } = setup();
+    // agents.json 과 team.db 가 어긋난 상태 — 등록부에는 있는데 DB 에는 없다.
+    const agents = agentsWithCoordinator("__none__"); // coordinator 없음 → coordinatorId 는 첫 에이전트로 폴백
+    db.prepare("DELETE FROM agent WHERE id IN ('bill','codex')").run(); // 그 첫 에이전트도, 제안자도 DB 에 없다
+
+    const tail = otherReviewers(db, "codex", agents);
+    expect(tail.length).toBeGreaterThan(1); // 제외해도 남는 후보가 있어야 이 검사가 뜻이 있다
+
+    // 꼬리가 그대로 첫 후보를 주면 방금 무응답한 그 사람이 다시 담당이 된다.
+    expect(coordinatorOwner(db, agents, "codex", tail[0])).not.toBe(tail[0]);
+    expect(coordinatorOwner(db, agents, "codex", tail[0])).toBe(tail[1]!);
+  });
+
+  test("넘길 사람이 없으면 카드에 명부가 어긋났다고 적는다", async () => {
+    const { app, db } = setup();
+    const agents = agentsWithCoordinator("__none__");
+    const { id } = (await (await create(app)).json()) as { id: string };
+
+    let reassigned = false;
+    for (let i = 0; i < 12 && !reassigned; i += 1) {
+      ageProposal(db, id, 40);
+      reassigned = sweepStaleProposals(db, agents).reassigned.includes(id);
+    }
+    expect(reassigned).toBe(true);
+
+    // 명부에는 있는데 DB 에는 없다 — 현재 담당 한 명만 남기고 제안자까지 지운다.
+    const owner = (db
+      .prepare(
+        `SELECT owner FROM proposal_followup_task
+          WHERE proposal_id = ? AND status LIKE 'peer_review:%' AND closed_at IS NULL
+          ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(id) as { owner: string }).owner;
+    db.prepare("DELETE FROM agent WHERE id != ?").run(owner);
+
+    let blocked = false;
+    for (let i = 0; i < 12 && !blocked; i += 1) {
+      ageProposal(db, id, 40);
+      blocked = sweepStaleProposals(db, agents).blocked.includes(id);
+    }
+    expect(blocked).toBe(true);
+
+    const card = db
+      .prepare(
+        `SELECT t.owner AS owner, t.description AS description FROM proposal_followup_task pft
+           JOIN task t ON t.id = pft.task_id
+          WHERE pft.proposal_id = ? AND pft.closed_at IS NULL`,
+      )
+      .get(id) as { owner: string; description: string };
+    expect(card.owner).toBe(owner); // 존재하지 않는 사람으로 바뀌지 않는다
+    expect(card.description).toContain("담당 없음");
+    expect(card.description).not.toContain("다음 행동");
+  });
+
+  test("남은 후보가 그 사람뿐이면, DB 에 없는 제안자를 담당으로 넣지 않는다", () => {
+    const { db } = setup();
+    const agents = agentsWithCoordinator("__none__");
+    db.prepare("DELETE FROM agent WHERE id IN ('bill','codex')").run();
+    // 후보를 한 명만 남긴다 — 그 한 명이 방금 무응답한 사람이다.
+    const only = otherReviewers(db, "codex", agents)[0]!;
+    db.prepare("DELETE FROM agent WHERE id NOT IN (?)").run(only);
+    expect(otherReviewers(db, "codex", agents)).toEqual([only]);
+
+    // 무응답이어도 실재하는 사람이, 존재하지 않는 사람보다 낫다.
+    expect(coordinatorOwner(db, agents, "codex", only)).toBe(only);
+    expect(coordinatorOwner(db, agents, "codex", only)).not.toBe("codex");
   });
 });
