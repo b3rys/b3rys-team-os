@@ -80,7 +80,60 @@ export function approvalOperationHash(req: ApprovalRequest): string {
   if (itemId) basis.item_id = itemId;
   const grantRoot = grantRootOf(p);
   if (grantRoot) basis.grant_root = grantRoot;
+  // ★S4 — 내용까지 담는다.★ 여기까지의 basis 는 파일 ★이름★ 만 담아서, 같은 파일을 고치는 두 요청이
+  //   ★내용이 전혀 달라도 같은 지문★ 이었다(알려진 갭 #2 — 테스트로 못박아 뒀던 것).
+  //   상관키가 ★결정↔요청을 1:1로 맞추는 것★ 이 이 지문의 일인데, 이름만 보면
+  //   ★다른 작업의 승인이 이 슬롯에 배달되는 것★ 을 못 막는다.
+  //   ★있을 때만 넣는다★ — 무조건 키를 추가하면 null 로라도 직렬화에 끼어들어 ★구세대 지문 값이 바뀐다★
+  //   (진행 중 승인의 상관키가 어긋난다). S2 에서 item_id·grant_root 에 쓴 것과 같은 규칙이다.
+  const contentDigest = approvalContentDigest(req);
+  if (contentDigest) basis.content = contentDigest;
   return createHash("sha256").update(JSON.stringify(basis)).digest("hex").slice(0, 16);
+}
+
+/** 승인 요청이 실제로 바꾸려는 ★내용★ 의 지문. 내용을 모르면 null(그러면 basis 에 키가 안 붙는다).
+ *
+ *  ■ 어디서 내용을 얻나 — 세대마다 다르다(둘 다 실측)
+ *    구세대 `fileChanges` : `{type:"update", unified_diff}` · `{type:"add"|"delete", content}` (+`move_path`)
+ *    신세대               : payload 에 내용이 ★없다.★ 알림으로 먼저 온 것을 색인한 `observedItem` 에 있다.
+ *
+ *  ■ ★전문이 아니라 해시만 담는다★ — 지문은 "같은가 다른가" 만 답하면 되고,
+ *    전문을 basis 에 넣으면 큰 diff 마다 직렬화가 커진다.
+ *
+ *  ■ ★종류·이동 목적지도 함께 담는다★ — 같은 내용을 add 하는 것과 update 하는 것은 다른 작업이고,
+ *    옮기는 목적지가 다른 것도 다른 작업이다(S2·S3 에서 열쇠에 대해 배운 것과 같은 이유).
+ */
+function approvalContentDigest(req: ApprovalRequest): string | null {
+  const p = req.params as Record<string, any>;
+  const rows: Array<[string, string, string | null, string]> = [];
+
+  // 신세대 — 관측해 둔 변경(내용 포함)
+  for (const c of req.observedItem?.changes ?? []) {
+    rows.push([c.path, c.kind, c.movePath, c.diff]);
+  }
+  // 구세대 — payload 안에 내용이 있다
+  const fc = p?.fileChanges;
+  if (fc && typeof fc === "object" && !Array.isArray(fc)) {
+    for (const [path, raw] of Object.entries(fc)) {
+      const ch = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+      const kind = typeof ch.type === "string" && ch.type ? ch.type : "change";
+      const mv = typeof ch.move_path === "string" && ch.move_path.trim() ? ch.move_path : null;
+      // ★종류에 맞는 필드만 본다★ — 짝이 어긋난 payload 에서 엉뚱한 값을 지문에 넣지 않기 위해서다
+      //   (S3 에서 표시 쪽에 같은 정정을 했다: 재료를 고르는 기준과 쓰는 기준이 달라 규모를 지어냈다).
+      const body =
+        kind === "update"
+          ? typeof ch.unified_diff === "string" ? ch.unified_diff : ""
+          : kind === "add" || kind === "delete"
+            ? typeof ch.content === "string" ? ch.content : ""
+            : typeof ch.unified_diff === "string" ? ch.unified_diff : typeof ch.content === "string" ? ch.content : "";
+      rows.push([path, kind, mv, body]);
+    }
+  }
+  // ★내용을 하나도 못 얻었으면 null★ — 이름만 아는 상태에서 빈 문자열을 해시하면
+  //   "내용을 안다" 는 거짓 신호가 되고, 구세대 골든 지문도 바뀐다.
+  if (!rows.some((r) => r[3].length > 0)) return null;
+  rows.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  return createHash("sha256").update(JSON.stringify(rows)).digest("hex").slice(0, 16);
 }
 
 const POPUP_TTL_MS = Number(process.env.B3OS_CODEX_APPSERVER_POPUP_TTL_MS ?? 60 * 60 * 1000); // 1h (GD: 무응답→hold)

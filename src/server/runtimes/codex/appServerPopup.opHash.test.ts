@@ -56,16 +56,56 @@ describe("알려진 갭 (후속 작업에서 닫히면 이 테스트가 실패�
     expect(scopeKeyForOperation(safe)).toBe(scopeKeyForOperation(evil));
   });
 
-  test("갭2: 파일 이름이 같으면 ★내용이 달라도★ 지문이 같다", () => {
-    // basis의 files가 Object.keys()라 이름만 담는다 → 승인과 실행 사이 내용 변경을 구분하지 못한다.
-    const before: ApprovalRequest = {
+});
+
+/**
+ * ★갭2 는 닫혔다 (S4, 2026-07-31).★ 지문 basis 에 ★내용 해시★ 를 넣었다.
+ *
+ * ■ ★옛 테스트가 틀린 모양을 쓰고 있었다★ — 이걸 먼저 적는다
+ * 예전 갭2 테스트는 `fileChanges: { "a.ts": { diff: "..." } }` 로 갭을 보였다.
+ * 그런데 ★벤더 스키마에 `diff` 라는 필드는 없다★ (0.144.6 실측:
+ * AddFileChange{content} · DeleteFileChange{content} · UpdateFileChange{unified_diff, move_path}).
+ * 즉 ★실제로는 올 수 없는 입력으로 갭을 증명하고 있었다.★ 그래서 S4 를 구현한 뒤에도
+ * 그 테스트는 ★초록 그대로였다★ — "갭이 닫히면 빨강이 된다" 는 완료 신호가 작동하지 않았다.
+ * ★모양을 지어내면 시험은 통과하고 실물에서 틀린다★ — 오늘 반복해서 만난 형태다.
+ * → 실제 모양으로 다시 쓰고, 이제 ★갭이 닫혔다는 단언★ 으로 뒤집는다.
+ */
+describe("갭2 닫힘 — 같은 파일이라도 내용이 다르면 지문이 다르다 (S4)", () => {
+  const oldGen = (fileChanges: unknown): ApprovalRequest => ({
+    method: "applyPatchApproval",
+    params: { fileChanges, callId: "c1" },
+  });
+
+  test("★구세대: 내용만 달라도 지문이 갈린다★ — 승인과 실행 사이 바꿔치기를 상관키가 구분한다", () => {
+    const before = oldGen({ "a.ts": { type: "update", unified_diff: "export const x = 1;" } });
+    const after = oldGen({ "a.ts": { type: "update", unified_diff: "process.exit(1);" } });
+    expect(approvalOperationHash(before)).not.toBe(approvalOperationHash(after));
+  });
+
+  test("★신세대: 관측한 내용이 다르면 지문이 갈린다★ (payload 에는 내용이 없다 — 색인해 둔 것을 쓴다)", () => {
+    const req = (diff: string): ApprovalRequest => ({
       method: "item/fileChange/requestApproval",
-      params: { fileChanges: { "a.ts": { diff: "export const x = 1;" } } },
-    };
-    const after: ApprovalRequest = {
-      method: "item/fileChange/requestApproval",
-      params: { fileChanges: { "a.ts": { diff: "process.exit(1);" } } },
-    };
-    expect(approvalOperationHash(before)).toBe(approvalOperationHash(after));
+      params: { itemId: "i1", turnId: "t1" },
+      observedItem: { itemId: "i1", turnId: "t1", threadId: "th", changes: [{ path: "a.ts", kind: "update", movePath: null, diff }] },
+    });
+    expect(approvalOperationHash(req("@@ -1 +1 @@\n-a\n+b\n")))
+      .not.toBe(approvalOperationHash(req("@@ -1 +1 @@\n-a\n+DANGER\n")));
+  });
+
+  test("같은 내용이면 같은 지문이다 — 갈라지기만 하면 되는 게 아니다", () => {
+    const one = oldGen({ "a.ts": { type: "add", content: "hello\n" } });
+    const two = oldGen({ "a.ts": { type: "add", content: "hello\n" } });
+    expect(approvalOperationHash(one)).toBe(approvalOperationHash(two));
+  });
+
+  test("★종류가 다르면 다른 작업이다★ — 같은 내용을 add 하는 것과 update 하는 것은 같지 않다", () => {
+    const added = oldGen({ "a.ts": { type: "add", content: "x\n" } });
+    const updated = oldGen({ "a.ts": { type: "update", unified_diff: "x\n" } });
+    expect(approvalOperationHash(added)).not.toBe(approvalOperationHash(updated));
+  });
+
+  test("★내용을 모르면 지문을 바꾸지 않는다★ — 구세대 golden 이 그대로여야 한다", () => {
+    // 내용 없는 payload 에 빈 문자열을 해시하면 "내용을 안다" 는 거짓 신호가 되고 골든도 깨진다.
+    expect(approvalOperationHash(oldGen({ "b.ts": {}, "a.ts": {} }))).toBe("c7fa63459c642993");
   });
 });
