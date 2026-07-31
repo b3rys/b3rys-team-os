@@ -1031,6 +1031,21 @@ describe("proposals — GD 심플 모델 (팀 크기별 라우팅)", () => {
     expect(statusOf(db, id)).toBe("accepted");
   });
 
+  test("다인 팀의 다른 팀원이 모두 blocked면 무검토 gd_report 대신 peer_review blocked 유지", async () => {
+    const { app, db } = setupTeam(["alice", "bob", "carol"], { coordinator: "bob" });
+    db.prepare("INSERT INTO agent_status (agent_id, state) VALUES (?, 'blocked')").run("bob");
+    db.prepare("INSERT INTO agent_status (agent_id, state) VALUES (?, 'blocked')").run("carol");
+
+    const id = await createBy(app, "alice");
+    expect(statusOf(db, id)).toBe("peer_review");
+    expect((await transition(app, id, "gd_report", "alice")).status).toBe(409);
+    const task = db.prepare(
+      "SELECT description FROM task WHERE id IN (SELECT task_id FROM proposal_followup_task WHERE proposal_id = ?)",
+    ).get(id) as { description: string };
+    expect(task.description).toContain("blocked:");
+    expect(task.description).toContain("무검토 gd_report 직행 금지");
+  });
+
   test("LEAD_ACTOR_ID 설정은 리뷰 후보 계산에 관여하지 않는다", async () => {
     process.env.LEAD_ACTOR_ID = "lead";
     const { app, db } = setupTeam(["lead", "alice", "bob"], { coordinator: "bob" });

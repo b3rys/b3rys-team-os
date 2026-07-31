@@ -114,9 +114,16 @@ function eligiblePeerReviewerCapacity(db: Database, proposer: string): number {
   return rows.filter((r) => !skip.has(r.id)).length;
 }
 
-// GD 심플 모델: 팀장 보고 전 review는 필수. 단, 제안자 제외 리뷰 후보가 0명이면 gd_report 직행.
+// blocked 상태를 포함한 실제 공식 팀원 수. 실제 1인 팀인지 판정할 때만 사용한다.
+function actualPeerReviewerCapacity(db: Database, proposer: string): number {
+  const skip = reviewSkipIds();
+  const rows = db.prepare("SELECT id FROM agent WHERE id != ?").all(proposer) as { id: string }[];
+  return rows.filter((r) => !skip.has(r.id)).length;
+}
+
+// GD 심플 모델: 팀장 보고 전 review는 필수. 단, 실제 공식 팀원이 제안자 1명뿐이면 gd_report 직행.
 function requiredPeerReviewCount(db: Database, proposer: string): number {
-  return eligiblePeerReviewerCapacity(db, proposer) >= 1 ? 1 : 0;
+  return actualPeerReviewerCapacity(db, proposer) >= 1 ? 1 : 0;
 }
 
 // GD 모델: pm_review 는 2+ 팀(제안자 제외 후보 1명+)에서 1건 필요.
@@ -251,6 +258,9 @@ export function transitionProposal(
     // 사람: proposer 본인만(가로채기 방지). 자동화: SYSTEM_ACTOR 허용(생성=즉시 진입/sweeper 대리 제출).
     if (actor !== row.proposer_agent && actor !== SYSTEM_ACTOR) {
       return { ok: false, error: `draft → ${toStatus} 제출은 proposer_agent 또는 system만 가능(현재 actor=${actor}, proposer=${row.proposer_agent})` };
+    }
+    if (toStatus === "gd_report" && actualPeerReviewerCapacity(db, row.proposer_agent) > 0) {
+      return { ok: false, error: "draft → gd_report 직행은 실제 1인 팀에서만 가능" };
     }
   }
   // revise_requested→draft는 proposer-only이되, proposer 무응답/rate-limited 시 coordinator가
