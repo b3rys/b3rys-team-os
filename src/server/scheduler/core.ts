@@ -65,21 +65,44 @@ export const WEEKLY_SHARED_CURATION_JOB_ID = "sched_weekly_shared_curation";
 export const WEEKLY_SELF_LEARNING_JOB_ID = "sched_weekly_self_learning_session";
 export const WEEKLY_SHARED_CURATION_CRON = "0 4 * * 5";
 export const WEEKLY_SELF_LEARNING_CRON = "0 5 * * 5";
+// 보고 경로 — 두 루프가 같은 문구를 쓴다.
+//
+// 예전에는 "send.sh --direct-to-gd" 한 줄이었는데 ★그대로 하면 실패한다★(2026-07-31 실측).
+// --direct-to-gd 는 --to <요청자> 를 함께 요구하는데, 이 알림의 발신자는 `system` 이고
+// 서버는 system 을 수신자로 받지 않는다(`not_a_recipient`). 즉 시킨 대로 하면 400 이 난다.
+// 게다가 claude 계열 런타임은 팀장 1:1 이 텔레그램이라 send.sh 자체가 그 자리에 맞지 않는다.
+const WORKLOOP_REPORT_LINE = [
+  "★완료 후 GD 에게 직접 보고하세요.★ 보고 경로는 런타임마다 다릅니다 —",
+  "  claude 계열은 자기 텔레그램 1:1 reply 도구, 그 외는 send.sh --to <요청자> --direct-to-gd.",
+  "  (이 알림은 발신자가 system 이라 send.sh --to system 은 서버가 거부합니다.",
+  "   1:1 로 보고했으면 마감 알림은 무시하세요 — 서버는 1:1 DM 을 보지 못합니다.)",
+].join("\n");
+
 export const WEEKLY_SHARED_CURATION_BODY = [
   "[workloop: SHARED.md 미팅 · 금 04:00 KST]",
   "b3os-task-loop의 scheduled workloop 계약으로 이번 세션을 오픈→수집·정리→보고→닫기까지 한 턴에 수행하세요.",
-  "목적: 지난 1주 팀원들이 실제 작업에서 겪은 것 중 '팀 지식'으로 남길 만한 것을 중앙 rules/SHARED.md 에 올립니다(수집·정리). 팀원 주중 메모/교훈 취합해 수록 + 완료·확정 항목 정돈·중복 정리.",
+  "목적: 지난 1주 팀원들이 실제 작업에서 겪은 것 중 '팀 지식'으로 남길 만한 것을 rules/SHARED.md 에 기록합니다(수집·정리). 팀원 주중 메모/교훈 취합해 수록 + 완료·확정 항목 정돈·중복 정리.",
+  // "중앙 … 에 올립니다" 였는데 수집 담당과 팀원이 각각 그걸 "PR 로 올린다" 로 읽었다(2026-07-31).
+  // rules/SHARED.md 는 .gitignore 대상이라 애초에 커밋되지 않는다 → 방법을 문장에 박는다.
+  "★기록 방법: rules/SHARED.md 를 직접 편집합니다. 커밋도 PR 도 하지 마세요★ — 이 파일은 .gitignore 대상(팀 전용 로컬 파일)이라 공개 저장소에 올라가지 않습니다. 공개 템플릿은 rules/SHARED.template.md 입니다.",
   "이 세션은 proposal 등록 세션이 아닙니다. 억지로 만들지 마세요 — 없거나 팀 레벨 교훈이 아니면 스킵, SHARED 에 꾸며 넣지 마세요.",
   "정책·보안·라우팅·외부전송 규칙은 자동 변경 금지.",
-  "★완료 후 GD에게 직접 정리 보고: send.sh --direct-to-gd. 내용 = SHARED.md 에 올린 항목 건수·주요 내용. 없으면 '이번 주 없음' 한 줄.",
+  WORKLOOP_REPORT_LINE,
+  "내용 = SHARED.md 에 올린 항목 건수·주요 내용. 없으면 '이번 주 없음' 한 줄.",
 ].join("\n");
 export const WEEKLY_SELF_LEARNING_BODY = [
   "[workloop: self-learning 세션 · 금 05:00 KST]",
   "b3os-task-loop의 scheduled workloop 계약으로 이번 세션을 오픈→검토→proposal 등록→보고→닫기까지 한 턴에 수행하세요.",
   "목적: SHARED.md(04:00에 정리된 것 포함)와 지난 1주 팀 활동을 검토해, 팀에 필요한 (a)팀 룰 변경 (b)새로운 과제 (c)고쳐야 할 이슈를 뽑아 ★proposal 시스템에 등록★하세요.",
-  "등록 방법: POST /api/proposals — 각 proposal 에 근거(왜)+예상효과 필수. 등록하면 GD 리뷰 게이트로 올라갑니다(자동 적용 아님).",
+  // 라우터가 /api 아래 마운트되고 그 전체가 /team 아래 붙는다 → 실제 경로는 /team/api/proposals.
+  // "POST /api/proposals" 로 적혀 있어서 시킨 대로 하면 404 가 난다(2026-07-31 실측).
+  "★등록 방법: POST /team/api/proposals★ (/api/proposals 는 404 입니다). 각 proposal 에 근거(왜)+예상효과 필수. 등록하면 리뷰 게이트로 올라갑니다(자동 적용 아님).",
+  "★올리기 전에 이 세 가지를 스스로 통과시키세요. 하나라도 아니면 등록하지 마세요:★",
+  "  1. 정말 팀에 필요한 것인가   2. 팀 전체의 이슈인가   3. 팀원 개인 레벨의 러닝이 아닌가",
+  "  규칙으로 써봤을 때 \"잘 확인해라\" 류가 되면 등록하지 마세요 — 그런 규칙은 지켜지지 않습니다. 도구·절차를 고치는 쪽이 실효가 있습니다.",
   "억지로 만들지 마세요 — 진짜 팀에 필요한 것만. 없으면 등록하지 말고 '이번 주 없음'. 정책·보안·라우팅·외부전송 규칙 변경도 proposal 로만(자동 적용 금지).",
-  "★완료 후 GD에게 직접 정리 보고: send.sh --direct-to-gd. 내용 = 등록한 proposal 목록(각 제목·유형[룰/과제/이슈]·근거 한 줄·proposal ID). 없으면 '이번 주 없음' 한 줄.",
+  WORKLOOP_REPORT_LINE,
+  "내용 = 등록한 proposal 목록(각 제목·유형[룰/과제/이슈]·근거 한 줄·proposal ID). 없으면 '이번 주 없음' 한 줄.",
 ].join("\n");
 
 export const DAILY_TASK_REVIEW_PING_JOB_ID = "sched_task_review_ping";

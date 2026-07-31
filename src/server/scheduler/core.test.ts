@@ -81,14 +81,29 @@ describe("b3os scheduler core", () => {
       fallbackCapability: "coordinator",
       threadId: "weekly-shared-curation",
     });
-    expect(JSON.parse(first[0]!.payload_json).body).toContain("proposal 등록 세션이 아닙니다");
+    const curationBody = JSON.parse(first[0]!.payload_json).body as string;
+    expect(curationBody).toContain("proposal 등록 세션이 아닙니다");
+    // rules/SHARED.md 는 gitignore 대상이라 커밋할 수 없다. 예전 문구("중앙 … 에 올립니다")를
+    // 두 사람이 각각 "PR 로 올린다" 로 읽어 막혔다 → 방법을 문장에 박았는지 고정한다.
+    expect(curationBody).toContain("커밋도 PR 도 하지 마세요");
+
     expect(JSON.parse(first[1]!.payload_json)).toMatchObject({
       type: "capability_workloop",
       capability: "coordinator",
       fallbackCapability: "learning_loop_pm",
       threadId: "weekly-self-learning",
     });
-    expect(JSON.parse(first[1]!.payload_json).body).toContain("POST /api/proposals");
+    const learningBody = JSON.parse(first[1]!.payload_json).body as string;
+    // 라우터는 /team 아래에 붙는다. "POST /api/proposals" 로 시키면 404 가 난다.
+    expect(learningBody).toContain("POST /team/api/proposals");
+    expect(learningBody).not.toMatch(/등록 방법: POST \/api\/proposals/);
+
+    // 두 루프 다 보고 경로가 런타임별로 갈린다는 것을 말해야 한다. 예전처럼
+    // "send.sh --direct-to-gd" 만 적으면 발신자가 system 이라 서버가 거부한다.
+    for (const body of [curationBody, learningBody]) {
+      expect(body).toContain("보고 경로는 런타임마다 다릅니다");
+      expect(body).not.toMatch(/정리 보고: send\.sh --direct-to-gd\./);
+    }
   });
 
   test("weekly learning reconciles config drift on existing jobs", () => {
