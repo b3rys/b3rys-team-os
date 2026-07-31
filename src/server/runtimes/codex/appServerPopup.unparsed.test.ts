@@ -113,7 +113,8 @@ describe("S0 — 해석 실패 payload 의 권한 열쇠", () => {
     const oldGen: ApprovalRequest = { method: "execCommandApproval", params: { command: ["rm", "-rf", "/tmp/x"], cwd: "/tmp" } };
     const op = buildOperationFromApproval(oldGen, "dex");
     expect(op.action).toBe("shell");
-    expect(op.command).toBe("rm -rf /tmp/x");
-    expect(targetForOperation(op)).toBe("rm -rf /tmp/x");
+    // ★S5: 본문은 그대로, 앞에 전체 지문.★ 해석 실패 경로(S0 지문 열쇠)로 새지 않는 것이 이 가드의 요지다.
+    expect(op.command).toMatch(/^#[0-9a-f]{64} rm -rf \/tmp\/x$/);
+    expect(targetForOperation(op)).toContain("rm -rf /tmp/x");
   });
 });

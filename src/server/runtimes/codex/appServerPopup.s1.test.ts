@@ -25,15 +25,40 @@ describe("S1 — 신세대 명령 승인 해석", () => {
     const nw = buildOperationFromApproval(newGen("rm -rf /tmp/x"), "dex");
     const od = buildOperationFromApproval(oldGen(["rm", "-rf", "/tmp/x"]), "dex");
     expect(nw.action).toBe("shell");
-    expect(nw.command).toBe("rm -rf /tmp/x");
-    // 같은 명령이면 세대가 달라도 같은 작업으로 본다 — 사람이 보기에 같은 일이기 때문.
-    expect(nw.command).toBe(od.command);
+    // ★S5 이후: 사람이 읽는 본문은 그대로고, 앞에 전체 지문이 붙는다.★ (240자 절단선 안에 열쇠를 남기려고)
+    expect(nw.command).toMatch(/^#[0-9a-f]{64} rm -rf \/tmp\/x$/);
+    expect(od.command).toMatch(/^#[0-9a-f]{64} rm -rf \/tmp\/x$/);
+  });
+
+  test("★S5 에서 뒤집힌 결정★: 세대가 다르면 이제 따로 묻는다 — 합칠 수가 없다", () => {
+    // S5 이전 계약은 '같은 명령이면 세대가 달라도 같은 작업' 이었다. 그것을 의도적으로 바꿨다.
+    //
+    // ★고칠 수 있는데 안 합친 게 아니라, 합칠 방법이 없다.★
+    // 구세대는 argv 배열(['a b','c'])이고 신세대는 문자열("a b c")이다. 배열을 문자열로 이으면
+    // ★['a b','c'] 와 ['a','b c'] 가 같은 문자열이 되어 실제로 다른 실행이 한 허용으로 묶인다★ (실측된 구멍).
+    // 그래서 지문 재료로 구조를 보존해야 하는데, ★문자열에서 argv 경계는 복원할 수 없다.★
+    // → 두 세대는 원리적으로 같은 열쇠를 가질 수 없다.
+    //
+    // 사용자에게 보이는 영향: codex CLI 세대가 바뀌면 저장된 '항상 허용' 을 ★한 번 다시 묻는다.★
+    // 방향이 안전하다(몰래 통과가 아니라 다시 묻기)이므로 이 손해를 받아들인다.
+    const nw = buildOperationFromApproval(newGen("rm -rf /tmp/x"), "dex");
+    const od = buildOperationFromApproval(oldGen(["rm", "-rf", "/tmp/x"]), "dex");
+    expect(scopeKeyForOperation(nw)).not.toBe(scopeKeyForOperation(od));
+  });
+
+  test("★구세대 argv 경계가 열쇠를 가른다★ — 이어붙인 문자열로 합치지 않는다", () => {
+    // ['a b','c'] 는 인자가 'a b' 하나, ['a','b c'] 는 실행 파일이 'a' — ★실제로 다른 실행이다.★
+    // 이어붙이면 둘 다 "a b c" 가 되어 하나를 허용하면 나머지가 팝업 없이 통과했다(아메스 실측).
+    const x = buildOperationFromApproval(oldGen(["a b", "c"]), "dex");
+    const y = buildOperationFromApproval(oldGen(["a", "b c"]), "dex");
+    expect(scopeKeyForOperation(x)).not.toBe(scopeKeyForOperation(y));
   });
 
   test("★사람이 읽을 수 있는 target 이 된다★ — 지문이 아니라 명령", () => {
     const op = buildOperationFromApproval(newGen("git status"), "dex");
-    expect(targetForOperation(op)).toBe("git status");
-    expect(targetForOperation(op)).not.toMatch(/#[0-9a-f]{16}/); // S0 지문 형식이 아니다
+    // ★명령 본문이 사람 눈에 남는다★ — 지문만 보이는 S0 형식이 아니다. (지문은 앞에 붙는다)
+    expect(targetForOperation(op)).toContain("git status");
+    expect(targetForOperation(op)).toMatch(/^#[0-9a-f]{64} git status$/);
   });
 
   test("서로 다른 명령은 서로 다른 열쇠 · 같은 명령은 같은 열쇠", () => {
@@ -95,7 +120,7 @@ describe("S1 — 신세대 명령 승인 해석", () => {
   test("구세대 배열 경로 불변 — 회귀 가드", () => {
     const op = buildOperationFromApproval(oldGen(["echo", "hi"]), "dex");
     expect(op.action).toBe("shell");
-    expect(op.command).toBe("echo hi");
+    expect(op.command).toMatch(/^#[0-9a-f]{64} echo hi$/);
   });
 
   test("구세대 파일 변경 경로 불변 — 회귀 가드", () => {

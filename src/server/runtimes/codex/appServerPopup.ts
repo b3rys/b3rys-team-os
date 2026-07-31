@@ -161,7 +161,7 @@ const POLL_INTERVAL_MS = Number(process.env.B3OS_CODEX_APPSERVER_POLL_MS ?? 1500
 type CommandParse =
   | { kind: "not_command" }          // 명령 승인 method 가 아니다 — 다음 분기로 넘긴다
   | { kind: "invalid" }              // 명령 승인 method 인데 command 를 못 읽었다 — ★즉시 해석 실패로★
-  | { kind: "ok"; command: string };
+  | { kind: "ok"; command: string; material: string };
 
 /** 명령 승인 요청을 파싱한다. ★'명령 method 가 아님' 과 '명령 method 인데 못 읽음' 을 구분한다.★
  *
@@ -181,15 +181,56 @@ function parseCommandApproval(req: ApprovalRequest): CommandParse {
     return { kind: "not_command" };
   }
   const raw = (req.params as Record<string, unknown>)?.command;
+  //  ★command 는 사람이 보는 줄, material 은 열쇠를 가르는 재료 — 둘을 분리한다.★
+  //  분리하는 이유: 사람 눈 문자열로 합치면 ★실제로 다른 작업이 같은 문자열이 된다.★ (아메스 실측)
+  //  · 구세대 ['a b','c'] 와 ['a','b c'] → join(" ") 후 둘 다 "a b c" → 같은 열쇠 → 두 번째가 팝업 없이 통과.
+  //  → material 은 ★원본 구조(배열은 배열대로) + method(세대 표식)★ 를 JSON 으로 굳혀 쓴다.
+  //  구세대와 신세대를 method 로 가르는 것도 의도다 — 같아 보여도 경로가 다르면 ★따로 묻는다★(애매하면 ask).
   if (Array.isArray(raw)) {
-    const joined = raw.map((x) => String(x)).join(" ").trim();
-    return joined.length > 0 ? { kind: "ok", command: joined } : { kind: "invalid" };
+    const argv = raw.map((x) => String(x));
+    const joined = argv.join(" ").trim();
+    return joined.length > 0
+      ? { kind: "ok", command: joined, material: JSON.stringify([req.method, argv]) }
+      : { kind: "invalid" };
   }
   if (typeof raw === "string") {
     const trimmed = raw.trim();
-    return trimmed.length > 0 ? { kind: "ok", command: trimmed } : { kind: "invalid" };
+    return trimmed.length > 0
+      ? { kind: "ok", command: trimmed, material: JSON.stringify([req.method, trimmed]) }
+      : { kind: "invalid" };
   }
   return { kind: "invalid" };
+}
+
+/**
+ * ★S5 — 긴 명령 두 개가 한 열쇠로 묶이던 것을 닫는다.★
+ *
+ * ■ 무엇이 문제였나 (정본 테스트에 갭으로 박혀 있던 것)
+ * 권한 열쇠(scopeKeyForOperation)는 target 을 쓰고, target 은 ★앞 240자만★ 본다.
+ * 그래서 `y×240 + SAFE` 와 `y×240 + EVIL` 이 ★같은 열쇠★ 였다 —
+ * ★안전한 명령에 '항상 허용' 을 한 번 주면 위험한 명령이 팝업 없이 통과★ 한다.
+ *
+ * ■ 어떻게 닫나 — ★공용 코드를 건드리지 않는다★ (팀 리드: "사이드이펙트 없이 분리해서")
+ * 우리가 만드는 값(op.command) ★안에★ 전체 명령의 지문을 넣는다. 240자 절단선 안에 지문이 있으면
+ * 뒤가 잘려도 열쇠가 갈린다. permissionGate 는 그대로 둔다.
+ *
+ * ■ ★지문을 앞에 두는 이유 — 쓰기 경로(S3)와 다르다★
+ * S3 에서는 우리가 텍스트를 다 만들었으므로 예산을 떼고 지문을 ★뒤★ 에 뒀다(사람이 읽기 좋게).
+ * 여기서는 그럴 수 없다 — ★op.command 는 Tier-D 위험 스캔의 입력★ 이다(permissionGate.operationText).
+ * 명령을 240자에 맞춰 자르면 ★그 뒤에 있는 위험한 문자열이 스캔 대상에서 빠진다.★
+ * 즉 열쇠를 고치려다 ★검사 범위를 줄이는★ 더 큰 구멍을 만든다.
+ * → ★명령 전문은 그대로 두고 지문을 앞에 붙인다.★ 사람이 보는 줄은 `#지문 명령…` 이 된다.
+ */
+function withCommandDigest(material: string, command: string): string {
+  //  ★지문은 material(원본 구조 전문) 로 만든다 — 화면에 보이는 command 나 잘린 값으로 만들지 않는다.★
+  //  잘린 값으로 만들면 잘린 뒤가 달라도 지문이 같아진다(아메스 실측: 앞 2000자 동일 → 두 번째 'allow').
+  //
+  //  ★자르지 않은 64 hex 전문을 쓴다.★ 이건 표시용 체크섬이 아니라 ★팝업 우회를 막는 유일한 구분자★ 다.
+  //  12 hex(48비트)면 SAFE/EVIL 후보를 각 2^24개씩 만들어 충돌시키는 게 GPU 로 현실적이다(아메스).
+  //  전문을 써도 240자 target 안에 명령 본문이 ~174자 남는다 — 사람이 읽을 만큼은 보인다.
+  const digest = createHash("sha256").update(material).digest("hex");
+  // 공백 정규화 후 잘리므로(normalizeText → slice) ★지문 안에는 공백이 없어야 한다.★
+  return `#${digest} ${command}`;
 }
 
 /** M5.1 — codex 승인요청 → PermissionOperation(requestPermission 입력). */
@@ -218,11 +259,10 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
   //  모양으로 판정하면 다음 세대에서 또 조용히 미끄러진다(그게 이 버그의 원인이었다).
   //
   //  ★교환 관계를 명시한다★: 해석되면 열쇠가 '명령' 단위가 되어 '항상 허용' 이 의미를 갖는다(쓸 만해진다).
-  //  대신 그 열쇠는 permissionGate 에서 ★앞 240자만★ 쓰므로, 240자 prefix 가 같고 뒤가 다른 긴 명령은
-  //  같은 열쇠가 된다 — ★구세대가 원래 갖고 있던 노출이고, S5(공용 결합)에서 닫힌다.★ #106 참조.
+  //  ★S5 에서 240자 절단 노출을 닫았다★ — 아래 withCommandDigest 참조.
   const parsed = parseCommandApproval(req);
   if (parsed.kind === "ok") {
-    return { runtime: "codex", agent_id: agentId, action: "shell", command: parsed.command.slice(0, 2000), requested_by: agentId, provenance };
+    return { runtime: "codex", agent_id: agentId, action: "shell", command: withCommandDigest(parsed.material, parsed.command.slice(0, 2000)), requested_by: agentId, provenance };
   }
   // ★명령 승인이라고 밝혔는데 명령을 못 읽었다 → 여기서 멈춘다.★ 아래 fileChanges 분기로 흘려보내면
   //   혼합 payload 가 write 로 처리되어 fail-closed 계약이 깨진다(Codex 리뷰 2026-07-29).
