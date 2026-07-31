@@ -40,6 +40,12 @@ Two throughlines:
 ## Phase 4 — Test
 
 - **Build green ≠ behavior correct.** tsc/unit prove "does not crash," not "renders/behaves as intended." Behavior-verified = drive the real flow once with evidence (screenshot / DOM read / real config value / real-data log), using a **representative case** (check the one that has a value, not only the empty one). Three-stage done: `code-complete` ≠ `behavior-verified` ≠ `deployed`; UI/persona/config never merge without behavior-verified.
+- **Test green ≠ test effective — 변이를 걸었으면 3항을 지킨다.** 테스트가 진짜 잡는지 보려고 코드를 일부러 깨뜨릴 때:
+  1. **적용 확인** — 치환이 실제로 일어났는지 먼저 단정한다(대상 문자열이 없으면 즉시 실패시킨다). **안 걸린 통과와 약한 테스트는 출력이 똑같다** — assert 없이는 구별할 방법이 없다.
+  2. **격리 실행** — 공유 작업트리가 아니라 사본이나 별도 worktree 에서 돌린다.
+  3. **원복 확인** — 끝나고 `git status` / `git diff` 로 되돌아왔는지 **눈으로 본다.** ★`git checkout --` 은 HEAD 기준이라 같은 파일의 미커밋 작업까지 지운다★ — 사본을 떠두고 사본에서 복원한다.
+  - 적용됐는데도 테스트가 통과하면 **다음은 입력을 의심한다** — 변이는 걸렸는데 테스트 입력이 그 분기를 안 지나갔을 수 있다.
+  - *(실패 사례 2026-07-31: ①패턴 불일치로 변이가 안 걸렸는데 통과를 "테스트가 약하다"로 읽을 뻔했다 ②`git checkout --` 으로 그날 쓴 코드를 통째로 날렸다 ③반증 실험이 공유 트리 상수를 되돌리지 않아 빌드 산출물까지 오염됐다. 한 주에 세 명이 각각 밟았다.)*
 
 ---
 
