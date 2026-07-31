@@ -12,6 +12,7 @@ import type { Database } from "bun:sqlite";
 import { requestPermission, getPermissionRequest, type PermissionOperation } from "../../lib/permissionGate";
 import type { ApprovalRequest, ReviewDecision } from "./appServerClient";
 import { CodexApprovalCorrelationStore } from "./state";
+import { appendAudit } from "../../db/queries";
 
 /** ★Phase1 ③: 이 서버 프로세스 인스턴스 id — 재시작 감지용(옛 팝업을 새 프로세스가 새 turn에 재결합 금지).★ */
 export const PROCESS_INSTANCE = randomUUID();
@@ -161,7 +162,7 @@ const POLL_INTERVAL_MS = Number(process.env.B3OS_CODEX_APPSERVER_POLL_MS ?? 1500
 type CommandParse =
   | { kind: "not_command" }          // 명령 승인 method 가 아니다 — 다음 분기로 넘긴다
   | { kind: "invalid" }              // 명령 승인 method 인데 command 를 못 읽었다 — ★즉시 해석 실패로★
-  | { kind: "ok"; command: string };
+  | { kind: "ok"; command: string; material: string };
 
 /** 명령 승인 요청을 파싱한다. ★'명령 method 가 아님' 과 '명령 method 인데 못 읽음' 을 구분한다.★
  *
@@ -181,15 +182,92 @@ function parseCommandApproval(req: ApprovalRequest): CommandParse {
     return { kind: "not_command" };
   }
   const raw = (req.params as Record<string, unknown>)?.command;
+  //  ★command 는 사람이 보는 줄, material 은 열쇠를 가르는 재료 — 둘을 분리한다.★
+  //  분리하는 이유: 사람 눈 문자열로 합치면 ★실제로 다른 작업이 같은 문자열이 된다.★ (아메스 실측)
+  //  · 구세대 ['a b','c'] 와 ['a','b c'] → join(" ") 후 둘 다 "a b c" → 같은 열쇠 → 두 번째가 팝업 없이 통과.
+  //  → material 은 ★원본 구조(배열은 배열대로) + method(세대 표식)★ 를 JSON 으로 굳혀 쓴다.
+  //  구세대와 신세대를 method 로 가르는 것도 의도다 — 같아 보여도 경로가 다르면 ★따로 묻는다★(애매하면 ask).
   if (Array.isArray(raw)) {
-    const joined = raw.map((x) => String(x)).join(" ").trim();
-    return joined.length > 0 ? { kind: "ok", command: joined } : { kind: "invalid" };
+    //  ★문자열이 아닌 원소는 해석 성공으로 받지 않는다.★
+    //  String(x) 로 강제변환하면 ★서로 다른 payload 가 같은 재료가 된다★ (아메스가 DB 경로에서 재현):
+    //    [1] 승인 뒤 ["1"] → allow · [null] 과 ["null"] → allow · [{}] 는 "[object Object]" 가 된다.
+    //  이건 규격에 없는 payload 를 ★넓게 통과★ 시키는 자리다. 모르면 좁게 묻는다 —
+    //  invalid 로 보내면 해석 실패 경로(S0: payload 지문 + 매번 묻기)를 받는다.
+    const argv = raw.every((x) => typeof x === "string") ? (raw as string[]) : null;
+    if (argv === null) return { kind: "invalid" };
+    const joined = argv.join(" ").trim();
+    return joined.length > 0
+      ? { kind: "ok", command: joined, material: JSON.stringify([req.method, argv]) }
+      : { kind: "invalid" };
   }
   if (typeof raw === "string") {
     const trimmed = raw.trim();
-    return trimmed.length > 0 ? { kind: "ok", command: trimmed } : { kind: "invalid" };
+    return trimmed.length > 0
+      ? { kind: "ok", command: trimmed, material: JSON.stringify([req.method, trimmed]) }
+      : { kind: "invalid" };
   }
   return { kind: "invalid" };
+}
+
+/**
+ * ★이보다 긴 명령은 승인 흐름에 태우지 않는다 — 거절하고 따로 검토한다.★ (팀 리드 결정)
+ *
+ * 앞서 이 자리에 ★스캔 상한★ 을 뒀다가 없앴다. 자르면 잘린 뒤가 검사에서 빠지고,
+ * 그래서 "얼마나 잘라야 안전한가" 를 놓고 100k → 1M → 64k → 8k 로 헤맸다.
+ * ★자르지 않으면 그 문제가 통째로 사라진다★ — 받은 명령은 이미 우리 손에 있으니 전부 검사하면 된다.
+ *
+ * 대신 ★비정상적으로 긴 명령은 사람이 팝업으로 판단할 수 있는 대상이 아니다.★
+ * 실측: 실제로 온 승인요청 5건의 명령 길이는 전부 45자.
+ * 다만 ★설정 파일을 명령 안에 통째로 써 넣는 모양(heredoc)이 700자대★ 라, 1,000자는 여유가 1.4배뿐이었다.
+ * 그래서 팀 리드가 ★2,000자★ 로 정했다 — 정상 범위(~724자)의 약 3배.
+ * 팀 리드: *"그냥 없애고 천자가 넘으면 그냥 에러를 내서 따로 검토하게 만들어."*
+ *
+ * → 넘으면 ★팝업을 만들지 않고 거절★ 하고, `audit_event` 에 남겨 별도 검토로 보낸다.
+ *   (조용히 통과시키지도, 사람에게 못 읽을 것을 들이밀지도 않는다.)
+ */
+const COMMAND_REVIEW_LIMIT = 2_000;
+
+/**
+ * ★S5 — 긴 명령 두 개가 한 열쇠로 묶이던 것을 닫는다.★
+ *
+ * ■ 무엇이 문제였나 (정본 테스트에 갭으로 박혀 있던 것)
+ * 권한 열쇠(scopeKeyForOperation)는 target 을 쓰고, target 은 ★앞 240자만★ 본다.
+ * 그래서 `y×240 + SAFE` 와 `y×240 + EVIL` 이 ★같은 열쇠★ 였다 —
+ * ★안전한 명령에 '항상 허용' 을 한 번 주면 위험한 명령이 팝업 없이 통과★ 한다.
+ *
+ * ■ 어떻게 닫나 — ★공용 코드를 건드리지 않는다★ (팀 리드: "사이드이펙트 없이 분리해서")
+ * 우리가 만드는 값 안에 전체 명령의 지문을 넣어 240자 절단선 안에 살린다. permissionGate 는 그대로.
+ *
+ * ■ ★두 자리로 나눠 싣는 이유 — 한 필드가 두 가지 일을 하려다 둘 다 놓쳤다★
+ *  · op.command → ★사람이 보는 줄이자 열쇠의 재료★ (target 우선순위 1위, 240자에서 잘림)
+ *  · op.text    → ★위험 스캔용 전문★ (operationText 가 command·path·egress·text 를 이어 Tier-D 에 넣는다)
+ *
+ * 전에는 command 하나에 다 실었고 2000자에서 잘랐다. 그래서 ★2000자를 패딩으로 채우고 그 뒤에 sudo 를 붙이면
+ * 게이트도 못 보고(스캔 밖) 사람도 못 봤다(화면 밖).★ 실측: 2100자 뒤 `; sudo id` → 탐지 0, 400자면 탐지됨.
+ * 전문을 text 로 따로 보내면 탐지가 살아나고, ★열쇠는 안 바뀐다★(target 은 command 가 우선).
+ *
+ * ■ 지문을 뒤에 두는 이유
+ * 스캔이 text 로 옮겨갔으므로 command 는 ★사람이 읽는 일만★ 하면 된다. 그래서 명령을 먼저 보여주고
+ * 지문을 뒤에 붙인다(S3 쓰기 경로와 같은 모양). 예산 안에서 자르므로 지문은 240자 안에 반드시 남는다.
+ * 자를 때는 ★코드포인트 경계★ 로 자른다 — UTF-16 으로 자르면 이모지·한글이 반토막 난다.
+ */
+function commandOperationFields(material: string, command: string): { command: string; text: string } {
+  //  ★지문은 material(원본 구조 전문) 로 만든다 — 화면용으로 자른 값으로 만들지 않는다.★
+  //  자른 값으로 만들면 잘린 뒤가 달라도 지문이 같아진다(아메스 실측: 앞 2000자 동일 → 두 번째 'allow').
+  //
+  //  ★자르지 않은 64 hex 전문을 쓴다.★ 표시용 체크섬이 아니라 ★팝업 우회를 막는 유일한 구분자★ 다.
+  //  12 hex(48비트)면 SAFE/EVIL 후보를 각 2^24개씩 만들어 충돌시키는 게 GPU 로 현실적이다(아메스).
+  const digest = createHash("sha256").update(material).digest("hex");
+  // 공백 정규화 후 잘리므로(normalizeText → slice) ★지문 안에는 공백이 없어야 한다.★
+  const suffix = ` #${digest}`;
+  const budget = Math.max(0, VISIBLE_BUDGET - suffix.length);
+  //  ★잘랐으면 잘랐다고 말한다.★ 표시가 없으면 사람은 ★이게 명령 전부인 줄★ 안다 —
+  //  "kubectl delete ns prod " 뒤에 500자가 더 있어도 화면은 그냥 174자에서 끊긴다(루이 실측).
+  //  전문이 text 로 빠진 지금은 ★사람 눈에 닿는 경로가 이 한 줄뿐★ 이라 더 중요해졌다.
+  //  S3 가 쓰기 경로에서 세운 규칙과도 같다 — 넘치면 몇 개가 잘렸는지 말한다.
+  const truncated = command.length > budget;
+  const visible = truncated ? `${cutCodePoints(command, Math.max(0, budget - 1))}…` : command;
+  return { command: `${visible}${suffix}`, text: command };
 }
 
 /** M5.1 — codex 승인요청 → PermissionOperation(requestPermission 입력). */
@@ -218,11 +296,10 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
   //  모양으로 판정하면 다음 세대에서 또 조용히 미끄러진다(그게 이 버그의 원인이었다).
   //
   //  ★교환 관계를 명시한다★: 해석되면 열쇠가 '명령' 단위가 되어 '항상 허용' 이 의미를 갖는다(쓸 만해진다).
-  //  대신 그 열쇠는 permissionGate 에서 ★앞 240자만★ 쓰므로, 240자 prefix 가 같고 뒤가 다른 긴 명령은
-  //  같은 열쇠가 된다 — ★구세대가 원래 갖고 있던 노출이고, S5(공용 결합)에서 닫힌다.★ #106 참조.
+  //  ★S5 에서 240자 절단 노출을 닫았다★ — 위 commandOperationFields 참조.
   const parsed = parseCommandApproval(req);
   if (parsed.kind === "ok") {
-    return { runtime: "codex", agent_id: agentId, action: "shell", command: parsed.command.slice(0, 2000), requested_by: agentId, provenance };
+    return { runtime: "codex", agent_id: agentId, action: "shell", ...commandOperationFields(parsed.material, parsed.command), requested_by: agentId, provenance };
   }
   // ★명령 승인이라고 밝혔는데 명령을 못 읽었다 → 여기서 멈춘다.★ 아래 fileChanges 분기로 흘려보내면
   //   혼합 payload 가 write 로 처리되어 fail-closed 계약이 깨진다(Codex 리뷰 2026-07-29).
@@ -577,7 +654,23 @@ function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Re
     //   (permissionGate 가 만든다 = 공용). ★그러면 최소한 뒷줄이 사람에게 상황을 말해야 한다.★
     //   내부 식별자만 두 줄 연달아 보여주면 사람은 무엇을 승인/거절하는지 모른 채 버튼을 누른다.
     //   지문은 그 뒤에 온다 — 앞머리는 ★모든 해석 실패에서 같은 상수★ 라 열쇠 구분력을 줄이지 않는다.
-    text: `${UNPARSED_NOTICE}${req.method.slice(0, 64)} #${unparsedPayloadDigest(req)}${reason ? ` ${reason}` : ""}`,
+    //  ★해석에 실패했다고 위험 검사까지 건너뛰지 않는다.★
+    //   해석 실패로 보내는 것은 ★열쇠를 좁히려는 것★ 이지 ★검사를 면제하려는 것★ 이 아니다.
+    //   payload 를 안 실으면 이 요청의 Tier-D 스캔 입력이 ★0★ 이 되고, 그러면
+    //   `[1, "; sudo rm -rf /tmp/x"]` 같은 규격 밖 요청이 ★사람이 누를 수 있는 평범한 팝업★ 으로 내려온다
+    //   (Tier-D 는 사람도 승인 못 하는 등급인데, 스캔이 비면 그 등급이 붙을 근거가 없어진다 — 루이 실측).
+    //   ★알아볼 수 없는 것을 넓게 통과시키지 않는다★ 는 이 경로의 원래 취지와도 맞다.
+    //
+    //   ★부작용은 명시한다★: 거대 payload 안에 'sudo' 같은 문자열이 ★우연히★ 들어 있으면 hard-deny 가 된다.
+    //   해석조차 못 한 payload 에 대해서는 fail-closed 가 맞는 방향이라고 봤다.
+    //
+    //   붙이는 자리는 ★맨 뒤★ 다 — 앞은 사람이 읽는 안내문이어야 한다(팝업 첫 줄).
+    //   ★주의: 이 op 은 command·path·egress 가 없어서 text 가 곧 target(=열쇠) 이다.★
+    //   (앞선 주석에 "우선순위상 열쇠를 안 바꾼다" 고 적었는데 틀렸다 — 루이 지적. 지금은 안내문·지문이
+    //    앞에 있어 해롭지 않지만, ★이 필드에 뭘 더 실으면 화면과 열쇠가 같이 바뀐다.★)
+    text:
+      `${UNPARSED_NOTICE}${req.method.slice(0, 64)} #${unparsedPayloadDigest(req)}${reason ? ` ${reason}` : ""}` +
+      ` ${payloadScanText(req)}`,
     requested_by: agentId,
     provenance,
   };
@@ -592,7 +685,34 @@ function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Re
  *
  *  키 순서에 흔들리지 않도록 재귀 정렬해 직렬화한다 — JSON.stringify 는 삽입 순서를 따르므로,
  *  같은 내용이 다른 순서로 오면 지문이 달라져 ★같은 작업에 열쇠가 두 개★ 생긴다. */
-function unparsedPayloadDigest(req: ApprovalRequest): string {
+/**
+ * 받은 payload 에서 ★문자열 값만 모아 공백으로 잇는다★ — 위험 스캔에 넣을 용도.
+ *
+ * ★JSON 을 그대로 스캔에 쓰면 안 된다.★ JSON.stringify 는 줄바꿈을 ★역슬래시+n 두 글자★ 로 바꾼다.
+ * 그러면 `"...\n" + "sudo"` 가 스캔 문자열에서 `nsudo` 가 되고, Tier-D 규칙 대부분이 쓰는
+ * 단어 경계(\b)가 안 맞아 ★줄바꿈 하나로 검사를 통과한다.★ 실측(루이):
+ *   'echo hi<개행>sudo id' → 해석 실패 경로 [] · 정상 경로 ["sudo"]
+ * codex 명령은 heredoc·`bash -c` 라 ★여러 줄이 기본★ 이므로, 공격이 아니어도 그냥 샌다.
+ *
+ * ★지문은 여전히 JSON 을 쓴다★(stablePayloadJson) — 거기서는 키 순서 안정성이 목적이라 JSON 이 맞다.
+ * 같은 payload 를 ★목적에 따라 다른 표현★ 으로 본다.
+ */
+function payloadScanText(req: ApprovalRequest): string {
+  const out: string[] = [];
+  const walk = (v: unknown): void => {
+    if (typeof v === "string") out.push(v);
+    else if (typeof v === "number" || typeof v === "boolean") out.push(String(v));
+    else if (Array.isArray(v)) v.forEach(walk);
+    //  ★키를 정렬해서 돈다★ — 안 하면 같은 내용이 다른 순서로 왔을 때 스캔 문자열이 달라지고,
+    //  이 경로에서는 text 가 곧 target 이라 ★같은 작업에 열쇠가 두 개★ 생긴다(S0 정본 시험이 잡았다).
+    else if (v && typeof v === "object") for (const k of Object.keys(v as Record<string, unknown>).sort()) walk((v as Record<string, unknown>)[k]);
+  };
+  walk(req.params ?? null);
+  return out.join(" ");
+}
+
+/** 받은 payload 를 ★키 순서에 흔들리지 않게★ 문자열로 굳힌다. ★지문 전용★ — 스캔은 payloadScanText 를 쓴다. */
+function stablePayloadJson(req: ApprovalRequest): string {
   const stable = (v: unknown): unknown => {
     if (Array.isArray(v)) return v.map(stable);
     if (v && typeof v === "object") {
@@ -609,10 +729,11 @@ function unparsedPayloadDigest(req: ApprovalRequest): string {
     }
     return v;
   };
-  return createHash("sha256")
-    .update(JSON.stringify(stable({ method: req.method, params: req.params ?? null })))
-    .digest("hex")
-    .slice(0, 16);
+  return JSON.stringify(stable({ method: req.method, params: req.params ?? null }));
+}
+
+function unparsedPayloadDigest(req: ApprovalRequest): string {
+  return createHash("sha256").update(stablePayloadJson(req)).digest("hex").slice(0, 16);
 }
 
 /** M5.2 — permission_request 상태를 폴링해 GD 결정을 ReviewDecision으로. 무응답 TTL→denied(hold). */
@@ -639,12 +760,47 @@ export async function pollDecision(db: Database, requestId: string, ttlMs = POPU
 }
 
 /**
+ * 승인 흐름에 태우기엔 ★너무 긴 '명령'★ 인지 본다. 넘으면 그 길이를, 아니면 null.
+ *
+ * ★명령 승인에만 적용한다.★ 팀 리드가 말한 것은 *"1000자를 넘는 명령은 이상한거야"* 이고,
+ * ★파일 변경 승인의 '내용' 은 길어도 이상하지 않다★ — 1,200자짜리 파일은 평범하다.
+ * (처음엔 모든 승인에 걸어서 ★평범한 파일 변경이 거절됐다★. 아메스가 실측으로 잡았다:
+ *  applyPatchApproval 에 1,200자 파일을 넣으면 denied · permission_request 0행 ·
+ *  기록은 '명령이 너무 길다' — 잘 되던 기능이 죽고 기록까지 틀린 이유를 댔다.)
+ *
+ * 재는 대상은 ★사람이 판단해야 할 내용★ 이다 — 해석되면 명령, 명령 method 인데 해석이 안 되면 payload 값들.
+ * (지문·안내문 같은 우리가 붙인 것은 빼고 잰다. 그걸 세면 기준이 우리 포맷에 흔들린다.)
+ */
+export function oversizedForReview(req: ApprovalRequest): number | null {
+  const parsed = parseCommandApproval(req);
+  if (parsed.kind === "not_command") return null;   // ★파일 변경·그 밖의 승인은 이 규칙 대상이 아니다★
+  const len = parsed.kind === "ok" ? parsed.command.length : payloadScanText(req).length;
+  return len > COMMAND_REVIEW_LIMIT ? len : null;
+}
+
+/**
  * M5.3 진입점 — ask-tier 승인요청을 팝업으로 처리. onApproval에서 needsApproval일 때 호출.
  * ★반환 전까지 codex 턴이 대기하므로, 상위(runner)는 이 대기 동안 turn timeout을 연기해야 한다(M5.3 배선).★
  */
 export async function requestApprovalPopup(db: Database, req: ApprovalRequest, agentId: string, cwd?: string, ttlMs = POPUP_TTL_MS): Promise<ReviewDecision> {
   const store = new CodexApprovalCorrelationStore(db);
   const opHash = approvalOperationHash(req);
+
+  //  ★너무 긴 요청은 팝업을 만들지 않고 거절한다★ — 사람이 읽고 판단할 수 있는 대상이 아니다.
+  //  조용히 통과시키지도, 못 읽을 것을 사람에게 들이밀지도 않는다. 기록을 남겨 ★따로 검토★ 하게 한다.
+  const oversized = oversizedForReview(req);
+  if (oversized !== null) {
+    try {
+      appendAudit(db, agentId, "codex_approval_oversized", req.method, {
+        length: oversized,
+        limit: COMMAND_REVIEW_LIMIT,
+        operation_hash: opHash,
+        note: "명령이 너무 길어 승인 팝업을 만들지 않고 거절했습니다. 원문을 따로 검토하세요.",
+      });
+    } catch { /* 기록 실패가 거절을 막지 않는다 */ }
+    return "denied";
+  }
+
   let requestId: string | undefined;
   try {
     const op = buildOperationFromApproval(req, agentId, cwd);

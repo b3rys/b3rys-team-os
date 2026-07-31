@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import { approvalOperationHash, buildOperationFromApproval } from "./appServerPopup";
-import { scopeKeyForOperation } from "../../lib/permissionGate";
+import { tierDReasons, scopeKeyForOperation } from "../../lib/permissionGate";
 import type { ApprovalRequest } from "./appServerClient";
 
 const cmd = (arr: string[]): ApprovalRequest => ({ method: "item/commandExecution/requestApproval", params: { command: arr } });
@@ -44,16 +44,35 @@ describe("approvalOperationHash — 지문의 결정성·충돌저항(권한 결
  * ★이 갭이 닫히기 전에는 B3OS_CODEX_APPSERVER를 켜지 않는다 — release blocker.★
  */
 describe("알려진 갭 (후속 작업에서 닫히면 이 테스트가 실패해야 한다)", () => {
-  test("갭1: 240자 prefix가 같으면 전체가 달라도 ★같은 grant scope★로 취급된다", () => {
-    // permissionGate.targetForOperation이 target을 앞 240자만 쓴다 → 뒤가 갈라져도 scope가 같다.
+  test("★갭1 닫힘(S5)★: 240자 prefix가 같아도 전체가 다르면 다른 grant scope 다", () => {
+    // permissionGate.targetForOperation 은 여전히 앞 240자만 쓴다(공용 코드는 안 건드렸다).
+    // 대신 우리가 만드는 op.command ★앞에 전체 명령의 지문★ 을 넣어 절단선 안에 살아남게 했다.
     const prefix = "y".repeat(240);
     const safe = buildOperationFromApproval(cmd([prefix + "SAFE"]), "demis");
     const evil = buildOperationFromApproval(cmd([prefix + "EVIL"]), "demis");
 
-    // 지문(해시)은 둘을 구분한다 —
     expect(safe.provenance!.operation_hash).not.toBe(evil.provenance!.operation_hash);
-    // — 그런데 실제 권한 판단에 쓰이는 scope는 같다. ★이 한 줄이 갭의 본체다.★
-    expect(scopeKeyForOperation(safe)).toBe(scopeKeyForOperation(evil));
+    // ★예전에는 이 둘이 같았다 — 안전한 명령에 준 '항상 허용' 이 위험한 명령에 재사용됐다.★
+    expect(scopeKeyForOperation(safe)).not.toBe(scopeKeyForOperation(evil));
+  });
+
+  test("★같은 명령은 여전히 같은 열쇠★ — '항상 허용' 이 계속 유효해야 한다", () => {
+    const c = "y".repeat(240) + "SAFE";
+    expect(scopeKeyForOperation(buildOperationFromApproval(cmd([c]), "demis")))
+      .toBe(scopeKeyForOperation(buildOperationFromApproval(cmd([c]), "demis")));
+  });
+
+  test("★2000자 너머의 위험 문자열도 스캔된다★ — 화면 밖 + 스캔 밖 을 만들지 않는다", () => {
+    // ★이 시험은 300자로 짜면 안 된다.★ 300자짜리는 예전 판(command 를 2000자에서 자르던 판)에서도
+    // 초록이라, ★닫히지 않은 구멍을 닫혔다고 보이게 한다.★ (루이가 실측으로 잡았다:
+    //  2100자 패딩 뒤 `; sudo id` → tierDReasons 탐지 0, 같은 패턴이 400자면 탐지됨.)
+    // 사람이 보는 건 앞 240자뿐이므로, 스캔까지 못 보면 ★평범해 보이는 팝업이 sudo 를 통과시킨다.★
+    const danger = "echo " + "w".repeat(2100) + " ; sudo id";
+    const op = buildOperationFromApproval(cmd([danger]), "demis");
+    // 사람이 보는 줄(=열쇠)은 240자로 자르되 —
+    expect(op.command!.length).toBeLessThanOrEqual(240);
+    // — 스캔 대상에는 전문이 남는다.
+    expect(tierDReasons(op)).toContain("sudo");
   });
 
 });
