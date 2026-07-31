@@ -415,12 +415,20 @@ describe("ProposalsView — read-only list/detail", () => {
     }
   });
 
-  test("opens an in-page modal for GD decisions and sends the typed comment", async () => {
+  test("keeps focus and draft in the shared approve/reject modal, then sends the typed comment", async () => {
     const origFetch = globalThis.fetch;
+    const origSetInterval = globalThis.setInterval;
     let transitionPayload: Record<string, unknown> | null = null;
+    let listFetchCount = 0;
+    let pollTick: (() => void) | null = null;
+    globalThis.setInterval = ((handler: TimerHandler) => {
+      if (typeof handler === "function") pollTick = handler as () => void;
+      return 1;
+    }) as unknown as typeof setInterval;
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/api/proposals")) {
+        listFetchCount += 1;
         return new Response(
           JSON.stringify({
             proposals: [
@@ -482,8 +490,15 @@ describe("ProposalsView — read-only list/detail", () => {
     try {
       const { renderProposalsView } = await import("./ProposalsView");
       const root = document.createElement("div");
+      document.body.appendChild(root);
       renderProposalsView(root);
       await new Promise((r) => setTimeout(r, 40));
+
+      const reject = root.querySelector<HTMLButtonElement>("[data-gd-decision='rejected']");
+      expect(reject).toBeTruthy();
+      reject?.click();
+      expect(root.querySelector("[data-proposal-action-modal]")?.textContent).toContain("반려 사유/코멘트");
+      root.querySelector<HTMLButtonElement>("[data-proposal-action-cancel]")?.click();
 
       const approve = root.querySelector<HTMLButtonElement>("[data-gd-decision='accepted']");
       expect(approve).toBeTruthy();
@@ -491,9 +506,28 @@ describe("ProposalsView — read-only list/detail", () => {
 
       const modal = root.querySelector("[data-proposal-action-modal]");
       expect(modal?.textContent).toContain("승인 사유/코멘트");
-      const textarea = root.querySelector<HTMLTextAreaElement>("[data-proposal-action-comment]");
+      let textarea = root.querySelector<HTMLTextAreaElement>("[data-proposal-action-comment]");
       expect(textarea).toBeTruthy();
-      textarea!.value = "승인합니다. 실행하세요.";
+      expect(document.activeElement).toBe(textarea);
+      textarea!.value = "\n승인합니다. 실행하세요.";
+      textarea!.dispatchEvent(new window.Event("input", { bubbles: true }));
+
+      // 5초 자동 폴링 콜백은 열린 모달의 fetch와 DOM을 건드리지 않는다.
+      const listFetchCountBeforePoll = listFetchCount;
+      const textareaBeforePoll = textarea;
+      expect(pollTick).toBeTruthy();
+      (pollTick as unknown as () => void)();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(listFetchCount).toBe(listFetchCountBeforePoll);
+      expect(root.querySelector("[data-proposal-action-comment]")).toBe(textareaBeforePoll);
+
+      // 수동 새로고침 같은 예외적 재렌더에도 입력과 포커스가 복구된다.
+      root.querySelector<HTMLButtonElement>("[data-refresh-proposals]")?.click();
+      await new Promise((r) => setTimeout(r, 40));
+      textarea = root.querySelector<HTMLTextAreaElement>("[data-proposal-action-comment]");
+      expect(textarea?.value).toBe("\n승인합니다. 실행하세요.");
+      expect(document.activeElement).toBe(textarea);
+
       root.querySelector<HTMLFormElement>("[data-proposal-action-form]")?.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
       await new Promise((r) => setTimeout(r, 40));
 
@@ -505,6 +539,8 @@ describe("ProposalsView — read-only list/detail", () => {
       });
     } finally {
       globalThis.fetch = origFetch;
+      globalThis.setInterval = origSetInterval;
+      document.body.innerHTML = "";
     }
   });
 
