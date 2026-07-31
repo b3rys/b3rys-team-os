@@ -112,7 +112,7 @@ function firstAvailableAgent(db: Database, candidates: string[], fallback: strin
 }
 
 // interactive 팀원(비대화 non_interactive · team_official_member:false · 제안자 · blocked 제외) 중 리뷰 후보 id 목록.
-function otherReviewers(db: Database, proposer: string, agents: AgentRecord[]): string[] {
+export function otherReviewers(db: Database, proposer: string, agents: AgentRecord[]): string[] {
   const nonInteractive = new Set(agentsWith(agents, "non_interactive").map((a) => a.id));
   const registry = new Map(agents.map((a) => [a.id, a]));
   const rows = db.prepare(
@@ -164,11 +164,15 @@ const REVIEW_CRITERIA =
   `1) 정말 팀에 필요한가?\n2) 팀 전체의 공통 이슈인가?\n3) 팀원 개인 수준의 learning인가?`;
 
 // 팀장 보고/조율 owner = coordinator(PM 역량) 우선 → 제안자 → 첫 후보 순 폴백(하드코딩 id 없음).
-function coordinatorOwner(db: Database, agents: AgentRecord[], proposer: string): string {
+// exclude 는 ★꼬리 폴백에만★ 건다. 앞의 두 층은 역할로 정해진 자리라 그대로 둔다 —
+// 조율자가 리뷰에 무응답이었더라도 "누구에게 맡길지·접을지" 를 정하는 역할은 여전히 그 사람이다.
+// 꼬리는 다르다. otherReviewers 는 방금 무응답한 리뷰어를 걸러내지 않아서,
+// 조율자도 제안자도 없으면 카드가 그 사람에게 되돌아간다 — 이 재배정이 없앤 상태 그대로다.
+export function coordinatorOwner(db: Database, agents: AgentRecord[], proposer: string, exclude?: string): string {
   const coord = coordinatorId(agents);
   if (coord && existingAgent(db, coord)) return coord;
   if (existingAgent(db, proposer)) return proposer;
-  return otherReviewers(db, proposer, agents)[0] ?? proposer;
+  return otherReviewers(db, proposer, agents).find((id) => id !== exclude) ?? proposer;
 }
 
 // peer_review 담당 = 제안자 제외 후보 중 열린/최근 배정이 가장 적은 1명.
@@ -757,8 +761,13 @@ export function sweepStaleProposals(
         // 막아두는 것과 멈춰두는 것은 다르다 — 막은 뒤에는 누군가 다음 행동을 해야 한다.
         const blockKey = `sweeper_blocked:${row.id}:${row.status}:${round}`;
         if (claimAutomationAction(db, blockKey, row.id, "sweeper_blocked")) {
-          const rescuer = coordinatorOwner(db, agents, row.proposer_agent);
-          db.prepare(
+          const stalled = (db.prepare(
+            `SELECT owner FROM proposal_followup_task
+              WHERE proposal_id = ? AND status LIKE ? AND closed_at IS NULL
+              ORDER BY created_at DESC LIMIT 1`,
+          ).get(row.id, `${row.status}:%`) as { owner: string } | undefined)?.owner;
+          const rescuer = coordinatorOwner(db, agents, row.proposer_agent, stalled);
+          const cardUpdate = db.prepare(
             `UPDATE task
                 SET owner = ?,
                     description = description || char(10)
@@ -770,12 +779,20 @@ export function sweepStaleProposals(
                 SELECT task_id FROM proposal_followup_task
                  WHERE proposal_id = ? AND status LIKE ? AND closed_at IS NULL
               )`,
-          ).run(rescuer, row.id, `${row.status}:%`);
-          db.prepare(
+          );
+          const cardChanges = cardUpdate.run(rescuer, row.id, `${row.status}:%`).changes ?? 0;
+          const ledgerChanges = db.prepare(
             `UPDATE proposal_followup_task
                 SET owner = ?
               WHERE proposal_id = ? AND status LIKE ? AND closed_at IS NULL`,
-          ).run(rescuer, row.id, `${row.status}:%`);
+          ).run(rescuer, row.id, `${row.status}:%`).changes ?? 0;
+          // 장부(followup)는 걸리는데 카드(task)가 안 걸리는 입력이 있다 — task 행이 지워진 고아 followup.
+          // 그 경우 "조율자에게 넘겼다" 는 기록만 남고 보드에는 아무것도 안 보인다. 남겨야 설명이 된다.
+          if (cardChanges !== ledgerChanges) {
+            auditGdReportNotice(db, "sweeper_blocked_card_missing", row.id, {
+              status: row.status, rescuer, card_changes: cardChanges, ledger_changes: ledgerChanges,
+            });
+          }
           out.blocked.push(row.id);
         }
       })();

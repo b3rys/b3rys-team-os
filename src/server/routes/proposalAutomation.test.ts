@@ -6,7 +6,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
-import { createProposalRoutes, sweepStaleProposals } from "./proposals";
+import { coordinatorOwner, createProposalRoutes, otherReviewers, sweepStaleProposals } from "./proposals";
 import { advanceProposalIfCurrent, createProposal, SYSTEM_ACTOR } from "../db/proposal";
 import { ambientAgents } from "../lib/registry";
 import type { AgentRecord } from "../types";
@@ -326,5 +326,50 @@ describe("후보를 다 돌아도 리뷰가 없을 때", () => {
     expect(a?.owner).toBe("demis");
     expect(b?.owner).toBe("bill");
     expect(a?.description).toContain("다음 행동");
+  });
+
+  test("카드가 없어진 채로 넘기면 기록을 남긴다", async () => {
+    const { app, db } = setup();
+    const agents = agentsWithCoordinator("demis");
+    const { id } = (await (await create(app)).json()) as { id: string };
+
+    // 1차 재배정까지 진행시킨 뒤, 카드(task)만 지운다 — 장부(followup)는 열려 있다.
+    let reassigned = false;
+    for (let i = 0; i < 12 && !reassigned; i += 1) {
+      ageProposal(db, id, 40);
+      reassigned = sweepStaleProposals(db, agents).reassigned.includes(id);
+    }
+    expect(reassigned).toBe(true);
+    db.prepare(
+      `DELETE FROM task WHERE id IN (
+         SELECT task_id FROM proposal_followup_task WHERE proposal_id = ? AND closed_at IS NULL)`,
+    ).run(id);
+
+    let blocked = false;
+    for (let i = 0; i < 12 && !blocked; i += 1) {
+      ageProposal(db, id, 40);
+      blocked = sweepStaleProposals(db, agents).blocked.includes(id);
+    }
+    expect(blocked).toBe(true);
+
+    // 장부는 조율자로 바뀌는데 보드에는 아무것도 안 보인다. 남아야 설명이 된다.
+    const audit = db
+      .prepare("SELECT COUNT(*) AS n FROM audit_event WHERE action = ? AND target = ?")
+      .get("sweeper_blocked_card_missing", id) as { n: number };
+    expect(audit.n).toBe(1);
+  });
+
+  test("조율자도 제안자도 없으면, 방금 무응답한 그 사람에게 되돌리지 않는다", () => {
+    const { db } = setup();
+    // agents.json 과 team.db 가 어긋난 상태 — 등록부에는 있는데 DB 에는 없다.
+    const agents = agentsWithCoordinator("__none__"); // coordinator 없음 → coordinatorId 는 첫 에이전트로 폴백
+    db.prepare("DELETE FROM agent WHERE id IN ('bill','codex')").run(); // 그 첫 에이전트도, 제안자도 DB 에 없다
+
+    const tail = otherReviewers(db, "codex", agents);
+    expect(tail.length).toBeGreaterThan(1); // 제외해도 남는 후보가 있어야 이 검사가 뜻이 있다
+
+    // 꼬리가 그대로 첫 후보를 주면 방금 무응답한 그 사람이 다시 담당이 된다.
+    expect(coordinatorOwner(db, agents, "codex", tail[0])).not.toBe(tail[0]);
+    expect(coordinatorOwner(db, agents, "codex", tail[0])).toBe(tail[1]!);
   });
 });
