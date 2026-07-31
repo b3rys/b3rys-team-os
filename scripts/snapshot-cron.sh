@@ -27,7 +27,9 @@ log "=== 시작 ==="
 B3OS_SNAPSHOT_DEST="$LOCAL" "$BASH" "$HERE/snapshot-team.sh" >>"$LOG" 2>&1 \
   || { log "✗ 스냅샷 실패 — 여기서 멈춘다"; exit 1; }
 
-NEW="$(ls -1t "$LOCAL"/b3os-snapshot-*.tar.gz 2>/dev/null | head -1)"
+# ls 는 무늬에 맞는 것이 없으면 실패한다. 그러면 set -e 가 여기서 끝내고
+# ★바로 아래 안내가 실행되지 않는다.★ 안내를 살리려면 이 줄이 실패하지 않아야 한다.
+NEW="$(ls -1t "$LOCAL"/b3os-snapshot-*.tar.gz 2>/dev/null | head -1 || true)"
 [ -n "$NEW" ] || { log "✗ 산출물을 찾지 못했다"; exit 1; }
 log "떴다: $(basename "$NEW") ($(du -h "$NEW" | cut -f1))"
 
