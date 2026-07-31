@@ -144,12 +144,62 @@ function coordinatorOwner(db: Database, agents: AgentRecord[], proposer: string)
   return otherReviewers(db, proposer, agents)[0] ?? proposer;
 }
 
-// peer_review 담당 = 나머지 팀원 중 랜덤 1명. 2+ 팀부터 팀장 보고 전 단일 review가 필수.
-function peerReviewOwners(db: Database, proposer: string, agents: AgentRecord[]): string[] {
+// peer_review 담당 = 나머지 팀원 중 1명. 2+ 팀부터 팀장 보고 전 단일 review가 필수.
+//
+// 랜덤 1명이었는데 재배정에서 문제가 됐다(2026-07-31 라이브): 무응답으로 5건이 한꺼번에
+// 재배정됐을 때 랜덤이 5건 모두 같은 사람에게 몰렸다. 그래서 (1) 이미 담당이었던 사람을
+// 빼고 (2) 열린 리뷰가 적은 쪽을 먼저 준다. 후보가 그 사람뿐이면 되돌린다 — 배정 없음보다 낫다.
+function peerReviewOwners(
+  db: Database,
+  proposer: string,
+  agents: AgentRecord[],
+  opts: { exclude?: string[] } = {},
+): string[] {
   const others = otherReviewers(db, proposer, agents);
   if (others.length < 1) return [];
-  const pick = others[Math.floor(Math.random() * others.length)];
+  const exclude = new Set((opts.exclude ?? []).filter(Boolean));
+  const pool = others.filter((id) => !exclude.has(id));
+  const candidates = pool.length ? pool : others;
+  const pick = leastLoadedReviewer(db, candidates);
   return pick ? [pick] : [];
+}
+
+/**
+ * 리뷰 판정 기준(팀장 지시 2026-07-31). 기준 없이 "리뷰해달라" 만 보내면 통과가 기본값이 된다 —
+ * 실제로 이 문구가 없던 회차에 리뷰 0건으로 5건이 그대로 팀장 게이트까지 올라갔다.
+ */
+const PEER_REVIEW_RUBRIC =
+  `판정 기준 — 셋 다 예여야 통과입니다. 하나라도 아니면 드랍(reject)하세요.\n` +
+  `  1. 정말 팀에 필요한 것인가\n` +
+  `  2. 팀 전체의 이슈인가\n` +
+  `  3. 팀원 개인 레벨의 러닝이 아닌가\n` +
+  `애매하면 드랍이 기본입니다. 리뷰 내용은 DB(proposal_review)에 남습니다.`;
+
+/** 이 단계에서 이미 담당이었던 사람들 — 재배정에서 제외한다. */
+function previousReviewOwners(db: Database, proposalId: string, status: string): string[] {
+  return (
+    db
+      .prepare(
+        `SELECT DISTINCT owner AS id FROM proposal_followup_task
+          WHERE proposal_id = ? AND status LIKE ?`,
+      )
+      .all(proposalId, `${status}%`) as { id: string }[]
+  ).map((r) => r.id);
+}
+
+/** 열린 리뷰 카드가 가장 적은 후보. 동수면 후보 순서를 따른다(결정적 — 테스트가 재현 가능하다). */
+function leastLoadedReviewer(db: Database, candidates: string[]): string | undefined {
+  if (candidates.length <= 1) return candidates[0];
+  const rows = db
+    .prepare(
+      `SELECT owner AS id, COUNT(*) AS n
+         FROM proposal_followup_task
+        WHERE closed_at IS NULL
+        GROUP BY owner`,
+    )
+    .all() as { id: string; n: number }[];
+  const load = new Map(rows.map((r) => [r.id, r.n]));
+  return candidates.reduce((best, id) => ((load.get(id) ?? 0) < (load.get(best) ?? 0) ? id : best));
 }
 
 // pm_review 담당 = coordinator(PM 역량) 우선, 없으면 랜덤 1명. peer 리뷰어와는 다른 사람.
@@ -358,7 +408,9 @@ function ensureProposalFollowup(db: Database, proposalId: string, status: string
     return { owner: "system", skipped: true };
   }
   if (status === "peer_review") {
-    const owners = peerReviewOwners(db, p.proposer_agent, agents);
+    const owners = peerReviewOwners(db, p.proposer_agent, agents, {
+      exclude: previousReviewOwners(db, p.id, status),
+    });
     if (owners.length === 0) {
       // 방어: 팀 규모가 줄어 peer 후보가 없으면 coordinator 가 다음 단계를 판단(정상 경로에선 3+ 팀에서만 peer 진입).
       return createLinkedFollowup(
@@ -390,7 +442,8 @@ function ensureProposalFollowup(db: Database, proposalId: string, status: string
         `[Proposal peer review 요청]\n` +
           `대상: ${p.title}\nID: ${p.id}\n` +
           `역할: reviewer(${owner})\n` +
-          `해야 할 일: 팀장 보고 전에 실제 리스크와 개선점을 포함해 review를 남겨 주세요.`,
+          `해야 할 일: 팀장 보고 전에 실제 리스크와 개선점을 포함해 review를 남겨 주세요.\n` +
+          PEER_REVIEW_RUBRIC,
       ));
     return { owner: followups.map((f) => f.owner).join(","), taskId: followups[0]?.taskId, messageId: followups[0]?.messageId };
   }
@@ -671,31 +724,35 @@ export function sweepStaleProposals(
           return;
         }
         // peer_review / legacy pm_review 무응답
-        const to = "gd_report";
         const round = stageEntryCount(db, row.id, row.status);
-        const reassignKey = `sweeper_reassign:${row.id}:${row.status}:${round}`;
-        if (claimAutomationAction(db, reassignKey, row.id, "sweeper_reassign")) {
-          // 1차: 담당 재배정(기존 카드 닫고 다른 후보 wake).
+        const tried = previousReviewOwners(db, row.id, row.status);
+        const untried = otherReviewers(db, row.proposer_agent, agents).filter(
+          (id) => !tried.includes(id),
+        );
+        const reassignKey = `sweeper_reassign:${row.id}:${row.status}:${round}:${tried.length}`;
+        if (untried.length > 0 && claimAutomationAction(db, reassignKey, row.id, "sweeper_reassign")) {
+          // 아직 담당한 적 없는 후보로 재배정(기존 카드 닫고 wake).
+          //
+          // ★재배정하면 정체 시계를 다시 돌린다(2026-07-31).★ 예전에는 updated_at 을 건드리지
+          // 않아서 재배정 직후에도 이미 30분 초과 상태였다 → 바로 다음 tick(5분 뒤) 무응답 판정.
+          // 라이브에서 05:36 재배정 → 05:41 무응답으로 5건이 한꺼번에 나갔다. 새 담당자가
+          // 실제로 staleMinutes 만큼 받도록 여기서 시계를 리셋한다.
           closeProposalFollowups(db, row.id, row.status);
           ensureProposalFollowup(db, row.id, row.status, agents);
+          db.prepare(`UPDATE proposal SET updated_at = datetime('now') WHERE id = ?`).run(row.id);
           out.reassigned.push(row.id);
           return;
         }
-        // 2차: 여전히 무응답 → 리뷰 skip degraded 진행.
-        // 고위험(risk_level=high)은 무검토 자동 진행 금지(P1). reject/revise verdict 있으면 사람 판단 보존.
-        if (String(row.risk_level ?? "").toLowerCase() === "high") return;
-        const stageName = row.status === "peer_review" ? "peer" : "pm";
-        const blocking = db.prepare(
-          `SELECT 1 FROM proposal_review WHERE proposal_id = ? AND stage = ? AND verdict IN ('reject','revise') LIMIT 1`,
-        ).get(row.id, stageName);
-        if (blocking) return;
-        const r = tryAutoAdvance(db, row.id, row.status, to, agents, {
-          emergency_override: true,
-          reason: "sweeper: 무응답 자동 진행(review_missing)",
-        });
-        if (r.advanced) {
+        // 후보를 다 돌았는데도 리뷰가 없다 → ★팀장에게 올리지 않는다.★
+        //
+        // 예전에는 여기서 리뷰를 건너뛰고 gd_report 로 승격했다("정체 방지", GD 2026-07-04).
+        // 그 결과 리뷰 0건인 제안이 팀장 결정 게이트에 도착했다 — 게이트가 있는데 걸러지지 않는
+        // 상태다. 팀장 지시(2026-07-31)로 승격 대신 coordinator(팀리드)에게 넘긴다: 파이프라인은
+        // 멈추지만 멈춘 사실이 사람에게 보이고, 팀장 앞에는 리뷰를 거친 것만 남는다.
+        const escalateKey = `sweeper_review_missing:${row.id}:${row.status}:${round}`;
+        if (claimAutomationAction(db, escalateKey, row.id, "sweeper_review_missing")) {
+          escalateReviewMissing(db, row.id, row.status, agents, tried);
           out.degraded.push(row.id);
-          if (to === "gd_report") gdReached = true;
         }
       })();
     } catch (e) {
@@ -705,6 +762,61 @@ export function sweepStaleProposals(
     if (gdReached) notifyGdReportReachedSafely(db, row.id, agents, "sweeper");
   }
   return out;
+}
+
+/**
+ * 후보를 다 돌았는데도 리뷰가 없을 때 — 승격시키지 않고 coordinator(팀리드)에게 넘긴다.
+ *
+ * 제안은 peer_review 에 그대로 남는다. 사람이 리뷰를 붙이거나 드랍하기 전에는 팀장 게이트로
+ * 가지 않는다. 상태를 바꾸지 않는 이유는 "리뷰 대기" 가 사실 그대로이기 때문이다 — 다른
+ * 상태로 옮기면 어디까지 갔는지가 흐려진다.
+ *
+ * coordinator 가 제안자 본인이어도 넘긴다. 본인이 리뷰를 등록하는 건 addReview 가 막으므로
+ * (peer reviewer != 제안자), 할 수 있는 일은 "다른 사람에게 붙이거나 드랍" 뿐이다.
+ */
+function escalateReviewMissing(
+  db: Database,
+  proposalId: string,
+  status: string,
+  agents: AgentRecord[],
+  tried: string[],
+): void {
+  const p = db
+    .prepare("SELECT id, title, proposer_agent, source FROM proposal WHERE id = ?")
+    .get(proposalId) as ProposalRow | undefined;
+  if (!p) return;
+  const owner = coordinatorOwner(db, agents, p.proposer_agent);
+  const triedText = tried.length ? tried.join(", ") : "없음";
+  const selfNote =
+    owner === p.proposer_agent
+      ? `\n주의: 이 제안의 제안자가 당신이다. 본인 리뷰는 등록되지 않으니 다른 팀원에게 붙여야 한다.`
+      : "";
+  closeProposalFollowups(db, proposalId, status);
+  createLinkedFollowup(
+    db,
+    p,
+    `${status}:review_missing`,
+    owner,
+    `[Proposal] 리뷰가 안 됐다: ${p.title}`,
+    `proposal:${p.id} status:${status} review_missing\n` +
+      `상황: 후보를 다 돌았는데 리뷰가 한 건도 없다. 무응답 담당: ${triedText}\n` +
+      `목표: 리뷰를 받아오거나, 판정 기준에 안 맞으면 드랍한다. ★팀장에게 자동으로 올라가지 않는다.★${selfNote}\n` +
+      `완료 기준: /api/proposals/${p.id}/reviews 에 stage=peer 리뷰 등록, 또는 transition to=rejected.`,
+    `[Proposal 리뷰 미완 — 처리 필요]\n` +
+      `대상: ${p.title}\nID: ${p.id}\n` +
+      `무응답 담당: ${triedText}\n` +
+      `이 제안은 리뷰 0건입니다. 팀장 보고로 넘어가지 않고 여기서 멈춰 있습니다.\n` +
+      `리뷰를 받아오거나 드랍해 주세요.${selfNote}\n` +
+      PEER_REVIEW_RUBRIC,
+    "high",
+  );
+  auditGdReportNotice(db, "proposal_review_missing_escalated", proposalId, {
+    title: p.title,
+    status,
+    tried,
+    owner,
+    reason: "리뷰 0건 — 팀장 승격 대신 coordinator 에스컬레이션(GD 2026-07-31)",
+  });
 }
 
 export function createProposalRoutes(deps: ProposalRouteDeps): Hono {

@@ -141,17 +141,63 @@ describe("자동화 — sweeper 정체 안전망", () => {
     expect(statusOf(db, id)).toBe("peer_review"); // 3+팀 → peer 자동 제출
   });
 
-  test("peer 무응답 → 1차 재배정 → 2차 리뷰 skip degraded 진행", async () => {
+  test("재배정하면 정체 시계가 다시 돈다 — 바로 다음 tick 에 무응답 처리되지 않는다", async () => {
+    // 라이브 회귀(2026-07-31): 재배정이 updated_at 을 건드리지 않아 새 담당자가 5분만 받았다.
+    const { app, db } = setup();
+    const { id } = (await (await create(app)).json()) as { id: string };
+    ageProposal(db, id, 40);
+    expect(sweepStaleProposals(db, ambientAgents()).reassigned).toContain(id);
+
+    const r2 = sweepStaleProposals(db, ambientAgents()); // 곧바로 다시 돌린다
+    expect(r2.degraded).not.toContain(id);
+    expect(r2.reassigned).not.toContain(id);
+    expect(statusOf(db, id)).toBe("peer_review");
+  });
+
+  test("후보를 다 돌아도 리뷰가 없으면 ★팀장에게 올리지 않고★ coordinator 에게 넘긴다", async () => {
     const { app, db } = setup();
     const { id } = (await (await create(app)).json()) as { id: string };
     expect(statusOf(db, id)).toBe("peer_review");
+
+    // 후보가 소진될 때까지 재배정을 반복한다(매번 시계를 다시 늙힌다).
+    for (let i = 0; i < 10; i++) {
+      ageProposal(db, id, 40);
+      const r = sweepStaleProposals(db, ambientAgents());
+      if (r.degraded.includes(id)) break;
+      expect(r.reassigned).toContain(id);
+    }
+
+    // 핵심: 리뷰 0건이면 gd_report 로 가지 않는다.
+    expect(statusOf(db, id)).toBe("peer_review");
+    const reviews = db
+      .prepare("SELECT COUNT(*) AS n FROM proposal_review WHERE proposal_id = ?")
+      .get(id) as { n: number };
+    expect(reviews.n).toBe(0);
+
+    // 대신 coordinator 에게 "리뷰 미완" 카드가 열린다.
+    const card = db
+      .prepare(
+        "SELECT owner, status FROM proposal_followup_task WHERE proposal_id = ? AND closed_at IS NULL",
+      )
+      .get(id) as { owner: string; status: string } | undefined;
+    expect(card?.status).toContain("review_missing");
+  });
+
+  test("재배정은 이미 무응답이던 담당자를 다시 고르지 않는다", async () => {
+    const { app, db } = setup();
+    const { id } = (await (await create(app)).json()) as { id: string };
+    const ownerOf = (): string =>
+      (
+        db
+          .prepare(
+            "SELECT owner FROM proposal_followup_task WHERE proposal_id = ? AND closed_at IS NULL",
+          )
+          .get(id) as { owner: string }
+      ).owner;
+    const first = ownerOf();
     ageProposal(db, id, 40);
-    const r1 = sweepStaleProposals(db, ambientAgents());
-    expect(r1.reassigned).toContain(id);
-    expect(statusOf(db, id)).toBe("peer_review"); // 재배정만, 아직 peer
-    const r2 = sweepStaleProposals(db, ambientAgents()); // 여전히 stale → degraded
-    expect(r2.degraded).toContain(id);
-    expect(statusOf(db, id)).toBe("gd_report"); // 리뷰 없이 자동 진행(degraded)
+    expect(sweepStaleProposals(db, ambientAgents()).reassigned).toContain(id);
+    expect(ownerOf()).not.toBe(first);
   });
 
   test("정체 아닌(최근) 제안은 sweeper가 건드리지 않는다", async () => {
