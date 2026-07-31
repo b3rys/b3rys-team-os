@@ -202,6 +202,9 @@ function parseCommandApproval(req: ApprovalRequest): CommandParse {
   return { kind: "invalid" };
 }
 
+/** 스캔용 전문을 담을 때의 상한. 이 너머는 ★다시 Tier-D 사각지대★ 다 — 실무 명령 길이보다 훨씬 크게 잡았다. */
+const SCAN_TEXT_LIMIT = 100_000;
+
 /**
  * ★S5 — 긴 명령 두 개가 한 열쇠로 묶이던 것을 닫는다.★
  *
@@ -211,26 +214,32 @@ function parseCommandApproval(req: ApprovalRequest): CommandParse {
  * ★안전한 명령에 '항상 허용' 을 한 번 주면 위험한 명령이 팝업 없이 통과★ 한다.
  *
  * ■ 어떻게 닫나 — ★공용 코드를 건드리지 않는다★ (팀 리드: "사이드이펙트 없이 분리해서")
- * 우리가 만드는 값(op.command) ★안에★ 전체 명령의 지문을 넣는다. 240자 절단선 안에 지문이 있으면
- * 뒤가 잘려도 열쇠가 갈린다. permissionGate 는 그대로 둔다.
+ * 우리가 만드는 값 안에 전체 명령의 지문을 넣어 240자 절단선 안에 살린다. permissionGate 는 그대로.
  *
- * ■ ★지문을 앞에 두는 이유 — 쓰기 경로(S3)와 다르다★
- * S3 에서는 우리가 텍스트를 다 만들었으므로 예산을 떼고 지문을 ★뒤★ 에 뒀다(사람이 읽기 좋게).
- * 여기서는 그럴 수 없다 — ★op.command 는 Tier-D 위험 스캔의 입력★ 이다(permissionGate.operationText).
- * 명령을 240자에 맞춰 자르면 ★그 뒤에 있는 위험한 문자열이 스캔 대상에서 빠진다.★
- * 즉 열쇠를 고치려다 ★검사 범위를 줄이는★ 더 큰 구멍을 만든다.
- * → ★명령 전문은 그대로 두고 지문을 앞에 붙인다.★ 사람이 보는 줄은 `#지문 명령…` 이 된다.
+ * ■ ★두 자리로 나눠 싣는 이유 — 한 필드가 두 가지 일을 하려다 둘 다 놓쳤다★
+ *  · op.command → ★사람이 보는 줄이자 열쇠의 재료★ (target 우선순위 1위, 240자에서 잘림)
+ *  · op.text    → ★위험 스캔용 전문★ (operationText 가 command·path·egress·text 를 이어 Tier-D 에 넣는다)
+ *
+ * 전에는 command 하나에 다 실었고 2000자에서 잘랐다. 그래서 ★2000자를 패딩으로 채우고 그 뒤에 sudo 를 붙이면
+ * 게이트도 못 보고(스캔 밖) 사람도 못 봤다(화면 밖).★ 실측: 2100자 뒤 `; sudo id` → 탐지 0, 400자면 탐지됨.
+ * 전문을 text 로 따로 보내면 탐지가 살아나고, ★열쇠는 안 바뀐다★(target 은 command 가 우선).
+ *
+ * ■ 지문을 뒤에 두는 이유
+ * 스캔이 text 로 옮겨갔으므로 command 는 ★사람이 읽는 일만★ 하면 된다. 그래서 명령을 먼저 보여주고
+ * 지문을 뒤에 붙인다(S3 쓰기 경로와 같은 모양). 예산 안에서 자르므로 지문은 240자 안에 반드시 남는다.
+ * 자를 때는 ★코드포인트 경계★ 로 자른다 — UTF-16 으로 자르면 이모지·한글이 반토막 난다.
  */
-function withCommandDigest(material: string, command: string): string {
-  //  ★지문은 material(원본 구조 전문) 로 만든다 — 화면에 보이는 command 나 잘린 값으로 만들지 않는다.★
-  //  잘린 값으로 만들면 잘린 뒤가 달라도 지문이 같아진다(아메스 실측: 앞 2000자 동일 → 두 번째 'allow').
+function commandOperationFields(material: string, command: string): { command: string; text: string } {
+  //  ★지문은 material(원본 구조 전문) 로 만든다 — 화면용으로 자른 값으로 만들지 않는다.★
+  //  자른 값으로 만들면 잘린 뒤가 달라도 지문이 같아진다(아메스 실측: 앞 2000자 동일 → 두 번째 'allow').
   //
-  //  ★자르지 않은 64 hex 전문을 쓴다.★ 이건 표시용 체크섬이 아니라 ★팝업 우회를 막는 유일한 구분자★ 다.
+  //  ★자르지 않은 64 hex 전문을 쓴다.★ 표시용 체크섬이 아니라 ★팝업 우회를 막는 유일한 구분자★ 다.
   //  12 hex(48비트)면 SAFE/EVIL 후보를 각 2^24개씩 만들어 충돌시키는 게 GPU 로 현실적이다(아메스).
-  //  전문을 써도 240자 target 안에 명령 본문이 ~174자 남는다 — 사람이 읽을 만큼은 보인다.
   const digest = createHash("sha256").update(material).digest("hex");
   // 공백 정규화 후 잘리므로(normalizeText → slice) ★지문 안에는 공백이 없어야 한다.★
-  return `#${digest} ${command}`;
+  const suffix = ` #${digest}`;
+  const visible = cutCodePoints(command, Math.max(0, VISIBLE_BUDGET - suffix.length));
+  return { command: `${visible}${suffix}`, text: command.slice(0, SCAN_TEXT_LIMIT) };
 }
 
 /** M5.1 — codex 승인요청 → PermissionOperation(requestPermission 입력). */
@@ -259,10 +268,10 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
   //  모양으로 판정하면 다음 세대에서 또 조용히 미끄러진다(그게 이 버그의 원인이었다).
   //
   //  ★교환 관계를 명시한다★: 해석되면 열쇠가 '명령' 단위가 되어 '항상 허용' 이 의미를 갖는다(쓸 만해진다).
-  //  ★S5 에서 240자 절단 노출을 닫았다★ — 아래 withCommandDigest 참조.
+  //  ★S5 에서 240자 절단 노출을 닫았다★ — 위 commandOperationFields 참조.
   const parsed = parseCommandApproval(req);
   if (parsed.kind === "ok") {
-    return { runtime: "codex", agent_id: agentId, action: "shell", command: withCommandDigest(parsed.material, parsed.command.slice(0, 2000)), requested_by: agentId, provenance };
+    return { runtime: "codex", agent_id: agentId, action: "shell", ...commandOperationFields(parsed.material, parsed.command), requested_by: agentId, provenance };
   }
   // ★명령 승인이라고 밝혔는데 명령을 못 읽었다 → 여기서 멈춘다.★ 아래 fileChanges 분기로 흘려보내면
   //   혼합 payload 가 write 로 처리되어 fail-closed 계약이 깨진다(Codex 리뷰 2026-07-29).

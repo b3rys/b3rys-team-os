@@ -65,6 +65,15 @@ describe("S5 — '항상 허용' 이 다른 명령으로 새지 않는다 (실�
     expect(decisionAfterAllowAlways(oldGen(["git", "status"]), newGen("git status"))).toBe("approval_required");
   });
 
+  test("★모양이 같아도 method 가 다르면 다시 묻는다★ — 세대 표식이 하는 일", () => {
+    // 위 '세대가 다르면' 시험은 배열 vs 문자열이라 ★모양 차이만으로도 통과한다★ — 세대 표식의 역할을 못 잰다.
+    // (뮤턴트로 확인: 표식을 지워도 그 시험은 초록이었다.)
+    // 실제로 파싱은 method 가 아니라 ★payload 모양으로 분기★ 하므로, 구세대 method 가 문자열을 실어 오는
+    // 입력이 도달 가능하다. 그때 표식이 없으면 두 세대가 ★완전히 같은 재료★ 가 되어 열쇠가 합쳐진다.
+    const oldGenString: ApprovalRequest = { method: "execCommandApproval", params: { command: "git status", cwd: "/tmp" } };
+    expect(decisionAfterAllowAlways(oldGenString, newGen("git status"))).toBe("approval_required");
+  });
+
   test("★같은 명령은 계속 허용된다★ — '항상 허용' 을 망가뜨리지 않았다", () => {
     // ★이 시험이 없으면 위 네 개는 '전부 다시 묻기' 로도 통과한다.★ 즉 기능을 죽여도 초록이 된다.
     expect(decisionAfterAllowAlways(newGen("npm test"), newGen("npm test"))).toBe("allow");

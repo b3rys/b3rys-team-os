@@ -26,8 +26,8 @@ describe("S1 — 신세대 명령 승인 해석", () => {
     const od = buildOperationFromApproval(oldGen(["rm", "-rf", "/tmp/x"]), "dex");
     expect(nw.action).toBe("shell");
     // ★S5 이후: 사람이 읽는 본문은 그대로고, 앞에 전체 지문이 붙는다.★ (240자 절단선 안에 열쇠를 남기려고)
-    expect(nw.command).toMatch(/^#[0-9a-f]{64} rm -rf \/tmp\/x$/);
-    expect(od.command).toMatch(/^#[0-9a-f]{64} rm -rf \/tmp\/x$/);
+    expect(nw.command).toMatch(/^rm -rf \/tmp\/x #[0-9a-f]{64}$/);
+    expect(od.command).toMatch(/^rm -rf \/tmp\/x #[0-9a-f]{64}$/);
   });
 
   test("★S5 에서 뒤집힌 결정★: 세대가 다르면 이제 따로 묻는다 — 합칠 수가 없다", () => {
@@ -58,7 +58,7 @@ describe("S1 — 신세대 명령 승인 해석", () => {
     const op = buildOperationFromApproval(newGen("git status"), "dex");
     // ★명령 본문이 사람 눈에 남는다★ — 지문만 보이는 S0 형식이 아니다. (지문은 앞에 붙는다)
     expect(targetForOperation(op)).toContain("git status");
-    expect(targetForOperation(op)).toMatch(/^#[0-9a-f]{64} git status$/);
+    expect(targetForOperation(op)).toMatch(/^git status #[0-9a-f]{64}$/);
   });
 
   test("서로 다른 명령은 서로 다른 열쇠 · 같은 명령은 같은 열쇠", () => {
@@ -120,7 +120,7 @@ describe("S1 — 신세대 명령 승인 해석", () => {
   test("구세대 배열 경로 불변 — 회귀 가드", () => {
     const op = buildOperationFromApproval(oldGen(["echo", "hi"]), "dex");
     expect(op.action).toBe("shell");
-    expect(op.command).toMatch(/^#[0-9a-f]{64} echo hi$/);
+    expect(op.command).toMatch(/^echo hi #[0-9a-f]{64}$/);
   });
 
   test("구세대 파일 변경 경로 불변 — 회귀 가드", () => {
