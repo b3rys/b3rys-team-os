@@ -50,6 +50,7 @@ const baseEnv = (over: Record<string, unknown>) => ({
   from_agent_id: "bill",
   to_agent_id: "steve",
   body: "@all hello",
+  explicit_recipients: ["bill","steve","demis"],
   source: "agent" as const,
   type: "dm",
   ...over,

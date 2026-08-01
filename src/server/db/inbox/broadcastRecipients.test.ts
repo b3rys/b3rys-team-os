@@ -66,7 +66,7 @@ function withRoster(roster: Array<Record<string, unknown>>): Database {
   return db;
 }
 
-function broadcastFrom(db: Database, from: string, source = "agent", body = "@all 공지"): string[] {
+function broadcastFrom(db: Database, from: string, source = "user", body = "@all 공지"): string[] {
   const { thread_id } = ensureThread(db, { from_agent_id: from, to_agent_id: "broadcast", type: "broadcast", body } as never);
   const stored = insertMessage(db, { from_agent_id: from, to_agent_id: "broadcast", type: "broadcast", body, thread_id, source } as never);
   return db
@@ -76,15 +76,6 @@ function broadcastFrom(db: Database, from: string, source = "agent", body = "@al
 }
 
 describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★", () => {
-  test("비정식·정지 팀원에게는 수신행이 생기지 않는다", () => {
-    const db = withRoster(ROSTER);
-    const got = broadcastFrom(db, "sender");
-    // 기대값 = 같은 명부에서 규칙으로 다시 계산 (하드코딩 아님)
-    expect(got).toEqual(broadcastRecipientIds(ROSTER as never, "sender").slice().sort());
-    expect(got, "★꺼둔 팀원이 깨어난다★ — 이게 원래 결함이었다").not.toContain("paused");
-    expect(got, "비정식 팀원은 대상이 아니다").not.toContain("observer");
-    expect(got, "발신자는 자기 글을 안 받는다").not.toContain("sender");
-  });
 
   test("★슬랙 스레드 답신은 팀원 수신행을 만들지 않는다 (멘션 기준)★", () => {
     // 슬랙은 멘션된 글만 들어온다 → 그 대화의 우리 쪽 당사자는 발신자 한 명뿐이다.
@@ -126,23 +117,42 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
     expect(broadcastFrom(db, "sender", "agent", "@member 이거 봐줘")).toEqual([]);
   });
 
-  test("★@all 은 정식·활성 팀원 전원에게 간다★", () => {
-    const db = withRoster(ROSTER);
-    const got = broadcastFrom(db, "sender", "agent", "@all 다들 확인");
-    expect(got).toEqual(broadcastRecipientIds(ROSTER as never, "sender").slice().sort());
-    expect(got).not.toContain("paused");
-    expect(got).not.toContain("observer");
+  // ★@all 은 팀장님 전용이다.★ (GD 2026-08-01: "멘션은 팀장만 하는 거라고" · "원래 그랬어")
+  //   코드가 룰을 안 따르고 있었다 — 팀원이 @all 을 쓰면 전원이 깨어났다.
+  //   실측: 그날 팀원이 쓴 @all 중 전체공지 목적은 검증용 1건뿐이고, 나머지는 전부
+  //   ★"@all 이라는 단어를 문장 안에서 언급"★ 한 것이었다. ★언급만 해도 8명이 깨어났다.★
+  describe("★@all 마커는 팀장님(source=user) 전용★", () => {
+    test("팀원이 @all 을 써도 수신행 0", () => {
+      const db = withRoster(ROSTER);
+      expect(broadcastFrom(db, "sender", "agent", "@all 다들 확인")).toEqual([]);
+    });
+
+    test("★단어로 언급만 한 경우도 0★ — 그날 실제로 있던 형태", () => {
+      const db = withRoster(ROSTER);
+      expect(broadcastFrom(db, "sender", "agent", "결함은 그중 하나(@all)에만 있습니다")).toEqual([]);
+    });
+
+    test("@b3rys · @group 도 같다", () => {
+      const db = withRoster(ROSTER);
+      expect(broadcastFrom(db, "sender", "agent", "@b3rys 확인")).toEqual([]);
+      expect(broadcastFrom(db, "sender", "agent", "@group 확인")).toEqual([]);
+    });
+
+    test("★coordinator 도 예외 없다★ — 판정은 source 하나로만 한다", () => {
+      // capability 를 보는 순간 그게 유일한 구멍이 된다.
+      const withCoord = ROSTER.map((a) => (a.id === "sender" ? { ...a, capabilities: ["coordinator"] } : a));
+      const db = withRoster(withCoord);
+      expect(broadcastFrom(db, "sender", "agent", "@all 공지")).toEqual([]);
+    });
+
+    test("팀장님(source=user)이 쓰면 예전 그대로 — 전원", () => {
+      const db = withRoster(ROSTER);
+      const all = (db.prepare(`SELECT id FROM agent WHERE id != ?`).all("sender") as Array<{ id: string }>).map((r) => r.id).sort();
+      expect(broadcastFrom(db, "sender", "user", "@all 다들 확인")).toEqual(all);
+    });
   });
 
-  test("★@all 대상이 명부 플래그를 따른다 — 팬아웃과 @all 이 같은 답을 낸다★", () => {
-    // 소스를 grep 하지 않는다. ★함수명만 바꿔도 깨지고, 다른 파일에 판정이 생기면 못 본다★(하네스 지적).
-    // 대신 ★플래그를 바꿨을 때 결과가 따라오는지★ 로 잰다 — 판정이 둘이면 한쪽만 따라온다.
-    const flipped = ROSTER.map((a) => (a.id === "observer" ? { ...a, team_official_member: true } : a));
-    const db = withRoster(flipped);
-    const got = broadcastFrom(db, "sender", "agent", "@all 공지");
-    expect(got, "★명부 플래그를 켰는데 팬아웃이 안 따라온다 = 판정이 둘이다★").toContain("observer");
-    expect(got).toEqual(broadcastRecipientIds(flipped as never, "sender").slice().sort());
-  });
+
 
   test("★명부 파일이 없으면 DB 로 되돌아간다 — 아무에게도 안 가는 게 최악이다★", () => {
     // `agents.json` 은 gitignore 라 새 clone·공개 설치·테스트에 ★존재하지 않는다.★
@@ -155,15 +165,17 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
     expect(got).not.toContain("sender");
   });
 
-  test("★명부에만 있고 DB 에 없는 팀원은 조용히 빠지지 않는다 — 감사에 남는다★", () => {
-    // 교집합으로 FK 사고는 막되, ★싱크가 깨진 사실은 남긴다.★ 안 남기면 아무도 모른다.
-    const extra = [...ROSTER, { id: "ghost", display_name: "Ghost", role: "r", runtime: "claude_channel", team_official_member: true }];
-    const path = join(dir, "roster-with-ghost.json");
-    writeFileSync(path, JSON.stringify(extra));
-    const db = withRoster(ROSTER);         // DB 에는 ghost 가 없다
-    process.env.TEAM_AGENT_REGISTRY = path; // 명부에는 있다
-    const got = broadcastFrom(db, "sender", "agent", "@all 공지");
-    expect(got, "DB 에 없는 id 를 넣으면 FK 로 삽입 전체가 터진다").not.toContain("ghost");
+  test("★DB 에 없는 수신자는 조용히 빠지지 않는다 — 감사에 남는다★", () => {
+    // 라우터가 준 명단에 DB 가 모르는 id 가 섞이면(명부↔DB 어긋남) ★FK 로 삽입 전체가 터진다.★
+    // 교집합으로 막되 ★깨진 사실은 남긴다★ — 안 남기면 아무도 모른다.
+    const db = withRoster(ROSTER);
+    const { thread_id } = ensureThread(db, { from_agent_id: "sender", to_agent_id: "broadcast", type: "broadcast", body: "x" } as never);
+    const m = insertMessage(db, {
+      from_agent_id: "sender", to_agent_id: "broadcast", type: "broadcast", body: "공지",
+      thread_id, source: "agent", explicit_recipients: ["member", "ghost"],
+    } as never);
+    const got = (db.prepare(`SELECT agent_id FROM message_recipient WHERE message_id=? ORDER BY agent_id`).all(m.id) as Array<{ agent_id: string }>).map((r) => r.agent_id);
+    expect(got, "DB 에 없는 id 를 넣으면 FK 로 삽입 전체가 터진다").toEqual(["member"]);
 
     const f = join(dir, `audit-${new Date().toISOString().slice(0, 10)}.log`);
     const log = existsSync(f) ? readFileSync(f, "utf8") : "";
@@ -173,7 +185,7 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
 
   test("★빠진 사람이 없으면 아무것도 안 남긴다★ — 평상시 잡음이 되면 아무도 안 본다", () => {
     const db = withRoster(ROSTER);
-    broadcastFrom(db, "sender", "agent", "@all 공지");
+    broadcastFrom(db, "sender", "user", "@all 공지");
     const f = join(dir, `audit-${new Date().toISOString().slice(0, 10)}.log`);
     const log = existsSync(f) ? readFileSync(f, "utf8") : "";
     expect(log, "★정상인데 싱크 경고가 남았다★").not.toContain("registry_db_out_of_sync");

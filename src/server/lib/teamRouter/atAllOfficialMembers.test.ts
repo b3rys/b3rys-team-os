@@ -12,9 +12,9 @@
  * ★demis 지적 반영★: "지금 명단으로 테스트를 짜면 그 테스트도 같이 통과해버린다."
  * → 그래서 이 테스트는 ★이름을 하드코딩하지 않고★, 새 정식 팀원을 넣었을 때 따라오는지로 잰다.
  */
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, test } from "bun:test";
 import { buildTmuxInjectionPrompt } from "../tmuxInject";
-import { broadcastAudience, routeTeamMessage } from "./ownerDecision";
+import { broadcastAudience, hasBroadcastAllMarker, routeTeamMessage } from "./ownerDecision";
 import { broadcastRecipientIds } from "../agentMembership";
 
 // ★소스가 아니라 실제 렌더 결과를 잰다★ — 소스를 grep 하면 '뺐다' 고 적은 주석까지 걸린다(내가 그랬다).
@@ -76,8 +76,14 @@ describe("★@all 대상은 agents.json 의 정식 팀원 하나만 본다★", 
     // ★설계 논의 중 이 둘을 섞은 적이 있다★ — 다음 사람도 헷갈리니 시험이 막는다.
     const agents = roster();
 
-    // 팀원 방 발언: 멘션 없음 → 전달 0명
-    expect(broadcastAudience("네 확인했습니다").kind).not.toBe("all_hands");
+    // 팀원 방 발언 → 전달 0명.
+    // ★source 를 반드시 넘긴다.★ optional 이라 빼면 어떤 입력이든 통과해서
+    // ★이 단언이 아무것도 안 지키게 된다.★ 그리고 마커까지 붙여서
+    // "멘션이 없어서 0명" 이 아니라 ★"팀원이라서 0명"★ 을 재게 한다.
+    expect(broadcastAudience("네 확인했습니다", "agent").kind).not.toBe("all_hands");
+    expect(broadcastAudience("@all 다들 확인", "agent").kind).not.toBe("all_hands");
+    // 반대 축이 같이 죽지 않았는지 — 팀장님 것은 그대로여야 한다
+    expect(broadcastAudience("@all 다들 확인", "user").kind).toBe("all_hands");
 
     // 팀장님 메시지: 멘션 없음이어도 sticky 가 받는다 (사다리 그대로)
     const d = routeTeamMessage("그럼 그거 진행해줘", agents as never, { activeAssigneeIds: ["m2"] });
@@ -120,5 +126,40 @@ describe("★그룹 주입문은 소유권을 단정하지 않는다 — sticky 
     } as never);
     expect(en).toContain("A message arrived in this group room");
     expect(en).not.toContain("The group router assigned this message to you");
+  });
+});
+
+/**
+ * ★마커 판정 자체를 직접 고정한다 — codex 검수 요청(2026-08-01).★
+ *
+ * 라우팅(broadcastAudience)과 깨움(wakeDispatcher)이 ★서로 다른 판정★ 을 쓰고 있었다.
+ * 라우팅은 stripQuotedForRouting 을 거쳤고, 깨움은 인라인 정규식으로 본문을 날것으로 봤다.
+ * → ★인용·예시 안의 @all 이 깨움만 발동시켰다.★ 두 곳을 hasBroadcastAllMarker 로 모았다.
+ *
+ * 아래는 "무엇이 마커냐" 를 한 곳에 박아둔 것이다. 이게 흔들리면 두 경로가 같이 흔들린다.
+ */
+describe("hasBroadcastAllMarker — 무엇이 마커이고 무엇이 아닌가", () => {
+  test("맨 본문의 @all·@b3rys·@group 은 마커다", () => {
+    expect(hasBroadcastAllMarker("@all 다들 확인")).toBe(true);
+    expect(hasBroadcastAllMarker("@b3rys 공지")).toBe(true);
+    expect(hasBroadcastAllMarker("@group 확인")).toBe(true);
+  });
+
+  test("★코드펜스 안의 @all 은 마커가 아니다★ — 예시를 보여준 것뿐이다", () => {
+    expect(hasBroadcastAllMarker("```\n@all\n```\n이렇게 쓰면 됩니다")).toBe(false);
+  });
+
+  test("★구분선 아래의 @all 은 마커가 아니다★ — 원문 인용부다", () => {
+    expect(hasBroadcastAllMarker("제 의견입니다\n---\n@all 원문")).toBe(false);
+  });
+
+  test("★인용줄(> @all)은 여전히 마커다★ — stripQuotedForRouting 이 제거 대상으로 안 잡는다", () => {
+    // 직관과 어긋나지만 ★기존 동작이고 라우팅도 같게 판정한다.★
+    // 바꾸려면 두 경로가 같이 움직이므로 여기부터 고쳐라.
+    expect(hasBroadcastAllMarker("> @all 원문입니다\n네 확인했습니다")).toBe(true);
+  });
+
+  test("멘션이 없으면 마커가 아니다", () => {
+    expect(hasBroadcastAllMarker("팀 참고만 하십시오")).toBe(false);
   });
 });

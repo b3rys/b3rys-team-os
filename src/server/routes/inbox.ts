@@ -14,8 +14,7 @@ import {
   agentActivity,
   acceptInbound,
 } from "../db/inboxQueries";
-import { hasCapability, coordinatorId } from "../lib/capabilities";
-import type { AgentRecord } from "../types";
+import { coordinatorId } from "../lib/capabilities";
 import { appendAudit } from "../db/queries";
 import { recordReportDelivery } from "../bus/deliveryRecord";
 import { appendAuditFile } from "../lib/auditFile";
@@ -161,15 +160,10 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     //   ★내가 고치려던 것과 무관한 경로를 같이 잘랐다★ — 범위를 좁힌다.
     const slackMetaForGate = findSlackMetaForThread(deps.db, env.thread_id ?? "");
     if (env.source === "agent" && env.to_agent_id === "broadcast" && !slackMetaForGate) {
-      const roster = deps.agents?.() ?? [];
-      const me = roster.find((a) => a.id === env.from_agent_id);
-      // 명부를 못 받으면(구 호출부) coordinator 판정을 할 수 없다 → ★막지 않는다.★
-      // 모르는 것을 '위반' 으로 처리하면 명부 배선이 빠진 경로에서 팀 통신이 통째로 끊긴다.
-      const rosterKnown = roster.length > 0;
-      const isCoordinator = !rosterKnown || (me ? hasCapability(me, "coordinator") : false);
-      const reason = typeof (env as { all_hands?: unknown }).all_hands === "string"
-        ? ((env as { all_hands?: string }).all_hands ?? "").trim()
-        : "";
+      // ★예외는 없다.★ coordinator 도 마찬가지다 (GD 2026-08-01: "coordinator 도 예외 없어").
+      //   그래서 여기서 ★명부·capability 를 보지 않는다★ — 보는 순간 그게 유일한 구멍이 된다.
+      //   (예전엔 `rosterKnown`·`isCoordinator`·`reason` 을 계산했는데, 게이트를 뺄 때
+      //    조건만 지우고 변수가 남아 있었다. 예외 개념이 사라졌으니 계산도 지운다.)
       // ★broadcast 에 대한 답을 broadcast 로 하지 않는다 (GD 2026-08-01)★ — 연쇄의 직접 고리다.
       //   실측: 오늘 47건 중 18건이 이 형태였다. coordinator 라도 막는다(연쇄는 발신자를 안 가린다).
       if (env.in_reply_to) {
