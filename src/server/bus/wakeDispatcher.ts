@@ -801,6 +801,36 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Pro
  *   ★유사도 같은 걸로 서버가 막지 않는다★ (GD). ★팀원이 볼 수 있으면 팀원이 판단한다.★
  */
 
+/**
+ * ★주입문 한 줄을 만드는 곳은 여기 하나다.★
+ *
+ * 왜 함수로 뺐나 — 줄을 만드는 곳이 ★두 군데★ 였다. 팀버스 깨움(`buildTeamContext`)과
+ * 단톡방 인입(`telegramCapture`). 출처 표시를 앞쪽에만 붙였더니 ★단톡방으로 들어오는 주입문은
+ * 그대로 이름만 찍혔다★ — 같은 일을 하는 곳이 둘인데 하나만 고친 것이고, 그게 출처 표시가
+ * 고치려던 결함과 같은 종류다. 판정(`lineOrigin`)만 공유하면 형식이 다시 갈라지므로 ★줄 전체★ 를 공유한다.
+ *
+ * `agentId` 를 주면 자기 글에 ★ 를 붙이고 자신을 "너" 로 부른다. 안 주면(방 전체용 문맥)
+ * 그냥 이름으로 찍는다. `maxChars` 는 호출부가 정한다 — 경로마다 예산이 다르다.
+ */
+export function renderContextLine(
+  m: { from_agent_id?: string | null; to_agent_id?: string | null; body: string; created_at: string; source?: string | null; type?: string | null },
+  opts: { agentId?: string; isGroupThread: boolean; maxChars: number },
+): string {
+  const agentId = opts.agentId;
+  const who = (id: string | null | undefined): string => (id && id === agentId ? "너" : (id ?? "?"));
+  const full = m.body.replace(/\n/g, " ");
+  const cut = full.length > opts.maxChars;
+  const body = cut ? `${full.slice(0, opts.maxChars)} …(잘림: 원문 ${full.length}자)` : full;
+  const mine = m.from_agent_id === agentId;
+  // ★언제 일인지 안 알려주고 있었다.★ (GD 2026-07-13: "오래된걸 주면 안좋은거 아냐?")
+  //   ★맞다 — 오래됐다는 걸 ★모르게★ 주면 나쁘다.★ 3일 전 대화를 지금 일로 착각하면 엉뚱한 걸 실행한다.
+  //   ★알려주면 팀원이 판단한다.★ ("이건 어제 얘기구나") — 빈 문맥보다 낫고, 무표시 옛 문맥보다 안전하다.
+  // ★줄마다 출처를 밝힌다★ (GD 2026-08-02 "출처별로 나누던지(1:1 / 단체 / 팀버스)").
+  //   한 스레드에 방 글·버스 DM·시스템 통지가 ★섞여서★ 들어오는데 줄 모양이 같았다.
+  //   머리말 하나로 뭉뚱그리면 섞인 주입에서 또 틀린다 — 그래서 블록이 아니라 줄에 붙인다.
+  return `${mine ? "★" : " "}(${timeAgo(m.created_at)})[${lineOrigin(m, opts.isGroupThread)} · ${who(m.from_agent_id)} → ${who(m.to_agent_id)}] ${body}`;
+}
+
 /** 문맥에 담는 메시지 수 · 시간창 · 한 건 상한 · 전체 예산. ★실측으로 정했다 (추측 아님)★:
  *   · 한 건 200자였는데 ★웹조사 답변(258자·219자)이 잘렸다★ → 800자
  *   · 전체 예산 8,000자 — 그룹방 최근 12건 실측이 761자였으니 평소엔 근처도 안 간다. ★폭주 방지용 상한.★ */
@@ -842,7 +872,6 @@ export function buildTeamContext(db: Database, threadId: string, agentId?: strin
     }
     if (!recent.length) return "";
 
-    const who = (id: string | null | undefined): string => (id && id === agentId ? "너" : (id ?? "?"));
     // ★잘림이 진짜 답을 잘랐다★ (GD 질문: "메시지가 크면?"). 실측: 최근 121건 중 4건이 200자 초과인데
     //   ★하필 웹조사 답변들이었다★ (라이프치히 258자 · 한스아이슬러 219자) → collector 가 ★잘린 답으로 종합★.
     //   → 한 건 상한을 올리고(800자), ★전체 예산★ 으로 막는다(무한정 커지지 않게).
@@ -851,17 +880,7 @@ export function buildTeamContext(db: Database, threadId: string, agentId?: strin
     let budget = CTX_TOTAL_CHARS;
     for (let i = recent.length - 1; i >= 0; i--) {   // 최신부터 담고, 예산 다 쓰면 옛 것을 버린다
       const m = recent[i]!;
-      const full = m.body.replace(/\n/g, " ");
-      const cut = full.length > CTX_MSG_CHARS;
-      const body = cut ? `${full.slice(0, CTX_MSG_CHARS)} …(잘림: 원문 ${full.length}자)` : full;
-      const mine = m.from_agent_id === agentId;
-      // ★언제 일인지 안 알려주고 있었다.★ (GD 2026-07-13: "오래된걸 주면 안좋은거 아냐?")
-      //   ★맞다 — 오래됐다는 걸 ★모르게★ 주면 나쁘다.★ 3일 전 대화를 지금 일로 착각하면 엉뚱한 걸 실행한다.
-      //   ★알려주면 팀원이 판단한다.★ ("이건 어제 얘기구나") — 빈 문맥보다 낫고, 무표시 옛 문맥보다 안전하다.
-      // ★줄마다 출처를 밝힌다★ (GD 2026-08-02 "출처별로 나누던지(1:1 / 단체 / 팀버스)").
-      //   한 스레드에 방 글·버스 DM·시스템 통지가 ★섞여서★ 들어오는데 줄 모양이 같았다.
-      //   머리말 하나로 뭉뚱그리면 섞인 주입에서 또 틀린다 — 그래서 블록이 아니라 줄에 붙인다.
-      const line = `${mine ? "★" : " "}(${timeAgo(m.created_at)})[${lineOrigin(m, isGroupRoom)} · ${who(m.from_agent_id)} → ${who(m.to_agent_id)}] ${body}`;
+      const line = renderContextLine(m, { agentId, isGroupThread: isGroupRoom, maxChars: CTX_MSG_CHARS });
       if (budget - line.length < 0 && lines.length > 0) break;
       budget -= line.length;
       lines.unshift(line);
