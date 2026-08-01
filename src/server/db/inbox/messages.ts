@@ -218,7 +218,19 @@ export function insertMessage(
       const known = new Set(
         (db.prepare(`SELECT id FROM agent`).all() as Array<{ id: string }>).map((r) => r.id),
       );
+      const dropped = recipients.filter((agentId) => !known.has(agentId));
       recipients = recipients.filter((agentId) => known.has(agentId));
+      // ★조용히 빼지 않는다.★ 파일(정본)에 있는데 `agent` 표에 없으면 그건 ★싱크가 깨진 것★ 이다.
+      //   교집합으로 FK 사고는 막되, ★깨진 사실은 남긴다★ — 안 남기면 아무도 모른다 (GD 2026-08-01:
+      //   "싱크가 잘 되게 하고, 문제가 있으면 보이게 하면 되잖아").
+      //   ★빠진 사람이 0명이면 아무것도 안 남긴다★ — 평상시 잡음이 되면 아무도 안 본다.
+      if (dropped.length > 0) {
+        appendAuditFile(env.from_agent_id, "registry_db_out_of_sync", env.thread_id, {
+          missing_in_db: dropped,          // 명부에는 있는데 `agent` 표에 없는 id
+          message_id: id,
+          note: "agents.json 과 DB 가 어긋났다. 이 수신자들은 이번 broadcast 를 못 받았다.",
+        });
+      }
       for (const agentId of recipients) insertRcpt.run(id, agentId, rcptState);
     }
   } else {

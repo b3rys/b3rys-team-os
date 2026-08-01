@@ -16,7 +16,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrate } from "../migrate";
@@ -153,6 +153,30 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
     const got = broadcastFrom(db, "sender");
     expect(got.length, "★명부가 없다고 수신자가 0명이 되면 안 된다★").toBeGreaterThan(0);
     expect(got).not.toContain("sender");
+  });
+
+  test("★명부에만 있고 DB 에 없는 팀원은 조용히 빠지지 않는다 — 감사에 남는다★", () => {
+    // 교집합으로 FK 사고는 막되, ★싱크가 깨진 사실은 남긴다.★ 안 남기면 아무도 모른다.
+    const extra = [...ROSTER, { id: "ghost", display_name: "Ghost", role: "r", runtime: "claude_channel", team_official_member: true }];
+    const path = join(dir, "roster-with-ghost.json");
+    writeFileSync(path, JSON.stringify(extra));
+    const db = withRoster(ROSTER);         // DB 에는 ghost 가 없다
+    process.env.TEAM_AGENT_REGISTRY = path; // 명부에는 있다
+    const got = broadcastFrom(db, "sender", "agent", "@all 공지");
+    expect(got, "DB 에 없는 id 를 넣으면 FK 로 삽입 전체가 터진다").not.toContain("ghost");
+
+    const f = join(dir, `audit-${new Date().toISOString().slice(0, 10)}.log`);
+    const log = existsSync(f) ? readFileSync(f, "utf8") : "";
+    expect(log, "★싱크가 깨졌는데 아무 기록이 없다★").toContain("registry_db_out_of_sync");
+    expect(log).toContain("ghost");
+  });
+
+  test("★빠진 사람이 없으면 아무것도 안 남긴다★ — 평상시 잡음이 되면 아무도 안 본다", () => {
+    const db = withRoster(ROSTER);
+    broadcastFrom(db, "sender", "agent", "@all 공지");
+    const f = join(dir, `audit-${new Date().toISOString().slice(0, 10)}.log`);
+    const log = existsSync(f) ? readFileSync(f, "utf8") : "";
+    expect(log, "★정상인데 싱크 경고가 남았다★").not.toContain("registry_db_out_of_sync");
   });
 
   test("★플래그를 아무도 안 쓰는 명부(공개 설치)에서 0명이 되지 않는다★", () => {
