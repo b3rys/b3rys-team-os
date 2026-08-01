@@ -70,8 +70,11 @@ export function finalizeApprovalDelivery(
  *      (grant 경로는 애초에 내용을 안 보고 준 동의라 재확인할 대상이 없다).
  *      ★남는 한계★: 우리가 결정을 돌려준 ★이후★ codex 가 실행하기까지의 구간은 ★관측 불가★ 다(벤더 안쪽).
  *      어디에 재확인을 두든 그 구간은 남는다 — ★"완전히 닫았다" 고 쓰면 안 된다.★
- *      ※ ★벤더 소스 근거는 ames 단독 확인이고 내가 교차검증하지 않았다★ (로컬에 벤더 소스가 없다).
- *        내가 직접 확인한 것은 ★규격에 patchUpdated 가 존재한다★ 는 것뿐이다(schema 덤프, ServerNotification 68종 중 하나). */
+ *      ※ 벤더 소스 근거는 ★demis 가 같은 소스로 교차확인했다★ (rust-v0.144.6 · HEAD 5d1fbf26, exact tag 일치):
+ *        `default_enabled: false`(features/src/lib.rs:957, Stage::UnderDevelopment) ·
+ *        request_patch_approval 이 changes 를 ★값으로 받아★ call_id 로 oneshot 채널을 걸고 기다린다(session/mod.rs:2249~) ·
+ *        steer 입력은 ★pending_input 으로 큐잉★ 된다(session/mod.rs:3931~). 셋 다 확인했다.
+ *        규격에 patchUpdated 가 존재한다는 것도 직접 확인했다(schema 덤프, ServerNotification 68종 중 하나). */
 export function approvalOperationHash(req: ApprovalRequest): string {
   const p = req.params as Record<string, any>;
   const basis: Record<string, unknown> = {
