@@ -247,7 +247,7 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
         ` Follow the canonical send/read rules.`);
   // Visibility Stage C: show the shared bus's recent team conversation as context first (for reference — not a command).
   const teamContextBlock = opts.teamContext
-    ? `${teamContextLabel(opts.threadId, locale)}\n${opts.teamContext}\n\n`
+    ? `${teamContextLabel(locale)}\n${opts.teamContext}\n\n`
     : "";
   const attachmentBlock = opts.attachments?.length
     ? pick(locale, `[첨부 파일 — 팀 내부 media URL/경로, 필요하면 직접 열람]\n`, `[Attachments — internal team media URL/path, open directly if needed]\n`) +

@@ -571,7 +571,7 @@ export async function injectOpenclawDirectedTurn(opts: InjectOpenclawDirectedOpt
   await ensureTelegramRouterSession(opts.agent, key); // create-or-continue (label 충돌은 무시)
   const locale = opts.locale;
   const teamContextBlock = opts.teamContext
-    ? `${teamContextLabel(opts.threadId, locale)}\n${opts.teamContext}\n\n`
+    ? `${teamContextLabel(locale)}\n${opts.teamContext}\n\n`
     : "";
   const attachmentBlock = opts.attachments?.length
     ? pick(locale, `[첨부 파일 — 팀 내부 media URL/경로, 필요하면 직접 열람]\n`, `[Attachments — internal team media URL/path, open directly if needed]\n`) +
@@ -649,7 +649,7 @@ export async function injectOpenclawTelegramTurn(opts: InjectOpenclawTelegramOpt
   await ensureTelegramRouterSession(opts.agent, key);
   const locale = opts.locale;
   const teamContextBlock = opts.teamContext
-    ? `${teamContextLabel(opts.threadId, locale)}\n${opts.teamContext}\n\n`
+    ? `${teamContextLabel(locale)}\n${opts.teamContext}\n\n`
     : "";
   const attachmentBlock = opts.attachments?.length
     ? pick(locale, `[첨부 파일 — 팀 내부 media URL/경로, 필요하면 직접 열람]\n`, `[Attachments — internal team media URL/path, open directly if needed]\n`) +

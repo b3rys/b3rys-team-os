@@ -152,7 +152,7 @@ export function buildPrompt(opts: HermesTurnOptions): string {
   const msgIsSafe = SAFE_THREAD_RE.test(opts.messageId);
 
   const context = opts.teamContext
-    ? `${teamContextLabel(opts.threadId, locale)}\n${opts.teamContext}\n\n`
+    ? `${teamContextLabel(locale)}\n${opts.teamContext}\n\n`
     : "";
   // (2026-07-10 제거, GD 결정): directReportNote(자가발송 금지 문구)는 hermes 자가발송을 막으려 넣었으나,
   //   이중발송의 진짜 원인은 hermes 자가발송이 아니라 어댑터 double-post(makeHermesAdapter insertMessage+surface)

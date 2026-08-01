@@ -48,7 +48,7 @@ function ownerDmChatId(db: Database): string | undefined {
 }
 import { injectOpenclawTelegramTurn, injectOpenclawDirectedTurn } from "../lib/openclawBridge";
 import { reactTelegramAsHermes, runHermesTeamTurn, HERMES_TURN_TIMEOUT_MS } from "../lib/hermesBridge";
-import { getChannel, resolveThreadKind } from "../channels/registry";
+import { getChannel, lineOrigin, resolveThreadKind } from "../channels/registry";
 import { coordinatorId } from "../lib/capabilities";
 import { ambientAgents } from "../lib/registry";
 import { buildDedupeKey } from "../../shared/envelopeSchema";
@@ -848,7 +848,10 @@ export function buildTeamContext(db: Database, threadId: string, agentId?: strin
       // ★언제 일인지 안 알려주고 있었다.★ (GD 2026-07-13: "오래된걸 주면 안좋은거 아냐?")
       //   ★맞다 — 오래됐다는 걸 ★모르게★ 주면 나쁘다.★ 3일 전 대화를 지금 일로 착각하면 엉뚱한 걸 실행한다.
       //   ★알려주면 팀원이 판단한다.★ ("이건 어제 얘기구나") — 빈 문맥보다 낫고, 무표시 옛 문맥보다 안전하다.
-      const line = `${mine ? "★" : " "}(${timeAgo(m.created_at)})[${who(m.from_agent_id)} → ${who(m.to_agent_id)}] ${body}`;
+      // ★줄마다 출처를 밝힌다★ (GD 2026-08-02 "출처별로 나누던지(1:1 / 단체 / 팀버스)").
+      //   한 스레드에 방 글·버스 DM·시스템 통지가 ★섞여서★ 들어오는데 줄 모양이 같았다.
+      //   머리말 하나로 뭉뚱그리면 섞인 주입에서 또 틀린다 — 그래서 블록이 아니라 줄에 붙인다.
+      const line = `${mine ? "★" : " "}(${timeAgo(m.created_at)})[${lineOrigin(m, isGroupRoom)} · ${who(m.from_agent_id)} → ${who(m.to_agent_id)}] ${body}`;
       if (budget - line.length < 0 && lines.length > 0) break;
       budget -= line.length;
       lines.unshift(line);
