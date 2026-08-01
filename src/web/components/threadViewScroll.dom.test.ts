@@ -116,7 +116,7 @@ describe("ThreadView scroll retention", () => {
       })) as unknown as typeof fetch;
     try {
       st.setThreads([thread as never]);
-      st.setThreadMessages("th-scroll", [msg("m1", "첫 보고"), msg("m2", "둘째 보고")] as never);
+      st.setThreadMessages("th-scroll", [msg("m1", "**첫** 보고"), msg("m2", "둘째 보고")] as never);
       renderThreadView(root);
       st.selectThread("th-scroll");
 
@@ -125,6 +125,8 @@ describe("ThreadView scroll retention", () => {
       mockMetrics(body!);
       // 전제 확인: 메시지 2개 → scrollHeight 1000, 뷰포트 400 → 스크롤 가능.
       expect(body!.scrollHeight).toBe(1000);
+      // 인라인 마크다운 배선 가드: **볼드** 가 <strong> 으로 렌더된다 (mdInline, GD 2026-08-01).
+      expect(body!.querySelector("strong")?.textContent).toBe("첫");
 
       // ── 시나리오 1: 위로 스크롤해 읽는 중(120px 지점) + 새 메시지 폴링 도착 ──
       body!.scrollTop = 120;

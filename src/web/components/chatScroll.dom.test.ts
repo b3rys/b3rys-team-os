@@ -17,7 +17,7 @@ const savedGlobals: Record<string, unknown> = {};
 let prevFetch: typeof fetch;
 
 const MSGS = [
-  { id: "c1", thread_id: "dm-user-lisa", from_agent_id: "lisa", to_agent_id: "user", type: "dm", body: "보고 1", source: "agent", hop_count: 0, in_reply_to: null, read_at: null, delivery_status: "delivered", retry_count: 0, expires_at: null, priority: "normal", dedupe_key: null, created_at: "2026-08-01 04:00:00" },
+  { id: "c1", thread_id: "dm-user-lisa", from_agent_id: "lisa", to_agent_id: "user", type: "dm", body: "**보고** 1 <b>x</b>", source: "agent", hop_count: 0, in_reply_to: null, read_at: null, delivery_status: "delivered", retry_count: 0, expires_at: null, priority: "normal", dedupe_key: null, created_at: "2026-08-01 04:00:00" },
   { id: "c2", thread_id: "dm-user-lisa", from_agent_id: "lisa", to_agent_id: "user", type: "dm", body: "보고 2", source: "agent", hop_count: 0, in_reply_to: null, read_at: null, delivery_status: "delivered", retry_count: 0, expires_at: null, priority: "normal", dedupe_key: null, created_at: "2026-08-01 04:01:00" },
 ];
 
@@ -98,6 +98,9 @@ describe("Chat(1:1) scroll retention", () => {
       const wrap = root.querySelector<HTMLElement>("#chat-msgs");
       expect(wrap).not.toBeNull();
       expect(wrap!.children.length).toBe(2);
+      // 인라인 마크다운 배선 가드: **볼드** 는 <strong> 으로, 원문 HTML 은 이스케이프된 채.
+      expect(wrap!.querySelector("strong")?.textContent).toBe("보고");
+      expect(wrap!.querySelector("b")).toBeNull(); // <b>x</b> 가 실제 태그로 들어가면 XSS
       mockMetrics(wrap!); // scrollHeight 1000 · viewport 400
 
       // ── ① 위에서 읽는 중 + 폴링 재렌더(1.5s 주기) → 위치 보존 ──
