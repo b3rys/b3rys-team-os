@@ -155,7 +155,12 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     //
     // 무엇: 팀원(source=agent)이 broadcast 하려면 ★coordinator 능력 + --all-hands 사유★ 둘 다 필요.
     //   팀장님(source=user)의 @all 은 이 게이트를 타지 않는다 — 라우터가 따로 판정한다.
-    if (env.source === "agent" && env.to_agent_id === "broadcast") {
+    // ★슬랙은 제외한다★ (2026-08-01 devon 실측 — 배포 직후 슬랙 답신이 막혔다).
+    //   슬랙 스레드에 답하는 유일한 경로가 `--to broadcast` 다(룰: kind="slack" → --to broadcast).
+    //   게이트의 목적은 ★단톡방 연쇄★ 를 끊는 것이지 슬랙 응답을 막는 것이 아니다.
+    //   ★내가 고치려던 것과 무관한 경로를 같이 잘랐다★ — 범위를 좁힌다.
+    const slackMetaForGate = findSlackMetaForThread(deps.db, env.thread_id ?? "");
+    if (env.source === "agent" && env.to_agent_id === "broadcast" && !slackMetaForGate) {
       const roster = deps.agents?.() ?? [];
       const me = roster.find((a) => a.id === env.from_agent_id);
       // 명부를 못 받으면(구 호출부) coordinator 판정을 할 수 없다 → ★막지 않는다.★
