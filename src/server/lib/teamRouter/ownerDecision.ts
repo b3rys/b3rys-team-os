@@ -10,6 +10,7 @@ import {
   classifyIntent,
 } from "./_shared";
 import { coordinatorId } from "../capabilities";
+import { broadcastRecipientIds } from "../agentMembership";
 import { detectExplicitTargets, stripQuotedForRouting } from "./mention";
 import { routeDefaultIntakeLLM } from "./defaultIntake";
 
@@ -25,13 +26,34 @@ const BROADCAST_MARKER_RE = /@(all|b3rys|group)\b/i;
  *
  * ★명단을 하나로 만드는 게 고침의 핵심이다.★ env 나 보강파일을 "같이 읽게" 하면 명단이 둘로 남아
  * 다음 영입 때 또 갈린다. wake allowlist(`busDispatchAllowlist`)는 별개 관심사라 건드리지 않는다.
+ *
+ * ★판정은 `broadcastRecipientIds` 하나가 한다★ — 팀원 broadcast 팬아웃도 같은 함수를 쓴다.
+ * 여기서 조건을 다시 쓰면 같은 질문에 답이 둘이 되고, 그게 이 결함의 원인이었다.
  */
 function broadcastTargets(agents: AgentRecord[]): string[] {
-  const active = agents.filter((a) => a.enabled !== false);
-  const official = active.filter((a) => a.team_official_member === true);
-  // ★플래그를 아무도 안 쓰는 명부(신규·공개 설치)에서는 전원이 대상이다.★
-  //   여기서 빈 배열을 돌려주면 @all 이 ★아무에게도 안 가는★ 더 나쁜 고장이 된다.
-  return (official.length > 0 ? official : active).map((a) => a.id);
+  return broadcastRecipientIds(agents);
+}
+
+/**
+ * ★방 발언이 팀원 inbox 로 전달될 대상★ — 본문의 멘션으로 정한다.
+ *
+ * 방 게시와 팀원 전달이 `broadcast` 한 단어에 묶여 있어서 ★어디에 말하든 전원이 깨어났다.★
+ * 갈라야 할 축은 "몇 명" 이 아니라 ★"애초에 전달이 필요한 발송인가"★ 다 (GD 2026-08-01).
+ *
+ * 실측(오늘 방 발언 81건): ★멘션 없음 51건 → 답 달린 것 0건★ · 멘션 있음 30건 → 답 27건.
+ * ★멘션 없는 발언에 답이 달린 사례가 하나도 없다★ — 이 축으로 잘라도 끊기는 대화가 없다.
+ * (그 51건은 대부분 팀장님께 드리는 답이었다. 오늘은 게이트 테스트라 평소보다 부풀어 있다.)
+ *
+ * ★멘션 판정은 `detectExplicitTargets` 하나만 쓴다★ — 한글 별칭·조사·인용 제외를 이미 안다.
+ * 여기서 정규식을 새로 쓰면 그게 ★두 번째 판정★ 이 되고, 그게 이 결함의 원인이었다.
+ */
+export function broadcastAudience(
+  text: string,
+  agents: AgentRecord[],
+): { kind: "all_hands" | "mentioned"; mentioned: string[] } {
+  const liveText = stripQuotedForRouting(text);
+  if (BROADCAST_MARKER_RE.test(liveText)) return { kind: "all_hands", mentioned: [] };
+  return { kind: "mentioned", mentioned: detectExplicitTargets(liveText, agents) };
 }
 
 export function routeTeamMessage(

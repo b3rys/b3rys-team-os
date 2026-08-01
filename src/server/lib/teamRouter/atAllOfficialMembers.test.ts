@@ -16,6 +16,8 @@ import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildTmuxInjectionPrompt } from "../tmuxInject";
+import { routeTeamMessage } from "./ownerDecision";
+import { broadcastRecipientIds } from "../agentMembership";
 
 const SRC = readFileSync(
   join(import.meta.dir, "ownerDecision.ts"),
@@ -28,21 +30,50 @@ const INJECT = buildTmuxInjectionPrompt({
   body: "hi", source: "telegram", kind: "group", agentId: "t",
 } as never);
 
+// ★소스 텍스트가 아니라 동작을 잰다.★ 예전 판은 `broadcastTargets` 의 본문을 grep 했는데,
+// 규칙을 공용 함수로 모으자 ★동작이 그대로인데도 시험이 깨졌다.★ 문구를 재고 있었기 때문이다.
+// 지금은 라우터를 실제로 호출하고, 기대값은 같은 명부에서 규칙으로 다시 계산해 비교한다.
+const roster = (extra: Array<Record<string, unknown>> = []) =>
+  [
+    { id: "m1", display_name: "M1", team_official_member: true },
+    { id: "m2", display_name: "M2", team_official_member: true },
+    { id: "observer", display_name: "Ob", team_official_member: false },
+    { id: "paused", display_name: "Pa", team_official_member: true, enabled: false },
+    ...extra,
+  ] as never;
+
+const atAll = (agents: unknown) => routeTeamMessage("@all 대답해봐", agents as never).targetAgentIds.slice().sort();
+
 describe("★@all 대상은 agents.json 의 정식 팀원 하나만 본다★", () => {
-  it("두 번째 명단(BUS_DISPATCH_AGENTS env)을 읽지 않는다 — 갈라지는 원인이었다", () => {
-    const fn = SRC.slice(SRC.indexOf("function broadcastTargets"));
-    const body = fn.slice(0, fn.indexOf("\n}"));
-    expect(body, "★broadcastTargets 가 다시 env 를 읽는다★ — 명단이 둘이 되면 후입 팀원이 또 빠진다.")
-      .not.toContain("BUS_DISPATCH_AGENTS");
-    expect(body, "정식 팀원 플래그를 봐야 한다").toContain("team_official_member");
+  it("두 번째 명단(BUS_DISPATCH_AGENTS env)이 있어도 ★결과가 안 바뀐다★", () => {
+    const before = atAll(roster());
+    const prev = process.env.BUS_DISPATCH_AGENTS;
+    process.env.BUS_DISPATCH_AGENTS = "m1"; // 예전엔 이 값이 대상을 m1 하나로 좁혔다
+    try {
+      expect(atAll(roster()), "★env 가 다시 대상을 좁힌다★ — 명단이 둘이 되면 후입 팀원이 또 빠진다.")
+        .toEqual(before);
+    } finally {
+      if (prev === undefined) delete process.env.BUS_DISPATCH_AGENTS;
+      else process.env.BUS_DISPATCH_AGENTS = prev;
+    }
   });
 
   it("★새 정식 팀원을 넣으면 자동으로 대상에 들어온다★ — 이름을 세지 않고 규칙으로 잰다", () => {
-    const fn = SRC.slice(SRC.indexOf("function broadcastTargets"));
-    const body = fn.slice(0, fn.indexOf("\n}"));
-    // 명단을 나열하는 대신 roster 를 필터하는 형태여야 새 멤버가 따라온다.
-    expect(body).toMatch(/agents\s*\n?\s*\.filter/);
-    expect(body, "비활성 팀원은 제외해야 한다").toContain("enabled");
+    const added = { id: "newbie", display_name: "New", team_official_member: true };
+    expect(atAll(roster([added]))).toContain("newbie");
+    // 비정식·정지 팀원은 따라오지 않는다
+    expect(atAll(roster())).not.toContain("observer");
+    expect(atAll(roster())).not.toContain("paused");
+  });
+
+  it("★두 경로가 같은 답을 낸다★ — 팬아웃과 @all 이 갈리는 게 이 결함이었다", () => {
+    const agents = roster();
+    expect(atAll(agents)).toEqual(broadcastRecipientIds(agents as never).slice().sort());
+  });
+
+  it("★플래그를 아무도 안 쓰는 명부에서 대상이 0명이 되지 않는다★ (공개 설치)", () => {
+    const flagless = [{ id: "a", display_name: "A" }, { id: "b", display_name: "B" }] as never;
+    expect(atAll(flagless)).toEqual(["a", "b"]);
   });
 
   it("wake allowlist 와 섞지 않는다 — 관심사가 다르다", () => {

@@ -4,6 +4,9 @@ import type { EnvelopeInbound, EnvelopeStored } from "../../../shared/envelopeSc
 import { MAX_HOPS_DEFAULT } from "../../../shared/envelopeSchema";
 import { type MessageRow, type ThreadRow, rowToEnvelope } from "./_shared";
 import { appendAuditFile } from "../../lib/auditFile";
+import { broadcastRecipientIds } from "../../lib/agentMembership";
+import { broadcastAudience } from "../../lib/teamRouter/ownerDecision";
+import { ambientAgents } from "../../lib/registry";
 import { applyAckClose, applyActivityAutoAck } from "../../bus/ackClose";
 
 export function ensureThread(
@@ -153,15 +156,45 @@ export function insertMessage(
       `INSERT OR IGNORE INTO message_recipient (message_id, agent_id, delivery_state, recipient_state, close_reason, state_source)
        VALUES (?, ?, ?, 'acknowledged', 'broadcast_fyi', 'system')`,
     );
-    if (env.explicit_recipients && env.explicit_recipients.length > 0) {
+    // ★슬랙 스레드에 답하는 broadcast 는 팀원 수신행을 만들지 않는다.★ (GD 2026-08-01)
+    //   슬랙은 ★멘션 기준★ 으로만 동작한다 — 들어오는 것도 멘션된 글뿐이고, 그 대화의 우리 쪽
+    //   당사자는 ★멘션받은 한 명(= 지금 답을 쓰는 발신자)★ 이다. 나머지 팀원은 그 대화와 무관하다.
+    //   실측: 슬랙 스레드 수신행 60건 중 ★읽음 0★ · 그 스레드에 글을 쓴 팀원은 발신자 본인뿐이었다.
+    //
+    //   ★빈 배열을 넘기는 방식으로는 못 막는다★ — 아래 조건이 `length > 0` 이라 빈 배열은
+    //   else 로 떨어져 ★조용히 전원으로 되돌아간다.★ 그래서 여기서 분기한다.
+    const isSlackThread = !!findSlackMetaForThread(db, env.thread_id)
+      || !!(env.meta as { slack?: { channel?: string } } | undefined)?.slack?.channel;
+
+    if (isSlackThread) {
+      // 수신행 없음. 메시지 자체는 저장되고, 슬랙 릴레이(routes/slack.ts)가 실제 발송을 한다.
+    } else if (env.explicit_recipients && env.explicit_recipients.length > 0) {
       for (const agentId of env.explicit_recipients) {
         if (agentId !== env.from_agent_id) insertRcpt.run(id, agentId, rcptState);
       }
     } else {
-      const recipients = db
-        .prepare(`SELECT id FROM agent WHERE id != ?`)
-        .all(env.from_agent_id) as Array<{ id: string }>;
-      for (const a of recipients) insertRcpt.run(id, a.id, rcptState);
+      // ★수신자 판정은 `broadcastRecipientIds` 하나가 한다★ — @all(ownerDecision)과 같은 함수다.
+      //   예전엔 여기서 `SELECT id FROM agent` 로 ★DB 전원★ 을 넣었다. 그런데 `agent` 테이블에는
+      //   `team_official_member`·`enabled` 컬럼이 ★없어서★ 규칙을 적용할 방법 자체가 없었다.
+      //   그래서 같은 질문에 답이 둘이 됐다 — 실측: @all 9명 vs 팀원 broadcast 11명(꺼진 팀원 포함).
+      //   명부(agents.json)는 `ambientAgents()` 가 mtime 캐시로 읽으므로 배관을 새로 팔 필요가 없다.
+      //
+      //   ★명부 파일이 아예 없을 때는 DB 로 되돌아간다 — 이건 예외지 기본이 아니다.★
+      //   `agents.json` 은 gitignore 라 ★새 clone·공개 설치·테스트에는 존재하지 않는다.★
+      //   그때 규칙만 믿으면 빈 목록이 되어 ★broadcast 가 아무에게도 안 간다★ — 원래 결함보다 나쁘다.
+      //   (플래그가 비어 있는 것과 ★명부 자체가 없는 것★ 은 다르다. 앞은 규칙이 전원으로 답하지만
+      //    뒤는 답할 대상 자체가 없다.)
+      //
+      //   ★전달 대상은 본문의 멘션이 정한다★ — @all 이면 정식팀원 전원, @이름이면 그 사람만,
+      //   멘션이 없으면 0명이다(방에는 그대로 게시된다). 실측: 멘션 없는 방 발언 51건 중
+      //   ★답이 달린 것 0건★ — 잘라도 끊기는 대화가 없다. 판정은 `broadcastAudience` 하나가 한다.
+      const roster = ambientAgents();
+      const audience = broadcastAudience(env.body ?? "", roster);
+      const recipients = roster.length > 0
+        ? broadcastRecipientIds(roster, env.from_agent_id, audience.kind, audience.mentioned)
+        : (db.prepare(`SELECT id FROM agent WHERE id != ?`).all(env.from_agent_id) as Array<{ id: string }>)
+            .map((r) => r.id);
+      for (const agentId of recipients) insertRcpt.run(id, agentId, rcptState);
     }
   } else {
     // Team Bus v1: also insert a message_recipient row for direct (non-broadcast) messages
