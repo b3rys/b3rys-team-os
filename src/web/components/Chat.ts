@@ -6,6 +6,7 @@ import { apiBase } from "../ws";
 import { agentIconName, renderIcon } from "../icons";
 import { renderAgentIcon } from "../agentColors";
 import { pick } from "../i18n";
+import { captureScrollStick, applyScrollStick, stickToBottom } from "../lib/scrollStick";
 
 function api(path: string): string { return `${apiBase()}/api${path}`; }
 function escape(s: unknown): string {
@@ -90,13 +91,16 @@ export function renderChat(root: HTMLElement): void {
     void fetchMsgs(); startPoll();
   }
 
-  function paintMessages(): void {
+  // forceStick: 내가 보낸 직후엔 위에서 읽던 중이어도 바닥으로(내 말풍선 확인) — 그 외 재렌더는
+  // 바닥 근처일 때만 stick, 위로 스크롤해 읽는 중이면 위치 보존(scrollStick, GD 2026-08-01).
+  function paintMessages(forceStick = false): void {
     const wrap = root.querySelector<HTMLElement>("#chat-msgs");
     if (!wrap) return;
     if (!msgs.length) {
       wrap.innerHTML = `<div class="h-full flex items-center justify-center text-slate-500 text-sm">${pick("아직 대화가 없습니다. 첫 메시지를 보내보세요.", "No messages yet. Send the first one.")}</div>`;
       return;
     }
+    const stick = forceStick ? stickToBottom() : captureScrollStick(wrap);
     const agents = store.getState().agents;
     const nameOf = (id: string) => agents.find((a) => a.id === id)?.display_name ?? id;
     wrap.innerHTML = msgs.map((m) => {
@@ -112,7 +116,7 @@ export function renderChat(root: HTMLElement): void {
           <div class="max-w-[78%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap ${bubble}">${escape(m.body)}</div>
         </div>`;
     }).join("");
-    wrap.scrollTop = wrap.scrollHeight;
+    applyScrollStick(wrap, stick);
   }
 
   function paintShell(): void {
@@ -157,7 +161,7 @@ export function renderChat(root: HTMLElement): void {
         delivery_status: "pending", retry_count: 0, expires_at: null, priority: "normal",
         dedupe_key: null, created_at: new Date().toISOString(),
       }]);
-      paintMessages();
+      paintMessages(true); // 내 전송 직후는 항상 바닥으로 — 내 말풍선이 보여야 한다
       void send(v);
     });
     input?.focus();
