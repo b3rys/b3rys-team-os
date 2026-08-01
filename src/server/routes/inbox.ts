@@ -14,6 +14,8 @@ import {
   agentActivity,
   acceptInbound,
 } from "../db/inboxQueries";
+import { hasCapability, coordinatorId } from "../lib/capabilities";
+import type { AgentRecord } from "../types";
 import { appendAudit } from "../db/queries";
 import { recordReportDelivery } from "../bus/deliveryRecord";
 import { appendAuditFile } from "../lib/auditFile";
@@ -143,6 +145,50 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         .get(env.in_reply_to) as { thread_id: string } | undefined;
       if (parentThread?.thread_id) env = { ...env, thread_id: parentThread.thread_id };
     }
+    // ★팀원 broadcast 게이트 (GD 2026-08-01)★
+    //
+    // 왜: `--to broadcast` 는 ★누구나 아무 때나★ 칠 수 있었고 검사도 기록도 없었다.
+    //   실측(70분): 팀원 broadcast ★47건 → wake 517회★. 1건이 11명을 깨우고, 깨어난 사람이 또 쏜다.
+    //   ★팀장님 @all 은 7명인데 팀원 혼잣말이 11명을 깨웠다★ — 구조가 뒤집혀 있었다.
+    //   룰에는 이미 "결과는 TERMINAL, 확인 답장 금지" 가 있었지만 지켜지지 않았다(내가 47건 중 5건).
+    //   → 판단을 9명에게 맡기지 않고 ★coordinator 한 곳으로 모은다.★
+    //
+    // 무엇: 팀원(source=agent)이 broadcast 하려면 ★coordinator 능력 + --all-hands 사유★ 둘 다 필요.
+    //   팀장님(source=user)의 @all 은 이 게이트를 타지 않는다 — 라우터가 따로 판정한다.
+    if (env.source === "agent" && env.to_agent_id === "broadcast") {
+      const roster = deps.agents?.() ?? [];
+      const me = roster.find((a) => a.id === env.from_agent_id);
+      // 명부를 못 받으면(구 호출부) coordinator 판정을 할 수 없다 → ★막지 않는다.★
+      // 모르는 것을 '위반' 으로 처리하면 명부 배선이 빠진 경로에서 팀 통신이 통째로 끊긴다.
+      const rosterKnown = roster.length > 0;
+      const isCoordinator = !rosterKnown || (me ? hasCapability(me, "coordinator") : false);
+      const reason = typeof (env as { all_hands?: unknown }).all_hands === "string"
+        ? ((env as { all_hands?: string }).all_hands ?? "").trim()
+        : "";
+      // ★broadcast 에 대한 답을 broadcast 로 하지 않는다 (GD 2026-08-01)★ — 연쇄의 직접 고리다.
+      //   실측: 오늘 47건 중 18건이 이 형태였다. coordinator 라도 막는다(연쇄는 발신자를 안 가린다).
+      if (env.in_reply_to) {
+        const parent = deps.db
+          .prepare(`SELECT to_agent_id FROM message WHERE id = ?`)
+          .get(env.in_reply_to) as { to_agent_id?: string } | undefined;
+        if (parent?.to_agent_id === "broadcast") {
+          return c.json({
+            error: "broadcast_reply_to_broadcast",
+            detail: "broadcast 에 대한 답은 broadcast 로 보내지 않습니다. 발신자에게 --to <이름>, 팀장님께는 --direct-to-gd 로 보내십시오.",
+          }, 403);
+        }
+      }
+      if (rosterKnown && (!isCoordinator || reason.length === 0)) {
+        return c.json({
+          error: "broadcast_not_allowed",
+          detail: !isCoordinator
+            ? "broadcast 는 coordinator 만 보낼 수 있습니다. 답/결과는 요청자에게 --to <이름>, 팀장님께는 --direct-to-gd 로 보내십시오."
+            : "broadcast 에는 --all-hands \"<이유>\" 가 필요합니다. 전원이 봐야 하는 사실인지 한 줄로 적으십시오.",
+          coordinator: coordinatorId(roster) ?? null,
+        }, 403);
+      }
+    }
+
     // Phase 2a: dedupe(60s) + ensureThread + insertMessage + (audit) + broadcast → 공통 acceptInbound (P2)
     // audit는 onInserted(insert직후·broadcast직전)에 둬 기존 insert→audit→broadcast 순서 보존(Steve·Codex 리뷰 ②).
     const accepted = acceptInbound(deps.db, env, {

@@ -66,7 +66,7 @@ const app = (db: Database) =>
     broadcast: () => {},
     registeredAgentIds: () => new Set(["bill", "steve"]),
     agents: () => [
-      { id: "bill", display_name: "Bill" } as never,
+      { id: "bill", display_name: "Bill", capabilities: ["coordinator"] } as never,
       { id: "steve", display_name: "Steve" } as never,
     ],
   } as never);
@@ -79,6 +79,7 @@ const post = (db: Database, body: Record<string, unknown>) =>
   });
 
 const bcast = (thread: string) => ({
+  all_hands: "게시 경로 테스트",
   thread_id: thread,
   from_agent_id: "bill",
   to_agent_id: "broadcast",
@@ -144,16 +145,16 @@ describe("--to broadcast → 언제나 단톡방", () => {
     ).run();
     db.prepare(
       `INSERT INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, created_at)
-       VALUES ('ASK1','collect-1','steve','bill','dm','이 코드 어떻게 생각해?','agent',datetime('now'))`,
+       VALUES ('ASK1','collect-1','bill','steve','dm','이 코드 어떻게 생각해?','agent',datetime('now'))`,
     ).run();
 
-    // bill 이 그 질문에 ★--to broadcast 로 잘못★ 답한다 (hermes 가 실제로 이러는 습관)
+    // steve(=coordinator 아님) 가 그 질문에 ★--to broadcast 로 잘못★ 답한다 — 오늘 47건의 전형
     const res = await app(db).request("/inbox", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         thread_id: "collect-1",
-        from_agent_id: "bill",
+        from_agent_id: "steve",
         to_agent_id: "broadcast",
         in_reply_to: "ASK1",
         body: "내부 검토 결과입니다 — 아직 공개 못 할 내용.",
@@ -162,16 +163,24 @@ describe("--to broadcast → 언제나 단톡방", () => {
       }),
     });
 
-    expect(res.status).toBe(201);
-    // ★서버가 고치지 않는다★ — 예전엔 여기서 'steve' 로 바꿔치기했다
-    const row = db.prepare(`SELECT to_agent_id FROM message WHERE in_reply_to='ASK1'`).get() as {
-      to_agent_id: string;
-    };
-    expect(row.to_agent_id).toBe("broadcast");
-    // ★방에 뜬다 — 팀원이 그렇게 보냈으니까.★ 조용히 사라지거나 몰래 고쳐지지 않는다.
-    expect(sent).toHaveLength(1);
-    // 그리고 stored 를 보고 보내므로 ★저장된 것 = 보낸 것★ 은 그대로 유지된다.
-    expect(sent[0]?.target).toBe(GROUP_ID);
+    // ★계약이 바뀌었다 (GD 2026-08-01)★: 1:1 질문에 broadcast 로 답하는 것은 ★거부★ 한다.
+    //   예전엔 그대로 방에 올렸다("서버가 몰래 고치지 않는다"). 그 정신은 유지하되 —
+    //   ★서버가 주소를 고쳐주지도, 조용히 버리지도 않는다. 이유를 붙여 거부하고 팀원이 다시 보낸다.★
+    //   오늘 이 형태가 소음의 본체였다(70분간 47건 → wake 517회).
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error?: string; detail?: string };
+    expect(body.error).toBe("broadcast_not_allowed");
+    expect(body.detail, "★어떻게 보내야 하는지 알려줘야 한다 — 거부만 하면 팀원이 헤맨다★")
+      .toContain("--to <이름>");
+    // ★조용히 사라지지 않는다★ — 저장도 안 된다(거부이므로). 팀원은 에러를 보고 다시 보낸다.
+    const row = db.prepare(`SELECT to_agent_id FROM message WHERE in_reply_to='ASK1'`).get() as
+      | { to_agent_id: string }
+      | undefined;
+    expect(row ?? undefined, "★거부했으면 저장하면 안 된다★").toBeUndefined();
+    // ★방에도 안 뜬다★ — 거부했으니 게시할 것이 없다.
+    //   예전 계약은 "잘못 보냈어도 방에 뜬다(숨기지 않는다)" 였다. 지금은 ★애초에 안 받는다.★
+    //   숨기는 것과 다르다 — 팀원은 403 과 이유를 받고 `--to <이름>` 으로 다시 보낸다.
+    expect(sent, "★거부한 메시지가 방에 나갔다★").toHaveLength(0);
   });
 
   test("팀원에게 보내는 건(--to steve) 방에 안 나간다 — 버스는 함수호출 채널이다", async () => {

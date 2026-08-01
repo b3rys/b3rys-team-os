@@ -63,8 +63,14 @@ describe("★그룹 주입문은 소유권을 단정하지 않는다 — sticky 
   it("owner 규칙을 주입문에 ★적지도 않는다★ — 룰이 정본이고 두 곳에 적으면 어긋난다", () => {
     // 이 파일의 기존 계약(tmuxInject.test.ts)이 그렇게 못박고 있다: 주입문은 '사실' 만 준다.
     // 그래서 소유권 단정을 빼되, owner 규칙을 대신 넣지도 않는다. 남는 건 "어느 방·어느 스레드" 뿐이다.
-    expect(INJECT).toContain("이 방에 올라온 메시지입니다");
-    expect(INJECT).toContain("A message arrived in this group room");
+    expect(INJECT).toContain("이 방에 올라온 메시지입니다");   // ko 렌더
     expect(INJECT).not.toContain("owner 규칙이 정합니다");
+    const en = buildTmuxInjectionPrompt({
+      session: "claude-t", fromLabel: "bill", locale: "en",
+      threadId: "tg--2000000000001", messageId: "m1", inReplyTo: "p1", hopCount: 1,
+      body: "hi", source: "telegram", kind: "group", agentId: "t",
+    } as never);
+    expect(en).toContain("A message arrived in this group room");
+    expect(en).not.toContain("The group router assigned this message to you");
   });
 });
