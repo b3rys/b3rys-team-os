@@ -689,13 +689,17 @@ export async function injectOpenclawTelegramTurn(opts: InjectOpenclawTelegramOpt
     //   broadcast 를 두 번 금지하고, 누구에게 답할지·재실행 말지까지 지시했다 — 전부 룰(§2 owner, §5 협업)에
     //   이미 있는 것을 주입문이 변형해서 다시 말한 것이다. 룰과 주입문이 어긋나면 팀원은 주입문을 따른다.
     //   남기는 것: ①이건 흘러가는 그룹 대화가 아니라 너에게 배정된 작업이다 ②[B] 불변식 ③이 방의 thread id
+    //   ★2026-08-01: '라우터가 당신에게 배정했습니다' 를 뺐다★ — tmuxInject 와 같은 수정.
+    //   kind 기본값이 'group' 이라 ★그룹 메시지 수신자 전원에게★ 그 문장이 나갔고,
+    //   깨어난 전원이 자기가 owner 라고 읽어 ★@mention·sticky 가 무력화됐다.★
+    //   claude 경로만 먼저 고쳐 openclaw 3명(devon·codex·brief)이 계속 읽고 있었다(팀장이 잡음).
     //   ④루프 방지 메타. 보내는 법·누구에게·무엇을 금지하는지는 룰이 말한다.
     pick(locale,
-      `b3rys team-collab 라우터가 이 메시지를 당신에게 배정했습니다 — 흘러가는 그룹 대화가 아니라 당신에게 온 명시적 작업입니다. ` +
+      `이 방에 올라온 메시지입니다. ` +
       `★말하려면 직접 보내세요. 안 보내면 아무 말도 안 한 것입니다.★ 턴에 쓴 글은 당신의 메모일 뿐, 아무 데도 안 갑니다(서버가 대신 게시하지 않습니다). ` +
       `이 방의 스레드는 thread="${opts.threadId}" 입니다. 할 말이 없으면 그냥 안 보내면 됩니다.` +
       hopInstruction,
-      `The b3rys team-collab router assigned this message to you — it is not ambient group chatter but an explicit task for you. ` +
+      `A message arrived in this group room. ` +
       `**To speak, you must send. If you do not send, you have said nothing.** Your turn text is your own scratchpad — it goes nowhere (the server does not post it for you). ` +
       `This room's thread is thread="${opts.threadId}". If you have nothing to say, simply do not send.` +
       hopInstruction);

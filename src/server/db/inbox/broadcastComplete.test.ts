@@ -30,7 +30,7 @@ const isActionRequired = (rows: ReturnType<typeof rcpts>) => rows.some((r) => r.
 describe("broadcast complete — FYI 수신행은 action-required로 안 쌓임", () => {
   test("@all(agent broadcast) 수신행은 acknowledged(broadcast_fyi), open 아님", () => {
     const db = setup();
-    const m = insertMessage(db, { thread_id: "t1", from_agent_id: "gd", to_agent_id: "broadcast", type: "broadcast", body: "@all 인사", source: "agent" } as never);
+    const m = insertMessage(db, { thread_id: "t1", from_agent_id: "gd", to_agent_id: "broadcast", type: "broadcast", body: "@all 인사", source: "agent", explicit_recipients: ["bill","steve","demis","dbak"] } as never);
     const rows = rcpts(db, m.id);
     expect(rows.length).toBe(4); // bill·steve·demis·dbak (sender gd 제외)
     for (const r of rows) {
@@ -63,7 +63,7 @@ describe("broadcastOpenBackfill — 기존 open broadcast 행 일회 정리", ()
   test("기존 open broadcast 행 → acknowledged(broadcast_fyi), directed open은 유지", () => {
     const db = setup();
     // 옛 broadcast 행을 강제로 open 으로(fix 전 상태 재현)
-    const m = insertMessage(db, { thread_id: "t1", from_agent_id: "gd", to_agent_id: "broadcast", type: "broadcast", body: "@all 옛인사", source: "agent" } as never);
+    const m = insertMessage(db, { thread_id: "t1", from_agent_id: "gd", to_agent_id: "broadcast", type: "broadcast", body: "@all 옛인사", source: "agent", explicit_recipients: ["steve"] } as never);
     db.prepare(`UPDATE message_recipient SET recipient_state='open', close_reason=NULL WHERE message_id=?`).run(m.id);
     // directed open 도 하나
     const d = insertMessage(db, { thread_id: "t1", from_agent_id: "gd", to_agent_id: "steve", type: "dm", body: "directed", source: "agent" } as never);
@@ -75,7 +75,7 @@ describe("broadcastOpenBackfill — 기존 open broadcast 행 일회 정리", ()
 
   test("idempotent: flag-guard로 2회차 no-op", () => {
     const db = setup();
-    const m = insertMessage(db, { thread_id: "t1", from_agent_id: "gd", to_agent_id: "broadcast", type: "broadcast", body: "@all", source: "agent" } as never);
+    const m = insertMessage(db, { thread_id: "t1", from_agent_id: "gd", to_agent_id: "broadcast", type: "broadcast", body: "@all", source: "agent", explicit_recipients: ["steve"] } as never);
     db.prepare(`UPDATE message_recipient SET recipient_state='open' WHERE message_id=?`).run(m.id);
     broadcastOpenBackfill(db); // migrate()가 이미 한 번 돌려 flag set 됨 → 이건 no-op일 수 있음
     db.prepare(`DELETE FROM runtime_lock WHERE key='broadcast_open_close_v1'`).run();

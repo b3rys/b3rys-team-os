@@ -1,6 +1,7 @@
 ---
 name: b3os-bwf
 description: b3rys 팀 기본 과제 수행 워크플로우(b3os workflow). 과제를 받으면 PM계획→팀배정→실행+품질방법→검증→보고+카드→학습hook 순으로 끝까지 끌고 가는 단일 진입점(stage router). BWF는 harness가 아니다 — harness/multi-ai/judge panel/적대적리뷰는 BWF 안에서 고르는 '품질방법'이다. 과제·프로젝트·구현·리서치·리뷰·릴리즈 등 실행이 필요한 일이면 이 흐름을 기본으로 쓴다. 얇은 오케스트레이터 — 실제 도구는 하위 스킬(task-loop·harness·report·team-inbox·learning-loop) 참조. 전 런타임(claude/openclaw/hermes). owner=maintainer.
+trigger: a confirmed execution/delegation task
 ---
 
 # b3os-bwf — 기본 과제 수행 워크플로우 (stage router)

@@ -1,6 +1,8 @@
 ---
 name: b3os-team-inbox
 description: the team lead AI Team 6 agent 가 message bus 와 대화하는 도구. inbox 조회, 메시지 전송, 읽음 표시. claude_channel runtime agent (maintainer/agent A/agent B/agent C) 가 자기 inbox 폴링하거나 응답할 때 사용. Slack 에서 멘션 받은 후 응답할 때, 다른 agent 와 thread 토론할 때, 사용자에게 보고할 때 모두 이 스킬로 envelope 보냄. ★슬랙에 글을 올리거나 슬랙에서 팀원을 부를 때도 이 스킬(slack-post.sh)을 쓴다 — 슬랙은 @멘션이 없으면 상대에게 도달하지 않는다.★
+trigger: message a teammate
+entry: scripts/send.sh · inbox.sh
 ---
 
 # b3os-team-inbox

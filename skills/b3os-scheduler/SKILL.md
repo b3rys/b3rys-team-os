@@ -1,6 +1,7 @@
 ---
 name: b3os-scheduler
 description: "b3os durable 스케줄러로 반복(cron)·간격(interval)·1회성(reminder) 잡을 등록하는 팀 스킬. 시·분·요일·월 cron + 잡별 휴일정책(run/skip/shift, KST)을 잡 등록 시 받아 team.db에 durable 저장하고, 서버 내 워커가 시각 맞춰 발화(인박스 wake). 세션 cron(런타임별 CronCreate)은 세션 죽으면 유실되므로, 팀 정본 반복작업은 이 스케줄러를 쓴다."
+trigger: schedule recurring work
 ---
 
 # b3os-scheduler — b3os durable 스케줄러

@@ -255,3 +255,65 @@ curl -s localhost:7878/health   # 서버 생존 확인
 - 스키마 변경은 서버 시작 시 `migrate`가 자동 적용하므로 별도 마이그레이션 명령은 없다.
 - 업데이트 후 반드시 대시보드(또는 `GET /team/api/agents`)로 전원 생존을 확인한다.
 - **이 설치·운영 스킬 자체도 매 b3os 버전에서 실제 절차와 어긋나지 않는지 함께 점검**한다(스킬↔버전 싱크).
+
+## 12. 긴급 ALL-STOP (에이전트 폭주·이상 시)
+
+에이전트가 폭주하거나(대량 메시지·외부 API 무한호출·통제 불능) 이상이면 **전부 즉시 중지**하고 복구한다. 긴급 시 **Claude Code + 대시보드/API 가 최후의 통제 지점** — 봇·런타임이 다 죽어도 서버가 살아 있으면 되살릴 수 있다.
+
+**① 유입 차단 (가장 빠름 · 재시작 불필요)** — 라우터를 끄면 팀원이 새 메시지를 **받지 못한다**:
+```bash
+curl -s -X PATCH http://localhost:7878/team/api/system-op \
+  -H 'content-type: application/json' -d '{"router_enabled":false}'
+```
+UI: Settings ▸ 시스템 OP 라우터 토글.
+
+**② 전원 정지**:
+```bash
+curl -s -X POST http://localhost:7878/team/api/members/stop-all
+```
+UI: 대시보드 빨강 **All-Stop** 버튼(더블 컨펌).
+→ 각 팀원의 세션/poller 를 내린다. **복구 코디 역할(coordinator) 팀원은 자동 제외**된다 — 복구 창구를 남기기 위해서다(정말 끄려면 그 팀원만 개별 정지).
+→ b3os 서버(대시보드·API)는 유지된다 = 복구 surface.
+
+**③ 개별 정지**: 대시보드 팀원 Settings ▸ 정지(서킷브레이커), 또는
+`POST /team/api/members/<id>/enabled` 본문 `{"enabled":false}`.
+
+> 위 정지·재시작 API 는 **실행 인가**(`APPROVAL_EXECUTION_ENABLED=1`)가 켜져 있어야 동작한다. 꺼져 있으면 "팀장 인가 필요" 를 돌려준다.
+
+**복구**:
+- 라우터 다시 ON: 위 PATCH 를 `{"router_enabled":true}` 로.
+- 팀원 기동: 대시보드에서 개별 기동, 또는 `POST /team/api/members/restart-all`.
+- 폭주 원인이 특정 팀원이면 **그 팀원만 정지 유지** + 나머지 기동.
+- 상태 확인은 §9(상태 확인)·인수테스트를 쓴다.
+
+## 13. (선택) 재부팅해도 계속 돌게 하기 — 상시가동 등록
+
+> **먼저 알아둘 것: 아무것도 안 해도 된다.** b3os 는 `bun run start` 로 띄워 쓰는 게 기본이고, 아래 등록을
+> **하지 않아도 모든 기능이 정상 동작한다.** 설치·영입 단계에서 이걸 묻지도, 강요하지도 않는다. macOS 전용이다.
+
+사용자가 **원할 때만** 안내한다. 먼저 권하지 않는다.
+
+```bash
+cd "$B3OS"
+bun run service install     # 등록 + 즉시 기동
+bun run service status      # 확인
+bun run service uninstall   # 되돌리기(등록 해제)
+```
+
+등록하면 얻는 것: **재부팅 자동복구** · **터미널/앱을 닫아도 서버 생존** · 맥앱의 **[서버 재시작] 버튼 활성화**.
+
+> **알아둘 점** — macOS 는 사용자 서비스(LaunchAgent)를 **부팅이 아니라 로그인 시점**에 올린다.
+> 그래서 등록해 두더라도 **재부팅 후 로그인을 한 번 해야** 뜬다(자동 로그인을 켜두면 그마저 불필요).
+>
+> 라벨은 `com.$USER.team-collab` 이다(`TEAMOS_LAUNCHD_PREFIX` 로 변경 가능). 멤버 봇 라벨과 같은 규칙이라,
+> 서버·멤버가 한 벌로 관리된다.
+
+**맥앱이 "b3os 스킬로 복구하세요"라고 안내할 때** — 맥앱은 서버가 죽으면 대시보드를 띄울 수 없다(서버가 화면을 내려주기 때문). 그래서 앱은 여기로 안내한다.
+
+```bash
+cd "$B3OS"
+bun run service status     # 상시가동으로 등록돼 있는지 확인
+```
+
+- **등록 안 됨(기본)** → 그냥 다시 띄우면 된다: `bun run start`
+- **등록됨** → `bun run service restart`

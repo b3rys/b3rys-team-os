@@ -145,18 +145,46 @@ describe("3c wake 경계 — comm 매트릭스", () => {
   });
 
   test("broadcast(no @all/@b3rys/@group 마커) → no-wake (inbox-only)", async () => {
-    const row = pendingRowFor(db, "codex", { to_agent_id: "broadcast", type: "broadcast", body: "팀 참고만" });
+    const row = pendingRowFor(db, "codex", { to_agent_id: "broadcast", type: "broadcast", body: "팀 참고만", explicit_recipients: ["codex"] });
     const spy = spyAdapter(() => ({ ok: true }));
     await dispatch(db, row, { openclaw: spy.adapter });
     expect(spy.calls).toBe(0); // 마커 없는 broadcast = inbox-only, no wake
     expect(rcpt(db, row.message_id, "codex")?.last_error).toBe("broadcast_inbox_only_no_wake_marker");
   });
 
-  test("broadcast + @all 마커 → wake (마커 있으면 깨움)", async () => {
-    const row = pendingRowFor(db, "codex", { to_agent_id: "broadcast", type: "broadcast", body: "@all 다들 확인" });
+  // ★기대값을 뒤집었다 — 옛 기대값(1회 깨움)은 사양 위반을 정답으로 고정하고 있었다.★
+  // 마커를 쓸 수 있는 것은 팀장님뿐이라는 계약은 수신행 생성에만 걸려 있었고 깨움에는 없었다.
+  // 그래서 이 시험은 "팀원이 @all 로 전원을 깨운다" 를 지키고 있었다 — 룰에 근거가 없는 동작이다.
+  // 되돌리기 전에 broadcastAudience 의 계약을 먼저 보라. 발신자와 마커를 함께 본다.
+  test("broadcast + @all 마커 + 팀원 발신 → no-wake (마커는 팀장님 전용)", async () => {
+    const row = pendingRowFor(db, "codex", { to_agent_id: "broadcast", type: "broadcast", body: "@all 다들 확인", explicit_recipients: ["codex"], source: "agent" });
     const spy = spyAdapter(() => ({ ok: true }));
     await dispatch(db, row, { openclaw: spy.adapter });
-    expect(spy.calls).toBe(1); // @all 마커 = wake
+    expect(spy.calls).toBe(0); // 팀원의 @all = 효력 없음
+  });
+
+  // ★반대쪽 축 — 팀장님 @all 이 조용해지면 그게 제일 큰 사고다.★
+  // dispatcher 가 팀원 것만 처리한다는 주석은 사실이 아니다: startup cleanup 이
+  // runtime IN ('b3os_native','codex') 인 팀원의 user-source pending 행을 ★일부러 남긴다★.
+  // 그 런타임은 팀장님 메시지를 버스로 받는다 — 이 경로가 실재한다는 증거다.
+  test("broadcast + @all 마커 + 팀장님 발신 → wake (이 경로는 살아 있어야 한다)", async () => {
+    const row = pendingRowFor(db, "codex", { to_agent_id: "broadcast", type: "broadcast", body: "@all 다들 확인", explicit_recipients: ["codex"], source: "user" });
+    const spy = spyAdapter(() => ({ ok: true }));
+    await dispatch(db, row, { openclaw: spy.adapter });
+    expect(spy.calls).toBe(1); // 팀장님의 @all = 깨움
+  });
+
+  // ★통일이 동작으로 고정되는 지점 — 이 시험이 없으면 인라인 정규식을 되넣어도 아무것도 안 깨진다.★
+  // 깨움 판정을 hasBroadcastAllMarker 로 모은 것의 ★유일한 관측 가능한 차이★ 가 여기다.
+  // 인라인 정규식은 본문을 날것으로 봐서 코드펜스 안의 예시까지 마커로 쳤다.
+  // ★인용줄(> @all)로는 이 축을 못 잰다★ — stripQuotedForRouting 이 인용줄을 제거 대상으로 안 잡아
+  // 옛 판정과 새 판정이 ★똑같이 true★ 다. 판별되는 것은 코드펜스·구분선뿐이다.
+  // 발신자를 팀장님으로 두는 것도 의도다 — 그래야 "팀원이라서 0" 이 아니라 ★"마커가 아니라서 0"★ 을 잰다.
+  test("팀장님 발신이어도 ★코드펜스 안의 @all 은 안 깨운다★ — 라우팅과 같은 계약", async () => {
+    const row = pendingRowFor(db, "codex", { to_agent_id: "broadcast", type: "broadcast", body: "이렇게 씁니다:\n```\n@all 다들 확인\n```", explicit_recipients: ["codex"], source: "user" });
+    const spy = spyAdapter(() => ({ ok: true }));
+    await dispatch(db, row, { openclaw: spy.adapter });
+    expect(spy.calls).toBe(0); // 예시로 보여준 @all 은 마커가 아니다
   });
 
   // collect_only 경계 (Codex 적대리뷰 §3c): 수집형 위임 응답은 coordinator wake 억제, 일반 directed Q&A는 wake.
@@ -201,7 +229,7 @@ describe("dispatchRow — plan early-returns (enabled-independent)", () => {
 describe("dispatchRow — plan (needs dispatch enabled)", () => {
   test("broadcast without @all marker → completed (inbox-only), no wake", async () => {
     // broadcast fans out to real members (recipient agent_id != 'broadcast'); pick one.
-    const env = insertMessage(db, { thread_id: "t1", from_agent_id: "steve", to_agent_id: "broadcast", type: "broadcast", body: "팀 공지인데 마커 없음", source: "agent" } as never);
+    const env = insertMessage(db, { thread_id: "t1", from_agent_id: "steve", to_agent_id: "broadcast", type: "broadcast", body: "팀 공지인데 마커 없음", source: "agent", explicit_recipients: ["codex"] } as never);
     const target = (db.prepare(`SELECT agent_id FROM message_recipient WHERE message_id=? LIMIT 1`).get(env.id) as { agent_id: string }).agent_id;
     const row = rowOf(db, env.id, target);
     const claude = spyAdapter(() => ({ ok: true }));

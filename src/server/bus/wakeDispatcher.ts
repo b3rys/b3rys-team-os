@@ -34,6 +34,7 @@ import { insertMessage } from "../db/inboxQueries";
 import { recoverB3osNativeInflight } from "../runtimes/b3osNative/recovery";
 import { recoverCodexInflight } from "../runtimes/codex/recovery";
 import { appendAuditFile } from "../lib/auditFile";
+import { broadcastAudience } from "../lib/teamRouter/ownerDecision";
 import { checkPingpong } from "./antiPingpong";
 import { recordReportDelivery } from "./deliveryRecord";
 import { applySync, mirrorDeadLetter } from "./syncPolicy";
@@ -155,6 +156,7 @@ export function inFlightGraceForRuntime(runtime: string | undefined): number {
   return IN_FLIGHT_GRACE_MS;
 }
 const UNKNOWN_SIDE_EFFECT_DETAIL = "execute_timeout_maybe_partial";
+// ★마커 판정은 한 곳(ownerDecision)만 쓴다★ — 같은 정규식이 두 곳에 있으면 한쪽만 고쳐진다.
 // pre-widen: allowlist of agent IDs to wake-dispatch.
 // BUS_DISPATCH_AGENTS="bill,codex,demis" → only those recipients get dispatched.
 // Recipients not in the list are skipped (row stays 'pending' until they're added).
@@ -1138,13 +1140,18 @@ function buildDispatchPlan(
     return { kind: "skip" };
   }
 
-  // @all-gating (GD 2026-05-27): a broadcast message wakes every recipient ONLY when its body
-  // carries an explicit wake-all marker (@all / @ALL / @b3rys / @group). Without the marker a
-  // broadcast is inbox-only — it lands in each inbox (visible) but does NOT proactively wake.
+  // @all-gating: a broadcast wakes every recipient ONLY when the team lead wrote it AND the body
+  // carries a wake-all marker (@all / @ALL / @b3rys / @group). Without both, a broadcast is
+  // inbox-only — it lands in each inbox (visible) but does NOT proactively wake.
   // Direct messages (to_agent_id != 'broadcast') always wake the addressed recipient.
-  // (user-source broadcasts are already excluded upstream by the source='agent' scope.)
+  //
+  // ★발신자를 함께 본다 — 마커만 보면 안 된다.★ 마커를 쓸 수 있는 것은 팀장님뿐이라는 계약은
+  // 수신행 생성(db/inbox/messages.ts)에서만 걸려 있었고 여기서는 안 걸려 있었다. 그래서
+  // 팀원 broadcast 에 수신행이 생기는 경로가 하나라도 생기면 팀원의 @all 이 전원을 다시 깨웠다.
+  // 지금은 수신행이 0이라 우연히 안전할 뿐이다 — 우연에 기대지 않도록 같은 판정을 여기에도 건다.
+  // 두 곳이 같은 broadcastAudience 를 쓰므로 한쪽만 고쳐서 어긋나는 일이 없다.
   const isBroadcast = row.to_agent_id === "broadcast" || row.type === "broadcast";
-  if (isBroadcast && !/@(all|b3rys|group)\b/i.test(row.body)) {
+  if (isBroadcast && broadcastAudience(row.body, row.source).kind !== "all_hands") {
     db.prepare(
       `UPDATE message_recipient
        SET delivery_state = 'completed',

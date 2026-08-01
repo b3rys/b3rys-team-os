@@ -14,6 +14,7 @@ import {
   agentActivity,
   acceptInbound,
 } from "../db/inboxQueries";
+import { coordinatorId } from "../lib/capabilities";
 import { appendAudit } from "../db/queries";
 import { recordReportDelivery } from "../bus/deliveryRecord";
 import { appendAuditFile } from "../lib/auditFile";
@@ -143,6 +144,50 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         .get(env.in_reply_to) as { thread_id: string } | undefined;
       if (parentThread?.thread_id) env = { ...env, thread_id: parentThread.thread_id };
     }
+    // ★팀원 broadcast 게이트 (GD 2026-08-01)★
+    //
+    // 왜: `--to broadcast` 는 ★누구나 아무 때나★ 칠 수 있었고 검사도 기록도 없었다.
+    //   실측(70분): 팀원 broadcast ★47건 → wake 517회★. 1건이 11명을 깨우고, 깨어난 사람이 또 쏜다.
+    //   ★팀장님 @all 은 7명인데 팀원 혼잣말이 11명을 깨웠다★ — 구조가 뒤집혀 있었다.
+    //   룰에는 이미 "결과는 TERMINAL, 확인 답장 금지" 가 있었지만 지켜지지 않았다(내가 47건 중 5건).
+    //   → 판단을 9명에게 맡기지 않고 ★coordinator 한 곳으로 모은다.★
+    //
+    // 무엇: 팀원(source=agent)이 broadcast 하려면 ★coordinator 능력 + --all-hands 사유★ 둘 다 필요.
+    //   팀장님(source=user)의 @all 은 이 게이트를 타지 않는다 — 라우터가 따로 판정한다.
+    // ★슬랙은 제외한다★ (2026-08-01 devon 실측 — 배포 직후 슬랙 답신이 막혔다).
+    //   슬랙 스레드에 답하는 유일한 경로가 `--to broadcast` 다(룰: kind="slack" → --to broadcast).
+    //   게이트의 목적은 ★단톡방 연쇄★ 를 끊는 것이지 슬랙 응답을 막는 것이 아니다.
+    //   ★내가 고치려던 것과 무관한 경로를 같이 잘랐다★ — 범위를 좁힌다.
+    const slackMetaForGate = findSlackMetaForThread(deps.db, env.thread_id ?? "");
+    if (env.source === "agent" && env.to_agent_id === "broadcast" && !slackMetaForGate) {
+      // ★예외는 없다.★ coordinator 도 마찬가지다 (GD 2026-08-01: "coordinator 도 예외 없어").
+      //   그래서 여기서 ★명부·capability 를 보지 않는다★ — 보는 순간 그게 유일한 구멍이 된다.
+      //   (예전엔 `rosterKnown`·`isCoordinator`·`reason` 을 계산했는데, 게이트를 뺄 때
+      //    조건만 지우고 변수가 남아 있었다. 예외 개념이 사라졌으니 계산도 지운다.)
+      // ★broadcast 에 대한 답을 broadcast 로 하지 않는다 (GD 2026-08-01)★ — 연쇄의 직접 고리다.
+      //   실측: 오늘 47건 중 18건이 이 형태였다. coordinator 라도 막는다(연쇄는 발신자를 안 가린다).
+      if (env.in_reply_to) {
+        const parent = deps.db
+          .prepare(`SELECT to_agent_id, source, from_agent_id FROM message WHERE id = ?`)
+          .get(env.in_reply_to) as { to_agent_id?: string; source?: string; from_agent_id?: string } | undefined;
+        // ★팀장님 @all 에는 방에서 답할 수 있어야 한다★ (2026-08-01 실측 — 배포 후 아무도 방에 답을 못 했다).
+        //   팀장님이 "@all 다들 인지했어?" 라고 물었는데 ★전원이 막혀서 방이 조용해졌다.★
+        //   막으려던 건 ★팀원끼리의 연쇄★ 지 팀장님 호출에 대한 답이 아니다.
+        //   그래서 부모가 팀장님(source=user)이면 통과, ★팀원 broadcast(source=agent)면 차단.★
+        const parentIsLeadCall = parent?.source === "user";
+        if (parent?.to_agent_id === "broadcast" && !parentIsLeadCall) {
+          return c.json({
+            error: "broadcast_reply_to_broadcast",
+            detail: "broadcast 에 대한 답은 broadcast 로 보내지 않습니다. 발신자에게 --to <이름>, 팀장님께는 --direct-to-gd 로 보내십시오.",
+          }, 403);
+        }
+      }
+      // ★coordinator 요구는 뺐다 (2026-08-01 실측)★ — 넣었더니 ★방이 통째로 조용해졌다.★
+      //   팀장님 "@all 다들 인지했어?" 에 아무도 방에 답하지 못했다(전원 1:1 로 우회).
+      //   내가 막으려던 것은 ★연쇄★ 지 방에서 말하는 것 자체가 아니었다. 과녁을 잘못 잡았다.
+      //   → 남기는 규칙은 ★하나뿐★: broadcast 에 broadcast 로 답하지 않는다(위 검사). 그게 고리다.
+    }
+
     // Phase 2a: dedupe(60s) + ensureThread + insertMessage + (audit) + broadcast → 공통 acceptInbound (P2)
     // audit는 onInserted(insert직후·broadcast직전)에 둬 기존 insert→audit→broadcast 순서 보존(Steve·Codex 리뷰 ②).
     const accepted = acceptInbound(deps.db, env, {

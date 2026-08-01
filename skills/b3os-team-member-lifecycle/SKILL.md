@@ -1,6 +1,7 @@
 ---
 name: b3os-team-member-lifecycle
 description: Use when adding, testing, disabling, offboarding, or archiving a b3rys team member across Claude Code channel, OpenClaw, Hermes Agent, or future runtimes.
+trigger: add·remove a member
 ---
 
 # b3rys Team Member Lifecycle
