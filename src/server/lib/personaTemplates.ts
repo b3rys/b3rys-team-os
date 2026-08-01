@@ -35,7 +35,7 @@ function mainWorktreeRoot(start: string): string {
       if (statSync(dotGit).isDirectory()) return dir;         // 메인 워크트리 — 여기가 정답
       const p = readFileSync(dotGit, "utf8").trim();           // "gitdir: /path/<main>/.git/worktrees/<name>"
       const m = /^gitdir:\s*(.+)$/.exec(p);
-      if (m) {
+      if (m?.[1]) {
         const common = m[1].replace(/\/worktrees\/[^/]+\/?$/, ""); // → <main>/.git
         const root = common.replace(/\/\.git\/?$/, "");            // → <main>
         if (root && existsSync(`${root}/rules`)) return root;
@@ -605,14 +605,15 @@ function readSkillTriggers(): Array<{ name: string; trigger: string; script: str
     let trigger = "";
     const head = readFileSync(md, "utf8").slice(0, 4000);
     const fm = /^---\n([\s\S]*?)\n---/.exec(head);
-    if (fm) {
-      const t = /^trigger:\s*(.+)$/m.exec(fm[1]);
-      if (t) trigger = t[1].trim().replace(/^["']|["']$/g, "");
+    const front = fm?.[1];
+    if (front) {
+      const t = /^trigger:\s*(.+)$/m.exec(front);
+      if (t?.[1]) trigger = t[1].trim().replace(/^["']|["']$/g, "");
     }
     let script = "";
-    if (fm) {
-      const e = /^entry:\s*(.+)$/m.exec(fm[1]);   // ★선언한 것만★ — 디렉터리를 뒤져 추측하지 않는다
-      if (e) script = e[1].trim().replace(/^["']|["']$/g, "");
+    if (front) {
+      const e = /^entry:\s*(.+)$/m.exec(front);   // ★선언한 것만★ — 디렉터리를 뒤져 추측하지 않는다
+      if (e?.[1]) script = e[1].trim().replace(/^["']|["']$/g, "");
     }
     if (!trigger) continue;   // ★선언하지 않은 스킬은 나가지 않는다★ — 새 스킬의 기본값은 '비공개'
     out.push({ name, trigger, script });
