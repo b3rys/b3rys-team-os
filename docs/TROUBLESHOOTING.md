@@ -72,6 +72,11 @@ bun run src/server/index.ts
 
 오류가 보이면 **Ctrl+C** 로 끄고, 그 내용을 팀원에게 주면 됩니다.
 
+### Codex 도구 호출 로그
+
+OpenClaw Codex 세션의 도구 호출은 `~/.openclaw/agents/<계정>/agent/codex-home/sessions/YYYY/MM/DD/rollout-*.jsonl` 에 기록됩니다.
+`custom_tool_call`의 도구 이름과 입력을 함께 확인해 실제 파일 읽기 명령의 대상과 대화·검색에 포함된 단순 경로 언급을 구분합니다.
+
 > 💡 **직접 외우거나 적어둘 것이 없습니다.** `team-os` 가 알아서 찾습니다.
 >
 > - **자동실행 이름**(`com.<사용자>.…`)은 설치마다 다릅니다 →
