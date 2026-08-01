@@ -49,7 +49,7 @@ const baseEnv = (over: Record<string, unknown>) => ({
   thread_id: "t1",
   from_agent_id: "bill",
   to_agent_id: "steve",
-  body: "hello",
+  body: "@all hello",
   source: "agent" as const,
   type: "dm",
   ...over,

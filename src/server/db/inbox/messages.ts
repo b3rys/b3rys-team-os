@@ -4,6 +4,9 @@ import type { EnvelopeInbound, EnvelopeStored } from "../../../shared/envelopeSc
 import { MAX_HOPS_DEFAULT } from "../../../shared/envelopeSchema";
 import { type MessageRow, type ThreadRow, rowToEnvelope } from "./_shared";
 import { appendAuditFile } from "../../lib/auditFile";
+import { broadcastRecipientIds } from "../../lib/agentMembership";
+import { broadcastAudience } from "../../lib/teamRouter/ownerDecision";
+import { ambientAgents } from "../../lib/registry";
 import { applyAckClose, applyActivityAutoAck } from "../../bus/ackClose";
 
 export function ensureThread(
@@ -153,15 +156,69 @@ export function insertMessage(
       `INSERT OR IGNORE INTO message_recipient (message_id, agent_id, delivery_state, recipient_state, close_reason, state_source)
        VALUES (?, ?, ?, 'acknowledged', 'broadcast_fyi', 'system')`,
     );
-    if (env.explicit_recipients && env.explicit_recipients.length > 0) {
-      for (const agentId of env.explicit_recipients) {
-        if (agentId !== env.from_agent_id) insertRcpt.run(id, agentId, rcptState);
+    // ★이 변경은 팀원(source=agent) 방 발언에만 적용한다.★ (GD 2026-08-01)
+    //   팀장님 메시지(`user`)와 시스템 공지(`system`)는 ★예전 경로 그대로★ 다 — 팀장님은
+    //   "잘못된 DB 입력을 고치는 것뿐" 으로 범위를 못박으셨고, 장애 통지가 0명이 되면
+    //   ★통째로 사라진다★(어댑터 직삽입이라 릴레이도 안 탄다).
+    //
+    //   ★한 번 이 경계를 잘못 그어서 4경로가 바뀌었다★ — user·system 의 멘션없음(전원→정식만),
+    //   빈 explicit_recipients(전원→0), 슬랙 스레드의 시스템 통지(전원→0). 하네스가 main 과
+    //   대조해서 잡았다. 그래서 지금은 ★분기 자체를 발신자별로 가른다.★
+    if ((env.source ?? "agent") !== "agent") {
+      // ── 팀장님·시스템: main 동작 그대로 ──
+      if (env.explicit_recipients && env.explicit_recipients.length > 0) {
+        for (const agentId of env.explicit_recipients) {
+          if (agentId !== env.from_agent_id) insertRcpt.run(id, agentId, rcptState);
+        }
+      } else {
+        const rows = db.prepare(`SELECT id FROM agent WHERE id != ?`).all(env.from_agent_id) as Array<{ id: string }>;
+        for (const r of rows) insertRcpt.run(id, r.id, rcptState);
       }
     } else {
-      const recipients = db
-        .prepare(`SELECT id FROM agent WHERE id != ?`)
-        .all(env.from_agent_id) as Array<{ id: string }>;
-      for (const a of recipients) insertRcpt.run(id, a.id, rcptState);
+      // ── 팀원 방 발언 ──
+      //   "단톡방에선 내가 멘션한 사람만 얘기하는 거야. ★팀원끼리는 팀버스로.★" (GD)
+      //   방 게시·슬랙 릴레이는 그대로 나간다 — 여기서 만드는 건 ★수신행뿐★ 이다.
+      //   ★예외 하나: 본문에 @all★ → 정식·활성 팀원 전원.
+      //   실측(오늘 방 broadcast 82건): 멘션 없는 발언 51건 중 ★답이 달린 것 0건★ — 잘라도 안 끊긴다.
+      const isSlackThread = !!findSlackMetaForThread(db, env.thread_id)
+        || !!(env.meta as { slack?: { channel?: string } } | undefined)?.slack?.channel;
+
+      let recipients: string[] = [];
+      if (isSlackThread) {
+        // 수신행 없음. 슬랙 릴레이(routes/slack.ts)가 실제 발송을 한다.
+      } else if (env.explicit_recipients !== undefined) {
+        // ★빈 배열도 "라우터가 0명으로 정했다" 는 답이다.★ `length > 0` 이면 빈 배열이 아래로
+        //   떨어져 ★본문 @all 로 다시 팬아웃★ 한다.
+        recipients = env.explicit_recipients.filter((agentId) => agentId !== env.from_agent_id);
+      } else if (broadcastAudience(env.body ?? "").kind === "all_hands") {
+        // ★명부가 없으면(새 clone·공개 설치) DB 로 되돌아간다 — 예외지 기본이 아니다.★
+        //   `agents.json` 은 gitignore 라 파일 자체가 없을 수 있고, 그때 규칙만 믿으면
+        //   @all 이 ★아무에게도 안 간다.★ ★audience 는 그대로 지킨다★ — @all 일 때만 여기다.
+        const roster = ambientAgents();
+        recipients = roster.length > 0
+          ? broadcastRecipientIds(roster, env.from_agent_id)
+          : (db.prepare(`SELECT id FROM agent WHERE id != ?`).all(env.from_agent_id) as Array<{ id: string }>)
+              .map((r) => r.id);
+      }
+
+      // ★이 DB 가 아는 팀원만 넣는다.★ 명부는 프로세스 환경에서 오고 `agent` 표는 이 DB 것이라
+      //   어긋날 수 있다(파일 변경 후 동기화까지 약 0.3초). 어긋난 id 를 넣으면 ★FK 위반으로
+      //   삽입 전체가 터진다.★
+      const known = new Set(
+        (db.prepare(`SELECT id FROM agent`).all() as Array<{ id: string }>).map((r) => r.id),
+      );
+      const dropped = recipients.filter((agentId) => !known.has(agentId));
+      recipients = recipients.filter((agentId) => known.has(agentId));
+      // ★조용히 빼지 않는다.★ 파일(정본)에 있는데 DB 에 없으면 그건 ★싱크가 깨진 것★ 이다.
+      //   ★빠진 사람이 0명이면 아무것도 안 남긴다★ — 평상시 잡음이 되면 아무도 안 본다.
+      if (dropped.length > 0) {
+        appendAuditFile(env.from_agent_id, "registry_db_out_of_sync", env.thread_id, {
+          missing_in_db: dropped,
+          message_id: id,
+          note: "agents.json 과 DB 가 어긋났다. 이 수신자들은 이번 broadcast 를 못 받았다.",
+        });
+      }
+      for (const agentId of recipients) insertRcpt.run(id, agentId, rcptState);
     }
   } else {
     // Team Bus v1: also insert a message_recipient row for direct (non-broadcast) messages

@@ -145,7 +145,7 @@ describe("3c wake 경계 — comm 매트릭스", () => {
   });
 
   test("broadcast(no @all/@b3rys/@group 마커) → no-wake (inbox-only)", async () => {
-    const row = pendingRowFor(db, "codex", { to_agent_id: "broadcast", type: "broadcast", body: "팀 참고만" });
+    const row = pendingRowFor(db, "codex", { to_agent_id: "broadcast", type: "broadcast", body: "팀 참고만", explicit_recipients: ["codex"] });
     const spy = spyAdapter(() => ({ ok: true }));
     await dispatch(db, row, { openclaw: spy.adapter });
     expect(spy.calls).toBe(0); // 마커 없는 broadcast = inbox-only, no wake
@@ -201,7 +201,7 @@ describe("dispatchRow — plan early-returns (enabled-independent)", () => {
 describe("dispatchRow — plan (needs dispatch enabled)", () => {
   test("broadcast without @all marker → completed (inbox-only), no wake", async () => {
     // broadcast fans out to real members (recipient agent_id != 'broadcast'); pick one.
-    const env = insertMessage(db, { thread_id: "t1", from_agent_id: "steve", to_agent_id: "broadcast", type: "broadcast", body: "팀 공지인데 마커 없음", source: "agent" } as never);
+    const env = insertMessage(db, { thread_id: "t1", from_agent_id: "steve", to_agent_id: "broadcast", type: "broadcast", body: "팀 공지인데 마커 없음", source: "agent", explicit_recipients: ["codex"] } as never);
     const target = (db.prepare(`SELECT agent_id FROM message_recipient WHERE message_id=? LIMIT 1`).get(env.id) as { agent_id: string }).agent_id;
     const row = rowOf(db, env.id, target);
     const claude = spyAdapter(() => ({ ok: true }));
