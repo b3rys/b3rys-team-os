@@ -131,13 +131,16 @@ export function installReplyGuardHook(id: string): void {
  *  PreToolUse(pre)=매 툴마다 진행 한 줄 append · Stop(stop)=턴 끝 진행 삭제 · PreCompact(compact)=압축 알림.
  *  봇 컨텍스트(어느 채팅에 쏠지)는 세션 env TELEGRAM_STATE_DIR(텔레그램 채널이 세팅)에서 읽으므로 별도
  *  래퍼/봇-스코프 case 불필요 — 워크스페이스 스코프라 오너·타 봇 무영향(글로벌 telegram-progress.sh 래퍼를
- *  ★공개 사용자·신규 멤버까지★ 대체). claude 런타임 전용. 멱등(evt별 includes 가드). best-effort. */
-export function installProgressHook(id: string): void {
+ *  ★공개 사용자·신규 멤버까지★ 대체). claude 런타임 전용. 멱등(evt별 reconcile). best-effort.
+ *  `roots` 는 ★테스트 이음매★ — 안 주면 실제 경로를 쓴다(실 FS 격리: seedGroupIntoClaudeMembers 와 같은 방식). */
+export function installProgressHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
   assertId(id);
-  const dotClaude = `${MEMBERS_ROOT}/${id}/.claude`;
+  const membersRoot = roots?.membersRoot ?? MEMBERS_ROOT;
+  const repoRoot = roots?.repoRoot ?? REPO_ROOT;
+  const dotClaude = `${membersRoot}/${id}/.claude`;
   const hookDst = `${dotClaude}/hooks/telegram-progress.py`;
   const settingsPath = `${dotClaude}/settings.json`;
-  const src = `${REPO_ROOT}/hooks/telegram-progress.py`;
+  const src = `${repoRoot}/hooks/telegram-progress.py`;
   try {
     if (!existsSync(src)) return; // 소스 없으면 skip
     mkdirSync(`${dotClaude}/hooks`, { recursive: true });
@@ -148,21 +151,47 @@ export function installProgressHook(id: string): void {
       try { const p = JSON.parse(readFileSync(settingsPath, "utf-8")); if (p && typeof p === "object") settings = p; } catch { /* keep {} */ }
     }
     const hooks = (settings.hooks && typeof settings.hooks === "object" ? settings.hooks : {}) as Record<string, unknown>;
-    const addOnce = (evt: string, matcher: string, mode: string) => {
+    // ★"있으면 건너뛴다" 가 아니라 "달라졌으면 맞춘다".★ 예전 구현은 telegram-progress.py 가
+    //   settings.json 에 이미 있으면 통째로 skip 했다. 그래서 커맨드가 바뀌어도(예: env 추가)
+    //   ★기존 멤버는 옛 커맨드를 그대로 들고 있었다★ — 훅 파일만 새것이고 배선은 옛것이 된다.
+    //   실제로 그 상태에서 owner-skip 이 그룹 ID 를 못 구해 fail-open 으로 돌았다.
+    const reconcile = (evt: string, matcher: string, mode: string) => {
       const arr = Array.isArray(hooks[evt]) ? (hooks[evt] as unknown[]) : [];
-      if (!JSON.stringify(arr).includes("telegram-progress.py")) {
-        const entry: Record<string, unknown> = { hooks: [{ type: "command", command: `python3 "${hookDst}" ${mode}` }] };
-        if (matcher) entry.matcher = matcher; // Stop 은 matcher 없음(글로벌 배선과 동형)
-        arr.push(entry);
-      }
+      // ★B3OS_ROOT 를 실어 보낸다★ — 훅은 저장소 밖(멤버 워크스페이스)에서 돌기 때문에
+      //   자기 위치로는 b3os `.env`(TEAM_GROUP_ID)를 못 찾는다. 실 chat_id 는 소스에 안 박는다.
+      const command = `B3OS_ROOT="${repoRoot}" python3 "${hookDst}" ${mode}`;
+      const entry: Record<string, unknown> = { hooks: [{ type: "command", command }] };
+      if (matcher) entry.matcher = matcher; // Stop 은 matcher 없음(글로벌 배선과 동형)
+      const idx = arr.findIndex((e) => JSON.stringify(e).includes("telegram-progress.py"));
+      if (idx < 0) arr.push(entry);
+      else if (JSON.stringify(arr[idx]) !== JSON.stringify(entry)) arr[idx] = entry;
       hooks[evt] = arr;
     };
-    addOnce("PreToolUse", "*", "pre");
-    addOnce("Stop", "", "stop");
-    addOnce("PreCompact", "*", "compact");
+    reconcile("PreToolUse", "*", "pre");
+    reconcile("Stop", "", "stop");
+    reconcile("PreCompact", "*", "compact");
     settings.hooks = hooks;
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
   } catch { /* best-effort */ }
+}
+
+/** 이미 깔려 있는 telegram-progress 훅만 최신으로 맞춘다(새로 깔지는 않는다).
+ *
+ *  ★설치와 수리를 가른다.★ 부팅 백필(`installProgressHook`)은 `PUBLIC_BUILD` 게이트 뒤에 있어
+ *  라이브에서는 안 돈다 — 실멤버 배선 보호가 이유다. 그런데 그 때문에 ★이미 깔린 배선이
+ *  낡아도 아무도 안 고쳤다.★ 훅 파일은 활성화 때만 갱신되고, 커맨드는 위 reconcile 이전엔
+ *  아예 안 갱신됐다. 그 결과가 이번 fail-open 이다.
+ *  → 여기서는 ★배선이 이미 있는 멤버만★ 대상으로 파일·커맨드를 저장소 기준으로 되맞춘다.
+ *    안 깔린 멤버에게 새로 깔지 않으므로 라이브 보호 의도는 그대로다. 멱등이다.
+ */
+export function repairProgressHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
+  assertId(id);
+  const settingsPath = `${roots?.membersRoot ?? MEMBERS_ROOT}/${id}/.claude/settings.json`;
+  try {
+    if (!existsSync(settingsPath)) return;
+    if (!readFileSync(settingsPath, "utf-8").includes("telegram-progress.py")) return; // 안 깔린 멤버는 건드리지 않는다
+  } catch { return; }
+  installProgressHook(id, roots);
 }
 
 /** telegram-progress 훅 제거 — settings.json 의 PreToolUse/Stop/PreCompact 에서 progress 항목 제거 + 훅 파일 삭제. best-effort. */

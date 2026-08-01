@@ -47,15 +47,27 @@ def _react_self_id():
 
 
 def _team_group_env():
-    # team-collab/.env 의 TEAM_GROUP_ID 폴백 (소스에 실 chat_id 비노출). 없으면 "".
-    try:
-        envp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
-        with open(envp) as f:
-            for line in f:
-                if line.startswith("TEAM_GROUP_ID="):
-                    return line.split("=", 1)[1].strip()
-    except Exception:
-        pass
+    """b3os `.env` 의 TEAM_GROUP_ID (소스에 실 chat_id 비노출). 못 찾으면 "".
+
+    ★이 파일은 저장소 밖으로 복사돼서 돈다★ — 런처가 멤버 워크스페이스
+    `<멤버>/.claude/hooks/` 로 깐다. 그래서 자기 위치 기준 `../.env` 는 ★저장소 안에서만★
+    맞고 배포된 자리에서는 `<멤버>/.claude/.env` 를 가리켜 ★존재하지 않는다.★
+    빈 값이 되면 owner-skip 이 fail-open 이라 ★그룹방에서 전원이 반응한다.★
+    → 런처가 훅 커맨드에 실어주는 `B3OS_ROOT` 를 먼저 보고, 없으면 예전 경로로 떨어진다
+      (저장소 안에서 직접 부르는 경우가 그 폴백으로 그대로 산다).
+    """
+    root = os.environ.get("B3OS_ROOT", "")
+    here = os.path.dirname(os.path.abspath(__file__))
+    for envp in ([os.path.join(root, ".env")] if root else []) + [os.path.join(here, "..", ".env")]:
+        try:
+            with open(envp) as f:
+                for line in f:
+                    if line.startswith("TEAM_GROUP_ID="):
+                        v = line.split("=", 1)[1].strip()
+                        if v:
+                            return v
+        except Exception:
+            pass
     return ""
 
 

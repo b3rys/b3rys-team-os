@@ -52,7 +52,7 @@ import { createSchedulerRoutes } from "./routes/scheduler";
 import { createCiStatusRoutes } from "./routes/ciStatus";
 import { ensureDailyTaskReviewJobs, ensureWeeklySelfLearningJobs } from "./scheduler/core";
 import { renderAndRepoint } from "./lib/teamOsRender";
-import { installProgressHook } from "./runtimes/claude/launcher";
+import { installProgressHook, repairProgressHook } from "./runtimes/claude/launcher";
 import { writeMemberPersona, savePersonaFile } from "./lib/writeMemberPersona";
 import { persistOwnerChatIdIfEmpty } from "./runtimes/codex/launcher";
 import { createApprovalsApp } from "./routes/approvals";
@@ -159,6 +159,13 @@ try {
     }
   } catch (e) {
     console.warn("[teamos-render] SHARED.md 생성 실패(계속):", e instanceof Error ? e.message : e);
+  }
+  // ★이미 깔린 progress 훅 배선 수리 — 게이트 밖★ (공개·라이브 공통).
+  //   위 백필은 `PUBLIC_BUILD` 뒤에 있어 라이브에서는 안 돈다. 그래서 ★이미 깔린 배선이 낡아도
+  //   아무도 안 고쳤고★, 훅 커맨드가 옛것으로 남아 owner-skip 이 fail-open 으로 돌았다.
+  //   여기서는 ★배선이 이미 있는 멤버만★ 저장소 기준으로 되맞춘다(새로 깔지 않으므로 실멤버 보호 유지).
+  for (const cid of claudeIds) {
+    try { repairProgressHook(cid); } catch { /* best-effort */ }
   }
   // 공개 빌드 부팅 백필(PUBLIC_BUILD 게이트) — 공개 사용자가 git 업데이트를 pull 한 뒤 재시작하면 기존
   //   멤버도 재영입 없이 최신을 받게. 라이브(PUBLIC_BUILD=false)는 글로벌 배선/실멤버 보호로 skip.
