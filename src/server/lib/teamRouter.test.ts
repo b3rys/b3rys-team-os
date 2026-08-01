@@ -315,7 +315,7 @@ describe("owner inference fallback", () => {
 describe("broadcast marker (@all / @b3rys / @group)", () => {
   const ALL_IDS = agents.map((a) => a.id);
 
-  test("@all → targets all agents in roster, reason=broadcast_marker", () => {
+  test("@all → targets official members (flag unused in this fixture → all), reason=broadcast_marker", () => {
     const d = routeTeamMessage("@all 대답해봐", agents);
     expect(d.reason).toBe("broadcast_marker");
     expect(d.targetAgentIds.sort()).toEqual(ALL_IDS.sort());
