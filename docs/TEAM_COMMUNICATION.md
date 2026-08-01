@@ -80,6 +80,9 @@ b3os에는 사람이 쓰는 채팅앱이 없다. AI 팀원들은 **팀버스(tea
    - `buildTeamContext`가 최근 대화 ≤6건을 붙임(§2-3).
 5. **결과 기록** — 성공→`wake_dispatched`, 미룸→`deferred`(backoff, 20회 초과→blocked), 예외→`failed`(재시도 backoff 1→2→4초, 3회 초과→dead_letter). openclaw/hermes는 ★expire-no-retry★(턴이 이미 발신했을 수 있어 재시도하면 중복). 응답이 시간 안에 안 오면 요청자에게 ★"[응답 대기]"★ 시스템 메시지 주입(영원히 안 기다리게). ★"실패" 가 아니라 "아직 안 왔다" 다★ — 상대가 작업 중일 수 있으므로 그 메시지는 ★재위임 전에 상대 작업물(브랜치·PR·카드)을 먼저 확인하라★ 고 안내한다 (2026-07-29 실사고: 옛 문구가 "응답하지 못했다" 라 요청자가 재위임했고 상대는 이미 끝내놓은 상태였다).
 
+Hermes Agent 도구호출 로그는 `$HERMES_HOME/profiles/<profile>/state.db`의 `messages` 테이블에 남는다.
+"실제 읽기"는 `role='tool'` 이고 `tool_name='read_file'` 같은 실행 결과 행이 있는 경우이며, "언급"은 assistant/user 본문이나 `tool_calls` JSON 문자열에만 파일명·도구명이 보이고 대응하는 tool 결과 행이 없는 경우로 가른다.
+
 ### 1-5. 실사례 A — "Bill이 Steve에게 질문"
 
 Bill의 claude 세션이 실행:
