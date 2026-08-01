@@ -77,7 +77,7 @@ export function routeTeamMessage(
   // 라이브 멘션 판정에만 적용 — 원문 text 는 다른 용도 위해 보존.
   const liveText = stripQuotedForRouting(text);
   // 0) @all/@b3rys/@group → broadcast all enabled agents. Checked BEFORE explicit_mention.
-  if (BROADCAST_MARKER_RE.test(liveText)) {
+  if (hasBroadcastAllMarker(text)) {
     return {
       targetAgentIds: broadcastTargets(agents),
       reason: "broadcast_marker",
@@ -279,7 +279,7 @@ export async function routeTeamMessageHybrid(
   // 으로만 결정한다. 종료·주제전환을 자동 추정해 owner 를 비우거나 codex 로 넘기지 않는다.
 
   // 0.5) @all/@b3rys/@group → broadcast all enabled agents. Checked BEFORE explicit_mention.
-  if (BROADCAST_MARKER_RE.test(liveText)) {
+  if (hasBroadcastAllMarker(text)) {
     return {
       targetAgentIds: broadcastTargets(agents),
       reason: "broadcast_marker",
