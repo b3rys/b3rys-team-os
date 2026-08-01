@@ -63,7 +63,7 @@ while [ $# -gt 0 ]; do
     --direct-to-gd) DIRECT_TO_GD="1"; shift ;;
     # 팀원 broadcast를 방 게시 1건 + 정식·활성 전원 수신행으로 보낸다.
     # 본문에 @all을 쓰는 것과 무관한 명시적 발신 옵션이다.
-    --notice) NOTICE="1"; shift ;;
+    --notice|--공지) NOTICE="1"; shift ;;
     # ★개별보고 위임 표시★ — "각자 GD께 직접 보고해라" 로 뿌릴 때 붙인다. 서버가 [마감] 독촉을 안 보낸다.
     #   안 붙여도 고장나지 않는다: 독촉이 한 번 올 뿐이고 그 본문이 "개별보고면 무시하세요" 라고 알려준다.
     --individual) INDIVIDUAL="1"; shift ;;

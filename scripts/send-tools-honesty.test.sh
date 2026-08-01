@@ -123,6 +123,14 @@ import json, os, sys
 p = json.load(open(os.environ["CAPTURE"]))
 sys.exit(0 if p.get("notice") is True and "@all" not in p.get("body", "") else 1)
 PY
+PATH="$FAKEBIN:$PATH" "$SEND" --to broadcast --body "공지" --공지 >/dev/null 2>&1
+CAPTURE="$CAPTURE" python3 - <<'PY' \
+  && pass "--공지 별칭도 notice=true로 실림" \
+  || fail "--공지 별칭이 notice 플래그로 변환되지 않음"
+import json, os, sys
+p = json.load(open(os.environ["CAPTURE"]))
+sys.exit(0 if p.get("notice") is True else 1)
+PY
 out="$(PATH="$FAKEBIN:$PATH" "$SEND" --to lisa --body "공지" --notice 2>&1)"; rc=$?
 [ $rc -ne 0 ] && pass "directed 메시지의 --notice 거절" || fail "--notice를 directed 메시지에 허용했다"
 
