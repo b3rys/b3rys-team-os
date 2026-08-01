@@ -16,7 +16,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrate } from "../migrate";
@@ -125,8 +125,6 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
     const db = withRoster(ROSTER);
     expect(broadcastFrom(db, "sender", "agent", "@member 이거 봐줘")).toEqual([]);
   });
-
-
 
   test("★@all 은 정식·활성 팀원 전원에게 간다★", () => {
     const db = withRoster(ROSTER);
