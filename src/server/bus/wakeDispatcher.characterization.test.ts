@@ -152,6 +152,17 @@ describe("3c wake 경계 — comm 매트릭스", () => {
     expect(rcpt(db, row.message_id, "codex")?.last_error).toBe("broadcast_inbox_only_no_wake_marker");
   });
 
+  test("broadcast + notice 플래그 + 팀원 발신 → 본문 마커 없이 wake", async () => {
+    const row = pendingRowFor(db, "codex", {
+      to_agent_id: "broadcast", type: "broadcast", body: "팀 공지", explicit_recipients: ["codex"],
+    });
+    db.prepare(`UPDATE message SET meta_json = ? WHERE id = ?`).run(JSON.stringify({ notice: true }), row.message_id);
+    row.meta_json = JSON.stringify({ notice: true });
+    const spy = spyAdapter(() => ({ ok: true }));
+    await dispatch(db, row, { openclaw: spy.adapter });
+    expect(spy.calls).toBe(1);
+  });
+
   // ★기대값을 뒤집었다 — 옛 기대값(1회 깨움)은 사양 위반을 정답으로 고정하고 있었다.★
   // 마커를 쓸 수 있는 것은 팀장님뿐이라는 계약은 수신행 생성에만 걸려 있었고 깨움에는 없었다.
   // 그래서 이 시험은 "팀원이 @all 로 전원을 깨운다" 를 지키고 있었다 — 룰에 근거가 없는 동작이다.

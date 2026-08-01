@@ -4,6 +4,8 @@ import type { EnvelopeInbound, EnvelopeStored } from "../../../shared/envelopeSc
 import { MAX_HOPS_DEFAULT } from "../../../shared/envelopeSchema";
 import { type MessageRow, type ThreadRow, rowToEnvelope } from "./_shared";
 import { appendAuditFile } from "../../lib/auditFile";
+import { broadcastRecipientIds } from "../../lib/agentMembership";
+import { ambientAgents } from "../../lib/registry";
 import { applyAckClose, applyActivityAutoAck } from "../../bus/ackClose";
 
 export function ensureThread(
@@ -47,7 +49,10 @@ export function insertMessage(
 ): EnvelopeStored {
   const id = nanoid(12);
   const attachments_json = env.attachments ? JSON.stringify(env.attachments) : null;
-  const meta_json = env.meta ? JSON.stringify(env.meta) : null;
+  // notice는 DB 컬럼을 늘리지 않고 message meta에 함께 보존한다. 디스패처가 본문을
+  // 해석하지 않고 명시적 발신 옵션만으로 전원 알림 여부를 판정한다.
+  const persistedMeta = env.notice ? { ...(env.meta ?? {}), notice: true } : env.meta;
+  const meta_json = persistedMeta ? JSON.stringify(persistedMeta) : null;
   // v1.2 issue 3 (anti-pingpong fix): parent_message_id is used by countAutoRounds to
   // trace the bot↔bot chain. Previously it was left NULL when agents only set in_reply_to.
   // We now derive parent_message_id from in_reply_to when not explicitly set: agents that
@@ -188,7 +193,9 @@ export function insertMessage(
         || !!(env.meta as { slack?: { channel?: string } } | undefined)?.slack?.channel;
 
       let recipients: string[] = [];
-      if (!isSlackThread && env.explicit_recipients !== undefined) {
+      if (env.notice) {
+        recipients = broadcastRecipientIds(ambientAgents(), env.from_agent_id);
+      } else if (!isSlackThread && env.explicit_recipients !== undefined) {
         recipients = env.explicit_recipients.filter((agentId) => agentId !== env.from_agent_id);
       }
 
@@ -207,6 +214,13 @@ export function insertMessage(
         });
       }
       for (const agentId of recipients) insertRcpt.run(id, agentId, rcptState);
+      if (env.notice) {
+        appendAuditFile(env.from_agent_id, "agent_broadcast_notice", id, {
+          thread_id: env.thread_id,
+          recipient_ids: recipients,
+          recipient_count: recipients.length,
+        });
+      }
     }
   } else {
     // Team Bus v1: also insert a message_recipient row for direct (non-broadcast) messages

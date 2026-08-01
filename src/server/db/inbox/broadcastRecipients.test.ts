@@ -66,9 +66,17 @@ function withRoster(roster: Array<Record<string, unknown>>): Database {
   return db;
 }
 
-function broadcastFrom(db: Database, from: string, source = "user", body = "@all 공지"): string[] {
+function broadcastFrom(
+  db: Database,
+  from: string,
+  source = "user",
+  body = "@all 공지",
+  notice = false,
+): string[] {
   const { thread_id } = ensureThread(db, { from_agent_id: from, to_agent_id: "broadcast", type: "broadcast", body } as never);
-  const stored = insertMessage(db, { from_agent_id: from, to_agent_id: "broadcast", type: "broadcast", body, thread_id, source } as never);
+  const stored = insertMessage(db, {
+    from_agent_id: from, to_agent_id: "broadcast", type: "broadcast", body, thread_id, source, notice,
+  } as never);
   return db
     .prepare(`SELECT agent_id FROM message_recipient WHERE message_id = ? ORDER BY agent_id`)
     .all(stored.id)
@@ -76,6 +84,43 @@ function broadcastFrom(db: Database, from: string, source = "user", body = "@all
 }
 
 describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★", () => {
+
+  describe("★팀원 공지는 본문이 아니라 notice 플래그로만 전원 전달한다★", () => {
+    test("notice 있음 → 정식·활성 전원, 발신자 제외", () => {
+      const db = withRoster(ROSTER);
+      expect(broadcastFrom(db, "sender", "agent", "서비스 점검 안내", true)).toEqual(["member"]);
+    });
+
+    test("notice 없음 → 수신행 0", () => {
+      const db = withRoster(ROSTER);
+      expect(broadcastFrom(db, "sender", "agent", "서비스 점검 안내")).toEqual([]);
+    });
+
+    test("본문에 @all만 있고 notice 없음 → 수신행 0", () => {
+      const db = withRoster(ROSTER);
+      expect(broadcastFrom(db, "sender", "agent", "@all 서비스 점검 안내")).toEqual([]);
+    });
+
+    test("notice 사용자는 수신자와 함께 감사기록에 남는다", () => {
+      const db = withRoster(ROSTER);
+      broadcastFrom(db, "sender", "agent", "서비스 점검 안내", true);
+      const path = join(dir, `audit-${new Date().toISOString().slice(0, 10)}.log`);
+      const log = readFileSync(path, "utf8");
+      expect(log).toContain("agent_broadcast_notice");
+      expect(log).toContain('"actor":"sender"');
+      expect(log).toContain('"recipient_ids":["member"]');
+    });
+
+    test("공개 설치의 플래그 없는 명부 → 발신자 제외 전원", () => {
+      const flagless = [
+        { id: "sender", display_name: "S", role: "r", runtime: "claude_channel" },
+        { id: "a", display_name: "A", role: "r", runtime: "claude_channel" },
+        { id: "b", display_name: "B", role: "r", runtime: "claude_channel" },
+      ];
+      const db = withRoster(flagless);
+      expect(broadcastFrom(db, "sender", "agent", "공지", true)).toEqual(["a", "b"]);
+    });
+  });
 
   test("★슬랙 스레드 답신은 팀원 수신행을 만들지 않는다 (멘션 기준)★", () => {
     // 슬랙은 멘션된 글만 들어온다 → 그 대화의 우리 쪽 당사자는 발신자 한 명뿐이다.
