@@ -98,14 +98,14 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
       thread_id, source: "agent", meta: { slack: { channel: "C1", thread_ts: "1.0" } },
     } as never);
     const reply = insertMessage(db, {
-      from_agent_id: "sender", to_agent_id: "broadcast", type: "broadcast", body: "reply", thread_id, source: "agent",
+      from_agent_id: "sender", to_agent_id: "broadcast", type: "broadcast", body: "@all 다들 확인", thread_id, source: "agent",
     } as never);
     const rows = db.prepare(`SELECT agent_id FROM message_recipient WHERE message_id = ?`).all(reply.id);
     expect(rows.length, "★슬랙 답신이 팀원 전원에게 수신행을 만든다★").toBe(0);
 
     // ★발송 자체는 막히지 않아야 한다★ — 수신행 0 과 '발송 실패' 는 겉보기가 비슷하다. 두 축을 따로 잰다.
     const stored = db.prepare(`SELECT id, body FROM message WHERE id = ?`).get(reply.id) as { id: string; body: string };
-    expect(stored?.body, "★메시지 자체가 저장되지 않았다 = 슬랙으로도 못 나간다★").toBe("reply");
+    expect(stored?.body, "★메시지 자체가 저장되지 않았다 = 슬랙으로도 못 나간다★").toBe("@all 다들 확인");
   });
 
   test("★멘션 없는 방 발언은 팀원 수신행을 안 만든다 — 방 게시는 그대로다★", () => {
@@ -119,16 +119,14 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
     expect(row, "★메시지 자체가 저장되지 않았다 = 방에도 안 뜬다★").toBeTruthy();
   });
 
-  test("★@이름 멘션은 그 사람에게만 간다★", () => {
+  test("★@이름 을 불러도 방에서는 전달하지 않는다 — 팀원끼리는 팀버스로★", () => {
+    // GD: "단톡방에선 내가 멘션한 사람만 얘기하는 거야. 팀원끼리는 팀버스로."
+    // 방 발언의 예외는 @all 하나뿐이다.
     const db = withRoster(ROSTER);
-    expect(broadcastFrom(db, "sender", "agent", "@member 이거 봐줘")).toEqual(["member"]);
+    expect(broadcastFrom(db, "sender", "agent", "@member 이거 봐줘")).toEqual([]);
   });
 
-  test("★한글 별칭 멘션도 잡는다★ — 직접 정규식을 쓰면 여기가 깨진다", () => {
-    // 멘션 파싱은 `detectExplicitTargets` 하나만 쓴다. 그 파서가 별칭·조사를 이미 안다.
-    const db = withRoster(ROSTER);
-    expect(broadcastFrom(db, "sender", "agent", "@멤버 이거 확인해줘")).toEqual(["member"]);
-  });
+
 
   test("★@all 은 정식·활성 팀원 전원에게 간다★", () => {
     const db = withRoster(ROSTER);
@@ -138,14 +136,14 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
     expect(got).not.toContain("observer");
   });
 
-  test("★팬아웃 경로에 수신자 판정이 하나뿐이다★ — 다음에 또 갈라지는 걸 막는다", () => {
-    // 오늘의 결함은 "같은 질문을 두 코드가 따로 답한 것" 이었다. 그래서 ★판정이 다시 늘어나는지★ 를 잰다.
-    // 팬아웃이 명부 대신 DB 를 다시 세기 시작하면 여기서 걸린다.
-    const src = readFileSync(join(import.meta.dir, "messages.ts"), "utf8");
-    expect(src, "수신자 판정은 공용 규칙 함수를 불러야 한다").toContain("broadcastRecipientIds");
-    // DB 전수 조회는 ★명부 파일이 없을 때의 예외 하나★ 로만 남는다. 둘 이상이면 판정이 또 갈린 것이다.
-    const dbFanouts = src.match(/SELECT id FROM agent WHERE id != \?/g) ?? [];
-    expect(dbFanouts.length, "★DB 전수 조회가 늘었다★ — 명부 없는 경우의 예외 하나만 허용된다").toBe(1);
+  test("★@all 대상이 명부 플래그를 따른다 — 팬아웃과 @all 이 같은 답을 낸다★", () => {
+    // 소스를 grep 하지 않는다. ★함수명만 바꿔도 깨지고, 다른 파일에 판정이 생기면 못 본다★(하네스 지적).
+    // 대신 ★플래그를 바꿨을 때 결과가 따라오는지★ 로 잰다 — 판정이 둘이면 한쪽만 따라온다.
+    const flipped = ROSTER.map((a) => (a.id === "observer" ? { ...a, team_official_member: true } : a));
+    const db = withRoster(flipped);
+    const got = broadcastFrom(db, "sender", "agent", "@all 공지");
+    expect(got, "★명부 플래그를 켰는데 팬아웃이 안 따라온다 = 판정이 둘이다★").toContain("observer");
+    expect(got).toEqual(broadcastRecipientIds(flipped as never, "sender").slice().sort());
   });
 
   test("★명부 파일이 없으면 DB 로 되돌아간다 — 아무에게도 안 가는 게 최악이다★", () => {

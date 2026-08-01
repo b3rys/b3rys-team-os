@@ -168,7 +168,9 @@ export function insertMessage(
 
     if (isSlackThread) {
       // 수신행 없음. 메시지 자체는 저장되고, 슬랙 릴레이(routes/slack.ts)가 실제 발송을 한다.
-    } else if (env.explicit_recipients && env.explicit_recipients.length > 0) {
+    } else if (env.explicit_recipients !== undefined) {
+      // ★빈 배열도 "라우터가 0명으로 정했다" 는 답이다.★ 예전엔 `length > 0` 이라 빈 배열이
+      //   else 로 떨어져 ★본문 멘션으로 다시 팬아웃★ 했다(하네스 probe: @all 본문 → 2명).
       for (const agentId of env.explicit_recipients) {
         if (agentId !== env.from_agent_id) insertRcpt.run(id, agentId, rcptState);
       }
@@ -188,12 +190,38 @@ export function insertMessage(
       //   ★전달 대상은 본문의 멘션이 정한다★ — @all 이면 정식팀원 전원, @이름이면 그 사람만,
       //   멘션이 없으면 0명이다(방에는 그대로 게시된다). 실측: 멘션 없는 방 발언 51건 중
       //   ★답이 달린 것 0건★ — 잘라도 끊기는 대화가 없다. 판정은 `broadcastAudience` 하나가 한다.
+      // ★팀원이 방에 하는 발언은 팀원 inbox 로 전달하지 않는다.★ (GD 2026-08-01)
+      //   "단톡방에선 내가 멘션한 사람만 얘기하는 거야. ★팀원끼리는 팀버스로.★"
+      //   방 게시·슬랙 릴레이는 그대로 나간다 — 여기서 만드는 건 ★수신행뿐★ 이다.
+      //
+      //   ★예외 하나: 본문에 @all★ (팀장님이 "전체공지해" 하셨을 때) → 정식·활성 팀원 전원.
+      //   그 판정은 `broadcastAudience` 가 한다 — @all 마커 정본을 재사용하므로 두 번째 판정이 아니다.
+      //
+      //   실측(오늘 방 broadcast 82건): 수신행 902 → 이 규칙이면 크게 줄고, 멘션 없는 발언 51건 중
+      //   ★답이 달린 것은 0건★ 이었다 — 잘라도 끊기는 대화가 없다.
+      //   ★이 규칙은 팀원(agent) 발신에만 적용한다.★ 팀장님 메시지(`source=user`)와 시스템 공지
+      //   (`source=system`)는 ★예전 그대로★ 다 — 팀장님 경로는 이번 변경에서 손대지 않기로 했고,
+      //   장애 통지는 본문에 멘션이 없어서 0명이 되면 ★통째로 사라진다★(어댑터 직삽입이라 릴레이도 안 탄다).
+      const fromTeammate = (env.source ?? "agent") === "agent";
       const roster = ambientAgents();
       const audience = broadcastAudience(env.body ?? "", roster);
-      const recipients = roster.length > 0
-        ? broadcastRecipientIds(roster, env.from_agent_id, audience.kind, audience.mentioned)
-        : (db.prepare(`SELECT id FROM agent WHERE id != ?`).all(env.from_agent_id) as Array<{ id: string }>)
-            .map((r) => r.id);
+      let recipients: string[] = [];
+      if (!fromTeammate || audience.kind === "all_hands") {
+        // ★명부가 없으면(새 clone·공개 설치) DB 로 되돌아간다 — 이건 예외지 기본이 아니다.★
+        //   `agents.json` 은 gitignore 라 파일 자체가 없을 수 있다. 그때 규칙만 믿으면 @all 이
+        //   ★아무에게도 안 간다.★ 단 ★audience 는 그대로 지킨다★ — @all 일 때만 여기로 온다.
+        recipients = roster.length > 0
+          ? broadcastRecipientIds(roster, env.from_agent_id)
+          : (db.prepare(`SELECT id FROM agent WHERE id != ?`).all(env.from_agent_id) as Array<{ id: string }>)
+              .map((r) => r.id);
+      }
+      // ★이 DB 가 아는 팀원만 넣는다.★ 명부는 프로세스 환경에서 오고 `agent` 표는 이 DB 것이라
+      //   어긋날 수 있다(테스트 DB · 교체 중 · 퇴사 직후). 어긋난 id 를 넣으면 ★FK 위반으로
+      //   삽입 전체가 터지고 방 발언이 아무에게도 안 간다.★ (hermes 검수 지적)
+      const known = new Set(
+        (db.prepare(`SELECT id FROM agent`).all() as Array<{ id: string }>).map((r) => r.id),
+      );
+      recipients = recipients.filter((agentId) => known.has(agentId));
       for (const agentId of recipients) insertRcpt.run(id, agentId, rcptState);
     }
   } else {

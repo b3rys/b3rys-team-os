@@ -16,7 +16,7 @@ import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildTmuxInjectionPrompt } from "../tmuxInject";
-import { routeTeamMessage } from "./ownerDecision";
+import { broadcastAudience, routeTeamMessage } from "./ownerDecision";
 import { broadcastRecipientIds } from "../agentMembership";
 
 const SRC = readFileSync(
@@ -76,11 +76,34 @@ describe("★@all 대상은 agents.json 의 정식 팀원 하나만 본다★", 
     expect(atAll(flagless)).toEqual(["a", "b"]);
   });
 
-  it("wake allowlist 와 섞지 않는다 — 관심사가 다르다", () => {
-    const fn = SRC.slice(SRC.indexOf("function broadcastTargets"));
-    const body = fn.slice(0, fn.indexOf("\n}"));
-    expect(body).not.toContain("busDispatchAllowlist");
-    expect(body).not.toContain("bus-wake-extra");
+  it("★팀원 방 발언이 0명이어도 팀장님 메시지의 sticky 경로는 그대로 동작한다★", () => {
+    // 두 사다리는 ★별개★ 다. 이번 변경은 팀원 방 발언(전달 대상)만 건드리고,
+    // 팀장님 메시지의 owner 판정(@이름 > 답장 > sticky > coordinator)은 손대지 않는다.
+    // ★설계 논의 중 이 둘을 섞은 적이 있다★ — 다음 사람도 헷갈리니 시험이 막는다.
+    const agents = roster();
+
+    // 팀원 방 발언: 멘션 없음 → 전달 0명
+    expect(broadcastAudience("네 확인했습니다", agents as never).kind).not.toBe("all_hands");
+
+    // 팀장님 메시지: 멘션 없음이어도 sticky 가 받는다 (사다리 그대로)
+    const d = routeTeamMessage("그럼 그거 진행해줘", agents as never, { activeAssigneeIds: ["m2"] });
+    expect(d.targetAgentIds, "★팀장님 sticky 경로가 같이 죽었다★").toEqual(["m2"]);
+    expect(d.reason).toBe("active_assignee_followup");
+  });
+
+  it("★wake allowlist 를 켜도 @all 대상이 안 바뀐다★ — 관심사가 다르다", () => {
+    // 예전 판은 소스를 grep 해서 `busDispatchAllowlist` 문자열이 없는지 봤다. ★문구를 재고 있었다.★
+    // 지금은 그 allowlist 를 실제로 좁혀놓고 ★결과가 바뀌는지★ 로 잰다.
+    const before = atAll(roster());
+    const prev = process.env.BUS_DISPATCH_AGENTS;
+    process.env.BUS_DISPATCH_AGENTS = "m1"; // wake allowlist 를 한 명으로 좁힌다
+    try {
+      expect(atAll(roster()), "★wake allowlist 가 @all 수신자를 좁혔다★ — 두 관심사가 섞였다")
+        .toEqual(before);
+    } finally {
+      if (prev === undefined) delete process.env.BUS_DISPATCH_AGENTS;
+      else process.env.BUS_DISPATCH_AGENTS = prev;
+    }
   });
 });
 
