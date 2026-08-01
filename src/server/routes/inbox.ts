@@ -174,16 +174,28 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       //   실측: 오늘 47건 중 18건이 이 형태였다. coordinator 라도 막는다(연쇄는 발신자를 안 가린다).
       if (env.in_reply_to) {
         const parent = deps.db
-          .prepare(`SELECT to_agent_id FROM message WHERE id = ?`)
-          .get(env.in_reply_to) as { to_agent_id?: string } | undefined;
-        if (parent?.to_agent_id === "broadcast") {
+          .prepare(`SELECT to_agent_id, source, from_agent_id FROM message WHERE id = ?`)
+          .get(env.in_reply_to) as { to_agent_id?: string; source?: string; from_agent_id?: string } | undefined;
+        // ★팀장님 @all 에는 방에서 답할 수 있어야 한다★ (2026-08-01 실측 — 배포 후 아무도 방에 답을 못 했다).
+        //   팀장님이 "@all 다들 인지했어?" 라고 물었는데 ★전원이 막혀서 방이 조용해졌다.★
+        //   막으려던 건 ★팀원끼리의 연쇄★ 지 팀장님 호출에 대한 답이 아니다.
+        //   그래서 부모가 팀장님(source=user)이면 통과, ★팀원 broadcast(source=agent)면 차단.★
+        const parentIsLeadCall = parent?.source === "user";
+        if (parent?.to_agent_id === "broadcast" && !parentIsLeadCall) {
           return c.json({
             error: "broadcast_reply_to_broadcast",
             detail: "broadcast 에 대한 답은 broadcast 로 보내지 않습니다. 발신자에게 --to <이름>, 팀장님께는 --direct-to-gd 로 보내십시오.",
           }, 403);
         }
       }
-      if (rosterKnown && (!isCoordinator || reason.length === 0)) {
+      // 팀장님 @all 에 대한 답이면 coordinator·사유 요구도 면제한다 — 위와 같은 이유.
+      const replyingToLeadCall = env.in_reply_to
+        ? ((deps.db.prepare(`SELECT source, to_agent_id FROM message WHERE id = ?`)
+            .get(env.in_reply_to) as { source?: string; to_agent_id?: string } | undefined)?.source === "user"
+           && (deps.db.prepare(`SELECT to_agent_id FROM message WHERE id = ?`)
+            .get(env.in_reply_to) as { to_agent_id?: string } | undefined)?.to_agent_id === "broadcast")
+        : false;
+      if (rosterKnown && !replyingToLeadCall && (!isCoordinator || reason.length === 0)) {
         return c.json({
           error: "broadcast_not_allowed",
           detail: !isCoordinator
