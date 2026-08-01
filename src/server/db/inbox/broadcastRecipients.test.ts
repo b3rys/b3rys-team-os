@@ -12,7 +12,7 @@
  * 쿼리로는 규칙을 적용할 방법 자체가 없었다. 그래서 명부(agents.json)를 읽어 판정한다.
  *
  * ★기대값을 손으로 적지 않는다.★ 같은 명부에서 규칙으로 다시 계산해 두 집합을 비교한다.
- * 이름·숫자를 박으면 팀원이 늘거나 플래그가 바뀔 때 테스트이 조용히 낡는다(오늘 7→8→9 로 움직였다).
+ * 이름·숫자를 박으면 팀원이 늘거나 플래그가 바뀔 때 테스트가 조용히 낡는다(오늘 7→8→9 로 움직였다).
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
@@ -79,7 +79,7 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
   test("★슬랙 스레드 답신은 팀원 수신행을 만들지 않는다 (멘션 기준)★", () => {
     // 슬랙은 멘션된 글만 들어온다 → 그 대화의 우리 쪽 당사자는 발신자 한 명뿐이다.
     // ★빈 배열을 넘기는 방식으로는 못 막는다★ — `length > 0` 조건 때문에 else 로 떨어져
-    // 조용히 전원으로 되돌아간다. 이 테스트이 그 되돌아감을 잡는다.
+    // 조용히 전원으로 되돌아간다. 이 테스트가 그 되돌아감을 잡는다.
     const db = withRoster(ROSTER);
     const { thread_id } = ensureThread(db, { from_agent_id: "sender", to_agent_id: "broadcast", type: "broadcast", body: "hi" } as never);
     // 슬랙 어댑터가 스레드를 열 때 붙이는 것과 같은 meta
@@ -235,7 +235,7 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
 
   // ★이름을 고쳤다.★ 예전 이름은 "플래그를 아무도 안 쓰는 명부" 였지만 팀장님 분기는
   // ★명부의 플래그를 읽지 않는다★ — DB 전수를 대상으로 한다. 플래그 축은 라우터 쪽
-  // 테스트(atAllOfficialMembers.test.ts)이 덮는다. 여기서 재는 것은 ★공개 설치에서도 0명이 아니라는 것★ 이다.
+  // 테스트(atAllOfficialMembers.test.ts)가 덮는다. 여기서 재는 것은 ★공개 설치에서도 0명이 아니라는 것★ 이다.
   test("★팀장님 발신은 공개 설치(플래그 없는 명부)에서도 0명이 되지 않는다★", () => {
     const flagless = [
       { id: "sender", display_name: "S", role: "r", runtime: "claude_channel" },
