@@ -15,7 +15,6 @@ import {
   acceptInbound,
 } from "../db/inboxQueries";
 import { coordinatorId } from "../lib/capabilities";
-import type { AgentRecord } from "../types";
 import { appendAudit } from "../db/queries";
 import { recordReportDelivery } from "../bus/deliveryRecord";
 import { appendAuditFile } from "../lib/auditFile";
