@@ -590,8 +590,9 @@ export function ruleLoadingBlock(runtime: string, agentId?: string): string {
  * "카탈로그 가서 찾아라" 였다. 그게 팀장이 물은 "엉뚱한 데 찾지 않나" 의 정체다.
  *
  * ★스킬이 자기 트리거를 선언하고, 룰은 모아서 찍기만 한다.★
- * 각 `SKILL.md` 프론트매터의 `trigger:` 한 줄을 읽는다. 없으면 그 스킬은 이름만 나온다
- * (빠지지는 않는다 — ★목록에서 사라지는 것이 가장 나쁜 실패★ 이므로).
+ * 각 `SKILL.md` 프론트매터의 `trigger:` 한 줄을 읽는다. ★없으면 목록에 나가지 않는다★ —
+ * 새 스킬·내부용 스킬의 기본값은 '비공개' 다 (GD: "반드시 안 나갈 스킬도 있다", "trigger 있으면 나가면 된다").
+ * ★은퇴한 스킬에 trigger 를 달지 않는 것은 사람 책임이고, personaPathSafety 테스트가 그걸 잡는다.★
  * → 스킬 추가 = SKILL.md 만 만들면 끝. 룰 파일은 안 건드린다.
  */
 function readSkillTriggers(): Array<{ name: string; trigger: string; script: string }> {
@@ -613,6 +614,7 @@ function readSkillTriggers(): Array<{ name: string; trigger: string; script: str
       const e = /^entry:\s*(.+)$/m.exec(fm[1]);   // ★선언한 것만★ — 디렉터리를 뒤져 추측하지 않는다
       if (e) script = e[1].trim().replace(/^["']|["']$/g, "");
     }
+    if (!trigger) continue;   // ★선언하지 않은 스킬은 나가지 않는다★ — 새 스킬의 기본값은 '비공개'
     out.push({ name, trigger, script });
   }
   return out;
@@ -621,10 +623,7 @@ function readSkillTriggers(): Array<{ name: string; trigger: string; script: str
 function buildSkillTable(): string {
   const skills = readSkillTriggers();
   const line = skills
-    .map((s) => {
-      const entry = s.script ? ` (\`${s.script}\`)` : "";
-      return s.trigger ? `${s.trigger} → \`${s.name}\`${entry}` : `\`${s.name}\`${entry}`;
-    })
+    .map((s) => `${s.trigger} → \`${s.name}\`${s.script ? ` (\`${s.script}\`)` : ""}`)
     .join(" · ");
   // 경로는 ★맨 위 b3os= 기준★ 을 한 번만 선언하고 이후는 상대로 쓴다 (GD 2026-08-01).
   return [
@@ -662,6 +661,7 @@ function sectionTeamShare(runtime: string, agentId?: string): string {
     `- Team-wide rules (mission·members·communication·owner resolution): \`${tilde(teamOsPathFor(agentId))}\` — **read at session start + when doing team ops/routing work.**`,
     "- Team current state·learning log: `b3os/rules/SHARED.md`",
     `- **★When sending a message/reply/review-request to a teammate, you MUST use \`${tilde(REPO_ROOT)}/skills/b3os-team-inbox/scripts/send.sh --to <them> --body "…"\`. Do NOT try to send via OpenClaw's sessions_* / dynamic session routing (the agentId isn't resolvable in this runtime, so it fails).** Check what you received with the same skill's \`inbox.sh\`.`,
+    "- **This runtime has no skill auto-discovery.** A b3os skill is not loaded for you: match the trigger below, **open that `SKILL.md` at the path above and follow it**, running its scripts by absolute path. Your runtime's own skill mechanism does not see these.",
     "- Team-wide rules follow the single TEAM-OS canonical (do not copy-paste here).",
     "",
     // 이 런타임엔 스킬 자동탐색이 없다 → 표를 파일에 박아둔다(카탈로그를 '찾아가야' 아는 구조면 못 찾는다).

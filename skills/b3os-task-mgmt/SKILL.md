@@ -1,7 +1,6 @@
 ---
 name: b3os-task-mgmt
 description: "Deprecated compatibility stub. Use b3os-task-loop for Tasks 칸반, 주행모드, handoff, continuation guard, review-wait, scheduled workloop."
-trigger: kanban·card work
 ---
 
 # Deprecated: use `b3os-task-loop`

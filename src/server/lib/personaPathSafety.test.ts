@@ -10,7 +10,7 @@
  * 그래서 검사 대상은 "코드가 맞나" 가 아니라 ★렌더 산출물에 그 흔적이 있나★ 다.
  */
 import { describe, expect, it } from "bun:test";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { buildAgentsMd, buildPersona, REPO_ROOT } from "./personaTemplates";
 
 const RUNTIMES = ["claude_channel", "openclaw", "hermes"] as const;
@@ -62,12 +62,33 @@ describe("★스킬 목록은 디렉터리에서 생성된다 — 손으로 나�
       )
     : [];
 
-  it("디렉터리의 모든 스킬이 룰 파일에 나온다 — 하나라도 빠지면 팀원이 그 스킬을 모른다", () => {
-    expect(skillNames.length).toBeGreaterThan(0);
+  // ★계약: trigger: 를 선언한 스킬만 나간다★ (GD 2026-08-01). 선언 안 한 것이 새어나가면 그것도 결함이다.
+  const declared = skillNames.filter((n) =>
+    /^trigger:/m.test(readFileSync(`${REPO_ROOT}/skills/${n}/SKILL.md`, "utf8").slice(0, 4000)));
+  const undeclared = skillNames.filter((n) => !declared.includes(n));
+
+  it("trigger 를 선언한 스킬은 전부 나온다 (선언 0개면 목록도 비어야 한다 — 머지 전 상태)", () => {
     for (const runtime of RUNTIMES) {
-      const out = render(runtime);
-      const missing = skillNames.filter((n) => !out.includes(n));
+      const missing = declared.filter((n) => !render(runtime).includes(n));
       expect(missing, `★${runtime} 룰에 빠진 스킬★: ${missing.join(", ")}`).toHaveLength(0);
+    }
+  });
+
+  it("★은퇴(deprecated)한 스킬은 목록에 나가지 않는다★ — trigger 가 붙어 있어도", () => {
+    const dep = skillNames.filter((n) =>
+      /deprecat/i.test(readFileSync(`${REPO_ROOT}/skills/${n}/SKILL.md`, "utf8").slice(0, 800)));
+    for (const runtime of RUNTIMES) {
+      const line = render(runtime).split("\n").find((l) => l.includes("→ `b3os-")) ?? "";
+      const leaked = dep.filter((n) => line.includes(n));
+      expect(leaked, `★은퇴한 스킬을 안내한다★: ${leaked.join(", ")}`).toHaveLength(0);
+    }
+  });
+
+  it("★trigger 를 선언하지 않은 스킬은 새어나가지 않는다★ — 기본값은 비공개다", () => {
+    for (const runtime of RUNTIMES) {
+      const line = render(runtime).split("\n").find((l) => l.includes("→ `b3os-")) ?? "";
+      const leaked = undeclared.filter((n) => line.includes(n));
+      expect(leaked, `★선언 안 한 스킬이 나갔다★: ${leaked.join(", ")}`).toHaveLength(0);
     }
   });
 
