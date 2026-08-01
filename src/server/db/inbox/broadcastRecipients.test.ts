@@ -179,6 +179,48 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
     expect(log, "★정상인데 싱크 경고가 남았다★").not.toContain("registry_db_out_of_sync");
   });
 
+  // ★팀장님·시스템 경로는 이 변경에서 손대지 않는다.★ 한 번 경계를 잘못 그어 4경로가 바뀌었고
+  // 하네스가 main 과 대조해 잡았다. 아래 넷이 그 4경로를 고정한다 — ★코드만 되돌리면 또 샌다.★
+  describe("★source=user·system 은 예전 그대로★", () => {
+    const all = (db: Database, from: string) =>
+      (db.prepare(`SELECT id FROM agent WHERE id != ?`).all(from) as Array<{ id: string }>).map((r) => r.id).sort();
+
+    test("system 멘션없음 → 전원 (장애 통지가 사라지면 안 된다)", () => {
+      const db = withRoster(ROSTER);
+      expect(broadcastFrom(db, "sender", "system", "복구 실패 통지")).toEqual(all(db, "sender"));
+    });
+
+    test("user 멘션없음 → 전원", () => {
+      const db = withRoster(ROSTER);
+      expect(broadcastFrom(db, "sender", "user", "다들 확인")).toEqual(all(db, "sender"));
+    });
+
+    test("user + explicit_recipients=[] → 전원 (main 동작)", () => {
+      const db = withRoster(ROSTER);
+      const { thread_id } = ensureThread(db, { from_agent_id: "sender", to_agent_id: "broadcast", type: "broadcast", body: "x" } as never);
+      const m = insertMessage(db, {
+        from_agent_id: "sender", to_agent_id: "broadcast", type: "broadcast", body: "x",
+        thread_id, source: "user", explicit_recipients: [],
+      } as never);
+      const got = (db.prepare(`SELECT agent_id FROM message_recipient WHERE message_id=? ORDER BY agent_id`).all(m.id) as Array<{ agent_id: string }>).map((r) => r.agent_id);
+      expect(got).toEqual(all(db, "sender"));
+    });
+
+    test("★system + 슬랙 스레드 → 전원★ (슬랙 문으로 같은 유실이 나면 안 된다)", () => {
+      const db = withRoster(ROSTER);
+      const { thread_id } = ensureThread(db, { from_agent_id: "sender", to_agent_id: "broadcast", type: "broadcast", body: "x" } as never);
+      insertMessage(db, {
+        from_agent_id: "sender", to_agent_id: "broadcast", type: "broadcast", body: "slack seed",
+        thread_id, source: "agent", meta: { slack: { channel: "C1", thread_ts: "1.0" } },
+      } as never);
+      const m = insertMessage(db, {
+        from_agent_id: "sender", to_agent_id: "broadcast", type: "broadcast", body: "장애 통지", thread_id, source: "system",
+      } as never);
+      const got = (db.prepare(`SELECT agent_id FROM message_recipient WHERE message_id=? ORDER BY agent_id`).all(m.id) as Array<{ agent_id: string }>).map((r) => r.agent_id);
+      expect(got, "★슬랙 스레드의 시스템 통지가 사라진다★").toEqual(all(db, "sender"));
+    });
+  });
+
   test("★플래그를 아무도 안 쓰는 명부(공개 설치)에서 0명이 되지 않는다★", () => {
     const flagless = [
       { id: "sender", display_name: "S", role: "r", runtime: "claude_channel" },

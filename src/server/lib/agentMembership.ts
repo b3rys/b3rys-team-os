@@ -20,21 +20,17 @@ export const MAX_OFFICIAL_TEAM_MEMBERS = 15;
  *
  * `excludeId` 는 발신자를 뺄 때 쓴다(자기 글은 자기 inbox 에 넣지 않는다).
  *
- * `kind` 는 ★발송 종류★ 다. 지금은 `all_hands`(=@all) 하나가 명부 전체를 부르고, 나머지는
- * 멘션된 사람만 받는다. 팀원 종류가 늘어나도 ★이 함수 하나만 고치면 되도록★ 자리를 둔다
- * (GD 2026-08-01: "팀원의 종류도 늘어날 수 있어").
+ * ★"어떤 종류의 발송인가" 는 부르는 쪽이 판단한다★ — 이 함수는 "그 발송을 받을 자격이 있는
+ * 팀원" 만 답한다. 팀원 종류가 늘어나면 여기 조건을 늘린다.
  */
-export type BroadcastKind = "all_hands" | "mentioned";
-
 export function broadcastRecipientIds(
   agents: Array<Pick<AgentRecord, "id" | "enabled" | "team_official_member" | "lead_eligible">>,
   excludeId?: string,
-  kind: BroadcastKind = "all_hands",
-  mentioned: readonly string[] = [],
 ): string[] {
-  const active = agents.filter((agent) => agent.enabled !== false && isTeamOfficialMember(agent));
-  const pool = kind === "all_hands" ? active : active.filter((agent) => mentioned.includes(agent.id));
-  return pool.map((agent) => agent.id).filter((id) => id !== excludeId);
+  return agents
+    .filter((agent) => agent.enabled !== false && isTeamOfficialMember(agent))
+    .map((agent) => agent.id)
+    .filter((id) => id !== excludeId);
 }
 
 export function activeOfficialMemberCount(

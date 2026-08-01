@@ -156,77 +156,64 @@ export function insertMessage(
       `INSERT OR IGNORE INTO message_recipient (message_id, agent_id, delivery_state, recipient_state, close_reason, state_source)
        VALUES (?, ?, ?, 'acknowledged', 'broadcast_fyi', 'system')`,
     );
-    // ★슬랙 스레드에 답하는 broadcast 는 팀원 수신행을 만들지 않는다.★ (GD 2026-08-01)
-    //   슬랙은 ★멘션 기준★ 으로만 동작한다 — 들어오는 것도 멘션된 글뿐이고, 그 대화의 우리 쪽
-    //   당사자는 ★멘션받은 한 명(= 지금 답을 쓰는 발신자)★ 이다. 나머지 팀원은 그 대화와 무관하다.
-    //   실측: 슬랙 스레드 수신행 60건 중 ★읽음 0★ · 그 스레드에 글을 쓴 팀원은 발신자 본인뿐이었다.
+    // ★이 변경은 팀원(source=agent) 방 발언에만 적용한다.★ (GD 2026-08-01)
+    //   팀장님 메시지(`user`)와 시스템 공지(`system`)는 ★예전 경로 그대로★ 다 — 팀장님은
+    //   "잘못된 DB 입력을 고치는 것뿐" 으로 범위를 못박으셨고, 장애 통지가 0명이 되면
+    //   ★통째로 사라진다★(어댑터 직삽입이라 릴레이도 안 탄다).
     //
-    //   ★빈 배열을 넘기는 방식으로는 못 막는다★ — 아래 조건이 `length > 0` 이라 빈 배열은
-    //   else 로 떨어져 ★조용히 전원으로 되돌아간다.★ 그래서 여기서 분기한다.
-    const isSlackThread = !!findSlackMetaForThread(db, env.thread_id)
-      || !!(env.meta as { slack?: { channel?: string } } | undefined)?.slack?.channel;
-
-    if (isSlackThread) {
-      // 수신행 없음. 메시지 자체는 저장되고, 슬랙 릴레이(routes/slack.ts)가 실제 발송을 한다.
-    } else if (env.explicit_recipients !== undefined) {
-      // ★빈 배열도 "라우터가 0명으로 정했다" 는 답이다.★ 예전엔 `length > 0` 이라 빈 배열이
-      //   else 로 떨어져 ★본문 멘션으로 다시 팬아웃★ 했다(하네스 probe: @all 본문 → 2명).
-      for (const agentId of env.explicit_recipients) {
-        if (agentId !== env.from_agent_id) insertRcpt.run(id, agentId, rcptState);
+    //   ★한 번 이 경계를 잘못 그어서 4경로가 바뀌었다★ — user·system 의 멘션없음(전원→정식만),
+    //   빈 explicit_recipients(전원→0), 슬랙 스레드의 시스템 통지(전원→0). 하네스가 main 과
+    //   대조해서 잡았다. 그래서 지금은 ★분기 자체를 발신자별로 가른다.★
+    if ((env.source ?? "agent") !== "agent") {
+      // ── 팀장님·시스템: main 동작 그대로 ──
+      if (env.explicit_recipients && env.explicit_recipients.length > 0) {
+        for (const agentId of env.explicit_recipients) {
+          if (agentId !== env.from_agent_id) insertRcpt.run(id, agentId, rcptState);
+        }
+      } else {
+        const rows = db.prepare(`SELECT id FROM agent WHERE id != ?`).all(env.from_agent_id) as Array<{ id: string }>;
+        for (const r of rows) insertRcpt.run(id, r.id, rcptState);
       }
     } else {
-      // ★수신자 판정은 `broadcastRecipientIds` 하나가 한다★ — @all(ownerDecision)과 같은 함수다.
-      //   예전엔 여기서 `SELECT id FROM agent` 로 ★DB 전원★ 을 넣었다. 그런데 `agent` 테이블에는
-      //   `team_official_member`·`enabled` 컬럼이 ★없어서★ 규칙을 적용할 방법 자체가 없었다.
-      //   그래서 같은 질문에 답이 둘이 됐다 — 실측: @all 9명 vs 팀원 broadcast 11명(꺼진 팀원 포함).
-      //   명부(agents.json)는 `ambientAgents()` 가 mtime 캐시로 읽으므로 배관을 새로 팔 필요가 없다.
-      //
-      //   ★명부 파일이 아예 없을 때는 DB 로 되돌아간다 — 이건 예외지 기본이 아니다.★
-      //   `agents.json` 은 gitignore 라 ★새 clone·공개 설치·테스트에는 존재하지 않는다.★
-      //   그때 규칙만 믿으면 빈 목록이 되어 ★broadcast 가 아무에게도 안 간다★ — 원래 결함보다 나쁘다.
-      //   (플래그가 비어 있는 것과 ★명부 자체가 없는 것★ 은 다르다. 앞은 규칙이 전원으로 답하지만
-      //    뒤는 답할 대상 자체가 없다.)
-      //
-      // ★팀원이 방에 하는 발언은 팀원 inbox 로 전달하지 않는다.★ (GD 2026-08-01)
-      //   "단톡방에선 내가 멘션한 사람만 얘기하는 거야. ★팀원끼리는 팀버스로.★"
+      // ── 팀원 방 발언 ──
+      //   "단톡방에선 내가 멘션한 사람만 얘기하는 거야. ★팀원끼리는 팀버스로.★" (GD)
       //   방 게시·슬랙 릴레이는 그대로 나간다 — 여기서 만드는 건 ★수신행뿐★ 이다.
-      //
-      //   ★예외 하나: 본문에 @all★ (팀장님이 "전체공지해" 하셨을 때) → 정식·활성 팀원 전원.
-      //   그 판정은 `broadcastAudience` 가 한다 — @all 마커 정본을 재사용하므로 두 번째 판정이 아니다.
-      //
-      //   실측(오늘 방 broadcast 82건): 수신행 902 → 이 규칙이면 크게 줄고, 멘션 없는 발언 51건 중
-      //   ★답이 달린 것은 0건★ 이었다 — 잘라도 끊기는 대화가 없다.
-      //   ★이 규칙은 팀원(agent) 발신에만 적용한다.★ 팀장님 메시지(`source=user`)와 시스템 공지
-      //   (`source=system`)는 ★예전 그대로★ 다 — 팀장님 경로는 이번 변경에서 손대지 않기로 했고,
-      //   장애 통지는 본문에 멘션이 없어서 0명이 되면 ★통째로 사라진다★(어댑터 직삽입이라 릴레이도 안 탄다).
-      const fromTeammate = (env.source ?? "agent") === "agent";
-      const roster = ambientAgents();
-      const audience = broadcastAudience(env.body ?? "", roster);
+      //   ★예외 하나: 본문에 @all★ → 정식·활성 팀원 전원.
+      //   실측(오늘 방 broadcast 82건): 멘션 없는 발언 51건 중 ★답이 달린 것 0건★ — 잘라도 안 끊긴다.
+      const isSlackThread = !!findSlackMetaForThread(db, env.thread_id)
+        || !!(env.meta as { slack?: { channel?: string } } | undefined)?.slack?.channel;
+
       let recipients: string[] = [];
-      if (!fromTeammate || audience.kind === "all_hands") {
-        // ★명부가 없으면(새 clone·공개 설치) DB 로 되돌아간다 — 이건 예외지 기본이 아니다.★
-        //   `agents.json` 은 gitignore 라 파일 자체가 없을 수 있다. 그때 규칙만 믿으면 @all 이
-        //   ★아무에게도 안 간다.★ 단 ★audience 는 그대로 지킨다★ — @all 일 때만 여기로 온다.
+      if (isSlackThread) {
+        // 수신행 없음. 슬랙 릴레이(routes/slack.ts)가 실제 발송을 한다.
+      } else if (env.explicit_recipients !== undefined) {
+        // ★빈 배열도 "라우터가 0명으로 정했다" 는 답이다.★ `length > 0` 이면 빈 배열이 아래로
+        //   떨어져 ★본문 @all 로 다시 팬아웃★ 한다.
+        recipients = env.explicit_recipients.filter((agentId) => agentId !== env.from_agent_id);
+      } else if (broadcastAudience(env.body ?? "").kind === "all_hands") {
+        // ★명부가 없으면(새 clone·공개 설치) DB 로 되돌아간다 — 예외지 기본이 아니다.★
+        //   `agents.json` 은 gitignore 라 파일 자체가 없을 수 있고, 그때 규칙만 믿으면
+        //   @all 이 ★아무에게도 안 간다.★ ★audience 는 그대로 지킨다★ — @all 일 때만 여기다.
+        const roster = ambientAgents();
         recipients = roster.length > 0
           ? broadcastRecipientIds(roster, env.from_agent_id)
           : (db.prepare(`SELECT id FROM agent WHERE id != ?`).all(env.from_agent_id) as Array<{ id: string }>)
               .map((r) => r.id);
       }
+
       // ★이 DB 가 아는 팀원만 넣는다.★ 명부는 프로세스 환경에서 오고 `agent` 표는 이 DB 것이라
-      //   어긋날 수 있다(테스트 DB · 교체 중 · 퇴사 직후). 어긋난 id 를 넣으면 ★FK 위반으로
-      //   삽입 전체가 터지고 방 발언이 아무에게도 안 간다.★ (hermes 검수 지적)
+      //   어긋날 수 있다(파일 변경 후 동기화까지 약 0.3초). 어긋난 id 를 넣으면 ★FK 위반으로
+      //   삽입 전체가 터진다.★
       const known = new Set(
         (db.prepare(`SELECT id FROM agent`).all() as Array<{ id: string }>).map((r) => r.id),
       );
       const dropped = recipients.filter((agentId) => !known.has(agentId));
       recipients = recipients.filter((agentId) => known.has(agentId));
-      // ★조용히 빼지 않는다.★ 파일(정본)에 있는데 `agent` 표에 없으면 그건 ★싱크가 깨진 것★ 이다.
-      //   교집합으로 FK 사고는 막되, ★깨진 사실은 남긴다★ — 안 남기면 아무도 모른다 (GD 2026-08-01:
-      //   "싱크가 잘 되게 하고, 문제가 있으면 보이게 하면 되잖아").
+      // ★조용히 빼지 않는다.★ 파일(정본)에 있는데 DB 에 없으면 그건 ★싱크가 깨진 것★ 이다.
       //   ★빠진 사람이 0명이면 아무것도 안 남긴다★ — 평상시 잡음이 되면 아무도 안 본다.
       if (dropped.length > 0) {
         appendAuditFile(env.from_agent_id, "registry_db_out_of_sync", env.thread_id, {
-          missing_in_db: dropped,          // 명부에는 있는데 `agent` 표에 없는 id
+          missing_in_db: dropped,
           message_id: id,
           note: "agents.json 과 DB 가 어긋났다. 이 수신자들은 이번 broadcast 를 못 받았다.",
         });

@@ -47,13 +47,9 @@ function broadcastTargets(agents: AgentRecord[]): string[] {
  * ★멘션 판정은 `detectExplicitTargets` 하나만 쓴다★ — 한글 별칭·조사·인용 제외를 이미 안다.
  * 여기서 정규식을 새로 쓰면 그게 ★두 번째 판정★ 이 되고, 그게 이 결함의 원인이었다.
  */
-export function broadcastAudience(
-  text: string,
-  agents: AgentRecord[],
-): { kind: "all_hands" | "mentioned"; mentioned: string[] } {
-  const liveText = stripQuotedForRouting(text);
-  if (BROADCAST_MARKER_RE.test(liveText)) return { kind: "all_hands", mentioned: [] };
-  return { kind: "mentioned", mentioned: detectExplicitTargets(liveText, agents) };
+export function broadcastAudience(text: string): { kind: "all_hands" | "none" } {
+  // 인용된 @all(팀장님 원문을 그대로 붙인 경우 등)은 마커로 치지 않는다 — 라우터와 같은 전처리다.
+  return { kind: BROADCAST_MARKER_RE.test(stripQuotedForRouting(text)) ? "all_hands" : "none" };
 }
 
 export function routeTeamMessage(

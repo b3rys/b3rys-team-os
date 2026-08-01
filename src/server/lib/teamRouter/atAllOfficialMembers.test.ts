@@ -13,16 +13,10 @@
  * → 그래서 이 테스트는 ★이름을 하드코딩하지 않고★, 새 정식 팀원을 넣었을 때 따라오는지로 잰다.
  */
 import { describe, expect, it } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { buildTmuxInjectionPrompt } from "../tmuxInject";
 import { broadcastAudience, routeTeamMessage } from "./ownerDecision";
 import { broadcastRecipientIds } from "../agentMembership";
 
-const SRC = readFileSync(
-  join(import.meta.dir, "ownerDecision.ts"),
-  "utf8",
-);
 // ★소스가 아니라 실제 렌더 결과를 잰다★ — 소스를 grep 하면 '뺐다' 고 적은 주석까지 걸린다(내가 그랬다).
 const INJECT = buildTmuxInjectionPrompt({
   session: "claude-t", fromLabel: "bill", locale: "ko",
@@ -83,7 +77,7 @@ describe("★@all 대상은 agents.json 의 정식 팀원 하나만 본다★", 
     const agents = roster();
 
     // 팀원 방 발언: 멘션 없음 → 전달 0명
-    expect(broadcastAudience("네 확인했습니다", agents as never).kind).not.toBe("all_hands");
+    expect(broadcastAudience("네 확인했습니다").kind).not.toBe("all_hands");
 
     // 팀장님 메시지: 멘션 없음이어도 sticky 가 받는다 (사다리 그대로)
     const d = routeTeamMessage("그럼 그거 진행해줘", agents as never, { activeAssigneeIds: ["m2"] });
