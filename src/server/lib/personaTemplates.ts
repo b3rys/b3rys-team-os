@@ -661,7 +661,6 @@ function sectionTeamShare(runtime: string, agentId?: string): string {
     `- Team-wide rules (mission·members·communication·owner resolution): \`${tilde(teamOsPathFor(agentId))}\` — **read at session start + when doing team ops/routing work.**`,
     "- Team current state·learning log: `b3os/rules/SHARED.md`",
     `- **★When sending a message/reply/review-request to a teammate, you MUST use \`${tilde(REPO_ROOT)}/skills/b3os-team-inbox/scripts/send.sh --to <them> --body "…"\`. Do NOT try to send via OpenClaw's sessions_* / dynamic session routing (the agentId isn't resolvable in this runtime, so it fails).** Check what you received with the same skill's \`inbox.sh\`.`,
-    "- **This runtime has no skill auto-discovery.** A b3os skill is not loaded for you: match the trigger below, **open that `SKILL.md` at the path above and follow it**, running its scripts by absolute path. Your runtime's own skill mechanism does not see these.",
     "- Team-wide rules follow the single TEAM-OS canonical (do not copy-paste here).",
     "",
     // 이 런타임엔 스킬 자동탐색이 없다 → 표를 파일에 박아둔다(카탈로그를 '찾아가야' 아는 구조면 못 찾는다).

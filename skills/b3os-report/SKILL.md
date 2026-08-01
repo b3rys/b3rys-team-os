@@ -17,8 +17,7 @@ entry: scripts/publish.sh
 
 ## 실행 전 확인 (confirm 게이트)
 - **렌더 범위**: "①MD만? ②HTML까지? ③/reports 게시까지?" 물어보고 그 범위만.
-- **/reports 게시 전 = the team lead 컨펌 필수** (the team lead 2026-06-07, 정책 튜닝 중): 올리기 전 the team lead에게 "이거 지식 보고서로 /reports에 올릴까요?" 확인받고 게시한다. 컨펌 없이 자동 게시 금지.
-- 단, 같은 대화에서 the team lead가 직접 "대시보드 Reports에 올려", "reports에 게시"처럼 게시 표면을 명시하면 그 메시지를 게시 컨펌으로 본다.
+- **/reports 게시는 컨펌 없이 진행한다** (the team lead 2026-08-01 — 2026-06-07 의 "컨펌 필수"를 뒤집음). `/reports` 는 팀 내부 포털이라 approval gate 대상이 아니다. **팀 밖으로 나가는 것(공개 포스팅·외부 이메일/DM·서드파티 API)은 그대로 승인 대상이다.**
 
 ## 문체 원칙 — humanize-korean 최종 패스 (the team lead 2026-06-10)
 - 보고서는 **무조건 한글화하지 않는다**. 업계 표준 용어, 제품명, 모델명, API 이름, 검색/평가 용어처럼 영어가 더 정확한 표현은 살린다.
@@ -31,8 +30,8 @@ entry: scripts/publish.sh
 ## 단계
 1. **MD 소스 먼저** — Markdown 작성(`reports/<주제>-<YYYYMMDD>/<name>.md`). 재편집·버전관리·재렌더 원본.
 2. **최종 윤문** — 렌더 전에 위 “문체 원칙” 기준으로 번역투·기계적 병렬·영어 라벨 남발을 줄인다. 내용 추가/삭제가 아니라 문체·리듬·표현만 다듬는다. (외부 `humanize-korean` 스킬이 설치돼 있으면 그걸로 돌려도 된다.)
-3. **HTML 렌더**(확인 시) — `scripts/render.sh <md> [out.html] [제목]` → 아이폰 반응형 HTML+SVG(자체완결, **다크/라이트 테마 토글**).
-4. **포털 게시**(확인 시) — `scripts/publish.sh --title "T" --author maintainer --summary "S" --md a.md --html a.html` → team-collab `reports/`에 복사 + 등록 → **<dashboard-url>/reports** 목록에 바로 뜬다. HTML이 있으면 포털 기본 form은 HTML이고, MD는 정본·다운로드용 보조 form으로 남는다.
+3. **HTML 렌더** — `scripts/render.sh <md> [out.html] [제목]` → 아이폰 반응형 HTML+SVG(자체완결, **다크/라이트 테마 토글**).
+4. **포털 게시** — `scripts/publish.sh --title "T" --author maintainer --summary "S" --md a.md --html a.html` → team-collab `reports/`에 복사 + 등록 → **<dashboard-url>/reports** 목록에 바로 뜬다. HTML이 있으면 포털 기본 form은 HTML이고, MD는 정본·다운로드용 보조 form으로 남는다.
 
 두 스크립트는 **이 저장소 안에** 있다. clone 루트에서 실행한다(`install.sh`는 `~/.claude/skills/b3os`만 연결하므로 `~/.claude/skills/b3os-report/…` 경로는 없다).
 
