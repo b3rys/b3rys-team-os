@@ -101,6 +101,8 @@ Modifying b3os itself (source, config, `agents.json`/`team.db`, releases) → fo
 
 ## 13. Team Skills
 
+**All paths in this document are relative to the b3os repo root** (your member file carries it as an absolute path) — they do NOT resolve from your own working directory.
+
 **Pick by trigger** (canonical `skills/<name>/SKILL.md` · index `docs/B3OS_SKILLS.md`):
 message a teammate → `b3os-team-inbox` · confirmed execution/delegation task → `b3os-bwf` · publish to `/reports` → `b3os-report` · branch·PR·merge → `b3os-github-workflow` · send a Telegram file → `b3os-telegram-file-delivery` · `[workloop: …]` wake → `b3os-task-loop` · modify b3os itself → `b3os-infra-safety` · deploy/release → `b3os-release-ops` · merge AI-written code → `b3os-ai-code-safety` · parallel agents → `b3os-harness-playbook` · record a lesson → `b3os-team-learning-loop` · member add/remove → `b3os-team-member-lifecycle`.
 
