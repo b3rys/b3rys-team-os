@@ -21,7 +21,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrate } from "../migrate";
 import { ensureThread, insertMessage } from "./messages";
-import { broadcastRecipientIds } from "../../lib/agentMembership";
 
 const ROSTER = [
   { id: "sender", display_name: "Sender", role: "r", runtime: "claude_channel", team_official_member: true },
@@ -154,10 +153,11 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
 
 
 
-  test("★명부 파일이 없으면 DB 로 되돌아간다 — 아무에게도 안 가는 게 최악이다★", () => {
-    // `agents.json` 은 gitignore 라 새 clone·공개 설치·테스트에 ★존재하지 않는다.★
-    // 플래그가 비어 있는 것과 ★명부 자체가 없는 것★ 은 다르다 — 뒤쪽에서 빈 목록이 되면
-    // broadcast 가 아무에게도 안 간다. 원래 결함보다 나쁘다.
+  test("★팀장님 발신은 명부 파일이 없어도 0명이 되지 않는다 — DB 를 본다★", () => {
+    // ★이름을 고쳤다.★ 예전 이름은 "명부 파일이 없으면 DB 로 되돌아간다" 였는데
+    // ★지금은 되돌아갈 폴백이 없다.★ 팀원 팬아웃이 사라지면서 팀장님·시스템 분기는
+    // 처음부터 DB 를 본다. 그래서 명부 파일 경로를 없는 값으로 두어도 결과가 안 바뀐다.
+    // 재는 것은 ★"명부 파일이 없어도 팀장님 broadcast 가 안 죽는다"★ 다.
     const db = withRoster(ROSTER);
     process.env.TEAM_AGENT_REGISTRY = join(dir, "does-not-exist.json");
     const got = broadcastFrom(db, "sender");
@@ -233,7 +233,10 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
     });
   });
 
-  test("★플래그를 아무도 안 쓰는 명부(공개 설치)에서 0명이 되지 않는다★", () => {
+  // ★이름을 고쳤다.★ 예전 이름은 "플래그를 아무도 안 쓰는 명부" 였지만 팀장님 분기는
+  // ★명부의 플래그를 읽지 않는다★ — DB 전수를 대상으로 한다. 플래그 축은 라우터 쪽
+  // 시험(atAllOfficialMembers.test.ts)이 덮는다. 여기서 재는 것은 ★공개 설치에서도 0명이 아니라는 것★ 이다.
+  test("★팀장님 발신은 공개 설치(플래그 없는 명부)에서도 0명이 되지 않는다★", () => {
     const flagless = [
       { id: "sender", display_name: "S", role: "r", runtime: "claude_channel" },
       { id: "a", display_name: "A", role: "r", runtime: "claude_channel" },

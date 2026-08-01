@@ -187,6 +187,17 @@ describe("3c wake 경계 — comm 매트릭스", () => {
     expect(spy.calls).toBe(0); // 예시로 보여준 @all 은 마커가 아니다
   });
 
+  // ★대전제 — "멘션은 팀장님만 쓴다. system 도 예외 없다" (GD 2026-08-01).★
+  // 이 시험이 없어서 한 번 헤맸다. 축에 시험이 없으니 'system 깨움이 죽었다' 를
+  // ★결함으로 읽고 되살리는 수정까지 올라갔다.★ 되살리는 쪽이 사양 위반이었다.
+  // ★기대값을 1 로 바꾸려는 사람은 먼저 이 대전제가 바뀌었는지 확인하라.★
+  test("★@all 마커는 팀장님 발신만 — system 도 예외 없다★ (system + @all → 깨움 0)", async () => {
+    const row = pendingRowFor(db, "codex", { to_agent_id: "broadcast", type: "broadcast", body: "@all 장애 통지", explicit_recipients: ["codex"], source: "system" });
+    const spy = spyAdapter(() => ({ ok: true }));
+    await dispatch(db, row, { openclaw: spy.adapter });
+    expect(spy.calls).toBe(0);
+  });
+
   // collect_only 경계 (Codex 적대리뷰 §3c): 수집형 위임 응답은 coordinator wake 억제, 일반 directed Q&A는 wake.
   const cRow = (over: Record<string, unknown>): PendingDispatchRow =>
     ({ agent_id: "bill", to_agent_id: "bill", type: "reply", thread_id: "t1", in_reply_to: null, parent_message_id: null, meta_json: null, ...over } as PendingDispatchRow);
