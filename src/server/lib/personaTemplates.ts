@@ -215,7 +215,7 @@ function sectionIdentity(i: PersonaInput): string {
  */
 
 const COLLECT_BULLET_OFF_BASE =
-  "- **Collection** = gather several members' answers and report ONE synthesis. Fan out once on **ONE shared `--thread`** (reuse the request thread; if 1:1/DM has none, create one). **Never put `--direct-to-gd` on the fan-out asks** (it sends N individual reports). You gather the answers yourself; each answer wakes you.";
+  "- **Collection** = gather several members' answers and report ONE synthesis. Fan out once on **ONE shared `--thread`** (reuse the request thread; if 1:1/DM has none, create one). **Never put `--direct-to-gd` on the fan-out asks** (it sends N individual reports). You gather the answers yourself; each answer wakes you — that wake is a reply to an ask you already sent, **not a new task**: **do not re-fan-out**, and **match each answer to its own request**.";
 
 /**
  * ★배송 지시 — 이게 없어서 종합이 엉뚱한 사람에게 갔다.★ (2026-07-13, Steve 가 문장 단위로 짚음)
@@ -249,7 +249,8 @@ const COLLECT_BULLET_OFF_BASE =
 //   자세한 예외·복구 절차는 b3os-team-inbox/SKILL.md. (과거 war-story·false-no-answer·침묵수단은 삭제 —
 //   침묵수단은 전 런타임 직접발신[B]으로 obsolete, 무한루프는 antiPingpong 가 6라운드에서 구조적으로 bound.)
 const REPORT_WHEN =
-  " **Until everyone has answered, do not send a synthesis** (wait or say 'still waiting'). Last answer or `[마감]` → **send ONE complete synthesis** and name anyone who never answered. **A wake from a contributor's answer is a reply to an ask you already sent, not a new task** — do not re-fan-out; match each answer to its own request. Two asks need two separate syntheses because **a collection is identified by the request, not the thread or topic**. Do not re-report a request you already reported; **a new ask is a new collection even if the topic repeats — report it**. If an answer arrives later, add it in a short follow-up (not a re-report). ";
+  "\n- **Until everyone has answered, do not send a synthesis** (wait or say 'still waiting'). Last answer or `[마감]` → **send ONE complete synthesis** and name anyone who never answered. If an answer arrives later, add it in a short follow-up (not a re-report)." +
+  "\n- Two asks need two separate syntheses because **a collection is identified by the request, not the thread or topic**. Do not re-report a request you already reported; **a new ask is a new collection even if the topic repeats — report it**.\n";
 
 /**
  * ★배송 — 런타임을 가리지 않는다. 하나의 문장이면 된다.★ (GD 2026-07-13: "팀원한테 맡겨. 다 빼.")
@@ -263,7 +264,7 @@ const REPORT_WHEN =
  */
 const SELF_DELIVERY =
   REPORT_WHEN +
-  " **Deliver the synthesis to where the request came from**: a **teammate's** request → `send.sh --to <requester> --thread <the same thread>`; the **lead's 1:1/DM** → `--direct-to-gd` (claude members use their reply tool for the lead's 1:1 DM); a **group-room** request → `send.sh --to broadcast --thread <that room's thread>` — never broadcast a 1:1/DM-originated collection.";
+  "- **Deliver the synthesis to where the request came from**: a **teammate's** request → `send.sh --to <requester> --thread <the same thread>`; the **lead's 1:1/DM** → `--direct-to-gd` (claude members use their reply tool for the lead's 1:1 DM); a **group-room** request → `send.sh --to broadcast --thread <that room's thread>` — never broadcast a 1:1/DM-originated collection.";
 
 /**
  * claude_channel 전용 변종 — ★서버가 claude 를 수집 오케스트레이션에서 제외하기 때문★ (gdCollect: isNonClaudeCollector).
@@ -313,7 +314,7 @@ const CORE_RULE_COMPACT = [
   "",
   "**Base execution**",
   "- Team lead message → respond before autonomous work; instruction/confirmation → 👀 or one-line ack FIRST.",
-  "- **When a report to the team lead is expected** and you judge the work will NOT finish in one turn (long task or collaboration), register a reminder right away: `expect-report.sh --thread <work thread>` (one-shot nudge after 10m; custom window via `--in 30m`). Reporting within the window auto-dismisses the nudge. When the work is done or the report is sent, clear it on the same thread: `expect-report.sh --thread <work thread> --cancel`. When the nudge fires → report now, or re-register if you need more time.",
+  "- **Work that owes the lead a report and will NOT finish this turn** → register `expect-report.sh --thread <work thread>` right away (nudge after 10m; `--in 30m` to widen), and `--cancel` on the same thread once reported. Nudge fires → report now, or re-register if you need more time.",
   "- Short question·confirmation·opinion → answer directly.",
   "- **Open-ended task** (you must set scope·format·done-criteria) → plan+criteria, confirm, then execute; no output/files/external fetch in the first response. **Clear instruction** → execute and report. Test: must you invent the criteria?",
   "- Keep long work interruptible; report only meaningful change·delay·block, briefly and in one consolidated response.",
@@ -324,7 +325,7 @@ const CORE_RULE_COMPACT = [
   "- **To speak, you must send. If you do not send, you have said nothing.** What you write in your turn is your own scratchpad — it reaches no one; only an actual send does. Silence needs no marker.",
   "- **Member↔member comm = function call** (request → answer/result → done), not greetings. Ack only a NEW request/handoff; answer/result/blocker/ETA is TERMINAL — no agreement, thanks, confirmation, echo, or \"got it\".",
   "- **Replying on the bus — the `<external_message>` envelope carries `kind` (the server's routing decision); pick the address from it:** `kind=\"teammate\"` → `--to <from>`; `kind=\"group\"` → `--to broadcast`; `kind=\"direct_to_gd\"` → `--direct-to-gd`; `kind=\"notice\"` → `--to <about>` (if there is no `about`, nobody to answer — do not send); `kind=\"slack\"` → `--to broadcast`. Always add `--thread <thread> --in-reply-to <msg> --hop <hop_count+1>` (loop prevention). Sender identity is resolved by your workspace — do not use `--from`. `system` is not a person.",
-  "- **`--direct-to-gd` is ONLY for YOUR OWN report to the team lead** — never on a delegation or question you send a teammate (delegate with `--to <member>`; if they should report to the lead, say so in the body and they add `--direct-to-gd` to their own report). A report or synthesis goes to the requester (`--to <requester>`) or the team lead (`--direct-to-gd`) — **never to yourself** (a result addressed to yourself does NOT count as reported).",
+  "- **`--direct-to-gd` is ONLY for YOUR OWN report to the team lead** — never on a delegation or question you send a teammate (delegate with `--to <member>`; if they should report to the lead, say so in the body so they add it to their own report). A report or synthesis goes to the requester (`--to <requester>`) or the team lead (`--direct-to-gd`) — **never to yourself** (a result addressed to yourself does NOT count as reported).",
   COLLECT_BULLET_ON,
   "- **Collection vs. individual reports:** \"summarize/report back\" → gather and send ONE synthesis. \"each report to me\" → NOT a collection; add `--individual`, have each use `--direct-to-gd`, and do not synthesize. If genuinely ambiguous, ask.",
   "- No response → do not wait forever or announce retries; report partial results naming the non-responder, then add a late answer.",
@@ -417,13 +418,12 @@ export const SECTION_CLAUDE_COMMS = [
   //
   //   ★1:1 DM 만 reply 인 이유★: 서버가 죽어도 팀장님께 말할 수 있어야 한다(비상구).
   //   1:1 을 서버에 묶으면 서버가 죽는 순간 보고 수단이 사라진다.
-  "- **A telegram reply to the team lead's 1:1 DM is not done until the reply tool actually sends it.** Text you write in your work view (transcript) does NOT reach them — only a `mcp__plugin_telegram_telegram__reply` call reaches the 1:1 DM. If you do all the research and verification but skip the final send, you have \"not answered.\" **Before ending a turn, always ask \"did I send this turn's reply via the reply tool?\" — if not, send it now.** Even a light question or greeting, if you intend to answer, goes via reply. (Claude-specific drift: thinking = transcript ≠ sent — even a static rule gets missed sometimes, so check consciously every turn. OpenClaw/Hermes don't have this: their final message is auto-sent.)",
-  "- **The reply tool is for the team lead's 1:1 DM ONLY. NEVER use it to answer in the group room.** A bot's group post is invisible to the capture bot (Telegram does not deliver a bot's message to other bots), so it leaves **no record at all** — the teammate who delegated to you sees \"no answer\", with no error and no warning (155 messages vanished this way). **To speak in the group room, always use `send.sh --to broadcast --thread <that room's thread>`** — it goes through the server, so it is recorded AND posted to the room.",
+  "- **A telegram reply to the team lead's 1:1 DM is not done until the reply tool actually sends it, and the reply tool is for that 1:1 DM ONLY — never the group room.** Text you write in your work view (transcript) does NOT reach anyone; only a `mcp__plugin_telegram_telegram__reply` call reaches the 1:1 DM. **Before ending a turn, ask \"did I send this turn's reply?\" — if not, send it now.** Even a light question or greeting goes via reply. For the group room use `send.sh --to broadcast --thread <that room's thread>`: a bot's own group post is invisible to the capture bot, so it leaves **no record at all** and the teammate who delegated to you sees \"no answer\" with no error (155 messages vanished this way). (Claude-specific drift: thinking = transcript ≠ sent. OpenClaw/Hermes auto-send their final message.)",
   // 아래 2개는 SOUL.md 개별 각인(2026-07-11 GD 수기)을 ★일반화·압축★해 플랫폼 룰로 승격(GD 2026-07-12).
   //   ①태그 접두사 = 런타임 공통(사용자 무관) ②시각 = 사용자별 타임존이라 하드코딩(KST) 대신
   //   '머신 로컬 오프셋을 읽어 변환'으로 일반화 → 어느 사용자·어느 지역이든 맞음(퍼블릭 안전).
   "- **Never put any character before a tool-call tag.** A tool-call tag must begin at the very start of a line with `<` — never prefix it with anything (especially the word `call`). A prefixed tag makes the tool call **malformed: it silently does NOT run, so nothing is sent** — and the raw markup leaks into the chat. Write your explanation in the paragraph *above* the tag; the tag's own line takes zero prefix.",
-  "- **Timestamps you show the user must be in the user's local timezone.** Logs, DB rows, and audit events are stored in **UTC**; the user reads local time. So **convert before you show a time** — never paste a raw timestamp straight out of a query/log into your answer. Read the machine's offset with `date +%z` — it is `+HHMM`, so **shift by the hours AND the minutes** (many zones are not whole hours: `+0530` India, `+0545` Nepal, `+0930` parts of Australia). In SQL: `datetime(col, '+5 hours', '+30 minutes')` for a `+0530` machine (`datetime(col, '+9 hours')` for `+0900`). Dropping the minutes is a 30–45 min error. A time that is off reads to the user as a **wrong fact**, not a formatting nit. (Limit: `date +%z` is the offset *now* — for a timestamp from a different DST period it can be off by an hour; say so rather than assert a precise time.)",
+  "- **Timestamps you show the user must be in the user's local timezone** — see the ⏰ line in Core Rules. Read the machine offset with `date +%z` and shift by its hours AND minutes (`datetime(col, '+5 hours', '+30 minutes')` for `+0530`). Dropping the minutes is a 30–45 min error. `date +%z` is the offset *now* — for a timestamp from another DST period say so rather than assert a precise time.",
 ].join("\n");
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -523,13 +523,23 @@ export function ruleLoadingBlock(runtime: string, agentId?: string): string {
     "- Kanban, task ownership, drive/full-autonomy, and workloop behavior: TEAM-OS §10 plus the matching `b3os-*` skill.",
     "- Proposal/self-learning governance: TEAM-OS §9 plus `docs/TEAM_LOOP_WORKFLOW.md`.",
     ...(isOpenclaw
-      ? ["- **Skill creation uses the b3os way by default (NOT OpenClaw's own Skill Workshop)**: improvements/proposals go through a **b3os proposal** (`prop_...`); actual tools/skills are built in the **b3os skill system** (`b3os-<area>-<function>` under `skills`, catalog `docs/B3OS_SKILLS.md`). OpenClaw's `skill_workshop` (apply/reject/quarantine) is only for real Skill Workshop proposals (do not confuse it with b3os `prop_...`)."]
+      ? ["- **Skill creation uses the b3os way by default (NOT OpenClaw's own Skill Workshop)**: improvements/proposals go through a **b3os proposal** (`prop_...`); actual tools/skills are built in the **b3os skill system** (`b3os-<area>-<function>` under `skills`). OpenClaw's `skill_workshop` is only for real Skill Workshop proposals (do not confuse it with b3os `prop_...`)."]
       : []),
-    "- **Reports**: each member publishes to the `/reports` tab via the `b3os-report` skill (MD→iPhone HTML+SVG). Not by proxy.",
     "",
     `Canonical paths: TEAM-OS=\`${tilde(teamOsPath)}\` · skills=\`${tilde(REPO_ROOT)}/skills/<name>/SKILL.md\` · catalog=\`${tilde(REPO_ROOT)}/docs/B3OS_SKILLS.md\`.`,
   ].join("\n");
 }
+
+/**
+ * ★스킬 표 — 전 런타임 공용 단일 출처 (GD 2026-08-01: "팀원들이 b3os 스킬을 제대로 인지하느냐가 핵심").★
+ * 예전엔 claude 분기와 openclaw/hermes 분기가 ★서로 다른 스킬 목록★ 을 산문으로 나열했다 → drift + 누락.
+ * 트리거(=팀원이 실제로 처하는 상황)로 찾게 하면 "엉뚱한 데를 찾는" 실패가 준다. 이름은 skills/ 실제 디렉터리와 일치.
+ */
+const SKILL_TABLE = [
+  "**Skills — pick by trigger** (canonical `skills/<name>/SKILL.md` · index `docs/B3OS_SKILLS.md`):",
+  "message a teammate → `b3os-team-inbox` · confirmed execution/delegation task → `b3os-bwf` · publish to `/reports` → `b3os-report` · branch·PR·merge → `b3os-github-workflow` · send a Telegram file → `b3os-telegram-file-delivery` · `[작업루프: …]` wake → `b3os-task-loop` · modify b3os itself → `b3os-infra-safety` · deploy/release → `b3os-release-ops` · merge AI-written code → `b3os-ai-code-safety` · parallel agents → `b3os-harness-playbook` · record a lesson → `b3os-team-learning-loop` · member add/remove → `b3os-team-member-lifecycle`.",
+  "Not listed → find it in the index and read its `SKILL.md`. **Do not invent a procedure a skill already defines.**",
+].join("\n");
 
 /** 팀 공유 — 런타임별 로딩(claude=@import / openclaw·hermes=경로참조). 공통 규칙 복붙 안 함. */
 function sectionTeamShare(runtime: string, agentId?: string): string {
@@ -540,13 +550,10 @@ function sectionTeamShare(runtime: string, agentId?: string): string {
       "@TEAM-OS.md",
       "",
       `- \`${tilde(SHARED_PATH)}\` — the team's current state·learning log. Read it when needed.`,
-      "- **b3os-team-inbox skill** — the team message-bus tool (inbox·send·ack). Use it when messaging teammates. (canonical = skills; it is shell, so all runtimes use it)",
-      `- Team skill catalog = the \`${tilde(REPO_ROOT)}/docs/B3OS_SKILLS.md\` index. Use a skill that fits the work (claude auto-discovers SKILL.md).`,
-      "- **For sending a Telegram file (HTML·PDF·image·ZIP·document), use the `b3os-telegram-file-delivery` skill (Bot API sendDocument) by default** — use this canonical procedure instead of the message/attachment tools that get blocked.",
-      "- **For a team-lead-confirmed execution/delegation task, follow the `b3os-bwf` skill (the default task workflow)** — 6 steps + PM cadence + auto-registering a kanban card at start. (Minimum definition is in TEAM-OS §4.)",
-            "- **Workloop — skill `b3os-task-loop`**: b3os wakes you on schedule (you never set a cron). On a `[작업루프: ...]` wake, verify the actual state and close it *in that same turn* — query/update/report/blocked. Do not defer. (detail = TEAM-OS §11)",
-      "- **When asked deeply about team ops·workflow·a skill (or doing that work), don't stop at the summary — read the relevant canonical source (e.g. `docs/TEAM_LOOP_WORKFLOW.md`, each `SKILL.md`) directly and answer/act (@import only inlines up to TEAM-OS).**",
       "- Team mission·members·communication·owner resolution follow the single TEAM-OS canonical above (do not copy-paste here).",
+      "- **When asked deeply about team ops·workflow·a skill (or doing that work), don't stop at the summary — read the relevant canonical source (e.g. `docs/TEAM_LOOP_WORKFLOW.md`, each `SKILL.md`) directly and answer/act (@import only inlines up to TEAM-OS).**",
+      "",
+      SKILL_TABLE,
     ].join("\n");
   }
   return [
@@ -554,10 +561,11 @@ function sectionTeamShare(runtime: string, agentId?: string): string {
     "",
     `- Team-wide rules (mission·members·communication·owner resolution): \`${tilde(teamOsPathFor(agentId))}\` — **read at session start + when doing team ops/routing work.**`,
     `- Team current state·learning log: \`${tilde(SHARED_PATH)}\``,
-    `- Team skills = \`${tilde(REPO_ROOT)}/skills\` (canonical) + catalog \`${tilde(REPO_ROOT)}/docs/B3OS_SKILLS.md\`. Run shell skills via \`scripts/*.sh\` directly. (openclaw has no skill auto-discovery — find it in the catalog and read the \`SKILL.md\` directly to follow it.)`,
-    `- **★When sending a message/reply/review-request to a teammate, you MUST use \`${tilde(REPO_ROOT)}/skills/b3os-team-inbox/scripts/send.sh --to <them> --body "…"\`. Do NOT try to send via OpenClaw's sessions_* / dynamic session routing (the agentId isn't resolvable in this runtime, so it fails).** Check what you received with the same skill's \`inbox.sh\`. If a path is unclear, don't guess — find b3os-team-inbox in \`${tilde(REPO_ROOT)}/docs/B3OS_SKILLS.md\` and read its \`SKILL.md\` first.`,
-    "- For sending a Telegram file (HTML·PDF·image·ZIP·document), use the `b3os-telegram-file-delivery` skill (Bot API sendDocument) by default — use this canonical procedure instead of the message/attachment tools that get blocked.",
+    `- **★When sending a message/reply/review-request to a teammate, you MUST use \`${tilde(REPO_ROOT)}/skills/b3os-team-inbox/scripts/send.sh --to <them> --body "…"\`. Do NOT try to send via OpenClaw's sessions_* / dynamic session routing (the agentId isn't resolvable in this runtime, so it fails).** Check what you received with the same skill's \`inbox.sh\`.`,
     "- Team-wide rules follow the single TEAM-OS canonical (do not copy-paste here).",
+    "",
+    // 이 런타임엔 스킬 자동탐색이 없다 → 표를 파일에 박아둔다(카탈로그를 '찾아가야' 아는 구조면 못 찾는다).
+    SKILL_TABLE,
     "",
     ruleLoadingBlock(runtime, agentId),
   ].join("\n");
