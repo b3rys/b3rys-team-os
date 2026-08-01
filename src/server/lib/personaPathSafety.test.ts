@@ -58,7 +58,7 @@ describe("★스킬 목록은 디렉터리에서 생성된다 — 손으로 나�
   // GD 2026-08-01: "스킬이 추가될 때마다 고쳐야 되나?" → 아니오. 이 테스트가 그걸 보증한다.
   const skillNames = existsSync(`${REPO_ROOT}/skills`)
     ? readdirSync(`${REPO_ROOT}/skills`).filter(
-        (n) => n.startsWith("b3os-") && existsSync(`${REPO_ROOT}/skills/${n}/SKILL.md`),
+        (n) => existsSync(`${REPO_ROOT}/skills/${n}/SKILL.md`),
       )
     : [];
 

@@ -599,7 +599,7 @@ function readSkillTriggers(): Array<{ name: string; trigger: string; script: str
   const dir = `${REPO_ROOT}/skills`;
   if (!existsSync(dir)) return [];
   const out: Array<{ name: string; trigger: string; script: string }> = [];
-  for (const name of readdirSync(dir).filter((n) => n.startsWith("b3os-")).sort()) {
+  for (const name of readdirSync(dir).sort()) {
     const md = `${dir}/${name}/SKILL.md`;
     if (!existsSync(md)) continue;
     let trigger = "";
