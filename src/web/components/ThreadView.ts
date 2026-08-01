@@ -8,6 +8,7 @@ import { agentIconName, renderIcon } from "../icons";
 import { pick, getLocale } from "../i18n";
 import { parseSqliteDate } from "../lib/datetime";
 import { captureScrollStick, applyScrollStick, stickToBottom } from "../lib/scrollStick";
+import { mdInlineToHtml } from "../lib/mdInline";
 import { showAlert } from "./dialogs";
 
 function safeRelative(s: string | null): string {
@@ -145,7 +146,7 @@ export function renderThreadView(root: HTMLElement): void {
                 <span class="text-[10px] text-slate-500">${time}</span>
                 ${hopBadge}${expiredBadge}
               </div>
-              <div class="text-sm text-slate-200 whitespace-pre-wrap">${escape(m.body)}</div>
+              <div class="text-sm text-slate-200 whitespace-pre-wrap [&_a]:underline [&_a]:underline-offset-2">${mdInlineToHtml(m.body)}</div>
             </div>
           </div>`;
       })
