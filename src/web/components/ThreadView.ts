@@ -6,6 +6,7 @@ import { enUS } from "date-fns/locale/en-US";
 import { agentIconName, renderIcon } from "../icons";
 import { pick, getLocale } from "../i18n";
 import { parseSqliteDate } from "../lib/datetime";
+import { captureScrollStick, applyScrollStick, stickToBottom } from "../lib/scrollStick";
 import { showAlert } from "./dialogs";
 
 function safeRelative(s: string | null): string {
@@ -82,6 +83,10 @@ export function renderThreadView(root: HTMLElement): void {
         if (!input || !input.value.trim()) return;
         const body = input.value.trim();
         input.value = "";
+        // 전송 즉시 바닥으로 — 내 메시지가 뜰 자리를 보여줘야 "전송됨"을 안다(리뷰 #1).
+        // 바닥에 있으면 도착 재렌더도 일반 캡처 로직으로 자연히 stick 하므로 별도 플래그는 불필요.
+        // (도착 전에 사용자가 다시 위로 올라가면 보존 — Chat 과 동일한 의도 해석.)
+        applyScrollStick(root.querySelector<HTMLElement>("#thread-msgs"), stickToBottom());
         const recipients = (t?.participants ?? []).filter((p) => p !== "user");
         const to = recipients[0] ?? "bill";
         const result = await sendMessage({
@@ -100,6 +105,9 @@ export function renderThreadView(root: HTMLElement): void {
     const body = root.querySelector<HTMLElement>("#thread-msgs");
     if (!body) return;
 
+    // 위로 스크롤해 읽는 중이면 폴링 재렌더가 위치를 뺏지 않는다 — 바닥 근처일 때만 stick.
+    // (무조건 scrollTop=scrollHeight 로 끌어내리던 문제 수정, GD 2026-08-01. scrollStick 참조.)
+    const stick = captureScrollStick(body);
     body.innerHTML = msgs
       .map((m: Message) => {
         const borderClass = SOURCE_BORDER[m.source] ?? "border-l-status-offline";
@@ -134,7 +142,7 @@ export function renderThreadView(root: HTMLElement): void {
           </div>`;
       })
       .join("");
-    body.scrollTop = body.scrollHeight;
+    applyScrollStick(body, stick);
   };
 
   update();
