@@ -73,6 +73,8 @@ archiving/
 !/docs/TEAM_COLLECT_ORCHESTRATION.md
 !/docs/DEPLOY_MERGE_HOTFIX_WORKFLOW.md
 !/docs/TEAM_COMMUNICATION.md
+# README 가 링크한다 — 없으면 공개 README 의 Trouble Shooting 링크가 404 다.
+!/docs/TROUBLESHOOTING.md
 # 대시보드 Doc 탭(TeamOS.ts CANONICAL_DOCS)이 링크한다 — 없으면 그 링크가 404 다(2026-07-28 실측).
 !/docs/TEST_CASES.md
 
