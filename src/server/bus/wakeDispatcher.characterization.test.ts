@@ -152,12 +152,12 @@ describe("3c wake 경계 — comm 매트릭스", () => {
     expect(rcpt(db, row.message_id, "codex")?.last_error).toBe("broadcast_inbox_only_no_wake_marker");
   });
 
-  test("broadcast + notice 플래그 + 팀원 발신 → 본문 마커 없이 wake", async () => {
+  test("broadcast + all_hands 사유 + 팀원 발신 → 본문 마커 없이 wake", async () => {
     const row = pendingRowFor(db, "codex", {
       to_agent_id: "broadcast", type: "broadcast", body: "팀 공지", explicit_recipients: ["codex"],
     });
-    db.prepare(`UPDATE message SET meta_json = ? WHERE id = ?`).run(JSON.stringify({ notice: true }), row.message_id);
-    row.meta_json = JSON.stringify({ notice: true });
+    db.prepare(`UPDATE message SET meta_json = ? WHERE id = ?`).run(JSON.stringify({ all_hands: "운영 점검" }), row.message_id);
+    row.meta_json = JSON.stringify({ all_hands: "운영 점검" });
     const spy = spyAdapter(() => ({ ok: true }));
     await dispatch(db, row, { openclaw: spy.adapter });
     expect(spy.calls).toBe(1);

@@ -77,10 +77,11 @@ function attachmentsFromRow(row: PendingDispatchRow): BusAttachment[] | undefine
   }
 }
 
-function isNoticeBroadcast(row: PendingDispatchRow): boolean {
+function isAgentAllHandsBroadcast(row: PendingDispatchRow): boolean {
   if (row.source !== "agent" || !row.meta_json) return false;
   try {
-    return (JSON.parse(row.meta_json) as { notice?: unknown }).notice === true;
+    const reason = (JSON.parse(row.meta_json) as { all_hands?: unknown }).all_hands;
+    return typeof reason === "string" && reason.length > 0;
   } catch {
     return false;
   }
@@ -1160,7 +1161,7 @@ function buildDispatchPlan(
   // 지금은 수신행이 0이라 우연히 안전할 뿐이다 — 우연에 기대지 않도록 같은 판정을 여기에도 건다.
   // 두 곳이 같은 broadcastAudience 를 쓰므로 한쪽만 고쳐서 어긋나는 일이 없다.
   const isBroadcast = row.to_agent_id === "broadcast" || row.type === "broadcast";
-  if (isBroadcast && !isNoticeBroadcast(row) && broadcastAudience(row.body, row.source).kind !== "all_hands") {
+  if (isBroadcast && !isAgentAllHandsBroadcast(row) && broadcastAudience(row.body, row.source).kind !== "all_hands") {
     db.prepare(
       `UPDATE message_recipient
        SET delivery_state = 'completed',

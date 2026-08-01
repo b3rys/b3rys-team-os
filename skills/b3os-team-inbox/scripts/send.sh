@@ -8,7 +8,7 @@
 #                                                   ★본문에 홑따옴표·백틱·$(cmd)·$VAR 가 있으면 --body-file 을 쓰세요★
 #                                                   — --body 로 넘기면 셸이 해석해서 본문이 조용히 훼손됩니다(실측 2건).
 #                                                   stdout=메시지 id · stderr=사람이 읽는 결과(파싱하는 코드 없음, 2026-07-30 확인)
-#                [--type dm|reply] [--priority low|normal|high] [--hop <n>] [--notice]
+#                [--type dm|reply] [--priority low|normal|high] [--hop <n>] [--notice|--공지 <reason>]
 #                [--direct-to-gd --source-thread <tg-...|group_id>] [--individual]
 #                                                   send ALL asks for one task on ONE --thread. The server
 #                                                   then gathers the replies and wakes you once with the
@@ -25,7 +25,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 BASE="${TEAM_BASE:-http://127.0.0.1:7878/team}"
 
 TO=""; BODY=""; THREAD=""; REPLY_TO=""; TYPE="dm"; PRIORITY="normal"; FROM=""; HOP=""; SYNC=""; DIRECT_TO_GD=""; SOURCE_THREAD=""; EXPECT_REPORT_BY=""; INDIVIDUAL=""; EPISODE=""
-BODY_FILE=""; BODY_SET=""; CONFIRM=""; MENTIONS=""; NOTICE=""
+BODY_FILE=""; BODY_SET=""; CONFIRM=""; MENTIONS=""; ALL_HANDS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -62,8 +62,8 @@ while [ $# -gt 0 ]; do
     --sync) SYNC="$2"; shift 2 ;;
     --direct-to-gd) DIRECT_TO_GD="1"; shift ;;
     # 팀원 broadcast를 방 게시 1건 + 정식·활성 전원 수신행으로 보낸다.
-    # 본문에 @all을 쓰는 것과 무관한 명시적 발신 옵션이다.
-    --notice|--공지) NOTICE="1"; shift ;;
+    # 사유를 감사에 남기며, 본문에 @all을 쓰는 것과 무관한 명시적 발신 옵션이다.
+    --notice|--공지) ALL_HANDS="${2:-}"; [ -n "$ALL_HANDS" ] || { echo "ERROR: $1 requires a reason" >&2; exit 1; }; shift 2 ;;
     # ★개별보고 위임 표시★ — "각자 GD께 직접 보고해라" 로 뿌릴 때 붙인다. 서버가 [마감] 독촉을 안 보낸다.
     #   안 붙여도 고장나지 않는다: 독촉이 한 번 올 뿐이고 그 본문이 "개별보고면 무시하세요" 라고 알려준다.
     --individual) INDIVIDUAL="1"; shift ;;
@@ -81,8 +81,8 @@ while [ $# -gt 0 ]; do
 done
 
 [ -z "$TO" ] && { echo "ERROR: --to required" >&2; exit 1; }
-[ -n "$NOTICE" ] && [ "$TO" != "broadcast" ] && {
-  echo "ERROR: --notice 는 --to broadcast 에만 사용할 수 있습니다" >&2
+[ -n "$ALL_HANDS" ] && [ "$TO" != "broadcast" ] && {
+  echo "ERROR: --notice/--공지 는 --to broadcast 에만 사용할 수 있습니다" >&2
   exit 1
 }
 
@@ -198,7 +198,7 @@ for _m in $MENTIONS; do
 done
 
 # Build JSON via python to handle escaping safely.
-PAYLOAD=$(MENTION_IDS="$MENTION_IDS" BODY="$BODY" FROM="$FROM" TO="$TO" THREAD="$THREAD" REPLY_TO="$REPLY_TO" TYPE="$TYPE" PRIORITY="$PRIORITY" HOP="$HOP" SYNC="$SYNC" DIRECT_TO_GD="$DIRECT_TO_GD" SOURCE_THREAD="$SOURCE_THREAD" EXPECT_REPORT_BY="$EXPECT_REPORT_BY" INDIVIDUAL="$INDIVIDUAL" EPISODE="$EPISODE" NOTICE="$NOTICE" python3 -c "
+PAYLOAD=$(MENTION_IDS="$MENTION_IDS" BODY="$BODY" FROM="$FROM" TO="$TO" THREAD="$THREAD" REPLY_TO="$REPLY_TO" TYPE="$TYPE" PRIORITY="$PRIORITY" HOP="$HOP" SYNC="$SYNC" DIRECT_TO_GD="$DIRECT_TO_GD" SOURCE_THREAD="$SOURCE_THREAD" EXPECT_REPORT_BY="$EXPECT_REPORT_BY" INDIVIDUAL="$INDIVIDUAL" EPISODE="$EPISODE" ALL_HANDS="$ALL_HANDS" python3 -c "
 import json, os
 p = {
   'from_agent_id': os.environ['FROM'],
@@ -212,7 +212,7 @@ if os.environ.get('THREAD'):    p['thread_id'] = os.environ['THREAD']
 if os.environ.get('REPLY_TO'):  p['in_reply_to'] = os.environ['REPLY_TO']
 if os.environ.get('HOP'):       p['hop_count'] = int(os.environ['HOP'])
 if os.environ.get('SYNC'):      p['sync'] = os.environ['SYNC']
-if os.environ.get('NOTICE'):    p['notice'] = True
+if os.environ.get('ALL_HANDS'): p['all_hands'] = os.environ['ALL_HANDS']
 meta = {}
 if os.environ.get('DIRECT_TO_GD'):
     src = os.environ.get('SOURCE_THREAD', '').strip()

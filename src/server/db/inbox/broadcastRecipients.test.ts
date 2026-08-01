@@ -71,11 +71,12 @@ function broadcastFrom(
   from: string,
   source = "user",
   body = "@all 공지",
-  notice = false,
+  allHands = "",
 ): string[] {
   const { thread_id } = ensureThread(db, { from_agent_id: from, to_agent_id: "broadcast", type: "broadcast", body } as never);
   const stored = insertMessage(db, {
-    from_agent_id: from, to_agent_id: "broadcast", type: "broadcast", body, thread_id, source, notice,
+    from_agent_id: from, to_agent_id: "broadcast", type: "broadcast", body, thread_id, source,
+    ...(allHands ? { all_hands: allHands } : {}),
   } as never);
   return db
     .prepare(`SELECT agent_id FROM message_recipient WHERE message_id = ? ORDER BY agent_id`)
@@ -85,30 +86,31 @@ function broadcastFrom(
 
 describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★", () => {
 
-  describe("★팀원 공지는 본문이 아니라 notice 플래그로만 전원 전달한다★", () => {
-    test("notice 있음 → 정식·활성 전원, 발신자 제외", () => {
+  describe("★팀원 공지는 본문이 아니라 all_hands 사유로만 전원 전달한다★", () => {
+    test("all_hands 사유 있음 → 정식·활성 전원, 발신자 제외", () => {
       const db = withRoster(ROSTER);
-      expect(broadcastFrom(db, "sender", "agent", "서비스 점검 안내", true)).toEqual(["member"]);
+      expect(broadcastFrom(db, "sender", "agent", "서비스 점검 안내", "운영 점검")).toEqual(["member"]);
     });
 
-    test("notice 없음 → 수신행 0", () => {
+    test("all_hands 사유 없음 → 수신행 0", () => {
       const db = withRoster(ROSTER);
       expect(broadcastFrom(db, "sender", "agent", "서비스 점검 안내")).toEqual([]);
     });
 
-    test("본문에 @all만 있고 notice 없음 → 수신행 0", () => {
+    test("본문에 @all만 있고 all_hands 사유 없음 → 수신행 0", () => {
       const db = withRoster(ROSTER);
       expect(broadcastFrom(db, "sender", "agent", "@all 서비스 점검 안내")).toEqual([]);
     });
 
-    test("notice 사용자는 수신자와 함께 감사기록에 남는다", () => {
+    test("all_hands 사유가 message meta에 보존된다", () => {
       const db = withRoster(ROSTER);
-      broadcastFrom(db, "sender", "agent", "서비스 점검 안내", true);
-      const path = join(dir, `audit-${new Date().toISOString().slice(0, 10)}.log`);
-      const log = readFileSync(path, "utf8");
-      expect(log).toContain("agent_broadcast_notice");
-      expect(log).toContain('"actor":"sender"');
-      expect(log).toContain('"recipient_ids":["member"]');
+      const { thread_id } = ensureThread(db, { from_agent_id: "sender", to_agent_id: "broadcast", type: "broadcast", body: "공지" } as never);
+      const stored = insertMessage(db, {
+        from_agent_id: "sender", to_agent_id: "broadcast", type: "broadcast", body: "공지",
+        thread_id, source: "agent", all_hands: "운영 점검",
+      } as never);
+      const row = db.prepare(`SELECT meta_json FROM message WHERE id = ?`).get(stored.id) as { meta_json: string };
+      expect(JSON.parse(row.meta_json).all_hands).toBe("운영 점검");
     });
 
     test("공개 설치의 플래그 없는 명부 → 발신자 제외 전원", () => {
@@ -118,7 +120,7 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
         { id: "b", display_name: "B", role: "r", runtime: "claude_channel" },
       ];
       const db = withRoster(flagless);
-      expect(broadcastFrom(db, "sender", "agent", "공지", true)).toEqual(["a", "b"]);
+      expect(broadcastFrom(db, "sender", "agent", "공지", "전원 확인")).toEqual(["a", "b"]);
     });
   });
 

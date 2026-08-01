@@ -10,7 +10,7 @@
  * ★그래서 룰이 아니라 게이트로 막는다.★ 판단을 9명에게 맡기지 않고 coordinator 한 곳으로 모은다.
  *
  * 계약 두 개:
- *  ① 팀원 broadcast = coordinator 능력 + `--all-hands "<이유>"` 둘 다 있어야 한다
+ *  ① 팀원 전체공지 = 정식·활성 자격 + `all_hands` 사유가 있어야 한다
  *  ② broadcast 에 대한 답은 broadcast 로 못 한다 (coordinator 라도) — 연쇄의 직접 고리
  */
 import { describe, expect, it } from "bun:test";
@@ -25,10 +25,10 @@ const ROSTER: AgentRecord[] = [
   { id: "lui", display_name: "Lui", role: "dev" },
 ] as never;
 
-function app() {
+function app(roster: AgentRecord[] = ROSTER, routeRoster: AgentRecord[] = roster) {
   const db = new Database(":memory:");
   migrate(db);
-  for (const a of ROSTER) {
+  for (const a of roster) {
     db.prepare(
       `INSERT OR IGNORE INTO agent (id, display_name, role, runtime, status_provider, workspace_path, persona_file)
        VALUES (?,?,?,'claude_channel','claude_tmux','/tmp','p.md')`,
@@ -41,8 +41,8 @@ function app() {
   const h = createInboxRoutes({
     db,
     broadcast: () => {},
-    registeredAgentIds: () => new Set(ROSTER.map((a) => a.id)),
-    agents: () => ROSTER,
+    registeredAgentIds: () => new Set(roster.map((a) => a.id)),
+    agents: () => routeRoster,
   } as never);
   return { h, db };
 }
@@ -89,5 +89,85 @@ describe("★팀장님 경로는 이 게이트를 타지 않는다★", () => {
     const { h } = app();
     const res = await send(h, { from_agent_id: "user", source: "user" });
     expect(res.status, "★팀장님 @all 을 막으면 안 된다★").not.toBe(403);
+  });
+});
+
+describe("★all_hands 전체공지는 사유·발신자격·감사를 강제한다★", () => {
+  it("정식·활성 팀원은 보내고 사유·수신자 수를 DB 감사에 남긴다", async () => {
+    const { h, db } = app();
+    const res = await send(h, { from_agent_id: "steve", all_hands: "운영 점검" });
+    expect(res.status).not.toBe(403);
+    expect(res.status).not.toBe(503);
+    const row = db.prepare(
+      `SELECT detail_json FROM audit_event WHERE actor='steve' AND action='agent_broadcast_all_hands' ORDER BY id DESC LIMIT 1`,
+    ).get() as { detail_json: string };
+    expect(JSON.parse(row.detail_json)).toMatchObject({
+      reason: "운영 점검",
+      recipient_count: 2,
+      eligible_recipient_count: 2,
+      zero_reason: null,
+    });
+  });
+
+  it("비정식 팀원은 전체공지를 보내지 못한다", async () => {
+    const roster = [
+      { ...ROSTER[0]! },
+      { ...ROSTER[1]!, team_official_member: false, lead_eligible: false },
+    ] as AgentRecord[];
+    const { h } = app(roster);
+    const res = await send(h, { from_agent_id: "steve", all_hands: "운영 점검" });
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("all_hands_sender_ineligible");
+  });
+
+  it("꺼진 팀원은 전체공지를 보내지 못한다", async () => {
+    const roster = [
+      { ...ROSTER[0]! },
+      { ...ROSTER[1]!, enabled: false },
+    ] as AgentRecord[];
+    const { h } = app(roster);
+    const res = await send(h, { from_agent_id: "steve", all_hands: "운영 점검" });
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("all_hands_sender_ineligible");
+  });
+
+  it("명부에서 발신자를 확인하지 못하면 성공시키지 않는다", async () => {
+    const { h, db } = app(ROSTER, []);
+    const res = await send(h, { from_agent_id: "steve", all_hands: "운영 점검" });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe("all_hands_roster_unavailable");
+    const audit = db.prepare(
+      `SELECT detail_json FROM audit_event WHERE action='agent_all_hands_blocked' ORDER BY id DESC LIMIT 1`,
+    ).get() as { detail_json: string };
+    expect(JSON.parse(audit.detail_json).error).toBe("sender_missing_from_registry");
+  });
+
+  it("발신자만 있는 명부의 수신행 0은 sender_only로 기록한다", async () => {
+    const roster = [{ ...ROSTER[0]! }] as AgentRecord[];
+    const { h, db } = app(roster);
+    const res = await send(h, { from_agent_id: "bill", all_hands: "개인 설치 확인" });
+    expect(res.status).not.toBe(403);
+    expect(res.status).not.toBe(503);
+    const row = db.prepare(
+      `SELECT detail_json FROM audit_event WHERE action='agent_broadcast_all_hands' ORDER BY id DESC LIMIT 1`,
+    ).get() as { detail_json: string };
+    expect(JSON.parse(row.detail_json)).toMatchObject({ recipient_count: 0, zero_reason: "sender_only" });
+  });
+
+  it("명부 수신자가 DB에 없어 수신행 0이면 registry_db_out_of_sync로 기록한다", async () => {
+    const dbRoster = [{ ...ROSTER[1]! }] as AgentRecord[];
+    const routeRoster = [{ ...ROSTER[1]! }, { ...ROSTER[0]! }] as AgentRecord[];
+    const { h, db } = app(dbRoster, routeRoster);
+    const res = await send(h, { from_agent_id: "steve", all_hands: "명부 동기화 확인" });
+    expect(res.status).not.toBe(403);
+    expect(res.status).not.toBe(503);
+    const row = db.prepare(
+      `SELECT detail_json FROM audit_event WHERE action='agent_broadcast_all_hands' ORDER BY id DESC LIMIT 1`,
+    ).get() as { detail_json: string };
+    expect(JSON.parse(row.detail_json)).toMatchObject({
+      recipient_count: 0,
+      eligible_recipient_count: 1,
+      zero_reason: "registry_db_out_of_sync",
+    });
   });
 });

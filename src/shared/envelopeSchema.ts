@@ -79,9 +79,6 @@ export const envelopeInboundSchema = z.object({
    * (실측: 게이트 없던 70분에 팀원 broadcast 47건 → wake 517회)
    */
   all_hands: z.string().min(1).max(200).optional(),
-  // 팀원 broadcast를 정식·활성 전원에게 알리는 명시적 발신 옵션.
-  // 본문 마커(@all 등)는 이 값을 대신하지 않는다.
-  notice: z.boolean().optional(),
   priority: prioritySchema.default("normal"),
   sync: syncLevelSchema.optional(), // 생략 시 insertMessage 가 'none' 처리 (미설정=미러 안 함)
   dedupe_key: z.string().min(1).max(128).nullable().optional(),
