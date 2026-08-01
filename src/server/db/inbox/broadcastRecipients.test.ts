@@ -12,7 +12,7 @@
  * 쿼리로는 규칙을 적용할 방법 자체가 없었다. 그래서 명부(agents.json)를 읽어 판정한다.
  *
  * ★기대값을 손으로 적지 않는다.★ 같은 명부에서 규칙으로 다시 계산해 두 집합을 비교한다.
- * 이름·숫자를 박으면 팀원이 늘거나 플래그가 바뀔 때 시험이 조용히 낡는다(오늘 7→8→9 로 움직였다).
+ * 이름·숫자를 박으면 팀원이 늘거나 플래그가 바뀔 때 테스트가 조용히 낡는다(오늘 7→8→9 로 움직였다).
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
@@ -21,7 +21,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrate } from "../migrate";
 import { ensureThread, insertMessage } from "./messages";
-import { broadcastRecipientIds } from "../../lib/agentMembership";
 
 const ROSTER = [
   { id: "sender", display_name: "Sender", role: "r", runtime: "claude_channel", team_official_member: true },
@@ -50,7 +49,7 @@ afterEach(() => {
 });
 
 function withRoster(roster: Array<Record<string, unknown>>): Database {
-  // 캐시 키에 경로가 들어가므로 시험마다 새 파일을 쓰면 서로 안 섞인다.
+  // 캐시 키에 경로가 들어가므로 테스트마다 새 파일을 쓰면 서로 안 섞인다.
   const path = join(dir, `agents-${roster.length}-${Math.abs(roster.length * 7 + roster.length)}.json`);
   writeFileSync(path, JSON.stringify(roster));
   process.env.TEAM_AGENT_REGISTRY = path;
@@ -80,7 +79,7 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
   test("★슬랙 스레드 답신은 팀원 수신행을 만들지 않는다 (멘션 기준)★", () => {
     // 슬랙은 멘션된 글만 들어온다 → 그 대화의 우리 쪽 당사자는 발신자 한 명뿐이다.
     // ★빈 배열을 넘기는 방식으로는 못 막는다★ — `length > 0` 조건 때문에 else 로 떨어져
-    // 조용히 전원으로 되돌아간다. 이 시험이 그 되돌아감을 잡는다.
+    // 조용히 전원으로 되돌아간다. 이 테스트가 그 되돌아감을 잡는다.
     const db = withRoster(ROSTER);
     const { thread_id } = ensureThread(db, { from_agent_id: "sender", to_agent_id: "broadcast", type: "broadcast", body: "hi" } as never);
     // 슬랙 어댑터가 스레드를 열 때 붙이는 것과 같은 meta
@@ -154,10 +153,11 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
 
 
 
-  test("★명부 파일이 없으면 DB 로 되돌아간다 — 아무에게도 안 가는 게 최악이다★", () => {
-    // `agents.json` 은 gitignore 라 새 clone·공개 설치·테스트에 ★존재하지 않는다.★
-    // 플래그가 비어 있는 것과 ★명부 자체가 없는 것★ 은 다르다 — 뒤쪽에서 빈 목록이 되면
-    // broadcast 가 아무에게도 안 간다. 원래 결함보다 나쁘다.
+  test("★팀장님 발신은 명부 파일이 없어도 0명이 되지 않는다 — DB 를 본다★", () => {
+    // ★이름을 고쳤다.★ 예전 이름은 "명부 파일이 없으면 DB 로 되돌아간다" 였는데
+    // ★지금은 되돌아갈 폴백이 없다.★ 팀원 팬아웃이 사라지면서 팀장님·시스템 분기는
+    // 처음부터 DB 를 본다. 그래서 명부 파일 경로를 없는 값으로 두어도 결과가 안 바뀐다.
+    // 재는 것은 ★"명부 파일이 없어도 팀장님 broadcast 가 안 죽는다"★ 다.
     const db = withRoster(ROSTER);
     process.env.TEAM_AGENT_REGISTRY = join(dir, "does-not-exist.json");
     const got = broadcastFrom(db, "sender");
@@ -233,7 +233,10 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
     });
   });
 
-  test("★플래그를 아무도 안 쓰는 명부(공개 설치)에서 0명이 되지 않는다★", () => {
+  // ★이름을 고쳤다.★ 예전 이름은 "플래그를 아무도 안 쓰는 명부" 였지만 팀장님 분기는
+  // ★명부의 플래그를 읽지 않는다★ — DB 전수를 대상으로 한다. 플래그 축은 라우터 쪽
+  // 테스트(atAllOfficialMembers.test.ts)가 덮는다. 여기서 재는 것은 ★공개 설치에서도 0명이 아니라는 것★ 이다.
+  test("★팀장님 발신은 공개 설치(플래그 없는 명부)에서도 0명이 되지 않는다★", () => {
     const flagless = [
       { id: "sender", display_name: "S", role: "r", runtime: "claude_channel" },
       { id: "a", display_name: "A", role: "r", runtime: "claude_channel" },

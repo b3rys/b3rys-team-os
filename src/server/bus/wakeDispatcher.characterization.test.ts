@@ -154,7 +154,7 @@ describe("3c wake 경계 — comm 매트릭스", () => {
 
   // ★기대값을 뒤집었다 — 옛 기대값(1회 깨움)은 사양 위반을 정답으로 고정하고 있었다.★
   // 마커를 쓸 수 있는 것은 팀장님뿐이라는 계약은 수신행 생성에만 걸려 있었고 깨움에는 없었다.
-  // 그래서 이 시험은 "팀원이 @all 로 전원을 깨운다" 를 지키고 있었다 — 룰에 근거가 없는 동작이다.
+  // 그래서 이 테스트는 "팀원이 @all 로 전원을 깨운다" 를 지키고 있었다 — 룰에 근거가 없는 동작이다.
   // 되돌리기 전에 broadcastAudience 의 계약을 먼저 보라. 발신자와 마커를 함께 본다.
   test("broadcast + @all 마커 + 팀원 발신 → no-wake (마커는 팀장님 전용)", async () => {
     const row = pendingRowFor(db, "codex", { to_agent_id: "broadcast", type: "broadcast", body: "@all 다들 확인", explicit_recipients: ["codex"], source: "agent" });
@@ -174,7 +174,7 @@ describe("3c wake 경계 — comm 매트릭스", () => {
     expect(spy.calls).toBe(1); // 팀장님의 @all = 깨움
   });
 
-  // ★통일이 동작으로 고정되는 지점 — 이 시험이 없으면 인라인 정규식을 되넣어도 아무것도 안 깨진다.★
+  // ★통일이 동작으로 고정되는 지점 — 이 테스트가 없으면 인라인 정규식을 되넣어도 아무것도 안 깨진다.★
   // 깨움 판정을 hasBroadcastAllMarker 로 모은 것의 ★유일한 관측 가능한 차이★ 가 여기다.
   // 인라인 정규식은 본문을 날것으로 봐서 코드펜스 안의 예시까지 마커로 쳤다.
   // ★인용줄(> @all)로는 이 축을 못 잰다★ — stripQuotedForRouting 이 인용줄을 제거 대상으로 안 잡아
@@ -185,6 +185,16 @@ describe("3c wake 경계 — comm 매트릭스", () => {
     const spy = spyAdapter(() => ({ ok: true }));
     await dispatch(db, row, { openclaw: spy.adapter });
     expect(spy.calls).toBe(0); // 예시로 보여준 @all 은 마커가 아니다
+  });
+
+  // ★대전제 — "멘션은 팀장님만 쓴다. system 도 예외 없다" (GD 2026-08-01).★
+  // ★이 축에 테스트가 없으면 'system 깨움이 죽었다' 가 결함으로 읽힌다★ — 되살리는 쪽이 사양 위반이다.
+  // ★기대값을 1 로 바꾸려는 사람은 먼저 이 대전제가 바뀌었는지 확인하라.★
+  test("★@all 마커는 팀장님 발신만 — system 도 예외 없다★ (system + @all → 깨움 0)", async () => {
+    const row = pendingRowFor(db, "codex", { to_agent_id: "broadcast", type: "broadcast", body: "@all 장애 통지", explicit_recipients: ["codex"], source: "system" });
+    const spy = spyAdapter(() => ({ ok: true }));
+    await dispatch(db, row, { openclaw: spy.adapter });
+    expect(spy.calls).toBe(0);
   });
 
   // collect_only 경계 (Codex 적대리뷰 §3c): 수집형 위임 응답은 coordinator wake 억제, 일반 directed Q&A는 wake.
