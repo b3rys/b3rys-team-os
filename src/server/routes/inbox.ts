@@ -188,22 +188,10 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
           }, 403);
         }
       }
-      // 팀장님 @all 에 대한 답이면 coordinator·사유 요구도 면제한다 — 위와 같은 이유.
-      const replyingToLeadCall = env.in_reply_to
-        ? ((deps.db.prepare(`SELECT source, to_agent_id FROM message WHERE id = ?`)
-            .get(env.in_reply_to) as { source?: string; to_agent_id?: string } | undefined)?.source === "user"
-           && (deps.db.prepare(`SELECT to_agent_id FROM message WHERE id = ?`)
-            .get(env.in_reply_to) as { to_agent_id?: string } | undefined)?.to_agent_id === "broadcast")
-        : false;
-      if (rosterKnown && !replyingToLeadCall && (!isCoordinator || reason.length === 0)) {
-        return c.json({
-          error: "broadcast_not_allowed",
-          detail: !isCoordinator
-            ? "broadcast 는 coordinator 만 보낼 수 있습니다. 답/결과는 요청자에게 --to <이름>, 팀장님께는 --direct-to-gd 로 보내십시오."
-            : "broadcast 에는 --all-hands \"<이유>\" 가 필요합니다. 전원이 봐야 하는 사실인지 한 줄로 적으십시오.",
-          coordinator: coordinatorId(roster) ?? null,
-        }, 403);
-      }
+      // ★coordinator 요구는 뺐다 (2026-08-01 실측)★ — 넣었더니 ★방이 통째로 조용해졌다.★
+      //   팀장님 "@all 다들 인지했어?" 에 아무도 방에 답하지 못했다(전원 1:1 로 우회).
+      //   내가 막으려던 것은 ★연쇄★ 지 방에서 말하는 것 자체가 아니었다. 과녁을 잘못 잡았다.
+      //   → 남기는 규칙은 ★하나뿐★: broadcast 에 broadcast 로 답하지 않는다(위 검사). 그게 고리다.
     }
 
     // Phase 2a: dedupe(60s) + ensureThread + insertMessage + (audit) + broadcast → 공통 acceptInbound (P2)

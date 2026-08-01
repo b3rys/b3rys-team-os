@@ -57,26 +57,9 @@ const send = (h: ReturnType<typeof createInboxRoutes>, body: Record<string, unkn
     }),
   });
 
-describe("★팀원 broadcast 는 coordinator + --all-hands 가 있어야 나간다★", () => {
-  it("coordinator 가 아니면 거부한다 — 오늘 47건 중 42건이 여기 걸린다", async () => {
-    const { h } = app();
-    const res = await send(h, { from_agent_id: "steve", all_hands: "서버 내립니다" });
-    expect(res.status, "★비-coordinator 의 broadcast 가 통과했다★").toBe(403);
-    expect((await res.json()).error).toBe("broadcast_not_allowed");
-  });
-
-  it("coordinator 라도 --all-hands 이유가 없으면 거부한다", async () => {
-    const { h } = app();
-    const res = await send(h, { from_agent_id: "bill" });
-    expect(res.status, "★이유 없이 broadcast 가 통과했다★").toBe(403);
-  });
-
-  it("coordinator + 이유가 있으면 나간다 — 진짜 전체공지는 막지 않는다", async () => {
-    const { h } = app();
-    const res = await send(h, { from_agent_id: "bill", all_hands: "서버 20:00 정지" });
-    expect(res.status, "★정당한 전체공지까지 막으면 안 된다★").not.toBe(403);
-  });
-});
+// ★coordinator 요구는 뺐다 (2026-08-01)★ — 넣었더니 방이 통째로 조용해졌다.
+//   팀장님 "@all 다들 인지했어?" 에 아무도 방에 답하지 못했다. 과녁은 ★연쇄★ 였지 발언 자체가 아니었다.
+//   그래서 그 계약을 검사하던 시험도 같이 지운다. 남는 계약은 아래 하나뿐이다.
 
 describe("★broadcast 에 대한 답은 broadcast 로 못 한다★ — 연쇄의 직접 고리", () => {
   it("부모가 broadcast 면 coordinator 라도 거부한다 (연쇄는 발신자를 안 가린다)", async () => {

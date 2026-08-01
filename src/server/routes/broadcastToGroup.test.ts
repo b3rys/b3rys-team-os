@@ -163,24 +163,14 @@ describe("--to broadcast → 언제나 단톡방", () => {
       }),
     });
 
-    // ★계약이 바뀌었다 (GD 2026-08-01)★: 1:1 질문에 broadcast 로 답하는 것은 ★거부★ 한다.
-    //   예전엔 그대로 방에 올렸다("서버가 몰래 고치지 않는다"). 그 정신은 유지하되 —
-    //   ★서버가 주소를 고쳐주지도, 조용히 버리지도 않는다. 이유를 붙여 거부하고 팀원이 다시 보낸다.★
-    //   오늘 이 형태가 소음의 본체였다(70분간 47건 → wake 517회).
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error?: string; detail?: string };
-    expect(body.error).toBe("broadcast_not_allowed");
-    expect(body.detail, "★어떻게 보내야 하는지 알려줘야 한다 — 거부만 하면 팀원이 헤맨다★")
-      .toContain("--to <이름>");
-    // ★조용히 사라지지 않는다★ — 저장도 안 된다(거부이므로). 팀원은 에러를 보고 다시 보낸다.
-    const row = db.prepare(`SELECT to_agent_id FROM message WHERE in_reply_to='ASK1'`).get() as
-      | { to_agent_id: string }
-      | undefined;
-    expect(row ?? undefined, "★거부했으면 저장하면 안 된다★").toBeUndefined();
-    // ★방에도 안 뜬다★ — 거부했으니 게시할 것이 없다.
-    //   예전 계약은 "잘못 보냈어도 방에 뜬다(숨기지 않는다)" 였다. 지금은 ★애초에 안 받는다.★
-    //   숨기는 것과 다르다 — 팀원은 403 과 이유를 받고 `--to <이름>` 으로 다시 보낸다.
-    expect(sent, "★거부한 메시지가 방에 나갔다★").toHaveLength(0);
+    // ★잘못 보낸 주소는 서버가 고치지 않는다★ — 그대로 방에 뜬다(원래 계약 복귀).
+    //   coordinator 게이트를 뺐으므로 이 경로는 다시 통과한다. 막는 건 ★broadcast 답장★ 하나뿐이다.
+    expect(res.status).toBe(201);
+    const row = db.prepare(`SELECT to_agent_id FROM message WHERE in_reply_to='ASK1'`).get() as {
+      to_agent_id: string;
+    };
+    expect(row.to_agent_id).toBe("broadcast");
+    expect(sent).toHaveLength(1);
   });
 
   test("팀원에게 보내는 건(--to steve) 방에 안 나간다 — 버스는 함수호출 채널이다", async () => {
