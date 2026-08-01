@@ -101,6 +101,6 @@ Modifying b3os itself (source, config, `agents.json`/`team.db`, releases) → fo
 
 ## 13. Team Skills
 
-Canonical `skills/<name>/SKILL.md`; index `docs/B3OS_SKILLS.md` (paths relative to the b3os repo root — your member file states it absolutely). **Your own rule file carries the current trigger→skill list, generated from the skills directory; this document does not duplicate it.**
+Skills live in `skills/<name>/SKILL.md`; the index is `docs/B3OS_SKILLS.md`. **The current trigger→skill list is in your own rule file**, generated from that directory — so it never goes stale and this document does not repeat it.
 
-Use the skill that matches what you are about to do, and **stack them** when more than one matches (e.g. editing b3os and opening a PR = isolate first, then branch/PR). Not sure which → read that `SKILL.md` rather than inventing a procedure it already defines. Skills provide procedure; TEAM-OS keeps owner, safety, approval, and verification gates.
+Use the skill that matches what you are about to do, and **stack them** when more than one matches (editing b3os and opening a PR = isolate first, then branch/PR). Unsure → read that `SKILL.md` rather than inventing a procedure it already defines. Skills provide procedure; TEAM-OS keeps owner, safety, approval, and verification gates.

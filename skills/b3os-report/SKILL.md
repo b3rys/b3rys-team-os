@@ -2,6 +2,7 @@
 name: b3os-report
 description: b3rys 팀 표준 보고서 스킬. 모든 보고서는 MD를 소스로 먼저 쓰고 → 아이폰에서 읽기 좋은 자체완결 반응형 HTML+SVG로 렌더한다. 사용 시점 — "보고서 써줘", "report", "팀 보고서", "결과 정리해서 보고", "테스트/리뷰/분석 보고서", MD를 HTML로 렌더. owner=maintainer.
 trigger: publish to `/reports`
+entry: scripts/publish.sh
 ---
 
 # b3os-report — 팀 표준 보고서

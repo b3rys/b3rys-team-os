@@ -594,10 +594,10 @@ export function ruleLoadingBlock(runtime: string, agentId?: string): string {
  * (빠지지는 않는다 — ★목록에서 사라지는 것이 가장 나쁜 실패★ 이므로).
  * → 스킬 추가 = SKILL.md 만 만들면 끝. 룰 파일은 안 건드린다.
  */
-function readSkillTriggers(): Array<{ name: string; trigger: string }> {
+function readSkillTriggers(): Array<{ name: string; trigger: string; script: string }> {
   const dir = `${REPO_ROOT}/skills`;
   if (!existsSync(dir)) return [];
-  const out: Array<{ name: string; trigger: string }> = [];
+  const out: Array<{ name: string; trigger: string; script: string }> = [];
   for (const name of readdirSync(dir).filter((n) => n.startsWith("b3os-")).sort()) {
     const md = `${dir}/${name}/SKILL.md`;
     if (!existsSync(md)) continue;
@@ -608,7 +608,12 @@ function readSkillTriggers(): Array<{ name: string; trigger: string }> {
       const t = /^trigger:\s*(.+)$/m.exec(fm[1]);
       if (t) trigger = t[1].trim().replace(/^["']|["']$/g, "");
     }
-    out.push({ name, trigger });
+    let script = "";
+    if (fm) {
+      const e = /^entry:\s*(.+)$/m.exec(fm[1]);   // ★선언한 것만★ — 디렉터리를 뒤져 추측하지 않는다
+      if (e) script = e[1].trim().replace(/^["']|["']$/g, "");
+    }
+    out.push({ name, trigger, script });
   }
   return out;
 }
@@ -616,7 +621,10 @@ function readSkillTriggers(): Array<{ name: string; trigger: string }> {
 function buildSkillTable(): string {
   const skills = readSkillTriggers();
   const line = skills
-    .map((s) => (s.trigger ? `${s.trigger} → \`${s.name}\`` : `\`${s.name}\``))
+    .map((s) => {
+      const entry = s.script ? ` (\`${s.script}\`)` : "";
+      return s.trigger ? `${s.trigger} → \`${s.name}\`${entry}` : `\`${s.name}\`${entry}`;
+    })
     .join(" · ");
   // 경로는 ★맨 위 b3os= 기준★ 을 한 번만 선언하고 이후는 상대로 쓴다 (GD 2026-08-01).
   return [
@@ -642,10 +650,7 @@ function sectionTeamShare(runtime: string, agentId?: string): string {
       //   긴 절대경로를 절마다 반복하지 않으면서 "무엇 기준인지" 는 파일 안에 남는다.
       `- **Paths**: \`b3os\` = \`${tilde(REPO_ROOT)}\`. Everything below is relative to it (it is NOT your working directory).`,
       "- `b3os/rules/SHARED.md` — the team's current state·learning log. Read it when needed.",
-      // ★claude 분기에도 send.sh 절대경로를 박는다 (lui 실측 2026-08-01): 예전엔 openclaw/hermes 분기에만 있었고
-      //   claude 는 명령 이름만 읽었다 → 자기 워크스페이스에서 `send.sh` 를 그냥 치면 없다.★
-      "- **Messaging a teammate**: `b3os/skills/b3os-team-inbox/scripts/send.sh --to <them> --thread <thread> --body \"…\"` (not on your PATH). Check what arrived with the same folder's `inbox.sh`.",
-      "- Team mission·members·communication·owner resolution follow the single TEAM-OS canonical above — **asked deeply about team ops·workflow·a skill? read that canonical source (`docs/TEAM_LOOP_WORKFLOW.md`, the relevant `SKILL.md`) directly rather than reciting this summary** (@import only inlines up to TEAM-OS).",
+      "- Team mission·members·communication·owner resolution follow the single TEAM-OS canonical above — **asked deeply about team ops·workflow·a skill? read the canonical source directly** (`b3os/docs/`, the relevant `SKILL.md`) **rather than reciting this summary** (@import only inlines up to TEAM-OS).",
       "",
       SKILL_TABLE,
     ].join("\n");
