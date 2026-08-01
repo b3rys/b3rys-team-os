@@ -59,3 +59,24 @@
 퍼블릭 인수테스트의 **인프라/운영** 섹션은 필수 KeepAlive 서비스 3종(`team-collab`·`caffeinate`·gateway), 활성 recurring 실패 잡, 1시간 넘은 `wake_dispatched` lease를 자동 점검한다. 고아 wake는 0개 pass, 1~10개 info, 10개 초과 fail이다.
 
 대시보드 **Team OS** 탭은 launchd·scheduled_job·openclaw_cron을 한 목록으로 합쳐 보여준다. 다만 서버 내부 워커의 마지막 tick은 아직 부팅 로그를 정본으로 확인한다.
+
+## 지연 작업 예약 (팀원이 "5분 뒤 알려줘" 를 받았을 때)
+
+턴기반 팀원(openclaw·hermes 등 wake 로만 움직이는 런타임)이 지연 작업을 받으면 현재 턴에서 기다리면 안 된다. 정규 동작은
+b3os 스케줄러 API로 예약 row를 만들고 즉시 답하는 것이다 (릴리즈에 실린 서버 엔드포인트 — 별도 스크립트 불필요):
+
+```bash
+curl -s -X POST http://localhost:$PORT/team/api/schedules/reminder \
+  -H 'content-type: application/json' \
+  -H "x-actor-id: <your_agent_id>" \
+  -d '{"target_agent_id":"<your_agent_id>","body":"[예약 알림] ...","delay_seconds":300}'
+```
+
+스케줄러가 수락 가능 상태가 아니면 이 명령/API는 실패해야 한다. 그 경우 "예약했습니다"라고 말하지 말고,
+현재 one-shot 예약 기능이 아직 활성화되지 않았다고 짧게 보고한다.
+
+- 예약 owner는 body가 아니라 인증 actor(`x-actor-id` 헤더, 환경에 `OP_MESSAGE_TOKEN` 있으면 `x-op-token`도)로 결정된다.
+- 일반 팀원은 자기 agent id만 target 으로 예약·조회·취소할 수 있고(다른 agent 대상은 lead 경로만), `created_by` 위조는 거부된다.
+- `run_at`(ISO 시각) 또는 `delay_seconds` 중 **정확히 하나**.
+- `direct_to_gd:true` 면 결과를 **팀 리드(팀장)의 대화창으로 직접 보고**한다(비리드 actor엔 quota 적용). 필드명은 내부 규약이라 그대로 두되, 동작은 "리드에게 직접"으로 이해하면 된다.
+- 취소 = `POST /team/api/schedules/<id>/cancel`.
