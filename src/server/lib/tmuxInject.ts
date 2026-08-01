@@ -223,14 +223,17 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
     //     팀장님도 보고, 서버도 본다. (릴레이는 routes/inbox.ts 에 이미 있다)
     //
     //   ★그리고 주입문은 '방법' 을 말하지 않는다 — '사실'(어느 스레드인가) 만 준다.★
+    //   ★2026-08-01: '그룹 라우터가 당신에게 배정했습니다' 를 뺐다.★ 그 문장은 '사실' 이 아니라
+    //   ★소유권 단정★ 이었고, 수신자 전원에게 나갔다 → 깨어난 전원이 자기가 owner 라고 읽어
+    //   ★@mention·sticky 규칙이 무력화됐다★(실측: 25분에 방 broadcast 28건). owner 판정은 룰이 한다.
     //   보내는 법은 룰(personaTemplates)에 있다. 두 곳에 적으면 언젠가 어긋나고,
     //   어긋나면 팀원은 ★가까이 있는 주입문★ 을 따른다 (오늘 codex 가 그랬다).
     : isTelegramGroup
     ? pick(locale,
-        `그룹 라우터가 당신에게 배정했습니다. 이 방의 스레드는 thread="${opts.threadId}" 입니다.` +
+        `이 방에 올라온 메시지입니다. 이 방의 스레드는 thread="${opts.threadId}" 입니다.` +
         hopInstruction +
         ` 모호하면 ${owner}에게 확인하세요.`,
-        `The group router assigned this message to you. This room's thread is thread="${opts.threadId}".` +
+        `A message arrived in this group room. This room's thread is thread="${opts.threadId}".` +
         hopInstruction +
         ` If ambiguous, ask ${owner}.`)
     : pick(locale,

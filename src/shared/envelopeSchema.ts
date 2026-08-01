@@ -73,6 +73,12 @@ export const envelopeInboundSchema = z.object({
   // Optional per-message cap for bounded smoke/acceptance flows. Defaults to MAX_HOPS_DEFAULT when omitted.
   max_hop: z.number().int().positive().max(MAX_HOPS_DEFAULT).optional(),
   in_reply_to: z.string().min(4).max(32).nullable().optional(),
+  /**
+   * ★전체공지 사유★ (GD 2026-08-01). 팀원 broadcast 는 coordinator + 이 사유가 있어야 나간다.
+   * 목적은 허가가 아니라 ★기록★ 이다 — "전원이 봐야 하는 사실인가" 를 나중에 팀장이 판정할 수 있게 남긴다.
+   * (실측: 게이트 없던 70분에 팀원 broadcast 47건 → wake 517회)
+   */
+  all_hands: z.string().min(1).max(200).optional(),
   priority: prioritySchema.default("normal"),
   sync: syncLevelSchema.optional(), // 생략 시 insertMessage 가 'none' 처리 (미설정=미러 안 함)
   dedupe_key: z.string().min(1).max(128).nullable().optional(),

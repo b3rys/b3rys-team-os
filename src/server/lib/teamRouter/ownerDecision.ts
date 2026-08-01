@@ -16,15 +16,22 @@ import { routeDefaultIntakeLLM } from "./defaultIntake";
 // @all/@b3rys/@group — broadcast-all marker. Checked before explicit_mention.
 const BROADCAST_MARKER_RE = /@(all|b3rys|group)\b/i;
 
-// Enabled agents for broadcast: reads BUS_DISPATCH_AGENTS env (comma-sep ids).
-// Falls back to all agents in roster if unset.
+/**
+ * ★@all 대상 = 정식 팀원(agents.json 의 team_official_member) — 그것 하나만 본다.★ (GD 2026-08-01)
+ *
+ * 예전엔 `BUS_DISPATCH_AGENTS` env 를 읽었다. 그 env 는 ★손으로 유지하는 두 번째 명단★ 이고,
+ * 정본(agents.json)과 갈렸다 — 실측: env 7명 vs 정식팀원 8명이라 ★lui·ames 가 @all 에서 통째로 빠졌다.★
+ * `message_recipient` 에 두 사람 행이 아예 없었다(안 읽은 게 아니라 안 갔다).
+ *
+ * ★명단을 하나로 만드는 게 고침의 핵심이다.★ env 나 보강파일을 "같이 읽게" 하면 명단이 둘로 남아
+ * 다음 영입 때 또 갈린다. wake allowlist(`busDispatchAllowlist`)는 별개 관심사라 건드리지 않는다.
+ */
 function broadcastTargets(agents: AgentRecord[]): string[] {
-  const env = process.env.BUS_DISPATCH_AGENTS;
-  if (env) {
-    const allowed = new Set(env.split(",").map((s) => s.trim()).filter(Boolean));
-    return agents.filter((a) => allowed.has(a.id)).map((a) => a.id);
-  }
-  return agents.map((a) => a.id);
+  const active = agents.filter((a) => a.enabled !== false);
+  const official = active.filter((a) => a.team_official_member === true);
+  // ★플래그를 아무도 안 쓰는 명부(신규·공개 설치)에서는 전원이 대상이다.★
+  //   여기서 빈 배열을 돌려주면 @all 이 ★아무에게도 안 가는★ 더 나쁜 고장이 된다.
+  return (official.length > 0 ? official : active).map((a) => a.id);
 }
 
 export function routeTeamMessage(
