@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# b3os-report → /reports 포털 게시 (선택 단계 — GD 확인 후에만).
+# b3os-report → /reports 포털 게시. 컨펌 없이 진행한다(GD 2026-08-01). 팀 밖 공개 포스팅은 별도 승인 대상.
 # MD/HTML 파일을 team-collab reports/<id>/ 로 복사하고 메타를 /reports/api/register 에 등록.
 # 등록되면 your-team.example.com/reports 목록에 바로 뜬다.
 #

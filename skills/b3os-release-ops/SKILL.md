@@ -1,6 +1,7 @@
 ---
 name: b3os-release-ops
 description: b3os 공개 정본 배포·PR 머지·핫픽스·force-push 안전 게이트. 팀원이 공개 main, live deploy, clean merge, GD noreply 재작성, 인수테스트, 봇 자율머지 범위를 판단할 때 invoke한다. skills/b3os-release-ops/scripts/release-preflight.sh 로 clean worktree·noreply author/committer·post-merge tip·branch protection·live repo 확인을 기계적으로 점검한다.
+trigger: deploy or cut a release
 ---
 
 # b3os-release-ops — 공개 배포·머지·핫픽스 게이트

@@ -1,6 +1,7 @@
 ---
 name: b3os-infra-safety
 description: b3os 플랫폼 자체(설정·소스·registry·배포)를 수정할 때 지킬 안전 규칙. 팀원이 b3os 코드/config/agents.json/team.db/릴리스를 건드리는 작업을 할 때 필독. 브랜치·worktree 격리, 런타임 상태(agents.json·team.db) 보호, 백업, 테스트 FS 격리, 릴리스/배포 가드, 격리 검증. 일반 팀작업이 아니라 b3os 인프라를 고칠 때만 해당. owner=maintainer.
+trigger: modify b3os itself
 ---
 
 # b3os-infra-safety — b3os 인프라 작업 안전 규칙

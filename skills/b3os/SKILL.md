@@ -1,6 +1,7 @@
 ---
 name: b3os
 description: b3rys TEAM OS(b3os) — 여러 AI를 한 팀으로 운영하는 멀티런타임 AI 팀 OS — 를 공개 저장소에서 clone·설치하고, 팀 기본정보를 채팅으로 세팅한 뒤 첫 팀원 1명을 영입(텔레그램 연결)해서 그 팀원에게 넘겨주는(handoff) 온보딩 스킬. Claude가 clone → install.sh → 대시보드 기동 → (채팅으로) 팀명·팀장ID·팀장이름 세팅 → 첫 팀원 런타임 추천·영입·인증·활성화 → 라우터 ON 까지 대신 몰아주고, 사람만 할 수 있는 것(BotFather 토큰·활성화 승인·페어링)만 직접 요청한다. 첫 팀원이 응답하면 설치는 끝 — 이후 추가 영입·운영은 그 팀원이 이어받는다. 사용 시점 — 설치·세팅: "b3os 설치해줘", "b3os 세팅", "AI 팀 세팅해줘", "AI 팀 만들어줘", "b3rys 팀 만들어줘", "b3rys-team-os setup/install", "이 repo 설치하고 팀 세팅해줘(github.com/b3rys/b3rys-team-os)", "b3os 언인스톨/삭제"; 팀방·그룹 협업 세팅: "b3os 팀방 세팅 어떻게 해", "b3os 그룹방 세팅/연동", "팀 라우터(System OP) 붙여줘", "그룹방에서 팀 협업되게 해줘"; 운영·문제해결(트러블슈팅): "b3os 안 떠요/안 돼요", "team-os 상태/복구/재시작", "b3os 봇이 응답 안 해요", "b3os 리부팅 후 안 올라와요", "b3os 문제/에러/트러블슈팅", "b3os 업데이트/버전 올려줘"; 기본 시스템 잡·서비스 안내: "b3os 시스템 잡 목록", "b3os가 뭘 자동으로 돌려?", "b3os 백그라운드 서비스 뭐 있어", "b3os 기본 운영 서비스" 등을 언급할 때. macOS 권장(팀원 활성화가 launchd 기반). 운영·복구 상세는 references/b3os-ops-primer.md 참조.
+trigger: first-time b3os install · recruiting a member · team setup
 ---
 
 # b3os — b3rys TEAM OS 온보딩 스킬

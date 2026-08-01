@@ -1,6 +1,7 @@
 ---
 name: b3os-team-learning-loop
 description: "b3rys 팀 정책 자가발전, SHARED->TEAM-OS 승격, compacting, 프로젝트별 운영리뷰, 월간 개선지표를 운영하는 주간 learning-loop 스킬."
+trigger: record a team lesson
 ---
 
 # b3rys Team Learning Loop
