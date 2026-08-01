@@ -4,6 +4,8 @@ import type { EnvelopeInbound, EnvelopeStored } from "../../../shared/envelopeSc
 import { MAX_HOPS_DEFAULT } from "../../../shared/envelopeSchema";
 import { type MessageRow, type ThreadRow, rowToEnvelope } from "./_shared";
 import { appendAuditFile } from "../../lib/auditFile";
+import { broadcastRecipientIds } from "../../lib/agentMembership";
+import { ambientAgents } from "../../lib/registry";
 import { applyAckClose, applyActivityAutoAck } from "../../bus/ackClose";
 
 export function ensureThread(
@@ -47,7 +49,10 @@ export function insertMessage(
 ): EnvelopeStored {
   const id = nanoid(12);
   const attachments_json = env.attachments ? JSON.stringify(env.attachments) : null;
-  const meta_json = env.meta ? JSON.stringify(env.meta) : null;
+  // all_hands 사유는 DB 컬럼을 늘리지 않고 message meta에 함께 보존한다. 디스패처가
+  // 본문을 해석하지 않고 명시적 사유가 기록된 팀원 공지만 wake하도록 판정한다.
+  const persistedMeta = env.all_hands ? { ...(env.meta ?? {}), all_hands: env.all_hands } : env.meta;
+  const meta_json = persistedMeta ? JSON.stringify(persistedMeta) : null;
   // v1.2 issue 3 (anti-pingpong fix): parent_message_id is used by countAutoRounds to
   // trace the bot↔bot chain. Previously it was left NULL when agents only set in_reply_to.
   // We now derive parent_message_id from in_reply_to when not explicitly set: agents that
@@ -188,7 +193,10 @@ export function insertMessage(
         || !!(env.meta as { slack?: { channel?: string } } | undefined)?.slack?.channel;
 
       let recipients: string[] = [];
-      if (!isSlackThread && env.explicit_recipients !== undefined) {
+      if (env.all_hands) {
+        recipients = env.explicit_recipients
+          ?? broadcastRecipientIds(ambientAgents(), env.from_agent_id);
+      } else if (!isSlackThread && env.explicit_recipients !== undefined) {
         recipients = env.explicit_recipients.filter((agentId) => agentId !== env.from_agent_id);
       }
 

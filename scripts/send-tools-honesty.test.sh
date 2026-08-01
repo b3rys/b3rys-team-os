@@ -114,6 +114,28 @@ else
   fail "페이로드를 잡지 못했다(테스트 하네스 문제 — 아래 단정은 신뢰할 수 없다)"
 fi
 
+echo "── A1-6: --notice/--공지 는 사유를 명시 필드로 싣는다 ──"
+PATH="$FAKEBIN:$PATH" "$SEND" --to broadcast --body "공지" --notice "서비스 점검" >/dev/null 2>&1
+CAPTURE="$CAPTURE" python3 - <<'PY' \
+  && pass "all_hands 사유가 페이로드에 실림" \
+  || fail "all_hands 사유가 페이로드에 없음"
+import json, os, sys
+p = json.load(open(os.environ["CAPTURE"]))
+sys.exit(0 if p.get("all_hands") == "서비스 점검" and "notice" not in p and "@all" not in p.get("body", "") else 1)
+PY
+PATH="$FAKEBIN:$PATH" "$SEND" --to broadcast --body "공지" --공지 "전원 확인 필요" >/dev/null 2>&1
+CAPTURE="$CAPTURE" python3 - <<'PY' \
+  && pass "--공지 별칭도 같은 all_hands 필드로 실림" \
+  || fail "--공지 별칭이 all_hands 사유로 변환되지 않음"
+import json, os, sys
+p = json.load(open(os.environ["CAPTURE"]))
+sys.exit(0 if p.get("all_hands") == "전원 확인 필요" else 1)
+PY
+out="$(PATH="$FAKEBIN:$PATH" "$SEND" --to broadcast --body "공지" --notice 2>&1)"; rc=$?
+[ $rc -ne 0 ] && pass "사유 없는 --notice 거절" || fail "사유 없는 --notice를 허용했다"
+out="$(PATH="$FAKEBIN:$PATH" "$SEND" --to lisa --body "공지" --notice "사유" 2>&1)"; rc=$?
+[ $rc -ne 0 ] && pass "directed 메시지의 --notice 거절" || fail "--notice를 directed 메시지에 허용했다"
+
 echo "── A2-1: 접수 문구가 '보냈다' 라고 단정하지 않는다 ──"
 out="$(PATH="$FAKEBIN:$PATH" "$SEND" --to lisa --body-file "$FIX" 2>&1)"
 grep -q "✓ sent" <<<"$out" && fail "아직 '✓ sent' 라고 단정한다" || pass "'✓ sent' 단정 제거됨"
