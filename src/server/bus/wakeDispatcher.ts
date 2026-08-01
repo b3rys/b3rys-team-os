@@ -34,6 +34,7 @@ import { insertMessage } from "../db/inboxQueries";
 import { recoverB3osNativeInflight } from "../runtimes/b3osNative/recovery";
 import { recoverCodexInflight } from "../runtimes/codex/recovery";
 import { appendAuditFile } from "../lib/auditFile";
+import { hasBroadcastAllMarker } from "../lib/teamRouter/ownerDecision";
 import { checkPingpong } from "./antiPingpong";
 import { recordReportDelivery } from "./deliveryRecord";
 import { applySync, mirrorDeadLetter } from "./syncPolicy";
@@ -155,6 +156,7 @@ export function inFlightGraceForRuntime(runtime: string | undefined): number {
   return IN_FLIGHT_GRACE_MS;
 }
 const UNKNOWN_SIDE_EFFECT_DETAIL = "execute_timeout_maybe_partial";
+// ★마커 판정은 한 곳(ownerDecision)만 쓴다★ — 같은 정규식이 두 곳에 있으면 한쪽만 고쳐진다.
 // pre-widen: allowlist of agent IDs to wake-dispatch.
 // BUS_DISPATCH_AGENTS="bill,codex,demis" → only those recipients get dispatched.
 // Recipients not in the list are skipped (row stays 'pending' until they're added).
@@ -1144,7 +1146,7 @@ function buildDispatchPlan(
   // Direct messages (to_agent_id != 'broadcast') always wake the addressed recipient.
   // (user-source broadcasts are already excluded upstream by the source='agent' scope.)
   const isBroadcast = row.to_agent_id === "broadcast" || row.type === "broadcast";
-  if (isBroadcast && !/@(all|b3rys|group)\b/i.test(row.body)) {
+  if (isBroadcast && !hasBroadcastAllMarker(row.body)) {
     db.prepare(
       `UPDATE message_recipient
        SET delivery_state = 'completed',

@@ -18,6 +18,16 @@ import { routeDefaultIntakeLLM } from "./defaultIntake";
 const BROADCAST_MARKER_RE = /@(all|b3rys|group)\b/i;
 
 /**
+ * ★전체 호출 마커가 본문에 있나★ — 이 정규식은 여기 하나뿐이다.
+ *
+ * 예전엔 같은 리터럴이 `wakeDispatcher` 에도 박혀 있었다. ★한쪽만 고치면 수신행은 0인데
+ * 깨우기는 하거나 그 반대가 된다★ — 같은 질문에 답이 둘이 되는 그 형태다.
+ */
+export function hasBroadcastAllMarker(text: string): boolean {
+  return BROADCAST_MARKER_RE.test(stripQuotedForRouting(text));
+}
+
+/**
  * ★@all 대상 = 정식 팀원(agents.json 의 team_official_member) — 그것 하나만 본다.★ (GD 2026-08-01)
  *
  * 예전엔 `BUS_DISPATCH_AGENTS` env 를 읽었다. 그 env 는 ★손으로 유지하는 두 번째 명단★ 이고,
@@ -47,9 +57,14 @@ function broadcastTargets(agents: AgentRecord[]): string[] {
  * ★멘션 판정은 `detectExplicitTargets` 하나만 쓴다★ — 한글 별칭·조사·인용 제외를 이미 안다.
  * 여기서 정규식을 새로 쓰면 그게 ★두 번째 판정★ 이 되고, 그게 이 결함의 원인이었다.
  */
-export function broadcastAudience(text: string): { kind: "all_hands" | "none" } {
-  // 인용된 @all(팀장님 원문을 그대로 붙인 경우 등)은 마커로 치지 않는다 — 라우터와 같은 전처리다.
-  return { kind: BROADCAST_MARKER_RE.test(stripQuotedForRouting(text)) ? "all_hands" : "none" };
+export function broadcastAudience(text: string, source?: string): { kind: "all_hands" | "none" } {
+  // ★@all 은 팀장님 전용이다.★ (GD 2026-08-01: "멘션은 팀장만 하는 거라고")
+  //   팀원이 본문에 @all 을 써도 마커로 치지 않는다 — ★방에 말하는 것 자체는 그대로다.★
+  //   실측: 그날 팀원이 쓴 @all 중 전체공지 목적은 ★검증용 1건뿐★ 이고 나머지는 전부
+  //   ★"@all 이라는 단어를 문장 안에서 언급"★ 한 것이었다(예: "결함은 그중 하나(@all)에만").
+  //   ★언급만 해도 8명이 깨어났다.★ 인용해 답하는 경우도 같은 문제의 부분집합이다.
+  if (source !== "user") return { kind: "none" };
+  return { kind: hasBroadcastAllMarker(text) ? "all_hands" : "none" };
 }
 
 export function routeTeamMessage(

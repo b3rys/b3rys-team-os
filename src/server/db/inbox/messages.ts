@@ -4,9 +4,6 @@ import type { EnvelopeInbound, EnvelopeStored } from "../../../shared/envelopeSc
 import { MAX_HOPS_DEFAULT } from "../../../shared/envelopeSchema";
 import { type MessageRow, type ThreadRow, rowToEnvelope } from "./_shared";
 import { appendAuditFile } from "../../lib/auditFile";
-import { broadcastRecipientIds } from "../../lib/agentMembership";
-import { broadcastAudience } from "../../lib/teamRouter/ownerDecision";
-import { ambientAgents } from "../../lib/registry";
 import { applyAckClose, applyActivityAutoAck } from "../../bus/ackClose";
 
 export function ensureThread(
@@ -175,42 +172,33 @@ export function insertMessage(
         for (const r of rows) insertRcpt.run(id, r.id, rcptState);
       }
     } else {
-      // ── 팀원 방 발언 ──
-      //   "단톡방에선 내가 멘션한 사람만 얘기하는 거야. ★팀원끼리는 팀버스로.★" (GD)
-      //   방 게시·슬랙 릴레이는 그대로 나간다 — 여기서 만드는 건 ★수신행뿐★ 이다.
-      //   ★예외 하나: 본문에 @all★ → 정식·활성 팀원 전원.
-      //   실측(오늘 방 broadcast 82건): 멘션 없는 발언 51건 중 ★답이 달린 것 0건★ — 잘라도 안 끊긴다.
+      // ── 팀원 방 발언: ★수신행 0. 예외 없다.★ ──
+      //   "단톡방에선 내가 멘션한 사람만 얘기하는 거야. ★팀원끼리는 팀버스로.★" (GD 2026-08-01)
+      //   ★@all 도 팀장님 전용이다★ ("멘션은 팀장만 하는 거라고" · "원래 그랬어") — coordinator 도 예외 없다.
+      //   ★방 게시·슬랙 릴레이는 그대로 나간다.★ 여기서 만드는 건 수신행뿐이다.
+      //
+      //   실측: 그날 팀원이 쓴 @all 중 전체공지 목적은 검증용 1건뿐이고 나머지는 전부
+      //   ★"@all 이라는 단어를 문장 안에서 언급"★ 한 것이었다("결함은 그중 하나(@all)에만 있습니다" 등).
+      //   ★언급만 해도 8명이 깨어났다.★ 인용해 답하는 경우도 같은 문제의 부분집합이라 같이 없어진다.
+      //
+      //   ★`explicit_recipients` 는 예외가 아니라 라우터의 답이다★ — 팀장님 메시지를 라우팅한
+      //   결과가 이 경로로 들어올 수 있다. 빈 배열도 "0명으로 정했다" 는 답이라 그대로 존중한다
+      //   (`length > 0` 이면 빈 배열이 아래로 떨어져 다시 팬아웃한다).
       const isSlackThread = !!findSlackMetaForThread(db, env.thread_id)
         || !!(env.meta as { slack?: { channel?: string } } | undefined)?.slack?.channel;
 
       let recipients: string[] = [];
-      if (isSlackThread) {
-        // 수신행 없음. 슬랙 릴레이(routes/slack.ts)가 실제 발송을 한다.
-      } else if (env.explicit_recipients !== undefined) {
-        // ★빈 배열도 "라우터가 0명으로 정했다" 는 답이다.★ `length > 0` 이면 빈 배열이 아래로
-        //   떨어져 ★본문 @all 로 다시 팬아웃★ 한다.
+      if (!isSlackThread && env.explicit_recipients !== undefined) {
         recipients = env.explicit_recipients.filter((agentId) => agentId !== env.from_agent_id);
-      } else if (broadcastAudience(env.body ?? "").kind === "all_hands") {
-        // ★명부가 없으면(새 clone·공개 설치) DB 로 되돌아간다 — 예외지 기본이 아니다.★
-        //   `agents.json` 은 gitignore 라 파일 자체가 없을 수 있고, 그때 규칙만 믿으면
-        //   @all 이 ★아무에게도 안 간다.★ ★audience 는 그대로 지킨다★ — @all 일 때만 여기다.
-        const roster = ambientAgents();
-        recipients = roster.length > 0
-          ? broadcastRecipientIds(roster, env.from_agent_id)
-          : (db.prepare(`SELECT id FROM agent WHERE id != ?`).all(env.from_agent_id) as Array<{ id: string }>)
-              .map((r) => r.id);
       }
 
-      // ★이 DB 가 아는 팀원만 넣는다.★ 명부는 프로세스 환경에서 오고 `agent` 표는 이 DB 것이라
-      //   어긋날 수 있다(파일 변경 후 동기화까지 약 0.3초). 어긋난 id 를 넣으면 ★FK 위반으로
-      //   삽입 전체가 터진다.★
+      // ★이 DB 가 아는 팀원만 넣는다.★ 명부와 `agent` 표가 어긋나면(파일 변경 후 동기화까지 약 0.3초)
+      //   FK 위반으로 삽입 전체가 터진다. ★빠진 사람이 있으면 감사에 남긴다★ — 조용히 넘기지 않는다.
       const known = new Set(
         (db.prepare(`SELECT id FROM agent`).all() as Array<{ id: string }>).map((r) => r.id),
       );
       const dropped = recipients.filter((agentId) => !known.has(agentId));
       recipients = recipients.filter((agentId) => known.has(agentId));
-      // ★조용히 빼지 않는다.★ 파일(정본)에 있는데 DB 에 없으면 그건 ★싱크가 깨진 것★ 이다.
-      //   ★빠진 사람이 0명이면 아무것도 안 남긴다★ — 평상시 잡음이 되면 아무도 안 본다.
       if (dropped.length > 0) {
         appendAuditFile(env.from_agent_id, "registry_db_out_of_sync", env.thread_id, {
           missing_in_db: dropped,

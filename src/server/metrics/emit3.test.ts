@@ -186,7 +186,7 @@ describe("emit③ request.created (acceptInbound)", () => {
     const db = setup();
     // 본문에 @all — 팀원 방 발언은 그 마커가 있어야 수신행이 생긴다(2026-08-01 규칙).
     //   이 시험이 재는 건 팬아웃이 아니라 ★수신자가 답하면 followup 으로 분류되는가★ 다.
-    const b = acceptInbound(db, env({ to_agent_id: "broadcast", body: "@all 확인 부탁" }) as never, { dedupeWindowSec: 60 });
+    const b = acceptInbound(db, env({ to_agent_id: "broadcast", body: "@all 확인 부탁", explicit_recipients: ["steve"] }) as never, { dedupeWindowSec: 60 });
     expect(b.ok).toBe(true);
     if (!b.ok) return;
     // 부모의 to_agent_id 는 'broadcast' 지만, steve 는 수신자 행을 갖는다 = 받았다

@@ -153,7 +153,7 @@ describe("3c wake 경계 — comm 매트릭스", () => {
   });
 
   test("broadcast + @all 마커 → wake (마커 있으면 깨움)", async () => {
-    const row = pendingRowFor(db, "codex", { to_agent_id: "broadcast", type: "broadcast", body: "@all 다들 확인" });
+    const row = pendingRowFor(db, "codex", { to_agent_id: "broadcast", type: "broadcast", body: "@all 다들 확인", explicit_recipients: ["codex"] });
     const spy = spyAdapter(() => ({ ok: true }));
     await dispatch(db, row, { openclaw: spy.adapter });
     expect(spy.calls).toBe(1); // @all 마커 = wake
