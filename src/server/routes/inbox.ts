@@ -161,7 +161,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     //   신뢰 경계로 쓸 수 없고, 생략 시 agent가 기본값이라 게이트 조건으로도 의미가 없다.
     //   현재 /api/inbox에는 서버가 인증한 호출자 신원이 없다. 따라서 from_agent_id 명부 검사는
     //   등록되지 않았거나 비활성인 claimed sender를 막지만, 정식 팀원 id 사칭까지 막는 인증은 아니다.
-    //   coordinator 전용은 아니다. 최근 지시는 "팀원용 --공지"이고, 사유가 남아 사후 판정이 가능하다.
+    //   coordinator 전용은 아니다. 팀원용 명시 공지 옵션이며, 사유가 남아 사후 판정이 가능하다.
     //   팀장님(source=user)의 @all 은 이 게이트를 타지 않는다 — 라우터가 따로 판정한다.
     // ★슬랙은 제외한다★ (2026-08-01 devon 실측 — 배포 직후 슬랙 답신이 막혔다).
     //   슬랙 스레드에 답하는 유일한 경로가 `--to broadcast` 다(룰: kind="slack" → --to broadcast).
