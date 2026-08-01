@@ -13,6 +13,35 @@
 - 인증 파일·토큰 값은 화면에 출력하지 않습니다. 존재 여부와 `--version`/`doctor` 결과만 확인합니다.
 - Telegram 봇 토큰 발급은 `recruit.md` Step C의 BotFather 4단계와 동일합니다. 런타임이 달라도 BotFather 흐름은 바뀌지 않습니다.
 
+## 런타임 고르기 — 사용자에게 보여줄 목록
+
+| # | runtime | 한 줄 설명 | 난이도 | 설치 주체 |
+|---|---|---|---|---|
+| 1 | `claude_channel` | 로컬 Claude Code 세션 연결(tmux 봇). 기존 Claude 로그인 재사용 | 쉬움 | **AI 자동** (사람은 CLI 로그인만) |
+| 2 | `openclaw` | OpenClaw gateway/session | 고급 | **BYO** — CLI+게이트웨이+인증 에이전트 **미리 준비** |
+| 3 | `hermes_agent` | Hermes 프로필 게이트웨이 | 고급 | **BYO** — CLI+인증 프로필 **미리 준비** |
+
+- **첫 팀원은 `claude_channel` 권장.** AI가 설치·인증 안내까지 가장 안정적으로 몰아줄 수 있는 공개 기본 경로입니다. 모르겠다고 하면 이걸로 안내합니다.
+- **`openclaw`·`hermes_agent` 는 BYO 고급 런타임** — CLI·게이트웨이·구독 인증·인증된 에이전트 1개가 **미리 갖춰져 있어야** 하며 b3os가 대신 설치하지 않습니다. 준비 안 됐으면 preflight에서 막히니, 아래 설치·인증 절차를 안내하거나 `claude_channel`로 되돌립니다.
+- UI에서는 준비되지 않은 BYO도 숨기지 않습니다. disabled 사유와 연동 CTA를 보여주고, 재확인 후 같은 옵션이 enabled 되는 흐름으로 안내합니다. 내부/coming-soon 항목은 만들지 않습니다.
+- **목록에 없는 런타임(예: 다른 AI 앱·CLI)을 요청하면** — 공개 지원 런타임은 이 3개뿐이라고 정직히 안내합니다(영입 API가 그 외 런타임은 400으로 거부). 목록에 없는 것을 선택지로 제시하지 말고 `claude_channel`로 안내합니다.
+
+> 💡 **어떤 런타임이든 '첫 영입'은 Claude Code 세션에서 진행하는 걸 권장합니다.** Claude Code는 preflight·준비물 설치·인증 안내·(고급 런타임은) API 영입까지 셸로 직접 몰아줄 수 있어(대시보드는 설치·인증을 못 함), openclaw·hermes 팀원도 Claude Code에서 영입하는 게 가장 매끄럽습니다.
+
+## 고른 순간에만 하는 preflight
+
+**구독을 미리 캐묻지 않습니다.** 고른 런타임의 CLI·로그인만 그때 확인합니다. 있으면 바로 진행(present→proceed), 없으면 그 런타임의 설치·로그인만 안내(missing→guide) — 다른 런타임 얘기로 사용자를 헷갈리게 하지 않습니다.
+
+- **`claude_channel` (쉬움, 대개 이미 로그인됨)**
+  ```bash
+  command -v claude >/dev/null || npm install -g @anthropic-ai/claude-code
+  command -v tmux   >/dev/null || brew install tmux
+  claude --version && tmux -V
+  ```
+  미로그인이면 활성화 preflight가 막고 안내합니다 → "터미널에서 `claude` 한 번 실행해 로그인해 주세요".
+- **`openclaw` (고급)**: openclaw CLI + **인증된 에이전트 1개**(auth 복제 소스) + `python3`. 아래 OpenClaw 절을 따릅니다.
+- **`hermes_agent` (고급)**: hermes CLI + **base 프로필 1개**(auth 시드) + `python3`. 아래 Hermes 절을 따릅니다.
+
 ## OpenClaw
 
 ### macOS BYO 체크리스트
