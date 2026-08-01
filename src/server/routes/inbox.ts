@@ -156,18 +156,22 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     //   룰에는 이미 "결과는 TERMINAL, 확인 답장 금지" 가 있었지만 지켜지지 않았다(내가 47건 중 5건).
     //   → 판단을 9명에게 맡기지 않고 ★coordinator 한 곳으로 모은다.★
     //
-    // 무엇: 팀원(source=agent)이 전원 수신행+wake를 요청하면 ★all_hands 사유 + 정식·활성 자격★을 본다.
+    // 무엇: 전원 수신행+wake를 요청하는 단일 키 `all_hands`가 있으면
+    //   ★source 값과 무관하게★ 사유 + 정식·활성 명부 자격을 본다. source는 인바운드 값이라
+    //   신뢰 경계로 쓸 수 없고, 생략 시 agent가 기본값이라 게이트 조건으로도 의미가 없다.
+    //   현재 /api/inbox에는 서버가 인증한 호출자 신원이 없다. 따라서 from_agent_id 명부 검사는
+    //   등록되지 않았거나 비활성인 claimed sender를 막지만, 정식 팀원 id 사칭까지 막는 인증은 아니다.
     //   coordinator 전용은 아니다. 최근 지시는 "팀원용 --공지"이고, 사유가 남아 사후 판정이 가능하다.
     //   팀장님(source=user)의 @all 은 이 게이트를 타지 않는다 — 라우터가 따로 판정한다.
     // ★슬랙은 제외한다★ (2026-08-01 devon 실측 — 배포 직후 슬랙 답신이 막혔다).
     //   슬랙 스레드에 답하는 유일한 경로가 `--to broadcast` 다(룰: kind="slack" → --to broadcast).
     //   게이트의 목적은 ★단톡방 연쇄★ 를 끊는 것이지 슬랙 응답을 막는 것이 아니다.
     //   ★내가 고치려던 것과 무관한 경로를 같이 잘랐다★ — 범위를 좁힌다.
-    if (env.source === "agent" && env.to_agent_id === "broadcast" && env.all_hands) {
+    if (env.to_agent_id === "broadcast" && env.all_hands) {
       const roster = deps.agents?.() ?? ambientAgents();
       const sender = roster.find((agent) => agent.id === env.from_agent_id);
       if (!sender) {
-        const detail = { reason: env.all_hands, error: "sender_missing_from_registry" };
+        const detail = { reason: env.all_hands, error: "sender_missing_from_registry", identity_basis: "claimed_from_agent_id" };
         appendAudit(deps.db, env.from_agent_id, "agent_all_hands_blocked", null, detail);
         appendAuditFile(env.from_agent_id, "agent_all_hands_blocked", null, detail);
         return c.json({
@@ -180,6 +184,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
           reason: env.all_hands,
           team_official_member: isTeamOfficialMember(sender),
           enabled: sender.enabled !== false,
+          identity_basis: "claimed_from_agent_id",
         };
         appendAudit(deps.db, env.from_agent_id, "agent_all_hands_blocked", null, detail);
         appendAuditFile(env.from_agent_id, "agent_all_hands_blocked", null, detail);
@@ -246,6 +251,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
             recipient_count: recipientIds.length,
             eligible_recipient_count: allHandsEligibleRecipients.length,
             zero_reason: zeroReason,
+            identity_basis: "claimed_from_agent_id",
           };
           appendAudit(deps.db, env.from_agent_id, "agent_broadcast_all_hands", stored.id, allHandsDetail);
           appendAuditFile(env.from_agent_id, "agent_broadcast_all_hands", stored.id, allHandsDetail);

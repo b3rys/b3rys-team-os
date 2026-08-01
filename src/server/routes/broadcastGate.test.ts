@@ -120,6 +120,37 @@ describe("★all_hands 전체공지는 사유·발신자격·감사를 강제한
     expect((await res.json()).error).toBe("all_hands_sender_ineligible");
   });
 
+  it("source를 user로 속여도 all_hands 판정·감사를 우회하지 못한다", async () => {
+    const roster = [
+      { ...ROSTER[0]! },
+      { ...ROSTER[1]!, team_official_member: false, lead_eligible: false },
+    ] as AgentRecord[];
+    const { h, db } = app(roster);
+    const res = await send(h, { from_agent_id: "steve", source: "user", all_hands: "우회 시도" });
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("all_hands_sender_ineligible");
+    const audit = db.prepare(
+      `SELECT detail_json FROM audit_event WHERE action='agent_all_hands_blocked' ORDER BY id DESC LIMIT 1`,
+    ).get() as { detail_json: string };
+    expect(JSON.parse(audit.detail_json)).toMatchObject({
+      reason: "우회 시도",
+      identity_basis: "claimed_from_agent_id",
+    });
+  });
+
+  it("인증 신원이 없는 현재 API에서는 정식 팀원 from_agent_id 사칭을 구분하지 못함을 고정한다", async () => {
+    const { h, db } = app();
+    const res = await send(h, { from_agent_id: "steve", source: "user", all_hands: "사칭 한계 기록" });
+    expect(res.status).not.toBe(403);
+    const audit = db.prepare(
+      `SELECT detail_json FROM audit_event WHERE action='agent_broadcast_all_hands' ORDER BY id DESC LIMIT 1`,
+    ).get() as { detail_json: string };
+    expect(JSON.parse(audit.detail_json)).toMatchObject({
+      reason: "사칭 한계 기록",
+      identity_basis: "claimed_from_agent_id",
+    });
+  });
+
   it("꺼진 팀원은 전체공지를 보내지 못한다", async () => {
     const roster = [
       { ...ROSTER[0]! },
