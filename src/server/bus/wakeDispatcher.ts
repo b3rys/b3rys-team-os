@@ -1149,7 +1149,8 @@ function buildDispatchPlan(
   // 수신행 생성(db/inbox/messages.ts)에서만 걸려 있었고 여기서는 안 걸려 있었다. 그래서
   // 팀원 broadcast 에 수신행이 생기는 경로가 하나라도 생기면 팀원의 @all 이 전원을 다시 깨웠다.
   // 지금은 수신행이 0이라 우연히 안전할 뿐이다 — 우연에 기대지 않도록 같은 판정을 여기에도 건다.
-  // 두 곳이 같은 broadcastAudience 를 쓰므로 한쪽만 고쳐서 어긋나는 일이 없다.
+  // ★두 곳이 같은 함수를 쓰는 것은 아니다★ — 수신행 쪽은 messages.ts 가 source 를 직접 가른다.
+  // 같은 것은 ★축(발신자가 agent 인가)과 기본값(source 없으면 agent)★ 이다. 그 둘을 맞춰 둔다.
   const isBroadcast = row.to_agent_id === "broadcast" || row.type === "broadcast";
   if (isBroadcast && broadcastAudience(row.body, row.source).kind !== "all_hands") {
     db.prepare(

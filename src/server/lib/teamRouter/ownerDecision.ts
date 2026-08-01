@@ -63,7 +63,14 @@ export function broadcastAudience(text: string, source?: string): { kind: "all_h
   //   실측: 그날 팀원이 쓴 @all 중 전체공지 목적은 ★검증용 1건뿐★ 이고 나머지는 전부
   //   ★"@all 이라는 단어를 문장 안에서 언급"★ 한 것이었다(예: "결함은 그중 하나(@all)에만").
   //   ★언급만 해도 8명이 깨어났다.★ 인용해 답하는 경우도 같은 문제의 부분집합이다.
-  if (source !== "user") return { kind: "none" };
+  //
+  // ★막는 대상은 팀원(agent)이지 "팀장님이 아닌 전부" 가 아니다.★
+  //   system 은 발신 수단을 가진 팀원이 아니라 장애 통지·카드 알림 경로다.
+  //   'source !== "user"' 로 자르면 ★시스템 통지의 깨움이 같이 죽는다★ — 실제로 한 번 죽였다.
+  //   수신행 축(db/inbox/messages.ts)은 처음부터 'agent 인가' 로 갈랐다. 여기도 같은 축이어야 한다.
+  //   기본값도 수신행 축과 같게 둔다 — messages.ts 가 (source ?? "agent") 로 읽는다.
+  //   ★두 축의 기본값이 다르면 source 가 빠진 행에서 또 갈린다.★
+  if ((source ?? "agent") === "agent") return { kind: "none" };
   return { kind: hasBroadcastAllMarker(text) ? "all_hands" : "none" };
 }
 

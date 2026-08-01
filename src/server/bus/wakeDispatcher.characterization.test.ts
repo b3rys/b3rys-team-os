@@ -187,6 +187,16 @@ describe("3c wake 경계 — comm 매트릭스", () => {
     expect(spy.calls).toBe(0); // 예시로 보여준 @all 은 마커가 아니다
   });
 
+  // ★system 은 팀원이 아니다 — 장애 통지·카드 알림이 여기로 온다.★
+  // 마커가 팀장님 전용이라는 계약은 ★팀원의 발신 수단★ 을 지우는 것이지 시스템 통지를 끄는 게 아니다.
+  // 수신행 축에는 이 계약이 시험으로 있는데 깨움 축에는 없어서 한 번 죽었다.
+  test("system 발신 + @all → wake (시스템 통지는 기존 동작 그대로)", async () => {
+    const row = pendingRowFor(db, "codex", { to_agent_id: "broadcast", type: "broadcast", body: "@all 장애 통지", explicit_recipients: ["codex"], source: "system" });
+    const spy = spyAdapter(() => ({ ok: true }));
+    await dispatch(db, row, { openclaw: spy.adapter });
+    expect(spy.calls).toBe(1); // 시스템 통지가 조용히 사라지면 안 된다
+  });
+
   // collect_only 경계 (Codex 적대리뷰 §3c): 수집형 위임 응답은 coordinator wake 억제, 일반 directed Q&A는 wake.
   const cRow = (over: Record<string, unknown>): PendingDispatchRow =>
     ({ agent_id: "bill", to_agent_id: "bill", type: "reply", thread_id: "t1", in_reply_to: null, parent_message_id: null, meta_json: null, ...over } as PendingDispatchRow);
