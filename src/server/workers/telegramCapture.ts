@@ -6,6 +6,8 @@ import { appendAuditFile } from "../lib/auditFile";
 import { injectPrompt } from "../lib/tmuxInject";
 import { injectOpenclawTelegramTurn } from "../lib/openclawBridge";
 import { recordReportDelivery } from "../bus/deliveryRecord";
+import { renderContextLine } from "../bus/wakeDispatcher";
+import { resolveThreadKind } from "../channels/registry";
 import { postTelegramAsHermes, reactTelegramAsHermes, runHermesTeamTurn } from "../lib/hermesBridge";
 import { teamContextForAgent } from "../lib/teamContextPolicy";
 import { hasCapability } from "../lib/capabilities";
@@ -53,7 +55,27 @@ let TOKEN = getCaptureToken();
 let GROUP_ID = getCaptureGroupId() ?? "";
 // injection 킬스위치 — 이제 *라이브 읽기*(isRouterEnabled(deps.db)). UI 토글 즉시 반영, 재시작 불요. (P0)
 // OFF면 결정 로깅만(shadow). store(setting router_enabled) 우선, 없으면 env(ROUTER_ENABLED) fallback.
+// 단톡방 인입 문맥 예산 — 팀버스 경로(CTX_*)와 값이 다르다. ★한 건 200자는 기존 동작이라 유지한다.★
+const CAPTURE_CTX_MSGS = 10;
+const CAPTURE_CTX_HOURS = 6;
+const CAPTURE_CTX_MSG_CHARS = 200;
 const OFFSET_PATH = process.env.CAPTURE_OFFSET_PATH ?? `${process.cwd()}/logs/telegram-capture-offset.txt`;
+/** 단톡방 인입 경로의 주입 문맥(최대 10건/6h) — 현재 메시지 적재 전 = 직전 맥락.
+ *
+ *  ★줄은 `renderContextLine` 한 곳에서 만든다★ — 예전에는 여기서 따로 `[이름] 본문` 을 찍었다.
+ *  그래서 팀버스 쪽에만 출처를 붙였을 때 ★이 경로는 그대로 이름만 나왔다.★ 팀장님이 실제로 쓰시는
+ *  경로가 여기라서, 고쳤다고 보고된 뒤에도 팀장님 화면에는 안 고쳐진 형식이 계속 갔다.
+ *  ★수신자(agentId)가 하나로 정해지지 않는 자리다★ — 방 전체용 문맥이라 "너" 없이 이름으로 찍는다.
+ *  ★함수로 뺀 이유는 재기 위해서다★ — 워커 안에 인라인으로 두면 이 줄을 직접 재는 테스트를 못 쓴다. */
+export function buildCaptureTeamContext(db: Database, threadId: string): string {
+  const recent = recentThreadMessages(db, threadId, CAPTURE_CTX_MSGS, CAPTURE_CTX_HOURS);
+  if (!recent.length) return "";
+  const isGroupThread = resolveThreadKind(threadId) === "telegram_group";
+  return recent
+    .map((m) => renderContextLine(m, { isGroupThread, maxChars: CAPTURE_CTX_MSG_CHARS }))
+    .join("\n");
+}
+
 export function mediaUrlBase(): string {
   const publicBase = (process.env.TEAM_PUBLIC_BASE_URL ?? process.env.TEAM_BASE_URL ?? "").replace(/\/$/, "");
   const basePath = (process.env.BASE_PATH ?? "/team").replace(/\/$/, "");
@@ -923,12 +945,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     // 가시성 Stage C: 깨우기 전 공유 버스의 최근 팀 맥락(최대 10건/6h)을 모은다 — 현재 메시지 적재 전 = 직전 맥락.
     let teamContext = "";
     try {
-      const recent = recentThreadMessages(deps.db, threadId, 10, 6);
-      if (recent.length) {
-        teamContext = recent
-          .map((m) => `[${m.from_agent_id}] ${m.body.slice(0, 200).replace(/\n/g, " ")}`)
-          .join("\n");
-      }
+      teamContext = buildCaptureTeamContext(deps.db, threadId);
     } catch (e) {
       console.error("[capture] team context fetch failed:", (e as Error).message);
     }
