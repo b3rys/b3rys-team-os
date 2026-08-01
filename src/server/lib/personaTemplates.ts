@@ -353,7 +353,7 @@ export const SECTION_CORE_RULE = CORE_RULE_COMPACT;
  * 결과: 핵심룰은 여전히 ★바이트 단위로 동일★ 하고, claude 만 중복이 사라진다.
  */
 const PROCEDURE_MOVED_TO_TEAMOS =
-  "- Ack/react first · light asks answered directly · **open-ended task** = plan+criteria+confirm before any output · keep long work interruptible, reporting only meaningful change·delay·block · **handoff** = who·context·task·done-criteria·deadline + ack, tracked to done·blocked·awaiting-confirmation. Roles = agents.json; outside your role → PM and delegate. (canonical wording = TEAM-OS §4·§5)";
+  "- **Team lead message → respond before autonomous work**; instruction/confirmation → ack/react FIRST. Light asks (greeting·status·opinion·wording·simple lookup) → answer directly. **Open-ended task** → plan+criteria, confirm, then execute — **no output/files/external fetch in the first response**; **test: must you invent the criteria?** (if not, it is a clear instruction → execute and report). Keep long work interruptible; report only meaningful change·delay·block, **briefly and in one consolidated response**. **Handoff = who·context·task·done-criteria·deadline + ack**, tracked to done·blocked·awaiting-confirmation; roles = `agents.json`, **outside your role → PM and delegate**. (canonical = TEAM-OS §4·§5)";
 
 // 파일럿 대상 에이전트면 영어 핵심룰, 아니면 한글(기본). teamOsPathFor 와 같은 env 게이트(TEAMOS_PILOT_*).
 // buildPersona/buildAgentsMd 가 이걸 써야 '전체 재생성' 경로에서도 파일럿 멤버의 핵심룰이 영어로 유지된다(Codex 권고 A).
