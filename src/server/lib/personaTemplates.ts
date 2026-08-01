@@ -10,12 +10,47 @@
 
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 
 const HOME = process.env.HOME ?? "";
 // 정본 경로 = team-os repo 루트 기준 (퍼블릭 포터블 — 하드코딩 금지, GD 2026-06-27 Q3).
 // 이 소스(.../src/server/lib/personaTemplates.ts) 기준 3단계 위 = repo 루트. install 위치 자동탐지.
 // env TEAM_COLLAB_ROOT 로 override 가능(컨테이너/심링크 환경). GD 머신에선 ~/Development/b3rys-team-os 로 해석되어 기존과 동일.
-export const REPO_ROOT = process.env.TEAM_COLLAB_ROOT ?? resolve(import.meta.dir, "../../..");
+/**
+ * ★렌더를 돌린 자리가 팀원 파일에 박히면 안 된다 (GD 2026-08-01: "경로 다 틀렸음").★
+ *
+ * 예전엔 `resolve(import.meta.dir, "../../..")` 뿐이었다 → ★워크트리에서 렌더하면 워크트리 경로가 박힌다.★
+ * 실제로 터졌다: devon·ames·codex 의 AGENTS.md 가 `~/Development/.worktrees/fu-150/...` 를 가리키고 있었고,
+ * 그 트리의 TEAM-OS 는 라이브와 내용이 다르다. 즉 세 팀원이 ★다른 룰을 읽고 있었다.★
+ *
+ * 워크트리에서는 `.git` 이 ★파일★(gitdir 포인터)이고 `<main>/.git/worktrees/<name>` 를 가리킨다.
+ * 그걸 거슬러 올라가 ★메인 워크트리★ 를 찾는다 → 어디서 돌리든 같은 경로가 나온다.
+ * (env override 는 그대로 최우선 — 컨테이너·심링크 환경용.)
+ */
+function mainWorktreeRoot(start: string): string {
+  let dir = start;
+  for (let i = 0; i < 8; i++) {
+    const dotGit = `${dir}/.git`;
+    if (existsSync(dotGit)) {
+      if (statSync(dotGit).isDirectory()) return dir;         // 메인 워크트리 — 여기가 정답
+      const p = readFileSync(dotGit, "utf8").trim();           // "gitdir: /path/<main>/.git/worktrees/<name>"
+      const m = /^gitdir:\s*(.+)$/.exec(p);
+      if (m) {
+        const common = m[1].replace(/\/worktrees\/[^/]+\/?$/, ""); // → <main>/.git
+        const root = common.replace(/\/\.git\/?$/, "");            // → <main>
+        if (root && existsSync(`${root}/rules`)) return root;
+      }
+      return dir;
+    }
+    const up = resolve(dir, "..");
+    if (up === dir) break;
+    dir = up;
+  }
+  return start;
+}
+
+export const REPO_ROOT =
+  process.env.TEAM_COLLAB_ROOT ?? mainWorktreeRoot(resolve(import.meta.dir, "../../.."));
 const TEAM_OS_PATH = `${REPO_ROOT}/rules/TEAM-OS.md`;
 const SHARED_PATH = `${REPO_ROOT}/rules/SHARED.md`;
 
@@ -539,7 +574,7 @@ export function ruleLoadingBlock(runtime: string, agentId?: string): string {
       ? ["- **Skill creation uses the b3os way by default (NOT OpenClaw's own Skill Workshop)**: improvements/proposals go through a **b3os proposal** (`prop_...`); actual tools/skills are built in the **b3os skill system** (`b3os-<area>-<function>` under `skills`). OpenClaw's `skill_workshop` is only for real Skill Workshop proposals (do not confuse it with b3os `prop_...`)."]
       : []),
     "",
-    `Canonical paths: TEAM-OS=\`${tilde(teamOsPath)}\` · skills=\`${tilde(REPO_ROOT)}/skills/<name>/SKILL.md\` · catalog=\`${tilde(REPO_ROOT)}/docs/B3OS_SKILLS.md\`.`,
+    `Canonical: TEAM-OS=\`${tilde(teamOsPath)}\` · skills=\`${tilde(REPO_ROOT)}/skills/<name>/SKILL.md\` · catalog=\`${tilde(REPO_ROOT)}/docs/B3OS_SKILLS.md\`.`,
   ].join("\n");
 }
 
@@ -548,12 +583,52 @@ export function ruleLoadingBlock(runtime: string, agentId?: string): string {
  * 예전엔 claude 분기와 openclaw/hermes 분기가 ★서로 다른 스킬 목록★ 을 산문으로 나열했다 → drift + 누락.
  * 트리거(=팀원이 실제로 처하는 상황)로 찾게 하면 "엉뚱한 데를 찾는" 실패가 준다. 이름은 skills/ 실제 디렉터리와 일치.
  */
-const SKILL_TABLE = [
-  `**Skills — pick by trigger.** Canonical \`${tilde(REPO_ROOT)}/skills/<name>/SKILL.md\` · index \`${tilde(REPO_ROOT)}/docs/B3OS_SKILLS.md\`. **These are absolute paths — they do NOT resolve from your own working directory.**`,
-  "message a teammate → `b3os-team-inbox` · confirmed execution/delegation task → `b3os-bwf` · publish to `/reports` → `b3os-report` · branch·PR·merge → `b3os-github-workflow` · send a Telegram file → `b3os-telegram-file-delivery` · `[작업루프: …]` wake → `b3os-task-loop` · modify b3os itself → `b3os-infra-safety` · deploy/release → `b3os-release-ops` · merge AI-written code → `b3os-ai-code-safety` · parallel agents → `b3os-harness-playbook` · record a lesson → `b3os-team-learning-loop` · member add/remove → `b3os-team-member-lifecycle`.",
-  "**They stack — they are not alternatives.** Editing b3os and opening a PR for it = `b3os-infra-safety` (isolate in a worktree) **then** `b3os-github-workflow` (branch·PR). Pick every row that matches, in that order.",
-  "Not listed → find it in the index and read its `SKILL.md`. **Do not invent a procedure a skill already defines.**",
-].join("\n");
+/**
+ * ★스킬 목록은 손으로 쓰지 않는다 (GD 2026-08-01: "스킬이 추가될 때마다 고쳐야 되나?").★
+ *
+ * 손으로 쓰면 드리프트한다 — 실제로 옛 목록은 ★17개 중 4개만★ 이름을 댔고 나머지 13개는
+ * "카탈로그 가서 찾아라" 였다. 그게 팀장이 물은 "엉뚱한 데 찾지 않나" 의 정체다.
+ *
+ * ★스킬이 자기 트리거를 선언하고, 룰은 모아서 찍기만 한다.★
+ * 각 `SKILL.md` 프론트매터의 `trigger:` 한 줄을 읽는다. 없으면 그 스킬은 이름만 나온다
+ * (빠지지는 않는다 — ★목록에서 사라지는 것이 가장 나쁜 실패★ 이므로).
+ * → 스킬 추가 = SKILL.md 만 만들면 끝. 룰 파일은 안 건드린다.
+ */
+function readSkillTriggers(): Array<{ name: string; trigger: string }> {
+  const dir = `${REPO_ROOT}/skills`;
+  if (!existsSync(dir)) return [];
+  const out: Array<{ name: string; trigger: string }> = [];
+  for (const name of readdirSync(dir).filter((n) => n.startsWith("b3os-")).sort()) {
+    const md = `${dir}/${name}/SKILL.md`;
+    if (!existsSync(md)) continue;
+    let trigger = "";
+    const head = readFileSync(md, "utf8").slice(0, 4000);
+    const fm = /^---\n([\s\S]*?)\n---/.exec(head);
+    if (fm) {
+      const t = /^trigger:\s*(.+)$/m.exec(fm[1]);
+      if (t) trigger = t[1].trim().replace(/^["']|["']$/g, "");
+    }
+    out.push({ name, trigger });
+  }
+  return out;
+}
+
+function buildSkillTable(): string {
+  const skills = readSkillTriggers();
+  const line = skills
+    .map((s) => (s.trigger ? `${s.trigger} → \`${s.name}\`` : `\`${s.name}\``))
+    .join(" · ");
+  // 경로는 ★맨 위 b3os= 기준★ 을 한 번만 선언하고 이후는 상대로 쓴다 (GD 2026-08-01).
+  return [
+    // ★카탈로그·스킬 경로는 절대경로로 둔다★ — 기존 가드("스킬 카탈로그도 절대경로, 양 런타임")가 막는다.
+    //   그 가드는 상대경로를 못 푸는 런타임에서 실제로 터져서 생긴 것이라 우회하지 않는다.
+    `**Skills — pick by trigger** (\`${tilde(REPO_ROOT)}/skills/<name>/SKILL.md\` · index \`${tilde(REPO_ROOT)}/docs/B3OS_SKILLS.md\`):`,
+    line + ".",
+    "**They stack.** Editing b3os and opening a PR for it = `b3os-infra-safety` (isolate in a worktree) **then** `b3os-github-workflow`. Pick every match, in that order. Unsure → read that `SKILL.md`; **do not invent a procedure a skill already defines.**",
+  ].join("\n");
+}
+
+const SKILL_TABLE = buildSkillTable();
 
 /** 팀 공유 — 런타임별 로딩(claude=@import / openclaw·hermes=경로참조). 공통 규칙 복붙 안 함. */
 function sectionTeamShare(runtime: string, agentId?: string): string {
@@ -563,10 +638,13 @@ function sectionTeamShare(runtime: string, agentId?: string): string {
       "",
       "@TEAM-OS.md",
       "",
-      `- \`${tilde(SHARED_PATH)}\` — the team's current state·learning log. Read it when needed.`,
+      // ★경로 기준을 맨 위에 한 번만 선언한다★ — 이후는 전부 `b3os/...` 상대로 쓴다 (GD 2026-08-01).
+      //   긴 절대경로를 절마다 반복하지 않으면서 "무엇 기준인지" 는 파일 안에 남는다.
+      `- **Paths**: \`b3os\` = \`${tilde(REPO_ROOT)}\`. Everything below is relative to it (it is NOT your working directory).`,
+      "- `b3os/rules/SHARED.md` — the team's current state·learning log. Read it when needed.",
       // ★claude 분기에도 send.sh 절대경로를 박는다 (lui 실측 2026-08-01): 예전엔 openclaw/hermes 분기에만 있었고
       //   claude 는 명령 이름만 읽었다 → 자기 워크스페이스에서 `send.sh` 를 그냥 치면 없다.★
-      `- **Messaging a teammate**: \`${tilde(REPO_ROOT)}/skills/b3os-team-inbox/scripts/send.sh --to <them> --thread <thread> --body "…"\` (absolute path — it is not on your PATH). Check what arrived with the same folder's \`inbox.sh\`.`,
+      "- **Messaging a teammate**: `b3os/skills/b3os-team-inbox/scripts/send.sh --to <them> --thread <thread> --body \"…\"` (not on your PATH). Check what arrived with the same folder's `inbox.sh`.",
       "- Team mission·members·communication·owner resolution follow the single TEAM-OS canonical above — **asked deeply about team ops·workflow·a skill? read that canonical source (`docs/TEAM_LOOP_WORKFLOW.md`, the relevant `SKILL.md`) directly rather than reciting this summary** (@import only inlines up to TEAM-OS).",
       "",
       SKILL_TABLE,
@@ -575,8 +653,9 @@ function sectionTeamShare(runtime: string, agentId?: string): string {
   return [
     "## Team share",
     "",
+    `- **Paths**: \`b3os\` = \`${tilde(REPO_ROOT)}\`. Everything below is relative to it (it is NOT your working directory).`,
     `- Team-wide rules (mission·members·communication·owner resolution): \`${tilde(teamOsPathFor(agentId))}\` — **read at session start + when doing team ops/routing work.**`,
-    `- Team current state·learning log: \`${tilde(SHARED_PATH)}\``,
+    "- Team current state·learning log: `b3os/rules/SHARED.md`",
     `- **★When sending a message/reply/review-request to a teammate, you MUST use \`${tilde(REPO_ROOT)}/skills/b3os-team-inbox/scripts/send.sh --to <them> --body "…"\`. Do NOT try to send via OpenClaw's sessions_* / dynamic session routing (the agentId isn't resolvable in this runtime, so it fails).** Check what you received with the same skill's \`inbox.sh\`.`,
     "- Team-wide rules follow the single TEAM-OS canonical (do not copy-paste here).",
     "",

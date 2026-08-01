@@ -1,6 +1,7 @@
 ---
 name: b3os-telegram-file-delivery
 description: "Telegram으로 파일(HTML·PDF·이미지·ZIP·문서 등)을 보내야 할 때, 막히는 message/첨부 도구 대신 Bot API sendDocument를 안전하게 쓰는 팀 정본 절차."
+trigger: send a Telegram file
 ---
 
 # b3rys Telegram File Delivery

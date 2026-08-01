@@ -2,6 +2,7 @@
 name: b3os-task-loop
 description: "b3rys 팀의 과제가 완료/blocked/승인대기까지 끊기지 않도록 Tasks 칸반, 주행모드, handoff, review-wait, scheduled workloop을 통합 운영하는 스킬. 팀원 리뷰·응답·승인 대기 중 멈추지 않게 thread/recheck/fallback/next_safe_action을 기록하고 계속 진행해야 할 때 반드시 사용."
 owner: maintainer (ops)
+trigger: a `[작업루프: …]` wake
 ---
 
 # b3os-task-loop — 과제 완료까지 끊기지 않게 도는 작업 루프

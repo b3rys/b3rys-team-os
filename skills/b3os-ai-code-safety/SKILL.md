@@ -1,6 +1,7 @@
 ---
 name: b3os-ai-code-safety
 description: b3rys software-structure and refactoring guide for AI-generated or AI-modified code. Use when designing a program's structure, writing non-trivial code, reviewing code, or refactoring when the code "smells" (a change forces edits in many places, or a fix breaks something unrelated). Covers SOLID/module boundaries, side-effect-reducing structure (pure core, immutability, dependency injection, map/factory over conditional sprawl), the operational Effect gates (concurrency, transaction, idempotency), and how to refactor common code smells.
+trigger: merge AI-written code
 ---
 
 # b3rys AI Code Safety — Structure & Refactoring

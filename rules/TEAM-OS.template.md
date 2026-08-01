@@ -101,9 +101,6 @@ Modifying b3os itself (source, config, `agents.json`/`team.db`, releases) → fo
 
 ## 13. Team Skills
 
-**All paths in this document are relative to the b3os repo root** (your member file carries it as an absolute path) — they do NOT resolve from your own working directory.
+Canonical `skills/<name>/SKILL.md`; index `docs/B3OS_SKILLS.md` (paths relative to the b3os repo root — your member file states it absolutely). **Your own rule file carries the current trigger→skill list, generated from the skills directory; this document does not duplicate it.**
 
-**Pick by trigger** (canonical `skills/<name>/SKILL.md` · index `docs/B3OS_SKILLS.md`):
-message a teammate → `b3os-team-inbox` · confirmed execution/delegation task → `b3os-bwf` · publish to `/reports` → `b3os-report` · branch·PR·merge → `b3os-github-workflow` · send a Telegram file → `b3os-telegram-file-delivery` · `[workloop: …]` wake → `b3os-task-loop` · modify b3os itself → `b3os-infra-safety` · deploy/release → `b3os-release-ops` · merge AI-written code → `b3os-ai-code-safety` · parallel agents → `b3os-harness-playbook` · record a lesson → `b3os-team-learning-loop` · member add/remove → `b3os-team-member-lifecycle`.
-
-Not listed → find it in the index and read its `SKILL.md`. **Do not invent a procedure a skill already defines.** Skills provide procedure; TEAM-OS keeps owner, safety, approval, and verification gates.
+Use the skill that matches what you are about to do, and **stack them** when more than one matches (e.g. editing b3os and opening a PR = isolate first, then branch/PR). Not sure which → read that `SKILL.md` rather than inventing a procedure it already defines. Skills provide procedure; TEAM-OS keeps owner, safety, approval, and verification gates.

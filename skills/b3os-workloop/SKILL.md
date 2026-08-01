@@ -2,6 +2,7 @@
 name: b3os-workloop
 description: "Deprecated compatibility stub. Use b3os-task-loop for scheduled workloop wake handling plus task continuation/review-wait tracking."
 owner: maintainer (infra)
+trigger: define a recurring loop
 ---
 
 # Deprecated: use `b3os-task-loop`

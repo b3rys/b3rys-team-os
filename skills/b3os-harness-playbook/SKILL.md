@@ -1,6 +1,7 @@
 ---
 name: b3os-harness-playbook
 description: b3rys 팀 harness(sub agent 병렬 실행) 플레이북 — 트리거 우선. "병렬 실소스 커버 모양이면 limited harness가 기본, 그 외 솔로." 트리거 리스트 + ready-run 레시피(audit·migration·N후보) + ★구조 규약(역할분리 에이전트·프론트매터·오케스트레이터 분리·파일 산출, 실물 템플릿)★ + 8 품질패턴 + 런타임별(클로드 네이티브 Workflow / openclaw 수동 캡) + 비용 게이트. 사용 시점 — 코드 audit·다PR 리뷰·마이그레이션·멀티소스 리서치·N후보 비교·다면 교차검증·릴리즈 전 검증 등 '여러 군데 동시'가 보일 때 자동으로 이 스킬의 레시피를 집는다. Workflow/subagent fan-out 전. ※ 실행 엔진이 아니라 결정+품질 플레이북(실행은 네이티브 Workflow/Agent 툴). 에이전트+스킬 구성 메타스킬 `harness`와 다름. owner=maintainer.
+trigger: split work across parallel agents
 ---
 
 # b3os-harness-playbook — harness 플레이북 (트리거 우선)

@@ -1,6 +1,7 @@
 ---
 name: b3os-slack-format
 description: "b3rys 팀 슬랙 메시지 포맷 스킬. 팀원이 Slack(팀 메신저)에 올리는 실행·검증·인수인계·보고 메시지를 '읽히는 운영 보고'로 정리한다(Slack mrkdwn + 구조 템플릿). 사용 시점 — 슬랙에 길거나 단계 있는 메시지 게시 전, '슬랙 포맷/정리해서 올려', 'slack 메시지 다듬어', 인수테스트·체크리스트·핸드오프를 슬랙에 올릴 때. owner=maintainer."
+trigger: post to Slack
 ---
 
 # b3os-slack-format — 슬랙 메시지 포맷
