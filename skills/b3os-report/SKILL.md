@@ -31,7 +31,9 @@ entry: scripts/publish.sh
 1. **MD 소스 먼저** — Markdown 작성(`reports/<주제>-<YYYYMMDD>/<name>.md`). 재편집·버전관리·재렌더 원본.
 2. **최종 윤문** — 렌더 전에 위 “문체 원칙” 기준으로 번역투·기계적 병렬·영어 라벨 남발을 줄인다. 내용 추가/삭제가 아니라 문체·리듬·표현만 다듬는다. (외부 `humanize-korean` 스킬이 설치돼 있으면 그걸로 돌려도 된다.)
 3. **HTML 렌더** — `scripts/render.sh <md> [out.html] [제목]` → 아이폰 반응형 HTML+SVG(자체완결, **다크/라이트 테마 토글**).
-4. **포털 게시** — `scripts/publish.sh --title "T" --author maintainer --summary "S" --md a.md --html a.html` → team-collab `reports/`에 복사 + 등록 → **<dashboard-url>/reports** 목록에 바로 뜬다. HTML이 있으면 포털 기본 form은 HTML이고, MD는 정본·다운로드용 보조 form으로 남는다.
+4. **포털 게시** — ★원본 md/html 은 `reports/` 밖(작업 폴더·임시 폴더)에 두고 publish.sh 가 복사하게 한다.★
+   이미 `reports/<id>/` 안에 써 두면 자기 자신을 복사하다 `SameFileError` 로 죽는다(lui 실측 2026-08-01).
+   `scripts/publish.sh --title "T" --author maintainer --summary "S" --md a.md --html a.html` → team-collab `reports/`에 복사 + 등록 → **<dashboard-url>/reports** 목록에 바로 뜬다. HTML이 있으면 포털 기본 form은 HTML이고, MD는 정본·다운로드용 보조 form으로 남는다.
 
 두 스크립트는 **이 저장소 안에** 있다. clone 루트에서 실행한다(`install.sh`는 `~/.claude/skills/b3os`만 연결하므로 `~/.claude/skills/b3os-report/…` 경로는 없다).
 
