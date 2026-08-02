@@ -23,7 +23,7 @@ const agents: AgentRecord[] = (
     // codex=coordinator(PM/조율 + sync fallback), bill=ambiguous_owner(애매→빌이 GD 께 문의, GD 2026-07-10).
     // 두 capability 를 분리 시드 — defaultIntake 의 애매 라우팅은 ambiguous_owner(빌)를 따른다.
     codex: ["coordinator", "restricted_mention", "native_routing", "full_context"],
-    bill: ["ambiguous_owner", "full_context", "recovery"],
+    bill: ["ambiguous_owner", "full_context"],
     brief: ["non_interactive"],
   } as Record<string, string[]>)[id] ?? [],
   tmux_session: tm, telegram_bot_username: tg, workspace_path: "", persona_file: "",

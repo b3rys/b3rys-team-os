@@ -25,7 +25,7 @@ import {
 
 const CAPS: Record<string, string[]> = {
   codex: ["coordinator", "restricted_mention", "native_routing", "full_context"],
-  bill: ["full_context", "recovery"],
+  bill: ["full_context"],
   brief: ["non_interactive"],
 };
 const NICKS: Record<string, string[]> = {

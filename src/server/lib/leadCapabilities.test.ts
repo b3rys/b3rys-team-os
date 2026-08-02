@@ -29,8 +29,8 @@ describe("withInitialLeadCapabilities — 첫 영입", () => {
   });
 
   test("이미 가진 능력은 보존한다(덮어쓰지 않음)", () => {
-    const entry = withInitialLeadCapabilities([], { id: "alice", capabilities: ["recovery"] });
-    expect(entry.capabilities).toContain("recovery");
+    const entry = withInitialLeadCapabilities([], { id: "alice", capabilities: ["some_existing_cap"] });
+    expect(entry.capabilities).toContain("some_existing_cap");
     expect(entry.capabilities).toContain("coordinator");
     expect(entry.capabilities).toContain("full_context");
   });

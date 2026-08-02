@@ -16,6 +16,7 @@ import { dirname } from "node:path";
 import { codexBridgeLaunchdLabel, writeCodexBridgeFiles } from "../runtimes/codex/launcher";
 import { REPO_ROOT } from "./personaTemplates";
 import { ambientAgents } from "./registry";
+import { COORDINATOR_CAPABILITY } from "./capabilities";
 import { ensureClaudePollerUp } from "../runtimes/claude/pollerHealth";
 
 const HOME = process.env.HOME ?? "";
@@ -277,16 +278,30 @@ export async function restartAgent(agentId: string, runtime: string, fresh = fal
  * collab 서버·b3rys-dev 같은 인프라는 건드리지 않는다.
  */
 type ControlMember = { id: string; runtime: string; capabilities?: string[] };
-const isRecovery = (m: ControlMember): boolean => (m.capabilities ?? []).includes("recovery");
+/** 코디네이터인가. ★`stop_all` 제외 + 맨 마지막 재시작★ 두 가지가 이 하나에 걸려 있다.
+ *
+ *  ★예전에는 `recovery` 라는 별도 능력이었다.★ 둘로 나눠서 얻는 게 없었고(팀장이 코디를 다시
+ *  임명하면 된다), ★나뉘어 있는 동안 화면이 "코디네이터 유지" 라고 말하면서 실제로는 recovery 를
+ *  거르는 어긋남★ 이 있었다. 더 나쁜 것은 ★새로 설치한 팀에는 `recovery` 보유자가 아예 없어서★
+ *  (`LEAD_CAPABILITIES` 는 `coordinator`·`full_context` 만 준다) ★코디가 보호받지 못했다는 점★ 이다. */
+const isCoordinator = (m: ControlMember): boolean => (m.capabilities ?? []).includes(COORDINATOR_CAPABILITY);
+
+/** 재시작 순서를 가른다 — ★코디는 맨 마지막.★ 이 대화 세션이 잠깐 끊기므로 끝으로 미룬다.
+ *  ★순서가 뒤집히면 복구할 사람이 먼저 죽는다.★ 그래서 순서를 ★따로 잴 수 있게★ 함수로 뺀다. */
+export function partitionForRestart<T extends ControlMember>(members: readonly T[]): { others: T[]; coordinators: T[] } {
+  const others: T[] = [];
+  const coordinators: T[] = [];
+  for (const m of members) (isCoordinator(m) ? coordinators : others).push(m);
+  return { others, coordinators };
+}
 
 export async function restartAll(members: ControlMember[]): Promise<Array<{ id: string; ok: boolean; detail: string }>> {
   if (!execOn()) return [{ id: "*", ok: false, detail: "실행 OFF(APPROVAL_EXECUTION_ENABLED≠1) — 팀장 인가 필요" }];
   const out: Array<{ id: string; ok: boolean; detail: string }> = [];
   let openclawDone = false;
-  // recovery capability 팀원(복구 코디)은 맨 마지막에 재시작 — 이 대화 세션 깜빡(~15s)을 끝으로 미룬다.
-  const recoveryMembers: ControlMember[] = [];
-  for (const m of members) {
-    if (isRecovery(m)) { recoveryMembers.push(m); continue; }
+  // 코디네이터는 맨 마지막에 재시작 — 이 대화 세션 깜빡(~15s)을 끝으로 미룬다.
+  const { others, coordinators } = partitionForRestart(members);
+  for (const m of others) {
     if (isAgentOff(m.id)) { out.push({ id: m.id, ok: true, detail: "건너뜀(정지 중 — 🟢 기동으로 켜세요)" }); continue; }
     if (m.runtime === "openclaw") {
       if (openclawDone) { out.push({ id: m.id, ok: true, detail: "openclaw 게이트웨이 일괄 재시작에 포함" }); continue; }
@@ -299,8 +314,8 @@ export async function restartAll(members: ControlMember[]): Promise<Array<{ id: 
     //   플러그인 캐시가 이미 warm 이라 세션 install 이 순삭 → MCP 가 30s 핸드셰이크 안에 붙는다. 콜드 install 대비는
     //   start-telegram-channel.sh 의 pre-warm 이 담당. 별도 부팅 직렬화 불필요.
   }
-  // 복구 코디는 맨 마지막(--resume 이라 이 대화 컨텍스트 유지하고 ~15s 후 복귀).
-  for (const m of recoveryMembers) {
+  // 코디는 맨 마지막(--resume 이라 이 대화 컨텍스트 유지하고 ~15s 후 복귀).
+  for (const m of coordinators) {
     if (isAgentOff(m.id)) { out.push({ id: m.id, ok: true, detail: "건너뜀(정지 중)" }); }
     else { const r = await restartAgent(m.id, m.runtime); out.push({ id: m.id, ok: r.ok, detail: r.detail + " ← 맨 마지막(이 대화 ~15s 깜빡 후 복귀)" }); }
   }
@@ -308,7 +323,7 @@ export async function restartAll(members: ControlMember[]): Promise<Array<{ id: 
 }
 
 /**
- * 비상 전체 정지 (서킷브레이커) — bill(복구 코디용)·이미 off 는 제외하고 전원 정지.
+ * 비상 전체 정지 (서킷브레이커) — 코디네이터·이미 off 는 제외하고 전원 정지.
  * 폭주·이상 시 GD 가 대시보드 빨강 버튼(더블컨펌)으로 즉시 호출. openclaw 는 각 계정 disable +
  * 게이트웨이 restart(stop 아님 → auto-heal 무관)라 멤버 수만큼 게이트웨이가 깜빡일 수 있다(비상이라 허용).
  */
@@ -321,7 +336,7 @@ export async function stopAll(members: ControlMember[]): Promise<StopResult[]> {
   if (!execOn()) return [{ id: "*", ok: false, detail: "실행 OFF(APPROVAL_EXECUTION_ENABLED≠1) — 팀장 인가 필요" }];
   const out: StopResult[] = [];
   for (const m of members) {
-    if (isRecovery(m)) { out.push({ id: m.id, ok: true, detail: "제외(복구 코디용 — 끄려면 개별 정지)", kept: true }); continue; }
+    if (isCoordinator(m)) { out.push({ id: m.id, ok: true, detail: "제외(코디네이터 — 끄려면 개별 정지)", kept: true }); continue; }
     if (isAgentOff(m.id)) { out.push({ id: m.id, ok: true, detail: "이미 정지" }); continue; }
     const r = await setAgentEnabled(m.id, m.runtime, false);
     out.push({ id: m.id, ok: r.ok, detail: r.detail });

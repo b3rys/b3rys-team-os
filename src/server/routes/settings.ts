@@ -51,7 +51,7 @@ import {
 } from "../lib/activation";
 import { checkRuntimeAuth, runtimeReadinessFromAuth, type RuntimeReadiness } from "../lib/runtimeAuth";
 import { verifyFirstModelCall, type FirstModelCallResult } from "../lib/runtimeSubscription";
-import { hasCapability } from "../lib/capabilities";
+import { hasCapability, COORDINATOR_CAPABILITY } from "../lib/capabilities";
 import { hasSlackTokenFile, loadAgentCreds, saveAgentCreds, removeAgentCreds, slackTokensDir, postMessage } from "../lib/slack";
 import { renderAndRepoint, TEAM_OS_TEMPLATE_PATH, LIVE_TEAM_OS_PATH } from "../lib/teamOsRender";
 import { HERMES_BASE_PROFILE } from "../lib/paths";
@@ -1411,8 +1411,9 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     try { list = readAgents(); } catch (e) { return c.json({ ok: false, error: "read_failed", detail: e instanceof Error ? e.message : String(e) }, 500); }
     const members = list.filter((a) => ["openclaw", "claude_channel", "hermes_agent", "codex"].includes(a.runtime)).map((a) => ({ id: a.id, runtime: a.runtime, capabilities: a.capabilities ?? [] }));
     const results = await stopAll(members);
-    const recoveryIds = new Set(list.filter((a) => hasCapability(a, "recovery")).map((a) => a.id));
-    appendAudit(db, "user", "stop_all_emergency", "team", { stopped: results.filter((r) => r.ok && !recoveryIds.has(r.id)).length });
+    // ★코디네이터는 정지 대상에서 빠진다★ — 감사 수치가 그걸 반영해야 한다(예전엔 별도 `recovery` 능력이었다).
+    const keptIds = new Set(list.filter((a) => hasCapability(a, COORDINATOR_CAPABILITY)).map((a) => a.id));
+    appendAudit(db, "user", "stop_all_emergency", "team", { stopped: results.filter((r) => r.ok && !keptIds.has(r.id)).length });
     return c.json({ ok: true, results });
   });
 

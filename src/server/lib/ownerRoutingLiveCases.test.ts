@@ -32,7 +32,7 @@ function mkAgent(
 ): AgentRecord {
   const caps: Record<string, string[]> = {
     codex: ["coordinator", "restricted_mention", "native_routing", "full_context"],
-    bill: ["full_context", "recovery"],
+    bill: ["full_context"],
     brief: ["non_interactive"],
   };
   const nicks: Record<string, string[]> = {
