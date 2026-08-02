@@ -5,7 +5,7 @@
 
 const LIVE_HOSTS = new Set(["dev.b3rys.com"]);
 // b3os 제품 버전. package.json version과 맞춰 관리.
-export const APP_VERSION = "0.6.0";
+export const APP_VERSION = "0.6.1";
 
 export function shouldShowLiveBadge(hostname: string): boolean {
   return LIVE_HOSTS.has(hostname);
