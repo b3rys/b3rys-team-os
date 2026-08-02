@@ -103,6 +103,9 @@ export function renderTmuxPane(root: HTMLElement): void {
       lastLineCount = lines.length;
     }
 
+    // ★의도적으로 scrollStick(바닥 근처일 때만 stick) 미적용★ — 이 pane 은 tail -f 성격의 라이브 로그라
+    // "따라가기 기본 + 명시적 일시정지(pauseAutoScroll)" 가 계약이다. 채팅형(ThreadView/Chat)과 달리
+    // 스크롤 위치로 독자 의도를 추정하지 않는다. 바꾸려면 pause 버튼과의 상호작용을 함께 설계할 것. (2026-08-01)
     if (!pauseAutoScroll) {
       body.scrollTop = body.scrollHeight;
     }
