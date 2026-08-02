@@ -184,130 +184,111 @@ describe("team router", () => {
   });
 });
 
-describe("owner inference fallback", () => {
+// 멘션·답장·sticky 가 모두 없을 때 = coordinator 가 받는다 (팀장 지시 2026-08-02).
+// 이전엔 로컬 LLM owner-inference 를 태웠는데 실측 정확도가 4케이스 중 2건이라 걷어냈다.
+// 정본 근거 = TEAM-OS §2 "애매하거나 조율성이면 coordinator capability 보유자가 받는다".
+describe("default owner (멘션·답장·sticky 없음 → coordinator)", () => {
   const originalFetch = globalThis.fetch;
-
-  function mockRouter(reply: Record<string, unknown>): void {
-    globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ message: { content: JSON.stringify(reply) } }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      })) as unknown as typeof fetch;
-  }
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
   });
 
-  test("routes infra/team-collab operations to Bill without explicit mention", async () => {
-    mockRouter({ outcome: "route", responder: "bill", domain: "infra_ops", needs_gd_confirm: false });
-    const d = await routeTeamMessageHybrid("team-collab 라우터 상태 좀 봐야겠네", agents);
-    expect(d.outcome).toBe("route");
-    expect(d.reason).toBe("default_intake");
-    expect(d.targetAgentIds).toEqual(["bill"]);
-    expect(d.domain).toBe("owner_inference:infra_ops");
-  });
-
-  test("routes general PM/coordination messages to Codex without explicit mention", async () => {
-    mockRouter({ outcome: "route", responder: "codex", domain: "general_pm", needs_gd_confirm: false });
-    const d = await routeTeamMessageHybrid("팀원 영입 절차를 정리하고 다음 진행 계획 잡자", agents, {}, { timeoutMs: 10 });
-    expect(d.outcome).toBe("route");
-    expect(d.reason).toBe("default_step");
-    expect(d.targetAgentIds).toEqual(["codex"]);
-    expect(d.domain).toBe("owner_inference:general_pm");
-  });
-
-  test("delegates unowned owner inference to local LLM using roles instead of default-intake fields", async () => {
-    const scoped = agents.map((a) =>
-      a.id === "steve"
-        ? { ...a, role: "Infra operations and team-collab runtime" }
-        : a.id === "dbak"
-          ? { ...a, role: "Team PM and coordination" }
-          : { ...a },
-    );
-    const calls: string[] = [];
-    globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }> };
-      calls.push(body.messages[0]?.content ?? "");
-      const user = JSON.parse(body.messages[1]?.content ?? "{}") as { new_message?: string };
-      const reply = user.new_message?.includes("team-collab")
-        ? { outcome: "route", responder: "steve", domain: "ops_from_role", needs_gd_confirm: false }
-        : { outcome: "route", responder: "dbak", domain: "pm_from_role", needs_gd_confirm: false };
-      return new Response(JSON.stringify({ message: { content: JSON.stringify(reply) } }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+  /** fetch 가 한 번이라도 불리면 기록 — LLM 을 안 거치는지 확인하는 용도. */
+  function watchFetch(): { calls: number } {
+    const seen = { calls: 0 };
+    globalThis.fetch = (async () => {
+      seen.calls += 1;
+      throw new Error("이 경로에서는 LLM 을 호출하면 안 된다");
     }) as unknown as typeof fetch;
+    return seen;
+  }
 
-    const infra = await routeTeamMessageHybrid("team-collab 라우터 상태 좀 봐야겠네", scoped, {}, { timeoutMs: 10 });
-    expect(infra.targetAgentIds).toEqual(["steve"]);
-    expect(infra.domain).toBe("owner_inference:ops_from_role");
-
-    const pm = await routeTeamMessageHybrid("팀원 영입 절차를 정리하고 다음 진행 계획 잡자", scoped, {}, { timeoutMs: 10 });
-    expect(pm.targetAgentIds).toEqual(["dbak"]);
-    expect(pm.domain).toBe("owner_inference:pm_from_role");
-    expect(calls.join("\n")).not.toContain("default_intake_scope=");
-    expect(calls.join("\n")).toContain("Infra operations and team-collab runtime");
-    expect(calls.join("\n")).toContain("Team PM and coordination");
-  });
-
-  test("routes pure decision/approval messages to Codex default owner", async () => {
-    mockRouter({ outcome: "ask_gd", suggested: [], domain: "decision", needs_gd_confirm: false });
-    const d = await routeTeamMessageHybrid("이건 최종 결정이 필요하겠네", agents, {}, { timeoutMs: 10 });
+  test("★LLM 을 호출하지 않는다★ — 판단 없이 곧바로 coordinator", async () => {
+    const seen = watchFetch();
+    const d = await routeTeamMessageHybrid("음 이건 좀 애매하네", agents);
+    expect(seen.calls).toBe(0);
     expect(d.outcome).toBe("route");
-    expect(d.reason).toBe("default_step");
+    expect(d.reason).toBe("default_coordinator");
     expect(d.targetAgentIds).toEqual(["codex"]);
   });
 
-  test("marks risky owner-inferred work as needing GD confirmation", async () => {
-    mockRouter({ outcome: "route", responder: "bill", domain: "ops", needs_gd_confirm: true });
+  test("도메인이 명확해 보여도 coordinator 가 받는다 (특정 담당 자동배정 안 함)", async () => {
+    watchFetch();
+    const d = await routeTeamMessageHybrid("team-collab 라우터 상태 좀 봐야겠네", agents);
+    expect(d.targetAgentIds).toEqual(["codex"]);
+    expect(d.reason).toBe("default_coordinator");
+  });
+
+  test("해석되지 않는 @멘션은 일반 텍스트 취급 → coordinator", async () => {
+    watchFetch();
+    const d = await routeTeamMessageHybrid("@클로드테스트 상태 확인", agents);
+    expect(d.targetAgentIds).toEqual(["codex"]);
+    expect(d.reason).toBe("default_coordinator");
+  });
+
+  test("confident owner 다 — 다른 봇은 억제된다", async () => {
+    watchFetch();
+    const d = await routeTeamMessageHybrid("음 이건 좀 애매하네", agents);
+    expect(isConfidentOwner(d.reason)).toBe(true);
+    expect(shouldSuppress(d.reason, d.targetAgentIds, "bill")).toBe(true);
+    expect(shouldSuppress(d.reason, d.targetAgentIds, "codex")).toBe(false);
+  });
+
+  // ★위험 신호 플래그는 LLM 경로에만 있었다 — 결정론 경로로 바꾸면서 같이 없애면 조용한 안전 후퇴다.★
+  test("위험 신호(배포·재시작 등)는 needsGdConfirm 을 유지한다", async () => {
+    watchFetch();
     const d = await routeTeamMessageHybrid("team-collab 배포하고 서비스 재시작해야겠네", agents);
-    expect(d.outcome).toBe("route");
-    expect(d.targetAgentIds).toEqual(["bill"]);
+    expect(d.targetAgentIds).toEqual(["codex"]);
     expect(d.needsGdConfirm).toBe(true);
   });
 
-  test("routes ambiguous casual messages to Codex default owner", async () => {
-    mockRouter({ outcome: "ask_gd", suggested: [], domain: "ambiguous", needs_gd_confirm: false });
-    const d = await routeTeamMessageHybrid("음 이건 좀 애매하네", agents, {}, { timeoutMs: 10 });
-    expect(d.outcome).toBe("route");
-    expect(d.reason).toBe("default_step");
-    expect(d.targetAgentIds).toEqual(["codex"]);
+  test("평범한 메시지는 needsGdConfirm 이 서지 않는다", async () => {
+    watchFetch();
+    const d = await routeTeamMessageHybrid("오늘 날씨 좋네요", agents);
+    expect(d.needsGdConfirm).toBe(false);
   });
 
-  test("routes unknown @mentions through owner inference when there is no reply or sticky owner", async () => {
-    mockRouter({ outcome: "route", responder: "bill", domain: "infra_ops", needs_gd_confirm: false });
-    const d = await routeTeamMessageHybrid("@클로드테스트 상태 확인", agents, {}, { timeoutMs: 10 });
-    expect(d.outcome).toBe("route");
-    expect(d.reason).toBe("default_intake");
+  test("ambiguous_owner capability 가 있으면 coordinator 보다 우선 (GD 2026-07-10 순서 보존)", async () => {
+    watchFetch();
+    const withIntake = agents.map((a) =>
+      a.id === "bill" ? { ...a, capabilities: [...(a.capabilities ?? []), "ambiguous_owner"] } : a,
+    );
+    const d = await routeTeamMessageHybrid("음 이건 좀 애매하네", withIntake);
     expect(d.targetAgentIds).toEqual(["bill"]);
-    expect(d.domain).toBe("owner_inference:infra_ops");
+    expect(d.reason).toBe("default_coordinator");
   });
 
-  test("allows role-clear owner inference to mention-only agents", async () => {
-    const withTemp: AgentRecord[] = [
-      ...agents,
-      {
-        id: "testclaude",
-        display_name: "Claude Temp",
-        nicknames: ["testclaude", "클로드테스트"],
-        role: "Temporary Claude Channel lifecycle rehearsal member",
-        response_mode: "mention-only",
-        runtime: "claude_channel",
-        status_provider: "claude_tmux",
-        tmux_session: "claude-testclaude",
-        telegram_bot_username: null,
-        workspace_path: "/Users/you/Development/testclaude",
-        persona_file: "/Users/you/Development/testclaude/CLAUDE.md",
-        moderator_eligible: false,
-        avatar_emoji: "T",
-      },
-    ];
-    mockRouter({ outcome: "route", responder: "testclaude", domain: "temp_member", needs_gd_confirm: false });
-    const d = await routeTeamMessageHybrid("클로드테스트 상태 확인", withTemp, {}, { timeoutMs: 10 });
-    expect(d.outcome).toBe("route");
-    expect(d.targetAgentIds).toEqual(["testclaude"]);
-    expect(d.domain).toBe("owner_inference:temp_member");
+  // coordinatorId 는 capability 미지정 시 agents[0] 로 폴백한다(silent-drop 방지). 그 폴백을 confident
+  // 자동배정에 쓰면 "엉뚱한 첫 에이전트가 다 받는" 2026-06-05 의 그 문제로 돌아간다 — 여기선 안 쓴다.
+  test("capability 미지정 레지스트리는 자동배정하지 않고 GD 에게 묻는다", async () => {
+    watchFetch();
+    const noCoord = agents.map((a) => ({ ...a, capabilities: [] as string[] }));
+    const d = await routeTeamMessageHybrid("음 이건 좀 애매하네", noCoord);
+    expect(d.outcome).toBe("ask_gd");
+    expect(d.targetAgentIds).toEqual([]);
+  });
+
+  // ─── 기존 동작 보존 (이 변경이 건드리면 안 되는 것들) ───
+  test("보존: @멘션이 있으면 그대로 그 사람", async () => {
+    watchFetch();
+    const d = await routeTeamMessageHybrid("@빌 라우터 좀 봐줘", agents);
+    expect(d.reason).toBe("explicit_mention");
+    expect(d.targetAgentIds).toEqual(["bill"]);
+  });
+
+  test("보존: 답장이면 원문 작성자", async () => {
+    watchFetch();
+    const d = await routeTeamMessageHybrid("이거 어떻게 됐어", agents, { replyToAgentId: "bill" });
+    expect(d.reason).toBe("reply_author");
+    expect(d.targetAgentIds).toEqual(["bill"]);
+  });
+
+  test("보존: sticky 담당이 있으면 유지된다 (멀티턴 위임이 끊기면 안 된다)", async () => {
+    watchFetch();
+    const d = await routeTeamMessageHybrid("그거 진행상황 어때", agents, { activeAssigneeIds: ["bill"] });
+    expect(d.reason).toBe("active_assignee_followup");
+    expect(d.targetAgentIds).toEqual(["bill"]);
   });
 });
 
@@ -613,7 +594,6 @@ describe("owner-gate suppress 규칙 — shouldSuppress 단일 출처 (커뮤니
       '명시적인 @은 붙는거 확인.. 그런데 그 다음 메시지인 "이번엔 sticky 테스트야. 누가 대답할까?" 는 리액션 뿐만 아니라 응답도 안한거임. 처리가 필요함.',
       agents,
       { activeAssigneeId: "codex" },
-      { timeoutMs: 10 },
     );
     expect(d.targetAgentIds).toEqual(["codex"]);
     expect(d.reason).toBe("active_assignee_followup");

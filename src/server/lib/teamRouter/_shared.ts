@@ -17,6 +17,8 @@ export interface RouteDecision {
     | "topic_shift_default"
     | "default_intake"
     | "default_step"
+    /** 멘션·답장·sticky 가 모두 없어 coordinator 가 기본으로 받음 (결정론, LLM 안 거침). */
+    | "default_coordinator"
     | "ask_gd"
     | "broadcast_marker";
   shouldResetThread: boolean;
@@ -24,6 +26,14 @@ export interface RouteDecision {
 
 // (removed) DEFAULT_STEP_AGENT_ID = "codex" — default_step owner 는 이제 coordinator capability 로
 // 결정한다. lib/capabilities.ts 의 coordinatorId(agents) 사용. 정본 = agents.json.
+
+/**
+ * GD 확인이 필요한 위험 신호 — 토큰·삭제·배포·재시작·비용·외부발신 등.
+ * 이 플래그(needsGdConfirm)는 받는 agent 가 "바로 실행하지 말고 GD 께 먼저 확인" 하라는 신호다.
+ * owner-inference 안에만 있었는데, 결정론 라우팅(default_coordinator)에서도 똑같이 필요해서 여기로 옮겼다.
+ */
+export const GD_CONFIRM_RE =
+  /(삭제|지워|제거|revoke|폐기|토큰|token|credential|시크릿|secret|보안|security|권한|permission|결제|비용|paid|외부\s*(공개|발신|전송)|public|배포|deploy|재시작|restart|launchctl|마이그레이션|migration|DB|데이터베이스|database)/i;
 
 export const OLLAMA_URL = process.env.TEAM_ROUTER_OLLAMA_URL ?? "http://127.0.0.1:11434/api/chat";
 export const ROUTER_MODEL = process.env.TEAM_ROUTER_MODEL ?? "exaone3.5:2.4b";

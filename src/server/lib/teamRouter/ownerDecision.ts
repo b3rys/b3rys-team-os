@@ -1,5 +1,6 @@
 import type { AgentRecord } from "../../types";
 import {
+  GD_CONFIRM_RE,
   type RouterContext,
   type RouteDecision,
   type RouteIntent,
@@ -9,10 +10,9 @@ import {
   buildRosterText,
   classifyIntent,
 } from "./_shared";
-import { coordinatorId } from "../capabilities";
+import { ambiguousOwnerId, coordinatorId, hasCapability } from "../capabilities";
 import { broadcastRecipientIds } from "../agentMembership";
 import { detectExplicitTargets, stripQuotedForRouting } from "./mention";
-import { routeDefaultIntakeLLM } from "./defaultIntake";
 
 // @all/@b3rys/@group — broadcast-all marker. Checked before explicit_mention.
 const BROADCAST_MARKER_RE = /@(all|b3rys|group)\b/i;
@@ -264,11 +264,12 @@ export async function routeTeamMessageLLM(
 // (GD 의 "all-LLM" 결정과의 트레이드오프: 신뢰도 위해 명확신호는 결정론. GD 리뷰 후 택1.)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// opts(model/timeoutMs)는 뺐다 — LLM 을 안 부르니 아무 효과가 없다. 남겨두면
+// "설정해도 아무 일 안 일어나는 노브" 가 되어 없느니만 못하다.
 export async function routeTeamMessageHybrid(
   text: string,
   agents: AgentRecord[],
   context: RouterContext = {},
-  opts: { model?: string; timeoutMs?: number } = {},
 ): Promise<LlmRouteDecision> {
   const intent = classifyIntent(text);
   const activeAssigneeIds = validActiveAssignees(context, agents);
@@ -339,24 +340,45 @@ export async function routeTeamMessageHybrid(
     };
   }
 
-  // 3) 명시 없음 + sticky 없음 → b3rys 전용 owner inference.
-  //    해석되지 않은 @텍스트도 여기서는 일반 텍스트로 취급한다.
-  //    담당 범주를 코드 regex 로 고정하지 않고, agents.json 의 role 을 로컬 LLM 프롬프트에 넣어 판단한다.
-  //    애매하거나 LLM 실패 시 coordinator capability 보유자가 default owner 로 받는다.
-  const intake = await routeDefaultIntakeLLM(text, agents, opts).catch(() => null);
-  if (intake?.outcome === "route") return { ...intake, shouldResetThread: false };
+  // 3) 명시 없음 + 답장 아님 + sticky 없음 → coordinator 가 받는다 (결정론, LLM 안 거침).
+  //    근거 = TEAM-OS §2 "애매하거나 조율성이면 coordinator capability 보유자가 받는다".
+  //    ★GD 룰 2026-06-05(애매하면 자동배정 말고 ask_gd)를 되돌리는 변경이다★ (팀장 지시 2026-08-02).
+  //    그때 걷어낸 이유는 "sticky 가 비면 ★특정 agent★ 가 엉뚱한 메시지를 잡는다" 였는데, 받는 쪽이
+  //    분류가 일인 coordinator 면 잘못 받아도 손실이 없다.
+  //    LLM 추론을 뺀 이유: 실측 정확도가 4케이스 중 2건이라(2026-08-02, exaone3.5:7.8b) 규칙보다 나을 게
+  //    없었다. 틀리면 엉뚱한 사람을 깨우고, 맞아도 대개 coordinator 였다.
+  //    수신자는 ambiguousOwnerId — 자체적으로 ambiguous_owner → coordinator 순 폴백이다(GD 2026-07-10).
+  //    needsGdConfirm 은 유지한다 — 위험 신호는 owner 를 어떻게 정했든 "실행 전 GD 확인" 이어야 하고,
+  //    LLM 경로에만 있던 걸 놓치면 조용한 안전 후퇴다.
+  //    ★capability 가 실제로 지정된 팀에서만 자동으로 깨운다★ — coordinatorId 는 미지정 시 agents[0] 로
+  //    폴백하는데(silent-drop 방지용), 그 폴백을 confident 자동배정에 쓰면 위의 2026-06-05 문제 그대로다.
+  const hasIntakeOwner = agents.some(
+    (a) => hasCapability(a, "ambiguous_owner") || hasCapability(a, "coordinator"),
+  );
+  const intakeOwner = hasIntakeOwner ? ambiguousOwnerId(agents) : undefined;
+  if (intakeOwner) {
+    return {
+      targetAgentIds: [intakeOwner],
+      reason: "default_coordinator",
+      shouldResetThread: false,
+      intent,
+      domain: "none",
+      via: "llm",
+      needsGdConfirm: GD_CONFIRM_RE.test(text),
+      outcome: "route",
+    };
+  }
 
-  // 4) (GD 룰 2026-06-05) 오너가 애매하면(멘션·답장·sticky 모두 없음) codex 로 자동 배정하지 않는다.
-  //    룰 = @멘션 > 답장 > sticky > **오너 애매하면 GD 문의**. → ask_gd(아무도 안 깨움 + GD 에게 누가 볼지 질문).
-  //    이전엔 하드코딩 default_step 으로 보내, 재시작으로 sticky 가 비면 특정 agent 가 엉뚱한 메시지를 잡던 문제 fix.
+  // 4) coordinator capability 보유자가 아예 없는 팀 → 예전대로 GD 에게 묻는다(아무도 안 깨움).
+  //    임의의 agent 를 골라 깨우지 않는다 — 그게 2026-06-05 에 걷어낸 바로 그 동작이다.
   return {
     targetAgentIds: [],
     reason: "ask_gd",
     shouldResetThread: false,
     intent,
-    domain: intake?.domain ?? "none",
+    domain: "none",
     via: "llm",
     outcome: "ask_gd",
-    suggested: intake?.suggested ?? [],
+    suggested: [],
   };
 }

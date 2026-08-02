@@ -1,5 +1,6 @@
 import type { AgentRecord } from "../../types";
 import {
+  GD_CONFIRM_RE,
   type LlmRouteDecision,
   OLLAMA_URL,
   ROUTER_MODEL,
@@ -7,9 +8,6 @@ import {
   classifyIntent,
 } from "./_shared";
 import { ambiguousOwnerId } from "../capabilities";
-
-const GD_CONFIRM_RE =
-  /(삭제|지워|제거|revoke|폐기|토큰|token|credential|시크릿|secret|보안|security|권한|permission|결제|비용|paid|외부\s*(공개|발신|전송)|public|배포|deploy|재시작|restart|launchctl|마이그레이션|migration|DB|데이터베이스|database)/i;
 
 interface RawDefaultIntake {
   outcome?: "route" | "ask_gd";

@@ -4,7 +4,14 @@ import { hasCapability } from "../capabilities";
 
 // ─── owner-gate suppress 판단: owner 로직의 단일 출처 (GD 2098 — 판단은 서버 한 곳) ───
 // gate/react 훅은 thin-client로 이 결정만 따른다(자체 로직 없음). 룰 변경은 여기서만 → 서버 재시작으로 배포.
-const CONFIDENT_OWNER_REASONS = new Set(["explicit_mention", "reply_author", "active_assignee_followup"]);
+// default_coordinator 는 추측이 아니라 룰이라 confident 다 — 멘션·답장·sticky 가 모두 없으면
+//   coordinator 가 받는다(TEAM-OS §2). 억제가 안 걸리면 주인 없는 메시지에 전원이 달려든다.
+const CONFIDENT_OWNER_REASONS = new Set([
+  "explicit_mention",
+  "reply_author",
+  "active_assignee_followup",
+  "default_coordinator",
+]);
 
 /** "확실 owner" reason 인가 (default_intake/default_step/broadcast/ask_gd 등 추측·전체는 아님). */
 export function isConfidentOwner(reason: string): boolean {
