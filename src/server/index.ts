@@ -52,7 +52,7 @@ import { createSchedulerRoutes } from "./routes/scheduler";
 import { createCiStatusRoutes } from "./routes/ciStatus";
 import { ensureDailyTaskReviewJobs, ensureWeeklySelfLearningJobs } from "./scheduler/core";
 import { renderAndRepoint } from "./lib/teamOsRender";
-import { installProgressHook, repairProgressHook, repairReplyGuardHook, repairOwnerGateHook } from "./runtimes/claude/launcher";
+import { installProgressHook, repairProgressHook, repairReplyGuardHook, ensureOwnerGateHook } from "./runtimes/claude/launcher";
 import { writeMemberPersona, savePersonaFile } from "./lib/writeMemberPersona";
 import { persistOwnerChatIdIfEmpty } from "./runtimes/codex/launcher";
 import { createApprovalsApp } from "./routes/approvals";
@@ -167,7 +167,8 @@ try {
   for (const cid of claudeIds) {
     try { repairProgressHook(cid); } catch { /* best-effort */ }
     try { repairReplyGuardHook(cid); } catch { /* best-effort */ }
-    try { repairOwnerGateHook(cid); } catch { /* best-effort */ }
+    // ★owner-gate 만 "없으면 깐다" 다★ — 위 둘과 목적이 반대다(주석은 launcher 쪽에).
+    try { ensureOwnerGateHook(cid); } catch { /* best-effort */ }
   }
   // 공개 빌드 부팅 백필(PUBLIC_BUILD 게이트) — 공개 사용자가 git 업데이트를 pull 한 뒤 재시작하면 기존
   //   멤버도 재영입 없이 최신을 받게. 라이브(PUBLIC_BUILD=false)는 글로벌 배선/실멤버 보호로 skip.

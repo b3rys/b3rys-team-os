@@ -241,14 +241,18 @@ export function installOwnerGateHook(id: string, roots?: { membersRoot?: string;
   } catch { /* best-effort */ }
 }
 
-/** 이미 깔려 있는 owner-gate 훅만 최신으로 맞춘다(새로 깔지는 않는다). `repairProgressHook` 과 같은 원칙. */
-export function repairOwnerGateHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
+/** owner-gate 를 ★없으면 새로 깐다.★ 부팅 때 돈다.
+ *
+ *  ★`repairProgressHook`·`repairReplyGuardHook` 과 일부러 다르다.★ 그 둘은 "이미 배선된 멤버만"
+ *  손본다 — 안 깔린 멤버에게 새로 깔지 않는 게 실멤버 보호다. ★owner-gate 는 목적이 반대다★:
+ *  ★없는 곳에 넣는 것★ 이 이 훅의 존재 이유다(공개 설치·기존 팀에 게이트가 아예 없었다).
+ *  "이미 있는 멤버만" 으로 두면 ★아무도 없으니 전원 건너뛰어 효과가 0★ 이 된다(실측으로 확인).
+ *
+ *  ★그래서 이름이 repair 가 아니라 ensure 다.★ 다음 사람이 세 함수를 같은 것으로 읽지 않게.
+ *  멱등이다 — `installOwnerGateHook` 이 있으면 교체, 없으면 추가한다.
+ */
+export function ensureOwnerGateHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
   assertId(id);
-  const settingsPath = `${roots?.membersRoot ?? MEMBERS_ROOT}/${id}/.claude/settings.json`;
-  try {
-    if (!existsSync(settingsPath)) return;
-    if (!readFileSync(settingsPath, "utf-8").includes("telegram-owner-gate.py")) return;
-  } catch { return; }
   installOwnerGateHook(id, roots);
 }
 
