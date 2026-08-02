@@ -1,6 +1,7 @@
 // Settings — 팀 셀프 커스터마이즈 탭 (심플 코어: 팀 정체성 + 팀원).
 // API(전부 /team/api 하위): GET/PUT /settings · GET/PUT /mission · GET/POST /members · DELETE /members/:id.
 // 봇·tmux·slack 실제 연결은 b3os-team-member-lifecycle 스킬로 별도 — 여기선 레지스트리 엔트리만.
+import { stoppedIds } from "./stopAllSummary";
 import { apiBase } from "../ws";
 import { store } from "../store";
 import { pick } from "../i18n";
@@ -987,9 +988,10 @@ function wire(): void {
     if (regenAllMsg) { regenAllMsg.textContent = `🔴 ${pick("비상 정지 중…", "Emergency stopping…")}`; regenAllMsg.className = "text-[11px] text-txt-red flex-1 leading-snug"; }
     try {
       const r = await fetch(api("/members/stop-all"), { method: "POST", headers: { "content-type": "application/json" } });
-      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; results?: Array<{ id: string; ok?: boolean }>; error?: string };
+      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; results?: Array<{ id: string; ok: boolean; detail: string; kept?: boolean }>; error?: string };
       if (j.ok && j.results) {
-        const stopped = j.results.filter((x) => x.ok && x.id !== "bill").map((x) => x.id);
+        // ★이름으로 거르지 않는다★ — 서버가 표시한 `kept` 를 읽는다(누가 코디인지는 명부가 정한다).
+        const stopped = stoppedIds(j.results);
         if (regenAllMsg) { regenAllMsg.textContent = `🔴 ${pick("정지됨", "Stopped")} ${stopped.length}${pick("명", " member(s)")} (${stopped.join(", ")}) · ${pick("코디네이터 유지", "coordinator kept")}`; regenAllMsg.className = "text-[11px] text-txt-red flex-1 leading-snug"; }
       } else if (regenAllMsg) { regenAllMsg.textContent = `${pick("실패:", "Failed:")} ${j.error || pick("오류", "error")}`; regenAllMsg.className = "text-[11px] text-txt-red flex-1 leading-snug"; }
     } catch (e) {

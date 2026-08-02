@@ -1,3 +1,4 @@
+import { threadRecipient } from "./stopAllSummary";
 import { store, type Message } from "../store";
 import { sendMessage } from "../ws";
 import { formatDistanceToNow } from "date-fns";
@@ -82,8 +83,15 @@ export function renderThreadView(root: HTMLElement): void {
         if (!input || !input.value.trim()) return;
         const body = input.value.trim();
         input.value = "";
-        const recipients = (t?.participants ?? []).filter((p) => p !== "user");
-        const to = recipients[0] ?? "bill";
+        const to = threadRecipient(t?.participants);
+        if (!to) {
+          // ★받는 사람을 못 정하면 안 보낸다.★ 예전에는 특정 팀원 id 로 폴백했는데,
+          //   그런 이름이 없는 설치에서는 ★존재하지 않는 상대로 발신★ 된다.
+          await showAlert(pick("받는 사람을 정할 수 없습니다 — 이 대화에 팀원이 없습니다.",
+                               "No recipient — this thread has no member participant."));
+          input.value = body;
+          return;
+        }
         const result = await sendMessage({
           from_agent_id: "user",
           to_agent_id: to,
