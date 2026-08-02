@@ -54,6 +54,16 @@ export function loadRegistry(path: string): AgentRecord[] {
     state_db_path: a.state_db_path ?? null,
     hermes_alias: a.hermes_alias ?? null,
     gateway_service: a.gateway_service ?? null,
+    // ★b3os_native 두뇌 선택 — 이 두 줄이 없으면 팀원이 무조건 Claude 로 돈다.★
+    // loadRegistry 는 필드 화이트리스트로 레코드를 ★재구성★ 하므로, 목록에 없는 필드는
+    // agents.json 에 써도 로드에서 조용히 사라진다. 그러면 adapter 의 pickModel 이 둘 다
+    // undefined 를 받아 기본값(anthropic / claude-sonnet-4-6)으로 떨어진다 — 즉 "설정했는데
+    // 안 먹는다". runner 쪽 화이트리스트(OPENAI_COMPAT_PROVIDERS)는 이미 openai_compatible·
+    // ollama 를 받고 있었으니, 막고 있던 건 그 화이트리스트가 아니라 ★이 매핑★ 이었다.
+    // 빈 문자열·공백은 null 로 접는다(runtime_cwd 선례) — pickModel 의 `||` 기본값 폴백이
+    // 공백 문자열은 참으로 보기 때문에, 여기서 접지 않으면 provider="  " 로 호출이 나간다.
+    model_provider: typeof a.model_provider === "string" && a.model_provider.trim() ? String(a.model_provider) : null,
+    model_id: typeof a.model_id === "string" && a.model_id.trim() ? String(a.model_id) : null,
     codex_sandbox: isAgentCodexSandbox(a.codex_sandbox) ? a.codex_sandbox : null,
     codex_network_access: typeof a.codex_network_access === "boolean" ? a.codex_network_access : null,
     };
