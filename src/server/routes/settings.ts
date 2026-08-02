@@ -1395,7 +1395,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ok: res.ok, bot_username: res.bot_username, error: res.error, detail: res.detail, warning: res.warning }, status);
   });
 
-  // 전체 재시작 (대시보드 — Settings에서 한 번에). 빌·정지팀원 제외, 빌 맨 마지막.
+  // 전체 재시작 (대시보드 — Settings에서 한 번에). ★코디네이터★·정지팀원 제외, ★코디네이터 맨 마지막★.
   app.post("/members/restart-all", async (c) => {
     let list: any[] = [];
     try { list = readAgents(); } catch (e) { return c.json({ ok: false, error: "read_failed", detail: e instanceof Error ? e.message : String(e) }, 500); }
@@ -1405,7 +1405,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ok: true, results });
   });
 
-  // 비상 전체 정지 (대시보드 빨강 버튼·더블컨펌). 빌 제외 전원 정지.
+  // 비상 전체 정지 (대시보드 빨강 버튼·더블컨펌). ★코디네이터★ 제외 전원 정지.
   app.post("/members/stop-all", async (c) => {
     let list: any[] = [];
     try { list = readAgents(); } catch (e) { return c.json({ ok: false, error: "read_failed", detail: e instanceof Error ? e.message : String(e) }, 500); }
