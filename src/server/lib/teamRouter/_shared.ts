@@ -28,6 +28,20 @@ export interface RouteDecision {
 export const OLLAMA_URL = process.env.TEAM_ROUTER_OLLAMA_URL ?? "http://127.0.0.1:11434/api/chat";
 export const ROUTER_MODEL = process.env.TEAM_ROUTER_MODEL ?? "exaone3.5:2.4b";
 
+/**
+ * owner-inference LLM 호출 상한(ms). 라우터가 원격 박스의 Ollama 를 볼 수 있어 환경마다 적정값이
+ * 다르다 — URL·모델과 같은 자리에서 조절한다.
+ *
+ * 기본 8000: 원격(DGX Spark, exaone3.5:7.8b) 실측 응답이 1.2~3.4초로 흩어져, 기존 3000 이면 매
+ * 회차 1건이 3.00초에 잘려 regex 폴백으로 샜다. 폴백 누수만 막는 값이고 판정 정확도는 안 오른다.
+ *
+ * ★잘못 쓴 값은 무시하고 기본값을 쓴다★ — 0 이 들어가면 라우터 LLM 이 통째로 죽는데(전부 regex
+ * 폴백) 에러가 안 나서 아무도 모른다.
+ */
+const parsedTimeout = Number(process.env.TEAM_ROUTER_TIMEOUT_MS);
+export const ROUTER_TIMEOUT_MS =
+  Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 8_000;
+
 export type RouteIntent = "discussion" | "execution" | "other";
 
 export interface LlmRouteDecision extends RouteDecision {

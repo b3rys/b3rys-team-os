@@ -3,6 +3,7 @@ import {
   type LlmRouteDecision,
   OLLAMA_URL,
   ROUTER_MODEL,
+  ROUTER_TIMEOUT_MS,
   buildRosterText,
   classifyIntent,
 } from "./_shared";
@@ -53,7 +54,7 @@ export async function routeDefaultIntakeLLM(
   // 오너가 애매/무-확신일 때의 default 담당 = ambiguous_owner(GD 2026-07-10: 빌). 미설정 시 coordinator 폴백.
   const ambiguousOwner = ambiguousOwnerId(agents);
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 3_000);
+  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? ROUTER_TIMEOUT_MS);
   try {
     const res = await fetch(OLLAMA_URL, {
       method: "POST",
