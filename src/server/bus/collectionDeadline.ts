@@ -34,9 +34,9 @@ import { insertMessage } from "../db/inboxQueries";
 import { appendAudit } from "../db/queries";
 import { appendAuditFile } from "../lib/auditFile";
 
-/** 위임 후 이 시간이 지나도 종합이 안 나오면 collector 를 깨운다. */
-export const COLLECTION_DEADLINE_MIN = Number(process.env.COLLECTION_DEADLINE_MIN ?? 5);
-/** ★이보다 오래된 건 깨우지 않는다★ — 5분 마감인데 90분 뒤 재촉은 도움이 아니라 소음이다. */
+/** 위임 후 이 시간이 지나도 종합이 안 나오면 collector 를 깨운다. 팀 과제 기본 단위가 10분이라 재촉도 맞춘다. */
+export const COLLECTION_DEADLINE_MIN = Number(process.env.COLLECTION_DEADLINE_MIN ?? 10);
+/** ★이보다 오래된 건 깨우지 않는다★ — 10분 마감인데 90분 뒤 재촉은 도움이 아니라 소음이다. */
 export const MAX_DEADLINE_AGE_MIN = Number(process.env.MAX_DEADLINE_AGE_MIN ?? 60);
 
 interface StalledCollection {
@@ -218,9 +218,9 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
       const minsSince = (db.prepare(`SELECT CAST((julianday('now') - julianday(?)) * 1440 AS INTEGER) AS m`)
         .get(lastAsk) as { m: number }).m;
       if (minsSince < COLLECTION_DEADLINE_MIN) continue;
-      // ★너무 늦은 건 깨우지 않는다★ — 마감이 5분인데 ★90분 뒤에★ 재촉하는 건 도움이 아니라 소음이다.
+      // ★너무 늦은 건 깨우지 않는다★ — 마감이 10분인데 ★90분 뒤에★ 재촉하는 건 도움이 아니라 소음이다.
       //   윈도 경계에서 시야가 훼손되는 구간이 바로 여기(윈도 끝자락)라서, 그 구간을 아예 안 쓴다.
-      //   (정상 경로는 5분에 잡힌다. 여기까지 온 건 감지가 뭔가 놓친 것이다 → ★조용히 넘긴다★)
+      //   (정상 경로는 10분에 잡힌다. 여기까지 온 건 감지가 뭔가 놓친 것이다 → ★조용히 넘긴다★)
       if (minsSince > MAX_DEADLINE_AGE_MIN) continue;
 
       // 마지막 질문 이후 보고했나 — 판단은 hasReportedSince() 한 곳에서만 한다(아래 정의).
