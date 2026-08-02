@@ -840,11 +840,11 @@ const CTX_MSG_CHARS = Number(process.env.CTX_MSG_CHARS ?? 800);
 const CTX_TOTAL_CHARS = Number(process.env.CTX_TOTAL_CHARS ?? 8000);
 // ★단톡방(그룹 스레드) 전용 상한★ (GD 2026-07-16): 그룹방은 스레드 하나에 전 과제가 섞여, 12건·24h 를
 //   그대로 주면 판교·증시·민재 인사가 통째 붙어 팀원이 ★옛 일을 지금 일로 착각★한다(Ames·codex 실측).
-//   → 그룹방만 좁힌다: 자기것만 · 6시간 · 6건. (수집·작업 전용 스레드는 tg- 가 아니라 그대로 full)
+//   → 그룹방만 좁힌다: 자기것만 · 6시간 · 5건. (수집·작업 전용 스레드는 tg- 가 아니라 그대로 full)
 const CTX_HOURS_GROUP = Number(process.env.CTX_HOURS_GROUP ?? 6);
 // ★참고용 주입은 '자기것만' · 5건 (그룹·버스 통일, 분기 없음)★ (GD 2026-07-16 "전부 5개로 해. 분기 타지 말고").
 //   from=나 OR to=나만 남기고 최근 5건. 남의 딴-대화(예: codex→demis 리뷰 팬아웃)를 걷어낸다.
-const CTX_MSGS_OWN = Number(process.env.CTX_MSGS_OWN ?? 6);
+const CTX_MSGS_OWN = Number(process.env.CTX_MSGS_OWN ?? 5);
 
 export function buildTeamContext(db: Database, threadId: string, agentId?: string): string {
   try {

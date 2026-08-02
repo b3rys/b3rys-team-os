@@ -56,7 +56,7 @@ let GROUP_ID = getCaptureGroupId() ?? "";
 // injection 킬스위치 — 이제 *라이브 읽기*(isRouterEnabled(deps.db)). UI 토글 즉시 반영, 재시작 불요. (P0)
 // OFF면 결정 로깅만(shadow). store(setting router_enabled) 우선, 없으면 env(ROUTER_ENABLED) fallback.
 // 단톡방 인입 문맥 예산 — 팀버스 경로(CTX_*)와 값이 다르다. ★한 건 200자는 기존 동작이라 유지한다.★
-const CAPTURE_CTX_MSGS = 10;
+const CAPTURE_CTX_MSGS = 5;
 const CAPTURE_CTX_HOURS = 6;
 const CAPTURE_CTX_MSG_CHARS = 200;
 const OFFSET_PATH = process.env.CAPTURE_OFFSET_PATH ?? `${process.cwd()}/logs/telegram-capture-offset.txt`;
