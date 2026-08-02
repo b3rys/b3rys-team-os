@@ -227,7 +227,10 @@ export function installOwnerGateHook(id: string, roots?: { membersRoot?: string;
     const hooks = (settings.hooks && typeof settings.hooks === "object" ? settings.hooks : {}) as Record<string, unknown>;
     const arr = Array.isArray(hooks.UserPromptSubmit) ? (hooks.UserPromptSubmit as unknown[]) : [];
     // ★있으면 skip 이 아니라 다르면 교체★ — 커맨드가 바뀌어도 기존 멤버가 옛것을 들고 있으면 안 된다.
-    const command = `B3OS_ROOT="${repoRoot}" python3 "${hookDst}"`;
+    // ★OWNER_GATE_SELF 를 반드시 싣는다★ — 없으면 훅이 자기 id 를 못 구하고,
+    //   그때 남의 id 로 폴백하면 ★게이트가 꺼지는 게 아니라 반대로 돈다★(lui 교차검증).
+    //   런처는 id 를 이미 안다. 추측하게 두지 않는다.
+    const command = `B3OS_ROOT="${repoRoot}" OWNER_GATE_SELF="${id}" python3 "${hookDst}"`;
     const entry = { hooks: [{ type: "command", command }] };
     const idx = arr.findIndex((e) => JSON.stringify(e).includes("telegram-owner-gate.py"));
     if (idx < 0) arr.push(entry);

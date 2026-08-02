@@ -154,6 +154,8 @@ describe("owner-gate 훅 설치·수리", () => {
     expect(cmds[0]).toContain("telegram-owner-gate.py");
     // ★B3OS_ROOT 가 실려야 한다★ — 없으면 깔려도 게이트가 무력화된다.
     expect(cmds[0]).toContain(`B3OS_ROOT="${repoRoot}"`);
+    // ★자기 id 도 실려야 한다★ — 없으면 훅이 추측하고, 틀리면 게이트가 반대로 돈다.
+    expect(cmds[0]).toContain(`OWNER_GATE_SELF="${ID}"`);
     expect(readFileSync(hookPath, "utf-8")).toBe("# NEW\n");
   });
 
