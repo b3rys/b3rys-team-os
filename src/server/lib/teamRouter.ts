@@ -8,7 +8,7 @@
  *
  * Module map (Devon guidance: keep mention regexes together, isolate legacy):
  *   _shared       — RouterContext, RouteDecision, RouteIntent, LlmRouteDecision,
- *                   OLLAMA_URL/ROUTER_MODEL, buildRosterText, classifyIntent
+ *                   ROUTER_LLM_URL/ROUTER_MODEL/callRouterLlmJson, buildRosterText, classifyIntent
  *                   (default_step owner = coordinator capability via lib/capabilities.coordinatorId)
  *   mention       — aliasesFor, hasTelegramMention, hasRestrictedMention, escapeRegex,
  *                   stripExampleRegions, detectExplicitTargets, detectAddressedNamesLoose

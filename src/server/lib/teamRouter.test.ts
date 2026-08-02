@@ -707,13 +707,32 @@ describe("라우터 LLM 와이어 포맷 (OpenAI 호환 /v1/chat/completions)", 
     await expect(callRouterLlmJson("sys", "user")).rejects.toThrow();
   });
 
-  test("content 가 아예 없으면 빈 객체", async () => {
+  // ★빈 응답의 세 가지 모양을 모두 throw 로 통일한다.★ 예전엔 content:"" 만 (JSON.parse 실패로 우연히)
+  // throw 되고 content:null·choices:[] 는 {} 로 삼켜져, 같은 실패인데 via 가 regex_fallback / llm 으로
+  // 갈렸다. reasoning 계열 모델은 content:null + reasoning_content 를 실제로 낸다 — 그게 "LLM 이
+  // 판정했다" 로 기록되면 감사 로그가 거짓말을 한다.
+  test.each([
+    ["content 없음", { choices: [{ message: {} }] }],
+    ["content:null (reasoning 모델)", { choices: [{ message: { content: null } }] }],
+    ["choices 비어있음", { choices: [] }],
+    ["choices 없음", {}],
+  ])("빈 응답은 throw 한다 — %s", async (_label, payload) => {
     globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ choices: [{ message: {} }] }), {
+      new Response(JSON.stringify(payload), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })) as unknown as typeof fetch;
-    expect(await callRouterLlmJson("sys", "user")).toEqual({});
+    await expect(callRouterLlmJson("sys", "user")).rejects.toThrow("empty response");
+  });
+
+  // 모델명 오설정이 가장 흔한 실패다. 상태코드만 남기면 원인을 영영 못 본다.
+  test("비 2xx 는 응답 본문을 에러에 담는다", async () => {
+    globalThis.fetch = (async () =>
+      new Response('{"error":{"message":"The model does not exist."}}', {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      })) as unknown as typeof fetch;
+    await expect(callRouterLlmJson("sys", "user")).rejects.toThrow("does not exist");
   });
 
   test("타임아웃이면 abort 되어 throw 한다", async () => {

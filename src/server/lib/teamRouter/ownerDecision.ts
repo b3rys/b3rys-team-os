@@ -131,14 +131,15 @@ function validActiveAssignees(context: RouterContext, agents: AgentRecord[]): st
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LLM router (EXAONE via Ollama) — PRIMARY engine per GD's "all-LLM, no regex"
+// LLM router (OpenAI 호환 엔드포인트) — PRIMARY engine per GD's "all-LLM, no regex"
 // decision (2026-05-23). The regex routeTeamMessage above is kept as a fast,
-// deterministic FALLBACK (used when Ollama is unavailable) + its tests document
+// deterministic FALLBACK (라우터 LLM 호출 실패 시) + its tests document
 // the expected behavior. The LLM engine additionally classifies discussion vs
 // execution intent (논의=multi / 구현=single owner) — GD pattern.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// NOTE (2026-06-20): routerSystemPrompt 는 데이터화(routing_domains) 시도했으나 EXAONE(2.4b, temp=0)이
+// NOTE (2026-06-20, 모델 전제 갱신 2026-08-02): routerSystemPrompt 는 데이터화(routing_domains) 시도했으나
+// 당시 기본 모델 EXAONE(2.4b, temp=0)이
 // 프롬프트 텍스트/순서/예시에 민감해 기존 green 테스트 3개(explicit name·finance·sticky)를 깨뜨려 behavior
 // 보존 실패 → 원문 유지. routeTeamMessageLLM 는 라이브 미연결(standalone) 함수라 영향 범위도 작다. 이 프롬프트
 // 속 실명은 public export pipeline 의 ownerDecision 치환 + SKIN 단계가 처리. (LIVE 경로인 defaultIntakePrompt 는
@@ -185,7 +186,7 @@ interface RawLlm {
 }
 
 /**
- * LLM 라우팅 (EXAONE/Ollama). Ollama 실패 시 regex routeTeamMessage 로 폴백.
+ * LLM 라우팅 (OpenAI 호환 엔드포인트). 호출 실패 시 regex routeTeamMessage 로 폴백.
  * standalone — 아직 라이브 메시지 흐름에 연결 안 됨 (GD 리뷰 후 통합).
  */
 export async function routeTeamMessageLLM(
@@ -204,7 +205,7 @@ export async function routeTeamMessageLLM(
     });
     const parsed = (await callRouterLlmJson(routerSystemPrompt(agents), user, {
       model: opts.model,
-      timeoutMs: opts.timeoutMs ?? 15_000,
+      timeoutMs: opts.timeoutMs,
     })) as RawLlm;
 
     const coordinator = coordinatorId(agents);
@@ -231,8 +232,9 @@ export async function routeTeamMessageLLM(
       domain: parsed.domain ?? "none",
       via: "llm",
     };
-  } catch {
-    // Ollama 불가 → 결정론적 regex 폴백 (Codex 라우터).
+  } catch (e) {
+    console.error("[router] LLM 라우팅 실패 → regex 폴백:", (e as Error).message);
+    // 라우터 LLM 불가 → 결정론적 regex 폴백.
     const d = routeTeamMessage(text, agents, context);
     return { ...d, intent: "other", domain: "none", via: "regex_fallback" };
   }
@@ -240,7 +242,8 @@ export async function routeTeamMessageLLM(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HYBRID 라우터 (권장) — 결정론 신호는 regex 로 100% 확실하게, 모호한 도메인만 LLM.
-// 이유: 순수 small-LLM(EXAONE 2.4b) 단독은 ~77% + run-to-run 변동(명시멘션·주제전환을
+// 이유(2026-05 당시 기본 모델 기준 — 80B 로 바뀐 뒤 재측정 기록 없음): 순수 small-LLM(EXAONE 2.4b)
+// 단독은 ~77% + run-to-run 변동(명시멘션·주제전환을
 // 가끔 놓침). 명시 @멘션/이름/주제전환 마커는 regex 가 확실하므로 그건 regex 로 고정하고,
 // "이름·도메인 불명확" 인 경우에만 LLM 으로 도메인 분류. → 신뢰도↑ + LLM 호출↓(빠름).
 // (GD 의 "all-LLM" 결정과의 트레이드오프: 신뢰도 위해 명확신호는 결정론. GD 리뷰 후 택1.)

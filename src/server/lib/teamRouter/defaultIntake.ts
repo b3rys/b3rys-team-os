@@ -55,7 +55,7 @@ export async function routeDefaultIntakeLLM(
     const parsed = (await callRouterLlmJson(
       defaultIntakePrompt(agents),
       JSON.stringify({ new_message: text }),
-      { model: opts.model, timeoutMs: opts.timeoutMs ?? 8_000 },
+      { model: opts.model, timeoutMs: opts.timeoutMs },
     )) as RawDefaultIntake;
     const suggested = (parsed.suggested ?? []).filter((id) => validIds.has(id));
     const responder = parsed.responder && validIds.has(parsed.responder) ? parsed.responder : null;
@@ -87,7 +87,10 @@ export async function routeDefaultIntakeLLM(
       outcome: "route",
       suggested,
     };
-  } catch {
+  } catch (e) {
+    // ★조용히 삼키지 않는다★ — 여기가 무음이면 모델명 오설정·엔드포인트 다운이 몇 주씩 안 보인다.
+    //   (실제로 라우터 LLM 경로는 오늘까지 로그가 한 줄도 없었다.)
+    console.error("[router] owner-inference 실패 → regex 폴백:", (e as Error).message);
     return {
       targetAgentIds: ambiguousOwner ? [ambiguousOwner] : [],
       reason: "default_step",

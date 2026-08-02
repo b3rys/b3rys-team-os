@@ -434,7 +434,9 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
   //   keep_alive=-1 을 걸던 블록. 라우터 LLM 이 vLLM(OpenAI 호환)으로 바뀌면서 두 가지 이유로 뺀다:
   //   ① keep_alive 는 Ollama 전용 필드고 /v1/chat/completions 에는 없다 — 보내봐야 무의미하다.
   //   ② vLLM 은 기동 시 가중치를 올려 두고 계속 물고 있으므로 데워 둘 cold-start 자체가 없다.
-  //   다시 Ollama 로 돌아가면 이 블록도 같이 되살려야 한다.
+  //   ★단, env 한 줄로도 Ollama 로 되돌아갈 수 있다★ — TEAM_ROUTER_LLM_URL 을 Ollama 의 /v1 경로로
+  //   두면 코드 변경 없이 그 상태가 되고, 그때는 warmup 이 없어 첫 판정이 콜드스타트를 문다.
+  //   그 조합을 쓸 거면 Ollama 쪽 OLLAMA_KEEP_ALIVE 로 잡거나 이 블록을 되살려라(.env.example 에도 적어뒀다).
   let offset = 0;
   let stopped = false;
   // ★in-flight getUpdates 롱폴(timeout=25s)을 stop() 에서 즉시 끊기 위한 abort★ — 이게 없으면 restartCapture 시

@@ -1,5 +1,8 @@
-// LLM 라우터(EXAONE/Ollama) 통합 테스트 — 논의(multi) vs 구현(single) intent + GD 시나리오.
-// Ollama 가 떠 있어야 함. (없으면 regex 폴백 → intent='other' 라 intent 단정은 skip 처리)
+// LLM 라우터 통합 테스트 — 논의(multi) vs 구현(single) intent + GD 시나리오.
+// ★실행 조건: TEAM_ROUTER_LLM_URL(기본 http://127.0.0.1:8000/v1/chat/completions)에 OpenAI 호환
+//   서버가 떠 있어야 하고, TEAM_ROUTER_LLM_MODEL 이 그 서버의 서빙 모델명과 같아야 한다.★
+//   (Ollama 를 쓸 거면 네이티브 /api/chat 이 아니라 /v1 경로를 가리켜야 한다.)
+//   없으면 regex 폴백 → intent='other' 라 intent 단정은 skip 처리
 import { describe, expect, test } from "bun:test";
 import type { AgentRecord } from "../types";
 import { routeTeamMessageHybrid, routeTeamMessageLLM } from "./teamRouter";
