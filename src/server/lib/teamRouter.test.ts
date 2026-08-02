@@ -8,7 +8,7 @@ const agents: AgentRecord[] = [
     display_name: "Bill",
     nicknames: ["bill", "빌"],
     role: "Infra",
-    capabilities: ["full_context", "recovery"],
+    capabilities: ["full_context"],
     runtime: "claude_channel",
     status_provider: "claude_tmux",
     tmux_session: "claude-bill",

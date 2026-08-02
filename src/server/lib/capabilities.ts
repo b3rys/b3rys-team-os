@@ -15,7 +15,8 @@ import type { AgentRecord } from "../types";
  * - restricted_mention : bare alias 무시, 명시 @멘션에만 응답
  * - native_routing     : openclaw 네이티브 self-poll 경로
  * - full_context       : 팀 전체 컨텍스트 수신
- * - recovery           : stop_all 제외 + 맨 마지막 재시작(복구 코디)
+ *   (coordinator 는 ★stop_all 제외 + 맨 마지막 재시작★ 도 겸한다 — 예전 `recovery` 능력을 흡수했다.
+ *    둘로 나눠서 얻는 게 없었고, 나뉜 동안 ★새 설치에는 recovery 보유자가 없어 코디가 보호받지 못했다.★)
  * - non_interactive    : cron 비대화(persona 재생성 등 스킵)
  * - learning_loop_pm   : 주간 learning-loop PM 및 금요일 10:00 보고 주체
  */
@@ -45,6 +46,9 @@ function warnOnce(msg: string): void {
  *  - 2개 이상    → 첫 매치 + warnOnce(구성 경고).
  *  - 0개         → 첫 에이전트로 fallback + warnOnce(절대 drop 하지 않음). 에이전트도 없으면 undefined.
  */
+/** 능력 이름 정본. ★문자열을 여기저기 적지 않는다★ — 오타가 조용히 게이트를 끈다. */
+export const COORDINATOR_CAPABILITY = "coordinator";
+
 export function coordinatorId(agents: AgentRecord[]): string | undefined {
   const [first, ...rest] = agentsWith(agents, "coordinator");
   if (first && rest.length === 0) return first.id; // 정확히 1개 — 기존 동작 보존

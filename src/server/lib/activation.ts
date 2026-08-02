@@ -10,6 +10,7 @@
 // 보안: 런타임 활성화 = self-mod. 서버가 실행 = GD가 /approve executor(APPROVAL_EXECUTION_ENABLED=1)로
 // 인가한 권한. 이 함수는 그 권한 위에서 동작한다(인증된 대시보드/approve 트리거에서만 호출).
 
+import { COORDINATOR_CAPABILITY } from "./capabilities";
 import type { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, writeFileSync, chmodSync, readFileSync, renameSync, rmSync, copyFileSync, symlinkSync } from "node:fs";
 import { dirname } from "node:path";
@@ -197,7 +198,7 @@ function offMemberActivationLimitReached(agents: any[], id: string): boolean {
     && activeOfficialMemberCount(agents, isAgentOff) >= MAX_OFFICIAL_TEAM_MEMBERS;
 }
 
-const COORDINATOR_CAPABILITY = "coordinator";
+
 
 export interface EssentialClassification {
   ok: boolean;
