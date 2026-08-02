@@ -961,7 +961,7 @@ function wire(): void {
   });
   refreshRollback(); // 페이지 로드 시: 6시간 내면 버튼 노출 + 카운트다운 시작
 
-  // 🔄 전체 재시작 — 빌·정지팀원 제외 전원 재시작(빌 맨 마지막).
+  // 🔄 전체 재시작 — ★코디네이터★·정지팀원 제외 전원 재시작(★코디네이터 맨 마지막★).
   const restartAll = _root.querySelector<HTMLButtonElement>("#restart-all");
   restartAll?.addEventListener("click", async () => {
     if (!await showConfirm(pick("정지 팀원 제외 전원을 재시작할까요?\n새 페르소나/상태를 로드합니다. openclaw 게이트웨이는 ~1분 깜빡, 복구 코디네이터는 맨 마지막(이 대화 ~15s 깜빡 후 복귀).", "Restart everyone except stopped members?\nThey reload fresh persona/state. The openclaw gateway blinks ~1 min; the recovery coordinator is last (this chat blinks ~15s, then returns)."))) return;
@@ -980,7 +980,7 @@ function wire(): void {
     _busy();
   });
 
-  // 🔴 전체 정지 (비상) — 빌 제외 전원 정지. 더블컨펌(강한 경고).
+  // 🔴 전체 정지 (비상) — ★코디네이터★ 제외 전원 정지. 더블컨펌(강한 경고).
   const stopAll = _root.querySelector<HTMLButtonElement>("#stop-all");
   stopAll?.addEventListener("click", async () => {
     if (!await showConfirm({ message: pick("🔴 비상 정지\n\n복구 코디네이터를 제외한 모든 팀원을 즉시 정지합니다.\n폭주·이상 상황의 서킷브레이커입니다. 정말 전원 정지할까요?\n\n(다시 켜려면 각 팀원 🟢 기동 또는 /onoff)", "🔴 Emergency stop\n\nImmediately stops every member except the recovery coordinator.\nThis is the circuit breaker for runaway/abnormal situations. Really stop everyone?\n\n(To turn them back on, use each member's 🟢 Start or /onoff)"), danger: true })) return;

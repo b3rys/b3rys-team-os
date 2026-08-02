@@ -838,7 +838,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
       return;
     }
 
-    // 전체 재시작 콜백 (rsall) — 빌·정지 팀원 제외, openclaw 게이트웨이 1회.
+    // 전체 재시작 콜백 (rsall) — ★코디네이터★·정지 팀원 제외, openclaw 게이트웨이 1회.
     if (data === "rsall") {
       if (!isAuthorized()) { await tg("answerCallbackQuery", { callback_query_id: cb.id, text: pick(locale, "권한 없음", "Not authorized"), show_alert: true }); appendAuditFile("capture", "callback_denied", data, { from: fromId }); return; }
       await tg("answerCallbackQuery", { callback_query_id: cb.id, text: pick(locale, "전체 재시작 중…", "Restarting all…") });
