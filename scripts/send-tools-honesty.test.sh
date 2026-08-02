@@ -269,6 +269,29 @@ out="$(PATH="$EXPBIN:$PATH" "$SEND" --to lisa --body-file "$FIX" --confirm 6 2>&
 grep -q "미배달" <<<"$out" && pass "미배달이라고 말한다" || fail "미배달 표현 없음: $(head -2 <<<"$out")"
 
 
+echo "── A2-7: broadcast 의 ★수신행 0★ 을 실패로 내지 않는다 ──"
+# 방 발언 전달이 멘션 기준으로 바뀌면서(#221) 멘션 없는 방 글은 수신행이 0 이 된다.
+#   그런데 ★방 게시 자체는 성공한다.★ 실측: 방 글이 정상 게시(팀장이 인용해 답함)됐는데
+#   이 분기가 exit 1 을 내서, 받은 쪽이 미배달로 읽고 원인 조사부터 했다.
+EMPBIN="$TMP/embin"; mkdir -p "$EMPBIN"
+cat > "$EMPBIN/curl" <<'STUB'
+#!/usr/bin/env bash
+for a in "$@"; do [ "$a" = "-X" ] && { printf '{"ok":true,"message":{"id":"testid","thread_id":"t","hop_count":0}}'; exit 0; }; done
+printf '{"message":{"id":"testid"},"recipients":[]}'
+STUB
+chmod +x "$EMPBIN/curl"
+
+out="$(PATH="$EMPBIN:$PATH" "$SEND" --to broadcast --body-file "$FIX" --confirm 6 2>&1)"; rc=$?
+[ $rc -eq 0 ] && pass "broadcast + 수신행 0 → 성공으로 끝낸다 (exit 0)" \
+  || fail "broadcast 인데 실패로 냈다 (exit $rc): $(head -2 <<<"$out")"
+grep -q "0 이 정상" <<<"$out" && pass "왜 0 인지 설명한다" || fail "설명 없음: $(head -2 <<<"$out")"
+grep -q "registry 를 확인" <<<"$out" && fail "★미배달 문구가 그대로 나온다★" || pass "미배달 문구를 안 쓴다"
+
+# ★directed 는 그대로 실패여야 한다★ — 여기까지 풀면 진짜 사고를 놓친다.
+out2="$(PATH="$EMPBIN:$PATH" "$SEND" --to lisa --body-file "$FIX" --confirm 6 2>&1)"; rc2=$?
+[ $rc2 -ne 0 ] && pass "directed + 수신행 0 → 여전히 실패 (exit $rc2)" \
+  || fail "★directed 의 수신행 0 까지 통과시켰다 (exit $rc2)★"
+
 echo "── A2-6: 타임아웃에도 ★현재 상태★ 를 보여준다 (진행 중 vs 막힘 구분) ──"
 # 상태 없이 "판정이 안 났다" 만 내면 진행 중인지 막힌 건지 알 수 없다. 실측으로 그 문구가
 #   "정상 처리 중" 으로 오독돼 잘못된 보고가 나갔다.
