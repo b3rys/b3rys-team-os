@@ -101,12 +101,14 @@ export function writeClaudeBridgeFiles(id: string): ClaudeBridgePaths {
  *  1:1 텔레그램 DM 턴을 reply 없이 끝내려 하면 차단·재프롬프트(Claude send-drift 안전망, GD 2026-07-03).
  *  워크스페이스 스코프라 user 전역 ~/.claude·오너 Claude Code엔 영향 0. 기존 settings.json 있으면 Stop 배열에 병합(중복 방지).
  *  best-effort — 설치 실패해도 활성화는 막지 않는다. */
-export function installReplyGuardHook(id: string): void {
+export function installReplyGuardHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
   assertId(id);
-  const dotClaude = `${MEMBERS_ROOT}/${id}/.claude`;
+  const membersRoot = roots?.membersRoot ?? MEMBERS_ROOT;
+  const repoRoot = roots?.repoRoot ?? REPO_ROOT;
+  const dotClaude = `${membersRoot}/${id}/.claude`;
   const hookDst = `${dotClaude}/hooks/reply-guard.py`;
   const settingsPath = `${dotClaude}/settings.json`;
-  const src = `${REPO_ROOT}/src/server/runtimes/claude/reply-guard.py`;
+  const src = `${repoRoot}/src/server/runtimes/claude/reply-guard.py`;
   try {
     if (!existsSync(src)) return; // 소스 없으면 skip
     mkdirSync(`${dotClaude}/hooks`, { recursive: true });
@@ -192,6 +194,23 @@ export function repairProgressHook(id: string, roots?: { membersRoot?: string; r
     if (!readFileSync(settingsPath, "utf-8").includes("telegram-progress.py")) return; // 안 깔린 멤버는 건드리지 않는다
   } catch { return; }
   installProgressHook(id, roots);
+}
+
+/** 이미 깔려 있는 reply-guard 훅의 ★파일만★ 최신으로 맞춘다(새로 깔지는 않는다).
+ *
+ *  ★배선(settings.json)은 안 바뀌고 파일만 낡는다★ — 커맨드가 `python3 "<경로>"` 뿐이라
+ *  저장소에서 훅을 고쳐도 활성화를 다시 하지 않으면 멤버 폴더의 사본이 옛날 것으로 남는다.
+ *  실제로 그래서 ★단톡방 글을 1:1 로 오인해 막는 판★ 이 팀원 5명에게 그대로 남아 있었다.
+ *  `repairProgressHook` 과 같은 원칙: ★배선이 이미 있는 멤버만★ 대상(라이브 보호 유지), 멱등.
+ */
+export function repairReplyGuardHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
+  assertId(id);
+  const settingsPath = `${roots?.membersRoot ?? MEMBERS_ROOT}/${id}/.claude/settings.json`;
+  try {
+    if (!existsSync(settingsPath)) return;
+    if (!readFileSync(settingsPath, "utf-8").includes("reply-guard.py")) return; // 안 깔린 멤버는 건드리지 않는다
+  } catch { return; }
+  installReplyGuardHook(id, roots);
 }
 
 /** telegram-progress 훅 제거 — settings.json 의 PreToolUse/Stop/PreCompact 에서 progress 항목 제거 + 훅 파일 삭제. best-effort. */
