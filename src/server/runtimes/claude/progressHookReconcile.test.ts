@@ -11,7 +11,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installProgressHook, repairProgressHook, repairReplyGuardHook, installOwnerGateHook, repairOwnerGateHook } from "./launcher";
+import { installProgressHook, repairProgressHook, repairReplyGuardHook, installOwnerGateHook, ensureOwnerGateHook } from "./launcher";
 
 const ID = "testmember";
 let dirs: string[] = [];
@@ -179,9 +179,25 @@ describe("owner-gate 훅 설치·수리", () => {
     expect(cmds.filter((c) => c.includes("telegram-owner-gate.py"))).toHaveLength(1);
   });
 
-  test("★repair 는 이미 배선된 멤버만★ — 안 깔린 멤버엔 새로 깔지 않는다", () => {
+  test("★ensure 는 안 깔린 멤버에도 새로 깐다★ — 이게 progress·reply-guard 와 반대인 지점이다", () => {
+    // "이미 배선된 멤버만" 으로 두면 ★아무도 없으니 전원 건너뛰어 효과가 0★ 이 된다(실측으로 확인됨).
+    const { membersRoot, repoRoot, settingsPath, hookPath } = setupGate({ hooks: {} });
+    ensureOwnerGateHook(ID, { membersRoot, repoRoot });
+    expect(readFileSync(settingsPath, "utf-8")).toContain("telegram-owner-gate.py");
+    expect(readFileSync(hookPath, "utf-8")).toBe("# NEW\n");
+  });
+
+  test("★settings.json 이 아예 없는 멤버에도 깐다★", () => {
+    const { membersRoot, repoRoot, settingsPath } = setupGate();
+    ensureOwnerGateHook(ID, { membersRoot, repoRoot });
+    expect(readFileSync(settingsPath, "utf-8")).toContain("telegram-owner-gate.py");
+  });
+
+  test("안 깔린 상태에서 두 번 돌려도 1개만 (멱등)", () => {
     const { membersRoot, repoRoot, settingsPath } = setupGate({ hooks: {} });
-    repairOwnerGateHook(ID, { membersRoot, repoRoot });
-    expect(readFileSync(settingsPath, "utf-8")).not.toContain("telegram-owner-gate.py");
+    ensureOwnerGateHook(ID, { membersRoot, repoRoot });
+    ensureOwnerGateHook(ID, { membersRoot, repoRoot });
+    const s = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    expect((s.hooks.UserPromptSubmit as unknown[]).length).toBe(1);
   });
 });

@@ -15,7 +15,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
-import { installOwnerGateHook, repairOwnerGateHook } from "./launcher";
+import { installOwnerGateHook, ensureOwnerGateHook } from "./launcher";
 
 const execFileAsync = promisify(execFile);
 const HOOK = join(import.meta.dir, "../../../../hooks/telegram-owner-gate.py");
@@ -160,20 +160,25 @@ describe("축2·축4 — 설치가 기존 배선을 건드리는가 / 반복하�
     expect(s.permissions).toEqual({ allow: ["Bash"] });   // 훅 밖 키도 보존
   });
 
-  test("★부팅 갱신(repair) 10회도 멱등★", () => {
+  test("★부팅 갱신(ensure) 10회도 멱등★", () => {
     const m = member(LIVE_SHAPE);
     installOwnerGateHook("m1", { membersRoot: m.membersRoot, repoRoot: m.repoRoot });
-    for (let i = 0; i < 10; i++) repairOwnerGateHook("m1", { membersRoot: m.membersRoot, repoRoot: m.repoRoot });
+    for (let i = 0; i < 10; i++) ensureOwnerGateHook("m1", { membersRoot: m.membersRoot, repoRoot: m.repoRoot });
     const s = JSON.parse(readFileSync(m.settings, "utf-8"));
     expect(s.hooks.UserPromptSubmit.length).toBe(1);
     expect(s.hooks.Stop.length).toBe(2);
   });
 
-  test("안 깔린 멤버는 repair 가 새로 깔지 않는다", () => {
+  test("★안 깔린 멤버에도 부팅 때 깔린다★ — 기존 설치본이 이 PR 의 대상이다", () => {
+    // ★기대값을 뒤집었다.★ 예전에는 "새로 깔지 않는다" 를 고정하고 있었는데, 그러면
+    // ★배선이 하나도 없는 기존 설치본에서 전원 건너뛰어 효과가 0★ 이 된다(배포 후 5명 실측).
+    // owner-gate 는 progress·reply-guard 와 목적이 반대다 — ★없는 곳에 넣는 게 존재 이유★ 다.
     const m = member(LIVE_SHAPE);
-    repairOwnerGateHook("m1", { membersRoot: m.membersRoot, repoRoot: m.repoRoot });
+    ensureOwnerGateHook("m1", { membersRoot: m.membersRoot, repoRoot: m.repoRoot });
     const s = JSON.parse(readFileSync(m.settings, "utf-8"));
-    expect(s.hooks.UserPromptSubmit).toBeUndefined();
+    expect(s.hooks.UserPromptSubmit.length).toBe(1);
+    expect(s.hooks.Stop.length).toBe(2);          // 기존 배선은 그대로
+    expect(s.hooks.PreToolUse.length).toBe(1);
   });
 
   // ★현재 동작을 그대로 적어둔 것이다(고침 아님).★ 별건 카드로 뺀 항목 — 여기서 고치면 범위가 커진다.
