@@ -10,6 +10,24 @@ import { parseSqliteDate } from "../lib/datetime";
 
 type ColKey = "plan" | "doing" | "done";
 
+// ★Tasks 뷰 재진입 시 재조회용 훅★
+// renderTasksKanban 은 main.ts 에서 ★1회만★ 호출된다(tasksRendered 가드). 그 뒤 뷰 전환은
+// display 토글이라, 다른 화면(1:1 대화 등)에 있는 동안 팀원들이 카드를 바꿔도 Tasks 로
+// 돌아오면 ★첫 렌더 때의 데이터가 그대로 보였다★ — 새로고침(F5)해야 최신이 됐다(팀장 리포트).
+// 컴포넌트 상태(담당자 필터·펼친 카드·더보기 개수)는 클로저에 있으므로 재렌더로 갈아치우지
+// 않고, 인스턴스의 loadTasks 만 꺼내 쓴다 → 사용자가 보던 화면 상태를 유지한 채 데이터만 갱신.
+// (Settings 뷰의 refreshSettingsSlack/Members 와 같은 관례 — 매 store update 마다는 X, 전환 순간만.)
+let _reload: (() => Promise<void>) | null = null;
+
+/**
+ * Tasks 뷰로 다시 들어온 순간의 가벼운 재조회. 아직 한 번도 렌더되지 않았으면
+ * `renderTasksKanban` 이 초기 로드를 하므로 아무 것도 하지 않는다(호출은 안전).
+ */
+export async function refreshTasksKanban(): Promise<void> {
+  if (!_reload) return;
+  await _reload();
+}
+
 interface KanbanTask {
   id: string;
   title: string;
@@ -366,5 +384,8 @@ export function renderTasksKanban(root: HTMLElement): void {
   }
 
   render();
+  // 재진입 재조회용으로 이 인스턴스의 loadTasks 를 노출한다(위 _reload 주석 참조).
+  // owners 는 여기서 다시 안 받는다 — 로스터는 자주 안 바뀌고, 재진입마다 2번 왕복할 이유가 없다.
+  _reload = loadTasks;
   void loadOwners().then(loadTasks);
 }

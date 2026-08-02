@@ -11,7 +11,7 @@ import { renderAgentSetup } from "./components/AgentSetup";
 import { renderBusFlow } from "./components/BusFlow";
 import { renderTeamOs } from "./components/TeamOS";
 import { renderTopology } from "./components/TopologyView";
-import { renderTasksKanban } from "./components/TasksKanban";
+import { renderTasksKanban, refreshTasksKanban } from "./components/TasksKanban";
 import { renderJobsView } from "./components/JobsView";
 import { renderTeamSearch } from "./components/TeamSearch";
 import { renderReports } from "./components/Reports";
@@ -292,10 +292,15 @@ function renderMainContent(root: HTMLElement) {
   let auditRendered = false;
   let proposalsRendered = false;
 
-  let prevMainView: MainView | null = null; // 뷰 전환 감지용 — settings 재진입 때만 새로고침(매 store update마다 X)
+  let prevMainView: MainView | null = null; // 뷰 전환 감지용 — settings·tasks 재진입 때만 새로고침(매 store update마다 X)
   const update = () => {
     const { mainView } = store.getState();
     const enteredSettings = mainView === "settings" && prevMainView !== "settings"; // 다른 뷰→settings 전환 순간만 true
+    // ★어느 화면에서 오든★ Tasks 로 "들어오는 순간" 이면 true — 조건이 `prevMainView !== "tasks"`
+    // 이므로 1:1 대화·Jobs·Settings·모니터링 등 출처를 가리지 않는다(특정 뷰로 좁혀져 있지 않다).
+    // 첫 진입(prevMainView === null)도 true 지만, 그때는 아래에서 초기 렌더 분기가 잡으므로
+    // 재조회가 중복되지 않는다. Tasks 안에서 도는 store update 는 false(스크롤·입력 깜빡임 방지).
+    const enteredTasks = mainView === "tasks" && prevMainView !== "tasks";
     prevMainView = mainView;
     if (!logEl) {
       logEl = document.createElement("div");
@@ -423,9 +428,9 @@ function renderMainContent(root: HTMLElement) {
     } else if (mainView === "topology" && !topoRendered) {
       renderTopology(topoEl);
       topoRendered = true;
-    } else if (mainView === "tasks" && !tasksRendered) {
-      renderTasksKanban(tasksEl);
-      tasksRendered = true;
+    } else if (mainView === "tasks") {
+      if (!tasksRendered) { renderTasksKanban(tasksEl); tasksRendered = true; }
+      else if (enteredTasks) { void refreshTasksKanban(); } // 들어오는 순간에만 재조회 — ★출처 화면과 무관하다★. 다른 화면에 있는 동안 팀원이 바꾼 카드가 stale 로 남던 것 방지(팀장 2026-08-02) · 매 update마다 X(입력 중 깜빡임·스크롤 jank 방지)
     } else if (mainView === "jobs" && !jobsRendered) {
       renderJobsView(jobsEl);
       jobsRendered = true;
