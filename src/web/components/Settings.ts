@@ -1,7 +1,7 @@
 // Settings — 팀 셀프 커스터마이즈 탭 (심플 코어: 팀 정체성 + 팀원).
 // API(전부 /team/api 하위): GET/PUT /settings · GET/PUT /mission · GET/POST /members · DELETE /members/:id.
 // 봇·tmux·slack 실제 연결은 b3os-team-member-lifecycle 스킬로 별도 — 여기선 레지스트리 엔트리만.
-import { stoppedIds } from "./stopAllSummary";
+import { stoppedIds, keptIds } from "./stopAllSummary";
 import { apiBase } from "../ws";
 import { store } from "../store";
 import { pick } from "../i18n";
@@ -992,7 +992,12 @@ function wire(): void {
       if (j.ok && j.results) {
         // ★이름으로 거르지 않는다★ — 서버가 표시한 `kept` 를 읽는다(누가 코디인지는 명부가 정한다).
         const stopped = stoppedIds(j.results);
-        if (regenAllMsg) { regenAllMsg.textContent = `🔴 ${pick("정지됨", "Stopped")} ${stopped.length}${pick("명", " member(s)")} (${stopped.join(", ")}) · ${pick("코디네이터 유지", "coordinator kept")}`; regenAllMsg.className = "text-[11px] text-txt-red flex-1 leading-snug"; }
+        // ★유지된 사람을 이름으로 밝힌다.★ 예전 문구는 "코디네이터 유지" 라고 단정했는데,
+        //   서버가 실제로 거르는 것은 `recovery` 능력이라 ★코디네이터와 다른 사람일 수 있다.★
+        //   누가 유지됐는지는 ★서버 결과가 이미 알고 있다★ — 화면이 다시 판정하지 않는다.
+        const kept = keptIds(j.results);
+        const keptText = kept.length ? `${pick("유지", "kept")}: ${kept.join(", ")}` : pick("유지된 팀원 없음", "none kept");
+        if (regenAllMsg) { regenAllMsg.textContent = `🔴 ${pick("정지됨", "Stopped")} ${stopped.length}${pick("명", " member(s)")} (${stopped.join(", ")}) · ${keptText}`; regenAllMsg.className = "text-[11px] text-txt-red flex-1 leading-snug"; }
       } else if (regenAllMsg) { regenAllMsg.textContent = `${pick("실패:", "Failed:")} ${j.error || pick("오류", "error")}`; regenAllMsg.className = "text-[11px] text-txt-red flex-1 leading-snug"; }
     } catch (e) {
       if (regenAllMsg) { regenAllMsg.textContent = pick("실패: ", "Failed: ") + (e as Error).message; regenAllMsg.className = "text-[11px] text-txt-red flex-1 leading-snug"; }

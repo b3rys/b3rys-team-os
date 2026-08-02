@@ -31,8 +31,11 @@ v2 (후속):
     설치된 Claude Code 버전에서 실제로 prompt 가 차단되는지 확인(필요시 exit 2 fallback).
 
 ENV:
-  OWNER_GATE_SELF        내 에이전트 id (default: bill)
-  OWNER_GATE_GROUP       게이트할 그룹 chat_id (env 또는 team-collab/.env TEAM_GROUP_ID)
+  OWNER_GATE_SELF        내 에이전트 id. ★미설정이면 TELEGRAM_STATE_DIR 에서 유추하고,
+                         그것도 없으면 게이트를 끈다(폴백 없음).★ 남의 id 로 판정하면
+                         게이트가 꺼지는 게 아니라 ★반대로 돌기★ 때문이다(아래 _self_id 참고).
+  OWNER_GATE_GROUP       게이트할 그룹 chat_id (env 또는 $B3OS_ROOT/.env 의 TEAM_GROUP_ID).
+                         ★1:1/그룹 판정 자체는 chat_id 부호로 한다★ — 이 값은 어느 방인지 표시용.
   OWNER_GATE_ROUTE_URL   라우터 결정 엔드포인트 (default: http://127.0.0.1:7878/team/api/route)
   OWNER_GATE_LOG         디버그 로그 경로 (선택)
 """

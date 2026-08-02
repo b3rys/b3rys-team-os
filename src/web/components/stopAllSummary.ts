@@ -22,3 +22,8 @@ export function stoppedIds(results: ReadonlyArray<StopResult>): string[] {
 export function threadRecipient(participants: ReadonlyArray<string> | undefined): string | null {
   return (participants ?? []).find((p) => p !== "user") ?? null;
 }
+
+/** 정지에서 ★실제로 제외된★ 팀원 id. 화면이 "누가 유지됐나" 를 추측하지 않게 서버 결과를 그대로 읽는다. */
+export function keptIds(results: ReadonlyArray<StopResult>): string[] {
+  return results.filter((x) => x.kept).map((x) => x.id);
+}

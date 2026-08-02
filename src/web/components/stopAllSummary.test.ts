@@ -9,7 +9,7 @@
  * "공개에서 깨진다" 는 축을 못 잡는다.
  */
 import { describe, expect, test } from "bun:test";
-import { stoppedIds, threadRecipient } from "./stopAllSummary";
+import { stoppedIds, keptIds, threadRecipient } from "./stopAllSummary";
 
 describe("전원 정지 요약 — 이름이 아니라 서버 표시를 읽는다", () => {
   test("★kept 로 표시된 멤버는 정지 목록에서 빠진다★", () => {
@@ -50,5 +50,19 @@ describe("대화창 받는 사람 — 못 정하면 안 보낸다", () => {
   test("팀원이 있으면 그 팀원 — 우리 팀 이름이 아니어도 된다", () => {
     expect(threadRecipient(["user", "kim"])).toBe("kim");
     expect(threadRecipient(["kim", "user", "park"])).toBe("kim");
+  });
+});
+
+describe("유지된 팀원 — 이름을 서버 결과에서 읽는다", () => {
+  test("★kept 로 표시된 사람을 그대로 돌려준다★ — 화면이 코디를 다시 판정하지 않는다", () => {
+    const results = [
+      { id: "kim", ok: true, detail: "정지" },
+      { id: "park", ok: true, detail: "제외(복구 코디용)", kept: true },
+    ];
+    expect(keptIds(results)).toEqual(["park"]);
+  });
+
+  test("아무도 제외되지 않으면 빈 배열", () => {
+    expect(keptIds([{ id: "kim", ok: true, detail: "정지" }])).toEqual([]);
   });
 });
