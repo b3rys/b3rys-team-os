@@ -59,7 +59,9 @@ describe("progress 훅 배선 reconcile", () => {
     installProgressHook(ID, { membersRoot, repoRoot });
 
     const cmds = commandsIn(settingsPath);
-    expect(cmds).toHaveLength(3);
+    // ★3 → 4.★ react(UserPromptSubmit)가 멤버 스코프로 들어오면서 하나 늘었다(의도된 계약 변경).
+    expect(cmds).toHaveLength(4);
+    expect(cmds.filter((c) => c.endsWith(" react"))).toHaveLength(1);
     for (const c of cmds) expect(c).toContain(`B3OS_ROOT="${repoRoot}"`);
     // 옛 커맨드가 남아 있으면 안 된다 — 추가만 하고 안 지우면 훅이 두 번 돈다.
     expect(cmds.some((c) => !c.includes("B3OS_ROOT"))).toBe(false);
@@ -71,7 +73,7 @@ describe("progress 훅 배선 reconcile", () => {
     const first = readFileSync(settingsPath, "utf-8");
     installProgressHook(ID, { membersRoot, repoRoot });
     expect(readFileSync(settingsPath, "utf-8")).toBe(first);
-    expect(commandsIn(settingsPath)).toHaveLength(3);
+    expect(commandsIn(settingsPath)).toHaveLength(4);   // pre·stop·compact·react
   });
 
   test("다른 훅(reply-guard)은 건드리지 않는다", () => {
@@ -199,5 +201,49 @@ describe("owner-gate 훅 설치·수리", () => {
     ensureOwnerGateHook(ID, { membersRoot, repoRoot });
     const s = JSON.parse(readFileSync(settingsPath, "utf-8"));
     expect((s.hooks.UserPromptSubmit as unknown[]).length).toBe(1);
+  });
+});
+
+describe("react 배선을 멤버 스코프로", () => {
+  const upsCommands = (settingsPath: string): string[] => {
+    const s = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    return ((s.hooks.UserPromptSubmit ?? []) as Array<{ hooks: Array<{ command: string }> }>)
+      .flatMap((e) => e.hooks.map((h) => h.command));
+  };
+
+  test("★UserPromptSubmit 에 react 가 배선된다★ — 지금까지 전역 래퍼에만 있었다", () => {
+    const { membersRoot, repoRoot, settingsPath } = setup({});
+    installProgressHook(ID, { membersRoot, repoRoot });
+    const react = upsCommands(settingsPath).filter((c) => c.includes("telegram-progress.py"));
+    expect(react).toHaveLength(1);
+    expect(react[0]).toMatch(/telegram-progress\.py" react$/);
+    // ★self 가 실려야 한다★ — react 는 owner 판정을 한다. 유추가 틀리면 남의 이름으로 판정한다.
+    expect(react[0]).toContain(`OWNER_GATE_SELF="${ID}"`);
+    expect(react[0]).toContain(`B3OS_ROOT="${repoRoot}"`);
+  });
+
+  test("★같은 이벤트에 있는 owner-gate 배선을 지우지 않는다★", () => {
+    const { membersRoot, repoRoot, settingsPath } = setup({
+      hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command: `python3 "/x/telegram-owner-gate.py"` }] }] },
+    });
+    installProgressHook(ID, { membersRoot, repoRoot });
+    const cmds = upsCommands(settingsPath);
+    expect(cmds.filter((c) => c.includes("telegram-owner-gate.py"))).toHaveLength(1);
+    expect(cmds.filter((c) => c.includes("telegram-progress.py"))).toHaveLength(1);
+  });
+
+  test("두 번 돌려도 react 가 하나뿐이다 (멱등)", () => {
+    const { membersRoot, repoRoot, settingsPath } = setup({});
+    installProgressHook(ID, { membersRoot, repoRoot });
+    installProgressHook(ID, { membersRoot, repoRoot });
+    expect(upsCommands(settingsPath).filter((c) => c.includes("telegram-progress.py"))).toHaveLength(1);
+  });
+
+  test("★기존 멤버(progress 만 배선된 상태)에도 repair 로 깔린다★ — 재영입 없이 받아야 한다", () => {
+    // 라이브 실측: 5명 전부 progress 가 배선돼 있다 → repairProgressHook 이 닿는다.
+    const { membersRoot, repoRoot, settingsPath } = setup(null);
+    writeFileSync(settingsPath, JSON.stringify(staleSettings(membersRoot), null, 2) + "\n");
+    repairProgressHook(ID, { membersRoot, repoRoot });
+    expect(upsCommands(settingsPath).filter((c) => c.includes("telegram-progress.py"))).toHaveLength(1);
   });
 });
