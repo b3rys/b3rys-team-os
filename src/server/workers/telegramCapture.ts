@@ -55,7 +55,20 @@ let TOKEN = getCaptureToken();
 let GROUP_ID = getCaptureGroupId() ?? "";
 // injection 킬스위치 — 이제 *라이브 읽기*(isRouterEnabled(deps.db)). UI 토글 즉시 반영, 재시작 불요. (P0)
 // OFF면 결정 로깅만(shadow). store(setting router_enabled) 우선, 없으면 env(ROUTER_ENABLED) fallback.
-// 단톡방 인입 문맥 예산 — 팀버스 경로(CTX_*)와 값이 다르다. ★한 건 200자는 기존 동작이라 유지한다.★
+// ★이 주입은 '감독' 용이다.★ 답하는 질문: ★"팀에 지금 무슨 일이 도나".★
+//   대상 = ★`full_context` 보유 팀원만★ · 방 전체(★자기것 필터 없음★) · 한 건 200자.
+//
+// ★이 값은 `full_context` 보유 팀원에게만 적용된다 — 나머지는 게이트에 막혀 0건이다.★
+//   (`teamContextForAgent` 가 미보유자에게 "" 를 준다. 아래 수신자별 루프에서 걸린다.)
+//   이걸 모르면 "10건은 너무 많다 → 줄이자" 로 읽게 되는데, 그건 ★일반 팀원 부담을 줄이는 게 아니라
+//   감독하라고 준 시야를 깎는 것★ 이다. 실제로 그렇게 읽은 적이 있다.
+//   ★"N명만" 이라고 적지 마라★ — 명부가 바뀌면 숫자는 낡는다. 기준은 언제나 `full_context` 보유다.
+//
+// ★자기것 필터를 넣지 마라.★ 넣는 순간 이 주입의 목적이 사라진다 — 남의 얘기까지 봐야
+//   팀 리드가 판단할 수 있다는 게 `full_context` 의 뜻이다 (GD 2026-08-02).
+// ★`CTX_MSGS_OWN`(wakeDispatcher.ts)과 값이 같아도 합치지 마라.★ 저쪽은 '내 일 이어가기' 용이라
+//   자기것 필터가 있다. ★필터 유무가 목적이 다르다는 증거다.★ 지금 둘 다 5인 것은 우연이다.
+//   (GD 2026-08-02 "둘 다 5" — 감독용도 5로 줄인다는 결정. 목적이 같아졌다는 뜻이 아니다.)
 const CAPTURE_CTX_MSGS = 5;
 const CAPTURE_CTX_HOURS = 6;
 const CAPTURE_CTX_MSG_CHARS = 200;
