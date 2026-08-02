@@ -161,7 +161,10 @@ export function installProgressHook(id: string, roots?: { membersRoot?: string; 
       const arr = Array.isArray(hooks[evt]) ? (hooks[evt] as unknown[]) : [];
       // ★B3OS_ROOT 를 실어 보낸다★ — 훅은 저장소 밖(멤버 워크스페이스)에서 돌기 때문에
       //   자기 위치로는 b3os `.env`(TEAM_GROUP_ID)를 못 찾는다. 실 chat_id 는 소스에 안 박는다.
-      const command = `B3OS_ROOT="${repoRoot}" python3 "${hookDst}" ${mode}`;
+      // ★OWNER_GATE_SELF 도 싣는다★ — `react` 모드가 owner 판정을 하므로 자기 id 가 필요하다.
+      //   훅은 TELEGRAM_STATE_DIR 로도 유추하지만, ★유추가 틀리면 남의 이름으로 판정한다★
+      //   (owner-gate 에서 겪은 것). 런처는 id 를 아니까 추측하게 두지 않는다.
+      const command = `B3OS_ROOT="${repoRoot}" OWNER_GATE_SELF="${id}" python3 "${hookDst}" ${mode}`;
       const entry: Record<string, unknown> = { hooks: [{ type: "command", command }] };
       if (matcher) entry.matcher = matcher; // Stop 은 matcher 없음(글로벌 배선과 동형)
       const idx = arr.findIndex((e) => JSON.stringify(e).includes("telegram-progress.py"));
@@ -172,6 +175,11 @@ export function installProgressHook(id: string, roots?: { membersRoot?: string; 
     reconcile("PreToolUse", "*", "pre");
     reconcile("Stop", "", "stop");
     reconcile("PreCompact", "*", "compact");
+    // ★react 는 멤버 스코프에 있어야 한다.★ 지금까지 이 기계 전역 래퍼에만 걸려 있었고,
+    //   그 래퍼는 ★봇 목록이 손으로 박혀 있어 새 팀원이 빠졌다★(명부엔 있는데 목록엔 없음).
+    //   react 가 "이번 턴이 어느 방인가" 를 적어두므로, 빠진 팀원은 진행표시가 ★엉뚱한 방★ 에 찍힌다.
+    //   공개 설치에는 그 래퍼 자체가 없어서 ★전부 같은 상태★ 였다. 명부를 읽는 이 경로로 옮긴다.
+    reconcile("UserPromptSubmit", "", "react");
     settings.hooks = hooks;
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
   } catch { /* best-effort */ }
