@@ -336,7 +336,8 @@ print('pending')
     norecipient)
       if [ "$TO" = "broadcast" ]; then
         echo "✓ 방 게시 완료 ($MSG_ID) — 수신행 0. 멘션 없는 방 발언은 0 이 정상입니다." >&2
-        echo "  특정 팀원이 받아야 하면 --mention <이름> 을 붙이세요." >&2
+        echo "  특정 팀원이 받아야 하면 --to <팀원> 으로 보내세요." >&2
+        echo "  전원이 봐야 하는 공지면 --all-hands \"<사유>\" 를 붙이세요(수신행이 생기고 실제로 깨웁니다)." >&2
         exit 0
       fi
       echo "⚠ 수신자가 붙지 않았습니다 ($MSG_ID) — 배달 대상이 0명입니다. --to 값과 registry 를 확인하세요." >&2

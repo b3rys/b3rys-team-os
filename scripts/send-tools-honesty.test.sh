@@ -286,6 +286,17 @@ out="$(PATH="$EMPBIN:$PATH" "$SEND" --to broadcast --body-file "$FIX" --confirm 
   || fail "broadcast 인데 실패로 냈다 (exit $rc): $(head -2 <<<"$out")"
 grep -q "0 이 정상" <<<"$out" && pass "왜 0 인지 설명한다" || fail "설명 없음: $(head -2 <<<"$out")"
 grep -q "registry 를 확인" <<<"$out" && fail "★미배달 문구가 그대로 나온다★" || pass "미배달 문구를 안 쓴다"
+# ★수신행을 만드는 방법을 안내해야 한다★ — --mention 은 슬랙 릴레이용이라 수신행과 무관하다
+#   (send.sh 의 "본문에 넣지 않는다" 주석 참조: ID 로 풀어 meta 로만 넘긴다).
+#   여기서 --mention 을 권하면 시킨 대로 해도 ★같은 화면을 다시 본다.★
+#   ※ 멘션 누락 경고는 별개 기능이라 출력 어딘가에 --mention 이 있을 수 있다.
+#     그래서 ★이 안내 줄만★ 본다.
+guide="$(grep -- '특정 팀원이 받아야 하면' <<<"$out")"
+grep -q -- "--to" <<<"$guide" && pass "안내가 --to <팀원> 을 가리킨다" \
+  || fail "★안내가 --to 를 안 가리킨다: $guide★"
+grep -q -- "--mention" <<<"$guide" && fail "★안내가 수신행과 무관한 --mention 을 권한다★" \
+  || pass "안내에서 --mention 을 권하지 않는다"
+grep -q -- "--all-hands" <<<"$out" && pass "전원 공지 방법(--all-hands)을 안내한다" || fail "--all-hands 안내 없음"
 
 # ★directed 는 그대로 실패여야 한다★ — 여기까지 풀면 진짜 사고를 놓친다.
 out2="$(PATH="$EMPBIN:$PATH" "$SEND" --to lisa --body-file "$FIX" --confirm 6 2>&1)"; rc2=$?
