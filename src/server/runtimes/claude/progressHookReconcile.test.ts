@@ -11,7 +11,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installProgressHook, repairProgressHook } from "./launcher";
+import { installProgressHook, repairProgressHook, repairReplyGuardHook } from "./launcher";
 
 const ID = "testmember";
 let dirs: string[] = [];
@@ -93,5 +93,38 @@ describe("progress 훅 배선 reconcile", () => {
     writeFileSync(settingsPath, JSON.stringify(staleSettings(membersRoot), null, 2) + "\n");
     repairProgressHook(ID, { membersRoot, repoRoot });
     for (const c of commandsIn(settingsPath)) expect(c).toContain("B3OS_ROOT=");
+  });
+});
+
+describe("reply-guard 훅 파일 수리", () => {
+  /** reply-guard 는 커맨드가 `python3 "<경로>"` 뿐이라 ★배선은 안 낡고 파일만 낡는다.★ */
+  function setupGuard(settings?: unknown): { membersRoot: string; repoRoot: string; hookPath: string } {
+    const base = mkdtempSync(join(tmpdir(), "b3os-guard-repair-"));
+    dirs.push(base);
+    const repoRoot = join(base, "b3os");
+    const membersRoot = join(base, "members");
+    mkdirSync(join(repoRoot, "src/server/runtimes/claude"), { recursive: true });
+    writeFileSync(join(repoRoot, "src/server/runtimes/claude/reply-guard.py"), "# NEW\n");
+    const dotClaude = join(membersRoot, ID, ".claude");
+    mkdirSync(join(dotClaude, "hooks"), { recursive: true });
+    writeFileSync(join(dotClaude, "hooks", "reply-guard.py"), "# OLD\n");
+    if (settings !== undefined) writeFileSync(join(dotClaude, "settings.json"), JSON.stringify(settings, null, 2) + "\n");
+    return { membersRoot, repoRoot, hookPath: join(dotClaude, "hooks", "reply-guard.py") };
+  }
+  const wired = (membersRoot: string) => ({
+    hooks: { Stop: [{ hooks: [{ type: "command", command: `python3 "${membersRoot}/${ID}/.claude/hooks/reply-guard.py"` }] }] },
+  });
+
+  test("★배선이 있으면 낡은 훅 파일을 저장소판으로 덮는다★ — 이게 없으면 고쳐도 안 나간다", () => {
+    const { membersRoot, repoRoot, hookPath } = setupGuard(null);
+    writeFileSync(join(membersRoot, ID, ".claude", "settings.json"), JSON.stringify(wired(membersRoot), null, 2) + "\n");
+    repairReplyGuardHook(ID, { membersRoot, repoRoot });
+    expect(readFileSync(hookPath, "utf-8")).toBe("# NEW\n");
+  });
+
+  test("배선이 없는 멤버에는 새로 깔지 않는다 (라이브 보호)", () => {
+    const { membersRoot, repoRoot, hookPath } = setupGuard({ hooks: {} });
+    repairReplyGuardHook(ID, { membersRoot, repoRoot });
+    expect(readFileSync(hookPath, "utf-8")).toBe("# OLD\n"); // 안 건드림
   });
 });

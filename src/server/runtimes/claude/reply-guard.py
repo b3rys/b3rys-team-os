@@ -17,7 +17,10 @@
   · 무한루프 방지: 같은 턴 최대 2회만 block(그 뒤엔 통과 — 유실 감수하되 세션 안 막음).
   · 어떤 에러도 턴을 막지 않는다(항상 allow=exit0).
 """
-import sys, json, os
+import sys, json, os, re
+
+CHANNEL_TAG_RE = re.compile(r'<channel\b[^>]*>')
+CHAT_ID_RE = re.compile(r'chat_id="(-?\d+)"')
 
 
 def allow():
@@ -58,6 +61,20 @@ def _reply_or_edit_toolcall(content):
     return False
 
 
+def _telegram_chat_id(text):
+    """플러그인 <channel …> 태그의 chat_id. 못 찾으면 None.
+
+    ★텔레그램은 그룹/슈퍼그룹 chat_id 가 음수, 1:1 이 양수다.★ 그게 유일하게 믿을 수 있는 구분이다.
+    """
+    for tag in CHANNEL_TAG_RE.findall(text or ""):
+        if "plugin:telegram" not in tag:
+            continue
+        m = CHAT_ID_RE.search(tag)
+        if m:
+            return m.group(1)
+    return None
+
+
 def main():
     try:
         data = json.loads(sys.stdin.read() or "{}")
@@ -90,8 +107,17 @@ def main():
     if last_user_idx is None:
         return allow()
 
-    # 2) 1:1 텔레그램 DM 턴인가? (그룹 external_message 는 owner 아니면 침묵이 정상 → 관여 안 함)
+    # 2) 1:1 텔레그램 DM 턴인가? (그룹은 owner 아니면 침묵이 정상 → 관여 안 함)
     if '<channel source="plugin:telegram' not in last_user_text:
+        return allow()
+
+    # ★단톡방이면 관여하지 않는다.★ 예전에는 이 검사가 없어서 ★플러그인으로 들어온 단톡방 글까지
+    #   1:1 로 쳤다.★ 단톡방은 답하는 방법이 다르다 — `send.sh --to broadcast` 다. 그런데 가드가
+    #   "reply 로 보내라" 고 막으면, 시키는 대로 한 봇이 ★자기 글을 방에 올리고 캡처가 못 봐서
+    #   기록이 0건★ 이 된다. 즉 가드가 룰 위반을 유도한다.
+    # ★모르면 1:1 로 친다★ — 단톡방 오탐보다 ★1:1 미답이 훨씬 나쁘다★ (퍼블릭 사용자는 주로 1:1 이다).
+    chat_id = _telegram_chat_id(last_user_text)
+    if chat_id is not None and chat_id.startswith("-"):
         return allow()
 
     # 3) 이 턴에 reply/edit_message 툴콜이 있었나?
