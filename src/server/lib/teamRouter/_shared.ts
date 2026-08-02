@@ -52,7 +52,7 @@ const ROUTER_LLM_API_KEY = process.env.TEAM_ROUTER_LLM_API_KEY ?? "";
  * 2.5초면 훅이 포기하기 전에 반드시 답을 받는다 — 늦으면 폴백 판정이라도 제때 준다.
  * 실측(DGX vLLM, Qwen3-Next-80B): 1.5~2.2초. 이 값을 올리려면 훅 쪽 timeout 도 같이 올려야 한다.
  */
-const ROUTER_LLM_TIMEOUT_MS = 2_500;
+export const ROUTER_LLM_TIMEOUT_MS = 2_500;
 
 /**
  * 라우터 LLM 에 JSON 응답을 요청하고 파싱해 돌려준다.

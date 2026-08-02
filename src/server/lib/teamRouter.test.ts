@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { AgentRecord } from "../types";
-import { routeTeamMessage, routeTeamMessageHybrid, detectExplicitTargets, isConfidentOwner, shouldSuppress, callRouterLlmJson } from "./teamRouter";
+import { readFileSync } from "node:fs";
+import { routeTeamMessage, routeTeamMessageHybrid, detectExplicitTargets, isConfidentOwner, shouldSuppress, callRouterLlmJson, ROUTER_MODEL, ROUTER_LLM_TIMEOUT_MS } from "./teamRouter";
+import { routeDefaultIntakeLLM } from "./teamRouter/defaultIntake";
 
 const agents: AgentRecord[] = [
   {
@@ -659,9 +661,10 @@ describe("라우터 LLM 와이어 포맷 (OpenAI 호환 /v1/chat/completions)", 
   });
 
   function capture(status = 200, content = '{"ok":true}') {
-    const seen: { url?: string; body?: Record<string, unknown> } = {};
+    const seen: { url?: string; body?: Record<string, unknown>; headers?: Record<string, string> } = {};
     globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
       seen.url = String(url);
+      seen.headers = (init?.headers ?? {}) as Record<string, string>;
       seen.body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
         status,
@@ -735,11 +738,78 @@ describe("라우터 LLM 와이어 포맷 (OpenAI 호환 /v1/chat/completions)", 
     await expect(callRouterLlmJson("sys", "user")).rejects.toThrow("does not exist");
   });
 
+  // ★자체 안전장치가 있는 이유★: signal 배선이 빠지면 이 mock 은 영원히 pending 이 되고
+  //   테스트가 실패가 아니라 ★hang★ 한다(파일 결과 유실 · CI 정지). 빨간 테스트로 떨어뜨린다.
   test("타임아웃이면 abort 되어 throw 한다", async () => {
     globalThis.fetch = ((_u: RequestInfo | URL, init?: RequestInit) =>
       new Promise((_resolve, reject) => {
         init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        setTimeout(() => reject(new Error("abort 배선 없음 — signal 이 fetch 로 안 넘어갔다")), 300);
       })) as unknown as typeof fetch;
     await expect(callRouterLlmJson("sys", "user", { timeoutMs: 30 })).rejects.toThrow();
+  });
+
+  test("fetch 자체가 reject 하면(연결 거부) 그대로 전파한다", async () => {
+    globalThis.fetch = (async () => {
+      throw new TypeError("Failed to connect");
+    }) as unknown as typeof fetch;
+    await expect(callRouterLlmJson("sys", "user")).rejects.toThrow("Failed to connect");
+  });
+
+  // ★모델명 오설정이 가장 흔한 실패다★ — 그런데 model 이 실려 나가는지 자체는 무검증이었다
+  //   (하네스 실증: model 을 통째로 빼도 전 테스트 통과). Ollama 태그(name:tag)가 새 키로
+  //   흘러드는 것도 여기서 막는다.
+  test("요청에 model 이 실린다 — Ollama 태그(name:tag) 형식이 아니다", async () => {
+    const seen = capture();
+    await callRouterLlmJson("sys", "user");
+    expect(seen.body?.model).toBe(ROUTER_MODEL);
+    expect(String(seen.body?.model)).not.toContain(":");
+  });
+
+  test("API 키가 없으면 Authorization 을 붙이지 않는다", async () => {
+    const seen = capture();
+    await callRouterLlmJson("sys", "user");
+    expect(Object.keys(seen.headers ?? {})).not.toContain("Authorization");
+  });
+});
+
+// ─── 교차파일 불변식·폴백 계약 ────────────────────────────────────────────────
+describe("라우터 LLM — 교차파일 불변식과 폴백 계약", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  // ★이 결합은 주석으로만 존재하면 반드시 깨진다.★ owner-gate 훅은 서버 응답을 N초까지만 기다리고
+  // 넘으면 fail-open 한다(= 아무도 억제 안 함 = 그룹방 전원 응답). 서버 상한이 훅 예산보다 크면
+  // 우리가 무슨 판정을 내든 훅에는 안 닿는다. 둘 중 하나만 고치는 사고를 여기서 잡는다.
+  test("서버 상한 < owner-gate 훅 예산", async () => {
+    const hook = readFileSync(
+      new URL("../../../hooks/telegram-owner-gate.py", import.meta.url).pathname,
+      "utf-8",
+    );
+    const m = hook.match(/urlopen\([^)]*timeout=(\d+(?:\.\d+)?)/);
+    expect(m).not.toBeNull();
+    const hookBudgetMs = Number(m?.[1]) * 1000;
+    expect(ROUTER_LLM_TIMEOUT_MS).toBeLessThan(hookBudgetMs);
+  });
+
+  // throw 는 고정됐지만 "그 throw 가 무엇이 되는가" 는 안 고정돼 있었다. 신규 블록 주석의 논거가
+  // 'via:"llm" 거짓 기록 방지' 인데, 정작 via 를 단언하는 테스트가 저장소에 하나도 없었다.
+  test("LLM 실패 시 via=regex_fallback 로 떨어진다", async () => {
+    globalThis.fetch = (async () => new Response("boom", { status: 503 })) as unknown as typeof fetch;
+    const d = await routeDefaultIntakeLLM("아무 말이나", agents);
+    expect(d.via).toBe("regex_fallback");
+    expect(d.domain).toBe("owner_inference:llm_unavailable");
+  });
+
+  test("빈 응답도 via=regex_fallback 이다 (llm 으로 위장하지 않는다)", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content: null } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as unknown as typeof fetch;
+    const d = await routeDefaultIntakeLLM("아무 말이나", agents);
+    expect(d.via).toBe("regex_fallback");
   });
 });
