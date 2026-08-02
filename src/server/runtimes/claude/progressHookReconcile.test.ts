@@ -11,7 +11,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installProgressHook, repairProgressHook, repairReplyGuardHook } from "./launcher";
+import { installProgressHook, repairProgressHook, repairReplyGuardHook, installOwnerGateHook, repairOwnerGateHook } from "./launcher";
 
 const ID = "testmember";
 let dirs: string[] = [];
@@ -126,5 +126,62 @@ describe("reply-guard 훅 파일 수리", () => {
     const { membersRoot, repoRoot, hookPath } = setupGuard({ hooks: {} });
     repairReplyGuardHook(ID, { membersRoot, repoRoot });
     expect(readFileSync(hookPath, "utf-8")).toBe("# OLD\n"); // 안 건드림
+  });
+});
+
+describe("owner-gate 훅 설치·수리", () => {
+  function setupGate(settings?: unknown): { membersRoot: string; repoRoot: string; settingsPath: string; hookPath: string } {
+    const base = mkdtempSync(join(tmpdir(), "b3os-gate-install-"));
+    dirs.push(base);
+    const repoRoot = join(base, "b3os");
+    const membersRoot = join(base, "members");
+    mkdirSync(join(repoRoot, "hooks"), { recursive: true });
+    writeFileSync(join(repoRoot, "hooks", "telegram-owner-gate.py"), "# NEW\n");
+    const dotClaude = join(membersRoot, ID, ".claude");
+    mkdirSync(dotClaude, { recursive: true });
+    const settingsPath = join(dotClaude, "settings.json");
+    if (settings !== undefined) writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+    return { membersRoot, repoRoot, settingsPath, hookPath: join(dotClaude, "hooks", "telegram-owner-gate.py") };
+  }
+
+  test("★UserPromptSubmit 배선이 생기고 훅 파일이 깔린다★ (기준 1·2)", () => {
+    const { membersRoot, repoRoot, settingsPath, hookPath } = setupGate({});
+    installOwnerGateHook(ID, { membersRoot, repoRoot });
+    const s = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    const cmds = (s.hooks.UserPromptSubmit as Array<{ hooks: Array<{ command: string }> }>)
+      .flatMap((e) => e.hooks.map((h) => h.command));
+    expect(cmds).toHaveLength(1);
+    expect(cmds[0]).toContain("telegram-owner-gate.py");
+    // ★B3OS_ROOT 가 실려야 한다★ — 없으면 깔려도 게이트가 무력화된다.
+    expect(cmds[0]).toContain(`B3OS_ROOT="${repoRoot}"`);
+    // ★자기 id 도 실려야 한다★ — 없으면 훅이 추측하고, 틀리면 게이트가 반대로 돈다.
+    expect(cmds[0]).toContain(`OWNER_GATE_SELF="${ID}"`);
+    expect(readFileSync(hookPath, "utf-8")).toBe("# NEW\n");
+  });
+
+  test("두 번 돌려도 항목이 늘지 않는다 (멱등)", () => {
+    const { membersRoot, repoRoot, settingsPath } = setupGate({});
+    installOwnerGateHook(ID, { membersRoot, repoRoot });
+    const first = readFileSync(settingsPath, "utf-8");
+    installOwnerGateHook(ID, { membersRoot, repoRoot });
+    expect(readFileSync(settingsPath, "utf-8")).toBe(first);
+  });
+
+  test("다른 UserPromptSubmit 훅은 건드리지 않는다", () => {
+    const { membersRoot, repoRoot, settingsPath } = setupGate({
+      hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command: "python3 /x/other.py" }] }] },
+    });
+    installOwnerGateHook(ID, { membersRoot, repoRoot });
+    const s = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    const cmds = (s.hooks.UserPromptSubmit as Array<{ hooks: Array<{ command: string }> }>)
+      .flatMap((e) => e.hooks.map((h) => h.command));
+    expect(cmds.filter((c) => c.includes("other.py"))).toHaveLength(1);
+    expect(cmds.filter((c) => c.includes("telegram-owner-gate.py"))).toHaveLength(1);
+  });
+
+  test("★repair 는 이미 배선된 멤버만★ — 안 깔린 멤버엔 새로 깔지 않는다", () => {
+    const { membersRoot, repoRoot, settingsPath } = setupGate({ hooks: {} });
+    repairOwnerGateHook(ID, { membersRoot, repoRoot });
+    expect(readFileSync(settingsPath, "utf-8")).not.toContain("telegram-owner-gate.py");
   });
 });

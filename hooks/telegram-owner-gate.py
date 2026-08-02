@@ -42,8 +42,16 @@ import json
 import re
 
 def _self_id():
-    # settings.json 은 claude 봇 4개(bill·steve·demis·dbak)가 공유(심링크)하므로,
-    # 자기 봇 id 를 하드코딩하지 않고 TELEGRAM_STATE_DIR(예: .../telegram-bill)에서 per-bot 으로 얻는다.
+    """이 세션이 누구인가. 런처가 `OWNER_GATE_SELF` 로 실어준다.
+
+    ★폴백이 틀리면 게이트가 꺼지는 게 아니라 반대로 돈다.★ 예전 폴백은 `"bill"` 이었는데,
+    그러면 ★남의 이름으로 owner 판정을 받는다★ — 자기 앞으로 온 글에서 자기가 막히고,
+    남 앞으로 온 글에는 응답한다. 진행표시 훅은 폴백이 틀리면 ★알림이 엉뚱한 방에 가서 보이지만★,
+    이 훅은 ★조용히 반대로 판정한다.★ 같은 규약이어도 결과가 다르다(lui 교차검증).
+
+    그래서 ★확실히 모르면 게이트를 끈다★ — `""` 를 돌려주면 호출부가 통과시킨다.
+    남의 id 로 판정하는 것보다 ★게이트가 없는 편이 낫다.★
+    """
     env = os.environ.get("OWNER_GATE_SELF")
     if env:
         return env
@@ -51,22 +59,35 @@ def _self_id():
     base = os.path.basename(sd.rstrip("/"))
     if base.startswith("telegram-"):
         return base[len("telegram-"):]
-    return "bill"
+    return ""
 
 
 def _team_group():
-    # 우선순위: env OWNER_GATE_GROUP → team-collab/.env 의 TEAM_GROUP_ID → "" (소스에 실 chat_id 비노출)
+    """게이트할 단톡방 chat_id. 못 구하면 "" (소스에 실 chat_id 비노출).
+
+    우선순위: env `OWNER_GATE_GROUP` → `$B3OS_ROOT/.env` → `<훅파일>/../.env`.
+
+    ★`B3OS_ROOT` 가 핵심이다.★ 이 훅은 저장소 밖으로 복사돼서 돈다 — 런처가
+    `<멤버>/.claude/hooks/` 로 깐다. 그 자리에서 `../.env` 는 `<멤버>/.claude/.env` 라 ★없다.★
+    그러면 GROUP_ID 가 "" 가 되고, 어떤 그룹 메시지든 `chat_id != ""` 라서 ★게이트가 통째로
+    무력화된다★ — ★"깔았는데 안 도는" 상태는 안 깐 것보다 나쁘다★(깔렸다고 착각하니까).
+    같은 구조로 진행표시 훅이 죽어 있었다(#230).
+    """
     g = os.environ.get("OWNER_GATE_GROUP")
     if g:
         return g
-    try:
-        envp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
-        with open(envp) as f:
-            for line in f:
-                if line.startswith("TEAM_GROUP_ID="):
-                    return line.split("=", 1)[1].strip()
-    except Exception:
-        pass
+    root = os.environ.get("B3OS_ROOT", "")
+    here = os.path.dirname(os.path.abspath(__file__))
+    for envp in ([os.path.join(root, ".env")] if root else []) + [os.path.join(here, "..", ".env")]:
+        try:
+            with open(envp) as f:
+                for line in f:
+                    if line.startswith("TEAM_GROUP_ID="):
+                        v = line.split("=", 1)[1].strip()
+                        if v:
+                            return v
+        except Exception:
+            pass
     return ""
 
 
@@ -115,13 +136,23 @@ def main():
     attrs, text = tg[-1]  # 가장 최근 채널 메시지
     cid = re.search(r'chat_id="([^"]+)"', attrs)
     chat_id = cid.group(1) if cid else ""
-    if chat_id != GROUP_ID:
-        allow()  # 1:1 DM 또는 다른 방 → 통과(DM 은 항상 owner)
+    # ★1:1 인가 그룹인가는 chat_id 부호로 가른다★ — 텔레그램은 그룹/슈퍼그룹이 음수, 1:1 이 양수다.
+    #   예전에는 "설정된 GROUP_ID 와 다른가" 로 갈랐다. 그러면 ★두 번째 단톡방도 1:1 처럼 통과★ 해서
+    #   방이 둘 이상인 설치(공개·다른 팀)에는 ★게이트가 아예 없는 방★ 이 생긴다.
+    #   같은 저장소의 `reply-guard.py` 도 부호로 가른다 — ★두 훅의 1:1 정의를 같게 둔다.★
+    #   `GROUP_ID` 는 "어느 방인지" 를 로그로 남기는 용도로만 쓴다(판정에서 뺀다).
+    if not chat_id.startswith("-"):
+        allow()  # 1:1 DM → 통과(DM 은 항상 owner). 라우터에 묻지도 않는다.
     mid = re.search(r'message_id="([^"]+)"', attrs)
     tg_msg_id = mid.group(1) if mid else ""
 
     text = text.strip()
     if not text:
+        allow()
+
+    # ★내가 누구인지 모르면 게이트를 끈다.★ 남의 id 로 물으면 판정이 반대로 나온다.
+    if not SELF_ID:
+        _log("self id unknown → fail-open (OWNER_GATE_SELF/TELEGRAM_STATE_DIR 미설정)")
         allow()
 
     # thin-client: self + 원본 telegram message_id 를 보내고 서버(/api/route)의 suppress 판단만 따른다.
