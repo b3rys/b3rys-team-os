@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { AgentRecord } from "../types";
-import { routeTeamMessage, routeTeamMessageHybrid, detectExplicitTargets, isConfidentOwner, shouldSuppress } from "./teamRouter";
+import { routeTeamMessage, routeTeamMessageHybrid, detectExplicitTargets, isConfidentOwner, shouldSuppress, callRouterLlmJson } from "./teamRouter";
 
 const agents: AgentRecord[] = [
   {
@@ -189,7 +189,7 @@ describe("owner inference fallback", () => {
 
   function mockRouter(reply: Record<string, unknown>): void {
     globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ message: { content: JSON.stringify(reply) } }), {
+      new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(reply) } }] }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })) as unknown as typeof fetch;
@@ -233,7 +233,7 @@ describe("owner inference fallback", () => {
       const reply = user.new_message?.includes("team-collab")
         ? { outcome: "route", responder: "steve", domain: "ops_from_role", needs_gd_confirm: false }
         : { outcome: "route", responder: "dbak", domain: "pm_from_role", needs_gd_confirm: false };
-      return new Response(JSON.stringify({ message: { content: JSON.stringify(reply) } }), {
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(reply) } }] }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -645,5 +645,82 @@ describe("hybrid 라우터도 인용/펜스 멘션 무시 (routeTeamMessageHybri
     const d = await routeTeamMessageHybrid("@빌 확인해줘\n—-\n@코덱스 @스티브 예시 멘션", agents);
     expect(d.targetAgentIds).toEqual(["bill"]);
     expect(d.reason).toBe("explicit_mention");
+  });
+});
+
+// ─── 라우터 LLM 와이어 포맷 (OpenAI 호환) ─────────────────────────────────────
+// 이 블록이 고정하는 것: 요청/응답이 ★OpenAI 호환 모양★ 이라는 것. 예전엔 Ollama 네이티브
+// (/api/chat + format:"json" + options.temperature + body.message.content) 였고, vLLM 은 그 경로가
+// 아예 없다. 모양이 되돌아가면 라우터는 에러 없이 조용히 regex 폴백만 계속한다 — 그게 이 테스트의 이유다.
+describe("라우터 LLM 와이어 포맷 (OpenAI 호환 /v1/chat/completions)", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function capture(status = 200, content = '{"ok":true}') {
+    const seen: { url?: string; body?: Record<string, unknown> } = {};
+    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      seen.url = String(url);
+      seen.body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    return seen;
+  }
+
+  test("요청 바디가 OpenAI 규격이다 — response_format·temperature 있고 Ollama 전용 필드는 없다", async () => {
+    const seen = capture();
+    await callRouterLlmJson("sys", "user");
+    expect(seen.body?.response_format).toEqual({ type: "json_object" });
+    expect(seen.body?.temperature).toBe(0);
+    expect(seen.body?.stream).toBe(false);
+    // ★Ollama 전용 필드가 다시 끼면 vLLM 이 거부하거나 무시한다★
+    expect(seen.body).not.toHaveProperty("format");
+    expect(seen.body).not.toHaveProperty("options");
+    expect(seen.body).not.toHaveProperty("keep_alive");
+  });
+
+  test("엔드포인트가 /v1/chat/completions 다 (/api/chat 아님)", async () => {
+    const seen = capture();
+    await callRouterLlmJson("sys", "user");
+    expect(seen.url).toContain("/v1/chat/completions");
+    expect(seen.url).not.toContain("/api/chat");
+  });
+
+  test("응답을 choices[0].message.content 에서 읽는다", async () => {
+    capture(200, '{"responder":"bill"}');
+    expect(await callRouterLlmJson("sys", "user")).toEqual({ responder: "bill" });
+  });
+
+  test("비 2xx 는 throw — 폴백 판단은 호출부 몫", async () => {
+    capture(500);
+    await expect(callRouterLlmJson("sys", "user")).rejects.toThrow("router llm 500");
+  });
+
+  // 빈 content 는 throw 한다 — 호출부가 regex 폴백으로 내려간다. ★{} 로 삼키면 안 된다★:
+  // 그러면 아무것도 못 받았는데 via:"llm" 로 기록돼 "LLM 이 판정했다" 는 거짓 신호가 남는다.
+  test("content 가 비면 throw (조용히 빈 결정으로 위장하지 않는다)", async () => {
+    capture(200, "");
+    await expect(callRouterLlmJson("sys", "user")).rejects.toThrow();
+  });
+
+  test("content 가 아예 없으면 빈 객체", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ choices: [{ message: {} }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as unknown as typeof fetch;
+    expect(await callRouterLlmJson("sys", "user")).toEqual({});
+  });
+
+  test("타임아웃이면 abort 되어 throw 한다", async () => {
+    globalThis.fetch = ((_u: RequestInfo | URL, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      })) as unknown as typeof fetch;
+    await expect(callRouterLlmJson("sys", "user", { timeoutMs: 30 })).rejects.toThrow();
   });
 });

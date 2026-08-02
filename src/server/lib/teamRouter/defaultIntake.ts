@@ -1,9 +1,8 @@
 import type { AgentRecord } from "../../types";
 import {
   type LlmRouteDecision,
-  OLLAMA_URL,
-  ROUTER_MODEL,
   buildRosterText,
+  callRouterLlmJson,
   classifyIntent,
 } from "./_shared";
 import { ambiguousOwnerId } from "../capabilities";
@@ -52,28 +51,12 @@ export async function routeDefaultIntakeLLM(
   const validIds = new Set(agents.map((a) => a.id));
   // 오너가 애매/무-확신일 때의 default 담당 = ambiguous_owner(GD 2026-07-10: 빌). 미설정 시 coordinator 폴백.
   const ambiguousOwner = ambiguousOwnerId(agents);
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 3_000);
   try {
-    const res = await fetch(OLLAMA_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: ctrl.signal,
-      body: JSON.stringify({
-        model: opts.model ?? ROUTER_MODEL,
-        messages: [
-          { role: "system", content: defaultIntakePrompt(agents) },
-          { role: "user", content: JSON.stringify({ new_message: text }) },
-        ],
-        stream: false,
-        format: "json",
-        options: { temperature: 0 },
-      }),
-    });
-    clearTimeout(timer);
-    if (!res.ok) throw new Error(`ollama ${res.status}`);
-    const body = (await res.json()) as { message?: { content?: string } };
-    const parsed = JSON.parse(body.message?.content ?? "{}") as RawDefaultIntake;
+    const parsed = (await callRouterLlmJson(
+      defaultIntakePrompt(agents),
+      JSON.stringify({ new_message: text }),
+      { model: opts.model, timeoutMs: opts.timeoutMs ?? 8_000 },
+    )) as RawDefaultIntake;
     const suggested = (parsed.suggested ?? []).filter((id) => validIds.has(id));
     const responder = parsed.responder && validIds.has(parsed.responder) ? parsed.responder : null;
     const needsGdConfirm = Boolean(parsed.needs_gd_confirm) || GD_CONFIRM_RE.test(text);
@@ -105,7 +88,6 @@ export async function routeDefaultIntakeLLM(
       suggested,
     };
   } catch {
-    clearTimeout(timer);
     return {
       targetAgentIds: ambiguousOwner ? [ambiguousOwner] : [],
       reason: "default_step",

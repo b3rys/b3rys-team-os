@@ -25,8 +25,58 @@ export interface RouteDecision {
 // (removed) DEFAULT_STEP_AGENT_ID = "codex" — default_step owner 는 이제 coordinator capability 로
 // 결정한다. lib/capabilities.ts 의 coordinatorId(agents) 사용. 정본 = agents.json.
 
-export const OLLAMA_URL = process.env.TEAM_ROUTER_OLLAMA_URL ?? "http://127.0.0.1:11434/api/chat";
-export const ROUTER_MODEL = process.env.TEAM_ROUTER_MODEL ?? "exaone3.5:2.4b";
+/**
+ * 라우터 판정용 LLM 엔드포인트 — ★OpenAI 호환 /v1/chat/completions★.
+ *
+ * 예전엔 Ollama 네이티브 `/api/chat` 이었다(`TEAM_ROUTER_OLLAMA_URL`). 로컬 LLM 을 vLLM 으로 옮기면서
+ * 바꿨다 — vLLM 은 OpenAI 호환 API 만 제공하고 `/api/chat` 이 없다. Ollama 도 OpenAI 호환 경로
+ * (`/v1/chat/completions`)를 제공하므로 이 클라이언트 하나로 양쪽을 다 붙일 수 있다.
+ *
+ * ★env 키 이름도 바꿨다★ — 값(경로)이 어차피 달라져야 해서, 옛 키를 그대로 두면 "설정은 있는데
+ * 경로가 틀린" 상태로 조용히 폴백만 계속된다. 키를 바꾸면 미설정으로 잡혀 기본값이 쓰인다.
+ */
+export const ROUTER_LLM_URL =
+  process.env.TEAM_ROUTER_LLM_URL ?? "http://127.0.0.1:8000/v1/chat/completions";
+export const ROUTER_MODEL = process.env.TEAM_ROUTER_MODEL ?? "Qwen3-Next-80B-A3B";
+
+/**
+ * 라우터 LLM 에 JSON 응답을 요청하고 파싱해 돌려준다.
+ *
+ * ★와이어 포맷을 아는 곳은 여기 하나다.★ 예전엔 defaultIntake 와 ownerDecision 이 같은 요청을 각자
+ * 만들어 두 벌이었다 — 한쪽만 고치면 같은 질문에 답이 둘이 된다.
+ *
+ * 실패(네트워크·비 2xx·JSON 파싱 실패·타임아웃)는 전부 throw 한다. 폴백 판단은 호출부의 몫이다.
+ */
+export async function callRouterLlmJson(
+  systemPrompt: string,
+  userContent: string,
+  opts: { model?: string; timeoutMs?: number } = {},
+): Promise<Record<string, unknown>> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 8_000);
+  try {
+    const res = await fetch(ROUTER_LLM_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: ctrl.signal,
+      body: JSON.stringify({
+        model: opts.model ?? ROUTER_MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userContent },
+        ],
+        stream: false,
+        response_format: { type: "json_object" },
+        temperature: 0,
+      }),
+    });
+    if (!res.ok) throw new Error(`router llm ${res.status}`);
+    const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    return JSON.parse(body.choices?.[0]?.message?.content ?? "{}") as Record<string, unknown>;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export type RouteIntent = "discussion" | "execution" | "other";
 

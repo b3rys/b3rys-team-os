@@ -430,21 +430,11 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     console.log("[capture] disabled — CAPTURE_BOT_TOKEN 미설정 (inert)");
     return () => {};
   }
-  // 라우터 LLM(exaone) 상주 — cold-start(~9s) 제거. 재부팅/재시작마다 재핀 (GD 결정 2026-05-24).
-  void (async () => {
-    const url = process.env.TEAM_ROUTER_OLLAMA_URL ?? "http://127.0.0.1:11434/api/chat";
-    const model = process.env.TEAM_ROUTER_MODEL ?? "exaone3.5:2.4b";
-    try {
-      await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model, messages: [{ role: "user", content: "warmup" }], stream: false, keep_alive: -1 }),
-      });
-      console.log(`[capture] router model ${model} 상주 (keep_alive=-1)`);
-    } catch (e) {
-      console.error("[capture] model warmup failed:", (e as Error).message);
-    }
-  })();
+  // (제거) 라우터 LLM 상주 warmup — GD 2026-05-24 에 cold-start(~9s) 를 없애려고 기동 때 Ollama 에
+  //   keep_alive=-1 을 걸던 블록. 라우터 LLM 이 vLLM(OpenAI 호환)으로 바뀌면서 두 가지 이유로 뺀다:
+  //   ① keep_alive 는 Ollama 전용 필드고 /v1/chat/completions 에는 없다 — 보내봐야 무의미하다.
+  //   ② vLLM 은 기동 시 가중치를 올려 두고 계속 물고 있으므로 데워 둘 cold-start 자체가 없다.
+  //   다시 Ollama 로 돌아가면 이 블록도 같이 되살려야 한다.
   let offset = 0;
   let stopped = false;
   // ★in-flight getUpdates 롱폴(timeout=25s)을 stop() 에서 즉시 끊기 위한 abort★ — 이게 없으면 restartCapture 시

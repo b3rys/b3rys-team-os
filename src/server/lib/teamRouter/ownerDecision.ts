@@ -4,9 +4,8 @@ import {
   type RouteDecision,
   type RouteIntent,
   type LlmRouteDecision,
-  OLLAMA_URL,
-  ROUTER_MODEL,
   buildRosterText,
+  callRouterLlmJson,
   classifyIntent,
 } from "./_shared";
 import { coordinatorId } from "../capabilities";
@@ -203,27 +202,10 @@ export async function routeTeamMessageLLM(
       reply_to_agent: context.replyToAgentId ?? null,
       new_message: text,
     });
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 15_000);
-    const res = await fetch(OLLAMA_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: ctrl.signal,
-      body: JSON.stringify({
-        model: opts.model ?? ROUTER_MODEL,
-        messages: [
-          { role: "system", content: routerSystemPrompt(agents) },
-          { role: "user", content: user },
-        ],
-        stream: false,
-        format: "json",
-        options: { temperature: 0 },
-      }),
-    });
-    clearTimeout(timer);
-    if (!res.ok) throw new Error(`ollama ${res.status}`);
-    const body = (await res.json()) as { message?: { content?: string } };
-    const parsed = JSON.parse(body.message?.content ?? "{}") as RawLlm;
+    const parsed = (await callRouterLlmJson(routerSystemPrompt(agents), user, {
+      model: opts.model,
+      timeoutMs: opts.timeoutMs ?? 15_000,
+    })) as RawLlm;
 
     const coordinator = coordinatorId(agents);
     let responders = (parsed.responders ?? []).filter((id) => validIds.has(id));
