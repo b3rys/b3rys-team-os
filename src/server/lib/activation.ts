@@ -20,7 +20,7 @@ import { isHermesMemberProtected, isHermesProfileProtected } from "./hermesBaseP
 import { appendAuditFile } from "./auditFile";
 import { codexBridgePaths, placeCodexToken, writeCodexBridgeFiles, removeCodexBridgeFiles, resolveOwnerDmId } from "../runtimes/codex/launcher";
 import { ensureClaudePollerUp } from "../runtimes/claude/pollerHealth";
-import { placeClaudeToken, writeClaudeBridgeFiles, seedClaudeTrust, seedClaudeAccess, killClaudeTmux, reconnectClaudeTelegram, claudeBridgePaths, installReplyGuardHook, installOutboundHook, installProgressHook, uninstallOutboundHook, uninstallReplyGuardHook, uninstallRecoveryHook, removeClaudeBridgeFiles } from "../runtimes/claude/launcher";
+import { placeClaudeToken, writeClaudeBridgeFiles, seedClaudeTrust, seedClaudeAccess, killClaudeTmux, reconnectClaudeTelegram, claudeBridgePaths, installReplyGuardHook, installOwnerGateHook, installOutboundHook, installProgressHook, uninstallOutboundHook, uninstallReplyGuardHook, uninstallRecoveryHook, removeClaudeBridgeFiles } from "../runtimes/claude/launcher";
 import { isTier2Outbound, isTier2Shadow } from "../runtimes/claude/tier2Flag";
 import { setAgentEnabled, clearAgentOff, isAgentOff } from "./agentControl";
 import { activeOfficialMemberCount, isTeamOfficialMember, MAX_OFFICIAL_TEAM_MEMBERS } from "./agentMembership";
@@ -629,7 +629,8 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       writeClaudeBridgeFiles(id);        // LaunchAgent plist 생성(setClaude bootstrap 대상)
       // reply-guard(reply 도구 미사용 감지 block)는 tier2 live(마커모드=reply 도구 안 씀)엔 미설치 — 안 그러면 매턴 block(Bill 하네스).
       //   shadow는 persona normal(reply 도구 유지)이라 reply-guard 유효 → 설치. live만 skip.
-      if (!isTier2Outbound(id)) installReplyGuardHook(id);   // 워크스페이스 .claude/settings.json 에 reply-guard Stop 훅(send-drift 안전망)
+      if (!isTier2Outbound(id)) installReplyGuardHook(id);
+      installOwnerGateHook(id);   // 그룹 owner 게이트(UserPromptSubmit) — 공개 설치·새 팀에도 깔리게   // 워크스페이스 .claude/settings.json 에 reply-guard Stop 훅(send-drift 안전망)
       installProgressHook(id);   // "작업 중 ⏳" 진행표시 훅(PreToolUse/Stop/PreCompact) — 공개 사용자·신규 멤버도 받게(글로벌 배선 대체). tier2 무관.
       // ★recovery 훅은 삭제됨(GD 2026-07-14) — 훅이 팀원 '대신' 보내는 [A] 패턴이라 제거.★
       //   이미 설치된 멤버에서도 걷어낸다(재활성화 때 self-heal). 안 보냈으면 안 보낸 것이고,

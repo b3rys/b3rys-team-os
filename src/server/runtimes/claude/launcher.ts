@@ -196,6 +196,59 @@ export function repairProgressHook(id: string, roots?: { membersRoot?: string; r
   installProgressHook(id, roots);
 }
 
+/** owner-gate 훅 설치 — 멤버 워크스페이스 `.claude/settings.json` 의 `UserPromptSubmit`.
+ *
+ *  ★왜 필요한가★ — 답장은 ★암묵적 멘션★ 이라, `@A` 라고 써도 ★답장 대상 봇 B 가 그 글을 받는다.★
+ *  게이트가 없으면 B 세션이 자기 것이 아닌 일을 시작한다. 이 훅이 라우터에 owner 를 물어
+ *  내가 아니면 그 prompt 를 막는다(판단에 맡기지 않는다).
+ *  이 게이트는 지금까지 ★이 기계 전역에만 손으로 걸려 있었다★ — 공개 설치·새 팀에는 아예 없었다.
+ *
+ *  ★커맨드에 `B3OS_ROOT` 를 싣는다★ — 훅이 저장소 밖에서 돌기 때문에 그게 없으면 단톡방 id 를
+ *  못 구해 ★게이트가 통째로 무력화된다★(#230 과 같은 함정). 실 chat_id 는 소스에 안 넣는다.
+ *  `OWNER_GATE_SELF` 는 안 싣는다 — 훅이 `TELEGRAM_STATE_DIR` 에서 per-bot 으로 얻는다.
+ *  best-effort. `roots` 는 테스트 이음매. */
+export function installOwnerGateHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
+  assertId(id);
+  const membersRoot = roots?.membersRoot ?? MEMBERS_ROOT;
+  const repoRoot = roots?.repoRoot ?? REPO_ROOT;
+  const dotClaude = `${membersRoot}/${id}/.claude`;
+  const hookDst = `${dotClaude}/hooks/telegram-owner-gate.py`;
+  const settingsPath = `${dotClaude}/settings.json`;
+  const src = `${repoRoot}/hooks/telegram-owner-gate.py`;
+  try {
+    if (!existsSync(src)) return; // 소스 없으면 skip
+    mkdirSync(`${dotClaude}/hooks`, { recursive: true });
+    writeFileSync(hookDst, readFileSync(src, "utf-8"));
+    try { chmodSync(hookDst, 0o755); } catch { /* best-effort */ }
+    let settings: Record<string, unknown> = {};
+    if (existsSync(settingsPath)) {
+      try { const p = JSON.parse(readFileSync(settingsPath, "utf-8")); if (p && typeof p === "object") settings = p; } catch { /* keep {} */ }
+    }
+    const hooks = (settings.hooks && typeof settings.hooks === "object" ? settings.hooks : {}) as Record<string, unknown>;
+    const arr = Array.isArray(hooks.UserPromptSubmit) ? (hooks.UserPromptSubmit as unknown[]) : [];
+    // ★있으면 skip 이 아니라 다르면 교체★ — 커맨드가 바뀌어도 기존 멤버가 옛것을 들고 있으면 안 된다.
+    const command = `B3OS_ROOT="${repoRoot}" python3 "${hookDst}"`;
+    const entry = { hooks: [{ type: "command", command }] };
+    const idx = arr.findIndex((e) => JSON.stringify(e).includes("telegram-owner-gate.py"));
+    if (idx < 0) arr.push(entry);
+    else if (JSON.stringify(arr[idx]) !== JSON.stringify(entry)) arr[idx] = entry;
+    hooks.UserPromptSubmit = arr;
+    settings.hooks = hooks;
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+  } catch { /* best-effort */ }
+}
+
+/** 이미 깔려 있는 owner-gate 훅만 최신으로 맞춘다(새로 깔지는 않는다). `repairProgressHook` 과 같은 원칙. */
+export function repairOwnerGateHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
+  assertId(id);
+  const settingsPath = `${roots?.membersRoot ?? MEMBERS_ROOT}/${id}/.claude/settings.json`;
+  try {
+    if (!existsSync(settingsPath)) return;
+    if (!readFileSync(settingsPath, "utf-8").includes("telegram-owner-gate.py")) return;
+  } catch { return; }
+  installOwnerGateHook(id, roots);
+}
+
 /** 이미 깔려 있는 reply-guard 훅의 ★파일만★ 최신으로 맞춘다(새로 깔지는 않는다).
  *
  *  ★배선(settings.json)은 안 바뀌고 파일만 낡는다★ — 커맨드가 `python3 "<경로>"` 뿐이라

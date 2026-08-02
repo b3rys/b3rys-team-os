@@ -55,18 +55,31 @@ def _self_id():
 
 
 def _team_group():
-    # 우선순위: env OWNER_GATE_GROUP → team-collab/.env 의 TEAM_GROUP_ID → "" (소스에 실 chat_id 비노출)
+    """게이트할 단톡방 chat_id. 못 구하면 "" (소스에 실 chat_id 비노출).
+
+    우선순위: env `OWNER_GATE_GROUP` → `$B3OS_ROOT/.env` → `<훅파일>/../.env`.
+
+    ★`B3OS_ROOT` 가 핵심이다.★ 이 훅은 저장소 밖으로 복사돼서 돈다 — 런처가
+    `<멤버>/.claude/hooks/` 로 깐다. 그 자리에서 `../.env` 는 `<멤버>/.claude/.env` 라 ★없다.★
+    그러면 GROUP_ID 가 "" 가 되고, 어떤 그룹 메시지든 `chat_id != ""` 라서 ★게이트가 통째로
+    무력화된다★ — ★"깔았는데 안 도는" 상태는 안 깐 것보다 나쁘다★(깔렸다고 착각하니까).
+    같은 구조로 진행표시 훅이 죽어 있었다(#230).
+    """
     g = os.environ.get("OWNER_GATE_GROUP")
     if g:
         return g
-    try:
-        envp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
-        with open(envp) as f:
-            for line in f:
-                if line.startswith("TEAM_GROUP_ID="):
-                    return line.split("=", 1)[1].strip()
-    except Exception:
-        pass
+    root = os.environ.get("B3OS_ROOT", "")
+    here = os.path.dirname(os.path.abspath(__file__))
+    for envp in ([os.path.join(root, ".env")] if root else []) + [os.path.join(here, "..", ".env")]:
+        try:
+            with open(envp) as f:
+                for line in f:
+                    if line.startswith("TEAM_GROUP_ID="):
+                        v = line.split("=", 1)[1].strip()
+                        if v:
+                            return v
+        except Exception:
+            pass
     return ""
 
 
