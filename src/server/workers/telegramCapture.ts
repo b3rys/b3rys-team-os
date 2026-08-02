@@ -430,21 +430,11 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     console.log("[capture] disabled — CAPTURE_BOT_TOKEN 미설정 (inert)");
     return () => {};
   }
-  // 라우터 LLM(exaone) 상주 — cold-start(~9s) 제거. 재부팅/재시작마다 재핀 (GD 결정 2026-05-24).
-  void (async () => {
-    const url = process.env.TEAM_ROUTER_OLLAMA_URL ?? "http://127.0.0.1:11434/api/chat";
-    const model = process.env.TEAM_ROUTER_MODEL ?? "exaone3.5:2.4b";
-    try {
-      await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model, messages: [{ role: "user", content: "warmup" }], stream: false, keep_alive: -1 }),
-      });
-      console.log(`[capture] router model ${model} 상주 (keep_alive=-1)`);
-    } catch (e) {
-      console.error("[capture] model warmup failed:", (e as Error).message);
-    }
-  })();
+  // (제거) 라우터 LLM 상주 warmup — GD 2026-05-24 에 cold-start(~9s)를 없애려고 넣었던 것.
+  //   owner 판정이 결정론 규칙으로 바뀌면서(같은 PR) 라이브에서 그 모델을 부르는 곳이 없어졌다.
+  //   그런데 warmup 은 keep_alive=-1 로 ★무기한 상주★ 를 걸어서, 아무도 안 쓰는 모델이 GPU 를
+  //   계속 붙잡고 있었다(실측: exaone3.5:7.8b = 11GB). 없앨 cold-start 자체가 없으니 warmup 도 뺀다.
+  //   라우터 LLM 을 라이브로 되살리면 이 블록도 같이 되살려야 한다.
   let offset = 0;
   let stopped = false;
   // ★in-flight getUpdates 롱폴(timeout=25s)을 stop() 에서 즉시 끊기 위한 abort★ — 이게 없으면 restartCapture 시
