@@ -62,8 +62,17 @@ export function lineOrigin(
 ): LineOrigin {
   if (m.source === "system") return "시스템";
   const inRoom = m.to_agent_id === "broadcast" || m.type === "broadcast";
-  if (m.source === "user") return isGroupThread ? "단체" : "1:1";
-  return isGroupThread && inRoom ? "단체" : "팀버스";
+  if (isGroupThread) {
+    // 방 안에서는 팀장님 글도, 방에 올린 글도 전부 "방에 떠 있는 말" 이다.
+    // 방 스레드로 들어온 개인 수신 DM 만 팀버스다.
+    if (m.source === "user" || inRoom) return "단체";
+    return "팀버스";
+  }
+  // ★그룹이 아닌 방 — 상대가 팀장님이면 양방향 다 1:1 이다.★
+  //   예전에는 발신 축만 봐서 ★같은 1:1 방인데 내 답만 '팀버스' 로 찍혔다.★
+  //   한 방이 두 이름으로 보이면 읽는 쪽은 다른 경로라고 읽는다 — ★이 표시가 없애려던 바로 그 오독이다.★
+  if (m.source === "user" || m.to_agent_id === "user") return "1:1";
+  return "팀버스";
 }
 
 /**

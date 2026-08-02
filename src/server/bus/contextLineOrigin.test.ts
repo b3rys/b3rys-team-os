@@ -104,3 +104,44 @@ describe("주입 문맥은 줄마다 출처를 밝힌다", () => {
     expect(teamContextLabel("en")).not.toContain("Group-room");
   });
 });
+
+describe("한 방은 한 이름으로만 보인다", () => {
+  const DM = "task-1"; // 그룹이 아닌 스레드
+
+  /** 그 본문 줄의 출처 라벨만 뽑는다. */
+  const labelOf = (ctx: string, needle: string): string =>
+    lineFor(ctx, needle).match(/\[([^\s·]+) ·/)?.[1] ?? "(없음)";
+
+  test("★1:1 방에서는 내 답도 1:1 이다★ — 예전엔 내 답만 팀버스로 찍혔다", () => {
+    const db = setup();
+    put(db, DM, "user", "steve", "팀장님이 물었다", "user");
+    put(db, DM, "steve", "user", "내가 답했다", "agent");
+
+    const ctx = buildTeamContext(db, DM, "steve");
+    expect(labelOf(ctx, "팀장님이 물었다")).toBe("1:1");
+    expect(labelOf(ctx, "내가 답했다")).toBe("1:1");
+  });
+
+  test("★같은 스레드에서 두 이름이 나오면 안 된다★ — 방이 둘로 보인다", () => {
+    const db = setup();
+    put(db, DM, "user", "steve", "질문", "user");
+    put(db, DM, "steve", "user", "답", "agent");
+    put(db, DM, "user", "steve", "추가 질문", "user");
+
+    const ctx = buildTeamContext(db, DM, "steve");
+    const labels = new Set(["질문", "답", "추가 질문"].map((n) => labelOf(ctx, n)));
+    expect([...labels]).toEqual(["1:1"]);
+  });
+
+  test("팀원끼리의 비그룹 스레드는 그대로 팀버스", () => {
+    const db = setup();
+    put(db, DM, "bill", "steve", "버스 위임", "agent");
+    expect(labelOf(buildTeamContext(db, DM, "steve"), "버스 위임")).toBe("팀버스");
+  });
+
+  test("단톡방으로 온 개인 수신 DM 은 여전히 팀버스", () => {
+    const db = setup();
+    put(db, GROUP, "bill", "steve", "방으로 온 버스 DM", "agent");
+    expect(labelOf(buildTeamContext(db, GROUP, "steve"), "방으로 온 버스 DM")).toBe("팀버스");
+  });
+});
