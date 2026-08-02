@@ -312,11 +312,16 @@ export async function restartAll(members: ControlMember[]): Promise<Array<{ id: 
  * 폭주·이상 시 GD 가 대시보드 빨강 버튼(더블컨펌)으로 즉시 호출. openclaw 는 각 계정 disable +
  * 게이트웨이 restart(stop 아님 → auto-heal 무관)라 멤버 수만큼 게이트웨이가 깜빡일 수 있다(비상이라 허용).
  */
-export async function stopAll(members: ControlMember[]): Promise<Array<{ id: string; ok: boolean; detail: string }>> {
+/** 정지 결과 한 줄. `kept` = 정지 대상에서 ★일부러 제외★ 된 멤버(복구 코디).
+ *  ★화면이 이름으로 다시 추측하지 않게 서버가 표시한다.★ 예전에는 UI 가 `id !== "bill"` 로 걸렀는데,
+ *  그러면 코디네이터가 바뀌거나 ★그런 이름이 아예 없는 설치(공개)★ 에서 틀린다. */
+export type StopResult = { id: string; ok: boolean; detail: string; kept?: boolean };
+
+export async function stopAll(members: ControlMember[]): Promise<StopResult[]> {
   if (!execOn()) return [{ id: "*", ok: false, detail: "실행 OFF(APPROVAL_EXECUTION_ENABLED≠1) — 팀장 인가 필요" }];
-  const out: Array<{ id: string; ok: boolean; detail: string }> = [];
+  const out: StopResult[] = [];
   for (const m of members) {
-    if (isRecovery(m)) { out.push({ id: m.id, ok: true, detail: "제외(복구 코디용 — 끄려면 개별 정지)" }); continue; }
+    if (isRecovery(m)) { out.push({ id: m.id, ok: true, detail: "제외(복구 코디용 — 끄려면 개별 정지)", kept: true }); continue; }
     if (isAgentOff(m.id)) { out.push({ id: m.id, ok: true, detail: "이미 정지" }); continue; }
     const r = await setAgentEnabled(m.id, m.runtime, false);
     out.push({ id: m.id, ok: r.ok, detail: r.detail });

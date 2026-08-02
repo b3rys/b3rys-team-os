@@ -34,6 +34,7 @@ import { insertMessage } from "../db/inboxQueries";
 import { recoverB3osNativeInflight } from "../runtimes/b3osNative/recovery";
 import { recoverCodexInflight } from "../runtimes/codex/recovery";
 import { appendAuditFile } from "../lib/auditFile";
+import { broadcastAudience } from "../lib/teamRouter/ownerDecision";
 import { checkPingpong } from "./antiPingpong";
 import { recordReportDelivery } from "./deliveryRecord";
 import { applySync, mirrorDeadLetter } from "./syncPolicy";
@@ -47,7 +48,7 @@ function ownerDmChatId(db: Database): string | undefined {
 }
 import { injectOpenclawTelegramTurn, injectOpenclawDirectedTurn } from "../lib/openclawBridge";
 import { reactTelegramAsHermes, runHermesTeamTurn, HERMES_TURN_TIMEOUT_MS } from "../lib/hermesBridge";
-import { getChannel, resolveThreadKind } from "../channels/registry";
+import { getChannel, lineOrigin, resolveThreadKind } from "../channels/registry";
 import { coordinatorId } from "../lib/capabilities";
 import { ambientAgents } from "../lib/registry";
 import { buildDedupeKey } from "../../shared/envelopeSchema";
@@ -73,6 +74,16 @@ function attachmentsFromRow(row: PendingDispatchRow): BusAttachment[] | undefine
     });
   } catch {
     return undefined;
+  }
+}
+
+function isAgentAllHandsBroadcast(row: PendingDispatchRow): boolean {
+  if (row.source !== "agent" || !row.meta_json) return false;
+  try {
+    const reason = (JSON.parse(row.meta_json) as { all_hands?: unknown }).all_hands;
+    return typeof reason === "string" && reason.length > 0;
+  } catch {
+    return false;
   }
 }
 
@@ -155,6 +166,7 @@ export function inFlightGraceForRuntime(runtime: string | undefined): number {
   return IN_FLIGHT_GRACE_MS;
 }
 const UNKNOWN_SIDE_EFFECT_DETAIL = "execute_timeout_maybe_partial";
+// ★마커 판정은 한 곳(ownerDecision)만 쓴다★ — 같은 정규식이 두 곳에 있으면 한쪽만 고쳐진다.
 // pre-widen: allowlist of agent IDs to wake-dispatch.
 // BUS_DISPATCH_AGENTS="bill,codex,demis" → only those recipients get dispatched.
 // Recipients not in the list are skipped (row stays 'pending' until they're added).
@@ -789,6 +801,36 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Pro
  *   ★유사도 같은 걸로 서버가 막지 않는다★ (GD). ★팀원이 볼 수 있으면 팀원이 판단한다.★
  */
 
+/**
+ * ★주입문 한 줄을 만드는 곳은 여기 하나다.★
+ *
+ * 왜 함수로 뺐나 — 줄을 만드는 곳이 ★두 군데★ 였다. 팀버스 깨움(`buildTeamContext`)과
+ * 단톡방 인입(`telegramCapture`). 출처 표시를 앞쪽에만 붙였더니 ★단톡방으로 들어오는 주입문은
+ * 그대로 이름만 찍혔다★ — 같은 일을 하는 곳이 둘인데 하나만 고친 것이고, 그게 출처 표시가
+ * 고치려던 결함과 같은 종류다. 판정(`lineOrigin`)만 공유하면 형식이 다시 갈라지므로 ★줄 전체★ 를 공유한다.
+ *
+ * `agentId` 를 주면 자기 글에 ★ 를 붙이고 자신을 "너" 로 부른다. 안 주면(방 전체용 문맥)
+ * 그냥 이름으로 찍는다. `maxChars` 는 호출부가 정한다 — 경로마다 예산이 다르다.
+ */
+export function renderContextLine(
+  m: { from_agent_id?: string | null; to_agent_id?: string | null; body: string; created_at: string; source?: string | null; type?: string | null },
+  opts: { agentId?: string; isGroupThread: boolean; maxChars: number },
+): string {
+  const agentId = opts.agentId;
+  const who = (id: string | null | undefined): string => (id && id === agentId ? "너" : (id ?? "?"));
+  const full = m.body.replace(/\n/g, " ");
+  const cut = full.length > opts.maxChars;
+  const body = cut ? `${full.slice(0, opts.maxChars)} …(잘림: 원문 ${full.length}자)` : full;
+  const mine = m.from_agent_id === agentId;
+  // ★언제 일인지 안 알려주고 있었다.★ (GD 2026-07-13: "오래된걸 주면 안좋은거 아냐?")
+  //   ★맞다 — 오래됐다는 걸 ★모르게★ 주면 나쁘다.★ 3일 전 대화를 지금 일로 착각하면 엉뚱한 걸 실행한다.
+  //   ★알려주면 팀원이 판단한다.★ ("이건 어제 얘기구나") — 빈 문맥보다 낫고, 무표시 옛 문맥보다 안전하다.
+  // ★줄마다 출처를 밝힌다★ (GD 2026-08-02 "출처별로 나누던지(1:1 / 단체 / 팀버스)").
+  //   한 스레드에 방 글·버스 DM·시스템 통지가 ★섞여서★ 들어오는데 줄 모양이 같았다.
+  //   머리말 하나로 뭉뚱그리면 섞인 주입에서 또 틀린다 — 그래서 블록이 아니라 줄에 붙인다.
+  return `${mine ? "★" : " "}(${timeAgo(m.created_at)})[${lineOrigin(m, opts.isGroupThread)} · ${who(m.from_agent_id)} → ${who(m.to_agent_id)}] ${body}`;
+}
+
 /** 문맥에 담는 메시지 수 · 시간창 · 한 건 상한 · 전체 예산. ★실측으로 정했다 (추측 아님)★:
  *   · 한 건 200자였는데 ★웹조사 답변(258자·219자)이 잘렸다★ → 800자
  *   · 전체 예산 8,000자 — 그룹방 최근 12건 실측이 761자였으니 평소엔 근처도 안 간다. ★폭주 방지용 상한.★ */
@@ -798,11 +840,18 @@ const CTX_MSG_CHARS = Number(process.env.CTX_MSG_CHARS ?? 800);
 const CTX_TOTAL_CHARS = Number(process.env.CTX_TOTAL_CHARS ?? 8000);
 // ★단톡방(그룹 스레드) 전용 상한★ (GD 2026-07-16): 그룹방은 스레드 하나에 전 과제가 섞여, 12건·24h 를
 //   그대로 주면 판교·증시·민재 인사가 통째 붙어 팀원이 ★옛 일을 지금 일로 착각★한다(Ames·codex 실측).
-//   → 그룹방만 좁힌다: 자기것만 · 6시간 · 6건. (수집·작업 전용 스레드는 tg- 가 아니라 그대로 full)
+//   → 그룹방만 좁힌다: 자기것만 · 6시간 · 5건. (수집·작업 전용 스레드는 tg- 가 아니라 그대로 full)
 const CTX_HOURS_GROUP = Number(process.env.CTX_HOURS_GROUP ?? 6);
-// ★참고용 주입은 '자기것만' · 5건 (그룹·버스 통일, 분기 없음)★ (GD 2026-07-16 "전부 5개로 해. 분기 타지 말고").
+// ★이 주입은 '내 일 이어가기' 용이다.★ 답하는 질문: ★"내가 하던 일이 어디까지 왔나".★
+//   대상 = ★팀원 전원★ · 자기것만(from=나 OR to=나) · 한 건 800자(CTX_MSG_CHARS).
 //   from=나 OR to=나만 남기고 최근 5건. 남의 딴-대화(예: codex→demis 리뷰 팬아웃)를 걷어낸다.
-const CTX_MSGS_OWN = Number(process.env.CTX_MSGS_OWN ?? 6);
+//   (GD 2026-07-16 "전부 5개로 해. 분기 타지 말고" · 2026-08-02 재확인)
+//
+// ★`CAPTURE_CTX_MSGS`(telegramCapture.ts)와 값이 같아도 합치지 마라.★ 답하는 질문이 다르다 —
+//   저쪽은 "팀에 지금 무슨 일이 도나"(감독용)라서 ★자기것 필터가 없다.★
+//   ★필터 유무가 그 증거다★: 목적이 같다면 한쪽만 필터를 걸 이유가 없다.
+//   지금 둘 다 5인 것은 우연이고, 목적이 갈리면 값도 다시 갈린다.
+const CTX_MSGS_OWN = Number(process.env.CTX_MSGS_OWN ?? 5);
 
 export function buildTeamContext(db: Database, threadId: string, agentId?: string): string {
   try {
@@ -830,7 +879,6 @@ export function buildTeamContext(db: Database, threadId: string, agentId?: strin
     }
     if (!recent.length) return "";
 
-    const who = (id: string | null | undefined): string => (id && id === agentId ? "너" : (id ?? "?"));
     // ★잘림이 진짜 답을 잘랐다★ (GD 질문: "메시지가 크면?"). 실측: 최근 121건 중 4건이 200자 초과인데
     //   ★하필 웹조사 답변들이었다★ (라이프치히 258자 · 한스아이슬러 219자) → collector 가 ★잘린 답으로 종합★.
     //   → 한 건 상한을 올리고(800자), ★전체 예산★ 으로 막는다(무한정 커지지 않게).
@@ -839,14 +887,7 @@ export function buildTeamContext(db: Database, threadId: string, agentId?: strin
     let budget = CTX_TOTAL_CHARS;
     for (let i = recent.length - 1; i >= 0; i--) {   // 최신부터 담고, 예산 다 쓰면 옛 것을 버린다
       const m = recent[i]!;
-      const full = m.body.replace(/\n/g, " ");
-      const cut = full.length > CTX_MSG_CHARS;
-      const body = cut ? `${full.slice(0, CTX_MSG_CHARS)} …(잘림: 원문 ${full.length}자)` : full;
-      const mine = m.from_agent_id === agentId;
-      // ★언제 일인지 안 알려주고 있었다.★ (GD 2026-07-13: "오래된걸 주면 안좋은거 아냐?")
-      //   ★맞다 — 오래됐다는 걸 ★모르게★ 주면 나쁘다.★ 3일 전 대화를 지금 일로 착각하면 엉뚱한 걸 실행한다.
-      //   ★알려주면 팀원이 판단한다.★ ("이건 어제 얘기구나") — 빈 문맥보다 낫고, 무표시 옛 문맥보다 안전하다.
-      const line = `${mine ? "★" : " "}(${timeAgo(m.created_at)})[${who(m.from_agent_id)} → ${who(m.to_agent_id)}] ${body}`;
+      const line = renderContextLine(m, { agentId, isGroupThread: isGroupRoom, maxChars: CTX_MSG_CHARS });
       if (budget - line.length < 0 && lines.length > 0) break;
       budget -= line.length;
       lines.unshift(line);
@@ -1138,13 +1179,18 @@ function buildDispatchPlan(
     return { kind: "skip" };
   }
 
-  // @all-gating (GD 2026-05-27): a broadcast message wakes every recipient ONLY when its body
-  // carries an explicit wake-all marker (@all / @ALL / @b3rys / @group). Without the marker a
-  // broadcast is inbox-only — it lands in each inbox (visible) but does NOT proactively wake.
+  // @all-gating: a broadcast wakes every recipient ONLY when the team lead wrote it AND the body
+  // carries a wake-all marker (@all / @ALL / @b3rys / @group). Without both, a broadcast is
+  // inbox-only — it lands in each inbox (visible) but does NOT proactively wake.
   // Direct messages (to_agent_id != 'broadcast') always wake the addressed recipient.
-  // (user-source broadcasts are already excluded upstream by the source='agent' scope.)
+  //
+  // ★발신자를 함께 본다 — 마커만 보면 안 된다.★ 마커를 쓸 수 있는 것은 팀장님뿐이라는 계약은
+  // 수신행 생성(db/inbox/messages.ts)에서만 걸려 있었고 여기서는 안 걸려 있었다. 그래서
+  // 팀원 broadcast 에 수신행이 생기는 경로가 하나라도 생기면 팀원의 @all 이 전원을 다시 깨웠다.
+  // 지금은 수신행이 0이라 우연히 안전할 뿐이다 — 우연에 기대지 않도록 같은 판정을 여기에도 건다.
+  // 두 곳이 같은 broadcastAudience 를 쓰므로 한쪽만 고쳐서 어긋나는 일이 없다.
   const isBroadcast = row.to_agent_id === "broadcast" || row.type === "broadcast";
-  if (isBroadcast && !/@(all|b3rys|group)\b/i.test(row.body)) {
+  if (isBroadcast && !isAgentAllHandsBroadcast(row) && broadcastAudience(row.body, row.source).kind !== "all_hands") {
     db.prepare(
       `UPDATE message_recipient
        SET delivery_state = 'completed',

@@ -184,7 +184,9 @@ describe("emit③ request.created (acceptInbound)", () => {
   //   실제 수신자가 답해도 delegation 으로 오분류됐다. 수신 사실은 message_recipient 행이 정본이다.
   test("★부모가 broadcast 여도 실제 수신자가 답하면 followup★ (to_agent_id 대리값 금지)", () => {
     const db = setup();
-    const b = acceptInbound(db, env({ to_agent_id: "broadcast" }) as never, { dedupeWindowSec: 60 });
+    // 본문에 @all — 팀원 방 발언은 그 마커가 있어야 수신행이 생긴다(2026-08-01 규칙).
+    //   이 시험이 재는 건 팬아웃이 아니라 ★수신자가 답하면 followup 으로 분류되는가★ 다.
+    const b = acceptInbound(db, env({ to_agent_id: "broadcast", body: "@all 확인 부탁", explicit_recipients: ["steve"] }) as never, { dedupeWindowSec: 60 });
     expect(b.ok).toBe(true);
     if (!b.ok) return;
     // 부모의 to_agent_id 는 'broadcast' 지만, steve 는 수신자 행을 갖는다 = 받았다

@@ -14,10 +14,13 @@ import {
   agentActivity,
   acceptInbound,
 } from "../db/inboxQueries";
+import { coordinatorId } from "../lib/capabilities";
 import { appendAudit } from "../db/queries";
 import { recordReportDelivery } from "../bus/deliveryRecord";
 import { appendAuditFile } from "../lib/auditFile";
 import { maybeCreatePendingFollowup, createSelfFollowup } from "../bus/followupTracker";
+import { broadcastRecipientIds, isTeamOfficialMember } from "../lib/agentMembership";
+import { ambientAgents } from "../lib/registry";
 
 import { MAX_HOPS_DEFAULT } from "../../shared/envelopeSchema";
 import { loadAgentCreds } from "../lib/slack";
@@ -54,7 +57,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     if (!parsed.success) {
       return c.json({ error: "schema_validation", issues: parsed.error.issues }, 400);
     }
-    let env: EnvelopeInbound = parsed.data;
+    let env: EnvelopeInbound & { explicit_recipients?: string[] } = parsed.data;
     // Validate agent ids against registry (except special values)
     const known = deps.registeredAgentIds();
     const reserved = new Set(["user", "system", "moderator", "broadcast"]);
@@ -143,6 +146,87 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         .get(env.in_reply_to) as { thread_id: string } | undefined;
       if (parentThread?.thread_id) env = { ...env, thread_id: parentThread.thread_id };
     }
+    let allHandsEligibleRecipients: string[] | null = null;
+
+    // ★팀원 broadcast 게이트 (GD 2026-08-01)★
+    //
+    // 왜: `--to broadcast` 는 ★누구나 아무 때나★ 칠 수 있었고 검사도 기록도 없었다.
+    //   실측(70분): 팀원 broadcast ★47건 → wake 517회★. 1건이 11명을 깨우고, 깨어난 사람이 또 쏜다.
+    //   ★팀장님 @all 은 7명인데 팀원 혼잣말이 11명을 깨웠다★ — 구조가 뒤집혀 있었다.
+    //   룰에는 이미 "결과는 TERMINAL, 확인 답장 금지" 가 있었지만 지켜지지 않았다(내가 47건 중 5건).
+    //   → 판단을 9명에게 맡기지 않고 ★coordinator 한 곳으로 모은다.★
+    //
+    // 무엇: 전원 수신행+wake를 요청하는 단일 키 `all_hands`가 있으면
+    //   ★source 값과 무관하게★ 사유 + 정식·활성 명부 자격을 본다. source는 인바운드 값이라
+    //   신뢰 경계로 쓸 수 없고, 생략 시 agent가 기본값이라 게이트 조건으로도 의미가 없다.
+    //   현재 /api/inbox에는 서버가 인증한 호출자 신원이 없다. 따라서 from_agent_id 명부 검사는
+    //   등록되지 않았거나 비활성인 claimed sender를 막지만, 정식 팀원 id 사칭까지 막는 인증은 아니다.
+    //   coordinator 전용은 아니다. 팀원용 명시 공지 옵션이며, 사유가 남아 사후 판정이 가능하다.
+    //   팀장님(source=user)의 @all 은 이 게이트를 타지 않는다 — 라우터가 따로 판정한다.
+    // ★슬랙은 제외한다★ (2026-08-01 devon 실측 — 배포 직후 슬랙 답신이 막혔다).
+    //   슬랙 스레드에 답하는 유일한 경로가 `--to broadcast` 다(룰: kind="slack" → --to broadcast).
+    //   게이트의 목적은 ★단톡방 연쇄★ 를 끊는 것이지 슬랙 응답을 막는 것이 아니다.
+    //   ★내가 고치려던 것과 무관한 경로를 같이 잘랐다★ — 범위를 좁힌다.
+    if (env.to_agent_id === "broadcast" && env.all_hands) {
+      const roster = deps.agents?.() ?? ambientAgents();
+      const sender = roster.find((agent) => agent.id === env.from_agent_id);
+      if (!sender) {
+        const detail = { reason: env.all_hands, error: "sender_missing_from_registry", identity_basis: "claimed_from_agent_id" };
+        appendAudit(deps.db, env.from_agent_id, "agent_all_hands_blocked", null, detail);
+        appendAuditFile(env.from_agent_id, "agent_all_hands_blocked", null, detail);
+        return c.json({
+          error: "all_hands_roster_unavailable",
+          detail: "전체공지 발신자 자격을 명부에서 확인할 수 없습니다. 명부를 복구한 뒤 다시 보내세요.",
+        }, 503);
+      }
+      if (!isTeamOfficialMember(sender) || sender.enabled === false) {
+        const detail = {
+          reason: env.all_hands,
+          team_official_member: isTeamOfficialMember(sender),
+          enabled: sender.enabled !== false,
+          identity_basis: "claimed_from_agent_id",
+        };
+        appendAudit(deps.db, env.from_agent_id, "agent_all_hands_blocked", null, detail);
+        appendAuditFile(env.from_agent_id, "agent_all_hands_blocked", null, detail);
+        return c.json({
+          error: "all_hands_sender_ineligible",
+          detail: "전체공지는 정식·활성 팀원만 보낼 수 있습니다.",
+        }, 403);
+      }
+      allHandsEligibleRecipients = broadcastRecipientIds(roster, env.from_agent_id);
+      env = { ...env, explicit_recipients: allHandsEligibleRecipients };
+    }
+
+    const slackMetaForGate = findSlackMetaForThread(deps.db, env.thread_id ?? "");
+    if (env.source === "agent" && env.to_agent_id === "broadcast" && !slackMetaForGate) {
+      // ★예외는 없다.★ coordinator 도 마찬가지다 (GD 2026-08-01: "coordinator 도 예외 없어").
+      //   그래서 여기서 ★명부·capability 를 보지 않는다★ — 보는 순간 그게 유일한 구멍이 된다.
+      //   (예전엔 `rosterKnown`·`isCoordinator`·`reason` 을 계산했는데, 게이트를 뺄 때
+      //    조건만 지우고 변수가 남아 있었다. 예외 개념이 사라졌으니 계산도 지운다.)
+      // ★broadcast 에 대한 답을 broadcast 로 하지 않는다 (GD 2026-08-01)★ — 연쇄의 직접 고리다.
+      //   실측: 오늘 47건 중 18건이 이 형태였다. coordinator 라도 막는다(연쇄는 발신자를 안 가린다).
+      if (env.in_reply_to) {
+        const parent = deps.db
+          .prepare(`SELECT to_agent_id, source, from_agent_id FROM message WHERE id = ?`)
+          .get(env.in_reply_to) as { to_agent_id?: string; source?: string; from_agent_id?: string } | undefined;
+        // ★팀장님 @all 에는 방에서 답할 수 있어야 한다★ (2026-08-01 실측 — 배포 후 아무도 방에 답을 못 했다).
+        //   팀장님이 "@all 다들 인지했어?" 라고 물었는데 ★전원이 막혀서 방이 조용해졌다.★
+        //   막으려던 건 ★팀원끼리의 연쇄★ 지 팀장님 호출에 대한 답이 아니다.
+        //   그래서 부모가 팀장님(source=user)이면 통과, ★팀원 broadcast(source=agent)면 차단.★
+        const parentIsLeadCall = parent?.source === "user";
+        if (parent?.to_agent_id === "broadcast" && !parentIsLeadCall) {
+          return c.json({
+            error: "broadcast_reply_to_broadcast",
+            detail: "broadcast 에 대한 답은 broadcast 로 보내지 않습니다. 발신자에게 --to <이름>, 팀장님께는 --direct-to-gd 로 보내십시오.",
+          }, 403);
+        }
+      }
+      // ★coordinator 요구는 뺐다 (2026-08-01 실측)★ — 넣었더니 ★방이 통째로 조용해졌다.★
+      //   팀장님 "@all 다들 인지했어?" 에 아무도 방에 답하지 못했다(전원 1:1 로 우회).
+      //   내가 막으려던 것은 ★연쇄★ 지 방에서 말하는 것 자체가 아니었다. 과녁을 잘못 잡았다.
+      //   → 남기는 규칙은 ★하나뿐★: broadcast 에 broadcast 로 답하지 않는다(위 검사). 그게 고리다.
+    }
+
     // Phase 2a: dedupe(60s) + ensureThread + insertMessage + (audit) + broadcast → 공통 acceptInbound (P2)
     // audit는 onInserted(insert직후·broadcast직전)에 둬 기존 insert→audit→broadcast 순서 보존(Steve·Codex 리뷰 ②).
     const accepted = acceptInbound(deps.db, env, {
@@ -152,6 +236,26 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         const auditDetail = { thread_id: stored.thread_id, to: env.to_agent_id, type: env.type };
         appendAudit(deps.db, env.from_agent_id, "message_sent", stored.id, auditDetail);
         appendAuditFile(env.from_agent_id, "message_sent", stored.id, auditDetail);
+        if (allHandsEligibleRecipients) {
+          const recipientIds = (deps.db
+            .prepare(`SELECT agent_id FROM message_recipient WHERE message_id = ? ORDER BY agent_id`)
+            .all(stored.id) as Array<{ agent_id: string }>).map((row) => row.agent_id);
+          const zeroReason = recipientIds.length > 0
+            ? null
+            : allHandsEligibleRecipients.length === 0
+              ? "sender_only"
+              : "registry_db_out_of_sync";
+          const allHandsDetail = {
+            reason: env.all_hands,
+            recipient_ids: recipientIds,
+            recipient_count: recipientIds.length,
+            eligible_recipient_count: allHandsEligibleRecipients.length,
+            zero_reason: zeroReason,
+            identity_basis: "claimed_from_agent_id",
+          };
+          appendAudit(deps.db, env.from_agent_id, "agent_broadcast_all_hands", stored.id, allHandsDetail);
+          appendAuditFile(env.from_agent_id, "agent_broadcast_all_hands", stored.id, allHandsDetail);
+        }
         // ★배달 기록 (ingress) — 에이전트가 ★자기 발신 도구로★ 보낸 것도 남긴다.★ (2026-07-13)
         //
         // ★왜 필요한가★: 서버가 대신 발송하는 런타임(게이트웨이 hermes·openclaw)만 배달 기록이 남았다.

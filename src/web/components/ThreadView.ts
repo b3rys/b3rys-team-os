@@ -1,3 +1,4 @@
+import { threadRecipient } from "./stopAllSummary";
 import { store, type Message } from "../store";
 import { sendMessage } from "../ws";
 import { formatDistanceToNow } from "date-fns";
@@ -83,12 +84,19 @@ export function renderThreadView(root: HTMLElement): void {
         if (!input || !input.value.trim()) return;
         const body = input.value.trim();
         input.value = "";
+        const to = threadRecipient(t?.participants);
+        if (!to) {
+          // ★받는 사람을 못 정하면 안 보낸다.★ 예전에는 특정 팀원 id 로 폴백했는데,
+          //   그런 이름이 없는 설치에서는 ★존재하지 않는 상대로 발신★ 된다.
+          await showAlert(pick("받는 사람을 정할 수 없습니다 — 이 대화에 팀원이 없습니다.",
+                               "No recipient — this thread has no member participant."));
+          input.value = body;
+          return;
+        }
         // 전송 즉시 바닥으로 — 내 메시지가 뜰 자리를 보여줘야 "전송됨"을 안다(리뷰 #1).
         // 바닥에 있으면 도착 재렌더도 일반 캡처 로직으로 자연히 stick 하므로 별도 플래그는 불필요.
         // (도착 전에 사용자가 다시 위로 올라가면 보존 — Chat 과 동일한 의도 해석.)
         applyScrollStick(root.querySelector<HTMLElement>("#thread-msgs"), stickToBottom());
-        const recipients = (t?.participants ?? []).filter((p) => p !== "user");
-        const to = recipients[0] ?? "bill";
         const result = await sendMessage({
           from_agent_id: "user",
           to_agent_id: to,

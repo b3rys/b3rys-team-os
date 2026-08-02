@@ -136,6 +136,18 @@ describe("★막힌 수집을 찾는다 — 정확히 그것만★", () => {
     msg(db, "t7", "steve", "hermes", 1);
     expect(findStalledCollections(db, AGENTS)).toHaveLength(0);
   });
+
+  it("★6분 경과는 아직 재촉하지 않는다★ — 10분 기본값을 숫자로 고정", () => {
+    msg(db, "deadline-6", "steve", "demis", 6);
+    msg(db, "deadline-6", "steve", "hermes", 6);
+    expect(findStalledCollections(db, AGENTS)).toHaveLength(0);
+  });
+
+  it("★11분 경과면 재촉한다★ — 10분 기본값을 숫자로 고정", () => {
+    msg(db, "deadline-11", "steve", "demis", 11);
+    msg(db, "deadline-11", "steve", "hermes", 11);
+    expect(findStalledCollections(db, AGENTS)).toHaveLength(1);
+  });
 });
 
 
@@ -256,7 +268,7 @@ describe("★윈도 경계 — 훼손된 시야로 멀쩡한 팀원을 고발하
     expect(findStalledCollections(db, AGENTS)).toHaveLength(0);   // ★깨우면 안 된다★
   });
 
-  it("★너무 늦은 건 깨우지 않는다★ — 5분 마감인데 90분 뒤 재촉은 소음이다", () => {
+  it("★너무 늦은 건 깨우지 않는다★ — 10분 마감인데 90분 뒤 재촉은 소음이다", () => {
     msg(db, "w2", "steve", "demis", 89);
     msg(db, "w2", "steve", "hermes", 89);
     // hermes 가 진짜로 안 왔지만 ★89분이 지났다★ → 지금 깨워봐야 도움이 안 된다

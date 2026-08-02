@@ -46,18 +46,33 @@ export function finalizeApprovalDelivery(
 /** 승인 요청의 작업 지문(sha256 16hex) — 전체 command 배열 + 파일 ★이름★ 집합 + method + reason.
  *  용도는 하나뿐이다: 상관키 테이블/CAS가 ★결정↔요청을 1:1로 맞추는 것★(다른 요청의 결정이 이 슬롯에 배달되는 것을 막는다).
  *
- *  ★이 해시가 하지 ★않는★ 것 — 알려진 갭(2026-07-28 Codex·Bill 리뷰에서 확인, 재현 테스트는 아래 파일 참조):★
- *   1. ★권한 grant 재사용을 막지 못한다.★ grant scope는 permissionGate.scopeKeyForOperation이 따로 만들고
- *      그 안에 이 해시가 들어가지 않는다(permissionGate.ts에 operation_hash 참조 0건). scope의 target은
- *      ★앞 240자만★ 쓰므로(permissionGate.ts:216), 240자 prefix가 같고 뒤가 다른 두 작업은 ★같은 grant★로 취급된다.
- *      게다가 이미 grant가 있으면 requestApprovalPopup이 조기 반환해 상관키·CAS·finalize를 ★전부 건너뛴다★.
- *   2. ★승인 후 실행 직전의 변경을 잡지 못한다.★ 이 해시는 승인 ★전에 한 번★ 계산해 그 캡처값을 그대로
- *      finalize에 넘긴다 — 실행 직전에 다시 계산해 비교하지 않는다.
- *   3. ★같은 파일의 내용 변경을 구분하지 못한다.★ files는 Object.keys()라 ★이름만★ 담는다.
- *      command 경로는 (배열이든 문자열이든) 전체가 들어가 구분되지만, fileChanges 경로는 이름 집합이 같으면 해시가 같다.
- *
- *  → 위 3건은 후속 작업에서 다룬다(전체 canonical operation을 grant scope에 결합 + 실행 직전 재해시 +
- *     파일 내용 해시). ★그 전까지 B3OS_CODEX_APPSERVER를 켜지 않는다 — release blocker.★ */
+ *  ★이 해시가 하지 ★않는★ 것 — 알려진 갭 3건과 현재 상태:★
+ *   1. ★권한 grant 재사용을 막지 못한다★ → ★S5 에서 닫혔다.★
+ *      grant scope 의 target 이 앞 240자만 쓰던 문제를, ★이 함수가 만드는 값 안에 명령 전체의 지문을 넣어★
+ *      절단선 안에 남기는 방식으로 해결했다(공용 permissionGate 는 무수정). 실제 DB 경로 회귀 테스트로 고정.
+ *   2. ★같은 파일의 내용 변경을 구분하지 못한다★ → ★S4 에서 닫혔다.★ approvalContentDigest 가 내용을 basis 에 넣는다.
+ *      (단 ★권한 열쇠(scope)에는 내용이 여전히 안 들어간다 — 이건 버그가 아니라 S2/S3 설계 의도다.★
+ *       넣으면 같은 파일을 고칠 때마다 열쇠가 달라져 '항상 허용' 이 영원히 안 붙는다.)
+ *   3. ★승인 후 실행 직전의 변경을 잡지 못한다★ → ★고치지 않는다.★
+ *      이 해시는 승인 ★전에 한 번★ 계산해 그 캡처값을 finalize 에 넘긴다 — 실행 직전에 다시 계산하지 않는다.
+ *      ★그런데 이 버전(codex-cli 0.144.6 · rust-v0.144.6 / 5d1fbf26)에서는 그 창이 열리지 않는다.★ 근거:
+ *        · patchUpdated 는 apply_patch ★입력 스트리밍 progress★ 이고 Feature::ApplyPatchStreamingEvents 가
+ *          ★default_enabled: false★ 다(features/src/lib.rs:957, Stage::UnderDevelopment).
+ *          켜도 최종 tool call·승인 요청 ★이전★ 에 끝난다.
+ *        · ★승인 대기 중 같은 call_id 의 patch 를 갈아끼우는 경로가 없다★ — request_patch_approval 이 changes 를
+ *          ★값으로 받아★ call_id 로 oneshot 채널을 걸고 기다린다(session/mod.rs:2249~).
+ *        · ★steer 는 즉시 반영되지 않는다★ — pending_input 으로 큐잉되어 ★다음 모델 요청 전에★ drain 된다
+ *          (session/mod.rs:3931~). 그래서 기존 승인이 해소되기 전에는 실행되지 않고, 거절하면 ★새 itemId 의
+ *          별도 승인★ 으로 다시 올라온다.
+ *        · 반대로 ★받는 쪽은 열려 있다★ — 갱신본이 오기만 하면 이쪽 색인은 승인 대기 중에도 갱신되어 스냅샷과
+ *          갈린다. 즉 ★막힌 곳은 보내는 쪽이다.★
+ *        · patchUpdated 자체는 규격에 ★실재하는 서버 알림★ 이다(ServerNotification 68종 중 하나).
+ *          ★"프로토콜에 없다" 로 쓰면 틀린다.★
+ *      ★이 판정은 버전에 묶인다.★ codex 가 저 기능을 기본 활성으로 바꾸거나 승인 중 갱신 경로를 만들면 ★다시 열린다.★
+ *      재확인 지점을 넣는다면 ★finalize 직전 하나★ 다 — 사람의 ★내용-특정 동의가 존재하는 곳이 거기뿐★ 이기 때문이다
+ *      (grant 경로는 애초에 내용을 안 보고 준 동의라 재확인할 대상이 없다).
+ *      ★남는 한계★: 결정을 돌려준 ★이후★ codex 가 실행하기까지의 구간은 ★관측 불가★ 다(벤더 안쪽).
+ *      어디에 재확인을 두든 그 구간은 남는다 — ★"완전히 닫았다" 고 쓰면 안 된다.★ */
 export function approvalOperationHash(req: ApprovalRequest): string {
   const p = req.params as Record<string, any>;
   const basis: Record<string, unknown> = {

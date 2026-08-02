@@ -47,15 +47,27 @@ def _react_self_id():
 
 
 def _team_group_env():
-    # team-collab/.env 의 TEAM_GROUP_ID 폴백 (소스에 실 chat_id 비노출). 없으면 "".
-    try:
-        envp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
-        with open(envp) as f:
-            for line in f:
-                if line.startswith("TEAM_GROUP_ID="):
-                    return line.split("=", 1)[1].strip()
-    except Exception:
-        pass
+    """b3os `.env` 의 TEAM_GROUP_ID (소스에 실 chat_id 비노출). 못 찾으면 "".
+
+    ★이 파일은 저장소 밖으로 복사돼서 돈다★ — 런처가 멤버 워크스페이스
+    `<멤버>/.claude/hooks/` 로 깐다. 그래서 자기 위치 기준 `../.env` 는 ★저장소 안에서만★
+    맞고 배포된 자리에서는 `<멤버>/.claude/.env` 를 가리켜 ★존재하지 않는다.★
+    빈 값이 되면 owner-skip 이 fail-open 이라 ★그룹방에서 전원이 반응한다.★
+    → 런처가 훅 커맨드에 실어주는 `B3OS_ROOT` 를 먼저 보고, 없으면 예전 경로로 떨어진다
+      (저장소 안에서 직접 부르는 경우가 그 폴백으로 그대로 산다).
+    """
+    root = os.environ.get("B3OS_ROOT", "")
+    here = os.path.dirname(os.path.abspath(__file__))
+    for envp in ([os.path.join(root, ".env")] if root else []) + [os.path.join(here, "..", ".env")]:
+        try:
+            with open(envp) as f:
+                for line in f:
+                    if line.startswith("TEAM_GROUP_ID="):
+                        v = line.split("=", 1)[1].strip()
+                        if v:
+                            return v
+        except Exception:
+            pass
     return ""
 
 
@@ -93,6 +105,26 @@ def _pick_emoji(text):
     return "👀"
 
 
+def _pick_turn_key(tags, ext):
+    """이 턴의 진행 메시지를 띄울 방 → (chat_id, message_id). 없으면 None.
+    ★토큰이 필요 없는 순수 계산★ — 그래서 handle_react 가 토큰 검사보다 먼저 부른다.
+    DM(<channel>) 우선, 없으면 그룹 주입(<external_message>). 같은 종류가 여럿이면 마지막 것."""
+    for attrs, _ in reversed(tags):
+        cid = re.search(r'chat_id="([^"]+)"', attrs)
+        mid = re.search(r'message_id="([^"]+)"', attrs)
+        if cid and mid:
+            return (cid.group(1), mid.group(1))
+    for attrs, _ in reversed(ext):
+        tgmsg = re.search(r'tg_msg_id="([^"]+)"', attrs)
+        thread = re.search(r'thread="([^"]+)"', attrs)
+        if tgmsg and thread:
+            chat = thread.group(1)
+            if chat.startswith("tg-"):
+                chat = chat[3:]
+            return (chat, tgmsg.group(1))
+    return None
+
+
 def handle_react(state_dir, data):
     """들어온 텔레그램 메시지에 즉시 내용기반 ack 이모지 — 툴이 없는 텍스트 답변에도 '받았어요' 신호.
     UserPromptSubmit 는 prompt 안에 <channel> 태그가 들어옴(transcript 아님).
@@ -103,6 +135,24 @@ def handle_react(state_dir, data):
     # <external_message>(capture 주입, 그룹 @별칭 등) — 주입 = 그 봇이 owner 확정이라 무조건 👀(owner-check 불필요).
     ext = [(a, b) for a, b in re.findall(r"<external_message\b([^>]*)>(.*?)</external_message>", prompt, re.DOTALL) if "telegram" in a]
     _dbg(state_dir, f"react entry plen={len(prompt)} tags={len(tags)} ext={len(ext)}")
+    # ── 이 턴의 방을 먼저 확정한다 (★토큰 검사보다 위★) ──────────────────────
+    # ★방을 정하는 데 토큰이 필요 없다★ — 프롬프트에서 뽑아 파일에 쓰거나 지우는 것뿐이다.
+    # 아래(리액션 전송)에 두면 ★토큰을 못 읽는 턴에 방이 갱신도 삭제도 안 되고 옛값이 남는다.★
+    # 그러면 다음 턴에 handle_pre 가 그 옛값을 읽어 ★엉뚱한 방에 진행 메시지를 띄운다★ —
+    # 버스로 깨운 작업의 명령줄이 단톡방에 찍힌 적이 있다. ★터지면 공개된다.★
+    # Stop 에서도 지우지만 인터럽트 등으로 Stop 이 안 터지면 남는다.
+    #
+    # ★한 프롬프트에 DM(<channel>)과 그룹 주입이 같이 오면 DM 을 쓴다.★
+    #   근거: 틀렸을 때 손해가 작은 쪽이다. DM 에 잘못 뜨면 당사자만 보지만 단톡방은 공개다.
+    #   같은 종류가 여럿이면 마지막 것을 쓴다.
+    # 방 정보가 아예 없으면(버스 깨움 등) ★지운다★ → handle_pre 는 기존 폴백으로 내려간다.
+    turn_key = _pick_turn_key(tags, ext)
+    _sid = data.get("session_id", "default")
+    if turn_key:
+        _save_turn_channel(state_dir, _sid, turn_key[0], turn_key[1])
+    else:
+        _clear_turn_channel(state_dir, _sid)
+
     if not tags and not ext:
         return
     token = read_token(state_dir)
@@ -111,14 +161,12 @@ def handle_react(state_dir, data):
     # 배치/인터럽트로 여러 메시지가 한 prompt 에 묶이면 전부 react (마지막만 X). fix 2026-05-25.
     # 극단 batch 오버헤드 방어로 마지막 6개만.
     seen = set()
-    last_key = None
     for attrs, body in tags[-6:]:
         cid = re.search(r'chat_id="([^"]+)"', attrs)
         mid = re.search(r'message_id="([^"]+)"', attrs)
         if not (cid and mid):
             continue
         key = (cid.group(1), mid.group(1))
-        last_key = key
         if key in seen:
             continue
         seen.add(key)
@@ -142,9 +190,8 @@ def handle_react(state_dir, data):
         seen.add(key)
         _dbg(state_dir, f"react send (injected) chat={key[0]} msg={key[1]}")
         tg_react(token, key[0], key[1], _pick_emoji(body))
-    # 이 turn 의 채널 기억 → handle_pre 가 progress 를 '작업한 방'에만 띄움 (방별 분리, 2026-05-27 GD).
-    if last_key:
-        _save_turn_channel(state_dir, data.get("session_id", "default"), last_key[0], last_key[1])
+    # 이 turn 의 채널은 ★위(토큰 검사 전)에서 이미 저장·삭제했다★ — _pick_turn_key 참조.
+    # 여기서 다시 저장하지 않는다. 저장을 토큰 뒤에 두면 토큰 없는 턴에 옛 방이 남는다.
 
 
 # ── PreToolUse ──────────────────────────────────────────────

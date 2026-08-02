@@ -10,21 +10,61 @@ import {
   classifyIntent,
 } from "./_shared";
 import { coordinatorId } from "../capabilities";
+import { broadcastRecipientIds } from "../agentMembership";
 import { detectExplicitTargets, stripQuotedForRouting } from "./mention";
 import { routeDefaultIntakeLLM } from "./defaultIntake";
 
 // @all/@b3rys/@group — broadcast-all marker. Checked before explicit_mention.
 const BROADCAST_MARKER_RE = /@(all|b3rys|group)\b/i;
 
-// Enabled agents for broadcast: reads BUS_DISPATCH_AGENTS env (comma-sep ids).
-// Falls back to all agents in roster if unset.
+/**
+ * ★전체 호출 마커가 본문에 있나★ — 이 정규식은 여기 하나뿐이다.
+ *
+ * 예전엔 같은 리터럴이 `wakeDispatcher` 에도 박혀 있었다. ★한쪽만 고치면 수신행은 0인데
+ * 깨우기는 하거나 그 반대가 된다★ — 같은 질문에 답이 둘이 되는 그 형태다.
+ */
+export function hasBroadcastAllMarker(text: string): boolean {
+  return BROADCAST_MARKER_RE.test(stripQuotedForRouting(text));
+}
+
+/**
+ * ★@all 대상 = 정식 팀원(agents.json 의 team_official_member) — 그것 하나만 본다.★ (GD 2026-08-01)
+ *
+ * 예전엔 `BUS_DISPATCH_AGENTS` env 를 읽었다. 그 env 는 ★손으로 유지하는 두 번째 명단★ 이고,
+ * 정본(agents.json)과 갈렸다 — 실측: env 7명 vs 정식팀원 8명이라 ★lui·ames 가 @all 에서 통째로 빠졌다.★
+ * `message_recipient` 에 두 사람 행이 아예 없었다(안 읽은 게 아니라 안 갔다).
+ *
+ * ★명단을 하나로 만드는 게 고침의 핵심이다.★ env 나 보강파일을 "같이 읽게" 하면 명단이 둘로 남아
+ * 다음 영입 때 또 갈린다. wake allowlist(`busDispatchAllowlist`)는 별개 관심사라 건드리지 않는다.
+ *
+ * ★판정은 `broadcastRecipientIds` 하나가 한다★ — 팀원 broadcast 팬아웃도 같은 함수를 쓴다.
+ * 여기서 조건을 다시 쓰면 같은 질문에 답이 둘이 되고, 그게 이 결함의 원인이었다.
+ */
 function broadcastTargets(agents: AgentRecord[]): string[] {
-  const env = process.env.BUS_DISPATCH_AGENTS;
-  if (env) {
-    const allowed = new Set(env.split(",").map((s) => s.trim()).filter(Boolean));
-    return agents.filter((a) => allowed.has(a.id)).map((a) => a.id);
-  }
-  return agents.map((a) => a.id);
+  return broadcastRecipientIds(agents);
+}
+
+/**
+ * ★방 발언이 팀원 inbox 로 전달될 대상★ — 본문의 멘션으로 정한다.
+ *
+ * 방 게시와 팀원 전달이 `broadcast` 한 단어에 묶여 있어서 ★어디에 말하든 전원이 깨어났다.★
+ * 갈라야 할 축은 "몇 명" 이 아니라 ★"애초에 전달이 필요한 발송인가"★ 다 (GD 2026-08-01).
+ *
+ * 실측(오늘 방 발언 81건): ★멘션 없음 51건 → 답 달린 것 0건★ · 멘션 있음 30건 → 답 27건.
+ * ★멘션 없는 발언에 답이 달린 사례가 하나도 없다★ — 이 축으로 잘라도 끊기는 대화가 없다.
+ * (그 51건은 대부분 팀장님께 드리는 답이었다. 오늘은 게이트 테스트라 평소보다 부풀어 있다.)
+ *
+ * ★멘션 판정은 `detectExplicitTargets` 하나만 쓴다★ — 한글 별칭·조사·인용 제외를 이미 안다.
+ * 여기서 정규식을 새로 쓰면 그게 ★두 번째 판정★ 이 되고, 그게 이 결함의 원인이었다.
+ */
+export function broadcastAudience(text: string, source?: string): { kind: "all_hands" | "none" } {
+  // ★@all 은 팀장님 전용이다.★ (GD 2026-08-01: "멘션은 팀장만 하는 거라고")
+  //   팀원이 본문에 @all 을 써도 마커로 치지 않는다 — ★방에 말하는 것 자체는 그대로다.★
+  //   실측: 그날 팀원이 쓴 @all 중 전체공지 목적은 ★검증용 1건뿐★ 이고 나머지는 전부
+  //   ★"@all 이라는 단어를 문장 안에서 언급"★ 한 것이었다(예: "결함은 그중 하나(@all)에만").
+  //   ★언급만 해도 8명이 깨어났다.★ 인용해 답하는 경우도 같은 문제의 부분집합이다.
+  if (source !== "user") return { kind: "none" };
+  return { kind: hasBroadcastAllMarker(text) ? "all_hands" : "none" };
 }
 
 export function routeTeamMessage(
@@ -37,7 +77,7 @@ export function routeTeamMessage(
   // 라이브 멘션 판정에만 적용 — 원문 text 는 다른 용도 위해 보존.
   const liveText = stripQuotedForRouting(text);
   // 0) @all/@b3rys/@group → broadcast all enabled agents. Checked BEFORE explicit_mention.
-  if (BROADCAST_MARKER_RE.test(liveText)) {
+  if (hasBroadcastAllMarker(text)) {
     return {
       targetAgentIds: broadcastTargets(agents),
       reason: "broadcast_marker",
@@ -239,7 +279,7 @@ export async function routeTeamMessageHybrid(
   // 으로만 결정한다. 종료·주제전환을 자동 추정해 owner 를 비우거나 codex 로 넘기지 않는다.
 
   // 0.5) @all/@b3rys/@group → broadcast all enabled agents. Checked BEFORE explicit_mention.
-  if (BROADCAST_MARKER_RE.test(liveText)) {
+  if (hasBroadcastAllMarker(text)) {
     return {
       targetAgentIds: broadcastTargets(agents),
       reason: "broadcast_marker",

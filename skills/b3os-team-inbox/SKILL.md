@@ -1,6 +1,8 @@
 ---
 name: b3os-team-inbox
 description: the team lead AI Team 6 agent 가 message bus 와 대화하는 도구. inbox 조회, 메시지 전송, 읽음 표시. claude_channel runtime agent (maintainer/agent A/agent B/agent C) 가 자기 inbox 폴링하거나 응답할 때 사용. Slack 에서 멘션 받은 후 응답할 때, 다른 agent 와 thread 토론할 때, 사용자에게 보고할 때 모두 이 스킬로 envelope 보냄. ★슬랙에 글을 올리거나 슬랙에서 팀원을 부를 때도 이 스킬(slack-post.sh)을 쓴다 — 슬랙은 @멘션이 없으면 상대에게 도달하지 않는다.★
+trigger: message a teammate
+entry: scripts/send.sh · inbox.sh
 ---
 
 # b3os-team-inbox
@@ -98,6 +100,21 @@ skills/b3os-team-inbox/scripts/send.sh \
 ```
 
 서버가 **DB 에 기록하고 그 방에 게시한다.** (`--thread` 는 그 방의 thread id — 주입문이 알려준다)
+
+**기본 `--to broadcast` 는 방에만 올라가고 팀원을 깨우지 않는다.** 전원이 반드시 봐야 하는 공지는
+사유를 한 줄로 적어 `--all-hands` 를 명시한다:
+
+```bash
+skills/b3os-team-inbox/scripts/send.sh \
+  --to broadcast --thread <그룹 thread> \
+  --all-hands "전원이 봐야 하는 이유" \
+  --body "공지 내용"
+```
+
+- 사유는 필수다.
+- 정식·활성 팀원 전원에게 수신행을 만들고 실제로 깨운다(발신자 제외).
+- 사유·수신자·수신자 수가 감사 기록에 남는다. 남용도 그대로 보인다.
+- `--all-hands` 없는 broadcast는 방 게시만 하며 아무도 깨우지 않는 것이 기본이다.
 
 **응답**
 | 결과 | 뜻 |

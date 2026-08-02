@@ -101,12 +101,14 @@ export function writeClaudeBridgeFiles(id: string): ClaudeBridgePaths {
  *  1:1 텔레그램 DM 턴을 reply 없이 끝내려 하면 차단·재프롬프트(Claude send-drift 안전망, GD 2026-07-03).
  *  워크스페이스 스코프라 user 전역 ~/.claude·오너 Claude Code엔 영향 0. 기존 settings.json 있으면 Stop 배열에 병합(중복 방지).
  *  best-effort — 설치 실패해도 활성화는 막지 않는다. */
-export function installReplyGuardHook(id: string): void {
+export function installReplyGuardHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
   assertId(id);
-  const dotClaude = `${MEMBERS_ROOT}/${id}/.claude`;
+  const membersRoot = roots?.membersRoot ?? MEMBERS_ROOT;
+  const repoRoot = roots?.repoRoot ?? REPO_ROOT;
+  const dotClaude = `${membersRoot}/${id}/.claude`;
   const hookDst = `${dotClaude}/hooks/reply-guard.py`;
   const settingsPath = `${dotClaude}/settings.json`;
-  const src = `${REPO_ROOT}/src/server/runtimes/claude/reply-guard.py`;
+  const src = `${repoRoot}/src/server/runtimes/claude/reply-guard.py`;
   try {
     if (!existsSync(src)) return; // 소스 없으면 skip
     mkdirSync(`${dotClaude}/hooks`, { recursive: true });
@@ -131,13 +133,16 @@ export function installReplyGuardHook(id: string): void {
  *  PreToolUse(pre)=매 툴마다 진행 한 줄 append · Stop(stop)=턴 끝 진행 삭제 · PreCompact(compact)=압축 알림.
  *  봇 컨텍스트(어느 채팅에 쏠지)는 세션 env TELEGRAM_STATE_DIR(텔레그램 채널이 세팅)에서 읽으므로 별도
  *  래퍼/봇-스코프 case 불필요 — 워크스페이스 스코프라 오너·타 봇 무영향(글로벌 telegram-progress.sh 래퍼를
- *  ★공개 사용자·신규 멤버까지★ 대체). claude 런타임 전용. 멱등(evt별 includes 가드). best-effort. */
-export function installProgressHook(id: string): void {
+ *  ★공개 사용자·신규 멤버까지★ 대체). claude 런타임 전용. 멱등(evt별 reconcile). best-effort.
+ *  `roots` 는 ★테스트 이음매★ — 안 주면 실제 경로를 쓴다(실 FS 격리: seedGroupIntoClaudeMembers 와 같은 방식). */
+export function installProgressHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
   assertId(id);
-  const dotClaude = `${MEMBERS_ROOT}/${id}/.claude`;
+  const membersRoot = roots?.membersRoot ?? MEMBERS_ROOT;
+  const repoRoot = roots?.repoRoot ?? REPO_ROOT;
+  const dotClaude = `${membersRoot}/${id}/.claude`;
   const hookDst = `${dotClaude}/hooks/telegram-progress.py`;
   const settingsPath = `${dotClaude}/settings.json`;
-  const src = `${REPO_ROOT}/hooks/telegram-progress.py`;
+  const src = `${repoRoot}/hooks/telegram-progress.py`;
   try {
     if (!existsSync(src)) return; // 소스 없으면 skip
     mkdirSync(`${dotClaude}/hooks`, { recursive: true });
@@ -148,21 +153,132 @@ export function installProgressHook(id: string): void {
       try { const p = JSON.parse(readFileSync(settingsPath, "utf-8")); if (p && typeof p === "object") settings = p; } catch { /* keep {} */ }
     }
     const hooks = (settings.hooks && typeof settings.hooks === "object" ? settings.hooks : {}) as Record<string, unknown>;
-    const addOnce = (evt: string, matcher: string, mode: string) => {
+    // ★"있으면 건너뛴다" 가 아니라 "달라졌으면 맞춘다".★ 예전 구현은 telegram-progress.py 가
+    //   settings.json 에 이미 있으면 통째로 skip 했다. 그래서 커맨드가 바뀌어도(예: env 추가)
+    //   ★기존 멤버는 옛 커맨드를 그대로 들고 있었다★ — 훅 파일만 새것이고 배선은 옛것이 된다.
+    //   실제로 그 상태에서 owner-skip 이 그룹 ID 를 못 구해 fail-open 으로 돌았다.
+    const reconcile = (evt: string, matcher: string, mode: string) => {
       const arr = Array.isArray(hooks[evt]) ? (hooks[evt] as unknown[]) : [];
-      if (!JSON.stringify(arr).includes("telegram-progress.py")) {
-        const entry: Record<string, unknown> = { hooks: [{ type: "command", command: `python3 "${hookDst}" ${mode}` }] };
-        if (matcher) entry.matcher = matcher; // Stop 은 matcher 없음(글로벌 배선과 동형)
-        arr.push(entry);
-      }
+      // ★B3OS_ROOT 를 실어 보낸다★ — 훅은 저장소 밖(멤버 워크스페이스)에서 돌기 때문에
+      //   자기 위치로는 b3os `.env`(TEAM_GROUP_ID)를 못 찾는다. 실 chat_id 는 소스에 안 박는다.
+      // ★OWNER_GATE_SELF 도 싣는다★ — `react` 모드가 owner 판정을 하므로 자기 id 가 필요하다.
+      //   훅은 TELEGRAM_STATE_DIR 로도 유추하지만, ★유추가 틀리면 남의 이름으로 판정한다★
+      //   (owner-gate 에서 겪은 것). 런처는 id 를 아니까 추측하게 두지 않는다.
+      const command = `B3OS_ROOT="${repoRoot}" OWNER_GATE_SELF="${id}" python3 "${hookDst}" ${mode}`;
+      const entry: Record<string, unknown> = { hooks: [{ type: "command", command }] };
+      if (matcher) entry.matcher = matcher; // Stop 은 matcher 없음(글로벌 배선과 동형)
+      const idx = arr.findIndex((e) => JSON.stringify(e).includes("telegram-progress.py"));
+      if (idx < 0) arr.push(entry);
+      else if (JSON.stringify(arr[idx]) !== JSON.stringify(entry)) arr[idx] = entry;
       hooks[evt] = arr;
     };
-    addOnce("PreToolUse", "*", "pre");
-    addOnce("Stop", "", "stop");
-    addOnce("PreCompact", "*", "compact");
+    reconcile("PreToolUse", "*", "pre");
+    reconcile("Stop", "", "stop");
+    reconcile("PreCompact", "*", "compact");
+    // ★react 는 멤버 스코프에 있어야 한다.★ 지금까지 이 기계 전역 래퍼에만 걸려 있었고,
+    //   그 래퍼는 ★봇 목록이 손으로 박혀 있어 새 팀원이 빠졌다★(명부엔 있는데 목록엔 없음).
+    //   react 가 "이번 턴이 어느 방인가" 를 적어두므로, 빠진 팀원은 진행표시가 ★엉뚱한 방★ 에 찍힌다.
+    //   공개 설치에는 그 래퍼 자체가 없어서 ★전부 같은 상태★ 였다. 명부를 읽는 이 경로로 옮긴다.
+    reconcile("UserPromptSubmit", "", "react");
     settings.hooks = hooks;
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
   } catch { /* best-effort */ }
+}
+
+/** 이미 깔려 있는 telegram-progress 훅만 최신으로 맞춘다(새로 깔지는 않는다).
+ *
+ *  ★설치와 수리를 가른다.★ 부팅 백필(`installProgressHook`)은 `PUBLIC_BUILD` 게이트 뒤에 있어
+ *  라이브에서는 안 돈다 — 실멤버 배선 보호가 이유다. 그런데 그 때문에 ★이미 깔린 배선이
+ *  낡아도 아무도 안 고쳤다.★ 훅 파일은 활성화 때만 갱신되고, 커맨드는 위 reconcile 이전엔
+ *  아예 안 갱신됐다. 그 결과가 이번 fail-open 이다.
+ *  → 여기서는 ★배선이 이미 있는 멤버만★ 대상으로 파일·커맨드를 저장소 기준으로 되맞춘다.
+ *    안 깔린 멤버에게 새로 깔지 않으므로 라이브 보호 의도는 그대로다. 멱등이다.
+ */
+export function repairProgressHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
+  assertId(id);
+  const settingsPath = `${roots?.membersRoot ?? MEMBERS_ROOT}/${id}/.claude/settings.json`;
+  try {
+    if (!existsSync(settingsPath)) return;
+    if (!readFileSync(settingsPath, "utf-8").includes("telegram-progress.py")) return; // 안 깔린 멤버는 건드리지 않는다
+  } catch { return; }
+  installProgressHook(id, roots);
+}
+
+/** owner-gate 훅 설치 — 멤버 워크스페이스 `.claude/settings.json` 의 `UserPromptSubmit`.
+ *
+ *  ★왜 필요한가★ — 답장은 ★암묵적 멘션★ 이라, `@A` 라고 써도 ★답장 대상 봇 B 가 그 글을 받는다.★
+ *  게이트가 없으면 B 세션이 자기 것이 아닌 일을 시작한다. 이 훅이 라우터에 owner 를 물어
+ *  내가 아니면 그 prompt 를 막는다(판단에 맡기지 않는다).
+ *  이 게이트는 지금까지 ★이 기계 전역에만 손으로 걸려 있었다★ — 공개 설치·새 팀에는 아예 없었다.
+ *
+ *  ★커맨드에 `B3OS_ROOT` 를 싣는다★ — 훅이 저장소 밖에서 돌기 때문에 그게 없으면 단톡방 id 를
+ *  못 구해 ★게이트가 통째로 무력화된다★(#230 과 같은 함정). 실 chat_id 는 소스에 안 넣는다.
+ *  `OWNER_GATE_SELF` 는 안 싣는다 — 훅이 `TELEGRAM_STATE_DIR` 에서 per-bot 으로 얻는다.
+ *  best-effort. `roots` 는 테스트 이음매. */
+export function installOwnerGateHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
+  assertId(id);
+  const membersRoot = roots?.membersRoot ?? MEMBERS_ROOT;
+  const repoRoot = roots?.repoRoot ?? REPO_ROOT;
+  const dotClaude = `${membersRoot}/${id}/.claude`;
+  const hookDst = `${dotClaude}/hooks/telegram-owner-gate.py`;
+  const settingsPath = `${dotClaude}/settings.json`;
+  const src = `${repoRoot}/hooks/telegram-owner-gate.py`;
+  try {
+    if (!existsSync(src)) return; // 소스 없으면 skip
+    mkdirSync(`${dotClaude}/hooks`, { recursive: true });
+    writeFileSync(hookDst, readFileSync(src, "utf-8"));
+    try { chmodSync(hookDst, 0o755); } catch { /* best-effort */ }
+    let settings: Record<string, unknown> = {};
+    if (existsSync(settingsPath)) {
+      try { const p = JSON.parse(readFileSync(settingsPath, "utf-8")); if (p && typeof p === "object") settings = p; } catch { /* keep {} */ }
+    }
+    const hooks = (settings.hooks && typeof settings.hooks === "object" ? settings.hooks : {}) as Record<string, unknown>;
+    const arr = Array.isArray(hooks.UserPromptSubmit) ? (hooks.UserPromptSubmit as unknown[]) : [];
+    // ★있으면 skip 이 아니라 다르면 교체★ — 커맨드가 바뀌어도 기존 멤버가 옛것을 들고 있으면 안 된다.
+    // ★OWNER_GATE_SELF 를 반드시 싣는다★ — 없으면 훅이 자기 id 를 못 구하고,
+    //   그때 남의 id 로 폴백하면 ★게이트가 꺼지는 게 아니라 반대로 돈다★(lui 교차검증).
+    //   런처는 id 를 이미 안다. 추측하게 두지 않는다.
+    const command = `B3OS_ROOT="${repoRoot}" OWNER_GATE_SELF="${id}" python3 "${hookDst}"`;
+    const entry = { hooks: [{ type: "command", command }] };
+    const idx = arr.findIndex((e) => JSON.stringify(e).includes("telegram-owner-gate.py"));
+    if (idx < 0) arr.push(entry);
+    else if (JSON.stringify(arr[idx]) !== JSON.stringify(entry)) arr[idx] = entry;
+    hooks.UserPromptSubmit = arr;
+    settings.hooks = hooks;
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+  } catch { /* best-effort */ }
+}
+
+/** owner-gate 를 ★없으면 새로 깐다.★ 부팅 때 돈다.
+ *
+ *  ★`repairProgressHook`·`repairReplyGuardHook` 과 일부러 다르다.★ 그 둘은 "이미 배선된 멤버만"
+ *  손본다 — 안 깔린 멤버에게 새로 깔지 않는 게 실멤버 보호다. ★owner-gate 는 목적이 반대다★:
+ *  ★없는 곳에 넣는 것★ 이 이 훅의 존재 이유다(공개 설치·기존 팀에 게이트가 아예 없었다).
+ *  "이미 있는 멤버만" 으로 두면 ★아무도 없으니 전원 건너뛰어 효과가 0★ 이 된다(실측으로 확인).
+ *
+ *  ★그래서 이름이 repair 가 아니라 ensure 다.★ 다음 사람이 세 함수를 같은 것으로 읽지 않게.
+ *  멱등이다 — `installOwnerGateHook` 이 있으면 교체, 없으면 추가한다.
+ */
+export function ensureOwnerGateHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
+  assertId(id);
+  installOwnerGateHook(id, roots);
+}
+
+/** 이미 깔려 있는 reply-guard 훅의 ★파일만★ 최신으로 맞춘다(새로 깔지는 않는다).
+ *
+ *  ★배선(settings.json)은 안 바뀌고 파일만 낡는다★ — 커맨드가 `python3 "<경로>"` 뿐이라
+ *  저장소에서 훅을 고쳐도 활성화를 다시 하지 않으면 멤버 폴더의 사본이 옛날 것으로 남는다.
+ *  실제로 그래서 ★단톡방 글을 1:1 로 오인해 막는 판★ 이 팀원 5명에게 그대로 남아 있었다.
+ *  `repairProgressHook` 과 같은 원칙: ★배선이 이미 있는 멤버만★ 대상(라이브 보호 유지), 멱등.
+ */
+export function repairReplyGuardHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
+  assertId(id);
+  const settingsPath = `${roots?.membersRoot ?? MEMBERS_ROOT}/${id}/.claude/settings.json`;
+  try {
+    if (!existsSync(settingsPath)) return;
+    if (!readFileSync(settingsPath, "utf-8").includes("reply-guard.py")) return; // 안 깔린 멤버는 건드리지 않는다
+  } catch { return; }
+  installReplyGuardHook(id, roots);
 }
 
 /** telegram-progress 훅 제거 — settings.json 의 PreToolUse/Stop/PreCompact 에서 progress 항목 제거 + 훅 파일 삭제. best-effort. */

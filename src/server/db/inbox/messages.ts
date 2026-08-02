@@ -4,6 +4,8 @@ import type { EnvelopeInbound, EnvelopeStored } from "../../../shared/envelopeSc
 import { MAX_HOPS_DEFAULT } from "../../../shared/envelopeSchema";
 import { type MessageRow, type ThreadRow, rowToEnvelope } from "./_shared";
 import { appendAuditFile } from "../../lib/auditFile";
+import { broadcastRecipientIds } from "../../lib/agentMembership";
+import { ambientAgents } from "../../lib/registry";
 import { applyAckClose, applyActivityAutoAck } from "../../bus/ackClose";
 
 export function ensureThread(
@@ -47,7 +49,10 @@ export function insertMessage(
 ): EnvelopeStored {
   const id = nanoid(12);
   const attachments_json = env.attachments ? JSON.stringify(env.attachments) : null;
-  const meta_json = env.meta ? JSON.stringify(env.meta) : null;
+  // all_hands 사유는 DB 컬럼을 늘리지 않고 message meta에 함께 보존한다. 디스패처가
+  // 본문을 해석하지 않고 명시적 사유가 기록된 팀원 공지만 wake하도록 판정한다.
+  const persistedMeta = env.all_hands ? { ...(env.meta ?? {}), all_hands: env.all_hands } : env.meta;
+  const meta_json = persistedMeta ? JSON.stringify(persistedMeta) : null;
   // v1.2 issue 3 (anti-pingpong fix): parent_message_id is used by countAutoRounds to
   // trace the bot↔bot chain. Previously it was left NULL when agents only set in_reply_to.
   // We now derive parent_message_id from in_reply_to when not explicitly set: agents that
@@ -153,15 +158,63 @@ export function insertMessage(
       `INSERT OR IGNORE INTO message_recipient (message_id, agent_id, delivery_state, recipient_state, close_reason, state_source)
        VALUES (?, ?, ?, 'acknowledged', 'broadcast_fyi', 'system')`,
     );
-    if (env.explicit_recipients && env.explicit_recipients.length > 0) {
-      for (const agentId of env.explicit_recipients) {
-        if (agentId !== env.from_agent_id) insertRcpt.run(id, agentId, rcptState);
+    // ★이 변경은 팀원(source=agent) 방 발언에만 적용한다.★ (GD 2026-08-01)
+    //   팀장님 메시지(`user`)와 시스템 공지(`system`)는 ★예전 경로 그대로★ 다 — 팀장님은
+    //   "잘못된 DB 입력을 고치는 것뿐" 으로 범위를 못박으셨고, 장애 통지가 0명이 되면
+    //   ★통째로 사라진다★(어댑터 직삽입이라 릴레이도 안 탄다).
+    //
+    //   ★한 번 이 경계를 잘못 그어서 4경로가 바뀌었다★ — user·system 의 멘션없음(전원→정식만),
+    //   빈 explicit_recipients(전원→0), 슬랙 스레드의 시스템 통지(전원→0). 하네스가 main 과
+    //   대조해서 잡았다. 그래서 지금은 ★분기 자체를 발신자별로 가른다.★
+    if ((env.source ?? "agent") !== "agent") {
+      // ── 팀장님·시스템: main 동작 그대로 ──
+      if (env.explicit_recipients && env.explicit_recipients.length > 0) {
+        for (const agentId of env.explicit_recipients) {
+          if (agentId !== env.from_agent_id) insertRcpt.run(id, agentId, rcptState);
+        }
+      } else {
+        const rows = db.prepare(`SELECT id FROM agent WHERE id != ?`).all(env.from_agent_id) as Array<{ id: string }>;
+        for (const r of rows) insertRcpt.run(id, r.id, rcptState);
       }
     } else {
-      const recipients = db
-        .prepare(`SELECT id FROM agent WHERE id != ?`)
-        .all(env.from_agent_id) as Array<{ id: string }>;
-      for (const a of recipients) insertRcpt.run(id, a.id, rcptState);
+      // ── 팀원 방 발언: ★수신행 0. 예외 없다.★ ──
+      //   "단톡방에선 내가 멘션한 사람만 얘기하는 거야. ★팀원끼리는 팀버스로.★" (GD 2026-08-01)
+      //   ★@all 도 팀장님 전용이다★ ("멘션은 팀장만 하는 거라고" · "원래 그랬어") — coordinator 도 예외 없다.
+      //   ★방 게시·슬랙 릴레이는 그대로 나간다.★ 여기서 만드는 건 수신행뿐이다.
+      //
+      //   실측: 그날 팀원이 쓴 @all 중 전체공지 목적은 검증용 1건뿐이고 나머지는 전부
+      //   ★"@all 이라는 단어를 문장 안에서 언급"★ 한 것이었다("결함은 그중 하나(@all)에만 있습니다" 등).
+      //   ★언급만 해도 8명이 깨어났다.★ 인용해 답하는 경우도 같은 문제의 부분집합이라 같이 없어진다.
+      //
+      //   ★`explicit_recipients` 는 예외가 아니라 라우터의 답이다★ — 팀장님 메시지를 라우팅한
+      //   결과가 이 경로로 들어올 수 있다. 빈 배열도 "0명으로 정했다" 는 답이라 그대로 존중한다
+      //   (`length > 0` 이면 빈 배열이 아래로 떨어져 다시 팬아웃한다).
+      const isSlackThread = !!findSlackMetaForThread(db, env.thread_id)
+        || !!(env.meta as { slack?: { channel?: string } } | undefined)?.slack?.channel;
+
+      let recipients: string[] = [];
+      if (env.all_hands) {
+        recipients = env.explicit_recipients
+          ?? broadcastRecipientIds(ambientAgents(), env.from_agent_id);
+      } else if (!isSlackThread && env.explicit_recipients !== undefined) {
+        recipients = env.explicit_recipients.filter((agentId) => agentId !== env.from_agent_id);
+      }
+
+      // ★이 DB 가 아는 팀원만 넣는다.★ 명부와 `agent` 표가 어긋나면(파일 변경 후 동기화까지 약 0.3초)
+      //   FK 위반으로 삽입 전체가 터진다. ★빠진 사람이 있으면 감사에 남긴다★ — 조용히 넘기지 않는다.
+      const known = new Set(
+        (db.prepare(`SELECT id FROM agent`).all() as Array<{ id: string }>).map((r) => r.id),
+      );
+      const dropped = recipients.filter((agentId) => !known.has(agentId));
+      recipients = recipients.filter((agentId) => known.has(agentId));
+      if (dropped.length > 0) {
+        appendAuditFile(env.from_agent_id, "registry_db_out_of_sync", env.thread_id, {
+          missing_in_db: dropped,
+          message_id: id,
+          note: "agents.json 과 DB 가 어긋났다. 이 수신자들은 이번 broadcast 를 못 받았다.",
+        });
+      }
+      for (const agentId of recipients) insertRcpt.run(id, agentId, rcptState);
     }
   } else {
     // Team Bus v1: also insert a message_recipient row for direct (non-broadcast) messages

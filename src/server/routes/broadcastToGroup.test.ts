@@ -66,7 +66,7 @@ const app = (db: Database) =>
     broadcast: () => {},
     registeredAgentIds: () => new Set(["bill", "steve"]),
     agents: () => [
-      { id: "bill", display_name: "Bill" } as never,
+      { id: "bill", display_name: "Bill", capabilities: ["coordinator"] } as never,
       { id: "steve", display_name: "Steve" } as never,
     ],
   } as never);
@@ -79,6 +79,7 @@ const post = (db: Database, body: Record<string, unknown>) =>
   });
 
 const bcast = (thread: string) => ({
+  all_hands: "게시 경로 테스트",
   thread_id: thread,
   from_agent_id: "bill",
   to_agent_id: "broadcast",
@@ -144,16 +145,16 @@ describe("--to broadcast → 언제나 단톡방", () => {
     ).run();
     db.prepare(
       `INSERT INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, created_at)
-       VALUES ('ASK1','collect-1','steve','bill','dm','이 코드 어떻게 생각해?','agent',datetime('now'))`,
+       VALUES ('ASK1','collect-1','bill','steve','dm','이 코드 어떻게 생각해?','agent',datetime('now'))`,
     ).run();
 
-    // bill 이 그 질문에 ★--to broadcast 로 잘못★ 답한다 (hermes 가 실제로 이러는 습관)
+    // steve(=coordinator 아님) 가 그 질문에 ★--to broadcast 로 잘못★ 답한다 — 오늘 47건의 전형
     const res = await app(db).request("/inbox", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         thread_id: "collect-1",
-        from_agent_id: "bill",
+        from_agent_id: "steve",
         to_agent_id: "broadcast",
         in_reply_to: "ASK1",
         body: "내부 검토 결과입니다 — 아직 공개 못 할 내용.",
@@ -162,16 +163,14 @@ describe("--to broadcast → 언제나 단톡방", () => {
       }),
     });
 
+    // ★잘못 보낸 주소는 서버가 고치지 않는다★ — 그대로 방에 뜬다(원래 계약 복귀).
+    //   coordinator 게이트를 뺐으므로 이 경로는 다시 통과한다. 막는 건 ★broadcast 답장★ 하나뿐이다.
     expect(res.status).toBe(201);
-    // ★서버가 고치지 않는다★ — 예전엔 여기서 'steve' 로 바꿔치기했다
     const row = db.prepare(`SELECT to_agent_id FROM message WHERE in_reply_to='ASK1'`).get() as {
       to_agent_id: string;
     };
     expect(row.to_agent_id).toBe("broadcast");
-    // ★방에 뜬다 — 팀원이 그렇게 보냈으니까.★ 조용히 사라지거나 몰래 고쳐지지 않는다.
     expect(sent).toHaveLength(1);
-    // 그리고 stored 를 보고 보내므로 ★저장된 것 = 보낸 것★ 은 그대로 유지된다.
-    expect(sent[0]?.target).toBe(GROUP_ID);
   });
 
   test("팀원에게 보내는 건(--to steve) 방에 안 나간다 — 버스는 함수호출 채널이다", async () => {

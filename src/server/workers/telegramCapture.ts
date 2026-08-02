@@ -6,6 +6,8 @@ import { appendAuditFile } from "../lib/auditFile";
 import { injectPrompt } from "../lib/tmuxInject";
 import { injectOpenclawTelegramTurn } from "../lib/openclawBridge";
 import { recordReportDelivery } from "../bus/deliveryRecord";
+import { renderContextLine } from "../bus/wakeDispatcher";
+import { resolveThreadKind } from "../channels/registry";
 import { postTelegramAsHermes, reactTelegramAsHermes, runHermesTeamTurn } from "../lib/hermesBridge";
 import { teamContextForAgent } from "../lib/teamContextPolicy";
 import { hasCapability } from "../lib/capabilities";
@@ -53,7 +55,40 @@ let TOKEN = getCaptureToken();
 let GROUP_ID = getCaptureGroupId() ?? "";
 // injection 킬스위치 — 이제 *라이브 읽기*(isRouterEnabled(deps.db)). UI 토글 즉시 반영, 재시작 불요. (P0)
 // OFF면 결정 로깅만(shadow). store(setting router_enabled) 우선, 없으면 env(ROUTER_ENABLED) fallback.
+// ★이 주입은 '감독' 용이다.★ 답하는 질문: ★"팀에 지금 무슨 일이 도나".★
+//   대상 = ★`full_context` 보유 팀원만★ · 방 전체(★자기것 필터 없음★) · 한 건 200자.
+//
+// ★이 값은 `full_context` 보유 팀원에게만 적용된다 — 나머지는 게이트에 막혀 0건이다.★
+//   (`teamContextForAgent` 가 미보유자에게 "" 를 준다. 아래 수신자별 루프에서 걸린다.)
+//   이걸 모르면 "10건은 너무 많다 → 줄이자" 로 읽게 되는데, 그건 ★일반 팀원 부담을 줄이는 게 아니라
+//   감독하라고 준 시야를 깎는 것★ 이다. 실제로 그렇게 읽은 적이 있다.
+//   ★"N명만" 이라고 적지 마라★ — 명부가 바뀌면 숫자는 낡는다. 기준은 언제나 `full_context` 보유다.
+//
+// ★자기것 필터를 넣지 마라.★ 넣는 순간 이 주입의 목적이 사라진다 — 남의 얘기까지 봐야
+//   팀 리드가 판단할 수 있다는 게 `full_context` 의 뜻이다 (GD 2026-08-02).
+// ★`CTX_MSGS_OWN`(wakeDispatcher.ts)과 값이 같아도 합치지 마라.★ 저쪽은 '내 일 이어가기' 용이라
+//   자기것 필터가 있다. ★필터 유무가 목적이 다르다는 증거다.★ 지금 둘 다 5인 것은 우연이다.
+//   (GD 2026-08-02 "둘 다 5" — 감독용도 5로 줄인다는 결정. 목적이 같아졌다는 뜻이 아니다.)
+const CAPTURE_CTX_MSGS = 5;
+const CAPTURE_CTX_HOURS = 6;
+const CAPTURE_CTX_MSG_CHARS = 200;
 const OFFSET_PATH = process.env.CAPTURE_OFFSET_PATH ?? `${process.cwd()}/logs/telegram-capture-offset.txt`;
+/** 단톡방 인입 경로의 주입 문맥(최대 10건/6h) — 현재 메시지 적재 전 = 직전 맥락.
+ *
+ *  ★줄은 `renderContextLine` 한 곳에서 만든다★ — 예전에는 여기서 따로 `[이름] 본문` 을 찍었다.
+ *  그래서 팀버스 쪽에만 출처를 붙였을 때 ★이 경로는 그대로 이름만 나왔다.★ 팀장님이 실제로 쓰시는
+ *  경로가 여기라서, 고쳤다고 보고된 뒤에도 팀장님 화면에는 안 고쳐진 형식이 계속 갔다.
+ *  ★수신자(agentId)가 하나로 정해지지 않는 자리다★ — 방 전체용 문맥이라 "너" 없이 이름으로 찍는다.
+ *  ★함수로 뺀 이유는 재기 위해서다★ — 워커 안에 인라인으로 두면 이 줄을 직접 재는 테스트를 못 쓴다. */
+export function buildCaptureTeamContext(db: Database, threadId: string): string {
+  const recent = recentThreadMessages(db, threadId, CAPTURE_CTX_MSGS, CAPTURE_CTX_HOURS);
+  if (!recent.length) return "";
+  const isGroupThread = resolveThreadKind(threadId) === "telegram_group";
+  return recent
+    .map((m) => renderContextLine(m, { isGroupThread, maxChars: CAPTURE_CTX_MSG_CHARS }))
+    .join("\n");
+}
+
 export function mediaUrlBase(): string {
   const publicBase = (process.env.TEAM_PUBLIC_BASE_URL ?? process.env.TEAM_BASE_URL ?? "").replace(/\/$/, "");
   const basePath = (process.env.BASE_PATH ?? "/team").replace(/\/$/, "");
@@ -923,12 +958,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     // 가시성 Stage C: 깨우기 전 공유 버스의 최근 팀 맥락(최대 10건/6h)을 모은다 — 현재 메시지 적재 전 = 직전 맥락.
     let teamContext = "";
     try {
-      const recent = recentThreadMessages(deps.db, threadId, 10, 6);
-      if (recent.length) {
-        teamContext = recent
-          .map((m) => `[${m.from_agent_id}] ${m.body.slice(0, 200).replace(/\n/g, " ")}`)
-          .join("\n");
-      }
+      teamContext = buildCaptureTeamContext(deps.db, threadId);
     } catch (e) {
       console.error("[capture] team context fetch failed:", (e as Error).message);
     }

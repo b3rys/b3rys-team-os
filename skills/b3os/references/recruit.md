@@ -180,7 +180,7 @@ curl -s -X POST http://localhost:$PORT/team/api/ot/<ot_id>/activate
 - 2번째+ 팀원(claude): 첫 팀원 allowlist 승계로 바로 답한다.
 - 그래도 안 오면 `troubleshooting.md` (완료 검증은 **봇 DM에 답/코드가 오는지**로 보고, `owner_chat_id` 로 보지 않는다).
 
-> **(선택) 라우터 ON 은 그룹(팀방) 협업용** — 여러 팀원을 한 텔레그램 그룹에 모아 System OP 봇으로 라우팅할 때만 켠다. **1:1 DM 검증엔 필요 없다.** 그룹 셋업 상세는 SKILL 의 "System OP 봇" 절 참고.
+> **(선택) 라우터 ON 은 그룹(팀방) 협업용** — 여러 팀원을 한 텔레그램 그룹에 모아 System OP 봇으로 라우팅할 때만 켠다. **1:1 DM 검증엔 필요 없다.** 그룹 셋업 상세는 `group-room-setup.md` 참고.
 > ```bash
 > curl -s -X PATCH http://localhost:$PORT/team/api/system-op \
 >   -H 'content-type: application/json' -d '{"router_enabled":true}'   # 토글=즉시 반영
