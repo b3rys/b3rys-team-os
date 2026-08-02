@@ -408,3 +408,45 @@ describe("postTelegramAsHermes", () => {
     expect(called).toBe(false);
   });
 });
+
+describe("buildPrompt — ★주동사는 '실행해서 보내라' 다★ (2026-08-03 실측)", () => {
+  // dojo(Qwen3-Next-80B)가 버스로 깨어나도 조용히 아무 말도 안 했다. 턴은 정상 완료였고, 답을
+  // ★stdout 에 쓰고 끝냈다★ — 서버는 설계상 그걸 버린다. 옛 주동사가 "간결하게 ★답하고★" 여서
+  // 이 모델이 그걸 그대로 실행했기 때문이다(claude 는 뒤의 "말하려면 보내라" 노트와 합쳐 읽는다).
+  //
+  // ★실측 4조합★: 팀원 규칙만 강화 ❌ / "답을 보내세요" ❌(명령을 글로 출력) /
+  //   "실행해서 보내세요" ❌ / ★팀원 규칙 + 이 동사 함께 ✅★(api_calls=2, 버스 도착)
+  // 그래서 이 문장은 ★"실행"을 요구★ 해야 하고, 명령의 형태는 팀원 규칙이 준다.
+  const base2 = {
+    agent: { id: "dojo", display_name: "Dojo" } as AgentRecord,
+    threadId: "biS95LYk",
+    messageId: "MSGab12cd34",
+    body: "확인해줘",
+    fromLabel: "devon",
+    replyRoute: { kind: "teammate" as const, to: "devon" },
+    locale: "ko" as const,
+  };
+
+  test("한국어 주입문이 ★실행★ 을 요구한다(‘답하고’ 로 되돌아가지 않는다)", () => {
+    const p = buildPrompt({ ...base2, locale: "ko" as const });
+    expect(p).toContain("발신 도구를 실제로 실행해서");
+    expect(p).toContain("발신 명령을 글로 적는 것은 발신이 아닙니다");
+    // ★회귀가드★: 옛 주동사로 되돌아가면 dojo 계열이 다시 조용히 침묵한다.
+    expect(p).not.toContain("간결하게 답하고");
+  });
+
+  test("영어 주입문도 ★run your send tool★ 을 요구한다", () => {
+    const p = buildPrompt({ ...base2, locale: "en" as const });
+    expect(p).toContain("run your send tool");
+    expect(p).toContain("writing the send command as text is not sending");
+    expect(p).not.toContain("Answer concisely,");
+  });
+
+  test("★2026-07-15 계약 유지★ — 도구 이름도 주소도 봉투에 넣지 않는다", () => {
+    for (const locale of ["ko", "en"] as const) {
+      const p = buildPrompt({ ...base2, locale });
+      expect(p).not.toContain("send.sh"); // 명령/도구 이름 렌더 금지(기존 계약)
+      expect(p).not.toContain("--to");    // 주소 계산 금지
+    }
+  });
+});
