@@ -18,13 +18,18 @@ v1 범위 (안전 우선):
 v2 (후속):
   - reply/sticky 게이팅: 경로 A엔 reply 원문/sticky 가 없으니, 캡처가 버스에 적재한
     reply_to_agent + activeAssigneeId 를 끌어와 /api/route 에 넣어 T4(코덱스 답장→codex) 등도 차단.
-  - 👀 react owner-only: 현재 telegram-progress react 가 모든 그룹 메시지에 👀 를 단다.
-    owner 일 때만 달도록 react 훅과 통합 필요(이 게이트의 owner 판정 공유).
+  (👀 react owner-only 는 ★이미 되어 있다★ — telegram-progress 의 `_react_owner_skip` 이
+   owner 가 아니면 리액션을 건너뛴다. 이 항목은 남은 과제가 아니다.)
 
-설치 (터미널 = self-mod, 채널 OK로는 분류기가 막음):
-  cp hooks/telegram-owner-gate.py ~/.claude/hooks/
-  ~/.claude/settings.json 의 UserPromptSubmit 에 등록(telegram-progress react 보다 먼저 권장)
-  빌 poller 재시작 후 T1~T6 로 라이브 검증.
+설치:
+  ★손으로 복사하지 마라. 서버가 자동으로 깐다★ — `installOwnerGateHook`(launcher)이 멤버
+  워크스페이스 `.claude/` 에 훅 파일과 `UserPromptSubmit` 배선을 넣고, 부팅 때 `ensureOwnerGateHook`
+  이 없으면 새로 깐다. 커맨드에 `B3OS_ROOT`·`OWNER_GATE_SELF` 도 서버가 실어준다.
+
+  ★전역(`~/.claude/settings.json`)에 손으로 걸지 마라.★ 멤버 스코프와 양쪽에 걸리면
+  ★게이트가 두 번 돈다.★ 예전 안내가 전역 등록이었고, 그 이중 배선을 걷어낸 적이 있다.
+
+  라이브 확인이 필요하면 ★해당 멤버★ 의 poller 를 재시작한 뒤 본다.
 
 ⚠ 설치/테스트 시 검증할 것:
   - UserPromptSubmit block 계약: 이 버전은 stdout JSON {"decision":"block"} 을 쓴다.
