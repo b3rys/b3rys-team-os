@@ -40,7 +40,7 @@ SH
 # mock: launchctl — bootstrap 호출을 기록
 cat > "$T/bin/launchctl" <<'SH'
 #!/usr/bin/env bash
-[ "$1" = print ] && exit 1
+[ "$1" = print ] && { case "$2" in *"com.gdmini.claude-telegram-${LOADED_AGENT:-__none__}") exit 0 ;; *) exit 1 ;; esac; }
 [ "$1" = bootstrap ] && { printf '%s\n' "$3" >> "$LAUNCHCTL_CALLS"; exit 0; }
 exit 2
 SH
@@ -69,8 +69,7 @@ export TEAMOS_AGENT_OFF_FILE="$T/agent-off.txt"
 export BOT_LIVENESS_BOOT_GRACE=0            # 부팅 유예 때문에 건너뛰지 않게
 export B3OS_ROOT="$T/b3os"
 export BOT_LIVENESS_LOG="$T/b3os/var/bot-liveness-monitor.log"
-export LIVENESS_AUTOHEAL=0
-export LIVENESS_LA_AUTOHEAL=1               # LA별 opt-in도 global alert-only를 우회할 수 없어야 함
+export LIVENESS_LA_AUTOHEAL=0
 export GD_CHAT_ID=test
 printf 'CAPTURE_BOT_TOKEN=test\n' > "$HOME/Development/b3rys-team-collab/.env"
 
@@ -109,4 +108,20 @@ echo "임시경로: $T"
   RC=1
 }
 echo "PASS: 전체 진입점이 alert-only에서 bootstrap/restart를 호출하지 않음"
+
+# 같은 등록부/off 조건에서 LaunchAgent가 로드돼 있으면 세션 부재는 실제 장애이므로 복구한다.
+: > "$LAUNCHCTL_CALLS"
+: > "$RESTART_CALLS"
+export LOADED_AGENT=bill
+bash "$SCRIPT" >"$T/loaded-out.txt" 2>"$T/loaded-err.txt"
+loaded_calls="$(cat "$RESTART_CALLS")"
+[ "$loaded_calls" = bill ] || {
+  echo "FAIL: loaded LaunchAgent + missing session should restart bill, got: ${loaded_calls:-none}" >&2
+  RC=1
+}
+[ ! -s "$LAUNCHCTL_CALLS" ] || {
+  echo "FAIL: loaded LaunchAgent must not be bootstrapped" >&2
+  RC=1
+}
+echo "PASS: 로드된 LaunchAgent의 세션 부재는 restart-agent로 복구함"
 exit "$RC"
