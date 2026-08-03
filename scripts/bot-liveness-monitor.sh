@@ -40,11 +40,11 @@ esac
 #   하필 이번 사고를 4시간 방치시킨 바로 그 가드를, 그 사고의 재현 테스트가 켜버린 것이다.
 #   → 루트를 env 로 덮어쓸 수 있게 한다. 기본값은 그대로 /tmp 라 라이브 동작은 불변.
 #   테스트는 LIVENESS_STATE_DIR 를 작업 디렉터리로 지정해 라이브 상태를 건드리지 않는다.
-: "${LIVENESS_STATE_DIR:=/tmp}"
-mkdir -p "$LIVENESS_STATE_DIR" 2>/dev/null || true
-
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 : "${B3OS_ROOT:=$(dirname "$SCRIPT_DIR")}"
+: "${LIVENESS_STATE_DIR:=$B3OS_ROOT/var/bot-liveness-monitor}"
+mkdir -p "$LIVENESS_STATE_DIR" 2>/dev/null || true
+
 : "${BOT_LIVENESS_LOG:=$B3OS_ROOT/var/bot-liveness-monitor.log}"
 mkdir -p "$(dirname "$BOT_LIVENESS_LOG")" 2>/dev/null || true
 LOG="$BOT_LIVENESS_LOG"
@@ -58,7 +58,9 @@ LOG="$BOT_LIVENESS_LOG"
 #   읽기 실패 시에만 옛 하드코딩으로 폴백(감시가 통째로 죽는 것보다 낫다) + 경고.
 : "${TEAM_AGENT_REGISTRY:=$HOME/Development/b3rys-team-os/agents.json}"
 : "${TEAMOS_AGENT_OFF_FILE:=$HOME/Development/b3rys-team-collab/var/agent-off.txt}"
-: "${LIVENESS_LA_AUTOHEAL:=0}"
+: "${LIVENESS_AUTOHEAL:=0}"
+: "${LIVENESS_LA_AUTOHEAL:=$LIVENESS_AUTOHEAL}"
+autoheal_enabled() { [ "$LIVENESS_AUTOHEAL" = "1" ]; }
 _AGENTS_JSON="$TEAM_AGENT_REGISTRY"
 _BOTS_STR="$(python3 -c "
 import json
@@ -147,7 +149,7 @@ ensure_launchagents_registered() {
 "
       continue
     fi
-    if [ "$DRY_RUN" = "1" ] || [ "$LIVENESS_LA_AUTOHEAL" != "1" ]; then
+    if [ "$DRY_RUN" = "1" ] || ! autoheal_enabled || [ "$LIVENESS_LA_AUTOHEAL" != "1" ]; then
       fixed="${fixed}· [$lbl] LaunchAgent 미등록 — 등록부 확인됨, alert-only
 "
     elif launchctl bootstrap "gui/$(id -u)" "$p" >/dev/null 2>&1; then
@@ -261,6 +263,11 @@ attempt_heal() {
   for rule in "${AUTOHEAL_RULES[@]}"; do
     pat="${rule%%|||*}"; rest="${rule#*|||}"; keys="${rest%%|||*}"; label="${rest##*|||}"
     if echo "$pane" | grep -qiE "$pat"; then
+      if ! autoheal_enabled; then
+        ISSUES="${ISSUES}· [$2] $label 감지 — alert-only (LIVENESS_AUTOHEAL=0)
+"
+        return 0
+      fi
       if [ "$DRY_RUN" = "1" ]; then
         HEALED="${HEALED}· [$2] $label (dry-run: 실제 복구는 안 함)
 "
@@ -294,6 +301,11 @@ attempt_feedback_heal() {  # $1=session $2=bot
   echo "$pane" | grep -qiE "Press Ctrl-C again to exit" && has_exit=1
   if [ "$has_survey" = "0" ] && [ "$has_exit" = "0" ]; then
     return 1
+  fi
+  if ! autoheal_enabled; then
+    ISSUES="${ISSUES}· [$2] Claude 피드백/종료 프롬프트 감지 — alert-only (LIVENESS_AUTOHEAL=0)
+"
+    return 0
   fi
   local pending newpane
   pending=$(feedback_prompt_input "$pane")
@@ -378,6 +390,9 @@ for bot in "${BOTS[@]}"; do
     if [ "$DRY_RUN" = "1" ]; then
       HEALED="${HEALED}· [$bot] tmux 세션 없음 → team-os up $bot (dry-run)
 "
+    elif ! autoheal_enabled; then
+      ISSUES="${ISSUES}· [$bot] tmux 세션 없음 — alert-only (LIVENESS_AUTOHEAL=0)
+"
     elif ! restart_budget_left; then
       ISSUES="${ISSUES}· [$bot] tmux 세션 없음 — 이번 점검의 재시작 예산($RESTART_BUDGET)을 이미 썼다. 다음 점검에서 복구 시도(여러 봇 동시 재시작 방지)
 "
@@ -435,6 +450,9 @@ for bot in "${BOTS[@]}"; do
 "
     elif [ "$DRY_RUN" = "1" ]; then
       HEALED="${HEALED}· [$bot] 폴러 사망(세션 up) → tmux kill + team-os up (dry-run)
+"
+    elif ! autoheal_enabled; then
+      ISSUES="${ISSUES}· [$bot] 폴러 미가동 — alert-only (LIVENESS_AUTOHEAL=0)
 "
     elif ! restart_budget_left; then
       ISSUES="${ISSUES}· [$bot] 폴러 미가동 — 이번 점검의 재시작 예산($RESTART_BUDGET)을 이미 썼다. 다음 점검에서 복구 시도(여러 봇 동시 재시작 방지)
@@ -497,7 +515,10 @@ for bot in "${BOTS[@]}"; do
 "
         elif [ "$prev" = "$pend_mid" ]; then
           # 2회 연속 확정 → nudge-heal 시도 (키 아님, 메시지 주입)
-          if [ "$DRY_RUN" = "1" ]; then
+          if ! autoheal_enabled; then
+            ISSUES="${ISSUES}· [$bot] reply-미호출(msg $pend_mid) — alert-only (LIVENESS_AUTOHEAL=0)
+"
+          elif [ "$DRY_RUN" = "1" ]; then
             HEALED="${HEALED}· [$bot] reply-미호출(msg $pend_mid) → reply 도구 nudge 주입 (dry-run)
 "
           else
@@ -558,6 +579,11 @@ check_gateway() {  # $1=LaunchAgent label, $2=표시이름, $3=team-os svc alias
   fi
   if [ "$DRY_RUN" = "1" ]; then
     HEALED="${HEALED}· [$2] $down → team-os up $3 (dry-run)
+"
+    return 0
+  fi
+  if ! autoheal_enabled; then
+    ISSUES="${ISSUES}· [$2] $down — alert-only (LIVENESS_AUTOHEAL=0)
 "
     return 0
   fi
@@ -695,7 +721,7 @@ ${ISSUES}"
   # 자가치유 에스컬레이션: GD 알림과 함께 빌을 깨워 안전조치 1회 시도(쿨다운·빌생존 가드 내부).
   # 단, Bill 본인이 이슈 대상이면 Bill에게 다시 요청하지 않는다. 자기 세션이 막힌 상태에
   # 자가치유 프롬프트를 얹으면 응답 루프가 더 꼬인다.
-  if [ "$DRY_RUN" = "0" ] && [ -n "$ESCALATABLE_ISSUES" ] && ! printf "%s" "$ESCALATABLE_ISSUES" | grep -q "· \\[bill\\]" && escalate_to_bill "$ESCALATABLE_ISSUES" "$SIG"; then
+  if autoheal_enabled && [ "$DRY_RUN" = "0" ] && [ -n "$ESCALATABLE_ISSUES" ] && ! printf "%s" "$ESCALATABLE_ISSUES" | grep -q "· \\[bill\\]" && escalate_to_bill "$ESCALATABLE_ISSUES" "$SIG"; then
     MSG="${MSG}
 → 🔧 빌에게 자가치유 요청 보냄 (안전조치·검증 후 GD께 결과 보고 예정)"
   fi
