@@ -42,6 +42,19 @@
 
 그룹/DM 에서 물으면 그때 답하는 명령(팀방 협업 셋업 시): `/status`(팀 상태) · `/board`(칸반) · `/digest`(요약) · `/approve`(민감 실행 승인) · `/onoff`(라우터/기능 토글).
 
+## bot-liveness-monitor 승격 기준
+
+`bot-liveness-monitor` 는 10분 주기 `launchd` 잡이다. 서버와 스크립트의 기본 경로는 한 곳에서 맞춰야 한다.
+
+- 로그 기본값: `<b3os repo>/var/bot-liveness-monitor.log` (`BOT_LIVENESS_LOG` 로 override 가능). `/tmp` 는 재부팅에 지워지므로 기본값으로 쓰지 않는다.
+- 상태 디렉터리 기본값: `<b3os repo>/var/bot-liveness-monitor` (`LIVENESS_STATE_DIR` 로 override 가능).
+- LaunchAgent 라벨: `<TEAMOS_LAUNCHD_PREFIX 또는 com.$USER>.bot-liveness-monitor`. `com.gdmini.*` 같은 개인 라벨은 설치 시점 로컬 값이지 공개 기본값이 아니다.
+- plist 템플릿은 `src/server/lib/livenessMonitor.ts` 의 `renderBotLivenessMonitorPlist()` 가 정본이다. `StartInterval=600`, `scripts/bot-liveness-monitor.sh`, 위 로그/상태 env를 같은 값으로 넘긴다.
+- 감시 대상 bot 목록은 `agents.json` 의 `runtime=claude_channel` 이 정본이다. 고정 팀원 목록으로 조용히 폴백하면 새 팀원이 빠져 잘못된 모니터링이 된다.
+- 알림 bot/chat, 토큰, heal/restart 명령 경로는 환경·설정 또는 repo-local 경로로 분리한다. 특정 팀장 chat id, `@gd452_team_op_bot`, `~/Development/<member>` 경로는 공개 템플릿 기본값에 넣지 않는다.
+
+원칙: 신뢰할 수 없는 입력이면 `unknown`/로그-only 로 닫고, 잘못된 모니터링으로 잘못된 복구를 실행하지 않는다.
+
 ## 관리 방법 (권장)
 
 시스템 잡이 늘수록 "뭐가 도는지" 관리가 어려워진다. 세 축으로 관리한다:

@@ -14,7 +14,7 @@ import type { Database } from "bun:sqlite";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import { teamosLaunchdPrefix } from "./agentControl";
+import { botLivenessLaunchdLabel, teamosLaunchdPrefix } from "./agentControl";
 import { captureConfigStatus } from "./captureConfig";
 import { fromSqliteDate } from "../scheduler/core";
 
@@ -71,7 +71,7 @@ function launchdDesc(): Record<string, string> {
     [`${prefix}.claude-telegram-steve`]: "Claude 채널 팀원 텔레그램 봇 (tmux 세션)",
     [`${prefix}.claude-telegram-demis`]: "Claude 채널 팀원 텔레그램 봇 (tmux 세션)",
     [`${prefix}.claude-telegram-dbak`]: "Claude 채널 팀원 텔레그램 봇 (tmux 세션)",
-    [`${prefix}.bot-liveness-monitor`]: "Claude channel bot liveness monitor · auto-heal",
+    [botLivenessLaunchdLabel()]: "Claude channel bot liveness monitor · auto-heal",
     [`${prefix}.bill-context-monitor`]: "Claude 세션 컨텍스트 크기 감시 (커지면 알림)",
     [`${prefix}.bill-weekly-healthcheck`]: "주간 팀 헬스체크 리포트",
     [`${prefix}.claude-bots-weekly-restart`]: "Claude 봇 주간 자동 재시작 (컨텍스트 정리)",

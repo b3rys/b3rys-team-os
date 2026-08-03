@@ -33,6 +33,10 @@ export function claudeTelegramLaunchdLabel(id: string): string {
   return `${teamosLaunchdPrefix()}.claude-telegram-${id}`;
 }
 
+export function botLivenessLaunchdLabel(): string {
+  return `${teamosLaunchdPrefix()}.bot-liveness-monitor`;
+}
+
 export interface ControlResult { ok: boolean; detail: string }
 
 // ── 의도적 off 명단 (auto-heal 조율) ──────────────────────────────────────

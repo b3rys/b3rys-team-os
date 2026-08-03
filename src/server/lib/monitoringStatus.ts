@@ -1,13 +1,12 @@
 // 모니터링 탭 데이터소스 (GD 2026-07-10, Bill 핸드오프) — 새 probe 0, 기존 소스만.
-//   ① bot-liveness 상태: /tmp/bot-liveness-monitor.log 파싱(runs·마지막실행·정상여부·결과문구)
+//   ① bot-liveness 상태: durable repo-local log 파싱(runs·마지막실행·정상여부·결과문구)
 //   ② dm_message health: team.db 집계(dm-monitor.sh 로직 이식)
 // ★방어적(Bill 요청): 로그 파일 없거나 형식 바뀌어도 크래시 X — 전부 try/catch + 안전 기본값.★
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
-
-const LIVENESS_LOG = process.env.BOT_LIVENESS_LOG || "/tmp/bot-liveness-monitor.log";
+import { botLivenessLogPath } from "./livenessMonitor";
 const INGRESS_STATUS_FILE =
   process.env.OPENCLAW_TELEGRAM_STATUS_FILE ||
   join(homedir(), "Development/b3rys-team-os/var/openclaw-telegram-ingress-status.json");
@@ -21,7 +20,15 @@ export interface LivenessStatus {
   logMtime: string | null; // 로그 파일 mtime(ISO)
 }
 
-export function readLivenessStatus(logPath: string = LIVENESS_LOG): LivenessStatus {
+function classifyBotLivenessResult(line: string): boolean | null {
+  const explicitStatus = line.match(/\bstatus=(ok|healthy|healed|issues|failed|error|down|unhealthy)\b/i)?.[1]?.toLowerCase();
+  if (explicitStatus) return /^(ok|healthy|healed)$/.test(explicitStatus);
+  if (/이상 없음|정상|\bOK\b|healthy/i.test(line)) return true;
+  if (/이상|실패|error|재시작|down|무응답|죽|수동 확인 필요|[⚠❌]/i.test(line)) return false;
+  return null;
+}
+
+export function readLivenessStatus(logPath: string = botLivenessLogPath()): LivenessStatus {
   const base: LivenessStatus = { available: false, runs: 0, lastRun: null, healthy: null, lastResult: null, logMtime: null };
   try {
     if (!existsSync(logPath)) return base;
@@ -36,10 +43,13 @@ export function readLivenessStatus(logPath: string = LIVENESS_LOG): LivenessStat
       if (/bot-liveness START/.test(lines[i]!)) break;
       if (lines[i]!.trim()) { lastResult = lines[i]!.trim(); break; }
     }
-    let healthy: boolean | null = null;
-    if (lastResult) {
-      if (/이상 없음|정상|\bOK\b|healthy/i.test(lastResult)) healthy = true;
-      else if (/이상|실패|error|재시작|down|무응답|죽|❌/i.test(lastResult)) healthy = false;
+    let healthy = lastResult ? classifyBotLivenessResult(lastResult) : null;
+    if (healthy === null) {
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (/bot-liveness START/.test(lines[i]!)) break;
+        const classified = classifyBotLivenessResult(lines[i]!.trim());
+        if (classified !== null) { healthy = classified; break; }
+      }
     }
     let logMtime: string | null = null;
     try { logMtime = new Date(statSync(logPath).mtimeMs).toISOString(); } catch { /* noop */ }
