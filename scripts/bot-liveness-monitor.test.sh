@@ -15,6 +15,7 @@ SCRIPT="${1:?스크립트 경로}"
 
 T="$(mktemp -d "${TMPDIR:-/tmp}/probe-restart.XXXXXX")"
 export HOME="$T/home"
+if [ "${KEEP_TMP:-0}" != "1" ]; then trap 'rm -rf "$T"' EXIT; fi
 mkdir -p "$HOME/Library/LaunchAgents" "$T/bin" \
          "$HOME/Development/b3rys-team-collab/scripts" \
          "$HOME/.claude/channels/telegram-bill" "$T/b3os"
@@ -105,6 +106,11 @@ echo
 echo "임시경로: $T"
 [ -d "$T/b3os/var/bot-liveness-monitor" ] || {
   echo "FAIL: 기본 상태 디렉터리가 <repo>/var/bot-liveness-monitor에 생성되지 않음" >&2
+  RC=1
+}
+tail -1 "$BOT_LIVENESS_LOG" | grep -q 'bot-liveness DONE status=issues$' || {
+  echo "FAIL: issue run must end with structured status=issues" >&2
+  tail -3 "$BOT_LIVENESS_LOG" >&2
   RC=1
 }
 echo "PASS: 전체 진입점이 alert-only에서 bootstrap/restart를 호출하지 않음"

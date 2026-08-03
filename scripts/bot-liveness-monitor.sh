@@ -50,6 +50,8 @@ mkdir -p "$(dirname "$BOT_LIVENESS_LOG")" 2>/dev/null || true
 LOG="$BOT_LIVENESS_LOG"
 [ "$DRY_RUN" = "0" ] && [ "$RESET" = "0" ] && exec >> "$LOG" 2>&1
 
+finish_status() { printf '%s bot-liveness DONE status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1"; }
+
 # ─── 설정 ────────────────────────────────────────────────────────────────
 # ★감시 대상은 정본(agents.json)에서 읽는다 (GD 승인 2026-08-03)★
 #   하드코딩 BOTS=(bill steve demis dbak) 였다 — ★lui 가 빠져 있었다.★ 그래서 2026-08-03 부팅에 lui 폴러가
@@ -172,6 +174,7 @@ if [ -n "$_boot_sec" ]; then
   _up=$(( $(date +%s) - _boot_sec ))
   if [ "$_up" -ge 0 ] && [ "$_up" -lt "$BOOT_GRACE_SECS" ]; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') bot-liveness SKIP — 부팅 ${_up}초 경과(유예 ${BOOT_GRACE_SECS}초). 팀원 기동이 끝나기 전이라 판정하지 않음."
+    finish_status skipped
     exit 0
   fi
 fi
@@ -200,6 +203,7 @@ OFF_FILE="$TEAMOS_AGENT_OFF_FILE"
 if [ "$RESET" = "1" ]; then
   rm -f "$STATE_FILE" "$PENDING_FILE"
   echo "state 삭제 — 다음 이상 발견 시 알림 가능"
+  finish_status reset
   exit 0
 fi
 
@@ -664,6 +668,7 @@ fi
 if [ -z "$ISSUES" ] && [ -z "$HEALED" ]; then
   echo "이상 없음 — 전 봇 정상"
   [ "$DRY_RUN" = "0" ] && rm -f "$STATE_FILE"
+  finish_status ok
   exit 0
 fi
 
@@ -723,26 +728,31 @@ echo "--- 끝 --- (sig=$SIG, last=$LAST_SIG)"
 if [ "$DRY_RUN" = "1" ]; then
   echo ""
   echo "[DRY-RUN] DM 전송 생략. 실제 실행 시 chat_id=${GD_CHAT_ID} 에 전송됨."
+  if [ -n "$ISSUES" ]; then finish_status issues; else finish_status healed; fi
   exit 0
 fi
 
 if [ "$SIG" = "$LAST_SIG" ]; then
   echo "동일 이상치 — 중복알림 skip"
+  if [ -n "$ISSUES" ]; then finish_status issues; else finish_status healed; fi
   exit 0
 fi
 
 # ─── 토큰 로드 + DM 전송 ──────────────────────────────────────────────────
 if [ ! -s "$ENV_FILE" ]; then
   echo "ERROR: token env file missing: $ENV_FILE"
+  finish_status error
   exit 1
 fi
 if [ -z "$GD_CHAT_ID" ]; then
   echo "ERROR: GD_CHAT_ID 비어있음"
+  finish_status error
   exit 1
 fi
 TOKEN=$(grep -E "^${TOKEN_VAR}=" "$ENV_FILE" | head -1 | cut -d= -f2-)
 if [ -z "$TOKEN" ]; then
   echo "ERROR: ${TOKEN_VAR} 비어있음"
+  finish_status error
   exit 1
 fi
 
@@ -761,7 +771,8 @@ else
   echo "DM 전송 실패 — 응답:"
   cat /tmp/bot-liveness-resp.json
   rm -f /tmp/bot-liveness-resp.json
+  finish_status error
   exit 2
 fi
 
-echo "$(date '+%Y-%m-%d %H:%M:%S') bot-liveness DONE"
+if [ -n "$ISSUES" ]; then finish_status issues; else finish_status healed; fi
