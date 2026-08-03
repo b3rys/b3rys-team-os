@@ -644,3 +644,37 @@ it("★자른 자리의 말줄임이 겹치지 않는다★", () => {
   expect(t).toContain("…(잘림)");
   expect(t).not.toContain("……");
 });
+
+// ★식별이 ack 을 집으면 안 된다★ (steve 리뷰 2026-08-04 · P1)
+//   collector 는 팬아웃 전에 요청자에게 ack 을 보낸다 — burst[0] 이 그 ack 이면
+//   알림 첫 줄이 「접수. 확인하고 회신하겠습니다.」 로 나간다. ★틀린 식별은 없느니만 못하다.★
+it("★팬아웃 전 ack 이 있어도 제목·id 는 진짜 질문에서 뽑는다★", () => {
+  const d = new Database(":memory:");
+  migrate(d);
+  d.run(`INSERT INTO thread (id,title,kind,participants_json,opened_by) VALUES ('tg-ack','t','dm','[]','bill')`);
+  const M = (f: string, to: string, mins: number, body: string, id: string) =>
+    d.run(`INSERT INTO message (id,thread_id,from_agent_id,to_agent_id,type,body,source,created_at)
+           VALUES (?,'tg-ack',?,?,'dm',?,'agent',datetime('now','-'||?||' minutes'))`,
+      [id, f, to, body, String(mins)]);
+  M("bill", "steve", 30, "[위임] 마감 알림 리뷰 좀 봐줘", "REQ-1");
+  M("steve", "bill", 29, "접수. 확인하고 회신하겠습니다.", "ACK-1");   // ★요청자에게 보낸 ack★
+  M("steve", "lui", 28, "[요청] bot-liveness 승격 — 판단근거 교체", "ASK-1");
+  M("steve", "demis", 28, "[요청] bot-liveness 승격 — 판단근거 교체", "ASK-2");
+  const c = findStalledCollections(d, AGENTS).find((x) => x.collector === "steve")!;
+  expect(c.askId).toBe("ASK-1");                       // ★ack 이 아니라 첫 질문★
+  expect(c.askTitle).toContain("bot-liveness 승격");
+  expect(c.askTitle).not.toContain("접수");
+  expect(c.missing.sort()).toEqual(["demis", "lui"]);  // 판정은 종전대로
+});
+
+// ★서로게이트를 쪼개지 않는다★ (steve 리뷰 · P2)
+it("★44자 경계에 이모지가 걸려도 반쪽 문자가 안 남는다★", () => {
+  const t = askTitleOf("가".repeat(43) + "😀" + "뒤에 더 있다");
+  expect(t).toContain("…(잘림)");
+  // ★"서로게이트가 있나" 가 아니라 "짝 없는 서로게이트가 있나" 다★ —
+  //   정상 이모지도 서로게이트 ★쌍★ 이라 /[\uD800-\uDFFF]/ 에 걸린다(내가 처음 이걸로 틀렸다).
+  //   spread 는 코드포인트 단위라, 짝이 없을 때만 그 범위 문자가 낱개로 나온다.
+  const lone = [...t].filter((ch) => { const c = ch.codePointAt(0)!; return c >= 0xd800 && c <= 0xdfff; });
+  expect(lone).toHaveLength(0);
+  expect(t).toContain("😀");                           // 이모지는 통째로 살아남는다
+});

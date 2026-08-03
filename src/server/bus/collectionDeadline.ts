@@ -59,8 +59,11 @@ export function askTitleOf(body: string, max = 44): string {
   const first = (body ?? "").split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
   // ★잘렸다는 걸 반드시 보이게★ — `…` 만으로는 원문에 있던 말줄임과 구분이 안 된다.
   // 자른 자리에 이미 말줄임이 있으면 ★……(잘림) 처럼 두 번 겹친다★ — 그 자리만 정리하고 붙인다.
-  if (first.length <= max) return first;
-  return `${first.slice(0, max).trimEnd().replace(/[…]+$/, "").trimEnd()}…(잘림)`;
+  if ([...first].length <= max) return first;
+  // ★코드유닛이 아니라 코드포인트로 자른다★ (steve 리뷰) — slice 는 경계에 astral 문자(😀 등)가
+  //   걸리면 ★반쪽 서로게이트★ 를 남긴다. 실측: "가"×43 + "😀" → "…가가\ud83d…(잘림)".
+  const cut = [...first].slice(0, max).join("");
+  return `${cut.trimEnd().replace(/[…]+$/, "").trimEnd()}…(잘림)`;
 }
 
 /**
@@ -331,7 +334,14 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
       //   요청자 행은 없을 수 있다(팀장이 단톡방에서 시키면 message 테이블에 안 남는다 — 위 ② 참조).
       //   반면 팬아웃 첫 건은 ★수집의 정의상 반드시 있다.★ 그리고 collector 가 직접 쓴 문장이라
       //   본인이 가장 빨리 알아본다.
-      const ask = burst[0]!;
+      // ★burst[0] 은 팬아웃 첫 건이 아닐 수 있다★ (steve 리뷰 2026-08-04, 재현 확인).
+      //   collector 는 팬아웃 ★전에★ 요청자에게 ack 을 보낸다(:202 주석이 이미 경고한 그 패턴).
+      //   그러면 burst[0] = 그 ack → 알림 첫 줄이 「접수. 확인하고 회신하겠습니다.」 로 나간다.
+      //   ★틀린 식별은 못 읽는 thread_id 보다 나쁘다★ — 사람이 딴 수집을 되짚는다.
+      //   targets 는 위(:230)에서 requester 를 빼지만 ★burst 배열 자체는 안 걸러진다.★
+      //   폴백을 남기는 이유: 팀장 단톡방 지시처럼 ★requester 행이 아예 없는★ 경우
+      //   requester 가 undefined 라 find 가 첫 건을 그대로 준다 — 그 경로는 지금도 옳다.
+      const ask = burst.find((b) => b.peer !== requester) ?? burst[0]!;
       out.push({
         threadId: thread_id, collector: C, missing, answered, key: `${thread_id}:${C}:${lastAsk}`,
         askId: ask.id, askTitle: askTitleOf(ask.body),
@@ -409,7 +419,7 @@ export function sweepCollectionDeadlines(db: Database, agents: AgentRecord[]): n
           `. ★지금까지 온 답으로 보고하세요★ — 안 온 사람은 '미응답' 이라고 명시하면 됩니다.\n` +
           // ★두 탈출구도 줄을 바꿔 아래로.★ 순서는 그대로 — 기본 동작(위) 다음에 예외(아래).
           `· 각자 GD께 직접 보고하도록 시킨 건이면 종합할 게 없으니 이 알림은 무시하세요\n` +
-          `· 늦게 답이 오면 그때 다시 깨워드립니다`);
+          `· 늦게 답이 오면 그때 다시 깨워드립니다 — 그때 상황에 맞게 응답하시면 됩니다`);
 
       const msg = insertMessage(db, {
         thread_id: c.threadId,
