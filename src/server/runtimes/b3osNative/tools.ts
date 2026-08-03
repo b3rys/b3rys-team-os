@@ -195,7 +195,7 @@ export function runTool(db: Database, agentId: string, tool: ToolName, args: Rec
       const lane = args.lane as TaskLane | undefined;
       const limit = (args.limit as number | undefined) ?? DEFAULT_TASK_LIMIT;
       argsPreview = `lane=${lane ?? "*"} limit=${limit}`;
-      const all = listTasks(db);
+      const all = listTasks(db).filter((t) => !t.held_at);
       const filtered = (lane ? all.filter((t) => t.column === lane) : all).slice(0, limit);
       body = filtered.length
         ? filtered.map((t) => `- [${t.column}] ${t.title}${t.owner ? ` (owner: ${t.owner})` : ""}`).join("\n")

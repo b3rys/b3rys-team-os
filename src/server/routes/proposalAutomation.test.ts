@@ -328,6 +328,27 @@ describe("후보를 다 돌아도 리뷰가 없을 때", () => {
     expect(a?.description).toContain("다음 행동");
   });
 
+  test("보류된 후속 카드는 peer review 미확보 자동화가 수정하지 않는다", async () => {
+    const { app, db } = setup();
+    const agents = agentsWithCoordinator("demis");
+    const { id } = (await (await create(app)).json()) as { id: string };
+    const before = db.prepare(
+      `SELECT t.id, t.owner, t.description
+         FROM proposal_followup_task pft JOIN task t ON t.id = pft.task_id
+        WHERE pft.proposal_id = ? AND pft.closed_at IS NULL`,
+    ).get(id) as { id: string; owner: string; description: string };
+    db.prepare(`UPDATE task SET held_at=datetime('now'), hold_reason='대기', review_at='2026-08-17' WHERE id=?`).run(before.id);
+
+    let blocked = false;
+    for (let i = 0; i < 12 && !blocked; i += 1) {
+      ageProposal(db, id, 40);
+      blocked = sweepStaleProposals(db, agents).blocked.includes(id);
+    }
+    expect(blocked).toBe(true);
+    const after = db.prepare(`SELECT owner, description FROM task WHERE id=?`).get(before.id);
+    expect(after).toEqual({ owner: before.owner, description: before.description });
+  });
+
   test("카드가 없어진 채로 넘기면 기록을 남긴다", async () => {
     const { app, db } = setup();
     const agents = agentsWithCoordinator("demis");

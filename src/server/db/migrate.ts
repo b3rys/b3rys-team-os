@@ -815,6 +815,10 @@ export function runBusMigration(db: Database): void {
     "ALTER TABLE message ADD COLUMN sync TEXT NOT NULL DEFAULT 'none'",
     // Tasks kanban: owner-maintained free-form description (목표·범위·계획·완료기준·메모)
     "ALTER TABLE task ADD COLUMN description TEXT",
+    // Tasks 보류함: 실행 칼럼과 분리된 commitment 전 저장소. lane은 plan/doing/done 호환 유지.
+    "ALTER TABLE task ADD COLUMN held_at TEXT",
+    "ALTER TABLE task ADD COLUMN hold_reason TEXT",
+    "ALTER TABLE task ADD COLUMN review_at TEXT",
     // 결과물 포털: report 분류(보고서/교육자료/리서치) — /research 통합 후 category 로 구분 (2026-06-07)
     "ALTER TABLE report ADD COLUMN category TEXT",
     // 결과물 포털: GD 중요표시 별표 필터 (2026-07-02)

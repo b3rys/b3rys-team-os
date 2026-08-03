@@ -25,6 +25,7 @@ interface Task {
   owner: string | null;
   column: "plan" | "doing" | "done";
   description: string | null;
+  held_at?: string | null;
 }
 
 interface Agent {
@@ -36,7 +37,7 @@ export function activeReviewOwners(tasks: Task[], reviewOwners: string[]): strin
   const allowed = new Set(reviewOwners);
   return [...new Set(
     tasks
-      .filter((t) => t.column !== "done" && t.owner && allowed.has(t.owner))
+      .filter((t) => !t.held_at && t.column !== "done" && t.owner && allowed.has(t.owner))
       .map((t) => t.owner!),
   )];
 }
@@ -107,7 +108,7 @@ async function main(): Promise<void> {
   // owner별 active(doing/plan) 과제 모으기
   const byOwner = new Map<string, { doing: Task[]; plan: Task[] }>();
   for (const t of tasks) {
-    if (t.column === "done") continue;
+    if (t.held_at || t.column === "done") continue;
     if (!t.owner || !reviewOwnerSet.has(t.owner)) continue;
     const g = byOwner.get(t.owner) ?? { doing: [], plan: [] };
     (t.column === "doing" ? g.doing : g.plan).push(t);

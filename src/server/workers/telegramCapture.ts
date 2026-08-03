@@ -336,7 +336,7 @@ export function applyTelegramBotActivityAutoAck(
 type TaskRow = { lane: string; title: string; owner: string | null };
 export function allTasks(db: Database): TaskRow[] {
   return db
-    .prepare("SELECT lane, title, owner FROM task ORDER BY lane, sort_order")
+    .prepare("SELECT lane, title, owner FROM task WHERE held_at IS NULL ORDER BY lane, sort_order")
     .all() as TaskRow[];
 }
 function byLane(rows: TaskRow[], lane: string): TaskRow[] {

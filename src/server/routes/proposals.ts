@@ -305,7 +305,7 @@ function createLinkedFollowup(
     `SELECT t.id
        FROM proposal_followup_task pft
        JOIN task t ON t.id = pft.task_id
-      WHERE pft.proposal_id = ? AND pft.status = ? AND pft.closed_at IS NULL AND t.lane != 'done'
+      WHERE pft.proposal_id = ? AND pft.status = ? AND pft.closed_at IS NULL AND t.lane != 'done' AND t.held_at IS NULL
       ORDER BY pft.created_at DESC
       LIMIT 1`,
   ).get(p.id, statusKey) as { id: string } | undefined;
@@ -539,6 +539,7 @@ function closeProposalFollowups(db: Database, proposalId: string, status: string
     `UPDATE task
        SET lane = 'done', updated_at = datetime('now')
       WHERE lane != 'done'
+        AND held_at IS NULL
         AND id IN (
           SELECT task_id
             FROM proposal_followup_task
@@ -548,7 +549,8 @@ function closeProposalFollowups(db: Database, proposalId: string, status: string
   db.prepare(
     `UPDATE proposal_followup_task
         SET closed_at = datetime('now')
-      WHERE proposal_id = ? AND (${clauses}) AND closed_at IS NULL`,
+      WHERE proposal_id = ? AND (${clauses}) AND closed_at IS NULL
+        AND task_id IN (SELECT id FROM task WHERE lane = 'done')`,
   ).run(proposalId, ...args);
 }
 
@@ -557,6 +559,7 @@ function closeAllProposalFollowups(db: Database, proposalId: string): void {
     `UPDATE task
        SET lane = 'done', updated_at = datetime('now')
       WHERE lane != 'done'
+        AND held_at IS NULL
         AND id IN (
           SELECT task_id
             FROM proposal_followup_task
@@ -566,7 +569,8 @@ function closeAllProposalFollowups(db: Database, proposalId: string): void {
   db.prepare(
     `UPDATE proposal_followup_task
         SET closed_at = datetime('now')
-      WHERE proposal_id = ? AND closed_at IS NULL`,
+      WHERE proposal_id = ? AND closed_at IS NULL
+        AND task_id IN (SELECT id FROM task WHERE lane = 'done')`,
   ).run(proposalId);
 }
 
@@ -779,7 +783,8 @@ export function sweepStaleProposals(
               WHERE id IN (
                 SELECT task_id FROM proposal_followup_task
                  WHERE proposal_id = ? AND status LIKE ? AND closed_at IS NULL
-              )`,
+              )
+                AND held_at IS NULL`,
           );
           // 조율자도 제안자도 DB 에 없어 담당이 그대로면(명부와 DB 어긋남), 다음 행동이 아니라
           // 그 사실을 적어야 사람이 고칠 수 있다. 조율자가 마침 그 담당인 정상 경우와 구분된다.

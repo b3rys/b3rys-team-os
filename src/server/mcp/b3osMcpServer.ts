@@ -165,7 +165,7 @@ export function buildMcpServer(db: Database): McpServer {
     },
     async (args: unknown) => {
       const { lane } = args as { lane?: "plan" | "doing" | "done" };
-      const all = listTasks(db);
+      const all = listTasks(db).filter((t) => !t.held_at);
       const tasks = lane ? all.filter((t) => t.column === lane) : all;
       const lines = tasks.map((t) => `- [${t.column}] ${t.title}${t.owner ? ` (${t.owner})` : ""}`);
       const text = `칸반 카드 ${tasks.length}건${lane ? ` (lane=${lane})` : ""}\n` + lines.join("\n");

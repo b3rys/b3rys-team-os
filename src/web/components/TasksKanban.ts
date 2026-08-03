@@ -7,6 +7,7 @@
 import { apiBase } from "../ws";
 import { pick } from "../i18n";
 import { parseSqliteDate } from "../lib/datetime";
+import { showConfirm } from "./dialogs";
 
 type ColKey = "plan" | "doing" | "done";
 
@@ -19,7 +20,12 @@ interface KanbanTask {
   sort_order?: number;
   created_at?: string;
   updated_at?: string;
+  held_at?: string | null;
+  hold_reason?: string | null;
+  review_at?: string | null;
 }
+
+type BoardView = "board" | "hold";
 
 // dot 의미(승인 프로토) = 계획:중립회색 · 실행중:accent green · 완료:blue. 시맨틱 토큰으로 라이트/다크 적응.
 const COLUMNS: { key: ColKey; label: string; accent: string }[] = [
@@ -62,6 +68,21 @@ function taskTimeMs(value?: string): number {
   return d ? d.getTime() : 0;
 }
 
+const STALE_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
+
+export function localDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+export function isTaskStale(t: KanbanTask, nowMs = Date.now()): boolean {
+  if (t.held_at || t.column === "done") return false;
+  const d = parseSqliteDate(t.updated_at ?? t.created_at ?? null);
+  return d ? nowMs - d.getTime() >= STALE_AFTER_MS : false;
+}
+
 function trashIcon(cls = "h-3.5 w-3.5"): string {
   return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>`;
 }
@@ -80,6 +101,8 @@ export function renderTasksKanban(root: HTMLElement): void {
   let expandedId: string | null = null; // description 펼침/편집
   let filterOwner: string | null = null; // 담당자 필터 (null=전체)
   let visibleCount = initialVisible(); // 칼럼별 표시 개수(더보기로 증가)
+  let view: BoardView = "board";
+  let holdVisibleCount = LANE_PAGE_SIZE;
 
   const base = () => `${apiBase()}/api/tasks`;
 
@@ -102,6 +125,7 @@ export function renderTasksKanban(root: HTMLElement): void {
       const body = (await res.json()) as { tasks: KanbanTask[] };
       tasks = body.tasks ?? [];
       visibleCount = initialVisible();
+      holdVisibleCount = LANE_PAGE_SIZE;
       loadError = false;
     } catch (e) {
       console.error("[loadTasks]", e);
@@ -142,6 +166,10 @@ export function renderTasksKanban(root: HTMLElement): void {
   }
 
   async function delTask(id: string) {
+    if (!await showConfirm({
+      message: pick("이 카드를 영구 삭제할까요? 보류하려면 보류 버튼을 사용하세요.", "Permanently delete this card? Use Hold if you may need it later."),
+      danger: true,
+    })) return;
     tasks = tasks.filter((x) => x.id !== id);
     render();
     try {
@@ -149,6 +177,29 @@ export function renderTasksKanban(root: HTMLElement): void {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch (e) {
       console.error("[delTask]", e);
+      await loadTasks();
+    }
+  }
+
+  async function setHeld(id: string, held: boolean) {
+    const task = tasks.find((x) => x.id === id);
+    if (!task) return;
+    const reviewAt = localDateKey(new Date(Date.now() + STALE_AFTER_MS));
+    const holdReason = isTaskStale(task) ? pick("14일+ 미갱신 검토", "Inactive 14+ days review") : pick("수동 보류", "Manually held");
+    task.held_at = held ? new Date().toISOString() : null;
+    task.hold_reason = held ? holdReason : null;
+    task.review_at = held ? reviewAt : null;
+    task.updated_at = new Date().toISOString();
+    render();
+    try {
+      const res = await fetch(`${base()}/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(held ? { held, hold_reason: holdReason, review_at: reviewAt } : { held }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      console.error("[setHeld]", e);
       await loadTasks();
     }
   }
@@ -211,11 +262,12 @@ export function renderTasksKanban(root: HTMLElement): void {
   }
 
   function cardHtml(t: KanbanTask): string {
+    const held = !!t.held_at;
     const idx = COL_ORDER.indexOf(t.column);
-    const left = idx > 0
+    const left = !held && idx > 0
       ? `<button data-move="-1" data-id="${t.id}" class="text-slate-500 hover:text-slate-200 px-1" title="${pick("왼쪽 컬럼으로", "To left column")}">◀</button>`
       : `<span class="px-1 opacity-0">◀</span>`;
-    const right = idx < COL_ORDER.length - 1
+    const right = !held && idx < COL_ORDER.length - 1
       ? `<button data-move="1" data-id="${t.id}" class="text-slate-500 hover:text-slate-200 px-1" title="${pick("오른쪽 컬럼으로", "To right column")}">▶</button>`
       : `<span class="px-1 opacity-0">▶</span>`;
     const titleHtml = editingId === t.id
@@ -230,14 +282,26 @@ export function renderTasksKanban(root: HTMLElement): void {
            class="w-full mt-2 bg-surface-0 border border-surface-3 rounded px-2 py-1 text-[11px] text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-accent-green resize-y">${escape(t.description ?? "")}</textarea>
          <div class="text-[9px] text-slate-600 mt-0.5">${pick("상세는 자동 저장 (포커스 벗어날 때)", "Details auto-save (on blur)")}</div>`
       : "";
+    const staleBadge = isTaskStale(t)
+      ? `<span class="inline-flex items-center rounded-full bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">${pick("14일+ 미갱신", "Inactive 14+ days")}</span>`
+      : "";
+    const holdAction = held
+      ? `<button data-unhold="${t.id}" class="rounded-md border border-accent-green/30 px-2 py-1 text-[11px] font-semibold text-accent-green hover:bg-accent-green/10">${pick("보드로 복귀", "Return to board")}</button>`
+      : `<button data-hold="${t.id}" class="rounded-md border border-amber-400/20 px-2 py-1 text-[11px] font-semibold text-amber-300 hover:bg-amber-400/10">${pick("보류", "Hold")}</button>`;
+    const holdMeta = held
+      ? `<div class="mt-2 text-[10px] text-slate-500">${escape(t.hold_reason ?? pick("사유 없음", "No reason"))}${t.review_at ? ` · ${pick("재검토", "Review")} ${escape(t.review_at)}` : ""}</div>`
+      : "";
     return `
       <div class="relative rounded-[14px] bg-surface-3 border border-surface-3 p-4 shadow-[0_1px_2px_rgba(0,0,0,.05)] hover:shadow-[0_4px_16px_rgba(0,0,0,.08)] transition-shadow group">
         ${detailLink}
         <div class="min-w-0">${titleHtml}</div>
         ${descBlock}
-        <div class="mt-4 flex flex-wrap items-center gap-2">
+        ${holdMeta}
+        <div class="mt-3 flex min-h-5 items-center gap-2">${staleBadge}</div>
+        <div class="mt-2 flex flex-wrap items-center gap-2">
           <div class="min-w-[7rem] flex-1">${ownerSelectHtml(t.owner, `data-owner="${t.id}"`)}</div>
           <div class="ml-auto flex shrink-0 items-center gap-1.5">
+            ${holdAction}
             <button data-del="${t.id}" class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent text-slate-500 transition-colors hover:border-red-400/30 hover:bg-red-400/10 hover:text-status-blocked" title="${pick("삭제", "Delete")}" aria-label="${pick("삭제", "Delete")}">${trashIcon()}</button>
             <div class="flex items-center">${left}${right}</div>
           </div>
@@ -245,9 +309,27 @@ export function renderTasksKanban(root: HTMLElement): void {
       </div>`;
   }
 
+  function viewTabsHtml(): string {
+    const heldCount = tasks.filter((t) => !!t.held_at).length;
+    const tab = (key: BoardView, label: string) => `<button data-view="${key}" class="rounded-full border px-3 py-1 text-[12px] font-semibold ${view === key ? "border-slate-100 bg-slate-100 text-surface-0" : "border-surface-3 bg-surface-3 text-slate-400 hover:text-slate-200"}">${label}</button>`;
+    return `<div class="flex items-center gap-2 px-1 pb-3">${tab("board", pick("업무 보드", "Work board"))}${tab("hold", `${pick("보류함", "Hold")} (${heldCount})`)}</div>`;
+  }
+
+  function holdHtml(): string {
+    const items = tasks
+      .filter((t) => !!t.held_at)
+      .filter((t) => filterOwner === null || t.owner === filterOwner)
+      .sort((a, b) => taskTimeMs(b.held_at ?? b.updated_at) - taskTimeMs(a.held_at ?? a.updated_at));
+    const visible = items.slice(0, holdVisibleCount);
+    const cards = visible.map(cardHtml).join("") || `<div class="rounded-[14px] border border-surface-3 px-4 py-10 text-center text-[12px] text-slate-500">${pick("보류한 계획이 없습니다.", "No held plans.")}</div>`;
+    const remaining = items.length - visible.length;
+    const more = remaining > 0 ? `<button data-hold-more class="mt-3 w-full rounded-[10px] border border-surface-3 bg-surface-2 px-3 py-2 text-[12px] font-semibold text-slate-300">${pick(`더보기 ${Math.min(LANE_PAGE_SIZE, remaining)}`, `Show ${Math.min(LANE_PAGE_SIZE, remaining)} more`)}</button>` : "";
+    return `${filterBarHtml()}<div class="mx-auto flex max-w-3xl flex-col gap-3">${cards}${more}</div>`;
+  }
+
   function columnHtml(col: { key: ColKey; label: string; accent: string }): string {
     const items = tasks
-      .filter((t) => t.column === col.key)
+      .filter((t) => !t.held_at && t.column === col.key)
       .filter((t) => filterOwner === null || t.owner === filterOwner)
       .sort(byNewestFirst);
     const visibleItems = items.slice(0, visibleCount[col.key]);
@@ -285,7 +367,7 @@ export function renderTasksKanban(root: HTMLElement): void {
         <button data-retry class="px-3 py-1 rounded bg-surface-3 hover:bg-surface-0 text-[12px] text-slate-200">${pick("다시 시도", "Retry")}</button>
       </div>`;
     }
-    return `${filterBarHtml()}<div class="flex gap-5 min-h-full items-stretch flex-col md:flex-row">${COLUMNS.map(columnHtml).join("")}</div>`;
+    return `${viewTabsHtml()}${view === "hold" ? holdHtml() : `${filterBarHtml()}<div class="flex gap-5 min-h-full items-stretch flex-col md:flex-row">${COLUMNS.map(columnHtml).join("")}</div>`}`;
   }
 
   function render() {
@@ -312,12 +394,19 @@ export function renderTasksKanban(root: HTMLElement): void {
     root.querySelector<HTMLButtonElement>("[data-retry]")?.addEventListener("click", () => void loadTasks());
     root.querySelectorAll<HTMLButtonElement>("[data-del]").forEach((b) =>
       b.addEventListener("click", () => void delTask(b.dataset.del!)));
+    root.querySelectorAll<HTMLButtonElement>("[data-hold]").forEach((b) =>
+      b.addEventListener("click", () => void setHeld(b.dataset.hold!, true)));
+    root.querySelectorAll<HTMLButtonElement>("[data-unhold]").forEach((b) =>
+      b.addEventListener("click", () => void setHeld(b.dataset.unhold!, false)));
+    root.querySelectorAll<HTMLButtonElement>("[data-view]").forEach((b) =>
+      b.addEventListener("click", () => { view = b.dataset.view as BoardView; editingId = null; expandedId = null; render(); }));
+    root.querySelector<HTMLButtonElement>("[data-hold-more]")?.addEventListener("click", () => { holdVisibleCount += LANE_PAGE_SIZE; render(); });
     root.querySelectorAll<HTMLButtonElement>("[data-move]").forEach((b) =>
       b.addEventListener("click", () => void moveTask(b.dataset.id!, Number(b.dataset.move) as -1 | 1)));
 
     // 담당자 필터
     root.querySelectorAll<HTMLButtonElement>("[data-filter]").forEach((b) =>
-      b.addEventListener("click", () => { filterOwner = b.dataset.filter || null; visibleCount = initialVisible(); render(); }));
+      b.addEventListener("click", () => { filterOwner = b.dataset.filter || null; visibleCount = initialVisible(); holdVisibleCount = LANE_PAGE_SIZE; render(); }));
 
     root.querySelectorAll<HTMLButtonElement>("[data-show-more]").forEach((b) =>
       b.addEventListener("click", () => {

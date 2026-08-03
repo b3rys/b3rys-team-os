@@ -68,6 +68,12 @@ describe("stall 판정 — 가드가 시킨 표시를 실제로 반영한다", (
   });
 });
 
+test("보류된 doing 카드는 continuation 대상으로 깨우지 않는다", () => {
+  const now = Date.parse("2026-08-03T06:00:00Z");
+  const card = { id: "held", title: "보류", owner: "codex", column: "doing" as const, description: null, updated_at: "2026-08-01 00:00:00", held_at: "2026-08-02 00:00:00" };
+  expect(stalledDoingCards([card], new Set(["codex"]), now, 60_000)).toEqual([]);
+});
+
 describe("안내 문구", () => {
   test("표시하면 무엇이 달라지는지 알려준다 — 안 그러면 유인이 서지 않는다", () => {
     const body = guardBody("someone", [card()], 60);
