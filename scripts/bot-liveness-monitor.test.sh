@@ -11,7 +11,7 @@
 #
 # 실 파일시스템·실 launchctl·실 tmux 미접촉 (전부 temp HOME + mock).
 set -uo pipefail
-SCRIPT="${1:?스크립트 경로}"
+SCRIPT="${1:-$(cd "$(dirname "$0")" && pwd)/bot-liveness-monitor.sh}"
 
 T="$(mktemp -d "${TMPDIR:-/tmp}/probe-restart.XXXXXX")"
 export HOME="$T/home"
