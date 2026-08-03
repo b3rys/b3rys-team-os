@@ -449,4 +449,29 @@ describe("buildPrompt — ★주동사는 '실행해서 보내라' 다★ (2026-
       expect(p).not.toContain("--to");    // 주소 계산 금지
     }
   });
+
+  test("★정의 문장이 trailer 안에 있다★ — 방아쇠만 남기면 실패한다(변형D 0/5)", () => {
+    // D(중간을 원문 "답하고" 로 되돌리고 맨 끝 방아쇠만) → 0/5, api_calls=1. 정의가 없으면 이 모델은
+    // ★명령을 글로 쓰는 것을 발신으로 여긴다.★ 그래서 이 문장은 "중복" 이 아니라 필수다.
+    const p = buildPrompt({ ...base2, locale: "ko" as const });
+    expect(p).toContain("발신 명령을 글로 적는 것은 발신이 아닙니다");
+    expect(p).not.toContain("간결하게 답하고"); // 옛 주동사로 되돌아가면 D 와 같아진다
+  });
+
+  test("★방아쇠가 trailer 맨 마지막에 온다★ (2026-08-03 A/B: 정의만으로는 0/5)", () => {
+    // 실측: 명령형이 중간에 있으면 이 모델은 ★도구를 아예 호출하지 않는다★(api_calls=1, 5/5 —
+    // 명령을 완벽히 조립해서 글로만 출력). 맨 끝으로 옮기면 15/15 전부 호출한다.
+    // 그래서 "문구가 있다" 로는 부족하고 ★끝에 있다★ 를 잠근다.
+    for (const locale of ["ko", "en"] as const) {
+      const p = buildPrompt({ ...base2, locale }).trimEnd();
+      const tail = locale === "ko" ? "전달되지 않습니다.★" : "reaches no one.★";
+      expect(p.endsWith(tail)).toBe(true);
+    }
+  });
+
+  test("★침묵 허용 문구는 보존된다★ — 지우지 않고 순서만 바꿨다", () => {
+    // `[NO_REPLY]` 가 문자로 찍히던 사고 뒤에 일부러 넣은 설계다. 삭제 변형(4/10)과 보존 변형(2/5)의
+    // 도구 호출률이 같아서 지울 이유가 없었다 — 이 단정이 "효율화" 로 지워지는 것을 막는다.
+    expect(buildPrompt({ ...base2, locale: "ko" as const })).toContain("할 말이 없으면 그냥 안 보내면 됩니다");
+  });
 });
