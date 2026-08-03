@@ -162,9 +162,11 @@ export function createTaskRoutes(deps: TaskRouteDeps): Hono {
     }
     const before = getTask(deps.db, id); // capture owner/state BEFORE update
     if (!before) return c.json({ ok: false, error: "not found" }, 404);
-    if (body.held === true && before.held_at) {
-      return c.json({ ok: true, task: before }); // idempotent hold retry; timestamp/audit unchanged
-    }
+    // Repeating hold on an already-held task updates its metadata/other requested fields,
+    // but must not reset held_at or emit a second hold audit event.
+    const held = body.held === true && before.held_at
+      ? undefined
+      : typeof body.held === "boolean" ? body.held : undefined;
     const task = updateTask(deps.db, id, {
       title: typeof body.title === "string" ? body.title.trim() : undefined,
       column: body.column as TaskLane | undefined,
@@ -181,7 +183,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): Hono {
             ? body.description
             : null,
       sort_order: typeof body.sort_order === "number" ? body.sort_order : undefined,
-      held: typeof body.held === "boolean" ? body.held : undefined,
+      held,
       hold_reason:
         body.hold_reason === undefined ? undefined : typeof body.hold_reason === "string" ? body.hold_reason.trim() || null : null,
       review_at:

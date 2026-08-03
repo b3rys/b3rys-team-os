@@ -783,7 +783,8 @@ export function sweepStaleProposals(
               WHERE id IN (
                 SELECT task_id FROM proposal_followup_task
                  WHERE proposal_id = ? AND status LIKE ? AND closed_at IS NULL
-              )`,
+              )
+                AND held_at IS NULL`,
           );
           // 조율자도 제안자도 DB 에 없어 담당이 그대로면(명부와 DB 어긋남), 다음 행동이 아니라
           // 그 사실을 적어야 사람이 고칠 수 있다. 조율자가 마침 그 담당인 정상 경우와 구분된다.

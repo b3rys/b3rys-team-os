@@ -170,6 +170,29 @@ describe("tasks HOLD — 복원 가능한 보류", () => {
     });
     expect(orphan.status).toBe(400);
   });
+
+  test("이미 보류된 카드의 사유와 재검토일은 갱신하되 보류 시각과 audit은 보존한다", async () => {
+    const { app, db } = setup();
+    const card = await createCard(app, { title: "메타 수정", column: "plan" });
+    await app.request(`/tasks/${card.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ held: true, hold_reason: "초기", review_at: "2026-08-17" }),
+    });
+    const first = db.query(`SELECT held_at FROM task WHERE id=?`).get(card.id) as { held_at: string };
+
+    const updated = await app.request(`/tasks/${card.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ held: true, hold_reason: "변경", review_at: "2026-08-24" }),
+    });
+    expect(updated.status).toBe(200);
+    const task = (await updated.json()).task;
+    expect(task.hold_reason).toBe("변경");
+    expect(task.review_at).toBe("2026-08-24");
+    expect(task.held_at).toBe(first.held_at);
+    expect(db.query(`SELECT count(*) c FROM audit_event WHERE action='task_held' AND target=?`).get(card.id)).toEqual({ c: 1 });
+  });
 });
 
 describe("tasks — 카드변경 담당자 알림", () => {

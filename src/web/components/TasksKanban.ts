@@ -7,6 +7,7 @@
 import { apiBase } from "../ws";
 import { pick } from "../i18n";
 import { parseSqliteDate } from "../lib/datetime";
+import { showConfirm } from "./dialogs";
 
 type ColKey = "plan" | "doing" | "done";
 
@@ -165,7 +166,10 @@ export function renderTasksKanban(root: HTMLElement): void {
   }
 
   async function delTask(id: string) {
-    if (!window.confirm(pick("이 카드를 영구 삭제할까요? 보류하려면 보류 버튼을 사용하세요.", "Permanently delete this card? Use Hold if you may need it later."))) return;
+    if (!await showConfirm({
+      message: pick("이 카드를 영구 삭제할까요? 보류하려면 보류 버튼을 사용하세요.", "Permanently delete this card? Use Hold if you may need it later."),
+      danger: true,
+    })) return;
     tasks = tasks.filter((x) => x.id !== id);
     render();
     try {
