@@ -83,6 +83,12 @@ export function isTaskStale(t: KanbanTask, nowMs = Date.now()): boolean {
   return d ? nowMs - d.getTime() >= STALE_AFTER_MS : false;
 }
 
+export function deletePrompt(t: KanbanTask | undefined): string {
+  return t?.held_at
+    ? pick("이 보류 카드를 영구 삭제할까요?", "Permanently delete this held card?")
+    : pick("이 카드를 영구 삭제할까요? 보류하려면 보류 버튼을 사용하세요.", "Permanently delete this card? Use Hold if you may need it later.");
+}
+
 function trashIcon(cls = "h-3.5 w-3.5"): string {
   return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>`;
 }
@@ -170,8 +176,9 @@ export function renderTasksKanban(root: HTMLElement): void {
   }
 
   async function delTask(id: string) {
+    const task = tasks.find((x) => x.id === id);
     if (!await showConfirm({
-      message: pick("이 카드를 영구 삭제할까요? 보류하려면 보류 버튼을 사용하세요.", "Permanently delete this card? Use Hold if you may need it later."),
+      message: deletePrompt(task),
       danger: true,
     })) return;
     tasks = tasks.filter((x) => x.id !== id);
