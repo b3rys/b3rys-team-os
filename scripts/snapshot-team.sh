@@ -20,17 +20,22 @@ mkdir -p "$DEST" "$STAGE"/{tree,home/Development,home/.claude,home/.hermes,launc
 #   지우려던 패턴이 ★멤버 워크스페이스의 reports·decks(작업물)까지★ 걸어 백업에서 빼고 있었다.
 #   백업 도구가 조용히 작업물을 버리는 형태라, 구획별로 나눈다.
 
-# 어디서나 안전한 것 — 재생성물·임시물
-EX_COMMON=(--exclude='.git' --exclude='node_modules' --exclude='backups' --exclude='migration-backups-*'
+# 어디서나 안전한 것 — 재생성물·임시물 (.git 제외는 여기 넣지 않는다 — 아래 EX_MEMBER 주석 참조)
+EX_BASE=(--exclude='node_modules' --exclude='backups' --exclude='migration-backups-*'
     --exclude='*.pre-*' --exclude='*.bak' --exclude='*.bak-*' --exclude='*.log' --exclude='.DS_Store'
     --exclude='dist' --exclude='.cache' --exclude='scratchpad' --exclude='outbox'
     --exclude='team.db.pre-*' --exclude='*.wal' --exclude='*.sqlite-*')
 
+EX_COMMON=("${EX_BASE[@]}" --exclude='.git')
+
 # 트리(var) 대용량 재생성물 — 모델·검색eval·벡터인덱스
 EX_TREE=("${EX_COMMON[@]}" --exclude='models' --exclude='team-search-eval' --exclude='*.lancedb')
 
-# 멤버 워크스페이스 — ★작업물을 지우지 않는다.★ 공통 제외만 건다.
-EX_MEMBER=("${EX_COMMON[@]}")
+# 멤버 워크스페이스 — ★작업물을 지우지 않는다.★
+#   ★.git 도 담는다★ (GD 2026-08-03). 팀원 워크스페이스는 원격이 없을 수 있어서, .git 을 빼면
+#   "파일은 복구되는데 언제 왜 바꿨는지는 사라지는" 반쪽 스냅샷이 된다. 스냅샷은 그야말로 스냅샷이다.
+#   비용: 실측 4MB (등록 12명 중 git repo 는 bill·lui 둘뿐) — 405MB 묶음의 1%.
+EX_MEMBER=("${EX_BASE[@]}")
 
 # hermes 프로필 — 대화state·홈·캐시·bin·모델·세션·미디어·스킬(repo서 옴)은 재생성 가능
 EX_HERMES=("${EX_COMMON[@]}" --exclude='state.db' --exclude='state.db-*' --exclude='state-snapshots'
