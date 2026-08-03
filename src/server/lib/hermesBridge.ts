@@ -188,13 +188,13 @@ export function buildPrompt(opts: HermesTurnOptions): string {
   // ★지시문의 ★주동사★ 가 "답하라" 가 아니라 "보내라" 여야 한다.★ (2026-08-03 실측)
   //
   // ═══ 무슨 일이 있었나 ═══
-  // dojo(Qwen3-Next-80B, hermes)가 버스로 깨어나도 ★조용히 아무 말도 안 했다★ — 에러 0, row 는
+  // hermes 런타임 팀원(Qwen3-Next-80B)이 버스로 깨어나도 ★조용히 아무 말도 안 했다★ — 에러 0, row 는
   // wake_dispatched 에서 멈춤. 턴은 정상 실행·완료됐다(usage completed:true). 문제는 ★답을 stdout 에
   // 쓰고 끝낸 것★ 이고, 서버는 설계상 그걸 버린다([B] 아래 참조).
   //
   // 예전 문장은 주동사가 "간결하게 ★답하고★" 였고, "말하려면 보내라" 는 뒤의 surfaceNote 에 있었다.
   // ★claude 팀원은 둘을 합쳐 "send.sh 로 답한다" 로 읽는다. Qwen 은 주동사를 그대로 실행한다.★
-  // ★실측 4조합★ (dojo/Qwen3-Next-80B, 2026-08-03. 발신 성공 = 버스 도착 + usage api_calls=2):
+  // ★실측 4조합★ (hermes 런타임 팀원/Qwen3-Next-80B, 2026-08-03. 발신 성공 = 버스 도착 + usage api_calls=2):
   //   ① 팀원 규칙만 강화 + 옛 동사("답하고")            → ❌ 텍스트만
   //   ② 동사만 "답을 보내세요"                          → ❌ ★명령을 글로 출력★ 하고 끝(api_calls=1)
   //   ③ 동사만 "실행해서 보내세요"                      → ❌ 여전히 명령을 글로 출력(api_calls=1)
@@ -220,7 +220,7 @@ export function buildPrompt(opts: HermesTurnOptions): string {
   //       "발신 명령을 글로 적는 것은 발신이 아닙니다 / 여기 쓰는 글은 아무에게도 전달되지 않습니다"
   //   · 아래(맨 끝) 문장 = ★지금 실행하라는 방아쇠★.
   //
-  // ★실측 3변형 (dojo/Qwen3-Next-80B, 각 5회 이상)★ — 성공 = 버스 도착 + api_calls≥2
+  // ★실측 3변형 (hermes 런타임 팀원/Qwen3-Next-80B, 각 5회 이상)★ — 성공 = 버스 도착 + api_calls≥2
   //   A 정의만(강한 명령형이 중간에만)        → 발신 0/5 · api_calls=1 · ★도구 호출 0★
   //   D 방아쇠만(중간은 원문 "답하고", 끝 1회) → 발신 0/5 · api_calls=1 · ★도구 호출 0★
   //   C 정의 + 방아쇠(현재 구현)              → 도구 호출 ★5/5★ · 발신 2/5
