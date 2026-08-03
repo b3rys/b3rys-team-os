@@ -45,6 +45,25 @@ interface StalledCollection {
   missing: string[];    // 아직 답 안 한 기여자
   answered: string[];   // 답한 기여자
   key: string;          // 중복 재촉 방지 키 (thread:collector:마지막팬아웃시각)
+  // ★어느 수집인지 알려주는 두 값★ (GD 2026-08-03) — 알림 첫 줄에 실린다.
+  //   thread_id 는 이미 실려 나가지만 `tg--1003947108339`·`XZD-y5Fs` 처럼 ★사람이 못 읽는다.★
+  //   (실측 2026-08-03: bill 이 하루에 이 알림을 4번 받고 매번 "어느 수집이지" 를 되짚었다)
+  askId: string;        // collector 가 던진 첫 질문의 message id — 제목이 무의미해도 이건 항상 식별된다
+  askTitle: string;     // 그 질문의 첫 줄 (자르면 …(잘림))
+}
+
+/** 첫 줄을 제목으로 쓴다. ★아무것도 벗기지 않는다★ (GD 2026-08-03 "심플하게").
+ *  벗기려다 `[아침 브리핑 …]` 의 여는 대괄호만 지워 ★닫는 짝이 혼자 남는★ 일이 있었다.
+ *  안 벗기면 `[6am 과제 리뷰]`·`[workloop: …]` 같은 말머리가 살아 종류가 한눈에 보인다. */
+export function askTitleOf(body: string, max = 44): string {
+  const first = (body ?? "").split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
+  // ★잘렸다는 걸 반드시 보이게★ — `…` 만으로는 원문에 있던 말줄임과 구분이 안 된다.
+  // 자른 자리에 이미 말줄임이 있으면 ★……(잘림) 처럼 두 번 겹친다★ — 그 자리만 정리하고 붙인다.
+  if ([...first].length <= max) return first;
+  // ★코드유닛이 아니라 코드포인트로 자른다★ (steve 리뷰) — slice 는 경계에 astral 문자(😀 등)가
+  //   걸리면 ★반쪽 서로게이트★ 를 남긴다. 실측: "가"×43 + "😀" → "…가가\ud83d…(잘림)".
+  const cut = [...first].slice(0, max).join("");
+  return `${cut.trimEnd().replace(/[…]+$/, "").trimEnd()}…(잘림)`;
 }
 
 /**
@@ -143,7 +162,7 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
       // C 가 보낸 directed 메시지 (질문일 수도, 보고일 수도)
       const sends = db
         .prepare(
-          `SELECT to_agent_id AS peer, created_at,
+          `SELECT id, body, to_agent_id AS peer, created_at,
                   json_extract(meta_json,'$.individual') AS individual
              FROM message
             WHERE thread_id = ? AND from_agent_id = ? AND source='agent'
@@ -151,7 +170,7 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
               AND to_agent_id <> ? AND created_at > datetime('now','-90 minutes')
             ORDER BY created_at`,
         )
-        .all(thread_id, C, C) as { peer: string; created_at: string; individual: number | null }[];
+        .all(thread_id, C, C) as { id: string; body: string; peer: string; created_at: string; individual: number | null }[];
       if (sends.length < 2) continue;
 
       // C 에게 들어온 메시지 (답·지시)
@@ -176,12 +195,12 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
       //   ② 위임 행을 anchor → ★팀장의 단톡방 지시는 message 테이블에 없다★ (캡처로 직접 주입)
       //   ③ "요청자는 먼저 말 건 사람" → 장수 그룹방에선 기여자도 예전에 말한 적이 있다 → ★0건★
       //   → ★버스트 = 답이 하나라도 들어오기 전에 연달아 나간 발신★. 보고는 답 뒤에 나온다.
-      let burst: { peer: string; at: string; individual: number | null }[] = [];
+      let burst: { peer: string; at: string; individual: number | null; id: string; body: string }[] = [];
       for (const s of sends) {
         const answeredBetween = burst.length > 0 &&
           inbound.some((i) => i.created_at > burst[0]!.at && i.created_at < s.created_at);
         if (answeredBetween) break;          // 답이 끼어들었다 → 여기부터는 보고다
-        burst.push({ peer: s.peer, at: s.created_at, individual: s.individual });  // ★손에 있는 걸 버리지 않는다★ (dbak)
+        burst.push({ peer: s.peer, at: s.created_at, individual: s.individual, id: s.id, body: s.body });  // ★손에 있는 걸 버리지 않는다★ (dbak)
       }
       // ★요청자에게 보낸 ack 은 질문이 아니다★ — codex 는 팬아웃 ★전에★ 요청자에게 "확인했습니다" 를 보낸다.
       //   그러면 그 ack 이 버스트에 섞여 ★요청자가 '미응답 기여자'★ 로 잡힌다 (실측: 미응답=[bill]).
@@ -311,7 +330,22 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
         if (answeredToCollector.length !== targets.length) continue;
       }
 
-      out.push({ threadId: thread_id, collector: C, missing, answered, key: `${thread_id}:${C}:${lastAsk}` });
+      // ★식별은 collector 가 던진 첫 질문에서 뽑는다★ — 요청자 메시지가 아니다.
+      //   요청자 행은 없을 수 있다(팀장이 단톡방에서 시키면 message 테이블에 안 남는다 — 위 ② 참조).
+      //   반면 팬아웃 첫 건은 ★수집의 정의상 반드시 있다.★ 그리고 collector 가 직접 쓴 문장이라
+      //   본인이 가장 빨리 알아본다.
+      // ★burst[0] 은 팬아웃 첫 건이 아닐 수 있다★ (steve 리뷰 2026-08-04, 재현 확인).
+      //   collector 는 팬아웃 ★전에★ 요청자에게 ack 을 보낸다(:202 주석이 이미 경고한 그 패턴).
+      //   그러면 burst[0] = 그 ack → 알림 첫 줄이 「접수. 확인하고 회신하겠습니다.」 로 나간다.
+      //   ★틀린 식별은 못 읽는 thread_id 보다 나쁘다★ — 사람이 딴 수집을 되짚는다.
+      //   targets 는 위(:230)에서 requester 를 빼지만 ★burst 배열 자체는 안 걸러진다.★
+      //   폴백을 남기는 이유: 팀장 단톡방 지시처럼 ★requester 행이 아예 없는★ 경우
+      //   requester 가 undefined 라 find 가 첫 건을 그대로 준다 — 그 경로는 지금도 옳다.
+      const ask = burst.find((b) => b.peer !== requester) ?? burst[0]!;
+      out.push({
+        threadId: thread_id, collector: C, missing, answered, key: `${thread_id}:${C}:${lastAsk}`,
+        askId: ask.id, askTitle: askTitleOf(ask.body),
+      });
     }
   }
   return out;
@@ -339,10 +373,16 @@ export function sweepCollectionDeadlines(db: Database, agents: AgentRecord[]): n
         .get(key) as { n: number }).n;
       if (already > 0) continue;   // ★수집 하나당 한 번만 — 예외 없다★
 
+      // ★첫 줄 = 어느 수집인지.★ (GD 2026-08-03) 나머지를 읽기 전에 이것부터 걸린다.
+      //   서버가 1:1 DM 을 못 보는 건 그대로 둔다 — 대신 ★오탐일 때 사람이 1초에 판단하게★ 만든다.
+      const head = `[확인] 「${c.askTitle}」 (${c.askId})\n`;
+
       // ★두 상황은 다르다 — 다르게 말해줘야 팀원이 옳게 판단한다.★
-      const body = c.missing.length === 0
+      const body = head + (c.missing.length === 0
         // ★전원 답했는데 종합이 안 나갔다★ (실측: collector 가 ack 으로 마지막 턴을 써버렸다)
-        ? `[마감] ${COLLECTION_DEADLINE_MIN}분이 지났는데 아직 보고가 없습니다. ` +
+        //   ★"보고가 없습니다" 라고 단정하지 않는다★ (GD 2026-08-03) — 서버는 1:1 DM 을 못 보므로
+        //   ★못 본 것과 없는 것을 구분할 수 없다.★ 그러니 확인 가능한 사실("N분 지났다")만 말한다.
+        ? `${COLLECTION_DEADLINE_MIN}분 지났습니다. ` +
           `★${c.answered.join(", ")} 전원이 이미 답했습니다.★ ` +
           // ★훈계는 뺀다★ (GD: "이건 빼도 되지 않아?") — 서버는 ★"시간이 됐다 + 지금 상황"★ 만 말한다.
           //   "ack 은 보고가 아니다" 는 ★이미 룰에 있다.★ 시스템 알림이 룰을 다시 읊을 이유가 없다.
@@ -352,9 +392,10 @@ export function sweepCollectionDeadlines(db: Database, agents: AgentRecord[]): n
           //   실측: steve 가 보고 83초 뒤에 이 독촉을 받았다. 따르면 중복 보고가 되어 팀 룰을 어긴다.
           //   ★기본 동작이 먼저, 탈출구는 조건과 함께 뒤에★ (순서 원칙은 아래 미응답 분기와 같다).
           //   이 탈출구는 "아직 안 한 사람" 에게는 해당되지 않으므로 진짜 수집을 무시하게 만들지 않는다.
-          `★아직 종합 보고를 안 하셨으면 지금 보내세요.★ ` +
-          `(이미 팀장님께 1:1 로 보고하셨다면 이 알림은 무시하세요 — 서버는 1:1 DM 을 보지 못합니다.)`
-        : `[마감] ${COLLECTION_DEADLINE_MIN}분이 지났는데 아직 보고가 없습니다. ` +
+          `★아직 종합 보고를 안 하셨으면 지금 보내세요.★\n` +
+          // ★탈출구는 줄을 바꿔 아래로.★ 첫 줄만 봐도 판단되게 — 길이는 그대로인데 훨씬 빨리 읽힌다.
+          `· 이미 팀장님께 1:1 로 보고하셨다면 이 알림은 무시하세요 (서버는 1:1 DM 을 보지 못합니다)`
+        : `${COLLECTION_DEADLINE_MIN}분 지났습니다. ` +
           `미응답: ${c.missing.join(", ")}` +
           (c.answered.length ? ` / 답함: ${c.answered.join(", ")}` : "") +
           // ★개별보고면 이 알림 자체가 틀린 것이다 — 그런데 서버는 아직 그걸 알 수가 없다.★ (GD 2026-07-17)
@@ -375,9 +416,10 @@ export function sweepCollectionDeadlines(db: Database, agents: AgentRecord[]): n
           //     첫 버전은 '무시하세요' 를 앞에 둬서 ★무조건 명령을 조건문으로★ 바꿨다 — collector 가 처음
           //     읽는 지시가 탈출구가 되면, 애매한 상태의 팀원이 진짜 수집을 무시할 확률이 올라간다.
           //     → 기본 동작은 ★무조건★ 으로 두고, 탈출구는 ★괄호 예외★ 로 내린다.
-          `. ★지금까지 온 답으로 보고하세요★ — 안 온 사람은 '미응답' 이라고 명시하면 됩니다. ` +
-          `(각자 GD께 직접 보고하도록 시킨 건이면 종합할 게 없으니 이 알림은 무시하세요.) ` +
-          `(늦게 답이 오면 그때 다시 깨워드립니다. 그때 상황에 맞게 응답하시면 됩니다)`;
+          `. ★지금까지 온 답으로 보고하세요★ — 안 온 사람은 '미응답' 이라고 명시하면 됩니다.\n` +
+          // ★두 탈출구도 줄을 바꿔 아래로.★ 순서는 그대로 — 기본 동작(위) 다음에 예외(아래).
+          `· 각자 GD께 직접 보고하도록 시킨 건이면 종합할 게 없으니 이 알림은 무시하세요\n` +
+          `· 늦게 답이 오면 그때 다시 깨워드립니다 — 그때 상황에 맞게 응답하시면 됩니다`);
 
       const msg = insertMessage(db, {
         thread_id: c.threadId,

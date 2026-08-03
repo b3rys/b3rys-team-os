@@ -21,7 +21,7 @@
  */
 import { describe, expect, it, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import { findStalledCollections, sweepCollectionDeadlines } from "./collectionDeadline";
+import { findStalledCollections, sweepCollectionDeadlines, askTitleOf } from "./collectionDeadline";
 import { migrate } from "../db/migrate";
 
 const AGENTS = ["steve", "hermes", "codex", "demis", "bill", "dbak", "devon"].map((id) => ({ id })) as never;
@@ -568,4 +568,113 @@ describe("보고 인정 — 팀장 1:1 DM(dm_message)은 근거로 쓰지 않는
     expect(findStalledCollections(bare, AGENTS)).toHaveLength(1);   // 수정 이전과 동일
   });
 
+});
+
+// ═══ ★알림 첫 줄이 "어느 수집인지" 를 말한다★ (GD 2026-08-03) ═══
+//   thread_id 는 원래도 실려 나갔지만 `tg--1003947108339` 처럼 ★사람이 못 읽는다.★
+//   실측: bill 이 하루에 이 알림을 4번 받고 매번 어느 건인지 되짚었다.
+describe("★알림 식별 — 제목 + msg id★", () => {
+  function dbReal(threads: string[]): Database {
+    const d = new Database(":memory:");
+    migrate(d);
+    for (const t of threads) {
+      d.run(`INSERT INTO thread (id, title, kind, participants_json, opened_by) VALUES (?, 't', 'dm', '[]', 'bill')`, [t]);
+    }
+    return d;
+  }
+  /** msg 와 달리 ★본문을 지정★ 한다 — 제목은 본문 첫 줄에서 나오므로 여기서만 검증 가능하다. */
+  function msgBody(d: Database, thread: string, from: string, to: string, minsAgo: number, body: string, id?: string) {
+    d.run(
+      `INSERT INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, created_at)
+       VALUES (?, ?, ?, ?, 'dm', ?, 'agent', datetime('now','-' || ? || ' minutes'))`,
+      [id ?? `b${Math.random().toString(36).slice(2, 10)}`, thread, from, to, body, String(minsAgo)],
+    );
+  }
+  function sentBody(d: Database, collector: string): string | null {
+    const r = d.prepare(
+      `SELECT body FROM message WHERE from_agent_id='system' AND to_agent_id=? ORDER BY created_at DESC LIMIT 1`,
+    ).get(collector) as { body: string } | undefined;
+    return r?.body ?? null;
+  }
+
+  it("★첫 줄에 제목과 msg id 가 실린다★ — 이게 없으면 어느 수집인지 알 수 없다", () => {
+    const d = dbReal(["tg-id1"]);
+    msgBody(d, "tg-id1", "steve", "lui", 20, "[요청] bot-liveness 승격 — 판단근거 교체", "ASK-1");
+    msgBody(d, "tg-id1", "steve", "ames", 20, "[요청] bot-liveness 승격 — 판단근거 교체", "ASK-2");
+    expect(sweepCollectionDeadlines(d, AGENTS)).toBe(1);
+    const body = sentBody(d, "steve")!;
+    const head = body.split("\n")[0]!;
+    expect(head).toContain("[요청] bot-liveness 승격 — 판단근거 교체");   // 제목
+    expect(head).toContain("ASK-1");                                      // ★첫 팬아웃의 id★
+    expect(body.indexOf("ASK-1")).toBeLessThan(body.indexOf("분 지났습니다")); // 식별이 ★맨 앞★
+  });
+
+  it("★긴 첫 줄은 잘리고 (잘림) 이 붙는다★ — … 만으로는 원문 말줄임과 구분이 안 된다", () => {
+    const d = dbReal(["tg-id2"]);
+    const long = "이상한 경우 같은 거 테스트 하지말라니깐. 혹시 그런거 더 없는 지 봐. 일반적인 것만 보자";
+    msgBody(d, "tg-id2", "steve", "lui", 20, long);
+    msgBody(d, "tg-id2", "steve", "ames", 20, long);
+    expect(sweepCollectionDeadlines(d, AGENTS)).toBe(1);
+    const head = sentBody(d, "steve")!.split("\n")[0]!;
+    expect(head).toContain("…(잘림)");
+    expect(head).not.toContain("일반적인 것만 보자");     // 뒤가 실제로 잘렸다
+  });
+
+  it("★짧은 첫 줄에는 (잘림) 이 안 붙는다★ — 안 잘렸는데 잘렸다고 하면 그게 오보다", () => {
+    const d = dbReal(["tg-id3"]);
+    msgBody(d, "tg-id3", "steve", "lui", 20, "[확인] 짧은 요청");
+    msgBody(d, "tg-id3", "steve", "ames", 20, "[확인] 짧은 요청");
+    expect(sweepCollectionDeadlines(d, AGENTS)).toBe(1);
+    const head = sentBody(d, "steve")!.split("\n")[0]!;
+    expect(head).toContain("[확인] 짧은 요청");
+    expect(head).not.toContain("잘림");
+  });
+
+  it("★제목은 아무것도 벗기지 않는다★ — 벗기려다 대괄호 짝이 깨졌다 (GD '심플하게')", () => {
+    expect(askTitleOf("[6am 과제 리뷰] bill님 active 과제입니다.")).toBe("[6am 과제 리뷰] bill님 active 과제입니다.");
+    expect(askTitleOf("✦ ★강조★ 남는다")).toBe("✦ ★강조★ 남는다");        // 기호 보존
+    expect(askTitleOf("  \n\n  둘째 줄이 첫 줄\n뒷줄")).toBe("둘째 줄이 첫 줄"); // 빈 줄은 건너뛴다
+    expect(askTitleOf("")).toBe("");                                          // 빈 본문도 안 던진다
+  });
+});
+
+// ★말줄임이 겹치지 않는다★ — 원문이 …로 끝나는데 자르면 ……(잘림) 이 된다
+it("★자른 자리의 말줄임이 겹치지 않는다★", () => {
+  const t = askTitleOf("[요청] bot-liveness 승격 — ① 판단근거 교체 (카드 eoLxrg…) 추가 내용");
+  expect(t).toContain("…(잘림)");
+  expect(t).not.toContain("……");
+});
+
+// ★식별이 ack 을 집으면 안 된다★ (steve 리뷰 2026-08-04 · P1)
+//   collector 는 팬아웃 전에 요청자에게 ack 을 보낸다 — burst[0] 이 그 ack 이면
+//   알림 첫 줄이 「접수. 확인하고 회신하겠습니다.」 로 나간다. ★틀린 식별은 없느니만 못하다.★
+it("★팬아웃 전 ack 이 있어도 제목·id 는 진짜 질문에서 뽑는다★", () => {
+  const d = new Database(":memory:");
+  migrate(d);
+  d.run(`INSERT INTO thread (id,title,kind,participants_json,opened_by) VALUES ('tg-ack','t','dm','[]','bill')`);
+  const M = (f: string, to: string, mins: number, body: string, id: string) =>
+    d.run(`INSERT INTO message (id,thread_id,from_agent_id,to_agent_id,type,body,source,created_at)
+           VALUES (?,'tg-ack',?,?,'dm',?,'agent',datetime('now','-'||?||' minutes'))`,
+      [id, f, to, body, String(mins)]);
+  M("bill", "steve", 30, "[위임] 마감 알림 리뷰 좀 봐줘", "REQ-1");
+  M("steve", "bill", 29, "접수. 확인하고 회신하겠습니다.", "ACK-1");   // ★요청자에게 보낸 ack★
+  M("steve", "lui", 28, "[요청] bot-liveness 승격 — 판단근거 교체", "ASK-1");
+  M("steve", "demis", 28, "[요청] bot-liveness 승격 — 판단근거 교체", "ASK-2");
+  const c = findStalledCollections(d, AGENTS).find((x) => x.collector === "steve")!;
+  expect(c.askId).toBe("ASK-1");                       // ★ack 이 아니라 첫 질문★
+  expect(c.askTitle).toContain("bot-liveness 승격");
+  expect(c.askTitle).not.toContain("접수");
+  expect(c.missing.sort()).toEqual(["demis", "lui"]);  // 판정은 종전대로
+});
+
+// ★서로게이트를 쪼개지 않는다★ (steve 리뷰 · P2)
+it("★44자 경계에 이모지가 걸려도 반쪽 문자가 안 남는다★", () => {
+  const t = askTitleOf("가".repeat(43) + "😀" + "뒤에 더 있다");
+  expect(t).toContain("…(잘림)");
+  // ★"서로게이트가 있나" 가 아니라 "짝 없는 서로게이트가 있나" 다★ —
+  //   정상 이모지도 서로게이트 ★쌍★ 이라 /[\uD800-\uDFFF]/ 에 걸린다(내가 처음 이걸로 틀렸다).
+  //   spread 는 코드포인트 단위라, 짝이 없을 때만 그 범위 문자가 낱개로 나온다.
+  const lone = [...t].filter((ch) => { const c = ch.codePointAt(0)!; return c >= 0xd800 && c <= 0xdfff; });
+  expect(lone).toHaveLength(0);
+  expect(t).toContain("😀");                           // 이모지는 통째로 살아남는다
 });
