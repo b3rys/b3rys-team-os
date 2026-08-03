@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { Database } from "bun:sqlite";
 import {
   DEFAULT_BOT_LIVENESS_LOG,
   DEFAULT_BOT_LIVENESS_STATE_DIR,
+  botLivenessOwnerChatId,
   botLivenessLogPath,
   botLivenessMonitorPaths,
   renderBotLivenessMonitorPlist,
@@ -15,6 +18,8 @@ const savedLog = process.env.BOT_LIVENESS_LOG;
 const savedState = process.env.LIVENESS_STATE_DIR;
 const savedPrefix = process.env.TEAMOS_LAUNCHD_PREFIX;
 const savedUser = process.env.USER;
+const savedTeamDb = process.env.TEAM_DB_PATH;
+const savedGdChatId = process.env.GD_CHAT_ID;
 
 afterEach(() => {
   if (savedLog === undefined) delete process.env.BOT_LIVENESS_LOG;
@@ -25,6 +30,10 @@ afterEach(() => {
   else process.env.TEAMOS_LAUNCHD_PREFIX = savedPrefix;
   if (savedUser === undefined) delete process.env.USER;
   else process.env.USER = savedUser;
+  if (savedTeamDb === undefined) delete process.env.TEAM_DB_PATH;
+  else process.env.TEAM_DB_PATH = savedTeamDb;
+  if (savedGdChatId === undefined) delete process.env.GD_CHAT_ID;
+  else process.env.GD_CHAT_ID = savedGdChatId;
 });
 
 describe("bot liveness monitor shared defaults", () => {
@@ -58,6 +67,35 @@ describe("bot liveness monitor shared defaults", () => {
     expect(xml).toContain("scripts/bot-liveness-monitor.sh");
     expect(xml).not.toContain("com.gdmini.bot-liveness-monitor");
     expect(xml).not.toContain("/tmp/bot-liveness-monitor.log");
+  });
+
+  test("plist template injects GD_CHAT_ID from team settings instead of hardcoding it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "b3os-liveness-db-"));
+    try {
+      const dbPath = join(dir, "team.db");
+      process.env.TEAM_DB_PATH = dbPath;
+      process.env.GD_CHAT_ID = "9999999999";
+      const db = new Database(dbPath);
+      db.exec("CREATE TABLE setting (key TEXT PRIMARY KEY, value TEXT)");
+      db.query("INSERT INTO setting (key, value) VALUES ('owner_chat_id', '1000000001')").run();
+      db.close();
+
+      expect(botLivenessOwnerChatId()).toBe("1000000001");
+      const xml = renderBotLivenessMonitorPlist();
+      expect(xml).toContain("<key>GD_CHAT_ID</key><string>1000000001</string>");
+      expect(xml).not.toContain("9999999999");
+      expect(xml).not.toContain("7066867819");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("plist template falls back to GD_CHAT_ID env when owner_chat_id setting is absent", () => {
+    process.env.TEAM_DB_PATH = join(tmpdir(), "missing-b3os-team.db");
+    process.env.GD_CHAT_ID = "1234567890";
+
+    expect(botLivenessOwnerChatId()).toBe("1234567890");
+    expect(renderBotLivenessMonitorPlist()).toContain("<key>GD_CHAT_ID</key><string>1234567890</string>");
   });
 
   test("server parser can read an actual log written at the durable default path", () => {

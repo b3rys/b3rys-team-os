@@ -1,4 +1,6 @@
+import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { Database } from "bun:sqlite";
 import { botLivenessLaunchdLabel, teamosLaunchdPrefix } from "./agentControl";
 import { REPO_ROOT } from "./personaTemplates";
 
@@ -7,6 +9,25 @@ export const DEFAULT_BOT_LIVENESS_STATE_DIR = join(REPO_ROOT, "var", "bot-livene
 
 export function botLivenessLogPath(): string {
   return process.env.BOT_LIVENESS_LOG?.trim() || DEFAULT_BOT_LIVENESS_LOG;
+}
+
+function ownerChatIdFromSettings(): string {
+  const dbPath = process.env.TEAM_DB_PATH?.trim() || join(REPO_ROOT, "team.db");
+  if (!existsSync(dbPath)) return "";
+  let db: Database | undefined;
+  try {
+    db = new Database(dbPath, { readonly: true });
+    const row = db.query("SELECT value FROM setting WHERE key = 'owner_chat_id'").get() as { value?: string } | undefined;
+    return (row?.value ?? "").trim();
+  } catch {
+    return "";
+  } finally {
+    try { db?.close(); } catch { /* ignore */ }
+  }
+}
+
+export function botLivenessOwnerChatId(): string {
+  return ownerChatIdFromSettings() || process.env.GD_CHAT_ID?.trim() || "";
 }
 
 export interface BotLivenessMonitorPaths {
@@ -34,6 +55,7 @@ function xmlEscape(s: string): string {
 
 export function renderBotLivenessMonitorPlist(): string {
   const p = botLivenessMonitorPaths();
+  const ownerChatId = botLivenessOwnerChatId();
   const env: Record<string, string> = {
     PATH: `${process.env.HOME ?? ""}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
     HOME: process.env.HOME ?? "",
@@ -41,6 +63,7 @@ export function renderBotLivenessMonitorPlist(): string {
     BOT_LIVENESS_LOG: p.log,
     LIVENESS_STATE_DIR: p.stateDir,
   };
+  if (ownerChatId) env.GD_CHAT_ID = ownerChatId;
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">`,
