@@ -92,6 +92,10 @@ function detailsIcon(cls = "h-3.5 w-3.5", add = false): string {
   return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16"/><path d="M4 12h16"/><path d="M4 19h10"/>${plus}</svg>`;
 }
 
+function pauseIcon(cls = "h-3.5 w-3.5"): string {
+  return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M9 7v10"/><path d="M15 7v10"/><circle cx="12" cy="12" r="9"/></svg>`;
+}
+
 export function renderTasksKanban(root: HTMLElement): void {
   let tasks: KanbanTask[] = [];
   let owners: { id: string; name: string }[] = [];
@@ -287,7 +291,9 @@ export function renderTasksKanban(root: HTMLElement): void {
       : "";
     const holdAction = held
       ? `<button data-unhold="${t.id}" class="rounded-md border border-accent-green/30 px-2 py-1 text-[11px] font-semibold text-accent-green hover:bg-accent-green/10">${pick("보드로 복귀", "Return to board")}</button>`
-      : `<button data-hold="${t.id}" class="rounded-md border border-amber-400/20 px-2 py-1 text-[11px] font-semibold text-amber-300 hover:bg-amber-400/10">${pick("보류", "Hold")}</button>`;
+      : t.column === "done"
+        ? ""
+        : `<button data-hold="${t.id}" class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent text-slate-500 transition-colors hover:border-surface-2 hover:bg-surface-2 hover:text-slate-200" title="${pick("보류함으로 이동", "Move to Hold")}" aria-label="${pick("보류함으로 이동", "Move to Hold")}">${pauseIcon()}</button>`;
     const holdMeta = held
       ? `<div class="mt-2 text-[10px] text-slate-500">${escape(t.hold_reason ?? pick("사유 없음", "No reason"))}${t.review_at ? ` · ${pick("재검토", "Review")} ${escape(t.review_at)}` : ""}</div>`
       : "";
@@ -312,7 +318,7 @@ export function renderTasksKanban(root: HTMLElement): void {
   function viewTabsHtml(): string {
     const heldCount = tasks.filter((t) => !!t.held_at).length;
     const tab = (key: BoardView, label: string) => `<button data-view="${key}" class="rounded-full border px-3 py-1 text-[12px] font-semibold ${view === key ? "border-slate-100 bg-slate-100 text-surface-0" : "border-surface-3 bg-surface-3 text-slate-400 hover:text-slate-200"}">${label}</button>`;
-    return `<div class="flex items-center gap-2 px-1 pb-3">${tab("board", pick("업무 보드", "Work board"))}${tab("hold", `${pick("보류함", "Hold")} (${heldCount})`)}</div>`;
+    return `<div class="flex items-center gap-2">${tab("board", pick("업무 보드", "Work board"))}${tab("hold", `${pick("보류함", "Hold")} (${heldCount})`)}</div>`;
   }
 
   function holdHtml(): string {
@@ -367,7 +373,7 @@ export function renderTasksKanban(root: HTMLElement): void {
         <button data-retry class="px-3 py-1 rounded bg-surface-3 hover:bg-surface-0 text-[12px] text-slate-200">${pick("다시 시도", "Retry")}</button>
       </div>`;
     }
-    return `${viewTabsHtml()}${view === "hold" ? holdHtml() : `${filterBarHtml()}<div class="flex gap-5 min-h-full items-stretch flex-col md:flex-row">${COLUMNS.map(columnHtml).join("")}</div>`}`;
+    return view === "hold" ? holdHtml() : `${filterBarHtml()}<div class="flex gap-5 min-h-full items-stretch flex-col md:flex-row">${COLUMNS.map(columnHtml).join("")}</div>`;
   }
 
   function render() {
@@ -378,9 +384,12 @@ export function renderTasksKanban(root: HTMLElement): void {
 
     root.innerHTML = `
       <div class="flex-1 flex flex-col min-h-0">
-        <div class="flex items-baseline gap-3 px-6 pt-6 pb-0.5 shrink-0">
-          <h1 class="text-[22px] font-bold tracking-tight text-slate-100">Tasks</h1>
-          <span class="text-[13px] text-slate-500">${loadError ? pick("오프라인", "Offline") : pick("팀 업무현황 · 실시간", "Team status · live")}</span>
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-2 px-6 pt-6 pb-3 shrink-0">
+          <div class="flex items-baseline gap-3">
+            <h1 class="text-[22px] font-bold tracking-tight text-slate-100">Tasks</h1>
+            <span class="text-[13px] text-slate-500">${loadError ? pick("오프라인", "Offline") : pick("팀 업무현황 · 실시간", "Team status · live")}</span>
+          </div>
+          <div class="ml-auto">${viewTabsHtml()}</div>
         </div>
         <div data-scroll-keep class="flex-1 overflow-y-auto px-6 pb-6 pt-3">${bodyHtml()}</div>
       </div>`;
