@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isTaskStale, localDateKey } from "./TasksKanban";
+import { deletePrompt, isTaskStale, localDateKey } from "./TasksKanban";
 
 const now = Date.parse("2026-08-03T06:00:00Z");
 const task = (updated_at: string, extra: Record<string, unknown> = {}) => ({
@@ -14,6 +14,11 @@ const task = (updated_at: string, extra: Record<string, unknown> = {}) => ({
 
 test("재검토일은 런타임의 로컬 달력 날짜를 사용한다", () => {
   expect(localDateKey(new Date(2026, 7, 17, 0, 30))).toBe("2026-08-17");
+});
+
+test("활성 카드와 보류 카드의 삭제 안내를 구분한다", () => {
+  expect(deletePrompt(task("2026-08-03 00:00:00"))).toContain("보류하려면");
+  expect(deletePrompt(task("2026-08-03 00:00:00", { held_at: "2026-08-03 01:00:00" }))).not.toContain("보류하려면");
 });
 
 describe("TasksKanban stale 후보", () => {
