@@ -15,6 +15,9 @@ export interface Task {
   column: TaskLane; // kanban column — stored as `lane` in the DB
   owner: string | null;
   description: string | null;
+  held_at: string | null;
+  hold_reason: string | null;
+  review_at: string | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -26,6 +29,9 @@ interface TaskRow {
   lane: TaskLane;
   owner: string | null;
   description: string | null;
+  held_at: string | null;
+  hold_reason: string | null;
+  review_at: string | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -38,6 +44,9 @@ function toTask(row: TaskRow): Task {
     column: row.lane,
     owner: row.owner,
     description: row.description ?? null,
+    held_at: row.held_at ?? null,
+    hold_reason: row.hold_reason ?? null,
+    review_at: row.review_at ?? null,
     sort_order: row.sort_order,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -46,7 +55,7 @@ function toTask(row: TaskRow): Task {
 
 const LANE_RANK: Record<TaskLane, number> = { plan: 0, doing: 1, done: 2 };
 
-const SELECT_COLS = `id, title, lane, owner, description, sort_order, created_at, updated_at`;
+const SELECT_COLS = `id, title, lane, owner, description, held_at, hold_reason, review_at, sort_order, created_at, updated_at`;
 
 /** All tasks, ordered plan→doing→done then by sort_order within each lane. */
 export function listTasks(db: Database): Task[] {
@@ -97,6 +106,9 @@ export interface UpdateTaskInput {
   owner?: string | null;
   description?: string | null;
   sort_order?: number;
+  held?: boolean;
+  hold_reason?: string | null;
+  review_at?: string | null;
 }
 
 /** Partial update. Returns the updated task, or null if the id does not exist. */
@@ -136,6 +148,20 @@ export function updateTask(
   if (input.sort_order !== undefined) {
     sets.push("sort_order = ?");
     args.push(input.sort_order);
+  }
+  if (input.held !== undefined) {
+    sets.push(input.held ? "held_at = datetime('now')" : "held_at = NULL");
+    if (!input.held) {
+      sets.push("hold_reason = NULL", "review_at = NULL");
+    }
+  }
+  if (input.hold_reason !== undefined) {
+    sets.push("hold_reason = ?");
+    args.push(input.hold_reason);
+  }
+  if (input.review_at !== undefined) {
+    sets.push("review_at = ?");
+    args.push(input.review_at);
   }
   sets.push("updated_at = datetime('now')");
 

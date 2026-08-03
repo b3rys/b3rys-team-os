@@ -34,6 +34,7 @@ interface Task {
   column: "plan" | "doing" | "done";
   description: string | null;
   updated_at: string;
+  held_at?: string | null;
 }
 
 interface Agent {
@@ -90,7 +91,7 @@ export function isBlockedCard(t: Task): boolean {
 //   임계 = 일반 stallMs, blocked 표시가 있으면 그 6배.
 export function stalledDoingCards(tasks: Task[], owners: Set<string>, nowMs: number, stallMs: number): Task[] {
   return tasks.filter((t) => {
-    if (t.column !== "doing" || t.owner == null || !owners.has(t.owner)) return false;
+    if (t.held_at || t.column !== "doing" || t.owner == null || !owners.has(t.owner)) return false;
     const threshold = isBlockedCard(t) ? stallMs * BLOCKED_STALL_MULTIPLIER : stallMs;
     return nowMs - parseUtc(t.updated_at, nowMs) >= threshold;
   });

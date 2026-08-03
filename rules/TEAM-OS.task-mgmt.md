@@ -15,6 +15,8 @@ A card has four fields:
 
 Blocked work stays in plan/doing with a blocked marker in the description or badge. Do not create a separate blocked column.
 
+Held work is different from blocked work. It keeps its original plan/doing lane but is removed from the active board into the recoverable Hold view. Use Hold when the work may still be valuable but has no current commitment or reliable start/resume date. Fourteen days without a card update is a review signal, not an automatic hold or cancellation decision.
+
 ## When To Card
 
 Card the work when any condition is true:

@@ -319,6 +319,15 @@ describe("slash command formatters (fmt*)", () => {
     expect(out).not.toContain("✅ 완료");
     expect(out).not.toContain("완료 작업C");
   });
+  test("fmtBoard excludes held plan/doing cards", () => {
+    const db = dbWithTasks();
+    db.prepare(`UPDATE task SET held_at=datetime('now'), hold_reason='대기', review_at='2026-08-17' WHERE id IN ('t1','t2')`).run();
+    const out = fmtBoard(db);
+    expect(out).toContain("📝 계획 (0)");
+    expect(out).toContain("🔧 실행 중 (0)");
+    expect(out).not.toContain("플랜 작업A");
+    expect(out).not.toContain("실행 작업B");
+  });
   test("fmtReview lists doing; empty message when none", () => {
     expect(fmtReview(dbWithTasks())).toContain("실행 작업B — @bill");
     const empty = new Database(":memory:"); migrate(empty);

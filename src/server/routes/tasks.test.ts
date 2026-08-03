@@ -102,6 +102,76 @@ describe("tasks DELETE — audit 계측", () => {
   });
 });
 
+describe("tasks HOLD — 복원 가능한 보류", () => {
+  test("보류는 행과 lane을 보존하고 audit을 남긴 뒤 원래 lane으로 복귀한다", async () => {
+    const { app, db } = setup();
+    const card = await createCard(app, { title: "잠시 멈춘 실행", column: "doing", owner: "dbak" });
+
+    const held = await app.request(`/tasks/${card.id}?actor=codex`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ held: true, hold_reason: "우선순위", review_at: "2026-08-17" }),
+    });
+    expect(held.status).toBe(200);
+    const heldTask = (await held.json()).task;
+    expect(heldTask.column).toBe("doing");
+    expect(heldTask.held_at).not.toBeNull();
+    expect(heldTask.hold_reason).toBe("우선순위");
+    expect(db.query(`SELECT count(*) c FROM task WHERE id=?`).get(card.id)).toEqual({ c: 1 });
+    expect(db.query(`SELECT count(*) c FROM audit_event WHERE action='task_held' AND target=?`).get(card.id)).toEqual({ c: 1 });
+    expect(db.query(`SELECT count(*) c FROM audit_event WHERE action='task_deleted' AND target=?`).get(card.id)).toEqual({ c: 0 });
+
+    const resumed = await app.request(`/tasks/${card.id}?actor=codex`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ held: false }),
+    });
+    const resumedTask = (await resumed.json()).task;
+    expect(resumedTask.column).toBe("doing");
+    expect(resumedTask.held_at).toBeNull();
+    expect(resumedTask.hold_reason).toBeNull();
+    expect(resumedTask.review_at).toBeNull();
+    expect(db.query(`SELECT count(*) c FROM audit_event WHERE action='task_resumed' AND target=?`).get(card.id)).toEqual({ c: 1 });
+  });
+
+  test("잘못된 보류 payload는 400이고 카드가 바뀌지 않는다", async () => {
+    const { app, db } = setup();
+    const card = await createCard(app, { title: "검증", column: "plan" });
+    const r = await app.request(`/tasks/${card.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ held: "yes" }),
+    });
+    expect(r.status).toBe(400);
+    expect(db.query(`SELECT held_at FROM task WHERE id=?`).get(card.id)).toEqual({ held_at: null });
+
+    const missingMeta = await app.request(`/tasks/${card.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ held: true }),
+    });
+    expect(missingMeta.status).toBe(400);
+    expect(db.query(`SELECT held_at FROM task WHERE id=?`).get(card.id)).toEqual({ held_at: null });
+  });
+
+  test("보류 전이는 멱등이고 활성 카드에 보류 메타만 남길 수 없다", async () => {
+    const { app, db } = setup();
+    const card = await createCard(app, { title: "멱등", column: "plan" });
+    const payload = JSON.stringify({ held: true, hold_reason: "대기", review_at: "2026-08-17" });
+    await app.request(`/tasks/${card.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: payload });
+    const first = db.query(`SELECT held_at FROM task WHERE id=?`).get(card.id) as { held_at: string };
+    await app.request(`/tasks/${card.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: payload });
+    const second = db.query(`SELECT held_at FROM task WHERE id=?`).get(card.id) as { held_at: string };
+    expect(second.held_at).toBe(first.held_at);
+    expect(db.query(`SELECT count(*) c FROM audit_event WHERE action='task_held' AND target=?`).get(card.id)).toEqual({ c: 1 });
+
+    const orphan = await app.request(`/tasks/${card.id}`, {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ held: false, hold_reason: "남으면 안 됨" }),
+    });
+    expect(orphan.status).toBe(400);
+  });
+});
+
 describe("tasks — 카드변경 담당자 알림", () => {
   test("삭제 시 담당자에게 버스 알림이 가고 깨움 대기(pending)다", async () => {
     const { app, db } = setup();

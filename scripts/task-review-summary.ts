@@ -20,6 +20,7 @@ interface Task {
   description: string | null;
   column: "plan" | "doing" | "done";
   updated_at?: string;
+  held_at?: string | null;
 }
 
 interface Message {
@@ -126,7 +127,7 @@ function isReviewPing(m: Message): boolean {
 }
 
 function reviewOwnersFromRegistry(agents: AgentRecord[], tasks: Task[]): string[] {
-  const activeOwnerSet = new Set(tasks.filter((t) => t.owner && t.column !== "done").map((t) => t.owner!));
+  const activeOwnerSet = new Set(tasks.filter((t) => !t.held_at && t.owner && t.column !== "done").map((t) => t.owner!));
   const configured = configuredOwners();
   if (configured.length) return configured.filter((owner) => activeOwnerSet.has(owner));
 
@@ -432,10 +433,10 @@ async function main(): Promise<void> {
   const activeByOwner = new Map<string, Task[]>();
   const updatedByOwner = new Map<string, Task[]>();
   for (const owner of reviewOwners) {
-    activeByOwner.set(owner, tasks.filter((t) => t.owner === owner && t.column !== "done"));
+    activeByOwner.set(owner, tasks.filter((t) => !t.held_at && t.owner === owner && t.column !== "done"));
     updatedByOwner.set(
       owner,
-      tasks.filter((t) => t.owner === owner && (t.updated_at ?? "") >= reviewStartUtc),
+      tasks.filter((t) => !t.held_at && t.owner === owner && (t.updated_at ?? "") >= reviewStartUtc),
     );
   }
 

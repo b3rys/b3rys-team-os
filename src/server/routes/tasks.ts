@@ -119,6 +119,9 @@ export function createTaskRoutes(deps: TaskRouteDeps): Hono {
       owner?: unknown;
       description?: unknown;
       sort_order?: unknown;
+      held?: unknown;
+      hold_reason?: unknown;
+      review_at?: unknown;
     };
     try {
       body = await c.req.json();
@@ -134,7 +137,34 @@ export function createTaskRoutes(deps: TaskRouteDeps): Hono {
     if (body.sort_order !== undefined && typeof body.sort_order !== "number") {
       return c.json({ ok: false, error: "invalid sort_order" }, 400);
     }
-    const before = getTask(deps.db, id); // capture owner BEFORE update to detect reassignment
+    if (body.held !== undefined && typeof body.held !== "boolean") {
+      return c.json({ ok: false, error: "invalid held" }, 400);
+    }
+    if (body.hold_reason !== undefined && body.hold_reason !== null && typeof body.hold_reason !== "string") {
+      return c.json({ ok: false, error: "invalid hold_reason" }, 400);
+    }
+    if (body.review_at !== undefined && body.review_at !== null && typeof body.review_at !== "string") {
+      return c.json({ ok: false, error: "invalid review_at" }, 400);
+    }
+    if (body.held === true) {
+      if (typeof body.hold_reason !== "string" || body.hold_reason.trim() === "") {
+        return c.json({ ok: false, error: "hold_reason required" }, 400);
+      }
+      if (typeof body.review_at !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body.review_at)) {
+        return c.json({ ok: false, error: "review_at required (YYYY-MM-DD)" }, 400);
+      }
+    }
+    if (body.held === false && (body.hold_reason !== undefined || body.review_at !== undefined)) {
+      return c.json({ ok: false, error: "hold metadata not allowed when resuming" }, 400);
+    }
+    if (body.held === undefined && (body.hold_reason !== undefined || body.review_at !== undefined)) {
+      return c.json({ ok: false, error: "held required with hold metadata" }, 400);
+    }
+    const before = getTask(deps.db, id); // capture owner/state BEFORE update
+    if (!before) return c.json({ ok: false, error: "not found" }, 404);
+    if (body.held === true && before.held_at) {
+      return c.json({ ok: true, task: before }); // idempotent hold retry; timestamp/audit unchanged
+    }
     const task = updateTask(deps.db, id, {
       title: typeof body.title === "string" ? body.title.trim() : undefined,
       column: body.column as TaskLane | undefined,
@@ -151,8 +181,30 @@ export function createTaskRoutes(deps: TaskRouteDeps): Hono {
             ? body.description
             : null,
       sort_order: typeof body.sort_order === "number" ? body.sort_order : undefined,
+      held: typeof body.held === "boolean" ? body.held : undefined,
+      hold_reason:
+        body.hold_reason === undefined ? undefined : typeof body.hold_reason === "string" ? body.hold_reason.trim() || null : null,
+      review_at:
+        body.review_at === undefined ? undefined : typeof body.review_at === "string" ? body.review_at.trim() || null : null,
     });
     if (!task) return c.json({ ok: false, error: "not found" }, 404);
+
+    if (before && before.held_at !== task.held_at) {
+      const actor = c.req.query("actor") || c.req.header("x-actor") || "unknown";
+      const action = task.held_at ? "task_held" : "task_resumed";
+      const detail = {
+        title: task.title,
+        lane: task.column,
+        hold_reason: task.hold_reason,
+        review_at: task.review_at,
+      };
+      try {
+        appendAudit(deps.db, actor, action, id, detail);
+        appendAuditFile(actor, action, id, detail);
+      } catch (e) {
+        console.error("[tasks] hold audit failed:", e);
+      }
+    }
 
     // Reassignment notify (scope per GD = delete + reassign only): when owner changes, audit
     // it and wake BOTH the previous owner ("removed from you") and the new owner ("assigned").
