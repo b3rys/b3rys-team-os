@@ -76,6 +76,51 @@ describe("bot liveness monitor shared defaults", () => {
     expect(status.healthy).toBe(true);
   });
 
+  test("server parser treats machine-readable DONE status=issues as unhealthy", () => {
+    const log = `${DEFAULT_BOT_LIVENESS_STATE_DIR}/issues-status.log`;
+    mkdirSync(dirname(log), { recursive: true });
+    writeFileSync(
+      log,
+      [
+        "2026-08-03 15:20:00 bot-liveness START (dry_run=0)",
+        "이상 발견 — 알림 전송 성공",
+        "2026-08-03 15:20:03 bot-liveness DONE status=issues",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const status = readLivenessStatus(log);
+    expect(status.available).toBe(true);
+    expect(status.lastRun).toBe("2026-08-03 15:20:00");
+    expect(status.lastResult).toBe("2026-08-03 15:20:03 bot-liveness DONE status=issues");
+    expect(status.healthy).toBe(false);
+  });
+
+  test("server parser falls back past an unclassified DONE line for legacy logs", () => {
+    const log = `${DEFAULT_BOT_LIVENESS_STATE_DIR}/legacy-done.log`;
+    mkdirSync(dirname(log), { recursive: true });
+    writeFileSync(
+      log,
+      [
+        "2026-08-03 15:30:00 bot-liveness START (dry_run=0)",
+        "--- 메시지 미리보기 ---",
+        "⚠️ [steve] tmux 세션 없음 — 수동 확인 필요",
+        "--- 끝 --- (sig=abc123, last=)",
+        "Telegram API: HTTP 200",
+        "DM 전송 완료",
+        "2026-08-03 15:30:03 bot-liveness DONE",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const status = readLivenessStatus(log);
+    expect(status.available).toBe(true);
+    expect(status.lastResult).toBe("2026-08-03 15:30:03 bot-liveness DONE");
+    expect(status.healthy).toBe(false);
+  });
+
   test("server parser default follows BOT_LIVENESS_LOG at call time", () => {
     const override = `${DEFAULT_BOT_LIVENESS_STATE_DIR}/override.log`;
     mkdirSync(dirname(override), { recursive: true });

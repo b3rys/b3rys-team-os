@@ -20,6 +20,14 @@ export interface LivenessStatus {
   logMtime: string | null; // 로그 파일 mtime(ISO)
 }
 
+function classifyBotLivenessResult(line: string): boolean | null {
+  const explicitStatus = line.match(/\bstatus=(ok|healthy|healed|issues|failed|error|down|unhealthy)\b/i)?.[1]?.toLowerCase();
+  if (explicitStatus) return /^(ok|healthy|healed)$/.test(explicitStatus);
+  if (/이상 없음|정상|\bOK\b|healthy/i.test(line)) return true;
+  if (/이상|실패|error|재시작|down|무응답|죽|수동 확인 필요|[⚠❌]/i.test(line)) return false;
+  return null;
+}
+
 export function readLivenessStatus(logPath: string = botLivenessLogPath()): LivenessStatus {
   const base: LivenessStatus = { available: false, runs: 0, lastRun: null, healthy: null, lastResult: null, logMtime: null };
   try {
@@ -35,10 +43,13 @@ export function readLivenessStatus(logPath: string = botLivenessLogPath()): Live
       if (/bot-liveness START/.test(lines[i]!)) break;
       if (lines[i]!.trim()) { lastResult = lines[i]!.trim(); break; }
     }
-    let healthy: boolean | null = null;
-    if (lastResult) {
-      if (/이상 없음|정상|\bOK\b|healthy/i.test(lastResult)) healthy = true;
-      else if (/이상|실패|error|재시작|down|무응답|죽|❌/i.test(lastResult)) healthy = false;
+    let healthy = lastResult ? classifyBotLivenessResult(lastResult) : null;
+    if (healthy === null) {
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (/bot-liveness START/.test(lines[i]!)) break;
+        const classified = classifyBotLivenessResult(lines[i]!.trim());
+        if (classified !== null) { healthy = classified; break; }
+      }
     }
     let logMtime: string | null = null;
     try { logMtime = new Date(statSync(logPath).mtimeMs).toISOString(); } catch { /* noop */ }
