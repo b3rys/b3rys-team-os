@@ -164,10 +164,18 @@ if [ "$CHECK_BRANCH_PROTECTION" -eq 1 ]; then
   fi
   SLUG="$(printf '%s\n' "$REMOTE_URL" | sed -E 's#^git@github.com:##; s#^https://github.com/##; s#\.git$##')"
   [ -n "$SLUG" ] || fail "could not parse GitHub owner/repo from origin"
+  # ★"못 읽음" 과 "없음" 은 다른 얘기다★ (bill 2026-08-03 실측)
+  #   branches/main/protection 은 ★admin 권한이 있어야★ 읽힌다. admin 이 아니면 설정이 멀쩡해도 404 다.
+  #   이 팀의 작업 계정(작성·승인 둘 다)은 pull/push/triage 뿐이라 ★항상 404★ 였고, 그래서 이 게이트는
+  #   ★설정이 걸려 있는데도 아무도 통과 못 하는 상태★ 였다(2026-08-03 bill·codex 둘 다 여기서 멈춤).
+  #   상시 빨간불인 게이트는 사람이 --skip 을 습관으로 쓰게 만든다 — 그게 검사 없는 것보다 나쁘다.
+  #   그래서 ★권한을 먼저 확인하고★ 판정한다: admin 인데 404 = 진짜 없음(fail) / admin 아님 = 판정불가(warn).
   if gh api "repos/$SLUG/branches/main/protection" >/dev/null 2>&1; then
     ok "main branch protection exists: $SLUG"
+  elif [ "$(gh api "repos/$SLUG" --jq '.permissions.admin' 2>/dev/null)" = "true" ]; then
+    fail "main branch protection missing: $SLUG (admin 권한으로 조회했는데 없다)"
   else
-    fail "main branch protection not readable or missing: $SLUG"
+    warn "main branch protection not verifiable: $SLUG — this account has no admin, so 'missing' and 'unreadable' cannot be told apart. Verify with the owner account."
   fi
 else
   warn "branch protection check skipped"
