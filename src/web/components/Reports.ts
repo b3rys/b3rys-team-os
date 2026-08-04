@@ -11,6 +11,7 @@
 
 import { pick } from "../i18n";
 import { parseSqliteDate } from "../lib/datetime";
+import { mdInlineToHtml } from "../lib/mdInline";
 import { humanizeApiError } from "../lib/apiErrorMessage";
 import { showAlert, showConfirm, showForm, showPrompt } from "./dialogs";
 
@@ -155,14 +156,9 @@ function mdToHtml(src: string): string {
   const lines = String(src).replace(/\r\n/g, "\n").split("\n");
   const out: string[] = [];
   let i = 0;
-  const inline = (t: string): string => {
-    let s = escape(t);
-    s = s.replace(/`([^`]+)`/g, (_m, c) => `<code>${c}</code>`);
-    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-    s = s.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
-    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, txt, href) => `<a href="${escape(href)}" target="_blank" rel="noopener">${txt}</a>`);
-    return s;
-  };
+  // 인라인 처리 = lib/mdInline 공유 헬퍼 (Chat/ThreadView 와 단일 출처, GD 2026-08-01).
+  // 원본 대비 강화 2건이 여기에도 적용된다: javascript: 링크 차단(http/https 만), 공백 경계 이탤릭 오변환 방지.
+  const inline = (t: string): string => mdInlineToHtml(t);
   while (i < lines.length) {
     const ln = lines[i]!;
     if (/^\s*$/.test(ln)) { i++; continue; }

@@ -7,6 +7,7 @@ import { agentIconName, renderIcon } from "../icons";
 import { renderAgentIcon } from "../agentColors";
 import { pick } from "../i18n";
 import { captureScrollStick, applyScrollStick, stickToBottom } from "../lib/scrollStick";
+import { mdInlineToHtml } from "../lib/mdInline";
 
 function api(path: string): string { return `${apiBase()}/api${path}`; }
 function escape(s: unknown): string {
@@ -113,7 +114,7 @@ export function renderChat(root: HTMLElement): void {
       return `
         <div class="flex flex-col ${align} gap-0.5">
           <div class="text-[10px] text-slate-500 px-1">${meta} · ${hhmm(m.created_at)}</div>
-          <div class="max-w-[78%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap ${bubble}">${escape(m.body)}</div>
+          <div class="max-w-[78%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap [&_a]:underline [&_a]:underline-offset-2 ${bubble}">${mdInlineToHtml(m.body)}</div>
         </div>`;
     }).join("");
     applyScrollStick(wrap, stick);
