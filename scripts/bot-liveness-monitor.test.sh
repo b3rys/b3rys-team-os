@@ -54,7 +54,12 @@ cat > "$T/bin/launchctl" <<'SH'
 # ★기대 라벨은 리터럴로 박는다★ — 스크립트와 같은 변수에서 만들면 스크립트가 그 값을 덮어써도
 #   export 속성이 유지돼 이 mock 에 그대로 전달된다. 그러면 mock 이 ★스크립트가 정한 라벨에
 #   무조건 동의하게 되어★ 접두를 개인 라벨로 되돌린 회귀를 잡지 못한다(실측: 그 뮤턴트가 생존했다).
-[ "$1" = print ] && { case "$2" in *"com.b3ostest.claude-telegram-${LOADED_AGENT:-__none__}") exit 0 ;; *) exit 1 ;; esac; }
+[ "$1" = print ] && { case "$2" in
+  *"com.b3ostest.claude-telegram-${LOADED_AGENT:-__none__}") exit 0 ;;
+  *"${LOADED_GATEWAY:-__none__}") exit 0 ;;      # 게이트웨이 시나리오에서만 켠다
+  *) exit 1 ;; esac; }
+# 로드됐지만 프로세스는 없는 상태(pid 자리에 '-')를 흉내낸다 → check_gateway 가 '미가동' 으로 본다
+[ "$1" = list ] && { [ -n "${LOADED_GATEWAY:-}" ] && printf -- '-\t0\t%s\n' "$LOADED_GATEWAY"; exit 0; }
 [ "$1" = bootstrap ] && { printf '%s\n' "$3" >> "$LAUNCHCTL_CALLS"; exit 0; }
 exit 2
 SH
@@ -194,4 +199,35 @@ grep -q "세션 유지하고 알림만" "$BOT_LIVENESS_LOG" || {
   RC=1
 }
 pass_if_clean "폴러가 죽어도 복구 수단이 없으면 세션을 죽이지 않는다"
+
+# 같은 폴러 사망 상태에서 ★복구 수단이 있으면 실제로 복구한다★ (양성 경로).
+#   위 시나리오만 있으면 "항상 alert-only" 로 바꾸는 회귀를 잡지 못한다 — 감시기가 아무것도
+#   고치지 않게 되어도 테스트는 통과한다(실측: elif true 뮤턴트가 exit 0 이었다).
+: > "$TMUX_KILLS"; : > "$RESTART_CALLS"; : > "$BOT_LIVENESS_LOG"
+rm -f "$T/b3os/var/bot-liveness-monitor"/bot-liveness-poller-heal-*.ts   # 40분 thrash 마커 초기화
+printf '999999\n' > "$HOME/.claude/channels/telegram-bill/bot.pid"
+bash "$SCRIPT" >"$T/heal-out.txt" 2>"$T/heal-err.txt"       # RESTART_AGENT 기본값 = 존재하는 mock
+grep -q 'kill-session' "$TMUX_KILLS" || {
+  echo "FAIL: 복구 수단이 있는데 폴러 사망 세션을 정리하지 않았다" >&2
+  RC=1
+}
+[ "$(cat "$RESTART_CALLS")" = bill ] || {
+  echo "FAIL: 폴러 사망 복구에서 restart-agent 가 안 불렸다: $(cat "$RESTART_CALLS" || true)" >&2
+  RC=1
+}
+pass_if_clean "복구 수단이 있으면 폴러 사망을 실제로 복구한다"
+
+# 게이트웨이도 같다 — 복구 명령을 실행할 수 없으면 ★예산을 쓰기 전에★ 알림만 한다.
+#   가드가 없으면 성공할 수 없는 호출에 그 사이클의 재시작 예산을 태우고, 정작 복구 가능한
+#   다른 대상이 예산 부족으로 밀린다.
+: > "$TMUX_KILLS"; : > "$RESTART_CALLS"; : > "$BOT_LIVENESS_LOG"
+printf '%s\n' "$$" > "$HOME/.claude/channels/telegram-bill/bot.pid"   # 봇은 정상 — 예산을 안 쓰게
+LOADED_GATEWAY=ai.openclaw.gateway \
+  TEAM_OS="$T/b3os/scripts/no-such-team-os.sh" \
+  bash "$SCRIPT" >"$T/gw-out.txt" 2>"$T/gw-err.txt"
+grep -q "서비스 복구 명령을 실행할 수 없습니다" "$BOT_LIVENESS_LOG" || {
+  echo "FAIL: 게이트웨이 복구 수단 부재를 알리지 않았다" >&2
+  RC=1
+}
+pass_if_clean "게이트웨이도 복구 명령이 없으면 예산을 쓰지 않고 알림만 한다"
 exit "$RC"

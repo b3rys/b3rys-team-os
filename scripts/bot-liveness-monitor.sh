@@ -193,7 +193,11 @@ STATE_FILE="$LIVENESS_STATE_DIR/bot-liveness-monitor.state"      # 직전 이상
 PENDING_FILE="$LIVENESS_STATE_DIR/bot-liveness-monitor.pending"  # #4 지속성: 직전 run 의 pending DM msgid
 : "${ENV_FILE:=$B3OS_ROOT/.env}"   # 알림 봇 토큰을 읽는 곳. 설치 위치 기준이라야 다른 기기에서도 찾는다
 TOKEN_VAR="CAPTURE_BOT_TOKEN"
-: "${TEAM_OS:=$B3OS_ROOT/bin/team-os}"   # 게이트웨이·서비스 복구용 (idempotent)
+#   ★bin/team-os 를 기본값으로 삼지 않는다★ — 호출 계약이 다르다. 여기서는 `up <alias>` 와
+#   `restart <alias>` 를 기대하는데, bin/team-os 의 up 은 두 번째 인자를 무시하고 설치의 모든
+#   상주 서비스를 순회하며 restart 서브커맨드는 없다. 그대로 두면 게이트웨이 하나를 살리려다
+#   전체를 올리고, restart 폴백은 확정 실패한다. 무엇을 쓸지는 설치가 지정한다.
+: "${TEAM_OS:=$B3OS_ROOT/scripts/team-os.sh}"   # 게이트웨이·서비스 복구용 (idempotent)
 # ★봇 복구는 team-os.sh 를 거치지 않고 restart-agent 를 직접 부른다 (codex·steve 교차검증 2026-08-03)★
 #   team-os.sh:26 은 CLAUDE_BOTS="bill steve demis dbak" ★하드코딩이라 lui 가 없다.★ 그래서 감시 목록만
 #   agents.json 으로 동적화해도 ★lui 는 감지만 되고 복구는 조용히 실패★ 했다(`team-os up lui` 가 no-op).
@@ -601,6 +605,13 @@ check_gateway() {  # $1=LaunchAgent label, $2=표시이름, $3=team-os svc alias
   fi
   if [ "$DRY_RUN" = "1" ]; then
     HEALED="${HEALED}· [$2] $down → team-os up $3 (dry-run)
+"
+    return 0
+  fi
+  # ★예산을 쓰기 전에 복구 수단을 확인한다★ — 없으면 성공할 수 없는 호출에 그 사이클의
+  #   재시작 예산을 태우고, 정작 복구 가능한 다른 대상이 예산 부족으로 밀린다.
+  if [ ! -x "$TEAM_OS" ]; then
+    ISSUES="${ISSUES}· [$2] $down — 자동복구 불가, 알림만. 서비스 복구 명령을 실행할 수 없습니다: $TEAM_OS (TEAM_OS 로 지정하세요)
 "
     return 0
   fi
