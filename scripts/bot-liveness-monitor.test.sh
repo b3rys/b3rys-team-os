@@ -51,7 +51,10 @@ SH
 # mock: launchctl — bootstrap 호출을 기록
 cat > "$T/bin/launchctl" <<'SH'
 #!/usr/bin/env bash
-[ "$1" = print ] && { case "$2" in *"${TEAMOS_LAUNCHD_PREFIX}.claude-telegram-${LOADED_AGENT:-__none__}") exit 0 ;; *) exit 1 ;; esac; }
+# ★기대 라벨은 리터럴로 박는다★ — 스크립트와 같은 변수에서 만들면 스크립트가 그 값을 덮어써도
+#   export 속성이 유지돼 이 mock 에 그대로 전달된다. 그러면 mock 이 ★스크립트가 정한 라벨에
+#   무조건 동의하게 되어★ 접두를 개인 라벨로 되돌린 회귀를 잡지 못한다(실측: 그 뮤턴트가 생존했다).
+[ "$1" = print ] && { case "$2" in *"com.b3ostest.claude-telegram-${LOADED_AGENT:-__none__}") exit 0 ;; *) exit 1 ;; esac; }
 [ "$1" = bootstrap ] && { printf '%s\n' "$3" >> "$LAUNCHCTL_CALLS"; exit 0; }
 exit 2
 SH
