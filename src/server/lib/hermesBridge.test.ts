@@ -408,3 +408,70 @@ describe("postTelegramAsHermes", () => {
     expect(called).toBe(false);
   });
 });
+
+describe("buildPrompt — ★주동사는 '실행해서 보내라' 다★ (2026-08-03 실측)", () => {
+  // hermes 런타임 팀원(Qwen3-Next-80B)이 버스로 깨어나도 조용히 아무 말도 안 했다. 턴은 정상 완료였고, 답을
+  // ★stdout 에 쓰고 끝냈다★ — 서버는 설계상 그걸 버린다. 옛 주동사가 "간결하게 ★답하고★" 여서
+  // 이 모델이 그걸 그대로 실행했기 때문이다(claude 는 뒤의 "말하려면 보내라" 노트와 합쳐 읽는다).
+  //
+  // ★실측 4조합★: 팀원 규칙만 강화 ❌ / "답을 보내세요" ❌(명령을 글로 출력) /
+  //   "실행해서 보내세요" ❌ / ★팀원 규칙 + 이 동사 함께 ✅★(api_calls=2, 버스 도착)
+  // 그래서 이 문장은 ★"실행"을 요구★ 해야 하고, 명령의 형태는 팀원 규칙이 준다.
+  const base2 = {
+    agent: { id: "member-b", display_name: "Member B" } as AgentRecord,
+    threadId: "biS95LYk",
+    messageId: "MSGab12cd34",
+    body: "확인해줘",
+    fromLabel: "member-a",
+    replyRoute: { kind: "teammate" as const, to: "member-a" },
+    locale: "ko" as const,
+  };
+
+  test("한국어 주입문이 ★실행★ 을 요구한다(‘답하고’ 로 되돌아가지 않는다)", () => {
+    const p = buildPrompt({ ...base2, locale: "ko" as const });
+    expect(p).toContain("발신 도구를 실제로 실행해서");
+    expect(p).toContain("발신 명령을 글로 적는 것은 발신이 아닙니다");
+    // ★회귀가드★: 옛 주동사로 되돌아가면 이 계열 모델이 다시 조용히 침묵한다.
+    expect(p).not.toContain("간결하게 답하고");
+  });
+
+  test("영어 주입문도 ★run your send tool★ 을 요구한다", () => {
+    const p = buildPrompt({ ...base2, locale: "en" as const });
+    expect(p).toContain("run your send tool");
+    expect(p).toContain("writing the send command as text is not sending");
+    expect(p).not.toContain("Answer concisely,");
+  });
+
+  test("★2026-07-15 계약 유지★ — 도구 이름도 주소도 봉투에 넣지 않는다", () => {
+    for (const locale of ["ko", "en"] as const) {
+      const p = buildPrompt({ ...base2, locale });
+      expect(p).not.toContain("send.sh"); // 명령/도구 이름 렌더 금지(기존 계약)
+      expect(p).not.toContain("--to");    // 주소 계산 금지
+    }
+  });
+
+  test("★정의 문장이 trailer 안에 있다★ — 방아쇠만 남기면 실패한다(변형B 0/5)", () => {
+    // D(중간을 원문 "답하고" 로 되돌리고 맨 끝 방아쇠만) → 0/5, api_calls=1. 정의가 없으면 이 모델은
+    // ★명령을 글로 쓰는 것을 발신으로 여긴다.★ 그래서 이 문장은 "중복" 이 아니라 필수다.
+    const p = buildPrompt({ ...base2, locale: "ko" as const });
+    expect(p).toContain("발신 명령을 글로 적는 것은 발신이 아닙니다");
+    expect(p).not.toContain("간결하게 답하고"); // 옛 주동사로 되돌아가면 D 와 같아진다
+  });
+
+  test("★방아쇠가 trailer 맨 마지막에 온다★ (2026-08-03 A/B: 정의만으로는 0/5)", () => {
+    // 실측: 명령형이 중간에 있으면 이 모델은 ★도구를 아예 호출하지 않는다★(api_calls=1, 5/5 —
+    // 명령을 완벽히 조립해서 글로만 출력). 맨 끝으로 옮기면 15/15 전부 호출한다.
+    // 그래서 "문구가 있다" 로는 부족하고 ★끝에 있다★ 를 잠근다.
+    for (const locale of ["ko", "en"] as const) {
+      const p = buildPrompt({ ...base2, locale }).trimEnd();
+      const tail = locale === "ko" ? "전달되지 않습니다.★" : "reaches no one.★";
+      expect(p.endsWith(tail)).toBe(true);
+    }
+  });
+
+  test("★침묵 허용 문구는 보존된다★ — 지우지 않고 순서만 바꿨다", () => {
+    // `[NO_REPLY]` 가 문자로 찍히던 사고 뒤에 일부러 넣은 설계다. 삭제 변형(4/10)과 보존 변형(2/5)의
+    // 도구 호출률이 같아서 지울 이유가 없었다 — 이 단정이 "효율화" 로 지워지는 것을 막는다.
+    expect(buildPrompt({ ...base2, locale: "ko" as const })).toContain("할 말이 없으면 그냥 안 보내면 됩니다");
+  });
+});
