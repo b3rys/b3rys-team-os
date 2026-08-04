@@ -177,7 +177,7 @@ case "$1" in
   has-session)   exit 0 ;;                       # ★세션은 살아 있다★
   kill-session)  printf '%s\n' "$*" >> "$TMUX_KILLS"; exit 0 ;;
   capture-pane)  printf 'idle\n'; exit 0 ;;
-  display-message) printf '%s\n' "$(date +%s)"; exit 0 ;;
+  display-message) printf '%s\n' "${SESSION_CREATED:-$(date +%s)}"; exit 0 ;;   # 노후화 시나리오가 과거로 지정
   list-sessions) printf 'claude-bill\n'; exit 0 ;;
   send-keys|load-buffer|paste-buffer|delete-buffer) exit 0 ;;
 esac
@@ -230,4 +230,99 @@ grep -q "서비스 복구 명령을 실행할 수 없습니다" "$BOT_LIVENESS_L
   RC=1
 }
 pass_if_clean "게이트웨이도 복구 명령이 없으면 예산을 쓰지 않고 알림만 한다"
+
+# ── 퍼블릭 설치 기본값 ────────────────────────────────────────────────────
+# ★시나리오마다 직전 signature 를 지운다★ — 안 지우면 "동일 이상치 중복알림 skip" 으로
+#   조기 종료해서 아래 검사들이 ★도달조차 못 한 채 통과★ 한다(실측으로 겪었다).
+STATE="$T/b3os/var/bot-liveness-monitor/bot-liveness-monitor.state"
+
+# 세션 노후화 알림은 기본으로 꺼져 있고, 지정하면 동작한다.
+#   기본이 0 인데 검사를 돌면 age_days>=0 이 항상 참이라 ★모든 세션에 매번 알림★ 이 된다.
+: > "$BOT_LIVENESS_LOG"; rm -f "$STATE"
+printf '%s\n' "$$" > "$HOME/.claude/channels/telegram-bill/bot.pid"   # 봇 정상
+OLD_CREATED=$(( $(date +%s) - 3 * 86400 ))                            # 3일 된 세션
+SESSION_CREATED="$OLD_CREATED" bash "$SCRIPT" >"$T/uptime-off.txt" 2>&1
+grep -q "노후화" "$BOT_LIVENESS_LOG" && {
+  echo "FAIL: UPTIME_STALE_DAYS 기본값에서 노후화 알림이 나갔다" >&2
+  RC=1
+}
+: > "$BOT_LIVENESS_LOG"; rm -f "$STATE"
+SESSION_CREATED="$OLD_CREATED" UPTIME_STALE_DAYS=1 bash "$SCRIPT" >"$T/uptime-on.txt" 2>&1
+grep -q "노후화" "$BOT_LIVENESS_LOG" || {
+  echo "FAIL: UPTIME_STALE_DAYS 를 지정했는데 노후화 검사가 안 돈다 — 기본 꺼짐이 기능 제거가 됐다" >&2
+  RC=1
+}
+pass_if_clean "세션 노후화 알림은 기본 꺼짐이고 지정하면 동작한다"
+
+# 알림 토큰: 전용 키 우선, 없으면 기존 키로 폴백(쓰던 설치가 안 깨지게).
+#   ★"에러 문구가 없다" 로 판정하지 않는다★ — 조기 종료해도 문구는 안 나오므로 헛통과한다.
+#   실제로 발송까지 갔는지(curl 호출 여부)로 본다.
+: > "$BOT_LIVENESS_LOG"; rm -f "$STATE"; : > "$CURL_CALLS"
+printf 'LIVENESS_ALERT_BOT_TOKEN=dedicated\n' > "$T/b3os/.env"
+bash "$SCRIPT" >"$T/tok1.txt" 2>&1
+[ -s "$CURL_CALLS" ] || {
+  echo "FAIL: 전용 토큰이 있는데 발송까지 가지 않았다" >&2
+  RC=1
+}
+: > "$BOT_LIVENESS_LOG"; rm -f "$STATE"; : > "$CURL_CALLS"
+printf 'CAPTURE_BOT_TOKEN=legacy\n' > "$T/b3os/.env"     # 기존 설치 모양
+bash "$SCRIPT" >"$T/tok2.txt" 2>&1
+[ -s "$CURL_CALLS" ] || {
+  echo "FAIL: 기존 키 폴백이 깨졌다 — 쓰던 설치가 알림을 못 받게 된다" >&2
+  RC=1
+}
+pass_if_clean "알림 토큰은 전용 키 우선 + 기존 키 폴백"
+
+# 알림을 아예 안 쓰는 설치를 오류로 끝내지 않는다.
+: > "$BOT_LIVENESS_LOG"; rm -f "$STATE"
+: > "$T/b3os/.env"
+GD_CHAT_ID="" GD_DM_CHAT="" bash "$SCRIPT" >"$T/noalert.txt" 2>&1
+rc_noalert=$?
+[ "$rc_noalert" = 0 ] || {
+  echo "FAIL: 알림 미설정 설치가 오류로 끝났다 (exit=$rc_noalert)" >&2
+  RC=1
+}
+grep -q "알림 미설정" "$BOT_LIVENESS_LOG" || {
+  echo "FAIL: 알림 미설정 사실을 로그에 남기지 않았다" >&2
+  RC=1
+}
+grep -qE "status=(issues|healed)-unreported" "$BOT_LIVENESS_LOG" || {
+  echo "FAIL: 미보고 상태를 구분해 기록하지 않았다" >&2
+  RC=1
+}
+pass_if_clean "알림 미설정 설치는 오류가 아니라 미보고로 끝난다"
+
+# 반쪽 설정은 오류로 알린다 — 받으려던 팀이 조용히 못 받는 것을 막는다.
+: > "$BOT_LIVENESS_LOG"; rm -f "$STATE"
+printf 'CAPTURE_BOT_TOKEN=legacy\n' > "$T/b3os/.env"
+GD_CHAT_ID="" GD_DM_CHAT="" bash "$SCRIPT" >"$T/halfconf.txt" 2>&1
+grep -q "설정 실수" "$BOT_LIVENESS_LOG" || {
+  echo "FAIL: 토큰만 있고 chat id 가 없는 설정 실수를 알리지 않았다" >&2
+  RC=1
+}
+pass_if_clean "토큰만 있고 대상이 없으면 설정 실수로 알린다"
+
+# ★토큰이 curl 인자로 넘어가지 않는다★ — 같은 기계의 다른 프로세스가 ps 로 가져갈 수 있는 자리다.
+#   curl mock 이 자기 argv 를 기록하게 해서, 거기에 토큰 값이 보이면 실패로 본다.
+cat > "$T/bin/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$CURL_ARGV"
+printf 'curl\n' >> "$CURL_CALLS"
+printf '200'
+exit 0
+SH
+chmod +x "$T/bin/curl"
+export CURL_ARGV="$T/curl.argv"; : > "$CURL_ARGV"
+: > "$BOT_LIVENESS_LOG"; rm -f "$STATE"; : > "$CURL_CALLS"
+printf 'CAPTURE_BOT_TOKEN=tok-must-not-leak\n' > "$T/b3os/.env"
+bash "$SCRIPT" >"$T/argv.txt" 2>&1
+[ -s "$CURL_CALLS" ] || {
+  echo "FAIL: 발송까지 가지 않아 argv 검사가 무의미하다" >&2
+  RC=1
+}
+grep -q "tok-must-not-leak" "$CURL_ARGV" && {
+  echo "FAIL: 토큰이 curl 인자로 넘어갔다 — ps 로 노출된다" >&2
+  RC=1
+}
+pass_if_clean "알림 발송 시 토큰이 curl 인자에 실리지 않는다"
 exit "$RC"

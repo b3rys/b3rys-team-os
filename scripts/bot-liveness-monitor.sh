@@ -187,12 +187,18 @@ fi
 
 GD_CHAT_ID="${GD_CHAT_ID:-}"
 GD_DM_CHAT="${GD_DM_CHAT:-$GD_CHAT_ID}"  # hooklog 상 owner 1:1 DM chat_id (#4 판정용)
-UPTIME_STALE_DAYS=7   # 매주 일요일 weekly-restart 기준 — 7일 초과 = 주간재시작 실패 신호 (GD 2217)
+# 세션 노후화 알림 — ★기본 꺼짐(0)★. "매주 재시작한다"는 운영 습관이 있는 팀에서만 의미가 있다.
+#   그 습관이 없는 설치에서는 오래 붙어 있는 정상 세션에 계속 알림이 뜬다. 쓰는 팀은 일수를 지정한다.
+: "${UPTIME_STALE_DAYS:=0}"
 RECENT_SECS=1200      # #4 DM 무응답: react 가 최근 이 시간(20분) 이내일 때만 — stale/재시작 로그 false positive 제외
 STATE_FILE="$LIVENESS_STATE_DIR/bot-liveness-monitor.state"      # 직전 이상치 signature (중복알림 방지)
 PENDING_FILE="$LIVENESS_STATE_DIR/bot-liveness-monitor.pending"  # #4 지속성: 직전 run 의 pending DM msgid
 : "${ENV_FILE:=$B3OS_ROOT/.env}"   # 알림 봇 토큰을 읽는 곳. 설치 위치 기준이라야 다른 기기에서도 찾는다
-TOKEN_VAR="CAPTURE_BOT_TOKEN"
+# 알림 발신 토큰 — ★전용 키 우선, 없으면 기존 키로 폴백★.
+#   CAPTURE_BOT_TOKEN 은 단톡방을 읽는 캡처봇 키다. 단톡방을 안 쓰는 설치에는 그 키가 없고,
+#   그러면 감시는 도는데 알림만 못 나간다. 알림 전용 키를 따로 둘 수 있게 하되, 기존 설치가
+#   깨지지 않도록 폴백을 남긴다. 순서대로 처음 값이 있는 것을 쓴다.
+: "${LIVENESS_ALERT_TOKEN_VARS:=LIVENESS_ALERT_BOT_TOKEN CAPTURE_BOT_TOKEN}"
 #   ★bin/team-os 를 기본값으로 삼지 않는다★ — 호출 계약이 다르다. 여기서는 `up <alias>` 와
 #   `restart <alias>` 를 기대하는데, bin/team-os 의 up 은 두 번째 인자를 무시하고 설치의 모든
 #   상주 서비스를 순회하며 restart 서브커맨드는 없다. 그대로 두면 게이트웨이 하나를 살리려다
@@ -558,8 +564,11 @@ for bot in "${BOTS[@]}"; do
     fi
   fi
 
-  # 5) 세션 uptime 노후화
-  created=$(tmux display-message -p -t "$session" '#{session_created}' 2>/dev/null || echo "")
+  # 5) 세션 uptime 노후화 — UPTIME_STALE_DAYS=0 이면 검사하지 않는다(기본).
+  #    0 에서 이 검사를 돌리면 age_days>=0 이 항상 참이라 ★모든 세션에 매번 알림★ 이 된다.
+  created=""
+  [ "$UPTIME_STALE_DAYS" -gt 0 ] 2>/dev/null && \
+    created=$(tmux display-message -p -t "$session" '#{session_created}' 2>/dev/null || echo "")
   if [ -n "$created" ] && [ "$created" -gt 0 ] 2>/dev/null; then
     age_days=$(( (NOW_EPOCH - created) / 86400 ))
     if [ "$age_days" -ge "$UPTIME_STALE_DAYS" ]; then
@@ -775,38 +784,64 @@ if [ "$SIG" = "$LAST_SIG" ]; then
 fi
 
 # ─── 토큰 로드 + DM 전송 ──────────────────────────────────────────────────
+# ★알림을 안 쓰는 설치를 오류로 취급하지 않는다★
+#   텔레그램을 안 쓰는 팀은 chat id 도 토큰도 없다. 예전에는 그 상태에서 무조건 exit 1 이라
+#   10분마다 오류로 끝났다 — 감지는 도는데 결과는 어디로도 안 가고 로그에 실패만 쌓였다.
+#   둘 다 없으면 "알림 미설정"으로 보고 정상 종료한다. 하나만 있으면 설정 실수이므로 오류로 알린다.
+TOKEN=""
+TOKEN_VAR=""
+if [ -s "$ENV_FILE" ]; then
+  for _tv in $LIVENESS_ALERT_TOKEN_VARS; do
+    TOKEN=$(grep -E "^${_tv}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-)
+    if [ -n "$TOKEN" ]; then TOKEN_VAR="$_tv"; break; fi
+  done
+fi
+
+if [ -z "$GD_CHAT_ID" ] && [ -z "$TOKEN" ]; then
+  echo "알림 미설정 — 알림 대상(GD_CHAT_ID)도 발신 토큰($LIVENESS_ALERT_TOKEN_VARS)도 없습니다."
+  echo "  감지 결과는 이 로그에 남습니다. 알림을 받으려면 둘 다 설정하세요."
+  if [ -n "$ISSUES" ]; then finish_status issues-unreported; else finish_status healed-unreported; fi
+  exit 0
+fi
+if [ -z "$GD_CHAT_ID" ]; then
+  echo "ERROR: 발신 토큰은 있는데 GD_CHAT_ID 가 비어있음 (설정 실수)"
+  finish_status error
+  exit 1
+fi
 if [ ! -s "$ENV_FILE" ]; then
   echo "ERROR: token env file missing: $ENV_FILE"
   finish_status error
   exit 1
 fi
-if [ -z "$GD_CHAT_ID" ]; then
-  echo "ERROR: GD_CHAT_ID 비어있음"
-  finish_status error
-  exit 1
-fi
-TOKEN=$(grep -E "^${TOKEN_VAR}=" "$ENV_FILE" | head -1 | cut -d= -f2-)
 if [ -z "$TOKEN" ]; then
-  echo "ERROR: ${TOKEN_VAR} 비어있음"
+  echo "ERROR: 발신 토큰이 비어있음 (찾은 순서: $LIVENESS_ALERT_TOKEN_VARS)"
   finish_status error
   exit 1
 fi
 
-HTTP_CODE=$(curl -s -o /tmp/bot-liveness-resp.json -w "%{http_code}" --max-time 10 \
-  "https://api.telegram.org/bot${TOKEN}/sendMessage" \
-  --data-urlencode "chat_id=${GD_CHAT_ID}" \
-  --data-urlencode "text=${MSG}")
+# 응답 파일은 매번 새로 만든다 — 고정 경로(/tmp/...)는 다중 사용자 기계에서 남이 미리
+#   만들어 둘 수 있는 자리다. 소유자만 읽을 수 있는 임시 파일로 받는다.
+RESP_FILE="$(mktemp "${TMPDIR:-/tmp}/bot-liveness-resp.XXXXXX")"
+
+# ★토큰을 curl 인자로 넘기지 않는다★
+#   텔레그램은 토큰이 URL ★경로★ 에 들어가는 구조라 body 로 옮길 수 없다. 대신 URL 을
+#   표준입력의 설정으로 넘기면 argv 에 남지 않는다 — 같은 기계의 다른 프로세스가 `ps` 로
+#   토큰을 가져가는 경로를 없앤다. (실측: 기존 방식은 argv 에 토큰 노출, 이 방식은 미노출)
+HTTP_CODE=$(printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "$TOKEN" \
+  | curl -s --config - -o "$RESP_FILE" -w "%{http_code}" --max-time 10 \
+    --data-urlencode "chat_id=${GD_CHAT_ID}" \
+    --data-urlencode "text=${MSG}")
 unset TOKEN
 
 echo "Telegram API: HTTP $HTTP_CODE"
 if [ "$HTTP_CODE" = "200" ]; then
   echo "DM 전송 완료"
   printf "%s" "$SIG" > "$STATE_FILE"
-  rm -f /tmp/bot-liveness-resp.json
+  rm -f "$RESP_FILE"
 else
   echo "DM 전송 실패 — 응답:"
-  cat /tmp/bot-liveness-resp.json
-  rm -f /tmp/bot-liveness-resp.json
+  cat "$RESP_FILE"
+  rm -f "$RESP_FILE"
   finish_status error
   exit 2
 fi
