@@ -13,6 +13,14 @@
 set -uo pipefail
 SCRIPT="${1:-$(cd "$(dirname "$0")" && pwd)/bot-liveness-monitor.sh}"
 
+# PASS 문구는 ★그 시나리오에서 실패가 없었을 때만★ 낸다.
+#   무조건 출력하면 FAIL 바로 뒤에 PASS 가 찍혀 로그만 보고는 통과로 읽힌다(RC 로만 판정됐다).
+_LAST_RC=0
+pass_if_clean() {
+  if [ "$RC" = "$_LAST_RC" ]; then echo "PASS: $1"; else echo "SKIP(위 FAIL 때문): $1"; fi
+  _LAST_RC="$RC"
+}
+
 T="$(mktemp -d "${TMPDIR:-/tmp}/probe-restart.XXXXXX")"
 export HOME="$T/home"
 if [ "${KEEP_TMP:-0}" != "1" ]; then trap 'rm -rf "$T"' EXIT; fi
@@ -115,7 +123,7 @@ tail -1 "$BOT_LIVENESS_LOG" | grep -q 'bot-liveness DONE status=issues$' || {
   tail -3 "$BOT_LIVENESS_LOG" >&2
   RC=1
 }
-echo "PASS: 전체 진입점이 alert-only에서 bootstrap/restart를 호출하지 않음"
+pass_if_clean "전체 진입점이 alert-only에서 bootstrap/restart를 호출하지 않음"
 
 # 같은 등록부/off 조건에서 LaunchAgent가 로드돼 있으면 세션 부재는 실제 장애이므로 복구한다.
 : > "$LAUNCHCTL_CALLS"
@@ -131,7 +139,7 @@ loaded_calls="$(cat "$RESTART_CALLS")"
   echo "FAIL: loaded LaunchAgent must not be bootstrapped" >&2
   RC=1
 }
-echo "PASS: 로드된 LaunchAgent의 세션 부재는 restart-agent로 복구함"
+pass_if_clean "로드된 LaunchAgent의 세션 부재는 restart-agent로 복구함"
 
 # 복구 수단이 없으면 파괴적 조치를 하지 않는다.
 #   폴러 사망 분기는 세션을 ★먼저 죽이고★ 복구를 부른다. 복구 스크립트가 없는 설치에서 그대로 두면
@@ -149,5 +157,38 @@ grep -q "자동복구 불가" "$BOT_LIVENESS_LOG" || {
   echo "FAIL: 복구 수단 부재를 알리지 않았다" >&2
   RC=1
 }
-echo "PASS: 복구 수단이 없으면 재시작하지 않고 알림만 한다"
+pass_if_clean "복구 수단이 없으면 재시작하지 않고 알림만 한다"
+
+# ★폴러 사망★ + 복구 수단 없음 → 세션을 죽이지 않는다.
+#   세션은 살아 있고 폴러만 죽은 상태. 이 분기는 tmux kill-session 을 ★먼저★ 하므로,
+#   복구 수단이 없으면 세션만 죽고 봇이 완전히 내려간다. 위 시나리오들은 세션 부재라
+#   세션 체크에서 continue 되어 이 경로에 도달하지 못한다 — 그래서 따로 만든다.
+cat > "$T/bin/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$1" in
+  has-session)   exit 0 ;;                       # ★세션은 살아 있다★
+  kill-session)  printf '%s\n' "$*" >> "$TMUX_KILLS"; exit 0 ;;
+  capture-pane)  printf 'idle\n'; exit 0 ;;
+  display-message) printf '%s\n' "$(date +%s)"; exit 0 ;;
+  list-sessions) printf 'claude-bill\n'; exit 0 ;;
+  send-keys|load-buffer|paste-buffer|delete-buffer) exit 0 ;;
+esac
+exit 0
+SH
+chmod +x "$T/bin/tmux"
+export TMUX_KILLS="$T/tmux.kills"; : > "$TMUX_KILLS"
+printf 'CHANNEL_BOT_TOKEN=x\n' > "$HOME/.claude/channels/telegram-bill/.env"   # .env 가드로 빠지지 않게
+printf '999999\n' > "$HOME/.claude/channels/telegram-bill/bot.pid"             # ★죽은 pid★
+: > "$RESTART_CALLS"; : > "$BOT_LIVENESS_LOG"
+RESTART_AGENT="$T/b3os/scripts/does-not-exist.sh" \
+  bash "$SCRIPT" >"$T/poller-out.txt" 2>"$T/poller-err.txt"
+[ ! -s "$TMUX_KILLS" ] || {
+  echo "FAIL: 복구 수단이 없는데 세션을 죽였다: $(cat "$TMUX_KILLS")" >&2
+  RC=1
+}
+grep -q "세션 유지하고 알림만" "$BOT_LIVENESS_LOG" || {
+  echo "FAIL: 폴러 사망 + 복구불가에서 세션 유지 알림이 없다" >&2
+  RC=1
+}
+pass_if_clean "폴러가 죽어도 복구 수단이 없으면 세션을 죽이지 않는다"
 exit "$RC"
