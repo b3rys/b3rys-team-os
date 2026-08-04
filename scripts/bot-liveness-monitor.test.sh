@@ -13,13 +13,23 @@
 set -uo pipefail
 SCRIPT="${1:-$(cd "$(dirname "$0")" && pwd)/bot-liveness-monitor.sh}"
 
+# PASS 문구는 ★그 시나리오에서 실패가 없었을 때만★ 낸다.
+#   무조건 출력하면 FAIL 바로 뒤에 PASS 가 찍혀 로그만 보고는 통과로 읽힌다(RC 로만 판정됐다).
+_LAST_RC=0
+pass_if_clean() {
+  if [ "$RC" = "$_LAST_RC" ]; then echo "PASS: $1"; else echo "SKIP(위 FAIL 때문): $1"; fi
+  _LAST_RC="$RC"
+}
+
 T="$(mktemp -d "${TMPDIR:-/tmp}/probe-restart.XXXXXX")"
 export HOME="$T/home"
 if [ "${KEEP_TMP:-0}" != "1" ]; then trap 'rm -rf "$T"' EXIT; fi
+# ★일부러 개인 라벨이 아닌 접두를 쓴다★ — 라벨을 다시 코드에 고정하면 이 테스트가 실패한다.
+export TEAMOS_LAUNCHD_PREFIX="com.b3ostest"
 mkdir -p "$HOME/Library/LaunchAgents" "$T/bin" \
-         "$HOME/Development/b3rys-team-collab/scripts" \
+         "$T/b3os/scripts" \
          "$HOME/.claude/channels/telegram-bill" "$T/b3os"
-: > "$HOME/Library/LaunchAgents/com.gdmini.claude-telegram-bill.plist"
+: > "$HOME/Library/LaunchAgents/$TEAMOS_LAUNCHD_PREFIX.claude-telegram-bill.plist"
 
 # 등록부: bill 은 ★활성 팀원★ (GD 가 지운 건 로그인 항목뿐)
 cat > "$T/agents.json" <<'JSON'
@@ -41,13 +51,21 @@ SH
 # mock: launchctl — bootstrap 호출을 기록
 cat > "$T/bin/launchctl" <<'SH'
 #!/usr/bin/env bash
-[ "$1" = print ] && { case "$2" in *"com.gdmini.claude-telegram-${LOADED_AGENT:-__none__}") exit 0 ;; *) exit 1 ;; esac; }
+# ★기대 라벨은 리터럴로 박는다★ — 스크립트와 같은 변수에서 만들면 스크립트가 그 값을 덮어써도
+#   export 속성이 유지돼 이 mock 에 그대로 전달된다. 그러면 mock 이 ★스크립트가 정한 라벨에
+#   무조건 동의하게 되어★ 접두를 개인 라벨로 되돌린 회귀를 잡지 못한다(실측: 그 뮤턴트가 생존했다).
+[ "$1" = print ] && { case "$2" in
+  *"com.b3ostest.claude-telegram-${LOADED_AGENT:-__none__}") exit 0 ;;
+  *"${LOADED_GATEWAY:-__none__}") exit 0 ;;      # 게이트웨이 시나리오에서만 켠다
+  *) exit 1 ;; esac; }
+# 로드됐지만 프로세스는 없는 상태(pid 자리에 '-')를 흉내낸다 → check_gateway 가 '미가동' 으로 본다
+[ "$1" = list ] && { [ -n "${LOADED_GATEWAY:-}" ] && printf -- '-\t0\t%s\n' "$LOADED_GATEWAY"; exit 0; }
 [ "$1" = bootstrap ] && { printf '%s\n' "$3" >> "$LAUNCHCTL_CALLS"; exit 0; }
 exit 2
 SH
 
 # mock: restart-agent.sh — ★이게 불리면 팀원이 되살아난 것★
-cat > "$HOME/Development/b3rys-team-collab/scripts/restart-agent.sh" <<'SH'
+cat > "$T/b3os/scripts/restart-agent.sh" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$1" >> "$RESTART_CALLS"
 SH
@@ -60,7 +78,7 @@ printf '200'
 exit 0
 SH
 
-chmod +x "$T/bin/"* "$HOME/Development/b3rys-team-collab/scripts/restart-agent.sh"
+chmod +x "$T/bin/"* "$T/b3os/scripts/restart-agent.sh"
 export PATH="$T/bin:$PATH"
 export LAUNCHCTL_CALLS="$T/launchctl.calls"; : > "$LAUNCHCTL_CALLS"
 export RESTART_CALLS="$T/restart.calls";     : > "$RESTART_CALLS"
@@ -72,7 +90,7 @@ export B3OS_ROOT="$T/b3os"
 export BOT_LIVENESS_LOG="$T/b3os/var/bot-liveness-monitor.log"
 export LIVENESS_LA_AUTOHEAL=0
 export GD_CHAT_ID=test
-printf 'CAPTURE_BOT_TOKEN=test\n' > "$HOME/Development/b3rys-team-collab/.env"
+printf 'CAPTURE_BOT_TOKEN=test\n' > "$T/b3os/.env"
 
 echo "■ 시나리오: bill 은 등록부에 있고 off 목록엔 없다. 세션은 안 떠 있다."
 echo "  (= GD 가 로그인 항목에서만 뺀 상태)"
@@ -113,7 +131,7 @@ tail -1 "$BOT_LIVENESS_LOG" | grep -q 'bot-liveness DONE status=issues$' || {
   tail -3 "$BOT_LIVENESS_LOG" >&2
   RC=1
 }
-echo "PASS: 전체 진입점이 alert-only에서 bootstrap/restart를 호출하지 않음"
+pass_if_clean "전체 진입점이 alert-only에서 bootstrap/restart를 호출하지 않음"
 
 # 같은 등록부/off 조건에서 LaunchAgent가 로드돼 있으면 세션 부재는 실제 장애이므로 복구한다.
 : > "$LAUNCHCTL_CALLS"
@@ -129,5 +147,87 @@ loaded_calls="$(cat "$RESTART_CALLS")"
   echo "FAIL: loaded LaunchAgent must not be bootstrapped" >&2
   RC=1
 }
-echo "PASS: 로드된 LaunchAgent의 세션 부재는 restart-agent로 복구함"
+pass_if_clean "로드된 LaunchAgent의 세션 부재는 restart-agent로 복구함"
+
+# 복구 수단이 없으면 파괴적 조치를 하지 않는다.
+#   폴러 사망 분기는 세션을 ★먼저 죽이고★ 복구를 부른다. 복구 스크립트가 없는 설치에서 그대로 두면
+#   세션만 죽고 복구는 실패해 봇이 완전히 내려간다. 그래서 감지·알림만 하고 손대지 않아야 한다.
+: > "$LAUNCHCTL_CALLS"
+: > "$RESTART_CALLS"
+: > "$BOT_LIVENESS_LOG"          # 이 시나리오의 출력만 보도록 — 평상 실행은 stdout 을 로그로 보낸다
+RESTART_AGENT="$T/b3os/scripts/does-not-exist.sh" \
+  bash "$SCRIPT" >"$T/noheal-out.txt" 2>"$T/noheal-err.txt"
+[ ! -s "$RESTART_CALLS" ] || {
+  echo "FAIL: 복구 수단이 없는데 재시작을 시도했다: $(cat "$RESTART_CALLS")" >&2
+  RC=1
+}
+grep -q "자동복구 불가" "$BOT_LIVENESS_LOG" || {
+  echo "FAIL: 복구 수단 부재를 알리지 않았다" >&2
+  RC=1
+}
+pass_if_clean "복구 수단이 없으면 재시작하지 않고 알림만 한다"
+
+# ★폴러 사망★ + 복구 수단 없음 → 세션을 죽이지 않는다.
+#   세션은 살아 있고 폴러만 죽은 상태. 이 분기는 tmux kill-session 을 ★먼저★ 하므로,
+#   복구 수단이 없으면 세션만 죽고 봇이 완전히 내려간다. 위 시나리오들은 세션 부재라
+#   세션 체크에서 continue 되어 이 경로에 도달하지 못한다 — 그래서 따로 만든다.
+cat > "$T/bin/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$1" in
+  has-session)   exit 0 ;;                       # ★세션은 살아 있다★
+  kill-session)  printf '%s\n' "$*" >> "$TMUX_KILLS"; exit 0 ;;
+  capture-pane)  printf 'idle\n'; exit 0 ;;
+  display-message) printf '%s\n' "$(date +%s)"; exit 0 ;;
+  list-sessions) printf 'claude-bill\n'; exit 0 ;;
+  send-keys|load-buffer|paste-buffer|delete-buffer) exit 0 ;;
+esac
+exit 0
+SH
+chmod +x "$T/bin/tmux"
+export TMUX_KILLS="$T/tmux.kills"; : > "$TMUX_KILLS"
+printf 'CHANNEL_BOT_TOKEN=x\n' > "$HOME/.claude/channels/telegram-bill/.env"   # .env 가드로 빠지지 않게
+printf '999999\n' > "$HOME/.claude/channels/telegram-bill/bot.pid"             # ★죽은 pid★
+: > "$RESTART_CALLS"; : > "$BOT_LIVENESS_LOG"
+RESTART_AGENT="$T/b3os/scripts/does-not-exist.sh" \
+  bash "$SCRIPT" >"$T/poller-out.txt" 2>"$T/poller-err.txt"
+[ ! -s "$TMUX_KILLS" ] || {
+  echo "FAIL: 복구 수단이 없는데 세션을 죽였다: $(cat "$TMUX_KILLS")" >&2
+  RC=1
+}
+grep -q "세션 유지하고 알림만" "$BOT_LIVENESS_LOG" || {
+  echo "FAIL: 폴러 사망 + 복구불가에서 세션 유지 알림이 없다" >&2
+  RC=1
+}
+pass_if_clean "폴러가 죽어도 복구 수단이 없으면 세션을 죽이지 않는다"
+
+# 같은 폴러 사망 상태에서 ★복구 수단이 있으면 실제로 복구한다★ (양성 경로).
+#   위 시나리오만 있으면 "항상 alert-only" 로 바꾸는 회귀를 잡지 못한다 — 감시기가 아무것도
+#   고치지 않게 되어도 테스트는 통과한다(실측: elif true 뮤턴트가 exit 0 이었다).
+: > "$TMUX_KILLS"; : > "$RESTART_CALLS"; : > "$BOT_LIVENESS_LOG"
+rm -f "$T/b3os/var/bot-liveness-monitor"/bot-liveness-poller-heal-*.ts   # 40분 thrash 마커 초기화
+printf '999999\n' > "$HOME/.claude/channels/telegram-bill/bot.pid"
+bash "$SCRIPT" >"$T/heal-out.txt" 2>"$T/heal-err.txt"       # RESTART_AGENT 기본값 = 존재하는 mock
+grep -q 'kill-session' "$TMUX_KILLS" || {
+  echo "FAIL: 복구 수단이 있는데 폴러 사망 세션을 정리하지 않았다" >&2
+  RC=1
+}
+[ "$(cat "$RESTART_CALLS")" = bill ] || {
+  echo "FAIL: 폴러 사망 복구에서 restart-agent 가 안 불렸다: $(cat "$RESTART_CALLS" || true)" >&2
+  RC=1
+}
+pass_if_clean "복구 수단이 있으면 폴러 사망을 실제로 복구한다"
+
+# 게이트웨이도 같다 — 복구 명령을 실행할 수 없으면 ★예산을 쓰기 전에★ 알림만 한다.
+#   가드가 없으면 성공할 수 없는 호출에 그 사이클의 재시작 예산을 태우고, 정작 복구 가능한
+#   다른 대상이 예산 부족으로 밀린다.
+: > "$TMUX_KILLS"; : > "$RESTART_CALLS"; : > "$BOT_LIVENESS_LOG"
+printf '%s\n' "$$" > "$HOME/.claude/channels/telegram-bill/bot.pid"   # 봇은 정상 — 예산을 안 쓰게
+LOADED_GATEWAY=ai.openclaw.gateway \
+  TEAM_OS="$T/b3os/scripts/no-such-team-os.sh" \
+  bash "$SCRIPT" >"$T/gw-out.txt" 2>"$T/gw-err.txt"
+grep -q "서비스 복구 명령을 실행할 수 없습니다" "$BOT_LIVENESS_LOG" || {
+  echo "FAIL: 게이트웨이 복구 수단 부재를 알리지 않았다" >&2
+  RC=1
+}
+pass_if_clean "게이트웨이도 복구 명령이 없으면 예산을 쓰지 않고 알림만 한다"
 exit "$RC"
