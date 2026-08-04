@@ -20,9 +20,31 @@ export interface LivenessStatus {
   logMtime: string | null; // 로그 파일 mtime(ISO)
 }
 
+// ★스크립트가 내는 status 값은 전부 여기 있어야 한다★
+//   허용목록에 없으면 아래 한국어 휴리스틱으로 떨어진다. 그건 판정이 아니라 추측이다.
+//   실제로 `reset`·`skipped` 가 목록 밖이라 계속 그렇게 돌고 있었고, `issues-unreported` 는
+//   하이픈이 단어경계라 `issues` 로 ★우연히★ 맞았다 — `issuesUnreported` 였으면 조용히 샜다.
+//   scripts/bot-liveness-monitor.sh 의 finish_status 값과 이 목록은 테스트로 묶여 있다.
+const STATUS_HEALTHY = ["ok", "healthy", "healed", "healed-unreported"] as const;
+const STATUS_UNHEALTHY = ["issues", "issues-unreported", "failed", "error", "down", "unhealthy"] as const;
+// 판정하지 않는 상태 — "정상"도 "이상"도 아니다. 부팅 유예처럼 검사 자체를 건너뛴 경우다.
+//   null 이 맞는 답이지만, 휴리스틱에 떨어져서 우연히 null 이 되는 것과는 다르다.
+const STATUS_NO_VERDICT = ["skipped", "reset"] as const;
+
+export const BOT_LIVENESS_KNOWN_STATUSES: readonly string[] = [
+  ...STATUS_HEALTHY,
+  ...STATUS_UNHEALTHY,
+  ...STATUS_NO_VERDICT,
+];
+
 function classifyBotLivenessResult(line: string): boolean | null {
-  const explicitStatus = line.match(/\bstatus=(ok|healthy|healed|issues|failed|error|down|unhealthy)\b/i)?.[1]?.toLowerCase();
-  if (explicitStatus) return /^(ok|healthy|healed)$/.test(explicitStatus);
+  // 긴 값을 먼저 시도한다 — 안 그러면 `issues-unreported` 가 `issues` 로 잘려 매칭된다.
+  const alternation = [...BOT_LIVENESS_KNOWN_STATUSES].sort((a, b) => b.length - a.length).join("|");
+  const explicitStatus = line.match(new RegExp(`\\bstatus=(${alternation})(?![\\w-])`, "i"))?.[1]?.toLowerCase();
+  if (explicitStatus) {
+    if ((STATUS_NO_VERDICT as readonly string[]).includes(explicitStatus)) return null;
+    return (STATUS_HEALTHY as readonly string[]).includes(explicitStatus);
+  }
   if (/이상 없음|정상|\bOK\b|healthy/i.test(line)) return true;
   if (/이상|실패|error|재시작|down|무응답|죽|수동 확인 필요|[⚠❌]/i.test(line)) return false;
   return null;
