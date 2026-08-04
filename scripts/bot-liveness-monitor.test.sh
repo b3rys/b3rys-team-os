@@ -16,10 +16,12 @@ SCRIPT="${1:-$(cd "$(dirname "$0")" && pwd)/bot-liveness-monitor.sh}"
 T="$(mktemp -d "${TMPDIR:-/tmp}/probe-restart.XXXXXX")"
 export HOME="$T/home"
 if [ "${KEEP_TMP:-0}" != "1" ]; then trap 'rm -rf "$T"' EXIT; fi
+# ★일부러 개인 라벨이 아닌 접두를 쓴다★ — 라벨을 다시 코드에 고정하면 이 테스트가 실패한다.
+export TEAMOS_LAUNCHD_PREFIX="com.b3ostest"
 mkdir -p "$HOME/Library/LaunchAgents" "$T/bin" \
-         "$HOME/Development/b3rys-team-collab/scripts" \
+         "$T/b3os/scripts" \
          "$HOME/.claude/channels/telegram-bill" "$T/b3os"
-: > "$HOME/Library/LaunchAgents/com.gdmini.claude-telegram-bill.plist"
+: > "$HOME/Library/LaunchAgents/$TEAMOS_LAUNCHD_PREFIX.claude-telegram-bill.plist"
 
 # 등록부: bill 은 ★활성 팀원★ (GD 가 지운 건 로그인 항목뿐)
 cat > "$T/agents.json" <<'JSON'
@@ -41,13 +43,13 @@ SH
 # mock: launchctl — bootstrap 호출을 기록
 cat > "$T/bin/launchctl" <<'SH'
 #!/usr/bin/env bash
-[ "$1" = print ] && { case "$2" in *"com.gdmini.claude-telegram-${LOADED_AGENT:-__none__}") exit 0 ;; *) exit 1 ;; esac; }
+[ "$1" = print ] && { case "$2" in *"${TEAMOS_LAUNCHD_PREFIX}.claude-telegram-${LOADED_AGENT:-__none__}") exit 0 ;; *) exit 1 ;; esac; }
 [ "$1" = bootstrap ] && { printf '%s\n' "$3" >> "$LAUNCHCTL_CALLS"; exit 0; }
 exit 2
 SH
 
 # mock: restart-agent.sh — ★이게 불리면 팀원이 되살아난 것★
-cat > "$HOME/Development/b3rys-team-collab/scripts/restart-agent.sh" <<'SH'
+cat > "$T/b3os/scripts/restart-agent.sh" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$1" >> "$RESTART_CALLS"
 SH
@@ -60,7 +62,7 @@ printf '200'
 exit 0
 SH
 
-chmod +x "$T/bin/"* "$HOME/Development/b3rys-team-collab/scripts/restart-agent.sh"
+chmod +x "$T/bin/"* "$T/b3os/scripts/restart-agent.sh"
 export PATH="$T/bin:$PATH"
 export LAUNCHCTL_CALLS="$T/launchctl.calls"; : > "$LAUNCHCTL_CALLS"
 export RESTART_CALLS="$T/restart.calls";     : > "$RESTART_CALLS"
@@ -72,7 +74,7 @@ export B3OS_ROOT="$T/b3os"
 export BOT_LIVENESS_LOG="$T/b3os/var/bot-liveness-monitor.log"
 export LIVENESS_LA_AUTOHEAL=0
 export GD_CHAT_ID=test
-printf 'CAPTURE_BOT_TOKEN=test\n' > "$HOME/Development/b3rys-team-collab/.env"
+printf 'CAPTURE_BOT_TOKEN=test\n' > "$T/b3os/.env"
 
 echo "■ 시나리오: bill 은 등록부에 있고 off 목록엔 없다. 세션은 안 떠 있다."
 echo "  (= GD 가 로그인 항목에서만 뺀 상태)"
@@ -130,4 +132,22 @@ loaded_calls="$(cat "$RESTART_CALLS")"
   RC=1
 }
 echo "PASS: 로드된 LaunchAgent의 세션 부재는 restart-agent로 복구함"
+
+# 복구 수단이 없으면 파괴적 조치를 하지 않는다.
+#   폴러 사망 분기는 세션을 ★먼저 죽이고★ 복구를 부른다. 복구 스크립트가 없는 설치에서 그대로 두면
+#   세션만 죽고 복구는 실패해 봇이 완전히 내려간다. 그래서 감지·알림만 하고 손대지 않아야 한다.
+: > "$LAUNCHCTL_CALLS"
+: > "$RESTART_CALLS"
+: > "$BOT_LIVENESS_LOG"          # 이 시나리오의 출력만 보도록 — 평상 실행은 stdout 을 로그로 보낸다
+RESTART_AGENT="$T/b3os/scripts/does-not-exist.sh" \
+  bash "$SCRIPT" >"$T/noheal-out.txt" 2>"$T/noheal-err.txt"
+[ ! -s "$RESTART_CALLS" ] || {
+  echo "FAIL: 복구 수단이 없는데 재시작을 시도했다: $(cat "$RESTART_CALLS")" >&2
+  RC=1
+}
+grep -q "자동복구 불가" "$BOT_LIVENESS_LOG" || {
+  echo "FAIL: 복구 수단 부재를 알리지 않았다" >&2
+  RC=1
+}
+echo "PASS: 복구 수단이 없으면 재시작하지 않고 알림만 한다"
 exit "$RC"

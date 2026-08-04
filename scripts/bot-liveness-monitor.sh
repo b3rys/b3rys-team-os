@@ -3,7 +3,7 @@
 # 배경: weekly-healthcheck 는 주 1회 + 세션 "존재"만 봐서, 주중 freeze 를 못 잡았다.
 #   2026-06-03 스티브가 1:1 리액션만 되고 응답 없던 건(설문 프롬프트 점거 + reply 도구 미호출)을
 #   미리 잡기 위해 10분 주기 경량 liveness 체크를 추가한다. 순수 shell — LLM 미호출(토큰 0).
-# Fired by ~/Library/LaunchAgents/com.gdmini.bot-liveness-monitor.plist (StartInterval=600s=10분)
+# Fired by ~/Library/LaunchAgents/<TEAMOS_LAUNCHD_PREFIX>.bot-liveness-monitor.plist (StartInterval=600s=10분)
 #
 # 검사 항목 (claude_channel 봇: bill steve demis dbak):
 #   1) tmux 세션 존재 (claude-<bot>)
@@ -48,6 +48,11 @@ mkdir -p "$LIVENESS_STATE_DIR" 2>/dev/null || true
 : "${BOT_LIVENESS_LOG:=$B3OS_ROOT/var/bot-liveness-monitor.log}"
 mkdir -p "$(dirname "$BOT_LIVENESS_LOG")" 2>/dev/null || true
 LOG="$BOT_LIVENESS_LOG"
+
+# LaunchAgent 라벨 접두. plist 렌더러(src/server/lib/livenessMonitor.ts)가 이미 이 값을 넘긴다.
+#   설치마다 다르므로 개인 라벨을 코드에 고정하지 않는다 — 접두가 어긋나면 모든 팀원이
+#   "LaunchAgent 미로드"로 판정돼 그 아래 tmux·폴러 검사에 도달하지 못한다(=감시 0).
+: "${TEAMOS_LAUNCHD_PREFIX:=com.${USER:-$(id -un)}}"
 [ "$DRY_RUN" = "0" ] && [ "$RESET" = "0" ] && exec >> "$LOG" 2>&1
 
 finish_status() { printf '%s bot-liveness DONE status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1"; }
@@ -58,8 +63,8 @@ finish_status() { printf '%s bot-liveness DONE status=%s\n' "$(date '+%Y-%m-%d %
 #   죽었을 때 이 감시기가 lui 를 아예 보지 않았고, 자가치유 대상에서도 제외돼 그물이 0이었다(수동 복구함).
 #   새 멤버를 영입할 때마다 이 줄을 고쳐야 하는 구조 자체가 누락의 원인이므로 정본을 읽는다.
 #   읽기 실패 시에만 옛 하드코딩으로 폴백(감시가 통째로 죽는 것보다 낫다) + 경고.
-: "${TEAM_AGENT_REGISTRY:=$HOME/Development/b3rys-team-os/agents.json}"
-: "${TEAMOS_AGENT_OFF_FILE:=$HOME/Development/b3rys-team-collab/var/agent-off.txt}"
+: "${TEAM_AGENT_REGISTRY:=$B3OS_ROOT/agents.json}"
+: "${TEAMOS_AGENT_OFF_FILE:=$B3OS_ROOT/var/agent-off.txt}"
 : "${LIVENESS_LA_AUTOHEAL:=0}"
 _AGENTS_JSON="$TEAM_AGENT_REGISTRY"
 _BOTS_STR="$(python3 -c "
@@ -126,15 +131,15 @@ PY
 
 launchagent_member() {
   case "$1" in
-    com.gdmini.claude-telegram-*) printf '%s\n' "${1#com.gdmini.claude-telegram-}" ;;
+    ${TEAMOS_LAUNCHD_PREFIX}.claude-telegram-*) printf '%s\n' "${1#${TEAMOS_LAUNCHD_PREFIX}.claude-telegram-}" ;;
     *) return 1 ;;
   esac
 }
 
 ensure_launchagents_registered() {
   local fixed="" p lbl member
-  for p in "$HOME"/Library/LaunchAgents/com.gdmini.claude-telegram-*.plist \
-           "$HOME/Library/LaunchAgents/com.gdmini.team-collab.plist"; do
+  for p in "$HOME"/Library/LaunchAgents/"$TEAMOS_LAUNCHD_PREFIX".claude-telegram-*.plist \
+           "$HOME/Library/LaunchAgents/$TEAMOS_LAUNCHD_PREFIX.team-collab.plist"; do
     [ -f "$p" ] || continue
     lbl="$(basename "$p" .plist)"
     launchctl print "gui/$(id -u)/$lbl" >/dev/null 2>&1 && continue   # 이미 로드됨
@@ -186,15 +191,28 @@ UPTIME_STALE_DAYS=7   # 매주 일요일 weekly-restart 기준 — 7일 초과 =
 RECENT_SECS=1200      # #4 DM 무응답: react 가 최근 이 시간(20분) 이내일 때만 — stale/재시작 로그 false positive 제외
 STATE_FILE="$LIVENESS_STATE_DIR/bot-liveness-monitor.state"      # 직전 이상치 signature (중복알림 방지)
 PENDING_FILE="$LIVENESS_STATE_DIR/bot-liveness-monitor.pending"  # #4 지속성: 직전 run 의 pending DM msgid
-ENV_FILE="$HOME/Development/b3rys-team-collab/.env"   # 알림은 team op 봇(@gd452_team_op_bot)으로 발신 — 운영성 시스템 메시지 (GD 2220, TEAM-OS §8 허용)
+: "${ENV_FILE:=$B3OS_ROOT/.env}"   # 알림 봇 토큰을 읽는 곳. 설치 위치 기준이라야 다른 기기에서도 찾는다
 TOKEN_VAR="CAPTURE_BOT_TOKEN"
-TEAM_OS="$HOME/Development/b3rys-team-collab/scripts/team-os.sh"   # 게이트웨이·서비스 복구용 (idempotent)
+: "${TEAM_OS:=$B3OS_ROOT/bin/team-os}"   # 게이트웨이·서비스 복구용 (idempotent)
 # ★봇 복구는 team-os.sh 를 거치지 않고 restart-agent 를 직접 부른다 (codex·steve 교차검증 2026-08-03)★
 #   team-os.sh:26 은 CLAUDE_BOTS="bill steve demis dbak" ★하드코딩이라 lui 가 없다.★ 그래서 감시 목록만
 #   agents.json 으로 동적화해도 ★lui 는 감지만 되고 복구는 조용히 실패★ 했다(`team-os up lui` 가 no-op).
 #   restart-agent.sh:35 는 agents.json 을 읽어 lui 를 포함하므로 이쪽이 정본에 붙어 있다.
-RESTART_AGENT="$HOME/Development/b3rys-team-collab/scripts/restart-agent.sh"
-OPENCLAW_INGRESS_CHECK="$HOME/Development/b3rys-team-collab/scripts/openclaw-telegram-ingress-check.sh"  # OpenClaw Telegram ingress silence + provider stuck detector (read-only)
+#   이 두 경로는 설치마다 다르므로 env 로 덮을 수 있어야 한다. 기본값은 설치 위치 기준이며,
+#   저장소가 이 스크립트를 제공하지 않는 설치도 있다 — 그 경우 아래 HEAL_READY 가 0 이 된다.
+: "${RESTART_AGENT:=$B3OS_ROOT/scripts/restart-agent.sh}"
+: "${OPENCLAW_INGRESS_CHECK:=$B3OS_ROOT/scripts/openclaw-telegram-ingress-check.sh}"  # OpenClaw Telegram ingress silence + provider stuck detector (read-only)
+
+# ★복구 수단이 없으면 파괴적 조치를 하지 않는다 (fail-closed)★
+#   폴러 사망 분기는 ★tmux 세션을 먼저 죽이고★ RESTART_AGENT 를 부른다. RESTART_AGENT 가 없으면
+#   그 호출은 조용히 실패하고(2>&1 로 버려짐, set -e 도 없음) ★세션만 죽은 채 남는다.★
+#   즉 "복구하려다 봇을 완전히 내리는" 결과가 된다. 그래서 복구 수단 유무를 먼저 확인하고,
+#   없으면 감지·알림만 한다. 감시를 잃는 것보다 낫지만, 봇을 잃는 것보다는 훨씬 낫다.
+HEAL_READY=1
+if [ ! -x "$RESTART_AGENT" ]; then
+  HEAL_READY=0
+  HEAL_UNAVAILABLE_REASON="복구 스크립트를 실행할 수 없습니다: $RESTART_AGENT (RESTART_AGENT 로 지정하세요)"
+fi
 # onoff 서킷브레이커 조율(2026-06-11 forin 인시던트): GD가 /onoff 로 의도적 정지한 팀원은 auto-heal 이
 # 되살리지 않는다. agentControl 이 이 파일에 off 명단을 기록 → 아래 복구 지점들이 존중(skip).
 OFF_FILE="$TEAMOS_AGENT_OFF_FILE"
@@ -214,7 +232,7 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') bot-liveness START (dry_run=$DRY_RUN)"
 # 정기 유지보수: 노후(48h+) terminal-bad(dead_letter + blocked 가드기록) 자동 아카이브 →
 # 모니터링이 '최근 실제 문제'만 보이게. 옛 주차 레코드가 영구 카운트로 남아 "이게 뭐지?" 노이즈
 # 되는 것 방지(GD 2026-06-07, blocked 포함 승인). 상세=scripts/bus-autoclean.sh
-BUS_AUTOCLEAN="$HOME/Development/b3rys-team-collab/scripts/bus-autoclean.sh"
+: "${BUS_AUTOCLEAN:=$B3OS_ROOT/scripts/bus-autoclean.sh}"
 AUTOCLEAN_STAMP="$LIVENESS_STATE_DIR/bus-autoclean.lastrun"
 if [ "$DRY_RUN" = "0" ] && [ -x "$BUS_AUTOCLEAN" ] && \
    [ "$(cat "$AUTOCLEAN_STAMP" 2>/dev/null)" != "$(date +%Y-%m-%d)" ]; then
@@ -377,7 +395,7 @@ for bot in "${BOTS[@]}"; do
 
   # 로그인 항목에 현재 로드된 팀원만 복구한다. plist/등록부만으로 운영자의 제외 의도를 추정하지 않는다.
   # 부팅 유예 검사는 이 루프보다 앞에서 끝났으므로, 부팅 중 미로드를 의도적 제외로 오판하지 않는다.
-  launchagent_label="com.gdmini.claude-telegram-$bot"
+  launchagent_label="$TEAMOS_LAUNCHD_PREFIX.claude-telegram-$bot"
   if ! launchctl print "gui/$(id -u)/$launchagent_label" >/dev/null 2>&1; then
     ISSUES="${ISSUES}· [$bot] LaunchAgent 미로드 — alert-only (로그인 항목 제외 가능성, 자동복구 안 함)
 "
@@ -390,6 +408,9 @@ for bot in "${BOTS[@]}"; do
   if ! tmux has-session -t "$session" 2>/dev/null; then
     if [ "$DRY_RUN" = "1" ]; then
       HEALED="${HEALED}· [$bot] tmux 세션 없음 → team-os up $bot (dry-run)
+"
+    elif [ "$HEAL_READY" = "0" ]; then
+      ISSUES="${ISSUES}· [$bot] tmux 세션 없음 — 자동복구 불가, 알림만. $HEAL_UNAVAILABLE_REASON
 "
     elif ! restart_budget_left; then
       ISSUES="${ISSUES}· [$bot] tmux 세션 없음 — 이번 점검의 재시작 예산($RESTART_BUDGET)을 이미 썼다. 다음 점검에서 복구 시도(여러 봇 동시 재시작 방지)
@@ -448,6 +469,10 @@ for bot in "${BOTS[@]}"; do
 "
     elif [ "$DRY_RUN" = "1" ]; then
       HEALED="${HEALED}· [$bot] 폴러 사망(세션 up) → tmux kill + team-os up (dry-run)
+"
+    elif [ "$HEAL_READY" = "0" ]; then
+      # ★세션을 죽이기 전에 확인한다★ — 복구 수단이 없는데 죽이면 봇이 완전히 내려간다.
+      ISSUES="${ISSUES}· [$bot] 폴러 미가동 — 자동복구 불가, 세션 유지하고 알림만. $HEAL_UNAVAILABLE_REASON
 "
     elif ! restart_budget_left; then
       ISSUES="${ISSUES}· [$bot] 폴러 미가동 — 이번 점검의 재시작 예산($RESTART_BUDGET)을 이미 썼다. 다음 점검에서 복구 시도(여러 봇 동시 재시작 방지)
@@ -611,10 +636,10 @@ check_gateway() {  # $1=LaunchAgent label, $2=표시이름, $3=team-os svc alias
 #   대시보드 무응답 · 팀버스 정지였는데 ★아무 알림도 없었다★(사람이 수동으로 발견해 bootstrap 함).
 #   서버 안에 health 워커(팀원 감시)가 들어 있어서, 서버가 없으면 팀원이 죽어도 볼 주체가 사라진다 = ★그물 0★.
 #   재시작 예산이 주기당 1건이라 ★순서가 곧 우선순위★ 다. 그래서 다른 게이트웨이보다 앞에 둔다.
-check_gateway "com.gdmini.team-collab" "b3os 서버" "collab" "http://127.0.0.1:7878/health" "-"
+check_gateway "$TEAMOS_LAUNCHD_PREFIX.team-collab" "b3os 서버" "collab" "http://127.0.0.1:7878/health" "-"
 check_gateway "ai.openclaw.gateway" "codex/openclaw" "openclaw" "http://127.0.0.1:18789/health" "-"
 check_gateway "ai.hermes.gateway-b3ryshermes" "hermes" "hermes" "-" "hermes"
-check_gateway "com.gdmini.b3rys-dev" "b3rys-dev" "b3rys-dev" "http://127.0.0.1:3000/" "-"
+check_gateway "$TEAMOS_LAUNCHD_PREFIX.b3rys-dev" "b3rys-dev" "b3rys-dev" "http://127.0.0.1:3000/" "-"
 
 # OpenClaw Telegram provider stuck detector (Phase A, 2026-06-16 outage):
 # alert only when last inbound is stale AND provider state is stopped/disconnected.
@@ -641,7 +666,7 @@ fi
 #   봇 생존 체크(#1~5)·게이트웨이 체크로는 못 잡던 갭 = "GD 메시지가 실제 도달 가능한가".
 # router-off 는 봇 문제가 아니라 설정 킬스위치 → 재시작/자가치유 대상 아님(전용 조치 안내).
 # 의도적 off 일 수 있으니 SIG dedup 으로 1회만 알림(off 유지 중 도배 안 함).
-TEAM_DB="${TEAM_DB_OVERRIDE:-$HOME/Development/b3rys-team-collab/team.db}"
+TEAM_DB="${TEAM_DB_OVERRIDE:-$B3OS_ROOT/team.db}"
 if command -v sqlite3 >/dev/null 2>&1 && [ -f "$TEAM_DB" ]; then
   router_val=$(sqlite3 "$TEAM_DB" "SELECT value FROM setting WHERE key='router_enabled';" 2>/dev/null || echo "")
   # store 비면 env ROUTER_ENABLED fallback (captureConfig 와 동일 규약, 기본 on).
@@ -704,7 +729,7 @@ ${ISSUES}"
     #   ★WORKDIR 를 반드시 붙인다★ — tmux 안에서 실행하면 tmux 전역에 박힌 첫 기동자의 WORKDIR(예: lui)을
     #   정본 스크립트가 검증 없이 물려받아 ★그 팀원이 남의 폴더에서 뜬다★(2026-08-03 dbak 실측).
     MSG="${MSG}조치: 해당 봇 재시작 (라이브 정본 스크립트 · 컨텍스트 유지)
-  WORKDIR=~/Development/<bot> ~/Development/b3rys-team-os/src/server/runtimes/claude/start-telegram-channel.sh <bot> --resume --force
+  WORKDIR=<그 팀원의 작업 폴더> $B3OS_ROOT/src/server/runtimes/claude/start-telegram-channel.sh <bot> --resume --force
   ※ WORKDIR 를 빼면 남의 폴더에서 뜰 수 있습니다(자기 CLAUDE.md/TEAM-OS 미로드)."
   elif printf "%s" "$NON_ROUTER_ISSUES" | grep -q "Telegram reply 플러그인 인증 만료"; then
     MSG="${MSG}조치: 해당 Claude 세션에서 /login 재인증 필요. 자동 로그인/토큰 조작은 하지 않음. 재인증 후에도 실패하면 채널 재시작."
