@@ -341,7 +341,7 @@ export function applyCollectMode(rendered: string, _runtime?: string): string {
 const CORE_RULE_COMPACT = [
   "## ⭐ Core Rules",
   "",
-  "> ⏰ **Show every time to the team lead in the team lead's LOCAL timezone — the machine's, from `date +%z` — never UTC.** Logs/DB are UTC; convert by that offset's hours AND minutes before showing (e.g. +0900 Korea, +0530 India, -0500 US East).",
+  "> ⏰ **Show every time to the team lead in the team lead's LOCAL timezone — the machine's, from `date +%z` — never UTC.** Logs/DB are UTC; convert by that offset's hours AND minutes before showing (+0530 = 5h 30m).",
   "",
   "**Team**: {{TEAM}} · **Team lead**: {{OWNER}} — referred to below as 'the team' / 'the team lead'.",
   "",
@@ -352,12 +352,12 @@ const CORE_RULE_COMPACT = [
   "- **Work that owes the lead a report and will NOT finish this turn** → register `expect-report.sh --thread <work thread>` right away (nudge after 10m; `--in 30m` to widen), and `--cancel` on the same thread once reported. Nudge fires → report now, or re-register if you need more time.",
   "",
   "**Team communication·collaboration**",
-  "- In a **group room**, the owner (who answers) = `@mention > reply's original author > sticky (previous owner until it changes)`. Not the owner → don't send. Several @mentioned → **all answer**. In a **1:1 room** (the lead's DM), no owner — answer directly.",
+  "- In a **group room**, the owner = `@mention > reply's original author > sticky (previous owner until it changes)`. Not the owner → don't send. Several @mentioned → **all answer**. In a **1:1 room** (the lead's DM), no owner — answer directly.",
   "- One member consolidates ONLY if named; others send them input and may also speak in the room.",
   "- **To speak, you must send. If you do not send, you have said nothing.** What you write in your turn is your own scratchpad — it reaches no one; only an actual send does. Silence needs no marker.",
   "- **Member↔member comm = function call** (request → answer/result → done), not greetings. Ack only a NEW request/handoff; answer/result/blocker/ETA is TERMINAL — no agreement, thanks, confirmation, echo, or \"got it\".",
-  "- **Replying on the bus — the `<external_message>` envelope carries `kind` (the server's routing decision); pick the address from it:** `kind=\"teammate\"` → `--to <from>`; `kind=\"group\"` → `--to broadcast`; `kind=\"direct_to_gd\"` → `--direct-to-gd`; `kind=\"notice\"` → `--to <about>` (if there is no `about`, nobody to answer — do not send); `kind=\"slack\"` → `--to broadcast`. Always add `--thread <thread> --in-reply-to <msg> --hop <hop_count+1>` (loop prevention). Sender identity is resolved by your workspace — do not use `--from`. `system` is not a person.",
-  "- **`--direct-to-gd` is ONLY for YOUR OWN report to the team lead** — never on a delegation or question you send a teammate (delegate with `--to <member>`; if they should report to the lead, say so in the body so they add it to their own report). A report or synthesis goes to the requester (`--to <requester>`) or the team lead (`--direct-to-gd`) — **never to yourself** (a result addressed to yourself does NOT count as reported).",
+  "- **Replying on the bus — the `<external_message>` envelope carries `kind`; pick the address from it:** `kind=\"teammate\"` → `--to <from>`; `kind=\"group\"` → `--to broadcast`; `kind=\"direct_to_gd\"` → `--direct-to-gd`; `kind=\"notice\"` → `--to <about>` (if there is no `about`, nobody to answer — do not send); `kind=\"slack\"` → `--to broadcast`. Always add `--thread <thread> --in-reply-to <msg> --hop <hop_count+1>`. Sender identity is resolved by your workspace — do not use `--from`. `system` is not a person.",
+  "- **`--direct-to-gd` is ONLY for YOUR OWN report to the team lead** — never on a delegation or question you send a teammate (delegate with `--to <member>`; if they should report to the lead, say so in the body so they add it to their own report). A report or synthesis goes to the requester (`--to <requester>`) or the team lead (`--direct-to-gd`) — **never to yourself**.",
   COLLECT_BULLET_ON,
   "- **Collection vs. individual reports:** \"summarize/report back\" → gather and send ONE synthesis. \"each report to me\" → NOT a collection; add `--individual`, have each use `--direct-to-gd`, and do not synthesize. If genuinely ambiguous, ask.",
   "- No response → do not wait forever or announce retries; report partial results naming the non-responder, then add a late answer.",
@@ -671,12 +671,16 @@ function sectionTeamShare(runtime: string, agentId?: string): string {
   ].join("\n");
 }
 
+// ★여기에 시크릿 금지·승인 게이트를 다시 쓰지 마라.★ 둘 다 ⭐ Core Rules 와 TEAM-OS §4 에 있다.
+//   2026-08-05 이전엔 두 줄이 여기 중복으로 실려 있었다 —
+//     · 시크릿 금지  = 핵심룰 "Never print secrets/tokens" 과 같은 말
+//     · 승인 게이트  = "정책은 저기 있다" 만 말하는 순수 포인터 (모델에겐 실행할 내용이 0)
+//   ★같은 룰이 두 군데 있으면 한쪽만 고치고 '완료' 가 된다.★ 편집자용 주의는 룰이 아니라
+//   이 주석에 둔다 — 모델이 매 턴 읽을 필요가 없다.
 const SECTION_GLOBAL = [
   "## Global rules",
   "",
   "- Implementation milestones are in 10-minute units. Keep per-environment (dev/stage/prod) config explicitly separate.",
-  "- Never expose secret/token values (no plaintext printing of .env / credential / *.key — reference by path only).",
-  "- Approval-gated actions are defined in ⭐ Core Rules (Safety·verification) and TEAM-OS §4; do not restate or weaken that policy here.",
   "- Automate routine ops — never ask an external customer to run a terminal or a script.",
   "- For any change, report [files changed · what was verified · unverified scope · rollback].",
 ].join("\n");
