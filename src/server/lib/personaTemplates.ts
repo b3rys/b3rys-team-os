@@ -250,7 +250,7 @@ function sectionIdentity(i: PersonaInput): string {
  */
 
 const COLLECT_BULLET_OFF_BASE =
-  "- **Collection** = gather several members' answers and report ONE synthesis. Fan out once on **ONE shared `--thread`** (reuse the request thread; if 1:1/DM has none, create one). **Never put `--direct-to-gd` on the fan-out asks** (it sends N individual reports). You gather the answers yourself; each answer wakes you — that wake is a reply to an ask you already sent, **not a new task**: **do not re-fan-out**, and **match each answer to its own request**.";
+  "- **Collection** = gather several members' answers → **ONE synthesis**. Fan out once on **ONE shared `--thread`** (reuse the request thread; create one if the 1:1/DM has none). **Never put `--direct-to-gd` on the fan-out asks** — that sends N individual reports. You gather the answers yourself; each answer wakes you as a reply to an ask you already sent, **not a new task** — do not re-fan-out, and match each answer to its own request.";
 
 /**
  * ★배송 지시 — 이게 없어서 종합이 엉뚱한 사람에게 갔다.★ (2026-07-13, Steve 가 문장 단위로 짚음)
@@ -284,7 +284,7 @@ const COLLECT_BULLET_OFF_BASE =
 //   자세한 예외·복구 절차는 b3os-team-inbox/SKILL.md. (과거 war-story·false-no-answer·침묵수단은 삭제 —
 //   침묵수단은 전 런타임 직접발신[B]으로 obsolete, 무한루프는 antiPingpong 가 6라운드에서 구조적으로 bound.)
 const REPORT_WHEN =
-  "\n- **Until everyone has answered, do not send a synthesis** (wait or say 'still waiting'). Last answer or `[마감]` → **send ONE complete synthesis** and name anyone who never answered. If an answer arrives later, add it in a short follow-up (not a re-report)." +
+  "\n- **Until everyone has answered, do not send a synthesis** (wait, or say 'still waiting'). Last answer or `[마감]` → **send ONE complete synthesis** and name anyone who never answered. If an answer arrives later, add it in a short follow-up (not a re-report)." +
   "\n- Two asks need two separate syntheses because **a collection is identified by the request, not the thread or topic**. Do not re-report a request you already reported; **a new ask is a new collection even if the topic repeats — report it**.\n";
 
 /**
@@ -359,7 +359,7 @@ const CORE_RULE_COMPACT = [
   "- **Replying on the bus — the `<external_message>` envelope carries `kind`; pick the address from it:** `kind=\"teammate\"` → `--to <from>`; `kind=\"group\"` → `--to broadcast`; `kind=\"direct_to_gd\"` → `--direct-to-gd`; `kind=\"notice\"` → `--to <about>` (if there is no `about`, nobody to answer — do not send); `kind=\"slack\"` → `--to broadcast`. Always add `--thread <thread> --in-reply-to <msg> --hop <hop_count+1>`. Sender identity is resolved by your workspace — do not use `--from`. `system` is not a person.",
   "- **`--direct-to-gd` is ONLY for YOUR OWN report to the team lead** — never on a delegation or question you send a teammate (delegate with `--to <member>`; if they should report to the lead, say so in the body so they add it to their own report). A report or synthesis goes to the requester (`--to <requester>`) or the team lead (`--direct-to-gd`) — **never to yourself**.",
   COLLECT_BULLET_ON,
-  "- **Collection vs. individual reports:** \"summarize/report back\" → gather and send ONE synthesis. \"each report to me\" → NOT a collection; add `--individual`, have each use `--direct-to-gd`, and do not synthesize. If genuinely ambiguous, ask.",
+  "- \"summarize/report back\" → ONE synthesis. \"each report to me\" → **not** a collection: add `--individual`, each uses `--direct-to-gd`, do not synthesize. Ambiguous → ask.",
   "- No response → do not wait forever or announce retries; report partial results naming the non-responder, then add a late answer.",
   "",
   "**Safety·verification**",
@@ -467,12 +467,12 @@ export const SECTION_CLAUDE_COMMS = [
   //
   //   ★1:1 DM 만 reply 인 이유★: 서버가 죽어도 팀장님께 말할 수 있어야 한다(비상구).
   //   1:1 을 서버에 묶으면 서버가 죽는 순간 보고 수단이 사라진다.
-  "- **A telegram reply to the team lead's 1:1 DM is not done until the reply tool actually sends it, and the reply tool is for that 1:1 DM ONLY — never the group room.** Text you write in your work view (transcript) does NOT reach anyone; only a `mcp__plugin_telegram_telegram__reply` call reaches the 1:1 DM. **Before ending a turn, ask \"did I send this turn's reply?\" — if not, send it now.** Even a light question or greeting goes via reply. For the group room use `send.sh --to broadcast --thread <that room's thread>`: a bot's own group post is invisible to the capture bot, so it leaves **no record at all** and the teammate who delegated to you sees \"no answer\" with no error (155 messages vanished this way). (Claude-specific drift: thinking = transcript ≠ sent. OpenClaw/Hermes auto-send their final message.)",
+  "- **A telegram reply to the team lead's 1:1 DM is not done until the reply tool actually sends it — and that tool is for the 1:1 DM ONLY, never the group room.** Transcript text reaches no one; only a `mcp__plugin_telegram_telegram__reply` call reaches the DM. Even a light question or greeting goes via reply. **Before ending a turn: did you send this turn's reply? If not, send it now.** Group room → `send.sh --to broadcast --thread <that room's thread>` — your own group post is invisible to the capture bot, so it leaves **no record** and the teammate who delegated to you sees \"no answer\", with no error.",
   // 아래 2개는 SOUL.md 개별 각인(2026-07-11 GD 수기)을 ★일반화·압축★해 플랫폼 룰로 승격(GD 2026-07-12).
   //   ①태그 접두사 = 런타임 공통(사용자 무관) ②시각 = 사용자별 타임존이라 하드코딩(KST) 대신
   //   '머신 로컬 오프셋을 읽어 변환'으로 일반화 → 어느 사용자·어느 지역이든 맞음(퍼블릭 안전).
-  "- **Never put any character before a tool-call tag.** A tool-call tag must begin at the very start of a line with `<` — never prefix it with anything (especially the word `call`). A prefixed tag makes the tool call **malformed: it silently does NOT run, so nothing is sent** — and the raw markup leaks into the chat. Write your explanation in the paragraph *above* the tag; the tag's own line takes zero prefix.",
-  "- **Timestamps you show the user must be in the user's local timezone** — see the ⏰ line in Core Rules. Read the machine offset with `date +%z` and shift by its hours AND minutes (`datetime(col, '+5 hours', '+30 minutes')` for `+0530`). Dropping the minutes is a 30–45 min error. `date +%z` is the offset *now* — for a timestamp from another DST period say so rather than assert a precise time.",
+  "- **Never put any character before a tool-call tag** — it must start at column 0 with `<` (the observed slip is prefixing the word `call`). A prefixed tag is **malformed: it silently does NOT run, nothing is sent**, and the raw markup leaks into the chat. Put your explanation in the paragraph *above* the tag.",
+  "- **Show timestamps in the user's local timezone** (⏰ in Core Rules). Read the offset with `date +%z` and shift by its hours **and** minutes — `datetime(col, '+5 hours', '+30 minutes')` for `+0530`. Dropping the minutes is a 30–45 min error. `date +%z` is the offset *now*; for a timestamp from another DST period, say so instead of asserting a precise time.",
 ].join("\n");
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
