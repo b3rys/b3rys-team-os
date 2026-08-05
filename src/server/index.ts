@@ -57,6 +57,7 @@ import { writeMemberPersona, savePersonaFile } from "./lib/writeMemberPersona";
 import { persistOwnerChatIdIfEmpty } from "./runtimes/codex/launcher";
 import { createApprovalsApp } from "./routes/approvals";
 import { createPermissionGateRoutes } from "./routes/permissionGate";
+import { buildMcpHttpApp } from "./mcp/mcpHttpRoute";
 import { configureLeadActorDb, leadActorId, trustedActorFromRequest } from "./lib/opAuth";
 import { createHostGate } from "./lib/hostGate";
 import { DEFAULT_MEDIA_DIR, contentTypeForMediaFile, resolveMediaPath } from "./lib/mediaStore";
@@ -501,6 +502,13 @@ const permissionGateApi = createPermissionGateRoutes({ db });
 if (!PUBLIC_BUILD) api.route("/", permissionGateApi);
 
 app.route("/api", api);
+
+// ★MCP HTTP 창구 — BASE_PATH 밑의 /mcp (기본값이면 /team/mcp).★
+// 반드시 아래쪽 SPA catch-all(`app.get("/*")`) ★보다 먼저★ 등록해야 한다. 뒤에 두면 화면이 이 주소를
+// 가로채서 MCP 클라이언트가 HTML 을 받고 "왜 안 되지" 가 된다.
+// 인증은 mcpAuth(Cloudflare Access JWT) 전용 — 대시보드 opAuth("루프백이면 lead")를 쓰지 않는다.
+// 공개 빌드에는 노출하지 않는다(permissionGate 와 같은 기준).
+if (!PUBLIC_BUILD) app.route("/", buildMcpHttpApp(db));
 
 const PUBLIC_RULE_FILES = new Set(["TEAM-OS.md", "SHARED.md"]);
 const PUBLIC_DOC_ALIASES: Record<string, string> = {
