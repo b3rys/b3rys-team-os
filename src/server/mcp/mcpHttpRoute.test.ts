@@ -142,3 +142,20 @@ test("★요청마다 신원이 갈린다★ — 앞 요청의 신원이 다음 
   const rows = db.query("select actor from audit_event where action = 'mcp.http.request' order by id").all() as { actor: string }[];
   expect(rows.map((r) => r.actor)).toEqual(["demis", "bill"]);
 });
+
+// ── 공개 빌드 격리 (팀 리드 지시 2026-08-05: "퍼블릭 기존소스에 영향없게") ──
+
+test("★공개 빌드에는 MCP 창구가 아예 안 붙는다★ — 가드를 지우면 이 시험이 깨진다", async () => {
+  // index.ts 는 `if (!PUBLIC_BUILD) app.route("/", buildMcpHttpApp(db))` 로 감싸고 있고,
+  // PUBLIC_BUILD 는 B3OS_LIVE !== "1" 이다. 즉 공개 빌드에서는 라우트가 등록되지 않는다.
+  // 실서버로 확인한 사실(B3OS_LIVE 없이 띄우면 /team/mcp 가 404)을 소스로 고정한다.
+  const src = await Bun.file(new URL("../index.ts", import.meta.url)).text();
+  const mount = src.split("\n").find((l) => l.includes("buildMcpHttpApp(db)"));
+  expect(mount).toBeDefined();
+  expect(mount).toContain("!PUBLIC_BUILD"); // 가드 없이 마운트하면 실패한다
+});
+
+test("★공개 빌드 판정 기준이 바뀌면 알아챈다★ — PUBLIC_BUILD = B3OS_LIVE !== '1'", async () => {
+  const src = await Bun.file(new URL("../routes/settings.ts", import.meta.url)).text();
+  expect(src).toContain('export const PUBLIC_BUILD = process.env.B3OS_LIVE !== "1"');
+});
