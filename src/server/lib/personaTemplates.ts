@@ -574,7 +574,7 @@ export function joinInstructions(displayName: string, role: string): string {
   return [
     "You just joined the team. While this file exists, do the following in your FIRST reply only:",
     "",
-    `1. One-line intro — your name (${displayName}) and your role (${role}).`,
+    `1. One-line greeting and intro in the user's language — your name (${displayName}) and your role (${role}).`,
     "2. One line confirming your onboarding (OT) is loaded — mission · rules · role · team skills · persona.",
     "3. Answer what the user actually asked.",
     `4. Delete this file: \`rm ${JOIN_FLAG_FILE}\``,

@@ -17,7 +17,11 @@ const M = { id: "t", display_name: "Testy", role: "QA" };
 test("★합류 지시서에 필수 4단계가 전부 있다★ — 하나라도 빠지면 신규 팀원이 그만큼 못 한다", () => {
   const body = joinInstructions(M.display_name, M.role);
   const need: [string, RegExp][] = [
-    ["① 한 줄 자기소개(이름+역할)", /intro.*Testy.*QA/is],
+    // ★인사는 Language 룰로 대체되지 않는다★ (codex 리뷰 2026-08-05) —
+    //   `Language:` 는 답변의 언어·말투를 제한할 뿐 ★인사하라는 발화 행동★ 을 지시하지 않는다.
+    //   이름·역할만 요구하면 "Codex — PM" 처럼 ★인사 없이도 충족★ 된다.
+    ["① 한 줄 인사 + 자기소개(이름+역할)", /greet(ing)?.*Testy.*QA/is],
+    ["①-b 사용자 언어로 인사", /in the user's language/i],
     ["② 온보딩(OT) 로드 확인", /onboarding|\bOT\b/i],
     ["③ 실제 질문에 답하기", /answer what the user/i],
     ["④ 이 파일 삭제", new RegExp(`rm\\s+${JOIN_FLAG_FILE.replace(".", "\\.")}`, "i")],
