@@ -8,7 +8,7 @@ import { readFileSync, writeFileSync, copyFileSync, chmodSync, existsSync, mkdir
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { writeMemberPersona, savePersonaFile } from "../lib/writeMemberPersona";
-import { memberPaths, personaTargetsForRuntime, injectCoreRule, stripCoreRule, coreRuleFor, injectClaudeComms, stripClaudeComms } from "../lib/personaTemplates";
+import { memberPaths, personaTargetsForRuntime, injectCoreRule, stripCoreRule, coreRuleFor, injectClaudeComms, stripClaudeComms, JOIN_FLAG_FILE, joinInstructions } from "../lib/personaTemplates";
 import { captureConfigStatus, setCaptureToken, setCaptureGroupId, setRouterEnabled, getCaptureToken } from "../lib/captureConfig";
 // ★설정 키 이름은 approvals.ts 정본을 쓴다★ — 문자열을 여기 다시 적으면 그 순간 갈린다.
 import { MERGE_APPROVERS_SETTING_KEY } from "../lib/approvals";
@@ -1242,8 +1242,13 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
         savePersonaFile(_paths.persona_file, persona);   // persona 값 = SOUL.md 에만
         persona_written = true;
       }
-      // ★합류 플래그: 첫 발화 자기소개+OT를 '합류 직후 1회'만 하게 하는 마커(sectionFirstContact 가 이 파일 있을 때만 소개→후 rm). 영입 때만 심음 → 재시작·재활성화는 반복 안 함. GD 2026-07-19.
-      try { writeFileSync(join(_paths.workspace_path, ".b3os-just-joined"), "joined\n"); } catch { /* best-effort */ }
+      // ★합류 플래그 = 마커이자 지시서.★ 영입 때만 심는다 → 재시작·재활성화는 반복 안 함(GD 2026-07-19).
+      //   페르소나(sectionFirstContact)는 "이 파일이 있으면 읽고 따르고 지워라" 한 줄만 싣고,
+      //   ★절차 본문은 여기 있다★ — 평생 한 번 쓰는 430자를 매 턴 페르소나로 나르지 않으려고
+      //   ★규칙이 필요한 순간에만 존재하게★ 옮겼다(GD 2026-08-05). 이 파일 내용을 읽는 코드는 없다(쓰기 전용).
+      try {
+        writeFileSync(join(_paths.workspace_path, JOIN_FLAG_FILE), joinInstructions(display_name, role));
+      } catch { /* best-effort */ }
       // claude_channel: CLAUDE.md 의 `@TEAM-OS.md`(상대) 가 풀리도록 workspace 에 심링크 생성(Steve 패턴).
       if (runtime === "claude_channel") {
         const link = join(_paths.workspace_path, "TEAM-OS.md");

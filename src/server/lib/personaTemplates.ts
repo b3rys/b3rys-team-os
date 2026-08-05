@@ -530,12 +530,45 @@ export function injectClaudeComms(personaText: string, tier2 = false): string {
 
 // ★First contact — 신규 합류 후 첫 발화에서 자기소개+OT 확인. (이전 sectionTone 이 빌더에 배선 안 돼
 //   dead code였던 것을 고침: 제인 등 신규 멤버가 첫 메시지에 OT·persona 언급 안 하던 근본원인. GD 2026-07-19)★
-function sectionFirstContact(i: PersonaInput): string {
+//
+// ★자기소개 절차는 여기 있지 않다 — `.b3os-just-joined` 파일 안에 있다★ (GD 2026-08-05).
+//   평생 한 번 쓰는 절차를 ★매 턴 430자★ 로 싣고 있었다. 파일이 없을 때의 동작("그냥 답해라")은
+//   원래 기본값이라 적어도 안 적어도 같았다. → ★규칙이 필요한 순간에만 존재하게★ 파일로 옮겼다.
+//   파일 본문을 쓰는 곳: `src/server/routes/settings.ts` (영입 시 1회). ★내용에 의존하는 코드는 없다★
+//   (이 이름이 나오는 곳은 쓰는 곳·이 룰·파일명만 거르는 테스트 3군데뿐).
+//
+// ★인사·톤은 SOUL.md 로★ — "친근하되 기술적으로 정확 / 자기소개 시 인사말 / 짧고 명확한 답변" 은
+//   페르소나(SOUL.md)의 「톤」에 이미 같은 말로 있었다. 여기 남은 건 ★안 겹치는 용어 풀이 하나★ 다.
+//   언어 선택 자체는 ⭐ Core Rules 의 `Language:` 줄이 정본이다.
+/** 페르소나의 First contact 룰이 가리키는 파일 이름 — ★두 곳이 같은 이름을 봐야 한다★. */
+export const JOIN_FLAG_FILE = ".b3os-just-joined";
+
+/**
+ * ★합류 직후 1회 절차의 본문.★ 페르소나가 아니라 ★이 파일 안에★ 실린다.
+ * 영입 시 `settings.ts` 가 워크스페이스에 써 넣고, 팀원은 읽고 따른 뒤 스스로 지운다.
+ * ★페르소나에서 옮겨온 것이라 여기가 비면 신규 팀원은 자기소개 절차를 아예 못 받는다★
+ *   — 그래서 `firstContact.test.ts` 가 이 본문의 필수 4단계를 지킨다.
+ */
+export function joinInstructions(displayName: string, role: string): string {
+  return [
+    "You just joined the team. While this file exists, do the following in your FIRST reply only:",
+    "",
+    `1. One-line intro — your name (${displayName}) and your role (${role}).`,
+    "2. One line confirming your onboarding (OT) is loaded — mission · rules · role · team skills · persona.",
+    "3. Answer what the user actually asked.",
+    `4. Delete this file: \`rm ${JOIN_FLAG_FILE}\``,
+    "",
+    "This self-intro is ONE-TIME, right after you join — NOT on every restart.",
+    "",
+  ].join("\n");
+}
+
+function sectionFirstContact(_i: PersonaInput): string {
   return [
     "## First contact",
     "",
-    `- **The self-intro is ONE-TIME, right after you join — NOT on every restart.** If \`.b3os-just-joined\` exists in your working directory: open with a one-line intro (your name ${i.display_name} + role), confirm in one line that your onboarding (OT) is loaded — mission · rules · role · team skills · persona — answer the actual point, then \`rm .b3os-just-joined\`. If the file is absent you have already joined: skip the intro and answer directly.`,
-    `- Greet in the user's language (Korean → "안녕하세요, ${i.display_name} 입니다"). Friendly but technically precise; short, clear answers. Gloss jargon/English/abbreviations in the user's language on first use — e.g. API (the rules programs use to exchange requests).`,
+    "- If `.b3os-just-joined` exists in your working directory, read it, follow it, then `rm` it. Otherwise you have already joined — answer directly.",
+    "- Gloss jargon, English terms, and abbreviations in the user's language on first use — e.g. API (the rules programs use to exchange requests).",
   ].join("\n");
 }
 
