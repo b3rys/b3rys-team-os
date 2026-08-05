@@ -544,6 +544,22 @@ export function injectClaudeComms(personaText: string, tier2 = false): string {
 export const JOIN_FLAG_FILE = ".b3os-just-joined";
 
 /**
+ * ★2026-08-05 이전 합류 깃발의 본문★ — 그때는 이 파일이 `joined` 한 줄짜리 ★깃발★ 이었고
+ * 자기소개 절차는 페르소나에 있었다. 지금은 절차가 이 파일 안에 있다(`joinInstructions`).
+ * 그래서 ★이 값과 정확히 일치하는 파일 = 지시가 없는 옛 깃발★ 이고, 부팅 때 치운다(`index.ts`).
+ */
+export const LEGACY_JOIN_FLAG_BODY = "joined";
+
+/**
+ * ★지시가 없는 옛 깃발인가.★ 부팅 정리(`index.ts`)가 ★이게 true 일 때만★ 파일을 지운다.
+ * ★새 지시서에는 절대 true 가 나오면 안 된다★ — 지우면 그 팀원은 자기소개 절차를 못 받는다.
+ * (`firstContact.test.ts` 가 양쪽을 다 고정한다)
+ */
+export function isLegacyJoinFlag(body: string): boolean {
+  return body.trim() === LEGACY_JOIN_FLAG_BODY;
+}
+
+/**
  * ★합류 직후 1회 절차의 본문.★ 페르소나가 아니라 ★이 파일 안에★ 실린다.
  * 영입 시 `settings.ts` 가 워크스페이스에 써 넣고, 팀원은 읽고 따른 뒤 스스로 지운다.
  * ★페르소나에서 옮겨온 것이라 여기가 비면 신규 팀원은 자기소개 절차를 아예 못 받는다★

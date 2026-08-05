@@ -10,7 +10,7 @@
  * 그래서 옮긴 자리에 그물을 같이 둔다 — ★막힌 걸 열었으면 그 책임도 같이 진다.★
  */
 import { expect, test } from "bun:test";
-import { buildPersona, buildAgentsMd, JOIN_FLAG_FILE, joinInstructions } from "./personaTemplates";
+import { buildPersona, buildAgentsMd, JOIN_FLAG_FILE, joinInstructions, isLegacyJoinFlag } from "./personaTemplates";
 
 const M = { id: "t", display_name: "Testy", role: "QA" };
 
@@ -37,4 +37,16 @@ test("★페르소나와 지시서가 같은 파일 이름을 본다★ — 어�
     // 파일을 ★읽고·따르고·지우라★ 는 세 지시가 다 있어야 절차가 끝까지 돈다.
     expect(doc).toMatch(/read it, follow it, then `rm` it/i);
   }
+});
+
+/**
+ * ★옛 깃발 정리는 지시서를 지우면 안 된다.★
+ * 부팅 정리(`index.ts`)가 `isLegacyJoinFlag` 로 판단한다 — 여기가 느슨해지면
+ * ★방금 영입된 팀원의 지시서가 첫 발화 전에 지워진다★ (그러면 자기소개 절차를 영영 못 받는다).
+ */
+test("★옛 깃발만 지운다 — 새 지시서는 절대 아니다★", () => {
+  expect(isLegacyJoinFlag("joined\n")).toBe(true);
+  expect(isLegacyJoinFlag("  joined  ")).toBe(true);
+  expect(isLegacyJoinFlag(joinInstructions("Testy", "QA"))).toBe(false);
+  expect(isLegacyJoinFlag("")).toBe(false); // 빈 파일은 판단 보류 — 지우지 않는다
 });
