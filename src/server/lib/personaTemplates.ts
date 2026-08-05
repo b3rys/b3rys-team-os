@@ -537,9 +537,14 @@ export function injectClaudeComms(personaText: string, tier2 = false): string {
 //   파일 본문을 쓰는 곳: `src/server/routes/settings.ts` (영입 시 1회). ★내용에 의존하는 코드는 없다★
 //   (이 이름이 나오는 곳은 쓰는 곳·이 룰·파일명만 거르는 테스트 3군데뿐).
 //
-// ★인사·톤은 SOUL.md 로★ — "친근하되 기술적으로 정확 / 자기소개 시 인사말 / 짧고 명확한 답변" 은
-//   페르소나(SOUL.md)의 「톤」에 이미 같은 말로 있었다. 여기 남은 건 ★안 겹치는 용어 풀이 하나★ 다.
-//   언어 선택 자체는 ⭐ Core Rules 의 `Language:` 줄이 정본이다.
+// ★인사말만 뺐다 — 톤은 남긴다★ (codex 리뷰 2026-08-05 반려 반영).
+//   처음엔 "SOUL.md 「톤」에 이미 있다" 며 톤까지 뺐다. ★그 근거가 틀렸다★ —
+//   ★SOUL.md 는 필수 파일이 아니다.★ persona 를 안 주면 아예 안 만들어지고(writeMemberPersona 는
+//   SOUL.md 를 건드리지 않는다), 사용자가 준 SOUL 도 임의 내용이라 톤 문구를 보장하지 않는다.
+//   실측(2026-08-05): 활성 12명 전원 SOUL.md 는 있지만 ★톤 문구가 있는 건 5명뿐★ 이다.
+//   → 톤을 여기서 빼면 나머지 7명과 향후 persona 없이 영입되는 팀원은 ★그 지시를 잃는다.★
+//   ★내 SOUL.md 하나를 보고 일반화했다★ — 창단 팀은 가장 안 대표적인 표본이다.
+//   빠진 건 인사말뿐이다. 언어 선택은 ⭐ Core Rules 의 `Language:` 줄이 정본이고 ★항상 실린다.★
 /** 페르소나의 First contact 룰이 가리키는 파일 이름 — ★두 곳이 같은 이름을 봐야 한다★. */
 export const JOIN_FLAG_FILE = ".b3os-just-joined";
 
@@ -584,7 +589,7 @@ function sectionFirstContact(_i: PersonaInput): string {
     "## First contact",
     "",
     "- If `.b3os-just-joined` exists in your working directory, read it, follow it, then `rm` it. Otherwise you have already joined — answer directly.",
-    "- Gloss jargon, English terms, and abbreviations in the user's language on first use — e.g. API (the rules programs use to exchange requests).",
+    "- Friendly but technically precise; short, clear answers. Gloss jargon, English terms, and abbreviations in the user's language on first use — e.g. API (the rules programs use to exchange requests).",
   ].join("\n");
 }
 

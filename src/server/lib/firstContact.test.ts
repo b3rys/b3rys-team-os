@@ -50,3 +50,26 @@ test("★옛 깃발만 지운다 — 새 지시서는 절대 아니다★", () =
   expect(isLegacyJoinFlag(joinInstructions("Testy", "QA"))).toBe(false);
   expect(isLegacyJoinFlag("")).toBe(false); // 빈 파일은 판단 보류 — 지우지 않는다
 });
+
+/**
+ * ★톤 지시는 페르소나에 있어야 한다 — SOUL.md 를 믿을 수 없다.★
+ *
+ * 2026-08-05 압축 때 "SOUL.md 「톤」에 이미 있다" 며 이 지시를 뺐다가 codex 리뷰에서 반려됐다.
+ *   ★SOUL.md 는 필수 파일이 아니다.★ persona 를 안 주면 만들어지지 않고, 사용자가 준 SOUL 도
+ *   임의 내용이라 톤 문구를 보장하지 않는다.
+ *   실측: 활성 12명 전원 SOUL.md 는 있었지만 ★톤 문구가 있는 건 5명뿐★ 이었다.
+ * ★근거가 된 것은 내 SOUL.md 하나였다★ — 창단 팀은 가장 안 대표적인 표본이다.
+ * 그래서 ★항상 실리는 곳(페르소나)에 있는지★ 를 코드로 고정한다.
+ */
+test("★톤 지시가 렌더본에 항상 있다★ — SOUL.md 는 선택 파일이라 근거가 못 된다", () => {
+  for (const doc of [
+    buildPersona({ ...M, runtime: "claude_channel" }),
+    buildAgentsMd({ ...M, runtime: "openclaw" }),
+    buildAgentsMd({ ...M, runtime: "hermes_agent" }),
+  ]) {
+    expect(doc).toMatch(/friendly but technically precise/i);
+    expect(doc).toMatch(/short, clear answers/i);
+    // 용어 풀이 — 이건 어디에도 중복이 없다.
+    expect(doc).toMatch(/gloss jargon/i);
+  }
+});
