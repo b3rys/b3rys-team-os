@@ -58,14 +58,28 @@ export function buildSendArgs(input: SendMessageInput, actor: string): string[] 
  *  stdio는 env B3OS_AGENT_ID, HTTP는 요청별 검증신원(declared 인자)을 넣는다.
  *  어느 경로든 이 함수 하나를 통과해야 actor 가 되므로 검증 규칙이 갈리지 않는다.
  */
-export function resolveActor(db: Database, declaredOverride?: string | null): string | null {
-  // ★HTTP: 요청마다 검증된 신원을 주입. stdio: 종전대로 env.★
-  const declared = (declaredOverride ?? process.env.B3OS_AGENT_ID)?.trim();
-  if (!declared) return null; // non-empty
-  if (!listAgents(db).some((a) => a.id === declared)) return null; // 레지스트리 등록 agent
+function validateActor(db: Database, declared: string | undefined | null): string | null {
+  const id = declared?.trim();
+  if (!id) return null; // non-empty
+  if (!listAgents(db).some((a) => a.id === id)) return null; // 레지스트리 등록 agent
   const allow = process.env.B3OS_MCP_ALLOWED_AGENTS?.trim(); // 선택 게이트: 설정 시에만 추가 제한
-  if (allow && !allow.split(",").map((s) => s.trim()).includes(declared)) return null;
-  return declared;
+  if (allow && !allow.split(",").map((s) => s.trim()).includes(id)) return null;
+  return id;
+}
+
+/** stdio 전용 — 연결 선언값을 env 에서 읽는다(종전 동작). */
+export function resolveActor(db: Database): string | null {
+  return validateActor(db, process.env.B3OS_AGENT_ID);
+}
+
+/**
+ * ★HTTP 전용 — env 폴백이 없다★ (리뷰 P2, bill).
+ * 밖에서 들어오는 경로에서 신원이 비면 ★거부★ 여야지, 서버 자기 신원(대개 권한이 큰 쪽)으로
+ * 떨어지면 안 된다. 폴백이 있으면 타입이 한 번 느슨해지거나 호출부가 바뀔 때 조용히 열린다.
+ * → 이 함수는 인자로 받은 값만 본다. 빈 값이면 null.
+ */
+export function resolveActorStrict(db: Database, declared: string): string | null {
+  return validateActor(db, declared);
 }
 /** lead 예외(타 멤버 개인scope 읽기 허용) allowlist — 별도 env, 미설정 시 없음. */
 function isLead(id: string): boolean {
@@ -96,10 +110,11 @@ function denyCrossMember(self: string, target: string) {
  * 어느 쪽이든 서버 인스턴스 하나에 actor 하나가 고정되므로, 한 인스턴스가 도중에 다른 사람이 되는 일은 없다.
  * → HTTP 경로는 반드시 ★요청마다 새 인스턴스★를 만들어야 한다(재사용 금지).
  */
-export function buildMcpServer(db: Database, declaredActor?: string | null, scope: McpScope = "write"): McpServer {
+export function buildMcpServer(db: Database, actor: string | null, scope: McpScope): McpServer {
   const server = new McpServer({ name: MCP_NAME, version: MCP_VERSION });
-  // ★신원 고정(B1)★: 이후 모든 쓰기·개인scope 읽기는 이 검증된 actor로만. null=무검증 → 거부.
-  const actor = resolveActor(db, declaredActor);
+  // ★신원은 호출부가 이미 검증해서 넘긴다★ — stdio 는 resolveActor, HTTP 는 resolveActorStrict.
+  // ★scope 는 기본값을 두지 않는다★ (리뷰 P3, bill): 권한 인자의 기본값이 열린 쪽이면
+  // 새 호출부가 빠뜨렸을 때 조용히 열린다. 필수로 두면 빠뜨리는 순간 컴파일이 막는다.
 
   server.registerTool(
     "team_status",
@@ -354,7 +369,8 @@ function sendShPath(): string {
  */
 export async function main(): Promise<void> {
   const db = new Database(dbPath());
-  const server = buildMcpServer(db);
+  // stdio 는 종전대로 env 신원 + 쓰기 허용. ★둘 다 명시★ — 기본값에 기대지 않는다.
+  const server = buildMcpServer(db, resolveActor(db), "write");
   await server.connect(new StdioServerTransport());
 }
 

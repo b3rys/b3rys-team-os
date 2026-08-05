@@ -4,7 +4,7 @@ import { test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
 import { buildMcpHttpApp } from "./mcpHttpRoute";
-import { buildMcpServer, WRITE_TOOL_NAMES } from "./b3osMcpServer";
+import { buildMcpServer, WRITE_TOOL_NAMES, resolveActorStrict } from "./b3osMcpServer";
 import type { McpAuthConfig, McpAuthResult } from "./mcpAuth";
 
 function addAgent(d: Database, id: string, name: string): void {
@@ -101,6 +101,33 @@ test("통과한 요청도 기록에 남는다(신원·권한 포함)", async () 
   expect(rows.length).toBe(1);
   expect(rows[0]!.actor).toBe("demis");
   expect(JSON.parse(rows[0]!.detail_json).scope).toBe("read");
+});
+
+// ── 폴백 없음 (리뷰 P2) ──
+
+test("★HTTP 경로는 env 신원으로 떨어지지 않는다★ — 빈 신원은 거부, 서버 자기 신원 승계 금지", () => {
+  const db = freshDb();
+  const prev = process.env.B3OS_AGENT_ID;
+  process.env.B3OS_AGENT_ID = "demis"; // 서버가 자기 신원을 갖고 있는 상황
+  try {
+    expect(resolveActorStrict(db, "")).toBeNull();
+    expect(resolveActorStrict(db, "   ")).toBeNull();
+    expect(resolveActorStrict(db, undefined as unknown as string)).toBeNull();
+    // 대조군 — 제대로 준 신원은 통과한다(위가 전부 null 만 뱉는 게 아님)
+    expect(resolveActorStrict(db, "demis")).toBe("demis");
+  } finally {
+    if (prev === undefined) delete process.env.B3OS_AGENT_ID;
+    else process.env.B3OS_AGENT_ID = prev;
+  }
+});
+
+test("★쓰기 도구 목록은 한 곳뿐★ — 관문(WRITE_TOOL_NAMES)이 실제로 그 이름들을 막는다", () => {
+  const db = freshDb();
+  const readNames = new Set(Object.keys((buildMcpServer(db, "demis", "read") as unknown as { _registeredTools: Record<string, unknown> })._registeredTools ?? {}));
+  const writeNames = new Set(Object.keys((buildMcpServer(db, "demis", "write") as unknown as { _registeredTools: Record<string, unknown> })._registeredTools ?? {}));
+  // write 에만 있고 read 에 없는 도구 = 실제로 걸러진 것. 이게 WRITE_TOOL_NAMES 와 정확히 같아야 한다.
+  const gated = new Set([...writeNames].filter((n) => !readNames.has(n)));
+  expect(gated).toEqual(WRITE_TOOL_NAMES);
 });
 
 // ── 신원 격리 ──

@@ -19,12 +19,13 @@
 import { Hono } from "hono";
 import { Database } from "bun:sqlite";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { buildMcpServer, resolveActor } from "./b3osMcpServer";
+import { buildMcpServer, resolveActorStrict } from "./b3osMcpServer";
 import { authenticateMcpRequest, loadMcpAuthConfig, type McpAuthConfig, type McpPrincipal } from "./mcpAuth";
 import { appendAudit } from "../db/queries";
 
-/** 쓰기 도구 — read 권한 신원에게는 노출하지 않는다. */
-export const WRITE_TOOLS = ["b3os_send_message", "b3os_kanban_add", "b3os_kanban_update"] as const;
+// ★쓰기 도구 목록은 여기 두지 않는다★ — 관문은 b3osMcpServer 의 WRITE_TOOL_NAMES 하나뿐이다.
+// (리뷰 P1, bill) 목록이 두 곳이면 새 쓰기 도구를 추가할 때 한쪽만 고치고 '완료' 가 되는데,
+// 그때 관문은 안 바뀌고 read 신원에게 그 도구가 노출된다 — 그리고 아무 에러도 안 난다.
 
 /** 감사 기록. 실패해도 요청을 막지는 않는다(기록 실패가 서비스 중단이 되면 안 된다). */
 function audit(db: Database, actor: string, action: string, target: string, detail: Record<string, unknown>): void {
@@ -62,7 +63,8 @@ export function buildMcpHttpApp(db: Database, deps: McpHttpDeps = {}): Hono {
     const principal: McpPrincipal = auth.principal;
 
     // ★이중 게이트★: CF 가 통과시킨 신원이라도 우리 레지스트리에 없으면 거부.
-    const actor = resolveActor(db, principal.agentId);
+    // strict = env 폴백 없음. 신원이 비면 서버 자기 신원으로 떨어지지 않고 거부된다.
+    const actor = resolveActorStrict(db, principal.agentId);
     if (!actor) {
       audit(db, principal.agentId, "mcp.http.denied", "actor_not_registered", { subject: principal.subject });
       return c.json({ error: "actor_not_registered" }, 403);
