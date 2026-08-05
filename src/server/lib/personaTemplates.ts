@@ -250,7 +250,7 @@ function sectionIdentity(i: PersonaInput): string {
  */
 
 const COLLECT_BULLET_OFF_BASE =
-  "- **Collection** = gather several members' answers and report ONE synthesis. Fan out once on **ONE shared `--thread`** (reuse the request thread; if 1:1/DM has none, create one). **Never put `--direct-to-gd` on the fan-out asks** (it sends N individual reports). You gather the answers yourself; each answer wakes you — that wake is a reply to an ask you already sent, **not a new task**: **do not re-fan-out**, and **match each answer to its own request**.";
+  "- **Collection** = gather several members' answers → **ONE synthesis**. Fan out once on **ONE shared `--thread`** (reuse the request thread; create one if the 1:1/DM has none). **Never put `--direct-to-gd` on the fan-out asks** — that sends N individual reports. You gather the answers yourself; each answer wakes you as a reply to an ask you already sent, **not a new task** — do not re-fan-out, and match each answer to its own request.";
 
 /**
  * ★배송 지시 — 이게 없어서 종합이 엉뚱한 사람에게 갔다.★ (2026-07-13, Steve 가 문장 단위로 짚음)
@@ -284,7 +284,7 @@ const COLLECT_BULLET_OFF_BASE =
 //   자세한 예외·복구 절차는 b3os-team-inbox/SKILL.md. (과거 war-story·false-no-answer·침묵수단은 삭제 —
 //   침묵수단은 전 런타임 직접발신[B]으로 obsolete, 무한루프는 antiPingpong 가 6라운드에서 구조적으로 bound.)
 const REPORT_WHEN =
-  "\n- **Until everyone has answered, do not send a synthesis** (wait or say 'still waiting'). Last answer or `[마감]` → **send ONE complete synthesis** and name anyone who never answered. If an answer arrives later, add it in a short follow-up (not a re-report)." +
+  "\n- **Until everyone has answered, do not send a synthesis** (wait, or say 'still waiting'). Last answer or `[마감]` → **send ONE complete synthesis** and name anyone who never answered. If an answer arrives later, add it in a short follow-up (not a re-report)." +
   "\n- Two asks need two separate syntheses because **a collection is identified by the request, not the thread or topic**. Do not re-report a request you already reported; **a new ask is a new collection even if the topic repeats — report it**.\n";
 
 /**
@@ -341,7 +341,7 @@ export function applyCollectMode(rendered: string, _runtime?: string): string {
 const CORE_RULE_COMPACT = [
   "## ⭐ Core Rules",
   "",
-  "> ⏰ **Show every time to the team lead in the team lead's LOCAL timezone — the machine's, from `date +%z` — never UTC.** Logs/DB are UTC; convert by that offset's hours AND minutes before showing (e.g. +0900 Korea, +0530 India, -0500 US East).",
+  "> ⏰ **Show every time to the team lead in the team lead's LOCAL timezone — the machine's, from `date +%z` — never UTC.** Logs/DB are UTC; convert by that offset's hours AND minutes before showing (+0530 = 5h 30m).",
   "",
   "**Team**: {{TEAM}} · **Team lead**: {{OWNER}} — referred to below as 'the team' / 'the team lead'.",
   "",
@@ -352,14 +352,14 @@ const CORE_RULE_COMPACT = [
   "- **Work that owes the lead a report and will NOT finish this turn** → register `expect-report.sh --thread <work thread>` right away (nudge after 10m; `--in 30m` to widen), and `--cancel` on the same thread once reported. Nudge fires → report now, or re-register if you need more time.",
   "",
   "**Team communication·collaboration**",
-  "- In a **group room**, the owner (who answers) = `@mention > reply's original author > sticky (previous owner until it changes)`. Not the owner → don't send. Several @mentioned → **all answer**. In a **1:1 room** (the lead's DM), no owner — answer directly.",
+  "- In a **group room**, the owner = `@mention > reply's original author > sticky (previous owner until it changes)`. Not the owner → don't send. Several @mentioned → **all answer**. In a **1:1 room** (the lead's DM), no owner — answer directly.",
   "- One member consolidates ONLY if named; others send them input and may also speak in the room.",
   "- **To speak, you must send. If you do not send, you have said nothing.** What you write in your turn is your own scratchpad — it reaches no one; only an actual send does. Silence needs no marker.",
   "- **Member↔member comm = function call** (request → answer/result → done), not greetings. Ack only a NEW request/handoff; answer/result/blocker/ETA is TERMINAL — no agreement, thanks, confirmation, echo, or \"got it\".",
-  "- **Replying on the bus — the `<external_message>` envelope carries `kind` (the server's routing decision); pick the address from it:** `kind=\"teammate\"` → `--to <from>`; `kind=\"group\"` → `--to broadcast`; `kind=\"direct_to_gd\"` → `--direct-to-gd`; `kind=\"notice\"` → `--to <about>` (if there is no `about`, nobody to answer — do not send); `kind=\"slack\"` → `--to broadcast`. Always add `--thread <thread> --in-reply-to <msg> --hop <hop_count+1>` (loop prevention). Sender identity is resolved by your workspace — do not use `--from`. `system` is not a person.",
-  "- **`--direct-to-gd` is ONLY for YOUR OWN report to the team lead** — never on a delegation or question you send a teammate (delegate with `--to <member>`; if they should report to the lead, say so in the body so they add it to their own report). A report or synthesis goes to the requester (`--to <requester>`) or the team lead (`--direct-to-gd`) — **never to yourself** (a result addressed to yourself does NOT count as reported).",
+  "- **Replying on the bus — the `<external_message>` envelope carries `kind`; pick the address from it:** `kind=\"teammate\"` → `--to <from>`; `kind=\"group\"` → `--to broadcast`; `kind=\"direct_to_gd\"` → `--direct-to-gd`; `kind=\"notice\"` → `--to <about>` (if there is no `about`, nobody to answer — do not send); `kind=\"slack\"` → `--to broadcast`. Always add `--thread <thread> --in-reply-to <msg> --hop <hop_count+1>`. Sender identity is resolved by your workspace — do not use `--from`. `system` is not a person.",
+  "- **`--direct-to-gd` is ONLY for YOUR OWN report to the team lead** — never on a delegation or question you send a teammate (delegate with `--to <member>`; if they should report to the lead, say so in the body so they add it to their own report). A report or synthesis goes to the requester (`--to <requester>`) or the team lead (`--direct-to-gd`) — **never to yourself**.",
   COLLECT_BULLET_ON,
-  "- **Collection vs. individual reports:** \"summarize/report back\" → gather and send ONE synthesis. \"each report to me\" → NOT a collection; add `--individual`, have each use `--direct-to-gd`, and do not synthesize. If genuinely ambiguous, ask.",
+  "- \"summarize/report back\" → ONE synthesis. \"each report to me\" → **not** a collection: add `--individual`, each uses `--direct-to-gd`, do not synthesize. Ambiguous → ask.",
   "- No response → do not wait forever or announce retries; report partial results naming the non-responder, then add a late answer.",
   "",
   "**Safety·verification**",
@@ -467,12 +467,12 @@ export const SECTION_CLAUDE_COMMS = [
   //
   //   ★1:1 DM 만 reply 인 이유★: 서버가 죽어도 팀장님께 말할 수 있어야 한다(비상구).
   //   1:1 을 서버에 묶으면 서버가 죽는 순간 보고 수단이 사라진다.
-  "- **A telegram reply to the team lead's 1:1 DM is not done until the reply tool actually sends it, and the reply tool is for that 1:1 DM ONLY — never the group room.** Text you write in your work view (transcript) does NOT reach anyone; only a `mcp__plugin_telegram_telegram__reply` call reaches the 1:1 DM. **Before ending a turn, ask \"did I send this turn's reply?\" — if not, send it now.** Even a light question or greeting goes via reply. For the group room use `send.sh --to broadcast --thread <that room's thread>`: a bot's own group post is invisible to the capture bot, so it leaves **no record at all** and the teammate who delegated to you sees \"no answer\" with no error (155 messages vanished this way). (Claude-specific drift: thinking = transcript ≠ sent. OpenClaw/Hermes auto-send their final message.)",
+  "- **A telegram reply to the team lead's 1:1 DM is not done until the reply tool actually sends it — and that tool is for the 1:1 DM ONLY, never the group room.** Transcript text reaches no one; only a `mcp__plugin_telegram_telegram__reply` call reaches the DM. Even a light question or greeting goes via reply. **Before ending a turn: did you send this turn's reply? If not, send it now.** Group room → `send.sh --to broadcast --thread <that room's thread>` — your own group post is invisible to the capture bot, so it leaves **no record** and the teammate who delegated to you sees \"no answer\", with no error.",
   // 아래 2개는 SOUL.md 개별 각인(2026-07-11 GD 수기)을 ★일반화·압축★해 플랫폼 룰로 승격(GD 2026-07-12).
   //   ①태그 접두사 = 런타임 공통(사용자 무관) ②시각 = 사용자별 타임존이라 하드코딩(KST) 대신
   //   '머신 로컬 오프셋을 읽어 변환'으로 일반화 → 어느 사용자·어느 지역이든 맞음(퍼블릭 안전).
-  "- **Never put any character before a tool-call tag.** A tool-call tag must begin at the very start of a line with `<` — never prefix it with anything (especially the word `call`). A prefixed tag makes the tool call **malformed: it silently does NOT run, so nothing is sent** — and the raw markup leaks into the chat. Write your explanation in the paragraph *above* the tag; the tag's own line takes zero prefix.",
-  "- **Timestamps you show the user must be in the user's local timezone** — see the ⏰ line in Core Rules. Read the machine offset with `date +%z` and shift by its hours AND minutes (`datetime(col, '+5 hours', '+30 minutes')` for `+0530`). Dropping the minutes is a 30–45 min error. `date +%z` is the offset *now* — for a timestamp from another DST period say so rather than assert a precise time.",
+  "- **Never put any character before a tool-call tag** — it must start at column 0 with `<` (the observed slip is prefixing the word `call`). A prefixed tag is **malformed: it silently does NOT run, nothing is sent**, and the raw markup leaks into the chat. Put your explanation in the paragraph *above* the tag.",
+  "- **Show timestamps in the user's local timezone** (⏰ in Core Rules). Read the offset with `date +%z` and shift by its hours **and** minutes — `datetime(col, '+5 hours', '+30 minutes')` for `+0530`. Dropping the minutes is a 30–45 min error. `date +%z` is the offset *now*; for a timestamp from another DST period, say so instead of asserting a precise time.",
 ].join("\n");
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -530,12 +530,66 @@ export function injectClaudeComms(personaText: string, tier2 = false): string {
 
 // ★First contact — 신규 합류 후 첫 발화에서 자기소개+OT 확인. (이전 sectionTone 이 빌더에 배선 안 돼
 //   dead code였던 것을 고침: 제인 등 신규 멤버가 첫 메시지에 OT·persona 언급 안 하던 근본원인. GD 2026-07-19)★
-function sectionFirstContact(i: PersonaInput): string {
+//
+// ★자기소개 절차는 여기 있지 않다 — `.b3os-just-joined` 파일 안에 있다★ (GD 2026-08-05).
+//   평생 한 번 쓰는 절차를 ★매 턴 430자★ 로 싣고 있었다. 파일이 없을 때의 동작("그냥 답해라")은
+//   원래 기본값이라 적어도 안 적어도 같았다. → ★규칙이 필요한 순간에만 존재하게★ 파일로 옮겼다.
+//   파일 본문을 쓰는 곳: `src/server/routes/settings.ts` (영입 시 1회). ★내용에 의존하는 코드는 없다★
+//   (이 이름이 나오는 곳은 쓰는 곳·이 룰·파일명만 거르는 테스트 3군데뿐).
+//
+// ★인사말만 뺐다 — 톤은 남긴다★ (codex 리뷰 2026-08-05 반려 반영).
+//   처음엔 "SOUL.md 「톤」에 이미 있다" 며 톤까지 뺐다. ★그 근거가 틀렸다★ —
+//   ★SOUL.md 는 필수 파일이 아니다.★ persona 를 안 주면 아예 안 만들어지고(writeMemberPersona 는
+//   SOUL.md 를 건드리지 않는다), 사용자가 준 SOUL 도 임의 내용이라 톤 문구를 보장하지 않는다.
+//   실측(2026-08-05): 활성 12명 전원 SOUL.md 는 있지만 ★톤 문구가 있는 건 5명뿐★ 이다.
+//   → 톤을 여기서 빼면 나머지 7명과 향후 persona 없이 영입되는 팀원은 ★그 지시를 잃는다.★
+//   ★내 SOUL.md 하나를 보고 일반화했다★ — 창단 팀은 가장 안 대표적인 표본이다.
+//   빠진 건 인사말뿐이다. 언어 선택은 ⭐ Core Rules 의 `Language:` 줄이 정본이고 ★항상 실린다.★
+/** 페르소나의 First contact 룰이 가리키는 파일 이름 — ★두 곳이 같은 이름을 봐야 한다★. */
+export const JOIN_FLAG_FILE = ".b3os-just-joined";
+
+/**
+ * ★2026-08-05 이전 합류 깃발의 본문★ — 그때는 이 파일이 `joined` 한 줄짜리 ★깃발★ 이었고
+ * 자기소개 절차는 페르소나에 있었다. 지금은 절차가 이 파일 안에 있다(`joinInstructions`).
+ * 그래서 ★이 값과 정확히 일치하는 파일 = 지시가 없는 옛 깃발★ 이고, 부팅 때 치운다(`index.ts`).
+ */
+export const LEGACY_JOIN_FLAG_BODY = "joined";
+
+/**
+ * ★지시가 없는 옛 깃발인가.★ 부팅 정리(`index.ts`)가 ★이게 true 일 때만★ 파일을 지운다.
+ * ★새 지시서에는 절대 true 가 나오면 안 된다★ — 지우면 그 팀원은 자기소개 절차를 못 받는다.
+ * (`firstContact.test.ts` 가 양쪽을 다 고정한다)
+ */
+export function isLegacyJoinFlag(body: string): boolean {
+  return body.trim() === LEGACY_JOIN_FLAG_BODY;
+}
+
+/**
+ * ★합류 직후 1회 절차의 본문.★ 페르소나가 아니라 ★이 파일 안에★ 실린다.
+ * 영입 시 `settings.ts` 가 워크스페이스에 써 넣고, 팀원은 읽고 따른 뒤 스스로 지운다.
+ * ★페르소나에서 옮겨온 것이라 여기가 비면 신규 팀원은 자기소개 절차를 아예 못 받는다★
+ *   — 그래서 `firstContact.test.ts` 가 이 본문의 필수 4단계를 지킨다.
+ */
+export function joinInstructions(displayName: string, role: string): string {
+  return [
+    "You just joined the team. While this file exists, do the following in your FIRST reply only:",
+    "",
+    `1. One-line greeting and intro in the user's language — your name (${displayName}) and your role (${role}).`,
+    "2. One line confirming your onboarding (OT) is loaded — mission · rules · role · team skills · persona.",
+    "3. Answer what the user actually asked.",
+    `4. Delete this file: \`rm ${JOIN_FLAG_FILE}\``,
+    "",
+    "This self-intro is ONE-TIME, right after you join — NOT on every restart.",
+    "",
+  ].join("\n");
+}
+
+function sectionFirstContact(_i: PersonaInput): string {
   return [
     "## First contact",
     "",
-    `- **The self-intro is ONE-TIME, right after you join — NOT on every restart.** If \`.b3os-just-joined\` exists in your working directory: open with a one-line intro (your name ${i.display_name} + role), confirm in one line that your onboarding (OT) is loaded — mission · rules · role · team skills · persona — answer the actual point, then \`rm .b3os-just-joined\`. If the file is absent you have already joined: skip the intro and answer directly.`,
-    `- Greet in the user's language (Korean → "안녕하세요, ${i.display_name} 입니다"). Friendly but technically precise; short, clear answers. Gloss jargon/English/abbreviations in the user's language on first use — e.g. API (the rules programs use to exchange requests).`,
+    "- If `.b3os-just-joined` exists in your working directory, read it, follow it, then `rm` it. Otherwise you have already joined — answer directly.",
+    "- Friendly but technically precise; short, clear answers. Gloss jargon, English terms, and abbreviations in the user's language on first use — e.g. API (the rules programs use to exchange requests).",
   ].join("\n");
 }
 
@@ -671,12 +725,16 @@ function sectionTeamShare(runtime: string, agentId?: string): string {
   ].join("\n");
 }
 
+// ★여기에 시크릿 금지·승인 게이트를 다시 쓰지 마라.★ 둘 다 ⭐ Core Rules 와 TEAM-OS §4 에 있다.
+//   2026-08-05 이전엔 두 줄이 여기 중복으로 실려 있었다 —
+//     · 시크릿 금지  = 핵심룰 "Never print secrets/tokens" 과 같은 말
+//     · 승인 게이트  = "정책은 저기 있다" 만 말하는 순수 포인터 (모델에겐 실행할 내용이 0)
+//   ★같은 룰이 두 군데 있으면 한쪽만 고치고 '완료' 가 된다.★ 편집자용 주의는 룰이 아니라
+//   이 주석에 둔다 — 모델이 매 턴 읽을 필요가 없다.
 const SECTION_GLOBAL = [
   "## Global rules",
   "",
   "- Implementation milestones are in 10-minute units. Keep per-environment (dev/stage/prod) config explicitly separate.",
-  "- Never expose secret/token values (no plaintext printing of .env / credential / *.key — reference by path only).",
-  "- Approval-gated actions are defined in ⭐ Core Rules (Safety·verification) and TEAM-OS §4; do not restate or weaken that policy here.",
   "- Automate routine ops — never ask an external customer to run a terminal or a script.",
   "- For any change, report [files changed · what was verified · unverified scope · rollback].",
 ].join("\n");

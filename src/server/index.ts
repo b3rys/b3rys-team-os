@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { createBunWebSocket } from "hono/bun";
 import type { ServerWebSocket } from "bun";
-import { existsSync, readFileSync, statSync, copyFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, copyFileSync, unlinkSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openDb, migrate } from "./db/migrate";
@@ -15,7 +15,7 @@ import {
 } from "./db/queries";
 import { agentActivity, agentStats, recentAlerts } from "./db/inboxQueries";
 import { claudePoolUsage } from "./lib/claudeUsage";
-import { } from "./lib/personaTemplates";
+import { JOIN_FLAG_FILE, isLegacyJoinFlag } from "./lib/personaTemplates";
 import { isAgentOff } from "./lib/agentControl";
 import { syncRegistry, watchRegistry } from "./lib/registry";
 import { initGroupOwnerStore } from "./lib/groupOwner";
@@ -169,6 +169,21 @@ try {
     try { repairReplyGuardHook(cid); } catch { /* best-effort */ }
     // ★owner-gate 만 "없으면 깐다" 다★ — 위 둘과 목적이 반대다(주석은 launcher 쪽에).
     try { ensureOwnerGateHook(cid); } catch { /* best-effort */ }
+  }
+  // ★옛 합류 깃발 정리 (일회성 전환, 전 환경)★ — 2026-08-05 이전 영입은 `.b3os-just-joined` 에
+  //   지시 없이 `joined` 한 줄만 들어 있다. 지금 룰은 "있으면 읽고·따르고·지워라" 라
+  //   ★따를 게 없는 파일★ 이 남아 있으면 팀원이 무엇을 할지 지어낼 여지가 생긴다.
+  //   ★한 번뿐인 전환을 룰 문장으로 나르지 않는다★ — 룰은 그대로 두고 여기서 치운다(GD 2026-08-05).
+  //   지우는 조건을 ★옛 마커와 정확히 일치할 때★ 로 좁힌다 — 방금 영입된 팀원의 ★지시서★ 를 지우면
+  //   그 사람은 자기소개 절차를 영영 못 받는다.
+  for (const a of agents) {
+    try {
+      const flag = join(a.workspace_path, JOIN_FLAG_FILE);
+      if (existsSync(flag) && isLegacyJoinFlag(readFileSync(flag, "utf8"))) {
+        unlinkSync(flag);
+        console.log(`[teamos-render] legacy join flag cleared: ${a.id}`);
+      }
+    } catch { /* best-effort */ }
   }
   // 공개 빌드 부팅 백필(PUBLIC_BUILD 게이트) — 공개 사용자가 git 업데이트를 pull 한 뒤 재시작하면 기존
   //   멤버도 재영입 없이 최신을 받게. 라이브(PUBLIC_BUILD=false)는 글로벌 배선/실멤버 보호로 skip.
