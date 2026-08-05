@@ -141,27 +141,46 @@ const TARGETS: { label: string; text: () => string }[] = [
   },
 ];
 
-/** 새 불릿 블록이 여기서 시작한다 = 최상위 불릿 · 인용 · 제목 · 굵은 소제목 */
-const STARTS_BLOCK = /^(?:[-*+]\s|>\s|#{1,6}\s|\*\*)/;
+/**
+ * ★지원하는 마크다운 부분집합★ — AST 파서가 아니라 손으로 만든 것이라 경계를 여기 적어둔다.
+ * 블록을 ★시작하는★ 것: 순서없는 목록 `- * +` · ★순서있는 목록 `1.` `1)`★ · 제목 `#` ·
+ *   굵은 소제목 `**` · 인용 `>` (단 ★연속된 `>` 줄은 한 덩어리★)
+ * 블록을 ★끊는★ 것: 빈 줄
+ * 그 외 모든 줄 = ★앞 블록의 후속 줄★
+ *
+ * ★순서있는 목록을 빠뜨리면 미탐이 난다★ (codex 리뷰 2026-08-05 실증) —
+ *   `1.` 을 시작으로 못 보면 그 항목이 ★앞의 무관한 불릿에 들러붙어★, 앞 줄에 우연히 있던
+ *   단어(예: 회계 안내문의 payment)를 ★빌려서★ 통과해버린다.
+ * ★연속 인용줄을 쪼개면 오탐이 난다★ (같은 리뷰 실증) —
+ *   `> 문장:` / `> 목록` 2줄로 나눠 쓴 ★정상 인용문 압축★ 이 두 블록으로 갈라져 전부 빨개진다.
+ */
+const STARTS_BLOCK = /^(?:[-*+]\s|\d+[.)]\s|#{1,6}\s|\*\*)/;
+const IS_QUOTE = /^>/;
 
 /**
- * ★마크다운 불릿 블록으로 쪼갠다.★
+ * ★마크다운 블록으로 쪼갠다.★
  * 블록 = 시작 줄 + ★다음 시작 줄이 나오기 전까지의 후속 줄들★ (빈 줄에서 끊는다).
  * 이래야 "불릿 한 줄 → 다음 줄에 목록" 같은 ★정상 압축이 한 덩어리로 묶여★ 통과한다.
  */
 function bulletBlocks(text: string): string[] {
   const blocks: string[] = [];
   let cur: string[] = [];
+  let prevWasQuote = false;
   const flush = () => {
     if (cur.length) blocks.push(cur.join("\n").toLowerCase());
     cur = [];
   };
   for (const line of text.split("\n")) {
+    const quote = IS_QUOTE.test(line);
     if (line.trim() === "") flush();
-    else if (STARTS_BLOCK.test(line)) {
+    else if (quote) {
+      if (!prevWasQuote) flush(); // 인용문의 ★첫 줄★ 에서만 끊는다 — 이어지는 `>` 는 같은 블록
+      cur.push(line);
+    } else if (STARTS_BLOCK.test(line)) {
       flush();
       cur.push(line);
     } else cur.push(line); // 후속 줄 — 현재 블록에 붙인다
+    prevWasQuote = quote;
   }
   flush();
   return blocks;
@@ -241,6 +260,23 @@ describe("★그물 자체의 회귀 케이스★", () => {
 
   test("(c) ★룰이 통째로 없으면 빨간불★", () => {
     expect(check("- Be careful with risky actions.")).toEqual(["<룰 자체가 없음>"]);
+  });
+
+  test("(e) ★번호 목록이 앞 블록에 들러붙어 단어를 빌려오면 안 된다★ (codex 리뷰 실증)", () => {
+    // `1.` 을 블록 시작으로 못 보면, 앞 불릿의 무관한 payment 를 빌려서 결제 누락이 통과한다.
+    const numbered = [
+      "- Unrelated accounting note: payment records are retained.",
+      "1. Get approval FIRST for restart · self-mod · external send · public post · deletion · credential handling.",
+    ].join("\n");
+    expect(check(numbered)).toEqual(["결제"]);
+  });
+
+  test("(f) ★2줄로 이어 쓴 인용문 압축은 초록불★ — 연속 `>` 는 한 블록이다 (codex 리뷰 실증)", () => {
+    const quoted = [
+      "> Announce scope+reason and get the team lead's approval FIRST for these actions:",
+      "> restart · self-mod · external send · public post · payment · deletion · credential handling",
+    ].join("\n");
+    expect(check(quoted)).toEqual([]);
   });
 
   test("(d) ★의미 반전은 잡지 못한다★ — 이 그물의 한계를 문서가 아니라 코드로 고정한다", () => {
