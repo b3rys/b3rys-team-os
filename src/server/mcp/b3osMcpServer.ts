@@ -19,6 +19,12 @@ import { classifyAll } from "../lib/health";
 export const MCP_NAME = "b3os-mcp";
 export const MCP_VERSION = "0.0.3-m2";
 
+/** 이 연결이 쓸 수 있는 범위. stdio 는 종전대로 write, HTTP 는 신원 매핑이 정한다. */
+export type McpScope = "read" | "write";
+
+/** 쓰기 도구 이름 — 권한 분리의 기준. 여기 없으면 읽기로 본다. */
+export const WRITE_TOOL_NAMES = new Set(["b3os_send_message", "b3os_kanban_add", "b3os_kanban_update"]);
+
 /** send_message 입력. */
 export interface SendMessageInput {
   to: string;
@@ -47,18 +53,33 @@ export function buildSendArgs(input: SendMessageInput, actor: string): string[] 
 }
 
 /**
- * ★신원 단일 choke-point(Codex/Bill MUST-FIX B1)★: 연결 선언값(env B3OS_AGENT_ID)을
+ * ★신원 단일 choke-point(Codex/Bill MUST-FIX B1)★: 연결 선언값을
  *  [non-empty + listAgents 레지스트리 등록 + (선택)MCP allowlist] 로 검증. 실패=null(fail-closed).
- *  startup에 1회 해석해 closure에 고정 → per-call env 재읽기·위조 차단. 쓰기(send·kanban)·개인scope
- *  읽기(inbox·recall_dms)가 전부 이 한 값으로 게이트되어 칸반 경로 무검증 구멍이 막힌다.
+ *  stdio는 env B3OS_AGENT_ID, HTTP는 요청별 검증신원(declared 인자)을 넣는다.
+ *  어느 경로든 이 함수 하나를 통과해야 actor 가 되므로 검증 규칙이 갈리지 않는다.
  */
-function resolveActor(db: Database): string | null {
-  const declared = process.env.B3OS_AGENT_ID?.trim();
-  if (!declared) return null; // non-empty
-  if (!listAgents(db).some((a) => a.id === declared)) return null; // 레지스트리 등록 agent
+function validateActor(db: Database, declared: string | undefined | null): string | null {
+  const id = declared?.trim();
+  if (!id) return null; // non-empty
+  if (!listAgents(db).some((a) => a.id === id)) return null; // 레지스트리 등록 agent
   const allow = process.env.B3OS_MCP_ALLOWED_AGENTS?.trim(); // 선택 게이트: 설정 시에만 추가 제한
-  if (allow && !allow.split(",").map((s) => s.trim()).includes(declared)) return null;
-  return declared;
+  if (allow && !allow.split(",").map((s) => s.trim()).includes(id)) return null;
+  return id;
+}
+
+/** stdio 전용 — 연결 선언값을 env 에서 읽는다(종전 동작). */
+export function resolveActor(db: Database): string | null {
+  return validateActor(db, process.env.B3OS_AGENT_ID);
+}
+
+/**
+ * ★HTTP 전용 — env 폴백이 없다★ (리뷰 P2, bill).
+ * 밖에서 들어오는 경로에서 신원이 비면 ★거부★ 여야지, 서버 자기 신원(대개 권한이 큰 쪽)으로
+ * 떨어지면 안 된다. 폴백이 있으면 타입이 한 번 느슨해지거나 호출부가 바뀔 때 조용히 열린다.
+ * → 이 함수는 인자로 받은 값만 본다. 빈 값이면 null.
+ */
+export function resolveActorStrict(db: Database, declared: string): string | null {
+  return validateActor(db, declared);
 }
 /** lead 예외(타 멤버 개인scope 읽기 허용) allowlist — 별도 env, 미설정 시 없음. */
 function isLead(id: string): boolean {
@@ -82,11 +103,18 @@ function denyCrossMember(self: string, target: string) {
   };
 }
 
-/** DB 핸들을 받아 team_status 도구를 등록한 McpServer 반환(테스트는 격리 DB 주입). */
-export function buildMcpServer(db: Database): McpServer {
+/**
+ * DB 핸들을 받아 도구를 등록한 McpServer 반환(테스트는 격리 DB 주입).
+ *
+ * ★신원 고정 시점★: stdio 는 프로세스당 1회(env), HTTP 는 ★요청/세션당 1회★(검증된 신원 주입).
+ * 어느 쪽이든 서버 인스턴스 하나에 actor 하나가 고정되므로, 한 인스턴스가 도중에 다른 사람이 되는 일은 없다.
+ * → HTTP 경로는 반드시 ★요청마다 새 인스턴스★를 만들어야 한다(재사용 금지).
+ */
+export function buildMcpServer(db: Database, actor: string | null, scope: McpScope): McpServer {
   const server = new McpServer({ name: MCP_NAME, version: MCP_VERSION });
-  // ★신원 startup 고정(B1)★: 이후 모든 쓰기·개인scope 읽기는 이 검증된 actor로만. null=무검증 → 거부.
-  const actor = resolveActor(db);
+  // ★신원은 호출부가 이미 검증해서 넘긴다★ — stdio 는 resolveActor, HTTP 는 resolveActorStrict.
+  // ★scope 는 기본값을 두지 않는다★ (리뷰 P3, bill): 권한 인자의 기본값이 열린 쪽이면
+  // 새 호출부가 빠뜨렸을 때 조용히 열린다. 필수로 두면 빠뜨리는 순간 컴파일이 막는다.
 
   server.registerTool(
     "team_status",
@@ -124,7 +152,16 @@ export function buildMcpServer(db: Database): McpServer {
   //  ToolCallback<InputArgs> 인스턴스화 중 TS2589(excessively deep)를 내는 알려진 타입 버그를 우회.
   //  런타임엔 실제 zod shape가 그대로 전달돼 입력검증·JSON스키마 노출 정상. 본문 인자는 명시 캐스트로 좁힌다.
   //  (team_status는 inputSchema 없어 무영향 — 타입 그대로 유지.)★
-  const reg = (server as { registerTool: (...a: unknown[]) => unknown }).registerTool.bind(server);
+  const rawReg = (server as { registerTool: (...a: unknown[]) => unknown }).registerTool.bind(server);
+  /**
+   * ★권한 단일 관문★: scope="read" 신원에게는 쓰기 도구를 ★아예 등록하지 않는다★.
+   * 호출 시점에 거절하는 대신 목록에서 빼는 이유 — 클라이언트가 있는 줄 알고 부르면 실패가 대화에 섞인다.
+   * 없으면 애초에 후보에 안 오른다. (신원 검증은 resolveActor, 권한 분리는 여기 — 둘 다 한 곳씩.)
+   */
+  const reg = (name: string, ...rest: unknown[]) => {
+    if (scope === "read" && WRITE_TOOL_NAMES.has(name)) return undefined;
+    return rawReg(name, ...rest);
+  };
   reg(
     "b3os_inbox",
     {
@@ -332,7 +369,8 @@ function sendShPath(): string {
  */
 export async function main(): Promise<void> {
   const db = new Database(dbPath());
-  const server = buildMcpServer(db);
+  // stdio 는 종전대로 env 신원 + 쓰기 허용. ★둘 다 명시★ — 기본값에 기대지 않는다.
+  const server = buildMcpServer(db, resolveActor(db), "write");
   await server.connect(new StdioServerTransport());
 }
 
