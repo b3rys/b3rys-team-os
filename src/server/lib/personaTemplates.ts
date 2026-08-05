@@ -567,7 +567,7 @@ function sectionFirstContact(_i: PersonaInput): string {
   return [
     "## First contact",
     "",
-    "- If `.b3os-just-joined` exists in your working directory, read it, follow it, then `rm` it. Otherwise you have already joined — answer directly.",
+    "- If `.b3os-just-joined` exists in your working directory, read it, follow it, then `rm` it — **if it holds no instructions, just `rm` it** (a legacy flag; you already joined). Otherwise you have already joined — answer directly.",
     "- Gloss jargon, English terms, and abbreviations in the user's language on first use — e.g. API (the rules programs use to exchange requests).",
   ].join("\n");
 }
