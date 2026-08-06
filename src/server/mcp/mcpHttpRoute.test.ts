@@ -4,7 +4,7 @@ import { test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
 import { buildMcpHttpApp } from "./mcpHttpRoute";
-import { buildMcpServer, WRITE_TOOL_NAMES, resolveActorStrict } from "./b3osMcpServer";
+import { buildMcpServer, WRITE_TOOL_NAMES, resolveActorStrict, resolveActor } from "./b3osMcpServer";
 import type { McpAuthConfig, McpAuthResult } from "./mcpAuth";
 
 function addAgent(d: Database, id: string, name: string): void {
@@ -193,4 +193,50 @@ test("★리드도 쓰기 권한은 매핑이 정한다★ — 리드라고 자�
   const readSrv = buildMcpServer(db, "gd", "read");
   const names = new Set(Object.keys((readSrv as unknown as { _registeredTools: Record<string, unknown> })._registeredTools ?? {}));
   for (const w of WRITE_TOOL_NAMES) expect(names.has(w)).toBe(false);
+});
+
+// ── stdio 경로 동작 변화 (리뷰, bill) ──
+// ★이 PR 로 stdio 도 넓어진다★: B3OS_AGENT_ID=<리드id> 가 이전엔 null 이었는데 이제 통과한다.
+// 위험은 작다 — 로컬 프로세스는 원래 등록 멤버 id 를 선언해 그 사람 행세를 할 수 있었고,
+// 리드가 된다고 추가 권한이 붙지도 않는다(권한은 scope 가, 타멤버 읽기는 별도 env 가 정한다).
+// 다만 ★"stdio 는 미등록이면 무조건 막힌다" 로 알고 설계하는 것을 막기 위해★ 동작을 시험으로 고정한다.
+
+test("★stdio 도 리드 id 는 통과한다★ — 이 PR 로 바뀐 동작(이전엔 null)", () => {
+  const db = freshDb();
+  const prev = process.env.B3OS_AGENT_ID;
+  process.env.B3OS_AGENT_ID = "gd";
+  try {
+    expect(resolveActor(db)).toBe("gd");
+  } finally {
+    if (prev === undefined) delete process.env.B3OS_AGENT_ID;
+    else process.env.B3OS_AGENT_ID = prev;
+  }
+});
+
+test("★stdio 도 리드 아닌 미등록은 여전히 막힌다★ — 넓어진 건 리드 하나뿐", () => {
+  const db = freshDb();
+  const prev = process.env.B3OS_AGENT_ID;
+  try {
+    for (const ghost of ["ghost", "gd2", "admin"]) {
+      process.env.B3OS_AGENT_ID = ghost;
+      expect(resolveActor(db)).toBeNull();
+    }
+  } finally {
+    if (prev === undefined) delete process.env.B3OS_AGENT_ID;
+    else process.env.B3OS_AGENT_ID = prev;
+  }
+});
+
+test("★리드도 추가 제한(ALLOWED_AGENTS)을 우회하지 못한다★ — 빌 실측을 회귀로 고정", () => {
+  const db = freshDb();
+  const prev = process.env.B3OS_MCP_ALLOWED_AGENTS;
+  try {
+    process.env.B3OS_MCP_ALLOWED_AGENTS = "bill";
+    expect(resolveActorStrict(db, "gd")).toBeNull(); // 리드여도 allow 목록에 없으면 거부
+    process.env.B3OS_MCP_ALLOWED_AGENTS = "bill,gd";
+    expect(resolveActorStrict(db, "gd")).toBe("gd"); // 대조군
+  } finally {
+    if (prev === undefined) delete process.env.B3OS_MCP_ALLOWED_AGENTS;
+    else process.env.B3OS_MCP_ALLOWED_AGENTS = prev;
+  }
 });
