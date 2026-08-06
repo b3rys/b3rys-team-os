@@ -58,7 +58,6 @@ export function checkPingpong(
   //   "여기가 정본" 이라는 주석이 거짓이 된다). ★broadcast 는 뺀다★: 그건 ★수신 주소★ 이지
   //   발신자가 아니다. 여기 넣으면 from='broadcast' 위조가 신뢰-출처 문을 통과하게 되어
   //   ★게이트가 넓어진다★ — 사본을 없애자고 문을 열지는 않는다.
-  const RESERVED_SENDERS = RESERVED_SENDER_IDS;
 
   // 1. Trusted-source check
   if (!["agent", "user", "system"].includes(row.source)) {
@@ -67,7 +66,7 @@ export function checkPingpong(
 
   // 2. created_by / from_agent_id must be known
   const sender = row.created_by ?? row.from_agent_id;
-  if (!RESERVED_SENDERS.has(sender) && !agentRoster.has(sender)) {
+  if (!RESERVED_SENDER_IDS.has(sender) && !agentRoster.has(sender)) {
     return { allowed: false, reason: `unknown_sender:${sender}` };
   }
 

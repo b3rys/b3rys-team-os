@@ -2,7 +2,7 @@
 import { test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
-import { RESERVED_AGENT_IDS as RESERVED_SENDERS } from "../../shared/envelopeSchema"; // ★진짜 코드의 목록을 그대로 쓴다★
+import { RESERVED_AGENT_IDS } from "../../shared/envelopeSchema"; // ★진짜 코드의 목록을 그대로 쓴다★
 import {
   roomIdFor,
   findAnswer,
@@ -55,7 +55,7 @@ function fakeBus(db: Database) {
     calls.push(p);
     const from = p.from_agent_id as string;
     const known = (db.prepare(`SELECT id FROM agent`).all() as Array<{ id: string }>).map((a) => a.id);
-    if (!RESERVED_SENDERS.has(from) && !known.includes(from)) {
+    if (!RESERVED_AGENT_IDS.has(from) && !known.includes(from)) {
       return new Response(JSON.stringify({ ok: false, error: "unknown_from_agent", id: from }), {
         headers: { "content-type": "application/json" },
       });
