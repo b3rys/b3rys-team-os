@@ -32,7 +32,14 @@ export const WRITE_TOOL_NAMES = new Set([
   "b3os_ask_teammate", // 팀원에게 질문을 남긴다 = 쓰기다
 ]);
 
-/** 한 호출이 기다릴 수 있는 상한. ★Cloudflare 가 125초에서 끊는다★ — 그 아래에서 우리가 먼저 접수로 끝낸다. */
+/**
+ * 한 호출이 기다릴 수 있는 상한.
+ *
+ * ★125초는 틀린 숫자였다★ (2026-08-06 라이브 실측): Cloudflare 는 ★조용한 POST 를 30초에 끊는다.★
+ * 서버는 60초를 정상 완료했는데 클라이언트는 30.4초에 에러를 봤다 — ★서버는 성공, 사용자는 에러★.
+ * → 그래서 이 경로를 ★SSE + 진행 알림★ 으로 바꿨다(mcpHttpRoute). 조용하지 않으면 끊을 이유가 없다.
+ *   ★그 전제가 라이브에서 확인되기 전까지 이 값들을 믿지 마라.★ 확인 후 다시 잡는다.
+ */
 export const ASK_WAIT_DEFAULT_SEC = 90;
 export const ASK_WAIT_MAX_SEC = 110;
 
@@ -419,7 +426,7 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
           .describe(`답을 기다릴 최대 시간(기본 ${ASK_WAIT_DEFAULT_SEC}초, 최대 ${ASK_WAIT_MAX_SEC}초)`),
       },
     },
-    async (args: unknown) => {
+    async (args: unknown, extra: unknown) => {
       if (!actor) return denyIdentity("팀원에게 질문");
       const { to, question, wait_seconds } = args as { to: string; question: string; wait_seconds?: number };
       if (to === actor) {
@@ -437,11 +444,30 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
         };
       }
       const waitMs = (wait_seconds ?? ASK_WAIT_DEFAULT_SEC) * 1000;
+      // ★기다리는 동안 연결을 조용히 두지 않는다★ — 조용하면 Cloudflare 가 30초에 끊는다.
+      //   클라이언트가 progressToken 을 줬을 때만 보낼 수 있다(MCP 규약). 없으면 그냥 안 보낸다.
+      const meta = (extra as { _meta?: { progressToken?: string | number } } | undefined)?._meta;
+      const send = (extra as { sendNotification?: (n: unknown) => Promise<void> } | undefined)?.sendNotification;
+      const token = meta?.progressToken;
+      const onWait =
+        token !== undefined && send
+          ? async (elapsedMs: number) => {
+              await send({
+                method: "notifications/progress",
+                params: {
+                  progressToken: token,
+                  progress: Math.round(elapsedMs / 1000),
+                  total: Math.round(waitMs / 1000),
+                  message: `${to} 가 답을 준비하는 중 (${Math.round(elapsedMs / 1000)}초)`,
+                },
+              });
+            }
+          : undefined;
       const r = await askTeammate(
         db,
         { baseUrl: busBaseUrl() },
         { from: actor, to, body: question, client: clientName() },
-        { waitMs, pollMs: 1500 }, // 디스패처 폴링과 같은 간격 — 더 자주 봐도 새 사실이 생기지 않는다
+        { waitMs, pollMs: 1500, onWait }, // 디스패처 폴링과 같은 간격 — 더 자주 봐도 새 사실이 생기지 않는다
       );
       appendAudit(db, actor, "mcp.ask_teammate", to, {
         request_id: r.requestId, thread_id: r.roomId, status: r.status, waited_ms: r.waitedMs,

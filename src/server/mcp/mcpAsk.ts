@@ -233,6 +233,13 @@ export interface AskOptions {
   pollMs: number;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
+  /**
+   * 기다리는 동안 매 폴링마다 불린다. ★연결을 조용히 두지 않기 위한 것★ —
+   * 조용한 연결은 Cloudflare 가 30초에 끊는다(2026-08-06 실측). 여기서 진행 알림을 보내
+   * 바이트를 흘리면 연결이 살아 있고, 부수적으로 사용자 화면에 "준비 중" 이 보인다.
+   * ★알림 실패가 기다림을 깨지 않는다★ — 던져도 삼킨다(알림은 부가 기능이다).
+   */
+  onWait?: (elapsedMs: number) => void | Promise<void>;
 }
 
 /**
@@ -269,6 +276,14 @@ export async function askTeammate(
         return { status: "answered", requestId: sent.id, roomId, answer, waitedMs: now() - started };
       }
       if (now() - started >= opts.waitMs) break;
+      // ★알림을 먼저, 그다음 잠깐 잔다★ — 순서를 바꾸면 첫 알림이 pollMs 만큼 늦어진다.
+      if (opts.onWait) {
+        try {
+          await opts.onWait(now() - started);
+        } catch {
+          /* 알림 실패가 기다림을 깨지 않는다 */
+        }
+      }
       await sleep(opts.pollMs);
     }
     return { status: "pending", requestId: sent.id, roomId, waitedMs: now() - started };

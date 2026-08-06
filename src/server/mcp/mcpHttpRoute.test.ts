@@ -240,3 +240,76 @@ test("★리드도 추가 제한(ALLOWED_AGENTS)을 우회하지 못한다★ �
     else process.env.B3OS_MCP_ALLOWED_AGENTS = prev;
   }
 });
+
+// ── ★SSE 응답이 실제로 본문을 낸다★ (2026-08-06) ──
+//
+// 왜 이 시험이 필요한가: JSON 모드 → SSE 모드로 바꿨을 때 ★기존 시험 73개가 전부 통과했는데
+// 본문이 빈 문자열★ 이었다. 정리 코드(finally)가 ★살아 있는 스트림을 즉시 닫아버렸다.★
+// JSON 모드에서는 응답이 이미 완성돼 있어 같은 코드가 멀쩡했다 — ★모드를 바꾸며 드러났다.★
+// ★상태코드만 보는 시험은 이걸 못 잡는다.★ 본문을 읽어야 잡힌다.
+
+test("★SSE 응답에 본문이 실제로 들어 있다★ — 상태코드만 보면 못 잡는다", async () => {
+  const db = freshDb();
+  const app = buildMcpHttpApp(db, { authConfig: CFG, authenticate: async () => allow("demis", "write") });
+  const res = await app.request(post(INIT));
+  expect(res.status).toBe(200);
+  expect(res.headers.get("content-type")).toContain("text/event-stream");
+  const body = await res.text();
+  expect(body.length).toBeGreaterThan(0); // ★빈 본문이 이 시험의 존재 이유다★
+  expect(body).toContain("event: message");
+  expect(body).toContain("b3os-mcp"); // 실제 응답 내용까지 도달했는가
+});
+
+test("★대조군★ — 도구 목록도 본문이 나온다(초기화만 되는 게 아님)", async () => {
+  const db = freshDb();
+  const app = buildMcpHttpApp(db, { authConfig: CFG, authenticate: async () => allow("demis", "write") });
+  const res = await app.request(post({ jsonrpc: "2.0", id: 2, method: "tools/list" }));
+  const body = await res.text();
+  expect(body).toContain("b3os_ask_teammate");
+});
+
+// ── ★클라이언트가 끊었을 때도 정리가 돈다★ (빌 리뷰 2026-08-06) ──
+//
+// 초판은 TransformStream 의 cancel 훅을 썼는데 ★Bun 이 그걸 안 부른다.★ 정상 종료만 돌고
+// ★클라이언트 끊김에는 안 돌았다★ — 그런데 그 순간이 ★CF 가 30초에 자르는 바로 그 경로★ 다.
+// 정리가 필요한 때만 정확히 안 도는 셈이었다. 아래 시험이 그 경로를 본다.
+
+test("★첫 조각만 읽고 끊어도 정리가 돈다★ — 초판이 놓치던 경로", async () => {
+  const db = freshDb();
+  let cleaned = 0;
+  const app = buildMcpHttpApp(db, {
+    authConfig: CFG,
+    authenticate: async () => allow("demis", "write"),
+    onCleanup: () => { cleaned++; },
+  });
+  const res = await app.request(post(INIT));
+  const reader = res.body!.getReader();
+  await reader.read(); // 첫 조각만 읽고
+  await reader.cancel("test"); // ★끊는다★
+  await Bun.sleep(30);
+  expect(cleaned).toBe(1); // ★0 이면 정리가 안 돈 것 — 초판이 그랬다★
+});
+
+test("★대조군★ — 끝까지 읽어도 정리가 정확히 1회 돈다(두 번 돌지 않는다)", async () => {
+  const db = freshDb();
+  let cleaned = 0;
+  const app = buildMcpHttpApp(db, {
+    authConfig: CFG,
+    authenticate: async () => allow("demis", "write"),
+    onCleanup: () => { cleaned++; },
+  });
+  const res = await app.request(post(INIT));
+  await res.text();
+  await Bun.sleep(30);
+  expect(cleaned).toBe(1);
+});
+
+// ★keepalive 는 여기서 시험하지 않는다 — 시험할 수 있는 대상이 없다★
+//
+// 시도했다가 접었다: initialize 는 ★즉답이라 스트림이 바로 닫힌다★ → keepalive 가 뜰 틈이 없다.
+// keepalive 가 의미를 갖는 건 ★도구 호출이 오래 걸릴 때★ 뿐인데, 그러려면 진짜 버스가 떠 있어야 한다.
+// 여기서 가짜 상류를 만들어 재면 ★내가 만든 복사본을 내가 검사하는 것★ 이 된다(오늘 두 번 당한 함정).
+//
+// → ★keepalive 는 라이브 실험에서 잰다.★ 그게 원래 목적이기도 하다:
+//   keepalive 가 있어야 실험 결과가 "가설이 틀렸다" 인지 "클라이언트가 progressToken 을 안 줬다" 인지
+//   구분된다(빌). 그 구분이 필요한 곳이 라이브다.
