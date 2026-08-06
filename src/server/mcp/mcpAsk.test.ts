@@ -2,7 +2,7 @@
 import { test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
-import { RESERVED_SENDERS } from "../../shared/envelopeSchema"; // ★진짜 코드의 목록을 그대로 쓴다★
+import { RESERVED_AGENT_IDS as RESERVED_SENDERS } from "../../shared/envelopeSchema"; // ★진짜 코드의 목록을 그대로 쓴다★
 import {
   roomIdFor,
   findAnswer,
