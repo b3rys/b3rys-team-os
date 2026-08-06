@@ -41,6 +41,14 @@ export interface McpHttpDeps {
   authConfig?: McpAuthConfig;
   /** 테스트에서 인증을 대체할 때 사용. */
   authenticate?: typeof authenticateMcpRequest;
+  /**
+   * ★시험 전용 관측 지점★ — 정리(transport·server close)가 실제로 돌았는지 볼 방법이 없어서 둔다.
+   * 클라이언트가 스트림을 끊는 경로는 ★밖에서 관측할 수 없다★(응답을 이미 버린 뒤다).
+   * 운영에서는 지정하지 않는다.
+   */
+  onCleanup?: () => void;
+  /** keepalive 간격(ms). 시험에서 짧게 줄여 확인한다. 기본 10초. */
+  keepaliveMs?: number;
 }
 
 /**
@@ -85,9 +93,13 @@ export function buildMcpHttpApp(db: Database, deps: McpHttpDeps = {}): Hono {
       enableJsonResponse: false,
     });
     // 인스턴스를 남기지 않는다(누수 시 다음 요청이 남의 신원을 쓸 위험).
+    let finished = false;
     const cleanup = async () => {
+      if (finished) return; // 두 번 돌지 않는다
+      finished = true;
       await transport.close().catch(() => {});
       await server.close().catch(() => {});
+      deps.onCleanup?.();
     };
     let res: Response;
     try {
@@ -105,13 +117,48 @@ export function buildMcpHttpApp(db: Database, deps: McpHttpDeps = {}): Hono {
       await cleanup();
       return res;
     }
-    const piped = res.body.pipeThrough(
-      new TransformStream({
-        flush: cleanup, // 스트림 정상 종료
-        cancel: cleanup, // 클라이언트가 끊음
-      } as Transformer),
-    );
-    return new Response(piped, { status: res.status, headers: res.headers });
+    // ★TransformStream 의 cancel 훅은 쓰지 않는다★ (빌 실측 2026-08-06, bun 1.3.14):
+    //   최신 스펙 추가분이라 ★Bun 이 안 부른다.★ 정상 종료(flush)만 돌고 ★클라이언트 끊김에는 안 돈다★ —
+    //   그런데 끊기는 그 순간이 ★CF 가 30초에 자르는 바로 그 경로★ 다. 정리가 필요한 때만 정확히 안 돈다.
+    //   (`as Transformer` 캐스팅이 필요했던 것 자체가 신호였다 — 타입에 없는 훅이었다.)
+    //   → ReadableStream 으로 직접 감싼다. 이쪽 cancel 은 Bun 이 부른다.
+    //
+    // ★그리고 여기서 keepalive 를 흘린다★: SDK 에는 자체 keepalive 가 없다(writePrimingEvent 는
+    //   eventStore + 프로토콜 2025-11-25 조건부라 우리 stateless 경로에는 안 온다).
+    //   그게 없으면 이 기능은 ★"클라이언트가 progressToken 을 준다" 에 전적으로 걸린다.★ 안 주면
+    //   90초 내내 조용해 CF 가 자르고 ★고치기 전과 똑같아진다.★ 주석 줄(`: …`)은 SSE 규약상
+    //   클라이언트가 무시하지만 ★바이트는 흐른다★ — 연결이 조용하지 않다.
+    const keepaliveMs = deps.keepaliveMs ?? 10_000;
+    const upstream = res.body.getReader();
+    let ka: ReturnType<typeof setInterval> | null = null;
+    const wrapped = new ReadableStream<Uint8Array>({
+      start(ctrl) {
+        ka = setInterval(() => {
+          try {
+            ctrl.enqueue(new TextEncoder().encode(": keepalive\n\n"));
+          } catch {
+            /* 이미 닫힌 뒤 — 무시 */
+          }
+        }, keepaliveMs);
+      },
+      async pull(ctrl) {
+        const { done, value } = await upstream.read();
+        if (done) {
+          if (ka) clearInterval(ka);
+          ctrl.close();
+          await cleanup();
+          return;
+        }
+        if (value) ctrl.enqueue(value);
+      },
+      async cancel(reason) {
+        // ★클라이언트가 끊었다★ — #280 초판이 놓치던 자리.
+        if (ka) clearInterval(ka);
+        await upstream.cancel(reason).catch(() => {});
+        await cleanup();
+      },
+    });
+    return new Response(wrapped, { status: res.status, headers: res.headers });
   });
 
   return app;
