@@ -7,7 +7,14 @@ import { test, expect } from "bun:test";
 // ── ① 구조: MCP 경로에 동기 호출이 남아 있으면 잡는다 ──
 // 다시 들어오면 이 시험이 깨진다. 숫자는 안 드러나도 이건 드러난다.
 
-const MCP_FILES = ["b3osMcpServer.ts", "mcpHttpRoute.ts", "mcpAuth.ts"];
+// ★목록을 손으로 들지 않는다★ (리뷰 P1, bill) — 폴더를 읽는다.
+// 손으로 들면 새 MCP 파일이 검사에서 빠지고, ★빠진 순간엔 아무 소리도 안 난다.★
+// (#274 의 WRITE_TOOLS 와 같은 계열의 실수를 반복했다. 목록은 언젠가 갈라진다.)
+async function mcpSourceFiles(): Promise<string[]> {
+  const dir = new URL("./", import.meta.url).pathname;
+  const names = [...new Bun.Glob("*.ts").scanSync(dir)];
+  return names.filter((n) => !n.endsWith(".test.ts"));
+}
 // ★자식 프로세스 계열만 금지한다★ (리뷰, bill).
 // 본질은 "동기" 가 아니라 ★끝을 모르는 일을 주 스레드에서 하는 것★ 이다.
 // readFileSync 같은 건 작은 로컬 파일이면 마이크로초다 — 설정 한 줄 읽는 것까지 막으면 정당한 코드가 걸린다.
@@ -15,8 +22,10 @@ const MCP_FILES = ["b3osMcpServer.ts", "mcpHttpRoute.ts", "mcpAuth.ts"];
 const BLOCKING = ["spawnSync", "execSync", "execFileSync"];
 
 test("★MCP 경로에 주 스레드를 붙드는 호출이 없다★ — 하나라도 들어오면 깨진다", async () => {
+  const files = await mcpSourceFiles();
+  expect(files.length).toBeGreaterThan(2); // 폴더를 못 읽어 빈 목록이면 '통과' 가 거짓이 된다
   const found: string[] = [];
-  for (const f of MCP_FILES) {
+  for (const f of files) {
     const src = await Bun.file(new URL(`./${f}`, import.meta.url)).text();
     for (const line of src.split("\n")) {
       if (line.trimStart().startsWith("//") || line.trimStart().startsWith("*")) continue; // 주석은 뺀다
