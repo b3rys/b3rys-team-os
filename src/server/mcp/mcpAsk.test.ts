@@ -251,9 +251,10 @@ test("★정상★ 접수로 끝난 뒤 온 답은 민다 — 어느 질문의 �
   reply(db, { id: "a1", room: "mcp-gd-bill", from: "bill", body: "결론부터 — 3번 파일이…", inReplyTo: r.requestId });
   const push = lateAnswerPush(db, { id: "a1", from_agent_id: "bill", in_reply_to: r.requestId, body: "결론부터 — 3번 파일이…" });
   expect(push).not.toBeNull();
-  expect(push!.lead).toBe("gd");
-  expect(push!.text).toContain("PR 전체 리뷰해줘"); // 원 질문
-  expect(push!.text).toContain("3번 파일"); // 답 본문
+  if (!push || "skipped" in push) throw new Error("밀어야 하는데 안 민다");
+  expect(push.lead).toBe("gd");
+  expect(push.text).toContain("PR 전체 리뷰해줘"); // 원 질문
+  expect(push.text).toContain("3번 파일"); // 답 본문
 });
 
 test("★기다리는 호출이 있으면 밀지 않는다★ — 같은 답이 두 번 가면 안 된다", async () => {
@@ -373,4 +374,28 @@ test("★대조군★ — 신원이 있으면 그 거부가 아니라 조회로 
   })._registeredTools;
   const res = await tools.b3os_fetch_answer!.handler({ request_id: "q1" }, {});
   expect(res.structuredContent?.error).toBe("unknown_request"); // 신원 거부가 아니다
+});
+
+// ── 늦은 답을 ★누구에게★ 미는가 (리뷰 P1 2회차) ──
+
+test("★리드가 아닌 사람이 물은 질문의 늦은 답은 팀 리드에게 안 간다★", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  // hermes 가 MCP 로 bill 에게 물었다 (리드가 아니다)
+  const r = await askTeammate(db, bus.deps, { from: "hermes", to: "bill", body: "질문" }, nowait);
+  reply(db, { id: "a1", room: r.roomId, from: "bill", body: "답", inReplyTo: r.requestId });
+  const late = lateAnswerPush(db, { id: "a1", from_agent_id: "bill", in_reply_to: r.requestId, body: "답" });
+  expect(late).not.toBeNull();
+  expect(late && "skipped" in late).toBe(true); // 밀지 않는다 — 대신 기록으로 남긴다
+  if (late && "skipped" in late) expect(late.asker).toBe("hermes");
+});
+
+test("★대조군★ — 리드가 물은 질문의 늦은 답은 민다(위 시험이 전부 막는 게 아님)", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  const r = await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "질문" }, nowait);
+  reply(db, { id: "a1", room: r.roomId, from: "bill", body: "답", inReplyTo: r.requestId });
+  const late = lateAnswerPush(db, { id: "a1", from_agent_id: "bill", in_reply_to: r.requestId, body: "답" });
+  expect(late && "skipped" in late).toBe(false);
+  if (late && !("skipped" in late)) expect(late.lead).toBe("gd");
 });

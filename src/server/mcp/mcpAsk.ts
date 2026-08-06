@@ -9,6 +9,7 @@
 //  ③ ★번호 없는 답은 대기 중인 호출에 절대 붙이지 않는다★ — 그 추측이 사고의 원인이다(빌 MUST).
 //  ④ 시간 초과는 ★기다림만★ 끝낸다. 요청 기록은 살아 있고 늦은 답은 원 번호에 귀속된다(코덱스).
 import type { Database } from "bun:sqlite";
+import { leadActorId } from "../lib/opAuth"; // ★이름만 재사용★ — 신뢰 규칙(루프백=리드)은 쓰지 않는다
 
 /** MCP 로 들어온 질문임을 표시하는 값. 커서·클로드 코드 등 ★클라이언트 종류와 무관하게 'mcp'★. */
 export const MCP_REPLY_ROUTE = "mcp";
@@ -154,10 +155,15 @@ export function isAwaited(requestId: string): boolean {
  * 이 메시지가 ★MCP 질문에 대한 답★ 이고 ★기다리는 호출이 없어서 밀어야 하는가★.
  * 아니면 null. (순수 판정 — 실제 발송은 호출부가 한다.)
  */
+export type LateAnswer =
+  | { requestId: string; question: string; lead: string; text: string }
+  /** 밀 곳을 모르는 경우. ★조용히 사라지지 않게★ 호출부가 감사기록을 남긴다. */
+  | { skipped: "non_lead"; requestId: string; asker: string };
+
 export function lateAnswerPush(
   db: Database,
   stored: { id: string; from_agent_id: string; in_reply_to?: string | null; body: string },
-): { requestId: string; question: string; lead: string; text: string } | null {
+): LateAnswer | null {
   if (!stored.in_reply_to) return null; // 번호가 없으면 답이 아니다 — 여기서도 추측하지 않는다
   const q = db
     .prepare(`SELECT from_agent_id, to_agent_id, body, meta_json FROM message WHERE id = ?`)
@@ -174,6 +180,15 @@ export function lateAnswerPush(
   if (route !== MCP_REPLY_ROUTE) return null; // MCP 로 들어온 질문이 아니다
   if (q.to_agent_id !== stored.from_agent_id) return null; // 물어본 상대가 답한 게 아니다
   if (isAwaited(stored.in_reply_to)) return null; // ★기다리는 호출이 있다 — 그쪽이 띄운다★
+  // ★물어본 사람에게 간다 — 아니면 안 간다★ (리뷰 P1 2회차, bill).
+  //   미는 곳이 팀 리드 DM 하나뿐이라, 리드가 아닌 신원이 물으면
+  //   ★물어본 사람은 답을 못 받고 팀 리드가 남의 대화를 받는다.★
+  //   오늘은 매핑에 리드뿐이라 안 터진다 — 방금 닫은 P1 과 ★같은 모양★ 이다.
+  //   지금은 fail-closed 로 둔다: 리드가 아닌 신원이 없으니 "그 사람 채널로 보내기" 는
+  //   ★검증할 대상이 없다.★ 검증 못 하는 경로를 미리 짓지 않는다.
+  if (q.from_agent_id !== leadActorId(db)) {
+    return { skipped: "non_lead", requestId: stored.in_reply_to, asker: q.from_agent_id };
+  }
   const clip = (s: string) => (s.length > 60 ? s.slice(0, 60) + "…" : s);
   return {
     requestId: stored.in_reply_to,

@@ -449,7 +449,16 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
           //     · 물어본 그 사람이 답한 것이어야 한다
           //     · ★기다리는 호출이 있으면 밀지 않는다★ — 그쪽 화면에 뜨므로 두 번 가면 안 된다
           const late = lateAnswerPush(deps.db, stored);
-          if (late) {
+          if (late && "skipped" in late) {
+            // ★리드가 아닌 사람이 물은 질문의 늦은 답은 팀 리드에게 보내지 않는다★ (리뷰 P1 2회차, bill).
+            //   미는 곳이 리드 DM 하나뿐이라 보내면 ★물어본 사람은 못 받고 리드가 남의 대화를 받는다.★
+            //   fail-closed 로 두되 ★기록은 남긴다★ — 회수(b3os_fetch_answer)는 여전히 가능하다.
+            appendAuditFile(env.from_agent_id, "mcp_late_answer_skipped", stored.id, {
+              request_id: late.requestId,
+              asker: late.asker,
+              reason: "asker_is_not_lead",
+            });
+          } else if (late) {
             const dm = ownerDmChatId(deps.db);
             if (dm) {
               dest = { chatId: dm, kind: "telegram_dm" };
