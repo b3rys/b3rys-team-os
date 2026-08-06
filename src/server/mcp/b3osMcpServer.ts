@@ -15,6 +15,7 @@ import { inboxFor } from "../db/inboxQueries";
 import { listTasks, createTask, updateTask } from "../db/taskQueries";
 import { recallDmMessages } from "../db/dmCapture";
 import { classifyAll } from "../lib/health";
+import { leadActorId } from "../lib/opAuth"; // ★이름만 재사용★ — 신뢰 규칙(루프백=리드)은 쓰지 않는다
 
 export const MCP_NAME = "b3os-mcp";
 export const MCP_VERSION = "0.0.3-m2";
@@ -61,7 +62,16 @@ export function buildSendArgs(input: SendMessageInput, actor: string): string[] 
 function validateActor(db: Database, declared: string | undefined | null): string | null {
   const id = declared?.trim();
   if (!id) return null; // non-empty
-  if (!listAgents(db).some((a) => a.id === id)) return null; // 레지스트리 등록 agent
+  // ★팀 리드는 팀원 명부(agent 테이블)에 없지만 기록 주체로는 이미 쓰인다★ —
+  // 대시보드가 그렇게 하고 있고 audit_event 에 actor='gd' 행이 실재한다(2026-08-06 실측 42건).
+  // 리드 id 의 단일 출처는 leadActorId(DB setting → env LEAD_ACTOR_ID → 기본 'gd') 이므로 그것만 재사용한다.
+  // → 리드를 agent 로 등록하지 않는다. 등록하면 깨우기·헬스·브로드캐스트 대상이 되어 사람이 팀원처럼 다뤄진다.
+  //
+  // ※ ★재사용하는 것은 '이름' 뿐이다.★ opAuth 의 신뢰 규칙("루프백이면 리드")은 쓰지 않는다 —
+  //   그건 같은 머신 전제라, 밖에서 오는 MCP 경로에 쓰면 서버에 닿은 모든 요청이 리드가 된다.
+  //   여기 도달했다는 건 이미 Cloudflare Access JWT 서명 검증 + 주체→신원 매핑을 통과했다는 뜻이다.
+  const isLeadId = id === leadActorId(db);
+  if (!isLeadId && !listAgents(db).some((a) => a.id === id)) return null; // 리드 또는 등록 agent
   const allow = process.env.B3OS_MCP_ALLOWED_AGENTS?.trim(); // 선택 게이트: 설정 시에만 추가 제한
   if (allow && !allow.split(",").map((s) => s.trim()).includes(id)) return null;
   return id;
