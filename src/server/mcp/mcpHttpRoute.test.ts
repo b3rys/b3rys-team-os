@@ -240,3 +240,30 @@ test("★리드도 추가 제한(ALLOWED_AGENTS)을 우회하지 못한다★ �
     else process.env.B3OS_MCP_ALLOWED_AGENTS = prev;
   }
 });
+
+// ── ★SSE 응답이 실제로 본문을 낸다★ (2026-08-06) ──
+//
+// 왜 이 시험이 필요한가: JSON 모드 → SSE 모드로 바꿨을 때 ★기존 시험 73개가 전부 통과했는데
+// 본문이 빈 문자열★ 이었다. 정리 코드(finally)가 ★살아 있는 스트림을 즉시 닫아버렸다.★
+// JSON 모드에서는 응답이 이미 완성돼 있어 같은 코드가 멀쩡했다 — ★모드를 바꾸며 드러났다.★
+// ★상태코드만 보는 시험은 이걸 못 잡는다.★ 본문을 읽어야 잡힌다.
+
+test("★SSE 응답에 본문이 실제로 들어 있다★ — 상태코드만 보면 못 잡는다", async () => {
+  const db = freshDb();
+  const app = buildMcpHttpApp(db, { authConfig: CFG, authenticate: async () => allow("demis", "write") });
+  const res = await app.request(post(INIT));
+  expect(res.status).toBe(200);
+  expect(res.headers.get("content-type")).toContain("text/event-stream");
+  const body = await res.text();
+  expect(body.length).toBeGreaterThan(0); // ★빈 본문이 이 시험의 존재 이유다★
+  expect(body).toContain("event: message");
+  expect(body).toContain("b3os-mcp"); // 실제 응답 내용까지 도달했는가
+});
+
+test("★대조군★ — 도구 목록도 본문이 나온다(초기화만 되는 게 아님)", async () => {
+  const db = freshDb();
+  const app = buildMcpHttpApp(db, { authConfig: CFG, authenticate: async () => allow("demis", "write") });
+  const res = await app.request(post({ jsonrpc: "2.0", id: 2, method: "tools/list" }));
+  const body = await res.text();
+  expect(body).toContain("b3os_ask_teammate");
+});

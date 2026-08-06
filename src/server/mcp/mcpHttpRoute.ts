@@ -77,16 +77,41 @@ export function buildMcpHttpApp(db: Database, deps: McpHttpDeps = {}): Hono {
     const server = buildMcpServer(db, actor, principal.scope);
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined, // stateless — 세션 저장 없음
-      enableJsonResponse: true,
+      // ★JSON 한 방 응답을 쓰지 않는다★ (2026-08-06 라이브): 그 모드는 답이 다 될 때까지
+      //   ★한 바이트도 안 보낸다.★ 그동안 연결이 조용하니 ★Cloudflare 가 30초에 끊었다.★
+      //   실측: 서버는 60초를 정상 완료했는데(waited_ms=60141) 클라이언트는 30.4초에 에러를 봤다.
+      //   → SSE 로 두면 응답이 ★즉시 열리고★ 진행 알림이 흐른다. 조용한 연결이 아니게 된다.
+      //   (MCP 규약이 원래 이 용도로 notifications/progress 를 갖고 있다.)
+      enableJsonResponse: false,
     });
-    try {
-      await server.connect(transport);
-      return await transport.handleRequest(c.req.raw);
-    } finally {
-      // 인스턴스를 남기지 않는다(누수 시 다음 요청이 남의 신원을 쓸 위험).
+    // 인스턴스를 남기지 않는다(누수 시 다음 요청이 남의 신원을 쓸 위험).
+    const cleanup = async () => {
       await transport.close().catch(() => {});
       await server.close().catch(() => {});
+    };
+    let res: Response;
+    try {
+      await server.connect(transport);
+      res = await transport.handleRequest(c.req.raw);
+    } catch (e) {
+      await cleanup();
+      throw e;
     }
+    // ★SSE 는 응답이 '살아 있는 스트림' 이다 — 여기서 바로 닫으면 한 바이트도 안 나간다.★
+    //   (실측 2026-08-06: finally 로 즉시 닫았더니 content-type 은 text/event-stream 인데 본문이 빈 문자열.
+    //    JSON 모드일 땐 응답이 이미 완성돼 있어서 같은 코드가 멀쩡했다 — 모드를 바꾸며 드러났다.)
+    //   → ★스트림이 끝날 때 정리한다.★ 본문이 없으면(빈 응답) 지금 정리해도 된다.
+    if (!res.body) {
+      await cleanup();
+      return res;
+    }
+    const piped = res.body.pipeThrough(
+      new TransformStream({
+        flush: cleanup, // 스트림 정상 종료
+        cancel: cleanup, // 클라이언트가 끊음
+      } as Transformer),
+    );
+    return new Response(piped, { status: res.status, headers: res.headers });
   });
 
   return app;
