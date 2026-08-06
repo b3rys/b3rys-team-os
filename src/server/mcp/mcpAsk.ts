@@ -136,6 +136,54 @@ export async function postQuestion(
   return json.message;
 }
 
+/**
+ * ★지금 이 순간 어떤 호출이 답을 기다리고 있는 질문들★ (프로세스 안 메모리).
+ *
+ * 늦은 답 밀어주기가 이걸 본다 — 기다리는 호출이 ★있으면★ 그 호출이 화면에 띄우므로 밀지 않고,
+ * ★없으면★(이미 접수로 끝났으면) 평소 채널로 민다. 둘 다 하면 같은 답이 두 번 간다.
+ *
+ * 경계에서의 선택: 기다림을 끝내기 ★전에★ 목록에서 뺀다. 그래서 아슬아슬하게 늦은 답은
+ * ★밀린다★(잃는 쪽이 아니라 겹치는 쪽으로 기운다). 잃는 것보다 두 번 보는 게 낫다.
+ */
+const awaiting = new Set<string>();
+export function isAwaited(requestId: string): boolean {
+  return awaiting.has(requestId);
+}
+
+/**
+ * 이 메시지가 ★MCP 질문에 대한 답★ 이고 ★기다리는 호출이 없어서 밀어야 하는가★.
+ * 아니면 null. (순수 판정 — 실제 발송은 호출부가 한다.)
+ */
+export function lateAnswerPush(
+  db: Database,
+  stored: { id: string; from_agent_id: string; in_reply_to?: string | null; body: string },
+): { requestId: string; question: string; lead: string; text: string } | null {
+  if (!stored.in_reply_to) return null; // 번호가 없으면 답이 아니다 — 여기서도 추측하지 않는다
+  const q = db
+    .prepare(`SELECT from_agent_id, to_agent_id, body, meta_json FROM message WHERE id = ?`)
+    .get(stored.in_reply_to) as
+    | { from_agent_id: string; to_agent_id: string; body: string; meta_json: string | null }
+    | undefined;
+  if (!q || !q.meta_json) return null;
+  let route: unknown;
+  try {
+    route = (JSON.parse(q.meta_json) as { reply_route?: unknown }).reply_route;
+  } catch {
+    return null;
+  }
+  if (route !== MCP_REPLY_ROUTE) return null; // MCP 로 들어온 질문이 아니다
+  if (q.to_agent_id !== stored.from_agent_id) return null; // 물어본 상대가 답한 게 아니다
+  if (isAwaited(stored.in_reply_to)) return null; // ★기다리는 호출이 있다 — 그쪽이 띄운다★
+  const clip = (s: string) => (s.length > 60 ? s.slice(0, 60) + "…" : s);
+  return {
+    requestId: stored.in_reply_to,
+    question: q.body,
+    lead: q.from_agent_id,
+    // 어느 질문의 답인지 같이 보여준다 — 번호만으로는 사람이 못 알아본다
+    text: `[MCP 답 · ${stored.from_agent_id}]\n(질문: ${clip(q.body)})\n\n${stored.body}`,
+  };
+}
+
 export interface AskOptions {
   waitMs: number;
   pollMs: number;
@@ -161,16 +209,22 @@ export async function askTeammate(
   const now = opts.now ?? (() => Date.now());
   const started = now();
 
-  // 넣자마자 한 번 본다 — 아주 빠른 답(캐시된 상태 질의 등)이 첫 대기를 통째로 기다리지 않게.
-  for (;;) {
-    const answer = findAnswer(db, roomId, sent.id, env.to);
-    if (answer) {
-      return { status: "answered", requestId: sent.id, roomId, answer, waitedMs: now() - started };
+  awaiting.add(sent.id);
+  try {
+    // 넣자마자 한 번 본다 — 아주 빠른 답(캐시된 상태 질의 등)이 첫 대기를 통째로 기다리지 않게.
+    for (;;) {
+      const answer = findAnswer(db, roomId, sent.id, env.to);
+      if (answer) {
+        return { status: "answered", requestId: sent.id, roomId, answer, waitedMs: now() - started };
+      }
+      if (now() - started >= opts.waitMs) break;
+      await sleep(opts.pollMs);
     }
-    if (now() - started >= opts.waitMs) break;
-    await sleep(opts.pollMs);
+    return { status: "pending", requestId: sent.id, roomId, waitedMs: now() - started };
+  } finally {
+    // ★예외로 빠져나가도 반드시 지운다★ — 남으면 그 질문의 늦은 답이 영원히 안 밀린다(조용한 손실).
+    awaiting.delete(sent.id);
   }
-  return { status: "pending", requestId: sent.id, roomId, waitedMs: now() - started };
 }
 
 /**
@@ -180,12 +234,20 @@ export async function askTeammate(
 export function fetchAnswer(
   db: Database,
   requestId: string,
+  actor: string,
 ): { found: true; answer: NonNullable<AskResult["answer"]>; roomId: string }
-  | { found: false; roomId: string | null; to: string | null; unlabeled: Array<{ id: string; body: string; at: string }> } {
+  | { found: false; denied?: true; roomId: string | null; to: string | null; unlabeled: Array<{ id: string; body: string; at: string }> } {
   const q = db
-    .prepare(`SELECT thread_id, to_agent_id FROM message WHERE id = ?`)
-    .get(requestId) as { thread_id: string; to_agent_id: string } | undefined;
+    .prepare(`SELECT thread_id, to_agent_id, from_agent_id FROM message WHERE id = ?`)
+    .get(requestId) as { thread_id: string; to_agent_id: string; from_agent_id: string } | undefined;
   if (!q) return { found: false, roomId: null, to: null, unlabeled: [] };
+  // ★번호를 안다고 남의 답을 볼 수는 없다★ (리뷰 P1, bill).
+  //   ask 는 첫 줄에서 신원을 막는데 fetch 만 안 막으면, ★번호만 알면 남의 대화가 열린다.★
+  //   오늘은 매핑에 리드 하나뿐이라 "남" 이 없어서 안 터진다 — ★그래서 더 위험하다.★
+  //   read 신원을 하나 추가하는 순간 조용히 열린다. 지금 닫는다.
+  if (q.from_agent_id !== actor) {
+    return { found: false, denied: true, roomId: null, to: null, unlabeled: [] };
+  }
   const answer = findAnswer(db, q.thread_id, requestId, q.to_agent_id);
   if (answer) return { found: true, answer, roomId: q.thread_id };
   return {

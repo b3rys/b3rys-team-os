@@ -21,6 +21,7 @@ import { appendAuditFile } from "../lib/auditFile";
 import { maybeCreatePendingFollowup, createSelfFollowup } from "../bus/followupTracker";
 import { broadcastRecipientIds, isTeamOfficialMember } from "../lib/agentMembership";
 import { ambientAgents } from "../lib/registry";
+import { lateAnswerPush } from "../mcp/mcpAsk";
 
 import { MAX_HOPS_DEFAULT } from "../../shared/envelopeSchema";
 import { loadAgentCreds } from "../lib/slack";
@@ -396,6 +397,9 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         //   에러도 경고도 없다. → ★같은 함수를 쓴다.★
         const groupId = getCaptureGroupId() ?? "";
         let dest: { chatId: string; kind: "telegram_group" | "telegram_dm" } | null = null;
+        // ★기본은 stored.body 다★ ("저장된 것 = 보낸 것"). MCP 늦은 답만 원 질문을 앞에 덧붙인다 —
+        //   번호만으로는 사람이 "무슨 질문의 답인지" 를 못 알아본다.
+        let relayText: string | null = null;
         if (mode === "direct_to_gd") {
           // ★위임에 direct_to_gd 오마킹은 여기 오기 전에 거부된다★ (프로토콜 에러, 위 조기검증 —
           //   direct_to_gd + in_reply_to 없음 → 400). 그래서 여기 오는 direct_to_gd 는 ★정상 보고★(in_reply_to 있음)뿐.
@@ -437,6 +441,27 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
             );
           }
           dest = { chatId: groupId, kind: "telegram_group" };
+        } else {
+          // ★MCP 로 물은 질문에 늦게 온 답★ — 호출은 이미 끝났으니 팀 리드의 평소 채널로 민다.
+          //   판정은 mcpAsk.lateAnswerPush 한 곳에서만 한다(여기서 조건을 다시 쓰면 언젠가 갈린다):
+          //     · 번호(in_reply_to)가 없으면 아니다 — 여기서도 추측하지 않는다
+          //     · 원 질문의 meta.reply_route 가 'mcp' 여야 한다 — 평범한 팀 대화는 해당 없음
+          //     · 물어본 그 사람이 답한 것이어야 한다
+          //     · ★기다리는 호출이 있으면 밀지 않는다★ — 그쪽 화면에 뜨므로 두 번 가면 안 된다
+          const late = lateAnswerPush(deps.db, stored);
+          if (late) {
+            const dm = ownerDmChatId(deps.db);
+            if (dm) {
+              dest = { chatId: dm, kind: "telegram_dm" };
+              relayText = late.text;
+            } else {
+              // ★조용히 삼키지 않는다★ — DM 이 설정 안 됐으면 답이 어디에도 안 뜬다(회수는 여전히 가능).
+              appendAuditFile(env.from_agent_id, "mcp_late_answer_undeliverable", stored.id, {
+                request_id: late.requestId,
+                error: "owner_dm_not_configured",
+              });
+            }
+          }
         }
         if (dest) {
           const d = dest;
@@ -458,7 +483,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
           //
           //   ★재시도는 하지 않는다★ (GD 2026-07-14): 실패 → 팀원이 다시 send.sh → 또 실패 → 무한루프.
           //   룰은 "실패하면 재시도하지 말고 팀장님께 1:1 DM 으로 알려라" 다. 1:1 은 서버를 안 거친다.
-          const r = await getChannel("telegram").send({ agent, target: d.chatId, text: stored.body });
+          const r = await getChannel("telegram").send({ agent, target: d.chatId, text: relayText ?? stored.body });
           appendAuditFile(env.from_agent_id, r.ok ? "telegram_relay_sent" : "telegram_relay_failed", stored.id, {
             target: d.chatId,
             kind: d.kind,

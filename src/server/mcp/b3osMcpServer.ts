@@ -480,8 +480,18 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
       inputSchema: { request_id: z.string().min(1).describe("b3os_ask_teammate 가 돌려준 요청 번호") },
     },
     async (args: unknown) => {
+      // ★읽기 도구도 누가 읽는지는 본다★ (리뷰 P1, bill) — 읽기 ≠ 신원 없음.
+      if (!actor) return denyIdentity("답 회수");
       const { request_id } = args as { request_id: string };
-      const got = fetchAnswer(db, request_id);
+      const got = fetchAnswer(db, request_id, actor);
+      if (!got.found && got.denied) {
+        // ★있다/없다를 구분해 알려주지 않는다★ — 그러면 번호를 넣어보며 남의 요청 존재를 알아낼 수 있다.
+        return {
+          content: [{ type: "text", text: `그런 요청 번호가 없습니다: ${request_id}` }],
+          isError: true,
+          structuredContent: { error: "unknown_request", request_id },
+        };
+      }
       if (got.found) {
         return {
           content: [{ type: "text", text: `${got.answer.from}:\n${got.answer.body}` }],

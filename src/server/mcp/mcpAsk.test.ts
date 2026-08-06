@@ -9,6 +9,7 @@ import {
   askTeammate,
   fetchAnswer,
   postQuestion,
+  lateAnswerPush,
   THREAD_ID_MAX,
 } from "./mcpAsk";
 import { buildMcpServer, ASK_WAIT_MAX_SEC, ASK_WAIT_DEFAULT_SEC } from "./b3osMcpServer";
@@ -163,7 +164,7 @@ test("★정상★ 접수로 끝난 뒤 늦게 온 답을 번호로 회수한다
   const r = await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "PR 전체 리뷰" }, nowait);
   expect(r.status).toBe("pending");
   reply(db, { id: "a1", room: "mcp-gd-bill", from: "bill", body: "결론부터 — 3번 파일이…", inReplyTo: r.requestId });
-  const got = fetchAnswer(db, r.requestId);
+  const got = fetchAnswer(db, r.requestId, "gd");
   expect(got.found).toBe(true);
   if (got.found) expect(got.answer.body).toContain("3번 파일");
 });
@@ -194,7 +195,7 @@ test("★번호 없는 답은 대기 중인 질문에 붙지 않는다★ — �
   // 빌이 번호를 안 달고 방에 한 마디 했다 (평범한 발언일 수도 있다)
   reply(db, { id: "u1", room: "mcp-gd-bill", from: "bill", body: "잠깐만요" });
   expect(findAnswer(db, "mcp-gd-bill", r.requestId, "bill")).toBeNull(); // 답으로 안 친다
-  const got = fetchAnswer(db, r.requestId);
+  const got = fetchAnswer(db, r.requestId, "gd");
   expect(got.found).toBe(false);
   if (!got.found) expect(got.unlabeled.map((u) => u.body)).toEqual(["잠깐만요"]); // 버리지도 않는다
 });
@@ -225,7 +226,7 @@ test("다른 방의 같은 번호를 집어오지 않는다", () => {
 
 test("없는 번호로 회수하면 조용히 실패한다 — 아무거나 집어오지 않는다", () => {
   const db = freshDb();
-  const got = fetchAnswer(db, "없는번호");
+  const got = fetchAnswer(db, "없는번호", "gd");
   expect(got.found).toBe(false);
   if (!got.found) expect(got.roomId).toBeNull();
 });
@@ -239,6 +240,65 @@ test("버스가 접수를 거부하면 예외로 드러난다 — 조용히 성�
   await expect(
     postQuestion({ baseUrl: "http://x", fetchImpl }, { from: "gd", to: "bill", body: "질문", roomId: "mcp-gd-bill" }),
   ).rejects.toThrow(/접수 실패/);
+});
+
+// ── 늦은 답 밀어주기 판정 ──
+
+test("★정상★ 접수로 끝난 뒤 온 답은 민다 — 어느 질문의 답인지 같이 보여준다", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  const r = await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "PR 전체 리뷰해줘" }, nowait);
+  reply(db, { id: "a1", room: "mcp-gd-bill", from: "bill", body: "결론부터 — 3번 파일이…", inReplyTo: r.requestId });
+  const push = lateAnswerPush(db, { id: "a1", from_agent_id: "bill", in_reply_to: r.requestId, body: "결론부터 — 3번 파일이…" });
+  expect(push).not.toBeNull();
+  expect(push!.lead).toBe("gd");
+  expect(push!.text).toContain("PR 전체 리뷰해줘"); // 원 질문
+  expect(push!.text).toContain("3번 파일"); // 답 본문
+});
+
+test("★기다리는 호출이 있으면 밀지 않는다★ — 같은 답이 두 번 가면 안 된다", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  let duringWait: ReturnType<typeof lateAnswerPush> = null;
+  await askTeammate(
+    db,
+    bus.deps,
+    { from: "gd", to: "bill", body: "질문" },
+    {
+      waitMs: 200,
+      pollMs: 5,
+      sleep: async () => {
+        // 아직 기다리는 중에 답이 도착한 상황
+        if (duringWait === null) {
+          reply(db, { id: "a1", room: "mcp-gd-bill", from: "bill", body: "답", inReplyTo: "q1" });
+          duringWait = lateAnswerPush(db, { id: "a1", from_agent_id: "bill", in_reply_to: "q1", body: "답" });
+        }
+      },
+    },
+  );
+  expect(duringWait).toBeNull(); // 그 호출이 화면에 띄운다 — 밀지 않는다
+  // ★대조군★ — 기다림이 끝난 지금은 같은 답을 민다
+  expect(lateAnswerPush(db, { id: "a1", from_agent_id: "bill", in_reply_to: "q1", body: "답" })).not.toBeNull();
+});
+
+test("MCP 질문이 아니면 밀지 않는다 — 평범한 팀 대화까지 팀장님께 가면 안 된다", () => {
+  const db = freshDb();
+  reply(db, { id: "n1", room: "mcp-gd-bill", from: "gd", body: "일반 질문" }); // meta 없음
+  reply(db, { id: "n2", room: "mcp-gd-bill", from: "bill", body: "일반 답", inReplyTo: "n1" });
+  expect(lateAnswerPush(db, { id: "n2", from_agent_id: "bill", in_reply_to: "n1", body: "일반 답" })).toBeNull();
+});
+
+test("번호가 없으면 밀지 않는다", () => {
+  const db = freshDb();
+  expect(lateAnswerPush(db, { id: "x", from_agent_id: "bill", in_reply_to: null, body: "아무말" })).toBeNull();
+});
+
+test("물어본 상대가 아닌 사람이 답하면 밀지 않는다", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  const r = await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "질문" }, nowait);
+  reply(db, { id: "c1", room: "mcp-gd-bill", from: "codex", body: "제가 대신", inReplyTo: r.requestId });
+  expect(lateAnswerPush(db, { id: "c1", from_agent_id: "codex", in_reply_to: r.requestId, body: "제가 대신" })).toBeNull();
 });
 
 // ── 권한 ──
@@ -269,4 +329,48 @@ test("번호 없는 발언 조회는 질문 이전 발언을 끌고 오지 않�
   reply(db, { id: "new", room: "mcp-gd-bill", from: "bill", body: "새 발언" });
   const list = findUnlabeled(db, "mcp-gd-bill", "bill", r.requestId);
   expect(list.map((u) => u.body)).toEqual(["새 발언"]);
+});
+
+test("★남의 번호로는 회수되지 않는다★ — 번호를 안다고 남의 대화가 열리면 안 된다", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  const r = await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "질문" }, nowait);
+  reply(db, { id: "a1", room: "mcp-gd-bill", from: "bill", body: "답", inReplyTo: r.requestId });
+  const other = fetchAnswer(db, r.requestId, "hermes"); // 이 질문을 한 사람이 아니다
+  expect(other.found).toBe(false);
+  if (!other.found) expect(other.denied).toBe(true);
+});
+
+test("★대조군★ — 질문한 본인은 같은 번호로 받는다(위 시험이 전부 막는 게 아님)", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  const r = await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "질문" }, nowait);
+  reply(db, { id: "a1", room: "mcp-gd-bill", from: "bill", body: "답", inReplyTo: r.requestId });
+  const mine = fetchAnswer(db, r.requestId, "gd");
+  expect(mine.found).toBe(true);
+});
+
+test("회수는 신원 없는 연결에 열려 있지 않다 — 도구가 신원을 먼저 막는다", () => {
+  const db = freshDb();
+  const tools = (buildMcpServer(db, null, "read") as unknown as { _registeredTools: Record<string, unknown> })._registeredTools ?? {};
+  expect(Object.keys(tools)).toContain("b3os_fetch_answer"); // 등록은 된다(신원 검사는 호출 시점)
+});
+
+test("★신원 없는 연결은 회수 자체가 거부된다★ — 도구를 직접 불러 확인", async () => {
+  const db = freshDb();
+  const tools = (buildMcpServer(db, null, "read") as unknown as {
+    _registeredTools: Record<string, { handler: (a: unknown, e: unknown) => Promise<{ isError?: boolean; structuredContent?: { error?: string } }> }>;
+  })._registeredTools;
+  const res = await tools.b3os_fetch_answer!.handler({ request_id: "q1" }, {});
+  expect(res.isError).toBe(true);
+  expect(res.structuredContent?.error).toBe("identity_required");
+});
+
+test("★대조군★ — 신원이 있으면 그 거부가 아니라 조회로 간다", async () => {
+  const db = freshDb();
+  const tools = (buildMcpServer(db, "gd", "read") as unknown as {
+    _registeredTools: Record<string, { handler: (a: unknown, e: unknown) => Promise<{ structuredContent?: { error?: string } }> }>;
+  })._registeredTools;
+  const res = await tools.b3os_fetch_answer!.handler({ request_id: "q1" }, {});
+  expect(res.structuredContent?.error).toBe("unknown_request"); // 신원 거부가 아니다
 });
