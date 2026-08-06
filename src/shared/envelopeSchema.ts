@@ -101,8 +101,10 @@ export type EnvelopeInbound = z.infer<typeof envelopeInboundSchema>;
  * ★레지스트리 검사를 건너뛰는 예약 발신자★ — 사람이 아닌 주체이거나(system·moderator),
  * 팀원 명부에 일부러 없는 주체(user = 팀 리드)다. `/api/inbox` 가 이 목록으로 판정한다.
  *
- * ★한 곳에서만 정의한다★: 시험용 가짜 입구가 자기 목록을 따로 들면 진짜와 갈리고,
+ * ★사본을 만들지 말고 여기서 파생하라★: 시험용 가짜 입구가 자기 목록을 따로 들면 진짜와 갈리고,
  * 그러면 가짜가 더 관대해져 시험이 통과를 보장하지 못한다(2026-08-06 실사고).
+ * 발신자 판정처럼 ★범위가 다른 곳★ 은 이 집합에서 ★깎아서★ 쓴다(antiPingpong 의 SENDER 파생 참고) —
+ * 새로 적지 않는다. 그래야 "여기가 정본" 이 사실로 남는다.
  */
 export const RESERVED_SENDERS: ReadonlySet<string> = new Set(["user", "system", "moderator", "broadcast"]);
 

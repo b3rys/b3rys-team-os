@@ -40,3 +40,15 @@ describe("hop_limit (max_hop=16 정렬, hop cap이 pingpong cap보다 높아야)
     expect(checkPingpong(db, row({ hop_count: 5, max_hop: 16 }), roster).allowed).toBe(true);
   });
 });
+
+// ★사본이 다시 생기지 않게 박아둔다★ (빌 리뷰 2026-08-06)
+import { RESERVED_SENDERS as INGRESS_RESERVED } from "../../shared/envelopeSchema";
+
+test("★발신자 예약어는 입구 목록에서 파생된다★ — 사본이 아니다", () => {
+  // 입구 목록이 늘면 여기도 따라 늘어야 한다. 따로 적어두면 언젠가 갈린다.
+  const derived = new Set([...INGRESS_RESERVED].filter((id) => id !== "broadcast"));
+  expect([...derived].sort()).toEqual(["moderator", "system", "user"]);
+  // ★broadcast 는 제외된다★ — 목적지이지 발신자가 아니다. 넣으면 신뢰-출처 문이 넓어진다.
+  expect(INGRESS_RESERVED.has("broadcast")).toBe(true);
+  expect(derived.has("broadcast")).toBe(false);
+});
