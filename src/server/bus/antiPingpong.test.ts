@@ -40,3 +40,35 @@ describe("hop_limit (max_hop=16 정렬, hop cap이 pingpong cap보다 높아야)
     expect(checkPingpong(db, row({ hop_count: 5, max_hop: 16 }), roster).allowed).toBe(true);
   });
 });
+
+// ★사본이 다시 생기지 않게 박아둔다★ (빌 리뷰 2026-08-06)
+//
+// ★시험이 필터를 다시 계산하면 안 된다★ — 처음엔 시험 안에서 filter 를 한 번 더 돌렸는데,
+// 그건 ★시험이 자기가 만든 것을 자기가 검사★ 하는 것이라 프로덕션이 바뀌어도 통과했다.
+// 빌이 뮤턴트로 확인했다: filter 를 빼도 4 pass. ★사본을 없애려고 넣은 시험이 그 자체로 사본★ 이었다.
+// → ★프로덕션 값(RESERVED_SENDER_IDS)을 직접 본다.★
+import { RESERVED_AGENT_IDS as INGRESS_RESERVED } from "../../shared/envelopeSchema";
+import { RESERVED_SENDER_IDS } from "./antiPingpong";
+
+// ★목록 내용만 보는 시험은 절반이다★ (GD 지적 2026-08-06): 그건 "명단이 이렇다" 를 고정할 뿐
+//   ★"그래서 실제로 막히나" 는 안 본다.★ 아래 두 시험을 짝으로 둔다 — 내용 + 동작.
+test("★from='broadcast' 는 실제로 차단된다★ — 명단이 아니라 동작으로 확인", () => {
+  const db = new Database(":memory:");
+  const v = checkPingpong(db, row({ from_agent_id: "broadcast", created_by: null }), roster);
+  expect(v.allowed).toBe(false);
+  expect(v.reason).toContain("unknown_sender");
+});
+
+test("★대조군★ — 진짜 예약 발신자(user)는 통과한다(위 시험이 전부 막는 게 아님)", () => {
+  const db = new Database(":memory:");
+  expect(checkPingpong(db, row({ from_agent_id: "user", source: "user" }), roster).allowed).toBe(true);
+});
+
+test("★발신자 예약어는 입구 목록에서 파생된다★ — 사본이 아니다", () => {
+  // 프로덕션 값을 그대로 본다. 파생을 지우면 broadcast 가 섞여 들어와 이 시험이 빨간불이 된다.
+  expect([...RESERVED_SENDER_IDS].sort()).toEqual(["moderator", "system", "user"]);
+  // ★broadcast 는 제외된다★ — 목적지이지 발신자가 아니다. 넣으면 신뢰-출처 문이 넓어진다.
+  expect(RESERVED_SENDER_IDS.has("broadcast")).toBe(false);
+  // 입구 목록에는 있다 = 두 목록의 범위가 다르다는 사실 자체를 고정한다.
+  expect(INGRESS_RESERVED.has("broadcast")).toBe(true);
+});

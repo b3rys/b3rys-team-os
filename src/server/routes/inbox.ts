@@ -23,7 +23,7 @@ import { broadcastRecipientIds, isTeamOfficialMember } from "../lib/agentMembers
 import { ambientAgents } from "../lib/registry";
 import { lateAnswerPush } from "../mcp/mcpAsk";
 
-import { MAX_HOPS_DEFAULT } from "../../shared/envelopeSchema";
+import { MAX_HOPS_DEFAULT, RESERVED_AGENT_IDS } from "../../shared/envelopeSchema";
 import { loadAgentCreds } from "../lib/slack";
 import { getCaptureGroupId } from "../lib/captureConfig";
 import { getChannel } from "../channels/registry";
@@ -61,7 +61,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     let env: EnvelopeInbound & { explicit_recipients?: string[] } = parsed.data;
     // Validate agent ids against registry (except special values)
     const known = deps.registeredAgentIds();
-    const reserved = new Set(["user", "system", "moderator", "broadcast"]);
+    const reserved = RESERVED_AGENT_IDS; // 단일 출처(shared/envelopeSchema) — 가짜 입구도 같은 것을 쓴다
     if (!reserved.has(env.from_agent_id) && !known.has(env.from_agent_id)) {
       return c.json({ error: "unknown_from_agent", id: env.from_agent_id }, 400);
     }
