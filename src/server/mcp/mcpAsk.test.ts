@@ -2,6 +2,7 @@
 import { test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
+import { RESERVED_SENDERS } from "../../shared/envelopeSchema"; // ★진짜 코드의 목록을 그대로 쓴다★
 import {
   roomIdFor,
   findAnswer,
@@ -9,14 +10,24 @@ import {
   askTeammate,
   fetchAnswer,
   postQuestion,
+  busIdentityFor,
   lateAnswerPush,
   THREAD_ID_MAX,
 } from "./mcpAsk";
 import { buildMcpServer, ASK_WAIT_MAX_SEC, ASK_WAIT_DEFAULT_SEC } from "./b3osMcpServer";
 
+function addAgent(d: Database, id: string) {
+  d.prepare(
+    `INSERT INTO agent (id, display_name, role, runtime, status_provider, workspace_path, persona_file,
+                        moderator_eligible, avatar_emoji, created_at)
+     VALUES (?, ?, 'test', 'claude_channel', 'claude_tmux', ?, ?, 0, '🙂', '2026-08-06 00:00:00')`,
+  ).run(id, id, `/tmp/${id}`, `/tmp/${id}/SOUL.md`);
+}
 function freshDb(): Database {
   const d = new Database(":memory:");
   migrate(d);
+  // ★리드(gd)는 일부러 넣지 않는다★ — 라이브가 그 상태다. 넣으면 이 시험이 사고를 못 잡는다.
+  for (const id of ["bill", "codex", "hermes", "demis"]) addAgent(d, id);
   return d;
 }
 
@@ -28,13 +39,27 @@ function ensureRoom(db: Database, roomId: string, openedBy: string) {
   ).run(roomId, roomId, openedBy);
 }
 
-/** 버스 입구 흉내 — 실제 POST /api/inbox 와 같은 응답 모양으로 message 행을 넣는다. */
+/**
+ * 버스 입구 흉내.
+ *
+ * ★진짜보다 관대하면 안 된다★ (2026-08-06 라이브 사고): 예전 가짜는 발신자를 검사하지 않아
+ * `from_agent_id: 'gd'` 를 받아줬다. 시험 29개가 전부 통과했는데 ★라이브 첫 호출에서 죽었다★ —
+ * 실제 POST /api/inbox 는 레지스트리에 없는 발신자를 `unknown_from_agent` 로 거부한다.
+ * 리드(gd)는 agent 표에 ★일부러★ 없다. → 가짜도 같은 문을 세운다.
+ */
 function fakeBus(db: Database) {
   let n = 0;
   const calls: Array<Record<string, unknown>> = [];
   const fetchImpl = (async (_url: string, init: RequestInit) => {
     const p = JSON.parse(String(init.body)) as Record<string, unknown>;
     calls.push(p);
+    const from = p.from_agent_id as string;
+    const known = (db.prepare(`SELECT id FROM agent`).all() as Array<{ id: string }>).map((a) => a.id);
+    if (!RESERVED_SENDERS.has(from) && !known.includes(from)) {
+      return new Response(JSON.stringify({ ok: false, error: "unknown_from_agent", id: from }), {
+        headers: { "content-type": "application/json" },
+      });
+    }
     const id = `q${++n}`;
     ensureRoom(db, p.thread_id as string, p.from_agent_id as string);
     db.prepare(
@@ -238,7 +263,7 @@ test("버스가 접수를 거부하면 예외로 드러난다 — 조용히 성�
       headers: { "content-type": "application/json" },
     })) as unknown as typeof fetch;
   await expect(
-    postQuestion({ baseUrl: "http://x", fetchImpl }, { from: "gd", to: "bill", body: "질문", roomId: "mcp-gd-bill" }),
+    postQuestion({ baseUrl: "http://x", fetchImpl }, { from: "user", source: "user", actor: "gd", to: "bill", body: "질문", roomId: "mcp-gd-bill" }),
   ).rejects.toThrow(/접수 실패/);
 });
 
@@ -398,4 +423,80 @@ test("★대조군★ — 리드가 물은 질문의 늦은 답은 민다(위 �
   const late = lateAnswerPush(db, { id: "a1", from_agent_id: "bill", in_reply_to: r.requestId, body: "답" });
   expect(late && "skipped" in late).toBe(false);
   if (late && !("skipped" in late)) expect(late.lead).toBe("gd");
+});
+
+// ── ★라이브 회귀★ — 리드는 agent 표에 없다 (2026-08-06 실사고) ──
+
+test("★리드의 질문은 버스에 user 로 나간다★ — gd 로 나가면 입구가 거부한다", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  const r = await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "질문" }, nowait);
+  expect(r.status).toBe("pending"); // 접수 자체가 됐다 = 거부 안 당했다
+  expect(bus.calls[0]!.from_agent_id).toBe("user");
+  expect(bus.calls[0]!.source).toBe("user");
+  // ★그래도 방은 리드의 방이고 신원은 gd 로 남는다★
+  expect(r.roomId).toBe("mcp-gd-bill");
+  expect((bus.calls[0]!.meta as Record<string, unknown>).mcp_actor).toBe("gd");
+});
+
+test("★대조군★ — 등록 안 된 신원으로 보내면 가짜 버스도 진짜처럼 거부한다", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  await expect(
+    postQuestion(bus.deps, { from: "ghost", source: "agent", actor: "ghost", to: "bill", body: "질문", roomId: "mcp-x-bill" }),
+  ).rejects.toThrow(/unknown_from_agent/);
+});
+
+test("팀원이 물으면 자기 id 로 나간다 — 리드만 user 다", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  await askTeammate(db, bus.deps, { from: "demis", to: "bill", body: "질문" }, nowait);
+  expect(bus.calls[0]!.from_agent_id).toBe("demis");
+  expect(bus.calls[0]!.source).toBe("agent");
+});
+
+test("★리드 본인은 자기 질문의 답을 회수할 수 있다★ — user 로 나갔어도 신원은 gd", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  const r = await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "질문" }, nowait);
+  reply(db, { id: "a1", room: r.roomId, from: "bill", body: "답", inReplyTo: r.requestId });
+  expect(fetchAnswer(db, r.requestId, "gd").found).toBe(true);
+  // ★대조군★ — 남은 여전히 못 본다
+  expect(fetchAnswer(db, r.requestId, "hermes").found).toBe(false);
+});
+
+test("★리드의 늦은 답은 그대로 밀린다★ — user 로 나갔다고 non_lead 로 오판하지 않는다", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  const r = await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "질문" }, nowait);
+  reply(db, { id: "a1", room: r.roomId, from: "bill", body: "답", inReplyTo: r.requestId });
+  const late = lateAnswerPush(db, { id: "a1", from_agent_id: "bill", in_reply_to: r.requestId, body: "답" });
+  expect(late && "skipped" in late).toBe(false);
+  if (late && !("skipped" in late)) expect(late.lead).toBe("gd");
+});
+
+test("★뮤턴트 확인★ — 번역을 빼고 gd 로 그냥 보내면 가짜 버스가 빨간불을 낸다", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  // busIdentityFor 를 안 거친 상태를 그대로 재현한다(= 라이브에서 죽었던 그 호출).
+  await expect(
+    postQuestion(bus.deps, { from: "gd", source: "user", actor: "gd", to: "bill", body: "질문", roomId: "mcp-gd-bill" }),
+  ).rejects.toThrow(/unknown_from_agent/);
+  // ★대조군★ — 번역을 거치면 통과한다
+  const ok = await postQuestion(bus.deps, {
+    from: busIdentityFor(db, "gd"), source: "user", actor: "gd", to: "bill", body: "질문", roomId: "mcp-gd-bill",
+  });
+  expect(ok.id).toBeTruthy();
+});
+
+test("소유권 판정이 meta 를 읽지 않는다 — 위조한 mcp_actor 로 남의 답을 못 본다", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  const r = await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "질문" }, nowait);
+  reply(db, { id: "a1", room: r.roomId, from: "bill", body: "답", inReplyTo: r.requestId });
+  // hermes 가 그 질문 행의 meta 를 'hermes' 로 바꿔치기해도(= 위조 상황)
+  db.prepare(`UPDATE message SET meta_json = ? WHERE id = ?`)
+    .run(JSON.stringify({ reply_route: "mcp", mcp_actor: "hermes" }), r.requestId);
+  expect(fetchAnswer(db, r.requestId, "hermes").found).toBe(false); // meta 를 믿었다면 열렸다
+  expect(fetchAnswer(db, r.requestId, "gd").found).toBe(true); // 실제 발신자 기준이라 본인은 그대로
 });

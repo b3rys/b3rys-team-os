@@ -97,6 +97,16 @@ export const envelopeInboundSchema = z.object({
 });
 export type EnvelopeInbound = z.infer<typeof envelopeInboundSchema>;
 
+/**
+ * ★레지스트리 검사를 건너뛰는 예약 발신자★ — 사람이 아닌 주체이거나(system·moderator),
+ * 팀원 명부에 일부러 없는 주체(user = 팀 리드)다. `/api/inbox` 가 이 목록으로 판정한다.
+ *
+ * ★한 곳에서만 정의한다★: 시험용 가짜 입구가 자기 목록을 따로 들면 진짜와 갈리고,
+ * 그러면 가짜가 더 관대해져 시험이 통과를 보장하지 못한다(2026-08-06 실사고).
+ */
+export const RESERVED_SENDERS: ReadonlySet<string> = new Set(["user", "system", "moderator", "broadcast"]);
+
+
 // ---------------------------------------------------------------------------
 // Envelope persisted (server → client, GET /api/inbox)
 // ---------------------------------------------------------------------------

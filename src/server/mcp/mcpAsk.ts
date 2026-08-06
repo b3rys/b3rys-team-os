@@ -108,11 +108,38 @@ export interface PostQuestionDeps {
  *
  * 깨우기는 우리가 하지 않는다 — 행이 들어가면 ★디스패처가 알아서 깨운다.★
  */
+/**
+ * ★신원(actor) → 버스에 적히는 발신자★. 변환은 ★이 함수 하나★ 뿐이다.
+ *
+ * 왜 필요한가: 팀 리드는 ★agent 표에 없다★(일부러 — 등록하면 깨우기·헬스 대상이 된다).
+ * 그래서 `from_agent_id: 'gd'` 로 넣으면 버스 입구가 `unknown_from_agent` 로 ★거부한다★
+ * (2026-08-06 라이브 첫 호출에서 실제로 죽었다). 리드의 버스 신원은 예약어 `user` 다 —
+ * `RESERVED_SENDERS` 에 있어 레지스트리 검사를 건너뛰고, 텔레그램 캡처도 그 이름으로 넣는다.
+ *
+ * ★보낼 때와 소유권을 볼 때 반드시 같은 함수를 쓴다.★ 두 곳에서 각자 변환하면 언젠가 갈린다.
+ *
+ * ※ ★meta 에 신원을 심어 그걸로 권한을 정하지 않는다★ (빌 리뷰 2026-08-06):
+ *   `envelopeSchema` 의 meta 는 `z.record(z.unknown())` — ★검증이 없다★. 그리고 `/api/inbox` 는
+ *   팀원이면 누구나 부를 수 있다. 즉 아무나 `mcp_actor: 'gd'` 를 붙일 수 있고, 그러면
+ *   ★번호만 알면 남의 답을 본다★ 는 우리가 방금 닫은 구멍이 다른 문으로 다시 열린다.
+ *   meta 의 mcp_actor 는 ★기록용일 뿐이다. 신뢰 판정에 읽지 마라.★
+ */
+export function busIdentityFor(db: Database, actor: string): string {
+  return actor === leadActorId(db) ? "user" : actor;
+}
+
+/** 버스에 적을 source. 리드는 사람이므로 'user', 팀원은 'agent'(레지스트리 검사와는 무관한 값). */
+function busSourceFor(db: Database, actor: string): "agent" | "user" {
+  return actor === leadActorId(db) ? "user" : "agent";
+}
+
 export async function postQuestion(
   deps: PostQuestionDeps,
-  env: { from: string; to: string; body: string; roomId: string; client?: string },
+  env: { from: string; source: "agent" | "user"; actor: string; to: string; body: string; roomId: string; client?: string },
 ): Promise<{ id: string; thread_id: string }> {
-  const meta: Record<string, unknown> = { reply_route: MCP_REPLY_ROUTE };
+  // ★actor 는 버스 발신자와 다를 수 있다★ (리드 = user 로 나간다) — 그래서 신원을 meta 에 남긴다.
+  // ★mcp_actor 는 기록용이다 — 권한 판정에 읽지 마라★ (위 busIdentityFor 주석). 누가 물었는지 사람이 볼 때만 쓴다.
+  const meta: Record<string, unknown> = { reply_route: MCP_REPLY_ROUTE, mcp_actor: env.actor };
   // 어느 클라이언트였는지는 ★기록용★이다. 동작은 reply_route 하나가 정한다.
   if (env.client) meta.mcp_client = env.client;
   const doFetch = deps.fetchImpl ?? fetch;
@@ -125,7 +152,7 @@ export async function postQuestion(
       body: env.body,
       type: "dm",
       priority: "normal",
-      source: "agent",
+      source: env.source,
       thread_id: env.roomId,
       meta,
     }),
@@ -186,14 +213,16 @@ export function lateAnswerPush(
   //   오늘은 매핑에 리드뿐이라 안 터진다 — 방금 닫은 P1 과 ★같은 모양★ 이다.
   //   지금은 fail-closed 로 둔다: 리드가 아닌 신원이 없으니 "그 사람 채널로 보내기" 는
   //   ★검증할 대상이 없다.★ 검증 못 하는 경로를 미리 짓지 않는다.
-  if (q.from_agent_id !== leadActorId(db)) {
+  // ★같은 번역 함수로 판정한다★ — 리드의 질문은 버스에 user 로 적혀 있다.
+  const lead = leadActorId(db);
+  if (q.from_agent_id !== busIdentityFor(db, lead)) {
     return { skipped: "non_lead", requestId: stored.in_reply_to, asker: q.from_agent_id };
   }
   const clip = (s: string) => (s.length > 60 ? s.slice(0, 60) + "…" : s);
   return {
     requestId: stored.in_reply_to,
     question: q.body,
-    lead: q.from_agent_id,
+    lead,
     // 어느 질문의 답인지 같이 보여준다 — 번호만으로는 사람이 못 알아본다
     text: `[MCP 답 · ${stored.from_agent_id}]\n(질문: ${clip(q.body)})\n\n${stored.body}`,
   };
@@ -218,8 +247,15 @@ export async function askTeammate(
   env: { from: string; to: string; body: string; client?: string },
   opts: AskOptions,
 ): Promise<AskResult> {
+  // ★방 이름은 신원으로 짓는다★(mcp-gd-bill) — 버스 발신자가 user 여도 방은 리드의 방이다.
   const roomId = roomIdFor(env.from, env.to);
-  const sent = await postQuestion(deps, { ...env, roomId });
+  const sent = await postQuestion(deps, {
+    ...env,
+    from: busIdentityFor(db, env.from),
+    source: busSourceFor(db, env.from),
+    actor: env.from,
+    roomId,
+  });
   const sleep = opts.sleep ?? ((ms: number) => Bun.sleep(ms));
   const now = opts.now ?? (() => Date.now());
   const started = now();
@@ -253,14 +289,18 @@ export function fetchAnswer(
 ): { found: true; answer: NonNullable<AskResult["answer"]>; roomId: string }
   | { found: false; denied?: true; roomId: string | null; to: string | null; unlabeled: Array<{ id: string; body: string; at: string }> } {
   const q = db
-    .prepare(`SELECT thread_id, to_agent_id, from_agent_id FROM message WHERE id = ?`)
-    .get(requestId) as { thread_id: string; to_agent_id: string; from_agent_id: string } | undefined;
+    .prepare(`SELECT thread_id, to_agent_id, from_agent_id, meta_json FROM message WHERE id = ?`)
+    .get(requestId) as
+    | { thread_id: string; to_agent_id: string; from_agent_id: string; meta_json: string | null }
+    | undefined;
   if (!q) return { found: false, roomId: null, to: null, unlabeled: [] };
   // ★번호를 안다고 남의 답을 볼 수는 없다★ (리뷰 P1, bill).
   //   ask 는 첫 줄에서 신원을 막는데 fetch 만 안 막으면, ★번호만 알면 남의 대화가 열린다.★
   //   오늘은 매핑에 리드 하나뿐이라 "남" 이 없어서 안 터진다 — ★그래서 더 위험하다.★
   //   read 신원을 하나 추가하는 순간 조용히 열린다. 지금 닫는다.
-  if (q.from_agent_id !== actor) {
+  // ★같은 번역 함수로 비교한다★ — 리드는 user 로 나가므로 actor 를 그대로 비교하면 본인도 막힌다.
+  //   meta 를 읽지 않는 이유는 busIdentityFor 주석 참고(검증 없는 필드로 권한을 정하지 않는다).
+  if (q.from_agent_id !== busIdentityFor(db, actor)) {
     return { found: false, denied: true, roomId: null, to: null, unlabeled: [] };
   }
   const answer = findAnswer(db, q.thread_id, requestId, q.to_agent_id);
