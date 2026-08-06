@@ -159,3 +159,38 @@ test("★공개 빌드 판정 기준이 바뀌면 알아챈다★ — PUBLIC_BUI
   const src = await Bun.file(new URL("../routes/settings.ts", import.meta.url)).text();
   expect(src).toContain('export const PUBLIC_BUILD = process.env.B3OS_LIVE !== "1"');
 });
+
+// ── 팀 리드 신원 (GD 2026-08-06: "쓰기 켤때 팀장이름이 필요해") ──
+
+test("★팀 리드는 명부에 없어도 신원으로 통과한다★ — 대시보드가 이미 그렇게 쓴다", () => {
+  const db = freshDb(); // demis·bill 만 등록. gd 는 없다
+  expect(db.query("select count(*) as n from agent where id='gd'").get()).toEqual({ n: 0 });
+  expect(resolveActorStrict(db, "gd")).toBe("gd");
+});
+
+test("★그렇다고 아무 미등록 이름이나 통과하지는 않는다★ — 리드 하나만 예외", () => {
+  const db = freshDb();
+  for (const ghost of ["ghost", "gd2", "GD", "admin", "root", ""]) {
+    expect(resolveActorStrict(db, ghost)).toBeNull();
+  }
+});
+
+test("리드 id 는 leadActorId 한 곳에서 온다 — LEAD_ACTOR_ID 를 바꾸면 따라간다", () => {
+  const db = freshDb();
+  const prev = process.env.LEAD_ACTOR_ID;
+  process.env.LEAD_ACTOR_ID = "boss";
+  try {
+    expect(resolveActorStrict(db, "boss")).toBe("boss");
+    expect(resolveActorStrict(db, "gd")).toBeNull(); // 옛 이름은 더 이상 리드가 아니다
+  } finally {
+    if (prev === undefined) delete process.env.LEAD_ACTOR_ID;
+    else process.env.LEAD_ACTOR_ID = prev;
+  }
+});
+
+test("★리드도 쓰기 권한은 매핑이 정한다★ — 리드라고 자동으로 쓰기가 열리지 않는다", () => {
+  const db = freshDb();
+  const readSrv = buildMcpServer(db, "gd", "read");
+  const names = new Set(Object.keys((readSrv as unknown as { _registeredTools: Record<string, unknown> })._registeredTools ?? {}));
+  for (const w of WRITE_TOOL_NAMES) expect(names.has(w)).toBe(false);
+});
