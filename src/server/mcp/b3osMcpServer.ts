@@ -16,6 +16,7 @@ import { listTasks, createTask, updateTask } from "../db/taskQueries";
 import { recallDmMessages } from "../db/dmCapture";
 import { classifyAll } from "../lib/health";
 import { leadActorId } from "../lib/opAuth"; // ★이름만 재사용★ — 신뢰 규칙(루프백=리드)은 쓰지 않는다
+import { askTeammate, fetchAnswer } from "./mcpAsk";
 
 export const MCP_NAME = "b3os-mcp";
 export const MCP_VERSION = "0.0.3-m2";
@@ -24,7 +25,21 @@ export const MCP_VERSION = "0.0.3-m2";
 export type McpScope = "read" | "write";
 
 /** 쓰기 도구 이름 — 권한 분리의 기준. 여기 없으면 읽기로 본다. */
-export const WRITE_TOOL_NAMES = new Set(["b3os_send_message", "b3os_kanban_add", "b3os_kanban_update"]);
+export const WRITE_TOOL_NAMES = new Set([
+  "b3os_send_message",
+  "b3os_kanban_add",
+  "b3os_kanban_update",
+  "b3os_ask_teammate", // 팀원에게 질문을 남긴다 = 쓰기다
+]);
+
+/** 한 호출이 기다릴 수 있는 상한. ★Cloudflare 가 125초에서 끊는다★ — 그 아래에서 우리가 먼저 접수로 끝낸다. */
+export const ASK_WAIT_DEFAULT_SEC = 90;
+export const ASK_WAIT_MAX_SEC = 110;
+
+/** 버스 입구 — send.sh 가 POST 하는 그 주소 그대로(기본 http://127.0.0.1:7878/team). */
+function busBaseUrl(): string {
+  return process.env.TEAM_BASE ?? `http://127.0.0.1:${process.env.TEAM_HTTP_PORT ?? 7878}/team`;
+}
 
 /** send_message 입력. */
 export interface SendMessageInput {
@@ -365,6 +380,144 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
       return {
         content: [{ type: "text", text: `카드 수정: ${task.id} [${task.column}] ${task.title}` }],
         structuredContent: { task: task as unknown as Record<string, unknown> },
+      };
+    },
+  );
+
+  // ── 팀원과 대화하기 (고정 1:1 방 + 질문 번호) ──
+  //
+  // ★설계 확정 근거는 mcpAsk.ts 머리말에 있다.★ 여기서는 도구 표면만 정의한다.
+  // send_message 와 다른 점: 저쪽은 "보내고 끝", 이쪽은 ★보내고 그 질문의 답까지 짝지어 돌려준다.★
+
+  /** 이 연결이 어느 클라이언트인지(커서·클로드 코드 등). ★기록용★ — 동작은 이 값에 좌우되지 않는다. */
+  const clientName = (): string | undefined => {
+    try {
+      const impl = (server as unknown as { server?: { getClientVersion?: () => { name?: string } | undefined } })
+        .server?.getClientVersion?.();
+      return impl?.name;
+    } catch {
+      return undefined;
+    }
+  };
+
+  reg(
+    "b3os_ask_teammate",
+    {
+      title: "b3os 팀원에게 묻기",
+      description:
+        "팀원에게 질문하고 그 답을 기다린다. 상대마다 고정된 1:1 방을 쓰므로 이어서 물으면 팀원이 앞 대화를 안다. " +
+        "답이 제때 오면 답을, 늦으면 요청 번호와 함께 접수 상태를 돌려준다(요청은 살아 있다 — b3os_fetch_answer 로 회수).",
+      inputSchema: {
+        to: z.string().min(1).describe("질문할 팀원 id (예: bill, codex)"),
+        question: z.string().min(1).describe("질문 본문"),
+        wait_seconds: z
+          .number()
+          .int()
+          .min(1)
+          .max(ASK_WAIT_MAX_SEC)
+          .optional()
+          .describe(`답을 기다릴 최대 시간(기본 ${ASK_WAIT_DEFAULT_SEC}초, 최대 ${ASK_WAIT_MAX_SEC}초)`),
+      },
+    },
+    async (args: unknown) => {
+      if (!actor) return denyIdentity("팀원에게 질문");
+      const { to, question, wait_seconds } = args as { to: string; question: string; wait_seconds?: number };
+      if (to === actor) {
+        return {
+          content: [{ type: "text", text: `거부: 자기 자신(${actor})에게는 물을 수 없다.` }],
+          isError: true,
+          structuredContent: { error: "self_ask" },
+        };
+      }
+      if (!listAgents(db).some((a) => a.id === to)) {
+        return {
+          content: [{ type: "text", text: `거부: '${to}' 는 등록된 팀원이 아니다.` }],
+          isError: true,
+          structuredContent: { error: "unknown_teammate", to },
+        };
+      }
+      const waitMs = (wait_seconds ?? ASK_WAIT_DEFAULT_SEC) * 1000;
+      const r = await askTeammate(
+        db,
+        { baseUrl: busBaseUrl() },
+        { from: actor, to, body: question, client: clientName() },
+        { waitMs, pollMs: 1500 }, // 디스패처 폴링과 같은 간격 — 더 자주 봐도 새 사실이 생기지 않는다
+      );
+      appendAudit(db, actor, "mcp.ask_teammate", to, {
+        request_id: r.requestId, thread_id: r.roomId, status: r.status, waited_ms: r.waitedMs,
+      });
+      if (r.status === "answered" && r.answer) {
+        return {
+          content: [{ type: "text", text: `${to}:\n${r.answer.body}` }],
+          structuredContent: {
+            status: "answered", request_id: r.requestId, thread_id: r.roomId,
+            answer: r.answer as unknown as Record<string, unknown>,
+          },
+        };
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `${to} 가 아직 답하지 않았습니다 (${Math.round((r.waitedMs ?? 0) / 1000)}초 기다림).\n` +
+              `요청 번호 ${r.requestId} — 질문은 살아 있습니다. 나중에 b3os_fetch_answer 로 받거나, ` +
+              `늦게 오면 팀 리드의 평소 채널로 전달됩니다.`,
+          },
+        ],
+        structuredContent: { status: "pending", request_id: r.requestId, thread_id: r.roomId },
+      };
+    },
+  );
+
+  reg(
+    "b3os_fetch_answer",
+    {
+      title: "b3os 답 회수",
+      description:
+        "b3os_ask_teammate 가 접수로 끝냈을 때, 요청 번호로 그 질문의 답을 회수한다. " +
+        "★번호가 맞는 답만 돌려준다★ — 번호 없이 온 발언은 답으로 붙이지 않고 따로 알려준다.",
+      inputSchema: { request_id: z.string().min(1).describe("b3os_ask_teammate 가 돌려준 요청 번호") },
+    },
+    async (args: unknown) => {
+      // ★읽기 도구도 누가 읽는지는 본다★ (리뷰 P1, bill) — 읽기 ≠ 신원 없음.
+      if (!actor) return denyIdentity("답 회수");
+      const { request_id } = args as { request_id: string };
+      const got = fetchAnswer(db, request_id, actor);
+      if (!got.found && got.denied) {
+        // ★있다/없다를 구분해 알려주지 않는다★ — 그러면 번호를 넣어보며 남의 요청 존재를 알아낼 수 있다.
+        return {
+          content: [{ type: "text", text: `그런 요청 번호가 없습니다: ${request_id}` }],
+          isError: true,
+          structuredContent: { error: "unknown_request", request_id },
+        };
+      }
+      if (got.found) {
+        return {
+          content: [{ type: "text", text: `${got.answer.from}:\n${got.answer.body}` }],
+          structuredContent: {
+            status: "answered", request_id, thread_id: got.roomId,
+            answer: got.answer as unknown as Record<string, unknown>,
+          },
+        };
+      }
+      if (!got.roomId) {
+        return {
+          content: [{ type: "text", text: `그런 요청 번호가 없습니다: ${request_id}` }],
+          isError: true,
+          structuredContent: { error: "unknown_request", request_id },
+        };
+      }
+      const note = got.unlabeled.length
+        ? `\n※ 번호 없이 온 발언 ${got.unlabeled.length}건이 있습니다(답으로 붙이지 않았습니다): ` +
+          got.unlabeled.map((u) => `"${u.body.slice(0, 40)}"`).join(", ")
+        : "";
+      return {
+        content: [{ type: "text", text: `${got.to} 의 답이 아직 없습니다. 요청은 살아 있습니다.${note}` }],
+        structuredContent: {
+          status: "pending", request_id, thread_id: got.roomId,
+          unlabeled: got.unlabeled as unknown as Record<string, unknown>[],
+        },
       };
     },
   );
