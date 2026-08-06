@@ -369,7 +369,7 @@ export function collectTagChoice(root: HTMLElement): { ids: string[]; newNames: 
   return { ids, newNames };
 }
 
-async function editReportTags(report: Report): Promise<void> {
+async function editReportTags(report: Report): Promise<Report | null> {
   const selected = new Set((report.tags ?? []).map((t) => t.id));
   const picked = await showForm<{ ids: string[]; newNames: string[] }>({
     title: pick("이 보고서의 태그", "Tags for this report"),
@@ -381,7 +381,7 @@ async function editReportTags(report: Report): Promise<void> {
     collect: collectTagChoice,
     okLabel: pick("저장", "Save"),
   });
-  if (picked == null) return;
+  if (picked == null) return null;
   const ids = [...picked.ids];
   const known = new Map(_tags.map((t) => [t.name.toLocaleLowerCase(), t]));
   for (const name of picked.newNames) {
@@ -392,7 +392,11 @@ async function editReportTags(report: Report): Promise<void> {
     known.set(created.name.toLocaleLowerCase(), created);
     ids.push(created.id);
   }
-  await mutateJson(`/api/${encodeURIComponent(report.id)}/tags`, "PUT", { tag_ids: [...new Set(ids)] });
+  const saved = await mutateJson(`/api/${encodeURIComponent(report.id)}/tags`, "PUT", { tag_ids: [...new Set(ids)] });
+  const updated = (saved as { report?: Report }).report;
+  if (!updated) throw new Error("missing report");
+  _all = _all.map((rep) => (rep.id === updated.id ? { ...rep, tags: updated.tags } : rep));
+  return updated;
 }
 /**
  * 태그 알약 + ★마우스 올리면 나오는 이름바꾸기·삭제 아이콘★ (팀장님 지시 2026-07-30).
@@ -931,7 +935,7 @@ async function renderDetail(): Promise<void> {
           <span class="inline-block mb-2 px-2 py-0.5 rounded text-[10px] font-semibold border text-txt-green border-accent-green/30 bg-accent-green/10">${escape(catOf(meta))}</span>
           <div class="flex items-center gap-2 flex-wrap text-[13px] text-slate-500"><span class="text-accent-greenSoft font-medium">${escape(author)}</span><span>·</span><span>${fmtDate(meta.created_at)}</span></div>
           ${meta.summary ? `<div class="text-sm text-slate-400 leading-relaxed mt-3 pl-3 border-l-2 border-surface-3">${escape(meta.summary)}</div>` : ""}
-          <div class="flex items-center gap-2 flex-wrap mt-3">
+          <div id="reports-detail-tags" class="flex items-center gap-2 flex-wrap mt-3">
             ${(meta.tags ?? []).map((t) => tagBadge(t)).join("")}
             <button id="reports-edit-tags" class="px-2.5 py-1 rounded-full text-[11px] font-semibold border border-surface-3 text-slate-400 hover:text-slate-200">＋ ${pick("태그 편집", "Edit tags")}</button>
           </div>
@@ -972,15 +976,24 @@ async function renderDetail(): Promise<void> {
       btn.disabled = false;
     }
   });
-  _root.querySelector<HTMLButtonElement>("#reports-edit-tags")?.addEventListener("click", async () => {
+  const renderDetailTags = (report: Report) => {
+    const tagRow = _root?.querySelector<HTMLElement>("#reports-detail-tags");
+    if (!tagRow) return;
+    tagRow.innerHTML = `${(report.tags ?? []).map((t) => tagBadge(t)).join("")}
+            <button id="reports-edit-tags" class="px-2.5 py-1 rounded-full text-[11px] font-semibold border border-surface-3 text-slate-400 hover:text-slate-200">＋ ${pick("태그 편집", "Edit tags")}</button>`;
+    tagRow.querySelector<HTMLButtonElement>("#reports-edit-tags")?.addEventListener("click", handleEditTags);
+  };
+  const handleEditTags = async () => {
     try {
-      await editReportTags(meta);
-      await loadReportsPage(true);
-      void renderDetail();
+      const updated = await editReportTags(meta);
+      if (!updated) return;
+      meta.tags = updated.tags;
+      renderDetailTags(meta);
     } catch (err) {
       await showAlert(pick(`태그 변경 실패: ${(err as Error).message}`, `Failed to update tags: ${(err as Error).message}`));
     }
-  });
+  };
+  _root.querySelector<HTMLButtonElement>("#reports-edit-tags")?.addEventListener("click", handleEditTags);
   _root.querySelector<HTMLButtonElement>("#reports-delete-detail")?.addEventListener("click", async () => {
     const btn = _root?.querySelector<HTMLButtonElement>("#reports-delete-detail");
     if (!await showConfirm({ message: pick(`보고서 "${meta.title}"을(를) 목록에서 삭제할까요?\n\n첨부 파일은 디스크에 남고, 대시보드 등록 정보만 삭제됩니다.`, `Delete report "${meta.title}" from the list?\n\nThe attached files stay on disk; only the dashboard registration is removed.`), danger: true })) return;
