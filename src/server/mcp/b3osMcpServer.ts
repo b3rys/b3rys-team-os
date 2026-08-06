@@ -281,10 +281,22 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
           structuredContent: { dryRun: true, argv, direct_to_gd: input.direct_to_gd === true },
         };
       }
-      const proc = Bun.spawnSync(["bash", sendShPath(), ...argv]);
-      const stdout = proc.stdout ? new TextDecoder().decode(proc.stdout).trim() : "";
-      const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr).trim() : "";
-      const ok = proc.exitCode === 0;
+      // ★동기 spawn 금지★ (팀 리드 원칙 2026-08-05: "외부확장 요청이 본 쓰레드를 멈추면 안 되지").
+      // b3os 서버는 프로세스 1개·주 스레드 1개다. spawnSync 는 자식이 끝날 때까지 그 스레드를 붙들어
+      // ★그동안 대시보드를 포함한 모든 요청이 멈춘다.★ stdio 시절엔 별도 프로세스라 자기만 멈췄는데,
+      // HTTP 창구가 같은 프로세스에 들어온 뒤로는 남을 멈춘다.
+      // 실측(2026-08-06): send.sh 는 인자 오류로 즉시 끝나는 경로에서도 25~32ms — 네트워크 호출 전이다.
+      // 실제 발신은 HTTP POST 가 붙어 더 길다. 대시보드 평소 응답이 0.6~1.2ms 이므로 한 번 보낼 때마다
+      // 그 수십 배를 서버 전체가 멈추고 있었다.
+      // → await 로 바꾼다. ★기다리는 것 자체는 무해하다★ — 기다리는 동안 다른 요청이 처리된다.
+      //   문제는 붙들고 안 놓는 것이었다. (둘은 비슷해 보이지만 다르다.)
+      const proc = Bun.spawn(["bash", sendShPath(), ...argv], { stdout: "pipe", stderr: "pipe" });
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text().then((t) => t.trim()),
+        new Response(proc.stderr).text().then((t) => t.trim()),
+        proc.exited,
+      ]);
+      const ok = exitCode === 0;
       // minor(추적성): send.sh 출력에서 message_id·thread 파싱해 audit detail에 실어 direct_to_gd 릴레이 추적.
       const sentId = stdout.match(/sent\s+(\S+)/)?.[1] ?? null;
       const threadId = stdout.match(/thread=(\S+)/)?.[1] ?? input.thread ?? null;
