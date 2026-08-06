@@ -42,13 +42,19 @@ describe("hop_limit (max_hop=16 정렬, hop cap이 pingpong cap보다 높아야)
 });
 
 // ★사본이 다시 생기지 않게 박아둔다★ (빌 리뷰 2026-08-06)
+//
+// ★시험이 필터를 다시 계산하면 안 된다★ — 처음엔 시험 안에서 filter 를 한 번 더 돌렸는데,
+// 그건 ★시험이 자기가 만든 것을 자기가 검사★ 하는 것이라 프로덕션이 바뀌어도 통과했다.
+// 빌이 뮤턴트로 확인했다: filter 를 빼도 4 pass. ★사본을 없애려고 넣은 시험이 그 자체로 사본★ 이었다.
+// → ★프로덕션 값(RESERVED_SENDER_IDS)을 직접 본다.★
 import { RESERVED_SENDERS as INGRESS_RESERVED } from "../../shared/envelopeSchema";
+import { RESERVED_SENDER_IDS } from "./antiPingpong";
 
 test("★발신자 예약어는 입구 목록에서 파생된다★ — 사본이 아니다", () => {
-  // 입구 목록이 늘면 여기도 따라 늘어야 한다. 따로 적어두면 언젠가 갈린다.
-  const derived = new Set([...INGRESS_RESERVED].filter((id) => id !== "broadcast"));
-  expect([...derived].sort()).toEqual(["moderator", "system", "user"]);
+  // 프로덕션 값을 그대로 본다. 파생을 지우면 broadcast 가 섞여 들어와 이 시험이 빨간불이 된다.
+  expect([...RESERVED_SENDER_IDS].sort()).toEqual(["moderator", "system", "user"]);
   // ★broadcast 는 제외된다★ — 목적지이지 발신자가 아니다. 넣으면 신뢰-출처 문이 넓어진다.
+  expect(RESERVED_SENDER_IDS.has("broadcast")).toBe(false);
+  // 입구 목록에는 있다 = 두 목록의 범위가 다르다는 사실 자체를 고정한다.
   expect(INGRESS_RESERVED.has("broadcast")).toBe(true);
-  expect(derived.has("broadcast")).toBe(false);
 });

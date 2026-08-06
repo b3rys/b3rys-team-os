@@ -21,7 +21,7 @@ import { countAutoRounds } from "../db/inboxQueries";
 import { RESERVED_SENDERS as INGRESS_RESERVED } from "../../shared/envelopeSchema";
 
 /** 입구 예약어에서 ★발신자가 될 수 있는 것만★ 남긴다. broadcast 는 목적지라 제외. */
-const RESERVED_SENDER_IDS: ReadonlySet<string> = new Set(
+export const RESERVED_SENDER_IDS: ReadonlySet<string> = new Set(
   [...INGRESS_RESERVED].filter((id) => id !== "broadcast"),
 );
 
