@@ -160,7 +160,11 @@ test("★두드리다 거절당한 기록만 있는 설치는 열리지 않는�
   expect(isMcpEnabled(d)).toBe(false);
 });
 
-test("★대조군 — 통과한 기록이 하나라도 있으면 열린다★ (stdio 도구 사용 포함)", () => {
+// ★이름을 실제로 재는 것보다 넓게 쓰지 않는다★ (codex 리뷰 2026-08-07):
+//   stdio 의 ★읽기 도구는 감사기록을 안 남긴다★(team_status·b3os_inbox·b3os_kanban_list·
+//   b3os_recall_dms·b3os_fetch_answer). 즉 ★읽기만 쓰던 stdio 설치는 식별할 수 없고 꺼진 채로 올라온다.★
+//   과거 신호가 아예 없어서 코드로 복구할 방법도 없다 — 그 설치는 사람이 한 번 켜야 한다.
+test("★대조군 — 감사기록이 남는 사용 5종은 각각 문을 연다★ (HTTP 통과 · stdio 쓰기)", () => {
   for (const action of ["mcp.http.request", "mcp.send_message", "mcp.ask_teammate", "mcp.kanban_add", "mcp.kanban_update"]) {
     const d = new Database(":memory:");
     migrate(d);

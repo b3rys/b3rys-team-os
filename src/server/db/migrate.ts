@@ -849,6 +849,9 @@ export function runBusMigration(db: Database): void {
     //   공개 설치가 스스로 열린다. 통과한 흔적만 센다 — 아래는 전부 ★신원이 확인된 뒤에★ 쓰인다.
     //   목록이 낡을 걱정은 없다: 이 백필이 의미를 갖는 건 행이 없는 동안뿐이고, 그동안엔
     //   창구가 꺼져 있어 새 mcp.* 기록 자체가 생기지 않는다.
+    //   ★보장 범위는 여기까지다★ (codex 리뷰): stdio 의 ★읽기 도구는 감사기록을 안 남긴다.★
+    //   = "이미 쓰던 설치를 전부 살린다" 가 아니라 ★"HTTP 로 썼거나, 기록이 남는 stdio 쓰기를 쓴 설치"★ 다.
+    //   읽기만 쓰던 stdio 설치는 신호가 없어 꺼진 채 올라온다 — 사람이 한 번 켜야 한다.
     "INSERT OR IGNORE INTO setting(key,value) SELECT 'mcp_enabled','true' " +
       "WHERE EXISTS(SELECT 1 FROM audit_event WHERE action IN " +
       "('mcp.http.request','mcp.send_message','mcp.ask_teammate','mcp.kanban_add','mcp.kanban_update') LIMIT 1)",
