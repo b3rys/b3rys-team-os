@@ -591,7 +591,7 @@ function mcpRowHtml(): string {
   return `
       <div class="flex items-center justify-between rounded-md border border-surface-3 bg-surface-0/60 px-3 py-2">
         <span class="text-[13px] font-medium text-slate-200">${pick("MCP 창구", "MCP endpoint")} <span class="${on ? "text-accent-greenSoft" : "text-slate-500"} text-[11px]">${on ? "ON" : "OFF"}</span>
-          <span class="block text-[11px] text-slate-500 mt-0.5">${pick("클로드 코드·커서에서 팀원에게 직접 질문", "Ask teammates directly from Claude Code · Cursor")}</span>
+          <span class="block text-[11px] text-slate-500 mt-0.5">${pick("클로드 코드·커서에서 팀원에게 직접 질문 · OFF 로 두면 그 연결이 끊깁니다", "Ask teammates directly from Claude Code · Cursor — OFF cuts that connection")}</span>
         </span>
         <button id="sysop-mcp" class="${on ? "bg-accent-green/80" : "bg-slate-400/50"} shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors" role="switch" aria-checked="${on}"><span class="${on ? "translate-x-6" : "translate-x-1"} inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"></span></button>
       </div>`;
@@ -642,8 +642,8 @@ function systemOpHtml(): string {
         <span class="text-[13px] font-medium text-slate-200">${pick("라우터 (agent 응답)", "Router (agent replies)")} <span class="${routerOn ? "text-accent-greenSoft" : "text-slate-500"} text-[11px]">${routerOn ? "ON" : "OFF · shadow"}</span></span>
         <button id="sysop-router" class="${routerOn ? "bg-accent-green/80" : "bg-slate-400/50"} shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors" role="switch" aria-checked="${routerOn}"><span class="${routerOn ? "translate-x-6" : "translate-x-1"} inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"></span></button>
       </div>
-      ${mcpRowHtml()}
       <div class="text-[11px] text-slate-500 -mt-1 leading-relaxed">${pick("ON = 팀방(그룹방)에서 팀원이 자동으로 응답 · OFF = 팀방에선 조용(결정만 기록). ★OFF여도 1:1 DM·팀원끼리 버스 협업은 그대로 동작★ — 라우터는 '그룹방 자동응답'만 켜고 끕니다.", "ON = teammates auto-reply in the team room · OFF = quiet in the room (decisions only logged). ★1:1 DM & teammate bus collab still work when OFF★ — the router only toggles group-room auto-reply.")}</div>
+      ${mcpRowHtml()}
       <div class="flex items-center gap-3 pt-1">
         <button id="sysop-save" class="${btnPrimary}">${pick("저장", "Save")}</button>
         <button id="sysop-check" class="${btnGhost}">${pick("봇 연결 확인", "Check bot connection")}</button>
