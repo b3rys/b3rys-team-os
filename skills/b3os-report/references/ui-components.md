@@ -157,14 +157,14 @@ RAG(Retrieval-Augmented Generation, 검색 증강 생성)
     <text x="380" y="24" text-anchor="middle" class="diagram-title">작동 흐름</text>
     <g transform="translate(32,58)">
       <rect class="diagram-node diagram-node-primary" width="150" height="92" rx="14"/>
-      <rect class="diagram-accent" width="4" height="92" rx="2"/>
+      <rect class="diagram-accent diagram-accent-bar" x="1" y="1" width="3" height="90" rx="1.5"/>
       <text x="20" y="34" class="diagram-text">1 · 발견</text>
       <text x="20" y="62" class="diagram-muted">후보를 넓게 수집</text>
     </g>
     <path d="M190 104H246" class="diagram-line" marker-end="url(#flow-arrow)"/>
     <g transform="translate(256,58)">
       <rect class="diagram-node diagram-node-warm" width="150" height="92" rx="14"/>
-      <rect class="diagram-accent-warm" width="4" height="92" rx="2"/>
+      <rect class="diagram-accent-warm diagram-accent-bar" x="1" y="1" width="3" height="90" rx="1.5"/>
       <text x="20" y="34" class="diagram-text">2 · 검증</text>
       <text x="20" y="62" class="diagram-muted">본문과 조건 확인</text>
     </g>
@@ -176,8 +176,29 @@ RAG(Retrieval-Augmented Generation, 검색 증강 생성)
 
 - 카드형 flow/sequence/architecture diagram은 `svg.diagram-flow`를 쓴다.
 - 색은 `diagram-node`, `diagram-node-primary`, `diagram-node-warm`, `diagram-node-danger`와 `diagram-line*` class로 구분한다.
-- 단계 구분은 여러 파스텔 박스를 남발하지 말고 **같은 카드 톤 + 왼쪽 accent bar**를 기본으로 한다.
+- 단계 구분은 여러 파스텔 박스를 남발하지 말고 **neutral 면 + 작은 dot/얇은 accent bar/선**을 기본으로 한다.
+- 왼쪽 accent bar는 rounded card 바깥으로 삐져나오면 안 된다. 노드 rect와 같은 x/y에 붙이지 말고 `x="1" y="1" height="노드높이-2"`로 안쪽에 넣고 `diagram-accent-bar`를 붙인다.
+- 기본 색은 밝은 professional sage/gold/red를 쓴다. 큰 면을 칠하지 말고 작은 강조에만 사용한다.
 - 금지: `#eff6ff`, `#eef2ff`, `#93c5fd`, `#1d4ed8`, `#2563eb`, `#faf5ff`, `#c4b5fd`, `#7c3aed` 같은 blue/violet slide palette를 기본 도식 색으로 쓰지 않는다.
+
+### 표현 패턴 reference
+
+다이어그램/인포그래픽은 한 가지 flowchart만 고집하지 않는다. 내용 구조에 맞춰 아래 패턴을 고른다.
+
+| 패턴 | 쓸 때 | 구조 |
+|---|---|---|
+| Decision map | 선택지·판단 기준 비교 | 2축 또는 갈림길, 추천안만 ring/dot으로 강조 |
+| Loop / operating cycle | 반복 운영 체계·학습 루프 | 중앙 카드 + 원형 단계 노드 + curved arrows |
+| Architecture map | 시스템 구성·데이터 흐름 | 입력 채널 → 중앙 bounded context → 런타임/저장소 |
+| Layer stack | 서버·DB·worker처럼 층이 있는 구조 | 큰 boundary 안에 row/column layer 배치 |
+| Timeline / lineage | 논문·릴리즈·사건 순서 | 축은 neutral, milestone만 small accent |
+| Matrix / quadrant | 두 판단 축으로 위치 비교 | label을 점 위에 길게 쓰지 말고 작은 callout으로 분리 |
+
+첨부 reference로 확인한 좋은 형태:
+
+- 운영 루프형: 중앙 설명 카드 주변에 1~9 원형 노드를 배치하고, 실선/점선 curved arrow로 순환과 learning loop를 구분한다.
+- 아키텍처형: 좌측 입력 채널, 중앙 서버 boundary, 우측 runtime, 하단 DB를 큰 영역으로 분리한다. box가 많아도 hierarchy가 보여야 한다.
+- 비교 map형: 점과 설명이 겹치지 않게 callout을 분리하고, 추천안만 더 선명하게 표시한다.
 - 허용: blue는 링크·코드·보조 정보에만 제한한다. 도식의 primary flow는 green/sage, secondary는 amber다.
 
 ## 8. 이미지 / 스크린샷
