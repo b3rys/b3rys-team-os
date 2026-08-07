@@ -70,7 +70,7 @@ legacy/custom HTML이 `body > .wrap`만 쓰는 경우도 테마가 960px로 잡�
 보고서는 나중에 발표자료로 바뀔 수 있어야 한다. 각 큰 섹션은 슬라이드 한 장으로 떼어도 이해되는 단위로 쓴다.
 
 ```html
-<p class="lede">이 섹션의 핵심은 긴 문장을 한 칸씩 기다리지 않고 전체 관계를 한 번에 보는 계산 구조다.</p>
+<div class="lede">이 섹션의 핵심은 긴 문장을 한 칸씩 기다리지 않고 전체 관계를 한 번에 보는 계산 구조다.</div>
 <div class="stat-grid" aria-label="핵심 요약">
   <div class="stat-card"><b>문제</b><span>무엇이 막혔는지</span></div>
   <div class="stat-card"><b>해법</b><span>어떤 구조를 바꿨는지</span></div>
@@ -80,7 +80,7 @@ legacy/custom HTML이 `body > .wrap`만 쓰는 경우도 테마가 960px로 잡�
 
 기준:
 
-- `lede`: 섹션 첫 문단이 너무 길 때 쓰는 한 단락 요약
+- `lede`: 섹션 첫 문단이 너무 길 때 쓰는 한 단락 요약. 렌더러 passthrough(원문 통과) 규칙에 맞춰 최상위에서는 `<div class="lede">`로 쓴다.
 - `stat-grid`: 수치만이 아니라 문제·해법·대가 같은 발표용 요약 카드에도 사용
 - 카드 하나는 “제목 1줄 + 설명 1~2줄”로 제한한다
 
