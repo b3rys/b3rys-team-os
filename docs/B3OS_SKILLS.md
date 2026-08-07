@@ -13,6 +13,7 @@
 | b3os-report | **skills** | 팀 표준 보고서 — MD 소스 → 아이폰 반응형 HTML+SVG 렌더(자체완결). `scripts/render.sh`·`publish.sh`. "보고서 써줘" |
 | b3os-slack-format | **skills** | 슬랙 메시지 포맷 — 팀원이 슬랙에 올리는 실행·검증·인수인계·보고를 Slack mrkdwn+운영보고 구조로 정리. `scripts/md-to-slack.py`(**→*·##→볼드·-→•·링크·코드보존). "슬랙 포맷/정리해서 올려". owner=maintainer |
 | b3os-harness-playbook | **skills** | harness(sub agent 병렬) 플레이북 — **트리거 우선**("병렬 실소스 커버면 기본, 그 외 솔로") + ready-run 레시피(`templates/recipes.md`: audit·migration·N후보·release-verify) + 8품질패턴 + 런타임별(클로드 Workflow/openclaw 수동) + 비용게이트. §10 연계 (2026-06-14 #2 reframe) |
+| b3os-mac-app-shell | skills | 웹 대시보드/웹앱을 Apple 네이티브 셸(.app)로 래핑. 트리거 미선언이라 팀원 룰 목록에는 안 나간다(필요할 때 이 카탈로그에서 찾아 쓴다). |
 | **b3os-ai-code-safety** | **skills** | **AI 생성/수정 코드 안전 체크리스트 — SOLID + Effects.** 코딩 작업·리뷰·완료 전, 특히 상태 변경·외부 side effect·동시성·트랜잭션·멱등성·재시도·webhook/queue/payment 경로에서 race condition, partial write, duplicate execution, hidden coupling을 점검한다. |
 | **b3os-infra-safety** | **skills** | **b3os 인프라 변경 안전 규칙.** fresh 격리 clone·런타임 상태(`agents.json`/`team.db`) 심링크 금지·백업 우선·테스트 FS 격리·릴리스/배포 가드·격리 검증을 강제한다. b3os 소스·config·registry·릴리스를 수정할 때 필독. owner=maintainer |
 | **b3os-github-workflow** | **skills** | **변경을 PR로 올려 승인·머지까지 가는 절차.** 브랜치·worktree 격리 → 커밋 신원(팀원 이름 + 팀 계정, 안 걸면 조용히 개인 계정으로 나감) → PR을 팀 계정으로 작성(작성자≠승인자여야 리뷰 요건 성립) → **검증 근거를 PR에 남기기**(범위·baseline·mutation·미검증) → tier별 승인 요청 → 머지 후 실측. 각 단계에 확인 명령이 붙고 기대와 다르면 멈춘다(fail-closed). 정책은 TEAM-OS §4·§12 정본, 여기는 절차만 |
