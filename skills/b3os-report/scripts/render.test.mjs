@@ -19,8 +19,13 @@ try {
   assert.match(html, /--bg:#0a0f0d/);
   assert.match(html, /--card:#111a15/);
   assert.match(html, /--glow:rgba\(52,211,153,\.16\)/);
-  assert.match(html, /--grid:rgba\(52,211,153,\.040\)/);
+  assert.match(html, /--grid:rgba\(52,211,153,\.055\)/);
+  assert.match(html, /--surface-edge:rgba\(232,255,241,\.055\)/);
+  assert.match(html, /--surface-shadow:0 18px 42px rgba\(0,0,0,\.30\),0 3px 10px rgba\(0,0,0,\.20\),inset 0 1px 0 var\(--surface-edge\)/);
   assert.match(html, /--blue:#9fc7ac/);
+  assert.match(html, /blockquote\{[^}]*box-shadow:var\(--surface-shadow\)/);
+  assert.match(html, /table\{[^}]*box-shadow:var\(--surface-shadow\)/);
+  assert.match(html, /\.stat-card\{[^}]*box-shadow:var\(--surface-shadow-soft\)/);
   assert.match(html, /linear-gradient\(90deg,var\(--grid\) 1px,transparent 1px\)/);
   assert.match(html, /linear-gradient\(var\(--grid\) 1px,transparent 1px\)/);
   assert.match(html, /h3\{[^}]*color:var\(--green\)/);
@@ -75,6 +80,8 @@ try {
   assert.match(refs, /milestone을 위\/아래로 stagger 배치/);
   assert.match(refs, /hard-coded white\/blue\/violet fill/);
   assert.match(refs, /Matrix \/ quadrant/);
+  assert.match(refs, /다크 모드 입체감/);
+  assert.match(refs, /surface-shadow/);
   assert.doesNotMatch(html, /&lt;(svg|rect|text|div)/);
   assert.match(html, /<p>본문입니다\.<\/p>/);
   console.log("PASS b3os-report dark/light theme + nested raw block passthrough");
