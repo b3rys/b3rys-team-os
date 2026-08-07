@@ -15,7 +15,10 @@ import {
   lateAnswerPush,
   THREAD_ID_MAX,
 } from "./mcpAsk";
-import { buildMcpServer, ASK_WAIT_MAX_SEC, ASK_WAIT_DEFAULT_SEC } from "./b3osMcpServer";
+import { buildMcpServer, officialRoster, ASK_WAIT_MAX_SEC, ASK_WAIT_DEFAULT_SEC } from "./b3osMcpServer";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 function addAgent(d: Database, id: string) {
   d.prepare(
@@ -695,4 +698,76 @@ test("★명부를 DB 에서 읽는다★ — 손으로 박으면 이 시험이 
     _registeredTools: Record<string, { inputSchema?: { shape?: { to?: { description?: string } } } }>;
   })._registeredTools.b3os_ask_teammate;
   expect(t?.inputSchema?.shape?.to?.description ?? "").toContain("zzqa");
+});
+
+// ── ★도구 설명에는 정규 팀원만★ (팀 리드 2026-08-07: "정규팀원만 해") ──
+//
+// 정규 여부의 정본은 ★agents.json★ 이다 — `agent` 표에는 그 칸이 없다.
+// 그래서 레지스트리를 격리해서 재고, ★라이브 agents.json 에 기대지 않는다★
+// (기대면 팀원이 바뀔 때마다 시험이 갈린다).
+
+function withRegistry(entries: Array<Record<string, unknown>>): string {
+  const dir = mkdtempSync(join(tmpdir(), "mcp-roster-"));
+  // 캐시 키에 경로가 들어가므로 시험마다 새 파일을 쓰면 서로 안 섞인다.
+  const path = join(dir, `agents-${entries.length}.json`);
+  writeFileSync(path, JSON.stringify(entries));
+  process.env.TEAM_AGENT_REGISTRY = path;
+  return dir;
+}
+function agentEntry(id: string, official: boolean): Record<string, unknown> {
+  return {
+    id, display_name: id, role: "t", runtime: "claude_channel", status_provider: "claude_tmux",
+    workspace_path: `/tmp/${id}`, persona_file: `/tmp/${id}/SOUL.md`, team_official_member: official,
+  };
+}
+
+test("★비정규 팀원은 도구 설명에서 빠진다★ — 12명이 아니라 정규만", () => {
+  const prev = process.env.TEAM_AGENT_REGISTRY;
+  const dir = withRegistry([agentEntry("bill", true), agentEntry("codex", true), agentEntry("hermes", false)]);
+  try {
+    const db = freshDb(); // 표에는 bill·codex·hermes·demis 넷 다 있다
+    const desc = officialRoster(db);
+    expect(desc).toContain("bill");
+    expect(desc).toContain("codex");
+    expect(desc).not.toContain("hermes"); // ★레지스트리가 비정규라고 한 사람★
+    expect(desc).toContain("demis"); // 레지스트리에 없는 사람은 ★안 뺀다★ (모르는 것 ≠ 비정규)
+  } finally {
+    if (prev === undefined) delete process.env.TEAM_AGENT_REGISTRY; else process.env.TEAM_AGENT_REGISTRY = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("★레지스트리가 없으면 아무도 안 뺀다★ — 공개 clone 첫 부팅에서 명부가 통째로 비면 안 된다", () => {
+  const prev = process.env.TEAM_AGENT_REGISTRY;
+  const dir = mkdtempSync(join(tmpdir(), "mcp-roster-none-"));
+  process.env.TEAM_AGENT_REGISTRY = join(dir, "없는파일.json"); // 읽히지 않는다 → 빈 로스터
+  try {
+    const desc = officialRoster(freshDb());
+    for (const id of ["bill", "codex", "hermes", "demis"]) expect(desc).toContain(id);
+  } finally {
+    if (prev === undefined) delete process.env.TEAM_AGENT_REGISTRY; else process.env.TEAM_AGENT_REGISTRY = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("★설명을 좁히는 것이지 문을 좁히는 게 아니다★ — 비정규 팀원에게도 계속 물을 수 있다", async () => {
+  const prev = process.env.TEAM_AGENT_REGISTRY;
+  const dir = withRegistry([agentEntry("bill", true), agentEntry("hermes", false)]);
+  const db = freshDb();
+  const bus = fakeBus(db);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = bus.deps.fetchImpl;
+  try {
+    expect(officialRoster(db)).not.toContain("hermes"); // 설명에는 없는데
+    const tools = (buildMcpServer(db, "gd", "write") as unknown as {
+      _registeredTools: Record<string, { handler: (a: unknown, e: unknown) => Promise<{ content: { text: string }[]; isError?: boolean }> }>;
+    })._registeredTools;
+    const r = await tools.b3os_ask_teammate!.handler({ to: "hermes", question: "q", wait_seconds: 1 }, {});
+    expect(r.isError).toBeUndefined(); // ★묻는 것은 그대로 된다★
+    expect(r.content[0]!.text).not.toContain("등록된 팀원이 아니다");
+  } finally {
+    globalThis.fetch = realFetch;
+    if (prev === undefined) delete process.env.TEAM_AGENT_REGISTRY; else process.env.TEAM_AGENT_REGISTRY = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
