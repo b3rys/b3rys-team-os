@@ -415,7 +415,19 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
         "팀원에게 질문하고 그 답을 기다린다. 상대마다 고정된 1:1 방을 쓰므로 이어서 물으면 팀원이 앞 대화를 안다. " +
         "답이 제때 오면 답을, 늦으면 요청 번호와 함께 접수 상태를 돌려준다(요청은 살아 있다 — b3os_fetch_answer 로 회수).",
       inputSchema: {
-        to: z.string().min(1).describe("질문할 팀원 id (예: bill, codex)"),
+        // ★명부를 그때그때 읽어 설명에 싣는다★ — 손으로 적으면 팀원이 바뀔 때 갈린다.
+        //   왜 필요한가(실측 2026-08-07): 클라이언트가 "빌" 을 bill 로 ★음차로 추측★ 하고 있었고,
+        //   id 목록을 얻으려면 team_status 를 ★먼저 한 번 불러야★ 했다. 세션 첫 마디부터
+        //   "빌한테 물어봐" 라고 하면 추측이 된다. 도구 설명은 ★세션 시작 시 주어지므로★
+        //   여기 실으면 추가 호출 없이 정확해진다.
+        to: z
+          .string()
+          .min(1)
+          .describe(
+            `질문할 팀원 id. 지금 등록된 팀원: ${listAgents(db)
+              .map((a) => `${a.id}(${a.display_name})`)
+              .join(" · ")}`,
+          ),
         question: z.string().min(1).describe("질문 본문"),
         wait_seconds: z
           .number()
@@ -490,7 +502,10 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
               (r.stuckReason
                 // ★막힌 것은 '아직 안 왔다' 가 아니다★ — 기다려도 안 온다는 걸 그대로 말한다.
                 ? `${r.stuckReason}\n`
-                : `${to} 가 아직 답하지 않았습니다 (${Math.round((r.waitedMs ?? 0) / 1000)}초 기다림).\n`) +
+                // ★진행 알림은 클라이언트가 progressToken 을 줘야 나간다★ — 안 주는 클라이언트에서는
+                //   같은 판정이 ★한 번도 안 보인다.★ 그래서 ★보이는 자리(접수 문구)★ 에 같은 판정을 쓴다.
+                //   실측 2026-08-07: 클로드 코드는 토큰을 안 보내 진행 알림이 0건 도착했다.
+                : `${askProgress(db, r.requestId, to).label} (${Math.round((r.waitedMs ?? 0) / 1000)}초 기다림).\n`) +
               `요청 번호 ${r.requestId} — 질문은 살아 있습니다. 나중에 b3os_fetch_answer 로 받거나, ` +
               `늦게 오면 팀 리드의 평소 채널로 전달됩니다.`,
           },

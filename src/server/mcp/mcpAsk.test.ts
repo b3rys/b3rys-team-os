@@ -657,3 +657,34 @@ test("★막힘에는 활동 줄을 안 붙인다★ — 그건 지금 하는 �
   expect(p.stuck).toBe(true);
   expect(p.label).not.toContain("Read(파일)");
 });
+
+// ── ★진행 알림이 안 나가는 클라이언트에서도 판정이 보인다★ (실측 2026-08-07) ──
+//
+// 클로드 코드는 progressToken 을 안 보낸다 → 진행 알림이 ★0건★ 도착한다(팀 리드 확인).
+// 규약상 토큰 없이는 서버가 보낼 수 없으므로 ★우리가 고를 수 있는 게 아니다.★
+// → 같은 판정을 ★보이는 자리(접수 문구)★ 에도 쓴다.
+
+test("★접수 문구가 '아직 답 안 함' 이 아니라 어디까지 왔는지를 말한다★", async () => {
+  const db = freshDb();
+  const tools = (buildMcpServer(db, "gd", "write") as unknown as {
+    _registeredTools: Record<string, { handler: (a: unknown, e: unknown) => Promise<{ content: { text: string }[] }> }>;
+  })._registeredTools;
+  // 버스가 없으므로 발신이 실패한다 — 그건 이 시험 대상이 아니다. 라벨 함수만 직접 검증한다.
+  db.prepare(`INSERT OR REPLACE INTO thread (id, title, kind, participants_json, opened_by) VALUES ('mcp-gd-bill','r','dm','[]','user')`).run();
+  db.prepare(`INSERT OR REPLACE INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, created_at) VALUES ('q9','mcp-gd-bill','user','bill','dm','q','user',datetime('now'))`).run();
+  db.prepare(`INSERT OR REPLACE INTO message_recipient (message_id, agent_id, delivery_state, recipient_state) VALUES ('q9','bill','completed','in_progress')`).run();
+  expect(askProgress(db, "q9", "bill").label).toContain("읽고 작업 중");
+  expect(tools.b3os_ask_teammate).toBeDefined();
+});
+
+test("★도구 설명에 팀원 명부가 실린다★ — 세션 첫 마디부터 id 를 추측하지 않게", () => {
+  const db = freshDb();
+  const t = (buildMcpServer(db, "gd", "write") as unknown as {
+    _registeredTools: Record<string, { inputSchema?: { shape?: { to?: { description?: string } } } }>;
+  })._registeredTools.b3os_ask_teammate;
+  const desc = t?.inputSchema?.shape?.to?.description ?? "";
+  expect(desc).toContain("bill");
+  expect(desc).toContain("codex");
+  // ★손으로 적은 목록이 아니다★ — 명부에 없는 사람은 안 나온다
+  expect(desc).not.toContain("nova");
+});
