@@ -1,0 +1,181 @@
+/**
+ * ★배포에서 "무엇을 해야 하는가" 를 판단한다.★ 실행은 하지 않는다 — 판단만 찍는다.
+ *
+ * ■ 왜 이 파일이 따로 있나
+ * 실제 배포 스크립트(`scripts/deploy-live.sh`)는 ★git 추적 밖★ 이다(GD 머신 전용 ops · `.gitignore` 방침).
+ * 판단 로직을 거기 두면 ★리뷰도 시험도 공개도 안 된다.★ 그래서 판단은 추적되는 이 파일에 두고,
+ * 로컬 배포 스크립트는 이걸 ★부르기만★ 한다. (`!/scripts/*.test.ts` 규칙 덕에 시험은 자동으로 추적된다)
+ *
+ * ■ 판단 기준 — ★층마다 살아나는 방법이 다르다★
+ *   · `src/server/**` 등 → 프로세스가 기동할 때 메모리에 올린다 → ★재시작★
+ *   · `src/web/**` 등    → 빌드 결과물(`dist/web`)을 요청 시점에 읽는다 → ★빌드★ (재시작은 효과 없음)
+ *   · 그 외(skills·rules·docs) → 파일이 바뀐 순간 끝. ★아무것도 안 한다.★
+ * 2026-08-06 실측: `src/web` 만 바뀐 배포에 재시작을 하면 ★화면은 그대로다.★ 반대로 `src/server`
+ * 가 바뀐 배포에 빌드만 하면 ★옛 코드가 계속 돈다.★ 사람이 매번 이걸 고르고 있었고, 한 번 틀렸다.
+ *
+ * ■ ★모르면 멈춘다★
+ * 라이브가 커밋을 말해주지 않거나(옛 빌드·git 없음), 그 커밋이 이 저장소에 없으면(강제푸시·얕은 클론)
+ * ★"최신인가 보다" 로 넘어가지 않는다.★ blocked 로 끝내고 사람이 본다.
+ *
+ * 사용: bun run scripts/deploy-plan.ts [--health <url>] [--target <ref>] [--json]
+ *   종료코드 0 = 판단 성공(할 일이 없어도 0) · 2 = blocked(사람이 봐야 함) · 1 = 사용법·실행 오류
+ */
+import { spawnSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+/**
+ * 층별 경로. ★공유 코드(`src/shared`)와 의존성은 양쪽 모두에 든다★ — 어느 한쪽에만 넣으면
+ * 나머지 층이 옛 코드로 남는다. 애매하면 ★넓게 잡는 쪽이 안전하다★(불필요한 작업 < 누락).
+ */
+export const LAYER_PATHS = {
+  server: ["src/server", "src/shared", "package.json", "bun.lock", "bunfig.toml"],
+  web: ["src/web", "src/shared", "package.json", "bun.lock", "vite.config.ts", "postcss.config.js"],
+} as const;
+
+export type Layer = keyof typeof LAYER_PATHS;
+
+export interface LivePoint {
+  commit: string | null;
+}
+
+export interface PlanInput {
+  live: Record<Layer, LivePoint>;
+  target: string;
+  /** 주입 가능하게 둔다 — 시험이 진짜 저장소 상태에 기대지 않도록. */
+  changedFiles: (from: string, to: string, paths: readonly string[]) => string[];
+  commitExists: (sha: string) => boolean;
+}
+
+export interface Plan {
+  blocked: string | null;
+  actions: { restart: boolean; build: boolean };
+  changed: Record<Layer, string[]>;
+  target: string;
+}
+
+/** ★판단 본체.★ 순수 함수다 — 저장소도 네트워크도 안 건드린다(그래서 시험이 진짜를 잰다). */
+export function planDeploy(input: PlanInput): Plan {
+  const changed: Record<Layer, string[]> = { server: [], web: [] };
+  for (const layer of Object.keys(LAYER_PATHS) as Layer[]) {
+    const from = input.live[layer].commit;
+    if (!from) {
+      return {
+        blocked: `${layer} 층이 자기 커밋을 말하지 않는다(표식 없음 또는 git 을 못 읽음). ` +
+          `모르는 상태를 '최신' 으로 치지 않는다 — 배포 전에 확인해라.`,
+        actions: { restart: false, build: false },
+        changed,
+        target: input.target,
+      };
+    }
+    if (!input.commitExists(from)) {
+      return {
+        blocked: `${layer} 층이 말한 커밋 ${from.slice(0, 8)} 이 이 저장소에 없다(강제푸시·얕은 클론 가능성). ` +
+          `무엇이 바뀌었는지 계산할 수 없다.`,
+        actions: { restart: false, build: false },
+        changed,
+        target: input.target,
+      };
+    }
+    changed[layer] = input.changedFiles(from, input.target, LAYER_PATHS[layer]);
+  }
+  return {
+    blocked: null,
+    // ★바뀐 층에만 그 층의 동작을 한다.★ 둘 다 안 바뀌었으면 아무것도 안 한다(재시작도 빌드도).
+    actions: { restart: changed.server.length > 0, build: changed.web.length > 0 },
+    changed,
+    target: input.target,
+  };
+}
+
+/**
+ * ★배포 후 검증은 '바뀐 층만' 본다.★ 전부 target 과 같은지로 보면, 화면만 바꾼 정상 배포에서
+ * 서버 층이 옛 커밋인 것을 ★실패로 오판한다★ (2026-08-06 실측 반례).
+ */
+export function verifyAfterDeploy(plan: Plan, after: Record<Layer, LivePoint>): { ok: boolean; problems: string[] } {
+  const problems: string[] = [];
+  for (const layer of Object.keys(LAYER_PATHS) as Layer[]) {
+    const didAct = layer === "server" ? plan.actions.restart : plan.actions.build;
+    if (!didAct) continue; // 안 건드린 층은 옛 커밋이 정상이다
+    const now = after[layer].commit;
+    if (now !== plan.target) {
+      problems.push(`${layer} 층이 아직 ${now ? now.slice(0, 8) : "모름"} 이다 — ${plan.target.slice(0, 8)} 이어야 한다`);
+    }
+  }
+  return { ok: problems.length === 0, problems };
+}
+
+// ── 실제 저장소·라이브를 읽는 얇은 껍데기 (위 순수 함수에 주입한다) ──────────────
+
+function git(args: string[]): { ok: boolean; out: string } {
+  const r = spawnSync("git", args, { cwd: REPO_ROOT, encoding: "utf8" });
+  return { ok: r.status === 0, out: (r.stdout ?? "").trim() };
+}
+
+export function realChangedFiles(from: string, to: string, paths: readonly string[]): string[] {
+  // ★A..B 가 아니라 A B★ — 비선형 이력(롤백·강제푸시)에서도 두 지점 비교는 성립한다.
+  const r = git(["diff", "--name-only", from, to, "--", ...paths]);
+  return r.ok && r.out ? r.out.split("\n").filter(Boolean) : [];
+}
+
+export function realCommitExists(sha: string): boolean {
+  return git(["cat-file", "-e", `${sha}^{commit}`]).ok;
+}
+
+async function fetchLive(healthUrl: string): Promise<Record<Layer, LivePoint>> {
+  const res = await fetch(healthUrl, { signal: AbortSignal.timeout(5000) });
+  const body = (await res.json()) as { server?: { commit?: unknown }; web?: { commit?: unknown } };
+  const pick = (v: unknown): string | null => (typeof v === "string" && /^[0-9a-f]{40}$/.test(v) ? v : null);
+  return { server: { commit: pick(body.server?.commit) }, web: { commit: pick(body.web?.commit) } };
+}
+
+if (import.meta.main) {
+  const argv = process.argv.slice(2);
+  const arg = (name: string, fallback: string): string => {
+    const i = argv.indexOf(name);
+    return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
+  };
+  const healthUrl = arg("--health", `http://127.0.0.1:${process.env.TEAM_HTTP_PORT ?? 7878}/health`);
+  const targetRef = arg("--target", "origin/main");
+  const asJson = argv.includes("--json");
+
+  const targetSha = git(["rev-parse", targetRef]);
+  if (!targetSha.ok) {
+    console.error(`✗ 목표를 못 읽는다: ${targetRef}`);
+    process.exit(1);
+  }
+
+  let live: Record<Layer, LivePoint>;
+  try {
+    live = await fetchLive(healthUrl);
+  } catch (e) {
+    console.error(`✗ 라이브에 물어보지 못했다(${healthUrl}): ${(e as Error).message}`);
+    console.error(`  서버가 떠 있는지 확인해라. ★응답이 없다고 '안 떠 있다'로 단정하지 마라★ — 주소·포트도 본다.`);
+    process.exit(2);
+  }
+
+  const plan = planDeploy({
+    live,
+    target: targetSha.out,
+    changedFiles: realChangedFiles,
+    commitExists: realCommitExists,
+  });
+
+  if (asJson) {
+    console.log(JSON.stringify(plan, null, 2));
+  } else {
+    const short = (s: string | null) => (s ? s.slice(0, 8) : "모름");
+    console.log(`라이브: server=${short(live.server.commit)}  web=${short(live.web.commit)}`);
+    console.log(`목표:   ${short(plan.target)} (${targetRef})`);
+    if (plan.blocked) {
+      console.log(`\n★멈춤★ — ${plan.blocked}`);
+    } else {
+      console.log(`바뀐 층: server ${plan.changed.server.length}개 · web ${plan.changed.web.length}개`);
+      const todo = [plan.actions.restart ? "재시작" : null, plan.actions.build ? "빌드" : null].filter(Boolean);
+      console.log(`→ 할 일: ${todo.length ? todo.join(" + ") : "없음 (이미 반영돼 있다)"}`);
+    }
+  }
+  process.exit(plan.blocked ? 2 : 0);
+}
