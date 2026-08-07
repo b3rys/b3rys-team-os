@@ -500,3 +500,49 @@ test("소유권 판정이 meta 를 읽지 않는다 — 위조한 mcp_actor 로 
   expect(fetchAnswer(db, r.requestId, "hermes").found).toBe(false); // meta 를 믿었다면 열렸다
   expect(fetchAnswer(db, r.requestId, "gd").found).toBe(true); // 실제 발신자 기준이라 본인은 그대로
 });
+
+// ── ★깨우기 회귀★ (2026-08-07 라이브 사고) ──
+//
+// #279 로 리드를 'user' 로 바꾼 뒤, 질문은 DB 에 들어가는데 ★아무도 안 깨웠다.★
+// source='user' 는 dispatch 표시가 없으면 수신자 행이 ★'completed' 로 박혀★ 디스패처가
+// 영영 안 집는다(messages.ts:152). ★메시지는 멀쩡히 있고 팀원만 모른다.★
+//
+// ★이 시험은 가짜 버스를 쓰지 않는다.★ 가짜는 이 규칙을 안 갖고 있어서 넣어봐야 못 잡는다 —
+// 어제 우리를 통과시킨 그 함정이다. ★진짜 insert 경로(acceptInbound)에 그대로 넣어서 잰다.★
+import { acceptInbound } from "../db/inboxQueries";
+
+function postThroughRealBus(db: Database, extra: Record<string, unknown>) {
+  return acceptInbound(
+    db,
+    {
+      from_agent_id: "user", to_agent_id: "bill", body: "질문 " + JSON.stringify(extra),
+      type: "dm", priority: "normal", source: "user", thread_id: "mcp-gd-bill", ...extra,
+    } as never,
+    { dedupeWindowSec: 0 },
+  );
+}
+const recipientState = (db: Database, messageId: string) =>
+  db.prepare(`SELECT delivery_state FROM message_recipient WHERE message_id = ? AND agent_id = 'bill'`)
+    .get(messageId) as { delivery_state: string } | undefined;
+
+test("★dispatch 표시가 있으면 배달 대기(pending) 로 들어간다★ — 그래야 팀원을 깨운다", () => {
+  const db = freshDb();
+  const r = postThroughRealBus(db, { dispatch: true });
+  if (!r.ok) throw new Error("접수됐어야 한다");
+  expect(recipientState(db, r.stored.id)?.delivery_state).toBe("pending");
+});
+
+test("★대조군 — 표시가 없으면 completed 로 박혀 영영 안 깨운다★ (2026-08-07 에 실제로 이랬다)", () => {
+  const db = freshDb();
+  const r = postThroughRealBus(db, {});
+  if (!r.ok) throw new Error("접수됐어야 한다");
+  expect(recipientState(db, r.stored.id)?.delivery_state).toBe("completed"); // ← 이게 사고였다
+});
+
+test("★askTeammate 가 보내는 payload 에 dispatch 가 실린다★", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "질문" }, nowait);
+  expect(bus.calls[0]!.dispatch).toBe(true);
+  expect(bus.calls[0]!.source).toBe("user"); // 리드는 user 로 나간다(#279) — 그래서 이 표시가 꼭 필요하다
+});

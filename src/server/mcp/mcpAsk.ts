@@ -153,6 +153,12 @@ export async function postQuestion(
       type: "dm",
       priority: "normal",
       source: env.source,
+      // ★이게 없으면 아무도 안 깨운다★ (2026-08-07 라이브): source='user' 는 dispatch 표시가 없으면
+      //   수신자 행이 ★'completed' 로 박혀서 들어간다★(messages.ts:152) → 디스패처가 'pending' 만
+      //   집으므로 ★영영 안 집는다.★ 메시지는 DB 에 멀쩡히 있는데 팀원은 모른다.
+      //   대시보드 1:1 이 쓰는 그 표시와 같은 것이다(envelopeSchema:71 "채널-poller 없는 user 메시지").
+      //   ★#279 에서 리드를 'user' 로 바꾸면서 이걸 같이 안 붙였다.★
+      dispatch: true,
       thread_id: env.roomId,
       meta,
     }),
