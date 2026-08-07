@@ -1,12 +1,12 @@
 /**
  * ★라이브가 자기 신원을 말한다★ — "지금 돌고 있는 게 어느 커밋인가" 를 물어볼 수 있게 한다.
  *
- * ■ 왜 필요한가 (proposal prop_8e91927ed38b · 팀장님 승인 2026-08-07)
+ * ■ 왜 필요한가
  * 배포 후 "이게 올라갔나" 를 물을 데가 없어서, 매번 사람이 ★프로세스 기동시각★ 과 ★커밋시각★ 을
  * 손으로 대조해 추론했다. 추론이라 틀린다 — 2026-08-05 에 실제로 틀려서, 라이브 트리가 옛 커밋인
  * 상태로 페르소나 재렌더가 돌았고 ★새 룰이 들어간 파일에 옛 룰이 되살아났다.★
  *
- * ■ ★층이 둘이다 — 커밋 하나로는 못 말한다★ (ames 반대리뷰 2026-08-06, 실측 반례로 확인)
+ * ■ ★층이 둘이다 — 커밋 하나로는 못 말한다★ (아래 실측 반례로 확인)
  * 서버 코드와 화면 코드는 ★살아나는 방법이 다르다.★
  *   · `src/server/**` → 프로세스가 기동할 때 메모리에 올린다 → ★재시작★ 해야 바뀐다
  *   · `src/web/**`    → 빌드 결과물(`dist/web`)을 요청 시점에 디스크에서 읽는다 → ★빌드★ 해야 바뀐다
@@ -53,7 +53,7 @@ function gitDirs(repoRoot: string): { headDir: string; commonDir: string } | nul
   const m = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf8"));
   if (!m) return null;
   const raw = m[1]!.trim();
-  // ★상대경로일 수 있다★ (codex 리뷰 2026-08-07): `git worktree add` 는 절대경로를 쓰지만
+  // ★상대경로일 수 있다★: `git worktree add` 는 절대경로를 쓰지만
   //   서브모듈 등은 상대경로를 쓴다. 그대로 쓰면 ★프로세스 cwd 기준★ 으로 풀려서, 멀쩡한 배치를
   //   cwd 가 다르다는 이유로 null 로 오판한다. ★기준은 언제나 repoRoot 다.★
   const headDir = isAbsolute(raw) ? raw : resolve(repoRoot, raw);

@@ -40,7 +40,7 @@ export const LAYER_PATHS = {
     "tsconfig.json",
     "vite.config.ts",
     "postcss.config.js",
-    // ★실측으로 넣었다★ (codex 리뷰 2026-08-07): postcss 가 tailwindcss 를 불러 쓰고,
+    // ★실측으로 넣었다★: postcss 가 tailwindcss 를 불러 쓰고,
     //   이 파일이 content·safelist·theme 를 정한다. safelist 에 유틸 하나를 넣고 빌드해보니
     //   ★산출물이 바뀌었다★ — index-4M85XvLX.css(53921B) → index-CWIvisIW.css(54140B), 원복하면 원래 해시.
     //   빠져 있으면 이 파일만 바꾼 배포가 ★조용히 누락된다.★

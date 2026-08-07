@@ -51,7 +51,7 @@ test("★워크트리(.git 이 파일)에서도 읽는다★ — HEAD 는 gitdir
 });
 
 test("★gitdir 이 상대경로여도 repoRoot 기준으로 푼다★ — 프로세스 cwd 에 맡기지 않는다", () => {
-  // codex 리뷰 2026-08-07: worktree 는 절대경로를 쓰지만 서브모듈 등은 상대경로를 쓴다.
+  // worktree 는 절대경로를 쓰지만 서브모듈 등은 상대경로를 쓴다.
   // cwd 기준으로 풀면 ★멀쩡한 배치를 cwd 가 다르다는 이유로 null 로 오판한다.★
   const root = fresh();
   mkdirSync(join(root, "nested", ".gitstore"), { recursive: true });
