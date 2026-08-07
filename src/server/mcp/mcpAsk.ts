@@ -19,6 +19,8 @@ export const THREAD_ID_MAX = 32;
 
 export interface AskResult {
   status: "answered" | "pending";
+  /** 기다려도 안 오는 상태로 끝났을 때의 사유(막힘·배달실패·만료). 정상 시간 초과면 없다. */
+  stuckReason?: string;
   /** 질문 message id = 요청 번호. pending 이어도 이 번호로 나중에 회수한다. */
   requestId: string;
   roomId: string;
@@ -234,6 +236,50 @@ export function lateAnswerPush(
   };
 }
 
+/**
+ * ★진행 상황을 '몇 초' 대신 '어디까지 왔나' 로 말한다★ (팀 리드 2026-08-07:
+ * "그냥 몇초가 지났다는 것만 나오니깐.. 별로다").
+ *
+ * 근거는 ★수신자 행 두 칸★ 이다 — delivery_state(전달이 어디까지) · recipient_state(그 사람이 어디까지).
+ * ★런타임과 무관하다★: 터미널 화면이 있는 팀원은 5명뿐이고 나머지 7명은 화면 자체가 없다.
+ * 이 두 칸은 ★12명 전부 똑같이★ 남으므로 누구에게 물어도 같은 말이 나온다.
+ *
+ * ★막힌 것을 알려주는 게 이 함수의 값이다★ — blocked·dead_letter 는 ★영영 안 온다★.
+ * 그걸 모르면 사용자는 상한까지 기다린 뒤에야 실패를 안다.
+ */
+/**
+ * ★done 필드를 두지 않는다★ (빌 리뷰 2026-08-07). 처음엔 넣었는데 ★아무도 안 읽었고★,
+ * 그냥 죽은 필드가 아니라 ★장전된 총★ 이었다: acknowledged 에 done=true 를 주고 있었는데
+ * 우리 코드는 그 상태를 ★"engaged, not done"★ 이라고 못박아 뒀다(ackClose.ts:122).
+ * ★이름은 done 인데 값은 '아직 안 끝났다' 일 때 true★ 라, 다음 사람이 "done 이면 기다림 끝" 으로
+ * 읽으면 ★답이 오기 전에 끊는다.★ 안 쓰는 값을 남기지 않는다.
+ */
+export type AskProgress = { label: string; stuck: boolean };
+
+export function askProgress(db: Database, requestId: string, to: string): AskProgress {
+  const row = db
+    .prepare(`SELECT delivery_state, recipient_state FROM message_recipient WHERE message_id = ? AND agent_id = ?`)
+    .get(requestId, to) as { delivery_state: string; recipient_state: string } | undefined;
+  if (!row) return { label: `${to} 에게 전달 준비 중`, stuck: false };
+
+  // ★막힘이 먼저다★ — 이 상태들은 기다려도 안 온다. 초를 세는 것보다 이걸 말해야 한다.
+  if (row.delivery_state === "blocked") return { label: `${to} 에게 배달이 막혔습니다 (더 기다려도 안 옵니다)`, stuck: true };
+  if (row.delivery_state === "dead_letter") return { label: `${to} 에게 배달 실패로 종료됐습니다`, stuck: true };
+  if (row.delivery_state === "expired") return { label: `${to} 에게 보낸 것이 시간이 지나 만료됐습니다`, stuck: true };
+
+  // 그 사람이 어디까지 갔나 — 이쪽이 전달 상태보다 뒤에 있으므로 먼저 본다.
+  if (row.recipient_state === "acknowledged" || row.recipient_state === "completed") {
+    return { label: `${to} 가 답을 쓰는 중입니다`, stuck: false };
+  }
+  if (row.recipient_state === "in_progress") return { label: `${to} 가 읽고 작업 중입니다`, stuck: false };
+
+  // 아직 안 읽음 — 전달이 어디까지 갔는지로 나눈다.
+  if (row.delivery_state === "pending" || row.delivery_state === "dispatching") {
+    return { label: `${to} 에게 전달 중입니다`, stuck: false };
+  }
+  return { label: `${to} 가 아직 열어보지 않았습니다`, stuck: false };
+}
+
 export interface AskOptions {
   waitMs: number;
   pollMs: number;
@@ -245,7 +291,7 @@ export interface AskOptions {
    * 바이트를 흘리면 연결이 살아 있고, 부수적으로 사용자 화면에 "준비 중" 이 보인다.
    * ★알림 실패가 기다림을 깨지 않는다★ — 던져도 삼킨다(알림은 부가 기능이다).
    */
-  onWait?: (elapsedMs: number) => void | Promise<void>;
+  onWait?: (elapsedMs: number, requestId: string) => void | Promise<void>;
 }
 
 /**
@@ -276,23 +322,31 @@ export async function askTeammate(
   awaiting.add(sent.id);
   try {
     // 넣자마자 한 번 본다 — 아주 빠른 답(캐시된 상태 질의 등)이 첫 대기를 통째로 기다리지 않게.
+    let stuckReason: string | undefined;
     for (;;) {
       const answer = findAnswer(db, roomId, sent.id, env.to);
       if (answer) {
         return { status: "answered", requestId: sent.id, roomId, answer, waitedMs: now() - started };
       }
+      // ★막힌 걸 알면서 상한까지 세지 않는다★ — blocked·dead_letter·expired 는 기다려도 안 온다.
+      //   (판정을 만들어놓고 안 쓰면 그건 계산만 한 것이다 — 빌이 #279 에서 잡은 그 모양.)
+      const prog = askProgress(db, sent.id, env.to);
+      if (prog.stuck) {
+        stuckReason = prog.label;
+        break;
+      }
       if (now() - started >= opts.waitMs) break;
       // ★알림을 먼저, 그다음 잠깐 잔다★ — 순서를 바꾸면 첫 알림이 pollMs 만큼 늦어진다.
       if (opts.onWait) {
         try {
-          await opts.onWait(now() - started);
+          await opts.onWait(now() - started, sent.id);
         } catch {
           /* 알림 실패가 기다림을 깨지 않는다 */
         }
       }
       await sleep(opts.pollMs);
     }
-    return { status: "pending", requestId: sent.id, roomId, waitedMs: now() - started };
+    return { status: "pending", requestId: sent.id, roomId, waitedMs: now() - started, stuckReason };
   } finally {
     // ★예외로 빠져나가도 반드시 지운다★ — 남으면 그 질문의 늦은 답이 영원히 안 밀린다(조용한 손실).
     awaiting.delete(sent.id);

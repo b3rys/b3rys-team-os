@@ -10,6 +10,7 @@ import {
   askTeammate,
   fetchAnswer,
   postQuestion,
+  askProgress,
   busIdentityFor,
   lateAnswerPush,
   THREAD_ID_MAX,
@@ -545,4 +546,84 @@ test("★askTeammate 가 보내는 payload 에 dispatch 가 실린다★", async
   await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "질문" }, nowait);
   expect(bus.calls[0]!.dispatch).toBe(true);
   expect(bus.calls[0]!.source).toBe("user"); // 리드는 user 로 나간다(#279) — 그래서 이 표시가 꼭 필요하다
+});
+
+// ── ★진행 표시: '몇 초' 가 아니라 '어디까지 왔나'★ (팀 리드 2026-08-07) ──
+
+function setRecipient(db: Database, messageId: string, agent: string, delivery: string, recipient: string) {
+  db.prepare(`UPDATE message_recipient SET delivery_state = ?, recipient_state = ? WHERE message_id = ? AND agent_id = ?`)
+    .run(delivery, recipient, messageId, agent);
+}
+
+test("★단계마다 다른 말을 한다★ — 전달 중 · 안 열어봄 · 작업 중 · 답 쓰는 중", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  const r = await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "질문" }, nowait);
+  db.prepare(`INSERT OR IGNORE INTO message_recipient (message_id, agent_id, delivery_state, recipient_state) VALUES (?, 'bill', 'pending', 'open')`)
+    .run(r.requestId);
+
+  const label = () => askProgress(db, r.requestId, "bill").label;
+  expect(label()).toContain("전달 중");
+  setRecipient(db, r.requestId, "bill", "wake_dispatched", "open");
+  expect(label()).toContain("아직 열어보지 않았");
+  setRecipient(db, r.requestId, "bill", "completed", "in_progress");
+  expect(label()).toContain("읽고 작업 중");
+  setRecipient(db, r.requestId, "bill", "completed", "acknowledged");
+  expect(label()).toContain("답을 쓰는 중");
+  // ★네 단계가 서로 다른 말이어야 의미가 있다★ — 같은 말이면 '몇 초' 와 다를 게 없다
+});
+
+test("★막힌 것은 막혔다고 말한다★ — 기다려도 안 오는데 초만 세면 안 된다", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  const r = await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "질문" }, nowait);
+  db.prepare(`INSERT OR IGNORE INTO message_recipient (message_id, agent_id, delivery_state, recipient_state) VALUES (?, 'bill', 'pending', 'open')`)
+    .run(r.requestId);
+  for (const [state, word] of [["blocked", "막혔"], ["dead_letter", "배달 실패"], ["expired", "만료"]] as const) {
+    setRecipient(db, r.requestId, "bill", state, "open");
+    const p = askProgress(db, r.requestId, "bill");
+    expect(p.label).toContain(word);
+    expect(p.stuck).toBe(true); // ★호출부가 이걸 보고 일찍 끝낼 수 있다★
+  }
+  // ★대조군★ — 정상 진행은 stuck 이 아니다
+  setRecipient(db, r.requestId, "bill", "completed", "in_progress");
+  expect(askProgress(db, r.requestId, "bill").stuck).toBe(false);
+});
+
+test("수신자 행이 아직 없어도 죽지 않는다", () => {
+  const db = freshDb();
+  expect(askProgress(db, "없는번호", "bill").label).toContain("전달 준비 중");
+});
+
+test("★막히면 상한까지 안 기다리고 바로 끝낸다★ — 판정을 계산만 하지 않는다", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  let polls = 0;
+  const r = await askTeammate(
+    db, bus.deps, { from: "gd", to: "bill", body: "질문" },
+    {
+      waitMs: 60_000, pollMs: 1,
+      sleep: async () => {
+        polls++;
+        // 첫 대기 직후 배달이 막힌 상태로 바꾼다
+        db.prepare(`INSERT OR REPLACE INTO message_recipient (message_id, agent_id, delivery_state, recipient_state) VALUES ('q1', 'bill', 'blocked', 'open')`).run();
+      },
+      now: (() => { let t = 0; return () => (t += 10); })(),
+    },
+  );
+  expect(r.status).toBe("pending");
+  expect(r.stuckReason).toContain("막혔");
+  expect(polls).toBeLessThan(5); // ★상한(60초)까지 세지 않았다★
+});
+
+test("★대조군 — 안 막히면 상한까지 기다린다★", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  let polls = 0;
+  const r = await askTeammate(
+    db, bus.deps, { from: "gd", to: "bill", body: "질문" },
+    { waitMs: 50, pollMs: 1, sleep: async () => { polls++; }, now: (() => { let t = 0; return () => (t += 10); })() },
+  );
+  expect(r.stuckReason).toBeUndefined();
+  expect(polls).toBeGreaterThanOrEqual(4); // 50/10 = 5회쯤 돈다
 });

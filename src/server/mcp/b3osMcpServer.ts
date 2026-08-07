@@ -16,7 +16,7 @@ import { listTasks, createTask, updateTask } from "../db/taskQueries";
 import { recallDmMessages } from "../db/dmCapture";
 import { classifyAll } from "../lib/health";
 import { leadActorId } from "../lib/opAuth"; // ★이름만 재사용★ — 신뢰 규칙(루프백=리드)은 쓰지 않는다
-import { askTeammate, fetchAnswer } from "./mcpAsk";
+import { askTeammate, fetchAnswer, askProgress } from "./mcpAsk";
 
 export const MCP_NAME = "b3os-mcp";
 export const MCP_VERSION = "0.0.3-m2";
@@ -451,14 +451,15 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
       const token = meta?.progressToken;
       const onWait =
         token !== undefined && send
-          ? async (elapsedMs: number) => {
+          ? async (elapsedMs: number, requestId: string) => {
               await send({
                 method: "notifications/progress",
                 params: {
                   progressToken: token,
                   progress: Math.round(elapsedMs / 1000),
                   total: Math.round(waitMs / 1000),
-                  message: `${to} 가 답을 준비하는 중 (${Math.round(elapsedMs / 1000)}초)`,
+                  // ★'몇 초' 가 아니라 '어디까지 왔나'★ (팀 리드 2026-08-07). 초는 뒤에 붙인다.
+                  message: `${askProgress(db, requestId, to).label} (${Math.round(elapsedMs / 1000)}초)`,
                 },
               });
             }
@@ -486,12 +487,15 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
           {
             type: "text",
             text:
-              `${to} 가 아직 답하지 않았습니다 (${Math.round((r.waitedMs ?? 0) / 1000)}초 기다림).\n` +
+              (r.stuckReason
+                // ★막힌 것은 '아직 안 왔다' 가 아니다★ — 기다려도 안 온다는 걸 그대로 말한다.
+                ? `${r.stuckReason}\n`
+                : `${to} 가 아직 답하지 않았습니다 (${Math.round((r.waitedMs ?? 0) / 1000)}초 기다림).\n`) +
               `요청 번호 ${r.requestId} — 질문은 살아 있습니다. 나중에 b3os_fetch_answer 로 받거나, ` +
               `늦게 오면 팀 리드의 평소 채널로 전달됩니다.`,
           },
         ],
-        structuredContent: { status: "pending", request_id: r.requestId, thread_id: r.roomId },
+        structuredContent: { status: "pending", request_id: r.requestId, thread_id: r.roomId, stuck: r.stuckReason ?? null },
       };
     },
   );
