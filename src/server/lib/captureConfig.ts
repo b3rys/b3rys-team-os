@@ -92,7 +92,11 @@ export function setRouterEnabled(db: Database, on: boolean): void {
  * 배포하면 ★쓰고 있던 사람이 그 순간 끊긴다★ (그리고 끊긴 창이 그 사람의 연락 수단이다).
  */
 export function isMcpEnabled(db: Database): boolean {
-  return getSetting(db, "mcp_enabled") === "true";
+  // ★기본은 켜짐★ (팀 리드 2026-08-07: "그냥 기본을 켜기로 해" · "복잡하게 하지 말자").
+  //   이 스위치는 ★끄는 스위치★ 다 — 끈 적이 없으면 켜져 있다. 그래서 "false 가 아니면 켜짐" 으로 읽는다.
+  //   앞선 설계(기본 꺼짐)는 ★쓰던 사람을 끊지 않으려고 구제 마이그레이션을 달아야 했고★,
+  //   그마저도 기록이 안 남는 읽기 전용 사용은 못 살렸다. 기본을 켜면 그 장치가 통째로 없어진다.
+  return getSetting(db, "mcp_enabled") !== "false";
 }
 
 export function setMcpEnabled(db: Database, on: boolean): void {

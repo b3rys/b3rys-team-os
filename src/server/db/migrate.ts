@@ -841,20 +841,6 @@ export function runBusMigration(db: Database): void {
     // 진행 표시용 — 그 팀원이 지금 무엇을 하고 있나. last_log_line 은 화면 맨 아랫줄(고정 장식)이라
     // 늘 "auto mode on" 이었다. 그 칸은 health 판정이 이미 쓰고 있으므로 건드리지 않고 따로 둔다.
     "ALTER TABLE agent_status ADD COLUMN activity_line TEXT",
-    // ★이미 MCP 를 쓰던 설치만 켜둔다★ — 기본은 꺼짐인데, 그대로 배포하면 ★쓰던 사람이 그 순간 끊긴다★
-    //   (그리고 끊긴 창이 그 사람이 우리에게 알릴 수단이다). 새 설치(공개 clone)는 이 기록이 없으니
-    //   행이 안 생기고 ★기본 꺼짐 그대로★ 다.
-    //   ★`mcp.%` 로 넓게 잡으면 안 된다★ (dex 리뷰): 인증 실패·미등록 신원·게이트 거절이 전부
-    //   `mcp.http.denied` 로 남는다. 즉 ★외부 스캐너가 한 번 두드리기만 해도★ 다음 부팅에
-    //   공개 설치가 스스로 열린다. 통과한 흔적만 센다 — 아래는 전부 ★신원이 확인된 뒤에★ 쓰인다.
-    //   목록이 낡을 걱정은 없다: 이 백필이 의미를 갖는 건 행이 없는 동안뿐이고, 그동안엔
-    //   창구가 꺼져 있어 새 mcp.* 기록 자체가 생기지 않는다.
-    //   ★보장 범위는 여기까지다★ (codex 리뷰): stdio 의 ★읽기 도구는 감사기록을 안 남긴다.★
-    //   = "이미 쓰던 설치를 전부 살린다" 가 아니라 ★"HTTP 로 썼거나, 기록이 남는 stdio 쓰기를 쓴 설치"★ 다.
-    //   읽기만 쓰던 stdio 설치는 신호가 없어 꺼진 채 올라온다 — 사람이 한 번 켜야 한다.
-    "INSERT OR IGNORE INTO setting(key,value) SELECT 'mcp_enabled','true' " +
-      "WHERE EXISTS(SELECT 1 FROM audit_event WHERE action IN " +
-      "('mcp.http.request','mcp.send_message','mcp.ask_teammate','mcp.kanban_add','mcp.kanban_update') LIMIT 1)",
   ];
   for (const stmt of alterStatements) {
     try {
