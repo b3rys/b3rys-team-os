@@ -5,7 +5,7 @@ import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
 import { setMcpEnabled } from "../lib/captureConfig";
 import { buildMcpHttpApp } from "./mcpHttpRoute";
-import { buildMcpServer, WRITE_TOOL_NAMES, resolveActorStrict, resolveActor } from "./b3osMcpServer";
+import { buildMcpServer, WRITE_TOOL_NAMES, resolveActorStrict, resolveActor, main as stdioMain } from "./b3osMcpServer";
 import type { McpAuthConfig, McpAuthResult } from "./mcpAuth";
 
 function addAgent(d: Database, id: string, name: string): void {
@@ -345,4 +345,24 @@ test("★대조군★ — 켜면 그대로 통과한다", async () => {
   const db = freshDb(); // freshDb 가 켜둔다
   const app = buildMcpHttpApp(db, { authConfig: CFG, authenticate: async () => allow("demis", "write") });
   expect((await app.request(post(INIT))).status).toBe(200);
+});
+
+// ── ★스위치는 창구 전체를 끈다★ (dex 리뷰 2026-08-07) ──
+//
+// HTTP 만 막으면 ★같은 기계에서 stdio 로 그대로 들어온다.★ 그러면 "MCP 연결 off" 라고 적힌 화면과
+// 실제 동작이 어긋난다 — 스위치가 낼 수 있는 최악의 실패다(꺼진 줄 알고 열려 있다).
+
+test("★꺼져 있으면 stdio 로도 안 붙는다★", async () => {
+  const d = new Database(":memory:");
+  migrate(d); // 새 설치 = 꺼짐
+  let connected = false;
+  await expect(stdioMain(d, async () => { connected = true; })).rejects.toThrow(/mcp_disabled/);
+  expect(connected).toBe(false); // ★붙기 전에 멈춘다★
+});
+
+test("★대조군 — 켜져 있으면 stdio 가 붙는다★", async () => {
+  const d = freshDb(); // setMcpEnabled(true)
+  let connected = false;
+  await stdioMain(d, async () => { connected = true; });
+  expect(connected).toBe(true);
 });

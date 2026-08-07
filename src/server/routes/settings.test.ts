@@ -12,6 +12,7 @@ import { migrate } from "../db/migrate";
 import { appendAudit, listAgents } from "../db/queries";
 import { syncRegistry } from "../lib/registry";
 import { allowedRuntimes, createSettingsApp, MAX_OFFICIAL_TEAM_MEMBERS, publicRuntimeOptions, removePathWithRetries } from "./settings";
+import { isMcpEnabled } from "../lib/captureConfig";
 import { MEMBERS_ROOT } from "../lib/personaTemplates";
 // 사용자가 붙여넣는 최종 JSON 은 서버 매니페스트 + 이 변환의 합성이다. 접합부를 검사하려고 가져온다.
 import { socketManifest } from "../../web/components/AgentSlack";
@@ -1663,5 +1664,30 @@ describe("system-op: MCP 창구 토글", () => {
     expect(on.mcp_enabled).toBe(true);
     const off = await (await app.request("/system-op", patch({ mcp_enabled: false }))).json();
     expect(off.mcp_enabled).toBe(false);
+  });
+
+  // ── ★공개 빌드 차단은 "소스에 조건식이 있다" 가 아니라 실제 응답으로 재야 한다★ (dex 리뷰 2026-08-07) ──
+  //   조건식이 남아 있어도 상수를 잘못 읽거나 응답이 새면 소스 검사는 초록불이다.
+  //   그래서 publicBuild 를 주입받게 고치고, ★같은 프로세스에서 양쪽 분기를 다 요청해 본다.★
+
+  test("★공개 빌드 GET 응답에는 MCP 칸이 아예 없다★ — 그런 기능이 있다는 것도 안 보인다", async () => {
+    const { app } = setup(AGENTS, { publicBuild: true });
+    const s = await (await app.request("/system-op")).json();
+    expect("mcp_enabled" in s).toBe(false);
+    expect(JSON.stringify(s)).not.toContain("mcp");
+  });
+
+  test("★공개 빌드는 PATCH 로도 못 켠다★ — 화면을 숨겨도 요청은 직접 보낼 수 있다", async () => {
+    const { app, db } = setup(AGENTS, { publicBuild: true });
+    const r = await app.request("/system-op", patch({ mcp_enabled: true }));
+    expect(r.status).toBe(200); // 다른 칸(router 등)까지 막지는 않는다 — MCP 만 무시한다
+    expect(isMcpEnabled(db)).toBe(false); // ★DB 가 안 바뀌었다★
+    expect("mcp_enabled" in (await r.json())).toBe(false);
+  });
+
+  test("★대조군 — 내부 빌드에서는 같은 요청이 실제로 켠다★", async () => {
+    const { app, db } = setup(AGENTS, { publicBuild: false });
+    await app.request("/system-op", patch({ mcp_enabled: true }));
+    expect(isMcpEnabled(db)).toBe(true);
   });
 });
