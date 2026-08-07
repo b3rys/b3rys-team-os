@@ -105,7 +105,7 @@ curl -s -X PUT http://localhost:$PORT/team/api/settings -H 'content-type: applic
 
 > ★★이 단계에 들어오면 **먼저 `references/recruit.md` 를 펼쳐 읽고** 진행한다★★ — 물어볼 필드·질문 문구·복사용 폼·기본값이 거기 다 있다. "이름·역할" 몇 개만 묻고 넘어가지 말 것.
 
-**① 런타임 선택** — `claude_channel`(권장·쉬움) / `openclaw`·`hermes_agent`(ChatGPT 구독 BYO 고급). 목록·권장 이유·고른 순간의 preflight 명령 = `references/runtime-setup.md`.
+**① 런타임 선택 모드** — `claude_channel`(권장·쉬움) / `openclaw`·`hermes_agent`(ChatGPT 구독 BYO 고급). 셋을 **항상 보여주되**, 설치+인증 readiness 가 안 되면 **disabled 상태와 `references/runtime-setup.md` CTA** 를 함께 보여준다(고르지 못하는 이유를 화면에서 알 수 있어야 한다). **이 세 가지 외 내부 런타임은 온보딩에 노출하지 않는다.** 목록·권장 이유·고른 순간의 preflight 명령 = `references/runtime-setup.md`.
 
 **② 사용자에게 먼저 다 묻는다** — **id**(영문 slug, ★display_name 과 별개이며 빠뜨리기 쉽다★) · **display_name** · **role** · **멘션명(별칭)** · **runtime+모델** · **persona**(선택).
 
