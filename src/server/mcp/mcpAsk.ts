@@ -247,30 +247,37 @@ export function lateAnswerPush(
  * ★막힌 것을 알려주는 게 이 함수의 값이다★ — blocked·dead_letter 는 ★영영 안 온다★.
  * 그걸 모르면 사용자는 상한까지 기다린 뒤에야 실패를 안다.
  */
-export type AskProgress = { label: string; done: boolean; stuck: boolean };
+/**
+ * ★done 필드를 두지 않는다★ (빌 리뷰 2026-08-07). 처음엔 넣었는데 ★아무도 안 읽었고★,
+ * 그냥 죽은 필드가 아니라 ★장전된 총★ 이었다: acknowledged 에 done=true 를 주고 있었는데
+ * 우리 코드는 그 상태를 ★"engaged, not done"★ 이라고 못박아 뒀다(ackClose.ts:122).
+ * ★이름은 done 인데 값은 '아직 안 끝났다' 일 때 true★ 라, 다음 사람이 "done 이면 기다림 끝" 으로
+ * 읽으면 ★답이 오기 전에 끊는다.★ 안 쓰는 값을 남기지 않는다.
+ */
+export type AskProgress = { label: string; stuck: boolean };
 
 export function askProgress(db: Database, requestId: string, to: string): AskProgress {
   const row = db
     .prepare(`SELECT delivery_state, recipient_state FROM message_recipient WHERE message_id = ? AND agent_id = ?`)
     .get(requestId, to) as { delivery_state: string; recipient_state: string } | undefined;
-  if (!row) return { label: `${to} 에게 전달 준비 중`, done: false, stuck: false };
+  if (!row) return { label: `${to} 에게 전달 준비 중`, stuck: false };
 
   // ★막힘이 먼저다★ — 이 상태들은 기다려도 안 온다. 초를 세는 것보다 이걸 말해야 한다.
-  if (row.delivery_state === "blocked") return { label: `${to} 에게 배달이 막혔습니다 (더 기다려도 안 옵니다)`, done: false, stuck: true };
-  if (row.delivery_state === "dead_letter") return { label: `${to} 에게 배달 실패로 종료됐습니다`, done: false, stuck: true };
-  if (row.delivery_state === "expired") return { label: `${to} 에게 보낸 것이 시간이 지나 만료됐습니다`, done: false, stuck: true };
+  if (row.delivery_state === "blocked") return { label: `${to} 에게 배달이 막혔습니다 (더 기다려도 안 옵니다)`, stuck: true };
+  if (row.delivery_state === "dead_letter") return { label: `${to} 에게 배달 실패로 종료됐습니다`, stuck: true };
+  if (row.delivery_state === "expired") return { label: `${to} 에게 보낸 것이 시간이 지나 만료됐습니다`, stuck: true };
 
   // 그 사람이 어디까지 갔나 — 이쪽이 전달 상태보다 뒤에 있으므로 먼저 본다.
   if (row.recipient_state === "acknowledged" || row.recipient_state === "completed") {
-    return { label: `${to} 가 답을 쓰는 중입니다`, done: true, stuck: false };
+    return { label: `${to} 가 답을 쓰는 중입니다`, stuck: false };
   }
-  if (row.recipient_state === "in_progress") return { label: `${to} 가 읽고 작업 중입니다`, done: false, stuck: false };
+  if (row.recipient_state === "in_progress") return { label: `${to} 가 읽고 작업 중입니다`, stuck: false };
 
   // 아직 안 읽음 — 전달이 어디까지 갔는지로 나눈다.
   if (row.delivery_state === "pending" || row.delivery_state === "dispatching") {
-    return { label: `${to} 에게 전달 중입니다`, done: false, stuck: false };
+    return { label: `${to} 에게 전달 중입니다`, stuck: false };
   }
-  return { label: `${to} 가 아직 열어보지 않았습니다`, done: false, stuck: false };
+  return { label: `${to} 가 아직 열어보지 않았습니다`, stuck: false };
 }
 
 export interface AskOptions {
