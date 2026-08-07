@@ -193,7 +193,7 @@ RAG(Retrieval-Augmented Generation, 검색 증강 생성)
 | Swimlane | 역할·주체별 책임이 나뉘는 프로세스 | lane별 row/column을 나누고 handoff만 arrow로 연결 |
 | Architecture map | 시스템 구성·데이터 흐름 | 입력 채널 → 중앙 bounded context → 런타임/저장소 |
 | Layer stack | 서버·DB·worker처럼 층이 있는 구조 | 큰 boundary 안에 row/column layer 배치 |
-| Timeline / lineage | 논문·릴리즈·사건 순서 | 축은 neutral, milestone만 small accent |
+| Timeline / lineage | 논문·릴리즈·사건 순서 | 하나의 report-card 안에 neutral axis를 두고 milestone을 위/아래로 stagger 배치한다. 날짜·이름·venue는 짧게, 인과가 아니라 순서임을 caption에 명시한다. dark/light 모두 CSS var로 전환되게 hard-coded white/blue/violet fill을 쓰지 않는다. |
 | Matrix / quadrant | 두 판단 축으로 위치 비교 | label을 점 위에 길게 쓰지 말고 작은 callout으로 분리 |
 | Funnel / narrowing | 후보를 줄여 선택하거나 우선순위를 좁힐 때 | 넓은 단계 → 좁은 단계. 면을 과하게 채우지 말고 outline 중심 |
 | Radial / hub-and-spoke | 하나의 중심 개념과 주변 요소 관계 | 중앙 node + 주변 작은 node. 선은 얇게, 중심만 강조 |
