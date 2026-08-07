@@ -50,6 +50,24 @@ test("★워크트리(.git 이 파일)에서도 읽는다★ — HEAD 는 gitdir
   rmSync(common, { recursive: true, force: true });
 });
 
+test("★gitdir 이 상대경로여도 repoRoot 기준으로 푼다★ — 프로세스 cwd 에 맡기지 않는다", () => {
+  // codex 리뷰 2026-08-07: worktree 는 절대경로를 쓰지만 서브모듈 등은 상대경로를 쓴다.
+  // cwd 기준으로 풀면 ★멀쩡한 배치를 cwd 가 다르다는 이유로 null 로 오판한다.★
+  const root = fresh();
+  mkdirSync(join(root, "nested", ".gitstore"), { recursive: true });
+  writeFileSync(join(root, "nested", ".gitstore", "HEAD"), SHA + "\n");
+  mkdirSync(join(root, "nested", "wt"), { recursive: true });
+  writeFileSync(join(root, "nested", "wt", ".git"), "gitdir: ../.gitstore\n");
+  const prevCwd = process.cwd();
+  process.chdir("/"); // ★cwd 를 일부러 엉뚱한 데로★ — 여기 기준으로 풀면 못 찾는다
+  try {
+    expect(readHeadCommit(join(root, "nested", "wt"))).toBe(SHA);
+  } finally {
+    process.chdir(prevCwd);
+  }
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("★gitdir 이 가리키는 곳이 없으면 null★ — 끊긴 포인터를 따라가지 않는다", () => {
   const root = fresh();
   writeFileSync(join(root, ".git"), "gitdir: /nonexistent/path/xyz\n");

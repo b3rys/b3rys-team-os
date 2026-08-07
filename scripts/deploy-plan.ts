@@ -31,9 +31,31 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
  * 나머지 층이 옛 코드로 남는다. 애매하면 ★넓게 잡는 쪽이 안전하다★(불필요한 작업 < 누락).
  */
 export const LAYER_PATHS = {
-  server: ["src/server", "src/shared", "package.json", "bun.lock", "bunfig.toml"],
-  web: ["src/web", "src/shared", "package.json", "bun.lock", "vite.config.ts", "postcss.config.js"],
+  server: ["src/server", "src/shared", "package.json", "bun.lock", "bunfig.toml", "tsconfig.json"],
+  web: [
+    "src/web",
+    "src/shared",
+    "package.json",
+    "bun.lock",
+    "tsconfig.json",
+    "vite.config.ts",
+    "postcss.config.js",
+    // ★실측으로 넣었다★ (codex 리뷰 2026-08-07): postcss 가 tailwindcss 를 불러 쓰고,
+    //   이 파일이 content·safelist·theme 를 정한다. safelist 에 유틸 하나를 넣고 빌드해보니
+    //   ★산출물이 바뀌었다★ — index-4M85XvLX.css(53921B) → index-CWIvisIW.css(54140B), 원복하면 원래 해시.
+    //   빠져 있으면 이 파일만 바꾼 배포가 ★조용히 누락된다.★
+    "tailwind.config.js",
+  ],
 } as const;
+
+/**
+ * ★분류에서 빠진 설정 파일을 잡기 위한 정본 집합★ — 목록을 눈으로 세는 대신 ★디스크와 대조★ 한다.
+ * (빠진 것은 diff 에 안 보인다: `tailwind.config.js` 가 실제로 그렇게 빠졌고, 리뷰어가 잡았다)
+ * 어느 층에도 영향이 없다고 판단한 파일만 여기 적는다 — ★이유와 함께, 눈에 보이게.★
+ */
+export const CONFIG_NOT_IN_ANY_LAYER: readonly string[] = [
+  // 지금은 없다. 새 설정 파일이 생기면 여기 적든지 층에 넣든지 ★둘 중 하나를 해야 시험이 통과한다.★
+];
 
 export type Layer = keyof typeof LAYER_PATHS;
 

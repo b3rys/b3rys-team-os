@@ -21,7 +21,7 @@
  * 판정하는 쪽(배포 도구)이 `null` 을 보고 ★멈출 수 있어야★ 한다.
  */
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 /** 층 하나의 신원. 못 읽으면 commit=null — ★모른다는 사실 자체가 값이다.★ */
 export interface LayerIdentity {
@@ -38,10 +38,6 @@ export interface DeploymentIdentity {
 /** 빌드가 `dist/web` 안에 남기는 표식 파일 이름. 빌드 산출물과 ★같은 자리★ 에 둬야 원자성이 성립한다. */
 export const BUILD_MANIFEST = "BUILD.json";
 
-/**
- * 저장소 HEAD 를 읽는다. ★git 명령을 쓰지 않는다★ — 서버 부팅 경로에서 외부 프로세스를 띄우지 않기 위해서다.
- * `.git/HEAD` → (심볼릭이면) 참조 파일 → 없으면 `packed-refs` 순으로 본다. 어느 단계든 실패하면 null.
- */
 const SHA_RE = /^[0-9a-f]{40}$/;
 
 /**
@@ -56,7 +52,11 @@ function gitDirs(repoRoot: string): { headDir: string; commonDir: string } | nul
   if (statSync(dotGit).isDirectory()) return { headDir: dotGit, commonDir: dotGit };
   const m = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf8"));
   if (!m) return null;
-  const headDir = m[1]!.trim();
+  const raw = m[1]!.trim();
+  // ★상대경로일 수 있다★ (codex 리뷰 2026-08-07): `git worktree add` 는 절대경로를 쓰지만
+  //   서브모듈 등은 상대경로를 쓴다. 그대로 쓰면 ★프로세스 cwd 기준★ 으로 풀려서, 멀쩡한 배치를
+  //   cwd 가 다르다는 이유로 null 로 오판한다. ★기준은 언제나 repoRoot 다.★
+  const headDir = isAbsolute(raw) ? raw : resolve(repoRoot, raw);
   if (!existsSync(headDir)) return null;
   const commonFile = join(headDir, "commondir");
   if (!existsSync(commonFile)) return { headDir, commonDir: headDir };
@@ -64,6 +64,10 @@ function gitDirs(repoRoot: string): { headDir: string; commonDir: string } | nul
   return { headDir, commonDir: rel.startsWith("/") ? rel : join(headDir, rel) };
 }
 
+/**
+ * 저장소 HEAD 를 읽는다. ★git 명령을 쓰지 않는다★ — 서버 부팅 경로에서 외부 프로세스를 띄우지 않기 위해서다.
+ * `.git/HEAD` → (심볼릭이면) 참조 파일 → 없으면 `packed-refs` 순으로 본다. 어느 단계든 실패하면 null.
+ */
 export function readHeadCommit(repoRoot: string): string | null {
   try {
     const dirs = gitDirs(repoRoot);
