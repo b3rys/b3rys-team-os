@@ -771,3 +771,47 @@ test("★설명을 좁히는 것이지 문을 좁히는 게 아니다★ — 비
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── ★누구 말인지 클라이언트가 채워 넣는다★ (팀 리드 2026-08-07) ──
+//
+// 서버는 이걸 만들어낼 수 없다 — 도착하는 건 글자뿐이고 ★누가 썼는지는 클라이언트만 안다.★
+// ★주장이지 증거가 아니다★: 클라이언트가 본문에 "— GD" 라고 서명한 적이 있고 그걸 믿어서 틀렸다.
+// 그래서 ★권한 판정에 안 쓰고 보여주기만★ 한다.
+
+test("★client 로 채우면 받는 팀원 화면에 표시가 붙는다★ — meta 에만 두면 팀원은 못 본다", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "정리한 질문", speaker: "client" }, nowait);
+  const p = bus.calls[0]!;
+  expect(p.body as string).toContain("[클라이언트가 정리한 말입니다");
+  expect(p.body as string).toContain("정리한 질문");
+  expect((p.meta as Record<string, unknown>).mcp_speaker).toBe("client");
+});
+
+test("★lead 면 본문을 안 건드린다★ — 팀 리드 원문은 그대로 간다", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "원문 그대로", speaker: "lead" }, nowait);
+  const p = bus.calls[0]!;
+  expect(p.body).toBe("원문 그대로");
+  expect((p.meta as Record<string, unknown>).mcp_speaker).toBe("lead");
+});
+
+test("★안 채우면 '채워서 lead' 와 구분된다★ — 없는 것을 lead 로 치지 않는다", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "표시 없음" }, nowait);
+  const p = bus.calls[0]!;
+  expect(p.body).toBe("표시 없음");
+  expect((p.meta as Record<string, unknown>).mcp_speaker).toBeUndefined();
+});
+
+test("★도구가 speaker 를 받고, 설명이 '정리했으면 client' 를 말한다★", () => {
+  const db = freshDb();
+  const t = (buildMcpServer(db, "gd", "write") as unknown as {
+    _registeredTools: Record<string, { inputSchema?: { shape?: Record<string, { description?: string }> } }>;
+  })._registeredTools.b3os_ask_teammate;
+  const desc = t?.inputSchema?.shape?.speaker?.description ?? "";
+  expect(desc).toContain("client");
+  expect(desc).toContain("정리"); // ★언제 채우는지가 설명에 있어야 클라이언트가 채운다★
+});
