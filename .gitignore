@@ -46,6 +46,13 @@ archiving/
 #   ★문서가 가리키는 도구가 리포에 없으면 그 안내는 거짓말이 된다★ (이 문서가 고치려던 바로 그 문제).
 # ★공개 사용자가 부팅 후 안 뜰 때 쓰는 도구★ — README 가 이 파일을 가리킨다.
 #   /scripts/* 가 전부 무시하므로 ★여기 없으면 조용히 빠진다★ (실제로 한 번 빠뜨렸다 — codex 가 잡음)
+# ★빌드가 부르는 스크립트★ — package.json 의 build 가 이 파일을 실행한다.
+#   /scripts/* 가 전부 무시하므로 ★여기 없으면 공개 클론에서 `bun run build` 가 깨진다★
+#   (파일은 없는데 스크립트만 그걸 부르는 상태가 된다).
+!/scripts/write-build-manifest.ts
+# ★배포 판단 로직★ — 실제 배포 스크립트(deploy-live.sh)는 GD 머신 전용이라 추적 밖이다.
+#   판단을 거기 두면 ★리뷰도 시험도 공개도 안 된다★ — 그래서 판단만 여기로 빼서 추적한다.
+!/scripts/deploy-plan.ts
 !/scripts/gen-test-map.sh
 !/scripts/test-map-nodescribe.txt
 # ★scripts 의 테스트는 ★클래스로★ 연다★ — /scripts/* 가 전부 무시하므로 .test.ts 를

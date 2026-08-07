@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "bun run --hot src/server/index.ts",
     "dev:web": "vite",
-    "build": "vite build",
+    "build": "vite build && bun run scripts/write-build-manifest.ts",
     "start": "bun run src/server/index.ts",
     "service": "bun run src/server/cli/service.ts",
     "typecheck": "tsc --noEmit"

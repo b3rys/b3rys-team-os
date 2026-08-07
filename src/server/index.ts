@@ -61,6 +61,7 @@ import { buildMcpHttpApp } from "./mcp/mcpHttpRoute";
 import { configureLeadActorDb, leadActorId, trustedActorFromRequest } from "./lib/opAuth";
 import { createHostGate } from "./lib/hostGate";
 import { DEFAULT_MEDIA_DIR, contentTypeForMediaFile, resolveMediaPath } from "./lib/mediaStore";
+import { captureServerIdentity, deploymentIdentity } from "./lib/deployIdentity";
 import type { WsEvent } from "./types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -72,6 +73,12 @@ const DB_PATH = process.env.TEAM_DB_PATH ?? join(__dirname, "../../team.db");
 const REGISTRY_PATH = process.env.TEAM_AGENT_REGISTRY ?? join(__dirname, "../../agents.json");
 const OPENCLAW_URL = process.env.OPENCLAW_GATEWAY_URL ?? "http://127.0.0.1:18789";
 const DIST_WEB = join(__dirname, "../../dist/web");
+const REPO_ROOT_FOR_IDENTITY = join(__dirname, "../..");
+/**
+ * ★서버 층 신원은 기동 시 한 번 굳힌다.★ 이 값은 재시작해야 바뀌는 값이라(코드를 메모리에 올린 시점)
+ * 요청마다 다시 읽으면 오히려 거짓말이 된다 — 트리가 먼저 앞서 나가도 ★돌고 있는 코드는 그대로다.★
+ */
+const SERVER_IDENTITY = captureServerIdentity(REPO_ROOT_FOR_IDENTITY, new Date());
 const DOCS_DIR = join(__dirname, "../../docs");
 const REPORTS_DIR = join(__dirname, "../../reports");
 const RESEARCH_DIR = join(__dirname, "../../research");
@@ -656,7 +663,11 @@ bun run build</pre>
 const rootApp = new Hono();
 
 // 바깥 감시용. ★관문 위에 둔다 — 이 한 줄이 유일한 예외이고, 예외라는 사실이 위치로 드러난다.★
-rootApp.get("/health", (c) => c.json({ ok: true }));
+// ★`ok` 는 그대로 둔다★ — 바깥 감시(`scripts/bot-liveness-monitor.sh`)는 본문을 파싱하지 않고
+//   응답 여부만 본다. 필드 추가는 호환되지만, 있던 키를 바꾸면 그 순간 깨진다.
+// 층별 신원을 같이 싣는다: 서버는 기동 시 굳힌 값, 웹은 빌드 표식을 ★요청 시점에★ 읽은 값
+// (화면은 재시작 없이 바뀌므로 캐시하면 옛 값을 말한다). 자세한 이유는 lib/deployIdentity.ts.
+rootApp.get("/health", (c) => c.json({ ok: true, ...deploymentIdentity(SERVER_IDENTITY, DIST_WEB) }));
 
 /**
  * ★신뢰하지 않는 주소는 여기 한 곳에서 막는다 — 읽기까지.★ (팀장님 지시 2026-07-30)
