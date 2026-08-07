@@ -157,14 +157,12 @@ RAG(Retrieval-Augmented Generation, 검색 증강 생성)
     <text x="380" y="24" text-anchor="middle" class="diagram-title">작동 흐름</text>
     <g transform="translate(32,58)">
       <rect class="diagram-node diagram-node-primary" width="150" height="92" rx="14"/>
-      <rect class="diagram-accent diagram-accent-bar" x="1" y="1" width="3" height="90" rx="1.5"/>
       <text x="20" y="34" class="diagram-text">1 · 발견</text>
       <text x="20" y="62" class="diagram-muted">후보를 넓게 수집</text>
     </g>
     <path d="M190 104H246" class="diagram-line" marker-end="url(#flow-arrow)"/>
     <g transform="translate(256,58)">
       <rect class="diagram-node diagram-node-warm" width="150" height="92" rx="14"/>
-      <rect class="diagram-accent-warm diagram-accent-bar" x="1" y="1" width="3" height="90" rx="1.5"/>
       <text x="20" y="34" class="diagram-text">2 · 검증</text>
       <text x="20" y="62" class="diagram-muted">본문과 조건 확인</text>
     </g>
@@ -176,9 +174,9 @@ RAG(Retrieval-Augmented Generation, 검색 증강 생성)
 
 - 카드형 flow/sequence/architecture diagram은 `svg.diagram-flow`를 쓴다.
 - 색은 `diagram-node`, `diagram-node-primary`, `diagram-node-warm`, `diagram-node-danger`와 `diagram-line*` class로 구분한다.
-- 단계 구분은 여러 파스텔 박스를 남발하지 말고 **neutral 면 + 작은 dot/얇은 accent bar/선**을 기본으로 한다.
-- 왼쪽 accent bar는 rounded card 바깥으로 삐져나오면 안 된다. 노드 rect와 같은 x/y에 붙이지 말고 `x="1" y="1" height="노드높이-2"`로 안쪽에 넣고 `diagram-accent-bar`를 붙인다.
-- 기본 색은 밝은 professional sage/gold/red를 쓴다. 큰 면을 칠하지 말고 작은 강조에만 사용한다.
+- 단계 구분은 여러 파스텔 박스를 남발하지 말고 **neutral 면 + 더 분명한 전체 테두리 + 작은 dot/선**을 기본으로 한다.
+- 사각형 node의 왼쪽 모서리나 왼쪽 edge에 두꺼운 accent bar를 붙이지 않는다. rounded rectangle과 겉돌고 모서리 밖으로 삐져나와 보인다. 강조는 전체 stroke color/width, 작은 dot, connector line, badge로 처리한다.
+- 기본 색은 밝은 professional sage/gold/red를 쓴다. 큰 면을 칠하지 말고 작은 강조와 테두리에만 사용한다.
 - 금지: `#eff6ff`, `#eef2ff`, `#93c5fd`, `#1d4ed8`, `#2563eb`, `#faf5ff`, `#c4b5fd`, `#7c3aed` 같은 blue/violet slide palette를 기본 도식 색으로 쓰지 않는다.
 
 ### 표현 패턴 reference
