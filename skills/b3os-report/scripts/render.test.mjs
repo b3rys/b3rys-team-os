@@ -71,6 +71,10 @@ try {
   assert.match(refs, /Funnel \/ narrowing/);
   assert.match(refs, /Radial \/ hub-and-spoke/);
   assert.match(refs, /Sankey-lite \/ weighted flow/);
+  assert.match(refs, /Timeline \/ lineage/);
+  assert.match(refs, /milestone을 위\/아래로 stagger 배치/);
+  assert.match(refs, /hard-coded white\/blue\/violet fill/);
+  assert.match(refs, /Matrix \/ quadrant/);
   assert.doesNotMatch(html, /&lt;(svg|rect|text|div)/);
   assert.match(html, /<p>본문입니다\.<\/p>/);
   console.log("PASS b3os-report dark/light theme + nested raw block passthrough");
