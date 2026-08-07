@@ -39,6 +39,7 @@ legacy/custom HTML이 `body > .wrap`만 쓰는 경우도 테마가 960px로 잡�
 - 선택 탭: 아래 초록 선 없음, 배경만 살짝 밝게
 - 색: green/sage 중심, sky-blue 금지
 - 모바일: 가로 스크롤 가능해야 함
+- 탭이 많아도 두 줄로 접지 않는다. **한 줄 horizontal scroll**이 기본이다. sticky 상태에서 본문을 가리지 않게 얇게 유지한다.
 
 특수 탭 보고서가 이미 `.tab-shell`, `.tab-nav`, `.tab-btn`, `.tab-panel.active`를 쓰면 그대로 유지한다. 표준 렌더로 덮어쓰지 말고 CSS만 맞춘다.
 
@@ -55,6 +56,10 @@ legacy/custom HTML이 `body > .wrap`만 쓰는 경우도 테마가 960px로 잡�
 
 필수 CSS 동작:
 
+- `.tab-shell`: `position: sticky`, `top:57px`, `display:flex`, `overflow-x:auto`, `scrollbar-width:none`
+- `.tab-nav`: `flex-wrap:nowrap`
+- `.tab-btn`: `white-space:nowrap`, `min-height:29px` 안팎
+- `.tab-panel`: 기본 `display:none`, active만 `display:block`
 ```css
 .tab-panel{display:none}
 .tab-panel.active{display:block}
@@ -132,6 +137,7 @@ RAG(Retrieval-Augmented Generation, 검색 증강 생성)
 - Secondary: amber/orange
 - Red: 위험·삭제·실패
 - Blue/cyan: 기본 accent로 쓰지 말고 링크·보조 정보에만 제한
+- Grid texture: 라이트 모드는 `--grid`를 은은하게 보여 종이 질감을 만들고, 다크 모드는 훨씬 낮은 대비로 깊이만 준다.
 
 새 보고서에서 하늘색 제목/탭/강조를 기본값으로 쓰지 않는다.
 
