@@ -256,6 +256,18 @@ export function lateAnswerPush(
  */
 export type AskProgress = { label: string; stuck: boolean };
 
+/** 그 팀원이 지금 무엇을 하고 있나 — 화면이 있는 런타임만 값이 있다(없으면 null). */
+function activityOf(db: Database, agentId: string): string | null {
+  try {
+    const r = db.prepare(`SELECT activity_line FROM agent_status WHERE agent_id = ?`).get(agentId) as
+      | { activity_line: string | null }
+      | undefined;
+    return r?.activity_line?.trim() || null;
+  } catch {
+    return null; // 컬럼이 아직 없는 DB(구버전)에서도 진행 표시가 죽지 않는다
+  }
+}
+
 export function askProgress(db: Database, requestId: string, to: string): AskProgress {
   const row = db
     .prepare(`SELECT delivery_state, recipient_state FROM message_recipient WHERE message_id = ? AND agent_id = ?`)
@@ -271,7 +283,11 @@ export function askProgress(db: Database, requestId: string, to: string): AskPro
   if (row.recipient_state === "acknowledged" || row.recipient_state === "completed") {
     return { label: `${to} 가 답을 쓰는 중입니다`, stuck: false };
   }
-  if (row.recipient_state === "in_progress") return { label: `${to} 가 읽고 작업 중입니다`, stuck: false };
+  if (row.recipient_state === "in_progress") {
+    // ★막힘 상태에는 안 붙인다★ — 그건 '지금 하는 일' 이 아니라 결론이다.
+    const act = activityOf(db, to);
+    return { label: act ? `${to} 가 읽고 작업 중입니다 · ${act}` : `${to} 가 읽고 작업 중입니다`, stuck: false };
+  }
 
   // 아직 안 읽음 — 전달이 어디까지 갔는지로 나눈다.
   if (row.delivery_state === "pending" || row.delivery_state === "dispatching") {

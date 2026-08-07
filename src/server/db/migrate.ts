@@ -838,6 +838,9 @@ export function runBusMigration(db: Database): void {
     "ALTER TABLE message_recipient ADD COLUMN closing_message_id TEXT",
     // message.task_link_id: task.lane=정본, recipient_state=mirror (req#2) + 매칭키 (req#4)
     "ALTER TABLE message ADD COLUMN task_link_id TEXT",
+    // 진행 표시용 — 그 팀원이 지금 무엇을 하고 있나. last_log_line 은 화면 맨 아랫줄(고정 장식)이라
+    // 늘 "auto mode on" 이었다. 그 칸은 health 판정이 이미 쓰고 있으므로 건드리지 않고 따로 둔다.
+    "ALTER TABLE agent_status ADD COLUMN activity_line TEXT",
   ];
   for (const stmt of alterStatements) {
     try {
