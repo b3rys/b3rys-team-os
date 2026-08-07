@@ -266,21 +266,33 @@ export function realIsAncestor(sha: string, target: string): Ancestry {
  */
 export const UNTRACKED_ALLOWED_PREFIXES = [".worktrees/", "node_modules/", "dist/"] as const;
 
+/**
+ * ★porcelain 출력을 값으로 바꾸는 순수 파서.★ 껍데기(git 호출)에서 떼어냈다 —
+ * 붙어 있으면 ★허용 목록 경계를 시험이 직접 잴 수 없다★ (주입으로는 파서를 건너뛴다).
+ */
+export function parseStatusPorcelain(lines: readonly string[]): {
+  dirtyTracked: number;
+  untrackedNotAllowed: string[];
+} {
+  const real = lines.filter((l) => l.trim());
+  return {
+    dirtyTracked: real.filter((l) => !l.startsWith("??")).length,
+    untrackedNotAllowed: real
+      .filter((l) => l.startsWith("??"))
+      .map((l) => l.slice(3).trim())
+      .filter((path) => !UNTRACKED_ALLOWED_PREFIXES.some((pre) => path.startsWith(pre))),
+  };
+}
+
 export function realTreeState(): TreeState {
   const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
   // `--untracked-files=all` — 디렉토리 하나로 뭉뚱그리지 않고 파일 단위로 본다.
   const status = git(["status", "--porcelain", "--untracked-files=all"]);
-  const lines = status.ok ? status.out.split("\n").filter((l) => l.trim()) : [];
-  const dirtyTracked = lines.filter((l) => !l.startsWith("??")).length;
-  const untrackedNotAllowed = lines
-    .filter((l) => l.startsWith("??"))
-    .map((l) => l.slice(3).trim())
-    .filter((path) => !UNTRACKED_ALLOWED_PREFIXES.some((pre) => path.startsWith(pre)));
+  const parsed = parseStatusPorcelain(status.ok ? status.out.split("\n") : []);
   const name = branch.ok ? branch.out : "";
   return {
     branch: name && name !== "HEAD" ? name : null,
-    dirtyTracked,
-    untrackedNotAllowed,
+    ...parsed,
     // ★관측 실패를 '깨끗함' 으로 바꾸지 않는다.★
     observed: status.ok && branch.ok,
   };

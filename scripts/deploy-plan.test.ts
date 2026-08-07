@@ -22,6 +22,8 @@ import {
   type TreeState,
   type Ancestry,
   realIsAncestor,
+  parseStatusPorcelain,
+  UNTRACKED_ALLOWED_PREFIXES,
 } from "./deploy-plan";
 
 const repoRoot = () => join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -279,6 +281,38 @@ test("★멈춘 경우에도 경고는 함께 나온다★ — 멈춘 이유와 
 
 test("★tree 를 안 주면 그 검사는 건너뛴다★ — 다른 호출부가 깨지지 않는다", () => {
   expect(basePlan().warnings).toEqual([]);
+});
+
+// ── ★porcelain 파서 — 허용 목록 경계를 직접 잰다★ ─────────────────────────────
+//
+// 리뷰 메모(codex): 지금까지 시험은 TreeState 를 ★주입★ 해서 treeWarnings 만 봤다.
+// 그러면 ★"어떤 미추적을 허용으로 걸러내는가" 라는 판단 자체는 아무도 안 본다.★
+// (같은 이음매에서 realIsAncestor 뮤턴트가 이미 한 번 살아남았다)
+
+test("★추적 변경과 미추적을 갈라 센다★", () => {
+  const r = parseStatusPorcelain([" M src/a.ts", "?? new.md", "A  src/b.ts", ""]);
+  expect(r.dirtyTracked).toBe(2);
+  expect(r.untrackedNotAllowed).toEqual(["new.md"]);
+});
+
+test("★허용 목록에 있는 미추적만 걸러낸다★ — 나머지는 남긴다", () => {
+  const r = parseStatusPorcelain([
+    "?? .worktrees/foo/",
+    "?? node_modules/x",
+    "?? dist/web/a.js",
+    "?? skills/b3os-report/새파일.md", // ★팀원이 바로 읽는 자리★
+    "?? rules/새룰.md",
+  ]);
+  expect(r.untrackedNotAllowed).toEqual(["skills/b3os-report/새파일.md", "rules/새룰.md"]);
+});
+
+test("★이름이 비슷할 뿐인 경로는 걸러내지 않는다★ — prefix 함정", () => {
+  const r = parseStatusPorcelain(["?? .worktrees-backup/x", "?? distribution/y", "?? node_modules_old/z"]);
+  expect(r.untrackedNotAllowed).toHaveLength(3); // 셋 다 남아야 한다
+});
+
+test("★허용 목록 자체가 비어 있지 않다★ — 비면 이 파서가 아무것도 안 거른다", () => {
+  expect(UNTRACKED_ALLOWED_PREFIXES.length).toBeGreaterThan(0);
 });
 
 // ── ★진짜 git 에 대고 재는 시험★ ──────────────────────────────────────────────
