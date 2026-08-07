@@ -47,6 +47,15 @@ try {
   assert.match(html, /\.mi-card p\{[^}]*color:var\(--ink\)\}/);
   assert.doesNotMatch(html, /\[data-theme="light"\] svg text\{fill:var\(--mut\)\}/);
   assert.match(html, /\[data-theme="light"\] svg text\[fill="#e6edf3"\][^}]*\{fill:var\(--ink\)\}/);
+  assert.match(html, /\.desktop-infographic\{display:block\}/);
+  assert.match(html, /figure img,\.report-image\{display:block;width:100%;height:auto;border:1px solid var\(--line\)/);
+  assert.match(html, /\.image-grid\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(html, /\.lede\{font-size:18px/);
+  assert.match(html, /\.stat-grid\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(html, /\.stat-card b\{display:block;color:var\(--green\);font-size:24px/);
+  assert.match(html, /\.diagram-flow\{background:linear-gradient/);
+  assert.match(html, /\.diagram-flow \.diagram-node-primary\{fill:color-mix\(in srgb,var\(--card-2\) 86%,var\(--green\) 14%\)/);
+  assert.match(html, /\.diagram-flow \.diagram-line-warm\{stroke:var\(--y\)/);
   assert.match(html, /\.desktop-infographic\{display:none!important\}/);
   assert.match(html, /<div class="outer">[\s\S]*<div class="hint">안내<\/div>[\s\S]*<svg/);
   assert.match(html, /<figure><figcaption>한눈에 보기<\/figcaption><div class="mobile-infographic">[\s\S]*<svg class="desktop-infographic"/);

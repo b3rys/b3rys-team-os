@@ -62,36 +62,44 @@ the team lead는 주로 아이폰에서 읽는다. 표·차트가 모바일에�
 - 탭이 필요하면 큰 pill 버튼을 쓰지 않는다. `report-tabs/report-tab`의 **작은 segmented navigation**을 써서 탭임은 인지되지만 본문보다 튀지 않게 한다. 세부 컴포넌트 예시는 `references/ui-components.md`를 따른다.
 - **라이트 모드는 유지**한다. 다만 라이트도 같은 구조와 여백을 쓰고 색만 밝은 토큰으로 바꾼다.
 - 보고서가 특수 구조를 가진 경우(예: CSS-only 탭 보고서)는 표준 render로 덮어쓰지 말고, 기존 구조를 유지한 채 공통 테마 CSS만 교체한다.
+- 인포그래픽·다이어그램은 보고서 테마와 같은 팔레트를 써야 한다. `svg.diagram-flow` kit와 `diagram-node*`, `diagram-line*` class를 기본으로 쓰고, blue/violet SaaS slide palette(`#eff6ff`, `#2563eb`, `#faf5ff`, `#7c3aed` 등)는 기본 도식 색으로 쓰지 않는다.
 
 ## 렌더러가 지원하는 MD
 `#`~`####` 헤딩 · `**굵게**` `*기울임*` `` `코드` `` · 표(`| |`) · `-`/`*`/`1.` 목록 · `>` 인용(=강조 박스) · `---` 구분선 · `[텍스트](url)` · 코드펜스 ```` ``` ```` · **`<svg>…</svg>` 원문 통과**(차트는 SVG로 직접 그려 넣으면 그대로 렌더).
 
-## 차트는 SVG로 (passthrough)
-바차트 등은 MD 안에 인라인 SVG로 직접 작성한다(렌더러가 통과시킴). 가로형 바 예시:
+## 차트·인포그래픽·다이어그램은 SVG로 (passthrough)
+
+바차트·흐름도·관계도는 MD 안에 인라인 SVG로 직접 작성한다(렌더러가 통과시킴). 단, 새 보고서의 기본 도식은 하드코딩한 파랑/보라 팔레트가 아니라 `diagram-flow` kit를 쓴다.
+
+간단한 바 차트 예시:
 ```html
-<svg viewBox="0 0 400 60"><g font-size="11" fill="#475467">
-  <text x="0" y="22">솔로</text><rect x="80" y="12" width="40" height="13" fill="#15803d" rx="2"/><text x="124" y="22" fill="#172033">58s</text>
-  <text x="0" y="42">harness</text><rect x="80" y="32" width="160" height="13" fill="#c2410c" rx="2"/><text x="244" y="42" fill="#172033">92s</text>
-</g></svg>
+<svg class="diagram-flow" viewBox="0 0 420 92" role="img" aria-label="리뷰 방식별 시간 비교">
+  <text x="18" y="24" class="diagram-title">시간 비교</text>
+  <text x="18" y="52" class="diagram-muted">솔로</text>
+  <rect x="86" y="40" width="74" height="14" rx="7" class="diagram-accent"/>
+  <text x="170" y="52" class="diagram-text">58s</text>
+  <text x="18" y="76" class="diagram-muted">harness</text>
+  <rect x="86" y="64" width="190" height="14" rx="7" class="diagram-accent-warm"/>
+  <text x="286" y="76" class="diagram-text">92s</text>
+</svg>
 ```
-라이트 기본 색 토큰: 좋음=`#15803d`(초록), 주의=`#c2410c`(주황), 경고=`#b42318`(빨강), 강조=`#a15c00`(황토), 링크/제목=`#1d4ed8`(파랑), 본문=`#172033`, 배경=`#f7f9fc`, 카드=`#ffffff`.
 
-SVG는 라이트 배경에서 읽히도록 밝은 카드와 진한 글자색을 사용한다. 중첩 wrapper가 필요하면 `<figure>…<svg>…</svg></figure>`를 우선 사용한다. 렌더러는 `<svg>`, `<figure>`, `<div>` raw block의 같은 태그 중첩을 depth 기준으로 통과시킨다.
+SVG는 라이트/다크 모두에서 읽혀야 한다. 텍스트가 긴 도식은 SVG 내부에서 줄바꿈이 자동으로 되지 않으므로 `<text>` 한 줄에 긴 문장을 넣지 말고, 짧은 label·caption·본문 설명으로 분리한다. 도식 안은 “구조”, 도식 아래 문단은 “해석”을 맡긴다.
 
-복잡한 가로 SVG는 iPhone에서 축소하거나 좌우 스크롤시키지 않는다. 같은 `<figure>` 안에 모바일 세로 카드와 데스크톱 SVG를 함께 두면 표준 테마가 640px에서 자동 전환한다.
+복잡한 가로 SVG는 iPhone에서 그대로 축소하지 않는다. 같은 `<figure>` 안에 모바일 세로 카드와 데스크톱 SVG를 함께 두면 표준 테마가 640px에서 자동 전환한다.
 
 ```html
 <figure>
   <figcaption>한눈에 보기 · 모바일은 세로 카드, 데스크톱은 전체 다이어그램</figcaption>
   <div class="mobile-infographic" role="group" aria-label="모바일 요약">
-    <div class="mi-card mi-blue"><h4>단계 1</h4><p>핵심 설명</p></div>
-    <div class="mi-card mi-green"><h4>단계 2</h4><p>핵심 설명</p></div>
+    <div class="mi-card mi-green"><h4>단계 1</h4><p>핵심 설명</p></div>
+    <div class="mi-card mi-amber"><h4>단계 2</h4><p>주의할 점</p></div>
   </div>
-  <svg class="desktop-infographic" viewBox="0 0 760 300" role="img" aria-label="전체 다이어그램">…</svg>
+  <svg class="desktop-infographic diagram-flow" viewBox="0 0 760 220" role="img" aria-label="전체 다이어그램">…</svg>
 </figure>
 ```
 
-사용 가능한 의미색 class: `mi-blue`, `mi-cyan`, `mi-green`, `mi-amber`, `mi-orange`, `mi-red`, `mi-violet`.
+사용 가능한 모바일 카드 class는 `mi-green`, `mi-amber`, `mi-orange`, `mi-red`를 기본으로 한다. `mi-blue`, `mi-cyan`, `mi-violet`은 legacy 호환용이며 새 도식의 primary 색으로 쓰지 않는다.
 
 ## 컨벤션
 - 맨 위 `# 제목` + 메타줄(일시·owner). 첫 `>` 인용 = "한 줄 결론"(노랑 박스로 강조됨).
