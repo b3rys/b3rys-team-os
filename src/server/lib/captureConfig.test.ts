@@ -106,71 +106,37 @@ describe("captureConfig — 상태 마스킹(★토큰 값 노출 금지)", () =
     setCaptureGroupId("-100g");
     setRouterEnabled(db, true);
     const status = captureConfigStatus(db);
-    expect(status).toEqual({ has_capture_token: true, capture_group_id: "-100g", router_enabled: true, mcp_enabled: false });
+    expect(status).toEqual({ has_capture_token: true, capture_group_id: "-100g", router_enabled: true, mcp_enabled: true });
     // 직렬화에도 토큰 값이 없어야 함
     expect(JSON.stringify(status)).not.toContain("SECRET-must-not-leak");
   });
 });
 
-// ── ★이미 쓰던 설치는 안 끊긴다★ (빌 리뷰 2026-08-07) ──
+// ── ★끄는 스위치★ (팀 리드 2026-08-07: "그냥 기본을 켜기로 해") ──
 //
-// 기본만 꺼짐으로 두고 배포하면 ★쓰고 있던 사람이 그 순간 끊긴다.★
-// 그리고 ★끊긴 그 창이 그 사람이 우리에게 알릴 수단★ 이다.
-// → 마이그레이션이 "이미 MCP 를 쓴 흔적(감사기록)" 이 있는 설치만 켜준다.
-// ★"off 면 막힌다" 만 재면 이 사고를 못 잡는다★ — 이쪽을 재야 한다.
+// 처음엔 기본을 꺼짐으로 뒀다. 그러니 ★쓰던 사람이 배포 순간 끊기지 않게★ 구제 마이그레이션이 필요했고,
+// 그마저도 ★기록이 안 남는 읽기 전용 사용은 못 살렸다.★ 기본을 켜면 그 장치가 통째로 없어진다.
+// 대신 ★"쓰기 전에 켜야 한다" 는 조건도 없어진다★ — 남는 건 끄는 스위치다.
 
-test("★이미 MCP 를 쓰던 설치는 켜진 채로 올라온다★", () => {
+test("★손댄 적 없으면 켜져 있다★ — 새 설치도, 쓰던 설치도", () => {
   const d = new Database(":memory:");
   migrate(d);
-  d.prepare(`INSERT INTO audit_event (actor, action, target, at) VALUES ('gd','mcp.http.request','x',datetime('now'))`).run();
-  migrate(d); // 다시 돌려도 안전해야 한다(운영은 부팅마다 돈다)
   expect(isMcpEnabled(d)).toBe(true);
 });
 
-test("★새 설치는 꺼진 채로 올라온다★ — 공개 clone 은 아무것도 안 하면 닫혀 있다", () => {
+test("★사람이 끈 것은 재부팅해도 안 되켜진다★", () => {
   const d = new Database(":memory:");
   migrate(d);
-  expect(isMcpEnabled(d)).toBe(false);
-});
-
-test("★사람이 끈 것은 마이그레이션이 되살리지 않는다★", () => {
-  const d = new Database(":memory:");
-  migrate(d);
-  d.prepare(`INSERT INTO audit_event (actor, action, target, at) VALUES ('gd','mcp.http.request','x',datetime('now'))`).run();
-  migrate(d);
-  setMcpEnabled(d, false); // 사람이 명시적으로 끔
-  migrate(d); // 재부팅
-  expect(isMcpEnabled(d)).toBe(false); // ★끈 것을 되켜면 안 된다★
-});
-
-// ★거절 기록은 "쓴 흔적" 이 아니다★ (dex 리뷰 2026-08-07)
-//
-// 처음엔 action LIKE 'mcp.%' 로 잡았다. 그런데 ★인증 실패·미등록 신원·게이트 거절이 전부
-// mcp.http.denied 로 남는다.★ 즉 외부 스캐너가 한 번 두드리고 간 공개 설치가 ★다음 부팅에
-// 스스로 열린다.★ 문을 잠그려고 넣은 코드가 문을 여는 셈이었다.
-// ★내 원래 시험은 이걸 못 봤다★ — 통과 기록(mcp.http.request)만 넣고 재서 양쪽이 다 초록불이었다.
-
-test("★두드리다 거절당한 기록만 있는 설치는 열리지 않는다★ — 스캐너가 문을 열어주면 안 된다", () => {
-  const d = new Database(":memory:");
-  migrate(d);
-  for (const reason of ["mcp_disabled", "unauthorized", "actor_not_registered"]) {
-    d.prepare(`INSERT INTO audit_event (actor, action, target, at) VALUES ('unknown','mcp.http.denied',?,datetime('now'))`).run(reason);
-  }
+  setMcpEnabled(d, false);
   migrate(d); // 재부팅
   expect(isMcpEnabled(d)).toBe(false);
 });
 
-// ★이름을 실제로 재는 것보다 넓게 쓰지 않는다★ (codex 리뷰 2026-08-07):
-//   stdio 의 ★읽기 도구는 감사기록을 안 남긴다★(team_status·b3os_inbox·b3os_kanban_list·
-//   b3os_recall_dms·b3os_fetch_answer). 즉 ★읽기만 쓰던 stdio 설치는 식별할 수 없고 꺼진 채로 올라온다.★
-//   과거 신호가 아예 없어서 코드로 복구할 방법도 없다 — 그 설치는 사람이 한 번 켜야 한다.
-test("★대조군 — 감사기록이 남는 사용 5종은 각각 문을 연다★ (HTTP 통과 · stdio 쓰기)", () => {
-  for (const action of ["mcp.http.request", "mcp.send_message", "mcp.ask_teammate", "mcp.kanban_add", "mcp.kanban_update"]) {
-    const d = new Database(":memory:");
-    migrate(d);
-    d.prepare(`INSERT INTO audit_event (actor, action, target, at) VALUES ('gd',?,'x',datetime('now'))`).run(action);
-    d.prepare(`INSERT INTO audit_event (actor, action, target, at) VALUES ('unknown','mcp.http.denied','unauthorized',datetime('now'))`).run();
-    migrate(d);
-    expect({ action, on: isMcpEnabled(d) }).toEqual({ action, on: true });
-  }
+test("★껐다 켤 수 있다★ — 끄는 스위치는 되살릴 수 있어야 한다", () => {
+  const d = new Database(":memory:");
+  migrate(d);
+  setMcpEnabled(d, false);
+  expect(isMcpEnabled(d)).toBe(false);
+  setMcpEnabled(d, true);
+  expect(isMcpEnabled(d)).toBe(true);
 });

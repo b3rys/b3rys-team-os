@@ -389,7 +389,7 @@ describe("settings: 시스템 OP (P0 floor — capture/router)", () => {
   test("GET 기본 상태 — 토큰 없음·router 기본 ON (setting·env 없으면 true, GD 0721)", async () => {
     const { app } = setup();
     const s = await (await app.request("/system-op")).json();
-    expect(s).toEqual({ has_capture_token: false, capture_group_id: null, router_enabled: true, mcp_enabled: false }); // ★MCP 기본 꺼짐★
+    expect(s).toEqual({ has_capture_token: false, capture_group_id: null, router_enabled: true, mcp_enabled: true }); // ★MCP 기본 켜짐 — 끄는 스위치다★
   });
 
   test("PATCH router_enabled 토글 (PIN 없이 즉시 반영)", async () => {
@@ -1677,17 +1677,17 @@ describe("system-op: MCP 창구 토글", () => {
     expect(JSON.stringify(s)).not.toContain("mcp");
   });
 
-  test("★공개 빌드는 PATCH 로도 못 켠다★ — 화면을 숨겨도 요청은 직접 보낼 수 있다", async () => {
+  test("★공개 빌드는 PATCH 로도 못 건드린다★ — 화면을 숨겨도 요청은 직접 보낼 수 있다", async () => {
     const { app, db } = setup(AGENTS, { publicBuild: true });
-    const r = await app.request("/system-op", patch({ mcp_enabled: true }));
+    const r = await app.request("/system-op", patch({ mcp_enabled: false }));
     expect(r.status).toBe(200); // 다른 칸(router 등)까지 막지는 않는다 — MCP 만 무시한다
-    expect(isMcpEnabled(db)).toBe(false); // ★DB 가 안 바뀌었다★
+    expect(isMcpEnabled(db)).toBe(true); // ★DB 가 안 바뀌었다★
     expect("mcp_enabled" in (await r.json())).toBe(false);
   });
 
-  test("★대조군 — 내부 빌드에서는 같은 요청이 실제로 켠다★", async () => {
+  test("★대조군 — 내부 빌드에서는 같은 요청이 실제로 끈다★", async () => {
     const { app, db } = setup(AGENTS, { publicBuild: false });
-    await app.request("/system-op", patch({ mcp_enabled: true }));
-    expect(isMcpEnabled(db)).toBe(true);
+    await app.request("/system-op", patch({ mcp_enabled: false }));
+    expect(isMcpEnabled(db)).toBe(false);
   });
 });

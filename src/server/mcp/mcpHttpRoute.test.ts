@@ -18,7 +18,6 @@ function addAgent(d: Database, id: string, name: string): void {
 function freshDb(): Database {
   const d = new Database(":memory:");
   migrate(d);
-  setMcpEnabled(d, true); // ★창구 스위치는 기본 꺼짐★ — 기존 시험들은 열린 상태를 전제한다
   addAgent(d, "demis", "Demis");
   addAgent(d, "bill", "Bill");
   return d;
@@ -354,7 +353,8 @@ test("★대조군★ — 켜면 그대로 통과한다", async () => {
 
 test("★꺼져 있으면 stdio 로도 안 붙는다★", async () => {
   const d = new Database(":memory:");
-  migrate(d); // 새 설치 = 꺼짐
+  migrate(d);
+  setMcpEnabled(d, false); // ★기본은 켜짐★ — 끈 상태를 만들어야 이 시험이 의미가 있다
   let connected = false;
   await expect(stdioMain(d, async () => { connected = true; })).rejects.toThrow(/mcp_disabled/);
   expect(connected).toBe(false); // ★붙기 전에 멈춘다★
