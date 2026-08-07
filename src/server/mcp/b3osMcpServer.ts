@@ -15,6 +15,8 @@ import { inboxFor } from "../db/inboxQueries";
 import { listTasks, createTask, updateTask } from "../db/taskQueries";
 import { recallDmMessages } from "../db/dmCapture";
 import { classifyAll } from "../lib/health";
+import { ambientAgents } from "../lib/registry"; // 정규 팀원 여부·별칭의 정본은 agents.json 이다 (DB 표에는 없다)
+import { isTeamOfficialMember } from "../lib/agentMembership";
 import { leadActorId } from "../lib/opAuth"; // ★이름만 재사용★ — 신뢰 규칙(루프백=리드)은 쓰지 않는다
 import { askTeammate, fetchAnswer, askProgress } from "./mcpAsk";
 
@@ -133,6 +135,28 @@ function denyCrossMember(self: string, target: string) {
     isError: true,
     structuredContent: { error: "cross_member_denied", self, target },
   };
+}
+
+/**
+ * 도구 설명에 실을 명부 — ★정규 팀원만★ (팀 리드 2026-08-07: "정규팀원만 해").
+ *
+ * ★정본이 두 군데로 갈려 있다★: 누가 있는지는 DB(`agent` 표), 정규 여부는 agents.json 이다.
+ * `agent` 표에는 `team_official_member` 칸이 없다 — 그래서 DB 만 읽으면 12명 전부가 나온다.
+ *
+ * ★빼는 쪽으로만 판단한다★: 레지스트리가 ★명시적으로 비정규라고 한 id★ 만 뺀다.
+ * agents.json 이 없는 환경(공개 clone 첫 부팅)에서는 `ambientAgents()` 가 빈 배열이라
+ * ★아무도 안 빠진다.★ 반대로 짰다면(정규인 사람만 남기기) 같은 상황에서 ★명부가 통째로 빈다.★
+ */
+export function officialRoster(db: Database): string {
+  const nonOfficial = new Set(
+    ambientAgents()
+      .filter((a) => !isTeamOfficialMember(a))
+      .map((a) => a.id),
+  );
+  return listAgents(db)
+    .filter((a) => !nonOfficial.has(a.id))
+    .map((a) => `${a.id}(${a.display_name})`)
+    .join(" · ");
 }
 
 /**
@@ -420,14 +444,13 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
         //   id 목록을 얻으려면 team_status 를 ★먼저 한 번 불러야★ 했다. 세션 첫 마디부터
         //   "빌한테 물어봐" 라고 하면 추측이 된다. 도구 설명은 ★세션 시작 시 주어지므로★
         //   여기 실으면 추가 호출 없이 정확해진다.
+        //   ★설명에는 정규 팀원만 싣는다★ (팀 리드 2026-08-07). 12명 전부가 아니라 9명이다.
+        //   ★설명을 좁히는 것이지 문을 좁히는 게 아니다★ — 아래 `to` 검증(listAgents)은 그대로라
+        //   비정규 팀원에게 묻는 것 자체는 계속 된다. 안내와 허용을 같이 줄이면 조용히 못 묻게 된다.
         to: z
           .string()
           .min(1)
-          .describe(
-            `질문할 팀원 id. 지금 등록된 팀원: ${listAgents(db)
-              .map((a) => `${a.id}(${a.display_name})`)
-              .join(" · ")}`,
-          ),
+          .describe(`질문할 팀원 id. 지금 등록된 팀원: ${officialRoster(db)}`),
         question: z.string().min(1).describe("질문 본문"),
         wait_seconds: z
           .number()
