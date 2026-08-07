@@ -187,18 +187,31 @@ RAG(Retrieval-Augmented Generation, 검색 증강 생성)
 
 | 패턴 | 쓸 때 | 구조 |
 |---|---|---|
-| Decision map | 선택지·판단 기준 비교 | 2축 또는 갈림길, 추천안만 ring/dot으로 강조 |
-| Loop / operating cycle | 반복 운영 체계·학습 루프 | 중앙 카드 + 원형 단계 노드 + curved arrows |
+| Horizontal flowchart | 요청·데이터가 왼쪽에서 오른쪽으로 흘러갈 때 | 3~5개 노드 + 짧은 arrow. 단계 설명은 노드 안 1~2줄로 제한 |
+| Vertical flowchart | 절차·승인·게이트처럼 위에서 아래로 내려가는 흐름 | 세로 카드 stack + 아래 화살표. 모바일/좁은 화면에 특히 좋음 |
+| Branching flow / decision tree | 조건에 따라 경로가 갈라질 때 | 질문 노드 → yes/no 또는 option A/B/C 가지. 조건 label은 선 위에 짧게 |
+| Tree / hierarchy | 조직·권한·파일 구조·개념 분류 | root → branch → leaf. 같은 level은 같은 y축/색상 규칙 유지 |
+| Loop / operating cycle | 반복 운영 체계·학습 루프 | 중앙 카드 + 원형 단계 노드 + curved arrows. 점선은 보조/학습 루프에만 |
+| Swimlane | 역할·주체별 책임이 나뉘는 프로세스 | lane별 row/column을 나누고 handoff만 arrow로 연결 |
 | Architecture map | 시스템 구성·데이터 흐름 | 입력 채널 → 중앙 bounded context → 런타임/저장소 |
 | Layer stack | 서버·DB·worker처럼 층이 있는 구조 | 큰 boundary 안에 row/column layer 배치 |
 | Timeline / lineage | 논문·릴리즈·사건 순서 | 축은 neutral, milestone만 small accent |
 | Matrix / quadrant | 두 판단 축으로 위치 비교 | label을 점 위에 길게 쓰지 말고 작은 callout으로 분리 |
+| Funnel / narrowing | 후보를 줄여 선택하거나 우선순위를 좁힐 때 | 넓은 단계 → 좁은 단계. 면을 과하게 채우지 말고 outline 중심 |
+| Radial / hub-and-spoke | 하나의 중심 개념과 주변 요소 관계 | 중앙 node + 주변 작은 node. 선은 얇게, 중심만 강조 |
+| Sankey-lite / weighted flow | 흐름의 양·비중이 중요한 경우 | 굵기 차이를 2~3단계만 사용. 복잡한 Sankey는 이미지/별도 도구 권장 |
 
 첨부 reference로 확인한 좋은 형태:
 
 - 운영 루프형: 중앙 설명 카드 주변에 1~9 원형 노드를 배치하고, 실선/점선 curved arrow로 순환과 learning loop를 구분한다.
 - 아키텍처형: 좌측 입력 채널, 중앙 서버 boundary, 우측 runtime, 하단 DB를 큰 영역으로 분리한다. box가 많아도 hierarchy가 보여야 한다.
 - 비교 map형: 점과 설명이 겹치지 않게 callout을 분리하고, 추천안만 더 선명하게 표시한다.
+- 세로 플로우차트형: 승인·검증·배포처럼 순서가 중요한 절차는 가로로 억지 배치하지 말고 위→아래로 읽히게 만든다.
+- 트리형: “무엇의 하위 항목인가”가 핵심이면 flow arrow보다 tree branch가 낫다. 원인 분석, 권한 체계, 문서 목차, 파일 구조에 쓴다.
+- Swimlane형: 팀장·에이전트·서버·DB처럼 주체가 다르면 lane을 나눠 책임과 handoff를 먼저 보이게 한다.
+- Funnel형: 후보군을 좁히는 리서치/우선순위 판단은 단계별 탈락 이유를 짧게 적고 마지막 선택지만 강조한다.
+- Radial형: 하나의 전략/제품/서버를 중심에 두고 주변 기능을 보여줄 때 쓴다. 모든 주변 노드를 같은 무게로 보이면 안 되고 핵심 3~5개만 둔다.
+- 복잡한 Sankey/정교한 네트워크 그래프는 SVG로 억지로 만들지 않는다. 직접 그린 이미지나 별도 시각화 도구를 쓰고, 보고서에는 해설과 legend를 붙인다.
 - 허용: blue는 링크·코드·보조 정보에만 제한한다. 도식의 primary flow는 green/sage, secondary는 amber다.
 
 ## 8. 이미지 / 스크린샷
