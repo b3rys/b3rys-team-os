@@ -9,7 +9,7 @@ import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { writeMemberPersona, savePersonaFile } from "../lib/writeMemberPersona";
 import { memberPaths, personaTargetsForRuntime, injectCoreRule, stripCoreRule, coreRuleFor, injectClaudeComms, stripClaudeComms, JOIN_FLAG_FILE, joinInstructions } from "../lib/personaTemplates";
-import { captureConfigStatus, setCaptureToken, setCaptureGroupId, setRouterEnabled, getCaptureToken } from "../lib/captureConfig";
+import { captureConfigStatus, setCaptureToken, setCaptureGroupId, setRouterEnabled, setMcpEnabled, getCaptureToken } from "../lib/captureConfig";
 // ★설정 키 이름은 approvals.ts 정본을 쓴다★ — 문자열을 여기 다시 적으면 그 순간 갈린다.
 import { MERGE_APPROVERS_SETTING_KEY } from "../lib/approvals";
 import { configureLeadActorDb, leadActorId, leadActorSource, trustedActorFromRequest } from "../lib/opAuth";
@@ -93,6 +93,8 @@ export interface SettingsDeps {
   //   이게 없어서 `bun test`의 DELETE /members/steve 테스트가 실제 telegram-steve 폴더를 삭제하던 치명 버그(GD 2026-07-01 fs_usage로 확정). 테스트는 true 주입.
   skipRuntimeCleanup?: boolean;
   checkRuntimeAuth?: typeof checkRuntimeAuth;
+  // ★공개 빌드 여부를 시험이 직접 정할 수 있게★ — 미주입이면 라이브와 같은 PUBLIC_BUILD(=B3OS_LIVE !== "1").
+  publicBuild?: boolean;
   activateMember?: typeof activateMember;
   // 활성화 직후 실제 첫 모델 호출 검증. 테스트는 mock 주입으로 라이브 계정/외부 상태 의존을 끊는다.
   firstModelCall?: (input: { id: string; runtime: string; workspacePath?: string }) => Promise<FirstModelCallResult>;
@@ -318,6 +320,9 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
   const doArchiveWorkspace = deps.archiveWorkspace ?? archiveWorkspace; // 주입 없으면 실제 함수(라이브). 테스트는 noop 주입.
   const skipRuntimeCleanup = deps.skipRuntimeCleanup ?? false; // 테스트=true → 실 HOME(~/.claude 등) 파일 rm 건너뜀(라이브 봇 데이터 삭제 방지).
   const doCheckRuntimeAuth = deps.checkRuntimeAuth ?? checkRuntimeAuth;
+  // ★공개 빌드 판정을 주입받는다★ (dex 리뷰): 모듈 상수를 그대로 읽으면 한 프로세스에서 한쪽 분기밖에
+  //   못 잰다 — 그래서 "소스에 조건식이 있다" 만 확인하는 시험이 됐고, 그건 동작을 증명하지 않는다.
+  const publicBuild = deps.publicBuild ?? PUBLIC_BUILD;
   const runtimeReadiness = async (runtime: string) => runtimeReadinessFromAuth(await doCheckRuntimeAuth(runtime));
   const publicRuntimeGate = async (runtime: string) => {
     if (PUBLIC_BUILD && LIVE_ONLY_RUNTIMES.has(runtime)) return { error: "runtime_not_public", hint: "이 런타임은 공개 온보딩에서 제공하지 않습니다." };
@@ -2146,15 +2151,24 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
   // graceful PIN: PIN 설정돼 있으면 검증 필수(앱레벨 잠금, 자가호스터 보안), 없으면 dashboard-trusted(기본 floor UX 안 막음).
   const CAPTURE_TOKEN_RE = /^\d+:[A-Za-z0-9_-]{30,120}$/; // 하네스 LOW-1: 길이 상한(DoS 방지)
   const CAPTURE_GROUP_RE = /^-?\d{1,20}$/; // telegram chat_id(음수 supergroup 포함). 하네스 LOW-1: group 검증
-  app.get("/system-op", (c) => c.json(captureConfigStatus(db)));
+  // ★공개 빌드에서는 MCP 칸을 아예 안 내려보낸다★ (팀 리드 2026-08-07: "퍼블릭에선 안보이게").
+  //   UI 는 이 값이 boolean 일 때만 토글을 그린다 — 없으면 그런 기능이 있다는 것도 안 보인다.
+  const stripMcpForPublic = (st: ReturnType<typeof captureConfigStatus>) => {
+    if (!publicBuild) return st;
+    const { mcp_enabled: _omit, ...rest } = st;
+    return rest;
+  };
+  app.get("/system-op", (c) => c.json(stripMcpForPublic(captureConfigStatus(db))));
 
   app.patch("/system-op", async (c) => {
-    let body: { capture_bot_token?: unknown; capture_group_id?: unknown; router_enabled?: unknown };
+    let body: { capture_bot_token?: unknown; capture_group_id?: unknown; router_enabled?: unknown; mcp_enabled?: unknown };
     try { body = await c.req.json(); } catch { return c.json({ ok: false, error: "invalid_json" }, 400); }
     // (접근제어/PIN은 System OP에서 제거 — GD 2026-06-28. 추후 소셜로긴/이메일로 독립 레벨 설계.)
     const token = typeof body.capture_bot_token === "string" ? body.capture_bot_token.trim() : undefined;
     const group = typeof body.capture_group_id === "string" ? body.capture_group_id.trim() : undefined;
     const router = typeof body.router_enabled === "boolean" ? body.router_enabled : undefined;
+    // ★공개 빌드에서는 켤 수 없다★ — UI 를 숨기는 것만으로는 부족하다(요청은 직접 보낼 수 있다).
+    const mcpOn = !publicBuild && typeof body.mcp_enabled === "boolean" ? body.mcp_enabled : undefined;
     if (token !== undefined && token !== "" && !CAPTURE_TOKEN_RE.test(token)) {
       return c.json({ ok: false, error: "capture_bot_token_invalid", hint: "봇 토큰 형식: 숫자:영숫자30~120 (BotFather)" }, 400);
     }
@@ -2169,15 +2183,16 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       if (group) { try { seedGroupIntoClaudeMembers(group, readAgents().filter((a: any) => a.runtime === "claude_channel").map((a: any) => a.id)); } catch { /* best-effort seed */ } }
     }
     if (router !== undefined) setRouterEnabled(db, router); // 라이브 — 재시작 불요
+    if (mcpOn !== undefined) setMcpEnabled(db, mcpOn); // 라이브 — 다음 요청부터 즉시 적용
     // ★토큰/그룹 변경을 서버 재시작 없이 즉시 적용★(GD 2026-07-19): capture 워커를 재init 한다(새 토큰으로 텔레그램 재연결).
     //   restartCapture 미주입(테스트 등)이면 종전대로 needs_restart=true 로 안내. 재init 은 best-effort(실패해도 저장은 유지).
     let applied = false;
     if (changedTokenOrGroup && deps.restartCapture) {
       try { deps.restartCapture(); applied = true; } catch { /* best-effort — 실패 시 needs_restart 로 폴백 */ }
     }
-    appendAudit(db, "user", "system_op_updated", "system", { token_set: !!token, group_set: group !== undefined, router_enabled: router, applied }); // ★토큰 값은 audit에 안 넣음
+    appendAudit(db, "user", "system_op_updated", "system", { token_set: !!token, group_set: group !== undefined, router_enabled: router, mcp_enabled: mcpOn, applied }); // ★토큰 값은 audit에 안 넣음
     const needsRestart = changedTokenOrGroup && !applied;
-    return c.json({ ok: true, ...captureConfigStatus(db), needs_restart: needsRestart, note: !changedTokenOrGroup ? "적용됨" : applied ? "적용됨(즉시 반영 — 재시작 불필요)" : "토큰/그룹 변경은 서버 재시작 시 적용(라우터는 즉시)" });
+    return c.json({ ok: true, ...stripMcpForPublic(captureConfigStatus(db)), needs_restart: needsRestart, note: !changedTokenOrGroup ? "적용됨" : applied ? "적용됨(즉시 반영 — 재시작 불필요)" : "토큰/그룹 변경은 서버 재시작 시 적용(라우터는 즉시)" });
   });
 
   // 저장된 토큰이 텔레그램에서 유효한지 확인(getMe). ★응답엔 bot_username 만, 토큰 값 노출 안 함.

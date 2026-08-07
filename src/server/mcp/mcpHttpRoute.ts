@@ -22,6 +22,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { buildMcpServer, resolveActorStrict } from "./b3osMcpServer";
 import { authenticateMcpRequest, loadMcpAuthConfig, type McpAuthConfig, type McpPrincipal } from "./mcpAuth";
 import { appendAudit } from "../db/queries";
+import { isMcpEnabled } from "../lib/captureConfig";
 
 // ★쓰기 도구 목록은 여기 두지 않는다★ — 관문은 b3osMcpServer 의 WRITE_TOOL_NAMES 하나뿐이다.
 // (리뷰 P1, bill) 목록이 두 곳이면 새 쓰기 도구를 추가할 때 한쪽만 고치고 '완료' 가 되는데,
@@ -62,6 +63,15 @@ export function buildMcpHttpApp(db: Database, deps: McpHttpDeps = {}): Hono {
   app.all("/mcp", async (c) => {
     // 설정은 요청 시점에 읽는다 — 재시작 없이 매핑을 갱신할 수 있게.
     const cfg = deps.authConfig ?? loadMcpAuthConfig();
+
+    // ★창구 자체를 닫는 스위치★ (팀 리드 2026-08-07). 도구가 여럿이라 ★한 도구만 막으면
+    //   나머지로 계속 들어온다★ — 그래서 입구 한 곳에서 막는다.
+    //   ★문구는 사실만 말한다★: 공개 빌드에는 토글이 없으므로 "관리자에게 켜달라" 는
+    //   ★할 수 없는 일을 시키는 안내★ 가 된다.
+    if (!isMcpEnabled(db)) {
+      audit(db, "unknown", "mcp.http.denied", "mcp_disabled", { status: 503 });
+      return c.json({ error: "mcp_disabled", detail: "이 설치에서는 MCP 창구가 꺼져 있습니다." }, 503);
+    }
 
     const auth = await authenticate(c.req.raw, cfg);
     if (!auth.ok) {

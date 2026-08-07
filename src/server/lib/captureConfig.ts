@@ -84,6 +84,21 @@ export function setRouterEnabled(db: Database, on: boolean): void {
   setSetting(db, "router_enabled", on ? "true" : "false");
 }
 
+/**
+ * MCP 창구가 열려 있나. ★기본은 꺼짐★ (팀 리드 2026-08-07: "mcp 는 일단 우리만 쓰는 걸로,
+ * 즉 리사팀도 못쓰는 거야"). 새 설치는 아무것도 안 하면 닫혀 있다.
+ *
+ * ★이미 쓰던 설치는 마이그레이션이 켜준다★ — migrate.ts 참고. 기본만 꺼짐으로 두고
+ * 배포하면 ★쓰고 있던 사람이 그 순간 끊긴다★ (그리고 끊긴 창이 그 사람의 연락 수단이다).
+ */
+export function isMcpEnabled(db: Database): boolean {
+  return getSetting(db, "mcp_enabled") === "true";
+}
+
+export function setMcpEnabled(db: Database, on: boolean): void {
+  setSetting(db, "mcp_enabled", on ? "true" : "false");
+}
+
 // group_id — 비밀 아니지만 *모듈 로드 시점*(워커 const)에서 읽혀야 해 파일 기반(그 시점엔 db 없음). file→env fallback.
 // (Codex 팀원리뷰: DB저장+env읽기 불일치 → UI로 바꿔도 미적용 "설정됐다 보이는데 안 됨" 버그. 파일로 통일=재시작 시 적용+GET 일치.)
 function groupPath(): string {
@@ -112,10 +127,12 @@ export function captureConfigStatus(db: Database): {
   has_capture_token: boolean;
   capture_group_id: string | null;
   router_enabled: boolean;
+  mcp_enabled: boolean;
 } {
   return {
     has_capture_token: hasCaptureToken(),
     capture_group_id: getCaptureGroupId(),
     router_enabled: isRouterEnabled(db),
+    mcp_enabled: isMcpEnabled(db),
   };
 }

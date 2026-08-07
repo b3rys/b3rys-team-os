@@ -3,8 +3,9 @@
 import { test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
+import { setMcpEnabled } from "../lib/captureConfig";
 import { buildMcpHttpApp } from "./mcpHttpRoute";
-import { buildMcpServer, WRITE_TOOL_NAMES, resolveActorStrict, resolveActor } from "./b3osMcpServer";
+import { buildMcpServer, WRITE_TOOL_NAMES, resolveActorStrict, resolveActor, main as stdioMain } from "./b3osMcpServer";
 import type { McpAuthConfig, McpAuthResult } from "./mcpAuth";
 
 function addAgent(d: Database, id: string, name: string): void {
@@ -17,6 +18,7 @@ function addAgent(d: Database, id: string, name: string): void {
 function freshDb(): Database {
   const d = new Database(":memory:");
   migrate(d);
+  setMcpEnabled(d, true); // ★창구 스위치는 기본 꺼짐★ — 기존 시험들은 열린 상태를 전제한다
   addAgent(d, "demis", "Demis");
   addAgent(d, "bill", "Bill");
   return d;
@@ -313,3 +315,54 @@ test("★대조군★ — 끝까지 읽어도 정리가 정확히 1회 돈다(�
 // → ★keepalive 는 라이브 실험에서 잰다.★ 그게 원래 목적이기도 하다:
 //   keepalive 가 있어야 실험 결과가 "가설이 틀렸다" 인지 "클라이언트가 progressToken 을 안 줬다" 인지
 //   구분된다(빌). 그 구분이 필요한 곳이 라이브다.
+
+// ── ★창구 스위치★ (팀 리드 2026-08-07) ──
+
+test("★꺼져 있으면 인증까지 안 가고 막힌다★ — 도구 하나가 아니라 입구에서", async () => {
+  const db = freshDb();
+  setMcpEnabled(db, false);
+  let authCalled = false;
+  const app = buildMcpHttpApp(db, {
+    authConfig: CFG,
+    authenticate: async () => { authCalled = true; return allow("demis", "write"); },
+  });
+  const res = await app.request(post(INIT));
+  expect(res.status).toBe(503);
+  expect((await res.json() as { error: string }).error).toBe("mcp_disabled");
+  expect(authCalled).toBe(false); // ★입구에서 막는다★ — 도구별로 막으면 나머지로 들어온다
+});
+
+test("★꺼졌을 때 문구는 사실만 말한다★ — 공개 빌드엔 토글이 없어 '켜달라' 는 못 할 일을 시키는 것", async () => {
+  const db = freshDb();
+  setMcpEnabled(db, false);
+  const app = buildMcpHttpApp(db, { authConfig: CFG, authenticate: async () => allow("demis", "write") });
+  const body = await (await app.request(post(INIT))).json() as { detail: string };
+  expect(body.detail).toContain("꺼져 있습니다");
+  expect(body.detail).not.toContain("관리자"); // 할 수 없는 일을 시키지 않는다
+});
+
+test("★대조군★ — 켜면 그대로 통과한다", async () => {
+  const db = freshDb(); // freshDb 가 켜둔다
+  const app = buildMcpHttpApp(db, { authConfig: CFG, authenticate: async () => allow("demis", "write") });
+  expect((await app.request(post(INIT))).status).toBe(200);
+});
+
+// ── ★스위치는 창구 전체를 끈다★ (dex 리뷰 2026-08-07) ──
+//
+// HTTP 만 막으면 ★같은 기계에서 stdio 로 그대로 들어온다.★ 그러면 "MCP 연결 off" 라고 적힌 화면과
+// 실제 동작이 어긋난다 — 스위치가 낼 수 있는 최악의 실패다(꺼진 줄 알고 열려 있다).
+
+test("★꺼져 있으면 stdio 로도 안 붙는다★", async () => {
+  const d = new Database(":memory:");
+  migrate(d); // 새 설치 = 꺼짐
+  let connected = false;
+  await expect(stdioMain(d, async () => { connected = true; })).rejects.toThrow(/mcp_disabled/);
+  expect(connected).toBe(false); // ★붙기 전에 멈춘다★
+});
+
+test("★대조군 — 켜져 있으면 stdio 가 붙는다★", async () => {
+  const d = freshDb(); // setMcpEnabled(true)
+  let connected = false;
+  await stdioMain(d, async () => { connected = true; });
+  expect(connected).toBe(true);
+});
