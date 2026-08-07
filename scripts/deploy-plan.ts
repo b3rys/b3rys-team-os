@@ -63,12 +63,29 @@ export interface LivePoint {
   commit: string | null;
 }
 
+/**
+ * 배포를 실행할 트리 자체의 상태. ★"무엇을 배포하나" 와 "어디서 배포하나" 는 다른 질문이다.★
+ * 공유 트리가 기능 브랜치에 올라가 있거나 미커밋이 얹혀 있으면, 팀원은 그 파일들을 직접 읽는다
+ * (스킬·룰은 공유 트리에서 바로 읽힌다). 그건 배포 대상이 아니라 ★지금 이미 벌어지고 있는 일★ 이다.
+ */
+export interface TreeState {
+  branch: string | null;
+  /** 추적 파일의 미커밋 변경 수. 미추적은 세지 않는다(워크트리 디렉토리 등 정상 잔재가 많다). */
+  dirtyTracked: number;
+}
+
 export interface PlanInput {
   live: Record<Layer, LivePoint>;
   target: string;
   /** 주입 가능하게 둔다 — 시험이 진짜 저장소 상태에 기대지 않도록. */
   changedFiles: (from: string, to: string, paths: readonly string[]) => string[];
   commitExists: (sha: string) => boolean;
+  /** `sha` 가 `target` 의 조상인가 = 정본 계열 위에 있는가. */
+  isAncestor?: (sha: string, target: string) => boolean;
+  /** 실행 트리 상태. 없으면 그 검사는 건너뛴다(시험·다른 호출부 호환). */
+  tree?: TreeState;
+  /** 정본 브랜치 이름. 기본 main. */
+  canonicalBranch?: string;
 }
 
 export interface Plan {
@@ -76,11 +93,20 @@ export interface Plan {
   actions: { restart: boolean; build: boolean };
   changed: Record<Layer, string[]>;
   target: string;
+  /**
+   * ★막지는 않지만 사람이 봐야 하는 것.★
+   *
+   * 왜 blocked 가 아니라 warnings 인가 — ★정당한 상태를 막는 게이트는 우회 습관을 만든다.★
+   * (우리 팀에 전례가 있다: 상시 실패하는 게이트가 `--skip` 을 습관으로 만들었다)
+   * 여기 담기는 것들은 ★배포를 못 할 이유는 아니지만 모르고 지나가면 안 되는★ 사실이다.
+   */
+  warnings: string[];
 }
 
 /** ★판단 본체.★ 순수 함수다 — 저장소도 네트워크도 안 건드린다(그래서 시험이 진짜를 잰다). */
 export function planDeploy(input: PlanInput): Plan {
   const changed: Record<Layer, string[]> = { server: [], web: [] };
+  const warnings = treeWarnings(input);
   for (const layer of Object.keys(LAYER_PATHS) as Layer[]) {
     const from = input.live[layer].commit;
     if (!from) {
@@ -90,6 +116,7 @@ export function planDeploy(input: PlanInput): Plan {
         actions: { restart: false, build: false },
         changed,
         target: input.target,
+        warnings,
       };
     }
     if (!input.commitExists(from)) {
@@ -99,7 +126,18 @@ export function planDeploy(input: PlanInput): Plan {
         actions: { restart: false, build: false },
         changed,
         target: input.target,
+        warnings,
       };
+    }
+    // ★"다시 배포할 필요가 있나" 와 "정본 계열 위에 있나" 는 다른 질문이다.★
+    //   2026-08-07 실측: 팀원이 미머지 브랜치에서 빌드해 web 층이 그 브랜치 커밋을 가리켰는데,
+    //   빌드 입력이 안 바뀌었으므로 "할 일 없음" 이 나왔다 — ★맞는 답이지만 그 사실은 말하지 않았다.★
+    //   그 커밋은 브랜치가 지워지면 저장소에서 사라진다. 다음 배포의 기준선이 사라지는 것이다.
+    if (input.isAncestor && from !== input.target && !input.isAncestor(from, input.target)) {
+      warnings.push(
+        `${layer} 층이 가리키는 ${from.slice(0, 8)} 이 정본(${input.target.slice(0, 8)}) 계열이 아니다 — ` +
+          `미머지 브랜치에서 배포했을 가능성. 그 커밋은 브랜치가 지워지면 사라진다.`,
+      );
     }
     changed[layer] = input.changedFiles(from, input.target, LAYER_PATHS[layer]);
   }
@@ -109,7 +147,31 @@ export function planDeploy(input: PlanInput): Plan {
     actions: { restart: changed.server.length > 0, build: changed.web.length > 0 },
     changed,
     target: input.target,
+    warnings,
   };
+}
+
+/**
+ * 실행 트리 자체를 본다. ★배포 대상과 무관하게, 지금 팀원이 읽고 있는 파일의 상태다.★
+ * 스킬·룰은 공유 트리에서 직접 읽히므로 여기가 브랜치이거나 더러우면 ★이미 그 내용이 팀에 나가 있다.★
+ */
+export function treeWarnings(input: Pick<PlanInput, "tree" | "canonicalBranch">): string[] {
+  const out: string[] = [];
+  const tree = input.tree;
+  if (!tree) return out;
+  const canonical = input.canonicalBranch ?? "main";
+  if (tree.branch !== canonical) {
+    out.push(
+      `실행 트리가 '${tree.branch ?? "detached"}' 에 있다 (정본은 '${canonical}'). ` +
+        `팀원은 스킬·룰을 이 트리에서 직접 읽으므로 ★미머지 내용이 이미 팀에 나가 있다.★`,
+    );
+  }
+  if (tree.dirtyTracked > 0) {
+    out.push(
+      `실행 트리에 미커밋 변경 ${tree.dirtyTracked}건이 있다 — ★커밋도 리뷰도 안 된 내용을 팀원이 읽는다.★`,
+    );
+  }
+  return out;
 }
 
 /**
@@ -146,6 +208,21 @@ export function realCommitExists(sha: string): boolean {
   return git(["cat-file", "-e", `${sha}^{commit}`]).ok;
 }
 
+export function realIsAncestor(sha: string, target: string): boolean {
+  return git(["merge-base", "--is-ancestor", sha, target]).ok;
+}
+
+/** 실행 트리 상태를 읽는다. ★미추적은 세지 않는다★ — `.worktrees/` 같은 정상 잔재가 늘 있다. */
+export function realTreeState(): TreeState {
+  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
+  const status = git(["status", "--porcelain"]);
+  const dirty = status.ok
+    ? status.out.split("\n").filter((l) => l.trim() && !l.startsWith("??")).length
+    : 0;
+  const name = branch.ok ? branch.out : "";
+  return { branch: name && name !== "HEAD" ? name : null, dirtyTracked: dirty };
+}
+
 async function fetchLive(healthUrl: string): Promise<Record<Layer, LivePoint>> {
   const res = await fetch(healthUrl, { signal: AbortSignal.timeout(5000) });
   const body = (await res.json()) as { server?: { commit?: unknown }; web?: { commit?: unknown } };
@@ -157,7 +234,8 @@ if (import.meta.main) {
   const argv = process.argv.slice(2);
   const arg = (name: string, fallback: string): string => {
     const i = argv.indexOf(name);
-    return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
+    const v = i >= 0 ? argv[i + 1] : undefined;
+    return v ?? fallback;
   };
   const healthUrl = arg("--health", `http://127.0.0.1:${process.env.TEAM_HTTP_PORT ?? 7878}/health`);
   const targetRef = arg("--target", "origin/main");
@@ -183,6 +261,9 @@ if (import.meta.main) {
     target: targetSha.out,
     changedFiles: realChangedFiles,
     commitExists: realCommitExists,
+    isAncestor: realIsAncestor,
+    tree: realTreeState(),
+    canonicalBranch: arg("--canonical-branch", "main"),
   });
 
   if (asJson) {
@@ -198,6 +279,8 @@ if (import.meta.main) {
       const todo = [plan.actions.restart ? "재시작" : null, plan.actions.build ? "빌드" : null].filter(Boolean);
       console.log(`→ 할 일: ${todo.length ? todo.join(" + ") : "없음 (이미 반영돼 있다)"}`);
     }
+    // ★멈추지 않는다. 다만 조용히 지나가지도 않는다.★ blocked 여부와 무관하게 항상 보여준다.
+    for (const w of plan.warnings) console.log(`\n⚠ ${w}`);
   }
   process.exit(plan.blocked ? 2 : 0);
 }

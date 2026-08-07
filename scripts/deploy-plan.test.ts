@@ -17,6 +17,7 @@ import {
   CONFIG_NOT_IN_ANY_LAYER,
   type Layer,
   type Plan,
+  type PlanInput,
 } from "./deploy-plan";
 
 const SHA = {
@@ -113,6 +114,7 @@ test("★화면만 배포했으면 서버 층이 옛 커밋이어도 성공이�
     actions: { restart: false, build: true },
     changed: { server: [], web: ["src/web/x.ts"] },
     target: SHA.target,
+    warnings: [],
   };
   // 서버는 여전히 옛 커밋 — 재시작을 안 했으니 당연하다
   const v = verifyAfterDeploy(plan, live(SHA.server, SHA.target));
@@ -126,6 +128,7 @@ test("★대조군★ — 빌드했다는데 화면 커밋이 안 바뀌었으�
     actions: { restart: false, build: true },
     changed: { server: [], web: ["src/web/x.ts"] },
     target: SHA.target,
+    warnings: [],
   };
   const v = verifyAfterDeploy(plan, live(SHA.server, SHA.web)); // web 이 옛것 그대로
   expect(v.ok).toBe(false);
@@ -153,6 +156,85 @@ test("★루트의 설정 파일은 모두 어느 층엔가 분류돼 있다★ 
 test("★tailwind 설정은 web 층이다★ — 이 파일 변경이 dist 산출물을 바꾸는 것을 실측했다", () => {
   expect(LAYER_PATHS.web).toContain("tailwind.config.js");
   expect(LAYER_PATHS.web).toContain("postcss.config.js"); // tailwind 를 불러 쓰는 쪽
+});
+
+// ── ★경고 — 막지는 않지만 드러낸다★ ───────────────────────────────────────────
+//
+// 왜 필요한가 (2026-08-07 실측):
+//  · 공유 라이브 트리에서 기능 브랜치를 checkout 하고 작업하는 일이 하루 다섯 번 났다.
+//    팀원은 스킬·룰을 그 트리에서 ★직접 읽으므로★ 그 시간 동안 ★미머지 내용이 이미 팀에 나가 있었다.★
+//  · 그 상태로 빌드가 돌아 web 층이 ★미머지 브랜치 커밋★ 을 가리켰는데, 빌드 입력이 안 바뀌었으므로
+//    planDeploy 는 "할 일 없음" 을 답했다 — ★맞는 답이지만 그 사실을 말하지 않았다.★
+//
+// ★막지 않는 이유★: 정당한 상태를 막는 게이트는 우회 습관을 만든다(팀 전례 있음).
+
+const cleanTree = { branch: "main", dirtyTracked: 0 };
+const basePlan = (over: Partial<PlanInput> = {}) =>
+  planDeploy({
+    live: live(SHA.server, SHA.web),
+    target: SHA.target,
+    changedFiles: () => [],
+    commitExists: always,
+    ...over,
+  });
+
+test("★실행 트리가 정본 브랜치가 아니면 경고한다★ — 팀원이 그 파일을 읽고 있다", () => {
+  const plan = basePlan({ tree: { branch: "hermes/some-work", dirtyTracked: 0 } });
+  expect(plan.warnings.some((w) => w.includes("hermes/some-work"))).toBe(true);
+  expect(plan.blocked).toBeNull(); // ★막지 않는다★
+});
+
+test("★미커밋이 있으면 경고한다★ — 커밋도 리뷰도 안 된 내용이 읽힌다", () => {
+  const plan = basePlan({ tree: { branch: "main", dirtyTracked: 4 } });
+  expect(plan.warnings.some((w) => w.includes("4건"))).toBe(true);
+  expect(plan.blocked).toBeNull();
+});
+
+test("★대조군★ — main 이고 깨끗하면 트리 경고가 없다", () => {
+  expect(basePlan({ tree: cleanTree }).warnings).toEqual([]);
+});
+
+test("★detached HEAD 도 경고한다★ — 브랜치 이름이 없는 것도 정본이 아니다", () => {
+  const plan = basePlan({ tree: { branch: null, dirtyTracked: 0 } });
+  expect(plan.warnings.some((w) => w.includes("detached"))).toBe(true);
+});
+
+test("★층 커밋이 정본 계열이 아니면 경고한다★ — 브랜치가 지워지면 사라질 커밋이다", () => {
+  const plan = basePlan({ tree: cleanTree, isAncestor: (sha) => sha !== SHA.web });
+  expect(plan.warnings.some((w) => w.includes("web") && w.includes(SHA.web.slice(0, 8)))).toBe(true);
+  expect(plan.warnings.some((w) => w.startsWith("server"))).toBe(false); // server 는 조상이므로 조용해야 한다
+});
+
+test("★대조군★ — 두 층이 모두 정본 계열이면 계열 경고가 없다", () => {
+  expect(basePlan({ tree: cleanTree, isAncestor: always }).warnings).toEqual([]);
+});
+
+test("★target 과 같은 커밋은 조상 검사에서 조용하다★ — 자기 자신은 조상이 아니라 오탐이 난다", () => {
+  const plan = planDeploy({
+    live: live(SHA.target, SHA.target), // 이미 target 인 정상 상태
+    target: SHA.target,
+    changedFiles: () => [],
+    commitExists: always,
+    tree: cleanTree,
+    isAncestor: () => false, // ★조상 판정이 false 를 줘도★ 같은 커밋이면 경고하지 않아야 한다
+  });
+  expect(plan.warnings).toEqual([]);
+});
+
+test("★멈춘 경우에도 경고는 함께 나온다★ — 멈춘 이유와 트리 상태를 같이 봐야 한다", () => {
+  const plan = planDeploy({
+    live: live(SHA.server, null), // web 표식 없음 → blocked
+    target: SHA.target,
+    changedFiles: () => [],
+    commitExists: always,
+    tree: { branch: "wip", dirtyTracked: 2 },
+  });
+  expect(plan.blocked).not.toBeNull();
+  expect(plan.warnings.length).toBeGreaterThan(0);
+});
+
+test("★tree 를 안 주면 그 검사는 건너뛴다★ — 다른 호출부가 깨지지 않는다", () => {
+  expect(basePlan().warnings).toEqual([]);
 });
 
 test("★공유 코드는 양쪽 층에 다 든다★ — 한쪽만 반영되면 나머지가 옛 코드로 남는다", () => {
