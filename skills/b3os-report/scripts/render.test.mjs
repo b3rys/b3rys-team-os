@@ -64,6 +64,13 @@ try {
   assert.match(html, /<figure><figcaption>한눈에 보기<\/figcaption><div class="mobile-infographic">[\s\S]*<svg class="desktop-infographic"/);
   assert.match(html, /<rect x="1"/);
   assert.match(html, /<text x="50"/);
+  const refs = readFileSync(new URL('../references/ui-components.md', import.meta.url), 'utf8');
+  assert.match(refs, /Vertical flowchart/);
+  assert.match(refs, /Tree \/ hierarchy/);
+  assert.match(refs, /Swimlane/);
+  assert.match(refs, /Funnel \/ narrowing/);
+  assert.match(refs, /Radial \/ hub-and-spoke/);
+  assert.match(refs, /Sankey-lite \/ weighted flow/);
   assert.doesNotMatch(html, /&lt;(svg|rect|text|div)/);
   assert.match(html, /<p>본문입니다\.<\/p>/);
   console.log("PASS b3os-report dark/light theme + nested raw block passthrough");
