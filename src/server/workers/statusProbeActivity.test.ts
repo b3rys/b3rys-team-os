@@ -32,6 +32,23 @@ test("★푸터의 '⏺ main' 은 안 고른다★ — 그건 브랜치 표시�
   expect(currentActivityLine(onlyFooter)).toBeNull();
 });
 
+// ★구분선이 없는 화면★ (빌 리뷰: 이 축을 아무도 안 보고 있었다)
+//
+// 처음엔 구분선을 못 찾으면 ★화면 전체를 뒤졌다.★ 그러면 푸터의 `⏺ main` 이 잡혀
+// "읽고 작업 중입니다 · main" 이 나간다. 길이로 거르려 했는데 ★"main" 은 4자라 안 걸렸다★ —
+// ★주석은 막는다고 적혀 있었고 실제로는 안 막았다.★
+// → 가를 수 없으면 ★모르는 것★ 이다. null 을 돌린다.
+
+test("★구분선이 없으면 null★ — 대화 영역과 푸터를 가를 수 없으면 모르는 것이다", () => {
+  expect(currentActivityLine(["⏺ main"])).toBeNull();
+  expect(currentActivityLine(["⏵⏵ auto mode on", "⏺ main", "12% ctx"])).toBeNull();
+  expect(currentActivityLine(["⏺ Read(a.ts)", "⏵⏵ auto mode on"])).toBeNull(); // 구분선 없으면 진짜 출력도 안 쓴다
+});
+
+test("★대조군★ — 구분선이 있으면 같은 입력이 값을 낸다", () => {
+  expect(currentActivityLine(["⏺ Read(a.ts)", "──────", "⏵⏵ auto mode on"])).toBe("Read(a.ts)");
+});
+
 test("★맨 아랫줄(고정 장식)을 고르지 않는다★ — 이게 지금까지의 문제였다", () => {
   const got = currentActivityLine(REAL_PANE);
   expect(got).not.toContain("auto mode on");

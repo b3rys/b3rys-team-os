@@ -182,18 +182,23 @@ function weeklyLimitBlockedLine(recent: { line: string; captured_at: string }[])
  * → `⏺` 줄을 쓴다. 실측: "⏺ 그룹방에 인사 전송 완료 (msg …)" · "⏺ Read(파일)" — ★진짜 내용이 있다.★
  *
  * ★입력창 아래는 보지 않는다★: 구분선(───) 밑은 전부 푸터라 거기 있는 `⏺ main`(브랜치 표시)이
- * 대화 출력으로 오인된다. 구분선 위(=대화 영역)에서만 고른다.
+ * 대화 출력으로 오인된다. 구분선 위(=대화 영역)에서만 고르고, ★구분선이 없으면 null★ 이다
+ * (가를 수 없으면 모르는 것이다 — 길이로 거르려 했더니 "main" 이 4자라 안 걸렸다).
  */
 export function currentActivityLine(lines: string[]): string | null {
-  let cutoff = lines.length;
+  // ★구분선을 못 찾으면 null 이다★ — 대화 영역과 푸터를 ★가를 수 없으면 모르는 것★ 이고,
+  //   모름을 값으로 바꾸지 않는다. 화면 전체를 뒤지면 푸터의 `⏺ main`(브랜치)이 잡혀
+  //   "읽고 작업 중입니다 · main" 이 된다. 화면 없는 런타임 7명이 이미 null 로 잘 돈다.
+  let cutoff = -1;
   for (let i = lines.length - 1; i >= 0; i--) {
     if (/─{6,}/.test(lines[i] ?? "")) { cutoff = i; break; }
   }
+  if (cutoff < 0) return null;
   for (let i = cutoff - 1; i >= 0; i--) {
     const raw = (lines[i] ?? "").trim();
     if (!raw.startsWith("⏺")) continue;
     const body = raw.slice(1).trim();
-    if (body.length < 3) continue; // "⏺ main" 같은 한 토막은 표시가 아니라 장식이다
+    if (!body) continue;
     return body.length > 160 ? body.slice(0, 160) + "…" : body;
   }
   return null;
