@@ -93,6 +93,8 @@ export interface SettingsDeps {
   //   이게 없어서 `bun test`의 DELETE /members/steve 테스트가 실제 telegram-steve 폴더를 삭제하던 치명 버그(GD 2026-07-01 fs_usage로 확정). 테스트는 true 주입.
   skipRuntimeCleanup?: boolean;
   checkRuntimeAuth?: typeof checkRuntimeAuth;
+  // ★공개 빌드 여부를 시험이 직접 정할 수 있게★ — 미주입이면 라이브와 같은 PUBLIC_BUILD(=B3OS_LIVE !== "1").
+  publicBuild?: boolean;
   activateMember?: typeof activateMember;
   // 활성화 직후 실제 첫 모델 호출 검증. 테스트는 mock 주입으로 라이브 계정/외부 상태 의존을 끊는다.
   firstModelCall?: (input: { id: string; runtime: string; workspacePath?: string }) => Promise<FirstModelCallResult>;
@@ -318,6 +320,9 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
   const doArchiveWorkspace = deps.archiveWorkspace ?? archiveWorkspace; // 주입 없으면 실제 함수(라이브). 테스트는 noop 주입.
   const skipRuntimeCleanup = deps.skipRuntimeCleanup ?? false; // 테스트=true → 실 HOME(~/.claude 등) 파일 rm 건너뜀(라이브 봇 데이터 삭제 방지).
   const doCheckRuntimeAuth = deps.checkRuntimeAuth ?? checkRuntimeAuth;
+  // ★공개 빌드 판정을 주입받는다★ (dex 리뷰): 모듈 상수를 그대로 읽으면 한 프로세스에서 한쪽 분기밖에
+  //   못 잰다 — 그래서 "소스에 조건식이 있다" 만 확인하는 시험이 됐고, 그건 동작을 증명하지 않는다.
+  const publicBuild = deps.publicBuild ?? PUBLIC_BUILD;
   const runtimeReadiness = async (runtime: string) => runtimeReadinessFromAuth(await doCheckRuntimeAuth(runtime));
   const publicRuntimeGate = async (runtime: string) => {
     if (PUBLIC_BUILD && LIVE_ONLY_RUNTIMES.has(runtime)) return { error: "runtime_not_public", hint: "이 런타임은 공개 온보딩에서 제공하지 않습니다." };
@@ -2149,7 +2154,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
   // ★공개 빌드에서는 MCP 칸을 아예 안 내려보낸다★ (팀 리드 2026-08-07: "퍼블릭에선 안보이게").
   //   UI 는 이 값이 boolean 일 때만 토글을 그린다 — 없으면 그런 기능이 있다는 것도 안 보인다.
   const stripMcpForPublic = (st: ReturnType<typeof captureConfigStatus>) => {
-    if (!PUBLIC_BUILD) return st;
+    if (!publicBuild) return st;
     const { mcp_enabled: _omit, ...rest } = st;
     return rest;
   };
@@ -2163,7 +2168,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     const group = typeof body.capture_group_id === "string" ? body.capture_group_id.trim() : undefined;
     const router = typeof body.router_enabled === "boolean" ? body.router_enabled : undefined;
     // ★공개 빌드에서는 켤 수 없다★ — UI 를 숨기는 것만으로는 부족하다(요청은 직접 보낼 수 있다).
-    const mcpOn = !PUBLIC_BUILD && typeof body.mcp_enabled === "boolean" ? body.mcp_enabled : undefined;
+    const mcpOn = !publicBuild && typeof body.mcp_enabled === "boolean" ? body.mcp_enabled : undefined;
     if (token !== undefined && token !== "" && !CAPTURE_TOKEN_RE.test(token)) {
       return c.json({ ok: false, error: "capture_bot_token_invalid", hint: "봇 토큰 형식: 숫자:영숫자30~120 (BotFather)" }, 400);
     }

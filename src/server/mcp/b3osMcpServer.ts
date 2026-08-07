@@ -17,6 +17,7 @@ import { recallDmMessages } from "../db/dmCapture";
 import { classifyAll } from "../lib/health";
 import { ambientAgents } from "../lib/registry"; // 정규 팀원 여부·별칭의 정본은 agents.json 이다 (DB 표에는 없다)
 import { isTeamOfficialMember } from "../lib/agentMembership";
+import { isMcpEnabled } from "../lib/captureConfig"; // ★HTTP 와 같은 스위치★ — 창구를 끄면 stdio 도 안 붙는다
 import { leadActorId } from "../lib/opAuth"; // ★이름만 재사용★ — 신뢰 규칙(루프백=리드)은 쓰지 않는다
 import { askTeammate, fetchAnswer, askProgress } from "./mcpAsk";
 
@@ -623,11 +624,16 @@ function sendShPath(): string {
  * stdio 서버로 기동. ★M2부터 쓰기 오픈★(읽기전용 아님) — 단 쓰기는 도구 레벨에서 신원(B3OS_AGENT_ID)
  * 필수 + 매 호출 audit로 게이트. 읽기 도구는 읽기 전용 query만 사용. (M3에서 신원 allowlist/deny 추가.)
  */
-export async function main(): Promise<void> {
-  const db = new Database(dbPath());
+export async function main(
+  db: Database = new Database(dbPath()),
+  connect: (server: ReturnType<typeof buildMcpServer>) => Promise<void> = (s) => s.connect(new StdioServerTransport()),
+): Promise<void> {
+  // ★스위치는 창구 전체를 끈다★ (dex 리뷰): HTTP 만 막으면 같은 기계에서 stdio 로 그대로 들어온다.
+  //   그러면 "MCP 연결 off" 라고 적힌 화면과 실제 동작이 어긋난다 — 그게 스위치의 최악의 실패다.
+  if (!isMcpEnabled(db)) throw new Error("mcp_disabled: 이 설치에서는 MCP 창구가 꺼져 있습니다.");
   // stdio 는 종전대로 env 신원 + 쓰기 허용. ★둘 다 명시★ — 기본값에 기대지 않는다.
   const server = buildMcpServer(db, resolveActor(db), "write");
-  await server.connect(new StdioServerTransport());
+  await connect(server);
 }
 
 if (import.meta.main) {

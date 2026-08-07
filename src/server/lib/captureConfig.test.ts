@@ -142,3 +142,31 @@ test("★사람이 끈 것은 마이그레이션이 되살리지 않는다★", 
   migrate(d); // 재부팅
   expect(isMcpEnabled(d)).toBe(false); // ★끈 것을 되켜면 안 된다★
 });
+
+// ★거절 기록은 "쓴 흔적" 이 아니다★ (dex 리뷰 2026-08-07)
+//
+// 처음엔 action LIKE 'mcp.%' 로 잡았다. 그런데 ★인증 실패·미등록 신원·게이트 거절이 전부
+// mcp.http.denied 로 남는다.★ 즉 외부 스캐너가 한 번 두드리고 간 공개 설치가 ★다음 부팅에
+// 스스로 열린다.★ 문을 잠그려고 넣은 코드가 문을 여는 셈이었다.
+// ★내 원래 시험은 이걸 못 봤다★ — 통과 기록(mcp.http.request)만 넣고 재서 양쪽이 다 초록불이었다.
+
+test("★두드리다 거절당한 기록만 있는 설치는 열리지 않는다★ — 스캐너가 문을 열어주면 안 된다", () => {
+  const d = new Database(":memory:");
+  migrate(d);
+  for (const reason of ["mcp_disabled", "unauthorized", "actor_not_registered"]) {
+    d.prepare(`INSERT INTO audit_event (actor, action, target, at) VALUES ('unknown','mcp.http.denied',?,datetime('now'))`).run(reason);
+  }
+  migrate(d); // 재부팅
+  expect(isMcpEnabled(d)).toBe(false);
+});
+
+test("★대조군 — 통과한 기록이 하나라도 있으면 열린다★ (stdio 도구 사용 포함)", () => {
+  for (const action of ["mcp.http.request", "mcp.send_message", "mcp.ask_teammate", "mcp.kanban_add", "mcp.kanban_update"]) {
+    const d = new Database(":memory:");
+    migrate(d);
+    d.prepare(`INSERT INTO audit_event (actor, action, target, at) VALUES ('gd',?,'x',datetime('now'))`).run(action);
+    d.prepare(`INSERT INTO audit_event (actor, action, target, at) VALUES ('unknown','mcp.http.denied','unauthorized',datetime('now'))`).run();
+    migrate(d);
+    expect({ action, on: isMcpEnabled(d) }).toEqual({ action, on: true });
+  }
+});
