@@ -388,7 +388,7 @@ describe("settings: 시스템 OP (P0 floor — capture/router)", () => {
   test("GET 기본 상태 — 토큰 없음·router 기본 ON (setting·env 없으면 true, GD 0721)", async () => {
     const { app } = setup();
     const s = await (await app.request("/system-op")).json();
-    expect(s).toEqual({ has_capture_token: false, capture_group_id: null, router_enabled: true });
+    expect(s).toEqual({ has_capture_token: false, capture_group_id: null, router_enabled: true, mcp_enabled: false }); // ★MCP 기본 꺼짐★
   });
 
   test("PATCH router_enabled 토글 (PIN 없이 즉시 반영)", async () => {
@@ -1652,5 +1652,16 @@ describe("OT 조회가 claude 페어링 대기를 표면화한다", () => {
     claudeOt(db, dir);
     const ot = await (await app.request("/ot/ot_ui")).json() as any;
     expect(ot.awaiting_input).toBeNull();
+  });
+});
+
+// ★MCP 토글 — 공개 빌드에서는 존재 자체가 안 보인다★ (팀 리드 2026-08-07)
+describe("system-op: MCP 창구 토글", () => {
+  test("PATCH mcp_enabled 로 켜고 끈다", async () => {
+    const { app } = setup();
+    const on = await (await app.request("/system-op", patch({ mcp_enabled: true }))).json();
+    expect(on.mcp_enabled).toBe(true);
+    const off = await (await app.request("/system-op", patch({ mcp_enabled: false }))).json();
+    expect(off.mcp_enabled).toBe(false);
   });
 });

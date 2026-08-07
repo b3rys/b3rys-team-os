@@ -841,6 +841,11 @@ export function runBusMigration(db: Database): void {
     // 진행 표시용 — 그 팀원이 지금 무엇을 하고 있나. last_log_line 은 화면 맨 아랫줄(고정 장식)이라
     // 늘 "auto mode on" 이었다. 그 칸은 health 판정이 이미 쓰고 있으므로 건드리지 않고 따로 둔다.
     "ALTER TABLE agent_status ADD COLUMN activity_line TEXT",
+    // ★이미 MCP 를 쓰던 설치만 켜둔다★ — 기본은 꺼짐인데, 그대로 배포하면 ★쓰던 사람이 그 순간 끊긴다★
+    //   (그리고 끊긴 창이 그 사람이 우리에게 알릴 수단이다). 감사기록에 mcp.* 가 있으면 = 이미 쓰던 곳.
+    //   새 설치(공개 clone)는 그 기록이 없으니 행이 안 생기고 ★기본 꺼짐 그대로★ 다.
+    "INSERT OR IGNORE INTO setting(key,value) SELECT 'mcp_enabled','true' " +
+      "WHERE EXISTS(SELECT 1 FROM audit_event WHERE action LIKE 'mcp.%' LIMIT 1)",
   ];
   for (const stmt of alterStatements) {
     try {

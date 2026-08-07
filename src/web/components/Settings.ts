@@ -93,7 +93,8 @@ let _capabilities: Capability[] = [];
 let _slack: SlackStatus | null = null;
 let _slackHealth: SlackHealth | null = null; // auth.test 실측(2단계 갱신) — 배지 정확성용
 // 시스템 OP (P0 기본 협업 floor) — capture 토큰·router·그룹·PIN. 토큰값은 안 받음(has_*만).
-let _systemOp: { has_capture_token: boolean; capture_group_id: string | null; router_enabled: boolean } | null = null;
+// mcp_enabled 는 ★공개 빌드에서는 아예 안 내려온다★ — 그래서 optional 이고, UI 는 ★boolean 일 때만★ 토글을 그린다.
+let _systemOp: { has_capture_token: boolean; capture_group_id: string | null; router_enabled: boolean; mcp_enabled?: boolean } | null = null;
 let _systemOpOpen = false; // 기본 접힘 — 클릭하면 펼침(설정 필요 느낌만 주고 평소엔 간결).
 let _addOpen = false;
 let _ot: OtState | null = null;          // 진행 중인 신규 OT(영입). null이면 폼/버튼 표시.
@@ -580,6 +581,22 @@ function otZoneHtml(): string {
   return `<button id="rec-open" class="mt-2 w-full ${btnGhost} py-2.5 border-dashed" ${atLimit ? "disabled" : ""}>${atLimit ? pick(`공식 팀원 ${current}/${MAX_OFFICIAL_TEAM_MEMBERS} · 영입 상한 도달`, `Official members ${current}/${MAX_OFFICIAL_TEAM_MEMBERS} · limit reached`) : `+ ${pick("영입", "Onboard")}`}</button>`;
 }
 
+/**
+ * MCP 창구 토글 — ★값이 안 내려오면 아무것도 안 그린다.★
+ * 공개 빌드는 서버가 이 칸을 빼고 주므로 ★그런 기능이 있다는 것조차 안 보인다★ (팀 리드 2026-08-07).
+ */
+function mcpRowHtml(): string {
+  const on = _systemOp?.mcp_enabled;
+  if (typeof on !== "boolean") return "";
+  return `
+      <div class="flex items-center justify-between rounded-md border border-surface-3 bg-surface-0/60 px-3 py-2">
+        <span class="text-[13px] font-medium text-slate-200">${pick("MCP 창구", "MCP endpoint")} <span class="${on ? "text-accent-greenSoft" : "text-slate-500"} text-[11px]">${on ? "ON" : "OFF"}</span>
+          <span class="block text-[11px] text-slate-500 mt-0.5">${pick("클로드 코드·커서에서 팀원에게 직접 질문", "Ask teammates directly from Claude Code · Cursor")}</span>
+        </span>
+        <button id="sysop-mcp" class="${on ? "bg-accent-green/80" : "bg-slate-400/50"} shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors" role="switch" aria-checked="${on}"><span class="${on ? "translate-x-6" : "translate-x-1"} inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"></span></button>
+      </div>`;
+}
+
 // ── 시스템 OP 패널 (P0 기본 협업 floor) ──────────────────────────────
 function systemOpHtml(): string {
   const s = _systemOp;
@@ -625,6 +642,7 @@ function systemOpHtml(): string {
         <span class="text-[13px] font-medium text-slate-200">${pick("라우터 (agent 응답)", "Router (agent replies)")} <span class="${routerOn ? "text-accent-greenSoft" : "text-slate-500"} text-[11px]">${routerOn ? "ON" : "OFF · shadow"}</span></span>
         <button id="sysop-router" class="${routerOn ? "bg-accent-green/80" : "bg-slate-400/50"} shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors" role="switch" aria-checked="${routerOn}"><span class="${routerOn ? "translate-x-6" : "translate-x-1"} inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"></span></button>
       </div>
+      ${mcpRowHtml()}
       <div class="text-[11px] text-slate-500 -mt-1 leading-relaxed">${pick("ON = 팀방(그룹방)에서 팀원이 자동으로 응답 · OFF = 팀방에선 조용(결정만 기록). ★OFF여도 1:1 DM·팀원끼리 버스 협업은 그대로 동작★ — 라우터는 '그룹방 자동응답'만 켜고 끕니다.", "ON = teammates auto-reply in the team room · OFF = quiet in the room (decisions only logged). ★1:1 DM & teammate bus collab still work when OFF★ — the router only toggles group-room auto-reply.")}</div>
       <div class="flex items-center gap-3 pt-1">
         <button id="sysop-save" class="${btnPrimary}">${pick("저장", "Save")}</button>
@@ -648,13 +666,21 @@ function wireSystemOp(): void {
   _root.querySelector<HTMLButtonElement>("#sysop-toggle")?.addEventListener("click", () => { _systemOpOpen = !_systemOpOpen; render(); });
   const val = (id: string) => (_root!.querySelector<HTMLInputElement>(id)?.value ?? "").trim();
   const setMsg = (t: string) => { const m = _root!.querySelector<HTMLSpanElement>("#sysop-msg"); if (m) m.textContent = t; };
-  const setState = (j: { has_capture_token: boolean; capture_group_id: string | null; router_enabled: boolean }) => {
-    _systemOp = { has_capture_token: j.has_capture_token, capture_group_id: j.capture_group_id, router_enabled: j.router_enabled };
+  const setState = (j: { has_capture_token: boolean; capture_group_id: string | null; router_enabled: boolean; mcp_enabled?: boolean }) => {
+    _systemOp = { has_capture_token: j.has_capture_token, capture_group_id: j.capture_group_id, router_enabled: j.router_enabled, mcp_enabled: j.mcp_enabled };
   };
   // (접근제어/PIN은 System OP에서 제거 — GD 2026-06-28. 라우터/저장/봇확인은 바로 동작.)
 
   _root.querySelector<HTMLButtonElement>("#sysop-router")?.addEventListener("click", async () => {
     const r = await fetch(api("/system-op"), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ router_enabled: !_systemOp?.router_enabled }) });
+    const j = await r.json();
+    if (!r.ok) { setMsg(`${pick("실패:", "Failed:")} ${j.error ?? ""}`); return; }
+    setState(j); render();
+  });
+
+  // ★값이 안 내려온 빌드에서는 버튼 자체가 없다★ — querySelector 가 null 이라 아무 일도 안 한다.
+  _root.querySelector<HTMLButtonElement>("#sysop-mcp")?.addEventListener("click", async () => {
+    const r = await fetch(api("/system-op"), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ mcp_enabled: !_systemOp?.mcp_enabled }) });
     const j = await r.json();
     if (!r.ok) { setMsg(`${pick("실패:", "Failed:")} ${j.error ?? ""}`); return; }
     setState(j); render();
