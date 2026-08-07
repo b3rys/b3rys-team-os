@@ -584,14 +584,22 @@ function otZoneHtml(): string {
 /**
  * MCP 창구 토글 — ★값이 안 내려오면 아무것도 안 그린다.★
  * 공개 빌드는 서버가 이 칸을 빼고 주므로 ★그런 기능이 있다는 것조차 안 보인다★ (팀 리드 2026-08-07).
+ *
+ * ★시스템 OP 안이 아니라 그 밖의 독립 줄이다★ (팀 리드 2026-08-07: "시스템 OP 설정은 아니야").
+ *   시스템 OP 는 팀방 협업(capture·라우터)이고, 이건 ★밖에서 들어오는 창구★ 라 성격이 다르다.
+ *   안에 두었을 때 실제로 사고가 났다: 시스템 OP 마지막 설명문(라우터 설명)이 이 줄 바로 밑에 붙어
+ *   ★"MCP 를 꺼도 팀방만 조용해진다" 로 읽혔다.★ 실제로는 클로드 코드·커서 연결이 끊긴다 — 정반대다.
+ *   ★스위치 옆 설명이 그 스위치를 잘못 설명하면 안심하고 끄게 된다.★ 밖으로 빼면 그 인접이 사라진다.
  */
 function mcpRowHtml(): string {
   const on = _systemOp?.mcp_enabled;
   if (typeof on !== "boolean") return "";
   return `
-      <div class="flex items-center justify-between rounded-md border border-surface-3 bg-surface-0/60 px-3 py-2">
-        <span class="text-[13px] font-medium text-slate-200">${pick("MCP 창구", "MCP endpoint")} <span class="${on ? "text-accent-greenSoft" : "text-slate-500"} text-[11px]">${on ? "ON" : "OFF"}</span>
-          <span class="block text-[11px] text-slate-500 mt-0.5">${pick("클로드 코드·커서에서 팀원에게 직접 질문 · OFF 로 두면 그 연결이 끊깁니다", "Ask teammates directly from Claude Code · Cursor — OFF cuts that connection")}</span>
+      <div class="flex items-center justify-between gap-3 rounded-xl border border-surface-3 bg-surface-2/60 px-5 py-4">
+        <span class="min-w-0">
+          <span class="text-base font-semibold text-slate-100">${pick("MCP 창구", "MCP endpoint")}</span>
+          <span class="${on ? "text-accent-greenSoft" : "text-slate-500"} text-[11px] font-semibold ml-2">${on ? "ON" : "OFF"}</span>
+          <span class="block text-[12px] text-slate-500 mt-0.5">${pick("클로드 코드·커서에서 팀원에게 직접 질문 · 끄면 그 연결만 닫힙니다(팀방·1:1 DM 은 그대로)", "Ask teammates directly from Claude Code · Cursor — turning it off closes only that connection (team room & 1:1 DM keep working)")}</span>
         </span>
         <button id="sysop-mcp" class="${on ? "bg-accent-green/80" : "bg-slate-400/50"} shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors" role="switch" aria-checked="${on}"><span class="${on ? "translate-x-6" : "translate-x-1"} inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"></span></button>
       </div>`;
@@ -643,7 +651,6 @@ function systemOpHtml(): string {
         <button id="sysop-router" class="${routerOn ? "bg-accent-green/80" : "bg-slate-400/50"} shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors" role="switch" aria-checked="${routerOn}"><span class="${routerOn ? "translate-x-6" : "translate-x-1"} inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"></span></button>
       </div>
       <div class="text-[11px] text-slate-500 -mt-1 leading-relaxed">${pick("ON = 팀방(그룹방)에서 팀원이 자동으로 응답 · OFF = 팀방에선 조용(결정만 기록). ★OFF여도 1:1 DM·팀원끼리 버스 협업은 그대로 동작★ — 라우터는 '그룹방 자동응답'만 켜고 끕니다.", "ON = teammates auto-reply in the team room · OFF = quiet in the room (decisions only logged). ★1:1 DM & teammate bus collab still work when OFF★ — the router only toggles group-room auto-reply.")}</div>
-      ${mcpRowHtml()}
       <div class="flex items-center gap-3 pt-1">
         <button id="sysop-save" class="${btnPrimary}">${pick("저장", "Save")}</button>
         <button id="sysop-check" class="${btnGhost}">${pick("봇 연결 확인", "Check bot connection")}</button>
@@ -811,6 +818,7 @@ function render(): void {
         ${identity}
         ${slackChannelsHtml()}
         ${systemOpHtml()}
+        ${mcpRowHtml()}
         ${members}
       </div>
     </div>`;
