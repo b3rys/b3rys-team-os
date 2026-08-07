@@ -77,19 +77,21 @@ export function upsertStatus(
     last_log_line: string | null;
     tmux_pid: number | null;
     ctx_percent?: number | null;
+    activity_line?: string | null;
   },
 ): void {
   db.prepare(
-    `INSERT INTO agent_status (agent_id, state, last_activity_at, last_log_line, tmux_pid, ctx_percent, probed_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    `INSERT INTO agent_status (agent_id, state, last_activity_at, last_log_line, tmux_pid, ctx_percent, activity_line, probed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(agent_id) DO UPDATE SET
        state=excluded.state,
        last_activity_at=excluded.last_activity_at,
        last_log_line=excluded.last_log_line,
        tmux_pid=excluded.tmux_pid,
        ctx_percent=excluded.ctx_percent,
+       activity_line=excluded.activity_line,
        probed_at=excluded.probed_at`,
-  ).run(s.agent_id, s.state, s.last_activity_at, s.last_log_line, s.tmux_pid, s.ctx_percent ?? null);
+  ).run(s.agent_id, s.state, s.last_activity_at, s.last_log_line, s.tmux_pid, s.ctx_percent ?? null, s.activity_line ?? null);
 }
 
 export function listStatuses(db: Database): AgentStatus[] {

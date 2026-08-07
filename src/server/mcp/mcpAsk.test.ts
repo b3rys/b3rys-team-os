@@ -627,3 +627,33 @@ test("★대조군 — 안 막히면 상한까지 기다린다★", async () => 
   expect(r.stuckReason).toBeUndefined();
   expect(polls).toBeGreaterThanOrEqual(4); // 50/10 = 5회쯤 돈다
 });
+
+test("★작업 중일 때 '무엇을 하는지' 가 붙는다★", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  const r = await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "질문" }, nowait);
+  db.prepare(`INSERT OR REPLACE INTO message_recipient (message_id, agent_id, delivery_state, recipient_state) VALUES (?, 'bill', 'completed', 'in_progress')`).run(r.requestId);
+  db.prepare(`INSERT OR REPLACE INTO agent_status (agent_id, state, activity_line) VALUES ('bill', 'running', 'Read(src/server/mcp/mcpAsk.ts)')`).run();
+  expect(askProgress(db, r.requestId, "bill").label).toContain("Read(src/server/mcp/mcpAsk.ts)");
+});
+
+test("★활동 줄이 없는 팀원(화면 없는 런타임)도 멀쩡히 나온다★", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  const r = await askTeammate(db, bus.deps, { from: "gd", to: "codex", body: "질문" }, nowait);
+  db.prepare(`INSERT OR REPLACE INTO message_recipient (message_id, agent_id, delivery_state, recipient_state) VALUES (?, 'codex', 'completed', 'in_progress')`).run(r.requestId);
+  const label = askProgress(db, r.requestId, "codex").label;
+  expect(label).toContain("읽고 작업 중"); // ★12명 전부 이건 나온다★
+  expect(label).not.toContain("·"); // 붙일 게 없으면 안 붙인다
+});
+
+test("★막힘에는 활동 줄을 안 붙인다★ — 그건 지금 하는 일이 아니라 결론이다", async () => {
+  const db = freshDb();
+  const bus = fakeBus(db);
+  const r = await askTeammate(db, bus.deps, { from: "gd", to: "bill", body: "질문" }, nowait);
+  db.prepare(`INSERT OR REPLACE INTO message_recipient (message_id, agent_id, delivery_state, recipient_state) VALUES (?, 'bill', 'blocked', 'open')`).run(r.requestId);
+  db.prepare(`INSERT OR REPLACE INTO agent_status (agent_id, state, activity_line) VALUES ('bill', 'running', 'Read(파일)')`).run();
+  const p = askProgress(db, r.requestId, "bill");
+  expect(p.stuck).toBe(true);
+  expect(p.label).not.toContain("Read(파일)");
+});

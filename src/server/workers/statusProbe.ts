@@ -170,6 +170,40 @@ function weeklyLimitBlockedLine(recent: { line: string; captured_at: string }[])
   return null;
 }
 
+/**
+ * ★그 팀원이 지금 무엇을 하고 있나★ — 진행 표시에 붙일 한 줄.
+ *
+ * 왜 맨 아랫줄이 아닌가: 화면 아래 3줄은 ★항상 같은 장식★ 이다(auto mode · ctx% · 경로).
+ * 실측하면 늘 "⏵⏵ auto mode on" 이 저장돼 있어 ★아무 정보가 없었다.★
+ *
+ * 왜 `✻` 가 아닌가: 실측값이 "Sautéed for 1m 7s" · "Cogitated for 1m 25s" 다 —
+ * ★클로드 코드가 아무 단어나 고르는 장식이라 무슨 일인지가 안 들어 있다.★
+ *
+ * → `⏺` 줄을 쓴다. 실측: "⏺ 그룹방에 인사 전송 완료 (msg …)" · "⏺ Read(파일)" — ★진짜 내용이 있다.★
+ *
+ * ★입력창 아래는 보지 않는다★: 구분선(───) 밑은 전부 푸터라 거기 있는 `⏺ main`(브랜치 표시)이
+ * 대화 출력으로 오인된다. 구분선 위(=대화 영역)에서만 고르고, ★구분선이 없으면 null★ 이다
+ * (가를 수 없으면 모르는 것이다 — 길이로 거르려 했더니 "main" 이 4자라 안 걸렸다).
+ */
+export function currentActivityLine(lines: string[]): string | null {
+  // ★구분선을 못 찾으면 null 이다★ — 대화 영역과 푸터를 ★가를 수 없으면 모르는 것★ 이고,
+  //   모름을 값으로 바꾸지 않는다. 화면 전체를 뒤지면 푸터의 `⏺ main`(브랜치)이 잡혀
+  //   "읽고 작업 중입니다 · main" 이 된다. 화면 없는 런타임 7명이 이미 null 로 잘 돈다.
+  let cutoff = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/─{6,}/.test(lines[i] ?? "")) { cutoff = i; break; }
+  }
+  if (cutoff < 0) return null;
+  for (let i = cutoff - 1; i >= 0; i--) {
+    const raw = (lines[i] ?? "").trim();
+    if (!raw.startsWith("⏺")) continue;
+    const body = raw.slice(1).trim();
+    if (!body) continue;
+    return body.length > 160 ? body.slice(0, 160) + "…" : body;
+  }
+  return null;
+}
+
 function currentPaneCapacityLine(lines: string[]): string | null {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
@@ -236,6 +270,7 @@ export function buildClaudeStatus(
     state: computeStateFromActivity(lastActivityAt),
     last_activity_at: lastActivityAt,
     last_log_line: blockedLine ?? visibleLastLine ?? lastLog?.line ?? null,
+    activity_line: currentPaneLines.length ? currentActivityLine(currentPaneLines) : null,
     tmux_pid: pid,
     ctx_percent: ctxRemaining == null ? null : 100 - ctxRemaining,
     probed_at: new Date().toISOString(),

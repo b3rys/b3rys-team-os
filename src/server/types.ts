@@ -65,6 +65,8 @@ export interface AgentStatus {
   state: AgentState;
   last_activity_at: string | null;
   last_log_line: string | null;
+  /** 그 팀원이 지금 무엇을 하고 있나(대화 영역의 마지막 ⏺ 줄). 화면이 없는 런타임은 null. */
+  activity_line?: string | null;
   tmux_pid: number | null;
   ctx_percent: number | null;
   probed_at: string;
