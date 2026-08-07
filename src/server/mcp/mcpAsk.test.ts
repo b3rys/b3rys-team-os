@@ -657,3 +657,42 @@ test("★막힘에는 활동 줄을 안 붙인다★ — 그건 지금 하는 �
   expect(p.stuck).toBe(true);
   expect(p.label).not.toContain("Read(파일)");
 });
+
+// ── ★진행 알림이 안 나가는 클라이언트에서도 판정이 보인다★ (실측 2026-08-07) ──
+//
+// 클로드 코드는 progressToken 을 안 보낸다 → 진행 알림이 ★0건★ 도착한다(팀 리드 확인).
+// 규약상 토큰 없이는 서버가 보낼 수 없으므로 ★우리가 고를 수 있는 게 아니다.★
+// → 같은 판정을 ★보이는 자리(접수 문구)★ 에도 쓴다.
+
+test("★접수 문구가 실제로 판정을 담는다★ — 진행 알림이 0건이어도 화면에 보이는 줄이다", async () => {
+  // ★이 시험이 읽어야 하는 건 '접수 문구' 자체다.★ 앞판은 askProgress 를 직접 불러서
+  // ★이 PR 이 바꾼 한 줄을 되돌려도 통과했다★(빌 뮤턴트 실측: 51개 전부 통과).
+  // mcpAsk.ts 가 `deps.fetchImpl ?? fetch` 라 ★전역 fetch 를 갈면 핸들러 경로가 그대로 돈다.★
+  const db = freshDb();
+  const bus = fakeBus(db);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = bus.deps.fetchImpl!;
+  try {
+    const tools = (buildMcpServer(db, "gd", "write") as unknown as {
+      _registeredTools: Record<string, { handler: (a: unknown, e: unknown) => Promise<{ content: { text: string }[] }> }>;
+    })._registeredTools;
+    // extra 를 {} 로 준다 = ★progressToken 없는 클라이언트★. 그 상태에서 무엇이 보이는지가 이 PR 의 전부다.
+    const r = await tools.b3os_ask_teammate!.handler({ to: "bill", question: "q", wait_seconds: 1 }, {});
+    const text = r.content[0]!.text;
+    expect(text).not.toContain("아직 답하지 않았습니다");
+    expect(text).toContain("전달");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("★명부를 DB 에서 읽는다★ — 손으로 박으면 이 시험이 죽는다", () => {
+  // 앞판은 not.toContain("nova") 였는데 ★nova 는 원래 없으니 손으로 박아도 통과★ 했다.
+  // ★코드에 있을 수 없는 id 를 넣어야★ 생성인지 박은 건지 갈린다.
+  const db = freshDb();
+  addAgent(db, "zzqa");
+  const t = (buildMcpServer(db, "gd", "write") as unknown as {
+    _registeredTools: Record<string, { inputSchema?: { shape?: { to?: { description?: string } } } }>;
+  })._registeredTools.b3os_ask_teammate;
+  expect(t?.inputSchema?.shape?.to?.description ?? "").toContain("zzqa");
+});
