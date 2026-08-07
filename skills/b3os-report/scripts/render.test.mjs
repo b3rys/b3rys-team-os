@@ -19,7 +19,7 @@ try {
   assert.match(html, /--bg:#0a0f0d/);
   assert.match(html, /--card:#111a15/);
   assert.match(html, /--glow:rgba\(52,211,153,\.16\)/);
-  assert.match(html, /--grid:rgba\(52,211,153,\.026\)/);
+  assert.match(html, /--grid:rgba\(52,211,153,\.040\)/);
   assert.match(html, /--blue:#9fc7ac/);
   assert.match(html, /linear-gradient\(90deg,var\(--grid\) 1px,transparent 1px\)/);
   assert.match(html, /linear-gradient\(var\(--grid\) 1px,transparent 1px\)/);

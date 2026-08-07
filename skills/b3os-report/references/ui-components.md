@@ -237,7 +237,7 @@ RAG(Retrieval-Augmented Generation, 검색 증강 생성)
 - Secondary: amber/orange
 - Red: 위험·삭제·실패
 - Blue/cyan: 기본 accent로 쓰지 말고 링크·보조 정보에만 제한
-- Grid texture: 라이트 모드는 `--grid`를 은은하게 보여 종이 질감을 만들고, 다크 모드는 훨씬 낮은 대비로 깊이만 준다.
+- Grid texture: 라이트 모드는 `--grid`를 은은하게 보여 종이 질감을 만들고, 다크 모드는 낮은 대비를 유지하되 완전히 사라지지 않을 정도로 보이게 한다.
 
 새 보고서에서 하늘색 제목/탭/강조를 기본값으로 쓰지 않는다.
 
