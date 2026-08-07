@@ -53,8 +53,10 @@ try {
   assert.match(html, /\.lede\{font-size:18px/);
   assert.match(html, /\.stat-grid\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
   assert.match(html, /\.stat-card b\{display:block;color:var\(--green\);font-size:24px/);
-  assert.match(html, /\.diagram-flow\{--diagram-green:#15845b;--diagram-green-soft:#3aa675;--diagram-gold:#b8892e/);
-  assert.match(html, /\.diagram-flow \.diagram-node-primary\{fill:var\(--diagram-neutral\);stroke:color-mix\(in srgb,var\(--diagram-green\) 46%,var\(--diagram-stroke\)\)/);
+  assert.match(html, /\.diagram-flow\{--diagram-green:#10a36f;--diagram-green-soft:#36c18a;--diagram-gold:#d49421/);
+  assert.match(html, /\[data-theme="light"\] \.diagram-flow\{--diagram-green:#0f9f6e;--diagram-green-soft:#2fbf87/);
+  assert.match(html, /\.diagram-flow \.diagram-node-primary\{fill:var\(--diagram-neutral\);stroke:color-mix\(in srgb,var\(--diagram-green\) 58%,var\(--diagram-stroke\)\)/);
+  assert.match(html, /\.diagram-flow \.diagram-accent-bar\{width:3px;rx:1\.5px\}/);
   assert.match(html, /\.diagram-flow \.diagram-text\{fill:var\(--ink\);font:650 13px\/1\.2 var\(--sans\)/);
   assert.match(html, /\.diagram-flow \.diagram-line-warm\{stroke:var\(--diagram-gold\)/);
   assert.match(html, /\.desktop-infographic\{display:none!important\}/);
