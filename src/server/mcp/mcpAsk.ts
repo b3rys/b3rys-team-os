@@ -137,11 +137,20 @@ function busSourceFor(db: Database, actor: string): "agent" | "user" {
 
 export async function postQuestion(
   deps: PostQuestionDeps,
-  env: { from: string; source: "agent" | "user"; actor: string; to: string; body: string; roomId: string; client?: string },
+  env: {
+    from: string; source: "agent" | "user"; actor: string; to: string; body: string; roomId: string;
+    client?: string;
+    /** 사람이 친 원문인지, 클라이언트가 정리한 것인지. ★주장이지 증거가 아니다★ — 아래 주석 참고. */
+    speaker?: "lead" | "client";
+  },
 ): Promise<{ id: string; thread_id: string }> {
   // ★actor 는 버스 발신자와 다를 수 있다★ (리드 = user 로 나간다) — 그래서 신원을 meta 에 남긴다.
   // ★mcp_actor 는 기록용이다 — 권한 판정에 읽지 마라★ (위 busIdentityFor 주석). 누가 물었는지 사람이 볼 때만 쓴다.
   const meta: Record<string, unknown> = { reply_route: MCP_REPLY_ROUTE, mcp_actor: env.actor };
+  // ★이건 클라이언트의 '주장' 이지 '증거' 가 아니다★ (2026-08-07 실사고):
+  //   클라이언트가 본문 끝에 "— GD" 라고 서명한 적이 있고, 그걸 신원 증거로 읽어서 틀렸다.
+  //   → 이 값으로 ★권한을 정하지 않는다.★ 사람이 오해하지 않게 ★보여주는 용도★ 다.
+  if (env.speaker) meta.mcp_speaker = env.speaker;
   // 어느 클라이언트였는지는 ★기록용★이다. 동작은 reply_route 하나가 정한다.
   if (env.client) meta.mcp_client = env.client;
   const doFetch = deps.fetchImpl ?? fetch;
@@ -151,7 +160,12 @@ export async function postQuestion(
     body: JSON.stringify({
       from_agent_id: env.from,
       to_agent_id: env.to,
-      body: env.body,
+      // ★받는 사람이 보는 자리에 붙인다★ — meta 에만 두면 팀원은 못 본다.
+      //   기본(표시 없음)은 건드리지 않는다. 명시적으로 client 일 때만 붙인다.
+      body:
+        env.speaker === "client"
+          ? `[클라이언트가 정리한 말입니다 — 팀 리드 원문 아님]\n${env.body}`
+          : env.body,
       type: "dm",
       priority: "normal",
       source: env.source,
@@ -319,7 +333,7 @@ export interface AskOptions {
 export async function askTeammate(
   db: Database,
   deps: PostQuestionDeps,
-  env: { from: string; to: string; body: string; client?: string },
+  env: { from: string; to: string; body: string; client?: string; speaker?: "lead" | "client" },
   opts: AskOptions,
 ): Promise<AskResult> {
   // ★방 이름은 신원으로 짓는다★(mcp-gd-bill) — 버스 발신자가 user 여도 방은 리드의 방이다.

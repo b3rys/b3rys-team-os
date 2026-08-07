@@ -452,6 +452,16 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
           .min(1)
           .describe(`질문할 팀원 id. 지금 등록된 팀원: ${officialRoster(db)}`),
         question: z.string().min(1).describe("질문 본문"),
+        // ★누구 말인지 클라이언트가 채워 넣는다★ (팀 리드 2026-08-07: "함수 파라미터를 채워 넣는 걸로").
+        //   서버는 이걸 만들어낼 수 없다 — 도착하는 건 글자뿐이고 ★누가 썼는지는 클라이언트만 안다.★
+        //   ★주장이지 증거가 아니다★: 권한 판정에 쓰지 않고, 사람이 오해하지 않게 보여주기만 한다.
+        speaker: z
+          .enum(["lead", "client"])
+          .optional()
+          .describe(
+            "이 질문이 누구 말인지. lead=사용자가 친 원문 그대로 · client=당신(클라이언트)이 정리하거나 지어낸 말. " +
+              "정리해서 보낼 때는 반드시 client 로 채우세요 — 받는 팀원이 사용자 지시로 오해합니다.",
+          ),
         wait_seconds: z
           .number()
           .int()
@@ -463,7 +473,9 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
     },
     async (args: unknown, extra: unknown) => {
       if (!actor) return denyIdentity("팀원에게 질문");
-      const { to, question, wait_seconds } = args as { to: string; question: string; wait_seconds?: number };
+      const { to, question, wait_seconds, speaker } = args as {
+        to: string; question: string; wait_seconds?: number; speaker?: "lead" | "client";
+      };
       if (to === actor) {
         return {
           content: [{ type: "text", text: `거부: 자기 자신(${actor})에게는 물을 수 없다.` }],
@@ -502,11 +514,12 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
       const r = await askTeammate(
         db,
         { baseUrl: busBaseUrl() },
-        { from: actor, to, body: question, client: clientName() },
+        { from: actor, to, body: question, client: clientName(), speaker },
         { waitMs, pollMs: 1500, onWait }, // 디스패처 폴링과 같은 간격 — 더 자주 봐도 새 사실이 생기지 않는다
       );
       appendAudit(db, actor, "mcp.ask_teammate", to, {
         request_id: r.requestId, thread_id: r.roomId, status: r.status, waited_ms: r.waitedMs,
+        speaker: speaker ?? null, // 안 채우면 null — ★안 채운 것과 lead 를 구분한다★
       });
       if (r.status === "answered" && r.answer) {
         return {
