@@ -79,7 +79,7 @@ CODE="$(curl -s -o /tmp/b3os-report-register.json -w '%{http_code}' -X POST "$AP
   -H 'content-type: application/json' --data-binary "$PAYLOAD")"
 if [ "$CODE" = "200" ]; then
   echo "✅ /reports 게시 완료: id=$ID · forms=$(echo "$FORMS" | python3 -c 'import sys,json;print(",".join(f["type"] for f in json.load(sys.stdin)) or "none")')"
-  echo "   → your-team.example.com/reports (또는 http://127.0.0.1:7878/reports)"
+  echo "   → https://dev.b3rys.com/reports"
 else
   echo "❌ 등록 실패 (HTTP $CODE) — team-collab 동작 확인 필요"; cat /tmp/b3os-report-register.json 2>/dev/null; exit 2
 fi
