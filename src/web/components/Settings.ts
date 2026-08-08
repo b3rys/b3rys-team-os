@@ -594,14 +594,45 @@ function otZoneHtml(): string {
 function mcpRowHtml(): string {
   const on = _systemOp?.mcp_enabled;
   if (typeof on !== "boolean") return "";
+  // ★한 줄 설명을 지우고 펼침 목록으로★ (팀 리드 2026-08-08): "그냥 MCP 로 표시하고
+  //   MCP 로 가능한 기능을 펼침 목록으로 설명하자."
+  //   한 줄에 담으면 ★끄면 무슨 일이 나는지★ 와 ★뭘 할 수 있는지★ 가 서로를 밀어낸다.
+  //   목록은 ★실제 도구 9개★ 를 그대로 옮긴 것이다 — 손으로 늘리지 말고 도구가 늘면 여기도 늘린다.
+  //   ★단, 도구는 read/write 로 갈린다★ (빌 리뷰): read 신원에게는 kanban_add·update 가 아예 안 보인다.
+  //   지금 우리 라이브는 write 라 이 목록과 어긋나지 않는다. ★read 로 쓰는 곳이 생기면 "만들고·고친다" 줄이
+  //   실제보다 넓어진다★ — 그때는 scope 를 받아서 줄을 가려야 한다.
+  // ★한글 옆에 프로토콜 이름을 붙인다★ (팀 리드 2026-08-08: "한글말 옆에 프로토콜을 붙이면 어때?").
+  //   한글만 있으면 ★클라이언트에서 실제로 뭘 부르는지 대조할 수 없고★, 이름만 있으면 처음 보는 사람이 못 읽는다.
+  //   ★이름은 코드에서 그대로 온 것이다★ — 못 부르는 이름을 적으면 화면이 거짓말이 된다.
+  const items: [string, string, string][] = [
+    [pick("팀원에게 묻고 답을 받는다", "Ask a teammate and get the answer"), "b3os_ask_teammate · b3os_fetch_answer", pick("답이 늦으면 요청 번호를 주고, 나중에 그 번호로 회수한다", "If the answer is late you get a request number to collect it later")],
+    [pick("팀원에게 메시지를 보낸다", "Send a teammate a message"), "b3os_send_message", pick("답을 기다리지 않고 남기기만 한다", "Leaves the message without waiting")],
+    [pick("팀 상태를 본다", "See the team status"), "team_status", pick("누가 있고 지금 무엇을 하고 있는지", "Who is here and what they are working on")],
+    [pick("받은 메시지함을 읽는다", "Read the inbox"), "b3os_inbox", pick("나에게 온 것 중 안 읽은 것", "Unread messages addressed to you")],
+    [pick("할 일 카드를 보고·만들고·고친다", "View, add and edit task cards"), "b3os_kanban_list · b3os_kanban_add · b3os_kanban_update", pick("대시보드 Tasks 와 같은 카드다", "The same cards as the dashboard Tasks board")],
+    [pick("지난 대화를 찾아본다", "Look up past conversations"), "b3os_recall_dms", pick("1:1 로 오간 기록에서", "From the 1:1 message history")],
+  ];
   return `
-      <div class="flex items-center justify-between gap-3 rounded-xl border border-surface-3 bg-surface-2/60 px-5 py-4">
-        <span class="min-w-0">
-          <span class="text-base font-semibold text-slate-100">${pick("MCP 창구", "MCP endpoint")}</span>
-          <span class="${on ? "text-accent-greenSoft" : "text-slate-500"} text-[11px] font-semibold ml-2">${on ? "ON" : "OFF"}</span>
-          <span class="block text-[12px] text-slate-500 mt-0.5">${pick("클로드 코드·커서에서 팀원에게 직접 질문 · 끄면 그 연결만 닫힙니다(팀방·1:1 DM 은 그대로)", "Ask teammates directly from Claude Code · Cursor — turning it off closes only that connection (team room & 1:1 DM keep working)")}</span>
-        </span>
-        <button id="sysop-mcp" class="${on ? "bg-accent-green/80" : "bg-slate-400/50"} shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors" role="switch" aria-checked="${on}"><span class="${on ? "translate-x-6" : "translate-x-1"} inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"></span></button>
+      <div class="rounded-xl border border-surface-3 bg-surface-2/60 px-5 py-4">
+        <div class="flex items-center justify-between gap-3">
+          <span class="min-w-0">
+            <span class="text-base font-semibold text-slate-100">MCP</span>
+            <span class="${on ? "text-accent-greenSoft" : "text-slate-500"} text-[11px] font-semibold ml-2">${on ? "ON" : "OFF"}</span>
+          </span>
+          <button id="sysop-mcp" class="${on ? "bg-accent-green/80" : "bg-slate-400/50"} shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors" role="switch" aria-checked="${on}"><span class="${on ? "translate-x-6" : "translate-x-1"} inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"></span></button>
+        </div>
+        <details class="mt-2 text-[12px]">
+          <summary class="cursor-pointer text-slate-400 hover:text-slate-200 select-none">${pick("무엇을 할 수 있나 — 클로드 코드·커서에서 바로", "What you can do — right from Claude Code · Cursor")}</summary>
+          <div class="mt-2 text-slate-500 leading-relaxed space-y-1">
+            ${items
+              .map(
+                ([t, tools, d]) =>
+                  `<div class="py-0.5">• <span class="text-slate-400">${t}</span> — ${d}<br /><span class="ml-3 font-mono text-[11px] text-slate-600">${tools}</span></div>`,
+              )
+              .join("")}
+            <div class="pt-1">${pick("끄면 이 연결만 닫힙니다. 팀방·1:1 DM 은 그대로 동작합니다.", "Turning it off closes only this connection. The team room and 1:1 DMs keep working.")}</div>
+          </div>
+        </details>
       </div>`;
 }
 
