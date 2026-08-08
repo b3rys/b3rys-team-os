@@ -19,6 +19,8 @@ import {
   fmtStatus,
   slashCommands,
   bestPhoto,
+  mcpOnoffRow,
+  applyMcpOnoff,
 } from "./telegramCapture";
 
 const codex: AgentRecord = {
@@ -217,6 +219,44 @@ const roster: AgentRecord[] = [
   { id: "bill", display_name: "Bill", role: "Infra", runtime: "claude_channel", status_provider: "claude_tmux", tmux_session: "claude-bill", telegram_bot_username: "example_dev_bot", workspace_path: "", persona_file: "", moderator_eligible: true, avatar_emoji: "" },
   { id: "codex", display_name: "Codex", role: "Step", runtime: "openclaw", status_provider: "openclaw_gateway", tmux_session: null, telegram_bot_username: "example_openclaw_bot", workspace_path: "", persona_file: "", moderator_eligible: true, avatar_emoji: "" },
 ];
+
+describe("/onoff MCP switch", () => {
+  function settingsDb(): Database {
+    const db = new Database(":memory:");
+    migrate(db);
+    return db;
+  }
+
+  test("internal menu renders one MCP row and reflects the shared setting", () => {
+    const db = settingsDb();
+    expect(mcpOnoffRow(db, "ko", false)).toEqual([
+      { text: "🟢 MCP — 🔴 끄기", callback_data: "mcp:off" },
+    ]);
+
+    db.prepare(`INSERT INTO setting (key, value) VALUES ('mcp_enabled', 'false') ON CONFLICT(key) DO UPDATE SET value='false'`).run();
+    expect(mcpOnoffRow(db, "ko", false)).toEqual([
+      { text: "🔴 MCP — 🟢 켜기", callback_data: "mcp:on" },
+    ]);
+  });
+
+  test("public menu omits the MCP row in both setting states", () => {
+    const db = settingsDb();
+    expect(mcpOnoffRow(db, "ko", true)).toBeNull();
+    db.prepare(`INSERT INTO setting (key, value) VALUES ('mcp_enabled', 'false') ON CONFLICT(key) DO UPDATE SET value='false'`).run();
+    expect(mcpOnoffRow(db, "ko", true)).toBeNull();
+    expect(applyMcpOnoff(db, "mcp:off", true)).toBeNull();
+    expect((db.prepare(`SELECT value FROM setting WHERE key='mcp_enabled'`).get() as { value: string }).value).toBe("false");
+  });
+
+  test("off and on callbacks change the dashboard's mcp_enabled DB setting", () => {
+    const db = settingsDb();
+    expect(applyMcpOnoff(db, "mcp:off")).toBe(false);
+    expect((db.prepare(`SELECT value FROM setting WHERE key='mcp_enabled'`).get() as { value: string }).value).toBe("false");
+
+    expect(applyMcpOnoff(db, "mcp:on")).toBe(true);
+    expect((db.prepare(`SELECT value FROM setting WHERE key='mcp_enabled'`).get() as { value: string }).value).toBe("true");
+  });
+});
 
 describe("replyAuthorAgentId — reply-owner mapping", () => {
   test("matches bot username (case/@ insensitive) → agent id", () => {
