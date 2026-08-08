@@ -248,16 +248,23 @@ describe("/onoff MCP switch", () => {
     expect(mcpOnoffRow(db, "ko", true)).toBeNull();
     db.prepare(`INSERT INTO setting (key, value) VALUES ('mcp_enabled', 'false') ON CONFLICT(key) DO UPDATE SET value='false'`).run();
     expect(mcpOnoffRow(db, "ko", true)).toBeNull();
-    expect(applyMcpOnoff(db, "mcp:off", true)).toBeNull();
+    expect(applyMcpOnoff(db, "mcp:off", { authorized: true, publicBuild: true })).toBeNull();
     expect((db.prepare(`SELECT value FROM setting WHERE key='mcp_enabled'`).get() as { value: string }).value).toBe("false");
+  });
+
+  test("unauthorized callback cannot create or change the MCP setting", () => {
+    const db = settingsDb();
+    expect(applyMcpOnoff(db, "mcp:off", { authorized: false, publicBuild: false })).toBeNull();
+    expect(db.prepare(`SELECT value FROM setting WHERE key='mcp_enabled'`).get()).toBeNull();
   });
 
   test("off and on callbacks change the dashboard's mcp_enabled DB setting", () => {
     const db = settingsDb();
-    expect(applyMcpOnoff(db, "mcp:off")).toBe(false);
+    const gate = { authorized: true, publicBuild: false };
+    expect(applyMcpOnoff(db, "mcp:off", gate)).toBe(false);
     expect((db.prepare(`SELECT value FROM setting WHERE key='mcp_enabled'`).get() as { value: string }).value).toBe("false");
 
-    expect(applyMcpOnoff(db, "mcp:on")).toBe(true);
+    expect(applyMcpOnoff(db, "mcp:on", gate)).toBe(true);
     expect((db.prepare(`SELECT value FROM setting WHERE key='mcp_enabled'`).get() as { value: string }).value).toBe("true");
   });
 });

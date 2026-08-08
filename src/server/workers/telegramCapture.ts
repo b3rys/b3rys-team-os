@@ -122,8 +122,12 @@ export function mcpOnoffRow(db: Database, locale: Locale, publicBuild: boolean):
 }
 
 /** Apply the Telegram MCP switch to the same setting used by dashboard Settings. */
-export function applyMcpOnoff(db: Database, data: string, publicBuild = false): boolean | null {
-  if (publicBuild) return null;
+export function applyMcpOnoff(
+  db: Database,
+  data: string,
+  gate: { authorized: boolean; publicBuild: boolean },
+): boolean | null {
+  if (!gate.authorized || gate.publicBuild) return null;
   const match = /^mcp:(on|off)$/.exec(data);
   if (!match) return null;
   const on = match[1] === "on";
@@ -790,8 +794,9 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
 
     // onoff 콜백 (on:<id>:<runtime> / off:<id>:<runtime>)
     if (/^mcp:(on|off)$/.test(data)) {
-      if (!isAuthorized()) { await tg("answerCallbackQuery", { callback_query_id: cb.id, text: pick(locale, "권한 없음", "Not authorized"), show_alert: true }); appendAuditFile("capture", "callback_denied", data, { from: fromId }); return; }
-      const mcpOn = applyMcpOnoff(deps.db, data, deps.publicBuild ?? PUBLIC_BUILD);
+      const authorized = isAuthorized();
+      const mcpOn = applyMcpOnoff(deps.db, data, { authorized, publicBuild: deps.publicBuild ?? PUBLIC_BUILD });
+      if (!authorized) { await tg("answerCallbackQuery", { callback_query_id: cb.id, text: pick(locale, "권한 없음", "Not authorized"), show_alert: true }); appendAuditFile("capture", "callback_denied", data, { from: fromId }); return; }
       if (mcpOn === null) { await tg("answerCallbackQuery", { callback_query_id: cb.id }); return; }
       await tg("answerCallbackQuery", { callback_query_id: cb.id, text: mcpOn ? pick(locale, "MCP 켜짐", "MCP on") : pick(locale, "MCP 꺼짐", "MCP off") });
       appendAuditFile("capture", "mcp_onoff", "mcp", { on: mcpOn });
