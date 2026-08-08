@@ -1042,19 +1042,31 @@ describe("proposals — GD 심플 모델 (팀 크기별 라우팅)", () => {
     expect(statusOf(db, id)).toBe("accepted");
   });
 
-  test("다인 팀의 다른 팀원이 모두 blocked면 무검토 gd_report 대신 peer_review blocked 유지", async () => {
+  // ★blocked 는 배정 자격이 아니다★ (팀 리드 2026-08-08: "blocked 는 빼고 그냥 배정해").
+  //   예전에는 이 상황에서 후보가 0이 되어 아무에게도 안 갔다. 그런데 `blocked` 는 `health.ts` 가
+  //   ★"정상 활동중에도 떠서 노이즈"★ 라고 적어둔 값이라, 실제로는 ★일하는 사람이 빠지는★ 필터였다.
+  //   라이브 실측: claude 런타임 5명이 작업 중 blocked 였고 배정은 idle 로 보이는 쪽에 쏠렸다.
+  //   ★두 축을 같이 잰다★ — 배정이 되는가(새 동작) · 그래도 무검토 직행은 막히는가(원래 안전 속성).
+  test("★blocked 인 팀원도 후보에 남아 실제로 배정된다★ — 그래도 무검토 gd_report 직행은 막는다", async () => {
     const { app, db } = setupTeam(["alice", "bob", "carol"], { coordinator: "bob" });
     db.prepare("INSERT INTO agent_status (agent_id, state) VALUES (?, 'blocked')").run("bob");
     db.prepare("INSERT INTO agent_status (agent_id, state) VALUES (?, 'blocked')").run("carol");
 
     const id = await createBy(app, "alice");
     expect(statusOf(db, id)).toBe("peer_review");
+
+    // ★owner 로 재면 안 된다★ — 후보가 0일 때 만들어지는 'blocked 안내' 도 조정자(bob)가 owner 라
+    //   둘이 구분되지 않는다(이 시험을 처음 그렇게 썼다가 뮤턴트가 살아남아서 알았다).
+    //   ★가르는 것은 status★ — 실제 배정은 `peer_review:*`, 후보 없음 안내는 `review_route_decision`.
+    const rows = db.prepare(
+      "SELECT owner, status FROM proposal_followup_task WHERE proposal_id = ?",
+    ).all(id) as { owner: string; status: string }[];
+    expect(rows.some((r) => r.status.startsWith("peer_review:"))).toBe(true); // ★실제로 배정됐다★
+    expect(rows.some((r) => r.status === "review_route_decision")).toBe(false); // 후보 없음 경로가 아니다
+    for (const r of rows) expect(["bob", "carol"]).toContain(r.owner);
+
+    // ★원래 안전 속성은 그대로★ — 리뷰 없이 팀장 보고로 못 넘어간다.
     expect((await transition(app, id, "gd_report", "alice")).status).toBe(409);
-    const task = db.prepare(
-      "SELECT description FROM task WHERE id IN (SELECT task_id FROM proposal_followup_task WHERE proposal_id = ?)",
-    ).get(id) as { description: string };
-    expect(task.description).toContain("blocked:");
-    expect(task.description).toContain("무검토 gd_report 직행 금지");
   });
 
   test("LEAD_ACTOR_ID 설정은 리뷰 후보 계산에 관여하지 않는다", async () => {

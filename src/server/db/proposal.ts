@@ -89,28 +89,25 @@ function reviewSkipIds(): Set<string> {
   ]);
 }
 
-// 리뷰 가능 팀원 수(비대화 제외, blocked 제외).
+// 리뷰 가능 팀원 수(비대화 제외).
+//
+// ★state 를 안 본다★ (팀 리드 2026-08-08: "blocked 는 빼고 그냥 배정해").
+//   `blocked` 는 배정 근거로 쓸 수 있는 값이 아니다 — `health.ts` 가 같은 값을 두고
+//   ★"정상 활동중에도 떠서 노이즈"★ 라고 못박아 두었고, 그래서 건강 판정은 이걸 위험으로 안 본다.
+//   그런데 여기서만 '이 사람은 못 받는다' 로 읽어서 ★일하고 있는 사람일수록 후보에서 빠졌다.★
+//   실측(2026-08-08 라이브): claude 런타임 5명이 ★작업 중★ blocked 로 찍혀 있었고(내 활동줄은
+//   "Running 3 shell commands…" 였다), 배정은 idle 로 보이는 런타임에 쏠렸다 —
+//   devon 12 · hermes 9 · codex 6 · bill 0. 재배정 sweeper 도 같은 필터라 같은 쪽으로 다시 갔다.
 function activeReviewTeamSize(db: Database): number {
   const skip = reviewSkipIds();
-  const rows = db.prepare(
-    `SELECT a.id
-       FROM agent a
-       LEFT JOIN agent_status s ON s.agent_id = a.id
-      WHERE COALESCE(s.state, 'idle') != 'blocked'`,
-  ).all() as { id: string }[];
+  const rows = db.prepare(`SELECT id FROM agent`).all() as { id: string }[];
   return rows.filter((r) => !skip.has(r.id)).length;
 }
 
-// 제안자 제외 리뷰 후보 수(= 팀 크기 판단 기준).
+// 제안자 제외 리뷰 후보 수(= 팀 크기 판단 기준). state 를 안 보는 이유는 위와 같다.
 function eligiblePeerReviewerCapacity(db: Database, proposer: string): number {
   const skip = reviewSkipIds();
-  const rows = db.prepare(
-    `SELECT a.id
-       FROM agent a
-       LEFT JOIN agent_status s ON s.agent_id = a.id
-      WHERE a.id != ?
-        AND COALESCE(s.state, 'idle') != 'blocked'`,
-  ).all(proposer) as { id: string }[];
+  const rows = db.prepare(`SELECT id FROM agent WHERE id != ?`).all(proposer) as { id: string }[];
   return rows.filter((r) => !skip.has(r.id)).length;
 }
 
