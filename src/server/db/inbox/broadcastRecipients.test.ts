@@ -168,20 +168,24 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
   //   실측: 그날 팀원이 쓴 @all 중 전체공지 목적은 검증용 1건뿐이고, 나머지는 전부
   //   ★"@all 이라는 단어를 문장 안에서 언급"★ 한 것이었다. ★언급만 해도 8명이 깨어났다.★
   describe("★@all 마커는 팀장님(source=user) 전용★", () => {
-    test("팀원이 @all 을 써도 수신행 0", () => {
+    // ★판정은 source 로만 한다 — 이 경로는 본문을 읽지 않는다.★ (messages.ts 팀원 분기)
+    //   그래서 "@all 을 써서 0" 이 아니라 ★"팀원이라서 0"★ 이다. 예전 시험 3건은 본문만
+    //   바꿔 나열해서 ★셋 다 같은 것을 재고 있었고★, 본문을 '오늘 점심 뭐 먹지' 로 바꿔도
+    //   전부 통과했다(실측). 마커를 정규식에서 지워도 안 깨지니 ★회귀를 못 잡는다.★
+    //   → 본문 목록을 한 시험에 모아 ★"본문이 무엇이든 결과가 같다" 를 단언★ 한다.
+    //     이러면 나중에 누가 이 경로에 본문 파싱을 넣는 순간 깨진다. 그게 잡아야 할 회귀다.
+    test("★팀원 발신은 본문과 무관하게 0★ — 판정은 source 하나로만 한다", () => {
       const db = withRoster(ROSTER);
-      expect(broadcastFrom(db, "sender", "agent", "@all 다들 확인")).toEqual([]);
-    });
-
-    test("★단어로 언급만 한 경우도 0★ — 그날 실제로 있던 형태", () => {
-      const db = withRoster(ROSTER);
-      expect(broadcastFrom(db, "sender", "agent", "결함은 그중 하나(@all)에만 있습니다")).toEqual([]);
-    });
-
-    test("@b3rys · @group 도 같다", () => {
-      const db = withRoster(ROSTER);
-      expect(broadcastFrom(db, "sender", "agent", "@b3rys 확인")).toEqual([]);
-      expect(broadcastFrom(db, "sender", "agent", "@group 확인")).toEqual([]);
+      const bodies = [
+        "@all 다들 확인",                          // 마커를 의도적으로 쓴 경우
+        "결함은 그중 하나(@all)에만 있습니다",      // ★단어로 언급만★ — 그날 실제로 있던 형태
+        "@b3rys 확인",
+        "@group 확인",
+        "오늘 점심 뭐 먹지",                        // 마커가 아예 없는 경우
+      ];
+      for (const body of bodies) {
+        expect(broadcastFrom(db, "sender", "agent", body), `본문: ${body}`).toEqual([]);
+      }
     });
 
     test("★coordinator 도 예외 없다★ — 판정은 source 하나로만 한다", () => {
@@ -191,10 +195,15 @@ describe("★팀원 broadcast 팬아웃은 @all 과 같은 규칙을 쓴다★",
       expect(broadcastFrom(db, "sender", "agent", "@all 공지")).toEqual([]);
     });
 
-    test("팀장님(source=user)이 쓰면 예전 그대로 — 전원", () => {
+    // ★이 시험 이름이 '@all 을 쓰면' 으로 읽히면 안 된다★ — user 분기도 본문을 안 읽는다.
+    //   전원이 되는 이유는 마커가 아니라 ★source=user★ 다. 예전 시험은 본문에 '@all' 이 있어서
+    //   ★마커 때문에 전원인 것처럼 오해를 만들었고★, 본문을 '안녕하세요' 로 바꿔도 통과했다(실측).
+    test("★팀장님(source=user)은 본문과 무관하게 전원★ — 마커가 아니라 source 가 가른다", () => {
       const db = withRoster(ROSTER);
       const all = (db.prepare(`SELECT id FROM agent WHERE id != ?`).all("sender") as Array<{ id: string }>).map((r) => r.id).sort();
-      expect(broadcastFrom(db, "sender", "user", "@all 다들 확인")).toEqual(all);
+      for (const body of ["@all 다들 확인", "안녕하세요"]) {
+        expect(broadcastFrom(db, "sender", "user", body), `본문: ${body}`).toEqual(all);
+      }
     });
   });
 
