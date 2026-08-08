@@ -23,6 +23,6 @@
       "@shared/*": ["src/shared/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "include": ["src/**/*.ts", "scripts/deploy-plan.ts", "scripts/deploy-plan.test.ts", "src/**/*.tsx"],
   "exclude": ["node_modules", "dist"]
 }
