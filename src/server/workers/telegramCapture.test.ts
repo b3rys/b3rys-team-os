@@ -227,12 +227,16 @@ describe("/onoff MCP switch", () => {
     return db;
   }
 
-  test("internal menu renders one MCP row and reflects the shared setting", () => {
+  test("missing mcp_enabled row defaults the internal menu to ON", () => {
     const db = settingsDb();
+    expect(db.prepare(`SELECT value FROM setting WHERE key='mcp_enabled'`).get()).toBeNull();
     expect(mcpOnoffRow(db, "ko", false)).toEqual([
       { text: "🟢 MCP — 🔴 끄기", callback_data: "mcp:off" },
     ]);
+  });
 
+  test("internal menu reflects an explicit false setting as OFF", () => {
+    const db = settingsDb();
     db.prepare(`INSERT INTO setting (key, value) VALUES ('mcp_enabled', 'false') ON CONFLICT(key) DO UPDATE SET value='false'`).run();
     expect(mcpOnoffRow(db, "ko", false)).toEqual([
       { text: "🔴 MCP — 🟢 켜기", callback_data: "mcp:on" },
