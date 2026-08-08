@@ -598,6 +598,9 @@ function mcpRowHtml(): string {
   //   MCP 로 가능한 기능을 펼침 목록으로 설명하자."
   //   한 줄에 담으면 ★끄면 무슨 일이 나는지★ 와 ★뭘 할 수 있는지★ 가 서로를 밀어낸다.
   //   목록은 ★실제 도구 9개★ 를 그대로 옮긴 것이다 — 손으로 늘리지 말고 도구가 늘면 여기도 늘린다.
+  //   ★단, 도구는 read/write 로 갈린다★ (빌 리뷰): read 신원에게는 kanban_add·update 가 아예 안 보인다.
+  //   지금 우리 라이브는 write 라 이 목록과 어긋나지 않는다. ★read 로 쓰는 곳이 생기면 "만들고·고친다" 줄이
+  //   실제보다 넓어진다★ — 그때는 scope 를 받아서 줄을 가려야 한다.
   const items: [string, string][] = [
     [pick("팀원에게 묻고 답을 받는다", "Ask a teammate and get the answer"), pick("답이 늦으면 요청 번호를 주고, 나중에 그 번호로 회수한다", "If the answer is late you get a request number to collect it later")],
     [pick("팀원에게 메시지를 보낸다", "Send a teammate a message"), pick("답을 기다리지 않고 남기기만 한다", "Leaves the message without waiting")],
