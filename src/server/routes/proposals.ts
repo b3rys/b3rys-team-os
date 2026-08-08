@@ -117,7 +117,7 @@ function firstAvailableAgent(db: Database, candidates: string[], fallback: strin
 //   예전에는 `agent_status.state != 'blocked'` 로 걸렀는데, 그 값은 ★일하는 중에도 뜬다.★
 //   `health.ts` 가 같은 값을 "정상 활동중에도 떠서 노이즈" 라고 적어두고 위험 판정에서 빼는데,
 //   배정만 그걸 자격으로 읽어서 ★바쁜 사람이 후보에서 사라졌다.★ 상세는 `db/proposal.ts` 의
-//   `activeReviewTeamSize` 주석 참고. 누구에게 갈지는 아래 배정부의 ★부하 분산★ 이 정한다.
+//   `eligiblePeerReviewerCapacity` 주석 참고. 누구에게 갈지는 아래 배정부의 ★부하 분산★ 이 정한다.
 export function otherReviewers(db: Database, proposer: string, agents: AgentRecord[]): string[] {
   const nonInteractive = new Set(agentsWith(agents, "non_interactive").map((a) => a.id));
   const registry = new Map(agents.map((a) => [a.id, a]));

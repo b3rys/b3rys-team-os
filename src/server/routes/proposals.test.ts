@@ -1069,6 +1069,26 @@ describe("proposals — GD 심플 모델 (팀 크기별 라우팅)", () => {
     expect((await transition(app, id, "gd_report", "alice")).status).toBe(409);
   });
 
+  // ★legacy pm_review 경로도 같이 막힌다★ (코덱스 리뷰 2026-08-08).
+  //   `eligiblePeerReviewerCapacity` 는 `requiredPmReviewCount` 가 읽는다:
+  //     예전 — 제안자 외 전원 blocked → 후보 0 → 필요 리뷰 ★0건★ → ★무검토로 gd_report 통과★
+  //     지금 — 상태를 안 보므로 후보가 있고 → ★1건 필요★ → 409
+  //   위 시험(peer 배정)만으로는 이 축이 안 잡힌다. 그래서 따로 둔다.
+  test("★제안자 외 전원이 blocked 여도 PM review 1건 없이는 gd_report 불가★", async () => {
+    const { app, db } = setupTeam(["alice", "bob", "carol"], { coordinator: "bob" });
+    db.prepare("INSERT INTO agent_status (agent_id, state) VALUES (?, 'blocked')").run("bob");
+    db.prepare("INSERT INTO agent_status (agent_id, state) VALUES (?, 'blocked')").run("carol");
+
+    // ★검증된 생성 경로를 쓴다★ — createProposalRow 직삽입은 이 팀에서 unknown_proposal 이 됐다
+    //   (그 상태로도 409 라서 시험이 통과했다. 409 를 받았다고 원하는 가드를 탄 게 아니다).
+    const id = await createBy(app, "alice");
+    db.prepare("UPDATE proposal SET status = 'pm_review' WHERE id = ?").run(id);
+
+    const r = await transition(app, id, "gd_report", "alice");
+    expect(r.status).toBe(409);
+    expect(await r.text()).toContain("PM review"); // ★그 가드가 맞는지 이유까지 본다★
+  });
+
   test("LEAD_ACTOR_ID 설정은 리뷰 후보 계산에 관여하지 않는다", async () => {
     process.env.LEAD_ACTOR_ID = "lead";
     const { app, db } = setupTeam(["lead", "alice", "bob"], { coordinator: "bob" });

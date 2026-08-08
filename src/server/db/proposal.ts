@@ -89,7 +89,11 @@ function reviewSkipIds(): Set<string> {
   ]);
 }
 
-// 리뷰 가능 팀원 수(비대화 제외).
+// (`activeReviewTeamSize` 는 제거했다 — 호출부가 0곳인 죽은 코드였다. 이 PR 이 만든 게 아니라
+//  원래 그랬고, 상태 필터를 걷어내는 뮤턴트가 전체 수트에서 살아남길래 드러났다. 코덱스 리뷰:
+//  "뮤턴트 생존은 테스트 누락이 아니라 미실행 경로의 증거다" — 시험을 붙이는 게 아니라 지우는 게 맞다.)
+
+// 제안자 제외 리뷰 후보 수(= 팀 크기 판단 기준. `requiredPmReviewCount` 가 이 값을 읽는다).
 //
 // ★state 를 안 본다★ (팀 리드 2026-08-08: "blocked 는 빼고 그냥 배정해").
 //   `blocked` 는 배정 근거로 쓸 수 있는 값이 아니다 — `health.ts` 가 같은 값을 두고
@@ -98,13 +102,11 @@ function reviewSkipIds(): Set<string> {
 //   실측(2026-08-08 라이브): claude 런타임 5명이 ★작업 중★ blocked 로 찍혀 있었고(내 활동줄은
 //   "Running 3 shell commands…" 였다), 배정은 idle 로 보이는 런타임에 쏠렸다 —
 //   devon 12 · hermes 9 · codex 6 · bill 0. 재배정 sweeper 도 같은 필터라 같은 쪽으로 다시 갔다.
-function activeReviewTeamSize(db: Database): number {
-  const skip = reviewSkipIds();
-  const rows = db.prepare(`SELECT id FROM agent`).all() as { id: string }[];
-  return rows.filter((r) => !skip.has(r.id)).length;
-}
-
-// 제안자 제외 리뷰 후보 수(= 팀 크기 판단 기준). state 를 안 보는 이유는 위와 같다.
+//
+// ★이 값이 바뀌면 무엇이 달라지나★ — `requiredPmReviewCount` 다.
+//   예전: 제안자 외 전원이 blocked → 후보 0 → pm review ★0건 필요★ = ★무검토로 gd_report 통과★
+//   지금: 상태와 무관하게 후보가 있으므로 ★1건 필요★ = 리뷰 없이는 409
+//   즉 이 변경은 배정 분포만이 아니라 ★검토를 건너뛸 수 있던 구멍도 같이 막는다.★
 function eligiblePeerReviewerCapacity(db: Database, proposer: string): number {
   const skip = reviewSkipIds();
   const rows = db.prepare(`SELECT id FROM agent WHERE id != ?`).all(proposer) as { id: string }[];
