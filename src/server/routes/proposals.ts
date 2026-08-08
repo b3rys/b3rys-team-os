@@ -324,16 +324,21 @@ function createLinkedFollowup(
     ).run(task.id);
   }
   const threadId = `prop-${p.id.replace(/^prop_/, "").slice(0, 12)}-${statusKey.replace(/[^a-z0-9]+/g, "").slice(0, 8)}`;
+  // ★발신자는 예약 id 여야 한다★ — antiPingpong 의 unknown_sender 검사는 발신자가
+  // RESERVED_SENDER_IDS 이거나 명부에 있는 팀원일 때만 통과시킨다. "codex" 는 런타임 이름이지
+  // 팀원 id 가 아니라서, codex 런타임 멤버가 없는 팀에서는 이 알림이 전부 dispatch_blocked
+  // (unknown_sender:codex) 로 막혔다 — message 행은 남고 수신자는 안 깨워지므로 조용히 사라진다.
+  // 서버가 스스로 보내는 알림이라 "system" 이 맞다(다른 자동 알림도 이미 이 id 를 쓴다).
   const { thread_id } = ensureThread(db, {
     thread_id: threadId,
-    from_agent_id: "codex",
+    from_agent_id: "system",
     to_agent_id: owner,
     type: "dm",
     body,
   });
   const message = insertMessage(db, {
     thread_id,
-    from_agent_id: "codex",
+    from_agent_id: "system",
     to_agent_id: owner,
     type: "dm",
     body: `${body}\n\nTasks 카드: ${task.id}`,

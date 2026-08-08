@@ -8,6 +8,7 @@ import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
 import { createProposal as createProposalRow } from "../db/proposal";
 import { createProposalRoutes, sweepStaleProposals } from "./proposals";
+import { checkPingpong } from "../bus/antiPingpong";
 import type { AgentRecord } from "../types";
 
 const OP_TOKEN = "proposal-route-test-op-token";
@@ -286,7 +287,17 @@ describe("proposals — 상태기계 + Guard", () => {
     const msg = db.prepare("SELECT from_agent_id, to_agent_id, body FROM message WHERE to_agent_id = ? ORDER BY created_at DESC LIMIT 1").get(peer) as {
       from_agent_id: string; to_agent_id: string; body: string;
     };
-    expect(msg.from_agent_id).toBe("codex");
+    expect(msg.from_agent_id).toBe("system");
+    // ★발신자 id 만 고정해서는 부족하다★ — 이 알림이 실제로 수신자를 깨우려면 발신자가
+    // antiPingpong 의 unknown_sender 검사를 통과해야 한다. 이전 값 "codex" 는 이 테스트의
+    // seed 에 codex 가 팀원으로 들어 있어서 통과했을 뿐이고, codex 런타임 멤버가 없는 팀에서는
+    // 전부 dispatch_blocked 로 막혔다. 그래서 ★게이트 자체를 태워★ 회귀를 잡는다.
+    expect(checkPingpong(db, {
+      message_id: followup!.messageId!, agent_id: peer, delivery_state: "pending", retry_count: 0, last_error: null,
+      from_agent_id: msg.from_agent_id, to_agent_id: peer, body: msg.body, source: "agent", created_by: null,
+      max_hop: 16, hop_count: 0, in_reply_to: null, parent_message_id: null, sync: "none",
+      thread_id: "t", type: "dm", created_at: "2026-08-08", priority: "normal",
+    }, new Set(["bill", "steve", "demis", "devon", "gd"])).allowed).toBe(true); // codex 없는 명부 = 실제 팀 구성
     expect(msg.body).toContain(id);
     const recipient = db.prepare("SELECT delivery_state FROM message_recipient WHERE message_id = ? AND agent_id = ?").get(followup!.messageId!, peer) as {
       delivery_state: string;
