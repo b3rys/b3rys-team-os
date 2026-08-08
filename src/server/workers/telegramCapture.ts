@@ -21,7 +21,7 @@ import { listStatuses, getStatus } from "../db/queries";
 import { classifyHealth } from "../lib/health";
 import { storeTelegramMedia, type StoredMedia, type TelegramMediaRef } from "../lib/mediaStore";
 import { BODY_MAX_CHARS, buildDedupeKey } from "../../shared/envelopeSchema";
-import { getCaptureToken, isRouterEnabled, getCaptureGroupId, getLocale } from "../lib/captureConfig";
+import { getCaptureToken, isMcpEnabled, isRouterEnabled, getCaptureGroupId, getLocale, setMcpEnabled } from "../lib/captureConfig";
 import { pick, type Locale } from "../lib/i18n";
 import { rememberCaptureNonBotSender, rememberDiscoveredGroup } from "../lib/telegramLeadDetection";
 import { decidePermissionRequest, getPermissionRequest, listPermissionRequests } from "../lib/permissionGate";
@@ -105,6 +105,34 @@ interface CaptureDeps {
   agents: () => AgentRecord[];
   db: Database;
   broadcast?: (e: WsEvent) => void;
+  /** Tests inject both visibility branches; production defaults to the build flag. */
+  publicBuild?: boolean;
+}
+
+type OnoffButton = { text: string; callback_data: string };
+
+/** Live-only MCP row for /onoff. Public builds omit the row entirely. */
+export function mcpOnoffRow(db: Database, locale: Locale, publicBuild: boolean): OnoffButton[] | null {
+  if (publicBuild) return null;
+  const on = isMcpEnabled(db);
+  return [{
+    text: on ? pick(locale, "🟢 MCP — 🔴 끄기", "🟢 MCP — 🔴 turn off") : pick(locale, "🔴 MCP — 🟢 켜기", "🔴 MCP — 🟢 turn on"),
+    callback_data: on ? "mcp:off" : "mcp:on",
+  }];
+}
+
+/** Apply the Telegram MCP switch to the same setting used by dashboard Settings. */
+export function applyMcpOnoff(
+  db: Database,
+  data: string,
+  gate: { authorized: boolean; publicBuild: boolean },
+): boolean | null {
+  if (!gate.authorized || gate.publicBuild) return null;
+  const match = /^mcp:(on|off)$/.exec(data);
+  if (!match) return null;
+  const on = match[1] === "on";
+  setMcpEnabled(db, on);
+  return on;
 }
 
 interface TgUpdate {
@@ -638,6 +666,8 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
       // 🔴 전체 정지 — 비상 서킷브레이커(복구 코디 제외 전원 정지). 오탭 방지로 stall 콜백이 확인 1번 받는다.
       [{ text: pick(locale, "🔴 전체 정지 (복구 코디 제외 · 확인)", "🔴 Stop all (excludes recovery coordinator · confirm)"), callback_data: "stall" }],
     ];
+    const mcpRow = mcpOnoffRow(deps.db, locale, deps.publicBuild ?? PUBLIC_BUILD);
+    if (mcpRow) rows.push(mcpRow);
     for (const a of agents) {
       const off = isAgentOff(a.id);
       if (off) {
@@ -763,6 +793,16 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     }
 
     // onoff 콜백 (on:<id>:<runtime> / off:<id>:<runtime>)
+    if (/^mcp:(on|off)$/.test(data)) {
+      const authorized = isAuthorized();
+      const mcpOn = applyMcpOnoff(deps.db, data, { authorized, publicBuild: deps.publicBuild ?? PUBLIC_BUILD });
+      if (!authorized) { await tg("answerCallbackQuery", { callback_query_id: cb.id, text: pick(locale, "권한 없음", "Not authorized"), show_alert: true }); appendAuditFile("capture", "callback_denied", data, { from: fromId }); return; }
+      if (mcpOn === null) { await tg("answerCallbackQuery", { callback_query_id: cb.id }); return; }
+      await tg("answerCallbackQuery", { callback_query_id: cb.id, text: mcpOn ? pick(locale, "MCP 켜짐", "MCP on") : pick(locale, "MCP 꺼짐", "MCP off") });
+      appendAuditFile("capture", "mcp_onoff", "mcp", { on: mcpOn });
+      if (mid) await tg("editMessageText", { chat_id: chatId, message_id: mid, text: onoffMenuText(mcpOn ? pick(locale, "🟢 MCP 켜짐", "🟢 MCP on") : pick(locale, "🔴 MCP 꺼짐", "🔴 MCP off")), reply_markup: onoffKeyboard() });
+      return;
+    }
     const oo = /^(on|off):([a-z0-9_-]+):([a-z_]+)$/.exec(data);
     if (oo) {
       if (!isAuthorized()) { await tg("answerCallbackQuery", { callback_query_id: cb.id, text: pick(locale, "권한 없음", "Not authorized"), show_alert: true }); appendAuditFile("capture", "callback_denied", data, { from: fromId }); return; }
