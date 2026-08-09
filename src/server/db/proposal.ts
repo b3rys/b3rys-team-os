@@ -362,9 +362,12 @@ export function addReview(db: Database, r: { proposal_id: string; reviewer_agent
   if (proposal.status !== expectedStatus) return { ok: false, error: `review stage/status mismatch: ${r.stage} requires ${expectedStatus}, current ${proposal.status}` };
   const reviewer = r.reviewer_agent.trim();
   // ★여기서도 state 를 안 본다★ — 배정(`eligiblePeerReviewerCapacity`)과 같은 이유다.
-  //   `agent_status.state` 의 `blocked` 는 "막혔다" 가 아니라 ★"마지막 활동에서 5분이 지났다"★ 다
-  //   (`statusProbe.ts` 의 `computeStateFromActivity`: 1분 → running · 5분 → idle · 그 이상 → blocked).
-  //   불려야 움직이는 런타임은 아무도 안 부르면 조용한 게 정상이라, ★가만히 두면 전원이 blocked 가 된다.★
+  //   ★예전에는★ `agent_status.state` 의 `blocked` 가 "막혔다" 가 아니라 "마지막 활동에서 5분이 지났다"
+  //   였다. 불려야 움직이는 런타임은 아무도 안 부르면 조용한 게 정상이라 ★가만히 두면 전원이 blocked★ 였고,
+  //   그 값을 자격으로 읽던 이 검사가 ★일하고 있는 사람의 리뷰를 거절했다.★
+  //   그 경계는 같은 PR 의 앞 커밋에서 없앴다 — 지금 `computeStateFromActivity` 는 running·idle·offline 만
+  //   낸다. ★그래도 이 검사는 되살리지 않는다★: blocked 는 이제 openclaw·codex 가 자기 차단 신호로 낼 수
+  //   있고, 그 경우에도 아래 이유로 등록을 막을 근거가 되지 못한다.
   //
   // ★등록에서는 이 검사가 특히 성립하지 않는다★ — 배정은 "이 사람이 할 수 있을까" 라는 예측이지만,
   //   등록은 ★그 사람이 리뷰를 다 써서 내미는 시점★ 이다. 제출하고 있다는 사실 자체가 살아있다는 증거고,
