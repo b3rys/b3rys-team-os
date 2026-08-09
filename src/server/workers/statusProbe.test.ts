@@ -58,13 +58,17 @@ describe("computeStateFromActivity — 마지막 활동 시각 → 상태", () =
     const justNow = new Date(Date.now() - 5_000).toISOString();
     expect(computeStateFromActivity(justNow)).toBe("running");
   });
-  test("60s~5min 사이 → idle", () => {
+  test("60s 초과 → idle", () => {
     const twoMinAgo = new Date(Date.now() - 2 * 60_000).toISOString();
     expect(computeStateFromActivity(twoMinAgo)).toBe("idle");
   });
-  test("5min 초과 → blocked", () => {
-    const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString();
-    expect(computeStateFromActivity(tenMinAgo)).toBe("blocked");
+  // ★아무리 오래 조용해도 blocked 가 아니다★ (팀 리드 2026-08-09: "진짜 blocked 가 아닌 상황은 idle 로").
+  //   예전에는 5분에서 blocked 로 넘어갔다. 불려야 움직이는 런타임에게 침묵은 정상이라,
+  //   그 값을 '일 못 맡길 사람' 으로 읽던 곳들(리뷰 배정·등록)이 ★멀쩡한 팀원을 빼버렸다.★
+  //   ★하루가 지나도 idle★ 이어야 한다 — 시간은 막혔다는 증거가 될 수 없다.
+  test("★10분이든 하루든, 조용하기만 한 것은 idle★", () => {
+    expect(computeStateFromActivity(new Date(Date.now() - 10 * 60_000).toISOString())).toBe("idle");
+    expect(computeStateFromActivity(new Date(Date.now() - 24 * 60 * 60_000).toISOString())).toBe("idle");
   });
   test("경계 직후(60s 막 지남) → idle", () => {
     const justOverIdle = new Date(Date.now() - 61_000).toISOString();
@@ -231,6 +235,17 @@ describe("buildClaudeStatus — claude_tmux 상태 생성", () => {
     expect(s.tmux_pid).toBe(99);
     expect(s.last_activity_at).toBe(null);
     expect(s.ctx_percent).toBe(null);
+  });
+
+  // ★claude 경로에서 blocked 는 이제 나오지 않는다★ — 경과시간이 유일한 근거였기 때문이다.
+  //   한도 소진 같은 실제 차단 증거는 `last_log_line` 에 그대로 남고, 위험 판정은 `health.ts` 의
+  //   `runtimeBlockedReason` 이 그 줄을 읽어서 한다 — state 를 거치지 않는다.
+  test("★하루를 조용해도 idle★ — 시간은 막혔다는 근거가 아니다", () => {
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+    const s = buildClaudeStatus("bill", true, 1234, [
+      { line: "Ready for input", captured_at: dayAgo },
+    ]);
+    expect(s.state).toBe("idle");
   });
 });
 
