@@ -1069,6 +1069,35 @@ describe("proposals — GD 심플 모델 (팀 크기별 라우팅)", () => {
     expect((await transition(app, id, "gd_report", "alice")).status).toBe(409);
   });
 
+  // ★배정만으로는 반쪽이다 — 낸 리뷰가 접수돼야 끝난다.★
+  //   위 시험은 blocked 인 팀원에게 ★배정이 가는 것★ 까지만 잰다. 그런데 배정과 등록은 다른 관문이라,
+  //   배정만 열어두면 ★명단에는 있는데 답안지는 안 받는★ 상태가 된다(등록 쪽에 같은 state 검사가 남아 있었다).
+  //   그 구멍은 여기까지 이어서 재야만 드러난다 — 그래서 배정된 사람이 ★실제로 등록에 성공하는지★ 를 잰다.
+  //
+  // ★막히면 저절로 풀리지도 않는다★ — 재배정(`peerReviewOwners`)은 "이미 배정된 적 있는 사람" 만 빼고
+  //   state 는 안 보므로, 남은 후보도 blocked 면 같은 곳으로 다시 간다. 사람이 손대기 전엔 진행이 멈춘다.
+  test("★blocked 인 팀원이 배정받은 리뷰를 실제로 등록할 수 있다★", async () => {
+    const { app, db } = setupTeam(["alice", "bob", "carol"], { coordinator: "bob" });
+    db.prepare("INSERT INTO agent_status (agent_id, state) VALUES (?, 'blocked')").run("bob");
+    db.prepare("INSERT INTO agent_status (agent_id, state) VALUES (?, 'blocked')").run("carol");
+
+    const id = await createBy(app, "alice");
+    // ★배정된 당사자로 낸다★ — 등록은 배정받은 사람만 할 수 있어서(미배정은 403),
+    //   아무나 넣으면 blocked 가 아니라 미배정 때문에 막혀 ★엉뚱한 축을 재게 된다.★
+    const assigned = db.prepare(
+      "SELECT owner FROM proposal_followup_task WHERE proposal_id = ? AND status LIKE 'peer_review:%' AND closed_at IS NULL",
+    ).get(id) as { owner: string };
+    expect(["bob", "carol"]).toContain(assigned.owner);
+
+    expect((await peerReview(app, id, assigned.owner)).status).toBe(201);
+
+    // ★행이 실제로 들어갔는지까지 본다★ — 201 만 보면 응답만 맞고 저장이 빠진 경우를 놓친다.
+    const stored = db.prepare(
+      "SELECT COUNT(*) AS c FROM proposal_review WHERE proposal_id = ? AND reviewer_agent = ?",
+    ).get(id, assigned.owner) as { c: number };
+    expect(stored.c).toBe(1);
+  });
+
   // ★legacy pm_review 경로도 같이 막힌다★ (코덱스 리뷰 2026-08-08).
   //   `eligiblePeerReviewerCapacity` 는 `requiredPmReviewCount` 가 읽는다:
   //     예전 — 제안자 외 전원 blocked → 후보 0 → 필요 리뷰 ★0건★ → ★무검토로 gd_report 통과★

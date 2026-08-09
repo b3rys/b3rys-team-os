@@ -294,11 +294,15 @@ function activityLabel(state: string, agent: Agent): { label: string; title: str
     };
   }
   if (state === "running") return { label: pick("최근 활동 시간", "Recent activity"), title: pick("최근 1분 안에 터미널 출력이 갱신됨", "Terminal output refreshed within the last minute") };
-  if (state === "idle") return { label: pick("최근 활동 시간", "Recent activity"), title: pick("최근 1-5분 사이 터미널 출력 갱신 없음", "No terminal output refresh in the last 1–5 minutes") };
+  // ★상한을 적지 않는다★ — idle 에는 이제 위쪽 경계가 없다. 얼마나 조용했든 그것만으로는 idle 이다.
+  //   (예전 문구는 "1-5분 사이" 였다. 5분이 넘으면 blocked 로 넘어간다는 뜻이었고, 그 경계를 없앴다.)
+  if (state === "idle") return { label: pick("최근 활동 시간", "Recent activity"), title: pick("1분 넘게 터미널 출력 갱신 없음. 정상 대기 상태입니다.", "No terminal output refresh for over a minute. This is a normal waiting state.") };
   if (state === "blocked") {
+    // ★이제 blocked 는 시간이 아니라 신호다.★ 예전 문구는 "5분 이상 조용함, 다만 작업 중단이라는 뜻은
+    //   아님" 이라고 단서를 달고 있었다 — 그 단서가 필요했다는 것 자체가 판정이 틀렸다는 증거였다.
     return {
       label: pick("최근 활동 시간", "Recent activity"),
-      title: pick("최근 5분 이상 터미널 출력 갱신 없음. 실제 작업 중단이나 문맥 포화라는 뜻은 아닙니다.", "No terminal output refresh for over 5 minutes. This does not necessarily mean the work stopped or the context is full."),
+      title: pick("런타임이 막혔다는 신호를 보냈습니다(한도 소진·런타임 차단 등). 조용한 것과는 다릅니다.", "The runtime reported a blocking condition (usage limit, runtime block, and so on). This is different from simply being quiet."),
     };
   }
   return { label: pick("최근 활동 시간", "Recent activity"), title: pick("세션이 없거나 상태 확인 실패", "No session, or status check failed") };

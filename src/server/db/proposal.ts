@@ -361,14 +361,23 @@ export function addReview(db: Database, r: { proposal_id: string; reviewer_agent
   const expectedStatus = r.stage === "peer" ? "peer_review" : r.stage === "pm" ? "pm_review" : "gd_report";
   if (proposal.status !== expectedStatus) return { ok: false, error: `review stage/status mismatch: ${r.stage} requires ${expectedStatus}, current ${proposal.status}` };
   const reviewer = r.reviewer_agent.trim();
-  const reviewerRow = db.prepare(
-    `SELECT a.id, COALESCE(s.state, 'idle') AS state
-       FROM agent a
-       LEFT JOIN agent_status s ON s.agent_id = a.id
-      WHERE a.id = ?`,
-  ).get(reviewer) as { id: string; state: string } | undefined;
+  // ★여기서도 state 를 안 본다★ — 배정(`eligiblePeerReviewerCapacity`)과 같은 이유다.
+  //   ★예전에는★ `agent_status.state` 의 `blocked` 가 "막혔다" 가 아니라 "마지막 활동에서 5분이 지났다"
+  //   였다. 불려야 움직이는 런타임은 아무도 안 부르면 조용한 게 정상이라 ★가만히 두면 전원이 blocked★ 였고,
+  //   그 값을 자격으로 읽던 이 검사가 ★일하고 있는 사람의 리뷰를 거절했다.★
+  //   그 경계는 같은 PR 의 앞 커밋에서 없앴다 — 지금 `computeStateFromActivity` 는 running·idle·offline 만
+  //   낸다. ★그래도 이 검사는 되살리지 않는다★: blocked 는 이제 openclaw·codex 가 자기 차단 신호로 낼 수
+  //   있고, 그 경우에도 아래 이유로 등록을 막을 근거가 되지 못한다.
+  //
+  // ★등록에서는 이 검사가 특히 성립하지 않는다★ — 배정은 "이 사람이 할 수 있을까" 라는 예측이지만,
+  //   등록은 ★그 사람이 리뷰를 다 써서 내미는 시점★ 이다. 제출하고 있다는 사실 자체가 살아있다는 증거고,
+  //   정말 죽은 팀원은 애초에 이 경로에 도달하지 못한다. 즉 이 검사가 막을 수 있는 것은
+  //   ★"조용했지만 살아서 일한 리뷰" 뿐이었다★ — 지키는 것 없이 결과물만 버렸다.
+  //
+  // 배정만 고쳤을 때(#304) 무엇이 남았나: 후보에는 들어가고 배정도 받는데, 리뷰를 내러 오면 여기서 막혔다.
+  //   같은 값을 배정은 "못 믿는다", 등록은 "믿는다" 로 읽던 불일치다.
+  const reviewerRow = db.prepare("SELECT id FROM agent WHERE id = ?").get(reviewer) as { id: string } | undefined;
   if (!reviewerRow) return { ok: false, error: `reviewer_agent는 실제 팀원 id여야 함: ${reviewer}` };
-  if (reviewerRow.state === "blocked") return { ok: false, error: `blocked reviewer는 새 리뷰를 등록할 수 없음: ${reviewer}` };
   if (r.stage === "peer" && (reviewer === proposal.proposer_agent || reviewSkipIds().has(reviewer))) {
     return { ok: false, error: `peer reviewer는 제안자/owner/비대화/비운영 agent가 아니어야 함: ${reviewer}` };
   }

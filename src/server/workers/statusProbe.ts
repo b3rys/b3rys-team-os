@@ -12,7 +12,6 @@ import { hermesBinary } from "../lib/paths";
 
 const POLL_INTERVAL_MS = 5000;
 const IDLE_AFTER_MS = 60_000;
-const BLOCKED_AFTER_MS = 5 * 60_000;
 
 async function tmuxSessionExists(session: string): Promise<boolean> {
   return new Promise((resolve) => {
@@ -213,16 +212,28 @@ function currentPaneCapacityLine(lines: string[]): string | null {
 }
 
 // ★DB 시각은 UTC 인데 Z 가 없다 ("2026-07-13 04:48:15").★ 맨 `new Date()` 로 읽으면 ★로컬★ 로 해석돼
-//   KST 서버에서 9시간 어긋나고, elapsed 가 9시간 부풀어 ★방금 답한 에이전트가 blocked 로 뒤집힌다.★
+//   KST 서버에서 9시간 어긋나고, elapsed 가 9시간 부풀어 ★방금 답한 에이전트가 조용한 쪽으로 뒤집힌다.★
 //   parseCapturedAt 이 Z 를 붙여 UTC 로 고정한다 — 다른 호출부는 이미 이걸 쓰고 있었고 ★여기만 안 썼다.★
+//
+// ★조용한 것은 막힌 것이 아니다★ (팀 리드 2026-08-09: "진짜 blocked 가 아닌 상황은 idle 로 해.
+//   idle 은 정상상태이면서 대기").
+//   예전에는 5분 넘게 조용하면 `blocked` 를 줬다. 그런데 ★불려야 움직이는 런타임은 아무도 안 부르면
+//   조용한 것이 정상★ 이라, 가만히 두면 멀쩡한 팀원이 차례로 blocked 가 됐다.
+//   실측(2026-08-09 라이브): 그 시각 서로 대화 중이던 멤버 2명이 ★마지막 활동 11분 경과★ 만으로 blocked.
+//   그 값을 '일 못 맡길 사람' 으로 읽던 곳이 실제로 오작동했다 — 리뷰 배정(#304)과 리뷰 등록.
+//
+// ★막혔다는 판정은 시간이 아니라 신호로 한다.★ 한도 소진 같은 실제 증거는 `blockedLine` 이 잡아
+//   `last_log_line` 에 남기고, 위험 판정은 `health.ts` 의 `runtimeBlockedReason` 이 그 줄을 읽어서 한다.
+//   ★그 신호를 여기서 state 로 승격하지는 않는다★ — `CAPACITY_RE` 에는 "now using usage credits"
+//   처럼 ★막힌 게 아니라 크레딧으로 계속 도는 중★ 인 줄도 함께 걸리기 때문이다(그 경계는 바로 아래
+//   `buildClaudeStatus` 시험이 "usage credits 인데 running" 으로 고정해 두었다).
+//   즉 claude 경로의 state 는 running·idle·offline 뿐이고, blocked 는 자기 차단 신호를 가진
+//   openclaw·codex 경로에서만 나온다.
 export function computeStateFromActivity(lastActivityAt: string | null): AgentState {
   if (!lastActivityAt) return "offline";
   const at = parseCapturedAt(lastActivityAt);
-  if (at === null) return "offline"; // 파싱 불가 = 활동을 모른다 (0 으로 읽어 blocked 로 단정하지 않는다)
-  const elapsed = Date.now() - at;
-  if (elapsed < IDLE_AFTER_MS) return "running";
-  if (elapsed < BLOCKED_AFTER_MS) return "idle";
-  return "blocked";
+  if (at === null) return "offline"; // 파싱 불가 = 활동을 모른다 (0 으로 읽어 단정하지 않는다)
+  return Date.now() - at < IDLE_AFTER_MS ? "running" : "idle";
 }
 
 // ── status-builder 순수 함수 (P1b: 루프 인라인 AgentStatus 생성을 추출 → 테스트 가능 + LivenessAdapter 씨앗) ──
