@@ -511,6 +511,23 @@ export function collectTagEdit(root: HTMLElement): { tagId: string; tagName: str
   };
 }
 
+/**
+ * ★아무것도 고르지 않고 '다음' 을 눌렀을 때 보여줄 안내★ — 조용히 닫지 않기 위한 것.
+ *
+ * 눌렀는데 아무 일도 안 나면 사용자는 무엇이 잘못됐는지 알 수 없고 ★취소한 것과 구분도 안 된다.★
+ * 공용 다이얼로그에 버튼 비활성 옵션이 없어(`DialogOptions` 에 disabled 없음) 안내로 대신한다.
+ *
+ * ★태그가 하나도 없을 때와 있을 때는 할 수 있는 일이 다르므로 문구도 달라야 한다★ —
+ * 태그가 0개인데 "태그를 고르세요" 라고 하면 ★없는 것을 고르라고 시키는 것★ 이다.
+ */
+export function tagEditEmptyNotice(tagCount: number): string {
+  return tagCount === 0
+    ? pick("아직 만들어진 태그가 없습니다. 맨 아래 칸에 새 태그 이름을 적어 주세요.",
+           "No tags exist yet. Type a new tag name in the bottom field.")
+    : pick("고른 태그가 없습니다. 태그를 고르거나, 맨 아래 칸에 새 이름을 적어 주세요.",
+           "No tag selected. Pick a tag, or type a new name in the bottom field.");
+}
+
 async function manageTags(): Promise<void> {
   const picked = await showForm<{ tagId: string; tagName: string; action: string; newName: string }>({
     title: pick("태그 편집", "Edit tags"),
@@ -525,7 +542,11 @@ async function manageTags(): Promise<void> {
   if (picked == null) return;
   // ★새 이름을 적었으면 그게 우선★ — 태그가 하나도 없을 때는 고를 것 자체가 없다.
   if (picked.newName) { await createTag(picked.newName); return; }
-  if (!picked.tagId) return;
+  // ★아무것도 안 고르고 눌렀을 때 조용히 닫지 않는다★ (문구·근거 = tagEditEmptyNotice)
+  if (!picked.tagId) {
+    await showAlert({ title: pick("태그 편집", "Edit tags"), message: tagEditEmptyNotice(_tags.length) });
+    return;
+  }
   if (picked.action === "delete") { await deleteTag(picked.tagId, picked.tagName); return; }
   await renameTag(picked.tagId, picked.tagName);
 }
