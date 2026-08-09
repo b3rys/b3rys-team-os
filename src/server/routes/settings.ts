@@ -164,8 +164,10 @@ const ROLLBACK_WINDOW_MS = 6 * 60 * 60 * 1000;
 
 // 공개 빌드 여부 = ★런타임 플래그★(public=source: 한 트리, 스크럽 시점 소스플립 제거). 전체 핵심룰
 // 재적용/롤백·라이브전용 런타임(codex)·배포 메뉴 등 라이브 전용 기능은 PUBLIC_BUILD=true(공개)에서 비활성.
-// ★기본 = 공개(제한) 모드 (fail-safe — 새 클론이 실수로 라이브 기능 노출 안 함)★.
-// 라이브(풀 기능)로 쓰려면 환경변수 `B3OS_LIVE=1` 설정. (토글 목록 = docs/BUILD_MODES.md)
+// ★기본 = 공개 모드★ (fail-safe — 새 클론이 실수로 라이브 기능 노출 안 함).
+// ★공개는 "제한된 상태" 가 아니라 정식 운영 모드다★ — 팀을 실제로 운영하는 설치도 여기가 맞다.
+// `B3OS_LIVE=1` 은 ★b3os 자체를 개발·검증하는 인스턴스용★ 이다. "우리 팀은 진짜로 돌아가니까
+// 라이브이겠지" 로 읽으면 뒤집힌다 — 기준은 b3os 를 개발하는가다. (토글 목록 = docs/BUILD_MODES.md)
 export const PUBLIC_BUILD = process.env.B3OS_LIVE !== "1";
 // codex·b3os_native = 라이브 검증 후 공개(GD 2026-07-05). 공개빌드(PUBLIC_BUILD=true)에선 영입·스왑에서 서버측 거부(UI 숨김의 방어 이중화).
 const LIVE_ONLY_RUNTIMES = new Set(["b3os_native", "codex"]);
