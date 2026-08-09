@@ -10,7 +10,7 @@
  * 시험도 ★조작이 hover 에 걸려 있지 않다★ 는 것을 직접 단정하도록 바꾼다.
  */
 import { describe, expect, test } from "bun:test";
-import { collectTagEdit, tagEditBodyHtml, tagPillsHtml } from "./Reports";
+import { collectTagEdit, tagEditBodyHtml, tagEditEmptyNotice, tagPillsHtml } from "./Reports";
 
 const pillCls = (active: boolean) => (active ? "ACTIVE" : "IDLE");
 const tag = (id: string, name: string, count = 0) => ({ id, name, color: "blue", report_count: count });
@@ -123,5 +123,25 @@ describe("collectTagEdit — 팝업에서 고른 것을 읽어낸다", () => {
 
   test("아무것도 안 고른 상태는 빈 값 — 호출부가 아무 일도 하지 않는 근거가 된다", () => {
     expect(collectTagEdit(rootWith({}))).toEqual({ tagId: "", tagName: "", action: "", newName: "" });
+  });
+});
+
+describe("tagEditEmptyNotice — 아무것도 안 고르고 눌렀을 때", () => {
+  // ★이 함수가 왜 있나★: 예전엔 조용히 return 해서 ★눌렀는데 아무 일도 안 났다.★
+  //   사용자는 무엇이 잘못됐는지 알 수 없고 '취소' 와 구분도 안 된다.
+  test("★태그가 0개면 '고르라' 고 하지 않는다★ — 없는 것을 고르라고 시키는 셈이다", () => {
+    const msg = tagEditEmptyNotice(0);
+    expect(msg).toContain("새 태그 이름");
+    expect(msg, "태그가 없는데 고르라고 하면 안 된다").not.toContain("태그를 고르");
+  });
+
+  test("태그가 있으면 고르는 길과 새로 만드는 길을 둘 다 알려준다", () => {
+    const msg = tagEditEmptyNotice(2);
+    expect(msg).toContain("태그를 고르");
+    expect(msg).toContain("새 이름");
+  });
+
+  test("★어느 쪽이든 빈 문자열이 아니다★ — 빈 안내는 조용한 종료와 같다", () => {
+    for (const n of [0, 1, 5]) expect(tagEditEmptyNotice(n).trim().length, `tagCount=${n}`).toBeGreaterThan(10);
   });
 });
