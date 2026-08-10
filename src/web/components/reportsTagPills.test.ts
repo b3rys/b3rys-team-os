@@ -135,7 +135,11 @@ describe("tagEditEmptyNotice — 아무것도 안 고르고 눌렀을 때", () =
     expect(msg, "태그가 없는데 고르라고 하면 안 된다").not.toContain("태그를 고르");
   });
 
-  test("태그가 있으면 고르는 길과 새로 만드는 길을 둘 다 알려준다", () => {
+  // ★이 갈래는 지금 UI 에서 도달 불가★ — 목록이 radio 이고 첫 항목이 기본 선택이라
+  //   태그가 1개라도 있으면 picked.tagId 가 안 빈다(Reports.ts:473 · 2026-08-10 배포본 실측).
+  //   ★그래도 지운다면 '죽은 분기' 가 '틀린 분기' 가 된다★ — checkbox 나 '선택 안 함' 이
+  //   들어오는 순간 태그가 있는데 "태그가 없습니다" 라고 말하게 된다. 근거는 함수 주석에.
+  test("★(현재 UI 에서는 도달 불가)★ 태그가 있으면 고르는 길과 새로 만드는 길을 둘 다 알려준다", () => {
     const msg = tagEditEmptyNotice(2);
     expect(msg).toContain("태그를 고르");
     expect(msg).toContain("새 이름");
