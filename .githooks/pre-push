@@ -1,0 +1,46 @@
+#!/bin/bash
+# ★push 전에 타입체크만 돌린다.★ (CI 후속② · GD 스크린샷 제시 형태 · b3rys-translate 방식)
+#
+# ■ 왜 훅인가 — ★CI 는 알려주기만 하고 못 고친다★
+#   force-push 로 main 에 올렸을 때 아무 검사도 안 돌았던 적이 있다(bill 지적).
+#   로컬 훅이 그 구멍을 먼저 막는다. CI 는 그 뒤의 그물이다.
+#
+# ■ ★왜 타입체크'만' 인가★ (2026-08-11 실측, bill 결정)
+#   카드 원안은 `gen-test-map.sh --check` 도 넣는 것이었다. 그런데 재보니 main 에서 이미
+#   ★exit 3★ 이다 — 최상위 describe 가 없는 시험 파일이 7개(예외 목록의 19개까지 더하면 26/206).
+#   그 7개는 ★최상위 test(...) 로 쓴 정상 파일★ 이고, --check 가 잡는 실제 비용은
+#   ★"이름이 docs/TEST_CASES.md 에 안 실린다"★ 이지 코드가 깨진 게 아니다.
+#   ★문서 누락으로 모든 push 를 막으면 게이트가 아니라 벽이 된다★ — 그런 가드는 곧 꺼진다.
+#   → 추출기 쪽이 진짜 자리라 별건으로 뺐다. 그게 정리되면 여기에 한 줄 더 붙이면 된다.
+#
+# ■ 원칙
+#   · husky 안 쓴다 — git 기본 기능(core.hooksPath)만 쓴다
+#   · ★--no-verify 는 허용한다★ — 급할 때 막지 않는다. 훅은 실수를 막는 것이지 사람을 막는 게 아니다
+#   · 상한 60초 — 넘으면 사람이 훅을 끈다
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" || exit 0   # ★루트를 못 찾으면 막지 않는다★ — 훅 때문에 push 를 못 하는 게 더 나쁘다
+
+command -v bunx >/dev/null 2>&1 || { echo "[pre-push] bunx 없음 — 타입체크 건너뜀"; exit 0; }
+
+# ★node_modules 가 없으면 돌리지 않는다★ (2026-08-11 bill 실측 · steve 재현)
+#   워크트리는 node_modules 를 안 들고 온다(우리는 손으로 심링크한다). 그 상태로 tsc 를 돌리면
+#   ★코드가 멀쩡한데 실패한다★ — 로컬 typescript 가 없어 bunx 가 다른 버전을 받아 쓰기 때문이다.
+#   (bill 은 TS2688 'Cannot find type definition file for bun', 나는 TS5102 tsconfig 에러를 봤다.
+#    에러는 갈렸지만 원인과 결론은 같다.) 게다가 bunx 가 그 워크트리에 의존성을 받아버린다.
+#   → ★"돌릴 수 없는 상황" 과 "코드가 틀린 상황" 을 가른다.★ 심링크를 한 번 빠뜨렸다고
+#     멀쩡한 브랜치의 push 가 막히면, 사람은 원인을 코드에서 찾다가 결국 훅을 끈다.
+[ -d node_modules ] || { echo "[pre-push] node_modules 없음 — 타입체크 건너뜀"; exit 0; }
+
+echo "[pre-push] 타입체크 중… (건너뛰려면 --no-verify)"
+START=$(date +%s)
+if bunx tsc --noEmit; then
+  echo "[pre-push] 타입체크 통과 ($(( $(date +%s) - START ))초)"
+  exit 0
+fi
+
+echo ""
+echo "[pre-push] ★타입 오류가 있어 push 를 멈춥니다.★"
+echo "           고치고 다시 push 하거나, 정말 급하면 git push --no-verify"
+exit 1

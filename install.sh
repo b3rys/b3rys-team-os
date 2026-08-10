@@ -53,6 +53,18 @@ fi
 say "■ 의존성 설치 (bun install)…"
 bun install
 
+# ── 2a) git 훅 배선 (pre-push 타입체크) ──────────────────────────
+# ★clone 에서만 한다★ — 다운로드 zip 처럼 .git 이 없으면 건너뛴다.
+#   husky 를 안 쓰고 git 기본 기능만 쓴다. 훅 본체는 저장소에 있어(.githooks/) 버전 관리된다.
+#   ★실패해도 설치를 멈추지 않는다★ — 훅은 편의지 설치 조건이 아니다.
+if [ -d .git ] && command -v git >/dev/null 2>&1; then
+  if git config core.hooksPath .githooks 2>/dev/null; then
+    say "■ git 훅 배선 완료 (push 전 타입체크 · 끄려면 git config --unset core.hooksPath)"
+  else
+    say "· git 훅 배선 실패 — 건너뜁니다(설치는 계속됩니다)"
+  fi
+fi
+
 # ── 3) 대시보드 빌드 (서버가 정적 산출물을 서빙) ─────────────────
 say "■ 대시보드 빌드 (bun run build)…"
 bun run build
