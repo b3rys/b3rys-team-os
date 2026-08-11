@@ -22,9 +22,15 @@ import type { CodexSandboxMode } from "../../types";
 export const CODEX_BIN = process.env.CODEX_BIN ?? "codex";
 
 export interface CodexTurnOptions {
-  /** ★이 턴이 '누구' 인가.★ 팀원 스크립트(_me.sh)가 tmux 세션으로 ★추측하지 않게★ 명시적으로 넘긴다.
-   *  (2026-07-13: hermes 가 구버전 _me.sh 의 tmux 폴백 때문에 ★전 발신이 'bill' 로 위장★됐다) */
-  agentId?: string;
+  /** ★이 턴이 '누구' 인가. 필수다.★ 팀원 스크립트(_me.sh)가 tmux 세션으로 ★추측하지 않게★ 명시적으로 넘긴다.
+   *  (2026-07-13: hermes 가 구버전 _me.sh 의 tmux 폴백 때문에 ★전 발신이 'bill' 로 위장★됐다)
+   *
+   *  ★선택 인자로 두지 않는다★ (빌 리뷰 2026-08-12): 이 값은 승인 요청의 주인으로도 쓰인다.
+   *  기본값을 두면 새 호출부가 빠뜨렸을 때 ★조용히 남의 신원으로 찍힌다★ — 실제로 그랬다
+   *  (appServerRunner 가 "codex" 를 박아둬서 dex 요청 4건이 codex 앞으로 기록됐다).
+   *  필수로 두면 빠뜨리는 순간 ★컴파일이 막는다.★ 런타임 예외보다 이르다 —
+   *  승인 경로는 자주 안 도는 길이라 예외는 한참 뒤에야 드러난다. */
+  agentId: string;
   /** 작업 디렉토리 = 페르소나(AGENTS.md) + 스킬 접근 루트. codex가 cwd의 AGENTS.md를 자동로드. */
   cwd?: string;
   /** 팀원별 정체성 격리(config/auth/session). 미지정 시 기본 ~/.codex. */

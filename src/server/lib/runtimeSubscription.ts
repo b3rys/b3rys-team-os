@@ -69,6 +69,7 @@ export async function verifyFirstModelCall(input: { id: string; runtime: string;
     }
     const result = await runCodexTurn({
       prompt: FIRST_MODEL_PROMPT,
+      agentId: input.id, // ★필수★ — 승인 요청의 주인이 된다
       cwd: input.workspacePath ?? paths.workdir,
       codexHome: paths.codexHome,
       timeoutMs: FIRST_MODEL_TIMEOUT_MS,

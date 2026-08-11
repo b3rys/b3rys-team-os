@@ -39,8 +39,20 @@ export async function runViaAppServer(
 ): Promise<CodexTurnResult> {
   const startedAt = nowMs();
   const client = makeClient();
-  // 승인 판정용 최소 agent/ctx (Tier-D는 id 불필요, 워크스페이스-write는 cwd 기준).
-  const permAgent: PermissionAgent = { id: "codex", workspace_path: opts.cwd ?? opts.writableRoots?.[0] ?? "" };
+  // ★승인 요청에 실제 팀원 id 를 싣는다★ (팀 리드 2026-08-11: "dex 방에 떠야지").
+  //
+  //   전에는 id 를 "codex" 로 박아놨다. 그래서 permission_request 의 agent_id 가 전부 "codex" 였고,
+  //   ★누구 요청인지 구분이 안 돼 팀원 방으로 보낼 수가 없었다.★ 전부 op 방으로 갔다.
+  //   (그리고 "codex" 는 ★실재하는 다른 팀원의 id★ 다 — 명부에 codex(openclaw)와 dex(codex 런타임)가 따로 있다.
+  //    허가증도 이 id 로 저장되니, 두 사람이 같은 서랍을 쓰고 있었다.)
+  //
+  //   앞 주석은 "Tier-D는 id 불필요" 라고 했는데 ★틀렸다★ — permissionGate.checkPermission 은
+  //   id 가 없으면 예외를 던지고, Tier-D 판정은 그 뒤에 있다. id 없이는 도달조차 못 한다.
+  //   ★그래서 기본값을 두지 않는다★ — CodexTurnOptions.agentId 를 필수로 만들어 컴파일이 막게 했다.
+  const permAgent: PermissionAgent = {
+    id: opts.agentId,
+    workspace_path: opts.cwd ?? opts.writableRoots?.[0] ?? "",
+  };
   const permCtx: PermissionContext = { workspaceRoot: opts.cwd ?? opts.writableRoots?.[0] ?? null };
   try {
     await client.start();
