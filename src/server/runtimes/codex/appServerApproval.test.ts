@@ -82,3 +82,48 @@ test("★GD msg838★ 명령/파일 아닌 차단(외부전송·권한)은 요�
   expect(g).toContain("안전상");
   expect(g).toContain("send data to external endpoint");
 });
+
+// ── ★codex 설정이 정하게 한다★ (팀 리드 2026-08-11) ──
+//
+// startThread 에 sandbox·approvalPolicy 를 넘기면 ★CODEX_HOME 의 config.toml 을 덮어쓴다.★
+// runtimeWorkspaceRoots 는 ★experimentalApi capability 를 요구해서 turn 이 시작도 못 했다★ (실측 2/2).
+//
+// ★소스에 그 줄이 없는지가 아니라 startThread 가 실제로 무엇을 받는지를 잰다.★
+
+import { runViaAppServer } from "./appServerRunner";
+
+function fakeClient(seen: Record<string, unknown>[]) {
+  return () =>
+    ({
+      currentThreadId: "th_1",
+      async start() {},
+      async startThread(o: Record<string, unknown>) { seen.push(o); return "th_1"; },
+      async runTurn() { return { status: "completed", finalText: "ok", turnId: "t1", detail: "" }; },
+      close() {},
+    }) as unknown as import("./appServerClient").CodexAppServerClient;
+}
+const startArgs = async (opts: Record<string, unknown>) => {
+  const seen: Record<string, unknown>[] = [];
+  await runViaAppServer({ prompt: "p", ...opts } as never, undefined, fakeClient(seen));
+  return seen[0] ?? {};
+};
+
+test("★sandbox 를 넘기지 않는다★ — 넘기면 config.toml 의 권한 프로필이 무력화된다", async () => {
+  const a = await startArgs({ cwd: "/tmp/ws", sandbox: "workspace-write" });
+  expect("sandbox" in a).toBe(false);
+});
+
+test("★approvalPolicy 도 넘기지 않는다★ — 승인 레벨도 codex 설정이 정한다", async () => {
+  const a = await startArgs({ cwd: "/tmp/ws" });
+  expect("approvalPolicy" in a).toBe(false);
+});
+
+test("★runtimeWorkspaceRoots 를 넘기지 않는다★ — experimentalApi 를 요구해 turn 이 죽던 원인", async () => {
+  const a = await startArgs({ cwd: "/tmp/ws", writableRoots: ["/tmp/ws"] });
+  expect("runtimeWorkspaceRoots" in a).toBe(false);
+});
+
+test("★대조군 — 넘겨야 하는 것은 그대로 간다★ (cwd · model · resume)", async () => {
+  const a = await startArgs({ cwd: "/tmp/ws", model: "gpt-x", resumeSessionId: "th_prev" });
+  expect({ cwd: a.cwd, model: a.model, resume: a.resumeThreadId }).toEqual({ cwd: "/tmp/ws", model: "gpt-x", resume: "th_prev" });
+});
