@@ -48,8 +48,9 @@ export async function runViaAppServer(
   //
   //   앞 주석은 "Tier-D는 id 불필요" 라고 했는데 ★틀렸다★ — permissionGate.checkPermission 은
   //   id 가 없으면 예외를 던지고, Tier-D 판정은 그 뒤에 있다. id 없이는 도달조차 못 한다.
+  //   ★그래서 기본값을 두지 않는다★ — CodexTurnOptions.agentId 를 필수로 만들어 컴파일이 막게 했다.
   const permAgent: PermissionAgent = {
-    id: opts.agentId ?? "codex",
+    id: opts.agentId,
     workspace_path: opts.cwd ?? opts.writableRoots?.[0] ?? "",
   };
   const permCtx: PermissionContext = { workspaceRoot: opts.cwd ?? opts.writableRoots?.[0] ?? null };

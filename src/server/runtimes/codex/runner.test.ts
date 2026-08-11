@@ -3,7 +3,7 @@ import { buildCodexArgs, extractSessionId, redactPromptArg } from "./runner";
 
 describe("codex runner args", () => {
   test("new turn uses read-only sandbox and terminates options before prompt", () => {
-    const args = buildCodexArgs({ prompt: "--dangerously-bypass-approvals-and-sandbox" }, "/tmp/last.txt");
+    const args = buildCodexArgs({ agentId: "t-agent", prompt: "--dangerously-bypass-approvals-and-sandbox" }, "/tmp/last.txt");
     expect(args.slice(0, 4)).toEqual(["exec", "--ignore-user-config", "-s", "read-only"]);
     expect(args).toContain("--json");
     expect(args).toContain("--skip-git-repo-check");
@@ -12,7 +12,7 @@ describe("codex runner args", () => {
 
   test("new turn preserves explicit sandbox and model", () => {
     const args = buildCodexArgs(
-      { prompt: "hi", sandbox: "workspace-write", model: "gpt-test" },
+      { agentId: "t-agent", prompt: "hi", sandbox: "workspace-write", model: "gpt-test" },
       "/tmp/last.txt",
     );
     expect(args.slice(0, 4)).toEqual(["exec", "--ignore-user-config", "-s", "workspace-write"]);
@@ -22,7 +22,7 @@ describe("codex runner args", () => {
 
   test("new workspace-write turn can enable network access", () => {
     const args = buildCodexArgs(
-      { prompt: "hi", sandbox: "workspace-write", networkAccess: true },
+      { agentId: "t-agent", prompt: "hi", sandbox: "workspace-write", networkAccess: true },
       "/tmp/last.txt",
     );
     expect(args.slice(0, 4)).toEqual(["exec", "--ignore-user-config", "-s", "workspace-write"]);
@@ -33,7 +33,7 @@ describe("codex runner args", () => {
 
   test("new workspace-write turn code-enforces writable roots from cwd", () => {
     const args = buildCodexArgs(
-      { prompt: "hi", sandbox: "workspace-write", cwd: "/tmp/codex-work" },
+      { agentId: "t-agent", prompt: "hi", sandbox: "workspace-write", cwd: "/tmp/codex-work" },
       "/tmp/last.txt",
     );
     expect(args).toContain('sandbox_workspace_write.writable_roots=["/tmp/codex-work"]');
@@ -41,7 +41,7 @@ describe("codex runner args", () => {
 
   test("resume does not pass -s, forces configured sandbox, and terminates options before prompt", () => {
     const args = buildCodexArgs(
-      { prompt: "-starts-with-dash", resumeSessionId: "sess-1", sandbox: "danger-full-access" },
+      { agentId: "t-agent", prompt: "-starts-with-dash", resumeSessionId: "sess-1", sandbox: "danger-full-access" },
       "/tmp/last.txt",
     );
     expect(args.slice(0, 3)).toEqual(["exec", "resume", "sess-1"]);
@@ -53,15 +53,14 @@ describe("codex runner args", () => {
   });
 
   test("resume defaults to read-only even though -s is unavailable for the resume subcommand", () => {
-    const args = buildCodexArgs({ prompt: "hi", resumeSessionId: "sess-1" }, "/tmp/last.txt");
+    const args = buildCodexArgs({ agentId: "t-agent", prompt: "hi", resumeSessionId: "sess-1" }, "/tmp/last.txt");
     expect(args).not.toContain("-s");
     expect(args[args.indexOf("-c") + 1]).toBe('sandbox_mode="read-only"');
   });
 
   test("resume workspace-write turn preserves network access override", () => {
     const args = buildCodexArgs(
-      {
-        prompt: "hi",
+      { agentId: "t-agent", prompt: "hi",
         resumeSessionId: "sess-1",
         sandbox: "workspace-write",
         networkAccess: true,
@@ -76,7 +75,7 @@ describe("codex runner args", () => {
   });
 
   test("spawn trace redacts prompt while preserving codex args", () => {
-    const args = buildCodexArgs({ prompt: "private message", sandbox: "workspace-write" }, "/tmp/last.txt");
+    const args = buildCodexArgs({ agentId: "t-agent", prompt: "private message", sandbox: "workspace-write" }, "/tmp/last.txt");
     expect(redactPromptArg(args)).toEqual([
       "exec",
       "--ignore-user-config",

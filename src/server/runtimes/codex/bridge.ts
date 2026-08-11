@@ -378,11 +378,16 @@ export async function handleMessage(
   //   ★enforcement = gate 결과와 무관하게 그룹 전체 drop★ — capture→bus가 owner를 이미 처리하므로(runInjection이
   //   route targets 에만 주입) native 가 또 답하면 이중응답. gate는 shadow/audit(effective 권위 기록)용으로만.
   //   env flag 2개 분리, 둘 다 off 기본 = ★라이브 영향 0(byte-level 불변)★. shadow=drop 없이 audit만.
+  // ★이 브리지가 '누구' 인지는 한 곳에서만 정한다★ (빌 리뷰 2026-08-12).
+  //   같은 식이 아래 네 곳에 흩어져 있었다. 그중 하나라도 빠지면 ★남의 신원으로 도는데★
+  //   그게 승인 요청의 주인으로도 쓰인다 — 실제로 dex 요청 4건이 codex 앞으로 기록됐다.
+  const selfAgentId = deps.agentId ?? process.env.CODEX_AGENT_ID ?? "codex";
+
   if (chatId < 0 && messageId !== undefined) {
     const shadowOn = process.env.CODEX_GROUP_NATIVE_DENY_SHADOW === "true";
     const enforceOn = process.env.CODEX_GROUP_NATIVE_DENY === "true";
     if (shadowOn || enforceOn) {
-      const self = deps.agentId ?? process.env.CODEX_AGENT_ID ?? "codex";
+      const self = selfAgentId;
       const teamBaseUrl = deps.teamBaseUrl ?? process.env.TEAM_BASE_URL ?? "http://127.0.0.1:7878/team";
       const gate = deps.ownerGate
         ? await deps.ownerGate({ text, self, tgMessageId: String(messageId) })
@@ -437,7 +442,7 @@ export async function handleMessage(
   const toolAwareText = scheduleRequest
     ? scheduleToolPrompt({
         text,
-        agentId: deps.agentId ?? process.env.CODEX_AGENT_ID ?? "codex",
+        agentId: selfAgentId,
         teamBaseUrl: deps.teamBaseUrl ?? process.env.TEAM_BASE_URL ?? "http://127.0.0.1:7878/team",
         repoRoot: deps.repoRoot ?? process.env.B3OS_REPO_ROOT ?? REPO_ROOT,
       })
@@ -445,14 +450,14 @@ export async function handleMessage(
   // 첫 접촉(여태 한 번도 인사 안 한 신입) = 영입 후 첫 응답 → 인사 + OT 받은 것 언급하며 시작(GD 2026-07-01).
   //   판정은 ★영속 마커★(재시작에도 남음) — 인메모리 prior(세션 resume용)와 분리해, 이미 합류한 팀원이
   //   재시작 후 재소개하지 않게 한다(GD 2026-07-10 버그픽스). prior는 아래 resumeSessionId 로만 쓴다.
-  const greetAgentId = deps.agentId ?? process.env.CODEX_AGENT_ID ?? "codex";
+  const greetAgentId = selfAgentId;
   const greetedBefore = hasGreetedFirstContact(greetAgentId);
   const promptText = greetedBefore
     ? toolAwareText
     : `[이번이 이 대화의 첫 응답입니다. 먼저 짧게 인사하고, OT(팀 미션·규칙·역할·팀 스킬)를 받아 팀에 합류했음을 한 줄로 밝힌 뒤 본론에 답하세요.]\n\n${toolAwareText}`;
   const preflight = codexRuntimePreflight(
     {
-      id: deps.agentId ?? process.env.CODEX_AGENT_ID ?? "codex",
+      id: selfAgentId,
       workspace_path: deps.workdir ?? process.env.CODEX_WORKDIR ?? "",
     },
     deps.sandbox ?? "read-only",
@@ -467,6 +472,8 @@ export async function handleMessage(
   }
   const result = await runTurn({
     prompt: promptText,
+    agentId: selfAgentId, // ★필수★ — 승인 요청의 주인이 된다
+
     resumeSessionId: prior,
     codexHome: deps.codexHome,
     cwd: deps.workdir,
@@ -491,7 +498,7 @@ export async function handleMessage(
     const marker = extractScheduleMarker(result.reply);
     if (marker) {
       reply = await registerReminder(marker, {
-        agentId: deps.agentId ?? process.env.CODEX_AGENT_ID ?? "codex",
+        agentId: selfAgentId,
         teamBaseUrl: deps.teamBaseUrl ?? process.env.TEAM_BASE_URL ?? "http://127.0.0.1:7878/team",
       });
     }
