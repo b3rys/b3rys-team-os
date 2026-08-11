@@ -127,3 +127,66 @@ test("★대조군 — 넘겨야 하는 것은 그대로 간다★ (cwd · model
   const a = await startArgs({ cwd: "/tmp/ws", model: "gpt-x", resumeSessionId: "th_prev" });
   expect({ cwd: a.cwd, model: a.model, resume: a.resumeThreadId }).toEqual({ cwd: "/tmp/ws", model: "gpt-x", resume: "th_prev" });
 });
+
+// ── ★승인 요청에 실제 팀원 id 가 실린다★ (팀 리드 2026-08-11: "dex 방에 떠야지") ──
+//
+// 전에는 runViaAppServer 안에서 id 를 "codex" 로 박아놨다. 그래서 permission_request.agent_id 가
+// 전부 "codex" 였고 ★누구 요청인지 구분이 안 돼 팀원 방으로 라우팅할 수 없었다.★ 전부 op 방으로 갔다.
+// 그리고 "codex" 는 ★실재하는 다른 팀원의 id★ 다 — 허가증도 이 id 로 저장되니 서랍이 겹쳤다.
+//
+// ★이 시험은 runViaAppServer 가 실제로 무슨 id 로 승인 요청을 만드는지 잰다.★
+// (앞서 buildOperationFromApproval 을 직접 부르는 시험을 썼다가 ★뮤턴트가 살아남았다★ —
+//  그 함수는 원래 id 를 인자로 받으므로 이 결함을 못 잡는다. 장식이었다.)
+
+import { Database as ApprDb } from "bun:sqlite";
+import { migrate as apprMigrate } from "../../db/migrate";
+import { runViaAppServer as runApprServer } from "./appServerRunner";
+
+/** codex 가 승인 요청을 올리는 상황을 흉내내는 클라이언트. */
+function approvalRaisingClient() {
+  return () =>
+    ({
+      currentThreadId: "th_1",
+      async start() {},
+      async startThread() { return "th_1"; },
+      async runTurn(_p: string, handlers: { onApproval?: (r: unknown) => Promise<string> }) {
+        await handlers.onApproval?.({
+          method: "item/commandExecution/requestApproval",
+          params: { command: "/bin/zsh -lc 'echo hi'", threadId: "th_1", turnId: "t1" },
+        });
+        return { status: "completed", finalText: "ok", turnId: "t1", detail: "" };
+      },
+      close() {},
+    }) as unknown as import("./appServerClient").CodexAppServerClient;
+}
+
+/**
+ * ★결정을 기다리지 않는다★ — onApproval 은 사람이 누를 때까지 폴링한다(기본 TTL 1시간).
+ * 우리가 재려는 것은 ★어떤 id 로 요청이 만들어지는가★ 뿐이므로, 행이 생기는 즉시 읽고
+ * 거절로 마감해 턴을 풀어준다. (그냥 await 하면 시험이 타임아웃까지 매달린다 — 실제로 그랬다.)
+ */
+const ownerOfRequest = async (agentId?: string) => {
+  const db = new ApprDb(":memory:");
+  apprMigrate(db);
+  const turn = runApprServer(
+    { prompt: "p", cwd: "/tmp/ws", agentId } as never,
+    db,
+    approvalRaisingClient(),
+  );
+  let row: { id: string; agent_id: string } | undefined;
+  for (let i = 0; i < 200 && !row; i++) {
+    row = db.query("select id, agent_id from permission_request order by created_at desc limit 1").get() as never;
+    if (!row) await new Promise((r) => setTimeout(r, 10));
+  }
+  if (row) db.run("update permission_request set status='denied' where id=?", [row.id]); // 턴을 풀어준다
+  await turn.catch(() => {});
+  return row?.agent_id;
+};
+
+test("★승인 요청의 주인이 dex 로 찍힌다★ — 팀원 방으로 보내려면 이게 있어야 한다", async () => {
+  expect(await ownerOfRequest("dex")).toBe("dex");
+}, 20000);
+
+test("★대조군 — 다른 팀원이면 그 id 가 찍힌다★ (한 값으로 고정돼 있지 않다)", async () => {
+  expect(await ownerOfRequest("cody")).toBe("cody");
+}, 20000);
