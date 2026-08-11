@@ -29,25 +29,38 @@ export function makeAppServerCaller(db: Database): CodexCaller {
 /** db 없는 기본 caller(ask=fail-closed denied). 팝업 원하면 makeAppServerCaller(db) 사용. */
 export const runCodexTurnViaAppServer: CodexCaller = (opts) => runViaAppServer(opts);
 
-async function runViaAppServer(opts: CodexTurnOptions, db?: Database): Promise<CodexTurnResult> {
+/** ★클라이언트를 주입 가능하게★ — startThread 에 실제로 무엇이 넘어가는지 재려면 대신 세울 자리가 필요하다. */
+export type AppServerClientFactory = () => CodexAppServerClient;
+
+export async function runViaAppServer(
+  opts: CodexTurnOptions,
+  db?: Database,
+  makeClient: AppServerClientFactory = () => new CodexAppServerClient(),
+): Promise<CodexTurnResult> {
   const startedAt = nowMs();
-  const client = new CodexAppServerClient();
+  const client = makeClient();
   // 승인 판정용 최소 agent/ctx (Tier-D는 id 불필요, 워크스페이스-write는 cwd 기준).
   const permAgent: PermissionAgent = { id: "codex", workspace_path: opts.cwd ?? opts.writableRoots?.[0] ?? "" };
   const permCtx: PermissionContext = { workspaceRoot: opts.cwd ?? opts.writableRoots?.[0] ?? null };
   try {
     await client.start();
+    // ★codex 설정이 정하게 한다★ (팀 리드 2026-08-11: "codex 설정으로 돌게 해. 별도 우리 코드가 아닌").
+    //
+    //   여기서 sandbox·approvalPolicy 를 넘기면 ★CODEX_HOME 의 config.toml 을 덮어쓴다.★
+    //   그러면 권한 프로필(파일 경로 deny 등)을 아무리 써놔도 효과가 없다 — 실측으로 확인했다:
+    //     프로필만            → .env 읽기 차단됨
+    //     + sandbox 를 넘기면  → 그냥 읽힘
+    //
+    //   ★runtimeWorkspaceRoots 도 빼야 한다.★ 그게 experimentalApi capability 를 요구해서
+    //   지금 flag on 이 ★턴 시작도 못 하고 죽는 원인★ 이었다(2/2 재현). 실측 3종:
+    //     전부 넘김 + caps null        → 거부(runtimeWorkspaceRoots requires experimentalApi)
+    //     ★cwd 만 넘김 + caps null★    → 성공  ← 이 길로 간다
+    //     roots + experimentalApi:true → 성공 (다른 길이지만 설정을 덮어쓰는 쪽으로 되돌아간다)
+    //
+    //   작업 폴더 범위는 cwd + config.toml 의 workspace_roots 가 정한다.
     await client.startThread({
       cwd: opts.cwd,
       model: opts.model,
-      // ★안전 F2 픽스(하네스 재검증 최우선): sandbox를 read-only로 하드 강제.★
-      // 이유: workspace-write면 codex가 writable_roots 안의 파괴(rm·overwrite·git reset·훅 심기)를
-      // 승인요청 없이 자체 실행 → 게이트에 안 옴 → Tier-D dead code → 게이트 전체 무력화(F2).
-      // read-only면 모든 쓰기/실행이 escalation → 승인요청 → 게이트(F1: Tier-D deny 아니면 ask=거절).
-      // ★쓰기 지원은 M5 팝업(GD 승인) 배선 후 별도 설계. 그 전엔 안전 우선으로 read-only 고정.★
-      sandbox: "read-only",
-      approvalPolicy: "on-request", // 모든 escalation을 승인요청으로(게이트가 보게)
-      runtimeWorkspaceRoots: opts.writableRoots && opts.writableRoots.length ? opts.writableRoots : undefined,
       resumeThreadId: opts.resumeSessionId, // ★정확성 #1: 멀티턴 맥락 이어감(exec resume 동등)★
     });
     const threadId = client.currentThreadId;
