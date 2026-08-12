@@ -128,32 +128,37 @@ test("★대조군 — 넘겨야 하는 것은 그대로 간다★ (cwd · model
   expect({ cwd: a.cwd, model: a.model, resume: a.resumeThreadId }).toEqual({ cwd: "/tmp/ws", model: "gpt-x", resume: "th_prev" });
 });
 
-// ── ★승인 요청에 실제 팀원 id 가 실린다★ (팀 리드 2026-08-11: "dex 방에 떠야지") ──
+// ── ★승인 판정은 우리가 하지 않는다★ (팀 리드 2026-08-12) ──
 //
-// 전에는 runViaAppServer 안에서 id 를 "codex" 로 박아놨다. 그래서 permission_request.agent_id 가
-// 전부 "codex" 였고 ★누구 요청인지 구분이 안 돼 팀원 방으로 라우팅할 수 없었다.★ 전부 op 방으로 갔다.
-// 그리고 "codex" 는 ★실재하는 다른 팀원의 id★ 다 — 허가증도 이 id 로 저장되니 서랍이 겹쳤다.
+// 전에는 여기서 다시 판정하고 ask 면 ★op 방★ 에 팝업을 띄웠다. 두 가지가 동시에 망가졌다:
+//   ① 팀원 승인이 op 방에 떴다 — op 방은 시스템 알림 자리다.
+//      실측: permission_request 를 만든 팀원은 codex 런타임뿐(dex 5 · codex 4). 다른 팀원 0건.
+//   ② 아무도 안 누르면 턴이 안 끝나 ★팀원이 답을 못 했다.★
+// hermes·openclaw 는 b3os 에 승인 배선이 아예 없다. 경계는 각자 런타임 설정이 친다.
 //
-// ★이 시험은 runViaAppServer 가 실제로 무슨 id 로 승인 요청을 만드는지 잰다.★
-// (앞서 buildOperationFromApproval 을 직접 부르는 시험을 썼다가 ★뮤턴트가 살아남았다★ —
-//  그 함수는 원래 id 를 인자로 받으므로 이 결함을 못 잡는다. 장식이었다.)
+// ★이 시험은 runViaAppServer 가 승인 요청을 받았을 때 실제로 무엇을 하는지 잰다★
+// (팝업을 안 만든다 · 사람을 안 기다린다 · fail-closed 로 거절한다).
 
 import { Database as ApprDb } from "bun:sqlite";
 import { migrate as apprMigrate } from "../../db/migrate";
 import { runViaAppServer as runApprServer } from "./appServerRunner";
 
-/** codex 가 승인 요청을 올리는 상황을 흉내내는 클라이언트. */
-function approvalRaisingClient() {
+/**
+ * codex 가 승인 요청을 올리는 상황을 흉내내는 클라이언트.
+ * ★돌려받은 결정을 seen 에 적어둔다★ — 안 적으면 결정값을 무엇으로 바꿔도 시험이 통과한다(뮤턴트 생존).
+ */
+function approvalRaisingClient(seen: string[] = []) {
   return () =>
     ({
       currentThreadId: "th_1",
       async start() {},
       async startThread() { return "th_1"; },
       async runTurn(_p: string, handlers: { onApproval?: (r: unknown) => Promise<string> }) {
-        await handlers.onApproval?.({
+        const d = await handlers.onApproval?.({
           method: "item/commandExecution/requestApproval",
           params: { command: "/bin/zsh -lc 'echo hi'", threadId: "th_1", turnId: "t1" },
         });
+        if (d !== undefined) seen.push(d);
         return { status: "completed", finalText: "ok", turnId: "t1", detail: "" };
       },
       close() {},
@@ -161,32 +166,71 @@ function approvalRaisingClient() {
 }
 
 /**
- * ★결정을 기다리지 않는다★ — onApproval 은 사람이 누를 때까지 폴링한다(기본 TTL 1시간).
- * 우리가 재려는 것은 ★어떤 id 로 요청이 만들어지는가★ 뿐이므로, 행이 생기는 즉시 읽고
- * 거절로 마감해 턴을 풀어준다. (그냥 await 하면 시험이 타임아웃까지 매달린다 — 실제로 그랬다.)
+ * ★codex 가 승인을 물어와도 우리는 사람을 부르지 않는다.★
+ *
+ * 전에는 여기서 permission_request 를 만들고 사람이 누를 때까지 폴링했다(TTL 1시간). 그 결과:
+ *   ① 그 팝업이 ★op 방★ 에 떴다 — op 방은 시스템 알림 자리다(팀 리드 2026-08-12).
+ *   ② 아무도 안 누르면 턴이 안 끝나 ★팀원이 답을 못 했다.★
+ * hermes·openclaw 는 b3os 에 승인 배선이 아예 없다. codex 도 같은 모양으로 맞췄다.
+ * 경계는 config.toml 의 permission 프로파일이 친다(launcher.renderLockedDownCodexConfig).
  */
-const ownerOfRequest = async (agentId?: string) => {
+const runWithApproval = async (agentId: string) => {
   const db = new ApprDb(":memory:");
   apprMigrate(db);
-  const turn = runApprServer(
-    { prompt: "p", cwd: "/tmp/ws", agentId } as never,
-    db,
-    approvalRaisingClient(),
-  );
-  let row: { id: string; agent_id: string } | undefined;
-  for (let i = 0; i < 200 && !row; i++) {
-    row = db.query("select id, agent_id from permission_request order by created_at desc limit 1").get() as never;
-    if (!row) await new Promise((r) => setTimeout(r, 10));
-  }
-  if (row) db.run("update permission_request set status='denied' where id=?", [row.id]); // 턴을 풀어준다
-  await turn.catch(() => {});
-  return row?.agent_id;
+  const decisions: string[] = [];
+  const res = await runApprServer({ prompt: "p", cwd: "/tmp/ws", agentId } as never, db, approvalRaisingClient(decisions));
+  const popups = (db.query("select count(*) as n from permission_request").get() as { n: number }).n;
+  db.close();
+  return { res, popups, decisions };
 };
 
-test("★승인 요청의 주인이 dex 로 찍힌다★ — 팀원 방으로 보내려면 이게 있어야 한다", async () => {
-  expect(await ownerOfRequest("dex")).toBe("dex");
+test("★사람을 기다리지 않고 턴이 끝난다★ — 이게 안 되면 팀원이 답을 못 한다", async () => {
+  const { res } = await runWithApproval("dex");
+  // 옛 경로였다면 여기서 폴링에 걸려 타임아웃까지 매달렸다(실제로 그랬다).
+  expect(res.ok).toBe(true);
+  expect(res.reply).toBe("ok");
 }, 20000);
 
-test("★대조군 — 다른 팀원이면 그 id 가 찍힌다★ (한 값으로 고정돼 있지 않다)", async () => {
-  expect(await ownerOfRequest("cody")).toBe("cody");
+test("★승인 팝업을 만들지 않는다★ — 팀원 승인이 팀 리드 방으로 올라가던 경로", async () => {
+  const { popups } = await runWithApproval("dex");
+  expect(popups).toBe(0);
 }, 20000);
+
+test("★물어오면 거절한다(fail-closed)★ — 감독을 강화한 설정이 오히려 전부 열리면 안 된다", async () => {
+  // 여기 왔다 = 그 멤버 설정이 "사람에게 물어라" 라고 한 것. 물어볼 창구가 없으니 거절이 그 뜻에 맞다.
+  // 허용으로 두면 approval_policy 를 on-request 로 ★조인 사람★ 이 오히려 전부 통과시키게 된다(빌 리뷰).
+  const { decisions } = await runWithApproval("dex");
+  expect(decisions).toEqual(["denied"]);
+}, 20000);
+
+test("대조군 — 다른 팀원도 같다(dex 전용 분기가 아니다)", async () => {
+  const { res, popups, decisions } = await runWithApproval("cody");
+  expect(res.ok).toBe(true);
+  expect(popups).toBe(0);
+  expect(decisions).toEqual(["denied"]);
+}, 20000);
+
+// ── ★자식 app-server 가 그 팀원의 설정을 읽는가★ (2026-08-12) ──
+//
+// 안 넘기면 자식이 ★호스트 ~/.codex★ 를 읽는다. 그러면 그 팀원 config 의 승인정책도 권한 프로파일도
+// ★하나도 안 걸린다.★ 라이브에서 실제로 그랬고, 나는 그걸 보고 "app-server 가 설정을 무시한다" 고
+// ★잘못 결론냈다★ — 무시한 게 아니라 다른 파일을 읽고 있었다.
+// exec 경로(runner.ts)는 원래 CODEX_HOME 을 넘긴다. app-server 경로만 빠져 있었다.
+
+import { appServerSpawnEnv } from "./appServerClient";
+import { defaultAppServerClientFactory } from "./appServerRunner";
+
+test("★CODEX_HOME 이 자식 env 로 간다★ — 없으면 그 팀원 설정이 통째로 안 걸린다", () => {
+  const env = appServerSpawnEnv("/home/dex/.codex-agents/dex", { PATH: "/usr/bin" });
+  expect(env.CODEX_HOME).toBe("/home/dex/.codex-agents/dex");
+  expect(env.PATH).toBe("/usr/bin"); // 나머지 환경은 그대로 물려준다
+});
+
+test("대조군 — codexHome 이 없으면 CODEX_HOME 을 새로 박지 않는다(호스트 기본값 그대로)", () => {
+  expect(appServerSpawnEnv(undefined, { PATH: "/usr/bin" }).CODEX_HOME).toBeUndefined();
+});
+
+test("★기본 팩토리가 그 턴 주인의 codexHome 을 실어 준다★ — 배선이 끊기면 위 함수가 맞아도 소용없다", () => {
+  const c = defaultAppServerClientFactory({ prompt: "p", agentId: "dex", codexHome: "/x/dex" } as never);
+  expect(c.codexHome).toBe("/x/dex");
+});

@@ -66,6 +66,18 @@ export interface ThreadStartOptions {
 
 interface Pending { resolve: (v: any) => void; reject: (e: any) => void; method: string; }
 
+/**
+ * ★자식 app-server 가 읽을 설정 위치를 정하는 env.★ 순수 함수라 spawn 없이 잴 수 있다.
+ *
+ * codexHome 이 없으면 자식은 ★호스트 ~/.codex★ 를 읽는다 — 그러면 그 팀원의 승인정책도
+ * 권한 프로파일도 하나도 안 걸린다(2026-08-12 실측: dex 턴이 호스트 설정으로 돌았다).
+ */
+export function appServerSpawnEnv(codexHome?: string, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env = { ...base };
+  if (codexHome) env.CODEX_HOME = codexHome;
+  return env;
+}
+
 export class CodexAppServerClient {
   private proc: ChildProcessWithoutNullStreams | null = null;
   private buf = "";
@@ -77,9 +89,25 @@ export class CodexAppServerClient {
   private turnResolve: ((r: TurnResult) => void) | null = null;
   private closed = false;
 
+  /**
+   * ★어느 팀원의 설정으로 돌 것인가.★ 안 주면 자식이 ★호스트 ~/.codex★ 를 읽는다.
+   *
+   * 실제로 그래서 사고가 났다(2026-08-12): 이 값을 안 넘겨서 dex 턴이 호스트 설정으로 돌았고,
+   * dex config 의 approval_policy 도 permission 프로파일도 ★하나도 안 걸렸다.★
+   * 그걸 보고 나는 "app-server 가 설정을 무시한다" 고 결론냈는데 ★틀렸다★ — 무시한 게 아니라
+   * ★다른 파일을 읽고 있었다.★ exec 경로(runner.ts)는 원래 넘긴다. 여기만 빠져 있었다.
+   */
+  constructor(private readonly spawnOpts: { codexHome?: string } = {}) {}
+
+  /** 이 클라이언트가 어느 팀원 설정으로 띄우는지(시험·진단용). */
+  get codexHome(): string | undefined { return this.spawnOpts.codexHome; }
+
   /** app-server 스폰 + initialize 핸드셰이크. */
   async start(): Promise<void> {
-    const proc = spawn(CODEX_BIN, ["app-server"], { stdio: ["pipe", "pipe", "pipe"] });
+    const proc = spawn(CODEX_BIN, ["app-server"], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: appServerSpawnEnv(this.spawnOpts.codexHome),
+    });
     this.proc = proc;
     proc.stdout.on("data", (d) => this.onData(d.toString()));
     // ★견고성 #3: stderr를 버리지 말고 tail 보관 → 실패/타임아웃 시 detail에 실어 진단(rate-limit 텍스트가 여기 옴).★
