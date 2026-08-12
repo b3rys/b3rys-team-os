@@ -10,6 +10,7 @@ import type { Database } from "bun:sqlite";
 import { CodexAppServerClient, type ReviewDecision } from "./appServerClient";
 import { requestApprovalPopup, PROCESS_INSTANCE } from "./appServerPopup";
 import { CodexApprovalCorrelationStore } from "./state";
+import { setActivityLine } from "../../db/queries";
 import type { CodexCaller, CodexTurnResult, CodexTurnOptions } from "./runner";
 import { registerActiveTurn, unregisterActiveTurn } from "./activeTurns";
 
@@ -75,6 +76,11 @@ export async function runViaAppServer(
     //   (실측: 20번 연기 후 blocked. 턴도 답도 없었다.)
     registerActiveTurn(opts.agentId, client);
     const r = await client.runTurn(opts.prompt, {
+      // ★지금 무엇을 하는 중인지 보이게 한다.★ 창이 없는 런타임이라 이벤트로 직접 쓴다.
+      onActivity: (line) => {
+        if (!db) return;
+        try { setActivityLine(db, opts.agentId, line); } catch { /* 표시가 턴을 막지 않는다 */ }
+      },
       onApproval: async (req) => {
         // ★codex 가 물으면 그 팀원 방에 띄우고, 사람이 누른 대로 답한다.★ (팀 리드 2026-08-12)
         //
@@ -116,6 +122,8 @@ export async function runViaAppServer(
       elapsedMs: nowMs() - startedAt,
     };
   } finally {
+    // 턴이 끝나면 지운다 — 안 지우면 ★끝난 일을 계속 하고 있는 것처럼★ 보인다.
+    if (db) { try { setActivityLine(db, opts.agentId, null); } catch { /* best-effort */ } }
     unregisterActiveTurn(opts.agentId, client);
     client.close();
   }

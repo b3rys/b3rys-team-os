@@ -43,6 +43,8 @@ export interface RunTurnHandlers {
   onTurnStarted?: (turnId: string) => void;
   /** 승인요청 → decision 반환(비동기). 미지정 시 기본 denied(fail-closed). */
   onApproval?: (req: ApprovalRequest) => Promise<ReviewDecision> | ReviewDecision;
+  /** ★지금 무엇을 하는 중인가★ — 사람이 진행 상황을 보게 한다(tmux 팀원의 화면 긁기와 같은 자리). */
+  onActivity?: (line: string) => void;
   /** 임의 서버 알림 관찰(로깅/디버그). */
   onNotify?: (method: string, params: unknown) => void;
 }
@@ -76,6 +78,40 @@ export function appServerSpawnEnv(codexHome?: string, base: NodeJS.ProcessEnv = 
   const env = { ...base };
   if (codexHome) env.CODEX_HOME = codexHome;
   return env;
+}
+
+/**
+ * ★지금 무엇을 하는 중인지 한 줄로.★ (팀 리드 2026-08-12: "진짜 몰하는지 나와야지")
+ *
+ * tmux 팀원은 statusProbe 가 화면을 긁어 이 줄을 채운다. codex 팀원은 창이 없어서
+ * ★영영 비어 있었다★ — 실측: agent_status.activity_line 이 dex 는 항상 null.
+ * codex 의 등가물은 app-server 가 흘려주는 item 이벤트다. 그걸 같은 칸에 쓴다.
+ */
+export function activityLineOf(item: unknown): string | null {
+  const it = (item ?? {}) as Record<string, unknown>;
+  const type = typeof it.type === "string" ? it.type : "";
+  const clip = (s: string) => (s.length > 80 ? `${s.slice(0, 80)}…` : s);
+
+  const cmd = it.command ?? (it as { cmd?: unknown }).cmd;
+  const cmdText = typeof cmd === "string" ? cmd : Array.isArray(cmd) ? cmd.join(" ") : null;
+  if (cmdText) return clip(`실행: ${cmdText}`);
+
+  const changes = it.fileChanges;
+  if (changes && typeof changes === "object") {
+    const files = Object.keys(changes as Record<string, unknown>);
+    return clip(files.length === 1 ? `파일 수정: ${files[0]}` : `파일 ${files.length}개 수정`);
+  }
+  if (type === "webSearch" || type === "web_search") {
+    const q = typeof it.query === "string" ? it.query : "";
+    return clip(q ? `웹 검색: ${q}` : "웹 검색");
+  }
+  if (type === "reasoning") return "생각하는 중";
+  if (type === "agentMessage") return "답 쓰는 중";
+  if (type === "mcpToolCall") {
+    const n = typeof it.name === "string" ? it.name : "도구";
+    return clip(`도구 호출: ${n}`);
+  }
+  return type ? clip(type) : null;
 }
 
 export class CodexAppServerClient {
@@ -373,6 +409,11 @@ export class CodexAppServerClient {
       case "item/agentMessage/delta": {
         const t = params?.delta ?? params?.text ?? "";
         if (t) { this.deltaBuf += String(t); this.activeHandlers?.onDelta?.(String(t)); } // ★#4: delta 누적(완결텍스트 빈 경우 폴백)★
+        break;
+      }
+      case "item/started": {
+        const line = activityLineOf(params?.item);
+        if (line) this.activeHandlers?.onActivity?.(line);
         break;
       }
       case "item/completed": {

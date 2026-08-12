@@ -173,3 +173,23 @@ export function appendAudit(
     detail == null ? null : JSON.stringify(detail),
   );
 }
+
+/**
+ * ★지금 무엇을 하는 중인지만 갱신한다.★ (팀 리드 2026-08-12: "진짜 몰하는지 나와야지")
+ *
+ * tmux 팀원은 statusProbe 가 화면을 긁어 이 칸을 채운다. 창이 없는 런타임(codex 등)은
+ * ★영영 비어 있었다★ — 실측: dex 의 activity_line 은 항상 null 이었다.
+ * 그 런타임들은 자기 이벤트 스트림에서 이 칸을 직접 쓴다.
+ *
+ * ★다른 칸은 건드리지 않는다★ — state·tmux_pid 는 statusProbe 의 것이라
+ * 여기서 같이 쓰면 두 주인이 서로 덮어쓴다. 행이 없으면 만들고, 있으면 이 칸만 바꾼다.
+ */
+export function setActivityLine(db: Database, agentId: string, line: string | null): void {
+  db.prepare(
+    `INSERT INTO agent_status (agent_id, state, last_activity_at, last_log_line, tmux_pid, activity_line, probed_at)
+     VALUES (?, 'working', datetime('now'), NULL, NULL, ?, datetime('now'))
+     ON CONFLICT(agent_id) DO UPDATE SET
+       activity_line=excluded.activity_line,
+       last_activity_at=excluded.last_activity_at`,
+  ).run(agentId, line);
+}
