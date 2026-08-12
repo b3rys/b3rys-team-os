@@ -28,16 +28,23 @@ export function makeAppServerCaller(db: Database): CodexCaller {
 /** db 없는 기본 caller. 판정은 동일(codex 설정) — 턴 상관관계 정리만 안 한다. */
 export const runCodexTurnViaAppServer: CodexCaller = (opts) => runViaAppServer(opts);
 
-/** ★클라이언트를 주입 가능하게★ — startThread 에 실제로 무엇이 넘어가는지 재려면 대신 세울 자리가 필요하다. */
-export type AppServerClientFactory = () => CodexAppServerClient;
+/**
+ * ★클라이언트를 주입 가능하게★ — startThread 에 실제로 무엇이 넘어가는지 재려면 대신 세울 자리가 필요하다.
+ * ★opts 를 받는다★ — 어느 팀원의 CODEX_HOME 으로 띄울지가 여기서 정해진다(안 넘기면 호스트 설정으로 돈다).
+ */
+export type AppServerClientFactory = (opts: CodexTurnOptions) => CodexAppServerClient;
+
+/** 기본 팩토리 — ★이 턴 주인의 CODEX_HOME 으로★ app-server 를 띄운다(안 넘기면 호스트 설정으로 돈다). */
+export const defaultAppServerClientFactory: AppServerClientFactory = (o) =>
+  new CodexAppServerClient({ codexHome: o.codexHome });
 
 export async function runViaAppServer(
   opts: CodexTurnOptions,
   db?: Database,
-  makeClient: AppServerClientFactory = () => new CodexAppServerClient(),
+  makeClient: AppServerClientFactory = defaultAppServerClientFactory,
 ): Promise<CodexTurnResult> {
   const startedAt = nowMs();
-  const client = makeClient();
+  const client = makeClient(opts);
   // ★이 턴이 누구인지는 계속 필수다★ — 승인 판정은 걷어냈지만 로그·아티팩트·세션이 전부 id 로 갈린다.
   //   전에는 "codex" 로 박혀 있었는데, 그건 ★실재하는 다른 팀원의 id★ 다(명부에 codex(openclaw)와
   //   dex(codex 런타임)가 따로 있다). 그래서 CodexTurnOptions.agentId 를 필수로 두어 컴파일이 막게 했다.
@@ -92,9 +99,11 @@ export async function runViaAppServer(
         //   비용은 0이다 — never 면 어차피 안 불리므로 정상 동작은 하나도 안 바뀐다.
         //   (옛 경로도 db 없으면 denied 였다. fail-closed 를 유지하는 것이지 새로 조이는 게 아니다.)
         //
-        // ★조용히 거절하지는 않는다★ — 왔다는 것 자체가 그 멤버 config.toml 이 우리 seed 와 다르다는
-        //   신호라 로그로 드러낸다(조용한 거절 = 나중에 왜 막혔는지 못 찾는다).
-        console.error(`[codex-appserver] ${opts.agentId}: codex 가 승인을 물었다(설정이 never 가 아님) → 거절: ${req.method}`);
+        // ★조용히 거절하지는 않는다★ — 로그가 없으면 나중에 왜 막혔는지 못 찾는다.
+        //   ★관측만 적는다. 원인 추정은 적지 않는다.★ 전에 여기 "(설정이 never 가 아님)" 이라고
+        //   추측을 사실처럼 박아놨는데 ★한 시간 만에 거짓★ 이 됐다(설정은 never 였고, 실은 그 설정
+        //   파일을 안 읽고 있었다). 그 문구 때문에 엉뚱한 곳을 뒤졌다.
+        console.error(`[codex-appserver] ${opts.agentId}: codex 가 승인을 물었다 → 거절(물어볼 창구가 없다): ${req.method} codex_home=${opts.codexHome ?? "(none)"}`);
         const decision: ReviewDecision = "denied";
         return decision;
       },

@@ -209,3 +209,28 @@ test("대조군 — 다른 팀원도 같다(dex 전용 분기가 아니다)", as
   expect(popups).toBe(0);
   expect(decisions).toEqual(["denied"]);
 }, 20000);
+
+// ── ★자식 app-server 가 그 팀원의 설정을 읽는가★ (2026-08-12) ──
+//
+// 안 넘기면 자식이 ★호스트 ~/.codex★ 를 읽는다. 그러면 그 팀원 config 의 승인정책도 권한 프로파일도
+// ★하나도 안 걸린다.★ 라이브에서 실제로 그랬고, 나는 그걸 보고 "app-server 가 설정을 무시한다" 고
+// ★잘못 결론냈다★ — 무시한 게 아니라 다른 파일을 읽고 있었다.
+// exec 경로(runner.ts)는 원래 CODEX_HOME 을 넘긴다. app-server 경로만 빠져 있었다.
+
+import { appServerSpawnEnv } from "./appServerClient";
+import { defaultAppServerClientFactory } from "./appServerRunner";
+
+test("★CODEX_HOME 이 자식 env 로 간다★ — 없으면 그 팀원 설정이 통째로 안 걸린다", () => {
+  const env = appServerSpawnEnv("/home/dex/.codex-agents/dex", { PATH: "/usr/bin" });
+  expect(env.CODEX_HOME).toBe("/home/dex/.codex-agents/dex");
+  expect(env.PATH).toBe("/usr/bin"); // 나머지 환경은 그대로 물려준다
+});
+
+test("대조군 — codexHome 이 없으면 CODEX_HOME 을 새로 박지 않는다(호스트 기본값 그대로)", () => {
+  expect(appServerSpawnEnv(undefined, { PATH: "/usr/bin" }).CODEX_HOME).toBeUndefined();
+});
+
+test("★기본 팩토리가 그 턴 주인의 codexHome 을 실어 준다★ — 배선이 끊기면 위 함수가 맞아도 소용없다", () => {
+  const c = defaultAppServerClientFactory({ prompt: "p", agentId: "dex", codexHome: "/x/dex" } as never);
+  expect(c.codexHome).toBe("/x/dex");
+});
