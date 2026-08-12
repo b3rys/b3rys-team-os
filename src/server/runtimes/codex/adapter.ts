@@ -231,7 +231,10 @@ export async function runTurn(
       appendAuditFile(targetAgentId, "turn_completed_but_no_reply_sent", row.message_id, {
         thread_id: row.thread_id, chars: result.reply.length,
       });
-      recordRuntimeBlock(targetAgentId, `직전 턴(${row.message_id})의 답이 팀에 도착하지 않았다 — send.sh 미실행`);
+      // ★runtimeBlock 을 쓰지 않는다★ — 그 칸은 '런타임이 막혔다' 는 뜻이고
+      //   '성공 턴은 이전 블록을 지운다' 는 계약이 따로 있다(시험이 그걸 고정한다).
+      //   여기 쓰면 그 계약과 싸운다. 사실만 남기고 로그로 드러낸다.
+      console.error(`[codex] ${targetAgentId}: 턴은 끝났는데 ★답이 팀에 도착하지 않았다★ (thread=${row.thread_id}, msg=${row.message_id}, 본문 ${result.reply.length}자)`);
     }
     stores.artifactStore.record({
       agentId: targetAgentId,
