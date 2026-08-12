@@ -288,7 +288,7 @@ export function requestPermission(db: Database, op: PermissionOperation): { deci
   //   (codex 런타임: appServerPopup.sendApprovalToMemberRoom → 브리지가 버튼 처리).
   //   agent_id 가 없는 것 = 특정 팀원의 일이 아닌 시스템 작업 → op 방이 맞다.
   //   ★감사기록은 어느 쪽이든 남긴다★ — 아래 enqueue 만 건너뛴다(기록까지 빠지면 팀원 요청은 흔적이 없다).
-  if (op.agent_id) {
+  if (belongsToMemberRoom(op)) {
     appendPermissionAudit(db, { request_id: id, scope_key, op, target, decision: "requested", approver: null, provenance: op.provenance ?? {} });
     return { decision: "approval_required", reasons: [], request };
   }
@@ -307,6 +307,19 @@ export function requestPermission(db: Database, op: PermissionOperation): { deci
   });
   appendPermissionAudit(db, { request_id: id, scope_key, op, target, decision: "requested", approver: null, provenance: op.provenance ?? {} });
   return { decision: "approval_required", reasons: [], request };
+}
+
+/**
+ * ★이 승인이 어디에 뜨는가 — 판정은 여기 한 곳뿐이다.★ (빌 리뷰 2026-08-12)
+ *
+ * 팀 리드: "팀원들이 승인을 받을 때는 각자방에 떠야지. op방에 뜨는 건 시스템 알림종류야."
+ *
+ * 같은 판단이 두 곳에 있으면 ★한쪽만 고치고 '완료' 가 된다★ — 그러면 행이 두 방에 뜨거나
+ * 아무 데도 안 뜬다. 그리고 조용하다. (오늘 우리가 이 모양으로 세 번 데였다.)
+ * requestPermission 과 telegramCapture 가 ★둘 다 이 함수를 부른다.★
+ */
+export function belongsToMemberRoom(row: { agent_id: string | null } | { agent_id?: string | null }): boolean {
+  return Boolean(row.agent_id);
 }
 
 export function getPermissionRequest(db: Database, id: string): PermissionRequestRow | undefined {

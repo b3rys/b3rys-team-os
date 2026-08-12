@@ -14,7 +14,7 @@ import type { ApprovalRequest, ReviewDecision } from "./appServerClient";
 import { CodexApprovalCorrelationStore } from "./state";
 import { appendAudit } from "../../db/queries";
 import { readFileSync } from "node:fs";
-import { codexBridgePaths } from "./launcher";
+import { codexBridgePaths, resolveOwnerDmId } from "./launcher";
 
 /** ★Phase1 ③: 이 서버 프로세스 인스턴스 id — 재시작 감지용(옛 팝업을 새 프로세스가 새 turn에 재결합 금지).★ */
 export const PROCESS_INSTANCE = randomUUID();
@@ -765,6 +765,11 @@ export async function pollDecision(db: Database, requestId: string, ttlMs = POPU
     } catch {
       return "denied"; // ★fail-closed: 조회 에러 → 거절★
     }
+    // ★행이 스스로 만료를 말한다★ — 이 프로세스의 deadline 과 무관하게(재시작 후에도 유효).
+    if (status === "pending" && isExpiredRow(db, requestId)) {
+      try { expirePermissionRequest(db, requestId); } catch { /* best-effort */ }
+      return "denied";
+    }
     switch (status) {
       case "allowed_once": return "approved";
       case "allowed_always": return "approved_for_session";
@@ -782,6 +787,14 @@ export async function pollDecision(db: Database, requestId: string, ttlMs = POPU
     }
     await sleep(intervalMs);
   }
+}
+
+/** 행에 박힌 만료시각이 지났나. 컬럼이 없거나 값이 없으면 ★만료 아님★(폴링 deadline 이 받친다). */
+export function isExpiredRow(db: Database, requestId: string): boolean {
+  try {
+    const r = db.prepare("SELECT (expires_at IS NOT NULL AND datetime('now') > expires_at) AS gone FROM permission_request WHERE id = ?").get(requestId) as { gone?: number } | undefined;
+    return Boolean(r?.gone);
+  } catch { return false; }
 }
 
 /** 아직 pending 인 요청만 expired 로 닫는다(이미 결정된 것은 건드리지 않는다). */
@@ -829,7 +842,15 @@ export async function sendApprovalToMemberRoom(
   if (!token) {
     try { token = readFileSync(paths.tokenFile, "utf-8").trim(); } catch { return false; }
   }
-  const chatId = deps.chatId ?? paths.allowFrom.split(",")[0]?.trim();
+  // ★목적지는 '그 팀원 방' = 팀 리드와 그 팀원 봇의 1:1 DM.★
+  //   어느 방인지는 ★봇 토큰★ 이 정하고, 상대는 ★팀 리드 DM★ 이다.
+  //
+  //   전에는 allowFrom 의 첫 항목을 썼는데 ★그건 "누가 말 걸 수 있나" 인가 목록★ 이다(빌 리뷰 2026-08-12).
+  //   목록은 [팀리드 DM, 팀 그룹] 이라 ★팀 리드 DM 이 비면 첫 항목이 팀 그룹이 된다★ —
+  //   그러면 ★보안 질문이 단체방에 뜬다.★ 인가 목록을 목적지로 쓰면 안 된다.
+  //
+  //   모르면 ★보내지 않는다.★ 아무 방에나 띄우는 것보다 안 뜨는 게 낫다(fail-closed).
+  const chatId = deps.chatId ?? resolveOwnerDmId();
   if (!token || !chatId) return false;
 
   // ★간결하게★ — 사람이 폰에서 한눈에 보고 누른다. 무엇을 하려는지 한 줄, 그 아래 대상.
@@ -932,6 +953,12 @@ export async function requestApprovalPopup(db: Database, req: ApprovalRequest, a
       processInstance: PROCESS_INSTANCE,
     });
   } catch { /* best-effort */ }
+  // ★만료 시각을 행에 박는다★ — 기다리는 프로세스가 죽어도 행이 스스로 만료를 말한다(빌 리뷰).
+  try {
+    db.prepare("UPDATE permission_request SET expires_at = datetime('now', ?) WHERE id = ?")
+      .run(`+${Math.round(ttlMs / 1000)} seconds`, requestId);
+  } catch { /* best-effort — 컬럼이 없어도 폴링 deadline 이 받쳐준다 */ }
+
   // ★그 팀원 방에 띄운다.★ 실패해도 요청 행은 남으므로 op 목록에서 여전히 보인다(조용히 사라지지 않는다).
   const sent = await sendApprovalToMemberRoom(agentId, requestId, req);
   if (!sent) {

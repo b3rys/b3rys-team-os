@@ -85,9 +85,15 @@ export function migrate(db: Database): void {
        created_at TEXT NOT NULL DEFAULT (datetime('now')),
        decided_at TEXT,
        approver TEXT,
-       provenance_json TEXT
+       provenance_json TEXT,
+       -- ★만료를 행 자신이 말한다★ (빌 리뷰 2026-08-12): 전에는 기다리는 프로세스의 메모리에만
+       -- 있어서, 그 프로세스가 대기 중 재시작하면 행이 영원히 pending 으로 남았다.
+       expires_at TEXT
      )`,
   );
+  // 기존 DB 용 — 이미 있으면 무시.
+  try { db.exec("ALTER TABLE permission_request ADD COLUMN expires_at TEXT"); }
+  catch (e) { if (!String(e instanceof Error ? e.message : e).includes("duplicate column name")) throw e; }
   db.exec("CREATE INDEX IF NOT EXISTS idx_permission_request_status ON permission_request(status, created_at DESC)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_permission_request_scope ON permission_request(scope_key, status, created_at DESC)");
   db.exec(

@@ -24,7 +24,7 @@ import { BODY_MAX_CHARS, buildDedupeKey } from "../../shared/envelopeSchema";
 import { getCaptureToken, isMcpEnabled, isRouterEnabled, getCaptureGroupId, getLocale, setMcpEnabled } from "../lib/captureConfig";
 import { pick, type Locale } from "../lib/i18n";
 import { rememberCaptureNonBotSender, rememberDiscoveredGroup } from "../lib/telegramLeadDetection";
-import { decidePermissionRequest, getPermissionRequest, listPermissionRequests } from "../lib/permissionGate";
+import { belongsToMemberRoom, decidePermissionRequest, getPermissionRequest, listPermissionRequests } from "../lib/permissionGate";
 import { activeOfficialMemberCount, isTeamOfficialMember, MAX_OFFICIAL_TEAM_MEMBERS } from "../lib/agentMembership";
 import { PUBLIC_BUILD } from "../routes/settings";
 
@@ -563,7 +563,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     //   여기 남겨두면 같은 승인이 ★두 방에 뜬다.★
     const pendingPerms = listPermissionRequests(deps.db, "pending")
       .filter((r) => !approvalPermIds.has(r.id))
-      .filter((r) => !r.agent_id);
+      .filter((r) => !belongsToMemberRoom(r)); // ★판정은 permissionGate 한 곳★ (두 곳이면 한쪽만 고친다)
     const execNote = isExecutionEnabled() ? pick(locale, "탭하면 즉시 실행됩니다.", "Tapping runs it immediately.") : pick(locale, "실행 OFF — 탭하면 승인만(실행 안 함).", "Execution OFF — tapping only approves (does not run).");
     if (!pending.length && !pendingPerms.length) {
       await sendViaTeamOp(pick(locale, `🔐 ${owner} 승인 대기 — 없음.\n\n등록 액션: `, `🔐 ${owner} pending approvals — none.\n\nRegistered actions: `) + listActions().map((a) => a.key).join(", "), replyTo, chatId);
@@ -625,7 +625,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     //   여기 남겨두면 같은 승인이 ★두 방에 뜬다.★
     const pendingPerms = listPermissionRequests(deps.db, "pending")
       .filter((r) => !approvalPermIds.has(r.id))
-      .filter((r) => !r.agent_id);
+      .filter((r) => !belongsToMemberRoom(r)); // ★판정은 permissionGate 한 곳★ (두 곳이면 한쪽만 고친다)
     const permButtons = (id: string) => ({ inline_keyboard: [[
       { text: pick(locale, "한번 허용", "Allow once"), callback_data: `pg1:${id}` },
       { text: pick(locale, "항상 허용", "Always allow"), callback_data: `pga:${id}` },

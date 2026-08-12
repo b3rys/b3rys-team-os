@@ -291,3 +291,46 @@ test("이미 결정된 요청은 만료가 덮어쓰지 않는다", () => {
   expect(expGet(db, id)?.status).toBe("allowed_once");
   db.close();
 });
+
+// ── ★목적지는 인가 목록이 아니다★ (빌 리뷰 2026-08-12) ──
+//
+// allowFrom = "누가 이 봇에 말 걸 수 있나" 인가 목록이고 [팀리드 DM, 팀 그룹] 순서다.
+// 그걸 목적지로 쓰면 ★팀 리드 DM 이 비었을 때 첫 항목이 팀 그룹★ 이 되어
+// ★보안 질문이 단체방에 뜬다.★ 목적지는 팀 리드 DM 이고, 모르면 보내지 않는다.
+
+test("★인가 목록을 목적지로 쓰지 않는다★ — 팀 그룹으로 새면 보안 질문이 단체방에 뜬다", async () => {
+  const sent: Record<string, unknown>[] = [];
+  const fetchFn = (async (_u: string, init: { body: string }) => { sent.push(JSON.parse(init.body)); return { ok: true } as Response; }) as unknown as typeof fetch;
+  // chatId 를 명시하지 않으면 팀 리드 DM 으로 간다(인가 목록 첫 항목이 아니라).
+  const { resolveOwnerDmId } = await import("./launcher");
+  const owner = resolveOwnerDmId();
+  const ok = await sendApprovalToMemberRoom("dex", "prm_x1", { method: "m", params: { command: "ls" } }, { token: "T", fetchFn });
+  if (owner) {
+    expect(ok).toBe(true);
+    expect(String(sent[0]!.chat_id)).toBe(String(owner));
+  } else {
+    expect(ok).toBe(false); // ★모르면 안 보낸다★
+    expect(sent).toHaveLength(0);
+  }
+});
+
+test("★재시작해도 만료가 유효하다★ — 만료가 대기 프로세스 메모리에만 있으면 행이 영원히 pending", async () => {
+  // 빌 리뷰: 서버가 대기 중 재시작하면 아무도 그 행을 안 닫는다. 행이 스스로 말해야 한다.
+  const db = new ApprDb(":memory:"); apprMigrate(db);
+  const id = expReq(db, { agent: { id: "dex", workspace_path: "/tmp/ws" }, agent_id: "dex", runtime: "codex", action: "shell", command: "echo hi", cwd: "/tmp/ws" } as never).request!.id;
+  db.run("update permission_request set expires_at = datetime('now','-1 second') where id=?", [id]);
+  // ttl 을 길게 줘도(=이 프로세스는 아직 안 기다렸다) ★행의 만료가 이긴다★
+  const decision = await pollDecision(db, id, 60_000, 5);
+  expect(decision).toBe("denied");
+  expect(expGet(db, id)?.status).toBe("expired");
+  db.close();
+});
+
+test("대조군 — 만료 전이면 계속 기다린다(아무거나 만료로 읽으면 승인이 죽는다)", async () => {
+  const db = new ApprDb(":memory:"); apprMigrate(db);
+  const id = expReq(db, { agent: { id: "dex", workspace_path: "/tmp/ws" }, agent_id: "dex", runtime: "codex", action: "shell", command: "echo hi", cwd: "/tmp/ws" } as never).request!.id;
+  db.run("update permission_request set expires_at = datetime('now','+60 seconds') where id=?", [id]);
+  setTimeout(() => db.run("update permission_request set status='allowed_once' where id=?", [id]), 20);
+  expect(await pollDecision(db, id, 5_000, 5)).toBe("approved");
+  db.close();
+});

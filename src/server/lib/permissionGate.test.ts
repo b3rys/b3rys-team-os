@@ -216,3 +216,12 @@ test("★팀원 요청도 감사기록은 남는다★ — op 대기열만 건�
   expect(audits).toBeGreaterThan(0);
   db.close();
 });
+
+// ── ★라우팅 판정은 한 곳뿐★ (빌 리뷰 2026-08-12) ──
+import { belongsToMemberRoom } from "./permissionGate";
+
+test("★팀원 것과 시스템 것을 가르는 판정 하나★ — 두 곳에 있으면 한쪽만 고치고 완료가 된다", () => {
+  expect(belongsToMemberRoom({ agent_id: "dex" })).toBe(true);
+  expect(belongsToMemberRoom({ agent_id: null })).toBe(false);
+  expect(belongsToMemberRoom({})).toBe(false); // 필드 자체가 없어도 시스템 취급(op 방)
+});
