@@ -151,12 +151,27 @@ dex 가 실제 URL 을 물고 왔고(`learn.chatgpt.com/docs/...`), 못 찾은 �
 | 항목 | 0.144.6 | 0.147.0 |
 |---|---|---|
 | `[permissions.*]` 프로파일 + 승인 escalation | **양립 불가** | **양립 불가** |
-| 명령 이름 차단(`rules.prefix_rules`) | 없음 | **없음**(문서엔 있으나 미출시) |
+| 명령 이름 차단(`rules.prefix_rules`) | 없음 | **user config 에는 없음 / ★관리자 계층에는 있음★** |
 | 경로·네트워크 통제 | 있음 | 있음 |
 
 **측정 방법**: `--strict-config exec` 으로만 설정 검증이 된다. `debug`·`mcp`·`app-server`·`--help` 는
 **모르는 필드를 그냥 통과시킨다** — 여기서 재면 "된다" 는 거짓 통과가 나온다. **대조군(없는 키)이
 실패하는 것을 먼저 확인하고 재라.** 오늘 이걸로 네 번 뒤집혔다.
+
+### ★정정 — 명령 차단은 "없는" 게 아니라 "다른 계층" 이다★ (dex 조사, 2026-08-12)
+
+내가 `user config.toml` 에서 거부되는 것만 보고 **"codex 엔 명령 차단이 없다"** 고 결론냈다. **틀렸다.**
+
+```
+user   ~/.codex/config.toml          → rules 거부 (여기만 봤다)
+★admin /etc/codex/requirements.toml★ → rules.prefix_rules 가 사는 곳
+                                       decision = "prompt" | "forbidden"
+```
+바이너리에 `/etc/codex/requirements.toml` 문자열이 실재한다(현재 그 폴더는 없음).
+= **`rm`·`sudo` 를 이름으로 막는 것은 가능하다.** 다만 `/etc` 라 설치에 관리자 권한이 필요하다.
+
+**dex 가 자기 측정을 스스로 정정하고 대조군까지 붙여 찾아냈다** — 처음엔 `debug models`(설정 미검사)로
+재서 틀렸고, 지적받은 뒤 `--strict-config exec` + 대조군으로 다시 재서 계층 차이를 특정했다.
 
 **현재 선택**: 프로파일 유지(비밀 차단) + 승인 못 씀. 되돌릴 수 없는 것이 되돌릴 수 있는 것보다 무겁다.
 
