@@ -13,6 +13,8 @@ import { requestPermission, getPermissionRequest, type PermissionOperation } fro
 import type { ApprovalRequest, ReviewDecision } from "./appServerClient";
 import { CodexApprovalCorrelationStore } from "./state";
 import { appendAudit } from "../../db/queries";
+import { readFileSync } from "node:fs";
+import { codexBridgePaths } from "./launcher";
 
 /** ★Phase1 ③: 이 서버 프로세스 인스턴스 id — 재시작 감지용(옛 팝업을 새 프로세스가 새 turn에 재결합 금지).★ */
 export const PROCESS_INSTANCE = randomUUID();
@@ -794,6 +796,81 @@ export function oversizedForReview(req: ApprovalRequest): number | null {
 }
 
 /**
+ * ★승인 요청을 그 팀원 방에 띄운다.★
+ *
+ * 팀 리드 2026-08-12: "팀원들이 승인을 받을 때는 각자방에 떠야지. op방에 뜨는 건 시스템 알림종류야."
+ * 전에는 op 방으로 갔다 — 실측상 permission_request 를 만든 팀원은 codex 런타임뿐이었고(다른 팀원 0건),
+ * 그건 원래 사용성이 아니라 우리가 얹은 것이었다.
+ *
+ * 그 팀원 봇으로 보낸다(브리지와 같은 봇). 보내는 것은 폴링과 충돌하지 않는다 —
+ * getUpdates 만 한 프로세스여야 하므로 버튼 처리는 브리지가 한다.
+ */
+export async function sendApprovalToMemberRoom(
+  agentId: string,
+  requestId: string,
+  req: ApprovalRequest,
+  deps: { token?: string; chatId?: string; fetchFn?: typeof fetch } = {},
+): Promise<boolean> {
+  const paths = codexBridgePaths(agentId);
+  let token = deps.token;
+  if (!token) {
+    try { token = readFileSync(paths.tokenFile, "utf-8").trim(); } catch { return false; }
+  }
+  const chatId = deps.chatId ?? paths.allowFrom.split(",")[0]?.trim();
+  if (!token || !chatId) return false;
+
+  // ★간결하게★ — 사람이 폰에서 한눈에 보고 누른다. 무엇을 하려는지 한 줄, 그 아래 대상.
+  const { title, detail } = approvalSummary(req);
+  const text = detail ? `🔐 ${title}\n\n<code>${escapeHtml(detail)}</code>` : `🔐 ${title}`;
+  const doFetch = deps.fetchFn ?? fetch;
+  try {
+    const res = await doFetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: [
+          [{ text: "한번 허용", callback_data: `pg1:${requestId}` },
+           { text: "항상 허용", callback_data: `pga:${requestId}` }],
+          [{ text: "거절", callback_data: `pgd:${requestId}` }],
+        ] },
+      }),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+/**
+ * 팝업 문구 — ★무엇을 하려는지 한 줄(title) + 그 대상(detail).★
+ * 폰에서 한눈에 읽혀야 한다. 긴 것은 자른다(안 자르면 버튼이 화면 밖으로 밀린다).
+ */
+export function approvalSummary(req: ApprovalRequest): { title: string; detail?: string } {
+  const p = (req.params ?? {}) as Record<string, unknown>;
+  const cmd = p.command;
+  const cmdText = typeof cmd === "string" ? cmd : Array.isArray(cmd) ? cmd.join(" ") : null;
+  if (cmdText) return { title: "명령을 실행할까요?", detail: clip(cmdText) };
+
+  const changes = p.fileChanges;
+  if (changes && typeof changes === "object") {
+    const files = Object.keys(changes as Record<string, unknown>);
+    const head = files.slice(0, 3).join("\n");
+    return { title: `파일 ${files.length}개를 고칠까요?`, detail: clip(files.length > 3 ? `${head}\n…외 ${files.length - 3}개` : head) };
+  }
+  if (typeof p.reason === "string") return { title: "권한을 요청합니다", detail: clip(p.reason) };
+  return { title: "승인이 필요합니다", detail: req.method };
+}
+
+function clip(s: string, max = 300): string {
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
  * M5.3 진입점 — ask-tier 승인요청을 팝업으로 처리. onApproval에서 needsApproval일 때 호출.
  * ★반환 전까지 codex 턴이 대기하므로, 상위(runner)는 이 대기 동안 turn timeout을 연기해야 한다(M5.3 배선).★
  */
@@ -841,6 +918,11 @@ export async function requestApprovalPopup(db: Database, req: ApprovalRequest, a
       processInstance: PROCESS_INSTANCE,
     });
   } catch { /* best-effort */ }
+  // ★그 팀원 방에 띄운다.★ 실패해도 요청 행은 남으므로 op 목록에서 여전히 보인다(조용히 사라지지 않는다).
+  const sent = await sendApprovalToMemberRoom(agentId, requestId, req);
+  if (!sent) {
+    try { appendAudit(db, agentId, "codex_approval_room_send_failed", req.method, { request_id: requestId }); } catch { /* best-effort */ }
+  }
   const decision = await pollDecision(db, requestId, ttlMs);
   // ★결정을 CAS로 마감(중복 버튼·요청 불일치·orphan 거부) 후 반환. 실행 직전 변경 검출은 아님 — 위 갭 주석 참조.★
   return finalizeApprovalDelivery(store, requestId, opHash, decision);

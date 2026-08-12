@@ -576,6 +576,82 @@ function tgReact(token: string): NonNullable<BridgeDeps["reactMessage"]> {
 interface TgUpdate {
   update_id: number;
   message?: { message_id: number; chat: { id: number }; text?: string };
+  callback_query?: TgCallbackQuery;
+}
+
+interface TgCallbackQuery {
+  id: string;
+  data?: string;
+  from?: { id: number };
+  message?: { message_id: number; chat: { id: number } };
+}
+
+/**
+ * ★승인 버튼을 이 팀원 방에서 처리한다.★ (팀 리드 2026-08-12: "팀원방에 그냥 띄우면 되잖아")
+ *
+ * 요청 자체는 서버가 이 봇으로 띄운다(appServerPopup.sendApprovalToMemberRoom).
+ * getUpdates 는 봇당 한 프로세스만 가능하므로, 폴링을 하는 ★브리지가 콜백을 맡는다.★
+ */
+export async function handleApprovalCallback(
+  token: string,
+  cb: TgCallbackQuery,
+  allowFrom: Set<number>,
+  deps: { dbPath?: string; fetchFn?: typeof fetch } = {},
+): Promise<"decided" | "ignored" | "stale" | "unauthorized"> {
+  const doFetch = deps.fetchFn ?? fetch;
+  const answer = (text: string, alert = false) =>
+    doFetch(`${TG_API}/bot${token}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ callback_query_id: cb.id, text, show_alert: alert }),
+    }).catch(() => undefined);
+
+  const m = /^(pg1|pga|pgd):((?:apr|prm)_[a-f0-9]+)$/.exec(cb.data ?? "");
+  if (!m) return "ignored";
+
+  // 발신자 게이트 — 메시지와 같은 규칙(fail-closed).
+  const fromId = cb.from?.id;
+  if (fromId === undefined || !isAllowedChat(allowFrom, fromId)) {
+    await answer("권한 없음", true);
+    return "unauthorized";
+  }
+
+  const { openDb } = await import("../../db/migrate");
+  const { decidePermissionRequest, getPermissionRequest } = await import("../../lib/permissionGate");
+  const db = openDb(deps.dbPath ?? `${process.env.B3OS_REPO_ROOT ?? "."}/team.db`);
+  try {
+    const id = m[2]!;
+    const row = getPermissionRequest(db, id);
+    // ★이미 지난 요청은 지난 대로 알린다★ — 눌렀는데 아무 반응이 없으면 사람은 다시 누른다.
+    if (!row || row.status !== "pending") {
+      await answer(row ? `이미 처리됨(${row.status})` : "만료되었거나 없는 요청입니다");
+      if (cb.message) {
+        await doFetch(`${TG_API}/bot${token}/editMessageReplyMarkup`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ chat_id: cb.message.chat.id, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } }),
+        }).catch(() => undefined);
+      }
+      return "stale";
+    }
+    const decision = m[1] === "pg1" ? "allow_once" : m[1] === "pga" ? "allow_always" : "deny";
+    const res = decidePermissionRequest(db, id, decision, {
+      approver: "GD",
+      provenance: { surface: "telegram_member_room", approver_telegram_id: fromId, callback_data: cb.data },
+    });
+    if (!res.ok) { await answer(res.error ?? "실패", true); return "ignored"; }
+    await answer(decision === "allow_once" ? "한번 허용" : decision === "allow_always" ? "항상 허용" : "거절");
+    if (cb.message) {
+      await doFetch(`${TG_API}/bot${token}/editMessageReplyMarkup`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ chat_id: cb.message.chat.id, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } }),
+      }).catch(() => undefined);
+    }
+    return "decided";
+  } finally {
+    try { db.close(); } catch { /* best-effort */ }
+  }
 }
 
 /** 첫 getUpdates 성공 후 ready marker를 원자적으로 쓴다. marker 존재 = 브리지가 실제 Telegram polling에 진입. */
@@ -674,7 +750,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
   }
   for (;;) {
     try {
-      const res = await fetch(`${TG_API}/bot${token}/getUpdates?timeout=30&offset=${offset}&allowed_updates=["message"]`);
+      const res = await fetch(`${TG_API}/bot${token}/getUpdates?timeout=30&offset=${offset}&allowed_updates=["message","callback_query"]`);
       const j = (await res.json()) as { ok?: boolean; result?: TgUpdate[] };
       if (j.ok === true && !readyMarked) {
         readyMarked = writeBridgeReadyMarker(pidFile);
@@ -682,6 +758,9 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
       }
       for (const u of j.result ?? []) {
         offset = u.update_id + 1;
+        // ★승인 버튼은 이 방에서 처리한다.★ 요청은 서버가 이 봇으로 띄우고, 누르는 것은 여기서 받는다
+        //   (getUpdates 는 봇당 한 프로세스만 가능하므로 폴링을 하는 브리지가 콜백도 맡는다).
+        if (u.callback_query) { await handleApprovalCallback(token, u.callback_query, allowFrom); continue; }
         const text = u.message?.text;
         const chatId = u.message?.chat.id;
         const messageId = u.message?.message_id;

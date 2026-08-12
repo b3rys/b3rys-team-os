@@ -575,7 +575,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
             `⚠ 권한 요청\n${pr ? `${pr.runtime}${pr.agent_id ? `/${pr.agent_id}` : ""} · ${pr.action}\n${pr.target}` : r.title}`,
             `⚠ Permission request\n${pr ? `${pr.runtime}${pr.agent_id ? `/${pr.agent_id}` : ""} · ${pr.action}\n${pr.target}` : r.title}`),
           reply_markup: { inline_keyboard: [[
-            { text: pick(locale, "1회 허용", "Allow once"), callback_data: `pg1:${r.id}` },
+            { text: pick(locale, "한번 허용", "Allow once"), callback_data: `pg1:${r.id}` },
             { text: pick(locale, "항상 허용", "Always allow"), callback_data: `pga:${r.id}` },
             { text: pick(locale, "거절", "Deny"), callback_data: `pgd:${r.id}` },
           ]] },
@@ -599,7 +599,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
           `🛂 권한 요청\n${r.runtime}${r.agent_id ? `/${r.agent_id}` : ""} · ${r.action}\n${r.target}`,
           `🛂 Permission request\n${r.runtime}${r.agent_id ? `/${r.agent_id}` : ""} · ${r.action}\n${r.target}`),
         reply_markup: { inline_keyboard: [[
-          { text: pick(locale, "1회 허용", "Allow once"), callback_data: `pg1:${r.id}` },
+          { text: pick(locale, "한번 허용", "Allow once"), callback_data: `pg1:${r.id}` },
           { text: pick(locale, "항상 허용", "Always allow"), callback_data: `pga:${r.id}` },
           { text: pick(locale, "거절", "Deny"), callback_data: `pgd:${r.id}` },
         ]] },
@@ -617,7 +617,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     const approvalPermIds = new Set(pending.map((r) => approvalParams(r).permission_request_id).filter(Boolean));
     const pendingPerms = listPermissionRequests(deps.db, "pending").filter((r) => !approvalPermIds.has(r.id));
     const permButtons = (id: string) => ({ inline_keyboard: [[
-      { text: pick(locale, "1회 허용", "Allow once"), callback_data: `pg1:${id}` },
+      { text: pick(locale, "한번 허용", "Allow once"), callback_data: `pg1:${id}` },
       { text: pick(locale, "항상 허용", "Always allow"), callback_data: `pga:${id}` },
       { text: pick(locale, "거절", "Deny"), callback_data: `pgd:${id}` },
     ]] });
@@ -786,7 +786,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
         return;
       }
       if (approval) setApprovalStatus(deps.db, approval.id, decision === "deny" ? "rejected" : "approved");
-      const label = decision === "allow_once" ? pick(locale, "1회 허용", "Allowed once") : decision === "allow_always" ? pick(locale, "항상 허용", "Always allowed") : pick(locale, "거절", "Denied");
+      const label = decision === "allow_once" ? pick(locale, "한번 허용", "Allowed once") : decision === "allow_always" ? pick(locale, "항상 허용", "Always allowed") : pick(locale, "거절", "Denied");
       await tg("answerCallbackQuery", { callback_query_id: cb.id, text: label });
       if (mid) await tg("editMessageText", { chat_id: chatId, message_id: mid, text: `✅ ${label}\n${row.runtime}${row.agent_id ? `/${row.agent_id}` : ""} · ${row.action}\n${row.target}` });
       return;

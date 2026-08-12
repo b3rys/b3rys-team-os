@@ -79,11 +79,11 @@ describe("codex launcher (M4) — 순수 렌더러", () => {
     expect(cfg).not.toContain("trust_level");
   });
 
-  test("경계를 codex 가 스스로 치게 한다 — 사람에게 묻지 않고(never) 프로파일 밖은 거절", () => {
+  test("★묻는 게 기본이다★ — never 로 막으면 옮겨온 게 아니라 기능을 뺀 것이다", () => {
     const cfg = renderLockedDownCodexConfig({ workdir: "/tmp/cody workspace" });
-    // ★"on-request" 면 밖으로 나갈 때마다 사람을 부른다★ — 그 물음이 팀 리드 방까지 올라갔던 원인.
-    expect(cfg).toContain('approval_policy = "never"');
-    expect(cfg).not.toContain('approval_policy = "on-request"');
+    // 터미널에서 codex 를 쓰면 경계 밖은 물어보고 사람이 누른다. 그 물음을 팀원 방으로 옮기는 게 우리 일.
+    expect(cfg).toContain('approval_policy = "on-request"');
+    expect(cfg).not.toContain('approval_policy = "never"');
     // 판정 주체가 이 프로파일이다. 이름이 없으면 프로파일이 통째로 안 걸린다.
     expect(cfg).toContain(`default_permissions = "${MEMBER_PERMISSION_PROFILE}"`);
     expect(cfg).toContain(`[permissions.${MEMBER_PERMISSION_PROFILE}]`);
