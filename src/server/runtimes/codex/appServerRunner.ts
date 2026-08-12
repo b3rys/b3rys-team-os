@@ -111,6 +111,11 @@ export async function runViaAppServer(
     if (db && threadId && r.turnId) {
       try { new CodexApprovalCorrelationStore(db).expireTurn(threadId, r.turnId); } catch { /* best-effort */ }
     }
+    // ★정상 종료가 아니면 그 프로세스를 버린다.★ (2026-08-12 실측)
+    //   상주로 바꾼 뒤 `appserver_interrupted` 가 났다 — 앞 턴의 서브에이전트가 아직 도는
+    //   프로세스에 새 턴이 들어가면 서로 간섭한다. 재사용의 이득보다 ★턴 하나를 통째로 잃는★ 손해가 크다.
+    //   완료된 턴만 프로세스를 남긴다(그 경우에만 서브가 안전하게 남는다).
+    if (pooled && r.status !== "completed") dropClient(opts.agentId);
     const ok = r.status === "completed" && r.finalText.trim().length > 0;
     // ★#8 픽스: 실패면 detail에 실제 사유(에러 notification/stderr tail) 반영 — rate-limit 진단 가능.★
     const detail = ok ? "appserver_completed" : `appserver_${r.status}${r.detail ? `: ${r.detail.slice(0, 300)}` : ""}`;

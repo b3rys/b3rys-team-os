@@ -57,3 +57,18 @@ test("★전부 정리★ — 안 하면 좀비 프로세스가 쌓인다", () =
 test("없는 팀원을 drop 해도 터지지 않는다", () => {
   expect(() => dropClient("nobody")).not.toThrow();
 });
+
+// ★비정상 종료 턴은 프로세스를 버린다★ (2026-08-12 실측)
+//
+// 상주로 바꾼 직후 `appserver_interrupted` 가 났다 — 앞 턴의 서브에이전트가 아직 도는
+// 프로세스에 새 턴이 들어가면 서로 간섭한다. 재사용 이득보다 ★턴을 통째로 잃는★ 손해가 크다.
+// 그래서 ★완료된 턴만★ 프로세스를 남긴다.
+
+test("★버린 프로세스는 다음에 재사용되지 않는다★", () => {
+  const first = acquireClient("dex", () => new Fake());
+  dropClient("dex"); // 비정상 종료로 폐기했다고 가정
+  const second = acquireClient("dex", () => new Fake());
+  expect(second.reused).toBe(false);
+  expect(second.client).not.toBe(first.client);
+  expect((first.client as Fake).isClosed).toBe(true); // 실제로 닫혔다(좀비 방지)
+});
