@@ -483,21 +483,12 @@ test("★cwd·환경변수와 무관하게 저장소의 team.db 를 가리킨다
 // 하나도 안 붙어 있었다(중간 개입·상주·서브에이전트 생존·승인창은 전부 버스 경로에만).
 import { defaultBridgeCaller } from "./bridge";
 
-test("★플래그가 켜지면 app-server 로 간다★ — 두 길이 갈라지면 한쪽만 좋아진다", () => {
+test("★app-server 하나뿐이다★ — 플래그로 갈라두면 한쪽만 좋아지고 다른 쪽은 조용히 뒤처진다", () => {
+  // 팀 리드 2026-08-12: "exec 방식은 deprecate 해. 자꾸 fallback 이런걸로 유지하지 마."
+  // 폴백은 ★말은 통하지만 기능이 사라진 상태★ 이고, 조용해서 아무도 모른다.
   const saved = process.env.B3OS_CODEX_APPSERVER;
   try {
-    process.env.B3OS_CODEX_APPSERVER = "1";
-    expect(typeof defaultBridgeCaller()).toBe("function"); // 준비 실패해도 함수는 나온다(폴백)
-  } finally {
-    if (saved === undefined) delete process.env.B3OS_CODEX_APPSERVER;
-    else process.env.B3OS_CODEX_APPSERVER = saved;
-  }
-});
-
-test("대조군 — 플래그가 꺼져 있으면 옛 경로 그대로(강제 전환하지 않는다)", () => {
-  const saved = process.env.B3OS_CODEX_APPSERVER;
-  try {
-    delete process.env.B3OS_CODEX_APPSERVER;
+    delete process.env.B3OS_CODEX_APPSERVER; // 플래그가 없어도 app-server 로 간다
     expect(typeof defaultBridgeCaller()).toBe("function");
   } finally {
     if (saved !== undefined) process.env.B3OS_CODEX_APPSERVER = saved;

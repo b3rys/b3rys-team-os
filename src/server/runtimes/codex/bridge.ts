@@ -591,21 +591,19 @@ interface TgCallbackQuery {
 }
 
 /**
- * ★이 브리지가 쓸 두뇌.★ app-server 를 기본으로 하고, 꺼져 있으면 옛 exec 경로로 떨어진다.
+ * ★이 브리지가 쓸 두뇌 — app-server 하나뿐이다.★ (팀 리드 2026-08-12)
  *
- * db 가 필요한 이유 — 승인창(팀원 방 팝업)이 그 db 에 요청 행을 만든다.
- * 열지 못하면 승인 없는 exec 경로로 가는 편이 낫다(그 자리에서 죽는 것보다).
+ * > "그게 무슨 fallback 이야. 기능을 퇴보시키는 거지.. app server 로 돌게 해야지.
+ * >  exec 방식은 deprecate 해. 자꾸 fallback 이런걸로 유지하지 마."
+ *
+ * 전에는 준비에 실패하면 `codex exec` 로 떨어뜨렸다. 그건 ★말은 통하지만 기능이 사라진 상태★ 다 —
+ * 중간 개입도, 서브에이전트 생존도, 승인창도 없다. 그리고 ★조용해서 아무도 모른다.★
+ * 그래서 떨어뜨리지 않는다. 준비가 안 되면 ★그 자리에서 시끄럽게 실패★ 시킨다.
  */
 export function defaultBridgeCaller(): (o: CodexTurnOptions) => Promise<CodexTurnResult> {
-  if (process.env.B3OS_CODEX_APPSERVER !== "1") return (o) => runCodexTurn(o);
-  try {
-    const { openDb } = require("../../db/migrate") as typeof import("../../db/migrate");
-    const { makeAppServerCaller } = require("./appServerRunner") as typeof import("./appServerRunner");
-    return makeAppServerCaller(openDb(defaultTeamDbPath()));
-  } catch (e) {
-    console.error(`[codex-bridge] app-server caller 준비 실패 — exec 경로로 간다: ${e instanceof Error ? e.message : e}`);
-    return (o) => runCodexTurn(o);
-  }
+  const { openDb } = require("../../db/migrate") as typeof import("../../db/migrate");
+  const { makeAppServerCaller } = require("./appServerRunner") as typeof import("./appServerRunner");
+  return makeAppServerCaller(openDb(defaultTeamDbPath()));
 }
 
 /**

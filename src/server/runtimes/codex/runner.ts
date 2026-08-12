@@ -136,6 +136,15 @@ export function redactPromptArg(args: string[]): string[] {
 /**
  * Codex 한 턴 실행(헤드리스). 답 텍스트 + sessionId 반환. 발신은 호출자(어댑터) 책임.
  */
+/**
+ * ★DEPRECATED — 새 경로에서 쓰지 마라.★ (팀 리드 2026-08-12: "exec 방식은 deprecate 해")
+ *
+ * `codex exec` 는 한 번 부르고 죽는다. 그래서 ★중간 개입도, 서브에이전트 생존도, 승인창도 없다.★
+ * app-server 가 안 되면 이쪽으로 떨어뜨리고 싶어지는데 — **그게 기능 퇴보다.**
+ * 팀 리드 비유 그대로: *"클로드 채널 안 되면 exec 로 할거야?"* 안 된다. **고쳐야 한다.**
+ *
+ * 남겨두는 이유는 하나 — 아직 이 함수를 부르는 옛 시험·도구가 있다. 제품 경로에서는 쓰지 않는다.
+ */
 export async function runCodexTurn(opts: CodexTurnOptions): Promise<CodexTurnResult> {
   const started = Date.now();
   const sandbox = opts.sandbox ?? "read-only";

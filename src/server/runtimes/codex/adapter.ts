@@ -354,7 +354,9 @@ export function makeCodexAdapter(
   // ★M6: B3OS_CODEX_APPSERVER=1 이면 app-server 런타임 사용(중간 인터럽트/steer+승인팝업 기반).★
   // 롤아웃 스위치(폴백 아님 — GD 방침): 검증 전엔 exec, 검증 후 flag on. deps.callCodex가 최우선(테스트).
   // ★M5.3: flag on이면 db 주입한 app-server caller(ask→GD 팝업). flag off=exec. deps.callCodex 최우선(테스트).★
-  const defaultCaller = process.env.B3OS_CODEX_APPSERVER === "1" ? makeAppServerCaller(db) : runCodexTurn;
+  // ★app-server 하나뿐이다.★ (팀 리드 2026-08-12: "exec 방식은 deprecate 해")
+  //   플래그로 갈라두면 ★한쪽만 좋아지고 다른 쪽은 조용히 뒤처진다★ — 실제로 그랬다.
+  const defaultCaller = makeAppServerCaller(db);
   const callCodex = deps.callCodex ?? defaultCaller;
   const stores = {
     sessionStore: deps.sessionStore ?? new CodexSessionStore(db),
