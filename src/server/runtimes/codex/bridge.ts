@@ -647,6 +647,23 @@ export async function handleApprovalCallback(
       return "stale";
     }
     const decision = m[1] === "pg1" ? "allow_once" : m[1] === "pga" ? "allow_always" : "deny";
+
+    // ★'항상 허용' 은 codex 설정 파일에 쓴다.★ (팀 리드 2026-08-12: "설정파일에 쓰면 되잖아")
+    //   우리 DB 에 영구 권한을 쌓지 않는다 — 그건 취소 경로가 없었다. 설정은 사람이 열어서 지울 수 있다.
+    if (decision === "allow_always") {
+      const target = (row as { target?: string }).target;
+      if (target) {
+        try {
+          const { addWritableRoot } = await import("./persistAlwaysAllow");
+          const { codexBridgePaths } = await import("./launcher");
+          const agentId = (row as { agent_id?: string }).agent_id ?? process.env.CODEX_AGENT_ID ?? "";
+          if (agentId) {
+            const r = addWritableRoot(`${codexBridgePaths(agentId).codexHome}/config.toml`, target);
+            console.log(`[codex-bridge] 항상 허용 → 설정에 기록: ${r.root} (${r.changed ? "추가" : "이미 있음"})`);
+          }
+        } catch (e) { console.error(`[codex-bridge] 설정 기록 실패(승인 자체는 진행): ${e instanceof Error ? e.message : e}`); }
+      }
+    }
     const res = decidePermissionRequest(db, id, decision, {
       approver: "GD",
       provenance: { surface: "telegram_member_room", approver_telegram_id: fromId, callback_data: cb.data },
