@@ -79,6 +79,8 @@ test("★봉투가 '보내야 말한 것' 을 명시하고 실제 명령을 준�
 
   const prompt = b.toPrompt(env);
   expect(prompt).toContain("delivered only by running"); // 안 보내면 전달 안 된다는 걸 말해야 한다
+  // ★중간 메모로 끝내면 안 된다★ — 착수 확인만 보내고 결과를 안 보낸 실측 사례가 있다
+  expect(prompt).toContain("Interim notes do not count");
   // ★같은 명령이 두 번 나오면 안 된다★ — JSON 에도 넣으면 중복이다(팀 리드 지적)
   expect(prompt.split("send.sh").length - 1).toBe(1);
 });

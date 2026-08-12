@@ -78,7 +78,10 @@ export class CodexTurnEnvelopeBuilder {
       //       명령이 문장 꼬리에 붙어 읽힌다.
       //   후: 무엇을 하고(answer) → 그 다음 무엇을 해야 전달되는지(deliver by running)를 순서대로,
       //       명령은 ★따로 한 줄★ 로 둔다(모델이 그대로 복사해 쓰기 쉽다).
-      "Answer the request above. Your reply is delivered only by running this command:",
+      // ★중간 메모는 답이 아니다★ — 실측 2026-08-12: dex 가 착수 확인만 보내고 118초 일한 뒤
+      //   최종 결과를 안 보냈다. 한 번 보냈으니 "보냈다" 로 여긴 것으로 보인다.
+      "Answer the request above. Your reply is delivered only by running this command.",
+      "Interim notes do not count — run it again at the end with your final answer:",
       howToReply,
     ].join("\n");
   }
