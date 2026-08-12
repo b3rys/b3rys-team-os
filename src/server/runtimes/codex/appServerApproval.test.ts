@@ -142,18 +142,22 @@ import { Database as ApprDb } from "bun:sqlite";
 import { migrate as apprMigrate } from "../../db/migrate";
 import { runViaAppServer as runApprServer } from "./appServerRunner";
 
-/** codex 가 승인 요청을 올리는 상황을 흉내내는 클라이언트. */
-function approvalRaisingClient() {
+/**
+ * codex 가 승인 요청을 올리는 상황을 흉내내는 클라이언트.
+ * ★돌려받은 결정을 seen 에 적어둔다★ — 안 적으면 결정값을 무엇으로 바꿔도 시험이 통과한다(뮤턴트 생존).
+ */
+function approvalRaisingClient(seen: string[] = []) {
   return () =>
     ({
       currentThreadId: "th_1",
       async start() {},
       async startThread() { return "th_1"; },
       async runTurn(_p: string, handlers: { onApproval?: (r: unknown) => Promise<string> }) {
-        await handlers.onApproval?.({
+        const d = await handlers.onApproval?.({
           method: "item/commandExecution/requestApproval",
           params: { command: "/bin/zsh -lc 'echo hi'", threadId: "th_1", turnId: "t1" },
         });
+        if (d !== undefined) seen.push(d);
         return { status: "completed", finalText: "ok", turnId: "t1", detail: "" };
       },
       close() {},
@@ -161,32 +165,44 @@ function approvalRaisingClient() {
 }
 
 /**
- * ★결정을 기다리지 않는다★ — onApproval 은 사람이 누를 때까지 폴링한다(기본 TTL 1시간).
- * 우리가 재려는 것은 ★어떤 id 로 요청이 만들어지는가★ 뿐이므로, 행이 생기는 즉시 읽고
- * 거절로 마감해 턴을 풀어준다. (그냥 await 하면 시험이 타임아웃까지 매달린다 — 실제로 그랬다.)
+ * ★codex 가 승인을 물어와도 우리는 사람을 부르지 않는다.★
+ *
+ * 전에는 여기서 permission_request 를 만들고 사람이 누를 때까지 폴링했다(TTL 1시간). 그 결과:
+ *   ① 그 팝업이 ★op 방★ 에 떴다 — op 방은 시스템 알림 자리다(팀 리드 2026-08-12).
+ *   ② 아무도 안 누르면 턴이 안 끝나 ★팀원이 답을 못 했다.★
+ * hermes·openclaw 는 b3os 에 승인 배선이 아예 없다. codex 도 같은 모양으로 맞췄다.
+ * 경계는 config.toml 의 permission 프로파일이 친다(launcher.renderLockedDownCodexConfig).
  */
-const ownerOfRequest = async (agentId?: string) => {
+const runWithApproval = async (agentId: string) => {
   const db = new ApprDb(":memory:");
   apprMigrate(db);
-  const turn = runApprServer(
-    { prompt: "p", cwd: "/tmp/ws", agentId } as never,
-    db,
-    approvalRaisingClient(),
-  );
-  let row: { id: string; agent_id: string } | undefined;
-  for (let i = 0; i < 200 && !row; i++) {
-    row = db.query("select id, agent_id from permission_request order by created_at desc limit 1").get() as never;
-    if (!row) await new Promise((r) => setTimeout(r, 10));
-  }
-  if (row) db.run("update permission_request set status='denied' where id=?", [row.id]); // 턴을 풀어준다
-  await turn.catch(() => {});
-  return row?.agent_id;
+  const decisions: string[] = [];
+  const res = await runApprServer({ prompt: "p", cwd: "/tmp/ws", agentId } as never, db, approvalRaisingClient(decisions));
+  const popups = (db.query("select count(*) as n from permission_request").get() as { n: number }).n;
+  db.close();
+  return { res, popups, decisions };
 };
 
-test("★승인 요청의 주인이 dex 로 찍힌다★ — 팀원 방으로 보내려면 이게 있어야 한다", async () => {
-  expect(await ownerOfRequest("dex")).toBe("dex");
+test("★사람을 기다리지 않고 턴이 끝난다★ — 이게 안 되면 팀원이 답을 못 한다", async () => {
+  const { res } = await runWithApproval("dex");
+  // 옛 경로였다면 여기서 폴링에 걸려 타임아웃까지 매달렸다(실제로 그랬다).
+  expect(res.ok).toBe(true);
+  expect(res.reply).toBe("ok");
 }, 20000);
 
-test("★대조군 — 다른 팀원이면 그 id 가 찍힌다★ (한 값으로 고정돼 있지 않다)", async () => {
-  expect(await ownerOfRequest("cody")).toBe("cody");
+test("★승인 팝업을 만들지 않는다★ — 팀원 승인이 팀 리드 방으로 올라가던 경로", async () => {
+  const { popups } = await runWithApproval("dex");
+  expect(popups).toBe(0);
+}, 20000);
+
+test("★codex 판단을 뒤집지 않는다★ — 거절로 바꾸면 codex 가 허용한 일까지 막힌다", async () => {
+  const { decisions } = await runWithApproval("dex");
+  expect(decisions).toEqual(["approved"]);
+}, 20000);
+
+test("대조군 — 다른 팀원도 같다(dex 전용 분기가 아니다)", async () => {
+  const { res, popups, decisions } = await runWithApproval("cody");
+  expect(res.ok).toBe(true);
+  expect(popups).toBe(0);
+  expect(decisions).toEqual(["approved"]);
 }, 20000);
