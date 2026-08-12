@@ -831,11 +831,12 @@ export async function sendApprovalToMemberRoom(
         chat_id: chatId,
         text,
         parse_mode: "HTML",
-        reply_markup: { inline_keyboard: [
-          [{ text: "한번 허용", callback_data: `pg1:${requestId}` },
-           { text: "항상 허용", callback_data: `pga:${requestId}` }],
-          [{ text: "거절", callback_data: `pgd:${requestId}` }],
-        ] },
+        // ★한 줄에 셋★ — 폰에서 두 줄이면 자리만 먹는다(팀 리드 2026-08-12).
+        reply_markup: { inline_keyboard: [[
+          { text: "한번 허용", callback_data: `pg1:${requestId}` },
+          { text: "항상 허용", callback_data: `pga:${requestId}` },
+          { text: "거절", callback_data: `pgd:${requestId}` },
+        ]] },
       }),
     });
     return res.ok;
