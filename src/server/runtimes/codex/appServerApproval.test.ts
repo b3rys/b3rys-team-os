@@ -128,15 +128,16 @@ test("★대조군 — 넘겨야 하는 것은 그대로 간다★ (cwd · model
   expect({ cwd: a.cwd, model: a.model, resume: a.resumeThreadId }).toEqual({ cwd: "/tmp/ws", model: "gpt-x", resume: "th_prev" });
 });
 
-// ── ★승인 요청에 실제 팀원 id 가 실린다★ (팀 리드 2026-08-11: "dex 방에 떠야지") ──
+// ── ★승인 판정은 우리가 하지 않는다★ (팀 리드 2026-08-12) ──
 //
-// 전에는 runViaAppServer 안에서 id 를 "codex" 로 박아놨다. 그래서 permission_request.agent_id 가
-// 전부 "codex" 였고 ★누구 요청인지 구분이 안 돼 팀원 방으로 라우팅할 수 없었다.★ 전부 op 방으로 갔다.
-// 그리고 "codex" 는 ★실재하는 다른 팀원의 id★ 다 — 허가증도 이 id 로 저장되니 서랍이 겹쳤다.
+// 전에는 여기서 다시 판정하고 ask 면 ★op 방★ 에 팝업을 띄웠다. 두 가지가 동시에 망가졌다:
+//   ① 팀원 승인이 op 방에 떴다 — op 방은 시스템 알림 자리다.
+//      실측: permission_request 를 만든 팀원은 codex 런타임뿐(dex 5 · codex 4). 다른 팀원 0건.
+//   ② 아무도 안 누르면 턴이 안 끝나 ★팀원이 답을 못 했다.★
+// hermes·openclaw 는 b3os 에 승인 배선이 아예 없다. 경계는 각자 런타임 설정이 친다.
 //
-// ★이 시험은 runViaAppServer 가 실제로 무슨 id 로 승인 요청을 만드는지 잰다.★
-// (앞서 buildOperationFromApproval 을 직접 부르는 시험을 썼다가 ★뮤턴트가 살아남았다★ —
-//  그 함수는 원래 id 를 인자로 받으므로 이 결함을 못 잡는다. 장식이었다.)
+// ★이 시험은 runViaAppServer 가 승인 요청을 받았을 때 실제로 무엇을 하는지 잰다★
+// (팝업을 안 만든다 · 사람을 안 기다린다 · fail-closed 로 거절한다).
 
 import { Database as ApprDb } from "bun:sqlite";
 import { migrate as apprMigrate } from "../../db/migrate";
@@ -195,14 +196,16 @@ test("★승인 팝업을 만들지 않는다★ — 팀원 승인이 팀 리드
   expect(popups).toBe(0);
 }, 20000);
 
-test("★codex 판단을 뒤집지 않는다★ — 거절로 바꾸면 codex 가 허용한 일까지 막힌다", async () => {
+test("★물어오면 거절한다(fail-closed)★ — 감독을 강화한 설정이 오히려 전부 열리면 안 된다", async () => {
+  // 여기 왔다 = 그 멤버 설정이 "사람에게 물어라" 라고 한 것. 물어볼 창구가 없으니 거절이 그 뜻에 맞다.
+  // 허용으로 두면 approval_policy 를 on-request 로 ★조인 사람★ 이 오히려 전부 통과시키게 된다(빌 리뷰).
   const { decisions } = await runWithApproval("dex");
-  expect(decisions).toEqual(["approved"]);
+  expect(decisions).toEqual(["denied"]);
 }, 20000);
 
 test("대조군 — 다른 팀원도 같다(dex 전용 분기가 아니다)", async () => {
   const { res, popups, decisions } = await runWithApproval("cody");
   expect(res.ok).toBe(true);
   expect(popups).toBe(0);
-  expect(decisions).toEqual(["approved"]);
+  expect(decisions).toEqual(["denied"]);
 }, 20000);

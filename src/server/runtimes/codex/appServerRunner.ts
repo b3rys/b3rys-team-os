@@ -81,13 +81,21 @@ export async function runViaAppServer(
         // (renderLockedDownCodexConfig: 작업 트리만 쓰기 · ~/.ssh·~/.aws · .env/*.key 류 deny).
         // `approval_policy = "never"` 라 codex 는 프로파일 밖을 ★묻지 않고 스스로 거절★ 한다.
         // 그래서 이 핸들러는 정상 설정에서는 ★호출조차 되지 않는다.★
-        // 그럼에도 불려 왔다면 그 멤버 설정이 사람을 부르겠다고 한 것이고, 그 창구는 op 방이 아니라
-        // ★그 팀원 방★ 이다 — 아직 없으므로 여기서 임의로 만들지 않고 codex 판단을 그대로 통과시킨다.
         //
-        // ★조용히 넘기지는 않는다★ — 설정이 `never` 면 여기 안 온다. 왔다면 그 멤버 config.toml 이
-        // 우리 seed 와 다르다는 뜻이라 로그로 드러낸다(조용한 통과 = 나중에 원인 못 찾는다).
-        console.error(`[codex-appserver] ${opts.agentId}: codex 가 승인을 물었다(설정이 never 가 아님) → 통과: ${req.method}`);
-        const decision: ReviewDecision = "approved";
+        // ★그럼에도 불려 왔다면 거절한다.★ (빌 리뷰 2026-08-12)
+        //   여기 왔다는 건 그 멤버 설정이 ★"사람에게 물어라"★ 라고 말한 것이다. 통과시킬 codex 판단이
+        //   있는 게 아니라 ★열린 질문★ 이 온 것이고, 우리에겐 아직 물어볼 창구가 없다(팀원 방 미구현).
+        //   그러면 그 설정의 뜻에 맞는 답은 거절이다. 허용은 정반대다:
+        //     감독을 ★강화하려고★ approval_policy 를 on-request 로 바꾼다
+        //       → codex 가 사람에게 묻는다 → 우리가 사람 없이 전부 통과
+        //     = ★조심하려던 설정이 오히려 전부 열어준다.★
+        //   비용은 0이다 — never 면 어차피 안 불리므로 정상 동작은 하나도 안 바뀐다.
+        //   (옛 경로도 db 없으면 denied 였다. fail-closed 를 유지하는 것이지 새로 조이는 게 아니다.)
+        //
+        // ★조용히 거절하지는 않는다★ — 왔다는 것 자체가 그 멤버 config.toml 이 우리 seed 와 다르다는
+        //   신호라 로그로 드러낸다(조용한 거절 = 나중에 왜 막혔는지 못 찾는다).
+        console.error(`[codex-appserver] ${opts.agentId}: codex 가 승인을 물었다(설정이 never 가 아님) → 거절: ${req.method}`);
+        const decision: ReviewDecision = "denied";
         return decision;
       },
     }, TURN_TIMEOUT_MS);
