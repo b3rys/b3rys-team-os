@@ -281,6 +281,13 @@ export function requestPermission(db: Database, op: PermissionOperation): { deci
     JSON.stringify(op.provenance ?? {}),
   );
   const request = getPermissionRequest(db, id)!;
+  // ★팀원 요청은 op 방 대기열에 넣지 않는다.★ (팀 리드 2026-08-12)
+  //   "팀원들이 승인을 받을 때는 각자방에 떠야지. op방에 뜨는 건 시스템 알림종류야."
+  //   op 대기열(approval_request)에 들어가면 op 방 승인 목록에 렌더된다 — 그게 팀원 승인이
+  //   팀 리드 방으로 올라가던 경로였다. 팀원 것은 그 팀원 방으로 간다
+  //   (codex 런타임: appServerPopup.sendApprovalToMemberRoom → 브리지가 버튼 처리).
+  //   agent_id 가 없는 것 = 특정 팀원의 일이 아닌 시스템 작업 → op 방이 맞다.
+  if (op.agent_id) return { decision: "approval_required", reasons: [], request };
   enqueueApproval(db, {
     action_key: "permission_gate",
     params: {

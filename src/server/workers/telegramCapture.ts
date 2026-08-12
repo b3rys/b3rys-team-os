@@ -558,7 +558,12 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     const owner = pick(getLocale(deps.db), "팀장", "the team lead");
     const pending = listApprovals(deps.db, "pending");
     const approvalPermIds = new Set(pending.map((r) => approvalParams(r).permission_request_id).filter(Boolean));
-    const pendingPerms = listPermissionRequests(deps.db, "pending").filter((r) => !approvalPermIds.has(r.id));
+    // ★팀원 승인은 op 방에 띄우지 않는다.★ (팀 리드 2026-08-12: "op방에 뜨는 건 시스템 알림종류야")
+    //   agent_id 가 있으면 그 팀원 방으로 간다(codex 런타임: 그 팀원 봇 + 브리지 콜백).
+    //   여기 남겨두면 같은 승인이 ★두 방에 뜬다.★
+    const pendingPerms = listPermissionRequests(deps.db, "pending")
+      .filter((r) => !approvalPermIds.has(r.id))
+      .filter((r) => !r.agent_id);
     const execNote = isExecutionEnabled() ? pick(locale, "탭하면 즉시 실행됩니다.", "Tapping runs it immediately.") : pick(locale, "실행 OFF — 탭하면 승인만(실행 안 함).", "Execution OFF — tapping only approves (does not run).");
     if (!pending.length && !pendingPerms.length) {
       await sendViaTeamOp(pick(locale, `🔐 ${owner} 승인 대기 — 없음.\n\n등록 액션: `, `🔐 ${owner} pending approvals — none.\n\nRegistered actions: `) + listActions().map((a) => a.key).join(", "), replyTo, chatId);
@@ -615,7 +620,12 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     const locale = getLocale(deps.db);
     const pending = listApprovals(deps.db, "pending");
     const approvalPermIds = new Set(pending.map((r) => approvalParams(r).permission_request_id).filter(Boolean));
-    const pendingPerms = listPermissionRequests(deps.db, "pending").filter((r) => !approvalPermIds.has(r.id));
+    // ★팀원 승인은 op 방에 띄우지 않는다.★ (팀 리드 2026-08-12: "op방에 뜨는 건 시스템 알림종류야")
+    //   agent_id 가 있으면 그 팀원 방으로 간다(codex 런타임: 그 팀원 봇 + 브리지 콜백).
+    //   여기 남겨두면 같은 승인이 ★두 방에 뜬다.★
+    const pendingPerms = listPermissionRequests(deps.db, "pending")
+      .filter((r) => !approvalPermIds.has(r.id))
+      .filter((r) => !r.agent_id);
     const permButtons = (id: string) => ({ inline_keyboard: [[
       { text: pick(locale, "한번 허용", "Allow once"), callback_data: `pg1:${id}` },
       { text: pick(locale, "항상 허용", "Always allow"), callback_data: `pga:${id}` },

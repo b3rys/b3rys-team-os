@@ -380,8 +380,10 @@ describe("codex adapter — 핵심 정확성", () => {
     expect(artifacts(db, "failed")[0]?.detail).toContain("permission_ask:tier-a.workspace-write");
     const pending = db.query("SELECT action, status, requested_by FROM permission_request").all() as any[];
     expect(pending).toEqual([{ action: "sandbox", status: "pending", requested_by: "codex-adapter" }]);
+    // ★팀원 요청은 op 대기열에 안 들어간다★ — 그 팀원 방에서 렌더·결정한다
+    //   (팀 리드 2026-08-12: "op방에 뜨는 건 시스템 알림종류야"). 위 permission_request 는 그대로 남는다.
     const approval = db.query("SELECT action_key, status FROM approval_request").all() as any[];
-    expect(approval).toEqual([{ action_key: "permission_gate", status: "pending" }]);
+    expect(approval).toEqual([]);
   });
 
   test("team-bus codex turn uses per-agent CODEX_HOME instead of host ~/.codex", async () => {

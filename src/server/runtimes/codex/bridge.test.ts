@@ -384,7 +384,7 @@ import { handleApprovalCallback } from "./bridge";
 import { Database as CbDb } from "bun:sqlite";
 import { migrate as cbMigrate } from "../../db/migrate";
 import { requestPermission as cbRequest, getPermissionRequest as cbGet } from "../../lib/permissionGate";
-import { mkdtempSync } from "node:fs";
+
 import { tmpdir as cbTmpdir } from "node:os";
 import { join as cbJoin } from "node:path";
 

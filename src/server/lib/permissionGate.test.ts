@@ -98,9 +98,10 @@ describe("permissionGate — DB request/grant/audit", () => {
     const safe = requestPermission(db, { runtime: "codex", agent_id: "codex", action: "shell", command: "ls /tmp" });
     expect(safe.decision).toBe("approval_required");
     expect(safe.request).toBeDefined();
-    const approval = db.prepare("SELECT action_key, params_json FROM approval_request WHERE action_key = 'permission_gate'").get() as any;
-    expect(approval.action_key).toBe("permission_gate");
-    expect(JSON.parse(approval.params_json).permission_request_id).toBe(safe.request!.id);
+    // ★팀원 요청(agent_id 있음)은 op 대기열에 안 들어간다★ — 그 팀원 방에서 렌더·결정한다
+    //   (팀 리드 2026-08-12: "op방에 뜨는 건 시스템 알림종류야"). 요청 자체는 남는다.
+    const approval = db.prepare("SELECT action_key FROM approval_request WHERE action_key = 'permission_gate'").get();
+    expect(approval).toBeNull();
     expect(decidePermissionRequest(db, safe.request!.id, "allow_always", { approver: "GD", provenance: { test: true } }).ok).toBe(true);
 
     const stillDenied = evaluatePermission(db, op);
@@ -168,4 +169,38 @@ describe("permissionGate — DB request/grant/audit", () => {
     expect(decidePermissionRequest(db, first.request!.id, "allow_once", { approver: "GD" }).ok).toBe(true);
     expect(evaluatePermission(db, op).decision).toBe("approval_required");
   });
+});
+
+// ── ★팀원 승인은 op 방 대기열에 들어가지 않는다★ (팀 리드 2026-08-12) ──
+//
+// "팀원들이 승인을 받을 때는 각자방에 떠야지. op방에 뜨는 건 시스템 알림종류야."
+// approval_request(op 대기열)에 들어가면 op 방 승인 목록에 렌더된다 — 그게 팀원 승인이
+// 팀 리드 방으로 올라가던 경로다. 팀원 것은 그 팀원 방으로 간다.
+
+import { Database as OpDb } from "bun:sqlite";
+import { migrate as opMigrate } from "../db/migrate";
+import { requestPermission as opRequest } from "./permissionGate";
+
+function opQueueCountFor(agentId?: string): { queued: number; requests: number } {
+  const db = new OpDb(":memory:");
+  opMigrate(db);
+  opRequest(db, {
+    agent: { id: agentId ?? "", workspace_path: "/tmp/ws" },
+    ...(agentId ? { agent_id: agentId } : {}),
+    runtime: "codex", action: "shell", command: "echo hi", cwd: "/tmp/ws",
+  } as never);
+  const queued = (db.query("select count(*) as n from approval_request").get() as { n: number }).n;
+  const requests = (db.query("select count(*) as n from permission_request").get() as { n: number }).n;
+  db.close();
+  return { queued, requests };
+}
+
+test("★팀원 요청은 op 대기열에 안 들어간다★ — 그 팀원 방으로 간다", () => {
+  const r = opQueueCountFor("dex");
+  expect(r.requests).toBe(1); // 요청 자체는 만들어진다(그 방에서 렌더·결정한다)
+  expect(r.queued).toBe(0);   // ★op 방에는 안 뜬다★
+});
+
+test("대조군 — 팀원이 아닌 시스템 작업은 op 대기열로 간다(둘 다 0이면 시험이 죽은 것)", () => {
+  expect(opQueueCountFor(undefined).queued).toBe(1);
 });
