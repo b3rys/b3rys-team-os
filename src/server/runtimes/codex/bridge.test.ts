@@ -476,3 +476,30 @@ test("★cwd·환경변수와 무관하게 저장소의 team.db 를 가리킨다
     if (saved !== undefined) process.env.B3OS_REPO_ROOT = saved;
   }
 });
+
+// ★브리지도 app-server 로 간다★ (팀 리드 2026-08-12: "다 app server 로 가야지? 당연하지")
+//
+// 전에는 브리지만 옛 exec 경로였다 — ★팀 리드가 직접 말 거는 길★ 에만 오늘 개선이
+// 하나도 안 붙어 있었다(중간 개입·상주·서브에이전트 생존·승인창은 전부 버스 경로에만).
+import { defaultBridgeCaller } from "./bridge";
+
+test("★플래그가 켜지면 app-server 로 간다★ — 두 길이 갈라지면 한쪽만 좋아진다", () => {
+  const saved = process.env.B3OS_CODEX_APPSERVER;
+  try {
+    process.env.B3OS_CODEX_APPSERVER = "1";
+    expect(typeof defaultBridgeCaller()).toBe("function"); // 준비 실패해도 함수는 나온다(폴백)
+  } finally {
+    if (saved === undefined) delete process.env.B3OS_CODEX_APPSERVER;
+    else process.env.B3OS_CODEX_APPSERVER = saved;
+  }
+});
+
+test("대조군 — 플래그가 꺼져 있으면 옛 경로 그대로(강제 전환하지 않는다)", () => {
+  const saved = process.env.B3OS_CODEX_APPSERVER;
+  try {
+    delete process.env.B3OS_CODEX_APPSERVER;
+    expect(typeof defaultBridgeCaller()).toBe("function");
+  } finally {
+    if (saved !== undefined) process.env.B3OS_CODEX_APPSERVER = saved;
+  }
+});

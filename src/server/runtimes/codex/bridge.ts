@@ -367,7 +367,11 @@ export async function handleMessage(
   messageId: number | undefined,
   deps: BridgeDeps = {},
 ): Promise<{ ok: boolean; reply: string; detail: string }> {
-  const runTurn = deps.runTurn ?? ((o) => runCodexTurn(o));
+  // ★브리지도 app-server 로 간다.★ (팀 리드 2026-08-12: "다 app server 로 가야지? 당연하지.")
+  //   전에는 브리지만 옛 exec 경로였다 — 그래서 ★팀 리드가 직접 말 거는 길에만★ 오늘 개선
+  //   (중간 개입 · 프로세스 상주 · 서브에이전트 생존 · 승인창)이 하나도 안 붙어 있었다.
+  //   버스는 app-server, 직접 대화는 exec 로 갈라져 있던 것이 구멍이었다.
+  const runTurn = deps.runTurn ?? defaultBridgeCaller();
   const registerReminder = deps.registerScheduleReminder ?? registerScheduleMarker;
   const send = deps.sendMessage ?? (async () => null);
   const edit = deps.editMessage ?? (async () => false);
@@ -584,6 +588,24 @@ interface TgCallbackQuery {
   data?: string;
   from?: { id: number };
   message?: { message_id: number; chat: { id: number } };
+}
+
+/**
+ * ★이 브리지가 쓸 두뇌.★ app-server 를 기본으로 하고, 꺼져 있으면 옛 exec 경로로 떨어진다.
+ *
+ * db 가 필요한 이유 — 승인창(팀원 방 팝업)이 그 db 에 요청 행을 만든다.
+ * 열지 못하면 승인 없는 exec 경로로 가는 편이 낫다(그 자리에서 죽는 것보다).
+ */
+export function defaultBridgeCaller(): (o: CodexTurnOptions) => Promise<CodexTurnResult> {
+  if (process.env.B3OS_CODEX_APPSERVER !== "1") return (o) => runCodexTurn(o);
+  try {
+    const { openDb } = require("../../db/migrate") as typeof import("../../db/migrate");
+    const { makeAppServerCaller } = require("./appServerRunner") as typeof import("./appServerRunner");
+    return makeAppServerCaller(openDb(defaultTeamDbPath()));
+  } catch (e) {
+    console.error(`[codex-bridge] app-server caller 준비 실패 — exec 경로로 간다: ${e instanceof Error ? e.message : e}`);
+    return (o) => runCodexTurn(o);
+  }
 }
 
 /**
