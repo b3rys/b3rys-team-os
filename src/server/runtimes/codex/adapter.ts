@@ -57,6 +57,21 @@ export interface CodexAdapterDeps {
 }
 
 /**
+ * ★그 팀원이 이 스레드에 실제로 무언가 보냈는가.★ (턴 시작 이후)
+ * 서버가 대신 말하지 않기로 한 이상, ★안 보낸 것을 알아채는 장치★ 는 따로 있어야 한다.
+ */
+export function agentRepliedSince(db: Database, agentId: string, threadId: string, sinceUtc: string): boolean {
+  try {
+    const r = db
+      .prepare(`SELECT 1 FROM message WHERE from_agent_id = ? AND thread_id = ? AND created_at >= ? LIMIT 1`)
+      .get(agentId, threadId, sinceUtc);
+    return Boolean(r);
+  } catch {
+    return true; // 조회 실패로 ★거짓 경고★ 를 내지 않는다
+  }
+}
+
+/**
  * ★진행 중 턴에 끼워 넣을 문장.★ 새 턴의 봉투를 통째로 넣지 않는다 —
  * 지금 하던 일의 맥락을 유지한 채 ★사람이 끼어든 말★ 로 읽히게 짧게 준다.
  */
@@ -96,6 +111,7 @@ export async function runTurn(
   const conversationKey = row.thread_id;
   const taskId = taskIdFromRow(row);
   try {
+    const turnStartedAt = new Date().toISOString().replace("T", " ").slice(0, 19);
     stores.inflightStore.mark(row.message_id, targetAgentId, row.thread_id);
     const priorSessionId = stores.sessionStore.get(targetAgentId, CODEX_SURFACE_TEAM_BUS, conversationKey);
     const sandbox = codexSandboxFor(agent);
@@ -205,6 +221,18 @@ export async function runTurn(
     appendAuditFile(targetAgentId, "turn_completed_no_autopost", row.message_id, {
       thread_id: row.thread_id, chars: result.reply.length,
     });
+
+    // ★답이 팀에 도착했는지 확인한다 — 대신 말하지는 않는다.★ (2026-08-12)
+    //   위 규칙(서버는 팀원 대신 말하지 않는다)은 그대로다. 다만 ★안 보낸 것을 아무도 모르는 것★ 은
+    //   다른 문제다. 오늘 하루에 세 번 났다: 답 없음 / 착수확인만 / 전송 0건.
+    //   턴은 succeeded 였고 로그도 조용해서, 사람이 물어보기 전엔 아무도 몰랐다.
+    //   → 도착 안 했으면 ★그 사실을 남기고 팀원 본인에게 한 번 알린다.★ 말은 본인이 한다.
+    if (!agentRepliedSince(db, targetAgentId, row.thread_id, turnStartedAt)) {
+      appendAuditFile(targetAgentId, "turn_completed_but_no_reply_sent", row.message_id, {
+        thread_id: row.thread_id, chars: result.reply.length,
+      });
+      recordRuntimeBlock(targetAgentId, `직전 턴(${row.message_id})의 답이 팀에 도착하지 않았다 — send.sh 미실행`);
+    }
     stores.artifactStore.record({
       agentId: targetAgentId,
       messageId: row.message_id,
