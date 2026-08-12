@@ -13,6 +13,7 @@ import { CodexApprovalCorrelationStore } from "./state";
 import { setActivityLine } from "../../db/queries";
 import type { CodexCaller, CodexTurnResult, CodexTurnOptions } from "./runner";
 import { registerActiveTurn, unregisterActiveTurn } from "./activeTurns";
+import { acquireClient, dropClient } from "./clientPool";
 
 const TURN_TIMEOUT_MS = Number(process.env.B3OS_CODEX_APPSERVER_TIMEOUT_MS ?? 300_000);
 
@@ -46,12 +47,19 @@ export async function runViaAppServer(
   makeClient: AppServerClientFactory = defaultAppServerClientFactory,
 ): Promise<CodexTurnResult> {
   const startedAt = nowMs();
-  const client = makeClient(opts);
+  // ★프로세스를 턴보다 오래 살린다★ — spawn_agent 로 띄운 서브가 턴 종료 후에도 결과를 돌려준다.
+  //   (실측 2026-08-12: 턴 끝에 닫아서 서브 3/4 가 완료 전에 죽었다.)
+  // ★풀은 운영 관심사다★ — 클라이언트를 주입받은 경우(시험·측정)는 풀에 넣지 않는다.
+  //   넣으면 한 시험의 가짜가 다음 시험으로 새어 나간다(실제로 2건이 그렇게 깨졌다).
+  const pooled = makeClient === defaultAppServerClientFactory;
+  const { client, reused } = pooled
+    ? acquireClient(opts.agentId, () => makeClient(opts))
+    : { client: makeClient(opts), reused: false };
   // ★이 턴이 누구인지는 계속 필수다★ — 승인 판정은 걷어냈지만 로그·아티팩트·세션이 전부 id 로 갈린다.
   //   전에는 "codex" 로 박혀 있었는데, 그건 ★실재하는 다른 팀원의 id★ 다(명부에 codex(openclaw)와
   //   dex(codex 런타임)가 따로 있다). 그래서 CodexTurnOptions.agentId 를 필수로 두어 컴파일이 막게 했다.
   try {
-    await client.start();
+    if (!reused) await client.start(); // 살아있는 프로세스면 핸드셰이크를 다시 하지 않는다
     // ★codex 설정이 정하게 한다★ (팀 리드 2026-08-11: "codex 설정으로 돌게 해. 별도 우리 코드가 아닌").
     //
     //   여기서 sandbox·approvalPolicy 를 넘기면 ★CODEX_HOME 의 config.toml 을 덮어쓴다.★
@@ -114,6 +122,8 @@ export async function runViaAppServer(
       elapsedMs: nowMs() - startedAt,
     };
   } catch (e) {
+    // ★에러로 끝난 프로세스는 치운다★ — 반쯤 죽은 것을 다음 턴이 물려받으면 그 턴도 같이 죽는다.
+    if (pooled) dropClient(opts.agentId);
     // 예외 정면 처리: 실패로 반환 → adapter가 실패통지(at-most-once 보존, 멈춤/유실 방지).
     return {
       ok: false,
@@ -125,7 +135,9 @@ export async function runViaAppServer(
     // 턴이 끝나면 지운다 — 안 지우면 ★끝난 일을 계속 하고 있는 것처럼★ 보인다.
     if (db) { try { setActivityLine(db, opts.agentId, null); } catch { /* best-effort */ } }
     unregisterActiveTurn(opts.agentId, client);
-    client.close();
+    if (!pooled) client.close(); // 주입된 것은 우리가 만든 게 아니니 그 자리에서 닫는다
+    // ★풀에 있는 것은 닫지 않는다.★ 이 프로세스 안에서 서브에이전트가 아직 돌고 있을 수 있다.
+    //   죽은 프로세스는 다음 턴에 acquireClient 가 알아서 새로 만든다.
   }
 }
 

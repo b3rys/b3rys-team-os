@@ -125,6 +125,8 @@ export class CodexAppServerClient {
   private activeHandlers: RunTurnHandlers | null = null;
   private turnResolve: ((r: TurnResult) => void) | null = null;
   private closed = false;
+  /** 풀이 ★죽은 것을 돌려주지 않게★ 밖에서 상태를 볼 수 있어야 한다. */
+  get isClosed(): boolean { return this.closed; }
 
   /**
    * ★어느 팀원의 설정으로 돌 것인가.★ 안 주면 자식이 ★호스트 ~/.codex★ 를 읽는다.
