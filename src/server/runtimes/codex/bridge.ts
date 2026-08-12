@@ -13,7 +13,7 @@
 import { runCodexTurn, type CodexTurnOptions, type CodexTurnResult } from "./runner";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadRegistry } from "../../lib/registry";
 import { appendAuditFile } from "../../lib/auditFile";
@@ -587,6 +587,18 @@ interface TgCallbackQuery {
 }
 
 /**
+ * team.db 경로 — ★환경변수에 기대지 않는다.★
+ *
+ * 실제로 그래서 승인 버튼이 죽었다(2026-08-12): `B3OS_REPO_ROOT ?? "."` 로 잡았는데
+ * 브리지 프로세스에는 ★그 변수가 없어서★ cwd(팀원 작업폴더)의 team.db 를 찾았고,
+ * 매 탭마다 "unable to open database file" 로 던져 ★답을 못 보냈다★ → 사람 화면엔 '로딩중' 만.
+ * 이 파일 위치에서 저장소 루트를 세는 쪽이 환경과 무관하다.
+ */
+export function defaultTeamDbPath(): string {
+  return process.env.B3OS_TEAM_DB ?? join(import.meta.dir, "..", "..", "..", "..", "team.db");
+}
+
+/**
  * ★승인 버튼을 이 팀원 방에서 처리한다.★ (팀 리드 2026-08-12: "팀원방에 그냥 띄우면 되잖아")
  *
  * 요청 자체는 서버가 이 봇으로 띄운다(appServerPopup.sendApprovalToMemberRoom).
@@ -618,7 +630,7 @@ export async function handleApprovalCallback(
 
   const { openDb } = await import("../../db/migrate");
   const { decidePermissionRequest, getPermissionRequest } = await import("../../lib/permissionGate");
-  const db = openDb(deps.dbPath ?? `${process.env.B3OS_REPO_ROOT ?? "."}/team.db`);
+  const db = openDb(deps.dbPath ?? defaultTeamDbPath());
   try {
     const id = m[2]!;
     const row = getPermissionRequest(db, id);
@@ -760,7 +772,12 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         offset = u.update_id + 1;
         // ★승인 버튼은 이 방에서 처리한다.★ 요청은 서버가 이 봇으로 띄우고, 누르는 것은 여기서 받는다
         //   (getUpdates 는 봇당 한 프로세스만 가능하므로 폴링을 하는 브리지가 콜백도 맡는다).
-        if (u.callback_query) { await handleApprovalCallback(token, u.callback_query, allowFrom); continue; }
+        // ★콜백 예외가 폴 루프를 죽이면 안 된다★ — 죽으면 그 뒤 메시지도 안 받는다.
+        if (u.callback_query) {
+          try { await handleApprovalCallback(token, u.callback_query, allowFrom); }
+          catch (e) { console.error(`[codex-bridge] 승인 콜백 처리 실패: ${e instanceof Error ? e.message : e}`); }
+          continue;
+        }
         const text = u.message?.text;
         const chatId = u.message?.chat.id;
         const messageId = u.message?.message_id;

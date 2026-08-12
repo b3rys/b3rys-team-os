@@ -448,3 +448,31 @@ test("승인과 무관한 콜백은 건드리지 않는다", async () => {
   const { dbPath } = pendingRequest();
   expect(await handleApprovalCallback("T", { id: "c6", data: "mcp:on", from: { id: GD } }, new Set([GD]), { dbPath, fetchFn: spyFetch([]) })).toBe("ignored");
 });
+
+// ── ★team.db 경로는 환경변수에 기대지 않는다★ (2026-08-12) ──
+//
+// 승인 버튼이 죽은 진짜 원인이었다: `B3OS_REPO_ROOT ?? "."` 로 잡았는데 ★브리지에는 그 변수가 없다★
+// (실측: 브리지 프로세스 env 에 CODEX_WORKDIR 만 있고 B3OS_REPO_ROOT 없음).
+// 그래서 cwd(팀원 작업폴더)의 team.db 를 찾아 "unable to open database file" 로 매번 던졌고,
+// ★답을 못 보내서 사람 화면엔 로딩중만 돌았다.★
+
+import { defaultTeamDbPath } from "./bridge";
+import { existsSync as dbExists } from "node:fs";
+import { isAbsolute } from "node:path";
+
+test("★cwd·환경변수와 무관하게 저장소의 team.db 를 가리킨다★", () => {
+  const before = process.cwd();
+  const saved = process.env.B3OS_REPO_ROOT;
+  try {
+    delete process.env.B3OS_REPO_ROOT; // ★없는 게 실제 브리지 환경이다★
+    process.chdir("/tmp");             // 팀원 작업폴더에서 도는 상황을 흉내
+    const p = defaultTeamDbPath();
+    expect(isAbsolute(p)).toBe(true);
+    expect(p.endsWith("/team.db")).toBe(true);
+    expect(p.startsWith("/tmp/")).toBe(false); // cwd 를 따라가면 안 된다
+    expect(dbExists(p)).toBe(true);            // 실제로 열 수 있는 파일이어야 한다
+  } finally {
+    process.chdir(before);
+    if (saved !== undefined) process.env.B3OS_REPO_ROOT = saved;
+  }
+});
