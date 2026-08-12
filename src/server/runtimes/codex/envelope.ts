@@ -66,8 +66,13 @@ export class CodexTurnEnvelopeBuilder {
       JSON.stringify(data, null, 2),
       "",
       "[Instruction]",
-      "Answer the current turn using the envelope above.",
-      `To actually reply you MUST run: ${howToReply}`,
+      // ★영어 점검(팀 리드 요청 2026-08-12)★
+      //   전: "To actually reply you MUST run: <cmd>" — 문법은 맞지만 actually 가 군더더기고
+      //       명령이 문장 꼬리에 붙어 읽힌다.
+      //   후: 무엇을 하고(answer) → 그 다음 무엇을 해야 전달되는지(deliver by running)를 순서대로,
+      //       명령은 ★따로 한 줄★ 로 둔다(모델이 그대로 복사해 쓰기 쉽다).
+      "Answer the request above. Your reply is delivered only by running this command:",
+      howToReply,
     ].join("\n");
   }
 

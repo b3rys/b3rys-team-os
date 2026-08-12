@@ -78,7 +78,7 @@ test("★봉투가 '보내야 말한 것' 을 명시하고 실제 명령을 준�
   expect(cmd).toContain("--in-reply-to");
 
   const prompt = b.toPrompt(env);
-  expect(prompt).toContain("MUST run"); // 프롬프트에 실제 명령이 나와야 모델이 보낸다
+  expect(prompt).toContain("delivered only by running"); // 안 보내면 전달 안 된다는 걸 말해야 한다
   // ★같은 명령이 두 번 나오면 안 된다★ — JSON 에도 넣으면 중복이다(팀 리드 지적)
   expect(prompt.split("send.sh").length - 1).toBe(1);
 });
