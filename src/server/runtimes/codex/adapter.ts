@@ -28,6 +28,7 @@ import {
   CodexSessionStore,
   sha256Short,
 } from "./state";
+import { steerActiveTurn } from "./activeTurns";
 
 const inFlight = new Set<string>();
 
@@ -53,6 +54,21 @@ export interface CodexAdapterDeps {
   artifactStore?: CodexRunArtifactStore;
   inflightStore?: CodexInflightStore;
   envelopeBuilder?: CodexTurnEnvelopeBuilder;
+}
+
+/**
+ * ★진행 중 턴에 끼워 넣을 문장.★ 새 턴의 봉투를 통째로 넣지 않는다 —
+ * 지금 하던 일의 맥락을 유지한 채 ★사람이 끼어든 말★ 로 읽히게 짧게 준다.
+ */
+export function buildSteerText(row: { from_agent_id?: string | null; body: string; message_id: string; thread_id: string }): string {
+  const who = row.from_agent_id ?? "team lead";
+  return [
+    `[중간 메시지 — ${who}]`,
+    row.body,
+    "",
+    `(thread=${row.thread_id} · in-reply-to=${row.message_id})`,
+    "이 말을 반영해서 계속하라. 답할 때는 이 메시지에도 답해라.",
+  ].join("\n");
 }
 
 /** 비동기 턴 — codex 호출 → 최종답 1회 게시. detach라 throw가 위로 안 감(자체 에러처리). */
@@ -294,7 +310,17 @@ export function makeCodexAdapter(
       //   → agent 단위 잠금으로 앞 턴이 끝날 때(아래 finally)까지 다음 턴을 defer(연기)해 '한 팀원=한 번에 한 턴'을 보장.
       //   (다른 런타임과 동일 계약. 공용 RuntimeTurnCoordinator 리팩터는 shared 코드라 별도 과제로 분리.)
       const key = targetAgentId;
-      if (inFlight.has(key)) return { ok: true, deferred: true, detail: "codex_in_flight" };
+      if (inFlight.has(key)) {
+        // ★연기하기 전에 진행 중 턴에 끼워 넣어 본다.★ (팀 리드 2026-08-12: "중간 steer")
+        //   연기만 하면 20번 뒤 blocked 로 ★메시지가 사라진다★ — 실측으로 확인했다.
+        //   끼워 넣기에 성공하면 그 턴이 이어서 읽으므로 별도 턴이 필요 없다.
+        const steered = await steerActiveTurn(targetAgentId, buildSteerText(row));
+        if (steered) {
+          appendAuditFile(targetAgentId, "codex_steered_into_turn", row.message_id, { thread_id: row.thread_id });
+          return { ok: true, detail: "codex_steered" };
+        }
+        return { ok: true, deferred: true, detail: "codex_in_flight" };
+      }
       inFlight.add(key);
 
       // ★관리자 설정(agents.json)을 grant로 seed(per-agent)★ — 미주입 시 preflight가 workspace-write/network를

@@ -84,7 +84,8 @@ export class CodexAppServerClient {
   private nextId = 1;
   private pending = new Map<number, Pending>();
   private threadId: string | null = null;
-  private currentTurnId: string | null = null;
+  /** ★공개★ — 진행 중 턴에 끼어들려면(steer) 밖에서 turnId 유무를 볼 수 있어야 한다. 쓰기는 내부에서만. */
+  currentTurnId: string | null = null;
   private activeHandlers: RunTurnHandlers | null = null;
   private turnResolve: ((r: TurnResult) => void) | null = null;
   private closed = false;

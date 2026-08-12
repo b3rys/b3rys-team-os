@@ -11,6 +11,7 @@ import { CodexAppServerClient, type ReviewDecision } from "./appServerClient";
 import { requestApprovalPopup, PROCESS_INSTANCE } from "./appServerPopup";
 import { CodexApprovalCorrelationStore } from "./state";
 import type { CodexCaller, CodexTurnResult, CodexTurnOptions } from "./runner";
+import { registerActiveTurn, unregisterActiveTurn } from "./activeTurns";
 
 const TURN_TIMEOUT_MS = Number(process.env.B3OS_CODEX_APPSERVER_TIMEOUT_MS ?? 300_000);
 
@@ -70,6 +71,9 @@ export async function runViaAppServer(
       resumeThreadId: opts.resumeSessionId, // ★정확성 #1: 멀티턴 맥락 이어감(exec resume 동등)★
     });
     const threadId = client.currentThreadId;
+    // ★진행 중 턴에 끼어들 수 있게 등록★ — 이게 없으면 턴 도는 동안 온 메시지가 연기되다 사라진다
+    //   (실측: 20번 연기 후 blocked. 턴도 답도 없었다.)
+    registerActiveTurn(opts.agentId, client);
     const r = await client.runTurn(opts.prompt, {
       onApproval: async (req) => {
         // ★codex 가 물으면 그 팀원 방에 띄우고, 사람이 누른 대로 답한다.★ (팀 리드 2026-08-12)
@@ -112,6 +116,7 @@ export async function runViaAppServer(
       elapsedMs: nowMs() - startedAt,
     };
   } finally {
+    unregisterActiveTurn(opts.agentId, client);
     client.close();
   }
 }
