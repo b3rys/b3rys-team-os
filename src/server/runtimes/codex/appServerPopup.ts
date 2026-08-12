@@ -161,7 +161,9 @@ function approvalContentDigest(req: ApprovalRequest): string | null {
   return createHash("sha256").update(JSON.stringify(rows)).digest("hex").slice(0, 16);
 }
 
-const POPUP_TTL_MS = Number(process.env.B3OS_CODEX_APPSERVER_POPUP_TTL_MS ?? 60 * 60 * 1000); // 1h (GD: 무응답→hold)
+// ★반응이 5분 넘게 없으면 무효.★ (팀 리드 2026-08-12: "승인창에 반응이 5분이상 없으면 무효한다")
+//   전엔 1시간이었다 — 그동안 codex 턴이 통째로 매달려 있어서 그 팀원이 아무 일도 못 한다.
+const POPUP_TTL_MS = Number(process.env.B3OS_CODEX_APPSERVER_POPUP_TTL_MS ?? 5 * 60 * 1000);
 const POLL_INTERVAL_MS = Number(process.env.B3OS_CODEX_APPSERVER_POLL_MS ?? 1500);
 
 /** 명령 승인 요청에서 ★실행될 명령 문자열★ 을 꺼낸다. 명령 승인이 아니면 null.
@@ -771,9 +773,20 @@ export async function pollDecision(db: Database, requestId: string, ttlMs = POPU
       case undefined: return "denied"; // 요청 사라짐 = 거절
       // "pending" → 계속 폴링
     }
-    if (Date.now() >= deadline) return "denied"; // ★1h 무응답 → hold(거절)★
+    if (Date.now() >= deadline) {
+      // ★무응답 만료 — 행도 expired 로 닫는다.★ (팀 리드 2026-08-12: "5분 이상 반응 없으면 무효")
+      //   안 닫으면 행이 pending 으로 남아, 한참 뒤에 누른 탭이 ★이미 끝난 턴을 승인★ 한다.
+      //   버튼도 그때 지워져서 사람이 "만료됐다" 를 화면에서 본다(헤르메스와 같은 모양).
+      try { expirePermissionRequest(db, requestId); } catch { /* best-effort — 만료 판정은 유지 */ }
+      return "denied";
+    }
     await sleep(intervalMs);
   }
+}
+
+/** 아직 pending 인 요청만 expired 로 닫는다(이미 결정된 것은 건드리지 않는다). */
+export function expirePermissionRequest(db: Database, requestId: string): void {
+  db.prepare("UPDATE permission_request SET status='expired', decided_at=datetime('now') WHERE id=? AND status='pending'").run(requestId);
 }
 
 /**

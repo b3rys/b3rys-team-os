@@ -268,3 +268,26 @@ test("팝업 문구는 무엇을 하려는지 + 대상으로 갈라진다", () =
   const f = approvalSummary({ method: "m", params: { fileChanges: { "/a.ts": {}, "/b.ts": {} } } });
   expect(f.title).toBe("파일 2개를 고칠까요?");
 });
+
+// ── ★무응답 만료(5분)★ (팀 리드 2026-08-12) ──
+
+import { pollDecision, expirePermissionRequest } from "./appServerPopup";
+import { requestPermission as expReq, getPermissionRequest as expGet } from "../../lib/permissionGate";
+
+test("★만료되면 행도 닫힌다★ — pending 으로 남으면 한참 뒤 탭이 끝난 턴을 승인한다", async () => {
+  const db = new ApprDb(":memory:"); apprMigrate(db);
+  const id = expReq(db, { agent: { id: "dex", workspace_path: "/tmp/ws" }, agent_id: "dex", runtime: "codex", action: "shell", command: "echo hi", cwd: "/tmp/ws" } as never).request!.id;
+  const decision = await pollDecision(db, id, 20, 5); // 20ms 만료
+  expect(decision).toBe("denied");
+  expect(expGet(db, id)?.status).toBe("expired"); // ★행이 닫혀야 나중 탭이 '만료' 로 답한다★
+  db.close();
+});
+
+test("이미 결정된 요청은 만료가 덮어쓰지 않는다", () => {
+  const db = new ApprDb(":memory:"); apprMigrate(db);
+  const id = expReq(db, { agent: { id: "dex", workspace_path: "/tmp/ws" }, agent_id: "dex", runtime: "codex", action: "shell", command: "echo hi", cwd: "/tmp/ws" } as never).request!.id;
+  db.run("update permission_request set status='allowed_once' where id=?", [id]);
+  expirePermissionRequest(db, id);
+  expect(expGet(db, id)?.status).toBe("allowed_once");
+  db.close();
+});
