@@ -58,13 +58,16 @@ export class CodexTurnEnvelopeBuilder {
   }
 
   toPrompt(envelope: CodexTurnEnvelope): string {
+    // ★같은 명령을 두 번 쓰지 않는다.★ (팀 리드 2026-08-12) 지시문 쪽만 남긴다 —
+    //   JSON 은 자료고 지시문은 명령이라, 모델이 실제로 따르는 쪽에 둔다.
+    const { howToReply, ...data } = envelope;
     return [
       "[CodexTurnEnvelope]",
-      JSON.stringify(envelope, null, 2),
+      JSON.stringify(data, null, 2),
       "",
       "[Instruction]",
       "Answer the current turn using the envelope above.",
-      `To actually reply you MUST run: ${envelope.howToReply}`,
+      `To actually reply you MUST run: ${howToReply}`,
     ].join("\n");
   }
 
