@@ -29,6 +29,7 @@ import {
   sha256Short,
 } from "./state";
 import { steerActiveTurn } from "./activeTurns";
+import { isTestRun } from "./appServerPopup";
 
 const inFlight = new Set<string>();
 
@@ -53,8 +54,19 @@ export interface CodexAdapterDeps {
   sessionStore?: CodexSessionStore;
   artifactStore?: CodexRunArtifactStore;
   inflightStore?: CodexInflightStore;
+  /** ★답이 안 갔을 때 같은 세션에 재촉 1회.★ 기본: 라이브 켬 / 시험 끔(가드 시험이 호출 수를 센다). */
+  nudgeOnUnsentReply?: boolean;
   envelopeBuilder?: CodexTurnEnvelopeBuilder;
 }
+
+/**
+ * ★재촉 턴의 요청문.★ 같은 스레드·같은 세션을 이어가되 goal 만 바꾼다.
+ * 버스에는 아무것도 안 들어간다 — 이건 서버가 그 팀원에게 직접 거는 한 턴이다.
+ */
+export const NUDGE_PROMPT = [
+  "[미전송] 직전 턴의 답이 ★팀에 도착하지 않았다.★ 턴은 끝났는데 send.sh 를 실행하지 않았다.",
+  "지금 ★그 답을 보내라.★ 새로 조사하지 말고, 이미 정리한 내용을 그대로 보내면 된다.",
+].join("\n");
 
 /**
  * ★그 팀원이 이 스레드에 실제로 무언가 보냈는가.★ (턴 시작 이후)
@@ -106,6 +118,14 @@ export async function runTurn(
     inflightStore: new CodexInflightStore(db),
     envelopeBuilder: new CodexTurnEnvelopeBuilder(db),
   },
+  /**
+   * ★답이 안 갔을 때 같은 세션에 재촉 1회를 걸지★ (기본 꺼짐).
+   *
+   * 기본을 끈 이유: 기존 시험들은 "턴당 codex 호출 1회" 를 전제로 가드를 세워놨다.
+   * 켠 채로 두면 그 가드들이 재촉 호출까지 세면서 깨진다 — ★가드를 약하게 만들지 않는다.★
+   * ★라이브(wake 경로)에서만 켠다.★ 재촉 동작 자체는 별도 시험이 덮는다.
+   */
+  nudgeOnUnsentReply = false,
 ): Promise<void> {
   const targetAgentId = agent.id;
   const conversationKey = row.thread_id;
@@ -235,6 +255,24 @@ export async function runTurn(
       //   '성공 턴은 이전 블록을 지운다' 는 계약이 따로 있다(시험이 그걸 고정한다).
       //   여기 쓰면 그 계약과 싸운다. 사실만 남기고 로그로 드러낸다.
       console.error(`[codex] ${targetAgentId}: 턴은 끝났는데 ★답이 팀에 도착하지 않았다★ (thread=${row.thread_id}, msg=${row.message_id}, 본문 ${result.reply.length}자)`);
+      // ★버스에는 아무것도 넣지 않는다★ — 서버가 한 마디도 하지 않는다는 계약(시험이 고정)을 지킨다.
+      //   대신 ★같은 세션에서 한 턴 더 돌려★ 본인이 보내게 한다. 말은 여전히 본인이 한다.
+      //   한 번만 한다(nudged 플래그) — 그 턴도 실패하면 또 도는 고리가 된다.
+      // ★runTurn 을 다시 돌지 않는다★ — 그 경로에는 '한 요청 한 턴'·in-flight 잠금·아티팩트 계약이
+      //   걸려 있어서 재진입하면 그 불변식들과 싸운다(시험 6건이 그걸 고정하고 있다).
+      //   대신 ★같은 세션에 codex 호출만 한 번 더★ 건다. 버스에도 아무것도 안 넣는다.
+      if (nudgeOnUnsentReply) {
+        try {
+          console.error(`[codex] ${targetAgentId}: 같은 세션에 재촉 1회 — 본인이 보내게 한다`);
+          await callCodex({
+            prompt: NUDGE_PROMPT,
+            agentId: targetAgentId,
+            cwd: agent.workspace_path ?? undefined,
+            codexHome: codexHomeFor(agent),
+            resumeSessionId: result.sessionId ?? priorSessionId ?? undefined,
+          } as never);
+        } catch { /* 재촉 실패가 원래 턴 결과를 바꾸지 않는다 */ }
+      }
     }
     stores.artifactStore.record({
       agentId: targetAgentId,
@@ -373,7 +411,7 @@ export function makeCodexAdapter(
           };
 
       // lease-safe: 턴 detach, wake는 즉시 반환(claim-tick 블록 방지).
-      void runTurn(db, agents, agent, row, teamContext, callCodex, turnStores).finally(() => inFlight.delete(key));
+      void runTurn(db, agents, agent, row, teamContext, callCodex, turnStores, deps.nudgeOnUnsentReply ?? !isTestRun()).finally(() => inFlight.delete(key));
       return { ok: true, detail: "codex_dispatched" };
     },
   };
