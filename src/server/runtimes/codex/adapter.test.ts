@@ -360,8 +360,10 @@ describe("codex adapter — 핵심 정확성", () => {
     expect(seen[0]?.sandbox).toBe("workspace-write");
     expect(seen[0]?.networkAccess).toBe(true);
     expect(seen[0]?.writableRoots).toEqual(["/tmp"]);
-    expect(seen[0]?.prompt).toContain('"sandbox": "workspace-write"');
-    expect(seen[0]?.prompt).toContain('"networkAccess": true');
+    // ★프롬프트에는 샌드박스를 싣지 않는다★ — codex 설정이 정하는 값이라 여기 또 쓰면 한쪽이 낡는다.
+    //   실제로 낡아 있었다: 봉투가 "read-only" 를 싣는 동안 codex 는 workspace-write 로 돌았다.
+    expect(seen[0]?.prompt).not.toContain('"sandbox"');
+    expect(seen[0]?.prompt).not.toContain('"networkAccess"');
   });
 
   test("permission preflight blocks workspace-write before spawning codex when no grant exists", async () => {
