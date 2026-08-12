@@ -835,7 +835,7 @@ export async function sendApprovalToMemberRoom(
   agentId: string,
   requestId: string,
   req: ApprovalRequest,
-  deps: { token?: string; chatId?: string; fetchFn?: typeof fetch } = {},
+  deps: { token?: string; chatId?: string; fetchFn?: typeof fetch; resolveDestination?: () => string | null } = {},
 ): Promise<boolean> {
   const paths = codexBridgePaths(agentId);
   let token = deps.token;
@@ -850,7 +850,10 @@ export async function sendApprovalToMemberRoom(
   //   그러면 ★보안 질문이 단체방에 뜬다.★ 인가 목록을 목적지로 쓰면 안 된다.
   //
   //   모르면 ★보내지 않는다.★ 아무 방에나 띄우는 것보다 안 뜨는 게 낫다(fail-closed).
-  const chatId = deps.chatId ?? resolveOwnerDmId();
+  //   ★목적지 해석기를 주입 가능하게 둔다★ — 그래야 시험이 "인가 목록" 과 "팀 리드 DM" 을
+  //   ★서로 다른 값으로★ 놓고 어느 쪽을 쓰는지 실제로 가를 수 있다. 이 기계에서는 두 값이 우연히
+  //   같아서, 주입 없이는 옛 버그 코드로 되돌려도 시험이 초록으로 통과한다(스티브 지적 2026-08-12).
+  const chatId = deps.chatId ?? (deps.resolveDestination ?? resolveOwnerDmId)();
   if (!token || !chatId) return false;
 
   // ★간결하게★ — 사람이 폰에서 한눈에 보고 누른다. 무엇을 하려는지 한 줄, 그 아래 대상.

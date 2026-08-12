@@ -298,22 +298,27 @@ test("이미 결정된 요청은 만료가 덮어쓰지 않는다", () => {
 // 그걸 목적지로 쓰면 ★팀 리드 DM 이 비었을 때 첫 항목이 팀 그룹★ 이 되어
 // ★보안 질문이 단체방에 뜬다.★ 목적지는 팀 리드 DM 이고, 모르면 보내지 않는다.
 
-test("★인가 목록을 목적지로 쓰지 않는다★ — 팀 그룹으로 새면 보안 질문이 단체방에 뜬다", async () => {
+test("★인가 목록이 아니라 팀 리드 DM 으로 간다★ — 두 값을 다르게 놓고 가른다", async () => {
+  // ★이 기계에서는 allowFrom[0] 과 팀 리드 DM 이 우연히 같다.★ 그래서 기대값을 피험 함수에서
+  // 뽑으면 옛 버그 코드(allowFrom[0])로 되돌려도 초록이다 — 실제로 그랬다(스티브 지적).
+  // 두 값을 ★서로 다르게★ 놓아야 어느 쪽을 쓰는지 갈린다.
   const sent: Record<string, unknown>[] = [];
   const fetchFn = (async (_u: string, init: { body: string }) => { sent.push(JSON.parse(init.body)); return { ok: true } as Response; }) as unknown as typeof fetch;
-  // chatId 를 명시하지 않으면 팀 리드 DM 으로 간다(인가 목록 첫 항목이 아니라).
-  const { resolveOwnerDmId } = await import("./launcher");
-  const owner = resolveOwnerDmId();
-  const ok = await sendApprovalToMemberRoom("dex", "prm_x1", { method: "m", params: { command: "ls" } }, { token: "T", fetchFn });
-  if (owner) {
-    expect(ok).toBe(true);
-    expect(String(sent[0]!.chat_id)).toBe(String(owner));
-  } else {
-    expect(ok).toBe(false); // ★모르면 안 보낸다★
-    expect(sent).toHaveLength(0);
-  }
+  const OWNER_DM = "111111111"; // 팀 리드 DM (정답)
+  const ok = await sendApprovalToMemberRoom("dex", "prm_x1", { method: "m", params: { command: "ls" } },
+    { token: "T", fetchFn, resolveDestination: () => OWNER_DM });
+  expect(ok).toBe(true);
+  expect(String(sent[0]!.chat_id)).toBe(OWNER_DM); // allowFrom[0] 를 쓰면 이 값이 안 나온다
 });
 
+test("★목적지를 모르면 보내지 않는다★ (fail-closed) — 아무 방에나 띄우는 것보다 안 뜨는 게 낫다", async () => {
+  const sent: unknown[] = [];
+  const fetchFn = (async () => { sent.push(1); return { ok: true } as Response; }) as unknown as typeof fetch;
+  const ok = await sendApprovalToMemberRoom("dex", "prm_x2", { method: "m", params: { command: "ls" } },
+    { token: "T", fetchFn, resolveDestination: () => null });
+  expect(ok).toBe(false);
+  expect(sent).toHaveLength(0);
+});
 test("★재시작해도 만료가 유효하다★ — 만료가 대기 프로세스 메모리에만 있으면 행이 영원히 pending", async () => {
   // 빌 리뷰: 서버가 대기 중 재시작하면 아무도 그 행을 안 닫는다. 행이 스스로 말해야 한다.
   const db = new ApprDb(":memory:"); apprMigrate(db);
