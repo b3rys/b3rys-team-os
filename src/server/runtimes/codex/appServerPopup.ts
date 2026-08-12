@@ -821,6 +821,11 @@ export function oversizedForReview(req: ApprovalRequest): number | null {
   return len > COMMAND_REVIEW_LIMIT ? len : null;
 }
 
+/** 지금이 시험 실행인가. 시험이면 실제 전송을 막는다(fetchFn 을 넣어 준 시험은 그 가짜로 검증한다). */
+export function isTestRun(): boolean {
+  return process.env.NODE_ENV === "test" || process.env.BUN_TEST === "1" || Boolean(process.env.B3OS_TEST);
+}
+
 /**
  * ★승인 요청을 그 팀원 방에 띄운다.★
  *
@@ -837,6 +842,12 @@ export async function sendApprovalToMemberRoom(
   req: ApprovalRequest,
   deps: { token?: string; chatId?: string; fetchFn?: typeof fetch; resolveDestination?: () => string | null } = {},
 ): Promise<boolean> {
+  // ★시험 중에는 진짜 텔레그램으로 보내지 않는다.★ (2026-08-12 사고)
+  //   requestApprovalPopup 을 지나는 시험이 deps 없이 이 함수를 부르면 ★실제 토큰·실제 방★ 으로
+  //   메시지가 나간다. 실제로 나갔다 — 팀 리드 방에 'echo hi' 'src/x.ts' 같은 ★시험 픽스처가 승인창으로★
+  //   떴다. 시험을 돌릴 때마다 반복됐다. 보내는 함수는 스스로 이걸 막아야 한다.
+  if (isTestRun() && !deps.fetchFn) return false;
+
   const paths = codexBridgePaths(agentId);
   let token = deps.token;
   if (!token) {

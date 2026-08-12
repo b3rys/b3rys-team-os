@@ -339,3 +339,25 @@ test("대조군 — 만료 전이면 계속 기다린다(아무거나 만료로 
   expect(await pollDecision(db, id, 5_000, 5)).toBe("approved");
   db.close();
 });
+
+// ── ★시험이 진짜 텔레그램으로 나가면 안 된다★ (2026-08-12 사고) ──
+//
+// requestApprovalPopup 을 지나는 시험이 deps 없이 sendApprovalToMemberRoom 을 부르면
+// ★실제 토큰·실제 방★ 으로 나간다. 실제로 나갔다 — 팀 리드 방에 'echo hi' 'src/x.ts' 같은
+// ★시험 픽스처가 승인창으로★ 떴고, 시험을 돌릴 때마다 반복됐다.
+// 라이브 DB 에는 흔적이 없었다(시험은 :memory: 를 쓴다) — ★전송만 진짜였다.★
+
+test("★시험 중에는 실제 전송을 하지 않는다★ — 픽스처가 팀 리드 방에 뜨면 안 된다", async () => {
+  // fetchFn 을 안 주면 = 진짜로 보내려는 것. 시험 중에는 무조건 막는다.
+  const ok = await sendApprovalToMemberRoom("dex", "prm_guard", { method: "m", params: { command: "echo hi" } });
+  expect(ok).toBe(false);
+});
+
+test("대조군 — fetchFn 을 준 시험은 그 가짜로 정상 검증된다(가드가 과잉이 아니다)", async () => {
+  const sent: unknown[] = [];
+  const fetchFn = (async () => { sent.push(1); return { ok: true } as Response; }) as unknown as typeof fetch;
+  const ok = await sendApprovalToMemberRoom("dex", "prm_guard2", { method: "m", params: { command: "echo hi" } },
+    { token: "T", chatId: "1", fetchFn });
+  expect(ok).toBe(true);
+  expect(sent).toHaveLength(1);
+});

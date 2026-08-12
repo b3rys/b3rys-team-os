@@ -71,14 +71,13 @@ test("★봉투가 '보내야 말한 것' 을 명시하고 실제 명령을 준�
   const { db, agent, row } = setup();
   const b = new CodexTurnEnvelopeBuilder(db);
   const env = b.buildForBus({ agent, row, teamContext: "" });
-  expect(env.expectedOutput.deliveryIsNotAutomatic).toBe(true);
-  const cmd = env.expectedOutput.howToReply ?? "";
+  const cmd = env.howToReply;
   expect(cmd).toContain("send.sh");
   expect(cmd).toContain("--thread t1"); // 스레드가 박혀 있어야 조립 실수가 없다
   expect(cmd).toContain("--to bill");   // 요청한 사람에게 간다
   expect(cmd).toContain("--in-reply-to");
 
   const prompt = b.toPrompt(env);
-  expect(prompt).toContain("NOT delivered automatically"); // 프롬프트에도 나와야 모델이 읽는다
+  expect(prompt).toContain("MUST run"); // 프롬프트에 실제 명령이 나와야 모델이 보낸다
   expect(prompt).toContain("send.sh");
 });
