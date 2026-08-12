@@ -29,6 +29,10 @@ export interface CodexTurnEnvelope {
   memoryRefs: CodexMemoryRef[];
   expectedOutput: {
     format: "final_reply";
+    /** ★서버가 답을 대신 게시하지 않는다★ — 보내야 말한 것이다(turn_completed_no_autopost). */
+    deliveryIsNotAutomatic?: boolean;
+    /** 이 턴의 답을 실제로 보내는 명령(스레드·in-reply-to 포함). */
+    howToReply?: string;
     mustInclude: string[];
     stopRule: string;
   };
@@ -76,6 +80,12 @@ export class CodexTurnEnvelopeBuilder {
         format: "final_reply",
         mustInclude: ["concise result", "blocked reason if blocked", "tests or verification when code changed"],
         stopRule: "Stop and report if required approval, credentials, destructive action, or external side effect is needed.",
+        // ★네 최종 답변은 자동으로 전달되지 않는다.★ 서버는 턴 결과를 게시하지 않는다
+        //   (turn_completed_no_autopost — 모든 런타임 공통). ★보내야 말한 것이다.★
+        //   실측 2026-08-12: 턴은 성공했는데 이 문장이 없어서 dex 가 답을 안 보냈다 —
+        //   일을 다 하고도 팀에는 아무것도 안 도착했다.
+        deliveryIsNotAutomatic: true,
+        howToReply: this.replyCommand(input.row),
       },
     };
   }
@@ -87,7 +97,18 @@ export class CodexTurnEnvelopeBuilder {
       "",
       "[Instruction]",
       "Answer the current turn using the envelope above. The envelope labels external input and safety rules explicitly.",
+      "",
+      "★Your final answer is NOT delivered automatically.★ Nothing you write here reaches anyone.",
+      `To actually reply you MUST run: ${envelope.expectedOutput.howToReply ?? "the team send script"}`,
+      "If you finish the work but do not run it, the team sees no answer at all.",
     ].join("\n");
+  }
+
+  /** ★이 턴의 답을 실제로 보내는 명령.★ 스레드·in-reply-to 를 박아 준다(사람이 조립하다 틀리지 않게). */
+  private replyCommand(row: PendingDispatchRow): string {
+    const repo = process.env.B3OS_REPO_ROOT ?? `${process.env.HOME ?? "~"}/Development/b3rys-team-os`;
+    const to = row.from_agent_id ? `--to ${row.from_agent_id}` : "--direct-to-gd";
+    return `${repo}/skills/b3os-team-inbox/scripts/send.sh ${to} --thread ${row.thread_id} --in-reply-to ${row.message_id} --body '<your answer>'`;
   }
 
   private findTaskState(row: PendingDispatchRow): CodexTurnEnvelope["taskState"] {

@@ -93,3 +93,25 @@ describe("CodexTurnEnvelopeBuilder", () => {
     expect(teamRefs.some((ref) => ref.summary.includes("bare private"))).toBe(false);
   });
 });
+
+// ── ★답은 자동으로 전달되지 않는다★ (실측 2026-08-12) ──
+//
+// 턴은 성공했는데 dex 가 send.sh 를 안 불러서 ★팀에는 아무것도 도착하지 않았다.★
+// 일은 다 하고(파일 읽고 정리하고) 마지막 한 걸음을 안 했다.
+// 서버는 어떤 런타임에서도 답을 대신 게시하지 않는다(turn_completed_no_autopost).
+
+test("★봉투가 '보내야 말한 것' 을 명시하고 실제 명령을 준다★", () => {
+  const { db, agent, row } = setup();
+  const b = new CodexTurnEnvelopeBuilder(db);
+  const env = b.buildForBus({ agent, row, teamContext: "" });
+  expect(env.expectedOutput.deliveryIsNotAutomatic).toBe(true);
+  const cmd = env.expectedOutput.howToReply ?? "";
+  expect(cmd).toContain("send.sh");
+  expect(cmd).toContain("--thread t1"); // 스레드가 박혀 있어야 조립 실수가 없다
+  expect(cmd).toContain("--to bill");   // 요청한 사람에게 간다
+  expect(cmd).toContain("--in-reply-to");
+
+  const prompt = b.toPrompt(env);
+  expect(prompt).toContain("NOT delivered automatically"); // 프롬프트에도 나와야 모델이 읽는다
+  expect(prompt).toContain("send.sh");
+});
