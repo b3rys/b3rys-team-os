@@ -18,6 +18,8 @@ export interface CodexTurnEnvelope {
     owner: string | null;
     description: string | null;
   };
+  /** 팀 맥락 — 모든 런타임 공통(wakeDispatcher.buildTeamContext). */
+  teamContext?: string;
   /** 이 턴의 답을 실제로 보내는 명령(스레드·in-reply-to 포함). 안 보내면 아무도 못 본다. */
   howToReply: string;
 }
@@ -49,6 +51,11 @@ export class CodexTurnEnvelopeBuilder {
       messageId: input.row.message_id,
       surface: "team_bus",
       goal: input.row.body,
+      // ★팀 컨텍스트는 런타임 무관 공통이다★ — claude·b3osNative 도 같은 값을 받는다
+      //   (wakeDispatcher.buildTeamContext). 팀 리드 2026-08-12: "다른 팀원과 똑같이 주입되면 됨."
+      //   한때 중복으로 보고 뺐는데, 그러면 ★codex 팀원만 팀 맥락을 못 받는다.★
+      //   codex 전용으로 더 얹었던 conversation 은 계속 뺀다(그건 이 위에 얹은 중복이었다).
+      teamContext: input.teamContext || undefined,
       taskState: this.findTaskState(input.row),
       // ★답을 실제로 보내는 명령.★ 서버는 턴 결과를 대신 게시하지 않는다
       //   (turn_completed_no_autopost — 모든 런타임 공통). 보내야 말한 것이다.
