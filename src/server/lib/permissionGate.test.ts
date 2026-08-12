@@ -204,3 +204,15 @@ test("★팀원 요청은 op 대기열에 안 들어간다★ — 그 팀원 방
 test("대조군 — 팀원이 아닌 시스템 작업은 op 대기열로 간다(둘 다 0이면 시험이 죽은 것)", () => {
   expect(opQueueCountFor(undefined).queued).toBe(1);
 });
+
+test("★팀원 요청도 감사기록은 남는다★ — op 대기열만 건너뛰는 것이지 흔적까지 빼는 게 아니다", () => {
+  const db = new OpDb(":memory:");
+  opMigrate(db);
+  opRequest(db, {
+    agent: { id: "dex", workspace_path: "/tmp/ws" }, agent_id: "dex",
+    runtime: "codex", action: "shell", command: "echo hi", cwd: "/tmp/ws",
+  } as never);
+  const audits = (db.query("select count(*) as n from perm_request_audit").get() as { n: number }).n;
+  expect(audits).toBeGreaterThan(0);
+  db.close();
+});

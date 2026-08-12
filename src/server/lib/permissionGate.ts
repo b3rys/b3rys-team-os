@@ -287,7 +287,11 @@ export function requestPermission(db: Database, op: PermissionOperation): { deci
   //   팀 리드 방으로 올라가던 경로였다. 팀원 것은 그 팀원 방으로 간다
   //   (codex 런타임: appServerPopup.sendApprovalToMemberRoom → 브리지가 버튼 처리).
   //   agent_id 가 없는 것 = 특정 팀원의 일이 아닌 시스템 작업 → op 방이 맞다.
-  if (op.agent_id) return { decision: "approval_required", reasons: [], request };
+  //   ★감사기록은 어느 쪽이든 남긴다★ — 아래 enqueue 만 건너뛴다(기록까지 빠지면 팀원 요청은 흔적이 없다).
+  if (op.agent_id) {
+    appendPermissionAudit(db, { request_id: id, scope_key, op, target, decision: "requested", approver: null, provenance: op.provenance ?? {} });
+    return { decision: "approval_required", reasons: [], request };
+  }
   enqueueApproval(db, {
     action_key: "permission_gate",
     params: {
