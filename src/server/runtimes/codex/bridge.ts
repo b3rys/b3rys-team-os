@@ -672,7 +672,16 @@ export async function handleApprovalCallback(
     //   우리 DB 에 영구 권한을 쌓지 않는다 — 그건 취소 경로가 없었다. 설정은 사람이 열어서 지울 수 있다.
     if (decision === "allow_always") {
       const target = (row as { target?: string }).target;
-      if (target) {
+      // ★target 이 경로일 때만 설정에 쓴다.★ (2026-08-13 — 하네스 적대 검증에서 잡힘)
+      //   `targetForOperation` 은 ★shell 작업의 target 을 "명령 문자열" 로 만든다.★ 그대로 넘기면
+      //   `dirname("sudo whoami")` = "." · `dirname("rm -rf /Users/…/b3rys-team-os")` = "rm -rf /Users/…/Development"
+      //   같은 ★쓰레기 값이 writable_roots 에 박힌다.★ 설정 파일은 사람이 읽는 유일한 기록이라
+      //   거기에 거짓이 들어가면 안 된다. ⇒ 절대경로 하나(공백 없음)만 통과시킨다.
+      const looksLikePath = Boolean(target) && /^\/[^\s]*$/.test(target as string);
+      if (target && !looksLikePath) {
+        console.log(`[codex-bridge] 항상 허용 → 설정 기록 건너뜀(경로가 아님): ${target.slice(0, 60)}`);
+      }
+      if (target && looksLikePath) {
         try {
           const { addWritableRoot } = await import("./persistAlwaysAllow");
           const { codexBridgePaths } = await import("./launcher");

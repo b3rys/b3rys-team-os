@@ -57,33 +57,19 @@ export function codexRuntimePreflight(
   const agent = (hasDb ? agentOrSandbox : dbOrAgent) as PermissionAgent;
   const sandbox = (hasDb ? sandboxOrNetworkAccess ?? "read-only" : agentOrSandbox ?? "read-only") as CodexSandboxMode;
   const networkAccess = (hasDb ? networkAccessOrCtx : sandboxOrNetworkAccess) as boolean | undefined;
-  const ctx = (hasDb ? maybeCtx : networkAccessOrCtx) as PermissionContext | undefined;
-  const workspaceRoot = ctx?.workspaceRoot ?? agent.workspace_path;
-  const preflightCtx = { ...ctx, workspaceRoot };
-  const sandboxCheck = safeCheckPermission(agent, { kind: "sandbox", sandbox }, preflightCtx);
-  if (sandboxCheck.tier !== "allow") {
-    return persistCodexPermissionRequest(db, sandboxCheck, {
-      runtime: "codex",
-      agent_id: agent.id,
-      action: "sandbox",
-      text: sandboxCheck.scope ?? sandbox,
-      requested_by: "codex-adapter",
-      provenance: { rule: sandboxCheck.rule, sandbox },
-    }, !db || Boolean(ctx));
-  }
-  if (networkAccess) {
-    const networkCheck = safeCheckPermission(agent, { kind: "network", target: "*" }, preflightCtx);
-    if (networkCheck.tier !== "allow") {
-      return persistCodexPermissionRequest(db, networkCheck, {
-        runtime: "codex",
-        agent_id: agent.id,
-        action: "network",
-        egress_url: networkCheck.scope?.replace(/^net:/, "") ?? "*",
-        requested_by: "codex-adapter",
-        provenance: { rule: networkCheck.rule, networkAccess },
-      }, !db || Boolean(ctx));
-    }
-  }
+  void hasDb; void db; void agent; void sandbox; void networkAccess;
+  void (hasDb ? maybeCtx : networkAccessOrCtx);
+  // ★턴이 시작되기 전에 우리가 막지 않는다.★ (팀 리드 2026-08-13)
+  //
+  //   전에는 여기서 샌드박스·네트워크를 우리 기준으로 미리 검사하고, 걸리면 ★턴을 아예 시작하지 않았다.★
+  //   그 기준은 우리 코드(`permissionGate` Tier-D)에 하드코딩된 것이라 사람이 볼 수도 고칠 수도 없었다.
+  //
+  //   ★다른 팀원과 비교하면 codex 만 이랬다★ (2026-08-13 실측 — 우리 차단목록 참조 파일 수):
+  //     claude 0 · hermes 0 · openclaw 0 · b3osNative 0 · ★codex 6★
+  //   나머지는 그 도구 자체 설정(클로드 settings.json · 헤르메스 자체 기능)을 쓰거나 아예 없다.
+  //
+  //   이제 경계는 ★codex 설정(config.toml 의 sandbox_mode · approval_policy · writable_roots)★ 이 정하고,
+  //   그 밖의 일은 ★codex 가 승인창으로 물어 사람이 정한다.★ 우리는 그 사이에 끼지 않는다.
   return null;
 }
 

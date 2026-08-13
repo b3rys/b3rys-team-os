@@ -203,20 +203,26 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     expect(calls.prompts[0]?.writableRoots).toEqual(["/tmp/cody"]);
   });
 
-  test("permission preflight blocks workspace-write before Codex turn", async () => {
-    const { deps, calls } = spies(() => {
-      throw new Error("runTurn must not be called when permission gate blocks");
-    });
+  // ★계약이 바뀌었다★ (팀 리드 2026-08-13 · 다른 런타임과의 일관성).
+  //   예전 이름: "permission preflight blocks workspace-write before Codex turn" —
+  //   grant 없이 workspace-write 면 브리지가 턴을 안 돌리고 "⚠️ 권한 게이트가 …막았습니다" 로 답했다.
+  //   우리 코드로 차단목록을 얹은 런타임이 codex 뿐이라 판정을 뺐다. 경계는 codex 설정이 정한다.
+  test("★grant 없이도 workspace-write 턴은 그대로 돈다★ — 브리지 앞 우리 판정을 뺐다", async () => {
+    const { deps, calls } = spies(() => ok("답입니다"));
     const r = await handleMessage(123, "파일 써줘", 55, {
       ...deps,
       agentId: "cody",
       workdir: "/tmp/cody",
       sandbox: "workspace-write",
+      // ★permissionContext(설정-grant)를 일부러 안 준다★ — 예전엔 이것 때문에 매 턴 막혔다.
+      //   바로 위 시험(grant 를 주는 경우)과 이제 ★결과가 같아야 한다★ = 통과 여부가 grant 에 안 달렸다.
     });
-    expect(r.ok).toBe(false);
-    expect(r.detail).toContain("permission_ask:tier-a.workspace-write");
-    expect(calls.prompts.length).toBe(0);
-    expect(calls.edits[0]?.text).toContain("권한 게이트");
+    expect(r.ok).toBe(true);        // 예전 false
+    expect(r.detail).toBe("delivered"); // 예전 permission_ask:tier-a.workspace-write
+    expect(calls.prompts.length, "★브리지 앞 차단이 되살아났다★ — 두뇌 턴이 안 돌았다").toBe(1);
+    expect(calls.prompts[0]?.sandbox).toBe("workspace-write"); // 샌드박스 값은 그대로 codex 로 간다
+    expect(calls.edits[0]?.text).toBe("답입니다");
+    expect(calls.edits.some((e) => e.text.includes("권한 게이트"))).toBe(false);
   });
 
   test("one-shot 예약 요청은 두뇌 턴으로 넘기지 않고 즉시 안내한다", async () => {
