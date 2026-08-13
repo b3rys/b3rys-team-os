@@ -177,7 +177,10 @@ function tomlString(value: string): string {
  * 그래서 codex 본래 모델(sandbox_mode + approval_policy)로 간다:
  *   작업 폴더 안  → 그냥 실행
  *   작업 폴더 밖  → ★사람에게 묻고, 누르면 실제로 열린다★
- *   '항상 허용'   → 이 파일의 writable_roots 에 적힌다(권한이 설정에 남는다)
+ *   '항상 허용'   → ★지금은 이 파일을 넓히지 않는다.★ (2026-08-13)
+ *     승인 행의 target 은 '파일 1개 · add /경로 #지문' 같은 ★사람이 읽는 문자열★ 이라 경로가 아니다.
+ *     그걸 폴더로 쓰면 writable_roots 에 쓰레기 값이 박힌다 — 그래서 절대경로일 때만 쓰고, 지금은 통과하지 않는다.
+ *     ★이 파일의 sandbox_mode·writable_roots 가 곧 유일한 경계다★ — 우리 코드에는 차단 판정이 없다.
  */
 export function renderLockedDownCodexConfig(p: Pick<CodexBridgePaths, "workdir">): string {
   return [
