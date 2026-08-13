@@ -258,6 +258,48 @@ test("★그 팀원 봇으로, 버튼 3개를 붙여 보낸다★", async () => 
   expect(kb.map((b) => b.callback_data)).toEqual(["pg1:prm_abc123", "pga:prm_abc123", "pgd:prm_abc123"]);
 });
 
+test("★위험 표시가 카드에 실린다 — 우리가 안 막으면 사람이 판단할 근거는 줘야 한다★", async () => {
+  // 우리 차단목록을 걷어낸 뒤(팀 리드 2026-08-13), 위험 명령도 카드로 올라온다.
+  // ★그 카드가 위험을 말하지 않으면 `sudo rm -rf /` 와 `ls` 가 폰에서 생김새가 같다.★ (빌 리뷰)
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetchFn = (async (_u: string, init: { body: string }) => {
+    calls.push({ body: JSON.parse(init.body) });
+    return { ok: true } as Response;
+  }) as unknown as typeof fetch;
+
+  await sendApprovalToMemberRoom(
+    "dex", "prm_risk",
+    { method: "item/commandExecution/requestApproval", params: { command: "sudo rm -rf /tmp/x" } },
+    { token: "T", chatId: "9", fetchFn, risks: ["sudo", "rm_rf"] },
+  );
+  const text = String(calls[0]!.body.text);
+  expect(text, "★위험 사유가 본문에 있어야 한다★").toContain("위험 표시");
+  expect(text).toContain("sudo");
+  expect(text).toContain("rm_rf");
+
+  // ★위험 건에는 '항상 허용' 을 주지 않는다★ — 막는 게 아니라 ★무인 반복★ 을 막는 것이다.
+  const kb = (calls[0]!.body.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard.flat();
+  expect(kb.map((b) => b.callback_data)).toEqual(["pg1:prm_risk", "pgd:prm_risk"]);
+});
+
+test("위험 표시가 없으면 카드는 그대로 — 버튼 3개 유지", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetchFn = (async (_u: string, init: { body: string }) => {
+    calls.push({ body: JSON.parse(init.body) });
+    return { ok: true } as Response;
+  }) as unknown as typeof fetch;
+
+  await sendApprovalToMemberRoom(
+    "dex", "prm_safe",
+    { method: "item/commandExecution/requestApproval", params: { command: "ls /tmp" } },
+    { token: "T", chatId: "9", fetchFn, risks: [] },
+  );
+  const text = String(calls[0]!.body.text);
+  expect(text, "안전한 건에는 위험 줄이 붙지 않는다").not.toContain("위험 표시");
+  const kb = (calls[0]!.body.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard.flat();
+  expect(kb.map((b) => b.callback_data)).toEqual(["pg1:prm_safe", "pga:prm_safe", "pgd:prm_safe"]);
+});
+
 test("토큰이나 방을 모르면 보내지 않는다(조용히 성공했다고 하지 않는다)", async () => {
   const fetchFn = (async () => ({ ok: true } as Response)) as unknown as typeof fetch;
   expect(await sendApprovalToMemberRoom("dex", "prm_a", { method: "m", params: {} }, { token: "T", chatId: "", fetchFn })).toBe(false);

@@ -9,7 +9,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { requestPermission, getPermissionRequest, type PermissionOperation } from "../../lib/permissionGate";
+import { requestPermission, getPermissionRequest, tierDReasons, type PermissionOperation } from "../../lib/permissionGate";
 import type { ApprovalRequest, ReviewDecision } from "./appServerClient";
 import { CodexApprovalCorrelationStore } from "./state";
 import { appendAudit } from "../../db/queries";
@@ -840,8 +840,13 @@ export async function sendApprovalToMemberRoom(
   agentId: string,
   requestId: string,
   req: ApprovalRequest,
-  deps: { token?: string; chatId?: string; fetchFn?: typeof fetch; resolveDestination?: () => string | null } = {},
+  deps: {
+    token?: string; chatId?: string; fetchFn?: typeof fetch; resolveDestination?: () => string | null;
+    /** ★위험 표시★ — tierDReasons 결과. 카드에 적고, 있으면 '항상 허용' 버튼을 빼는 근거가 된다. */
+    risks?: string[];
+  } = {},
 ): Promise<boolean> {
+  const risks = deps.risks ?? [];
   // ★시험 중에는 진짜 텔레그램으로 보내지 않는다.★ (2026-08-12 사고)
   //   requestApprovalPopup 을 지나는 시험이 deps 없이 이 함수를 부르면 ★실제 토큰·실제 방★ 으로
   //   메시지가 나간다. 실제로 나갔다 — 팀 리드 방에 'echo hi' 'src/x.ts' 같은 ★시험 픽스처가 승인창으로★
@@ -869,7 +874,10 @@ export async function sendApprovalToMemberRoom(
 
   // ★간결하게★ — 사람이 폰에서 한눈에 보고 누른다. 무엇을 하려는지 한 줄, 그 아래 대상.
   const { title, detail } = approvalSummary(req);
-  const text = detail ? `🔐 ${title}\n\n<code>${escapeHtml(detail)}</code>` : `🔐 ${title}`;
+  // ★위험 사유를 카드에 적는다.★ 우리가 대신 막지 않기로 했으면 ★판단 근거는 줘야 한다.★
+  //   이 줄이 없으면 `sudo rm -rf /` 와 `ls` 가 폰에서 생김새가 같다(빌 리뷰 2026-08-13).
+  const riskLine = risks.length ? `\n\n⚠️ 위험 표시: ${escapeHtml(risks.join(" · "))}` : "";
+  const text = (detail ? `🔐 ${title}\n\n<code>${escapeHtml(detail)}</code>` : `🔐 ${title}`) + riskLine;
   const doFetch = deps.fetchFn ?? fetch;
   try {
     const res = await doFetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -880,11 +888,20 @@ export async function sendApprovalToMemberRoom(
         text,
         parse_mode: "HTML",
         // ★한 줄에 셋★ — 폰에서 두 줄이면 자리만 먹는다(팀 리드 2026-08-12).
-        reply_markup: { inline_keyboard: [[
-          { text: "한번 허용", callback_data: `pg1:${requestId}` },
-          { text: "항상 허용", callback_data: `pga:${requestId}` },
-          { text: "거절", callback_data: `pgd:${requestId}` },
-        ]] },
+        // ★위험 표시가 붙은 건에는 '항상 허용' 을 주지 않는다.★ (빌 리뷰 2026-08-13)
+        //   우리가 막는 게 아니다 — 사람은 여전히 '한번 허용' 으로 실행할 수 있다.
+        //   막는 것은 ★무인 반복★ 이다: '항상 허용' 은 24시간 grant 를 만들어 그동안 카드가 다시 안 뜬다.
+        //   codex 자신도 위험한 것은 세션 단위로만 기억한다(acceptForSession).
+        reply_markup: { inline_keyboard: [risks.length
+          ? [
+              { text: "한번 허용", callback_data: `pg1:${requestId}` },
+              { text: "거절", callback_data: `pgd:${requestId}` },
+            ]
+          : [
+              { text: "한번 허용", callback_data: `pg1:${requestId}` },
+              { text: "항상 허용", callback_data: `pga:${requestId}` },
+              { text: "거절", callback_data: `pgd:${requestId}` },
+            ]] },
       }),
     });
     return res.ok;
@@ -943,10 +960,16 @@ export async function requestApprovalPopup(db: Database, req: ApprovalRequest, a
   }
 
   let requestId: string | undefined;
+  let risks: string[] = [];
   try {
     const op = buildOperationFromApproval(req, agentId, cwd);
+    // ★위험 사유를 카드에 싣는다.★ (2026-08-13 — 빌 리뷰에서 잡힘)
+    //   우리가 대신 막지 않기로 했으면 ★사람이 판단할 근거를 줘야★ 그 전제가 성립한다.
+    //   그 전까지 `sudo rm -rf /` 와 `ls` 가 폰에서 ★생김새가 같았다.★
+    risks = tierDReasons(op);
     const res = requestPermission(db, op); // ★팝업 생성(telegramCapture가 렌더)★
-    // requestPermission이 Tier-D면 deny로 즉시 반환(팝업 안 만듦) — 이중 안전.
+    // ※ Tier-D 로 여기서 deny 하던 "이중 안전" 은 없어졌다(팀 리드 2026-08-13 — 우리가 판정하지 않는다).
+    //   이 분기는 grant 조회 결과가 deny 일 때만 남아 있다. 위험 명령은 이제 ★카드로 올라간다.★
     if (res.decision === "deny") return "denied";
     if (res.decision === "allow") return "approved"; // 이미 grant 있으면 통과(기존 grant는 permissionGate가 벤팅)
     requestId = res.request?.id;
@@ -974,7 +997,7 @@ export async function requestApprovalPopup(db: Database, req: ApprovalRequest, a
   } catch { /* best-effort — 컬럼이 없어도 폴링 deadline 이 받쳐준다 */ }
 
   // ★그 팀원 방에 띄운다.★ 실패해도 요청 행은 남으므로 op 목록에서 여전히 보인다(조용히 사라지지 않는다).
-  const sent = await sendApprovalToMemberRoom(agentId, requestId, req);
+  const sent = await sendApprovalToMemberRoom(agentId, requestId, req, { risks });
   if (!sent) {
     try { appendAudit(db, agentId, "codex_approval_room_send_failed", req.method, { request_id: requestId }); } catch { /* best-effort */ }
   }
