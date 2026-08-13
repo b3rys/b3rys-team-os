@@ -306,10 +306,43 @@ describe("codex adapter — 핵심 정확성", () => {
     expect(repliesFrom(db, "system").length).toBe(1); // 같은 본문 → 60s 내 재통지 억제
   });
 
-  test("에이전트 요청(user 아님) + 실패 → 통지 안 함 (봇↔봇 루프 방지)", async () => {
+  test("★팀원 요청 + 실패 → 요청자에게 통지한다. 단 체인 밖 모양으로★ (봇↔봇 루프 방지)", async () => {
+    // ★계약이 바뀌었다★ — 전에는 '통지 안 함' 이었다. 그 가드가 막던 것은 "알리는 것" 이 아니라
+    //   ★"체인에 얹혀서 알리는 것"★ 이었다(in_reply_to + hop_count+1 → hop 한도 소모 → [전달 차단] 유발).
+    //   ★안 알리면 팀원이 시킨 일이 죽어도 아무도 모른다★ — 2026-08-13 실측: dex 위임 4건이 승인창 만료로
+    //   죽었는데 요청자 통지 0건이었고, 요청자는 "dex 가 실행을 안 한다" 로 오진했다.
     const db = setup();
     const fail: CodexCaller = async () => ({ ok: false, reply: "", detail: "boom", elapsedMs: 1 });
     await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "bill" }), "", fail);
+    const notices = repliesFrom(db, "system");
+    expect(notices.length, "요청자에게 통지 1건").toBe(1);
+    const n = notices[0]!;
+    expect(n.to_agent_id, "방이 아니라 ★요청자에게만★").toBe("bill");
+    expect(n.type).toBe("dm");
+    expect(n.source, "pingpong 검사는 source==='agent' 일 때만 돈다").toBe("system");
+    expect(n.in_reply_to, "★parent 없음 = 체인 밖★").toBeNull();
+    expect(n.hop_count, "★hop 한도와 무관★").toBe(0);
+    expect(String(n.body), "실패 사유가 실려야 진단이 된다").toContain("boom");
+  });
+
+  test("팀원 통지: 같은 실패는 두 번 알리지 않는다 — 단 ★다른 위임은 각각 알린다★", async () => {
+    const db = setup();
+    const fail: CodexCaller = async () => ({ ok: false, reply: "", detail: "boom", elapsedMs: 1 });
+    const same = row({ from_agent_id: "bill", message_id: "same-msg" });
+    await runTurn(db, agentsOf(db), codyOf(db), same, "", fail);
+    await runTurn(db, agentsOf(db), codyOf(db), same, "", fail);
+    expect(repliesFrom(db, "system").length, "같은 message_id = 1건").toBe(1);
+    // ★본문 기준 60초 창이었다면 여기서 묻혔다★ — 서로 다른 위임의 실패는 각각 보여야 한다.
+    await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "bill", message_id: "other-msg" }), "", fail);
+    expect(repliesFrom(db, "system").length, "다른 message_id = 추가 통지").toBe(2);
+  });
+
+  test("명부 밖·플랫폼 발신·자기 자신에게는 통지하지 않는다", async () => {
+    const db = setup();
+    const fail: CodexCaller = async () => ({ ok: false, reply: "", detail: "boom", elapsedMs: 1 });
+    await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "system", message_id: "m-sys" }), "", fail);
+    await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "ghost", message_id: "m-ghost" }), "", fail);
+    await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "cody", message_id: "m-self" }), "", fail);
     expect(allMessages(db)).toEqual([]);
   });
 
@@ -447,7 +480,14 @@ describe("codex adapter — 핵심 정확성", () => {
         "★succeeded artifact 에 reply_message_id 가 있다 = 서버가 턴 본문을 게시했다★ ([A] 회귀)",
       ).toBeNull();
     }
-    expect(allMessages(db)).toEqual([]);
+    // ★[A] 계약은 "서버가 ★팀원 이름으로★ 게시하지 않는다" 다★ — "아무것도 안 들어간다" 가 아니다.
+    //   m3 실패에는 이제 요청자(bill)에게 가는 ★system 통지 1건★ 이 들어간다(실패가 보여야 하므로).
+    //   그 통지는 from="system" 이라 팀원을 사칭하지 않는다 = [A] 회귀가 아니다.
+    expect(repliesFrom(db, "cody").length, "★팀원 이름으로 게시된 것은 0건★ ([A] 회귀 가드)").toBe(0);
+    const msgs = allMessages(db);
+    expect(msgs.length, "실패 1건 → system 통지 1건").toBe(1);
+    expect(msgs[0]?.from_agent_id).toBe("system");
+    expect(msgs[0]?.to_agent_id, "요청자에게만").toBe("bill");
   });
 
   test("inflight marker: runTurn 정상 종료 후 marker를 삭제한다", async () => {
