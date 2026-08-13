@@ -6,7 +6,10 @@
  *
  * 매핑: allowed_once→approved(★decision_scope 가 session 이면 approved_for_session★) ·
  * allowed_always→approved_for_session · denied/expired/timeout→denied.
- * ★안전: Tier-D는 여기 도달 전 judgeApproval에서 이미 denied(팝업 안 뜸). fail-closed: 에러/무응답→denied.★
+ * ★안전: Tier-D는 requestPermission(permissionGate)이 ★팝업을 만들기 전에★ deny 로 반환한다("이중 안전" 지점).
+ *   전에는 이 자리에 judgeApproval(우리 승인 판정)이 있었다. #316 에서 경계를 codex 설정으로 넘기며 그 판정을
+ *   경로에서 뺐고, 함수는 아무도 부르지 않는 채 남아 있다가 삭제됐다. ★주석만 남으면 없는 방어선을 있다고 읽는다.★
+ *   fail-closed(에러/무응답→denied)는 그대로다.
  */
 import { createHash, randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";

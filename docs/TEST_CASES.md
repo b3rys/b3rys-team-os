@@ -477,8 +477,6 @@
   - _(최상위 describe 없음 — test/it 7개. 이름은 파일에서 확인하세요)_
 - `src/server/runtimes/codex/adapter.test.ts`
   - codex adapter — 핵심 정확성
-- `src/server/runtimes/codex/appServerApproval.test.ts`
-  - _(최상위 describe 없음 — test/it 11개. 이름은 파일에서 확인하세요)_
 - `src/server/runtimes/codex/appServerClient.smoke.test.ts`
   - _(최상위 describe 없음 — test/it 4개. 이름은 파일에서 확인하세요)_
 - `src/server/runtimes/codex/appServerPopup.finalize.test.ts`
