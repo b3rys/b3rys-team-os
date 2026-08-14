@@ -8,6 +8,8 @@
  */
 import type { Database } from "bun:sqlite";
 import { CodexAppServerClient, type ReviewDecision } from "./appServerClient";
+import { requestApprovalPopup, PROCESS_INSTANCE } from "./appServerPopup";
+import { CodexApprovalCorrelationStore } from "./state";
 import { setActivityLine } from "../../db/queries";
 import type { CodexCaller, CodexTurnResult, CodexTurnOptions } from "./runner";
 import { registerActiveTurn, unregisterActiveTurn } from "./activeTurns";
@@ -22,6 +24,7 @@ const TURN_TIMEOUT_MS = Number(process.env.B3OS_CODEX_APPSERVER_TIMEOUT_MS ?? 30
 export function makeAppServerCaller(db: Database): CodexCaller {
   // ★Phase1 ③: 부팅/모드 활성 시 1회 orphan sweep — 이전 프로세스의 pending/decided 팝업을 orphaned로
   //   (재시작 후 옛 팝업이 새 turn에 재결합되지 않게). best-effort(스윕 실패가 caller 생성을 막지 않음).★
+  try { new CodexApprovalCorrelationStore(db).sweepOrphans(PROCESS_INSTANCE); } catch { /* best-effort */ }
   return (opts) => runViaAppServer(opts, db);
 }
 
@@ -86,13 +89,28 @@ export async function runViaAppServer(
         if (!db) return;
         try { setActivityLine(db, opts.agentId, line); } catch { /* 표시가 턴을 막지 않는다 */ }
       },
-      onApproval: async (): Promise<"denied"> => {
-        // codex 실행 모드가 approvalPolicy "never" 라 승인 요청은 오지 않는다.
-        // 그래도 프로토콜상 요청이 오면 답을 줘야 턴이 멈추지 않으므로 fail-closed 로 답한다.
-        // 판정은 codex 설정이 한다 — 여기서 우리가 다시 판정하지 않는다.
-        return "denied";
+      onApproval: async (req) => {
+        // ★codex 가 물으면 그 팀원 방에 띄우고, 사람이 누른 대로 답한다.★ (팀 리드 2026-08-12)
+        //
+        //   터미널이나 앱에서 codex 를 쓰면 경계 밖은 ★물어보고 사람이 누른다.★ 그게 원래 모습이다.
+        //   우리가 하는 일은 그 물음을 ★텔레그램 그 팀원 방으로 옮기는 것★ 이다 — 메인 작업은 codex 가 한다.
+        //
+        //   한때 여기서 무조건 거절한 적이 있다. 띄울 데가 없다는 이유였는데, 그건 옮겨온 게 아니라
+        //   ★기능을 뺀 것★ 이었다(팀 리드: "그걸 기본을 실패로 하면 헤르메스 대체를 실현할 수 있어?").
+        //   그 전에는 ★op 방★ 에 띄웠다 — op 방은 시스템 알림 자리다.
+        //
+        //   목적지는 ★이 턴의 주인★ 에서 뽑는다. 상수로 박으면 다시 남의 방으로 간다.
+        return db
+          ? await requestApprovalPopup(db, req, opts.agentId, opts.cwd)
+          : "denied"; // db 없는 caller 는 띄울 곳이 없다(테스트·도구 경로)
       },
     }, TURN_TIMEOUT_MS);
+    // ★Phase1 ③: 턴 종료 시 이 turn의 남은 pending/decided 팝업을 expire(cancel/interrupt/timeout 포함).
+    //   늦게 도착한 승인은 finalizeApprovalDelivery의 CAS가 expired 상태를 보고 이미 거부하지만, 여기서 상태를
+    //   확정 정리해 orphan 누적을 막는다. best-effort. (delivered/orphaned는 건드리지 않음.)★
+    if (db && threadId && r.turnId) {
+      try { new CodexApprovalCorrelationStore(db).expireTurn(threadId, r.turnId); } catch { /* best-effort */ }
+    }
     // ★정상 종료가 아니면 그 프로세스를 버린다.★ (2026-08-12 실측)
     //   상주로 바꾼 뒤 `appserver_interrupted` 가 났다 — 앞 턴의 서브에이전트가 아직 도는
     //   프로세스에 새 턴이 들어가면 서로 간섭한다. 재사용의 이득보다 ★턴 하나를 통째로 잃는★ 손해가 크다.

@@ -30,6 +30,7 @@ import type { CodexCaller, CodexTurnResult } from "./runner";
 import type { AgentRecord } from "../../types";
 import type { PendingDispatchRow } from "../../bus/types";
 import { clearRuntimeBlock, getRuntimeBlock } from "../../lib/runtimeBlocks";
+import { grantKey } from "../../lib/permissionGate";
 import { CodexInflightStore, CodexRunArtifactStore, CodexSessionStore } from "./state";
 import { CodexTurnEnvelopeBuilder } from "./envelope";
 
@@ -360,6 +361,43 @@ describe("codex adapter — 핵심 정확성", () => {
     expect(sessions(db)[0]?.codex_session_id).toBe("sess-2");
   });
 
+  test("agent-level codex sandbox/network config is passed after explicit permission grants", async () => {
+    const db = setup();
+    const agent = {
+      ...codyOf(db),
+      codex_sandbox: "workspace-write" as const,
+      codex_network_access: true,
+    };
+    const seen: Array<{ sandbox?: string; networkAccess?: boolean; writableRoots?: string[]; prompt: string }> = [];
+    const fake: CodexCaller = async (opts) => {
+      seen.push({
+        sandbox: opts.sandbox,
+        networkAccess: opts.networkAccess,
+        writableRoots: opts.writableRoots,
+        prompt: opts.prompt,
+      });
+      return okResult("권한 확인");
+    };
+
+    await runTurn(db, agentsOf(db), agent, row(), "", fake, {
+      sessionStore: new CodexSessionStore(db),
+      artifactStore: new CodexRunArtifactStore(db),
+      inflightStore: new CodexInflightStore(db),
+      envelopeBuilder: new CodexTurnEnvelopeBuilder(db),
+      permissionContext: {
+        grants: new Set([grantKey("cody", "workspace-write:/tmp")]),
+        networkAllowlist: ["*"],
+      },
+    });
+
+    expect(seen[0]?.sandbox).toBe("workspace-write");
+    expect(seen[0]?.networkAccess).toBe(true);
+    expect(seen[0]?.writableRoots).toEqual(["/tmp"]);
+    // ★프롬프트에는 샌드박스를 싣지 않는다★ — codex 설정이 정하는 값이라 여기 또 쓰면 한쪽이 낡는다.
+    //   실제로 낡아 있었다: 봉투가 "read-only" 를 싣는 동안 codex 는 workspace-write 로 돌았다.
+    expect(seen[0]?.prompt).not.toContain('"sandbox"');
+    expect(seen[0]?.prompt).not.toContain('"networkAccess"');
+  });
 
   // ★계약이 바뀌었다★ (팀 리드 2026-08-13 · 다른 런타임과의 일관성).
   //   예전 이름: "permission preflight blocks workspace-write before spawning codex when no grant exists" —

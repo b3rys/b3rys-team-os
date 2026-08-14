@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { runCodexTurn } from "../runtimes/codex/runner";
 import { codexBridgePaths } from "../runtimes/codex/launcher";
+import { codexRuntimePreflight } from "../runtimes/codex/permissions";
 
 export interface FirstModelCallResult {
   runtime: string;
@@ -53,6 +54,19 @@ async function runClaudeFirstModelCall(workdir?: string): Promise<FirstModelCall
 export async function verifyFirstModelCall(input: { id: string; runtime: string; workspacePath?: string }): Promise<FirstModelCallResult> {
   if (input.runtime === "codex") {
     const paths = codexBridgePaths(input.id);
+    const preflight = codexRuntimePreflight(
+      { id: input.id, workspace_path: input.workspacePath ?? paths.workdir },
+      "read-only",
+      false,
+    );
+    if (preflight) {
+      return {
+        runtime: "codex",
+        ok: false,
+        subscriptionNeeded: false,
+        detail: cleanDetail(`permission_${preflight.tier}:${preflight.rule}`),
+      };
+    }
     const result = await runCodexTurn({
       prompt: FIRST_MODEL_PROMPT,
       agentId: input.id, // ★필수★ — 승인 요청의 주인이 된다
