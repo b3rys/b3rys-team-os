@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb, migrate } from "../db/migrate";
@@ -920,11 +920,12 @@ describe("늦은 깨움은 봉투에 사실로 실린다", () => {
   // ★테스트가 라이브 agents.json 을 읽지 않게 격리한다★ — ambientAgents 의 기본 경로는
   // <repo>/agents.json 이고, 그건 팀 전체의 런타임 상태다(b3os-infra-safety ④).
   // 파일 하나를 tmp 에 새로 쓰고 TEAM_AGENT_REGISTRY 로 명시한다(캐시가 경로+mtime 키라 매번 새 파일).
-  let registryPath: string | undefined;
+  let registryDir: string | undefined;
   let prevRegistry: string | undefined;
   beforeEach(() => {
     prevRegistry = process.env.TEAM_AGENT_REGISTRY;
-    registryPath = join(mkdtempSync(join(tmpdir(), "b3os-sched-reg-")), "agents.json");
+    registryDir = mkdtempSync(join(tmpdir(), "b3os-sched-reg-"));
+    const registryPath = join(registryDir, "agents.json");
     writeFileSync(registryPath, JSON.stringify([
       { id: "dex", display_name: "Dex", role: "Codex runtime pilot", runtime: "codex",
         capabilities: ["learning_loop_pm", "coordinator"], enabled: true },
@@ -934,6 +935,10 @@ describe("늦은 깨움은 봉투에 사실로 실린다", () => {
   afterEach(() => {
     if (prevRegistry === undefined) delete process.env.TEAM_AGENT_REGISTRY;
     else process.env.TEAM_AGENT_REGISTRY = prevRegistry;
+    // ★만든 것은 지운다★ — 없으면 수트를 한 번 돌 때마다 tmpdir 에 이 describe 의 테스트 수만큼
+    // 디렉토리가 쌓인다(codex 리뷰 실측: 누적 80개). 검사가 남기는 쓰레기도 검사의 결함이다.
+    if (registryDir) rmSync(registryDir, { recursive: true, force: true });
+    registryDir = undefined;
   });
 
   function workloopJob(d: ReturnType<typeof db>, id = "sched_late_probe") {
@@ -969,11 +974,31 @@ describe("늦은 깨움은 봉투에 사실로 실린다", () => {
     const banner = lateWakeBanner(job, kst(2026, 8, 14, 8, 52));
     // ★시간+분을 둘 다 읽는다★ — 분을 버리면 3시간 52분이 "3시간" 으로 반올림돼도 통과한다.
     expect(banner).toContain("3시간 52분 늦게");
-    // ★프로세스 시간대에 의존하지 않는지 여기서 갈린다.★ bun test 는 TZ=UTC 로 도는데,
-    // 구현이 로컬 포맷을 쓰면 이 두 줄은 UTC(20:00 / 23:52)로 찍혀 실패한다.
+    // 이 두 줄은 job 시간대(Asia/Seoul) 기준이다. bun test 의 기본 TZ 는 UTC 라
+    // 구현이 로컬 포맷을 쓰면 UTC(20:00 / 23:52)로 찍혀 실패한다 — ★단 그건 기본 TZ 일 때만이다.★
+    // TZ=Asia/Seoul 로 돌리면 로컬 == job 시간대라 같은 문자열이 나온다(아래 별도 검사 참고).
     expect(banner).toContain("예정 2026-08-14 05:00");
     expect(banner).toContain("실제 2026-08-14 08:52");
     expect(banner).toContain("Asia/Seoul");
+  });
+
+  // ★위 검사만으로는 시간대 독립성을 못 잰다.★ job 시간대가 Asia/Seoul 이라, 프로세스도
+  // Asia/Seoul 이면 로컬 포맷과 결과가 같아진다 — 실제로 `timeZone` 을 지운 뮤턴트가
+  // TZ=Asia/Seoul 에서만 살아남았다(UTC·LA 에서는 죽음). 이미 보는 축으로 변이하면 안 잡힌다.
+  // 그래서 ★job 시간대를 프로세스와 겹치지 않을 값으로 둔 검사★ 를 따로 세운다.
+  // 예정 2026-08-13 20:00 UTC = 13:00 PDT, 232분 뒤 = 16:52 PDT.
+  test("배너 시각은 job 시간대를 따른다 — 프로세스 시간대가 무엇이든", () => {
+    const d = db();
+    const j = createCronJob(d, {
+      // LA 기준 목 13:00 = 서울 금 05:00 = DUE. 요일도 시간대를 따라 달라진다.
+      id: "sched_late_probe_la", title: "LA 예약", cron: "0 13 * * 4",
+      timezone: "America/Los_Angeles", createdBy: "system",
+      payload: learningPayload, from: new Date(DUE.getTime() - 1000),
+    });
+    const banner = lateWakeBanner(getScheduledJob(d, j.id)!, kst(2026, 8, 14, 8, 52));
+    expect(banner).toContain("예정 2026-08-13 13:00");
+    expect(banner).toContain("실제 2026-08-13 16:52");
+    expect(banner).toContain("America/Los_Angeles");
   });
 
   test("60분 미만은 '시간' 을 안 쓴다", () => {
