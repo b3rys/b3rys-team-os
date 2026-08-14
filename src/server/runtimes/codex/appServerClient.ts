@@ -59,11 +59,27 @@ export interface TurnResult {
 export interface ThreadStartOptions {
   cwd?: string;
   model?: string;
-  approvalPolicy?: string; // AskForApproval (예: on-request)
-  sandbox?: string; // SandboxMode
+  approvalPolicy?: string; // AskForApproval — untrusted | on-request | never
+  sandbox?: string; // SandboxMode — read-only | workspace-write | danger-full-access
+  /** 승인 주체. openclaw 는 "user" 를 명시한다. */
+  approvalsReviewer?: string;
   runtimeWorkspaceRoots?: string[];
   /** 있으면 thread/resume으로 이전 대화 이어감(멀티턴 맥락 유지, 정확성 #1). 실패 시 새 thread 폴백. */
   resumeThreadId?: string;
+}
+
+/**
+ * thread/start 의 `sandbox` 는 ★문자열★("danger-full-access"), turn/start 의 `sandboxPolicy` 는
+ * ★객체★({ type: "dangerFullAccess" }) 다. 같은 뜻인데 모양이 다르다 — openclaw 실측 대조로 확인.
+ * 근거: openclaw thread-lifecycle-DSMv62L1.js:2402~2405(문자열) · 2382~2384(객체).
+ */
+export function sandboxModeToTurnPolicyType(mode: string): string {
+  switch (mode) {
+    case "read-only": return "readOnly";
+    case "workspace-write": return "workspaceWrite";
+    case "danger-full-access": return "dangerFullAccess";
+    default: return mode; // 모르는 값은 그대로 — codex 가 거부하면 그게 답이다
+  }
 }
 
 interface Pending { resolve: (v: any) => void; reject: (e: any) => void; method: string; }
@@ -120,6 +136,13 @@ export class CodexAppServerClient {
   private nextId = 1;
   private pending = new Map<number, Pending>();
   private threadId: string | null = null;
+  /**
+   * ★실행 모드는 turn/start 에도 다시 명시한다.★ (2026-08-14, codex(openclaw) 실측 대조)
+   * openclaw 는 thread/start 와 turn/start ★양쪽 모두★ 에 명시한다
+   * (thread-lifecycle-DSMv62L1.js:2224~2226 · 2382~2384).
+   * thread 설정이 이어질 가능성은 있지만, 같은 모양으로 맞춰야 동작이 갈리지 않는다.
+   */
+  private turnPolicy: { approvalPolicy?: string; sandboxPolicy?: { type: string }; approvalsReviewer?: string } = {};
   /** ★공개★ — 진행 중 턴에 끼어들려면(steer) 밖에서 turnId 유무를 볼 수 있어야 한다. 쓰기는 내부에서만. */
   currentTurnId: string | null = null;
   private activeHandlers: RunTurnHandlers | null = null;
@@ -174,7 +197,14 @@ export class CodexAppServerClient {
     if (opts.model) params.model = opts.model;
     if (opts.approvalPolicy) params.approvalPolicy = opts.approvalPolicy;
     if (opts.sandbox) params.sandbox = opts.sandbox;
+    if (opts.approvalsReviewer) params.approvalsReviewer = opts.approvalsReviewer;
     if (opts.runtimeWorkspaceRoots) params.runtimeWorkspaceRoots = opts.runtimeWorkspaceRoots;
+    // turn/start 에 다시 실을 값 — sandbox 는 문자열(thread)이 아니라 ★객체(turn)★ 라 모양이 다르다.
+    this.turnPolicy = {
+      ...(opts.approvalPolicy ? { approvalPolicy: opts.approvalPolicy } : {}),
+      ...(opts.sandbox ? { sandboxPolicy: { type: sandboxModeToTurnPolicyType(opts.sandbox) } } : {}),
+      ...(opts.approvalsReviewer ? { approvalsReviewer: opts.approvalsReviewer } : {}),
+    };
     // ★정확성 #1: resumeThreadId 있으면 thread/resume으로 이전 맥락 이어감. 실패하면 새 thread 폴백(무맥락이라도 진행).★
     let id: string | undefined;
     if (opts.resumeThreadId) {
@@ -218,7 +248,11 @@ export class CodexAppServerClient {
       }, this.turnTimeoutMs);
       this.turnTimer = this.armTurnTimer();
       this.turnResolve = finish;
-      this.notify("turn/start", { threadId: this.threadId, input: [{ type: "text", text, text_elements: [] }] })
+      this.notify("turn/start", {
+        threadId: this.threadId,
+        input: [{ type: "text", text, text_elements: [] }],
+        ...this.turnPolicy, // ★thread 에 준 실행 모드를 턴에도 그대로★ (openclaw 와 같은 모양)
+      })
         .catch(() => finish({ finalText: "", status: "error", turnId: this.currentTurnId }));
     });
   }
