@@ -86,7 +86,7 @@ export function migrate(db: Database): void {
        decided_at TEXT,
        approver TEXT,
        provenance_json TEXT,
-       -- ★만료를 행 자신이 말한다★ (빌 리뷰 2026-08-12): 전에는 기다리는 프로세스의 메모리에만
+       -- ★만료를 행 자신이 말한다★: 전에는 기다리는 프로세스의 메모리에만
        -- 있어서, 그 프로세스가 대기 중 재시작하면 행이 영원히 pending 으로 남았다.
        expires_at TEXT
      )`,

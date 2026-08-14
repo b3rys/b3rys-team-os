@@ -7,7 +7,7 @@
  * 실측 검증(스파이크): initialize·thread/start·turn/start(스트리밍+응답)·turn/steer(expectedTurnId 필수)·
  * turn/interrupt(status=interrupted)·승인요청(execCommandApproval 등 ServerRequest). 전부 동작 확인.
  *
- * ★이 모듈은 순수 프로토콜 클라이언트다 — 팀 버스/permissionGate/텔레그램 배선은 상위(adapter)가 한다.★
+ * ★이 모듈은 순수 프로토콜 클라이언트다 — 팀 버스·텔레그램 배선은 상위(adapter)가 한다.★
  */
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import {
@@ -17,7 +17,7 @@ import {
 const CODEX_BIN = process.env.CODEX_BIN ?? "codex";
 const HANDSHAKE_TIMEOUT_MS = Number(process.env.B3OS_CODEX_APPSERVER_HANDSHAKE_MS ?? 45_000);
 
-/** 승인요청(ServerRequest) — 상위가 permissionGate/GD 팝업으로 판정해 decision을 돌려준다. */
+/** 승인요청(ServerRequest) — 상위가 decision 을 돌려준다. 실행 모드가 approvalPolicy never 라 실사용에서는 오지 않는다. */
 export interface ApprovalRequest {
   method: string; // execCommandApproval | applyPatchApproval | item/permissions/requestApproval | item/tool/requestUserInput ...
   params: Record<string, unknown>;
