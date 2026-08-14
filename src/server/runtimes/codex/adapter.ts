@@ -18,9 +18,7 @@ import { isAgentOff } from "../../lib/agentControl";
 import { clearRuntimeBlock, recordRuntimeBlock } from "../../lib/runtimeBlocks";
 import { runCodexTurn, type CodexCaller } from "./runner";
 import { makeAppServerCaller } from "./appServerRunner";
-import type { PermissionContext } from "../../lib/permissionGate";
 import { CodexTurnEnvelopeBuilder } from "./envelope";
-import { codexRuntimePreflight, codexConfiguredGrants } from "./permissions";
 import {
   CODEX_SURFACE_TEAM_BUS,
   CodexInflightStore,
@@ -29,7 +27,11 @@ import {
   sha256Short,
 } from "./state";
 import { steerActiveTurn } from "./activeTurns";
-import { isTestRun } from "./appServerPopup";
+
+/** 시험 실행 여부 — 시험에서는 실제 전송을 하지 않는다. */
+function isTestRun(): boolean {
+  return process.env.NODE_ENV === "test" || process.env.BUN_TEST === "1" || Boolean(process.env.B3OS_TEST);
+}
 
 const inFlight = new Set<string>();
 
@@ -50,7 +52,6 @@ export function inFlightCount(): number {
 export interface CodexAdapterDeps {
   /** 테스트 주입용 codex 호출 함수. 기본 = 실제 runCodexTurn. */
   callCodex?: CodexCaller;
-  permissionContext?: PermissionContext;
   sessionStore?: CodexSessionStore;
   artifactStore?: CodexRunArtifactStore;
   inflightStore?: CodexInflightStore;
@@ -111,8 +112,7 @@ export async function runTurn(
     artifactStore: CodexRunArtifactStore;
     inflightStore: CodexInflightStore;
     envelopeBuilder: CodexTurnEnvelopeBuilder;
-    permissionContext?: PermissionContext;
-  } = {
+    } = {
     sessionStore: new CodexSessionStore(db),
     artifactStore: new CodexRunArtifactStore(db),
     inflightStore: new CodexInflightStore(db),
@@ -135,27 +135,6 @@ export async function runTurn(
     stores.inflightStore.mark(row.message_id, targetAgentId, row.thread_id);
     const priorSessionId = stores.sessionStore.get(targetAgentId, CODEX_SURFACE_TEAM_BUS, conversationKey);
     const sandbox = codexSandboxFor(agent);
-    const preflight = codexRuntimePreflight(db, agent, sandbox, agent.codex_network_access ?? undefined, stores.permissionContext);
-    if (preflight) {
-      recordRuntimeBlock(targetAgentId, `codex permission blocked: ${preflight.rule} ${preflight.reason}`);
-      appendAuditFile(targetAgentId, "codex_permission_blocked", row.message_id, preflight);
-      stores.artifactStore.record({
-        agentId: targetAgentId,
-        messageId: row.message_id,
-        threadId: row.thread_id,
-        taskId,
-        codexSessionId: priorSessionId ?? null,
-        status: "failed",
-        detail: `permission_${preflight.tier}:${preflight.rule}`,
-        artifact: {
-          surface: CODEX_SURFACE_TEAM_BUS,
-          conversation_key: conversationKey,
-          permission: preflight,
-        },
-      });
-      postFailureNotice(db, agents, agent, row, `permission_${preflight.tier}:${preflight.rule}`);
-      return;
-    }
     const envelope = stores.envelopeBuilder.buildForBus({
       agent,
       row,
@@ -408,7 +387,6 @@ export function makeCodexAdapter(
     artifactStore: deps.artifactStore ?? new CodexRunArtifactStore(db),
     inflightStore: deps.inflightStore ?? new CodexInflightStore(db),
     envelopeBuilder: deps.envelopeBuilder ?? new CodexTurnEnvelopeBuilder(db),
-    permissionContext: deps.permissionContext,
   };
   return {
     async wake(targetAgentId, row, teamContext): Promise<WakeResult> {
@@ -439,26 +417,8 @@ export function makeCodexAdapter(
       }
       inFlight.add(key);
 
-      // ★관리자 설정(agents.json)을 grant로 seed(per-agent)★ — 미주입 시 preflight가 workspace-write/network를
-      // 매 턴 tier-a "ask"로 차단해 버스 경로 Dex도 구조적 실행불가(2026-07-05 fix, 브릿지와 동일 근본).
-      // ctx.workspaceRoot 미설정 → preflight가 agent.workspace_path 사용(per-agent 정확) + grant scope도 그에 맞춤.
-      // deps.permissionContext 명시 시엔 그대로 존중. Tier-D는 이 grant로도 통과 못 함(hardDeny 우선).
-      const turnStores = deps.permissionContext
-        ? stores
-        : {
-            ...stores,
-            permissionContext: {
-              grants: codexConfiguredGrants(
-                agent.id,
-                codexSandboxFor(agent),
-                agent.codex_network_access ?? undefined,
-                agent.workspace_path,
-              ),
-            },
-          };
-
       // lease-safe: 턴 detach, wake는 즉시 반환(claim-tick 블록 방지).
-      void runTurn(db, agents, agent, row, teamContext, callCodex, turnStores, deps.nudgeOnUnsentReply ?? !isTestRun()).finally(() => inFlight.delete(key));
+      void runTurn(db, agents, agent, row, teamContext, callCodex, stores, deps.nudgeOnUnsentReply ?? !isTestRun()).finally(() => inFlight.delete(key));
       return { ok: true, detail: "codex_dispatched" };
     },
   };

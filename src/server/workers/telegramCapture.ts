@@ -24,7 +24,6 @@ import { BODY_MAX_CHARS, buildDedupeKey } from "../../shared/envelopeSchema";
 import { getCaptureToken, isMcpEnabled, isRouterEnabled, getCaptureGroupId, getLocale, setMcpEnabled } from "../lib/captureConfig";
 import { pick, type Locale } from "../lib/i18n";
 import { rememberCaptureNonBotSender, rememberDiscoveredGroup } from "../lib/telegramLeadDetection";
-import { belongsToMemberRoom, decidePermissionRequest, getPermissionRequest, listPermissionRequests } from "../lib/permissionGate";
 import { activeOfficialMemberCount, isTeamOfficialMember, MAX_OFFICIAL_TEAM_MEMBERS } from "../lib/agentMembership";
 import { PUBLIC_BUILD } from "../routes/settings";
 
@@ -557,36 +556,13 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     const locale = getLocale(deps.db);
     const owner = pick(getLocale(deps.db), "팀장", "the team lead");
     const pending = listApprovals(deps.db, "pending");
-    const approvalPermIds = new Set(pending.map((r) => approvalParams(r).permission_request_id).filter(Boolean));
-    // ★팀원 승인은 op 방에 띄우지 않는다.★ (팀 리드 2026-08-12: "op방에 뜨는 건 시스템 알림종류야")
-    //   agent_id 가 있으면 그 팀원 방으로 간다(codex 런타임: 그 팀원 봇 + 브리지 콜백).
-    //   여기 남겨두면 같은 승인이 ★두 방에 뜬다.★
-    const pendingPerms = listPermissionRequests(deps.db, "pending")
-      .filter((r) => !approvalPermIds.has(r.id))
-      .filter((r) => !belongsToMemberRoom(r)); // ★판정은 permissionGate 한 곳★ (두 곳이면 한쪽만 고친다)
     const execNote = isExecutionEnabled() ? pick(locale, "탭하면 즉시 실행됩니다.", "Tapping runs it immediately.") : pick(locale, "실행 OFF — 탭하면 승인만(실행 안 함).", "Execution OFF — tapping only approves (does not run).");
-    if (!pending.length && !pendingPerms.length) {
+    if (!pending.length) {
       await sendViaTeamOp(pick(locale, `🔐 ${owner} 승인 대기 — 없음.\n\n등록 액션: `, `🔐 ${owner} pending approvals — none.\n\nRegistered actions: `) + listActions().map((a) => a.key).join(", "), replyTo, chatId);
       return;
     }
-    await sendViaTeamOp(pick(locale, `🔐 ${owner} 승인 대기 — 액션 ${pending.length}건 · 권한 ${pendingPerms.length}건\n${execNote}`, `🔐 ${owner} pending approvals — actions ${pending.length} · permissions ${pendingPerms.length}\n${execNote}`), replyTo, chatId);
+    await sendViaTeamOp(pick(locale, `🔐 ${owner} 승인 대기 — 액션 ${pending.length}건\n${execNote}`, `🔐 ${owner} pending approvals — actions ${pending.length}\n${execNote}`), replyTo, chatId);
     for (const r of pending) {
-      if (r.action_key === "permission_gate") {
-        const params = approvalParams(r);
-        const pr = params.permission_request_id ? getPermissionRequest(deps.db, params.permission_request_id) : undefined;
-        await tg("sendMessage", {
-          chat_id: chatId,
-          text: pick(locale,
-            `⚠ 권한 요청\n${pr ? `${pr.runtime}${pr.agent_id ? `/${pr.agent_id}` : ""} · ${pr.action}\n${pr.target}` : r.title}`,
-            `⚠ Permission request\n${pr ? `${pr.runtime}${pr.agent_id ? `/${pr.agent_id}` : ""} · ${pr.action}\n${pr.target}` : r.title}`),
-          reply_markup: { inline_keyboard: [[
-            { text: pick(locale, "한번 허용", "Allow once"), callback_data: `pg1:${r.id}` },
-            { text: pick(locale, "항상 허용", "Always allow"), callback_data: `pga:${r.id}` },
-            { text: pick(locale, "거절", "Deny"), callback_data: `pgd:${r.id}` },
-          ]] },
-        });
-        continue;
-      }
       const danger = listActions().find((a) => a.key === r.action_key)?.danger === "high" ? "⚠ " : "";
       await tg("sendMessage", {
         chat_id: chatId,
@@ -594,19 +570,6 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
         reply_markup: { inline_keyboard: [[
           { text: pick(locale, "✅ 승인", "✅ Approve"), callback_data: `apv:${r.id}` },
           { text: pick(locale, "❌ 거절", "❌ Reject"), callback_data: `rej:${r.id}` },
-        ]] },
-      });
-    }
-    for (const r of pendingPerms) {
-      await tg("sendMessage", {
-        chat_id: chatId,
-        text: pick(locale,
-          `🛂 권한 요청\n${r.runtime}${r.agent_id ? `/${r.agent_id}` : ""} · ${r.action}\n${r.target}`,
-          `🛂 Permission request\n${r.runtime}${r.agent_id ? `/${r.agent_id}` : ""} · ${r.action}\n${r.target}`),
-        reply_markup: { inline_keyboard: [[
-          { text: pick(locale, "한번 허용", "Allow once"), callback_data: `pg1:${r.id}` },
-          { text: pick(locale, "항상 허용", "Always allow"), callback_data: `pga:${r.id}` },
-          { text: pick(locale, "거절", "Deny"), callback_data: `pgd:${r.id}` },
         ]] },
       });
     }
@@ -619,13 +582,6 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     if (!gdDm) return;
     const locale = getLocale(deps.db);
     const pending = listApprovals(deps.db, "pending");
-    const approvalPermIds = new Set(pending.map((r) => approvalParams(r).permission_request_id).filter(Boolean));
-    // ★팀원 승인은 op 방에 띄우지 않는다.★ (팀 리드 2026-08-12: "op방에 뜨는 건 시스템 알림종류야")
-    //   agent_id 가 있으면 그 팀원 방으로 간다(codex 런타임: 그 팀원 봇 + 브리지 콜백).
-    //   여기 남겨두면 같은 승인이 ★두 방에 뜬다.★
-    const pendingPerms = listPermissionRequests(deps.db, "pending")
-      .filter((r) => !approvalPermIds.has(r.id))
-      .filter((r) => !belongsToMemberRoom(r)); // ★판정은 permissionGate 한 곳★ (두 곳이면 한쪽만 고친다)
     const permButtons = (id: string) => ({ inline_keyboard: [[
       { text: pick(locale, "한번 허용", "Allow once"), callback_data: `pg1:${id}` },
       { text: pick(locale, "항상 허용", "Always allow"), callback_data: `pga:${id}` },
@@ -635,23 +591,11 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
       const key = `apr:${r.id}`;
       if (pushedApprovalKeys.has(key)) continue;
       pushedApprovalKeys.add(key);
-      if (r.action_key === "permission_gate") {
-        const params = approvalParams(r);
-        const pr = params.permission_request_id ? getPermissionRequest(deps.db, params.permission_request_id) : undefined;
-        await tg("sendMessage", { chat_id: gdDm, text: pick(locale, `🔔 새 권한 요청\n${pr ? `${pr.runtime}${pr.agent_id ? `/${pr.agent_id}` : ""} · ${pr.action}\n${pr.target}` : r.title}`, `🔔 New permission request\n${pr ? `${pr.runtime}${pr.agent_id ? `/${pr.agent_id}` : ""} · ${pr.action}\n${pr.target}` : r.title}`), reply_markup: permButtons(r.id) });
-        continue;
-      }
       const danger = listActions().find((a) => a.key === r.action_key)?.danger === "high" ? "⚠ " : "";
       await tg("sendMessage", { chat_id: gdDm, text: pick(locale, `🔔 새 승인 요청\n${danger}${r.title}\n〈${r.action_key}〉`, `🔔 New approval request\n${danger}${r.title}\n〈${r.action_key}〉`), reply_markup: { inline_keyboard: [[
         { text: pick(locale, "✅ 승인", "✅ Approve"), callback_data: `apv:${r.id}` },
         { text: pick(locale, "❌ 거절", "❌ Reject"), callback_data: `rej:${r.id}` },
       ]] } });
-    }
-    for (const r of pendingPerms) {
-      const key = `perm:${r.id}`;
-      if (pushedApprovalKeys.has(key)) continue;
-      pushedApprovalKeys.add(key);
-      await tg("sendMessage", { chat_id: gdDm, text: pick(locale, `🔔 새 권한 요청\n${r.runtime}${r.agent_id ? `/${r.agent_id}` : ""} · ${r.action}\n${r.target}`, `🔔 New permission request\n${r.runtime}${r.agent_id ? `/${r.agent_id}` : ""} · ${r.action}\n${r.target}`), reply_markup: permButtons(r.id) });
     }
   }
   // /onoff — 팀원 서킷브레이커. 한 메시지 + 멤버당 1줄(팀원 많아도 짧게). 🔴정지/🟢기동/🔄재시작/🆕새세션.
@@ -768,39 +712,6 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     }
 
     // permission gate 콜백 (pg1/pga/pgd:<approval_id 또는 legacy request_id>) — Tier D는 lib에서 재평가해 override 차단.
-    const pg = /^(pg1|pga|pgd):((?:apr|prm)_[a-f0-9]+)$/.exec(data);
-    if (pg) {
-      if (!isAuthorized()) { await tg("answerCallbackQuery", { callback_query_id: cb.id, text: pick(locale, "권한 없음", "Not authorized"), show_alert: true }); appendAuditFile("capture", "callback_denied", data, { from: fromId }); return; }
-      const refId = pg[2]!;
-      const approval = refId.startsWith("apr_") ? getApproval(deps.db, refId) : undefined;
-      const id = approval ? approvalParams(approval).permission_request_id : refId;
-      if (!id) {
-        await tg("answerCallbackQuery", { callback_query_id: cb.id, text: pick(locale, "권한 요청 연결 없음", "Permission request link missing"), show_alert: true });
-        appendAuditFile("capture", "permission_decide_failed", refId, { from: fromId, error: "missing_permission_request_id" });
-        return;
-      }
-      const row = getPermissionRequest(deps.db, id);
-      if (!row || row.status !== "pending") {
-        await tg("answerCallbackQuery", { callback_query_id: cb.id, text: row ? pick(locale, `이미 처리됨(${row.status})`, `Already handled (${row.status})`) : pick(locale, "항목 없음", "No such item") });
-        if (mid) await tg("editMessageReplyMarkup", { chat_id: chatId, message_id: mid, reply_markup: { inline_keyboard: [] } });
-        return;
-      }
-      const decision = pg[1] === "pg1" ? "allow_once" : pg[1] === "pga" ? "allow_always" : "deny";
-      const res = decidePermissionRequest(deps.db, id, decision, {
-        approver: "GD",
-        provenance: { surface: "telegram", approver_telegram_id: fromId, callback_data: data },
-      });
-      if (!res.ok) {
-        await tg("answerCallbackQuery", { callback_query_id: cb.id, text: res.error ?? "failed", show_alert: true });
-        appendAuditFile("capture", "permission_decide_failed", id, { from: fromId, error: res.error });
-        return;
-      }
-      if (approval) setApprovalStatus(deps.db, approval.id, decision === "deny" ? "rejected" : "approved");
-      const label = decision === "allow_once" ? pick(locale, "한번 허용", "Allowed once") : decision === "allow_always" ? pick(locale, "항상 허용", "Always allowed") : pick(locale, "거절", "Denied");
-      await tg("answerCallbackQuery", { callback_query_id: cb.id, text: label });
-      if (mid) await tg("editMessageText", { chat_id: chatId, message_id: mid, text: `✅ ${label}\n${row.runtime}${row.agent_id ? `/${row.agent_id}` : ""} · ${row.action}\n${row.target}` });
-      return;
-    }
 
     // onoff 콜백 (on:<id>:<runtime> / off:<id>:<runtime>)
     if (/^mcp:(on|off)$/.test(data)) {

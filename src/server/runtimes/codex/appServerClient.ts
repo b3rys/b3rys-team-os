@@ -13,7 +13,6 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   classifyServerRequest, isApprovalKind, toInternalDecision, encodeApproval, failSafeNonApproval,
 } from "./serverRequestCodec";
-import { CodexTurnItemIndex, type ObservedItem } from "./appServerItemIndex";
 
 const CODEX_BIN = process.env.CODEX_BIN ?? "codex";
 const HANDSHAKE_TIMEOUT_MS = Number(process.env.B3OS_CODEX_APPSERVER_HANDSHAKE_MS ?? 45_000);
@@ -31,7 +30,6 @@ export interface ApprovalRequest {
    * 그래서 클라이언트가 알림을 색인해 두었다가 여기에 실어 준다. ★짝이 없으면 undefined★ — 상위는
    * 그 경우 내용을 지어내지 말고 해석 실패(매번 묻기)로 처리해야 한다.
    */
-  observedItem?: ObservedItem;
 }
 /** 승인 결정. codex ReviewDecision: approved(=이번만) | approved_for_session(=계속) | denied(=거절/이번만거절) | abort. */
 export type ReviewDecision = "approved" | "approved_for_session" | "denied" | "abort";
@@ -206,7 +204,6 @@ export class CodexAppServerClient {
     this.approvalWaits = 0; // ★턴 시작 시 승인 대기 ref-count 리셋(이전 턴 누수 방지)★
     // ★S2: 이전 턴의 파일변경 관측을 버린다 — 이전 턴 내용이 이번 턴 승인에 붙으면 사람이 승인한 것과
     //   실행되는 것이 갈린다. (조회 시 turnId 대조가 한 겹 더 막지만, 여기서 먼저 비운다.)★
-    this.itemIndex.beginTurn();
     return new Promise<TurnResult>((resolve) => {
       let settled = false;
       const finish = (r: TurnResult) => { if (settled) return; settled = true; this.clearTurnTimer(); this.turnResolve = null; this.activeHandlers = null; resolve(r); };
@@ -360,11 +357,10 @@ export class CodexAppServerClient {
       let decision: ReturnType<typeof toInternalDecision> = "decline"; // ★fail-closed 기본★
       // ★S2: 이 승인이 가리키는 항목을 ★먼저 온 알림★ 에서 찾아 실어 준다(조회 요청이 없으므로 '기억' 으로).
       //   같은 turn·같은 itemId 일 때만 붙는다 — 어긋나면 undefined 라 상위가 매번 묻는 경로로 간다.★
-      const observedItem = this.itemIndex.lookup(params?.itemId, params?.turnId) ?? undefined;
       // ★M5.3: 승인 대기(팝업) 동안 턴 타이머 정지 → 사람이 폰으로 승인하는 시간이 turn timeout에 안 잡힘.★
       this.pauseTurnTimer();
       try {
-        if (handler) decision = toInternalDecision(await handler({ method, params, serverRequestId: String(id), observedItem }));
+        if (handler) decision = toInternalDecision(await handler({ method, params, serverRequestId: String(id) }));
       } catch { decision = "decline"; }
       finally { this.resumeTurnTimer(); } // 결정 받으면 즉시 재개(예외에도 보장)
       const out = encodeApproval(kind, decision, params);
@@ -384,7 +380,6 @@ export class CodexAppServerClient {
     this.activeHandlers?.onNotify?.(method, params);
     // ★S2: 파일변경 항목을 itemId 로 색인해 둔다 — 승인 요청은 내용을 안 담아 오므로 여기서만 볼 수 있다.
     //   파일변경과 무관한 알림은 observe 안에서 무시된다.★
-    this.itemIndex.observe(method, params);
     // ★견고성 #2 픽스: 턴 종료를 turn/completed 하나로만 인식하면 turn/failed·error·aborted에서 300초 hang.★
     // completed 외 turn-level 종료/에러 신호를 잡아 즉시 실패 종료(rate-limit 사유를 params에서 끌어올림).
     if ((method.startsWith("turn/") && /error|fail|abort|cancel/i.test(method)) || method === "error") {
@@ -444,7 +439,6 @@ export class CodexAppServerClient {
   private rateLimitTail = "";
   private approvalWaits = 0; // 동시 승인 대기 ref-count(Phase1 ③) — 0일 때만 턴 타이머 재개.
   /** ★S2: 파일변경 항목 turn 단위 색인 — 승인 요청에 내용이 없어 알림에서만 알 수 있다.★ */
-  private itemIndex = new CodexTurnItemIndex();
   private turnTimer: ReturnType<typeof setTimeout> | null = null;
   private turnTimeoutMs = 0;
   private armTurnTimer: (() => ReturnType<typeof setTimeout>) | null = null;

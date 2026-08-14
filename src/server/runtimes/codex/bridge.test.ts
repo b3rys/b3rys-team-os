@@ -19,7 +19,6 @@ import type { CodexTurnResult } from "./runner";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { grantKey } from "../../lib/permissionGate";
 
 const ok = (reply: string, sessionId?: string): CodexTurnResult => ({ ok: true, reply, sessionId, detail: "ok", elapsedMs: 1 });
 
@@ -185,23 +184,6 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     expect(calls.edits[0]?.text).toBe("답");
   });
 
-  test("sandbox/networkAccess deps를 Codex 턴까지 전달한다", async () => {
-    const { deps, calls } = spies(() => ok("답"));
-    await handleMessage(123, "파일 써줘", 55, {
-      ...deps,
-      agentId: "cody",
-      workdir: "/tmp/cody",
-      sandbox: "workspace-write",
-      networkAccess: true,
-      permissionContext: {
-        grants: new Set([grantKey("cody", "workspace-write:/tmp/cody")]),
-        networkAllowlist: ["*"],
-      },
-    });
-    expect(calls.prompts[0]?.sandbox).toBe("workspace-write");
-    expect(calls.prompts[0]?.networkAccess).toBe(true);
-    expect(calls.prompts[0]?.writableRoots).toEqual(["/tmp/cody"]);
-  });
 
   // ★계약이 바뀌었다★ (팀 리드 2026-08-13 · 다른 런타임과의 일관성).
   //   예전 이름: "permission preflight blocks workspace-write before Codex turn" —
@@ -377,82 +359,6 @@ describe("발신자 게이트(allowlist) — parseAllowFrom + 통과 판정", ()
     expect(isAllowedChat(allow, 999999)).toBe(false); // 낯선 발신자 = 차단
     expect(isAllowedChat(allow, 1000000001)).toBe(true); // 오너 = 통과
   });
-});
-
-// ── ★승인 버튼은 그 팀원 방에서 처리한다★ (팀 리드 2026-08-12) ──
-//
-// 서버가 이 봇으로 승인창을 띄우고, 누르는 것은 브리지가 받는다
-// (getUpdates 는 봇당 한 프로세스만 가능하므로 폴링하는 쪽이 콜백을 맡는다).
-// ★누른 뒤 answerCallbackQuery 를 반드시 보내야 한다★ — 안 보내면 텔레그램이 계속 '로딩중' 을 돌린다
-// (실제로 그 증상이 났다: "눌러도 로딩중 뜨고 반응도 없어").
-
-import { handleApprovalCallback } from "./bridge";
-import { Database as CbDb } from "bun:sqlite";
-import { migrate as cbMigrate } from "../../db/migrate";
-import { requestPermission as cbRequest, getPermissionRequest as cbGet } from "../../lib/permissionGate";
-
-import { tmpdir as cbTmpdir } from "node:os";
-import { join as cbJoin } from "node:path";
-
-const GD = 7066867819;
-
-function pendingRequest(): { dbPath: string; id: string } {
-  const dbPath = cbJoin(mkdtempSync(cbJoin(cbTmpdir(), "cb-")), "team.db");
-  const db = new CbDb(dbPath);
-  cbMigrate(db);
-  const res = cbRequest(db, {
-    agent: { id: "dex", workspace_path: "/tmp/ws" },
-    runtime: "codex", action: "shell", command: "echo hi", cwd: "/tmp/ws",
-  } as never);
-  const id = res.request!.id;
-  db.close();
-  return { dbPath, id };
-}
-
-const spyFetch = (calls: string[]) =>
-  (async (url: string) => { calls.push(String(url).split("/bot")[1]!.split("?")[0]!); return { ok: true } as Response; }) as unknown as typeof fetch;
-
-test("★누르면 결정이 기록되고 답을 보낸다★ — 답이 없으면 텔레그램은 계속 로딩중이다", async () => {
-  const { dbPath, id } = pendingRequest();
-  const calls: string[] = [];
-  const out = await handleApprovalCallback("T", { id: "c1", data: `pg1:${id}`, from: { id: GD }, message: { message_id: 1, chat: { id: GD } } }, new Set([GD]), { dbPath, fetchFn: spyFetch(calls) });
-  expect(out).toBe("decided");
-  expect(calls).toContain("T/answerCallbackQuery"); // ★이게 없으면 로딩중이 안 멈춘다★
-  const db = new CbDb(dbPath);
-  expect(cbGet(db, id)?.status).toBe("allowed_once");
-  db.close();
-});
-
-test("거절 버튼은 거절로 기록된다(세 버튼이 같은 결과면 버튼이 장식이다)", async () => {
-  const { dbPath, id } = pendingRequest();
-  await handleApprovalCallback("T", { id: "c2", data: `pgd:${id}`, from: { id: GD } }, new Set([GD]), { dbPath, fetchFn: spyFetch([]) });
-  const db = new CbDb(dbPath);
-  expect(cbGet(db, id)?.status).toBe("denied");
-  db.close();
-});
-
-test("★이미 처리된 요청은 지난 대로 알린다★ — 무반응이면 사람은 다시 누른다", async () => {
-  const { dbPath, id } = pendingRequest();
-  const calls: string[] = [];
-  await handleApprovalCallback("T", { id: "c3", data: `pg1:${id}`, from: { id: GD } }, new Set([GD]), { dbPath, fetchFn: spyFetch([]) });
-  const out = await handleApprovalCallback("T", { id: "c4", data: `pg1:${id}`, from: { id: GD }, message: { message_id: 1, chat: { id: GD } } }, new Set([GD]), { dbPath, fetchFn: spyFetch(calls) });
-  expect(out).toBe("stale");
-  expect(calls).toContain("T/answerCallbackQuery");
-  expect(calls).toContain("T/editMessageReplyMarkup"); // 버튼을 지워서 또 누르지 않게
-});
-
-test("허용 목록 밖 발신자는 결정하지 못한다(fail-closed)", async () => {
-  const { dbPath, id } = pendingRequest();
-  const out = await handleApprovalCallback("T", { id: "c5", data: `pg1:${id}`, from: { id: 999 } }, new Set([GD]), { dbPath, fetchFn: spyFetch([]) });
-  expect(out).toBe("unauthorized");
-  const db = new CbDb(dbPath);
-  expect(cbGet(db, id)?.status).toBe("pending"); // 상태가 바뀌면 안 된다
-  db.close();
-});
-
-test("승인과 무관한 콜백은 건드리지 않는다", async () => {
-  const { dbPath } = pendingRequest();
-  expect(await handleApprovalCallback("T", { id: "c6", data: "mcp:on", from: { id: GD } }, new Set([GD]), { dbPath, fetchFn: spyFetch([]) })).toBe("ignored");
 });
 
 // ── ★team.db 경로는 환경변수에 기대지 않는다★ (2026-08-12) ──

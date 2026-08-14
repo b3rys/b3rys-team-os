@@ -18,8 +18,6 @@ import { fileURLToPath } from "node:url";
 import { loadRegistry } from "../../lib/registry";
 import { appendAuditFile } from "../../lib/auditFile";
 import type { CodexSandboxMode } from "../../types";
-import type { PermissionContext } from "../../lib/permissionGate";
-import { codexRuntimePreflight, codexConfiguredGrants } from "./permissions";
 
 export interface BridgeDeps {
   /** codex 한 턴 구동(기본 runCodexTurn — 테스트 mock). */
@@ -39,7 +37,6 @@ export interface BridgeDeps {
   /** Codex network access toggle when sandbox is workspace-write. */
   networkAccess?: boolean;
   /** Permission-gate context. Empty means ask-tier actions stay blocked. */
-  permissionContext?: PermissionContext;
   /** "작업 중" 표시 문구(기본값 제공). */
   workingText?: string;
   /** agent id used by schedule_reminder tool instructions. */
@@ -459,21 +456,6 @@ export async function handleMessage(
   const promptText = greetedBefore
     ? toolAwareText
     : `[이번이 이 대화의 첫 응답입니다. 먼저 짧게 인사하고, OT(팀 미션·규칙·역할·팀 스킬)를 받아 팀에 합류했음을 한 줄로 밝힌 뒤 본론에 답하세요.]\n\n${toolAwareText}`;
-  const preflight = codexRuntimePreflight(
-    {
-      id: selfAgentId,
-      workspace_path: deps.workdir ?? process.env.CODEX_WORKDIR ?? "",
-    },
-    deps.sandbox ?? "read-only",
-    deps.networkAccess,
-    deps.permissionContext,
-  );
-  if (preflight) {
-    const errText = "⚠️ 권한 게이트가 이 Codex 런타임 실행을 막았습니다. 설정 승인이 필요합니다.";
-    if (workingMsgId !== null) await edit(chatId, workingMsgId, errText);
-    else await send(chatId, errText);
-    return { ok: false, reply: "", detail: `permission_${preflight.tier}:${preflight.rule}` };
-  }
   const result = await runTurn({
     prompt: promptText,
     agentId: selfAgentId, // ★필수★ — 승인 요청의 주인이 된다
@@ -618,99 +600,6 @@ export function defaultTeamDbPath(): string {
   return process.env.B3OS_TEAM_DB ?? join(import.meta.dir, "..", "..", "..", "..", "team.db");
 }
 
-/**
- * ★승인 버튼을 이 팀원 방에서 처리한다.★ (팀 리드 2026-08-12: "팀원방에 그냥 띄우면 되잖아")
- *
- * 요청 자체는 서버가 이 봇으로 띄운다(appServerPopup.sendApprovalToMemberRoom).
- * getUpdates 는 봇당 한 프로세스만 가능하므로, 폴링을 하는 ★브리지가 콜백을 맡는다.★
- */
-export async function handleApprovalCallback(
-  token: string,
-  cb: TgCallbackQuery,
-  allowFrom: Set<number>,
-  deps: { dbPath?: string; fetchFn?: typeof fetch } = {},
-): Promise<"decided" | "ignored" | "stale" | "unauthorized"> {
-  const doFetch = deps.fetchFn ?? fetch;
-  const answer = (text: string, alert = false) =>
-    doFetch(`${TG_API}/bot${token}/answerCallbackQuery`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ callback_query_id: cb.id, text, show_alert: alert }),
-    }).catch(() => undefined);
-
-  const m = /^(pg1|pga|pgd):((?:apr|prm)_[a-f0-9]+)$/.exec(cb.data ?? "");
-  if (!m) return "ignored";
-
-  // 발신자 게이트 — 메시지와 같은 규칙(fail-closed).
-  const fromId = cb.from?.id;
-  if (fromId === undefined || !isAllowedChat(allowFrom, fromId)) {
-    await answer("권한 없음", true);
-    return "unauthorized";
-  }
-
-  const { openDb } = await import("../../db/migrate");
-  const { decidePermissionRequest, getPermissionRequest } = await import("../../lib/permissionGate");
-  const db = openDb(deps.dbPath ?? defaultTeamDbPath());
-  try {
-    const id = m[2]!;
-    const row = getPermissionRequest(db, id);
-    // ★이미 지난 요청은 지난 대로 알린다★ — 눌렀는데 아무 반응이 없으면 사람은 다시 누른다.
-    if (!row || row.status !== "pending") {
-      await answer(row ? `이미 처리됨(${row.status})` : "만료되었거나 없는 요청입니다");
-      if (cb.message) {
-        await doFetch(`${TG_API}/bot${token}/editMessageReplyMarkup`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ chat_id: cb.message.chat.id, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } }),
-        }).catch(() => undefined);
-      }
-      return "stale";
-    }
-    const decision = m[1] === "pg1" ? "allow_once" : m[1] === "pga" ? "allow_always" : "deny";
-
-    // ★'항상 허용' 은 codex 설정 파일에 쓴다.★ (팀 리드 2026-08-12: "설정파일에 쓰면 되잖아")
-    //   우리 DB 에 영구 권한을 쌓지 않는다 — 그건 취소 경로가 없었다. 설정은 사람이 열어서 지울 수 있다.
-    if (decision === "allow_always") {
-      const target = (row as { target?: string }).target;
-      // ★target 이 경로일 때만 설정에 쓴다.★ (2026-08-13 — 하네스 적대 검증에서 잡힘)
-      //   `targetForOperation` 은 ★shell 작업의 target 을 "명령 문자열" 로 만든다.★ 그대로 넘기면
-      //   `dirname("sudo whoami")` = "." · `dirname("rm -rf /Users/…/b3rys-team-os")` = "rm -rf /Users/…/Development"
-      //   같은 ★쓰레기 값이 writable_roots 에 박힌다.★ 설정 파일은 사람이 읽는 유일한 기록이라
-      //   거기에 거짓이 들어가면 안 된다. ⇒ 절대경로 하나(공백 없음)만 통과시킨다.
-      const looksLikePath = Boolean(target) && /^\/[^\s]*$/.test(target as string);
-      if (target && !looksLikePath) {
-        console.log(`[codex-bridge] 항상 허용 → 설정 기록 건너뜀(경로가 아님): ${target.slice(0, 60)}`);
-      }
-      if (target && looksLikePath) {
-        try {
-          const { addWritableRoot } = await import("./persistAlwaysAllow");
-          const { codexBridgePaths } = await import("./launcher");
-          const agentId = (row as { agent_id?: string }).agent_id ?? process.env.CODEX_AGENT_ID ?? "";
-          if (agentId) {
-            const r = addWritableRoot(`${codexBridgePaths(agentId).codexHome}/config.toml`, target);
-            console.log(`[codex-bridge] 항상 허용 → 설정에 기록: ${r.root} (${r.changed ? "추가" : "이미 있음"})`);
-          }
-        } catch (e) { console.error(`[codex-bridge] 설정 기록 실패(승인 자체는 진행): ${e instanceof Error ? e.message : e}`); }
-      }
-    }
-    const res = decidePermissionRequest(db, id, decision, {
-      approver: "GD",
-      provenance: { surface: "telegram_member_room", approver_telegram_id: fromId, callback_data: cb.data },
-    });
-    if (!res.ok) { await answer(res.error ?? "실패", true); return "ignored"; }
-    await answer(decision === "allow_once" ? "한번 허용" : decision === "allow_always" ? "항상 허용" : "거절");
-    if (cb.message) {
-      await doFetch(`${TG_API}/bot${token}/editMessageReplyMarkup`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ chat_id: cb.message.chat.id, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } }),
-      }).catch(() => undefined);
-    }
-    return "decided";
-  } finally {
-    try { db.close(); } catch { /* best-effort */ }
-  }
-}
 
 /** 첫 getUpdates 성공 후 ready marker를 원자적으로 쓴다. marker 존재 = 브리지가 실제 Telegram polling에 진입. */
 export function writeBridgeReadyMarker(pidFile: string, pid = process.pid, agentId = process.env.CODEX_AGENT_ID ?? ""): boolean {
@@ -776,14 +665,6 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     codexHome,
     sandbox: liveSandbox,
     networkAccess: liveNetwork,
-    // ★관리자 설정(agents.json codex_sandbox/network)을 permissionGate grant로 seed★.
-    // 미주입 시 preflight가 workspace-write/network를 매 턴 tier-a "ask"로 차단 → Dex 구조적 실행불가
-    // (2026-07-05 GD 테스트에서 "덱스 있어?"조차 dead-end로 발견). Tier-D(danger-full-access)는 이 grant로도
-    // 통과 못 함(hardDeny가 grant보다 우선). scope는 preflight의 workspaceRoot 산출과 동일 값으로 맞춤.
-    permissionContext: deps.permissionContext ?? {
-      workspaceRoot: liveWorkspaceRoot,
-      grants: codexConfiguredGrants(liveAgentId, liveSandbox, liveNetwork, liveWorkspaceRoot),
-    },
     sendMessage: deps.sendMessage ?? tgSend(token),
     editMessage: deps.editMessage ?? tgEdit(token),
     reactMessage: deps.reactMessage ?? tgReact(token),
@@ -816,14 +697,6 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
       }
       for (const u of j.result ?? []) {
         offset = u.update_id + 1;
-        // ★승인 버튼은 이 방에서 처리한다.★ 요청은 서버가 이 봇으로 띄우고, 누르는 것은 여기서 받는다
-        //   (getUpdates 는 봇당 한 프로세스만 가능하므로 폴링을 하는 브리지가 콜백도 맡는다).
-        // ★콜백 예외가 폴 루프를 죽이면 안 된다★ — 죽으면 그 뒤 메시지도 안 받는다.
-        if (u.callback_query) {
-          try { await handleApprovalCallback(token, u.callback_query, allowFrom); }
-          catch (e) { console.error(`[codex-bridge] 승인 콜백 처리 실패: ${e instanceof Error ? e.message : e}`); }
-          continue;
-        }
         const text = u.message?.text;
         const chatId = u.message?.chat.id;
         const messageId = u.message?.message_id;
