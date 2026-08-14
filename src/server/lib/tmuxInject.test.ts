@@ -197,6 +197,10 @@ describe("Korean runtime loading templates", () => {
       "Approval gate",
       "Self-mod also needs direct terminal instruction or explicit confirmation",
       "Reports include changed files, verification, unverified scope, and rollback",
+      // 저장소에 남는 글 규칙. ★en·ko 를 각자 배열에서 따로 고정한다★ — 이 검사는 두 언어를
+      // 서로 대조하지 않으므로 한쪽에만 토큰을 두면 다른 쪽은 지워도 통과한다(실측).
+      // 면제(Approved-by 등)는 §4 가 아니라 스킬에 있다 — §4 는 금지만 싣는다.
+      "carries facts and causes only",
       "SECTION_CORE_RULE",
       "AI code",
       "BWF closes team-lead-confirmed execution/delegation",
@@ -221,6 +225,7 @@ describe("Korean runtime loading templates", () => {
       "Approval gate",
       "self-mod는 직접 터미널 지시나 명시 확인도 필요",
       "변경 파일, 검증, 미검증 범위, rollback",
+      "사실과 인과만 담는다",
       "SECTION_CORE_RULE",
       "AI 코드",
       "BWF는 팀장 확인 실행/위임 과제",
