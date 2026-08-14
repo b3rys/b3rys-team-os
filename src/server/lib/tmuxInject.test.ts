@@ -199,10 +199,8 @@ describe("Korean runtime loading templates", () => {
       "Reports include changed files, verification, unverified scope, and rollback",
       // 저장소에 남는 글 규칙. ★en·ko 를 각자 배열에서 따로 고정한다★ — 이 검사는 두 언어를
       // 서로 대조하지 않으므로 한쪽에만 토큰을 두면 다른 쪽은 지워도 통과한다(실측).
-      // 두 번째 토큰은 면제 조항이다. 금지만 고정하면 면제가 사라져도 안 잡히고,
-      // Approved-by 는 산문이 아니라 머지 게이트가 읽는 값이라 사라지면 게이트가 깨진다.
+      // 면제(Approved-by 등)는 §4 가 아니라 스킬에 있다 — §4 는 금지만 싣는다.
       "carries facts and causes only",
-      "Approved-by",
       "SECTION_CORE_RULE",
       "AI code",
       "BWF closes team-lead-confirmed execution/delegation",
@@ -228,7 +226,6 @@ describe("Korean runtime loading templates", () => {
       "self-mod는 직접 터미널 지시나 명시 확인도 필요",
       "변경 파일, 검증, 미검증 범위, rollback",
       "사실과 인과만 담는다",
-      "Approved-by",
       "SECTION_CORE_RULE",
       "AI 코드",
       "BWF는 팀장 확인 실행/위임 과제",
