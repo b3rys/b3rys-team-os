@@ -1,5 +1,5 @@
 /**
- * proposals 라우트 — 거버넌스 상태기계 integration test (GD 2026-06-22 "필수기능 integration 테스트").
+ * proposals 라우트 — 거버넌스 상태기계 integration test.
  * 표면: dashboard Proposal 탭의 정본 게이트(팀 정책 + 팀스킬 후보 공통). createProposalRoutes + in-memory DB + app.request.
  * 핀: 품질 하한선(evidence·expected_value) / 상태기계 / Guard A(반대리뷰 의무) / Guard B(최종승인 GD 전용).
  */
@@ -135,7 +135,7 @@ describe("proposals — 상태기계 + Guard", () => {
     return { ...s, id, followup };
   }
   // 지정 proposer로 revise_requested 상태까지 끌고 간다(escape/alert 테스트용).
-  // 팀장 결정 단계(gd_report)는 승인/반려 2택이므로(GD 2026-07-10), revise 는 리뷰어 단계에서만 진입한다.
+  // 팀장 결정 단계(gd_report)는 승인/반려 2택이므로, revise 는 리뷰어 단계에서만 진입한다.
   async function reviseRequested(proposer: string) {
     const s = setup();
     // 생성=peer_review 진입 → 리뷰어가 곧바로 revise 요청(gd_report 로 넘기지 않는다).
@@ -565,7 +565,7 @@ describe("proposals — 상태기계 + Guard", () => {
     }
   });
 
-  // GD 2026-07-10: 팀장 결정 단계는 승인/반려 2택. gd_report→revise_requested 경로 자체를 없앴다.
+  // 팀장 결정 단계는 승인/반려 2택. gd_report→revise_requested 경로 자체를 없앴다.
   //   따라서 "팀장이 수정요청으로 gd_report를 떠난다"는 시나리오는 더 이상 존재하지 않는다.
   //   이 테스트는 그 자리를 지키되, 검증 대상을 새 불변식으로 바꾼다: 거부되고, 알림 claim 은 유지된다.
   test("팀장 결정 단계에서 수정요청은 거부되고(409), 팀장보고 알림 claim 은 리셋되지 않는다", async () => {
@@ -651,7 +651,7 @@ describe("proposals — 상태기계 + Guard", () => {
   test("revise_requested는 제안자에게 돌아가고 재상정 시 이전 follow-up을 닫은 뒤 새 리뷰 루프를 만든다", async () => {
     const { app, db, id } = await fresh();
     await transition(app, id, "peer_review", "codex");
-    // 수정요청은 리뷰어 단계에서만 발생한다(팀장 단계는 승인/반려 2택 — GD 2026-07-10).
+    // 수정요청은 리뷰어 단계에서만 발생한다(팀장 단계는 승인/반려 2택).
     const revise = await transition(app, id, "revise_requested", "steve");
     expect(revise.status).toBe(200);
     const reviseBody = (await revise.json()) as { followup?: { owner?: string; taskId?: string } };
@@ -968,7 +968,7 @@ describe("proposals — 상태기계 + Guard", () => {
 
 // ── GD 심플 모델: 팀 크기별 라우팅 (2026-07-01) ──────────────────────────
 // 하드코딩 codex/bill 제거 검증 — 팀 크기 + capability 도출, 공개 팀(임의 멤버)에서도 유령배정 없이 동작.
-// GD 지시 시나리오: 1/2/3+명 흐름 · 중간 드랍 · 최종 승인/리젝/수정요청 재인입.
+// 요구사항 시나리오: 1/2/3+명 흐름 · 중간 드랍 · 최종 승인/리젝/수정요청 재인입.
 function agentRec(id: string, capabilities: string[] = []): AgentRecord {
   return { id, display_name: id, role: "role", runtime: "claude_channel", capabilities } as AgentRecord;
 }
@@ -1042,7 +1042,7 @@ describe("proposals — GD 심플 모델 (팀 크기별 라우팅)", () => {
     expect(statusOf(db, id)).toBe("accepted");
   });
 
-  // ★blocked 는 배정 자격이 아니다★ (팀 리드 2026-08-08: "blocked 는 빼고 그냥 배정해").
+  // ★blocked 는 배정 자격이 아니다★.
   //   예전에는 이 상황에서 후보가 0이 되어 아무에게도 안 갔다. 그런데 `blocked` 는 `health.ts` 가
   //   ★"정상 활동중에도 떠서 노이즈"★ 라고 적어둔 값이라, 실제로는 ★일하는 사람이 빠지는★ 필터였다.
   //   라이브 실측: claude 런타임 5명이 작업 중 blocked 였고 배정은 idle 로 보이는 쪽에 쏠렸다.
@@ -1133,7 +1133,7 @@ describe("proposals — GD 심플 모델 (팀 크기별 라우팅)", () => {
   });
 
   // 1인 팀은 peer_review 단계가 없어(others=0 → 바로 gd_report) revise_requested 에 도달할 경로가 없다.
-  //   팀장은 승인/반려만 한다. 고칠 게 있으면 반려 후 새 proposal 로 올린다. (GD 2026-07-10)
+  // 팀장은 승인/반려만 한다. 고칠 게 있으면 반려 후 새 proposal 로 올린다.
   test("1인 팀: 팀장 결정은 승인/반려 2택 — 수정요청 경로가 없다", async () => {
     const { app, db } = setupTeam(["alice"], { coordinator: "alice" });
     const id = await createBy(app, "alice");

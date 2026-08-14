@@ -156,7 +156,7 @@ export class CodexAppServerClient {
   /**
    * 한 턴 실행 — 텍스트 입력 → 스트리밍/승인 처리 → 최종 텍스트.
    * ★견고성: timeoutMs 내 turn/completed 없으면 interrupt 후 status="timeout"으로 정리(무응답 턴이 런타임 막지 않게).★
-   * exec 폴백이 없으므로(GD 방침) 예외는 여기서 정면 처리한다.
+   * exec 폴백이 없으므로 예외는 여기서 정면 처리한다.
    */
   runTurn(text: string, handlers: RunTurnHandlers = {}, timeoutMs = 300_000): Promise<TurnResult> {
     if (!this.threadId) throw new Error("startThread first");

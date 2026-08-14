@@ -171,7 +171,7 @@ export function resolveOpenclawBin(
   }
   return "openclaw"; // 최후 폴백 — PATH 에 맡긴다(기존 동작).
 }
-// 2026-07-06 (GD live): 300초는 코드 수정·검증 같은 긴 turn에서 bridge가 먼저 포기해
+// 2026-07-06: 300초는 코드 수정·검증 같은 긴 turn에서 bridge가 먼저 포기해
 // "Codex가 끝까지 답했지만 Telegram에는 안 보이는" 상태를 만들었다. 팀방 visible reply는 실제 최종보고가
 // 보이는 것이 완료 기준이다. 팀 기본 과제 수행시간 단위에 맞춰 기본 대기 시간을 10분으로 둔다.
 // 실제 턴 실패는 session.describe 로 조기 감지.
@@ -183,7 +183,7 @@ function isOpenclawTimeoutNoticeEnabled(): boolean {
   return process.env.OPENCLAW_TIMEOUT_NOTICE === "1";
 }
 const OPENCLAW_PREVIEW_LIMIT = Number(process.env.OPENCLAW_PREVIEW_LIMIT ?? 80);
-// 2026-06-05 롤백(GD): 오늘 넣었던 "작성 중"(EARLY_PROGRESS)·별도 보이는-한도(VISIBLE_REPLY_TIMEOUT)
+// 2026-06-05 롤백: 오늘 넣었던 "작성 중"(EARLY_PROGRESS)·별도 보이는-한도(VISIBLE_REPLY_TIMEOUT)
 // 제거. 응답 대기는 게이트웨이 타임아웃(OPENCLAW_GATEWAY_TIMEOUT_MS, 300초)만 사용.
 const DEFAULT_OPENCLAW_ENV = process.env.OPENCLAW_ENV ?? openclawEnvPath();
 
@@ -395,7 +395,7 @@ function openclawTelegramBotToken(agent: AgentRecord): string | null {
   // openclaw account tokenFile fallback — openclaw 에이전트(devon 등)의 텔레그램 봇 토큰은
   // ~/.openclaw/openclaw.json 의 channels.telegram.accounts[<account>].tokenFile 에 저장된다.
   // codex 만 env-파일 fallback 이 있어 다른 openclaw 에이전트(devon)는 토큰을 못 찾아 그룹 react/응답을
-  // 못 올리던 버그(GD 2501) 수정. 값은 런타임에 파일에서 읽고 어디에도 복사하지 않는다.
+  // 못 올리던 버그 수정. 값은 런타임에 파일에서 읽고 어디에도 복사하지 않는다.
   try {
     const openclawConfig = `${process.env.HOME ?? ""}/.openclaw/openclaw.json`;
     if (existsSync(openclawConfig)) {
@@ -504,8 +504,8 @@ export async function runOpenclawSlackTurn(opts: RunOpenclawTurnOptions): Promis
     `<external_message source="slack" kind="slack" from="${opts.slackUserId ?? "slack:user"}" thread="${opts.threadId}" msg="${opts.messageId}">\n` +
     `${opts.body}\n` +
     `</external_message>\n\n` +
-    // ★[B] — 말하려면 보내라.★ (GD 2026-07-13) 예전엔 "직접 보내지 마세요, 브릿지가 전송합니다" 였다.
-    // 보내는 법(send.sh)은 룰에 있다 — 여기서 두 번째 입구를 열지 않는다(GD 2026-07-14).
+    // ★[B] — 말하려면 보내라.★ 예전엔 "직접 보내지 마세요, 브릿지가 전송합니다" 였다.
+    // 보내는 법(send.sh)은 룰에 있다 — 여기서 두 번째 입구를 열지 않는다.
     pick(opts.locale,
       "Slack에서 온 멘션입니다. ★말하려면 직접 보내세요. 안 보내면 아무 말도 안 한 것입니다.★ " +
       "여기 쓰는 글은 ★당신의 메모★ 일 뿐 아무 데도 안 갑니다 — 서버가 대신 게시하지 않습니다. " +
@@ -578,7 +578,7 @@ export async function injectOpenclawDirectedTurn(opts: InjectOpenclawDirectedOpt
       opts.attachments.map((a, i) => `${i + 1}. ${a.kind}: ${a.value}${a.note ? ` (${a.note})` : ""}`).join("\n") +
       "\n\n"
     : "";
-  // ★봉투에는 '지금 이 메시지의 hop' 을 그대로 싣는다★ (2026-07-27, GD 결정 (b)안).
+  // ★봉투에는 '지금 이 메시지의 hop' 을 그대로 싣는다★ (2026-07-27, 제품 결정 (b)안).
   //   룰은 팀원에게 `--hop <hop_count+1>` 을 시킨다. 그런데 여기서 미리 +1 해서 보내면
   //   팀원이 그 값에 또 +1 해서 ★메시지당 2씩★ 올랐다(실측: 0→2→4→6…).
   //   그래서 MAX_HOPS=16 이 실제로는 8메시지 한도로 동작했다.
@@ -599,7 +599,7 @@ export async function injectOpenclawDirectedTurn(opts: InjectOpenclawDirectedOpt
     //   fan-out 에 부모가 있을 때 부모 id 로 답해 ★집계 실패 → 종합에서 누락★ (codex 리뷰 blocker,
     //   2026-07-12). collect 아닐 때는 기존 hop-chain 규약(inReplyTo ?? messageId) 그대로.
     (() => {
-      // ★주입문은 사실만 말한다(GD 2026-07-14).★ 예전 문구는 세 가지를 했고 셋 다 해로웠다:
+      // ★주입문은 사실만 말한다.★ 예전 문구는 세 가지를 했고 셋 다 해로웠다:
       //   ① "발신자에게 응답/ack 를 보내세요" → ★ack 를 시켰다.★ 룰은 정반대다(요청받은 답·결과는 TERMINAL —
       //      ack·동의·확인으로 답하지 않는다). 그래서 수집자가 기여자 답마다 ack 를 보내고, 정작 종합은
       //      마감 알림이 깨울 때까지 안 보냈다 — ★"코덱스가 마감까지 기다린다"의 원인이 이 문장이었다.★
@@ -657,7 +657,7 @@ export async function injectOpenclawTelegramTurn(opts: InjectOpenclawTelegramOpt
       "\n\n"
     : "";
   // v1.2 issue 3: include anti-pingpong hop metadata in prompt — same convention as tmux adapter.
-  // ★봉투에는 '지금 이 메시지의 hop' 을 그대로 싣는다★ (2026-07-27, GD 결정 (b)안).
+  // ★봉투에는 '지금 이 메시지의 hop' 을 그대로 싣는다★ (2026-07-27, 제품 결정 (b)안).
   //   룰은 팀원에게 `--hop <hop_count+1>` 을 시킨다. 그런데 여기서 미리 +1 해서 보내면
   //   팀원이 그 값에 또 +1 해서 ★메시지당 2씩★ 올랐다(실측: 0→2→4→6…).
   //   그래서 MAX_HOPS=16 이 실제로는 8메시지 한도로 동작했다.
@@ -685,7 +685,7 @@ export async function injectOpenclawTelegramTurn(opts: InjectOpenclawTelegramOpt
     `<external_message source="telegram" kind="${opts.kind ?? "group"}" from="${opts.fromLabel ?? `${owner} (${pick(locale, "그룹 라우터", "group router")})`}" thread="${opts.threadId}" msg="${opts.messageId}"${replyToMeta} ${hopMeta}>\n` +
     `${opts.body}\n` +
     `</external_message>\n\n` +
-    // ★사실만 말한다(GD 2026-07-14).★ 예전 문구는 envelope API(두 번째 입구)를 두 번 안내하고,
+    // ★사실만 말한다.★ 예전 문구는 envelope API(두 번째 입구)를 두 번 안내하고,
     //   broadcast 를 두 번 금지하고, 누구에게 답할지·재실행 말지까지 지시했다 — 전부 룰(§2 owner, §5 협업)에
     //   이미 있는 것을 주입문이 변형해서 다시 말한 것이다. 룰과 주입문이 어긋나면 팀원은 주입문을 따른다.
     //   남기는 것: ①이건 흘러가는 그룹 대화가 아니라 너에게 배정된 작업이다 ②[B] 불변식 ③이 방의 thread id
@@ -719,7 +719,7 @@ export async function injectOpenclawTelegramTurn(opts: InjectOpenclawTelegramOpt
       idempotencyKey: `telegram-router-${opts.messageId}`,
     }),
   ], OPENCLAW_GATEWAY_TIMEOUT_MS);
-  // 2026-07-06 (GD live): timeout 뒤 침묵하면 팀장 입장에서는 "아무것도 안 함"이 된다.
+  // 2026-07-06: timeout 뒤 침묵하면 팀장 입장에서는 "아무것도 안 함"이 된다.
   // 단순 응답 지연도 bridge가 포기한 순간에는 visible notice 를 남긴다(OPENCLAW_TIMEOUT_NOTICE=0 이면 비활성).
   // B (2026-06-13): 다만 session 이 terminal-failed(확정된 죽은 턴)면 그건 지연이 아니라 실패이므로,
   // 침묵하지 말고 visible notice 를 띄운다(Lui silent-abort 재발 방지). 둘의 구분은
@@ -773,12 +773,12 @@ export async function injectOpenclawTelegramTurn(opts: InjectOpenclawTelegramOpt
     return false;
   }
   clearRuntimeBlock(opts.agent.id);
-  // ★[B] — 서버는 팀원 대신 말하지 않는다.★ (GD 2026-07-13: "팀원한테 맡겨. 다 빼.")
+  // ★[B] — 서버는 팀원 대신 말하지 않는다.★
   //
   // ═══ 예전엔 ═══
   //   게이트웨이가 뱉은 최종 텍스트를 ★브릿지가 대신 단톡방에 게시★했다.
   //   그래서 codex 는 ★뭘 쓰든 나갔다★ → 침묵이 불가능 → `[NO_REPLY]` 우회로 →
-  //   ★"GD Step Codex: [NO_REPLY]" 가 팀장 단톡방에 문자 그대로 찍혔다.★ (2026-07-13 라이브)
+  // ★"GD Step Codex: [NO_REPLY]" 가 팀장 단톡방에 문자 그대로 찍혔다.★ (2026-07-13 라이브)
   //
   // ═══ 지금 ═══
   //   ★턴 본문은 그 팀원의 메모다. 아무 데도 안 간다.★ 말하려면 팀원이 자기 도구로 보낸다:

@@ -551,7 +551,7 @@ test("★askTeammate 가 보내는 payload 에 dispatch 가 실린다★", async
   expect(bus.calls[0]!.source).toBe("user"); // 리드는 user 로 나간다(#279) — 그래서 이 표시가 꼭 필요하다
 });
 
-// ── ★진행 표시: '몇 초' 가 아니라 '어디까지 왔나'★ (팀 리드 2026-08-07) ──
+// ── ★진행 표시: '몇 초' 가 아니라 '어디까지 왔나'★ ──
 
 function setRecipient(db: Database, messageId: string, agent: string, delivery: string, recipient: string) {
   db.prepare(`UPDATE message_recipient SET delivery_state = ?, recipient_state = ? WHERE message_id = ? AND agent_id = ?`)
@@ -663,7 +663,7 @@ test("★막힘에는 활동 줄을 안 붙인다★ — 그건 지금 하는 �
 
 // ── ★진행 알림이 안 나가는 클라이언트에서도 판정이 보인다★ (실측 2026-08-07) ──
 //
-// 클로드 코드는 progressToken 을 안 보낸다 → 진행 알림이 ★0건★ 도착한다(팀 리드 확인).
+// 클로드 코드는 progressToken 을 안 보낸다 → 진행 알림이 ★0건★ 도착한다.
 // 규약상 토큰 없이는 서버가 보낼 수 없으므로 ★우리가 고를 수 있는 게 아니다.★
 // → 같은 판정을 ★보이는 자리(접수 문구)★ 에도 쓴다.
 
@@ -700,7 +700,7 @@ test("★명부를 DB 에서 읽는다★ — 손으로 박으면 이 시험이 
   expect(t?.inputSchema?.shape?.to?.description ?? "").toContain("zzqa");
 });
 
-// ── ★도구 설명에는 정규 팀원만★ (팀 리드 2026-08-07: "정규팀원만 해") ──
+// ── ★도구 설명에는 정규 팀원만★ ──
 //
 // 정규 여부의 정본은 ★agents.json★ 이다 — `agent` 표에는 그 칸이 없다.
 // 그래서 레지스트리를 격리해서 재고, ★라이브 agents.json 에 기대지 않는다★
@@ -772,7 +772,7 @@ test("★설명을 좁히는 것이지 문을 좁히는 게 아니다★ — 비
   }
 });
 
-// ── ★누구 말인지 클라이언트가 채워 넣는다★ (팀 리드 2026-08-07) ──
+// ── ★누구 말인지 클라이언트가 채워 넣는다★ ──
 //
 // 서버는 이걸 만들어낼 수 없다 — 도착하는 건 글자뿐이고 ★누가 썼는지는 클라이언트만 안다.★
 // ★주장이지 증거가 아니다★: 클라이언트가 본문에 "— GD" 라고 서명한 적이 있고 그걸 믿어서 틀렸다.

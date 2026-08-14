@@ -43,7 +43,7 @@
   --status-offline: 107 113 128;
   --status-info:    91 140 255;
   /* 배지/칩 '텍스트' 전용 — 상태토큰은 dot/fill용, 이건 작은 라벨 가독(다크: 밝게) */
-  /* ⭐ 핵심내용 최소대비 원칙 (GD 상시규칙 2026-06-21) — 읽어야 하는 본문·라벨·값(=핵심내용)에는:
+  /* ⭐ 핵심내용 최소대비 원칙 — 읽어야 하는 본문·라벨·값(=핵심내용)에는:
      ① 흐린 초록/주황(text-emerald-200·amber-200 류 Tailwind 기본 밝은셰이드=다크전용) 금지 → deep 토큰(text-txt-green/amber 등)만.
      ② 하드코딩 검은바탕(bg-[#020617]/#07101d/#050814] 류)+회색글씨 금지 → 테마 토큰(bg-surface-0 등).
      ③ 작은 회색글씨(text-[10~11px]+slate-500 류)는 보조/메타에만, 핵심내용엔 금지(핵심=12px+ & slate-400/200+ 대비).
@@ -170,7 +170,7 @@
   to { opacity: 1; }
 }
 
-/* 스크롤바 완전 숨김 — 스크롤 기능은 유지, 막대만 아예 안 보이게(GD R6 2026-06-21:
+/* 스크롤바 완전 숨김 — 스크롤 기능은 유지, 막대만 아예 안 보이게(
    '스크롤해도 안 나오게'). 패널 전반 일관 적용. */
 * {
   scrollbar-width: none;        /* Firefox */
@@ -405,7 +405,7 @@
   padding: 0.2rem 0.45rem;
 }
 
-/* UX #2 — phone-first agent cards. On the phone the agents pane is GD's "누가 막혔나" glance:
+/* UX #2 — phone-first agent cards. On the phone the agents pane is the team lead's "누가 막혔나" glance:
    collapse each card to a dense ~2 lines (name + health, then state-dot · last · ctx% · pending),
    hiding the verbose desktop bits. Desktop layout is untouched (rules scoped to <768px; the mobile
    meta row is display:none by default below). */
@@ -504,7 +504,7 @@ html[data-b3rys-native] .metric-bar {
      bar grow with the wrapped rows + safe-area padding (Tailwind h-12 is
      border-box, so padding alone can't push content below the notch). */
   .metric-bar {
-    /* 모바일: 한 줄 + 가로 스크롤(GD 2026-06-23 '한줄로 나오면서 스크롤이 되야지'). 오른쪽 상태를
+    /* 모바일: 한 줄 + 가로 스크롤. 오른쪽 상태를
        숨겨 항목이 적어 스크롤도 짧다. ★탭 문제 해결: 바 배경은 가로 팬(스크롤), 버튼은 즉시 탭으로
        분리(touch-action) — 가로스크롤이어도 버튼이 확실히 눌린다(아래 .metric-bar button 참고). */
     height: auto;
@@ -523,7 +523,7 @@ html[data-b3rys-native] .metric-bar {
     flex-wrap: nowrap;
     flex-shrink: 0;
   }
-  /* 오른쪽 상태 클러스터(CPU·RAM·Load·Ollama·alerts)는 모바일에서 숨긴다 — 항목 줄어 스크롤 짧고 슬림(GD). */
+  /* 오른쪽 상태 클러스터(CPU·RAM·Load·Ollama·alerts)는 모바일에서 숨긴다 — 항목 줄어 스크롤 짧고 슬림. */
   .metric-bar > div:last-child {
     display: none;
   }
@@ -650,7 +650,7 @@ html[data-b3rys-native] .metric-bar {
 }
 @keyframes update-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-/* 아코디언(details) chevron — 열림 시 90° 회전(▶→▼ 방향 표시). group-open 유틸 미적용 대체(GD 2026-07-01). */
+/* 아코디언(details) chevron — 열림 시 90° 회전(▶→▼ 방향 표시). group-open 유틸 미적용 대체. */
 details[open] > summary .acc-chevron { transform: rotate(90deg); }
 
 /* select 을 input 과 동일 높이·스타일로 — WKWebView(b3rys.app)의 네이티브 select 가 py 패딩을 무시해

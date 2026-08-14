@@ -21,7 +21,7 @@ interface RawDefaultIntake {
 }
 
 function defaultIntakePrompt(agents: AgentRecord[]): string {
-  // default/fallback(애매한 무-오너) 담당 = ambiguous_owner capability 보유자(GD 2026-07-10: 코덱스가 아니라 빌).
+  // default/fallback(애매한 무-오너) 담당 = ambiguous_owner capability 보유자.
   // 미설정 레지스트리는 coordinatorId 로 폴백(기존 동작 보존).
   const coord = ambiguousOwnerId(agents) ?? "";
   return `너는 b3rys 팀 채팅의 owner inference(담당자 추론) 판단기다.
@@ -50,7 +50,7 @@ export async function routeDefaultIntakeLLM(
   opts: { model?: string; timeoutMs?: number } = {},
 ): Promise<LlmRouteDecision> {
   const validIds = new Set(agents.map((a) => a.id));
-  // 오너가 애매/무-확신일 때의 default 담당 = ambiguous_owner(GD 2026-07-10: 빌). 미설정 시 coordinator 폴백.
+  // 오너가 애매/무-확신일 때의 default 담당 = ambiguous_owner. 미설정 시 coordinator 폴백.
   const ambiguousOwner = ambiguousOwnerId(agents);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 3_000);
@@ -92,7 +92,7 @@ export async function routeDefaultIntakeLLM(
       };
     }
 
-    // 오너 애매/무-responder → ambiguous_owner(빌)가 받아 GD 께 문의(GD 2026-07-10). 미설정 시 coordinator 폴백.
+    // 오너 애매/무-responder → ambiguous_owner(빌)가 받아 GD 께 문의. 미설정 시 coordinator 폴백.
     return {
       targetAgentIds: ambiguousOwner ? [ambiguousOwner] : [],
       reason: "default_step",

@@ -127,7 +127,7 @@ describe("team router", () => {
     expect(decision.reason).toBe("active_assignee_followup");
   });
 
-  // 2026-06-05: topic_shift/closure 자동감지 제거(GD). 주제전환 문구가 있어도 owner(sticky)는
+  // 2026-06-05: topic_shift/closure 자동감지 제거. 주제전환 문구가 있어도 owner(sticky)는
   // 명시적 @멘션/답장 전까진 유지된다. 자동 추정으로 codex 로 넘기지 않는다.
   test("topic shift phrase no longer reassigns — sticky persists", () => {
     const decision = routeTeamMessage("오케이 이건 됐고 팀 대시보드 업무 리뷰하자", agents, {
@@ -562,7 +562,7 @@ describe("example-separator @멘션 억제 (—- 아래는 예시)", () => {
 // gate(owner-gate/react 훅)는 라우터 reason이 "확실 owner"이고 자기가 targets 에 없으면 응답·👀 차단.
 //   확실 owner reason = explicit_mention · reply_author · active_assignee_followup(sticky).
 //   추측성(default_intake/default_step)·broadcast_marker·라우터 에러 = fail-open(통과, 👀 유지).
-// 배경: v1은 explicit_mention 만 막아 무-@멘션 sticky non-owner(#2066)를 못 막던 갭 → confident owner 로 확장(GD 2080/2082).
+// 배경: v1은 explicit_mention 만 막아 무-@멘션 sticky non-owner(#2066)를 못 막던 갭 → confident owner 로 확장.
 describe("owner-gate suppress 규칙 — shouldSuppress 단일 출처 (커뮤니케이션 룰 spec)", () => {
   // 훅(owner-gate/react)은 thin-client로 이 함수 결과만 obey. 이 블록만 봐도 "누가 응답·👀 하나"가 보인다.
   // 억제(suppress) = 확실 owner(explicit_mention·reply_author·active_assignee_followup)가 있는데 내가 그 owner가 아님.

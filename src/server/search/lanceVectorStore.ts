@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 // LanceDB는 네이티브 모듈(darwin-x64 등 일부 플랫폼 prebuilt 없음). 부팅 시 top-level 로드하면
 // prebuilt 없는 머신(Intel Mac/Linux)서 `bun run start`가 하드크래시 → 대시보드·렉시컬 검색까지 사망.
 // 그래서 값 임포트는 open()에서 lazy import로 한다. public export는 native deps를 설치하지 않으므로
-// 타입 import도 피한다. (하네스 MAJOR, GD 2026-07-02; public lazy-degrade, GD 2026-07-02)
+// 타입 import도 피한다. (하네스 MAJOR ; public lazy-degrade)
 import type { VectorRecord, VectorSearchHit, VectorSearchStore } from "./vectorStore";
 
 const TABLE_NAME = "team_search_vectors";

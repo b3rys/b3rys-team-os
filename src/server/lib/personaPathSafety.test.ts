@@ -1,5 +1,5 @@
 /**
- * ★팀원 룰 파일에 '렌더를 돌린 자리' 가 박히는 것을 잡는다.★ (GD 2026-08-01: "경로 다 틀렸음… 항상 체크하는 로직을 넣어")
+ * ★팀원 룰 파일에 '렌더를 돌린 자리' 가 박히는 것을 잡는다.★
  *
  * ═══ 이건 가정이 아니라 라이브에서 터진 일이다 ═══
  * `REPO_ROOT` 가 `resolve(import.meta.dir, "../../..")` 뿐이라서, ★워크트리에서 렌더하면 워크트리 경로가 박혔다.★
@@ -55,14 +55,14 @@ describe("★렌더 산출물에 워크트리 경로·미치환 플레이스홀�
 });
 
 describe("★스킬 목록은 디렉터리에서 생성된다 — 손으로 나열하지 않는다★", () => {
-  // GD 2026-08-01: "스킬이 추가될 때마다 고쳐야 되나?" → 아니오. 이 테스트가 그걸 보증한다.
+  // "스킬이 추가될 때마다 고쳐야 되나?" → 아니오. 이 테스트가 그걸 보증한다.
   const skillNames = existsSync(`${REPO_ROOT}/skills`)
     ? readdirSync(`${REPO_ROOT}/skills`).filter(
         (n) => existsSync(`${REPO_ROOT}/skills/${n}/SKILL.md`),
       )
     : [];
 
-  // ★계약: trigger: 를 선언한 스킬만 나간다★ (GD 2026-08-01). 선언 안 한 것이 새어나가면 그것도 결함이다.
+  // ★계약: trigger: 를 선언한 스킬만 나간다★. 선언 안 한 것이 새어나가면 그것도 결함이다.
   const declared = skillNames.filter((n) =>
     /^trigger:/m.test(readFileSync(`${REPO_ROOT}/skills/${n}/SKILL.md`, "utf8").slice(0, 4000)));
   const undeclared = skillNames.filter((n) => !declared.includes(n));

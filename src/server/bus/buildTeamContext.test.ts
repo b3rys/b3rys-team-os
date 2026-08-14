@@ -1,4 +1,4 @@
-// buildTeamContext — B fix (GD 2026-07-16): 단톡방(그룹 스레드)만 자기것만·6h·6건.
+// buildTeamContext — B fix: 단톡방(그룹 스레드)만 자기것만·6h·6건.
 //   그룹방은 스레드 하나에 전 과제가 섞여 노이즈 → 자기것만 남긴다. 작업/수집 스레드(tg- 아님)는 full.
 //   in-memory sqlite, 라이브 무관.
 import { describe, expect, test } from "bun:test";

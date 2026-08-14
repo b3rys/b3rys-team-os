@@ -1,4 +1,4 @@
-// per-runtime 페르소나 템플릿. (GD 2026-06-10)
+// per-runtime 페르소나 템플릿.
 //
 // 골드 스탠다드 = Bill CLAUDE.md 구조(팀에서 커뮤니케이션 가장 잘함):
 //   정체 → ⭐핵심룰 → 능력 → 톤 → 작업 컨텍스트 → 팀 공유 → 글로벌 규칙
@@ -13,11 +13,11 @@ import { tmpdir } from "node:os";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 
 const HOME = process.env.HOME ?? "";
-// 정본 경로 = team-os repo 루트 기준 (퍼블릭 포터블 — 하드코딩 금지, GD 2026-06-27 Q3).
+// 정본 경로 = team-os repo 루트 기준 (퍼블릭 포터블 — 하드코딩 금지 Q3).
 // 이 소스(.../src/server/lib/personaTemplates.ts) 기준 3단계 위 = repo 루트. install 위치 자동탐지.
 // env TEAM_COLLAB_ROOT 로 override 가능(컨테이너/심링크 환경). GD 머신에선 ~/Development/b3rys-team-os 로 해석되어 기존과 동일.
 /**
- * ★렌더를 돌린 자리가 팀원 파일에 박히면 안 된다 (GD 2026-08-01: "경로 다 틀렸음").★
+ * ★렌더를 돌린 자리가 팀원 파일에 박히면 안 된다.★
  *
  * 예전엔 `resolve(import.meta.dir, "../../..")` 뿐이었다 → ★워크트리에서 렌더하면 워크트리 경로가 박힌다.★
  * 실제로 터졌다: devon·ames·codex 의 AGENTS.md 가 `~/Development/.worktrees/fu-150/...` 를 가리키고 있었고,
@@ -54,7 +54,7 @@ export const REPO_ROOT =
 const TEAM_OS_PATH = `${REPO_ROOT}/rules/TEAM-OS.md`;
 const SHARED_PATH = `${REPO_ROOT}/rules/SHARED.md`;
 
-// i18n 영어 핵심룰 파일럿 (GD 2026-06-30): 지정 에이전트만 대체 TEAM-OS 경로(영어 드래프트)를 읽게 한다.
+// i18n 영어 핵심룰 파일럿: 지정 에이전트만 대체 TEAM-OS 경로(영어 드래프트)를 읽게 한다.
 // 공유 정본(rules/TEAM-OS.md)은 안 건드림 — env-gated, 미설정이면 기존과 100% 동일(기본 off, blast radius 격리).
 //   예) TEAMOS_PILOT_PATH=/abs/.../rules/TEAM-OS.en.draft.md  TEAMOS_PILOT_AGENTS=codex
 // (claude_channel 멤버는 workspace 심링크 재지정으로 파일럿 — 이 override는 openclaw/hermes AGENTS.md 임베드 경로용.)
@@ -70,7 +70,7 @@ export function teamOsPathFor(agentId?: string): string {
 
 export type Runtime = "claude_channel" | "openclaw" | "hermes_agent" | "b3os_native" | "codex";
 
-// 멤버 워크스페이스 루트 = 코드(repo)와 분리된 "데이터 홈"(GD 2026-06-27 "코드↔데이터 분리").
+// 멤버 워크스페이스 루트 = 코드(repo)와 분리된 "데이터 홈".
 // ★기본값 = 퍼블릭-안전(2026-07-12, 클린클론 인수테스트 finding, Bill 승인):★ 어떤 env 도 없으면
 //   `~/b3os/members/<id>` — dev 프로젝트 디렉토리 밖 자체완결 데이터루트라, 퍼블릭 유저의 기존 repo 와 충돌 0.
 //   (이전 기본값 `~/Development` 는 OWNER 머신 관례라, install.sh 없이 부팅 시 유저의 `~/Development/your-workspace` 등에
@@ -89,7 +89,7 @@ export function resolveMembersRoot(): string {
 }
 export const MEMBERS_ROOT = resolveMembersRoot();
 
-// ─── live-fs 가드 (GD 2026-07-08, 하네스 3-Explore 확정) ─────────────────────────
+// ─── live-fs 가드 ─────────────────────────
 // 반복 인시던트 원천차단: 테스트가 fixture id("steve"/"bill" 등 실 멤버 폴더명)로
 // memberPaths()를 태우면 라이브 `~/Development/<id>` 로 해석돼, 파괴적 fs 연산
 // (swapRuntime STEP4 rmSync / archiveWorkspace renameSync / writeMemberPersona 덮어쓰기)이
@@ -156,7 +156,7 @@ export function assertNotLiveMemberFsUnderTest(p: string, op: string): void {
 }
 
 // AGENTS.md에 노출되는 경로는 `~/` 로 표시(포터빌리티 — 유저명 `/Users/<name>/` 노출 방지, 영입검증 absolute-path blocker 회피).
-// codex/openclaw는 `~`를 홈으로 해석하고, 핵심룰은 AGENTS.md에 이미 인라인이라 정본 직독 실패해도 기능 안전(GD 2026-07-01).
+// codex/openclaw는 `~`를 홈으로 해석하고, 핵심룰은 AGENTS.md에 이미 인라인이라 정본 직독 실패해도 기능 안전.
 const tilde = (p: string): string => (HOME && p.startsWith(`${HOME}/`) ? `~${p.slice(HOME.length)}` : p);
 
 /** 런타임별 워크스페이스 경로 + 페르소나 파일 경로(절대). 데이터홈(MEMBERS_ROOT) 기준. */
@@ -179,7 +179,7 @@ export function personaTargetsForRuntime(
   workspace: string,
   fallbackPersonaFile?: string,
 ): { loadingFile: string; identityFile: string | null; personaFile: string } {
-  // ★SOUL.md 통일 모델(GD 2026-07-05, 런타임에 직접 확인): persona 공통 파일 = SOUL.md.
+  // ★SOUL.md 통일 모델: persona 공통 파일 = SOUL.md.
   //   openclaw(AGENTS+SOUL+USER+IDENTITY)·hermes(AGENTS+SOUL) 둘 다 SOUL.md 로드 / claude 는 CLAUDE.md 의 @SOUL.md inline.
   //   identityFile = persona 내용 파일(SOUL.md). loadingFile = 룰+참조.
   const soulFile = fallbackPersonaFile?.endsWith("/SOUL.md") ? fallbackPersonaFile : `${workspace}/SOUL.md`;
@@ -187,7 +187,7 @@ export function personaTargetsForRuntime(
     return { loadingFile: `${workspace}/CLAUDE.md`, identityFile: soulFile, personaFile: soulFile };
   }
   if (runtime === "b3os_native") {
-    // TODO(GD): b3os_native persona/loading 정책은 아직 확정 전. 임의로 SOUL/AGENTS 정책을 확정하지 않는다.
+    // TODO: b3os_native persona/loading 정책은 아직 확정 전. 임의로 SOUL/AGENTS 정책을 확정하지 않는다.
     throw new Error("b3os_native persona policy is not decided yet");
   }
   // openclaw / hermes_agent / codex: AGENTS.md(brain, 룰+참조) 로드 + SOUL.md(persona) 로드.
@@ -280,7 +280,7 @@ const COLLECT_BULLET_OFF_BASE =
  * ★"한 번만 보고하라" 를 collector 가 "첫 깨우기에 보고하고 다신 말라" 로 읽었다.★
  * ★빠진 말은 "아직이면 ★아무 말도 하지 말고 기다려라★" 다.★ 침묵도 행동이라고 말해줘야 한다.
  */
-// 수집 보고 규율(압축, GD 2026-07-16): basics + 재팬아웃/두-수집 가드 1줄 + 짧은 마감.
+// 수집 보고 규율(압축): basics + 재팬아웃/두-수집 가드 1줄 + 짧은 마감.
 //   자세한 예외·복구 절차는 b3os-team-inbox/SKILL.md. (과거 war-story·false-no-answer·침묵수단은 삭제 —
 //   침묵수단은 전 런타임 직접발신[B]으로 obsolete, 무한루프는 antiPingpong 가 6라운드에서 구조적으로 bound.)
 const REPORT_WHEN =
@@ -288,7 +288,7 @@ const REPORT_WHEN =
   "\n- Two asks need two separate syntheses because **a collection is identified by the request, not the thread or topic**. Do not re-report a request you already reported; **a new ask is a new collection even if the topic repeats — report it**.\n";
 
 /**
- * ★배송 — 런타임을 가리지 않는다. 하나의 문장이면 된다.★ (GD 2026-07-13: "팀원한테 맡겨. 다 빼.")
+ * ★배송 — 런타임을 가리지 않는다. 하나의 문장이면 된다.★
  *
  * 예전엔 런타임마다 다른 문장을 줬다 — 브릿지는 "서버가 대신 보낸다", claude 는 "네가 보내라".
  * ★그 차이가 모든 복잡도의 근원이었다★: 서버가 대신 말해주니 ★침묵이 불가능★ 해졌고 → `[NO_REPLY]`
@@ -323,7 +323,7 @@ const COLLECT_BULLET_OFF = COLLECT_BULLET_OFF_BASE + SELF_DELIVERY;
  */
 const COLLECT_BULLET_ON = COLLECT_BULLET_OFF;
 
-/** ★런타임 변종 없음★ — 전 런타임이 같은 룰을 읽는다 (GD 2026-07-13). */
+/** ★런타임 변종 없음★ — 전 런타임이 같은 룰을 읽는다. */
 const COLLECT_BULLET_CLAUDE = COLLECT_BULLET_OFF;
 
 /**
@@ -335,7 +335,7 @@ export function applyCollectMode(rendered: string, _runtime?: string): string {
   return rendered;   // ★런타임 무관 — 전원이 같은 룰★
 }
 
-// ★전체 압축 적용 (GD 2026-07-17): 옛 ①②③ 장황본(CORE_RULE_SNIPPET)을 압축 구조(기본실행/팀소통협업/수집/안전검증)로 교체.
+// ★전체 압축 적용: 옛 ①②③ 장황본(CORE_RULE_SNIPPET)을 압축 구조(기본실행/팀소통협업/수집/안전검증)로 교체.
 //   draft var/rule-en/{CLAUDE,AGENTS}.en.md(하네스4+팀원3런타임 검증) 기준. load-bearing 문구(to-speak-send·kind·direct-to-gd·external-send·verify-before-deploy·collection guards)는 verbatim 보존.
 //   Claude 전용(reply 도구 1:1·도구호출 태그)은 SECTION_CLAUDE_COMMS, openclaw sessions 경고는 sectionTeamShare 에 유지(공용 core엔 안 넣음). 옛 CORE_RULE_SNIPPET(약 10,241자 dead code)은 2026-07-18 제거 완료.
 const CORE_RULE_COMPACT = [
@@ -375,7 +375,7 @@ export const SECTION_CORE_RULE_EN = CORE_RULE_COMPACT;
 export const SECTION_CORE_RULE = CORE_RULE_COMPACT;
 
 /**
- * ★TEAM-OS 와 겹치던 절차 5줄은 핵심룰에서 뺐다 (GD 2026-08-01: "claude 는 team-os 를 로딩하니 중복은 빼면 어때?").★
+ * ★TEAM-OS 와 겹치던 절차 5줄은 핵심룰에서 뺐다.★
  *
  * ★런타임별로 다른 핵심룰을 주는 방식은 쓰지 않는다.★ 처음엔 claude 만 빼려 했는데
  * `collectDelivery.test.ts` 의 ★"전 런타임이 바이트 단위로 같은 룰을 읽는다"★ 가드가 즉시 빨개졌다.
@@ -392,7 +392,7 @@ const PROCEDURE_MOVED_TO_TEAMOS =
 
 // 파일럿 대상 에이전트면 영어 핵심룰, 아니면 한글(기본). teamOsPathFor 와 같은 env 게이트(TEAMOS_PILOT_*).
 // buildPersona/buildAgentsMd 가 이걸 써야 '전체 재생성' 경로에서도 파일럿 멤버의 핵심룰이 영어로 유지된다(Codex 권고 A).
-// ownerName 주면 핵심룰의 {{OWNER}} 를, teamName 주면 {{TEAM}} 을 그 값으로 치환(라이브=owner "GD"/team "b3rys").
+// ownerName 주면 핵심룰의 {{OWNER}} 를, teamName 주면 {{TEAM}} 을 그 값으로 치환(라이브=owner "b3rys").
 // 둘 중 안 준 건 플레이스홀더 유지(퍼블릭 export 안전 — 라이브 페르소나엔 둘 다 넘겨 누출 0).
 export function coreRuleFor(
   _agentId?: string,
@@ -401,7 +401,7 @@ export function coreRuleFor(
   collectEnabled: boolean = true,
   runtime?: string,
 ): string {
-  // 핵심룰은 TEAM-OS.md 규칙 문서처럼 **영어 정본** — locale 토글 대상이 아니다(GD 2026-07-01).
+  // 핵심룰은 TEAM-OS.md 규칙 문서처럼 **영어 정본** — locale 토글 대상이 아니다.
   // (이전 pilot 게이트 TEAMOS_PILOT_* 제거: 파일럿 미설정 시 한글로 롤백되던 원인. _agentId 는 시그니처 호환용 유지.)
   //
   // ★collectEnabled: 킬스위치가 이 경로로도 뒤집혀야 한다.★ persona 쓰기 통로는 하나가 아니다 —
@@ -445,30 +445,30 @@ export function injectCoreRule(personaText: string, section: string = SECTION_CO
 
 // Claude(claude_channel) 전용 소통 섹션 — 팀장 telegram 답을 reply 도구로 '전송'까지 확인.
 // ⚠️ Claude만: openclaw/hermes는 최종 assistant 메시지가 자동 전송이라 이 갭이 없음 → AGENTS.md/IDENTITY.md엔 넣지 않는다(runtime-split). buildPersona claude 분기 + claudeCommsTargets(claude만 inject)로만 주입.
-// 본문은 영어 정본(TEAM-OS/핵심룰과 동일 정책 — 응답 언어는 사용자 언어를 따르되 규칙 텍스트는 영어). GD 2026-07-04.
+// 본문은 영어 정본(TEAM-OS/핵심룰과 동일 정책 — 응답 언어는 사용자 언어를 따르되 규칙 텍스트는 영어).
 export const SECTION_CLAUDE_COMMS = [
   "## Communication note (Claude runtime)",
   "",
   "> ⭐ **CORE RULE — top priority.** This member's single most important execution rule; follow it every turn (to the user, failing it is the same as not having answered).",
   "",
-  // ★★reply 도구는 팀장님과의 1:1 DM 전용이다 (GD 2026-07-14, 라이브 증명) ★★
+  // reply 도구는 팀장님과의 1:1 DM 전용이다
   //
   //   이 줄은 예전에 "(both 1:1 DM and group)" 이라고 적혀 있었다. 그런데 같은 파일 위쪽은
   //   "단톡방에 말하려면 send.sh --to broadcast" 라고 말한다. ★룰이 스스로 모순됐다.★
   //   그리고 이 줄에는 ⭐CORE RULE(최우선) 딱지가 붙어 있어서 ★팀원은 이쪽을 따랐다.★
   //
   //   ★왜 그룹에 reply 를 쓰면 안 되는가★ (실측):
-  //     · reply 로 그룹에 올리면 ★팀장님 눈에는 보인다.★
+  // · reply 로 그룹에 올리면 ★팀장님 눈에는 보인다.★
   //     · 그런데 ★텔레그램은 봇에게 다른 봇의 메시지를 주지 않는다★ — 캡처봇도 못 본다.
   //       (증명: 빌 봇이 그룹에 @스티브봇 멘션 → 스티브 90초 무응답. bot-activity auto-ack 발동 0회)
   //     · → ★DB 에 한 줄도 안 남는다.★ 위임한 팀원은 ★"답이 없다"★ 로 본다. 에러 0, 경고 0.
   //     · 실측: 단톡방 thread 의 팀원간 directed 메시지 ★155건★ 이 이 경로로 조용히 사라졌다.
   //   send.sh 로 보내면 서버를 거치므로 ★DB 에 남고★, 서버가 봇 API 로 그룹에 올린다 — 둘 다 본다.
   //
-  //   ★1:1 DM 만 reply 인 이유★: 서버가 죽어도 팀장님께 말할 수 있어야 한다(비상구).
+  // ★1:1 DM 만 reply 인 이유★: 서버가 죽어도 팀장님께 말할 수 있어야 한다(비상구).
   //   1:1 을 서버에 묶으면 서버가 죽는 순간 보고 수단이 사라진다.
   "- **A telegram reply to the team lead's 1:1 DM is not done until the reply tool actually sends it — and that tool is for the 1:1 DM ONLY, never the group room.** Transcript text reaches no one; only a `mcp__plugin_telegram_telegram__reply` call reaches the DM. Even a light question or greeting goes via reply. **Before ending a turn: did you send this turn's reply? If not, send it now.** Group room → `send.sh --to broadcast --thread <that room's thread>` — your own group post is invisible to the capture bot, so it leaves **no record** and the teammate who delegated to you sees \"no answer\", with no error.",
-  // 아래 2개는 SOUL.md 개별 각인(2026-07-11 GD 수기)을 ★일반화·압축★해 플랫폼 룰로 승격(GD 2026-07-12).
+  // 아래 2개는 SOUL.md 개별 각인(2026-07-11 GD 수기)을 ★일반화·압축★해 플랫폼 룰로 승격.
   //   ①태그 접두사 = 런타임 공통(사용자 무관) ②시각 = 사용자별 타임존이라 하드코딩(KST) 대신
   //   '머신 로컬 오프셋을 읽어 변환'으로 일반화 → 어느 사용자·어느 지역이든 맞음(퍼블릭 안전).
   "- **Never put any character before a tool-call tag** — it must start at column 0 with `<` (the observed slip is prefixing the word `call`). A prefixed tag is **malformed: it silently does NOT run, nothing is sent**, and the raw markup leaks into the chat. Put your explanation in the paragraph *above* the tag.",
@@ -476,21 +476,21 @@ export const SECTION_CLAUDE_COMMS = [
 ].join("\n");
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
-// ★★★ Tier2 = ROLLED BACK / INACTIVE (GD 2026-07-12). 라이브 아님. 읽는 사람 주의. ★★★
+// ★ Tier2 = ROLLED BACK / INACTIVE. 라이브 아님. 읽는 사람 주의. ★
 //
 //  malform(도구호출 태그 깨짐 → 미전송) 방지의 ★현재 라이브 방식★ = 그냥 ★프롬프트 강조★:
 //    각 claude 멤버의 SOUL.md 최상단 '각인 #1' ("<invoke 태그 앞에 아무 글자도 붙이지 않는다").
-//    GD 판단: "지금까지 빌이 잘 응답하고 있으니 프롬프트 강조로 간다."
+//
 //
 //  아래 3개는 ★전부 롤백/비활성★ — malform 관련해서 이것들을 '현재 동작'이라고 말하지 말 것:
 //    ① Tier2 마커(‹‹‹b3os-send›››)  : 코드는 남아있으나 게이트(var/tier2-outbound-agents.txt)
 //                                     등록 멤버 ★0명★ = 아무에게도 적용 안 됨.
 //    ② tg-outbound.py (Tier2 Stop 훅) : Tier2 미사용이라 무의미.
-//    ③ tg-reply-recovery.py (복구 훅) : GD가 ★settings 등록 해제★(파일만 고아로 남음).
+// ③ tg-reply-recovery.py (복구 훅) : GD가 ★settings 등록 해제★(파일만 고아로 남음).
 //
 //  ※ 실제 사고 이력: 이 혼동 때문에 "어제 malformed 뭐로 고쳤지?"에 Tier2 → 훅 이라고
 //    ★두 번 연속 틀리게★ 답한 적 있음(정답=SOUL.md). 코드만 보고 단정하지 말고 SOUL.md 확인.
-//  ※ 되살리려면 GD 결정 필요(그냥 재제안 금지). 되살리는 법=게이트 파일에 멤버 등록 + 훅 재등록.
+// ※ 되살리려면 제품 결정 필요(그냥 재제안 금지). 되살리는 법=게이트 파일에 멤버 등록 + 훅 재등록.
 // ══════════════════════════════════════════════════════════════════════════════════════════
 //
 // [원 설계 메모] Tier2 (2026-07-06, GD): claude_channel 아웃바운드를 서버 소유로. LLM은 tool-call
@@ -529,9 +529,9 @@ export function injectClaudeComms(personaText: string, tier2 = false): string {
 
 
 // ★First contact — 신규 합류 후 첫 발화에서 자기소개+OT 확인. (이전 sectionTone 이 빌더에 배선 안 돼
-//   dead code였던 것을 고침: 제인 등 신규 멤버가 첫 메시지에 OT·persona 언급 안 하던 근본원인. GD 2026-07-19)★
+// dead code였던 것을 고침: 제인 등 신규 멤버가 첫 메시지에 OT·persona 언급 안 하던 근본원인.)★
 //
-// ★자기소개 절차는 여기 있지 않다 — `.b3os-just-joined` 파일 안에 있다★ (GD 2026-08-05).
+// ★자기소개 절차는 여기 있지 않다 — `.b3os-just-joined` 파일 안에 있다★.
 //   평생 한 번 쓰는 절차를 ★매 턴 430자★ 로 싣고 있었다. 파일이 없을 때의 동작("그냥 답해라")은
 //   원래 기본값이라 적어도 안 적어도 같았다. → ★규칙이 필요한 순간에만 존재하게★ 파일로 옮겼다.
 //   파일 본문을 쓰는 곳: `src/server/routes/settings.ts` (영입 시 1회). ★내용에 의존하는 코드는 없다★
@@ -608,7 +608,7 @@ function sectionWorkspace(i: PersonaInput): string {
  * 라이브 stale 파일 보강(scripts/fix-rule-loading.ts)에서도 동일 블록 재사용 → 단일 출처.
  */
 // 룰 로딩 블록 — openclaw·hermes 는 @import 자동인라인이 없어 이 요약+정본 직독으로 메운다.
-// runtime별 분기: Skill Workshop 구분은 openclaw 전용(hermes엔 Skill Workshop 기능 자체가 없음 → GD 2026-06-28 "hermes에선 빼자").
+// runtime별 분기: Skill Workshop 구분은 openclaw 전용(hermes엔 Skill Workshop 기능 자체가 없음 →).
 export function ruleLoadingBlock(runtime: string, agentId?: string): string {
   const isOpenclaw = runtime === "openclaw";
   const teamOsPath = teamOsPathFor(agentId); // 파일럿 대상이면 영어 드래프트 경로, 그 외 정본
@@ -633,19 +633,19 @@ export function ruleLoadingBlock(runtime: string, agentId?: string): string {
 }
 
 /**
- * ★스킬 표 — 전 런타임 공용 단일 출처 (GD 2026-08-01: "팀원들이 b3os 스킬을 제대로 인지하느냐가 핵심").★
+ * ★스킬 표 — 전 런타임 공용 단일 출처.★
  * 예전엔 claude 분기와 openclaw/hermes 분기가 ★서로 다른 스킬 목록★ 을 산문으로 나열했다 → drift + 누락.
  * 트리거(=팀원이 실제로 처하는 상황)로 찾게 하면 "엉뚱한 데를 찾는" 실패가 준다. 이름은 skills/ 실제 디렉터리와 일치.
  */
 /**
- * ★스킬 목록은 손으로 쓰지 않는다 (GD 2026-08-01: "스킬이 추가될 때마다 고쳐야 되나?").★
+ * ★스킬 목록은 손으로 쓰지 않는다.★
  *
  * 손으로 쓰면 드리프트한다 — 실제로 옛 목록은 ★17개 중 4개만★ 이름을 댔고 나머지 13개는
  * "카탈로그 가서 찾아라" 였다. 그게 팀장이 물은 "엉뚱한 데 찾지 않나" 의 정체다.
  *
  * ★스킬이 자기 트리거를 선언하고, 룰은 모아서 찍기만 한다.★
  * 각 `SKILL.md` 프론트매터의 `trigger:` 한 줄을 읽는다. ★없으면 목록에 나가지 않는다★ —
- * 새 스킬·내부용 스킬의 기본값은 '비공개' 다 (GD: "반드시 안 나갈 스킬도 있다", "trigger 있으면 나가면 된다").
+ * 새 스킬·내부용 스킬의 기본값은 '비공개' 다.
  * ★은퇴한 스킬에 trigger 를 달지 않는 것은 사람 책임이고, personaPathSafety 테스트가 그걸 잡는다.★
  * → 스킬 추가 = SKILL.md 만 만들면 끝. 룰 파일은 안 건드린다.
  */
@@ -680,7 +680,7 @@ function buildSkillTable(): string {
   const line = skills
     .map((s) => `${s.trigger} → \`${s.name}\`${s.script ? ` (\`${s.script}\`)` : ""}`)
     .join(" · ");
-  // 경로는 ★맨 위 b3os= 기준★ 을 한 번만 선언하고 이후는 상대로 쓴다 (GD 2026-08-01).
+  // 경로는 ★맨 위 b3os= 기준★ 을 한 번만 선언하고 이후는 상대로 쓴다.
   return [
     // ★카탈로그·스킬 경로는 절대경로로 둔다★ — 기존 가드("스킬 카탈로그도 절대경로, 양 런타임")가 막는다.
     //   그 가드는 상대경로를 못 푸는 런타임에서 실제로 터져서 생긴 것이라 우회하지 않는다.
@@ -700,7 +700,7 @@ function sectionTeamShare(runtime: string, agentId?: string): string {
       "",
       "@TEAM-OS.md",
       "",
-      // ★경로 기준을 맨 위에 한 번만 선언한다★ — 이후는 전부 `b3os/...` 상대로 쓴다 (GD 2026-08-01).
+      // ★경로 기준을 맨 위에 한 번만 선언한다★ — 이후는 전부 `b3os/...` 상대로 쓴다.
       //   긴 절대경로를 절마다 반복하지 않으면서 "무엇 기준인지" 는 파일 안에 남는다.
       `- **Paths**: \`b3os\` = \`${tilde(REPO_ROOT)}\`. Everything below is relative to it (it is NOT your working directory).`,
       "- `b3os/rules/SHARED.md` — the team's current state·learning log. Read it when needed.",
@@ -746,7 +746,7 @@ const SECTION_GLOBAL = [
  *   - claude → CLAUDE.md = 풀 템플릿(정체·핵심룰·능력·톤·작업컨텍스트·팀공유@import·글로벌).
  *   - openclaw/hermes → IDENTITY.md = 정체성 표시용(정체·핵심룰·능력·톤). 팀공유/글로벌은 로딩파일 AGENTS.md(buildAgentsMd)에.
  */
-// ★단순 모델(GD 2026-07-05): 역할·persona 는 SOUL.md 가 유일 소유(사용자 입력 verbatim).
+// ★단순 모델: 역할·persona 는 SOUL.md 가 유일 소유(사용자 입력 verbatim).
 //   로딩파일(CLAUDE.md/AGENTS.md)엔 정체성/능력/톤 자동생성 안 넣음 — "역할·persona 는 SOUL.md" 참조만.
 //   claude 는 Claude Code @import(`@SOUL.md`)로 실제 inline 로드. 자동 wrapper("You are X"/"As a b3rys"/"Signature") 전면 제거 = 중복 근원 제거.
 function personaPointer(i: PersonaInput): string {
@@ -754,7 +754,7 @@ function personaPointer(i: PersonaInput): string {
     // claude(Claude Code)만 @import 지원 → SOUL.md 자동 inline (로컬 파일이라 승인 다이얼로그 없음).
     return ["## Role & Persona", "", "역할·persona 는 `@SOUL.md` 참조 (Claude Code 가 이 파일을 자동 inline 로드)."].join("\n");
   }
-  // ★openclaw/hermes 는 @import 미지원(GD 2026-07-05) → 직접 절대경로. (이 런타임들은 SOUL.md 를 bootstrap 으로 자동 로드하므로 참조는 안내용.)
+  // ★openclaw/hermes 는 @import 미지원 → 직접 절대경로. (이 런타임들은 SOUL.md 를 bootstrap 으로 자동 로드하므로 참조는 안내용.)
   const soulPath = `${tilde(`${MEMBERS_ROOT}/${i.id}`)}/SOUL.md`;
   return ["## Role & Persona", "", `역할·persona 는 \`${soulPath}\` 에 있음 (이 런타임이 SOUL.md 를 함께 로드).`].join("\n");
 }
@@ -803,13 +803,13 @@ export function extractCustomPersona(text: string): string {
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-// (buildPersonaFromCustom 제거 GD 2026-07-06: 단순 모델에서 미사용 dead code. persona=SOUL.md verbatim, IDENTITY.md 참조 없음.)
+// (buildPersonaFromCustom 제거 단순 모델에서 미사용 dead code. persona=SOUL.md verbatim, IDENTITY.md 참조 없음.)
 
 /**
  * openclaw/hermes 의 **로딩 파일** AGENTS.md 본문 — Bill 구조 풀 템플릿(정체·핵심룰·능력·톤·작업컨텍스트·팀공유 참조·글로벌).
  * 런타임이 시작 시 AGENTS.md 를 컨텍스트로 주입하므로 팀공유 참조는 여기. 활성화 단계에서 스캐폴드 생성 후 덮어쓴다.
  */
-// ★단순 모델(GD 2026-07-05): AGENTS.md = 룰 + SOUL.md 참조 링크만. 정체성/능력/톤 자동생성 전면 제거.
+// ★단순 모델: AGENTS.md = 룰 + SOUL.md 참조 링크만. 정체성/능력/톤 자동생성 전면 제거.
 //   openclaw/hermes/codex 모두 AGENTS.md 로딩. 역할·persona 는 SOUL.md(openclaw/hermes 직접 로드, 참조는 안내).
 export function buildAgentsMd(i: PersonaInput): string {
   return subTeam(subOwner([

@@ -2,7 +2,7 @@
  * case 6 — direct_to_gd 플래그 해석 (2026-06-05).
  *
  * "받은 팀원이 GD 에게 직접 응답"은 자연어 추측이 아니라 라우팅 계약으로 푼다:
- * 발신자(Bill, LLM)가 directed 메시지에 meta.reply_mode="direct_to_gd" + source_thread_id(GD 그룹 tg- thread)를
+ * 발신자(Bill, LLM)가 directed 메시지에 meta.reply_mode="direct_to_gd" + source_thread_id를
  * 붙인다. dispatcher 의 resolveDirectToGd 가 이 플래그를 보고 수신자를 "그룹 직접 응답" 경로로 보낸다.
  * 수신자는 본문 해석 없이 플래그만 따른다.
  */

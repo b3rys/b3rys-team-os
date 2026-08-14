@@ -28,7 +28,7 @@ import {
 } from "../lib/approvals";
 import { ensureThread, insertMessage } from "../db/inboxQueries";
 
-// 승인 v2(GD 2026-07-08): 에이전트(승인자 풀)가 merge 승인/거절 시 신청자에게 버스 통지(읽기전용).
+// 승인 v2: 에이전트(승인자 풀)가 merge 승인/거절 시 신청자에게 버스 통지(읽기전용).
 //   ★Devon 리뷰 #4: wake 안 나는 이유는 source:"system" 이다 — dispatcher pendingDispatch 가 source IN(agent,user)
 //   만 wake 큐에 올려서(inbox/dispatch.ts) system 은 세션 wake·답장 유발 안 함. (expected_response 는 insertMessage
 //   가 컬럼에 안 넣으므로 no-op 이라 제거.) unread inbox 항목만 남음 = 통지라 OK.

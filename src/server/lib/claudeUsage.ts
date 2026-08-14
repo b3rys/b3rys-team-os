@@ -1,6 +1,6 @@
 // Claude Code usage aggregator.
 //
-// All claude_channel agents run under ONE shared Claude Max account (GD's), so the
+// All claude_channel agents run under ONE shared Claude Max account, so the
 // 5-hour rolling window and weekly limits are a SHARED pool — if the team collectively
 // burns the budget, every Claude agent gets throttled together. This module reads each
 // agent's Claude Code session logs (~/.claude/projects/<encoded-cwd>/*.jsonl), counts

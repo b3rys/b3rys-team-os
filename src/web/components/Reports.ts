@@ -86,7 +86,7 @@ function escape(s: unknown): string {
 }
 // ★DB 시각은 UTC 인데 Z 가 없다.★ 옛 주석은 이걸 '로컬' 이라 적어 두고 Z 를 안 붙였다 →
 //   ★화면에 9시간 이른 시각이 찍혔다★ (DB 04:48 → 화면 04:48, 실제 13:48 KST).
-//   parseSqliteDate 가 Z 를 붙여 UTC 로 고정한다 — GD 가 2026-07-04 에 만든 단일 출처인데 ★여기만 안 썼다.★
+// parseSqliteDate 가 Z 를 붙여 UTC 로 고정한다 — GD 가 2026-07-04 에 만든 단일 출처인데 ★여기만 안 썼다.★
 function fmtDate(s: string | null | undefined): string {
   if (!s) return "";
   const d = parseSqliteDate(s);
@@ -156,7 +156,7 @@ function mdToHtml(src: string): string {
   const lines = String(src).replace(/\r\n/g, "\n").split("\n");
   const out: string[] = [];
   let i = 0;
-  // 인라인 처리 = lib/mdInline 공유 헬퍼 (Chat/ThreadView 와 단일 출처, GD 2026-08-01).
+  // 인라인 처리 = lib/mdInline 공유 헬퍼 (Chat/ThreadView 와 단일 출처).
   // 원본 대비 강화 2건이 여기에도 적용된다: javascript: 링크 차단(http/https 만), 공백 경계 이탤릭 오변환 방지.
   const inline = (t: string): string => mdInlineToHtml(t);
   while (i < lines.length) {
@@ -338,7 +338,7 @@ async function mutateJson(path: string, method: string, body?: unknown): Promise
 /**
  * 보고서에 붙일 태그를 ★목록에서 골라★ 정한다.
  *
- * ★왜 바꿨나★ (팀장님 실측 2026-07-30): 전에는 쉼표로 이름을 적는 칸 하나였다.
+ * ★왜 바꿨나★: 전에는 쉼표로 이름을 적는 칸 하나였다.
  * "이미 추가된 태그가 없으니 외워서 넣기도 그렇고.. 이 추가된 태그를 좀 보여주면 좋지 안나? 선택해서 넣을 수 있게?"
  * ★맞는 지적이다.★ 있는 것을 보여주지 않으면 사람은 외워야 하고, 오타를 내면 같은 뜻의 태그가 하나 더 생긴다
  * (오늘 카테고리에서 리서치/research/AI 리서치/AI Research 로 갈린 것이 그 결과다).
@@ -399,7 +399,7 @@ async function editReportTags(report: Report): Promise<Report | null> {
   return updated;
 }
 /**
- * 태그 알약 + ★마우스 올리면 나오는 이름바꾸기·삭제 아이콘★ (팀장님 지시 2026-07-30).
+ * 태그 알약 + ★마우스 올리면 나오는 이름바꾸기·삭제 아이콘★.
  *
  * 전에는 이 두 동작이 팝업 안의 ★문법★ 이었다 — `기존 -> 새이름` 으로 바꾸고 `-이름` 으로 지웠다.
  * 그래서 팀장님이 `aaa->bbb` 를 넣었을 때 이름이 바뀌는 대신 그 이름의 태그가 새로 생겼다.
@@ -416,7 +416,7 @@ export function tagPillsHtml(
 ): string {
   // ★알약은 오직 필터다.★ 이름 바꾸기·지우기는 "태그 편집" 버튼 → 팝업으로 간다.
   //
-  // 여기 hover 아이콘을 붙였다가 두 번 실패하고 걷어냈다(팀장님 실측 2026-07-30):
+  // 여기 hover 아이콘을 붙였다가 두 번 실패하고 걷어냈다:
   //   1차 — 흐름 안에 두니 ★마우스를 안 올려도 아이콘 두 개 만큼 빈칸이 항상 남았다★
   //   2차 — absolute 로 빼니 알약과 아이콘 사이 4px 틈에서 hover 가 풀려 ★누를 수가 없었다★
   // ★두 번 다 마크업 시험은 통과했다.★ "자리를 차지하나" 는 잴 수 있어도 "실제로 누를 수 있나" 는
@@ -451,7 +451,7 @@ async function createTag(name: string): Promise<void> {
 }
 
 /**
- * ★태그 편집 — 한 팝업에서 만들기·이름 바꾸기·지우기를 다 받는다.★ (팀장님 지시 2026-07-30)
+ * ★태그 편집 — 한 팝업에서 만들기·이름 바꾸기·지우기를 다 받는다.★
  *
  * ■ 왜 hover 아이콘을 버렸나
  * 태그 옆에 연필·휴지통을 띄우는 방식을 두 번 고쳤는데 두 번 다 못 쓰는 물건이 나왔다.
@@ -464,7 +464,7 @@ async function createTag(name: string): Promise<void> {
  */
 export function tagEditBodyHtml(all: ReportTag[]): string {
   const chip = "inline-flex cursor-pointer items-center rounded-full border border-surface-3 bg-surface-2 px-2.5 py-1 text-xs text-slate-400 transition-colors peer-checked:border-accent-green/50 peer-checked:bg-accent-green/10 peer-checked:text-accent-green";
-  // ★작은 회색 글씨를 쓰지 않는다★ (팀장님 상시 규칙) — 이 라벨은 "무엇을 하는 칸인가" 를 알려주는
+  // ★작은 회색 글씨를 쓰지 않는다★ — 이 라벨은 "무엇을 하는 칸인가" 를 알려주는
   // 핵심 안내다. 흐리게 두면 고를 것만 보이고 무엇을 고르는지가 안 보인다.
   // uppercase·tracking 도 뺐다 — 한글에는 효과가 없고 ①② 같은 기호는 11px 에서 읽히지 않았다(실측).
   const label = "text-xs font-semibold text-slate-300";
@@ -773,7 +773,7 @@ function renderList(): void {
     <button id="reports-retry" class="px-3 py-1.5 rounded-lg border border-surface-3 bg-surface-2 text-sm text-slate-200 hover:bg-surface-3">${pick("다시 시도", "Retry")}</button>
   </div>`;
   // ★분류·태그를 누르면 목록을 다시 받아오는데, 그 사이 화면이 예전 목록을 그대로 보여줬다★
-  //   (팀장님: "카테고리를 누르거나 하면 느린데.. 로딩되는 바도 좀 넣어봐"). 눌렀는데 아무 반응이 없으면
+  //. 눌렀는데 아무 반응이 없으면
   //   사람은 안 눌린 줄 알고 또 누른다 — 오늘 우리가 계속 만난 '무증상' 과 같은 모양이다.
   //   새 키프레임을 만들지 않고 이미 쓰는 animate-pulse 로 얇은 띠 하나만 둔다.
   const loadingBar = _reloading
@@ -1091,7 +1091,7 @@ async function renderDetail(): Promise<void> {
       const active = el.dataset.type === type;
       el.className = `reports-tab px-3.5 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wide border transition-colors ${active ? "text-accent-green border-accent-green/35 bg-accent-green/10" : "text-slate-400 border-surface-3 bg-surface-2 hover:text-slate-200"}`;
     });
-    // 새창보기 — 현재 form 타입을 새 탭에서 전체화면으로(좁은 대시보드 뷰 대신, GD 2026-06-22).
+    // 새창보기 — 현재 form 타입을 새 탭에서 전체화면으로(좁은 대시보드 뷰 대신).
     const open = _root?.querySelector<HTMLAnchorElement>("#reports-open");
     if (open) {
       const href = absoluteUrl(fileUrl(id, type));
@@ -1106,11 +1106,11 @@ async function renderDetail(): Promise<void> {
       const dlHref = absoluteUrl(fileUrl(id, type));
       dl.href = dlHref;
       // 다운로드 파일명 = 제목 슬러그 + 확장자(60자 제한). 빈 download면 브라우저가 URL 끝('md'/'html')만
-      // 써서 형식이름으로 떨어지던 버그 fix (GD R5 4737). 한글 보존(\p{L}).
+      // 써서 형식이름으로 떨어지던 버그 fix. 한글 보존(\p{L}).
       const slug = String(meta?.title ?? id).replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "report";
       dl.setAttribute("download", `${slug}.${type}`);
       // 맥앱(WKWebView): download 속성이 무시되고 webview가 파일로 네비게이션 → 보고서가 전체화면으로 뜨고
-      // 복귀 불가(GD 2026-07-02). 새창보기와 동일하게 시스템 브라우저로 넘겨 다운로드(대시보드 화면 유지).
+      // 복귀 불가. 새창보기와 동일하게 시스템 브라우저로 넘겨 다운로드(대시보드 화면 유지).
       // 일반 브라우저는 bridge 없음 → false → 기본 download 속성 동작.
       dl.onclick = (e) => {
         if (!openInSystemBrowser(dlHref)) return;

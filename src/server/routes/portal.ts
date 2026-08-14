@@ -207,7 +207,7 @@ export function createReportsApp(deps: PortalDeps): Hono {
   });
 
   // 요청 버튼: 보고서 + 요청내용을 담당자(기본=author)에게 버스로 directed 전달(깨움) + 추적 task.
-  // 담당자가 처리 후 팀장께 보고. (GD 2026-06-07)
+  // 담당자가 처리 후 팀장께 보고.
   r.post("/api/:id/request", async (c) => {
     const auth = requireActor(c.req.raw);
     if (!auth.ok || !auth.actor) return c.json({ error: auth.error }, (auth.status ?? 401) as 401);

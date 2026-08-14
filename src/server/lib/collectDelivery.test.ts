@@ -1,6 +1,6 @@
 /**
  * ★수집 룰 — 변종이 사라졌다. 이제 한 문장이다: "말하려면 보내라."★
- * ([B] 전환 — GD 2026-07-13 "팀원한테 맡겨. 다 빼.")
+ * ([B] 전환)
  *
  * ═══ 이 파일이 지키던 예전 계약 [A] ═══
  * 런타임마다 ★배송 문장이 달랐다★:
@@ -132,7 +132,7 @@ describe("★모든 런타임이 '어디로·어떻게 보내는지' 를 읽는�
   });
 
   it("★침묵할 수단이 있다 — 그리고 그건 '그냥 안 보내는 것' 이다★ (토큰 없음)", () => {
-    // ★2026-07-17: 이 보장을 ★핵심룰★ 기준으로 옮겼다.★ (GD: '중복만 제거하자')
+    // ★2026-07-17: 이 보장을 ★핵심룰★ 기준으로 옮겼다.★
     //   옛 테스트는 Collection 룰의 "If you have nothing to say, simply do not send" 를 잡았는데,
     //   그건 핵심룰의 "If you do not send, you have said nothing" + "Silence needs no marker" 와
     //   ★같은 말을 같은 파일에서 두 번★ 하는 것이었다. 문장을 지우되 ★보장은 그대로 강제한다★ —
@@ -217,7 +217,7 @@ describe("★보고 시점 룰(REPORT_WHEN)은 런타임 무관 — 전원이 �
     forEveryRuntime((rule, runtime) => {
       expect(rule, `${runtime}`).toContain("send ONE complete synthesis");
       expect(rule, `${runtime}`).toContain("Do not re-report a request you already reported");
-      // ★late-fold reconcile 가드 (GD 2026-07-17 결정 + codex r2 권장)★: '재보고 금지' 와 TEAM-OS §5
+      // ★late-fold reconcile 가드★: '재보고 금지' 와 TEAM-OS §5
       //   '무응답자 늦은 답 나중에 반영' 충돌을 addendum 예외로 해소. 문구가 압축서 재손실되지 않게 고정.
       expect(rule, `${runtime}`).toContain("add it in a short follow-up");
     });

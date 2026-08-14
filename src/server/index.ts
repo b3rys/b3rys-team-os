@@ -118,7 +118,7 @@ const stopSlackPoll = startSlackPoll({ db, broadcast, agents: () => agents });
 const stopSlackSocket = startSlackSocket({ db, broadcast, agents: () => agents });
 let stopCapture = startTelegramCapture({ agents: () => agents, db, broadcast });
 // capture 워커 재init — Settings ▸ System OP 에서 capture 토큰/그룹을 저장하면 서버 재시작 없이 즉시 적용한다
-//   (워커가 토큰을 부팅 시 1회 읽으므로, 새 토큰으로 텔레그램에 다시 붙으려면 재init 필요). GD 2026-07-19.
+// (워커가 토큰을 부팅 시 1회 읽으므로, 새 토큰으로 텔레그램에 다시 붙으려면 재init 필요).
 const restartCapture = () => {
   try { stopCapture(); } catch { /* best-effort */ }
   stopCapture = startTelegramCapture({ agents: () => agents, db, broadcast });
@@ -139,7 +139,7 @@ const stopProposalSweeper = startProposalSweeper(db);
 const stopScheduler = startSchedulerWorker(db);
 const stopFollowupWorker = startFollowupWorker(db, broadcast);
 // owner_chat_id 자동저장 — 비어 있고 claude access.json(페어링) 등에서 도출되면 team.db 에 persist.
-//   대시보드 도움말("claude 첫 팀원 영입 시 자동 채워집니다")과 실제 동작 일치 + hermes activate 가 안정 설정값을 읽게. GD 2026-07-19.
+// 대시보드 도움말("claude 첫 팀원 영입 시 자동 채워집니다")과 실제 동작 일치 + hermes activate 가 안정 설정값을 읽게.
 try {
   if (persistOwnerChatIdIfEmpty(db)) console.log("[owner-chat-id] 도출값 자동저장됨(설정 비어있던 상태)");
 } catch { /* best-effort */ }
@@ -181,7 +181,7 @@ try {
   // ★옛 합류 깃발 정리 (일회성 전환, 전 환경)★ — 2026-08-05 이전 영입은 `.b3os-just-joined` 에
   //   지시 없이 `joined` 한 줄만 들어 있다. 지금 룰은 "있으면 읽고·따르고·지워라" 라
   //   ★따를 게 없는 파일★ 이 남아 있으면 팀원이 무엇을 할지 지어낼 여지가 생긴다.
-  //   ★한 번뿐인 전환을 룰 문장으로 나르지 않는다★ — 룰은 그대로 두고 여기서 치운다(GD 2026-08-05).
+  // ★한 번뿐인 전환을 룰 문장으로 나르지 않는다★ — 룰은 그대로 두고 여기서 치운다.
   //   지우는 조건을 ★옛 마커와 정확히 일치할 때★ 로 좁힌다 — 방금 영입된 팀원의 ★지시서★ 를 지우면
   //   그 사람은 자기소개 절차를 영영 못 받는다.
   for (const a of agents) {
@@ -348,7 +348,7 @@ api.get("/agents/:id/config", (c) => {
   }
   const slackCreds = loadAgentCreds(id);
   const slackConnectionMode = agent.slack_connection_mode === "socket" ? "socket" : "webhook";
-  // ★대시보드 persona 칸 = SOUL.md. 그게 전부다.★ (GD 2026-07-17)
+  // ★대시보드 persona 칸 = SOUL.md. 그게 전부다.★
   //   "persona 값은 그냥 soul.md 에만 저장해. 대시보드 나머지 필드는 agents.json이 원본이면 되고"
   //   agents.json 의 purpose 필드는 제거됐다. fallback 도 없다 — ★소스가 하나면 어긋날 수가 없다.★
   //   (옛 구조는 purpose 를 읽어 pre-fill 했다. 그래서 사용자가 SOUL 을 고치면 칸엔 옛 purpose 가 뜨고,
@@ -476,7 +476,7 @@ const schedulerApi = createSchedulerRoutes({
 });
 api.route("/", schedulerApi);
 
-// ★approvals(승인큐)는 공개빌드에서 "지원하지 않는" 기능이다★ (GD 2026-07-26). 공개 메뉴에서 /approve 를
+// ★approvals(승인큐)는 공개빌드에서 "지원하지 않는" 기능이다★. 공개 메뉴에서 /approve 를
 //   내리는 것으로 1차 정리하고, ★라우트는 지금 그대로 둔다★ — 아래가 그 이유와, 손대려면 무엇이 선행돼야
 //   하는지다. 여기를 고치러 온 사람은 반드시 먼저 읽을 것.
 //
@@ -486,7 +486,7 @@ api.route("/", schedulerApi);
 //   필연이다. 승인을 안 쓰는 공개 설치본은 PIN 이 영영 미설정이므로 ★먼저 잡는 쪽이 승인 권한을 갖는다.★
 //   TEAM_BIND 로 바인딩을 열 수 있어(폰에서 대시보드 보기 등) "로컬 전용이라 괜찮다" 도 성립하지 않는다.
 //
-//   ■ 왜 지금 라우트를 안 막나 — ★기능 안정화 우선 (GD 판단)★
+// ■ 왜 지금 라우트를 안 막나 — ★기능 안정화 우선★
 //   제대로 된 해법은 라우트 한 줄이 아니라 ★신원·인증 설계 자체★ 다: 대시보드 로그인(소셜 등), PIN 발급·
 //   재설정 경로, 그리고 ★로그인을 강제할 수 없는 채팅에서 어디까지 허용할지★ 의 경계. 그건 별도 프로젝트다.
 //   제안된 기준선: ★채팅 = 조회·상태·본인 범위 / 로그인된 대시보드 = 실행·신뢰 설정 변경.★
@@ -670,7 +670,7 @@ const rootApp = new Hono();
 rootApp.get("/health", (c) => c.json({ ok: true, ...deploymentIdentity(SERVER_IDENTITY, DIST_WEB) }));
 
 /**
- * ★신뢰하지 않는 주소는 여기 한 곳에서 막는다 — 읽기까지.★ (팀장님 지시 2026-07-30)
+ * ★신뢰하지 않는 주소는 여기 한 곳에서 막는다 — 읽기까지.★
  *
  *  판정과 응답 형태는 lib/hostGate.ts 에 있다. 여기서는 "어디에 거는가" 만 정한다.
  *
@@ -706,7 +706,7 @@ try {
     hostname: BIND,
     // ★idleTimeout 명시(Bun 기본 10s) — hermes 활성화(POST /ot/:id/activate)는 브리지 셋업 + poller/gateway
     //   게이트(기본 28s) + 첫 모델호출로 10s를 넘겨, 기본값이면 Bun이 소켓을 끊어 브라우저 "Failed to fetch"가 뜬다
-    //   (핸들러는 계속 돌아 부분상태 잔존). claude는 poller가 몇 초라 우연히 통과. Bun 최대=255s. (BUG4, GD 맥북테스트 2026-07-03)
+    // (핸들러는 계속 돌아 부분상태 잔존). claude는 poller가 몇 초라 우연히 통과. Bun 최대=255s. (BUG4, GD 맥북테스트 2026-07-03)
     idleTimeout: 255,
     fetch: rootApp.fetch,
     websocket,

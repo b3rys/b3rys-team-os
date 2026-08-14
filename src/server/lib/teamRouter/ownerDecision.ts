@@ -28,7 +28,7 @@ export function hasBroadcastAllMarker(text: string): boolean {
 }
 
 /**
- * ★@all 대상 = 정식 팀원(agents.json 의 team_official_member) — 그것 하나만 본다.★ (GD 2026-08-01)
+ * ★@all 대상 = 정식 팀원(agents.json 의 team_official_member) — 그것 하나만 본다.★
  *
  * 예전엔 `BUS_DISPATCH_AGENTS` env 를 읽었다. 그 env 는 ★손으로 유지하는 두 번째 명단★ 이고,
  * 정본(agents.json)과 갈렸다 — 실측: env 7명 vs 정식팀원 8명이라 ★lui·ames 가 @all 에서 통째로 빠졌다.★
@@ -48,7 +48,7 @@ function broadcastTargets(agents: AgentRecord[]): string[] {
  * ★방 발언이 팀원 inbox 로 전달될 대상★ — 본문의 멘션으로 정한다.
  *
  * 방 게시와 팀원 전달이 `broadcast` 한 단어에 묶여 있어서 ★어디에 말하든 전원이 깨어났다.★
- * 갈라야 할 축은 "몇 명" 이 아니라 ★"애초에 전달이 필요한 발송인가"★ 다 (GD 2026-08-01).
+ * 갈라야 할 축은 "몇 명" 이 아니라 ★"애초에 전달이 필요한 발송인가"★ 다.
  *
  * 실측(오늘 방 발언 81건): ★멘션 없음 51건 → 답 달린 것 0건★ · 멘션 있음 30건 → 답 27건.
  * ★멘션 없는 발언에 답이 달린 사례가 하나도 없다★ — 이 축으로 잘라도 끊기는 대화가 없다.
@@ -58,7 +58,7 @@ function broadcastTargets(agents: AgentRecord[]): string[] {
  * 여기서 정규식을 새로 쓰면 그게 ★두 번째 판정★ 이 되고, 그게 이 결함의 원인이었다.
  */
 export function broadcastAudience(text: string, source?: string): { kind: "all_hands" | "none" } {
-  // ★@all 은 팀장님 전용이다.★ (GD 2026-08-01: "멘션은 팀장만 하는 거라고")
+  // ★@all 은 팀장님 전용이다.★
   //   팀원이 본문에 @all 을 써도 마커로 치지 않는다 — ★방에 말하는 것 자체는 그대로다.★
   //   실측: 그날 팀원이 쓴 @all 중 전체공지 목적은 ★검증용 1건뿐★ 이고 나머지는 전부
   //   ★"@all 이라는 단어를 문장 안에서 언급"★ 한 것이었다(예: "결함은 그중 하나(@all)에만").
@@ -73,7 +73,7 @@ export function routeTeamMessage(
   context: RouterContext = {},
 ): RouteDecision {
   const activeAssigneeIds = validActiveAssignees(context, agents);
-  // 인용/예시(코드펜스·"—-" 구분선 아래)의 멘션은 트리거 대상에서 제외 (GD 2026-06-25).
+  // 인용/예시(코드펜스·"—-" 구분선 아래)의 멘션은 트리거 대상에서 제외.
   // 라이브 멘션 판정에만 적용 — 원문 text 는 다른 용도 위해 보존.
   const liveText = stripQuotedForRouting(text);
   // 0) @all/@b3rys/@group → broadcast all enabled agents. Checked BEFORE explicit_mention.
@@ -103,7 +103,7 @@ export function routeTeamMessage(
     };
   }
 
-  // 2026-06-05: topic_shift/closure 자동감지 제거(GD). sticky 는 명시적 @멘션/답장으로
+  // 2026-06-05: topic_shift/closure 자동감지 제거. sticky 는 명시적 @멘션/답장으로
   // owner 가 바뀌기 전엔 항상 유지된다 — 자동 주제전환 추정으로 owner 를 버리지 않는다.
   if (activeAssigneeIds.length > 0) {
     return {
@@ -132,7 +132,7 @@ function validActiveAssignees(context: RouterContext, agents: AgentRecord[]): st
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LLM router (EXAONE via Ollama) — PRIMARY engine per GD's "all-LLM, no regex"
+// LLM router (EXAONE via Ollama) — PRIMARY engine per the team lead's "all-LLM, no regex"
 // decision (2026-05-23). The regex routeTeamMessage above is kept as a fast,
 // deterministic FALLBACK (used when Ollama is unavailable) + its tests document
 // the expected behavior. The LLM engine additionally classifies discussion vs
@@ -187,7 +187,7 @@ interface RawLlm {
 
 /**
  * LLM 라우팅 (EXAONE/Ollama). Ollama 실패 시 regex routeTeamMessage 로 폴백.
- * standalone — 아직 라이브 메시지 흐름에 연결 안 됨 (GD 리뷰 후 통합).
+ * standalone — 아직 라이브 메시지 흐름에 연결 안 됨.
  */
 export async function routeTeamMessageLLM(
   text: string,
@@ -261,7 +261,7 @@ export async function routeTeamMessageLLM(
 // 이유: 순수 small-LLM(EXAONE 2.4b) 단독은 ~77% + run-to-run 변동(명시멘션·주제전환을
 // 가끔 놓침). 명시 @멘션/이름/주제전환 마커는 regex 가 확실하므로 그건 regex 로 고정하고,
 // "이름·도메인 불명확" 인 경우에만 LLM 으로 도메인 분류. → 신뢰도↑ + LLM 호출↓(빠름).
-// (GD 의 "all-LLM" 결정과의 트레이드오프: 신뢰도 위해 명확신호는 결정론. GD 리뷰 후 택1.)
+//
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function routeTeamMessageHybrid(
@@ -272,10 +272,10 @@ export async function routeTeamMessageHybrid(
 ): Promise<LlmRouteDecision> {
   const intent = classifyIntent(text);
   const activeAssigneeIds = validActiveAssignees(context, agents);
-  // 인용/예시(코드펜스·"—-" 구분선 아래)의 멘션은 트리거 제외 (GD 2026-06-25). 라이브 멘션 판정에만 적용.
+  // 인용/예시(코드펜스·"—-" 구분선 아래)의 멘션은 트리거 제외. 라이브 멘션 판정에만 적용.
   const liveText = stripQuotedForRouting(text);
 
-  // 2026-06-05: topic_shift/closure 자동감지 제거(GD). owner 는 @멘션 > 답장 > sticky > 기본
+  // 2026-06-05: topic_shift/closure 자동감지 제거. owner 는 @멘션 > 답장 > sticky > 기본
   // 으로만 결정한다. 종료·주제전환을 자동 추정해 owner 를 비우거나 codex 로 넘기지 않는다.
 
   // 0.5) @all/@b3rys/@group → broadcast all enabled agents. Checked BEFORE explicit_mention.
@@ -291,14 +291,14 @@ export async function routeTeamMessageHybrid(
     };
   }
 
-  // 1) 명시 @멘션 — @멘션은 어떤 상황에서도 우선 (GD 2026-05-25). detectExplicitTargets 는
+  // 1) 명시 @멘션 — @멘션은 어떤 상황에서도 우선. detectExplicitTargets 는
   // 순수 @멘션/@별칭만 잡고(과거참조 tail drop·REQUEST_MARKER 필터 없음) 무조건 깨운다.
   // 직접 호출 "@데미스 @스티브 이거 보여. 어제 모했어" 가 tail 의 '어제'(과거참조)+요청마커 부재로
   // detectAddressedNamesLoose/filterLiveWakeTargets 에서 둘 다 누락되던 버그 fix.
   // (bare 이름(@ 없음)은 detectExplicitTargets 가 안 잡으므로 over-summon 은 여전히 방지됨.)
   const wakeTargets = detectExplicitTargets(liveText, agents);
   if (wakeTargets.length > 0) {
-    // 2026-06-05 (GD): @멘션은 컴 룰의 최상위. 잡힌 전원에게 라우팅하고 끝낸다.
+    // 2026-06-05: @멘션은 컴 룰의 최상위. 잡힌 전원에게 라우팅하고 끝낸다.
     // 위임/중계/보고/작업 판단은 멘션 받은 에이전트(LLM)가 내용을 읽고 한다 — 라우터는 'owner 가 누구냐'만.
     // (이전 analyzeDelegation 좁히기는 "@빌 @코덱스 각자 일"을 위임으로 오판하는 등 버그만 양산해 제거.)
     return {
@@ -346,8 +346,8 @@ export async function routeTeamMessageHybrid(
   const intake = await routeDefaultIntakeLLM(text, agents, opts).catch(() => null);
   if (intake?.outcome === "route") return { ...intake, shouldResetThread: false };
 
-  // 4) (GD 룰 2026-06-05) 오너가 애매하면(멘션·답장·sticky 모두 없음) codex 로 자동 배정하지 않는다.
-  //    룰 = @멘션 > 답장 > sticky > **오너 애매하면 GD 문의**. → ask_gd(아무도 안 깨움 + GD 에게 누가 볼지 질문).
+  // 4) 오너가 애매하면(멘션·답장·sticky 모두 없음) codex 로 자동 배정하지 않는다.
+  // 룰 = @멘션 > 답장 > sticky > **오너 애매하면 GD 문의**. → ask_gd(아무도 안 깨움 + GD 에게 누가 볼지 질문).
   //    이전엔 하드코딩 default_step 으로 보내, 재시작으로 sticky 가 비면 특정 agent 가 엉뚱한 메시지를 잡던 문제 fix.
   return {
     targetAgentIds: [],

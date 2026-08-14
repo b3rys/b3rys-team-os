@@ -413,7 +413,7 @@ export const store = createStore<AppState>((set) => ({
   },
   selectAgent(id) {
     // Keep the currently-selected per-agent tab (Live/Thread/Settings) when switching members —
-    // switching from Settings to another member used to snap back to Live. (GD 2026-05-31)
+    // switching from Settings to another member used to snap back to Live.
     // If we're on a global view (doc/bus/teamos/topology, not agent-specific), default to Live.
     set((state) => {
       const perAgentTab =

@@ -192,10 +192,10 @@ export function setApprovalStatus(
   ).run(status, result ?? null, id);
 }
 
-// 승인 시스템 v2 tier 인가(GD 2026-07-08). normal(문구·코드) 승인자 풀 = author 아닌 풀 1인.
+// 승인 시스템 v2 tier 인가. normal(문구·코드) 승인자 풀 = author 아닌 풀 1인.
 // core(위험·보안·삭제·배포)는 GD(lead) 탭만. GD 는 상위권한이라 normal 도 승인 가능(단 self-approve 금지).
 // 에이전트 승인은 CLI/버스 경로(텔레그램 탭 아님). 소문자 id 비교.
-// ★풀은 하드코딩 아니라 설정(setting)으로 언제든 변경(GD 2026-07-08, 데이터구조>분기 원칙).
+// ★풀은 하드코딩 아니라 설정(setting)으로 언제든 변경.
 export const DEFAULT_NORMAL_TIER_APPROVERS = ["bill", "steve", "codex", "hermes"] as const;
 export const MERGE_APPROVERS_SETTING_KEY = "merge_approvers_normal";
 export type ApprovalTier = "normal" | "core";
@@ -238,7 +238,7 @@ export function canApproveTier(opts: {
 }
 
 /**
- * 승인 시스템 v2(GD 2026-07-08): maxAgeMinutes(기본 10분) 이상 pending 인 승인을 '보류(deferred)' 로
+ * 승인 시스템 v2: maxAgeMinutes(기본 10분) 이상 pending 인 승인을 '보류(deferred)' 로
  * 전이하고 대상 행을 반환한다(호출부가 신청자에게 알림). ★행 id 로 개별 전이 — 'WHERE status=pending'
  * 일괄 UPDATE 금지(Bill 제약⑨: bulk 는 남의 pending 오염). 순수 db 로직이라 sender 비의존 → 테스트 용이.
  */
@@ -273,7 +273,7 @@ const LOCK_MS = 15 * 60 * 1000;
 let _attempts = 0;
 let _lockedUntil = 0;
 
-// PIN per-session — 검증 1회 후 짧은 TTL 토큰으로 재요구 없이(GD UX). in-memory(프로세스).
+// PIN per-session — 검증 1회 후 짧은 TTL 토큰으로 재요구 없이. in-memory(프로세스).
 const PIN_SESSIONS = new Map<string, number>(); // token → expiryMs
 const PIN_SESSION_TTL = 30 * 60 * 1000; // 30분
 /** PIN 검증 성공 시 세션 토큰 발급(이후 민감작업은 pin 대신 이 토큰으로). */

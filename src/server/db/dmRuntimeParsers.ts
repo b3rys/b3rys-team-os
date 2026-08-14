@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { insertDmMessage, type DmMessageInput } from "./dmCapture";
 
-// ★팀장 1:1 chat_id 는 설정값(setting: owner_chat_id)이다 — 상수로 박지 않는다(GD 2026-07-14).★
+// ★팀장 1:1 chat_id 는 설정값(setting: owner_chat_id)이다 — 상수로 박지 않는다.★
 // 박아 두면 그 값이 곧 '팀장'이 되어, 다른 팀에서는 필터가 전부 어긋나 DM 캡처가 조용히 0건이 된다
 // (누출이 아니라 무동작으로 실패한다 — 더 나쁘다). 호출자가 실제 설정값을 넘기고, 없으면 캡처를 건너뛴다.
 export function openclawGdSessionKey(chatId: string, agentId: string): string { return `agent:${agentId}:telegram:direct:${chatId}`; }

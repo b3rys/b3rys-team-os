@@ -3,8 +3,8 @@
 // 왜 필요했나 (2026-07-30 실측 사고):
 //   08:03:37 health 가 `runtime_essentials_missing | lisa | missing:["poller:claude bot.pid"]` 를
 //   정확히 잡았다. 그런데 healthCheck 는 appendAudit 으로 ★audit_event 테이블에만★ 썼다.
-//   message 테이블에 아무것도 안 넣으므로 팀장님 텔레그램·그룹방·팀원 누구에게도 안 갔고,
-//   리사는 28분간 무응답이었다. 팀장님이 직접 "리사가 응답이 없어" 라고 알려줘야 했다.
+// message 테이블에 아무것도 안 넣으므로 팀장님 텔레그램·그룹방·팀원 누구에게도 안 갔고,
+// 리사는 28분간 무응답이었다. 팀장님이 직접 "리사가 응답이 없어" 라고 알려줘야 했다.
 //   → 감지는 되어 있었다. 없던 건 ★알림 경로★ 다. 이 모듈이 그 경로다.
 //
 // 설계 원칙
@@ -34,11 +34,11 @@ const RESERVED = new Set(["user", "system", "moderator", "broadcast"]);
  *   근본 경합(bun binlink)은 lisa·jane 사이에서 대칭이라 둘이 동시에 탈락할 수 있고(08:03:37 실측),
  *   그러면 알림이 죽은 쪽으로 들어가 아무도 못 읽는다. 그래서 다른 런타임(clo·herm)을 폴백으로
  *   선호하게 만들었다.
- *   그런데 그 점수제가 ★coordinator 기본 라우팅을 뒤집는 사고★ 를 냈고(B1), 팀장님이
+ * 그런데 그 점수제가 ★coordinator 기본 라우팅을 뒤집는 사고★ 를 냈고(B1), 팀장님이
  *   "coordinator 기본은 건드리지 마라 / lisa 가 죽으면 jane 으로, 그냥 원래대로 가라" 로 정리했다.
  *   ★알려진 트레이드오프★: lisa·jane 이 ★동시에★ 죽으면 알림이 죽은 jane 에게 가서 아무도 못 읽는다.
- *   팀장님이 이 경우를 직접 처리하겠다고 명시했다("정 안되면 내가 처리하면 돼"). 그래서 단순 규칙이
- *   의도된 동작이며, 이걸 '버그' 로 보고 점수제를 되살리지 마라 — 되살리려면 팀장님 승인이 필요하다.
+ * 팀장님이 이 경우를 직접 처리하겠다고 명시했다("정 안되면 내가 처리하면 돼"). 그래서 단순 규칙이
+ * 의도된 동작이며, 이걸 '버그' 로 보고 점수제를 되살리지 마라 — 되살리려면 팀장님 승인이 필요하다.
  */
 export function pickOpNoticeRecipient(
   agents: AgentRecord[],
@@ -78,7 +78,7 @@ export function emitOpNotice(
       source: "system",
       // ★reply_to 를 비워두지 않는다★ — notifyCardOwner 주석의 교훈: 받는 쪽이 'system 에게 답해라'
       //   로 읽으면 --to system = 블랙홀이 된다. op 알림은 답장 대상이 아니라 ★행동 지시★ 이므로
-      //   수신자가 팀장님께 직보하도록 본문에서 명시한다.
+      // 수신자가 팀장님께 직보하도록 본문에서 명시한다.
       meta: { op_notice: true },
       hop_count: 0,
       priority: opts.priority ?? "high",

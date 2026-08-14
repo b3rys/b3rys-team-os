@@ -95,7 +95,7 @@ export function webhookBlockedNotice(mode: "webhook" | "socket", eventRequestUrl
   );
 }
 
-// ★이벤트 구독을 켜는 단계가 안내에 아예 없었다★ (2026-07-27 GD 실측 — 리사 앱을 만들다 여기서 헤맸다).
+// ★이벤트 구독을 켜는 단계가 안내에 아예 없었다★ (2026-07-27 실측 — 리사 앱을 만들다 여기서 헤맸다).
 // 매니페스트에는 event_subscriptions.bot_events=["app_mention"] 이 들어 있다. 그런데 ★그게 들어 있다는 것과
 // 그 앱에서 실제로 켜져 있다는 것은 다르다★ — 실제로 GD 는 Slack 화면에서 직접 토글을 올려야 했다.
 // 이게 꺼져 있으면 ★봇은 멘션에 아무 반응을 하지 않는다. 오류도 안 난다.★ 사용자는 "봇이 무시한다" 로만 본다.
@@ -321,7 +321,7 @@ export function renderAgentSlack(host: HTMLElement, agentId: string, _displayNam
 
     host.querySelector<HTMLButtonElement>("#sl-open")?.addEventListener("click", () => {
       open = !open;
-      // ★슬랙 정본은 Socket Mode 뿐이다★ (GD 2026-07-27). 예전엔 기존 멤버의 저장된 방식을 따라가서
+      // ★슬랙 정본은 Socket Mode 뿐이다★. 예전엔 기존 멤버의 저장된 방식을 따라가서
       //   ★지원하지 않는 Event URL 안내가 계속 떴다.★ 저장값은 과거 잔재이지 현재 정책이 아니다.
       //   기존 멤버의 ★런타임 수신 동작은 그대로다★ — 서버 경로는 안 건드린다. 앱을 다시 만들 때만 Socket 이 된다.
       //   (이 값이 항상 "socket" 이므로 아래 isSocket 분기·webhookBlockedNotice 는 자연히 Socket 쪽만 탄다.)

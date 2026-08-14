@@ -1,4 +1,4 @@
-// MonitoringView — 모니터링 탭 (GD 2026-07-10, Bill 핸드오프). read-only.
+// MonitoringView — 모니터링 탭. read-only.
 //   ① 봇 liveness 모니터 상태  ② DM 저장(dm_message) health. 데이터: GET /api/monitoring(서버 30초 캐시).
 import { apiBase } from "../ws";
 import { pick } from "../i18n";

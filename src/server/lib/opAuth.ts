@@ -84,7 +84,7 @@ export function trustedActorFromRequest(
   if (actor && isLoopbackDashboardRequest(request) && ACTOR_RE.test(actor)) {
     return { ok: true, actor: { actor, source: "loopback_dashboard" } };
   }
-  // ★여기서 실패한 이유는 "헤더가 없다" 가 아니라 "이 주소를 못 믿는다" 다.★ (팀장님 지적 2026-07-30)
+  // ★여기서 실패한 이유는 "헤더가 없다" 가 아니라 "이 주소를 못 믿는다" 다.★
   //   앞서는 위에서 만들어둔 `fromHeaders`(= x_actor_id_required)를 그대로 돌려줬다. 그런데
   //   그 값을 만든 함수는 ★주소를 한 번도 안 본다★ — 헤더만 본다. 그래서 화면에도 로그에도
   //   ★대시보드가 쓰지도 않는 헤더 이름★ 이 남았고, 원인을 찾는 사람을 엉뚱한 데로 보냈다.
@@ -96,7 +96,7 @@ export function trustedActorFromRequest(
 /**
  * 이 주소로 들어온 대시보드도 loopback 과 같게 믿는다 — ★기본값 없음(=현행 동작 그대로)★.
  *
- * 왜 필요했나 (2026-07-30 팀장님 실측): 대시보드는 신원을 얻는 경로가 loopback 예외 하나뿐이다
+ * 왜 필요했나 (2026-07-30 실측): 대시보드는 신원을 얻는 경로가 loopback 예외 하나뿐이다
  * (PIN UI 는 2026-06-28 에 제거됐고, 프론트는 어떤 인증 헤더도 보내지 않는다). 그래서 같은 사람이
  * 같은 맥에서 같은 버튼을 눌러도 ★주소창이 127.0.0.1 이면 되고 도메인이면 403★ 이었다.
  * 터널이 요청을 127.0.0.1 로 넘겨주지만 Host 헤더에는 도메인 이름이 남아 서버가 구분할 근거가 없다.

@@ -1,7 +1,7 @@
 /**
  * b3os_native M2d — 배정 preflight 체크.
  *
- * b3osNative 팀원을 ★실제 배정하기 전★에 준비상태를 검사한다. 라이브 배정(GD+Bill 게이트) 전
+ * b3osNative 팀원을 ★실제 배정하기 전★에 준비상태를 검사한다. 라이브 배정 전
  * "이 팀원이 진짜 돌 준비가 됐나"를 코드로 확인 — persona·model·runtime·API키 존재.
  * ★API 키는 "존재 여부"만 본다(값은 절대 안 읽음 — 보안).★
  */

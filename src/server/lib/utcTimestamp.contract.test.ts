@@ -18,7 +18,7 @@
  *
  * ■ 올바른 파서 (이미 있다 — 새로 만들지 마라)
  *   · 서버: parseCapturedAt (statusProbe) · toUtcIso/timeKST (shared)
- *   · 웹  : parseSqliteDate / formatLocal (web/lib/datetime.ts) ← GD 가 2026-07-04 에 만든 단일 출처
+ * · 웹 : parseSqliteDate / formatLocal (web/lib/datetime.ts) ← GD 가 2026-07-04 에 만든 단일 출처
  */
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";

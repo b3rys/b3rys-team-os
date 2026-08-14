@@ -296,7 +296,7 @@ async function processMentionForAgent(opts: {
       body: cleanBody,
     })
       .then(async (reply) => {
-        // ★[B] — 서버는 팀원 대신 말하지 않는다.★ (GD 2026-07-13: "팀원한테 맡겨. 다 빼.")
+        // ★[B] — 서버는 팀원 대신 말하지 않는다.★
         //   예전엔 여기서 턴 본문을 ★버스에 insert + 슬랙 스레드에 게시★ 했다.
         //   ★말하려면 팀원이 직접 보낸다★ → POST /team/api/inbox → routes/inbox.ts 가
         //   ★슬랙 스레드로 릴레이한다★ (findSlackMetaForThread — ★그 릴레이는 원래부터 있었다★).
@@ -314,7 +314,7 @@ async function processMentionForAgent(opts: {
         appendAuditFile("system", "openclaw_inject_failed", stored.id, detail);
       });
   } else if (targetAgent.runtime === "hermes_agent") {
-    // hermes_agent — 게이트웨이가 Telegram 직결이라 slack.ts에 분기가 없어 @멘션이 무응답이던 버그(GD 2026-06-29).
+    // hermes_agent — 게이트웨이가 Telegram 직결이라 slack.ts에 분기가 없어 @멘션이 무응답이던 버그.
     // runHermesTeamTurn(headless hermes CLI one-shot)으로 응답 생성 → slack thread로 relay. (openclaw 분기와 동일 패턴.)
     void runHermesTeamTurn({
       agent: targetAgent,
@@ -329,7 +329,7 @@ async function processMentionForAgent(opts: {
       body: cleanBody,
     })
       .then(async (reply) => {
-        // ★[B] — 서버는 팀원 대신 말하지 않는다.★ (GD 2026-07-13: "팀원한테 맡겨. 다 빼.")
+        // ★[B] — 서버는 팀원 대신 말하지 않는다.★
         //   예전엔 여기서 턴 본문을 ★버스에 insert + 슬랙 스레드에 게시★ 했다.
         //   ★말하려면 팀원이 직접 보낸다★ → POST /team/api/inbox → routes/inbox.ts 가
         //   ★슬랙 스레드로 릴레이한다★ (findSlackMetaForThread — ★그 릴레이는 원래부터 있었다★).

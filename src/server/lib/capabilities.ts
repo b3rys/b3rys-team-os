@@ -10,7 +10,7 @@ import type { AgentRecord } from "../types";
  * 정의된 capability (의미 = 코드 동작):
  * - coordinator        : default_step owner(미배정/모호 메시지 기본 담당 — sync fallback·PM 조율)
  * - ambiguous_owner    : 오너가 애매/무-확신일 때 owner-inference(defaultIntake)가 보내는 담당.
- *                        = "누가 볼지 애매하면 이 사람이 받아서 GD 께 문의한다"(GD 2026-07-10 결정: 코덱스가 아니라 빌).
+ * = "누가 볼지 애매하면 이 사람이 받아서 GD 께 문의한다".
  *                        미설정 시 coordinator 로 폴백(기존 동작 보존). coordinator(PM/조율)와 분리 가능.
  * - restricted_mention : bare alias 무시, 명시 @멘션에만 응답
  * - native_routing     : openclaw 네이티브 self-poll 경로
@@ -73,7 +73,7 @@ export function coordinatorId(agents: AgentRecord[]): string | undefined {
 /**
  * ambiguous_owner capability 를 가진 agent 의 id (= 오너가 애매/무-확신일 때 owner-inference 가 보내는 담당).
  *
- * GD 2026-07-10 결정: "오너 애매한 메시지는 코덱스(coordinator)가 받지 말고 빌이 받아서 GD 께 문의(ask gd)한다."
+ * 제품 결정: 오너가 애매한 메시지는 coordinator 가 아니라 ambiguous_owner 담당이 받아 팀 리드에게 문의한다.
  * → 애매 라우팅 대상을 coordinator(PM/조율)와 분리한다. defaultIntake(라이브 owner-inference LLM 경로)의
  *    default/fallback 담당자로 쓰인다.
  *

@@ -65,7 +65,7 @@ export interface SendMessageInput {
 
 /**
  * send.sh argv 조립(순수함수 — 테스트 대상). ★direct_to_gd는 명시 true일 때만 --direct-to-gd 붙인다★:
- * 본문 기반 자동승격 영구 금지(GD 2026-07-09 — 위임 본문 오발화로 direct_to_gd 폭주했던 회귀 방지).
+ * 본문 기반 자동승격 영구 금지.
  */
 export function buildSendArgs(input: SendMessageInput, actor: string): string[] {
   const a = ["--from", actor, "--to", input.to, "--body", input.body];
@@ -139,7 +139,7 @@ function denyCrossMember(self: string, target: string) {
 }
 
 /**
- * 도구 설명에 실을 명부 — ★정규 팀원만★ (팀 리드 2026-08-07: "정규팀원만 해").
+ * 도구 설명에 실을 명부 — ★정규 팀원만★.
  *
  * ★정본이 두 군데로 갈려 있다★: 누가 있는지는 DB(`agent` 표), 정규 여부는 agents.json 이다.
  * `agent` 표에는 `team_official_member` 칸이 없다 — 그래서 DB 만 읽으면 12명 전부가 나온다.
@@ -328,7 +328,7 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
           structuredContent: { dryRun: true, argv, direct_to_gd: input.direct_to_gd === true },
         };
       }
-      // ★동기 spawn 금지★ (팀 리드 원칙 2026-08-05: "외부확장 요청이 본 쓰레드를 멈추면 안 되지").
+      // ★동기 spawn 금지★.
       // b3os 서버는 프로세스 1개·주 스레드 1개다. spawnSync 는 자식이 끝날 때까지 그 스레드를 붙들어
       // ★그동안 대시보드를 포함한 모든 요청이 멈춘다.★ stdio 시절엔 별도 프로세스라 자기만 멈췄는데,
       // HTTP 창구가 같은 프로세스에 들어온 뒤로는 남을 멈춘다.
@@ -439,7 +439,7 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
       description:
         "팀원에게 질문하고 그 답을 기다린다. 상대마다 고정된 1:1 방을 쓰므로 이어서 물으면 팀원이 앞 대화를 안다. " +
         "답이 제때 오면 답을, 늦으면 요청 번호와 함께 접수 상태를 돌려준다(요청은 살아 있다 — b3os_fetch_answer 로 회수). " +
-        // ★클라이언트는 전달만 한다★ (팀 리드 2026-08-07). 안내이지 강제가 아니다 — 그래서 speaker 로 표시까지 남긴다.
+        // ★클라이언트는 전달만 한다★. 안내이지 강제가 아니다 — 그래서 speaker 로 표시까지 남긴다.
         "사용자의 말을 전할 때는 고치거나 요약하지 말고 받은 그대로 넘기세요. 정리·보완·판단을 덧붙이지 마세요. " +
         "덧붙이거나 당신이 지어낸 말을 보낼 때는 speaker 를 client 로 채우세요.",
       inputSchema: {
@@ -448,7 +448,7 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
         //   id 목록을 얻으려면 team_status 를 ★먼저 한 번 불러야★ 했다. 세션 첫 마디부터
         //   "빌한테 물어봐" 라고 하면 추측이 된다. 도구 설명은 ★세션 시작 시 주어지므로★
         //   여기 실으면 추가 호출 없이 정확해진다.
-        //   ★설명에는 정규 팀원만 싣는다★ (팀 리드 2026-08-07). 12명 전부가 아니라 9명이다.
+        // ★설명에는 정규 팀원만 싣는다★. 12명 전부가 아니라 9명이다.
         //   ★설명을 좁히는 것이지 문을 좁히는 게 아니다★ — 아래 `to` 검증(listAgents)은 그대로라
         //   비정규 팀원에게 묻는 것 자체는 계속 된다. 안내와 허용을 같이 줄이면 조용히 못 묻게 된다.
         to: z
@@ -456,7 +456,7 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
           .min(1)
           .describe(`질문할 팀원 id. 지금 등록된 팀원: ${officialRoster(db)}`),
         question: z.string().min(1).describe("질문 본문"),
-        // ★누구 말인지 클라이언트가 채워 넣는다★ (팀 리드 2026-08-07: "함수 파라미터를 채워 넣는 걸로").
+        // ★누구 말인지 클라이언트가 채워 넣는다★.
         //   서버는 이걸 만들어낼 수 없다 — 도착하는 건 글자뿐이고 ★누가 썼는지는 클라이언트만 안다.★
         //   ★주장이지 증거가 아니다★: 권한 판정에 쓰지 않고, 사람이 오해하지 않게 보여주기만 한다.
         speaker: z
@@ -509,7 +509,7 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
                   progressToken: token,
                   progress: Math.round(elapsedMs / 1000),
                   total: Math.round(waitMs / 1000),
-                  // ★'몇 초' 가 아니라 '어디까지 왔나'★ (팀 리드 2026-08-07). 초는 뒤에 붙인다.
+                  // ★'몇 초' 가 아니라 '어디까지 왔나'★. 초는 뒤에 붙인다.
                   message: `${askProgress(db, requestId, to).label} (${Math.round(elapsedMs / 1000)}초)`,
                 },
               });

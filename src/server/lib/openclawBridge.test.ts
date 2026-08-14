@@ -98,7 +98,7 @@ describe("resolveOpenclawBin — PATH 만 믿지 않는다", () => {
 
 describe("injectOpenclawTelegramTurn visible reply bridge", () => {
   /**
-   * ★[B] — 브릿지는 턴 본문을 ★게시하지 않는다.★★ (GD 2026-07-13: "팀원한테 맡겨. 다 빼.")
+   * ★[B] — 브릿지는 턴 본문을 ★게시하지 않는다.
    *
    * ═══ 예전 계약 [A] (이 테스트가 지키던 것) ═══
    *   브릿지가 세션을 만들고 → 주입하고 → preview 로 ★게이트웨이가 뱉은 최종 텍스트를 긁어★ →
@@ -107,7 +107,7 @@ describe("injectOpenclawTelegramTurn visible reply bridge", () => {
    *
    * ═══ 왜 뒤집혔나 ═══
    *   ★침묵이 불가능했다★ → `[NO_REPLY]` 우회 토큰 → 발행 지점마다 가드 → ★하나 놓침★ →
-   *   ★"GD Step Codex: [NO_REPLY]" 가 팀장 단톡방에 문자 그대로 찍혔다★ (2026-07-13 라이브).
+   * ★"GD Step Codex: [NO_REPLY]" 가 팀장 단톡방에 문자 그대로 찍혔다★ (2026-07-13 라이브).
    *   그리고 수신자를 서버가 ★추측★ 했다 → 종합이 엉뚱한 사람에게 갔다.
    *
    * ═══ 지금 계약 [B] ═══
@@ -157,7 +157,7 @@ describe("injectOpenclawTelegramTurn visible reply bridge", () => {
           // 배송처 = 이 방의 thread id. 팀원이 알 수 없는 ★사실★ 이므로 주입문이 준다.
           // 보내는 ★법★(send.sh --to broadcast --thread) 은 룰(AGENTS.md)이 말한다 — 주입문은 반복하지 않는다.
           expect(params.message).toContain('thread="tg--1009999999999"');
-          // ★두 번째 입구 금지 (GD 2026-07-14)★ — 예전 주입문은 envelope API(POST /team/api/inbox)를 안내해
+          // ★두 번째 입구 금지★ — 예전 주입문은 envelope API(POST /team/api/inbox)를 안내해
           //   룰의 send.sh 와 입구가 둘이 됐다. 입구가 둘이면 언젠가 한쪽으로 샌다 → 회귀 가드.
           expect(params.message).not.toContain("api/inbox");
           expect(params.message).not.toContain("envelope API");

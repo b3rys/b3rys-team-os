@@ -62,9 +62,9 @@ export function insertMessage(
     ?? env.in_reply_to
     ?? null;
 
-  // ★★서버는 팀원이 쓴 주소를 고치지 않는다. 기록만 한다.★★ (GD 2026-07-14)
+  // 서버는 팀원이 쓴 주소를 고치지 않는다. 기록만 한다.
   //
-  //   ★GD:★ "보정을 하면 안된다니깐.. 근본이 아니잖아. 그냥 기록만 추가하고 삭제해.
+  // ★GD:★ "보정을 하면 안된다니깐.. 근본이 아니잖아. 그냥 기록만 추가하고 삭제해.
   //          보정 자체가 룰대로 동작을 안한건데.. 그걸 다른 반창고로 자꾸 덮으려는 그 접근을 바꿔."
   //
   //   ═══ 예전 (2026-06-05 ~ 2026-07-14) ═══
@@ -85,7 +85,7 @@ export function insertMessage(
   //   (근본은 2026-07-14 에 고쳤다: 주입문이 답 주소를 ★호출부가 준 사실 그대로★ 한 줄로 말한다.
   //    98건 중 96건이 hermes_agent 였고 그 주입문을 고쳤다 → 이 로그는 ★0 에 수렴해야 한다.★)
   //
-  //   ★서버는 추측하지 않는다. 모델이 말한 사실만 쓴다.★ (GD 2026-07-14)
+  // ★서버는 추측하지 않는다. 모델이 말한 사실만 쓴다.★
   //
   //   한 번 ★폴백을 넣었다가 데이터가 죽였다★: "--in-reply-to 가 3~4할만 붙는다" 는 게 걱정돼서,
   //   없으면 ★"이 스레드에서 이 사람에게 1:1 로 온 질문"★ 을 찾아 상관지으려 했다.
@@ -150,7 +150,7 @@ export function insertMessage(
     // stale 'pending' (2026-05-30). inboxFor() filters by read_at (not delivery_state), so inbox
     // visibility is unchanged. Agent messages stay 'pending' for the dispatcher to deliver.
     const rcptState = env.source === "user" && !env.dispatch ? "completed" : "pending";
-    // broadcast complete 로직 (GD 2026-06-22): broadcast(@all/announce)는 FYI다 — 비응답자도 inbox에
+    // broadcast complete 로직: broadcast(@all/announce)는 FYI다 — 비응답자도 inbox에
     // 영구 'open'(action-required)으로 쌓이면 안 됨(개별 응답은 선택). 그래서 수신행을 'acknowledged'
     // (close_reason='broadcast_fyi')로 생성해 InboxView action-required(=open/needs_match_review)에서 제외.
     // 깨우기(wake)는 delivery_state로 굴러가니 영향 없고, directed/@멘션 = 응답필요는 그대로 'open' 유지.
@@ -158,8 +158,8 @@ export function insertMessage(
       `INSERT OR IGNORE INTO message_recipient (message_id, agent_id, delivery_state, recipient_state, close_reason, state_source)
        VALUES (?, ?, ?, 'acknowledged', 'broadcast_fyi', 'system')`,
     );
-    // ★이 변경은 팀원(source=agent) 방 발언에만 적용한다.★ (GD 2026-08-01)
-    //   팀장님 메시지(`user`)와 시스템 공지(`system`)는 ★예전 경로 그대로★ 다 — 팀장님은
+    // ★이 변경은 팀원(source=agent) 방 발언에만 적용한다.★
+    // 팀장님 메시지(`user`)와 시스템 공지(`system`)는 ★예전 경로 그대로★ 다 — 팀장님은
     //   "잘못된 DB 입력을 고치는 것뿐" 으로 범위를 못박으셨고, 장애 통지가 0명이 되면
     //   ★통째로 사라진다★(어댑터 직삽입이라 릴레이도 안 탄다).
     //
@@ -178,15 +178,15 @@ export function insertMessage(
       }
     } else {
       // ── 팀원 방 발언: ★수신행 0. 예외 없다.★ ──
-      //   "단톡방에선 내가 멘션한 사람만 얘기하는 거야. ★팀원끼리는 팀버스로.★" (GD 2026-08-01)
-      //   ★@all 도 팀장님 전용이다★ ("멘션은 팀장만 하는 거라고" · "원래 그랬어") — coordinator 도 예외 없다.
+      // "단톡방에선 내가 멘션한 사람만 얘기하는 거야. ★팀원끼리는 팀버스로.★"
+      // ★@all 도 팀장님 전용이다★ ("멘션은 팀장만 하는 거라고" · "원래 그랬어") — coordinator 도 예외 없다.
       //   ★방 게시·슬랙 릴레이는 그대로 나간다.★ 여기서 만드는 건 수신행뿐이다.
       //
       //   실측: 그날 팀원이 쓴 @all 중 전체공지 목적은 검증용 1건뿐이고 나머지는 전부
       //   ★"@all 이라는 단어를 문장 안에서 언급"★ 한 것이었다("결함은 그중 하나(@all)에만 있습니다" 등).
       //   ★언급만 해도 8명이 깨어났다.★ 인용해 답하는 경우도 같은 문제의 부분집합이라 같이 없어진다.
       //
-      //   ★`explicit_recipients` 는 예외가 아니라 라우터의 답이다★ — 팀장님 메시지를 라우팅한
+      // ★`explicit_recipients` 는 예외가 아니라 라우터의 답이다★ — 팀장님 메시지를 라우팅한
       //   결과가 이 경로로 들어올 수 있다. 빈 배열도 "0명으로 정했다" 는 답이라 그대로 존중한다
       //   (`length > 0` 이면 빈 배열이 아래로 떨어져 다시 팬아웃한다).
       const isSlackThread = !!findSlackMetaForThread(db, env.thread_id)

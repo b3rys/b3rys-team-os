@@ -1,5 +1,5 @@
 // Claude 전용 소통 섹션(SECTION_CLAUDE_COMMS) 주입 — idempotency + runtime-split 회귀 가드.
-// churn 버그(comms가 마지막 섹션이면 매 실행 재기록) 재발 방지. (GD 2026-06-28)
+// churn 버그(comms가 마지막 섹션이면 매 실행 재기록) 재발 방지.
 import { test, expect } from "bun:test";
 import { afterEach } from "bun:test";
 import { existsSync, mkdtempSync } from "node:fs";
@@ -76,7 +76,7 @@ test("SECTION_CLAUDE_COMMS는 reply 도구 핵심 문구 포함", () => {
   expect(SECTION_CLAUDE_COMMS.includes("reply tool actually sends")).toBe(true);
 });
 
-// ── i18n 영어룰 파일럿 override (GD 2026-06-30) — teamOsPathFor + buildAgentsMd 임베드 경로 ──
+// ── i18n 영어룰 파일럿 override — teamOsPathFor + buildAgentsMd 임베드 경로 ──
 const EN_PILOT = "/tmp/b3rys-pilot/rules/TEAM-OS.en.draft.md";
 afterEach(() => {
   delete process.env.TEAMOS_PILOT_PATH;
@@ -132,10 +132,10 @@ test("SECTION_CORE_RULE_EN: 언어 불변(사용자 언어 유지) + 핵심 구�
   expect(SECTION_CORE_RULE_EN.includes("## ⭐ Core Rules")).toBe(true);
   expect(SECTION_CORE_RULE_EN.includes("reply in the language and register the user wrote in")).toBe(true);
   expect(SECTION_CORE_RULE_EN.includes("Korean in → Korean out")).toBe(true);
-  // 언어불변 라인엔 팀-특정(존대 for GD) 하드코딩 누출 없어야 — public-safe(GD 2026-06-30)
+  // 언어불변 라인엔 팀-특정(존대 for GD) 하드코딩 누출 없어야 — public-safe
   expect(SECTION_CORE_RULE_EN.includes("폴라이트 코리안")).toBe(false);
   expect(SECTION_CORE_RULE_EN.includes("polite Korean (존대) for GD")).toBe(false);
-  // 3개 정책 블록 보존 (압축 구조: 기본실행/팀소통협업/안전검증 — GD 2026-07-17 전체압축)
+  // 3개 정책 블록 보존 (압축 구조: 기본실행/팀소통협업/안전검증 전체압축)
   expect(SECTION_CORE_RULE_EN.includes("**Base execution**")).toBe(true);
   expect(SECTION_CORE_RULE_EN.includes("**Team communication·collaboration**")).toBe(true);
   expect(SECTION_CORE_RULE_EN.includes("**Safety·verification**")).toBe(true);
@@ -209,7 +209,7 @@ test("buildPersona(steve claude, 파일럿 on): CLAUDE.md 재생성도 핵심룰
   expect(p.includes("## ⭐ 핵심 룰")).toBe(false);
 });
 
-// ── {{OWNER}} 플레이스홀더화 (안전: 라이브=GD, 퍼블릭/no-owner={{OWNER}}) — GD 2026-06-30 ──
+// ── {{OWNER}} 플레이스홀더화 (안전: 라이브=GD, 퍼블릭/no-owner={{OWNER}}) ──
 test("subOwner: ownerName 주면 {{OWNER}} 치환, 안 주면 {{OWNER}} 유지", () => {
   expect(subOwner("hi {{OWNER}} bye", "GD")).toBe("hi GD bye");
   expect(subOwner("a {{OWNER}} b {{OWNER}} c", "GD")).toBe("a GD b GD c"); // 전부 치환
@@ -268,7 +268,7 @@ test("buildAgentsMd(openclaw, owner/team 없음): 퍼블릭 템플릿 — 핵심
   expect(md.includes("the team lead")).toBe(true); // 일반어 본문(EN)
 });
 
-// extractCustomPersona 룰섹션 제거 검증 (config GET fallback용, buildPersonaFromCustom 제거로 round-trip 테스트는 폐기 — GD 2026-07-06).
+// extractCustomPersona 룰섹션 제거 검증 (config GET fallback용, buildPersonaFromCustom 제거로 round-trip 테스트는 폐기).
 test("extractCustomPersona: 룰섹션 제거 + 커스텀 보존(부분매칭 오제거 없음)", () => {
   // "## 메모리 관리 노하우"는 마커 '메모리' 부분문자열 포함 — 정확매칭이라 오제거 안 돼야 함.
   const rendered = "# Test — Team\n\n## 전문 영역\n\n- LLM 응용\n\n## 메모리 관리 노하우\n\n오제거되면 안 되는 커스텀 섹션\n\n## ⭐ Core Rules\n\n룰\n\n## Global rules\n\n글로벌";

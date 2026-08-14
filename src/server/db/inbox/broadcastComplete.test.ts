@@ -1,6 +1,6 @@
 /**
  * broadcast complete 로직 — broadcast(@all/announce)는 FYI라 비응답자도 inbox에 action-required로 쌓이면 안 됨.
- * GD 2026-06-22 버그: @all 인사 후 답한 듯해도 inbox에 주르륵 — 비응답자 recipient_state=open이 영구히 action-required.
+ * 버그: @all 인사 후 답한 듯해도 inbox에 주르륵 — 비응답자 recipient_state=open이 영구히 action-required.
  * fix: broadcast 수신행은 'acknowledged'(broadcast_fyi)로 생성 → InboxView action-required(=open/needs_match_review)에서 빠짐.
  * directed(1:1)는 그대로 'open'(응답 필요) 유지.
  */

@@ -124,7 +124,7 @@ export type ReplySignal = "ack_only" | "substantive" | "explicit_done";
 // lexeme + an optional inflection suffix (below), or the body is pure emoji/reaction. Matching is
 // lexeme+suffix (NOT a loose prefix), so a substantive word that merely starts with an ack syllable
 // (확인불가, 네트워크, 예외, 콜백) can never be mis-gated. Growing this list is fail-safe: an
-// uncovered phrase simply wakes the requester, never silently gated. (GD 2026-07-09: replaces the
+// uncovered phrase simply wakes the requester, never silently gated. ( replaces the
 // prefix-match + open-ended blocker list — no whack-a-mole, no possible mis-gate of a blocked reply.)
 const ACK_LEXEMES = [
   "네", "넵", "넹", "예", "옙", "ok", "okay", "오케이", "콜",
@@ -164,7 +164,7 @@ export function classifyReplySignal(rawBody: string): ReplySignal {
   //    (or the bare lexeme). Trailing punctuation is stripped per word. Because a word must FULLY
   //    equal lexeme+suffix (no partial/prefix match), a substantive word that starts with an ack
   //    syllable (확인불가, 네트워크 끊김, 콜백 실패, 네 안돼요) never matches → the requester is
-  //    always woken for it. This is the fail-safe wake-gate input (GD 2026-07-09).
+  // always woken for it. This is the fail-safe wake-gate input.
   const isAckWord = (w: string): boolean => {
     const wl = w.toLowerCase().replace(/[.!?~,·…]+$/u, "");
     if (!wl) return false;

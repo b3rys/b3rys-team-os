@@ -116,7 +116,7 @@ describe("activity_assumed never masquerades as a real ack (category chip)", () 
     // explicit ack shows its raw reason, NOT '활동추정' — never mixed
     expect(html).toContain("ack_only");
     // the two are visually different chips (blue vs slate). 색은 deep 토큰 text-txt-blue
-    // (GD 3원칙 sweep 2026-06-21 — 흐린 text-sky-300/90→deep, 파랑·구별 semantic은 유지).
+    //.
     expect(html).toContain("text-txt-blue");
   });
 });

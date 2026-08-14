@@ -56,7 +56,7 @@ export function renderTmuxPane(root: HTMLElement): void {
       lastRenderedAgentId = agent.id;
       lastLineCount = 0;
       // pause 토글은 전체 재렌더하지 않는다 — 예전엔 lastRenderedAgentId=null로 innerHTML을 통째로
-      // 다시 그려 로그 본문 scrollTop이 0으로 튀었다(GD R4). 이제 버튼 라벨만 제자리 갱신하고
+      // 다시 그려 로그 본문 scrollTop이 0으로 튀었다. 이제 버튼 라벨만 제자리 갱신하고
       // 스크롤 위치는 그대로 둔다. 정지=현 위치 고정, 재개=맨 아래로 따라붙기 시작.
       const pauseBtn = root.querySelector<HTMLButtonElement>("[data-pause]");
       pauseBtn?.addEventListener("click", () => {

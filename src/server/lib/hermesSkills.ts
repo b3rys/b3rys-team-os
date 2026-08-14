@@ -6,7 +6,7 @@ import { HERMES_ROOT, REPO_ROOT } from "./paths";
 export const TEAM_INBOX_SKILL = "b3os-team-inbox";
 
 /**
- * ★hermes 프로필의 팀 스킬 = 정본 심링크. 사본을 만들지 않는다.★ (GD 2026-07-14)
+ * ★hermes 프로필의 팀 스킬 = 정본 심링크. 사본을 만들지 않는다.★
  *
  * ═══ 왜 ═══
  * hermes 는 ★자기 프로필 폴더의 스킬만★ 본다 (외부 skills 경로 설정이 없다).

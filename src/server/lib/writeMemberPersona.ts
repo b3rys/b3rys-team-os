@@ -1,4 +1,4 @@
-// persona 쓰기 단일 canonical 경로 (GD 아키텍처 지시, Bill 핸드오프 2026-07-05).
+// persona 쓰기 단일 canonical 경로.
 //
 // 문제: persona 쓰기 통로가 여러 개(recruit buildPersona / save buildPersonaFromCustom / swap activate)라
 //   제각각 → Lui 스왑에서 옛 한글 persona 유지 + 사용자 custom 덮어쓰기 반복.
@@ -6,7 +6,7 @@
 //   - custom block(agents.json `purpose`) = verbatim 보존(i18n·strip·inject 안 함).
 //   - 룰/템플릿 섹션만 현재(영문) 최신으로 재생성.
 //   - !existsSync 게이트 없음 → 항상 멱등 재생성(옛 persona 잔존 = Lui 버그 직접 원인 제거).
-//   - backup-first: 덮기 전 기존 파일 `.bak` (GD 데이터 무조건 백업 원칙).
+// - backup-first: 덮기 전 기존 파일 `.bak`.
 //   - 런타임→파일 매핑은 personaTargetsForRuntime 단일 소스(Codex runtimeEssentials 와 공유).
 
 import { existsSync, readFileSync, copyFileSync, mkdirSync, writeFileSync, symlinkSync, lstatSync, unlinkSync } from "node:fs";
@@ -49,7 +49,7 @@ export interface WriteMemberPersonaResult {
 }
 
 /**
- * ★워크스페이스에 TEAM-OS.md 심링크를 보장한다★ (GD 2026-07-13 — "team-os 심링크는 영입때도 체크")
+ * ★워크스페이스에 TEAM-OS.md 심링크를 보장한다★
  *
  * ═══ 왜 (루이가 잡았다) ═══
  *   실측: 팀원 11명 중 ★6명(steve·hermes·codex·ames·devon·dex)에게 TEAM-OS.md 가 아예 없었다.★
@@ -82,9 +82,9 @@ function ensureTeamOsLink(workspace: string): void {
  * 직접 쓰지 않는다. custom block 은 절대 변형하지 않고, 룰/템플릿 섹션만 최신으로 덮는다.
  */
 /**
- * ★persona 값을 저장하는 유일한 지점 — SOUL.md 에만 쓴다.★ (GD 2026-07-17)
+ * ★persona 값을 저장하는 유일한 지점 — SOUL.md 에만 쓴다.★
  *
- *   "persona 값은 그냥 soul.md 에만 저장해. 대시보드 나머지 필드는 agents.json이 원본이면 되고" — GD
+ * "persona 값은 그냥 soul.md 에만 저장해. 대시보드 나머지 필드는 agents.json이 원본이면 되고" — GD
  *
  * agents.json 의 purpose 필드는 제거됐다. 두 곳에 두면 반드시 어긋나고(2026-07-17: 12명 중 7명),
  * 어긋나면 렌더가 옛값으로 사용자 글을 덮는다. ★소스를 하나로 두면 그 문제가 아예 생기지 않는다.★
@@ -135,7 +135,7 @@ export function writeMemberPersona(m: WriteMemberPersonaInput): WriteMemberPerso
   const backedUp: string[] = [];
 
   const put = (file: string, content: string): void => {
-    // skip-if-unchanged: 렌더 결과가 기존 파일과 동일하면 write·bak 생략 (GD 2026-07-19 — 룰 변화 없으면 매 부팅 재작성하지 마라).
+    // skip-if-unchanged: 렌더 결과가 기존 파일과 동일하면 write·bak 생략.
     // ★내용 비교★라 안전 — 같을 때만 스킵하므로 옛 persona 잔존(Lui 버그: existsSync 게이트로 인한 것)은 재발하지 않는다.
     if (existsSync(file)) {
       if (readFileSync(file, "utf-8") === content) return; // 동일 → 재작성·백업 생략
@@ -152,16 +152,16 @@ export function writeMemberPersona(m: WriteMemberPersonaInput): WriteMemberPerso
   // ★렌더는 renderLoadingFile 한 곳에서만★ — 검증기(verify-rules-live)도 같은 함수를 쓴다.
   put(targets.loadingFile, renderLoadingFile(m).content);
 
-  // ★SOUL.md 는 여기서 아예 안 건드린다 — 이 함수는 '룰 렌더러' 다.★ (GD 2026-07-17)
+  // ★SOUL.md 는 여기서 아예 안 건드린다 — 이 함수는 '룰 렌더러' 다.★
   //
   // ═══ 왜 ═══
   //   persona 값이 사는 곳은 ★SOUL.md 단 하나★ 다(purpose 필드는 제거됨). 저장은 persona 를 가진 쪽
   //   (대시보드 저장·영입)이 savePersonaFile() 로 ★직접★ 한다. 렌더러가 낄 자리가 아니다.
-  //   ★"어디에 붙이냐" 와 "어디에 저장하냐" 는 분리된 트랜잭션이다★ (GD).
+  // ★"어디에 붙이냐" 와 "어디에 저장하냐" 는 분리된 트랜잭션이다★.
   //
   // ═══ 이 줄이 있었을 때 무슨 일이 났나 (2026-07-17 실측) ═══
   //   옛 코드는 렌더마다 SOUL 을 purpose 로 덮었다. 12명 중 7명이 어긋났고:
-  //     · GD 가 손질한 5명(steve·hermes·ames·codex·demis) → ★렌더 한 번에 손질이 되돌아갈 위치★
+  // · GD 가 손질한 5명(steve·hermes·ames·codex·demis) → ★렌더 한 번에 손질이 되돌아갈 위치★
   //     · lui·forin → purpose 가 비어 찍힌 24자 껍데기가 굳어 페르소나가 실제로 없었다
   //   ★렌더는 플래그 토글로도 돈다(line 124).★ 스위치 하나에 사용자가 쓴 글이 사라지면 안 된다.
   //

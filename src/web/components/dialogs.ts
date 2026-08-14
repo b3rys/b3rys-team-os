@@ -124,7 +124,7 @@ export async function showAlert(opts: DialogOptions | string): Promise<void> {
 /**
  * 텍스트 한 줄을 받는 인페이지 모달. ★네이티브 prompt() 를 쓰지 않는다★ —
  * 앱 웹뷰(WKWebView)에서 네이티브 다이얼로그가 억제되면 prompt() 는 조용히 null 을 돌려주고,
- * 그러면 버튼을 눌러도 아무 일도 일어나지 않는다(2026-07-30 팀장님 실측: "태그 관리가 안 눌린다").
+ * 그러면 버튼을 눌러도 아무 일도 일어나지 않는다(2026-07-30).
  * @returns 입력값(빈 문자열 포함) 또는 취소 시 null. ★빈 문자열과 취소는 다르다.★
  */
 export function showPrompt(opts: PromptOptions | string): Promise<string | null> {
@@ -134,7 +134,7 @@ export function showPrompt(opts: PromptOptions | string): Promise<string | null>
 /**
  * 본문 마크업을 호출부가 만들고, 확인 시 그 DOM 에서 결과를 읽어오는 모달.
  *
- * ★왜 필요했나★ (팀장님 실측 2026-07-30): 보고서에 태그를 붙이는 창이 ★쉼표로 이름을 적는 칸★ 이었다.
+ * ★왜 필요했나★: 보고서에 태그를 붙이는 창이 ★쉼표로 이름을 적는 칸★ 이었다.
  * "이미 추가된 태그가 없으니 외워서 넣기도 그렇고" — 있는 태그를 보여주지 않으면 사람은 외워야 한다.
  * 목록을 보여주고 눌러서 고르게 하려면 본문에 마크업이 필요한데, shell 은 문자열 한 줄만 받았다.
  *

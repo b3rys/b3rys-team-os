@@ -153,7 +153,7 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
         <td class="py-1.5 text-slate-200 break-all font-mono text-[11px]">${escape(get(agent))}</td>
       </tr>`,
   ).join("");
-  // 레지스트리 표에 자연스럽게 이어지는 icon 행 — 아이콘 클릭 시 피커 펼쳐 아이콘+색 변경(색은 펼침 메뉴 안에 녹임, GD 2026-06-27).
+  // 레지스트리 표에 자연스럽게 이어지는 icon 행 — 아이콘 클릭 시 피커 펼쳐 아이콘+색 변경(색은 펼침 메뉴 안에 녹임).
   const iconRow = `
       <tr class="border-b border-surface-3/50">
         <td class="py-1.5 pr-4 text-slate-500 align-top whitespace-nowrap">icon</td>
@@ -185,7 +185,7 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
           <div id="cfg-runtime-cwd-msg" class="text-[11px] text-slate-500 mt-1.5"></div>
         </div>` : "";
   // 런타임 교체 select 옵션 — 서버 화이트리스트(SWAP_TARGETS)와 교집합 + 현재 런타임 제외 + 공개빌드 b3os_native 숨김.
-  // 공개빌드에선 아래 '런타임 교체' 섹션 전체를 렌더하지 않는다(LIVE_ONLY_OPS=false) — 공개판은 UI에서만 swap 숨김(GD 0721). 서버 엔드포인트는 유지되며 codex target·미준비는 publicRuntimeGate/runtime_not_ready 가 막는다.
+  // 공개빌드에선 아래 '런타임 교체' 섹션 전체를 렌더하지 않는다(LIVE_ONLY_OPS=false) — 공개판은 UI에서만 swap 숨김. 서버 엔드포인트는 유지되며 codex target·미준비는 publicRuntimeGate/runtime_not_ready 가 막는다.
   const swapTargetOptions = runtimeOptions
     .filter((r) => SWAP_TARGETS.includes(r.runtime) && r.runtime !== agent.runtime)
     .map((r) => `<option value="${escape(r.runtime)}" ${r.disabled ? "disabled" : ""}>${escape(r.label)}${r.disabled ? pick(" · 연동 필요", " · Setup required") : ""}</option>`)
@@ -359,7 +359,7 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
     if (statusEl) statusEl.textContent = "";
   });
 
-  // 멘션명(별칭) — 별도 버튼 없이 아래 '저장' 버튼이 role·persona 와 함께 저장(GD 2026-07-19). PATCH /members/:id {nicknames}.
+  // 멘션명(별칭) — 별도 버튼 없이 아래 '저장' 버튼이 role·persona 와 함께 저장. PATCH /members/:id {nicknames}.
   //   쉼표/공백으로 분리 → @접두 제거. 빈 값이면 별칭 제거(id·display_name 만으로 호출).
   const nicksInput = root.querySelector<HTMLInputElement>("#cfg-nicknames");
   const parseNicknames = (): { nicknames: string[] } | { error: string } => {
@@ -510,7 +510,7 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
   tokenBtn?.addEventListener("click", async () => {
     const token = tokenInput?.value.trim() ?? "";
     if (!token) { setTokenMsg("text-txt-red", pick("토큰을 입력하세요.", "Enter a token.")); return; }
-    // 엉뚱한 팀원에게 적용 방지 — 팀원명 크게 노출한 확인창(GD 2026-07-01).
+    // 엉뚱한 팀원에게 적용 방지 — 팀원명 크게 노출한 확인창.
     if (!(await showConfirm({ messageHtml: pick(
       `<b class="text-base text-slate-100">${escape(agent.display_name)}</b> 의 봇 토큰을 바꾸시겠습니까?<div class="text-[12px] text-slate-500 mt-1">이 팀원의 봇을 새 토큰으로 다시 연결합니다.</div>`,
       `Change <b class="text-base text-slate-100">${escape(agent.display_name)}</b>'s bot token?<div class="text-[12px] text-slate-500 mt-1">Reconnects this member's bot with the new token.</div>`) }))) { if (tokenInput) tokenInput.value = ""; return; }
@@ -563,7 +563,7 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
     const target = swapTargetSel?.value ?? "";
     const confirmName = swapConfirm?.value.trim() ?? "";
     if (!target || confirmName !== agent.display_name) return;
-    // 파괴적 작업(런타임 정지→재기동) — 팀원명 크게 노출한 확인창(offboard/토큰변경과 동일 패턴, GD 2026-07-01 관례).
+    // 파괴적 작업(런타임 정지→재기동) — 팀원명 크게 노출한 확인창(offboard/토큰변경과 동일 패턴 관례).
     if (!(await showConfirm({ messageHtml: pick(
       `<b class="text-base text-slate-100">${escape(agent.display_name)}</b> 의 런타임을 <b class="text-txt-amber">${escape(runtimeLabel(agent.runtime))} → ${escape(runtimeLabel(target))}</b> 로 교체할까요?<div class="text-[12px] text-slate-500 mt-1">런타임을 정지했다 재기동합니다. 진행 중 작업이 있으면 중단될 수 있습니다. 메모리는 보존됩니다.</div>`,
       `Swap <b class="text-base text-slate-100">${escape(agent.display_name)}</b>'s runtime from <b class="text-txt-amber">${escape(runtimeLabel(agent.runtime))} → ${escape(runtimeLabel(target))}</b>?<div class="text-[12px] text-slate-500 mt-1">This stops and restarts the runtime. In-progress work may be interrupted. Memory is preserved.</div>`),
@@ -621,13 +621,13 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
     if (offBtn) offBtn.disabled = offConfirm.value.trim() !== agent.display_name;
   });
   offBtn?.addEventListener("click", async () => {
-    // 이름-타이핑 가드에 더해 명시적 확인창 — 엉뚱한 팀원 퇴사 방지, 팀원명 크게(GD 2026-07-01).
+    // 이름-타이핑 가드에 더해 명시적 확인창 — 엉뚱한 팀원 퇴사 방지, 팀원명 크게.
     if (!(await showConfirm({ messageHtml: pick(
       `정말 <b class="text-base text-slate-100">${escape(agent.display_name)}</b> 을(를) 퇴사시키겠습니까?<div class="text-[12px] text-slate-500 mt-1">팀원 목록에서 지우고, 지금까지 등록·진행한 내용을 정리합니다.</div>`,
       `Really offboard <b class="text-base text-slate-100">${escape(agent.display_name)}</b>?<div class="text-[12px] text-slate-500 mt-1">Removes them from the team and clears what was set up so far.</div>`), danger: true, okLabel: pick("퇴사", "Offboard") }))) return;
     offBtn.disabled = true;
     if (offMsg) {
-      // openclaw는 게이트웨이 정리(bootout+프로필 제거)로 퇴사가 더 오래 걸림 → 눈에 띄게 안내(GD 2026-07-02).
+      // openclaw는 게이트웨이 정리(bootout+프로필 제거)로 퇴사가 더 오래 걸림 → 눈에 띄게 안내.
       offMsg.textContent = agent.runtime === "openclaw"
         ? pick("⏳ 퇴사 처리 중… 오픈클로 팀원은 게이트웨이 정리로 조금 더 걸립니다…", "⏳ Offboarding… OpenClaw members take a bit longer (gateway cleanup)…")
         : pick("퇴사 처리 중…", "Offboarding…");

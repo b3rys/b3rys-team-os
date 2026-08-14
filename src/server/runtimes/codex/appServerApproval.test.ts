@@ -83,7 +83,7 @@ test("★GD msg838★ 명령/파일 아닌 차단(외부전송·권한)은 요�
   expect(g).toContain("send data to external endpoint");
 });
 
-// ── ★codex 설정이 정하게 한다★ (팀 리드 2026-08-11) ──
+// ── ★codex 설정이 정하게 한다★ ──
 //
 // startThread 에 sandbox·approvalPolicy 를 넘기면 ★CODEX_HOME 의 config.toml 을 덮어쓴다.★
 // runtimeWorkspaceRoots 는 ★experimentalApi capability 를 요구해서 turn 이 시작도 못 했다★ (실측 2/2).
@@ -128,7 +128,7 @@ test("★대조군 — 넘겨야 하는 것은 그대로 간다★ (cwd · model
   expect({ cwd: a.cwd, model: a.model, resume: a.resumeThreadId }).toEqual({ cwd: "/tmp/ws", model: "gpt-x", resume: "th_prev" });
 });
 
-// ── ★승인 판정은 우리가 하지 않는다★ (팀 리드 2026-08-12) ──
+// ── ★승인 판정은 우리가 하지 않는다★ ──
 //
 // 전에는 여기서 다시 판정하고 ask 면 ★op 방★ 에 팝업을 띄웠다. 두 가지가 동시에 망가졌다:
 //   ① 팀원 승인이 op 방에 떴다 — op 방은 시스템 알림 자리다.
@@ -169,7 +169,7 @@ function approvalRaisingClient(seen: string[] = []) {
  * ★codex 가 승인을 물어와도 우리는 사람을 부르지 않는다.★
  *
  * 전에는 여기서 permission_request 를 만들고 사람이 누를 때까지 폴링했다(TTL 1시간). 그 결과:
- *   ① 그 팝업이 ★op 방★ 에 떴다 — op 방은 시스템 알림 자리다(팀 리드 2026-08-12).
+ * ① 그 팝업이 ★op 방★ 에 떴다 — op 방은 시스템 알림 자리다.
  *   ② 아무도 안 누르면 턴이 안 끝나 ★팀원이 답을 못 했다.★
  * hermes·openclaw 는 b3os 에 승인 배선이 아예 없다. codex 도 같은 모양으로 맞췄다.
  * 경계는 config.toml 의 permission 프로파일이 친다(launcher.renderLockedDownCodexConfig).
