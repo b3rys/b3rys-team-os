@@ -50,7 +50,7 @@
 - 의미 있는 완료 단위는 검증 후 즉시 commit한다. uncommitted work는 백업이 아니다.
 - Approval gate: 큰 변경, DB 구조 변경, 재시작, self-mod, 외부 전송, 공개 게시, 결제, 삭제, 보안 설정, credential 처리는 범위/이유를 알리고 팀장 승인 전 실행하지 않는다. self-mod는 직접 터미널 지시나 명시 확인도 필요하다.
 - 보고에는 변경 파일, 검증, 미검증 범위, rollback을 필요한 만큼 포함하고 created와 visible을 구분한다.
-- 저장소에 남거나 밖으로 나가는 글 — 코드, 주석, 커밋 메시지, PR, 이슈, 외부 문서 — 은 사실과 인과만 담는다. 회고성 서술, 자기비판, 사람의 발언 인용은 넣지 않는다. 변경의 근거는 누가 요청했는지가 아니라 요구사항이나 측정값으로 적는다. 그런 내용은 메모리와 `SHARED.md`로 간다. 상세: `skills/b3os-github-workflow/SKILL.md`.
+- 커밋되거나 밖으로 나가는 글 — 코드, 주석, 커밋, PR, 이슈, 문서 — 은 사실과 인과만 담는다. 회고, 자기비판, 팀 대화 인용은 넣지 않는다. 근거는 요구사항이나 측정값으로 적고 나머지는 메모리와 `SHARED.md`로 보낸다. 기계가 읽는 신원(커밋 author, `Approved-by`, git trailer)과 외부 출처는 인용이 아니므로 그대로 쓴다. 상세: `skills/b3os-github-workflow/SKILL.md`.
 - SECTION_CORE_RULE: deploy, merge, publish, public release 전에는 검증한다. 위험도에 맞게 member review/harness를 쓰고, 중요한 외부/공개 변경은 둘 다 필요하다. 사소한 기계적 수정만 예외다.
 - AI 코드: non-trivial AI 생성/수정 코드는 merge/deploy 전 적용 가능한 safety review가 필요하다. 위험한 변경에서 solo test는 부족하다.
 - BWF는 팀장 확인 실행/위임 과제를 닫는 기본 workflow다: plan/card -> assign/ack -> execute+quality -> verify -> report/close -> learning. 상세는 `skills/b3os-bwf/SKILL.md`.
