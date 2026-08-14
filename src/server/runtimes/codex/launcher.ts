@@ -165,7 +165,7 @@ export function renderBridgePlist(p: CodexBridgePaths): string {
  * ★빈 껍데기★ 다. **실행 정책(샌드박스·승인)은 여기 쓰지 않는다.**
  *
  * ★★2026-08-14 — 우리 정책을 전부 뺐다.★★ (팀 리드 방향 리셋:
- *   "codex 런타임은 openclaw·헤르메스를 대체하는 거야. 똑같이 되야지. 채널 연동에만 집중해")
+ *   codex 런타임은 openclaw·헤르메스를 대체한다. 같은 수준으로 동작해야 하고, 채널 연동에 집중한다.)
  *
  * 뺀 것: `sandbox_mode` · `approval_policy` · `network_access` · `writable_roots`.
  *

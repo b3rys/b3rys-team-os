@@ -58,7 +58,7 @@ export async function runViaAppServer(
   try {
     if (!reused) await client.start(); // 살아있는 프로세스면 핸드셰이크를 다시 하지 않는다
     // ★★실행 모드를 codex 프로토콜로 명시한다★★ (팀 리드 2026-08-14 방향 리셋:
-    //   "codex 런타임은 openclaw·헤르메스를 대체하는 거야. 똑같이 되야지")
+    //   codex 런타임은 openclaw·헤르메스를 대체한다. 같은 수준으로 동작해야 한다.)
     //
     //   ★안 넘기면 열리는 게 아니라 잠긴다.★ codex(openclaw 팀원)가 같은 CLI 0.147.0 을
     //   빈 CODEX_HOME·config 없이 띄워 thread/start 에 cwd·model 만 보내고 실측했다:
