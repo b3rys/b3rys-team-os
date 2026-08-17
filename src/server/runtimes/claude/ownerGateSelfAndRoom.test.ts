@@ -21,7 +21,7 @@ const execFileAsync = promisify(execFile);
 const HOOK = join(import.meta.dir, "../../../../hooks/telegram-owner-gate.py");
 const GROUP = "-1009999999999";
 const OTHER_GROUP = "-1008888888888"; // 리사팀·공개 설치의 두 번째 방
-const DM = "7066867819";
+const DM = "9999999999";
 
 let dirs: string[] = [];
 let servers: Server[] = [];

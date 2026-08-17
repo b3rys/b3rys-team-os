@@ -17,7 +17,7 @@ import { join } from "node:path";
 
 const HOOK = join(import.meta.dir, "reply-guard.py");
 const GROUP_CHAT = "-1009999999999"; // 텔레그램 그룹은 음수
-const DM_CHAT = "7066867819";        // 1:1 은 양수
+const DM_CHAT = "9999999999";        // 1:1 은 양수
 
 let dirs: string[] = [];
 afterEach(() => {
