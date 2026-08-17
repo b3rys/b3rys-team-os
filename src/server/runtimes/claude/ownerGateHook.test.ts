@@ -19,7 +19,7 @@ import { createServer, type Server } from "node:http";
 
 const HOOK = join(import.meta.dir, "../../../../hooks/telegram-owner-gate.py");
 const GROUP = "-1009999999999"; // 테스트 전용 가짜 값
-const DM = "7066867819";
+const DM = "9999999999";
 
 let dirs: string[] = [];
 let servers: Server[] = [];

@@ -84,7 +84,10 @@ describe("bot liveness monitor shared defaults", () => {
       const xml = renderBotLivenessMonitorPlist();
       expect(xml).toContain("<key>GD_CHAT_ID</key><string>1000000001</string>");
       expect(xml).not.toContain("9999999999");
-      expect(xml).not.toContain("7066867819");
+      // 하드코딩 방지는 값 하나를 이름으로 막지 않는다 — 긴 자릿수 자체를 막는다.
+      // 특정 값만 적으면 ★그 값이 아닌 다른 값이 박힐 때 통과한다.★
+      const longDigits = [...new Set(xml.match(/\d{9,}/g) ?? [])];
+      expect(longDigits).toEqual(["1000000001"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
