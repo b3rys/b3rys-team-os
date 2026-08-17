@@ -9,7 +9,7 @@ import { buildTmuxInjectionPrompt } from "./tmuxInject";
 //   서버가 collection_reply 로 집계 못 함 → collection 영원히 미완 + 종합에서 누락.
 //   실측: 그룹 수집에서 dbak 이 그룹에 "가을"이라 답했는데 서버는 미응답으로 봄.
 //   fix: isCollect 를 isTelegramGroup 보다 ★먼저★ 분기 → 그룹이어도 버스로 답하게.
-//   (GD: "그룹방에 물어본 걸 꼭 그룹방에 답할 필요 없다. 도달 + 중복X 만 되면 된다.")
+//
 describe("buildTmuxInjectionPrompt — 수집 fan-out 은 그룹이어도 버스로 답한다", () => {
   const base = {
     session: "claude-demo",
@@ -33,7 +33,7 @@ describe("buildTmuxInjectionPrompt — 수집 fan-out 은 그룹이어도 버스
   // directReport(=GD 보고)는 collect 보다 우선 — 보고는 GD DM 으로 가야 한다
 });
 
-/* ★hop 계약 (2026-07-27, GD 결정 (b)안)★
+/* ★hop 계약 (2026-07-27, 제품 결정 (b)안)★
  * 봉투의 hop_count 는 ★지금 이 메시지의 값 그대로★ 다 — 미리 +1 하지 않는다.
  * 룰이 팀원에게 `--hop <hop_count+1>` 을 시키므로, 여기서 또 올리면 ★메시지당 2씩★ 오른다
  * (실측 0→2→4→6…, 그래서 MAX_HOPS=16 이 실제로는 8메시지 한도로 동작했다).
@@ -63,7 +63,7 @@ describe("buildTmuxInjectionPrompt", () => {
     expect(prompt).toContain("A message arrived in this group room");
     // 배송처 = 이 방의 thread id. 팀원이 알 수 없는 ★사실★ 이므로 주입문이 준다.
     expect(prompt).toContain('This room\'s thread is thread="tg--2000000000001"');
-    // ★★회귀 가드 (GD 2026-07-14) ★★
+    // 회귀 가드
     //   단톡방 답변을 reply 도구로 시키면 안 된다 — 텔레그램은 봇에게 다른 봇의 글을 주지 않으므로
     //   캡처봇이 못 보고, ★DB 에 한 줄도 안 남는다★ → 위임자는 "답이 없다" 로 본다(155건 증발).
     //   보내는 법은 룰(send.sh --to broadcast)에만 있어야 한다. 주입문은 사실만 준다.

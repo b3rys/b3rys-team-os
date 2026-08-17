@@ -30,7 +30,7 @@ interface SlackHistoryMessage {
 
 const ENABLED = (process.env.TEAM_SLACK_POLL_ENABLED ?? "1") !== "0";
 // 채널은 env로만 설정(기본 빈값). 실채널 id를 소스에 하드코딩하면 공개빌드에 내부 id 누출 + 기본으로 폴링이 켜짐.
-// 채널 미설정 시 startSlackPoll가 no-op(아래 CHANNELS.length===0 가드). (하네스, GD 2026-07-02)
+// 채널 미설정 시 startSlackPoll가 no-op(아래 CHANNELS.length===0 가드). (하네스)
 const CHANNELS = (process.env.TEAM_SLACK_POLL_CHANNELS ?? "")
   .split(",")
   .map((s) => s.trim())

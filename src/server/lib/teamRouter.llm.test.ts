@@ -69,7 +69,7 @@ const agents: AgentRecord[] = (
     demis: ["demis", "데미스"], dbak: ["dbak", "드박", "디박", "cfo"], brief: ["brief", "브리프"],
   } as Record<string, string[]>)[id] ?? [id],
   capabilities: ({
-    // codex=coordinator(PM/조율 + sync fallback), bill=ambiguous_owner(애매→빌이 GD 께 문의, GD 2026-07-10).
+    // codex=coordinator(PM/조율 + sync fallback), bill=ambiguous_owner(애매→빌이 GD 께 문의).
     // 두 capability 를 분리 시드 — defaultIntake 의 애매 라우팅은 ambiguous_owner(빌)를 따른다.
     codex: ["coordinator", "restricted_mention", "native_routing", "full_context"],
     bill: ["ambiguous_owner", "full_context"],
@@ -153,7 +153,7 @@ describe("HYBRID team router (regex 확실신호 + LLM 도메인)", () => {
     expect(d.reason).toBe("active_assignee_followup");
   }, TIMEOUT);
 
-  // 2026-06-05: topic_shift 자동감지 제거(GD). 주제전환 문구가 있어도 sticky 유지 — owner 안 바뀜.
+  // 2026-06-05: topic_shift 자동감지 제거. 주제전환 문구가 있어도 sticky 유지 — owner 안 바뀜.
   test("[결정론] 주제전환 문구 — topic_shift 제거 → sticky 유지", async () => {
     const d = await routeTeamMessageHybrid("오케이 이건 됐고 팀 대시보드 리뷰하자", agents, {
       activeAssigneeId: "steve",
@@ -175,7 +175,7 @@ describe("HYBRID team router (regex 확실신호 + LLM 도메인)", () => {
   }, TIMEOUT);
 
   // --- 애매(이름없음) → ambiguous_owner(bill) 라우팅 ---
-  // GD 2026-07-10 결정: 오너 애매한 메시지는 코덱스(coordinator)가 아니라 빌(ambiguous_owner)이 받아서 GD 께 문의한다.
+  // 결정: 오너 애매한 메시지는 코덱스(coordinator)가 아니라 빌(ambiguous_owner)이 받아서 GD 께 문의한다.
   // → defaultIntake 의 default/fallback 담당을 coordinator 와 분리(ambiguous_owner capability). 빌 persona 가 "누가 볼지 GD 께 확인" 처리.
   test("[route] 이름없는 도메인 → ambiguous_owner(bill) 라우팅", async () => {
     const d = await routeTeamMessageHybrid("이 사업 투자할 만해?", agents);
@@ -189,7 +189,7 @@ describe("HYBRID team router (regex 확실신호 + LLM 도메인)", () => {
     expect(d.targetAgentIds).toEqual(["bill"]);
   }, TIMEOUT);
 
-  // 2026-06-05: closure 자동감지 제거(GD). 종료어가 있어도 자동으로 owner 를 비우지 않는다.
+  // 2026-06-05: closure 자동감지 제거. 종료어가 있어도 자동으로 owner 를 비우지 않는다.
   test("[closure 제거] 종료어 있어도 자동 closure 처리 안 함", async () => {
     const d = await routeTeamMessageHybrid(
       "코덱스 지금까지 얘기한 건 해결해서 빌이 처리했어. 더 이상 대답안해도 돼.",
@@ -204,7 +204,7 @@ describe("HYBRID team router (regex 확실신호 + LLM 도메인)", () => {
     expect(d.targetAgentIds).toContain("bill");
   }, TIMEOUT);
 
-  // --- 위임/중계: 2026-06-05 (GD) 라우터는 좁히지 않는다. @멘션은 최상위 — 잡힌 전원에게 라우팅하고,
+  // --- 위임/중계: 2026-06-05 라우터는 좁히지 않는다. @멘션은 최상위 — 잡힌 전원에게 라우팅하고,
   //     "전달해/보고해" 같은 위임·보고 판단은 멘션 받은 에이전트(LLM)가 내용을 읽고 한다. ---
   test("[위임] '@코덱스 @브리프한테 전달' → @멘션 전원 라우팅 (위임 해석은 에이전트)", async () => {
     const d = await routeTeamMessageHybrid("@코덱스. 위 메시지는 @브리프한테 전달해서 의견을 받도록 해", agents);
@@ -228,7 +228,7 @@ describe("HYBRID team router (regex 확실신호 + LLM 도메인)", () => {
     expect(d.domain).not.toContain("delegation");
   }, TIMEOUT);
 
-  // GD 2026-07-10: 애매 라우팅 대상 = ambiguous_owner(bill). 이름 나열/스코프 언급뿐인(무-@멘션) 메시지는
+  // 애매 라우팅 대상 = ambiguous_owner(bill). 이름 나열/스코프 언급뿐인(무-@멘션) 메시지는
   // 특정 스페셜리스트를 깨우지 않고 빌이 받아 GD 께 문의한다.
   // TODO(team-lead): 이름나열-only 메시지 spurious wake — no-prompt wake-guard 후보(후속 과제).
   test("[route] specialist 이름 나열/스코프 언급 → ambiguous_owner(bill) (스페셜리스트는 안 깨움)", async () => {

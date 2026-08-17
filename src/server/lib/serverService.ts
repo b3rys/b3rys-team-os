@@ -4,7 +4,7 @@
 //
 //   왜 필요했나: 멤버 봇(runtimes/{claude,codex}/launcher.ts)은 이미 LaunchAgent로 등록되는데,
 //   정작 그들을 관리하는 서버만 등록 수단이 없었다(비대칭). uninstall.sh는 이미 서버 plist 제거를
-//   약속하고 있었지만 등록하는 쪽이 없었다. 이 모듈이 그 구멍을 메운다. GD 2026-07-12.
+// 약속하고 있었지만 등록하는 쪽이 없었다. 이 모듈이 그 구멍을 메운다.
 //
 //   설계 규칙:
 //   - 라벨은 teamosLaunchdPrefix()(= com.$USER, TEAMOS_LAUNCHD_PREFIX 로 override) — 특정 조직/사용자 하드코딩 금지.

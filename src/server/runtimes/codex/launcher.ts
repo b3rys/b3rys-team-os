@@ -60,7 +60,7 @@ export function resolveCodexAllowFrom(): string {
 /**
  * owner_chat_id 설정이 비어 있고 도출 가능(claude access.json allowFrom / GD_CHAT_ID env)하면 team.db 에 persist.
  * 대시보드 도움말("claude 첫 팀원 영입 시 자동 채워집니다")과 실제 동작을 일치시키고, hermes activate 등이
- * 안정적인 설정값을 읽게 한다(도출은 시점 의존적). 이미 값이 있으면 건드리지 않는다. GD 2026-07-19.
+ * 안정적인 설정값을 읽게 한다(도출은 시점 의존적). 이미 값이 있으면 건드리지 않는다.
  * @returns persist 됐거나 이미 있던 owner_chat_id (없으면 null).
  */
 export function persistOwnerChatIdIfEmpty(db: Database): string | null {
@@ -135,7 +135,7 @@ export function renderLaunchWrapper(p: CodexBridgePaths): string {
     `export TEAM_BASE_URL="${process.env.TEAM_BASE_URL ?? "http://127.0.0.1:7878/team"}"`,
     `export CODEX_SCHEDULE_TOOL_ENABLED="${process.env.CODEX_SCHEDULE_TOOL_ENABLED ?? "false"}"`,
     // launchd 는 최소 PATH 로 wrapper 를 띄운다(plist 에 EnvironmentVariables 없음) → bun 설치경로를 명시해야 respawn-loop 안 남.
-    //   claude launcher(claude/launcher.ts) 와 동일 세트: ~/.bun/bin(공식 인스톨러) · ~/.local/bin · /opt/homebrew/bin(Apple Silicon) · /usr/local/bin(Intel homebrew). GD 2026-07-02.
+    // claude launcher(claude/launcher.ts) 와 동일 세트: ~/.bun/bin(공식 인스톨러) · ~/.local/bin · /opt/homebrew/bin(Apple Silicon) · /usr/local/bin(Intel homebrew).
     `export PATH="${HOME}/.bun/bin:${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"`,
     `exec bun "${REPO_ROOT}/src/server/runtimes/codex/bridge.ts"`,
     "",
@@ -167,7 +167,7 @@ function tomlString(value: string): string {
 /**
  * Public-safe per-agent config. Never inherit host trust/MCP/plugin config into team members.
  *
- * ★경계는 codex 설정이 정한다 — 우리 코드가 두 번째로 판정하지 않는다.★ (GD 2026-08-09·08-12)
+ * ★경계는 codex 설정이 정한다 — 우리 코드가 두 번째로 판정하지 않는다.★
  * hermes·openclaw 는 b3os 에 승인 배선이 아예 없다. 자기 런타임 설정으로 자기 방에서 끝낸다.
  * codex 도 같은 모양으로 맞춘다: 아래 permission 프로파일이 ★유일한 경계★ 다.
  *
@@ -237,7 +237,7 @@ export function ensureCodexHome(p: CodexBridgePaths): void {
     if (!existsSync(dst)) writeFileSync(dst, renderLockedDownCodexConfig(p), "utf-8");
   }
   // auth.json: **라이브 ~/.codex/auth.json 로 심링크**(복사 아님) — openclaw/hermes 와 동일 메커니즘.
-  //   (GD 2026-07-01, 하네스+실증: codex ChatGPT 인증은 single-use rotating refresh 토큰. 복사본은 호스트 rotation
+  // (하네스+실증: codex ChatGPT 인증은 single-use rotating refresh 토큰. 복사본은 호스트 rotation
   //    뒤 stale→"refresh token already used"(codi 인시던트). openclaw acpx/codex-home/auth.json 은 심링크라
   //    항상 라이브를 읽어 idle 후에도 정상 — 그 패턴을 codi 에도 적용. refresh 도 라이브에 in-place → 사본 race 근절.)
   //   per-agent 독립 로그인이 필요하면(멀티 계정) 이 심링크를 실파일 login 으로 교체(향후, 계정 하나면 불필요).
@@ -278,10 +278,10 @@ export function placeCodexToken(id: string, token: string): string {
 
 /** plist/wrapper/토큰 + (removeHome 시) CODEX_HOME 정리(퇴사). launchctl bootout은 호출자가 먼저.
  *  removeHome=true: ~/.codex-agents/<id> 삭제 → 같은 이름 재영입이 stale 인증 재사용 없이 fresh 재시드.
- *  (GD 2026-07-01, 하네스 검증: ensureCodexHome은 "없을 때만 seed"라 CODEX_HOME 잔재 시 stale 토큰 재사용→"already used" 원인.) */
+ * */
 export function removeCodexBridgeFiles(id: string, opts: { removeToken?: boolean; removeHome?: boolean } = {}): void {
   const p = codexBridgePaths(id);
-  // removeHome(전체 퇴사)면 브릿지 로그도 정리 — 재영입 시 stale 로그 혼선 방지(GD 2026-07-01 검증).
+  // removeHome(전체 퇴사)면 브릿지 로그도 정리 — 재영입 시 stale 로그 혼선 방지.
   for (const f of [p.plist, p.wrapper, ...(opts.removeToken ? [p.tokenFile] : []), ...(opts.removeHome ? [p.log] : [])]) {
     try { if (existsSync(f)) rmSync(f); } catch { /* best-effort */ }
   }

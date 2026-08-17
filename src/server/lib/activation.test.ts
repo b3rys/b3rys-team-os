@@ -628,7 +628,7 @@ describe("activation: swapRuntime", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.code).toBe("activate_failed");
-    // ★핵심: 토큰 없으면 teardown 전에 중단 → 구 런타임 무손상(self-lock 아웃티지 방지, GD 2026-07-05 하네스 fix)★
+    // ★핵심: 토큰 없으면 teardown 전에 중단 → 구 런타임 무손상(self-lock 아웃티지 방지 하네스 fix)★
     expect(teardownCalled).toBe(false);
     const precheck = result.steps.find((s) => s.step === "token-precheck");
     expect(precheck?.ok).toBe(false);
@@ -671,7 +671,7 @@ describe("activation: swap 후 persona 정합성의 근거 — buildPersona/buil
   });
 
   test("buildPersona = claude CLAUDE.md 전용(@SOUL.md 참조 + registry 정체성)", () => {
-    // 단순 모델(GD 2026-07-05): buildPersona는 claude 로딩파일만. openclaw/hermes IDENTITY.md는 사용자 입력 verbatim(buildPersona 아님).
+    // 단순 모델: buildPersona는 claude 로딩파일만. openclaw/hermes IDENTITY.md는 사용자 입력 verbatim(buildPersona 아님).
     const out = buildPersona({ ...base, runtime: "claude_channel" });
     expect(out).toContain("@SOUL.md");        // IDENTITY.md 참조(inline)
     expect(out).toContain("You are **Nova** (nova) — design.");

@@ -17,7 +17,7 @@
  *      ★서버는 읽었다고 믿고, 진짜 수신자는 영영 안 읽은 상태로 남는다.★
  *
  * ■ 올바른 해석 (정본 _me.sh)
- *   GD_AGENT_ID(★DB 에 존재하는 id 일 때만★) → 현재 폴더 ↔ agent.workspace_path →
+ * GD_AGENT_ID(★DB 에 존재하는 id 일 때만★) → 현재 폴더 ↔ agent.workspace_path →
  *   tmux 세션 ↔ agent.tmux_session(★$TMUX 안에서만★) → 레거시 claude-<id>(★DB 대조★) → ★exit 1★
  *   ★어느 단계도 지어내지 않는다. 전부 DB 와 대조한다. 다 실패하면 멈춘다.★
  *

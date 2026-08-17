@@ -184,7 +184,7 @@ export const EXEC_ALLOWLIST: Readonly<Record<string, ExecSpec>> = Object.freeze(
       timeoutMs: 120_000,
       label: "매일 06:00 칸반 PM 워크루프 (담당자 동적해석 wake)",
     },
-    // ★launchd → scheduled_job 이관★ (GD 2026-07-17). 옛 경로: launchd `com.you.team-continuation-guard`.
+    // ★launchd → scheduled_job 이관★. 옛 경로: launchd `com.you.team-continuation-guard`.
     //   왜 옮겼나:
     //   ① ★조용히 죽었다★ — plist 는 있는데 launchctl 에 언로드된 채 ★3일 18시간 정지★(7/14 00:12 마지막).
     //      아무도 몰랐다. 룰(TEAM-OS.task-mgmt)은 그동안 "가드가 owner 를 깨워줄 것" 이라고 약속하고 있었다.
@@ -1036,7 +1036,7 @@ const EXEC_LEASE_MARGIN_SEC = 60;
  * The problem it addresses: after the Mac is off for days every job's next_run_at is in
  * the past, so they all come due in one tick and a "06:00 ping" lands at 14:00.
  *
- * Why it ships off (GD, 2026-07-29): the burst is smaller than it looks — next_run_at is
+ * Why it ships off: the burst is smaller than it looks — next_run_at is
  * recomputed forward from `now` and missed slots are never backfilled, so a 30-minute job
  * idle for three days fires ONCE, not 144 times. So the cost of leaving it off is a dozen
  * late messages at boot. The cost of turning it on is that things silently do not happen:

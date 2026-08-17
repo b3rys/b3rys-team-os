@@ -1,7 +1,7 @@
 // claude_channel 봇 셋업 — 토큰(.env) 배치 + LaunchAgent plist 생성/정리(영입 활성화용).
 //   codex launcher(runtimes/codex/launcher.ts)와 동일 패턴. 토큰 값은 파일로만(로그/응답 노출 없음).
 //   claude 봇 = start-telegram-channel.sh <id> (tmux claude-<id>) — .env의 TELEGRAM_BOT_TOKEN 읽고, WORKDIR=~/Development/<id>.
-//   GD 2026-07-01: 영입이 codex만 배선돼 claude 봇이 안 떴던 갭 보완(setClaude가 plist를 요구하는데 생성기가 없었음).
+// 영입이 codex만 배선돼 claude 봇이 안 떴던 갭 보완(setClaude가 plist를 요구하는데 생성기가 없었음).
 import { writeFileSync, mkdirSync, chmodSync, existsSync, rmSync, readFileSync, readdirSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 import { homedir } from "node:os";
@@ -11,7 +11,7 @@ import { MEMBERS_ROOT, REPO_ROOT } from "../../lib/personaTemplates";
 import { getCaptureGroupId } from "../../lib/captureConfig";
 
 const HOME = process.env.HOME ?? "";
-// ★vendored 시작 스크립트 — repo 내(src/, 공개 export 포함)에서 REPO_ROOT로 해석. 기존 ~/.claude/skills 개인스킬 의존 제거(퍼블릭 fresh 클론서 봇 안 뜨던 #1 blocker). GD 2026-07-02.
+// ★vendored 시작 스크립트 — repo 내(src/, 공개 export 포함)에서 REPO_ROOT로 해석. 기존 ~/.claude/skills 개인스킬 의존 제거(퍼블릭 fresh 클론서 봇 안 뜨던 #1 blocker).
 const START_SCRIPT = `${REPO_ROOT}/src/server/runtimes/claude/start-telegram-channel.sh`;
 /** 정본 런처 경로 — plist drift 검사(인수테스트)가 이 값과 대조한다.
  *  ★사본이 여러 벌 굴러다니면 "한 곳만 고치고 까먹는" 사고가 난다★ (2026-07-25 실측: 모델 하드코딩 fix 때
@@ -47,7 +47,7 @@ export function claudeBridgePaths(id: string): ClaudeBridgePaths {
 }
 
 /** 토큰을 claude 채널 .env(TELEGRAM_BOT_TOKEN)에 0600 저장. 값 노출 없음.
- *  ★atomic(temp+rename): truncate-in-place로 쓰면 poller가 하필 그 순간 읽을 때 빈 파일→토큰로드 실패→poller 즉사(하네스 근본원인). rename은 원자적이라 빈 창이 없음. GD 2026-07-01. */
+ * ★atomic(temp+rename): truncate-in-place로 쓰면 poller가 하필 그 순간 읽을 때 빈 파일→토큰로드 실패→poller 즉사(하네스 근본원인). rename은 원자적이라 빈 창이 없음. */
 export function placeClaudeToken(id: string, token: string): string {
   const p = claudeBridgePaths(id);
   mkdirSync(p.stateDir, { recursive: true });
@@ -78,7 +78,7 @@ function renderClaudePlist(p: ClaudeBridgePaths): string {
     `  <dict>`,
     `    <key>PATH</key><string>${HOME}/.bun/bin:${HOME}/.local/bin:${HOME}/.claude/local:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>`,
     `    <key>HOME</key><string>${HOME}</string>`,
-    // ★WORKDIR 고정 — 없으면 start-telegram-channel.sh가 ~/Development/<id> fallback → 퍼블릭 모드(MEMBERS_ROOT=$B3RYS_HOME/members)서 봇이 자기 persona/CLAUDE.md/TEAM-OS 못 읽고 $HOME cwd로 뜸(정체성 없음). 하네스 HIGH, GD 2026-07-02.
+    // ★WORKDIR 고정 — 없으면 start-telegram-channel.sh가 ~/Development/<id> fallback → 퍼블릭 모드(MEMBERS_ROOT=$B3RYS_HOME/members)서 봇이 자기 persona/CLAUDE.md/TEAM-OS 못 읽고 $HOME cwd로 뜸(정체성 없음). 하네스 HIGH
     `    <key>WORKDIR</key><string>${MEMBERS_ROOT}/${p.id}</string>`,
     ...(process.env.B3RYS_HOME ? [`    <key>B3RYS_HOME</key><string>${process.env.B3RYS_HOME}</string>`] : []),
     `  </dict>`,
@@ -98,7 +98,7 @@ export function writeClaudeBridgeFiles(id: string): ClaudeBridgePaths {
 }
 
 /** reply-guard Stop 훅 설치 — 멤버 워크스페이스 `.claude/`(프로젝트 스코프)에 훅 스크립트 + settings.json.
- *  1:1 텔레그램 DM 턴을 reply 없이 끝내려 하면 차단·재프롬프트(Claude send-drift 안전망, GD 2026-07-03).
+ * 1:1 텔레그램 DM 턴을 reply 없이 끝내려 하면 차단·재프롬프트(Claude send-drift 안전망).
  *  워크스페이스 스코프라 user 전역 ~/.claude·오너 Claude Code엔 영향 0. 기존 settings.json 있으면 Stop 배열에 병합(중복 방지).
  *  best-effort — 설치 실패해도 활성화는 막지 않는다. */
 export function installReplyGuardHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
@@ -304,7 +304,7 @@ export function uninstallProgressHook(id: string): void {
   try { rmSync(hookDst, { force: true }); } catch { /* best-effort */ }
 }
 
-// ★tg-reply-recovery 훅은 제거됨 (GD 2026-07-14).★ 훅이 팀원 '대신' 텔레그램에 보내는 [A] 패턴이었다 —
+// ★tg-reply-recovery 훅은 제거됨.★ 훅이 팀원 '대신' 텔레그램에 보내는 [A] 패턴이었다 —
 // 서버가 팀원 턴 본문을 대신 게시하던 것을 걷어낸 것과 같은 이유로 삭제. 팀원이 안 보냈으면 안 보낸 것이고,
 // 그 사실을 팀원 본인에게 되돌려 주는 것(reply-guard)까지가 시스템의 몫이다. 대신 말해 주지는 않는다.
 
@@ -331,7 +331,7 @@ export function installOutboundHook(id: string, opts: { dryRun?: boolean } = {})
     const hooks = (settings.hooks && typeof settings.hooks === "object" ? settings.hooks : {}) as Record<string, unknown>;
     const stop = Array.isArray(hooks.Stop) ? (hooks.Stop as unknown[]) : [];
     // ★DRYRUN 기본 true (fail-open 방지, Bill 하네스 MED): 명시적 dryRun:false(Phase1 live)만 실전송.
-    //   설치 시 실수로 dryRun 안 넘겨도 실전송이 아니라 로그만 → GD 답 오발송/유실 위험 차단.
+    // 설치 시 실수로 dryRun 안 넘겨도 실전송이 아니라 로그만 → GD 답 오발송/유실 위험 차단.
     const dry = opts.dryRun === false ? "" : "TG_OUTBOUND_DRYRUN=1 ";
     if (!JSON.stringify(stop).includes("tg-outbound.py")) {
       stop.push({ hooks: [{ type: "command", command: `${dry}TG_OUTBOUND_ENV="${tokenEnv}" python3 "${hookDst}"` }] });
@@ -383,7 +383,7 @@ function uninstallStopHookByFile(id: string, hookFile: string): void {
 /** reply-guard Stop 훅 제거 — Tier2 live(마커모드)에선 reply 도구를 안 써 매턴 block 방지. */
 export function uninstallReplyGuardHook(id: string): void { uninstallStopHookByFile(id, "reply-guard.py"); }
 
-/** tg-reply-recovery Stop 훅 제거 — 훅 자체가 삭제됐다(GD 2026-07-14). 이 함수는 이미 설치된 멤버에서
+/** tg-reply-recovery Stop 훅 제거 — 훅 자체가 삭제됐다. 이 함수는 이미 설치된 멤버에서
  *  등록을 걷어내는 self-heal 용으로만 남는다(활성화·퇴사 때 호출). 잔재가 다 걷히면 같이 지운다. */
 export function uninstallRecoveryHook(id: string): void { uninstallStopHookByFile(id, "tg-reply-recovery.py"); }
 
@@ -399,7 +399,7 @@ export { reconnectClaudeTelegram } from "./pollerHealth";
 
 
 /** 퇴사 정리 — tmux 세션 kill + plist + (removeToken 시) 채널 상태 dir 전체 + ~/.claude.json projects 항목.
- *  ★재영입 clean: 채널 dir(.env·access.json·inbox 등)·trust 항목이 남으면 재영입 시 stale 설정 잔재(GD 2026-07-01 4런타임 잔재 감사). launchctl bootout은 호출자가 먼저. */
+ * ★재영입 clean: 채널 dir(.env·access.json·inbox 등)·trust 항목이 남으면 재영입 시 stale 설정 잔재. launchctl bootout은 호출자가 먼저. */
 export function removeClaudeBridgeFiles(id: string, opts: { removeToken?: boolean } = {}): void {
   const p = claudeBridgePaths(id);
   killClaudeTmux(id); // detached tmux 봇 종료(고아 방지)
@@ -430,7 +430,7 @@ export function seedClaudeTrust(id: string): void {
 
 /** GD DM 페어링 자동 시드(하네스 #1): 기존 claude 멤버 access.json 의 allowFrom(인스턴스 오너 DM id)을 새 봇 access.json 에 시드.
  *  재활성화 대상에 이미 승인된 allowFrom 이 있으면 파일 전체를 보존한다. 도출 불가(첫 claude 멤버)면
- *  pairing 기본값을 시드해 봇/그룹은 즉시 도달하고 GD DM은 수동 페어링(DM→code→promote)한다. */
+ * pairing 기본값을 시드해 봇/그룹은 즉시 도달하고 GD DM은 수동 페어링(DM→code→promote)한다. */
 export function seedClaudeAccess(id: string): void {
   assertId(id);
   const p = claudeBridgePaths(id);
@@ -463,12 +463,12 @@ export function seedClaudeAccess(id: string): void {
       }
     }
     mkdirSync(p.stateDir, { recursive: true });
-    // ackReaction: 봇이 메시지 받으면 👀 리액션(server.ts:950 access.ackReaction 있어야 붙음). 없으면 claude 봇 리액션 안 뜸(codex는 브리지 경로라 별개). GD 2026-07-01.
+    // ackReaction: 봇이 메시지 받으면 👀 리액션(server.ts:950 access.ackReaction 있어야 붙음). 없으면 claude 봇 리액션 안 뜸(codex는 브리지 경로라 별개).
     if (ownerId) {
       // 참조봇 있음: owner DM allowlist + 참조봇 groups 복사.
       writeFileSync(targetAccess, JSON.stringify({ dmPolicy: "allowlist", allowFrom: [ownerId], groups: refGroups, pending: {}, ackReaction: "👀" }, null, 2), "utf-8");
     } else {
-      // ★첫 claude 멤버(참조봇 없음): access.json 자체가 없으면 플러그인 assertAllowedChat이 그룹 응답을 거부(받되 답 못함, 하네스 Gap A HIGH). capture group id로 groups seed → 그룹 참여 가능. DM은 수동 페어링(pairing)로 안전 fallback. GD 2026-07-02.
+      // ★첫 claude 멤버(참조봇 없음): access.json 자체가 없으면 플러그인 assertAllowedChat이 그룹 응답을 거부(받되 답 못함, 하네스 Gap A HIGH). capture group id로 groups seed → 그룹 참여 가능. DM은 수동 페어링(pairing)로 안전 fallback.
       const gid = getCaptureGroupId();
       const groups = gid ? { [gid]: { requireMention: true, allowFrom: [] as string[] } } : {};
       writeFileSync(targetAccess, JSON.stringify({ dmPolicy: "pairing", allowFrom: [], groups, pending: {}, ackReaction: "👀" }, null, 2), "utf-8");

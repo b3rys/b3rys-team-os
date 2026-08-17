@@ -39,7 +39,7 @@ const read = (p: string) => readFileSync(join(SRC, p), "utf-8");
  * (이 목록 자체가 "통로를 세었다"는 증거다. ★"하나뿐"이라고 쓰기 전에 세라.★)
  */
 const OUTBOUND_FILES = [
-  // ★[B] 전환 (GD 2026-07-13: "팀원한테 맡겨. 다 빼.")★
+  // ★[B] 전환★
   //   ★서버가 팀원 대신 말하던 통로(자동 게시)를 전부 걷어냈다.★ 그래서 이 목록이 ★줄었다.★
   //   남은 건 ★팀원이 자기 발신 도구로 보낸 것을 서버가 릴레이하는 통로★ 뿐이다.
   //   (예전 목록: wakeDispatcher · openclawBridge · telegramCapture · slack · codex · b3osNative — 6개가

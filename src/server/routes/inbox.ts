@@ -87,7 +87,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         400,
       );
     }
-    // ★프로토콜 에러 — 오용을 그 자리에서 잡아 고치게 한다.★ (GD 2026-07-15: "에러 + 올바른 법")
+    // ★프로토콜 에러 — 오용을 그 자리에서 잡아 고치게 한다.★
     //   send.sh 는 서버가 ok:false 로 돌려주면 그 detail 을 발신자에게 그대로 보여준다(전 런타임 공통).
     {
       const replyMode = (env as { meta?: { reply_mode?: string } }).meta?.reply_mode;
@@ -149,11 +149,11 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     }
     let allHandsEligibleRecipients: string[] | null = null;
 
-    // ★팀원 broadcast 게이트 (GD 2026-08-01)★
+    // ★팀원 broadcast 게이트★
     //
     // 왜: `--to broadcast` 는 ★누구나 아무 때나★ 칠 수 있었고 검사도 기록도 없었다.
     //   실측(70분): 팀원 broadcast ★47건 → wake 517회★. 1건이 11명을 깨우고, 깨어난 사람이 또 쏜다.
-    //   ★팀장님 @all 은 7명인데 팀원 혼잣말이 11명을 깨웠다★ — 구조가 뒤집혀 있었다.
+    // ★팀장님 @all 은 7명인데 팀원 혼잣말이 11명을 깨웠다★ — 구조가 뒤집혀 있었다.
     //   룰에는 이미 "결과는 TERMINAL, 확인 답장 금지" 가 있었지만 지켜지지 않았다(내가 47건 중 5건).
     //   → 판단을 9명에게 맡기지 않고 ★coordinator 한 곳으로 모은다.★
     //
@@ -163,7 +163,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     //   현재 /api/inbox에는 서버가 인증한 호출자 신원이 없다. 따라서 from_agent_id 명부 검사는
     //   등록되지 않았거나 비활성인 claimed sender를 막지만, 정식 팀원 id 사칭까지 막는 인증은 아니다.
     //   coordinator 전용은 아니다. 팀원용 명시 공지 옵션이며, 사유가 남아 사후 판정이 가능하다.
-    //   팀장님(source=user)의 @all 은 이 게이트를 타지 않는다 — 라우터가 따로 판정한다.
+    // 팀장님(source=user)의 @all 은 이 게이트를 타지 않는다 — 라우터가 따로 판정한다.
     // ★슬랙은 제외한다★ (2026-08-01 devon 실측 — 배포 직후 슬랙 답신이 막혔다).
     //   슬랙 스레드에 답하는 유일한 경로가 `--to broadcast` 다(룰: kind="slack" → --to broadcast).
     //   게이트의 목적은 ★단톡방 연쇄★ 를 끊는 것이지 슬랙 응답을 막는 것이 아니다.
@@ -200,20 +200,20 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
 
     const slackMetaForGate = findSlackMetaForThread(deps.db, env.thread_id ?? "");
     if (env.source === "agent" && env.to_agent_id === "broadcast" && !slackMetaForGate) {
-      // ★예외는 없다.★ coordinator 도 마찬가지다 (GD 2026-08-01: "coordinator 도 예외 없어").
+      // ★예외는 없다.★ coordinator 도 마찬가지다.
       //   그래서 여기서 ★명부·capability 를 보지 않는다★ — 보는 순간 그게 유일한 구멍이 된다.
       //   (예전엔 `rosterKnown`·`isCoordinator`·`reason` 을 계산했는데, 게이트를 뺄 때
       //    조건만 지우고 변수가 남아 있었다. 예외 개념이 사라졌으니 계산도 지운다.)
-      // ★broadcast 에 대한 답을 broadcast 로 하지 않는다 (GD 2026-08-01)★ — 연쇄의 직접 고리다.
+      // ★broadcast 에 대한 답을 broadcast 로 하지 않는다★ — 연쇄의 직접 고리다.
       //   실측: 오늘 47건 중 18건이 이 형태였다. coordinator 라도 막는다(연쇄는 발신자를 안 가린다).
       if (env.in_reply_to) {
         const parent = deps.db
           .prepare(`SELECT to_agent_id, source, from_agent_id FROM message WHERE id = ?`)
           .get(env.in_reply_to) as { to_agent_id?: string; source?: string; from_agent_id?: string } | undefined;
         // ★팀장님 @all 에는 방에서 답할 수 있어야 한다★ (2026-08-01 실측 — 배포 후 아무도 방에 답을 못 했다).
-        //   팀장님이 "@all 다들 인지했어?" 라고 물었는데 ★전원이 막혀서 방이 조용해졌다.★
-        //   막으려던 건 ★팀원끼리의 연쇄★ 지 팀장님 호출에 대한 답이 아니다.
-        //   그래서 부모가 팀장님(source=user)이면 통과, ★팀원 broadcast(source=agent)면 차단.★
+        // 팀장님이 "@all 다들 인지했어?" 라고 물었는데 ★전원이 막혀서 방이 조용해졌다.★
+        // 막으려던 건 ★팀원끼리의 연쇄★ 지 팀장님 호출에 대한 답이 아니다.
+        // 그래서 부모가 팀장님(source=user)이면 통과, ★팀원 broadcast(source=agent)면 차단.★
         const parentIsLeadCall = parent?.source === "user";
         if (parent?.to_agent_id === "broadcast" && !parentIsLeadCall) {
           return c.json({
@@ -223,7 +223,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         }
       }
       // ★coordinator 요구는 뺐다 (2026-08-01 실측)★ — 넣었더니 ★방이 통째로 조용해졌다.★
-      //   팀장님 "@all 다들 인지했어?" 에 아무도 방에 답하지 못했다(전원 1:1 로 우회).
+      // 에 아무도 방에 답하지 못했다(전원 1:1 로 우회).
       //   내가 막으려던 것은 ★연쇄★ 지 방에서 말하는 것 자체가 아니었다. 과녁을 잘못 잡았다.
       //   → 남기는 규칙은 ★하나뿐★: broadcast 에 broadcast 로 답하지 않는다(위 검사). 그게 고리다.
     }
@@ -333,7 +333,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         const creds = loadAgentCreds(env.from_agent_id);
         if (creds) {
           // ★슬랙 멘션은 여기서 붙인다★ (2026-07-30) — 발신 스크립트가 본문에 미리 넣으면
-          //   `<@U…>` 가 ★텔레그램 그룹방에도 그대로 찍힌다★(실측: 팀장님이 단체방에서 발견).
+          // `<@U…>` 가 ★텔레그램 그룹방에도 그대로 찍힌다★(실측: 팀장님이 단체방에서 발견).
           //   슬랙 문법은 슬랙에서만 뜻이 있고, 다른 채널에는 의미 없는 문자열이다.
           //   즉 ★채널마다 다른 것은 채널로 나갈 때 붙여야★ 한다. 저장되는 본문은 채널 중립으로 둔다.
           //   meta.slack_mentions = ["U…", …] (send.sh --mention 이 이름을 ID 로 풀어 넣는다)
@@ -372,7 +372,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       }
     }
 
-    // ★[B] — 팀원이 방·팀장께 ★직접★ 말하는 통로.★ (GD 2026-07-13 승인: "팀원한테 맡겨. 다 빼.")
+    // ★[B] — 팀원이 방·팀장께 ★직접★ 말하는 통로.★
     //
     // ═══ 이게 없어서 모든 게 꼬였다 ═══
     //   지금까지 팀원이 단톡방에서 말하는 ★유일한 길★ 은 ★서버가 턴 본문을 대신 게시하는 것★ 이었다.
@@ -392,7 +392,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         const mode = (env as { meta?: { reply_mode?: string } }).meta?.reply_mode;
         // ★설정을 두 군데서 읽으면 언젠가 갈린다 (하네스 리뷰 2026-07-14).★
         //   캡처봇은 getCaptureGroupId() — ★파일(var/capture-group-id.txt) 먼저, env 는 폴백★ — 을 쓰는데
-        //   여기만 ★env 만★ 읽었다. 팀장님이 대시보드에서 그룹을 바꾸면 파일만 바뀐다
+        // 여기만 ★env 만★ 읽었다. 팀장님이 대시보드에서 그룹을 바꾸면 파일만 바뀐다
         //   → ★캡처는 새 그룹을 읽고, 릴레이는 조용히 꺼진다★ (groupId="" → dest=null → DB 에만 남고 방엔 안 뜸).
         //   에러도 경고도 없다. → ★같은 함수를 쓴다.★
         const groupId = getCaptureGroupId() ?? "";
@@ -407,17 +407,17 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
           if (dm) dest = { chatId: dm, kind: "telegram_dm" };
           // ★★슬랙 스레드의 답을 텔레그램 단톡방에 게시하지 않는다★★ (codex 리뷰 — ★내가 오늘 만든 유출★)
           //   아침까지는 텔레그램 릴레이가 `thread_id.startsWith("tg-")` 조건이라 슬랙 스레드가 ★자동 제외★ 됐다.
-          //   내가 그 조건을 없애면서(맞는 방향이었다) ★슬랙 답이 팀장님 텔레그램 방으로도 새게 됐다.★
+          // 내가 그 조건을 없애면서(맞는 방향이었다) ★슬랙 답이 팀장님 텔레그램 방으로도 새게 됐다.★
           //   ★한 스레드의 방은 하나다.★ 슬랙 스레드의 방은 슬랙이다 — 위에서 이미 슬랙으로 보냈다.
           //   (이건 이름 앞글자 추론이 아니다: findSlackMetaForThread 는 ★DB 조회★ = 사실이다.)
           // ★★env 가 아니라 stored 를 본다★★ (codex 리뷰 2026-07-14 — 배포 블로커였다)
           //   insertMessage 는 ★잘못 온 broadcast 답변을 원 요청자에게 directed 로 보정★ 한다
           //   (messages.ts:63-71 — hermes 가 수집 질문에 `--to broadcast` 로 답하는 습관이 있어서).
           //   그런데 여기서 원본 env 를 보면: ★DB 엔 비공개(directed)로 저장되는데 단톡방엔 게시★ 된다.
-          //   = 수집 답변(팀원끼리 주고받는 사적 내용)이 ★팀장님 방으로 유출★ 된다.
+          // = 수집 답변(팀원끼리 주고받는 사적 내용)이 ★팀장님 방으로 유출★ 된다.
           //   ★저장된 것과 보낸 것이 달라지면 안 된다.★ stored 가 유일한 진실이다.
         } else if (stored.to_agent_id === "broadcast" && !slackThread) {
-          // ★broadcast 는 "방에 말한다" 는 뜻이다. 뜻이 하나다.★ (GD 2026-07-14 "기본부터 다지자")
+          // ★broadcast 는 "방에 말한다" 는 뜻이다. 뜻이 하나다.★
           //
           //   예전엔 여기에 `&& stored.thread_id.startsWith("tg-")` 가 있었다. 근거는
           //   "안 그러면 팀원끼리 쓰는 브로드캐스트가 전부 팀장 방으로 쏟아진다" 였다.
@@ -490,8 +490,8 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
           //   서버가 "sent" 라고 하고 안 보내고. ★성공 응답을 확인 없이 믿었다.★
           //   → ★기다린다.★ 게시 결과를 팀원에게 그대로 돌려준다. (0.2~1초 느려질 뿐이다)
           //
-          //   ★재시도는 하지 않는다★ (GD 2026-07-14): 실패 → 팀원이 다시 send.sh → 또 실패 → 무한루프.
-          //   룰은 "실패하면 재시도하지 말고 팀장님께 1:1 DM 으로 알려라" 다. 1:1 은 서버를 안 거친다.
+          // ★재시도는 하지 않는다★: 실패 → 팀원이 다시 send.sh → 또 실패 → 무한루프.
+          // 룰은 "실패하면 재시도하지 말고 팀장님께 1:1 DM 으로 알려라" 다. 1:1 은 서버를 안 거친다.
           const r = await getChannel("telegram").send({ agent, target: d.chatId, text: relayText ?? stored.body });
           appendAuditFile(env.from_agent_id, r.ok ? "telegram_relay_sent" : "telegram_relay_failed", stored.id, {
             target: d.chatId,
@@ -525,7 +525,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     return c.json({ ok: true, message: stored }, 201);
   });
 
-  // ★응답가드 자가등록 (GD 2026-07-18)★ — 턴기반 팀원이 "긴 작업, 팀장 보고 잊지 않기" 를 스스로 건다.
+  // ★응답가드 자가등록★ — 턴기반 팀원이 "긴 작업, 팀장 보고 잊지 않기" 를 스스로 건다.
   // 기존 pending_followup 파이프라인(60s 워커·1회성·보고감지·GC) 재사용 — 등록 진입점만 신설.
   // 게이트 탈락은 422 + reason 으로 ★명시적으로★ 거절한다 (조용한 no-op = 어제 유형의 침묵 실패).
   r.post("/followup/self", async (c) => {

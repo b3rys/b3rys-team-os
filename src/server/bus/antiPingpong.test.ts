@@ -50,7 +50,7 @@ describe("hop_limit (max_hop=16 정렬, hop cap이 pingpong cap보다 높아야)
 import { RESERVED_AGENT_IDS as INGRESS_RESERVED } from "../../shared/envelopeSchema";
 import { RESERVED_SENDER_IDS } from "./antiPingpong";
 
-// ★목록 내용만 보는 시험은 절반이다★ (GD 지적 2026-08-06): 그건 "명단이 이렇다" 를 고정할 뿐
+// ★목록 내용만 보는 시험은 절반이다★: 그건 "명단이 이렇다" 를 고정할 뿐
 //   ★"그래서 실제로 막히나" 는 안 본다.★ 아래 두 시험을 짝으로 둔다 — 내용 + 동작.
 test("★from='broadcast' 는 실제로 차단된다★ — 명단이 아니라 동작으로 확인", () => {
   const db = new Database(":memory:");

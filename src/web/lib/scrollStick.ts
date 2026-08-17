@@ -1,6 +1,6 @@
 // scrollStick — 채팅형 컨테이너의 스크롤 유지 규칙 (단일 출처).
 //   문제: ThreadView/Chat 이 폴링 재렌더마다 무조건 scrollTop=scrollHeight 로 끌어내려,
-//   위로 스크롤해 이전 보고를 읽는 중에도 바닥으로 튕겼다 (GD 리포트 2026-08-01).
+// 위로 스크롤해 이전 보고를 읽는 중에도 바닥으로 튕겼다.
 //   규칙(채팅 UX 관례): ★독자가 바닥 근처일 때만 재렌더 후 바닥으로 따라가고(stick),
 //   위에서 읽는 중이면 읽던 위치를 그대로 보존한다.★
 //   사용법: innerHTML 재작성 ★직전에★ captureScrollStick(el) → 재작성 ★직후에★ applyScrollStick(el, saved).

@@ -1,6 +1,6 @@
 // fastembed도 네이티브 의존(onnxruntime). 부팅 시 top-level 로드하면 prebuilt 없는 플랫폼서 하드크래시.
 // 값 임포트는 createFastEmbedProvider()에서 lazy import. public export는 native deps를 설치하지 않으므로
-// 타입 import도 피한다. (하네스 MAJOR, GD 2026-07-02; public lazy-degrade, GD 2026-07-02)
+// 타입 import도 피한다. (하네스 MAJOR ; public lazy-degrade)
 import { mkdirSync } from "node:fs";
 import type { EmbeddingInput, EmbeddingProvider } from "./vectorStore";
 

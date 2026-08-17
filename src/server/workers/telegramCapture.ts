@@ -28,8 +28,8 @@ import { decidePermissionRequest, getPermissionRequest, listPermissionRequests }
 import { activeOfficialMemberCount, isTeamOfficialMember, MAX_OFFICIAL_TEAM_MEMBERS } from "../lib/agentMembership";
 import { PUBLIC_BUILD } from "../routes/settings";
 
-// 승인 시스템 v2(GD 2026-07-08) — 신청자 알림 문구(순수·i18n). 승인/거절/보류 3종, 결정 승인자 명시 →
-// 신청자가 그 승인자에게 직접 문의. 재요청 "방법"은 명시 안 함(GD 심플·신청자가 알아서).
+// 승인 시스템 v2 — 신청자 알림 문구(순수·i18n). 승인/거절/보류 3종, 결정 승인자 명시 →
+// 신청자가 그 승인자에게 직접 문의. 재요청 "방법"은 명시 안 함.
 export function approvalApprovedNotice(title: string, approver: string, locale: Locale): string {
   return pick(locale,
     `✅ 승인·처리됨 — ${title}\n승인: ${approver}`,
@@ -49,7 +49,7 @@ export function approvalDeferredNotice(title: string, approverHint: string, loca
 // 전용 캡처봇 토큰 — var/secrets/capture.bot-token(0600) → 없으면 env(CAPTURE_BOT_TOKEN) fallback.
 // (P0) UI(Settings▸시스템OP)로 설정 가능. 변경 적용은 워커 재init(restartCapture). 없으면 워커 inert — 라이브 흐름 안 건드림.
 // ★let (const 아님): startTelegramCapture 재init(대시보드 토큰/그룹 저장) 마다 파일에서 다시 읽어 갱신한다.
-//   const 로 두면 모듈 로드 시 1회만 평가돼, 재init 해도 옛 토큰/그룹으로 폴링(자동적용 no-op). GD 2026-07-19 하네스 BLOCKER 수정.
+// const 로 두면 모듈 로드 시 1회만 평가돼, 재init 해도 옛 토큰/그룹으로 폴링(자동적용 no-op). 하네스 BLOCKER 수정.
 let TOKEN = getCaptureToken();
 // 대상 그룹 (현재 supergroup). 비우면 모든 그룹. (P0) var/capture-group-id.txt → env fallback. 재init 시 갱신(아래 start 진입부).
 let GROUP_ID = getCaptureGroupId() ?? "";
@@ -65,10 +65,10 @@ let GROUP_ID = getCaptureGroupId() ?? "";
 //   ★"N명만" 이라고 적지 마라★ — 명부가 바뀌면 숫자는 낡는다. 기준은 언제나 `full_context` 보유다.
 //
 // ★자기것 필터를 넣지 마라.★ 넣는 순간 이 주입의 목적이 사라진다 — 남의 얘기까지 봐야
-//   팀 리드가 판단할 수 있다는 게 `full_context` 의 뜻이다 (GD 2026-08-02).
+// 팀 리드가 판단할 수 있다는 게 `full_context` 의 뜻이다.
 // ★`CTX_MSGS_OWN`(wakeDispatcher.ts)과 값이 같아도 합치지 마라.★ 저쪽은 '내 일 이어가기' 용이라
 //   자기것 필터가 있다. ★필터 유무가 목적이 다르다는 증거다.★ 지금 둘 다 5인 것은 우연이다.
-//   (GD 2026-08-02 "둘 다 5" — 감독용도 5로 줄인다는 결정. 목적이 같아졌다는 뜻이 아니다.)
+//
 const CAPTURE_CTX_MSGS = 5;
 const CAPTURE_CTX_HOURS = 6;
 const CAPTURE_CTX_MSG_CHARS = 200;
@@ -76,8 +76,8 @@ const OFFSET_PATH = process.env.CAPTURE_OFFSET_PATH ?? `${process.cwd()}/logs/te
 /** 단톡방 인입 경로의 주입 문맥(최대 10건/6h) — 현재 메시지 적재 전 = 직전 맥락.
  *
  *  ★줄은 `renderContextLine` 한 곳에서 만든다★ — 예전에는 여기서 따로 `[이름] 본문` 을 찍었다.
- *  그래서 팀버스 쪽에만 출처를 붙였을 때 ★이 경로는 그대로 이름만 나왔다.★ 팀장님이 실제로 쓰시는
- *  경로가 여기라서, 고쳤다고 보고된 뒤에도 팀장님 화면에는 안 고쳐진 형식이 계속 갔다.
+ * 그래서 팀버스 쪽에만 출처를 붙였을 때 ★이 경로는 그대로 이름만 나왔다.★ 팀장님이 실제로 쓰시는
+ * 경로가 여기라서, 고쳤다고 보고된 뒤에도 팀장님 화면에는 안 고쳐진 형식이 계속 갔다.
  *  ★수신자(agentId)가 하나로 정해지지 않는 자리다★ — 방 전체용 문맥이라 "너" 없이 이름으로 찍는다.
  *  ★함수로 뺀 이유는 재기 위해서다★ — 워커 안에 인라인으로 두면 이 줄을 직접 재는 테스트를 못 쓴다. */
 export function buildCaptureTeamContext(db: Database, threadId: string): string {
@@ -257,7 +257,7 @@ export function telegramMediaRefs(msg: NonNullable<TgUpdate["message"]>): Telegr
       mime_type: "image/jpeg",
     });
   }
-  // 모든 document 첨부를 캡처(이미지 한정 게이트 제거 — GD 2026-07-03: 일반 사용자가
+  // 모든 document 첨부를 캡처(이미지 한정 게이트 제거 일반 사용자가
   // .md·pdf 등 문서를 팀방에 올려 담당자에게 전달하는 건 기본 기능). 다운로드는 텔레그램
   // getFile 20MB 상한으로 자연 제한. 저장 후 media URL/경로로 에이전트에 노출(실행 아님·열람용).
   const doc = msg.document;
@@ -458,7 +458,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     console.log("[capture] disabled — CAPTURE_BOT_TOKEN 미설정 (inert)");
     return () => {};
   }
-  // 라우터 LLM(exaone) 상주 — cold-start(~9s) 제거. 재부팅/재시작마다 재핀 (GD 결정 2026-05-24).
+  // 라우터 LLM(exaone) 상주 — cold-start(~9s) 제거. 재부팅/재시작마다 재핀.
   void (async () => {
     const url = process.env.TEAM_ROUTER_OLLAMA_URL ?? "http://127.0.0.1:11434/api/chat";
     const model = process.env.TEAM_ROUTER_MODEL ?? "exaone3.5:2.4b";
@@ -476,10 +476,10 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
   let offset = 0;
   let stopped = false;
   // ★in-flight getUpdates 롱폴(timeout=25s)을 stop() 에서 즉시 끊기 위한 abort★ — 이게 없으면 restartCapture 시
-  //   옛 루프가 25s 롱폴에 블록된 채 새 루프가 떠 같은 토큰 2폴러 → 텔레그램 409(conflict)·메시지 드롭. GD 2026-07-19 하네스 MAJOR 수정.
+  // 옛 루프가 25s 롱폴에 블록된 채 새 루프가 떠 같은 토큰 2폴러 → 텔레그램 409(conflict)·메시지 드롭. 하네스 MAJOR 수정.
   const captureAbort = new AbortController();
   // 간이 sticky: 직전 담당을 기억. 멀티 @owner 뒤 후속은 여러 owner가 유지되어야 한다.
-  // 2026-06-05(GD 2798): 재시작 시 DB 영속 owner 로 seed. 이전엔 []로 시작해서 setGroupOwner(쓰기)만
+  // 2026-06-05: 재시작 시 DB 영속 owner 로 seed. 이전엔 []로 시작해서 setGroupOwner(쓰기)만
   // 하고 DB값을 안 읽어, 재시작 직후 무-@멘션 메시지가 sticky 를 잃고 default_step(codex)으로 빠졌다.
   // (DB 저장은 됐는데 capture 워커가 안 읽던 갭.) initGroupOwnerStore 가 먼저 호출되므로 값이 있다.
   let activeAssigneeIds: string[] = getGroupOwners();
@@ -527,7 +527,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
   async function sendViaTeamOp(text: string, replyTo?: string, chatId: string = GROUP_ID): Promise<void> {
     await tg("sendMessage", { chat_id: chatId, text, ...(replyTo ? { reply_to_message_id: Number(replyTo) } : {}) });
   }
-  // 승인 v2 알림 발송(GD 2026-07-08): 대상이 telegram:<id> → 텔레그램 DM / 에이전트 id → 팀버스 dm(읽기전용 통지).
+  // 승인 v2 알림 발송: 대상이 telegram:<id> → 텔레그램 DM / 에이전트 id → 팀버스 dm(읽기전용 통지).
   //   ★Devon 리뷰 #4: 이 dm 이 팀원 세션을 자동 wake·답장 유발하지 않는 근거 = source:"system" —
   //   dispatcher pendingDispatch 가 source IN(agent,user)만 wake 큐에 올림(inbox/dispatch.ts). system 은 제외.
   //   (unread inbox 항목만 남음 = 통지라 OK.) best-effort — 실패해도 배정/승인/거절엔 영향 없음.
@@ -606,8 +606,8 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
       });
     }
   }
-  // ★새 승인/권한 요청은 생성 즉시 GD op DM에 버튼과 함께 push — /approve 눌러야만 보이던 문제 fix(GD 2026-07-06). /approve는 놓친 것 재리스팅 fallback으로 유지.
-  //   폴러 매 사이클 호출. in-memory 중복방지(재시작 시 현재 pending 1회 재push = GD가 어차피 봐야 할 것).
+  // ★새 승인/권한 요청은 생성 즉시 GD op DM에 버튼과 함께 push — /approve 눌러야만 보이던 문제 fix. /approve는 놓친 것 재리스팅 fallback으로 유지.
+  // 폴러 매 사이클 호출. in-memory 중복방지(재시작 시 현재 pending 1회 재push = GD가 어차피 봐야 할 것).
   const pushedApprovalKeys = new Set<string>();
   async function pushNewApprovals(): Promise<void> {
     const gdDm = approvalAllowedIds()[0]; // GD user id = op DM chat_id(1:1). 없으면 push 안 함(fail-safe).
@@ -657,7 +657,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     const locale = getLocale(deps.db);
     const ctl = ["openclaw", "claude_channel", "hermes_agent", "codex"];
     const agents = deps.agents().filter((a: any) => ctl.includes(a.runtime));
-    // 실제 생존상태 반영(GD 2026-07-08): /onoff 는 제어(토글) 메뉴라 초록/빨강이 "의도적 정지 여부"만 표시했다.
+    // 실제 생존상태 반영: /onoff 는 제어(토글) 메뉴라 초록/빨강이 "의도적 정지 여부"만 표시했다.
     //   → agent_status 를 classifyHealth 로 분류해, 켜져있는데 실제로 죽은(livenessLevel=danger, 예: 세션 offline)
     //   팀원은 ⚫(다운)으로 구분 표시. blocked/idle(정상 활동·게이트웨이 대기)은 danger 아니라 🟢 유지.
     const statusMap = new Map(listStatuses(deps.db).map((s) => [s.agent_id, s]));
@@ -674,7 +674,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
         rows.push([{ text: pick(locale, `🔴 ${a.display_name} — 🟢 기동`, `🔴 ${a.display_name} — 🟢 start`), callback_data: `on:${a.id}:${a.runtime}` }]);
       } else {
         // 켜진 팀원: 🟢/⚫이름=상태(탭하면 힌트만, 정지 안 함) + 🔴정지=명시적 정지 버튼(따로) + 🔄재시작 + 🆕새세션.
-        //   ★기존엔 🟢이름 탭이 곧 정지였는데 "상태표시"로 보여 GD가 못 알아봄 → 정지를 별도 버튼으로 분리(GD 2026-07-08).
+        // ★기존엔 🟢이름 탭이 곧 정지였는데 "상태표시"로 보여 GD가 못 알아봄 → 정지를 별도 버튼으로 분리.
         //   🟢=작동중 / ⚫=켜짐이지만 실제 다운(세션 죽음) — 제어토글은 ON인데 런타임이 죽은 경우(예: Ames offline).
         const st = statusMap.get(a.id);
         const down = st ? classifyHealth(st, a).livenessLevel === "danger" : false;
@@ -700,7 +700,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     });
   }
   // @all confirm (2026-06-18, GD): @all/전체멘션은 즉시 fan-out 하지 않고 GD 승인을 받는다(오발송 방지).
-  //   broadcast_marker 감지 → 주입 보류 + pending 저장 + ✅/❌ 버튼 → GD ✅ 시 runInjection 재실행.
+  // broadcast_marker 감지 → 주입 보류 + pending 저장 + ✅/❌ 버튼 → GD ✅ 시 runInjection 재실행.
   const pendingBroadcasts = new Map<string, {
     decision: any; roster: any; deliveryBody: string; media: any;
     threadId: string; origTgMessageId?: string; teamContext: string; text: string;
@@ -725,11 +725,11 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     const chatId = cb.message?.chat?.id != null ? String(cb.message.chat.id) : "";
     const mid = cb.message?.message_id;
     appendAuditFile("capture", "callback_query", data, { from: fromId, chat: chatId });
-    // ★fail-closed 인가(danger:high 공통): non-bot + GROUP_ID 설정+정확일치 + allowlist 설정+id일치. GROUP_ID나 allowlist가 비면 "권한 미구성"으로 deny(과거 empty=all-allow fail-open → 그룹 2번째 사람이 deploy/restart 가능하던 갭. Codex·Devon·하네스 만장일치, GD 2026-07-02). 라이브 .env엔 APPROVAL_ALLOWED_USER_IDS=GD id 설정됨.
+    // ★fail-closed 인가(danger:high 공통): non-bot + GROUP_ID 설정+정확일치 + allowlist 설정+id일치. GROUP_ID나 allowlist가 비면 "권한 미구성"으로 deny(과거 empty=all-allow fail-open → 그룹 2번째 사람이 deploy/restart 가능하던 갭. Codex·Devon·하네스 만장일치). 라이브.env엔 APPROVAL_ALLOWED_USER_IDS=GD id 설정됨.
     const isAuthorized = (): boolean => {
       const allow = approvalAllowedIds();
       // allowlist(=GD id)는 항상 필수. 그 위에서 팀 그룹(GROUP_ID) 또는 GD 본인 DM(private + chat.id===from.id, 1:1)만 허용.
-      // op 봇 방(DM)에서 운영 메뉴를 쓰기 위한 확장(GD 2026-07-06). DM은 1:1이라 "그룹 2번째 사람" fail-open 갭이 없음.
+      // op 봇 방(DM)에서 운영 메뉴를 쓰기 위한 확장. DM은 1:1이라 "그룹 2번째 사람" fail-open 갭이 없음.
       if (cb.from?.is_bot || allow.length === 0 || !allow.includes(fromId)) return false;
       const inGroup = GROUP_ID !== "" && chatId === GROUP_ID;
       const inOwnerDm = cb.message?.chat?.type === "private" && chatId === fromId;
@@ -916,7 +916,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
 
     const m = /^(apv|rej):(apr_[a-f0-9]+)$/.exec(data);
     if (!m) { await tg("answerCallbackQuery", { callback_query_id: cb.id }); return; }
-    // ★fail-closed 인가 = isAuthorized()로 통일(GROUP_ID 또는 GD private DM, allowlist 필수). DM에서도 승인/배포 실행되게(GD 2026-07-06). 하네스 검증: DM은 1:1+allowlist라 fail-open 갭 없음.
+    // ★fail-closed 인가 = isAuthorized로 통일(GROUP_ID 또는 GD private DM, allowlist 필수). DM에서도 승인/배포 실행되게. 하네스 검증: DM은 1:1+allowlist라 fail-open 갭 없음.
     if (!isAuthorized()) {
       await tg("answerCallbackQuery", { callback_query_id: cb.id, text: pick(locale, "권한 없음", "Not authorized"), show_alert: true });
       appendAuditFile("capture", "callback_denied", data, { from: fromId });
@@ -947,7 +947,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     else final = pick(locale, `✅ 승인됨 (실행 안 함) — ${row.title}`, `✅ Approved (not executed) — ${row.title}`);
     if (mid) await tg("editMessageText", { chat_id: chatId, message_id: mid, text: final });
   }
-  // targetChat = 메뉴/응답을 띄울 chat(그룹 기본, op 봇 DM이면 그 DM). GD 2026-07-06 op 방 배선.
+  // targetChat = 메뉴/응답을 띄울 chat(그룹 기본, op 봇 DM이면 그 DM). op 방 배선.
   async function handleSlashCommand(text: string, msgId?: string, targetChat: string = GROUP_ID): Promise<boolean> {
     const cmd = (text.trim().split(/\s+/)[0] ?? "").replace(/@\S+$/, "").toLowerCase();
     if (!SLASH_CMDS.includes(cmd)) return false;
@@ -1059,7 +1059,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     // sticky 상태 갱신
     if (decision.outcome === "closure" || decision.shouldResetThread) activeAssigneeIds = [];
     // @all/전체멘션(broadcast_marker)은 '이번 메시지'만 전원 fan-out 하고, sticky(다음 무멘션 담당)는
-    // 바꾸지 않는다 → 다음 무멘션은 @all 이전 owner 로 복귀(GD 2026-06-18, Bill+Codex 합의). 일회성 전체 호출.
+    // 바꾸지 않는다 → 다음 무멘션은 @all 이전 owner 로 복귀. 일회성 전체 호출.
     if (decision.outcome === "route" && decision.targetAgentIds.length > 0 && decision.reason !== "broadcast_marker") {
       activeAssigneeIds = [...new Set(decision.targetAgentIds)];
     }
@@ -1221,21 +1221,21 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
                 messageId,
                 body: deliveryBody,
                 fromLabel: `${pick(locale, "팀장", "the team lead")} (${pick(locale, "그룹 라우터", "group router")})`,
-                // ★여기는 단톡방이다 — 답은 ★방★ 에 간다.★ (GD 2026-07-14)
+                // ★여기는 단톡방이다 — 답은 ★방★ 에 간다.★
                 //   fromLabel 은 사람이 읽는 ★이름표★("팀장 (그룹 라우터)")지 팀원 id 가 아니다.
                 //   주입문이 그걸로 주소를 지어내면 `send.sh --to 팀장 (그룹 라우터)` 같은 헛것이 나온다.
-                //   ★부르는 쪽이 사실을 넘긴다.★ 팀장님이 방에서 불렀으니 답도 방에 온다.
+                // ★부르는 쪽이 사실을 넘긴다.★ 팀장님이 방에서 불렀으니 답도 방에 온다.
                 replyRoute: { kind: "group" },
                 locale,
                 teamContext: scopedTeamContext,
-                // 턴 상한은 안 넘긴다 — 기본값(HERMES_TURN_TIMEOUT_MS) 한 곳에 맡긴다 (GD 2026-07-15).
+                // 턴 상한은 안 넘긴다 — 기본값(HERMES_TURN_TIMEOUT_MS) 한 곳에 맡긴다.
               });
-              // ★[B] — 서버는 팀원 대신 말하지 않는다.★ (GD 2026-07-13: "팀원한테 맡겨. 다 빼.")
+              // ★[B] — 서버는 팀원 대신 말하지 않는다.★
               //
               // ═══ 이 통로가 제일 아팠다 ═══
               //   팀장이 단톡방에서 @멘션하면 ★여기가 hermes 를 직접 돌리고 stdout 을 방에 게시★했다.
               //   ★wakeDispatcher 를 안 지나서★ 거기 달아둔 가드가 아무 소용이 없었다 →
-              //   ★"GD CSO HERMES: [NO_REPLY]" 가 팀장 단톡방에 문자 그대로 찍혔다.★ (2026-07-13 라이브)
+              // ★"GD CSO HERMES: [NO_REPLY]" 가 팀장 단톡방에 문자 그대로 찍혔다.★ (2026-07-13 라이브)
               //
               // ═══ 지금 ═══
               //   ★턴 본문은 그 팀원의 메모다. 아무 데도 안 간다.★
@@ -1271,10 +1271,10 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
       { command: "status", description: pick(locale, "팀 상태 요약", "Team status summary") },
     ];
     // ★ 그룹 채팅 자동완성은 all_group_chats / 특정 chat scope 가 default 보다 우선한다. default 만 갱신하면
-    //   예전에 등록된 그룹 scope 목록이 남아 새 명령(onoff)이 그룹에서 안 뜬다(2026-06-11 GD 발견). → 셋 다 등록.
+    // 예전에 등록된 그룹 scope 목록이 남아 새 명령(onoff)이 그룹에서 안 뜬다(2026-06-11 GD 발견). → 셋 다 등록.
     await tg("setMyCommands", { commands });
     await tg("setMyCommands", { commands, scope: { type: "all_group_chats" } });
-    // ★op 봇 DM(private) 슬래시 메뉴 — 퍼블릭 사용자가 팀 그룹 없이 op 봇 방만으로 운영 메뉴 접근(GD 2026-07-06).
+    // ★op 봇 DM(private) 슬래시 메뉴 — 퍼블릭 사용자가 팀 그룹 없이 op 봇 방만으로 운영 메뉴 접근.
     await tg("setMyCommands", { commands, scope: { type: "all_private_chats" } });
     if (GROUP_ID) await tg("setMyCommands", { commands, scope: { type: "chat", chat_id: Number(GROUP_ID) } });
   }
@@ -1295,7 +1295,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
           const msgChatId = String(msg.chat?.id ?? "");
           const fromIdMsg = String(msg.from?.id ?? "");
           const isGroupMsg = GROUP_ID !== "" && msgChatId === GROUP_ID;
-          // op 봇 방(GD 1:1 DM)에서 운영 슬래시 메뉴 허용(GD 2026-07-06). fail-closed: non-bot + private + chat.id===from.id(1:1) + allowlist(=GD).
+          // op 봇 방에서 운영 슬래시 메뉴 허용. fail-closed: non-bot + private + chat.id===from.id(1:1) + allowlist(=GD).
           const isOwnerDm = !msg.from?.is_bot && msg.chat?.type === "private" && msgChatId === fromIdMsg && fromIdMsg !== "" && approvalAllowedIds().includes(fromIdMsg);
           if (GROUP_ID === "" && !msg.from?.is_bot) {
             try { rememberDiscoveredGroup(deps.db, msg.chat, new Date().toISOString()); } catch { /* best-effort */ }

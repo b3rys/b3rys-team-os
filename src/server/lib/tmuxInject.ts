@@ -13,7 +13,7 @@ import { groupChatIdFromThread, teamContextLabel } from "../channels/registry";
 
 // tmux 바이너리 해석: TMUX_BIN override → Bun.which(PATH) → 흔한 경로.
 // Apple-Silicon 고정경로만 쓰면 Intel(/usr/local)·Linux(/usr/bin)·커스텀 PATH서
-// claude_channel 주입(Slack 멘션 전달)이 깨진다(하네스 fix, GD 2026-07-02).
+// claude_channel 주입(Slack 멘션 전달)이 깨진다(하네스 fix).
 function resolveTmuxBin(): string {
   const override = process.env.TMUX_BIN;
   if (override && existsSync(override)) return override;
@@ -142,7 +142,7 @@ export interface InjectPromptOptions {
   agentId: string;
   teamContext?: string; // 가시성 Stage C: 공유 버스의 최근 팀 대화 (깨어날 때 동봉)
   /** case 6 (direct_to_gd): Bill 등이 위임한 GD-facing 보고. set 되면 수신자가 버스 ack 대신
-   *  GD 1:1 DM(groupId 필드=owner_chat_id)에 자기 telegram reply 도구로 직접 보고한다. */
+   * GD 1:1 DM(groupId 필드=owner_chat_id)에 자기 telegram reply 도구로 직접 보고한다. */
   directReport?: { groupId: string };
 }
 
@@ -174,7 +174,7 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
   // Anti-pingpong hop metadata (issue 1 A+C):
   // Include in_reply_to and hop instructions so the agent can propagate them on its response.
   // The server also enforces hop_count server-side (routes/inbox.ts) as a backstop.
-  // ★봉투에는 '지금 이 메시지의 hop' 을 그대로 싣는다★ (2026-07-27, GD 결정 (b)안).
+  // ★봉투에는 '지금 이 메시지의 hop' 을 그대로 싣는다★ (2026-07-27, 제품 결정 (b)안).
   //   룰은 팀원에게 `--hop <hop_count+1>` 을 시킨다. 그런데 여기서 미리 +1 해서 보내면
   //   팀원이 그 값에 또 +1 해서 ★메시지당 2씩★ 올랐다(실측: 0→2→4→6…).
   //   그래서 MAX_HOPS=16 이 실제로는 8메시지 한도로 동작했다.
@@ -207,9 +207,9 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
     //   여기 있던 isCollect 분기는 "★telegram 그룹에 답하면 서버가 집계하지 못해 종합에서 누락★" 이라고
     //   말했다 — ★이제 거짓말이다.★ 호출부가 없어 죽어 있었지만 다시 넘기면 거짓말이 부활한다 → 분기째 제거.
     //   (그룹방에서도 답이 버스로 돌아오는 건 이제 isTeammateDirected 불변식이 보장한다 — 반창고 불필요)
-    // ★★단톡방 답변을 reply 도구로 시키면 안 된다 (GD 2026-07-14, 라이브 증명) ★★
+    // 단톡방 답변을 reply 도구로 시키면 안 된다
     //
-    //   reply 도구로 그룹에 올리면 ★팀장님 눈에는 보인다.★ 그런데 —
+    // reply 도구로 그룹에 올리면 ★팀장님 눈에는 보인다.★ 그런데 —
     //   ★텔레그램은 봇에게 다른 봇의 메시지를 주지 않는다★ (실측: 빌 봇이 그룹에 @스티브봇 멘션 →
     //   스티브 90초 무응답. 캡처봇도 봇 글을 못 본다 — auto-ack 발동 0회).
     //   → ★캡처봇이 못 보니 DB 에 한 줄도 안 남는다.★
@@ -220,7 +220,7 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
     //   그래서 증발한 155건은 claude 팀원(5명)의 그룹 답변이었을 가능성이 크다.
     //
     //   → send.sh 로 보내면 ★서버를 거치니 DB 에 남고★, 서버가 봇 API 로 그룹에 올린다.
-    //     팀장님도 보고, 서버도 본다. (릴레이는 routes/inbox.ts 에 이미 있다)
+    // 팀장님도 보고, 서버도 본다. (릴레이는 routes/inbox.ts 에 이미 있다)
     //
     //   ★그리고 주입문은 '방법' 을 말하지 않는다 — '사실'(어느 스레드인가) 만 준다.★
     //   ★2026-08-01: '그룹 라우터가 당신에게 배정했습니다' 를 뺐다.★ 그 문장은 '사실' 이 아니라

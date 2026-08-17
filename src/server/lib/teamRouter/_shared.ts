@@ -40,14 +40,14 @@ export interface LlmRouteDecision extends RouteDecision {
    */
   needsGdConfirm?: boolean;
   /**
-   * 결정 종류 (GD 설계 2026-05-24):
+   * 결정 종류:
    * - route: 정상 라우팅 (targetAgentIds 로 보냄)
    * - closure: 종료/그만 신호 → 아무도 안 깸 + sticky 해제 (targetAgentIds=[])
    * - ask_gd: 담당 애매 → GD 에게 "누가 볼까요?" 질문. suggested 는 LLM/키워드 추천 후보(결정 아님).
    * (routeTeamMessageLLM 순수 경로는 항상 route 의미라 생략 가능 — hybrid 는 항상 명시.)
    */
   outcome?: "route" | "closure" | "ask_gd";
-  /** ask_gd 일 때 LLM/키워드가 제안하는 후보 (GD 가 확정/변경). 결정이 아니라 추천. */
+  /** ask_gd 일 때 LLM/키워드가 제안하는 후보. 결정이 아니라 추천. */
   suggested?: string[];
 }
 

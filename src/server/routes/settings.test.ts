@@ -53,7 +53,7 @@ function setup(agents: any[] = AGENTS, overrides: Partial<Parameters<typeof crea
   const registryPath = join(dir, "agents.json");
   process.env.SLACK_TOKENS_DIR = join(dir, "slack-tokens");
   writeFileSync(teamOsPath, TEAM_OS, "utf-8");
-  // FIX1(GD 2026-07-08): fixture 멤버(steve/bill = 실 멤버 폴더명)의 workspace를 per-test temp로 고정.
+  // FIX1: fixture 멤버(steve/bill = 실 멤버 폴더명)의 workspace를 per-test temp로 고정.
   //   미지정이면 swapRuntime/writeMemberPersona 가 memberPaths() 폴백으로 라이브 ~/Development/<id> 를
   //   건드려 실 CLAUDE.md 를 삭제하던 근본버그(activation.ts:897 rmSync). temp 주입으로 원천차단 +
   //   실제 파일연산은 temp 안에서 정상 동작(=삭제경로도 여전히 커버). 중앙가드(FIX2)와 이중방어.
@@ -70,7 +70,7 @@ function setup(agents: any[] = AGENTS, overrides: Partial<Parameters<typeof crea
   return { app, teamOsPath, registryPath, dir, db };
 }
 /** 팀 세팅이 '완료'된 상태 — 영입(recruit)은 setupComplete() 를 통과해야 열린다.
- *  ★필수 3필드 = team_name · lead_id · owner_name★ (2c0f363, GD 2026-07-10).
+ * ★필수 3필드 = team_name · lead_id · owner_name★ (2c0f363).
  *  owner_name 이 빠져 있어서 recruit 이 계속 막혔고, '영입 OT' 테스트 9건이 통째로 실패했다. */
 function setupReady(agents: any[] = AGENTS, overrides: Partial<Parameters<typeof createSettingsApp>[0]> = {}) {
   const out = setup(agents, overrides);
@@ -640,7 +640,7 @@ describe("settings: 팀명/태그라인", () => {
       github_approver_account: "",
       merge_approvers_normal: "",
     });
-    // ★필수 3필드 = team_name · lead_id · owner_name (2c0f363, GD 2026-07-10).★
+    // ★필수 3필드 = team_name · lead_id · owner_name (2c0f363).★
     //   2개만 채우면 아직 setup_complete=false 여야 한다 — 이 테스트는 옛 2필드 규칙을 기대해서 깨져 있었다.
     const r = await app.request("/settings", put({ team_name: "로빈팀", lead_id: "lead", tagline: "우리만의 팀" }));
     expect(r.status).toBe(200);
@@ -1486,7 +1486,7 @@ describe("slack reinstall-info", () => {
     }
   };
 
-  /* ★서버는 언제나 Socket 매니페스트를 낸다★ (GD 2026-07-27 — 슬랙 정본 = Socket Mode).
+  /* ★서버는 언제나 Socket 매니페스트를 낸다★.
    * 예전엔 공개 URL 이 있으면 request_url + socket_mode_enabled:false 를 내보냈다. 화면에서는
    * 클라이언트 socketManifest() 가 Socket 으로 바꿔줘 멀쩡해 보였지만, ★그건 화면을 거칠 때만★ 이다.
    * 이 엔드포인트를 직접 받아가면 ★지원하지 않는 Event URL 앱을 만드는 매니페스트★ 가 그대로 나갔다.
@@ -1656,7 +1656,7 @@ describe("OT 조회가 claude 페어링 대기를 표면화한다", () => {
   });
 });
 
-// ★MCP 토글 — 공개 빌드에서는 존재 자체가 안 보인다★ (팀 리드 2026-08-07)
+// ★MCP 토글 — 공개 빌드에서는 존재 자체가 안 보인다★
 describe("system-op: MCP 창구 토글", () => {
   test("PATCH mcp_enabled 로 켜고 끈다", async () => {
     const { app } = setup();

@@ -8,7 +8,7 @@
  * Key design decisions:
  * - Adapter calls are isolated in async tasks; hang in one adapter cannot block
  *   the poller loop or the HTTP server (blast-radius containment).
- * - BUS_DISPATCH_ENABLED default ON (GD 2026-07-19); set =false → shadow mode: logs decisions, sends no wakes.
+ * - BUS_DISPATCH_ENABLED default ON; set =false → shadow mode: logs decisions, sends no wakes.
  * - claude_channel wakes are serialized via runtime_lock to avoid OAuth 429.
  * - Crash recovery runs on startup: stale 'dispatching' rows are reset to 'pending'.
  */
@@ -89,7 +89,7 @@ function isAgentAllHandsBroadcast(row: PendingDispatchRow): boolean {
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-// ★기본 ON★ (GD 2026-07-19): 협업/위임은 dispatcher 가 팀원을 깨워야 성립한다. 명시적으로 "false" 일 때만 shadow.
+// ★기본 ON★: 협업/위임은 dispatcher 가 팀원을 깨워야 성립한다. 명시적으로 "false" 일 때만 shadow.
 // (fresh/public 설치도 켜진 채로 뜬다 — 예전엔 기본 OFF 라 새 사용자는 버스 wake 가 안 됐다.)
 export const BUS_DISPATCH_ENABLED = process.env.BUS_DISPATCH_ENABLED !== "false";
 
@@ -120,7 +120,7 @@ const POLL_INTERVAL_MS = Number(process.env.BUS_POLL_INTERVAL_MS ?? 1500);
 //                      Was 60s — an UNFINISHED fix: the inner gateway wait was raised to 300s
 //                      (openclawBridge OPENCLAW_GATEWAY_TIMEOUT_MS) but this OUTER cap stayed 60s, so
 //                      it cut off normal-but-slow codex turns at 60s → execute_timeout_maybe_partial
-//                      → expired, GD report never marked delivered (2026-06-29 diagnosis). A timeout
+// → expired, GD report never marked delivered (2026-06-29 diagnosis). A timeout
 //                      here is an "unknown side effect" (the turn may still post), not a retryable false.
 //     lease_ttl:       300s — adapter_timeout + 60s (OPENCLAW_LEASE_SEC). MUST exceed adapter_timeout:
 //                      otherwise the lease expires mid-wake, recoverStaleClaims resets the row to
@@ -180,7 +180,7 @@ const ENV_ALLOWLIST: ReadonlySet<string> | null = BUS_DISPATCH_AGENTS_RAW
 // env(BUS_DISPATCH_AGENTS, plist·재시작 필요) ∪ 이 파일(쓰면 즉시 반영). mtime 캐시로 매 dispatch 읽기 저렴.
 // 이게 "영입=클릭/자동, 터미널 0"의 인프라 — 활성화가 이 파일에 에이전트를 추가하면 바로 깨워짐.
 // ★경로를 call-time+env override로 — 테스트가 실 운영파일(var/bus-wake-extra.txt) 읽어 fixture(bill/codex/steve)가
-//   운영 allowlist(lui/devon/…)에 밀려 allowlist_not_enabled 되던 격리 갭(Codex 진단, 테스트 격리 게이트). GD 2026-07-01.
+// 운영 allowlist(lui/devon/…)에 밀려 allowlist_not_enabled 되던 격리 갭(Codex 진단, 테스트 격리 게이트).
 export function busWakeExtraFile(): string {
   return process.env.TEAMOS_BUS_WAKE_EXTRA_FILE ?? `${process.cwd()}/var/bus-wake-extra.txt`;
 }
@@ -387,8 +387,8 @@ function makeCludeAdapter(db: Database): WakeAdapter {
  * tg- thread 로 이미 온 메시지엔 적용 안 함(이미 텔레그램 경로). 반환: {groupId=owner DM chat_id, threadId} or null.
  */
 // ★2026-07-08 GD: direct_to_gd 기본 타겟 = GD 1:1 DM(owner_chat_id). 그룹 아님.★
-//   이유: 팀방 없는 퍼블릭 사용자도 릴레이 가능해야 하고, GD-facing 보고를 그룹에 노출하면 footgun.
-//   반환 groupId 필드 = 이제 "GD DM chat_id" (봇이 자기 토큰으로 그 DM에 post). source_thread_id 는 무시(호환).
+// 이유: 팀방 없는 퍼블릭 사용자도 릴레이 가능해야 하고, GD-facing 보고를 그룹에 노출하면 footgun.
+// 반환 groupId 필드 = 이제 "GD DM chat_id" (봇이 자기 토큰으로 그 DM에 post). source_thread_id 는 무시(호환).
 /** 수집 fan-out ask 인가 (meta.collect === true). ★그룹 thread 여도 답을 버스로 받아야★ 서버가
  *  collection_reply 로 집계할 수 있다. 없으면 tmuxInject 의 isTelegramGroup 분기가 이겨 수신자가
  *  telegram 그룹에 답하고, 그 답은 버스에 안 남아 collection 이 영원히 미완 → 종합에서 누락
@@ -452,7 +452,7 @@ export function resolveSystemReplyTo(row: { from_agent_id: string; source?: stri
 
 export function resolveDirectToGd(row: PendingDispatchRow, ownerChatId?: string): { groupId: string; threadId: string } | null {
   // ★단톡방 스레드면 DM 직보를 하지 않는다 — 팀장님이 그 방에 계시니 방에 답하면 이미 닿는다.★
-  //   DM 까지 보내면 ★중복 보고★ 다. (GD 2026-07-14 확인: "둘 다 상관없어" → 중복 없는 쪽을 택함.
+  // DM 까지 보내면 ★중복 보고★ 다. (중복 없는 쪽을 택한다.
   //   이건 2026-07-08 case-6 계약과 같은 동작이라 회귀도 없다.)
   //
   //   ★단, '이름 앞글자' 가 아니라 '방이 어디냐' 라는 ★사실★ 로 묻는다.★ (codex 리뷰)
@@ -696,7 +696,7 @@ function makeHermesAdapter(db: Database, agents: () => AgentRecord[]): WakeAdapt
           });
         }
 
-        // ★[B] — 서버는 팀원 대신 말하지 않는다.★ (GD 2026-07-13: "팀원한테 맡겨. 다 빼.")
+        // ★[B] — 서버는 팀원 대신 말하지 않는다.★
         //
         // ═══ 예전엔 여기서 무슨 일이 일어났나 ═══
         //   hermes 의 stdout(턴 본문)을 받아서 ★서버가 대신 게시★했다:
@@ -711,7 +711,7 @@ function makeHermesAdapter(db: Database, agents: () => AgentRecord[]): WakeAdapt
         //   말하려면 팀원이 ★직접 보낸다★ — send.sh --to <상대> / --to broadcast(방) / --direct-to-gd.
         //   ★"보낸 것만 말한 것이다."★  → 침묵에 토큰이 필요없고, 수신자를 서버가 추측하지 않는다.
         //   (claude 가 원래 이렇게 돌고 있었고, 그래서 이 병이 없었다.)
-        // ★답이 어디로 가야 하는지는 ★여기가 안다★. 주입문이 추측하게 두지 않는다.★ (GD 2026-07-14)
+        // ★답이 어디로 가야 하는지는 ★여기가 안다★. 주입문이 추측하게 두지 않는다.★
         //   claude 는 이미 :299 에서 resolveDirectToGd 로 판정하는데 ★hermes 만 그 줄이 없었다★ (codex 리뷰).
         //   그래서 direct_to_gd 위임을 받아도 hermes 는 그걸 모르고 위임자에게 답했다.
         //   여기는 ★버스 경로★ 다 — 답은 물어본 팀원에게 1:1 로 간다 (단톡방이 아니다).
@@ -736,7 +736,7 @@ function makeHermesAdapter(db: Database, agents: () => AgentRecord[]): WakeAdapt
           locale: getLocale(db),
           teamContext,
           // 턴 상한은 안 넘긴다 — runHermesTeamTurn 의 기본값(HERMES_TURN_TIMEOUT_MS)에 맡긴다.
-          // ★상한은 한 곳(hermesBridge)에만 산다★ (GD 2026-07-15). 호출부마다 넘기면 또 슬랙처럼 빠뜨린다.
+          // ★상한은 한 곳(hermesBridge)에만 산다★. 호출부마다 넘기면 또 슬랙처럼 빠뜨린다.
         });
 
         return { ok: true, detail: "hermes_oneshot_completed" };
@@ -782,7 +782,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Pro
 
 
 /**
- * ★네가 이미 무엇을 보냈는지 ★보이게★ 만든다.★ (GD 2026-07-13: "룰과 세션데이터로 하자")
+ * ★네가 이미 무엇을 보냈는지 ★보이게★ 만든다.★
  *
  * ═══ 무엇이 잘못됐었나 (실측) ═══
  *   collector 가 종합을 두 번 냈다 (22:40:11 / 22:40:17 — 같은 내용).
@@ -798,7 +798,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Pro
  * ═══ 그래서 ═══
  *   · ★방향을 표시한다★: `[너 → bill]` / `[dbak → 너]` — 누가 누구에게인지 한눈에.
  *   · ★내가 이미 한 일을 요약해서 맨 아래 못박는다★ — 나열에 묻히지 않게.
- *   ★유사도 같은 걸로 서버가 막지 않는다★ (GD). ★팀원이 볼 수 있으면 팀원이 판단한다.★
+ * ★유사도 같은 걸로 서버가 막지 않는다★. ★팀원이 볼 수 있으면 팀원이 판단한다.★
  */
 
 /**
@@ -822,10 +822,10 @@ export function renderContextLine(
   const cut = full.length > opts.maxChars;
   const body = cut ? `${full.slice(0, opts.maxChars)} …(잘림: 원문 ${full.length}자)` : full;
   const mine = m.from_agent_id === agentId;
-  // ★언제 일인지 안 알려주고 있었다.★ (GD 2026-07-13: "오래된걸 주면 안좋은거 아냐?")
+  // ★언제 일인지 안 알려주고 있었다.★
   //   ★맞다 — 오래됐다는 걸 ★모르게★ 주면 나쁘다.★ 3일 전 대화를 지금 일로 착각하면 엉뚱한 걸 실행한다.
   //   ★알려주면 팀원이 판단한다.★ ("이건 어제 얘기구나") — 빈 문맥보다 낫고, 무표시 옛 문맥보다 안전하다.
-  // ★줄마다 출처를 밝힌다★ (GD 2026-08-02 "출처별로 나누던지(1:1 / 단체 / 팀버스)").
+  // ★줄마다 출처를 밝힌다★.
   //   한 스레드에 방 글·버스 DM·시스템 통지가 ★섞여서★ 들어오는데 줄 모양이 같았다.
   //   머리말 하나로 뭉뚱그리면 섞인 주입에서 또 틀린다 — 그래서 블록이 아니라 줄에 붙인다.
   return `${mine ? "★" : " "}(${timeAgo(m.created_at)})[${lineOrigin(m, opts.isGroupThread)} · ${who(m.from_agent_id)} → ${who(m.to_agent_id)}] ${body}`;
@@ -838,14 +838,14 @@ const CTX_MSGS = Number(process.env.CTX_MSGS ?? 12);
 const CTX_HOURS = Number(process.env.CTX_HOURS ?? 24);   // ★24시간. 넘으면 문맥 없음★ (GD 결정)
 const CTX_MSG_CHARS = Number(process.env.CTX_MSG_CHARS ?? 800);
 const CTX_TOTAL_CHARS = Number(process.env.CTX_TOTAL_CHARS ?? 8000);
-// ★단톡방(그룹 스레드) 전용 상한★ (GD 2026-07-16): 그룹방은 스레드 하나에 전 과제가 섞여, 12건·24h 를
+// ★단톡방(그룹 스레드) 전용 상한★: 그룹방은 스레드 하나에 전 과제가 섞여, 12건·24h 를
 //   그대로 주면 판교·증시·민재 인사가 통째 붙어 팀원이 ★옛 일을 지금 일로 착각★한다(Ames·codex 실측).
 //   → 그룹방만 좁힌다: 자기것만 · 6시간 · 5건. (수집·작업 전용 스레드는 tg- 가 아니라 그대로 full)
 const CTX_HOURS_GROUP = Number(process.env.CTX_HOURS_GROUP ?? 6);
 // ★이 주입은 '내 일 이어가기' 용이다.★ 답하는 질문: ★"내가 하던 일이 어디까지 왔나".★
 //   대상 = ★팀원 전원★ · 자기것만(from=나 OR to=나) · 한 건 800자(CTX_MSG_CHARS).
 //   from=나 OR to=나만 남기고 최근 5건. 남의 딴-대화(예: codex→demis 리뷰 팬아웃)를 걷어낸다.
-//   (GD 2026-07-16 "전부 5개로 해. 분기 타지 말고" · 2026-08-02 재확인)
+//
 //
 // ★`CAPTURE_CTX_MSGS`(telegramCapture.ts)와 값이 같아도 합치지 마라.★ 답하는 질문이 다르다 —
 //   저쪽은 "팀에 지금 무슨 일이 도나"(감독용)라서 ★자기것 필터가 없다.★
@@ -855,14 +855,14 @@ const CTX_MSGS_OWN = Number(process.env.CTX_MSGS_OWN ?? 5);
 
 export function buildTeamContext(db: Database, threadId: string, agentId?: string): string {
   try {
-    // ★6시간 안에 아무것도 없으면 빈 문맥이었다★ (GD 질문: "만약 6시간 메시지가 없으면?")
+    // ★6시간 안에 아무것도 없으면 빈 문맥이었다★
     //   → 하루 뒤 재개된 위임에서 collector 가 ★자기가 이미 뭘 했는지도 모른 채★ 돈다.
     //   ★시간창은 '최근 대화' 를 주려는 것이지 '아무것도 안 주려는' 게 아니다.★ → 비면 나이 무시하고 준다.
-    // ★24시간 넘으면 문맥 없음.★ (GD 2026-07-13 결정)
+    // ★24시간 넘으면 문맥 없음.★
     //   ★옛 대화를 붙이면 "지금 일" 로 착각한다★ — 빈 문맥보다 나쁠 수 있다.
     //   필요하면 팀원이 `thread.sh <thread_id>` 로 ★직접 꺼내 본다★ (능력은 이미 있다).
     //   ★우리가 대신 "볼지 말지" 를 정하지 않는다.★
-    // ★단톡방(그룹 스레드)만 좁힌다★ (GD 2026-07-16): resolveThreadKind 로 그룹방 판별(정본 함수).
+    // ★단톡방(그룹 스레드)만 좁힌다★: resolveThreadKind 로 그룹방 판별(정본 함수).
     //   그룹방 = 스레드 하나에 전 과제 섞임 → ①6시간 ②자기것+나에게온것 ③6건.
     //   (수집·작업 스레드는 tg- 가 아니므로 full 유지 = 기여자 답이 그대로 보여 수집 안 깨짐)
     const isGroupRoom = resolveThreadKind(threadId) === "telegram_group";
@@ -870,8 +870,8 @@ export function buildTeamContext(db: Database, threadId: string, agentId?: strin
     const fetchLimit = 40; // 그룹·버스 모두 필터를 견디게 넉넉히 뽑고 아래서 5건으로 자른다
     let recent = recentThreadMessages(db, threadId, fetchLimit, fetchHours);
     if (agentId) {
-      // ★자기것 + 나에게 온 것만 · 5건 (그룹·버스 통일, 분기 없음)★ (GD 2026-07-16 "전부 5개, 분기 타지 말고").
-      //   from=나(내 팬아웃·발언) OR to=나(기여자 답·GD 지시)만. 남의 딴-대화(예: codex→demis 리뷰 팬아웃)를 제거.
+      // ★자기것 + 나에게 온 것만 · 5건 (그룹·버스 통일, 분기 없음)★.
+      // from=나(내 팬아웃·발언) OR to=나(기여자 답·요구사항)만. 남의 딴-대화(예: codex→demis 리뷰 팬아웃)를 제거.
       //   ★기여자 답(to=나)은 남으므로 수집 안 깨짐.★
       recent = recent
         .filter((m) => m.from_agent_id === agentId || m.to_agent_id === agentId)
@@ -879,7 +879,7 @@ export function buildTeamContext(db: Database, threadId: string, agentId?: strin
     }
     if (!recent.length) return "";
 
-    // ★잘림이 진짜 답을 잘랐다★ (GD 질문: "메시지가 크면?"). 실측: 최근 121건 중 4건이 200자 초과인데
+    // ★잘림이 진짜 답을 잘랐다★. 실측: 최근 121건 중 4건이 200자 초과인데
     //   ★하필 웹조사 답변들이었다★ (라이프치히 258자 · 한스아이슬러 219자) → collector 가 ★잘린 답으로 종합★.
     //   → 한 건 상한을 올리고(800자), ★전체 예산★ 으로 막는다(무한정 커지지 않게).
     //   ★상한에 걸려 잘리면 그 사실을 알려준다★ — 조용히 자르면 collector 는 그게 전부인 줄 안다.
@@ -905,7 +905,7 @@ export function buildTeamContext(db: Database, threadId: string, agentId?: strin
       `\n★[네가 이 스레드에서 이미 보낸 것] ${mine.length}건 → ${sentTo.join(", ")} ` +
       `(위에서 ★ 표시된 줄이 전부 네가 보낸 것이다)★\n` +
       `★같은 사람에게 같은 질문을 다시 하지 마라. 같은 요청에 두 번 보고하지 마라.★\n` +
-      // ★24시간 넘은 이력은 안 붙인다 — 대신 ★꺼내 보는 법★ 을 한 줄로 알려준다 (GD 지시).★
+      // ★24시간 넘은 이력은 안 붙인다 — 대신 ★꺼내 보는 법★ 을 한 줄로 알려준다.★
       `(더 이전 이력이 필요하면: thread.sh ${threadId})`;
     return lines.join("\n") + "\n" + summary;
   } catch {
@@ -1008,7 +1008,7 @@ function buildDispatchPlan(
     return { kind: "skip" };
   }
 
-  // ack-only reply wake-gate (team-comm 왕복 축소, GD 2026-07-09):
+  // ack-only reply wake-gate (team-comm 왕복 축소):
   // "네 확인했습니다"/👍 같은 ack-only reply 는 상대를 full wake 하지 않는다(inbox-only). wake 는
   // actionable 신호(substantive/explicit_done)에만 — bare ack 로 상대 턴+토큰을 소모하는 ack 핑퐁 제거.
   // collect_only 게이트와 동형. 안전: recipient_state 는 ackClose 가 이미 반영하므로 상대는 다음
@@ -1035,11 +1035,11 @@ function buildDispatchPlan(
     return { kind: "skip" };
   }
 
-  // ack-loop guard (team-comm ②, GD 2026-07-09; 하네스 적대검증 반영 2026-07-10):
+  // ack-loop guard (team-comm ② ; 하네스 적대검증 반영 2026-07-10):
   //   같은 (thread, from→to) 쌍이 '짧은 시간창 내' CAP 회 넘게 발신하면 반복(맞장구·재정리) → inbox-only.
   //   ★하네스 BLOCKING fix★: (1)그룹은 영구 thread(tg-GROUP) 라 lifetime 누적은 몇 주 뒤 정상 협업까지
-  //   막음 → 반드시 '최근 시간창(WINDOW_MIN)' bound. (2)source=agent 만(user/system=GD 지시 절대 안 막음).
-  //   (3)broadcast 제외(@all wake-all 보장 침해 방지). shadow-first(로그만) → GD 재검토+재검증 후에만 enforce.
+  // 막음 → 반드시 '최근 시간창(WINDOW_MIN)' bound. (2)source=agent 만(user/system=요구사항 절대 안 막음).
+  // (3)broadcast 제외(@all wake-all 보장 침해 방지). shadow-first(로그만) → GD 재검토+재검증 후에만 enforce.
   const ACK_LOOP_WINDOW_MIN = Number(process.env.ACK_LOOP_GUARD_WINDOW_MIN ?? 15);
   const ackLoopShadow = process.env.ACK_LOOP_GUARD_SHADOW === "true";
   const ackLoopEnforce = process.env.ACK_LOOP_GUARD === "true";
@@ -1109,7 +1109,7 @@ function buildDispatchPlan(
     return { kind: "skip" };
   }
 
-  // GD-report reminder (prompt-injection, GD 2026-07-11): while this collector has an active team-lead
+  // GD-report reminder (prompt-injection): while this collector has an active team-lead
   // collection flag for this thread, append a soft "wrap up & report to the team lead" reminder to the
   // wake body. It RIDES this existing wake (never creates one — no infinite loop). TTL-bounded + cleared
   // when the report is observed. Applied once here so every runtime adapter inherits it via row.body.
@@ -1159,7 +1159,7 @@ function buildDispatchPlan(
   }
 
   // pre-widen: allowlist filter — only dispatch to agents in BUS_DISPATCH_AGENTS.
-  // 2026-05-27 (GD): agents NOT in the allowlist are expired (dropped), not requeued.
+  // 2026-05-27: agents NOT in the allowlist are expired (dropped), not requeued.
   // "애매하면 만료" — ambiguous/indefinite waits are worse than a clean drop.
   // If the agent is later added to the allowlist, sender re-sends a new message.
   const _allow = busDispatchAllowlist();
@@ -1251,7 +1251,7 @@ function buildDispatchPlan(
   //   · 위임/과제 스레드 문맥  = ★자기가 참여 중인 그 대화★ → ★막을 이유가 없다★
   // 우리 룰도 그렇게 말한다: "버스 문맥은 ★네가 깨워진 스레드에 대해서만★ 온다".
   // ★그 최소한마저 안 주고 있었다.★ → 그래서 갈랐다.
-  // ★그룹방도 푼다.★ (GD 2026-07-13: "그룹방도 풀면 안돼?")
+  // ★그룹방도 푼다.★
   //   ═══ 게이트를 걸 이유가 없었다 ═══
   //   · ★그룹방은 어차피 다 같이 있는 방이다.★ 거기 오간 말을 그 방 사람에게 숨길 이유가 없다.
   //   · 토큰 부담? ★실측: 최근 12건 = 총 761자.★ 부담이 아니다.
@@ -1282,7 +1282,7 @@ async function invokeWakeAdapter(
 
 // 런타임별 웨이크-실패 정책 (P1a: runtime 문자열 분기를 선언적 정책 맵으로 — Steve·Codex 리뷰 방향).
 // "expire_no_retry": inject가 취소불가/부분 side-effect 가능(openclaw) → exception·returned-false·timeout
-//   3경로 모두 동일 terminal expire로 닫아 중복 가시응답 방지(GD 2026-06-03 dup root cause). preservesInbox.
+// 3경로 모두 동일 terminal expire로 닫아 중복 가시응답 방지. preservesInbox.
 // "retry": 깨끗한 실패 → markFailed 백오프(claude maybePartial은 아래 별도 cooldown 분기, hermes clean).
 // 향후 P1b에서 RuntimeAdapter.ambiguousWakePolicy 필드로 이전(지금은 wakeDispatcher-local, types.ts 무관).
 // 동작 동일: 기존 `runtime === "openclaw"` 두 분기를 정책 조회로 치환만 함(SQL·last_error 프리픽스 불변).
@@ -1307,7 +1307,7 @@ function wakeFailurePolicy(runtime: string): WakeFailurePolicy {
  * exception / deferred / ok / failure, with openclaw no-retry and unknown-side-effect expiry.
  */
 /**
- * ★차단되면 발신자에게 알린다.★ (GD 승인 2026-07-26 · 스티브 종합)
+ * ★차단되면 발신자에게 알린다.★
  *
  * 무슨 일이 있었나: 빌이 스티브에게 보낸 4건이 pingpong 가드에 막혔다. 그런데
  *   · 발신자 쪽 — send.sh 가 ★"✓ sent" 를 찍었다★
@@ -1471,7 +1471,7 @@ function recordDispatchOutcome(
     });
     // OpenClaw exceptions are ambiguous just like returned-false/timeout: injectOpenclawTelegramTurn
     // may have already woken Codex and posted (or partially posted) a Telegram reply before throwing.
-    // Generic retry here re-wakes + re-posts → duplicate visible replies (GD 2026-06-03 dup root cause —
+    // Generic retry here re-wakes + re-posts → duplicate visible replies ( dup root cause —
     // the exception path was the last retry gap; the !result.ok path below already expires no-retry).
     // Same policy: expire (no retry), leave the bus message in the inbox for next-turn/manual collection.
     if (wakeFailurePolicy(targetAgent.runtime) === "expire_no_retry") {
@@ -1595,7 +1595,7 @@ function recordDispatchOutcome(
     return;
   }
   if (lastError === UNKNOWN_SIDE_EFFECT_DETAIL) {
-    // 2026-05-27 (GD): "애매하면 만료" — partial inject is ambiguous (may have partially
+    // 2026-05-27: "애매하면 만료" — partial inject is ambiguous (may have partially
     // applied). Retrying risks double-inject / workspace corruption. Drop immediately.
     // Sender re-sends if the message wasn't received. audit: execute_timeout_expired.
     db.prepare(
@@ -1782,12 +1782,12 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
       // DB lease is the truth; if the DB lease expired and recoverStaleClaims reset it,
       // we need inFlight to release too — otherwise the row is permanently skipped.
       const now = Date.now();
-      // ★마감 독촉(collectionDeadline) — 개별보고 제외로 좁혀 되살림★ (GD 2026-07-15)
+      // ★마감 독촉(collectionDeadline) — 개별보고 제외로 좁혀 되살림★
       //   [히스토리] 처음엔 통째 제거했다("독촉코드 빼는게 어때"). 그런데 이 backstop 이 실은 ★codex 의
       //   유일한 fallback 깨우기★ 였다 — codex 의 auto-wake 는 원래도 드롭했고(wake_dispatched 고아),
       //   [마감] 독촉이 codex 를 깨워 종합시키고 있었다(실측: 16:43 [마감]→16:44 종합). 제거하니 codex 가
       //   진짜 수집에서도 멈췄다. → ★뺄 게 아니라 개별/수집을 구별해 진짜 수집에만★ 깨우게 좁힌다.
-      //   구별 = 기여자가 collector 에게 direct_to_gd 없이 답했나(수집) vs GD 께 direct_to_gd(개별).
+      // 구별 = 기여자가 collector 에게 direct_to_gd 없이 답했나(수집) vs GD 께 direct_to_gd(개별).
       //   (collectionDeadline.ts inbound 쿼리에서 direct_to_gd 제외 — 개별보고는 answeredToCollector 에서 빠져 발사 안 됨)
       //   킬스위치 유지: COLLECTION_DEADLINE_ON=0 으로 끌 수 있다.
       if (process.env.COLLECTION_DEADLINE_ON !== "0") {
@@ -1802,7 +1802,7 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
         }
       }
 
-      // Team-Collect close tick (GD 2026-07-11, feature-flag OFF → no-op unless enabled): close any due
+      // Team-Collect close tick: close any due
       // collection (all-received fast-path OR timeout guaranteed-closer) by emitting ONE synthetic
       // system→collector bundle message. That message dispatches on the next pass (normal wake path),
       // waking the collector once with the aggregated answers to synthesize + report. Idempotent per

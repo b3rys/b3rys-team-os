@@ -1,5 +1,5 @@
 /**
- * ★팀원 broadcast 게이트★ (GD 2026-08-01)
+ * ★팀원 broadcast 게이트★
  *
  * ═══ 왜 생겼나 — 실측 ═══
  * `--to broadcast` 는 누구나 아무 때나 칠 수 있었고 검사도 기록도 없었다.
@@ -58,7 +58,7 @@ const send = (h: ReturnType<typeof createInboxRoutes>, body: Record<string, unkn
   });
 
 // ★coordinator 요구는 뺐다 (2026-08-01)★ — 넣었더니 방이 통째로 조용해졌다.
-//   팀장님 "@all 다들 인지했어?" 에 아무도 방에 답하지 못했다. 과녁은 ★연쇄★ 였지 발언 자체가 아니었다.
+// 에 아무도 방에 답하지 못했다. 과녁은 ★연쇄★ 였지 발언 자체가 아니었다.
 //   그래서 그 계약을 검사하던 시험도 같이 지운다. 남는 계약은 아래 하나뿐이다.
 
 describe("★broadcast 에 대한 답은 broadcast 로 못 한다★ — 연쇄의 직접 고리", () => {

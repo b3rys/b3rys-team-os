@@ -161,10 +161,10 @@ export function maybeCreatePendingFollowup(db: Database, input: MaybeCreateFollo
 }
 
 /**
- * ★자가등록 (GD 2026-07-18 응답가드)★ — 팀원이 "작업이 길어져 팀장 보고를 잊으면 안 된다" 싶을 때 스스로 건다.
+ * ★자가등록★ — 팀원이 "작업이 길어져 팀장 보고를 잊으면 안 된다" 싶을 때 스스로 건다.
  * 기존 pending_followup 파이프라인(60s 워커·1회성 재-wake·보고감지·GC)을 그대로 재사용한다 — 별도 크론/워커 금지
  * (hermes 2026-07-18: 딴 경로를 만들면 1회성·GC·중복방지 불변식이 깨진다).
- * · 게이트 = 등록자 runtime 이 one-shot(턴기반) — GD: "턴기반 팀원만". 탈락은 ★명시적 reason 으로 거절★한다 (침묵 금지).
+ * · 게이트 = 등록자 runtime 이 one-shot(턴기반). 탈락은 ★명시적 reason 으로 거절★한다 (침묵 금지).
  * · threadId 는 ★실제 작업 thread 필수★ — 보고 감지(hasSubstantiveReport)와 hermes/openclaw audit 결합이 thread 로 묶인다.
  * · sourceMessageId 는 합성 id — 원 요청 메시지가 없다. NULL 로 두면 audit 결합 SQL 이 전부 불일치한다(하네스 반증 2026-07-18).
  */

@@ -1,5 +1,5 @@
 // 팀원 onoff 서킷브레이커 — 서버 executor 가 런타임별로 에이전트를 정지/기동(터미널 0).
-//   비상 시 GD 가 팀방 /onoff 탭으로 폭주 팀원을 즉시 끈다(2026-06-11 forin 자율-폭주 인시던트 대응).
+// 비상 시 GD 가 팀방 /onoff 탭으로 폭주 팀원을 즉시 끈다(2026-06-11 forin 자율-폭주 인시던트 대응).
 //
 // 보안: self-mod 실행 → APPROVAL_EXECUTION_ENABLED=1(팀장 터미널-직접 무장) + GD 인증 탭에서만 호출.
 //
@@ -56,7 +56,7 @@ function markOff(id: string, off: boolean): void {
   writeFileSync(f, [...ids].join("\n") + (ids.size ? "\n" : ""), "utf-8");
 }
 
-/** 퇴사/재영입 시 off-list에서 제거 — 안 지우면 재영입 agent가 게이트웨이는 떠도 버스에서 suppress됨(deleted≠off, 하네스 #1 systemic breaker. openclaw/hermes 재영입 실패 근본). GD 2026-07-01. */
+/** 퇴사/재영입 시 off-list에서 제거 — 안 지우면 재영입 agent가 게이트웨이는 떠도 버스에서 suppress됨(deleted≠off, 하네스 #1 systemic breaker. openclaw/hermes 재영입 실패 근본). */
 export function clearAgentOff(id: string): void {
   markOff(id, false);
 }
@@ -143,7 +143,7 @@ async function setHermes(id: string, enabled: boolean): Promise<ControlResult> {
     const r = await run(["hermes", "gateway", "start"], { HERMES_PROFILE: profile });
     return { ok: r.code === 0, detail: r.code === 0 ? `hermes ${id} 기동(게이트웨이 직접 · LaunchAgent 없음 — 재부팅 후 수동 기동 필요, 프로필 ${profile})` : `기동 실패: ${r.out.slice(-150)}` };
   }
-  // 정지: 게이트웨이 stop + LaunchAgent bootout. bootout 안 하면 KeepAlive LaunchAgent가 게이트웨이를 되살려 '퇴사해도 계속 응답'(GD 2026-07-01 mes 실측 버그). 프로필별 라벨 타겟.
+  // 정지: 게이트웨이 stop + LaunchAgent bootout. bootout 안 하면 KeepAlive LaunchAgent가 게이트웨이를 되살려 '퇴사해도 계속 응답'. 프로필별 라벨 타겟.
   const stopR = await run(["hermes", "gateway", "stop"], { HERMES_PROFILE: profile });
   await run(["launchctl", "bootout", `gui/${uid}/${label}`]);
   return { ok: true, detail: `hermes ${id} 정지(게이트웨이 stop + LaunchAgent bootout, 프로필 ${profile})${stopR.code !== 0 ? " [stop 경고]" : ""}` };

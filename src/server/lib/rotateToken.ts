@@ -1,5 +1,5 @@
-// 봇 토큰 교체 — 런타임별 격리 핸들러 + fail-safe (GD 2026-07-01).
-// 원칙(GD): getMe로 새 토큰 검증 → 기존 백업 → 쓰기 → 재시작 → 어디서든 실패하면 기존 복원+멈춤(절대 반쯤 안 바꿈).
+// 봇 토큰 교체 — 런타임별 격리 핸들러 + fail-safe.
+// 원칙: getMe로 새 토큰 검증 → 기존 백업 → 쓰기 → 재시작 → 어디서든 실패하면 기존 복원+멈춤(절대 반쯤 안 바꿈).
 //   토큰 값은 파일로만 다루고 로그/응답/audit에 절대 노출하지 않는다(username만).
 //   런타임별 저장소가 완전히 분리돼 있어(claude/openclaw/hermes/codex) 서로·기존 코드에 side-effect 0.
 import { readFileSync, writeFileSync, existsSync, chmodSync, mkdirSync, renameSync } from "node:fs";
@@ -46,7 +46,7 @@ function writeEnvKey(file: string, key: string, value: string, mode = 0o600): vo
     while (out.length && out[out.length - 1] === "") out.pop();
     out.push(`${key}=${value}`);
   }
-  // atomic(temp+rename) — truncate-in-place 빈 창에 poller가 읽으면 토큰로드 실패로 죽음(하네스 근본원인). GD 2026-07-01.
+  // atomic(temp+rename) — truncate-in-place 빈 창에 poller가 읽으면 토큰로드 실패로 죽음(하네스 근본원인).
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, out.join("\n") + (out[out.length - 1] === "" ? "" : "\n"), { mode });
   try { chmodSync(tmp, mode); } catch { /* best-effort */ }
@@ -92,7 +92,7 @@ export function resolveTokenStore(runtime: string, id: string, agent: AgentRecor
     const account = agent.openclaw_agent_id ?? id;
     // account(openclaw_agent_id)도 path에 들어가니 id와 동일하게 형식 검증(방어적 — 하네스 LOW).
     if (!/^[a-z0-9_-]+$/i.test(account)) return { unsupported: `openclaw account 형식이 올바르지 않아요 — 변경 미지원(기존 유지).` };
-    // ★파일기반 계정만 rotate 허용(GD 2026-07-05)★: openclaw.json 에 tokenFile 이 정의된 계정(lui·devon 등)만.
+    // ★파일기반 계정만 rotate 허용★: openclaw.json 에 tokenFile 이 정의된 계정(lui·devon 등)만.
     //   ★파일이 실종돼도(Lui 토큰파일 사라진 케이스) 거부하지 않는다★ — '죽은 봇→새 토큰' 취지대로 새 토큰으로 파일 생성
     //   (plainFileStore.write = mkdir+atomic create; read 는 파일 없으면 null → 백업할 것 없음, fail-safe).
     //   tokenFile 미정의(인라인 토큰 codex/brief, 빈 계정)면 파일 생성이 인라인 config 와 충돌하므로 여전히 거부.

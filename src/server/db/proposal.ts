@@ -18,7 +18,7 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
   peer_review: ["gd_report", "revise_requested", "rejected", "archived_duplicate"],
   // legacy drain path: 기존 DB에 남은 pm_review row는 gd_report/revise/reject로 빠져나갈 수 있게만 둔다.
   pm_review: ["gd_report", "revise_requested", "rejected"],
-  // 팀장 결정은 승인/반려 둘뿐(GD 2026-07-10). 수정요청은 팀장 단계에서 제거 — 고칠 게 있으면
+  // 팀장 결정은 승인/반려 둘뿐. 수정요청은 팀장 단계에서 제거 — 고칠 게 있으면
   //   반려하고 새로 올리게 한다(rejected는 terminal이라 재제출=새 proposal). 리뷰어 단계의
   //   revise_requested 는 그대로 둔다(peer_review→revise_requested).
   gd_report: ["accepted", "rejected"],
@@ -95,7 +95,7 @@ function reviewSkipIds(): Set<string> {
 
 // 제안자 제외 리뷰 후보 수(= 팀 크기 판단 기준. `requiredPmReviewCount` 가 이 값을 읽는다).
 //
-// ★state 를 안 본다★ (팀 리드 2026-08-08: "blocked 는 빼고 그냥 배정해").
+// ★state 를 안 본다★.
 //   `blocked` 는 배정 근거로 쓸 수 있는 값이 아니다 — `health.ts` 가 같은 값을 두고
 //   ★"정상 활동중에도 떠서 노이즈"★ 라고 못박아 두었고, 그래서 건강 판정은 이걸 위험으로 안 본다.
 //   그런데 여기서만 '이 사람은 못 받는다' 로 읽어서 ★일하고 있는 사람일수록 후보에서 빠졌다.★

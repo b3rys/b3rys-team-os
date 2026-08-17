@@ -1,5 +1,5 @@
 /**
- * ★마감 — 답이 안 오면 그때 상황으로 보고하게 깨운다.★ (GD 2026-07-13)
+ * ★마감 — 답이 안 오면 그때 상황으로 보고하게 깨운다.★
  *
  * ═══ 왜 필요한가 (팀장 라이브 테스트) ═══
  *   16:22:01  steve → demis / hermes / codex   팬아웃 3명
@@ -45,14 +45,14 @@ interface StalledCollection {
   missing: string[];    // 아직 답 안 한 기여자
   answered: string[];   // 답한 기여자
   key: string;          // 중복 재촉 방지 키 (thread:collector:마지막팬아웃시각)
-  // ★어느 수집인지 알려주는 두 값★ (GD 2026-08-03) — 알림 첫 줄에 실린다.
+  // ★어느 수집인지 알려주는 두 값★ — 알림 첫 줄에 실린다.
   //   thread_id 는 이미 실려 나가지만 `tg--1003947108339`·`XZD-y5Fs` 처럼 ★사람이 못 읽는다.★
   //   (실측 2026-08-03: bill 이 하루에 이 알림을 4번 받고 매번 "어느 수집이지" 를 되짚었다)
   askId: string;        // collector 가 던진 첫 질문의 message id — 제목이 무의미해도 이건 항상 식별된다
   askTitle: string;     // 그 질문의 첫 줄 (자르면 …(잘림))
 }
 
-/** 첫 줄을 제목으로 쓴다. ★아무것도 벗기지 않는다★ (GD 2026-08-03 "심플하게").
+/** 첫 줄을 제목으로 쓴다. ★아무것도 벗기지 않는다★.
  *  벗기려다 `[아침 브리핑 …]` 의 여는 대괄호만 지워 ★닫는 짝이 혼자 남는★ 일이 있었다.
  *  안 벗기면 `[6am 과제 리뷰]`·`[workloop: …]` 같은 말머리가 살아 종류가 한눈에 보인다. */
 export function askTitleOf(body: string, max = 44): string {
@@ -121,7 +121,7 @@ export function hasReportedSince(
     .get(thread_id, collector, since, ...targets) as { n: number }).n;
   if (viaBus > 0) return true;
 
-  // ② 팀장 1:1 DM 은 ★근거로 쓰지 않는다★ (GD 2026-07-26 결정)
+  // ② 팀장 1:1 DM 은 ★근거로 쓰지 않는다★
   //
   //   한 번 넣었다가 되돌렸다. 이유를 남긴다 —
   //   claude 멤버가 팀장 1:1 에 답하는 정본 경로는 텔레그램 reply 도구이고 그 산출물은 dm_message 다.
@@ -175,7 +175,7 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
 
       // C 에게 들어온 메시지 (답·지시)
       // ★direct_to_gd 답은 제외한다★ (2026-07-15, GD) — 기여자가 `--to <collector>` 로 보냈어도
-      //   reply_mode=direct_to_gd 면 그건 ★개별보고(GD 행)★ 지 collector 를 위한 수집 기여가 아니다.
+      // reply_mode=direct_to_gd 면 그건 ★개별보고★ 지 collector 를 위한 수집 기여가 아니다.
       //   (2026-07-15 라이브: 서귀포 개별보고에서 hermes·codex 가 `--to steve --direct-to-gd` 로 보내자
       //    steve 가 '수집 collector' 로 오판돼 [마감] 독촉을 맞았다.) → direct_to_gd 는 '수집 답' 으로 안 센다.
       const inbound = db
@@ -263,8 +263,8 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
                 WHERE thread_id = ? AND from_agent_id = ? AND to_agent_id = ? AND created_at > ?`)
               .get(thread_id, t, requester, askedAt) as { n: number }).n > 0
           : false;
-        // ★direct_to_gd 로 답한 것도 '답함' 이다 — ★개별보고(GD 행)★.★ (2026-07-15, GD)
-        //   기여자가 `--to <collector> --direct-to-gd` 로 보내면 목적지는 GD 다(inbound 에선 이미 제외됨).
+        // ★direct_to_gd 로 답한 것도 '답함' 이다 — ★개별보고★.★ (2026-07-15, GD)
+        // 기여자가 `--to <collector> --direct-to-gd` 로 보내면 목적지는 GD 다(inbound 에선 이미 제외됨).
         //   이걸 '답함' 으로 안 세면 → missing 으로 잡혀 ★"안 왔다" 독촉★ 이 나간다 (서귀포 오탐의 다른 얼굴).
         //   → answered 에는 넣되(=안 왔다 아님), answeredToCollector 에는 ★안 넣는다★(=종합 대상 아님) → 개별보고로 판정돼 발사 안 됨.
         const toGd = (db.prepare(
@@ -284,7 +284,7 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
 
       // ★--individual = 확정이 아니라 '사실로 반박 가능한 힌트' 다.★ (dbak 리뷰 2026-07-17, GD 지시로 도입)
       //
-      //   위임자가 `send.sh --individual` 로 뿌렸다 = "각자 GD께 직접 보고해라". 종합할 사람이 없으니 안 깨운다.
+      // 위임자가 `send.sh --individual` 로 뿌렸다 = "각자 GD께 직접 보고해라". 종합할 사람이 없으니 안 깨운다.
       //   ★meta 의 칸 하나만 본다 — 본문은 안 읽는다★ (본문의 "각자 보고하세요" 를 서버는 못 읽는다).
       //   이게 닫는 창: anyToGd 는 ★답이 와야★ 켜지므로 아무도 안 답한 5분 시점엔 개별보고와 수집이
       //   서버 눈에 똑같다(둘 다 '2명 이상에게 뿌림') → 개별보고가 독촉을 맞았다.
@@ -373,20 +373,20 @@ export function sweepCollectionDeadlines(db: Database, agents: AgentRecord[]): n
         .get(key) as { n: number }).n;
       if (already > 0) continue;   // ★수집 하나당 한 번만 — 예외 없다★
 
-      // ★첫 줄 = 어느 수집인지.★ (GD 2026-08-03) 나머지를 읽기 전에 이것부터 걸린다.
+      // ★첫 줄 = 어느 수집인지.★ 나머지를 읽기 전에 이것부터 걸린다.
       //   서버가 1:1 DM 을 못 보는 건 그대로 둔다 — 대신 ★오탐일 때 사람이 1초에 판단하게★ 만든다.
       const head = `[확인] 「${c.askTitle}」 (${c.askId})\n`;
 
       // ★두 상황은 다르다 — 다르게 말해줘야 팀원이 옳게 판단한다.★
       const body = head + (c.missing.length === 0
         // ★전원 답했는데 종합이 안 나갔다★ (실측: collector 가 ack 으로 마지막 턴을 써버렸다)
-        //   ★"보고가 없습니다" 라고 단정하지 않는다★ (GD 2026-08-03) — 서버는 1:1 DM 을 못 보므로
+        // ★"보고가 없습니다" 라고 단정하지 않는다★ — 서버는 1:1 DM 을 못 보므로
         //   ★못 본 것과 없는 것을 구분할 수 없다.★ 그러니 확인 가능한 사실("N분 지났다")만 말한다.
         ? `${COLLECTION_DEADLINE_MIN}분 지났습니다. ` +
           `★${c.answered.join(", ")} 전원이 이미 답했습니다.★ ` +
-          // ★훈계는 뺀다★ (GD: "이건 빼도 되지 않아?") — 서버는 ★"시간이 됐다 + 지금 상황"★ 만 말한다.
+          // ★훈계는 뺀다★ — 서버는 ★"시간이 됐다 + 지금 상황"★ 만 말한다.
           //   "ack 은 보고가 아니다" 는 ★이미 룰에 있다.★ 시스템 알림이 룰을 다시 읊을 이유가 없다.
-          // ★서버는 보고했는지 모른다★ — 그러니 단정하지 않는다 (GD 2026-07-26 승인).
+          // ★서버는 보고했는지 모른다★ — 그러니 단정하지 않는다.
           //   팀장 1:1 DM 으로 간 보고는 이 판정의 시야 밖이다(dm_message 는 신뢰할 수 없어 근거로 안 쓴다).
           //   그런데 문구가 "지금 보내세요" 라고 단정하면 ★이미 보낸 사람도 다시 보낸다★ —
           //   실측: steve 가 보고 83초 뒤에 이 독촉을 받았다. 따르면 중복 보고가 되어 팀 룰을 어긴다.
@@ -398,10 +398,10 @@ export function sweepCollectionDeadlines(db: Database, agents: AgentRecord[]): n
         : `${COLLECTION_DEADLINE_MIN}분 지났습니다. ` +
           `미응답: ${c.missing.join(", ")}` +
           (c.answered.length ? ` / 답함: ${c.answered.join(", ")}` : "") +
-          // ★개별보고면 이 알림 자체가 틀린 것이다 — 그런데 서버는 아직 그걸 알 수가 없다.★ (GD 2026-07-17)
+          // ★개별보고면 이 알림 자체가 틀린 것이다 — 그런데 서버는 아직 그걸 알 수가 없다.★
           //   위 anyToGd 판정은 ★기여자가 direct_to_gd 로 답해야★ 켜진다. 아무도 아직 안 답한 5분 시점엔
           //   개별보고와 수집이 ★서버 눈에 똑같이 생겼다★ — 둘 다 '60초 안에 2명 이상에게 뿌림' 이다.
-          //   요청 본문의 "각자 GD께 직접 보고하세요" 는 meta 에 없어서 서버가 못 읽는다.
+          // 요청 본문의 "각자 GD께 직접 보고하세요" 는 meta 에 없어서 서버가 못 읽는다.
           //   → ★플래그를 새로 만들지 않는다(line 22 의 교훈).★ 대신 ★사실만 말하고 판단은 팀원이 한다(line 18).★
           //   ★★이 탈출구 문구를 빼지 마라 — `--individual` 의 선택성이 여기 얹혀 있다.★★ (dbak 리뷰 2026-07-17)
           //     "--individual 은 안 붙여도 안 깨진다(=계약이 아니라 최적화)" 가 참인 ★유일한 이유★ 가 이 문구다.

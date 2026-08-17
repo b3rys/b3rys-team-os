@@ -34,7 +34,7 @@ type DB = InstanceType<typeof Database>;
 const PREV_ENABLED = process.env.BUS_DISPATCH_ENABLED;
 const PREV_AGENTS = process.env.BUS_DISPATCH_AGENTS;
 // ★테스트 격리: 실 운영 allowlist(process.cwd()/var/bus-wake-extra.txt, 내용=lui/devon/…)를 읽으면
-//   fixture(bill/codex/steve)가 제외돼 allowlist_not_enabled로 9fail. 존재하지 않는 경로로 override → extra=[] → allowlist=null(pass-through). Codex 진단, GD 2026-07-01.
+// fixture(bill/codex/steve)가 제외돼 allowlist_not_enabled로 9fail. 존재하지 않는 경로로 override → extra=[] → allowlist=null(pass-through). Codex 진단
 const PREV_WAKE_EXTRA = process.env.TEAMOS_BUS_WAKE_EXTRA_FILE;
 process.env.TEAMOS_BUS_WAKE_EXTRA_FILE = "/tmp/.teamos-bus-wake-extra-characterization-noexist";
 afterAll(() => {
@@ -133,7 +133,7 @@ describe("resolveDirectToGd", () => {
   });
 });
 
-// ─── 3c: wake 경계 (팀 커뮤니케이션 재사용 comm 테스트, GD 2026-07-09) ──────────────
+// ─── 3c: wake 경계 (팀 커뮤니케이션 재사용 comm 테스트) ──────────────
 // 설계문서 team-comm-ingress-owner-gate-design §3c/§4: 이 경계를 테스트로 고정(회귀방지).
 // Codex 적대리뷰 확인: directed→requester wake / broadcast no-marker→no-wake.
 describe("3c wake 경계 — comm 매트릭스", () => {
@@ -198,7 +198,7 @@ describe("3c wake 경계 — comm 매트릭스", () => {
     expect(spy.calls).toBe(0); // 예시로 보여준 @all 은 마커가 아니다
   });
 
-  // ★대전제 — "멘션은 팀장님만 쓴다. system 도 예외 없다" (GD 2026-08-01).★
+  // ★대전제 — "멘션은 팀장님만 쓴다. system 도 예외 없다".★
   // ★이 축에 테스트가 없으면 'system 깨움이 죽었다' 가 결함으로 읽힌다★ — 되살리는 쪽이 사양 위반이다.
   // ★기대값을 1 로 바꾸려는 사람은 먼저 이 대전제가 바뀌었는지 확인하라.★
   test("★@all 마커는 팀장님 발신만 — system 도 예외 없다★ (system + @all → 깨움 0)", async () => {
@@ -338,7 +338,7 @@ describe("dispatchRow — invoke + record", () => {
   });
 });
 
-// ─── ack-only wake-gate: bare ack reply 는 상대를 깨우지 않는다(왕복/토큰 축소, GD 2026-07-09) ───
+// ─── ack-only wake-gate: bare ack reply 는 상대를 깨우지 않는다(왕복/토큰 축소) ───
 describe("dispatchRow — ack_only wake-gate (team-comm 왕복 축소)", () => {
   // bill 이 steve 의 요청에 짧은 ack 로 답 → steve 를 full wake 하지 않고 inbox-only.
   function replyFromBillToSteve(body: string): PendingDispatchRow {
@@ -389,7 +389,7 @@ describe("dispatchRow — ack_only wake-gate (team-comm 왕복 축소)", () => {
   });
 });
 
-// ─── ack-loop guard (deterministic (thread,from→to) pair 카운트, GD 2026-07-09) ───
+// ─── ack-loop guard (deterministic (thread,from→to) pair 카운트) ───
 describe("dispatchRow — ack_loop guard (deterministic)", () => {
   afterEach(() => { delete process.env.ACK_LOOP_GUARD; delete process.env.ACK_LOOP_GUARD_SHADOW; });
   const steveToBill = (body: string): PendingDispatchRow => {

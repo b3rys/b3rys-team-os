@@ -1,4 +1,4 @@
-// TEAM-OS {{OWNER}} 렌더 (Option B 통합, GD 2026-06-25) — 전 런타임이 rules/TEAM-OS.md 를 읽으므로
+// TEAM-OS {{OWNER}} 렌더 (Option B 통합) — 전 런타임이 rules/TEAM-OS.md 를 읽으므로
 // 그 파일 자체를 '렌더본'으로 만든다. 템플릿({{OWNER}})은 rules/TEAM-OS.template.md 로 분리(편집·export용).
 //   - 소스(편집/export): rules/TEAM-OS.template.md  ({{OWNER}} 유지)
 //   - 런타임이 읽는 파일: rules/TEAM-OS.md           ({{OWNER}}→owner_name 렌더; owner 비면 템플릿 그대로)
@@ -22,7 +22,7 @@ export function renderTeamOs(ownerName: string | null | undefined): { ok: boolea
     const srcPath = existsSync(TEMPLATE) ? TEMPLATE : LIVE;
     let text = readFileSync(srcPath, "utf-8");
     if (owner) text = text.split("{{OWNER}}").join(owner);
-    // skip-if-unchanged: 렌더 결과가 기존 LIVE 와 동일하면 재작성 생략 (GD 2026-07-19 — 룰 변화 없으면 매 부팅 렌더하지 마라).
+    // skip-if-unchanged: 렌더 결과가 기존 LIVE 와 동일하면 재작성 생략.
     if (existsSync(LIVE) && readFileSync(LIVE, "utf-8") === text) return { ok: true, owner };
     // ★원자적 쓰기: 임시파일 → rename★ (infra-safety ② "상태 파일은 임시파일 작성 → 원자적 mv").
     //   이 파일은 ★전 런타임이 읽는 정본★ 이라, 쓰는 도중을 다른 프로세스가 읽으면 ★반쪽짜리 룰★ 을

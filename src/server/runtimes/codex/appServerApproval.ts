@@ -9,7 +9,7 @@
  * 판정 → ReviewDecision:
  *  - Tier D(하드deny) → "denied" (승인으로도 못 뚫음)
  *  - ★F1: bash escalation은 Tier-D 아니면 무조건 ask(자동허용 없음)★ → 팝업 전엔 fail-closed "denied".
- *  - ask(위험하지만 정당) → needsApproval=true → 상위(M5)가 GD 텔레그램 팝업.
+ * - ask(위험하지만 정당) → needsApproval=true → 상위(M5)가 GD 텔레그램 팝업.
  */
 import { checkPermission, type PermissionAgent, type PermissionContext, type PermissionCheck } from "../../lib/permissionGate";
 import type { ApprovalRequest, ReviewDecision } from "./appServerClient";
@@ -51,7 +51,7 @@ function evaluate(agent: PermissionAgent, req: ApprovalRequest, ctx: PermissionC
     // ★안전 F1 픽스(하네스 발견): permissionGate.askRule에 bash 케이스가 없어 bash는 deny/allow 둘 뿐이다.
     // 그대로 두면 Tier-D 정규식 9개만 피한 임의 셸(rm -r -f·git reset --hard 등)이 auto-allow로 샌다.
     // ★execCommandApproval = codex의 escalation 요청이므로, Tier-D deny가 아니면 무조건 ask로 승격★
-    // → resolveWithoutPopup=fail-closed denied(팝업 전) / M5 팝업(GD 승인). 정책 'ask=거절'이 셸을 실제로 덮는다.★
+    // → resolveWithoutPopup=fail-closed denied(팝업 전) / M5 팝업. 정책 'ask=거절'이 셸을 실제로 덮는다.★
     if (c.tier === "allow") {
       return { tier: "ask", rule: "bash.escalation", reason: "shell escalation always requires approval (no auto-allow)", scope: `bash:${cmd.slice(0, 80)}` };
     }

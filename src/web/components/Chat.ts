@@ -93,7 +93,7 @@ export function renderChat(root: HTMLElement): void {
   }
 
   // forceStick: 내가 보낸 직후엔 위에서 읽던 중이어도 바닥으로(내 말풍선 확인) — 그 외 재렌더는
-  // 바닥 근처일 때만 stick, 위로 스크롤해 읽는 중이면 위치 보존(scrollStick, GD 2026-08-01).
+  // 바닥 근처일 때만 stick, 위로 스크롤해 읽는 중이면 위치 보존(scrollStick).
   function paintMessages(forceStick = false): void {
     const wrap = root.querySelector<HTMLElement>("#chat-msgs");
     if (!wrap) return;

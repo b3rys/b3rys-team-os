@@ -64,7 +64,7 @@ describe("classifyReplySignal", () => {
       expect(classifyReplySignal(b)).toBe("ack_only");
     }
   });
-  // 구조적 속성(GD 2026-07-09, exact lexeme+suffix): ack 음절로 '시작만' 하는 substantive 단어는
+  // 구조적 속성: ack 음절로 '시작만' 하는 substantive 단어는
   // blocker 리스트 없이도 절대 ack 로 오분류되지 않는다 = 유지보수 없이 fail-safe.
   test("word that merely STARTS with an ack syllable is never mis-gated (no blocker list needed)", () => {
     for (const b of ["확인불가", "확인불가능", "네트워크", "예외", "콜백", "네이버", "예약", "응답 지연"]) {

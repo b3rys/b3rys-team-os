@@ -16,7 +16,7 @@ import { pick } from "../i18n";
 //   [ACTIVE_MAX, RECENT_MAX) → recently stuck (red) — genuinely not progressing
 //   >= RECENT_MAX       → historical leftover from a past wake (e.g. 45–98h old wake_dispatched
 //                          rows that never completed). NOT "now stuck" — demoted to a gray
-//                          "미완(오래됨)" sub-badge so it never paints the node red. (v1.1 GD fix)
+// "미완(오래됨)" sub-badge so it never paints the node red. (v1.1 GD fix)
 // 90s was too sensitive: real Claude/OpenClaw replies and bus round-trips often exceed it,
 // making active members look stopped. Use 10m before showing red "recent stuck".
 const ACTIVE_MAX_SEC = 600;
@@ -50,7 +50,7 @@ function escape(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-// Node PRIMARY color = the team member's reachability, per GD's v1.1 feedback
+// Node PRIMARY color = the team member's reachability, per the team lead's v1.1 feedback
 // ("노드 주색은 팀원 실제 상태로"). Pending/in-flight are traffic/backlog signals,
 // so they stay as badges/edges instead of changing the node's primary color.
 type NodeStatus = "offline" | "stuck" | "pending" | "healthy" | "idle";

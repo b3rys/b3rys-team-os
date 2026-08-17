@@ -1,5 +1,5 @@
 // P3 신원 seam characterization — 중요 로직(인바운드 신원해석) 동작 고정.
-// GD 2026-06-21: "중요 로직 테스트 방법 잘 구축" — 이 suite가 라우팅 신원해석의 '전후 동일'을 핀한다.
+// "중요 로직 테스트 방법 잘 구축" — 이 suite가 라우팅 신원해석의 '전후 동일'을 핀한다.
 // 리팩토링해도 이 테스트가 깨지면 신원해석 동작이 바뀐 것 = 회귀 감지.
 import { test, expect, describe } from "bun:test";
 import type { AgentRecord } from "../types";

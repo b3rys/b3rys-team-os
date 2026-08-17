@@ -1,7 +1,7 @@
 /**
  * KST(Asia/Seoul) 시각 표시 — 단일 정본.
  *
- * 근본원인(GD 2026-06-13, "매번 틀림"): DB의 created_at 등은 SQLite `datetime('now')` =
+ * 근본원인: DB의 created_at 등은 SQLite `datetime('now')` =
  * UTC를 tz suffix 없이 저장한다("YYYY-MM-DD HH:MM:SS"). 이걸 변환 없이 표시하거나
  * `new Date(...)`에 그대로 넘기면 (a) 브라우저 로컬 타임존을 따라가거나 (b) 문자열을
  * 로컬로 오해석해 매번 어긋난다. formatKST는 입력을 항상 UTC로 못박은 뒤 Asia/Seoul

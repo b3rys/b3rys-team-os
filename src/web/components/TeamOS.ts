@@ -231,7 +231,7 @@ function renderInto(root: HTMLElement, snap: TeamOsSnapshot | null): void {
   // TEAM OP = the dedicated Telegram capture bot, NOT a team member.
   // ★상태는 capture 봇 실제 구성(토큰+그룹+라우터)으로 판정한다(Bill). 이전엔 `.team-collab` launchd 라벨
   //   존재로 판정했는데, launchd prefix(com.<user>)가 머신마다 달라 클린설치서 라벨을 못 찾아 늘 '상태 미상'
-  //   으로 떨어졌다(GD 발견). snap.capture(=captureConfigStatus) 로 활성/부분구성/미설정을 정확히 표시.
+  // 으로 떨어졌다. snap.capture(=captureConfigStatus) 로 활성/부분구성/미설정을 정확히 표시.
   const cap = snap.capture;
   const capState: "active" | "partial" | "unset" =
     cap.has_capture_token && cap.capture_group_id && cap.router_enabled ? "active"

@@ -156,7 +156,7 @@ function renderInto(root: HTMLElement, agent: Agent, msgs: Message[], myId: stri
       </div>
       <div class="flex-1 overflow-y-auto" id="agent-activity-body"></div>
     </div>`;
-  // 메시지 전송 입력창은 제거(GD 2026-07-23) — Thread 뷰는 활동 열람 전용.
+  // 메시지 전송 입력창은 제거 — Thread 뷰는 활동 열람 전용.
   const body = root.querySelector<HTMLElement>("#agent-activity-body");
   if (body) body.innerHTML = items;
 }

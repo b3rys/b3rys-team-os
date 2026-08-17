@@ -149,7 +149,7 @@ describe("insertMessage", () => {
     expect(ids).toEqual(["steve"]); // bill (sender) filtered, demis not listed
   });
 
-  // ★서버는 팀원이 쓴 주소를 고치지 않는다★ (GD 2026-07-14: "보정을 하면 안된다니깐.. 근본이 아니잖아")
+  // ★서버는 팀원이 쓴 주소를 고치지 않는다★
   //   예전엔 여기서 broadcast → 원 요청자(bill) 로 ★몰래 바꿔치기★ 했다. 30일 98건, ★로그 0줄.★
   //   그래서 진짜 원인(주입문이 "팀장께 답하라")이 6주간 살아 있었다.
   //   ★이제 안 고친다.★ 팀원이 broadcast 라 썼으면 broadcast 다 — 방에 떠서 ★보인다.★

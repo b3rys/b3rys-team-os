@@ -33,7 +33,7 @@ export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^\${}()|[\]\\]/g, "\\$&");
 }
 
-// 라우팅용: 인용/예시 구간 제거 → 그 안 @멘션·@all 은 트리거하지 않는다 (GD 2026-06-25).
+// 라우팅용: 인용/예시 구간 제거 → 그 안 @멘션·@all 은 트리거하지 않는다.
 // 제거: ``` ``` · ''' ''' · """ """ 펜스 안 + 대시/em대시만으로 된 구분선("—-"·"---"·"—" 등) 아래 전체.
 // 라이브 멘션은 보통 펜스/구분선 '위'(상단)에 오므로 그 부분만 남아 판정된다.
 export function stripQuotedForRouting(text: string): string {
@@ -184,7 +184,7 @@ export function detectAddressedNamesLoose(text: string, agents: AgentRecord[]): 
 }
 
 // 요청/지시/질문 신호 — 이게 없으면 이름이 있어도 '호출'이 아니라 '나열·서술'일 수 있음.
-// over-summon 방지용 (GD 2026-05-24): "대상은 빌/코덱스/스티브/데미스/드박이겠지" 같은 나열에서 다 깨우지 않게.
+// over-summon 방지용: "대상은 빌/코덱스/스티브/데미스/드박이겠지" 같은 나열에서 다 깨우지 않게.
 const REQUEST_MARKER = /(의견|생각|어때|어떻|줘|해줘|봐줘|답해|답변|확인|만들|고쳐|구현|배포|세팅|설정|알려|보고|전달|리뷰|체크|들려|봐봐|해봐|부탁|질문|시켜|하라|할까|볼까|\?)/;
 // NOTE (2026-06-06 split): SCOPE_MARKER + filterLiveWakeTargets are dead code (scope guard removed
 // 2026-05-25; no current caller). Preserved as-is for behavior-neutral move. Cleanup card candidate.
@@ -192,7 +192,7 @@ const SCOPE_MARKER = /(대상|범위|적용\s*대상|self[-\s]?learning|셀프\s
 void SCOPE_MARKER;
 
 function filterLiveWakeTargets(text: string, agents: AgentRecord[], targets: string[]): string[] {
-  // scope-list 가드 제거 (2026-05-25, GD 결정): @멘션 필수(detectAddressedNamesLoose) + 아래 REQUEST_MARKER
+  // scope-list 가드 제거 (2026-05-25, 제품 결정): @멘션 필수(detectAddressedNamesLoose) + 아래 REQUEST_MARKER
   // 체크로 이미 커버됨 — 요청 없으면 안 깬다. scope단어 가드는 "정책/규칙" 든 진짜 호출을 오판해 redundant+해로움.
   return targets.filter((id) => {
     const agent = agents.find((a) => a.id === id);
