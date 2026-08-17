@@ -4,10 +4,12 @@
 // 다만 ★안 보낸 것을 아무도 모르는 것★ 은 다른 문제다. 하루에 3건이 관측됐다:
 //   답 없음 / 착수확인만 보내고 118초 일한 뒤 결과 없음 / 전송 0건
 // 셋 다 턴은 succeeded 였고 로그도 조용했다. 사람이 물어보기 전엔 아무도 몰랐다.
-import { test, expect } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../../db/migrate";
 import { agentRepliedSince } from "./adapter";
+
+describe("codex 답 배달 확인 — 안 보낸 것을 잡는다", () => {
 
 function db2() {
   const db = new Database(":memory:"); migrate(db);
@@ -53,4 +55,5 @@ test("조회가 깨지면 거짓 경고를 내지 않는다(안전한 쪽으로)
   const db = new Database(":memory:"); // migrate 안 함 = message 테이블 없음
   expect(agentRepliedSince(db, "dex", "t1", "2026-08-12 05:00:00")).toBe(true);
   db.close();
+});
 });

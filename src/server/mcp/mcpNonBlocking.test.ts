@@ -2,7 +2,9 @@
 //
 // 숫자(부하 측정)만으로는 안 보인다 — 부하가 가벼우면 동기 호출도 묻힌다(빌 지적).
 // 그래서 ①구조로 ②동작으로 두 겹으로 잰다.
-import { test, expect } from "bun:test";
+import { describe, test, expect } from "bun:test";
+
+describe("MCP 비차단 — 긴 작업이 창구를 막지 않는다", () => {
 
 // ── ① 구조: MCP 경로에 동기 호출이 남아 있으면 잡는다 ──
 // 다시 들어오면 이 시험이 깨진다. 숫자는 안 드러나도 이건 드러난다.
@@ -63,4 +65,5 @@ test("★대조군 — 동기 spawn 은 그 사이 아무것도 못 돈다★ (�
   clearInterval(timer);
   // 붙들려 있었으므로 타이머가 거의 못 돈다. 비동기(>5)와 명확히 갈린다.
   expect(ticks).toBeLessThan(3);
+});
 });

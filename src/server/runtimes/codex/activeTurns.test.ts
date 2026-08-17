@@ -2,9 +2,11 @@
 //
 // 실측 2026-08-12: dex 가 74초 작업 중일 때 보낸 메시지가 ★20번 연기되다 blocked★ 로 끝났다.
 // 턴도 답도 없었고, recipient_state 는 'acknowledged/activity_assumed' — ★활동 중이라는 이유로 봤다고 처리★ 됐다.
-import { test, expect } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import { registerActiveTurn, unregisterActiveTurn, steerActiveTurn, activeTurnAgents } from "./activeTurns";
 import { buildSteerText } from "./adapter";
+
+describe("codex 중간 주입 — 도는 턴에 끼워 넣는 조건", () => {
 
 const fakeTurn = (turnId: string | null, sink: string[] = [], fail = false) => ({
   currentTurnId: turnId,
@@ -54,4 +56,5 @@ test("끼워 넣는 문장에 보낸 사람·스레드가 들어간다(맥락 �
   expect(t).toContain("이거 먼저 해줘");
   expect(t).toContain("th1");
   expect(t).toContain("m9");
+});
 });

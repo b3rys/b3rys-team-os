@@ -1,6 +1,8 @@
 // MCP HTTP 인증 — 매핑 파싱·주체 추출·거부 경로. ★뚫어보는 시험★ 위주로 짠다.
-import { test, expect } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import { parsePrincipalMap, subjectFromPayload, authenticateMcpRequest, CF_JWT_HEADER, type McpAuthConfig } from "./mcpAuth";
+
+describe("MCP 인증 — 토큰 없는 호출은 막는다", () => {
 
 const cfg = (over: Partial<McpAuthConfig> = {}): McpAuthConfig => ({
   teamDomain: "team.cloudflareaccess.com",
@@ -80,4 +82,5 @@ test("★위조 증명서는 거부★ — 헤더가 있다는 것만으로 믿�
   const r = await authenticateMcpRequest(req({ [CF_JWT_HEADER]: fake }), cfg());
   expect(r.ok).toBe(false);
   if (!r.ok) { expect(r.status).toBe(401); expect(r.reason).toBe("invalid_access_jwt"); }
+});
 });

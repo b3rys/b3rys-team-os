@@ -2,11 +2,13 @@
 //
 // 전에는 우리 DB(permission_grant)에 넣었다 — 영구·내용무관·★취소 경로가 코드에 없었다.★
 // 설정 파일이면 사람이 열어서 지울 수 있다. 되돌리는 방법이 파일 편집이다.
-import { test, expect } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { addWritableRoot, roots } from "./persistAlwaysAllow";
+
+describe("codex '항상 허용' — 설정에 남겨 다시 묻지 않는다", () => {
 
 const tmpCfg = (body = "") => {
   const p = join(mkdtempSync(join(tmpdir(), "cfg-")), "config.toml");
@@ -43,4 +45,5 @@ test("공백·특수문자 경로도 그대로 살아난다", () => {
   const p = tmpCfg('[sandbox_workspace_write]\nwritable_roots = []\n');
   addWritableRoot(p, "/data/my proj/x.txt");
   expect(roots(readFileSync(p, "utf-8"))).toEqual(["/data/my proj"]);
+});
 });

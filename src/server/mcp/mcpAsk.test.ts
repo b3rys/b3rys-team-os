@@ -1,5 +1,5 @@
 // MCP → 팀원에게 묻기. ★정상 경우를 먼저 재고★, 그 다음 사고 시나리오를 재현한다.
-import { test, expect } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
 import { RESERVED_AGENT_IDS } from "../../shared/envelopeSchema"; // ★진짜 코드의 목록을 그대로 쓴다★
@@ -19,6 +19,9 @@ import { buildMcpServer, officialRoster, ASK_WAIT_MAX_SEC, ASK_WAIT_DEFAULT_SEC 
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { acceptInbound } from "../db/inboxQueries";
+
+describe("MCP ask — 질문이 실제로 팀원을 깨운다", () => {
 
 function addAgent(d: Database, id: string) {
   d.prepare(
@@ -513,7 +516,6 @@ test("소유권 판정이 meta 를 읽지 않는다 — 위조한 mcp_actor 로 
 //
 // ★이 시험은 가짜 버스를 쓰지 않는다.★ 가짜는 이 규칙을 안 갖고 있어서 넣어봐야 못 잡는다 —
 // 어제 우리를 통과시킨 그 함정이다. ★진짜 insert 경로(acceptInbound)에 그대로 넣어서 잰다.★
-import { acceptInbound } from "../db/inboxQueries";
 
 function postThroughRealBus(db: Database, extra: Record<string, unknown>) {
   return acceptInbound(
@@ -814,4 +816,5 @@ test("★도구가 speaker 를 받고, 설명이 '정리했으면 client' 를 �
   const desc = t?.inputSchema?.shape?.speaker?.description ?? "";
   expect(desc).toContain("client");
   expect(desc).toContain("정리"); // ★언제 채우는지가 설명에 있어야 클라이언트가 채운다★
+});
 });
