@@ -1,0 +1,51 @@
+/**
+ * ★검사기 자신을 건다.★ 잡는 쪽만 맞추면 334건짜리 오탐 검사기가 나온다.
+ *
+ * 표본은 지어낸 것이 아니라 ★저장소에서 실제로 나온 줄★ 이다(2026-08-17 실측).
+ * 통과 세트가 무너지면 사람이 이 검사기를 지운다 — 그래서 양쪽을 같은 무게로 건다.
+ */
+import { describe, expect, test } from "bun:test";
+import { scanText } from "./check-comment-attribution";
+
+/** ★잡혀야 한다★ — 사람에게 공을 돌리거나 사람의 말을 인용한 주석. */
+const MUST_CATCH: [string, string][] = [
+  ["dbak 리뷰", "      // ★--individual = 확정이 아니라 '사실로 반박 가능한 힌트' 다.★ (dbak 리뷰 2026-07-17)"],
+  ["dbak 이 잡은", "      //   ═══ ★그런데 무조건 믿으면 안 된다★ (dbak 이 잡은 축) ═══"],
+  ["아메스 실측", "  //  자른 값으로 만들면 잘린 뒤가 달라도 지문이 같아진다(아메스 실측: 앞 2000자만 같으면 충돌)."],
+  ["실측(루이)", " * 단어 경계가 안 맞아 ★줄바꿈 하나로 검사를 통과한다.★ 실측(루이): 개행을 넣으면 탐지 0."],
+  ["steve 리뷰", "  //    role 만 바꿔도 손질한 SOUL 이 되돌아갔다. steve 리뷰 2026-07-17)"],
+  ["dex 리뷰", "  // ★공개 빌드 판정을 주입받는다★ (dex 리뷰): 모듈 상수를 그대로 읽으면 시험이 못 바꾼다."],
+  ["팀 리드 원칙", " * ★팀 리드 원칙(2026-07-28): 애매하면 통과가 아니고 ask 로.★"],
+  ["팀장이 물었다", "  // 팀장님이 \"@all 다들 인지했어?\" 라고 물었는데 전원이 막혔다."],
+];
+
+/** ★통과해야 한다★ — 역할·라우팅·런타임 동작·제품명. 지우면 문서가 나빠진다. */
+const MUST_PASS: [string, string][] = [
+  ["역할 라우팅", "        // · 팀장께 보고 → `--direct-to-gd`"],
+  ["역할 설정", "    // 팀장 텔레그램 id 로 저장한다"],
+  ["역할 이식성", "// 팀장 chat_id 를 상수로 박으면 다른 팀에선 안 맞는다"],
+  ["제품명·버전", " * codex-cli 0.144.6 벤더 스키마 실측"],
+  ["런타임 동작", "  // 실측: codex 가 35분째 멈췄다 — 깨우는 쪽이 없었다"],
+  ["런타임 동작2", " * 실측: dex 의 activity_line 은 항상 null 이다"],
+  ["런타임 나열", "  // claude 0 · hermes 0 · openclaw 0 · codex 6"],
+  ["인과 서술", "  // 예전엔 채널별로 갈랐는데 지금은 registry 하나로 모은다"],
+  ["빌드는 이름이 아니다", "  // 공개 빌드 차단은 실제 응답으로 재야 한다"],
+];
+
+describe("주석 사람귀속 검사기", () => {
+  for (const [name, line] of MUST_CATCH) {
+    test(`★잡는다★ — ${name}`, () => {
+      expect(scanText("t.ts", line), `못 잡았다: ${line}`).toHaveLength(1);
+    });
+  }
+  for (const [name, line] of MUST_PASS) {
+    test(`통과시킨다 — ${name}`, () => {
+      expect(scanText("t.ts", line), `★오탐★: ${line}`).toHaveLength(0);
+    });
+  }
+
+  test("★코드 줄은 안 본다★ — 시험 입력값을 지우면 시험이 죽는다", () => {
+    const code = '    expect(await gateBlocks(GROUP, "@빌 이거 해줘 라고 요청했다", ctx)).toBe(true);';
+    expect(scanText("t.ts", code)).toHaveLength(0);
+  });
+});
