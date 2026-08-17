@@ -4,7 +4,8 @@
  * ★재빌드 아님:★ permissionGate.requestPermission(팝업 생성)+getPermissionRequest(상태) + telegramCapture(3버튼 렌더)
  * 를 재사용. onApproval이 ask면 여기서 팝업 띄우고 GD 결정을 폴링해 ReviewDecision으로 매핑한다.
  *
- * 매핑: allowed_once→approved · allowed_always→approved_for_session · denied/expired/timeout→denied.
+ * 매핑: allowed_once→approved(★decision_scope 가 session 이면 approved_for_session★) ·
+ * allowed_always→approved_for_session · denied/expired/timeout→denied.
  * ★안전: Tier-D는 여기 도달 전 judgeApproval에서 이미 denied(팝업 안 뜸). fail-closed: 에러/무응답→denied.★
  */
 import { createHash, randomUUID } from "node:crypto";
@@ -759,8 +760,14 @@ export async function pollDecision(db: Database, requestId: string, ttlMs = POPU
   const deadline = Date.now() + ttlMs;
   for (;;) {
     let status: string | undefined;
+    let scope: string | null | undefined;
     try {
-      status = getPermissionRequest(db, requestId)?.status;
+      const row = getPermissionRequest(db, requestId);
+      status = row?.status;
+      // ★status 와 decision_scope 를 같이 읽는다.★ '이 세션' 은 지속되는 허가를 남기지 않아
+      //   status 가 allowed_once 와 같다(permissionGate.ts) — 둘을 가르는 것은 이 칸뿐이다.
+      //   status 만 읽으면 사람이 세션을 골라도 런타임에는 '한번' 이 간다.
+      scope = row?.decision_scope ?? null;
     } catch {
       return "denied"; // ★fail-closed: 조회 에러 → 거절★
     }
@@ -770,7 +777,10 @@ export async function pollDecision(db: Database, requestId: string, ttlMs = POPU
       return "denied";
     }
     switch (status) {
-      case "allowed_once": return "approved";
+      // ★decision_scope 가 'session' 일 때만 세션으로 올린다.★ #325 이전에 결정된 행은 이 칸이
+      //   NULL 이다 — NULL 을 session 으로 읽으면 옛 '한번' 결정이 소급해서 세션 허용이 된다.
+      //   모르는 값도 같다: 좁은 쪽(approved)으로 떨어뜨린다.
+      case "allowed_once": return scope === "session" ? "approved_for_session" : "approved";
       case "allowed_always": return "approved_for_session";
       case "denied":
       case "expired": return "denied";
