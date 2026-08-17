@@ -14,9 +14,9 @@ src/server/lib/teamOsRenderAtomic.test.ts
 src/server/personaWriteWiring.test.ts
 src/server/runtimes/claude/seedClaudeAccess.test.ts
 src/server/runtimes/claude/seedGroupIntoClaudeMembers.test.ts
-src/server/runtimes/codex/appServerApproval.test.ts
 src/server/runtimes/codex/appServerClient.smoke.test.ts
 src/server/runtimes/codex/appServerPopup.test.ts
+src/server/runtimes/codex/approvalPath.test.ts
 src/server/workers/slackSocket.test.ts
 src/web/components/runtimeOptions.test.ts
 src/web/icons.test.ts
