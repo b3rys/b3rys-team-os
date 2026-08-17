@@ -175,12 +175,13 @@
 **런타임의 보고가 아니라 별도로 확인한 것**: 대조군 파일 실재(7바이트, 15:03) · 경계 밖 파일 **미생성** ·
 `permission_request` 재기동 이후 **0건**(최신 행은 08-13 21:28 그대로) · `permission_grant` **전체 0건**.
 
-**원인은 우리 코드가 아니라 codex 설정이다.** 팀원 `config.toml`:
+**원인은 우리 코드가 아니라 codex 설정이다.** `~/.codex-agents/dex/config.toml`:
 
 ```
 approval_policy = "on-request"
 sandbox_mode    = "workspace-write"
-writable_roots  = [팀원 작업 폴더 4개]
+writable_roots  = [~/Development/dex, ~/Development/b3rys-team-os,
+                   ~/Development/.worktrees, ~/Development/b3rys-team-collab]
 ```
 
 codex 0.147.0 의 `--help` 가 정의하는 `on-request` = **"모델이 알아서 물어볼 때를 정한다."**
