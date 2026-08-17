@@ -54,7 +54,8 @@ const HUMAN =
  *   "hermes 잘못이 아니다. 우리가 그렇게 시켰다".
  * ★'합의' 는 여기 없다★ — "(Codex 합의 2026-06-22)" 는 진짜 귀속이라 공용으로 둔다.
  */
-const HUMAN_PERSON_ONLY = "말했|말한 것|말씀|물었|원칙|시켰";
+//   ★'시켰' 은 앞이 한글이면 다른 낱말이다★ — "유실★시켰★다" 가 그렇게 걸렸다.
+const HUMAN_PERSON_ONLY = "말했|말한 것|말씀|물었|원칙|(?<![가-힣])시켰";
 
 /**
  * PERSON 에만 붙는 ★관찰 귀속★ — 누가 쟀는지를 적은 것이다.
@@ -129,23 +130,40 @@ function observeInParenWithoutName(line: string, at: number, nameRe: RegExp): bo
  * 여기서 걸리는 이름은 화살표 ★뒤★ 의 demis 라, 앞뒤를 다 본다.
  */
 const ARROW_AFTER = /^\s*(?:→|->|=>)/;
-const ARROW_BEFORE = /(?:→|->|=>)\s*$/;
+/**
+ * ★화살표 ★반대편에도 이름★ 이 있어야 데이터 예시다.★
+ * 안 그러면 ★인과 화살표★ 를 라우팅 화살표로 오해한다 — 실측 미탐 2건:
+ *   "압축이 또 삭제 → steve 리뷰가 잡음" · "아무도 몰랐다 → 빌이 …"
+ * 여기 화살표는 ★그래서★ 라는 뜻이지 보내는 방향이 아니다.
+ */
+const ARROW_BEFORE = new RegExp(`(?:${PERSON}|${AMBIG})\\s*(?:→|->|=>)\\s*$`, "i");
 
 export function scanText(file: string, text: string): Finding[] {
   const out: Finding[] = [];
+  const OBSERVE_RE = new RegExp(`(?:${OBSERVE})`);
+  // ★괄호 안 이름 검사에는 AMBIG 도 넣는다★ — "(codex 리뷰 실측…)" 의 codex 를
+  //   '이름 없음' 으로 읽어 진짜를 지웠다(실측 미탐 1건).
+  const ANY_NAME = new RegExp(`(?:${PERSON}|${AMBIG})`, "i");
   text.split("\n").forEach((line, i) => {
     if (!isCommentLine(line)) return;
-    const m = HIT_PERSON.exec(line) ?? HIT_AMBIG.exec(line) ?? HIT_PAREN.exec(line) ?? HIT_ADJACENT.exec(line);
+    // 어느 규칙으로 잡혔는지와 ★그 서술어★ 를 같이 들고 간다 — 거부권을 좁게 걸기 위해서다.
+    let m = HIT_PERSON.exec(line); let pred = m?.[3];
+    if (!m) { m = HIT_AMBIG.exec(line); pred = m?.[3]; }
+    if (!m) { m = HIT_PAREN.exec(line); pred = m?.[1]; }
+    if (!m) { m = HIT_ADJACENT.exec(line); pred = m?.[2]; }
     if (!m) return;
     const at = m.index ?? 0;
     const after = line.slice(at + m[1]!.length);
     if (PRODUCTISH.test(after)) return;                 // 제품명·버전 (codex-cli · codex 0.144)
     if (ROLE_BEFORE.test(line.slice(0, at))) return;    // 역할 지정 (제안자 lui · 요청자(bill))
     if (inCodeSpan(line, at)) return;                   // 백틱 안 = 값 (`--to bill`)
-    if (ARROW_AFTER.test(after)) return;                            // 데이터 예시 (codex→…)
-    if (ARROW_BEFORE.test(line.slice(0, at))) return;               // 데이터 예시 (…→demis)
-    const obs = new RegExp(`(?:${OBSERVE})`).exec(line);
-    if (obs && observeInParenWithoutName(line, obs.index, new RegExp(`(?:${PERSON})`, "i"))) return;
+    if (ARROW_AFTER.test(after)) return;                // 데이터 예시 (codex→…)
+    if (ARROW_BEFORE.test(line.slice(0, at))) return;   // 데이터 예시 (…codex→demis)
+    // ★이 거부권은 그 히트가 OBSERVE 로 잡혔을 때만★ — 남의 판정(리뷰·지적)까지 뒤집으면 안 된다.
+    if (pred && OBSERVE_RE.test(pred)) {
+      const obs = OBSERVE_RE.exec(line);
+      if (obs && observeInParenWithoutName(line, obs.index, ANY_NAME)) return;
+    }
     out.push({ file, line: i + 1, text: line.trim() });
   });
   return out;
