@@ -756,13 +756,22 @@ export async function pollDecision(db: Database, requestId: string, ttlMs = POPU
   const deadline = Date.now() + ttlMs;
   for (;;) {
     let status: string | undefined;
+    let scope: string | null | undefined;
     try {
-      status = getPermissionRequest(db, requestId)?.status;
+      const row = getPermissionRequest(db, requestId);
+      status = row?.status;
+      // ★status 와 decision_scope 를 같이 읽는다.★ '이 세션' 은 지속되는 허가를 남기지 않아
+      //   status 가 allowed_once 와 같다(permissionGate.ts) — 둘을 가르는 것은 이 칸뿐이다.
+      //   status 만 읽으면 사람이 세션을 골라도 런타임에는 '한번' 이 간다.
+      scope = row?.decision_scope ?? null;
     } catch {
       return "denied"; // ★fail-closed: 조회 에러 → 거절★
     }
     switch (status) {
-      case "allowed_once": return "approved";
+      // ★decision_scope 가 'session' 일 때만 세션으로 올린다.★ #325 이전에 결정된 행은 이 칸이
+      //   NULL 이다 — NULL 을 session 으로 읽으면 옛 '한번' 결정이 소급해서 세션 허용이 된다.
+      //   모르는 값도 같다: 좁은 쪽(approved)으로 떨어뜨린다.
+      case "allowed_once": return scope === "session" ? "approved_for_session" : "approved";
       case "allowed_always": return "approved_for_session";
       case "denied":
       case "expired": return "denied";
