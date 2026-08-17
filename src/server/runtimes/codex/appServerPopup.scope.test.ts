@@ -6,11 +6,13 @@
  * '한번' 이 간다. 아래 시험은 그 경계를 양쪽에서 잰다 — 세션이 세션으로 가는가, 그리고
  * ★세션이 아닌 것이 세션으로 새지 않는가.★
  */
-import { test, expect } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../../db/migrate";
 import { decidePermissionRequest } from "../../lib/permissionGate";
 import { pollDecision } from "./appServerPopup";
+
+describe("codex 승인 범위 — status 와 decision_scope 를 같이 읽는다", () => {
 
 /** 결정 대기 중인 요청 하나를 만든다. */
 function pendingRequest(db: Database, id = "req_scope"): string {
@@ -99,4 +101,5 @@ test("회귀 — '항상 허용' 은 그대로 세션이다(범위 always)", asy
   expect(row.status).toBe("allowed_always");
   expect(row.decision_scope).toBe("always");
   expect(await pollDecision(db, id, 1_000, 5)).toBe("approved_for_session");
+});
 });

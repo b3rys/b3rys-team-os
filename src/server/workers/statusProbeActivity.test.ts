@@ -3,8 +3,10 @@
 // 왜 이 시험이 필요한가: 지금까지 저장하던 last_log_line 은 ★화면 맨 아랫줄★ 이었고
 // 실측하면 늘 "⏵⏵ auto mode on" 이었다 — ★아무 정보가 없었다.★
 // 아래 입력은 ★실제 팀원 화면에서 그대로 떠온 모양★ 이다(2026-08-07).
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { currentActivityLine } from "./statusProbe";
+
+describe("상태 탐침 — 활동 표시를 갱신한다", () => {
 
 // 실측: 디백 화면. ⏺ 출력이 있고 그 아래 입력창·푸터가 있다.
 const REAL_PANE = [
@@ -70,4 +72,5 @@ test("아주 긴 줄은 잘린다 — 진행 표시 한 줄에 들어가야 한�
   const got = currentActivityLine([long, "──────", "❯ "]);
   expect(got!.length).toBeLessThanOrEqual(161);
   expect(got!.endsWith("…")).toBe(true);
+});
 });

@@ -1,12 +1,14 @@
 // MCP HTTP 창구 — 권한 분리·신원 격리·거부 경로. ★뚫어보는 시험★.
 // 인증 자체는 mcpAuth.test.ts 가 본다. 여기서는 인증을 대체(주입)하고 그 뒤 동작만 검증한다.
-import { test, expect } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
 import { setMcpEnabled } from "../lib/captureConfig";
 import { buildMcpHttpApp } from "./mcpHttpRoute";
 import { buildMcpServer, WRITE_TOOL_NAMES, resolveActorStrict, resolveActor, main as stdioMain } from "./b3osMcpServer";
 import type { McpAuthConfig, McpAuthResult } from "./mcpAuth";
+
+describe("MCP HTTP 창구 — 경로와 응답 형태", () => {
 
 function addAgent(d: Database, id: string, name: string): void {
   d.run(
@@ -365,4 +367,5 @@ test("★대조군 — 켜져 있으면 stdio 가 붙는다★", async () => {
   let connected = false;
   await stdioMain(d, async () => { connected = true; });
   expect(connected).toBe(true);
+});
 });

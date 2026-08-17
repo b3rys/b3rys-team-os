@@ -3,11 +3,13 @@
 // tmux 팀원은 statusProbe 가 화면을 긁어 activity_line 을 채운다. 창이 없는 codex 팀원은
 // ★영영 비어 있었다★ — 실측: dex 의 activity_line 은 항상 null.
 // codex 의 등가물은 app-server item 이벤트다. 같은 칸에 쓴다.
-import { test, expect } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../../db/migrate";
 import { setActivityLine } from "../../db/queries";
 import { activityLineOf } from "./appServerClient";
+
+describe("codex 활동 한 줄 — 무엇을 하는지 보여준다", () => {
 
 const dbWithDex = () => {
   const db = new Database(":memory:"); migrate(db);
@@ -53,4 +55,5 @@ test("행이 없어도 만들어진다(첫 턴에 표시가 나와야 한다)", 
   setActivityLine(db, "dex", "웹 검색: x");
   expect((db.query("select activity_line from agent_status where agent_id='dex'").get() as { activity_line: string }).activity_line).toBe("웹 검색: x");
   db.close();
+});
 });

@@ -9,8 +9,10 @@
  *   (오늘 확인한 것과 같은 계열: 안전 룰을 지워도 전체 수트가 초록불이었다.)
  * 그래서 옮긴 자리에 그물을 같이 둔다 — ★막힌 걸 열었으면 그 책임도 같이 진다.★
  */
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { buildPersona, buildAgentsMd, JOIN_FLAG_FILE, joinInstructions, isLegacyJoinFlag } from "./personaTemplates";
+
+describe("첫 접촉 — 새 팀원이 처음 받는 안내", () => {
 
 const M = { id: "t", display_name: "Testy", role: "QA" };
 
@@ -76,4 +78,5 @@ test("★톤 지시가 렌더본에 항상 있다★ — SOUL.md 는 선택 파�
     // 용어 풀이 — 이건 어디에도 중복이 없다.
     expect(doc).toMatch(/gloss jargon/i);
   }
+});
 });

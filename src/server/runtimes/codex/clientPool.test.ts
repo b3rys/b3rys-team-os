@@ -3,8 +3,10 @@
 // 왜 — codex 0.147 의 spawn_agent 는 ★비동기★ 다. 띄우면 id 만 즉시 오고 결과는 나중에 회수한다.
 // 턴 끝에 프로세스를 닫으면 그 안에서 돌던 서브가 같이 죽는다.
 // 실측: 서브 4개 중 3개가 완료 기록 없이 잘렸고, 메인 마지막 말이 "서브 결과를 회수합니다" 였다.
-import { test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach } from "bun:test";
 import { acquireClient, dropClient, dropAllClients, pooledAgents } from "./clientPool";
+
+describe("codex 프로세스 풀 — 팀원별 재사용과 정리", () => {
 
 class Fake {
   closed = false;
@@ -71,4 +73,5 @@ test("★버린 프로세스는 다음에 재사용되지 않는다★", () => {
   expect(second.reused).toBe(false);
   expect(second.client).not.toBe(first.client);
   expect((first.client as Fake).isClosed).toBe(true); // 실제로 닫혔다(좀비 방지)
+});
 });

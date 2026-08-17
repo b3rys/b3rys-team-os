@@ -1,9 +1,11 @@
 // 라이브 신원 읽기 — ★모르면 null 이어야 한다★ · ★화면 표식은 재시작 없이 바뀌어야 한다★
-import { test, expect } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readHeadCommit, readWebBuild, resetWebBuildCache, captureServerIdentity, BUILD_MANIFEST } from "./deployIdentity";
+
+describe("배포 신원 — 누가 배포했는지 남는다", () => {
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const fresh = () => mkdtempSync(join(tmpdir(), "deployid-"));
@@ -149,4 +151,5 @@ test("서버 신원은 ★기동 시각과 함께★ 굳는다", () => {
   const at = new Date("2026-08-07T03:04:05Z");
   expect(captureServerIdentity(root, at)).toEqual({ commit: SHA, at: "2026-08-07T03:04:05.000Z" });
   rmSync(root, { recursive: true, force: true });
+});
 });
