@@ -4,7 +4,8 @@
  * ★재빌드 아님:★ permissionGate.requestPermission(팝업 생성)+getPermissionRequest(상태) + telegramCapture(3버튼 렌더)
  * 를 재사용. onApproval이 ask면 여기서 팝업 띄우고 GD 결정을 폴링해 ReviewDecision으로 매핑한다.
  *
- * 매핑: allowed_once→approved · allowed_always→approved_for_session · denied/expired/timeout→denied.
+ * 매핑: allowed_once→approved(★decision_scope 가 session 이면 approved_for_session★) ·
+ * allowed_always→approved_for_session · denied/expired/timeout→denied.
  * ★안전: Tier-D는 여기 도달 전 judgeApproval에서 이미 denied(팝업 안 뜸). fail-closed: 에러/무응답→denied.★
  */
 import { createHash, randomUUID } from "node:crypto";
