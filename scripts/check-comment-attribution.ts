@@ -104,6 +104,33 @@ function isCommentLine(line: string): boolean {
 
 export type Finding = { file: string; line: number; text: string };
 
+/**
+ * ★'실측' 이 괄호 안에 있으면, ★그 괄호 안에★ 이름이 있어야 귀속이다.★
+ *
+ * 글자 거리로 자르면 안 된다 — 실측(스티브가 8건에 직접 대봤다):
+ *   "(2026-08-10 배포본 실측: steve 확인 · bill 판단)" 은 이름이 ★실측 뒤★ 에 있고,
+ *   "(빌 뮤턴트 실측: …)" 은 사이에 낱말이 끼어 있다. 거리로 자르면 ★진짜 5건이 사라진다.★
+ * 반대로 "(2026-07-14 실측)" · "(2026-08-06 실측 42건)" 은 괄호 안에 이름이 없다 —
+ * 앞 절의 '팀장' 은 ★수신처★ 이지 잰 사람이 아니다.
+ */
+function observeInParenWithoutName(line: string, at: number, nameRe: RegExp): boolean {
+  const open = line.lastIndexOf("(", at);
+  if (open < 0) return false;
+  const close = line.indexOf(")", at);
+  if (close < 0) return false;
+  const inner = line.slice(open + 1, close);
+  if (!new RegExp(`(?:${OBSERVE})`).test(inner)) return false; // 괄호 안에 실측류가 없다
+  return !nameRe.test(inner);                                   // 이름이 없으면 귀속 아님
+}
+
+/**
+ * ★이름 양옆이 화살표면 그 이름은 '거르는 대상의 예시' 다★
+ *   "남의 딴-대화(예: codex→demis 리뷰 팬아웃)를 걷어낸다"
+ * 여기서 걸리는 이름은 화살표 ★뒤★ 의 demis 라, 앞뒤를 다 본다.
+ */
+const ARROW_AFTER = /^\s*(?:→|->|=>)/;
+const ARROW_BEFORE = /(?:→|->|=>)\s*$/;
+
 export function scanText(file: string, text: string): Finding[] {
   const out: Finding[] = [];
   text.split("\n").forEach((line, i) => {
@@ -115,6 +142,10 @@ export function scanText(file: string, text: string): Finding[] {
     if (PRODUCTISH.test(after)) return;                 // 제품명·버전 (codex-cli · codex 0.144)
     if (ROLE_BEFORE.test(line.slice(0, at))) return;    // 역할 지정 (제안자 lui · 요청자(bill))
     if (inCodeSpan(line, at)) return;                   // 백틱 안 = 값 (`--to bill`)
+    if (ARROW_AFTER.test(after)) return;                            // 데이터 예시 (codex→…)
+    if (ARROW_BEFORE.test(line.slice(0, at))) return;               // 데이터 예시 (…→demis)
+    const obs = new RegExp(`(?:${OBSERVE})`).exec(line);
+    if (obs && observeInParenWithoutName(line, obs.index, new RegExp(`(?:${PERSON})`, "i"))) return;
     out.push({ file, line: i + 1, text: line.trim() });
   });
   return out;
