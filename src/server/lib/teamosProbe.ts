@@ -3,7 +3,7 @@
  * dashboard "Team OS" view: which scripts exist, which LaunchAgents/cron jobs are
  * scheduled (and running), and what work is in flight (TODO.md).
  *
- * Design constraint (GD): this must NOT touch the team bus's own function or
+ * Design constraint: this must NOT touch the team bus's own function or
  * performance. Everything here is read-only — filesystem reads + a single cached
  * `launchctl list` spawn — on a 15s cache, hit only when the Team OS tab is open.
  * No shared state with the dispatcher, no DB writes, no hot-loop work.
@@ -223,7 +223,7 @@ function listLaunchd(running: Map<string, boolean>): TeamOsScheduled[] {
     //   so we report null (not false) to avoid a misleading red "멈춤".
     // - claude-telegram-* run via a detached tmux session; the LaunchAgent job exits after spawning,
     //   so launchctl shows it as not-running even though the bot is alive → report null, point users
-    //   to the Agent cards for real liveness. (GD 2026-05-31: bots were all false-red.)
+    // to the Agent cards for real liveness.
     // Only genuine KeepAlive direct services (gateway/team-collab/pangyobuk/caffeinate) keep a
     // trustworthy running flag — red there means a real outage.
     const isTmuxBot = label.includes("claude-telegram");

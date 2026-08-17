@@ -1,4 +1,4 @@
-// 팀원 아이콘 색 — 퍼블릭 팀에서 멤버를 한눈에 구분하기 위한 색(GD 2026-06-26).
+// 팀원 아이콘 색 — 퍼블릭 팀에서 멤버를 한눈에 구분하기 위한 색.
 // green(기본)은 기존 text-accent-greenSoft 클래스를 그대로 쓰고, 나머지 색만 인라인 color 적용.
 // SVG 아이콘은 stroke="currentColor"라 부모 span의 color로 물든다(icons.ts 참고).
 import { renderIcon } from "./icons";

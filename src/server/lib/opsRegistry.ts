@@ -1,4 +1,4 @@
-// opsRegistry — 잡/기능을 한 레지스트리로 모아 *조건부 on/off* 관리(P1, GD 2026-06-28 설계: Bill+Codex+Steve).
+// opsRegistry — 잡/기능을 한 레지스트리로 모아 *조건부 on/off* 관리(P1 설계: Bill+Codex+Steve).
 //
 // 설계 핵심(Codex 리뷰):
 //   - 각 항목 = 공통 envelope(메타) + desired_enabled(사용자 토글) + conditions(선언형 predicate).

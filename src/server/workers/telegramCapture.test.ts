@@ -167,7 +167,7 @@ describe("telegramCapture media refs", () => {
     ]);
   });
 
-  // 문서 첨부 캡처(GD 2026-07-03): 예전엔 이미지 문서만 캡처하고 나머지(PDF 등)는 무시했으나,
+  // 문서 첨부 캡처: 예전엔 이미지 문서만 캡처하고 나머지(PDF 등)는 무시했으나,
   //   일반 사용자에게 문서 첨부는 필요한 기능이라 image-only 게이트를 제거 → 모든 문서를 캡처한다.
   test("telegramMediaRefs captures non-image documents (e.g. PDF)", () => {
     expect(

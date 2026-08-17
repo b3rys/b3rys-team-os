@@ -3,7 +3,7 @@
 // ★2026-07-30 수정 — "감지는 됐는데 아무도 못 들었다"★
 //   이전엔 appendAudit 으로 audit_event 테이블에만 썼다. 08:03:37 에
 //   `runtime_essentials_missing | lisa | poller:claude bot.pid, canAutoFix:true` 를 정확히 잡아놓고도
-//   message 테이블에 아무것도 안 넣어 팀장님·팀원 누구에게도 안 갔고, 리사는 28분 무응답이었다.
+// message 테이블에 아무것도 안 넣어 팀장님·팀원 누구에게도 안 갔고, 리사는 28분 무응답이었다.
 //   게다가 claude 봇 launchd 잡은 KeepAlive=false 라(스포너라서 true 로 켤 수도 없다) 시스템 안에
 //   그 멤버를 되살릴 주체가 아예 없었다 → 사람이 손으로 --force 를 돌려야 끝났다.
 //   그래서 이제 (1) op 알림을 실제로 발행하고, (2) 게이트가 열려 있으면 재시작까지 시도한다.

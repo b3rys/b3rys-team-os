@@ -34,7 +34,7 @@ describe("rotateToken: resolveTokenStore 런타임별 격리", () => {
   });
 });
 
-// GD 2026-07-05 fix — openclaw 파일기반 계정은 토큰파일 실종돼도 rotate 허용(생성). 인라인/비표준경로는 거부. 하네스 지적으로 신 분기 커버.
+// fix — openclaw 파일기반 계정은 토큰파일 실종돼도 rotate 허용(생성). 인라인/비표준경로는 거부. 하네스 지적으로 신 분기 커버.
 describe("rotateToken: openclawConfiguredTokenFile 파일기반 판별(fixture 격리)", () => {
   test("tokenFile 정의된 파일기반 계정 → 경로 반환 (파일 실존 여부 무관 = Lui 실종 케이스)", () => {
     const p = mkOpenclawCfg({ lui: { name: "GD LUI", enabled: true, tokenFile: "/abs/telegram-lui-token.txt" } });

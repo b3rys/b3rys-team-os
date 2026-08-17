@@ -82,7 +82,7 @@ function handle(msg: WsMsg) {
     case "hello":
       // hello 는 매 WS 연결(최초·재연결 모두)마다 서버가 push(index.ts onOpen) → 재연결 시 전체 상태 re-sync 되어
       //   다운타임/끊김 후 자동 최신화된다(IMPROVE7 리포트는 "재연결 re-sync 없음"이라 했으나, onopen 자체는 아니어도
-      //   server-push hello 로 이미 커버됨을 코드검증으로 확인 — GD 2026-07-03). hello 에 빠져 있던 metric 만 보완.
+      // server-push hello 로 이미 커버됨을 코드검증으로 확인). hello 에 빠져 있던 metric 만 보완.
       s.setAgents(msg.agents);
       s.setStatuses(msg.statuses);
       void loadThreads();

@@ -1,5 +1,5 @@
 /**
- * portal(리포트) 요청 플로우 integration test — 리포트 요청 접수회신(GD 2026-06-22 "요청 접수가 GD께 떠야").
+ * portal(리포트) 요청 플로우 integration test — 리포트 요청 접수회신.
  * 핀: POST /api/:id/request → {ok, assignee, thread_id} 반환(=대시보드 인라인 "✅ 전송됨" 근거) + 담당자 버스 dm + 추적 task.
  */
 import { describe, expect, test } from "bun:test";

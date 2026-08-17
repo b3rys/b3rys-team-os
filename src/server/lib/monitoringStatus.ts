@@ -1,4 +1,4 @@
-// 모니터링 탭 데이터소스 (GD 2026-07-10, Bill 핸드오프) — 새 probe 0, 기존 소스만.
+// 모니터링 탭 데이터소스 — 새 probe 0, 기존 소스만.
 //   ① bot-liveness 상태: durable repo-local log 파싱(runs·마지막실행·정상여부·결과문구)
 //   ② dm_message health: team.db 집계(dm-monitor.sh 로직 이식)
 // ★방어적(Bill 요청): 로그 파일 없거나 형식 바뀌어도 크래시 X — 전부 try/catch + 안전 기본값.★
@@ -393,7 +393,7 @@ export function readOpenClawTelegramIngressStatus(db: Database, statusPath: stri
   }
 }
 
-// ── 멤버별 홉 카운트 (GD 2026-07-10 "1턴1홉" 계측) ──────────────────────────
+// ── 멤버별 홉 카운트 ──────────────────────────
 // 팀원끼리 버스 왕복 홉 수를 from_agent_id별로 집계 → avg/min/max. 낮을수록 효율(1홉), 높으면 루프 의심.
 // read-only, 새 probe 0. user/system/broadcast 발신은 제외(팀원 루프만 계측).
 export interface HopMemberStat {

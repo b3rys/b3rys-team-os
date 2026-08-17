@@ -233,7 +233,7 @@ export async function runTurn(
     //   → ★판정은 bus/replyTarget.ts 한 곳에서만 한다.★
 
 
-    // ★[B] — 서버는 팀원 대신 말하지 않는다.★ (GD 2026-07-13: "팀원한테 맡겨. 다 빼.")
+    // ★[B] — 서버는 팀원 대신 말하지 않는다.★
     //   예전엔 codex CLI 의 stdout 을 받아 ★서버가 버스에 "codex 가 말했다" 로 넣었다★ —
     //   ★dex 가 쓴 "[NO_REPLY]" 가 버스에 그대로 실렸다.★ (2026-07-13 수트 실측)
     //   ★이제 턴 본문은 메모다.★ 말하려면 dex 가 직접 POST /team/api/inbox 로 보낸다
@@ -347,7 +347,7 @@ function postFailureNotice(
     const why = reason ? ` (${reason.slice(0, 120)})` : "";
     const body = `⚠️ ${agent.display_name ?? agent.id} 의 응답이 실패했습니다${why}. 잠시 후 다시 시도해 주세요.`;
     // dedupe 는 ★받는 곳에 따라 기준이 다르다★ — 두 계약이 서로 다른 것을 막는다.
-    //   · 팀 리드 방(broadcast) = ★도배 방지★ 가 목적 → 본문 기준 60초 창(기존 계약 유지)
+    // · 팀 리드 방(broadcast) = ★도배 방지★ 가 목적 → 본문 기준 60초 창(기존 계약 유지)
     //   · 팀원 1:1 = ★같은 실패를 두 번 안 알리기★ 가 목적 → ★message_id 기준★
     //     (본문 기준 60초를 쓰면 서로 다른 위임 두 건이 연속 실패했을 때 ★두 번째가 조용히 사라진다★)
     let dedupeKey: string;
@@ -397,7 +397,7 @@ export function makeCodexAdapter(
   deps: CodexAdapterDeps = {},
 ): WakeAdapter {
   // ★M6: B3OS_CODEX_APPSERVER=1 이면 app-server 런타임 사용(중간 인터럽트/steer+승인팝업 기반).★
-  // 롤아웃 스위치(폴백 아님 — GD 방침): 검증 전엔 exec, 검증 후 flag on. deps.callCodex가 최우선(테스트).
+  // 롤아웃 스위치(폴백 아님 — 제품 결정): 검증 전엔 exec, 검증 후 flag on. deps.callCodex가 최우선(테스트).
   // ★M5.3: flag on이면 db 주입한 app-server caller(ask→GD 팝업). flag off=exec. deps.callCodex 최우선(테스트).★
   // ★app-server 하나뿐이다.★ (팀 리드 2026-08-12: "exec 방식은 deprecate 해")
   //   플래그로 갈라두면 ★한쪽만 좋아지고 다른 쪽은 조용히 뒤처진다★ — 실제로 그랬다.

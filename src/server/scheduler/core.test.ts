@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { openDb, migrate } from "../db/migrate";
 import { seedKrHolidays } from "../db/migrate";
 import {
@@ -22,6 +25,8 @@ import {
   completeScheduledJob,
   skipScheduledJob,
   consecutiveFailures,
+  lateWakeBanner,
+  emitCapabilityWorkloop,
 } from "./core";
 import { nextCronRun } from "./cron";
 
@@ -453,7 +458,7 @@ describe("b3os scheduler exec jobs", () => {
   test("the production allowlist only contains the vetted ops scripts (argv-only)", () => {
     // ★이 목록은 의도적으로 못박아 둔다★ — 여기 한 줄 추가 = ★서버 권한 코드실행 등록★ 이다.
     //   테스트가 깨지는 게 정상이고, 깨져야 사람이 한 번 더 본다. 목록을 늘렸으면 여기도 같이 고쳐라.
-    //   (2026-07-17: task-continuation-guard 를 launchd 에서 이관하며 추가 — GD 승인)
+    // (2026-07-17: task-continuation-guard 를 launchd 에서 이관하며 추가 — GD 승인)
     expect(Object.keys(EXEC_ALLOWLIST).sort()).toEqual([
       "task-continuation-guard",
       "task-review-ping",
@@ -540,7 +545,7 @@ function toSqliteDateForTest(d: Date): string {
 }
 
 // Misfire grace — the Mac is off for days, then every overdue job comes due in one tick.
-// A stale slot must skip forward instead of firing late (GD, 2026-07-29).
+// A stale slot must skip forward instead of firing late.
 describe("b3os scheduler misfire grace", () => {
   const GRACE_ENV = "SCHEDULER_MISFIRE_GRACE_SEC";
   const GRACE_2H = "7200";   // 기본은 꺼져 있다 — 켜야 검사할 수 있다
@@ -637,7 +642,7 @@ describe("b3os scheduler misfire grace", () => {
     expect(results[0]?.status).toBe("succeeded");
   });
 
-  // One rule for every kind — off at the slot means it does not arrive. (GD, 2026-07-29)
+  // One rule for every kind — off at the slot means it does not arrive.
   test("a stale one-shot reminder is skipped too — same rule for every kind", async () => {
     const d = db();
     const job = scheduleReminder(d, {
@@ -898,5 +903,164 @@ describe("연속 실패 카운트는 성공에서만 끊긴다", () => {
     job = getScheduledJob(d, job.id)!;
     failScheduledJob(d, job, "2", { now: new Date(T0.getTime() + 120_000) });
     expect(consecutiveFailures(d, job.id, 5)).toBe(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 늦은 깨움 배너 + 봉투가 다른 job 의 결과를 단정하지 않는다 (prop_696c5d65b2d5)
+//
+// 실측 배경(2026-08-13): 맥이 자다 깨면 밀린 슬롯이 부팅 직후 한꺼번에 돈다.
+// 그날 23:52:05 UTC 한 초에 8개 job 이 실행됐고, 04:00 SHARED 정리와 05:00 self-learning 의
+// 1시간 간격이 0초가 됐다. 그 사실은 scheduled_job_run 에만 남고 ★깨어난 당사자에겐 안 갔다.★
+// ─────────────────────────────────────────────────────────────────────────────
+describe("늦은 깨움은 봉투에 사실로 실린다", () => {
+  // 2026-08-14 금 05:00 KST 예정 슬롯 = 2026-08-13 20:00 UTC.
+  const DUE = kst(2026, 8, 14, 5, 0);
+
+  // ★테스트가 라이브 agents.json 을 읽지 않게 격리한다★ — ambientAgents 의 기본 경로는
+  // <repo>/agents.json 이고, 그건 팀 전체의 런타임 상태다(b3os-infra-safety ④).
+  // 파일 하나를 tmp 에 새로 쓰고 TEAM_AGENT_REGISTRY 로 명시한다(캐시가 경로+mtime 키라 매번 새 파일).
+  let registryDir: string | undefined;
+  let prevRegistry: string | undefined;
+  beforeEach(() => {
+    prevRegistry = process.env.TEAM_AGENT_REGISTRY;
+    registryDir = mkdtempSync(join(tmpdir(), "b3os-sched-reg-"));
+    const registryPath = join(registryDir, "agents.json");
+    writeFileSync(registryPath, JSON.stringify([
+      { id: "dex", display_name: "Dex", role: "Codex runtime pilot", runtime: "codex",
+        capabilities: ["learning_loop_pm", "coordinator"], enabled: true },
+    ]));
+    process.env.TEAM_AGENT_REGISTRY = registryPath;
+  });
+  afterEach(() => {
+    if (prevRegistry === undefined) delete process.env.TEAM_AGENT_REGISTRY;
+    else process.env.TEAM_AGENT_REGISTRY = prevRegistry;
+    // ★만든 것은 지운다★ — 없으면 수트를 한 번 돌 때마다 tmpdir 에 이 describe 의 테스트 수만큼
+    // 디렉토리가 쌓인다(codex 리뷰 실측: 누적 80개). 검사가 남기는 쓰레기도 검사의 결함이다.
+    if (registryDir) rmSync(registryDir, { recursive: true, force: true });
+    registryDir = undefined;
+  });
+
+  function workloopJob(d: ReturnType<typeof db>, id = "sched_late_probe") {
+    const j = createCronJob(d, {
+      id, title: "self-learning", cron: "0 5 * * 5", timezone: "Asia/Seoul",
+      createdBy: "system", payload: learningPayload, from: new Date(DUE.getTime() - 1000),
+    });
+    return getScheduledJob(d, j.id)!;
+  }
+
+  // ★정시일 때 봉투가 한 글자도 안 바뀌는지부터 고정한다.★ 이게 없으면 "항상 붙이는" 구현이
+  // 아래 지연 검사를 전부 통과한다 — 가짜가 통과하는 길을 먼저 막는다.
+  test("정시 깨움은 원문 그대로 — 배너 0자", () => {
+    const d = db();
+    const job = workloopJob(d);
+    expect(lateWakeBanner(job, DUE)).toBe("");
+    const out = emitCapabilityWorkloop(d, job, learningPayload, DUE);
+    const body = d.prepare(`SELECT body FROM message WHERE id = ?`).get(out.emittedMessageId!) as { body: string };
+    expect(body.body).toBe(learningPayload.body); // 부분일치가 아니라 완전일치
+  });
+
+  test("임계는 15분 — 14분은 조용하고 16분은 말한다", () => {
+    const d = db();
+    const job = workloopJob(d);
+    expect(lateWakeBanner(job, new Date(DUE.getTime() + 14 * 60_000))).toBe("");
+    expect(lateWakeBanner(job, new Date(DUE.getTime() + 16 * 60_000))).toContain("16분 늦게");
+  });
+
+  // 08-13 실측 재현: 예정 05:00 KST → 실제 08:52 KST = 232분 지연.
+  test("실제로 있었던 232분 지연이 시각·간격까지 그대로 찍힌다", () => {
+    const d = db();
+    const job = workloopJob(d);
+    const banner = lateWakeBanner(job, kst(2026, 8, 14, 8, 52));
+    // ★시간+분을 둘 다 읽는다★ — 분을 버리면 3시간 52분이 "3시간" 으로 반올림돼도 통과한다.
+    expect(banner).toContain("3시간 52분 늦게");
+    // 이 두 줄은 job 시간대(Asia/Seoul) 기준이다. bun test 의 기본 TZ 는 UTC 라
+    // 구현이 로컬 포맷을 쓰면 UTC(20:00 / 23:52)로 찍혀 실패한다 — ★단 그건 기본 TZ 일 때만이다.★
+    // TZ=Asia/Seoul 로 돌리면 로컬 == job 시간대라 같은 문자열이 나온다(아래 별도 검사 참고).
+    expect(banner).toContain("예정 2026-08-14 05:00");
+    expect(banner).toContain("실제 2026-08-14 08:52");
+    expect(banner).toContain("Asia/Seoul");
+  });
+
+  // ★위 검사만으로는 시간대 독립성을 못 잰다.★ job 시간대가 Asia/Seoul 이라, 프로세스도
+  // Asia/Seoul 이면 로컬 포맷과 결과가 같아진다 — 실제로 `timeZone` 을 지운 뮤턴트가
+  // TZ=Asia/Seoul 에서만 살아남았다(UTC·LA 에서는 죽음). 이미 보는 축으로 변이하면 안 잡힌다.
+  // 그래서 ★job 시간대를 프로세스와 겹치지 않을 값으로 둔 검사★ 를 따로 세운다.
+  // 예정 2026-08-13 20:00 UTC = 13:00 PDT, 232분 뒤 = 16:52 PDT.
+  test("배너 시각은 job 시간대를 따른다 — 프로세스 시간대가 무엇이든", () => {
+    const d = db();
+    const j = createCronJob(d, {
+      // LA 기준 목 13:00 = 서울 금 05:00 = DUE. 요일도 시간대를 따라 달라진다.
+      id: "sched_late_probe_la", title: "LA 예약", cron: "0 13 * * 4",
+      timezone: "America/Los_Angeles", createdBy: "system",
+      payload: learningPayload, from: new Date(DUE.getTime() - 1000),
+    });
+    const banner = lateWakeBanner(getScheduledJob(d, j.id)!, kst(2026, 8, 14, 8, 52));
+    expect(banner).toContain("예정 2026-08-13 13:00");
+    expect(banner).toContain("실제 2026-08-13 16:52");
+    expect(banner).toContain("America/Los_Angeles");
+  });
+
+  test("60분 미만은 '시간' 을 안 쓴다", () => {
+    const d = db();
+    const job = workloopJob(d);
+    expect(lateWakeBanner(job, new Date(DUE.getTime() + 45 * 60_000))).toContain("45분 늦게");
+    expect(lateWakeBanner(job, new Date(DUE.getTime() + 45 * 60_000))).not.toContain("시간");
+  });
+
+  // ★두 경로 다 잰다.★ 한쪽만 고치고 "완료" 로 읽히는 것이 이 팀이 가장 자주 밟는 함정이다.
+  test("capability_workloop 봉투 — 배너가 맨 앞, 원문은 그대로", () => {
+    const d = db();
+    const job = workloopJob(d);
+    const late = kst(2026, 8, 14, 8, 52);
+    const out = emitCapabilityWorkloop(d, job, learningPayload, late);
+    const { body } = d.prepare(`SELECT body FROM message WHERE id = ?`).get(out.emittedMessageId!) as { body: string };
+    expect(body.startsWith("[늦은 깨움]")).toBe(true);
+    expect(body).toContain(learningPayload.body);
+  });
+
+  test("inbox 봉투도 같은 배너를 받는다 — 예약 알림도 늦게 깨어난다", async () => {
+    const d = db();
+    const now = kst(2026, 8, 14, 8, 52);
+    const job = scheduleReminder(d, {
+      targetAgentId: "dex",
+      body: "[예약 알림] 늦은 깨움 경로",
+      runAt: DUE,
+      createdBy: "dex",
+    });
+    const results = await runDueSchedulerJobsOnce(d, { now });
+    expect(results[0]?.status).toBe("succeeded");
+    const { body } = d.prepare(`SELECT body FROM message WHERE id = ?`).get(results[0]!.emittedMessageId!) as { body: string };
+    expect(body.startsWith("[늦은 깨움]")).toBe(true);
+    expect(body).toContain("3시간 52분 늦게");
+    expect(body).toContain("[예약 알림] 늦은 깨움 경로");
+    expect(getScheduledJob(d, job.id)!.status).toBe("succeeded");
+  });
+
+  // ★배너가 dedupe 를 바꾸면 같은 슬롯이 두 번 깨운다.★ 본문이 달라져도 키는 슬롯 기준이어야 한다.
+  test("배너가 붙어도 같은 슬롯은 여전히 한 번만 나간다", () => {
+    const d = db();
+    const job = workloopJob(d);
+    const late = kst(2026, 8, 14, 8, 52);
+    const first = emitCapabilityWorkloop(d, job, learningPayload, late);
+    const second = emitCapabilityWorkloop(d, job, learningPayload, new Date(late.getTime() + 30_000));
+    expect(second.emittedMessageId).toBe(first.emittedMessageId);
+    expect(d.prepare(`SELECT count(*) AS n FROM message`).get()).toEqual({ n: 1 });
+  });
+
+  // ★고친 본체.★ 봉투가 04:00 job 의 결과를 산문으로 단정하던 문장을 지웠는지 본다.
+  // 부재만 재면 문장을 통째로 날려도 통과하므로, 대체 지시가 실제로 들어왔는지 함께 잰다.
+  test("self-learning 봉투는 04:00 정리 결과를 단정하지 않고 직접 확인을 시킨다", () => {
+    const d = db();
+    const jobs = ensureWeeklySelfLearningJobs(d);
+    const body = JSON.parse(jobs[1]!.payload_json).body as string;
+    // 없어야 하는 것: 다른 job 이 이미 돌았다는 주장
+    expect(body).not.toContain("04:00에 정리된 것 포함");
+    // 있어야 하는 것: 읽는 시점에 직접 재라는 지시 + 아직일 때의 대안
+    expect(body).toContain("읽기 직전에 mtime 과 최신 항목 날짜를 직접 확인하세요");
+    expect(body).toContain("별개 job 이라 아직 안 돌았을 수 있습니다");
+    expect(body).toContain("원자료");
+    // 원래 목적은 그대로 남아 있어야 한다(문장을 지우다 과제까지 지우지 않았는지)
+    expect(body).toContain("POST /team/api/proposals");
   });
 });

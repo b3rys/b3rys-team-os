@@ -9,7 +9,19 @@ export type PermissionTier = "allow" | "ask" | "deny";
 export type PermissionAgent = Pick<AgentRecord, "id" | "workspace_path">;
 export type PermissionDecision = "allow" | "deny" | "approval_required";
 export type PermissionRequestStatus = "pending" | "allowed_once" | "allowed_always" | "denied" | "expired";
-export type PermissionDecisionInput = "allow_once" | "allow_always" | "deny";
+/**
+ * `allow_session` = 이 세션 동안만 허용.
+ *
+ * ★status 로는 allow_once 와 구분되지 않는다.★ status 는 CHECK 로 값이 고정돼 있고 그 표는
+ * 공개 코드가 모든 설치본에 만든다 — 값을 늘리려면 남의 DB 까지 재작성해야 해서 하지 않는다.
+ * 대신 `decision_scope` 칸에 사람이 고른 범위를 그대로 적는다. 결정을 읽을 때는 두 칸을 같이 본다.
+ *
+ * ★grant 는 만들지 않는다.★ 세션 범위를 실제로 지키는 것은 런타임이고(codex 의 acceptForSession),
+ * 우리 표는 사람이 무엇을 골랐는지를 적는 자리다.
+ */
+export type PermissionDecisionInput = "allow_once" | "allow_session" | "allow_always" | "deny";
+/** 사람이 고른 범위 — status 와 함께 읽어야 결정이 온전해진다. */
+export type PermissionDecisionScope = "once" | "session" | "always";
 
 export type PermissionAction =
   | { kind: "sandbox"; sandbox: CodexSandboxMode; writableRoot?: string }
@@ -52,6 +64,8 @@ export interface PermissionRequestRow {
   target: string;
   payload_json: string;
   status: PermissionRequestStatus;
+  /** 사람이 고른 범위. 이 칸이 생기기 전에 결정된 행은 null 이다 — 없음을 '한번' 으로 읽지 않는다. */
+  decision_scope: PermissionDecisionScope | null;
   requested_by: string;
   created_at: string;
   decided_at: string | null;
@@ -375,13 +389,20 @@ export function decidePermissionRequest(
     appendPermissionAudit(db, { request_id: id, scope_key: row.scope_key, op, target: row.target, decision: `risk_noted:${decision}`, approver: opts.approver, provenance: { ...(opts.provenance ?? {}), reasons: tierD } });
   }
 
+  // 세션은 ★지속되는 허가를 남기지 않는다★ — 그 점에서 allowed_once 와 같다. 무엇을 골랐는지는
+  // decision_scope 가 말한다. 거절은 범위가 없으므로 null 이다.
   const status: PermissionRequestStatus =
-    decision === "allow_once" ? "allowed_once" : decision === "allow_always" ? "allowed_always" : "denied";
+    decision === "allow_always" ? "allowed_always" : decision === "deny" ? "denied" : "allowed_once";
+  const scope: PermissionDecisionScope | null =
+    decision === "allow_once" ? "once"
+    : decision === "allow_session" ? "session"
+    : decision === "allow_always" ? "always"
+    : null;
   const changed = db.prepare(
     `UPDATE permission_request
-       SET status = ?, decided_at = datetime('now'), approver = ?, provenance_json = ?
+       SET status = ?, decision_scope = ?, decided_at = datetime('now'), approver = ?, provenance_json = ?
      WHERE id = ? AND status = 'pending'`,
-  ).run(status, opts.approver, JSON.stringify(opts.provenance ?? {}), id).changes;
+  ).run(status, scope, opts.approver, JSON.stringify(opts.provenance ?? {}), id).changes;
   if (changed !== 1) return { ok: false, error: "permission request changed concurrently" };
 
   // ★'항상 허용' 에 기한을 둔다 — 무기한이 아니다.★ (2026-08-13)

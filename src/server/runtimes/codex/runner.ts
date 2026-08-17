@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import type { CodexSandboxMode } from "../../types";
 
-// 아키텍처/OS 무관(하네스, GD 2026-07-02): env 미설정 시 bare 이름 → PATH lookup(OPENCLAW_BIN 패턴과 동일). Apple-Silicon 고정경로 하드코딩은 Intel/Linux서 spawn 실패.
+// 아키텍처/OS 무관(하네스): env 미설정 시 bare 이름 → PATH lookup(OPENCLAW_BIN 패턴과 동일). Apple-Silicon 고정경로 하드코딩은 Intel/Linux서 spawn 실패.
 export const CODEX_BIN = process.env.CODEX_BIN ?? "codex";
 
 export interface CodexTurnOptions {

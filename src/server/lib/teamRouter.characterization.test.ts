@@ -4,11 +4,11 @@
  *
  * Scope = the GAP left by the existing suites (teamRouter.test / .llm.test / ownerRoutingLiveCases):
  *   - hasTopicShift          (legacy topic-shift detector — to be isolated in ④; 0 direct tests before)
- *   - stripExampleRegions    (GD example-separator convention, env-gated; 0 direct tests before)
+ * - stripExampleRegions
  *   - detectAddressedNamesLoose (HYBRID @-mention detector, drops past-references; 0 direct tests before)
  *   - leadingAddressee       (leading addressee = orchestrator; 0 direct tests before)
  *   - routeTeamMessage priority ladder (sync FALLBACK): broadcast > explicit > reply > sticky > default
- *     — GD rule (@mention > reply > sticky) pinned as a single regression ladder (Bill request).
+ * — GD rule (@mention > reply > sticky) pinned as a single regression ladder (Bill request).
  *
  * NOT re-covered here (already well-tested elsewhere): shouldSuppress(12), isConfidentOwner(8),
  * detectExplicitTargets(17), routeTeamMessage(36), routeTeamMessageHybrid(37).

@@ -115,7 +115,7 @@ export function renderThreadView(root: HTMLElement): void {
     if (!body) return;
 
     // 위로 스크롤해 읽는 중이면 폴링 재렌더가 위치를 뺏지 않는다 — 바닥 근처일 때만 stick.
-    // (무조건 scrollTop=scrollHeight 로 끌어내리던 문제 수정, GD 2026-08-01. scrollStick 참조.)
+    // (무조건 scrollTop=scrollHeight 로 끌어내리던 문제 수정 scrollStick 참조.)
     const stick = captureScrollStick(body);
     body.innerHTML = msgs
       .map((m: Message) => {

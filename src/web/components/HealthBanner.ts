@@ -1,5 +1,5 @@
 // HealthBanner — first-screen one-line health signal (busviz UX #1).
-// Answers GD's "지금 문제 있나?" in 0.5s: shows ONLY what needs attention, nothing else.
+// Answers the team lead's "지금 문제 있나?" in 0.5s: shows ONLY what needs attention, nothing else.
 // Global data only (no new fetch): store.statuses (offline), store.agentHealth (danger/warn),
 // store.alerts (recent failures, already 6h-filtered by the loader). When nothing is wrong it
 // collapses to a slim green "✓ 전원 정상". Bill places it (MetricsBar 아래 · main 위) in main.ts;

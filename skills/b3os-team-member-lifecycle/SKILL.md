@@ -29,7 +29,7 @@ Authoritative context — note which of these a fresh clone actually has:
 | File | Present in a fresh clone? |
 |---|---|
 | `<repo>/rules/SHARED.md` | yes |
-| `<repo>/rules/TEAM-OS.md` | **no** — render output, generated at startup from `rules/TEAM-OS.template.ko.md`. Edit the template, never the output. |
+| `<repo>/rules/TEAM-OS.md` | **no** — render output, generated at startup from `rules/TEAM-OS.template.md` (`src/server/lib/teamOsRender.ts`). `TEAM-OS.template.ko.md` is a separate document with no runtime reader. Edit the template, never the output. |
 | `<repo>/agents.json` | **no** — per-machine roster, deliberately untracked. `loadRegistry` returns `[]` until someone is recruited. |
 
 Never tell a reader to open a file their clone does not have.

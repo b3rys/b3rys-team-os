@@ -21,7 +21,7 @@ export interface HermesTurnOptions {
   body: string;
   fromLabel: string;
   /**
-   * ★답이 어디로 가야 하는지 — 부르는 쪽이 ★안다★. 주입문이 추측하면 안 된다.★ (GD 2026-07-14)
+   * ★답이 어디로 가야 하는지 — 부르는 쪽이 ★안다★. 주입문이 추측하면 안 된다.★
    *
    * 예전엔 주입문 꼬리가 무조건 "★팀장께★ 답하라" 였다. 그런데 이 주입문은 ★4가지 상황★ 에 쓰인다:
    *   버스 1:1(스티브가 물음) / 단톡방(팀장이 부름) / 팀장 직보 / 슬랙 — ★정답이 전부 다르다.★
@@ -109,13 +109,13 @@ function hermesTelegramBotToken(agent: AgentRecord): string | null {
 export function buildPrompt(opts: HermesTurnOptions): string {
   const locale = opts.locale;
   const owner = pick(locale, "팀장", "the team lead");
-  // Hermes 전용 함수호출 강제(GD 2026-07-09): hermes 런타임이 공유 persona 룰만으론 맞장구 루프를
+  // Hermes 전용 함수호출 강제: hermes 런타임이 공유 persona 룰만으론 맞장구 루프를
   //   못 끊어서 bridge 프롬프트에 최상단 강제. 팀버스=call/return, 답은 1회 terminal.
   // --thread 는 ★들어온 thread(opts.threadId)를 그대로★ 박아 넣는다 (2026-07-12 라이브 회귀):
   //   '<공통thread>' 같은 placeholder 를 주면 hermes 가 ★새 thread 를 지어내서★ fan-out 한다(실측:
   //   위임 thread 대신 'lunch-recs-...' 자작). collection 자체는 형성되지만 위임 thread 와 끊겨서
   //   followup(expect_report_by) 의 thread 바인딩(hasSubstantiveReport 의 json_extract thread_id)이
-  //   빗나가 ★재-wake → GD 중복보고★ 위험. 실제 id 를 문자열로 주면 모델이 복사만 하면 되어 결정론적.
+  // 빗나가 ★재-wake → GD 중복보고★ 위험. 실제 id 를 문자열로 주면 모델이 복사만 하면 되어 결정론적.
   //
   // ★보안(codex 리뷰 2026-07-12)★: threadId 는 '서버 생성'이 아니다. envelopeInboundSchema 는 길이
   //   4~32 만 보고 문자셋을 안 본다(envelopeSchema.ts) → 외부가 백틱·따옴표·개행·공백이 든 thread_id 를
@@ -128,7 +128,7 @@ export function buildPrompt(opts: HermesTurnOptions): string {
   //     metachar 가 없어도 위험하다. 폴백 경로에선 아래 external_message 의 thread 속성을 쓰게 안내.
   const SAFE_THREAD_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/;
   const threadIsSafe = SAFE_THREAD_RE.test(opts.threadId);
-  // ★★답은 "보낸 사람" 에게 간다. 팀장께가 아니다.★★ (GD 2026-07-14: "팀원이 왜 잘못 보냈는지 찾아야지")
+  // 답은 "보낸 사람" 에게 간다. 팀장께가 아니다.
   //   ★이 줄이 hermes 가 방에 대고 답하던 진짜 원인이었다.★
   //   예전엔 `${owner}께 답하고` = ★"팀장께 답하라"★ 였다. 그런데 이건 ★팀버스 메시지★ 다 —
   //   보낸 사람은 스티브인데 "팀장께 답하라" 고 시켰다. 그래서 hermes 는 방(broadcast)에 대고 썼다.
@@ -154,19 +154,19 @@ export function buildPrompt(opts: HermesTurnOptions): string {
   const context = opts.teamContext
     ? `${teamContextLabel(locale)}\n${opts.teamContext}\n\n`
     : "";
-  // (2026-07-10 제거, GD 결정): directReportNote(자가발송 금지 문구)는 hermes 자가발송을 막으려 넣었으나,
+  // (2026-07-10 제거, 제품 결정): directReportNote(자가발송 금지 문구)는 hermes 자가발송을 막으려 넣었으나,
   //   이중발송의 진짜 원인은 hermes 자가발송이 아니라 어댑터 double-post(makeHermesAdapter insertMessage+surface)
   //   였고 그건 direct_to_gd시 요청자 버스 insert 스킵으로 수정됨. 노트 필요성 라이브 테스트=노트 없이도 자가발송0.
   //   전제(자가발송)가 오진이라 제거. (재발 시 어댑터 skip은 유지되니 재추가 용이.) surfaceNote 는 유지.
   const directReportNote = "";
   // 표면 문구: direct_to_gd 면 브릿지가 owner DM 으로 전달하므로 '그룹 표시' 문구를 넣지 않는다
-  //   (directReportNote 의 'DM·그룹금지'와 상충 방지, GD 2026-07-09). 일반 턴은 그룹 표시 안내 유지.
-  // ★[B] — 말하려면 보내라.★ (GD 2026-07-13: "팀원한테 맡겨. 다 빼.")
+  // (directReportNote 의 'DM·그룹금지'와 상충 방지). 일반 턴은 그룹 표시 안내 유지.
+  // ★[B] — 말하려면 보내라.★
   //   예전엔 "브릿지가 당신의 최종 답변을 전달합니다 — 발신 도구로 다시 보내지 마세요" 였다.
   //   ★그래서 hermes 는 뭘 쓰든 나갔고, 침묵이 불가능했고, [NO_REPLY] 라는 우회로가 생겼고,
   //     그 토큰이 팀장 단톡방에 그대로 찍혔다.★ (2026-07-13 라이브)
   //   ★이제 서버는 대신 말하지 않는다. 턴 본문은 메모다.★
-  // ★주소 메뉴를 주지 않는다.★ (GD 2026-07-14 / hermes 본인 확인)
+  // ★주소 메뉴를 주지 않는다.★
   //   예전엔 여기서 "· 팀원에게 → … · 단톡방에 → … · 팀장께 직보 → …" 라고 ★선택지 3개★ 를 줬다.
   //   그런데 답 주소는 ★이미 정해져 있다★ (호출부가 안다). 메뉴를 주면 모델이 ★고른다★ —
   //   ★hermes 본인 증언★: "그 선택지가 붙어 있으면 상위 지시의 '팀장께' 가 routing intent 처럼 보입니다."
@@ -175,7 +175,7 @@ export function buildPrompt(opts: HermesTurnOptions): string {
   const surfaceNote = pick(locale,
     "★말하려면 직접 보내세요. 안 보내면 아무 말도 안 한 것입니다.★ 여기 쓰는 글은 ★당신의 메모★ 일 뿐 아무 데도 안 갑니다 — 서버가 대신 게시하지 않습니다. ★할 말이 없으면 그냥 안 보내면 됩니다★(특별한 토큰 같은 것 필요 없음).",
     "**To speak, you must send. If you do not send, you have said nothing.** What you write here is **your own scratchpad** — it goes nowhere; the server does not post it for you. **If you have nothing to say, simply do not send** (no special token needed).");
-  // ★from=system 이면 그게 무슨 뜻인지 ★말해준다.★★ (GD 2026-07-14)
+  // ★from=system 이면 그게 무슨 뜻인지 ★말해준다.
   //   봉투엔 from="system" 이라고만 써 있었다 → ★팀원이 이름을 보고 추측해야 했다.★
   //   ★요청과 알림이 똑같이 생겼으니 똑같이 답했다★ → --to system → ★30일 40건 증발.★
   //   ★사실을 그대로 말한다.★ 그러면 답 주소("--to bill")도 ★말이 된다★ — 왜 bill 인지 알게 된다.
@@ -276,7 +276,7 @@ export function buildPrompt(opts: HermesTurnOptions): string {
  * openclaw 는 이미 600초를 쓴다(OPENCLAW_GATEWAY_TIMEOUT_MS). ★hermes 만 90초로 굶고 있었다.★
  * ★2026-07-16: 300→600★ — Mac 가격 리서치가 8.5분 걸려 300s 로도 부족(잘려서 '실패' 오탐 + 종합 누락).
  *   openclaw 와 동일한 600s 로 맞춘다. ★lease/grace 는 wakeDispatcher 가 이 값에서 자동 파생★ 하므로
- *   여기 하나만 바꾸면 사다리(turnCap<lease<grace)가 따라온다 — 빼먹을 일 없음 (GD 2026-07-16).
+ * 여기 하나만 바꾸면 사다리(turnCap<lease<grace)가 따라온다 — 빼먹을 일 없음.
  */
 export const HERMES_TURN_TIMEOUT_MS = Number(process.env.HERMES_TURN_TIMEOUT_MS ?? 600_000);
 
@@ -284,11 +284,11 @@ export async function runHermesTeamTurn(opts: HermesTurnOptions): Promise<string
   const cmd = hermesCommand(opts.agent);
   const prompt = buildPrompt(opts);
   const runtimeCwd = runtimeCwdForAgent(opts.agent);
-  // ★턴 상한은 ★한 곳★ 에서만 정한다.★ (GD 2026-07-15: "턴 상한도 한 군데서 수정하게")
+  // ★턴 상한은 ★한 곳★ 에서만 정한다.★
   //   예전엔 호출부마다 따로 넘겨서 ★슬랙만 이 기본값(150s)이 그대로 적용★됐다 — 버스·단톡방은
   //   HERMES_TURN_TIMEOUT_MS(300s)를 명시했는데 슬랙(routes/slack.ts)은 안 넘겨서 ★절반★ 이었다.
   //   아무도 그렇게 정한 적 없다. 기본값을 그 상수로 통일하면 호출부가 안 넘겨도 전부 같은 상한이 된다.
-  //   (60s 는 가벼운 답엔 충분하나 수집·리서치·종합형 team-turn 은 초과 → dead_letter. GD 2026-07-09 라이브
+  // (60s 는 가벼운 답엔 충분하나 수집·리서치·종합형 team-turn 은 초과 → dead_letter. 라이브
   //    테스트서 "맛집 정리" 위임이 60s×3 타임아웃 후 dead_letter 였다.)
   const timeoutMs = opts.timeoutMs ?? HERMES_TURN_TIMEOUT_MS;
   // (2026-07-10 롤백: directReport -t 화이트리스트 패치 제거 — hermes 이중발송의 진짜 원인은 어댑터
@@ -365,7 +365,7 @@ export async function runHermesTeamTurn(opts: HermesTurnOptions): Promise<string
   });
 }
 
-// ★hermes 텍스트 전송 = Bot API sendMessage 직접★ (2026-07-15, GD 지시)
+// ★hermes 텍스트 전송 = Bot API sendMessage 직접★ (2026-07-15, 요구사항)
 //   예전엔 `hermes send` CLI 를 spawn 했다 → cold 기동이 15초 타임아웃을 넘기면 error 없이 false
 //   (2026-07-15 라이브: gd-report hermes 1건 유실, "unknown"). 리액션(reactTelegramAsHermes)은 이미
 //   같은 토큰으로 Bot API 직접이라 robust 했다 — 전송만 CLI 라 fragile 했다. codex(postTelegramAsOpenclaw)

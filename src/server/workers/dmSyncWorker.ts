@@ -47,8 +47,8 @@ function hermesStateDbPath(m: DmSyncMember): string {
   return join(homedir(), ".hermes", "profiles", profile, "state.db");
 }
 
-// 런타임 → GD 1:1 파서 (GD 지침: if/else 분기 대신 lookup table). 새 런타임은 여기 한 줄 추가.
-// codex(runtime="codex", member=dex)는 1:1 텔레그램 DM 봇이 아니라 버스로 소통 → dm_message 대상 아님(GD 2026-07-09 확인).
+// 런타임 → GD 1:1 파서. 새 런타임은 여기 한 줄 추가.
+// codex(runtime="codex", member=dex)는 1:1 텔레그램 DM 봇이 아니라 버스로 소통 → dm_message 대상 아님.
 const PARSERS: Record<string, (m: DmSyncMember, ownerChatId: string) => DmMessageInput[]> = {
   claude_channel: (m, owner) => parseClaudeGdDms(m.id, m.workspacePath, owner),
   openclaw: (m, owner) => {
@@ -99,7 +99,7 @@ function ownerChatId(db: Database): string {
 // 팀장 chat_id 를 못 찾아 캡처를 건너뛸 때 ★한 번은 알린다★ — 조용한 0건이 제일 나쁘다.
 let warnedNoOwner = false;
 
-/** DM 적재 on/off — 팀원 세션 기록을 읽는 기능이라 끌 수 있다(GD 2026-07-14). 기본 on, "off" 면 캡처 안 함.
+/** DM 적재 on/off — 팀원 세션 기록을 읽는 기능이라 끌 수 있다. 기본 on, "off" 면 캡처 안 함.
  *  매 tick 읽으므로 재시작 없이 즉시 반영. 꺼도 버스·위임·발신은 그대로 돈다(dm_message 는 크리티컬 아님). */
 function dmCaptureEnabled(db: Database): boolean {
   return setting(db, "dm_capture") !== "off";

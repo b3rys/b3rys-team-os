@@ -1,7 +1,7 @@
-// LiveBadge — 라이브(정본) 대시보드 상단 구별 스트립. (GD 2026-07-02)
+// LiveBadge — 라이브(정본) 대시보드 상단 구별 스트립.
 // dev.b3rys.com에서만 #app 최상단에 초록 바 + 빌드 식별자를 띄운다.
 // 퍼블릭(studio.b3rys.com)·로컬·기타 origin에는 렌더하지 않는다.
-// 색: #23895C(GD 확정 B) + 하얀 글씨. 빌드 식별자 = 로드된 번들 해시(index-XXXX.js).
+// 색: #23895C + 하얀 글씨. 빌드 식별자 = 로드된 번들 해시(index-XXXX.js).
 
 const LIVE_HOSTS = new Set(["dev.b3rys.com"]);
 // b3os 제품 버전. package.json version과 맞춰 관리.

@@ -2,7 +2,7 @@ import type { AgentRecord } from "../../types";
 import { aliasesFor, escapeRegex } from "./mention";
 import { hasCapability } from "../capabilities";
 
-// ─── owner-gate suppress 판단: owner 로직의 단일 출처 (GD 2098 — 판단은 서버 한 곳) ───
+// ─── owner-gate suppress 판단: owner 로직의 단일 출처 ───
 // gate/react 훅은 thin-client로 이 결정만 따른다(자체 로직 없음). 룰 변경은 여기서만 → 서버 재시작으로 배포.
 const CONFIDENT_OWNER_REASONS = new Set(["explicit_mention", "reply_author", "active_assignee_followup"]);
 

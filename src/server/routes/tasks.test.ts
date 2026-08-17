@@ -2,7 +2,7 @@
  * tasks 라우트 — DELETE/PATCH 계측 + 카드변경 담당자 알림 검증 (2026-06-14).
  * 핵심1(CCTV): 삭제/재배정 시 audit_event 에 actor·UA·referer·스냅샷이 남아 범인 추적+복구.
  * 핵심2(알림): 삭제·담당자 변경 시 영향받는 담당자를 버스로 깨운다(self-action 제외) →
- *             GD가 카드를 지워도 담당자가 자동 인지해 GD께 확인만 (dbak 케이스 근본 해결).
+ * GD가 카드를 지워도 담당자가 자동 인지해 GD께 확인만 (dbak 케이스 근본 해결).
  */
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";

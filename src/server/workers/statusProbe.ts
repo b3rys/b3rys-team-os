@@ -215,7 +215,7 @@ function currentPaneCapacityLine(lines: string[]): string | null {
 //   KST 서버에서 9시간 어긋나고, elapsed 가 9시간 부풀어 ★방금 답한 에이전트가 조용한 쪽으로 뒤집힌다.★
 //   parseCapturedAt 이 Z 를 붙여 UTC 로 고정한다 — 다른 호출부는 이미 이걸 쓰고 있었고 ★여기만 안 썼다.★
 //
-// ★조용한 것은 막힌 것이 아니다★ (팀 리드 2026-08-09: "진짜 blocked 가 아닌 상황은 idle 로 해.
+// ★조용한 것은 막힌 것이 아니다★ ( "진짜 blocked 가 아닌 상황은 idle 로 해.
 //   idle 은 정상상태이면서 대기").
 //   예전에는 5분 넘게 조용하면 `blocked` 를 줬다. 그런데 ★불려야 움직이는 런타임은 아무도 안 부르면
 //   조용한 것이 정상★ 이라, 가만히 두면 멀쩡한 팀원이 차례로 blocked 가 됐다.
@@ -274,7 +274,7 @@ export function buildClaudeStatus(
   // Claude Code footer "ctx N%" = auto-compact 까지 *남은* 문맥%(잔여). b3os 지표는 '사용률'(높을수록 위험 —
   //   AgentCard 바 ≥85%=빨강, health ≥90%=compact권장)이라 저장 시 뒤집는다: usage = 100 - remaining.
   //   안 뒤집으면 갓 뜬 빈 세션(잔여 95%)이 빨강, 실제 꽉 참(잔여 10%)이 초록으로 숨는 역전 오탐 —
-  //   모니터가 거꾸로 동작(GD 맥북 클린테스트서 Claude Code v2.1.200 확인 2026-07-03).
+  // 모니터가 거꾸로 동작.
   const ctxRemaining = extractCtxPercent(observedLines) ?? (currentPaneLines.length ? extractCtxPercent(recent.map((r) => r.line)) : null);
   return {
     agent_id: agentId,

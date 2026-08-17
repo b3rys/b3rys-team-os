@@ -1,6 +1,6 @@
 /**
  * proposal 자동화 — 생성=즉시 진입 / 리뷰=자동 전이 / 원자·멱등 코어 테스트.
- * GD 2026-07-04 "담당자 자율성 배제 → 시스템 자동 승격". codex/gemini 교차검토 반영.
+ * "담당자 자율성 배제 → 시스템 자동 승격". codex/gemini 교차검토 반영.
  * 핀: (B)생성 즉시 첫 리뷰단계 진입 · 리뷰 등록 시 자동 전이 · advanceProposalIfCurrent 멱등/원자 race 차단.
  */
 import { beforeEach, describe, expect, test } from "bun:test";

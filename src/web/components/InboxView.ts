@@ -17,7 +17,7 @@ import { pick } from "../i18n";
 
 // Inbox default view = action-required only. A message is "action-required" if ANY of its
 // recipients is still 'open', 'needs_match_review', or 'blocked'. blocked=막힘도 누군가 풀어줘야
-// 진행되는 비종료 상태라 행동필요에 띄운다(GD 2026-07-02: "blocked도 행동 필요"). completed/expired/
+// 진행되는 비종료 상태라 행동필요에 띄운다. completed/expired/
 // acknowledged(activity_assumed 포함)만 기본에서 접힘 — toggle 로 전체.
 let showAll = false;
 function isActionRequired(m: BusFlowMessage): boolean {
@@ -80,7 +80,7 @@ function row(m: BusFlowMessage): string {
         .map((r) => `<div class="flex items-center gap-1.5 flex-wrap">${stateBadge(r)}${closeReasonChip(r)}</div>`)
         .join("")
     : `<span class="text-[12px] text-slate-500">${pick("— 수신자 없음", "— No recipients")}</span>`;
-  // 날짜는 KST 고정(formatKST) + sender→recipient 줄 바로 옆 인라인 (GD: 날짜가 중요)
+  // 날짜는 KST 고정(formatKST) + sender→recipient 줄 바로 옆 인라인
   const time = escape(formatKST(m.created_at));
   return `
     <div class="rounded-[14px] bg-surface-3 border border-surface-3 p-4 mb-3 shadow-[0_1px_2px_rgba(0,0,0,.05)] hover:shadow-[0_4px_16px_rgba(0,0,0,.08)] transition-shadow">

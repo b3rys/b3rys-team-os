@@ -24,7 +24,7 @@ import { join } from "node:path";
 const SRC = readFileSync(join(import.meta.dir, "wakeDispatcher.ts"), "utf8");
 
 /**
- * ★깨워진 스레드의 문맥은 ★전 팀원★ 에게, ★같은 형식★ 으로.★ (GD 2026-07-13: "그룹방도 풀면 안돼?")
+ * ★깨워진 스레드의 문맥은 ★전 팀원★ 에게, ★같은 형식★ 으로.★
  *
  * ═══ 예전 ═══
  *   그룹방(tg-) 문맥은 `full_context` capability 가 있는 3명(bill·steve·codex)만 봤다.
@@ -53,7 +53,7 @@ describe("★스레드 문맥 — 전 팀원, 같은 형식★", () => {
     expect(SRC).toContain("recentThreadMessages(db, threadId, fetchLimit, fetchHours)");
   });
 
-  // ★2026-07-16 (GD "전부 5개, 분기 타지 말고"): 참고용 주입을 그룹·버스 통일 = 자기것만·5건★
+  // ★2026-07-16: 참고용 주입을 그룹·버스 통일 = 자기것만·5건★
   it("★자기것만 · 5건 통일★ — from=나 OR to=나, CTX_MSGS_OWN, count 분기 없음", () => {
     expect(SRC).toContain("m.from_agent_id === agentId || m.to_agent_id === agentId"); // 자기것 + 나에게 온 것
     expect(SRC).toContain("CTX_MSGS_OWN"); // 5건 통일 상수
@@ -85,14 +85,14 @@ describe("★내가 이미 보낸 것이 눈에 띄는가★", () => {
 });
 
 /**
- * ★문맥의 크기·잘림·빈 문맥 — 팀장이 세 가지를 다 짚었다.★ (GD 2026-07-13)
+ * ★문맥의 크기·잘림·빈 문맥 — 팀장이 세 가지를 다 짚었다.★
  *   "토큰비용이 크진 않겠지? 만약 6시간 메시지가 없으면? 메시지가 크면? 일단 그냥 붙이나?"
  *   ★셋 다 실재하는 문제였다.★
  */
 describe("★문맥의 크기·잘림·빈 문맥★", () => {
   it("★24시간 넘으면 문맥 없음★ — 옛 대화를 붙이면 '지금 일' 로 착각한다 (GD 2026-07-13 결정)", () => {
     // ★내가 처음엔 반대로 했다★: "비면 나이 무시하고라도 준다".
-    //   ★GD: "오래된걸 주면 안좋은거 아냐?" → 맞다.★ 3일 전 대화를 지금 일로 읽으면 엉뚱한 걸 실행한다.
+    // ★→ 맞다.★ 3일 전 대화를 지금 일로 읽으면 엉뚱한 걸 실행한다.
     //   ★빈 문맥보다 나쁠 수 있다.★ 필요하면 팀원이 thread.sh 로 직접 꺼내 본다(능력은 이미 있다).
     expect(SRC).toContain("const CTX_HOURS = Number(process.env.CTX_HOURS ?? 24);");
     expect(SRC).not.toContain("recentThreadMessages(db, threadId, CTX_MSGS, 24 * 365)");   // ★폴백 없음★

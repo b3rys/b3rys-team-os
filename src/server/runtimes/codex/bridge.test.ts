@@ -70,7 +70,7 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     const r = await handleMessage(123, "안녕", 55, deps);
     expect(calls.reacts).toEqual([{ mid: 55, emoji: "👀" }]); // 접수 즉시 👀
     expect(calls.sends[0]).toBe(DEFAULT_WORKING_TEXT); // 작업중 메시지
-    // 첫 접촉(영입인사 마커 없음)이라 인사+OT 지시가 prepend되고 원문 메시지 포함 (GD 2026-07-01)
+    // 첫 접촉(영입인사 마커 없음)이라 인사+OT 지시가 prepend되고 원문 메시지 포함
     expect(calls.prompts[0]?.prompt).toContain("안녕"); // 원문 메시지 포함
     expect(calls.prompts[0]?.prompt).toContain("첫 응답"); // 첫 접촉 인사 지시 prepend
     expect(calls.edits[0]?.text).toBe("답입니다"); // 작업중 → 답 교체
@@ -78,7 +78,7 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     expect(r.detail).toBe("delivered");
   });
 
-  // ─── 영입인사 = 영속 마커로 1회만 (GD 2026-07-10 버그픽스: 재시작마다 재소개하던 것) ───
+  // ─── 영입인사 = 영속 마커로 1회만 ───
   test("이미 합류한 팀원(마커 존재) → 세션 비어도 영입인사 prepend 안 함", async () => {
     const dir = process.env.B3OS_FIRST_CONTACT_DIR!;
     writeFileSync(join(dir, "devon.done"), "greeted\n"); // devon = 여태 한 번이라도 인사함
@@ -109,7 +109,7 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     expect(calls.edits[0]?.text).toContain("응답을 만들지 못했어요");
   });
 
-  // ─── owner-gate shadow/enforcement (team-comm 3a, GD 2026-07-09, Codex 적대리뷰 대상) ───
+  // ─── owner-gate shadow/enforcement (team-comm 3a, Codex 적대리뷰 대상) ───
   describe("owner-gate shadow/enforcement", () => {
     const PREV_S = process.env.CODEX_GROUP_NATIVE_DENY_SHADOW;
     const PREV_E = process.env.CODEX_GROUP_NATIVE_DENY;

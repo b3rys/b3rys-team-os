@@ -68,7 +68,7 @@ function proposalStatus(db: Database, proposalId: string): string | null {
 }
 
 // gd_report 보고/알림용 리뷰 현황 — 누가 어떤 verdict로 검토했는지. 리뷰 없으면 '무응답 자동 승격' 명시.
-// (GD 2026-07-04: 팀장이 '검증됨/미검증'을 한눈에 보고 결정하게.)
+//
 function formatReviewSummaryRow(r: { reviewer_agent: string; verdict: string | null; is_adversarial: number }): string {
   const verdict = r.verdict ? `(${r.verdict})` : "";
   const role = r.is_adversarial ? "[의무 반대리뷰]" : "";
@@ -113,7 +113,7 @@ function firstAvailableAgent(db: Database, candidates: string[], fallback: strin
 
 // interactive 팀원(비대화 non_interactive · team_official_member:false · 제안자 제외) 중 리뷰 후보 id 목록.
 //
-// ★지금 무엇을 하고 있는지는 안 본다★ (팀 리드 2026-08-08: "blocked 는 빼고 그냥 배정해").
+// ★지금 무엇을 하고 있는지는 안 본다★.
 //   예전에는 `agent_status.state != 'blocked'` 로 걸렀는데, 그 값은 ★일하는 중에도 뜬다.★
 //   `health.ts` 가 같은 값을 "정상 활동중에도 떠서 노이즈" 라고 적어두고 위험 판정에서 빼는데,
 //   배정만 그걸 자격으로 읽어서 ★바쁜 사람이 후보에서 사라졌다.★ 상세는 `db/proposal.ts` 의
@@ -632,7 +632,7 @@ function resetGdReportNoticeClaimsForRevision(db: Database, proposalId: string):
 }
 
 // gd_report 도달 시 팀장 1:1/op surface에 '결정 요청' 알림 — 상태 도달당 1회(멱등), fire-and-forget.
-// (GD 2026-07-10: 그룹 broadcast와 coordinator agent sender를 제거. 알림은 team-op/system 성격으로 팀장 DM에만 보낸다.)
+//
 // owner_chat_id 또는 capture token 미설정(테스트/퍼블릭 미구성)이면 조용히 skip. 커밋 후 라우트에서 호출(트랜잭션 밖).
 async function notifyGdReportReached(db: Database, proposalId: string, _agents: AgentRecord[]): Promise<void> {
   const chatId = ownerChatId(db);
@@ -713,7 +713,7 @@ function notifyGdReportReachedSafely(db: Database, proposalId: string, agents: A
 }
 
 // 시간 기반 안전망 — 정체(updated_at 임계 초과) 제안을 시스템이 스스로 진행시킨다.
-// (GD 2026-07-04: 담당자 무응답으로 파이프라인이 멈추지 않게. workers/proposalSweeper 가 주기 호출.)
+//
 //   draft/revise_requested 정체 → 첫 리뷰 단계로 자동 제출(이미 멈춘 제안도 구제).
 //   peer/pm 무응답 → 1차 재배정(다른 후보 wake) → 2차 리뷰 skip degraded 진행.
 //     단 reject/revise verdict 가 있으면 사람 판단이 필요하므로 자동 진행하지 않는다(codex 교차검토 반영).
@@ -902,7 +902,7 @@ export function createProposalRoutes(deps: ProposalRouteDeps): Hono {
         const res = createProposal(deps.db, body as NewProposal);
         if (!res.ok) return { ok: false as const, error: res.error };
         const proposalId = res.id!;
-        // (B, GD 2026-07-04): 생성 성공 = 곧 제출. 품질 하한선(근거+예상효과)이 이미 미완성을 막으므로
+        // (B): 생성 성공 = 곧 제출. 품질 하한선(근거+예상효과)이 이미 미완성을 막으므로
         // draft에 고이지 않고 팀 규모별 첫 리뷰 단계로 자동 진입(+담당자 배정/wake). 사람이 버튼 누를 필요 없음.
         const proposer = String(body.proposer_agent ?? "").trim();
         const stage = firstReviewStage(otherTeamMembers(deps.db, proposer, agents).length);
@@ -934,7 +934,7 @@ export function createProposalRoutes(deps: ProposalRouteDeps): Hono {
     try {
       const runTransition = deps.db.transaction(() => {
         const fromStatus = proposalStatus(deps.db, proposalId);
-        // GD 2026-07-04: 팀장 최종 결정(gd_report→승인/반려)에는 실행 지시 코멘트가 필수.
+        // 팀장 최종 결정(gd_report→승인/반려)에는 실행 지시 코멘트가 필수.
         // 지시 판정은 오직 body.comment 만 본다 — 대시보드가 빈 입력에 버튼 라벨("승인")을 채우거나
         // reason fallback 으로 라벨이 새도 우회 못하게(교차검토 후 실측 버그 fix). 이 지시가 제안자에게
         // 전달되어 '팀장께 먼저 컨펌 메시지를 보내는' 진입 트리거가 된다.
@@ -1012,7 +1012,7 @@ export function createProposalRoutes(deps: ProposalRouteDeps): Hono {
         if (!res.ok) return { ok: false as const, error: res.error };
         // 리뷰 등록 = 승격 트리거. 현재 단계에서 가드(반대 peer 리뷰 / PM 리뷰) 충족 시 자동 전이 + 다음 배정.
         // 가드 미충족(예: approve만)이면 advanced=false로 머무르고, sweeper가 나중에 처리(degraded).
-        // GD 2026-07-04: peer/pm verdict=reject 는 그 자리서 최종 반려(rejected) + 제안자·팀장 노티.
+        // peer/pm verdict=reject 는 그 자리서 최종 반려(rejected) + 제안자·팀장 노티.
         // concern/revise/approve 는 진행성 판정이라 그냥 다음 단계로만 흐르고 노티 안 함(중간은 팀원끼리).
         const status = proposalStatus(deps.db, proposalId);
         const verdict = String(body.verdict ?? "");

@@ -61,7 +61,7 @@ const chatThreads = new Map<number, string>();
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const DEFAULT_AGENT_REGISTRY = resolve(REPO_ROOT, "agents.json");
 
-// 첫 접촉(영입 후 첫 인사) 판정을 ★영속★ 마커로 한다(GD 2026-07-10 버그픽스).
+// 첫 접촉(영입 후 첫 인사) 판정을 ★영속★ 마커로 한다.
 //   과거엔 인메모리 chatThreads(세션 캐시)가 비면 "첫 접촉"으로 봤는데, 이 캐시는 서버 재시작마다
 //   날아가서 이미 합류한 팀원(devon·lui…)이 재시작 후 첫 wake마다 신입처럼 영입인사를 반복했다.
 //   마커(파일)는 재시작·새 스레드에도 남으므로 "여태 한 번이라도 인사했나"를 정확히 판정한다.
@@ -327,7 +327,7 @@ export async function registerScheduleMarkerViaApi(
   return `${formatScheduleJob(json.job as Record<string, unknown>)}\n- 등록 경로: Codex CLI structured request → bridge host-side schedule tool\n\n대기하지 않고 예약 등록 후 턴을 종료합니다.`;
 }
 
-// ★team-comm owner-gate (GD 2026-07-09, 설계 §3a): 그룹서 owner 아닌데 native로 답하는 것 방지.
+// ★team-comm owner-gate: 그룹서 owner 아닌데 native로 답하는 것 방지.
 //   authority = /api/route (findRouteByTgMessageId + shouldSuppress) — bridge는 판단 안 하고 조회만.
 //   에러/race → null(fail-open: false drop 방지, Codex 적대리뷰 §5).
 async function fetchOwnerGate(
@@ -378,7 +378,7 @@ export async function handleMessage(
   const react = deps.reactMessage ?? (async () => false);
   const workingText = deps.workingText ?? DEFAULT_WORKING_TEXT;
 
-  // ★team-comm group native deny (GD 2026-07-09, 설계 §3a, Codex F1): 그룹(chatId<0) native 처리를 막는다.
+  // ★team-comm group native deny: 그룹(chatId<0) native 처리를 막는다.
   //   ★enforcement = gate 결과와 무관하게 그룹 전체 drop★ — capture→bus가 owner를 이미 처리하므로(runInjection이
   //   route targets 에만 주입) native 가 또 답하면 이중응답. gate는 shadow/audit(effective 권위 기록)용으로만.
   //   env flag 2개 분리, 둘 다 off 기본 = ★라이브 영향 0(byte-level 불변)★. shadow=drop 없이 audit만.
@@ -431,7 +431,7 @@ export async function handleMessage(
     };
   }
 
-  // ★예약 등록은 LLM 판단으로만★ (GD 2026-07-05): 이전엔 여기서 키워드(isOneShotScheduleRequest) 매치만으로
+  // ★예약 등록은 LLM 판단으로만★: 이전엔 여기서 키워드(isOneShotScheduleRequest) 매치만으로
   // buildDirectScheduleRequest → 즉시 등록하고 턴을 종료했다. 그 결과 "3분뒤 메시지가 안왔네" 같은 ★불평·질문★도
   // 시간패턴+행동패턴만 있으면 자동 예약돼버림(LLM이 의도를 판단하지 못함). GD 지적대로 이건 파싱이지 판단이 아니다.
   // → direct-register 경로 제거. isOneShotScheduleRequest 는 아래 ③에서 scheduleToolPrompt(도구 안내)를 주입하는
@@ -451,9 +451,9 @@ export async function handleMessage(
         repoRoot: deps.repoRoot ?? process.env.B3OS_REPO_ROOT ?? REPO_ROOT,
       })
     : text;
-  // 첫 접촉(여태 한 번도 인사 안 한 신입) = 영입 후 첫 응답 → 인사 + OT 받은 것 언급하며 시작(GD 2026-07-01).
+  // 첫 접촉(여태 한 번도 인사 안 한 신입) = 영입 후 첫 응답 → 인사 + OT 받은 것 언급하며 시작.
   //   판정은 ★영속 마커★(재시작에도 남음) — 인메모리 prior(세션 resume용)와 분리해, 이미 합류한 팀원이
-  //   재시작 후 재소개하지 않게 한다(GD 2026-07-10 버그픽스). prior는 아래 resumeSessionId 로만 쓴다.
+  // 재시작 후 재소개하지 않게 한다. prior는 아래 resumeSessionId 로만 쓴다.
   const greetAgentId = selfAgentId;
   const greetedBefore = hasGreetedFirstContact(greetAgentId);
   const promptText = greetedBefore
@@ -794,7 +794,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
   console.log(`[codex-bridge] 시작(long-poll). workdir=${workdir ?? "(none)"}`);
   // ★ready marker를 첫 long-poll 응답이 아니라 getMe 직후 즉시 기록 — 대기 메시지 없는 새 봇은 첫
   //   getUpdates(timeout=30)가 ~30s 뒤 반환이라 marker도 ~30s 뒤였고, 활성화 게이트(28s)가 그보다 짧아
-  //   건강한 브리지를 '미기동'으로 오판했다(BUG5, GD 맥북테스트 2026-07-03). getMe는 즉시 반환+토큰/도달성
+  // 건강한 브리지를 '미기동'으로 오판했다(BUG5, GD 맥북테스트 2026-07-03). getMe는 즉시 반환+토큰/도달성
   //   검증이라 '폴링 진입=ready'로 안전. getMe 실패 시엔 아래 getUpdates-후-marker 폴백이 그대로 커버.
   try {
     const me = await fetch(`${TG_API}/bot${token}/getMe`);

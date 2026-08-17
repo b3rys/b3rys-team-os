@@ -82,7 +82,7 @@ export function messagesWithAggregatedStatus(
  * so they are NOT 'pending' and never appear here — no double-wake. Only dashboard's
  * pending user rows get bus-woken.
  *
- * ★'system' — 2026-07-13 (GD 승인) 부터 깨운다. 단 ★시각 컷오프★ 를 건다.★
+ * ★'system' — 2026-07-13 부터 깨운다. 단 ★시각 컷오프★ 를 건다.★
  *   예전엔 system 을 ★수집 번들일 때만★ 통과시켰다. 그 수집 기능은 삭제됐다 → ★system 이 전부 막혔다.★
  *   실측: 카드 알림 29건 중 ★배달 0건★ (expired 21 · pending 8, 가장 오래된 건 7/04).
  *   "[카드 배정] 카드 'X' 담당이 되셨습니다" 가 ★단 한 번도 안 갔다★ → 팀원이 자기 카드를 못 챙겼다.

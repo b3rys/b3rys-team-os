@@ -51,7 +51,7 @@ function viewTabClass(active: boolean): string {
 
 function bootstrap() {
   const app = document.getElementById("app")!;
-  // deep-link: /team?view=reports (top-level /reports redirect 등) → 해당 탭으로 부팅 (GD 2026-06-07)
+  // deep-link: /team?view=reports (top-level /reports redirect 등) → 해당 탭으로 부팅
   const _bootParams = new URLSearchParams(location.search);
   const _bootView = _bootParams.get("view");
   const _savedView = localStorage.getItem(VIEW_STORAGE_KEY);
@@ -463,7 +463,7 @@ function renderMainContent(root: HTMLElement) {
 
 // Draggable column widths (desktop only). The handles set CSS vars --sidebar-w / --thread-w,
 // which styles.css consumes ONLY inside the md+ media query — so mobile's single-pane layout is
-// untouched. Widths persist in localStorage. (GD 2026-05-31)
+// untouched. Widths persist in localStorage.
 function setupResizers() {
   const root = document.documentElement;
   const LS = { sidebar: "bill-dash-sidebar-w", thread: "bill-dash-thread-w" } as const;

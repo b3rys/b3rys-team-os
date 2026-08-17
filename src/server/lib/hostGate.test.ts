@@ -60,7 +60,7 @@ describe("신뢰하지 않는 주소 — 막는다", () => {
     expect(html).toContain("studio.b3rys.com");
     expect(html).toContain("팀원에게 이대로 물어보세요");
     expect(html).toContain("TEAM_TRUSTED_DASHBOARD_HOSTS");
-    // ★등록이 무엇을 뜻하는지 같이 말해야 한다★ (팀장님 2026-07-30)
+    // ★등록이 무엇을 뜻하는지 같이 말해야 한다★
     //   "등록하면 열린다" 만 알려주면, 인터넷에 그냥 열린 주소를 등록하게 된다.
     //   그날 실제로 그런 주소가 있었고, 쓰기를 막던 유일한 장치가 이 검사였다.
     expect(html).toContain("팀리드 권한");

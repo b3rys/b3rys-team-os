@@ -1,12 +1,12 @@
 // 중앙 경로 모듈 — 하드코딩된 `/Users/you/...` 절대경로를 HOME 기준으로 이관해
-// 공개 빌드가 임의 머신에서 동작하게 한다(포터빌리티, GD 2026-07-02).
+// 공개 빌드가 임의 머신에서 동작하게 한다(포터빌리티).
 //
 // 원칙:
 //   - process.env 는 여기서 한 번만 읽는다(단일 출처).
 //   - REPO_ROOT / MEMBERS_ROOT 는 personaTemplates 와 동일 파생을 재사용(divergence 방지).
 //     personaTemplates: REPO_ROOT = TEAM_COLLAB_ROOT ?? resolve(<이 소스 dir>/../../..)
 //                       MEMBERS_ROOT = B3RYS_HOME ? $B3RYS_HOME/members : $HOME/Development
-//   - GD 머신(HOME=/Users/you)에선 모든 값이 기존 하드코딩과 동일하게 해석된다(무중단).
+// - GD 머신(HOME=/Users/you)에선 모든 값이 기존 하드코딩과 동일하게 해석된다(무중단).
 //
 // dependency-light: node:path 와 타입 전용 import 만.
 

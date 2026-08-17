@@ -93,7 +93,14 @@ export const WEEKLY_SHARED_CURATION_BODY = [
 export const WEEKLY_SELF_LEARNING_BODY = [
   "[workloop: self-learning 세션 · 금 05:00 KST]",
   "b3os-task-loop의 scheduled workloop 계약으로 이번 세션을 오픈→검토→proposal 등록→보고→닫기까지 한 턴에 수행하세요.",
-  "목적: SHARED.md(04:00에 정리된 것 포함)와 지난 1주 팀 활동을 검토해, 팀에 필요한 (a)팀 룰 변경 (b)새로운 과제 (c)고쳐야 할 이슈를 뽑아 ★proposal 시스템에 등록★하세요.",
+  // 예전에는 "SHARED.md(04:00에 정리된 것 포함)" 였다. ★이 봉투가 다른 job 의 결과를 산문으로 단정하고 있었다.★
+  // 04:00 정리(codex)와 05:00 이 세션은 별개 job 이고, 맥이 자다 깨면 둘이 같은 초에 깨어난다
+  // (2026-08-13: 8개 job 이 23:52:05 UTC 한 초에 실행 — 1시간 간격이 0초). 그러면 이 문장은 거짓이 된다.
+  // ★대신 값을 박지도 않는다★ — 봉투는 wake 시점에 만들어지므로 "최종 수정: 08:52 기준" 같은 값은
+  // 몇 분 뒤 무효가 되고, 산문 거짓말이 기계가 서명한 거짓말로 바뀔 뿐이다(dbak 반대리뷰).
+  // 그래서 ★주장하지 말고 읽는 시점에 직접 확인하라고 지시한다.★ 지연 여부와 무관하게 성립한다.
+  "목적: rules/SHARED.md 와 지난 1주 팀 활동을 검토해, 팀에 필요한 (a)팀 룰 변경 (b)새로운 과제 (c)고쳐야 할 이슈를 뽑아 ★proposal 시스템에 등록★하세요.",
+  "★SHARED.md 를 읽기 직전에 mtime 과 최신 항목 날짜를 직접 확인하세요★ — 04:00 정리 세션은 별개 job 이라 아직 안 돌았을 수 있습니다. 아직이면 정리본을 기다리지 말고 원자료(team.db·git log·audit)로 보세요.",
   // 라우터가 /api 아래 마운트되고 그 전체가 /team 아래 붙는다 → 실제 경로는 /team/api/proposals.
   // "POST /api/proposals" 로 적혀 있어서 시킨 대로 하면 404 가 난다(2026-07-31 실측).
   "★등록 방법: POST /team/api/proposals★ (/api/proposals 는 404 입니다). 각 proposal 에 근거(왜)+예상효과 필수. 등록하면 리뷰 게이트로 올라갑니다(자동 적용 아님).",
@@ -177,7 +184,7 @@ export const EXEC_ALLOWLIST: Readonly<Record<string, ExecSpec>> = Object.freeze(
       timeoutMs: 120_000,
       label: "매일 06:00 칸반 PM 워크루프 (담당자 동적해석 wake)",
     },
-    // ★launchd → scheduled_job 이관★ (GD 2026-07-17). 옛 경로: launchd `com.you.team-continuation-guard`.
+    // ★launchd → scheduled_job 이관★. 옛 경로: launchd `com.you.team-continuation-guard`.
     //   왜 옮겼나:
     //   ① ★조용히 죽었다★ — plist 는 있는데 launchctl 에 언로드된 채 ★3일 18시간 정지★(7/14 00:12 마지막).
     //      아무도 몰랐다. 룰(TEAM-OS.task-mgmt)은 그동안 "가드가 owner 를 깨워줄 것" 이라고 약속하고 있었다.
@@ -828,11 +835,14 @@ export function skipScheduledJob(
   ).run(nextStatus, enabled, nextRun, nowSql, nowSql, job.id);
 }
 
-export function emitScheduledJob(db: Database, job: ScheduledJobRow): string {
+export function emitScheduledJob(db: Database, job: ScheduledJobRow, now: Date = new Date()): string {
   const payload = JSON.parse(job.payload_json) as SchedulePayload;
   if (payload.type !== "inbox") throw new Error(`unsupported_payload:${payload.type}`);
   const env = {
     ...payload.envelope,
+    // ★두 emit 경로 모두에 붙인다★ — inbox 도 capability_workloop 도 늦게 깨어난다.
+    // 한쪽만 고치면 "고쳤다" 로 읽히고 다른 쪽은 조용히 옛 동작을 유지한다.
+    body: withLateWakeBanner(payload.envelope.body, job, now),
     dedupe_key: scheduledDedupeKey(job.id, job.next_run_at),
   };
   const accepted = acceptInbound(db, env, { dedupeWindowSec: 60 });
@@ -861,6 +871,7 @@ export function emitCapabilityWorkloop(
   db: Database,
   job: ScheduledJobRow,
   payload: CapabilityWorkloopPayload,
+  now: Date = new Date(),
 ): { emittedMessageId?: string; skippedReason?: string; targetAgentId?: string } {
   const agents = ambientAgents();
   if (agents.filter((agent) => agent.enabled !== false && isTeamOfficialMember(agent) && !hasCapability(agent, "non_interactive")).length === 0) {
@@ -875,7 +886,7 @@ export function emitCapabilityWorkloop(
       from_agent_id: "system",
       to_agent_id: targetAgentId,
       type: "dm",
-      body: payload.body,
+      body: withLateWakeBanner(payload.body, job, now),
       source: "agent",
       hop_count: 0,
       priority: "normal",
@@ -1025,7 +1036,7 @@ const EXEC_LEASE_MARGIN_SEC = 60;
  * The problem it addresses: after the Mac is off for days every job's next_run_at is in
  * the past, so they all come due in one tick and a "06:00 ping" lands at 14:00.
  *
- * Why it ships off (GD, 2026-07-29): the burst is smaller than it looks — next_run_at is
+ * Why it ships off: the burst is smaller than it looks — next_run_at is
  * recomputed forward from `now` and missed slots are never backfilled, so a 30-minute job
  * idle for three days fires ONCE, not 144 times. So the cost of leaving it off is a dozen
  * late messages at boot. The cost of turning it on is that things silently do not happen:
@@ -1047,6 +1058,72 @@ function misfireGraceSec(): number {
 /** How late this job's due slot is, in seconds. Negative/zero means on time. */
 function lateBySec(job: ScheduledJobRow, now: Date): number {
   return (now.getTime() - fromSqliteDate(job.next_run_at).getTime()) / 1000;
+}
+
+/**
+ * A wake this late gets a banner. 15분: 정시 tick 지터(초 단위)와 "맥이 자다 깼다"(수십 분~수 시간)
+ * 사이에 겹치는 구간이 없다. 30일 실측에서 이 선을 넘은 실행은 전부 부팅 직후 catch-up 이었다.
+ */
+export const LATE_WAKE_BANNER_THRESHOLD_SEC = 15 * 60;
+
+/**
+ * 시각을 job 의 시간대로 찍는다.
+ *
+ * ★프로세스 시간대에 의존하지 않는다★ — `bun test` 는 TZ=UTC 로 돌고 실서버는 Asia/Seoul 이라,
+ * 로컬 포맷을 쓰면 검사 환경에서만 통과하는 결함이 생긴다(SHARED.md 2026-07-30). timeZone 을
+ * 명시하면 어디서 돌든 같은 문자열이 나온다. sv-SE 로케일은 "YYYY-MM-DD HH:mm" 을 준다.
+ */
+function formatInZone(date: Date, tz: string): string {
+  try {
+    return new Intl.DateTimeFormat("sv-SE", {
+      timeZone: tz,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).format(date);
+  } catch {
+    // 알 수 없는 시간대면 UTC 로 떨어뜨린다 — 배너가 없는 것보다 UTC 라도 있는 게 낫다.
+    return `${toSqliteDate(date).slice(0, 16)} UTC`;
+  }
+}
+
+function formatLateness(sec: number): string {
+  const totalMin = Math.round(sec / 60);
+  if (totalMin < 60) return `${totalMin}분`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return m === 0 ? `${h}시간` : `${h}시간 ${m}분`;
+}
+
+/**
+ * 늦게 깨어난 wake 봉투 맨 앞에 붙는 배너. 정시면 빈 문자열(= 봉투 무변화).
+ *
+ * 왜 필요한가: 미스파이어 유예가 기본 OFF 라서(위 주석) 맥이 자는 동안 밀린 슬롯은 부팅 직후
+ * 한꺼번에 실행된다. 그때 04:00 job 과 05:00 job 이 같은 초에 깨어나 ★간격 계약이 0초가 된다.★
+ * 그 사실은 scheduled_job_run 에만 남고 ★깨어난 당사자에게는 안 간다★ — 그래서 후행 owner 가
+ * 선행 job 의 산출물이 아직 없는 상태에서 그것을 읽는다(2026-08-13 실측).
+ *
+ * ★배너는 동시 실행 자체를 막지 못한다.★ 막는 건 봉투 본문의 "읽기 직전에 직접 확인하라" 쪽이고,
+ * 배너는 owner 가 "이 세션의 입력이 신선한가" 를 판단할 사실을 주는 역할이다. 둘은 대체재가 아니다.
+ *
+ * ★선행 job 의 '완료' 는 싣지 않는다★ — scheduled_job_run.outcome='succeeded' 는 "깨움 메시지를
+ * 발송했다" 는 뜻이지 "그 일이 끝났다" 가 아니다(started_at == finished_at 같은 초). 그 값을
+ * "선행 완료" 로 실으면 지금 고치는 것과 똑같은 거짓을 한 세대 더 만든다(dbak 반대리뷰).
+ */
+export function lateWakeBanner(job: ScheduledJobRow, now: Date): string {
+  const lateSec = lateBySec(job, now);
+  if (lateSec < LATE_WAKE_BANNER_THRESHOLD_SEC) return "";
+  const tz = job.timezone || "Asia/Seoul";
+  return [
+    `[늦은 깨움] 이 세션은 예정보다 ★${formatLateness(lateSec)} 늦게★ 시작됐습니다.`,
+    `  예정 ${formatInZone(fromSqliteDate(job.next_run_at), tz)} · 실제 ${formatInZone(now, tz)} (${tz})`,
+    "  같은 시각에 다른 정기 작업도 함께 깨어났을 수 있습니다 — 앞선 작업의 산출물이 아직 없을 수 있으니, 파일·기록을 읽기 전에 실제 상태를 직접 확인하세요.",
+  ].join("\n");
+}
+
+/** 배너를 봉투 본문 앞에 붙인다. 정시면 원문 그대로(문자열 동일성 보장). */
+function withLateWakeBanner(body: string, job: ScheduledJobRow, now: Date): string {
+  const banner = lateWakeBanner(job, now);
+  return banner ? `${banner}\n\n${body}` : body;
 }
 
 export async function runDueSchedulerJobsOnce(
@@ -1143,14 +1220,16 @@ export async function runDueSchedulerJobsOnce(
       } else if (payload.type === "inbox") {
         // inbox: emit + reschedule atomically so a crash can't double-emit.
         const emittedMessageId = db.transaction((j: ScheduledJobRow) => {
-          const id = emitScheduledJob(db, j);
+          // 배너의 "실제" 시각은 completeScheduledJob 이 기록하는 시각과 같아야 한다 —
+          // 여기서 새로 new Date() 를 부르면 봉투와 run 기록이 서로 다른 시각을 말한다.
+          const id = emitScheduledJob(db, j, now);
           completeScheduledJob(db, j, { emittedMessageId: id, now });
           return id;
         })(claimed);
         results.push({ jobId: job.id, status: "succeeded", emittedMessageId });
       } else {
         const outcome = db.transaction((j: ScheduledJobRow) => {
-          const emitted = emitCapabilityWorkloop(db, j, payload);
+          const emitted = emitCapabilityWorkloop(db, j, payload, now);
           if (emitted.skippedReason) {
             skipScheduledJob(db, j, emitted.skippedReason, { now });
             return emitted;

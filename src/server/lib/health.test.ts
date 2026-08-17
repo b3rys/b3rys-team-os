@@ -23,7 +23,7 @@ const mk = (over: Partial<AgentStatus>): AgentStatus => ({
 } as AgentStatus);
 
 describe("classifyHealth", () => {
-  // GD 2026-06-26: 빨간 점/위험 라벨은 응답(세션) 기준만. 문맥(ctx)은 level에 반영하지 않고 reason 노트만(노티는 카드 문맥 바).
+  // 빨간 점/위험 라벨은 응답(세션) 기준만. 문맥(ctx)은 level에 반영하지 않고 reason 노트만(노티는 카드 문맥 바).
   test("ctx 95% → 세션 정상이면 level ok 유지 + 문맥 reason만", () => {
     const v = classifyHealth(mk({ ctx_percent: 95 }), claudeAgent, now);
     expect(v.level).toBe("ok");

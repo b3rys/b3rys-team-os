@@ -229,7 +229,7 @@ function parseCommandApproval(req: ApprovalRequest): CommandParse {
 }
 
 /**
- * ★이보다 긴 명령은 승인 흐름에 태우지 않는다 — 거절하고 따로 검토한다.★ (팀 리드 결정)
+ * ★이보다 긴 명령은 승인 흐름에 태우지 않는다 — 거절하고 따로 검토한다.★
  *
  * 앞서 이 자리에 ★스캔 상한★ 을 뒀다가 없앴다. 자르면 잘린 뒤가 검사에서 빠지고,
  * 그래서 "얼마나 잘라야 안전한가" 를 놓고 100k → 1M → 64k → 8k 로 헤맸다.
@@ -254,7 +254,7 @@ const COMMAND_REVIEW_LIMIT = 2_000;
  * 그래서 `y×240 + SAFE` 와 `y×240 + EVIL` 이 ★같은 열쇠★ 였다 —
  * ★안전한 명령에 '항상 허용' 을 한 번 주면 위험한 명령이 팝업 없이 통과★ 한다.
  *
- * ■ 어떻게 닫나 — ★공용 코드를 건드리지 않는다★ (팀 리드: "사이드이펙트 없이 분리해서")
+ * ■ 어떻게 닫나 — ★공용 코드를 건드리지 않는다★
  * 우리가 만드는 값 안에 전체 명령의 지문을 넣어 240자 절단선 안에 살린다. permissionGate 는 그대로.
  *
  * ■ ★두 자리로 나눠 싣는 이유 — 한 필드가 두 가지 일을 하려다 둘 다 놓쳤다★
@@ -567,7 +567,7 @@ function fitEntries(display: string[], budget: number): string {
  *   → 한 문자열이 두 일을 해야 하므로 순서를 이렇게 고정한다:
  *     ①경고(사람) ②지문(열쇠 — 잘려도 구분됨) ③파일 개수·종류·경로(사람+열쇠)
  *   ★규모(+n/-n)는 여기 못 넣는다★ — 내용이 바뀔 때마다 열쇠가 달라져 '항상 허용' 이 영원히 안 붙는다.
- *   규모는 text 에 남고, 그것을 화면에 띄우려면 렌더러(codex 폴더 밖)를 고쳐야 한다 — ★팀 리드 판단 대기.★
+ * 규모는 text 에 남고, 그것을 화면에 띄우려면 렌더러(codex 폴더 밖)를 고쳐야 한다 — ★팀 리드 판단 대기.★
  */
 function writeOperation(
   agentId: string,
@@ -657,7 +657,7 @@ function grantRootDisplay(root: string): string {
  *  action 으로 떨어지므로 ★target = method 이름★ 이 되어 ★그 method 로 오는 모든 요청이 같은 scope★ 였다.
  *  → 한 번 allowed_always 를 받으면 이후 ★내용이 전혀 다른 요청도 팝업 없이 통과★ 한다.
  *
- *  ★팀 리드 원칙(2026-07-28): "애매하면 통과가 아니고 ask 로."★
+ * ★팀 리드 원칙(2026-07-28): "애매하면 통과가 아니고 ask 로."★
  *  해석에 실패했으면 넓은 열쇠를 만들지 않는다 — payload 지문을 target 에 넣어 payload 가 다르면 열쇠도 다르게.
  *
  *  ※ reason 을 text 에 남기는 이유: permissionGate.operationText 가 text 도 Tier-D 스캔에 쓴다. */

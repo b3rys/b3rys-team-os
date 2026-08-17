@@ -13,7 +13,7 @@ describe("서버 오류 코드를 사람 말로", () => {
     expect(m).toContain("localhost");
     // ★이 예외는 서버가 로컬에만 열려 있을 때만 성립한다★ — 그 전제를 빼면 막힌 길로 안내하게 된다
     expect(m).toContain("로컬에만");
-    // ★사용자가 뭘 물어야 할지 알 수 있어야 한다★ — 그대로 붙여넣을 문장을 준다(팀장님 지시)
+    // ★사용자가 뭘 물어야 할지 알 수 있어야 한다★ — 그대로 붙여넣을 문장을 준다
     expect(m).toContain("팀원에게 이대로 물어보세요");
     expect(m).toContain("TEAM_TRUSTED_DASHBOARD_HOSTS");
   });

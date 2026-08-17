@@ -4,7 +4,7 @@
  *
  * GD 방침: exec 폴백 없음 → app-server 예외를 여기서 정면 처리(에러=ok:false로 실패통지 경로 태움).
  * ★승인 경계는 codex 설정(config.toml permission 프로파일)이 정한다★ — 우리 코드가 두 번째로 판정하지 않는다.
- * hermes·openclaw 와 같은 모양(자기 런타임 설정으로 자기 방에서 끝냄). 팀 리드 2026-08-09·08-12.
+ * hermes·openclaw 와 같은 모양(자기 런타임 설정으로 자기 방에서 끝냄). ·08-12.
  */
 import type { Database } from "bun:sqlite";
 import { CodexAppServerClient, type ReviewDecision } from "./appServerClient";
@@ -60,7 +60,7 @@ export async function runViaAppServer(
   //   dex(codex 런타임)가 따로 있다). 그래서 CodexTurnOptions.agentId 를 필수로 두어 컴파일이 막게 했다.
   try {
     if (!reused) await client.start(); // 살아있는 프로세스면 핸드셰이크를 다시 하지 않는다
-    // ★codex 설정이 정하게 한다★ (팀 리드 2026-08-11: "codex 설정으로 돌게 해. 별도 우리 코드가 아닌").
+    // ★codex 설정이 정하게 한다★.
     //
     //   여기서 sandbox·approvalPolicy 를 넘기면 ★CODEX_HOME 의 config.toml 을 덮어쓴다.★
     //   그러면 권한 프로필(파일 경로 deny 등)을 아무리 써놔도 효과가 없다 — 실측으로 확인했다:
@@ -90,14 +90,19 @@ export async function runViaAppServer(
         try { setActivityLine(db, opts.agentId, line); } catch { /* 표시가 턴을 막지 않는다 */ }
       },
       onApproval: async (req) => {
-        // ★codex 가 물으면 그 팀원 방에 띄우고, 사람이 누른 대로 답한다.★ (팀 리드 2026-08-12)
+        // ★경계는 codex 설정이 정한다. 우리는 두 번째로 판정하지 않는다.★
+        //   codex 가 물으면 그 물음을 ★그 팀원의 방★ 으로 옮기고, 사람이 누른 대로 돌려준다.
+        //   판정은 codex 가, 전달만 우리가 한다. 터미널·앱에서 codex 를 쓸 때와 같은 모습이다.
         //
-        //   터미널이나 앱에서 codex 를 쓰면 경계 밖은 ★물어보고 사람이 누른다.★ 그게 원래 모습이다.
-        //   우리가 하는 일은 그 물음을 ★텔레그램 그 팀원 방으로 옮기는 것★ 이다 — 메인 작업은 codex 가 한다.
+        //   전에는 여기서 judgeApproval 로 다시 판정하고, ask 면 ★op 방에 팝업★ 을 띄웠다.
+        //   그게 두 가지를 동시에 망가뜨렸다:
+        //     ① 팀원 승인이 ★op 방★ 에 떴다 — op 방은 시스템 알림 자리다.
+        //        실측: permission_request 를 만든 팀원은 ★codex 런타임뿐★ (dex 5 · codex 4). 다른 팀원 0건.
+        //        = 원래 사용성이 아니라 ★우리가 얹은 것★ 이었다.
+        //     ② 사람이 안 누르면 턴이 끝나지 않아 ★dex 가 답을 못 했다.★
         //
         //   한때 여기서 무조건 거절한 적이 있다. 띄울 데가 없다는 이유였는데, 그건 옮겨온 게 아니라
-        //   ★기능을 뺀 것★ 이었다(팀 리드: "그걸 기본을 실패로 하면 헤르메스 대체를 실현할 수 있어?").
-        //   그 전에는 ★op 방★ 에 띄웠다 — op 방은 시스템 알림 자리다.
+        //   ★기능을 뺀 것★ 이었다 — 기본이 거절이면 승인창을 옮겨왔다고 할 수 없다.
         //
         //   목적지는 ★이 턴의 주인★ 에서 뽑는다. 상수로 박으면 다시 남의 방으로 간다.
         return db

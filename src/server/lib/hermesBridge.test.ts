@@ -117,13 +117,13 @@ describe("buildPrompt — direct_to_gd 자가발송 금지 지시", () => {
     const p = buildPrompt(base);
     expect(p).not.toContain("발신 도구를 직접 호출하지 마세요");
   });
-  // GD 2026-07-09: trailer 정리 — '너는 b3rys 팀원' 제거 + direct_to_gd 시 '그룹 표시' 문구 상충 제거
+  // trailer 정리 — '너는 b3rys 팀원' 제거 + direct_to_gd 시 '그룹 표시' 문구 상충 제거
   test("trailer: 'b3rys 팀의 <name>' 문구 제거(매 턴)", () => {
     expect(buildPrompt(base)).not.toContain("b3rys 팀의");
     expect(buildPrompt({ ...base, locale: "en" })).not.toContain("on the b3rys team");
   });
   /**
-   * ★[B] 전환 — surfaceNote 가 정반대가 됐다.★ (GD 2026-07-13: "팀원한테 맡겨. 다 빼.")
+   * ★[B] 전환 — surfaceNote 가 정반대가 됐다.★
    *
    * ═══ 예전 계약 [A] ═══
    *   surfaceNote = "브릿지가 당신의 최종 답변을 ★버스/그룹에 전달★합니다 — 발신 도구로 다시 보내지 마세요."
@@ -132,7 +132,7 @@ describe("buildPrompt — direct_to_gd 자가발송 금지 지시", () => {
    * ═══ 왜 뒤집혔나 ═══
    *   ★"아무 말도 안 하기" 가 불가능했다★ → 룰대로 침묵을 택해도 그 문장이 그대로 발송됐다 →
    *   `[NO_REPLY]` 라는 우회 토큰이 생겼고 → 가드를 발행 지점마다 달았고 → ★하나를 놓쳤고★ →
-   *   ★"GD CSO HERMES : [NO_REPLY]" 가 팀장 단톡방에 문자 그대로 찍혔다★ (2026-07-13 라이브).
+   * ★"GD CSO HERMES : [NO_REPLY]" 가 팀장 단톡방에 문자 그대로 찍혔다★ (2026-07-13 라이브).
    *
    * ═══ 지금 계약 [B] ═══
    *   ★턴 본문은 hermes 의 메모다. 아무 데도 안 간다.★ 말하려면 ★자기 손으로 보낸다.★
@@ -145,7 +145,7 @@ describe("buildPrompt — direct_to_gd 자가발송 금지 지시", () => {
     // ② [B] 불변식이 ★명시★ 된다
     expect(p).toContain("★말하려면 직접 보내세요. 안 보내면 아무 말도 안 한 것입니다.★");
     expect(p).toContain("당신의 메모"); // 턴 본문 = 메모 (왜 보내야 하는지의 '이유')
-    // ③ ★주소 메뉴를 주지 않는다★ (GD 2026-07-14 / hermes 본인 증언)
+    // ③ ★주소 메뉴를 주지 않는다★
     //    예전엔 "· 팀원에게 → … · 단톡방에 → … · 팀장께 직보 → …" 라고 ★선택지 3개★ 를 줬다.
     //    ★hermes:★ "그 선택지가 붙어 있으면 상위 지시의 '팀장께' 가 routing intent 처럼 보입니다."
     //    답 주소는 ★이미 정해져 있다★ (호출부가 안다) → 이제 봉투 kind 로만 표현한다.

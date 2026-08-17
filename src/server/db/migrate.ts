@@ -94,6 +94,16 @@ export function migrate(db: Database): void {
   // 기존 DB 용 — 이미 있으면 무시.
   try { db.exec("ALTER TABLE permission_request ADD COLUMN expires_at TEXT"); }
   catch (e) { if (!String(e instanceof Error ? e.message : e).includes("duplicate column name")) throw e; }
+  // 사람이 고른 ★범위★ 를 그대로 적는 칸. once | session | always.
+  //
+  // status 는 CHECK 로 값이 고정돼 있고, ★CHECK 는 ALTER 로 못 바꾼다★ — 늘리려면 표를 재작성해야 한다.
+  // 이 표는 공개 코드가 무조건 만든다(PUBLIC_BUILD 분기 없음). 남의 설치본 DB 를 재작성하지 않는다.
+  // ADD COLUMN 은 메타데이터만 바꾸고 기존 행은 NULL 로 남으므로 어느 설치본에서도 안전하다.
+  //
+  // status 는 ★지속되는 허가를 남기는가★ 를 말한다(allowed_always 만 grant 를 쓴다).
+  // 세션 허용은 지속되지 않으므로 status 는 allowed_once 와 같고, 둘을 가르는 것은 이 칸이다.
+  // ★결정을 보고할 때는 두 칸을 같이 읽는다★ — status 만 읽으면 세션 선택이 '한번' 으로 보인다.
+  addColumnIfMissing(db, "permission_request", "decision_scope", "TEXT");
   db.exec("CREATE INDEX IF NOT EXISTS idx_permission_request_status ON permission_request(status, created_at DESC)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_permission_request_scope ON permission_request(scope_key, status, created_at DESC)");
   db.exec(
@@ -156,7 +166,7 @@ export function migrate(db: Database): void {
   db.exec("CREATE INDEX IF NOT EXISTS idx_proposal_status ON proposal(status, updated_at DESC)");
   addColumnIfMissing(db, "proposal", "body", "TEXT");
   addColumnIfMissing(db, "proposal", "author_agent", "TEXT");
-  // 승인 후 실행 유형(GD 2026-07-04): skill/rule/task/other. 생성 시 지정 또는 제목 태그에서 파생.
+  // 승인 후 실행 유형: skill/rule/task/other. 생성 시 지정 또는 제목 태그에서 파생.
   addColumnIfMissing(db, "proposal", "type", "TEXT");
   db.exec("UPDATE proposal SET author_agent = proposer_agent WHERE author_agent IS NULL OR trim(author_agent) = ''");
   db.exec(
@@ -197,7 +207,7 @@ export function migrate(db: Database): void {
      )`,
   );
   db.exec("CREATE INDEX IF NOT EXISTS idx_proposal_followup_open ON proposal_followup_task(proposal_id, status, closed_at)");
-  // Proposal 자동화 멱등 레이어(2026-07-04, GD 지시 · codex/gemini 교차검토).
+  // Proposal 자동화 멱등 레이어(2026-07-04, 요구사항 · codex/gemini 교차검토).
   //   자동 전이/알림의 부수효과 중복 방지: action_key(PK unique)를 실행 전 insert 시도해
   //   이미 있으면(중복) skip. sweeper·이벤트 승격이 동시에 같은 전이를 밀어도 1회만 발생.
   //   advanceProposalIfCurrent(db/proposal.ts)가 이 테이블만 통해 자동 액션을 게이트한다.
@@ -415,7 +425,7 @@ export function migratePendingFollowup(db: Database): void {
 /**
  * GD-report reminder flag (2026-07-11, GD — prompt-injection approach). A lightweight per-(collector,
  * thread) bit that says "this non-claude collector is running a team-lead collection." Set when the
- * collector's fan-out handoff (GD provenance) is observed; while set, wakeDispatcher appends a soft
+ * collector's fan-out handoff is observed; while set, wakeDispatcher appends a soft
  * "wrap up & report to the team lead" reminder to the collector's wake body. Cleared when the
  * collector's report to the team lead (reply_mode=direct_to_gd) is observed. TTL-bounded (created_at)
  * so a missed clear can't linger. NO central watchdog — set/inject/clear only.
@@ -906,7 +916,7 @@ export function runBusMigration(db: Database): void {
   // sweep. Same safe rule applied to history. Idempotent + flag-guarded.
   orphanedDeliveryBackfill(db);
 
-  // broadcast complete 로직 (GD 2026-06-22): broadcast(@all/announce)는 FYI인데 비응답자 수신행이
+  // broadcast complete 로직: broadcast(@all/announce)는 FYI인데 비응답자 수신행이
   // 'open'으로 남아 inbox에 action-required로 영구 누적됨(@all 인사 후 "주르륵"). 이제 신규는
   // acknowledged로 생성하고(insertMessage), 기존 open broadcast 행도 일회 정리. Idempotent + flag-guarded.
   broadcastOpenBackfill(db);
@@ -1019,7 +1029,7 @@ export function orphanedDeliveryBackfill(db: Database): void {
 }
 
 /**
- * broadcast-open backfill — broadcast complete 로직의 retroactive 절반 (GD 2026-06-22).
+ * broadcast-open backfill — broadcast complete 로직의 retroactive 절반.
  * 기존 broadcast(@all/announce) 수신행이 recipient_state='open'으로 남아 inbox에 action-required로
  * 영구 누적된 걸 'acknowledged'(broadcast_fyi)로 일회 정리. 새 broadcast는 insertMessage가 이미 ack로 생성.
  * SCOPE: message.type='broadcast' OR to_agent_id='broadcast' 인 메시지의 'open' 수신행만. needs_match_review·

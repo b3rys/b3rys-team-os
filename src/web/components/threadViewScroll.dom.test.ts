@@ -1,6 +1,6 @@
 /**
  * ThreadView 스크롤 유지 — DOM 회귀 테스트.
- *   증상(2026-08-01, GD 리포트): 1:1 스레드에서 위로 스크롤해 이전 보고를 읽는 중에도
+ * 증상(2026-08-01, GD 리포트): 1:1 스레드에서 위로 스크롤해 이전 보고를 읽는 중에도
  *   폴링 재렌더마다 무조건 바닥으로 끌려 내려감 (구현이 재렌더 후 scrollTop=scrollHeight 고정).
  *   기대: 바닥 근처일 때만 stick, 위에서 읽는 중이면 위치 보존.
  *
@@ -125,7 +125,7 @@ describe("ThreadView scroll retention", () => {
       mockMetrics(body!);
       // 전제 확인: 메시지 2개 → scrollHeight 1000, 뷰포트 400 → 스크롤 가능.
       expect(body!.scrollHeight).toBe(1000);
-      // 인라인 마크다운 배선 가드: **볼드** 가 <strong> 으로 렌더된다 (mdInline, GD 2026-08-01).
+      // 인라인 마크다운 배선 가드: **볼드** 가 <strong> 으로 렌더된다 (mdInline).
       expect(body!.querySelector("strong")?.textContent).toBe("첫");
 
       // ── 시나리오 1: 위로 스크롤해 읽는 중(120px 지점) + 새 메시지 폴링 도착 ──

@@ -1,7 +1,7 @@
 // 공유 날짜/시각 유틸 — SQLite 타임스탬프를 뷰어의 로컬 타임존으로 정확히 렌더.
 //   SQLite datetime('now') 은 타임존 없는 UTC 문자열("YYYY-MM-DD HH:MM:SS") 을 저장한다.
 //   JS `new Date("2026-07-04 14:00:00")` 은 이를 로컬(KST) 로 해석 → UTC 로 명시(Z)하지 않으면 9시간 오차.
-//   (GD 발견 2026-07-04.) 각 컴포넌트가 복제하던 parseSqliteDate 를 단일 출처로 통합한다.
+// 각 컴포넌트가 복제하던 parseSqliteDate 를 단일 출처로 통합한다.
 import { getLocale } from "../i18n";
 
 /**

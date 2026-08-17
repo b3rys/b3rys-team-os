@@ -62,7 +62,7 @@ describe("computeStateFromActivity — 마지막 활동 시각 → 상태", () =
     const twoMinAgo = new Date(Date.now() - 2 * 60_000).toISOString();
     expect(computeStateFromActivity(twoMinAgo)).toBe("idle");
   });
-  // ★아무리 오래 조용해도 blocked 가 아니다★ (팀 리드 2026-08-09: "진짜 blocked 가 아닌 상황은 idle 로").
+  // ★아무리 오래 조용해도 blocked 가 아니다★.
   //   예전에는 5분에서 blocked 로 넘어갔다. 불려야 움직이는 런타임에게 침묵은 정상이라,
   //   그 값을 '일 못 맡길 사람' 으로 읽던 곳들(리뷰 배정·등록)이 ★멀쩡한 팀원을 빼버렸다.★
   //   ★하루가 지나도 idle★ 이어야 한다 — 시간은 막혔다는 증거가 될 수 없다.

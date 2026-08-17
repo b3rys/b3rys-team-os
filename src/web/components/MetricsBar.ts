@@ -103,7 +103,7 @@ function fmtTokens(n: number): string {
 export function renderMetricsBar(root: HTMLElement): void {
   const update = () => {
     // update()는 root.innerHTML을 통째로 교체하므로, 모바일 가로스크롤 메뉴바의 scrollLeft가 0으로
-    // 리셋된다(GD 2026-06-24 '메뉴 클릭하면 좌로 튀네' — 오른쪽으로 스크롤해 누르면 맨 왼쪽으로 점프).
+    // 리셋된다.
     // 교체 전 scrollLeft를 캡처해 교체 직후 복원한다(칸반 data-scroll-keep과 같은 패턴).
     const prevScrollLeft = root.querySelector<HTMLElement>(".metric-bar")?.scrollLeft ?? 0;
     const { connected, metric, agents, alerts } = store.getState();
@@ -115,7 +115,7 @@ export function renderMetricsBar(root: HTMLElement): void {
       ? "background:#22C55E;box-shadow:0 0 6px rgba(34,197,94,.5)"
       : "background:#EF4444";
 
-    // Claude Max 사용통계(호출수·토큰) 표시는 노이즈라 제거(GD 2026-07-01). maxGauge 자리표시자만 유지(항상 빈값).
+    // Claude Max 사용통계(호출수·토큰) 표시는 노이즈라 제거. maxGauge 자리표시자만 유지(항상 빈값).
     const maxGauge = "";
 
     const alertCount = alerts.length;
@@ -150,7 +150,7 @@ export function renderMetricsBar(root: HTMLElement): void {
            </div>`
         : "";
 
-    // Mobile: minimal (GD + agent count + CPU + Ollama + alerts). Desktop: + RAM + Load.
+    // Mobile: minimal. Desktop: + RAM + Load.
     root.innerHTML = `
       <div class="relative">
         <!-- ★바에 overflow-hidden 을 걸면 안 된다★ — Tasks/Inbox/Doc 드롭다운이 absolute 로 바 아래에
@@ -277,7 +277,7 @@ export function renderMetricsBar(root: HTMLElement): void {
       bridge.postMessage({ command: "shell.openExternal", payload: { url: b3osDl.href } });
       e.preventDefault();
     });
-    // 언어 깃발 토글(우상단 구석) — ko↔en 전환 + 즉시 반영. persist 후 reload로 전 컴포넌트 재렌더(GD 2026-07-01).
+    // 언어 깃발 토글(우상단 구석) — ko↔en 전환 + 즉시 반영. persist 후 reload로 전 컴포넌트 재렌더.
     const localeFlag = root.querySelector<HTMLButtonElement>("#locale-flag");
     localeFlag?.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -315,7 +315,7 @@ export function renderMetricsBar(root: HTMLElement): void {
       alertsOpen = false;
       update();
     });
-    // 네비 드롭다운 hover-open (GD R6) — 마우스 오버 시 펼침, 벗어나면 닫힘. 상태가 실제로 바뀔 때만
+    // 네비 드롭다운 hover-open — 마우스 오버 시 펼침, 벗어나면 닫힘. 상태가 실제로 바뀔 때만
     // update()해 무한 re-render 방지. 모바일(hover 없음)은 위 click 토글이 폴백.
     const flags = { tasks: () => tasksMenuOpen, inbox: () => inboxMenuOpen, doc: () => docMenuOpen };
     const setOnly = (key: "tasks" | "inbox" | "doc" | null) => {
@@ -380,7 +380,7 @@ export function renderMetricsBar(root: HTMLElement): void {
       store.getState().setMainView("tasks");
       store.getState().setMobilePane("main");
     });
-    // 팀이름(브랜드) 클릭 = 홈 = Tasks 칸반 기본 표시 (GD 2026-06-21 R4).
+    // 팀이름(브랜드) 클릭 = 홈 = Tasks 칸반 기본 표시.
     root.querySelector<HTMLElement>("[data-team-brand]")?.addEventListener("click", (e) => {
       e.stopPropagation();
       tasksMenuOpen = false;

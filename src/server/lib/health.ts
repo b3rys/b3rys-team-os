@@ -98,7 +98,7 @@ export function classifyHealth(s: AgentStatus, agent?: AgentRecord, now = Date.n
   let capacityLabel: string | null = null;
   const ctx = s.ctx_percent ?? null;
 
-  // 빨간 점/위험 라벨은 '응답(세션) 여부' 기준만 — 문맥(ctx)은 dot/배너 level에 반영하지 않는다(GD 2026-06-26).
+  // 빨간 점/위험 라벨은 '응답(세션) 여부' 기준만 — 문맥(ctx)은 dot/배너 level에 반영하지 않는다.
   // ctx는 카드의 문맥 바(85%+ 빨강)와 아래 reason 노트로만 알린다(노티). 세션이 살아 응답 잘 하는데 빨강 뜨던 것 방지.
   if (ctx != null && ctx >= CTX_DANGER) {
     contextReasons.push(`문맥 ${ctx}% · compact/reset 권장`);

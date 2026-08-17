@@ -644,7 +644,7 @@ export function renderProposalsView(root: HTMLElement): void {
     const board = root.querySelector<HTMLElement>("[data-proposals-board-scroll]");
     if (board) board.scrollTop = scrollTop;
 
-    // 상세 패널 스크롤 보존 — 폴링 full-render에도 위로 안 튀게(GD 2026-06-25). 스크롤 시 위치 기억.
+    // 상세 패널 스크롤 보존 — 폴링 full-render에도 위로 안 튀게. 스크롤 시 위치 기억.
     const detailEl = root.querySelector<HTMLElement>("[data-proposals-detail-scroll]");
     if (detailEl) {
       detailEl.scrollTop = detailScroll;
@@ -660,7 +660,7 @@ export function renderProposalsView(root: HTMLElement): void {
         url.searchParams.set("proposal", b.dataset.proposalId!);
         window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
         if (b.dataset.proposalId !== selectedId) detailScroll = 0; // 다른 제안 선택 → 상세 맨 위부터
-        // 모바일에선 상세가 board(칸반) 한참 밑에 스택돼 '눌러도 안 보이던' 문제(GD 2026-06-23)
+        // 모바일에선 상세가 board(칸반) 한참 밑에 스택돼 '눌러도 안 보이던' 문제
         // → 카드 탭하면 상세를 화면에 스크롤해 바로 보이게.
         void loadDetail(b.dataset.proposalId!).then(() => {
           if (window.innerWidth < 768) {

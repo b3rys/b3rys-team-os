@@ -1,11 +1,11 @@
-// ★모델(GD 2026-07-17): persona 값이 사는 곳은 SOUL.md 단 하나.★ agents.json 의 purpose 필드는 제거됨.
+// ★모델: persona 값이 사는 곳은 SOUL.md 단 하나.★ agents.json 의 purpose 필드는 제거됨.
 //   · writeMemberPersona = ★룰 렌더러★ (CLAUDE.md/AGENTS.md). SOUL.md 는 읽지도 쓰지도 않는다.
 //   · savePersonaFile   = ★persona 저장의 유일한 지점★ (대시보드 저장·영입이 호출).
-//   "그걸 어디다 붙이던 그건 분리된 트랜잭션이잖아" — GD
+// "그걸 어디다 붙이던 그건 분리된 트랜잭션이잖아" — GD
 //
 // ═══ 왜 이렇게 됐나 (2026-07-17 실측) ═══
 //   옛 구조는 purpose(agents.json)=정본, SOUL=렌더 출력이었다. 렌더마다 SOUL 을 purpose 로 덮었다.
-//   결과: 12명 중 7명이 어긋났고 — GD 가 손질한 5명은 ★렌더 한 번에 되돌아갈 위치★,
+// 결과: 12명 중 7명이 어긋났고 — GD 가 손질한 5명은 ★렌더 한 번에 되돌아갈 위치★,
 //   lui·forin 은 purpose 가 비어 찍힌 24자 껍데기가 굳어 ★페르소나가 실제로 없었다.★
 //   ★렌더는 플래그 토글로도 돈다.★ → 소스를 하나(SOUL)로 두면 이 문제가 아예 생기지 않는다.
 import { beforeAll, describe, expect, test } from "bun:test";
@@ -148,7 +148,7 @@ describe("writeMemberPersona — 기타", () => {
 });
 
 /**
- * ★TEAM-OS.md 심링크 — 영입 때부터★ (GD 2026-07-13: "team-os 심링크는 영입때도 체크")
+ * ★TEAM-OS.md 심링크 — 영입 때부터★
  *
  * 루이가 잡은 실측: 11명 중 ★6명에게 TEAM-OS.md 가 아예 없었다★ (steve·hermes·codex·ames·devon·dex).
  *   심링크 코드가 ★런타임 스왑 경로에만★ 있어서, 스왑을 겪은 5명만 갖고 있었다.

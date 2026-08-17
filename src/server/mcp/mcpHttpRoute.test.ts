@@ -144,7 +144,7 @@ test("★요청마다 신원이 갈린다★ — 앞 요청의 신원이 다음 
   expect(rows.map((r) => r.actor)).toEqual(["demis", "bill"]);
 });
 
-// ── 공개 빌드 격리 (팀 리드 지시 2026-08-05: "퍼블릭 기존소스에 영향없게") ──
+// ── 공개 빌드 격리 ──
 
 test("★공개 빌드에는 MCP 창구가 아예 안 붙는다★ — 가드를 지우면 이 시험이 깨진다", async () => {
   // index.ts 는 `if (!PUBLIC_BUILD) app.route("/", buildMcpHttpApp(db))` 로 감싸고 있고,
@@ -161,7 +161,7 @@ test("★공개 빌드 판정 기준이 바뀌면 알아챈다★ — PUBLIC_BUI
   expect(src).toContain('export const PUBLIC_BUILD = process.env.B3OS_LIVE !== "1"');
 });
 
-// ── 팀 리드 신원 (GD 2026-08-06: "쓰기 켤때 팀장이름이 필요해") ──
+// ── 팀 리드 신원 ──
 
 test("★팀 리드는 명부에 없어도 신원으로 통과한다★ — 대시보드가 이미 그렇게 쓴다", () => {
   const db = freshDb(); // demis·bill 만 등록. gd 는 없다
@@ -315,7 +315,7 @@ test("★대조군★ — 끝까지 읽어도 정리가 정확히 1회 돈다(�
 //   keepalive 가 있어야 실험 결과가 "가설이 틀렸다" 인지 "클라이언트가 progressToken 을 안 줬다" 인지
 //   구분된다(빌). 그 구분이 필요한 곳이 라이브다.
 
-// ── ★창구 스위치★ (팀 리드 2026-08-07) ──
+// ── ★창구 스위치★ ──
 
 test("★꺼져 있으면 인증까지 안 가고 막힌다★ — 도구 하나가 아니라 입구에서", async () => {
   const db = freshDb();

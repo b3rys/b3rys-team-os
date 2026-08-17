@@ -1,4 +1,4 @@
-// claude 런타임 GD 1:1 DM 파서 — 세션 .jsonl에서 GD와의 1:1만 엄격 추출해 dm_message로 sync.
+// claude 런타임 GD 1:1 DM 파서 — 세션.jsonl에서 GD와의 1:1만 엄격 추출해 dm_message로 sync.
 // ★엄격필터★(POC 검증): <channel source="plugin:telegram" chat_id=GD>(inbound) + reply tool_use(outbound)만.
 //   <external_message>(팀/버스)·bash·thinking·그룹은 제외 — 안 하면 버스 메시지가 섞임(POC 567→498).
 import { createHash } from "node:crypto";
@@ -8,7 +8,7 @@ import type { DmMessageInput } from "../../db/dmCapture";
 
 
 // 세션 jsonl은 append-only(새 이벤트가 파일 끝에 추가)라, 끝 일부만 읽어도 최신 DM을 다 잡는다.
-// 통째 읽기 대신 tail만 읽어 세션이 MB로 커져도 읽기 비용을 상한(기본 1MB)으로 고정(GD 2026-07-09).
+// 통째 읽기 대신 tail만 읽어 세션이 MB로 커져도 읽기 비용을 상한(기본 1MB)으로 고정.
 // 10초 폴링이라 새 DM은 append된 그 tick에 파일 끝(=tail 안)에 있으므로 놓치지 않는다.
 const TAIL_BYTES = Math.max(64 * 1024, Number(process.env.B3OS_DM_TAIL_BYTES) || 1024 * 1024);
 
@@ -124,7 +124,7 @@ export function parseClaudeGdDms(memberId: string, workspacePath: string, ownerC
       const msg = ev.message ?? {};
       const role = msg.role ?? ev.type;
 
-      // ★INBOUND ②: 팀원이 ★일하는 중에★ 팀장이 보낸 메시지(인터럽트) — GD 2026-07-14 발견.★
+      // ★INBOUND ②: 팀원이 ★일하는 중에★ 팀장이 보낸 메시지(인터럽트) 발견.★
       //   클로드 런타임은 이걸 user 이벤트가 아니라 {type:"queue-operation", operation:"enqueue",
       //   content:"<channel …>"} 로 적는다. role==="user" 만 보던 옛 코드는 ★통째로 놓쳤다.★
       //   실측(이 세션): "잠시만"·"오케이 고 하고 풀테스트" 가 dm_message 에 하나도 안 남았다.

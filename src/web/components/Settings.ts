@@ -79,7 +79,7 @@ const OT_STEP_DEFS: { key: string; label: string }[] = [
 
 let _root: HTMLElement | null = null;
 let _settings: TeamSettings = { team_name: "", lead_id: "", tagline: "", owner_name: "", owner_chat_id: "", locale: "ko", dm_capture: true };
-// 첫 세팅 락(GD): 팀명+팀장ID 통과해야 팀원 영입. GET /settings가 setup_complete/lead_actor_id 반환.
+// 첫 세팅 락: 팀명+팀장ID 통과해야 팀원 영입. GET /settings가 setup_complete/lead_actor_id 반환.
 let _setupComplete = false;
 let _leadActorId: string | null = null;
 let _leadTelegramId: string | null = null; // detect-lead-id 로 감지되면 표시
@@ -256,7 +256,7 @@ async function loadSlackHealth(): Promise<void> {
   } catch { /* status 폴백 유지 */ }
 }
 
-// 설정 뷰 재진입 시 Slack 상태/헬스 재조회 — 토큰 갱신·재연동 후에도 '재설치 필요' 배지가 stale로 남던 것 방지(GD).
+// 설정 뷰 재진입 시 Slack 상태/헬스 재조회 — 토큰 갱신·재연동 후에도 '재설치 필요' 배지가 stale로 남던 것 방지.
 // renderSettings는 main.ts에서 1회만 호출되므로(settingsRendered 가드), 재방문 갱신은 이 가벼운 재조회로 처리한다.
 export async function refreshSettingsSlack(): Promise<void> {
   if (!_root) return; // 아직 한 번도 렌더 안 됐으면 renderSettings가 처리
@@ -583,9 +583,9 @@ function otZoneHtml(): string {
 
 /**
  * MCP 창구 토글 — ★값이 안 내려오면 아무것도 안 그린다.★
- * 공개 빌드는 서버가 이 칸을 빼고 주므로 ★그런 기능이 있다는 것조차 안 보인다★ (팀 리드 2026-08-07).
+ * 공개 빌드는 서버가 이 칸을 빼고 주므로 ★그런 기능이 있다는 것조차 안 보인다★.
  *
- * ★시스템 OP 안이 아니라 그 밖의 독립 줄이다★ (팀 리드 2026-08-07: "시스템 OP 설정은 아니야").
+ * ★시스템 OP 안이 아니라 그 밖의 독립 줄이다★.
  *   시스템 OP 는 팀방 협업(capture·라우터)이고, 이건 ★밖에서 들어오는 창구★ 라 성격이 다르다.
  *   안에 두었을 때 실제로 사고가 났다: 시스템 OP 마지막 설명문(라우터 설명)이 이 줄 바로 밑에 붙어
  *   ★"MCP 를 꺼도 팀방만 조용해진다" 로 읽혔다.★ 실제로는 클로드 코드·커서 연결이 끊긴다 — 정반대다.
@@ -594,14 +594,14 @@ function otZoneHtml(): string {
 function mcpRowHtml(): string {
   const on = _systemOp?.mcp_enabled;
   if (typeof on !== "boolean") return "";
-  // ★한 줄 설명을 지우고 펼침 목록으로★ (팀 리드 2026-08-08): "그냥 MCP 로 표시하고
+  // ★한 줄 설명을 지우고 펼침 목록으로★: "그냥 MCP 로 표시하고
   //   MCP 로 가능한 기능을 펼침 목록으로 설명하자."
   //   한 줄에 담으면 ★끄면 무슨 일이 나는지★ 와 ★뭘 할 수 있는지★ 가 서로를 밀어낸다.
   //   목록은 ★실제 도구 9개★ 를 그대로 옮긴 것이다 — 손으로 늘리지 말고 도구가 늘면 여기도 늘린다.
   //   ★단, 도구는 read/write 로 갈린다★ (빌 리뷰): read 신원에게는 kanban_add·update 가 아예 안 보인다.
   //   지금 우리 라이브는 write 라 이 목록과 어긋나지 않는다. ★read 로 쓰는 곳이 생기면 "만들고·고친다" 줄이
   //   실제보다 넓어진다★ — 그때는 scope 를 받아서 줄을 가려야 한다.
-  // ★한글 옆에 프로토콜 이름을 붙인다★ (팀 리드 2026-08-08: "한글말 옆에 프로토콜을 붙이면 어때?").
+  // ★한글 옆에 프로토콜 이름을 붙인다★.
   //   한글만 있으면 ★클라이언트에서 실제로 뭘 부르는지 대조할 수 없고★, 이름만 있으면 처음 보는 사람이 못 읽는다.
   //   ★이름은 코드에서 그대로 온 것이다★ — 못 부르는 이름을 적으면 화면이 거짓말이 된다.
   const items: [string, string, string][] = [
@@ -657,10 +657,10 @@ function systemOpHtml(): string {
       <span class="shrink-0 text-slate-500 text-lg leading-none ${_systemOpOpen ? "rotate-90" : ""} transition-transform">›</span>
     </button>`;
   if (!_systemOpOpen) return `<div class="rounded-xl border border-surface-3 bg-surface-2/60 p-5">${header}</div>`;
-  // 컴팩트 입력/라벨(GD: 필드 너무 큼).
+  // 컴팩트 입력/라벨.
   const cInput = "w-full bg-surface-0 border border-surface-3 rounded-md text-[13px] text-slate-200 px-2.5 py-1.5 outline-none focus:border-accent-green/40 placeholder:text-slate-600";
   const cLabel = "block text-[11px] font-medium text-slate-400 mb-1";
-  // (관리자 PIN/접근제어는 System OP에서 제거 — GD 2026-06-28. 추후 소셜로긴/이메일로 독립 레벨 설계.)
+  // (관리자 PIN/접근제어는 System OP에서 제거 추후 소셜로긴/이메일로 독립 레벨 설계.)
   const form = `
     <div class="mt-4 space-y-3 border-t border-surface-3 pt-4">
       <div class="text-[12px] text-slate-400 leading-relaxed bg-surface-0/40 rounded-md p-3 border border-surface-3/60">
@@ -707,7 +707,7 @@ function wireSystemOp(): void {
   const setState = (j: { has_capture_token: boolean; capture_group_id: string | null; router_enabled: boolean; mcp_enabled?: boolean }) => {
     _systemOp = { has_capture_token: j.has_capture_token, capture_group_id: j.capture_group_id, router_enabled: j.router_enabled, mcp_enabled: j.mcp_enabled };
   };
-  // (접근제어/PIN은 System OP에서 제거 — GD 2026-06-28. 라우터/저장/봇확인은 바로 동작.)
+  // (접근제어/PIN은 System OP에서 제거 라우터/저장/봇확인은 바로 동작.)
 
   _root.querySelector<HTMLButtonElement>("#sysop-router")?.addEventListener("click", async () => {
     const r = await fetch(api("/system-op"), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ router_enabled: !_systemOp?.router_enabled }) });
@@ -861,8 +861,8 @@ function render(): void {
 function wire(): void {
   if (!_root) return;
   wireSystemOp(); // 시스템 OP 패널 핸들러(P0)
-  // 언어 토글은 우상단 헤더 깃발(MetricsBar #locale-flag)로 이전 — 여기선 제거(GD 2026-07-01).
-  // 저장 + 필수 필드 검증(팀 이름·팀장 ID·팀장 이름) — GD 2026-07-10
+  // 언어 토글은 우상단 헤더 깃발(MetricsBar #locale-flag)로 이전 — 여기선 제거.
+  // 저장 + 필수 필드 검증(팀 이름·팀장 ID·팀장 이름)
   const save = _root.querySelector<HTMLButtonElement>("#set-save");
   const syncRequired = (): void => {
     let anyEmpty = false;
@@ -904,7 +904,7 @@ function wire(): void {
       const r1 = await fetch(api("/settings"), { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ team_name: name, lead_id: leadId, owner_name: owner, owner_chat_id: ownerChatId, dm_capture: dmCapture }) });
       const j1 = await r1.json().catch(() => ({}));
       if (!r1.ok || !j1.ok) throw new Error(j1.error || "settings HTTP " + r1.status);
-      // ★미션은 대시보드에서 편집하지 않는다(GD 2026-07-19) — TEAM-OS.md §1 의 기본값을 쓴다.★ 필드·PUT /mission 호출 제거.
+      // ★미션은 대시보드에서 편집하지 않는다 — TEAM-OS.md §1 의 기본값을 쓴다.★ 필드·PUT /mission 호출 제거.
       _settings = { team_name: name, lead_id: leadId, tagline: _settings.tagline, owner_name: owner, owner_chat_id: ownerChatId, locale: _settings.locale, dm_capture: dmCapture };
       _setupComplete = Boolean(j1.setup_complete); _leadActorId = j1.lead_actor_id ?? _leadActorId;
       applyTeamTitle(name);
@@ -1087,7 +1087,7 @@ function wireOtZone(): void {
   // +영입 / 취소
   _root.querySelector<HTMLButtonElement>("#rec-open")?.addEventListener("click", () => { _addOpen = true; refreshOtZone(); });
   _root.querySelector<HTMLButtonElement>("#rec-cancel")?.addEventListener("click", () => { _addOpen = false; refreshOtZone(); });
-  // id 검증 — blur 시 형식(백엔드 ID_RE 미러)·중복 위반이면 빨간 테두리 + 영입 버튼 비활성(자동변환 안 함, GD 2026-07-01).
+  // id 검증 — blur 시 형식(백엔드 ID_RE 미러)·중복 위반이면 빨간 테두리 + 영입 버튼 비활성(자동변환 안 함).
   {
     const recId = _root.querySelector<HTMLInputElement>("#rec-id");
     const recSubmitBtn = _root.querySelector<HTMLButtonElement>("#rec-submit");
@@ -1277,7 +1277,7 @@ function wireOtZone(): void {
         if (_ot && j.ot) _ot.data = j.ot;             // joined 반영 → 패널이 "합류 완료"로 전환, 접근 승인 버튼 사라짐
         _pairMsg = `<div class="text-accent-greenSoft">✅ ${escape(j.detail || pick("접근 승인 완료", "Access approved"))}${pick(" — 합류 완료", " — joined")}</div>`;
         refreshOtZone();
-        // openclaw는 pairing으로 join(폴링 종료 경로 밖) → 검수 테스트(acceptance-check) 트리거 + 로스터 재조회를 여기서 직접 호출. codex/claude/hermes는 폴링 종료 시 아래 pollOt가 refreshMembers()를 하지만 openclaw는 pair-approve가 폴링을 멈춰서 둘 다 누락됐음(로스터 stale → F5 필요). GD 2026-07-01.
+        // openclaw는 pairing으로 join(폴링 종료 경로 밖) → 검수 테스트(acceptance-check) 트리거 + 로스터 재조회를 여기서 직접 호출. codex/claude/hermes는 폴링 종료 시 아래 pollOt가 refreshMembers를 하지만 openclaw는 pair-approve가 폴링을 멈춰서 둘 다 누락됐음(로스터 stale → F5 필요).
         if (_ot && (_ot.data?.joined || _ot.data?.stage === "joined")) {
           await refreshMembers(); // 새 팀원(openclaw) 목록 반영 — #ot-close render() 전에 _members 갱신
           render();               // 뒤 목록 행 즉시 갱신(닫기 전에도 이미 로스터에 보이게)

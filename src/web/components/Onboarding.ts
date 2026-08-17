@@ -5,7 +5,7 @@ import { pick } from "../i18n";
 // 첫 실행 빈 팀(0명) 온보딩 — 빈 대시보드 대신 "안내된 첫걸음"을 보여준다.
 // 팀원이 0명이고 사용자가 닫지 않았을 때만 전체 오버레이로 표시. "첫 팀원 만들기"는 Settings(영입)로,
 // "둘러보기"는 오버레이만 닫아 빈 대시보드를 살펴보게 한다. 팀원이 생기면 자동으로 사라진다.
-// (GD 2026-06-24 '설치하면 빈 팀이라 막막함 → 안내'. 카피 톤 = your-team.example.com 온보딩 step과 일치.)
+//
 const STEP = (n: string, title: string, desc: string) => `
   <li class="onb-step">
     <span class="onb-step-num">${n}</span>
@@ -24,7 +24,7 @@ export function renderOnboarding(host: HTMLElement): void {
 
   const update = () => {
     const { agents, agentsLoaded } = store.getState();
-    // agentsLoaded 전에는 부팅 중 빈 배열이라 표시하지 않는다(리프레시 시 깜빡 방지, GD 2026-06-24).
+    // agentsLoaded 전에는 부팅 중 빈 배열이라 표시하지 않는다(리프레시 시 깜빡 방지).
     const show = agentsLoaded && agents.length === 0 && !dismissed;
     overlay.style.display = show ? "flex" : "none";
     if (!show) {

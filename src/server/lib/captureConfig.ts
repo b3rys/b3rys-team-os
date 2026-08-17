@@ -1,5 +1,5 @@
 // captureConfig — 기본 협업 floor 설정(capture 봇 토큰·라우터·그룹)을 UI-settable 하게.
-// (P0, GD 2026-06-28) 목적: 신규 유저가 터미널·.env 편집 없이 대시보드로 기본 협업을 켤 수 있게.
+// (P0) 목적: 신규 유저가 터미널·.env 편집 없이 대시보드로 기본 협업을 켤 수 있게.
 //
 // 저장 위치(보안):
 //   - capture 봇 토큰 = var/secrets/capture.bot-token (0600 파일, approvals.setPin 패턴). ★절대 DB·audit·로그에 값으로 두지 않는다 — 경로 참조만.
@@ -64,7 +64,7 @@ function setSetting(db: Database, key: string, value: string): void {
 //  locale pick 사용 → 호출처 0. owner_name 실제 이름은 셋업 정체선언(핵심룰 {{OWNER}})에서만 렌더.)
 
 /**
- * 팀 메시지/UI 로케일 — 한국어 기본, setting 'locale'='en' 일 때만 영어. (GD 2026-06-30)
+ * 팀 메시지/UI 로케일 — 한국어 기본, setting 'locale'='en' 일 때만 영어.
  * 라이브 읽기(owner_name 패턴 동일) — 토글 즉시 반영, 재시작 불요. owner_name 치환과 직교.
  */
 export function getLocale(db: Database): import("./i18n").Locale {
@@ -75,7 +75,7 @@ export function getLocale(db: Database): import("./i18n").Locale {
 export function isRouterEnabled(db: Database): boolean {
   const v = getSetting(db, "router_enabled");
   if (v !== null) return v === "true";
-  // 기본 ON (GD 2026-07-21): 신규 사용자가 토글을 켜야 팀이 응답하던 초반 마찰 제거.
+  // 기본 ON: 신규 사용자가 토글을 켜야 팀이 응답하던 초반 마찰 제거.
   // 명시적으로 끈 경우(setting="false" 또는 ROUTER_ENABLED=false)와 비상 킬스위치는 그대로 동작.
   return process.env.ROUTER_ENABLED !== "false";
 }
@@ -85,14 +85,14 @@ export function setRouterEnabled(db: Database, on: boolean): void {
 }
 
 /**
- * MCP 창구가 열려 있나. ★기본은 꺼짐★ (팀 리드 2026-08-07: "mcp 는 일단 우리만 쓰는 걸로,
+ * MCP 창구가 열려 있나. ★기본은 꺼짐★ ( "mcp 는 일단 우리만 쓰는 걸로,
  * 즉 리사팀도 못쓰는 거야"). 새 설치는 아무것도 안 하면 닫혀 있다.
  *
  * ★이미 쓰던 설치는 마이그레이션이 켜준다★ — migrate.ts 참고. 기본만 꺼짐으로 두고
  * 배포하면 ★쓰고 있던 사람이 그 순간 끊긴다★ (그리고 끊긴 창이 그 사람의 연락 수단이다).
  */
 export function isMcpEnabled(db: Database): boolean {
-  // ★기본은 켜짐★ (팀 리드 2026-08-07: "그냥 기본을 켜기로 해" · "복잡하게 하지 말자").
+  // ★기본은 켜짐★.
   //   이 스위치는 ★끄는 스위치★ 다 — 끈 적이 없으면 켜져 있다. 그래서 "false 가 아니면 켜짐" 으로 읽는다.
   //   앞선 설계(기본 꺼짐)는 ★쓰던 사람을 끊지 않으려고 구제 마이그레이션을 달아야 했고★,
   //   그마저도 기록이 안 남는 읽기 전용 사용은 못 살렸다. 기본을 켜면 그 장치가 통째로 없어진다.
