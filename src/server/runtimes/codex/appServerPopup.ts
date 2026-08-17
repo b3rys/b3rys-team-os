@@ -242,7 +242,7 @@ function parseCommandApproval(req: ApprovalRequest): CommandParse {
  * 대신 ★비정상적으로 긴 명령은 사람이 팝업으로 판단할 수 있는 대상이 아니다.★
  * 실측: 실제로 온 승인요청 5건의 명령 길이는 전부 45자.
  * 다만 ★설정 파일을 명령 안에 통째로 써 넣는 모양(heredoc)이 700자대★ 라, 1,000자는 여유가 1.4배뿐이었다.
- * 그래서 팀 리드가 ★2,000자★ 로 정했다 — 정상 범위(~724자)의 약 3배.
+ * 그래서 한도는 ★2,000자★ 다 — 정상 범위(~724자)의 약 3배.
  *
  * → 넘으면 ★팝업을 만들지 않고 거절★ 하고, `audit_event` 에 남겨 별도 검토로 보낸다.
  *   (조용히 통과시키지도, 사람에게 못 읽을 것을 들이밀지도 않는다.)
@@ -660,7 +660,7 @@ function grantRootDisplay(root: string): string {
  *  action 으로 떨어지므로 ★target = method 이름★ 이 되어 ★그 method 로 오는 모든 요청이 같은 scope★ 였다.
  *  → 한 번 allowed_always 를 받으면 이후 ★내용이 전혀 다른 요청도 팝업 없이 통과★ 한다.
  *
- * ★팀 리드 원칙(2026-07-28): "애매하면 통과가 아니고 ask 로."★
+ * ★원칙(2026-07-28): 애매하면 통과가 아니라 ask 다.★
  *  해석에 실패했으면 넓은 열쇠를 만들지 않는다 — payload 지문을 target 에 넣어 payload 가 다르면 열쇠도 다르게.
  *
  *  ※ reason 을 text 에 남기는 이유: permissionGate.operationText 가 text 도 Tier-D 스캔에 쓴다. */
@@ -817,9 +817,9 @@ export function expirePermissionRequest(db: Database, requestId: string): void {
 /**
  * 승인 흐름에 태우기엔 ★너무 긴 '명령'★ 인지 본다. 넘으면 그 길이를, 아니면 null.
  *
- * ★명령 승인에만 적용한다.★ 팀 리드가 말한 것은 *"1000자를 넘는 명령은 이상한거야"* 이고,
+ * ★명령 승인에만 적용한다.★ 기준은 ★명령★ 의 길이이고,
  * ★파일 변경 승인의 '내용' 은 길어도 이상하지 않다★ — 1,200자짜리 파일은 평범하다.
- * (처음엔 모든 승인에 걸어서 ★평범한 파일 변경이 거절됐다★. 아메스가 실측으로 잡았다:
+ * (처음엔 모든 승인에 걸어서 ★평범한 파일 변경이 거절됐다★. 실측:
  *  applyPatchApproval 에 1,200자 파일을 넣으면 denied · permission_request 0행 ·
  *  기록은 '명령이 너무 길다' — 잘 되던 기능이 죽고 기록까지 틀린 이유를 댔다.)
  *
