@@ -88,6 +88,16 @@ export function migrate(db: Database): void {
        provenance_json TEXT
      )`,
   );
+  // 사람이 고른 ★범위★ 를 그대로 적는 칸. once | session | always.
+  //
+  // status 는 CHECK 로 값이 고정돼 있고, ★CHECK 는 ALTER 로 못 바꾼다★ — 늘리려면 표를 재작성해야 한다.
+  // 이 표는 공개 코드가 무조건 만든다(PUBLIC_BUILD 분기 없음). 남의 설치본 DB 를 재작성하지 않는다.
+  // ADD COLUMN 은 메타데이터만 바꾸고 기존 행은 NULL 로 남으므로 어느 설치본에서도 안전하다.
+  //
+  // status 는 ★지속되는 허가를 남기는가★ 를 말한다(allowed_always 만 grant 를 쓴다).
+  // 세션 허용은 지속되지 않으므로 status 는 allowed_once 와 같고, 둘을 가르는 것은 이 칸이다.
+  // ★결정을 보고할 때는 두 칸을 같이 읽는다★ — status 만 읽으면 세션 선택이 '한번' 으로 보인다.
+  addColumnIfMissing(db, "permission_request", "decision_scope", "TEXT");
   db.exec("CREATE INDEX IF NOT EXISTS idx_permission_request_status ON permission_request(status, created_at DESC)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_permission_request_scope ON permission_request(scope_key, status, created_at DESC)");
   db.exec(
