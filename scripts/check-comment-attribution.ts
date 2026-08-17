@@ -64,7 +64,9 @@ const HUMAN_PERSON_ONLY = "말했|말한 것|말씀|물었|원칙|(?<![가-힣])
 const OBSERVE = "실측|확인했|재봤|제보|발견했|보고했";
 
 /** 이름 바로 뒤가 제품명 꼴이면 사람이 아니다: codex-cli · codex 0.144 · dex.ts */
-const PRODUCTISH = /^(?:[-_.][A-Za-z0-9]|\s+v?\d)/;
+//   ★연도를 버전으로 읽지 않는다★ — "리뷰(Bill 2026-07-27)" 의 2026 을 버전으로 보고
+//   진짜 귀속을 통과시켰다. 버전은 `v` 접두 또는 점이 든 수(0.144.6)여야 한다.
+const PRODUCTISH = /^(?:[-_.][A-Za-z0-9]|\s+v\d|\s+\d+\.\d)/;
 
 /**
  * ★이름 앞이 역할 명사면 사람 귀속이 아니라 '역할 지정' 이다.★ 실측 오탐:
@@ -84,19 +86,22 @@ function inCodeSpan(line: string, at: number): boolean {
   return ticks % 2 === 1;
 }
 
-/** 이름 → (25자 안) 서술어. PERSON 은 관찰 귀속까지 잡고, AMBIG 은 사람 전용 서술어만 잡는다. */
-const HIT_PERSON = new RegExp(`(${PERSON})(.{0,25}?)(${HUMAN}|${HUMAN_PERSON_ONLY}|${OBSERVE})`, "i");
-const HIT_AMBIG = new RegExp(`(${AMBIG})(.{0,25}?)(${HUMAN})`, "i");
 /**
- * ★이름 바로 뒤에 붙는 행위 명사★ — 거리가 붙어 있어야 귀속이다.
- *   "(루이 제안)" 은 귀속이고, "팀장 결정 화면에는 검토를 마친 제안만" 은 도메인 명사다.
- *   둘의 차이는 어휘가 아니라 ★거리★ 라, 여기만 붙여쓰기(0~2자)로 좁혀 잡는다.
+ * ★한 줄에 후보가 여러 개다.★ 첫 후보만 보고 끝내면 ★통과 규칙이 뒤쪽 진짜를 덮는다.★
+ * 실측 반례(codex 리뷰):
+ *   "제안자 lui 는 데이터다. bill 리뷰로 수정했다"   ← 앞의 역할 지정이 뒤의 귀속을 덮었다
+ *   "`--to bill` 은 값이다. steve 리뷰로 수정했다"   ← 백틱 예외가 줄 전체를 끝냈다
+ *   "(2026-08-06 실측 42건). steve 가 확인했다"      ← 괄호 실측 거부권이 뒤 귀속을 지웠다
+ * 그래서 ★이름마다 따로 판정하고, 예외는 그 후보만 건너뛴다.★
  */
-//   ★'판단 대기' 는 귀속이 아니라 ★미래 상태★ 다★ — 누가 했다가 아니라 아직 안 했다는 말이다.
-const HIT_ADJACENT = new RegExp(`(${PERSON})\\s{0,2}(제안|검토|판단)(?!\\s*(?:대기|중))(?![가-힣]*(?:서|화면|기능))`, "i");
-
-/** 이름이 괄호 안에 뒤따라 오는 꼴도 귀속이다: `실측(루이)` · `(dbak 리뷰 …)` */
-const HIT_PAREN = new RegExp(`(${HUMAN}|${OBSERVE})\\s*\\((${PERSON})[^)]*\\)`, "i");
+const NAME_G = new RegExp(`(${PERSON}|${AMBIG})`, "gi");
+const PERSON_RE = new RegExp(`^(?:${PERSON})$`, "i");
+const PRED_PERSON = new RegExp(`^(.{0,25}?)(${HUMAN}|${HUMAN_PERSON_ONLY}|${OBSERVE})`, "i");
+const PRED_AMBIG = new RegExp(`^(.{0,25}?)(${HUMAN})`, "i");
+/** 이름 바로 뒤 행위 명사(붙여쓰기). "(루이 제안)" 은 귀속, "…검토를 마친 제안" 은 도메인 명사. */
+const PRED_ADJACENT = /^\s{0,2}(제안|검토|판단)(?!\s*(?:대기|중))(?![가-힣]*(?:서|화면|기능))/;
+/** 이름이 괄호 안에 뒤따르는 꼴: `실측(루이)` · `(dbak 리뷰 …)` 의 앞쪽 서술어. */
+const PRED_BEFORE = new RegExp(`(${HUMAN}|${OBSERVE})\\s*\\(?\\s*$`, "i");
 
 function isCommentLine(line: string): boolean {
   const t = line.trimStart();
@@ -140,31 +145,46 @@ const ARROW_BEFORE = new RegExp(`(?:${PERSON}|${AMBIG})\\s*(?:→|->|=>)\\s*$`, 
 
 export function scanText(file: string, text: string): Finding[] {
   const out: Finding[] = [];
-  const OBSERVE_RE = new RegExp(`(?:${OBSERVE})`);
-  // ★괄호 안 이름 검사에는 AMBIG 도 넣는다★ — "(codex 리뷰 실측…)" 의 codex 를
-  //   '이름 없음' 으로 읽어 진짜를 지웠다(실측 미탐 1건).
+  const OBSERVE_RE = new RegExp(`(?:${OBSERVE})`, "i");
+  // 괄호 안 이름 검사에는 AMBIG 도 넣는다 — "(codex 리뷰 실측…)" 의 codex 를 '이름 없음' 으로 읽었다.
   const ANY_NAME = new RegExp(`(?:${PERSON}|${AMBIG})`, "i");
   text.split("\n").forEach((line, i) => {
     if (!isCommentLine(line)) return;
-    // 어느 규칙으로 잡혔는지와 ★그 서술어★ 를 같이 들고 간다 — 거부권을 좁게 걸기 위해서다.
-    let m = HIT_PERSON.exec(line); let pred = m?.[3];
-    if (!m) { m = HIT_AMBIG.exec(line); pred = m?.[3]; }
-    if (!m) { m = HIT_PAREN.exec(line); pred = m?.[1]; }
-    if (!m) { m = HIT_ADJACENT.exec(line); pred = m?.[2]; }
-    if (!m) return;
-    const at = m.index ?? 0;
-    const after = line.slice(at + m[1]!.length);
-    if (PRODUCTISH.test(after)) return;                 // 제품명·버전 (codex-cli · codex 0.144)
-    if (ROLE_BEFORE.test(line.slice(0, at))) return;    // 역할 지정 (제안자 lui · 요청자(bill))
-    if (inCodeSpan(line, at)) return;                   // 백틱 안 = 값 (`--to bill`)
-    if (ARROW_AFTER.test(after)) return;                // 데이터 예시 (codex→…)
-    if (ARROW_BEFORE.test(line.slice(0, at))) return;   // 데이터 예시 (…codex→demis)
-    // ★이 거부권은 그 히트가 OBSERVE 로 잡혔을 때만★ — 남의 판정(리뷰·지적)까지 뒤집으면 안 된다.
-    if (pred && OBSERVE_RE.test(pred)) {
-      const obs = OBSERVE_RE.exec(line);
-      if (obs && observeInParenWithoutName(line, obs.index, ANY_NAME)) return;
+    NAME_G.lastIndex = 0;
+    for (let nm = NAME_G.exec(line); nm; nm = NAME_G.exec(line)) {
+      const name = nm[1]!;
+      const at = nm.index;
+      const after = line.slice(at + name.length);
+      const before = line.slice(0, at);
+
+      // ── 이 후보를 건너뛸 이유들(줄 전체를 끝내지 않는다) ──
+      if (PRODUCTISH.test(after)) continue;        // codex-cli · codex 0.144
+      if (ROLE_BEFORE.test(before)) continue;      // 제안자 lui · 요청자(bill)
+      if (inCodeSpan(line, at)) continue;          // `--to bill`
+      if (ARROW_AFTER.test(after)) continue;       // codex→…
+      if (ARROW_BEFORE.test(before)) continue;     // …codex→demis
+
+      // ── 이 후보에 붙는 서술어 찾기 ──
+      const isPerson = PERSON_RE.test(name);
+      const m = (isPerson ? PRED_PERSON : PRED_AMBIG).exec(after);
+      const adj = isPerson ? PRED_ADJACENT.exec(after) : null;
+      const pre = isPerson ? PRED_BEFORE.exec(before) : null;
+      const pred = m?.[2] ?? adj?.[1] ?? pre?.[1];
+      if (!pred) continue;
+
+      // ── 관찰 귀속 거부권은 ★그 서술어★ 자리에서만 판단한다(줄의 첫 관찰어가 아니라) ──
+      if (OBSERVE_RE.test(pred)) {
+        const predAt = m
+          ? at + name.length + (m[1]?.length ?? 0)
+          : pre
+            ? before.length - (pre[0]?.length ?? 0)
+            : at;
+        if (observeInParenWithoutName(line, predAt, ANY_NAME)) continue;
+      }
+
+      out.push({ file, line: i + 1, text: line.trim() });
+      return; // 한 줄에 하나만 보고한다
     }
-    out.push({ file, line: i + 1, text: line.trim() });
   });
   return out;
 }
