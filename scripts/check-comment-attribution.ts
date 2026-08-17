@@ -35,10 +35,21 @@ const PERSON = "팀장|팀 리드|팀리드|GD|빌(?!드|딩)|데미스|스티�
   "\\b(?:bill|demis|steve|ames|lui|dbak|devon|forin|brief)\\b";
 const AMBIG = "헤르메스|\\b(?:hermes|codex|dex)\\b";
 
-/** ★사람만 주어가 되는 서술어.★ 여기 없는 것은 통과시킨다(오탐을 줄이는 쪽이 기본). */
+/**
+ * ★사람만 주어가 되는 서술어.★ 여기 없는 것은 통과시킨다(오탐을 줄이는 쪽이 기본).
+ *
+ * ★말했·물었 는 여기 없다.★ 런타임도 그 주어가 된다 — 실측 오탐:
+ *   "hermes 가 말했다 로 기록됐다" · "hermes 가 기여자에게 다시 물었다".
+ *   그래서 그 둘은 사람 전용 이름에만 붙인다(HUMAN_PERSON).
+ * ★맨 명사 '제안' 도 없다.★ 이 저장소엔 proposal 기능이 있어 '제안' 이 도메인 명사다
+ *   ("검토를 마친 제안만 올라간다"). 사람 행위형(제안했·제안대로)으로만 좁혔다.
+ */
 const HUMAN =
-  "리뷰|지적|제안|요청했|요청함|채택|판단했|판단이|말했|말한 것|말씀|물었|시켰|정했|결정했|" +
+  "리뷰|지적|제안했|제안대로|제안한|요청했|요청함|채택|판단했|판단이|시켰|정했|결정했|" +
   "원칙|잡았|잡은|잡아낸|짚었|짚은|찾아냈|알려줬|승인했|반대했|합의|약속";
+
+/** 사람 전용 이름에만 붙이는 서술어 — 런타임도 주어가 될 수 있어 AMBIG 에는 안 쓴다. */
+const HUMAN_PERSON_ONLY = "말했|말한 것|말씀|물었";
 
 /**
  * PERSON 에만 붙는 ★관찰 귀속★ — 누가 쟀는지를 적은 것이다.
@@ -49,9 +60,34 @@ const OBSERVE = "실측|확인했|재봤|제보|발견했|보고했";
 /** 이름 바로 뒤가 제품명 꼴이면 사람이 아니다: codex-cli · codex 0.144 · dex.ts */
 const PRODUCTISH = /^(?:[-_.][A-Za-z0-9]|\s+v?\d)/;
 
+/**
+ * ★이름 앞이 역할 명사면 사람 귀속이 아니라 '역할 지정' 이다.★ 실측 오탐:
+ *   "제안자 lui 는 리뷰 불가" · "요청자(bill)를 '이미 물어본 사람' 이라고 하면"
+ * 여긴 이름이 ★데이터★ 다 — 시나리오·역할을 말하는 자리라 지우면 뜻이 사라진다.
+ */
+const ROLE_BEFORE = /(제안자|요청자|작성자|리뷰어|승인자|소유자|수신자|발신자|담당자|owner|author|requester)\s*\(?$/;
+
+/**
+ * ★백틱 안의 이름은 값이다.★ 실측 오탐:
+ *   "서버가 hermes 에게 `--to bill` 이라고 정확히 말했는데도"
+ * 여기서 bill 은 사람이 아니라 ★명령 인자★ 다.
+ */
+function inCodeSpan(line: string, at: number): boolean {
+  let ticks = 0;
+  for (let i = 0; i < at; i++) if (line[i] === "`") ticks++;
+  return ticks % 2 === 1;
+}
+
 /** 이름 → (25자 안) 서술어. PERSON 은 관찰 귀속까지 잡고, AMBIG 은 사람 전용 서술어만 잡는다. */
-const HIT_PERSON = new RegExp(`(${PERSON})(.{0,25}?)(${HUMAN}|${OBSERVE})`, "i");
+const HIT_PERSON = new RegExp(`(${PERSON})(.{0,25}?)(${HUMAN}|${HUMAN_PERSON_ONLY}|${OBSERVE})`, "i");
 const HIT_AMBIG = new RegExp(`(${AMBIG})(.{0,25}?)(${HUMAN})`, "i");
+/**
+ * ★이름 바로 뒤에 붙는 행위 명사★ — 거리가 붙어 있어야 귀속이다.
+ *   "(루이 제안)" 은 귀속이고, "팀장 결정 화면에는 검토를 마친 제안만" 은 도메인 명사다.
+ *   둘의 차이는 어휘가 아니라 ★거리★ 라, 여기만 붙여쓰기(0~2자)로 좁혀 잡는다.
+ */
+const HIT_ADJACENT = new RegExp(`(${PERSON})\\s{0,2}(제안|검토|판단)(?![ا-힣]*(?:서|화면|기능))`, "i");
+
 /** 이름이 괄호 안에 뒤따라 오는 꼴도 귀속이다: `실측(루이)` · `(dbak 리뷰 …)` */
 const HIT_PAREN = new RegExp(`(${HUMAN}|${OBSERVE})\\s*\\((${PERSON})[^)]*\\)`, "i");
 
@@ -66,10 +102,13 @@ export function scanText(file: string, text: string): Finding[] {
   const out: Finding[] = [];
   text.split("\n").forEach((line, i) => {
     if (!isCommentLine(line)) return;
-    const m = HIT_PERSON.exec(line) ?? HIT_AMBIG.exec(line) ?? HIT_PAREN.exec(line);
+    const m = HIT_PERSON.exec(line) ?? HIT_AMBIG.exec(line) ?? HIT_PAREN.exec(line) ?? HIT_ADJACENT.exec(line);
     if (!m) return;
-    const after = line.slice((m.index ?? 0) + m[1]!.length);
-    if (PRODUCTISH.test(after)) return; // 제품명·버전 (codex-cli · codex 0.144)
+    const at = m.index ?? 0;
+    const after = line.slice(at + m[1]!.length);
+    if (PRODUCTISH.test(after)) return;                 // 제품명·버전 (codex-cli · codex 0.144)
+    if (ROLE_BEFORE.test(line.slice(0, at))) return;    // 역할 지정 (제안자 lui · 요청자(bill))
+    if (inCodeSpan(line, at)) return;                   // 백틱 안 = 값 (`--to bill`)
     out.push({ file, line: i + 1, text: line.trim() });
   });
   return out;
