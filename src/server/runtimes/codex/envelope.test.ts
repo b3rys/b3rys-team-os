@@ -81,13 +81,12 @@ test("★봉투가 '보내야 말한 것' 을 명시하고 실제 명령을 준�
   expect(prompt).toContain("delivered only by running"); // 안 보내면 전달 안 된다는 걸 말해야 한다
   // ★중간 메모로 끝내면 안 된다★ — 착수 확인만 보내고 결과를 안 보낸 실측 사례가 있다
   expect(prompt).toContain("Interim notes do not count");
-  // ★같은 명령이 두 번 나오면 안 된다★ — JSON 에도 넣으면 중복이다(팀 리드 지적)
+  // ★같은 명령이 두 번 나오면 안 된다★ — JSON 에도 넣으면 중복이다(리뷰 지적)
   expect(prompt.split("send.sh").length - 1).toBe(1);
 });
 
 test("★팀 컨텍스트는 다른 런타임과 똑같이 들어간다★ — codex 만 못 받으면 안 된다", () => {
   // 런타임 무관 공통값이다(wakeDispatcher.buildTeamContext → claude·b3osNative 도 받는다).
-  // 팀 리드 2026-08-12: "그건 런타임과 상관없는 코드니, 다른 팀원과 똑같이 주입되면 됨."
   const { db, agent, row } = setup();
   const b = new CodexTurnEnvelopeBuilder(db);
   const env = b.buildForBus({ agent, row, teamContext: "팀 규칙 요약 줄" });

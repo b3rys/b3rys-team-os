@@ -399,7 +399,7 @@ describe("codex adapter — 핵심 정확성", () => {
     expect(seen[0]?.prompt).not.toContain('"networkAccess"');
   });
 
-  // ★계약이 바뀌었다★ (팀 리드 2026-08-13 · 다른 런타임과의 일관성).
+  // ★계약이 바뀌었다★ (다른 런타임과의 일관성).
   //   예전 이름: "permission preflight blocks workspace-write before spawning codex when no grant exists" —
   //   grant 가 없으면 ★codex 를 띄우기도 전에★ 우리가 턴을 죽이고 실패 아티팩트·런타임 블록을 남겼다.
   //   우리 코드로 차단목록을 얹은 런타임이 codex 뿐이라(claude·hermes·openclaw·b3osNative 0건) 판정을 뺐다.

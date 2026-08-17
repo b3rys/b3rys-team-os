@@ -367,8 +367,8 @@ export async function handleMessage(
   messageId: number | undefined,
   deps: BridgeDeps = {},
 ): Promise<{ ok: boolean; reply: string; detail: string }> {
-  // ★브리지도 app-server 로 간다.★ (팀 리드 2026-08-12: "다 app server 로 가야지? 당연하지.")
-  //   전에는 브리지만 옛 exec 경로였다 — 그래서 ★팀 리드가 직접 말 거는 길에만★ 오늘 개선
+  // ★브리지도 app-server 로 간다.★
+  //   전에는 브리지만 옛 exec 경로였다 — 그래서 ★사람이 직접 말 거는 길에만★ 그때까지의 개선
   //   (중간 개입 · 프로세스 상주 · 서브에이전트 생존 · 승인창)이 하나도 안 붙어 있었다.
   //   버스는 app-server, 직접 대화는 exec 로 갈라져 있던 것이 구멍이었다.
   const runTurn = deps.runTurn ?? defaultBridgeCaller();
@@ -382,7 +382,7 @@ export async function handleMessage(
   //   ★enforcement = gate 결과와 무관하게 그룹 전체 drop★ — capture→bus가 owner를 이미 처리하므로(runInjection이
   //   route targets 에만 주입) native 가 또 답하면 이중응답. gate는 shadow/audit(effective 권위 기록)용으로만.
   //   env flag 2개 분리, 둘 다 off 기본 = ★라이브 영향 0(byte-level 불변)★. shadow=drop 없이 audit만.
-  // ★이 브리지가 '누구' 인지는 한 곳에서만 정한다★ (빌 리뷰 2026-08-12).
+  // ★이 브리지가 '누구' 인지는 한 곳에서만 정한다★ (리뷰 지적).
   //   같은 식이 아래 네 곳에 흩어져 있었다. 그중 하나라도 빠지면 ★남의 신원으로 도는데★
   //   그게 승인 요청의 주인으로도 쓰인다 — 실제로 dex 요청 4건이 codex 앞으로 기록됐다.
   const selfAgentId = deps.agentId ?? process.env.CODEX_AGENT_ID ?? "codex";
@@ -591,7 +591,7 @@ interface TgCallbackQuery {
 }
 
 /**
- * ★이 브리지가 쓸 두뇌 — app-server 하나뿐이다.★ (팀 리드 2026-08-12)
+ * ★이 브리지가 쓸 두뇌 — app-server 하나뿐이다.★
  *
  * > "그게 무슨 fallback 이야. 기능을 퇴보시키는 거지.. app server 로 돌게 해야지.
  * >  exec 방식은 deprecate 해. 자꾸 fallback 이런걸로 유지하지 마."
@@ -619,7 +619,7 @@ export function defaultTeamDbPath(): string {
 }
 
 /**
- * ★승인 버튼을 이 팀원 방에서 처리한다.★ (팀 리드 2026-08-12: "팀원방에 그냥 띄우면 되잖아")
+ * ★승인 버튼을 이 팀원 방에서 처리한다.★
  *
  * 요청 자체는 서버가 이 봇으로 띄운다(appServerPopup.sendApprovalToMemberRoom).
  * getUpdates 는 봇당 한 프로세스만 가능하므로, 폴링을 하는 ★브리지가 콜백을 맡는다.★
@@ -668,7 +668,7 @@ export async function handleApprovalCallback(
     }
     const decision = m[1] === "pg1" ? "allow_once" : m[1] === "pga" ? "allow_always" : "deny";
 
-    // ★'항상 허용' 은 codex 설정 파일에 쓴다.★ (팀 리드 2026-08-12: "설정파일에 쓰면 되잖아")
+    // ★'항상 허용' 은 codex 설정 파일에 쓴다.★
     //   우리 DB 에 영구 권한을 쌓지 않는다 — 그건 취소 경로가 없었다. 설정은 사람이 열어서 지울 수 있다.
     if (decision === "allow_always") {
       const target = (row as { target?: string }).target;

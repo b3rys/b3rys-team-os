@@ -81,7 +81,7 @@ export function appServerSpawnEnv(codexHome?: string, base: NodeJS.ProcessEnv = 
 }
 
 /**
- * ★지금 무엇을 하는 중인지 한 줄로.★ (팀 리드 2026-08-12: "진짜 몰하는지 나와야지")
+ * ★지금 무엇을 하는 중인지 한 줄로.★
  *
  * tmux 팀원은 statusProbe 가 화면을 긁어 이 줄을 채운다. codex 팀원은 창이 없어서
  * ★영영 비어 있었다★ — 실측: agent_status.activity_line 이 dex 는 항상 null.

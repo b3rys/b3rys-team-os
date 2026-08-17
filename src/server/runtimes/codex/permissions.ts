@@ -59,7 +59,7 @@ export function codexRuntimePreflight(
   const networkAccess = (hasDb ? networkAccessOrCtx : sandboxOrNetworkAccess) as boolean | undefined;
   void hasDb; void db; void agent; void sandbox; void networkAccess;
   void (hasDb ? maybeCtx : networkAccessOrCtx);
-  // ★턴이 시작되기 전에 우리가 막지 않는다.★ (팀 리드 2026-08-13)
+  // ★턴이 시작되기 전에 우리가 막지 않는다.★
   //
   //   전에는 여기서 샌드박스·네트워크를 우리 기준으로 미리 검사하고, 걸리면 ★턴을 아예 시작하지 않았다.★
   //   그 기준은 우리 코드(`permissionGate` Tier-D)에 하드코딩된 것이라 사람이 볼 수도 고칠 수도 없었다.

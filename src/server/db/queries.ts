@@ -175,7 +175,7 @@ export function appendAudit(
 }
 
 /**
- * ★지금 무엇을 하는 중인지만 갱신한다.★ (팀 리드 2026-08-12: "진짜 몰하는지 나와야지")
+ * ★지금 무엇을 하는 중인지만 갱신한다.★
  *
  * tmux 팀원은 statusProbe 가 화면을 긁어 이 칸을 채운다. 창이 없는 런타임(codex 등)은
  * ★영영 비어 있었다★ — 실측: dex 의 activity_line 은 항상 null 이었다.

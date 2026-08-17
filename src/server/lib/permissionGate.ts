@@ -246,7 +246,7 @@ export function scopeKeyForOperation(op: PermissionOperation): string {
 }
 
 /**
- * ★우리가 판정하지 않는다 — 사람이 판정한다.★ (팀 리드 2026-08-13)
+ * ★우리가 판정하지 않는다 — 사람이 판정한다.★
  *
  * 전에는 여기서 Tier-D 목록(sudo·rm -rf·dd 등 정규식 9개)에 걸리면 ★팝업조차 안 만들고 deny★ 했다.
  * 그 목록은 ★우리 코드에 하드코딩★ 되어 있어 사람이 열어볼 수도, 팀원별로 다르게 줄 수도 없었다.
@@ -307,7 +307,7 @@ export function requestPermission(db: Database, op: PermissionOperation): { deci
     JSON.stringify(op.provenance ?? {}),
   );
   const request = getPermissionRequest(db, id)!;
-  // ★팀원 요청은 op 방 대기열에 넣지 않는다.★ (팀 리드 2026-08-12)
+  // ★팀원 요청은 op 방 대기열에 넣지 않는다.★
   //   "팀원들이 승인을 받을 때는 각자방에 떠야지. op방에 뜨는 건 시스템 알림종류야."
   //   op 대기열(approval_request)에 들어가면 op 방 승인 목록에 렌더된다 — 그게 팀원 승인이
   //   팀 리드 방으로 올라가던 경로였다. 팀원 것은 그 팀원 방으로 간다
@@ -336,12 +336,11 @@ export function requestPermission(db: Database, op: PermissionOperation): { deci
 }
 
 /**
- * ★이 승인이 어디에 뜨는가 — 판정은 여기 한 곳뿐이다.★ (빌 리뷰 2026-08-12)
+ * ★이 승인이 어디에 뜨는가 — 판정은 여기 한 곳뿐이다.★ (리뷰 지적)
  *
- * 팀 리드: "팀원들이 승인을 받을 때는 각자방에 떠야지. op방에 뜨는 건 시스템 알림종류야."
  *
  * 같은 판단이 두 곳에 있으면 ★한쪽만 고치고 '완료' 가 된다★ — 그러면 행이 두 방에 뜨거나
- * 아무 데도 안 뜬다. 그리고 조용하다. (오늘 우리가 이 모양으로 세 번 데였다.)
+ * 아무 데도 안 뜬다. 그리고 조용하다 — 이 모양으로 3건이 관측됐다.
  * requestPermission 과 telegramCapture 가 ★둘 다 이 함수를 부른다.★
  */
 export function belongsToMemberRoom(row: { agent_id: string | null } | { agent_id?: string | null }): boolean {
@@ -379,7 +378,7 @@ export function decidePermissionRequest(
     egress_url: stringOrUndefined(payload.egress_url),
     text: stringOrUndefined(payload.text),
   };
-  // ★사람이 누른 것을 우리가 뒤집지 않는다.★ (팀 리드 2026-08-13)
+  // ★사람이 누른 것을 우리가 뒤집지 않는다.★
   //   전에는 Tier-D 목록에 걸리면 ★사람이 허용을 눌러도 거부★ 했다("Tier D cannot be approved").
   //   그 목록은 우리 코드에 하드코딩돼 있어 사람이 볼 수도, 고칠 수도 없었다.
   //   위험 사유는 ★팝업 본문에 적어 사람이 보고 판단★ 하게 한다 — 대신 정하지 않는다.

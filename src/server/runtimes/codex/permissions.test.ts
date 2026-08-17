@@ -5,7 +5,7 @@ import { checkPermission } from "../../lib/permissionGate";
 // 2026-07-05: GD 테스트에서 workspace-write Dex가 "덱스 있어?"조차 preflight tier-a "ask"로 매 턴 차단(dead-end)
 // → 구조적 실행불가. fix = 관리자 설정(agents.json)을 grant로 seed(launch 경계). 이 라운드트립을 락인했었다.
 //
-// ★2026-08-13 계약 변경(팀 리드 지시)★: preflight 는 이제 ★아무것도 막지 않는다(항상 null)★.
+// ★2026-08-13 계약 변경★: preflight 는 이제 ★아무것도 막지 않는다(항상 null)★.
 //   우리 코드로 차단목록을 얹은 런타임은 codex 하나뿐이었다
 //   (실측 — claude 0 · hermes 0 · openclaw 0 · b3osNative 0 · ★codex 6★). 다른 팀원은 그 도구 자체 설정을 쓴다.
 //   경계는 ★codex 설정(config.toml 의 sandbox_mode·approval_policy·writable_roots)★ 이 정하고,
@@ -24,7 +24,7 @@ describe("codexRuntimePreflight — 턴 앞에 우리 판정 없음 (설정-gran
     expect(r).toBeNull(); // null = 차단 없음(실행 허용)
   });
 
-  // ★계약 변경★ (팀 리드 2026-08-13 · 다른 런타임과의 일관성).
+  // ★계약 변경★ (다른 런타임과의 일관성).
   //   예전 이름: "grant 미주입 시 workspace-write 는 여전히 차단(preflight 원형 유지)".
   test("★grant 가 없어도 preflight 는 턴을 막지 않는다★ — 우리 판정을 뺐다", () => {
     const r = codexRuntimePreflight(agent, "workspace-write", true, {
@@ -39,7 +39,7 @@ describe("codexRuntimePreflight — 턴 앞에 우리 판정 없음 (설정-gran
       .toMatchObject({ tier: "ask", rule: "tier-a.workspace-write" });
   });
 
-  // ★계약 변경★ (팀 리드 2026-08-13). 예전 이름: "★Tier-D 불변★: danger-full-access 는 설정-grant 로도 통과 못 한다".
+  // ★계약 변경★. 예전 이름: "★Tier-D 불변★: danger-full-access 는 설정-grant 로도 통과 못 한다".
   //   불변이 아니게 됐다 — 이 경계는 이제 우리가 아니라 ★codex 설정(config.toml sandbox_mode)★ 이 정한다.
   test("★danger-full-access 도 preflight 는 통과시킨다★ — 이 경계는 codex 설정이 정한다", () => {
     const grants = codexConfiguredGrants("dex", "danger-full-access", true, agent.workspace_path);

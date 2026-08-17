@@ -52,7 +52,7 @@ export class CodexTurnEnvelopeBuilder {
       surface: "team_bus",
       goal: input.row.body,
       // ★팀 컨텍스트는 런타임 무관 공통이다★ — claude·b3osNative 도 같은 값을 받는다
-      //   (wakeDispatcher.buildTeamContext). 팀 리드 2026-08-12: "다른 팀원과 똑같이 주입되면 됨."
+      //   (wakeDispatcher.buildTeamContext). 런타임과 무관한 코드라 다른 팀원과 같은 경로로 주입된다.
       //   한때 중복으로 보고 뺐는데, 그러면 ★codex 팀원만 팀 맥락을 못 받는다.★
       //   codex 전용으로 더 얹었던 conversation 은 계속 뺀다(그건 이 위에 얹은 중복이었다).
       teamContext: input.teamContext || undefined,
@@ -65,7 +65,7 @@ export class CodexTurnEnvelopeBuilder {
   }
 
   toPrompt(envelope: CodexTurnEnvelope): string {
-    // ★같은 명령을 두 번 쓰지 않는다.★ (팀 리드 2026-08-12) 지시문 쪽만 남긴다 —
+    // ★같은 명령을 두 번 쓰지 않는다.★ 지시문 쪽만 남긴다 —
     //   JSON 은 자료고 지시문은 명령이라, 모델이 실제로 따르는 쪽에 둔다.
     const { howToReply, ...data } = envelope;
     return [
@@ -73,7 +73,7 @@ export class CodexTurnEnvelopeBuilder {
       JSON.stringify(data, null, 2),
       "",
       "[Instruction]",
-      // ★영어 점검(팀 리드 요청 2026-08-12)★
+      // ★영어 점검★
       //   전: "To actually reply you MUST run: <cmd>" — 문법은 맞지만 actually 가 군더더기고
       //       명령이 문장 꼬리에 붙어 읽힌다.
       //   후: 무엇을 하고(answer) → 그 다음 무엇을 해야 전달되는지(deliver by running)를 순서대로,

@@ -234,7 +234,7 @@ test("★기본 팩토리가 그 턴 주인의 codexHome 을 실어 준다★ �
   expect(c.codexHome).toBe("/x/dex");
 });
 
-// ── ★팝업이 그 팀원 방으로 간다★ (팀 리드 2026-08-12: "팀원방에 그냥 띄우면 되잖아") ──
+// ── ★팝업이 그 팀원 방으로 간다★ ──
 
 import { sendApprovalToMemberRoom, approvalSummary } from "./appServerPopup";
 
@@ -259,8 +259,8 @@ test("★그 팀원 봇으로, 버튼 3개를 붙여 보낸다★", async () => 
 });
 
 test("★위험 표시가 카드에 실린다 — 우리가 안 막으면 사람이 판단할 근거는 줘야 한다★", async () => {
-  // 우리 차단목록을 걷어낸 뒤(팀 리드 2026-08-13), 위험 명령도 카드로 올라온다.
-  // ★그 카드가 위험을 말하지 않으면 `sudo rm -rf /` 와 `ls` 가 폰에서 생김새가 같다.★ (빌 리뷰)
+  // 우리 차단목록을 걷어낸 뒤, 위험 명령도 카드로 올라온다.
+  // ★그 카드가 위험을 말하지 않으면 `sudo rm -rf /` 와 `ls` 가 폰에서 생김새가 같다.★ (리뷰 지적)
   const calls: { body: Record<string, unknown> }[] = [];
   const fetchFn = (async (_u: string, init: { body: string }) => {
     calls.push({ body: JSON.parse(init.body) });
@@ -311,7 +311,7 @@ test("팝업 문구는 무엇을 하려는지 + 대상으로 갈라진다", () =
   expect(f.title).toBe("파일 2개를 고칠까요?");
 });
 
-// ── ★무응답 만료(5분)★ (팀 리드 2026-08-12) ──
+// ── ★무응답 만료(5분)★ ──
 
 import { pollDecision, expirePermissionRequest } from "./appServerPopup";
 import { requestPermission as expReq, getPermissionRequest as expGet } from "../../lib/permissionGate";
@@ -334,7 +334,7 @@ test("이미 결정된 요청은 만료가 덮어쓰지 않는다", () => {
   db.close();
 });
 
-// ── ★목적지는 인가 목록이 아니다★ (빌 리뷰 2026-08-12) ──
+// ── ★목적지는 인가 목록이 아니다★ (리뷰 지적) ──
 //
 // allowFrom = "누가 이 봇에 말 걸 수 있나" 인가 목록이고 [팀리드 DM, 팀 그룹] 순서다.
 // 그걸 목적지로 쓰면 ★팀 리드 DM 이 비었을 때 첫 항목이 팀 그룹★ 이 되어
@@ -342,7 +342,7 @@ test("이미 결정된 요청은 만료가 덮어쓰지 않는다", () => {
 
 test("★인가 목록이 아니라 팀 리드 DM 으로 간다★ — 두 값을 다르게 놓고 가른다", async () => {
   // ★이 기계에서는 allowFrom[0] 과 팀 리드 DM 이 우연히 같다.★ 그래서 기대값을 피험 함수에서
-  // 뽑으면 옛 버그 코드(allowFrom[0])로 되돌려도 초록이다 — 실제로 그랬다(스티브 지적).
+  // 뽑으면 옛 버그 코드(allowFrom[0])로 되돌려도 초록이다 — 실제로 그랬다(리뷰 지적).
   // 두 값을 ★서로 다르게★ 놓아야 어느 쪽을 쓰는지 갈린다.
   const sent: Record<string, unknown>[] = [];
   const fetchFn = (async (_u: string, init: { body: string }) => { sent.push(JSON.parse(init.body)); return { ok: true } as Response; }) as unknown as typeof fetch;
@@ -362,7 +362,7 @@ test("★목적지를 모르면 보내지 않는다★ (fail-closed) — 아무 
   expect(sent).toHaveLength(0);
 });
 test("★재시작해도 만료가 유효하다★ — 만료가 대기 프로세스 메모리에만 있으면 행이 영원히 pending", async () => {
-  // 빌 리뷰: 서버가 대기 중 재시작하면 아무도 그 행을 안 닫는다. 행이 스스로 말해야 한다.
+  // 리뷰 지적: 서버가 대기 중 재시작하면 아무도 그 행을 안 닫는다. 행이 스스로 말해야 한다.
   const db = new ApprDb(":memory:"); apprMigrate(db);
   const id = expReq(db, { agent: { id: "dex", workspace_path: "/tmp/ws" }, agent_id: "dex", runtime: "codex", action: "shell", command: "echo hi", cwd: "/tmp/ws" } as never).request!.id;
   db.run("update permission_request set expires_at = datetime('now','-1 second') where id=?", [id]);

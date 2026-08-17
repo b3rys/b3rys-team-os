@@ -558,7 +558,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     const owner = pick(getLocale(deps.db), "팀장", "the team lead");
     const pending = listApprovals(deps.db, "pending");
     const approvalPermIds = new Set(pending.map((r) => approvalParams(r).permission_request_id).filter(Boolean));
-    // ★팀원 승인은 op 방에 띄우지 않는다.★ (팀 리드 2026-08-12: "op방에 뜨는 건 시스템 알림종류야")
+    // ★팀원 승인은 op 방에 띄우지 않는다.★
     //   agent_id 가 있으면 그 팀원 방으로 간다(codex 런타임: 그 팀원 봇 + 브리지 콜백).
     //   여기 남겨두면 같은 승인이 ★두 방에 뜬다.★
     const pendingPerms = listPermissionRequests(deps.db, "pending")
@@ -620,7 +620,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     const locale = getLocale(deps.db);
     const pending = listApprovals(deps.db, "pending");
     const approvalPermIds = new Set(pending.map((r) => approvalParams(r).permission_request_id).filter(Boolean));
-    // ★팀원 승인은 op 방에 띄우지 않는다.★ (팀 리드 2026-08-12: "op방에 뜨는 건 시스템 알림종류야")
+    // ★팀원 승인은 op 방에 띄우지 않는다.★
     //   agent_id 가 있으면 그 팀원 방으로 간다(codex 런타임: 그 팀원 봇 + 브리지 콜백).
     //   여기 남겨두면 같은 승인이 ★두 방에 뜬다.★
     const pendingPerms = listPermissionRequests(deps.db, "pending")

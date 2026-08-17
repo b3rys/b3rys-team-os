@@ -17,7 +17,7 @@ const postAuthed = (body: unknown) => ({
 });
 
 describe("permission gate routes", () => {
-  // ★계약이 바뀌었다★ (팀 리드 2026-08-13 · 다른 런타임과의 일관성).
+  // ★계약이 바뀌었다★ (다른 런타임과의 일관성).
   //   예전 이름: "check denies Tier D without creating pending request" — 403 + 요청 행 없음.
   //   우리 코드로 차단목록을 얹은 런타임이 codex 뿐이라(claude·hermes·openclaw·b3osNative 0건) 판정을 뺐다.
   //   이제 위험 명령도 ★202 + 대기 중 요청★ = 사람이 볼 승인창이 만들어진다.

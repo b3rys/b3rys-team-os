@@ -161,7 +161,7 @@ function approvalContentDigest(req: ApprovalRequest): string | null {
   return createHash("sha256").update(JSON.stringify(rows)).digest("hex").slice(0, 16);
 }
 
-// ★반응이 5분 넘게 없으면 무효.★ (팀 리드 2026-08-12: "승인창에 반응이 5분이상 없으면 무효한다")
+// ★반응이 5분 넘게 없으면 무효.★
 //   전엔 1시간이었다 — 그동안 codex 턴이 통째로 매달려 있어서 그 팀원이 아무 일도 못 한다.
 const POPUP_TTL_MS = Number(process.env.B3OS_CODEX_APPSERVER_POPUP_TTL_MS ?? 5 * 60 * 1000);
 const POLL_INTERVAL_MS = Number(process.env.B3OS_CODEX_APPSERVER_POLL_MS ?? 1500);
@@ -239,7 +239,6 @@ function parseCommandApproval(req: ApprovalRequest): CommandParse {
  * 실측: 실제로 온 승인요청 5건의 명령 길이는 전부 45자.
  * 다만 ★설정 파일을 명령 안에 통째로 써 넣는 모양(heredoc)이 700자대★ 라, 1,000자는 여유가 1.4배뿐이었다.
  * 그래서 팀 리드가 ★2,000자★ 로 정했다 — 정상 범위(~724자)의 약 3배.
- * 팀 리드: *"그냥 없애고 천자가 넘으면 그냥 에러를 내서 따로 검토하게 만들어."*
  *
  * → 넘으면 ★팝업을 만들지 않고 거절★ 하고, `audit_event` 에 남겨 별도 검토로 보낸다.
  *   (조용히 통과시키지도, 사람에게 못 읽을 것을 들이밀지도 않는다.)
@@ -779,7 +778,7 @@ export async function pollDecision(db: Database, requestId: string, ttlMs = POPU
       // "pending" → 계속 폴링
     }
     if (Date.now() >= deadline) {
-      // ★무응답 만료 — 행도 expired 로 닫는다.★ (팀 리드 2026-08-12: "5분 이상 반응 없으면 무효")
+      // ★무응답 만료 — 행도 expired 로 닫는다.★
       //   안 닫으면 행이 pending 으로 남아, 한참 뒤에 누른 탭이 ★이미 끝난 턴을 승인★ 한다.
       //   버튼도 그때 지워져서 사람이 "만료됐다" 를 화면에서 본다(헤르메스와 같은 모양).
       try { expirePermissionRequest(db, requestId); } catch { /* best-effort — 만료 판정은 유지 */ }
@@ -829,7 +828,6 @@ export function isTestRun(): boolean {
 /**
  * ★승인 요청을 그 팀원 방에 띄운다.★
  *
- * 팀 리드 2026-08-12: "팀원들이 승인을 받을 때는 각자방에 떠야지. op방에 뜨는 건 시스템 알림종류야."
  * 전에는 op 방으로 갔다 — 실측상 permission_request 를 만든 팀원은 codex 런타임뿐이었고(다른 팀원 0건),
  * 그건 원래 사용성이 아니라 우리가 얹은 것이었다.
  *
@@ -861,21 +859,21 @@ export async function sendApprovalToMemberRoom(
   // ★목적지는 '그 팀원 방' = 팀 리드와 그 팀원 봇의 1:1 DM.★
   //   어느 방인지는 ★봇 토큰★ 이 정하고, 상대는 ★팀 리드 DM★ 이다.
   //
-  //   전에는 allowFrom 의 첫 항목을 썼는데 ★그건 "누가 말 걸 수 있나" 인가 목록★ 이다(빌 리뷰 2026-08-12).
+  //   전에는 allowFrom 의 첫 항목을 썼는데 ★그건 "누가 말 걸 수 있나" 인가 목록★ 이다(리뷰 지적).
   //   목록은 [팀리드 DM, 팀 그룹] 이라 ★팀 리드 DM 이 비면 첫 항목이 팀 그룹이 된다★ —
   //   그러면 ★보안 질문이 단체방에 뜬다.★ 인가 목록을 목적지로 쓰면 안 된다.
   //
   //   모르면 ★보내지 않는다.★ 아무 방에나 띄우는 것보다 안 뜨는 게 낫다(fail-closed).
   //   ★목적지 해석기를 주입 가능하게 둔다★ — 그래야 시험이 "인가 목록" 과 "팀 리드 DM" 을
   //   ★서로 다른 값으로★ 놓고 어느 쪽을 쓰는지 실제로 가를 수 있다. 이 기계에서는 두 값이 우연히
-  //   같아서, 주입 없이는 옛 버그 코드로 되돌려도 시험이 초록으로 통과한다(스티브 지적 2026-08-12).
+  //   같아서, 주입 없이는 옛 버그 코드로 되돌려도 시험이 초록으로 통과한다(리뷰 지적).
   const chatId = deps.chatId ?? (deps.resolveDestination ?? resolveOwnerDmId)();
   if (!token || !chatId) return false;
 
   // ★간결하게★ — 사람이 폰에서 한눈에 보고 누른다. 무엇을 하려는지 한 줄, 그 아래 대상.
   const { title, detail } = approvalSummary(req);
   // ★위험 사유를 카드에 적는다.★ 우리가 대신 막지 않기로 했으면 ★판단 근거는 줘야 한다.★
-  //   이 줄이 없으면 `sudo rm -rf /` 와 `ls` 가 폰에서 생김새가 같다(빌 리뷰 2026-08-13).
+  //   이 줄이 없으면 `sudo rm -rf /` 와 `ls` 가 폰에서 생김새가 같다(리뷰 지적).
   const riskLine = risks.length ? `\n\n⚠️ 위험 표시: ${escapeHtml(risks.join(" · "))}` : "";
   const text = (detail ? `🔐 ${title}\n\n<code>${escapeHtml(detail)}</code>` : `🔐 ${title}`) + riskLine;
   const doFetch = deps.fetchFn ?? fetch;
@@ -887,8 +885,8 @@ export async function sendApprovalToMemberRoom(
         chat_id: chatId,
         text,
         parse_mode: "HTML",
-        // ★한 줄에 셋★ — 폰에서 두 줄이면 자리만 먹는다(팀 리드 2026-08-12).
-        // ★위험 표시가 붙은 건에는 '항상 허용' 을 주지 않는다.★ (빌 리뷰 2026-08-13)
+        // ★한 줄에 셋★ — 폰에서 두 줄이면 자리만 먹는다.
+        // ★위험 표시가 붙은 건에는 '항상 허용' 을 주지 않는다.★ (리뷰 지적)
         //   우리가 막는 게 아니다 — 사람은 여전히 '한번 허용' 으로 실행할 수 있다.
         //   막는 것은 ★무인 반복★ 이다: '항상 허용' 은 24시간 grant 를 만들어 그동안 카드가 다시 안 뜬다.
         //   codex 자신도 위험한 것은 세션 단위로만 기억한다(acceptForSession).
@@ -963,12 +961,12 @@ export async function requestApprovalPopup(db: Database, req: ApprovalRequest, a
   let risks: string[] = [];
   try {
     const op = buildOperationFromApproval(req, agentId, cwd);
-    // ★위험 사유를 카드에 싣는다.★ (2026-08-13 — 빌 리뷰에서 잡힘)
+    // ★위험 사유를 카드에 싣는다.★ (리뷰 지적)
     //   우리가 대신 막지 않기로 했으면 ★사람이 판단할 근거를 줘야★ 그 전제가 성립한다.
     //   그 전까지 `sudo rm -rf /` 와 `ls` 가 폰에서 ★생김새가 같았다.★
     risks = tierDReasons(op);
     const res = requestPermission(db, op); // ★팝업 생성(telegramCapture가 렌더)★
-    // ※ Tier-D 로 여기서 deny 하던 "이중 안전" 은 없어졌다(팀 리드 2026-08-13 — 우리가 판정하지 않는다).
+    // ※ Tier-D 로 여기서 deny 하던 "이중 안전" 은 없어졌다(우리가 판정하지 않는다).
     //   이 분기는 grant 조회 결과가 deny 일 때만 남아 있다. 위험 명령은 이제 ★카드로 올라간다.★
     if (res.decision === "deny") return "denied";
     if (res.decision === "allow") return "approved"; // 이미 grant 있으면 통과(기존 grant는 permissionGate가 벤팅)
@@ -990,7 +988,7 @@ export async function requestApprovalPopup(db: Database, req: ApprovalRequest, a
       processInstance: PROCESS_INSTANCE,
     });
   } catch { /* best-effort */ }
-  // ★만료 시각을 행에 박는다★ — 기다리는 프로세스가 죽어도 행이 스스로 만료를 말한다(빌 리뷰).
+  // ★만료 시각을 행에 박는다★ — 기다리는 프로세스가 죽어도 행이 스스로 만료를 말한다(리뷰 지적).
   try {
     db.prepare("UPDATE permission_request SET expires_at = datetime('now', ?) WHERE id = ?")
       .run(`+${Math.round(ttlMs / 1000)} seconds`, requestId);

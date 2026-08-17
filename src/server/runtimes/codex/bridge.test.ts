@@ -203,7 +203,7 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     expect(calls.prompts[0]?.writableRoots).toEqual(["/tmp/cody"]);
   });
 
-  // ★계약이 바뀌었다★ (팀 리드 2026-08-13 · 다른 런타임과의 일관성).
+  // ★계약이 바뀌었다★ (다른 런타임과의 일관성).
   //   예전 이름: "permission preflight blocks workspace-write before Codex turn" —
   //   grant 없이 workspace-write 면 브리지가 턴을 안 돌리고 "⚠️ 권한 게이트가 …막았습니다" 로 답했다.
   //   우리 코드로 차단목록을 얹은 런타임이 codex 뿐이라 판정을 뺐다. 경계는 codex 설정이 정한다.
@@ -379,7 +379,7 @@ describe("발신자 게이트(allowlist) — parseAllowFrom + 통과 판정", ()
   });
 });
 
-// ── ★승인 버튼은 그 팀원 방에서 처리한다★ (팀 리드 2026-08-12) ──
+// ── ★승인 버튼은 그 팀원 방에서 처리한다★ ──
 //
 // 서버가 이 봇으로 승인창을 띄우고, 누르는 것은 브리지가 받는다
 // (getUpdates 는 봇당 한 프로세스만 가능하므로 폴링하는 쪽이 콜백을 맡는다).
@@ -394,7 +394,7 @@ import { requestPermission as cbRequest, getPermissionRequest as cbGet } from ".
 import { tmpdir as cbTmpdir } from "node:os";
 import { join as cbJoin } from "node:path";
 
-const GD = 7066867819;
+const OWNER = 111111111; // 승인자 chat id (픽스처 — 실제 값과 무관)
 
 function pendingRequest(): { dbPath: string; id: string } {
   const dbPath = cbJoin(mkdtempSync(cbJoin(cbTmpdir(), "cb-")), "team.db");
@@ -415,7 +415,7 @@ const spyFetch = (calls: string[]) =>
 test("★누르면 결정이 기록되고 답을 보낸다★ — 답이 없으면 텔레그램은 계속 로딩중이다", async () => {
   const { dbPath, id } = pendingRequest();
   const calls: string[] = [];
-  const out = await handleApprovalCallback("T", { id: "c1", data: `pg1:${id}`, from: { id: GD }, message: { message_id: 1, chat: { id: GD } } }, new Set([GD]), { dbPath, fetchFn: spyFetch(calls) });
+  const out = await handleApprovalCallback("T", { id: "c1", data: `pg1:${id}`, from: { id: OWNER }, message: { message_id: 1, chat: { id: OWNER } } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch(calls) });
   expect(out).toBe("decided");
   expect(calls).toContain("T/answerCallbackQuery"); // ★이게 없으면 로딩중이 안 멈춘다★
   const db = new CbDb(dbPath);
@@ -425,7 +425,7 @@ test("★누르면 결정이 기록되고 답을 보낸다★ — 답이 없으�
 
 test("거절 버튼은 거절로 기록된다(세 버튼이 같은 결과면 버튼이 장식이다)", async () => {
   const { dbPath, id } = pendingRequest();
-  await handleApprovalCallback("T", { id: "c2", data: `pgd:${id}`, from: { id: GD } }, new Set([GD]), { dbPath, fetchFn: spyFetch([]) });
+  await handleApprovalCallback("T", { id: "c2", data: `pgd:${id}`, from: { id: OWNER } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch([]) });
   const db = new CbDb(dbPath);
   expect(cbGet(db, id)?.status).toBe("denied");
   db.close();
@@ -434,8 +434,8 @@ test("거절 버튼은 거절로 기록된다(세 버튼이 같은 결과면 버
 test("★이미 처리된 요청은 지난 대로 알린다★ — 무반응이면 사람은 다시 누른다", async () => {
   const { dbPath, id } = pendingRequest();
   const calls: string[] = [];
-  await handleApprovalCallback("T", { id: "c3", data: `pg1:${id}`, from: { id: GD } }, new Set([GD]), { dbPath, fetchFn: spyFetch([]) });
-  const out = await handleApprovalCallback("T", { id: "c4", data: `pg1:${id}`, from: { id: GD }, message: { message_id: 1, chat: { id: GD } } }, new Set([GD]), { dbPath, fetchFn: spyFetch(calls) });
+  await handleApprovalCallback("T", { id: "c3", data: `pg1:${id}`, from: { id: OWNER } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch([]) });
+  const out = await handleApprovalCallback("T", { id: "c4", data: `pg1:${id}`, from: { id: OWNER }, message: { message_id: 1, chat: { id: OWNER } } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch(calls) });
   expect(out).toBe("stale");
   expect(calls).toContain("T/answerCallbackQuery");
   expect(calls).toContain("T/editMessageReplyMarkup"); // 버튼을 지워서 또 누르지 않게
@@ -443,7 +443,7 @@ test("★이미 처리된 요청은 지난 대로 알린다★ — 무반응이�
 
 test("허용 목록 밖 발신자는 결정하지 못한다(fail-closed)", async () => {
   const { dbPath, id } = pendingRequest();
-  const out = await handleApprovalCallback("T", { id: "c5", data: `pg1:${id}`, from: { id: 999 } }, new Set([GD]), { dbPath, fetchFn: spyFetch([]) });
+  const out = await handleApprovalCallback("T", { id: "c5", data: `pg1:${id}`, from: { id: 999 } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch([]) });
   expect(out).toBe("unauthorized");
   const db = new CbDb(dbPath);
   expect(cbGet(db, id)?.status).toBe("pending"); // 상태가 바뀌면 안 된다
@@ -452,7 +452,7 @@ test("허용 목록 밖 발신자는 결정하지 못한다(fail-closed)", async
 
 test("승인과 무관한 콜백은 건드리지 않는다", async () => {
   const { dbPath } = pendingRequest();
-  expect(await handleApprovalCallback("T", { id: "c6", data: "mcp:on", from: { id: GD } }, new Set([GD]), { dbPath, fetchFn: spyFetch([]) })).toBe("ignored");
+  expect(await handleApprovalCallback("T", { id: "c6", data: "mcp:on", from: { id: OWNER } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch([]) })).toBe("ignored");
 });
 
 // ── ★team.db 경로는 환경변수에 기대지 않는다★ (2026-08-12) ──
@@ -483,14 +483,13 @@ test("★cwd·환경변수와 무관하게 저장소의 team.db 를 가리킨다
   }
 });
 
-// ★브리지도 app-server 로 간다★ (팀 리드 2026-08-12: "다 app server 로 가야지? 당연하지")
+// ★브리지도 app-server 로 간다★
 //
-// 전에는 브리지만 옛 exec 경로였다 — ★팀 리드가 직접 말 거는 길★ 에만 오늘 개선이
+// 전에는 브리지만 옛 exec 경로였다 — ★사람이 직접 말 거는 길★ 에만 그때까지의 개선이
 // 하나도 안 붙어 있었다(중간 개입·상주·서브에이전트 생존·승인창은 전부 버스 경로에만).
 import { defaultBridgeCaller } from "./bridge";
 
 test("★app-server 하나뿐이다★ — 플래그로 갈라두면 한쪽만 좋아지고 다른 쪽은 조용히 뒤처진다", () => {
-  // 팀 리드 2026-08-12: "exec 방식은 deprecate 해. 자꾸 fallback 이런걸로 유지하지 마."
   // 폴백은 ★말은 통하지만 기능이 사라진 상태★ 이고, 조용해서 아무도 모른다.
   const saved = process.env.B3OS_CODEX_APPSERVER;
   try {

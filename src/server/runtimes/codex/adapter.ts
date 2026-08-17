@@ -244,7 +244,7 @@ export async function runTurn(
 
     // ★답이 팀에 도착했는지 확인한다 — 대신 말하지는 않는다.★ (2026-08-12)
     //   위 규칙(서버는 팀원 대신 말하지 않는다)은 그대로다. 다만 ★안 보낸 것을 아무도 모르는 것★ 은
-    //   다른 문제다. 오늘 하루에 세 번 났다: 답 없음 / 착수확인만 / 전송 0건.
+    //   다른 문제다. 하루에 3건이 관측됐다: 답 없음 / 착수확인만 / 전송 0건.
     //   턴은 succeeded 였고 로그도 조용해서, 사람이 물어보기 전엔 아무도 몰랐다.
     //   → 도착 안 했으면 ★그 사실을 남기고 팀원 본인에게 한 번 알린다.★ 말은 본인이 한다.
     if (!agentRepliedSince(db, targetAgentId, row.thread_id, turnStartedAt)) {
@@ -399,7 +399,7 @@ export function makeCodexAdapter(
   // ★M6: B3OS_CODEX_APPSERVER=1 이면 app-server 런타임 사용(중간 인터럽트/steer+승인팝업 기반).★
   // 롤아웃 스위치(폴백 아님 — 제품 결정): 검증 전엔 exec, 검증 후 flag on. deps.callCodex가 최우선(테스트).
   // ★M5.3: flag on이면 db 주입한 app-server caller(ask→GD 팝업). flag off=exec. deps.callCodex 최우선(테스트).★
-  // ★app-server 하나뿐이다.★ (팀 리드 2026-08-12: "exec 방식은 deprecate 해")
+  // ★app-server 하나뿐이다.★
   //   플래그로 갈라두면 ★한쪽만 좋아지고 다른 쪽은 조용히 뒤처진다★ — 실제로 그랬다.
   const defaultCaller = makeAppServerCaller(db);
   const callCodex = deps.callCodex ?? defaultCaller;
@@ -427,7 +427,7 @@ export function makeCodexAdapter(
       //   (다른 런타임과 동일 계약. 공용 RuntimeTurnCoordinator 리팩터는 shared 코드라 별도 과제로 분리.)
       const key = targetAgentId;
       if (inFlight.has(key)) {
-        // ★연기하기 전에 진행 중 턴에 끼워 넣어 본다.★ (팀 리드 2026-08-12: "중간 steer")
+        // ★연기하기 전에 진행 중 턴에 끼워 넣어 본다.★
         //   연기만 하면 20번 뒤 blocked 로 ★메시지가 사라진다★ — 실측으로 확인했다.
         //   끼워 넣기에 성공하면 그 턴이 이어서 읽으므로 별도 턴이 필요 없다.
         const steered = await steerActiveTurn(targetAgentId, buildSteerText(row));
