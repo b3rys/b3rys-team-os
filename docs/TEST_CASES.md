@@ -486,6 +486,8 @@
   - 알려진 갭 (후속 작업에서 닫히면 이 테스트가 실패해야 한다)
 - `src/server/runtimes/codex/appServerPopup.test.ts`
   - _(최상위 describe 없음 — test/it 7개. 이름은 파일에서 확인하세요)_
+- `src/server/runtimes/codex/approvalPath.test.ts`
+  - _(최상위 describe 없음 — test/it 23개. 이름은 파일에서 확인하세요)_
 - `src/server/runtimes/codex/bridge.test.ts`
   - codex bridge (M2) — 채널 I/O
   - 발신자 게이트(allowlist) — parseAllowFrom + 통과 판정
