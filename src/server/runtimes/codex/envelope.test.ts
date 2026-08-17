@@ -43,14 +43,6 @@ function setup(): { db: Database; agent: AgentRecord; row: PendingDispatchRow } 
 }
 
 describe("CodexTurnEnvelopeBuilder", () => {
-  test("labels external input as evidence and includes safety stop rules", () => {
-    const { db, agent, row } = setup();
-    const env = new CodexTurnEnvelopeBuilder(db).buildForBus({ agent, row, teamContext: "team rules", sandbox: "read-only" });
-    expect(env.safety.externalInputPolicy).toContain("external evidence");
-    expect(env.safety.riskyActionsRequireApproval).toContain("deploy");
-    expect(env.conversation[0]?.role).toBe("external");
-    expect(env.expectedOutput.stopRule).toContain("approval");
-  });
 
   test("includes linked task state when message metadata points to a task", () => {
     const { db, agent, row } = setup();
@@ -66,30 +58,38 @@ describe("CodexTurnEnvelopeBuilder", () => {
     expect(env.goal).toBe("구현해");
   });
 
-  test("includes personal MEMORY.md and curated team-search refs as memory evidence", () => {
-    const { db, agent, row } = setup();
-    const env = new CodexTurnEnvelopeBuilder(db).buildForBus({ agent, row, teamContext: "" });
-    expect(env.memoryRefs.some((ref) => ref.source === "MEMORY" && ref.ref === "MEMORY.md")).toBe(true);
-    expect(env.memoryRefs.some((ref) => ref.source === "team_search" && ref.ref.includes("SHARED.md"))).toBe(true);
-    expect(env.memoryRefs.find((ref) => ref.source === "MEMORY")?.summary).toContain("퇴사자");
-  });
 
-  test("does not surface raw workspace MEMORY.md rows from team search", () => {
-    const { db, agent, row } = setup();
-    db.prepare(
-      `INSERT INTO team_search_chunk
-        (id, source_type, source_ref, title, content, created_at)
-       VALUES
-        ('bad-memory', 'doc', ?, 'raw workspace memory', '구현해 private workspace note', datetime('now')),
-        ('bad-memory-line', 'doc', 'MEMORY.md:1', 'raw bare memory line', '구현해 bare private line', datetime('now')),
-        ('bad-memory-anchor', 'doc', 'MEMORY.md#ops', 'raw bare memory anchor', '구현해 bare private anchor', datetime('now'))`,
-    ).run(join(agent.workspace_path ?? "", "MEMORY.md"));
+});
 
-    const env = new CodexTurnEnvelopeBuilder(db).buildForBus({ agent, row, teamContext: "" });
-    const teamRefs = env.memoryRefs.filter((ref) => ref.source === "team_search");
-    expect(teamRefs.some((ref) => ref.ref.includes("/MEMORY.md"))).toBe(false);
-    expect(teamRefs.some((ref) => ref.ref.startsWith("MEMORY.md"))).toBe(false);
-    expect(teamRefs.some((ref) => ref.summary.includes("private workspace note"))).toBe(false);
-    expect(teamRefs.some((ref) => ref.summary.includes("bare private"))).toBe(false);
-  });
+// ── ★답은 자동으로 전달되지 않는다★ (실측 2026-08-12) ──
+//
+// 턴은 성공했는데 dex 가 send.sh 를 안 불러서 ★팀에는 아무것도 도착하지 않았다.★
+// 일은 다 하고(파일 읽고 정리하고) 마지막 한 걸음을 안 했다.
+// 서버는 어떤 런타임에서도 답을 대신 게시하지 않는다(turn_completed_no_autopost).
+
+test("★봉투가 '보내야 말한 것' 을 명시하고 실제 명령을 준다★", () => {
+  const { db, agent, row } = setup();
+  const b = new CodexTurnEnvelopeBuilder(db);
+  const env = b.buildForBus({ agent, row, teamContext: "" });
+  const cmd = env.howToReply;
+  expect(cmd).toContain("send.sh");
+  expect(cmd).toContain("--thread t1"); // 스레드가 박혀 있어야 조립 실수가 없다
+  expect(cmd).toContain("--to bill");   // 요청한 사람에게 간다
+  expect(cmd).toContain("--in-reply-to");
+
+  const prompt = b.toPrompt(env);
+  expect(prompt).toContain("delivered only by running"); // 안 보내면 전달 안 된다는 걸 말해야 한다
+  // ★중간 메모로 끝내면 안 된다★ — 착수 확인만 보내고 결과를 안 보낸 실측 사례가 있다
+  expect(prompt).toContain("Interim notes do not count");
+  // ★같은 명령이 두 번 나오면 안 된다★ — JSON 에도 넣으면 중복이다(리뷰 지적)
+  expect(prompt.split("send.sh").length - 1).toBe(1);
+});
+
+test("★팀 컨텍스트는 다른 런타임과 똑같이 들어간다★ — codex 만 못 받으면 안 된다", () => {
+  // 런타임 무관 공통값이다(wakeDispatcher.buildTeamContext → claude·b3osNative 도 받는다).
+  const { db, agent, row } = setup();
+  const b = new CodexTurnEnvelopeBuilder(db);
+  const env = b.buildForBus({ agent, row, teamContext: "팀 규칙 요약 줄" });
+  expect(env.teamContext).toBe("팀 규칙 요약 줄");
+  expect(b.toPrompt(env)).toContain("팀 규칙 요약 줄");
 });

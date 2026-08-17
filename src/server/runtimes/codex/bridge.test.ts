@@ -203,20 +203,26 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     expect(calls.prompts[0]?.writableRoots).toEqual(["/tmp/cody"]);
   });
 
-  test("permission preflight blocks workspace-write before Codex turn", async () => {
-    const { deps, calls } = spies(() => {
-      throw new Error("runTurn must not be called when permission gate blocks");
-    });
+  // ★계약이 바뀌었다★ (다른 런타임과의 일관성).
+  //   예전 이름: "permission preflight blocks workspace-write before Codex turn" —
+  //   grant 없이 workspace-write 면 브리지가 턴을 안 돌리고 "⚠️ 권한 게이트가 …막았습니다" 로 답했다.
+  //   우리 코드로 차단목록을 얹은 런타임이 codex 뿐이라 판정을 뺐다. 경계는 codex 설정이 정한다.
+  test("★grant 없이도 workspace-write 턴은 그대로 돈다★ — 브리지 앞 우리 판정을 뺐다", async () => {
+    const { deps, calls } = spies(() => ok("답입니다"));
     const r = await handleMessage(123, "파일 써줘", 55, {
       ...deps,
       agentId: "cody",
       workdir: "/tmp/cody",
       sandbox: "workspace-write",
+      // ★permissionContext(설정-grant)를 일부러 안 준다★ — 예전엔 이것 때문에 매 턴 막혔다.
+      //   바로 위 시험(grant 를 주는 경우)과 이제 ★결과가 같아야 한다★ = 통과 여부가 grant 에 안 달렸다.
     });
-    expect(r.ok).toBe(false);
-    expect(r.detail).toContain("permission_ask:tier-a.workspace-write");
-    expect(calls.prompts.length).toBe(0);
-    expect(calls.edits[0]?.text).toContain("권한 게이트");
+    expect(r.ok).toBe(true);        // 예전 false
+    expect(r.detail).toBe("delivered"); // 예전 permission_ask:tier-a.workspace-write
+    expect(calls.prompts.length, "★브리지 앞 차단이 되살아났다★ — 두뇌 턴이 안 돌았다").toBe(1);
+    expect(calls.prompts[0]?.sandbox).toBe("workspace-write"); // 샌드박스 값은 그대로 codex 로 간다
+    expect(calls.edits[0]?.text).toBe("답입니다");
+    expect(calls.edits.some((e) => e.text.includes("권한 게이트"))).toBe(false);
   });
 
   test("one-shot 예약 요청은 두뇌 턴으로 넘기지 않고 즉시 안내한다", async () => {
@@ -371,4 +377,125 @@ describe("발신자 게이트(allowlist) — parseAllowFrom + 통과 판정", ()
     expect(isAllowedChat(allow, 999999)).toBe(false); // 낯선 발신자 = 차단
     expect(isAllowedChat(allow, 1000000001)).toBe(true); // 오너 = 통과
   });
+});
+
+// ── ★승인 버튼은 그 팀원 방에서 처리한다★ ──
+//
+// 서버가 이 봇으로 승인창을 띄우고, 누르는 것은 브리지가 받는다
+// (getUpdates 는 봇당 한 프로세스만 가능하므로 폴링하는 쪽이 콜백을 맡는다).
+// ★누른 뒤 answerCallbackQuery 를 반드시 보내야 한다★ — 안 보내면 텔레그램이 계속 '로딩중' 을 돌린다
+// (실제로 그 증상이 났다: "눌러도 로딩중 뜨고 반응도 없어").
+
+import { handleApprovalCallback } from "./bridge";
+import { Database as CbDb } from "bun:sqlite";
+import { migrate as cbMigrate } from "../../db/migrate";
+import { requestPermission as cbRequest, getPermissionRequest as cbGet } from "../../lib/permissionGate";
+
+import { tmpdir as cbTmpdir } from "node:os";
+import { join as cbJoin } from "node:path";
+
+const OWNER = 111111111; // 승인자 chat id (픽스처 — 실제 값과 무관)
+
+function pendingRequest(): { dbPath: string; id: string } {
+  const dbPath = cbJoin(mkdtempSync(cbJoin(cbTmpdir(), "cb-")), "team.db");
+  const db = new CbDb(dbPath);
+  cbMigrate(db);
+  const res = cbRequest(db, {
+    agent: { id: "dex", workspace_path: "/tmp/ws" },
+    runtime: "codex", action: "shell", command: "echo hi", cwd: "/tmp/ws",
+  } as never);
+  const id = res.request!.id;
+  db.close();
+  return { dbPath, id };
+}
+
+const spyFetch = (calls: string[]) =>
+  (async (url: string) => { calls.push(String(url).split("/bot")[1]!.split("?")[0]!); return { ok: true } as Response; }) as unknown as typeof fetch;
+
+test("★누르면 결정이 기록되고 답을 보낸다★ — 답이 없으면 텔레그램은 계속 로딩중이다", async () => {
+  const { dbPath, id } = pendingRequest();
+  const calls: string[] = [];
+  const out = await handleApprovalCallback("T", { id: "c1", data: `pg1:${id}`, from: { id: OWNER }, message: { message_id: 1, chat: { id: OWNER } } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch(calls) });
+  expect(out).toBe("decided");
+  expect(calls).toContain("T/answerCallbackQuery"); // ★이게 없으면 로딩중이 안 멈춘다★
+  const db = new CbDb(dbPath);
+  expect(cbGet(db, id)?.status).toBe("allowed_once");
+  db.close();
+});
+
+test("거절 버튼은 거절로 기록된다(세 버튼이 같은 결과면 버튼이 장식이다)", async () => {
+  const { dbPath, id } = pendingRequest();
+  await handleApprovalCallback("T", { id: "c2", data: `pgd:${id}`, from: { id: OWNER } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch([]) });
+  const db = new CbDb(dbPath);
+  expect(cbGet(db, id)?.status).toBe("denied");
+  db.close();
+});
+
+test("★이미 처리된 요청은 지난 대로 알린다★ — 무반응이면 사람은 다시 누른다", async () => {
+  const { dbPath, id } = pendingRequest();
+  const calls: string[] = [];
+  await handleApprovalCallback("T", { id: "c3", data: `pg1:${id}`, from: { id: OWNER } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch([]) });
+  const out = await handleApprovalCallback("T", { id: "c4", data: `pg1:${id}`, from: { id: OWNER }, message: { message_id: 1, chat: { id: OWNER } } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch(calls) });
+  expect(out).toBe("stale");
+  expect(calls).toContain("T/answerCallbackQuery");
+  expect(calls).toContain("T/editMessageReplyMarkup"); // 버튼을 지워서 또 누르지 않게
+});
+
+test("허용 목록 밖 발신자는 결정하지 못한다(fail-closed)", async () => {
+  const { dbPath, id } = pendingRequest();
+  const out = await handleApprovalCallback("T", { id: "c5", data: `pg1:${id}`, from: { id: 999 } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch([]) });
+  expect(out).toBe("unauthorized");
+  const db = new CbDb(dbPath);
+  expect(cbGet(db, id)?.status).toBe("pending"); // 상태가 바뀌면 안 된다
+  db.close();
+});
+
+test("승인과 무관한 콜백은 건드리지 않는다", async () => {
+  const { dbPath } = pendingRequest();
+  expect(await handleApprovalCallback("T", { id: "c6", data: "mcp:on", from: { id: OWNER } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch([]) })).toBe("ignored");
+});
+
+// ── ★team.db 경로는 환경변수에 기대지 않는다★ (2026-08-12) ──
+//
+// 승인 버튼이 죽은 진짜 원인이었다: `B3OS_REPO_ROOT ?? "."` 로 잡았는데 ★브리지에는 그 변수가 없다★
+// (실측: 브리지 프로세스 env 에 CODEX_WORKDIR 만 있고 B3OS_REPO_ROOT 없음).
+// 그래서 cwd(팀원 작업폴더)의 team.db 를 찾아 "unable to open database file" 로 매번 던졌고,
+// ★답을 못 보내서 사람 화면엔 로딩중만 돌았다.★
+
+import { defaultTeamDbPath } from "./bridge";
+import { existsSync as dbExists } from "node:fs";
+import { isAbsolute } from "node:path";
+
+test("★cwd·환경변수와 무관하게 저장소의 team.db 를 가리킨다★", () => {
+  const before = process.cwd();
+  const saved = process.env.B3OS_REPO_ROOT;
+  try {
+    delete process.env.B3OS_REPO_ROOT; // ★없는 게 실제 브리지 환경이다★
+    process.chdir("/tmp");             // 팀원 작업폴더에서 도는 상황을 흉내
+    const p = defaultTeamDbPath();
+    expect(isAbsolute(p)).toBe(true);
+    expect(p.endsWith("/team.db")).toBe(true);
+    expect(p.startsWith("/tmp/")).toBe(false); // cwd 를 따라가면 안 된다
+    expect(dbExists(p)).toBe(true);            // 실제로 열 수 있는 파일이어야 한다
+  } finally {
+    process.chdir(before);
+    if (saved !== undefined) process.env.B3OS_REPO_ROOT = saved;
+  }
+});
+
+// ★브리지도 app-server 로 간다★
+//
+// 전에는 브리지만 옛 exec 경로였다 — ★사람이 직접 말 거는 길★ 에만 그때까지의 개선이
+// 하나도 안 붙어 있었다(중간 개입·상주·서브에이전트 생존·승인창은 전부 버스 경로에만).
+import { defaultBridgeCaller } from "./bridge";
+
+test("★app-server 하나뿐이다★ — 플래그로 갈라두면 한쪽만 좋아지고 다른 쪽은 조용히 뒤처진다", () => {
+  // 폴백은 ★말은 통하지만 기능이 사라진 상태★ 이고, 조용해서 아무도 모른다.
+  const saved = process.env.B3OS_CODEX_APPSERVER;
+  try {
+    delete process.env.B3OS_CODEX_APPSERVER; // 플래그가 없어도 app-server 로 간다
+    expect(typeof defaultBridgeCaller()).toBe("function");
+  } finally {
+    if (saved !== undefined) process.env.B3OS_CODEX_APPSERVER = saved;
+  }
 });

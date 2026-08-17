@@ -28,6 +28,8 @@ import {
   CodexSessionStore,
   sha256Short,
 } from "./state";
+import { steerActiveTurn } from "./activeTurns";
+import { isTestRun } from "./appServerPopup";
 
 const inFlight = new Set<string>();
 
@@ -52,7 +54,48 @@ export interface CodexAdapterDeps {
   sessionStore?: CodexSessionStore;
   artifactStore?: CodexRunArtifactStore;
   inflightStore?: CodexInflightStore;
+  /** ★답이 안 갔을 때 같은 세션에 재촉 1회.★ 기본: 라이브 켬 / 시험 끔(가드 시험이 호출 수를 센다). */
+  nudgeOnUnsentReply?: boolean;
   envelopeBuilder?: CodexTurnEnvelopeBuilder;
+}
+
+/**
+ * ★재촉 턴의 요청문.★ 같은 스레드·같은 세션을 이어가되 goal 만 바꾼다.
+ * 버스에는 아무것도 안 들어간다 — 이건 서버가 그 팀원에게 직접 거는 한 턴이다.
+ */
+export const NUDGE_PROMPT = [
+  "[미전송] 직전 턴의 답이 ★팀에 도착하지 않았다.★ 턴은 끝났는데 send.sh 를 실행하지 않았다.",
+  "지금 ★그 답을 보내라.★ 새로 조사하지 말고, 이미 정리한 내용을 그대로 보내면 된다.",
+].join("\n");
+
+/**
+ * ★그 팀원이 이 스레드에 실제로 무언가 보냈는가.★ (턴 시작 이후)
+ * 서버가 대신 말하지 않기로 한 이상, ★안 보낸 것을 알아채는 장치★ 는 따로 있어야 한다.
+ */
+export function agentRepliedSince(db: Database, agentId: string, threadId: string, sinceUtc: string): boolean {
+  try {
+    const r = db
+      .prepare(`SELECT 1 FROM message WHERE from_agent_id = ? AND thread_id = ? AND created_at >= ? LIMIT 1`)
+      .get(agentId, threadId, sinceUtc);
+    return Boolean(r);
+  } catch {
+    return true; // 조회 실패로 ★거짓 경고★ 를 내지 않는다
+  }
+}
+
+/**
+ * ★진행 중 턴에 끼워 넣을 문장.★ 새 턴의 봉투를 통째로 넣지 않는다 —
+ * 지금 하던 일의 맥락을 유지한 채 ★사람이 끼어든 말★ 로 읽히게 짧게 준다.
+ */
+export function buildSteerText(row: { from_agent_id?: string | null; body: string; message_id: string; thread_id: string }): string {
+  const who = row.from_agent_id ?? "team lead";
+  return [
+    `[중간 메시지 — ${who}]`,
+    row.body,
+    "",
+    `(thread=${row.thread_id} · in-reply-to=${row.message_id})`,
+    "이 말을 반영해서 계속하라. 답할 때는 이 메시지에도 답해라.",
+  ].join("\n");
 }
 
 /** 비동기 턴 — codex 호출 → 최종답 1회 게시. detach라 throw가 위로 안 감(자체 에러처리). */
@@ -75,11 +118,20 @@ export async function runTurn(
     inflightStore: new CodexInflightStore(db),
     envelopeBuilder: new CodexTurnEnvelopeBuilder(db),
   },
+  /**
+   * ★답이 안 갔을 때 같은 세션에 재촉 1회를 걸지★ (기본 꺼짐).
+   *
+   * 기본을 끈 이유: 기존 시험들은 "턴당 codex 호출 1회" 를 전제로 가드를 세워놨다.
+   * 켠 채로 두면 그 가드들이 재촉 호출까지 세면서 깨진다 — ★가드를 약하게 만들지 않는다.★
+   * ★라이브(wake 경로)에서만 켠다.★ 재촉 동작 자체는 별도 시험이 덮는다.
+   */
+  nudgeOnUnsentReply = false,
 ): Promise<void> {
   const targetAgentId = agent.id;
   const conversationKey = row.thread_id;
   const taskId = taskIdFromRow(row);
   try {
+    const turnStartedAt = new Date().toISOString().replace("T", " ").slice(0, 19);
     stores.inflightStore.mark(row.message_id, targetAgentId, row.thread_id);
     const priorSessionId = stores.sessionStore.get(targetAgentId, CODEX_SURFACE_TEAM_BUS, conversationKey);
     const sandbox = codexSandboxFor(agent);
@@ -189,6 +241,39 @@ export async function runTurn(
     appendAuditFile(targetAgentId, "turn_completed_no_autopost", row.message_id, {
       thread_id: row.thread_id, chars: result.reply.length,
     });
+
+    // ★답이 팀에 도착했는지 확인한다 — 대신 말하지는 않는다.★ (2026-08-12)
+    //   위 규칙(서버는 팀원 대신 말하지 않는다)은 그대로다. 다만 ★안 보낸 것을 아무도 모르는 것★ 은
+    //   다른 문제다. 하루에 3건이 관측됐다: 답 없음 / 착수확인만 / 전송 0건.
+    //   턴은 succeeded 였고 로그도 조용해서, 사람이 물어보기 전엔 아무도 몰랐다.
+    //   → 도착 안 했으면 ★그 사실을 남기고 팀원 본인에게 한 번 알린다.★ 말은 본인이 한다.
+    if (!agentRepliedSince(db, targetAgentId, row.thread_id, turnStartedAt)) {
+      appendAuditFile(targetAgentId, "turn_completed_but_no_reply_sent", row.message_id, {
+        thread_id: row.thread_id, chars: result.reply.length,
+      });
+      // ★runtimeBlock 을 쓰지 않는다★ — 그 칸은 '런타임이 막혔다' 는 뜻이고
+      //   '성공 턴은 이전 블록을 지운다' 는 계약이 따로 있다(시험이 그걸 고정한다).
+      //   여기 쓰면 그 계약과 싸운다. 사실만 남기고 로그로 드러낸다.
+      console.error(`[codex] ${targetAgentId}: 턴은 끝났는데 ★답이 팀에 도착하지 않았다★ (thread=${row.thread_id}, msg=${row.message_id}, 본문 ${result.reply.length}자)`);
+      // ★버스에는 아무것도 넣지 않는다★ — 서버가 한 마디도 하지 않는다는 계약(시험이 고정)을 지킨다.
+      //   대신 ★같은 세션에서 한 턴 더 돌려★ 본인이 보내게 한다. 말은 여전히 본인이 한다.
+      //   한 번만 한다(nudged 플래그) — 그 턴도 실패하면 또 도는 고리가 된다.
+      // ★runTurn 을 다시 돌지 않는다★ — 그 경로에는 '한 요청 한 턴'·in-flight 잠금·아티팩트 계약이
+      //   걸려 있어서 재진입하면 그 불변식들과 싸운다(시험 6건이 그걸 고정하고 있다).
+      //   대신 ★같은 세션에 codex 호출만 한 번 더★ 건다. 버스에도 아무것도 안 넣는다.
+      if (nudgeOnUnsentReply) {
+        try {
+          console.error(`[codex] ${targetAgentId}: 같은 세션에 재촉 1회 — 본인이 보내게 한다`);
+          await callCodex({
+            prompt: NUDGE_PROMPT,
+            agentId: targetAgentId,
+            cwd: agent.workspace_path ?? undefined,
+            codexHome: codexHomeFor(agent),
+            resumeSessionId: result.sessionId ?? priorSessionId ?? undefined,
+          } as never);
+        } catch { /* 재촉 실패가 원래 턴 결과를 바꾸지 않는다 */ }
+      }
+    }
     stores.artifactStore.record({
       agentId: targetAgentId,
       messageId: row.message_id,
@@ -314,7 +399,9 @@ export function makeCodexAdapter(
   // ★M6: B3OS_CODEX_APPSERVER=1 이면 app-server 런타임 사용(중간 인터럽트/steer+승인팝업 기반).★
   // 롤아웃 스위치(폴백 아님 — 제품 결정): 검증 전엔 exec, 검증 후 flag on. deps.callCodex가 최우선(테스트).
   // ★M5.3: flag on이면 db 주입한 app-server caller(ask→GD 팝업). flag off=exec. deps.callCodex 최우선(테스트).★
-  const defaultCaller = process.env.B3OS_CODEX_APPSERVER === "1" ? makeAppServerCaller(db) : runCodexTurn;
+  // ★app-server 하나뿐이다.★
+  //   플래그로 갈라두면 ★한쪽만 좋아지고 다른 쪽은 조용히 뒤처진다★ — 실제로 그랬다.
+  const defaultCaller = makeAppServerCaller(db);
   const callCodex = deps.callCodex ?? defaultCaller;
   const stores = {
     sessionStore: deps.sessionStore ?? new CodexSessionStore(db),
@@ -339,7 +426,17 @@ export function makeCodexAdapter(
       //   → agent 단위 잠금으로 앞 턴이 끝날 때(아래 finally)까지 다음 턴을 defer(연기)해 '한 팀원=한 번에 한 턴'을 보장.
       //   (다른 런타임과 동일 계약. 공용 RuntimeTurnCoordinator 리팩터는 shared 코드라 별도 과제로 분리.)
       const key = targetAgentId;
-      if (inFlight.has(key)) return { ok: true, deferred: true, detail: "codex_in_flight" };
+      if (inFlight.has(key)) {
+        // ★연기하기 전에 진행 중 턴에 끼워 넣어 본다.★
+        //   연기만 하면 20번 뒤 blocked 로 ★메시지가 사라진다★ — 실측으로 확인했다.
+        //   끼워 넣기에 성공하면 그 턴이 이어서 읽으므로 별도 턴이 필요 없다.
+        const steered = await steerActiveTurn(targetAgentId, buildSteerText(row));
+        if (steered) {
+          appendAuditFile(targetAgentId, "codex_steered_into_turn", row.message_id, { thread_id: row.thread_id });
+          return { ok: true, detail: "codex_steered" };
+        }
+        return { ok: true, deferred: true, detail: "codex_in_flight" };
+      }
       inFlight.add(key);
 
       // ★관리자 설정(agents.json)을 grant로 seed(per-agent)★ — 미주입 시 preflight가 workspace-write/network를
@@ -361,7 +458,7 @@ export function makeCodexAdapter(
           };
 
       // lease-safe: 턴 detach, wake는 즉시 반환(claim-tick 블록 방지).
-      void runTurn(db, agents, agent, row, teamContext, callCodex, turnStores).finally(() => inFlight.delete(key));
+      void runTurn(db, agents, agent, row, teamContext, callCodex, turnStores, deps.nudgeOnUnsentReply ?? !isTestRun()).finally(() => inFlight.delete(key));
       return { ok: true, detail: "codex_dispatched" };
     },
   };

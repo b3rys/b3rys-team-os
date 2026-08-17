@@ -25,7 +25,7 @@ export interface CodexTurnOptions {
   /** ★이 턴이 '누구' 인가. 필수다.★ 팀원 스크립트(_me.sh)가 tmux 세션으로 ★추측하지 않게★ 명시적으로 넘긴다.
    *  (2026-07-13: hermes 가 구버전 _me.sh 의 tmux 폴백 때문에 ★전 발신이 'bill' 로 위장★됐다)
    *
-   *  ★선택 인자로 두지 않는다★ (빌 리뷰 2026-08-12): 이 값은 승인 요청의 주인으로도 쓰인다.
+   *  ★선택 인자로 두지 않는다★ (리뷰 지적): 이 값은 승인 요청의 주인으로도 쓰인다.
    *  기본값을 두면 새 호출부가 빠뜨렸을 때 ★조용히 남의 신원으로 찍힌다★ — 실제로 그랬다
    *  (appServerRunner 가 "codex" 를 박아둬서 dex 요청 4건이 codex 앞으로 기록됐다).
    *  필수로 두면 빠뜨리는 순간 ★컴파일이 막는다.★ 런타임 예외보다 이르다 —
@@ -135,6 +135,14 @@ export function redactPromptArg(args: string[]): string[] {
 
 /**
  * Codex 한 턴 실행(헤드리스). 답 텍스트 + sessionId 반환. 발신은 호출자(어댑터) 책임.
+ */
+/**
+ * ★DEPRECATED — 새 경로에서 쓰지 마라.★
+ *
+ * `codex exec` 는 한 번 부르고 죽는다. 그래서 ★중간 개입도, 서브에이전트 생존도, 승인창도 없다.★
+ * app-server 가 안 되면 이쪽으로 떨어뜨리고 싶어지는데 — **그게 기능 퇴보다.**
+ *
+ * 남겨두는 이유는 하나 — 아직 이 함수를 부르는 옛 시험·도구가 있다. 제품 경로에서는 쓰지 않는다.
  */
 export async function runCodexTurn(opts: CodexTurnOptions): Promise<CodexTurnResult> {
   const started = Date.now();

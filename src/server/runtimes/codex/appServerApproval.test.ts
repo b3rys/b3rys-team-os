@@ -174,40 +174,39 @@ function approvalRaisingClient(seen: string[] = []) {
  * hermes·openclaw 는 b3os 에 승인 배선이 아예 없다. codex 도 같은 모양으로 맞췄다.
  * 경계는 config.toml 의 permission 프로파일이 친다(launcher.renderLockedDownCodexConfig).
  */
-const runWithApproval = async (agentId: string) => {
+/**
+ * ★결정을 기다리지 않는다★ — 팝업은 사람이 누를 때까지 폴링한다(기본 TTL 1시간).
+ * 행이 생기는 즉시 읽고 거절로 마감해 턴을 풀어준다. (그냥 await 하면 시험이 타임아웃까지 매달린다.)
+ */
+const popupOf = async (agentId: string) => {
   const db = new ApprDb(":memory:");
   apprMigrate(db);
   const decisions: string[] = [];
-  const res = await runApprServer({ prompt: "p", cwd: "/tmp/ws", agentId } as never, db, approvalRaisingClient(decisions));
-  const popups = (db.query("select count(*) as n from permission_request").get() as { n: number }).n;
+  const turn = runApprServer({ prompt: "p", cwd: "/tmp/ws", agentId } as never, db, approvalRaisingClient(decisions));
+  let row: { id: string; agent_id: string } | undefined;
+  for (let i = 0; i < 300 && !row; i++) {
+    row = db.query("select id, agent_id from permission_request order by created_at desc limit 1").get() as never;
+    if (!row) await new Promise((r) => setTimeout(r, 10));
+  }
+  if (row) db.run("update permission_request set status='denied' where id=?", [row.id]); // 턴을 풀어준다
+  await turn.catch(() => {});
   db.close();
-  return { res, popups, decisions };
+  return { agentId: row?.agent_id, decisions };
 };
 
-test("★사람을 기다리지 않고 턴이 끝난다★ — 이게 안 되면 팀원이 답을 못 한다", async () => {
-  const { res } = await runWithApproval("dex");
-  // 옛 경로였다면 여기서 폴링에 걸려 타임아웃까지 매달렸다(실제로 그랬다).
-  expect(res.ok).toBe(true);
-  expect(res.reply).toBe("ok");
+test("★codex 가 물으면 승인 요청을 만든다★ — 무조건 거절하면 옮겨온 게 아니라 기능을 뺀 것이다", async () => {
+  // 터미널에서 codex 를 쓰면 경계 밖은 물어보고 사람이 누른다. 그 물음을 팀원 방으로 옮기는 게 우리 일.
+  expect((await popupOf("dex")).agentId).toBe("dex");
 }, 20000);
 
-test("★승인 팝업을 만들지 않는다★ — 팀원 승인이 팀 리드 방으로 올라가던 경로", async () => {
-  const { popups } = await runWithApproval("dex");
-  expect(popups).toBe(0);
+test("★목적지는 이 턴의 주인이다★ — 상수로 박으면 남의 방으로 간다", async () => {
+  // 전에 id 가 "codex" 로 박혀 있어 permission_request.agent_id 가 전부 "codex" 였다.
+  // 그리고 "codex" 는 실재하는 다른 팀원의 id 다(명부에 codex(openclaw)와 dex(codex 런타임)가 따로 있다).
+  expect((await popupOf("cody")).agentId).toBe("cody");
 }, 20000);
 
-test("★물어오면 거절한다(fail-closed)★ — 감독을 강화한 설정이 오히려 전부 열리면 안 된다", async () => {
-  // 여기 왔다 = 그 멤버 설정이 "사람에게 물어라" 라고 한 것. 물어볼 창구가 없으니 거절이 그 뜻에 맞다.
-  // 허용으로 두면 approval_policy 를 on-request 로 ★조인 사람★ 이 오히려 전부 통과시키게 된다(빌 리뷰).
-  const { decisions } = await runWithApproval("dex");
-  expect(decisions).toEqual(["denied"]);
-}, 20000);
-
-test("대조군 — 다른 팀원도 같다(dex 전용 분기가 아니다)", async () => {
-  const { res, popups, decisions } = await runWithApproval("cody");
-  expect(res.ok).toBe(true);
-  expect(popups).toBe(0);
-  expect(decisions).toEqual(["denied"]);
+test("사람이 누른 결정이 codex 에게 그대로 간다", async () => {
+  expect((await popupOf("dex")).decisions).toEqual(["denied"]); // 위에서 거절로 마감했다
 }, 20000);
 
 // ── ★자식 app-server 가 그 팀원의 설정을 읽는가★ (2026-08-12) ──
@@ -233,4 +232,174 @@ test("대조군 — codexHome 이 없으면 CODEX_HOME 을 새로 박지 않는�
 test("★기본 팩토리가 그 턴 주인의 codexHome 을 실어 준다★ — 배선이 끊기면 위 함수가 맞아도 소용없다", () => {
   const c = defaultAppServerClientFactory({ prompt: "p", agentId: "dex", codexHome: "/x/dex" } as never);
   expect(c.codexHome).toBe("/x/dex");
+});
+
+// ── ★팝업이 그 팀원 방으로 간다★ ──
+
+import { sendApprovalToMemberRoom, approvalSummary } from "./appServerPopup";
+
+test("★그 팀원 봇으로, 버튼 3개를 붙여 보낸다★", async () => {
+  const calls: { url: string; body: Record<string, unknown> }[] = [];
+  const fetchFn = (async (url: string, init: { body: string }) => {
+    calls.push({ url: String(url), body: JSON.parse(init.body) });
+    return { ok: true } as Response;
+  }) as unknown as typeof fetch;
+
+  const ok = await sendApprovalToMemberRoom(
+    "dex", "prm_abc123",
+    { method: "item/commandExecution/requestApproval", params: { command: "rm -rf /tmp/x" } },
+    { token: "TKN", chatId: "555", fetchFn },
+  );
+  expect(ok).toBe(true);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]!.url).toContain("/botTKN/sendMessage"); // ★그 팀원 봇★ — 다른 봇이면 남의 방에 뜬다
+  expect(calls[0]!.body.chat_id).toBe("555");
+  const kb = (calls[0]!.body.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard.flat();
+  expect(kb.map((b) => b.callback_data)).toEqual(["pg1:prm_abc123", "pga:prm_abc123", "pgd:prm_abc123"]);
+});
+
+test("★위험 표시가 카드에 실린다 — 우리가 안 막으면 사람이 판단할 근거는 줘야 한다★", async () => {
+  // 우리 차단목록을 걷어낸 뒤, 위험 명령도 카드로 올라온다.
+  // ★그 카드가 위험을 말하지 않으면 `sudo rm -rf /` 와 `ls` 가 폰에서 생김새가 같다.★ (리뷰 지적)
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetchFn = (async (_u: string, init: { body: string }) => {
+    calls.push({ body: JSON.parse(init.body) });
+    return { ok: true } as Response;
+  }) as unknown as typeof fetch;
+
+  await sendApprovalToMemberRoom(
+    "dex", "prm_risk",
+    { method: "item/commandExecution/requestApproval", params: { command: "sudo rm -rf /tmp/x" } },
+    { token: "T", chatId: "9", fetchFn, risks: ["sudo", "rm_rf"] },
+  );
+  const text = String(calls[0]!.body.text);
+  expect(text, "★위험 사유가 본문에 있어야 한다★").toContain("위험 표시");
+  expect(text).toContain("sudo");
+  expect(text).toContain("rm_rf");
+
+  // ★위험 건에는 '항상 허용' 을 주지 않는다★ — 막는 게 아니라 ★무인 반복★ 을 막는 것이다.
+  const kb = (calls[0]!.body.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard.flat();
+  expect(kb.map((b) => b.callback_data)).toEqual(["pg1:prm_risk", "pgd:prm_risk"]);
+});
+
+test("위험 표시가 없으면 카드는 그대로 — 버튼 3개 유지", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetchFn = (async (_u: string, init: { body: string }) => {
+    calls.push({ body: JSON.parse(init.body) });
+    return { ok: true } as Response;
+  }) as unknown as typeof fetch;
+
+  await sendApprovalToMemberRoom(
+    "dex", "prm_safe",
+    { method: "item/commandExecution/requestApproval", params: { command: "ls /tmp" } },
+    { token: "T", chatId: "9", fetchFn, risks: [] },
+  );
+  const text = String(calls[0]!.body.text);
+  expect(text, "안전한 건에는 위험 줄이 붙지 않는다").not.toContain("위험 표시");
+  const kb = (calls[0]!.body.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard.flat();
+  expect(kb.map((b) => b.callback_data)).toEqual(["pg1:prm_safe", "pga:prm_safe", "pgd:prm_safe"]);
+});
+
+test("토큰이나 방을 모르면 보내지 않는다(조용히 성공했다고 하지 않는다)", async () => {
+  const fetchFn = (async () => ({ ok: true } as Response)) as unknown as typeof fetch;
+  expect(await sendApprovalToMemberRoom("dex", "prm_a", { method: "m", params: {} }, { token: "T", chatId: "", fetchFn })).toBe(false);
+});
+
+test("팝업 문구는 무엇을 하려는지 + 대상으로 갈라진다", () => {
+  expect(approvalSummary({ method: "m", params: { command: ["ls", "-la"] } })).toEqual({ title: "명령을 실행할까요?", detail: "ls -la" });
+  const f = approvalSummary({ method: "m", params: { fileChanges: { "/a.ts": {}, "/b.ts": {} } } });
+  expect(f.title).toBe("파일 2개를 고칠까요?");
+});
+
+// ── ★무응답 만료(5분)★ ──
+
+import { pollDecision, expirePermissionRequest } from "./appServerPopup";
+import { requestPermission as expReq, getPermissionRequest as expGet } from "../../lib/permissionGate";
+
+test("★만료되면 행도 닫힌다★ — pending 으로 남으면 한참 뒤 탭이 끝난 턴을 승인한다", async () => {
+  const db = new ApprDb(":memory:"); apprMigrate(db);
+  const id = expReq(db, { agent: { id: "dex", workspace_path: "/tmp/ws" }, agent_id: "dex", runtime: "codex", action: "shell", command: "echo hi", cwd: "/tmp/ws" } as never).request!.id;
+  const decision = await pollDecision(db, id, 20, 5); // 20ms 만료
+  expect(decision).toBe("denied");
+  expect(expGet(db, id)?.status).toBe("expired"); // ★행이 닫혀야 나중 탭이 '만료' 로 답한다★
+  db.close();
+});
+
+test("이미 결정된 요청은 만료가 덮어쓰지 않는다", () => {
+  const db = new ApprDb(":memory:"); apprMigrate(db);
+  const id = expReq(db, { agent: { id: "dex", workspace_path: "/tmp/ws" }, agent_id: "dex", runtime: "codex", action: "shell", command: "echo hi", cwd: "/tmp/ws" } as never).request!.id;
+  db.run("update permission_request set status='allowed_once' where id=?", [id]);
+  expirePermissionRequest(db, id);
+  expect(expGet(db, id)?.status).toBe("allowed_once");
+  db.close();
+});
+
+// ── ★목적지는 인가 목록이 아니다★ (리뷰 지적) ──
+//
+// allowFrom = "누가 이 봇에 말 걸 수 있나" 인가 목록이고 [팀리드 DM, 팀 그룹] 순서다.
+// 그걸 목적지로 쓰면 ★팀 리드 DM 이 비었을 때 첫 항목이 팀 그룹★ 이 되어
+// ★보안 질문이 단체방에 뜬다.★ 목적지는 팀 리드 DM 이고, 모르면 보내지 않는다.
+
+test("★인가 목록이 아니라 팀 리드 DM 으로 간다★ — 두 값을 다르게 놓고 가른다", async () => {
+  // ★이 기계에서는 allowFrom[0] 과 팀 리드 DM 이 우연히 같다.★ 그래서 기대값을 피험 함수에서
+  // 뽑으면 옛 버그 코드(allowFrom[0])로 되돌려도 초록이다 — 실제로 그랬다(리뷰 지적).
+  // 두 값을 ★서로 다르게★ 놓아야 어느 쪽을 쓰는지 갈린다.
+  const sent: Record<string, unknown>[] = [];
+  const fetchFn = (async (_u: string, init: { body: string }) => { sent.push(JSON.parse(init.body)); return { ok: true } as Response; }) as unknown as typeof fetch;
+  const OWNER_DM = "111111111"; // 팀 리드 DM (정답)
+  const ok = await sendApprovalToMemberRoom("dex", "prm_x1", { method: "m", params: { command: "ls" } },
+    { token: "T", fetchFn, resolveDestination: () => OWNER_DM });
+  expect(ok).toBe(true);
+  expect(String(sent[0]!.chat_id)).toBe(OWNER_DM); // allowFrom[0] 를 쓰면 이 값이 안 나온다
+});
+
+test("★목적지를 모르면 보내지 않는다★ (fail-closed) — 아무 방에나 띄우는 것보다 안 뜨는 게 낫다", async () => {
+  const sent: unknown[] = [];
+  const fetchFn = (async () => { sent.push(1); return { ok: true } as Response; }) as unknown as typeof fetch;
+  const ok = await sendApprovalToMemberRoom("dex", "prm_x2", { method: "m", params: { command: "ls" } },
+    { token: "T", fetchFn, resolveDestination: () => null });
+  expect(ok).toBe(false);
+  expect(sent).toHaveLength(0);
+});
+test("★재시작해도 만료가 유효하다★ — 만료가 대기 프로세스 메모리에만 있으면 행이 영원히 pending", async () => {
+  // 리뷰 지적: 서버가 대기 중 재시작하면 아무도 그 행을 안 닫는다. 행이 스스로 말해야 한다.
+  const db = new ApprDb(":memory:"); apprMigrate(db);
+  const id = expReq(db, { agent: { id: "dex", workspace_path: "/tmp/ws" }, agent_id: "dex", runtime: "codex", action: "shell", command: "echo hi", cwd: "/tmp/ws" } as never).request!.id;
+  db.run("update permission_request set expires_at = datetime('now','-1 second') where id=?", [id]);
+  // ttl 을 길게 줘도(=이 프로세스는 아직 안 기다렸다) ★행의 만료가 이긴다★
+  const decision = await pollDecision(db, id, 60_000, 5);
+  expect(decision).toBe("denied");
+  expect(expGet(db, id)?.status).toBe("expired");
+  db.close();
+});
+
+test("대조군 — 만료 전이면 계속 기다린다(아무거나 만료로 읽으면 승인이 죽는다)", async () => {
+  const db = new ApprDb(":memory:"); apprMigrate(db);
+  const id = expReq(db, { agent: { id: "dex", workspace_path: "/tmp/ws" }, agent_id: "dex", runtime: "codex", action: "shell", command: "echo hi", cwd: "/tmp/ws" } as never).request!.id;
+  db.run("update permission_request set expires_at = datetime('now','+60 seconds') where id=?", [id]);
+  setTimeout(() => db.run("update permission_request set status='allowed_once' where id=?", [id]), 20);
+  expect(await pollDecision(db, id, 5_000, 5)).toBe("approved");
+  db.close();
+});
+
+// ── ★시험이 진짜 텔레그램으로 나가면 안 된다★ (2026-08-12 사고) ──
+//
+// requestApprovalPopup 을 지나는 시험이 deps 없이 sendApprovalToMemberRoom 을 부르면
+// ★실제 토큰·실제 방★ 으로 나간다. 실제로 나갔다 — 팀 리드 방에 'echo hi' 'src/x.ts' 같은
+// ★시험 픽스처가 승인창으로★ 떴고, 시험을 돌릴 때마다 반복됐다.
+// 라이브 DB 에는 흔적이 없었다(시험은 :memory: 를 쓴다) — ★전송만 진짜였다.★
+
+test("★시험 중에는 실제 전송을 하지 않는다★ — 픽스처가 팀 리드 방에 뜨면 안 된다", async () => {
+  // fetchFn 을 안 주면 = 진짜로 보내려는 것. 시험 중에는 무조건 막는다.
+  const ok = await sendApprovalToMemberRoom("dex", "prm_guard", { method: "m", params: { command: "echo hi" } });
+  expect(ok).toBe(false);
+});
+
+test("대조군 — fetchFn 을 준 시험은 그 가짜로 정상 검증된다(가드가 과잉이 아니다)", async () => {
+  const sent: unknown[] = [];
+  const fetchFn = (async () => { sent.push(1); return { ok: true } as Response; }) as unknown as typeof fetch;
+  const ok = await sendApprovalToMemberRoom("dex", "prm_guard2", { method: "m", params: { command: "echo hi" } },
+    { token: "T", chatId: "1", fetchFn });
+  expect(ok).toBe(true);
+  expect(sent).toHaveLength(1);
 });

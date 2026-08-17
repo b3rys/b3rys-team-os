@@ -7,7 +7,7 @@
  * 실측 검증(스파이크): initialize·thread/start·turn/start(스트리밍+응답)·turn/steer(expectedTurnId 필수)·
  * turn/interrupt(status=interrupted)·승인요청(execCommandApproval 등 ServerRequest). 전부 동작 확인.
  *
- * ★이 모듈은 순수 프로토콜 클라이언트다 — 팀 버스/permissionGate/텔레그램 배선은 상위(adapter)가 한다.★
+ * ★이 모듈은 순수 프로토콜 클라이언트다 — 팀 버스·텔레그램 배선은 상위(adapter)가 한다.★
  */
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import {
@@ -18,7 +18,7 @@ import { CodexTurnItemIndex, type ObservedItem } from "./appServerItemIndex";
 const CODEX_BIN = process.env.CODEX_BIN ?? "codex";
 const HANDSHAKE_TIMEOUT_MS = Number(process.env.B3OS_CODEX_APPSERVER_HANDSHAKE_MS ?? 45_000);
 
-/** 승인요청(ServerRequest) — 상위가 permissionGate/GD 팝업으로 판정해 decision을 돌려준다. */
+/** 승인요청(ServerRequest) — 상위가 decision 을 돌려준다. 실행 모드가 approvalPolicy never 라 실사용에서는 오지 않는다. */
 export interface ApprovalRequest {
   method: string; // execCommandApproval | applyPatchApproval | item/permissions/requestApproval | item/tool/requestUserInput ...
   params: Record<string, unknown>;
@@ -43,6 +43,8 @@ export interface RunTurnHandlers {
   onTurnStarted?: (turnId: string) => void;
   /** 승인요청 → decision 반환(비동기). 미지정 시 기본 denied(fail-closed). */
   onApproval?: (req: ApprovalRequest) => Promise<ReviewDecision> | ReviewDecision;
+  /** ★지금 무엇을 하는 중인가★ — 사람이 진행 상황을 보게 한다(tmux 팀원의 화면 긁기와 같은 자리). */
+  onActivity?: (line: string) => void;
   /** 임의 서버 알림 관찰(로깅/디버그). */
   onNotify?: (method: string, params: unknown) => void;
 }
@@ -78,16 +80,53 @@ export function appServerSpawnEnv(codexHome?: string, base: NodeJS.ProcessEnv = 
   return env;
 }
 
+/**
+ * ★지금 무엇을 하는 중인지 한 줄로.★
+ *
+ * tmux 팀원은 statusProbe 가 화면을 긁어 이 줄을 채운다. codex 팀원은 창이 없어서
+ * ★영영 비어 있었다★ — 실측: agent_status.activity_line 이 dex 는 항상 null.
+ * codex 의 등가물은 app-server 가 흘려주는 item 이벤트다. 그걸 같은 칸에 쓴다.
+ */
+export function activityLineOf(item: unknown): string | null {
+  const it = (item ?? {}) as Record<string, unknown>;
+  const type = typeof it.type === "string" ? it.type : "";
+  const clip = (s: string) => (s.length > 80 ? `${s.slice(0, 80)}…` : s);
+
+  const cmd = it.command ?? (it as { cmd?: unknown }).cmd;
+  const cmdText = typeof cmd === "string" ? cmd : Array.isArray(cmd) ? cmd.join(" ") : null;
+  if (cmdText) return clip(`실행: ${cmdText}`);
+
+  const changes = it.fileChanges;
+  if (changes && typeof changes === "object") {
+    const files = Object.keys(changes as Record<string, unknown>);
+    return clip(files.length === 1 ? `파일 수정: ${files[0]}` : `파일 ${files.length}개 수정`);
+  }
+  if (type === "webSearch" || type === "web_search") {
+    const q = typeof it.query === "string" ? it.query : "";
+    return clip(q ? `웹 검색: ${q}` : "웹 검색");
+  }
+  if (type === "reasoning") return "생각하는 중";
+  if (type === "agentMessage") return "답 쓰는 중";
+  if (type === "mcpToolCall") {
+    const n = typeof it.name === "string" ? it.name : "도구";
+    return clip(`도구 호출: ${n}`);
+  }
+  return type ? clip(type) : null;
+}
+
 export class CodexAppServerClient {
   private proc: ChildProcessWithoutNullStreams | null = null;
   private buf = "";
   private nextId = 1;
   private pending = new Map<number, Pending>();
   private threadId: string | null = null;
-  private currentTurnId: string | null = null;
+  /** ★공개★ — 진행 중 턴에 끼어들려면(steer) 밖에서 turnId 유무를 볼 수 있어야 한다. 쓰기는 내부에서만. */
+  currentTurnId: string | null = null;
   private activeHandlers: RunTurnHandlers | null = null;
   private turnResolve: ((r: TurnResult) => void) | null = null;
   private closed = false;
+  /** 풀이 ★죽은 것을 돌려주지 않게★ 밖에서 상태를 볼 수 있어야 한다. */
+  get isClosed(): boolean { return this.closed; }
 
   /**
    * ★어느 팀원의 설정으로 돌 것인가.★ 안 주면 자식이 ★호스트 ~/.codex★ 를 읽는다.
@@ -372,6 +411,11 @@ export class CodexAppServerClient {
       case "item/agentMessage/delta": {
         const t = params?.delta ?? params?.text ?? "";
         if (t) { this.deltaBuf += String(t); this.activeHandlers?.onDelta?.(String(t)); } // ★#4: delta 누적(완결텍스트 빈 경우 폴백)★
+        break;
+      }
+      case "item/started": {
+        const line = activityLineOf(params?.item);
+        if (line) this.activeHandlers?.onActivity?.(line);
         break;
       }
       case "item/completed": {

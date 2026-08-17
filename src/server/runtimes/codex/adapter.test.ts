@@ -393,28 +393,38 @@ describe("codex adapter — 핵심 정확성", () => {
     expect(seen[0]?.sandbox).toBe("workspace-write");
     expect(seen[0]?.networkAccess).toBe(true);
     expect(seen[0]?.writableRoots).toEqual(["/tmp"]);
-    expect(seen[0]?.prompt).toContain('"sandbox": "workspace-write"');
-    expect(seen[0]?.prompt).toContain('"networkAccess": true');
+    // ★프롬프트에는 샌드박스를 싣지 않는다★ — codex 설정이 정하는 값이라 여기 또 쓰면 한쪽이 낡는다.
+    //   실제로 낡아 있었다: 봉투가 "read-only" 를 싣는 동안 codex 는 workspace-write 로 돌았다.
+    expect(seen[0]?.prompt).not.toContain('"sandbox"');
+    expect(seen[0]?.prompt).not.toContain('"networkAccess"');
   });
 
-  test("permission preflight blocks workspace-write before spawning codex when no grant exists", async () => {
+  // ★계약이 바뀌었다★ (다른 런타임과의 일관성).
+  //   예전 이름: "permission preflight blocks workspace-write before spawning codex when no grant exists" —
+  //   grant 가 없으면 ★codex 를 띄우기도 전에★ 우리가 턴을 죽이고 실패 아티팩트·런타임 블록을 남겼다.
+  //   우리 코드로 차단목록을 얹은 런타임이 codex 뿐이라(claude·hermes·openclaw·b3osNative 0건) 판정을 뺐다.
+  //   이제 경계는 codex 설정이 정하고, 그 밖은 codex 승인창에서 사람이 정한다.
+  test("★grant 가 없어도 workspace-write 턴은 그대로 실행된다★ — 턴 앞 우리 판정을 뺐다", async () => {
     const db = setup();
     const agent = { ...codyOf(db), codex_sandbox: "workspace-write" as const };
     let called = false;
     const fake: CodexCaller = async () => {
       called = true;
-      return okResult("실행되면 안 됨");
+      return okResult("실행된다");
     };
 
+    // ★permissionContext(설정-grant)를 일부러 안 넘긴다★ — 예전엔 바로 이것 때문에 막혔다.
     await runTurn(db, agentsOf(db), agent, row(), "", fake);
 
-    expect(called).toBe(false);
-    expect(getRuntimeBlock("cody")?.line).toContain("tier-a.workspace-write");
-    expect(artifacts(db, "failed")[0]?.detail).toContain("permission_ask:tier-a.workspace-write");
-    const pending = db.query("SELECT action, status, requested_by FROM permission_request").all() as any[];
-    expect(pending).toEqual([{ action: "sandbox", status: "pending", requested_by: "codex-adapter" }]);
-    const approval = db.query("SELECT action_key, status FROM approval_request").all() as any[];
-    expect(approval).toEqual([{ action_key: "permission_gate", status: "pending" }]);
+    expect(called, "★턴 앞 차단이 되살아났다★ — codex 가 스폰되지 않았다").toBe(true); // 예전 false
+    expect(getRuntimeBlock("cody")).toBe(null); // 예전: "tier-a.workspace-write" 블록이 걸렸다
+    expect(artifacts(db, "failed")).toEqual([]); // 예전: permission_ask 실패 아티팩트가 남았다
+    expect(artifacts(db, "succeeded").length).toBe(1); // 턴은 정상 완주한다
+
+    // ★우리가 만들던 sandbox 승인요청은 더 이상 생기지 않는다★
+    //   — 승인은 codex 가 자기 승인창을 올릴 때(appServerPopup) 생긴다. 턴 시작 전 우리 몫이 아니다.
+    expect(db.query("SELECT action, status, requested_by FROM permission_request").all()).toEqual([]);
+    expect(db.query("SELECT action_key, status FROM approval_request").all()).toEqual([]);
   });
 
   test("team-bus codex turn uses per-agent CODEX_HOME instead of host ~/.codex", async () => {

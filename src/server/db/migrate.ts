@@ -85,9 +85,15 @@ export function migrate(db: Database): void {
        created_at TEXT NOT NULL DEFAULT (datetime('now')),
        decided_at TEXT,
        approver TEXT,
-       provenance_json TEXT
+       provenance_json TEXT,
+       -- ★만료를 행 자신이 말한다★: 전에는 기다리는 프로세스의 메모리에만
+       -- 있어서, 그 프로세스가 대기 중 재시작하면 행이 영원히 pending 으로 남았다.
+       expires_at TEXT
      )`,
   );
+  // 기존 DB 용 — 이미 있으면 무시.
+  try { db.exec("ALTER TABLE permission_request ADD COLUMN expires_at TEXT"); }
+  catch (e) { if (!String(e instanceof Error ? e.message : e).includes("duplicate column name")) throw e; }
   // 사람이 고른 ★범위★ 를 그대로 적는 칸. once | session | always.
   //
   // status 는 CHECK 로 값이 고정돼 있고, ★CHECK 는 ALTER 로 못 바꾼다★ — 늘리려면 표를 재작성해야 한다.

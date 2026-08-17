@@ -13,7 +13,7 @@
 import { runCodexTurn, type CodexTurnOptions, type CodexTurnResult } from "./runner";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadRegistry } from "../../lib/registry";
 import { appendAuditFile } from "../../lib/auditFile";
@@ -367,7 +367,11 @@ export async function handleMessage(
   messageId: number | undefined,
   deps: BridgeDeps = {},
 ): Promise<{ ok: boolean; reply: string; detail: string }> {
-  const runTurn = deps.runTurn ?? ((o) => runCodexTurn(o));
+  // ★브리지도 app-server 로 간다.★
+  //   전에는 브리지만 옛 exec 경로였다 — 그래서 ★사람이 직접 말 거는 길에만★ 그때까지의 개선
+  //   (중간 개입 · 프로세스 상주 · 서브에이전트 생존 · 승인창)이 하나도 안 붙어 있었다.
+  //   버스는 app-server, 직접 대화는 exec 로 갈라져 있던 것이 구멍이었다.
+  const runTurn = deps.runTurn ?? defaultBridgeCaller();
   const registerReminder = deps.registerScheduleReminder ?? registerScheduleMarker;
   const send = deps.sendMessage ?? (async () => null);
   const edit = deps.editMessage ?? (async () => false);
@@ -378,7 +382,7 @@ export async function handleMessage(
   //   ★enforcement = gate 결과와 무관하게 그룹 전체 drop★ — capture→bus가 owner를 이미 처리하므로(runInjection이
   //   route targets 에만 주입) native 가 또 답하면 이중응답. gate는 shadow/audit(effective 권위 기록)용으로만.
   //   env flag 2개 분리, 둘 다 off 기본 = ★라이브 영향 0(byte-level 불변)★. shadow=drop 없이 audit만.
-  // ★이 브리지가 '누구' 인지는 한 곳에서만 정한다★ (빌 리뷰 2026-08-12).
+  // ★이 브리지가 '누구' 인지는 한 곳에서만 정한다★ (리뷰 지적).
   //   같은 식이 아래 네 곳에 흩어져 있었다. 그중 하나라도 빠지면 ★남의 신원으로 도는데★
   //   그게 승인 요청의 주인으로도 쓰인다 — 실제로 dex 요청 4건이 codex 앞으로 기록됐다.
   const selfAgentId = deps.agentId ?? process.env.CODEX_AGENT_ID ?? "codex";
@@ -576,6 +580,136 @@ function tgReact(token: string): NonNullable<BridgeDeps["reactMessage"]> {
 interface TgUpdate {
   update_id: number;
   message?: { message_id: number; chat: { id: number }; text?: string };
+  callback_query?: TgCallbackQuery;
+}
+
+interface TgCallbackQuery {
+  id: string;
+  data?: string;
+  from?: { id: number };
+  message?: { message_id: number; chat: { id: number } };
+}
+
+/**
+ * ★이 브리지가 쓸 두뇌 — app-server 하나뿐이다.★
+ *
+ * > "그게 무슨 fallback 이야. 기능을 퇴보시키는 거지.. app server 로 돌게 해야지.
+ * >  exec 방식은 deprecate 해. 자꾸 fallback 이런걸로 유지하지 마."
+ *
+ * 전에는 준비에 실패하면 `codex exec` 로 떨어뜨렸다. 그건 ★말은 통하지만 기능이 사라진 상태★ 다 —
+ * 중간 개입도, 서브에이전트 생존도, 승인창도 없다. 그리고 ★조용해서 아무도 모른다.★
+ * 그래서 떨어뜨리지 않는다. 준비가 안 되면 ★그 자리에서 시끄럽게 실패★ 시킨다.
+ */
+export function defaultBridgeCaller(): (o: CodexTurnOptions) => Promise<CodexTurnResult> {
+  const { openDb } = require("../../db/migrate") as typeof import("../../db/migrate");
+  const { makeAppServerCaller } = require("./appServerRunner") as typeof import("./appServerRunner");
+  return makeAppServerCaller(openDb(defaultTeamDbPath()));
+}
+
+/**
+ * team.db 경로 — ★환경변수에 기대지 않는다.★
+ *
+ * 실제로 그래서 승인 버튼이 죽었다(2026-08-12): `B3OS_REPO_ROOT ?? "."` 로 잡았는데
+ * 브리지 프로세스에는 ★그 변수가 없어서★ cwd(팀원 작업폴더)의 team.db 를 찾았고,
+ * 매 탭마다 "unable to open database file" 로 던져 ★답을 못 보냈다★ → 사람 화면엔 '로딩중' 만.
+ * 이 파일 위치에서 저장소 루트를 세는 쪽이 환경과 무관하다.
+ */
+export function defaultTeamDbPath(): string {
+  return process.env.B3OS_TEAM_DB ?? join(import.meta.dir, "..", "..", "..", "..", "team.db");
+}
+
+/**
+ * ★승인 버튼을 이 팀원 방에서 처리한다.★
+ *
+ * 요청 자체는 서버가 이 봇으로 띄운다(appServerPopup.sendApprovalToMemberRoom).
+ * getUpdates 는 봇당 한 프로세스만 가능하므로, 폴링을 하는 ★브리지가 콜백을 맡는다.★
+ */
+export async function handleApprovalCallback(
+  token: string,
+  cb: TgCallbackQuery,
+  allowFrom: Set<number>,
+  deps: { dbPath?: string; fetchFn?: typeof fetch } = {},
+): Promise<"decided" | "ignored" | "stale" | "unauthorized"> {
+  const doFetch = deps.fetchFn ?? fetch;
+  const answer = (text: string, alert = false) =>
+    doFetch(`${TG_API}/bot${token}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ callback_query_id: cb.id, text, show_alert: alert }),
+    }).catch(() => undefined);
+
+  const m = /^(pg1|pga|pgd):((?:apr|prm)_[a-f0-9]+)$/.exec(cb.data ?? "");
+  if (!m) return "ignored";
+
+  // 발신자 게이트 — 메시지와 같은 규칙(fail-closed).
+  const fromId = cb.from?.id;
+  if (fromId === undefined || !isAllowedChat(allowFrom, fromId)) {
+    await answer("권한 없음", true);
+    return "unauthorized";
+  }
+
+  const { openDb } = await import("../../db/migrate");
+  const { decidePermissionRequest, getPermissionRequest } = await import("../../lib/permissionGate");
+  const db = openDb(deps.dbPath ?? defaultTeamDbPath());
+  try {
+    const id = m[2]!;
+    const row = getPermissionRequest(db, id);
+    // ★이미 지난 요청은 지난 대로 알린다★ — 눌렀는데 아무 반응이 없으면 사람은 다시 누른다.
+    if (!row || row.status !== "pending") {
+      await answer(row ? `이미 처리됨(${row.status})` : "만료되었거나 없는 요청입니다");
+      if (cb.message) {
+        await doFetch(`${TG_API}/bot${token}/editMessageReplyMarkup`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ chat_id: cb.message.chat.id, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } }),
+        }).catch(() => undefined);
+      }
+      return "stale";
+    }
+    const decision = m[1] === "pg1" ? "allow_once" : m[1] === "pga" ? "allow_always" : "deny";
+
+    // ★'항상 허용' 은 codex 설정 파일에 쓴다.★
+    //   우리 DB 에 영구 권한을 쌓지 않는다 — 그건 취소 경로가 없었다. 설정은 사람이 열어서 지울 수 있다.
+    if (decision === "allow_always") {
+      const target = (row as { target?: string }).target;
+      // ★target 이 경로일 때만 설정에 쓴다.★ (2026-08-13 — 하네스 적대 검증에서 잡힘)
+      //   `targetForOperation` 은 ★shell 작업의 target 을 "명령 문자열" 로 만든다.★ 그대로 넘기면
+      //   `dirname("sudo whoami")` = "." · `dirname("rm -rf /Users/…/b3rys-team-os")` = "rm -rf /Users/…/Development"
+      //   같은 ★쓰레기 값이 writable_roots 에 박힌다.★ 설정 파일은 사람이 읽는 유일한 기록이라
+      //   거기에 거짓이 들어가면 안 된다. ⇒ 절대경로 하나(공백 없음)만 통과시킨다.
+      const looksLikePath = Boolean(target) && /^\/[^\s]*$/.test(target as string);
+      if (target && !looksLikePath) {
+        console.log(`[codex-bridge] 항상 허용 → 설정 기록 건너뜀(경로가 아님): ${target.slice(0, 60)}`);
+      }
+      if (target && looksLikePath) {
+        try {
+          const { addWritableRoot } = await import("./persistAlwaysAllow");
+          const { codexBridgePaths } = await import("./launcher");
+          const agentId = (row as { agent_id?: string }).agent_id ?? process.env.CODEX_AGENT_ID ?? "";
+          if (agentId) {
+            const r = addWritableRoot(`${codexBridgePaths(agentId).codexHome}/config.toml`, target);
+            console.log(`[codex-bridge] 항상 허용 → 설정에 기록: ${r.root} (${r.changed ? "추가" : "이미 있음"})`);
+          }
+        } catch (e) { console.error(`[codex-bridge] 설정 기록 실패(승인 자체는 진행): ${e instanceof Error ? e.message : e}`); }
+      }
+    }
+    const res = decidePermissionRequest(db, id, decision, {
+      approver: "GD",
+      provenance: { surface: "telegram_member_room", approver_telegram_id: fromId, callback_data: cb.data },
+    });
+    if (!res.ok) { await answer(res.error ?? "실패", true); return "ignored"; }
+    await answer(decision === "allow_once" ? "한번 허용" : decision === "allow_always" ? "항상 허용" : "거절");
+    if (cb.message) {
+      await doFetch(`${TG_API}/bot${token}/editMessageReplyMarkup`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ chat_id: cb.message.chat.id, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } }),
+      }).catch(() => undefined);
+    }
+    return "decided";
+  } finally {
+    try { db.close(); } catch { /* best-effort */ }
+  }
 }
 
 /** 첫 getUpdates 성공 후 ready marker를 원자적으로 쓴다. marker 존재 = 브리지가 실제 Telegram polling에 진입. */
@@ -674,7 +808,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
   }
   for (;;) {
     try {
-      const res = await fetch(`${TG_API}/bot${token}/getUpdates?timeout=30&offset=${offset}&allowed_updates=["message"]`);
+      const res = await fetch(`${TG_API}/bot${token}/getUpdates?timeout=30&offset=${offset}&allowed_updates=["message","callback_query"]`);
       const j = (await res.json()) as { ok?: boolean; result?: TgUpdate[] };
       if (j.ok === true && !readyMarked) {
         readyMarked = writeBridgeReadyMarker(pidFile);
@@ -682,6 +816,14 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
       }
       for (const u of j.result ?? []) {
         offset = u.update_id + 1;
+        // ★승인 버튼은 이 방에서 처리한다.★ 요청은 서버가 이 봇으로 띄우고, 누르는 것은 여기서 받는다
+        //   (getUpdates 는 봇당 한 프로세스만 가능하므로 폴링을 하는 브리지가 콜백도 맡는다).
+        // ★콜백 예외가 폴 루프를 죽이면 안 된다★ — 죽으면 그 뒤 메시지도 안 받는다.
+        if (u.callback_query) {
+          try { await handleApprovalCallback(token, u.callback_query, allowFrom); }
+          catch (e) { console.error(`[codex-bridge] 승인 콜백 처리 실패: ${e instanceof Error ? e.message : e}`); }
+          continue;
+        }
         const text = u.message?.text;
         const chatId = u.message?.chat.id;
         const messageId = u.message?.message_id;

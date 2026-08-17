@@ -245,10 +245,22 @@ export function scopeKeyForOperation(op: PermissionOperation): string {
   return createHash("sha256").update(normalized).digest("hex");
 }
 
+/**
+ * ★우리가 판정하지 않는다 — 사람이 판정한다.★
+ *
+ * 전에는 여기서 Tier-D 목록(sudo·rm -rf·dd 등 정규식 9개)에 걸리면 ★팝업조차 안 만들고 deny★ 했다.
+ * 그 목록은 ★우리 코드에 하드코딩★ 되어 있어 사람이 열어볼 수도, 팀원별로 다르게 줄 수도 없었다.
+ *
+ * ★다른 팀원과 비교하면 이것만 달랐다★ (2026-08-13 실측 — 우리 코드의 차단목록 참조 파일 수):
+ *   claude 0 · hermes 0 · openclaw 0 · b3osNative 0 · ★codex 6★
+ * 다른 팀원은 그 도구 자체 설정(클로드 settings.json · 헤르메스 자체 기능)을 쓰거나 아예 없다.
+ * codex 도 같은 원칙으로 간다 — ★경계는 codex 설정이 정하고, 그 밖은 사람이 승인창에서 정한다.★
+ *
+ * `tierDReasons` 는 지우지 않는다 — 팝업 본문에 "왜 위험한지" 를 적는 ★표시용★ 으로는 값이 있다.
+ * 판정에서만 뺀다.
+ */
 export function evaluatePermission(db: Database, op: PermissionOperation): { decision: PermissionDecision; reasons: string[]; grant?: PermissionGrantRow } {
-  const reasons = tierDReasons(op);
   const scope_key = scopeKeyForOperation(op);
-  if (reasons.length) return { decision: "deny", reasons };
   const grant = db
     .prepare(
       `SELECT * FROM permission_grant
@@ -295,6 +307,17 @@ export function requestPermission(db: Database, op: PermissionOperation): { deci
     JSON.stringify(op.provenance ?? {}),
   );
   const request = getPermissionRequest(db, id)!;
+  // ★팀원 요청은 op 방 대기열에 넣지 않는다.★
+  //   "팀원들이 승인을 받을 때는 각자방에 떠야지. op방에 뜨는 건 시스템 알림종류야."
+  //   op 대기열(approval_request)에 들어가면 op 방 승인 목록에 렌더된다 — 그게 팀원 승인이
+  //   팀 리드 방으로 올라가던 경로였다. 팀원 것은 그 팀원 방으로 간다
+  //   (codex 런타임: appServerPopup.sendApprovalToMemberRoom → 브리지가 버튼 처리).
+  //   agent_id 가 없는 것 = 특정 팀원의 일이 아닌 시스템 작업 → op 방이 맞다.
+  //   ★감사기록은 어느 쪽이든 남긴다★ — 아래 enqueue 만 건너뛴다(기록까지 빠지면 팀원 요청은 흔적이 없다).
+  if (belongsToMemberRoom(op)) {
+    appendPermissionAudit(db, { request_id: id, scope_key, op, target, decision: "requested", approver: null, provenance: op.provenance ?? {} });
+    return { decision: "approval_required", reasons: [], request };
+  }
   enqueueApproval(db, {
     action_key: "permission_gate",
     params: {
@@ -310,6 +333,18 @@ export function requestPermission(db: Database, op: PermissionOperation): { deci
   });
   appendPermissionAudit(db, { request_id: id, scope_key, op, target, decision: "requested", approver: null, provenance: op.provenance ?? {} });
   return { decision: "approval_required", reasons: [], request };
+}
+
+/**
+ * ★이 승인이 어디에 뜨는가 — 판정은 여기 한 곳뿐이다.★ (리뷰 지적)
+ *
+ *
+ * 같은 판단이 두 곳에 있으면 ★한쪽만 고치고 '완료' 가 된다★ — 그러면 행이 두 방에 뜨거나
+ * 아무 데도 안 뜬다. 그리고 조용하다 — 이 모양으로 3건이 관측됐다.
+ * requestPermission 과 telegramCapture 가 ★둘 다 이 함수를 부른다.★
+ */
+export function belongsToMemberRoom(row: { agent_id: string | null } | { agent_id?: string | null }): boolean {
+  return Boolean(row.agent_id);
 }
 
 export function getPermissionRequest(db: Database, id: string): PermissionRequestRow | undefined {
@@ -343,10 +378,14 @@ export function decidePermissionRequest(
     egress_url: stringOrUndefined(payload.egress_url),
     text: stringOrUndefined(payload.text),
   };
+  // ★사람이 누른 것을 우리가 뒤집지 않는다.★
+  //   전에는 Tier-D 목록에 걸리면 ★사람이 허용을 눌러도 거부★ 했다("Tier D cannot be approved").
+  //   그 목록은 우리 코드에 하드코딩돼 있어 사람이 볼 수도, 고칠 수도 없었다.
+  //   위험 사유는 ★팝업 본문에 적어 사람이 보고 판단★ 하게 한다 — 대신 정하지 않는다.
   const tierD = tierDReasons(op);
-  if (tierD.length && decision !== "deny") {
-    appendPermissionAudit(db, { request_id: id, scope_key: row.scope_key, op, target: row.target, decision: `tier_d_override_blocked:${decision}`, approver: opts.approver, provenance: { ...(opts.provenance ?? {}), reasons: tierD } });
-    return { ok: false, status: row.status, error: `Tier D cannot be approved: ${tierD.join(",")}` };
+  if (tierD.length) {
+    // 판정은 안 하되 ★무엇이 걸렸는지는 남긴다★ — 나중에 "왜 그때 허용했나" 를 볼 수 있어야 한다.
+    appendPermissionAudit(db, { request_id: id, scope_key: row.scope_key, op, target: row.target, decision: `risk_noted:${decision}`, approver: opts.approver, provenance: { ...(opts.provenance ?? {}), reasons: tierD } });
   }
 
   // 세션은 ★지속되는 허가를 남기지 않는다★ — 그 점에서 allowed_once 와 같다. 무엇을 골랐는지는
@@ -365,16 +404,31 @@ export function decidePermissionRequest(
   ).run(status, scope, opts.approver, JSON.stringify(opts.provenance ?? {}), id).changes;
   if (changed !== 1) return { ok: false, error: "permission request changed concurrently" };
 
+  // ★'항상 허용' 에 기한을 둔다 — 무기한이 아니다.★ (2026-08-13)
+  //
+  //   전에는 `expires_at = NULL`(무기한) 이었다. 그 행이 있으면 `evaluatePermission` 이 grant 조회에서
+  //   곧장 allow 를 돌려줘 ★팝업조차 안 뜬다.★ Tier-D 판정을 걷어낸 뒤에는 ★위험 명령도 이 경로에 도달한다★
+  //   — 탭 한 번이 ★영구 자동승인★ 이 된다. (하네스 2개가 독립적으로 같은 지점을 지목했다.
+  //   예전에는 Tier-D 가 grant 조회 ★앞줄★ 에서 막아 이 상태가 도달 불가였다.)
+  //
+  //   이 표에는 ★취소 경로가 코드에 없다★(`DELETE FROM permission_grant` 0건). 무기한 + 취소불가는
+  //   되돌릴 수 없는 조합이다. 기한을 두면 ★가만히 둬도 스스로 닫힌다.★
+  //   codex 자신도 세션 단위로만 기억한다(`acceptForSession`) — 우리만 영구를 들고 있을 이유가 없다.
+  const GRANT_TTL_HOURS = 24;
   if (decision === "allow_always") {
     db.prepare(
-      `INSERT INTO permission_grant(id, scope_key, runtime, agent_id, action, target, approver, provenance_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO permission_grant(id, scope_key, runtime, agent_id, action, target, approver, provenance_json, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+' || ? || ' hours'))
        ON CONFLICT(scope_key) DO UPDATE SET
          approver = excluded.approver,
          provenance_json = excluded.provenance_json,
          created_at = datetime('now'),
-         expires_at = NULL`,
-    ).run(`pgr_${randomUUID().replace(/-/g, "").slice(0, 18)}`, row.scope_key, row.runtime, row.agent_id, row.action, row.target, opts.approver, JSON.stringify(opts.provenance ?? {}));
+         expires_at = excluded.expires_at`,
+    ).run(
+      `pgr_${randomUUID().replace(/-/g, "").slice(0, 18)}`,
+      row.scope_key, row.runtime, row.agent_id, row.action, row.target,
+      opts.approver, JSON.stringify(opts.provenance ?? {}), GRANT_TTL_HOURS,
+    );
   }
   appendPermissionAudit(db, { request_id: id, scope_key: row.scope_key, op, target: row.target, decision, approver: opts.approver, provenance: opts.provenance ?? {} });
   appendAuditFile("permission_gate", decision, id, { approver: opts.approver, scope_key: row.scope_key });

@@ -72,6 +72,8 @@ archiving/
 !/docs/remote-access.md
 !/docs/public-dashboard.md
 !/docs/BUILD_MODES.md
+# 신규 런타임 수용 시험 — 다음 런타임(b3os native 등)에서 그대로 쓴다. 팀이 읽는 문서라 추적한다.
+!/docs/RUNTIME_ACCEPTANCE.md
 # 공개-참조되는 값-청결 워크플로우/카탈로그 문서 (tracked 코드·README·멤버 로드가 참조 — untrack 시 스킬발견/온보딩 깨짐)
 !/docs/B3OS_SKILLS.md
 !/docs/TEAM_LOOP_WORKFLOW.md
