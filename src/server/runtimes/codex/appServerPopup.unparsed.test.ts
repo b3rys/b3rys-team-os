@@ -17,7 +17,7 @@ import type { ApprovalRequest } from "./appServerClient";
  * 떨어져 ★target = method 이름★ 이 된다 → 그 method 로 오는 ★모든 요청이 같은 scope_key★.
  * 즉 한 번 allowed_always 를 주면 이후 내용이 전혀 다른 요청도 팝업 없이 통과한다.
  *
- * 팀 리드 원칙(2026-07-28): ★"애매하면 통과가 아니고 ask 로."★
+ * 원칙(2026-07-28): ★애매하면 통과가 아니라 ask 다.★
  * 아래 테스트들이 그 원칙을 코드에 고정한다.
  *
  * ★2026-07-29 S1 이후 — 이 파일의 fixture 를 바꿨다(보장은 그대로다).★

@@ -51,7 +51,7 @@ export interface WriteMemberPersonaResult {
 /**
  * ★워크스페이스에 TEAM-OS.md 심링크를 보장한다★
  *
- * ═══ 왜 (루이가 잡았다) ═══
+ * ═══ 왜 ═══
  *   실측: 팀원 11명 중 ★6명(steve·hermes·codex·ames·devon·dex)에게 TEAM-OS.md 가 아예 없었다.★
  *   원인: 심링크를 거는 코드가 ★런타임 스왑 경로(activation STEP4)에만★ 있었다 →
  *         ★스왑을 겪은 5명만★ 갖게 됐고, 그냥 영입된 사람은 정본을 못 읽었다.

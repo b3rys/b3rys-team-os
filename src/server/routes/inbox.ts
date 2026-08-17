@@ -211,7 +211,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
           .prepare(`SELECT to_agent_id, source, from_agent_id FROM message WHERE id = ?`)
           .get(env.in_reply_to) as { to_agent_id?: string; source?: string; from_agent_id?: string } | undefined;
         // ★팀장님 @all 에는 방에서 답할 수 있어야 한다★ (2026-08-01 실측 — 배포 후 아무도 방에 답을 못 했다).
-        // 팀장님이 "@all 다들 인지했어?" 라고 물었는데 ★전원이 막혀서 방이 조용해졌다.★
+        // 팀 리드의 @all 호출에 ★전원이 막혀서 방이 조용해졌다.★
         // 막으려던 건 ★팀원끼리의 연쇄★ 지 팀장님 호출에 대한 답이 아니다.
         // 그래서 부모가 팀장님(source=user)이면 통과, ★팀원 broadcast(source=agent)면 차단.★
         const parentIsLeadCall = parent?.source === "user";

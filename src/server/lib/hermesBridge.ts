@@ -130,8 +130,8 @@ export function buildPrompt(opts: HermesTurnOptions): string {
   const threadIsSafe = SAFE_THREAD_RE.test(opts.threadId);
   // 답은 "보낸 사람" 에게 간다. 팀장께가 아니다.
   //   ★이 줄이 hermes 가 방에 대고 답하던 진짜 원인이었다.★
-  //   예전엔 `${owner}께 답하고` = ★"팀장께 답하라"★ 였다. 그런데 이건 ★팀버스 메시지★ 다 —
-  //   보낸 사람은 스티브인데 "팀장께 답하라" 고 시켰다. 그래서 hermes 는 방(broadcast)에 대고 썼다.
+  //   예전엔 `${owner}께 답하고` 였다 — ★소유자에게 답하라★ 는 뜻이다. 그런데 이건 ★팀버스 메시지★ 다 —
+  //   보낸 사람이 팀원인데도 소유자에게 답하라고 시켰다. 그래서 hermes 는 방(broadcast)에 대고 썼다.
   //   ★hermes 잘못이 아니다. 우리가 그렇게 시켰다.★
   //   그 증상을 서버가 DB 계층에서 몰래 고쳐줬고(messages.ts:63 broadcast→directed 보정),
   //   ★그 반창고가 오늘 유출을 낳았다★ (DB엔 1:1 로 적히는데 릴레이는 방에 띄움).

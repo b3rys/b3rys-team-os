@@ -1727,7 +1727,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     if (!row) return c.json({ error: "unknown_ot", ot_id }, 404);
     // 형식만으로는 '살아있는 봇'인지 알 수 없다 — getMe로 즉시 검증한다(없는 OT는 위에서 이미 404, 네트워크 호출 아낌).
     //   (오타/폐기 토큰이 '봇 토큰 연결됨 ✓'으로 통과한 뒤, 실패가 activate 의 28s poller 타임아웃에서 '재활성화 필요'로만
-    // 드러나 토큰을 의심할 단서가 0이던 갭 — GD rotate 원칙 '검증 실패면 멈춤'과 동일하게 저장 전 차단.)
+    // 드러나 토큰을 의심할 단서가 0이던 갭 — rotate 규칙과 같이 ★검증 실패면 저장 전에 멈춘다★.)
     const live = await doValidateBotToken(token);
     if (!live.ok) {
       return c.json(
