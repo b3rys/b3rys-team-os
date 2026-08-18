@@ -189,7 +189,12 @@ test("★그 팀원 봇으로, 버튼 3개를 붙여 보낸다★", async () => 
   expect(calls[0]!.url).toContain("/botTKN/sendMessage"); // ★그 팀원 봇★ — 다른 봇이면 남의 방에 뜬다
   expect(calls[0]!.body.chat_id).toBe("555");
   const kb = (calls[0]!.body.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard.flat();
-  expect(kb.map((b) => b.callback_data)).toEqual(["pg1:prm_abc123", "pga:prm_abc123", "pgd:prm_abc123"]);
+  // ★계약이 바뀌었다(2026-08-18) — '이 세션'(pgs) 이 추가됐다.★
+  //   배선(allow_session · decision_scope='session' · acceptForSession)은 원래 끝까지 있었고
+  //   사람이 누를 자리만 없었다. 그래서 카드에서 세션 범위를 고를 수 없었다.
+  expect(kb.map((b) => b.callback_data)).toEqual([
+    "pg1:prm_abc123", "pgs:prm_abc123", "pga:prm_abc123", "pgd:prm_abc123",
+  ]);
 });
 
 test("★위험 표시가 카드에 실린다 — 우리가 안 막으면 사람이 판단할 근거는 줘야 한다★", async () => {
@@ -212,11 +217,14 @@ test("★위험 표시가 카드에 실린다 — 우리가 안 막으면 사람
   expect(text).toContain("rm_rf");
 
   // ★위험 건에는 '항상 허용' 을 주지 않는다★ — 막는 게 아니라 ★무인 반복★ 을 막는 것이다.
+  //   ★'이 세션'(pgs) 은 위험 건에도 준다★ — 지속되는 허가를 남기지 않고 codex 세션과 함께 사라진다.
+  //   그래서 무인 반복이 생기지 않는다. codex 자신이 위험한 것을 기억하는 단위도 이것이다.
   const kb = (calls[0]!.body.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard.flat();
-  expect(kb.map((b) => b.callback_data)).toEqual(["pg1:prm_risk", "pgd:prm_risk"]);
+  expect(kb.map((b) => b.callback_data)).toEqual(["pg1:prm_risk", "pgs:prm_risk", "pgd:prm_risk"]);
+  expect(kb.map((b) => b.callback_data), "위험 건에 항상 허용은 없다").not.toContain("pga:prm_risk");
 });
 
-test("위험 표시가 없으면 카드는 그대로 — 버튼 3개 유지", async () => {
+test("위험 표시가 없으면 네 갈래를 다 준다 — 한번·이 세션·항상·거절", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const fetchFn = (async (_u: string, init: { body: string }) => {
     calls.push({ body: JSON.parse(init.body) });
@@ -231,7 +239,9 @@ test("위험 표시가 없으면 카드는 그대로 — 버튼 3개 유지", as
   const text = String(calls[0]!.body.text);
   expect(text, "안전한 건에는 위험 줄이 붙지 않는다").not.toContain("위험 표시");
   const kb = (calls[0]!.body.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard.flat();
-  expect(kb.map((b) => b.callback_data)).toEqual(["pg1:prm_safe", "pga:prm_safe", "pgd:prm_safe"]);
+  expect(kb.map((b) => b.callback_data)).toEqual([
+    "pg1:prm_safe", "pgs:prm_safe", "pga:prm_safe", "pgd:prm_safe",
+  ]);
 });
 
 test("토큰이나 방을 모르면 보내지 않는다(조용히 성공했다고 하지 않는다)", async () => {

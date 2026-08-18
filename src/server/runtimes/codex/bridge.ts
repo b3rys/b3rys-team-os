@@ -732,7 +732,7 @@ export async function handleApprovalCallback(
       body: JSON.stringify({ callback_query_id: cb.id, text, show_alert: alert }),
     }).catch(() => undefined);
 
-  const m = /^(pg1|pga|pgd):((?:apr|prm)_[a-f0-9]+)$/.exec(cb.data ?? "");
+  const m = /^(pg1|pgs|pga|pgd):((?:apr|prm)_[a-f0-9]+)$/.exec(cb.data ?? "");
   if (!m) return "ignored";
 
   // 발신자 게이트 — 메시지와 같은 규칙(fail-closed).
@@ -760,7 +760,11 @@ export async function handleApprovalCallback(
       }
       return "stale";
     }
-    const decision = m[1] === "pg1" ? "allow_once" : m[1] === "pga" ? "allow_always" : "deny";
+    const decision =
+      m[1] === "pg1" ? "allow_once"
+      : m[1] === "pgs" ? "allow_session"   // ★이 세션 동안만★ — 지속 허가를 남기지 않는다
+      : m[1] === "pga" ? "allow_always"
+      : "deny";
 
     // ★'항상 허용' 은 codex 설정 파일에 쓴다.★
     //   우리 DB 에 영구 권한을 쌓지 않는다 — 그건 취소 경로가 없었다. 설정은 사람이 열어서 지울 수 있다.
@@ -792,7 +796,12 @@ export async function handleApprovalCallback(
       provenance: { surface: "telegram_member_room", approver_telegram_id: fromId, callback_data: cb.data },
     });
     if (!res.ok) { await answer(res.error ?? "실패", true); return "ignored"; }
-    await answer(decision === "allow_once" ? "한번 허용" : decision === "allow_always" ? "항상 허용" : "거절");
+    await answer(
+      decision === "allow_once" ? "한번 허용"
+      : decision === "allow_session" ? "이 세션 동안 허용"
+      : decision === "allow_always" ? "항상 허용"
+      : "거절",
+    );
     if (cb.message) {
       await doFetch(`${TG_API}/bot${token}/editMessageReplyMarkup`, {
         method: "POST",
