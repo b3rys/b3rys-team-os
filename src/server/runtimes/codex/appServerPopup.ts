@@ -903,13 +903,17 @@ export async function sendApprovalToMemberRoom(
         //   우리가 막는 게 아니다 — 사람은 여전히 '한번 허용' 으로 실행할 수 있다.
         //   막는 것은 ★무인 반복★ 이다: '항상 허용' 은 24시간 grant 를 만들어 그동안 카드가 다시 안 뜬다.
         //   codex 자신도 위험한 것은 세션 단위로만 기억한다(acceptForSession).
+        //   ★'이 세션' 은 위험 표시가 있어도 준다.★ 지속되는 허가를 남기지 않고 codex 세션이
+        //   끝나면 함께 사라진다 — codex 자신이 위험한 것을 기억하는 단위가 이것이다(acceptForSession).
         reply_markup: { inline_keyboard: [risks.length
           ? [
               { text: "한번 허용", callback_data: `pg1:${requestId}` },
+              { text: "이 세션", callback_data: `pgs:${requestId}` },
               { text: "거절", callback_data: `pgd:${requestId}` },
             ]
           : [
               { text: "한번 허용", callback_data: `pg1:${requestId}` },
+              { text: "이 세션", callback_data: `pgs:${requestId}` },
               { text: "항상 허용", callback_data: `pga:${requestId}` },
               { text: "거절", callback_data: `pgd:${requestId}` },
             ]] },

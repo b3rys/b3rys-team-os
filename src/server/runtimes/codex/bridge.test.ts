@@ -765,3 +765,55 @@ describe("codex bridge — 1:1 세션 재시작 연속성", () => {
     expect(saved.has(45)).toBe(false);
   });
 });
+
+// ── ★'이 세션' 버튼★ ──
+//
+// 배선은 원래 끝까지 있었다 — permissionGate 의 allow_session · decision_scope='session' ·
+// serverRequestCodec 의 acceptForSession 까지. ★없던 것은 사람이 누를 자리뿐이었다.★
+describe("codex bridge — 이 세션 승인", () => {
+  test("★'이 세션' 을 누르면 세션 범위로 기록된다★ — 한번 허용과 구분돼야 codex 가 세션 동안 기억한다", async () => {
+    const { dbPath, id } = pendingRequest();
+    const out = await handleApprovalCallback(
+      "T",
+      { id: "cs1", data: `pgs:${id}`, from: { id: OWNER }, message: { message_id: 3, chat: { id: OWNER } } },
+      new Set([OWNER]),
+      { dbPath, fetchFn: spyFetch([]) },
+    );
+    expect(out).not.toBe("ignored");
+    const db = new CbDb(dbPath);
+    const row = db.prepare("SELECT status, decision_scope FROM permission_request WHERE id = ?").get(id) as { status: string; decision_scope: string };
+    db.close();
+    expect(row.decision_scope).toBe("session");
+    expect(row.status).toBe("allowed_once"); // status 로는 한번 허용과 같다 — 범위는 decision_scope 가 말한다
+  });
+
+  test("★대조군 — 한번 허용은 세션 범위가 아니다★ (둘이 같으면 세션 버튼이 하는 일이 없다)", async () => {
+    const { dbPath, id } = pendingRequest();
+    await handleApprovalCallback(
+      "T",
+      { id: "cs2", data: `pg1:${id}`, from: { id: OWNER } },
+      new Set([OWNER]),
+      { dbPath, fetchFn: spyFetch([]) },
+    );
+    const db = new CbDb(dbPath);
+    const row = db.prepare("SELECT decision_scope FROM permission_request WHERE id = ?").get(id) as { decision_scope: string };
+    db.close();
+    expect(row.decision_scope).toBe("once");
+  });
+
+  test("★'이 세션' 은 설정 파일에 쓰지 않는다★ — 지속되는 허가를 남기면 세션 범위가 아니다", async () => {
+    const { dbPath, id } = pendingRequest();
+    const calls: string[] = [];
+    await handleApprovalCallback(
+      "T",
+      { id: "cs3", data: `pgs:${id}`, from: { id: OWNER } },
+      new Set([OWNER]),
+      { dbPath, fetchFn: spyFetch(calls) },
+    );
+    // 설정 기록 경로는 allow_always 에만 걸려 있다. 세션 결정에서 그 경로를 타면 안 된다.
+    const db = new CbDb(dbPath);
+    const row = db.prepare("SELECT decision_scope FROM permission_request WHERE id = ?").get(id) as { decision_scope: string };
+    db.close();
+    expect(row.decision_scope).toBe("session");
+  });
+});
