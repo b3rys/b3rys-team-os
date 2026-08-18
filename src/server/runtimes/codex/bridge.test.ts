@@ -14,6 +14,8 @@ import {
   extractScheduleMarker,
   SCHEDULE_MARKER,
   type BridgeDeps,
+  tgSend,
+  tgEdit,
 } from "./bridge";
 import type { CodexTurnResult } from "./runner";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -868,5 +870,66 @@ describe("codex bridge — 답 포맷", () => {
     const { deps, sends } = spiesForReply("네 알겠습니다");
     await handleMessage(34, "해줘", 1, deps);
     expect(sends.length).toBe(1); // 작업중 버블 하나뿐
+  });
+});
+
+// ── ★폴백 분기 — 실패했을 때만 도는 길★ ──
+//
+// 이 분기가 이 변경의 안전장치인데, 주입 없이는 단위에서도 라이브에서도 실행되지 않는다.
+// ★함수가 검증된 것과 그 함수를 부르는 분기가 검증된 것은 다르다★ — toPlain 은 시험돼 있었지만
+// 그것을 부르는 이 길은 한 번도 안 돌았다. 여기서 그 길을 직접 밟는다.
+describe("텔레그램 전송 — MarkdownV2 거부 시 폴백", () => {
+  /** 첫 호출은 실패, 그 뒤는 성공하는 가짜 텔레그램. */
+  function flakyFetch(okFrom: number, result: Record<string, unknown> = { message_id: 5 }) {
+    const bodies: Record<string, unknown>[] = [];
+    const fn = (async (_url: string, init: { body: string }) => {
+      bodies.push(JSON.parse(init.body));
+      const ok = bodies.length >= okFrom;
+      return { json: async () => (ok ? { ok: true, result } : { ok: false, description: "can't parse entities" }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+    return { fn, bodies };
+  }
+
+  test("★거부되면 표시를 걷고 한 번 더 보낸다★ — 없으면 답이 통째로 사라진다", async () => {
+    const { fn, bodies } = flakyFetch(2);
+    const send = tgSend("TKN", fn);
+    const id = await send(7066867819, "판교 28\\-31도\\(맑음\\)");
+
+    expect(bodies).toHaveLength(2);                       // ① 두 번째 호출이 일어났다
+    expect(bodies[0]!.parse_mode).toBe("MarkdownV2");
+    expect(bodies[1]!.parse_mode).toBeUndefined();        // ② 재시도에는 parse_mode 가 없다
+    expect(bodies[1]!.text).toBe("판교 28-31도(맑음)");    //    표시가 걷혔다
+    expect(id).toBe(5);                                   // ③ 최종적으로 성공했다
+  });
+
+  test("★대조군 — 첫 전송이 성공하면 두 번째 호출은 없다★ (폴백이 늘 돌면 표시가 사라진다)", async () => {
+    const { fn, bodies } = flakyFetch(1);
+    const id = await tgSend("TKN", fn)(1, "*굵게*");
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]!.parse_mode).toBe("MarkdownV2");
+    expect(id).toBe(5);
+  });
+
+  test("★둘 다 실패하면 실패로 돌려준다★ — 성공한 척하지 않는다", async () => {
+    const { fn, bodies } = flakyFetch(99);
+    const id = await tgSend("TKN", fn)(1, "x");
+    expect(bodies).toHaveLength(2);
+    expect(id).toBeNull();
+  });
+
+  test("편집도 같은 폴백을 탄다 — 답은 대개 편집으로 나간다", async () => {
+    const { fn, bodies } = flakyFetch(2, {});
+    const ok = await tgEdit("TKN", fn)(1, 42, "28\\-31도");
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]!.parse_mode).toBe("MarkdownV2");
+    expect(bodies[1]!.parse_mode).toBeUndefined();
+    expect(bodies[1]!.text).toBe("28-31도");
+    expect(ok).toBe(true);
+  });
+
+  test("★대조군 — 편집이 한 번에 되면 재시도하지 않는다★", async () => {
+    const { fn, bodies } = flakyFetch(1, {});
+    expect(await tgEdit("TKN", fn)(1, 42, "*굵게*")).toBe(true);
+    expect(bodies).toHaveLength(1);
   });
 });

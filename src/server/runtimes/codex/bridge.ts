@@ -632,9 +632,14 @@ export function resetChatThreads(): void {
 const TG_API = "https://api.telegram.org";
 
 /** 텔레그램 발신 → 보낸 message_id 반환(작업중 메시지 교체용). */
-function tgSend(token: string): NonNullable<BridgeDeps["sendMessage"]> {
+/**
+ * ★fetchFn 을 받는 이유★: 폴백(MarkdownV2 거부 → 표시 걷고 재전송)은 ★실패했을 때만 도는 분기★ 라
+ * 주입 없이는 시험에서 한 번도 실행되지 않는다. 정말 필요한 순간에 처음 돌면 거기서 또 틀려도
+ * 알 방법이 없고, 그 결과가 ★답이 통째로 사라짐★ — 이 코드가 막으려던 바로 그 상황이다.
+ */
+export function tgSend(token: string, fetchFn: typeof fetch = fetch): NonNullable<BridgeDeps["sendMessage"]> {
   const post = async (body: Record<string, unknown>): Promise<number | null> => {
-    const res = await fetch(`${TG_API}/bot${token}/sendMessage`, {
+    const res = await fetchFn(`${TG_API}/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -656,9 +661,10 @@ function tgSend(token: string): NonNullable<BridgeDeps["sendMessage"]> {
 }
 
 /** 텔레그램 메시지 편집(작업중 → 답). */
-function tgEdit(token: string): NonNullable<BridgeDeps["editMessage"]> {
+/** 폴백을 시험할 수 있게 fetchFn 을 받는다 — tgSend 주석 참조. */
+export function tgEdit(token: string, fetchFn: typeof fetch = fetch): NonNullable<BridgeDeps["editMessage"]> {
   const post = async (body: Record<string, unknown>): Promise<boolean> => {
-    const res = await fetch(`${TG_API}/bot${token}/editMessageText`, {
+    const res = await fetchFn(`${TG_API}/bot${token}/editMessageText`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
