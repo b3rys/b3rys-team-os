@@ -48,7 +48,7 @@ describe("S1 — 신세대 명령 승인 해석", () => {
 
   test("★구세대 argv 경계가 열쇠를 가른다★ — 이어붙인 문자열로 합치지 않는다", () => {
     // ['a b','c'] 는 인자가 'a b' 하나, ['a','b c'] 는 실행 파일이 'a' — ★실제로 다른 실행이다.★
-    // 이어붙이면 둘 다 "a b c" 가 되어 하나를 허용하면 나머지가 팝업 없이 통과했다(아메스 실측).
+    // 이어붙이면 둘 다 "a b c" 가 되어 하나를 허용하면 나머지가 팝업 없이 통과했다(실측).
     const x = buildOperationFromApproval(oldGen(["a b", "c"]), "dex");
     const y = buildOperationFromApproval(oldGen(["a", "b c"]), "dex");
     expect(scopeKeyForOperation(x)).not.toBe(scopeKeyForOperation(y));
@@ -89,7 +89,7 @@ describe("S1 — 신세대 명령 승인 해석", () => {
   });
 
   test("★혼합 payload — 명령 method + 빈 command + fileChanges 는 write 가 아니라 unparsed★", () => {
-    // Codex 리뷰(2026-07-29)에서 잡힌 실제 구멍. '명령 method 아님' 과 '명령 method 인데 못 읽음' 을
+    // (2026-07-29) 리뷰에서 잡힌 실제 구멍. '명령 method 아님' 과 '명령 method 인데 못 읽음' 을
     // 같은 null 로 합쳤더니, 호출부가 이어서 fileChanges 를 검사해 ★write 로 처리★ 됐다.
     // ★명령 승인이라고 밝힌 요청은 명령을 못 읽는 순간 거기서 멈춰야 한다★ — fail-closed 계약.
     const mixed: ApprovalRequest = {
@@ -101,16 +101,16 @@ describe("S1 — 신세대 명령 승인 해석", () => {
 
   test("★서로 다른 신세대 명령은 서로 다른 작업 지문을 갖는다★ — 상관키가 둘을 구분해야 한다", () => {
     // S1 이 문자열 command 를 실제 shell operation 으로 승격하는데, 지문 basis 가 Array.isArray 만 보면
-    // ★신세대는 전부 command:null★ 이 되어 서로 다른 명령이 ★같은 지문★ 을 갖는다(Codex 리뷰에서 재현).
+    // ★신세대는 전부 command:null★ 이 되어 서로 다른 명령이 ★같은 지문★ 을 갖는다(재현 확인).
     // 상관키·audit 이 두 요청을 구분하지 못하면 결정이 엉뚱한 요청에 배달될 수 있다.
     expect(approvalOperationHash(newGen("rm -rf /tmp/x")))
       .not.toBe(approvalOperationHash(newGen("cat /etc/shadow")));
   });
 
   test("★구세대 배열 지문 값이 S1 이전과 동일하다★ — golden 값으로 고정", () => {
-    // ★Codex 재리뷰(2026-07-29) 지적 반영★: 앞선 판에서 이 테스트는 '결정성 + 다른 입력 구분' 만
+    // ★재리뷰(2026-07-29) 지적 반영★: 앞선 판에서 이 테스트는 '결정성 + 다른 입력 구분' 만
     // 검사하면서 이름은 "값이 그대로다" 라고 주장했다. ★테스트 이름이 검사하는 것보다 많이 주장했다.★
-    // 커밋 메시지에도 "구세대 지문 값은 바꾸지 않았다" 고 적었으므로, ★그 주장을 실제로 고정한다.★
+    // ★그 주장을 실제로 고정한다.★
     //
     // golden 값은 ★S1 이전 정본(9903b3d)에서 같은 입력으로 실측★ 해 얻었다. 두 판이 같은 값을 냈다.
     // 이 값이 바뀌면 = 배열 경로를 건드린 것이고, 진행 중인 승인의 상관키가 어긋날 수 있다.
