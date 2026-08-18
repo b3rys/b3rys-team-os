@@ -21,6 +21,7 @@ import { appendAuditFile } from "../../lib/auditFile";
 import type { CodexSandboxMode } from "../../types";
 import type { PermissionContext } from "../../lib/permissionGate";
 import { codexRuntimePreflight, codexConfiguredGrants } from "./permissions";
+import { appendLine, renderBubble, fits, EDIT_MIN_INTERVAL_MS, type ProgressLine } from "./progressLines";
 
 export interface BridgeDeps {
   /** codex 한 턴 구동(기본 runCodexTurn — 테스트 mock). */
@@ -475,9 +476,76 @@ export async function handleMessage(
     else await send(chatId, errText);
     return { ok: false, reply: "", detail: `permission_${preflight.tier}:${preflight.rule}` };
   }
+  // ★진행 표시★ — codex 가 도구를 시작할 때마다 오는 줄을 모아 "작업 중…" 메시지를 고쳐 쓴다.
+  //   창이 없는 런타임이라 이게 없으면 사람 눈에는 몇 분간 문구 하나만 남는다.
+  //   간격·자르기·넘김 기준은 hermes 실구현 값을 그대로 쓴다(progressLines.ts 주석).
+  let bubbleId = workingMsgId;          // 지금 고쳐 쓰는 메시지
+  let lines: ProgressLine[] = [];       // 그 메시지에 담긴 줄
+  let lastEditAt = 0;                   // 마지막 편집 시각
+  let editTimer: ReturnType<typeof setTimeout> | null = null;
+  let editing = false;                  // 편집 진행 중이면 다음 것을 겹쳐 치지 않는다
+  let dirty = false;                    // 아직 화면에 안 나간 줄이 있나
+  let inFlightEdit: Promise<void> | null = null; // 지금 날아가 있는 편집(답을 쓰기 전에 기다린다)
+
+  const flush = async (): Promise<void> => {
+    if (editing || !dirty || bubbleId === null) return;
+    editing = true;
+    dirty = false;
+    lastEditAt = Date.now();
+    const text = renderBubble(workingText, lines);
+    const work = (async () => {
+      const ok = await edit(chatId, bubbleId as number, text);
+      if (!ok) {
+        // ★편집이 안 되면 그 버블은 그대로 두고 새 버블을 연다.★ 이미 보낸 줄을 지우지 않는다.
+        const fresh = await send(chatId, text);
+        if (fresh !== null) bubbleId = fresh;
+        else bubbleId = null; // 보내기까지 막히면 진행 표시를 포기한다(턴은 계속 간다)
+      }
+    })();
+    inFlightEdit = work;
+    try {
+      await work;
+    } finally {
+      inFlightEdit = null;
+      editing = false;
+    }
+    // ★편집 중에 들어온 줄은 여기서 다시 예약한다.★ 안 하면 타이머는 이미 소진돼 있어
+    //   뒤에 줄이 더 오지 않는 한 마지막 줄이 화면에 영영 안 나간다.
+    if (dirty) schedule();
+  };
+
+  const schedule = (): void => {
+    if (editTimer !== null || bubbleId === null) return;
+    const wait = Math.max(0, EDIT_MIN_INTERVAL_MS - (Date.now() - lastEditAt));
+    editTimer = setTimeout(() => {
+      editTimer = null;
+      void flush();
+    }, wait);
+  };
+
+  const onActivity = (line: string): void => {
+    if (bubbleId === null) return;
+    const next = appendLine(lines, line);
+    if (next === lines) return; // 빈 줄이라 담을 것이 없다
+    if (!fits(workingText, next)) {
+      // ★한도에 닿으면 지금 버블은 남기고 새 버블로 넘어간다★ — 어디까지 했는지가 사라지지 않는다.
+      lines = appendLine([], line);
+      dirty = true;
+      void (async () => {
+        const fresh = await send(chatId, renderBubble(workingText, lines));
+        if (fresh !== null) { bubbleId = fresh; dirty = false; lastEditAt = Date.now(); }
+      })();
+      return;
+    }
+    lines = next;
+    dirty = true;
+    schedule();
+  };
+
   const result = await runTurn({
     prompt: promptText,
     agentId: selfAgentId, // ★필수★ — 승인 요청의 주인이 된다
+    onActivity,
 
     resumeSessionId: prior,
     codexHome: deps.codexHome,
@@ -486,13 +554,21 @@ export async function handleMessage(
     networkAccess: deps.networkAccess,
     writableRoots: deps.workdir ? [deps.workdir] : [],
   });
+  // ★예약된 편집이 답을 덮어쓰지 못하게 먼저 끈다.★ 끄지 않으면 답을 쓴 뒤 진행 줄이 다시 올라온다.
+  if (editTimer !== null) { clearTimeout(editTimer); editTimer = null; }
+  dirty = false;
+  // ★이미 날아간 편집은 취소할 수 없다★ — 끝나기를 기다린 뒤에 답을 쓴다.
+  //   기다리지 않으면 그 응답이 답보다 늦게 도착해 답이 진행 줄로 덮인다.
+  if (inFlightEdit !== null) { try { await inFlightEdit; } catch { /* 표시 실패가 답을 막지 않는다 */ } }
+
   if (result.sessionId) chatThreads.set(chatId, result.sessionId);
 
   if (!result.ok || !result.reply) {
     // self-heal: 턴 실패(만료·손상 세션 포함) 시 thread 초기화 → 다음 턴은 새 세션(죽은 sessionId resume 반복 stuck 방지).
     chatThreads.delete(chatId);
     const errText = "⚠️ 일시적으로 응답을 만들지 못했어요. 잠시 후 다시 시도해 주세요.";
-    if (workingMsgId !== null) await edit(chatId, workingMsgId, errText);
+    // ★마지막 버블에 쓴다★ — 넘김이 일어났으면 첫 버블에 쓸 경우 오류가 진행 줄 위로 올라간다.
+    if (bubbleId !== null) await edit(chatId, bubbleId, errText);
     else await send(chatId, errText);
     return { ok: false, reply: "", detail: `codex_turn_failed:${result.detail}` };
   }
@@ -510,8 +586,10 @@ export async function handleMessage(
   }
 
   // ④ 작업중 메시지를 답으로 교체(편집). 작업중 메시지가 없거나 편집 실패 시 신규 발신.
+  //   ★교체 대상은 지금 쓰고 있는 마지막 버블이다.★ 진행 줄이 길어 새 버블로 넘어갔다면
+  //   첫 버블에 답을 쓰면 답이 진행 줄 ★위★ 에 나타나고, 마지막 버블은 "작업 중" 인 채 남는다.
   let delivered = false;
-  if (workingMsgId !== null) delivered = await edit(chatId, workingMsgId, reply);
+  if (bubbleId !== null) delivered = await edit(chatId, bubbleId, reply);
   if (!delivered) {
     const newId = await send(chatId, reply);
     delivered = newId !== null;

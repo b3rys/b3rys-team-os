@@ -503,3 +503,132 @@ test("★app-server 하나뿐이다★ — 플래그로 갈라두면 한쪽만 �
     if (saved !== undefined) process.env.B3OS_CODEX_APPSERVER = saved;
   }
 });
+
+// ── ★진행 표시 배선★ ──
+//
+// 순수 로직(줄 접기·길이·넘김)은 progressLines.test.ts 가 잰다.
+// 여기서 재는 것은 ★배선★ 이다 — 브리지가 진행 이벤트를 실제로 받는가, 그 줄이 어느 메시지에
+// 쓰이는가, 답이 어디로 가는가. 실제로 끊겨 있던 곳이 로직이 아니라 이 배선이었다.
+describe("codex bridge — 진행 표시", () => {
+  beforeEach(() => resetChatThreads());
+
+  /** onActivity 를 실제로 부르는 두뇌 mock. */
+  function spiesWithActivity(lines: string[], reply = "다 했습니다") {
+    const calls = {
+      sends: [] as string[],
+      edits: [] as { mid: number; text: string }[],
+      gotOnActivity: false,
+    };
+    let nextMid = 2000;
+    const deps: BridgeDeps = {
+      reactMessage: async () => true,
+      sendMessage: async (_c, text) => { calls.sends.push(text); return ++nextMid; },
+      editMessage: async (_c, mid, text) => { calls.edits.push({ mid, text }); return true; },
+      sandbox: "read-only",
+      runTurn: async (o) => {
+        calls.gotOnActivity = typeof (o as { onActivity?: unknown }).onActivity === "function";
+        for (const l of lines) (o as { onActivity?: (s: string) => void }).onActivity?.(l);
+        // 편집은 1.5초 배치라 턴이 끝나기 전에 한 번은 나가야 관측된다.
+        await new Promise((r) => setTimeout(r, 1700));
+        return { ok: true, reply, sessionId: "s1", detail: "ok", elapsedMs: 1 };
+      },
+    };
+    return { deps, calls };
+  }
+
+  test("★브리지가 진행 통로를 넘긴다★ — 이 배선이 없어서 화면에 문구 하나만 남았다", async () => {
+    const { deps, calls } = spiesWithActivity(["git status"]);
+    await handleMessage(11, "확인해줘", 1, deps);
+    expect(calls.gotOnActivity).toBe(true);
+  });
+
+  test("★받은 줄이 작업중 메시지에 실제로 쓰인다★", async () => {
+    const { deps, calls } = spiesWithActivity(["git status --short", "bun test"]);
+    await handleMessage(12, "확인해줘", 1, deps);
+    const withLines = calls.edits.filter((e) => e.text.includes("🛠️"));
+    expect(withLines.length).toBeGreaterThan(0);
+    expect(withLines[withLines.length - 1]!.text).toContain("bun test");
+  });
+
+  test("★대조군 — 진행 줄이 없으면 진행 편집도 없다★ (기존 동작 그대로)", async () => {
+    const { deps, calls } = spiesWithActivity([]);
+    await handleMessage(13, "안녕", 1, deps);
+    expect(calls.edits.filter((e) => e.text.includes("🛠️")).length).toBe(0);
+  });
+
+  test("★마지막 편집은 답이다★ — 진행 줄이 답을 덮어쓰지 않는다", async () => {
+    const { deps, calls } = spiesWithActivity(["read a.ts", "read b.ts"], "정리했습니다");
+    await handleMessage(14, "해줘", 1, deps);
+    const last = calls.edits[calls.edits.length - 1]!;
+    expect(last.text).toBe("정리했습니다");
+  });
+  /**
+   * 경합을 실제로 만드는 mock.
+   *   · lines: [지연ms, 문구] — 그 시각에 진행 줄을 흘린다
+   *   · editDelays: 편집 호출별 지연(부족하면 0). ★첫 편집만 느리게★ 해야 답과 순서가 뒤집힌다
+   *   · turnMs: 턴이 끝나는 시각
+   */
+  function spiesRace(opts: {
+    lines: [number, string][];
+    editDelays: number[];
+    reply: string;
+    turnMs: number;
+  }) {
+    const calls = { sends: [] as string[], edits: [] as { text: string; doneAt: number }[] };
+    let nextMid = 3000;
+    let editN = 0;
+    const t0 = Date.now();
+    const deps: BridgeDeps = {
+      reactMessage: async () => true,
+      sendMessage: async (_c, text) => { calls.sends.push(text); return ++nextMid; },
+      editMessage: async (_c, _mid, text) => {
+        const d = opts.editDelays[editN++] ?? 0;
+        if (d > 0) await new Promise((r) => setTimeout(r, d));
+        calls.edits.push({ text, doneAt: Date.now() - t0 });
+        return true;
+      },
+      sandbox: "read-only",
+      runTurn: async (o) => {
+        const onAct = (o as { onActivity?: (s: string) => void }).onActivity;
+        for (const [at, text] of opts.lines) setTimeout(() => onAct?.(text), at);
+        await new Promise((r) => setTimeout(r, opts.turnMs));
+        return { ok: true, reply: opts.reply, sessionId: "s1", detail: "ok", elapsedMs: 1 };
+      },
+    };
+    return { deps, calls };
+  }
+
+  // ★첫 편집은 즉시 나간다★(lastEditAt 초기값 0) — 이후만 1.5초 간격으로 묶인다.
+  //   그래서 경합을 만들려면 ★첫 편집을 길게★ 잡아야 한다. 아래 두 시험의 시간 값은 그 실측에서 나왔다.
+
+  test("★편집 중에 들어온 마지막 줄도 화면에 나간다★ — 재예약이 없으면 그 줄은 영영 안 보인다", async () => {
+    // 첫 줄 t=0 → 편집 즉시 시작, 3000ms 걸린다.
+    // 둘째 줄 t=100 → 예약된 flush 가 t≈1500 에 뜨는데 ★그때 편집이 아직 돈다★ → 조용히 되돌아간다.
+    // 타이머는 이미 소진됐고 뒤에 줄이 더 없으므로, 재예약이 없으면 둘째 줄은 화면에 못 간다.
+    const { deps, calls } = spiesRace({
+      lines: [[0, "첫 명령"], [100, "둘째 명령"]],
+      editDelays: [3000],
+      reply: "끝",
+      turnMs: 4200,
+    });
+    await handleMessage(21, "해줘", 1, deps);
+    const progress = calls.edits.filter((e) => e.text.includes("🛠️"));
+    expect(progress.length).toBeGreaterThan(0);
+    expect(progress[progress.length - 1]!.text).toContain("둘째 명령");
+  });
+
+  test("★날아간 편집이 답을 덮지 않는다★ — 마지막 편집은 언제나 답이다", async () => {
+    // 진행 편집이 t≈0 에 시작해 2000ms 걸리는데 턴은 t=500 에 끝난다
+    // = 답을 쓰려는 순간 ★진행 편집이 아직 날아가 있다.★ 기다리지 않으면 답이 먼저 찍히고
+    //   늦게 끝난 진행 줄이 그 위를 덮는다.
+    const { deps, calls } = spiesRace({
+      lines: [[0, "느린 명령"]],
+      editDelays: [2000],
+      reply: "최종 답변",
+      turnMs: 500,
+    });
+    await handleMessage(22, "해줘", 1, deps);
+    expect(calls.edits.length).toBeGreaterThan(1);
+    expect(calls.edits[calls.edits.length - 1]!.text).toBe("최종 답변");
+  });
+});
