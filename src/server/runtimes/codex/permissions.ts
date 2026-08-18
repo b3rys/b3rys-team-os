@@ -3,7 +3,6 @@ import type { CodexSandboxMode } from "../../types";
 import {
   grantKey,
   requestPermission,
-  safeCheckPermission,
   type PermissionAgent,
   type PermissionCheck,
   type PermissionContext,
@@ -16,7 +15,9 @@ import {
  * 이 grants 를 permissionContext 에 실어야 preflight 가 통과한다(미주입 시 tier-a "ask"로 매 턴 차단 → 구조적 실행불가).
  * grant scope 는 askRule 이 만드는 것과 ★정확히 동일★해야 매칭된다: sandbox=`workspace-write:${root}`, network=`net:*`.
  * (root 는 preflight 의 workspaceRoot 와 같은 값을 넘겨야 함 — 아래 codexRuntimePreflight 의 workspaceRoot 산출과 일치.)
- * Tier-D(danger-full-access 등)는 grant 로 부여 불가라 이 헬퍼로도 통과 못 한다(hardDeny 가 grant 이전에 deny).
+ *
+ * ★이 grant 를 막아 세우는 상위 등급은 없다.★ 전에는 Tier-D 가 grant 보다 먼저 deny 했지만
+ * 그 판정은 경로에서 빠졌다 — 지금 경계를 정하는 것은 codex 설정이고, 그 밖은 승인창에서 사람이 정한다.
  */
 export function codexConfiguredGrants(
   agentId: string,

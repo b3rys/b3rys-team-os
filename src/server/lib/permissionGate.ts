@@ -276,19 +276,6 @@ export function requestPermission(db: Database, op: PermissionOperation): { deci
   const evalResult = evaluatePermission(db, op);
   const scope_key = scopeKeyForOperation(op);
   const target = targetForOperation(op);
-  if (evalResult.decision === "deny") {
-    appendPermissionAudit(db, {
-      request_id: null,
-      scope_key,
-      op,
-      target,
-      decision: `tier_d_denied:${evalResult.reasons.join(",")}`,
-      approver: null,
-      provenance: { ...(op.provenance ?? {}), reasons: evalResult.reasons },
-    });
-    appendAuditFile("permission_gate", "tier_d_denied", scope_key, { runtime: op.runtime, agent_id: op.agent_id ?? null, action: op.action, reasons: evalResult.reasons });
-    return evalResult;
-  }
   if (evalResult.decision === "allow") return evalResult;
 
   const id = `prm_${randomUUID().replace(/-/g, "").slice(0, 18)}`;

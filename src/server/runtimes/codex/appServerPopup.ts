@@ -6,9 +6,10 @@
  *
  * 매핑: allowed_once→approved(★decision_scope 가 session 이면 approved_for_session★) ·
  * allowed_always→approved_for_session · denied/expired/timeout→denied.
- * ★안전: Tier-D는 requestPermission(permissionGate)이 ★팝업을 만들기 전에★ deny 로 반환한다("이중 안전" 지점).
- *   전에는 이 자리에 judgeApproval(우리 승인 판정)이 있었다. #316 에서 경계를 codex 설정으로 넘기며 그 판정을
- *   경로에서 뺐고, 함수는 아무도 부르지 않는 채 남아 있다가 삭제됐다. ★주석만 남으면 없는 방어선을 있다고 읽는다.★
+ * ★이 경로에 우리 쪽 자동 거부는 없다.★ requestPermission 은 allow 아니면 approval_required 만 낸다 —
+ *   팝업을 만들기 전에 걸러지는 요청은 없고, 위험한 요청도 ★사람 앞까지 올라온다.★
+ *   경계는 codex 설정이 정하고, 그 밖은 사람이 승인창에서 정한다(#316·#318).
+ *   Tier-D 사유는 판정이 아니라 ★팝업 본문 표시용★ 으로만 남는다 — 사람이 보고 고를 근거다.
  *   fail-closed(에러/무응답→denied)는 그대로다.
  */
 import { createHash, randomUUID } from "node:crypto";
@@ -679,12 +680,11 @@ function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Re
     //  ★해석에 실패했다고 위험 검사까지 건너뛰지 않는다.★
     //   해석 실패로 보내는 것은 ★열쇠를 좁히려는 것★ 이지 ★검사를 면제하려는 것★ 이 아니다.
     //   payload 를 안 실으면 이 요청의 Tier-D 스캔 입력이 ★0★ 이 되고, 그러면
-    //   `[1, "; sudo rm -rf /tmp/x"]` 같은 규격 밖 요청이 ★사람이 누를 수 있는 평범한 팝업★ 으로 내려온다
-    //   (Tier-D 는 사람도 승인 못 하는 등급인데, 스캔이 비면 그 등급이 붙을 근거가 없어진다 — 루이 실측).
-    //   ★알아볼 수 없는 것을 넓게 통과시키지 않는다★ 는 이 경로의 원래 취지와도 맞다.
+    //   `[1, "; sudo rm -rf /tmp/x"]` 같은 규격 밖 요청이 ★위험 표시가 하나도 없는 팝업★ 으로 내려온다.
+    //   판정은 이제 사람이 한다 — 그러니 ★사람이 볼 근거를 비워서 내리지 않는다.★
     //
-    //   ★부작용은 명시한다★: 거대 payload 안에 'sudo' 같은 문자열이 ★우연히★ 들어 있으면 hard-deny 가 된다.
-    //   해석조차 못 한 payload 에 대해서는 fail-closed 가 맞는 방향이라고 봤다.
+    //   ★부작용은 명시한다★: 거대 payload 안에 'sudo' 같은 문자열이 ★우연히★ 들어 있으면
+    //   팝업에 위험 사유가 붙는다. 거부되지는 않고, 사람이 보고 판단한다.
     //
     //   붙이는 자리는 ★맨 뒤★ 다 — 앞은 사람이 읽는 안내문이어야 한다(팝업 첫 줄).
     //   ★주의: 이 op 은 command·path·egress 가 없어서 text 가 곧 target(=열쇠) 이다.★

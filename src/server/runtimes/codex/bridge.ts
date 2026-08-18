@@ -778,8 +778,8 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     networkAccess: liveNetwork,
     // ★관리자 설정(agents.json codex_sandbox/network)을 permissionGate grant로 seed★.
     // 미주입 시 preflight가 workspace-write/network를 매 턴 tier-a "ask"로 차단 → Dex 구조적 실행불가
-    // (2026-07-05 GD 테스트에서 "덱스 있어?"조차 dead-end로 발견). Tier-D(danger-full-access)는 이 grant로도
-    // 통과 못 함(hardDeny가 grant보다 우선). scope는 preflight의 workspaceRoot 산출과 동일 값으로 맞춤.
+    // (2026-07-05 실측: "덱스 있어?"조차 dead-end). scope는 preflight의 workspaceRoot 산출과 동일 값으로 맞춤.
+    // ★이 grant 위에 놓인 상위 거부 등급은 없다★ — Tier-D 판정은 경로에서 빠졌다(#316·#318).
     permissionContext: deps.permissionContext ?? {
       workspaceRoot: liveWorkspaceRoot,
       grants: codexConfiguredGrants(liveAgentId, liveSandbox, liveNetwork, liveWorkspaceRoot),

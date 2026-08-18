@@ -442,7 +442,8 @@ export function makeCodexAdapter(
       // ★관리자 설정(agents.json)을 grant로 seed(per-agent)★ — 미주입 시 preflight가 workspace-write/network를
       // 매 턴 tier-a "ask"로 차단해 버스 경로 Dex도 구조적 실행불가(2026-07-05 fix, 브릿지와 동일 근본).
       // ctx.workspaceRoot 미설정 → preflight가 agent.workspace_path 사용(per-agent 정확) + grant scope도 그에 맞춤.
-      // deps.permissionContext 명시 시엔 그대로 존중. Tier-D는 이 grant로도 통과 못 함(hardDeny 우선).
+      // deps.permissionContext 명시 시엔 그대로 존중.
+      // ★이 grant 위에 놓인 상위 거부 등급은 없다★ — Tier-D 판정은 경로에서 빠졌다(#316·#318).
       const turnStores = deps.permissionContext
         ? stores
         : {
