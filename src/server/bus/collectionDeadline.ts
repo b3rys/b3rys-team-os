@@ -1,14 +1,14 @@
 /**
  * ★마감 — 답이 안 오면 그때 상황으로 보고하게 깨운다.★
  *
- * ═══ 왜 필요한가 (팀장 라이브 테스트) ═══
+ * ═══ 왜 필요한가 (라이브 실측) ═══
  *   16:22:01  steve → demis / hermes / codex   팬아웃 3명
  *   16:23:13  demis → steve                    답
  *   16:24:01  codex → steve                    답
  *             hermes                            ★영영 안 옴★ (그 턴이 타임아웃으로 죽었다)
  *   → steve 는 ★아무 응답 없이 영원히 대기.★ 대기열 0건 — ★아무도 steve 를 다시 안 깨운다.★
  *
- * ★steve 는 룰을 지킨 것이다★ — "다 안 왔으면 종합하지 마라, 아무 말 안 해도 된다".
+ * ★수집자는 룰을 지킨 것이다★ — "다 안 왔으면 종합하지 마라, 아무 말 안 해도 된다".
  * 그런데 ★다시 깨워주는 게 없으니 거기서 멈췄다.★ 화면에는 응답 대기중만 남는다.
  *
  * ═══ 원칙 ═══
@@ -19,7 +19,7 @@
  *   (룰이 이미 그걸 시킨다: "끝내 침묵하는 사람이 있으면 보고하고 누가 안 했는지 밝혀라")
  *
  * ═══ 판정은 ★관측 가능한 사실★ 로만 ═══
- *   ★플래그(--collect)로 판정하지 않는다.★ 그게 오늘 우리를 물었다 —
+ *   ★플래그(--collect)로 판정하지 않는다.★ 그 판정이 실제로 고장을 냈다 —
  *   기능을 지웠는데 플래그를 시키는 지시문이 남아 팀원이 오지 않을 번들을 영원히 기다렸다.
  *   여기서는 ★DB 에 실제로 일어난 일★ 만 본다:
  *     · 누가 collector 에게 뭔가 시켰다 (requester → collector)
@@ -47,7 +47,7 @@ interface StalledCollection {
   key: string;          // 중복 재촉 방지 키 (thread:collector:마지막팬아웃시각)
   // ★어느 수집인지 알려주는 두 값★ — 알림 첫 줄에 실린다.
   //   thread_id 는 이미 실려 나가지만 `tg--1003947108339`·`XZD-y5Fs` 처럼 ★사람이 못 읽는다.★
-  //   (실측 2026-08-03: bill 이 하루에 이 알림을 4번 받고 매번 "어느 수집이지" 를 되짚었다)
+  //   (실측 2026-08-03: 한 팀원이 하루에 이 알림을 4번 받았고, 매번 어느 수집인지 되짚어야 했다)
   askId: string;        // collector 가 던진 첫 질문의 message id — 제목이 무의미해도 이건 항상 식별된다
   askTitle: string;     // 그 질문의 첫 줄 (자르면 …(잘림))
 }
@@ -60,7 +60,7 @@ export function askTitleOf(body: string, max = 44): string {
   // ★잘렸다는 걸 반드시 보이게★ — `…` 만으로는 원문에 있던 말줄임과 구분이 안 된다.
   // 자른 자리에 이미 말줄임이 있으면 ★……(잘림) 처럼 두 번 겹친다★ — 그 자리만 정리하고 붙인다.
   if ([...first].length <= max) return first;
-  // ★코드유닛이 아니라 코드포인트로 자른다★ (steve 리뷰) — slice 는 경계에 astral 문자(😀 등)가
+  // ★코드유닛이 아니라 코드포인트로 자른다★ — slice 는 경계에 astral 문자(😀 등)가
   //   걸리면 ★반쪽 서로게이트★ 를 남긴다. 실측: "가"×43 + "😀" → "…가가\ud83d…(잘림)".
   const cut = [...first].slice(0, max).join("");
   return `${cut.trimEnd().replace(/[…]+$/, "").trimEnd()}…(잘림)`;
@@ -69,9 +69,9 @@ export function askTitleOf(body: string, max = 44): string {
 /**
  * ★막힌 수집★ — 여러 명에게 물어놓고, 마감이 지나도 아무 데도 보고를 안 한 것.
  *
- * ═══ ★요청자를 알아내려 하지 마라★ (내가 여기서 두 번 틀렸다) ═══
+ * ═══ ★요청자를 알아내려 하지 마라★ — 아래 셋이 전부 틀린 접근이다 ═══
  *   ① thread+collector 로 묶었더니 ★200개 넘는 가짜 수집★ 을 찾아냈다.
- *      요청자(bill)를 '미응답 기여자' 로 세고, 배포했으면 ★전 팀원에게 마감 폭탄★ 이었다.
+ *      요청자를 '미응답 기여자' 로 세고, 배포했으면 ★전 팀원에게 마감 폭탄★ 이었다.
  *   ② 위임 메시지를 찾으려 했더니 ★답변을 위임으로 오인★ 했다 (방향만으론 구분이 안 된다).
  *   ③ 결정타: ★팀장이 단톡방에서 시킨 건 message 테이블에 아예 없다★ (텔레그램 캡처로 직접 주입).
  *      → 위임 행을 anchor 로 삼으면 ★정작 잡아야 할 케이스를 못 본다.★
@@ -90,7 +90,7 @@ export function askTitleOf(body: string, max = 44): string {
 /**
  * ★"보고했나" 는 여기 한 곳에서만 판단한다.★
  *
- * 이 판정은 같은 병으로 이미 두 번 기워졌다 — 매번 ★어디로 간 보고를 인정할 것인가★ 였다:
+ * 이 판정이 걸리는 지점은 하나다 — ★어디로 간 보고를 인정할 것인가.★ 두 경로가 누락돼 오탐을 냈다:
  *   2026-07-13  codex 가 팀장께 직보(to='user')했는데 팀원 발신만 보고 있어 ★불필요한 재촉 6건★
  *               → `to_agent_id IN ('user','broadcast')` 를 추가해 기움
  *   2026-07-26  claude 멤버가 ★텔레그램 reply 도구★ 로 팀장 1:1 에 종합을 보냈는데(그게 정본 경로다)
@@ -99,7 +99,7 @@ export function askTitleOf(body: string, max = 44): string {
  *                 팀 규칙("같은 요청에 두 번 보고하지 마라")을 어기게 된다.
  *                 ★규칙을 지킨 사람에게 규칙 위반을 유도하는 알림★ 이라 단순 노이즈가 아니다.
  *
- * 그래서 개별로 또 깁지 않고 경로를 여기로 모은다. ★새 보고 경로가 생기면 이 함수만 고친다.★
+ * 그래서 경로를 여기 한 곳으로 모은다. ★새 보고 경로가 생기면 이 함수만 고친다.★
  */
 export function hasReportedSince(
   db: Database,
@@ -123,7 +123,7 @@ export function hasReportedSince(
 
   // ② 팀장 1:1 DM 은 ★근거로 쓰지 않는다★
   //
-  //   한 번 넣었다가 되돌렸다. 이유를 남긴다 —
+  //   ★근거로 쓸 수 있는데 안 쓴다 — 이유:★
   //   claude 멤버가 팀장 1:1 에 답하는 정본 경로는 텔레그램 reply 도구이고 그 산출물은 dm_message 다.
   //   그래서 여기서 dm_message 를 보면 오탐이 준다. 실제로 줄었다.
   //   ★그런데 그 테이블을 신뢰할 수 없다.★ 2026-07-17 실측 기준:
@@ -134,7 +134,7 @@ export function hasReportedSince(
   //   오탐 하나를 고치면서 ★런타임별 불공평★ 을 새로 만드는 셈이다.
   //   게다가 파서 상태(dm_sync_health)를 봐도 못 거른다 — openclaw 는 "성공" 인데 내용이 0건이다.
   //
-  //   팀 결정: dm_message 의 소비처는 ★재시작 recall 주입★ 으로 한정한다(확대 금지).
+  //   제품 결정: dm_message 의 소비처는 ★재시작 recall 주입★ 으로 한정한다(확대 금지).
   //   보고 리마인드는 ★expect-report(pending_followup)★ 로 간다 — 팀원이 스스로 등록하므로
   //   깨진 캡처에 의존하지 않는다.
   //
@@ -174,7 +174,7 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
       if (sends.length < 2) continue;
 
       // C 에게 들어온 메시지 (답·지시)
-      // ★direct_to_gd 답은 제외한다★ (2026-07-15, GD) — 기여자가 `--to <collector>` 로 보냈어도
+      // ★direct_to_gd 답은 제외한다★ (제품 결정: 2026-07-15) — 기여자가 `--to <collector>` 로 보냈어도
       // reply_mode=direct_to_gd 면 그건 ★개별보고★ 지 collector 를 위한 수집 기여가 아니다.
       //   (2026-07-15 라이브: 서귀포 개별보고에서 hermes·codex 가 `--to steve --direct-to-gd` 로 보내자
       //    steve 가 '수집 collector' 로 오판돼 [마감] 독촉을 맞았다.) → direct_to_gd 는 '수집 답' 으로 안 센다.
@@ -190,7 +190,7 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
         .all(thread_id, C) as { peer: string; created_at: string }[];
 
       // ★질문은 답보다 먼저 나간다.★ (이게 질문과 보고를 가르는 유일하게 믿을 수 있는 신호다)
-      //   ★내가 여기서 세 번 틀렸다★:
+      //   ★여기서 틀리기 쉬운 세 가지★:
       //   ① thread+collector 로 묶음 → 가짜 수집 200개 (요청자를 기여자로 셈 → ★마감 폭탄★)
       //   ② 위임 행을 anchor → ★팀장의 단톡방 지시는 message 테이블에 없다★ (캡처로 직접 주입)
       //   ③ "요청자는 먼저 말 건 사람" → 장수 그룹방에선 기여자도 예전에 말한 적이 있다 → ★0건★
@@ -200,14 +200,14 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
         const answeredBetween = burst.length > 0 &&
           inbound.some((i) => i.created_at > burst[0]!.at && i.created_at < s.created_at);
         if (answeredBetween) break;          // 답이 끼어들었다 → 여기부터는 보고다
-        burst.push({ peer: s.peer, at: s.created_at, individual: s.individual, id: s.id, body: s.body });  // ★손에 있는 걸 버리지 않는다★ (dbak)
+        burst.push({ peer: s.peer, at: s.created_at, individual: s.individual, id: s.id, body: s.body });  // ★손에 있는 걸 버리지 않는다★
       }
       // ★요청자에게 보낸 ack 은 질문이 아니다★ — codex 는 팬아웃 ★전에★ 요청자에게 "확인했습니다" 를 보낸다.
       //   그러면 그 ack 이 버스트에 섞여 ★요청자가 '미응답 기여자'★ 로 잡힌다 (실측: 미응답=[bill]).
       //   ★요청자 = 버스트 직전에 collector 에게 들어온 메시지의 발신자.★ 그를 대상에서 뺀다.
       //   (팀장이 단톡방에서 시킨 경우는 그 행이 아예 없다 → 뺄 것도 없다. 그래서 그 케이스는 그대로 잡힌다)
       const firstAt = burst[0]!.at;
-      // ★요청자는 ★버스트 기준★ 으로 찾는다 — 'now-90분' 윈도로 찾으면 안 된다.★ (2026-07-13 실측 오탐, dbak 이 잡았다)
+      // ★요청자는 ★버스트 기준★ 으로 찾는다 — 'now-90분' 윈도로 찾으면 안 된다.★ (2026-07-13 실측: 오탐)
       //   ═══ 무슨 일이 있었나 ═══
       //     18:14:54  bill  → dbak   위임
       //     18:15:03  dbak  → demis  질문     ┐ 같은 초
@@ -263,7 +263,7 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
                 WHERE thread_id = ? AND from_agent_id = ? AND to_agent_id = ? AND created_at > ?`)
               .get(thread_id, t, requester, askedAt) as { n: number }).n > 0
           : false;
-        // ★direct_to_gd 로 답한 것도 '답함' 이다 — ★개별보고★.★ (2026-07-15, GD)
+        // ★direct_to_gd 로 답한 것도 '답함' 이다 — ★개별보고★.★ (제품 결정: 2026-07-15)
         // 기여자가 `--to <collector> --direct-to-gd` 로 보내면 목적지는 GD 다(inbound 에선 이미 제외됨).
         //   이걸 '답함' 으로 안 세면 → missing 으로 잡혀 ★"안 왔다" 독촉★ 이 나간다 (서귀포 오탐의 다른 얼굴).
         //   → answered 에는 넣되(=안 왔다 아님), answeredToCollector 에는 ★안 넣는다★(=종합 대상 아님) → 개별보고로 판정돼 발사 안 됨.
@@ -276,26 +276,26 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
         if (toGd) anyToGd = true;
         (toCollector || toRequester || toGd ? answered : missing).push(t);
       }
-      // ★개별보고면 전원/일부 무관하게 통째 스킵★ (2026-07-15 ①, GD) — 기여자가 direct_to_gd 로 GD께 답하기
+      // ★개별보고면 전원/일부 무관하게 통째 스킵★ (제품 결정: 2026-07-15) — 기여자가 direct_to_gd 로 GD께 답하기
       //   시작하면 이건 '개별보고' 다. collector 는 종합할 게 없다. 그런데 옛 narrowing 은 '전원 답함' 분기에만
-      //   스킵을 넣어, 일부 미응답(다른 기여자가 늦음)이면 여전히 "missing: X" 독촉이 나갔다(라이브 dbak 오탐).
+      //   스킵을 넣어, 일부 미응답(다른 기여자가 늦음)이면 여전히 "missing: X" 독촉이 나갔다(라이브 오탐).
       //   → direct_to_gd 답이 하나라도 있으면 개별보고 확정 → 어느 분기든 깨우지 않는다.
       if (anyToGd) continue;
 
-      // ★--individual = 확정이 아니라 '사실로 반박 가능한 힌트' 다.★ (dbak 리뷰 2026-07-17, GD 지시로 도입)
+      // ★--individual = 확정이 아니라 '사실로 반박 가능한 힌트' 다.★ (제품 결정: 2026-07-17)
       //
       // 위임자가 `send.sh --individual` 로 뿌렸다 = "각자 GD께 직접 보고해라". 종합할 사람이 없으니 안 깨운다.
       //   ★meta 의 칸 하나만 본다 — 본문은 안 읽는다★ (본문의 "각자 보고하세요" 를 서버는 못 읽는다).
       //   이게 닫는 창: anyToGd 는 ★답이 와야★ 켜지므로 아무도 안 답한 5분 시점엔 개별보고와 수집이
       //   서버 눈에 똑같다(둘 다 '2명 이상에게 뿌림') → 개별보고가 독촉을 맞았다.
       //
-      //   ═══ ★그런데 무조건 믿으면 안 된다★ (dbak 이 잡은 축) ═══
-      //     --collect 와 비교할 때 '없으면 고장나나' 축만 봤다. 축이 하나 더 있다 — ★잘못 붙이면?★
+      //   ═══ ★그런데 무조건 믿으면 안 된다★ ═══
+      //     --collect 와의 비교를 '없으면 고장나나' 축으로만 보면 놓친다. 축이 하나 더 있다 — ★잘못 붙이면?★
       //       · --collect 오남용    → 안 올 번들 무한대기
       //       · --individual 오남용 → backstop 사망 → collector 무한대기
       //     ★실패 모양이 같다.★ 플래그는 실패를 없앤 게 아니라 '누락' 에서 '오남용' 으로 옮겼을 뿐이다.
-      //     그리고 오남용의 결말은 ★이 파일이 애초에 만들어진 그 사고★(steve 가 hermes 답을 영영 못 받고
-      //     정지)와 정확히 같다. 조용히 죽어서 발견도 안 된다.
+      //     그리고 오남용의 결말은 ★위 실측과 동일한 무한대기★ 다 — 답 하나가 끝내 안 와서
+      //     수집이 정지한다. 조용히 죽어서 발견도 안 된다.
       //
       //   ═══ 그래서 이 파일 자신의 원칙을 적용한다 (line 21-29 ★판정은 관측 가능한 사실로만★) ═══
       //     ★기여자가 collector 에게 실제로 답하고 있다 = 개별보고가 아니라는 관측된 증거다.★
@@ -306,7 +306,7 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
       //     · 오남용 + 답이 오는 중 → backstop 부활 → 부분보고 독촉 (무한대기 아님)
       //     · 진짜 개별보고인데 누가 착각하고 collector 에게 답함 → 독촉 1회 + 본문 탈출구 = 안전한 실패
       //   ★한계(명시)★: 오남용 + 아무도 안 답함 = 여전히 조용히 스킵. ★완전 방어가 아니다.★
-      //     다만 실측 사고(steve 건)는 2명 답 + 1명 미응답이었으므로 다수 케이스는 덮는다.
+      //     다만 위 실측 사고는 2명 답 + 1명 미응답이었으므로 다수 케이스는 덮는다.
       if (burst.some((b) => b.individual) && answeredToCollector.length === 0) continue;
       // ★"다 왔는데 종합이 안 나갔다" — 여기서 그냥 넘겼다. 그게 구멍이었다.★ (2026-07-14 실측)
       //
@@ -319,7 +319,7 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
       //
       // ★옛 주석: "다 왔는데 보고 안 한 건 침묵 룰 소관" — ★그런데 룰은 아무도 깨우지 않는다.★★
       //   ★한 턴짜리 런타임은 다음 순간의 자기가 없다.★ 깨워주지 않으면 그걸로 끝이다.
-      //   ★팀장 기준: "답이 영영 안 옴" = 의도하지 않은 결과 → 시스템이 잡는다.★
+      //   ★제품 기준: "답이 영영 안 옴" = 의도하지 않은 결과 → 시스템이 잡는다.★
       //
       // (여기 도달했다는 건 이미 reportedElsewhere === 0 을 통과했다는 뜻 = ★보고가 정말 안 나갔다★)
       if (missing.length === 0) {
@@ -334,7 +334,7 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
       //   요청자 행은 없을 수 있다(팀장이 단톡방에서 시키면 message 테이블에 안 남는다 — 위 ② 참조).
       //   반면 팬아웃 첫 건은 ★수집의 정의상 반드시 있다.★ 그리고 collector 가 직접 쓴 문장이라
       //   본인이 가장 빨리 알아본다.
-      // ★burst[0] 은 팬아웃 첫 건이 아닐 수 있다★ (steve 리뷰 2026-08-04, 재현 확인).
+      // ★burst[0] 은 팬아웃 첫 건이 아닐 수 있다★ (2026-08-04 재현 확인).
       //   collector 는 팬아웃 ★전에★ 요청자에게 ack 을 보낸다(:202 주석이 이미 경고한 그 패턴).
       //   그러면 burst[0] = 그 ack → 알림 첫 줄이 「접수. 확인하고 회신하겠습니다.」 로 나간다.
       //   ★틀린 식별은 못 읽는 thread_id 보다 나쁘다★ — 사람이 딴 수집을 되짚는다.
@@ -359,7 +359,7 @@ export function sweepCollectionDeadlines(db: Database, agents: AgentRecord[]): n
   let woke = 0;
   for (const c of findStalledCollections(db, agents)) {
     try {
-      // ★하드캡 — 감지가 틀려도 스팸이 되면 안 된다.★ (2026-07-13 사고: steve 를 ★47번★ 재촉했다)
+      // ★하드캡 — 감지가 틀려도 스팸이 되면 안 된다.★ (2026-07-13 사고: 한 팀원을 ★47번★ 재촉했다)
       //   dedupe_key 는 못 믿는다 — ★insertMessage 는 dedupe 를 하지 않는다★ (명시 체크가 필요하다).
       //   ★audit 을 진실의 원천으로 쓴다★: 이 수집을 이미 깨웠으면 두 번 다시 안 깨운다.
       //   ★감지 로직이 아무리 틀려도 수집 하나당 최대 1회.★ 그게 스팸을 구조적으로 불가능하게 한다.
@@ -389,7 +389,7 @@ export function sweepCollectionDeadlines(db: Database, agents: AgentRecord[]): n
           // ★서버는 보고했는지 모른다★ — 그러니 단정하지 않는다.
           //   팀장 1:1 DM 으로 간 보고는 이 판정의 시야 밖이다(dm_message 는 신뢰할 수 없어 근거로 안 쓴다).
           //   그런데 문구가 "지금 보내세요" 라고 단정하면 ★이미 보낸 사람도 다시 보낸다★ —
-          //   실측: steve 가 보고 83초 뒤에 이 독촉을 받았다. 따르면 중복 보고가 되어 팀 룰을 어긴다.
+          //   실측: 보고 83초 뒤에 이 독촉이 나갔다. 따르면 중복 보고가 되어 팀 룰을 어긴다.
           //   ★기본 동작이 먼저, 탈출구는 조건과 함께 뒤에★ (순서 원칙은 아래 미응답 분기와 같다).
           //   이 탈출구는 "아직 안 한 사람" 에게는 해당되지 않으므로 진짜 수집을 무시하게 만들지 않는다.
           `★아직 종합 보고를 안 하셨으면 지금 보내세요.★\n` +
@@ -403,17 +403,17 @@ export function sweepCollectionDeadlines(db: Database, agents: AgentRecord[]): n
           //   개별보고와 수집이 ★서버 눈에 똑같이 생겼다★ — 둘 다 '60초 안에 2명 이상에게 뿌림' 이다.
           // 요청 본문의 "각자 GD께 직접 보고하세요" 는 meta 에 없어서 서버가 못 읽는다.
           //   → ★플래그를 새로 만들지 않는다(line 22 의 교훈).★ 대신 ★사실만 말하고 판단은 팀원이 한다(line 18).★
-          //   ★★이 탈출구 문구를 빼지 마라 — `--individual` 의 선택성이 여기 얹혀 있다.★★ (dbak 리뷰 2026-07-17)
+          //   ★★이 탈출구 문구를 빼지 마라 — `--individual` 의 선택성이 여기 얹혀 있다.★★
           //     "--individual 은 안 붙여도 안 깨진다(=계약이 아니라 최적화)" 가 참인 ★유일한 이유★ 가 이 문구다.
           //     이걸 노이즈로 보고 빼면 --individual 이 조용히 ★필수 플래그로 승격★ 된다(안 붙이면 탈출구 없는
           //     독촉 → 원래 혼란 복귀). 그건 --collect 가 팀을 물었던 바로 그 구조다.
           //     팀원은 자기가 개별보고를 시켰는지 ★안다.★ 서버가 못 가르는 걸 팀원은 가른다.
-          //     (2026-07-17 demis 라이브: 개별보고 위임 후 "5분 뒤 독촉 오면 무시하겠다" — 무시가 맞다.
+          //     (2026-07-17 라이브: 개별보고 위임 뒤 독촉이 나갔고 무시됐다. 무시가 맞다.
           //      그런데 그걸 ★알림 자체가 말해줘야★ 팀원이 룰을 뒤져 추론하지 않는다.)
-          //   ★순서가 중요하다 — 기본 동작이 먼저, 탈출구는 예외로.★ (dbak 리뷰 2026-07-17)
-          //     미응답 분기는 ★이 기능이 원래 잡으려던 케이스★ 가 착지하는 곳이다(steve 가 hermes 답을
-          //     영영 못 받고 정지). 즉 ★진짜 수집 트래픽이 가장 많이 지나는 분기★ 다(전원답함이 오히려 희귀).
-          //     첫 버전은 '무시하세요' 를 앞에 둬서 ★무조건 명령을 조건문으로★ 바꿨다 — collector 가 처음
+          //   ★순서가 중요하다 — 기본 동작이 먼저, 탈출구는 예외로.★
+          //     미응답 분기는 ★미응답 수집이 착지하는 분기★ 다(맨 위 타임라인 — 답 하나가
+          //     끝내 안 와서 정지). 즉 ★진짜 수집 트래픽이 가장 많이 지나는 분기★ 다(전원답함이 오히려 희귀).
+          //     '무시하세요' 가 앞에 오면 ★무조건 명령이 조건문으로 내려앉는다★ — collector 가 처음
           //     읽는 지시가 탈출구가 되면, 애매한 상태의 팀원이 진짜 수집을 무시할 확률이 올라간다.
           //     → 기본 동작은 ★무조건★ 으로 두고, 탈출구는 ★괄호 예외★ 로 내린다.
           `. ★지금까지 온 답으로 보고하세요★ — 안 온 사람은 '미응답' 이라고 명시하면 됩니다.\n` +
