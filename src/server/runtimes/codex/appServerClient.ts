@@ -108,7 +108,7 @@ export function appServerSpawnEnv(codexHome?: string, base: NodeJS.ProcessEnv = 
  */
 /**
  * ★지금 어느 단계인가★ — 맨 윗줄에서 교체되는 상태. 작업 줄과 달리 쌓이지 않는다.
- * 매 턴 여러 번 오는 것이라 쌓으면 화면이 그것으로 찬다(팀 리드 지적 2026-08-18).
+ * 매 턴 여러 번 오는 것이라 쌓으면 화면이 그것으로 찬다(제품 결정: 2026-08-18).
  */
 export function statusLineOf(item: unknown): string | null {
   const it = (item ?? {}) as Record<string, unknown>;
@@ -183,7 +183,7 @@ export function activityLineOf(item: unknown): string | null {
     if (q) return clip(`웹 검색: ${q}`);
     return "웹 검색";
   }
-  // ★상태 줄은 쌓지 않고 맨 위에서 교체된다★(팀 리드 설계 2026-08-18) — statusLineOf 가 돌려준다.
+  // ★상태 줄은 쌓지 않고 맨 위에서 교체된다★(제품 결정: 2026-08-18) — statusLineOf 가 돌려준다.
   //   여기서는 null 을 내서 ★작업 줄로 쌓이지 않게★ 한다. 매 턴 여러 번 오는 것들이다.
   if (type === "reasoning" || type === "agentMessage") return null;
   if (type === "mcpToolCall") {

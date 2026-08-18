@@ -53,10 +53,23 @@ export class CodexSessionStore {
   }): void {
     this.db
       .prepare(
+        // ★created_at 은 '이 세션 id 가 언제 처음 저장됐나' 다.★
+        //   같은 id 로 계속 이어지면 그대로 두고, id 가 바뀌면(=새 대화가 시작되면) 다시 찍는다.
+        //   그래야 기록만으로 갈린다 — created_at < updated_at 이면 ★그 사이에 이어받은 것★,
+        //   둘이 같으면 이번에 처음 만든 것이다. 없으면 매번 바깥에서 기준점을 재야 한다.
+        //
+        //   ★같은 세션일 때 NULL 을 채우지 않는다.★ 채우면 그 순간 created_at == updated_at 이 되어
+        //   ★이어받은 것을 '처음 만든 세션' 으로 읽게 만든다.★ 모르는 것은 NULL 로 남겨 모른다고 말한다 —
+        //   지어낸 값은 판정 불가보다 나쁘다. 마이그레이션 이전 행은 세션이 바뀔 때 아래 ELSE 가 채운다.
         `INSERT INTO codex_session_map
-           (agent_id, surface, conversation_key, codex_session_id, last_message_id, last_task_id, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+           (agent_id, surface, conversation_key, codex_session_id, last_message_id, last_task_id, updated_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
          ON CONFLICT(agent_id, surface, conversation_key) DO UPDATE SET
+           created_at = CASE
+             WHEN codex_session_map.codex_session_id = excluded.codex_session_id
+               THEN codex_session_map.created_at
+             ELSE datetime('now')
+           END,
            codex_session_id = excluded.codex_session_id,
            last_message_id = excluded.last_message_id,
            last_task_id = excluded.last_task_id,
