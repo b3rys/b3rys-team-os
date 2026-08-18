@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { ensureRenderedTeamOs } from "./testSupport";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildTmuxInjectionPrompt } from "./tmuxInject";
 
@@ -153,7 +153,9 @@ describe("Korean runtime loading templates", () => {
 
   test("CLAUDE template delegates owner and safety rules to TEAM-OS canonical text", () => {
     const claude = readFileSync(join(rulesDir, "CLAUDE.template.ko.md"), "utf8");
-    const teamOsEn = readFileSync(join(rulesDir, "TEAM-OS.md"), "utf8");
+    // ★룰 문장은 추적본으로 잰다★ — `TEAM-OS.md` 는 gitignore 된 렌더 산출물이라 새 클론·워크트리·CI 에 없다.
+    //   렌더는 `{{OWNER}}` 치환뿐이므로(`teamOsRender.renderTeamOs`) 문장 검사에는 템플릿으로 충분하다.
+    const teamOsEn = readFileSync(join(rulesDir, "TEAM-OS.template.md"), "utf8");
     const teamOs = readFileSync(join(rulesDir, "TEAM-OS.template.ko.md"), "utf8");
 
     expect(claude).toContain("@TEAM-OS.md");
@@ -170,18 +172,37 @@ describe("Korean runtime loading templates", () => {
     expect(teamOs).toContain("SECTION_CORE_RULE");
   });
 
+  /**
+   * ★렌더본이 있을 때만 재는 검사★ — 여기만 `rules/TEAM-OS.md`(gitignore 산출물)가 필요하다.
+   *
+   * 룰 문장 검사가 이 파일을 직접 읽으면 없는 환경에서 ★브랜치와 무관하게 빨간불★ 이 된다(ENOENT).
+   * 그래서 문장 검사는 추적본 기준이고 ★동일성 검사만 여기 남는다.★
+   *
+   * ★없을 때 통과로 세지 않는다★ — skip 은 결과에 그대로 남아 "확인했다" 와 구별된다.
+   * (렌더본이 없다는 것 자체는 결함이 아니다. 새 클론에는 원래 없다.)
+   */
+  test.skipIf(!existsSync(join(rulesDir, "TEAM-OS.md")))(
+    "렌더본이 템플릿과 일치한다 — 한쪽만 고치면 다음 렌더에 되돌아간다",
+    () => {
+      const teamOsTemplate = readFileSync(join(rulesDir, "TEAM-OS.template.md"), "utf8");
+      const rendered = readFileSync(join(rulesDir, "TEAM-OS.md"), "utf8");
+      // 렌더는 `{{OWNER}}` 치환뿐이라 같은 값으로 정규화해 비교한다.
+      expect(teamOsTemplate.replaceAll("{{OWNER}}", "the team lead")).toBe(
+        rendered.replaceAll("{{OWNER}}", "the team lead"),
+      );
+    },
+  );
+
   test("TEAM-OS section 4 keeps compacted behavior and safety invariants", () => {
-    const teamOsEn = readFileSync(join(rulesDir, "TEAM-OS.md"), "utf8");
+    // ★룰 문장은 추적본으로 잰다★ (위 시험과 같은 이유 — 렌더 산출물은 이 환경에 없을 수 있다).
     const teamOsTemplate = readFileSync(join(rulesDir, "TEAM-OS.template.md"), "utf8");
+    const teamOsEn = teamOsTemplate;
     const teamOsKo = readFileSync(join(rulesDir, "TEAM-OS.template.ko.md"), "utf8");
     const en = section(teamOsEn, "## 4. Shared Response Rules", "## 5. Collaboration Rules");
     const sourceEn = section(teamOsTemplate, "## 4. Shared Response Rules", "## 5. Collaboration Rules");
     const ko = section(teamOsKo, "## 4. 공통 응답 규칙", "## 5. 협업 규칙");
 
     expect(teamOsTemplate).not.toContain("Superseded compact template");
-    expect(teamOsTemplate.replaceAll("{{OWNER}}", "the team lead")).toBe(
-      teamOsEn.replaceAll("{{OWNER}}", "the team lead"),
-    );
 
     for (const token of [
       "ack or react first",

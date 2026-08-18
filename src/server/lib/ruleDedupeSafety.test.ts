@@ -9,13 +9,28 @@
  * 이 테스트가 빨개지면: 핵심룰에서 뺀 것을 TEAM-OS 가 못 받고 있다는 뜻 → 되살리거나 되돌려라.
  */
 import { describe, expect, it } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildAgentsMd, buildPersona } from "./personaTemplates";
 
 const rulesDir = join(import.meta.dir, "../../../rules");
-const teamOs = readFileSync(join(rulesDir, "TEAM-OS.md"), "utf8");
+
+/**
+ * ★룰 내용은 추적본(template)으로 잰다.★
+ *
+ * `TEAM-OS.md` 는 gitignore 된 ★렌더 산출물★ 이라 새 클론·워크트리에는 없다.
+ * 이 파일을 최상단에서 읽으면 그런 환경에서 ★모듈 로드가 ENOENT 로 실패해 이 파일의 검사가
+ * 하나도 돌지 않는다★ — 검사가 있는데 아무것도 지키지 않는 상태가 된다.
+ *
+ * 렌더는 `{{OWNER}}` 치환뿐이므로(`teamOsRender.renderTeamOs`) ★룰 문장 검사에는 템플릿으로 충분하다.★
+ * 렌더본이 필요한 검사는 아래 `teamOsRendered` 를 쓰고, 없으면 ★조건 미성립으로 건너뛴다★ —
+ * "검사했는데 통과" 와 "잴 수 없었다" 를 같은 초록으로 뭉개지 않기 위해 사유를 남긴다.
+ */
 const teamOsTemplate = readFileSync(join(rulesDir, "TEAM-OS.template.md"), "utf8");
+const teamOs = teamOsTemplate; // 룰 문장 검사의 기준 — 치환 전/후가 같은 문장을 본다
+const renderedPath = join(rulesDir, "TEAM-OS.md");
+/** 렌더 산출물. 이 환경에 없으면 null — 있을 때만 재는 검사가 있다. */
+const teamOsRendered: string | null = existsSync(renderedPath) ? readFileSync(renderedPath, "utf8") : null;
 
 /** 핵심룰에서 뺀 5개의 ★실행 세부★ — 주제어가 아니라 그 결정을 쓸 수 있게 만드는 문구다. */
 const MOVED_DETAILS = [
@@ -42,8 +57,13 @@ describe("★핵심룰에서 뺀 절차는 TEAM-OS 가 '실행 가능한 형태�
   //   워크트리·새 클론·CI 에는 없다 — 모듈 로드가 통째로 실패해 ★이 파일의 검사가 하나도 안 돈다.★
   //   여기 두면 검사가 있는 것처럼 보이지만 실제로는 아무것도 지키지 않는다. 별건으로 고칠 자리다.
 
-  it("템플릿과 렌더본이 같다 — 한쪽만 고치면 다음 렌더에 되돌아간다", () => {
-    expect(teamOsTemplate).toBe(teamOs);
+  /**
+   * ★이 검사만 렌더 산출물이 필요하다★ — 없는 환경에서는 ★건너뛴다(skip)★.
+   * 통과로 세면 "잴 수 없었다" 가 "확인했다" 로 읽힌다. skip 은 결과에 그대로 남는다.
+   * (렌더본이 없다는 것 자체는 결함이 아니다 — gitignore 산출물이라 새 클론에는 원래 없다.)
+   */
+  it.skipIf(teamOsRendered === null)("템플릿과 렌더본이 같다 — 한쪽만 고치면 다음 렌더에 되돌아간다", () => {
+    expect(teamOsRendered).toBe(teamOsTemplate);
   });
 
   it("★claude 는 @TEAM-OS.md 를 반드시 싣는다★ — 이게 이번 중복 제거의 전제다 (lui 지적: 단일 실패점)", () => {
