@@ -34,14 +34,22 @@ const startArgs = async (opts: Record<string, unknown>) => {
   return seen[0] ?? {};
 };
 
-test("★sandbox 를 넘기지 않는다★ — 넘기면 config.toml 의 권한 프로필이 무력화된다", async () => {
-  const a = await startArgs({ cwd: "/tmp/ws", sandbox: "workspace-write" });
-  expect("sandbox" in a).toBe(false);
+test("★실행 모드를 프로토콜로 명시한다★ — 안 넘기면 readOnly 로 잠겨 승인 요청이 발생하지 않는다", async () => {
+  const a = await startArgs({ cwd: "/tmp/ws" });
+  expect({ approvalPolicy: a.approvalPolicy, sandbox: a.sandbox, approvalsReviewer: a.approvalsReviewer })
+    .toEqual({ approvalPolicy: "on-request", sandbox: "danger-full-access", approvalsReviewer: "user" });
 });
 
-test("★approvalPolicy 도 넘기지 않는다★ — 승인 레벨도 codex 설정이 정한다", async () => {
+test("★approvalPolicy 는 on-request 여야 한다★ — never 면 codex 가 묻지 않아 승인 릴레이가 죽는다", async () => {
   const a = await startArgs({ cwd: "/tmp/ws" });
-  expect("approvalPolicy" in a).toBe(false);
+  expect(a.approvalPolicy).toBe("on-request");
+  expect(a.approvalPolicy).not.toBe("never");
+});
+
+test("★호출자 opts 가 실행 모드를 덮지 못한다★ — 경계는 한 곳에서만 정해진다", async () => {
+  const a = await startArgs({ cwd: "/tmp/ws", sandbox: "workspace-write", approvalPolicy: "never" });
+  expect({ sandbox: a.sandbox, approvalPolicy: a.approvalPolicy })
+    .toEqual({ sandbox: "danger-full-access", approvalPolicy: "on-request" });
 });
 
 test("★runtimeWorkspaceRoots 를 넘기지 않는다★ — experimentalApi 를 요구해 turn 이 죽던 원인", async () => {

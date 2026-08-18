@@ -60,24 +60,37 @@ export async function runViaAppServer(
   //   dex(codex 런타임)가 따로 있다). 그래서 CodexTurnOptions.agentId 를 필수로 두어 컴파일이 막게 했다.
   try {
     if (!reused) await client.start(); // 살아있는 프로세스면 핸드셰이크를 다시 하지 않는다
-    // ★codex 설정이 정하게 한다★.
+    // ★실행 모드를 codex 프로토콜로 명시한다.★
     //
-    //   여기서 sandbox·approvalPolicy 를 넘기면 ★CODEX_HOME 의 config.toml 을 덮어쓴다.★
-    //   그러면 권한 프로필(파일 경로 deny 등)을 아무리 써놔도 효과가 없다 — 실측으로 확인했다:
-    //     프로필만            → .env 읽기 차단됨
-    //     + sandbox 를 넘기면  → 그냥 읽힘
+    //   ★안 넘기면 열리는 게 아니라 잠긴다.★ 실측(CLI 0.147.0 · 빈 CODEX_HOME · config 없음 ·
+    //   thread/start 에 cwd·model 만 전달):
+    //     → approvalPolicy "on-request" · sandbox { type: "readOnly" } · profile ":read-only"
+    //   그래서 "우리 config 시딩만 지우면 codex 기본으로 열린다" 는 ★틀렸다.★ 명시해야 열린다.
     //
-    //   ★runtimeWorkspaceRoots 도 빼야 한다.★ 그게 experimentalApi capability 를 요구해서
-    //   지금 flag on 이 ★턴 시작도 못 하고 죽는 원인★ 이었다(2/2 재현). 실측 3종:
-    //     전부 넘김 + caps null        → 거부(runtimeWorkspaceRoots requires experimentalApi)
-    //     ★cwd 만 넘김 + caps null★    → 성공  ← 이 길로 간다
-    //     roots + experimentalApi:true → 성공 (다른 길이지만 설정을 덮어쓰는 쪽으로 되돌아간다)
+    //   sandbox 는 openclaw 가 넘기는 값과 같다(요구사항 파일 없음 → resolver 기본 mode=yolo):
+    //     sandbox "danger-full-access" · approvalsReviewer "user"
+    //     근거: openclaw config-fy-53tqM.js:269~272 · 279~282 · 306~309,
+    //           thread-lifecycle-DSMv62L1.js:2224~2226 · 2402~2405
     //
-    //   작업 폴더 범위는 cwd + config.toml 의 workspace_roots 가 정한다.
+    //   ★approvalPolicy 만 openclaw 와 다르게 "on-request" 다.★ 제품 결정: 위험한 실행은
+    //   codex 가 판정해 물어보고, 그 물음을 채널로 옮겨 사람이 누른 대로 돌려준다.
+    //   · "never" 는 승인 요청 자체를 보내지 않아 onApproval 이 한 번도 불리지 않는다.
+    //   · sandbox 를 "workspace-write" 로 좁히면 샌드박스가 먼저 거부하고 모델이 승격을
+    //     요청하지 않아 물어보는 단계가 사라진다(실측: docs/RUNTIME_ACCEPTANCE.md).
+    //   즉 판정 단계가 살아있으려면 경계는 codex 가 쥐고 정책은 on-request 여야 한다.
+    //
+    //   ★이건 우리 승인 코드를 얹는 게 아니라 codex 정식 프로토콜로 실행 모드를 지정하는 것이다.★
+    //   경계가 필요해지면 그때 codex 설정으로 넣는다 — 우리 판정층을 다시 만들지 않는다.
+    //
+    //   `runtimeWorkspaceRoots` 는 계속 안 넘긴다 — experimentalApi capability 를 요구해서
+    //   넘기면 턴 시작도 못 하고 죽는다(2/2 재현). cwd 만으로 간다.
     await client.startThread({
       cwd: opts.cwd,
       model: opts.model,
       resumeThreadId: opts.resumeSessionId, // ★정확성 #1: 멀티턴 맥락 이어감(exec resume 동등)★
+      approvalPolicy: "on-request",
+      sandbox: "danger-full-access",
+      approvalsReviewer: "user",
     });
     const threadId = client.currentThreadId;
     // ★진행 중 턴에 끼어들 수 있게 등록★ — 이게 없으면 턴 도는 동안 온 메시지가 연기되다 사라진다
