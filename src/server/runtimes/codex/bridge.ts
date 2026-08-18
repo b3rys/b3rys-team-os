@@ -13,6 +13,7 @@
 import { runCodexTurn, type CodexTurnOptions, type CodexTurnResult } from "./runner";
 import { createSerialTurnQueue } from "./serialTurnQueue";
 import { makeDmSessionStore, NOOP_DM_SESSION_STORE, type DmSessionStore } from "./dmSessionStore";
+import { toMarkdownV2, splitForTelegram, toPlain } from "./telegramMarkdown";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -603,11 +604,21 @@ export async function handleMessage(
   // ④ 작업중 메시지를 답으로 교체(편집). 작업중 메시지가 없거나 편집 실패 시 신규 발신.
   //   ★교체 대상은 지금 쓰고 있는 마지막 버블이다.★ 진행 줄이 길어 새 버블로 넘어갔다면
   //   첫 버블에 답을 쓰면 답이 진행 줄 ★위★ 에 나타나고, 마지막 버블은 "작업 중" 인 채 남는다.
+  //   ★모델이 쓴 Markdown 을 텔레그램 표기로 옮긴다★ — 원문 그대로 보내면 별표·백틱이 글자로 보인다.
+  //   길이는 ★변환 뒤 UTF-16 기준★ 으로 나눈다. 이스케이프가 붙으면서 늘어나기 때문에
+  //   원문이 한도 이하여도 변환 후 넘을 수 있다.
+  const parts = splitForTelegram(toMarkdownV2(reply));
   let delivered = false;
-  if (bubbleId !== null) delivered = await edit(chatId, bubbleId, reply);
+  const first = parts[0] as string;
+  if (bubbleId !== null) delivered = await edit(chatId, bubbleId, first);
   if (!delivered) {
-    const newId = await send(chatId, reply);
+    const newId = await send(chatId, first);
     delivered = newId !== null;
+  }
+  // 남은 조각은 이어서 보낸다 — 자르지 않는다.
+  for (const rest of parts.slice(1)) {
+    const id = await send(chatId, rest);
+    if (id === null) { delivered = false; break; }
   }
   return { ok: delivered, reply, detail: delivered ? "delivered" : "send_failed" };
 }
@@ -622,15 +633,22 @@ const TG_API = "https://api.telegram.org";
 
 /** 텔레그램 발신 → 보낸 message_id 반환(작업중 메시지 교체용). */
 function tgSend(token: string): NonNullable<BridgeDeps["sendMessage"]> {
+  const post = async (body: Record<string, unknown>): Promise<number | null> => {
+    const res = await fetch(`${TG_API}/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const j = (await res.json()) as { ok?: boolean; result?: { message_id?: number } };
+    return j.ok && j.result?.message_id != null ? j.result.message_id : null;
+  };
   return async (chatId, text) => {
     try {
-      const res = await fetch(`${TG_API}/bot${token}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: chatId, text }),
-      });
-      const j = (await res.json()) as { ok?: boolean; result?: { message_id?: number } };
-      return j.ok && j.result?.message_id != null ? j.result.message_id : null;
+      const id = await post({ chat_id: chatId, text, parse_mode: "MarkdownV2" });
+      if (id !== null) return id;
+      // ★MarkdownV2 로 거부되면 표시를 걷어내고 한 번 더.★ 이스케이프 한 곳이 어긋났다고
+      //   답이 통째로 사라지면 안 된다(hermes 도 같은 폴백을 둔다).
+      return await post({ chat_id: chatId, text: toPlain(text) });
     } catch {
       return null;
     }
@@ -639,15 +657,19 @@ function tgSend(token: string): NonNullable<BridgeDeps["sendMessage"]> {
 
 /** 텔레그램 메시지 편집(작업중 → 답). */
 function tgEdit(token: string): NonNullable<BridgeDeps["editMessage"]> {
+  const post = async (body: Record<string, unknown>): Promise<boolean> => {
+    const res = await fetch(`${TG_API}/bot${token}/editMessageText`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const j = (await res.json()) as { ok?: boolean };
+    return j.ok === true;
+  };
   return async (chatId, messageId, text) => {
     try {
-      const res = await fetch(`${TG_API}/bot${token}/editMessageText`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: chatId, message_id: messageId, text }),
-      });
-      const j = (await res.json()) as { ok?: boolean };
-      return j.ok === true;
+      if (await post({ chat_id: chatId, message_id: messageId, text, parse_mode: "MarkdownV2" })) return true;
+      return await post({ chat_id: chatId, message_id: messageId, text: toPlain(text) });
     } catch {
       return false;
     }

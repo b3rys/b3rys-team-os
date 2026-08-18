@@ -817,3 +817,56 @@ describe("codex bridge — 이 세션 승인", () => {
     expect(row.decision_scope).toBe("session");
   });
 });
+
+// ── ★답 포맷 배선★ ──
+//
+// 변환 규칙 자체는 telegramMarkdown.test.ts 가 잰다. 여기서는 ★브리지가 그것을 실제로 쓰는지★ 를 잰다.
+describe("codex bridge — 답 포맷", () => {
+  beforeEach(() => resetChatThreads());
+
+  function spiesForReply(reply: string) {
+    const sends: string[] = [];
+    const edits: string[] = [];
+    const deps: BridgeDeps = {
+      reactMessage: async () => true,
+      sendMessage: async (_c, text) => { sends.push(text); return 700 + sends.length; },
+      editMessage: async (_c, _m, text) => { edits.push(text); return true; },
+      sandbox: "read-only",
+      runTurn: async () => ({ ok: true, reply, sessionId: "s1", detail: "ok", elapsedMs: 1 }),
+    };
+    return { deps, sends, edits };
+  }
+
+  test("★굵게 표시가 텔레그램 표기로 바뀌어 나간다★ — 예전엔 별표가 글자로 보였다", async () => {
+    const { deps, edits } = spiesForReply("**중요** 합니다");
+    await handleMessage(31, "해줘", 1, deps);
+    const last = edits[edits.length - 1]!;
+    expect(last).toContain("*중요*");
+    expect(last).not.toContain("**중요**");
+  });
+
+  test("★예약문자는 이스케이프돼서 나간다★ — 안 하면 메시지 전체가 거부된다", async () => {
+    const { deps, edits } = spiesForReply("판교 28-31도(맑음).");
+    await handleMessage(32, "해줘", 1, deps);
+    const last = edits[edits.length - 1]!;
+    expect(last).toContain("\\-");
+    expect(last).toContain("\\(");
+    expect(last).toContain("\\.");
+  });
+
+  test("★긴 답은 자르지 않고 나눠 보낸다★", async () => {
+    const long = Array.from({ length: 500 }, (_, i) => "줄 " + i + " 내용이 제법 길게 이어진다").join("\n");
+    const { deps, sends, edits } = spiesForReply(long);
+    await handleMessage(33, "해줘", 1, deps);
+    // 첫 조각은 작업중 버블 편집으로, 나머지는 새 메시지로 나간다
+    expect(edits.length).toBeGreaterThan(0);
+    expect(sends.length).toBeGreaterThan(1); // 작업중 버블 1 + 이어지는 조각들
+    for (const t of [...edits, ...sends]) expect(t.length).toBeLessThanOrEqual(4096);
+  });
+
+  test("★대조군 — 짧은 답은 한 번에 나간다★ (쓸데없이 나누지 않는다)", async () => {
+    const { deps, sends } = spiesForReply("네 알겠습니다");
+    await handleMessage(34, "해줘", 1, deps);
+    expect(sends.length).toBe(1); // 작업중 버블 하나뿐
+  });
+});
