@@ -489,7 +489,7 @@ export async function handleMessage(
   }
   // ★진행 표시★ — codex 가 도구를 시작할 때마다 오는 줄을 모아 "작업 중…" 메시지를 고쳐 쓴다.
   //   창이 없는 런타임이라 이게 없으면 사람 눈에는 몇 분간 문구 하나만 남는다.
-  //   간격·자르기·넘김 기준은 hermes 실구현 값을 그대로 쓴다(progressLines.ts 주석).
+  //   자르기·넘김 기준은 hermes 실구현 값을 쓴다. 편집 간격만 팀 리드 요청으로 2초다(progressLines.ts 주석).
   let bubbleId = workingMsgId;          // 지금 고쳐 쓰는 메시지
   let lines: ProgressLine[] = [];       // 그 메시지에 담긴 줄
   let lastEditAt = 0;                   // 마지막 편집 시각
@@ -534,9 +534,9 @@ export async function handleMessage(
     }, wait);
   };
 
-  const onActivity = (line: string): void => {
+  const onActivity = (line: string, itemId?: string): void => {
     if (bubbleId === null) return;
-    const next = appendLine(lines, line);
+    const next = appendLine(lines, line, undefined, itemId);
     if (next === lines) return; // 빈 줄이라 담을 것이 없다
     if (!fits(workingText, next)) {
       // ★한도에 닿으면 지금 버블은 남기고 새 버블로 넘어간다★ — 어디까지 했는지가 사라지지 않는다.

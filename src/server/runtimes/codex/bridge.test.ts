@@ -529,7 +529,7 @@ describe("codex bridge — 진행 표시", () => {
       runTurn: async (o) => {
         calls.gotOnActivity = typeof (o as { onActivity?: unknown }).onActivity === "function";
         for (const l of lines) (o as { onActivity?: (s: string) => void }).onActivity?.(l);
-        // 편집은 1.5초 배치라 턴이 끝나기 전에 한 번은 나가야 관측된다.
+        // 편집은 배치(EDIT_MIN_INTERVAL_MS)라 턴이 끝나기 전에 한 번은 나가야 관측된다.
         await new Promise((r) => setTimeout(r, 1700));
         return { ok: true, reply, sessionId: "s1", detail: "ok", elapsedMs: 1 };
       },
@@ -599,7 +599,7 @@ describe("codex bridge — 진행 표시", () => {
     return { deps, calls };
   }
 
-  // ★첫 편집은 즉시 나간다★(lastEditAt 초기값 0) — 이후만 1.5초 간격으로 묶인다.
+  // ★첫 편집은 즉시 나간다★(lastEditAt 초기값 0) — 이후만 EDIT_MIN_INTERVAL_MS 간격으로 묶인다.
   //   그래서 경합을 만들려면 ★첫 편집을 길게★ 잡아야 한다. 아래 두 시험의 시간 값은 그 실측에서 나왔다.
 
   test("★편집 중에 들어온 마지막 줄도 화면에 나간다★ — 재예약이 없으면 그 줄은 영영 안 보인다", async () => {

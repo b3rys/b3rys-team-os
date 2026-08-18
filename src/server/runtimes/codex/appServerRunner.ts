@@ -98,12 +98,12 @@ export async function runViaAppServer(
     registerActiveTurn(opts.agentId, client);
     const r = await client.runTurn(opts.prompt, {
       // ★지금 무엇을 하는 중인지 보이게 한다.★ 창이 없는 런타임이라 이벤트로 직접 쓴다.
-      onActivity: (line) => {
+      onActivity: (line, itemId) => {
         // 두 수신처가 서로를 막지 않는다 — 대시보드 쓰기가 실패해도 채널 표시는 살고, 반대도 같다.
         if (db) {
           try { setActivityLine(db, opts.agentId, line); } catch { /* 표시가 턴을 막지 않는다 */ }
         }
-        try { opts.onActivity?.(line); } catch { /* 채널 표시가 턴을 막지 않는다 */ }
+        try { opts.onActivity?.(line, itemId); } catch { /* 채널 표시가 턴을 막지 않는다 */ }
       },
       onApproval: async (req) => {
         // ★경계는 codex 설정이 정한다. 우리는 두 번째로 판정하지 않는다.★
