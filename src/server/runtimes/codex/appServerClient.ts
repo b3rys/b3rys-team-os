@@ -46,6 +46,8 @@ export interface RunTurnHandlers {
   /** ★지금 무엇을 하는 중인가★ — 사람이 진행 상황을 보게 한다(tmux 팀원의 화면 긁기와 같은 자리). */
   /** itemId 를 함께 준다 — 같은 항목이 나중에 구체화되면 그 줄을 ★교체★ 할 수 있다. */
   onActivity?: (line: string, itemId?: string) => void;
+  /** ★지금 어느 단계인가★ — 맨 윗줄에서 교체된다. 쌓이지 않는다. */
+  onStatus?: (line: string) => void;
   /** 임의 서버 알림 관찰(로깅/디버그). */
   onNotify?: (method: string, params: unknown) => void;
 }
@@ -104,6 +106,23 @@ export function appServerSpawnEnv(codexHome?: string, base: NodeJS.ProcessEnv = 
  * ★영영 비어 있었다★ — 실측: agent_status.activity_line 이 dex 는 항상 null.
  * codex 의 등가물은 app-server 가 흘려주는 item 이벤트다. 그걸 같은 칸에 쓴다.
  */
+/**
+ * ★지금 어느 단계인가★ — 맨 윗줄에서 교체되는 상태. 작업 줄과 달리 쌓이지 않는다.
+ * 매 턴 여러 번 오는 것이라 쌓으면 화면이 그것으로 찬다(팀 리드 지적 2026-08-18).
+ */
+export function statusLineOf(item: unknown): string | null {
+  const it = (item ?? {}) as Record<string, unknown>;
+  const type = typeof it.type === "string" ? it.type : "";
+  if (type === "reasoning") {
+    // 요약이 실려 오면 무엇을 생각하는 중인지까지 보여준다.
+    const sum = typeof it.summary === "string" ? it.summary : typeof it.text === "string" ? it.text : "";
+    const head = sum.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
+    return head ? `🧠 ${head.length > 60 ? head.slice(0, 59) + "…" : head}` : "🧠 생각하는 중…";
+  }
+  if (type === "agentMessage") return "✍️ 대답하는 중…";
+  return null;
+}
+
 /** 항목 id — 같은 항목의 시작/완료를 잇는 열쇠. */
 export function itemIdOf(item: unknown): string | undefined {
   const id = (item as { id?: unknown } | null)?.id;
@@ -122,9 +141,24 @@ export function activityLineOf(item: unknown): string | null {
   const cmdText = typeof cmd === "string" ? cmd : Array.isArray(cmd) ? cmd.join(" ") : null;
   if (cmdText) return clip(`실행: ${cmdText}`);
 
-  const changes = it.fileChanges;
-  if (changes && typeof changes === "object") {
-    const files = Object.keys(changes as Record<string, unknown>);
+  // ★실측(0.147.0): 파일 변경은 changes 배열로 온다★ — [{ path, kind:{type:"add"|…}, diff }].
+  //   예전 코드는 fileChanges 라는 객체를 찾아서 못 만났고, 그 결과 화면에 ★내부 이름 fileChange 가 그대로★ 떴다.
+  const changeList = Array.isArray(it.changes) ? (it.changes as Record<string, unknown>[]) : null;
+  if (changeList && changeList.length > 0) {
+    const verb = (k: unknown): string => {
+      const t = (k as { type?: unknown } | null)?.type;
+      return t === "add" ? "생성" : t === "delete" ? "삭제" : "수정";
+    };
+    if (changeList.length === 1) {
+      const c = changeList[0]!;
+      const path = typeof c.path === "string" ? c.path.split("/").pop() ?? String(c.path) : "파일";
+      return clip(`파일 ${verb(c.kind)}: ${path}`);
+    }
+    return clip(`파일 ${changeList.length}개 ${verb(changeList[0]!.kind)}`);
+  }
+  const legacy = it.fileChanges;
+  if (legacy && typeof legacy === "object") {
+    const files = Object.keys(legacy as Record<string, unknown>);
     return clip(files.length === 1 ? `파일 수정: ${files[0]}` : `파일 ${files.length}개 수정`);
   }
   if (type === "webSearch" || type === "web_search") {
@@ -149,13 +183,9 @@ export function activityLineOf(item: unknown): string | null {
     if (q) return clip(`웹 검색: ${q}`);
     return "웹 검색";
   }
-  if (type === "reasoning") {
-    // 요약이 오면 무엇을 생각하는 중인지 보여준다 — "생각하는 중" 만 반복되면 사람에게 정보가 없다.
-    const sum = typeof it.summary === "string" ? it.summary : typeof it.text === "string" ? it.text : "";
-    const head = sum.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
-    return head ? clip(`생각: ${head}`) : "생각하는 중";
-  }
-  if (type === "agentMessage") return "답 쓰는 중";
+  // ★상태 줄은 쌓지 않고 맨 위에서 교체된다★(팀 리드 설계 2026-08-18) — statusLineOf 가 돌려준다.
+  //   여기서는 null 을 내서 ★작업 줄로 쌓이지 않게★ 한다. 매 턴 여러 번 오는 것들이다.
+  if (type === "reasoning" || type === "agentMessage") return null;
   if (type === "mcpToolCall") {
     const n = typeof it.name === "string" ? it.name : "도구";
     return clip(`도구 호출: ${n}`);
@@ -484,6 +514,8 @@ export class CodexAppServerClient {
         break;
       }
       case "item/started": {
+        const status = statusLineOf(params?.item);
+        if (status) { this.activeHandlers?.onStatus?.(status); break; }
         const line = activityLineOf(params?.item);
         if (line) this.activeHandlers?.onActivity?.(line, itemIdOf(params?.item));
         break;
@@ -493,8 +525,12 @@ export class CodexAppServerClient {
         //   (0.147.0 실측). 그래서 시작 시점 줄만 만들면 "웹 검색" 에서 영영 멈춘다.
         //   같은 itemId 를 주어 호출자가 그 줄을 구체적인 것으로 바꾸게 한다.
         {
-          const line = activityLineOf(params?.item);
-          if (line) this.activeHandlers?.onActivity?.(line, itemIdOf(params?.item));
+          const status = statusLineOf(params?.item);
+          if (status) this.activeHandlers?.onStatus?.(status);
+          else {
+            const line = activityLineOf(params?.item);
+            if (line) this.activeHandlers?.onActivity?.(line, itemIdOf(params?.item));
+          }
         }
         if (params?.item?.type === "agentMessage" && typeof params.item.text === "string") {
           this.lastFinal = params.item.text;

@@ -933,3 +933,50 @@ describe("텔레그램 전송 — MarkdownV2 거부 시 폴백", () => {
     expect(bodies).toHaveLength(1);
   });
 });
+
+// ── ★상태는 한 자리, 작업은 그 아래★ ──
+describe("codex bridge — 상태 머리글", () => {
+  beforeEach(() => resetChatThreads());
+
+  function spiesWithStatus(steps: Array<{ status?: string; work?: string; id?: string }>) {
+    const edits: string[] = [];
+    const deps: BridgeDeps = {
+      reactMessage: async () => true,
+      sendMessage: async () => 800,
+      editMessage: async (_c, _m, text) => { edits.push(text); return true; },
+      sandbox: "read-only",
+      runTurn: async (o) => {
+        const oa = (o as { onActivity?: (l: string, id?: string) => void }).onActivity;
+        const os = (o as { onStatus?: (l: string) => void }).onStatus;
+        for (const s of steps) {
+          if (s.status) os?.(s.status);
+          if (s.work) oa?.(s.work, s.id);
+          await new Promise((r) => setTimeout(r, 2100)); // 배치 간격을 넘긴다
+        }
+        return { ok: true, reply: "끝", sessionId: "s1", detail: "ok", elapsedMs: 1 };
+      },
+    };
+    return { deps, edits };
+  }
+
+  test("★상태는 쌓이지 않고 맨 윗줄에서 바뀐다★ — 작업은 아래에 남는다", async () => {
+    const { deps, edits } = spiesWithStatus([
+      { status: "🧠 생각하는 중…", work: "실행: ls", id: "e1" },
+      { status: "✍️ 대답하는 중…" },
+    ]);
+    await handleMessage(41, "해줘", 1, deps);
+    const withWork = edits.filter((e) => e.includes("실행: ls"));
+    expect(withWork.length).toBeGreaterThan(0);
+    const last = withWork[withWork.length - 1]!;
+    expect(last.split("\n")[0]).toBe("✍️ 대답하는 중…"); // 머리글은 최신 상태 하나
+    expect(last).toContain("실행: ls");                   // 작업은 남아 있다
+    expect((last.match(/생각하는 중/g) ?? []).length).toBe(0); // 옛 상태는 안 쌓인다
+  });
+
+  test("★대조군 — 상태가 안 오면 머리글은 처음 그대로★", async () => {
+    const { deps, edits } = spiesWithStatus([{ work: "실행: pwd", id: "e1" }]);
+    await handleMessage(42, "해줘", 1, deps);
+    const withWork = edits.filter((e) => e.includes("실행: pwd"));
+    expect(withWork[0]!.split("\n")[0]).toBe(DEFAULT_WORKING_TEXT);
+  });
+});

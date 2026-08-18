@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import {
-  previewOf, appendLine, renderBubble, fits, retryPlan,
+  previewOf, appendLine, renderBubble, fits, retryPlan, iconFor, WORK_ICONS,
   PREVIEW_MAX, BUBBLE_MAX_UNITS, RETRY_WAIT_MAX_SEC,
 } from "./progressLines";
 
@@ -122,5 +122,38 @@ describe("진행 줄 — 항목 id 로 교체", () => {
     const first = appendLine([], "웹 검색", undefined, "exec-1");
     const again = appendLine(first, "웹 검색", undefined, "exec-1");
     expect(again).toBe(first);
+  });
+});
+
+describe("버블 — 머리글은 상태 한 자리, 작업은 그 아래 누적", () => {
+  test("★머리글은 남고 작업은 아래에 쌓인다★ — 상태는 거기서 교체된다", () => {
+    let lines = appendLine([], "실행: a");
+    lines = appendLine(lines, "웹 검색: b");
+    const out = renderBubble("🧠 생각하는 중…", lines);
+    expect(out.split("\n")[0]).toBe("🧠 생각하는 중…");
+    expect(out).toContain("실행: a");
+    expect(out).toContain("웹 검색: b");
+  });
+
+  test("★대조군 — 아직 작업이 없으면 머리글만★ (빈 메시지는 못 보낸다)", () => {
+    expect(renderBubble("⏳ 작업 중…", [])).toBe("⏳ 작업 중…");
+  });
+
+  test("★아이콘은 줄마다 돌아간다★ — 같은 그림이 세로로 반복되면 줄 수를 눈으로 못 센다", () => {
+    let lines = appendLine([], "a");
+    lines = appendLine(lines, "b");
+    lines = appendLine(lines, "c");
+    const icons = renderBubble("H", lines).split("\n").slice(1).map((l) => l.split(" ")[0]);
+    expect(new Set(icons).size).toBe(3);
+    expect(icons[0]).toBe(iconFor(0));
+  });
+
+  test("★아이콘은 자리 기준이라 다시 그려도 같다★ — 편집마다 바뀌면 화면이 요동친다", () => {
+    const lines = appendLine(appendLine([], "a"), "b");
+    expect(renderBubble("H", lines)).toBe(renderBubble("H", lines));
+  });
+
+  test("아이콘 목록보다 줄이 많으면 처음부터 다시 쓴다", () => {
+    expect(iconFor(0)).toBe(iconFor(WORK_ICONS.length));
   });
 });
