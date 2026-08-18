@@ -20,6 +20,7 @@ trigger: schedule recurring work
 
 ## 개념 (실제 구현)
 - **정본 저장**: `team.db`의 `scheduled_job` 테이블 (id·kind·schedule_kind·next_run_at(UTC)·schedule_expr·payload_json·enabled·lock_until…). 실행 이력=`scheduled_job_run`.
+- **여러 잡이 한 과제를 이루면** `scheduled_workflow`가 관계의 정본이다. 잡은 `workflow_id`·`workflow_step_key`·`workflow_step_order`로 소속되며, 제목이나 payload 문자열로 관계를 추론하지 않는다. 회차별 예외는 `scheduled_workflow_exception`에 남긴다.
 - **워커**: b3os 서버가 `startSchedulerWorker`로 틱마다(기본 60초, env `B3OS_SCHEDULER_INTERVAL_MS`로 조정·최소 5초) `next_run_at<=now`인 잡을 lease-claim → 발화 → 재계산. 코드=`src/server/scheduler/core.ts`(`runDueSchedulerJobsOnce`)·`workers/schedulerWorker.ts`.
 - **발화 = 2종 페이로드**: ①`inbox` — `payload_json`의 인박스 봉투를 `acceptInbound`로 삽입(실제 wake/라우팅은 wakeDispatcher, 신규 라우팅 0). ②`exec` — allowlist된 ops 스크립트를 spawn(에이전트 안 깨우고 결정적 작업 직접 수행, 옛 launchd 대체). inbox는 emit+재계산이 단일 트랜잭션(at-most-once), exec는 async라 실행 후 재계산(at-least-once).
 - **잡 종류(kind × schedule_kind)**: `recurring`×`cron`(시·분·요일·월) / `recurring`×`interval`(N분 간격) / `oneshot`×`once`(1회 리마인드).
@@ -44,6 +45,33 @@ trigger: schedule recurring work
 
 ## 등록 방법
 API = `src/server/scheduler/core.ts`. 서버 프로세스 안이나 team.db를 여는 스크립트에서 호출.
+
+### 여러 잡으로 구성된 워크플로
+
+준비→실행→보고처럼 여러 scheduled job이 한 과제를 이루면 먼저 `ensureScheduledWorkflow`로 불변 키를 만들고, 각 잡을 `assignScheduledJobToWorkflow`로 연결한다. `workflow_step_key`는 워크플로 안에서 유일해야 한다.
+
+```ts
+ensureScheduledWorkflow(db, {
+  id: "weekly_self_learning",
+  title: "주간 러닝 세션",
+  timezone: "Asia/Seoul",
+});
+assignScheduledJobToWorkflow(db, prepare.id, "weekly_self_learning", "shared_curation", 10);
+assignScheduledJobToWorkflow(db, session.id, "weekly_self_learning", "self_learning", 20);
+```
+
+한 회차를 건너뛸 때 개별 `next_run_at`을 직접 수정하지 않는다. 팀장 인증 경로에서 아래 API를 호출하면 소속된 활성 잡 중 그 로컬 날짜에 남아 있는 단계를 한 트랜잭션으로 `skipped` 처리하고 다음 슬롯을 기록한다. 같은 날 이미 실행되어 다음 회차로 넘어간 단계는 `alreadyPassedJobIds`로 구분한다. 그 밖의 회차 불일치나 실행 중인 잡이 있으면 전체가 롤백된다.
+
+```http
+POST /team/api/schedules/workflows/weekly_self_learning/occurrences/2026-08-21/skip
+Content-Type: application/json
+
+{"reason":"이번 주 세션 휴무"}
+```
+
+같은 회차 skip 재요청은 idempotent no-op이다. 응답의 `ungroupedActiveJobIds`와 `warnings`는 같은 날짜에 활성 상태지만 워크플로 밖이라 건너뛰지 않은 잡을 알린다. 현재 API와 예외 스키마는 **skip만 지원**한다.
+
+회차 키는 워크플로 시간대의 로컬 날짜 하나다. 따라서 한 워크플로의 단계는 같은 로컬 날짜 안에 있어야 하며, 23:00 준비→다음 날 01:00 보고처럼 자정을 넘는 구성은 현재 모델로 묶지 않는다.
 
 **반복 cron 잡:**
 ```ts

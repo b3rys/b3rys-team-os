@@ -31,6 +31,8 @@ trigger: record a team lesson
 
 금요일 05:00 KST self-learning 세션에서 실행한다. 자동화가 있더라도 파일을 바로 고치는 것이 아니라 후보를 만들고, 필요한 경우 공동 리뷰와 {{OWNER}} 승인 gate를 거친다. 금요일 10:00 KST에는 learning-loop PM이 {{OWNER}}에게 정리된 결과를 메시지로 보낸다.
 
+스케줄 구성의 관계 정본은 `scheduled_workflow.id = weekly_self_learning`이다. 특정 주 회차를 쉬거나 조정할 때 잡 제목으로 검색해 개별 수정하지 말고 `b3os-scheduler`의 workflow occurrence 연산을 사용한다.
+
 1. 입력 수집
    - 지난 1주일 `rules/SHARED.md` 신규 항목과 stale(낡음)/중복 후보
    - Tasks 칸반에서 반복적으로 멈춘 과제, owner 혼선, handoff 실패, 완료 기준 누락

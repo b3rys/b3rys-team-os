@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import type { Database } from "bun:sqlite";
 import { z } from "zod";
-import { getScheduledJob, scheduleReminder } from "../scheduler/core";
+import { getScheduledJob, scheduleReminder, skipWorkflowOccurrence } from "../scheduler/core";
 import { appendAudit } from "../db/queries";
 import { leadActorId, trustedActorFromRequest } from "../lib/opAuth";
 
@@ -30,6 +30,10 @@ const reminderSchema = z
     message: "provide exactly one of run_at or delay_seconds",
     path: ["run_at"],
   });
+
+const workflowSkipSchema = z.object({
+  reason: z.string().trim().min(1).max(500),
+});
 
 function authError(c: Context, auth: ReturnType<typeof trustedActorFromRequest>) {
   const status = (auth.status ?? 401) as 401 | 403 | 503;
@@ -154,6 +158,48 @@ export function createSchedulerRoutes(deps: SchedulerRouteDeps): Hono {
       return c.json({ error: "schedule_forbidden", id }, 403);
     }
     return c.json({ job });
+  });
+
+  r.post("/schedules/workflows/:id/occurrences/:date/skip", async (c) => {
+    const auth = trustedActorFromRequest(c.req.raw, { loopbackDashboardActor: leadActorId(deps.db) });
+    if (!auth.ok || !auth.actor) return authError(c, auth);
+    const actor = auth.actor.actor;
+    if (!isLeadActor(deps.db, actor)) return c.json({ error: "workflow_schedule_forbidden" }, 403);
+    let raw: unknown;
+    try {
+      raw = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid_json" }, 400);
+    }
+    const parsed = workflowSkipSchema.safeParse(raw);
+    if (!parsed.success) return c.json({ error: "schema_validation", issues: parsed.error.issues }, 400);
+    try {
+      const result = skipWorkflowOccurrence(deps.db, {
+        workflowId: c.req.param("id"),
+        occurrenceDate: c.req.param("date"),
+        actor,
+        reason: parsed.data.reason,
+      });
+      return c.json({
+        ok: true,
+        ...result,
+        warnings: result.ungroupedActiveJobIds.length > 0
+          ? [{ code: "ungrouped_active_jobs_in_occurrence", job_ids: result.ungroupedActiveJobIds }]
+          : [],
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      if (detail === "invalid_occurrence_date") return c.json({ error: detail }, 400);
+      if (detail.startsWith("scheduled_workflow_not_active:") || detail.startsWith("scheduled_workflow_has_no_jobs:")) {
+        return c.json({ error: detail }, 404);
+      }
+      if (
+        detail.startsWith("scheduled_workflow_job_not_pending:")
+        || detail.startsWith("scheduled_workflow_occurrence_mismatch:")
+        || detail.startsWith("scheduled_workflow_no_next_run:")
+      ) return c.json({ error: "workflow_occurrence_not_skippable", detail }, 409);
+      throw error;
+    }
   });
 
   r.post("/schedules/:id/cancel", (c) => {
