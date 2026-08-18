@@ -79,9 +79,22 @@ export function removeTablesWithPrefix(toml: string, prefix: string): string {
  */
 export function removeLinesReferencing(toml: string, needle: string): string {
   if (needle === "") return toml;
+  // ★경계까지 보고 비교한다.★ 단순 포함으로 재면 needle 이 `~/.codex` 일 때
+  //   `~/.codex-agents/<팀원>` 을 가리키는 줄까지 같이 걸린다 — 그건 그 팀원 자신의 폴더다.
+  const hit = (line: string): boolean => {
+    let from = 0;
+    for (;;) {
+      const i = line.indexOf(needle, from);
+      if (i === -1) return false;
+      const next = line[i + needle.length];
+      // 경로가 거기서 끝나거나(따옴표·공백 등) 하위 경로로 이어질 때만 같은 경로다.
+      if (next === undefined || next === "/" || !/[A-Za-z0-9._-]/.test(next)) return true;
+      from = i + needle.length;
+    }
+  };
   return toml
     .split("\n")
-    .filter((l) => !(/^\s*[A-Za-z_][A-Za-z0-9_]*\s*=/.test(l) && l.includes(needle)))
+    .filter((l) => !(/^\s*[A-Za-z_][A-Za-z0-9_]*\s*=/.test(l) && hit(l)))
     .join("\n");
 }
 
