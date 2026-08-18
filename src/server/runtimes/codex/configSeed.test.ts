@@ -130,6 +130,24 @@ describe("TOML 편집 도우미", () => {
     expect(out).toContain('B = "/other"');
   });
 
+  test("★그 팀원 자신의 폴더는 안 걷는다★ — 호스트가 ~/.codex 면 ~/.codex-agents/<팀원> 은 남아야 한다", () => {
+    const src = 'A = "/h/.codex"\nB = "/h/.codex-agents/newbie"\nC = "/h/.codexfoo"\nD = "/h/.codex/sub"\n';
+    const out = removeLinesReferencing(src, "/h/.codex");
+    expect(out).not.toContain("A =");        // 그 경로 자체
+    expect(out).not.toContain("D =");        // 하위 경로
+    expect(out).toContain('B = "/h/.codex-agents/newbie"'); // ★다른 폴더다★
+    expect(out).toContain('C = "/h/.codexfoo"');            // 이름만 비슷한 것
+  });
+
+  test("★최상위 키 제거는 [profiles.*] 안까지 보지 않는다★ — 지금 계약의 경계를 적어둔다", () => {
+    // removeTopLevelKey 는 첫 테이블 헤더 앞만 본다. 프로파일 테이블 안에 정책 키가 있으면 남는다.
+    // 지금 호스트 설정에는 그런 프로파일이 없어 무해하지만, 생기면 이 시험이 그 사실을 알려준다.
+    const src = 'sandbox_mode = "x"\n\n[profiles.dev]\nsandbox_mode = "y"\n';
+    const out = removeTopLevelKey(src, "sandbox_mode");
+    expect(out).not.toContain('sandbox_mode = "x"');
+    expect(out).toContain('sandbox_mode = "y"'); // ★남는다 — 알고 있는 경계다★
+  });
+
   test("빈 needle 로는 아무것도 안 지운다 — 실수로 전체가 날아가면 안 된다", () => {
     const src = 'A = 1\nB = 2\n';
     expect(removeLinesReferencing(src, "")).toBe(src);

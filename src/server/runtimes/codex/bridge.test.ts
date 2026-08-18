@@ -386,6 +386,7 @@ describe("발신자 게이트(allowlist) — parseAllowFrom + 통과 판정", ()
 // ★누른 뒤 answerCallbackQuery 를 반드시 보내야 한다★ — 안 보내면 텔레그램이 계속 '로딩중' 을 돌린다
 // (실제로 그 증상이 났다: "눌러도 로딩중 뜨고 반응도 없어").
 
+import { createSerialTurnQueue } from "./serialTurnQueue";
 import { handleApprovalCallback } from "./bridge";
 import { Database as CbDb } from "bun:sqlite";
 import { migrate as cbMigrate } from "../../db/migrate";
@@ -631,4 +632,65 @@ describe("codex bridge — 진행 표시", () => {
     expect(calls.edits.length).toBeGreaterThan(1);
     expect(calls.edits[calls.edits.length - 1]!.text).toBe("최종 답변");
   });
+});
+
+// ── ★턴이 도는 도중에 눌러도 처리되는가★ ──
+//
+// 이것이 #334 가 고친 것의 핵심이다. 예전에는 폴링 루프가 턴을 인라인으로 기다려서
+// 버튼 입력을 제때 가져오지 못했고, 승인 요청은 codex 로 전달되지 못한 채 만료됐다
+// (실측: 2026-08-13 11:35 ~ 08-18 11:18 구간 8건 전부 expired · 그중 6건이 300~302초.
+//  사람이 누른 기록은 6건 있었으나 codex 로 전달된 건은 0건 — state != 'delivered' 기준).
+//
+// ★라이브 증거★: 고친 뒤 prm_93e07c50a14b4eb989 이 생성 7초 만에 delivered 됐다
+// (2026-08-18 12:29 · approver=GD). 그 구간 이후 첫 전달이다.
+//
+// ★여기서 재는 것★: 턴이 아직 도는 중에 콜백이 들어오면 그 자리에서 처리되고 DB 가 실제로 바뀐다.
+// ★여기서 재지 않는 것★: 폴링 루프가 그 콜백을 실제로 가져오는지. 루프는 무한 루프라 단위 시험으로
+//   돌릴 수 없다 — 그 부분은 라이브 로그로 확인했다(턴의 답이 나가기 전에 다음 메시지가 수신됨).
+test("★턴이 도는 도중에 눌러도 그 자리에서 처리된다★ — 이게 안 되면 승인은 300초 뒤 만료된다", async () => {
+  const { dbPath, id } = pendingRequest();
+  const turns = createSerialTurnQueue();
+
+  let turnFinished = false;
+  turns.enqueue(async () => {
+    await new Promise((r) => setTimeout(r, 800)); // 도는 중인 턴
+    turnFinished = true;
+  });
+
+  // ★턴이 끝나기 전에★ 버튼이 눌린 상황.
+  const out = await handleApprovalCallback(
+    "T",
+    { id: "cb-mid", data: `pg1:${id}`, from: { id: OWNER }, message: { message_id: 7, chat: { id: OWNER } } },
+    new Set([OWNER]),
+    { dbPath, fetchFn: spyFetch([]) },
+  );
+
+  expect(turnFinished).toBe(false); // 아직 턴은 돌고 있다
+  expect(out).not.toBe("unauthorized");
+  expect(out).not.toBe("stale");
+
+  const db = new CbDb(dbPath);
+  const row = db.prepare("SELECT status FROM permission_request WHERE id = ?").get(id) as { status: string };
+  db.close();
+  expect(row.status).not.toBe("pending"); // ★턴이 도는 동안 실제로 결정됐다★
+
+  await turns.drain();
+  expect(turnFinished).toBe(true);
+});
+
+test("★대조군 — 대기열이 콜백 처리를 늦추지 않는다★ (턴을 기다렸다면 이 시간이 턴 길이만큼 늘어난다)", async () => {
+  const { dbPath, id } = pendingRequest();
+  const turns = createSerialTurnQueue();
+  turns.enqueue(async () => { await new Promise((r) => setTimeout(r, 1500)); });
+
+  const t0 = Date.now();
+  await handleApprovalCallback(
+    "T",
+    { id: "cb-fast", data: `pg1:${id}`, from: { id: OWNER } },
+    new Set([OWNER]),
+    { dbPath, fetchFn: spyFetch([]) },
+  );
+  const elapsed = Date.now() - t0;
+  expect(elapsed).toBeLessThan(1000); // 턴(1500ms)을 기다리지 않았다
+  await turns.drain();
 });
