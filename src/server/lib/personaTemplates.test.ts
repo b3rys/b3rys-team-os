@@ -1,8 +1,8 @@
 // Claude 전용 소통 섹션(SECTION_CLAUDE_COMMS) 주입 — idempotency + runtime-split 회귀 가드.
 // churn 버그(comms가 마지막 섹션이면 매 실행 재기록) 재발 방지.
-import { test, expect } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import { afterEach } from "bun:test";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { resolveMembersRoot, MEMBERS_ROOT, assertNotLiveMemberFsUnderTest } from "./personaTemplates";
@@ -43,6 +43,51 @@ test("runtime-split: buildAgentsMd가 Skill Workshop(openclaw 전용)을 hermes�
   const MARKER = "OpenClaw's own Skill Workshop";
   expect(buildAgentsMd({ ...claudeInput, runtime: "openclaw" }).includes(MARKER)).toBe(true);
   expect(buildAgentsMd({ ...claudeInput, runtime: "hermes_agent" }).includes(MARKER)).toBe(false);
+});
+
+/**
+ * ★팀원이 실제로 읽는 파일에 판별 축이 살아 있어야 한다.★
+ *
+ * 정본(TEAM-OS 템플릿) 쪽만 검사하면 ★여기 문장을 지워도 초록★ 이다 — 리뷰에서 실증됐다
+ * (판별 축을 지운 뮤턴트로 60 pass / 0 fail 재현). 정본과 산출물은 다른 파일이고,
+ * 팀원 런타임이 읽는 것은 ★산출물★ 이다.
+ *
+ * 2026-08-17 실측: 기준이 예시 나열뿐이라 한 런타임이 ★우리 저장소 PR 리뷰★ 를 외부 전송으로 읽고
+ * 하루에 여러 번 멈춰 섰다. 예시를 더하는 방식은 다음 사례에서 또 멈춘다 — 그래서 축을 박았다:
+ * ★누가 받는가★ 이고, 기록이 공개로 보이는지가 아니다.
+ */
+describe("핵심룰 — '외부 전송' 판별 축", () => {
+  const approvalBullet = (md: string): string =>
+    md.split("\n").find((l) => l.includes("external send")) ?? "";
+
+  for (const runtime of ["openclaw", "hermes_agent"] as const) {
+    test(`${runtime} 산출물에 판별 축이 들어간다 — 단어만 남으면 뜻이 매번 다시 만들어진다`, () => {
+      const bullet = approvalBullet(buildAgentsMd({ ...claudeInput, runtime }));
+      expect(bullet, "★승인 게이트 줄을 못 찾았다★").toContain("external send");
+      expect(bullet, "★판별 축(누가 받는가)이 없다★").toMatch(/who receives|recipient/);
+      expect(bullet, "★저장소 안 작업이 외부 전송이 아니라는 것이 빠졌다★").toMatch(/repo|PR/);
+    });
+  }
+
+  test("★대조군 — 이 검사는 산출물을 본다★ (정본만 고치고 산출물을 안 고치면 빨간불)", () => {
+    const bullet = approvalBullet(buildAgentsMd({ ...claudeInput, runtime: "openclaw" }));
+    expect(bullet.length, "★산출물에서 그 줄 자체가 사라졌다★").toBeGreaterThan(0);
+  });
+
+  /**
+   * 정본(TEAM-OS 템플릿) 쪽도 같은 축을 요구한다.
+   * ★읽는 파일은 `TEAM-OS.template.md`(git 추적) 다★ — `TEAM-OS.md` 는 gitignore 된 렌더
+   * 산출물이라 워크트리·새 클론·CI 에 없다. 산출물을 읽는 검사는 환경에 따라 안 돈다.
+   */
+  test("정본 템플릿에도 판별 축이 있다 — 산출물만 고치면 다음 렌더에 되돌아간다", () => {
+    const template = readFileSync(
+      join(import.meta.dir, "../../../rules/TEAM-OS.template.md"),
+      "utf8",
+    );
+    const bullet = template.split("\n").find((l) => l.includes("Approval gate")) ?? "";
+    expect(bullet, "★승인 게이트 줄을 못 찾았다★").toContain("external send");
+    expect(bullet, "★판별 축(누가 받는가)이 없다★").toMatch(/who receives|recipient/);
+  });
 });
 
 test("injectClaudeComms idempotent — 일반(뒤에 ## 있음)", () => {
