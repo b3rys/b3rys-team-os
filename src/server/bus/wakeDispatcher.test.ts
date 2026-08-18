@@ -48,7 +48,7 @@ import {
 import type { PendingDispatchRow } from "./types";
 import { HERMES_TURN_TIMEOUT_MS } from "../lib/hermesBridge";
 
-// ★hermes lease/grace 사다리 (2026-07-16, GD)★ — blocking-wake 런타임(openclaw·hermes)의 claim 은
+// ★hermes lease/grace 사다리 (2026-07-16)★ — blocking-wake 런타임(openclaw·hermes)의 claim 은
 //   turn cap 보다 길어야 recoverStaleClaims 가 턴 도중 리셋하지 않는다(안 그러면 중복보고).
 describe("lease/grace ladder — blocking-wake 런타임은 turnCap < lease < grace", () => {
   test("★hermes: turnCap < lease < grace 자동 성립 (중복 방지 불변식)", () => {
@@ -578,7 +578,7 @@ describe("checkPingpong — anti-pingpong guard", () => {
     expect(v.reason).toContain("messages=");
     expect(v.reason).toContain("왕복 횟수가 아니다");
     expect(v.reason).not.toContain("rounds=");
-    // ★환산 횟수를 붙이지 않는다★ — 홀수에서 과소표시해 새 오해를 만든다(Codex 리뷰).
+    // ★환산 횟수를 붙이지 않는다★ — 홀수에서 과소표시해 새 오해를 만든다.
     expect(v.reason).not.toMatch(/왕복 약 \d+/);
   });
 

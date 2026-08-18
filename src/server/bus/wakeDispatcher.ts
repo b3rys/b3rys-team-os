@@ -176,11 +176,11 @@ const ENV_ALLOWLIST: ReadonlySet<string> | null = BUS_DISPATCH_AGENTS_RAW
   ? new Set(BUS_DISPATCH_AGENTS_RAW.split(",").map((s) => s.trim()).filter(Boolean))
   : null;
 
-// 동적 보강 allowlist 파일(2026-06-10 GD): 영입 시 재시작 없이 에이전트를 wake 대상에 추가하기 위함.
+// 동적 보강 allowlist 파일(2026-06-10): 영입 시 재시작 없이 에이전트를 wake 대상에 추가하기 위함.
 // env(BUS_DISPATCH_AGENTS, plist·재시작 필요) ∪ 이 파일(쓰면 즉시 반영). mtime 캐시로 매 dispatch 읽기 저렴.
 // 이게 "영입=클릭/자동, 터미널 0"의 인프라 — 활성화가 이 파일에 에이전트를 추가하면 바로 깨워짐.
 // ★경로를 call-time+env override로 — 테스트가 실 운영파일(var/bus-wake-extra.txt) 읽어 fixture(bill/codex/steve)가
-// 운영 allowlist(lui/devon/…)에 밀려 allowlist_not_enabled 되던 격리 갭(Codex 진단, 테스트 격리 게이트).
+// 운영 allowlist(lui/devon/…)에 밀려 allowlist_not_enabled 되던 격리 갭(테스트 격리 게이트).
 export function busWakeExtraFile(): string {
   return process.env.TEAMOS_BUS_WAKE_EXTRA_FILE ?? `${process.cwd()}/var/bus-wake-extra.txt`;
 }
@@ -322,7 +322,7 @@ function makeCludeAdapter(db: Database): WakeAdapter {
         // On execute timeout, injectPrompt returns { ok: false, maybePartial: true }.
         // We surface this as a special error so the caller applies a cooldown backoff
         // (not an immediate retry — partial paste risk).
-        // case 6: Bill 위임 + direct_to_gd → demis 등 claude_channel 수신자가 버스 ack 대신
+        // case 6: 위임 + direct_to_gd → claude_channel 수신자가 버스 ack 대신
         // GD 1:1 DM 에 자기 reply 도구로 직접 보고하도록 directReport 를 넘긴다.
         const directToGd = resolveDirectToGd(row, ownerDmChatId(db));
         // ★팀원간 directed 는 "telegram" 으로 넘기지 않는다★ — 넘기면 tmuxInject 가 tg- thread 에서
@@ -380,19 +380,19 @@ function makeCludeAdapter(db: Database): WakeAdapter {
 }
 
 /**
- * case 6 (2026-06-05, DM 전환 2026-07-08): direct_to_gd — Bill 등이 팀원에게 위임하면서 "수신자가
+ * case 6 (2026-06-05, DM 전환 2026-07-08): direct_to_gd — 위임자가 팀원에게 위임하면서 "수신자가
  * GD 에게 직접 visible 응답하라"고 표시한 directed 메시지인지 판별. 핵심은 자연어 추측이 아니라 라우팅 계약:
  * 발신자(LLM)가 meta.reply_mode="direct_to_gd" 를 붙인다. 타겟은 ★GD 1:1 DM(owner_chat_id)★ — 팀방 유무 무관.
  * 수신자는 본문 해석 없이 이 플래그만 보고 GD DM 에 직접 응답한다. (source_thread_id 는 무시 — DM 이 기본.)
  * tg- thread 로 이미 온 메시지엔 적용 안 함(이미 텔레그램 경로). 반환: {groupId=owner DM chat_id, threadId} or null.
  */
-// ★2026-07-08 GD: direct_to_gd 기본 타겟 = GD 1:1 DM(owner_chat_id). 그룹 아님.★
+// ★제품 결정 2026-07-08: direct_to_gd 기본 타겟 = GD 1:1 DM(owner_chat_id). 그룹 아님.★
 // 이유: 팀방 없는 퍼블릭 사용자도 릴레이 가능해야 하고, GD-facing 보고를 그룹에 노출하면 footgun.
 // 반환 groupId 필드 = 이제 "GD DM chat_id" (봇이 자기 토큰으로 그 DM에 post). source_thread_id 는 무시(호환).
 /** 수집 fan-out ask 인가 (meta.collect === true). ★그룹 thread 여도 답을 버스로 받아야★ 서버가
  *  collection_reply 로 집계할 수 있다. 없으면 tmuxInject 의 isTelegramGroup 분기가 이겨 수신자가
  *  telegram 그룹에 답하고, 그 답은 버스에 안 남아 collection 이 영원히 미완 → 종합에서 누락
- *  (2026-07-12 실측: 그룹 thread 수집에서 dbak 이 그룹에 "가을"이라 답했으나 서버는 미응답 처리).
+ *  (2026-07-12 실측: 그룹 thread 수집에서 기여자가 그룹에 답했으나 서버는 미응답 처리).
  *  send.sh --collect 가 찍는 JSON boolean true 만 신뢰(문자열 "true" 아님). */
 /**
  * ★팀원 사이의 directed 메시지인가 — 라우팅의 단일 판정 기준.★
@@ -402,7 +402,7 @@ function makeCludeAdapter(db: Database): WakeAdapter {
  * WHY (2026-07-12 라이브 실측):
  *   지금까지 "답을 어디에 쓸지" 를 ★thread 이름(tg- 접두사)★ 으로 정했다. 그런데 텔레그램에서 시작된
  *   대화는 ★전부★ tg- 를 달고, 그 꼬리표는 ★답장·재위임을 이어가도 계속 따라다닌다.★
- *   → 팀장이 단톡방에서 시킨 일을 빌이 스티브에게 재위임하면, 스티브는 tg- 를 물려받아
+ *   → 단톡방에서 시작된 일을 한 팀원이 다른 팀원에게 재위임하면, 그 팀원은 tg- 를 물려받아
  *     ★"단톡방에 답해라"★ 로 지시된다. 그런데 ★봇이 방에 올린 글은 telegramCapture 가 무시한다(is_bot —
  *     봇끼리 무한루프 방지. 그 자체는 옳다).★ → DB 에 한 줄도 안 남는다 → ★위임자는 답을 영영 못 받는다.★
  *   에러 0, 경고 0. 팀 단톡방 thread 의 팀원간 directed 메시지 ★155건★ 이 이 경로를 탔다.
@@ -455,9 +455,9 @@ export function resolveDirectToGd(row: PendingDispatchRow, ownerChatId?: string)
   // DM 까지 보내면 ★중복 보고★ 다. (중복 없는 쪽을 택한다.
   //   이건 2026-07-08 case-6 계약과 같은 동작이라 회귀도 없다.)
   //
-  //   ★단, '이름 앞글자' 가 아니라 '방이 어디냐' 라는 ★사실★ 로 묻는다.★ (codex 리뷰)
+  //   ★단, '이름 앞글자' 가 아니라 '방이 어디냐' 라는 ★사실★ 로 묻는다.★
   //   예전엔 여기서 `thread_id.startsWith("tg-")` 를 ★직접★ 봤다 — 같은 판단이 코드 4곳에 복붙돼 있었고,
-  //   그중 하나(inbox.ts)가 오늘 36건을 삼켰다. ★판단이 여러 벌이면 언젠가 갈린다.★
+  //   그중 하나(inbox.ts)가 36건을 삼켰다. ★판단이 여러 벌이면 언젠가 갈린다.★
   //   → 정본은 resolveThreadKind() 하나다. 방 이름 규칙이 바뀌어도 고칠 곳은 거기 한 군데다.
   if (resolveThreadKind(row.thread_id) === "telegram_group") return null;
   if (!row.meta_json) return null;
@@ -542,14 +542,14 @@ function makeOpenclawAdapter(db: Database, agents: () => AgentRecord[]): WakeAda
       // ★수집 fan-out 은 tg- thread(그룹)여도 directed(버스 복귀) 경로로 보낸다★ — 그룹 경로
       //   (injectOpenclawTelegramTurn)는 답을 텔레그램 그룹에만 올리고 ★버스 row 를 안 남겨서★
       //   collection_reply 집계가 불가 → openclaw 기여자(devon/brief/codex)가 ★영구 missing★
-      //   (codex 리뷰 blocker 2, 2026-07-12). fan-out ask 는 그룹 게시가 아니라 directed 함수호출이다.
+      //   (2026-07-12 실측). fan-out ask 는 그룹 게시가 아니라 directed 함수호출이다.
       //   tg- + collect 는 resolveDirectToGd 가 null(354행: tg- 는 早期 return)이라 자연히 directed 로 흐른다.
       // ★판정을 thread 접두사가 아니라 메시지 종류로.★ 팀원간 directed 는 tg- 여도 ★버스 복귀★.
       //   전에는 isCollectFanout(--collect 가 붙었나) 으로 예외를 뒀다 — ★그건 반창고였다.★
       //   --collect 없는 일반 위임은 그대로 "그룹에 답해라" 로 새어 ★답이 증발★했다.
       // ★'방이 어디냐' 는 정본 하나(resolveThreadKind)에 묻는다★ — 같은 판단을 복붙하지 않는다.
       if (resolveThreadKind(row.thread_id) !== "telegram_group" || isTeammateDirected(row)) {
-        // case 6 (direct_to_gd): Bill 이 위임하며 "GD 그룹에 직접 응답" 플래그를 단 directed 메시지면,
+        // case 6 (direct_to_gd): 위임자가 "GD 그룹에 직접 응답" 플래그를 단 directed 메시지면,
         // 버스 ack 대신 GD 1:1 DM 에 visible reply 로 올린다. (injectOpenclawTelegramTurn 가 답을 DM 에 전송)
         const directToGd = resolveDirectToGd(row, ownerDmChatId(db));
         if (directToGd) {
@@ -589,7 +589,7 @@ function makeOpenclawAdapter(db: Database, agents: () => AgentRecord[]): WakeAda
           }
         }
         // directed(지정) 버스 메시지: 그룹에 노출하지 않고 에이전트를 깨운다. 에이전트가 발신자에게
-        // 버스로 ack/응답한다. (기존 inbox-only 는 directed handoff 가 openclaw 에이전트한테 안 닿는 버그였음 — GD 2489)
+        // 버스로 ack/응답한다. (기존 inbox-only 는 directed handoff 가 openclaw 에이전트한테 안 닿는 버그였음)
         // ★봉투 kind★ (2026-07-15) — hermes hReplyRoute(662~707) 와 ★동일 판정★. 여기는 directToGd 가
         //   null 인 else 분기라 direct_to_gd 는 이미 위에서 갈렸다. 남은 건 두 가지다:
         //   system 알림이면 reply_to 있으면 teammate(그 사람에게), 없으면 notice(답할 곳 없음); 아니면 teammate.
@@ -611,7 +611,7 @@ function makeOpenclawAdapter(db: Database, agents: () => AgentRecord[]): WakeAda
             hopCount: row.hop_count,
             kind: oDirectedKind,
             });
-          // ★성공과 실패가 같은 코드를 쓰면 안 된다★ (리사 실측, 2026-07-29)
+          // ★성공과 실패가 같은 코드를 쓰면 안 된다★ (실측 2026-07-29)
           //   ok 가 false 여도 detail 이 "…injected" 라서 ★실패 통지에 성공 코드가 박혀 나갔다.★
           //   받는 사람은 원인을 알 수 없고, 기록으로도 성공·실패를 못 가른다.
           return ok
@@ -712,7 +712,7 @@ function makeHermesAdapter(db: Database, agents: () => AgentRecord[]): WakeAdapt
         //   ★"보낸 것만 말한 것이다."★  → 침묵에 토큰이 필요없고, 수신자를 서버가 추측하지 않는다.
         //   (claude 가 원래 이렇게 돌고 있었고, 그래서 이 병이 없었다.)
         // ★답이 어디로 가야 하는지는 ★여기가 안다★. 주입문이 추측하게 두지 않는다.★
-        //   claude 는 이미 :299 에서 resolveDirectToGd 로 판정하는데 ★hermes 만 그 줄이 없었다★ (codex 리뷰).
+        //   claude 는 이미 :299 에서 resolveDirectToGd 로 판정하는데 ★hermes 만 그 줄이 없었다★.
         //   그래서 direct_to_gd 위임을 받아도 hermes 는 그걸 모르고 위임자에게 답했다.
         //   여기는 ★버스 경로★ 다 — 답은 물어본 팀원에게 1:1 로 간다 (단톡방이 아니다).
         const hDirectToGd = resolveDirectToGd(row, ownerDmChatId(db));
@@ -765,10 +765,10 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Pro
 // ─── Team context capture ─────────────────────────────────────────────────────
 
 /**
- * ★그룹 스레드에서 collector 가 봐야 하는 최소한 — ★자기 대화★.★ (2026-07-13, Steve)
+ * ★그룹 스레드에서 collector 가 봐야 하는 최소한 — ★자기 대화★.★ (2026-07-13)
  *
  * ═══ 왜 필요한가 ═══
- * 내 ctxfix 는 `tg-` 그룹을 ★일부러 제외★ 했다 ("팀방 전체는 광범위하다" — 3,072건·6주).
+ * 앞선 판은 `tg-` 그룹을 ★일부러 제외★ 했다 ("팀방 전체는 광범위하다" — 3,072건·6주).
  * ★그 대가가 이거다★ (라이브 실측): 그룹에서 collector 가 ★눈을 감고 있다★ →
  *   ① ★재팬아웃★ (자기가 이미 물은 걸 모른다)
  *   ② ★"아직 안 모였다"★ (기여자가 답한 걸 모른다 — 둘 다 답했는데!)
@@ -793,7 +793,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Pro
  *       [dex]  종합: steve와 dbak 모두 가을을…      ← ★이게 자기 보고인데★
  *   ★자기가 보낸 것과 남이 보낸 것이 똑같이 생겼다.★ 수신자도 안 보인다.
  *   → 6줄 중에서 "저 중 하나가 내 보고다" 를 ★알아채야만★ 룰을 지킬 수 있었다.
- *   ★"읽고 판단해라" 고 시켜놓고, 읽기 어렵게 만들어 놨다.★ (오늘 이 패턴만 열 번째)
+ *   ★"읽고 판단해라" 고 시켜놓고, 읽기 어렵게 만들어 놨다.★
  *
  * ═══ 그래서 ═══
  *   · ★방향을 표시한다★: `[너 → bill]` / `[dbak → 너]` — 누가 누구에게인지 한눈에.
@@ -823,7 +823,7 @@ export function renderContextLine(
   const body = cut ? `${full.slice(0, opts.maxChars)} …(잘림: 원문 ${full.length}자)` : full;
   const mine = m.from_agent_id === agentId;
   // ★언제 일인지 안 알려주고 있었다.★
-  //   ★맞다 — 오래됐다는 걸 ★모르게★ 주면 나쁘다.★ 3일 전 대화를 지금 일로 착각하면 엉뚱한 걸 실행한다.
+  //   ★오래됐다는 걸 ★모르게★ 주면 나쁘다.★ 3일 전 대화를 지금 일로 착각하면 엉뚱한 걸 실행한다.
   //   ★알려주면 팀원이 판단한다.★ ("이건 어제 얘기구나") — 빈 문맥보다 낫고, 무표시 옛 문맥보다 안전하다.
   // ★줄마다 출처를 밝힌다★.
   //   한 스레드에 방 글·버스 DM·시스템 통지가 ★섞여서★ 들어오는데 줄 모양이 같았다.
@@ -839,7 +839,7 @@ const CTX_HOURS = Number(process.env.CTX_HOURS ?? 24);   // ★24시간. 넘으�
 const CTX_MSG_CHARS = Number(process.env.CTX_MSG_CHARS ?? 800);
 const CTX_TOTAL_CHARS = Number(process.env.CTX_TOTAL_CHARS ?? 8000);
 // ★단톡방(그룹 스레드) 전용 상한★: 그룹방은 스레드 하나에 전 과제가 섞여, 12건·24h 를
-//   그대로 주면 판교·증시·민재 인사가 통째 붙어 팀원이 ★옛 일을 지금 일로 착각★한다(Ames·codex 실측).
+//   그대로 주면 판교·증시·민재 인사가 통째 붙어 팀원이 ★옛 일을 지금 일로 착각★한다(실측).
 //   → 그룹방만 좁힌다: 자기것만 · 6시간 · 5건. (수집·작업 전용 스레드는 tg- 가 아니라 그대로 full)
 const CTX_HOURS_GROUP = Number(process.env.CTX_HOURS_GROUP ?? 6);
 // ★이 주입은 '내 일 이어가기' 용이다.★ 답하는 질문: ★"내가 하던 일이 어디까지 왔나".★
@@ -897,7 +897,7 @@ export function buildTeamContext(db: Database, threadId: string, agentId?: strin
 
     // ★내가 이미 한 일 — 나열에 묻히지 않게 따로 못박는다.★
     // ★"물어본 사람" 과 "보고한 사람" 을 수신자만으로는 못 가른다★ — 그래서 ★있는 그대로★ 만 말한다.
-    //   (요청자 bill 을 "이미 물어본 사람" 이라고 하면 그게 또 다른 거짓말이다)
+    //   (요청자를 "이미 물어본 사람" 이라고 하면 그게 또 다른 거짓말이다)
     const mine = recent.filter((m) => m.from_agent_id === agentId);
     if (mine.length === 0) return lines.join("\n");
     const sentTo = [...new Set(mine.map((m) => m.to_agent_id ?? "?"))];
@@ -925,7 +925,7 @@ export function buildTeamContext(db: Database, threadId: string, agentId?: strin
  *
  * Lock-busy (deferred): does NOT increment retry_count; resets pending with 2-3s backoff.
  */
-// dispatchRow internals split into 3 stages (2026-06-06 strangler refactor, Bill claim-cut spec):
+// dispatchRow internals split into 3 stages (2026-06-06 strangler refactor, claim-cut spec):
 //   buildDispatchPlan → invokeWakeAdapter → recordDispatchOutcome.
 // CLAIM stays in the worker/tick (pendingDispatch→markDispatching→inFlight→recoverStaleClaims) —
 // its atomicity / inFlight self-heal is NEVER pulled into dispatchRow.
@@ -1104,7 +1104,7 @@ function buildDispatchPlan(
       reason: verdict.reason,
       from: row.from_agent_id,
     });
-    // ★막았으면 보낸 사람에게 말해준다.★ 이게 없어서 오늘 4건이 조용히 사라졌다.
+    // ★막았으면 보낸 사람에게 말해준다.★ 이게 없으면 발신이 조용히 사라진다(실측 4건).
     notifySenderOfBlock(db, row, agents, verdict.reason);
     return { kind: "skip" };
   }
@@ -1208,7 +1208,7 @@ function buildDispatchPlan(
 
   // Pick adapter — runtime→adapter registry (P1a: 삼항식을 Map 레지스트리로, 동작 동일).
   // 새 런타임 추가 = 이 Map에 한 줄. 미지원 runtime → undefined → null (기존 삼항식 final ': null'과 동일).
-  // Map 사용(Steve·Codex 리뷰 채택): plain object[runtime]은 'constructor'/'__proto__'/'toString' 등
+  // Map 을 쓰는 이유: plain object[runtime]은 'constructor'/'__proto__'/'toString' 등
   //   상속 프로퍼티가 truthy라 `?? null`이 안 잡는 신규 위험 → Map.get은 구조적으로 차단.
   //   현재 runtime은 migrate.ts CHECK enum으로 제약돼 실질 안전하나, 그 불변식이 드리프트(수동 insert·
   //   agents.json 로드·향후 마이그레이션)해도 안전하게 + 설계문서 RuntimeAdapter REGISTRY의 씨앗.
@@ -1243,8 +1243,8 @@ function buildDispatchPlan(
   //
   // ═══ 무엇이 잘못됐었나 (2026-07-13 실측) ═══
   // ★예전엔 hermes 가 권한이 없어서 문맥을 ★빈 문자열★ 로 받았다 (그래서 종합을 못 했다).★
-  // → 기여자 둘이 각각 답해도 hermes 는 ★자기를 깨운 한 건만★ 보였다 → "스티브 1건뿐" → ★종합 불가.★
-  // ★codex 가 종합을 잘한 건 자가발신 때문만이 아니라 이 권한이 있어서였다.★
+  // → 기여자 둘이 각각 답해도 hermes 는 ★자기를 깨운 한 건만★ 보였다 → "기여자 1건뿐" → ★종합 불가.★
+  // ★자가발신 런타임이 종합에 성공한 것도 이 권한이 있어서다 — 자가발신만으로는 안 된다.★
   //
   // ★그런데 이 게이트는 두 가지를 한 덩어리로 막고 있었다★:
   //   · `tg-` 그룹 스레드 문맥 = ★팀방 전체 대화★ → 광범위 가시성 → ★게이트가 맞다★
@@ -1256,7 +1256,7 @@ function buildDispatchPlan(
   //   · ★그룹방은 어차피 다 같이 있는 방이다.★ 거기 오간 말을 그 방 사람에게 숨길 이유가 없다.
   //   · 토큰 부담? ★실측: 최근 12건 = 총 761자.★ 부담이 아니다.
   //   · 그리고 게이트에 걸린 팀원들이 받던 대체 문맥은
-  //     ★방향 표시도, '네가 보낸 것' 마커도 없는 옛 형식이었다★ — 오늘 고친 그 문제를 그대로 갖고 있었다.
+  //     ★방향 표시도, '네가 보낸 것' 마커도 없는 옛 형식이었다★ — 위에서 고친 그 문제를 그대로 갖고 있었다.
   //   → ★깨워진 스레드의 문맥은 전 팀원에게, 같은 형식으로.★ (full_context 특권 불필요)
   //   (팀 전체·타 스레드 가시성은 별개다 — 여긴 ★네가 깨워진 그 대화★ 만 준다)
   const teamContext = buildTeamContext(db, row.thread_id, row.agent_id);
@@ -1280,7 +1280,7 @@ async function invokeWakeAdapter(
   }
 }
 
-// 런타임별 웨이크-실패 정책 (P1a: runtime 문자열 분기를 선언적 정책 맵으로 — Steve·Codex 리뷰 방향).
+// 런타임별 웨이크-실패 정책 (P1a: runtime 문자열 분기를 선언적 정책 맵으로).
 // "expire_no_retry": inject가 취소불가/부분 side-effect 가능(openclaw) → exception·returned-false·timeout
 // 3경로 모두 동일 terminal expire로 닫아 중복 가시응답 방지. preservesInbox.
 // "retry": 깨끗한 실패 → markFailed 백오프(claude maybePartial은 아래 별도 cooldown 분기, hermes clean).
@@ -1289,7 +1289,7 @@ async function invokeWakeAdapter(
 type WakeFailurePolicy = "expire_no_retry" | "retry";
 const RUNTIME_WAKE_FAILURE_POLICY = new Map<string, WakeFailurePolicy>([
   ["openclaw", "expire_no_retry"],
-  // ★hermes 도 재시도하면 안 된다.★ (2026-07-13 — 적대 리뷰가 내 1차 fix 를 반증했다)
+  // ★hermes 도 재시도하면 안 된다.★ (2026-07-13 — 적대 리뷰가 1차 fix 를 반증했다)
   //   openclaw 와 같은 이유다: ★턴이 멱등이 아니다.★ hermes 는 턴 ★도중에★ send.sh 로 버스에 직접 쓴다
   //   (실측: 01:07:16 hermes→steve 위임 / 01:07:17 hermes→dbak 위임 / 01:07:54 그 턴이 실패).
   //   그 턴을 재시도하면 hermes 는 -z one-shot 이라 ★이전 시도의 기억이 없다★ → ★같은 사람에게 다시 위임★
@@ -1309,17 +1309,17 @@ function wakeFailurePolicy(runtime: string): WakeFailurePolicy {
 /**
  * ★차단되면 발신자에게 알린다.★
  *
- * 무슨 일이 있었나: 빌이 스티브에게 보낸 4건이 pingpong 가드에 막혔다. 그런데
+ * 무슨 일이 있었나: 한 팀원이 다른 팀원에게 보낸 4건이 pingpong 가드에 막혔다. 그런데
  *   · 발신자 쪽 — send.sh 가 ★"✓ sent" 를 찍었다★
  *   · 수신자 쪽 — ★아무것도 안 왔다★
  *   · ★양쪽 다 몰랐다★
- * 그래서 빌이 스티브를 무응답으로 판단하고 ★리뷰를 다른 사람에게 재배치했다.★
- * 스티브는 그 4건을 몇 시간 뒤 DB 에서 처음 봤다.
+ * 그래서 발신자가 수신자를 무응답으로 판단하고 ★리뷰를 다른 사람에게 재배치했다.★
+ * 수신자는 그 4건을 몇 시간 뒤 DB 에서 처음 봤다.
  *
  * ★차단 자체는 그대로 둔다.★ 고치는 건 침묵이다 — 알려주면 발신자가 새 스레드로 옮겨
  * 계속할 수 있다(체인은 부모가 없으면 0으로 리셋되므로 실제로 통한다).
  *
- * ★한도를 올리는 것은 답이 아니다★ — 2→6 으로 한 번 올렸고 오늘 6에서 또 걸렸다.
+ * ★한도를 올리는 것은 답이 아니다★ — 2→6 으로 올린 뒤 6에서 또 걸렸다.
  * 숫자만 올리면 다음엔 그 숫자에서 걸린다. 세 번째 반복을 하지 않는다.
  *
  * ★통보가 같은 가드에 안 걸리는 이유★
@@ -1392,7 +1392,7 @@ export function notifySenderOfBlock(
  *
  * 룰은 "끝내 침묵하는 사람이 있으면 보고하고 누가 안 했는지 밝혀라" 고 한다.
  * ★steve 는 그걸 하고 싶어도 못 한다 — hermes 가 죽었다는 사실 자체가 안 보이니까.★
- * ★"룰이 시켰는데 안 한다" 가 아니라 "볼 수 없게 해놓고 시켰다".★ (오늘 이 패턴만 여섯 번째)
+ * ★"룰이 시켰는데 안 한다" 가 아니라 "볼 수 없게 해놓고 시켰다".★
  *
  * ★재시도는 여전히 안 한다★ (hermes/openclaw 는 턴 도중 이미 팬아웃을 보낸다 → 재시도 = 중복 위임).
  * 대신 ★요청자에게 사실을 알려준다.★ 그러면 요청자가 룰대로 "미응답" 으로 마감할 수 있다.
@@ -1413,12 +1413,12 @@ function notifyRequesterOfExpiry(
     if (!requester || requester === row.agent_id) return;
     if (!agents.some((a) => a.id === requester)) return;
 
-    // ★문구가 사실과 달라서 실제 중복작업을 낼 뻔했다★ (리사 실측, 2026-07-29)
-    //   리사가 clo 에게 위임 → clo 는 ★받아서 작업 중★ → 이 통지가 "응답하지 못했습니다" 를 보냄
-    //   → 리사가 미착수로 판단해 herm 에게 ★재위임★ → 그 사이 clo 가 ★정상 완료(PR 생성)★
-    //   → herm 이 중복 작업 직전, 리사가 저장소를 직접 확인해서 막았다.
+    // ★문구가 사실과 달라서 실제 중복작업을 낼 뻔했다★ (실측 2026-07-29)
+    //   위임자 → 수임자가 ★받아서 작업 중★ → 이 통지가 "응답하지 못했습니다" 를 보냄
+    //   → 위임자가 미착수로 판단해 제3자에게 ★재위임★ → 그 사이 수임자가 ★정상 완료(PR 생성)★
+    //   → 제3자가 중복 작업 직전, 위임자가 저장소를 직접 확인해서 막았다.
     //   ★실제 뜻은 "정해진 대기 시간 안에 응답이 안 왔다" 이지 "못 했다" 가 아니다.★
-    //   그리고 이 문구가 ★"없이 마감해도 된다" 고 권했다★ — 리사는 그 말대로 한 것이다.
+    //   그리고 이 문구가 ★"없이 마감해도 된다" 고 권했다★ — 위임자는 그 말대로 한 것이다.
     const body =
       `[응답 대기] ${row.agent_id} 에게서 아직 응답이 없습니다 — 대기 시간 초과 (${reason}). ` +
       `${row.agent_id} 가 작업 중일 수 있습니다: ★다시 시키기 전에 그쪽 작업물(브랜치·PR·카드)을 먼저 확인하세요.★ ` +
@@ -1671,14 +1671,14 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
     appendAuditFile("bus_dispatcher", "crash_recovery", null, { recovered });
   }
 
-  // Startup cleanup: expire stale user-message pending recipients (2026-05-30, GD).
+  // Startup cleanup: expire stale user-message pending recipients (2026-05-30).
   // User (telegram) messages are delivered directly by the telegram channel, not the bus —
   // their recipient rows are never woken/completed by the dispatcher and have no expires_at,
   // so they accumulate as 'pending' forever (observed: 75 rows). The telegram path already
   // handled them, so on every startup we expire them. This is both the one-time cleanup and
   // the recurring re-dispatch-safety policy: a restart never re-fires already-handled user msgs.
   // Agent-to-agent pending is left untouched (the dispatcher delivers those; expiring would lose them).
-  // M1.5 fix(Bill HIGH-1): runtime guard. The "user msgs are telegram-direct" premise is FALSE for
+  // M1.5 fix(HIGH-1): runtime guard. The "user msgs are telegram-direct" premise is FALSE for
   // bus-dispatched runtimes (b3os_native/codex respond via the bus). Without this exclusion the
   // cleanup would expire b3os_native user-pending rows — including ones just re-queued by the
   // crash-recovery sweep below → the headline recovery case (user re-request) silently lost.
@@ -1696,7 +1696,7 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
     appendAuditFile("bus_dispatcher", "startup_user_pending_cleanup", null, { expired: userCleanup.changes });
   }
 
-  // Startup cleanup: expire stale 'wake_dispatched' zombies (2026-05-31, GD).
+  // Startup cleanup: expire stale 'wake_dispatched' zombies (2026-05-31).
   // wake_dispatched = "adapter called, waiting for the agent to ack". If no ack ever comes the row
   // sits forever (observed: ~38 rows, oldest ~4 days) and the topology shows them as lingering
   // in-flight. Anything older than 24h with no ack is dead — the wake either landed (agent moved on)
@@ -1718,8 +1718,8 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
 
   // M1.5: b3os_native 크래시 턴 복구. 기존 recoverStaleClaims는 lease-safe-async라 이미 dispatching을 벗어난
   // b3os 행을 못 잡음 → 격리 마커 sweep으로 미완료 건을 'pending' 재wake. dedup이 이중게시 방어.
-  // ★두 startup cleanup 뒤에 둔다(Bill HIGH-1): 그래야 재queue한 행을 user-cleanup이 못 만료.
-  // ★부팅은 staleSec=0(Bill HIGH-2): 갓 부팅한 프로세스엔 라이브 턴이 없으니 모든 마커=크래시. 빠른 재시작(~1s)으로
+  // ★두 startup cleanup 뒤에 둔다(HIGH-1): 그래야 재queue한 행을 user-cleanup이 못 만료.
+  // ★부팅은 staleSec=0(HIGH-2): 갓 부팅한 프로세스엔 라이브 턴이 없으니 모든 마커=크래시. 빠른 재시작(~1s)으로
   //   마커가 <150s여도 부팅에서 즉시 복구된다(150s 바닥은 런타임 주기 sweep에서 라이브 턴 보호 역할만).
   const b3osRecovered = recoverB3osNativeInflight(db, 0);
   if (b3osRecovered > 0) {
@@ -1772,7 +1772,7 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
    *  보정이었다 — agent.wait 블록킹으로 대체되어 제거함. 상한은 self-heal grace + claim-lease 가 받는다.)
    */
   const inFlight = new Map<string, { startedAt: number; graceMs: number }>();
-  // ★"직렬화 때문에 얼마나 밀렸나" 를 재려면 ★첫 defer 시각★ 이 필요하다 (Steve).
+  // ★"직렬화 때문에 얼마나 밀렸나" 를 재려면 ★첫 defer 시각★ 이 필요하다.
   //   메시지 생성시각으로 재면 그건 ★"이 메시지가 몇 살인가"★ 다 — 9일 묵은 pending 행이 있으면 9일로 찍힌다.
   const firstDeferAt = new Map<string, number>();
 
@@ -1783,10 +1783,10 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
       // we need inFlight to release too — otherwise the row is permanently skipped.
       const now = Date.now();
       // ★마감 독촉(collectionDeadline) — 개별보고 제외로 좁혀 되살림★
-      //   [히스토리] 처음엔 통째 제거했다("독촉코드 빼는게 어때"). 그런데 이 backstop 이 실은 ★codex 의
-      //   유일한 fallback 깨우기★ 였다 — codex 의 auto-wake 는 원래도 드롭했고(wake_dispatched 고아),
-      //   [마감] 독촉이 codex 를 깨워 종합시키고 있었다(실측: 16:43 [마감]→16:44 종합). 제거하니 codex 가
-      //   진짜 수집에서도 멈췄다. → ★뺄 게 아니라 개별/수집을 구별해 진짜 수집에만★ 깨우게 좁힌다.
+      //   통째 제거하면 안 된다 — 이 backstop 이 ★auto-wake 를 드롭하는 런타임의 유일한 fallback★ 이다.
+      //   그런 런타임은 wake_dispatched 가 고아로 남고, [마감] 독촉만이 collector 를 깨워 종합시킨다
+      //   (실측: 16:43 [마감] → 16:44 종합). 제거하면 ★진짜 수집에서도 멈춘다.★
+      //   → ★뺄 게 아니라 개별/수집을 구별해 진짜 수집에만★ 깨우게 좁힌다.
       // 구별 = 기여자가 collector 에게 direct_to_gd 없이 답했나(수집) vs GD 께 direct_to_gd(개별).
       //   (collectionDeadline.ts inbound 쿼리에서 direct_to_gd 제외 — 개별보고는 answeredToCollector 에서 빠져 발사 안 됨)
       //   킬스위치 유지: COLLECTION_DEADLINE_ON=0 으로 끌 수 있다.
@@ -1835,7 +1835,7 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
         // → ★앞 턴이 끝난 뒤에 깨우면★ 두 번째 턴의 문맥에 첫 종합이 들어온다 → ★스스로 침묵한다.★
         //
         // ★같은 변경이 다른 버그도 고친다★: 턴 중에 주입된 메시지를 openclaw TUI 는 ★버리고★,
-        //   hermes REPL 은 ★돌던 턴을 죽인다(msg=interrupt)★ — 어제 실측한 ★조용한 유실★ 이 그것이다.
+        //   hermes REPL 은 ★돌던 턴을 죽인다(msg=interrupt)★ — 실측된 ★조용한 유실★ 이 그것이다.
         //
         // ★claude 는 제외한다★ — Claude Code 는 ★입력을 큐잉★ 해서 안 잃는다. 직렬화하면 팀장 메시지만 느려진다.
         // ★영구 정체는 없다★: 아래 self-heal 이 grace 지난 항목을 비운다(죽은 턴도 결국 풀린다).
@@ -1845,12 +1845,12 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
             if (k.endsWith(`:${row.agent_id}`)) { busy = true; break; }
           }
           if (busy) {
-            // ★조용히 밀리면 아무도 모른다★ (Steve): 얼마나 기다렸는지 audit 으로 남긴다.
+            // ★조용히 밀리면 아무도 모른다★: 얼마나 기다렸는지 audit 으로 남긴다.
             //   → "팀장 메시지가 3분 밀렸다" 를 ★숫자로★ 안다. 안 남기면 다음에 또 추측한다.
             //   self-heal grace(120~420s)는 ★상한이지 목표가 아니다★ — 실제 분포를 봐야 한다.
-            // ★UTC 를 로컬로 파싱하면 정확히 +9h 거짓말한다★ (Steve 실측: 실제 62초 → audit 9시간).
+            // ★UTC 를 로컬로 파싱하면 정확히 +9h 거짓말한다★ (실측: 실제 62초 → audit 9시간).
             //   DB 는 "2026-07-13 01:27:41" (UTC) 로 저장하는데 JS 는 그걸 ★로컬 시각★ 으로 읽는다.
-            //   ★내 룰에 적혀 있는 함정에 내가 빠졌다.★ 여기서는 아예 ★DB 시각을 안 쓴다★ (아래 이유).
+            //   여기서는 아예 ★DB 시각을 안 쓴다★ (아래 이유).
             // ★★매 tick 마다 찍으면 audit 폭풍이 된다★★ (라이브 실측: 1.5초마다 한 줄 → 2.5분에 200줄).
             //   긴 턴에 물린 메시지가 계속 재-defer 되기 때문이다. ★첫 defer 에만 남긴다.★
             //   ★"몇 번 밀렸나" 가 아니라 "밀리기 시작했다" 가 신호다.★ 실제 지연은 배달 시각과의 차이로 안다.
@@ -1931,7 +1931,7 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
     if (n > 0) {
       console.log(`[bus_dispatcher] periodic recovery: reset ${n} stale claims`);
     }
-    // M1.5(Bill HIGH-2): b3os 마커도 주기적으로 sweep. 기본 150s 임계라 여기선 "진짜 라이브 턴(120s cap)"만
+    // M1.5(HIGH-2): b3os 마커도 주기적으로 sweep. 기본 150s 임계라 여기선 "진짜 라이브 턴(120s cap)"만
     // 보호하고, 부팅 때 <150s라 못 잡았거나 런타임 중 hung된 턴이 나이들면 재처리된다(데드존 제거).
     const b = recoverB3osNativeInflight(db);
     if (b > 0) {

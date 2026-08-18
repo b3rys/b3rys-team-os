@@ -34,7 +34,7 @@ type DB = InstanceType<typeof Database>;
 const PREV_ENABLED = process.env.BUS_DISPATCH_ENABLED;
 const PREV_AGENTS = process.env.BUS_DISPATCH_AGENTS;
 // ★테스트 격리: 실 운영 allowlist(process.cwd()/var/bus-wake-extra.txt, 내용=lui/devon/…)를 읽으면
-// fixture(bill/codex/steve)가 제외돼 allowlist_not_enabled로 9fail. 존재하지 않는 경로로 override → extra=[] → allowlist=null(pass-through). Codex 진단
+// fixture(bill/codex/steve)가 제외돼 allowlist_not_enabled로 9fail. 존재하지 않는 경로로 override → extra=[] → allowlist=null(pass-through).
 const PREV_WAKE_EXTRA = process.env.TEAMOS_BUS_WAKE_EXTRA_FILE;
 process.env.TEAMOS_BUS_WAKE_EXTRA_FILE = "/tmp/.teamos-bus-wake-extra-characterization-noexist";
 afterAll(() => {
@@ -111,7 +111,7 @@ beforeEach(() => {
 describe("resolveDirectToGd", () => {
   const row = (over: Record<string, unknown>): PendingDispatchRow => ({ thread_id: "abc123", meta_json: null, ...over } as PendingDispatchRow);
 
-  // 2026-07-08 GD: direct_to_gd 타겟 = GD 1:1 DM(ownerChatId). 그룹 아님. source_thread_id 무시.
+  // 제품 결정 2026-07-08: direct_to_gd 타겟 = GD 1:1 DM(ownerChatId). 그룹 아님. source_thread_id 무시.
   test("direct_to_gd meta + ownerChatId → GD DM {threadId, groupId}", () => {
     const r = row({ meta_json: JSON.stringify({ reply_mode: "direct_to_gd", source_thread_id: "tg-12345" }) });
     expect(resolveDirectToGd(r, "1000000001")).toEqual({ threadId: "dm-1000000001", groupId: "1000000001" });
@@ -135,7 +135,7 @@ describe("resolveDirectToGd", () => {
 
 // ─── 3c: wake 경계 (팀 커뮤니케이션 재사용 comm 테스트) ──────────────
 // 설계문서 team-comm-ingress-owner-gate-design §3c/§4: 이 경계를 테스트로 고정(회귀방지).
-// Codex 적대리뷰 확인: directed→requester wake / broadcast no-marker→no-wake.
+// 경계 확인: directed→requester wake / broadcast no-marker→no-wake.
 describe("3c wake 경계 — comm 매트릭스", () => {
   test("directed 메시지 → 수신자 wake (adapter 호출됨)", async () => {
     const row = pendingRowFor(db, "codex"); // steve→codex directed dm
@@ -208,7 +208,7 @@ describe("3c wake 경계 — comm 매트릭스", () => {
     expect(spy.calls).toBe(0);
   });
 
-  // collect_only 경계 (Codex 적대리뷰 §3c): 수집형 위임 응답은 coordinator wake 억제, 일반 directed Q&A는 wake.
+  // collect_only 경계: 수집형 위임 응답은 coordinator wake 억제, 일반 directed Q&A는 wake.
   const cRow = (over: Record<string, unknown>): PendingDispatchRow =>
     ({ agent_id: "bill", to_agent_id: "bill", type: "reply", thread_id: "t1", in_reply_to: null, parent_message_id: null, meta_json: null, ...over } as PendingDispatchRow);
   test("collect_only: coordinator에게 reply + feedback thread → no-wake(true)", () => {
