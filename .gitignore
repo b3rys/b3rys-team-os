@@ -54,6 +54,10 @@ archiving/
 #   판단을 거기 두면 ★리뷰도 시험도 공개도 안 된다★ — 그래서 판단만 여기로 빼서 추적한다.
 !/scripts/deploy-plan.ts
 !/scripts/gen-test-map.sh
+# ★주석 사람귀속 검사기★ — #322 규칙(저장소 글은 사실과 인과만)의 기계 검사다.
+#   그 규칙은 문서에만 있었고 같은 종류를 ★세 번★ 놓쳤다(#324 → #329 → 남은 16건).
+#   여기 없으면 공개 클론에 검사기가 없어 규칙만 남는다 — 그게 지금까지의 상태였다.
+!/scripts/check-comment-attribution.ts
 !/scripts/test-map-nodescribe.txt
 # ★scripts 의 테스트는 ★클래스로★ 연다★ — /scripts/* 가 전부 무시하므로 .test.ts 를
 #   개별 등록하면, 다음 스크립트에 테스트를 붙일 때 git add -A 가 ★조용히 건너뛴다★.
