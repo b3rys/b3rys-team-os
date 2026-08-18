@@ -19,7 +19,7 @@
  * 범위: src 아래 .ts 의 ★주석 줄★ 만. 코드 줄의 문자열은 안 본다
  *       (시험 입력값 "@빌 이거 해줘" 같은 것은 지우면 시험이 죽는다).
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -87,8 +87,31 @@ function inCodeSpan(line: string, at: number): boolean {
 }
 
 /**
+ * ★따옴표로 감싼 구간은 예시·인용이다★ — 백틱 예외와 같은 축이다.
+ *
+ * 왜 필요해졌나: 기본 범위에 `scripts` 를 넣자 ★이 검사기 자신이 24건 걸렸다.★
+ * 걸린 것 대부분이 규칙을 설명하려고 적어둔 반례 문장이다:
+ *   `*   "(2026-08-06 실측 42건). steve 가 확인했다"      ← 괄호 실측 거부권이 …`
+ * ★규칙을 설명하는 문장이 그 규칙에 걸리면 사람이 검사기를 지운다.★
+ * (같은 함정을 승인 판정부도 겪었다 — 그 기능을 설명하는 문서가 예시 서명을 담고 있었다.)
+ *
+ * ★이 예외는 계약과 어긋나지 않는다★ — 이 검사기는 처음부터 ★귀속만 보고 발언 인용은 안 본다.★
+ * 따옴표 안은 인용이므로 애초에 이 검사기의 대상이 아니다.
+ */
+function inQuotedSpan(line: string, at: number): boolean {
+  let straight = 0;
+  let curly = 0;
+  for (let i = 0; i < at; i++) {
+    const c = line[i];
+    if (c === '"') straight++;
+    else if (c === "“" || c === "”") curly++;
+  }
+  return straight % 2 === 1 || curly % 2 === 1;
+}
+
+/**
  * ★한 줄에 후보가 여러 개다.★ 첫 후보만 보고 끝내면 ★통과 규칙이 뒤쪽 진짜를 덮는다.★
- * 실측 반례(codex 리뷰):
+ * 실측 반례:
  *   "제안자 lui 는 데이터다. bill 리뷰로 수정했다"   ← 앞의 역할 지정이 뒤의 귀속을 덮었다
  *   "`--to bill` 은 값이다. steve 리뷰로 수정했다"   ← 백틱 예외가 줄 전체를 끝냈다
  *   "(2026-08-06 실측 42건). steve 가 확인했다"      ← 괄호 실측 거부권이 뒤 귀속을 지웠다
@@ -103,9 +126,34 @@ const PRED_ADJACENT = /^\s{0,2}(제안|검토|판단)(?!\s*(?:대기|중))(?![�
 /** 이름이 괄호 안에 뒤따르는 꼴: `실측(루이)` · `(dbak 리뷰 …)` 의 앞쪽 서술어. */
 const PRED_BEFORE = new RegExp(`(${HUMAN}|${OBSERVE})\\s*\\(?\\s*$`, "i");
 
-function isCommentLine(line: string): boolean {
+/**
+ * 그 줄에서 ★검사할 주석 구간★ 을 준다. 주석이 없으면 null.
+ *
+ * ★줄 시작 주석만 보면 코드 뒤 주석을 통째로 놓친다★ (2026-08-18 실측):
+ *   `const label = makeLabel(id); // 사람이름이 정한 규칙이다`
+ * 이런 꼴이 검사 밖이었다. 귀속은 주석이 어디서 시작하든 귀속이다.
+ *
+ * ★코드 뒤 주석은 `//` 부터만 돌려준다★ — 앞의 코드까지 넘기면 앞쪽 판정(ROLE_BEFORE·PRED_BEFORE)이
+ * 코드를 보고 오작동한다. 줄 시작 주석은 줄 전체를 그대로 넘긴다(기존 동작 유지).
+ *
+ * ★문자열 안의 `//` 는 주석이 아니다★ — `const u = "https://x"` 를 주석으로 읽으면
+ * 코드 문자열이 검사 대상이 되어 이 검사기의 범위 계약("주석만 본다")이 깨진다.
+ */
+export function commentSegment(line: string): string | null {
   const t = line.trimStart();
-  return t.startsWith("//") || t.startsWith("*") || t.startsWith("/*");
+  if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) return line;
+  let quote: string | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]!;
+    if (quote) {
+      if (c === "\\") { i++; continue; }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { quote = c; continue; }
+    if (c === "/" && line[i + 1] === "/") return line.slice(i);
+  }
+  return null;
 }
 
 export type Finding = { file: string; line: number; text: string };
@@ -113,7 +161,7 @@ export type Finding = { file: string; line: number; text: string };
 /**
  * ★'실측' 이 괄호 안에 있으면, ★그 괄호 안에★ 이름이 있어야 귀속이다.★
  *
- * 글자 거리로 자르면 안 된다 — 실측(스티브가 8건에 직접 대봤다):
+ * 글자 거리로 자르면 안 된다 — 8건에 직접 대본 실측:
  *   "(2026-08-10 배포본 실측: steve 확인 · bill 판단)" 은 이름이 ★실측 뒤★ 에 있고,
  *   "(빌 뮤턴트 실측: …)" 은 사이에 낱말이 끼어 있다. 거리로 자르면 ★진짜 5건이 사라진다.★
  * 반대로 "(2026-07-14 실측)" · "(2026-08-06 실측 42건)" 은 괄호 안에 이름이 없다 —
@@ -148,8 +196,10 @@ export function scanText(file: string, text: string): Finding[] {
   const OBSERVE_RE = new RegExp(`(?:${OBSERVE})`, "i");
   // 괄호 안 이름 검사에는 AMBIG 도 넣는다 — "(codex 리뷰 실측…)" 의 codex 를 '이름 없음' 으로 읽었다.
   const ANY_NAME = new RegExp(`(?:${PERSON}|${AMBIG})`, "i");
-  text.split("\n").forEach((line, i) => {
-    if (!isCommentLine(line)) return;
+  text.split("\n").forEach((rawLine, i) => {
+    // ★검사 대상은 주석 구간이다★ — 코드 뒤 주석이면 `//` 부터. 보고는 원본 줄로 한다.
+    const line = commentSegment(rawLine);
+    if (line === null) return;
     NAME_G.lastIndex = 0;
     for (let nm = NAME_G.exec(line); nm; nm = NAME_G.exec(line)) {
       const name = nm[1]!;
@@ -161,6 +211,7 @@ export function scanText(file: string, text: string): Finding[] {
       if (PRODUCTISH.test(after)) continue;        // codex-cli · codex 0.144
       if (ROLE_BEFORE.test(before)) continue;      // 제안자 lui · 요청자(bill)
       if (inCodeSpan(line, at)) continue;          // `--to bill`
+      if (inQuotedSpan(line, at)) continue;        // "… steve 가 확인했다" ← 예시·인용
       if (ARROW_AFTER.test(after)) continue;       // codex→…
       if (ARROW_BEFORE.test(before)) continue;     // …codex→demis
 
@@ -182,7 +233,7 @@ export function scanText(file: string, text: string): Finding[] {
         if (observeInParenWithoutName(line, predAt, ANY_NAME)) continue;
       }
 
-      out.push({ file, line: i + 1, text: line.trim() });
+      out.push({ file, line: i + 1, text: rawLine.trim() });
       return; // 한 줄에 하나만 보고한다
     }
   });
@@ -199,9 +250,17 @@ function walk(dir: string, acc: string[] = []): string[] {
   return acc;
 }
 
+/**
+ * ★기본 범위에 scripts 를 넣는다★ (2026-08-18).
+ * 전에는 `src` 만이라 ★이 검사기 자신(scripts/…)이 검사 밖★ 이었다.
+ * 규칙을 강제하는 파일이 그 규칙에서 면제되면, 가장 먼저 새는 곳이 거기다.
+ * 없는 폴더는 조용히 건너뛴다 — 다른 저장소에서 이 스크립트만 가져다 쓸 수 있어야 한다.
+ */
+export const DEFAULT_ROOTS = ["src", "scripts"] as const;
+
 if (import.meta.main) {
-  const root = process.argv[2] ?? "src";
-  const findings = walk(root).flatMap((f) => scanText(f, readFileSync(f, "utf8")));
+  const roots = process.argv[2] ? [process.argv[2]] : DEFAULT_ROOTS.filter((d) => existsSync(d));
+  const findings = roots.flatMap((root) => walk(root)).flatMap((f) => scanText(f, readFileSync(f, "utf8")));
   for (const f of findings) console.log(`${f.file}:${f.line}  ${f.text.slice(0, 120)}`);
   console.log(`\n사람 귀속으로 걸린 주석: ${findings.length}건`);
   process.exit(findings.length ? 3 : 0);

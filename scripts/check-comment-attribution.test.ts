@@ -5,7 +5,7 @@
  * 통과 세트가 무너지면 사람이 이 검사기를 지운다 — 그래서 양쪽을 같은 무게로 건다.
  */
 import { describe, expect, test } from "bun:test";
-import { scanText } from "./check-comment-attribution";
+import { DEFAULT_ROOTS, scanText } from "./check-comment-attribution";
 
 /** ★잡혀야 한다★ — 사람에게 공을 돌리거나 사람의 말을 인용한 주석. */
 const MUST_CATCH: [string, string][] = [
@@ -99,7 +99,7 @@ describe("주석 사람귀속 검사기", () => {
    * ★알려진 오탐 — 구조가 진짜와 같아서 규칙으로 못 가른다.★
    *   "제안자 lui 는 리뷰 불가, gd는 팀원이라면 리뷰 가능" (시험 시나리오 인물) 과
    *   "제안자 lui 는 데이터다. bill 리뷰로 수정했다" (진짜 귀속) 은 ★같은 모양★ 이다.
-   *   앞 이름의 역할 지정이 ★뒤 이름까지 덮게 하면★ 진짜를 놓친다(codex 리뷰에서 실증).
+   *   앞 이름의 역할 지정이 ★뒤 이름까지 덮게 하면★ 진짜를 놓친다(반례로 실증됐다).
    *   그래서 뒤 후보를 살리는 쪽을 택했고, 이 줄은 오탐으로 남는다. 사람이 30초면 판단한다.
    */
   test("알려진 한계 — 시험 시나리오 인물은 걸린다(오탐으로 남긴다)", () => {
@@ -115,5 +115,71 @@ describe("주석 사람귀속 검사기", () => {
   test("★코드 줄은 안 본다★ — 시험 입력값을 지우면 시험이 죽는다", () => {
     const code = '    expect(await gateBlocks(GROUP, "@빌 이거 해줘 라고 요청했다", ctx)).toBe(true);';
     expect(scanText("t.ts", code)).toHaveLength(0);
+  });
+
+  /**
+   * ── ★코드 뒤 인라인 주석★ (2026-08-18) ──
+   * 전에는 ★줄 시작 주석만★ 봐서 이 꼴이 통째로 검사 밖이었다. 오탐이 아니라 ★미탐★ 이다.
+   * 아래 넷은 ①진짜를 잡는가 ②코드를 주석으로 오해하지 않는가 ★양쪽★ 을 건다.
+   */
+  describe("코드 뒤 인라인 주석", () => {
+    test("★인라인 주석의 귀속을 잡는다★ — 예전에는 줄 시작이 아니라 통째로 빠졌다", () => {
+      const line = "  const label = makeLabel(id); // 빌이 말했다";
+      expect(scanText("t.ts", line)).toHaveLength(1);
+    });
+
+    test("★앞의 코드는 판정에 안 섞인다★ — `//` 앞은 검사 구간이 아니다", () => {
+      // 코드 쪽 '제안자' 가 주석 안 이름의 역할 지정으로 읽히면 진짜 귀속을 놓친다.
+      const line = "  const 제안자 = pick(rows); // 루이가 판단했다";
+      expect(scanText("t.ts", line)).toHaveLength(1);
+    });
+
+    test("★문자열 안의 `//` 는 주석이 아니다★ — 이걸 주석으로 읽으면 코드가 검사 대상이 된다", () => {
+      const line = '  const url = "https://example.test/빌이 말했다";';
+      expect(scanText("t.ts", line)).toHaveLength(0);
+    });
+
+    test("★인라인 주석에도 통과 규칙이 그대로 산다★ — 역할 지정은 귀속이 아니다", () => {
+      const line = "  const to = resolve(id); // 요청자(bill) 에게 보낸다";
+      expect(scanText("t.ts", line)).toHaveLength(0);
+    });
+  });
+
+  /**
+   * ── ★검사기 자신이 검사 범위 안에 있어야 한다★ (2026-08-18) ──
+   * 기본 범위가 `src` 뿐이라 `scripts/` 아래 이 파일들은 규칙에서 면제돼 있었다.
+   * ★규칙을 강제하는 파일이 그 규칙 밖에 있으면 가장 먼저 새는 곳이 거기다.★
+   */
+  test("★기본 범위에 scripts 가 들어 있다★ — 이게 빠지면 검사기가 자기를 검사하지 않는다", () => {
+    expect([...DEFAULT_ROOTS]).toContain("scripts");
+    expect([...DEFAULT_ROOTS]).toContain("src");
+  });
+
+  /**
+   * ── ★따옴표 안은 예시·인용★ ──
+   * scripts 를 범위에 넣자 이 검사기 자신이 24건 걸렸고, 대부분이 ★규칙을 설명하려고 적어둔 반례★ 였다.
+   * 규칙을 설명하는 문장이 그 규칙에 걸리면 사람이 검사기를 지운다. 백틱 예외와 같은 축으로 넓혔다.
+   * ★단 예외가 줄 전체를 끝내면 안 된다★ — 그건 이 검사기가 이미 한 번 고친 구멍이다.
+   */
+  describe("따옴표 안 예시", () => {
+    test("★인용 안의 귀속 예시는 통과한다★ — 규칙 설명문이 규칙에 걸리면 검사기가 지워진다", () => {
+      const line = '   *   "(2026-08-06 실측 42건). steve 가 확인했다"   ← 괄호 거부권 반례';
+      expect(scanText("t.ts", line)).toHaveLength(0);
+    });
+
+    test("★대조군 — 같은 줄이라도 인용 밖 이름은 잡는다★ (예외가 줄 전체를 끝내지 않는다)", () => {
+      const line = '  // "예시다" 라고 적어두었지만 steve 리뷰로 수정했다';
+      expect(scanText("t.ts", line)).toHaveLength(1);
+    });
+
+    test("★대조군 — 따옴표가 없으면 그대로 잡힌다★", () => {
+      const line = "  //   (2026-08-06 실측 42건). steve 가 확인했다";
+      expect(scanText("t.ts", line)).toHaveLength(1);
+    });
+
+    test("한글 인용부호도 같게 본다", () => {
+      const line = "   *   “steve 가 확인했다” 는 예시 문장이다";
+      expect(scanText("t.ts", line)).toHaveLength(0);
+    });
   });
 });
