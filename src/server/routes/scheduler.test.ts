@@ -232,6 +232,7 @@ describe("scheduler routes", () => {
     const payload = { type: "capability_workloop" as const, capability: "coordinator", threadId: "route-weekly", body: "route" };
     const a = createCronJob(db, { id: "route-weekly-a", title: "A", cron: "0 4 * * 5", timezone: "Asia/Seoul", from, payload });
     const b = createCronJob(db, { id: "route-weekly-b", title: "B", cron: "0 10 * * 5", timezone: "Asia/Seoul", from, payload });
+    const legacy = createCronJob(db, { id: "route-weekly-legacy", title: "Legacy", cron: "0 5 * * 5", timezone: "Asia/Seoul", from, payload });
     assignScheduledJobToWorkflow(db, a.id, "route-weekly", "a", 10);
     assignScheduledJobToWorkflow(db, b.id, "route-weekly", "b", 20);
 
@@ -244,8 +245,15 @@ describe("scheduler routes", () => {
       method: "POST", headers: authHeaders("gd"), body: JSON.stringify({ reason: "week off" }),
     });
     expect(skipped.status).toBe(200);
-    const json = (await skipped.json()) as { skippedJobIds: string[]; alreadySkipped: boolean };
+    const json = (await skipped.json()) as {
+      skippedJobIds: string[];
+      alreadySkipped: boolean;
+      ungroupedActiveJobIds: string[];
+      warnings: Array<{ code: string; job_ids: string[] }>;
+    };
     expect(json.skippedJobIds).toEqual([a.id, b.id]);
     expect(json.alreadySkipped).toBe(false);
+    expect(json.ungroupedActiveJobIds).toEqual([legacy.id]);
+    expect(json.warnings).toEqual([{ code: "ungrouped_active_jobs_in_occurrence", job_ids: [legacy.id] }]);
   });
 });

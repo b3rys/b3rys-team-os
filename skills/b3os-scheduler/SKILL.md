@@ -60,7 +60,7 @@ assignScheduledJobToWorkflow(db, prepare.id, "weekly_self_learning", "shared_cur
 assignScheduledJobToWorkflow(db, session.id, "weekly_self_learning", "self_learning", 20);
 ```
 
-한 회차를 건너뛸 때 개별 `next_run_at`을 직접 수정하지 않는다. 팀장 인증 경로에서 아래 API를 호출하면 소속된 활성 잡 전체가 같은 로컬 날짜의 회차인지 검증한 뒤 한 트랜잭션으로 `skipped` 이력과 다음 슬롯을 기록한다. 일부 잡이 다른 회차를 가리키거나 실행 중이면 전체가 롤백된다.
+한 회차를 건너뛸 때 개별 `next_run_at`을 직접 수정하지 않는다. 팀장 인증 경로에서 아래 API를 호출하면 소속된 활성 잡 중 그 로컬 날짜에 남아 있는 단계를 한 트랜잭션으로 `skipped` 처리하고 다음 슬롯을 기록한다. 같은 날 이미 실행되어 다음 회차로 넘어간 단계는 `alreadyPassedJobIds`로 구분한다. 그 밖의 회차 불일치나 실행 중인 잡이 있으면 전체가 롤백된다.
 
 ```http
 POST /team/api/schedules/workflows/weekly_self_learning/occurrences/2026-08-21/skip
@@ -69,7 +69,9 @@ Content-Type: application/json
 {"reason":"이번 주 세션 휴무"}
 ```
 
-같은 회차 skip 재요청은 idempotent no-op이다. 현재 API는 **skip만 지원**한다. reschedule은 예외 스키마에 예약되어 있지만, 벽시계 시각·DST·선후행 의존을 함께 정의한 뒤 별도로 구현한다.
+같은 회차 skip 재요청은 idempotent no-op이다. 응답의 `ungroupedActiveJobIds`와 `warnings`는 같은 날짜에 활성 상태지만 워크플로 밖이라 건너뛰지 않은 잡을 알린다. 현재 API와 예외 스키마는 **skip만 지원**한다.
+
+회차 키는 워크플로 시간대의 로컬 날짜 하나다. 따라서 한 워크플로의 단계는 같은 로컬 날짜 안에 있어야 하며, 23:00 준비→다음 날 01:00 보고처럼 자정을 넘는 구성은 현재 모델로 묶지 않는다.
 
 **반복 cron 잡:**
 ```ts

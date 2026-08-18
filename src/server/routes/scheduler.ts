@@ -180,14 +180,25 @@ export function createSchedulerRoutes(deps: SchedulerRouteDeps): Hono {
         actor,
         reason: parsed.data.reason,
       });
-      return c.json({ ok: true, ...result });
+      return c.json({
+        ok: true,
+        ...result,
+        warnings: result.ungroupedActiveJobIds.length > 0
+          ? [{ code: "ungrouped_active_jobs_in_occurrence", job_ids: result.ungroupedActiveJobIds }]
+          : [],
+      });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       if (detail === "invalid_occurrence_date") return c.json({ error: detail }, 400);
       if (detail.startsWith("scheduled_workflow_not_active:") || detail.startsWith("scheduled_workflow_has_no_jobs:")) {
         return c.json({ error: detail }, 404);
       }
-      return c.json({ error: "workflow_occurrence_not_skippable", detail }, 409);
+      if (
+        detail.startsWith("scheduled_workflow_job_not_pending:")
+        || detail.startsWith("scheduled_workflow_occurrence_mismatch:")
+        || detail.startsWith("scheduled_workflow_no_next_run:")
+      ) return c.json({ error: "workflow_occurrence_not_skippable", detail }, 409);
+      throw error;
     }
   });
 

@@ -226,13 +226,15 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_job_workflow ON scheduled_job(workflow_
 CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduled_job_workflow_step
   ON scheduled_job(workflow_id, workflow_step_key)
   WHERE workflow_id IS NOT NULL AND workflow_step_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduled_job_workflow_order
+  ON scheduled_job(workflow_id, workflow_step_order)
+  WHERE workflow_id IS NOT NULL AND workflow_step_order IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS scheduled_workflow_exception (
   id TEXT PRIMARY KEY,
   workflow_id TEXT NOT NULL REFERENCES scheduled_workflow(id) ON DELETE CASCADE,
   occurrence_date TEXT NOT NULL,
-  action TEXT NOT NULL CHECK(action IN ('skip','reschedule')),
-  rescheduled_to_date TEXT,
+  action TEXT NOT NULL CHECK(action = 'skip'),
   reason TEXT NOT NULL,
   actor TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
