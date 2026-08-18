@@ -52,7 +52,7 @@ export interface CodexTurnOptions {
   /** 진행 줄(도구 시작 등) 알림. 미지정이면 러너가 대시보드 표시만 갱신한다.
    *  채널(텔레그램 등)이 "지금 무엇을 하는 중인지" 를 보여주려면 이 통로가 필요하다 —
    *  없으면 러너까지 온 이벤트가 호출자에게 도달하지 않는다. */
-  onActivity?: (line: string) => void;
+  onActivity?: (line: string, itemId?: string) => void;
 }
 
 export interface CodexTurnResult {

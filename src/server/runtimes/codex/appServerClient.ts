@@ -44,7 +44,8 @@ export interface RunTurnHandlers {
   /** 승인요청 → decision 반환(비동기). 미지정 시 기본 denied(fail-closed). */
   onApproval?: (req: ApprovalRequest) => Promise<ReviewDecision> | ReviewDecision;
   /** ★지금 무엇을 하는 중인가★ — 사람이 진행 상황을 보게 한다(tmux 팀원의 화면 긁기와 같은 자리). */
-  onActivity?: (line: string) => void;
+  /** itemId 를 함께 준다 — 같은 항목이 나중에 구체화되면 그 줄을 ★교체★ 할 수 있다. */
+  onActivity?: (line: string, itemId?: string) => void;
   /** 임의 서버 알림 관찰(로깅/디버그). */
   onNotify?: (method: string, params: unknown) => void;
 }
@@ -103,6 +104,15 @@ export function appServerSpawnEnv(codexHome?: string, base: NodeJS.ProcessEnv = 
  * ★영영 비어 있었다★ — 실측: agent_status.activity_line 이 dex 는 항상 null.
  * codex 의 등가물은 app-server 가 흘려주는 item 이벤트다. 그걸 같은 칸에 쓴다.
  */
+/** 항목 id — 같은 항목의 시작/완료를 잇는 열쇠. */
+export function itemIdOf(item: unknown): string | undefined {
+  const id = (item as { id?: unknown } | null)?.id;
+  return typeof id === "string" && id !== "" ? id : undefined;
+}
+
+/** 진행 줄로 보여줄 것이 없는 항목 — 사람이 방금 보낸 말의 되울림 등. */
+const NOISE_ITEM_TYPES = new Set(["userMessage", "user_message", "userMessageDelta"]);
+
 export function activityLineOf(item: unknown): string | null {
   const it = (item ?? {}) as Record<string, unknown>;
   const type = typeof it.type === "string" ? it.type : "";
@@ -118,15 +128,41 @@ export function activityLineOf(item: unknown): string | null {
     return clip(files.length === 1 ? `파일 수정: ${files[0]}` : `파일 ${files.length}개 수정`);
   }
   if (type === "webSearch" || type === "web_search") {
-    const q = typeof it.query === "string" ? it.query : "";
-    return clip(q ? `웹 검색: ${q}` : "웹 검색");
+    // ★codex 는 queries(복수) 를 쓴다★ — 단수 query 만 보면 검색어가 비어 "웹 검색" 만 뜬다
+    //   (0.147.0 바이너리의 WebSearchAction: queries · open_page(url) · find_in_page(pattern)).
+    //   중첩된 action 안에 실릴 수도 있어 양쪽을 본다.
+    const act = (it.action ?? {}) as Record<string, unknown>;
+    // 실측(0.147.0): 시작 시점엔 전부 비어 있고, 완료 시점에 action.queries(복수) 또는
+    //   action.query(단수) 또는 최상위 query 중 하나가 채워진다. openPage 면 action.url 이다.
+    const pick = (v: unknown): string =>
+      Array.isArray(v) ? v.filter((x) => typeof x === "string").join(" · ")
+      : typeof v === "string" ? v
+      : "";
+    // ★무엇을 했는지는 action.type 이 말한다 — 그걸 먼저 본다.★
+    //   실측: openPage 인데도 최상위 query 에 ★URL 이 들어온다.★ 검색어 먼저 보면 "웹 검색: https://…" 가 된다.
+    const kind = typeof act.type === "string" ? act.type : "";
+    const url = typeof act.url === "string" ? act.url : typeof it.url === "string" ? it.url : "";
+    if (kind === "openPage" || (!kind && url)) return url ? clip(`웹 열기: ${url}`) : "웹 열기";
+    const pattern = typeof act.pattern === "string" ? act.pattern : typeof it.pattern === "string" ? it.pattern : "";
+    if (kind === "findInPage" || (!kind && pattern)) return pattern ? clip(`페이지에서 찾기: ${pattern}`) : "페이지에서 찾기";
+    const q = pick(act.queries) || pick(act.query) || pick(it.queries) || pick(it.query);
+    if (q) return clip(`웹 검색: ${q}`);
+    return "웹 검색";
   }
-  if (type === "reasoning") return "생각하는 중";
+  if (type === "reasoning") {
+    // 요약이 오면 무엇을 생각하는 중인지 보여준다 — "생각하는 중" 만 반복되면 사람에게 정보가 없다.
+    const sum = typeof it.summary === "string" ? it.summary : typeof it.text === "string" ? it.text : "";
+    const head = sum.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
+    return head ? clip(`생각: ${head}`) : "생각하는 중";
+  }
   if (type === "agentMessage") return "답 쓰는 중";
   if (type === "mcpToolCall") {
     const n = typeof it.name === "string" ? it.name : "도구";
     return clip(`도구 호출: ${n}`);
   }
+  // ★사람에게 뜻이 없는 내부 항목은 줄을 만들지 않는다.★ 예전엔 마지막 줄에서 type 을 그대로 찍어
+  //   화면에 `userMessage` 같은 내부 이름이 올라왔다(2026-08-18 라이브 확인).
+  if (NOISE_ITEM_TYPES.has(type)) return null;
   return type ? clip(type) : null;
 }
 
@@ -449,10 +485,17 @@ export class CodexAppServerClient {
       }
       case "item/started": {
         const line = activityLineOf(params?.item);
-        if (line) this.activeHandlers?.onActivity?.(line);
+        if (line) this.activeHandlers?.onActivity?.(line, itemIdOf(params?.item));
         break;
       }
       case "item/completed": {
+        // ★검색어는 여기서야 채워져 온다.★ item/started 는 query="" · action=null 로 빈 채 온다
+        //   (0.147.0 실측). 그래서 시작 시점 줄만 만들면 "웹 검색" 에서 영영 멈춘다.
+        //   같은 itemId 를 주어 호출자가 그 줄을 구체적인 것으로 바꾸게 한다.
+        {
+          const line = activityLineOf(params?.item);
+          if (line) this.activeHandlers?.onActivity?.(line, itemIdOf(params?.item));
+        }
         if (params?.item?.type === "agentMessage" && typeof params.item.text === "string") {
           this.lastFinal = params.item.text;
         }

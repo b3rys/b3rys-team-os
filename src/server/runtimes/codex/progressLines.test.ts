@@ -1,4 +1,4 @@
-import { test, expect } from "bun:test";
+import { test, expect, describe } from "bun:test";
 import {
   previewOf, appendLine, renderBubble, fits, retryPlan,
   PREVIEW_MAX, BUBBLE_MAX_UNITS, RETRY_WAIT_MAX_SEC,
@@ -74,4 +74,53 @@ test("★429 대기 계획 — 짧으면 기다리고 길면 포기한다★ (�
   expect(retryPlan(RETRY_WAIT_MAX_SEC)).toEqual({ wait: true, waitMs: 5000 });
   expect(retryPlan(RETRY_WAIT_MAX_SEC + 1)).toEqual({ wait: false, waitMs: 0 });
   expect(retryPlan(0)).toEqual({ wait: false, waitMs: 0 });
+});
+
+// ── ★같은 항목은 줄을 새로 만들지 않고 교체한다★ ──
+//
+// 실측(codex 0.147.0): 웹 검색 항목은 ★시작 때 query="" · action=null★ 로 오고,
+// 검색어는 ★완료 때★ 채워진다. 두 시점을 각각 새 줄로 쌓으면 같은 검색이 두 번 일어난 것처럼 보이고,
+// 시작 줄만 쓰면 "웹 검색" 에서 영영 멈춘다.
+describe("진행 줄 — 항목 id 로 교체", () => {
+  test("★같은 id 가 다시 오면 그 자리를 바꾼다★ — 줄이 늘지 않는다", () => {
+    let lines = appendLine([], "웹 검색", undefined, "exec-1");
+    lines = appendLine(lines, "웹 검색: 판교 날씨", undefined, "exec-1");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.text).toBe("웹 검색: 판교 날씨");
+  });
+
+  test("★다른 id 는 각자 줄을 갖는다★ — 검색을 두 번 하면 두 줄이다", () => {
+    let lines = appendLine([], "웹 검색", undefined, "exec-1");
+    lines = appendLine(lines, "웹 검색", undefined, "exec-2");
+    lines = appendLine(lines, "웹 검색: 첫째", undefined, "exec-1");
+    lines = appendLine(lines, "웹 검색: 둘째", undefined, "exec-2");
+    expect(lines.map((l) => l.text)).toEqual(["웹 검색: 첫째", "웹 검색: 둘째"]);
+  });
+
+  test("교체해도 자리는 그대로 — 뒤에 온 줄이 앞으로 튀지 않는다", () => {
+    let lines = appendLine([], "웹 검색", undefined, "exec-1");
+    lines = appendLine(lines, "생각하는 중");
+    lines = appendLine(lines, "웹 검색: 판교 날씨", undefined, "exec-1");
+    expect(lines.map((l) => l.text)).toEqual(["웹 검색: 판교 날씨", "생각하는 중"]);
+  });
+
+  test("★대조군 — id 가 없으면 예전처럼 쌓이고 연속 중복은 접힌다★", () => {
+    let lines = appendLine([], "생각하는 중");
+    lines = appendLine(lines, "생각하는 중");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.count).toBe(2);
+  });
+
+  test("★id 있는 줄은 연속 중복으로 접지 않는다★ — 접으면 어느 항목인지 잃는다", () => {
+    let lines = appendLine([], "웹 검색", undefined, "exec-1");
+    lines = appendLine(lines, "웹 검색", undefined, "exec-2");
+    expect(lines).toHaveLength(2);
+    expect(lines.every((l) => l.count === 1)).toBe(true);
+  });
+
+  test("같은 값으로 다시 오면 아무것도 안 바뀐다 — 헛 편집을 만들지 않는다", () => {
+    const first = appendLine([], "웹 검색", undefined, "exec-1");
+    const again = appendLine(first, "웹 검색", undefined, "exec-1");
+    expect(again).toBe(first);
+  });
 });

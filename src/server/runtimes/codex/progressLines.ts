@@ -2,7 +2,7 @@
  * 진행 줄 버블 — "작업 중…" 메시지에 지금 무엇을 하는 중인지 누적해 보여준다.
  *
  * 값의 출처는 hermes v0.19.1 실구현이다(같은 문제를 이미 푼 곳):
- *   편집 최소 간격 1.5초 · 미리보기 40자 · 연속 중복은 (×N) 으로 접기 ·
+ *   편집 최소 간격 1.5초(★우리는 2초 — 팀 리드 요청★) · 미리보기 40자 · 연속 중복은 (×N) 으로 접기 ·
  *   텔레그램 4096 UTF-16 code unit 에서 여유 64 를 뺀 4032 에서 새 버블로 넘김.
  *
  * 이 파일은 순수 함수만 둔다 — 편집 호출·타이머는 bridge 가 쥔다.
@@ -13,13 +13,17 @@
 export const PREVIEW_MAX = 40;
 /** 한 버블의 최대 길이(UTF-16 code unit). 텔레그램 4096 - 여유 64. */
 export const BUBBLE_MAX_UNITS = 4032;
-/** 편집 최소 간격(ms). 이 사이에 온 이벤트는 모아 한 번에 친다. */
-export const EDIT_MIN_INTERVAL_MS = 1500;
+/** 편집 최소 간격(ms). 이 사이에 온 이벤트는 모아 한 번에 친다.
+ *  hermes 실구현은 1.5초다. 팀 리드 요청(2026-08-18)으로 2초로 둔다 — 줄이 빠르게 늘 때
+ *  화면이 덜 깜빡인다. 텔레그램 편집 제한에도 더 여유가 있다. */
+export const EDIT_MIN_INTERVAL_MS = 2000;
 
 export interface ProgressLine {
   text: string;
   /** 같은 줄이 연속으로 몇 번 왔나. 1이면 표시하지 않는다. */
   count: number;
+  /** 항목 id — 같은 id 가 다시 오면 ★그 줄을 교체★ 한다(시작 때 비었다가 끝나면 구체화되는 항목용). */
+  id?: string;
 }
 
 /** 줄바꿈·앞뒤 공백을 걷고 길면 자른다. 자를 때 길이는 … 포함 PREVIEW_MAX 다. */
@@ -34,16 +38,35 @@ export function previewOf(raw: string, max: number = PREVIEW_MAX): string {
  * 같은 도구를 반복 호출할 때 버블이 같은 문장으로 채워지는 것을 막는다.
  * 빈 줄은 버린다(이벤트는 왔지만 보여줄 것이 없는 경우).
  */
-export function appendLine(lines: ProgressLine[], raw: string, max: number = PREVIEW_MAX): ProgressLine[] {
+export function appendLine(
+  lines: ProgressLine[],
+  raw: string,
+  max: number = PREVIEW_MAX,
+  id?: string,
+): ProgressLine[] {
   const text = previewOf(raw, max);
   if (text === "") return lines;
+
+  // ★같은 항목이 다시 오면 새 줄을 만들지 않고 그 자리를 바꾼다.★
+  //   웹 검색은 시작할 때 검색어가 비어 있고 끝날 때 채워져 온다 — 두 줄로 쌓이면
+  //   같은 검색이 두 번 일어난 것처럼 보인다.
+  if (id !== undefined) {
+    const at = lines.findIndex((l) => l.id === id);
+    if (at !== -1) {
+      if (lines[at]!.text === text) return lines; // 바뀐 게 없으면 그대로
+      const next = lines.slice();
+      next[at] = { text, count: lines[at]!.count, id };
+      return next;
+    }
+  }
+
   const last = lines[lines.length - 1];
-  if (last && last.text === text) {
+  if (last && last.text === text && last.id === undefined && id === undefined) {
     const next = lines.slice(0, -1);
     next.push({ text, count: last.count + 1 });
     return next;
   }
-  return [...lines, { text, count: 1 }];
+  return [...lines, { text, count: 1, ...(id !== undefined ? { id } : {}) }];
 }
 
 /** 버블 본문. header 는 "⏳ 작업 중…" 같은 첫 줄이다. */
