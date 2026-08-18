@@ -463,8 +463,8 @@ test("승인과 무관한 콜백은 건드리지 않는다", async () => {
 // ★답을 못 보내서 사람 화면엔 로딩중만 돌았다.★
 
 import { defaultTeamDbPath } from "./bridge";
-import { existsSync as dbExists } from "node:fs";
-import { isAbsolute } from "node:path";
+import { existsSync as pathExists } from "node:fs";
+import { isAbsolute, dirname, join as joinPath } from "node:path";
 
 test("★cwd·환경변수와 무관하게 저장소의 team.db 를 가리킨다★", () => {
   const before = process.cwd();
@@ -476,7 +476,11 @@ test("★cwd·환경변수와 무관하게 저장소의 team.db 를 가리킨다
     expect(isAbsolute(p)).toBe(true);
     expect(p.endsWith("/team.db")).toBe(true);
     expect(p.startsWith("/tmp/")).toBe(false); // cwd 를 따라가면 안 된다
-    expect(dbExists(p)).toBe(true);            // 실제로 열 수 있는 파일이어야 한다
+    // ★가리키는 폴더가 실제 저장소 루트여야 한다.★
+    //   전에는 team.db 자체의 존재를 봤는데, 그 파일은 ★git 이 추적하지 않는다★ —
+    //   worktree·새 클론·CI 에는 없어서 시험이 브랜치와 무관하게 빨간불이 났다(2026-08-18 실측).
+    //   추적되는 파일로 같은 것을 잰다: 경로가 엉뚱하면 여기서 걸린다.
+    expect(pathExists(joinPath(dirname(p), "package.json"))).toBe(true);
   } finally {
     process.chdir(before);
     if (saved !== undefined) process.env.B3OS_REPO_ROOT = saved;
