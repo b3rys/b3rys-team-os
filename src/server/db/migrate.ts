@@ -250,6 +250,7 @@ export function migrateCodexRuntimeState(db: Database): void {
        last_message_id TEXT,
        last_task_id TEXT,
        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+       created_at TEXT,
        PRIMARY KEY (agent_id, surface, conversation_key)
      )`,
   );
@@ -857,6 +858,10 @@ export function runBusMigration(db: Database): void {
     // 진행 표시용 — 그 팀원이 지금 무엇을 하고 있나. last_log_line 은 화면 맨 아랫줄(고정 장식)이라
     // 늘 "auto mode on" 이었다. 그 칸은 health 판정이 이미 쓰고 있으므로 건드리지 않고 따로 둔다.
     "ALTER TABLE agent_status ADD COLUMN activity_line TEXT",
+    // 이 대화 기록이 ★언제 처음 생겼나★. updated_at 만 있으면 "재시작을 넘어 이어받았나" 를
+    // 기록만으로 못 가린다 — 이어받아도 새로 시작해도 updated_at 은 방금으로 같다.
+    // 두 값이 다르면 ★그 사이에 이어받은 것★ 이고, 같으면 이번에 처음 만든 것이다.
+    "ALTER TABLE codex_session_map ADD COLUMN created_at TEXT",
   ];
   for (const stmt of alterStatements) {
     try {

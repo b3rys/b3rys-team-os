@@ -490,7 +490,7 @@ export async function handleMessage(
   }
   // ★진행 표시★ — codex 가 도구를 시작할 때마다 오는 줄을 모아 "작업 중…" 메시지를 고쳐 쓴다.
   //   창이 없는 런타임이라 이게 없으면 사람 눈에는 몇 분간 문구 하나만 남는다.
-  //   자르기·넘김 기준은 hermes 실구현 값을 쓴다. 편집 간격만 팀 리드 요청으로 2초다(progressLines.ts 주석).
+  //   자르기·넘김 기준은 hermes 실구현 값을 쓴다. 편집 간격만 2초다(제품 결정: 2026-08-18 · progressLines.ts 주석).
   let bubbleId = workingMsgId;          // 지금 고쳐 쓰는 메시지
   let lines: ProgressLine[] = [];       // 그 메시지에 담긴 줄
   let lastEditAt = 0;                   // 마지막 편집 시각
@@ -662,7 +662,13 @@ export function tgSend(token: string, fetchFn: typeof fetch = fetch): NonNullabl
       const id = await post({ chat_id: chatId, text, parse_mode: "MarkdownV2" });
       if (id !== null) return id;
       // ★MarkdownV2 로 거부되면 표시를 걷어내고 한 번 더.★ 이스케이프 한 곳이 어긋났다고
-      //   답이 통째로 사라지면 안 된다(hermes 도 같은 폴백을 둔다).
+      //   답이 통째로 사라지면 안 된다.
+      // ★흔적을 남긴다★ — 조용히 재시도하면 "한 번도 안 돌았다" 와 "매번 돌고 있다" 가
+      //   로그에서 같은 모양이라, 표시가 계속 깨지고 있어도 아무도 모른다.
+      //   ★원인은 단정하지 않는다★ — post 는 표시 거부만이 아니라 429·chat not found·비-JSON 응답에도
+      //   null 을 낸다. "표시 때문" 이라고 적으면 rate limit 인데 이스케이프를 뒤지게 된다.
+      //   (그런 경우엔 재전송도 같은 이유로 실패한다 — 로그만 남고 답은 여전히 안 간다.)
+      console.warn("[codex-bridge] 1차 전송 실패(MarkdownV2) → 순수 텍스트로 재전송");
       return await post({ chat_id: chatId, text: toPlain(text) });
     } catch {
       return null;
@@ -685,6 +691,7 @@ export function tgEdit(token: string, fetchFn: typeof fetch = fetch): NonNullabl
   return async (chatId, messageId, text) => {
     try {
       if (await post({ chat_id: chatId, message_id: messageId, text, parse_mode: "MarkdownV2" })) return true;
+      console.warn("[codex-bridge] 1차 편집 실패(MarkdownV2) → 순수 텍스트로 재전송");
       return await post({ chat_id: chatId, message_id: messageId, text: toPlain(text) });
     } catch {
       return false;
