@@ -112,6 +112,51 @@ describe("주석 사람귀속 검사기", () => {
     expect(scanText("t.ts", line)).toHaveLength(1);
   });
 
+  /**
+   * ── ★이름 바로 뒤의 요청·설계★ ──
+   * `(팀 리드 요청 2026-08-18)` 꼴이 검출을 빠져나갔다. 이름 뒤 행위 명사라 제안·검토·판단과 같은 자리다.
+   * ★넓히는 쪽만 걸면 오탐이 늘어도 안 보인다★ — 그래서 아래에 배제 쪽을 같은 수만큼 둔다.
+   */
+  describe("이름 뒤 요청·설계", () => {
+    test("★'팀 리드 요청' 을 잡는다★ — 결정의 공을 사람에게 돌리는 자리다", () => {
+      expect(scanText("t.ts", " * 편집 간격은 팀 리드 요청(2026-08-18)으로 2초다")).toHaveLength(1);
+    });
+
+    test("★'팀 리드 설계' 도 같은 자리다★", () => {
+      expect(scanText("t.ts", "  // 상태 줄은 맨 위에서 교체된다(팀 리드 설계 2026-08-18)")).toHaveLength(1);
+    });
+
+    test("다른 이름에도 붙는다 — 규칙은 이름 목록 전체에 걸린다", () => {
+      expect(scanText("t.ts", "  // ★방어적(Bill 요청): 형식이 바뀌어도 크래시 없음★")).toHaveLength(1);
+    });
+
+    /**
+     * ★'지시' 는 일부러 넣지 않았다.★ 전수 대조에서 그 낱말로만 4건이 늘었고 넷 다 오탐이었다 —
+     * 로그 예시의 메시지 제목 · 데이터 출처 분류 · 동작 서술. 이 세 시험이 그 결정을 고정한다.
+     * 누가 '지시' 를 추가하면 여기가 빨간불이 되고, 그때 오탐 4건을 같이 보게 된다.
+     */
+    test("★대조군 — 로그 예시의 메시지 제목은 귀속이 아니다★", () => {
+      expect(scanText("t.ts", " *   16:22:01  steve → hermes   [팀장 지시 수집] 질문")).toHaveLength(0);
+    });
+
+    test("★대조군 — 데이터 출처 분류는 귀속이 아니다★", () => {
+      expect(scanText("t.ts", '  row.source === "agent" && // user/system(GD 지시)은 절대 억제 안 함')).toHaveLength(0);
+    });
+
+    test("★대조군 — 동작 서술은 귀속이 아니다★", () => {
+      expect(scanText("t.ts", '    expect(card.description).toContain("반영 검토"); // 팀장 지시 전달')).toHaveLength(0);
+    });
+
+    test("★대조군 — 이름이 앞에 없으면 대상이 아니다★ (그냥 '요청' 은 흔한 낱말이다)", () => {
+      expect(scanText("t.ts", "  // 승인 요청을 큐에 넣고 응답을 기다린다")).toHaveLength(0);
+    });
+
+    test("★대조군 — 파생어는 걸리지 않는다★ (요청서·설계도)", () => {
+      expect(scanText("t.ts", "  // 팀장 요청서 양식을 렌더한다")).toHaveLength(0);
+      expect(scanText("t.ts", "  // 팀 리드 설계도를 문서에 싣는다")).toHaveLength(0);
+    });
+  });
+
   test("★코드 줄은 안 본다★ — 시험 입력값을 지우면 시험이 죽는다", () => {
     const code = '    expect(await gateBlocks(GROUP, "@빌 이거 해줘 라고 요청했다", ctx)).toBe(true);';
     expect(scanText("t.ts", code)).toHaveLength(0);
