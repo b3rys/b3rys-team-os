@@ -3,7 +3,6 @@ import type { CodexSandboxMode } from "../../types";
 import {
   grantKey,
   requestPermission,
-  safeCheckPermission,
   type PermissionAgent,
   type PermissionCheck,
   type PermissionContext,

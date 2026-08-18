@@ -128,6 +128,26 @@ export function grantKey(agentId: string, scope: string): string {
   return `perm.grant.${agentId}.${scope}`;
 }
 
+/**
+ * ★이 층은 현재 운영 경로에서 호출되지 않는다 (2026-08-18 전수 확인).★
+ *
+ * 진입점: 없음. `safeCheckPermission` 은 `runtimes/codex/permissions.ts` 가 import 만 하고 부르지 않았고,
+ * 그 import 는 이 커밋에서 제거했다. `checkPermission`·`hardDeny` 는 이 파일 안에서만 서로를 부른다.
+ * 시험은 21건이 남아 있다 — ★이 층이 무엇을 막는지에 대한 유일한 기록이라 함께 보존한다.★
+ *
+ * 이 층이 꺼져 있는 동안 다음 방어가 ★작동하지 않는다★:
+ *   · `tier-d.secret-read-plus-egress` — 비밀 읽기 + 외부 전송 조합 하드 거부
+ *   · `tier-d.security-config`         — 인증·크리덴셜 설정 접근 제한
+ *   · `tier-d.outside-workspace-write` — 작업폴더 밖 쓰기 하드 거부
+ *   · tier-a — workspace-write · 네트워크 송신 · MCP · 비밀 메타데이터 읽기를 ask 로
+ *
+ * ★지우지 않는 이유★: 삭제하면 위 규칙이 코드에서 사라져, 다시 조일 때 처음부터 재발견해야 한다.
+ * 그리고 `tier-d.danger-full-access` 는 "승인 버튼으로 danger 를 줄 수 없다" 는 규칙이지
+ * "설정·프로토콜로도 못 연다" 가 아니다 — 실행 모드를 codex 프로토콜로 지정하는 경로와는 다른 층이다.
+ *
+ * 다시 이으려면 런타임 실행 직전 경로에서 이 함수를 부르고, `evaluatePermission` 이 deny 를 낼 수 있게
+ * 해야 한다(아래 주석 참조). 그 전까지 이 파일의 규칙은 ★기록이지 방어가 아니다.★
+ */
 export function safeCheckPermission(
   agent: PermissionAgent,
   action: PermissionAction,
@@ -258,6 +278,13 @@ export function scopeKeyForOperation(op: PermissionOperation): string {
  *
  * `tierDReasons` 는 지우지 않는다 — 팝업 본문에 "왜 위험한지" 를 적는 ★표시용★ 으로는 값이 있다.
  * 판정에서만 뺀다.
+ */
+/**
+ * ★반환은 allow · approval_required 둘뿐이다 — deny 를 내지 않는다.★
+ * 그래서 `requestPermission` 의 deny 분기(감사 기록 + tier_d_denied)는 현재 도달 불가다.
+ * 그 분기를 지우지 않는 이유: 여기에 deny 를 다시 넣는 순간 그 분기가 주 경로가 되는데,
+ * 지워져 있으면 감사 기록 없이 살아난다. 도달 불가는 시험으로 고정해 두었다 —
+ * 여기에 deny 를 추가하면 그 시험이 빨간불이 되어 아래 분기를 함께 보게 된다.
  */
 export function evaluatePermission(db: Database, op: PermissionOperation): { decision: PermissionDecision; reasons: string[]; grant?: PermissionGrantRow } {
   const scope_key = scopeKeyForOperation(op);
