@@ -11,6 +11,7 @@
  * 채팅별 codex thread(resume sessionId)로 멀티턴 맥락 유지.
  */
 import { runCodexTurn, type CodexTurnOptions, type CodexTurnResult } from "./runner";
+import { createSerialTurnQueue } from "./serialTurnQueue";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -806,6 +807,14 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
   } catch (e) {
     console.error(`[codex-bridge] getMe 실패(토큰/네트워크?) — getUpdates 후 marker 폴백: ${e instanceof Error ? e.message : e}`);
   }
+  // ★턴을 여기서 기다리지 않는다★ — 기다리면 턴이 도는 동안 getUpdates 를 못 부르고,
+  //   승인 팝업은 턴 도중에만 뜨므로 버튼 입력이 영영 안 들어온다(실측 2026-08-18: 승인 6건 중
+  //   5건이 생성 후 300~302초에 만료 = 턴 하드 타임아웃 300초. 사람이 눌러 처리된 건 0건).
+  //   ★직렬이다★ — 겹쳐 돌리면 app-server 클라이언트(팀원 단위 공유)의 turn 상태가 덮어써진다.
+  const turns = createSerialTurnQueue((e) => {
+    console.error(`[codex-bridge] 턴 처리 실패: ${e instanceof Error ? e.message : e}`);
+  });
+
   for (;;) {
     try {
       const res = await fetch(`${TG_API}/bot${token}/getUpdates?timeout=30&offset=${offset}&allowed_updates=["message","callback_query"]`);
@@ -839,8 +848,11 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
 	          continue;
 	        }
         console.log(`[codex-bridge] ← chat ${chatId}: ${text.slice(0, 60)}`);
-        const r = await handleMessage(chatId, text, messageId, live);
-        console.log(`[codex-bridge] → ${r.detail}: ${r.reply.slice(0, 60)}`);
+        // ★턴은 하나씩 돈다(직렬).★ 루프는 기다리지 않고 다음 업데이트로 간다 — 그래야 승인 버튼이 들어온다.
+        turns.enqueue(async () => {
+          const r = await handleMessage(chatId, text, messageId, live);
+          console.log(`[codex-bridge] → ${r.detail}: ${r.reply.slice(0, 60)}`);
+        });
       }
     } catch (e) {
       console.error("[codex-bridge] poll 오류:", (e as Error).message);
