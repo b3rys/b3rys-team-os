@@ -305,6 +305,18 @@ export function migrateCodexRuntimeState(db: Database): void {
 
 export function migrateSchedulerState(db: Database): void {
   db.exec(
+    `CREATE TABLE IF NOT EXISTS scheduled_workflow (
+       id TEXT PRIMARY KEY,
+       title TEXT NOT NULL,
+       timezone TEXT NOT NULL DEFAULT 'Asia/Seoul',
+       owner_agent_id TEXT,
+       description TEXT NOT NULL DEFAULT '',
+       enabled INTEGER NOT NULL DEFAULT 1,
+       created_at TEXT NOT NULL DEFAULT (datetime('now')),
+       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+     )`,
+  );
+  db.exec(
     `CREATE TABLE IF NOT EXISTS scheduled_job (
        id TEXT PRIMARY KEY,
        kind TEXT NOT NULL CHECK(kind IN ('oneshot','recurring')),
@@ -312,6 +324,9 @@ export function migrateSchedulerState(db: Database): void {
        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','running','succeeded','failed','cancelled')),
        enabled INTEGER NOT NULL DEFAULT 1,
        title TEXT NOT NULL,
+       workflow_id TEXT REFERENCES scheduled_workflow(id),
+       workflow_step_key TEXT,
+       workflow_step_order INTEGER,
        owner_agent_id TEXT,
        target_agent_id TEXT,
        created_by TEXT NOT NULL DEFAULT 'system',
@@ -331,8 +346,28 @@ export function migrateSchedulerState(db: Database): void {
        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
      )`,
   );
+  addColumnIfMissing(db, "scheduled_job", "workflow_id", "TEXT REFERENCES scheduled_workflow(id)");
+  addColumnIfMissing(db, "scheduled_job", "workflow_step_key", "TEXT");
+  addColumnIfMissing(db, "scheduled_job", "workflow_step_order", "INTEGER");
   db.exec("CREATE INDEX IF NOT EXISTS idx_scheduled_job_due ON scheduled_job(enabled, status, next_run_at, lock_until)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_scheduled_job_target ON scheduled_job(target_agent_id, next_run_at)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_scheduled_job_workflow ON scheduled_job(workflow_id, workflow_step_order)");
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduled_job_workflow_step
+    ON scheduled_job(workflow_id, workflow_step_key)
+    WHERE workflow_id IS NOT NULL AND workflow_step_key IS NOT NULL`);
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS scheduled_workflow_exception (
+       id TEXT PRIMARY KEY,
+       workflow_id TEXT NOT NULL REFERENCES scheduled_workflow(id) ON DELETE CASCADE,
+       occurrence_date TEXT NOT NULL,
+       action TEXT NOT NULL CHECK(action IN ('skip','reschedule')),
+       rescheduled_to_date TEXT,
+       reason TEXT NOT NULL,
+       actor TEXT NOT NULL,
+       created_at TEXT NOT NULL DEFAULT (datetime('now')),
+       UNIQUE(workflow_id, occurrence_date)
+     )`,
+  );
   db.exec(
     `CREATE TABLE IF NOT EXISTS scheduled_job_run (
        id TEXT PRIMARY KEY,

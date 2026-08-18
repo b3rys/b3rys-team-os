@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { openDb, migrate } from "../db/migrate";
 import { createSchedulerRoutes } from "./scheduler";
+import { assignScheduledJobToWorkflow, createCronJob, ensureScheduledWorkflow } from "../scheduler/core";
 
 function makeApp(opts: { acceptingJobs?: boolean } = {}) {
   process.env.OP_MESSAGE_TOKEN = "test-token";
@@ -222,5 +223,29 @@ describe("scheduler routes", () => {
       headers: authHeaders("gd"),
     });
     expect(leadCancel.status).toBe(200);
+  });
+
+  test("lead can skip a complete workflow occurrence but a member cannot", async () => {
+    const { app, db } = makeApp();
+    ensureScheduledWorkflow(db, { id: "route-weekly", title: "Route weekly", timezone: "Asia/Seoul" });
+    const from = new Date("2026-08-16T15:00:00Z");
+    const payload = { type: "capability_workloop" as const, capability: "coordinator", threadId: "route-weekly", body: "route" };
+    const a = createCronJob(db, { id: "route-weekly-a", title: "A", cron: "0 4 * * 5", timezone: "Asia/Seoul", from, payload });
+    const b = createCronJob(db, { id: "route-weekly-b", title: "B", cron: "0 10 * * 5", timezone: "Asia/Seoul", from, payload });
+    assignScheduledJobToWorkflow(db, a.id, "route-weekly", "a", 10);
+    assignScheduledJobToWorkflow(db, b.id, "route-weekly", "b", 20);
+
+    const blocked = await app.request("/api/schedules/workflows/route-weekly/occurrences/2026-08-21/skip", {
+      method: "POST", headers: authHeaders("dex"), body: JSON.stringify({ reason: "not lead" }),
+    });
+    expect(blocked.status).toBe(403);
+
+    const skipped = await app.request("/api/schedules/workflows/route-weekly/occurrences/2026-08-21/skip", {
+      method: "POST", headers: authHeaders("gd"), body: JSON.stringify({ reason: "week off" }),
+    });
+    expect(skipped.status).toBe(200);
+    const json = (await skipped.json()) as { skippedJobIds: string[]; alreadySkipped: boolean };
+    expect(json.skippedJobIds).toEqual([a.id, b.id]);
+    expect(json.alreadySkipped).toBe(false);
   });
 });
