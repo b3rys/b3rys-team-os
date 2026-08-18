@@ -54,6 +54,7 @@ import { ensureDailyTaskReviewJobs, ensureWeeklySelfLearningJobs } from "./sched
 import { renderAndRepoint } from "./lib/teamOsRender";
 import { installProgressHook, repairProgressHook, repairReplyGuardHook, ensureOwnerGateHook } from "./runtimes/claude/launcher";
 import { writeMemberPersona, savePersonaFile } from "./lib/writeMemberPersona";
+import { refreshLoadingFiles } from "./lib/refreshLoadingFiles";
 import { persistOwnerChatIdIfEmpty } from "./runtimes/codex/launcher";
 import { createApprovalsApp } from "./routes/approvals";
 import { createPermissionGateRoutes } from "./routes/permissionGate";
@@ -177,6 +178,29 @@ try {
     try { repairReplyGuardHook(cid); } catch { /* best-effort */ }
     // ★owner-gate 만 "없으면 깐다" 다★ — 위 둘과 목적이 반대다(주석은 launcher 쪽에).
     try { ensureOwnerGateHook(cid); } catch { /* best-effort */ }
+  }
+  // ★이미 있는 로딩파일(CLAUDE.md/AGENTS.md) 되맞추기 — 게이트 밖★ (위 훅 수리와 같은 이유·같은 형태).
+  //   룰을 고쳐 배포·재시작해도 기존 팀원 파일은 그대로였다(2026-08-18 실측: 렌더 결과에는 새 문장이
+  //   있는데 팀원 AGENTS.md 는 6일 전 파일 그대로, 그 문장 0건). 정본 룰 파일은 심링크로 닿아서
+  //   이 간극이 드러나지 않았다 — ★핵심룰 요약만 조용히 낡는다.★
+  //   ★없는 파일은 만들지 않는다★(영입 절차의 몫) — 그래서 게이트가 지키려던 실멤버 보호가 유지된다.
+  //   렌더러는 SOUL.md 를 건드리지 않고 skip-if-unchanged 다.
+  {
+    const teamNameForRefresh = (db.query("SELECT value FROM setting WHERE key = 'team_name'").get() as { value: string } | null)?.value ?? undefined;
+    const r = refreshLoadingFiles(
+      agents
+        .filter((a) => a.runtime !== "b3os_native")
+        .map((a) => ({
+          id: a.id, display_name: a.display_name, role: a.role, runtime: a.runtime,
+          bot_username: a.telegram_bot_username ?? undefined,
+          workspace_path: a.workspace_path, persona_file: a.persona_file,
+          owner_name: ownerRow?.value ?? undefined, team_name: teamNameForRefresh,
+          team_collect_enabled: false,
+        })),
+    );
+    // ★결과를 로그로 남긴다★ — 조용한 성공은 조용한 실패와 구별되지 않는다.
+    if (r.updated.length > 0) console.log(`[teamos-render] 로딩파일 되맞춤: ${r.updated.join(", ")}`);
+    for (const s of r.skipped) console.warn(`[teamos-render] 로딩파일 되맞춤 실패(계속) ${s.id}: ${s.reason}`);
   }
   // ★옛 합류 깃발 정리 (일회성 전환, 전 환경)★ — 2026-08-05 이전 영입은 `.b3os-just-joined` 에
   //   지시 없이 `joined` 한 줄만 들어 있다. 지금 룰은 "있으면 읽고·따르고·지워라" 라
