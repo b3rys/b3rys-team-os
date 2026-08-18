@@ -201,7 +201,7 @@ describe("b3os scheduler core", () => {
     expect(tables.map((t) => t.name).sort()).toEqual(["scheduled_job", "scheduled_job_run", "scheduled_workflow", "scheduled_workflow_exception"]);
   });
 
-  test("workflow occurrence skip consumes every step atomically and is idempotent", () => {
+  test("future workflow occurrence skip advances every step past the skipped slot and is idempotent", () => {
     const d = db();
     ensureScheduledWorkflow(d, { id: "weekly-test", title: "Weekly test", timezone: "Asia/Seoul" });
     const a = createCronJob(d, {
