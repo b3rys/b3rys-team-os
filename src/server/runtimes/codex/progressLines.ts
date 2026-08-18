@@ -70,9 +70,25 @@ export function appendLine(
 }
 
 /** 버블 본문. header 는 "⏳ 작업 중…" 같은 첫 줄이다. */
+/**
+ * 작업 줄 아이콘 — 줄마다 돌려 쓴다.
+ * ★같은 그림이 세로로 반복되면 줄 수를 눈으로 못 센다★(팀 리드 요청 2026-08-18).
+ * 무작위가 아니라 ★자리 기준★ 으로 고른다 — 편집할 때마다 그림이 바뀌면 화면이 요동친다.
+ */
+export const WORK_ICONS = ["🛠️", "⚙️", "🔧", "📎", "🧩", "📐"] as const;
+
+export function iconFor(index: number): string {
+  return WORK_ICONS[index % WORK_ICONS.length] as string;
+}
+
 export function renderBubble(header: string, lines: ProgressLine[]): string {
+  // ★머리글은 '지금 어느 단계인가' 한 자리다★ — 매 턴 여러 번 오는 상태(생각·대답 준비)를
+  //   여기서 교체한다. 쌓지 않으므로 화면이 그것으로 차지 않는다(팀 리드 설계 2026-08-18).
+  //   실제 작업은 그 아래에 계속 쌓인다.
   if (lines.length === 0) return header;
-  const body = lines.map((l) => (l.count > 1 ? `🛠️ ${l.text} (×${l.count})` : `🛠️ ${l.text}`)).join("\n");
+  const body = lines
+    .map((l, i) => (l.count > 1 ? `${iconFor(i)} ${l.text} (×${l.count})` : `${iconFor(i)} ${l.text}`))
+    .join("\n");
   return `${header}\n${body}`;
 }
 

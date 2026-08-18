@@ -504,7 +504,7 @@ export async function handleMessage(
     editing = true;
     dirty = false;
     lastEditAt = Date.now();
-    const text = renderBubble(workingText, lines);
+    const text = renderBubble(headLine, lines);
     const work = (async () => {
       const ok = await edit(chatId, bubbleId as number, text);
       if (!ok) {
@@ -535,16 +535,25 @@ export async function handleMessage(
     }, wait);
   };
 
+  // ★상태는 한 자리에서 교체된다★ — 쌓지 않는다. 실제 작업만 아래에 쌓인다.
+  let headLine = workingText;
+  const onStatus = (line: string): void => {
+    if (bubbleId === null || line === headLine) return;
+    headLine = line;
+    dirty = true;
+    schedule();
+  };
+
   const onActivity = (line: string, itemId?: string): void => {
     if (bubbleId === null) return;
     const next = appendLine(lines, line, undefined, itemId);
     if (next === lines) return; // 빈 줄이라 담을 것이 없다
-    if (!fits(workingText, next)) {
+    if (!fits(headLine, next)) {
       // ★한도에 닿으면 지금 버블은 남기고 새 버블로 넘어간다★ — 어디까지 했는지가 사라지지 않는다.
       lines = appendLine([], line);
       dirty = true;
       void (async () => {
-        const fresh = await send(chatId, renderBubble(workingText, lines));
+        const fresh = await send(chatId, renderBubble(headLine, lines));
         if (fresh !== null) { bubbleId = fresh; dirty = false; lastEditAt = Date.now(); }
       })();
       return;
@@ -558,6 +567,7 @@ export async function handleMessage(
     prompt: promptText,
     agentId: selfAgentId, // ★필수★ — 승인 요청의 주인이 된다
     onActivity,
+    onStatus,
 
     resumeSessionId: prior,
     codexHome: deps.codexHome,

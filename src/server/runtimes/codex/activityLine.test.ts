@@ -7,7 +7,7 @@ import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../../db/migrate";
 import { setActivityLine } from "../../db/queries";
-import { activityLineOf } from "./appServerClient";
+import { activityLineOf, statusLineOf } from "./appServerClient";
 
 describe("codex 활동 한 줄 — 무엇을 하는지 보여준다", () => {
 
@@ -92,9 +92,32 @@ describe("진행 줄 — 라이브에서 드러난 구멍", () => {
     expect(activityLineOf({ type: "somethingNew" })).toBe("somethingNew");
   });
 
-  test("생각 요약이 오면 무엇을 생각하는지 보여준다 — 없으면 예전 문구", () => {
-    expect(activityLineOf({ type: "reasoning", summary: "판교 날씨를 찾는다\n두 번째 줄" })).toBe("생각: 판교 날씨를 찾는다");
-    expect(activityLineOf({ type: "reasoning" })).toBe("생각하는 중");
+  // ★계약이 바뀌었다(2026-08-18 팀 리드 지적) — 매번 나오는 상태 줄은 빼고 실제 작업만 보여준다.★
+  //   "생각하는 중" · "답 쓰는 중" 은 어느 턴에나 여러 번 나와 줄만 차지하고 무엇을 하는 중인지는 안 알려준다.
+  // ★설계가 바뀌었다(팀 리드 2026-08-18) — 매 턴 반복되는 상태는 ★맨 윗줄 한 자리★ 에서 교체한다.
+  //   지우는 게 아니라 쌓지 않는 것이다. 실제 작업만 그 아래에 누적된다.
+  test("★반복되는 상태는 작업 줄로 쌓이지 않는다★", () => {
+    expect(activityLineOf({ type: "reasoning" })).toBeNull();
+    expect(activityLineOf({ type: "reasoning", summary: "판교 날씨를 찾는다" })).toBeNull();
+    expect(activityLineOf({ type: "agentMessage" })).toBeNull();
+  });
+
+  test("★그 상태는 머리글로 간다★ — 요약이 실리면 무엇을 생각하는 중인지까지", () => {
+    expect(statusLineOf({ type: "reasoning" })).toBe("🧠 생각하는 중…");
+    expect(statusLineOf({ type: "reasoning", summary: "판교 날씨를 찾는다\n둘째 줄" })).toBe("🧠 판교 날씨를 찾는다");
+    expect(statusLineOf({ type: "agentMessage" })).toBe("✍️ 대답하는 중…");
+  });
+
+  test("★대조군 — 실제 작업은 머리글이 아니다★ (그러면 앞 작업을 덮어쓴다)", () => {
+    expect(statusLineOf({ type: "commandExecution", command: "ls" })).toBeNull();
+    expect(statusLineOf({ type: "webSearch", action: { queries: ["x"] } })).toBeNull();
+  });
+
+  test("★대조군 — 실제 작업은 그대로 보여준다★ (다 걸러내면 화면이 빈다)", () => {
+    expect(activityLineOf({ type: "commandExecution", command: "bun test" })).toBe("실행: bun test");
+    expect(activityLineOf({ type: "webSearch", action: { queries: ["판교 날씨"] } })).toBe("웹 검색: 판교 날씨");
+    expect(activityLineOf({ type: "mcpToolCall", name: "team_status" })).toBe("도구 호출: team_status");
+    expect(activityLineOf({ type: "fileChange", fileChanges: { "a.ts": {} } })).toBe("파일 수정: a.ts");
   });
 });
 
@@ -138,5 +161,35 @@ describe("진행 줄 — 실제 payload", () => {
   test("★대조군 — 검색이 빈손이면 예전 문구 그대로★ (action.type='other')", () => {
     const done = { type: "webSearch", id: "exec-4", query: "", action: { type: "other" }, results: [] };
     expect(activityLineOf(done)).toBe("웹 검색");
+  });
+});
+
+describe("진행 줄 — 파일 변경(실제 payload)", () => {
+  // 아래 payload 는 2026-08-18 실제 턴에서 받아 적은 것이다.
+  // 예전 코드는 fileChanges 라는 ★객체★ 를 찾았는데 실제로는 changes ★배열★ 이라,
+  // 못 만나고 마지막 줄로 떨어져 화면에 ★내부 이름 fileChange★ 가 그대로 떴다.
+  const mk = (kind: string, paths: string[]) => ({
+    type: "fileChange",
+    id: "exec-1",
+    changes: paths.map((p) => ({ path: p, kind: { type: kind }, diff: "\n" })),
+    status: "completed",
+  });
+
+  test("★파일 하나면 이름과 무엇을 했는지 보여준다★", () => {
+    expect(activityLineOf(mk("add", ["/tmp/ws/note2.txt"]))).toBe("파일 생성: note2.txt");
+    expect(activityLineOf(mk("delete", ["/tmp/ws/old.md"]))).toBe("파일 삭제: old.md");
+    expect(activityLineOf(mk("update", ["/tmp/ws/a.ts"]))).toBe("파일 수정: a.ts");
+  });
+
+  test("여러 개면 개수로 줄인다 — 경로가 길어 화면을 다 먹는다", () => {
+    expect(activityLineOf(mk("add", ["/tmp/a", "/tmp/b", "/tmp/c"]))).toBe("파일 3개 생성");
+  });
+
+  test("★내부 이름이 새지 않는다★ — 이 항목에서 fileChange 라는 글자가 화면에 뜨면 안 된다", () => {
+    expect(activityLineOf(mk("add", ["/tmp/ws/x.txt"]))).not.toContain("fileChange");
+  });
+
+  test("★대조군 — 변경 목록이 비면 예전 경로로 떨어진다★ (지어내지 않는다)", () => {
+    expect(activityLineOf({ type: "fileChange", changes: [] })).toBe("fileChange");
   });
 });

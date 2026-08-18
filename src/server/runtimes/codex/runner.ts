@@ -53,6 +53,8 @@ export interface CodexTurnOptions {
    *  채널(텔레그램 등)이 "지금 무엇을 하는 중인지" 를 보여주려면 이 통로가 필요하다 —
    *  없으면 러너까지 온 이벤트가 호출자에게 도달하지 않는다. */
   onActivity?: (line: string, itemId?: string) => void;
+  /** 지금 어느 단계인가 — 맨 윗줄에서 교체된다(쌓이지 않는다). */
+  onStatus?: (line: string) => void;
 }
 
 export interface CodexTurnResult {

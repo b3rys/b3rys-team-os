@@ -105,6 +105,9 @@ export async function runViaAppServer(
         }
         try { opts.onActivity?.(line, itemId); } catch { /* 채널 표시가 턴을 막지 않는다 */ }
       },
+      onStatus: (line) => {
+        try { opts.onStatus?.(line); } catch { /* 채널 표시가 턴을 막지 않는다 */ }
+      },
       onApproval: async (req) => {
         // ★경계는 codex 설정이 정한다. 우리는 두 번째로 판정하지 않는다.★
         //   codex 가 물으면 그 물음을 ★그 팀원의 방★ 으로 옮기고, 사람이 누른 대로 돌려준다.
