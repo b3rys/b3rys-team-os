@@ -12,6 +12,7 @@
  */
 import { runCodexTurn, type CodexTurnOptions, type CodexTurnResult } from "./runner";
 import { createSerialTurnQueue } from "./serialTurnQueue";
+import { makeDmSessionStore, NOOP_DM_SESSION_STORE, type DmSessionStore } from "./dmSessionStore";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -56,6 +57,8 @@ export interface BridgeDeps {
   scheduleToolEnabled?: boolean;
   /** Host-side executor for structured schedule requests emitted by the Codex turn. */
   registerScheduleReminder?: (req: ScheduleMarkerRequest, ctx: ScheduleMarkerContext) => Promise<string>;
+  /** 1:1 대화 세션을 재시작 넘어 기억한다. 미지정이면 기억하지 않는다(시험 기본값). */
+  dmSessions?: DmSessionStore;
 }
 
 // 채팅별 codex thread(resume sessionId) → 같은 대화 맥락 유지.
@@ -444,7 +447,15 @@ export async function handleMessage(
   const workingMsgId = await send(chatId, workingText);
 
   // ③ 두뇌 호출(채팅별 thread resume로 맥락 유지)
-  const prior = chatThreads.get(chatId);
+  //   ★인메모리 지도가 비어 있으면 저장된 것을 본다★ — 그 지도는 재시작마다 비고,
+  //   그때 사람 쪽에서는 앞 대화를 잊은 것으로 보인다(2026-08-18 실측: 브리지가 codex_session_map 을
+  //   참조하지 않아 1:1 대화만 맥락이 끊겼다. 버스로 온 일은 그 표를 써서 이어졌다).
+  const sessions = deps.dmSessions ?? NOOP_DM_SESSION_STORE;
+  let prior = chatThreads.get(chatId);
+  if (prior === undefined) {
+    prior = sessions.get(chatId);
+    if (prior !== undefined) chatThreads.set(chatId, prior); // 다음 턴부터는 메모리에서 바로
+  }
   const toolAwareText = scheduleRequest
     ? scheduleToolPrompt({
         text,
@@ -561,11 +572,15 @@ export async function handleMessage(
   //   기다리지 않으면 그 응답이 답보다 늦게 도착해 답이 진행 줄로 덮인다.
   if (inFlightEdit !== null) { try { await inFlightEdit; } catch { /* 표시 실패가 답을 막지 않는다 */ } }
 
-  if (result.sessionId) chatThreads.set(chatId, result.sessionId);
+  if (result.sessionId) {
+    chatThreads.set(chatId, result.sessionId);
+    sessions.save(chatId, result.sessionId); // 재시작 넘어 기억한다
+  }
 
   if (!result.ok || !result.reply) {
     // self-heal: 턴 실패(만료·손상 세션 포함) 시 thread 초기화 → 다음 턴은 새 세션(죽은 sessionId resume 반복 stuck 방지).
     chatThreads.delete(chatId);
+    sessions.clear(chatId); // ★죽은 세션을 저장해두면 재시작 후에도 계속 그것으로 resume 한다★
     const errText = "⚠️ 일시적으로 응답을 만들지 못했어요. 잠시 후 다시 시도해 주세요.";
     // ★마지막 버블에 쓴다★ — 넘김이 일어났으면 첫 버블에 쓸 경우 오류가 진행 줄 위로 올라간다.
     if (bubbleId !== null) await edit(chatId, bubbleId, errText);
@@ -863,6 +878,8 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
       workspaceRoot: liveWorkspaceRoot,
       grants: codexConfiguredGrants(liveAgentId, liveSandbox, liveNetwork, liveWorkspaceRoot),
     },
+    // 라이브에서는 1:1 세션을 team.db 에 기억한다(재시작 넘어 맥락 유지).
+    dmSessions: deps.dmSessions ?? makeDmSessionStore(liveAgentId, defaultTeamDbPath()),
     sendMessage: deps.sendMessage ?? tgSend(token),
     editMessage: deps.editMessage ?? tgEdit(token),
     reactMessage: deps.reactMessage ?? tgReact(token),

@@ -694,3 +694,74 @@ test("★대조군 — 대기열이 콜백 처리를 늦추지 않는다★ (턴
   expect(elapsed).toBeLessThan(1000); // 턴(1500ms)을 기다리지 않았다
   await turns.drain();
 });
+
+// ── ★재시작 넘어 맥락이 이어지는가 (배선)★ ──
+//
+// 순수 저장 로직은 dmSessionStore.test.ts 가 잰다. 여기서는 ★브리지가 그것을 실제로 쓰는지★ 를 잰다 —
+// 실제로 끊겨 있던 곳이 저장소가 아니라 배선이었다(브리지가 codex_session_map 을 참조하지 않았다).
+describe("codex bridge — 1:1 세션 재시작 연속성", () => {
+  beforeEach(() => resetChatThreads());
+
+  /** 인메모리 지도가 빈 상태 = 방금 재시작한 상황. */
+  function spiesWithSessions(store: { get: (c: number) => string | undefined; save: (c: number, s: string) => void; clear: (c: number) => void }) {
+    const seen: { resume?: string }[] = [];
+    const deps: BridgeDeps = {
+      reactMessage: async () => true,
+      sendMessage: async () => 900,
+      editMessage: async () => true,
+      sandbox: "read-only",
+      dmSessions: store,
+      runTurn: async (o) => {
+        seen.push({ resume: o.resumeSessionId });
+        return { ok: true, reply: "답", sessionId: "sess-new", detail: "ok", elapsedMs: 1 };
+      },
+    };
+    return { deps, seen };
+  }
+
+  test("★재시작 후에도 지난 세션으로 이어간다★ — 이 배선이 없으면 매 재시작마다 첫 대화가 된다", async () => {
+    const saved = new Map<number, string>([[42, "sess-before-restart"]]);
+    const { deps, seen } = spiesWithSessions({
+      get: (c) => saved.get(c),
+      save: (c, s) => { saved.set(c, s); },
+      clear: (c) => { saved.delete(c); },
+    });
+    await handleMessage(42, "이어서 하자", 1, deps);
+    expect(seen[0]!.resume).toBe("sess-before-restart");
+  });
+
+  test("★대조군 — 기억하는 곳이 없으면 새 대화로 시작한다★ (고치기 전 동작)", async () => {
+    const { deps, seen } = spiesWithSessions({ get: () => undefined, save: () => {}, clear: () => {} });
+    await handleMessage(43, "안녕", 1, deps);
+    expect(seen[0]!.resume).toBeUndefined();
+  });
+
+  test("턴이 끝나면 그 세션을 적는다 — 다음 재시작이 이어받을 수 있게", async () => {
+    const saved = new Map<number, string>();
+    const { deps } = spiesWithSessions({
+      get: (c) => saved.get(c),
+      save: (c, s) => { saved.set(c, s); },
+      clear: (c) => { saved.delete(c); },
+    });
+    await handleMessage(44, "해줘", 1, deps);
+    expect(saved.get(44)).toBe("sess-new");
+  });
+
+  test("★턴이 실패하면 저장된 세션을 지운다★ — 죽은 세션을 계속 resume 하면 매번 실패한다", async () => {
+    const saved = new Map<number, string>([[45, "sess-dead"]]);
+    const deps: BridgeDeps = {
+      reactMessage: async () => true,
+      sendMessage: async () => 900,
+      editMessage: async () => true,
+      sandbox: "read-only",
+      dmSessions: {
+        get: (c) => saved.get(c),
+        save: (c, s) => { saved.set(c, s); },
+        clear: (c) => { saved.delete(c); },
+      },
+      runTurn: async () => ({ ok: false, reply: "", detail: "boom", elapsedMs: 1 }),
+    };
+    await handleMessage(45, "해줘", 1, deps);
+    expect(saved.has(45)).toBe(false);
+  });
+});
