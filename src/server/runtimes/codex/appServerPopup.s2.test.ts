@@ -15,7 +15,7 @@ import { CodexTurnItemIndex, type ObservedItem } from "./appServerItemIndex";
  * ★fixture 는 라이브 실측 모양을 따른다(2026-07-29 codex-cli 0.144.6).★
  *   update → `@@ -1,4 +1,3 @@\n alpha\n-bravo\n+BRAVO\n` (통일diff)
  *   add    → `HELLO\n` (파일 원문 — `+` 도 `@@` 도 없다)
- * 지어낸 모양으로 시험하면 ★시험만 통과하고 실물에서 틀린다★ — 오늘 이 형태를 여러 번 봤다.
+ * 지어낸 모양으로 시험하면 ★시험만 통과하고 실물에서 틀린다.★
  */
 const observed = (paths: Array<[string, string, number]>, turnId = "t1", itemId = "i1"): ObservedItem => ({
   itemId, turnId, threadId: "th1",
@@ -60,7 +60,7 @@ describe("S2 — 신세대 파일변경 승인 해석", () => {
     // ★뮤턴트가 살아남아 드러난 구멍(2026-07-29).★ 짝이 없을 때 '그냥 다음 분기로 흘려보내도' 신세대
     // 정상 payload 에는 fileChanges 가 없어서 결과가 같다 — 그래서 아무 시험도 안 깨졌다.
     // 그런데 malformed 입력이 fileChanges 를 달고 오면 ★그대로 write 로 처리된다.★
-    // S1 에서 Codex 가 명령 승인에 대해 잡았던 것과 ★같은 계열★ 이다: 파일변경 승인이라고 밝힌 요청은
+    // S1 이 명령 승인에서 잡은 것과 ★같은 계열★ 이다: 파일변경 승인이라고 밝힌 요청은
     // 내용을 못 찾는 순간 거기서 멈춰야 한다. ★못 찾음을 다른 경로의 입력으로 재활용하지 않는다.★
     const mixed: ApprovalRequest = {
       method: "item/fileChange/requestApproval",
@@ -120,7 +120,7 @@ describe("S2 — 신세대 파일변경 승인 해석", () => {
  * ★라이브 실측 payload 재생 — 지어낸 fixture 가 아니라 실물로 한 바퀴 돌린다.★
  *
  * 아래 두 덩어리는 2026-07-29 실제 `codex app-server`(0.144.6)에서 받은 원문을 그대로 붙인 것이다.
- * ★이 시험이 제일 중요하다★ — 나머지 시험은 전부 내가 상상한 모양 위에서 도는데, 이건 실물이다.
+ * ★이 시험이 제일 중요하다★ — 나머지 시험은 만들어낸 모양 위에서 돌지만 이건 실물이다.
  *
  * ★실측이 설계를 고쳤다:★ 계획서에는 내용 출처를 `item/fileChange/patchUpdated` 라고 적었는데,
  * ★라이브 두 번 모두 그 알림은 한 번도 오지 않았다.★ 실제로 내용을 실어온 것은 `item/started` 다.
@@ -233,7 +233,7 @@ describe("S2 — grantRoot 는 별개 승인이다", () => {
 });
 
 /**
- * ★Codex 리뷰(2026-07-29) 차단 2건 — 둘 다 내가 재현해서 확인했다.★
+ * ★차단 2건(2026-07-29 리뷰) — 둘 다 재현 확인.★
  *
  * 공통 원인이 하나다: ★팝업이 보여주는 것과 열쇠가 뜻하는 것이 어긋났다.★
  * 어긋나면 보여준 쪽은 아무 힘이 없다 — '항상 허용' 이 한 번 붙는 순간 ★두 번째 팝업은 안 뜨기 때문에★

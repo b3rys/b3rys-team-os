@@ -70,7 +70,7 @@ describe("S0 — 해석 실패 payload 의 권한 열쇠", () => {
   });
 
   test("★'__proto__' 키만 다른 payload 도 갈린다★ — 해석 실패 경로의 우회 통로였다", () => {
-    // Codex 리뷰(2026-07-29)에서 잡힌 실제 충돌. 일반 객체에 acc["__proto__"]=... 로 대입하면
+    // (2026-07-29) 리뷰에서 잡힌 실제 충돌. 일반 객체에 acc["__proto__"]=... 로 대입하면
     // ★프로토타입이 바뀔 뿐 own property 가 되지 않아 JSON.stringify 에서 통째로 사라진다.★
     // → "__proto__" 값만 다른 두 payload 가 ★같은 지문·같은 열쇠★ 였다(재현: 둘 다 #5353b5b6…).
     // JSON-RPC payload 에 이 키가 오는 것은 유효하므로 ★해석 실패 경로에서 우회 통로★ 가 된다.
@@ -94,7 +94,7 @@ describe("S0 — 해석 실패 payload 의 권한 열쇠", () => {
   test("★approvalOperationHash 로는 못 가른다★ — 왜 payload 전체 지문이 필요한지의 근거", () => {
     // 이 fixture(item/tool/requestUserInput)는 command 도 fileChanges 도 reason 도 없어
     // basis 가 {method, null, null, null} 로 ★내용과 무관하게 같아진다★.
-    // ★즉 기존 지문을 그대로 썼다면 위 첫 테스트가 통과하지 못한다.★ (실제로 처음에 그렇게 짰다가 잡혔다)
+    // ★즉 기존 지문을 그대로 썼다면 위 첫 테스트가 통과하지 못한다.★
     // ※ 신세대 '명령' 은 S1 에서 지문 basis 에 포함되도록 고쳤다 — appServerPopup.s1.test.ts 참조.
     expect(approvalOperationHash(unparsed("rm -rf /tmp/x")))
       .toBe(approvalOperationHash(unparsed("cat ~/.ssh/id_rsa")));

@@ -10,7 +10,7 @@ import type { ApprovalRequest } from "./appServerClient";
  *
  * 왜 열쇠 비교로 부족한가: 열쇠가 갈려도 저장·조회 경로에서 다시 묶이면 소용이 없다.
  * 그래서 ★인메모리 DB 에 실제로 '항상 허용' 을 저장하고, 두 번째 요청의 판정을 본다.★
- * (이 경로로 실측해서 초안의 구멍 두 개를 잡았다 — 둘 다 두 번째가 'allow' 로 통과했다.)
+ * (이 경로 실측에서 구멍 두 개가 나왔다 — 둘 다 두 번째가 'allow' 로 통과했다.)
  *
  * 통과 기준은 하나다: ★다른 작업이면 두 번째가 'approval_required'(다시 묻기)★,
  * ★같은 작업이면 두 번째가 'allow'(항상 허용이 계속 유효)★.
@@ -48,7 +48,7 @@ describe("S5 — '항상 허용' 이 다른 명령으로 새지 않는다 (실�
   });
 
   test("★2000자 경계★: 표시용으로 자른 뒤가 달라도 다시 묻는다", () => {
-    // 초안이 여기서 뚫렸다 — 지문을 '잘린 본문' 으로 만들어서 2000자 뒤 차이가 지문에 안 들어갔다.
+    // 여기가 뚫리는 자리다 — 지문을 '잘린 본문' 으로 만들면 2000자 뒤 차이가 지문에 안 들어간다.
     // ★지문은 자르기 전 원본(material)으로 만든다★ 는 규칙이 살아 있는지 잰다.
     const prefix = "z".repeat(2000);
     expect(decisionAfterAllowAlways(newGen(prefix + "SAFE"), newGen(prefix + "EVIL"))).toBe("approval_required");
@@ -82,7 +82,7 @@ describe("S5 — '항상 허용' 이 다른 명령으로 새지 않는다 (실�
 });
 
 describe("S5 — 규격 밖 payload 를 해석 성공으로 받지 않는다", () => {
-  // 아메스가 DB 경로에서 재현: String(x) 강제변환이 ★서로 다른 payload 를 한 열쇠로★ 묶었다.
+  // DB 경로에서 재현 확인: String(x) 강제변환이 ★서로 다른 payload 를 한 열쇠로★ 묶었다.
   // 규격에 없는 값이 오면 ★넓게 통과가 아니라 좁게 묻는다★ — 해석 실패 경로로 보낸다.
   const pairs: Array<[unknown[], unknown[], string]> = [
     [[1], ["1"], "숫자 1 과 문자열 '1'"],
@@ -100,7 +100,7 @@ describe("S5 — 사람이 보는 한 줄", () => {
   const target = (c: string) => targetForOperation(buildOperationFromApproval(newGen(c), "dex"));
 
   test("★잘렸으면 잘렸다고 말한다★ — 이게 명령 전부인 줄 알게 두지 않는다", () => {
-    // 표시가 없으면 "kubectl delete ns prod" 뒤에 500자가 더 있어도 화면은 그냥 끊긴다(루이 실측).
+    // 표시가 없으면 "kubectl delete ns prod" 뒤에 500자가 더 있어도 화면은 그냥 끊긴다(실측).
     // 전문이 op.text 로 빠진 지금은 ★사람 눈에 닿는 경로가 이 한 줄뿐★ 이다.
     const t = target("kubectl delete ns prod " + "z".repeat(500));
     expect(t).toContain("…");
@@ -112,7 +112,7 @@ describe("S5 — 사람이 보는 한 줄", () => {
   });
 
   test("★어떤 입력이든 지문이 240자 안에 온전히 남는다★", () => {
-    // 지문이 잘려 나가면 열쇠가 다시 합쳐진다 — 경계마다 확인한다(루이 제안).
+    // 지문이 잘려 나가면 열쇠가 다시 합쳐진다 — 경계마다 확인한다.
     const cases: Array<[string, string]> = [
       ["평범한 장문", "echo " + "a".repeat(1000)],
       ["공백 다발", "echo" + " ".repeat(300) + "x"],
@@ -135,7 +135,7 @@ describe("S5 — 사람이 보는 한 줄", () => {
 
 describe("S5 — 너무 긴 요청은 승인 흐름에 태우지 않는다", () => {
   //
-  // 스캔 상한(자르기)은 없앴다 — 자르면 잘린 뒤가 검사에서 빠져서 "얼마면 안전한가" 를 영원히 못 정한다.
+  // 스캔 상한(자르기)을 두지 않는다 — 자르면 잘린 뒤가 검사에서 빠져 "얼마면 안전한가" 에 답이 없다.
   // 대신 ★사람이 읽고 판단할 수 없는 길이는 팝업을 만들지 않는다.★
 
   test("★2,000자를 넘으면 팝업 없이 거절되고 기록이 남는다★", async () => {
@@ -156,7 +156,7 @@ describe("S5 — 너무 긴 요청은 승인 흐름에 태우지 않는다", () 
     // 실측 45자. 이 규칙이 평소 동작을 건드리면 안 된다.
     expect(oversizedForReview(newGen("bun test src/server/runtimes/codex/adapter.ts"))).toBeNull();
     expect(oversizedForReview(oldGen(["npm", "run", "build"]))).toBeNull();
-    // ★현실 최대 모양★ — 설정 파일을 heredoc 으로 명령 안에 통째로 써 넣는 경우(루이 실측 724자).
+    // ★현실 최대 모양★ — 설정 파일을 heredoc 으로 명령 안에 통째로 써 넣는 경우(실측 724자).
     // 한도를 1,000 에서 2,000 으로 올린 이유가 이것이다. 이 줄이 그 여유를 지킨다.
     expect(oversizedForReview(newGen("bash -c 'cat <<EOF > /tmp/x.yml\n" + "b".repeat(900) + "\nEOF'"))).toBeNull();
   });
@@ -170,7 +170,7 @@ describe("S5 — 너무 긴 요청은 승인 흐름에 태우지 않는다", () 
 });
 
 describe("S5 — 해석 실패로 보내도 위험 검사는 면제되지 않는다", () => {
-  // ★내가 만든 회귀였다★ (루이가 잡음): 상한 초과·규격 밖 argv 를 해석 실패로 보내면서
+  // ★이 자리에서 회귀가 났다★ — 상한 초과·규격 밖 argv 를 해석 실패로 보내면서
   // 그 payload 의 Tier-D 스캔 입력이 0 이 됐다. 열쇠는 좁혔는데 ★검사 범위를 없앴다.★
   // Tier-D 는 사람도 승인 못 하는 등급이라, 스캔이 비면 위험 명령이 '누를 수 있는 팝업' 으로 내려온다.
   const danger = "sudo rm -rf /tmp/x ; ";
@@ -195,7 +195,7 @@ describe("S5 — 해석 실패로 보내도 위험 검사는 면제되지 않는
 });
 
 describe("S5 — 1,000자 규칙은 ★명령에만★ 적용된다", () => {
-  // ★내가 잘 되던 기능을 죽였던 자리다★ (아메스 실측): 모든 승인에 길이 규칙을 걸어서
+  // ★잘 되던 기능이 죽었던 자리다★ (실측): 모든 승인에 길이 규칙을 걸어서
   // 1,200자짜리 파일을 만드는 ★평범한 파일 변경 승인이 거절★ 됐고, 기록까지 '명령이 너무 길다' 로 남았다.
   // 기준은 ★명령★ 의 길이다 — 파일 내용은 길어도 이상하지 않다.
   const patch = (content: string): ApprovalRequest => ({

@@ -7,8 +7,8 @@
  * 매핑: allowed_once→approved(★decision_scope 가 session 이면 approved_for_session★) ·
  * allowed_always→approved_for_session · denied/expired/timeout→denied.
  * ★안전: Tier-D는 requestPermission(permissionGate)이 ★팝업을 만들기 전에★ deny 로 반환한다("이중 안전" 지점).
- *   전에는 이 자리에 judgeApproval(우리 승인 판정)이 있었다. #316 에서 경계를 codex 설정으로 넘기며 그 판정을
- *   경로에서 뺐고, 함수는 아무도 부르지 않는 채 남아 있다가 삭제됐다. ★주석만 남으면 없는 방어선을 있다고 읽는다.★
+ *   이 자리의 판정은 judgeApproval 이 아니다 — #316 에서 경계가 codex 설정으로 넘어가며 경로에서 빠졌고,
+ *   아무도 부르지 않던 그 함수는 삭제됐다. ★주석만 남으면 없는 방어선을 있다고 읽는다.★
  *   fail-closed(에러/무응답→denied)는 그대로다.
  */
 import { createHash, randomUUID } from "node:crypto";
@@ -84,11 +84,11 @@ export function approvalOperationHash(req: ApprovalRequest): string {
   const basis: Record<string, unknown> = {
     method: req.method,
     // ★신세대 문자열 command 도 담는다★ — 예전엔 Array.isArray 만 봐서 신세대는 null 이 됐고,
-    //   그 결과 ★서로 다른 신세대 명령이 같은 지문★ 을 가졌다(Codex 리뷰 2026-07-29에서 재현).
+    //   그 결과 ★서로 다른 신세대 명령이 같은 지문★ 을 가졌다(2026-07-29 재현 확인).
     //   S1 이 그 문자열을 실제 shell operation 으로 승격하므로, 상관키·audit 지문도 구분해야 한다.
     //   ★배열은 배열 그대로 둔다★ — 구세대 지문 값을 바꾸지 않기 위해서다(변경 범위 최소).
     command: Array.isArray(p.command) ? p.command : (typeof p.command === "string" ? p.command.trim() || null : null),
-    // ★이동 목적지도 담는다(Codex 리뷰 P1)★ — 예전엔 출발지만 담아 목적지만 다른 두 요청이 같은 지문이었다.
+    // ★이동 목적지도 담는다(P1)★ — 예전엔 출발지만 담아 목적지만 다른 두 요청이 같은 지문이었다.
     //   move_path 가 없으면 결과가 Object.keys().sort() 와 완전히 같다(golden 고정).
     files: p.fileChanges && typeof p.fileChanges === "object" ? fileChangeEntries(p.fileChanges) : null,
     reason: typeof p.reason === "string" ? p.reason : null,
@@ -128,7 +128,7 @@ export function approvalOperationHash(req: ApprovalRequest): string {
 function approvalContentDigest(req: ApprovalRequest): string | null {
   const p = req.params as Record<string, any>;
   // ★body 는 string | null 이다 — ""(빈 내용을 안다) 와 null(내용을 모른다) 은 다른 상태다.★
-  //   앞선 판은 둘을 "" 하나로 합쳐서 ★빈 파일 생성과 빈 파일 삭제가 같은 지문★ 이었다(코덱스 리뷰 P1, 재현 확인).
+  //   앞선 판은 둘을 "" 하나로 합쳐서 ★빈 파일 생성과 빈 파일 삭제가 같은 지문★ 이었다(P1 · 재현 확인).
   //   basis.files 에는 kind 가 없으므로 그 둘을 갈라줄 다른 재료도 없었다.
   const rows: Array<[string, string, string | null, string | null]> = [];
 
@@ -166,7 +166,7 @@ function approvalContentDigest(req: ApprovalRequest): string | null {
 }
 
 // ★반응이 5분 넘게 없으면 무효.★
-//   전엔 1시간이었다 — 그동안 codex 턴이 통째로 매달려 있어서 그 팀원이 아무 일도 못 한다.
+//   1시간이면 그동안 codex 턴이 통째로 매달려 그 팀원이 아무 일도 못 한다.
 const POPUP_TTL_MS = Number(process.env.B3OS_CODEX_APPSERVER_POPUP_TTL_MS ?? 5 * 60 * 1000);
 const POLL_INTERVAL_MS = Number(process.env.B3OS_CODEX_APPSERVER_POLL_MS ?? 1500);
 
@@ -189,7 +189,7 @@ type CommandParse =
 
 /** 명령 승인 요청을 파싱한다. ★'명령 method 가 아님' 과 '명령 method 인데 못 읽음' 을 구분한다.★
  *
- *  ★왜 구분해야 하나 (2026-07-29 Codex 리뷰에서 잡힌 실제 구멍):★
+ *  ★왜 구분해야 하나 (2026-07-29 리뷰에서 잡힌 실제 구멍):★
  *  둘을 같은 null 로 합치면 호출부가 이어서 fileChanges 를 검사한다. 그래서
  *  `item/commandExecution/requestApproval` + `command: ""` + `fileChanges: {...}` 같은
  *  ★혼합 payload 가 approval_unparsed 가 아니라 write 로 처리됐다★ — 주석과 테스트가 약속한
@@ -206,13 +206,13 @@ function parseCommandApproval(req: ApprovalRequest): CommandParse {
   }
   const raw = (req.params as Record<string, unknown>)?.command;
   //  ★command 는 사람이 보는 줄, material 은 열쇠를 가르는 재료 — 둘을 분리한다.★
-  //  분리하는 이유: 사람 눈 문자열로 합치면 ★실제로 다른 작업이 같은 문자열이 된다.★ (아메스 실측)
+  //  분리하는 이유: 사람 눈 문자열로 합치면 ★실제로 다른 작업이 같은 문자열이 된다.★ (실측)
   //  · 구세대 ['a b','c'] 와 ['a','b c'] → join(" ") 후 둘 다 "a b c" → 같은 열쇠 → 두 번째가 팝업 없이 통과.
   //  → material 은 ★원본 구조(배열은 배열대로) + method(세대 표식)★ 를 JSON 으로 굳혀 쓴다.
   //  구세대와 신세대를 method 로 가르는 것도 의도다 — 같아 보여도 경로가 다르면 ★따로 묻는다★(애매하면 ask).
   if (Array.isArray(raw)) {
     //  ★문자열이 아닌 원소는 해석 성공으로 받지 않는다.★
-    //  String(x) 로 강제변환하면 ★서로 다른 payload 가 같은 재료가 된다★ (아메스가 DB 경로에서 재현):
+    //  String(x) 로 강제변환하면 ★서로 다른 payload 가 같은 재료가 된다★ (DB 경로에서 재현 확인):
     //    [1] 승인 뒤 ["1"] → allow · [null] 과 ["null"] → allow · [{}] 는 "[object Object]" 가 된다.
     //  이건 규격에 없는 payload 를 ★넓게 통과★ 시키는 자리다. 모르면 좁게 묻는다 —
     //  invalid 로 보내면 해석 실패 경로(S0: payload 지문 + 매번 묻기)를 받는다.
@@ -235,8 +235,8 @@ function parseCommandApproval(req: ApprovalRequest): CommandParse {
 /**
  * ★이보다 긴 명령은 승인 흐름에 태우지 않는다 — 거절하고 따로 검토한다.★
  *
- * 앞서 이 자리에 ★스캔 상한★ 을 뒀다가 없앴다. 자르면 잘린 뒤가 검사에서 빠지고,
- * 그래서 "얼마나 잘라야 안전한가" 를 놓고 100k → 1M → 64k → 8k 로 헤맸다.
+ * ★이 자리에 스캔 상한을 두지 않는다.★ 자르면 잘린 뒤가 검사에서 빠지고,
+ * "얼마나 잘라야 안전한가" 에는 답이 없다.
  * ★자르지 않으면 그 문제가 통째로 사라진다★ — 받은 명령은 이미 우리 손에 있으니 전부 검사하면 된다.
  *
  * 대신 ★비정상적으로 긴 명령은 사람이 팝업으로 판단할 수 있는 대상이 아니다.★
@@ -264,7 +264,7 @@ const COMMAND_REVIEW_LIMIT = 2_000;
  *  · op.command → ★사람이 보는 줄이자 열쇠의 재료★ (target 우선순위 1위, 240자에서 잘림)
  *  · op.text    → ★위험 스캔용 전문★ (operationText 가 command·path·egress·text 를 이어 Tier-D 에 넣는다)
  *
- * 전에는 command 하나에 다 실었고 2000자에서 잘랐다. 그래서 ★2000자를 패딩으로 채우고 그 뒤에 sudo 를 붙이면
+ * command 하나에 다 싣고 2000자에서 자르면 ★2000자를 패딩으로 채우고 그 뒤에 sudo 를 붙였을 때
  * 게이트도 못 보고(스캔 밖) 사람도 못 봤다(화면 밖).★ 실측: 2100자 뒤 `; sudo id` → 탐지 0, 400자면 탐지됨.
  * 전문을 text 로 따로 보내면 탐지가 살아나고, ★열쇠는 안 바뀐다★(target 은 command 가 우선).
  *
@@ -275,16 +275,16 @@ const COMMAND_REVIEW_LIMIT = 2_000;
  */
 function commandOperationFields(material: string, command: string): { command: string; text: string } {
   //  ★지문은 material(원본 구조 전문) 로 만든다 — 화면용으로 자른 값으로 만들지 않는다.★
-  //  자른 값으로 만들면 잘린 뒤가 달라도 지문이 같아진다(아메스 실측: 앞 2000자 동일 → 두 번째 'allow').
+  //  자른 값으로 만들면 잘린 뒤가 달라도 지문이 같아진다(실측: 앞 2000자 동일 → 두 번째 'allow').
   //
   //  ★자르지 않은 64 hex 전문을 쓴다.★ 표시용 체크섬이 아니라 ★팝업 우회를 막는 유일한 구분자★ 다.
-  //  12 hex(48비트)면 SAFE/EVIL 후보를 각 2^24개씩 만들어 충돌시키는 게 GPU 로 현실적이다(아메스).
+  //  12 hex(48비트)면 SAFE/EVIL 후보를 각 2^24개씩 만들어 충돌시키는 게 GPU 로 현실적이다.
   const digest = createHash("sha256").update(material).digest("hex");
   // 공백 정규화 후 잘리므로(normalizeText → slice) ★지문 안에는 공백이 없어야 한다.★
   const suffix = ` #${digest}`;
   const budget = Math.max(0, VISIBLE_BUDGET - suffix.length);
   //  ★잘랐으면 잘랐다고 말한다.★ 표시가 없으면 사람은 ★이게 명령 전부인 줄★ 안다 —
-  //  "kubectl delete ns prod " 뒤에 500자가 더 있어도 화면은 그냥 174자에서 끊긴다(루이 실측).
+  //  "kubectl delete ns prod " 뒤에 500자가 더 있어도 화면은 그냥 174자에서 끊긴다(실측).
   //  전문이 text 로 빠진 지금은 ★사람 눈에 닿는 경로가 이 한 줄뿐★ 이라 더 중요해졌다.
   //  S3 가 쓰기 경로에서 세운 규칙과도 같다 — 넘치면 몇 개가 잘렸는지 말한다.
   const truncated = command.length > budget;
@@ -324,7 +324,7 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
     return { runtime: "codex", agent_id: agentId, action: "shell", ...commandOperationFields(parsed.material, parsed.command), requested_by: agentId, provenance };
   }
   // ★명령 승인이라고 밝혔는데 명령을 못 읽었다 → 여기서 멈춘다.★ 아래 fileChanges 분기로 흘려보내면
-  //   혼합 payload 가 write 로 처리되어 fail-closed 계약이 깨진다(Codex 리뷰 2026-07-29).
+  //   혼합 payload 가 write 로 처리되어 fail-closed 계약이 깨진다(2026-07-29).
   if (parsed.kind === "invalid") return unparsedOperation(req, agentId, provenance);
   // ★S2(#106) — 신세대 파일변경 승인을 실제 내용으로 해석한다.★
   //
@@ -341,7 +341,7 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
     const observed = req.observedItem;
     if (!observed || observed.changes.length === 0) return unparsedOperation(req, agentId, provenance);
     // ★grantRoot 로 보이는 낯선 키가 있으면 여기서 멈춘다★ — 폴더 전체 요청이 평범한 파일 쓰기로
-    //   보이는 것보다 매번 묻는 게 낫다(벤더 개명 대비 · Bill 리뷰 후속).
+    //   보이는 것보다 매번 묻는 게 낫다(벤더 개명 대비).
     if (hasUnreadGrantRootKey(p)) return unparsedOperation(req, agentId, provenance);
     return writeOperation(agentId, provenance, observed.changes, grantRootOf(p), observed.itemId);
   }
@@ -352,7 +352,7 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
   //    AddFileChange    { type: "add",    content }        DeleteFileChange { type: "delete", content }
   //    UpdateFileChange { type: "update", unified_diff, move_path? }
   //  ★모양을 짐작하지 않고 벤더 스키마에서 읽었다★ — 앞서 patchUpdated 를 짐작해 한 번 틀렸던 자리다.
-  // ★배열은 파일 목록이 아니다(Codex 리뷰 2026-07-30).★ `typeof [] === "object"` 라 그냥 통과했고,
+  // ★배열은 파일 목록이 아니다(2026-07-30).★ `typeof [] === "object"` 라 그냥 통과했고,
   //   그 결과 ★인덱스 0 을 파일 경로로 표시★ 했다(실측: `change 0`). 모양이 아니면 해석 실패로 보낸다.
   if (p.fileChanges && typeof p.fileChanges === "object" && !Array.isArray(p.fileChanges)) {
     // ★S2: grantRoot 는 구세대 applyPatchApproval 에도 있다★ — 지금까지 통째로 무시하고 있었다.
@@ -380,16 +380,16 @@ const UNPARSED_NOTICE = "내용 해석 실패 — 원문 확인 필요 · ";
  *  ★벤더 설명: "the agent is asking the user to allow writes under this root for the remainder of the
  *  session"★ — 즉 파일 단위 승인이 아니라 ★루트 단위 세션 승인★ 이다. UNSTABLE 표기지만 payload 에
  *  실려 오는 이상 ★우리 쪽 열쇠와 표시는 이걸 반영해야 한다.★ */
-/** ★grantRoot 로 보이는데 우리가 안 읽는 키가 있으면 해석 실패로 보낸다(Bill 리뷰 2026-07-30 후속).★
+/** ★grantRoot 로 보이는데 우리가 안 읽는 키가 있으면 해석 실패로 보낸다(2026-07-30).★
  *
- *  ★왜 필요한가 — 실패가 조용하기 때문이다.★ Bill 이 리뷰 중 payload 를 `grant_root` 로 잘못 만들어
+ *  ★왜 필요한가 — 실패가 조용하기 때문이다.★ 리뷰 중 payload 를 `grant_root` 로 잘못 만들어
  *  돌려보니, ★"⚠ 세션 동안 폴더 하위 전체 쓰기 허용" 경고가 화면에서 사라지고★ 서로 다른 폴더 요청
- *  두 건이 ★같은 열쇠★ 가 됐다. 0.144.6 에서는 도달 불가다(Bill 이 바이너리 문자열로 직접 확인:
+ *  두 건이 ★같은 열쇠★ 가 됐다. 0.144.6 에서는 도달 불가다(바이너리 문자열로 직접 확인:
  *  `grantRoot` 3건 / `grant_root` 0건). 그러나 ★벤더가 다음 버전에서 이름을 바꾸면 에러 하나 없이★
  *  폴더 전체 권한이 평범한 파일 쓰기로 보인다.
  *
- *  이 저장소에서 같은 형태로 두 번 데였다 — `patchUpdated` 를 짐작했고(안 오는 알림이었다),
- *  `Array.isArray(command)` 로 세대를 판정했다(신세대가 통째로 미끄러졌다). ★모양이 바뀌면
+ *  같은 형태의 실패가 이 저장소에 둘 있다 — `patchUpdated` 를 짐작한 것(안 오는 알림이었다),
+ *  `Array.isArray(command)` 로 세대를 판정한 것(신세대가 통째로 미끄러졌다). ★모양이 바뀌면
  *  조용히 미끄러지는 자리에는 가드를 둔다.★ 배열·빈 목록에 이미 같은 정책(모르면 ask)을 쓰고 있다. */
 function hasUnreadGrantRootKey(p: Record<string, any> | undefined): boolean {
   if (!p || typeof p !== "object") return false;
@@ -400,14 +400,14 @@ function grantRootOf(p: Record<string, any> | undefined): string | null {
   const raw = p?.grantRoot;
   if (typeof raw !== "string") return null;
   const t = raw.trim();
-  // ★여기서 자르지 않는다(Codex 리뷰 2026-07-29 P2).★ 앞선 판은 300자로 잘랐는데, 그러면
+  // ★여기서 자르지 않는다(2026-07-29 · P2).★ 앞선 판은 300자로 잘랐는데, 그러면
   //   ★공통 prefix 가 긴 서로 다른 루트가 같은 값이 되어 열쇠·지문이 합쳐졌다★
   //   (310자 공통 + `/one` vs `/two` 로 재현 확인). 자르는 것은 ★표시할 때만★ 한다.
   return t.length > 0 ? t : null;
 }
 
 /**
- * ★쓰기 대상 한 건의 표기 — 이동이면 목적지까지 포함한다(Codex 리뷰 2026-07-29 P1).★
+ * ★쓰기 대상 한 건의 표기 — 이동이면 목적지까지 포함한다(2026-07-29 · P1).★
  *
  * 앞선 판은 출발지만 열쇠에 넣고 목적지는 ★팝업 글자에만★ 넣었다. 그래서 `a.ts→safe.ts` 와
  * `a.ts→outside/target.ts` 가 ★팝업 문구는 다른데 열쇠가 완전히 같았다.★
@@ -437,12 +437,12 @@ function fileChangeEntries(fileChanges: Record<string, unknown>): string[] {
  *  ★실측(2026-07-29, codex-cli 0.144.6 라이브)에서 diff 모양이 ★종류마다 다르다★ 는 것을 확인했다:★
  *    update → 진짜 통일diff        `@@ -1,4 +1,3 @@\n alpha\n-bravo\n+BRAVO\n charlie\n-delta\n`
  *    add    → ★파일 원문 그대로★   `HELLO\n`   (`+` 접두어도 `@@` 헤더도 없다)
- *  처음엔 둘 다 통일diff 라고 가정하고 `+`/`-` 만 셌는데, 그러면 ★새 파일 생성이 전부 "(+0/-0)"★ 로 보인다 —
+ *  둘 다 통일diff 라고 가정해 `+`/`-` 만 세면 ★새 파일 생성이 전부 "(+0/-0)"★ 로 보인다 —
  *  ★사람에게 "아무것도 안 바뀐다" 로 읽히는 것이 제일 나쁜 거짓말이다.★ 그래서 모양을 판별해서 센다.
  *  (delete 는 라이브로 못 봤다 — 통일diff 가 아니면 삭제 규모로 센다.) */
 function changeStat(kind: string, diff: string): { added: number; removed: number } {
   const lines = diff.split("\n");
-  // ★모양이 아니라 종류로 판정한다(Codex 리뷰 2026-07-30 P2).★ 앞선 판은 `@@` 로 시작하는 줄이
+  // ★모양이 아니라 종류로 판정한다(2026-07-30 · P2).★ 앞선 판은 `@@` 로 시작하는 줄이
   //   있으면 통일diff 로 봤는데, add/delete 의 `content` 는 ★파일 원문★ 이라 마크다운 제목 `@@ heading`
   //   같은 줄이 들어오면 통일diff 로 오판해 ★(+0/-0)★ 을 만든다(실측 재현: add·delete·신세대 add 전부).
   //   ★그게 이 함수가 애초에 막으려 했던 거짓말 그 자체다.★ 벤더 스키마상 통일diff 는 update 뿐이므로
@@ -485,7 +485,7 @@ function oldGenChanges(fileChanges: Record<string, unknown>): WriteChange[] {
     const ch = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
     const mv = typeof ch.move_path === "string" && ch.move_path.trim() ? ch.move_path : null;
     const kind = typeof ch.type === "string" && ch.type ? ch.type : "change";
-    // ★필드를 종류에 맞춰 고른다(Codex 리뷰 2026-07-30, 2회전).★ 앞선 판은 type 과 무관하게
+    // ★필드를 종류에 맞춰 고른다(2026-07-30 · 2회전).★ 앞선 판은 type 과 무관하게
     //   unified_diff 를 먼저 집었다. changeStat 은 kind 로 세는데 재료는 kind 를 안 보고 골랐으니
     //   ★짝이 어긋난 payload 에서 규모를 지어냈다★ (전부 실측):
     //     {type:"update", content:"hello\n"}            → update x(+0/-0)  ← "아무것도 안 바뀐다" 거짓말
@@ -508,7 +508,7 @@ function oldGenChanges(fileChanges: Record<string, unknown>): WriteChange[] {
 const VISIBLE_BUDGET = 240;
 
 /** 코드포인트 경계에서 자른다. ★UTF-16 code unit 으로 자르면 이모지 한 자를 반 토막 낸다★ —
- *  `a×224 + 😀` 경로에서 target 끝이 고아 서로게이트(U+D83D)로 끝나는 것을 재현했다(Codex 리뷰 2026-07-30).
+ *  `a×224 + 😀` 경로에서 target 끝이 고아 서로게이트(U+D83D)로 끝나는 것을 재현했다(2026-07-30).
  *  화면에 깨진 글자가 뜨는 것 자체도 문제지만, ★"내가 지금 무엇을 승인하는가" 를 흐리는 것★ 이 더 나쁘다. */
 function cutCodePoints(s: string, max: number): string {
   if (s.length <= max) return s;
@@ -524,7 +524,7 @@ function cutCodePoints(s: string, max: number): string {
  *  예전에는 500자로 이어붙인 뒤 permissionGate 가 240자에서 ★단어 중간을 잘랐다★ —
  *  화면에는 `…component/fil` 처럼 끝나고 ★"12개 중 5개만 보고 있다" 는 사실이 사라졌다.★
  *
- *  ★첫 항목도 예산을 지킨다(Codex 리뷰 2026-07-30 P1).★ 앞선 판은 `out.length > 0` 일 때만 줄여서
+ *  ★첫 항목도 예산을 지킨다(2026-07-30 · P1).★ 앞선 판은 `out.length > 0` 일 때만 줄여서
  *  ★첫 경로가 길면 통째로 밀어넣었다★ — 그러면 뒤에 붙는 지문이 permissionGate 의 240자 절단에서
  *  ★사라지고, 앞 240자가 같은 서로 다른 긴 경로가 한 열쇠로 합쳐진다★(400자 단일 경로로 재현).
  *  ★지문을 뒤에 두기로 한 결정이 성립하려면 "예산은 무조건 지킨다" 가 예외 없이 참이어야 한다.★ */
@@ -570,7 +570,7 @@ function fitEntries(display: string[], budget: number): string {
  *   → 한 문자열이 두 일을 해야 하므로 순서를 이렇게 고정한다:
  *     ①경고(사람) ②지문(열쇠 — 잘려도 구분됨) ③파일 개수·종류·경로(사람+열쇠)
  *   ★규모(+n/-n)는 여기 못 넣는다★ — 내용이 바뀔 때마다 열쇠가 달라져 '항상 허용' 이 영원히 안 붙는다.
- * 규모는 text 에 남고, 그것을 화면에 띄우려면 렌더러(codex 폴더 밖)를 고쳐야 한다 — ★팀 리드 판단 대기.★
+ * 규모는 text 에 남고, 그것을 화면에 띄우려면 렌더러(codex 폴더 밖)를 고쳐야 한다 — ★렌더러 변경 결정 대기.★
  */
 function writeOperation(
   agentId: string,
@@ -581,13 +581,13 @@ function writeOperation(
 ): PermissionOperation {
   // ★이동은 목적지까지가 쓰기 대상이다★ — 출발지만 넣으면 목적지가 달라도 같은 열쇠가 된다(P1).
   //
-  // ★지문의 재료는 구조화 tuple 이다 — 이어붙인 문자열이 아니다(Codex 리뷰 2026-07-30 P1).★
+  // ★지문의 재료는 구조화 tuple 이다 — 이어붙인 문자열이 아니다(2026-07-30 · P1).★
   //   앞선 판은 `path + ">" + movePath` 문자열 집합을 해시했다. 그래서
   //     경로 이름이 그대로 `a>b` 인 파일  vs  `a` 를 `b` 로 옮기는 이동
   //     `a>b` → `c`                      vs  `a` → `b>c`
   //   가 ★완전히 같은 재료★ 가 됐다 — 뒤 쌍은 ★실제로 같은 열쇠★ 임을 재현했다.
-  //   ★"지문이 갈라준다" 는 지문의 재료가 모호하지 않을 때만 참이다.★ 내가 그 전제를 확인하지 않고
-  //   코덱스에게 단언했고, 그게 틀렸다. 이제 [path, movePath] 로 담아 구분이 구조에서 나온다.
+  //   ★"지문이 갈라준다" 는 지문의 재료가 모호하지 않을 때만 참이다.★ 그 전제가 깨지면 문장도 깨진다.
+  //   [path, movePath] 로 담아 구분이 구조에서 나오게 한다.
   const keyOf = (c: WriteChange) => JSON.stringify([c.path, c.movePath]);
   const byKey = new Map<string, WriteChange>();
   for (const c of changes) if (!byKey.has(keyOf(c))) byKey.set(keyOf(c), c);
@@ -598,7 +598,7 @@ function writeOperation(
   //   집합이 다르면 지문이 다르다. 내용이 아니라 ★경로 집합 + grantRoot 전문★ 만 담으므로, 같은 파일을
   //   다시 고칠 때는 같은 지문이다('항상 허용' 이 계속 유효). ★이 지문이 있어야 뒤쪽을 사람 말로 줄일 수 있다.★
   //
-  //   ★grantRoot 를 반드시 지문에 넣는다(Codex 리뷰 P2 의 재발 방지).★ 표시용 grantRootDisplay 는
+  //   ★grantRoot 를 반드시 지문에 넣는다(P2 재발 방지).★ 표시용 grantRootDisplay 는
   //   뒤 71자만 남기므로, 지문이 없으면 ★앞부분만 다른 두 루트가 같은 열쇠★ 가 된다 —
   //   그게 P2 에서 실제로 재현했던 사고다(공통 prefix 가 긴 서로 다른 루트).
   const setDigest = createHash("sha256")
@@ -680,7 +680,7 @@ function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Re
     //   해석 실패로 보내는 것은 ★열쇠를 좁히려는 것★ 이지 ★검사를 면제하려는 것★ 이 아니다.
     //   payload 를 안 실으면 이 요청의 Tier-D 스캔 입력이 ★0★ 이 되고, 그러면
     //   `[1, "; sudo rm -rf /tmp/x"]` 같은 규격 밖 요청이 ★사람이 누를 수 있는 평범한 팝업★ 으로 내려온다
-    //   (Tier-D 는 사람도 승인 못 하는 등급인데, 스캔이 비면 그 등급이 붙을 근거가 없어진다 — 루이 실측).
+    //   (Tier-D 는 사람도 승인 못 하는 등급인데, 스캔이 비면 그 등급이 붙을 근거가 없어진다).
     //   ★알아볼 수 없는 것을 넓게 통과시키지 않는다★ 는 이 경로의 원래 취지와도 맞다.
     //
     //   ★부작용은 명시한다★: 거대 payload 안에 'sudo' 같은 문자열이 ★우연히★ 들어 있으면 hard-deny 가 된다.
@@ -688,7 +688,7 @@ function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Re
     //
     //   붙이는 자리는 ★맨 뒤★ 다 — 앞은 사람이 읽는 안내문이어야 한다(팝업 첫 줄).
     //   ★주의: 이 op 은 command·path·egress 가 없어서 text 가 곧 target(=열쇠) 이다.★
-    //   (앞선 주석에 "우선순위상 열쇠를 안 바꾼다" 고 적었는데 틀렸다 — 루이 지적. 지금은 안내문·지문이
+    //   (앞선 주석에 "우선순위상 열쇠를 안 바꾼다" 고 적었는데 틀렸다. 지금은 안내문·지문이
     //    앞에 있어 해롭지 않지만, ★이 필드에 뭘 더 실으면 화면과 열쇠가 같이 바뀐다.★)
     text:
       `${UNPARSED_NOTICE}${req.method.slice(0, 64)} #${unparsedPayloadDigest(req)}${reason ? ` ${reason}` : ""}` +
@@ -712,7 +712,7 @@ function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Re
  *
  * ★JSON 을 그대로 스캔에 쓰면 안 된다.★ JSON.stringify 는 줄바꿈을 ★역슬래시+n 두 글자★ 로 바꾼다.
  * 그러면 `"...\n" + "sudo"` 가 스캔 문자열에서 `nsudo` 가 되고, Tier-D 규칙 대부분이 쓰는
- * 단어 경계(\b)가 안 맞아 ★줄바꿈 하나로 검사를 통과한다.★ 실측(루이):
+ * 단어 경계(\b)가 안 맞아 ★줄바꿈 하나로 검사를 통과한다.★ 실측:
  *   'echo hi<개행>sudo id' → 해석 실패 경로 [] · 정상 경로 ["sudo"]
  * codex 명령은 heredoc·`bash -c` 라 ★여러 줄이 기본★ 이므로, 공격이 아니어도 그냥 샌다.
  *
@@ -740,7 +740,7 @@ function stablePayloadJson(req: ApprovalRequest): string {
     if (v && typeof v === "object") {
       // ★Object.fromEntries 를 쓴다 — 일반 객체에 acc["__proto__"]=... 로 대입하면 ★프로토타입이 바뀔 뿐
       //  own property 가 되지 않아 JSON.stringify 에서 통째로 사라진다.★ 그러면 "__proto__" 값만 다른 두
-      //  payload 가 ★같은 지문·같은 열쇠★ 가 된다(Codex 리뷰에서 지적, 재현 확인: 둘 다 #5353b5b6…).
+      //  payload 가 ★같은 지문·같은 열쇠★ 가 된다(재현 확인: 둘 다 #5353b5b6…).
       //  JSON-RPC payload 에 그 키가 오는 것은 유효하므로, ★해석 실패 경로에서 이건 우회 통로★ 가 된다.
       //  fromEntries 는 CreateDataProperty 라 "__proto__" 도 평범한 키로 보존한다.
       return Object.fromEntries(
@@ -819,7 +819,7 @@ export function expirePermissionRequest(db: Database, requestId: string): void {
  *
  * ★명령 승인에만 적용한다.★ 기준은 ★명령★ 의 길이이고,
  * ★파일 변경 승인의 '내용' 은 길어도 이상하지 않다★ — 1,200자짜리 파일은 평범하다.
- * (처음엔 모든 승인에 걸어서 ★평범한 파일 변경이 거절됐다★. 실측:
+ * (모든 승인에 걸면 ★평범한 파일 변경이 거절된다★. 실측:
  *  applyPatchApproval 에 1,200자 파일을 넣으면 denied · permission_request 0행 ·
  *  기록은 '명령이 너무 길다' — 잘 되던 기능이 죽고 기록까지 틀린 이유를 댔다.)
  *
@@ -842,7 +842,7 @@ export function isTestRun(): boolean {
  * ★승인 요청을 그 팀원 방에 띄운다.★
  *
  * 전에는 op 방으로 갔다 — 실측상 permission_request 를 만든 팀원은 codex 런타임뿐이었고(다른 팀원 0건),
- * 그건 원래 사용성이 아니라 우리가 얹은 것이었다.
+ * 그건 사용성이 아니라 우리 구현이 얹은 것이다.
  *
  * 그 팀원 봇으로 보낸다(브리지와 같은 봇). 보내는 것은 폴링과 충돌하지 않는다 —
  * getUpdates 만 한 프로세스여야 하므로 버튼 처리는 브리지가 한다.
@@ -872,21 +872,21 @@ export async function sendApprovalToMemberRoom(
   // ★목적지는 '그 팀원 방' = 팀 리드와 그 팀원 봇의 1:1 DM.★
   //   어느 방인지는 ★봇 토큰★ 이 정하고, 상대는 ★팀 리드 DM★ 이다.
   //
-  //   전에는 allowFrom 의 첫 항목을 썼는데 ★그건 "누가 말 걸 수 있나" 인가 목록★ 이다(리뷰 지적).
+  //   전에는 allowFrom 의 첫 항목을 썼는데 ★그건 "누가 말 걸 수 있나" 인가 목록★ 이다.
   //   목록은 [팀리드 DM, 팀 그룹] 이라 ★팀 리드 DM 이 비면 첫 항목이 팀 그룹이 된다★ —
   //   그러면 ★보안 질문이 단체방에 뜬다.★ 인가 목록을 목적지로 쓰면 안 된다.
   //
   //   모르면 ★보내지 않는다.★ 아무 방에나 띄우는 것보다 안 뜨는 게 낫다(fail-closed).
   //   ★목적지 해석기를 주입 가능하게 둔다★ — 그래야 시험이 "인가 목록" 과 "팀 리드 DM" 을
   //   ★서로 다른 값으로★ 놓고 어느 쪽을 쓰는지 실제로 가를 수 있다. 이 기계에서는 두 값이 우연히
-  //   같아서, 주입 없이는 옛 버그 코드로 되돌려도 시험이 초록으로 통과한다(리뷰 지적).
+  //   같아서, 주입 없이는 옛 버그 코드로 되돌려도 시험이 초록으로 통과한다.
   const chatId = deps.chatId ?? (deps.resolveDestination ?? resolveOwnerDmId)();
   if (!token || !chatId) return false;
 
   // ★간결하게★ — 사람이 폰에서 한눈에 보고 누른다. 무엇을 하려는지 한 줄, 그 아래 대상.
   const { title, detail } = approvalSummary(req);
   // ★위험 사유를 카드에 적는다.★ 우리가 대신 막지 않기로 했으면 ★판단 근거는 줘야 한다.★
-  //   이 줄이 없으면 `sudo rm -rf /` 와 `ls` 가 폰에서 생김새가 같다(리뷰 지적).
+  //   이 줄이 없으면 `sudo rm -rf /` 와 `ls` 가 폰에서 생김새가 같다.
   const riskLine = risks.length ? `\n\n⚠️ 위험 표시: ${escapeHtml(risks.join(" · "))}` : "";
   const text = (detail ? `🔐 ${title}\n\n<code>${escapeHtml(detail)}</code>` : `🔐 ${title}`) + riskLine;
   const doFetch = deps.fetchFn ?? fetch;
@@ -899,7 +899,7 @@ export async function sendApprovalToMemberRoom(
         text,
         parse_mode: "HTML",
         // ★한 줄에 셋★ — 폰에서 두 줄이면 자리만 먹는다.
-        // ★위험 표시가 붙은 건에는 '항상 허용' 을 주지 않는다.★ (리뷰 지적)
+        // ★위험 표시가 붙은 건에는 '항상 허용' 을 주지 않는다.★
         //   우리가 막는 게 아니다 — 사람은 여전히 '한번 허용' 으로 실행할 수 있다.
         //   막는 것은 ★무인 반복★ 이다: '항상 허용' 은 24시간 grant 를 만들어 그동안 카드가 다시 안 뜬다.
         //   codex 자신도 위험한 것은 세션 단위로만 기억한다(acceptForSession).
@@ -978,7 +978,7 @@ export async function requestApprovalPopup(db: Database, req: ApprovalRequest, a
   let risks: string[] = [];
   try {
     const op = buildOperationFromApproval(req, agentId, cwd);
-    // ★위험 사유를 카드에 싣는다.★ (리뷰 지적)
+    // ★위험 사유를 카드에 싣는다.★
     //   우리가 대신 막지 않기로 했으면 ★사람이 판단할 근거를 줘야★ 그 전제가 성립한다.
     //   그 전까지 `sudo rm -rf /` 와 `ls` 가 폰에서 ★생김새가 같았다.★
     risks = tierDReasons(op);
@@ -1005,7 +1005,7 @@ export async function requestApprovalPopup(db: Database, req: ApprovalRequest, a
       processInstance: PROCESS_INSTANCE,
     });
   } catch { /* best-effort */ }
-  // ★만료 시각을 행에 박는다★ — 기다리는 프로세스가 죽어도 행이 스스로 만료를 말한다(리뷰 지적).
+  // ★만료 시각을 행에 박는다★ — 기다리는 프로세스가 죽어도 행이 스스로 만료를 말한다.
   try {
     db.prepare("UPDATE permission_request SET expires_at = datetime('now', ?) WHERE id = ?")
       .run(`+${Math.round(ttlMs / 1000)} seconds`, requestId);
