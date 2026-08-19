@@ -180,11 +180,20 @@ describe("★이 메시지를 처리할 것인가★ — 원래 결함이 살던
 });
 
 describe("★안전 내려받기 — 어떤 식으로 실패해도 결과를 돌려준다★", () => {
-  test("던지지 않고 실패로 담는다 — 두 경로가 같은 방어를 쓰게 한다", async () => {
+  test("★건별 실패는 안쪽에서 잡힌다★ — 여기까지 오지 않는다(대조군)", async () => {
     const a = await downloadDmAttachmentsSafe("tok", { photo: [{ file_id: "p" }] }, {
       store: (async () => { throw new Error("망가진 응답"); }) as never,
     });
     expect(a.failed).toHaveLength(1);
-    expect(a.failed[0]!.reason).toContain("망가진 응답");
+    expect(a.failed[0]!.kind, "건별 실패는 그 첨부 종류로 기록된다").toBe("photo");
+  });
+
+  test("★건별 처리 바깥에서 터져도 던지지 않는다★ — 이 분기가 없으면 중간 개입이 통째로 죽는다", async () => {
+    // 텔레그램이 보낸 모양이 예상과 다르면 목록을 만드는 단계에서 터진다(건별 try 밖이다).
+    // 전에는 중간 개입 쪽이 이걸 .catch(() => null) 로 삼켜 ★첨부가 조용히 사라졌다.★
+    const a = await downloadDmAttachmentsSafe("tok", { photo: {} as never });
+    expect(a.failed, "던지지 않고 실패로 담아야 한다").toHaveLength(1);
+    expect(a.failed[0]!.kind).toBe("attachment");
+    expect(a.imagePaths).toHaveLength(0);
   });
 });
