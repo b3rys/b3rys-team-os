@@ -1,5 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import { renderLoadingFile } from "./writeMemberPersona";
+import { buildAgentsMd } from "./personaTemplates";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,5 +50,28 @@ describe("codex 로딩파일에 persona 가 실제로 들어간다", () => {
     const out = render("openclaw", ws("성격 본문"));
     expect(out).not.toContain("성격 본문");
     expect(out).toContain("SOUL.md");
+  });
+});
+
+describe("★비어 있을 때야말로 비었다고 말한다★ (리뷰 지적 — 새 팀원 영입 직후가 그 경우다)", () => {
+  test("★codex 인데 SOUL 이 없으면 옛 거짓말로 돌아가지 않는다★", () => {
+    const out = render("codex", ws(undefined));
+    expect(out, "참조로 될 것처럼 적으면 조용히 비어 있다").not.toContain("이 런타임이 SOUL.md 를 함께 로드");
+    expect(out).toContain("자동으로 읽지 않는다");
+    expect(out, "비었다는 사실을 말해야 한다").toContain("아직 비어 있다");
+  });
+
+  test("SOUL 이 공백뿐이어도 같다 — 있는 척하지 않는다", () => {
+    const out = render("codex", ws("   \n  "));
+    expect(out).toContain("아직 비어 있다");
+  });
+
+  test("★runtime 조건이 실제로 지킨다★ — soul_text 가 와도 claude 는 본문을 싣지 않는다(두 벌 방지)", () => {
+    // ★두 번째 겹을 직접 부른다★ — 호출부(writeMemberPersona)가 codex 에만 넘겨서 도달 불가라
+    //   이 조건을 지워도 아무도 모르는 상태였다(리뷰 지적).
+    const out = buildAgentsMd({
+      id: "x", display_name: "X", role: "r", runtime: "claude_channel", soul_text: "성격 본문",
+    } as never);
+    expect(out, "claude 는 @import 로 닿는다 — 본문을 또 두면 어긋난다").not.toContain("성격 본문");
   });
 });
