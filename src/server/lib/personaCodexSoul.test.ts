@@ -66,12 +66,25 @@ describe("★비어 있을 때야말로 비었다고 말한다★ (리뷰 지적
     expect(out).toContain("아직 비어 있다");
   });
 
-  test("★runtime 조건이 실제로 지킨다★ — soul_text 가 와도 claude 는 본문을 싣지 않는다(두 벌 방지)", () => {
+  test("★runtime 조건이 실제로 지킨다★ — soul_text 가 와도 codex 가 아니면 본문을 안 싣는다(두 벌 방지)", () => {
     // ★두 번째 겹을 직접 부른다★ — 호출부(writeMemberPersona)가 codex 에만 넘겨서 도달 불가라
     //   이 조건을 지워도 아무도 모르는 상태였다(리뷰 지적).
+    //
+    // ★런타임 고르기가 중요하다.★ 처음엔 claude_channel 로 불렀는데, personaPointer 의 ★첫 줄★ 이
+    //   claude 를 먼저 걸러 return 한다 — 그래서 codex 조건에 ★도달조차 못 했고★, 조건을 지워도 초록이었다.
+    //   ★시험이 주장하는 것을 재고 있지 않았다.★ openclaw 는 앞 분기를 안 타고 여기까지 내려온다.
+    for (const runtime of ["openclaw", "hermes_agent"]) {
+      const out = buildAgentsMd({
+        id: "x", display_name: "X", role: "r", runtime, soul_text: "성격 본문",
+      } as never);
+      expect(out, `${runtime} 은 bootstrap 으로 SOUL 을 읽는다 — 본문을 또 두면 어긋난다`).not.toContain("성격 본문");
+    }
+  });
+
+  test("★대조군 — 같은 호출을 codex 로 하면 본문이 들어간다★ (위가 '아무 때도 안 넣는다' 가 아님을 보인다)", () => {
     const out = buildAgentsMd({
-      id: "x", display_name: "X", role: "r", runtime: "claude_channel", soul_text: "성격 본문",
+      id: "x", display_name: "X", role: "r", runtime: "codex", soul_text: "성격 본문",
     } as never);
-    expect(out, "claude 는 @import 로 닿는다 — 본문을 또 두면 어긋난다").not.toContain("성격 본문");
+    expect(out).toContain("성격 본문");
   });
 });
