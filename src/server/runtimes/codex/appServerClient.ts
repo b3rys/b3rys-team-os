@@ -208,6 +208,21 @@ export function activityLineOf(item: unknown): string | null {
  * `Invalid request: missing field \`path\`` 로 거부된다.
  * ★그림이 글자보다 앞선다★ — 뒤에 두면 "이 그림" 이 앞 문장을 못 가리킨다.
  */
+/**
+ * ★이어받기가 실패했다는 사실을 남기는 한 줄.★
+ *
+ * 조용히 넘어가면 이어받기 실패와 성공이 로그에서 ★같은 모양★ 이라,
+ * 사람이 "왜 앞 얘기를 잊었냐" 고 물어도 ★기록으로는 답할 수 없다★
+ * (2026-08-19 실측: 1:1 세션이 한 번 갈렸는데 이유를 좁힐 수 없었다).
+ *
+ * ★함수로 뺀 이유★: 로그 한 줄은 시험이 닿기 어려워 ★지워도 아무도 모른다.★
+ * 사유 문자열을 만드는 자리를 밖에 두면 그 계약을 시험이 지킬 수 있다(tgFailureReason 과 같은 방식).
+ */
+export function resumeFailureLine(threadId: string, e: unknown): string {
+  const why = e instanceof Error ? e.message : String(e);
+  return `[codex] thread/resume 실패 → 새 대화로 시작한다 (앞 맥락 없음) · thread=${threadId} · ${why}`;
+}
+
 export function buildTurnInput(
   text: string,
   imagePaths?: readonly string[],
@@ -247,7 +262,12 @@ export class CodexAppServerClient {
    * 그걸 보고 나는 "app-server 가 설정을 무시한다" 고 결론냈는데 ★틀렸다★ — 무시한 게 아니라
    * ★다른 파일을 읽고 있었다.★ exec 경로(runner.ts)는 원래 넘긴다. 여기만 빠져 있었다.
    */
-  constructor(private readonly spawnOpts: { codexHome?: string } = {}) {}
+  constructor(private readonly spawnOpts: { codexHome?: string; warn?: (line: string) => void } = {}) {}
+
+  /** 진단 줄을 내보내는 통로. 시험이 가로챌 수 있게 주입 가능하다(기본은 콘솔). */
+  private warn(line: string): void {
+    (this.spawnOpts.warn ?? console.warn)(line);
+  }
 
   /** 이 클라이언트가 어느 팀원 설정으로 띄우는지(시험·진단용). */
   get codexHome(): string | undefined { return this.spawnOpts.codexHome; }
@@ -300,10 +320,7 @@ export class CodexAppServerClient {
         const r = await this.withTimeout(this.request("thread/resume", { ...params, threadId: opts.resumeThreadId }), HANDSHAKE_TIMEOUT_MS, "thread/resume") as { thread?: { id?: string } };
         id = r?.thread?.id;
       } catch (e) {
-        // ★조용히 넘어가면 안 된다.★ 이어받기 실패와 성공이 로그에서 같은 모양이라,
-        //   사람이 "왜 앞 얘기를 잊었냐" 고 물어도 ★기록으로는 답할 수 없다★
-        //   (2026-08-19 실측: 1:1 세션이 한 번 갈렸는데 이유를 좁힐 수 없었다).
-        console.warn(`[codex] thread/resume 실패 → 새 대화로 시작한다 (앞 맥락 없음): ${e instanceof Error ? e.message : String(e)}`);
+        this.warn(resumeFailureLine(opts.resumeThreadId, e));
       }
     }
     if (!id) {
