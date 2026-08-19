@@ -96,6 +96,48 @@ export function buildDmSteerText(body: string): string {
   ].join("\n");
 }
 
+/**
+ * ★들어온 말을 어디로 보낼지 정하고 실행한다.★
+ *
+ * 폴 루프 안에 두면 시험이 못 닿는다 — 실제로 그래서 두 계약이 ★지워도 초록★ 이었다:
+ *   ① 밀어 넣기가 실패하면 새 작업으로 되돌린다(조용히 삼키지 않는다)
+ *   ② 밀어 넣었으면 진행 줄에 남긴다(안 보이면 들어갔는지 모른 채 같은 말을 다시 한다)
+ * 둘 다 이 기능이 존재하는 이유라, ★지켜지는지 시험이 봐야 한다.★
+ */
+export interface IncomingRouteDeps {
+  isRunning: (chatId: number) => boolean;
+  steer: (text: string) => Promise<boolean>;
+  note: (line: string) => void;
+  enqueue: (run: () => Promise<void>) => void;
+  runTurnFor: () => Promise<void>;
+  react?: () => void;
+}
+
+export type IncomingRoute = "steered" | "newTurn";
+
+export async function routeIncoming(
+  chatId: number,
+  text: string,
+  d: IncomingRouteDeps,
+): Promise<IncomingRoute> {
+  if (d.isRunning(chatId)) {
+    d.react?.();
+    // ★던져도 말을 잃지 않는다★ — 연결이 끊기면 steer 는 성공/실패가 아니라 예외로 끝난다.
+    //   그때 그냥 올려보내면 이 말은 새 작업으로도 안 가고 사라진다.
+    const injected = await d.steer(buildDmSteerText(text)).catch((e) => {
+      console.warn(`[codex-bridge] 전달 중 오류 → 새 작업으로: ${String(e)}`);
+      return false;
+    });
+    if (injected) {
+      d.note(`받음: ${text}`);
+      return "steered";
+    }
+    // ★번호가 아직 없어 못 넣었다 — 여기서 멈추면 그 말은 아무 데도 안 간다.★
+  }
+  d.enqueue(d.runTurnFor);
+  return "newTurn";
+}
+
 /** 시험·진단용 — 지금 그 대화의 턴이 도는 중인가. */
 export function isTurnRunningFor(chatId: number): boolean {
   return runningTurnChatId === chatId;
@@ -985,6 +1027,9 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
       grants: codexConfiguredGrants(liveAgentId, liveSandbox, liveNetwork, liveWorkspaceRoot),
     },
     // 라이브에서는 1:1 세션을 team.db 에 기억한다(재시작 넘어 맥락 유지).
+    // ★agentId 를 실어 보낸다★ — 안 실으면 handleMessage 가 같은 식을 다시 계산해,
+    //   runBridge({agentId}) 로 부를 때 두 값이 갈린다. 그러면 steer 가 등록 안 된 id 를 찾아 늘 실패한다.
+    agentId: liveAgentId,
     dmSessions: deps.dmSessions ?? makeDmSessionStore(liveAgentId, defaultTeamDbPath()),
     sendMessage: deps.sendMessage ?? tgSend(token),
     editMessage: deps.editMessage ?? tgEdit(token),
@@ -1056,23 +1101,24 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         //   turn/steer 는 turnId 를 요구하므로 ★막 시작해 번호가 아직 없으면 실패★ 한다. 그때는 아래로 내려가
         //   지금처럼 새 턴이 된다 — 실패를 조용히 삼키지 않는다.
         // ★루프는 여기서도 기다리지 않는다★ — 기다리면 승인 버튼이 다시 막힌다.
-        void (async () => {
-          if (isTurnRunningFor(chatId)) {
-            if (messageId !== undefined) void live.reactMessage?.(chatId, messageId, "👀");
-            const injected = await steerActiveTurn(liveAgentId, buildDmSteerText(text));
-            if (injected) {
-              console.log(`[codex-bridge] ↳ 진행 중 작업에 전달: ${text.slice(0, 40)}`);
-              noteIntoRunningTurn?.(`받음: ${text}`); // 들어갔다는 것을 화면에도 남긴다
-              return;
-            }
-            console.log(`[codex-bridge] ↳ 전달 실패(작업 번호 없음) → 새 작업으로: ${text.slice(0, 40)}`);
-          }
-          // ★턴은 하나씩 돈다(직렬).★ 루프는 기다리지 않고 다음 업데이트로 간다.
-          turns.enqueue(async () => {
+        // ★루프는 여기서도 기다리지 않는다★ — 기다리면 승인 버튼이 다시 막힌다.
+        void routeIncoming(chatId, text, {
+          isRunning: isTurnRunningFor,
+          steer: (t) => steerActiveTurn(liveAgentId, t),
+          note: (line) => {
+            // 턴이 방금 끝났으면 통로가 닫혀 있다 — 그때는 남기지 않는다.
+            //   ★닫힌 뒤에 남기면 답을 쓴 자리에 진행 줄이 덮인다.★ 유실이 아니라 안전 쪽이다.
+            noteIntoRunningTurn?.(line);
+          },
+          enqueue: (run) => turns.enqueue(run),
+          runTurnFor: async () => {
             const r = await handleMessage(chatId, text, messageId, live);
             console.log(`[codex-bridge] → ${r.detail}: ${r.reply.slice(0, 60)}`);
-          });
-        })();
+          },
+          react: () => { if (messageId !== undefined) void live.reactMessage?.(chatId, messageId, "👀"); },
+        }).then((route) => {
+          console.log(`[codex-bridge] ↳ ${route === "steered" ? "진행 중 작업에 전달" : "새 작업으로"}: ${text.slice(0, 40)}`);
+        });
       }
     } catch (e) {
       console.error("[codex-bridge] poll 오류:", (e as Error).message);
