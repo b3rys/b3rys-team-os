@@ -299,7 +299,12 @@ export class CodexAppServerClient {
       try {
         const r = await this.withTimeout(this.request("thread/resume", { ...params, threadId: opts.resumeThreadId }), HANDSHAKE_TIMEOUT_MS, "thread/resume") as { thread?: { id?: string } };
         id = r?.thread?.id;
-      } catch { /* resume 실패 → 아래 새 thread 폴백 */ }
+      } catch (e) {
+        // ★조용히 넘어가면 안 된다.★ 이어받기 실패와 성공이 로그에서 같은 모양이라,
+        //   사람이 "왜 앞 얘기를 잊었냐" 고 물어도 ★기록으로는 답할 수 없다★
+        //   (2026-08-19 실측: 1:1 세션이 한 번 갈렸는데 이유를 좁힐 수 없었다).
+        console.warn(`[codex] thread/resume 실패 → 새 대화로 시작한다 (앞 맥락 없음): ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
     if (!id) {
       const res = await this.withTimeout(this.request("thread/start", params), HANDSHAKE_TIMEOUT_MS, "thread/start") as { thread?: { id?: string } };

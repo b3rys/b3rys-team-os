@@ -204,6 +204,11 @@ interface PersonaInput {
   owner_name?: string; // 팀장 이름(setting owner_name). 핵심룰의 {{OWNER}} 치환용. 비면 {{OWNER}} 유지(퍼블릭 템플릿).
   team_name?: string; // 팀 이름(setting team_name). 핵심룰의 {{TEAM}} 치환용. 비면 {{TEAM}} 유지(퍼블릭 템플릿).
   tier2_outbound?: boolean; // Tier2(2026-07-06): claude 아웃바운드 마커 전송. true면 SECTION_CLAUDE_COMMS_TIER2(reply 도구 대신 ‹‹‹b3os-send››› 마커). 멤버십=var/tier2-outbound-agents.txt.
+  /**
+   * ★SOUL.md 본문.★ codex 처럼 ★참조로는 못 닿는 런타임★ 에만 여기 실어 로딩파일에 직접 넣는다.
+   * 다른 런타임은 안 넘긴다 — 참조가 실제로 닿으므로 본문을 두 벌 두면 어긋난다.
+   */
+  soul_text?: string;
 }
 
 // 핵심룰 텍스트의 {{OWNER}} 플레이스홀더를 팀장 이름으로 치환. (안전: ownerName 없으면 원문 그대로 — 퍼블릭 export는 {{OWNER}} 유지)
@@ -754,8 +759,26 @@ function personaPointer(i: PersonaInput): string {
     // claude(Claude Code)만 @import 지원 → SOUL.md 자동 inline (로컬 파일이라 승인 다이얼로그 없음).
     return ["## Role & Persona", "", "역할·persona 는 `@SOUL.md` 참조 (Claude Code 가 이 파일을 자동 inline 로드)."].join("\n");
   }
-  // ★openclaw/hermes 는 @import 미지원 → 직접 절대경로. (이 런타임들은 SOUL.md 를 bootstrap 으로 자동 로드하므로 참조는 안내용.)
   const soulPath = `${tilde(`${MEMBERS_ROOT}/${i.id}`)}/SOUL.md`;
+  // ★codex 는 SOUL.md 를 안 읽는다 — 실측이다.★ (2026-08-19)
+  //   임시 작업폴더에 AGENTS.md·SOUL.md 를 두고 각각 다른 표식을 심어 물었더니,
+  //   ★도구를 한 번도 안 쓰고★ AGENTS.md 표식은 맞히고 SOUL.md 표식은 "모름" 이었다.
+  //   = codex 가 자동으로 읽는 것은 cwd 의 AGENTS.md 뿐이다.
+  //
+  //   그런데 여기 문장은 "이 런타임이 SOUL.md 를 함께 로드" 라고 ★단언★ 하고 있었다.
+  //   그래서 dex 는 ★역할도 말투도 없이★ 돌았고, 남은 지시는 "상대가 쓴 말투에 맞춰라" 뿐이라
+  //   팀장님이 편하게 쓰시면 ★규칙대로 반말이 나왔다★(실측: 답신 51건 중 반말 2건, 짧은 답에서 샌다).
+  //   ★참조가 안 닿는 런타임에는 본문을 직접 넣는다.★ 참조로 될 것처럼 적어두면 조용히 비어 있다.
+  if (i.runtime === "codex" && i.soul_text?.trim()) {
+    return [
+      "## Role & Persona",
+      "",
+      `(정본은 \`${soulPath}\` — 이 런타임은 그 파일을 자동으로 읽지 않아 여기 그대로 싣는다.)`,
+      "",
+      i.soul_text.trim(),
+    ].join("\n");
+  }
+  // openclaw/hermes 는 @import 미지원이지만 bootstrap 으로 SOUL.md 를 로드한다 → 경로 참조로 족하다.
   return ["## Role & Persona", "", `역할·persona 는 \`${soulPath}\` 에 있음 (이 런타임이 SOUL.md 를 함께 로드).`].join("\n");
 }
 
