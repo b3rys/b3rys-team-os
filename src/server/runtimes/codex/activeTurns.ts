@@ -11,7 +11,8 @@
  * 그 길을 쓰려면 ★지금 도는 클라이언트를 찾을 수 있어야★ 해서 이 등록부를 둔다.
  */
 export interface SteerableTurn {
-  steer(text: string): Promise<void>;
+  /** imagePaths 는 ★선택★ 이다 — 버스 경로는 안 넘기고 그대로 돈다(글자만 끼워 넣는다). */
+  steer(text: string, imagePaths?: readonly string[]): Promise<void>;
   readonly currentTurnId: string | null;
 }
 
@@ -31,11 +32,15 @@ export function unregisterActiveTurn(agentId: string, turn: SteerableTurn): void
  * 진행 중 턴에 말을 끼워 넣는다. 성공하면 true.
  * ★turnId 가 없으면 아직 턴이 안 붙은 것★ 이라 넣지 않는다(codex 가 expectedTurnId 를 요구한다).
  */
-export async function steerActiveTurn(agentId: string, text: string): Promise<boolean> {
+export async function steerActiveTurn(
+  agentId: string,
+  text: string,
+  imagePaths?: readonly string[],
+): Promise<boolean> {
   const turn = active.get(agentId);
   if (!turn || !turn.currentTurnId) return false;
   try {
-    await turn.steer(text);
+    await turn.steer(text, imagePaths);
     return true;
   } catch {
     return false; // 실패하면 기존 defer 경로로 되돌아간다(조용히 삼키지 않는다)

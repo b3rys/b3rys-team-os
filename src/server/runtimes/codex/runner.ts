@@ -55,6 +55,13 @@ export interface CodexTurnOptions {
   onActivity?: (line: string, itemId?: string) => void;
   /** 지금 어느 단계인가 — 맨 윗줄에서 교체된다(쌓이지 않는다). */
   onStatus?: (line: string) => void;
+  /**
+   * ★사람이 붙인 그림의 로컬 경로.★ 본문에 경로를 적어주는 것과 다르다 —
+   * 적어주면 codex 는 파일을 ★바이트로 읽을 뿐★ 이고, 입력 아이템으로 넣어야 ★본다.★
+   * 실측(CLI 0.147.0): 글자가 든 그림을 태워 codex 가 그 글자를 읽어냈고,
+   * 같은 질문을 그림 없이 주면 "안보임" 이 나왔다.
+   */
+  imagePaths?: readonly string[];
 }
 
 export interface CodexTurnResult {

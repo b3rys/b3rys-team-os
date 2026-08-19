@@ -11,6 +11,10 @@
  * 채팅별 codex thread(resume sessionId)로 멀티턴 맥락 유지.
  */
 import { runCodexTurn, type CodexTurnOptions, type CodexTurnResult } from "./runner";
+import {
+  attachmentNote, decideDmMessage, downloadDmAttachments,
+  type DmAttachments, type DmMessageMedia,
+} from "./dmMedia";
 import { createSerialTurnQueue } from "./serialTurnQueue";
 import { makeDmSessionStore, NOOP_DM_SESSION_STORE, type DmSessionStore } from "./dmSessionStore";
 import { toMarkdownV2, splitForTelegram, toPlain } from "./telegramMarkdown";
@@ -453,6 +457,12 @@ export async function handleMessage(
   text: string,
   messageId: number | undefined,
   deps: BridgeDeps = {},
+  /**
+   * ★첨부는 여기서 내려받는다 — 폴 루프가 아니다.★
+   * 루프에서 받으면 내려받는 동안 다음 업데이트를 못 읽어, #334 에서 고친 ★승인 버튼 막힘★ 이 되살아난다.
+   * 함수로 넘겨 이 턴 안에서 받게 한다(시험에서는 통신 없이 대신 넣는다).
+   */
+  fetchAttachments?: () => Promise<DmAttachments>,
 ): Promise<{ ok: boolean; reply: string; detail: string }> {
   // ★브리지도 app-server 로 간다.★
   //   전에는 브리지만 옛 exec 경로였다 — 그래서 ★사람이 직접 말 거는 길에만★ 그때까지의 개선
@@ -554,6 +564,19 @@ export async function handleMessage(
   const promptText = greetedBefore
     ? toolAwareText
     : `[이번이 이 대화의 첫 응답입니다. 먼저 짧게 인사하고, OT(팀 미션·규칙·역할·팀 스킬)를 받아 팀에 합류했음을 한 줄로 밝힌 뒤 본론에 답하세요.]\n\n${toolAwareText}`;
+  // ★첨부를 여기서 내려받는다.★ 진행 표시가 이미 떠 있는 자리라 사람은 기다리는 줄 안다.
+  //   실패해도 턴을 죽이지 않는다 — 사람이 보낸 것을 말없이 없애지 않고, 무슨 일이 났는지 본문에 적는다.
+  let attachments: DmAttachments | null = null;
+  if (fetchAttachments) {
+    try {
+      attachments = await fetchAttachments();
+    } catch (e) {
+      attachments = { imagePaths: [], files: [], failed: [{ kind: "attachment", reason: e instanceof Error ? e.message : String(e) }] };
+    }
+  }
+  const note = attachments ? attachmentNote(attachments) : "";
+  const promptWithMedia = note ? `${promptText}\n\n${note}` : promptText;
+
   const preflight = codexRuntimePreflight(
     {
       id: selfAgentId,
@@ -651,7 +674,9 @@ export async function handleMessage(
   let result: CodexTurnResult;
   try {
     result = await runTurn({
-      prompt: promptText,
+      prompt: promptWithMedia,
+      // ★그림은 본문이 아니라 입력으로 간다★ — 경로를 적어주면 codex 는 바이트로 읽을 뿐 보지 못한다.
+      imagePaths: attachments?.imagePaths,
       agentId: selfAgentId, // ★필수★ — 승인 요청의 주인이 된다
       onActivity,
       onStatus,
@@ -812,7 +837,16 @@ function tgReact(token: string): NonNullable<BridgeDeps["reactMessage"]> {
 
 interface TgUpdate {
   update_id: number;
-  message?: { message_id: number; chat: { id: number }; text?: string };
+  message?: {
+    message_id: number;
+    chat: { id: number };
+    text?: string;
+    /** ★사진에 달린 설명★ — 사진 메시지는 text 가 아니라 caption 으로 온다. */
+    caption?: string;
+    /** ★같은 그림의 여러 크기★ (썸네일·중간·원본). 장수가 아니다 — 여러 장은 메시지가 나뉘어 온다. */
+    photo?: DmMessageMedia["photo"];
+    document?: DmMessageMedia["document"];
+  };
   callback_query?: TgCallbackQuery;
 }
 
@@ -1080,10 +1114,15 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
           catch (e) { console.error(`[codex-bridge] 승인 콜백 처리 실패: ${e instanceof Error ? e.message : e}`); }
           continue;
         }
-        const text = u.message?.text;
-        const chatId = u.message?.chat.id;
-        const messageId = u.message?.message_id;
-        if (!text || chatId === undefined) continue;
+        const msg = u.message;
+        const chatId = msg?.chat.id;
+        const messageId = msg?.message_id;
+        // ★사진 메시지는 text 가 없다 — 설명은 caption 으로 온다.★
+        //   전에는 여기서 text 만 보고 걸렀다. 그래서 ★사진만 보낸 메시지는 통째로 버려졌다★ —
+        //   로그에도 안 남아 "무시당했다" 로 보였다(팀장님 관측: "이미지 첨부하면 못 읽는다").
+        const decided = decideDmMessage(msg);
+        if (chatId === undefined || !decided.handle) continue;
+        const { text, hasMedia } = decided;
 	        // 발신자 게이트(fail-closed): 허용 목록이 비어 있거나 미포함이면 무시한다.
 	        if (!isAllowedChat(allowFrom, chatId)) {
 	          if (allowFrom.size === 0 && !warnedNoAllowlist) {
@@ -1101,10 +1140,15 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         //   turn/steer 는 turnId 를 요구하므로 ★막 시작해 번호가 아직 없으면 실패★ 한다. 그때는 아래로 내려가
         //   지금처럼 새 턴이 된다 — 실패를 조용히 삼키지 않는다.
         // ★루프는 여기서도 기다리지 않는다★ — 기다리면 승인 버튼이 다시 막힌다.
-        // ★루프는 여기서도 기다리지 않는다★ — 기다리면 승인 버튼이 다시 막힌다.
         void routeIncoming(chatId, text, {
           isRunning: isTurnRunningFor,
-          steer: (t) => steerActiveTurn(liveAgentId, t),
+          steer: async (t) => {
+            // ★도중에 붙인 그림도 그 작업 안으로 넣는다.★ 여기서 내려받아도 폴 루프는 안 막힌다 —
+            //   위에서 routeIncoming 을 기다리지 않기 때문이다(await 를 붙이면 승인 버튼이 다시 막힌다).
+            const mid = hasMedia && msg ? await downloadDmAttachments(token, msg).catch(() => null) : null;
+            const withNote = mid && attachmentNote(mid) ? `${t}\n\n${attachmentNote(mid)}` : t;
+            return steerActiveTurn(liveAgentId, withNote, mid?.imagePaths);
+          },
           note: (line) => {
             // 턴이 방금 끝났으면 통로가 닫혀 있다 — 그때는 남기지 않는다.
             //   ★닫힌 뒤에 남기면 답을 쓴 자리에 진행 줄이 덮인다.★ 유실이 아니라 안전 쪽이다.
@@ -1112,7 +1156,9 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
           },
           enqueue: (run) => turns.enqueue(run),
           runTurnFor: async () => {
-            const r = await handleMessage(chatId, text, messageId, live);
+            const r = await handleMessage(chatId, text, messageId, live, hasMedia && msg
+              ? () => downloadDmAttachments(token, msg)
+              : undefined);
             console.log(`[codex-bridge] → ${r.detail}: ${r.reply.slice(0, 60)}`);
           },
           react: () => { if (messageId !== undefined) void live.reactMessage?.(chatId, messageId, "👀"); },

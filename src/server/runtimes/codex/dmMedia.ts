@@ -1,0 +1,170 @@
+/**
+ * ★1:1 대화로 온 첨부를 dex 가 실제로 보게 한다.★
+ *
+ * 무엇이 문제였나 — 브리지가 받는 항목이 ★글자 하나뿐★ 이었다(TgUpdate.message.text).
+ * 그래서 사진만 보낸 메시지는 통째로 버려지고, 사진에 달린 설명(caption)도 안 왔다.
+ * 팀장님 관측: "dex 한테 이미지 첨부하면 못 읽는다" · "다른 팀원은 다 되는데".
+ * 다른 팀원(그룹방 capture 경로)은 이미 내려받아 저장하고 있었다 — ★1:1 만 안 이어져 있었다.★
+ *
+ * 사진은 버려지지 않는다: 텔레그램은 ★사진 한 장을 여러 크기로★ 보낸다(photo[] = 같은 그림의 썸네일·
+ * 중간·원본). 그중 가장 큰 것을 고르는 것은 ★장수를 고르는 게 아니라 화질을 고르는 것★ 이다.
+ * 여러 장을 보내면 텔레그램이 ★한 장씩 따로★ 보내므로 각 메시지가 각자 처리된다.
+ */
+import { storeTelegramMedia, type StoredMedia, type TelegramMediaRef } from "../../lib/mediaStore";
+
+/** 텔레그램 메시지에서 우리가 읽는 부분만. (브리지의 TgUpdate 와 같은 모양) */
+export interface DmMessageMedia {
+  photo?: Array<{
+    file_id: string;
+    file_unique_id?: string;
+    file_size?: number;
+    width?: number;
+    height?: number;
+  }>;
+  document?: {
+    file_id: string;
+    file_unique_id?: string;
+    file_name?: string;
+    mime_type?: string;
+    file_size?: number;
+  };
+}
+
+/**
+ * 같은 그림의 여러 크기 중 ★가장 큰 것★ 을 고른다.
+ * file_size 가 없는 변형이 섞여 있어 넓이로 보조 판정한다(둘 다 없으면 0 — 맨 뒤로 간다).
+ */
+export function largestPhotoVariant(
+  photo: DmMessageMedia["photo"],
+): NonNullable<DmMessageMedia["photo"]>[number] | undefined {
+  return photo?.slice().sort((a, b) => {
+    const as = a.file_size ?? (a.width ?? 0) * (a.height ?? 0);
+    const bs = b.file_size ?? (b.width ?? 0) * (b.height ?? 0);
+    return bs - as;
+  })[0];
+}
+
+/** 내려받을 대상을 뽑는다 — 순수 함수라 통신 없이 잴 수 있다. */
+export function dmMediaRefs(msg: DmMessageMedia): TelegramMediaRef[] {
+  const refs: TelegramMediaRef[] = [];
+  const photo = largestPhotoVariant(msg.photo);
+  if (photo) {
+    refs.push({
+      kind: "photo",
+      file_id: photo.file_id,
+      file_unique_id: photo.file_unique_id,
+      file_size: photo.file_size,
+      width: photo.width,
+      height: photo.height,
+      mime_type: "image/jpeg",
+    });
+  }
+  const doc = msg.document;
+  if (doc) {
+    refs.push({
+      kind: "document",
+      file_id: doc.file_id,
+      file_unique_id: doc.file_unique_id,
+      file_name: doc.file_name,
+      mime_type: doc.mime_type,
+      file_size: doc.file_size,
+    });
+  }
+  return refs;
+}
+
+/** 문서가 그림인가 — .png 를 문서로 보내는 사람이 많다(텔레그램의 "파일로 보내기"). */
+export function isImageMedia(m: Pick<StoredMedia, "kind" | "mime_type" | "file_name">): boolean {
+  if (m.kind === "photo") return true;
+  if (m.mime_type?.startsWith("image/")) return true;
+  return /\.(jpe?g|png|webp|gif)$/i.test(m.file_name ?? "");
+}
+
+export interface DmAttachments {
+  /** codex 에 ★입력 아이템★ 으로 넣을 그림 경로. 본문에 경로만 적는 것과 다르다 — 이래야 본다. */
+  imagePaths: string[];
+  /** 그림이 아닌 첨부(pdf·zip 등) — 본문에 경로를 적어 필요하면 열게 한다. */
+  files: StoredMedia[];
+  /** 내려받기에 실패한 것. ★조용히 지우지 않는다★ — 사람이 보낸 것이 사라지면 안 된다. */
+  failed: Array<{ kind: string; reason: string }>;
+}
+
+/**
+ * 첨부를 내려받아 로컬 경로로 만든다.
+ *
+ * ★한 건이 실패해도 나머지는 간다.★ 그리고 실패는 남긴다 — 사람은 보냈는데 아무 말이 없으면
+ * 봤는지 못 봤는지 알 수 없다(그게 이 결함의 원래 모습이었다).
+ */
+export async function downloadDmAttachments(
+  token: string,
+  msg: DmMessageMedia,
+  opts: { store?: typeof storeTelegramMedia; mediaDir?: string } = {},
+): Promise<DmAttachments> {
+  const store = opts.store ?? storeTelegramMedia;
+  const out: DmAttachments = { imagePaths: [], files: [], failed: [] };
+  for (const ref of dmMediaRefs(msg)) {
+    try {
+      const saved = await store(token, ref, opts.mediaDir ? { mediaDir: opts.mediaDir } : {});
+      if (isImageMedia(saved)) out.imagePaths.push(saved.file_path);
+      else out.files.push(saved);
+    } catch (e) {
+      out.failed.push({ kind: ref.kind, reason: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return out;
+}
+
+/**
+ * 첨부 사실을 본문에 덧붙인다.
+ *
+ * 그림은 ★입력 아이템으로 따로 들어가지만★ 본문에도 한 줄 적는다 — 안 적으면 사람이 설명 없이
+ * 그림만 보냈을 때 codex 가 무엇을 해달라는 건지 모른다. 문서는 경로가 유일한 통로다.
+ */
+export function attachmentNote(a: DmAttachments): string {
+  const lines: string[] = [];
+  if (a.imagePaths.length) {
+    lines.push(
+      a.imagePaths.length === 1
+        ? "[첨부: 그림 1장 — 위 입력으로 함께 보냈다. 보이는 대로 답하라.]"
+        : `[첨부: 그림 ${a.imagePaths.length}장 — 위 입력으로 함께 보냈다. 보이는 대로 답하라.]`,
+    );
+  }
+  for (const f of a.files) {
+    lines.push(`[첨부 파일: ${f.file_name ?? f.media_id} — ${f.file_path} (필요하면 직접 열어라)]`);
+  }
+  for (const f of a.failed) {
+    lines.push(`[첨부(${f.kind}) 내려받기 실패: ${f.reason} — 사람에게 다시 보내달라고 하라.]`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * 첨부만 있고 글이 없을 때 쓸 본문.
+ * ★빈 문자열로 두면 안 된다★ — codex 는 할 말이 없는 턴으로 받아 아무것도 안 한다.
+ */
+export const MEDIA_ONLY_PROMPT = "(설명 없이 첨부만 보냈다. 첨부를 보고 무엇인지 짧게 말하고, 필요한 것을 물어라.)";
+
+/**
+ * ★이 메시지를 처리할 것인가, 그리고 codex 에 무슨 말을 줄 것인가.★
+ *
+ * 이 판단이 원래 폴 루프 안에 `if (!text) continue` 한 줄로 있었다. 그래서
+ * ★사진만 보낸 메시지가 통째로 버려졌다★ — 로그에도 안 남아 무시당한 것처럼 보였다.
+ * 판단을 밖으로 빼서 시험이 지키게 한다(같은 실수를 오늘 steer 쪽에서도 했다).
+ */
+export function decideDmMessage(msg: {
+  text?: string;
+  caption?: string;
+  photo?: DmMessageMedia["photo"];
+  document?: DmMessageMedia["document"];
+} | undefined): { handle: boolean; text: string; hasMedia: boolean } {
+  const body = dmBodyText(msg?.text, msg?.caption);
+  const hasMedia = Boolean(msg?.photo?.length || msg?.document);
+  if (!body && !hasMedia) return { handle: false, text: "", hasMedia };
+  return { handle: true, text: body ?? MEDIA_ONLY_PROMPT, hasMedia };
+}
+
+/** 본문 = 글 또는 캡션. 둘 다 없으면 첨부만 온 것이다. */
+export function dmBodyText(text: string | undefined, caption: string | undefined): string | undefined {
+  const body = (text ?? caption ?? "").trim();
+  return body.length ? body : undefined;
+}
