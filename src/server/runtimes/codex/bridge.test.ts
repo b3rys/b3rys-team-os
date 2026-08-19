@@ -16,6 +16,8 @@ import {
   type BridgeDeps,
   tgSend,
   tgEdit,
+  isTurnRunningFor,
+  buildDmSteerText,
 } from "./bridge";
 import type { CodexTurnResult } from "./runner";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -978,5 +980,67 @@ describe("codex bridge — 상태 머리글", () => {
     await handleMessage(42, "해줘", 1, deps);
     const withWork = edits.filter((e) => e.includes("실행: pwd"));
     expect(withWork[0]!.split("\n")[0]).toBe(DEFAULT_WORKING_TEXT);
+  });
+});
+
+// ── ★도는 중인 작업에 말을 밀어 넣는다★ ──
+//
+// 실측(2026-08-19): 팀 리드가 작업 중에 보낸 메시지 4건이 ★전부 로그에 들어와 있는데 답이 없었다.★
+// 받기는 하지만 새 턴으로 줄을 세우니, 하던 일이 끝날 때까지 아무 반응이 없어 ★못 듣는 것처럼 보인다.★
+// 버스로 온 일에는 이 배선이 있었고(7군데) 1:1 에는 ★0군데★ 였다.
+describe("codex bridge — 진행 중 작업에 끼어들기", () => {
+  beforeEach(() => resetChatThreads());
+
+  test("★턴이 도는 동안에는 그 대화가 '도는 중' 으로 보인다★ — 끼어들지 말지를 이걸로 가른다", async () => {
+    let sawRunning = false;
+    const deps: BridgeDeps = {
+      reactMessage: async () => true,
+      sendMessage: async () => 900,
+      editMessage: async () => true,
+      sandbox: "read-only",
+      runTurn: async () => {
+        sawRunning = isTurnRunningFor(51);
+        return { ok: true, reply: "끝", sessionId: "s1", detail: "ok", elapsedMs: 1 };
+      },
+    };
+    await handleMessage(51, "해줘", 1, deps);
+    expect(sawRunning, "턴 안에서는 도는 중이어야 한다").toBe(true);
+    expect(isTurnRunningFor(51), "끝나면 도는 중이 아니다").toBe(false);
+  });
+
+  test("★대조군 — 다른 대화는 '도는 중' 이 아니다★ (남의 턴에 끼워 넣으면 안 된다)", async () => {
+    let other = true;
+    const deps: BridgeDeps = {
+      reactMessage: async () => true,
+      sendMessage: async () => 900,
+      editMessage: async () => true,
+      sandbox: "read-only",
+      runTurn: async () => {
+        other = isTurnRunningFor(52); // 다른 대화 번호
+        return { ok: true, reply: "끝", sessionId: "s1", detail: "ok", elapsedMs: 1 };
+      },
+    };
+    await handleMessage(51, "해줘", 1, deps);
+    expect(other).toBe(false);
+  });
+
+  test("★턴이 던져도 '도는 중' 표시가 남지 않는다★ — 남으면 이후 모든 말이 갈 곳을 잃는다", async () => {
+    const deps: BridgeDeps = {
+      reactMessage: async () => true,
+      sendMessage: async () => 900,
+      editMessage: async () => true,
+      sandbox: "read-only",
+      runTurn: async () => { throw new Error("터짐"); },
+    };
+    await handleMessage(53, "해줘", 1, deps).catch(() => undefined);
+    expect(isTurnRunningFor(53)).toBe(false);
+  });
+
+  test("밀어 넣는 문구에 ★반영하라·답하라★ 가 들어간다 — 없으면 조용히 무시될 수 있다", () => {
+    const t = buildDmSteerText("로그인이 안되면 알려줘");
+    expect(t).toContain("[중간 메시지");
+    expect(t).toContain("로그인이 안되면 알려줘");
+    expect(t).toContain("반영해서 계속하라");
+    expect(t).toContain("이 메시지에도 답해라");
   });
 });
