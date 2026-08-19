@@ -96,7 +96,7 @@ export async function runViaAppServer(
     // ★진행 중 턴에 끼어들 수 있게 등록★ — 이게 없으면 턴 도는 동안 온 메시지가 연기되다 사라진다
     //   (실측: 20번 연기 후 blocked. 턴도 답도 없었다.)
     registerActiveTurn(opts.agentId, client);
-    const r = await client.runTurn(opts.prompt, {
+    const r = await client.runTurn(opts.prompt, {  // 그림은 아래 4번째 인자로 간다
       // ★지금 무엇을 하는 중인지 보이게 한다.★ 창이 없는 런타임이라 이벤트로 직접 쓴다.
       onActivity: (line, itemId) => {
         // 두 수신처가 서로를 막지 않는다 — 대시보드 쓰기가 실패해도 채널 표시는 살고, 반대도 같다.
@@ -128,7 +128,7 @@ export async function runViaAppServer(
           ? await requestApprovalPopup(db, req, opts.agentId, opts.cwd)
           : "denied"; // db 없는 caller 는 띄울 곳이 없다(테스트·도구 경로)
       },
-    }, TURN_TIMEOUT_MS);
+    }, TURN_TIMEOUT_MS, opts.imagePaths);
     // ★Phase1 ③: 턴 종료 시 이 turn의 남은 pending/decided 팝업을 expire(cancel/interrupt/timeout 포함).
     //   늦게 도착한 승인은 finalizeApprovalDelivery의 CAS가 expired 상태를 보고 이미 거부하지만, 여기서 상태를
     //   확정 정리해 orphan 누적을 막는다. best-effort. (delivered/orphaned는 건드리지 않음.)★

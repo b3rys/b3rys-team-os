@@ -196,6 +196,28 @@ export function activityLineOf(item: unknown): string | null {
   return type ? clip(type) : null;
 }
 
+/**
+ * ★턴에 실어 보낼 입력 아이템을 만든다.★
+ *
+ * 클래스 안에 두면 시험이 못 닿는다 — app-server 를 실제로 띄워야 하기 때문이다.
+ * 그런데 여기서 틀리면 ★그림이 조용히 빠진 채★ 글자만 간다(사람은 보냈는데 못 봤다는 답을 받는다).
+ * 그래서 판단을 밖으로 뺀다.
+ *
+ * 실측(CLI 0.147.0 · app-server): 입력 종류는 text | image | localImage | audio | localAudio |
+ * skill | mention. localImage 는 ★path 를 요구한다★ — imageUrl 로 주면
+ * `Invalid request: missing field \`path\`` 로 거부된다.
+ * ★그림이 글자보다 앞선다★ — 뒤에 두면 "이 그림" 이 앞 문장을 못 가리킨다.
+ */
+export function buildTurnInput(
+  text: string,
+  imagePaths?: readonly string[],
+): Array<Record<string, unknown>> {
+  return [
+    ...(imagePaths ?? []).map((path) => ({ type: "localImage", path })),
+    { type: "text", text, text_elements: [] },
+  ];
+}
+
 export class CodexAppServerClient {
   private proc: ChildProcessWithoutNullStreams | null = null;
   private buf = "";
@@ -293,7 +315,20 @@ export class CodexAppServerClient {
    * ★견고성: timeoutMs 내 turn/completed 없으면 interrupt 후 status="timeout"으로 정리(무응답 턴이 런타임 막지 않게).★
    * exec 폴백이 없으므로 예외는 여기서 정면 처리한다.
    */
-  runTurn(text: string, handlers: RunTurnHandlers = {}, timeoutMs = 300_000): Promise<TurnResult> {
+  /**
+   * ★그림은 경로만 넘기면 안 된다 — 입력 아이템으로 넣어야 codex 가 본다.★
+   *
+   * 실측(CLI 0.147.0 · app-server): 입력 아이템 종류는 text | image | localImage | audio | localAudio |
+   * skill | mention 이고, localImage 는 ★path 를 요구한다★ (imageUrl 로 주면
+   * `Invalid request: missing field \`path\`` 로 거부). 글자가 적힌 그림을 태워
+   * ★codex 가 그 글자를 읽어냈다★ — 경로를 본문에 적어주는 것과는 다른 길이다.
+   */
+  runTurn(
+    text: string,
+    handlers: RunTurnHandlers = {},
+    timeoutMs = 300_000,
+    imagePaths?: readonly string[],
+  ): Promise<TurnResult> {
     if (!this.threadId) throw new Error("startThread first");
     this.activeHandlers = handlers;
     this.currentTurnId = null;
@@ -316,7 +351,8 @@ export class CodexAppServerClient {
       this.turnResolve = finish;
       this.notify("turn/start", {
         threadId: this.threadId,
-        input: [{ type: "text", text, text_elements: [] }],
+        // ★그림이 글자보다 앞선다★ — 뒤에 두면 "이 그림" 이 앞 문장을 못 가리킨다(스파이크에서 앞에 두고 확인).
+        input: buildTurnInput(text, imagePaths),
         ...this.turnPolicy, // ★thread 에 준 실행 모드를 턴에도 그대로★ (openclaw 와 같은 모양)
       })
         .catch(() => finish({ finalText: "", status: "error", turnId: this.currentTurnId }));
@@ -334,9 +370,15 @@ export class CodexAppServerClient {
   }
 
   /** 진행 중 턴을 새 지시로 전환(중간 steer). expectedTurnId 필수(실측). */
-  async steer(text: string): Promise<void> {
+  async steer(text: string, imagePaths?: readonly string[]): Promise<void> {
     if (!this.threadId || !this.currentTurnId) throw new Error("no active turn to steer");
-    await this.notify("turn/steer", { threadId: this.threadId, expectedTurnId: this.currentTurnId, input: [{ type: "text", text, text_elements: [] }] });
+    await this.notify("turn/steer", {
+      threadId: this.threadId,
+      expectedTurnId: this.currentTurnId,
+      // ★중간에 보낸 그림도 봐야 한다★ — 턴 시작과 같은 모양이다. 안 실으면 사람이 도중에 붙인
+      //   화면 사진이 글자만 남고 사라진다(그게 이 결함의 원래 모습이었다).
+      input: buildTurnInput(text, imagePaths),
+    });
   }
 
   /** 진행 중 턴을 완전 중단(interrupt). */
