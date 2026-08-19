@@ -1,7 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import {
   attachmentNote, decideDmMessage, dmBodyText, dmMediaRefs, downloadDmAttachments, downloadDmAttachmentsSafe,
-  isImageMedia, largestPhotoVariant, MEDIA_ONLY_PROMPT,
+  isImageMedia, largestPhotoVariant, MEDIA_ONLY_PROMPT, withQuotedContext,
 } from "./dmMedia";
 import type { StoredMedia } from "../../lib/mediaStore";
 
@@ -195,5 +195,34 @@ describe("★안전 내려받기 — 어떤 식으로 실패해도 결과를 돌
     expect(a.failed, "던지지 않고 실패로 담아야 한다").toHaveLength(1);
     expect(a.failed[0]!.kind).toBe("attachment");
     expect(a.imagePaths).toHaveLength(0);
+  });
+});
+
+describe("★인용 답장 — 무엇에 대한 말인지 함께 보낸다★ (팀장님 관측 2026-08-19)", () => {
+  test("★집은 앞 메시지가 본문에 실린다★ — 안 실으면 '이게 모야?' 가 무엇에 대한 말인지 모른다", () => {
+    const d = decideDmMessage({
+      text: "이게 모야?",
+      reply_to_message: { text: "보고서 게시 완료 — zZq0qZz 발생", from: { username: "gd_dev_demis_bot" } },
+    });
+    expect(d.text).toContain("이게 모야?");
+    expect(d.text, "집은 원문이 함께 가야 한다").toContain("zZq0qZz");
+  });
+
+  test("누가 한 말인지도 남는다", () => {
+    const d = decideDmMessage({ text: "왜?", reply_to_message: { text: "앞 말", from: { first_name: "Dex" } } });
+    expect(d.text).toContain("Dex");
+  });
+
+  test("사진 인용이면 그 캡션을 쓴다", () => {
+    const d = decideDmMessage({ text: "이거 봐", reply_to_message: { caption: "화면 캡처 설명" } });
+    expect(d.text).toContain("화면 캡처 설명");
+  });
+
+  test("★대조군 — 인용이 없으면 아무것도 안 붙는다★", () => {
+    expect(decideDmMessage({ text: "안녕" }).text).toBe("안녕");
+  });
+
+  test("★대조군 — 인용이 있어도 내용이 비면 안 붙인다★ (빈 꼬리표를 지어내지 않는다)", () => {
+    expect(decideDmMessage({ text: "안녕", reply_to_message: { text: "  " } }).text).toBe("안녕");
   });
 });
