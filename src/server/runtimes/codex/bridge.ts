@@ -12,7 +12,7 @@
  */
 import { runCodexTurn, type CodexTurnOptions, type CodexTurnResult } from "./runner";
 import {
-  attachmentNote, decideDmMessage, downloadDmAttachments,
+  attachmentNote, decideDmMessage, downloadDmAttachments, downloadDmAttachmentsSafe,
   type DmAttachments, type DmMessageMedia,
 } from "./dmMedia";
 import { createSerialTurnQueue } from "./serialTurnQueue";
@@ -91,6 +91,27 @@ let noteIntoRunningTurn: ((line: string) => void) | null = null;
  * 버스 쪽(buildSteerText)과 같은 모양으로 둔다 — 받는 쪽(codex)이 같은 형식을 이미 읽고 있다.
  * ★"반영해서 계속하라 · 답할 때 이 말에도 답하라" 를 명시★ 하지 않으면 조용히 무시될 수 있다.
  */
+/**
+ * ★중간 개입에 첨부를 실어 보낸다.★
+ *
+ * 폴 루프 안 클로저로 두면 시험이 못 닿는다 — 리뷰에서 ★첨부를 통째로 무시해도 초록★ 이었다.
+ * 실사용 경로다: 작업을 시켜놓고 도는 중에 사진을 보내면 여기로 온다.
+ * 여기서 그림이 빠지면 codex 는 글자만 받고 "무슨 그림?" 이라 답한다 —
+ * ★사람은 보냈는데, 못 봤다는 사실조차 안 남는다.★ 이 파일이 고치려던 결함과 같은 모양이다.
+ */
+export async function steerWithAttachments(
+  text: string,
+  d: {
+    fetchAttachments: (() => Promise<DmAttachments>) | null;
+    steer: (text: string, imagePaths?: readonly string[]) => Promise<boolean>;
+  },
+): Promise<boolean> {
+  const mid = d.fetchAttachments ? await d.fetchAttachments() : null;
+  const note = mid ? attachmentNote(mid) : "";
+  const body = note ? `${text}\n\n${note}` : text;
+  return d.steer(body, mid?.imagePaths);
+}
+
 export function buildDmSteerText(body: string): string {
   return [
     "[중간 메시지 — 팀 리드]",
@@ -568,11 +589,10 @@ export async function handleMessage(
   //   실패해도 턴을 죽이지 않는다 — 사람이 보낸 것을 말없이 없애지 않고, 무슨 일이 났는지 본문에 적는다.
   let attachments: DmAttachments | null = null;
   if (fetchAttachments) {
-    try {
-      attachments = await fetchAttachments();
-    } catch (e) {
-      attachments = { imagePaths: [], files: [], failed: [{ kind: "attachment", reason: e instanceof Error ? e.message : String(e) }] };
-    }
+    attachments = await fetchAttachments().catch((e) => ({
+      imagePaths: [], files: [],
+      failed: [{ kind: "attachment", reason: e instanceof Error ? e.message : String(e) }],
+    }));
   }
   const note = attachments ? attachmentNote(attachments) : "";
   const promptWithMedia = note ? `${promptText}\n\n${note}` : promptText;
@@ -1142,13 +1162,12 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         // ★루프는 여기서도 기다리지 않는다★ — 기다리면 승인 버튼이 다시 막힌다.
         void routeIncoming(chatId, text, {
           isRunning: isTurnRunningFor,
-          steer: async (t) => {
-            // ★도중에 붙인 그림도 그 작업 안으로 넣는다.★ 여기서 내려받아도 폴 루프는 안 막힌다 —
-            //   위에서 routeIncoming 을 기다리지 않기 때문이다(await 를 붙이면 승인 버튼이 다시 막힌다).
-            const mid = hasMedia && msg ? await downloadDmAttachments(token, msg).catch(() => null) : null;
-            const withNote = mid && attachmentNote(mid) ? `${t}\n\n${attachmentNote(mid)}` : t;
-            return steerActiveTurn(liveAgentId, withNote, mid?.imagePaths);
-          },
+          // ★도중에 붙인 그림도 그 작업 안으로 넣는다.★ 여기서 내려받아도 폴 루프는 안 막힌다 —
+          //   위에서 routeIncoming 을 기다리지 않기 때문이다(await 를 붙이면 승인 버튼이 다시 막힌다).
+          steer: (t) => steerWithAttachments(t, {
+            fetchAttachments: hasMedia && msg ? () => downloadDmAttachmentsSafe(token, msg) : null,
+            steer: (body, imagePaths) => steerActiveTurn(liveAgentId, body, imagePaths),
+          }),
           note: (line) => {
             // 턴이 방금 끝났으면 통로가 닫혀 있다 — 그때는 남기지 않는다.
             //   ★닫힌 뒤에 남기면 답을 쓴 자리에 진행 줄이 덮인다.★ 유실이 아니라 안전 쪽이다.

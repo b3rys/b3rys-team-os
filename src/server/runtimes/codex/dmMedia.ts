@@ -115,6 +115,26 @@ export async function downloadDmAttachments(
 }
 
 /**
+ * ★내려받기를 시도하되, 어떤 식으로 실패해도 결과를 돌려준다.★
+ *
+ * 두 경로(새 턴 · 중간 개입)가 ★같은 방어★ 를 쓰게 하려고 여기 둔다.
+ * 전에는 중간 개입 쪽만 `.catch(() => null)` 이라 ★첨부가 조용히 사라졌다★ —
+ * 사람은 보냈는데 못 봤다는 사실조차 안 남는다. 이 파일이 고치려는 결함과 같은 모양이다.
+ * ★문을 두 개 만들었으면 그 둘도 같아야 한다.★
+ */
+export async function downloadDmAttachmentsSafe(
+  token: string,
+  msg: DmMessageMedia,
+  opts: { store?: typeof storeTelegramMedia; mediaDir?: string } = {},
+): Promise<DmAttachments> {
+  try {
+    return await downloadDmAttachments(token, msg, opts);
+  } catch (e) {
+    return { imagePaths: [], files: [], failed: [{ kind: "attachment", reason: e instanceof Error ? e.message : String(e) }] };
+  }
+}
+
+/**
  * 첨부 사실을 본문에 덧붙인다.
  *
  * 그림은 ★입력 아이템으로 따로 들어가지만★ 본문에도 한 줄 적는다 — 안 적으면 사람이 설명 없이

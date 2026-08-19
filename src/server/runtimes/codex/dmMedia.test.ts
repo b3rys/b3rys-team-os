@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import {
-  attachmentNote, decideDmMessage, dmBodyText, dmMediaRefs, downloadDmAttachments,
+  attachmentNote, decideDmMessage, dmBodyText, dmMediaRefs, downloadDmAttachments, downloadDmAttachmentsSafe,
   isImageMedia, largestPhotoVariant, MEDIA_ONLY_PROMPT,
 } from "./dmMedia";
 import type { StoredMedia } from "../../lib/mediaStore";
@@ -176,5 +176,15 @@ describe("★이 메시지를 처리할 것인가★ — 원래 결함이 살던
     expect(decideDmMessage({}).handle).toBe(false);
     expect(decideDmMessage(undefined).handle).toBe(false);
     expect(decideDmMessage({ photo: [] }).handle).toBe(false);
+  });
+});
+
+describe("★안전 내려받기 — 어떤 식으로 실패해도 결과를 돌려준다★", () => {
+  test("던지지 않고 실패로 담는다 — 두 경로가 같은 방어를 쓰게 한다", async () => {
+    const a = await downloadDmAttachmentsSafe("tok", { photo: [{ file_id: "p" }] }, {
+      store: (async () => { throw new Error("망가진 응답"); }) as never,
+    });
+    expect(a.failed).toHaveLength(1);
+    expect(a.failed[0]!.reason).toContain("망가진 응답");
   });
 });

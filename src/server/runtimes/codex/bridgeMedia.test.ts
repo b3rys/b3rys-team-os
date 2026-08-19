@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { handleMessage, resetChatThreads, type BridgeDeps } from "./bridge";
+import { handleMessage, resetChatThreads, steerWithAttachments, type BridgeDeps } from "./bridge";
 import type { CodexTurnResult } from "./runner";
 import type { DmAttachments } from "./dmMedia";
 import { mkdtempSync } from "node:fs";
@@ -91,5 +91,54 @@ describe("첨부 배선 — 그림이 codex 입력까지 간다", () => {
     }));
     expect(calls[0]?.imagePaths).toEqual(["/m/a.jpg"]);
     expect(calls[0]?.prompt).toContain("20MB 초과");
+  });
+});
+
+describe("★중간 개입 — 도는 작업에도 첨부가 실린다★ (리뷰에서 조용히 사라지던 자리)", () => {
+  const got = () => {
+    const calls: { text: string; imagePaths?: readonly string[] }[] = [];
+    return {
+      calls,
+      steer: async (text: string, imagePaths?: readonly string[]) => {
+        calls.push({ text, imagePaths });
+        return true;
+      },
+    };
+  };
+
+  test("★그림이 steer 까지 간다★ — 빠지면 codex 는 글자만 받고 '무슨 그림?' 이라 답한다", async () => {
+    const g = got();
+    await steerWithAttachments("이 화면 봐줘", {
+      fetchAttachments: async () => attach({ imagePaths: ["/m/a.jpg"] }),
+      steer: g.steer,
+    });
+    expect(g.calls[0]?.imagePaths, "중간에 보낸 그림도 그 작업에 들어가야 한다").toEqual(["/m/a.jpg"]);
+    expect(g.calls[0]?.text).toContain("이 화면 봐줘");
+    expect(g.calls[0]?.text).toContain("그림");
+  });
+
+  test("★대조군 — 첨부가 없으면 글자만 간다★ (빈 첨부를 지어내지 않는다)", async () => {
+    const g = got();
+    await steerWithAttachments("잠시만", { fetchAttachments: null, steer: g.steer });
+    expect(g.calls[0]).toEqual({ text: "잠시만", imagePaths: undefined });
+  });
+
+  test("★내려받기 실패도 새 턴 경로와 같은 모양으로 남는다★ — 조용히 사라지면 안 됐다", async () => {
+    const g = got();
+    await steerWithAttachments("이거 봐", {
+      fetchAttachments: async () => attach({ failed: [{ kind: "photo", reason: "20MB 초과" }] }),
+      steer: g.steer,
+    });
+    expect(g.calls[0]?.text).toContain("20MB 초과");
+    expect(g.calls[0]?.text).toContain("이거 봐"); // 사람 말은 그대로
+  });
+
+  test("문서는 중간 개입에서도 경로로 실린다", async () => {
+    const g = got();
+    await steerWithAttachments("읽어봐", {
+      fetchAttachments: async () => attach({ files: [{ file_name: "spec.pdf", file_path: "/m/spec.pdf" } as never] }),
+      steer: g.steer,
+    });
+    expect(g.calls[0]?.text).toContain("/m/spec.pdf");
   });
 });
