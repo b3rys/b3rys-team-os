@@ -12,7 +12,7 @@
  */
 import { runCodexTurn, type CodexTurnOptions, type CodexTurnResult } from "./runner";
 import {
-  attachmentNote, decideDmMessage, downloadDmAttachments, downloadDmAttachmentsSafe,
+  attachmentNote, attachmentsOrFailure, decideDmMessage, downloadDmAttachmentsSafe,
   type DmAttachments, type DmMessageMedia,
 } from "./dmMedia";
 import { createSerialTurnQueue } from "./serialTurnQueue";
@@ -587,13 +587,12 @@ export async function handleMessage(
     : `[이번이 이 대화의 첫 응답입니다. 먼저 짧게 인사하고, OT(팀 미션·규칙·역할·팀 스킬)를 받아 팀에 합류했음을 한 줄로 밝힌 뒤 본론에 답하세요.]\n\n${toolAwareText}`;
   // ★첨부를 여기서 내려받는다.★ 진행 표시가 이미 떠 있는 자리라 사람은 기다리는 줄 안다.
   //   실패해도 턴을 죽이지 않는다 — 사람이 보낸 것을 말없이 없애지 않고, 무슨 일이 났는지 본문에 적는다.
-  let attachments: DmAttachments | null = null;
-  if (fetchAttachments) {
-    attachments = await fetchAttachments().catch((e) => ({
-      imagePaths: [], files: [],
-      failed: [{ kind: "attachment", reason: e instanceof Error ? e.message : String(e) }],
-    }));
-  }
+  // ★실패를 무엇으로 바꾸는지는 attachmentsOrFailure 한 곳에만 있다.★
+  //   전에는 여기 인라인 catch 가 같은 객체를 ★문자 하나까지 똑같이★ 다시 만들고 있었다 —
+  //   그래서 "한 함수로 모았다" 는 내 설명이 코드와 달랐다(리뷰 지적). 다음 사람이 한쪽만 고치면 갈린다.
+  //   ★인라인 catch 를 그냥 지우면 안 된다★ — 이 함수는 넘겨받은 것을 부르는 자리라
+  //   던지는 것이 오면 턴이 통째로 죽는다(시험이 잡았다). 그래서 지우는 대신 같은 정의를 쓴다.
+  const attachments: DmAttachments | null = fetchAttachments ? await attachmentsOrFailure(fetchAttachments) : null;
   const note = attachments ? attachmentNote(attachments) : "";
   const promptWithMedia = note ? `${promptText}\n\n${note}` : promptText;
 
@@ -787,14 +786,17 @@ const TG_API = "https://api.telegram.org";
  * 알 방법이 없고, 그 결과가 ★답이 통째로 사라짐★ — 이 코드가 막으려던 바로 그 상황이다.
  */
 export function tgSend(token: string, fetchFn: typeof fetch = fetch): NonNullable<BridgeDeps["sendMessage"]> {
+  let lastReason = "";
   const post = async (body: Record<string, unknown>): Promise<number | null> => {
     const res = await fetchFn(`${TG_API}/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    const j = (await res.json()) as { ok?: boolean; result?: { message_id?: number } };
-    return j.ok && j.result?.message_id != null ? j.result.message_id : null;
+    const j = (await res.json()) as { ok?: boolean; result?: { message_id?: number }; description?: string; error_code?: number; parameters?: { retry_after?: number } };
+    if (j.ok && j.result?.message_id != null) return j.result.message_id;
+    lastReason = tgFailureReason(j); // ★사유를 들고 있는다★ — 없으면 왜 막혔는지 영영 모른다
+    return null;
   };
   return async (chatId, text) => {
     try {
@@ -807,8 +809,10 @@ export function tgSend(token: string, fetchFn: typeof fetch = fetch): NonNullabl
       //   ★원인은 단정하지 않는다★ — post 는 표시 거부만이 아니라 429·chat not found·비-JSON 응답에도
       //   null 을 낸다. "표시 때문" 이라고 적으면 rate limit 인데 이스케이프를 뒤지게 된다.
       //   (그런 경우엔 재전송도 같은 이유로 실패한다 — 로그만 남고 답은 여전히 안 간다.)
-      console.warn("[codex-bridge] 1차 전송 실패(MarkdownV2) → 순수 텍스트로 재전송");
-      return await post({ chat_id: chatId, text: toPlain(text) });
+      console.warn(`[codex-bridge] 1차 전송 실패(MarkdownV2) → 순수 텍스트로 재전송: ${lastReason}`);
+      const retried = await post({ chat_id: chatId, text: toPlain(text) });
+      if (retried === null) console.warn(`[codex-bridge] ★재전송도 실패 — 이 답은 안 나간다★: ${lastReason}`);
+      return retried;
     } catch {
       return null;
     }
@@ -817,22 +821,46 @@ export function tgSend(token: string, fetchFn: typeof fetch = fetch): NonNullabl
 
 /** 텔레그램 메시지 편집(작업중 → 답). */
 /** 폴백을 시험할 수 있게 fetchFn 을 받는다 — tgSend 주석 참조. */
+/**
+ * ★텔레그램이 왜 거절했는지를 남긴다.★
+ *
+ * 전에는 "재전송했다" 만 적었다. 그래서 라이브에서 한 턴에 20번 넘게 편집이 막히는데도
+ * ★rate limit 인지 · 글자 모양 때문인지 · 내용이 그대로라 막힌 건지 구별이 안 됐다★ —
+ * 그 상태로 고치면 고쳐졌는지도 모른다(2026-08-19 실측: 작업중 메시지가 둘로 갈라지는 현상).
+ *
+ * `description` 은 그대로 찍어도 안전하다 — 토큰이 안 실린다(#355 리뷰에서 확인).
+ * `retry_after` 를 함께 찍으면 ★rate limit 인지 한 번에 갈린다.★
+ */
+export function tgFailureReason(j: { description?: string; error_code?: number; parameters?: { retry_after?: number } }): string {
+  const retry = j.parameters?.retry_after;
+  return [
+    j.error_code !== undefined ? `code=${j.error_code}` : "",
+    j.description ? `desc=${j.description}` : "",
+    retry !== undefined ? `retry_after=${retry}s` : "",
+  ].filter(Boolean).join(" · ") || "사유 없음(응답에 description 이 없다)";
+}
+
 export function tgEdit(token: string, fetchFn: typeof fetch = fetch): NonNullable<BridgeDeps["editMessage"]> {
-  const post = async (body: Record<string, unknown>): Promise<boolean> => {
+  const post = async (body: Record<string, unknown>): Promise<{ ok: boolean; reason: string }> => {
     const res = await fetchFn(`${TG_API}/bot${token}/editMessageText`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    const j = (await res.json()) as { ok?: boolean };
-    return j.ok === true;
+    const j = (await res.json()) as { ok?: boolean; description?: string; error_code?: number; parameters?: { retry_after?: number } };
+    return j.ok === true ? { ok: true, reason: "" } : { ok: false, reason: tgFailureReason(j) };
   };
   return async (chatId, messageId, text) => {
     try {
-      if (await post({ chat_id: chatId, message_id: messageId, text, parse_mode: "MarkdownV2" })) return true;
-      console.warn("[codex-bridge] 1차 편집 실패(MarkdownV2) → 순수 텍스트로 재전송");
-      return await post({ chat_id: chatId, message_id: messageId, text: toPlain(text) });
-    } catch {
+      const first = await post({ chat_id: chatId, message_id: messageId, text, parse_mode: "MarkdownV2" });
+      if (first.ok) return true;
+      console.warn(`[codex-bridge] 1차 편집 실패(MarkdownV2) → 순수 텍스트로 재전송: ${first.reason}`);
+      const second = await post({ chat_id: chatId, message_id: messageId, text: toPlain(text) });
+      // ★둘 다 막히면 여기서 새 버블이 열린다★ — 화면이 갈라지는 그 순간이라 반드시 남긴다.
+      if (!second.ok) console.warn(`[codex-bridge] ★2차 편집도 실패 → 새 버블로 갈라진다★: ${second.reason}`);
+      return second.ok;
+    } catch (e) {
+      console.warn(`[codex-bridge] 편집 중 예외: ${e instanceof Error ? e.message : String(e)}`);
       return false;
     }
   };
@@ -1176,7 +1204,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
           enqueue: (run) => turns.enqueue(run),
           runTurnFor: async () => {
             const r = await handleMessage(chatId, text, messageId, live, hasMedia && msg
-              ? () => downloadDmAttachments(token, msg)
+              ? () => downloadDmAttachmentsSafe(token, msg)
               : undefined);
             console.log(`[codex-bridge] → ${r.detail}: ${r.reply.slice(0, 60)}`);
           },

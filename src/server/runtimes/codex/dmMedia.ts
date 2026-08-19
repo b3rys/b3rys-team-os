@@ -122,16 +122,21 @@ export async function downloadDmAttachments(
  * 사람은 보냈는데 못 봤다는 사실조차 안 남는다. 이 파일이 고치려는 결함과 같은 모양이다.
  * ★문을 두 개 만들었으면 그 둘도 같아야 한다.★
  */
-export async function downloadDmAttachmentsSafe(
+export async function attachmentsOrFailure(load: () => Promise<DmAttachments>): Promise<DmAttachments> {
+  try {
+    return await load();
+  } catch (e) {
+    return { imagePaths: [], files: [], failed: [{ kind: "attachment", reason: e instanceof Error ? e.message : String(e) }] };
+  }
+}
+
+/** 내려받기 + 위 방어. 두 경로가 ★이 한 정의★ 를 쓴다. */
+export function downloadDmAttachmentsSafe(
   token: string,
   msg: DmMessageMedia,
   opts: { store?: typeof storeTelegramMedia; mediaDir?: string } = {},
 ): Promise<DmAttachments> {
-  try {
-    return await downloadDmAttachments(token, msg, opts);
-  } catch (e) {
-    return { imagePaths: [], files: [], failed: [{ kind: "attachment", reason: e instanceof Error ? e.message : String(e) }] };
-  }
+  return attachmentsOrFailure(() => downloadDmAttachments(token, msg, opts));
 }
 
 /**

@@ -108,6 +108,19 @@ export function savePersonaFile(personaFile: string, content: string): void {
  * 검증기가 렌더 입력을 손으로 재현하면 반드시 어긋난다(2026-07-17 실측: workspace 폴백·team_name·
  * tier2 플래그를 빠뜨려 ★12명 전원 오탐★). ★검증기가 writer 와 다르면 검증기를 못 믿는다.★
  */
+/**
+ * SOUL.md 본문을 읽는다 — ★없거나 못 읽으면 undefined★ 다.
+ * 지어내지 않는다: 페르소나가 없는데 있는 척하면 다음 사람이 왜 안 먹는지 못 찾는다.
+ */
+function readSoulText(soulFile: string): string | undefined {
+  try {
+    const t = readFileSync(soulFile, "utf-8").trim();
+    return t.length ? t : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function renderLoadingFile(m: WriteMemberPersonaInput): { path: string; content: string } {
   const workspace = m.workspace_path ?? memberPaths(m.id, m.runtime).workspace_path;
   const targets = personaTargetsForRuntime(m.runtime, workspace, m.persona_file);
@@ -121,6 +134,9 @@ export function renderLoadingFile(m: WriteMemberPersonaInput): { path: string; c
     owner_name: m.owner_name,
     team_name: m.team_name,
     tier2_outbound: isTier2Outbound(m.id),
+    // ★codex 는 SOUL.md 를 안 읽는다★ — 그 런타임만 본문을 실어 보낸다(위 personaPointer 주석의 실측).
+    //   읽어오지 못하면 안 넣는다: 없는 페르소나를 지어내지 않는다.
+    soul_text: m.runtime === "codex" ? readSoulText(targets.personaFile) : undefined,
   } as Parameters<typeof buildPersona>[0];
   const rendered = m.runtime === "claude_channel" ? buildPersona(input) : buildAgentsMd(input);
   return { path: targets.loadingFile, content: applyCollectMode(rendered, m.runtime) };
