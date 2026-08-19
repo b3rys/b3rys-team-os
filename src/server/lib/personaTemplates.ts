@@ -753,11 +753,24 @@ const SECTION_GLOBAL = [
  */
 // ★단순 모델: 역할·persona 는 SOUL.md 가 유일 소유(사용자 입력 verbatim).
 //   로딩파일(CLAUDE.md/AGENTS.md)엔 정체성/능력/톤 자동생성 안 넣음 — "역할·persona 는 SOUL.md" 참조만.
-//   claude 는 Claude Code @import(`@SOUL.md`)로 실제 inline 로드. 자동 wrapper("You are X"/"As a b3rys"/"Signature") 전면 제거 = 중복 근원 제거.
+//   claude 는 Claude Code @import 로 실제 inline 로드 — ★단, 맨 줄에 홀로 있어야 확장된다(실측).★ 자동 wrapper("You are X"/"As a b3rys"/"Signature") 전면 제거 = 중복 근원 제거.
 function personaPointer(i: PersonaInput): string {
   if (i.runtime === "claude_channel") {
-    // claude(Claude Code)만 @import 지원 → SOUL.md 자동 inline (로컬 파일이라 승인 다이얼로그 없음).
-    return ["## Role & Persona", "", "역할·persona 는 `@SOUL.md` 참조 (Claude Code 가 이 파일을 자동 inline 로드)."].join("\n");
+    // ★import 는 맨 줄에 홀로 둔다 — 백틱으로 감싸면 코드 표기가 되어 확장되지 않는다.★ (2026-08-19 실측)
+    //   전에는 "역할·persona 는 `@SOUL.md` 참조 (자동 inline 로드)" 라고 ★문장 안 백틱★ 에 넣어뒀다.
+    //   그래서 ★모든 claude 팀원의 persona 가 한 번도 로드된 적이 없다.★ 문장은 "자동 로드" 라고
+    //   ★단언★ 하고 있었고 — 오늘 codex 에서 틀린 그 문장과 형태까지 같았다.
+    //
+    //   실측: 같은 CLAUDE.md 안에 두 형태를 넣고 표식을 물었다.
+    //     `@BACKTICK.md` (백틱 안) → ★"모름"★      ·  @BARE.md (맨 줄) → ★표식을 맞힘★
+    //   같은 파일의 @TEAM-OS.md 가 잘 확장되던 것도 그것이 ★맨 줄★ 이었기 때문이다.
+    return [
+      "## Role & Persona",
+      "",
+      "@SOUL.md",
+      "",
+      "(위 한 줄이 SOUL.md 를 이 자리에 그대로 불러온다. ★백틱으로 감싸면 안 불려온다.★)",
+    ].join("\n");
   }
   const soulPath = `${tilde(`${MEMBERS_ROOT}/${i.id}`)}/SOUL.md`;
   // ★codex 는 SOUL.md 를 안 읽는다 — 실측이다.★ (2026-08-19)
