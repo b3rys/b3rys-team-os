@@ -14,6 +14,7 @@ import { runCodexTurn, type CodexTurnOptions, type CodexTurnResult } from "./run
 import { createSerialTurnQueue } from "./serialTurnQueue";
 import { makeDmSessionStore, NOOP_DM_SESSION_STORE, type DmSessionStore } from "./dmSessionStore";
 import { toMarkdownV2, splitForTelegram, toPlain } from "./telegramMarkdown";
+import { steerActiveTurn } from "./activeTurns";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -60,6 +61,86 @@ export interface BridgeDeps {
   registerScheduleReminder?: (req: ScheduleMarkerRequest, ctx: ScheduleMarkerContext) => Promise<string>;
   /** 1:1 대화 세션을 재시작 넘어 기억한다. 미지정이면 기억하지 않는다(시험 기본값). */
   dmSessions?: DmSessionStore;
+}
+
+/**
+ * ★지금 어느 대화의 턴이 도는 중인가.★
+ *
+ * 도는 중에 사람이 또 말하면 ★그 턴에 끼워 넣어야★ 한다(codex turn/steer). 새 턴으로 줄을 세우면
+ * 하던 일이 끝날 때까지 답이 없어 ★못 듣는 것처럼 보인다.★ 실제로 그렇게 보였다 —
+ * 로그에는 메시지가 다 들어와 있는데 답이 없었다(2026-08-19 실측).
+ *
+ * 등록부(activeTurns)는 ★팀원 단위★ 라 어느 대화의 턴인지 모른다. 그래서 여기서 대화를 함께 기억한다 —
+ * 다른 대화의 말을 남의 턴에 끼워 넣으면 안 된다.
+ */
+let runningTurnChatId: number | null = null;
+
+/**
+ * 도는 턴의 진행 줄에 한 줄 얹는 통로.
+ * ★밀어 넣었다는 것을 사람이 봐야 한다★ — 안 보이면 들어갔는지 모른 채 같은 말을 다시 하게 된다.
+ * 턴이 도는 동안에만 채워져 있다.
+ */
+let noteIntoRunningTurn: ((line: string) => void) | null = null;
+
+/**
+ * 진행 중 작업에 밀어 넣을 문구.
+ * 버스 쪽(buildSteerText)과 같은 모양으로 둔다 — 받는 쪽(codex)이 같은 형식을 이미 읽고 있다.
+ * ★"반영해서 계속하라 · 답할 때 이 말에도 답하라" 를 명시★ 하지 않으면 조용히 무시될 수 있다.
+ */
+export function buildDmSteerText(body: string): string {
+  return [
+    "[중간 메시지 — 팀 리드]",
+    body,
+    "",
+    "이 말을 반영해서 계속하라. 답할 때는 이 메시지에도 답해라.",
+  ].join("\n");
+}
+
+/**
+ * ★들어온 말을 어디로 보낼지 정하고 실행한다.★
+ *
+ * 폴 루프 안에 두면 시험이 못 닿는다 — 실제로 그래서 두 계약이 ★지워도 초록★ 이었다:
+ *   ① 밀어 넣기가 실패하면 새 작업으로 되돌린다(조용히 삼키지 않는다)
+ *   ② 밀어 넣었으면 진행 줄에 남긴다(안 보이면 들어갔는지 모른 채 같은 말을 다시 한다)
+ * 둘 다 이 기능이 존재하는 이유라, ★지켜지는지 시험이 봐야 한다.★
+ */
+export interface IncomingRouteDeps {
+  isRunning: (chatId: number) => boolean;
+  steer: (text: string) => Promise<boolean>;
+  note: (line: string) => void;
+  enqueue: (run: () => Promise<void>) => void;
+  runTurnFor: () => Promise<void>;
+  react?: () => void;
+}
+
+export type IncomingRoute = "steered" | "newTurn";
+
+export async function routeIncoming(
+  chatId: number,
+  text: string,
+  d: IncomingRouteDeps,
+): Promise<IncomingRoute> {
+  if (d.isRunning(chatId)) {
+    d.react?.();
+    // ★던져도 말을 잃지 않는다★ — 연결이 끊기면 steer 는 성공/실패가 아니라 예외로 끝난다.
+    //   그때 그냥 올려보내면 이 말은 새 작업으로도 안 가고 사라진다.
+    const injected = await d.steer(buildDmSteerText(text)).catch((e) => {
+      console.warn(`[codex-bridge] 전달 중 오류 → 새 작업으로: ${String(e)}`);
+      return false;
+    });
+    if (injected) {
+      d.note(`받음: ${text}`);
+      return "steered";
+    }
+    // ★번호가 아직 없어 못 넣었다 — 여기서 멈추면 그 말은 아무 데도 안 간다.★
+  }
+  d.enqueue(d.runTurnFor);
+  return "newTurn";
+}
+
+/** 시험·진단용 — 지금 그 대화의 턴이 도는 중인가. */
+export function isTurnRunningFor(chatId: number): boolean {
+  return runningTurnChatId === chatId;
 }
 
 // 채팅별 codex thread(resume sessionId) → 같은 대화 맥락 유지.
@@ -563,19 +644,32 @@ export async function handleMessage(
     schedule();
   };
 
-  const result = await runTurn({
-    prompt: promptText,
-    agentId: selfAgentId, // ★필수★ — 승인 요청의 주인이 된다
-    onActivity,
-    onStatus,
+  runningTurnChatId = chatId;
+  // 밖(폴 루프)에서 진행 줄에 한 줄 얹을 수 있게 연다. 항목 id 를 매번 새로 주어 줄이 쌓이게 한다.
+  let noteSeq = 0;
+  noteIntoRunningTurn = (line: string) => onActivity(line, `note-${++noteSeq}`);
+  let result: CodexTurnResult;
+  try {
+    result = await runTurn({
+      prompt: promptText,
+      agentId: selfAgentId, // ★필수★ — 승인 요청의 주인이 된다
+      onActivity,
+      onStatus,
 
-    resumeSessionId: prior,
-    codexHome: deps.codexHome,
-    cwd: deps.workdir,
-    sandbox: deps.sandbox,
-    networkAccess: deps.networkAccess,
-    writableRoots: deps.workdir ? [deps.workdir] : [],
-  });
+      resumeSessionId: prior,
+      codexHome: deps.codexHome,
+      cwd: deps.workdir,
+      sandbox: deps.sandbox,
+      networkAccess: deps.networkAccess,
+      writableRoots: deps.workdir ? [deps.workdir] : [],
+    });
+  } finally {
+    // ★던지고 나가도 반드시 지운다.★ 안 지우면 그 대화는 영영 "도는 중" 으로 남아
+    //   이후 모든 말이 끼어들기로 가고, 끼어들 턴이 없어 아무 데도 안 간다.
+    runningTurnChatId = null;
+    noteIntoRunningTurn = null;
+  }
+
   // ★예약된 편집이 답을 덮어쓰지 못하게 먼저 끈다.★ 끄지 않으면 답을 쓴 뒤 진행 줄이 다시 올라온다.
   if (editTimer !== null) { clearTimeout(editTimer); editTimer = null; }
   dirty = false;
@@ -933,6 +1027,9 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
       grants: codexConfiguredGrants(liveAgentId, liveSandbox, liveNetwork, liveWorkspaceRoot),
     },
     // 라이브에서는 1:1 세션을 team.db 에 기억한다(재시작 넘어 맥락 유지).
+    // ★agentId 를 실어 보낸다★ — 안 실으면 handleMessage 가 같은 식을 다시 계산해,
+    //   runBridge({agentId}) 로 부를 때 두 값이 갈린다. 그러면 steer 가 등록 안 된 id 를 찾아 늘 실패한다.
+    agentId: liveAgentId,
     dmSessions: deps.dmSessions ?? makeDmSessionStore(liveAgentId, defaultTeamDbPath()),
     sendMessage: deps.sendMessage ?? tgSend(token),
     editMessage: deps.editMessage ?? tgEdit(token),
@@ -998,10 +1095,29 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
 	          continue;
 	        }
         console.log(`[codex-bridge] ← chat ${chatId}: ${text.slice(0, 60)}`);
-        // ★턴은 하나씩 돈다(직렬).★ 루프는 기다리지 않고 다음 업데이트로 간다 — 그래야 승인 버튼이 들어온다.
-        turns.enqueue(async () => {
-          const r = await handleMessage(chatId, text, messageId, live);
-          console.log(`[codex-bridge] → ${r.detail}: ${r.reply.slice(0, 60)}`);
+        // ★도는 중인 작업이 있으면 그 안으로 밀어 넣는다.★ 새 턴으로 줄을 세우면 하던 일이 끝날
+        //   때까지 답이 없어 ★못 듣는 것처럼 보인다★ — 실제로 그렇게 보였다(2026-08-19 실측:
+        //   메시지 4건이 전부 로그에 들어와 있는데 답이 없었다).
+        //   turn/steer 는 turnId 를 요구하므로 ★막 시작해 번호가 아직 없으면 실패★ 한다. 그때는 아래로 내려가
+        //   지금처럼 새 턴이 된다 — 실패를 조용히 삼키지 않는다.
+        // ★루프는 여기서도 기다리지 않는다★ — 기다리면 승인 버튼이 다시 막힌다.
+        // ★루프는 여기서도 기다리지 않는다★ — 기다리면 승인 버튼이 다시 막힌다.
+        void routeIncoming(chatId, text, {
+          isRunning: isTurnRunningFor,
+          steer: (t) => steerActiveTurn(liveAgentId, t),
+          note: (line) => {
+            // 턴이 방금 끝났으면 통로가 닫혀 있다 — 그때는 남기지 않는다.
+            //   ★닫힌 뒤에 남기면 답을 쓴 자리에 진행 줄이 덮인다.★ 유실이 아니라 안전 쪽이다.
+            noteIntoRunningTurn?.(line);
+          },
+          enqueue: (run) => turns.enqueue(run),
+          runTurnFor: async () => {
+            const r = await handleMessage(chatId, text, messageId, live);
+            console.log(`[codex-bridge] → ${r.detail}: ${r.reply.slice(0, 60)}`);
+          },
+          react: () => { if (messageId !== undefined) void live.reactMessage?.(chatId, messageId, "👀"); },
+        }).then((route) => {
+          console.log(`[codex-bridge] ↳ ${route === "steered" ? "진행 중 작업에 전달" : "새 작업으로"}: ${text.slice(0, 40)}`);
         });
       }
     } catch (e) {
