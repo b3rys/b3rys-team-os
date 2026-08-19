@@ -727,9 +727,20 @@ export async function handleMessage(
   }
 
   if (!result.ok || !result.reply) {
-    // self-heal: 턴 실패(만료·손상 세션 포함) 시 thread 초기화 → 다음 턴은 새 세션(죽은 sessionId resume 반복 stuck 방지).
-    chatThreads.delete(chatId);
-    sessions.clear(chatId); // ★죽은 세션을 저장해두면 재시작 후에도 계속 그것으로 resume 한다★
+    // ★턴이 실패한 것과 세션이 죽은 것은 다르다.★ (2026-08-19 실측 — 팀장님 관측)
+    //   전에는 실패하면 무조건 지웠다. 그런데 ★appserver_timeout 은 세션이 멀쩡한데 턴만 오래 걸린 것★ 이라,
+    //   지우고 나면 ★바로 직전에 한 얘기까지 통째로 잊는다.★ 실제로 그렇게 보였다:
+    //   "방금 니가 보낸 메시지에 있는 말이야??? 왜 본인이 방금 말한걸 기억을 못하지?"
+    //   게다가 바로 위에서 이 sessionId 를 ★저장한 직후★ 다 — 저장하고 곧바로 지우고 있었다.
+    //   ★thread 번호가 살아 있으면 그 대화는 이어받을 수 있다★ — 그때는 지우지 않는다.
+    //   진짜로 못 이어받는 경우(resume 실패)는 클라이언트가 새 thread 로 떨어지고,
+    //   그 새 번호가 위에서 저장되므로 ★스스로 낫는다★ — 여기서 지울 일이 아니다.
+    if (!result.sessionId) {
+      chatThreads.delete(chatId);
+      sessions.clear(chatId); // 이번 턴에서 쓸 수 있는 thread 를 못 얻었다 = 그 세션은 못 쓴다
+    } else {
+      console.warn(`[codex-bridge] 턴 실패했지만 세션은 유지한다(thread 살아 있음): ${result.detail ?? "사유 없음"}`);
+    }
     const errText = "⚠️ 일시적으로 응답을 만들지 못했어요. 잠시 후 다시 시도해 주세요.";
     // ★마지막 버블에 쓴다★ — 넘김이 일어났으면 첫 버블에 쓸 경우 오류가 진행 줄 위로 올라간다.
     if (bubbleId !== null) await edit(chatId, bubbleId, errText);
@@ -891,6 +902,11 @@ interface TgUpdate {
     text?: string;
     /** ★사진에 달린 설명★ — 사진 메시지는 text 가 아니라 caption 으로 온다. */
     caption?: string;
+    /**
+     * ★인용 답장의 원문.★ 사람이 앞 메시지를 집어 답하면 새 글자만 오고 ★무엇을 집었는지는 안 온다.★
+     * 그룹방 경로는 이미 싣고 있었다(7군데) — ★1:1 만 0군데였다.★ 또 같은 축이다.
+     */
+    reply_to_message?: { text?: string; caption?: string; from?: { username?: string; first_name?: string } };
     /** ★같은 그림의 여러 크기★ (썸네일·중간·원본). 장수가 아니다 — 여러 장은 메시지가 나뉘어 온다. */
     photo?: DmMessageMedia["photo"];
     document?: DmMessageMedia["document"];

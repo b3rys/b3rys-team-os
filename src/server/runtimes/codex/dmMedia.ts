@@ -179,13 +179,33 @@ export const MEDIA_ONLY_PROMPT = "(설명 없이 첨부만 보냈다. 첨부를 
 export function decideDmMessage(msg: {
   text?: string;
   caption?: string;
+  reply_to_message?: { text?: string; caption?: string; from?: { username?: string; first_name?: string } };
   photo?: DmMessageMedia["photo"];
   document?: DmMessageMedia["document"];
 } | undefined): { handle: boolean; text: string; hasMedia: boolean } {
   const body = dmBodyText(msg?.text, msg?.caption);
   const hasMedia = Boolean(msg?.photo?.length || msg?.document);
   if (!body && !hasMedia) return { handle: false, text: "", hasMedia };
-  return { handle: true, text: body ?? MEDIA_ONLY_PROMPT, hasMedia };
+  // ★인용한 앞 메시지를 함께 싣는다★ — 안 실으면 "이게 모야?" 가 무엇에 대한 말인지 알 수 없다.
+  return { handle: true, text: withQuotedContext(body ?? MEDIA_ONLY_PROMPT, msg?.reply_to_message), hasMedia };
+}
+
+/**
+ * ★인용 답장의 원문을 본문에 붙인다.★
+ *
+ * 사람이 앞 메시지를 집어서 답하면 텔레그램은 ★새로 친 글자만★ 보낸다.
+ * 무엇을 집었는지는 `reply_to_message` 에 따로 온다 — 그걸 안 실으면 dex 는
+ * "이게 모야?" 같은 말을 ★무엇에 대한 말인지 모른 채★ 받는다(실측: 팀장님이 dex 자기 답을 인용해
+ * 되물었는데 dex 는 그 연결고리를 못 봤다). 그룹방 경로는 이미 같은 형태로 싣고 있다.
+ */
+export function withQuotedContext(
+  body: string,
+  quoted: { text?: string; caption?: string; from?: { username?: string; first_name?: string } } | undefined,
+): string {
+  const q = (quoted?.text ?? quoted?.caption ?? "").trim();
+  if (!q) return body;
+  const who = quoted?.from?.username ?? quoted?.from?.first_name;
+  return `${body}\n\n[인용한 앞 메시지${who ? ` — ${who}` : ""}]\n${q}`;
 }
 
 /** 본문 = 글 또는 캡션. 둘 다 없으면 첨부만 온 것이다. */
