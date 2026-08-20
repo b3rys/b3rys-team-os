@@ -106,12 +106,20 @@ export function agentAnsweredRequest(
   try {
     const r = db
       .prepare(
+        // ★수신자 조건은 ★두 갈래 모두★ 에 건다.★ (빌 재리뷰 — 처음엔 오른쪽에만 걸었다)
+        //   우리 규칙이 "답할 때 --in-reply-to 를 붙여라" 라서 ★fan-out 도 in_reply_to 를 달고 나간다.★
+        //   그래서 왼쪽 갈래에 수신자 조건이 없으면 fan-out 이 그대로 '답' 으로 샌다.
+        //   실측(team.db): 요청자≠수신자인데 그 요청에 in_reply_to 를 단 행이 ★1,448건★ 있다.
+        // ★broadcast 는 답으로 인정한다★ — 1:1 요청에 그룹방으로 답한 행이 ★46건★ 실재한다.
+        //   빼면 정당한 답에 실패통지가 따라붙는다(이 PR 이 없애려던 현상). fan-out 은 개인에게 가지
+        //   broadcast 로 안 가므로 이 예외로 구멍이 열리지 않는다.
         `SELECT 1 FROM message
            WHERE from_agent_id = ? AND created_at >= ?
-             AND (in_reply_to = ? OR (thread_id = ? AND to_agent_id = ?))
+             AND to_agent_id IN (?, 'broadcast')
+             AND (in_reply_to = ? OR thread_id = ?)
            LIMIT 1`,
       )
-      .get(agentId, sinceUtc, row.message_id, row.thread_id, row.from_agent_id ?? "");
+      .get(agentId, sinceUtc, row.from_agent_id ?? "", row.message_id, row.thread_id);
     return Boolean(r);
   } catch {
     return false; // ★모르면 알린다★ — 조회 실패가 침묵으로 바뀌면 안 된다

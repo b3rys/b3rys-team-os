@@ -581,9 +581,11 @@ describe("빈 최종텍스트 + 팀원이 직접 답한 턴", () => {
     const db = setup();
     const fanoutThenEmpty: CodexCaller = async () => {
       // 규칙상 수집 fan-out 은 ★같은 스레드★ 로 나간다 — 요청자(user)가 아니라 팀원에게 간다
+      // ★실제 fan-out 은 in_reply_to 를 달고 나간다★ — 우리 규칙이 그렇게 시킨다.
+      //   안 달면 이 시험은 ★오른쪽 갈래만★ 재고, 정작 새는 왼쪽 갈래를 못 본다(빌 재리뷰).
       db.prepare(
-        `INSERT INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, hop_count, created_at)
-         VALUES ('fanout-1','t1','cody','bill','dm','빌, 이것 좀 봐줘','agent',1, datetime('now'))`,
+        `INSERT INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, hop_count, in_reply_to, created_at)
+         VALUES ('fanout-1','t1','cody','bill','dm','빌, 이것 좀 봐줘','agent',1,'fanout-turn', datetime('now'))`,
       ).run();
       return { ok: false, reply: "", detail: "appserver_completed_empty", elapsedMs: 1 };
     };
@@ -606,6 +608,22 @@ describe("빈 최종텍스트 + 팀원이 직접 답한 턴", () => {
     };
     await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "user", message_id: "broken-1" }), "", brokenLookup);
     expect(repliesFrom(db, "system").length, "★조회 실패가 침묵이 되면 죽은 턴이 통째로 사라진다★").toBe(1);
+  });
+
+  test("★그룹방(broadcast)으로 한 답도 답으로 센다★ — 1:1 요청에 그룹으로 답한 행이 실재한다(46건)", async () => {
+    const db = setup();
+    const broadcastAnswer: CodexCaller = async () => {
+      db.prepare(
+        `INSERT INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, hop_count, in_reply_to, created_at)
+         VALUES ('bc-1','t1','cody','broadcast','dm','팀장님, 결과 올립니다','agent',1,'bc-turn', datetime('now'))`,
+      ).run();
+      return { ok: false, reply: "", detail: "appserver_completed_empty", elapsedMs: 1 };
+    };
+    await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "user", message_id: "bc-turn" }), "", broadcastAnswer);
+    expect(
+      repliesFrom(db, "system"),
+      "★그룹방에 답을 올렸는데 실패통지가 따라붙었다 — 이 PR 이 없애려던 그 현상이다★",
+    ).toEqual([]);
   });
 
   test("★대조군 — 팀원이 아무 말도 안 했으면 실패통지는 여전히 간다★ (통지를 끈 게 아니다)", async () => {
