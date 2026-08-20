@@ -190,8 +190,14 @@ export async function runTurn(
       resumeSessionId: priorSessionId,
     });
     if (!result.ok || !result.reply) {
+      // ★답이 이미 나갔는데 "실패했다" 고 알리지 않는다.★ (2026-08-20 실측)
+      //   팀원이 턴 안에서 팀버스 도구로 직접 답하면 런타임이 돌려주는 최종 텍스트는 비어 있다.
+      //   그 턴을 실패로만 읽으면 ★요청자는 답을 받아 놓고 실패 통지를 함께 받는다★ — 같은 일을
+      //   두 번 시키게 된다(실측: 답 03:32:22 도착 · 실패 통지 03:32:24, 재발송 아님).
+      //   ★조용히 성공으로 바꾸지도 않는다★ — 최종 텍스트가 빈 것은 여전히 사실이라 기록에는 남긴다.
+      const deliveredBySelf = agentRepliedSince(db, targetAgentId, row.thread_id, turnStartedAt);
       recordRuntimeBlock(targetAgentId, `codex runtime failed: ${result.detail}`);
-      appendAuditFile(targetAgentId, "codex_error", row.message_id, { detail: result.detail });
+      appendAuditFile(targetAgentId, "codex_error", row.message_id, { detail: result.detail, delivered_by_self: deliveredBySelf });
       stores.artifactStore.record({
         agentId: targetAgentId,
         messageId: row.message_id,
@@ -200,13 +206,14 @@ export async function runTurn(
         codexSessionId: result.sessionId ?? priorSessionId ?? null,
         status: /timeout/i.test(result.detail) ? "timed_out" : "failed",
         elapsedMs: result.elapsedMs,
-        detail: result.detail,
+        // 통지를 접은 이유가 기록에 남아야 한다 — 안 남기면 '통지가 왜 없지' 를 다음 사람이 다시 판다.
+        detail: deliveredBySelf ? `${result.detail} (notice_suppressed: agent_replied_on_bus)` : result.detail,
         artifact: {
           surface: CODEX_SURFACE_TEAM_BUS,
           conversation_key: conversationKey,
         },
       });
-      postFailureNotice(db, agents, agent, row, result.detail);
+      if (!deliveredBySelf) postFailureNotice(db, agents, agent, row, result.detail);
       return;
     }
     if (result.sessionId) {

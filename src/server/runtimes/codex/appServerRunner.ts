@@ -32,6 +32,23 @@ export function makeAppServerCaller(db: Database): CodexCaller {
 export const runCodexTurnViaAppServer: CodexCaller = (opts) => runViaAppServer(opts);
 
 /**
+ * 턴 결과 detail 문자열. ★성공과 "완료했지만 최종 텍스트가 비었다" 는 다른 사건이다 — 다른 이름을 준다.★
+ *
+ * 2026-08-20 실측: dex 가 턴 안에서 팀버스 도구로 직접 답을 보내면 app-server 가 돌려주는 최종
+ * 텍스트는 비어 있다. 그때 `ok=false` 인데 옛 식은 `appserver_${r.status}` = `appserver_completed`
+ * 를 만들어 ★성공 detail 과 같은 문자열★ 이 됐다. 기록만 보고는 두 사건을 가를 수 없었다
+ * (`codex_run_7a087419` status=failed detail=appserver_completed — 그 턴의 답은 정상 도착해 있었다).
+ */
+export function codexTurnDetail(status: string, finalText: string, detail?: string): string {
+  const suffix = detail ? `: ${detail.slice(0, 300)}` : "";
+  if (status === "completed") {
+    // 완료 + 본문 있음 = 성공 / 완료 + 본문 없음 = ★따로 이름을 가진 실패★
+    return finalText.trim().length > 0 ? "appserver_completed" : `appserver_completed_empty${suffix}`;
+  }
+  return `appserver_${status}${suffix}`;
+}
+
+/**
  * ★클라이언트를 주입 가능하게★ — startThread 에 실제로 무엇이 넘어가는지 재려면 대신 세울 자리가 필요하다.
  * ★opts 를 받는다★ — 어느 팀원의 CODEX_HOME 으로 띄울지가 여기서 정해진다(안 넘기면 호스트 설정으로 돈다).
  */
@@ -142,7 +159,7 @@ export async function runViaAppServer(
     if (pooled && r.status !== "completed") dropClient(opts.agentId);
     const ok = r.status === "completed" && r.finalText.trim().length > 0;
     // ★#8 픽스: 실패면 detail에 실제 사유(에러 notification/stderr tail) 반영 — rate-limit 진단 가능.★
-    const detail = ok ? "appserver_completed" : `appserver_${r.status}${r.detail ? `: ${r.detail.slice(0, 300)}` : ""}`;
+    const detail = codexTurnDetail(r.status, r.finalText, r.detail);
     return {
       ok,
       reply: r.finalText,

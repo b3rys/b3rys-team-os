@@ -534,3 +534,56 @@ describe("codex adapter — 핵심 정확성", () => {
     expect(allMessages(db)).toEqual([]);
   });
 });
+
+/**
+ * ★답이 이미 나갔는데 "실패했다" 고 알리지 않는다.★ (2026-08-20 실측 → 이 시험이 그 자리를 지킨다)
+ *
+ * 라이브에서 벌어진 것: dex 가 턴 안에서 팀버스 도구로 직접 답을 보냈다 → app-server 가 돌려준
+ * ★최종 텍스트는 비어 있었다★ → 어댑터가 실패로 읽고 요청자에게 "Dex 의 응답이 실패했습니다" 를 보냈다.
+ * ★요청자는 답을 받아 놓고 실패 통지를 함께 받았다★ (답 03:32:22 · 통지 03:32:24, 재발송 아님 — started 1건).
+ * 그 상태로 두면 사람이 ★같은 일을 두 번★ 시킨다.
+ *
+ * ★대조군을 같이 둔다★ — 세 번째 시험이 "답이 없으면 통지는 여전히 간다" 를 잰다.
+ * 하나만 두면 "통지를 아예 껐다" 와 구별되지 않는다.
+ */
+describe("빈 최종텍스트 + 팀원이 직접 답한 턴", () => {
+  /** 턴 도중 팀원이 send.sh 로 직접 답한 상황 — 그리고 런타임에는 빈 본문이 남는다. */
+  const replyOnBusThenEmpty = (db: Database): CodexCaller => async () => {
+    db.prepare(
+      `INSERT INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, hop_count, created_at)
+       VALUES ('self-reply-1','t1','cody','bill','dm','제가 직접 보낸 답입니다','agent',1, datetime('now'))`,
+    ).run();
+    return { ok: false, reply: "", detail: "appserver_completed_empty", elapsedMs: 1 };
+  };
+
+  test("★답이 이미 버스에 나갔으면 실패통지를 보내지 않는다★ (요청자가 답+실패를 함께 받지 않게)", async () => {
+    const db = setup();
+    await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "user", message_id: "quiet-1" }), "", replyOnBusThenEmpty(db));
+
+    expect(
+      repliesFrom(db, "system"),
+      "★답이 도착했는데 '실패했습니다' 통지가 함께 나갔다★ — 라이브에서 실제로 벌어진 그 상태다.",
+    ).toEqual([]);
+    // 팀원의 답 자체는 그대로 남아 있다(우리가 지우거나 바꾸지 않는다)
+    expect(repliesFrom(db, "cody").length).toBe(1);
+  });
+
+  test("★그래도 기록에는 남긴다★ — 최종텍스트가 빈 것은 사실이고, 통지를 접은 이유도 적는다", async () => {
+    const db = setup();
+    await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "user", message_id: "quiet-2" }), "", replyOnBusThenEmpty(db));
+
+    const failed = artifacts(db, "failed");
+    expect(failed.length, "★조용히 성공으로 바꾸면 안 된다★ — 빈 최종텍스트는 계속 관측돼야 한다").toBe(1);
+    expect(String(failed[0]?.detail)).toContain("notice_suppressed: agent_replied_on_bus");
+  });
+
+  test("★대조군 — 팀원이 아무 말도 안 했으면 실패통지는 여전히 간다★ (통지를 끈 게 아니다)", async () => {
+    const db = setup();
+    const silentEmpty: CodexCaller = async () => ({ ok: false, reply: "", detail: "appserver_completed_empty", elapsedMs: 1 });
+    await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "user", message_id: "loud-1" }), "", silentEmpty);
+
+    const notices = repliesFrom(db, "system");
+    expect(notices.length, "★답도 없고 통지도 없으면 그 턴은 아무 흔적 없이 사라진다★").toBe(1);
+    expect(String(notices[0]?.body)).toContain("응답이 실패했습니다");
+  });
+});

@@ -266,10 +266,13 @@ export async function restartAgent(agentId: string, runtime: string, fresh = fal
       return { ok: r.code === 0, detail: r.code === 0 ? `hermes ${agentId} 재시작(게이트웨이 in-place: ${label})` : `재시작 실패: ${r.out.slice(-150)}` };
     }
     if (runtime === "codex") {
-      // codex 두뇌는 매 wake마다 cwd AGENTS.md 새로 로드(stateless) — 페르소나 갱신은 자동. 브리지 프로세스만 kickstart.
+      // codex 두뇌는 매 wake마다 cwd AGENTS.md 를 새로 읽는다(stateless) — 브리지 프로세스만 kickstart 하면 된다.
+      // ★단 "페르소나 갱신은 자동" 이 아니다★ — codex 는 SOUL.md 를 안 읽고, 렌더가 AGENTS.md 에 박아둔
+      //   본문을 읽는다. SOUL.md 만 고치면 재렌더 전까지 옛 페르소나로 돈다. 그래서 대시보드 재시작
+      //   엔드포인트가 restartAgent 전에 refreshLoadingFiles 로 되맞춘다(routes/settings.ts, 2026-08-20).
       const label = codexBridgeLaunchdLabel(agentId);
       const r = await run(["launchctl", "kickstart", "-k", `gui/${uid}/${label}`]);
-      return { ok: r.code === 0, detail: r.code === 0 ? `codex ${agentId} 브리지 재기동(두뇌는 매 턴 cwd 페르소나 자동 재로드)` : `브리지 재기동 실패(미기동이었을 수 있음): ${r.out.slice(-120)}` };
+      return { ok: r.code === 0, detail: r.code === 0 ? `codex ${agentId} 브리지 재기동(다음 턴부터 현재 AGENTS.md 로 돈다)` : `브리지 재기동 실패(미기동이었을 수 있음): ${r.out.slice(-120)}` };
     }
     return { ok: false, detail: `지원 안 하는 런타임: ${runtime}` };
   } catch (e) { return { ok: false, detail: `실행 오류: ${(e as Error).message}` }; }
