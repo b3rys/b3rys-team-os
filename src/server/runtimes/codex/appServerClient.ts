@@ -233,6 +233,22 @@ export function buildTurnInput(
   ];
 }
 
+/**
+ * ★무응답 시계를 되돌릴 알림인가★ — "턴이 실제로 일하고 있다" 는 뜻인 것만 센다.
+ *
+ * ★모든 알림을 세면 안 된다★(빌 리뷰): 앱서버가 진행과 무관한 주기 알림을 하나라도 보내면
+ * 무응답 컷이 ★영영 안 터진다★ — 상한을 없앤 것과 같아진다. 실제로 `account/rateLimits/updated`
+ * 가 그 계열이라 ★일부러 뺐다.★ 모르는 method 도 세지 않는다.
+ *
+ * 관측 범위(CLI 0.147.0): 턴 진행은 `turn/started` · `item/started` · `item/agentMessage/delta` ·
+ * `item/completed` · `turn/completed` 로 온다. 그래서 ★`item/` · `turn/` 두 접두어★ 로 잡는다
+ * (같은 namespace 안에서 이름이 늘어도 따라간다). ★다른 버전에서 진행 method 가 이 밖으로 나가면
+ * 일하는 턴이 다시 잘린다★ — 그때는 이 목록을 늘려야 한다.
+ */
+function isTurnProgress(method: string): boolean {
+  return method.startsWith("item/") || method.startsWith("turn/");
+}
+
 export class CodexAppServerClient {
   private proc: ChildProcessWithoutNullStreams | null = null;
   private buf = "";
@@ -574,7 +590,7 @@ export class CodexAppServerClient {
     //   전에는 턴 시작에 타이머를 한 번 걸고 끝이라 ★일하는 시간★ 을 쟀다. 그래서 dex 가 진행 표시를
     //   137번 보내며 계속 일하는 중에도 5분에 interrupt 를 맞았다(보고서 작업 3건 전부).
     //   ★재야 할 것은 일한 시간이 아니라 조용한 시간이다★ — 살아 있으면 안 끊고, 멈춘 턴만 끊는다.
-    this.noteTurnAlive();
+    if (isTurnProgress(method)) this.noteTurnAlive();
     this.activeHandlers?.onNotify?.(method, params);
     // ★S2: 파일변경 항목을 itemId 로 색인해 둔다 — 승인 요청은 내용을 안 담아 오므로 여기서만 볼 수 있다.
     //   파일변경과 무관한 알림은 observe 안에서 무시된다.★

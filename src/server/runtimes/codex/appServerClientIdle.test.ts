@@ -24,7 +24,7 @@ function makeClient() {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** 진행 신호 1건 — 실제 스트림이 지나는 그 입구로 넣는다. */
-const activity = (c: CodexAppServerClient) => (c as any).handleNotification("thread/item.updated", {});
+const activity = (c: CodexAppServerClient) => (c as any).handleNotification("item/started", {});
 
 describe("무응답 상한(idle) — 일하는 턴은 안 끊는다", () => {
   test("★진행 신호가 계속 오면 상한을 훨씬 넘겨도 안 끊긴다★ (라이브에서 잘린 그 상황)", async () => {
@@ -63,6 +63,18 @@ describe("무응답 상한(idle) — 일하는 턴은 안 끊는다", () => {
     const r = await p;
     expect(r.status).toBe("timeout");
     expect(calls.interrupts).toBe(1);
+  });
+
+  test("★진행과 무관한 알림은 시계를 되돌리지 않는다★ (주기 알림 하나로 상한이 무력화되면 안 된다)", async () => {
+    const { c, calls } = makeClient();
+    const started = Date.now();
+    const p = c.runTurn("계정 알림만 오는 멈춘 턴", {}, 200);
+    // 앱서버가 진행과 무관하게 보내는 계열 — 이걸 진행으로 세면 무응답 컷이 영영 안 터진다
+    for (let i = 0; i < 4; i++) { await sleep(40); (c as any).handleNotification("account/rateLimits/updated", {}); }
+    const r = await p;
+    expect(r.status).toBe("timeout");
+    expect(calls.interrupts, "★멈춘 턴인데 계정 알림 때문에 안 끊겼다★").toBe(1);
+    expect(Date.now() - started, "상한 근처에서 끊겨야 한다").toBeLessThan(1000);
   });
 
   test("★왜 끊었는지 사유에 남긴다★ — '오래 걸려서' 와 '조용해서' 는 다른 사건이다", async () => {

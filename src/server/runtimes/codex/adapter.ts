@@ -84,6 +84,41 @@ export function agentRepliedSince(db: Database, agentId: string, threadId: strin
 }
 
 /**
+ * ★그 팀원이 ★이 요청에 대한 답★ 을 보냈나.★ (턴 시작 이후)
+ *
+ * `agentRepliedSince` 와 ★묻는 질문이 다르다★ — 저쪽은 "이 스레드에 뭐라도 보냈나" 이고,
+ * 받는 사람도 그게 답인지도 안 본다. ★재촉 억제에는 그 폭이 안전하다★(오탐 = 재촉 한 번 안 함).
+ * ★실패통지 억제에서는 오탐 비용이 뒤집힌다★ — 요청자가 ★답도 실패통지도 못 받는다.★
+ *
+ * 실제로 나는 오탐(빌 리뷰): 수집 fan-out 은 규칙상 ★같은 스레드★ 로 나간다. dex 가 그 스레드로
+ * 팀원들에게 질문을 뿌린 뒤 턴이 빈 최종텍스트로 죽으면, 넓은 판정은 ★그 질문들을 '답' 으로 읽고★
+ * 통지를 접는다 → 요청자는 영영 기다린다. ack 도 같은 모양이다.
+ *
+ * 그래서 ★요청자에게 갔거나(to), 그 요청에 달렸거나(in_reply_to)★ 만 답으로 센다.
+ * 조회가 실패하면 ★false★ — ★모르면 알린다.★ (여기서 true 면 죽은 턴이 통째로 침묵이 된다)
+ */
+export function agentAnsweredRequest(
+  db: Database,
+  agentId: string,
+  row: { message_id: string; thread_id: string; from_agent_id?: string | null },
+  sinceUtc: string,
+): boolean {
+  try {
+    const r = db
+      .prepare(
+        `SELECT 1 FROM message
+           WHERE from_agent_id = ? AND created_at >= ?
+             AND (in_reply_to = ? OR (thread_id = ? AND to_agent_id = ?))
+           LIMIT 1`,
+      )
+      .get(agentId, sinceUtc, row.message_id, row.thread_id, row.from_agent_id ?? "");
+    return Boolean(r);
+  } catch {
+    return false; // ★모르면 알린다★ — 조회 실패가 침묵으로 바뀌면 안 된다
+  }
+}
+
+/**
  * ★진행 중 턴에 끼워 넣을 문장.★ 새 턴의 봉투를 통째로 넣지 않는다 —
  * 지금 하던 일의 맥락을 유지한 채 ★사람이 끼어든 말★ 로 읽히게 짧게 준다.
  */
@@ -195,7 +230,7 @@ export async function runTurn(
       //   그 턴을 실패로만 읽으면 ★요청자는 답을 받아 놓고 실패 통지를 함께 받는다★ — 같은 일을
       //   두 번 시키게 된다(실측: 답 03:32:22 도착 · 실패 통지 03:32:24, 재발송 아님).
       //   ★조용히 성공으로 바꾸지도 않는다★ — 최종 텍스트가 빈 것은 여전히 사실이라 기록에는 남긴다.
-      const deliveredBySelf = agentRepliedSince(db, targetAgentId, row.thread_id, turnStartedAt);
+      const deliveredBySelf = agentAnsweredRequest(db, targetAgentId, row, turnStartedAt);
       recordRuntimeBlock(targetAgentId, `codex runtime failed: ${result.detail}`);
       appendAuditFile(targetAgentId, "codex_error", row.message_id, { detail: result.detail, delivered_by_self: deliveredBySelf });
       stores.artifactStore.record({

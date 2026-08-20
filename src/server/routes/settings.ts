@@ -1395,6 +1395,9 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
         team_collect_enabled: false,
       }]);
       if (r.updated.length > 0) refreshNote = " · 로딩파일 갱신됨(SOUL 반영)";
+      // ★absent 를 안 읽으면 "파일이 없어서 못 했다" 가 "바꿀 게 없었다" 로 기록된다★ (빌 리뷰).
+      //   이 PR 이 고치려는 병이 바로 그것이라 여기서 같은 실수를 하면 안 된다.
+      else if (r.absent.length > 0) refreshNote = " · 로딩파일이 없어 되맞추지 않음(영입 절차의 몫)";
       for (const s of r.skipped) refreshNote = ` · 로딩파일 갱신 실패(계속): ${s.reason.slice(0, 80)}`;
     } catch (e) {
       refreshNote = ` · 로딩파일 갱신 실패(계속): ${e instanceof Error ? e.message.slice(0, 80) : String(e).slice(0, 80)}`;

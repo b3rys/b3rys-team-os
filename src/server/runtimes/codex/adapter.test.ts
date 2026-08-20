@@ -551,7 +551,7 @@ describe("빈 최종텍스트 + 팀원이 직접 답한 턴", () => {
   const replyOnBusThenEmpty = (db: Database): CodexCaller => async () => {
     db.prepare(
       `INSERT INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, hop_count, created_at)
-       VALUES ('self-reply-1','t1','cody','bill','dm','제가 직접 보낸 답입니다','agent',1, datetime('now'))`,
+       VALUES ('self-reply-1','t1','cody','user','dm','제가 직접 보낸 답입니다','agent',1, datetime('now'))`,
     ).run();
     return { ok: false, reply: "", detail: "appserver_completed_empty", elapsedMs: 1 };
   };
@@ -575,6 +575,37 @@ describe("빈 최종텍스트 + 팀원이 직접 답한 턴", () => {
     const failed = artifacts(db, "failed");
     expect(failed.length, "★조용히 성공으로 바꾸면 안 된다★ — 빈 최종텍스트는 계속 관측돼야 한다").toBe(1);
     expect(String(failed[0]?.detail)).toContain("notice_suppressed: agent_replied_on_bus");
+  });
+
+  test("★답이 아니라 남에게 질문을 뿌린 것이면 통지는 간다★ (수집 fan-out 을 '답' 으로 읽으면 요청자가 영영 기다린다)", async () => {
+    const db = setup();
+    const fanoutThenEmpty: CodexCaller = async () => {
+      // 규칙상 수집 fan-out 은 ★같은 스레드★ 로 나간다 — 요청자(user)가 아니라 팀원에게 간다
+      db.prepare(
+        `INSERT INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, hop_count, created_at)
+         VALUES ('fanout-1','t1','cody','bill','dm','빌, 이것 좀 봐줘','agent',1, datetime('now'))`,
+      ).run();
+      return { ok: false, reply: "", detail: "appserver_completed_empty", elapsedMs: 1 };
+    };
+    await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "user", message_id: "fanout-turn" }), "", fanoutThenEmpty);
+    expect(
+      repliesFrom(db, "system").length,
+      "★같은 스레드에 무언가 있다는 이유로 통지를 접었다 — 요청자는 답도 통지도 못 받는다★",
+    ).toBe(1);
+  });
+
+  test("★조회가 실패하면 통지한다★ — 모르면 알린다(침묵 쪽으로 기울지 않는다)", async () => {
+    const db = setup();
+    const brokenLookup: CodexCaller = async () => {
+      const orig = db.prepare.bind(db);
+      (db as unknown as { prepare: unknown }).prepare = (sql: string) => {
+        if (sql.includes("in_reply_to = ?")) throw new Error("db down"); // 답 판정만 깨뜨린다
+        return orig(sql);
+      };
+      return { ok: false, reply: "", detail: "appserver_completed_empty", elapsedMs: 1 };
+    };
+    await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "user", message_id: "broken-1" }), "", brokenLookup);
+    expect(repliesFrom(db, "system").length, "★조회 실패가 침묵이 되면 죽은 턴이 통째로 사라진다★").toBe(1);
   });
 
   test("★대조군 — 팀원이 아무 말도 안 했으면 실패통지는 여전히 간다★ (통지를 끈 게 아니다)", async () => {
