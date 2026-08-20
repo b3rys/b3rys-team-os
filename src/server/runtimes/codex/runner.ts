@@ -160,7 +160,13 @@ export function redactPromptArg(args: string[]): string[] {
 export async function runCodexTurn(opts: CodexTurnOptions): Promise<CodexTurnResult> {
   const started = Date.now();
   const sandbox = opts.sandbox ?? "read-only";
-  const timeoutMs = opts.timeoutMs ?? 240_000;
+  // ★기본값을 두지 않는다★ — 240초는 ★라이브에서 도달하지 않는 죽은 값★ 이었다.
+  //   이 함수는 DEPRECATED 고, 유일한 제품 호출부(`runtimeSubscription.ts`)는 자기 상한을 명시로 넘긴다.
+  //   그런데 숫자가 남아 있으면 ★"우리 정책이 240초" 로 읽힌다.★ 조용히 기본값을 주는 대신 크게 실패한다.
+  const timeoutMs = opts.timeoutMs;
+  if (timeoutMs == null) {
+    throw new Error("runCodexTurn: timeoutMs 를 명시하세요 (DEPRECATED 경로 — 기본값을 두지 않습니다)");
+  }
   const writableRoots = writableRootsFor(opts, sandbox);
 
   const lastMsgDir = mkdtempSync(join(tmpdir(), "codexrt-"));

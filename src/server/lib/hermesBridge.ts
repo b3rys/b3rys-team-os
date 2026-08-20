@@ -52,6 +52,15 @@ export interface HermesTurnOptions {
   directReport?: boolean;
   /** anti-pingpong hop 체인: 받은 메시지의 hop_count. 봉투에 hop_count = (hopCount ?? 0)+1 로 실어 openclaw/claude 봉투와 대칭. */
   hopCount?: number;
+  /**
+   * ★이 턴이 아직 살아 있다는 신호.★ hermes 자식이 stdout/stderr 를 흘릴 때마다 불린다.
+   *
+   * 부르는 쪽(버스)이 이걸로 ★예약(lease)을 연장★ 한다 — 그래야 ★일하는 중인 턴이 죽은 것으로
+   * 오인돼 같은 메시지가 다시 디스패치되는 일★ 이 없다. (`extendLease` 주석에 경위)
+   * ★버스 밖 호출부(단톡방·슬랙)는 안 넘겨도 된다★ — 그쪽은 lease 가 없다.
+   * ★던지지 마라★ — 여기서 난 예외는 아래에서 삼킨다(갱신 실패가 턴을 죽이면 안 된다).
+   */
+  onAlive?: () => void;
 }
 
 function hermesCommand(agent: AgentRecord): string {
@@ -278,6 +287,21 @@ export function buildPrompt(opts: HermesTurnOptions): string {
  *   openclaw 와 동일한 600s 로 맞춘다. ★lease/grace 는 wakeDispatcher 가 이 값에서 자동 파생★ 하므로
  * 여기 하나만 바꾸면 사다리(turnCap<lease<grace)가 따라온다 — 빼먹을 일 없음.
  */
+/** 생존신호를 부르는 ★최소 간격★ — 출력 청크마다 DB 를 쓰지 않기 위한 것. lease(660s)보다 훨씬 짧아야 한다. */
+const ALIVE_NOTIFY_MIN_INTERVAL_MS = 30_000;
+/** SIGTERM 뒤 ★이만큼 기다렸다 SIGKILL★ 로 승격한다. 정리할 틈은 주되 무한정 기다리지 않는다. */
+const KILL_ESCALATION_MS = 5_000;
+
+/**
+ * ★시험용 spawn 주입★ — `openclawBridge.__setOpenclawBridgeTestDeps` 와 같은 관례다.
+ * ★왜 필요한가★: 이 파일에서 제일 위험한 것은 ★무응답 시계★ 다(잘못되면 일하는 턴이 죽거나,
+ * 매달린 턴이 안 죽어 중복 실행이 난다). 실제 hermes 를 띄우지 않고 그 시계만 재려면 이 이음매가 있어야 한다.
+ */
+type SpawnFn = typeof spawn;
+let spawnForBridge: SpawnFn = spawn;
+export function __setHermesBridgeTestDeps(deps?: { spawn?: SpawnFn }): void {
+  spawnForBridge = deps?.spawn ?? spawn;
+}
 export const HERMES_TURN_TIMEOUT_MS = Number(process.env.HERMES_TURN_TIMEOUT_MS ?? 600_000);
 
 export async function runHermesTeamTurn(opts: HermesTurnOptions): Promise<string> {
@@ -298,7 +322,7 @@ export async function runHermesTeamTurn(opts: HermesTurnOptions): Promise<string
   //   `--usage-file` 은 실행 후 JSON 을 쓴다. ★실패해도 쓴다.★ 실패 분기 24개가 전부 completed:false 다.
   const usagePath = join(tmpdir(), `hermes-usage-${opts.agent.id}-${opts.messageId}-${process.pid}.json`);
   return new Promise((resolve, reject) => {
-    const proc = spawn(cmd, ["-z", prompt, "--usage-file", usagePath], {
+    const proc = spawnForBridge(cmd, ["-z", prompt, "--usage-file", usagePath], {
       cwd: runtimeCwd,
       // ★팀원의 정체를 ★명시적으로★ 알려준다 — 추측하게 두지 않는다.★ (2026-07-13 실측 사고)
       //
@@ -322,18 +346,54 @@ export async function runHermesTeamTurn(opts: HermesTurnOptions): Promise<string
     });
     let stdout = "";
     let stderr = "";
-    const timer = setTimeout(() => {
+    // ★이 상한이 재는 것은 '일한 시간' 이 아니라 '조용한 시간' 이다.★
+    //   전에는 턴 시작에 한 번 걸고 끝이라, ★출력이 계속 나오는 멀쩡한 턴도★ 상한에서 죽었다
+    //   (실측: 12건이 90초에 죽었다. 그 90초는 상수가 아니라 호출부 하드코딩이었다 — 아무도 정한 적 없는 값이다).
+    //   ★살아 있으면 안 끊고, 진짜 조용할 때만 끊는다.★
+    //
+    // ★그래도 '안 끊기'로 갈 수는 없다★ — 자식이 매달리면 출력이 없고, 출력이 없으면 예약(lease)도 안 밀린다.
+    //   그럼 예약이 만료돼 ★같은 메시지가 다시 디스패치된다★(중복 실행). 그때 옛 자식은 살아 있다.
+    //   그래서 ★무응답일 때는 확실히 끝낸다★ — 이게 turn cap 을 대신하는 유일한 조치다.
+    let idleTimer: ReturnType<typeof setTimeout>;
+    let killEscalation: ReturnType<typeof setTimeout> | undefined;
+    const onIdle = (): void => {
+      // ★SIGTERM 만으로는 종료가 보장되지 않는다★ — 무시하거나 syscall 에 걸려 있으면 그대로 산다.
+      //   유예를 주고 ★SIGKILL 로 승격★ 한다. (승격이 없으면 위 '중복 실행 방지' 가 보장이 아니라 희망이 된다)
       proc.kill();
-      reject(new Error("hermes_timeout"));
-    }, timeoutMs);
-    proc.stdout.on("data", (c) => (stdout += c.toString()));
-    proc.stderr.on("data", (c) => (stderr += c.toString()));
+      killEscalation = setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* 이미 죽음 */ } }, KILL_ESCALATION_MS);
+      killEscalation.unref?.();
+      reject(new Error(`hermes_timeout (idle ${Math.round(timeoutMs / 1000)}s)`));
+    };
+    const bumpIdle = (): void => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(onIdle, timeoutMs);
+    };
+    idleTimer = setTimeout(onIdle, timeoutMs);
+    // 턴이 끝나면(error·close) 시계와 승격 예약을 함께 지운다 — 둘 중 하나만 지우면 승격이 뒤늦게 터진다.
+    const clearIdle = (): void => {
+      clearTimeout(idleTimer);
+      if (killEscalation) clearTimeout(killEscalation);
+    };
+    // ★생존신호 — 출력이 흐르면 부르는 쪽에 알린다(예약 연장).★
+    //   ★매 청크마다 DB 를 쓰지 않는다★ — 한 턴에 수백 번 올 수 있다. 최소 간격만 두고 흘린다.
+    let lastAliveAt = 0;
+    const noteAlive = (): void => {
+      if (!opts.onAlive) return;
+      const now = Date.now();
+      if (now - lastAliveAt < ALIVE_NOTIFY_MIN_INTERVAL_MS) return;
+      lastAliveAt = now;
+      // ★갱신 실패가 턴을 죽이지 않는다★ — 이건 보조 장치지 턴의 일부가 아니다.
+      try { opts.onAlive(); } catch { /* 무시 */ }
+    };
+    // ★시계 밀기는 매 청크마다★(공짜) · ★생존신호는 최소 간격으로★(DB 쓰기라 아낀다) — 둘은 다른 일이다.
+    proc.stdout.on("data", (c) => { stdout += c.toString(); bumpIdle(); noteAlive(); });
+    proc.stderr.on("data", (c) => { stderr += c.toString(); bumpIdle(); noteAlive(); });
     proc.on("error", (e) => {
-      clearTimeout(timer);
+      clearIdle();
       reject(e);
     });
     proc.on("close", (code) => {
-      clearTimeout(timer);
+      clearIdle();
       // ★실패한 턴은 답변이 아니다.★ hermes 는 턴을 못 끝내도 ★exit 0 으로★ 실패 문장을 stdout 에 찍는다
       //   ("Codex response remained incomplete…", "API call failed after 3 retries: HTTP 429…").
       //   그대로 발행하면 ★런타임 에러가 그 팀원의 말로 버스에 배달된다★ (실측: 전자 7건, 후자 3건 —
