@@ -15,7 +15,20 @@ import type { CodexCaller, CodexTurnResult, CodexTurnOptions } from "./runner";
 import { registerActiveTurn, unregisterActiveTurn } from "./activeTurns";
 import { acquireClient, dropClient } from "./clientPool";
 
-const TURN_TIMEOUT_MS = Number(process.env.B3OS_CODEX_APPSERVER_TIMEOUT_MS ?? 300_000);
+/**
+ * ★무응답 상한★ — 마지막 진행 신호 이후 이만큼 조용하면 그 턴을 끊는다(일한 시간이 아니다).
+ *
+ * ★300초가 아니라 600초인 이유★ (2026-08-20, dex 조사):
+ * codex 자신이 ★모델 응답 스트림 무수신 300초★(`model_providers.<id>.stream_idle_timeout_ms` 기본값)
+ * + ★재시도 5회★(`stream_max_retries`)로 스스로 버틴다. 우리 상한을 같은 300초에 두면
+ * ★codex 가 재시도하는 동안 우리가 먼저 끊는다★ — 그 사이 우리에게 오는 신호가 없기 때문이다.
+ * 그래서 ★codex 자체 보호보다 길게★ 잡는다. 이름은 옛 env 를 그대로 둔다(운영 중 값 override 유지).
+ *
+ * ★codex 에는 턴 전체 상한이 없다★(공식 Config Reference 에 turn_timeout 계열 키 없음) —
+ * 즉 여기를 아예 없애면 멈춘 턴을 끊을 시계가 ★어디에도 없다.★ dex 는 턴이 팀원 단위로 직렬이고
+ * app-server 클라이언트를 공유해서(`bridge.ts` 참조), 멈춘 턴이 남으면 ★그 팀원이 영구히 먹통★ 이 된다.
+ */
+const TURN_TIMEOUT_MS = Number(process.env.B3OS_CODEX_APPSERVER_TIMEOUT_MS ?? 600_000);
 
 /**
  * db 를 주입한 caller. db 는 ★승인이 아니라★ 턴 상관관계(orphan 정리) 용도로만 쓴다.
