@@ -68,13 +68,18 @@ describe("무응답 상한(idle) — 일하는 턴은 안 끊는다", () => {
   test("★진행과 무관한 알림은 시계를 되돌리지 않는다★ (주기 알림 하나로 상한이 무력화되면 안 된다)", async () => {
     const { c, calls } = makeClient();
     const started = Date.now();
-    const p = c.runTurn("계정 알림만 오는 멈춘 턴", {}, 200);
-    // 앱서버가 진행과 무관하게 보내는 계열 — 이걸 진행으로 세면 무응답 컷이 영영 안 터진다
-    for (let i = 0; i < 4; i++) { await sleep(40); (c as any).handleNotification("account/rateLimits/updated", {}); }
+    let resolvedAt = 0;
+    const p = c.runTurn("계정 알림만 오는 멈춘 턴", {}, 200).then((r) => { resolvedAt = Date.now(); return r; });
+    // ★상한(200ms)보다 오래★ 계정 알림만 계속 보낸다 — 이걸 진행으로 세면 그 동안 안 끊긴다
+    for (let i = 0; i < 8; i++) { await sleep(120); (c as any).handleNotification("account/rateLimits/updated", {}); }
     const r = await p;
     expect(r.status).toBe("timeout");
-    expect(calls.interrupts, "★멈춘 턴인데 계정 알림 때문에 안 끊겼다★").toBe(1);
-    expect(Date.now() - started, "상한 근처에서 끊겨야 한다").toBeLessThan(1000);
+    expect(calls.interrupts).toBe(1);
+    // ★언제 끊겼는지를 잰다★ — 총 경과가 아니라. 총 경과로 재면 두 동작이 같은 값을 낸다(이 시험이 그래서 한 번 헛돌았다)
+    expect(
+      resolvedAt - started,
+      "★계정 알림이 시계를 되돌렸다 — 멈춘 턴이 알림 도는 동안 영영 안 끊긴다★",
+    ).toBeLessThan(600);
   });
 
   test("★왜 끊었는지 사유에 남긴다★ — '오래 걸려서' 와 '조용해서' 는 다른 사건이다", async () => {
