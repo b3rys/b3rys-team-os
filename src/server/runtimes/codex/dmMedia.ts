@@ -45,7 +45,7 @@ export function largestPhotoVariant(
 }
 
 /** 내려받을 대상을 뽑는다 — 순수 함수라 통신 없이 잴 수 있다. */
-export function dmMediaRefs(msg: DmMessageMedia): TelegramMediaRef[] {
+export function dmMediaRefs(msg: DmMessageMedia, depth = 1): TelegramMediaRef[] {
   const refs: TelegramMediaRef[] = [];
   const photo = largestPhotoVariant(msg.photo);
   if (photo) {
@@ -70,6 +70,16 @@ export function dmMediaRefs(msg: DmMessageMedia): TelegramMediaRef[] {
       file_size: doc.file_size,
     });
   }
+  // ★인용한 원문의 첨부도 함께 싣는다.★
+  //   사람이 사진에 답장하면 텔레그램은 새로 친 글자만 보내고, 그 사진은 `reply_to_message` 에 있다.
+  //   전에는 ★원문 텍스트만★ 실어서, 팀장님이 사진에 "이거 설명해줘" 라고 답하면 dex 는
+  //   ★"텍스트는 보입니다"★ 라고 답했다 — 정작 봐야 할 그림이 안 갔다(실측).
+  //   같은 파일을 다시 인용해도 저장소가 file_unique_id 로 같은 경로를 돌려주므로 중복 비용은 없다.
+  //   ★깊이를 코드가 제한한다★ — 텔레그램은 인용의 인용을 안 주지만 그건 ★남의 API 의 사정★ 이다.
+  //   우리 코드는 캐스팅으로 읽으므로 타입이 재귀를 못 막는다. 틀리면 대가가 ★스택 오버플로 =
+  //   1:1 경로 전체 정지★ 라, 한 겹으로 잘라 둔다(빌 리뷰).
+  const quoted = depth > 0 ? (msg as { reply_to_message?: DmMessageMedia }).reply_to_message : undefined;
+  if (quoted) refs.push(...dmMediaRefs(quoted, depth - 1));
   return refs;
 }
 
@@ -179,7 +189,10 @@ export const MEDIA_ONLY_PROMPT = "(설명 없이 첨부만 보냈다. 첨부를 
 export function decideDmMessage(msg: {
   text?: string;
   caption?: string;
-  reply_to_message?: { text?: string; caption?: string; from?: { username?: string; first_name?: string } };
+  reply_to_message?: {
+    text?: string; caption?: string; from?: { username?: string; first_name?: string };
+    photo?: DmMessageMedia["photo"]; document?: DmMessageMedia["document"];
+  };
   photo?: DmMessageMedia["photo"];
   document?: DmMessageMedia["document"];
 } | undefined): { handle: boolean; text: string; hasMedia: boolean } {
@@ -200,12 +213,19 @@ export function decideDmMessage(msg: {
  */
 export function withQuotedContext(
   body: string,
-  quoted: { text?: string; caption?: string; from?: { username?: string; first_name?: string } } | undefined,
+  quoted: {
+    text?: string; caption?: string; from?: { username?: string; first_name?: string };
+    photo?: DmMessageMedia["photo"]; document?: DmMessageMedia["document"];
+  } | undefined,
 ): string {
   const q = (quoted?.text ?? quoted?.caption ?? "").trim();
-  if (!q) return body;
+  // ★원문이 사진뿐이어도 인용은 실린다★ — 글자가 없다고 "인용 없음" 으로 처리하면
+  //   그 그림이 무엇의 인용인지 사라진다(그림 자체는 dmMediaRefs 가 함께 싣는다).
+  const hasMedia = Boolean(quoted?.photo?.length || quoted?.document);
+  if (!q && !hasMedia) return body;
   const who = quoted?.from?.username ?? quoted?.from?.first_name;
-  return `${body}\n\n[인용한 앞 메시지${who ? ` — ${who}` : ""}]\n${q}`;
+  const mark = hasMedia ? " · 첨부 포함(아래 그림이 그 첨부다)" : "";
+  return `${body}\n\n[인용한 앞 메시지${who ? ` — ${who}` : ""}${mark}]\n${q || "(글자 없이 첨부만)"}`;
 }
 
 /** 본문 = 글 또는 캡션. 둘 다 없으면 첨부만 온 것이다. */
