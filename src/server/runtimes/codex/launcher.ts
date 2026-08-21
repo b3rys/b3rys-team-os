@@ -152,6 +152,11 @@ export function renderBridgePlist(p: CodexBridgePaths): string {
     `  <key>Label</key><string>${p.label}</string>`,
     "  <key>ProgramArguments</key>",
     `  <array><string>/bin/bash</string><string>${p.wrapper}</string></array>`,
+    // ★작업 디렉토리를 명시한다★ — 없으면 launchd 가 cwd `/` 로 띄운다.
+    //   그러면 cwd 기준 상대경로가 전부 루트로 풀린다(실측: 사진 저장이 `/team-media` 로 가서
+    //   `EROFS: read-only file system` 로 1:1 사진 첨부가 전부 실패했다).
+    //   ★서버 plist 는 이미 이 키가 있어서 멀쩡했다★ — 브리지만 빠져 있었다. 같은 모양으로 맞춘다.
+    `  <key>WorkingDirectory</key><string>${REPO_ROOT}</string>`,
     "  <key>RunAtLoad</key><true/>",
     "  <key>KeepAlive</key><true/>",
     `  <key>StandardOutPath</key><string>${p.log}</string>`,
