@@ -293,3 +293,23 @@ describe("hasMedia — 인용한 첨부도 센다", () => {
     expect(d.hasMedia).toBe(false);
   });
 });
+
+/**
+ * ★문과 수집을 따로 재면 그 사이가 끊겨도 둘 다 통과한다.★ (빌 지적 — #367 에서 실제로 그랬다)
+ * 그래서 ★한 줄로 잇는다★: 인용 사진이 붙은 메시지를 넣어 ★내려받기가 그림 경로를 돌려주는지★ 를 잰다.
+ * 이것이 "그림이 모델에 갈 준비가 됐다" 는 단위 증거다.
+ */
+test("★인용 사진 → 내려받기가 그림 경로를 돌려준다★ (문·수집·판정을 한 줄로 잇는다)", async () => {
+  const msg = { text: "이거 설명해줘", reply_to_message: { photo: [{ file_id: "q9", file_unique_id: "qu9", file_size: 9, width: 9, height: 9 }] } };
+  const decided = decideDmMessage(msg as never);
+  expect(decided.hasMedia, "문이 닫혀 있으면 아래가 아예 안 돈다").toBe(true);
+
+  const got = await downloadDmAttachments("token", msg as never, {
+    store: (async (_t: string, ref: { file_unique_id: string }) => ({
+      kind: "photo", file_id: "q9", file_unique_id: ref.file_unique_id,
+      file_path: `/tmp/${ref.file_unique_id}.jpg`, mime_type: "image/jpeg", file_name: "q.jpg", file_size: 9,
+    })) as never,
+  });
+  expect(got.imagePaths, "★여기가 비면 인용 사진은 모델에 안 간다★").toEqual(["/tmp/qu9.jpg"]);
+  expect(got.failed).toEqual([]);
+});
