@@ -272,3 +272,24 @@ test("★인용이 순환해도 죽지 않는다★ — 한 겹에서 끊는 것
   const refs = dmMediaRefs(loop as never);
   expect(refs.length, "★두 겹까지만 — 무한 재귀면 여기서 죽는다★").toBe(2);
 });
+
+/**
+ * ★모으는 코드를 고쳐도 그 앞의 문이 닫혀 있으면 아무 일도 안 난다.★ (2026-08-21 실측)
+ *
+ * `dmMediaRefs` 가 인용 첨부를 모으게 고쳤는데 라이브에서 그림이 여전히 안 갔다.
+ * 부르는 쪽이 `hasMedia` 로 ★내려받기를 걸지 말지★ 정하는데, 그 값이 ★내가 보낸 첨부만★ 보고 있었다.
+ * 본문에는 "첨부 포함" 이 찍히는데 파일은 안 받아지는 상태였다.
+ */
+describe("hasMedia — 인용한 첨부도 센다", () => {
+  const photo = [{ file_id: "p", file_unique_id: "pu", file_size: 1, width: 1, height: 1 }];
+
+  test("★사진에 답장하면 hasMedia 가 참이다★ (이게 거짓이면 내려받기가 아예 안 돈다)", () => {
+    const d = decideDmMessage({ text: "이거 설명해줘", reply_to_message: { photo } } as never);
+    expect(d.hasMedia, "★여기가 false 면 위에서 고친 수집이 한 번도 안 불린다★").toBe(true);
+  });
+
+  test("★대조군 — 글자만 인용하면 hasMedia 는 거짓★ (쓸데없이 내려받지 않는다)", () => {
+    const d = decideDmMessage({ text: "응", reply_to_message: { text: "앞 말" } } as never);
+    expect(d.hasMedia).toBe(false);
+  });
+});
