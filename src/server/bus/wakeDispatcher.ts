@@ -159,9 +159,30 @@ const MAX_RETRIES = 3;
  */
 const lastAliveAt = new Map<string, number>();
 
+/** in-flight 키 — 자가치유·생존신호가 ★같은 모양★ 을 써야 맞물린다(어긋나면 오류 없이 옛 동작이 된다). */
+export function inFlightKey(messageId: string, agentId: string): string {
+  return `${messageId}:${agentId}`;
+}
+
 /** 살아 있다는 신호를 기록한다. 런타임 어댑터가 부른다(hermes = 자식이 출력을 흘릴 때마다). */
 export function noteTurnAlive(messageId: string, agentId: string): void {
-  lastAliveAt.set(`${messageId}:${agentId}`, Date.now());
+  lastAliveAt.set(inFlightKey(messageId, agentId), Date.now());
+}
+
+/** 턴이 끝났다 — 생존신호 기록을 버린다(안 지우면 이 Map 이 프로세스 수명 내내 자란다). */
+export function forgetTurnAlive(key: string): void {
+  lastAliveAt.delete(key);
+}
+
+/**
+ * ★이 in-flight 잠금을 풀어도 되나 — 기준은 '시작한 지 오래' 가 아니라 '조용한 지 오래' 다.★
+ *
+ * 순수 함수로 뽑아둔 이유: 이 판정이 ★이 변경의 핵심 한 줄★ 인데 tick 루프 안에 있으면 시험이 못 잡는다.
+ * (되돌려도 수트가 전부 초록이면 다음 사람이 깨뜨린 걸 아무도 모른다)
+ */
+export function shouldReleaseInFlight(key: string, startedAt: number, graceMs: number, now: number): boolean {
+  const quietSince = Math.max(startedAt, lastAliveAt.get(key) ?? 0);
+  return now - quietSince > graceMs;
 }
 
 /**
@@ -746,8 +767,12 @@ function makeHermesAdapter(db: Database, agents: () => AgentRecord[]): WakeAdapt
           agent,
           // ★살아 있는 동안 예약을 민다★ — blocking 런타임이라 이 행은 턴 내내 `dispatching` 이고,
           //   예약이 만료되면 recoverStaleClaims 가 `pending` 으로 되돌려 ★같은 메시지가 다시 나간다.★
-          //   DB 예약(extendLease)과 프로세스 내 잠금(noteTurnAlive) ★둘 다★ 밀어야 한다 — 한쪽만 밀면
-          //   다른 쪽이 먼저 풀려서 중복이 그대로 난다.
+          //
+          // ★둘을 미는 이유는 서로 다르다 — 같은 것을 이중으로 막는 게 아니다.★
+          //   · ★DB 예약(extendLease)★ = ★같은 메시지의 재디스패치★ 를 막는다. 폴러는 `pending` 행만 집고
+          //     `dispatching` → `pending` 은 recoverStaleClaims(lease 만료) ★한 경로뿐★ 이라, 여기가 유일한 방어다.
+          //   · ★프로세스 내 잠금(noteTurnAlive)★ = ★같은 팀원에게 온 '다른' 메시지★ 가 턴 도중 겹쳐 드는 것을 막는다.
+          //   그래서 한쪽만 밀면 ★막지 못하는 것이 서로 다르다.★ 둘 다 밀어야 둘 다 막힌다.
           onAlive: () => {
             extendLease(db, row.message_id, targetAgentId, HERMES_LEASE_SEC);
             noteTurnAlive(row.message_id, targetAgentId);
@@ -1822,12 +1847,13 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
       for (const [key, entry] of inFlight) {
         // 잠금 해제 = dispatchRow 완료(턴 종료) 시 finally 에서. 여기는 hang 백스톱(self-heal)만.
         // ★기준은 "언제 시작했나" 가 아니라 "마지막으로 살아 있다고 한 게 언제냐" 다.★
-        //   살아 있다는 신호가 오는 동안은 잠금을 풀지 않는다 — 풀면 같은 메시지가 다시 나가 ★중복 실행★ 된다.
+        //   살아 있다는 신호가 오는 동안은 잠금을 풀지 않는다 — 풀면 ★같은 팀원에게 온 다음 메시지★ 가
+        //   턴이 도는 중에 겹쳐 들어간다(이 잠금이 막는 것이 그것이다. 같은 메시지의 재디스패치는 DB 예약이 막는다).
         const aliveAt = lastAliveAt.get(key) ?? 0;
-        const quietSince = Math.max(entry.startedAt, aliveAt);
-        if (now - quietSince > entry.graceMs) {
+        if (shouldReleaseInFlight(key, entry.startedAt, entry.graceMs, now)) {
+          const quietSince = Math.max(entry.startedAt, aliveAt);
           inFlight.delete(key);
-          lastAliveAt.delete(key);
+          forgetTurnAlive(key);
           appendAuditFile("bus_dispatcher", "inflight_self_heal", null, {
             key,
             age_ms: now - entry.startedAt,
@@ -1945,7 +1971,7 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
             //   → 여기 도달 = 턴 종료. 모든 런타임 동일하게 잠금 해제. (mid-turn 주입 방지는 busy-defer 가 담당)
             inFlight.delete(key);
             // ★생존신호도 같이 지운다★ — 안 지우면 이 Map 이 프로세스 수명 내내 자란다(키가 메시지마다 하나).
-            lastAliveAt.delete(key);
+            forgetTurnAlive(key);
           }
         })();
       }

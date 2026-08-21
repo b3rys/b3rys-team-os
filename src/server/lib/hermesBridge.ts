@@ -354,9 +354,11 @@ export async function runHermesTeamTurn(opts: HermesTurnOptions): Promise<string
     // ★그래도 '안 끊기'로 갈 수는 없다★ — 자식이 매달리면 출력이 없고, 출력이 없으면 예약(lease)도 안 밀린다.
     //   그럼 예약이 만료돼 ★같은 메시지가 다시 디스패치된다★(중복 실행). 그때 옛 자식은 살아 있다.
     //   그래서 ★무응답일 때는 확실히 끝낸다★ — 이게 turn cap 을 대신하는 유일한 조치다.
+    let finished = false;
     let idleTimer: ReturnType<typeof setTimeout>;
     let killEscalation: ReturnType<typeof setTimeout> | undefined;
     const onIdle = (): void => {
+      finished = true;
       // ★SIGTERM 만으로는 종료가 보장되지 않는다★ — 무시하거나 syscall 에 걸려 있으면 그대로 산다.
       //   유예를 주고 ★SIGKILL 로 승격★ 한다. (승격이 없으면 위 '중복 실행 방지' 가 보장이 아니라 희망이 된다)
       proc.kill();
@@ -371,6 +373,7 @@ export async function runHermesTeamTurn(opts: HermesTurnOptions): Promise<string
     idleTimer = setTimeout(onIdle, timeoutMs);
     // 턴이 끝나면(error·close) 시계와 승격 예약을 함께 지운다 — 둘 중 하나만 지우면 승격이 뒤늦게 터진다.
     const clearIdle = (): void => {
+      finished = true;
       clearTimeout(idleTimer);
       if (killEscalation) clearTimeout(killEscalation);
     };
@@ -378,6 +381,10 @@ export async function runHermesTeamTurn(opts: HermesTurnOptions): Promise<string
     //   ★매 청크마다 DB 를 쓰지 않는다★ — 한 턴에 수백 번 올 수 있다. 최소 간격만 두고 흘린다.
     let lastAliveAt = 0;
     const noteAlive = (): void => {
+      // ★턴이 끝난 뒤에 온 신호는 흘리지 않는다.★ onIdle 이 reject 한 뒤에도 SIGKILL 승격까지 리스너가
+      //   붙어 있어서, 그 사이 자식이 마지막 출력을 흘리면 ★부르는 쪽이 이미 지운 키를 되살린다★(누수).
+      //   무응답으로 죽은 턴이라 직전 신호가 오래돼 아래 최소간격 게이트도 그냥 통과한다.
+      if (finished) return;
       if (!opts.onAlive) return;
       const now = Date.now();
       if (now - lastAliveAt < ALIVE_NOTIFY_MIN_INTERVAL_MS) return;
