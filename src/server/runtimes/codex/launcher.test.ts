@@ -46,6 +46,20 @@ describe("codex launcher (M4) — 순수 렌더러", () => {
     expect(xml).not.toMatch(/[0-9]{8,}:[A-Za-z0-9_-]{30,}/); // 텔레그램 토큰 형식 없음
   });
 
+  /**
+   * ★작업 디렉토리가 없으면 launchd 는 cwd `/` 로 띄운다.★ 그러면 cwd 기준 상대경로가 전부 루트로 풀린다 —
+   * 실측: 사진 저장 폴더가 `/team-media` 가 되어 1:1 사진 첨부가 `EROFS` 로 전부 실패했다.
+   * ★서버 plist 에는 이 키가 원래 있었다★(그래서 서버 경로만 멀쩡했다). 브리지도 같은 모양이어야 한다.
+   */
+  test("★plist 에 WorkingDirectory 가 있다★ — 없으면 cwd 가 / 라 상대경로가 루트로 풀린다", () => {
+    const p = codexBridgePaths("cody");
+    const xml = renderBridgePlist(p);
+    expect(xml, "★이 키가 빠지면 launchd 가 cwd=/ 로 띄운다★").toContain("<key>WorkingDirectory</key>");
+    // 값은 repo 루트여야 한다 — wrapper 가 실행하는 bridge.ts 가 그 안에 있다
+    const root = p.wrapper.replace(/\/var\/codex-bridge\/.*$/, "");
+    expect(xml).toContain(`<key>WorkingDirectory</key><string>${root}</string>`);
+  });
+
   test("wrapper: 토큰 파일→env(평문 노출 없음) + bridge.ts exec", () => {
     const p = codexBridgePaths("cody");
     const sh = renderLaunchWrapper(p);
