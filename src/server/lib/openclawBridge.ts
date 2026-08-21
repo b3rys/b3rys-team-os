@@ -182,6 +182,12 @@ const OPENCLAW_GATEWAY_TIMEOUT_MS = Number(process.env.OPENCLAW_GATEWAY_TIMEOUT_
 function isOpenclawTimeoutNoticeEnabled(): boolean {
   return process.env.OPENCLAW_TIMEOUT_NOTICE === "1";
 }
+/**
+ * CLI 자기 `--timeout` 이 먼저 끝내도록 주는 ★유예★. 이 시간을 넘겨도 안 죽으면 그때만 우리가 죽인다.
+ * ★이 값에는 근거가 없다★ — CLI 가 자기 타임아웃 뒤 결과 JSON 을 쓰는 데 충분해 보인다는 판단일 뿐,
+ * 재서 정한 값이 아니다. ★조정하려면 먼저 재라★(백스톱이 실제로 터진 audit 이 있으면 그게 자료다).
+ */
+const CLI_TIMEOUT_BACKSTOP_MARGIN_MS = 10_000;
 const OPENCLAW_PREVIEW_LIMIT = Number(process.env.OPENCLAW_PREVIEW_LIMIT ?? 80);
 // 2026-06-05 롤백: 오늘 넣었던 "작성 중"(EARLY_PROGRESS)·별도 보이는-한도(VISIBLE_REPLY_TIMEOUT)
 // 제거. 응답 대기는 게이트웨이 타임아웃(OPENCLAW_GATEWAY_TIMEOUT_MS, 300초)만 사용.
@@ -240,7 +246,20 @@ async function runOpenclawJson(args: string[], timeoutMs = 30_000): Promise<unkn
       );
     }
   })();
-  const timeout = setTimeout(() => proc.kill(), timeoutMs);
+  // ★우리가 먼저 죽이지 않는다 — CLI 자기 타임아웃이 먼저 끝내게 둔다.★
+  //   바로 위에서 CLI 에 ★같은 값★ 을 `--timeout` 으로 넘긴다. 그런데 우리 kill 도 ★같은 시각★ 에 걸려 있었다
+  //   = ★둘이 같은 순간에 경주한다.★ 우리가 이기면 CLI 가 쓰려던 `{ok:false, error:{kind:"timeout"}}` 을
+  //   ★끝까지 못 쓰고 죽는다★ — 깔끔한 타임아웃 보고가 '출력 없이 죽은 프로세스' 로 바뀐다.
+  //   ★그래서 유예를 준다.★ 정상 경로에서는 CLI 자기 타임아웃이 항상 먼저 끝낸다.
+  //   여기 kill 이 실제로 터졌다 = ★CLI 가 자기 약속을 안 지켰다★ 는 뜻이라 ★기록을 남긴다★(안 남기면 안 보인다).
+  const timeout = setTimeout(() => {
+    appendAuditFile("openclaw_bridge", "cli_timeout_backstop_kill", null, {
+      call: args[0] ?? "(unknown)",
+      cli_timeout_ms: timeoutMs,
+      waited_ms: timeoutMs + CLI_TIMEOUT_BACKSTOP_MARGIN_MS,
+    });
+    proc.kill();
+  }, timeoutMs + CLI_TIMEOUT_BACKSTOP_MARGIN_MS);
   try {
     const [stdout, stderr, exitCode] = await Promise.all([
       new Response(proc.stdout).text(),

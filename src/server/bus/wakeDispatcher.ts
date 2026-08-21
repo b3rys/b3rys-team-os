@@ -27,6 +27,7 @@ import {
   markFailed,
   markDeferred,
   recoverStaleClaims,
+  extendLease,
   recentThreadMessages,
 } from "../db/inboxQueries";
 import { appendAudit } from "../db/queries";
@@ -132,7 +133,7 @@ const POLL_INTERVAL_MS = Number(process.env.BUS_POLL_INTERVAL_MS ?? 1500);
 //   timeout cannot break the ladder.
 export const ADAPTER_TIMEOUT_MS = 10_000; // tmux prepare/session check timeout (10s)
 export const OPENCLAW_ADAPTER_TIMEOUT_MS = Number(process.env.OPENCLAW_ADAPTER_TIMEOUT_MS ?? 240_000);
-const DEFAULT_LEASE_SEC = 60; // fast runtimes (tmux/claude/hermes/codex/b3os_native) claim lease
+const DEFAULT_LEASE_SEC = 60; // fast runtimes (tmux/claude/codex/b3os_native) claim lease — ★hermes 는 아래에서 자기 turn cap 으로 파생한다(HERMES_LEASE_SEC)★
 const IN_FLIGHT_GRACE_MS = 120_000; // default inFlight eviction: lease 60 + buffer 60
 // openclaw-only long lease/grace, derived from the adapter timeout so adapter < lease < grace always holds.
 const OPENCLAW_LEASE_MS = OPENCLAW_ADAPTER_TIMEOUT_MS + 60_000;
@@ -146,6 +147,43 @@ const HERMES_LEASE_MS = HERMES_TURN_TIMEOUT_MS + 60_000;
 const HERMES_LEASE_SEC = Math.ceil(HERMES_LEASE_MS / 1000);
 const HERMES_IN_FLIGHT_GRACE_MS = HERMES_LEASE_MS + 60_000;
 const MAX_RETRIES = 3;
+
+/**
+ * ★턴이 마지막으로 '살아 있다' 고 알린 시각★ (key = `${message_id}:${agent_id}`).
+ *
+ * ★왜 있나★ — self-heal(아래 tick)은 `startedAt` 하나로 나이를 재서, ★일하는 중인 턴도★ grace 를 넘으면
+ * 잠금을 푼다. 잠금이 풀리면 같은 메시지가 다시 디스패치돼 ★같은 일이 두 번★ 돈다.
+ * blocking 런타임(hermes)의 강제 종료를 없애려면 ★"오래됐다" 가 아니라 "조용하다" 로 재야 한다.★
+ * 그래서 생존신호가 오면 여기 시각을 갱신하고, self-heal 은 ★startedAt 과 이 값 중 나중 것★ 을 기준으로 잰다.
+ * (DB 쪽 예약은 `extendLease` 가 따로 연장한다 — 이건 ★같은 프로세스 안의 잠금★ 용이다)
+ */
+const lastAliveAt = new Map<string, number>();
+
+/** in-flight 키 — 자가치유·생존신호가 ★같은 모양★ 을 써야 맞물린다(어긋나면 오류 없이 옛 동작이 된다). */
+export function inFlightKey(messageId: string, agentId: string): string {
+  return `${messageId}:${agentId}`;
+}
+
+/** 살아 있다는 신호를 기록한다. 런타임 어댑터가 부른다(hermes = 자식이 출력을 흘릴 때마다). */
+export function noteTurnAlive(messageId: string, agentId: string): void {
+  lastAliveAt.set(inFlightKey(messageId, agentId), Date.now());
+}
+
+/** 턴이 끝났다 — 생존신호 기록을 버린다(안 지우면 이 Map 이 프로세스 수명 내내 자란다). */
+export function forgetTurnAlive(key: string): void {
+  lastAliveAt.delete(key);
+}
+
+/**
+ * ★이 in-flight 잠금을 풀어도 되나 — 기준은 '시작한 지 오래' 가 아니라 '조용한 지 오래' 다.★
+ *
+ * 순수 함수로 뽑아둔 이유: 이 판정이 ★이 변경의 핵심 한 줄★ 인데 tick 루프 안에 있으면 시험이 못 잡는다.
+ * (되돌려도 수트가 전부 초록이면 다음 사람이 깨뜨린 걸 아무도 모른다)
+ */
+export function shouldReleaseInFlight(key: string, startedAt: number, graceMs: number, now: number): boolean {
+  const quietSince = Math.max(startedAt, lastAliveAt.get(key) ?? 0);
+  return now - quietSince > graceMs;
+}
 
 /**
  * Per-runtime claim lease (seconds). ★Blocking-wake runtimes (openclaw, hermes) hold their claim
@@ -727,6 +765,18 @@ function makeHermesAdapter(db: Database, agents: () => AgentRecord[]): WakeAdapt
             : ({ kind: "teammate", to: row.from_agent_id } as const);
         await runHermesTeamTurn({
           agent,
+          // ★살아 있는 동안 예약을 민다★ — blocking 런타임이라 이 행은 턴 내내 `dispatching` 이고,
+          //   예약이 만료되면 recoverStaleClaims 가 `pending` 으로 되돌려 ★같은 메시지가 다시 나간다.★
+          //
+          // ★둘을 미는 이유는 서로 다르다 — 같은 것을 이중으로 막는 게 아니다.★
+          //   · ★DB 예약(extendLease)★ = ★같은 메시지의 재디스패치★ 를 막는다. 폴러는 `pending` 행만 집고
+          //     `dispatching` → `pending` 은 recoverStaleClaims(lease 만료) ★한 경로뿐★ 이라, 여기가 유일한 방어다.
+          //   · ★프로세스 내 잠금(noteTurnAlive)★ = ★같은 팀원에게 온 '다른' 메시지★ 가 턴 도중 겹쳐 드는 것을 막는다.
+          //   그래서 한쪽만 밀면 ★막지 못하는 것이 서로 다르다.★ 둘 다 밀어야 둘 다 막힌다.
+          onAlive: () => {
+            extendLease(db, row.message_id, targetAgentId, HERMES_LEASE_SEC);
+            noteTurnAlive(row.message_id, targetAgentId);
+          },
           threadId: row.thread_id,
           messageId: row.message_id,
           body: row.body,
@@ -1796,9 +1846,21 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
 
       for (const [key, entry] of inFlight) {
         // 잠금 해제 = dispatchRow 완료(턴 종료) 시 finally 에서. 여기는 hang 백스톱(self-heal)만.
-        if (now - entry.startedAt > entry.graceMs) {
+        // ★기준은 "언제 시작했나" 가 아니라 "마지막으로 살아 있다고 한 게 언제냐" 다.★
+        //   살아 있다는 신호가 오는 동안은 잠금을 풀지 않는다 — 풀면 ★같은 팀원에게 온 다음 메시지★ 가
+        //   턴이 도는 중에 겹쳐 들어간다(이 잠금이 막는 것이 그것이다. 같은 메시지의 재디스패치는 DB 예약이 막는다).
+        const aliveAt = lastAliveAt.get(key) ?? 0;
+        if (shouldReleaseInFlight(key, entry.startedAt, entry.graceMs, now)) {
+          const quietSince = Math.max(entry.startedAt, aliveAt);
           inFlight.delete(key);
-          appendAuditFile("bus_dispatcher", "inflight_self_heal", null, { key, age_ms: now - entry.startedAt });
+          forgetTurnAlive(key);
+          appendAuditFile("bus_dispatcher", "inflight_self_heal", null, {
+            key,
+            age_ms: now - entry.startedAt,
+            // ★"오래 걸려서" 와 "조용해서" 는 다른 사건이다 — 무엇을 재서 풀었는지 남긴다.★
+            quiet_ms: now - quietSince,
+            had_alive_signal: aliveAt > 0,
+          });
         }
       }
 
@@ -1815,7 +1877,9 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
       const agentsNow = deps.agents();
       const rows = pendingDispatch(db, 10);
       for (const row of rows) {
-        const key = `${row.message_id}:${row.agent_id}`;
+        // ★키는 한 곳에서만 만든다★ — 여기서 따로 조립하면 생존신호(noteTurnAlive)와 모양이 갈려도
+        //   오류 없이 조용히 어긋난다(신호가 판정부에 영영 안 닿는다).
+        const key = inFlightKey(row.message_id, row.agent_id);
         if (inFlight.has(key)) continue;
 
         // Per-runtime claim lease: openclaw wakes run up to ~240s, so they need a lease that
@@ -1908,6 +1972,8 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
             // dispatchRow 가 턴 끝까지 블록한다(openclaw=agent.wait / hermes=stdout / claude=inject).
             //   → 여기 도달 = 턴 종료. 모든 런타임 동일하게 잠금 해제. (mid-turn 주입 방지는 busy-defer 가 담당)
             inFlight.delete(key);
+            // ★생존신호도 같이 지운다★ — 안 지우면 이 Map 이 프로세스 수명 내내 자란다(키가 메시지마다 하나).
+            forgetTurnAlive(key);
           }
         })();
       }

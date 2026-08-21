@@ -173,6 +173,36 @@ export function markDispatching(
 }
 
 /**
+ * ★예약(lease)을 '살아 있는 동안' 연장한다 — 시간이 아니라 생존신호로.★
+ *
+ * ★왜 필요한가★ — hermes 처럼 ★턴 내내 붙잡는(blocking)★ 런타임은 `markWakeDispatched` 가
+ * 턴이 끝난 뒤에야 찍히므로(wakeDispatcher) 그 행이 ★턴 내내 `dispatching` 에 머문다.★
+ * 그런데 `recoverStaleClaims` 는 ★`dispatching` + lease 만료★ 를 죽은 워커로 보고 `pending` 으로 되돌린다
+ * → 폴러가 ★같은 메시지를 다시 집어간다★ → ★같은 일이 두 번 돈다(중복 발신·중복 side effect).★
+ *
+ * 지금까지 이 길이 안 열린 이유는 ★hermes 를 turn cap 에서 강제 종료★ 해서 lease 만료 전에 끝냈기 때문이다.
+ * ★그 강제 종료를 없애려면 이 함수가 먼저 있어야 한다★ — 순서를 뒤집으면 중복 경로가 그대로 열린다.
+ *
+ * ★`dispatching` 인 행만 연장한다★ — 이미 끝났거나(`wake_dispatched`·완료) 다른 워커가 가져간 행을
+ * 되살리지 않는다. 그래서 반환값이 false 면 ★"연장 실패" 가 아니라 "연장할 필요가 없어졌다" 는 뜻일 수 있다.
+ */
+export function extendLease(
+  db: Database,
+  messageId: string,
+  agentId: string,
+  leaseSec: number,
+): boolean {
+  const result = db
+    .prepare(
+      `UPDATE message_recipient
+       SET lease_until = datetime('now', '+${leaseSec} seconds')
+       WHERE message_id = ? AND agent_id = ? AND delivery_state = 'dispatching'`,
+    )
+    .run(messageId, agentId);
+  return result.changes === 1;
+}
+
+/**
  * Mark a row as wake_dispatched (adapter was called, waiting for ack).
  */
 export function markWakeDispatched(
