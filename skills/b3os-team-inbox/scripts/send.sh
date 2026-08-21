@@ -249,12 +249,19 @@ RESP=$(curl -sS -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$BASE
 #   그래서 이 시점에 배달 여부를 아는 것은 구조적으로 불가능하다. 실측: 미배달 메시지에 '✓ sent' 가
 #   찍혔고, 보낸 사람은 전달된 줄 알았다 — 실제로 정정 메시지 한 건이 그렇게 사라졌다.
 #   알 수 없는 것을 안다고 말하지 않는다 — '접수됨'까지만 단정하고, 확인은 --confirm 이 한다.
+#
+# ★확인 경로를 출력에 적는다★ — '배달 확인 전' 만 적고 ★어디서 확인하는지는 안 적었다.★
+#   그래서 보낸 쪽은 스스로 표를 찾아야 했고, 목적지가 버스 밖인 메시지(`--direct-to-gd`)는
+#   message_recipient 에 그 구간이 없어 ★'기록이 아예 없다'★ 로 읽혔다. 기록은 audit_event 에
+#   있었다. 조회 경로가 없으면 '확인 안 됨' 이 아니라 ★'기능이 없음' 으로 결론난다.★
+#   두 확인법은 보는 곳이 다르다 — --confirm 은 버스 안, --delivery 는 버스 밖.
 MSG_ID=$(echo "$RESP" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 if d.get('ok'):
     m = d['message']
     print(f'접수됨 {m[\"id\"]} thread={m[\"thread_id\"]} (hop={m[\"hop_count\"]}) — 배달 확인 전', file=sys.stderr)
+    print(f'  확인: inbox.sh --delivery {m[\"id\"]}   (버스 밖 발송) · send.sh --confirm  (버스 안 수신)', file=sys.stderr)
     print(m['id'])
 else:
     print(f'✗ 접수 실패: {json.dumps(d, ensure_ascii=False)}', file=sys.stderr)

@@ -639,7 +639,36 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       .all(id) as Array<Record<string, unknown>>;
     // recipients 는 ★항상 배열★ 이다. 빈 배열은 '수신자가 0명' 이라는 사실이며 '모름' 이 아니다 —
     //   호출부가 그 둘을 구분할 수 있어야 수신자 미연결 사고를 '아직 안 왔음' 으로 흘리지 않는다.
-    return c.json({ message: m, recipients });
+    // ★외부 채널(telegram DM·팀방) 로 나간 결과도 함께 준다.★
+    //   recipients 는 ★버스 안★ 수신자만 다룬다. `--direct-to-gd` 처럼 목적지가 버스 밖이면 그 구간이
+    //   recipients 에 안 나타나서, 보낸 쪽에서 보면 ★기록이 아예 없는 것처럼 보인다.★ 실제로는
+    //   recordReportDelivery 가 audit_event 에 남겨두고 있다(전송 결과를 await 한 뒤에 기록하므로
+    //   '보내려 했다' 가 아니라 '채널이 받았다' 를 뜻한다). 조회 경로가 없어서 안 보였을 뿐이다.
+    //   ★ok 는 '발송 성공' 까지다 — 수신자가 읽었는지는 어떤 채널도 알려주지 않는다.★
+    const deliveries = deps.db
+      .prepare(
+        `SELECT actor, action, detail_json, at
+         FROM audit_event
+         WHERE target = ? AND action IN ('report_delivered', 'report_delivery_failed')
+         ORDER BY at, id`,
+      )
+      .all(id) as Array<{ actor: string; action: string; detail_json: string | null; at: string }>;
+    return c.json({
+      message: m,
+      recipients,
+      deliveries: deliveries.map((d) => {
+        let detail: { channel?: string; to?: string; error?: string } = {};
+        try { detail = d.detail_json ? JSON.parse(d.detail_json) : {}; } catch { /* 기록이 깨져도 나머지는 준다 */ }
+        return {
+          actor: d.actor,
+          channel: detail.channel ?? null,
+          to: detail.to ?? null,
+          ok: d.action === "report_delivered",
+          error: detail.error ?? null,
+          at: d.at,
+        };
+      }),
+    });
   });
 
   return r;
