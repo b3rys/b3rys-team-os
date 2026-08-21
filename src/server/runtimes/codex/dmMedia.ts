@@ -70,6 +70,13 @@ export function dmMediaRefs(msg: DmMessageMedia): TelegramMediaRef[] {
       file_size: doc.file_size,
     });
   }
+  // ★인용한 원문의 첨부도 함께 싣는다.★
+  //   사람이 사진에 답장하면 텔레그램은 새로 친 글자만 보내고, 그 사진은 `reply_to_message` 에 있다.
+  //   전에는 ★원문 텍스트만★ 실어서, 팀장님이 사진에 "이거 설명해줘" 라고 답하면 dex 는
+  //   ★"텍스트는 보입니다"★ 라고 답했다 — 정작 봐야 할 그림이 안 갔다(실측).
+  //   같은 파일을 다시 인용해도 저장소가 file_unique_id 로 같은 경로를 돌려주므로 중복 비용은 없다.
+  const quoted = (msg as { reply_to_message?: DmMessageMedia }).reply_to_message;
+  if (quoted) refs.push(...dmMediaRefs(quoted));
   return refs;
 }
 
@@ -179,7 +186,10 @@ export const MEDIA_ONLY_PROMPT = "(설명 없이 첨부만 보냈다. 첨부를 
 export function decideDmMessage(msg: {
   text?: string;
   caption?: string;
-  reply_to_message?: { text?: string; caption?: string; from?: { username?: string; first_name?: string } };
+  reply_to_message?: {
+    text?: string; caption?: string; from?: { username?: string; first_name?: string };
+    photo?: DmMessageMedia["photo"]; document?: DmMessageMedia["document"];
+  };
   photo?: DmMessageMedia["photo"];
   document?: DmMessageMedia["document"];
 } | undefined): { handle: boolean; text: string; hasMedia: boolean } {
@@ -200,12 +210,19 @@ export function decideDmMessage(msg: {
  */
 export function withQuotedContext(
   body: string,
-  quoted: { text?: string; caption?: string; from?: { username?: string; first_name?: string } } | undefined,
+  quoted: {
+    text?: string; caption?: string; from?: { username?: string; first_name?: string };
+    photo?: DmMessageMedia["photo"]; document?: DmMessageMedia["document"];
+  } | undefined,
 ): string {
   const q = (quoted?.text ?? quoted?.caption ?? "").trim();
-  if (!q) return body;
+  // ★원문이 사진뿐이어도 인용은 실린다★ — 글자가 없다고 "인용 없음" 으로 처리하면
+  //   그 그림이 무엇의 인용인지 사라진다(그림 자체는 dmMediaRefs 가 함께 싣는다).
+  const hasMedia = Boolean(quoted?.photo?.length || quoted?.document);
+  if (!q && !hasMedia) return body;
   const who = quoted?.from?.username ?? quoted?.from?.first_name;
-  return `${body}\n\n[인용한 앞 메시지${who ? ` — ${who}` : ""}]\n${q}`;
+  const mark = hasMedia ? " · 첨부 포함(아래 그림이 그 첨부다)" : "";
+  return `${body}\n\n[인용한 앞 메시지${who ? ` — ${who}` : ""}${mark}]\n${q || "(글자 없이 첨부만)"}`;
 }
 
 /** 본문 = 글 또는 캡션. 둘 다 없으면 첨부만 온 것이다. */

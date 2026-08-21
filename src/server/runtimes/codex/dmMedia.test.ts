@@ -226,3 +226,40 @@ describe("★인용 답장 — 무엇에 대한 말인지 함께 보낸다★ (�
     expect(decideDmMessage({ text: "안녕", reply_to_message: { text: "  " } }).text).toBe("안녕");
   });
 });
+
+/**
+ * ★인용한 원문이 사진이면 그 사진도 함께 가야 한다.★ (2026-08-21 실측)
+ *
+ * 라이브: 팀장님이 사진에 답장해 "이거 설명해줘" 라고 물으니 dex 가 ★"텍스트는 보입니다"★ 라고 답했다 —
+ * 정작 봐야 할 그림이 안 갔다. 인용은 ★원문 글자만★ 싣고 있었다.
+ */
+describe("인용한 원문의 첨부", () => {
+  const photoMsg = {
+    photo: [{ file_id: "q1", file_unique_id: "qu1", file_size: 100, width: 10, height: 10 }],
+  };
+
+  test("★사진에 답장하면 그 사진도 실린다★ (전에는 글자만 갔다)", () => {
+    const refs = dmMediaRefs({ text: "이거 설명해줘", reply_to_message: photoMsg } as never);
+    expect(refs.length, "★인용한 사진이 빠지면 모델이 볼 것이 없다★").toBe(1);
+    expect(refs[0]!.file_unique_id).toBe("qu1");
+  });
+
+  test("★내가 보낸 사진 + 인용한 사진 = 둘 다★", () => {
+    const refs = dmMediaRefs({
+      photo: [{ file_id: "n1", file_unique_id: "nu1", file_size: 100, width: 10, height: 10 }],
+      reply_to_message: photoMsg,
+    } as never);
+    expect(refs.map((r) => r.file_unique_id)).toEqual(["nu1", "qu1"]);
+  });
+
+  test("★대조군 — 인용이 글자뿐이면 첨부는 안 는다★", () => {
+    const refs = dmMediaRefs({ text: "응", reply_to_message: { text: "앞 말" } } as never);
+    expect(refs.length).toBe(0);
+  });
+
+  test("★글자 없이 사진만 인용해도 인용 표시가 남는다★ — 무엇의 인용인지 사라지면 안 된다", () => {
+    const out = withQuotedContext("이거 뭐야", photoMsg as never);
+    expect(out).toContain("[인용한 앞 메시지");
+    expect(out).toContain("첨부 포함");
+  });
+});
