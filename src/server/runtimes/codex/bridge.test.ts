@@ -561,6 +561,24 @@ describe("codex bridge — 진행 표시", () => {
     expect(calls.edits.filter((e) => e.text.includes("🛠️")).length).toBe(0);
   });
 
+  /**
+   * ★진행 버블도 MarkdownV2 로 나간다 — 그러면 이스케이프해서 보내야 한다.★
+   *
+   * 라이브: 버블 텍스트가 ★순수 텍스트 그대로★ parse_mode=MarkdownV2 로 나갔다. 그래서 `-`·`.` 이 있는 줄마다
+   * 텔레그램이 400 을 냈고(`dex.log` ★156건★), 매번 평문으로 재전송해 ★같은 편집을 두 번씩★ 했다.
+   * 화면은 멀쩡했지만 호출이 2배였고 로그가 그 실패로 덮였다. ★최종 답은 이미 변환을 타고 있었다 — 버블만 빠졌다.★
+   */
+  test("★진행 줄의 예약문자를 이스케이프해서 보낸다★ (안 하면 매번 400 → 재전송으로 호출 2배)", async () => {
+    const { deps, calls } = spiesWithActivity(["a-b 파일 확인", "설정.값 갱신"]);
+    await handleMessage(15, "해줘", 1, deps);
+
+    const bubbles = calls.edits.filter((e) => e.text.includes("🛠️")).map((e) => e.text);
+    expect(bubbles.length, "진행 편집이 한 번은 나가야 관측된다").toBeGreaterThan(0);
+    const last = bubbles[bubbles.length - 1]!;
+    expect(last, "★하이픈이 그대로 나가면 텔레그램이 400 을 낸다★").toContain("a\\-b");
+    expect(last, "★마침표도 예약문자다★").toContain("설정\\.값");
+  });
+
   test("★마지막 편집은 답이다★ — 진행 줄이 답을 덮어쓰지 않는다", async () => {
     const { deps, calls } = spiesWithActivity(["read a.ts", "read b.ts"], "정리했습니다");
     await handleMessage(14, "해줘", 1, deps);
