@@ -606,7 +606,7 @@ export async function handleMessage(
     deps.permissionContext,
   );
   if (preflight) {
-    const errText = "⚠️ 권한 게이트가 이 Codex 런타임 실행을 막았습니다. 설정 승인이 필요합니다.";
+    const errText = toMarkdownV2("⚠️ 권한 게이트가 이 Codex 런타임 실행을 막았습니다. 설정 승인이 필요합니다.");
     if (workingMsgId !== null) await edit(chatId, workingMsgId, errText);
     else await send(chatId, errText);
     return { ok: false, reply: "", detail: `permission_${preflight.tier}:${preflight.rule}` };
@@ -627,7 +627,12 @@ export async function handleMessage(
     editing = true;
     dirty = false;
     lastEditAt = Date.now();
-    const text = renderBubble(headLine, lines);
+    // ★MarkdownV2 로 보낼 것이면 여기서 이스케이프한다.★ (2026-08-20 실측)
+    //   진행 버블은 `renderBubble` 이 만든 ★순수 텍스트★ 인데 그대로 parse_mode=MarkdownV2 로 나갔다.
+    //   그래서 `-`·`.` 같은 예약문자가 있는 줄마다 400 이 났고(실측 ★156건★: `-` 49 · `.` 2 …),
+    //   매번 평문으로 재전송해서 ★같은 편집을 두 번씩★ 했다. 화면은 멀쩡했지만 호출이 2배였다.
+    //   최종 답은 이미 `toMarkdownV2` 를 타고 있었다(:769) — ★버블만 빠져 있었다.★
+    const text = toMarkdownV2(renderBubble(headLine, lines));
     const work = (async () => {
       const ok = await edit(chatId, bubbleId as number, text);
       if (!ok) {
@@ -676,7 +681,7 @@ export async function handleMessage(
       lines = appendLine([], line);
       dirty = true;
       void (async () => {
-        const fresh = await send(chatId, renderBubble(headLine, lines));
+        const fresh = await send(chatId, toMarkdownV2(renderBubble(headLine, lines)));
         if (fresh !== null) { bubbleId = fresh; dirty = false; lastEditAt = Date.now(); }
       })();
       return;
@@ -741,7 +746,7 @@ export async function handleMessage(
     } else {
       console.warn(`[codex-bridge] 턴 실패했지만 세션은 유지한다(thread 살아 있음): ${result.detail ?? "사유 없음"}`);
     }
-    const errText = "⚠️ 일시적으로 응답을 만들지 못했어요. 잠시 후 다시 시도해 주세요.";
+    const errText = toMarkdownV2("⚠️ 일시적으로 응답을 만들지 못했어요. 잠시 후 다시 시도해 주세요.");
     // ★마지막 버블에 쓴다★ — 넘김이 일어났으면 첫 버블에 쓸 경우 오류가 진행 줄 위로 올라간다.
     if (bubbleId !== null) await edit(chatId, bubbleId, errText);
     else await send(chatId, errText);
