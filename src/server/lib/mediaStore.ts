@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
-import { basename, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface TelegramMediaRef {
   kind: "photo" | "document";
@@ -71,7 +72,19 @@ const ALLOWED_EXTENSIONS = new Set([
   ".zip",
 ]);
 
-export const DEFAULT_MEDIA_DIR = process.env.TEAM_MEDIA_DIR ?? join(process.cwd(), "..", "team-media");
+/**
+ * 미디어 저장 폴더.
+ *
+ * ★cwd 에 기대지 않는다.★ 전에는 `join(process.cwd(), "..", "team-media")` 였는데,
+ * ★작업 디렉토리 없이 뜨는 프로세스(launchd 브리지)에서는 cwd 가 `/` 라 `/team-media` 로 풀렸다★ —
+ * 루트는 읽기전용이라 1:1 사진 첨부가 전부 `EROFS: mkdir /team-media` 로 실패했다(dex 실측).
+ * ★서버는 plist 에 WorkingDirectory 가 있어 멀쩡했다★ — 그래서 그룹 경로만 보면 안 드러났다.
+ *
+ * 그래서 ★이 파일의 위치★ 를 기준으로 잡는다(`src/server/lib` → repo 루트 → 그 옆 `team-media`).
+ * 실행 위치가 어디든 같은 폴더가 나온다. `TEAM_MEDIA_DIR` 덮어쓰기는 그대로 둔다.
+ */
+export const DEFAULT_MEDIA_DIR = process.env.TEAM_MEDIA_DIR
+  ?? join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "team-media");
 
 export function mediaUrlFor(mediaFile: string, urlBase = "/media"): string {
   return `${urlBase.replace(/\/$/, "")}/${mediaFile}`;
