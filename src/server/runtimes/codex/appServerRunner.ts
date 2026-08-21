@@ -15,7 +15,26 @@ import type { CodexCaller, CodexTurnResult, CodexTurnOptions } from "./runner";
 import { registerActiveTurn, unregisterActiveTurn } from "./activeTurns";
 import { acquireClient, dropClient } from "./clientPool";
 
-const TURN_TIMEOUT_MS = Number(process.env.B3OS_CODEX_APPSERVER_TIMEOUT_MS ?? 300_000);
+/**
+ * ★무응답 상한★ — 마지막 진행 신호 이후 이만큼 조용하면 그 턴을 끊는다(일한 시간이 아니다).
+ *
+ * ★300초가 아니라 600초인 이유★ (2026-08-20, dex 조사 · 빌 검산):
+ * codex 자신의 보호도 ★같은 축(무수신)★ 이다 — `model_providers.<id>.stream_idle_timeout_ms` 기본 300초.
+ * 우리 상한을 ★그와 같은 값★ 에 두면 codex 가 스스로 처리할 구간에서 우리가 먼저 끊는다.
+ * 그래서 ★codex 자체 보호보다 길게★ 잡는다. 이름은 옛 env 를 그대로 둔다(운영 중 값 override 유지).
+ *
+ * ★단, 이 값이 codex 의 재시도 전체를 덮는다는 뜻은 아니다★ (빌 검산 — 내 처음 근거가 산술로 틀렸다):
+ * `stream_max_retries` 기본 5회면 최악의 침묵 구간은 300×5 ≈ 1500초라 600초로는 못 덮는다.
+ * ★갈림길은 "재시도 중에 우리에게 알림이 오는가" 하나다★ — 오면 시계가 리셋되니 300초로도 안 끊겼을 것이고,
+ * 안 오면 600초도 부족하다. ★그걸 아직 안 쟀다.★ 앱서버 내부라 우리 코드로는 알 수 없다.
+ * ★재는 법★: 재시도가 실제로 난 턴의 타임아웃 사유에 실리는 `진행신호 N건` 이 그대로 답이다.
+ * 그 전까지 600 은 ★300보다 나은 값일 뿐, 충분하다고 주장하는 값이 아니다.★
+ *
+ * ★codex 에는 턴 전체 상한이 없다★(공식 Config Reference 에 turn_timeout 계열 키 없음) —
+ * 즉 여기를 아예 없애면 멈춘 턴을 끊을 시계가 ★어디에도 없다.★ dex 는 턴이 팀원 단위로 직렬이고
+ * app-server 클라이언트를 공유해서(`bridge.ts` 참조), 멈춘 턴이 남으면 ★그 팀원이 영구히 먹통★ 이 된다.
+ */
+const TURN_TIMEOUT_MS = Number(process.env.B3OS_CODEX_APPSERVER_TIMEOUT_MS ?? 600_000);
 
 /**
  * db 를 주입한 caller. db 는 ★승인이 아니라★ 턴 상관관계(orphan 정리) 용도로만 쓴다.
@@ -30,6 +49,23 @@ export function makeAppServerCaller(db: Database): CodexCaller {
 
 /** db 없는 기본 caller. 판정은 동일(codex 설정) — 턴 상관관계 정리만 안 한다. */
 export const runCodexTurnViaAppServer: CodexCaller = (opts) => runViaAppServer(opts);
+
+/**
+ * 턴 결과 detail 문자열. ★성공과 "완료했지만 최종 텍스트가 비었다" 는 다른 사건이다 — 다른 이름을 준다.★
+ *
+ * 2026-08-20 실측: dex 가 턴 안에서 팀버스 도구로 직접 답을 보내면 app-server 가 돌려주는 최종
+ * 텍스트는 비어 있다. 그때 `ok=false` 인데 옛 식은 `appserver_${r.status}` = `appserver_completed`
+ * 를 만들어 ★성공 detail 과 같은 문자열★ 이 됐다. 기록만 보고는 두 사건을 가를 수 없었다
+ * (`codex_run_7a087419` status=failed detail=appserver_completed — 그 턴의 답은 정상 도착해 있었다).
+ */
+export function codexTurnDetail(status: string, finalText: string, detail?: string): string {
+  const suffix = detail ? `: ${detail.slice(0, 300)}` : "";
+  if (status === "completed") {
+    // 완료 + 본문 있음 = 성공 / 완료 + 본문 없음 = ★따로 이름을 가진 실패★
+    return finalText.trim().length > 0 ? "appserver_completed" : `appserver_completed_empty${suffix}`;
+  }
+  return `appserver_${status}${suffix}`;
+}
 
 /**
  * ★클라이언트를 주입 가능하게★ — startThread 에 실제로 무엇이 넘어가는지 재려면 대신 세울 자리가 필요하다.
@@ -142,7 +178,7 @@ export async function runViaAppServer(
     if (pooled && r.status !== "completed") dropClient(opts.agentId);
     const ok = r.status === "completed" && r.finalText.trim().length > 0;
     // ★#8 픽스: 실패면 detail에 실제 사유(에러 notification/stderr tail) 반영 — rate-limit 진단 가능.★
-    const detail = ok ? "appserver_completed" : `appserver_${r.status}${r.detail ? `: ${r.detail.slice(0, 300)}` : ""}`;
+    const detail = codexTurnDetail(r.status, r.finalText, r.detail);
     return {
       ok,
       reply: r.finalText,

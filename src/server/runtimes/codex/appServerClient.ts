@@ -233,6 +233,22 @@ export function buildTurnInput(
   ];
 }
 
+/**
+ * ★무응답 시계를 되돌릴 알림인가★ — "턴이 실제로 일하고 있다" 는 뜻인 것만 센다.
+ *
+ * ★모든 알림을 세면 안 된다★(빌 리뷰): 앱서버가 진행과 무관한 주기 알림을 하나라도 보내면
+ * 무응답 컷이 ★영영 안 터진다★ — 상한을 없앤 것과 같아진다. 실제로 `account/rateLimits/updated`
+ * 가 그 계열이라 ★일부러 뺐다.★ 모르는 method 도 세지 않는다.
+ *
+ * 관측 범위(CLI 0.147.0): 턴 진행은 `turn/started` · `item/started` · `item/agentMessage/delta` ·
+ * `item/completed` · `turn/completed` 로 온다. 그래서 ★`item/` · `turn/` 두 접두어★ 로 잡는다
+ * (같은 namespace 안에서 이름이 늘어도 따라간다). ★다른 버전에서 진행 method 가 이 밖으로 나가면
+ * 일하는 턴이 다시 잘린다★ — 그때는 이 목록을 늘려야 한다.
+ */
+function isTurnProgress(method: string): boolean {
+  return method.startsWith("item/") || method.startsWith("turn/");
+}
+
 export class CodexAppServerClient {
   private proc: ChildProcessWithoutNullStreams | null = null;
   private buf = "";
@@ -250,6 +266,9 @@ export class CodexAppServerClient {
   currentTurnId: string | null = null;
   private activeHandlers: RunTurnHandlers | null = null;
   private turnResolve: ((r: TurnResult) => void) | null = null;
+  /** ★무응답 시계 관측값★ — 마지막 진행 신호 시각과 이 턴에 받은 신호 수(타임아웃 사유에 싣는다). */
+  private lastActivityAtMs = 0;
+  private turnActivityCount = 0;
   private closed = false;
   /** 풀이 ★죽은 것을 돌려주지 않게★ 밖에서 상태를 볼 수 있어야 한다. */
   get isClosed(): boolean { return this.closed; }
@@ -365,9 +384,16 @@ export class CodexAppServerClient {
       const finish = (r: TurnResult) => { if (settled) return; settled = true; this.clearTurnTimer(); this.turnResolve = null; this.activeHandlers = null; resolve(r); };
       // ★타이머를 인스턴스 필드로(pause/resume 가능) — 승인 팝업 대기 중엔 턴 타이머 정지(M5.3).★
       this.turnTimeoutMs = timeoutMs;
+      // ★이 상한은 '일한 시간' 이 아니라 '조용한 시간' 이다★ — 진행 신호가 올 때마다 noteTurnAlive() 가 다시 건다.
+      this.lastActivityAtMs = Date.now();
+      this.turnActivityCount = 0;
       this.armTurnTimer = () => setTimeout(() => {
+        // 여기까지 왔다 = ★상한만큼 아무 소식이 없었다★. 멈춘 턴이라 끊는다(살아 있으면 타이머가 리셋됐다).
         void this.interrupt().catch(() => {});
-        finish({ finalText: this.lastFinal || this.deltaBuf, status: "timeout", turnId: this.currentTurnId, detail: [this.rateLimitTail, this.stderrTail ? `stderr: ${this.stderrTail.slice(-400)}` : ""].filter(Boolean).join(" | ") || undefined });
+        const quietSec = Math.round((Date.now() - this.lastActivityAtMs) / 1000);
+        // ★무엇을 재서 끊었는지 사유에 남긴다★ — 안 남기면 '오래 걸려서 끊겼다' 로 읽힌다(실제와 다르다).
+        const why = `idle ${quietSec}s (진행신호 ${this.turnActivityCount}건 뒤 무응답)`;
+        finish({ finalText: this.lastFinal || this.deltaBuf, status: "timeout", turnId: this.currentTurnId, detail: [why, this.rateLimitTail, this.stderrTail ? `stderr: ${this.stderrTail.slice(-400)}` : ""].filter(Boolean).join(" | ") });
       }, this.turnTimeoutMs);
       this.turnTimer = this.armTurnTimer();
       this.turnResolve = finish;
@@ -382,6 +408,21 @@ export class CodexAppServerClient {
   }
 
   private clearTurnTimer(): void { if (this.turnTimer) { clearTimeout(this.turnTimer); this.turnTimer = null; } }
+  /**
+   * ★턴이 살아 있다는 신호를 받았다 — 무응답 시계를 다시 건다.★
+   *
+   * ★승인 대기 중에는 절대 건드리지 않는다★(`approvalWaits > 0`). 그때 타이머는 ★일부러 꺼둔 것★ 이고,
+   * 여기서 무조건 다시 걸면 ★사람이 팝업을 보고 있는 중에 시계가 되살아난다★ — Ames 가 잡았던
+   * 조기 재개 사고(`resumeTurnTimer` 주석)가 그대로 돌아온다. 재무장은 `resumeTurnTimer` 한 곳에만 맡긴다.
+   */
+  private noteTurnAlive(): void {
+    if (!this.turnResolve || !this.armTurnTimer) return; // 진행 중인 턴이 없으면 아무 일도 안 한다
+    this.lastActivityAtMs = Date.now();
+    this.turnActivityCount++;
+    if (this.approvalWaits > 0) return; // ★승인 대기 중 — 꺼둔 시계를 여기서 켜지 않는다★
+    this.clearTurnTimer();
+    this.turnTimer = this.armTurnTimer();
+  }
   /** ★M5.3: 승인 팝업 대기 시작 — 턴 타이머 정지(사람 대기 중엔 타임아웃 안 되게). ref-count 증가(Phase1 ③).★ */
   private pauseTurnTimer(): void { this.approvalWaits++; this.clearTurnTimer(); }
   /** ★M5.3+③: 승인 응답 후 — ref-count 감소, ★모든★ 승인 대기가 끝나야 턴 타이머 재개.
@@ -545,6 +586,11 @@ export class CodexAppServerClient {
   }
 
   private handleNotification(method: string, params: any): void {
+    // ★진행 신호가 오면 무응답 시계를 0으로 되돌린다.★ (2026-08-20 GD 지시)
+    //   전에는 턴 시작에 타이머를 한 번 걸고 끝이라 ★일하는 시간★ 을 쟀다. 그래서 dex 가 진행 표시를
+    //   137번 보내며 계속 일하는 중에도 5분에 interrupt 를 맞았다(보고서 작업 3건 전부).
+    //   ★재야 할 것은 일한 시간이 아니라 조용한 시간이다★ — 살아 있으면 안 끊고, 멈춘 턴만 끊는다.
+    if (isTurnProgress(method)) this.noteTurnAlive();
     this.activeHandlers?.onNotify?.(method, params);
     // ★S2: 파일변경 항목을 itemId 로 색인해 둔다 — 승인 요청은 내용을 안 담아 오므로 여기서만 볼 수 있다.
     //   파일변경과 무관한 알림은 observe 안에서 무시된다.★

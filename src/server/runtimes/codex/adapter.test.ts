@@ -534,3 +534,105 @@ describe("codex adapter — 핵심 정확성", () => {
     expect(allMessages(db)).toEqual([]);
   });
 });
+
+/**
+ * ★답이 이미 나갔는데 "실패했다" 고 알리지 않는다.★ (2026-08-20 실측 → 이 시험이 그 자리를 지킨다)
+ *
+ * 라이브에서 벌어진 것: dex 가 턴 안에서 팀버스 도구로 직접 답을 보냈다 → app-server 가 돌려준
+ * ★최종 텍스트는 비어 있었다★ → 어댑터가 실패로 읽고 요청자에게 "Dex 의 응답이 실패했습니다" 를 보냈다.
+ * ★요청자는 답을 받아 놓고 실패 통지를 함께 받았다★ (답 03:32:22 · 통지 03:32:24, 재발송 아님 — started 1건).
+ * 그 상태로 두면 사람이 ★같은 일을 두 번★ 시킨다.
+ *
+ * ★대조군을 같이 둔다★ — 세 번째 시험이 "답이 없으면 통지는 여전히 간다" 를 잰다.
+ * 하나만 두면 "통지를 아예 껐다" 와 구별되지 않는다.
+ */
+describe("빈 최종텍스트 + 팀원이 직접 답한 턴", () => {
+  /** 턴 도중 팀원이 send.sh 로 직접 답한 상황 — 그리고 런타임에는 빈 본문이 남는다. */
+  const replyOnBusThenEmpty = (db: Database): CodexCaller => async () => {
+    db.prepare(
+      `INSERT INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, hop_count, created_at)
+       VALUES ('self-reply-1','t1','cody','user','dm','제가 직접 보낸 답입니다','agent',1, datetime('now'))`,
+    ).run();
+    return { ok: false, reply: "", detail: "appserver_completed_empty", elapsedMs: 1 };
+  };
+
+  test("★답이 이미 버스에 나갔으면 실패통지를 보내지 않는다★ (요청자가 답+실패를 함께 받지 않게)", async () => {
+    const db = setup();
+    await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "user", message_id: "quiet-1" }), "", replyOnBusThenEmpty(db));
+
+    expect(
+      repliesFrom(db, "system"),
+      "★답이 도착했는데 '실패했습니다' 통지가 함께 나갔다★ — 라이브에서 실제로 벌어진 그 상태다.",
+    ).toEqual([]);
+    // 팀원의 답 자체는 그대로 남아 있다(우리가 지우거나 바꾸지 않는다)
+    expect(repliesFrom(db, "cody").length).toBe(1);
+  });
+
+  test("★그래도 기록에는 남긴다★ — 최종텍스트가 빈 것은 사실이고, 통지를 접은 이유도 적는다", async () => {
+    const db = setup();
+    await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "user", message_id: "quiet-2" }), "", replyOnBusThenEmpty(db));
+
+    const failed = artifacts(db, "failed");
+    expect(failed.length, "★조용히 성공으로 바꾸면 안 된다★ — 빈 최종텍스트는 계속 관측돼야 한다").toBe(1);
+    expect(String(failed[0]?.detail)).toContain("notice_suppressed: agent_replied_on_bus");
+  });
+
+  test("★답이 아니라 남에게 질문을 뿌린 것이면 통지는 간다★ (수집 fan-out 을 '답' 으로 읽으면 요청자가 영영 기다린다)", async () => {
+    const db = setup();
+    const fanoutThenEmpty: CodexCaller = async () => {
+      // 규칙상 수집 fan-out 은 ★같은 스레드★ 로 나간다 — 요청자(user)가 아니라 팀원에게 간다
+      // ★실제 fan-out 은 in_reply_to 를 달고 나간다★ — 우리 규칙이 그렇게 시킨다.
+      //   안 달면 이 시험은 ★오른쪽 갈래만★ 재고, 정작 새는 왼쪽 갈래를 못 본다(빌 재리뷰).
+      db.prepare(
+        `INSERT INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, hop_count, in_reply_to, created_at)
+         VALUES ('fanout-1','t1','cody','bill','dm','빌, 이것 좀 봐줘','agent',1,'fanout-turn', datetime('now'))`,
+      ).run();
+      return { ok: false, reply: "", detail: "appserver_completed_empty", elapsedMs: 1 };
+    };
+    await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "user", message_id: "fanout-turn" }), "", fanoutThenEmpty);
+    expect(
+      repliesFrom(db, "system").length,
+      "★같은 스레드에 무언가 있다는 이유로 통지를 접었다 — 요청자는 답도 통지도 못 받는다★",
+    ).toBe(1);
+  });
+
+  test("★조회가 실패하면 통지한다★ — 모르면 알린다(침묵 쪽으로 기울지 않는다)", async () => {
+    const db = setup();
+    const brokenLookup: CodexCaller = async () => {
+      const orig = db.prepare.bind(db);
+      (db as unknown as { prepare: unknown }).prepare = (sql: string) => {
+        if (sql.includes("in_reply_to = ?")) throw new Error("db down"); // 답 판정만 깨뜨린다
+        return orig(sql);
+      };
+      return { ok: false, reply: "", detail: "appserver_completed_empty", elapsedMs: 1 };
+    };
+    await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "user", message_id: "broken-1" }), "", brokenLookup);
+    expect(repliesFrom(db, "system").length, "★조회 실패가 침묵이 되면 죽은 턴이 통째로 사라진다★").toBe(1);
+  });
+
+  test("★그룹방(broadcast)으로 한 답도 답으로 센다★ — 1:1 요청에 그룹으로 답한 행이 실재한다(46건)", async () => {
+    const db = setup();
+    const broadcastAnswer: CodexCaller = async () => {
+      db.prepare(
+        `INSERT INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, hop_count, in_reply_to, created_at)
+         VALUES ('bc-1','t1','cody','broadcast','dm','팀장님, 결과 올립니다','agent',1,'bc-turn', datetime('now'))`,
+      ).run();
+      return { ok: false, reply: "", detail: "appserver_completed_empty", elapsedMs: 1 };
+    };
+    await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "user", message_id: "bc-turn" }), "", broadcastAnswer);
+    expect(
+      repliesFrom(db, "system"),
+      "★그룹방에 답을 올렸는데 실패통지가 따라붙었다 — 이 PR 이 없애려던 그 현상이다★",
+    ).toEqual([]);
+  });
+
+  test("★대조군 — 팀원이 아무 말도 안 했으면 실패통지는 여전히 간다★ (통지를 끈 게 아니다)", async () => {
+    const db = setup();
+    const silentEmpty: CodexCaller = async () => ({ ok: false, reply: "", detail: "appserver_completed_empty", elapsedMs: 1 });
+    await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "user", message_id: "loud-1" }), "", silentEmpty);
+
+    const notices = repliesFrom(db, "system");
+    expect(notices.length, "★답도 없고 통지도 없으면 그 턴은 아무 흔적 없이 사라진다★").toBe(1);
+    expect(String(notices[0]?.body)).toContain("응답이 실패했습니다");
+  });
+});

@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync, copyFileSync, chmodSync, existsSync, mkdir
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { writeMemberPersona, savePersonaFile } from "../lib/writeMemberPersona";
+import { refreshLoadingFiles } from "../lib/refreshLoadingFiles";
 import { memberPaths, personaTargetsForRuntime, injectCoreRule, stripCoreRule, coreRuleFor, injectClaudeComms, stripClaudeComms, JOIN_FLAG_FILE, joinInstructions } from "../lib/personaTemplates";
 import { captureConfigStatus, setCaptureToken, setCaptureGroupId, setRouterEnabled, setMcpEnabled, getCaptureToken } from "../lib/captureConfig";
 // ★설정 키 이름은 approvals.ts 정본을 쓴다★ — 문자열을 여기 다시 적으면 그 순간 갈린다.
@@ -1376,10 +1377,35 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     if (!agent) return c.json({ ok: false, error: "unknown_member", id }, 404);
     const body = await c.req.json().catch(() => ({}));
     const fresh = (body as any)?.fresh === true;
+    // ★재시작 전에 로딩파일을 SOUL.md 기준으로 되맞춘다★ (2026-08-20 GD 지시:
+    //   "대시보드나 직접 SOUL 파일 바꾸면 반영이 되어야지. 필요하면 리스타트 하고")
+    //   대시보드 편집은 저장 직후 렌더를 타지만, ★에디터로 SOUL.md 를 직접 고친 경우는 아무도 렌더를 안 탄다.★
+    //   특히 codex 런타임은 SOUL.md 를 읽지 않고 렌더가 AGENTS.md 에 박아둔 본문을 읽어서,
+    //   원본만 고치면 ★재시작해도 옛 페르소나로 돈다★(claude·hermes 는 파일을 직접 읽어 재시작이면 반영됨).
+    //   부팅 때 도는 되맞추기와 ★같은 함수·같은 인자★ 다 — 팀원 1명으로 좁힌 것뿐. skip-if-unchanged 라
+    //   내용이 같으면 쓰지도 백업하지도 않는다. 실패해도 재시작은 진행한다(best-effort, 사유는 detail 에).
+    let refreshNote = "";
+    try {
+      const teamNameForRefresh = (db.query("SELECT value FROM setting WHERE key = 'team_name'").get() as { value: string } | null)?.value ?? undefined;
+      const r = refreshLoadingFiles([{
+        id: agent.id, display_name: agent.display_name, role: agent.role, runtime: agent.runtime,
+        signature: agent.signature, bot_username: agent.telegram_bot_username ?? undefined,
+        workspace_path: agent.workspace_path, persona_file: agent.persona_file,
+        owner_name: getSetting(db, "owner_name") ?? undefined, team_name: teamNameForRefresh,
+        team_collect_enabled: false,
+      }]);
+      if (r.updated.length > 0) refreshNote = " · 로딩파일 갱신됨(SOUL 반영)";
+      // ★absent 를 안 읽으면 "파일이 없어서 못 했다" 가 "바꿀 게 없었다" 로 기록된다★ (빌 리뷰).
+      //   이 PR 이 고치려는 병이 바로 그것이라 여기서 같은 실수를 하면 안 된다.
+      else if (r.absent.length > 0) refreshNote = " · 로딩파일이 없어 되맞추지 않음(영입 절차의 몫)";
+      for (const s of r.skipped) refreshNote = ` · 로딩파일 갱신 실패(계속): ${s.reason.slice(0, 80)}`;
+    } catch (e) {
+      refreshNote = ` · 로딩파일 갱신 실패(계속): ${e instanceof Error ? e.message.slice(0, 80) : String(e).slice(0, 80)}`;
+    }
     const res = await restartAgent(id, agent.runtime ?? "claude_channel", fresh);
     const action = res.ok ? (fresh ? "member_restart_fresh" : "member_restart") : "member_restart_failed";
-    appendAudit(db, "user", action, id, { detail: res.detail, fresh });
-    return c.json({ ok: res.ok, detail: res.detail, fresh });
+    appendAudit(db, "user", action, id, { detail: res.detail, fresh, refresh: refreshNote || "unchanged" });
+    return c.json({ ok: res.ok, detail: `${res.detail}${refreshNote}`, fresh });
   });
 
   // 봇 토큰 변경 (대시보드 self-service — 죽은/withdrawn 봇 교체., 터미널·에이전트에 토큰 전달 없이).
