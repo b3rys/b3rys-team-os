@@ -272,3 +272,44 @@ test("★인용이 순환해도 죽지 않는다★ — 한 겹에서 끊는 것
   const refs = dmMediaRefs(loop as never);
   expect(refs.length, "★두 겹까지만 — 무한 재귀면 여기서 죽는다★").toBe(2);
 });
+
+/**
+ * ★모으는 코드를 고쳐도 그 앞의 문이 닫혀 있으면 아무 일도 안 난다.★ (2026-08-21 실측)
+ *
+ * `dmMediaRefs` 가 인용 첨부를 모으게 고쳤는데 라이브에서 그림이 여전히 안 갔다.
+ * 부르는 쪽이 `hasMedia` 로 ★내려받기를 걸지 말지★ 정하는데, 그 값이 ★내가 보낸 첨부만★ 보고 있었다.
+ * 본문에는 "첨부 포함" 이 찍히는데 파일은 안 받아지는 상태였다.
+ */
+describe("hasMedia — 인용한 첨부도 센다", () => {
+  const photo = [{ file_id: "p", file_unique_id: "pu", file_size: 1, width: 1, height: 1 }];
+
+  test("★사진에 답장하면 hasMedia 가 참이다★ (이게 거짓이면 내려받기가 아예 안 돈다)", () => {
+    const d = decideDmMessage({ text: "이거 설명해줘", reply_to_message: { photo } } as never);
+    expect(d.hasMedia, "★여기가 false 면 위에서 고친 수집이 한 번도 안 불린다★").toBe(true);
+  });
+
+  test("★대조군 — 글자만 인용하면 hasMedia 는 거짓★ (쓸데없이 내려받지 않는다)", () => {
+    const d = decideDmMessage({ text: "응", reply_to_message: { text: "앞 말" } } as never);
+    expect(d.hasMedia).toBe(false);
+  });
+});
+
+/**
+ * ★문과 수집을 따로 재면 그 사이가 끊겨도 둘 다 통과한다.★ (빌 지적 — #367 에서 실제로 그랬다)
+ * 그래서 ★한 줄로 잇는다★: 인용 사진이 붙은 메시지를 넣어 ★내려받기가 그림 경로를 돌려주는지★ 를 잰다.
+ * 이것이 "그림이 모델에 갈 준비가 됐다" 는 단위 증거다.
+ */
+test("★인용 사진 → 내려받기가 그림 경로를 돌려준다★ (문·수집·판정을 한 줄로 잇는다)", async () => {
+  const msg = { text: "이거 설명해줘", reply_to_message: { photo: [{ file_id: "q9", file_unique_id: "qu9", file_size: 9, width: 9, height: 9 }] } };
+  const decided = decideDmMessage(msg as never);
+  expect(decided.hasMedia, "문이 닫혀 있으면 아래가 아예 안 돈다").toBe(true);
+
+  const got = await downloadDmAttachments("token", msg as never, {
+    store: (async (_t: string, ref: { file_unique_id: string }) => ({
+      kind: "photo", file_id: "q9", file_unique_id: ref.file_unique_id,
+      file_path: `/tmp/${ref.file_unique_id}.jpg`, mime_type: "image/jpeg", file_name: "q.jpg", file_size: 9,
+    })) as never,
+  });
+  expect(got.imagePaths, "★여기가 비면 인용 사진은 모델에 안 간다★").toEqual(["/tmp/qu9.jpg"]);
+  expect(got.failed).toEqual([]);
+});

@@ -197,7 +197,15 @@ export function decideDmMessage(msg: {
   document?: DmMessageMedia["document"];
 } | undefined): { handle: boolean; text: string; hasMedia: boolean } {
   const body = dmBodyText(msg?.text, msg?.caption);
-  const hasMedia = Boolean(msg?.photo?.length || msg?.document);
+  // ★인용한 원문의 첨부도 "첨부 있음" 으로 센다.★
+  //   `dmMediaRefs` 가 인용 첨부를 모으게 고쳤는데도 라이브에서 그림이 안 갔다 — 부르는 쪽이
+  //   ★이 값으로 내려받기를 걸지 말지 정하기 때문★ 이다(`bridge.ts` 의 `fetchAttachments`).
+  //   즉 ★모으는 코드는 고쳤는데 그 앞의 문이 닫혀 있었다.★ 본문에는 "첨부 포함" 이 찍히는데
+  //   파일은 안 받아지는 상태가 그것이다(실측).
+  const quoted = msg?.reply_to_message;
+  const hasMedia = Boolean(
+    msg?.photo?.length || msg?.document || quoted?.photo?.length || quoted?.document,
+  );
   if (!body && !hasMedia) return { handle: false, text: "", hasMedia };
   // ★인용한 앞 메시지를 함께 싣는다★ — 안 실으면 "이게 모야?" 가 무엇에 대한 말인지 알 수 없다.
   return { handle: true, text: withQuotedContext(body ?? MEDIA_ONLY_PROMPT, msg?.reply_to_message), hasMedia };
