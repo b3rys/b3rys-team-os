@@ -627,7 +627,7 @@ export async function handleMessage(
     editing = true;
     dirty = false;
     lastEditAt = Date.now();
-    // ★MarkdownV2 로 보낼 것이면 여기서 이스케이프한다.★ (2026-08-20 실측)
+    // ★MarkdownV2 로 보낼 것이면 여기서 이스케이프한다.★
     //   진행 버블은 `renderBubble` 이 만든 ★순수 텍스트★ 인데 그대로 parse_mode=MarkdownV2 로 나갔다.
     //   그래서 `-`·`.` 같은 예약문자가 있는 줄마다 400 이 났고(실측 ★156건★: `-` 49 · `.` 2 …),
     //   매번 평문으로 재전송해서 ★같은 편집을 두 번씩★ 했다. 화면은 멀쩡했지만 호출이 2배였다.
