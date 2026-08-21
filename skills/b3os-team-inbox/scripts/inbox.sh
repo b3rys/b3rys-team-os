@@ -44,6 +44,17 @@ ds = d["deliveries"]
 if not ds:
     print(mid + " — 배달 기록 없음 (아직 처리 전이거나 발송 경로를 안 탄 메시지)")
     sys.exit(0)
+# ★저장은 UTC, 표시는 이 기계의 로컬 시각.★ 사람이 읽는 출력이라 그대로 찍으면 9시간 어긋나 보이고
+#   "언제 나갔나" 를 매번 잘못 읽는다. 오프셋을 박지 않고 astimezone() 이 기계 설정을 따르게 둔다.
+#   ★모양이 다르면 원문 그대로 낸다★ — 못 바꾼 것을 바꾼 척하지 않는다.
+def local_time(v):
+    from datetime import datetime, timezone
+    try:
+        return (datetime.strptime(str(v), "%Y-%m-%d %H:%M:%S")
+                .replace(tzinfo=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S"))
+    except Exception:
+        return str(v)
+
 LABEL = {"bus": "버스", "telegram_dm": "텔레그램 팀장 DM", "telegram_group": "텔레그램 팀방"}
 print(mid)
 for x in ds:
@@ -52,7 +63,7 @@ for x in ds:
     if ch == "bus" and x.get("to"):
         label = "버스 → " + str(x["to"])
     state = "성공" if x.get("ok") else "★실패★"
-    line = "  " + str(x.get("at", "?")) + "  " + label + "  " + state
+    line = "  " + local_time(x.get("at", "?")) + "  " + label + "  " + state
     if not x.get("ok") and x.get("error"):
         line += "  (" + str(x["error"]) + ")"
     print(line)
