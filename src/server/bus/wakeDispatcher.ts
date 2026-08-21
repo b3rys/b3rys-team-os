@@ -1877,7 +1877,9 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
       const agentsNow = deps.agents();
       const rows = pendingDispatch(db, 10);
       for (const row of rows) {
-        const key = `${row.message_id}:${row.agent_id}`;
+        // ★키는 한 곳에서만 만든다★ — 여기서 따로 조립하면 생존신호(noteTurnAlive)와 모양이 갈려도
+        //   오류 없이 조용히 어긋난다(신호가 판정부에 영영 안 닿는다).
+        const key = inFlightKey(row.message_id, row.agent_id);
         if (inFlight.has(key)) continue;
 
         // Per-runtime claim lease: openclaw wakes run up to ~240s, so they need a lease that
