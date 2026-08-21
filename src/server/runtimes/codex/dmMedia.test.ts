@@ -263,3 +263,12 @@ describe("인용한 원문의 첨부", () => {
     expect(out).toContain("첨부 포함");
   });
 });
+
+test("★인용이 순환해도 죽지 않는다★ — 한 겹에서 끊는 것을 코드가 보장한다(텔레그램 사정에 안 기댄다)", () => {
+  const loop: Record<string, unknown> = {
+    photo: [{ file_id: "l1", file_unique_id: "lu1", file_size: 1, width: 1, height: 1 }],
+  };
+  loop.reply_to_message = loop; // 스스로를 인용 — 실제 API 는 안 주지만 우리 코드가 견뎌야 한다
+  const refs = dmMediaRefs(loop as never);
+  expect(refs.length, "★두 겹까지만 — 무한 재귀면 여기서 죽는다★").toBe(2);
+});

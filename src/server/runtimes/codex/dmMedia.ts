@@ -45,7 +45,7 @@ export function largestPhotoVariant(
 }
 
 /** 내려받을 대상을 뽑는다 — 순수 함수라 통신 없이 잴 수 있다. */
-export function dmMediaRefs(msg: DmMessageMedia): TelegramMediaRef[] {
+export function dmMediaRefs(msg: DmMessageMedia, depth = 1): TelegramMediaRef[] {
   const refs: TelegramMediaRef[] = [];
   const photo = largestPhotoVariant(msg.photo);
   if (photo) {
@@ -75,8 +75,11 @@ export function dmMediaRefs(msg: DmMessageMedia): TelegramMediaRef[] {
   //   전에는 ★원문 텍스트만★ 실어서, 팀장님이 사진에 "이거 설명해줘" 라고 답하면 dex 는
   //   ★"텍스트는 보입니다"★ 라고 답했다 — 정작 봐야 할 그림이 안 갔다(실측).
   //   같은 파일을 다시 인용해도 저장소가 file_unique_id 로 같은 경로를 돌려주므로 중복 비용은 없다.
-  const quoted = (msg as { reply_to_message?: DmMessageMedia }).reply_to_message;
-  if (quoted) refs.push(...dmMediaRefs(quoted));
+  //   ★깊이를 코드가 제한한다★ — 텔레그램은 인용의 인용을 안 주지만 그건 ★남의 API 의 사정★ 이다.
+  //   우리 코드는 캐스팅으로 읽으므로 타입이 재귀를 못 막는다. 틀리면 대가가 ★스택 오버플로 =
+  //   1:1 경로 전체 정지★ 라, 한 겹으로 잘라 둔다(빌 리뷰).
+  const quoted = depth > 0 ? (msg as { reply_to_message?: DmMessageMedia }).reply_to_message : undefined;
+  if (quoted) refs.push(...dmMediaRefs(quoted, depth - 1));
   return refs;
 }
 
