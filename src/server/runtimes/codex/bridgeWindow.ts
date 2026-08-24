@@ -271,15 +271,42 @@ export async function startBridgeWindow(deps: BridgeWindowDeps): Promise<BridgeW
 }
 
 /**
- * ★그룹 턴의 본문 — 답을 어디로 보낼지 함께 준다.★
+ * ★그룹 턴 한 건에 필요한 것을 한 번에 만든다.★
  *
- * 서버는 팀원 대신 말하지 않는다(hermes 와 같은 계약). 턴 본문은 ★그 팀원의 메모★ 이고,
- * 방에 말하려면 팀원이 ★직접★ `send.sh --to broadcast` 를 불러야 한다 —
- * 그래야 버스에 남고, 거기서 방으로 릴레이된다. ★보낸 것만 말한 것이다.★
+ * 서버는 팀원 대신 말하지 않는다(hermes 와 같은 계약). 그래서 두 가지가 ★항상 같이★ 가야 한다:
+ * · 발신을 뗀 deps — 브리지가 텔레그램으로 직접 쏘지 않는다
+ * · 답을 보내는 명령이 박힌 본문 — 팀원이 직접 `send.sh` 를 불러야 버스에 남는다
  *
- * 이 문장이 없으면 턴은 돌지만 ★답이 아무 데도 안 간다★(자동 게시를 막았으므로).
+ * ★한쪽만 있는 상태를 만들 수 없게 이 함수 하나만 내보낸다★ (리뷰 지적).
+ *   발신만 떼면 ★턴은 돌고 답은 아무 데도 안 간다.★ 본문만 넣으면 ★두 번 답한다.★
+ *   시험으로 묶는 것은 약하다 — 새 호출부가 생기면 시험은 통과하면서 한쪽이 빠진다.
  */
-export function groupTurnBody(input: {
+export function groupTurnCall<T extends { sendMessage?: unknown; editMessage?: unknown }>(
+  deps: T,
+  input: { repoRoot: string; body: string; threadId: string; messageId: string },
+): { deps: T; body: string } {
+  return { deps: noAutopostDeps(deps), body: groupTurnBody(input) };
+}
+
+/**
+ * ★발신을 떼어낸 deps.★ `groupTurnCall` 안에서만 쓴다 — 밖으로 내보내지 않는다.
+ * ★리액션은 떼지 않는다★ — "그 팀원이 받았다" 는 사람이 보는 신호이고 발신과 다른 값이다.
+ */
+function noAutopostDeps<T extends { sendMessage?: unknown; editMessage?: unknown }>(deps: T): T {
+  return { ...deps, sendMessage: async () => null, editMessage: async () => false };
+}
+
+/**
+ * ★그룹 턴의 본문 — 답을 어디로 보낼지 함께 준다.★ `groupTurnCall` 안에서만 쓴다.
+ *
+ * ★`--body` 가 아니라 `--body-file` 을 시킨다★ (리뷰 지적 · send.sh 가 자기 사용법에 적어둔 경고):
+ *   본문에 홑따옴표·백틱·`$(cmd)`·`$VAR` 가 있으면 셸이 해석해 ★본문이 조용히 훼손되거나
+ *   명령이 통째로 깨진다.★ dex 는 코딩 에이전트라 답에 코드·경로·영어 축약형이 들어간다 —
+ *   홑따옴표가 안 나올 리 없다. 깨지면 ★턴은 돌고 send 는 실패하고 방은 조용하다★ =
+ *   ★이 계약이 없애려는 그 실패 모양 그대로다.★ 자동 게시를 막았으므로 ★대체 경로도 없다.★
+ *   heredoc 의 구분자를 따옴표로 감싸면 `$`·백틱이 전부 무해해진다.
+ */
+function groupTurnBody(input: {
   repoRoot: string;
   body: string;
   threadId: string;
@@ -293,6 +320,13 @@ export function groupTurnBody(input: {
     "",
     "★답은 이 명령으로 보내야 전달된다.★ 이 턴의 본문은 아무 데도 안 간다 —",
     "서버가 대신 게시하지 않는다. 끝에 최종 답으로 한 번 실행하라:",
-    `${send} --to broadcast --thread ${input.threadId} --in-reply-to ${input.messageId} --body '<답>'`,
+    "",
+    "cat > /tmp/dex-reply.txt <<'EOF'",
+    "<답>",
+    "EOF",
+    `${send} --to broadcast --thread ${input.threadId} --in-reply-to ${input.messageId} --body-file /tmp/dex-reply.txt`,
+    "",
+    "★--body 로 넘기지 마라★ — 답에 홑따옴표·백틱·$ 가 있으면 셸이 해석해 명령이 깨지고,",
+    "그러면 턴은 돌았는데 방은 조용해진다. 위 heredoc 형태를 그대로 쓴다.",
   ].join("\n");
 }

@@ -237,38 +237,72 @@ describe("startBridgeWindow — 실제 왕복", () => {
 // 창구 경로가 텔레그램으로 직접 쏘면 방에는 뜨지만 ★버스에는 아무 기록이 없다.★
 // 같은 방에서 claude 팀원 답은 남고 dex 것만 0건이었다(대조군 실측). 그래서 턴 본문은
 // 메모로 두고, 방에 말하려면 팀원이 직접 `send.sh --to broadcast` 를 불러야 한다.
-import { groupTurnBody } from "./bridgeWindow";
+//
+// ★한 함수만 내보낸다★ — 발신 떼기와 명령 넣기는 한 쌍이라, 한쪽만 있는 상태를 못 만들게 한다.
+import { groupTurnCall } from "./bridgeWindow";
 
-describe("groupTurnBody — 답을 어디로 보낼지 함께 준다", () => {
-  const made = () =>
-    groupTurnBody({
+describe("groupTurnCall — 발신을 떼고, 답 보내는 법을 함께 준다", () => {
+  const base = () => ({
+    sendMessage: async () => 1 as number | null,
+    editMessage: async () => true,
+    reactMessage: async () => true,
+    agentId: "dex",
+  });
+  const made = (over: Record<string, string> = {}) =>
+    groupTurnCall(base(), {
       repoRoot: "/repo",
       body: "@덱스 들려?",
       threadId: "tg--1003947108339",
       messageId: "tg-8874",
+      ...over,
     });
 
-  test("★send.sh --to broadcast 명령이 들어간다★ — 없으면 답이 아무 데도 안 간다", () => {
-    const t = made();
-    expect(t).toContain("/repo/skills/b3os-team-inbox/scripts/send.sh");
-    expect(t).toContain("--to broadcast");
+  test("★발신이 떨어진다★ — sendMessage·editMessage 가 아무것도 안 한다", async () => {
+    const { deps } = made();
+    expect(await deps.sendMessage()).toBeNull();
+    expect(await deps.editMessage()).toBe(false);
   });
 
-  test("★스레드와 in-reply-to 가 박혀 있다★ — 사람이 조립하다 틀리지 않게", () => {
-    const t = made();
-    expect(t).toContain("--thread tg--1003947108339");
-    expect(t).toContain("--in-reply-to tg-8874");
+  test("★리액션은 남는다★ — '받았다' 는 발신과 다른 값이다", async () => {
+    const { deps } = made();
+    expect(await deps.reactMessage()).toBe(true);
   });
 
-  test("★'서버가 대신 게시하지 않는다' 를 말해준다★ — 안 보내면 말한 게 아니다", () => {
-    expect(made()).toContain("서버가 대신 게시하지 않는다");
+  test("나머지 deps 는 그대로 넘어간다", () => {
+    expect(made().deps.agentId).toBe("dex");
+  });
+
+  test("★send.sh --to broadcast 가 본문에 있다★ — 없으면 답이 아무 데도 안 간다", () => {
+    const { body } = made();
+    expect(body).toContain("/repo/skills/b3os-team-inbox/scripts/send.sh");
+    expect(body).toContain("--to broadcast");
+  });
+
+  test("★--body 가 아니라 --body-file 을 시킨다★ — 답의 홑따옴표가 명령을 깬다", () => {
+    const { body } = made();
+    expect(body).toContain("--body-file");
+    expect(body).not.toContain("--body '");
+  });
+
+  test("★heredoc 구분자가 따옴표로 감싸여 있다★ — $ ·백틱이 해석되면 본문이 훼손된다", () => {
+    expect(made().body).toContain("<<'EOF'");
+  });
+
+  test("스레드와 in-reply-to 가 박혀 있다 — 조립하다 틀리지 않게", () => {
+    const { body } = made();
+    expect(body).toContain("--thread tg--1003947108339");
+    expect(body).toContain("--in-reply-to tg-8874");
+  });
+
+  test("'서버가 대신 게시하지 않는다' 를 말해준다 — 안 보내면 말한 게 아니다", () => {
+    expect(made().body).toContain("서버가 대신 게시하지 않는다");
   });
 
   test("원문이 맨 앞에 그대로 있다 — 지시문이 질문을 덮지 않는다", () => {
-    expect(made().startsWith("@덱스 들려?")).toBe(true);
+    expect(made().body.startsWith("@덱스 들려?")).toBe(true);
   });
 
-  test("★--to <보낸사람> 이 아니다★ — 그룹 행의 발신자는 팀원이 아니다", () => {
-    expect(made()).not.toContain("--to user");
+  test("★--to user 가 아니다★ — 그룹 행의 발신자는 팀원이 아니다", () => {
+    expect(made().body).not.toContain("--to user");
   });
 });

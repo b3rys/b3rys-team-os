@@ -16,7 +16,7 @@ import {
   type DmAttachments, type DmMessageMedia,
 } from "./dmMedia";
 import { createSerialTurnQueue } from "./serialTurnQueue";
-import { startBridgeWindow, groupTurnBody } from "./bridgeWindow";
+import { startBridgeWindow, groupTurnCall } from "./bridgeWindow";
 import { makeChatSessionStore, NOOP_DM_SESSION_STORE, type DmSessionStore } from "./dmSessionStore";
 import { toMarkdownV2, splitForTelegram, toPlain } from "./telegramMarkdown";
 import { steerActiveTurn } from "./activeTurns";
@@ -474,19 +474,6 @@ async function fetchOwnerGate(
  * 텔레그램 메시지 1건 처리(순수 로직 — 토큰 불필요, mock 테스트 가능).
  * 흐름: 👀 리액션 → "작업 중…" 게시 → codex 턴 → 작업중 메시지를 답으로 교체(편집 실패 시 신규 발신).
  */
-/**
- * ★서버가 팀원 대신 말하지 못하게 발신을 떼어낸 deps.★
- *
- * 창구(그룹) 경로 전용이다. 이 경로의 답은 팀원이 `send.sh --to broadcast` 로 직접 보내야
- * ★버스에 남고★ 거기서 방으로 릴레이된다. 브리지가 텔레그램으로 바로 쏘면 방에는 뜨지만
- * ★기록이 아무 데도 없다★ — 같은 방에서 claude 팀원 답은 남고 이쪽만 0건이었다(대조군 실측).
- *
- * ★리액션은 떼지 않는다★ — "그 팀원이 받았다" 는 사람이 보는 신호이고 발신과 다른 값이다.
- * 1:1 경로는 이 함수를 쓰지 않는다(거기서는 브리지가 답하는 게 맞다).
- */
-export function noAutopostDeps(deps: BridgeDeps): BridgeDeps {
-  return { ...deps, sendMessage: async () => null, editMessage: async () => false };
-}
 
 export async function handleMessage(
   chatId: number,
@@ -1216,17 +1203,23 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         //   그룹 native 차단은 ★들어오는 쪽★ 만 막는다 — 나가는 쪽은 여기서 막는다.
         //
         //   ★리액션은 남긴다★ — "그 팀원이 받았다" 를 사람이 보는 신호라 발신과 다른 값이다.
-        const noAutopost = noAutopostDeps(live);
-        const res = await handleMessage(
-          chatId,
-          groupTurnBody({ repoRoot: REPO_ROOT, body: r.body, threadId: r.threadId, messageId: r.messageId }),
-          tgMsgId,
-          noAutopost,
-          undefined,
-          "window",
-        );
+        // ★한 번만 부른다★ — 발신을 떼는 것과 답 보내는 명령을 넣는 것은 한 쌍이다.
+        //   따로 부르면 나중에 한쪽만 지워져도 컴파일이 통과하고 ★그때 dex 가 조용해진다★(리뷰 지적).
+        const call = groupTurnCall(live, {
+          repoRoot: REPO_ROOT,
+          body: r.body,
+          threadId: r.threadId,
+          messageId: r.messageId,
+        });
+        const res = await handleMessage(chatId, call.body, tgMsgId, call.deps, undefined, "window");
         // ★본문은 안 남긴다★ — 말한 게 아니라 메모다(hermes 와 같은 기록 모양).
         console.log(`[codex-bridge] 창구 턴 완료(자동게시 없음) → ${res.detail} · ${res.reply.length}자`);
+        // ★실패를 조용히 두지 않는다★ (리뷰 지적 — 오늘 그룹에서 두 번 났다).
+        //   발신을 뗐으므로 ★에러 문구도 같이 사라진다★ — 사람 화면에서 "도는 중" 과 "죽었다" 가 같아진다.
+        //   리액션은 발신이 아니라서 계약을 안 깬다. 👀 를 ⚠️ 로 바꿔 ★받았지만 못 했다★ 를 남긴다.
+        if (!res.ok && tgMsgId !== undefined && Number.isFinite(tgMsgId)) {
+          void live.reactMessage?.(chatId, tgMsgId, "⚠️");
+        }
         appendAuditFile("codex_bridge", "turn_completed_no_autopost", r.messageId, {
           agent_id: liveAgentId, thread_id: r.threadId, detail: res.detail, chars: res.reply.length,
         });
