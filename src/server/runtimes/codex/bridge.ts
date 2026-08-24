@@ -1210,6 +1210,11 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
       //   ★확정적으로 사라지는데, 안 돌았다는 기록이 어디에도 없다★ —
       //   ★보낸 쪽은 갔다고 믿고 받는 쪽은 온 적이 없는★, 이 창구가 고치려는 그 실패 모양이다.
       //   막지는 않는다(비우려면 종료가 늘어진다). 남은 개수를 남겨 나중에 읽히게 한다.
+      //   ★이 줄이 남는 이유는 조건부다★ (리뷰 지적): `process.exit(0)` 은 ★버퍼를 안 비우고★
+      //   나간다. 지금 살아남는 것은 stdout 이 ★일반 파일★ 이라 Node 가 동기로 쓰기 때문이다
+      //   (`launcher.ts` — plist 의 `StandardOutPath` 가 파일이고, wrapper 의 `exec bun` 뒤에 파이프가 없다).
+      //   ★wrapper 에 `| tee` 같은 파이프를 하나 붙이면 stdout 이 파이프(비동기)가 되어 이 줄이 잘린다★ —
+      //   "안 돌았다" 를 증명하려고 넣은 기록이 바로 그 순간 같이 사라진다.
       const left = turns.pendingCount();
       if (left > 0) console.log(`[codex-bridge] 종료 — ★큐에 남은 턴 ${left}건은 돌지 않는다★`);
       try {
