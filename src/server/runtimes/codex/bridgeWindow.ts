@@ -305,6 +305,14 @@ function noAutopostDeps<T extends { sendMessage?: unknown; editMessage?: unknown
  *   홑따옴표가 안 나올 리 없다. 깨지면 ★턴은 돌고 send 는 실패하고 방은 조용하다★ =
  *   ★이 계약이 없애려는 그 실패 모양 그대로다.★ 자동 게시를 막았으므로 ★대체 경로도 없다.★
  *   heredoc 의 구분자를 따옴표로 감싸면 `$`·백틱이 전부 무해해진다.
+ *
+ * ★고정 경로·고정 종료자를 쓰지 않는다★ (리뷰 지적):
+ *   · 같은 파일에 덮어쓰면 ★쓰기가 실패했을 때 직전 턴의 답이 그대로 다시 나간다★ —
+ *     빈 파일은 `send.sh` 가 거절하지만 ★옛 내용은 거절하지 않는다.★ 조용한 실패가 아니라
+ *     ★그럴듯하게 틀린★ 쪽이라 더 나쁘다. 예측 가능한 공용 경로라 선점 위험도 있다.
+ *   · 종료자가 `EOF` 면 ★답에 `EOF` 한 줄이 들어갈 때 거기서 끊기고★ 뒤가 셸 명령으로 읽힌다.
+ *     코딩 에이전트의 답에 셸 예시가 들어가는 것은 드문 일이 아니다.
+ *   `mktemp` 로 실행마다 새 파일을 만들고, 보낸 뒤 지운다(팀 대화가 `/tmp` 에 남지 않게).
  */
 function groupTurnBody(input: {
   repoRoot: string;
@@ -321,10 +329,12 @@ function groupTurnBody(input: {
     "★답은 이 명령으로 보내야 전달된다.★ 이 턴의 본문은 아무 데도 안 간다 —",
     "서버가 대신 게시하지 않는다. 끝에 최종 답으로 한 번 실행하라:",
     "",
-    "cat > /tmp/dex-reply.txt <<'EOF'",
+    'f="$(mktemp -t b3os-reply)"',
+    `cat > "$f" <<'B3OS_REPLY_EOF__DO_NOT_USE'`,
     "<답>",
-    "EOF",
-    `${send} --to broadcast --thread ${input.threadId} --in-reply-to ${input.messageId} --body-file /tmp/dex-reply.txt`,
+    "B3OS_REPLY_EOF__DO_NOT_USE",
+    `${send} --to broadcast --thread ${input.threadId} --in-reply-to ${input.messageId} --body-file "$f"`,
+    'rm -f "$f"',
     "",
     "★--body 로 넘기지 마라★ — 답에 홑따옴표·백틱·$ 가 있으면 셸이 해석해 명령이 깨지고,",
     "그러면 턴은 돌았는데 방은 조용해진다. 위 heredoc 형태를 그대로 쓴다.",

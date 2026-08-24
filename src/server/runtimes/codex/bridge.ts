@@ -471,6 +471,64 @@ async function fetchOwnerGate(
 }
 
 /**
+ * ★창구(그룹) 턴 한 건을 돌린다.★ 호출부를 시험할 수 있게 떼어 뒀다.
+ *
+ * ★서버는 팀원 대신 말하지 않는다★ (hermes 와 같은 계약 · 실측):
+ *   전에는 이 경로도 `handleMessage` 의 텔레그램 발신을 그대로 탔다 — 방에는 떴지만
+ *   ★버스에는 아무 기록이 없었다.★ 같은 방에서 claude 팀원의 답은 남고 이쪽만 0건이었다.
+ *   그룹 native 차단은 ★들어오는 쪽★ 만 막는다 — 나가는 쪽은 여기서 막는다.
+ *
+ * ★실패를 조용히 두지 않는다★: 발신을 뗐으므로 에러 문구도 같이 사라진다 —
+ *   사람 화면에서 "도는 중" 과 "죽었다" 가 같아진다. 리액션은 발신이 아니라 계약을 안 깨므로
+ *   👀 를 ⚠️ 로 바꿔 남긴다. ★반환 실패와 예외 실패를 같은 모양으로★ 남긴다(둘 다 실패다).
+ *
+ * ★`ok` 가 아니라 `turnOk` 를 본다★: `ok` 는 "텔레그램에 보냈나" 라서 이 경로에선 항상 false 다.
+ *   그걸로 판정하면 ★성공할 때마다 실패로 읽는다.★
+ */
+export async function runGroupTurn(ctx: {
+  deps: BridgeDeps;
+  agentId: string;
+  repoRoot: string;
+  chatId: number;
+  tgMsgId: number | undefined;
+  req: { body: string; threadId: string; messageId: string };
+  run?: typeof handleMessage;
+  audit?: (action: string, target: string, detail: Record<string, unknown>) => void;
+}): Promise<void> {
+  const { deps, chatId, tgMsgId, req } = ctx;
+  const run = ctx.run ?? handleMessage;
+  const audit = ctx.audit ?? ((a, t, d) => appendAuditFile("codex_bridge", a, t, d));
+  const warn = () => {
+    if (tgMsgId !== undefined && Number.isFinite(tgMsgId)) void deps.reactMessage?.(chatId, tgMsgId, "⚠️");
+  };
+  // ★한 번만 부른다★ — 발신을 떼는 것과 답 보내는 명령을 넣는 것은 한 쌍이다.
+  const call = groupTurnCall(deps, {
+    repoRoot: ctx.repoRoot,
+    body: req.body,
+    threadId: req.threadId,
+    messageId: req.messageId,
+  });
+  let res: Awaited<ReturnType<typeof handleMessage>>;
+  try {
+    res = await run(chatId, call.body, tgMsgId, call.deps, undefined, "window");
+  } catch (e) {
+    warn();
+    audit("turn_completed_no_autopost", req.messageId, {
+      agent_id: ctx.agentId, thread_id: req.threadId, turn_ok: false, chars: 0,
+      detail: `threw:${e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)}`,
+    });
+    return;
+  }
+  console.log(`[codex-bridge] 창구 턴 완료(자동게시 없음) → ${res.detail} · ${res.reply.length}자`);
+  audit("turn_completed_no_autopost", req.messageId, {
+    agent_id: ctx.agentId, thread_id: req.threadId, turn_ok: res.turnOk, chars: res.reply.length,
+    // ★send_failed 는 이 경로의 기대값이다★ — 발신을 뗐으므로. 실패 사유로 적으면 전부 거짓값이 된다.
+    detail: res.turnOk ? "turn_ok" : res.detail,
+  });
+  if (!res.turnOk) warn();
+}
+
+/**
  * 텔레그램 메시지 1건 처리(순수 로직 — 토큰 불필요, mock 테스트 가능).
  * 흐름: 👀 리액션 → "작업 중…" 게시 → codex 턴 → 작업중 메시지를 답으로 교체(편집 실패 시 신규 발신).
  */
@@ -493,7 +551,7 @@ export async function handleMessage(
    *   ★플래그로 게이트를 끄는 게 아니라, 게이트가 애초에 그 입구의 것이다.★
    */
   ingress: "poll" | "window" = "poll",
-): Promise<{ ok: boolean; reply: string; detail: string }> {
+): Promise<{ ok: boolean; turnOk: boolean; reply: string; detail: string }> {
   // ★브리지도 app-server 로 간다.★
   //   전에는 브리지만 옛 exec 경로였다 — 그래서 ★사람이 직접 말 거는 길에만★ 그때까지의 개선
   //   (중간 개입 · 프로세스 상주 · 서브에이전트 생존 · 승인창)이 하나도 안 붙어 있었다.
@@ -537,7 +595,7 @@ export async function handleMessage(
       if (enforceOn) {
         // 그룹 native 전체 drop (react/runTurn 전 → 👀도 안 찍힘). DM/health 무관(chatId<0 only).
         appendAuditFile("codex_bridge", "group_native_denied", String(messageId), auditFields);
-        return { ok: true, reply: "", detail: "group_native_denied" };
+        return { ok: true, turnOk: true, reply: "", detail: "group_native_denied" };
       }
       // shadow: drop 없이 effective authority audit만 (24h 3자비교로 capture 커버 검증).
       appendAuditFile("codex_bridge", "group_native_shadow", String(messageId), { ...auditFields, shadow: true });
@@ -557,6 +615,8 @@ export async function handleMessage(
     const sent = await send(chatId, SCHEDULE_UNSUPPORTED_TEXT);
     return {
       ok: sent !== null,
+      // 턴을 안 돌린 것이지 실패한 게 아니다 — 창구 경로에서 경고를 띄울 일이 아니다.
+      turnOk: true,
       reply: SCHEDULE_UNSUPPORTED_TEXT,
       detail: sent !== null ? "schedule_unsupported" : "send_failed",
     };
@@ -622,7 +682,7 @@ export async function handleMessage(
     const errText = toMarkdownV2("⚠️ 권한 게이트가 이 Codex 런타임 실행을 막았습니다. 설정 승인이 필요합니다.");
     if (workingMsgId !== null) await edit(chatId, workingMsgId, errText);
     else await send(chatId, errText);
-    return { ok: false, reply: "", detail: `permission_${preflight.tier}:${preflight.rule}` };
+    return { ok: false, turnOk: false, reply: "", detail: `permission_${preflight.tier}:${preflight.rule}` };
   }
   // ★진행 표시★ — codex 가 도구를 시작할 때마다 오는 줄을 모아 "작업 중…" 메시지를 고쳐 쓴다.
   //   창이 없는 런타임이라 이게 없으면 사람 눈에는 몇 분간 문구 하나만 남는다.
@@ -763,7 +823,7 @@ export async function handleMessage(
     // ★마지막 버블에 쓴다★ — 넘김이 일어났으면 첫 버블에 쓸 경우 오류가 진행 줄 위로 올라간다.
     if (bubbleId !== null) await edit(chatId, bubbleId, errText);
     else await send(chatId, errText);
-    return { ok: false, reply: "", detail: `codex_turn_failed:${result.detail}` };
+    return { ok: false, turnOk: false, reply: "", detail: `codex_turn_failed:${result.detail}` };
   }
   // 성공 턴에서 첫 인사를 했다면 영속 마커를 남긴다 → 다음부터(재시작·새 스레드 포함) 재소개 안 함.
   if (!greetedBefore) markGreetedFirstContact(greetAgentId);
@@ -797,7 +857,11 @@ export async function handleMessage(
     const id = await send(chatId, rest);
     if (id === null) { delivered = false; break; }
   }
-  return { ok: delivered, reply, detail: delivered ? "delivered" : "send_failed" };
+  // ★`ok` 와 `turnOk` 는 다른 질문에 답한다★ (리뷰 지적 — 한 이름에 두 뜻이 들어 있었다).
+  //   `ok` = 텔레그램에 ★보냈나★ · `turnOk` = 턴이 ★됐나★.
+  //   창구 경로는 발신을 일부러 뗐으므로 `ok` 는 ★항상 false★ 다 — 거기서 `ok` 로 실패를 판정하면
+  //   ★성공할 때마다 실패로 읽는다.★ 그 경로는 `turnOk` 를 본다.
+  return { ok: delivered, turnOk: true, reply, detail: delivered ? "delivered" : "send_failed" };
 }
 
 /** 테스트/리셋용 — 채팅 thread 맥락 비우기. */
@@ -1195,35 +1259,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
       if (tgMsgId !== undefined && Number.isFinite(tgMsgId)) {
         void live.reactMessage?.(chatId, tgMsgId, "👀");
       }
-      turns.enqueue(async () => {
-        // ★서버는 팀원 대신 말하지 않는다★ (hermes 와 같은 계약 · 실측 2026-08-24).
-        //   전에는 이 경로도 `handleMessage` 의 텔레그램 발신을 그대로 탔다 — 방에는 떴지만
-        //   ★버스에는 아무 기록이 없었다.★ 같은 방에서 claude 팀원의 답은 남고 dex 것만 0건이었다
-        //   (대조군으로 확인). 버스만 보는 팀원에게 그 답은 ★존재하지 않는다.★
-        //   그룹 native 차단은 ★들어오는 쪽★ 만 막는다 — 나가는 쪽은 여기서 막는다.
-        //
-        //   ★리액션은 남긴다★ — "그 팀원이 받았다" 를 사람이 보는 신호라 발신과 다른 값이다.
-        // ★한 번만 부른다★ — 발신을 떼는 것과 답 보내는 명령을 넣는 것은 한 쌍이다.
-        //   따로 부르면 나중에 한쪽만 지워져도 컴파일이 통과하고 ★그때 dex 가 조용해진다★(리뷰 지적).
-        const call = groupTurnCall(live, {
-          repoRoot: REPO_ROOT,
-          body: r.body,
-          threadId: r.threadId,
-          messageId: r.messageId,
-        });
-        const res = await handleMessage(chatId, call.body, tgMsgId, call.deps, undefined, "window");
-        // ★본문은 안 남긴다★ — 말한 게 아니라 메모다(hermes 와 같은 기록 모양).
-        console.log(`[codex-bridge] 창구 턴 완료(자동게시 없음) → ${res.detail} · ${res.reply.length}자`);
-        // ★실패를 조용히 두지 않는다★ (리뷰 지적 — 오늘 그룹에서 두 번 났다).
-        //   발신을 뗐으므로 ★에러 문구도 같이 사라진다★ — 사람 화면에서 "도는 중" 과 "죽었다" 가 같아진다.
-        //   리액션은 발신이 아니라서 계약을 안 깬다. 👀 를 ⚠️ 로 바꿔 ★받았지만 못 했다★ 를 남긴다.
-        if (!res.ok && tgMsgId !== undefined && Number.isFinite(tgMsgId)) {
-          void live.reactMessage?.(chatId, tgMsgId, "⚠️");
-        }
-        appendAuditFile("codex_bridge", "turn_completed_no_autopost", r.messageId, {
-          agent_id: liveAgentId, thread_id: r.threadId, detail: res.detail, chars: res.reply.length,
-        });
-      });
+      turns.enqueue(() => runGroupTurn({ deps: live, agentId: liveAgentId, repoRoot: REPO_ROOT, chatId, tgMsgId, req: r }));
     },
   });
   if (windowHandle) {

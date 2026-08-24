@@ -285,7 +285,21 @@ describe("groupTurnCall — 발신을 떼고, 답 보내는 법을 함께 준다
   });
 
   test("★heredoc 구분자가 따옴표로 감싸여 있다★ — $ ·백틱이 해석되면 본문이 훼손된다", () => {
-    expect(made().body).toContain("<<'EOF'");
+    expect(made().body).toMatch(/<<'[A-Z0-9_]+'/);
+  });
+
+  test("★종료자가 EOF 가 아니다★ — 답에 EOF 한 줄이 들어가면 거기서 끊기고 뒤가 셸 명령이 된다", () => {
+    expect(made().body).not.toContain("<<'EOF'");
+  });
+
+  test("★고정 경로를 안 쓴다 — mktemp 로 매번 새 파일★ (쓰기 실패 시 옛 답이 다시 나간다)", () => {
+    const { body } = made();
+    expect(body).toContain("mktemp");
+    expect(body).not.toContain("/tmp/dex-reply.txt");
+  });
+
+  test("★보낸 뒤 지운다★ — 팀 대화가 /tmp 에 평문으로 남지 않게", () => {
+    expect(made().body).toContain('rm -f "$f"');
   });
 
   test("스레드와 in-reply-to 가 박혀 있다 — 조립하다 틀리지 않게", () => {

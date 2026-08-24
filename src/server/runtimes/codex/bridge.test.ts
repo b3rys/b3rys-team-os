@@ -1093,3 +1093,78 @@ describe("codex bridge — 진행 중 작업에 끼어들기", () => {
     expect(t).toContain("이 메시지에도 답해라");
   });
 });
+
+// ── ★조립된 값을 잰다★ — 부품 시험은 다 통과하는데 조립하면 뒤집혀 있었다 ──
+//
+// 경고는 `res.ok` 를 읽는 자리에 있었는데, 창구 경로는 발신을 일부러 떼서 `ok` 가 ★항상 false★ 다.
+// 그래서 ★정상 성공에도 경고가 떴다.★ 부품(문자열·발신 0회)만 재는 시험은 이걸 못 잡는다.
+import { runGroupTurn } from "./bridge";
+
+describe("runGroupTurn — 성공·반환실패·예외실패가 서로 다르게 보인다", () => {
+  type Ctx = Parameters<typeof runGroupTurn>[0];
+  function make(run: unknown): { reacts: string[]; audits: Record<string, unknown>[]; ctx: Ctx } {
+    const reacts: string[] = [];
+    const audits: Record<string, unknown>[] = [];
+    const ctx = {
+      deps: {
+        sendMessage: async () => 1,
+        editMessage: async () => true,
+        reactMessage: async (_c: number, _m: number, e: string) => { reacts.push(e); return true; },
+      },
+      agentId: "dex",
+      repoRoot: "/repo",
+      chatId: -100,
+      tgMsgId: 42,
+      req: { body: "@덱스 들려?", threadId: "tg--100", messageId: "tg-1" },
+      audit: (_a: string, _t: string, d: Record<string, unknown>) => { audits.push(d); },
+      run,
+    } as unknown as Ctx;
+    return { reacts, audits, ctx };
+  }
+
+  test("★턴 성공 → 경고가 안 뜬다★ (발신을 뗐어도 성공은 성공이다)", async () => {
+    const { reacts, audits, ctx } = make(async () => ({ ok: false, turnOk: true, reply: "네", detail: "send_failed" }));
+    await runGroupTurn(ctx);
+    expect(reacts).toEqual([]);
+    expect(audits[0]?.turn_ok).toBe(true);
+    // ★send_failed 를 실패 사유로 적지 않는다★ — 이 경로의 기대값이다
+    expect(audits[0]?.detail).toBe("turn_ok");
+  });
+
+  test("★턴 실패(반환) → 경고 + 실패 audit★", async () => {
+    const { reacts, audits, ctx } = make(async () => ({ ok: false, turnOk: false, reply: "", detail: "codex_turn_failed:empty" }));
+    await runGroupTurn(ctx);
+    expect(reacts).toEqual(["⚠️"]);
+    expect(audits[0]?.turn_ok).toBe(false);
+    expect(audits[0]?.detail).toBe("codex_turn_failed:empty");
+  });
+
+  test("★턴이 던져도 같은 모양으로 보인다★ — 큐 catch 에 맡기면 눈 표시만 남는다", async () => {
+    const { reacts, audits, ctx } = make(async () => { throw new Error("boom"); });
+    await runGroupTurn(ctx);
+    expect(reacts).toEqual(["⚠️"]);
+    expect(audits[0]?.turn_ok).toBe(false);
+    expect(String(audits[0]?.detail)).toContain("threw:");
+  });
+
+  test("★턴에 넘어가는 본문에 send.sh 명령이 실려 있다★ — 조립된 값으로 확인", async () => {
+    let seen = "";
+    const { ctx } = make(async (_c: number, body: string) => {
+      seen = body;
+      return { ok: false, turnOk: true, reply: "", detail: "send_failed" };
+    });
+    await runGroupTurn(ctx);
+    expect(seen).toContain("--to broadcast");
+    expect(seen).toContain("--body-file");
+  });
+
+  test("★턴에 넘어가는 deps 는 발신이 떨어져 있다★", async () => {
+    let sent: unknown = "unset";
+    const { ctx } = make(async (_c: number, _b: string, _m: unknown, deps: { sendMessage: () => Promise<unknown> }) => {
+      sent = await deps.sendMessage();
+      return { ok: false, turnOk: true, reply: "", detail: "send_failed" };
+    });
+    await runGroupTurn(ctx);
+    expect(sent).toBeNull();
+  });
+});
