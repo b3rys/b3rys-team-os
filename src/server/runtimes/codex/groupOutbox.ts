@@ -70,21 +70,27 @@ export type ConsumeResult =
  * ★심링크를 따라가지 않는다★: 에이전트가 쓰는 자리라 링크가 걸려 있으면 그 대상을 읽어
  * 방에 게시하게 된다 — ★읽기 권한이 곧 유출 경로★ 가 된다.
  */
-export function consumeGroupReply(path: string, expectedDir?: string): ConsumeResult {
+export function consumeGroupReply(path: string, expectedDir: string): ConsumeResult {
   // ★부모 경로도 본다★: `O_NOFOLLOW` 는 ★마지막 조각만★ 안 따라간다.
   //   에이전트가 `outbox/<agent>` 를 ★디렉터리 대신 심링크★ 로 바꾸면 그 너머의 파일은
   //   ★보통 파일이라 통과★ 하고, 남의 파일이 방에 올라간다. `mkdirSync(recursive)` 는
   //   그 자리가 이미 심링크-디렉터리면 ★그냥 통과★ 해서 못 막는다.
   //   → 실제로 열리는 디렉터리가 ★우리가 만든 그 디렉터리★ 인지 대조한다.
-  if (expectedDir !== undefined) {
-    try {
-      // ★기대값에는 realpath 를 안 건다★ — 이미 신뢰하는 뿌리에서 계산된 값이다.
-      if (realpathSync(dirname(path)) !== expectedDir) {
-        return discard(path, { kind: "rejected", reason: "dir_moved" });
-      }
-    } catch {
+  //   ★남는 창은 여기까지다★: `realpath` 와 `open` 사이가 벌어져 있어 그 사이에 부모를 바꾸면
+  //   여전히 통과한다. 완전히 닫으려면 디렉터리 fd 기준 상대 열기(`openat`)가 필요한데 Node 가 안 내준다.
+  //   ★이 가드의 값어치는 "적대적 팀원을 이기는 것" 이 아니다★ — 팀원은 브리지와 ★같은 사용자★ 로 돌아서
+  //   원하면 이 경로를 안 통하고 그냥 읽으면 된다. 막는 것은 ★실수·오작동이 방으로 새는 것★ 이다.
+  //   (팀원을 다른 사용자·다른 샌드박스로 돌리면 그때 이 경계가 진짜가 되고 `openat` 부재가 제약이 된다)
+  //
+  //   ★필수 인자다★ — 선택으로 두면 안 넘긴 호출부에서 이 검사가 통째로 꺼지고,
+  //   그래도 컴파일과 시험이 통과한다. 시험은 어긋남을 탐지하고 ★구조는 어긋남을 예방한다.★
+  try {
+    // ★기대값에는 realpath 를 안 건다★ — 이미 신뢰하는 뿌리에서 계산된 값이다.
+    if (realpathSync(dirname(path)) !== expectedDir) {
       return discard(path, { kind: "rejected", reason: "dir_moved" });
     }
+  } catch {
+    return discard(path, { kind: "rejected", reason: "dir_moved" });
   }
   // ★경로로 두 번 열지 않는다★ (TOCTOU):
   //   전에는 `lstat` 으로 보통 파일인지 본 뒤 ★경로로 다시★ `readFileSync` 를 했다.
