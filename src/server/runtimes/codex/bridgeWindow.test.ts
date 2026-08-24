@@ -220,4 +220,14 @@ describe("startBridgeWindow — 실제 왕복", () => {
     h.close();
     expect(readWindowFile(file)).toBeNull();
   });
+  test("★파일을 못 쓰면 창구를 연 채로 두지 않는다★ — 아무도 못 부르는 리스너가 남으면 종료도 막는다", async () => {
+    // 존재하지 않는 디렉터리 → writeWindowFile 이 ENOENT 로 던진다.
+    const h = await startBridgeWindow({
+      agentId: "dex",
+      pidFile: join(tmpdir(), "no-such-dir-cbw", "dex.pid"),
+      enqueue: () => {},
+    });
+    expect(h).toBeNull();
+  });
 });
+

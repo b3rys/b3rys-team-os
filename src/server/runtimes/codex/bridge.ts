@@ -1201,7 +1201,17 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     },
   });
   if (windowHandle) {
-    const stop = () => windowHandle.close();
+    // ★신호 처리기를 달면 Node 의 기본 종료가 사라진다★ (리뷰 지적).
+    //   창구만 닫고 끝내면 폴 루프가 계속 돌아 ★SIGTERM 으로 안 죽는다★ —
+    //   launchd 재기동이 SIGKILL 까지 기다리게 된다. 치우고 ★직접 나간다.★
+    const stop = () => {
+      try {
+        windowHandle.close();
+      } catch {
+        /* 정리 실패가 종료를 막지 않는다 */
+      }
+      process.exit(0);
+    };
     process.once("SIGTERM", stop);
     process.once("SIGINT", stop);
   }

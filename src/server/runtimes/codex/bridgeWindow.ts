@@ -235,7 +235,20 @@ export async function startBridgeWindow(deps: BridgeWindowDeps): Promise<BridgeW
     return null;
   }
 
-  writeWindowFile(filePath, { port, token, pid: process.pid, agentId: deps.agentId });
+  // ★파일을 못 쓰면 창구를 연 채로 두지 않는다★ (리뷰 지적).
+  //   파일이 없으면 부르는 쪽이 이 포트를 알 수 없으니 ★아무도 못 부르는 리스너★ 가 남는다.
+  //   그런 리스너는 프로세스를 붙잡고 있어 종료도 방해한다. 열었으면 닫고 실패로 돌려준다.
+  try {
+    writeWindowFile(filePath, { port, token, pid: process.pid, agentId: deps.agentId });
+  } catch (e) {
+    try {
+      server.close();
+    } catch {
+      /* 닫기 실패가 이 실패를 가리지 않는다 */
+    }
+    deps.log?.(`[codex-bridge] 창구 못 엶: 파일 기록 실패(${(e as Error).message})`);
+    return null;
+  }
   deps.log?.(`[codex-bridge] 창구 열림 127.0.0.1:${port} (${filePath})`);
 
   return {
