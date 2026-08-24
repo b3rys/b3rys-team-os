@@ -507,7 +507,11 @@ export async function handleMessage(
 
   if (chatId < 0 && messageId !== undefined) {
     const shadowOn = process.env.CODEX_GROUP_NATIVE_DENY_SHADOW === "true";
-    const enforceOn = process.env.CODEX_GROUP_NATIVE_DENY === "true";
+    // ★기본값 = 켜짐★ (제품 결정 2026-08-24): 그룹은 다른 런타임과 같이 capture→bus 로만 받는다.
+    //   native 가 그룹에 직접 답하면 ★자기 앞으로 온 것이 아닌 호출에도 답한다★ — 실측: 그룹에서
+    //   다른 팀원을 @멘션한 두 건을 이 브리지가 집어 빈 응답을 냈다. owner 판정은 capture→bus 가 한다.
+    //   끄려면 명시적으로 "false" 를 준다. ★미설정은 켜짐이다★ — 새 팀원이 설정을 빠뜨려도 안전한 쪽이 기본이다.
+    const enforceOn = (process.env.CODEX_GROUP_NATIVE_DENY ?? "true") !== "false";
     if (shadowOn || enforceOn) {
       const self = selfAgentId;
       const teamBaseUrl = deps.teamBaseUrl ?? process.env.TEAM_BASE_URL ?? "http://127.0.0.1:7878/team";

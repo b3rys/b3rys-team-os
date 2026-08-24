@@ -123,14 +123,26 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     });
     const gate = (suppress: boolean) => { let n = 0; const fn = async () => { n++; return { suppress, reason: "explicit_mention", targets: ["bill"] }; }; return { fn, calls: () => n }; };
 
-    test("flag off 기본 → ownerGate 미호출, 정상 delivered (라이브 영향 0)", async () => {
+    test("★미설정 = 켜짐★ → 그룹은 drop(group_native_denied), react 안 함", async () => {
       delete process.env.CODEX_GROUP_NATIVE_DENY_SHADOW; delete process.env.CODEX_GROUP_NATIVE_DENY;
+      const { deps, calls } = spies(() => ok("답")); deps.ownerGate = gate(false).fn;
+      const r = await handleMessage(-123, "x", 55, deps);
+      expect(r.detail).toBe("group_native_denied"); expect(calls.reacts.length).toBe(0);
+    });
+    test("★명시적 \"false\" 만 끈다★ → 그룹 native 통과, ownerGate 미호출", async () => {
+      process.env.CODEX_GROUP_NATIVE_DENY = "false"; delete process.env.CODEX_GROUP_NATIVE_DENY_SHADOW;
       const { deps, calls } = spies(() => ok("답")); const g = gate(true); deps.ownerGate = g.fn;
       const r = await handleMessage(-123, "x", 55, deps);
       expect(g.calls()).toBe(0); expect(calls.reacts.length).toBe(1); expect(r.detail).toBe("delivered");
     });
+    test("미설정이어도 ★DM(chatId>0) 은 영향 없다★", async () => {
+      delete process.env.CODEX_GROUP_NATIVE_DENY_SHADOW; delete process.env.CODEX_GROUP_NATIVE_DENY;
+      const { deps, calls } = spies(() => ok("답")); deps.ownerGate = gate(true).fn;
+      const r = await handleMessage(123, "x", 55, deps);
+      expect(r.detail).toBe("delivered"); expect(calls.reacts.length).toBe(1);
+    });
     test("shadow on + suppress + group → delivered 유지, react 계속(로그만)", async () => {
-      process.env.CODEX_GROUP_NATIVE_DENY_SHADOW = "true"; delete process.env.CODEX_GROUP_NATIVE_DENY;
+      process.env.CODEX_GROUP_NATIVE_DENY_SHADOW = "true"; process.env.CODEX_GROUP_NATIVE_DENY = "false";
       const { deps, calls } = spies(() => ok("답")); deps.ownerGate = gate(true).fn;
       const r = await handleMessage(-123, "x", 55, deps);
       expect(calls.reacts.length).toBe(1); expect(r.detail).toBe("delivered");
@@ -149,7 +161,7 @@ describe("codex bridge (M2) — 채널 I/O", () => {
       expect(r.detail).toBe("delivered"); expect(calls.reacts.length).toBe(1);
     });
     test("shadow on + gate null(조회실패) → fail-open, 정상 delivered", async () => {
-      process.env.CODEX_GROUP_NATIVE_DENY_SHADOW = "true";
+      process.env.CODEX_GROUP_NATIVE_DENY_SHADOW = "true"; process.env.CODEX_GROUP_NATIVE_DENY = "false";
       const { deps, calls } = spies(() => ok("답")); deps.ownerGate = async () => null;
       const r = await handleMessage(-123, "x", 55, deps);
       expect(r.detail).toBe("delivered"); expect(calls.reacts.length).toBe(1);
