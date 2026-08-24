@@ -497,7 +497,8 @@ export async function runGroupTurn(ctx: {
   audit?: (action: string, target: string, detail: Record<string, unknown>) => void;
   /** 답 파일을 읽고 지우는 것 · 버스로 운반하는 것. 시험에서 갈아 끼운다. */
   consume?: typeof consumeGroupReply;
-  deliver?: (a: { repoRoot: string; text: string; threadId: string; messageId: string }) => Promise<boolean>;
+  deliver?: (a: { agentId: string; text: string; threadId: string; messageId: string })
+    => Promise<{ ok: boolean; detail: string }>;
   replyPath?: string;
 }): Promise<void> {
   const { deps, chatId, tgMsgId, req } = ctx;
@@ -546,10 +547,11 @@ export async function runGroupTurn(ctx: {
   let deliverDetail = "";
   if (out.kind === "reply") {
     try {
-      delivered = await deliver({
-        repoRoot: ctx.repoRoot, text: out.text, threadId: req.threadId, messageId: req.messageId,
+      const d = await deliver({
+        agentId: ctx.agentId, text: out.text, threadId: req.threadId, messageId: req.messageId,
       });
-      if (!delivered) deliverDetail = "deliver_failed";
+      delivered = d.ok;
+      if (!d.ok) deliverDetail = `deliver_failed:${d.detail}`;
     } catch (e) {
       deliverDetail = `deliver_threw:${e instanceof Error ? e.message.slice(0, 80) : String(e).slice(0, 80)}`;
     }
@@ -575,31 +577,42 @@ export async function runGroupTurn(ctx: {
 }
 
 /**
- * ★브리지가 답을 버스로 운반한다.★ 팀원이 셸을 안 타므로 승인 팝업이 안 뜬다.
+ * ★브리지가 답을 버스로 운반한다 — 서버 입구에 직접 넣는다.★
  *
- * 본문은 ★argv 에 싣지 않는다★ — `--body-file` 로 넘긴다. 답에 홑따옴표·백틱·`$` 가 있어도
- * 해석될 자리가 없다. 파일은 보낸 뒤 지운다(팀 대화가 디스크에 남지 않게).
+ * `send.sh` 도 결국 이 입구로 POST 한다. 셸을 거치면 ★발신자를 현재 디렉터리·tmux 로 추측하는 층★ 이
+ * 하나 더 붙는데, 브리지의 디렉터리는 어느 팀원의 작업폴더도 아니고 launchd 아래라 tmux 도 없다.
+ * 그 조건에서 해석은 실패하고(fail-closed) 발신이 죽는다 — 실측: 팀원 작업폴더가 아닌 cwd 는
+ * tmux 없이 전부 exit 1 이다. 조용한 오배송이 아니라 시끄러운 실패다.
+ * 브리지는 이 턴의 주인을 알고 있으므로 `from_agent_id` 로 그대로 싣는다 — 추측할 자리가 없어진다.
+ *
+ * 하위 프로세스·임시 파일·환경변수가 전부 사라진다. 팀원이 셸을 안 타므로 승인 팝업이 안 뜬다.
+ *
+ * 본문은 ★셸을 안 지나므로★ 따옴표·백틱·`$` 가 해석될 자리가 없다.
  */
 async function deliverGroupReply(a: {
-  repoRoot: string; text: string; threadId: string; messageId: string;
-}): Promise<boolean> {
-  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
-  const { tmpdir } = await import("node:os");
-  const { join } = await import("node:path");
-  const dir = mkdtempSync(join(tmpdir(), "b3os-out-"));
-  const file = join(dir, "body.txt");
+  agentId: string; text: string; threadId: string; messageId: string;
+}): Promise<{ ok: boolean; detail: string }> {
+  const base = process.env.TEAM_BASE_URL ?? "http://127.0.0.1:7878/team";
   try {
-    writeFileSync(file, a.text, { mode: 0o600 });
-    const proc = Bun.spawn([
-      `${a.repoRoot}/skills/b3os-team-inbox/scripts/send.sh`,
-      "--to", "broadcast",
-      "--thread", a.threadId,
-      "--in-reply-to", a.messageId,
-      "--body-file", file,
-    ], { stdout: "pipe", stderr: "pipe", cwd: a.repoRoot });
-    return (await proc.exited) === 0;
-  } finally {
-    try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    const res = await fetch(`${base}/api/inbox`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        from_agent_id: a.agentId,
+        to_agent_id: "broadcast",
+        body: a.text,
+        type: "dm",
+        priority: "normal",
+        source: "agent",
+        thread_id: a.threadId,
+        in_reply_to: a.messageId,
+      }),
+    });
+    // ★사유를 버리지 않는다★ — 버리면 다음 실패도 "운반 실패" 넉 자로만 남아 같은 조사를 반복한다.
+    if (res.ok) return { ok: true, detail: "" };
+    return { ok: false, detail: `http ${res.status}: ${(await res.text()).slice(0, 160)}` };
+  } catch (e) {
+    return { ok: false, detail: `fetch: ${e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)}` };
   }
 }
 
