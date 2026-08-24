@@ -26,6 +26,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadRegistry } from "../../lib/registry";
 import { appendAuditFile } from "../../lib/auditFile";
+import { consumeGroupReply, ensureOutboxDir, groupReplyPath, outboxDir } from "./groupOutbox";
 import type { CodexSandboxMode } from "../../types";
 import type { PermissionContext } from "../../lib/permissionGate";
 import { codexRuntimePreflight, codexConfiguredGrants } from "./permissions";
@@ -494,38 +495,112 @@ export async function runGroupTurn(ctx: {
   req: { body: string; threadId: string; messageId: string };
   run?: typeof handleMessage;
   audit?: (action: string, target: string, detail: Record<string, unknown>) => void;
+  /** 답 파일을 읽고 지우는 것 · 버스로 운반하는 것. 시험에서 갈아 끼운다. */
+  consume?: typeof consumeGroupReply;
+  deliver?: (a: { repoRoot: string; text: string; threadId: string; messageId: string }) => Promise<boolean>;
+  replyPath?: string;
 }): Promise<void> {
   const { deps, chatId, tgMsgId, req } = ctx;
   const run = ctx.run ?? handleMessage;
   const audit = ctx.audit ?? ((a, t, d) => appendAuditFile("codex_bridge", a, t, d));
+  const consume = ctx.consume ?? consumeGroupReply;
+  const deliver = ctx.deliver ?? deliverGroupReply;
+  const replyPath = ctx.replyPath ?? groupReplyPath(ctx.repoRoot, ctx.agentId);
+  // ★자리를 못 만들면 턴을 돌리지 않는다★ — 돌려봐야 답을 받을 데가 없고,
+  //   그 실패는 "답 안 함" 과 구분이 안 되는 모양으로 기록된다.
+  const prep = ensureOutboxDir(replyPath);
   const warn = () => {
     if (tgMsgId !== undefined && Number.isFinite(tgMsgId)) void deps.reactMessage?.(chatId, tgMsgId, "⚠️");
   };
+  if (!prep.ok) {
+    warn();
+    audit("turn_completed_no_autopost", req.messageId, {
+      agent_id: ctx.agentId, thread_id: req.threadId, turn_ok: false, chars: 0,
+      replied: false, delivered: false, detail: `outbox_unavailable:${prep.detail}`,
+    });
+    return;
+  }
   // ★한 번만 부른다★ — 발신을 떼는 것과 답 보내는 명령을 넣는 것은 한 쌍이다.
   const call = groupTurnCall(deps, {
-    repoRoot: ctx.repoRoot,
     body: req.body,
     threadId: req.threadId,
     messageId: req.messageId,
+    replyPath,
   });
   let res: Awaited<ReturnType<typeof handleMessage>>;
   try {
     res = await run(chatId, call.body, tgMsgId, call.deps, undefined, "window");
   } catch (e) {
     warn();
+    // ★던져도 자리를 비운다★ — 안 지우면 다음 턴이 이번 답을 자기 답으로 읽는다.
+    consume(replyPath, outboxDir(ctx.repoRoot, ctx.agentId));
     audit("turn_completed_no_autopost", req.messageId, {
-      agent_id: ctx.agentId, thread_id: req.threadId, turn_ok: false, chars: 0,
+      agent_id: ctx.agentId, thread_id: req.threadId, turn_ok: false, chars: 0, replied: false,
       detail: `threw:${e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)}`,
     });
     return;
   }
-  console.log(`[codex-bridge] 창구 턴 완료(자동게시 없음) → ${res.detail} · ${res.reply.length}자`);
+  // ★답은 턴의 stdout 이 아니라 팀원이 쓴 파일에서 온다.★ 안 썼으면 안 보낸다.
+  const out = consume(replyPath, outboxDir(ctx.repoRoot, ctx.agentId));
+  let delivered = false;
+  let deliverDetail = "";
+  if (out.kind === "reply") {
+    try {
+      delivered = await deliver({
+        repoRoot: ctx.repoRoot, text: out.text, threadId: req.threadId, messageId: req.messageId,
+      });
+      if (!delivered) deliverDetail = "deliver_failed";
+    } catch (e) {
+      deliverDetail = `deliver_threw:${e instanceof Error ? e.message.slice(0, 80) : String(e).slice(0, 80)}`;
+    }
+  } else if (out.kind === "rejected") {
+    deliverDetail = `reply_rejected:${out.reason}`;
+  }
+  const replyChars = out.kind === "reply" ? out.text.length : 0;
+  console.log(
+    `[codex-bridge] 창구 턴 완료 → ${res.detail} · 답파일 ${out.kind}${replyChars ? ` ${replyChars}자` : ""}` +
+      `${out.kind === "reply" ? ` · 운반 ${delivered ? "성공" : "실패"}` : ""}`,
+  );
   audit("turn_completed_no_autopost", req.messageId, {
-    agent_id: ctx.agentId, thread_id: req.threadId, turn_ok: res.turnOk, chars: res.reply.length,
-    // ★send_failed 는 이 경로의 기대값이다★ — 발신을 뗐으므로. 실패 사유로 적으면 전부 거짓값이 된다.
-    detail: res.turnOk ? "turn_ok" : res.detail,
+    agent_id: ctx.agentId, thread_id: req.threadId, turn_ok: res.turnOk, chars: replyChars,
+    // ★"턴이 됐나" 와 "답을 했나" 와 "운반됐나" 는 서로 다른 값이다★ — 한 칸에 뭉치면 판정이 거짓이 된다.
+    //   턴이 성공했는데 답 파일이 없는 것은 ★고장이 아니라 "답 안 함"★ 이다(오너가 아니었을 수 있다).
+    replied: out.kind === "reply",
+    delivered,
+    // ★send_failed 는 이 경로의 기대값이다★ — 텔레그램 발신을 뗐으므로. 실패 사유로 적으면 전부 거짓값이 된다.
+    detail: !res.turnOk ? res.detail : deliverDetail || (out.kind === "reply" ? "turn_ok" : `no_reply:${out.kind}`),
   });
-  if (!res.turnOk) warn();
+  // ★경고는 "고장" 에만 붙인다★ — 답을 안 한 것은 고장이 아니다. 운반 실패는 고장이다.
+  if (!res.turnOk || deliverDetail) warn();
+}
+
+/**
+ * ★브리지가 답을 버스로 운반한다.★ 팀원이 셸을 안 타므로 승인 팝업이 안 뜬다.
+ *
+ * 본문은 ★argv 에 싣지 않는다★ — `--body-file` 로 넘긴다. 답에 홑따옴표·백틱·`$` 가 있어도
+ * 해석될 자리가 없다. 파일은 보낸 뒤 지운다(팀 대화가 디스크에 남지 않게).
+ */
+async function deliverGroupReply(a: {
+  repoRoot: string; text: string; threadId: string; messageId: string;
+}): Promise<boolean> {
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "b3os-out-"));
+  const file = join(dir, "body.txt");
+  try {
+    writeFileSync(file, a.text, { mode: 0o600 });
+    const proc = Bun.spawn([
+      `${a.repoRoot}/skills/b3os-team-inbox/scripts/send.sh`,
+      "--to", "broadcast",
+      "--thread", a.threadId,
+      "--in-reply-to", a.messageId,
+      "--body-file", file,
+    ], { stdout: "pipe", stderr: "pipe", cwd: a.repoRoot });
+    return (await proc.exited) === 0;
+  } finally {
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
 }
 
 /**
@@ -567,7 +642,7 @@ export async function handleMessage(
   //   ★enforcement = gate 결과와 무관하게 그룹 전체 drop★ — capture→bus가 owner를 이미 처리하므로(runInjection이
   //   route targets 에만 주입) native 가 또 답하면 이중응답. gate는 shadow/audit(effective 권위 기록)용으로만.
   //   env flag 2개 분리, 둘 다 off 기본 = ★라이브 영향 0(byte-level 불변)★. shadow=drop 없이 audit만.
-  // ★이 브리지가 '누구' 인지는 한 곳에서만 정한다★ (리뷰 지적).
+  // ★이 브리지가 '누구' 인지는 한 곳에서만 정한다★.
   //   같은 식이 아래 네 곳에 흩어져 있었다. 그중 하나라도 빠지면 ★남의 신원으로 도는데★
   //   그게 승인 요청의 주인으로도 쓰인다 — 실제로 dex 요청 4건이 codex 앞으로 기록됐다.
   const selfAgentId = deps.agentId ?? process.env.CODEX_AGENT_ID ?? "codex";
@@ -615,7 +690,7 @@ export async function handleMessage(
     const sent = await send(chatId, SCHEDULE_UNSUPPORTED_TEXT);
     return {
       ok: sent !== null,
-      // ★창구 경로에서는 실패다★ (리뷰 지적): 여기서는 안내 문구를 ★발신으로★ 전하는데,
+      // ★창구 경로에서는 실패다★: 여기서는 안내 문구를 ★발신으로★ 전하는데,
       //   그 경로는 발신을 뗐다 — 그러면 ★답 0건 · 경고 없음 · 성공 기록★ 이 되어
       //   사람도 기록도 "잘 됐다" 로 읽는다. 아무것도 전달되지 않았으므로 turnOk 는 거짓이다.
       //   1:1 은 실제로 보내므로 `ok` 로 판정되어 영향이 없다.
@@ -1266,16 +1341,16 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     },
   });
   if (windowHandle) {
-    // ★신호 처리기를 달면 Node 의 기본 종료가 사라진다★ (리뷰 지적).
+    // ★신호 처리기를 달면 Node 의 기본 종료가 사라진다★.
     //   창구만 닫고 끝내면 폴 루프가 계속 돌아 ★SIGTERM 으로 안 죽는다★ —
     //   launchd 재기동이 SIGKILL 까지 기다리게 된다. 치우고 ★직접 나간다.★
     const stop = () => {
-      // ★종료에 물려 사라지는 턴을 기록에 남긴다★ (리뷰 지적).
+      // ★종료에 물려 사라지는 턴을 기록에 남긴다★.
       //   창구는 202(접수)까지만 답한다. 이미 접수돼 큐에 든 턴은 여기서 프로세스가 끝나며
       //   ★확정적으로 사라지는데, 안 돌았다는 기록이 어디에도 없다★ —
       //   ★보낸 쪽은 갔다고 믿고 받는 쪽은 온 적이 없는★, 이 창구가 고치려는 그 실패 모양이다.
       //   막지는 않는다(비우려면 종료가 늘어진다). 남은 개수를 남겨 나중에 읽히게 한다.
-      //   ★이 줄이 남는 이유는 조건부다★ (리뷰 지적): `process.exit(0)` 은 ★버퍼를 안 비우고★
+      //   ★이 줄이 남는 이유는 조건부다★: `process.exit(0)` 은 ★버퍼를 안 비우고★
       //   나간다. 지금 살아남는 것은 stdout 이 ★일반 파일★ 이라 Node 가 동기로 쓰기 때문이다
       //   (`launcher.ts` — plist 의 `StandardOutPath` 가 파일이고, wrapper 의 `exec bun` 뒤에 파이프가 없다).
       //   ★wrapper 에 `| tee` 같은 파이프를 하나 붙이면 stdout 이 파이프(비동기)가 되어 이 줄이 잘린다★ —
