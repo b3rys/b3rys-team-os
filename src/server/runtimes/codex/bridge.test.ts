@@ -18,6 +18,7 @@ import {
   tgEdit,
   isTurnRunningFor,
   buildDmSteerText,
+  noAutopostDeps,
 } from "./bridge";
 import type { CodexTurnResult } from "./runner";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -1091,5 +1092,35 @@ describe("codex bridge — 진행 중 작업에 끼어들기", () => {
     expect(t).toContain("로그인이 안되면 알려줘");
     expect(t).toContain("반영해서 계속하라");
     expect(t).toContain("이 메시지에도 답해라");
+  });
+});
+
+// ── ★창구 경로는 서버가 대신 말하지 않는다★ (2026-08-24 실측) ──
+describe("noAutopostDeps — 발신만 떼고 리액션은 남긴다", () => {
+  test("★sendMessage·editMessage 가 아무것도 안 보낸다★", async () => {
+    let sent = 0, edited = 0;
+    const base = {
+      sendMessage: async () => { sent += 1; return 1; },
+      editMessage: async () => { edited += 1; return true; },
+    } as unknown as Parameters<typeof noAutopostDeps>[0];
+    const d = noAutopostDeps(base);
+    expect(await d.sendMessage!(1, "x")).toBeNull();
+    expect(await d.editMessage!(1, 2, "x")).toBe(false);
+    expect(sent).toBe(0);
+    expect(edited).toBe(0);
+  });
+
+  test("★리액션은 그대로 남는다★ — '그 팀원이 받았다' 는 발신과 다른 값이다", async () => {
+    let reacted = 0;
+    const base = { reactMessage: async () => { reacted += 1; return true; } } as unknown as Parameters<typeof noAutopostDeps>[0];
+    await noAutopostDeps(base).reactMessage!(1, 2, "👀");
+    expect(reacted).toBe(1);
+  });
+
+  test("나머지 deps 는 그대로 넘어간다", () => {
+    const base = { agentId: "dex", teamBaseUrl: "http://x" } as unknown as Parameters<typeof noAutopostDeps>[0];
+    const d = noAutopostDeps(base);
+    expect(d.agentId).toBe("dex");
+    expect(d.teamBaseUrl).toBe("http://x");
   });
 });

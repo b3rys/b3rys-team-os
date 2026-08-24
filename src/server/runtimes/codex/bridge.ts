@@ -16,7 +16,7 @@ import {
   type DmAttachments, type DmMessageMedia,
 } from "./dmMedia";
 import { createSerialTurnQueue } from "./serialTurnQueue";
-import { startBridgeWindow } from "./bridgeWindow";
+import { startBridgeWindow, groupTurnBody } from "./bridgeWindow";
 import { makeChatSessionStore, NOOP_DM_SESSION_STORE, type DmSessionStore } from "./dmSessionStore";
 import { toMarkdownV2, splitForTelegram, toPlain } from "./telegramMarkdown";
 import { steerActiveTurn } from "./activeTurns";
@@ -474,6 +474,20 @@ async function fetchOwnerGate(
  * 텔레그램 메시지 1건 처리(순수 로직 — 토큰 불필요, mock 테스트 가능).
  * 흐름: 👀 리액션 → "작업 중…" 게시 → codex 턴 → 작업중 메시지를 답으로 교체(편집 실패 시 신규 발신).
  */
+/**
+ * ★서버가 팀원 대신 말하지 못하게 발신을 떼어낸 deps.★
+ *
+ * 창구(그룹) 경로 전용이다. 이 경로의 답은 팀원이 `send.sh --to broadcast` 로 직접 보내야
+ * ★버스에 남고★ 거기서 방으로 릴레이된다. 브리지가 텔레그램으로 바로 쏘면 방에는 뜨지만
+ * ★기록이 아무 데도 없다★ — 같은 방에서 claude 팀원 답은 남고 이쪽만 0건이었다(대조군 실측).
+ *
+ * ★리액션은 떼지 않는다★ — "그 팀원이 받았다" 는 사람이 보는 신호이고 발신과 다른 값이다.
+ * 1:1 경로는 이 함수를 쓰지 않는다(거기서는 브리지가 답하는 게 맞다).
+ */
+export function noAutopostDeps(deps: BridgeDeps): BridgeDeps {
+  return { ...deps, sendMessage: async () => null, editMessage: async () => false };
+}
+
 export async function handleMessage(
   chatId: number,
   text: string,
@@ -1195,8 +1209,27 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         void live.reactMessage?.(chatId, tgMsgId, "👀");
       }
       turns.enqueue(async () => {
-        const res = await handleMessage(chatId, r.body, tgMsgId, live, undefined, "window");
-        console.log(`[codex-bridge] 창구 턴 → ${res.detail}: ${res.reply.slice(0, 60)}`);
+        // ★서버는 팀원 대신 말하지 않는다★ (hermes 와 같은 계약 · 실측 2026-08-24).
+        //   전에는 이 경로도 `handleMessage` 의 텔레그램 발신을 그대로 탔다 — 방에는 떴지만
+        //   ★버스에는 아무 기록이 없었다.★ 같은 방에서 claude 팀원의 답은 남고 dex 것만 0건이었다
+        //   (대조군으로 확인). 버스만 보는 팀원에게 그 답은 ★존재하지 않는다.★
+        //   그룹 native 차단은 ★들어오는 쪽★ 만 막는다 — 나가는 쪽은 여기서 막는다.
+        //
+        //   ★리액션은 남긴다★ — "그 팀원이 받았다" 를 사람이 보는 신호라 발신과 다른 값이다.
+        const noAutopost = noAutopostDeps(live);
+        const res = await handleMessage(
+          chatId,
+          groupTurnBody({ repoRoot: REPO_ROOT, body: r.body, threadId: r.threadId, messageId: r.messageId }),
+          tgMsgId,
+          noAutopost,
+          undefined,
+          "window",
+        );
+        // ★본문은 안 남긴다★ — 말한 게 아니라 메모다(hermes 와 같은 기록 모양).
+        console.log(`[codex-bridge] 창구 턴 완료(자동게시 없음) → ${res.detail} · ${res.reply.length}자`);
+        appendAuditFile("codex_bridge", "turn_completed_no_autopost", r.messageId, {
+          agent_id: liveAgentId, thread_id: r.threadId, detail: res.detail, chars: res.reply.length,
+        });
       });
     },
   });

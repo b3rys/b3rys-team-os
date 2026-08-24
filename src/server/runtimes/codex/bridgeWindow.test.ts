@@ -231,3 +231,44 @@ describe("startBridgeWindow — 실제 왕복", () => {
   });
 });
 
+
+// ── ★서버는 팀원 대신 말하지 않는다★ (hermes 와 같은 계약) ──
+//
+// 창구 경로가 텔레그램으로 직접 쏘면 방에는 뜨지만 ★버스에는 아무 기록이 없다.★
+// 같은 방에서 claude 팀원 답은 남고 dex 것만 0건이었다(대조군 실측). 그래서 턴 본문은
+// 메모로 두고, 방에 말하려면 팀원이 직접 `send.sh --to broadcast` 를 불러야 한다.
+import { groupTurnBody } from "./bridgeWindow";
+
+describe("groupTurnBody — 답을 어디로 보낼지 함께 준다", () => {
+  const made = () =>
+    groupTurnBody({
+      repoRoot: "/repo",
+      body: "@덱스 들려?",
+      threadId: "tg--1003947108339",
+      messageId: "tg-8874",
+    });
+
+  test("★send.sh --to broadcast 명령이 들어간다★ — 없으면 답이 아무 데도 안 간다", () => {
+    const t = made();
+    expect(t).toContain("/repo/skills/b3os-team-inbox/scripts/send.sh");
+    expect(t).toContain("--to broadcast");
+  });
+
+  test("★스레드와 in-reply-to 가 박혀 있다★ — 사람이 조립하다 틀리지 않게", () => {
+    const t = made();
+    expect(t).toContain("--thread tg--1003947108339");
+    expect(t).toContain("--in-reply-to tg-8874");
+  });
+
+  test("★'서버가 대신 게시하지 않는다' 를 말해준다★ — 안 보내면 말한 게 아니다", () => {
+    expect(made()).toContain("서버가 대신 게시하지 않는다");
+  });
+
+  test("원문이 맨 앞에 그대로 있다 — 지시문이 질문을 덮지 않는다", () => {
+    expect(made().startsWith("@덱스 들려?")).toBe(true);
+  });
+
+  test("★--to <보낸사람> 이 아니다★ — 그룹 행의 발신자는 팀원이 아니다", () => {
+    expect(made()).not.toContain("--to user");
+  });
+});

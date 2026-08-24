@@ -269,3 +269,30 @@ export async function startBridgeWindow(deps: BridgeWindowDeps): Promise<BridgeW
     },
   };
 }
+
+/**
+ * ★그룹 턴의 본문 — 답을 어디로 보낼지 함께 준다.★
+ *
+ * 서버는 팀원 대신 말하지 않는다(hermes 와 같은 계약). 턴 본문은 ★그 팀원의 메모★ 이고,
+ * 방에 말하려면 팀원이 ★직접★ `send.sh --to broadcast` 를 불러야 한다 —
+ * 그래야 버스에 남고, 거기서 방으로 릴레이된다. ★보낸 것만 말한 것이다.★
+ *
+ * 이 문장이 없으면 턴은 돌지만 ★답이 아무 데도 안 간다★(자동 게시를 막았으므로).
+ */
+export function groupTurnBody(input: {
+  repoRoot: string;
+  body: string;
+  threadId: string;
+  messageId: string;
+}): string {
+  const send = `${input.repoRoot}/skills/b3os-team-inbox/scripts/send.sh`;
+  return [
+    input.body,
+    "",
+    `(그룹방 메시지 · thread=${input.threadId} · in-reply-to=${input.messageId})`,
+    "",
+    "★답은 이 명령으로 보내야 전달된다.★ 이 턴의 본문은 아무 데도 안 간다 —",
+    "서버가 대신 게시하지 않는다. 끝에 최종 답으로 한 번 실행하라:",
+    `${send} --to broadcast --thread ${input.threadId} --in-reply-to ${input.messageId} --body '<답>'`,
+  ].join("\n");
+}
