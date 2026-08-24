@@ -321,6 +321,10 @@ function groupTurnBody(input: {
   messageId: string;
 }): string {
   const send = `${input.repoRoot}/skills/b3os-team-inbox/scripts/send.sh`;
+  // ★종료자는 매번 다르게★ (리뷰 지적): 고정 이름이면 답에 그 줄이 들어갈 때 거기서 끊긴다.
+  //   "EOF 가 아니다" 로는 부족하다 — 다른 고정 이름으로 바꿔도 같은 사고가 난다.
+  //   매번 다르면 ★답이 종료자를 맞힐 확률 자체가 사라진다.★
+  const term = `B3OS_REPLY_${randomBytes(6).toString("hex").toUpperCase()}`;
   return [
     input.body,
     "",
@@ -330,9 +334,9 @@ function groupTurnBody(input: {
     "서버가 대신 게시하지 않는다. 끝에 최종 답으로 한 번 실행하라:",
     "",
     'f="$(mktemp -t b3os-reply)"',
-    `cat > "$f" <<'B3OS_REPLY_EOF__DO_NOT_USE'`,
+    `cat > "$f" <<'${term}'`,
     "<답>",
-    "B3OS_REPLY_EOF__DO_NOT_USE",
+    term,
     `${send} --to broadcast --thread ${input.threadId} --in-reply-to ${input.messageId} --body-file "$f"`,
     'rm -f "$f"',
     "",

@@ -320,3 +320,94 @@ describe("groupTurnCall — 발신을 떼고, 답 보내는 법을 함께 준다
     expect(made().body).not.toContain("--to user");
   });
 });
+
+// ── ★적대 입력 왕복 시험★ — 모양 단언이 아니라 실제 동작을 잰다 ──
+//
+// "mktemp 를 쓴다"·"종료자가 EOF 가 아니다" 는 ★생성된 문자열의 모양★ 이라, 템플릿을 바꾸면
+// 같이 바뀐다. ★인용을 잘못해도 통과한다.★ 유일한 증명은 실제로 셸에 태워서
+// ★나온 파일이 원문과 바이트로 같은가★ 를 보는 것이다.
+//
+// ★이 시험이 증명하지 않는 것★: dex 가 이 조각을 ★그대로 실행한다★ 는 것.
+//   본문은 프롬프트고 dex 는 다르게 쓸 수 있다 — 그건 배포 후 ② 로만 재진다.
+//   (부품이 맞다 ≠ 조립된 게 돈다 ≠ 실제로 그 경로로 간다)
+import { readFileSync, existsSync, mkdirSync } from "node:fs";
+
+describe("템플릿이 적대 입력을 손상 없이 통과시킨다 (dex 가 그대로 실행하는지는 배포 후 ②)", () => {
+  // 한 덩어리로 넣는다 — 하나씩 넣으면 조합에서 새는 것을 못 잡는다.
+  const HOSTILE = [
+    "홑따옴표 ' 하나",
+    ' 겹따옴표 " 하나',
+    "백틱 `id` 와 달러괄호 $(id) 와 달러변수 $HOME",
+    "EOF",
+    "B3OS_REPLY_DEADBEEF",
+    "탭\t끝",
+    "역슬래시 \\ 와 이모지 ✦ 와 한글",
+    "",
+    "마지막 줄",
+  ].join("\n");
+
+  test("★적대 입력이 파일까지 바이트 그대로 간다★", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rt-"));
+    // send.sh 스텁 — --body-file 의 내용을 그대로 밖으로 복사한다.
+    const stubRoot = join(dir, "root");
+    const stubDir = join(stubRoot, "skills", "b3os-team-inbox", "scripts");
+    mkdirSync(stubDir, { recursive: true });
+    const out = join(dir, "captured.txt");
+    writeFileSync(
+      join(stubDir, "send.sh"),
+      ['#!/bin/bash', 'while [ $# -gt 0 ]; do', '  if [ "$1" = "--body-file" ]; then cp "$2" "' + out + '"; shift; fi',
+       '  shift', 'done', ''].join("\n"),
+      { mode: 0o755 },
+    );
+    chmodSync(join(stubDir, "send.sh"), 0o755);
+
+    const { body } = groupTurnCall(
+      { sendMessage: async () => null, editMessage: async () => false },
+      { repoRoot: stubRoot, body: "질문", threadId: "tg--100", messageId: "tg-1" },
+    );
+
+    // 본문에서 셸 조각만 떼어낸다: f=... 줄부터 rm -f 줄까지.
+    const lines = body.split("\n");
+    const from = lines.findIndex((l) => l.startsWith('f="$(mktemp'));
+    const to = lines.findIndex((l) => l.startsWith('rm -f'));
+    expect(from).toBeGreaterThan(-1);
+    expect(to).toBeGreaterThan(from);
+    // <답> 자리를 적대 입력으로 갈아끼운다.
+    const snippet = lines.slice(from, to + 1).join("\n").replace("<답>", HOSTILE);
+
+    const r = Bun.spawnSync(["bash", "-c", snippet]);
+    expect(r.exitCode).toBe(0);
+    expect(existsSync(out)).toBe(true);
+    // ★바이트로 비교한다★ — heredoc 은 끝에 개행을 하나 붙인다.
+    expect(readFileSync(out, "utf8")).toBe(HOSTILE + "\n");
+  });
+
+  test("★종료자가 매번 다르다★ — 고정이면 답이 그 줄을 맞힐 수 있다", () => {
+    const term = (b: string) => b.split("\n").find((l) => l.startsWith("cat > "))!;
+    const a = groupTurnCall({}, { repoRoot: "/r", body: "x", threadId: "t", messageId: "m" }).body;
+    const b = groupTurnCall({}, { repoRoot: "/r", body: "x", threadId: "t", messageId: "m" }).body;
+    expect(term(a)).not.toBe(term(b));
+  });
+
+  test("★보낸 뒤 임시파일이 남지 않는다★ — 팀 대화가 /tmp 에 평문으로 남으면 안 된다", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rt2-"));
+    const stubDir = join(dir, "skills", "b3os-team-inbox", "scripts");
+    mkdirSync(stubDir, { recursive: true });
+    const seen = join(dir, "path.txt");
+    writeFileSync(
+      join(stubDir, "send.sh"),
+      ['#!/bin/bash', 'while [ $# -gt 0 ]; do', '  if [ "$1" = "--body-file" ]; then echo -n "$2" > "' + seen + '"; shift; fi',
+       '  shift', 'done', ''].join("\n"),
+      { mode: 0o755 },
+    );
+    chmodSync(join(stubDir, "send.sh"), 0o755);
+    const { body } = groupTurnCall({}, { repoRoot: dir, body: "질문", threadId: "t", messageId: "m" });
+    const lines = body.split("\n");
+    const from = lines.findIndex((l) => l.startsWith('f="$(mktemp'));
+    const to = lines.findIndex((l) => l.startsWith("rm -f"));
+    Bun.spawnSync(["bash", "-c", lines.slice(from, to + 1).join("\n").replace("<답>", "내용")]);
+    const used = readFileSync(seen, "utf8");
+    expect(used).toContain("b3os-reply");
+    expect(existsSync(used)).toBe(false);
+  });
+});
