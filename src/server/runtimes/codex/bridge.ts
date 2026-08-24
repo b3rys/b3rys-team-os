@@ -16,7 +16,8 @@ import {
   type DmAttachments, type DmMessageMedia,
 } from "./dmMedia";
 import { createSerialTurnQueue } from "./serialTurnQueue";
-import { makeDmSessionStore, NOOP_DM_SESSION_STORE, type DmSessionStore } from "./dmSessionStore";
+import { startBridgeWindow } from "./bridgeWindow";
+import { makeChatSessionStore, NOOP_DM_SESSION_STORE, type DmSessionStore } from "./dmSessionStore";
 import { toMarkdownV2, splitForTelegram, toPlain } from "./telegramMarkdown";
 import { steerActiveTurn } from "./activeTurns";
 import { spawn } from "node:child_process";
@@ -484,6 +485,13 @@ export async function handleMessage(
    * 함수로 넘겨 이 턴 안에서 받게 한다(시험에서는 통신 없이 대신 넣는다).
    */
   fetchAttachments?: () => Promise<DmAttachments>,
+  /**
+   * ★어느 입구로 들어왔나.★ 그룹 native 차단은 ★폴링 입구★ 에 거는 것이다 —
+   *   그 입구엔 오너 판정이 없어서 남을 부른 메시지에도 답했다(실측 2026-08-24).
+   *   `"window"` 는 서버(capture)가 오너를 정한 뒤 창구로 넣은 것이라 그 차단을 지나지 않는다.
+   *   ★플래그로 게이트를 끄는 게 아니라, 게이트가 애초에 그 입구의 것이다.★
+   */
+  ingress: "poll" | "window" = "poll",
 ): Promise<{ ok: boolean; reply: string; detail: string }> {
   // ★브리지도 app-server 로 간다.★
   //   전에는 브리지만 옛 exec 경로였다 — 그래서 ★사람이 직접 말 거는 길에만★ 그때까지의 개선
@@ -505,7 +513,7 @@ export async function handleMessage(
   //   그게 승인 요청의 주인으로도 쓰인다 — 실제로 dex 요청 4건이 codex 앞으로 기록됐다.
   const selfAgentId = deps.agentId ?? process.env.CODEX_AGENT_ID ?? "codex";
 
-  if (chatId < 0 && messageId !== undefined) {
+  if (ingress === "poll" && chatId < 0 && messageId !== undefined) {
     const shadowOn = process.env.CODEX_GROUP_NATIVE_DENY_SHADOW === "true";
     // ★기본값 = 켜짐★ (제품 결정 2026-08-24): 그룹은 다른 런타임과 같이 capture→bus 로만 받는다.
     //   native 가 그룹에 직접 답하면 ★자기 앞으로 온 것이 아닌 호출에도 답한다★ — 실측: 그룹에서
@@ -1137,7 +1145,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     // ★agentId 를 실어 보낸다★ — 안 실으면 handleMessage 가 같은 식을 다시 계산해,
     //   runBridge({agentId}) 로 부를 때 두 값이 갈린다. 그러면 steer 가 등록 안 된 id 를 찾아 늘 실패한다.
     agentId: liveAgentId,
-    dmSessions: deps.dmSessions ?? makeDmSessionStore(liveAgentId, defaultTeamDbPath()),
+    dmSessions: deps.dmSessions ?? makeChatSessionStore(liveAgentId, defaultTeamDbPath()),
     sendMessage: deps.sendMessage ?? tgSend(token),
     editMessage: deps.editMessage ?? tgEdit(token),
     reactMessage: deps.reactMessage ?? tgReact(token),
@@ -1168,6 +1176,35 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
   const turns = createSerialTurnQueue((e) => {
     console.error(`[codex-bridge] 턴 처리 실패: ${e instanceof Error ? e.message : e}`);
   });
+
+  // ★그룹 턴은 서버(capture)가 창구로 넣는다★ — 오너 판정은 거기서 이미 끝났다.
+  //   같은 `turns` 큐를 타므로 ★한 팀원 한 턴★ 불변식이 유지된다(1:1 과 겹치지 않는다).
+  //   리액션은 ★이 봇으로★ 단다 — 팀 op 봇이 달면 "누가 받았는지" 가 안 보인다(리뷰 지적).
+  const windowHandle = await startBridgeWindow({
+    agentId: liveAgentId,
+    pidFile,
+    log: (line) => console.log(line),
+    enqueue: (r) => {
+      const chatId = Number(r.groupId);
+      if (!Number.isFinite(chatId)) {
+        console.log(`[codex-bridge] 창구 요청 무시: groupId 가 숫자가 아니다 msg=${r.messageId}`);
+        return;
+      }
+      const tgMsgId = r.origTgMessageId ? Number(r.origTgMessageId) : undefined;
+      if (tgMsgId !== undefined && Number.isFinite(tgMsgId)) {
+        void live.reactMessage?.(chatId, tgMsgId, "👀");
+      }
+      turns.enqueue(async () => {
+        const res = await handleMessage(chatId, r.body, tgMsgId, live, undefined, "window");
+        console.log(`[codex-bridge] 창구 턴 → ${res.detail}: ${res.reply.slice(0, 60)}`);
+      });
+    },
+  });
+  if (windowHandle) {
+    const stop = () => windowHandle.close();
+    process.once("SIGTERM", stop);
+    process.once("SIGINT", stop);
+  }
 
   for (;;) {
     try {

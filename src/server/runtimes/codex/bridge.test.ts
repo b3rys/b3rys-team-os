@@ -123,6 +123,25 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     });
     const gate = (suppress: boolean) => { let n = 0; const fn = async () => { n++; return { suppress, reason: "explicit_mention", targets: ["bill"] }; }; return { fn, calls: () => n }; };
 
+    // ★차단은 '폴링 입구' 의 것이다★ — 그 입구엔 오너 판정이 없어 남을 부른 메시지에도 답했다.
+    //   창구(window)로 들어온 것은 서버(capture)가 오너를 정한 뒤 넣은 것이라 그 차단을 지나지 않는다.
+    test("★창구 입구는 차단을 지나지 않는다★ — 미설정(차단 켜짐)이어도 그룹 턴이 돈다", async () => {
+      delete process.env.CODEX_GROUP_NATIVE_DENY_SHADOW; delete process.env.CODEX_GROUP_NATIVE_DENY;
+      const { deps, calls } = spies(() => ok("답")); const g = gate(false); deps.ownerGate = g.fn;
+      const r = await handleMessage(-123, "x", 55, deps, undefined, "window");
+      expect(r.detail).toBe("delivered");
+      expect(g.calls()).toBe(0); // 브리지는 오너 판정을 하지 않는다 — capture 가 이미 했다
+      expect(calls.reacts.length).toBe(1);
+    });
+
+    test("★같은 메시지라도 폴링 입구면 여전히 막힌다★ (기본값이 우회 수단이 되면 안 된다)", async () => {
+      delete process.env.CODEX_GROUP_NATIVE_DENY_SHADOW; delete process.env.CODEX_GROUP_NATIVE_DENY;
+      const { deps, calls } = spies(() => ok("답")); deps.ownerGate = gate(false).fn;
+      const r = await handleMessage(-123, "x", 55, deps, undefined, "poll");
+      expect(r.detail).toBe("group_native_denied");
+      expect(calls.reacts.length).toBe(0);
+    });
+
     test("★미설정 = 켜짐★ → 그룹은 drop(group_native_denied), react 안 함", async () => {
       delete process.env.CODEX_GROUP_NATIVE_DENY_SHADOW; delete process.env.CODEX_GROUP_NATIVE_DENY;
       const { deps, calls } = spies(() => ok("답")); deps.ownerGate = gate(false).fn;

@@ -91,3 +91,57 @@ describe("1:1 세션 기억 — 재시작 연속성", () => {
     expect(() => s.clear(111)).not.toThrow();
   });
 });
+
+// ── ★그룹과 1:1 은 다른 surface 로 적힌다★ (2026-08-24) ──
+//
+// 섞어도 chatId 가 달라 충돌은 안 나지만 ★이름이 거짓말★ 이 된다. 6.8 을 재는 판별자
+// (`created_at` 보존)도 두 대화가 한 이름에 섞이면 못 쓰게 된다.
+import { makeChatSessionStore, GROUP_SURFACE } from "./dmSessionStore";
+
+describe("makeChatSessionStore — chatId 부호로 surface 를 고른다", () => {
+  function fresh(): { db: Database; path: string } {
+    const dir = mkdtempSync(join(tmpdir(), "css-"));
+    const path = join(dir, "team.db");
+    const db = new Database(path);
+    migrate(db);
+    db.prepare(
+      `INSERT INTO agent (id, display_name, role, runtime, status_provider, workspace_path, persona_file)
+       VALUES ('dex','Dex','Dev','codex','codex_cli','','')`,
+    ).run();
+    db.close();
+    return { db: new Database(path), path };
+  }
+  const surfaceOf = (db: Database, key: string): string | undefined =>
+    (db.prepare(`SELECT surface AS s FROM codex_session_map WHERE conversation_key = ?`).get(key) as { s: string } | undefined)?.s;
+
+  test("★그룹(음수 chatId)은 telegram_group 으로 적힌다★", () => {
+    const { db, path } = fresh();
+    makeChatSessionStore("dex", path).save(-1003947108339, "sess-g");
+    expect(surfaceOf(db, "-1003947108339")).toBe(GROUP_SURFACE);
+  });
+
+  test("1:1(양수 chatId)은 telegram_dm 그대로", () => {
+    const { db, path } = fresh();
+    makeChatSessionStore("dex", path).save(7066867819, "sess-d");
+    expect(surfaceOf(db, "7066867819")).toBe(DM_SURFACE);
+  });
+
+  test("★두 대화가 서로를 안 덮는다★ — 각자 자기 세션을 돌려준다", () => {
+    const { path } = fresh();
+    const s = makeChatSessionStore("dex", path);
+    s.save(-100, "sess-group");
+    s.save(200, "sess-dm");
+    expect(s.get(-100)).toBe("sess-group");
+    expect(s.get(200)).toBe("sess-dm");
+  });
+
+  test("★지울 때도 자기 surface 만★ — 그룹을 지워도 1:1 은 남는다", () => {
+    const { path } = fresh();
+    const s = makeChatSessionStore("dex", path);
+    s.save(-100, "sess-group");
+    s.save(200, "sess-dm");
+    s.clear(-100);
+    expect(s.get(-100)).toBeUndefined();
+    expect(s.get(200)).toBe("sess-dm");
+  });
+});
