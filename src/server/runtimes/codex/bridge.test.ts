@@ -1099,6 +1099,7 @@ describe("codex bridge — 진행 중 작업에 끼어들기", () => {
 // 경고는 `res.ok` 를 읽는 자리에 있었는데, 창구 경로는 발신을 일부러 떼서 `ok` 가 ★항상 false★ 다.
 // 그래서 ★정상 성공에도 경고가 떴다.★ 부품(문자열·발신 0회)만 재는 시험은 이걸 못 잡는다.
 import { runGroupTurn } from "./bridge";
+import { groupReplyPath, ensureOutboxDir } from "./groupOutbox";
 
 describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 값이다★", () => {
   const tmpRoot = mkdtempSync(join(tmpdir(), "grt-"));
@@ -1243,4 +1244,86 @@ test("★예약 미지원 안내는 창구에서 실패로 보인다★ — 답 
   expect(r.detail).toContain("schedule");
   // ★turnOk 가 거짓이어야 창구 경로가 경고를 띄운다★
   expect(r.turnOk).toBe(false);
+});
+
+// ── ★진짜 운반 경로를 통과시킨다★ ──
+//
+// 주입된 스텁만 재면 ★스텁이 받은 값★ 을 잴 뿐이고, 실제 함수에서 from_agent_id 줄을 지워도
+// 전부 초록이다. 서버 입구를 세워 ★실제로 POST 되는 것★ 을 본다.
+describe("deliverGroupReply — 실제로 서버 입구에 넣는다", () => {
+  type Ctx = Parameters<typeof runGroupTurn>[0];
+  const root2 = mkdtempSync(join(tmpdir(), "dlv-"));
+
+  async function withServer(
+    status: number,
+    body: string,
+    run: (audits: Record<string, unknown>[]) => Promise<void>,
+  ): Promise<Record<string, unknown>[]> {
+    const seen: Record<string, unknown>[] = [];
+    const srv = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(req) {
+        seen.push({ path: new URL(req.url).pathname, ...(await req.json() as Record<string, unknown>) });
+        return new Response(body, { status });
+      },
+    });
+    const prev = process.env.TEAM_BASE_URL;
+    process.env.TEAM_BASE_URL = `http://127.0.0.1:${srv.port}/team`;
+    const audits: Record<string, unknown>[] = [];
+    try {
+      await run(audits);
+    } finally {
+      if (prev === undefined) delete process.env.TEAM_BASE_URL; else process.env.TEAM_BASE_URL = prev;
+      srv.stop(true);
+    }
+    return [...seen, ...audits];
+  }
+
+  function ctxFor(audits: Record<string, unknown>[], replyPath: string): Ctx {
+    writeFileSync(replyPath, "방에 올릴 답");
+    return {
+      deps: { sendMessage: async () => 1, editMessage: async () => true, reactMessage: async () => true },
+      agentId: "dex",
+      repoRoot: root2,
+      chatId: -100,
+      tgMsgId: 42,
+      req: { body: "@덱스 들려?", threadId: "tg--100", messageId: "tg-1" },
+      audit: (_a: string, _t: string, d: Record<string, unknown>) => { audits.push(d); },
+      run: async () => ({ ok: false, turnOk: true, reply: "", detail: "send_failed" }),
+      replyPath,
+      // ★deliver 를 안 넘긴다★ — 진짜 함수를 태운다
+    } as unknown as Ctx;
+  }
+
+  test("★from_agent_id 에 이 턴의 주인이 실린다★ — 서버가 누가 보냈는지 추측하지 않는다", async () => {
+    const p = groupReplyPath(root2, "dex");
+    ensureOutboxDir(p);
+    let audits: Record<string, unknown>[] = [];
+    const all = await withServer(201, '{"ok":true}', async (a) => {
+      audits = a;
+      await runGroupTurn(ctxFor(a, p));
+    });
+    const posted = all[0] as Record<string, unknown>;
+    expect(posted.path).toBe("/team/api/inbox");
+    expect(posted.from_agent_id).toBe("dex");
+    expect(posted.to_agent_id).toBe("broadcast");
+    expect(posted.body).toBe("방에 올릴 답");
+    expect(posted.thread_id).toBe("tg--100");
+    expect(posted.in_reply_to).toBe("tg-1");
+    expect(audits[0]?.delivered).toBe(true);
+  });
+
+  test("★거절되면 상태 코드와 응답이 사유에 남는다★ — 넉 자만 남으면 손으로 재현해야 한다", async () => {
+    const p = groupReplyPath(root2, "dex");
+    ensureOutboxDir(p);
+    let audits: Record<string, unknown>[] = [];
+    await withServer(422, '{"error":"unknown agent"}', async (a) => {
+      audits = a;
+      await runGroupTurn(ctxFor(a, p));
+    });
+    expect(audits[0]?.delivered).toBe(false);
+    expect(String(audits[0]?.detail)).toContain("422");
+    expect(String(audits[0]?.detail)).toContain("unknown agent");
+  });
 });
