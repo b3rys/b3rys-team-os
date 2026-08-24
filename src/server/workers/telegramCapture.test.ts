@@ -21,6 +21,7 @@ import {
   bestPhoto,
   mcpOnoffRow,
   applyMcpOnoff,
+  armBusFallback,
 } from "./telegramCapture";
 
 const codex: AgentRecord = {
@@ -402,5 +403,85 @@ describe("slash command formatters (fmt*)", () => {
     const out = fmtStatus(dbWithTasks(), roster);
     expect(out).toContain("등록 에이전트: 2명");
     expect(out).toContain("실행중 1 / 완료 1");
+  });
+});
+
+
+describe("armBusFallback — 주입 분기 없는 팀원을 버스가 깨우게", () => {
+  function seed(): { db: Database; mid: string } {
+    const db = new Database(":memory:");
+    migrate(db);
+    const mid = "m-grp-1";
+    for (const [id, rt, sp] of [["dex", "codex", "codex_cli"], ["bill", "claude_channel", "claude_tmux"]] as const) {
+      db.prepare(
+        `INSERT INTO agent (id, display_name, role, runtime, status_provider, workspace_path, persona_file)
+         VALUES (?, ?, 'Dev', ?, ?, '', '')`,
+      ).run(id, id, rt, sp);
+    }
+    // ★INSERT OR IGNORE 로 thread 를 만들면 NOT NULL 위반이 조용히 삼켜진다★ — 정본 헬퍼를 쓴다.
+    db.prepare(
+      `INSERT INTO thread (id, title, kind, participants_json, opened_by) VALUES ('tg--100', 'group', 'broadcast', '[]', 'user')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, created_at)
+       VALUES (?, 'tg--100', 'user', 'dex', 'dm', '@덱스 들려?', 'user', datetime('now'))`,
+    ).run(mid);
+    return { db, mid };
+  }
+  function rcpt(db: Database, mid: string, agentId: string, state: string) {
+    db.prepare(
+      `INSERT INTO message_recipient (message_id, agent_id, delivery_state) VALUES (?, ?, ?)`,
+    ).run(mid, agentId, state);
+  }
+  function stateOf(db: Database, mid: string, agentId: string): string | undefined {
+    return (
+      db
+        .prepare(`SELECT delivery_state AS s FROM message_recipient WHERE message_id = ? AND agent_id = ?`)
+        .get(mid, agentId) as { s: string } | undefined
+    )?.s;
+  }
+
+  test("completed 행 → pending 으로 되돌린다 (changes 1)", () => {
+    const { db, mid } = seed();
+    rcpt(db, mid, "dex", "completed");
+    expect(armBusFallback(db, mid, "dex")).toBe(1);
+    expect(stateOf(db, mid, "dex")).toBe("pending");
+  });
+
+  test("★completed 가 아닌 행은 안 덮는다★ — dispatching 은 그대로", () => {
+    const { db, mid } = seed();
+    rcpt(db, mid, "dex", "dispatching");
+    expect(armBusFallback(db, mid, "dex")).toBe(0);
+    expect(stateOf(db, mid, "dex")).toBe("dispatching");
+  });
+
+  test("이미 pending 이면 아무 일도 안 한다 (changes 0)", () => {
+    const { db, mid } = seed();
+    rcpt(db, mid, "dex", "pending");
+    expect(armBusFallback(db, mid, "dex")).toBe(0);
+    expect(stateOf(db, mid, "dex")).toBe("pending");
+  });
+
+  test("행이 없으면 0 — 부르는 쪽이 audit 할 수 있어야 한다", () => {
+    const { db, mid } = seed();
+    expect(armBusFallback(db, mid, "dex")).toBe(0);
+  });
+
+  test("★수신자 단위★ — 같은 메시지의 다른 팀원 행은 안 건드린다(이중배달 방지)", () => {
+    const { db, mid } = seed();
+    rcpt(db, mid, "dex", "completed");
+    rcpt(db, mid, "bill", "completed");
+    expect(armBusFallback(db, mid, "dex")).toBe(1);
+    expect(stateOf(db, mid, "dex")).toBe("pending");
+    expect(stateOf(db, mid, "bill")).toBe("completed");
+  });
+
+  test("★연결 시험 — 되돌린 행을 pendingDispatch 가 실제로 집는다★", async () => {
+    const { db, mid } = seed();
+    rcpt(db, mid, "dex", "completed");
+    const { pendingDispatch } = await import("../db/inbox/dispatch");
+    expect(pendingDispatch(db).some((r) => r.message_id === mid && r.agent_id === "dex")).toBe(false);
+    armBusFallback(db, mid, "dex");
+    expect(pendingDispatch(db).some((r) => r.message_id === mid && r.agent_id === "dex")).toBe(true);
   });
 });

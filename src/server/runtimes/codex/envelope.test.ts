@@ -93,3 +93,45 @@ test("★팀 컨텍스트는 다른 런타임과 똑같이 들어간다★ — c
   expect(env.teamContext).toBe("팀 규칙 요약 줄");
   expect(b.toPrompt(env)).toContain("팀 규칙 요약 줄");
 });
+
+// ── ★그룹 스레드면 방으로 답한다★ (2026-08-24) ──
+//
+// 그룹 캡처가 만든 행은 `from_agent_id='user'` 다. 예전 규칙(`--to <from>`)이면 `--to user` 가 나오는데
+// `user` 는 팀원이 아니라 ★답이 방에 안 간다.★ 깨어나기는 하는데 방은 조용한, 원인만 바뀐 같은 증상이다.
+describe("replyCommand — 그룹 스레드 대상", () => {
+  function groupRow(db: Database, threadId: string, from: string) {
+    db.prepare(
+      `INSERT INTO thread (id, title, kind, participants_json, opened_by) VALUES (?, 'group', 'broadcast', '[]', 'user')`,
+    ).run(threadId);
+    return {
+      message_id: "g1", agent_id: "cody", delivery_state: "dispatching", retry_count: 0, last_error: null,
+      from_agent_id: from, to_agent_id: "cody", body: "@덱스 들려?", source: "user", created_by: null,
+      max_hop: 16, hop_count: 0, in_reply_to: null, parent_message_id: null, sync: "none", thread_id: threadId,
+      type: "dm", created_at: new Date().toISOString(), priority: "normal", meta_json: null,
+    } as unknown as PendingDispatchRow;
+  }
+
+  test("★그룹 스레드 → --to broadcast★ (--to user 가 나오면 안 된다)", () => {
+    const { db, agent } = setup();
+    const row = groupRow(db, "tg--1003947108339", "user");
+    const env = new CodexTurnEnvelopeBuilder(db).buildForBus({ agent, row, teamContext: "" });
+    expect(env.howToReply).toContain("--to broadcast");
+    expect(env.howToReply).not.toContain("--to user");
+    expect(env.howToReply).toContain("--thread tg--1003947108339");
+  });
+
+  test("★팀원이 보낸 그룹 메시지도 방으로 간다★ — 방 판정이 발신자보다 우선", () => {
+    const { db, agent } = setup();
+    const row = groupRow(db, "tg--1003947108339", "bill");
+    const env = new CodexTurnEnvelopeBuilder(db).buildForBus({ agent, row, teamContext: "" });
+    expect(env.howToReply).toContain("--to broadcast");
+    expect(env.howToReply).not.toContain("--to bill");
+  });
+
+  test("★그룹이 아닌 스레드는 그대로★ — 요청자에게 간다(회귀 방지)", () => {
+    const { db, agent, row } = setup();
+    const env = new CodexTurnEnvelopeBuilder(db).buildForBus({ agent, row, teamContext: "" });
+    expect(env.howToReply).toContain("--to bill");
+    expect(env.howToReply).not.toContain("--to broadcast");
+  });
+});

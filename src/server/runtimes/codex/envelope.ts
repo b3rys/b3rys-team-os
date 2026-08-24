@@ -3,6 +3,7 @@ import type { PendingDispatchRow } from "../../bus/types";
 import { recentThreadMessages } from "../../db/inboxQueries";
 import type { AgentRecord } from "../../types";
 import { buildCodexMemoryRefs, type CodexMemoryRef } from "./memory";
+import { resolveThreadKind } from "../../channels/registry";
 
 export interface CodexTurnEnvelope {
   runtime: "codex_cli";
@@ -89,7 +90,17 @@ export class CodexTurnEnvelopeBuilder {
   /** ★이 턴의 답을 실제로 보내는 명령.★ 스레드·in-reply-to 를 박아 준다(사람이 조립하다 틀리지 않게). */
   private replyCommand(row: PendingDispatchRow): string {
     const repo = process.env.B3OS_REPO_ROOT ?? `${process.env.HOME ?? "~"}/Development/b3rys-team-os`;
-    const to = row.from_agent_id ? `--to ${row.from_agent_id}` : "--direct-to-gd";
+    // ★그룹 스레드면 방으로 답한다★ (2026-08-24).
+    //   그룹 캡처가 만든 행은 `from_agent_id='user'` 라, 예전엔 `--to user` 가 나왔다 — `user` 는
+    //   팀원이 아니므로 ★답이 방에 안 간다.★ 깨어나기는 하는데 방은 조용한, 원인만 바뀐 같은 증상이다.
+    //   '방이 어디냐' 는 ★정본 하나에 묻는다★ — `resolveThreadKind`(claude 분기도 같은 것을 쓴다).
+    //   복붙한 접두어 규칙을 두면 방 이름 규칙이 바뀔 때 한쪽만 어긋난다.
+    const to =
+      resolveThreadKind(row.thread_id) === "telegram_group"
+        ? "--to broadcast"
+        : row.from_agent_id
+          ? `--to ${row.from_agent_id}`
+          : "--direct-to-gd";
     return `${repo}/skills/b3os-team-inbox/scripts/send.sh ${to} --thread ${row.thread_id} --in-reply-to ${row.message_id} --body '<your answer>'`;
   }
 

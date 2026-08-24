@@ -335,6 +335,30 @@ export function findExistingTelegramOriginMessage(
 // 답장 원문 작성자(봇 username)를 agent id 로 매핑. @멘션 없을 때 라우터가 owner 로 씀.
 // GD 본인/외부 메시지에 대한 답장이면 매칭 없음 → undefined (reply-owner 미적용).
 // (2026-06-06 split: startTelegramCapture 클로저 → 모듈 함수. agents 를 인자로 받는 것 외 동작 동일.)
+/**
+ * ★주입 분기가 없는 팀원의 수신 행을 버스가 깨우도록 되돌린다.★
+ *
+ * 텔레그램 사용자 메시지의 수신 행은 삽입 시점에 `'completed'` 다 — "채널 담당이 배달하므로
+ * 버스는 안 깨운다" 는 전제다(`db/inbox/dispatch.ts`). 그 채널 담당이 없는 팀원에게는 그 전제가
+ * 성립하지 않으므로 `'pending'` 으로 되돌려 `pendingDispatch` 가 집게 한다.
+ *
+ * ★`'completed'` 인 행만 바꾼다★ — 이미 `pending`·`dispatching` 이거나 다른 경로가 손댄 행을 덮지 않는다.
+ * ★그 팀원의 행 하나만 바꾼다★ — 같은 메시지의 다른 수신자(주입 성공)는 영향이 없다.
+ *
+ * @returns 바뀐 행 수. ★1 이 아니면 부르는 쪽이 audit 한다★ — 0 은 "구제할 행이 없었다" 이고,
+ *          조용히 넘기면 그 팀원은 그룹에서 침묵한다.
+ */
+export function armBusFallback(db: Database, messageId: string, agentId: string): number {
+  const res = db
+    .prepare(
+      `UPDATE message_recipient
+          SET delivery_state = 'pending'
+        WHERE message_id = ? AND agent_id = ? AND delivery_state = 'completed'`,
+    )
+    .run(messageId, agentId);
+  return Number(res.changes ?? 0);
+}
+
 export function replyAuthorAgentId(fromUsername: string | undefined, agents: AgentRecord[]): string | undefined {
   if (!fromUsername) return undefined;
   // P3 신원 seam: 채널 어댑터로 위임. channel_identities.telegram 우선 → legacy telegram_bot_username 폴백.
@@ -714,6 +738,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
   const pendingBroadcasts = new Map<string, {
     decision: any; roster: any; deliveryBody: string; media: any;
     threadId: string; origTgMessageId?: string; teamContext: string; text: string;
+    storedMessageId?: string;
   }>();
   async function sendBroadcastConfirm(pid: string, text: string, targetCount: number, replyTo?: string): Promise<void> {
     const locale = getLocale(deps.db);
@@ -763,7 +788,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
       await tg("answerCallbackQuery", { callback_query_id: cb.id, text: pick(locale, "전송 중…", "Sending…") });
       if (mid) await tg("editMessageText", { chat_id: chatId, message_id: mid, text: pick(locale, `✅ 전체전송 승인 — 팀원 ${pending.decision.targetAgentIds.length}명에게 전송`, `✅ Broadcast approved — sending to ${pending.decision.targetAgentIds.length} member(s)`) });
       appendAuditFile("capture", "broadcast_approved", pid, { from: fromId, targets: pending.decision.targetAgentIds });
-      await runInjection(pending.decision, pending.roster, pending.deliveryBody, pending.media, pending.threadId, pending.origTgMessageId, pending.teamContext, pending.text);
+      await runInjection(pending.decision, pending.roster, pending.deliveryBody, pending.media, pending.threadId, pending.origTgMessageId, pending.teamContext, pending.text, pending.storedMessageId);
       return;
     }
 
@@ -1005,6 +1030,9 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     });
     const deliveryBody = withReplyContext(text, replyText);
     const threadId = `tg-${GROUP_ID}`;
+    // ★버스에 저장된 메시지 id★ — 아래 persist 블록에서 채운다. 주입 분기가 없는 팀원의
+    //   수신 행을 'pending' 으로 되돌릴 때 이 값으로 행을 특정한다(runInjection 의 버스 fallback).
+    let storedMessageId: string | undefined;
     // 가시성 Stage C: 깨우기 전 공유 버스의 최근 팀 맥락(최대 10건/6h)을 모은다 — 현재 메시지 적재 전 = 직전 맥락.
     let teamContext = "";
     try {
@@ -1063,6 +1091,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
         });
         return;
       }
+      storedMessageId = accepted.stored.id;
     } catch (e) {
       console.error("[capture] bus persist failed:", (e as Error).message);
     }
@@ -1100,17 +1129,32 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
       if (decision.reason === "broadcast_marker") {
         // @all 보류 — 주입하지 않고 GD 승인 버튼을 띄운다(오발송 방지).
         const pid = `bcast-${Date.now()}`;
-        pendingBroadcasts.set(pid, { decision, roster, deliveryBody, media, threadId, origTgMessageId, teamContext, text });
+        pendingBroadcasts.set(pid, { decision, roster, deliveryBody, media, threadId, origTgMessageId, teamContext, text, storedMessageId });
         appendAuditFile("capture", "broadcast_held", pid, { targets: decision.targetAgentIds, text: text.slice(0, 120) });
         await sendBroadcastConfirm(pid, text, decision.targetAgentIds.length, origTgMessageId);
       } else {
-        await runInjection(decision, roster, deliveryBody, media, threadId, origTgMessageId, teamContext, text);
+        await runInjection(decision, roster, deliveryBody, media, threadId, origTgMessageId, teamContext, text, storedMessageId);
       }
     }
   }
 
   // 주입 루프 추출(2026-06-18, @all confirm 준비) — 정상 라우팅과 @all 승인 후 재실행이 같은 코드를 쓰도록 함수화.
   // 동작 보존: 호출부 조건/본문 변경 없음.
+  /**
+   * ★capture 가 넣을 수 없는 런타임은 버스가 깨우게 한다.★
+   *
+   * 이 함수는 런타임별 분기로 팀원에게 그룹 메시지를 넣는다. 분기가 없는 런타임은 예전에
+   * `no_supported_path` 로그만 남기고 ★조용히 끝났다★ — 그 팀원은 그룹에서 아무 말도 못 듣는다
+   * (실측 2026-08-24: dex(runtime=codex) 호출 3건이 전부 이 자리로 떨어졌다).
+   *
+   * 텔레그램 사용자 메시지의 수신 행은 ★삽입 시점에 'completed'★ 다(`db/inbox/messages.ts`) —
+   * "채널 담당이 배달하므로 버스는 안 깨운다"는 전제다(`db/inbox/dispatch.ts` 주석). 그 채널 담당이
+   * 없는 팀원에게는 그 전제가 성립하지 않으므로, ★그 수신 행만★ 'pending' 으로 돌려 버스가 깨우게 한다.
+   *
+   * ★수신자 단위★ 라 같은 메시지의 다른 팀원(주입 성공)은 영향이 없다 — 이중배달이 안 난다.
+   * ★구제 범위는 '분기 없음' 하나다★ (리뷰 지적) — 주입을 시도했다가 실패한 경우(`ok:false`,
+   * openclaw 비동기 실패)는 여기 오지 않으므로 여전히 fallback 이 없다. 그건 별건이다.
+   */
   async function runInjection(
     decision: any,
     roster: any,
@@ -1120,6 +1164,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     origTgMessageId: string | undefined,
     teamContext: string,
     text: string,
+    storedMessageId: string | undefined,
   ): Promise<void> {
       for (const id of decision.targetAgentIds) {
         // 빌-제외 해제(2026-06-02): 빌 requireMention=true 전환 → owned 무-@멘션(sticky/default/reply/@별칭)을
@@ -1265,6 +1310,20 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
         }
         console.log(`[capture] inject skip ${id} (no supported injection path)`);
         appendAuditFile("capture", "injection_skip", id, { reason: "no_supported_path", text: text.slice(0, 120) });
+        // ★버스 fallback★ — 이 팀원은 주입 경로가 없으므로 수신 행을 'pending' 으로 돌려 깨운다.
+        if (!storedMessageId) {
+          // 저장 id 가 없으면 구제할 행을 특정할 수 없다. ★조용히 넘기지 않는다★ — 이 팀원은 침묵한다.
+          console.log(`[capture] bus fallback unavailable → ${id} (no stored message id)`);
+          appendAuditFile("capture", "bus_fallback_unavailable", id, {
+            reason: "no_stored_message_id", runtime: agent.runtime ?? null, text: text.slice(0, 120),
+          });
+          continue;
+        }
+        const changed = armBusFallback(deps.db, storedMessageId, id);
+        appendAuditFile("capture", changed === 1 ? "bus_fallback_armed" : "bus_fallback_no_row", id, {
+          message_id: storedMessageId, runtime: agent.runtime ?? null, changes: changed, text: text.slice(0, 120),
+        });
+        console.log(`[capture] bus fallback → ${id}: ${changed === 1 ? "armed" : `no_row(changes=${changed})`}`);
       }
   }
 
