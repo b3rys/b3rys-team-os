@@ -73,9 +73,8 @@ describe("consumeGroupReply — 한 번 읽고 반드시 지운다", () => {
   });
 
   test("★검사한 것과 읽은 것이 같은 객체다★ — 열린 fd 로만 재고 읽는다", () => {
-    // 전에는 lstat 으로 재고 ★경로로 다시★ 열었다. 그 사이에 심링크로 바꿔치기하면
-    // 읽기가 링크를 따라간다 — ★그 경로를 아는 게 팀원 자신이라★ 이론이 아니다.
-    // 지금은 O_NOFOLLOW 로 한 번 열고 fstat 으로 그 fd 를 재므로 바꿔칠 창이 없다.
+    // O_NOFOLLOW 로 한 번 열고 fstat 으로 ★그 fd★ 를 재므로, 검사와 읽기 사이에
+    // 경로를 바꿔칠 창이 없다. 그 경로를 아는 것은 답을 쓰는 팀원 자신이다.
     const d = dir();
     const f = join(d, "r.txt");
     writeFileSync(f, "정상 답");
@@ -126,6 +125,9 @@ describe("★부모 디렉터리가 바꿔치기되면 거절한다★ — O_NOF
     const r = consumeGroupReply(p, outboxDir(root, "dex"));
     expect(r).toEqual({ kind: "rejected", reason: "dir_moved" });
     expect(JSON.stringify(r)).not.toContain("비밀");
+    // ★거절만으로는 부족하다★ — 지우면서 거절하면 반환값은 같은데 남의 파일이 사라진다.
+    //   반환값만 보는 시험은 그 차이를 못 본다. ★막았다는 것은 원본이 그대로라는 뜻이다.★
+    expect(existsSync(join(elsewhere, "x.txt"))).toBe(true);
   });
 
   test("★정상 자리는 통과한다★ — 경계 밖만 재면 문턱이 어디든 통과한다", () => {
