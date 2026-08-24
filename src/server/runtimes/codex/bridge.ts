@@ -497,7 +497,8 @@ export async function runGroupTurn(ctx: {
   audit?: (action: string, target: string, detail: Record<string, unknown>) => void;
   /** 답 파일을 읽고 지우는 것 · 버스로 운반하는 것. 시험에서 갈아 끼운다. */
   consume?: typeof consumeGroupReply;
-  deliver?: (a: { repoRoot: string; text: string; threadId: string; messageId: string }) => Promise<boolean>;
+  deliver?: (a: { repoRoot: string; agentId: string; text: string; threadId: string; messageId: string })
+    => Promise<{ ok: boolean; detail: string }>;
   replyPath?: string;
 }): Promise<void> {
   const { deps, chatId, tgMsgId, req } = ctx;
@@ -546,10 +547,12 @@ export async function runGroupTurn(ctx: {
   let deliverDetail = "";
   if (out.kind === "reply") {
     try {
-      delivered = await deliver({
-        repoRoot: ctx.repoRoot, text: out.text, threadId: req.threadId, messageId: req.messageId,
+      const d = await deliver({
+        repoRoot: ctx.repoRoot, agentId: ctx.agentId, text: out.text,
+        threadId: req.threadId, messageId: req.messageId,
       });
-      if (!delivered) deliverDetail = "deliver_failed";
+      delivered = d.ok;
+      if (!d.ok) deliverDetail = `deliver_failed:${d.detail}`;
     } catch (e) {
       deliverDetail = `deliver_threw:${e instanceof Error ? e.message.slice(0, 80) : String(e).slice(0, 80)}`;
     }
@@ -581,8 +584,8 @@ export async function runGroupTurn(ctx: {
  * 해석될 자리가 없다. 파일은 보낸 뒤 지운다(팀 대화가 디스크에 남지 않게).
  */
 async function deliverGroupReply(a: {
-  repoRoot: string; text: string; threadId: string; messageId: string;
-}): Promise<boolean> {
+  repoRoot: string; agentId: string; text: string; threadId: string; messageId: string;
+}): Promise<{ ok: boolean; detail: string }> {
   const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
@@ -596,8 +599,20 @@ async function deliverGroupReply(a: {
       "--thread", a.threadId,
       "--in-reply-to", a.messageId,
       "--body-file", file,
-    ], { stdout: "pipe", stderr: "pipe", cwd: a.repoRoot });
-    return (await proc.exited) === 0;
+    ], {
+      stdout: "pipe",
+      stderr: "pipe",
+      cwd: a.repoRoot,
+      // ★발신자를 명시한다★: 그 스크립트는 기본적으로 ★현재 디렉터리↔작업폴더★ 로 누가 보내는지를
+      //   정하고, 실패하면 tmux 세션 이름으로 넘어간다. 이 프로세스의 디렉터리는 저장소 뿌리라
+      //   어느 팀원의 작업폴더도 아니고 tmux 세션도 없다 → ★해석이 실패해 발신이 통째로 죽는다.★
+      //   해석이 우연히 성공하는 환경에서는 더 나쁘다 — ★다른 팀원 이름으로 나간다.★
+      //   브리지는 이 턴의 주인을 알고 있으므로 추측 대신 그 값을 넘긴다(스크립트가 DB 로 검증한다).
+      env: { ...process.env, GD_AGENT_ID: a.agentId },
+    });
+    const [code, err] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+    // ★실패 사유를 버리지 않는다★ — 버리면 다음 실패도 "운반 실패" 넉 자로만 남아 같은 조사를 반복한다.
+    return { ok: code === 0, detail: code === 0 ? "" : `exit ${code}: ${err.trim().slice(0, 160)}` };
   } finally {
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
   }

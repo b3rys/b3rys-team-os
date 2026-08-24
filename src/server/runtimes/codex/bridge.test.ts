@@ -1107,7 +1107,7 @@ describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 �
   function make(run: unknown, out: Out = { kind: "reply", text: "네 들립니다" }, deliverOk = true) {
     const reacts: string[] = [];
     const audits: Record<string, unknown>[] = [];
-    const delivered: { text: string; threadId: string; messageId: string }[] = [];
+    const delivered: { text: string; threadId: string; messageId: string; agentId: string }[] = [];
     const consumed: string[] = [];
     const ctx = {
       deps: {
@@ -1125,9 +1125,9 @@ describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 �
       run,
       replyPath: join(tmpRoot, "var", "codex-bridge", "outbox", "dex", "fixed.txt"),
       consume: (p: string) => { consumed.push(p); return out; },
-      deliver: async (a: { text: string; threadId: string; messageId: string }) => {
-        delivered.push({ text: a.text, threadId: a.threadId, messageId: a.messageId });
-        return deliverOk;
+      deliver: async (a: { agentId: string; text: string; threadId: string; messageId: string }) => {
+        delivered.push({ text: a.text, threadId: a.threadId, messageId: a.messageId, agentId: a.agentId });
+        return deliverOk ? { ok: true, detail: "" } : { ok: false, detail: "exit 1: 발신자 해석 실패" };
       },
     } as unknown as Ctx;
     return { reacts, audits, delivered, consumed, ctx };
@@ -1137,7 +1137,8 @@ describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 �
   test("★답 파일이 있으면 브리지가 운반한다★ — 팀원은 셸을 안 탄다", async () => {
     const { reacts, audits, delivered, ctx } = make(okTurn);
     await runGroupTurn(ctx);
-    expect(delivered).toEqual([{ text: "네 들립니다", threadId: "tg--100", messageId: "tg-1" }]);
+    // ★누가 보내는지를 브리지가 넘긴다★ — 안 넘기면 스크립트가 디렉터리·tmux 로 추측한다
+    expect(delivered).toEqual([{ text: "네 들립니다", threadId: "tg--100", messageId: "tg-1", agentId: "dex" }]);
     expect(audits[0]?.replied).toBe(true);
     expect(audits[0]?.delivered).toBe(true);
     expect(audits[0]?.chars).toBe("네 들립니다".length);
@@ -1162,7 +1163,9 @@ describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 �
     await runGroupTurn(ctx);
     expect(audits[0]?.replied).toBe(true);
     expect(audits[0]?.delivered).toBe(false);
-    expect(audits[0]?.detail).toBe("deliver_failed");
+    // ★사유를 버리지 않는다★ — 버리면 다음 실패도 넉 자로만 남아 같은 조사를 반복한다
+    expect(String(audits[0]?.detail)).toContain("deliver_failed:");
+    expect(String(audits[0]?.detail)).toContain("발신자 해석 실패");
     expect(reacts).toEqual(["⚠️"]);
   });
 
