@@ -9,7 +9,6 @@
  * ★매 호출 전에 창구 파일을 다시 읽는다.★ 브리지가 재시작하면 포트가 바뀌는데
  * 캐시하고 있으면 ★조용히 안 간다.★
  */
-import { rmSync } from "node:fs";
 import { readWindowFile, windowFilePathFor, type BridgeWindowRequest } from "../runtimes/codex/bridgeWindow";
 
 /** 창구 호출 결과. ★queued 는 "접수" 지 "답했다" 가 아니다.★ */
@@ -24,8 +23,6 @@ export interface CodexBridgeCallDeps {
   fetchImpl?: typeof fetch;
   /** 그 pid 가 살아 있나. 시험에서 갈아 끼운다. */
   isAlive?: (pid: number) => boolean;
-  /** 죽은 브리지의 창구 파일을 치운다. 시험에서 갈아 끼운다. */
-  removeStale?: (path: string) => void;
 }
 
 /**
@@ -69,15 +66,18 @@ export async function callCodexBridge(
   //   ★본문(그룹 원문 + 팀 맥락)과 토큰이 무관한 리스너에게 그대로 날아간다.★
   //   게다가 그쪽이 200 을 주면 부르는 쪽은 `duplicate` 로 읽어 ★성공으로 기록★ 한다.
   //   보내기 전에 존재를 확인하고, 죽었으면 그 파일을 치워 다음 호출을 깨끗하게 한다.
+  //
+  //   ★남은 파일을 지우지는 않는다★ (리뷰 지적 — 경쟁 조건).
+  //   읽고 나서 생존을 확인하는 사이에 브리지가 재기동하면 그 파일은 ★새 pid·포트·토큰으로
+  //   원자 교체★ 된다. 그때 옛 pid 로 ESRCH 를 보고 지우면 ★방금 뜬 새 창구 파일을 지운다★ —
+  //   정상 재기동 직후에 ★계속 no_window★ 가 되어 조용해진다. 치우는 일은 새 브리지가 이미 한다.
+  //
+  //   ★남는 구멍 — 완전 차단이 아니다★: pid 는 재사용된다. 브리지가 죽고 그 번호를 다른
+  //   프로세스가 물려받으면 `pidAlive` 는 참을 준다. 이 검사가 막는 것은 ★그 번호가 아예 없는
+  //   경우(ESRCH)★ 이고, 그게 크래시 직후의 대부분이다. 완전한 증명은 파일에 기동 시각·nonce 를
+  //   같이 싣고 창구가 자기 것을 확인해야 한다 — 별건이다.
   const alive = (deps.isAlive ?? pidAlive)(file.pid);
-  if (!alive) {
-    try {
-      (deps.removeStale ?? ((p: string) => rmSync(p, { force: true })))(path);
-    } catch {
-      /* 정리 실패가 판정을 바꾸지 않는다 — 어차피 안 보낸다 */
-    }
-    return { ok: false, reason: "no_window" };
-  }
+  if (!alive) return { ok: false, reason: "no_window" };
 
   const doFetch = deps.fetchImpl ?? fetch;
   const ac = new AbortController();

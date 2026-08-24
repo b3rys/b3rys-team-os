@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { callCodexBridge, pidAlive } from "./codexBridgeClient";
-import { writeWindowFile, type BridgeWindowRequest } from "../runtimes/codex/bridgeWindow";
+import { writeWindowFile, readWindowFile, type BridgeWindowRequest } from "../runtimes/codex/bridgeWindow";
 
 const TOKEN = "a".repeat(64);
 
@@ -142,7 +142,6 @@ describe("죽은 브리지 — 보내기 전에 막는다", () => {
     const r = await callCodexBridge(REQ, {
       pidFile,
       isAlive: () => false,
-      removeStale: () => {},
       fetchImpl: (async () => {
         called += 1;
         return new Response("{}", { status: 200 });
@@ -152,12 +151,30 @@ describe("죽은 브리지 — 보내기 전에 막는다", () => {
     expect(called).toBe(0);
   });
 
-  test("★죽었으면 stale 파일을 치운다★ — 다음 호출이 깨끗하게 실패한다", async () => {
-    const { pidFile } = seedWindow();
-    const removed: string[] = [];
-    await callCodexBridge(REQ, { pidFile, isAlive: () => false, removeStale: (p) => removed.push(p) });
-    expect(removed.length).toBe(1);
-    expect(removed[0]).toContain("dex.window.json");
+  // ★남은 파일을 지우면 안 된다★ — 읽고 나서 생존을 보는 사이에 브리지가 재기동하면
+  //   그 파일은 새 pid·포트·토큰으로 원자 교체된다. 옛 pid 로 ESRCH 를 보고 지우면
+  //   ★방금 뜬 새 창구 파일을 지운다★ = 정상 재기동 직후에 계속 조용해진다.
+  test("★재기동 경쟁 — 생존 확인 중 새 브리지가 파일을 갈아도 그 파일을 안 지운다★", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cbc-race-"));
+    const pidFile = join(dir, "dex.pid");
+    const wf = join(dir, "dex.window.json");
+    writeWindowFile(wf, { port: 1111, token: TOKEN, pid: 999999, agentId: "dex" });
+
+    const r = await callCodexBridge(REQ, {
+      pidFile,
+      isAlive: () => {
+        // 생존을 재는 그 사이에 새 브리지가 뜬다 — 원자 교체.
+        writeWindowFile(wf, { port: 2222, token: "c".repeat(64), pid: process.pid, agentId: "dex" });
+        return false; // 우리가 읽은 옛 pid 는 죽어 있다
+      },
+      fetchImpl: (async () => new Response("{}", { status: 202 })) as unknown as typeof fetch,
+    });
+
+    expect(r).toEqual({ ok: false, reason: "no_window" });
+    // ★새 파일이 살아 있어야 한다★ — 다음 호출이 새 창구로 간다.
+    const after = readWindowFile(wf);
+    expect(after).not.toBeNull();
+    expect(after?.port).toBe(2222);
   });
 
   test("살아 있으면 그대로 보낸다", async () => {

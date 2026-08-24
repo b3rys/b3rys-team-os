@@ -1205,6 +1205,13 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     //   창구만 닫고 끝내면 폴 루프가 계속 돌아 ★SIGTERM 으로 안 죽는다★ —
     //   launchd 재기동이 SIGKILL 까지 기다리게 된다. 치우고 ★직접 나간다.★
     const stop = () => {
+      // ★종료에 물려 사라지는 턴을 기록에 남긴다★ (리뷰 지적).
+      //   창구는 202(접수)까지만 답한다. 이미 접수돼 큐에 든 턴은 여기서 프로세스가 끝나며
+      //   ★확정적으로 사라지는데, 안 돌았다는 기록이 어디에도 없다★ —
+      //   ★보낸 쪽은 갔다고 믿고 받는 쪽은 온 적이 없는★, 이 창구가 고치려는 그 실패 모양이다.
+      //   막지는 않는다(비우려면 종료가 늘어진다). 남은 개수를 남겨 나중에 읽히게 한다.
+      const left = turns.pendingCount();
+      if (left > 0) console.log(`[codex-bridge] 종료 — ★큐에 남은 턴 ${left}건은 돌지 않는다★`);
       try {
         windowHandle.close();
       } catch {
