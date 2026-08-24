@@ -17,6 +17,13 @@ import { CodexSessionStore } from "./state";
 /** 이 표에서 1:1 대화가 쓰는 surface. 버스(team_bus)와 갈라 둔다. */
 export const DM_SURFACE = "telegram_dm";
 
+/**
+ * ★그룹방이 쓰는 surface.★ 1:1 과 갈라 둔다 — chatId 가 달라서 섞어도 충돌은 안 나지만
+ *   ★섞으면 이름이 거짓말이 된다★(리뷰 지적). 6.8 을 재는 판별자(`created_at` 보존)도
+ *   두 대화가 한 이름에 섞이면 못 쓰게 된다.
+ */
+export const GROUP_SURFACE = "telegram_group";
+
 export interface DmSessionStore {
   /** 이 대화의 지난 세션. 없으면 undefined(새 대화로 시작). */
   get: (chatId: number) => string | undefined;
@@ -38,7 +45,7 @@ export const NOOP_DM_SESSION_STORE: DmSessionStore = {
  * ★DB 문제가 대화를 막지 않는다★ — 읽기 실패는 '지난 세션 없음', 쓰기 실패는 조용히 넘긴다.
  * 맥락이 끊기는 것은 불편이지만, 답을 못 하는 것은 고장이다.
  */
-export function makeDmSessionStore(agentId: string, dbPath: string): DmSessionStore {
+export function makeDmSessionStore(agentId: string, dbPath: string, surface: string = DM_SURFACE): DmSessionStore {
   let db: Database | null = null;
   const open = (): Database | null => {
     if (db) return db;
@@ -56,7 +63,7 @@ export function makeDmSessionStore(agentId: string, dbPath: string): DmSessionSt
   return {
     get: (chatId) => {
       try {
-        return store()?.get(agentId, DM_SURFACE, String(chatId));
+        return store()?.get(agentId, surface, String(chatId));
       } catch {
         return undefined;
       }
@@ -65,7 +72,7 @@ export function makeDmSessionStore(agentId: string, dbPath: string): DmSessionSt
       try {
         store()?.save({
           agentId,
-          surface: DM_SURFACE,
+          surface,
           conversationKey: String(chatId),
           codexSessionId: sessionId,
         });
@@ -75,8 +82,25 @@ export function makeDmSessionStore(agentId: string, dbPath: string): DmSessionSt
       try {
         open()?.prepare(
           `DELETE FROM codex_session_map WHERE agent_id = ? AND surface = ? AND conversation_key = ?`,
-        ).run(agentId, DM_SURFACE, String(chatId));
+        ).run(agentId, surface, String(chatId));
       } catch { /* 지우기 실패가 답을 막지 않는다 */ }
     },
+  };
+}
+
+/**
+ * ★대화 종류에 따라 surface 를 고르는 저장소.★ 텔레그램 그룹 chat id 는 ★음수★ 다.
+ *
+ * 한 저장소로 두 surface 를 쓰면 그룹 행이 `telegram_dm` 으로 적혀 ★이름이 거짓말★ 이 된다.
+ * 그렇다고 파일을 하나 더 만들면 같은 코드가 두 벌이 된다 — ★surface 만 갈라 끼운다.★
+ */
+export function makeChatSessionStore(agentId: string, dbPath: string): DmSessionStore {
+  const dm = makeDmSessionStore(agentId, dbPath, DM_SURFACE);
+  const group = makeDmSessionStore(agentId, dbPath, GROUP_SURFACE);
+  const pick = (chatId: number): DmSessionStore => (chatId < 0 ? group : dm);
+  return {
+    get: (chatId) => pick(chatId).get(chatId),
+    save: (chatId, sessionId) => pick(chatId).save(chatId, sessionId),
+    clear: (chatId) => pick(chatId).clear(chatId),
   };
 }

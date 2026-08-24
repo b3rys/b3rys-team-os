@@ -63,3 +63,19 @@ test("사슬이 끝나면 비었다고 보고한다 — 진단용", async () => 
   await q.drain();
   expect(q.idle()).toBe(true);
 });
+
+// ★종료할 때 남은 턴을 세려면 개수를 물어볼 수 있어야 한다★ —
+//   창구는 202(접수)까지만 답하므로, 접수된 채 사라진 턴은 이 값 없이는 기록조차 안 남는다.
+test("pendingCount — 접수된 채 아직 안 끝난 턴 수를 준다", async () => {
+  const q = createSerialTurnQueue();
+  expect(q.pendingCount()).toBe(0);
+  let release: (() => void) | null = null;
+  q.enqueue(() => new Promise<void>((r) => { release = r; }));
+  q.enqueue(async () => {});
+  expect(q.pendingCount()).toBe(2);
+  // 사슬은 마이크로태스크로 돈다 — 첫 턴이 실제로 시작할 틈을 준다.
+  await new Promise((r) => setTimeout(r, 0));
+  release!();
+  await q.drain();
+  expect(q.pendingCount()).toBe(0);
+});

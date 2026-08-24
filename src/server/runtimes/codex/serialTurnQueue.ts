@@ -28,6 +28,8 @@ export interface SerialTurnQueue {
   enqueue: (run: () => Promise<void>) => void;
   /** 사슬이 비어 있나(시험·진단용). */
   idle: () => boolean;
+  /** ★아직 안 끝난 턴 수.★ 종료할 때 남은 것을 세어 기록하는 데 쓴다. */
+  pendingCount: () => number;
   /** 지금 사슬이 끝날 때까지(시험용). */
   drain: () => Promise<void>;
 }
@@ -52,6 +54,7 @@ export function createSerialTurnQueue(onError?: (err: unknown) => void): SerialT
   return {
     enqueue,
     idle: () => pending === 0,
+    pendingCount: () => pending,
     drain: async () => { await chain; },
   };
 }

@@ -2,6 +2,8 @@ import type { AgentRecord, WsEvent } from "../types";
 import type { Database } from "bun:sqlite";
 import { routeTeamMessageHybrid } from "../lib/teamRouter";
 import { setGroupOwner, getGroupOwners } from "../lib/groupOwner";
+import { callCodexBridge } from "../lib/codexBridgeClient";
+import { codexBridgePaths } from "../runtimes/codex/launcher";
 import { appendAuditFile } from "../lib/auditFile";
 import { injectPrompt } from "../lib/tmuxInject";
 import { injectOpenclawTelegramTurn } from "../lib/openclawBridge";
@@ -1260,6 +1262,45 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
                 error: e instanceof Error ? e.message : String(e),
               });
             }
+          })();
+          continue;
+        }
+        if (agent.runtime === "codex") {
+          // ★codex 는 브리지가 세션을 소유한다★ — 서버가 턴을 돌지 않고 그 프로세스의 창구를 부른다.
+          //   openclaw·hermes 와 같은 모양이다(서버 → 런타임 소유 프로세스). 서버가 따로 돌리면
+          //   `clientPool` 이 프로세스마다 따로라 같은 팀원에 app-server 자식이 둘 뜬다.
+          //
+          //   ★재시도하지 않는다★ — 타임아웃이어도 턴은 브리지에서 계속 돌 수 있다. 다시 부르면 이중응답이다.
+          //   ★202 는 접수지 배달이 아니다★ — 답은 dex 가 `send.sh --to broadcast` 로 직접 보낸다.
+          appendAuditFile("capture", "injection", id, { mode: "codex", ok: "queued", async: true, text: text.slice(0, 120) });
+          void (async () => {
+            const r = await callCodexBridge(
+              {
+                agentId: id,
+                groupId: String(GROUP_ID),
+                threadId,
+                messageId,
+                body: deliveryBody,
+                origTgMessageId,
+                teamContext: scopedTeamContext,
+                attachments: mediaAttachments(media),
+              },
+              { pidFile: codexBridgePaths(id).pidFile },
+            );
+            if (r.ok) {
+              console.log(`[capture] injected codex → ${id}: ${r.duplicate ? "duplicate(ignored)" : "queued"}`);
+              appendAuditFile("capture", "injection", id, {
+                mode: "codex", ok: true, duplicate: r.duplicate, async: true, text: text.slice(0, 120),
+              });
+              return;
+            }
+            // ★`no_supported_path` 를 재사용하지 않는다★ — 그 이름은 "분기가 없다" 전용이다(리뷰 지적).
+            //   창구 장애를 같은 이름으로 적으면 분기 누락을 찾던 신호가 무뎌진다.
+            const action = r.reason === "timeout" ? "codex_bridge_timeout" : "codex_bridge_unreachable";
+            console.log(`[capture] codex bridge ${r.reason} → ${id}`);
+            appendAuditFile("capture", action, id, {
+              reason: r.reason, status: r.status ?? null, text: text.slice(0, 120),
+            });
           })();
           continue;
         }

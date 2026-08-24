@@ -16,7 +16,8 @@ import {
   type DmAttachments, type DmMessageMedia,
 } from "./dmMedia";
 import { createSerialTurnQueue } from "./serialTurnQueue";
-import { makeDmSessionStore, NOOP_DM_SESSION_STORE, type DmSessionStore } from "./dmSessionStore";
+import { startBridgeWindow } from "./bridgeWindow";
+import { makeChatSessionStore, NOOP_DM_SESSION_STORE, type DmSessionStore } from "./dmSessionStore";
 import { toMarkdownV2, splitForTelegram, toPlain } from "./telegramMarkdown";
 import { steerActiveTurn } from "./activeTurns";
 import { spawn } from "node:child_process";
@@ -484,6 +485,13 @@ export async function handleMessage(
    * 함수로 넘겨 이 턴 안에서 받게 한다(시험에서는 통신 없이 대신 넣는다).
    */
   fetchAttachments?: () => Promise<DmAttachments>,
+  /**
+   * ★어느 입구로 들어왔나.★ 그룹 native 차단은 ★폴링 입구★ 에 거는 것이다 —
+   *   그 입구엔 오너 판정이 없어서 남을 부른 메시지에도 답했다(실측 2026-08-24).
+   *   `"window"` 는 서버(capture)가 오너를 정한 뒤 창구로 넣은 것이라 그 차단을 지나지 않는다.
+   *   ★플래그로 게이트를 끄는 게 아니라, 게이트가 애초에 그 입구의 것이다.★
+   */
+  ingress: "poll" | "window" = "poll",
 ): Promise<{ ok: boolean; reply: string; detail: string }> {
   // ★브리지도 app-server 로 간다.★
   //   전에는 브리지만 옛 exec 경로였다 — 그래서 ★사람이 직접 말 거는 길에만★ 그때까지의 개선
@@ -505,7 +513,7 @@ export async function handleMessage(
   //   그게 승인 요청의 주인으로도 쓰인다 — 실제로 dex 요청 4건이 codex 앞으로 기록됐다.
   const selfAgentId = deps.agentId ?? process.env.CODEX_AGENT_ID ?? "codex";
 
-  if (chatId < 0 && messageId !== undefined) {
+  if (ingress === "poll" && chatId < 0 && messageId !== undefined) {
     const shadowOn = process.env.CODEX_GROUP_NATIVE_DENY_SHADOW === "true";
     // ★기본값 = 켜짐★ (제품 결정 2026-08-24): 그룹은 다른 런타임과 같이 capture→bus 로만 받는다.
     //   native 가 그룹에 직접 답하면 ★자기 앞으로 온 것이 아닌 호출에도 답한다★ — 실측: 그룹에서
@@ -1137,7 +1145,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     // ★agentId 를 실어 보낸다★ — 안 실으면 handleMessage 가 같은 식을 다시 계산해,
     //   runBridge({agentId}) 로 부를 때 두 값이 갈린다. 그러면 steer 가 등록 안 된 id 를 찾아 늘 실패한다.
     agentId: liveAgentId,
-    dmSessions: deps.dmSessions ?? makeDmSessionStore(liveAgentId, defaultTeamDbPath()),
+    dmSessions: deps.dmSessions ?? makeChatSessionStore(liveAgentId, defaultTeamDbPath()),
     sendMessage: deps.sendMessage ?? tgSend(token),
     editMessage: deps.editMessage ?? tgEdit(token),
     reactMessage: deps.reactMessage ?? tgReact(token),
@@ -1168,6 +1176,57 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
   const turns = createSerialTurnQueue((e) => {
     console.error(`[codex-bridge] 턴 처리 실패: ${e instanceof Error ? e.message : e}`);
   });
+
+  // ★그룹 턴은 서버(capture)가 창구로 넣는다★ — 오너 판정은 거기서 이미 끝났다.
+  //   같은 `turns` 큐를 타므로 ★한 팀원 한 턴★ 불변식이 유지된다(1:1 과 겹치지 않는다).
+  //   리액션은 ★이 봇으로★ 단다 — 팀 op 봇이 달면 "누가 받았는지" 가 안 보인다(리뷰 지적).
+  const windowHandle = await startBridgeWindow({
+    agentId: liveAgentId,
+    pidFile,
+    log: (line) => console.log(line),
+    enqueue: (r) => {
+      const chatId = Number(r.groupId);
+      if (!Number.isFinite(chatId)) {
+        console.log(`[codex-bridge] 창구 요청 무시: groupId 가 숫자가 아니다 msg=${r.messageId}`);
+        return;
+      }
+      const tgMsgId = r.origTgMessageId ? Number(r.origTgMessageId) : undefined;
+      if (tgMsgId !== undefined && Number.isFinite(tgMsgId)) {
+        void live.reactMessage?.(chatId, tgMsgId, "👀");
+      }
+      turns.enqueue(async () => {
+        const res = await handleMessage(chatId, r.body, tgMsgId, live, undefined, "window");
+        console.log(`[codex-bridge] 창구 턴 → ${res.detail}: ${res.reply.slice(0, 60)}`);
+      });
+    },
+  });
+  if (windowHandle) {
+    // ★신호 처리기를 달면 Node 의 기본 종료가 사라진다★ (리뷰 지적).
+    //   창구만 닫고 끝내면 폴 루프가 계속 돌아 ★SIGTERM 으로 안 죽는다★ —
+    //   launchd 재기동이 SIGKILL 까지 기다리게 된다. 치우고 ★직접 나간다.★
+    const stop = () => {
+      // ★종료에 물려 사라지는 턴을 기록에 남긴다★ (리뷰 지적).
+      //   창구는 202(접수)까지만 답한다. 이미 접수돼 큐에 든 턴은 여기서 프로세스가 끝나며
+      //   ★확정적으로 사라지는데, 안 돌았다는 기록이 어디에도 없다★ —
+      //   ★보낸 쪽은 갔다고 믿고 받는 쪽은 온 적이 없는★, 이 창구가 고치려는 그 실패 모양이다.
+      //   막지는 않는다(비우려면 종료가 늘어진다). 남은 개수를 남겨 나중에 읽히게 한다.
+      //   ★이 줄이 남는 이유는 조건부다★ (리뷰 지적): `process.exit(0)` 은 ★버퍼를 안 비우고★
+      //   나간다. 지금 살아남는 것은 stdout 이 ★일반 파일★ 이라 Node 가 동기로 쓰기 때문이다
+      //   (`launcher.ts` — plist 의 `StandardOutPath` 가 파일이고, wrapper 의 `exec bun` 뒤에 파이프가 없다).
+      //   ★wrapper 에 `| tee` 같은 파이프를 하나 붙이면 stdout 이 파이프(비동기)가 되어 이 줄이 잘린다★ —
+      //   "안 돌았다" 를 증명하려고 넣은 기록이 바로 그 순간 같이 사라진다.
+      const left = turns.pendingCount();
+      if (left > 0) console.log(`[codex-bridge] 종료 — ★큐에 남은 턴 ${left}건은 돌지 않는다★`);
+      try {
+        windowHandle.close();
+      } catch {
+        /* 정리 실패가 종료를 막지 않는다 */
+      }
+      process.exit(0);
+    };
+    process.once("SIGTERM", stop);
+    process.once("SIGINT", stop);
+  }
 
   for (;;) {
     try {
