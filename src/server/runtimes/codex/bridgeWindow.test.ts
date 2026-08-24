@@ -241,182 +241,62 @@ describe("startBridgeWindow — 실제 왕복", () => {
 // ★한 함수만 내보낸다★ — 발신 떼기와 명령 넣기는 한 쌍이라, 한쪽만 있는 상태를 못 만들게 한다.
 import { groupTurnCall } from "./bridgeWindow";
 
-describe("groupTurnCall — 발신을 떼고, 답 보내는 법을 함께 준다", () => {
+describe("groupTurnCall — 발신을 떼고, ★답을 쓸 자리★ 를 함께 준다", () => {
   const base = () => ({
     sendMessage: async () => 1 as number | null,
     editMessage: async () => true,
     reactMessage: async () => true,
     agentId: "dex",
   });
-  const made = (over: Record<string, string> = {}) =>
+  const call = (over: Partial<{ body: string; threadId: string; messageId: string; replyPath: string }> = {}) =>
     groupTurnCall(base(), {
-      repoRoot: "/repo",
-      body: "@덱스 들려?",
-      threadId: "tg--1003947108339",
-      messageId: "tg-8874",
-      ...over,
+      body: "@덱스 들려?", threadId: "tg--100", messageId: "tg-1",
+      replyPath: "/repo/var/codex-bridge/outbox/dex/abc123.txt", ...over,
     });
 
-  test("★발신이 떨어진다★ — sendMessage·editMessage 가 아무것도 안 한다", async () => {
-    const { deps } = made();
-    expect(await deps.sendMessage()).toBeNull();
-    expect(await deps.editMessage()).toBe(false);
+  test("★텔레그램 발신을 뗀다★ — 서버가 팀원 대신 말하지 않는다", async () => {
+    const c = call();
+    expect(await c.deps.sendMessage()).toBeNull();
+    expect(await c.deps.editMessage()).toBe(false);
   });
 
-  test("★리액션은 남는다★ — '받았다' 는 발신과 다른 값이다", async () => {
-    const { deps } = made();
-    expect(await deps.reactMessage()).toBe(true);
+  test("★리액션은 안 뗀다★ — '받았다' 는 발신과 다른 값이다", async () => {
+    expect(await call().deps.reactMessage()).toBe(true);
   });
 
-  test("나머지 deps 는 그대로 넘어간다", () => {
-    expect(made().deps.agentId).toBe("dex");
+  test("★셸 명령을 시키지 않는다★ — exec 이 곧 승인 팝업이고, 팝업은 아무도 안 누르면 턴을 죽인다", () => {
+    const b = call().body;
+    // 실측(2026-08-24): send.sh 를 실행시켰더니 매 턴 승인 팝업이 오너 DM 으로 갔고
+    // 300초 뒤 만료되며 턴이 통째로 죽었다. 이 시험은 그 형태가 다시 들어오는 것을 막는다.
+    expect(b).not.toContain("send.sh");
+    expect(b).not.toContain("mktemp");
+    expect(b).not.toContain("<<");   // heredoc
+    expect(b).not.toContain("rm -f");
   });
 
-  test("★send.sh --to broadcast 가 본문에 있다★ — 없으면 답이 아무 데도 안 간다", () => {
-    const { body } = made();
-    expect(body).toContain("/repo/skills/b3os-team-inbox/scripts/send.sh");
-    expect(body).toContain("--to broadcast");
+  test("★답을 쓸 경로를 그대로 준다★ — 브리지가 정한 자리여야 브리지가 읽는다", () => {
+    const b = call({ replyPath: "/repo/var/codex-bridge/outbox/dex/deadbeef.txt" }).body;
+    expect(b).toContain("/repo/var/codex-bridge/outbox/dex/deadbeef.txt");
   });
 
-  test("★--body 가 아니라 --body-file 을 시킨다★ — 답의 홑따옴표가 명령을 깬다", () => {
-    const { body } = made();
-    expect(body).toContain("--body-file");
-    expect(body).not.toContain("--body '");
+  test("★안 쓰면 안 나간다는 것을 말해준다★ — 답 안 함이 고장으로 읽히지 않게", () => {
+    expect(call().body).toContain("안 쓰면 안 나간다");
   });
 
-  test("★heredoc 구분자가 따옴표로 감싸여 있다★ — $ ·백틱이 해석되면 본문이 훼손된다", () => {
-    expect(made().body).toMatch(/<<'[A-Z0-9_]+'/);
+  test("★원문·스레드·in-reply-to 를 함께 싣는다★", () => {
+    const b = call({ body: "질문 원문", threadId: "tg--777", messageId: "tg-9" }).body;
+    expect(b).toContain("질문 원문");
+    expect(b).toContain("tg--777");
+    expect(b).toContain("tg-9");
   });
 
-  test("★종료자가 EOF 가 아니다★ — 답에 EOF 한 줄이 들어가면 거기서 끊기고 뒤가 셸 명령이 된다", () => {
-    expect(made().body).not.toContain("<<'EOF'");
-  });
-
-  test("★고정 경로를 안 쓴다 — mktemp 로 매번 새 파일★ (쓰기 실패 시 옛 답이 다시 나간다)", () => {
-    const { body } = made();
-    expect(body).toContain("mktemp");
-    expect(body).not.toContain("/tmp/dex-reply.txt");
-  });
-
-  test("★보낸 뒤 지운다★ — 팀 대화가 /tmp 에 평문으로 남지 않게", () => {
-    expect(made().body).toContain('rm -f "$f"');
-  });
-
-  test("스레드와 in-reply-to 가 박혀 있다 — 조립하다 틀리지 않게", () => {
-    const { body } = made();
-    expect(body).toContain("--thread tg--1003947108339");
-    expect(body).toContain("--in-reply-to tg-8874");
-  });
-
-  test("'서버가 대신 게시하지 않는다' 를 말해준다 — 안 보내면 말한 게 아니다", () => {
-    expect(made().body).toContain("서버가 대신 게시하지 않는다");
-  });
-
-  test("원문이 맨 앞에 그대로 있다 — 지시문이 질문을 덮지 않는다", () => {
-    expect(made().body.startsWith("@덱스 들려?")).toBe(true);
-  });
-
-  test("★--to user 가 아니다★ — 그룹 행의 발신자는 팀원이 아니다", () => {
-    expect(made().body).not.toContain("--to user");
-  });
-});
-
-// ── ★적대 입력 왕복 시험★ — 모양 단언이 아니라 실제 동작을 잰다 ──
-//
-// "mktemp 를 쓴다"·"종료자가 EOF 가 아니다" 는 ★생성된 문자열의 모양★ 이라, 템플릿을 바꾸면
-// 같이 바뀐다. ★인용을 잘못해도 통과한다.★ 유일한 증명은 실제로 셸에 태워서
-// ★나온 파일이 원문과 바이트로 같은가★ 를 보는 것이다.
-//
-// ★이 시험이 증명하지 않는 것★: dex 가 이 조각을 ★그대로 실행한다★ 는 것.
-//   본문은 프롬프트고 dex 는 다르게 쓸 수 있다 — 그건 배포 후 ② 로만 재진다.
-//   (부품이 맞다 ≠ 조립된 게 돈다 ≠ 실제로 그 경로로 간다)
-import { readFileSync, existsSync, mkdirSync } from "node:fs";
-
-describe("템플릿이 적대 입력을 손상 없이 통과시킨다 (dex 가 그대로 실행하는지는 배포 후 ②)", () => {
-  // 한 덩어리로 넣는다 — 하나씩 넣으면 조합에서 새는 것을 못 잡는다.
-  const HOSTILE = [
-    "홑따옴표 ' 하나",
-    ' 겹따옴표 " 하나',
-    "백틱 `id` 와 달러괄호 $(id) 와 달러변수 $HOME",
-    "EOF",
-    "B3OS_REPLY_DEADBEEF",
-    // ★JS String.replace 의 치환 패턴 문자★ — 시험이 자기 이스케이프로 무너지는지도 같이 잰다.
-    //   bash ANSI-C 인용($'\\n')도 여기 걸린다. 아래 () => 형태가 아니면 이 줄에서 깨진다.
-    "치환패턴 $$ $& $` $' $1 끝",
-    "탭\t끝",
-    "역슬래시 \\ 와 이모지 ✦ 와 한글",
-    "",
-    "마지막 줄",
-  ].join("\n");
-
-  test("★적대 입력이 파일까지 바이트 그대로 간다★", () => {
-    const dir = mkdtempSync(join(tmpdir(), "rt-"));
-    // send.sh 스텁 — --body-file 의 내용을 그대로 밖으로 복사한다.
-    const stubRoot = join(dir, "root");
-    const stubDir = join(stubRoot, "skills", "b3os-team-inbox", "scripts");
-    mkdirSync(stubDir, { recursive: true });
-    const out = join(dir, "captured.txt");
-    writeFileSync(
-      join(stubDir, "send.sh"),
-      ['#!/bin/bash', 'while [ $# -gt 0 ]; do', '  if [ "$1" = "--body-file" ]; then cp "$2" "' + out + '"; shift; fi',
-       '  shift', 'done', ''].join("\n"),
-      { mode: 0o755 },
-    );
-    chmodSync(join(stubDir, "send.sh"), 0o755);
-
-    const { body } = groupTurnCall(
-      { sendMessage: async () => null, editMessage: async () => false },
-      { repoRoot: stubRoot, body: "질문", threadId: "tg--100", messageId: "tg-1" },
-    );
-
-    // 본문에서 셸 조각만 떼어낸다: f=... 줄부터 rm -f 줄까지.
-    const lines = body.split("\n");
-    const from = lines.findIndex((l) => l.startsWith('f="$(mktemp'));
-    const to = lines.findIndex((l) => l.startsWith('rm -f'));
-    expect(from).toBeGreaterThan(-1);
-    expect(to).toBeGreaterThan(from);
-    // <답> 자리를 적대 입력으로 갈아끼운다.
-    // ★치환은 반드시 함수로 준다★ — 문자열로 주면 JS 가 $$·$&·$`·$'·$1 을 치환 패턴으로
-    //   먼저 해석해서, 적대 입력이 ★bash 에 닿기도 전에★ 뭉개진다. 그러면 빨간불이 뜨는데
-    //   범인은 시험인데 템플릿을 뒤지게 된다 — 이 PR 이 고치는 것과 ★같은 병★ 이다.
-    const snippet = lines.slice(from, to + 1).join("\n").replace("<답>", () => HOSTILE);
-    // 셸에 태우기 전에, 적대 입력이 ★온전한 채로★ 들어갔는지부터 확인한다.
-    // 여기서 깨지면 원인은 템플릿이 아니라 위 치환이다.
-    expect(snippet).toContain(HOSTILE);
-
-    const r = Bun.spawnSync(["bash", "-c", snippet]);
-    expect(r.exitCode).toBe(0);
-    expect(existsSync(out)).toBe(true);
-    // ★바이트로 비교한다★ — heredoc 은 끝에 개행을 하나 붙인다.
-    expect(readFileSync(out, "utf8")).toBe(HOSTILE + "\n");
-  });
-
-  test("★종료자가 매번 다르다★ — 고정이면 답이 그 줄을 맞힐 수 있다", () => {
-    const term = (b: string) => b.split("\n").find((l) => l.startsWith("cat > "))!;
-    const a = groupTurnCall({}, { repoRoot: "/r", body: "x", threadId: "t", messageId: "m" }).body;
-    const b = groupTurnCall({}, { repoRoot: "/r", body: "x", threadId: "t", messageId: "m" }).body;
-    expect(term(a)).not.toBe(term(b));
-  });
-
-  test("★보낸 뒤 임시파일이 남지 않는다★ — 팀 대화가 /tmp 에 평문으로 남으면 안 된다", () => {
-    const dir = mkdtempSync(join(tmpdir(), "rt2-"));
-    const stubDir = join(dir, "skills", "b3os-team-inbox", "scripts");
-    mkdirSync(stubDir, { recursive: true });
-    const seen = join(dir, "path.txt");
-    writeFileSync(
-      join(stubDir, "send.sh"),
-      ['#!/bin/bash', 'while [ $# -gt 0 ]; do', '  if [ "$1" = "--body-file" ]; then echo -n "$2" > "' + seen + '"; shift; fi',
-       '  shift', 'done', ''].join("\n"),
-      { mode: 0o755 },
-    );
-    chmodSync(join(stubDir, "send.sh"), 0o755);
-    const { body } = groupTurnCall({}, { repoRoot: dir, body: "질문", threadId: "t", messageId: "m" });
-    const lines = body.split("\n");
-    const from = lines.findIndex((l) => l.startsWith('f="$(mktemp'));
-    const to = lines.findIndex((l) => l.startsWith("rm -f"));
-    Bun.spawnSync(["bash", "-c", lines.slice(from, to + 1).join("\n").replace("<답>", () => "내용")]);
-    const used = readFileSync(seen, "utf8");
-    expect(used).toContain("b3os-reply");
-    expect(existsSync(used)).toBe(false);
+  test("★답이 명령 문자열에 안 들어간다★ — 적대 입력이 해석될 자리가 아예 없다", () => {
+    // 이전 설계에서는 답이 heredoc 안에 들어가 따옴표·백틱·종료자 사고가 났고,
+    // ★승인 지문이 매 턴 달라져 '항상 허용' 이 원리적으로 안 걸렸다.★
+    // 지금은 답이 프롬프트 밖(파일)이라 그 부류가 통째로 사라진다.
+    const b = call({ body: "홑따옴표 ' 백틱 ` $(id) $HOME" }).body;
+    expect(b).not.toContain("bash");
+    expect(b).not.toContain("zsh");
+    expect(b).not.toContain("-lc");
   });
 });

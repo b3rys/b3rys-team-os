@@ -283,7 +283,7 @@ export async function startBridgeWindow(deps: BridgeWindowDeps): Promise<BridgeW
  */
 export function groupTurnCall<T extends { sendMessage?: unknown; editMessage?: unknown }>(
   deps: T,
-  input: { repoRoot: string; body: string; threadId: string; messageId: string },
+  input: { body: string; threadId: string; messageId: string; replyPath: string },
 ): { deps: T; body: string } {
   return { deps: noAutopostDeps(deps), body: groupTurnBody(input) };
 }
@@ -297,50 +297,38 @@ function noAutopostDeps<T extends { sendMessage?: unknown; editMessage?: unknown
 }
 
 /**
- * ★그룹 턴의 본문 — 답을 어디로 보낼지 함께 준다.★ `groupTurnCall` 안에서만 쓴다.
+ * ★그룹 턴의 본문 — 답을 ★어디에 쓸지★ 함께 준다.★ `groupTurnCall` 안에서만 쓴다.
  *
- * ★`--body` 가 아니라 `--body-file` 을 시킨다★ (리뷰 지적 · send.sh 가 자기 사용법에 적어둔 경고):
- *   본문에 홑따옴표·백틱·`$(cmd)`·`$VAR` 가 있으면 셸이 해석해 ★본문이 조용히 훼손되거나
- *   명령이 통째로 깨진다.★ dex 는 코딩 에이전트라 답에 코드·경로·영어 축약형이 들어간다 —
- *   홑따옴표가 안 나올 리 없다. 깨지면 ★턴은 돌고 send 는 실패하고 방은 조용하다★ =
- *   ★이 계약이 없애려는 그 실패 모양 그대로다.★ 자동 게시를 막았으므로 ★대체 경로도 없다.★
- *   heredoc 의 구분자를 따옴표로 감싸면 `$`·백틱이 전부 무해해진다.
+ * ★셸 명령을 시키지 않는다★ (2026-08-24 라이브 실측으로 되돌린 결정):
+ *   전에는 `send.sh` 를 ★실행★ 하라고 시켰다. 그 실행마다 codex 가 ★승인 팝업★ 을 띄웠고,
+ *   팝업은 그룹방이 아니라 ★오너 DM★ 으로 갔다. 아무도 안 누르니 ★300초 뒤 만료 →
+ *   턴이 통째로 죽었다★ — 방은 조용하고 기록에는 `appserver_interrupted · 0자` 만 남았다.
+ *   "명령을 고정해 '항상 허용' 을 받자" 는 `GRANT_TTL_HOURS = 24` 때문에 ★하루짜리★ 라 접었다.
+ *   자세한 판단은 `groupOutbox.ts` 머리말에 적어 뒀다.
  *
- * ★고정 경로·고정 종료자를 쓰지 않는다★ (리뷰 지적):
- *   · 같은 파일에 덮어쓰면 ★쓰기가 실패했을 때 직전 턴의 답이 그대로 다시 나간다★ —
- *     빈 파일은 `send.sh` 가 거절하지만 ★옛 내용은 거절하지 않는다.★ 조용한 실패가 아니라
- *     ★그럴듯하게 틀린★ 쪽이라 더 나쁘다. 예측 가능한 공용 경로라 선점 위험도 있다.
- *   · 종료자가 `EOF` 면 ★답에 `EOF` 한 줄이 들어갈 때 거기서 끊기고★ 뒤가 셸 명령으로 읽힌다.
- *     코딩 에이전트의 답에 셸 예시가 들어가는 것은 드문 일이 아니다.
- *   `mktemp` 로 실행마다 새 파일을 만들고, 보낸 뒤 지운다(팀 대화가 `/tmp` 에 남지 않게).
+ * → ★파일에 쓰게 하고 운반은 브리지가 한다.★ 셸을 안 타므로 승인 경로를 아예 안 지난다.
+ *   답이 ★명령 문자열에 안 들어가므로★ heredoc·따옴표·백틱·종료자 사고도 통째로 사라진다.
+ *
+ * ★경로는 이 턴 전용이다★ — 고정 경로면 이번 턴이 안 썼을 때 ★직전 답이 다시 나간다.★
  */
 function groupTurnBody(input: {
-  repoRoot: string;
   body: string;
   threadId: string;
   messageId: string;
+  replyPath: string;
 }): string {
-  const send = `${input.repoRoot}/skills/b3os-team-inbox/scripts/send.sh`;
-  // ★종료자는 매번 다르게★ (리뷰 지적): 고정 이름이면 답에 그 줄이 들어갈 때 거기서 끊긴다.
-  //   "EOF 가 아니다" 로는 부족하다 — 다른 고정 이름으로 바꿔도 같은 사고가 난다.
-  //   매번 다르면 ★답이 종료자를 맞힐 확률 자체가 사라진다.★
-  const term = `B3OS_REPLY_${randomBytes(6).toString("hex").toUpperCase()}`;
   return [
     input.body,
     "",
     `(그룹방 메시지 · thread=${input.threadId} · in-reply-to=${input.messageId})`,
     "",
-    "★답은 이 명령으로 보내야 전달된다.★ 이 턴의 본문은 아무 데도 안 간다 —",
-    "서버가 대신 게시하지 않는다. 끝에 최종 답으로 한 번 실행하라:",
+    "★답은 아래 파일에 써야 방에 전달된다.★ 이 턴의 본문은 아무 데도 안 간다 —",
+    "서버가 대신 게시하지 않는다. 답할 내용을 ★파일 쓰기 도구로★ 이 경로에 쓴다:",
     "",
-    'f="$(mktemp -t b3os-reply)"',
-    `cat > "$f" <<'${term}'`,
-    "<답>",
-    term,
-    `${send} --to broadcast --thread ${input.threadId} --in-reply-to ${input.messageId} --body-file "$f"`,
-    'rm -f "$f"',
+    `  ${input.replyPath}`,
     "",
-    "★--body 로 넘기지 마라★ — 답에 홑따옴표·백틱·$ 가 있으면 셸이 해석해 명령이 깨지고,",
-    "그러면 턴은 돌았는데 방은 조용해진다. 위 heredoc 형태를 그대로 쓴다.",
+    "★셸 명령을 실행하지 마라★ — 보내는 일은 브리지가 한다. 파일만 쓰면 방에 올라간다.",
+    "★안 쓰면 안 나간다★ — 답할 차례가 아니라고 판단하면 그냥 쓰지 마라. 그것도 정상이다.",
+    "파일에는 ★방에 그대로 올라갈 본문만★ 쓴다(설명·따옴표·코드펜스로 감싸지 않는다).",
   ].join("\n");
 }

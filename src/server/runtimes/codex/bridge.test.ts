@@ -1100,11 +1100,14 @@ describe("codex bridge — 진행 중 작업에 끼어들기", () => {
 // 그래서 ★정상 성공에도 경고가 떴다.★ 부품(문자열·발신 0회)만 재는 시험은 이걸 못 잡는다.
 import { runGroupTurn } from "./bridge";
 
-describe("runGroupTurn — 성공·반환실패·예외실패가 서로 다르게 보인다", () => {
+describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 값이다★", () => {
   type Ctx = Parameters<typeof runGroupTurn>[0];
-  function make(run: unknown): { reacts: string[]; audits: Record<string, unknown>[]; ctx: Ctx } {
+  type Out = { kind: "reply"; text: string } | { kind: "none" } | { kind: "rejected"; reason: string };
+  function make(run: unknown, out: Out = { kind: "reply", text: "네 들립니다" }, deliverOk = true) {
     const reacts: string[] = [];
     const audits: Record<string, unknown>[] = [];
+    const delivered: { text: string; threadId: string; messageId: string }[] = [];
+    const consumed: string[] = [];
     const ctx = {
       deps: {
         sendMessage: async () => 1,
@@ -1118,51 +1121,93 @@ describe("runGroupTurn — 성공·반환실패·예외실패가 서로 다르�
       req: { body: "@덱스 들려?", threadId: "tg--100", messageId: "tg-1" },
       audit: (_a: string, _t: string, d: Record<string, unknown>) => { audits.push(d); },
       run,
+      replyPath: "/repo/var/codex-bridge/outbox/dex/fixed.txt",
+      consume: (p: string) => { consumed.push(p); return out; },
+      deliver: async (a: { text: string; threadId: string; messageId: string }) => {
+        delivered.push({ text: a.text, threadId: a.threadId, messageId: a.messageId });
+        return deliverOk;
+      },
     } as unknown as Ctx;
-    return { reacts, audits, ctx };
+    return { reacts, audits, delivered, consumed, ctx };
   }
+  const okTurn = async () => ({ ok: false, turnOk: true, reply: "", detail: "send_failed" });
 
-  test("★턴 성공 → 경고가 안 뜬다★ (발신을 뗐어도 성공은 성공이다)", async () => {
-    const { reacts, audits, ctx } = make(async () => ({ ok: false, turnOk: true, reply: "네", detail: "send_failed" }));
+  test("★답 파일이 있으면 브리지가 운반한다★ — 팀원은 셸을 안 탄다", async () => {
+    const { reacts, audits, delivered, ctx } = make(okTurn);
     await runGroupTurn(ctx);
-    expect(reacts).toEqual([]);
-    expect(audits[0]?.turn_ok).toBe(true);
-    // ★send_failed 를 실패 사유로 적지 않는다★ — 이 경로의 기대값이다
+    expect(delivered).toEqual([{ text: "네 들립니다", threadId: "tg--100", messageId: "tg-1" }]);
+    expect(audits[0]?.replied).toBe(true);
+    expect(audits[0]?.delivered).toBe(true);
+    expect(audits[0]?.chars).toBe("네 들립니다".length);
+    // ★send_failed 는 이 경로의 기대값이다★ — 실패 사유로 적으면 전부 거짓값이 된다
     expect(audits[0]?.detail).toBe("turn_ok");
+    expect(reacts).toEqual([]);
   });
 
-  test("★턴 실패(반환) → 경고 + 실패 audit★", async () => {
-    const { reacts, audits, ctx } = make(async () => ({ ok: false, turnOk: false, reply: "", detail: "codex_turn_failed:empty" }));
+  test("★답을 안 썼으면 안 보낸다 — 그리고 그건 고장이 아니다★", async () => {
+    const { reacts, audits, delivered, ctx } = make(okTurn, { kind: "none" });
+    await runGroupTurn(ctx);
+    expect(delivered).toEqual([]);
+    expect(audits[0]?.turn_ok).toBe(true);
+    expect(audits[0]?.replied).toBe(false);
+    expect(audits[0]?.detail).toBe("no_reply:none");
+    // ★경고를 붙이지 않는다★ — 오너가 아니어서 안 답한 것도 정상이다
+    expect(reacts).toEqual([]);
+  });
+
+  test("★운반이 실패하면 경고가 뜬다★ — '답은 했는데 방에 안 갔다' 는 고장이다", async () => {
+    const { reacts, audits, ctx } = make(okTurn, { kind: "reply", text: "답" }, false);
+    await runGroupTurn(ctx);
+    expect(audits[0]?.replied).toBe(true);
+    expect(audits[0]?.delivered).toBe(false);
+    expect(audits[0]?.detail).toBe("deliver_failed");
+    expect(reacts).toEqual(["⚠️"]);
+  });
+
+  test("★거절된 답 파일은 사유가 남는다★ — 조용히 안 보내면 '답 안 함' 과 구분이 안 된다", async () => {
+    const { audits, delivered, ctx } = make(okTurn, { kind: "rejected", reason: "not_regular_file" });
+    await runGroupTurn(ctx);
+    expect(delivered).toEqual([]);
+    expect(audits[0]?.replied).toBe(false);
+    expect(audits[0]?.detail).toBe("reply_rejected:not_regular_file");
+  });
+
+  test("★턴 실패 → 경고 + 실패 사유★", async () => {
+    const { reacts, audits, ctx } = make(
+      async () => ({ ok: false, turnOk: false, reply: "", detail: "codex_turn_failed:empty" }),
+      { kind: "none" },
+    );
     await runGroupTurn(ctx);
     expect(reacts).toEqual(["⚠️"]);
     expect(audits[0]?.turn_ok).toBe(false);
     expect(audits[0]?.detail).toBe("codex_turn_failed:empty");
   });
 
-  test("★턴이 던져도 같은 모양으로 보인다★ — 큐 catch 에 맡기면 눈 표시만 남는다", async () => {
-    const { reacts, audits, ctx } = make(async () => { throw new Error("boom"); });
+  test("★턴이 던져도 같은 모양으로 보인다 — 그리고 자리를 비운다★", async () => {
+    // 안 비우면 ★다음 턴이 이번 답을 자기 답으로 읽는다★ (조용한 실패가 아니라 그럴듯하게 틀린 쪽)
+    const { reacts, audits, consumed, ctx } = make(async () => { throw new Error("boom"); });
     await runGroupTurn(ctx);
     expect(reacts).toEqual(["⚠️"]);
     expect(audits[0]?.turn_ok).toBe(false);
     expect(String(audits[0]?.detail)).toContain("threw:");
+    expect(consumed).toEqual(["/repo/var/codex-bridge/outbox/dex/fixed.txt"]);
   });
 
-  test("★턴에 넘어가는 본문에 send.sh 명령이 실려 있다★ — 조립된 값으로 확인", async () => {
+  test("★턴에 넘어가는 본문이 답 쓸 자리를 알려준다 — 조립된 값으로 확인★", async () => {
     let seen = "";
-    const { ctx } = make(async (_c: number, body: string) => {
-      seen = body;
-      return { ok: false, turnOk: true, reply: "", detail: "send_failed" };
-    });
+    const { ctx } = make(async (_c: number, body: string) => { seen = body; return okTurn(); });
     await runGroupTurn(ctx);
-    expect(seen).toContain("--to broadcast");
-    expect(seen).toContain("--body-file");
+    expect(seen).toContain("/repo/var/codex-bridge/outbox/dex/fixed.txt");
+    // ★셸을 시키지 않는다★ — exec 이 곧 승인 팝업이고 팝업은 턴을 죽였다
+    expect(seen).not.toContain("send.sh");
+    expect(seen).not.toContain("mktemp");
   });
 
   test("★턴에 넘어가는 deps 는 발신이 떨어져 있다★", async () => {
     let sent: unknown = "unset";
     const { ctx } = make(async (_c: number, _b: string, _m: unknown, deps: { sendMessage: () => Promise<unknown> }) => {
       sent = await deps.sendMessage();
-      return { ok: false, turnOk: true, reply: "", detail: "send_failed" };
+      return okTurn();
     });
     await runGroupTurn(ctx);
     expect(sent).toBeNull();
