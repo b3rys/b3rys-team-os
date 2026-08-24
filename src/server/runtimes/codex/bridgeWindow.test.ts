@@ -340,6 +340,9 @@ describe("템플릿이 적대 입력을 손상 없이 통과시킨다 (dex 가 �
     "백틱 `id` 와 달러괄호 $(id) 와 달러변수 $HOME",
     "EOF",
     "B3OS_REPLY_DEADBEEF",
+    // ★JS String.replace 의 치환 패턴 문자★ — 시험이 자기 이스케이프로 무너지는지도 같이 잰다.
+    //   bash ANSI-C 인용($'\\n')도 여기 걸린다. 아래 () => 형태가 아니면 이 줄에서 깨진다.
+    "치환패턴 $$ $& $` $' $1 끝",
     "탭\t끝",
     "역슬래시 \\ 와 이모지 ✦ 와 한글",
     "",
@@ -373,7 +376,13 @@ describe("템플릿이 적대 입력을 손상 없이 통과시킨다 (dex 가 �
     expect(from).toBeGreaterThan(-1);
     expect(to).toBeGreaterThan(from);
     // <답> 자리를 적대 입력으로 갈아끼운다.
-    const snippet = lines.slice(from, to + 1).join("\n").replace("<답>", HOSTILE);
+    // ★치환은 반드시 함수로 준다★ — 문자열로 주면 JS 가 $$·$&·$`·$'·$1 을 치환 패턴으로
+    //   먼저 해석해서, 적대 입력이 ★bash 에 닿기도 전에★ 뭉개진다. 그러면 빨간불이 뜨는데
+    //   범인은 시험인데 템플릿을 뒤지게 된다 — 이 PR 이 고치는 것과 ★같은 병★ 이다.
+    const snippet = lines.slice(from, to + 1).join("\n").replace("<답>", () => HOSTILE);
+    // 셸에 태우기 전에, 적대 입력이 ★온전한 채로★ 들어갔는지부터 확인한다.
+    // 여기서 깨지면 원인은 템플릿이 아니라 위 치환이다.
+    expect(snippet).toContain(HOSTILE);
 
     const r = Bun.spawnSync(["bash", "-c", snippet]);
     expect(r.exitCode).toBe(0);
@@ -405,7 +414,7 @@ describe("템플릿이 적대 입력을 손상 없이 통과시킨다 (dex 가 �
     const lines = body.split("\n");
     const from = lines.findIndex((l) => l.startsWith('f="$(mktemp'));
     const to = lines.findIndex((l) => l.startsWith("rm -f"));
-    Bun.spawnSync(["bash", "-c", lines.slice(from, to + 1).join("\n").replace("<답>", "내용")]);
+    Bun.spawnSync(["bash", "-c", lines.slice(from, to + 1).join("\n").replace("<답>", () => "내용")]);
     const used = readFileSync(seen, "utf8");
     expect(used).toContain("b3os-reply");
     expect(existsSync(used)).toBe(false);
