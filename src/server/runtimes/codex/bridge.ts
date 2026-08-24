@@ -499,7 +499,9 @@ export async function handleMessage(
   // ★team-comm group native deny: 그룹(chatId<0) native 처리를 막는다.
   //   ★enforcement = gate 결과와 무관하게 그룹 전체 drop★ — capture→bus가 owner를 이미 처리하므로(runInjection이
   //   route targets 에만 주입) native 가 또 답하면 이중응답. gate는 shadow/audit(effective 권위 기록)용으로만.
-  //   env flag 2개 분리, 둘 다 off 기본 = ★라이브 영향 0(byte-level 불변)★. shadow=drop 없이 audit만.
+  //   enforcement는 fail-closed 기본이다. capture→bus가 그룹 owner를 판정하므로 설정 누락이 native 우회를
+  //   다시 열면 안 된다. 긴급 복구가 필요할 때만 CODEX_GROUP_NATIVE_DENY=false로 명시 해제한다.
+  //   shadow=drop 없이 audit만이며, enforcement를 false로 명시했을 때만 전달된다.
   // ★이 브리지가 '누구' 인지는 한 곳에서만 정한다★ (리뷰 지적).
   //   같은 식이 아래 네 곳에 흩어져 있었다. 그중 하나라도 빠지면 ★남의 신원으로 도는데★
   //   그게 승인 요청의 주인으로도 쓰인다 — 실제로 dex 요청 4건이 codex 앞으로 기록됐다.
@@ -507,7 +509,7 @@ export async function handleMessage(
 
   if (chatId < 0 && messageId !== undefined) {
     const shadowOn = process.env.CODEX_GROUP_NATIVE_DENY_SHADOW === "true";
-    const enforceOn = process.env.CODEX_GROUP_NATIVE_DENY === "true";
+    const enforceOn = process.env.CODEX_GROUP_NATIVE_DENY !== "false";
     if (shadowOn || enforceOn) {
       const self = selfAgentId;
       const teamBaseUrl = deps.teamBaseUrl ?? process.env.TEAM_BASE_URL ?? "http://127.0.0.1:7878/team";

@@ -123,14 +123,20 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     });
     const gate = (suppress: boolean) => { let n = 0; const fn = async () => { n++; return { suppress, reason: "explicit_mention", targets: ["bill"] }; }; return { fn, calls: () => n }; };
 
-    test("flag off 기본 → ownerGate 미호출, 정상 delivered (라이브 영향 0)", async () => {
+    test("flag 미설정 기본 → 그룹 native drop (capture→bus만 허용)", async () => {
       delete process.env.CODEX_GROUP_NATIVE_DENY_SHADOW; delete process.env.CODEX_GROUP_NATIVE_DENY;
+      const { deps, calls } = spies(() => ok("답")); const g = gate(true); deps.ownerGate = g.fn;
+      const r = await handleMessage(-123, "x", 55, deps);
+      expect(g.calls()).toBe(1); expect(calls.reacts.length).toBe(0); expect(r.detail).toBe("group_native_denied");
+    });
+    test("enforcement false 명시 → 그룹 native delivered (긴급 복구 opt-out)", async () => {
+      delete process.env.CODEX_GROUP_NATIVE_DENY_SHADOW; process.env.CODEX_GROUP_NATIVE_DENY = "false";
       const { deps, calls } = spies(() => ok("답")); const g = gate(true); deps.ownerGate = g.fn;
       const r = await handleMessage(-123, "x", 55, deps);
       expect(g.calls()).toBe(0); expect(calls.reacts.length).toBe(1); expect(r.detail).toBe("delivered");
     });
     test("shadow on + suppress + group → delivered 유지, react 계속(로그만)", async () => {
-      process.env.CODEX_GROUP_NATIVE_DENY_SHADOW = "true"; delete process.env.CODEX_GROUP_NATIVE_DENY;
+      process.env.CODEX_GROUP_NATIVE_DENY_SHADOW = "true"; process.env.CODEX_GROUP_NATIVE_DENY = "false";
       const { deps, calls } = spies(() => ok("답")); deps.ownerGate = gate(true).fn;
       const r = await handleMessage(-123, "x", 55, deps);
       expect(calls.reacts.length).toBe(1); expect(r.detail).toBe("delivered");
@@ -150,6 +156,7 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     });
     test("shadow on + gate null(조회실패) → fail-open, 정상 delivered", async () => {
       process.env.CODEX_GROUP_NATIVE_DENY_SHADOW = "true";
+      process.env.CODEX_GROUP_NATIVE_DENY = "false";
       const { deps, calls } = spies(() => ok("답")); deps.ownerGate = async () => null;
       const r = await handleMessage(-123, "x", 55, deps);
       expect(r.detail).toBe("delivered"); expect(calls.reacts.length).toBe(1);
