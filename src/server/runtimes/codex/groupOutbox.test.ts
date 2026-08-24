@@ -101,7 +101,7 @@ describe("consumeGroupReply — 한 번 읽고 반드시 지운다", () => {
 
 test("ensureOutboxDir — 팀원이 쓸 자리를 미리 만든다", () => {
   const p = join(dir(), "a", "b", "r.txt");
-  ensureOutboxDir(p);
+  expect(ensureOutboxDir(p).ok).toBe(true);
   writeFileSync(p, "됨");  // 디렉터리가 없으면 여기서 던진다
   expect(consumeGroupReply(p)).toEqual({ kind: "reply", text: "됨" });
 });
@@ -145,4 +145,11 @@ test("★열기 실패 사유를 가른다★ — 전부 '답 안 함' 이면 �
   writeFileSync(p, "x");
   expect(consumeGroupReply(p2, outboxDir(root, "dex")).kind).not.toBe("none");
   expect(r.kind).not.toBe("reply");
+});
+
+test("★자리를 못 만들면 실패로 알린다★ — 삼키면 '답 안 함'(정상)으로 기록되고 경고도 안 붙는다", () => {
+  // /dev/null 아래에는 디렉터리를 못 만든다(ENOTDIR).
+  const r = ensureOutboxDir("/dev/null/outbox/r.txt");
+  expect(r.ok).toBe(false);
+  if (!r.ok) expect(r.detail).toBeTruthy();
 });

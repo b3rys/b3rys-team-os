@@ -1,7 +1,7 @@
 /**
  * ★그룹 답을 셸 없이 내보내는 자리.★
  *
- * ★왜 셸을 안 태우나 — 실측으로 배웠다(2026-08-24).★
+ * ★왜 셸을 안 태우나.★
  * 전에는 프롬프트가 `send.sh` 를 ★실행★ 하라고 시켰다. 그러자 그 실행마다 codex 가
  * ★승인 팝업★ 을 띄웠고(그 팀원 설정이 `approval_policy = "on-request"`), 팝업은 그룹방이 아니라
  * ★오너 DM★ 으로 갔다. 아무도 안 누르니 ★300초 뒤 만료 → 턴이 통째로 죽었다.★
@@ -10,8 +10,7 @@
  * "명령을 고정해서 '항상 허용' 을 한 번 받자" 도 검토했고 ★접었다★:
  *   `permissionGate.ts` 의 `GRANT_TTL_HOURS = 24` — ★그 기억은 24시간짜리다.★
  *   즉 "한 번만 누르면 끝" 이 아니라 ★하루에 한 번★ 이고, 다음날 조용해지면
- *   ★아무도 아무것도 안 했으므로 원인이 안 보인다.★ 팀장 기준은 "대화에 승인창은 아니다" —
- *   목표는 ★한 번만 뜨는 것이 아니라 안 뜨는 것★ 이다.
+ *   ★아무도 아무것도 안 했으므로 원인이 안 보인다.★ 목표는 ★한 번만 뜨는 것이 아니라 안 뜨는 것★ 이다.
  *
  * → ★팀원은 답을 파일로 쓰고, 운반은 브리지가 한다.★ 셸을 안 타므로 승인 경로를 아예 안 지난다.
  *   덤으로 heredoc·따옴표·백틱·종료자 사고가 ★통째로 사라진다★ — 답이 명령 문자열에 안 들어간다.
@@ -30,7 +29,7 @@ export const MAX_REPLY_BYTES = 64 * 1024;
 /**
  * ★이 턴 전용 경로를 만든다.★
  *
- * ★고정 경로를 쓰지 않는다★ (리뷰에서 같은 지적을 두 번 받았다): 같은 파일을 재사용하면
+ * ★고정 경로를 쓰지 않는다★ : 같은 파일을 재사용하면
  * 이번 턴이 안 썼을 때 ★직전 턴의 답이 그대로 다시 나간다.★ 빈 파일은 거절되지만
  * ★옛 내용은 거절되지 않는다★ — 조용한 실패가 아니라 ★그럴듯하게 틀린★ 쪽이라 더 나쁘다.
  *
@@ -52,7 +51,7 @@ export function outboxDir(repoRoot: string, agentId: string): string {
   const safeAgent = agentId.replace(/[^A-Za-z0-9_-]/g, "_");
   // ★신뢰하는 쪽만 풀고 나머지는 문자열로 붙인다.★ `repoRoot` 는 에이전트가 못 바꾸지만
   //   그 아래 `outbox/<agent>` 는 바꿀 수 있다. ★양쪽에 realpath 를 걸면 링크가 같이 풀려
-  //   비교가 언제나 통과한다★ — 검사가 아니라 모양만 남는다(첫 시도에서 그렇게 짰다가 잡혔다).
+  //   비교가 언제나 통과한다★ — 검사가 아니라 모양만 남는다.
   let root = repoRoot;
   try { root = realpathSync(repoRoot); } catch { /* 없으면 준 값을 그대로 쓴다 */ }
   return join(root, "var", "codex-bridge", "outbox", safeAgent);
@@ -72,7 +71,7 @@ export type ConsumeResult =
  * 방에 게시하게 된다 — ★읽기 권한이 곧 유출 경로★ 가 된다.
  */
 export function consumeGroupReply(path: string, expectedDir?: string): ConsumeResult {
-  // ★부모 경로도 본다★ (리뷰 지적): `O_NOFOLLOW` 는 ★마지막 조각만★ 안 따라간다.
+  // ★부모 경로도 본다★: `O_NOFOLLOW` 는 ★마지막 조각만★ 안 따라간다.
   //   에이전트가 `outbox/<agent>` 를 ★디렉터리 대신 심링크★ 로 바꾸면 그 너머의 파일은
   //   ★보통 파일이라 통과★ 하고, 남의 파일이 방에 올라간다. `mkdirSync(recursive)` 는
   //   그 자리가 이미 심링크-디렉터리면 ★그냥 통과★ 해서 못 막는다.
@@ -87,7 +86,7 @@ export function consumeGroupReply(path: string, expectedDir?: string): ConsumeRe
       return discard(path, { kind: "rejected", reason: "dir_moved" });
     }
   }
-  // ★경로로 두 번 열지 않는다★ (리뷰 지적 · TOCTOU):
+  // ★경로로 두 번 열지 않는다★ (TOCTOU):
   //   전에는 `lstat` 으로 보통 파일인지 본 뒤 ★경로로 다시★ `readFileSync` 를 했다.
   //   그 사이에 경로를 심링크로 바꿔치기하면 ★읽기는 링크를 따라간다★ — 검사한 것과 읽은 것이
   //   다른 객체다. 크기 검사도 같은 이유로 샌다(잰 뒤에 커질 수 있다).
@@ -134,7 +133,16 @@ function discard<T extends ConsumeResult>(path: string, r: T): T {
   return r;
 }
 
-/** 팀원이 쓸 자리를 미리 만들어 둔다 — 디렉터리가 없어서 못 쓰는 일이 없게. */
-export function ensureOutboxDir(path: string): void {
-  try { mkdirSync(dirname(path), { recursive: true, mode: 0o700 }); } catch { /* best-effort */ }
+/**
+ * 팀원이 쓸 자리를 미리 만든다. ★실패를 삼키지 않는다★ —
+ * 삼키면 자리가 없어서 못 쓴 것이 ★"답 안 함"(정상)★ 으로 기록되고 경고도 안 붙는다.
+ * 그 상태에서는 모든 턴이 조용히 통과하고, 사람은 팀원이 답을 안 한다고 읽는다.
+ */
+export function ensureOutboxDir(path: string): { ok: true } | { ok: false; detail: string } {
+  try {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, detail: (e as { code?: string }).code ?? String(e).slice(0, 60) };
+  }
 }

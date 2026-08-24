@@ -1101,6 +1101,7 @@ describe("codex bridge — 진행 중 작업에 끼어들기", () => {
 import { runGroupTurn } from "./bridge";
 
 describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 값이다★", () => {
+  const tmpRoot = mkdtempSync(join(tmpdir(), "grt-"));
   type Ctx = Parameters<typeof runGroupTurn>[0];
   type Out = { kind: "reply"; text: string } | { kind: "none" } | { kind: "rejected"; reason: string };
   function make(run: unknown, out: Out = { kind: "reply", text: "네 들립니다" }, deliverOk = true) {
@@ -1115,13 +1116,14 @@ describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 �
         reactMessage: async (_c: number, _m: number, e: string) => { reacts.push(e); return true; },
       },
       agentId: "dex",
-      repoRoot: "/repo",
+      // ★진짜로 만들 수 있는 자리를 준다★ — 준비 실패면 턴을 안 돌리므로 /repo 로는 아무것도 안 돈다
+      repoRoot: tmpRoot,
       chatId: -100,
       tgMsgId: 42,
       req: { body: "@덱스 들려?", threadId: "tg--100", messageId: "tg-1" },
       audit: (_a: string, _t: string, d: Record<string, unknown>) => { audits.push(d); },
       run,
-      replyPath: "/repo/var/codex-bridge/outbox/dex/fixed.txt",
+      replyPath: join(tmpRoot, "var", "codex-bridge", "outbox", "dex", "fixed.txt"),
       consume: (p: string) => { consumed.push(p); return out; },
       deliver: async (a: { text: string; threadId: string; messageId: string }) => {
         delivered.push({ text: a.text, threadId: a.threadId, messageId: a.messageId });
@@ -1190,17 +1192,29 @@ describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 �
     expect(reacts).toEqual(["⚠️"]);
     expect(audits[0]?.turn_ok).toBe(false);
     expect(String(audits[0]?.detail)).toContain("threw:");
-    expect(consumed).toEqual(["/repo/var/codex-bridge/outbox/dex/fixed.txt"]);
+    expect(consumed).toEqual([join(tmpRoot, "var", "codex-bridge", "outbox", "dex", "fixed.txt")]);
   });
 
   test("★턴에 넘어가는 본문이 답 쓸 자리를 알려준다 — 조립된 값으로 확인★", async () => {
     let seen = "";
     const { ctx } = make(async (_c: number, body: string) => { seen = body; return okTurn(); });
     await runGroupTurn(ctx);
-    expect(seen).toContain("/repo/var/codex-bridge/outbox/dex/fixed.txt");
+    expect(seen).toContain(join(tmpRoot, "var", "codex-bridge", "outbox", "dex", "fixed.txt"));
     // ★셸을 시키지 않는다★ — exec 이 곧 승인 팝업이고 팝업은 턴을 죽였다
     expect(seen).not.toContain("send.sh");
     expect(seen).not.toContain("mktemp");
+  });
+
+  test("★자리를 못 만들면 턴을 안 돌린다★ — 준비 실패가 '답 안 함' 으로 묻히면 안 된다", async () => {
+    let ran = false;
+    const { reacts, audits, ctx } = make(async () => { ran = true; return okTurn(); });
+    // 실제로 못 만드는 자리를 준다 (/dev/null 아래)
+    (ctx as unknown as { replyPath: string }).replyPath = "/dev/null/outbox/dex/r.txt";
+    await runGroupTurn(ctx);
+    expect(ran).toBe(false);
+    expect(reacts).toEqual(["⚠️"]);
+    expect(String(audits[0]?.detail)).toContain("outbox_unavailable");
+    expect(audits[0]?.replied).toBe(false);
   });
 
   test("★턴에 넘어가는 deps 는 발신이 떨어져 있다★", async () => {

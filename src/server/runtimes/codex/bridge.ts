@@ -506,10 +506,20 @@ export async function runGroupTurn(ctx: {
   const consume = ctx.consume ?? consumeGroupReply;
   const deliver = ctx.deliver ?? deliverGroupReply;
   const replyPath = ctx.replyPath ?? groupReplyPath(ctx.repoRoot, ctx.agentId);
-  ensureOutboxDir(replyPath);
+  // ★자리를 못 만들면 턴을 돌리지 않는다★ — 돌려봐야 답을 받을 데가 없고,
+  //   그 실패는 "답 안 함" 과 구분이 안 되는 모양으로 기록된다.
+  const prep = ensureOutboxDir(replyPath);
   const warn = () => {
     if (tgMsgId !== undefined && Number.isFinite(tgMsgId)) void deps.reactMessage?.(chatId, tgMsgId, "⚠️");
   };
+  if (!prep.ok) {
+    warn();
+    audit("turn_completed_no_autopost", req.messageId, {
+      agent_id: ctx.agentId, thread_id: req.threadId, turn_ok: false, chars: 0,
+      replied: false, delivered: false, detail: `outbox_unavailable:${prep.detail}`,
+    });
+    return;
+  }
   // ★한 번만 부른다★ — 발신을 떼는 것과 답 보내는 명령을 넣는 것은 한 쌍이다.
   const call = groupTurnCall(deps, {
     body: req.body,
@@ -632,7 +642,7 @@ export async function handleMessage(
   //   ★enforcement = gate 결과와 무관하게 그룹 전체 drop★ — capture→bus가 owner를 이미 처리하므로(runInjection이
   //   route targets 에만 주입) native 가 또 답하면 이중응답. gate는 shadow/audit(effective 권위 기록)용으로만.
   //   env flag 2개 분리, 둘 다 off 기본 = ★라이브 영향 0(byte-level 불변)★. shadow=drop 없이 audit만.
-  // ★이 브리지가 '누구' 인지는 한 곳에서만 정한다★ (리뷰 지적).
+  // ★이 브리지가 '누구' 인지는 한 곳에서만 정한다★.
   //   같은 식이 아래 네 곳에 흩어져 있었다. 그중 하나라도 빠지면 ★남의 신원으로 도는데★
   //   그게 승인 요청의 주인으로도 쓰인다 — 실제로 dex 요청 4건이 codex 앞으로 기록됐다.
   const selfAgentId = deps.agentId ?? process.env.CODEX_AGENT_ID ?? "codex";
@@ -680,7 +690,7 @@ export async function handleMessage(
     const sent = await send(chatId, SCHEDULE_UNSUPPORTED_TEXT);
     return {
       ok: sent !== null,
-      // ★창구 경로에서는 실패다★ (리뷰 지적): 여기서는 안내 문구를 ★발신으로★ 전하는데,
+      // ★창구 경로에서는 실패다★: 여기서는 안내 문구를 ★발신으로★ 전하는데,
       //   그 경로는 발신을 뗐다 — 그러면 ★답 0건 · 경고 없음 · 성공 기록★ 이 되어
       //   사람도 기록도 "잘 됐다" 로 읽는다. 아무것도 전달되지 않았으므로 turnOk 는 거짓이다.
       //   1:1 은 실제로 보내므로 `ok` 로 판정되어 영향이 없다.
@@ -1331,16 +1341,16 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     },
   });
   if (windowHandle) {
-    // ★신호 처리기를 달면 Node 의 기본 종료가 사라진다★ (리뷰 지적).
+    // ★신호 처리기를 달면 Node 의 기본 종료가 사라진다★.
     //   창구만 닫고 끝내면 폴 루프가 계속 돌아 ★SIGTERM 으로 안 죽는다★ —
     //   launchd 재기동이 SIGKILL 까지 기다리게 된다. 치우고 ★직접 나간다.★
     const stop = () => {
-      // ★종료에 물려 사라지는 턴을 기록에 남긴다★ (리뷰 지적).
+      // ★종료에 물려 사라지는 턴을 기록에 남긴다★.
       //   창구는 202(접수)까지만 답한다. 이미 접수돼 큐에 든 턴은 여기서 프로세스가 끝나며
       //   ★확정적으로 사라지는데, 안 돌았다는 기록이 어디에도 없다★ —
       //   ★보낸 쪽은 갔다고 믿고 받는 쪽은 온 적이 없는★, 이 창구가 고치려는 그 실패 모양이다.
       //   막지는 않는다(비우려면 종료가 늘어진다). 남은 개수를 남겨 나중에 읽히게 한다.
-      //   ★이 줄이 남는 이유는 조건부다★ (리뷰 지적): `process.exit(0)` 은 ★버퍼를 안 비우고★
+      //   ★이 줄이 남는 이유는 조건부다★: `process.exit(0)` 은 ★버퍼를 안 비우고★
       //   나간다. 지금 살아남는 것은 stdout 이 ★일반 파일★ 이라 Node 가 동기로 쓰기 때문이다
       //   (`launcher.ts` — plist 의 `StandardOutPath` 가 파일이고, wrapper 의 `exec bun` 뒤에 파이프가 없다).
       //   ★wrapper 에 `| tee` 같은 파이프를 하나 붙이면 stdout 이 파이프(비동기)가 되어 이 줄이 잘린다★ —
