@@ -1,8 +1,8 @@
 import { test, expect, describe } from "bun:test";
-import { mkdtempSync, writeFileSync, existsSync, symlinkSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, symlinkSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { consumeGroupReply, ensureOutboxDir, groupReplyPath, MAX_REPLY_BYTES } from "./groupOutbox";
+import { consumeGroupReply, ensureOutboxDir, groupReplyPath, outboxDir, MAX_REPLY_BYTES } from "./groupOutbox";
 
 const dir = () => mkdtempSync(join(tmpdir(), "outbox-"));
 
@@ -56,6 +56,29 @@ describe("consumeGroupReply — 한 번 읽고 반드시 지운다", () => {
     expect(existsSync(secret)).toBe(true);
   });
 
+  test("★심링크는 '답 안 함' 이 아니라 '거절' 로 남는다★ — 뭉치면 공격 시도가 조용히 묻힌다", () => {
+    const d = dir();
+    writeFileSync(join(d, "secret.txt"), "비밀");
+    const link = join(d, "r.txt");
+    symlinkSync(join(d, "secret.txt"), link);
+    const r = consumeGroupReply(link);
+    // ★"파일이 없다"(none) 와 섞이면 안 된다★ — 없는 것과 막은 것은 다른 사건이다
+    expect(r.kind).toBe("rejected");
+    expect(JSON.stringify(r)).not.toContain("비밀");
+  });
+
+  test("★검사한 것과 읽은 것이 같은 객체다★ — 열린 fd 로만 재고 읽는다", () => {
+    // 전에는 lstat 으로 재고 ★경로로 다시★ 열었다. 그 사이에 심링크로 바꿔치기하면
+    // 읽기가 링크를 따라간다 — ★그 경로를 아는 게 팀원 자신이라★ 이론이 아니다.
+    // 지금은 O_NOFOLLOW 로 한 번 열고 fstat 으로 그 fd 를 재므로 바꿔칠 창이 없다.
+    const d = dir();
+    const f = join(d, "r.txt");
+    writeFileSync(f, "정상 답");
+    expect(consumeGroupReply(f)).toEqual({ kind: "reply", text: "정상 답" });
+    // 소각까지 한 동작이라, 같은 경로에 링크를 새로 걸어도 남은 것이 없다
+    expect(existsSync(f)).toBe(false);
+  });
+
   test("★디렉터리도 거절한다★", () => {
     const d = join(dir(), "sub");
     mkdirSync(d);
@@ -81,4 +104,45 @@ test("ensureOutboxDir — 팀원이 쓸 자리를 미리 만든다", () => {
   ensureOutboxDir(p);
   writeFileSync(p, "됨");  // 디렉터리가 없으면 여기서 던진다
   expect(consumeGroupReply(p)).toEqual({ kind: "reply", text: "됨" });
+});
+
+describe("★부모 디렉터리가 바꿔치기되면 거절한다★ — O_NOFOLLOW 는 마지막 조각만 막는다", () => {
+  test("outbox/<agent> 가 심링크로 바뀌면 그 너머 파일을 안 읽는다", () => {
+    const root = dir();
+    const real = outboxDir(root, "dex");
+    mkdirSync(real, { recursive: true });
+    // 공격자가 그 자리를 남의 디렉터리로 향하는 링크로 바꾼다
+    const elsewhere = join(root, "secrets");
+    mkdirSync(elsewhere);
+    writeFileSync(join(elsewhere, "x.txt"), "비밀");
+    rmSync(real, { recursive: true });
+    symlinkSync(elsewhere, real);
+    const p = join(real, "x.txt");
+    const r = consumeGroupReply(p, outboxDir(root, "dex"));
+    expect(r).toEqual({ kind: "rejected", reason: "dir_moved" });
+    expect(JSON.stringify(r)).not.toContain("비밀");
+  });
+
+  test("★정상 자리는 통과한다★ — 경계 밖만 재면 문턱이 어디든 통과한다", () => {
+    const root = dir();
+    const p = groupReplyPath(root, "dex");
+    ensureOutboxDir(p);
+    writeFileSync(p, "정상");
+    expect(consumeGroupReply(p, outboxDir(root, "dex"))).toEqual({ kind: "reply", text: "정상" });
+  });
+});
+
+test("★열기 실패 사유를 가른다★ — 전부 '답 안 함' 이면 고장이 조용히 통과한다", () => {
+  // outbox 디렉터리가 한 번 틀어지면 ★모든 턴이 "답 안 함" 으로 보인다★ —
+  // 사람은 "덱스가 답을 안 하네" 로 읽는다. 이 PR 이 없애려는 그 모양이다.
+  const root = dir();
+  const d = outboxDir(root, "dex");
+  mkdirSync(d, { recursive: true });
+  const p = join(d, "r.txt");
+  // 경로 중간을 파일로 만들어 ENOTDIR 을 낸다 (ENOENT 가 아니다)
+  const p2 = join(p, "더", "안쪽.txt");
+  const r = consumeGroupReply(p2, outboxDir(root, "dex"));
+  writeFileSync(p, "x");
+  expect(consumeGroupReply(p2, outboxDir(root, "dex")).kind).not.toBe("none");
+  expect(r.kind).not.toBe("reply");
 });

@@ -26,7 +26,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadRegistry } from "../../lib/registry";
 import { appendAuditFile } from "../../lib/auditFile";
-import { consumeGroupReply, ensureOutboxDir, groupReplyPath } from "./groupOutbox";
+import { consumeGroupReply, ensureOutboxDir, groupReplyPath, outboxDir } from "./groupOutbox";
 import type { CodexSandboxMode } from "../../types";
 import type { PermissionContext } from "../../lib/permissionGate";
 import { codexRuntimePreflight, codexConfiguredGrants } from "./permissions";
@@ -523,7 +523,7 @@ export async function runGroupTurn(ctx: {
   } catch (e) {
     warn();
     // ★던져도 자리를 비운다★ — 안 지우면 다음 턴이 이번 답을 자기 답으로 읽는다.
-    consume(replyPath);
+    consume(replyPath, outboxDir(ctx.repoRoot, ctx.agentId));
     audit("turn_completed_no_autopost", req.messageId, {
       agent_id: ctx.agentId, thread_id: req.threadId, turn_ok: false, chars: 0, replied: false,
       detail: `threw:${e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)}`,
@@ -531,7 +531,7 @@ export async function runGroupTurn(ctx: {
     return;
   }
   // ★답은 턴의 stdout 이 아니라 팀원이 쓴 파일에서 온다.★ 안 썼으면 안 보낸다.
-  const out = consume(replyPath);
+  const out = consume(replyPath, outboxDir(ctx.repoRoot, ctx.agentId));
   let delivered = false;
   let deliverDetail = "";
   if (out.kind === "reply") {

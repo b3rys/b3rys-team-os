@@ -20,7 +20,7 @@
  * 여기서는 ★답 파일을 쓰는 행위 자체가 "보낸다" 는 결정★ 이고 브리지는 운반만 한다.
  * ★안 쓰면 안 나간다★ — "보낸 것만 말한 것이다" 가 그대로 유지된다.
  */
-import { lstatSync, mkdirSync, readFileSync, rmSync, type Stats } from "node:fs";
+import { closeSync, constants, fstatSync, mkdirSync, openSync, readSync, realpathSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 
@@ -38,43 +38,93 @@ export const MAX_REPLY_BYTES = 64 * 1024;
  * ★팀원 사이는 안 막는다.★ 경로가 갈리면 서로를 못 덮는다.
  */
 export function groupReplyPath(repoRoot: string, agentId: string): string {
-  const safeAgent = agentId.replace(/[^A-Za-z0-9_-]/g, "_");
   const nonce = randomBytes(8).toString("hex");
-  return join(repoRoot, "var", "codex-bridge", "outbox", safeAgent, `${nonce}.txt`);
+  return join(outboxDir(repoRoot, agentId), `${nonce}.txt`);
+}
+
+/**
+ * ★그 팀원의 자리 — 경로에서 되뽑지 않고 `repoRoot`·`agentId` 에서 ★독립적으로★ 계산한다.★
+ *
+ * 읽을 때 이것과 대조한다. ★`dirname(path)` 를 기대값으로 쓰면 자기 자신과 비교하는 것이라
+ * 언제나 통과한다★ — 검사가 아니라 모양만 남는다.
+ */
+export function outboxDir(repoRoot: string, agentId: string): string {
+  const safeAgent = agentId.replace(/[^A-Za-z0-9_-]/g, "_");
+  // ★신뢰하는 쪽만 풀고 나머지는 문자열로 붙인다.★ `repoRoot` 는 에이전트가 못 바꾸지만
+  //   그 아래 `outbox/<agent>` 는 바꿀 수 있다. ★양쪽에 realpath 를 걸면 링크가 같이 풀려
+  //   비교가 언제나 통과한다★ — 검사가 아니라 모양만 남는다(첫 시도에서 그렇게 짰다가 잡혔다).
+  let root = repoRoot;
+  try { root = realpathSync(repoRoot); } catch { /* 없으면 준 값을 그대로 쓴다 */ }
+  return join(root, "var", "codex-bridge", "outbox", safeAgent);
 }
 
 /** 결과. ★"안 썼다" 와 "못 읽었다" 를 가른다★ — 둘을 뭉치면 "답 안 함" 이 고장으로 읽힌다. */
 export type ConsumeResult =
   | { kind: "reply"; text: string }
   | { kind: "none" }
-  | { kind: "rejected"; reason: "not_regular_file" | "too_large" | "empty" | "unreadable" };
+  | { kind: "rejected"; reason: "not_regular_file" | "too_large" | "empty" | "unreadable" | "dir_moved" };
 
 /**
  * ★답 파일을 한 번 읽고 지운다.★ 읽든 못 읽든 ★반드시 지운다★ —
  * 남기면 다음 턴이 그것을 이번 답으로 읽고, 팀 대화가 디스크에 그대로 남는다.
  *
- * ★심링크를 따라가지 않는다★: `lstat` 으로 ★보통 파일★ 인지 먼저 본다. 에이전트가 쓰는 자리라
- * 링크가 걸려 있으면 그 대상을 읽어 방에 게시하게 된다 — ★읽기 권한이 곧 유출 경로★ 가 된다.
+ * ★심링크를 따라가지 않는다★: 에이전트가 쓰는 자리라 링크가 걸려 있으면 그 대상을 읽어
+ * 방에 게시하게 된다 — ★읽기 권한이 곧 유출 경로★ 가 된다.
  */
-export function consumeGroupReply(path: string): ConsumeResult {
-  let st: Stats;
-  try {
-    // ★lstat 이다 — stat 이 아니다.★ `stat` 은 링크를 따라가므로 링크도 "보통 파일" 로 통과한다.
-    //   그러면 에이전트가 남의 파일로 링크를 걸어 그 내용을 방에 게시하게 만들 수 있다.
-    st = lstatSync(path);
-  } catch {
-    return { kind: "none" }; // ★턴이 안 썼다 = 답 안 함.★ 고장이 아니다
+export function consumeGroupReply(path: string, expectedDir?: string): ConsumeResult {
+  // ★부모 경로도 본다★ (리뷰 지적): `O_NOFOLLOW` 는 ★마지막 조각만★ 안 따라간다.
+  //   에이전트가 `outbox/<agent>` 를 ★디렉터리 대신 심링크★ 로 바꾸면 그 너머의 파일은
+  //   ★보통 파일이라 통과★ 하고, 남의 파일이 방에 올라간다. `mkdirSync(recursive)` 는
+  //   그 자리가 이미 심링크-디렉터리면 ★그냥 통과★ 해서 못 막는다.
+  //   → 실제로 열리는 디렉터리가 ★우리가 만든 그 디렉터리★ 인지 대조한다.
+  if (expectedDir !== undefined) {
+    try {
+      // ★기대값에는 realpath 를 안 건다★ — 이미 신뢰하는 뿌리에서 계산된 값이다.
+      if (realpathSync(dirname(path)) !== expectedDir) {
+        return discard(path, { kind: "rejected", reason: "dir_moved" });
+      }
+    } catch {
+      return discard(path, { kind: "rejected", reason: "dir_moved" });
+    }
   }
-  if (!st.isFile()) return discard(path, { kind: "rejected", reason: "not_regular_file" });
-  if (st.size > MAX_REPLY_BYTES) return discard(path, { kind: "rejected", reason: "too_large" });
-  let text: string;
+  // ★경로로 두 번 열지 않는다★ (리뷰 지적 · TOCTOU):
+  //   전에는 `lstat` 으로 보통 파일인지 본 뒤 ★경로로 다시★ `readFileSync` 를 했다.
+  //   그 사이에 경로를 심링크로 바꿔치기하면 ★읽기는 링크를 따라간다★ — 검사한 것과 읽은 것이
+  //   다른 객체다. 크기 검사도 같은 이유로 샌다(잰 뒤에 커질 수 있다).
+  //   ★이건 이론이 아니다★ — 그 경로를 아는 것이 팀원 자신이다. 브리지가 알려준다.
+  //   성공하면 ★비밀 파일 내용이 그룹방에 올라간다.★
+  //
+  //   → ★fd 하나로 끝낸다.★ `O_NOFOLLOW` 는 마지막 경로 요소가 심링크면 ★열기 자체가 실패★ 하고,
+  //     `fstat` 은 경로가 아니라 ★열린 그 파일★ 을 잰다. 검사한 것과 읽은 것이 같음이 보장된다.
+  let fd: number;
   try {
-    text = readFileSync(path, "utf8").trim();
-  } catch {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (e) {
+    // ★"안 썼다" 와 "심링크였다" 를 가른다★ — 뭉치면 공격 시도가 "답 안 함" 으로 조용히 묻힌다.
+    const code = (e as { code?: string }).code;
+    if (code === "ENOENT") return { kind: "none" }; // 턴이 안 썼다 = 답 안 함. 고장이 아니다
+    if (code === "ELOOP" || code === "EMLINK") return discard(path, { kind: "rejected", reason: "not_regular_file" });
     return discard(path, { kind: "rejected", reason: "unreadable" });
   }
-  if (!text) return discard(path, { kind: "rejected", reason: "empty" });
-  return discard(path, { kind: "reply", text });
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile()) return discard(path, { kind: "rejected", reason: "not_regular_file" });
+    if (st.size > MAX_REPLY_BYTES) return discard(path, { kind: "rejected", reason: "too_large" });
+    const buf = Buffer.allocUnsafe(st.size);
+    let off = 0;
+    while (off < st.size) {
+      const n = readSync(fd, buf, off, st.size - off, off);
+      if (n <= 0) break;
+      off += n;
+    }
+    const text = buf.subarray(0, off).toString("utf8").trim();
+    if (!text) return discard(path, { kind: "rejected", reason: "empty" });
+    return discard(path, { kind: "reply", text });
+  } catch {
+    return discard(path, { kind: "rejected", reason: "unreadable" });
+  } finally {
+    try { closeSync(fd); } catch { /* best-effort */ }
+  }
 }
 
 /** 읽었든 거절했든 ★자리를 비우고★ 결과를 그대로 돌려준다.
