@@ -615,8 +615,11 @@ export async function handleMessage(
     const sent = await send(chatId, SCHEDULE_UNSUPPORTED_TEXT);
     return {
       ok: sent !== null,
-      // 턴을 안 돌린 것이지 실패한 게 아니다 — 창구 경로에서 경고를 띄울 일이 아니다.
-      turnOk: true,
+      // ★창구 경로에서는 실패다★ (리뷰 지적): 여기서는 안내 문구를 ★발신으로★ 전하는데,
+      //   그 경로는 발신을 뗐다 — 그러면 ★답 0건 · 경고 없음 · 성공 기록★ 이 되어
+      //   사람도 기록도 "잘 됐다" 로 읽는다. 아무것도 전달되지 않았으므로 turnOk 는 거짓이다.
+      //   1:1 은 실제로 보내므로 `ok` 로 판정되어 영향이 없다.
+      turnOk: false,
       reply: SCHEDULE_UNSUPPORTED_TEXT,
       detail: sent !== null ? "schedule_unsupported" : "send_failed",
     };

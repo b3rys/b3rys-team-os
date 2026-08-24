@@ -1168,3 +1168,17 @@ describe("runGroupTurn — 성공·반환실패·예외실패가 서로 다르�
     expect(sent).toBeNull();
   });
 });
+
+// ── ★안내 문구를 '발신' 으로 전하는 경로는 창구에서 실패다★ (리뷰 지적) ──
+//
+// 예약 요청인데 예약 도구가 꺼져 있으면 LLM 앞에서 조기 반환하며 안내 문구를 ★보낸다.★
+// 그런데 창구 경로는 그 발신을 뗐다 — 그러면 ★답 0건 · 경고 없음 · 성공 기록★ 이 되어
+// 사람도 기록도 "잘 됐다" 로 읽는다. 아무것도 전달되지 않았으므로 실패로 보여야 한다.
+test("★예약 미지원 안내는 창구에서 실패로 보인다★ — 답 0건인데 성공으로 적히면 안 된다", async () => {
+  const { deps } = spies(() => ok("답"));
+  // 예약 도구가 꺼진 상태(기본값)에서 예약형 문장을 넣는다.
+  const r = await handleMessage(-123, "10분 뒤에 알려줘", 55, deps, undefined, "window");
+  expect(r.detail).toContain("schedule");
+  // ★turnOk 가 거짓이어야 창구 경로가 경고를 띄운다★
+  expect(r.turnOk).toBe(false);
+});
