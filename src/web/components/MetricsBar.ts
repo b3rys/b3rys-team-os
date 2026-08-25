@@ -221,7 +221,7 @@ export function renderMetricsBar(root: HTMLElement): void {
               ${navIcon("settings", "Settings")}
             </button>
             <a id="global-vocab-rise-link"
-              href="/reports/file/vocab-rise-b2-c1/html"
+              href="/vocab-rise/"
               class="inline-flex min-h-10 items-center px-2 py-1 rounded-md text-[11px] md:text-[13px] text-slate-400 hover:bg-surface-3 hover:text-slate-200 whitespace-nowrap [touch-action:manipulation]"
               title="${pick("Vocab Rise — 중상급 영어 단어·표현 학습", "Vocab Rise — upper-intermediate vocabulary and phrases")}">Vocab Rise</a>
           </div>
