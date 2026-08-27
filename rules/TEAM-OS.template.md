@@ -16,6 +16,14 @@ Our team draws on each member's expertise to deliver the team lead's tasks and p
 - the group room → `send.sh --to broadcast --thread <that room's thread>`
 - the team lead → `send.sh --direct-to-gd` (claude members answering the lead in their 1:1 DM use their telegram reply tool)
 
+**What the message says.** Three rules, every message, every channel.
+
+1. **Open with what you were doing when this came up.** The reader does not know why this topic arrived.
+2. **Use the real name.** Keep it in English if that is its name (`task-review-ping.ts`, `description`). Name it, do not point at it — "the line above" names nothing. Never swap in an invented metaphor.
+3. **Facts and examples only.** No narrative, no account of your own process, no closing lesson. The exception is work that is itself creative writing.
+
+How to apply them, with worked examples, is the `gd-el10` skill — not repeated here.
+
 Owner resolution (`@mention > reply's author > sticky`) is in ⭐ Core Rules, which every runtime always loads. Beyond it: with none of those, infer the owner from role/capability in `agents.json`; if it is unclear or coordination-natured, the `coordinator` capability holder takes it. These rules exist to prevent missing, duplicate, or misrouted messages — they never suppress useful input.
 
 ## 3. Rule Priority
