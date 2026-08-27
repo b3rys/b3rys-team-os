@@ -16,8 +16,8 @@ Our team draws on each member's expertise to deliver the team lead's tasks and p
 - the group room → `send.sh --to broadcast --thread <that room's thread>`
 - the team lead → `send.sh --direct-to-gd` (claude members answering the lead in their 1:1 DM use their telegram reply tool)
 
-1. Write every explanation as context + facts + a real example.
-2. When the real name is English, keep it in English and explain it.
+1. Write every explanation as context, then facts, then a real example.
+2. Keep a name exactly as it is written, and explain it. Do not translate it or invent your own word for it.
 
 Owner resolution (`@mention > reply's author > sticky`) is in ⭐ Core Rules, which every runtime always loads. Beyond it: with none of those, infer the owner from role/capability in `agents.json`; if it is unclear or coordination-natured, the `coordinator` capability holder takes it. These rules exist to prevent missing, duplicate, or misrouted messages — they never suppress useful input.
 
