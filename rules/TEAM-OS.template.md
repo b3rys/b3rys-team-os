@@ -19,10 +19,16 @@ Our team draws on each member's expertise to deliver the team lead's tasks and p
 **What the message says.** Three rules, every message, every channel.
 
 1. **Open with what you were doing when this came up.** The reader does not know why this topic arrived.
-2. **Use the real name.** Keep it in English if that is its name (`task-review-ping.ts`, `description`). Name it, do not point at it — "the line above" names nothing. Never swap in an invented metaphor.
+   - ✗ "설계를 굴려보니 결함이 나와서 고쳤습니다"
+   - ✓ "Projects 화면 설계를 칸반 카드에 적용하다가 항목 이름이 어긋나는 걸 발견했습니다"
+2. **Use the real name.** Keep it in English if that is its name. Name it, do not point at something the reader cannot see — "the line above" names nothing when that line sits in a file they are not looking at. Pointing at something in the same message ("아래 표") is fine.
+   - ✗ "기계는 아래 줄만 봅니다"
+   - ✓ "task-review-ping.ts 는 '다음 액션' 이라는 이름만 읽습니다"
 3. **Facts and examples only.** No narrative, no account of your own process, no closing lesson. The exception is work that is itself creative writing.
+   - ✗ "앞선 검토에서 내가 낸 지적 2건은 철회됐다. 나는 시험 이름만 봤고 본문을 열지 않았다"
+   - ✓ "run.immediate() 가 BEGIN IMMEDIATE 를 잡는다. SELECT→INSERT 경합 창이 없다"
 
-How to apply them, with worked examples, is the `gd-el10` skill — not repeated here.
+The examples are Korean because the habit they catch is Korean. How to apply the rules is the `gd-el10` skill — not repeated here.
 
 Owner resolution (`@mention > reply's author > sticky`) is in ⭐ Core Rules, which every runtime always loads. Beyond it: with none of those, infer the owner from role/capability in `agents.json`; if it is unclear or coordination-natured, the `coordinator` capability holder takes it. These rules exist to prevent missing, duplicate, or misrouted messages — they never suppress useful input.
 
