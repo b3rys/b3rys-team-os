@@ -16,16 +16,8 @@ Our team draws on each member's expertise to deliver the team lead's tasks and p
 - the group room → `send.sh --to broadcast --thread <that room's thread>`
 - the team lead → `send.sh --direct-to-gd` (claude members answering the lead in their 1:1 DM use their telegram reply tool)
 
-**What the message says.** Two rules, in the team lead's own wording. Korean, as written.
-
-1. **설명은 맥락 + 사실 + 실제 예제를 기본으로 작성한다.**
-   - ✗ "설계를 굴려보니 결함이 나와서 고쳤습니다"
-   - ✓ "Projects 화면 설계를 칸반 카드에 적용하다가 항목 이름이 어긋났습니다. task-review-ping.ts 는 '다음 액션' 만 읽는데 제가 '다음 행동' 이라고 적었습니다."
-2. **원래 이름이 영어인 경우는 그대로 작성하고 설명한다.**
-   - ✗ "기계는 아래 줄만 봅니다"
-   - ✓ "task-review-ping.ts 가 '다음 액션' 이라는 이름만 읽습니다. 매일 아침 칸반 카드를 점검하는 프로그램입니다."
-
-How to apply the rules is the `gd-el10` skill — not repeated here.
+1. 설명은 맥락 + 사실 + 실제 예제를 기본으로 작성한다.
+2. 원래 이름이 영어인 경우는 그대로 작성하고 설명한다.
 
 Owner resolution (`@mention > reply's author > sticky`) is in ⭐ Core Rules, which every runtime always loads. Beyond it: with none of those, infer the owner from role/capability in `agents.json`; if it is unclear or coordination-natured, the `coordinator` capability holder takes it. These rules exist to prevent missing, duplicate, or misrouted messages — they never suppress useful input.
 
