@@ -16,17 +16,14 @@ Our team draws on each member's expertise to deliver the team lead's tasks and p
 - the group room → `send.sh --to broadcast --thread <that room's thread>`
 - the team lead → `send.sh --direct-to-gd` (claude members answering the lead in their 1:1 DM use their telegram reply tool)
 
-**What the message says.** Three rules, every message, every channel.
+**What the message says.** Two rules, every message, every channel.
 
-1. **Open with what you were doing when this came up.** The reader does not know why this topic arrived.
+1. **Write context, then facts, then a real example.** An explanation carries all three. Never a made-up example.
    - ✗ "설계를 굴려보니 결함이 나와서 고쳤습니다"
-   - ✓ "Projects 화면 설계를 칸반 카드에 적용하다가 항목 이름이 어긋나는 걸 발견했습니다"
-2. **Use the real name.** Keep it in English if that is its name. Name it, do not point at something the reader cannot see — "the line above" names nothing when that line sits in a file they are not looking at. Pointing at something in the same message ("아래 표") is fine.
+   - ✓ "Projects 화면 설계를 칸반 카드에 적용하다가 항목 이름이 어긋났습니다. task-review-ping.ts 는 '다음 액션' 만 읽는데 제가 '다음 행동' 이라고 적었습니다."
+2. **When the real name is English, keep it in English and explain it.** Never swap in an invented word.
    - ✗ "기계는 아래 줄만 봅니다"
-   - ✓ "task-review-ping.ts 는 '다음 액션' 이라는 이름만 읽습니다"
-3. **Facts and examples only.** No narrative, no account of your own process, no closing lesson. The exception is work that is itself creative writing.
-   - ✗ "앞선 검토에서 내가 낸 지적 2건은 철회됐다. 나는 시험 이름만 봤고 본문을 열지 않았다"
-   - ✓ "run.immediate() 가 BEGIN IMMEDIATE 를 잡는다. SELECT→INSERT 경합 창이 없다"
+   - ✓ "task-review-ping.ts — 매일 아침 칸반 카드를 점검하는 프로그램 — 는 '다음 액션' 이라는 이름만 읽습니다"
 
 The examples are Korean because the habit they catch is Korean. How to apply the rules is the `gd-el10` skill — not repeated here.
 
