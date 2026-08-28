@@ -120,10 +120,15 @@ boot_services() {
 # ★목록에 없는 라벨은 rank 50 으로 뒤에 붙는다.★ 새 팀원이 들어와도 빠지지 않는다 —
 #   이 목록은 "누가 켜지나" 가 아니라 "무엇이 먼저냐" 만 정한다.
 #   서버 라벨이 바뀌면 목록이 안 맞아 알파벳순으로 돌아간다. 안 켜지는 게 아니라 순서만 잃는다.
+#
+# ★여기에 라벨을 적기 전에 boot_services 가 그 라벨을 낼 수 있는지 먼저 봐라.★
+#   openclaw 게이트웨이를 넣었다가 뺐다 — ai.openclaw.gateway.plist 는 이 저장소 경로를
+#   참조하지 않아 boot_services 가 내놓지 않는다(위 grep -Fq "$REPO" 필터).
+#   적어두면 다루는 것처럼 읽히는데 그 case 에 한 번도 안 들어간다. 순위표만 낡는다. (steve 지적)
+#   그 게이트웨이는 RunAtLoad·KeepAlive 가 둘 다 true 라 로그인 때 스스로 뜬다.
 boot_rank() {
   case "$1" in
     *team-collab*) echo 10 ;;
-    *openclaw*)    echo 20 ;;
     *)             echo 50 ;;
   esac
 }
