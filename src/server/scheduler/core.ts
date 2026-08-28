@@ -23,6 +23,9 @@ export interface ScheduledJobRow {
   status: ScheduledJobStatus;
   enabled: number;
   title: string;
+  workflow_id: string | null;
+  workflow_step_key: string | null;
+  workflow_step_order: number | null;
   owner_agent_id: string | null;
   target_agent_id: string | null;
   created_by: string;
@@ -63,6 +66,7 @@ export type SchedulePayload = InboxPayload | ExecPayload | CapabilityWorkloopPay
 
 export const WEEKLY_SHARED_CURATION_JOB_ID = "sched_weekly_shared_curation";
 export const WEEKLY_SELF_LEARNING_JOB_ID = "sched_weekly_self_learning_session";
+export const WEEKLY_SELF_LEARNING_WORKFLOW_ID = "weekly_self_learning";
 export const WEEKLY_SHARED_CURATION_CRON = "0 4 * * 5";
 export const WEEKLY_SELF_LEARNING_CRON = "0 5 * * 5";
 // 보고 경로 — 두 루프가 같은 문구를 쓴다.
@@ -454,8 +458,219 @@ function ensureCronJob(db: Database, input: CreateCronJobInput & { id: string })
   return getScheduledJob(db, input.id)!;
 }
 
+export interface ScheduledWorkflowInput {
+  id: string;
+  title: string;
+  timezone?: string;
+  ownerAgentId?: string | null;
+  description?: string;
+}
+
+export interface WorkflowOccurrenceSkipResult {
+  workflowId: string;
+  occurrenceDate: string;
+  skippedJobIds: string[];
+  alreadyPassedJobIds: string[];
+  ungroupedActiveJobIds: string[];
+  alreadySkipped: boolean;
+}
+
+export function ensureScheduledWorkflow(db: Database, input: ScheduledWorkflowInput): void {
+  db.prepare(
+    `INSERT INTO scheduled_workflow
+       (id, title, timezone, owner_agent_id, description, enabled, updated_at)
+     VALUES (?, ?, ?, ?, ?, 1, datetime('now'))
+     ON CONFLICT(id) DO UPDATE SET
+       title = excluded.title,
+       timezone = excluded.timezone,
+       owner_agent_id = excluded.owner_agent_id,
+       description = excluded.description,
+       enabled = 1,
+       updated_at = datetime('now')`,
+  ).run(
+    input.id,
+    input.title,
+    input.timezone ?? "Asia/Seoul",
+    input.ownerAgentId ?? null,
+    input.description ?? "",
+  );
+}
+
+export function assignScheduledJobToWorkflow(
+  db: Database,
+  jobId: string,
+  workflowId: string,
+  stepKey: string,
+  stepOrder: number,
+): void {
+  const result = db.prepare(
+    `UPDATE scheduled_job
+       SET workflow_id = ?, workflow_step_key = ?, workflow_step_order = ?, updated_at = datetime('now')
+     WHERE id = ?`,
+  ).run(workflowId, stepKey, stepOrder, jobId);
+  if (result.changes !== 1) throw new Error(`scheduled_job_not_found:${jobId}`);
+}
+
+function localDateInZone(date: Date, timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function backfillWorkflowSkipExceptions(db: Database, workflowId: string, timezone: string): void {
+  const jobIds = (db.prepare(
+    `SELECT id FROM scheduled_job WHERE workflow_id = ? ORDER BY id`,
+  ).all(workflowId) as Array<{ id: string }>).map((row) => row.id);
+  if (jobIds.length === 0) return;
+  const placeholders = jobIds.map(() => "?").join(",");
+  const historicalRuns = db.prepare(
+    `SELECT job_id, scheduled_for, finished_at, detail_json
+       FROM scheduled_job_run
+      WHERE job_id IN (${placeholders})
+        AND outcome = 'skipped'
+        AND json_valid(detail_json)
+        AND json_extract(detail_json, '$.reason') = 'lead_requested_week_skip'`,
+  ).all(...jobIds) as Array<{ job_id: string; scheduled_for: string; finished_at: string | null; detail_json: string }>;
+  const byOccurrence = new Map<string, { jobIds: Set<string>; createdAt: string; requestReason: string }>();
+  for (const run of historicalRuns) {
+    const occurrenceDate = localDateInZone(fromSqliteDate(run.scheduled_for), timezone);
+    const detail = JSON.parse(run.detail_json) as { request_reason?: unknown };
+    const current = byOccurrence.get(occurrenceDate) ?? {
+      jobIds: new Set<string>(),
+      createdAt: run.finished_at ?? run.scheduled_for,
+      requestReason: typeof detail.request_reason === "string" ? detail.request_reason : "lead_requested_week_skip",
+    };
+    current.jobIds.add(run.job_id);
+    if ((run.finished_at ?? run.scheduled_for) < current.createdAt) current.createdAt = run.finished_at ?? run.scheduled_for;
+    byOccurrence.set(occurrenceDate, current);
+  }
+  for (const [occurrenceDate, occurrence] of byOccurrence) {
+    if (occurrence.jobIds.size !== jobIds.length) continue;
+    db.prepare(
+      `INSERT OR IGNORE INTO scheduled_workflow_exception
+         (id, workflow_id, occurrence_date, action, reason, actor, created_at)
+       VALUES (?, ?, ?, 'skip', ?, 'historical_backfill', ?)`,
+    ).run(`swx_backfill_${workflowId}_${occurrenceDate}`, workflowId, occurrenceDate, occurrence.requestReason, occurrence.createdAt);
+  }
+}
+
+/**
+ * Consume every job in one workflow occurrence as a single transaction.
+ * The occurrence may be skipped before it is due; advancing from each scheduled
+ * slot (not from the request time) guarantees that the skipped slot cannot wake.
+ */
+export function skipWorkflowOccurrence(
+  db: Database,
+  input: { workflowId: string; occurrenceDate: string; actor: string; reason: string; now?: Date },
+): WorkflowOccurrenceSkipResult {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.occurrenceDate)) throw new Error("invalid_occurrence_date");
+  if (!input.actor.trim()) throw new Error("actor_required");
+  if (!input.reason.trim()) throw new Error("reason_required");
+
+  const requestedAt = input.now ?? new Date();
+  const run = db.transaction((): WorkflowOccurrenceSkipResult => {
+    const workflow = db.prepare(
+      `SELECT id, timezone, enabled FROM scheduled_workflow WHERE id = ?`,
+    ).get(input.workflowId) as { id: string; timezone: string; enabled: number } | null;
+    if (!workflow || workflow.enabled !== 1) throw new Error(`scheduled_workflow_not_active:${input.workflowId}`);
+
+    const ungroupedJobs = db.prepare(
+      `SELECT * FROM scheduled_job
+       WHERE workflow_id IS NULL AND enabled = 1 AND status = 'pending'
+       ORDER BY next_run_at, id`,
+    ).all() as ScheduledJobRow[];
+    const ungroupedActiveJobIds = ungroupedJobs
+      .filter((job) => localDateInZone(fromSqliteDate(job.next_run_at), job.timezone || workflow.timezone) === input.occurrenceDate)
+      .map((job) => job.id);
+
+    const existing = db.prepare(
+      `SELECT action FROM scheduled_workflow_exception WHERE workflow_id = ? AND occurrence_date = ?`,
+    ).get(input.workflowId, input.occurrenceDate) as { action: string } | null;
+    if (existing) {
+      return {
+        workflowId: input.workflowId,
+        occurrenceDate: input.occurrenceDate,
+        skippedJobIds: [],
+        alreadyPassedJobIds: [],
+        ungroupedActiveJobIds,
+        alreadySkipped: true,
+      };
+    }
+
+    const jobs = db.prepare(
+      `SELECT * FROM scheduled_job
+       WHERE workflow_id = ? AND enabled = 1
+       ORDER BY workflow_step_order, id`,
+    ).all(input.workflowId) as ScheduledJobRow[];
+    if (jobs.length === 0) throw new Error(`scheduled_workflow_has_no_jobs:${input.workflowId}`);
+    const remainingJobs: ScheduledJobRow[] = [];
+    const alreadyPassedJobIds: string[] = [];
+    for (const job of jobs) {
+      if (job.status !== "pending") throw new Error(`scheduled_workflow_job_not_pending:${job.id}:${job.status}`);
+      const timezone = job.timezone || workflow.timezone;
+      const jobDate = localDateInZone(fromSqliteDate(job.next_run_at), timezone);
+      if (jobDate === input.occurrenceDate) {
+        remainingJobs.push(job);
+        continue;
+      }
+      const requestDate = localDateInZone(requestedAt, timezone);
+      if (jobDate > input.occurrenceDate && requestDate === input.occurrenceDate) {
+        alreadyPassedJobIds.push(job.id);
+        continue;
+      }
+      throw new Error(`scheduled_workflow_occurrence_mismatch:${job.id}:${jobDate}`);
+    }
+
+    const nowSql = toSqliteDate(requestedAt);
+    db.prepare(
+      `INSERT INTO scheduled_workflow_exception
+         (id, workflow_id, occurrence_date, action, reason, actor, created_at)
+       VALUES (?, ?, ?, 'skip', ?, ?, ?)`,
+    ).run(`swx_${nanoid(10)}`, input.workflowId, input.occurrenceDate, input.reason, input.actor, nowSql);
+
+    for (const job of remainingJobs) {
+      const scheduledFor = fromSqliteDate(job.next_run_at);
+      skipScheduledJob(db, job, "workflow_occurrence_skip", {
+        now: requestedAt,
+        nextRunFrom: new Date(scheduledFor.getTime() + 1),
+        detail: {
+          workflow_id: input.workflowId,
+          occurrence_date: input.occurrenceDate,
+          requested_by: input.actor,
+          request_reason: input.reason,
+        },
+      });
+    }
+    appendAudit(db, input.actor, "scheduled_workflow_occurrence_skipped", input.workflowId, {
+      occurrence_date: input.occurrenceDate,
+      job_ids: remainingJobs.map((job) => job.id),
+      already_passed_job_ids: alreadyPassedJobIds,
+      ungrouped_active_job_ids: ungroupedActiveJobIds,
+      reason: input.reason,
+    });
+    return {
+      workflowId: input.workflowId,
+      occurrenceDate: input.occurrenceDate,
+      skippedJobIds: remainingJobs.map((job) => job.id),
+      alreadyPassedJobIds,
+      ungroupedActiveJobIds,
+      alreadySkipped: false,
+    };
+  });
+  return run.immediate();
+}
+
 /** Seed and reconcile the portable weekly learning triggers. */
 export function ensureWeeklySelfLearningJobs(db: Database): ScheduledJobRow[] {
+  ensureScheduledWorkflow(db, {
+    id: WEEKLY_SELF_LEARNING_WORKFLOW_ID,
+    title: "주간 러닝 세션",
+    timezone: "Asia/Seoul",
+    description: "SHARED.md 정리와 주간 self-learning proposal 검토를 한 회차로 묶는다.",
+  });
   const sharedCuration = ensureCronJob(db, {
     id: WEEKLY_SHARED_CURATION_JOB_ID,
     title: "SHARED.md 미팅 (금 04:00 KST)",
@@ -471,6 +686,7 @@ export function ensureWeeklySelfLearningJobs(db: Database): ScheduledJobRow[] {
       body: WEEKLY_SHARED_CURATION_BODY,
     },
   });
+  assignScheduledJobToWorkflow(db, sharedCuration.id, WEEKLY_SELF_LEARNING_WORKFLOW_ID, "shared_curation", 10);
   const selfLearning = ensureCronJob(db, {
     id: WEEKLY_SELF_LEARNING_JOB_ID,
     title: "self-learning 세션 (금 05:00 KST)",
@@ -486,7 +702,9 @@ export function ensureWeeklySelfLearningJobs(db: Database): ScheduledJobRow[] {
       body: WEEKLY_SELF_LEARNING_BODY,
     },
   });
-  return [sharedCuration, selfLearning];
+  assignScheduledJobToWorkflow(db, selfLearning.id, WEEKLY_SELF_LEARNING_WORKFLOW_ID, "self_learning", 20);
+  backfillWorkflowSkipExceptions(db, WEEKLY_SELF_LEARNING_WORKFLOW_ID, "Asia/Seoul");
+  return [getScheduledJob(db, sharedCuration.id)!, getScheduledJob(db, selfLearning.id)!];
 }
 
 /** @deprecated Use ensureWeeklySelfLearningJobs so both weekly jobs are seeded. */
@@ -800,7 +1018,7 @@ export function skipScheduledJob(
   db: Database,
   job: ScheduledJobRow,
   reason: string,
-  opts: { now?: Date; detail?: Record<string, unknown> } = {},
+  opts: { now?: Date; nextRunFrom?: Date; detail?: Record<string, unknown> } = {},
 ): void {
   const now = opts.now ?? new Date();
   const nowSql = toSqliteDate(now);
@@ -810,11 +1028,10 @@ export function skipScheduledJob(
        (id, job_id, scheduled_for, started_at, finished_at, outcome, detail_json)
      VALUES (?, ?, ?, ?, ?, 'skipped', ?)`,
   ).run(runId, job.id, job.next_run_at, nowSql, nowSql, JSON.stringify({ reason, ...(opts.detail ?? {}) }));
-  const nextRun = job.kind === "recurring" ? computeNextRun(db, job, now) : null;
+  const nextRun = job.kind === "recurring" ? computeNextRun(db, job, opts.nextRunFrom ?? now) : null;
   // A skip is still a consumed occurrence — it bumps run_count. So it must honor max_runs
   // exactly like completeScheduledJob does, or the last allowed slot being skipped lets
-  // the job run one MORE time and overshoot its cap. (codex review; latent since dry-run,
-  // reachable in practice now that misfire skipping exists.)
+  // the job run one more time and overshoot its cap.
   const exhausted = job.max_runs != null && job.run_count + 1 >= job.max_runs;
   // Leaving a one-shot pending with its past next_run_at makes every worker tick claim
   // and record it forever.

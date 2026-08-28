@@ -27,6 +27,10 @@ import {
   consecutiveFailures,
   lateWakeBanner,
   emitCapabilityWorkloop,
+  ensureScheduledWorkflow,
+  assignScheduledJobToWorkflow,
+  skipWorkflowOccurrence,
+  WEEKLY_SELF_LEARNING_WORKFLOW_ID,
 } from "./core";
 import { nextCronRun } from "./cron";
 
@@ -78,6 +82,11 @@ describe("b3os scheduler core", () => {
     const second = ensureWeeklySelfLearningJobs(d);
     expect(second.map((job) => job.id)).toEqual(first.map((job) => job.id));
     expect(d.prepare(`SELECT count(*) AS n FROM scheduled_job WHERE id IN (?, ?)`).get(first[0]!.id, first[1]!.id)).toEqual({ n: 2 });
+    expect(first.map((job) => [job.workflow_id, job.workflow_step_key, job.workflow_step_order])).toEqual([
+      [WEEKLY_SELF_LEARNING_WORKFLOW_ID, "shared_curation", 10],
+      [WEEKLY_SELF_LEARNING_WORKFLOW_ID, "self_learning", 20],
+    ]);
+    expect(d.prepare(`SELECT title FROM scheduled_workflow WHERE id = ?`).get(WEEKLY_SELF_LEARNING_WORKFLOW_ID)).toEqual({ title: "주간 러닝 세션" });
     expect(JSON.parse(first[0]!.schedule_expr!)).toMatchObject({ cron: "0 4 * * 5" });
     expect(JSON.parse(first[1]!.schedule_expr!)).toMatchObject({ cron: "0 5 * * 5" });
     expect(JSON.parse(first[0]!.payload_json)).toMatchObject({
@@ -131,6 +140,37 @@ describe("b3os scheduler core", () => {
     expect(session.enabled).toBe(1);
   });
 
+  test("weekly learning backfills a fully skipped historical occurrence", () => {
+    const d = db();
+    const jobs = ensureWeeklySelfLearningJobs(d);
+    for (const job of jobs) {
+      d.prepare(
+        `INSERT INTO scheduled_job_run
+           (id, job_id, scheduled_for, started_at, finished_at, outcome, detail_json)
+         VALUES (?, ?, ?, ?, ?, 'skipped', ?)`,
+      ).run(
+        `historical-${job.id}`,
+        job.id,
+        job.id === jobs[0]!.id ? "2026-08-20 19:00:00" : "2026-08-20 20:00:00",
+        "2026-08-18 02:48:00",
+        "2026-08-18 02:48:00",
+        JSON.stringify({ reason: "lead_requested_week_skip", requested_local_date: "2026-08-18" }),
+      );
+    }
+
+    ensureWeeklySelfLearningJobs(d);
+    expect(d.prepare(
+      `SELECT occurrence_date, action, reason, actor
+         FROM scheduled_workflow_exception
+        WHERE workflow_id = ?`,
+    ).get(WEEKLY_SELF_LEARNING_WORKFLOW_ID)).toEqual({
+      occurrence_date: "2026-08-21",
+      action: "skip",
+      reason: "lead_requested_week_skip",
+      actor: "historical_backfill",
+    });
+  });
+
   test("daily task review seeds portable 06:00/06:20 jobs idempotently", () => {
     const d = db();
     const first = ensureDailyTaskReviewJobs(d);
@@ -157,8 +197,102 @@ describe("b3os scheduler core", () => {
 
   test("migration creates scheduler tables", () => {
     const d = db();
-    const tables = d.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name IN ('scheduled_job','scheduled_job_run')`).all() as Array<{ name: string }>;
-    expect(tables.map((t) => t.name).sort()).toEqual(["scheduled_job", "scheduled_job_run"]);
+    const tables = d.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name IN ('scheduled_workflow','scheduled_job','scheduled_job_run','scheduled_workflow_exception')`).all() as Array<{ name: string }>;
+    expect(tables.map((t) => t.name).sort()).toEqual(["scheduled_job", "scheduled_job_run", "scheduled_workflow", "scheduled_workflow_exception"]);
+  });
+
+  test("future workflow occurrence skip advances every step past the skipped slot and is idempotent", () => {
+    const d = db();
+    ensureScheduledWorkflow(d, { id: "weekly-test", title: "Weekly test", timezone: "Asia/Seoul" });
+    const a = createCronJob(d, {
+      id: "weekly-test-a", title: "A", cron: "0 4 * * 5", timezone: "Asia/Seoul",
+      from: kst(2026, 8, 17, 0, 0), payload: learningPayload,
+    });
+    const b = createCronJob(d, {
+      id: "weekly-test-b", title: "B", cron: "0 10 * * 5", timezone: "Asia/Seoul",
+      from: kst(2026, 8, 17, 0, 0), payload: learningPayload,
+    });
+    assignScheduledJobToWorkflow(d, a.id, "weekly-test", "prepare", 10);
+    assignScheduledJobToWorkflow(d, b.id, "weekly-test", "report", 20);
+
+    const result = skipWorkflowOccurrence(d, {
+      workflowId: "weekly-test", occurrenceDate: "2026-08-21", actor: "gd", reason: "week off",
+      now: kst(2026, 8, 18, 12, 0),
+    });
+    expect(result.skippedJobIds).toEqual([a.id, b.id]);
+    expect(result.alreadySkipped).toBe(false);
+    const rows = d.prepare(`SELECT id, next_run_at, run_count FROM scheduled_job WHERE workflow_id='weekly-test' ORDER BY workflow_step_order`).all() as Array<{ id: string; next_run_at: string; run_count: number }>;
+    expect(rows.map((row) => fromSqliteDate(row.next_run_at))).toEqual([
+      kst(2026, 8, 28, 4, 0),
+      kst(2026, 8, 28, 10, 0),
+    ]);
+    expect(rows.map((row) => row.run_count)).toEqual([1, 1]);
+    expect(d.prepare(`SELECT count(*) AS n FROM scheduled_job_run WHERE outcome='skipped' AND job_id IN (?, ?)`).get(a.id, b.id)).toEqual({ n: 2 });
+
+    const repeated = skipWorkflowOccurrence(d, {
+      workflowId: "weekly-test", occurrenceDate: "2026-08-21", actor: "gd", reason: "retry",
+    });
+    expect(repeated.alreadySkipped).toBe(true);
+    expect(d.prepare(`SELECT sum(run_count) AS n FROM scheduled_job WHERE workflow_id='weekly-test'`).get()).toEqual({ n: 2 });
+  });
+
+  test("workflow occurrence skip rolls back when one step is on another occurrence", () => {
+    const d = db();
+    ensureScheduledWorkflow(d, { id: "weekly-mismatch", title: "Mismatch", timezone: "Asia/Seoul" });
+    const a = createCronJob(d, { id: "mismatch-a", title: "A", cron: "0 4 * * 5", timezone: "Asia/Seoul", from: kst(2026, 8, 17, 0, 0), payload: learningPayload });
+    const b = createCronJob(d, { id: "mismatch-b", title: "B", cron: "0 10 * * 5", timezone: "Asia/Seoul", from: kst(2026, 8, 24, 0, 0), payload: learningPayload });
+    assignScheduledJobToWorkflow(d, a.id, "weekly-mismatch", "a", 10);
+    assignScheduledJobToWorkflow(d, b.id, "weekly-mismatch", "b", 20);
+
+    expect(() => skipWorkflowOccurrence(d, {
+      workflowId: "weekly-mismatch", occurrenceDate: "2026-08-21", actor: "gd", reason: "week off",
+    })).toThrow("scheduled_workflow_occurrence_mismatch:mismatch-b:2026-08-28");
+    expect(d.prepare(`SELECT count(*) AS n FROM scheduled_workflow_exception WHERE workflow_id='weekly-mismatch'`).get()).toEqual({ n: 0 });
+    expect(d.prepare(`SELECT sum(run_count) AS n FROM scheduled_job WHERE workflow_id='weekly-mismatch'`).get()).toEqual({ n: 0 });
+  });
+
+  test("workflow occurrence skip honors max_runs through the shared skip transition", () => {
+    const d = db();
+    ensureScheduledWorkflow(d, { id: "weekly-capped", title: "Capped", timezone: "Asia/Seoul" });
+    const job = createCronJob(d, {
+      id: "weekly-capped-a", title: "A", cron: "0 4 * * 5", timezone: "Asia/Seoul",
+      from: kst(2026, 8, 17, 0, 0), payload: learningPayload,
+    });
+    d.prepare(`UPDATE scheduled_job SET max_runs = 1 WHERE id = ?`).run(job.id);
+    assignScheduledJobToWorkflow(d, job.id, "weekly-capped", "a", 10);
+
+    skipWorkflowOccurrence(d, {
+      workflowId: "weekly-capped", occurrenceDate: "2026-08-21", actor: "gd", reason: "week off",
+      now: kst(2026, 8, 18, 12, 0),
+    });
+
+    expect(d.prepare(`SELECT status, enabled, run_count FROM scheduled_job WHERE id = ?`).get(job.id)).toEqual({
+      status: "succeeded", enabled: 0, run_count: 1,
+    });
+  });
+
+  test("workflow occurrence skip consumes only steps remaining in the current local date", () => {
+    const d = db();
+    ensureScheduledWorkflow(d, { id: "weekly-partial", title: "Partial", timezone: "Asia/Seoul" });
+    const a = createCronJob(d, { id: "partial-a", title: "A", cron: "0 4 * * 5", timezone: "Asia/Seoul", from: kst(2026, 8, 17, 0, 0), payload: learningPayload });
+    const b = createCronJob(d, { id: "partial-b", title: "B", cron: "0 5 * * 5", timezone: "Asia/Seoul", from: kst(2026, 8, 17, 0, 0), payload: learningPayload });
+    assignScheduledJobToWorkflow(d, a.id, "weekly-partial", "a", 10);
+    assignScheduledJobToWorkflow(d, b.id, "weekly-partial", "b", 20);
+    skipScheduledJob(d, a, "completed_probe", {
+      now: kst(2026, 8, 21, 4, 1),
+      nextRunFrom: new Date(fromSqliteDate(a.next_run_at).getTime() + 1),
+    });
+
+    const result = skipWorkflowOccurrence(d, {
+      workflowId: "weekly-partial", occurrenceDate: "2026-08-21", actor: "gd", reason: "stop remaining",
+      now: kst(2026, 8, 21, 4, 30),
+    });
+
+    expect(result.skippedJobIds).toEqual([b.id]);
+    expect(result.alreadyPassedJobIds).toEqual([a.id]);
+    expect(d.prepare(`SELECT run_count FROM scheduled_job WHERE id = ?`).get(a.id)).toEqual({ run_count: 1 });
+    expect(d.prepare(`SELECT run_count FROM scheduled_job WHERE id = ?`).get(b.id)).toEqual({ run_count: 1 });
+    expect(fromSqliteDate(getScheduledJob(d, b.id)!.next_run_at)).toEqual(kst(2026, 8, 28, 5, 0));
   });
 
   test("scheduleReminder creates a one-shot scheduled inbox wake", () => {
