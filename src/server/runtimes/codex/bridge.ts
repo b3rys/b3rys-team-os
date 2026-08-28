@@ -643,6 +643,7 @@ export async function handleMessage(
   // ★브리지도 app-server 로 간다.★
   //   전에는 브리지만 옛 exec 경로였다 — 그래서 ★사람이 직접 말 거는 길에만★ 그때까지의 개선
   //   (중간 개입 · 프로세스 상주 · 서브에이전트 생존 · 승인창)이 하나도 안 붙어 있었다.
+  //   ★그중 승인창은 지금 안 쓴다★ — 실행 정책이 "never" 라 codex 가 묻지 않는다. 나머지는 그대로 유효하다.
   //   버스는 app-server, 직접 대화는 exec 로 갈라져 있던 것이 구멍이었다.
   const runTurn = deps.runTurn ?? defaultBridgeCaller();
   const registerReminder = deps.registerScheduleReminder ?? registerScheduleMarker;
@@ -1101,7 +1102,8 @@ interface TgCallbackQuery {
  * >  exec 방식은 deprecate 해. 자꾸 fallback 이런걸로 유지하지 마."
  *
  * 전에는 준비에 실패하면 `codex exec` 로 떨어뜨렸다. 그건 ★말은 통하지만 기능이 사라진 상태★ 다 —
- * 중간 개입도, 서브에이전트 생존도, 승인창도 없다. 그리고 ★조용해서 아무도 모른다.★
+ * 중간 개입도, 서브에이전트 생존도 없다. 그리고 ★조용해서 아무도 모른다.★
+ * (그때 같이 적었던 "승인창" 은 지금 실행 정책이 "never" 라 app-server 쪽에도 없다.)
  * 그래서 떨어뜨리지 않는다. 준비가 안 되면 ★그 자리에서 시끄럽게 실패★ 시킨다.
  */
 export function defaultBridgeCaller(): (o: CodexTurnOptions) => Promise<CodexTurnResult> {
