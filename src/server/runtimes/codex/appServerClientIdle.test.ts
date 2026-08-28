@@ -49,6 +49,8 @@ describe("무응답 상한(idle) — 일하는 턴은 안 끊는다", () => {
     expect(Date.now() - started, "조용한 턴은 상한 근처에서 끊긴다").toBeLessThan(1000);
   });
 
+  // ★이 대기 상태는 지금 라이브에서 안 생긴다★ — 실행 정책이 "never" 라 승인 팝업이 없다.
+  //   여기서 지키는 것은 타이머 계약이고, "on-request" 로 되돌리면 그대로 다시 쓰인다.
   test("★승인 팝업 대기 중에는 진행 신호가 와도 시계를 켜지 않는다★ (빌 경고 · Ames 조기재개 회귀)", async () => {
     const { c, calls } = makeClient();
     const p = c.runTurn("승인 대기 턴", {}, 150);

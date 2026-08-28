@@ -172,7 +172,8 @@ export function renderBridgePlist(p: CodexBridgePaths): string {
  *
  * ★실행 정책은 이 파일이 아니라 thread/start 인자로 간다★ — appServerRunner 가 턴마다
  * approvalPolicy·sandbox 를 codex 프로토콜로 명시한다. 여기에 다시 쓰면 두 곳이 갈린다.
- * 우리 코드가 두 번째로 판정하지도 않는다: codex 가 물으면 그 물음을 채널로 옮길 뿐이다.
+ * 우리 코드가 두 번째로 판정하지도 않는다. ★지금 실행 정책은 "never" 라 codex 가 묻지 않는다★
+ * (appServerRunner.ts) — 옮길 물음이 없다. "on-request" 로 되돌리면 그 물음을 채널로 옮긴다.
  *
  * 뺀 것: `sandbox_mode` · `approval_policy` · `network_access` · `writable_roots`.
  *

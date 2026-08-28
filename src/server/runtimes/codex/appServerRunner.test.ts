@@ -27,8 +27,9 @@ const startArgs = async (opts: Record<string, unknown>) => {
 // ★실행 모드를 명시하지 않으면 열리는 게 아니라 잠긴다.★
 //   실측: 빈 CODEX_HOME · config 없음으로 codex 0.147.0 을 띄우고 thread/start 에 cwd·model 만 보내면
 //     approvalPolicy "on-request" · sandbox { type: "readOnly" } · activePermissionProfile ":read-only"
-//   그래서 열린 sandbox 를 프로토콜에 명시한다. approvalPolicy 는 openclaw 의 "never" 가 아니라
-//   "on-request" 다 — never 면 codex 가 승인을 묻지 않아 채널 승인 배선이 호출되지 않는다.
+//   그래서 열린 sandbox 를 프로토콜에 명시한다. approvalPolicy 는 openclaw 와 같은 "never" 다 —
+//   codex 가 승인을 묻지 않으므로 채널 승인 배선이 호출되지 않는다. 그것이 의도한 결과다.
+//   (전에는 "on-request" 였고, 그때는 사람이 안 누르면 300초 뒤 턴이 끊겼다.)
 
 test("★sandbox 를 열린 값으로 명시한다★ — 안 넘기면 read-only 로 잠긴다", async () => {
   const a = await startArgs({ cwd: "/tmp/ws" });
@@ -37,7 +38,7 @@ test("★sandbox 를 열린 값으로 명시한다★ — 안 넘기면 read-onl
 
 test("★approvalPolicy·reviewer 도 명시한다★", async () => {
   const a = await startArgs({ cwd: "/tmp/ws" });
-  expect(a.approvalPolicy).toBe("on-request");
+  expect(a.approvalPolicy).toBe("never");
   expect(a.approvalsReviewer).toBe("user");
 });
 

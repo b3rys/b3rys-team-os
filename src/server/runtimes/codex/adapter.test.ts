@@ -403,7 +403,8 @@ describe("codex adapter — 핵심 정확성", () => {
   //   예전 이름: "permission preflight blocks workspace-write before spawning codex when no grant exists" —
   //   grant 가 없으면 ★codex 를 띄우기도 전에★ 우리가 턴을 죽이고 실패 아티팩트·런타임 블록을 남겼다.
   //   우리 코드로 차단목록을 얹은 런타임이 codex 뿐이라(claude·hermes·openclaw·b3osNative 0건) 판정을 뺐다.
-  //   이제 경계는 codex 설정이 정하고, 그 밖은 codex 승인창에서 사람이 정한다.
+  //   경계는 codex 설정이 정한다. ★그 밖을 사람이 정하는 단계는 지금 없다★ —
+  //   실행 정책이 "never" 라 codex 가 승인창을 띄우지 않는다(appServerRunner.ts).
   test("★grant 가 없어도 workspace-write 턴은 그대로 실행된다★ — 턴 앞 우리 판정을 뺐다", async () => {
     const db = setup();
     const agent = { ...codyOf(db), codex_sandbox: "workspace-write" as const };
@@ -422,7 +423,8 @@ describe("codex adapter — 핵심 정확성", () => {
     expect(artifacts(db, "succeeded").length).toBe(1); // 턴은 정상 완주한다
 
     // ★우리가 만들던 sandbox 승인요청은 더 이상 생기지 않는다★
-    //   — 승인은 codex 가 자기 승인창을 올릴 때(appServerPopup) 생긴다. 턴 시작 전 우리 몫이 아니다.
+    //   — 턴 시작 전 우리 몫이 아니다. ★지금은 승인 자체가 안 생긴다★ — 실행 정책이 "never" 라
+    //   codex 가 승인창을 올리지 않는다(appServerRunner.ts).
     expect(db.query("SELECT action, status, requested_by FROM permission_request").all()).toEqual([]);
     expect(db.query("SELECT action_key, status FROM approval_request").all()).toEqual([]);
   });

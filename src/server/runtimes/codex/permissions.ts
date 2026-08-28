@@ -68,7 +68,9 @@ export function codexRuntimePreflight(
   //   나머지는 그 도구 자체 설정(클로드 settings.json · 헤르메스 자체 기능)을 쓰거나 아예 없다.
   //
   //   이제 경계는 ★codex 설정(config.toml 의 sandbox_mode · approval_policy · writable_roots)★ 이 정하고,
-  //   그 밖의 일은 ★codex 가 승인창으로 물어 사람이 정한다.★ 우리는 그 사이에 끼지 않는다.
+  //   그 밖의 일은 codex 가 판정한다. ★지금 실행 모드는 approvalPolicy "never" 라 codex 가
+  //   승인창으로 묻지 않는다★(appServerRunner.ts) — 사람이 정하는 단계가 없다.
+  //   아래 설명은 "on-request" 로 되돌렸을 때의 동작이다.
   return null;
 }
 

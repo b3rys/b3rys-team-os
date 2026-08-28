@@ -585,7 +585,7 @@ export async function runGroupTurn(ctx: {
  * tmux 없이 전부 exit 1 이다. 조용한 오배송이 아니라 시끄러운 실패다.
  * 브리지는 이 턴의 주인을 알고 있으므로 `from_agent_id` 로 그대로 싣는다 — 추측할 자리가 없어진다.
  *
- * 하위 프로세스·임시 파일·환경변수가 전부 사라진다. 팀원이 셸을 안 타므로 승인 팝업이 안 뜬다.
+ * 하위 프로세스·임시 파일·환경변수가 전부 사라진다.
  *
  * 본문은 ★셸을 안 지나므로★ 따옴표·백틱·`$` 가 해석될 자리가 없다.
  */
@@ -643,6 +643,7 @@ export async function handleMessage(
   // ★브리지도 app-server 로 간다.★
   //   전에는 브리지만 옛 exec 경로였다 — 그래서 ★사람이 직접 말 거는 길에만★ 그때까지의 개선
   //   (중간 개입 · 프로세스 상주 · 서브에이전트 생존 · 승인창)이 하나도 안 붙어 있었다.
+  //   ★그중 승인창은 지금 안 쓴다★ — 실행 정책이 "never" 라 codex 가 묻지 않는다. 나머지는 그대로 유효하다.
   //   버스는 app-server, 직접 대화는 exec 로 갈라져 있던 것이 구멍이었다.
   const runTurn = deps.runTurn ?? defaultBridgeCaller();
   const registerReminder = deps.registerScheduleReminder ?? registerScheduleMarker;
@@ -1101,7 +1102,8 @@ interface TgCallbackQuery {
  * >  exec 방식은 deprecate 해. 자꾸 fallback 이런걸로 유지하지 마."
  *
  * 전에는 준비에 실패하면 `codex exec` 로 떨어뜨렸다. 그건 ★말은 통하지만 기능이 사라진 상태★ 다 —
- * 중간 개입도, 서브에이전트 생존도, 승인창도 없다. 그리고 ★조용해서 아무도 모른다.★
+ * 중간 개입도, 서브에이전트 생존도 없다. 그리고 ★조용해서 아무도 모른다.★
+ * (그때 같이 적었던 "승인창" 은 지금 실행 정책이 "never" 라 app-server 쪽에도 없다.)
  * 그래서 떨어뜨리지 않는다. 준비가 안 되면 ★그 자리에서 시끄럽게 실패★ 시킨다.
  */
 export function defaultBridgeCaller(): (o: CodexTurnOptions) => Promise<CodexTurnResult> {
@@ -1325,7 +1327,8 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     console.error(`[codex-bridge] getMe 실패(토큰/네트워크?) — getUpdates 후 marker 폴백: ${e instanceof Error ? e.message : e}`);
   }
   // ★턴을 여기서 기다리지 않는다★ — 기다리면 턴이 도는 동안 getUpdates 를 못 부르고,
-  //   승인 팝업은 턴 도중에만 뜨므로 버튼 입력이 영영 안 들어온다(실측 2026-08-18: 승인 6건 중
+  //   승인 팝업은 턴 도중에만 떴으므로 버튼 입력이 영영 안 들어왔다(과거 on-request 시절 ·
+  //   지금은 정책이 "never" 라 팝업 자체가 없다 · 실측 2026-08-18: 승인 6건 중
   //   8건이 연속으로 만료됐고(2026-08-13 11:35 ~ 08-18 11:18) 그중 6건이 300~302초 =
   //   턴 하드 타임아웃 300초. 사람이 누른 기록은 6건 있었으나 그 결정이 codex 로 전달된 건은 0건).
   //   ★직렬이다★ — 겹쳐 돌리면 app-server 클라이언트(팀원 단위 공유)의 turn 상태가 덮어써진다.
