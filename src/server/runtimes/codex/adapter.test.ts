@@ -423,7 +423,8 @@ describe("codex adapter — 핵심 정확성", () => {
     expect(artifacts(db, "succeeded").length).toBe(1); // 턴은 정상 완주한다
 
     // ★우리가 만들던 sandbox 승인요청은 더 이상 생기지 않는다★
-    //   — 승인은 codex 가 자기 승인창을 올릴 때(appServerPopup) 생긴다. 턴 시작 전 우리 몫이 아니다.
+    //   — 턴 시작 전 우리 몫이 아니다. ★지금은 승인 자체가 안 생긴다★ — 실행 정책이 "never" 라
+    //   codex 가 승인창을 올리지 않는다(appServerRunner.ts).
     expect(db.query("SELECT action, status, requested_by FROM permission_request").all()).toEqual([]);
     expect(db.query("SELECT action_key, status FROM approval_request").all()).toEqual([]);
   });

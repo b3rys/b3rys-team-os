@@ -264,9 +264,10 @@ describe("groupTurnCall — 발신을 떼고, ★답을 쓸 자리★ 를 함께
     expect(await call().deps.reactMessage()).toBe(true);
   });
 
-  test("★셸 명령을 시키지 않는다★ — exec 이 곧 승인 팝업이고, 팝업은 아무도 안 누르면 턴을 죽인다", () => {
+  test("★셸 명령을 시키지 않는다★ — 답이 명령 문자열에 들어가면 인용이 해석된다", () => {
     const b = call().body;
-    // 실측(2026-08-24): send.sh 를 실행시켰더니 매 턴 승인 팝업이 오너 DM 으로 갔고
+    // 지금 근거는 인용이다 — 답이 명령 안에 있으면 따옴표·백틱·종료자가 해석돼 본문이 훼손된다.
+    // (과거 on-request 시절 실측: send.sh 를 실행시켰더니 매 턴 승인 팝업이 오너 DM 으로 갔고
     // 300초 뒤 만료되며 턴이 통째로 죽었다. 이 시험은 그 형태가 다시 들어오는 것을 막는다.
     expect(b).not.toContain("send.sh");
     expect(b).not.toContain("mktemp");
