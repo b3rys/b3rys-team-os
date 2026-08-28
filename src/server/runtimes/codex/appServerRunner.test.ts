@@ -37,7 +37,7 @@ test("★sandbox 를 열린 값으로 명시한다★ — 안 넘기면 read-onl
 
 test("★approvalPolicy·reviewer 도 명시한다★", async () => {
   const a = await startArgs({ cwd: "/tmp/ws" });
-  expect(a.approvalPolicy).toBe("on-request");
+  expect(a.approvalPolicy).toBe("never");
   expect(a.approvalsReviewer).toBe("user");
 });
 

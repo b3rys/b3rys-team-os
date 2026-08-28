@@ -108,15 +108,23 @@ export async function runViaAppServer(
     //     근거: openclaw config-fy-53tqM.js:269~272 · 279~282 · 306~309,
     //           thread-lifecycle-DSMv62L1.js:2224~2226 · 2402~2405
     //
-    //   ★approvalPolicy 만 openclaw 와 다르게 "on-request" 다.★ 제품 결정: 위험한 실행은
-    //   codex 가 판정해 물어보고, 그 물음을 채널로 옮겨 사람이 누른 대로 돌려준다.
-    //   · "never" 는 승인 요청 자체를 보내지 않아 onApproval 이 한 번도 불리지 않는다.
-    //   · sandbox 를 "workspace-write" 로 좁히면 샌드박스가 먼저 거부하고 모델이 승격을
-    //     요청하지 않아 물어보는 단계가 사라진다(실측: docs/RUNTIME_ACCEPTANCE.md).
-    //   즉 판정 단계가 살아있으려면 경계는 codex 가 쥐고 정책은 on-request 여야 한다.
+    //   approvalPolicy 는 openclaw 와 같은 "never" 다. 요구사항: 이 팀원을 다른 팀원과 동일하게 둔다.
+    //   실측(openclaw 2026.7.1-2): resolver 가 policyMode 기본 yolo → implicit approvalPolicy "never"
+    //   (config-fy-53tqM.js:279~306 · thread-lifecycle-DSMv62L1.js:2224). codex rollout 의
+    //   turn_context 에서도 확인된다 — 다른 팀원 세션이 approval_policy=never · sandbox=danger-full-access
+    //   · permission_profile=disabled 로 돈다.
     //
-    //   ★이건 우리 승인 코드를 얹는 게 아니라 codex 정식 프로토콜로 실행 모드를 지정하는 것이다.★
-    //   경계가 필요해지면 그때 codex 설정으로 넣는다 — 우리 판정층을 다시 만들지 않는다.
+    //   ★대가를 적어 둔다★: "never" 는 codex 가 승인 요청 자체를 보내지 않는다. 그래서
+    //   onApproval 이 한 번도 안 불리고, 이 런타임에서는 ★사람이 실행을 승인하는 단계가 없다.★
+    //   permissionGate·승인 팝업·승인 기억은 이 경로에서 도달하지 않는다.
+    //   되돌리는 방법은 이 값을 "on-request" 로 바꾸는 것 하나다.
+    //
+    //   ★"on-request" 로 돌리면 사람이 반드시 눌러야 한다★ — 실측: 아무도 안 누르면 300초 뒤
+    //   만료되며 턴이 통째로 끊긴다(그때 방은 조용하고 기록에는 interrupted 만 남는다).
+    //   그 형태를 겪었기 때문에 값을 바꾼 것이다.
+    //
+    //   sandbox 를 "workspace-write" 로 좁히면 샌드박스가 먼저 거부한다(실측: docs/RUNTIME_ACCEPTANCE.md).
+    //   경계를 좁히려면 approvalPolicy 가 아니라 sandbox 쪽을 쓴다.
     //
     //   `runtimeWorkspaceRoots` 는 계속 안 넘긴다 — experimentalApi capability 를 요구해서
     //   넘기면 턴 시작도 못 하고 죽는다(2/2 재현). cwd 만으로 간다.
@@ -124,7 +132,7 @@ export async function runViaAppServer(
       cwd: opts.cwd,
       model: opts.model,
       resumeThreadId: opts.resumeSessionId, // ★정확성 #1: 멀티턴 맥락 이어감(exec resume 동등)★
-      approvalPolicy: "on-request",
+      approvalPolicy: "never",
       sandbox: "danger-full-access",
       approvalsReviewer: "user",
     });

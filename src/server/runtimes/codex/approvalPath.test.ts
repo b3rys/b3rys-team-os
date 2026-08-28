@@ -37,19 +37,23 @@ const startArgs = async (opts: Record<string, unknown>) => {
 test("★실행 모드를 프로토콜로 명시한다★ — 안 넘기면 readOnly 로 잠겨 승인 요청이 발생하지 않는다", async () => {
   const a = await startArgs({ cwd: "/tmp/ws" });
   expect({ approvalPolicy: a.approvalPolicy, sandbox: a.sandbox, approvalsReviewer: a.approvalsReviewer })
-    .toEqual({ approvalPolicy: "on-request", sandbox: "danger-full-access", approvalsReviewer: "user" });
+    .toEqual({ approvalPolicy: "never", sandbox: "danger-full-access", approvalsReviewer: "user" });
 });
 
-test("★approvalPolicy 는 on-request 여야 한다★ — never 면 codex 가 묻지 않아 승인 릴레이가 죽는다", async () => {
+// 이 시험은 전에 정반대를 못박고 있었다("on-request 여야 한다 — never 면 승인 릴레이가 죽는다").
+// 요구사항이 바뀌었다: 이 런타임을 다른 팀원과 동일하게 둔다. 승인 릴레이가 죽는 것은
+// 부작용이 아니라 ★의도한 결과★ 다. 값과 함께 이유도 바꿔 적는다.
+test("approvalPolicy 는 never 다 — 다른 팀원과 같은 값이고, 사람이 실행을 승인하는 단계가 없다", async () => {
   const a = await startArgs({ cwd: "/tmp/ws" });
-  expect(a.approvalPolicy).toBe("on-request");
-  expect(a.approvalPolicy).not.toBe("never");
+  expect(a.approvalPolicy).toBe("never");
+  // on-request 로 돌아가면 사람이 안 누를 때 턴이 300초 뒤 끊긴다 — 실측으로 겪은 형태다.
+  expect(a.approvalPolicy).not.toBe("on-request");
 });
 
 test("★호출자 opts 가 실행 모드를 덮지 못한다★ — 경계는 한 곳에서만 정해진다", async () => {
-  const a = await startArgs({ cwd: "/tmp/ws", sandbox: "workspace-write", approvalPolicy: "never" });
+  const a = await startArgs({ cwd: "/tmp/ws", sandbox: "workspace-write", approvalPolicy: "on-request" });
   expect({ sandbox: a.sandbox, approvalPolicy: a.approvalPolicy })
-    .toEqual({ sandbox: "danger-full-access", approvalPolicy: "on-request" });
+    .toEqual({ sandbox: "danger-full-access", approvalPolicy: "never" });
 });
 
 test("★runtimeWorkspaceRoots 를 넘기지 않는다★ — experimentalApi 를 요구해 turn 이 죽던 원인", async () => {
