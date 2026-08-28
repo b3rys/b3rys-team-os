@@ -5,7 +5,12 @@
  * appServerClient(자식 env) 를 함께 잰다. 세 모듈이 한 경로를 이루므로 한 파일에서 본다.
  *
  * 판정 계층(appServerApproval)의 시험은 그 모듈과 함께 삭제됐다 — 경로에서 빠진 지 오래고
- * 실호출이 0곳이었다. 아래는 전부 ★지금 도는 코드★ 다.
+ * 실호출이 0곳이었다.
+ *
+ * ★이 파일의 승인 팝업 시험들은 지금 라이브에서 도달하지 않는다★ — 실행 모드가
+ * approvalPolicy "never" 라 codex 가 승인 요청을 보내지 않는다(appServerRunner.ts).
+ * 여기서 지키는 것은 "on-request" 로 되돌렸을 때의 계약이다. ★통과가 그 경로가 돈다는
+ * 뜻이 아니다.★ 실제로 넘기는 값을 재는 시험은 이 파일 위쪽(실행 모드)에 있다.
  */
 import { test, expect } from "bun:test";
 
@@ -34,7 +39,7 @@ const startArgs = async (opts: Record<string, unknown>) => {
   return seen[0] ?? {};
 };
 
-test("★실행 모드를 프로토콜로 명시한다★ — 안 넘기면 readOnly 로 잠겨 승인 요청이 발생하지 않는다", async () => {
+test("★실행 모드를 프로토콜로 명시한다★ — 안 넘기면 readOnly 로 잠겨 턴이 아무것도 못 한다", async () => {
   const a = await startArgs({ cwd: "/tmp/ws" });
   expect({ approvalPolicy: a.approvalPolicy, sandbox: a.sandbox, approvalsReviewer: a.approvalsReviewer })
     .toEqual({ approvalPolicy: "never", sandbox: "danger-full-access", approvalsReviewer: "user" });
@@ -133,7 +138,9 @@ const popupOf = async (agentId: string) => {
 };
 
 test("★codex 가 물으면 승인 요청을 만든다★ — 무조건 거절하면 옮겨온 게 아니라 기능을 뺀 것이다", async () => {
-  // 터미널에서 codex 를 쓰면 경계 밖은 물어보고 사람이 누른다. 그 물음을 팀원 방으로 옮기는 게 우리 일.
+  // ★아래는 지금 도달하지 않는 경로다★ — 실행 모드가 approvalPolicy "never" 라 codex 가
+  // 승인 요청을 보내지 않는다. 이 시험들은 "on-request" 로 되돌렸을 때의 계약을 지킨다.
+  // 통과한다는 것이 그 경로가 라이브에서 돈다는 뜻은 아니다.
   expect((await popupOf("dex")).agentId).toBe("dex");
 }, 20000);
 

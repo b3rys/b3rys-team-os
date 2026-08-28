@@ -152,6 +152,10 @@ export async function runViaAppServer(
       onStatus: (line) => {
         try { opts.onStatus?.(line); } catch { /* 채널 표시가 턴을 막지 않는다 */ }
       },
+      // ★지금 이 콜백은 안 불린다★ — 위에서 approvalPolicy 를 "never" 로 넘기므로 codex 가
+      //   승인 요청을 보내지 않는다. 아래 코드와 appServerPopup 시험들은 ★도달하지 않는 상태★ 다.
+      //   그 시험들이 계속 통과하는 것은 이 경로가 돈다는 뜻이 아니다.
+      //   지우지 않는 이유: 되돌리기가 approvalPolicy 한 값이면 끝나야 한다.
       onApproval: async (req) => {
         // ★경계는 codex 설정이 정한다. 우리는 두 번째로 판정하지 않는다.★
         //   codex 가 물으면 그 물음을 ★그 팀원의 방★ 으로 옮기고, 사람이 누른 대로 돌려준다.

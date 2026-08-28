@@ -8,6 +8,14 @@ import { enqueueApproval } from "./approvals";
 export type PermissionTier = "allow" | "ask" | "deny";
 export type PermissionAgent = Pick<AgentRecord, "id" | "workspace_path">;
 export type PermissionDecision = "allow" | "deny" | "approval_required";
+/**
+ * ★codex 런타임은 이 경로로 요청을 만들지 않는다★ — 실행 모드가 approvalPolicy "never" 라
+ * codex 가 승인 요청 자체를 보내지 않는다(appServerRunner.ts). 그 팀원이 유일한 codex 멤버다.
+ *
+ * 그래서 승인 대기 목록이 계속 비어 있는 것은 ★"위험한 실행이 없었다" 가 아니라
+ * "이 런타임에서 요청이 생기지 않는다" 다.★ 두 상태가 같은 화면(빈 목록)으로 보인다.
+ * 여기 코드는 지우지 않는다 — 정책을 "on-request" 로 되돌리면 그대로 다시 쓰인다.
+ */
 export type PermissionRequestStatus = "pending" | "allowed_once" | "allowed_always" | "denied" | "expired";
 /**
  * `allow_session` = 이 세션 동안만 허용.
