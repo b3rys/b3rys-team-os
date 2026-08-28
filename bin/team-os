@@ -112,6 +112,31 @@ boot_services() {
   done
 }
 
+# ─── 켜는 순서 ────────────────────────────────────────────────────────────
+# ★무엇을 켜는지는 boot_services 가 정한다.★ 설치마다 팀원이 다르므로 발견에 맡긴다.
+#   여기서 정하는 것은 ★순서뿐★ 이다. 팀 서버가 먼저 떠야 팀원 poller 가 붙는다.
+#   알파벳순으로 켜면 com.gdmini.team-collab 이 claude-telegram-* 보다 뒤라 봇이 먼저 뜬다.
+#
+# ★목록에 없는 라벨은 rank 50 으로 뒤에 붙는다.★ 새 팀원이 들어와도 빠지지 않는다 —
+#   이 목록은 "누가 켜지나" 가 아니라 "무엇이 먼저냐" 만 정한다.
+#   서버 라벨이 바뀌면 목록이 안 맞아 알파벳순으로 돌아간다. 안 켜지는 게 아니라 순서만 잃는다.
+boot_rank() {
+  case "$1" in
+    *team-collab*) echo 10 ;;
+    *openclaw*)    echo 20 ;;
+    *)             echo 50 ;;
+  esac
+}
+
+# rank 로 안정 정렬(-s)한다. 같은 rank 안에서는 boot_services 가 준 순서가 그대로 남는다.
+boot_services_ordered() {
+  local _lbl _plist
+  while IFS='|' read -r _lbl _plist; do
+    [ -n "$_lbl" ] || continue
+    printf '%s\t%s|%s\n' "$(boot_rank "$_lbl")" "$_lbl" "$_plist"
+  done < <(boot_services) | sort -n -s -k1,1 | cut -f2-
+}
+
 loaded() { launchctl print "gui/$(id -u)/$1" >/dev/null 2>&1; }
 
 # 팀원 런처인가. 런처는 팀원을 tmux 로 띄우고 자기는 끝난다 — 그래서 launchd 상태로는
@@ -418,7 +443,7 @@ case "${1:-help}" in
         echo "  ✗ $_lbl 등록 실패 — ${_err:-(메시지 없음)}"
         FAILED="$FAILED $_lbl"
       fi
-    done < <(boot_services)
+    done < <(boot_services_ordered)
     # 서버 HTTP 는 ★확인용으로만★ 쓴다. 여기서 다시 올리지 않는다.
     #   프로세스는 살아 있는데 HTTP 가 아직 안 열린 상태(부팅 직후)가 정상적으로 있고,
     #   그때 재시작하면 ★막 올라오던 서버를 죽이고 처음부터★ 시작한다 —

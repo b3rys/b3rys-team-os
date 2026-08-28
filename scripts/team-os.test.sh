@@ -71,6 +71,63 @@ else
   ok "인라인 중복 설명 없음"
 fi
 
+echo "── T5: up 은 ★팀 서버를 먼저★ 켠다 (알파벳순이면 봇이 먼저 뜬다) ──"
+# ★이름 목록을 세지 않는다.★ 새 팀원 plist 를 하나 만들어 넣고,
+#   그 팀원이 대상에 들어오면서 ★서버 뒤★ 에 오는지를 본다.
+#   개수를 상수로 박으면 그 시험은 오늘만 맞다 (steve 지적).
+T5H="$TMP/home5"; mkdir -p "$T5H/Library/LaunchAgents"
+mk_plist() { # mk_plist <라벨> <본문에 넣을 저장소경로>
+  cat > "$T5H/Library/LaunchAgents/$1.plist" <<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$1</string>
+  <key>RunAtLoad</key><true/>
+  <key>ProgramArguments</key><array><string>$2/bin/dummy</string></array>
+</dict></plist>
+XML
+}
+T5REPO="$TMP/repo5"; mkdir -p "$T5REPO/src/server"; : > "$T5REPO/package.json"
+mk_plist "com.test.aaa-first-alphabetically" "$T5REPO"
+mk_plist "com.test.team-collab"              "$T5REPO"
+mk_plist "com.test.claude-telegram-newbie"   "$T5REPO"   # ← 오늘 없던 팀원
+
+ORDER="$(HOME="$T5H" TEAM_OS_REPO="$T5REPO" TEAMOS_LIB_ONLY=1          bash -c 'source "'"$TARGET"'"; boot_services_ordered | cut -d"|" -f1')"
+
+case "$(printf '%s\n' "$ORDER" | head -1)" in
+  *team-collab*) ok "팀 서버가 맨 앞이다" ;;
+  *) bad "팀 서버가 맨 앞이 아니다 — 실제 순서: $(printf '%s' "$ORDER" | tr '\n' ' ')" ;;
+esac
+
+printf '%s\n' "$ORDER" | grep -q 'claude-telegram-newbie' \
+  && ok "목록에 없던 새 팀원도 대상에 들어온다" \
+  || bad "새 팀원이 빠졌다 — 이름을 박아둔 것이다"
+
+SRV_N="$(printf '%s\n' "$ORDER" | grep -n 'team-collab' | cut -d: -f1)"
+NEW_N="$(printf '%s\n' "$ORDER" | grep -n 'claude-telegram-newbie' | cut -d: -f1)"
+if [ -n "$SRV_N" ] && [ -n "$NEW_N" ] && [ "$SRV_N" -lt "$NEW_N" ]; then
+  ok "새 팀원은 서버보다 뒤다"
+else
+  bad "새 팀원이 서버보다 앞이다 (서버 ${SRV_N} · 팀원 ${NEW_N})"
+fi
+
+echo "── T6: ★up 이 실제로 그 순서를 쓰는지★ (함수만 고치고 배선을 안 하면 여기서 걸린다) ──"
+# T5 는 boot_services_ordered 를 직접 부른다. 그래서 up 이 옛 열거를 쓰도록 되돌려도 T5 는 통과한다.
+#   실제로 그 뮤턴트를 넣어보니 T5 가 살아남았다. 그래서 up 을 돌려서 처리 순서를 본다.
+#   가짜 HOME·가짜 저장소·stub launchctl 이라 실제 서비스는 건드리지 않는다.
+UPOUT="$(HOME="$T5H" TEAM_OS_REPO="$T5REPO" PATH="$STUB:$PATH" bash "$TARGET" up 2>&1)"
+
+UP_SRV="$(printf '%s\n' "$UPOUT" | grep -n 'team-collab' | head -1 | cut -d: -f1)"
+UP_NEW="$(printf '%s\n' "$UPOUT" | grep -n 'claude-telegram-newbie' | head -1 | cut -d: -f1)"
+
+if [ -z "$UP_SRV" ] || [ -z "$UP_NEW" ]; then
+  bad "up 출력에 서버나 새 팀원이 안 보인다 — 순서를 잴 수 없다"
+elif [ "$UP_SRV" -lt "$UP_NEW" ]; then
+  ok "up 이 서버를 새 팀원보다 먼저 처리한다"
+else
+  bad "up 이 새 팀원을 서버보다 먼저 처리한다 (서버 ${UP_SRV}번째 · 팀원 ${UP_NEW}번째)"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then echo "ALL PASS — team-os 진입 동작"; else echo "FAIL — team-os 진입 동작"; fi
 exit "$FAILED"
