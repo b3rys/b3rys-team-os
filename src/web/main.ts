@@ -194,6 +194,7 @@ function bootstrap() {
 function renderTabs(root: HTMLElement) {
   const update = () => {
     const { mainView, selectedAgentId, agents } = store.getState();
+    root.classList.toggle("hidden", mainView === "reports");
     const agentName = agents.find((a) => a.id === selectedAgentId)?.display_name ?? "—";
     const groupTabs = groupedViewTabs(mainView);
     const groupTabsHtml = groupTabs?.map((t) => `
