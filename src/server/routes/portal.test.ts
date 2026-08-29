@@ -173,13 +173,19 @@ describe("portal 리포트 요청 — 접수회신 플로우", () => {
     expect(reports.every((report: any) => report.category === "보고서")).toBe(true);
   });
 
-  test("빈 분류 이름과 기본 분류 삭제를 안전하게 거부하거나 무시한다", async () => {
+  test("빈 분류 이름과 기본 분류 변경을 안전하게 거부한다", async () => {
     const { app } = setup();
     expect((await app.request("/api/rep1/category", putJson({ category: "  " }))).status).toBe(400);
+    const renamed = await app.request(`/api/categories/${encodeURIComponent("보고서")}`, patchJson({ name: "옛날것" }));
+    expect(renamed.status).toBe(200);
+    expect(((await renamed.json()) as any).changed).toBe(0);
     const deleted = await app.request(`/api/categories/${encodeURIComponent("보고서")}`, { method: "DELETE" });
     expect(deleted.status).toBe(200);
     expect(((await deleted.json()) as any).changed).toBe(0);
-    expect(((await (await app.request("/api/rep1")).json()) as any).category).toBe("보고서");
+    const report = (await (await app.request("/api/rep1")).json()) as any;
+    expect(report.category).toBe("보고서");
+    const list = (await (await app.request("/api/list?limit=10")).json()) as any;
+    expect(list.category_counts).toEqual({ "보고서": 1 });
   });
 
   test("재게시에서 분류를 생략하면 사용자가 이동한 분류를 유지한다", async () => {

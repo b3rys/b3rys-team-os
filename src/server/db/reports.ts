@@ -265,6 +265,7 @@ export function setReportCategory(db: Database, id: string, category: unknown): 
 export function renameReportCategory(db: Database, current: unknown, next: unknown): number {
   const from = editableCategoryName(current);
   const to = editableCategoryName(next);
+  if (from === DEFAULT_REPORT_CATEGORY) return 0;
   if (from === to) return 0;
   return db.query(`UPDATE report SET category = ?, updated_at = datetime('now')
                     WHERE COALESCE(NULLIF(TRIM(category), ''), ?) = ?`)
@@ -274,7 +275,6 @@ export function renameReportCategory(db: Database, current: unknown, next: unkno
 /** Delete a category folder while preserving its reports in the default folder. */
 export function deleteReportCategory(db: Database, category: unknown): number {
   const name = editableCategoryName(category);
-  if (name === DEFAULT_REPORT_CATEGORY) return 0;
   return renameReportCategory(db, name, DEFAULT_REPORT_CATEGORY);
 }
 

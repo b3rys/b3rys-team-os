@@ -634,11 +634,14 @@ async function manageCategories(categories: string[]): Promise<void> {
     okLabel: pick("다음", "Next"),
   });
   if (!picked?.category) return;
+  if (picked.category === DEFAULT_CAT) {
+    await showAlert({
+      title: pick("기본 분류", "Default category"),
+      message: pick("‘보고서’는 기본 분류라 이름을 바꾸거나 삭제할 수 없습니다.", "The default Reports category cannot be renamed or deleted."),
+    });
+    return;
+  }
   if (picked.action === "delete") {
-    if (picked.category === DEFAULT_CAT) {
-      await showAlert({ title: pick("분류 삭제", "Delete category"), message: pick("‘보고서’는 기본 분류라 삭제할 수 없습니다.", "The default Reports category cannot be deleted.") });
-      return;
-    }
     const yes = await showConfirm({
       title: pick("분류를 삭제할까요?", "Delete this category?"),
       message: pick(`‘${picked.category}’ 분류를 삭제합니다. 안의 보고서는 ‘${DEFAULT_CAT}’로 이동합니다.`, `Delete '${picked.category}'. Its reports will move to '${DEFAULT_CAT}'.`),
