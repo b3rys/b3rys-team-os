@@ -5,6 +5,7 @@ import { join, isAbsolute, resolve, extname } from "node:path";
 import {
   listReports, listReportsPage, getReport, upsertReport, deleteReport, setReportImportant,
   listReportTags, createReportTag, updateReportTag, deleteReportTag, setReportTags,
+  setReportCategory, renameReportCategory, deleteReportCategory,
   listResearch, getResearch, upsertResearch,
   type PortalForm,
 } from "../db/reports";
@@ -140,6 +141,39 @@ export function createReportsApp(deps: PortalDeps): Hono {
     return ok ? c.json({ ok: true }) : c.json({ error: "tag not found" }, 404);
   });
 
+  r.patch("/api/categories/:category", async (c) => {
+    try {
+      const auth = requireActor(c.req.raw);
+      if (!auth.ok || !auth.actor) return c.json({ error: auth.error }, (auth.status ?? 401) as 401);
+      const body = await c.req.json();
+      const current = c.req.param("category");
+      const name = String(body?.name ?? "").trim();
+      const changed = deps.db.transaction(() => {
+        const count = renameReportCategory(deps.db, current, name);
+        appendAudit(deps.db, auth.actor!.actor, "report_category_renamed", current, { name, changed: count });
+        return count;
+      })();
+      return c.json({ ok: true, changed });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+  r.delete("/api/categories/:category", (c) => {
+    try {
+      const auth = requireActor(c.req.raw);
+      if (!auth.ok || !auth.actor) return c.json({ error: auth.error }, (auth.status ?? 401) as 401);
+      const category = c.req.param("category");
+      const changed = deps.db.transaction(() => {
+        const count = deleteReportCategory(deps.db, category);
+        appendAudit(deps.db, auth.actor!.actor, "report_category_deleted", category, { changed: count });
+        return count;
+      })();
+      return c.json({ ok: true, changed });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
   r.get("/api/:id", (c) => {
     const rep = getReport(deps.db, c.req.param("id"));
     return rep ? c.json(rep) : c.json({ error: "not found" }, 404);
@@ -201,6 +235,21 @@ export function createReportsApp(deps: PortalDeps): Hono {
         return updated;
       })();
       return rep ? c.json({ ok: true, report: rep }) : c.json({ error: "report not found" }, 404);
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+  r.put("/api/:id/category", async (c) => {
+    try {
+      const auth = requireActor(c.req.raw);
+      if (!auth.ok || !auth.actor) return c.json({ error: auth.error }, (auth.status ?? 401) as 401);
+      const body = await c.req.json();
+      const report = deps.db.transaction(() => {
+        const updated = setReportCategory(deps.db, c.req.param("id"), body?.category);
+        if (updated) appendAudit(deps.db, auth.actor!.actor, "report_category_updated", updated.id, { category: updated.category });
+        return updated;
+      })();
+      return report ? c.json({ ok: true, report }) : c.json({ error: "report not found" }, 404);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }

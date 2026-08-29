@@ -248,6 +248,36 @@ export function setReportImportant(db: Database, id: string, important: boolean)
   return res.changes > 0 ? getReport(db, id) : null;
 }
 
+function editableCategoryName(value: unknown): string {
+  const name = String(value ?? "").trim();
+  if (!name || name.length > 40) throw new Error("category must be 1-40 characters");
+  return name;
+}
+
+/** Move one report between user-managed category folders. */
+export function setReportCategory(db: Database, id: string, category: unknown): ReportMeta | null {
+  const name = editableCategoryName(category);
+  const res = db.query("UPDATE report SET category = ?, updated_at = datetime('now') WHERE id = ?").run(name, id);
+  return res.changes > 0 ? getReport(db, id) : null;
+}
+
+/** Rename a category folder by moving every report that currently belongs to it. */
+export function renameReportCategory(db: Database, current: unknown, next: unknown): number {
+  const from = editableCategoryName(current);
+  const to = editableCategoryName(next);
+  if (from === to) return 0;
+  return db.query(`UPDATE report SET category = ?, updated_at = datetime('now')
+                    WHERE COALESCE(NULLIF(TRIM(category), ''), ?) = ?`)
+    .run(to, DEFAULT_REPORT_CATEGORY, from).changes;
+}
+
+/** Delete a category folder while preserving its reports in the default folder. */
+export function deleteReportCategory(db: Database, category: unknown): number {
+  const name = editableCategoryName(category);
+  if (name === DEFAULT_REPORT_CATEGORY) return 0;
+  return renameReportCategory(db, name, DEFAULT_REPORT_CATEGORY);
+}
+
 /** upsert by id. id 없으면 생성. forms=[{type,path}]. 스킬 등록 훅이 호출. */
 export function upsertReport(
   db: Database,
