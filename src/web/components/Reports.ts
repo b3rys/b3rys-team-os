@@ -711,6 +711,11 @@ function rememberListScroll(): void {
   if (scroller) _listScrollTop = scroller.scrollTop;
 }
 
+function renderListPreservingScroll(): void {
+  rememberListScroll();
+  renderList();
+}
+
 function rememberDetailScroll(): void {
   const scroller = _root?.querySelector<HTMLElement>("[data-reports-detail-scroll]");
   if (scroller) _detailScrollTop = scroller.scrollTop;
@@ -824,7 +829,7 @@ function renderList(): void {
       : "text-txt-amber border-amber-300 bg-transparent hover:border-amber-500"}`;
   const pills =
     `<button class="${pillCls(_cat === ALL_FILTER)}" data-cat="${ALL_FILTER}">${pick("전체", "All")}<span class="ml-1.5 text-[11px] text-slate-500" data-reports-all-count>${allCount}</span></button>` +
-    `<button class="${pillCls(_cat === IMPORTANT_FILTER)}" data-cat="${IMPORTANT_FILTER}" title="${pick("중요 표시만 보기", "Show important only")}" aria-label="${pick("중요 표시만 보기", "Show important only")}"><span>${pick("별표", "Starred")}</span><span class="text-[11px] text-slate-500" data-reports-important-count>${_importantCount}</span></button>` +
+    `<button class="${pillCls(_cat === IMPORTANT_FILTER)}" data-cat="${IMPORTANT_FILTER}" title="${pick("중요 표시만 보기", "Show important only")}" aria-label="${pick("중요 표시만 보기", "Show important only")}"><span class="text-rose-300">${starIcon(true)}</span><span class="text-[11px] text-slate-500" data-reports-important-count>${_importantCount}</span></button>` +
     cats.map((c) => `<button class="${pillCls(_cat === c)}" data-cat="${escape(c)}">${folderIcon()}${escape(c)}<span class="ml-1.5 text-[11px] text-slate-500" data-reports-category-count="${escape(c)}">${counts[c]}</span></button>`).join("");
   const tagPills = tagPillsHtml(_tags, _selectedTagIds, tagPillCls);
 
@@ -871,7 +876,7 @@ function renderList(): void {
   const loadMore = items.length
     ? `<div class="py-4 text-center text-[12px] text-slate-500" data-reports-page-status>${_loading ? pick("더 불러오는 중…", "Loading more…") : _hasMore ? pick("아래로 스크롤하면 더 불러옵니다", "Scroll down to load more") : pick("마지막 보고서입니다", "End of reports")}</div>`
     : "";
-  const selectionBar = _selectionMode ? `<div class="mt-2 rounded-xl border border-accent-green/40 bg-accent-green/[0.07] px-4 py-2.5 text-[12px] flex items-center justify-between">
+  const selectionBar = _selectionMode ? `<div class="mb-2 rounded-xl border border-accent-green/40 bg-accent-green/[0.07] px-4 py-2.5 text-[12px] flex items-center justify-between">
     <span class="text-accent-green font-semibold">${_selectedReportIds.size}${pick("건 선택됨", " selected")}</span>
     <span class="flex gap-1.5"><button id="reports-move-selected" class="px-2.5 py-1 rounded-md border border-surface-3 bg-surface-2 text-slate-300 text-[11px] disabled:opacity-40"${_selectedReportIds.size ? "" : " disabled"}>${pick("분류로 이동 ▾", "Move to category ▾")}</button><button id="reports-cancel-selection" class="px-2.5 py-1 rounded-md text-slate-500 text-[11px]">${pick("취소", "Cancel")}</button></span>
   </div>` : "";
@@ -893,11 +898,12 @@ function renderList(): void {
           <div class="relative flex-1"><svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
             <input id="reports-q" type="search" placeholder="${pick("제목·작성자·요약 검색", "Search title · author · summary")}" value="${escape(_query)}" class="w-full bg-surface-2 border border-surface-3 rounded-xl text-sm text-slate-200 pl-9 pr-3 py-2.5 outline-none focus:border-accent-green/40 placeholder:text-slate-600" />
           </div>
-          <button id="reports-selection-mode" class="shrink-0 px-3 py-2 rounded-lg text-[12px] font-semibold border border-surface-3 bg-surface-2 text-slate-400">${pick("선택", "Select")}</button>
+          <button id="reports-selection-mode" class="shrink-0 px-3 py-2 rounded-lg text-[12px] font-semibold border border-surface-3 bg-surface-2 text-slate-400">${_selectionMode ? pick("선택 해제", "Deselect") : pick("선택", "Select")}</button>
         </div>
+        ${selectionBar}
         ${loadingBar}
         <div class="${_reloading ? "opacity-50 transition-opacity" : "transition-opacity"}">
-        ${_loadError ? error : items.length ? `<div class="flex flex-col gap-2.5">${cards}</div>${selectionBar}${loadMore}` : empty}
+        ${_loadError ? error : items.length ? `<div class="flex flex-col gap-2.5">${cards}</div>${loadMore}` : empty}
         </div>
       </div>
     </div>`;
@@ -930,12 +936,13 @@ function renderList(): void {
     void manageCategories(cats).catch(reportTagFailure);
   });
   _root.querySelector<HTMLButtonElement>("#reports-selection-mode")?.addEventListener("click", () => {
-    _selectionMode = true;
-    renderList();
+    _selectionMode = !_selectionMode;
+    if (!_selectionMode) clearReportSelection();
+    renderListPreservingScroll();
   });
   _root.querySelector<HTMLButtonElement>("#reports-cancel-selection")?.addEventListener("click", () => {
     clearReportSelection();
-    renderList();
+    renderListPreservingScroll();
   });
   _root.querySelector<HTMLButtonElement>("#reports-move-selected")?.addEventListener("click", () => {
     void moveSelectedReports(cats).catch(reportTagFailure);
@@ -945,7 +952,7 @@ function renderList(): void {
       e.preventDefault(); e.stopPropagation();
       const id = button.dataset.id || "";
       if (_selectedReportIds.has(id)) _selectedReportIds.delete(id); else _selectedReportIds.add(id);
-      renderList();
+      renderListPreservingScroll();
     });
   });
   _root.querySelectorAll<HTMLElement>(".reports-card").forEach((el) => {
@@ -953,7 +960,7 @@ function renderList(): void {
       const id = el.dataset.id || "";
       if (_selectionMode) {
         if (_selectedReportIds.has(id)) _selectedReportIds.delete(id); else _selectedReportIds.add(id);
-        renderList();
+        renderListPreservingScroll();
         return;
       }
       rememberListScroll(); _curId = id || null; if (_curId) setDetailHash(_curId); _curType = null; _view = "detail"; renderDetail();
@@ -963,7 +970,7 @@ function renderList(): void {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         const id = el.dataset.id || "";
-        if (_selectionMode) { if (_selectedReportIds.has(id)) _selectedReportIds.delete(id); else _selectedReportIds.add(id); renderList(); return; }
+        if (_selectionMode) { if (_selectedReportIds.has(id)) _selectedReportIds.delete(id); else _selectedReportIds.add(id); renderListPreservingScroll(); return; }
         rememberListScroll(); _curId = id || null; if (_curId) setDetailHash(_curId); _curType = null; _view = "detail"; void renderDetail();
       }
     });
