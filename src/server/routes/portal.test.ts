@@ -181,4 +181,15 @@ describe("portal 리포트 요청 — 접수회신 플로우", () => {
     expect(((await deleted.json()) as any).changed).toBe(0);
     expect(((await (await app.request("/api/rep1")).json()) as any).category).toBe("보고서");
   });
+
+  test("재게시에서 분류를 생략하면 사용자가 이동한 분류를 유지한다", async () => {
+    const { app, db } = setup();
+    await app.request("/api/rep1/category", putJson({ category: "0828 드라이브" }));
+
+    upsertReport(db, { id: "rep1", title: "갱신된 보고서", category: null, forms: [] });
+    expect(((await (await app.request("/api/rep1")).json()) as any).category).toBe("0828 드라이브");
+
+    upsertReport(db, { id: "rep1", title: "명시 분류 보고서", category: "리서치", forms: [] });
+    expect(((await (await app.request("/api/rep1")).json()) as any).category).toBe("리서치");
+  });
 });
