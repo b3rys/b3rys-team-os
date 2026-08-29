@@ -32,7 +32,7 @@ export const MAC_APP_DOWNLOAD_URL =
 let alertsOpen = false;
 let tasksMenuOpen = false;
 let inboxMenuOpen = false;
-let docMenuOpen = false;
+let osMenuOpen = false;
 // hover-open 닫힘 유예 타이머 — re-render를 가로질러 유지되도록 모듈 스코프(R6.1 핫픽스).
 let navCloseTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -153,7 +153,7 @@ export function renderMetricsBar(root: HTMLElement): void {
     // Mobile: minimal. Desktop: + RAM + Load.
     root.innerHTML = `
       <div class="relative">
-        <!-- ★바에 overflow-hidden 을 걸면 안 된다★ — Tasks/Inbox/Doc 드롭다운이 absolute 로 바 아래에
+        <!-- ★바에 overflow-hidden 을 걸면 안 된다★ — Tasks/Inbox/OS 드롭다운이 absolute 로 바 아래에
              펼쳐지므로 통째로 잘린다 (GD 2026-07-14 실사용 발견). 넘침 클립은 ★우측 지표 클러스터에서만★ 한다. -->
         <div class="metric-bar h-12 md:h-14 px-3 md:px-4 flex items-center justify-between bg-surface-2 border-b border-surface-3 shrink-0 gap-2">
           <div class="flex items-center gap-2 shrink-0">
@@ -189,27 +189,27 @@ export function renderMetricsBar(root: HTMLElement): void {
               title="${pick("팀 버스 실시간 흐름", "Team bus real-time flow")}">
               ${navIcon("activity", "Bus")}
             </button>
-            <button id="global-teamos-tab"
-              class="px-2 py-1 rounded-md text-[11px] md:text-[13px] ${store.getState().mainView === "teamos" ? "bg-surface-0 text-slate-100" : "text-slate-400 hover:bg-surface-3 hover:text-slate-200"}"
-              title="${pick("팀 OS — 스크립트·스케줄·정본 문서", "Team OS — scripts, schedules, canonical docs")}">
-              ${navIcon("terminal", "OS")}
-            </button>
+            <div class="relative" data-navmenu="os">
+              <button id="global-os-menu"
+                class="${navBtnClass(store.getState().mainView === "teamos" || store.getState().mainView === "doc")}"
+                title="${pick("팀 OS와 팀 운영 문서", "Team OS and team ops docs")}">
+                OS ▾
+              </button>
+              ${osMenuOpen ? `<div id="os-menu-dropdown" class="absolute left-0 top-full z-50 w-40 overflow-hidden rounded-md border border-surface-3 bg-surface-2 shadow-xl">
+                ${navMenuItem("global-teamos-tab", "OS", store.getState().mainView === "teamos")}
+                ${navMenuItem("global-doc-tab", "Docs", store.getState().mainView === "doc")}
+              </div>` : ""}
+            </div>
             <button id="global-topology-tab"
               class="px-2 py-1 rounded-md text-[11px] md:text-[13px] ${store.getState().mainView === "topology" ? "bg-surface-0 text-slate-100" : "text-slate-400 hover:bg-surface-3 hover:text-slate-200"}"
               title="${pick("버스 토폴로지 — 팀원별 pending·전송중·stuck", "Bus topology — per-member pending·sending·stuck")}">
               ${navIcon("share-2", "Topo")}
             </button>
-            <div class="relative" data-navmenu="doc">
-              <button id="global-doc-menu"
-                class="${navBtnClass(store.getState().mainView === "doc" || store.getState().mainView === "reports")}"
-                title="${pick("Doc — 팀 운영 문서와 Reports", "Doc — team ops docs and Reports")}">
-                Doc ▾
-              </button>
-              ${docMenuOpen ? `<div id="doc-menu-dropdown" class="absolute left-0 top-full z-50 w-40 overflow-hidden rounded-md border border-surface-3 bg-surface-2 shadow-xl">
-                ${navMenuItem("global-doc-tab", "Doc", store.getState().mainView === "doc")}
-                ${navMenuItem("global-reports-tab", "Reports", store.getState().mainView === "reports")}
-              </div>` : ""}
-            </div>
+            <button id="global-reports-tab"
+              class="${navBtnClass(store.getState().mainView === "reports")}"
+              title="${pick("팀 보고서", "Team reports")}">
+              Reports
+            </button>
             <button id="global-search-tab"
               class="px-2 py-1 rounded-md text-[11px] md:text-[13px] inline-flex items-center gap-1 ${store.getState().mainView === "search" ? "bg-surface-0 text-slate-100" : "text-slate-400 hover:bg-surface-3 hover:text-slate-200"}"
               title="${pick("팀 기록 검색 (개발중 — 벡터검색은 진화 중, 현재 텍스트검색)", "Search team records (in development — vector search evolving, lexical for now)")}">
@@ -261,7 +261,7 @@ export function renderMetricsBar(root: HTMLElement): void {
       alertsOpen = !alertsOpen;
       tasksMenuOpen = false;
       inboxMenuOpen = false;
-      docMenuOpen = false;
+      osMenuOpen = false;
       update();
     });
     // b3os.app 내려받기: 맥앱(WKWebView)에선 이 링크가 webview 네비게이션이 되어 화면이 갇힌다
@@ -293,7 +293,7 @@ export function renderMetricsBar(root: HTMLElement): void {
       e.stopPropagation();
       tasksMenuOpen = !tasksMenuOpen;
       inboxMenuOpen = false;
-      docMenuOpen = false;
+      osMenuOpen = false;
       alertsOpen = false;
       update();
     });
@@ -302,14 +302,14 @@ export function renderMetricsBar(root: HTMLElement): void {
       e.stopPropagation();
       inboxMenuOpen = !inboxMenuOpen;
       tasksMenuOpen = false;
-      docMenuOpen = false;
+      osMenuOpen = false;
       alertsOpen = false;
       update();
     });
-    const docMenuBtn = root.querySelector<HTMLButtonElement>("#global-doc-menu");
-    docMenuBtn?.addEventListener("click", (e) => {
+    const osMenuBtn = root.querySelector<HTMLButtonElement>("#global-os-menu");
+    osMenuBtn?.addEventListener("click", (e) => {
       e.stopPropagation();
-      docMenuOpen = !docMenuOpen;
+      osMenuOpen = !osMenuOpen;
       tasksMenuOpen = false;
       inboxMenuOpen = false;
       alertsOpen = false;
@@ -317,17 +317,17 @@ export function renderMetricsBar(root: HTMLElement): void {
     });
     // 네비 드롭다운 hover-open — 마우스 오버 시 펼침, 벗어나면 닫힘. 상태가 실제로 바뀔 때만
     // update()해 무한 re-render 방지. 모바일(hover 없음)은 위 click 토글이 폴백.
-    const flags = { tasks: () => tasksMenuOpen, inbox: () => inboxMenuOpen, doc: () => docMenuOpen };
-    const setOnly = (key: "tasks" | "inbox" | "doc" | null) => {
+    const flags = { tasks: () => tasksMenuOpen, inbox: () => inboxMenuOpen, os: () => osMenuOpen };
+    const setOnly = (key: "tasks" | "inbox" | "os" | null) => {
       tasksMenuOpen = key === "tasks";
       inboxMenuOpen = key === "inbox";
-      docMenuOpen = key === "doc";
+      osMenuOpen = key === "os";
     };
     const cancelClose = () => {
       if (navCloseTimer) { clearTimeout(navCloseTimer); navCloseTimer = null; }
     };
     root.querySelectorAll<HTMLElement>("[data-navmenu]").forEach((wrap) => {
-      const key = wrap.dataset.navmenu as "tasks" | "inbox" | "doc";
+      const key = wrap.dataset.navmenu as "tasks" | "inbox" | "os";
       // mouseenter — 진입(버튼이든 드롭다운이든 wrapper descendant)하면 닫힘 예약을 취소하고 연다.
       // 이미 열려 있으면 타이머만 끄고 재렌더 안 함(루프 방지).
       wrap.addEventListener("mouseenter", () => {
@@ -352,7 +352,7 @@ export function renderMetricsBar(root: HTMLElement): void {
     inboxBtn?.addEventListener("click", (e) => {
       e.stopPropagation();
       inboxMenuOpen = false;
-      docMenuOpen = false;
+      osMenuOpen = false;
       store.getState().setMainView("inbox");
       store.getState().setMobilePane("main");
     });
@@ -360,7 +360,7 @@ export function renderMetricsBar(root: HTMLElement): void {
     auditBtn?.addEventListener("click", (e) => {
       e.stopPropagation();
       inboxMenuOpen = false;
-      docMenuOpen = false;
+      osMenuOpen = false;
       store.getState().setMainView("audit");
       store.getState().setMobilePane("main");
     });
@@ -368,7 +368,7 @@ export function renderMetricsBar(root: HTMLElement): void {
     proposalsBtn?.addEventListener("click", (e) => {
       e.stopPropagation();
       inboxMenuOpen = false;
-      docMenuOpen = false;
+      osMenuOpen = false;
       store.getState().setMainView("proposals");
       store.getState().setMobilePane("main");
     });
@@ -376,7 +376,7 @@ export function renderMetricsBar(root: HTMLElement): void {
     tasksBtn?.addEventListener("click", (e) => {
       e.stopPropagation();
       tasksMenuOpen = false;
-      docMenuOpen = false;
+      osMenuOpen = false;
       store.getState().setMainView("tasks");
       store.getState().setMobilePane("main");
     });
@@ -384,7 +384,7 @@ export function renderMetricsBar(root: HTMLElement): void {
     root.querySelector<HTMLElement>("[data-team-brand]")?.addEventListener("click", (e) => {
       e.stopPropagation();
       tasksMenuOpen = false;
-      docMenuOpen = false;
+      osMenuOpen = false;
       store.getState().setMainView("tasks");
       store.getState().setMobilePane("main");
     });
@@ -392,7 +392,7 @@ export function renderMetricsBar(root: HTMLElement): void {
     jobsBtn?.addEventListener("click", (e) => {
       e.stopPropagation();
       tasksMenuOpen = false;
-      docMenuOpen = false;
+      osMenuOpen = false;
       store.getState().setMainView("jobs");
       store.getState().setMobilePane("main");
     });
@@ -400,56 +400,56 @@ export function renderMetricsBar(root: HTMLElement): void {
     monitoringBtn?.addEventListener("click", (e) => {
       e.stopPropagation();
       tasksMenuOpen = false;
-      docMenuOpen = false;
+      osMenuOpen = false;
       store.getState().setMainView("monitoring");
       store.getState().setMobilePane("main");
     });
     const docBtn = root.querySelector<HTMLButtonElement>("#global-doc-tab");
     docBtn?.addEventListener("click", (e) => {
       e.stopPropagation();
-      docMenuOpen = false;
+      osMenuOpen = false;
       store.getState().setMainView("doc");
       store.getState().setMobilePane("main");
     });
     const busBtn = root.querySelector<HTMLButtonElement>("#global-bus-tab");
     busBtn?.addEventListener("click", (e) => {
       e.stopPropagation();
-      docMenuOpen = false;
+      osMenuOpen = false;
       store.getState().setMainView("busflow");
       store.getState().setMobilePane("main");
     });
     const teamosBtn = root.querySelector<HTMLButtonElement>("#global-teamos-tab");
     teamosBtn?.addEventListener("click", (e) => {
       e.stopPropagation();
-      docMenuOpen = false;
+      osMenuOpen = false;
       store.getState().setMainView("teamos");
       store.getState().setMobilePane("main");
     });
     const topoBtn = root.querySelector<HTMLButtonElement>("#global-topology-tab");
     topoBtn?.addEventListener("click", (e) => {
       e.stopPropagation();
-      docMenuOpen = false;
+      osMenuOpen = false;
       store.getState().setMainView("topology");
       store.getState().setMobilePane("main");
     });
     const searchBtn = root.querySelector<HTMLButtonElement>("#global-search-tab");
     searchBtn?.addEventListener("click", (e) => {
       e.stopPropagation();
-      docMenuOpen = false;
+      osMenuOpen = false;
       store.getState().setMainView("search");
       store.getState().setMobilePane("main");
     });
     const reportsBtn = root.querySelector<HTMLButtonElement>("#global-reports-tab");
     reportsBtn?.addEventListener("click", (e) => {
       e.stopPropagation();
-      docMenuOpen = false;
+      osMenuOpen = false;
       store.getState().setMainView("reports");
       store.getState().setMobilePane("main");
     });
     const settingsBtn = root.querySelector<HTMLButtonElement>("#global-settings-tab");
     settingsBtn?.addEventListener("click", (e) => {
       e.stopPropagation();
-      docMenuOpen = false;
+      osMenuOpen = false;
       store.getState().setMainView("settings");
       store.getState().setMobilePane("main");
     });
@@ -470,8 +470,8 @@ export function renderMetricsBar(root: HTMLElement): void {
     const tasksBtn = root.querySelector("#global-tasks-menu");
     const inboxDd = root.querySelector("#inbox-menu-dropdown");
     const inboxBtn = root.querySelector("#global-inbox-menu");
-    const docDd = root.querySelector("#doc-menu-dropdown");
-    const docBtn = root.querySelector("#global-doc-menu");
+    const osDd = root.querySelector("#os-menu-dropdown");
+    const osBtn = root.querySelector("#global-os-menu");
     let changed = false;
     if (tasksMenuOpen && tasksDd && !tasksDd.contains(e.target as Node) && tasksBtn && !tasksBtn.contains(e.target as Node)) {
       tasksMenuOpen = false;
@@ -481,8 +481,8 @@ export function renderMetricsBar(root: HTMLElement): void {
       inboxMenuOpen = false;
       changed = true;
     }
-    if (docMenuOpen && docDd && !docDd.contains(e.target as Node) && docBtn && !docBtn.contains(e.target as Node)) {
-      docMenuOpen = false;
+    if (osMenuOpen && osDd && !osDd.contains(e.target as Node) && osBtn && !osBtn.contains(e.target as Node)) {
+      osMenuOpen = false;
       changed = true;
     }
     if (changed) update();

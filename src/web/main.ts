@@ -32,7 +32,7 @@ import { renderIcon } from "./icons";
 const VIEW_GROUPS: Array<{ views: MainView[]; tabs: Array<{ id: MainView; label: string }> }> = [
   { views: ["tasks", "jobs"], tabs: [{ id: "tasks", label: "Tasks" }, { id: "jobs", label: "Jobs" }] },
   { views: ["inbox", "audit", "proposals"], tabs: [{ id: "inbox", label: "Inbox" }, { id: "audit", label: "Audit" }, { id: "proposals", label: "Proposal" }] },
-  { views: ["doc", "reports"], tabs: [{ id: "doc", label: "Doc" }, { id: "reports", label: "Reports" }] },
+  { views: ["teamos", "doc"], tabs: [{ id: "teamos", label: "OS" }, { id: "doc", label: "Docs" }] },
 ];
 const VALID_MAIN_VIEWS: MainView[] = ["tasks", "jobs", "monitoring", "busflow", "teamos", "topology", "search", "reports", "doc", "settings", "inbox", "audit", "proposals", "log", "thread", "config", "chat"];
 const VIEW_STORAGE_KEY = "bill-dash-main-view";
@@ -213,6 +213,10 @@ function renderTabs(root: HTMLElement) {
           store.getState().setMobilePane("main");
         });
       });
+      return;
+    }
+    if (mainView === "reports") {
+      root.innerHTML = "";
       return;
     }
     if (mainView === "busflow" || mainView === "teamos" || mainView === "topology" || mainView === "search" || mainView === "settings" || mainView === "monitoring") {
