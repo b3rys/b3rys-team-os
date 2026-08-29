@@ -248,6 +248,36 @@ export function setReportImportant(db: Database, id: string, important: boolean)
   return res.changes > 0 ? getReport(db, id) : null;
 }
 
+function editableCategoryName(value: unknown): string {
+  const name = String(value ?? "").trim();
+  if (!name || name.length > 40) throw new Error("category must be 1-40 characters");
+  return name;
+}
+
+/** Move one report between user-managed category folders. */
+export function setReportCategory(db: Database, id: string, category: unknown): ReportMeta | null {
+  const name = editableCategoryName(category);
+  const res = db.query("UPDATE report SET category = ?, updated_at = datetime('now') WHERE id = ?").run(name, id);
+  return res.changes > 0 ? getReport(db, id) : null;
+}
+
+/** Rename a category folder by moving every report that currently belongs to it. */
+export function renameReportCategory(db: Database, current: unknown, next: unknown): number {
+  const from = editableCategoryName(current);
+  const to = editableCategoryName(next);
+  if (from === DEFAULT_REPORT_CATEGORY) return 0;
+  if (from === to) return 0;
+  return db.query(`UPDATE report SET category = ?, updated_at = datetime('now')
+                    WHERE COALESCE(NULLIF(TRIM(category), ''), ?) = ?`)
+    .run(to, DEFAULT_REPORT_CATEGORY, from).changes;
+}
+
+/** Delete a category folder while preserving its reports in the default folder. */
+export function deleteReportCategory(db: Database, category: unknown): number {
+  const name = editableCategoryName(category);
+  return renameReportCategory(db, name, DEFAULT_REPORT_CATEGORY);
+}
+
 /** upsert by id. id 없으면 생성. forms=[{type,path}]. 스킬 등록 훅이 호출. */
 export function upsertReport(
   db: Database,
@@ -267,14 +297,18 @@ export function upsertReport(
   const category = canonicalCategory(input.category, (original) => {
     console.warn(`[reports] 알 수 없는 분류 "${original}" → "${DEFAULT_REPORT_CATEGORY}" 로 저장합니다 (분류는 ${REPORT_CATEGORIES.join("·")} 만 씁니다)`);
   });
+  // 재게시에서 분류를 생략하면 사용자가 화면에서 옮긴 폴더를 유지한다.
+  // 신규 보고서는 canonicalCategory의 기본값을 쓰고, 명시된 분류만 기존 값을 덮는다.
+  const hasExplicitCategory = typeof input.category === "string" && input.category.trim().length > 0;
   db.query(
     `INSERT INTO report (id, title, author, summary, category, forms_json, project, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
      ON CONFLICT(id) DO UPDATE SET
        title=excluded.title, author=excluded.author, summary=excluded.summary,
-       category=excluded.category, forms_json=excluded.forms_json, project=excluded.project,
+       category=CASE WHEN ? THEN excluded.category ELSE report.category END,
+       forms_json=excluded.forms_json, project=excluded.project,
        created_at=COALESCE(?, report.created_at), updated_at=datetime('now')`,
-  ).run(id, input.title, input.author ?? null, input.summary ?? null, category, forms_json, input.project ?? null, date, date);
+  ).run(id, input.title, input.author ?? null, input.summary ?? null, category, forms_json, input.project ?? null, date, hasExplicitCategory, date);
   return getReport(db, id)!;
 }
 

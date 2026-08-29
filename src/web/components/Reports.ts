@@ -78,6 +78,13 @@ let _cat = ALL_FILTER;
 let _listScrollTop = 0;
 let _detailScrollTop = 0;
 let _restoreSearchFocus = false;
+let _selectionMode = false;
+let _selectedReportIds = new Set<string>();
+
+function clearReportSelection(): void {
+  _selectionMode = false;
+  _selectedReportIds.clear();
+}
 
 function escape(s: unknown): string {
   return String(s == null ? "" : s)
@@ -422,7 +429,7 @@ export function tagPillsHtml(
   // ★두 번 다 마크업 시험은 통과했다.★ "자리를 차지하나" 는 잴 수 있어도 "실제로 누를 수 있나" 는
   // 마크업만 봐서는 못 잰다. hover 로만 나타나는 조작은 그 간극이 구조적으로 크므로 쓰지 않는다.
   return tags.map((t) =>
-    `<button class="${pillCls(selected.has(t.id))} reports-tag-pill" data-tag-id="${escape(t.id)}" data-tag-name="${escape(t.name)}">#${escape(t.name)}<span class="ml-1.5 text-[11px] text-slate-500">${t.report_count ?? 0}</span></button>`
+    `<button class="${pillCls(selected.has(t.id))} reports-tag-pill" data-tag-id="${escape(t.id)}" data-tag-name="${escape(t.name)}">#${escape(t.name)}<span class="ml-1 text-txt-amber/60">${t.report_count ?? 0}</span></button>`
   ).join("");
 }
 
@@ -600,9 +607,89 @@ async function deleteTag(tagId: string, name: string): Promise<void> {
   await reloadList();
 }
 
+function categoryChoiceBodyHtml(categories: string[], selected = ""): string {
+  const chip = "inline-flex cursor-pointer items-center rounded-md border border-surface-3 bg-surface-2 px-2.5 py-1 text-xs text-slate-400 transition-colors peer-checked:border-accent-green/50 peer-checked:bg-accent-green/10 peer-checked:text-accent-green";
+  return `<div class="mt-3 flex flex-wrap gap-1.5">${categories.map((category, i) => `<label class="inline-flex">
+    <input type="radio" name="category-choice" class="peer sr-only" data-category-choice value="${escape(category)}"${category === selected || (!selected && i === 0) ? " checked" : ""} />
+    <span class="${chip}">${folderIcon()}${escape(category)}</span>
+  </label>`).join("")}</div>`;
+}
+
+function collectCategoryChoice(root: HTMLElement): string {
+  return root.querySelector<HTMLInputElement>("input[data-category-choice]:checked")?.value ?? "";
+}
+
+async function manageCategories(categories: string[]): Promise<void> {
+  if (!categories.length) return;
+  const body = `${categoryChoiceBodyHtml(categories)}
+    <div class="mt-4 flex gap-2">
+      <label class="inline-flex"><input type="radio" name="category-action" class="peer sr-only" value="rename" checked /><span class="cursor-pointer rounded-md border border-surface-3 px-2.5 py-1 text-xs text-slate-400 peer-checked:border-accent-green/50 peer-checked:text-accent-green">${pick("이름 바꾸기", "Rename")}</span></label>
+      <label class="inline-flex"><input type="radio" name="category-action" class="peer sr-only" value="delete" /><span class="cursor-pointer rounded-md border border-surface-3 px-2.5 py-1 text-xs text-slate-400 peer-checked:border-red-400/40 peer-checked:text-txt-red">${pick("삭제", "Delete")}</span></label>
+    </div>`;
+  const picked = await showForm<{ category: string; action: string }>({
+    title: pick("분류 편집", "Edit categories"),
+    message: pick("분류와 작업을 고르세요.", "Choose a category and an action."),
+    bodyHtml: body,
+    collect: (root) => ({ category: collectCategoryChoice(root), action: root.querySelector<HTMLInputElement>('input[name="category-action"]:checked')?.value ?? "" }),
+    okLabel: pick("다음", "Next"),
+  });
+  if (!picked?.category) return;
+  if (picked.category === DEFAULT_CAT) {
+    await showAlert({
+      title: pick("기본 분류", "Default category"),
+      message: pick("‘보고서’는 기본 분류라 이름을 바꾸거나 삭제할 수 없습니다.", "The default Reports category cannot be renamed or deleted."),
+    });
+    return;
+  }
+  if (picked.action === "delete") {
+    const yes = await showConfirm({
+      title: pick("분류를 삭제할까요?", "Delete this category?"),
+      message: pick(`‘${picked.category}’ 분류를 삭제합니다. 안의 보고서는 ‘${DEFAULT_CAT}’로 이동합니다.`, `Delete '${picked.category}'. Its reports will move to '${DEFAULT_CAT}'.`),
+      okLabel: pick("삭제", "Delete"), danger: true,
+    });
+    if (!yes) return;
+    await mutateJson(`/api/categories/${encodeURIComponent(picked.category)}`, "DELETE");
+  } else {
+    const next = await showPrompt({ title: pick("분류 이름 바꾸기", "Rename category"), defaultValue: picked.category, okLabel: pick("저장", "Save") });
+    const name = next?.trim();
+    if (!name || name === picked.category) return;
+    await mutateJson(`/api/categories/${encodeURIComponent(picked.category)}`, "PATCH", { name });
+  }
+  if (_cat === picked.category) _cat = ALL_FILTER;
+  await reloadList();
+}
+
+async function moveSelectedReports(categories: string[]): Promise<void> {
+  if (!_selectedReportIds.size || !categories.length) return;
+  const category = await showForm<string>({
+    title: pick("분류로 이동", "Move to category"),
+    message: pick(`${_selectedReportIds.size}건을 옮길 분류를 고르세요.`, `Choose a category for ${_selectedReportIds.size} reports.`),
+    bodyHtml: categoryChoiceBodyHtml(categories, _cat !== ALL_FILTER && _cat !== IMPORTANT_FILTER ? _cat : ""),
+    collect: collectCategoryChoice,
+    okLabel: pick("이동", "Move"),
+  });
+  if (!category) return;
+  const failures: string[] = [];
+  for (const id of [..._selectedReportIds]) {
+    try {
+      await mutateJson(`/api/${encodeURIComponent(id)}/category`, "PUT", { category });
+      _selectedReportIds.delete(id);
+    } catch {
+      failures.push(id);
+    }
+  }
+  _selectionMode = failures.length > 0;
+  await reloadList();
+  if (failures.length) throw new Error(pick(`${failures.length}건을 옮기지 못했습니다. 실패한 보고서는 선택 상태로 남겼습니다.`, `${failures.length} reports could not be moved and remain selected.`));
+}
+
+function folderIcon(): string {
+  return `<svg class="mr-1.5 inline h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5h6l2 2h10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
+}
+
 function tagBadge(tag: ReportTag, interactive = false): string {
   const tagName = interactive ? "button" : "span";
-  return `<${tagName} class="${interactive ? "reports-tag-filter " : ""}inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold border border-blue-400/25 bg-blue-400/10 text-txt-blue" data-tag-id="${escape(tag.id)}">#${escape(tag.name)}</${tagName}>`;
+  return `<${tagName} class="${interactive ? "reports-tag-filter " : ""}inline-flex px-1.5 py-0.5 rounded text-[11px] font-medium border border-txt-amber/40 text-txt-amber" data-tag-id="${escape(tag.id)}">#${escape(tag.name)}</${tagName}>`;
 }
 function fileUrl(id: string, type: string): string {
   return `${REPORTS_BASE}/file/${encodeURIComponent(id)}/${encodeURIComponent(type)}`;
@@ -730,14 +817,18 @@ function renderList(): void {
   const cats = Object.keys(counts).sort((a, b) => (a === DEFAULT_CAT ? -1 : b === DEFAULT_CAT ? 1 : a.localeCompare(b, "ko")));
 
   const pillCls = (active: boolean) =>
-    `reports-pill px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${active
+    `reports-pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${active
       ? "text-accent-green border-accent-green/35 bg-accent-green/10"
-      : "text-slate-400 border-surface-3 bg-surface-2 hover:text-slate-200"}`;
+      : "text-slate-300 border-surface-3 bg-surface-2 hover:text-slate-100"}`;
+  const tagPillCls = (active: boolean) =>
+    `reports-pill inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border transition-colors ${active
+      ? "text-txt-amber border-txt-amber/70 bg-txt-amber/10"
+      : "text-txt-amber border-txt-amber/40 hover:border-txt-amber/70"}`;
   const pills =
     `<button class="${pillCls(_cat === ALL_FILTER)}" data-cat="${ALL_FILTER}">${pick("전체", "All")}<span class="ml-1.5 text-[11px] text-slate-500" data-reports-all-count>${allCount}</span></button>` +
-    `<button class="${pillCls(_cat === IMPORTANT_FILTER)}" data-cat="${IMPORTANT_FILTER}" title="${pick("중요 표시만 보기", "Show important only")}" aria-label="${pick("중요 표시만 보기", "Show important only")}"><span class="inline-flex items-center gap-1.5" title="${pick("중요 표시", "Important")}">${starIcon(true)}<span class="text-[11px] text-slate-500" data-reports-important-count>${_importantCount}</span></span></button>` +
-    cats.map((c) => `<button class="${pillCls(_cat === c)}" data-cat="${escape(c)}">${escape(c)}<span class="ml-1.5 text-[11px] text-slate-500" data-reports-category-count="${escape(c)}">${counts[c]}</span></button>`).join("");
-  const tagPills = tagPillsHtml(_tags, _selectedTagIds, pillCls);
+    `<button class="${pillCls(_cat === IMPORTANT_FILTER)}" data-cat="${IMPORTANT_FILTER}" title="${pick("중요 표시만 보기", "Show important only")}" aria-label="${pick("중요 표시만 보기", "Show important only")}"><span>${pick("별표", "Starred")}</span><span class="text-[11px] text-slate-500" data-reports-important-count>${_importantCount}</span></button>` +
+    cats.map((c) => `<button class="${pillCls(_cat === c)}" data-cat="${escape(c)}">${folderIcon()}${escape(c)}<span class="ml-1.5 text-[11px] text-slate-500" data-reports-category-count="${escape(c)}">${counts[c]}</span></button>`).join("");
+  const tagPills = tagPillsHtml(_tags, _selectedTagIds, tagPillCls);
 
   const items = _all.slice().sort(byNewest);
 
@@ -746,10 +837,12 @@ function renderList(): void {
       const ft = formType(t);
       return `<button class="reports-form-badge px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide border ${badgeClass(ft)} hover:brightness-110" data-id="${escape(r.id)}" data-type="${escape(ft)}" title="${pick(`${escape(ft)} 형식으로 열기`, `Open as ${escape(ft)}`)}">${escape(ft)}</button>`;
     }).join("");
+    const selected = _selectedReportIds.has(r.id);
     return `
-      <div class="reports-card group relative w-full text-left rounded-xl border border-surface-3 bg-surface-2 px-4 py-3 hover:bg-surface-3/60 transition-colors overflow-hidden" data-id="${escape(r.id)}" data-category="${escape(catOf(r))}" role="button" tabindex="0">
+      <div class="reports-card group relative w-full text-left rounded-xl border ${selected ? "border-accent-green/50 bg-accent-green/[0.05]" : "border-surface-3 bg-surface-2"} px-4 py-3 hover:bg-surface-3/60 transition-colors overflow-hidden" data-id="${escape(r.id)}" data-category="${escape(catOf(r))}" role="button" tabindex="0">
         <span class="absolute left-0 top-0 bottom-0 w-[3px] bg-accent-green opacity-0 group-hover:opacity-100 transition-opacity"></span>
         <div class="flex items-start gap-2">
+          ${_selectionMode ? `<button class="reports-select mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 ${selected ? "border-accent-green bg-accent-green/20 text-accent-green" : "border-surface-3 text-transparent"}" data-id="${escape(r.id)}" aria-label="${pick("보고서 선택", "Select report")}" aria-pressed="${selected}"><span class="text-[10px] leading-none">✓</span></button>` : ""}
           <div class="min-w-0 flex-1 text-[15px] font-semibold text-slate-100 leading-snug">${escape(r.title)}</div>
           <div class="flex shrink-0 items-center gap-1">
             ${starButton(r, "card")}
@@ -758,10 +851,8 @@ function renderList(): void {
             </button>
           </div>
         </div>
-        <div class="flex items-center gap-2 flex-wrap text-xs text-slate-500 mt-1"><span class="text-accent-greenSoft font-medium">${escape(r.author || "—")}</span><span>·</span><span>${fmtDate(r.created_at)}</span></div>
         ${r.summary ? `<div class="text-[13px] text-slate-400 leading-relaxed mt-1.5 line-clamp-1">${escape(r.summary)}</div>` : ""}
-        ${(r.tags ?? []).length ? `<div class="flex gap-1.5 flex-wrap mt-2">${(r.tags ?? []).map((t) => tagBadge(t, true)).join("")}</div>` : ""}
-        ${badges ? `<div class="flex gap-1.5 flex-wrap mt-2">${badges}</div>` : ""}
+        <div class="flex items-center gap-2 flex-wrap text-xs text-slate-500 mt-1"><span class="text-accent-greenSoft font-medium">${escape(r.author || "—")}</span><span>·</span><span>${fmtDate(r.created_at)}</span>${(r.tags ?? []).map((t) => tagBadge(t, true)).join("")}${badges}</div>
       </div>`;
   }).join("");
 
@@ -782,28 +873,33 @@ function renderList(): void {
   const loadMore = items.length
     ? `<div class="py-4 text-center text-[12px] text-slate-500" data-reports-page-status>${_loading ? pick("더 불러오는 중…", "Loading more…") : _hasMore ? pick("아래로 스크롤하면 더 불러옵니다", "Scroll down to load more") : pick("마지막 보고서입니다", "End of reports")}</div>`
     : "";
+  const selectionBar = _selectionMode ? `<div class="mt-2 rounded-xl border border-accent-green/40 bg-accent-green/[0.07] px-4 py-2.5 text-[12px] flex items-center justify-between">
+    <span class="text-accent-green font-semibold">${_selectedReportIds.size}${pick("건 선택됨", " selected")}</span>
+    <span class="flex gap-1.5"><button id="reports-move-selected" class="px-2.5 py-1 rounded-md border border-surface-3 bg-surface-2 text-slate-300 text-[11px] disabled:opacity-40"${_selectedReportIds.size ? "" : " disabled"}>${pick("분류로 이동 ▾", "Move to category ▾")}</button><button id="reports-cancel-selection" class="px-2.5 py-1 rounded-md text-slate-500 text-[11px]">${pick("취소", "Cancel")}</button></span>
+  </div>` : "";
 
   _root.innerHTML = `
     <div data-reports-list-scroll class="h-full overflow-y-auto">
       <div class="max-w-3xl mx-auto px-4 md:px-6 py-5 pb-20">
-        <div class="text-sm text-slate-500 mb-4">${pick("b3rys 팀 보고서 — 클릭하면 본문을 봅니다.", "b3rys team reports — click to read the full text.")}</div>
         <div class="flex items-center gap-2 flex-wrap mb-3">
-          <span class="shrink-0 text-[11px] font-semibold text-slate-500">${pick("분류", "Category")}</span>
-          ${pills}
+          <span class="w-7 shrink-0 text-[11px] font-semibold text-slate-500">${pick("분류", "Category")}</span>
+          <div class="flex flex-1 items-center gap-1.5 flex-wrap">${pills}</div>
+          <button id="reports-manage-categories" class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-slate-500 border border-dashed border-surface-3 hover:text-slate-300">✎ ${pick("편집", "Edit")}</button>
         </div>
         <div class="flex items-center gap-2 flex-wrap mb-3">
-          <span class="shrink-0 text-[11px] font-semibold text-slate-500">${pick("태그", "Tags")}</span>
-          ${tagPills || `<span class="text-xs text-slate-600">${pick("등록된 태그 없음", "No tags yet")}</span>`}
-          <button id="reports-manage-tags" class="ml-auto px-3 py-1.5 rounded-full text-xs font-semibold border border-surface-3 bg-surface-2 text-slate-400 hover:text-slate-200">${pick("태그 편집", "Edit tags")}</button>
+          <span class="w-7 shrink-0 text-[11px] font-semibold text-slate-500">${pick("태그", "Tags")}</span>
+          <div class="flex flex-1 items-center gap-1.5 flex-wrap">${tagPills || `<span class="text-xs text-slate-600">${pick("등록된 태그 없음", "No tags yet")}</span>`}</div>
+          <button id="reports-manage-tags" class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-slate-500 border border-dashed border-surface-3 hover:text-slate-300">✎ ${pick("편집", "Edit")}</button>
         </div>
-        <div class="relative mb-4">
-          <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-          <input id="reports-q" type="search" placeholder="${pick("제목·작성자·요약 검색", "Search title · author · summary")}" value="${escape(_query)}"
-            class="w-full bg-surface-2 border border-surface-3 rounded-xl text-sm text-slate-200 pl-9 pr-3 py-2.5 outline-none focus:border-accent-green/40 placeholder:text-slate-600" />
+        <div class="flex gap-2 mb-2">
+          <div class="relative flex-1"><svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <input id="reports-q" type="search" placeholder="${pick("제목·작성자·요약 검색", "Search title · author · summary")}" value="${escape(_query)}" class="w-full bg-surface-2 border border-surface-3 rounded-xl text-sm text-slate-200 pl-9 pr-3 py-2.5 outline-none focus:border-accent-green/40 placeholder:text-slate-600" />
+          </div>
+          <button id="reports-selection-mode" class="shrink-0 px-3 py-2 rounded-lg text-[12px] font-semibold border border-surface-3 bg-surface-2 text-slate-400">${pick("선택", "Select")}</button>
         </div>
         ${loadingBar}
         <div class="${_reloading ? "opacity-50 transition-opacity" : "transition-opacity"}">
-        ${_loadError ? error : items.length ? `<div class="flex flex-col gap-2.5">${cards}</div>${loadMore}` : empty}
+        ${_loadError ? error : items.length ? `<div class="flex flex-col gap-2.5">${cards}</div>${selectionBar}${loadMore}` : empty}
         </div>
       </div>
     </div>`;
@@ -811,10 +907,11 @@ function renderList(): void {
   if (scroller) scroller.scrollTop = _listScrollTop;
 
   _root.querySelectorAll<HTMLButtonElement>(".reports-pill:not(.reports-tag-pill)").forEach((el) => {
-    el.addEventListener("click", () => { _cat = el.dataset.cat || ALL_FILTER; void reloadList(); });
+    el.addEventListener("click", () => { clearReportSelection(); _cat = el.dataset.cat || ALL_FILTER; void reloadList(); });
   });
   _root.querySelectorAll<HTMLButtonElement>(".reports-tag-pill").forEach((el) => {
     el.addEventListener("click", () => {
+      clearReportSelection();
       const id = el.dataset.tagId || "";
       if (_selectedTagIds.has(id)) _selectedTagIds.delete(id); else _selectedTagIds.add(id);
       void reloadList();
@@ -823,6 +920,7 @@ function renderList(): void {
   _root.querySelectorAll<HTMLButtonElement>(".reports-tag-filter").forEach((el) => {
     el.addEventListener("click", (e) => {
       e.preventDefault(); e.stopPropagation();
+      clearReportSelection();
       _selectedTagIds = new Set([el.dataset.tagId || ""]);
       void reloadList();
     });
@@ -830,11 +928,46 @@ function renderList(): void {
   _root.querySelector<HTMLButtonElement>("#reports-manage-tags")?.addEventListener("click", () => {
     void manageTags().catch(reportTagFailure);
   });
+  _root.querySelector<HTMLButtonElement>("#reports-manage-categories")?.addEventListener("click", () => {
+    void manageCategories(cats).catch(reportTagFailure);
+  });
+  _root.querySelector<HTMLButtonElement>("#reports-selection-mode")?.addEventListener("click", () => {
+    _selectionMode = true;
+    renderList();
+  });
+  _root.querySelector<HTMLButtonElement>("#reports-cancel-selection")?.addEventListener("click", () => {
+    clearReportSelection();
+    renderList();
+  });
+  _root.querySelector<HTMLButtonElement>("#reports-move-selected")?.addEventListener("click", () => {
+    void moveSelectedReports(cats).catch(reportTagFailure);
+  });
+  _root.querySelectorAll<HTMLButtonElement>(".reports-select").forEach((button) => {
+    button.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const id = button.dataset.id || "";
+      if (_selectedReportIds.has(id)) _selectedReportIds.delete(id); else _selectedReportIds.add(id);
+      renderList();
+    });
+  });
   _root.querySelectorAll<HTMLElement>(".reports-card").forEach((el) => {
-    el.addEventListener("click", () => { rememberListScroll(); _curId = el.dataset.id || null; if (_curId) setDetailHash(_curId); _curType = null; _view = "detail"; renderDetail(); });
+    el.addEventListener("click", () => {
+      const id = el.dataset.id || "";
+      if (_selectionMode) {
+        if (_selectedReportIds.has(id)) _selectedReportIds.delete(id); else _selectedReportIds.add(id);
+        renderList();
+        return;
+      }
+      rememberListScroll(); _curId = id || null; if (_curId) setDetailHash(_curId); _curType = null; _view = "detail"; renderDetail();
+    });
     el.addEventListener("keydown", (e) => {
-      if (isInteractiveTarget(e.target)) return;
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); rememberListScroll(); _curId = el.dataset.id || null; if (_curId) setDetailHash(_curId); _curType = null; _view = "detail"; void renderDetail(); }
+      if (e.target !== el && isInteractiveTarget(e.target)) return;
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        const id = el.dataset.id || "";
+        if (_selectionMode) { if (_selectedReportIds.has(id)) _selectedReportIds.delete(id); else _selectedReportIds.add(id); renderList(); return; }
+        rememberListScroll(); _curId = id || null; if (_curId) setDetailHash(_curId); _curType = null; _view = "detail"; void renderDetail();
+      }
     });
   });
   _root.querySelectorAll<HTMLButtonElement>(".reports-form-badge").forEach((el) => {
@@ -896,14 +1029,14 @@ function renderList(): void {
       clearTimeout(t);
       const v = q.value;
       _restoreSearchFocus = true;
-      t = setTimeout(() => { _query = v; void reloadList({ restoreSearchFocus: true }); }, 900);
+      t = setTimeout(() => { clearReportSelection(); _query = v; void reloadList({ restoreSearchFocus: true }); }, 900);
     });
     q.addEventListener("input", (e) => {
       if (composing || (e as InputEvent).isComposing) return;
       clearTimeout(t);
       const v = q.value;
       _restoreSearchFocus = true;
-      t = setTimeout(() => { _query = v; void reloadList({ restoreSearchFocus: true }); }, 900);
+      t = setTimeout(() => { clearReportSelection(); _query = v; void reloadList({ restoreSearchFocus: true }); }, 900);
     });
     if (_restoreSearchFocus || _query) {
       q.focus();

@@ -144,4 +144,58 @@ describe("portal 리포트 요청 — 접수회신 플로우", () => {
     const report = await app.request("/api/rep1");
     expect(((await report.json()) as any).tags).toEqual([]);
   });
+
+  test("보고서를 분류로 이동하고 분류 이름을 바꾼다", async () => {
+    const { app, db } = setup();
+    upsertReport(db, { id: "rep2", title: "두 번째", category: "리서치", forms: [] } as never);
+
+    const moved = await app.request("/api/rep1/category", putJson({ category: "0730 드라이브" }));
+    expect(moved.status).toBe(200);
+    expect(((await moved.json()) as any).report.category).toBe("0730 드라이브");
+
+    const renamed = await app.request(`/api/categories/${encodeURIComponent("0730 드라이브")}`, patchJson({ name: "완료" }));
+    expect(renamed.status).toBe(200);
+    expect(((await renamed.json()) as any).changed).toBe(1);
+    expect(((await (await app.request("/api/rep1")).json()) as any).category).toBe("완료");
+  });
+
+  test("분류 삭제는 안의 보고서를 기본 분류로 이동한다", async () => {
+    const { app, db } = setup();
+    upsertReport(db, { id: "rep2", title: "두 번째", category: "리서치", forms: [] } as never);
+    await app.request("/api/rep1/category", putJson({ category: "보관함" }));
+    await app.request("/api/rep2/category", putJson({ category: "보관함" }));
+
+    const deleted = await app.request(`/api/categories/${encodeURIComponent("보관함")}`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    expect(((await deleted.json()) as any).changed).toBe(2);
+    const list = await app.request("/api/list?limit=10");
+    const reports = ((await list.json()) as any).reports;
+    expect(reports.every((report: any) => report.category === "보고서")).toBe(true);
+  });
+
+  test("빈 분류 이름과 기본 분류 변경을 안전하게 거부한다", async () => {
+    const { app } = setup();
+    expect((await app.request("/api/rep1/category", putJson({ category: "  " }))).status).toBe(400);
+    const renamed = await app.request(`/api/categories/${encodeURIComponent("보고서")}`, patchJson({ name: "옛날것" }));
+    expect(renamed.status).toBe(200);
+    expect(((await renamed.json()) as any).changed).toBe(0);
+    const deleted = await app.request(`/api/categories/${encodeURIComponent("보고서")}`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    expect(((await deleted.json()) as any).changed).toBe(0);
+    const report = (await (await app.request("/api/rep1")).json()) as any;
+    expect(report.category).toBe("보고서");
+    const list = (await (await app.request("/api/list?limit=10")).json()) as any;
+    expect(list.category_counts).toEqual({ "보고서": 1 });
+  });
+
+  test("재게시에서 분류를 생략하면 사용자가 이동한 분류를 유지한다", async () => {
+    const { app, db } = setup();
+    await app.request("/api/rep1/category", putJson({ category: "0828 드라이브" }));
+
+    upsertReport(db, { id: "rep1", title: "갱신된 보고서", category: null, forms: [] });
+    expect(((await (await app.request("/api/rep1")).json()) as any).category).toBe("0828 드라이브");
+
+    upsertReport(db, { id: "rep1", title: "명시 분류 보고서", category: "리서치", forms: [] });
+    expect(((await (await app.request("/api/rep1")).json()) as any).category).toBe("리서치");
+  });
 });
