@@ -297,17 +297,13 @@ export function upsertReport(
   // date = 실제 작성일(있으면 created_at 으로). 없으면 INSERT 시 now / 갱신 시 기존값 유지.
   // created_at = 정렬·표시 기준(보고서 작성일). 등록시각은 updated_at 으로 충분.
   const date = input.date ?? null;
-  // ★분류는 세 개(보고서·리서치·교육자료)로만 저장한다★.
-  //   자유 문자열이던 탓에 같은 뜻이 표기별로 갈렸다 — 리서치/research/AI 리서치/AI Research 가
-  // 전부 따로 세어져 화면 알약이 9개로 늘었고, 팀장님이 그것을 태그로 오인하셨다.
-  //   ★db 층에 두는 이유★: 라우트 두 곳·정리 스크립트가 각자 접으면 또 갈린다. 넣는 문이 하나여야 한다.
-  //   모르는 표기는 기본값으로 접되 ★조용히 하지 않는다★ — 올린 사람이 자기 분류가 사라진 걸 모르면
-  //   그게 오늘 하루 우리를 괴롭힌 '무증상' 이다.
+  // 과거 내부 호출자의 분류 별칭은 정본화하지만, 게시 API는 category=null을 넘겨 이 경고 경로를 사용하지 않는다.
+  // 신규 게시물은 NULL로 저장되어 ‘전체’에서만 보이고, 폴더 배치는 화면에서 관리한다.
   const category = canonicalCategory(input.category, (original) => {
     console.warn(`[reports] 알 수 없는 분류 "${original}" → "${DEFAULT_REPORT_CATEGORY}" 로 저장합니다 (분류는 ${REPORT_CATEGORIES.join("·")} 만 씁니다)`);
   });
   // 재게시에서 분류를 생략하면 사용자가 화면에서 옮긴 폴더를 유지한다.
-  // 신규 보고서는 canonicalCategory의 기본값을 쓰고, 명시된 분류만 기존 값을 덮는다.
+  // 신규 보고서는 분류 미지정 시 NULL을 쓰고, 명시된 분류만 기존 값을 덮는다.
   const hasExplicitCategory = typeof input.category === "string" && input.category.trim().length > 0;
   db.query(
     `INSERT INTO report (id, title, author, summary, category, forms_json, project, created_at)
