@@ -142,7 +142,7 @@ export function listReports(db: Database): ReportMeta[] {
 }
 
 // 기본 분류는 lib/reportCategory 의 정본을 쓴다 — 여기 따로 두면 두 곳이 갈린다(오늘 고치는 게 그 문제다).
-const CATEGORY_EXPR = `COALESCE(NULLIF(TRIM(category), ''), '${DEFAULT_REPORT_CATEGORY}')`;
+const CATEGORY_EXPR = "NULLIF(TRIM(category), '')";
 const MAX_REPORT_PAGE_SIZE = 100;
 type DbArg = string | number | boolean | null;
 
@@ -218,13 +218,13 @@ export function listReportsPage(db: Database, options: ReportListOptions = {}): 
   const hasMore = rows.length > limit;
 
   const categoryRows = db.query(
-    `SELECT ${CATEGORY_EXPR} AS category, COUNT(*) AS c
-       FROM report ${baseWhereSql}
-      GROUP BY ${CATEGORY_EXPR}
-      ORDER BY CASE WHEN ${CATEGORY_EXPR} = '${DEFAULT_REPORT_CATEGORY}' THEN 0 ELSE 1 END, ${CATEGORY_EXPR} COLLATE NOCASE`,
+    `SELECT categories.name AS category, COUNT(report.id) AS c
+       FROM (SELECT name FROM report_category UNION SELECT DISTINCT ${CATEGORY_EXPR} FROM report WHERE ${CATEGORY_EXPR} IS NOT NULL) categories
+       LEFT JOIN report ON ${CATEGORY_EXPR} = categories.name ${baseWhereSql ? `AND ${baseWhereSql.slice(6)}` : ""}
+      GROUP BY categories.name ORDER BY categories.name COLLATE NOCASE`,
   ).all(...baseArgs) as { category: string; c: number }[];
   const categoryCounts: Record<string, number> = {};
-  for (const r of categoryRows) categoryCounts[r.category || DEFAULT_REPORT_CATEGORY] = r.c;
+  for (const r of categoryRows) categoryCounts[r.category] = r.c;
   const importantCount = countScalar(db, baseWhere.length ? `WHERE ${baseWhere.join(" AND ")} AND is_important = 1` : "WHERE is_important = 1", baseArgs);
 
   return {
@@ -257,6 +257,7 @@ function editableCategoryName(value: unknown): string {
 /** Move one report between user-managed category folders. */
 export function setReportCategory(db: Database, id: string, category: unknown): ReportMeta | null {
   const name = editableCategoryName(category);
+  db.query("INSERT OR IGNORE INTO report_category (name) VALUES (?)").run(name);
   const res = db.query("UPDATE report SET category = ?, updated_at = datetime('now') WHERE id = ?").run(name, id);
   return res.changes > 0 ? getReport(db, id) : null;
 }
@@ -265,17 +266,25 @@ export function setReportCategory(db: Database, id: string, category: unknown): 
 export function renameReportCategory(db: Database, current: unknown, next: unknown): number {
   const from = editableCategoryName(current);
   const to = editableCategoryName(next);
-  if (from === DEFAULT_REPORT_CATEGORY) return 0;
   if (from === to) return 0;
-  return db.query(`UPDATE report SET category = ?, updated_at = datetime('now')
-                    WHERE COALESCE(NULLIF(TRIM(category), ''), ?) = ?`)
-    .run(to, DEFAULT_REPORT_CATEGORY, from).changes;
+  db.query("INSERT OR IGNORE INTO report_category (name) VALUES (?)").run(to);
+  const changed = db.query(`UPDATE report SET category = ?, updated_at = datetime('now') WHERE NULLIF(TRIM(category), '') = ?`).run(to, from).changes;
+  db.query("DELETE FROM report_category WHERE name = ?").run(from);
+  return changed;
 }
 
-/** Delete a category folder while preserving its reports in the default folder. */
+export function createReportCategory(db: Database, category: unknown): string {
+  const name = editableCategoryName(category);
+  db.query("INSERT INTO report_category (name) VALUES (?)").run(name);
+  return name;
+}
+
+/** Delete a category folder while preserving its reports without a category. */
 export function deleteReportCategory(db: Database, category: unknown): number {
   const name = editableCategoryName(category);
-  return renameReportCategory(db, name, DEFAULT_REPORT_CATEGORY);
+  const changed = db.query("UPDATE report SET category = NULL, updated_at = datetime('now') WHERE NULLIF(TRIM(category), '') = ?").run(name).changes;
+  db.query("DELETE FROM report_category WHERE name = ?").run(name);
+  return changed;
 }
 
 /** upsert by id. id 없으면 생성. forms=[{type,path}]. 스킬 등록 훅이 호출. */
@@ -288,17 +297,13 @@ export function upsertReport(
   // date = 실제 작성일(있으면 created_at 으로). 없으면 INSERT 시 now / 갱신 시 기존값 유지.
   // created_at = 정렬·표시 기준(보고서 작성일). 등록시각은 updated_at 으로 충분.
   const date = input.date ?? null;
-  // ★분류는 세 개(보고서·리서치·교육자료)로만 저장한다★.
-  //   자유 문자열이던 탓에 같은 뜻이 표기별로 갈렸다 — 리서치/research/AI 리서치/AI Research 가
-  // 전부 따로 세어져 화면 알약이 9개로 늘었고, 팀장님이 그것을 태그로 오인하셨다.
-  //   ★db 층에 두는 이유★: 라우트 두 곳·정리 스크립트가 각자 접으면 또 갈린다. 넣는 문이 하나여야 한다.
-  //   모르는 표기는 기본값으로 접되 ★조용히 하지 않는다★ — 올린 사람이 자기 분류가 사라진 걸 모르면
-  //   그게 오늘 하루 우리를 괴롭힌 '무증상' 이다.
+  // 과거 내부 호출자의 분류 별칭은 정본화하지만, 게시 API는 category=null을 넘겨 이 경고 경로를 사용하지 않는다.
+  // 신규 게시물은 NULL로 저장되어 ‘전체’에서만 보이고, 폴더 배치는 화면에서 관리한다.
   const category = canonicalCategory(input.category, (original) => {
     console.warn(`[reports] 알 수 없는 분류 "${original}" → "${DEFAULT_REPORT_CATEGORY}" 로 저장합니다 (분류는 ${REPORT_CATEGORIES.join("·")} 만 씁니다)`);
   });
   // 재게시에서 분류를 생략하면 사용자가 화면에서 옮긴 폴더를 유지한다.
-  // 신규 보고서는 canonicalCategory의 기본값을 쓰고, 명시된 분류만 기존 값을 덮는다.
+  // 신규 보고서는 분류 미지정 시 NULL을 쓰고, 명시된 분류만 기존 값을 덮는다.
   const hasExplicitCategory = typeof input.category === "string" && input.category.trim().length > 0;
   db.query(
     `INSERT INTO report (id, title, author, summary, category, forms_json, project, created_at)
@@ -308,7 +313,7 @@ export function upsertReport(
        category=CASE WHEN ? THEN excluded.category ELSE report.category END,
        forms_json=excluded.forms_json, project=excluded.project,
        created_at=COALESCE(?, report.created_at), updated_at=datetime('now')`,
-  ).run(id, input.title, input.author ?? null, input.summary ?? null, category, forms_json, input.project ?? null, date, hasExplicitCategory, date);
+  ).run(id, input.title, input.author ?? null, input.summary ?? null, hasExplicitCategory ? category : null, forms_json, input.project ?? null, date, hasExplicitCategory, date);
   return getReport(db, id)!;
 }
 
