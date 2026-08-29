@@ -159,7 +159,7 @@ describe("portal 리포트 요청 — 접수회신 플로우", () => {
     expect(((await (await app.request("/api/rep1")).json()) as any).category).toBe("완료");
   });
 
-  test("분류 삭제는 안의 보고서를 기본 분류로 이동한다", async () => {
+  test("분류 삭제는 안의 보고서를 무분류로 보존한다", async () => {
     const { app, db } = setup();
     upsertReport(db, { id: "rep2", title: "두 번째", category: "리서치", forms: [] } as never);
     await app.request("/api/rep1/category", putJson({ category: "보관함" }));
@@ -170,22 +170,37 @@ describe("portal 리포트 요청 — 접수회신 플로우", () => {
     expect(((await deleted.json()) as any).changed).toBe(2);
     const list = await app.request("/api/list?limit=10");
     const reports = ((await list.json()) as any).reports;
-    expect(reports.every((report: any) => report.category === "보고서")).toBe(true);
+    expect(reports.every((report: any) => report.category === null)).toBe(true);
   });
 
-  test("빈 분류 이름과 기본 분류 변경을 안전하게 거부한다", async () => {
+  test("빈 분류 이름은 거부하고 기존 분류도 자유롭게 변경한다", async () => {
     const { app } = setup();
     expect((await app.request("/api/rep1/category", putJson({ category: "  " }))).status).toBe(400);
     const renamed = await app.request(`/api/categories/${encodeURIComponent("보고서")}`, patchJson({ name: "옛날것" }));
     expect(renamed.status).toBe(200);
-    expect(((await renamed.json()) as any).changed).toBe(0);
-    const deleted = await app.request(`/api/categories/${encodeURIComponent("보고서")}`, { method: "DELETE" });
+    expect(((await renamed.json()) as any).changed).toBe(1);
+    const deleted = await app.request(`/api/categories/${encodeURIComponent("옛날것")}`, { method: "DELETE" });
     expect(deleted.status).toBe(200);
-    expect(((await deleted.json()) as any).changed).toBe(0);
+    expect(((await deleted.json()) as any).changed).toBe(1);
     const report = (await (await app.request("/api/rep1")).json()) as any;
-    expect(report.category).toBe("보고서");
+    expect(report.category).toBe(null);
     const list = (await (await app.request("/api/list?limit=10")).json()) as any;
-    expect(list.category_counts).toEqual({ "보고서": 1 });
+    expect(list.category_counts).toEqual({});
+  });
+
+  test("빈 분류를 새로 만들어도 목록에 0건으로 남는다", async () => {
+    const { app } = setup();
+    const created = await app.request("/api/categories", json({ name: "새 폴더" }));
+    expect(created.status).toBe(200);
+    const list = await app.request("/api/list?limit=10");
+    expect(((await list.json()) as any).category_counts["새 폴더"]).toBe(0);
+  });
+
+  test("게시 API의 분류 입력은 받지 않고 신규 보고서를 무분류로 등록한다", async () => {
+    const { app } = setup();
+    const registered = await app.request("/api/register", json({ id: "new-report", title: "신규", category: "리서치", forms: [] }));
+    expect(registered.status).toBe(200);
+    expect(((await registered.json()) as any).report.category).toBe(null);
   });
 
   test("재게시에서 분류를 생략하면 사용자가 이동한 분류를 유지한다", async () => {

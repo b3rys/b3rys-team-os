@@ -5,7 +5,7 @@ import { join, isAbsolute, resolve, extname } from "node:path";
 import {
   listReports, listReportsPage, getReport, upsertReport, deleteReport, setReportImportant,
   listReportTags, createReportTag, updateReportTag, deleteReportTag, setReportTags,
-  setReportCategory, renameReportCategory, deleteReportCategory,
+  setReportCategory, createReportCategory, renameReportCategory, deleteReportCategory,
   listResearch, getResearch, upsertResearch,
   type PortalForm,
 } from "../db/reports";
@@ -141,6 +141,20 @@ export function createReportsApp(deps: PortalDeps): Hono {
     return ok ? c.json({ ok: true }) : c.json({ error: "tag not found" }, 404);
   });
 
+  r.post("/api/categories", async (c) => {
+    try {
+      const auth = requireActor(c.req.raw);
+      if (!auth.ok || !auth.actor) return c.json({ error: auth.error }, (auth.status ?? 401) as 401);
+      const body = await c.req.json();
+      const name = deps.db.transaction(() => {
+        const created = createReportCategory(deps.db, body?.name);
+        appendAudit(deps.db, auth.actor!.actor, "report_category_created", created, {});
+        return created;
+      })();
+      return c.json({ ok: true, name });
+    } catch (e) { return c.json({ error: (e as Error).message }, 400); }
+  });
+
   r.patch("/api/categories/:category", async (c) => {
     try {
       const auth = requireActor(c.req.raw);
@@ -209,7 +223,7 @@ export function createReportsApp(deps: PortalDeps): Hono {
     }
     const rep = upsertReport(deps.db, {
       id: body.id, title: String(body.title), author: body.author ?? null,
-      summary: body.summary ?? null, category: body.category ?? null,
+      summary: body.summary ?? null, category: null,
       forms: Array.isArray(body.forms) ? body.forms : [], project: body.project ?? null,
       date: body.date ?? null,
     });

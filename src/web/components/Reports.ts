@@ -103,7 +103,7 @@ function fmtDate(s: string | null | undefined): string {
 }
 function catOf(r: Report): string {
   const c = r && r.category != null ? String(r.category).trim() : "";
-  return c || DEFAULT_CAT;
+  return c;
 }
 function isImportant(r: Report): boolean {
   return r.is_important === true || r.is_important === 1;
@@ -620,31 +620,29 @@ function collectCategoryChoice(root: HTMLElement): string {
 }
 
 async function manageCategories(categories: string[]): Promise<void> {
-  if (!categories.length) return;
-  const body = `${categoryChoiceBodyHtml(categories)}
+  const body = `${categories.length ? categoryChoiceBodyHtml(categories) : `<div class="mt-3 text-xs text-slate-500">${pick("아직 만든 분류가 없습니다.", "No categories yet.")}</div>`}
     <div class="mt-4 flex gap-2">
       <label class="inline-flex"><input type="radio" name="category-action" class="peer sr-only" value="rename" checked /><span class="cursor-pointer rounded-md border border-surface-3 px-2.5 py-1 text-xs text-slate-400 peer-checked:border-accent-green/50 peer-checked:text-accent-green">${pick("이름 바꾸기", "Rename")}</span></label>
       <label class="inline-flex"><input type="radio" name="category-action" class="peer sr-only" value="delete" /><span class="cursor-pointer rounded-md border border-surface-3 px-2.5 py-1 text-xs text-slate-400 peer-checked:border-red-400/40 peer-checked:text-txt-red">${pick("삭제", "Delete")}</span></label>
+    </div>
+    <div class="mt-4 border-t border-surface-3 pt-3">
+      <div class="text-xs font-semibold text-slate-300">${pick("새 분류 만들기", "Create a category")}</div>
+      <input type="text" data-category-new class="mt-1.5 w-full rounded-md border border-surface-3 bg-surface-2 px-3 py-2 text-sm text-slate-100" />
     </div>`;
-  const picked = await showForm<{ category: string; action: string }>({
+  const picked = await showForm<{ category: string; action: string; newName: string }>({
     title: pick("분류 편집", "Edit categories"),
     message: pick("분류와 작업을 고르세요.", "Choose a category and an action."),
     bodyHtml: body,
-    collect: (root) => ({ category: collectCategoryChoice(root), action: root.querySelector<HTMLInputElement>('input[name="category-action"]:checked')?.value ?? "" }),
+    collect: (root) => ({ category: collectCategoryChoice(root), action: root.querySelector<HTMLInputElement>('input[name="category-action"]:checked')?.value ?? "", newName: (root.querySelector<HTMLInputElement>('[data-category-new]')?.value ?? "").trim() }),
     okLabel: pick("다음", "Next"),
   });
-  if (!picked?.category) return;
-  if (picked.category === DEFAULT_CAT) {
-    await showAlert({
-      title: pick("기본 분류", "Default category"),
-      message: pick("‘보고서’는 기본 분류라 이름을 바꾸거나 삭제할 수 없습니다.", "The default Reports category cannot be renamed or deleted."),
-    });
-    return;
-  }
+  if (!picked) return;
+  if (picked.newName) { await mutateJson("/api/categories", "POST", { name: picked.newName }); await reloadList(); return; }
+  if (!picked.category) return;
   if (picked.action === "delete") {
     const yes = await showConfirm({
       title: pick("분류를 삭제할까요?", "Delete this category?"),
-      message: pick(`‘${picked.category}’ 분류를 삭제합니다. 안의 보고서는 ‘${DEFAULT_CAT}’로 이동합니다.`, `Delete '${picked.category}'. Its reports will move to '${DEFAULT_CAT}'.`),
+      message: pick(`‘${picked.category}’ 분류를 삭제합니다. 안의 보고서는 분류 없음으로 바뀌어 ‘전체’에서만 보입니다.`, `Delete '${picked.category}'. Its reports become uncategorized and appear only in All.`),
       okLabel: pick("삭제", "Delete"), danger: true,
     });
     if (!yes) return;
@@ -813,7 +811,7 @@ async function handleCardStarClick(e: MouseEvent): Promise<void> {
 function renderList(): void {
   if (!_root) return;
   const counts = _categoryCounts;
-  const allCount = Object.values(counts).reduce((sum, n) => sum + n, 0) || _totalCount || _all.length;
+  const allCount = _totalCount || _all.length;
   const cats = Object.keys(counts).sort((a, b) => (a === DEFAULT_CAT ? -1 : b === DEFAULT_CAT ? 1 : a.localeCompare(b, "ko")));
 
   const pillCls = (active: boolean) =>
@@ -822,8 +820,8 @@ function renderList(): void {
       : "text-slate-300 border-surface-3 bg-surface-2 hover:text-slate-100"}`;
   const tagPillCls = (active: boolean) =>
     `reports-pill inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border transition-colors ${active
-      ? "text-txt-amber border-txt-amber/70 bg-txt-amber/10"
-      : "text-txt-amber border-txt-amber/40 hover:border-txt-amber/70"}`;
+      ? "text-amber-900 border-amber-500 bg-amber-200"
+      : "text-txt-amber border-amber-300 bg-transparent hover:border-amber-500"}`;
   const pills =
     `<button class="${pillCls(_cat === ALL_FILTER)}" data-cat="${ALL_FILTER}">${pick("전체", "All")}<span class="ml-1.5 text-[11px] text-slate-500" data-reports-all-count>${allCount}</span></button>` +
     `<button class="${pillCls(_cat === IMPORTANT_FILTER)}" data-cat="${IMPORTANT_FILTER}" title="${pick("중요 표시만 보기", "Show important only")}" aria-label="${pick("중요 표시만 보기", "Show important only")}"><span>${pick("별표", "Starred")}</span><span class="text-[11px] text-slate-500" data-reports-important-count>${_importantCount}</span></button>` +

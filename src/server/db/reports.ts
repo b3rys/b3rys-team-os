@@ -142,7 +142,7 @@ export function listReports(db: Database): ReportMeta[] {
 }
 
 // 기본 분류는 lib/reportCategory 의 정본을 쓴다 — 여기 따로 두면 두 곳이 갈린다(오늘 고치는 게 그 문제다).
-const CATEGORY_EXPR = `COALESCE(NULLIF(TRIM(category), ''), '${DEFAULT_REPORT_CATEGORY}')`;
+const CATEGORY_EXPR = "NULLIF(TRIM(category), '')";
 const MAX_REPORT_PAGE_SIZE = 100;
 type DbArg = string | number | boolean | null;
 
@@ -218,13 +218,13 @@ export function listReportsPage(db: Database, options: ReportListOptions = {}): 
   const hasMore = rows.length > limit;
 
   const categoryRows = db.query(
-    `SELECT ${CATEGORY_EXPR} AS category, COUNT(*) AS c
-       FROM report ${baseWhereSql}
-      GROUP BY ${CATEGORY_EXPR}
-      ORDER BY CASE WHEN ${CATEGORY_EXPR} = '${DEFAULT_REPORT_CATEGORY}' THEN 0 ELSE 1 END, ${CATEGORY_EXPR} COLLATE NOCASE`,
+    `SELECT categories.name AS category, COUNT(report.id) AS c
+       FROM (SELECT name FROM report_category UNION SELECT DISTINCT ${CATEGORY_EXPR} FROM report WHERE ${CATEGORY_EXPR} IS NOT NULL) categories
+       LEFT JOIN report ON ${CATEGORY_EXPR} = categories.name ${baseWhereSql ? `AND ${baseWhereSql.slice(6)}` : ""}
+      GROUP BY categories.name ORDER BY categories.name COLLATE NOCASE`,
   ).all(...baseArgs) as { category: string; c: number }[];
   const categoryCounts: Record<string, number> = {};
-  for (const r of categoryRows) categoryCounts[r.category || DEFAULT_REPORT_CATEGORY] = r.c;
+  for (const r of categoryRows) categoryCounts[r.category] = r.c;
   const importantCount = countScalar(db, baseWhere.length ? `WHERE ${baseWhere.join(" AND ")} AND is_important = 1` : "WHERE is_important = 1", baseArgs);
 
   return {
@@ -257,6 +257,7 @@ function editableCategoryName(value: unknown): string {
 /** Move one report between user-managed category folders. */
 export function setReportCategory(db: Database, id: string, category: unknown): ReportMeta | null {
   const name = editableCategoryName(category);
+  db.query("INSERT OR IGNORE INTO report_category (name) VALUES (?)").run(name);
   const res = db.query("UPDATE report SET category = ?, updated_at = datetime('now') WHERE id = ?").run(name, id);
   return res.changes > 0 ? getReport(db, id) : null;
 }
@@ -265,17 +266,25 @@ export function setReportCategory(db: Database, id: string, category: unknown): 
 export function renameReportCategory(db: Database, current: unknown, next: unknown): number {
   const from = editableCategoryName(current);
   const to = editableCategoryName(next);
-  if (from === DEFAULT_REPORT_CATEGORY) return 0;
   if (from === to) return 0;
-  return db.query(`UPDATE report SET category = ?, updated_at = datetime('now')
-                    WHERE COALESCE(NULLIF(TRIM(category), ''), ?) = ?`)
-    .run(to, DEFAULT_REPORT_CATEGORY, from).changes;
+  db.query("INSERT OR IGNORE INTO report_category (name) VALUES (?)").run(to);
+  const changed = db.query(`UPDATE report SET category = ?, updated_at = datetime('now') WHERE NULLIF(TRIM(category), '') = ?`).run(to, from).changes;
+  db.query("DELETE FROM report_category WHERE name = ?").run(from);
+  return changed;
 }
 
-/** Delete a category folder while preserving its reports in the default folder. */
+export function createReportCategory(db: Database, category: unknown): string {
+  const name = editableCategoryName(category);
+  db.query("INSERT INTO report_category (name) VALUES (?)").run(name);
+  return name;
+}
+
+/** Delete a category folder while preserving its reports without a category. */
 export function deleteReportCategory(db: Database, category: unknown): number {
   const name = editableCategoryName(category);
-  return renameReportCategory(db, name, DEFAULT_REPORT_CATEGORY);
+  const changed = db.query("UPDATE report SET category = NULL, updated_at = datetime('now') WHERE NULLIF(TRIM(category), '') = ?").run(name).changes;
+  db.query("DELETE FROM report_category WHERE name = ?").run(name);
+  return changed;
 }
 
 /** upsert by id. id 없으면 생성. forms=[{type,path}]. 스킬 등록 훅이 호출. */
@@ -308,7 +317,7 @@ export function upsertReport(
        category=CASE WHEN ? THEN excluded.category ELSE report.category END,
        forms_json=excluded.forms_json, project=excluded.project,
        created_at=COALESCE(?, report.created_at), updated_at=datetime('now')`,
-  ).run(id, input.title, input.author ?? null, input.summary ?? null, category, forms_json, input.project ?? null, date, hasExplicitCategory, date);
+  ).run(id, input.title, input.author ?? null, input.summary ?? null, hasExplicitCategory ? category : null, forms_json, input.project ?? null, date, hasExplicitCategory, date);
   return getReport(db, id)!;
 }
 

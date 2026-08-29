@@ -269,6 +269,10 @@ CREATE TABLE IF NOT EXISTS report (
 );
 CREATE INDEX IF NOT EXISTS idx_report_created ON report(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_report_created_id ON report(created_at DESC, id DESC);
+CREATE TABLE IF NOT EXISTS report_category (
+  name TEXT PRIMARY KEY COLLATE NOCASE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 CREATE TABLE IF NOT EXISTS report_tag (
   id TEXT PRIMARY KEY,
