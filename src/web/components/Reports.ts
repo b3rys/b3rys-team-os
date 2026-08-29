@@ -47,6 +47,7 @@ interface ReportListPage {
   next_cursor?: string | null;
   has_more?: boolean;
   total?: number;
+  total_all?: number;
   important_count?: number;
   category_counts?: Record<string, number>;
   tags?: ReportTag[];
@@ -66,6 +67,7 @@ let _loadError: string | null = null;
 let _hasMore = false;
 let _nextCursor: string | null = null;
 let _totalCount = 0;
+let _totalAllCount = 0;
 let _importantCount = 0;
 let _categoryCounts: Record<string, number> = {};
 let _tags: ReportTag[] = [];
@@ -131,13 +133,14 @@ function asPage(res: unknown): ReportListPage {
       next_cursor: page.next_cursor ?? null,
       has_more: Boolean(page.has_more),
       total: typeof page.total === "number" ? page.total : page.reports.length,
+      total_all: typeof page.total_all === "number" ? page.total_all : (typeof page.total === "number" ? page.total : page.reports.length),
       important_count: typeof page.important_count === "number" ? page.important_count : page.reports.filter(isImportant).length,
       category_counts: page.category_counts ?? {},
       tags: page.tags ?? [],
     };
   }
   const reports = asList(res);
-  return { reports, next_cursor: null, has_more: false, total: reports.length, important_count: reports.filter(isImportant).length, category_counts: {}, tags: [] };
+  return { reports, next_cursor: null, has_more: false, total: reports.length, total_all: reports.length, important_count: reports.filter(isImportant).length, category_counts: {}, tags: [] };
 }
 // 정렬은 같은 방향으로 어긋나면 순서가 살아남지만, ★DB 형식과 ISO 가 섞이면 9시간짜리 오정렬이 난다.★
 // 같은 파서를 쓰면 그 위험 자체가 없어진다.
@@ -264,6 +267,7 @@ async function loadReportsPage(reset: boolean): Promise<void> {
     _nextCursor = page.next_cursor ?? null;
     _hasMore = Boolean(page.has_more);
     _totalCount = page.total ?? _all.length;
+    _totalAllCount = page.total_all ?? _totalCount;
     _importantCount = page.important_count ?? _all.filter(isImportant).length;
     _categoryCounts = page.category_counts ?? {};
     _tags = page.tags ?? _tags;
@@ -278,6 +282,7 @@ async function loadReportsPage(reset: boolean): Promise<void> {
       _nextCursor = null;
       _hasMore = false;
       _totalCount = 0;
+      _totalAllCount = 0;
       _importantCount = 0;
       _categoryCounts = {};
       _tags = [];
@@ -816,7 +821,7 @@ async function handleCardStarClick(e: MouseEvent): Promise<void> {
 function renderList(): void {
   if (!_root) return;
   const counts = _categoryCounts;
-  const allCount = _totalCount || _all.length;
+  const allCount = _totalAllCount || _all.length;
   const cats = Object.keys(counts).sort((a, b) => (a === DEFAULT_CAT ? -1 : b === DEFAULT_CAT ? 1 : a.localeCompare(b, "ko")));
 
   const pillCls = (active: boolean) =>
@@ -979,10 +984,17 @@ function renderList(): void {
     el.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
+      const id = el.dataset.id || "";
+      const type = el.dataset.type || "";
+      if (id && type === "html") {
+        const href = absoluteUrl(fileUrl(id, type));
+        if (!openInSystemBrowser(href)) window.open(href, "_blank", "noopener");
+        return;
+      }
       rememberListScroll();
-      _curId = el.dataset.id || null;
+      _curId = id || null;
       if (_curId) setDetailHash(_curId);
-      _curType = el.dataset.type || null;
+      _curType = type || null;
       _view = "detail";
       void renderDetail();
     });
@@ -1002,7 +1014,8 @@ function renderList(): void {
         const removed = _all.find((r) => r.id === id);
         await deleteReport(id);
         _totalCount = Math.max(0, _totalCount - 1);
-        updateListCount("[data-reports-all-count]", _totalCount);
+        _totalAllCount = Math.max(0, _totalAllCount - 1);
+        updateListCount("[data-reports-all-count]", _totalAllCount);
         if (removed) {
           const category = catOf(removed);
           _categoryCounts[category] = Math.max(0, (_categoryCounts[category] || 0) - 1);
