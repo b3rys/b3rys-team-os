@@ -93,6 +93,19 @@ describe("portal 리포트 요청 — 접수회신 플로우", () => {
     expect(new Set([...firstJson.reports, ...secondJson.reports].map((r) => r.id)).size).toBe(4);
   });
 
+  test("목록 필터와 무관한 전체 개수를 total_all로 반환한다", async () => {
+    const { app, db } = setup();
+    upsertReport(db, { id: "uncategorized", title: "무분류 보고서", category: null, forms: [] } as never);
+    upsertReport(db, { id: "research", title: "리서치 보고서", category: "리서치", forms: [] } as never);
+
+    const filtered = await app.request(`/api/list?limit=10&category=${encodeURIComponent("보고서")}`);
+    const body = (await filtered.json()) as { total: number; total_all: number; reports: { id: string }[] };
+
+    expect(body.total).toBe(1);
+    expect(body.reports.map((report) => report.id)).toEqual(["rep1"]);
+    expect(body.total_all).toBe(3);
+  });
+
   test("목록 pagination → 중요 필터와 검색을 서버에서 적용한다", async () => {
     const { app, db } = setup();
     upsertReport(db, { id: "star1", title: "중요 릴리즈", author: "steve", category: "교육자료", forms: [], date: "2026-07-03 10:00:00" } as never);

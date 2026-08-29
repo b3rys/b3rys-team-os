@@ -37,6 +37,7 @@ export interface ReportListPage {
   next_cursor: string | null;
   has_more: boolean;
   total: number;
+  total_all: number;
   important_count: number;
   category_counts: Record<string, number>;
   tags: ReportTag[];
@@ -202,6 +203,7 @@ export function listReportsPage(db: Database, options: ReportListOptions = {}): 
   }
   const totalWhereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const total = countScalar(db, totalWhereSql, args);
+  const totalAll = countScalar(db, "", []);
 
   const cursor = decodeCursor(options.cursor);
   if (cursor) {
@@ -232,6 +234,7 @@ export function listReportsPage(db: Database, options: ReportListOptions = {}): 
     next_cursor: hasMore && pageRows.length ? encodeCursor(pageRows[pageRows.length - 1]!) : null,
     has_more: hasMore,
     total,
+    total_all: totalAll,
     important_count: importantCount,
     category_counts: categoryCounts,
     tags: listReportTags(db),

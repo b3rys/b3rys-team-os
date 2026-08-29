@@ -14,12 +14,12 @@ const reports = Array.from({ length: 3 }, (_, index) => ({
   category: "보고서",
   is_important: index === 0,
   created_at: `2026-08-${29 - index} 08:00:00`,
-  forms: ["md"],
+  forms: index === 0 ? ["html", "md"] : ["md"],
 }));
 
 beforeAll(() => {
   const globals = globalThis as Record<string, unknown>;
-  const window = (globals.window as Window | undefined) ?? new Window();
+  const window = (globals.window as Window | undefined) ?? new Window({ url: "http://localhost/team?view=reports" });
   for (const [key, value] of [
     ["window", window],
     ["document", window.document],
@@ -44,6 +44,7 @@ beforeAll(() => {
         next_cursor: null,
         has_more: false,
         total: reports.length,
+        total_all: 72,
         important_count: 1,
         category_counts: { "보고서": reports.length },
         tags: [],
@@ -100,5 +101,17 @@ describe("Reports selection interactions", () => {
 
     expect(root.querySelector<HTMLElement>("[data-reports-list-scroll]")!.scrollTop).toBe(246);
     expect(root.querySelectorAll(".reports-select[aria-pressed='true']")).toHaveLength(1);
+  });
+
+  test("필터 결과와 별도로 전체 개수를 표시하고 HTML 배지는 새창으로 연다", async () => {
+    const root = await renderFixture();
+    expect(root.querySelector("[data-reports-all-count]")?.textContent).toBe("72");
+    root.querySelector<HTMLButtonElement>('.reports-form-badge[data-type="html"]')!
+      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    expect(window.location.hash).toBe("");
+
+    root.querySelector<HTMLButtonElement>('.reports-form-badge[data-type="md"]')!
+      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    expect(window.location.hash).toBe("#/r/report-1");
   });
 });
