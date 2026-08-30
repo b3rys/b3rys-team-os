@@ -55,6 +55,8 @@ runtime/platform safety > TEAM-OS shared rules > member personal settings. Safet
 ## 6. Rule Loading
 
 - claude auto-inlines this file via `@TEAM-OS.md`. openclaw·hermes do **not** — they receive a summary and must read this file directly for team-ops/routing work.
+- ⭐ Core Rules is the exception: its body is written into every member's `CLAUDE.md`/`AGENTS.md`, so every runtime reads it without opening a file. A rule that must reach everyone goes there, not here.
+- Member loading files are rewritten at server boot. **Merging a rule change does not reach members — a restart does.** Count the members whose file actually carries the change before calling it applied.
 - Never copy shared rules into per-member files. This file is the single source; link on-demand detail files instead.
 - If a runtime cannot auto-discover team skills, use `docs/B3OS_SKILLS.md` and the linked `skills/*/SKILL.md` files directly.
 
