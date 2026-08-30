@@ -65,6 +65,7 @@ export const WEEKLY_SHARED_CURATION_JOB_ID = "sched_weekly_shared_curation";
 export const WEEKLY_SELF_LEARNING_JOB_ID = "sched_weekly_self_learning_session";
 export const WEEKLY_SHARED_CURATION_CRON = "0 4 * * 5";
 export const WEEKLY_SELF_LEARNING_CRON = "0 5 * * 5";
+export const FORTNIGHTLY_SELF_LEARNING_MINUTES = 14 * 24 * 60;
 // 보고 경로 — 두 루프가 같은 문구를 쓴다.
 //
 // 예전에는 "send.sh --direct-to-gd" 한 줄이었는데 ★그대로 하면 실패한다★(2026-07-31 실측).
@@ -99,7 +100,7 @@ export const WEEKLY_SELF_LEARNING_BODY = [
   // ★대신 값을 박지도 않는다★ — 봉투는 wake 시점에 만들어지므로 "최종 수정: 08:52 기준" 같은 값은
   // 몇 분 뒤 무효가 되고, 산문 거짓말이 기계가 서명한 거짓말로 바뀔 뿐이다(dbak 반대리뷰).
   // 그래서 ★주장하지 말고 읽는 시점에 직접 확인하라고 지시한다.★ 지연 여부와 무관하게 성립한다.
-  "목적: rules/SHARED.md 와 지난 1주 팀 활동을 검토해, 팀에 필요한 (a)팀 룰 변경 (b)새로운 과제 (c)고쳐야 할 이슈를 뽑아 ★proposal 시스템에 등록★하세요.",
+  "목적: rules/SHARED.md 와 지난 2주 팀 활동을 검토해, 팀에 필요한 (a)팀 룰 변경 (b)새로운 과제 (c)고쳐야 할 이슈를 뽑아 ★proposal 시스템에 등록★하세요.",
   "★SHARED.md 를 읽기 직전에 mtime 과 최신 항목 날짜를 직접 확인하세요★ — 04:00 정리 세션은 별개 job 이라 아직 안 돌았을 수 있습니다. 아직이면 정리본을 기다리지 말고 원자료(team.db·git log·audit)로 보세요.",
   // 라우터가 /api 아래 마운트되고 그 전체가 /team 아래 붙는다 → 실제 경로는 /team/api/proposals.
   // "POST /api/proposals" 로 적혀 있어서 시킨 대로 하면 404 가 난다(2026-07-31 실측).
@@ -454,6 +455,51 @@ function ensureCronJob(db: Database, input: CreateCronJobInput & { id: string })
   return getScheduledJob(db, input.id)!;
 }
 
+function ensureIntervalJob(
+  db: Database,
+  input: Omit<CreateScheduledJobInput, "kind" | "scheduleKind" | "scheduleExpr"> & { id: string; minutes: number },
+): ScheduledJobRow {
+  const existing = getScheduledJob(db, input.id);
+  const scheduleExpr = JSON.stringify({ minutes: input.minutes });
+  const payloadJson = JSON.stringify(input.payload);
+  const desiredMatches = existing
+    && existing.kind === "recurring"
+    && existing.schedule_kind === "interval"
+    && existing.title === input.title
+    && existing.timezone === (input.timezone ?? "Asia/Seoul")
+    && existing.schedule_expr === scheduleExpr
+    && existing.payload_json === payloadJson
+    && existing.owner_agent_id === (input.ownerAgentId ?? null)
+    && existing.target_agent_id === (input.targetAgentId ?? null)
+    && existing.created_by === (input.createdBy ?? "system")
+    && existing.misfire_policy === (input.misfirePolicy ?? "coalesce")
+    && existing.enabled === 1;
+  if (desiredMatches) return existing;
+  if (!existing) {
+    return createScheduledJob(db, {
+      ...input,
+      kind: "recurring",
+      scheduleKind: "interval",
+      scheduleExpr: { minutes: input.minutes },
+    });
+  }
+
+  const now = toSqliteDate(new Date());
+  db.prepare(
+    `UPDATE scheduled_job
+       SET kind = 'recurring', schedule_kind = 'interval', status = 'pending', enabled = 1,
+           title = ?, owner_agent_id = ?, target_agent_id = ?, created_by = ?, timezone = ?,
+           next_run_at = ?, schedule_expr = ?, payload_json = ?, misfire_policy = ?, max_runs = NULL,
+           lock_until = NULL, lock_owner = NULL, last_error = NULL, updated_at = ?
+     WHERE id = ?`,
+  ).run(
+    input.title, input.ownerAgentId ?? null, input.targetAgentId ?? null, input.createdBy ?? "system",
+    input.timezone ?? "Asia/Seoul", toSqliteDate(input.nextRunAt), scheduleExpr, payloadJson,
+    input.misfirePolicy ?? "coalesce", now, input.id,
+  );
+  return getScheduledJob(db, input.id)!;
+}
+
 /** Seed and reconcile the portable weekly learning triggers. */
 export function ensureWeeklySelfLearningJobs(db: Database): ScheduledJobRow[] {
   const sharedCuration = ensureCronJob(db, {
@@ -471,12 +517,12 @@ export function ensureWeeklySelfLearningJobs(db: Database): ScheduledJobRow[] {
       body: WEEKLY_SHARED_CURATION_BODY,
     },
   });
-  const selfLearning = ensureCronJob(db, {
+  const selfLearning = ensureIntervalJob(db, {
     id: WEEKLY_SELF_LEARNING_JOB_ID,
-    title: "self-learning 세션 (금 05:00 KST)",
-    cron: WEEKLY_SELF_LEARNING_CRON,
+    title: "self-learning 세션 (격주 금 05:00 KST)",
+    minutes: FORTNIGHTLY_SELF_LEARNING_MINUTES,
+    nextRunAt: computeCronNextRun(WEEKLY_SELF_LEARNING_CRON, new Date(), { timezone: "Asia/Seoul" }),
     timezone: "Asia/Seoul",
-    holidayPolicy: "run",
     createdBy: "system",
     payload: {
       type: "capability_workloop",
@@ -497,15 +543,15 @@ export function ensureWeeklySelfLearningJob(db: Database): ScheduledJobRow {
 /** Seed and reconcile portable daily task-review jobs. */
 export function ensureDailyTaskReviewJobs(db: Database, opts: { from?: Date } = {}): ScheduledJobRow[] {
   const specs = [
-    { id: DAILY_TASK_REVIEW_PING_JOB_ID, title: "과제 리뷰 핑 (06:00)", cron: "0 6 * * *", execKey: "task-review-ping" },
-    { id: DAILY_TASK_REVIEW_SUMMARY_JOB_ID, title: "과제 리뷰 다이제스트 (06:20)", cron: "20 6 * * *", execKey: "task-review-summary" },
+    { id: DAILY_TASK_REVIEW_PING_JOB_ID, title: "과제 리뷰 핑 (평일 06:00)", cron: "0 6 * * 1-5", execKey: "task-review-ping" },
+    { id: DAILY_TASK_REVIEW_SUMMARY_JOB_ID, title: "과제 리뷰 다이제스트 (평일 06:20)", cron: "20 6 * * 1-5", execKey: "task-review-summary" },
   ] as const;
   return specs.map((spec) => ensureCronJob(db, {
     id: spec.id,
     title: spec.title,
     cron: spec.cron,
     timezone: currentDailyTaskReviewTimezone(),
-    holidayPolicy: "run",
+    holidayPolicy: "skip",
     createdBy: "system",
     from: opts.from,
     payload: { type: "exec", execKey: spec.execKey },

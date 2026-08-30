@@ -16,7 +16,7 @@ trigger: schedule recurring work
 
 세션 한정 임시 점검(몇 분 뒤 한 번 확인)은 런타임 세션 cron으로도 충분하다 — 이 스킬은 **유실되면 안 되는** 잡에 쓴다.
 
-**`b3os-task-loop`(작업루프)과 구분**: workloop = 정해진 코디네이터 루프(매일 칸반 PM·주간 self-learning 등 고정 프로그램)를 깨우는 기본 인프라. scheduler(이 스킬) = **임의의 durable 반복·예약 잡**을 자유롭게 등록하는 범용 도구. workloop의 스케줄 자체도 이 스케줄러로 이관 가능(launchd per-job → scheduled_job).
+**`b3os-task-loop`(작업루프)과 구분**: workloop = 정해진 코디네이터 루프(평일 칸반 PM·격주 self-learning 등 고정 프로그램)를 깨우는 기본 인프라. scheduler(이 스킬) = **임의의 durable 반복·예약 잡**을 자유롭게 등록하는 범용 도구. workloop의 스케줄 자체도 이 스케줄러로 이관 가능(launchd per-job → scheduled_job).
 
 ## 개념 (실제 구현)
 - **정본 저장**: `team.db`의 `scheduled_job` 테이블 (id·kind·schedule_kind·next_run_at(UTC)·schedule_expr·payload_json·enabled·lock_until…). 실행 이력=`scheduled_job_run`.

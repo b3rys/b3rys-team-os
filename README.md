@@ -130,7 +130,7 @@ bun run start        # → 브라우저에서 http://localhost:7878/team
 - **매일 과제 리뷰 핑 (06:00)** — active Tasks를 점검하고 다음 액션 누락을 잡습니다.
 - **매일 과제 리뷰 다이제스트 (06:20)** — 그 결과를 모아 한 번에 보고합니다.
 - **주간 공유 큐레이션** — 팀 학습 로그에서 정리 후보를 모읍니다.
-- **주간 self-learning** — SHARED/TEAM-OS/스킬 개선 후보를 모아 리뷰합니다.
+- **격주 self-learning** — SHARED/TEAM-OS/스킬 개선 후보를 모아 리뷰합니다.
 
 > 미완 과제 재확인(continuation guard)·봇 자가치유(auto-heal)는 **opt-in** 입니다 — 기본으로 켜지지 않습니다.
 
@@ -335,7 +335,7 @@ b3os는 사람이 지휘하는 시스템입니다. 에이전트가 조율하고 
 | b3os-task-loop | Tasks 칸반 · 진행 추적 · 인계 검증 · 작업루프 wake |
 | b3os-team-inbox | 팀 메시지 버스 — 전송 · 답장 · 인계 추적 |
 | **b3os-github-workflow** | 변경을 PR로 — 격리 · 커밋 신원 · 팀 계정 PR · 검증 근거 기록 · 승인 · 머지 후 확인 |
-| b3os-team-learning-loop | 주간 self-learning — 팀 정책 자가발전 |
+| b3os-team-learning-loop | 격주 self-learning — 팀 정책 자가발전 |
 | b3os-team-member-lifecycle | 팀원 온보딩 / lifecycle |
 | b3os-harness-playbook | 병렬 실행(harness) 플레이북 |
 | b3os-ai-code-safety | AI 생성·수정 코드 안전 체크리스트 — SOLID+Effects, 완료 전 side effect·동시성·멱등성 점검 |

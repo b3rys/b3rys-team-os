@@ -57,7 +57,7 @@ Everything else — clone, install, dashboard, wiring, recruiting — Claude doe
 Default ops jobs are prepared **ON by default** after install, not as optional conditional extras (they safely no-op until the needed teammate/config exists):
 
 - **Daily kanban PM review** — checks active Tasks and missing next actions.
-- **Weekly self-learning** — gathers SHARED/TEAM-OS/skill improvement candidates for review.
+- **Fortnightly self-learning** — gathers SHARED/TEAM-OS/skill improvement candidates for review.
 - **Continuation guard** — wakes stalled handoffs, reviews, and approvals.
 - **Auto-heal** — checks bot/session health and recovers within the safe operating scope.
 
