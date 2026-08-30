@@ -60,15 +60,18 @@ the team lead는 주로 아이폰에서 읽는다. 표·차트가 모바일에�
 - 색 규칙: **초록/세이지를 primary accent**, amber/orange를 보조 강조로 쓴다. 하늘색/파랑은 다크 그린 배경에서 튀므로 링크·코드 같은 보조 정보에만 muted sage 톤으로 제한한다.
 - 배경은 아주 연한 grid texture를 기본으로 쓴다. 라이트 모드는 종이 느낌이 나도록 은은하게 보이게 하고, 다크 모드는 같은 grid를 낮은 대비로 유지하되 눈을 집중하면 인지되는 수준이어야 한다. 본문 가독성을 해치면 안 된다.
 - 다크 모드 표·인용·코드·figure·요약 카드는 검정 drop shadow만 쓰지 않는다. `--surface-shadow`/`--surface-shadow-soft`로 아래 방향 그림자, 위쪽 1px inset highlight, 분명한 외곽선을 함께 써서 라이트 모드와 같은 깊이 구조를 만든다.
-- 탭이 필요하면 큰 pill 버튼을 쓰지 않는다. `report-tabs/report-tab`의 **작은 segmented navigation**을 써서 탭임은 인지되지만 본문보다 튀지 않게 한다. 세부 컴포넌트 예시는 `references/ui-components.md`를 따른다.
+- 탭이 필요하면 큰 pill 버튼을 쓰지 않는다. `report-tabs/report-tab`의 **작은 segmented navigation**을 써서 탭임은 인지되지만 본문보다 튀지 않게 한다. 세부 컴포넌트 예시는 `references/ui-components.md`, 다이어그램은 `references/diagrams.md`를 따른다.
 - **라이트 모드는 유지**한다. 다만 라이트도 같은 구조와 여백을 쓰고 색만 밝은 토큰으로 바꾼다.
 - 보고서가 특수 구조를 가진 경우(예: CSS-only 탭 보고서)는 표준 render로 덮어쓰지 말고, 기존 구조를 유지한 채 공통 테마 CSS만 교체한다.
 - 인포그래픽·다이어그램은 보고서 테마와 같은 팔레트를 써야 한다. `svg.diagram-flow` kit와 `diagram-node*`, `diagram-line*` class를 기본으로 쓰고, blue/violet SaaS slide palette(`#eff6ff`, `#2563eb`, `#faf5ff`, `#7c3aed` 등)는 기본 도식 색으로 쓰지 않는다.
+- 그림은 장식이 아니라 **설명그림**이다 — 그림만 보고 개념을 남에게 설명할 수 있어야 한다. 판별 기준·여섯 가지 틀·검사 목록은 `references/diagrams.md`.
 
 ## 렌더러가 지원하는 MD
 `#`~`####` 헤딩 · `**굵게**` `*기울임*` `` `코드` `` · 표(`| |`) · `-`/`*`/`1.` 목록 · `>` 인용(=강조 박스) · `---` 구분선 · `[텍스트](url)` · 코드펜스 ```` ``` ```` · **`<svg>…</svg>` 원문 통과**(차트는 SVG로 직접 그려 넣으면 그대로 렌더).
 
 ## 차트·인포그래픽·다이어그램은 SVG로 (passthrough)
+
+> **다이어그램을 넣는 보고서는 `references/diagrams.md` 를 먼저 읽는다.** 여섯 가지 표준 틀, 예 하나로 여러 그림을 잇는 방법, 실제 값을 넣는 규칙, class 표, 글자 폭 계산, 브라우저 검사 목록이 거기 있다. 아래는 통과(passthrough) 문법만 다룬다.
 
 바차트·흐름도·관계도는 MD 안에 인라인 SVG로 직접 작성한다(렌더러가 통과시킴). 단, 새 보고서의 기본 도식은 하드코딩한 파랑/보라 팔레트가 아니라 `diagram-flow` kit를 쓴다.
 
@@ -110,6 +113,8 @@ SVG는 라이트/다크 모두에서 읽혀야 한다. 텍스트가 긴 도식�
 
 ## 예제
 `examples/harness-pilot-report.md` (소스) → `examples/harness-pilot-report.html` (렌더 결과). 실제 harness 파일럿 보고서.
+
+다이어그램 중심 보고서의 실물은 `/reports/file/llm-layer0-basics/html` 이다. 그림 13장이 예문 하나로 이어지고, `references/diagrams.md` 의 여섯 틀이 전부 한 번씩 나온다.
 
 ## 살아있는 스킬
 더 나은 차트(자동 바차트 생성기)·레이아웃·호스팅 자동링크는 계속 업뎃(§11 팀 스킬). 테마=`assets/theme.css`(단일 출처, 렌더 시 인라인됨).
