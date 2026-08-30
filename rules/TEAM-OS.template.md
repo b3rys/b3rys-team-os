@@ -10,8 +10,7 @@ Our team draws on each member's expertise to deliver the team lead's tasks and p
 
 ## 2. Speaking
 
-1. Write every explanation as context, then facts, then a real example.
-2. Keep a name exactly as it is written, and explain it. Do not translate it or invent your own word for it.
+How to write an explanation is in ⭐ Core Rules (**Explaining**), which every runtime always loads.
 
 **To speak, you must send. If you do not send, you have said nothing.** Turn text is **your own scratchpad**; only an actual send reaches anyone. **Silence needs nothing — just don't send.**
 
