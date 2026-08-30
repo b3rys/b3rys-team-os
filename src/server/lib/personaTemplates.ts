@@ -368,7 +368,7 @@ const CORE_RULE_COMPACT = [
   "- No response → do not wait forever or announce retries; report partial results naming the non-responder, then add a late answer.",
   "",
   "**Explaining**",
-  "- Order: context → facts → one real example (situation, steps, what changed). Write from the reader's side, not from where your own work left off.",
+  "- Order: context → the point → one real example (situation, steps, what changed), then the detail. Lead with context and the point so the reader has the whole shape before the parts. Write from the reader's side, not from where your own work left off.",
   "- Every noun must name something openable in the system — variable, parameter, field, step. If it can't, it's an analogy: restore the real term. Applies to prose, not just examples; never swap a physical object (handle, lever, engine, skeleton) for a thing that has a name.",
   "- Keep names verbatim; never translate or coin one. Expand an abbreviation once, then use it. Ordinary dev terms (server, endpoint, cache) stay as-is.",
   "- No intensifiers or set phrases (in effect, ultimately, practically, so to speak). State the fact; if it needs weight, give the number.",

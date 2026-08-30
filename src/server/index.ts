@@ -217,28 +217,33 @@ try {
       }
     } catch { /* best-effort */ }
   }
-  // 공개 빌드 부팅 백필(PUBLIC_BUILD 게이트) — 공개 사용자가 git 업데이트를 pull 한 뒤 재시작하면 기존
-  //   멤버도 재영입 없이 최신을 받게. 라이브(PUBLIC_BUILD=false)는 글로벌 배선/실멤버 보호로 skip.
+  // ★① progress 훅 배선은 PUBLIC_BUILD 에서만★ — 팀원 `~/.claude/settings.json` 과 hooks/ 를 쓴다.
+  //   라이브는 그 배선을 사람이 관리하므로 부팅이 덮으면 안 된다. 주석의 "글로벌 배선" 이 이것이다.
   if (PUBLIC_BUILD) {
-    // ① progress("작업 중 ⏳") 훅 — claude 전용(글로벌 telegram-progress.sh 배선 대체).
     for (const cid of claudeIds) {
       try { installProgressHook(cid); } catch { /* best-effort */ }
     }
-    // ② 룰 로딩파일(CLAUDE.md/AGENTS.md) 재생성 — pull 한 룰 업데이트(예: First contact 자기소개)를 기존
-    //    멤버에도 반영. skip-if-unchanged 라 멱등, SOUL.md(persona)는 안 건드림. b3os_native 는 정책 미확정이라 제외.
-    const teamName = (db.query("SELECT value FROM setting WHERE key = 'team_name'").get() as { value: string } | null)?.value ?? undefined;
-    for (const a of agents) {
-      if (a.runtime === "b3os_native") continue;
-      try {
-        writeMemberPersona({
-          id: a.id, display_name: a.display_name, role: a.role, runtime: a.runtime,
-          bot_username: a.telegram_bot_username ?? undefined,
-          workspace_path: a.workspace_path, persona_file: a.persona_file,
-          owner_name: ownerRow?.value ?? undefined, team_name: teamName,
-          team_collect_enabled: false,
-        });
-      } catch { /* best-effort */ }
-    }
+  }
+
+  // ★② 룰 로딩파일(CLAUDE.md/AGENTS.md) 재생성 — 게이트 밖. 라이브도 부팅마다 돈다.★
+  //   전에는 ①과 한 블록이라 PUBLIC_BUILD 에 같이 묶여 있었다. 그래서 룰을 고치고 재시작해도
+  //   ★라이브 팀원 파일은 안 바뀌었다★ — 소스만 바뀌고 12명이 옛 룰을 계속 읽는다.
+  //   실측(2026-08-30): Core Rules 에 설명 원칙을 넣고 머지한 뒤 팀원 파일 반영 0/12.
+  //   ①과 달리 이 함수는 ★b3os 가 만든 파일만★ 쓴다(로딩파일). SOUL.md(persona)는 안 건드리고,
+  //   skip-if-unchanged 라 바뀐 게 없으면 아무것도 안 쓴다.
+  //   b3os_native 는 정책 미확정이라 제외 — 지금 그 런타임을 쓰는 팀원은 0명이다.
+  const teamName = (db.query("SELECT value FROM setting WHERE key = 'team_name'").get() as { value: string } | null)?.value ?? undefined;
+  for (const a of agents) {
+    if (a.runtime === "b3os_native") continue;
+    try {
+      writeMemberPersona({
+        id: a.id, display_name: a.display_name, role: a.role, runtime: a.runtime,
+        bot_username: a.telegram_bot_username ?? undefined,
+        workspace_path: a.workspace_path, persona_file: a.persona_file,
+        owner_name: ownerRow?.value ?? undefined, team_name: teamName,
+        team_collect_enabled: false,
+      });
+    } catch { /* best-effort */ }
   }
 } catch (e) {
   console.error("[teamos-render] startup failed:", e instanceof Error ? e.message : String(e));
