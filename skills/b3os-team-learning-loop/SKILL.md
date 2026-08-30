@@ -6,7 +6,7 @@ trigger: record a team lesson
 
 # b3rys Team Learning Loop
 
-이 스킬은 b3rys 팀의 weekly self-learning(주간 자가학습) 세션을 운영할 때 사용한다. 목적은 문서 작업량을 늘리는 것이 아니라, 팀 정책·스킬·개인 설정·프로젝트 운영을 실제로 개선하고 그 개선이 측정되게 만드는 것이다.
+이 스킬은 b3rys 팀의 fortnightly self-learning(격주 자가학습) 세션을 운영할 때 사용한다. 목적은 문서 작업량을 늘리는 것이 아니라, 팀 정책·스킬·개인 설정·프로젝트 운영을 실제로 개선하고 그 개선이 측정되게 만드는 것이다.
 
 > **BWF와의 관계 (2026-06-22, 팀 7/7 합의)**: learning-loop은 `b3os-bwf`와 **별도**다. BWF=개별 과제 실행(미시) / learning-loop=주간 메타-개선(거시·cadence·승인게이트 다름). BWF 6단계의 "학습 hook"이 만든 교훈·재발사례·검증증거가 이 루프의 **입력**으로 흘러든다(합치지 않고 데이터만 연계).
 
@@ -29,10 +29,10 @@ trigger: record a team lesson
 
 ## 주간 운영 흐름
 
-금요일 05:00 KST self-learning 세션에서 실행한다. 자동화가 있더라도 파일을 바로 고치는 것이 아니라 후보를 만들고, 필요한 경우 공동 리뷰와 {{OWNER}} 승인 gate를 거친다. 금요일 10:00 KST에는 learning-loop PM이 {{OWNER}}에게 정리된 결과를 메시지로 보낸다.
+격주 금요일 05:00 KST self-learning 세션에서 실행한다. 자동화가 있더라도 파일을 바로 고치는 것이 아니라 후보를 만들고, 필요한 경우 공동 리뷰와 {{OWNER}} 승인 gate를 거친다. 같은 날 10:00 KST에는 learning-loop PM이 {{OWNER}}에게 정리된 결과를 메시지로 보낸다.
 
 1. 입력 수집
-   - 지난 1주일 `rules/SHARED.md` 신규 항목과 stale(낡음)/중복 후보
+   - 지난 2주일 `rules/SHARED.md` 신규 항목과 stale(낡음)/중복 후보
    - Tasks 칸반에서 반복적으로 멈춘 과제, owner 혼선, handoff 실패, 완료 기준 누락
    - team bus/audit log에서 라우팅 실패, 중복 위임, 응답 가시성 문제
    - 프로젝트별 서브주제 지표와 실패 사례

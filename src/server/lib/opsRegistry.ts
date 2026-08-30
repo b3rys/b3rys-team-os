@@ -114,7 +114,7 @@ export const OPS_CATALOG: OpsEntry[] = [
     note: "owner(coordinator)를 매일 깨워 칸반 점검·보고.",
   },
   {
-    id: "learning-weekly", type: "job", title: "주간 self-learning", scope: "public", default_desired: true,
+    id: "learning-weekly", type: "job", title: "격주 self-learning", scope: "public", default_desired: true,
     conditions: { all: [{ team: { capability: "coordinator", min: 1 } }, { members: { min: 2 } }] },
     note: "팀 ≥2명 + coordinator 있을 때. 혼자면 의미 약함.",
   },

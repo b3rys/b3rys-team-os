@@ -72,14 +72,15 @@ function db() {
 }
 
 describe("b3os scheduler core", () => {
-  test("weekly learning seeds 04:00 curation and 05:00 proposal jobs idempotently", () => {
+  test("learning seeds weekly 04:00 curation and fortnightly 05:00 proposal jobs idempotently", () => {
     const d = db();
     const first = ensureWeeklySelfLearningJobs(d);
     const second = ensureWeeklySelfLearningJobs(d);
     expect(second.map((job) => job.id)).toEqual(first.map((job) => job.id));
     expect(d.prepare(`SELECT count(*) AS n FROM scheduled_job WHERE id IN (?, ?)`).get(first[0]!.id, first[1]!.id)).toEqual({ n: 2 });
     expect(JSON.parse(first[0]!.schedule_expr!)).toMatchObject({ cron: "0 4 * * 5" });
-    expect(JSON.parse(first[1]!.schedule_expr!)).toMatchObject({ cron: "0 5 * * 5" });
+    expect(first[1]!.schedule_kind).toBe("interval");
+    expect(JSON.parse(first[1]!.schedule_expr!)).toMatchObject({ minutes: 20160 });
     expect(JSON.parse(first[0]!.payload_json)).toMatchObject({
       type: "capability_workloop",
       capability: "learning_loop_pm",
@@ -124,8 +125,9 @@ describe("b3os scheduler core", () => {
 
     const jobs = ensureWeeklySelfLearningJobs(d);
     const session = jobs[1]!;
-    expect(session.title).toBe("self-learning 세션 (금 05:00 KST)");
-    expect(JSON.parse(session.schedule_expr!)).toMatchObject({ cron: "0 5 * * 5" });
+    expect(session.title).toBe("self-learning 세션 (격주 금 05:00 KST)");
+    expect(session.schedule_kind).toBe("interval");
+    expect(JSON.parse(session.schedule_expr!)).toMatchObject({ minutes: 20160 });
     expect(JSON.parse(session.payload_json)).toMatchObject({ capability: "coordinator", fallbackCapability: "learning_loop_pm" });
     expect(session.status).toBe("pending");
     expect(session.enabled).toBe(1);
@@ -138,8 +140,8 @@ describe("b3os scheduler core", () => {
     expect(first.map((j) => j.id)).toEqual(["sched_task_review_ping", "sched_task_review_summary"]);
     expect(second.map((j) => j.id)).toEqual(first.map((j) => j.id));
     expect(d.prepare(`SELECT count(*) AS n FROM scheduled_job WHERE id IN (?, ?)`).get(first[0]!.id, first[1]!.id)).toEqual({ n: 2 });
-    expect(JSON.parse(first[0]!.schedule_expr!)).toMatchObject({ cron: "0 6 * * *" });
-    expect(JSON.parse(first[1]!.schedule_expr!)).toMatchObject({ cron: "20 6 * * *" });
+    expect(JSON.parse(first[0]!.schedule_expr!)).toMatchObject({ cron: "0 6 * * 1-5", holidayPolicy: "skip" });
+    expect(JSON.parse(first[1]!.schedule_expr!)).toMatchObject({ cron: "20 6 * * 1-5", holidayPolicy: "skip" });
     expect(JSON.parse(first[0]!.payload_json)).toEqual({ type: "exec", execKey: "task-review-ping" });
     expect(JSON.parse(first[1]!.payload_json)).toEqual({ type: "exec", execKey: "task-review-summary" });
   });
@@ -419,7 +421,7 @@ describe("b3os scheduler core", () => {
     try {
       const [job] = ensureDailyTaskReviewJobs(d, { from: new Date("2026-03-07T12:00:00.000Z") });
       expect(job!.timezone).toBe("America/New_York");
-      expect(job!.next_run_at).toBe("2026-03-08 10:00:00"); // 06:00 EDT
+      expect(job!.next_run_at).toBe("2026-03-09 10:00:00"); // next weekday, 06:00 EDT
     } finally {
       if (original === undefined) delete process.env.B3OS_SCHEDULER_TIMEZONE;
       else process.env.B3OS_SCHEDULER_TIMEZONE = original;
