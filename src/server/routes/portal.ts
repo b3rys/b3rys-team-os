@@ -284,6 +284,7 @@ export function createReportsApp(deps: PortalDeps): Hono {
     const assignee = String(body?.assignee ?? rep.author ?? "").trim();
     if (!assignee) return c.json({ error: "no assignee (보고서에 author 없음 — assignee 지정 필요)" }, 400);
     const requester = auth.actor.actor;
+    const requesterBusId = requester === leadActorId() ? "user" : requester;
     // 유지보수자 도메인 하드코딩 금지 — telegramCapture(mediaUrlBase)와 동일하게 env 미설정 시 빈 문자열 →
     // 상대경로(`/reports#/r/…`)로 우아하게 강등한다(신선 설치서 your-team.example.com 누출 방지). 대시보드 브라우저
     // 컨텍스트에선 상대경로가 그대로 해석된다. 라이브 풀 URL 을 원하면 TEAM_PUBLIC_BASE_URL 을 설정.
@@ -291,8 +292,18 @@ export function createReportsApp(deps: PortalDeps): Hono {
     const link = `${publicBase}/reports#/r/${id}`;
     const msg = `[보고서 요청 · ${requester}] "${rep.title}"\n${link}\n\n요청: ${text}\n\n→ 처리 후 팀장께 보고해주세요.`;
     // 1) 담당자에게 버스 directed (wakeDispatcher 가 깨움)
-    const { thread_id } = ensureThread(deps.db, { from_agent_id: requester, to_agent_id: assignee, type: "dm", body: msg });
-    insertMessage(deps.db, { thread_id, from_agent_id: requester, to_agent_id: assignee, type: "dm", body: msg, source: "user", hop_count: 0, priority: "normal" } as any);
+    const { thread_id } = ensureThread(deps.db, { from_agent_id: requesterBusId, to_agent_id: assignee, type: "dm", body: msg });
+    insertMessage(deps.db, {
+      thread_id,
+      from_agent_id: requesterBusId,
+      to_agent_id: assignee,
+      type: "dm",
+      body: msg,
+      source: "user",
+      dispatch: true,
+      hop_count: 0,
+      priority: "normal",
+    } as any);
     // 2) 추적 task (안 묻히게 — PM 체크포인트와 연결)
     try {
       createTask(deps.db, { title: `요청: ${rep.title}`, column: "doing", owner: assignee, description: `[/reports 요청 · ${requester} → ${assignee}]\n${link}\n\n${text}` });
