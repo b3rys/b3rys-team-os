@@ -33,12 +33,26 @@ describe("portal 리포트 요청 — 접수회신 플로우", () => {
     expect(j.thread_id).toBeTruthy();
   });
 
-  test("요청 → 담당자 버스 dm + 추적 task 생성 (안 묻힘)", async () => {
+  test("요청 → 담당자 wake 가능한 user bus dm + 추적 task 생성", async () => {
     const { app, db } = setup();
     await app.request("/api/rep1/request", json({ text: "수치 갱신" }));
-    const dm = db.prepare("SELECT to_agent_id, body FROM message WHERE to_agent_id='bill' ORDER BY rowid DESC LIMIT 1").get() as { to_agent_id: string; body: string } | null;
+    const dm = db.prepare(
+      `SELECT m.id, m.from_agent_id, m.to_agent_id, m.body, mr.delivery_state
+       FROM message m
+       JOIN message_recipient mr ON mr.message_id = m.id AND mr.agent_id = m.to_agent_id
+       WHERE m.to_agent_id='bill'
+       ORDER BY m.rowid DESC LIMIT 1`,
+    ).get() as {
+      id: string;
+      from_agent_id: string;
+      to_agent_id: string;
+      body: string;
+      delivery_state: string;
+    } | null;
+    expect(dm?.from_agent_id).toBe("user");
     expect(dm?.to_agent_id).toBe("bill");
-    expect(dm?.body).toContain("보고서 요청");
+    expect(dm?.body).toContain("[보고서 요청 · gd]");
+    expect(dm?.delivery_state).toBe("pending");
     const task = db.prepare("SELECT owner, lane FROM task WHERE owner='bill' AND title LIKE '요청:%' ORDER BY rowid DESC LIMIT 1").get() as { owner: string; lane: string } | null;
     expect(task?.owner).toBe("bill");
     expect(task?.lane).toBe("doing");
