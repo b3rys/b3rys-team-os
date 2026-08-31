@@ -247,7 +247,7 @@ export interface TeamOsSnapshot {
   capture: { has_capture_token: boolean; capture_group_id: string | null; router_enabled: boolean };
 }
 
-export type MainView = "log" | "thread" | "config" | "chat" | "doc" | "busflow" | "teamos" | "topology" | "tasks" | "jobs" | "monitoring" | "search" | "reports" | "settings" | "inbox" | "audit" | "proposals";
+export type MainView = "log" | "thread" | "config" | "chat" | "doc" | "busflow" | "teamos" | "topology" | "tasks" | "jobs" | "projects" | "monitoring" | "search" | "reports" | "settings" | "inbox" | "audit" | "proposals";
 export type MobilePane = "agents" | "main" | "threads";
 export type DocSection = "policy" | "architecture" | "routing" | "learning" | "qa" | "search";
 

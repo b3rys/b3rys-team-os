@@ -378,6 +378,14 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       // dm_capture: 팀원↔팀장 1:1 DM 을 dm_message 로 적재할지. 팀원 세션 기록을 읽는 기능이라 끌 수 있어야 한다.
       //   끄면 대시보드 DM 통계와 bus-recall 의 1:1 조회만 비고, 버스·위임·발신은 전부 그대로 돈다(크리티컬 아님).
       dm_capture: getSetting(db, "dm_capture") !== "off",
+      project_prefixes: (() => {
+        try {
+          const parsed = JSON.parse(getSetting(db, "project_prefixes") ?? "[]");
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })(),
       // ★GitHub 계정·승인자 — 셸 절차가 읽어야 하는 값들 (2026-07-29 요구사항)★
       //   이 값들은 DB 에 ★있었는데 조회할 길이 없었다.★ 그래서 b3os-github-workflow 스킬에는
       //   "설정에서 조회한다" 고만 적혀 있고 ★조회 명령이 없었다.★
