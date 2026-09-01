@@ -84,7 +84,68 @@ try {
   assert.match(refs, /surface-shadow/);
   assert.doesNotMatch(html, /&lt;(svg|rect|text|div)/);
   assert.match(html, /<p>본문입니다\.<\/p>/);
-  console.log("PASS b3os-report dark/light theme + nested raw block passthrough");
+
+  // ── 탭(부별 페이지 나누기) ────────────────────────────────────────────────
+  // ★이 시험이 지키는 것★ — "탭이 생겼다" 가 아니라 ①본문이 제 패널에 들어갔나
+  // ②목차가 가리키는 앵커가 살아있나 ③표식이 잘못됐을 때 조용히 넘어가지 않고 멈추나.
+  const tmd = join(tmp, "tabs.md");
+  const tout = join(tmp, "tabs.html");
+  writeFileSync(tmd, [
+    "# 탭 보고서", "", "머리말은 탭 밖에 남는다.", "",
+    '<div id="a" data-tab="첫째"></div>', "", "## 첫째 마당", "",
+    '<div id="a-1"></div>', "", "### 1. 안쪽 절", "", "내용가나다.", "",
+    '<div id="b" data-tab="둘째"></div>', "", "## 둘째 마당", "", "내용라마바.", "",
+  ].join("\n"), "utf8");
+  execFileSync(process.execPath, [join(here, "render.mjs"), tmd, tout], { stdio: "pipe" });
+  const th = readFileSync(tout, "utf8");
+
+  // 패널 두 개, 첫 패널이 기본
+  assert.equal((th.match(/<section id="panel-/g) || []).length, 2);
+  assert.match(th, /<section id="panel-a" class="tab-panel is-default"/);
+  assert.match(th, /<section id="panel-b" class="tab-panel"/);
+  // 탭 줄은 theme.css 가 정한 컴포넌트를 그대로 쓴다(생김새를 렌더러가 다시 정의하지 않는다)
+  assert.match(th, /<nav class="report-tabs" role="tablist"/);
+  assert.match(th, /<a id="tab-a" class="report-tab" role="tab" href="#panel-a">첫째<\/a>/);
+  // ★내용이 제 패널에 들어갔나★ — 이걸 안 보면 패널만 생기고 본문이 통째로 한쪽에 몰려도 통과한다
+  const segA = th.slice(th.indexOf('id="panel-a"'), th.indexOf('id="panel-b"'));
+  assert.ok(segA.includes("내용가나다") && !segA.includes("내용라마바"));
+  // ★목차 앵커가 살아있나★ — 표식 div 와 절 앵커가 둘 다 남아야 #a-1 링크가 뜻을 갖는다
+  assert.match(th, /<div id="a"><\/div>/);
+  assert.match(th, /<div id="a-1"><\/div>/);
+  // 머리말은 패널 바깥
+  assert.ok(th.indexOf("머리말은 탭 밖에 남는다") < th.indexOf('class="tab-panel'));
+  // 전환은 CSS :target — 스크립트가 막힌 곳(/reports 뷰어 iframe sandbox)에서도 돌아야 한다
+  assert.match(th, /\.tab-panel:target,\.tab-panel:has\(:target\)\{display:block\}/);
+  // 패널 바깥을 가리키는 주소에서 화면이 비지 않게, "어느 패널도 안 걸렸을 때만" 기본을 켠다
+  assert.match(th, /\.wrap:not\(:has\(\.tab-panel:target\)\):not\(:has\(\.tab-panel :target\)\) \.tab-panel\.is-default\{display:block\}/);
+
+  // ★표식이 없으면 탭도 없다★ — 기존 보고서가 영향받지 않는지
+  const pmd = join(tmp, "plain.md"), pout = join(tmp, "plain.html");
+  writeFileSync(pmd, "# 그냥 보고서\n\n<div id=\"x\"></div>\n\n## 마당\n\n본문사아자.\n", "utf8");
+  execFileSync(process.execPath, [join(here, "render.mjs"), pmd, pout], { stdio: "pipe" });
+  const ph = readFileSync(pout, "utf8");
+  assert.doesNotMatch(ph, /<section id="panel-/);
+  assert.doesNotMatch(ph, /<nav class="report-tabs"/);
+  assert.match(ph, /본문사아자/);
+
+  // ★잘못된 표식은 조용히 넘어가지 않고 멈춘다★ — 안 멈추면 탭이 하나만 생기거나
+  // 표식이 본문에 그대로 찍힌 채 배포된다. 넷 다 실제로 낼 수 있는 실수다.
+  const mustFail = [
+    ["탭 1개", '# t\n\n<div id="a" data-tab="하나"></div>\n\n## A\n'],
+    ["id 중복", '# t\n\n<div id="a" data-tab="하나"></div>\n\n## A\n\n<div id="a" data-tab="둘"></div>\n\n## B\n'],
+    ["여러 줄 표식", '# t\n\n<div id="a" data-tab="하나"\n></div>\n\n## A\n\n<div id="b" data-tab="둘"></div>\n'],
+    ["id 없음", '# t\n\n<div data-tab="하나"></div>\n\n## A\n\n<div id="b" data-tab="둘"></div>\n'],
+  ];
+  for (const [name, body] of mustFail) {
+    const f = join(tmp, "bad.md");
+    writeFileSync(f, body, "utf8");
+    let threw = false;
+    try { execFileSync(process.execPath, [join(here, "render.mjs"), f, join(tmp, "bad.html")], { stdio: "pipe" }); }
+    catch { threw = true; }
+    assert.ok(threw, `${name}: 렌더가 멈춰야 하는데 통과했다`);
+  }
+
+  console.log("PASS b3os-report dark/light theme + nested raw block passthrough + CSS-only tabs");
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }
