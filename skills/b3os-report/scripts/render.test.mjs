@@ -119,6 +119,14 @@ try {
   // 패널 바깥을 가리키는 주소에서 화면이 비지 않게, "어느 패널도 안 걸렸을 때만" 기본을 켠다
   assert.match(th, /\.wrap:not\(:has\(\.tab-panel:target\)\):not\(:has\(\.tab-panel :target\)\) \.tab-panel\.is-default\{display:block\}/);
 
+  // ★탭은 이동이지 효과가 아니다★ — 부드러운 스크롤이 켜져 있으면 브라우저 애니메이션과
+  // 보정 이동이 다투어 화면이 떨린다. 그리고 보정은 탭 클릭에서 한 번만 움직여야 한다.
+  assert.match(th, /html\{scroll-behavior:auto\}/);
+  assert.match(th, /if\(isTab\) return;/);           // 탭 클릭은 재배치를 예약하지 않는다
+  assert.match(th, /behavior:'instant'/);            // scrollTo(x,y) 2인자는 smooth 아래서 안 움직인다
+  assert.doesNotMatch(th, /setTimeout\(put,\s*\d+\)/); // 옛 다중 보정(200·700ms)이 남아 있지 않다
+  assert.equal((th.match(/setTimeout\(/g) || []).length, 1); // 늦은 재배치는 깊은 앵커용 1개뿐
+
   // ★표식이 없으면 탭도 없다★ — 기존 보고서가 영향받지 않는지
   const pmd = join(tmp, "plain.md"), pout = join(tmp, "plain.html");
   writeFileSync(pmd, "# 그냥 보고서\n\n<div id=\"x\"></div>\n\n## 마당\n\n본문사아자.\n", "utf8");

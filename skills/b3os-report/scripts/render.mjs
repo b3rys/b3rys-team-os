@@ -153,6 +153,10 @@ if (tabs.length >= 2) {
   // 생김새 기준은 references/ui-components.md 2절이 정한다(조용한 blurred row, 한 줄 가로 스크롤).
   // 여기서 더하는 것은 ★:target 으로 어느 패널을 열지 고르는 규칙★ 뿐이다.
   tabsCss = `
+/* ★탭 보고서에서는 부드러운 스크롤을 끈다★ — theme.css 의 scroll-behavior:smooth 가 켜져 있으면
+   탭을 눌렀을 때 브라우저의 애니메이션과 아래 보정 코드의 이동이 서로 다투어 화면이 떨린다.
+   탭은 이동이지 효과가 아니다. */
+html{scroll-behavior:auto}
 .tab-panel:target,.tab-panel:has(:target){display:block}
 ${noPanelHit} .tab-panel.is-default{display:block}
 .wrap div[id]:empty{scroll-margin-top:104px}
@@ -164,20 +168,28 @@ ${noPanelHit} [href="#panel-${tabs[0].id}"]${activeBg}`;
   // 그 요소는 화면에 없어 레이아웃 상자가 없다 → 갈 곳을 못 찾는다.
   // CSS 가 패널을 편 뒤에도 브라우저는 다시 시도하지 않는다. 그래서 열린 다음 한 번 더 옮긴다.
   // 이건 스크롤만 거든다 — 스크립트가 막힌 곳(포털 iframe)에서도 탭 전환 자체는 CSS 로 그대로 돈다.
+  // ★스크롤 보정 — 한 번만 움직인다★
+  // 목적지가 닫혀 있던 탭 안이면 브라우저는 첫 스크롤 시점에 그 요소의 위치를 모른다(화면에 없어서다).
+  // CSS 가 탭을 편 뒤에도 브라우저는 다시 시도하지 않으므로 여기서 한 번 옮긴다.
+  // ★여러 번 옮기면 화면이 떨린다★ — 그래서 탭 클릭은 1회, 깊은 앵커만 늦은 재배치를 한 번 더 확인하되
+  // 어긋난 폭이 4px 를 넘을 때만 실제로 움직인다.
   tabsJs = `
 (function(){
+  var TOP=104;
+  function put(el){ window.scrollTo({top: Math.max(0, el.getBoundingClientRect().top+window.scrollY-TOP), behavior:'instant'}); }
   function go(){
     var h=location.hash; if(!h||h.length<2) return;
     var el=document.getElementById(decodeURIComponent(h.slice(1))); if(!el) return;
-    // 탭을 눌러 패널을 바꿀 때는 그 패널의 첫 줄이 아니라 ★탭 줄★ 을 화면 위에 둔다.
-    // 패널이 바뀌면 문서 높이가 통째로 달라져, 이전 패널 기준으로 잰 위치는 뜻이 없다.
-    if(el.classList.contains('tab-panel')) el=document.getElementById('report-top')||el;
-    // ★반드시 behavior:'instant' 다★ — theme.css 가 scroll-behavior:smooth 를 켜 놓아서
-    // scrollTo(x,y) 2인자 형태는 이 페이지에서 실제로 화면을 못 움직인다(실측: 목표 5270, 결과 제자리).
-    // scrollIntoView 도 같은 이유로 안 쓴다 — 전환 중에 엉뚱한 자리에 선다.
-    // ★여러 번 재는 이유★ — 그림이 자리를 잡으면서 위치가 계속 바뀐다.
-    function put(){ window.scrollTo({top: Math.max(0, el.getBoundingClientRect().top+window.scrollY-104), behavior:'instant'}); }
-    requestAnimationFrame(put); setTimeout(put,200); setTimeout(put,700);
+    var isTab=el.classList.contains('tab-panel');
+    // 탭을 눌러 화면을 바꿀 때는 그 탭의 첫 줄이 아니라 탭 줄을 화면 위에 둔다.
+    if(isTab) el=document.getElementById('report-top')||el;
+    requestAnimationFrame(function(){
+      put(el);
+      if(isTab) return;                       // 탭 클릭은 여기서 끝. 다시 움직이지 않는다.
+      setTimeout(function(){                  // 깊은 앵커만 — 그림이 늦게 자리를 잡아 밀렸는지 본다
+        if(Math.abs(el.getBoundingClientRect().top-TOP)>4) put(el);
+      },400);
+    });
   }
   addEventListener('load',go); addEventListener('hashchange',go);
 })();`;
