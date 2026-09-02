@@ -173,26 +173,60 @@ ${noPanelHit} [href="#panel-${tabs[0].id}"]${activeBg}`;
   // CSS 가 탭을 편 뒤에도 브라우저는 다시 시도하지 않으므로 여기서 한 번 옮긴다.
   // ★여러 번 옮기면 화면이 떨린다★ — 그래서 탭 클릭은 1회, 깊은 앵커만 늦은 재배치를 한 번 더 확인하되
   // 어긋난 폭이 4px 를 넘을 때만 실제로 움직인다.
+  // ★스크롤 보정★ — 두 가지 일을 한다.
+  //  ① 닫혀 있던 패널로 갈 때: 누르는 순간 그 패널은 display:none 이라 브라우저가 위치를 모른다.
+  //     그대로 두면 화면이 문서 맨 위로 가고 탭 줄이 가운데에 놓인다(실측 2026-09-02).
+  //  ② 탭마다 읽던 자리를 기억한다: 다른 탭에 갔다가 돌아오면 그 자리로 돌려놓는다.
+  //     처음 여는 탭은 그 부의 첫머리로 간다. 지금 켜진 탭을 다시 누르면 첫머리로 간다.
+  // ★어느 경우든 한 번만 옮긴다★ — 두 번 옮기면 화면이 튄다.
   tabsJs = `
 (function(){
-  var TOP=104;
-  function put(el){ window.scrollTo({top: Math.max(0, el.getBoundingClientRect().top+window.scrollY-TOP), behavior:'instant'}); }
+  var TOP=104;          // 장 앵커 — 제목이 상단 탭 줄에 가리지 않는 자리
+  var PANEL_TOP=112;    // 탭 첫머리 — .tab-panel 의 scroll-margin-top 과 같은 값
+  var pos={}, current=null;
+  function put(el, top){ window.scrollTo({top: Math.max(0, el.getBoundingClientRect().top+window.scrollY-top), behavior:'instant'}); }
+  function shown(){
+    var els=document.querySelectorAll('.tab-panel');
+    for(var i=0;i<els.length;i++) if(getComputedStyle(els[i]).display!=='none') return els[i].id;
+    return null;
+  }
+  // ★떠나기 전에 적어 둔다★ — hashchange 시점에는 브라우저가 이미 화면을 옮긴 뒤라 늦다.
+  //   클릭 시점은 주소가 바뀌기 전이므로 그때의 scrollY 가 그 탭에서 읽던 자리다.
+  function wire(){
+    var tabs=document.querySelectorAll('.report-tab');
+    for(var i=0;i<tabs.length;i++) tabs[i].addEventListener('click', function(){
+      var to=(this.getAttribute('href')||'').slice(1);
+      if(current===to) delete pos[current];        // 같은 탭을 다시 누르면 첫머리로
+      else if(current) pos[current]=window.scrollY;
+    });
+    current=shown();
+  }
   function go(){
     var h=location.hash; if(!h||h.length<2) return;
     var el=document.getElementById(decodeURIComponent(h.slice(1))); if(!el) return;
-    // ★탭 클릭에는 손대지 않는다★ — 탭을 바꾸면 문서 길이가 달라져 브라우저가 먼저 위치를 자르고,
-    // 거기에 이 코드가 한 번 더 옮기면 화면이 두 번 움직여 튀어 보인다.
-    // 브라우저의 앵커 이동만으로 충분하다 — .tab-panel 의 scroll-margin-top 이 자리를 잡고,
-    // 탭 줄은 sticky 라 화면 위에 붙는다.
-    if(el.classList.contains('tab-panel')) return;
-    requestAnimationFrame(function(){
-      put(el);
-      setTimeout(function(){                  // 깊은 앵커만 — 그림이 늦게 자리를 잡아 밀렸는지 본다
-        if(Math.abs(el.getBoundingClientRect().top-TOP)>4) put(el);
-      },400);
-    });
+    var isTab=el.classList.contains('tab-panel');
+    // ★requestAnimationFrame 을 쓰지 않는다★ — 배경 탭에서는 콜백이 아예 실행되지 않는다(실측 2026-09-02:
+    //   document.hidden=true 인 탭에서 rAF 는 안 돌고 setTimeout 만 돈다. 그래서 이 코드가 한 줄도
+    //   실행되지 않은 채 "동작한다" 로 잘못 읽혔다). getBoundingClientRect 를 읽으면 :target 으로 바뀐
+    //   표시 상태가 그 자리에서 계산되므로, 프레임을 기다릴 이유가 없다.
+    if(isTab){
+      current=el.id;
+      var saved=pos[el.id];
+      if(typeof saved==='number'){
+        el.getBoundingClientRect();           // 방금 열린 패널의 높이를 먼저 계산시킨다
+        window.scrollTo({top:saved, behavior:'instant'});
+      }
+      else put(el, PANEL_TOP);
+      return;
+    }
+    current=shown();
+    put(el, TOP);
+    setTimeout(function(){                    // 깊은 앵커만 — 그림이 늦게 자리를 잡아 밀렸는지 본다
+      if(Math.abs(el.getBoundingClientRect().top-TOP)>4) put(el, TOP);
+    },400);
   }
-  addEventListener('load',go); addEventListener('hashchange',go);
+  addEventListener('load',function(){ wire(); go(); });
+  addEventListener('hashchange',go);
 })();`;
 }
 

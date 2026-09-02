@@ -122,7 +122,19 @@ try {
   // ★탭은 이동이지 효과가 아니다★ — 부드러운 스크롤이 켜져 있으면 브라우저 애니메이션과
   // 보정 이동이 다투어 화면이 떨린다. 그리고 보정은 탭 클릭에서 한 번만 움직여야 한다.
   assert.match(th, /html\{scroll-behavior:auto\}/);
-  assert.match(th, /if\(el\.classList\.contains\('tab-panel'\)\) return;/);  // 탭 클릭에는 손대지 않는다
+  // 닫혀 있던 패널은 브라우저가 위치를 모른다 — 탭 클릭도 스크립트가 옮겨야 한다. 단 한 번만.
+  assert.match(th, /var isTab=el\.classList\.contains\('tab-panel'\);/);
+  // ★rAF 금지★ — 배경 탭에서는 콜백이 실행되지 않아 이 코드가 통째로 안 돈다
+  assert.doesNotMatch(th, /requestAnimationFrame\(/);   // 주석의 단어는 허용, ★호출★ 은 금지
+  assert.match(th, /var PANEL_TOP=112;/);
+  assert.match(th, /put\(el, PANEL_TOP\);/);
+  // 탭마다 읽던 자리를 기억한다. 떠나는 시점은 클릭이지 hashchange 가 아니다(그때는 이미 옮겨진 뒤다).
+  assert.match(th, /pos\[current\]=window\.scrollY;/);
+  assert.match(th, /if\(current===to\) delete pos\[current\];/);
+  assert.match(th, /if\(typeof saved==='number'\)\{/);
+  // 복원 직전에 레이아웃을 강제하지 않으면 문서가 짧아 값이 잘린다
+  assert.match(th, /el\.getBoundingClientRect\(\);[^\n]*\n\s*window\.scrollTo\(\{top:saved/);
+  assert.match(th, /addEventListener\('click'/);
   assert.match(th, /behavior:'instant'/);            // scrollTo(x,y) 2인자는 smooth 아래서 안 움직인다
   assert.doesNotMatch(th, /setTimeout\(put,\s*\d+\)/); // 옛 다중 보정(200·700ms)이 남아 있지 않다
   assert.equal((th.match(/setTimeout\(/g) || []).length, 1); // 늦은 재배치는 깊은 앵커용 1개뿐
