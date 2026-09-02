@@ -180,12 +180,13 @@ ${noPanelHit} [href="#panel-${tabs[0].id}"]${activeBg}`;
   function go(){
     var h=location.hash; if(!h||h.length<2) return;
     var el=document.getElementById(decodeURIComponent(h.slice(1))); if(!el) return;
-    var isTab=el.classList.contains('tab-panel');
-    // 탭을 눌러 화면을 바꿀 때는 그 탭의 첫 줄이 아니라 탭 줄을 화면 위에 둔다.
-    if(isTab) el=document.getElementById('report-top')||el;
+    // ★탭 클릭에는 손대지 않는다★ — 탭을 바꾸면 문서 길이가 달라져 브라우저가 먼저 위치를 자르고,
+    // 거기에 이 코드가 한 번 더 옮기면 화면이 두 번 움직여 튀어 보인다.
+    // 브라우저의 앵커 이동만으로 충분하다 — .tab-panel 의 scroll-margin-top 이 자리를 잡고,
+    // 탭 줄은 sticky 라 화면 위에 붙는다.
+    if(el.classList.contains('tab-panel')) return;
     requestAnimationFrame(function(){
       put(el);
-      if(isTab) return;                       // 탭 클릭은 여기서 끝. 다시 움직이지 않는다.
       setTimeout(function(){                  // 깊은 앵커만 — 그림이 늦게 자리를 잡아 밀렸는지 본다
         if(Math.abs(el.getBoundingClientRect().top-TOP)>4) put(el);
       },400);
