@@ -135,7 +135,14 @@ try {
   // 복원 직전에 레이아웃을 강제하지 않으면 문서가 짧아 값이 잘린다
   assert.match(th, /el\.getBoundingClientRect\(\);[^\n]*\n\s*window\.scrollTo\(\{top:saved/);
   assert.match(th, /addEventListener\('click'/);
-  assert.match(th, /behavior:'instant'/);            // scrollTo(x,y) 2인자는 smooth 아래서 안 움직인다
+  // ★scrollTo 호출마다 behavior:'instant' 여야 한다★ — 문자열이 한 번만 있는지 보면
+  // 한 곳만 'smooth' 로 바뀌어도 나머지 하나가 검사를 통과시킨다(실측: 187행·217행 각각 생존).
+  // 그래서 ★호출 수와 instant 수가 같은지★ 를 센다.
+  const scrollCalls = (th.match(/window\.scrollTo\(/g) || []).length;
+  const instantCalls = (th.match(/window\.scrollTo\(\{[^}]*behavior:'instant'\}\)/g) || []).length;
+  assert.equal(scrollCalls, instantCalls, `scrollTo ${scrollCalls}개 중 behavior:'instant' 는 ${instantCalls}개`);
+  assert.ok(scrollCalls >= 2, `scrollTo 호출이 ${scrollCalls}개다 — 보정 코드가 빠졌다`);
+  assert.doesNotMatch(th, /behavior:'smooth'/);
   assert.doesNotMatch(th, /setTimeout\(put,\s*\d+\)/); // 옛 다중 보정(200·700ms)이 남아 있지 않다
   assert.equal((th.match(/setTimeout\(/g) || []).length, 1); // 늦은 재배치는 깊은 앵커용 1개뿐
 

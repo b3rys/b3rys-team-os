@@ -210,7 +210,7 @@
 
 ---
 
-## 참고할 실물
+## 참고할 실제 보고서
 
 - `/reports/file/llm-layer0-basics/html` — 그림 13장. 위 여섯 틀이 전부 한 번씩 나오고, 예문 하나로 이어진다.
 - `/reports/file/differential-privacy/html` — 다크 editorial 톤의 기준.
