@@ -48,8 +48,8 @@ describe("S5 — '항상 허용' 이 다른 명령으로 새지 않는다 (실�
   });
 
   test("★2000자 경계★: 표시용으로 자른 뒤가 달라도 다시 묻는다", () => {
-    // 여기가 뚫리는 자리다 — 지문을 '잘린 본문' 으로 만들면 2000자 뒤 차이가 지문에 안 들어간다.
-    // ★지문은 자르기 전 원본(material)으로 만든다★ 는 규칙이 살아 있는지 잰다.
+    // 여기가 뚫리는 자리다 — operation hash 를 '잘린 본문' 으로 만들면 2000자 뒤 차이가 operation hash 에 안 들어간다.
+    // ★operation hash 는 자르기 전 원본(material)으로 만든다★ 는 규칙이 살아 있는지 잰다.
     const prefix = "z".repeat(2000);
     expect(decisionAfterAllowAlways(newGen(prefix + "SAFE"), newGen(prefix + "EVIL"))).toBe("approval_required");
   });
@@ -112,7 +112,7 @@ describe("S5 — 사람이 보는 한 줄", () => {
   });
 
   test("★어떤 입력이든 지문이 240자 안에 온전히 남는다★", () => {
-    // 지문이 잘려 나가면 열쇠가 다시 합쳐진다 — 경계마다 확인한다.
+    // operation hash 가 잘려 나가면 열쇠가 다시 합쳐진다 — 경계마다 확인한다.
     const cases: Array<[string, string]> = [
       ["평범한 장문", "echo " + "a".repeat(1000)],
       ["공백 다발", "echo" + " ".repeat(300) + "x"],

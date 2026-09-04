@@ -21,7 +21,7 @@ test("M5.1 buildOp — exec 명령 → action=shell + command", () => {
 test("M5.1 buildOp — patch → action=write + path(전체 파일집합, CRITICAL 1-B)", () => {
   const op = buildOperationFromApproval({ method: "applyPatchApproval", params: { fileChanges: { "/p/b.ts": {}, "/p/a.ts": {} } } }, "dex");
   expect(op.action).toBe("write");
-  // ★S3: path 는 열쇠이면서 사람이 읽는 유일한 줄이다★ — 개수·종류·경로 + 뒤에 열쇠 지문.
+  // ★S3: path 는 열쇠이면서 사람이 읽는 유일한 줄이다★ — 개수·종류·경로 + 뒤에 열쇠 operation hash.
   expect(op.path).toMatch(/^파일 2개 · change \/p\/a\.ts, change \/p\/b\.ts #[0-9a-f]{12}$/);
   expect(op.text).toContain("b.ts");
 });

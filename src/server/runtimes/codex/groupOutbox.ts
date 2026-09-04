@@ -8,7 +8,7 @@
  *   `appserver_interrupted` 는 원인이 아니라 결과다.
  *
  * ★"명령을 고정해 항상 허용을 한 번 받는다" 는 성립하지 않는다★ — 세 값이 각각 막는다:
- *   · 승인 지문(scope key)에 ★명령 전문★ 이 들어가고 명령에는 답 본문이 있다 → 열쇠가 매 턴 다르다
+ *   · 승인 scope key 에 ★명령 전문★ 이 들어가고 명령에는 답 본문이 있다 → 열쇠가 매 턴 다르다
  *   · `permissionGate.ts` 의 `GRANT_TTL_HOURS = 24` → 기억은 ★하루★ 만 산다
  *   · `permission_grant` 를 조회하는 유일한 함수 `evaluatePermission` 은 ★호출부가 없다★
  *     → 기록은 남지만 다음 턴 판정에 쓰이지 않는다

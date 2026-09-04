@@ -33,7 +33,7 @@ export interface ObservedFileChange {
   kind: string;
   /** update 이면서 이동을 겸하는 경우의 목적지(move_path). 없으면 null. */
   movePath: string | null;
-  /** unified diff 원문(상한 절단). 사람 표시가 아니라 ★내용 지문·줄수 계산용★. */
+  /** unified diff 원문(상한 절단). 사람 표시가 아니라 ★content digest·줄수 계산용★. */
   diff: string;
 }
 
@@ -45,7 +45,7 @@ export interface ObservedItem {
   changes: ObservedFileChange[];
 }
 
-/** 한 diff 당 보관 상한(메모리 보호). 지문·줄수 계산에만 쓰므로 절단돼도 판단이 넓어지지 않는다. */
+/** 한 diff 당 보관 상한(메모리 보호). operation hash ·줄수 계산에만 쓰므로 절단돼도 판단이 넓어지지 않는다. */
 const MAX_DIFF_CHARS = 20_000;
 /** 색인 항목 수 상한. 넘으면 ★가장 오래 전에 넣은 것부터★ 버린다(버려지면 ask 로 떨어진다 = 안전). */
 const MAX_ITEMS = 256;

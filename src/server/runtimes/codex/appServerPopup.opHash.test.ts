@@ -46,7 +46,7 @@ describe("approvalOperationHash — 지문의 결정성·충돌저항(권한 결
 describe("알려진 갭 (후속 작업에서 닫히면 이 테스트가 실패해야 한다)", () => {
   test("★갭1 닫힘(S5)★: 240자 prefix가 같아도 전체가 다르면 다른 grant scope 다", () => {
     // permissionGate.targetForOperation 은 여전히 앞 240자만 쓴다(공용 코드는 안 건드렸다).
-    // 대신 우리가 만드는 op.command ★앞에 전체 명령의 지문★ 을 넣어 절단선 안에 살아남게 했다.
+    // 대신 우리가 만드는 op.command ★앞에 전체 명령의 operation hash★ 을 넣어 절단선 안에 살아남게 했다.
     const prefix = "y".repeat(240);
     const safe = buildOperationFromApproval(cmd([prefix + "SAFE"]), "demis");
     const evil = buildOperationFromApproval(cmd([prefix + "EVIL"]), "demis");
@@ -78,7 +78,7 @@ describe("알려진 갭 (후속 작업에서 닫히면 이 테스트가 실패�
 });
 
 /**
- * ★갭2 는 닫혔다 (S4, 2026-07-31).★ 지문 basis 에 ★내용 해시★ 를 넣었다.
+ * ★갭2 는 닫혔다 (S4, 2026-07-31).★ operation hash basis 에 ★내용 해시★ 를 넣었다.
  *
  * ■ ★옛 테스트가 틀린 모양을 쓰고 있었다★
  * 예전 갭2 테스트는 `fileChanges: { "a.ts": { diff: "..." } }` 로 갭을 보였다.
@@ -136,7 +136,7 @@ describe("갭2 닫힘 — 같은 파일이라도 내용이 다르면 지문이 �
   test("★종류와 필드가 어긋나면 내용을 안 읽는다★ — 엉뚱한 값을 지문에 넣지 않는다", () => {
     // ★뮤턴트가 살아남아 추가했다(M4).★ 앞 시험은 kind 가 달라서 통과했고, ★필드 선택 자체는 재지 않았다.★
     // update 인데 content 만 있는 payload 는 ★내용을 모르는 것★ 으로 본다(S3 에서 표시 쪽에 한 정정과 같다).
-    // 그러므로 content 가 A 든 B 든 지문이 같아야 한다 — 다르면 없는 내용을 읽고 있다는 뜻이다.
+    // 그러므로 content 가 A 든 B 든 operation hash 가 같아야 한다 — 다르면 없는 내용을 읽고 있다는 뜻이다.
     const a = oldGen({ "a.ts": { type: "update", content: "AAA" } });
     const b = oldGen({ "a.ts": { type: "update", content: "BBB" } });
     expect(approvalOperationHash(a)).toBe(approvalOperationHash(b));
@@ -144,7 +144,7 @@ describe("갭2 닫힘 — 같은 파일이라도 내용이 다르면 지문이 �
 
   test("★빈 파일도 '아는 내용' 이다★ — 빈 파일 생성과 빈 파일 삭제는 다른 작업이다", () => {
     // ★P1 · 재현 확인.★ 길이로 "내용을 얻었나" 를 재면 ★정상적인 빈 파일 작업이 '모름' 과 합쳐진다.★
-    // basis.files 에는 kind 가 없어서 그 둘을 갈라줄 다른 재료도 없었다 → 같은 지문이 됐다.
+    // basis.files 에는 kind 가 없어서 그 둘을 갈라줄 다른 재료도 없었다 → 같은 operation hash 가 됐다.
     const addEmpty = oldGen({ "a.ts": { type: "add", content: "" } });
     const delEmpty = oldGen({ "a.ts": { type: "delete", content: "" } });
     expect(approvalOperationHash(addEmpty)).not.toBe(approvalOperationHash(delEmpty));

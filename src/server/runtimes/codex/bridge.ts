@@ -472,7 +472,7 @@ async function fetchOwnerGate(
 }
 
 /**
- * ★창구(그룹) 턴 한 건을 돌린다.★ 호출부를 시험할 수 있게 떼어 뒀다.
+ * ★bridge window(그룹) 턴 한 건을 돌린다.★ 호출부를 시험할 수 있게 떼어 뒀다.
  *
  * ★서버는 팀원 대신 말하지 않는다★ (hermes 와 같은 계약 · 실측):
  *   전에는 이 경로도 `handleMessage` 의 텔레그램 발신을 그대로 탔다 — 방에는 떴지만
@@ -635,7 +635,7 @@ export async function handleMessage(
   /**
    * ★어느 입구로 들어왔나.★ 그룹 native 차단은 ★폴링 입구★ 에 거는 것이다 —
    *   그 입구엔 오너 판정이 없어서 남을 부른 메시지에도 답했다(실측 2026-08-24).
-   *   `"window"` 는 서버(capture)가 오너를 정한 뒤 창구로 넣은 것이라 그 차단을 지나지 않는다.
+   *   `"window"` 는 서버(capture)가 오너를 정한 뒤 bridge window 로 넣은 것이라 그 차단을 지나지 않는다.
    *   ★플래그로 게이트를 끄는 게 아니라, 게이트가 애초에 그 입구의 것이다.★
    */
   ingress: "poll" | "window" = "poll",
@@ -704,7 +704,7 @@ export async function handleMessage(
     const sent = await send(chatId, SCHEDULE_UNSUPPORTED_TEXT);
     return {
       ok: sent !== null,
-      // ★창구 경로에서는 실패다★: 여기서는 안내 문구를 ★발신으로★ 전하는데,
+      // ★bridge window 경로에서는 실패다★: 여기서는 안내 문구를 ★발신으로★ 전하는데,
       //   그 경로는 발신을 뗐다 — 그러면 ★답 0건 · 경고 없음 · 성공 기록★ 이 되어
       //   사람도 기록도 "잘 됐다" 로 읽는다. 아무것도 전달되지 않았으므로 turnOk 는 거짓이다.
       //   1:1 은 실제로 보내므로 `ok` 로 판정되어 영향이 없다.
@@ -951,7 +951,7 @@ export async function handleMessage(
   }
   // ★`ok` 와 `turnOk` 는 다른 질문에 답한다★ (리뷰 지적 — 한 이름에 두 뜻이 들어 있었다).
   //   `ok` = 텔레그램에 ★보냈나★ · `turnOk` = 턴이 ★됐나★.
-  //   창구 경로는 발신을 일부러 뗐으므로 `ok` 는 ★항상 false★ 다 — 거기서 `ok` 로 실패를 판정하면
+  //   bridge window 경로는 발신을 일부러 뗐으므로 `ok` 는 ★항상 false★ 다 — 거기서 `ok` 로 실패를 판정하면
   //   ★성공할 때마다 실패로 읽는다.★ 그 경로는 `turnOk` 를 본다.
   return { ok: delivered, turnOk: true, reply, detail: delivered ? "delivered" : "send_failed" };
 }
@@ -1336,7 +1336,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     console.error(`[codex-bridge] 턴 처리 실패: ${e instanceof Error ? e.message : e}`);
   });
 
-  // ★그룹 턴은 서버(capture)가 창구로 넣는다★ — 오너 판정은 거기서 이미 끝났다.
+  // ★그룹 턴은 서버(capture)가 bridge window 로 넣는다★ — 오너 판정은 거기서 이미 끝났다.
   //   같은 `turns` 큐를 타므로 ★한 팀원 한 턴★ 불변식이 유지된다(1:1 과 겹치지 않는다).
   //   리액션은 ★이 봇으로★ 단다 — 팀 op 봇이 달면 "누가 받았는지" 가 안 보인다(리뷰 지적).
   const windowHandle = await startBridgeWindow({
@@ -1358,13 +1358,13 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
   });
   if (windowHandle) {
     // ★신호 처리기를 달면 Node 의 기본 종료가 사라진다★.
-    //   창구만 닫고 끝내면 폴 루프가 계속 돌아 ★SIGTERM 으로 안 죽는다★ —
+    //   bridge window 만 닫고 끝내면 폴 루프가 계속 돌아 ★SIGTERM 으로 안 죽는다★ —
     //   launchd 재기동이 SIGKILL 까지 기다리게 된다. 치우고 ★직접 나간다.★
     const stop = () => {
       // ★종료에 물려 사라지는 턴을 기록에 남긴다★.
-      //   창구는 202(접수)까지만 답한다. 이미 접수돼 큐에 든 턴은 여기서 프로세스가 끝나며
+      //   bridge window 는 202(접수)까지만 답한다. 이미 접수돼 큐에 든 턴은 여기서 프로세스가 끝나며
       //   ★확정적으로 사라지는데, 안 돌았다는 기록이 어디에도 없다★ —
-      //   ★보낸 쪽은 갔다고 믿고 받는 쪽은 온 적이 없는★, 이 창구가 고치려는 그 실패 모양이다.
+      //   ★보낸 쪽은 갔다고 믿고 받는 쪽은 온 적이 없는★, 이 bridge window가 고치려는 그 실패 모양이다.
       //   막지는 않는다(비우려면 종료가 늘어진다). 남은 개수를 남겨 나중에 읽히게 한다.
       //   ★이 줄이 남는 이유는 조건부다★: `process.exit(0)` 은 ★버퍼를 안 비우고★
       //   나간다. 지금 살아남는 것은 stdout 이 ★일반 파일★ 이라 Node 가 동기로 쓰기 때문이다
