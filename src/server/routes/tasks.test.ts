@@ -24,6 +24,34 @@ function setup() {
   return { app, db };
 }
 
+describe("GET /projects — 읽기 전용 프로젝트 집계", () => {
+  test("초기 승격 목록만 반환하고 대소문자 접두어를 합친다", async () => {
+    const { app } = setup();
+    await createCard(app, { title: "[PM] project card", column: "doing", owner: "steve", description: "다음 액션: 리뷰" });
+    await createCard(app, { title: "[pm] implementation", column: "done", owner: "devon" });
+    await createCard(app, { title: "[proposal] excluded", column: "done", owner: "bill" });
+
+    const response = await app.request("/projects");
+    expect(response.status).toBe(200);
+    const body = await response.json() as any;
+    expect(body.projects.map((project: any) => project.name)).toEqual(["infra", "codex", "scheduler", "pm"]);
+    expect(body.projects.find((project: any) => project.name === "pm")).toEqual({
+      name: "pm",
+      counts: { done: 1, doing: 1, plan: 0 },
+      next_action: "리뷰",
+      owner: "steve",
+    });
+  });
+
+  test("승격 목록이 비면 빈 목록을 반환한다", async () => {
+    const { app, db } = setup();
+    db.prepare("UPDATE setting SET value = '[]' WHERE key = 'project_prefixes'").run();
+    await createCard(app, { title: "[pm] hidden", column: "doing", owner: "steve" });
+
+    expect(await (await app.request("/projects")).json()).toEqual({ projects: [] });
+  });
+});
+
 // the bus message + its pending recipient row that wakes the owner
 function lastNotice(db: Database, to: string) {
   return db
