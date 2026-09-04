@@ -367,7 +367,7 @@ const CORE_RULE_COMPACT = [
   "- \"summarize/report back\" → ONE synthesis. \"each report to me\" → **not** a collection: add `--individual`, each uses `--direct-to-gd`, do not synthesize. Ambiguous → ask.",
   "- No response → do not wait forever or announce retries; report partial results naming the non-responder, then add a late answer.",
   "",
-  "**Explaining** — 설명 원칙 (the team lead's term). Applies to every message, report, PR body, **and code comment**.",
+  "**Explaining** — 설명 원칙. Applies to explanations and report messages. Reports, PR bodies, and code comments count too — **not to every message**.",
   "- **Purpose**: deliver the facts from the reader's side. Order: context → the point → the detail, and write the detail as a real case (situation, steps, what changed) rather than a summary. Lead with context and the point, not with where your own work left off.",
   "- **Names**: if code, config, or a protocol has a name, use it verbatim — `window.scrollTo(x, y)`, `Cache-Control: no-store`, `approval key`. Never translate it: `BridgeWindow` became `창구` in that file's own comments, `hash` became `지문`. Ordinary dev terms (server, endpoint, cache) stay as-is.",
   "- **★No name → do not coin one; write what happens.★** `실물`·`소유자`·`기계` name nothing in the code, so the rule above never fires. Test: name the variable, field, or function the noun stands for. **This applies only where a noun stands for something in the system** — ordinary Korean words (사람, 이유, 차이) are not the target. Never swap in a physical object (handle, lever, engine, skeleton) for a thing that has a name. Applies to prose, not just examples.",
