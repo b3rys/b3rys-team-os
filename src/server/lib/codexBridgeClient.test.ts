@@ -132,7 +132,7 @@ describe("callCodexBridge", () => {
 
 // ── ★"파일이 있다" 와 "그 프로세스가 살아 있다" 는 다른 값이다★ ──
 //
-// close() 는 SIGTERM·SIGINT 에만 걸린다. 크래시·SIGKILL 이면 창구 파일이 남고, 포트는
+// close() 는 SIGTERM·SIGINT 에만 걸린다. 크래시·SIGKILL 이면 bridge window 파일이 남고, 포트는
 // ephemeral 대역이라 커널이 그 포트를 다른 로컬 프로세스에 다시 줄 수 있다. 그러면
 // ★본문(그룹 원문 + 팀 맥락)과 토큰이 무관한 리스너에게 그대로 날아간다.★
 describe("죽은 브리지 — 보내기 전에 막는다", () => {
@@ -153,7 +153,7 @@ describe("죽은 브리지 — 보내기 전에 막는다", () => {
 
   // ★남은 파일을 지우면 안 된다★ — 읽고 나서 생존을 보는 사이에 브리지가 재기동하면
   //   그 파일은 새 pid·포트·토큰으로 원자 교체된다. 옛 pid 로 ESRCH 를 보고 지우면
-  //   ★방금 뜬 새 창구 파일을 지운다★ = 정상 재기동 직후에 계속 조용해진다.
+  //   ★방금 뜬 새 bridge window 파일을 지운다★ = 정상 재기동 직후에 계속 조용해진다.
   test("★재기동 경쟁 — 생존 확인 중 새 브리지가 파일을 갈아도 그 파일을 안 지운다★", async () => {
     const dir = mkdtempSync(join(tmpdir(), "cbc-race-"));
     const pidFile = join(dir, "dex.pid");
@@ -171,7 +171,7 @@ describe("죽은 브리지 — 보내기 전에 막는다", () => {
     });
 
     expect(r).toEqual({ ok: false, reason: "no_window" });
-    // ★새 파일이 살아 있어야 한다★ — 다음 호출이 새 창구로 간다.
+    // ★새 파일이 살아 있어야 한다★ — 다음 호출이 새 bridge window 로 간다.
     const after = readWindowFile(wf);
     expect(after).not.toBeNull();
     expect(after?.port).toBe(2222);

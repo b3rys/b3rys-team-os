@@ -49,15 +49,15 @@ export function finalizeApprovalDelivery(
   return decision;
 }
 
-/** 승인 요청의 작업 지문(sha256 16hex) — 전체 command 배열 + 파일 ★이름★ 집합 + method + reason.
+/** 승인 요청의 작업 operation hash(sha256 16hex) — 전체 command 배열 + 파일 ★이름★ 집합 + method + reason.
  *  용도는 하나뿐이다: 상관키 테이블/CAS가 ★결정↔요청을 1:1로 맞추는 것★(다른 요청의 결정이 이 슬롯에 배달되는 것을 막는다).
  *
  *  ★이 해시가 하지 ★않는★ 것 — 알려진 갭 3건과 현재 상태:★
  *   1. ★권한 grant 재사용을 막지 못한다★ → ★S5 에서 닫혔다.★
- *      grant scope 의 target 이 앞 240자만 쓰던 문제를, ★이 함수가 만드는 값 안에 명령 전체의 지문을 넣어★
+ *      grant scope 의 target 이 앞 240자만 쓰던 문제를, ★이 함수가 만드는 값 안에 명령 전체의 operation hash 를 넣어★
  *      절단선 안에 남기는 방식으로 해결했다(공용 permissionGate 는 무수정). 실제 DB 경로 회귀 테스트로 고정.
  *   2. ★같은 파일의 내용 변경을 구분하지 못한다★ → ★S4 에서 닫혔다.★ approvalContentDigest 가 내용을 basis 에 넣는다.
- *      (단 ★권한 열쇠(scope)에는 내용이 여전히 안 들어간다 — 이건 버그가 아니라 S2/S3 설계 의도다.★
+ *      (단 ★scope key에는 내용이 여전히 안 들어간다 — 이건 버그가 아니라 S2/S3 설계 의도다.★
  *       넣으면 같은 파일을 고칠 때마다 열쇠가 달라져 '항상 허용' 이 영원히 안 붙는다.)
  *   3. ★승인 후 실행 직전의 변경을 잡지 못한다★ → ★고치지 않는다.★
  *      이 해시는 승인 ★전에 한 번★ 계산해 그 캡처값을 finalize 에 넘긴다 — 실행 직전에 다시 계산하지 않는다.
@@ -84,42 +84,42 @@ export function approvalOperationHash(req: ApprovalRequest): string {
   const basis: Record<string, unknown> = {
     method: req.method,
     // ★신세대 문자열 command 도 담는다★ — 예전엔 Array.isArray 만 봐서 신세대는 null 이 됐고,
-    //   그 결과 ★서로 다른 신세대 명령이 같은 지문★ 을 가졌다(2026-07-29 재현 확인).
-    //   S1 이 그 문자열을 실제 shell operation 으로 승격하므로, 상관키·audit 지문도 구분해야 한다.
-    //   ★배열은 배열 그대로 둔다★ — 구세대 지문 값을 바꾸지 않기 위해서다(변경 범위 최소).
+    //   그 결과 ★서로 다른 신세대 명령이 같은 operation hash★ 을 가졌다(2026-07-29 재현 확인).
+    //   S1 이 그 문자열을 실제 shell operation 으로 승격하므로, 상관키·audit operation hash 도 구분해야 한다.
+    //   ★배열은 배열 그대로 둔다★ — 구세대 operation hash 값을 바꾸지 않기 위해서다(변경 범위 최소).
     command: Array.isArray(p.command) ? p.command : (typeof p.command === "string" ? p.command.trim() || null : null),
-    // ★이동 목적지도 담는다(P1)★ — 예전엔 출발지만 담아 목적지만 다른 두 요청이 같은 지문이었다.
+    // ★이동 목적지도 담는다(P1)★ — 예전엔 출발지만 담아 목적지만 다른 두 요청이 같은 operation hash 가었다.
     //   move_path 가 없으면 결과가 Object.keys().sort() 와 완전히 같다(golden 고정).
     files: p.fileChanges && typeof p.fileChanges === "object" ? fileChangeEntries(p.fileChanges) : null,
     reason: typeof p.reason === "string" ? p.reason : null,
   };
   // ★S2 — 신세대 파일변경 승인은 위 4개가 ★전부 비어 있다★(method 말고는 command·files·reason 모두 null).
-  //   그래서 한 턴에 두 건이 오면 ★서로 다른 요청이 같은 지문★ 을 갖는다 — S1 에서 문자열 command 로 겪은
+  //   그래서 한 턴에 두 건이 오면 ★서로 다른 요청이 같은 operation hash★ 을 갖는다 — S1 에서 문자열 command 로 겪은
   //   것과 같은 형태다. 상관키·audit 이 둘을 구분해야 하므로 payload 에 있을 때만 덧붙인다.
-  //   ★있을 때만 넣는 이유★: 무조건 키를 추가하면 null 로라도 직렬화에 끼어들어 ★구세대 지문 값이 바뀐다★
+  //   ★있을 때만 넣는 이유★: 무조건 키를 추가하면 null 로라도 직렬화에 끼어들어 ★구세대 operation hash 값이 바뀐다★
   //   (진행 중 승인의 상관키가 어긋난다). 구세대 params 에는 itemId·grantRoot 가 없다(스키마 실측).
   const itemId = typeof p.itemId === "string" && p.itemId ? p.itemId : null;
   if (itemId) basis.item_id = itemId;
   const grantRoot = grantRootOf(p);
   if (grantRoot) basis.grant_root = grantRoot;
   // ★S4 — 내용까지 담는다.★ 여기까지의 basis 는 파일 ★이름★ 만 담아서, 같은 파일을 고치는 두 요청이
-  //   ★내용이 전혀 달라도 같은 지문★ 이었다(알려진 갭 #2 — 테스트로 못박아 뒀던 것).
-  //   상관키가 ★결정↔요청을 1:1로 맞추는 것★ 이 이 지문의 일인데, 이름만 보면
+  //   ★내용이 전혀 달라도 같은 operation hash★ 이었다(알려진 갭 #2 — 테스트로 못박아 뒀던 것).
+  //   상관키가 ★결정↔요청을 1:1로 맞추는 것★ 이 이 operation hash의 일인데, 이름만 보면
   //   ★다른 작업의 승인이 이 슬롯에 배달되는 것★ 을 못 막는다.
-  //   ★있을 때만 넣는다★ — 무조건 키를 추가하면 null 로라도 직렬화에 끼어들어 ★구세대 지문 값이 바뀐다★
+  //   ★있을 때만 넣는다★ — 무조건 키를 추가하면 null 로라도 직렬화에 끼어들어 ★구세대 operation hash 값이 바뀐다★
   //   (진행 중 승인의 상관키가 어긋난다). S2 에서 item_id·grant_root 에 쓴 것과 같은 규칙이다.
   const contentDigest = approvalContentDigest(req);
   if (contentDigest) basis.content = contentDigest;
   return createHash("sha256").update(JSON.stringify(basis)).digest("hex").slice(0, 16);
 }
 
-/** 승인 요청이 실제로 바꾸려는 ★내용★ 의 지문. 내용을 모르면 null(그러면 basis 에 키가 안 붙는다).
+/** 승인 요청이 실제로 바꾸려는 ★내용★ 의 operation hash. 내용을 모르면 null(그러면 basis 에 키가 안 붙는다).
  *
  *  ■ 어디서 내용을 얻나 — 세대마다 다르다(둘 다 실측)
  *    구세대 `fileChanges` : `{type:"update", unified_diff}` · `{type:"add"|"delete", content}` (+`move_path`)
  *    신세대               : payload 에 내용이 ★없다.★ 알림으로 먼저 온 것을 색인한 `observedItem` 에 있다.
  *
- *  ■ ★전문이 아니라 해시만 담는다★ — 지문은 "같은가 다른가" 만 답하면 되고,
+ *  ■ ★전문이 아니라 해시만 담는다★ — operation hash 는 "같은가 다른가" 만 답하면 되고,
  *    전문을 basis 에 넣으면 큰 diff 마다 직렬화가 커진다.
  *
  *  ■ ★종류·이동 목적지도 함께 담는다★ — 같은 내용을 add 하는 것과 update 하는 것은 다른 작업이고,
@@ -128,7 +128,7 @@ export function approvalOperationHash(req: ApprovalRequest): string {
 function approvalContentDigest(req: ApprovalRequest): string | null {
   const p = req.params as Record<string, any>;
   // ★body 는 string | null 이다 — ""(빈 내용을 안다) 와 null(내용을 모른다) 은 다른 상태다.★
-  //   앞선 판은 둘을 "" 하나로 합쳐서 ★빈 파일 생성과 빈 파일 삭제가 같은 지문★ 이었다(P1 · 재현 확인).
+  //   앞선 판은 둘을 "" 하나로 합쳐서 ★빈 파일 생성과 빈 파일 삭제가 같은 operation hash★ 이었다(P1 · 재현 확인).
   //   basis.files 에는 kind 가 없으므로 그 둘을 갈라줄 다른 재료도 없었다.
   const rows: Array<[string, string, string | null, string | null]> = [];
 
@@ -143,7 +143,7 @@ function approvalContentDigest(req: ApprovalRequest): string | null {
       const ch = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
       const kind = typeof ch.type === "string" && ch.type ? ch.type : "change";
       const mv = typeof ch.move_path === "string" && ch.move_path.trim() ? ch.move_path : null;
-      // ★종류에 맞는 필드만 본다★ — 짝이 어긋난 payload 에서 엉뚱한 값을 지문에 넣지 않기 위해서다
+      // ★종류에 맞는 필드만 본다★ — 짝이 어긋난 payload 에서 엉뚱한 값을 operation hash 에 넣지 않기 위해서다
       //   (S3 에서 표시 쪽에 같은 정정을 했다: 재료를 고르는 기준과 쓰는 기준이 달라 규모를 지어냈다).
       //   ★필드가 없으면 null★ — "내용이 비어 있다" 가 아니라 "내용을 모른다" 다.
       const body =
@@ -158,7 +158,7 @@ function approvalContentDigest(req: ApprovalRequest): string | null {
       rows.push([path, kind, mv, body]);
     }
   }
-  // ★하나라도 '아는' 내용이 있으면 지문화한다★ — 길이가 아니라 ★null 여부★ 로 판정한다.
+  // ★하나라도 '아는' 내용이 있으면 operation hash화한다★ — 길이가 아니라 ★null 여부★ 로 판정한다.
   //   길이로 재면 ★빈 파일 작업이 "모름" 과 합쳐진다★(P1). 아무것도 모르면 키를 안 붙여 구세대 골든을 지킨다.
   if (!rows.some((r) => r[3] !== null)) return null;
   rows.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
@@ -181,7 +181,7 @@ const POLL_INTERVAL_MS = Number(process.env.B3OS_CODEX_APPSERVER_POLL_MS ?? 1500
  *    item/commandExecution/requestApproval   → command: string|null (신세대)
  *
  *  ★method 는 아는데 command 가 비어 있으면 null 을 돌려준다★ — 그러면 호출부가 해석 실패 분기로
- *  보내 S0 의 보수적 처리(payload 지문 + 매번 묻기)를 받는다. ★모르면 넓게 통과가 아니라 좁게 묻는다.★ */
+ *  보내 S0 의 보수적 처리(payload digest + 매번 묻기)를 받는다. ★모르면 넓게 통과가 아니라 좁게 묻는다.★ */
 type CommandParse =
   | { kind: "not_command" }          // 명령 승인 method 가 아니다 — 다음 분기로 넘긴다
   | { kind: "invalid" }              // 명령 승인 method 인데 command 를 못 읽었다 — ★즉시 해석 실패로★
@@ -215,7 +215,7 @@ function parseCommandApproval(req: ApprovalRequest): CommandParse {
     //  String(x) 로 강제변환하면 ★서로 다른 payload 가 같은 재료가 된다★ (DB 경로에서 재현 확인):
     //    [1] 승인 뒤 ["1"] → allow · [null] 과 ["null"] → allow · [{}] 는 "[object Object]" 가 된다.
     //  이건 규격에 없는 payload 를 ★넓게 통과★ 시키는 자리다. 모르면 좁게 묻는다 —
-    //  invalid 로 보내면 해석 실패 경로(S0: payload 지문 + 매번 묻기)를 받는다.
+    //  invalid 로 보내면 해석 실패 경로(S0: payload digest + 매번 묻기)를 받는다.
     const argv = raw.every((x) => typeof x === "string") ? (raw as string[]) : null;
     if (argv === null) return { kind: "invalid" };
     const joined = argv.join(" ").trim();
@@ -253,12 +253,12 @@ const COMMAND_REVIEW_LIMIT = 2_000;
  * ★S5 — 긴 명령 두 개가 한 열쇠로 묶이던 것을 닫는다.★
  *
  * ■ 무엇이 문제였나 (정본 테스트에 갭으로 박혀 있던 것)
- * 권한 열쇠(scopeKeyForOperation)는 target 을 쓰고, target 은 ★앞 240자만★ 본다.
+ * scope key(scopeKeyForOperation)는 target 을 쓰고, target 은 ★앞 240자만★ 본다.
  * 그래서 `y×240 + SAFE` 와 `y×240 + EVIL` 이 ★같은 열쇠★ 였다 —
  * ★안전한 명령에 '항상 허용' 을 한 번 주면 위험한 명령이 팝업 없이 통과★ 한다.
  *
  * ■ 어떻게 닫나 — ★공용 코드를 건드리지 않는다★
- * 우리가 만드는 값 안에 전체 명령의 지문을 넣어 240자 절단선 안에 살린다. permissionGate 는 그대로.
+ * 우리가 만드는 값 안에 전체 명령의 operation hash을 넣어 240자 절단선 안에 살린다. permissionGate 는 그대로.
  *
  * ■ ★두 자리로 나눠 싣는 이유 — 한 필드가 두 가지 일을 하려다 둘 다 놓쳤다★
  *  · op.command → ★사람이 보는 줄이자 열쇠의 재료★ (target 우선순위 1위, 240자에서 잘림)
@@ -268,19 +268,19 @@ const COMMAND_REVIEW_LIMIT = 2_000;
  * 게이트도 못 보고(스캔 밖) 사람도 못 봤다(화면 밖).★ 실측: 2100자 뒤 `; sudo id` → 탐지 0, 400자면 탐지됨.
  * 전문을 text 로 따로 보내면 탐지가 살아나고, ★열쇠는 안 바뀐다★(target 은 command 가 우선).
  *
- * ■ 지문을 뒤에 두는 이유
+ * ■ operation hash 를 뒤에 두는 이유
  * 스캔이 text 로 옮겨갔으므로 command 는 ★사람이 읽는 일만★ 하면 된다. 그래서 명령을 먼저 보여주고
- * 지문을 뒤에 붙인다(S3 쓰기 경로와 같은 모양). 예산 안에서 자르므로 지문은 240자 안에 반드시 남는다.
+ * operation hash 를 뒤에 붙인다(S3 쓰기 경로와 같은 모양). 예산 안에서 자르므로 operation hash 는 240자 안에 반드시 남는다.
  * 자를 때는 ★코드포인트 경계★ 로 자른다 — UTF-16 으로 자르면 이모지·한글이 반토막 난다.
  */
 function commandOperationFields(material: string, command: string): { command: string; text: string } {
-  //  ★지문은 material(원본 구조 전문) 로 만든다 — 화면용으로 자른 값으로 만들지 않는다.★
-  //  자른 값으로 만들면 잘린 뒤가 달라도 지문이 같아진다(실측: 앞 2000자 동일 → 두 번째 'allow').
+  //  ★operation hash 는 material(원본 구조 전문) 로 만든다 — 화면용으로 자른 값으로 만들지 않는다.★
+  //  자른 값으로 만들면 잘린 뒤가 달라도 operation hash 가 같아진다(실측: 앞 2000자 동일 → 두 번째 'allow').
   //
   //  ★자르지 않은 64 hex 전문을 쓴다.★ 표시용 체크섬이 아니라 ★팝업 우회를 막는 유일한 구분자★ 다.
   //  12 hex(48비트)면 SAFE/EVIL 후보를 각 2^24개씩 만들어 충돌시키는 게 GPU 로 현실적이다.
   const digest = createHash("sha256").update(material).digest("hex");
-  // 공백 정규화 후 잘리므로(normalizeText → slice) ★지문 안에는 공백이 없어야 한다.★
+  // 공백 정규화 후 잘리므로(normalizeText → slice) ★operation hash 안에는 공백이 없어야 한다.★
   const suffix = ` #${digest}`;
   const budget = Math.max(0, VISIBLE_BUDGET - suffix.length);
   //  ★잘랐으면 잘랐다고 말한다.★ 표시가 없으면 사람은 ★이게 명령 전부인 줄★ 안다 —
@@ -302,7 +302,7 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
     cwd: cwd ?? p.cwd ?? null,
     // ★provenance에 origin 표식(팝업 표시 하드닝·audit). taint 전체는 M3b 공용 layer로 확장.★
     input_origin: "codex_turn",
-    // 작업 지문 — ★audit/상관키 대조용으로만 기록된다.★ permissionGate는 이 값을 읽지 않으므로
+    // 작업 operation hash — ★audit/상관키 대조용으로만 기록된다.★ permissionGate는 이 값을 읽지 않으므로
     // ★grant scope에는 반영되지 않는다★(알려진 갭 — approvalOperationHash 주석 참조).
     operation_hash: approvalOperationHash(req),
   };
@@ -311,7 +311,7 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
   //  구세대 execCommandApproval 은 command 가 ★배열★, 신세대 item/commandExecution/requestApproval 은
   //  ★문자열★ 이다(codex-cli 0.144.6 벤더 스키마 실측). 예전에는 Array.isArray 만 봐서 ★신세대가 통째로
   //  해석 실패 분기로 떨어졌다★ — S0 이 그 분기를 안전하게 만들었지만, 안전할 뿐 ★사람이 읽을 수는 없었다★
-  //  (열쇠도 팝업도 지문 문자열이라 무슨 명령인지 안 보인다).
+  //  (열쇠도 팝업도 operation hash 문자열이라 무슨 명령인지 안 보인다).
   //
   //  여기서는 ★method 로 명령 승인임을 먼저 판정★ 하고, command 가 배열이든 문자열이든 같은 모양으로 만든다.
   //  판정 기준을 payload 모양이 아니라 method 로 둔 이유: 모양은 세대마다 바뀌지만 ★method 는 계약★ 이다.
@@ -401,7 +401,7 @@ function grantRootOf(p: Record<string, any> | undefined): string | null {
   if (typeof raw !== "string") return null;
   const t = raw.trim();
   // ★여기서 자르지 않는다(2026-07-29 · P2).★ 앞선 판은 300자로 잘랐는데, 그러면
-  //   ★공통 prefix 가 긴 서로 다른 루트가 같은 값이 되어 열쇠·지문이 합쳐졌다★
+  //   ★공통 prefix 가 긴 서로 다른 루트가 같은 값이 되어 열쇠·operation hash 가 합쳐졌다★
   //   (310자 공통 + `/one` vs `/two` 로 재현 확인). 자르는 것은 ★표시할 때만★ 한다.
   return t.length > 0 ? t : null;
 }
@@ -422,7 +422,7 @@ function writeTargetEntry(path: string, movePath: string | null): string {
 /** 구세대 fileChanges(경로 → FileChange) → 정렬된 쓰기 대상 표기 목록.
  *  ★move_path 는 UpdateFileChange 에만 있다★(0.144.6 스키마 실측) — 구세대에도 P1 과 ★같은 구멍★ 이
  *  있었다(지금까지 Object.keys 만 봤다). move_path 가 없으면 결과가 예전 Object.keys().sort() 와
- *  ★완전히 동일★ 하다 — 구세대 열쇠·지문 값 불변 조건이고 golden 으로 고정해 뒀다. */
+ *  ★완전히 동일★ 하다 — 구세대 열쇠·operation hash 값 불변 조건이고 golden 으로 고정해 뒀다. */
 function fileChangeEntries(fileChanges: Record<string, unknown>): string[] {
   return Object.entries(fileChanges)
     .map(([path, ch]) => {
@@ -525,9 +525,9 @@ function cutCodePoints(s: string, max: number): string {
  *  화면에는 `…component/fil` 처럼 끝나고 ★"12개 중 5개만 보고 있다" 는 사실이 사라졌다.★
  *
  *  ★첫 항목도 예산을 지킨다(2026-07-30 · P1).★ 앞선 판은 `out.length > 0` 일 때만 줄여서
- *  ★첫 경로가 길면 통째로 밀어넣었다★ — 그러면 뒤에 붙는 지문이 permissionGate 의 240자 절단에서
+ *  ★첫 경로가 길면 통째로 밀어넣었다★ — 그러면 뒤에 붙는 operation hash 가 permissionGate 의 240자 절단에서
  *  ★사라지고, 앞 240자가 같은 서로 다른 긴 경로가 한 열쇠로 합쳐진다★(400자 단일 경로로 재현).
- *  ★지문을 뒤에 두기로 한 결정이 성립하려면 "예산은 무조건 지킨다" 가 예외 없이 참이어야 한다.★ */
+ *  ★operation hash 를 뒤에 두기로 한 결정이 성립하려면 "예산은 무조건 지킨다" 가 예외 없이 참이어야 한다.★ */
 function fitEntries(display: string[], budget: number): string {
   const out: string[] = [];
   let used = 0;
@@ -554,12 +554,12 @@ function fitEntries(display: string[], budget: number): string {
  *
  * ■ 열쇠(scope)는 ★파일 경로 집합★ 이다 — 내용(diff)이 아니다.
  *   내용까지 열쇠에 넣으면 같은 파일을 두 번 고칠 때마다 다른 열쇠가 되어 ★'항상 허용' 이 영원히 안 붙는다★
- *   (S0 의 지문 열쇠가 정확히 그랬다 — 안전하지만 쓸 수 없었다). 사람이 '항상 허용' 으로 뜻하는 단위는
+ *   (S0 의 operation hash 열쇠가 정확히 그랬다 — 안전하지만 쓸 수 없었다). 사람이 '항상 허용' 으로 뜻하는 단위는
  *   ★"이 파일들에 쓰는 것"★ 이고, 그건 구세대 동작과도 같다. ★단, grantRoot 가 있으면 단위가 통째로
  *   달라지므로 열쇠 맨 앞에 넣는다★ — permissionGate 가 target 을 ★앞 240자만★ 쓰기 때문에
  *   ★제일 위험한 정보가 잘려나가면 안 된다.★
  *
- * ■ 내용(diff)은 ★사람이 보는 요약★ 과 ★audit 지문★ 에만 쓴다.
+ * ■ 내용(diff)은 ★사람이 보는 요약★ 과 ★audit operation hash★ 에만 쓴다.
  *   diff 원문을 text 에 그대로 실으면 permissionGate.operationText 를 통해 ★파일 내용이 Tier-D 스캔에
  *   걸려★ 멀쩡한 코드가 차단될 수 있다. 그래서 ★경로·종류·줄수 요약만★ 싣는다.
  *
@@ -568,7 +568,7 @@ function fitEntries(display: string[], budget: number): string {
  *   ★path 가 target 이 되고 text 는 화면에 안 나온다★(실측 확인). 그래서 path 를 열쇠로만 짜면
  *   사람은 `grant_root#…=/Users/… | a.ts|b.ts` 를 보게 된다 — ★열쇠를 사람에게 읽히는 셈★ 이다.
  *   → 한 문자열이 두 일을 해야 하므로 순서를 이렇게 고정한다:
- *     ①경고(사람) ②지문(열쇠 — 잘려도 구분됨) ③파일 개수·종류·경로(사람+열쇠)
+ *     ①경고(사람) ②operation hash(열쇠 — 잘려도 구분됨) ③파일 개수·종류·경로(사람+열쇠)
  *   ★규모(+n/-n)는 여기 못 넣는다★ — 내용이 바뀔 때마다 열쇠가 달라져 '항상 허용' 이 영원히 안 붙는다.
  * 규모는 text 에 남고, 그것을 화면에 띄우려면 렌더러(codex 폴더 밖)를 고쳐야 한다 — ★렌더러 변경 결정 대기.★
  */
@@ -581,12 +581,12 @@ function writeOperation(
 ): PermissionOperation {
   // ★이동은 목적지까지가 쓰기 대상이다★ — 출발지만 넣으면 목적지가 달라도 같은 열쇠가 된다(P1).
   //
-  // ★지문의 재료는 구조화 tuple 이다 — 이어붙인 문자열이 아니다(2026-07-30 · P1).★
+  // ★operation hash의 재료는 구조화 tuple 이다 — 이어붙인 문자열이 아니다(2026-07-30 · P1).★
   //   앞선 판은 `path + ">" + movePath` 문자열 집합을 해시했다. 그래서
   //     경로 이름이 그대로 `a>b` 인 파일  vs  `a` 를 `b` 로 옮기는 이동
   //     `a>b` → `c`                      vs  `a` → `b>c`
   //   가 ★완전히 같은 재료★ 가 됐다 — 뒤 쌍은 ★실제로 같은 열쇠★ 임을 재현했다.
-  //   ★"지문이 갈라준다" 는 지문의 재료가 모호하지 않을 때만 참이다.★ 그 전제가 깨지면 문장도 깨진다.
+  //   ★"operation hash 가 갈라준다" 는 operation hash의 재료가 모호하지 않을 때만 참이다.★ 그 전제가 깨지면 문장도 깨진다.
   //   [path, movePath] 로 담아 구분이 구조에서 나오게 한다.
   const keyOf = (c: WriteChange) => JSON.stringify([c.path, c.movePath]);
   const byKey = new Map<string, WriteChange>();
@@ -594,12 +594,12 @@ function writeOperation(
   const uniq = [...byKey.values()].sort((a, b) => keyOf(a).localeCompare(keyOf(b)));
   const entries = uniq.map((c) => [c.path, c.movePath] as const);
   const sorted = changes.slice().sort((a, b) => a.path.localeCompare(b.path));
-  // ★열쇠 지문 — 잘림이 서로 다른 요청을 합치지 못하게 한다.★ 예산 안에 못 들어간 파일이 있어도
-  //   집합이 다르면 지문이 다르다. 내용이 아니라 ★경로 집합 + grantRoot 전문★ 만 담으므로, 같은 파일을
-  //   다시 고칠 때는 같은 지문이다('항상 허용' 이 계속 유효). ★이 지문이 있어야 뒤쪽을 사람 말로 줄일 수 있다.★
+  // ★열쇠 operation hash — 잘림이 서로 다른 요청을 합치지 못하게 한다.★ 예산 안에 못 들어간 파일이 있어도
+  //   집합이 다르면 operation hash 가 다르다. 내용이 아니라 ★경로 집합 + grantRoot 전문★ 만 담으므로, 같은 파일을
+  //   다시 고칠 때는 같은 operation hash 가다('항상 허용' 이 계속 유효). ★이 operation hash 가 있어야 뒤쪽을 사람 말로 줄일 수 있다.★
   //
-  //   ★grantRoot 를 반드시 지문에 넣는다(P2 재발 방지).★ 표시용 grantRootDisplay 는
-  //   뒤 71자만 남기므로, 지문이 없으면 ★앞부분만 다른 두 루트가 같은 열쇠★ 가 된다 —
+  //   ★grantRoot 를 반드시 operation hash 에 넣는다(P2 재발 방지).★ 표시용 grantRootDisplay 는
+  //   뒤 71자만 남기므로, operation hash 가 없으면 ★앞부분만 다른 두 루트가 같은 열쇠★ 가 된다 —
   //   그게 P2 에서 실제로 재현했던 사고다(공통 prefix 가 긴 서로 다른 루트).
   const setDigest = createHash("sha256")
     .update(JSON.stringify({ grant_root: grantRoot, entries }))
@@ -608,10 +608,10 @@ function writeOperation(
   // ★표시도 원본 필드에서 조립한다★ — 이어붙인 문자열에서 `>` 를 `→` 로 바꾸면
   //   이름에 `>` 가 든 평범한 파일이 ★"옮긴다" 로 거짓 표시된다★(실측: `a>b.ts` → `add a→b.ts`).
   const display = uniq.map((c) => `${c.kind} ${c.path}${c.movePath ? ` → ${c.movePath}` : ""}`);
-  // ★사람이 읽는 순서로 놓는다 — 경고 → 개수 → 파일. 지문은 ★맨 뒤★ 다.★
-  //   지문을 앞에 두면 화면 첫 글자가 `#77b435181b45` 로 시작해 ★사람은 못 읽고 열쇠만 보인다.★
-  //   뒤로 보내도 안전한 이유: 아래에서 지문 길이만큼 예산을 ★먼저 떼어놓고★ 파일 목록을 채우므로
-  //   240자 절단선 안에 지문이 반드시 남는다(그게 P2 재발 방지의 조건이다).
+  // ★사람이 읽는 순서로 놓는다 — 경고 → 개수 → 파일. operation hash 는 ★맨 뒤★ 다.★
+  //   operation hash 를 앞에 두면 화면 첫 글자가 `#77b435181b45` 로 시작해 ★사람은 못 읽고 열쇠만 보인다.★
+  //   뒤로 보내도 안전한 이유: 아래에서 operation hash 길이만큼 예산을 ★먼저 떼어놓고★ 파일 목록을 채우므로
+  //   240자 절단선 안에 operation hash 가 반드시 남는다(그게 P2 재발 방지의 조건이다).
   const head = grantRoot ? `${GRANT_ROOT_WARNING}${grantRootDisplay(grantRoot)} · ` : "";
   const prefix = `${head}파일 ${entries.length}개 · `;
   const suffix = ` #${setDigest}`;
@@ -636,7 +636,7 @@ function writeOperation(
       grant_root: grantRoot,
       // 관측 경로를 남긴다 — 나중에 "이 내용을 어디서 알았나" 를 답할 수 있어야 한다.
       file_changes_source: itemId ? "notification_index" : "approval_payload",
-      // ★audit 전용 내용 지문.★ 열쇠에는 안 들어간다(위 설명) — permissionGate 는 provenance 를 읽지 않는다.
+      // ★audit 전용 content digest.★ 열쇠에는 안 들어간다(위 설명) — permissionGate 는 provenance 를 읽지 않는다.
       file_changes_digest: createHash("sha256")
         .update(JSON.stringify(changes.map((c) => [c.path, c.kind, c.movePath, c.diff]).sort()))
         .digest("hex")
@@ -645,7 +645,7 @@ function writeOperation(
   };
 }
 
-/** grantRoot 를 ★사람이 구별할 수 있게★ 줄인다. 열쇠 구분은 지문(setDigest)이 하므로
+/** grantRoot 를 ★사람이 구별할 수 있게★ 줄인다. 열쇠 구분은 operation hash(setDigest)이 하므로
  *  여기서는 읽히는 것만 신경 쓴다 — ★뿌리는 앞이 아니라 뒤가 다르다★
  *  (`/Users/gdmini/Development/a` vs `…/b` 는 앞 60자가 똑같다). 그래서 길면 ★뒤를 남긴다.★ */
 function grantRootDisplay(root: string): string {
@@ -661,7 +661,7 @@ function grantRootDisplay(root: string): string {
  *  → 한 번 allowed_always 를 받으면 이후 ★내용이 전혀 다른 요청도 팝업 없이 통과★ 한다.
  *
  * ★원칙(2026-07-28): 애매하면 통과가 아니라 ask 다.★
- *  해석에 실패했으면 넓은 열쇠를 만들지 않는다 — payload 지문을 target 에 넣어 payload 가 다르면 열쇠도 다르게.
+ *  해석에 실패했으면 넓은 열쇠를 만들지 않는다 — payload digest을 target 에 넣어 payload 가 다르면 열쇠도 다르게.
  *
  *  ※ reason 을 text 에 남기는 이유: permissionGate.operationText 가 text 도 Tier-D 스캔에 쓴다. */
 function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Record<string, unknown>): PermissionOperation {
@@ -675,7 +675,7 @@ function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Re
     //   `codex/dex · approval_unparsed` / `<target>` 인데, 앞줄의 action 은 codex 계층에서 바꿀 수 없다
     //   (permissionGate 가 만든다 = 공용). ★그러면 최소한 뒷줄이 사람에게 상황을 말해야 한다.★
     //   내부 식별자만 두 줄 연달아 보여주면 사람은 무엇을 승인/거절하는지 모른 채 버튼을 누른다.
-    //   지문은 그 뒤에 온다 — 앞머리는 ★모든 해석 실패에서 같은 상수★ 라 열쇠 구분력을 줄이지 않는다.
+    //   operation hash 는 그 뒤에 온다 — 앞머리는 ★모든 해석 실패에서 같은 상수★ 라 열쇠 구분력을 줄이지 않는다.
     //  ★해석에 실패했다고 위험 검사까지 건너뛰지 않는다.★
     //   해석 실패로 보내는 것은 ★열쇠를 좁히려는 것★ 이지 ★검사를 면제하려는 것★ 이 아니다.
     //   payload 를 안 실으면 이 요청의 Tier-D 스캔 입력이 ★0★ 이 되고, 그러면
@@ -688,7 +688,7 @@ function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Re
     //
     //   붙이는 자리는 ★맨 뒤★ 다 — 앞은 사람이 읽는 안내문이어야 한다(팝업 첫 줄).
     //   ★주의: 이 op 은 command·path·egress 가 없어서 text 가 곧 target(=열쇠) 이다.★
-    //   (앞선 주석에 "우선순위상 열쇠를 안 바꾼다" 고 적었는데 틀렸다. 지금은 안내문·지문이
+    //   (앞선 주석에 "우선순위상 열쇠를 안 바꾼다" 고 적었는데 틀렸다. 지금은 안내문·operation hash 가
     //    앞에 있어 해롭지 않지만, ★이 필드에 뭘 더 실으면 화면과 열쇠가 같이 바뀐다.★)
     text:
       `${UNPARSED_NOTICE}${req.method.slice(0, 64)} #${unparsedPayloadDigest(req)}${reason ? ` ${reason}` : ""}` +
@@ -698,15 +698,15 @@ function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Re
   };
 }
 
-/** 해석하지 못한 요청을 ★받은 payload 전체★ 로 묶는 지문(sha256 16hex).
+/** 해석하지 못한 요청을 ★받은 payload 전체★ 로 묶는 operation hash(sha256 16hex).
  *
  *  approvalOperationHash 를 쓰지 않는 이유: 그 basis 는 {method, command(배열만), files, reason} 라
  *  ★신세대 payload 를 하나도 담지 못한다★ — command 가 문자열이면 Array.isArray 가 false 라 null 이 되고,
- *  fileChanges 는 신세대에 아예 없다. 그래서 서로 다른 두 명령이 ★같은 지문★ 을 갖는다(테스트로 고정해 뒀다).
+ *  fileChanges 는 신세대에 아예 없다. 그래서 서로 다른 두 명령이 ★같은 operation hash★ 을 갖는다(테스트로 고정해 뒀다).
  *  해석에 실패한 마당에 '무엇이 중요한 필드인지' 를 고를 근거가 없으므로 ★전부★ 를 담는다.
  *
  *  키 순서에 흔들리지 않도록 재귀 정렬해 직렬화한다 — JSON.stringify 는 삽입 순서를 따르므로,
- *  같은 내용이 다른 순서로 오면 지문이 달라져 ★같은 작업에 열쇠가 두 개★ 생긴다. */
+ *  같은 내용이 다른 순서로 오면 operation hash 가 달라져 ★같은 작업에 열쇠가 두 개★ 생긴다. */
 /**
  * 받은 payload 에서 ★문자열 값만 모아 공백으로 잇는다★ — 위험 스캔에 넣을 용도.
  *
@@ -716,7 +716,7 @@ function unparsedOperation(req: ApprovalRequest, agentId: string, provenance: Re
  *   'echo hi<개행>sudo id' → 해석 실패 경로 [] · 정상 경로 ["sudo"]
  * codex 명령은 heredoc·`bash -c` 라 ★여러 줄이 기본★ 이므로, 공격이 아니어도 그냥 샌다.
  *
- * ★지문은 여전히 JSON 을 쓴다★(stablePayloadJson) — 거기서는 키 순서 안정성이 목적이라 JSON 이 맞다.
+ * ★operation hash 는 여전히 JSON 을 쓴다★(stablePayloadJson) — 거기서는 키 순서 안정성이 목적이라 JSON 이 맞다.
  * 같은 payload 를 ★목적에 따라 다른 표현★ 으로 본다.
  */
 function payloadScanText(req: ApprovalRequest): string {
@@ -733,14 +733,14 @@ function payloadScanText(req: ApprovalRequest): string {
   return out.join(" ");
 }
 
-/** 받은 payload 를 ★키 순서에 흔들리지 않게★ 문자열로 굳힌다. ★지문 전용★ — 스캔은 payloadScanText 를 쓴다. */
+/** 받은 payload 를 ★키 순서에 흔들리지 않게★ 문자열로 굳힌다. ★operation hash 전용★ — 스캔은 payloadScanText 를 쓴다. */
 function stablePayloadJson(req: ApprovalRequest): string {
   const stable = (v: unknown): unknown => {
     if (Array.isArray(v)) return v.map(stable);
     if (v && typeof v === "object") {
       // ★Object.fromEntries 를 쓴다 — 일반 객체에 acc["__proto__"]=... 로 대입하면 ★프로토타입이 바뀔 뿐
       //  own property 가 되지 않아 JSON.stringify 에서 통째로 사라진다.★ 그러면 "__proto__" 값만 다른 두
-      //  payload 가 ★같은 지문·같은 열쇠★ 가 된다(재현 확인: 둘 다 #5353b5b6…).
+      //  payload 가 ★같은 operation hash ·같은 열쇠★ 가 된다(재현 확인: 둘 다 #5353b5b6…).
       //  JSON-RPC payload 에 그 키가 오는 것은 유효하므로, ★해석 실패 경로에서 이건 우회 통로★ 가 된다.
       //  fromEntries 는 CreateDataProperty 라 "__proto__" 도 평범한 키로 보존한다.
       return Object.fromEntries(
@@ -824,7 +824,7 @@ export function expirePermissionRequest(db: Database, requestId: string): void {
  *  기록은 '명령이 너무 길다' — 잘 되던 기능이 죽고 기록까지 틀린 이유를 댔다.)
  *
  * 재는 대상은 ★사람이 판단해야 할 내용★ 이다 — 해석되면 명령, 명령 method 인데 해석이 안 되면 payload 값들.
- * (지문·안내문 같은 우리가 붙인 것은 빼고 잰다. 그걸 세면 기준이 우리 포맷에 흔들린다.)
+ * (operation hash ·안내문 같은 우리가 붙인 것은 빼고 잰다. 그걸 세면 기준이 우리 포맷에 흔들린다.)
  */
 export function oversizedForReview(req: ApprovalRequest): number | null {
   const parsed = parseCommandApproval(req);

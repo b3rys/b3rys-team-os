@@ -1,23 +1,23 @@
 /**
- * ★서버가 codex 브리지의 창구를 부르는 쪽.★ (telegramCapture 의 codex 분기가 쓴다)
+ * ★서버가 codex 브리지의 bridge window 를 부르는 쪽.★ (telegramCapture 의 codex 분기가 쓴다)
  *
  * 다른 런타임과 같은 모양이다 — 서버는 턴을 돌지 않고 ★런타임을 소유한 프로세스★ 를 부른다.
  *
  * ★재시도하지 않는다.★ 타임아웃이 나도 턴은 브리지에서 계속 돌고 있을 수 있다 —
  * 다시 부르면 그게 곧 이중응답이다(리뷰 지적). 실패는 실패로 두고 audit 만 남긴다.
  *
- * ★매 호출 전에 창구 파일을 다시 읽는다.★ 브리지가 재시작하면 포트가 바뀌는데
+ * ★매 호출 전에 bridge window 파일을 다시 읽는다.★ 브리지가 재시작하면 포트가 바뀌는데
  * 캐시하고 있으면 ★조용히 안 간다.★
  */
 import { readWindowFile, windowFilePathFor, type BridgeWindowRequest } from "../runtimes/codex/bridgeWindow";
 
-/** 창구 호출 결과. ★queued 는 "접수" 지 "답했다" 가 아니다.★ */
+/** bridge window 호출 결과. ★queued 는 "접수" 지 "답했다" 가 아니다.★ */
 export type CodexBridgeCallResult =
   | { ok: true; duplicate: boolean }
   | { ok: false; reason: "unreachable" | "timeout" | "rejected" | "no_window"; status?: number };
 
 export interface CodexBridgeCallDeps {
-  /** 그 팀원 브리지의 pid 파일 경로(창구 파일은 그 옆에 있다). */
+  /** 그 팀원 브리지의 pid 파일 경로(bridge window 파일은 그 옆에 있다). */
   pidFile: string | undefined;
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
@@ -43,7 +43,7 @@ export function pidAlive(pid: number): boolean {
   }
 }
 
-/** 기본 타임아웃 — 창구는 큐에 넣고 바로 답한다(턴을 기다리지 않는다). 짧게 잡는다. */
+/** 기본 타임아웃 — bridge window 는 큐에 넣고 바로 답한다(턴을 기다리지 않는다). 짧게 잡는다. */
 export const BRIDGE_CALL_TIMEOUT_MS = 5_000;
 
 export async function callCodexBridge(
@@ -69,13 +69,13 @@ export async function callCodexBridge(
   //
   //   ★남은 파일을 지우지는 않는다★ (리뷰 지적 — 경쟁 조건).
   //   읽고 나서 생존을 확인하는 사이에 브리지가 재기동하면 그 파일은 ★새 pid·포트·토큰으로
-  //   원자 교체★ 된다. 그때 옛 pid 로 ESRCH 를 보고 지우면 ★방금 뜬 새 창구 파일을 지운다★ —
+  //   원자 교체★ 된다. 그때 옛 pid 로 ESRCH 를 보고 지우면 ★방금 뜬 새 bridge window 파일을 지운다★ —
   //   정상 재기동 직후에 ★계속 no_window★ 가 되어 조용해진다. 치우는 일은 새 브리지가 이미 한다.
   //
   //   ★남는 구멍 — 완전 차단이 아니다★: pid 는 재사용된다. 브리지가 죽고 그 번호를 다른
   //   프로세스가 물려받으면 `pidAlive` 는 참을 준다. 이 검사가 막는 것은 ★그 번호가 아예 없는
   //   경우(ESRCH)★ 이고, 그게 크래시 직후의 대부분이다. 완전한 증명은 파일에 기동 시각·nonce 를
-  //   같이 싣고 창구가 자기 것을 확인해야 한다 — 별건이다.
+  //   같이 싣고 bridge window 가 자기 것을 확인해야 한다 — 별건이다.
   const alive = (deps.isAlive ?? pidAlive)(file.pid);
   if (!alive) return { ok: false, reason: "no_window" };
 

@@ -1,12 +1,12 @@
 /**
- * ★브리지의 로컬 창구.★ 서버(telegramCapture)가 그룹 턴을 이 창구로 넣는다.
+ * ★브리지의 로컬 bridge window.★ 서버(telegramCapture)가 그룹 턴을 이 bridge window 로 넣는다.
  *
  * 왜 브리지인가 — 다른 런타임과 같은 모양이다. openclaw·hermes 도 서버가 턴을 도는 게 아니라
  * ★런타임을 소유한 프로세스★ 를 부른다(`OPENCLAW_GATEWAY_URL`). codex 에서 그 자리는 브리지다.
  * 서버가 따로 돌리면 `clientPool` 이 ★모듈 전역(프로세스마다 따로)★ 이라 같은 팀원에 app-server
  * 자식이 둘 뜨고, 같은 세션 행을 동시에 resume 한다(`serialTurnQueue` 주석의 그 사고).
  *
- * ★이 창구는 자기 폴링을 안 지나는 새 입구다★ — 브리지의 중복 방지(update_id offset)가 여기엔
+ * ★이 bridge window는 자기 폴링을 안 지나는 새 입구다★ — 브리지의 중복 방지(update_id offset)가 여기엔
  * 없다. 그래서 ★messageId 를 멱등키로 여기서 직접 막는다★. 막지 않으면 같은 요청이
  * 두 번 들어올 때 큐가 ★겹치지 않게 하지만 두 번 돌린다★ = dex 가 두 번 답한다.
  *
@@ -18,7 +18,7 @@ import { timingSafeEqual, randomBytes } from "node:crypto";
 import { writeFileSync, renameSync, rmSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-/** 창구가 받는 한 건. capture 가 정한 것만 담는다 — 브리지는 오너 판정을 하지 않는다. */
+/** bridge window 가 받는 한 건. capture 가 정한 것만 담는다 — 브리지는 오너 판정을 하지 않는다. */
 export interface BridgeWindowRequest {
   agentId: string;
   groupId: string;
@@ -30,7 +30,7 @@ export interface BridgeWindowRequest {
   attachments?: { kind: string; value: string; note?: string }[];
 }
 
-/** 창구 파일에 적히는 것. ★토큰은 이 파일 밖으로 나가지 않는다★ — 로그·audit·에러에 안 싣는다. */
+/** bridge window 파일에 적히는 것. ★토큰은 이 파일 밖으로 나가지 않는다★ — 로그·audit·에러에 안 싣는다. */
 export interface BridgeWindowFile {
   port: number;
   token: string;
@@ -46,7 +46,7 @@ export const WINDOW_DEDUPE_TTL_MS = 10 * 60 * 1000;
 
 /**
  * ★파일 경로는 pid 파일 옆이다★ — 브리지가 이미 그 자리에 자기 표식을 쓴다.
- * `CODEX_BRIDGE_PID_FILE` 이 없으면 창구를 열 자리가 없다는 뜻이라 null 을 준다.
+ * `CODEX_BRIDGE_PID_FILE` 이 없으면 bridge window 를 열 자리가 없다는 뜻이라 null 을 준다.
  */
 export function windowFilePathFor(pidFile: string | undefined, agentId: string): string | null {
   if (!pidFile) return null;
@@ -64,7 +64,7 @@ export function writeWindowFile(path: string, data: BridgeWindowFile): void {
 }
 
 /**
- * 창구 파일을 읽는다. ★부르는 쪽은 매 호출 전에 다시 읽는다★ — 브리지가 재시작하면 포트가
+ * bridge window 파일을 읽는다. ★부르는 쪽은 매 호출 전에 다시 읽는다★ — 브리지가 재시작하면 포트가
  * 바뀌는데 캐시하고 있으면 ★조용히 안 간다★(리뷰 지적).
  */
 export function readWindowFile(path: string): BridgeWindowFile | null {
@@ -115,7 +115,7 @@ export function decideWindowRequest(
       return { accept: false, status: 400, reason: `missing_${k}` };
     }
   }
-  // ★남의 신원으로 도는 것을 막는다★ — 이 창구는 자기 팀원 것만 받는다.
+  // ★남의 신원으로 도는 것을 막는다★ — 이 bridge window는 자기 팀원 것만 받는다.
   if (req.agentId !== opts.selfAgentId) return { accept: false, status: 403, reason: "agent_mismatch" };
   return { accept: true };
 }
@@ -144,7 +144,7 @@ export class WindowDedupe {
 export interface BridgeWindowDeps {
   agentId: string;
   pidFile: string | undefined;
-  /** 턴을 큐에 넣는다. ★기다리지 않는다★ — 창구는 접수(202)까지만 책임진다. */
+  /** 턴을 큐에 넣는다. ★기다리지 않는다★ — bridge window 는 접수(202)까지만 책임진다. */
   enqueue: (req: BridgeWindowRequest) => void;
   log?: (line: string) => void;
   now?: () => number;
@@ -156,8 +156,8 @@ export interface BridgeWindowHandle {
 }
 
 /**
- * 창구를 연다. ★127.0.0.1 에만 붙는다★ — 밖에서 이 창구에 닿을 수 없어야 한다.
- * 열지 못하면 null 을 준다(창구 없이도 1:1 은 그대로 돈다 — 창구 실패가 브리지를 죽이지 않는다).
+ * bridge window 를 연다. ★127.0.0.1 에만 붙는다★ — 밖에서 이 bridge window에 닿을 수 없어야 한다.
+ * 열지 못하면 null 을 준다(bridge window 없이도 1:1 은 그대로 돈다 — bridge window 실패가 브리지를 죽이지 않는다).
  */
 export async function startBridgeWindow(deps: BridgeWindowDeps): Promise<BridgeWindowHandle | null> {
   const filePath = windowFilePathFor(deps.pidFile, deps.agentId);
@@ -235,7 +235,7 @@ export async function startBridgeWindow(deps: BridgeWindowDeps): Promise<BridgeW
     return null;
   }
 
-  // ★파일을 못 쓰면 창구를 연 채로 두지 않는다★.
+  // ★파일을 못 쓰면 bridge window 를 연 채로 두지 않는다★.
   //   파일이 없으면 부르는 쪽이 이 포트를 알 수 없으니 ★아무도 못 부르는 리스너★ 가 남는다.
   //   그런 리스너는 프로세스를 붙잡고 있어 종료도 방해한다. 열었으면 닫고 실패로 돌려준다.
   try {

@@ -7,7 +7,7 @@ import type { ApprovalRequest } from "./appServerClient";
  * ★S1(#106) — 명령 승인을 세대 무관하게 해석한다★
  *
  * S0 는 해석 못 한 요청이 넓은 열쇠를 만들지 않게 했다(안전). 하지만 신세대 명령 승인은 여전히
- * 해석되지 않아 ★열쇠도 팝업도 payload 지문★ 이었다 — 안전하지만 ★사람이 무슨 명령인지 볼 수 없다.★
+ * 해석되지 않아 ★열쇠도 팝업도 payload digest★ 이었다 — 안전하지만 ★사람이 무슨 명령인지 볼 수 없다.★
  *
  * S1 은 그 명령을 실제로 읽는다. 판정 기준은 payload 모양이 아니라 ★method★ 다.
  */
@@ -25,7 +25,7 @@ describe("S1 — 신세대 명령 승인 해석", () => {
     const nw = buildOperationFromApproval(newGen("rm -rf /tmp/x"), "dex");
     const od = buildOperationFromApproval(oldGen(["rm", "-rf", "/tmp/x"]), "dex");
     expect(nw.action).toBe("shell");
-    // ★S5 이후: 사람이 읽는 본문은 그대로고, 앞에 전체 지문이 붙는다.★ (240자 절단선 안에 열쇠를 남기려고)
+    // ★S5 이후: 사람이 읽는 본문은 그대로고, 앞에 전체 operation hash 가 붙는다.★ (240자 절단선 안에 열쇠를 남기려고)
     expect(nw.command).toMatch(/^rm -rf \/tmp\/x #[0-9a-f]{64}$/);
     expect(od.command).toMatch(/^rm -rf \/tmp\/x #[0-9a-f]{64}$/);
   });
@@ -36,7 +36,7 @@ describe("S1 — 신세대 명령 승인 해석", () => {
     // ★고칠 수 있는데 안 합친 게 아니라, 합칠 방법이 없다.★
     // 구세대는 argv 배열(['a b','c'])이고 신세대는 문자열("a b c")이다. 배열을 문자열로 이으면
     // ★['a b','c'] 와 ['a','b c'] 가 같은 문자열이 되어 실제로 다른 실행이 한 허용으로 묶인다★ (실측된 구멍).
-    // 그래서 지문 재료로 구조를 보존해야 하는데, ★문자열에서 argv 경계는 복원할 수 없다.★
+    // 그래서 operation hash 재료로 구조를 보존해야 하는데, ★문자열에서 argv 경계는 복원할 수 없다.★
     // → 두 세대는 원리적으로 같은 열쇠를 가질 수 없다.
     //
     // 사용자에게 보이는 영향: codex CLI 세대가 바뀌면 저장된 '항상 허용' 을 ★한 번 다시 묻는다.★
@@ -56,7 +56,7 @@ describe("S1 — 신세대 명령 승인 해석", () => {
 
   test("★사람이 읽을 수 있는 target 이 된다★ — 지문이 아니라 명령", () => {
     const op = buildOperationFromApproval(newGen("git status"), "dex");
-    // ★명령 본문이 사람 눈에 남는다★ — 지문만 보이는 S0 형식이 아니다. (지문은 앞에 붙는다)
+    // ★명령 본문이 사람 눈에 남는다★ — operation hash 만 보이는 S0 형식이 아니다. (operation hash 는 앞에 붙는다)
     expect(targetForOperation(op)).toContain("git status");
     expect(targetForOperation(op)).toMatch(/^git status #[0-9a-f]{64}$/);
   });
@@ -67,7 +67,7 @@ describe("S1 — 신세대 명령 승인 해석", () => {
     const a2 = buildOperationFromApproval(newGen("rm -rf /tmp/x"), "dex");
     expect(scopeKeyForOperation(a)).not.toBe(scopeKeyForOperation(b));
     // ★S0 와 달라지는 지점★: 해석되면 열쇠가 '명령' 단위라 같은 명령은 같은 열쇠다.
-    // 그래야 '항상 허용' 이 의미를 갖는다(S0 의 지문 열쇠는 요청마다 달라 매번 물었다).
+    // 그래야 '항상 허용' 이 의미를 갖는다(S0 의 operation hash 열쇠는 요청마다 달라 매번 물었다).
     expect(scopeKeyForOperation(a)).toBe(scopeKeyForOperation(a2));
   });
 
@@ -100,8 +100,8 @@ describe("S1 — 신세대 명령 승인 해석", () => {
   });
 
   test("★서로 다른 신세대 명령은 서로 다른 작업 지문을 갖는다★ — 상관키가 둘을 구분해야 한다", () => {
-    // S1 이 문자열 command 를 실제 shell operation 으로 승격하는데, 지문 basis 가 Array.isArray 만 보면
-    // ★신세대는 전부 command:null★ 이 되어 서로 다른 명령이 ★같은 지문★ 을 갖는다(재현 확인).
+    // S1 이 문자열 command 를 실제 shell operation 으로 승격하는데, operation hash basis 가 Array.isArray 만 보면
+    // ★신세대는 전부 command:null★ 이 되어 서로 다른 명령이 ★같은 operation hash★ 을 갖는다(재현 확인).
     // 상관키·audit 이 두 요청을 구분하지 못하면 결정이 엉뚱한 요청에 배달될 수 있다.
     expect(approvalOperationHash(newGen("rm -rf /tmp/x")))
       .not.toBe(approvalOperationHash(newGen("cat /etc/shadow")));
@@ -130,7 +130,7 @@ describe("S1 — 신세대 명령 승인 해석", () => {
     };
     const op = buildOperationFromApproval(req, "dex");
     expect(op.action).toBe("write");
-    // ★S3 에서 표시 형식이 바뀌었다★ — 파일집합(정렬)은 그대로이고 사람이 읽을 말과 지문이 붙었다.
+    // ★S3 에서 표시 형식이 바뀌었다★ — 파일집합(정렬)은 그대로이고 사람이 읽을 말과 operation hash 가 붙었다.
     expect(op.path).toMatch(/^파일 2개 · change a\.ts, change b\.ts #[0-9a-f]{12}$/);
   });
 });

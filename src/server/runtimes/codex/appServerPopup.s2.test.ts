@@ -181,8 +181,8 @@ describe("S2 — 라이브 실측 재생", () => {
  * ★grantRoot — 파일 몇 개가 아니라 '폴더 하위 전체를 세션 동안' 이다.★
  *
  * 벤더 설명: "the agent is asking the user to allow writes under this root for the remainder of the session".
- * ★변경 전 정본(4430021)에서 실측한 실제 구멍★: grantRoot 가 있든 없든 ★열쇠도 지문도 완전히 같았다★
- * (둘 다 target="a.ts|b.ts", 지문 c7fa63459c642993). 즉 파일 2개에 준 '항상 허용' 이 ★루트 전체 승인★ 에
+ * ★변경 전 정본(4430021)에서 실측한 실제 구멍★: grantRoot 가 있든 없든 ★열쇠도 operation hash 도 완전히 같았다★
+ * (둘 다 target="a.ts|b.ts", operation hash c7fa63459c642993). 즉 파일 2개에 준 '항상 허용' 이 ★루트 전체 승인★ 에
  * 그대로 재사용된다 — 사람은 파일 2개를 승인했는데 열리는 것은 폴더 전체다.
  */
 describe("S2 — grantRoot 는 별개 승인이다", () => {
@@ -216,7 +216,7 @@ describe("S2 — grantRoot 는 별개 승인이다", () => {
     expect(targetForOperation(rooted).length).toBeLessThanOrEqual(240);
     // ★사람이 볼 경고가 맨 앞에 남는다★ — 이건 '파일 몇 개' 가 아니라 '폴더 전체' 요청이다.
     expect(targetForOperation(rooted).startsWith("⚠")).toBe(true);
-    // ★열쇠 지문이 절단선 안에 살아남는다★ — 이게 P2 재발 방지의 조건이다(뒤에 두되 예산을 먼저 뗀다).
+    // ★열쇠 operation hash 가 절단선 안에 살아남는다★ — 이게 P2 재발 방지의 조건이다(뒤에 두되 예산을 먼저 뗀다).
     expect(targetForOperation(rooted)).toMatch(/#[0-9a-f]{12}$/);
     expect(scopeKeyForOperation(rooted)).not.toBe(scopeKeyForOperation(plain));
   });
@@ -274,7 +274,7 @@ describe("S2 — 이동 목적지(P1)", () => {
       method: "applyPatchApproval",
       params: { fileChanges: { "b.ts": { type: "add", content: "x" }, "a.ts": {} }, callId: "c1" },
     }, "dex");
-    // ★S3 에서 표시 형식이 바뀌었다(의도)★ — 파일집합·정렬은 그대로, 사람이 읽을 종류·개수와 지문이 붙었다.
+    // ★S3 에서 표시 형식이 바뀌었다(의도)★ — 파일집합·정렬은 그대로, 사람이 읽을 종류·개수와 operation hash 가 붙었다.
     expect(op.path).toMatch(/^파일 2개 · change a\.ts, add b\.ts #[0-9a-f]{12}$/);
   });
 });
@@ -291,13 +291,13 @@ describe("S2 — 긴 grantRoot(P2)", () => {
   });
 
   test("★공통 prefix 가 길어도 서로 다른 루트는 서로 다른 열쇠·지문★", () => {
-    // 재현(수정 전): grantRoot 를 300자로 ★먼저 잘라서★ 두 루트가 같은 값이 됐고, 열쇠도 지문도 같았다.
-    // 이제 열쇠에는 ★전체의 지문★ 을 맨 앞에 넣는다 — 240자 절단이 지문을 못 자른다.
+    // 재현(수정 전): grantRoot 를 300자로 ★먼저 잘라서★ 두 루트가 같은 값이 됐고, 열쇠도 operation hash 도 같았다.
+    // 이제 열쇠에는 ★전체의 operation hash★ 을 맨 앞에 넣는다 — 240자 절단이 operation hash 를 못 자른다.
     const one = mkNew(longRoot("/one")), two = mkNew(longRoot("/two"));
     expect(scopeKeyForOperation(buildOperationFromApproval(one, "dex")))
       .not.toBe(scopeKeyForOperation(buildOperationFromApproval(two, "dex")));
     expect(approvalOperationHash(one)).not.toBe(approvalOperationHash(two));
-    // ★루트 원문은 표시용으로 줄어들지만(뒤 71자) 지문이 전체를 담아 열쇠를 가른다.★
+    // ★루트 원문은 표시용으로 줄어들지만(뒤 71자) operation hash 가 전체를 담아 열쇠를 가른다.★
     expect(targetForOperation(buildOperationFromApproval(one, "dex"))).toMatch(/#[0-9a-f]{12}$/);
   });
 
@@ -328,7 +328,7 @@ describe("S2 — 구세대 불변", () => {
     const apply: ApprovalRequest = { method: "applyPatchApproval", params: { fileChanges: { "b.ts": {}, "a.ts": {} }, callId: "c1" } };
     expect(approvalOperationHash(apply)).toBe("c7fa63459c642993");
     const op = buildOperationFromApproval(apply, "dex");
-    // ★지문(approvalOperationHash) 은 그대로다★ — 진행 중 승인의 상관키가 어긋나지 않는다.
+    // ★operation hash(approvalOperationHash) 은 그대로다★ — 진행 중 승인의 상관키가 어긋나지 않는다.
     //   ★열쇠(scope) 는 S3 에서 의도적으로 바뀐다★ — 저장된 grant 는 0행이라 무효화될 것이 없다(실측 2026-07-30).
     expect(op.path).toMatch(/^파일 2개 · change a\.ts, change b\.ts #[0-9a-f]{12}$/);
     expect(op.text).toBe("파일 2개: change a.ts, change b.ts");
@@ -341,7 +341,7 @@ describe("S2 — 구세대 불변", () => {
 
   test("★한 턴에 온 서로 다른 파일변경 승인은 서로 다른 지문을 갖는다★ — 상관키가 둘을 구분해야 한다", () => {
     // 신세대 파일변경 params 는 command·fileChanges·reason 이 전부 없다. itemId 를 안 넣으면
-    // ★두 요청의 지문이 같아진다★(S1 에서 문자열 command 로 겪은 것과 같은 형태).
+    // ★두 요청의 operation hash 가 같아진다★(S1 에서 문자열 command 로 겪은 것과 같은 형태).
     const a: ApprovalRequest = { method: "item/fileChange/requestApproval", params: { itemId: "i1", turnId: "t1", threadId: "th1", startedAtMs: 1 } };
     const b: ApprovalRequest = { method: "item/fileChange/requestApproval", params: { itemId: "i2", turnId: "t1", threadId: "th1", startedAtMs: 1 } };
     expect(approvalOperationHash(a)).not.toBe(approvalOperationHash(b));

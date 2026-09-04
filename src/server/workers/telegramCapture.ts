@@ -1234,7 +1234,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
                 body: deliveryBody,
                 fromLabel: `${pick(locale, "팀장", "the team lead")} (${pick(locale, "그룹 라우터", "group router")})`,
                 // ★여기는 단톡방이다 — 답은 ★방★ 에 간다.★
-                //   fromLabel 은 사람이 읽는 ★이름표★("팀장 (그룹 라우터)")지 팀원 id 가 아니다.
+                //   fromLabel 은 사람이 읽는 ★fromLabel★("팀장 (그룹 라우터)")지 팀원 id 가 아니다.
                 //   주입문이 그걸로 주소를 지어내면 `send.sh --to 팀장 (그룹 라우터)` 같은 헛것이 나온다.
                 // ★부르는 쪽이 사실을 넘긴다.★ 팀장님이 방에서 불렀으니 답도 방에 온다.
                 replyRoute: { kind: "group" },
@@ -1266,7 +1266,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
           continue;
         }
         if (agent.runtime === "codex") {
-          // ★codex 는 브리지가 세션을 소유한다★ — 서버가 턴을 돌지 않고 그 프로세스의 창구를 부른다.
+          // ★codex 는 브리지가 세션을 소유한다★ — 서버가 턴을 돌지 않고 그 프로세스의 bridge window 를 부른다.
           //   openclaw·hermes 와 같은 모양이다(서버 → 런타임 소유 프로세스). 서버가 따로 돌리면
           //   `clientPool` 이 프로세스마다 따로라 같은 팀원에 app-server 자식이 둘 뜬다.
           //
@@ -1295,7 +1295,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
               return;
             }
             // ★`no_supported_path` 를 재사용하지 않는다★ — 그 이름은 "분기가 없다" 전용이다(리뷰 지적).
-            //   창구 장애를 같은 이름으로 적으면 분기 누락을 찾던 신호가 무뎌진다.
+            //   bridge window 장애를 같은 이름으로 적으면 분기 누락을 찾던 신호가 무뎌진다.
             const action = r.reason === "timeout" ? "codex_bridge_timeout" : "codex_bridge_unreachable";
             console.log(`[capture] codex bridge ${r.reason} → ${id}`);
             appendAuditFile("capture", action, id, {

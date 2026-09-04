@@ -4,7 +4,7 @@ import { scopeKeyForOperation, targetForOperation } from "../../lib/permissionGa
 import type { ApprovalRequest } from "./appServerClient";
 
 /**
- * ★S0(#106) — 해석하지 못한 승인 payload 가 넓은 권한 열쇠를 만들지 않는다★
+ * ★S0(#106) — 해석하지 못한 승인 payload 가 넓은 scope key를 만들지 않는다★
  *
  * 배경: 승인 요청 payload 는 두 세대다(2026-07-28 벤더 스키마 실측, codex-cli 0.144.6).
  *   구세대 execCommandApproval   → command 가 ★배열★
@@ -52,7 +52,7 @@ describe("S0 — 해석 실패 payload 의 권한 열쇠", () => {
 
   test("payload 지문이 target 안에 살아남는다 (240자 절단 뒤에도)", () => {
     const op = buildOperationFromApproval(unparsed("echo hi"), "dex");
-    // 지문이 절단에 잘려나가면 열쇠가 다시 뭉개진다. 그래서 method 바로 뒤에 둔다.
+    // operation hash 가 절단에 잘려나가면 열쇠가 다시 뭉개진다. 그래서 method 바로 뒤에 둔다.
     expect(targetForOperation(op)).toMatch(/#[0-9a-f]{16}/);
   });
 
@@ -72,7 +72,7 @@ describe("S0 — 해석 실패 payload 의 권한 열쇠", () => {
   test("★'__proto__' 키만 다른 payload 도 갈린다★ — 해석 실패 경로의 우회 통로였다", () => {
     // (2026-07-29) 리뷰에서 잡힌 실제 충돌. 일반 객체에 acc["__proto__"]=... 로 대입하면
     // ★프로토타입이 바뀔 뿐 own property 가 되지 않아 JSON.stringify 에서 통째로 사라진다.★
-    // → "__proto__" 값만 다른 두 payload 가 ★같은 지문·같은 열쇠★ 였다(재현: 둘 다 #5353b5b6…).
+    // → "__proto__" 값만 다른 두 payload 가 ★같은 operation hash ·같은 열쇠★ 였다(재현: 둘 다 #5353b5b6…).
     // JSON-RPC payload 에 이 키가 오는 것은 유효하므로 ★해석 실패 경로에서 우회 통로★ 가 된다.
     // JSON.parse 로 만들어야 실제 수신 경로와 같다(리터럴로 쓰면 파서가 프로토타입으로 처리한다).
     const a = { method: "item/tool/requestUserInput", params: JSON.parse('{"x":1,"__proto__":{"a":1}}') } as ApprovalRequest;
@@ -94,8 +94,8 @@ describe("S0 — 해석 실패 payload 의 권한 열쇠", () => {
   test("★approvalOperationHash 로는 못 가른다★ — 왜 payload 전체 지문이 필요한지의 근거", () => {
     // 이 fixture(item/tool/requestUserInput)는 command 도 fileChanges 도 reason 도 없어
     // basis 가 {method, null, null, null} 로 ★내용과 무관하게 같아진다★.
-    // ★즉 기존 지문을 그대로 썼다면 위 첫 테스트가 통과하지 못한다.★
-    // ※ 신세대 '명령' 은 S1 에서 지문 basis 에 포함되도록 고쳤다 — appServerPopup.s1.test.ts 참조.
+    // ★즉 기존 operation hash 를 그대로 썼다면 위 첫 테스트가 통과하지 못한다.★
+    // ※ 신세대 '명령' 은 S1 에서 operation hash basis 에 포함되도록 고쳤다 — appServerPopup.s1.test.ts 참조.
     expect(approvalOperationHash(unparsed("rm -rf /tmp/x")))
       .toBe(approvalOperationHash(unparsed("cat ~/.ssh/id_rsa")));
   });
@@ -113,7 +113,7 @@ describe("S0 — 해석 실패 payload 의 권한 열쇠", () => {
     const oldGen: ApprovalRequest = { method: "execCommandApproval", params: { command: ["rm", "-rf", "/tmp/x"], cwd: "/tmp" } };
     const op = buildOperationFromApproval(oldGen, "dex");
     expect(op.action).toBe("shell");
-    // ★S5: 본문은 그대로, 앞에 전체 지문.★ 해석 실패 경로(S0 지문 열쇠)로 새지 않는 것이 이 가드의 요지다.
+    // ★S5: 본문은 그대로, 앞에 전체 operation hash.★ 해석 실패 경로(S0 operation hash 열쇠)로 새지 않는 것이 이 가드의 요지다.
     expect(op.command).toMatch(/^rm -rf \/tmp\/x #[0-9a-f]{64}$/);
     expect(targetForOperation(op)).toContain("rm -rf /tmp/x");
   });

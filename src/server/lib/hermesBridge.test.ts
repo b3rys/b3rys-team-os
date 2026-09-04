@@ -292,7 +292,7 @@ describe("buildPrompt — ★답 주소는 호출부가 준다 → 봉투 kind�
   });
 
   test("★★단톡방 → kind=group (steve 가 경고한 '입 막힘' 회귀 방어)★★", () => {
-    // 팀장님이 단톡방에서 부른 경우. fromLabel 은 사람이 읽는 이름표라 팀원 id 가 아니다.
+    // 팀장님이 단톡방에서 부른 경우. fromLabel 은 사람이 읽는 fromLabel라 팀원 id 가 아니다.
     const p = buildPrompt({
       ...base,
       threadId: "tg--2000000000001",

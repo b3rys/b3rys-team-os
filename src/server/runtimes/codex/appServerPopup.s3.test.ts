@@ -60,7 +60,7 @@ describe("S3 — 잘려도 열쇠가 갈린다 (지문을 뒤로 옮긴 근거)"
     const b = buildOperationFromApproval(fileReq(many("-bravo")), "dex");
     // 화면에 보이는 부분은 같다 — 사람 눈으로는 구별이 안 된다.
     expect(screenLine(a).slice(0, 100)).toBe(screenLine(b).slice(0, 100));
-    // ★그래도 열쇠는 갈린다★ — 파일집합 전체의 지문이 절단선 안에 남기 때문이다.
+    // ★그래도 열쇠는 갈린다★ — 파일집합 전체의 operation hash 가 절단선 안에 남기 때문이다.
     expect(scopeKeyForOperation(a)).not.toBe(scopeKeyForOperation(b));
   });
 
@@ -139,16 +139,16 @@ describe("S3 — 폴더 전체 요청은 경고가 먼저 보인다", () => {
 
   test("★표시에 안 보이는 부분만 다른 두 루트도 열쇠가 갈린다★ — 지문이 루트 전문을 담는 이유", () => {
     // ★이 시험은 뮤턴트가 살아남아서 추가했다(2026-07-30).★ 앞 시험은 두 루트의 ★뒤★ 가 달라서
-    //   표시 문자열만으로도 열쇠가 갈렸다 — 즉 지문을 지워도 초록이었다. ★기계가 아니라 입력이 문제였다.★
+    //   표시 문자열만으로도 열쇠가 갈렸다 — 즉 operation hash 를 지워도 초록이었다. ★기계가 아니라 입력이 문제였다.★
     //   여기서는 ★뒤 71자가 완전히 같고 앞만 다른★ 두 루트를 쓴다. 표시로는 구별이 불가능하므로
-    //   지문이 grantRoot 전문을 담지 않으면 ★서로 다른 폴더 승인이 같은 열쇠★ 가 된다(P2 그 사고).
+    //   operation hash 가 grantRoot 전문을 담지 않으면 ★서로 다른 폴더 승인이 같은 열쇠★ 가 된다(P2 그 사고).
     const tail = "/" + "x".repeat(300);
     const a = root(`/alpha${tail}`);
     const b = root(`/bravo${tail}`);
-    // ★사람이 읽는 부분(지문 앞까지)이 글자 하나까지 같다★ — 눈으로는 구별할 방법이 없다.
+    // ★사람이 읽는 부분(operation hash 앞까지)이 글자 하나까지 같다★ — 눈으로는 구별할 방법이 없다.
     const readable = (s: string) => s.replace(/ #[0-9a-f]{12}$/, "");
     expect(readable(screenLine(a))).toBe(readable(screenLine(b)));
-    // → 즉 ★이 두 요청을 가르는 것은 지문뿐이다★. 그래서 지문이 루트 전문을 담아야 한다.
+    // → 즉 ★이 두 요청을 가르는 것은 operation hash뿐이다★. 그래서 operation hash 가 루트 전문을 담아야 한다.
     expect(scopeKeyForOperation(a)).not.toBe(scopeKeyForOperation(b)); // ★그래도 열쇠는 갈려야 한다★
   });
 
@@ -184,8 +184,8 @@ describe("S3 — 폴더 전체 요청은 경고가 먼저 보인다", () => {
  *
  * 앞의 시험 39건이 전부 초록인데 아래 여섯 가지가 깨져 있었다. ★시험이 주장하는 것을
  * 재고 있지 않았다★ — 뮤턴트가 살아남는 것과 같은 형태다(입력이 메커니즘을 안 건드린다).
- * 두 번째 시험은 ★"열쇠는 지문이 갈라준다" 가 성립하는 자리★ 인데,
- * 지문의 재료가 모호하면 성립하지 않는다 — ★재료가 유일해야 그 문장이 참이다.★
+ * 두 번째 시험은 ★"열쇠는 operation hash 가 갈라준다" 가 성립하는 자리★ 인데,
+ * operation hash의 재료가 모호하면 성립하지 않는다 — ★재료가 유일해야 그 문장이 참이다.★
  */
 describe("S3 — 리뷰 반례 (회귀 가드)", () => {
   const one = (path: string, kind = "update", movePath: string | null = null, diff?: string) =>
@@ -220,7 +220,7 @@ describe("S3 — 리뷰 반례 (회귀 가드)", () => {
   });
 
   test("★같은 요청의 두 쓰기가 한 개로 합쳐지지 않는다★ — 합치면 하나가 화면에서 사라진다", () => {
-    // ★뮤턴트로 찾은 자리(2026-07-30).★ 지문·중복제거 재료가 이어붙인 문자열이면
+    // ★뮤턴트로 찾은 자리(2026-07-30).★ operation hash ·중복제거 재료가 이어붙인 문자열이면
     //   `a>b` 새 파일과 `a`→`b` 이동이 ★같은 항목★ 이 되어 화면이 "파일 1개 · add a>b" 로 나온다 —
     //   ★이동 쓰기가 통째로 안 보이는 채로 승인된다.★ 개수까지 거짓이 되므로 사람이 알아챌 수도 없다.
     const op = buildOperationFromApproval(

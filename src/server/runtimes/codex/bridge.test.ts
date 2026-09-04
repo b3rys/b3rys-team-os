@@ -124,7 +124,7 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     const gate = (suppress: boolean) => { let n = 0; const fn = async () => { n++; return { suppress, reason: "explicit_mention", targets: ["bill"] }; }; return { fn, calls: () => n }; };
 
     // ★차단은 '폴링 입구' 의 것이다★ — 그 입구엔 오너 판정이 없어 남을 부른 메시지에도 답했다.
-    //   창구(window)로 들어온 것은 서버(capture)가 오너를 정한 뒤 넣은 것이라 그 차단을 지나지 않는다.
+    //   bridge window로 들어온 것은 서버(capture)가 오너를 정한 뒤 넣은 것이라 그 차단을 지나지 않는다.
     test("★창구 입구는 차단을 지나지 않는다★ — 미설정(차단 켜짐)이어도 그룹 턴이 돈다", async () => {
       delete process.env.CODEX_GROUP_NATIVE_DENY_SHADOW; delete process.env.CODEX_GROUP_NATIVE_DENY;
       const { deps, calls } = spies(() => ok("답")); const g = gate(false); deps.ownerGate = g.fn;
@@ -1096,7 +1096,7 @@ describe("codex bridge — 진행 중 작업에 끼어들기", () => {
 
 // ── ★조립된 값을 잰다★ — 부품 시험은 다 통과하는데 조립하면 뒤집혀 있었다 ──
 //
-// 경고는 `res.ok` 를 읽는 자리에 있었는데, 창구 경로는 발신을 일부러 떼서 `ok` 가 ★항상 false★ 다.
+// 경고는 `res.ok` 를 읽는 자리에 있었는데, bridge window 경로는 발신을 일부러 떼서 `ok` 가 ★항상 false★ 다.
 // 그래서 ★정상 성공에도 경고가 떴다.★ 부품(문자열·발신 0회)만 재는 시험은 이걸 못 잡는다.
 import { runGroupTurn } from "./bridge";
 import { groupReplyPath, ensureOutboxDir } from "./groupOutbox";
@@ -1232,17 +1232,17 @@ describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 �
   });
 });
 
-// ── ★안내 문구를 '발신' 으로 전하는 경로는 창구에서 실패다★ (리뷰 지적) ──
+// ── ★안내 문구를 '발신' 으로 전하는 경로는 bridge window 에서 실패다★ (리뷰 지적) ──
 //
 // 예약 요청인데 예약 도구가 꺼져 있으면 LLM 앞에서 조기 반환하며 안내 문구를 ★보낸다.★
-// 그런데 창구 경로는 그 발신을 뗐다 — 그러면 ★답 0건 · 경고 없음 · 성공 기록★ 이 되어
+// 그런데 bridge window 경로는 그 발신을 뗐다 — 그러면 ★답 0건 · 경고 없음 · 성공 기록★ 이 되어
 // 사람도 기록도 "잘 됐다" 로 읽는다. 아무것도 전달되지 않았으므로 실패로 보여야 한다.
 test("★예약 미지원 안내는 창구에서 실패로 보인다★ — 답 0건인데 성공으로 적히면 안 된다", async () => {
   const { deps } = spies(() => ok("답"));
   // 예약 도구가 꺼진 상태(기본값)에서 예약형 문장을 넣는다.
   const r = await handleMessage(-123, "10분 뒤에 알려줘", 55, deps, undefined, "window");
   expect(r.detail).toContain("schedule");
-  // ★turnOk 가 거짓이어야 창구 경로가 경고를 띄운다★
+  // ★turnOk 가 거짓이어야 bridge window 경로가 경고를 띄운다★
   expect(r.turnOk).toBe(false);
 });
 
