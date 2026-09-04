@@ -72,6 +72,77 @@ bun run src/server/index.ts
 
 오류가 보이면 **Ctrl+C** 로 끄고, 그 내용을 팀원에게 주면 됩니다.
 
+### 오픈클로 게이트웨이가 안 뜰 때 — ★오류는 `/tmp/openclaw/openclaw-<날짜>.log` 에 있다★
+
+증상: OpenClaw 런타임으로 도는 팀원이 한꺼번에 답이 없다. 어느 팀원이 그 런타임인지는 `agents.json` 의 `runtime` 이 `openclaw` 인 항목이다.
+
+먼저 이것부터 봅니다.
+
+```bash
+launchctl list | grep ai.openclaw.gateway
+```
+
+앞자리가 `-` 이고 뒤가 `1` 이면 켜자마자 종료된 것입니다. launchd 가 10초마다 다시 켜고 그때마다 같은 이유로 죽습니다.
+
+**오류가 어디에 남는지 먼저 알아야 합니다.** 이 서비스는 `StandardErrorPath` 가 `/dev/null` 이라 오류를 버립니다(`~/Library/LaunchAgents` 의 `ai.openclaw`·`ai.hermes`·`com.gdmini` 라벨 23개 중 이것 하나. 2026-09-05 실측).
+`~/Library/Logs/openclaw/gateway.log` 에는 Doctor 경고만 반복해서 찍힙니다. 그것만 보면 원인을 못 찾습니다.
+
+★실제 오류는 `/tmp/openclaw/openclaw-<날짜>.log` 에 있습니다.★ 경로는 아래 명령이 알려줍니다.
+
+```bash
+openclaw gateway status --deep     # File logs: 줄에 그 경로가 나옵니다
+tail -50 /tmp/openclaw/openclaw-$(date +%F).log
+```
+
+`/tmp` 아래라 맥을 껐다 켜면 지워집니다. 재부팅 전에 봐야 합니다.
+
+실제 사례(2026-09-03). 로그에 이렇게 찍혀 있었습니다.
+
+```
+OpenClaw startup migrations did not complete cleanly; refusing to report the gateway ready.
+```
+
+옮기지 못한 항목이 있으면 게이트웨이가 "준비됐다" 고 보고하지 않습니다. 그날은 셋이었습니다.
+
+- `~/.openclaw/credentials/telegram-<계정>-allowFrom.json` 두 개 — 그 계정이 지금 설정에 없어서 옮길 곳을 못 찾음
+- `telegram.message-cache` 가 3000개로 꽉 참 — 옮길 항목 1개인데 자리가 없음
+
+처리한 방법입니다. **지우기 전에 백업합니다.**
+
+★무엇을 고치든 먼저 게이트웨이를 멈춥니다.★ `KeepAlive` 가 `true` 이고 `ThrottleInterval` 이 10 이라,
+멈추지 않으면 launchd 가 10초마다 다시 켜는 도중에 파일을 고치게 됩니다.
+`credentials` 아래 파일도 startup migration 이 읽으므로 그 이동도 멈춘 뒤에 합니다.
+
+```bash
+set -e
+STAMP=$(date +%Y%m%d-%H%M%S)
+mkdir -p ~/.openclaw/backups/$STAMP
+
+openclaw gateway stop
+
+# 없어진 계정 파일 — 백업 폴더로 이동
+mv ~/.openclaw/credentials/telegram-<계정>-allowFrom.json ~/.openclaw/backups/$STAMP/
+
+# 백업 → 무결성 확인 → 오래된 것부터 삭제
+sqlite3 ~/.openclaw/state/openclaw.sqlite ".backup '$HOME/.openclaw/backups/$STAMP/openclaw.sqlite'"
+[ "$(sqlite3 ~/.openclaw/backups/$STAMP/openclaw.sqlite 'pragma integrity_check;')" = "ok" ] || { echo "백업이 온전하지 않다 — 여기서 멈춘다"; exit 1; }
+sqlite3 ~/.openclaw/state/openclaw.sqlite "DELETE FROM plugin_state_entries WHERE rowid IN (SELECT rowid FROM plugin_state_entries WHERE plugin_id='telegram' AND namespace='telegram.message-cache' ORDER BY created_at ASC LIMIT 100);"
+
+openclaw gateway start
+```
+
+`integrity_check` 결과를 `ok` 와 대조합니다. 출력만 보고 넘어가면 백업이 깨져 있어도 다음 줄이 지웁니다.
+
+`$STAMP` 를 쓰는 이유 — 백업 이름을 고정하면 두 번째 실행이 첫 번째 백업을 덮습니다.
+`plugin_id='telegram'` 을 넣는 이유 — 이 표의 기본키가 `(plugin_id, namespace, entry_key)` 라
+같은 namespace 를 다른 plugin 이 쓸 수 있습니다.
+
+올라왔는지는 이것으로 봅니다.
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:18789/    # 200 이면 정상
+```
+
 ### Codex 도구 호출 로그
 
 OpenClaw Codex 세션의 도구 호출은 `~/.openclaw/agents/<계정>/agent/codex-home/sessions/YYYY/MM/DD/rollout-*.jsonl` 에 기록됩니다.
