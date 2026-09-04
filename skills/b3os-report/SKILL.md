@@ -206,7 +206,7 @@ SVG는 라이트/다크 모두에서 읽혀야 한다. 텍스트가 긴 도식�
 ## 예제
 `examples/harness-pilot-report.md` (소스) → `examples/harness-pilot-report.html` (렌더 결과). 실제 harness 파일럿 보고서.
 
-다이어그램 중심 보고서의 실물은 `/reports/file/llm-layer0-basics/html` 이다. 그림 13장이 예문 하나로 이어지고, `references/diagrams.md` 의 여섯 틀이 전부 한 번씩 나온다.
+다이어그램 중심 보고서는 `/reports/file/llm-book/html` 이다. 0부에 그림 13장이 예문 하나로 이어지고, `references/diagrams.md` 의 여섯 틀이 전부 한 번씩 나온다. 부별 탭도 이 보고서에서 쓴다.
 
 ## 살아있는 스킬
 더 나은 차트(자동 바차트 생성기)·레이아웃·호스팅 자동링크는 계속 업뎃(§11 팀 스킬). 테마=`assets/theme.css`(단일 출처, 렌더 시 인라인됨).

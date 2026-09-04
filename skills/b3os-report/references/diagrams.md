@@ -39,7 +39,7 @@
 - 그림 N 의 출력이 그림 N+1 의 입력이 되게 배치한다.
 - 다른 예가 꼭 필요하면(대조를 보여줘야 할 때 등) 그 자리에서만 쓰고, 왜 다른 예를 쓰는지 한 줄 적는다.
 
-**실제 적용 예** — `/reports/file/llm-layer0-basics/html` 는 문장 하나(`고양이가 배가 고파서 그것이 울었다`)로 그림 13장을 이었다.
+**실제 적용 예** — `/reports/file/llm-book/html` 의 0부는 문장 하나(`고양이가 배가 고파서 그것이 울었다`)로 그림 13장을 이었다.
 
 ```
 그림 1  문장    → 토큰 12개 + 토큰 번호
@@ -212,6 +212,6 @@
 
 ## 참고할 실제 보고서
 
-- `/reports/file/llm-layer0-basics/html` — 그림 13장. 위 여섯 틀이 전부 한 번씩 나오고, 예문 하나로 이어진다.
+- `/reports/file/llm-book/html` — 0부에 그림 13장. 위 여섯 틀이 전부 한 번씩 나오고, 예문 하나로 이어진다.
 - `/reports/file/differential-privacy/html` — 다크 editorial 톤의 기준.
 - `examples/harness-pilot-report.md` — 이 스킬의 렌더 예제.
