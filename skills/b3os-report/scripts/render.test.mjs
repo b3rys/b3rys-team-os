@@ -214,7 +214,8 @@ try {
       // 같아도 걸리게 한다 — 색이 같으면 그림에서 제목과 보조설명을 못 가른다.
       assert.ok(
         seen["diagram-title"] > seen["diagram-muted"],
-        `★${label}: 제목(${seen["diagram-title"].toFixed(2)})이 보조설명(${seen["diagram-muted"].toFixed(2)})보다 흐리거나 같다★`,
+        `★${label}: 제목(${seen["diagram-title"].toFixed(2)})이 보조설명(${seen["diagram-muted"].toFixed(2)})보다 흐리거나 같다★\n` +
+          `  이 검사는 위계를 대비 비율로만 본다. 색상(hue)으로 가르는 디자인이면 이 규칙을 다시 봐라 — 코드가 아니라 규칙이 틀린 자리일 수 있다.`,
       );
     }
   }
