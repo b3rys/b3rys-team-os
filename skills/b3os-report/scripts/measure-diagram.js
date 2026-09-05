@@ -17,36 +17,46 @@
 //      안 재고도 '통과' 로 집계된다(2026-09-06 실측 — orange-dark/light 로 dark 를 두 번
 //      더 재고 "4개 테마" 로 보고했다). 아래 themeApplies() 가 그것을 SKIPPED 로 남긴다.
 (() => {
-  const lum = c => { const m=c.match(/\d+\.?\d*/g).map(Number);
-    const f=v=>{v/=255;return v<=.03928?v/12.92:((v+.055)/1.055)**2.4};
-    return .2126*f(m[0])+.7152*f(m[1])+.0722*f(m[2]); };
-  const ratio = (a,b) => { const A=lum(a),B=lum(b);
-    return +(((Math.max(A,B)+.05)/(Math.min(A,B)+.05))).toFixed(2); };
-  const rgb = c => c.match(/\d+\.?\d*/g).map(Number);
+  // ★색 문자열을 자리 세기로 파싱하지 않는다.★ getComputedStyle 은 정규화해 주지 않아서
+  // oklch(...) 나 color(display-p3 ...) 가 적힌 그대로 들어온다. 숫자 자리를 세면
+  // display-p3 의 '3' 이 첫 숫자로 잡혀 한 칸씩 밀린다 — 던지지 않고 ★조용히 틀린다.★
+  // 1x1 캔버스에 칠하고 픽셀을 읽으면 표기와 무관하게 RGBA 가 나온다(2026-09-06 실측:
+  // none·transparent·rgb()/rgba()·hsl()·oklch()·color(srgb)·color(display-p3) 11종 전부 일치).
+  const _cv = document.createElement('canvas'); _cv.width = _cv.height = 1;
+  const _cx = _cv.getContext('2d', { willReadFrequently: true });
+  // 칠할 수 없는 값이면 null. 'none' 과 잘못된 값은 fillStyle 이 바뀌지 않는 것으로 가린다.
+  const toRGBA = (c) => {
+    if (!c || c === 'none') return null;
+    _cx.fillStyle = '#000';
+    _cx.fillStyle = c;
+    if (_cx.fillStyle === '#000000' && !/^#0{3,6}$|^black$|^rgb\(0, 0, 0\)$/i.test(c.trim())) return null;
+    _cx.clearRect(0, 0, 1, 1);
+    _cx.fillRect(0, 0, 1, 1);
+    const d = _cx.getImageData(0, 0, 1, 1).data;
+    return [d[0], d[1], d[2], d[3] / 255];
+  };
+  const lum = (px) => {
+    const f = v => { v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; };
+    return .2126 * f(px[0]) + .7152 * f(px[1]) + .0722 * f(px[2]);
+  };
+  const ratio = (a, b) => { const A = lum(a), B = lum(b);
+    return +(((Math.max(A, B) + .05) / (Math.min(A, B) + .05))).toFixed(2); };
   // ★칸 배경은 fill 만으로 정해지지 않는다.★ opacity·fill-opacity 가 걸리면 그 아래 색과 섞인다.
   // 섞기 전 값으로 재면 실제로 읽히는 칸까지 미달로 잡는다(2026-09-06: 행렬 그림에서
   // 10건 중 9건이 그렇게 나왔다. opacity 를 반영하니 실제 미달은 1건이었다).
-  const blend = (fg, bg, a) => {
-    const F = rgb(fg), B = rgb(bg);
-    return `rgb(${[0,1,2].map(i => Math.round(F[i]*a + B[i]*(1-a))).join(', ')})`;
-  };
-  // 색이 아닌 값 — 'none' 은 파싱하면 null 이라 lum() 이 던지고, 투명(alpha 0)은
-  // rgba(0,0,0,0) 이라 검정으로 읽힌다. 둘 다 "그 자리에 색이 없다" 이므로 아래 색을 쓴다.
-  const paints = (c) => {
-    if (!c || c === 'none') return false;
-    const m = c.match(/\d+\.?\d*/g);
-    if (!m) return false;
-    return !(m.length >= 4 && Number(m[3]) === 0);
-  };
+  const blend = (fg, bg, a) => [0,1,2].map(i => Math.round(fg[i]*a + bg[i]*(1-a))).concat(1);
+  // 그 자리에 색이 없으면(none·투명) 아래 색을 쓴다.
   const effBg = (el, under) => {
+    const px = toRGBA(getComputedStyle(el).fill);
+    if (!px || px[3] === 0) return under;        // 윤곽선만 있는 상자 · 투명
     const cs = getComputedStyle(el);
-    if (!paints(cs.fill)) return under;          // 윤곽선만 있는 상자
-    const a = parseFloat(cs.opacity) * parseFloat(cs.fillOpacity || 1);
-    return a >= 1 ? cs.fill : blend(cs.fill, under, a);
+    const a = parseFloat(cs.opacity) * parseFloat(cs.fillOpacity || 1) * px[3];
+    return a >= 1 ? px : blend(px, under, a);
   };
 
   const root = document.documentElement, before = root.getAttribute('data-theme');
   const bodyBg = () => getComputedStyle(document.body).backgroundColor;
+  const bodyPx = () => toRGBA(bodyBg()) || [255,255,255,1];
 
   // :root 만 걸린 상태의 배경색 — 없는 테마를 판별하는 기준값
   root.removeAttribute('data-theme');
@@ -87,7 +97,7 @@
       continue;
     }
     root.setAttribute('data-theme', theme);
-    const pageBg = bodyBg();
+    const pageBg = bodyPx();
     const F = { lowContrast:[], hardcoded:[], viewBoxOverflow:[], tightBox:[], missingMarker:[] };
 
     // ★diagram-flow 와 desktop-infographic 을 둘 다 본다.★ desktop-infographic 은 모바일
@@ -134,14 +144,14 @@
         });
 
         const bg = host ? effBg(host, pageBg) : pageBg;
-        const fg = getComputedStyle(t).fill;
-        if (!paints(fg)) return;                  // 안 보이는 글자는 잴 대상이 아니다
+        const fg = toRGBA(getComputedStyle(t).fill);
+        if (!fg || fg[3] === 0) return;           // 안 보이는 글자는 잴 대상이 아니다
         const r  = ratio(fg, bg);
         const fs = parseFloat(getComputedStyle(t).fontSize);
         const fw = +getComputedStyle(t).fontWeight;
         // WCAG AA: 큰 글씨(18.66px+bold 또는 24px+)는 3.0, 그 외 4.5
         const need = (fs>=18.66 && fw>=700) || fs>=24 ? 3.0 : 4.5;
-        if (r < need) F.lowContrast.push({fig, txt, ratio:r, need, fg, bg,
+        if (r < need) F.lowContrast.push({fig, txt, ratio:r, need, fg:`rgb(${fg.slice(0,3)})`, bg:`rgb(${bg.slice(0,3)})`,
           onAccent: !!host && (host.getAttribute('class')||'').includes('accent')});
 
         // ④ 상자 여백 (diagrams.md 권장 좌우 24px, 최소선 6px)
