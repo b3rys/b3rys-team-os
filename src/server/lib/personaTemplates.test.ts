@@ -90,7 +90,33 @@ describe("핵심룰 — '외부 전송' 판별 축", () => {
   });
 });
 
-describe("설명 원칙 — 산출물에 다섯 줄이 다 있나", () => {
+describe("문장 작성 기준 — 산출물에 세 줄이 다 있나", () => {
+  const rule = (md: string): string => {
+    const i = md.indexOf("**문장 작성 기준**");
+    return i < 0 ? "" : md.slice(i, md.indexOf("\n\n", i));
+  };
+
+  for (const runtime of ["claude_channel", "openclaw", "hermes_agent"] as const) {
+    test(`${runtime} 산출물에 문장 작성 기준 세 줄`, () => {
+      const md =
+        runtime === "claude_channel"
+          ? buildPersona(claudeInput)
+          : buildAgentsMd({ ...claudeInput, runtime });
+      const block = rule(md);
+      expect(block, "★문장 작성 기준 블록 자체가 산출물에서 사라졌다★").not.toBe("");
+      for (const n of [1, 2, 3]) {
+        expect(block, `★${n}번 줄이 없다★`).toContain(`\n${n}. `);
+      }
+      expect(block, "★지운 4번이 되살아났다★").not.toContain("4. ");
+      expect(block, "★'같은 주장을 표현만 바꿔 반복하지 않는다' 가 빠졌다★").toContain(
+        "같은 주장을 표현만 바꿔 반복하지 않는다",
+      );
+      expect(block, "★'한 문장에 판단 하나' 가 빠졌다★").toContain("한 문장에 판단 하나");
+    });
+  }
+});
+
+describe("설명 원칙 — 산출물에 네 줄이 다 있나", () => {
   const rule = (md: string): string => {
     const i = md.indexOf("**설명 원칙**");
     return i < 0 ? "" : md.slice(i, md.indexOf("\n\n", i));
@@ -104,7 +130,8 @@ describe("설명 원칙 — 산출물에 다섯 줄이 다 있나", () => {
           : buildAgentsMd({ ...claudeInput, runtime });
       const block = rule(md);
       expect(block, "★설명 원칙 블록 자체가 산출물에서 사라졌다★").not.toBe("");
-      for (const n of [1, 2, 3, 4, 5]) {
+      expect(block, "★지운 5번이 되살아났다★").not.toContain("5. ");
+      for (const n of [1, 2, 3, 4]) {
         expect(block, `★${n}번 줄이 없다★`).toContain(`\n${n}. `);
       }
       // GD 2026-09-05 — 지어낸 낱말(창구·제자리·실물)이 반복돼 2번에 넣은 문장.
@@ -115,6 +142,7 @@ describe("설명 원칙 — 산출물에 다섯 줄이 다 있나", () => {
       expect(block, "★'핵심만 얘기한다' 가 빠졌다★").toContain(
         "전달하려고 하는 핵심만 얘기한다",
       );
+      expect(block, "★'말을 늘리지 않는다' 가 빠졌다★").toContain("말을 늘리지 않는다");
     });
   }
 });
