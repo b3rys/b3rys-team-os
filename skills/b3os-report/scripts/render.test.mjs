@@ -172,6 +172,54 @@ try {
     assert.ok(threw, `${name}: 렌더가 멈춰야 하는데 통과했다`);
   }
 
+  // ── 그림 글자 대비 (WCAG AA 4.5:1) ─────────────────────────────────────────
+  // dbak 측정(2026-09-06): diagram-title 이 --subtle 이라 light 3.06 · dark 3.85 로 미달했다.
+  // 본문(--ink 15.17)·보조설명(--mut 4.88)보다 제목이 안 보여 순서가 뒤집혀 있었다.
+  // 토큰과 클래스가 산출물 안에 다 있으므로 브라우저 없이 여기서 잰다.
+  {
+    const relLum = (hex) => {
+      const h = hex.replace("#", "");
+      const ch = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+      const lin = ch.map((x) => (x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+    };
+    const ratio = (a, b) => {
+      const [hi, lo] = [relLum(a), relLum(b)].sort((x, y) => y - x);
+      return (hi + 0.05) / (lo + 0.05);
+    };
+    // 산출물에서 토큰 값을 읽는다 — 소스가 아니라 렌더된 HTML 이 기준이다.
+    const tokenIn = (scope, name) => {
+      const seg = html.slice(html.indexOf(scope));
+      const m = seg.match(new RegExp(`--${name}:(#[0-9a-fA-F]{6})`));
+      assert.ok(m, `★${scope} 에서 --${name} 토큰을 못 찾았다★`);
+      return m[1];
+    };
+    const darkScope = ":root{";
+    const lightScope = '[data-theme="light"]';
+    // 클래스가 어느 토큰을 쓰는지도 산출물에서 읽는다 — 이름을 여기 박아두면 CSS 를 바꿔도 안 걸린다.
+    const fillVar = (cls) => {
+      const m = html.match(new RegExp(`\\.diagram-flow \\.${cls}\\{fill:var\\(--([a-z-]+)\\)`));
+      assert.ok(m, `★.${cls} 의 fill 을 산출물에서 못 찾았다★`);
+      return m[1];
+    };
+    for (const [scope, label] of [[darkScope, "dark"], [lightScope, "light"]]) {
+      const bg = tokenIn(scope, "bg");
+      const seen = {};
+      for (const cls of ["diagram-title", "diagram-text", "diagram-muted"]) {
+        const v = ratio(tokenIn(scope, fillVar(cls)), bg);
+        seen[cls] = v;
+        assert.ok(v >= 4.5, `★${label}/${cls} 대비 ${v.toFixed(2)} — AA 4.5 미달★`);
+      }
+      // 제목이 보조설명보다 흐리거나 같으면 위계가 무너진 것이다. dbak 이 잡은 것이 이 축이다.
+      // 같아도 걸리게 한다 — 색이 같으면 그림에서 제목과 보조설명을 못 가른다.
+      assert.ok(
+        seen["diagram-title"] > seen["diagram-muted"],
+        `★${label}: 제목(${seen["diagram-title"].toFixed(2)})이 보조설명(${seen["diagram-muted"].toFixed(2)})보다 흐리거나 같다★\n` +
+          `  이 검사는 위계를 대비 비율로만 본다. 색상(hue)으로 가르는 디자인이면 이 규칙을 다시 봐라 — 코드가 아니라 규칙이 틀린 자리일 수 있다.`,
+      );
+    }
+  }
+
   console.log("PASS b3os-report dark/light theme + nested raw block passthrough + CSS-only tabs");
 } finally {
   rmSync(tmp, { recursive: true, force: true });
