@@ -24,13 +24,17 @@
   // none·transparent·rgb()/rgba()·hsl()·oklch()·color(srgb)·color(display-p3) 11종 전부 일치).
   const _cv = document.createElement('canvas'); _cv.width = _cv.height = 1;
   const _cx = _cv.getContext('2d', { willReadFrequently: true });
-  // 칠할 수 없는 값이면 null. 'none' 과 잘못된 값은 fillStyle 이 바뀌지 않는 것으로 가린다.
+  // 칠할 수 없는 값이면 null. fillStyle 은 잘못된 값을 받으면 ★직전 값을 그대로 둔다.★
+  // 그래서 서로 다른 초기값 둘로 넣어보고 결과가 갈리면 그 값은 색이 아니다. 검정 표기
+  // 목록을 유지할 필요가 없다 — hsl(0 0% 0%) 처럼 캔버스가 #000000 으로 바꾸는 검정도
+  // 그대로 통과한다(예외 목록 방식은 이것을 null 로 떨어뜨렸다).
   const toRGBA = (c) => {
     if (!c || c === 'none') return null;
-    _cx.fillStyle = '#000';
-    _cx.fillStyle = c;
-    if (_cx.fillStyle === '#000000' && !/^#0{3,6}$|^black$|^rgb\(0, 0, 0\)$/i.test(c.trim())) return null;
+    _cx.fillStyle = '#000000'; _cx.fillStyle = c; const seedBlack = _cx.fillStyle;
+    _cx.fillStyle = '#ffffff'; _cx.fillStyle = c; const seedWhite = _cx.fillStyle;
+    if (seedBlack !== seedWhite) return null;
     _cx.clearRect(0, 0, 1, 1);
+    _cx.fillStyle = c;
     _cx.fillRect(0, 0, 1, 1);
     const d = _cx.getImageData(0, 0, 1, 1).data;
     return [d[0], d[1], d[2], d[3] / 255];
