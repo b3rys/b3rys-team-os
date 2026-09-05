@@ -2,7 +2,8 @@
 // b3os-report — zero-dep Markdown → 자체완결 반응형 HTML(+SVG passthrough).
 // 사용: node render.mjs <input.md> [output.html] [--title "제목"]
 // 지원: # ## ### 헤딩 / **굵게** *기울임* `코드` / 표 / -·* 목록 / 1. 순서목록 /
-//       > 인용 / --- 구분선 / [텍스트](url) / 코드펜스 ``` / <svg>…</svg> 원문 통과.
+//       > 인용 / --- 구분선 / [텍스트](url) / 코드펜스 ``` / <svg>…</svg> 원문 통과 /
+//       <div id="x" data-tab="라벨"></div> 탭 구분 (2개 이상일 때만 탭이 생긴다).
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve, basename } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,11 +35,26 @@ function inline(t) {
 
 const lines = readFileSync(inPath, "utf8").replace(/\r\n/g, "\n").split("\n");
 const out = [];
+const tabs = [];   // 탭 구분 표식 — {id, label, at}. at = out 배열에서 그 탭이 시작하는 자리.
 let i = 0;
 while (i < lines.length) {
   let line = lines[i];
   const t = line.trim();
 
+  // 탭 구분 표식: <div id="개요" data-tab="개요"></div>
+  // ★아래 passthrough 보다 먼저 본다★ — 순서가 바뀌면 통과 블록이 먼저 먹어 표식이 사라진다.
+  if (/^<div\b[^>]*\bdata-tab=/i.test(t)) {
+    if (!/<\/div>\s*$/.test(t)) {
+      console.error(`탭 표식은 한 줄로 닫아야 한다: ${t}`); process.exit(1);
+    }
+    const id = (t.match(/\bid="([^"]+)"/) || [])[1];
+    const label = (t.match(/\bdata-tab="([^"]*)"/) || [])[1];
+    if (!id || !label) { console.error(`탭 표식에 id 와 data-tab 이 둘 다 있어야 한다: ${t}`); process.exit(1); }
+    if (tabs.some((x) => x.id === id)) { console.error(`탭 id 중복: ${id}`); process.exit(1); }
+    tabs.push({ id, label, at: out.length });
+    out.push(`<div id="${id}"></div>`);   // 표식 자체가 앵커로 남는다 → 목차의 #id 링크가 그대로 산다.
+    i++; continue;
+  }
   // SVG / figure / div 원문 블록 통과. 같은 태그가 중첩돼도 실제 depth가 0이 될 때까지 읽는다.
   if (/^<(svg|figure|div)\b/i.test(t)) {
     const tag = t.match(/^<(\w+)/)[1];
@@ -104,6 +120,116 @@ while (i < lines.length) {
   out.push(`<p>${para.join("<br>")}</p>`);
 }
 
+// ── 탭 조립 ────────────────────────────────────────────────────────────────
+// ★왜 탭인가★ — 긴 보고서는 한 장에 그림이 몰리면서, 브라우저가 앵커로 스크롤한 뒤
+// 그림들이 뒤늦게 자리를 잡아 내용이 밀린다. 목차 링크를 눌러도 엉뚱한 데 서는 실제 원인이다.
+// 부마다 나누면 한 화면이 다루는 양이 줄어 그 밀림이 없어진다.
+// ★전환은 CSS :target 하나로 한다★ — /reports 뷰어가 iframe 을 sandbox 로 띄워
+// 스크립트를 막으므로, 자바스크립트에 기대면 거기서 탭이 죽는다.
+let bodyHtml = out.join("\n");
+let tabsCss = "", tabsJs = "";
+if (tabs.length === 1) {
+  console.error(`탭 표식이 1개뿐이다(${tabs[0].id}) — 2개 이상이어야 탭이 된다. 표식을 더 넣거나 지워라.`);
+  process.exit(1);
+}
+if (tabs.length >= 2) {
+  const panels = tabs.map((tb, k) => {
+    const end = k + 1 < tabs.length ? tabs[k + 1].at : out.length;
+    return `<section id="panel-${tb.id}" class="tab-panel${k === 0 ? " is-default" : ""}" role="tabpanel" aria-labelledby="tab-${tb.id}">\n`
+      + out.slice(tb.at, end).join("\n") + `\n</section>`;
+  });
+  const bar = `<div id="report-top"></div>\n<nav class="report-tabs" role="tablist" aria-label="보고서 탭">\n`
+    + tabs.map((tb) => `  <a id="tab-${tb.id}" class="report-tab" role="tab" href="#panel-${tb.id}">${esc(tb.label)}</a>`).join("\n")
+    + `\n</nav>`;
+  bodyHtml = out.slice(0, tabs[0].at).join("\n") + "\n" + bar + "\n" + panels.join("\n");
+
+  // 켜진 탭 표시. 패널 자체가 target 이거나(탭을 눌렀다), 패널 안의 무언가가 target 이다(목차를 눌렀다).
+  const activeBg = "{background:color-mix(in srgb,var(--card) 78%,var(--green) 22%);color:var(--ink)}";
+  // ★어느 패널도 안 걸렸을 때만★ 첫 패널을 켠다. 단순히 :not(:has(:target)) 로 쓰면
+  // 패널 바깥(머리말)을 가리키는 주소에서 모든 패널이 닫혀 화면이 빈다.
+  const noPanelHit = `.wrap:not(:has(.tab-panel:target)):not(:has(.tab-panel :target))`;
+  // ★theme.css 에 이미 있는 것은 다시 쓰지 않는다★ —
+  // .report-tabs · .report-tab · .report-tab.is-active · .tab-panel{display:none} 은 테마 소관이고
+  // 생김새 기준은 references/ui-components.md 2절이 정한다(조용한 blurred row, 한 줄 가로 스크롤).
+  // 여기서 더하는 것은 ★:target 으로 어느 패널을 열지 고르는 규칙★ 뿐이다.
+  tabsCss = `
+/* ★탭 보고서에서는 부드러운 스크롤을 끈다★ — theme.css 의 scroll-behavior:smooth 가 켜져 있으면
+   탭을 눌렀을 때 브라우저의 애니메이션과 아래 보정 코드의 이동이 서로 다투어 화면이 떨린다.
+   탭은 이동이지 효과가 아니다. */
+html{scroll-behavior:auto}
+.tab-panel:target,.tab-panel:has(:target){display:block}
+${noPanelHit} .tab-panel.is-default{display:block}
+.wrap div[id]:empty{scroll-margin-top:104px}
+${tabs.map((tb) => `.wrap:has(#panel-${tb.id}:target) [href="#panel-${tb.id}"],.wrap:has(#panel-${tb.id} :target) [href="#panel-${tb.id}"]${activeBg}`).join("\n")}
+${noPanelHit} [href="#panel-${tabs[0].id}"]${activeBg}`;
+
+  // ★스크롤 보정★ — 탭으로 나눠도 남는 문제가 하나 있다.
+  // 목적지가 ★닫혀 있던 패널★ 안이면, 브라우저가 첫 스크롤을 시도하는 시점에
+  // 그 요소는 화면에 없어 레이아웃 상자가 없다 → 갈 곳을 못 찾는다.
+  // CSS 가 패널을 편 뒤에도 브라우저는 다시 시도하지 않는다. 그래서 열린 다음 한 번 더 옮긴다.
+  // 이건 스크롤만 거든다 — 스크립트가 막힌 곳(포털 iframe)에서도 탭 전환 자체는 CSS 로 그대로 돈다.
+  // ★스크롤 보정 — 한 번만 움직인다★
+  // 목적지가 닫혀 있던 탭 안이면 브라우저는 첫 스크롤 시점에 그 요소의 위치를 모른다(화면에 없어서다).
+  // CSS 가 탭을 편 뒤에도 브라우저는 다시 시도하지 않으므로 여기서 한 번 옮긴다.
+  // ★여러 번 옮기면 화면이 떨린다★ — 그래서 탭 클릭은 1회, 깊은 앵커만 늦은 재배치를 한 번 더 확인하되
+  // 어긋난 폭이 4px 를 넘을 때만 실제로 움직인다.
+  // ★스크롤 보정★ — 두 가지 일을 한다.
+  //  ① 닫혀 있던 패널로 갈 때: 누르는 순간 그 패널은 display:none 이라 브라우저가 위치를 모른다.
+  //     그대로 두면 화면이 문서 맨 위로 가고 탭 줄이 가운데에 놓인다(실측 2026-09-02).
+  //  ② 탭마다 읽던 자리를 기억한다: 다른 탭에 갔다가 돌아오면 그 자리로 돌려놓는다.
+  //     처음 여는 탭은 그 부의 첫머리로 간다. 지금 켜진 탭을 다시 누르면 첫머리로 간다.
+  // ★어느 경우든 한 번만 옮긴다★ — 두 번 옮기면 화면이 튄다.
+  tabsJs = `
+(function(){
+  var TOP=104;          // 장 앵커 — 제목이 상단 탭 줄에 가리지 않는 자리
+  var PANEL_TOP=112;    // 탭 첫머리 — .tab-panel 의 scroll-margin-top 과 같은 값
+  var pos={}, current=null;
+  function put(el, top){ window.scrollTo({top: Math.max(0, el.getBoundingClientRect().top+window.scrollY-top), behavior:'instant'}); }
+  function shown(){
+    var els=document.querySelectorAll('.tab-panel');
+    for(var i=0;i<els.length;i++) if(getComputedStyle(els[i]).display!=='none') return els[i].id;
+    return null;
+  }
+  // ★떠나기 전에 적어 둔다★ — hashchange 시점에는 브라우저가 이미 화면을 옮긴 뒤라 늦다.
+  //   클릭 시점은 주소가 바뀌기 전이므로 그때의 scrollY 가 그 탭에서 읽던 자리다.
+  function wire(){
+    var tabs=document.querySelectorAll('.report-tab');
+    for(var i=0;i<tabs.length;i++) tabs[i].addEventListener('click', function(){
+      var to=(this.getAttribute('href')||'').slice(1);
+      if(current===to) delete pos[current];        // 같은 탭을 다시 누르면 첫머리로
+      else if(current) pos[current]=window.scrollY;
+    });
+    current=shown();
+  }
+  function go(){
+    var h=location.hash; if(!h||h.length<2) return;
+    var el=document.getElementById(decodeURIComponent(h.slice(1))); if(!el) return;
+    var isTab=el.classList.contains('tab-panel');
+    // ★requestAnimationFrame 을 쓰지 않는다★ — 배경 탭에서는 콜백이 아예 실행되지 않는다(실측 2026-09-02:
+    //   document.hidden=true 인 탭에서 rAF 는 안 돌고 setTimeout 만 돈다. 그래서 이 코드가 한 줄도
+    //   실행되지 않은 채 "동작한다" 로 잘못 읽혔다). getBoundingClientRect 를 읽으면 :target 으로 바뀐
+    //   표시 상태가 그 자리에서 계산되므로, 프레임을 기다릴 이유가 없다.
+    if(isTab){
+      current=el.id;
+      var saved=pos[el.id];
+      if(typeof saved==='number'){
+        el.getBoundingClientRect();           // 방금 열린 패널의 높이를 먼저 계산시킨다
+        window.scrollTo({top:saved, behavior:'instant'});
+      }
+      else put(el, PANEL_TOP);
+      return;
+    }
+    current=shown();
+    put(el, TOP);
+    setTimeout(function(){                    // 깊은 앵커만 — 그림이 늦게 자리를 잡아 밀렸는지 본다
+      if(Math.abs(el.getBoundingClientRect().top-TOP)>4) put(el, TOP);
+    },400);
+  }
+  addEventListener('load',function(){ wire(); go(); });
+  addEventListener('hashchange',go);
+})();`;
+}
+
 const css = readFileSync(resolve(__dir, "../assets/theme.css"), "utf8");
 const docTitle = title || (lines.find((l) => /^#\s+/.test(l)) || "# 보고서").replace(/^#\s+/, "").trim();
 const html = `<!doctype html>
@@ -112,14 +238,15 @@ const html = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${esc(docTitle)}</title>
 <style>
-${css}</style>
+${css}${tabsCss}
+</style>
 </head><body><div class="report-shell">
   <div class="report-toolbar">
     <div class="report-brand"><span class="report-mark"></span><b>b3rys report</b><span>self-contained HTML</span></div>
     <div class="theme-switch" role="group" aria-label="theme switch"><button id="theme-dark" class="active" type="button">Dark</button><button id="theme-light" type="button">Light</button></div>
   </div>
   <div class="wrap">
-${out.join("\n")}
+${bodyHtml}
     <div class="report-footer">b3rys report · Dark/Light theme · generated from Markdown</div>
   </div>
 </div>
@@ -129,7 +256,7 @@ ${out.join("\n")}
   function setTheme(t){root.setAttribute('data-theme',t);try{localStorage.setItem('b3os-report-theme',t)}catch(e){};d.classList.toggle('active',t==='dark');l.classList.toggle('active',t==='light')}
   try{var saved=localStorage.getItem('b3os-report-theme'); if(saved==='light') setTheme('light');}catch(e){}
   d.onclick=function(){setTheme('dark')}; l.onclick=function(){setTheme('light')};
-})();
+})();${tabsJs}
 </script></body></html>
 `;
 writeFileSync(outPath, html);
