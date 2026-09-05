@@ -201,6 +201,17 @@
 
 렌더한 HTML 을 **브라우저로 열어서** 확인한다. 소스만 보고 통과시키지 않는다.
 
+눈으로 훑는 대신 재는 스크립트가 있다. 렌더한 HTML 을 브라우저에서 열고 콘솔에 붙여넣는다.
+
+```text
+scripts/measure-diagram.js   대비·하드코딩색·viewBox 넘침·상자 여백·marker 실재
+scripts/measure-mobile.js    390/640/1024 에서 모바일 전환·가로 스크롤·표 잘림
+```
+
+`measure-diagram.js` 는 `getComputedStyle` 과 `getBBox` 로 **그려진 값**을 본다.
+`render.test.mjs` 의 대비 검사는 `theme.css` 토큰을 계산하므로 SVG 안 하드코딩 색을 못 잡는다.
+두 개가 보는 축이 다르니 둘 다 돌린다.
+
 - [ ] 라이트 모드에서 모든 글자가 읽히나 (하드코딩 색이 남아 있으면 여기서 걸린다)
 - [ ] 다크 모드에서 모든 글자가 읽히나
 - [ ] 상자 밖으로 넘친 글자가 없나
