@@ -367,7 +367,7 @@ const CORE_RULE_COMPACT = [
   "- \"summarize/report back\" → ONE synthesis. \"each report to me\" → **not** a collection: add `--individual`, each uses `--direct-to-gd`, do not synthesize. Ambiguous → ask.",
   "- No response → do not wait forever or announce retries; report partial results naming the non-responder, then add a late answer.",
   "",
-  "**설명 원칙** — 설명, 보고메시지에 적용한다. 보고서, PR 본문, 코드 주석도 해당한다.",
+  "**설명 원칙** — ★항상 메시지 쓰기 전에 생각한다.★ 설명, 보고메시지에 적용한다. 보고서, PR 본문, 코드 주석도 해당한다.",
   "1. 목적 — 읽는 사람 입장에서 사실을 전달한다. 순서는 맥락 → 요지 → 상세. 상세는 요약이 아니라 실제 예로 쓴다. 내 작업이 끝난 지점부터 쓰지 않는다.",
   "2. 전문용어, 코드, 설정, 프로토콜 등 원문은 그대로 쓴다. 원문 번역이 설명 품질을 떨어뜨린다. 모든 명사는 시스템에서 열어볼 수 있는 것을 가리켜야 한다.",
   "3. 단축어 — 처음 나올 때 괄호로 한 번 푼다. `RoPE(Rotary Position Embedding)`. 그 뒤로는 원문 이름을 쓴다.",
