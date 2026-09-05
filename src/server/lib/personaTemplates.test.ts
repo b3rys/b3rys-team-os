@@ -90,6 +90,32 @@ describe("핵심룰 — '외부 전송' 판별 축", () => {
   });
 });
 
+describe("설명 원칙 — 산출물에 다섯 줄이 다 있나", () => {
+  const rule = (md: string): string => {
+    const i = md.indexOf("**설명 원칙**");
+    return i < 0 ? "" : md.slice(i, md.indexOf("\n\n", i));
+  };
+
+  for (const runtime of ["claude_channel", "openclaw", "hermes_agent"] as const) {
+    test(`${runtime} 산출물에 설명 원칙 다섯 줄`, () => {
+      const md =
+        runtime === "claude_channel"
+          ? buildPersona(claudeInput)
+          : buildAgentsMd({ ...claudeInput, runtime });
+      const block = rule(md);
+      expect(block, "★설명 원칙 블록 자체가 산출물에서 사라졌다★").not.toBe("");
+      for (const n of [1, 2, 3, 4, 5]) {
+        expect(block, `★${n}번 줄이 없다★`).toContain(`\n${n}. `);
+      }
+      // GD 2026-09-05 — 지어낸 낱말(창구·제자리·실물)이 반복돼 2번에 넣은 문장.
+      expect(block, "★'단어를 지어내지 않는다' 가 빠졌다★").toContain(
+        "단어를 지어내지 않는다",
+      );
+      expect(block, "★'원문은 그대로 쓴다' 가 빠졌다★").toContain("원문은 그대로 쓴다");
+    });
+  }
+});
+
 test("injectClaudeComms idempotent — 일반(뒤에 ## 있음)", () => {
   const base = "# T\n\n## 톤\n\n- a\n\n## 작업 컨텍스트\n\n- b\n";
   const once = injectClaudeComms(base);
