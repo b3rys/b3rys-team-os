@@ -104,7 +104,8 @@ describe("설명 원칙 — 산출물에 다섯 줄이 다 있나", () => {
           : buildAgentsMd({ ...claudeInput, runtime });
       const block = rule(md);
       expect(block, "★설명 원칙 블록 자체가 산출물에서 사라졌다★").not.toBe("");
-      for (const n of [1, 2, 3, 4, 5]) {
+      expect(block, "★지운 5번이 되살아났다★").not.toContain("5. ");
+      for (const n of [1, 2, 3, 4]) {
         expect(block, `★${n}번 줄이 없다★`).toContain(`\n${n}. `);
       }
       // GD 2026-09-05 — 지어낸 낱말(창구·제자리·실물)이 반복돼 2번에 넣은 문장.
@@ -115,6 +116,7 @@ describe("설명 원칙 — 산출물에 다섯 줄이 다 있나", () => {
       expect(block, "★'핵심만 얘기한다' 가 빠졌다★").toContain(
         "전달하려고 하는 핵심만 얘기한다",
       );
+      expect(block, "★'말을 늘리지 않는다' 가 빠졌다★").toContain("말을 늘리지 않는다");
     });
   }
 });
