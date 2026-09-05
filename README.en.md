@@ -149,4 +149,4 @@ PRs welcome. Dev setup, what to check before sending, and the PR process are in 
 
 > 🖥️ Developed and tested on macOS with Claude Code, so support and test coverage are narrow. This is a personal project — thanks for your understanding. Windows/Linux may be rough for now; macOS is the smoothest today.
 
-> 🕘 Timezone: scheduled jobs (e.g. the daily task review) default to Korea time (`Asia/Seoul`). Set `B3OS_SCHEDULER_TIMEZONE` in `.env` to change it — **fixed-offset zones only** for now (e.g. `Asia/Seoul`, `Asia/Kolkata`). DST zones like `America/New_York` aren't supported yet (ignored, falls back to Korea time; boot stays safe).
+> 🕘 Timezone: scheduled jobs (e.g. the weekday task review, which skips Korean public holidays) default to Korea time (`Asia/Seoul`). Set `B3OS_SCHEDULER_TIMEZONE` in `.env` to change it — **fixed-offset zones only** for now (e.g. `Asia/Seoul`, `Asia/Kolkata`). DST zones like `America/New_York` aren't supported yet (ignored, falls back to Korea time; boot stays safe).

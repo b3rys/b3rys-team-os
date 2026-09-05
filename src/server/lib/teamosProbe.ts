@@ -62,7 +62,7 @@ function launchdDesc(): Record<string, string> {
     "ai.openclaw.gateway": "openclaw 게이트웨이 — openclaw 런타임 구동",
     [`${prefix}.caffeinate`]: "맥미니 잠들기 방지 (24/7 가동 유지)",
     [`${prefix}.team-collab`]: "팀 대시보드 · 메시지 버스 서버 (:7878)",
-    [`${prefix}.team-task-review`]: "매일 06:00 Tasks active 과제 리뷰 ping",
+    [`${prefix}.team-task-review`]: "평일 06:00 Tasks active 과제 리뷰 ping",
     [`${prefix}.team-digest`]: "매일 08:00 팀 digest 발송",
     [`${prefix}.team-os-boot`]: "부팅 시 팀 운영 상태 초기 점검",
     [`${prefix}.pangyobuk-hub`]: "your-team.example.com 허브 (:3000)",

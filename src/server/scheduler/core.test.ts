@@ -131,17 +131,26 @@ describe("b3os scheduler core", () => {
     expect(session.enabled).toBe(1);
   });
 
-  test("daily task review seeds portable 06:00/06:20 jobs idempotently", () => {
+  test("daily task review seeds weekday-only 06:00/06:20 jobs that skip KR holidays", () => {
     const d = db();
-    const first = ensureDailyTaskReviewJobs(d);
-    const second = ensureDailyTaskReviewJobs(d);
+    const first = ensureDailyTaskReviewJobs(d, { from: kst(2026, 9, 4, 7, 0) });
+    const second = ensureDailyTaskReviewJobs(d, { from: kst(2026, 9, 4, 7, 0) });
     expect(first.map((j) => j.id)).toEqual(["sched_task_review_ping", "sched_task_review_summary"]);
     expect(second.map((j) => j.id)).toEqual(first.map((j) => j.id));
     expect(d.prepare(`SELECT count(*) AS n FROM scheduled_job WHERE id IN (?, ?)`).get(first[0]!.id, first[1]!.id)).toEqual({ n: 2 });
-    expect(JSON.parse(first[0]!.schedule_expr!)).toMatchObject({ cron: "0 6 * * *" });
-    expect(JSON.parse(first[1]!.schedule_expr!)).toMatchObject({ cron: "20 6 * * *" });
+    expect(JSON.parse(first[0]!.schedule_expr!)).toMatchObject({ cron: "0 6 * * 1-5", holidayPolicy: "skip", holidayCountry: "KR" });
+    expect(JSON.parse(first[1]!.schedule_expr!)).toMatchObject({ cron: "20 6 * * 1-5", holidayPolicy: "skip", holidayCountry: "KR" });
+    expect(fromSqliteDate(first[0]!.next_run_at).getTime()).toBe(kst(2026, 9, 7, 6, 0).getTime());
+    expect(fromSqliteDate(first[1]!.next_run_at).getTime()).toBe(kst(2026, 9, 7, 6, 20).getTime());
     expect(JSON.parse(first[0]!.payload_json)).toEqual({ type: "exec", execKey: "task-review-ping" });
     expect(JSON.parse(first[1]!.payload_json)).toEqual({ type: "exec", execKey: "task-review-summary" });
+  });
+
+  test("daily task review skips consecutive KR holidays and the following weekend", () => {
+    const d = db();
+    const jobs = ensureDailyTaskReviewJobs(d, { from: kst(2026, 9, 23, 7, 0) });
+    expect(fromSqliteDate(jobs[0]!.next_run_at).getTime()).toBe(kst(2026, 9, 28, 6, 0).getTime());
+    expect(fromSqliteDate(jobs[1]!.next_run_at).getTime()).toBe(kst(2026, 9, 28, 6, 20).getTime());
   });
 
   test("capability workloop targets PM, then coordinator, and never an arbitrary member", () => {
@@ -419,7 +428,7 @@ describe("b3os scheduler core", () => {
     try {
       const [job] = ensureDailyTaskReviewJobs(d, { from: new Date("2026-03-07T12:00:00.000Z") });
       expect(job!.timezone).toBe("America/New_York");
-      expect(job!.next_run_at).toBe("2026-03-08 10:00:00"); // 06:00 EDT
+      expect(job!.next_run_at).toBe("2026-03-09 10:00:00"); // Monday 06:00 EDT
     } finally {
       if (original === undefined) delete process.env.B3OS_SCHEDULER_TIMEZONE;
       else process.env.B3OS_SCHEDULER_TIMEZONE = original;

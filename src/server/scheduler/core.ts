@@ -172,12 +172,12 @@ export const EXEC_ALLOWLIST: Readonly<Record<string, ExecSpec>> = Object.freeze(
     "task-review-ping": {
       command: ["bun", "run", "scripts/task-review-ping.ts"],
       timeoutMs: 120_000,
-      label: "매일 06:00 과제 리뷰 핑 (active owner만)",
+      label: "평일 06:00 과제 리뷰 핑 (active owner만, KR 공휴일 제외)",
     },
     "task-review-summary": {
       command: ["bun", "run", "scripts/task-review-summary.ts"],
       timeoutMs: 180_000,
-      label: "매일 06:20 과제 리뷰 다이제스트 (GD 텔레그램)",
+      label: "평일 06:20 과제 리뷰 다이제스트 (GD 텔레그램, KR 공휴일 제외)",
     },
     "workloop-kanban": {
       command: ["bun", "run", "scripts/workloop-driver.ts", "kanban"],
@@ -497,15 +497,15 @@ export function ensureWeeklySelfLearningJob(db: Database): ScheduledJobRow {
 /** Seed and reconcile portable daily task-review jobs. */
 export function ensureDailyTaskReviewJobs(db: Database, opts: { from?: Date } = {}): ScheduledJobRow[] {
   const specs = [
-    { id: DAILY_TASK_REVIEW_PING_JOB_ID, title: "과제 리뷰 핑 (06:00)", cron: "0 6 * * *", execKey: "task-review-ping" },
-    { id: DAILY_TASK_REVIEW_SUMMARY_JOB_ID, title: "과제 리뷰 다이제스트 (06:20)", cron: "20 6 * * *", execKey: "task-review-summary" },
+    { id: DAILY_TASK_REVIEW_PING_JOB_ID, title: "과제 리뷰 핑 (평일 06:00)", cron: "0 6 * * 1-5", execKey: "task-review-ping" },
+    { id: DAILY_TASK_REVIEW_SUMMARY_JOB_ID, title: "과제 리뷰 다이제스트 (평일 06:20)", cron: "20 6 * * 1-5", execKey: "task-review-summary" },
   ] as const;
   return specs.map((spec) => ensureCronJob(db, {
     id: spec.id,
     title: spec.title,
     cron: spec.cron,
     timezone: currentDailyTaskReviewTimezone(),
-    holidayPolicy: "run",
+    holidayPolicy: "skip",
     createdBy: "system",
     from: opts.from,
     payload: { type: "exec", execKey: spec.execKey },
