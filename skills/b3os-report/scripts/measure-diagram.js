@@ -8,6 +8,8 @@
 //
 // ★재는 사람이 알아야 하는 한계 셋★
 //   1. 글자를 담는 rect 를 좌표로 추정한다. 겹친 rect 가 여러 개면 첫 번째를 고른다.
+//      rect 의 opacity·fill-opacity 는 반영하지만, 그 rect 아래에 또 다른 rect 가 깔려 있으면
+//      페이지 배경과 섞는다 — 겹겹이 쌓은 그림에서는 값이 낙관적으로 나온다.
 //   2. <image>·패턴 위에 얹은 글자는 배경색을 못 읽어 페이지 배경으로 떨어진다.
 //   3. ★없는 테마 이름을 걸면 어느 규칙도 안 맞아 :root 로 떨어진다.★ 그러면 그 자리를
 //      안 재고도 '통과' 로 집계된다(2026-09-06 실측 — orange-dark/light 로 dark 를 두 번
@@ -18,6 +20,19 @@
     return .2126*f(m[0])+.7152*f(m[1])+.0722*f(m[2]); };
   const ratio = (a,b) => { const A=lum(a),B=lum(b);
     return +(((Math.max(A,B)+.05)/(Math.min(A,B)+.05))).toFixed(2); };
+  const rgb = c => c.match(/\d+\.?\d*/g).map(Number);
+  // ★칸 배경은 fill 만으로 정해지지 않는다.★ opacity·fill-opacity 가 걸리면 그 아래 색과 섞인다.
+  // 섞기 전 값으로 재면 실제로 읽히는 칸까지 미달로 잡는다(2026-09-06: 행렬 그림에서
+  // 10건 중 9건이 그렇게 나왔다. opacity 를 반영하니 실제 미달은 1건이었다).
+  const blend = (fg, bg, a) => {
+    const F = rgb(fg), B = rgb(bg);
+    return `rgb(${[0,1,2].map(i => Math.round(F[i]*a + B[i]*(1-a))).join(', ')})`;
+  };
+  const effBg = (el, under) => {
+    const cs = getComputedStyle(el);
+    const a = parseFloat(cs.opacity) * parseFloat(cs.fillOpacity || 1);
+    return a >= 1 ? cs.fill : blend(cs.fill, under, a);
+  };
 
   const root = document.documentElement, before = root.getAttribute('data-theme');
   const bodyBg = () => getComputedStyle(document.body).backgroundColor;
@@ -107,7 +122,7 @@
           return b.y>=y-2 && b.y+b.height<=y+h+2 && b.x>=x-1 && b.x<x+w;
         });
 
-        const bg = host ? getComputedStyle(host).fill : pageBg;
+        const bg = host ? effBg(host, pageBg) : pageBg;
         const fg = getComputedStyle(t).fill;
         const r  = ratio(fg, bg);
         const fs = parseFloat(getComputedStyle(t).fontSize);
