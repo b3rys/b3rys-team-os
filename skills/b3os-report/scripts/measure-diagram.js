@@ -26,12 +26,29 @@
   root.removeAttribute('data-theme');
   const rootBg = bodyBg();
 
-  // 재려는 테마가 실제로 정의돼 있나. 걸었는데 배경이 :root 와 같으면 안 걸린 것이다.
-  // dark 는 :root 자체라 예외로 둔다.
+  // 재려는 테마가 실제로 정의돼 있나.
+  // ① 스타일시트에서 [data-theme="X"] 규칙을 직접 찾는다. --bg 를 그대로 두고 다른 토큰만
+  //    바꾸는 테마도 "정의는 있다" 로 잡힌다. @media 안에 든 규칙도 훑는다.
+  // ② 스타일시트를 못 읽으면(다른 출처) 배경색 비교로 떨어진다 — 그때는 --bg 를 안 바꾸는
+  //    테마를 놓칠 수 있다. 그 경우 SKIPPED 로 나오므로 조용히 통과하지는 않는다.
+  // dark 는 :root 자체라 선택자가 없다. 예외로 둔다.
+  const hasThemeRule = (theme) => {
+    const want = `[data-theme="${theme}"]`;
+    const walk = (rules) => [...rules].some(r =>
+      (r.selectorText && r.selectorText.includes(want)) || (r.cssRules && walk(r.cssRules)));
+    let readable = false;
+    for (const sheet of document.styleSheets) {
+      let rules; try { rules = sheet.cssRules } catch { continue }   // 다른 출처
+      readable = true;
+      if (walk(rules)) return true;
+    }
+    return readable ? false : null;   // null = 판단 못 함 → 배경색으로 떨어진다
+  };
   const themeApplies = (theme) => {
     if (theme === 'dark') return true;
+    const declared = hasThemeRule(theme);
     root.setAttribute('data-theme', theme);
-    return bodyBg() !== rootBg;
+    return declared === null ? bodyBg() !== rootBg : declared;
   };
 
   const THEMES = ['dark', 'light'];   // theme.css 에 정의된 것만. 늘릴 때 여기에 적는다.
