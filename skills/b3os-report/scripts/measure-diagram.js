@@ -30,8 +30,17 @@
     const F = rgb(fg), B = rgb(bg);
     return `rgb(${[0,1,2].map(i => Math.round(F[i]*a + B[i]*(1-a))).join(', ')})`;
   };
+  // 색이 아닌 값 — 'none' 은 파싱하면 null 이라 lum() 이 던지고, 투명(alpha 0)은
+  // rgba(0,0,0,0) 이라 검정으로 읽힌다. 둘 다 "그 자리에 색이 없다" 이므로 아래 색을 쓴다.
+  const paints = (c) => {
+    if (!c || c === 'none') return false;
+    const m = c.match(/\d+\.?\d*/g);
+    if (!m) return false;
+    return !(m.length >= 4 && Number(m[3]) === 0);
+  };
   const effBg = (el, under) => {
     const cs = getComputedStyle(el);
+    if (!paints(cs.fill)) return under;          // 윤곽선만 있는 상자
     const a = parseFloat(cs.opacity) * parseFloat(cs.fillOpacity || 1);
     return a >= 1 ? cs.fill : blend(cs.fill, under, a);
   };
@@ -126,6 +135,7 @@
 
         const bg = host ? effBg(host, pageBg) : pageBg;
         const fg = getComputedStyle(t).fill;
+        if (!paints(fg)) return;                  // 안 보이는 글자는 잴 대상이 아니다
         const r  = ratio(fg, bg);
         const fs = parseFloat(getComputedStyle(t).fontSize);
         const fw = +getComputedStyle(t).fontWeight;
