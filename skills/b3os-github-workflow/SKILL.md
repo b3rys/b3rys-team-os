@@ -376,12 +376,26 @@ Approved-by: <승인자 ID>
 > 그래서 설명글에 아무리 정확한 모양으로 써도 ★`reviews` 가 비어 있으면 판정 자체가 안 선다.★
 >
 > ```bash
-> gh pr review <번호> --approve --body "$(printf '%s\n' '<사람이 읽을 말>' '' 'Approved-by: <승인자 ID>')"
+> APPROVER=<설정 github_approver_account>
+> TOKEN="$(gh auth token --user "$APPROVER")" || { echo "토큰 조회 실패 — 중단"; exit 1; }
+> [ -n "$TOKEN" ] || { echo "토큰이 비어 있다 — 중단"; exit 1; }
+> GH_TOKEN="$TOKEN" \
+>   gh pr review <번호> --approve --body "$(printf '%s\n' '<사람이 읽을 말>' '' 'Approved-by: <승인자 ID>')"
 > ```
+>
+> **★한 줄로 합치지 않는다★** — `GH_TOKEN="$(gh auth token --user X)" gh …` 형태는 토큰 조회가
+> 실패해도 멈추지 않는다. 조회 실패 시 값이 비고, `GH_TOKEN` 이 비면 `gh` 는 **활성 계정으로
+> 그냥 실행하며 종료코드도 0** 이다(gh 2.96.0 실측: 없는 계정을 넣으면 그때의 활성 계정으로 실행됐다).
+> 승인이 엉뚱한 계정으로 나가고 아무 신호도 안 뜬다. 위처럼 조회·빈 값·적용을 나눈다.
 >
 > **★계정이 작성자면 GitHub 이 self-approve 를 거부한다.★** PR 은 `github_team_account` 로 올리고
 > 승인은 `github_approver_account` 로 한다 — 게이트도 ★둘이 서로 달라야★ 통과시킨다.
-> 승인 전에 `gh api user --jq .login` 으로 지금 계정을 확인하고, 다르면 `gh auth switch` 로 바꾼다.
+>
+> **★`gh auth switch` 를 쓰지 않는다.★** 그건 이 기계 전체의 활성 계정을 바꾸고 **그대로 남는다.**
+> 팀원이 같은 `gh` 설정을 공유하므로, 승인 뒤 되돌리지 않으면 **다음 사람이 올리는 PR 이
+> 승인 계정 작성으로 잡힌다.** 그러면 GitHub 이 self-approve 를 거부하고, PR 작성자는 바꿀 수 없어
+> **그 PR 을 닫고 다시 만들어야 한다.** 위처럼 `GH_TOKEN` 을 그 명령에만 주면 활성 계정이 안 바뀐다.
+> 토큰은 변수에 담아 그 변수만 넘기고 화면·로그에 남기지 않는다.
 >
 > **★머지 직전에 한 번 돌려서 확인한다★** — 눈으로 보지 말고 게이트에게 물어본다:
 >
