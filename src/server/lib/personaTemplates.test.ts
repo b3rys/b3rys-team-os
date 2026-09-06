@@ -96,7 +96,7 @@ describe("문장 작성 기준 — 산출물에 세 줄이 다 있나", () => {
     return i < 0 ? "" : md.slice(i, md.indexOf("\n\n", i));
   };
 
-  for (const runtime of ["claude_channel", "openclaw", "hermes_agent"] as const) {
+  for (const runtime of ["claude_channel", "openclaw", "hermes_agent", "codex"] as const) {
     test(`${runtime} 산출물에 문장 작성 기준 세 줄`, () => {
       const md =
         runtime === "claude_channel"
@@ -116,33 +116,89 @@ describe("문장 작성 기준 — 산출물에 세 줄이 다 있나", () => {
   }
 });
 
-describe("설명 원칙 — 산출물에 네 줄이 다 있나", () => {
+// 이 블록은 Core Rules 안에서 맨 앞이어야 한다. 아래로 밀리면 읽히지 않으므로
+// 문구뿐 아니라 자리 자체를 검사한다.
+describe("메시지 작성 원칙 — Core Rules 맨 앞에 있나", () => {
+  for (const runtime of ["claude_channel", "openclaw", "hermes_agent", "codex"] as const) {
+    test(`${runtime} 산출물에서 Core Rules 첫 블록`, () => {
+      const md =
+        runtime === "claude_channel"
+          ? buildPersona(claudeInput)
+          : buildAgentsMd({ ...claudeInput, runtime });
+      const core = md.indexOf("## ⭐ Core Rules");
+      const rule = md.indexOf("**메시지 작성 원칙**");
+      const clock = md.indexOf("> ⏰");
+      const base = md.indexOf("**Base execution**");
+      expect(core, "★Core Rules 헤더가 없다★").toBeGreaterThan(-1);
+      expect(rule, "★메시지 작성 원칙이 없다★").toBeGreaterThan(core);
+      expect(rule, "★⏰ 줄보다 뒤로 밀렸다★").toBeLessThan(clock);
+      // "⏰ 보다 앞" 은 "맨 앞" 이 아니다 — 헤더와 이 블록 사이에 다른 블록을 끼우는
+      // 뮤턴트가 살아남는다. 그래서 헤더 다음 첫 내용이 이 블록인지 잰다.
+      const afterHeader = md.slice(core).split("\n").slice(1).join("\n").trimStart();
+      expect(afterHeader.startsWith("**메시지 작성 원칙**"), "★헤더와 블록 사이에 다른 것이 끼었다★").toBe(true);
+      expect(rule, "★Base execution 뒤로 밀렸다★").toBeLessThan(base);
+    });
+  }
+});
+
+describe("메시지 작성 원칙 — 산출물에 네 줄이 다 있나", () => {
   const rule = (md: string): string => {
-    const i = md.indexOf("**설명 원칙**");
+    const i = md.indexOf("**메시지 작성 원칙**");
     return i < 0 ? "" : md.slice(i, md.indexOf("\n\n", i));
   };
 
-  for (const runtime of ["claude_channel", "openclaw", "hermes_agent"] as const) {
-    test(`${runtime} 산출물에 설명 원칙 다섯 줄`, () => {
+  for (const runtime of ["claude_channel", "openclaw", "hermes_agent", "codex"] as const) {
+    test(`${runtime} 산출물에 메시지 작성 원칙 네 줄`, () => {
       const md =
         runtime === "claude_channel"
           ? buildPersona(claudeInput)
           : buildAgentsMd({ ...claudeInput, runtime });
       const block = rule(md);
-      expect(block, "★설명 원칙 블록 자체가 산출물에서 사라졌다★").not.toBe("");
+      expect(block, "★메시지 작성 원칙 블록 자체가 산출물에서 사라졌다★").not.toBe("");
       expect(block, "★지운 5번이 되살아났다★").not.toContain("5. ");
       for (const n of [1, 2, 3, 4]) {
         expect(block, `★${n}번 줄이 없다★`).toContain(`\n${n}. `);
       }
       // GD 2026-09-05 — 지어낸 낱말(창구·제자리·실물)이 반복돼 2번에 넣은 문장.
-      expect(block, "★'단어를 지어내지 않는다' 가 빠졌다★").toContain(
-        "단어를 지어내지 않는다",
+      expect(block, "★'말을 지어내지 않는다' 강조가 빠졌다★").toContain(
+        "★말을 지어내지 않는다.★",
       );
       expect(block, "★'원문은 그대로 쓴다' 가 빠졌다★").toContain("원문은 그대로 쓴다");
       expect(block, "★'핵심만 얘기한다' 가 빠졌다★").toContain(
         "전달하려고 하는 핵심만 얘기한다",
       );
       expect(block, "★'말을 늘리지 않는다' 가 빠졌다★").toContain("말을 늘리지 않는다");
+      // 팀버스에서 진행한 일을 맥락 없이 보고하면 읽는 쪽이 무슨 얘기인지 못 잡는다.
+      expect(block, "★'팀장은 팀원끼리 주고받은 내용을 모른다' 가 빠졌다★").toContain(
+        "팀장은 팀원끼리 주고받은 내용을 모른다",
+      );
+      // 판정법이 이 규칙의 실행부다. 문장만 있고 판정이 없으면 적용이 사람마다 갈린다.
+      // 판정이 한 갈래면 예시 7개 중 5개가 통과한다 — "창구" 는 BridgeWindowRequest 로
+      // 바꿔 쓸 수 있어서 "바꿔 쓸 수 없으면" 이라는 조건을 빠져나간다. 그래서 두 갈래다.
+      expect(block, "★원문 이름 갈래가 빠졌다★").toContain(
+        "원문 이름이 있는데 새 낱말을 만들었으면 지어낸 말이다",
+      );
+      expect(block, "★바꿔 쓸 수 없는 갈래가 빠졌다★").toContain(
+        "숫자·파일명·필드명으로도 바꿔 쓸 수 없으면 그것도 지어낸 말이다",
+      );
+      // 목록 제목과 BridgeWindowRequest 만 고정하면 예시 하나를 지워도 통과한다
+      // ("권한 열쇠" 삭제 뮤턴트가 57 pass 로 생존했다). 일곱 개를 각각 고정한다.
+      expect(block, "★쓰지 말아야 할 예시 목록이 빠졌다★").toContain("쓰지 말아야 할 예시");
+      // 낱말과 대응값이 각각 있는지만 보면 ★둘을 맞바꾼 변이가 살아남는다★
+      // (권한 열쇠→operation hash, 지문→approval key 로 교환해도 57 pass 였다).
+      // 렌더된 짝 문자열을 통째로 고정한다.
+      const COINAGE_PAIRS = [
+        '"값이 나간다"',
+        '"사실보다 넓다"',
+        '"창구"(코드 이름은 BridgeWindowRequest)',
+        '"권한 열쇠"(approval key)',
+        '"지문"(operation hash)',
+        '"팀장님이 첫 독자입니다"(아무도 안 읽고 그대로 갑니다)',
+        '"아직 아무도 눈으로 못 봤습니다"(화면으로 확인 못 했습니다)',
+      ];
+      for (const pair of COINAGE_PAIRS) {
+        expect(block, `★예시 짝 ${pair} 가 그대로 있지 않다★`).toContain(pair);
+      }
     });
   }
 });
