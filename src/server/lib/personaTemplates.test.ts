@@ -118,6 +118,28 @@ describe("문장 작성 기준 — 산출물에 세 줄이 다 있나", () => {
 
 // 이 블록은 Core Rules 안에서 맨 앞이어야 한다. 아래로 밀리면 읽히지 않으므로
 // 문구뿐 아니라 자리 자체를 검사한다.
+// 굵은 소제목이 목록 바로 다음 줄에 오면 마크다운이 그 줄을 마지막 항목의 이어붙임으로
+// 먹는다 — 소제목이 제목으로 안 보인다. 블록을 옮기다 빈 줄 하나를 지워 12개 파일에서
+// 실제로 났다. 산출물에서 그 모양 자체를 막는다.
+describe("산출물 — 목록 바로 뒤에 굵은 소제목이 붙지 않나", () => {
+  for (const runtime of ["claude_channel", "openclaw", "hermes_agent", "codex"] as const) {
+    test(`${runtime} 산출물에 목록-소제목 붙음 0건`, () => {
+      const md =
+        runtime === "claude_channel"
+          ? buildPersona(claudeInput)
+          : buildAgentsMd({ ...claudeInput, runtime });
+      const lines = md.split("\n");
+      const glued: string[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const prev = lines[i - 1] ?? "";
+        const cur = lines[i] ?? "";
+        if (/^- /.test(prev) && /^\*\*/.test(cur)) glued.push(`${i + 1}행 ${cur}`);
+      }
+      expect(glued, `★목록 바로 뒤에 굵은 소제목이 붙었다★ ${glued.join(" · ")}`).toEqual([]);
+    });
+  }
+});
+
 describe("메시지 작성 원칙 — Core Rules 맨 앞에 있나", () => {
   for (const runtime of ["claude_channel", "openclaw", "hermes_agent", "codex"] as const) {
     test(`${runtime} 산출물에서 Core Rules 첫 블록`, () => {
