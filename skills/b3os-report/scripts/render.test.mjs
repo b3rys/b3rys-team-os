@@ -145,13 +145,15 @@ try {
   assert.equal(floorFrom(830, 52, 0), 778);   // 완충이 없으면 경계와 같아진다(고치기 전 상태)
   assert.equal(floorFrom(10, 52, 6), 0);      // 문서 맨 위 근처면 0 으로 깎는다
   // 저장 위치로 돌아갈 때도 같은 바닥을 지킨다 — 조금만 읽던 탭으로 돌아가면 줄이 풀린다.
-  assert.match(th, /window\.scrollTo\(\{top:Math\.max\(stickFloor\(\), saved\)/);
+  // ★복원은 읽던 자리 그대로★ — 바닥을 대면 탭을 누를 때 화면이 아래로 밀린다.
+  assert.match(th, /window\.scrollTo\(\{top:saved, behavior:'instant'\}\)/);
+  assert.doesNotMatch(th, /Math\.max\(stickFloor\(\), saved\)/);
   // 탭마다 읽던 자리를 기억한다. 떠나는 시점은 클릭이지 hashchange 가 아니다(그때는 이미 옮겨진 뒤다).
   assert.match(th, /pos\[current\]=window\.scrollY;/);
   assert.match(th, /if\(current===to\) delete pos\[current\];/);
   assert.match(th, /if\(typeof saved==='number'\)\{/);
   // 복원 직전에 레이아웃을 강제하지 않으면 문서가 짧아 값이 잘린다
-  assert.match(th, /el\.getBoundingClientRect\(\);[^\n]*\n\s*window\.scrollTo\(\{top:Math\.max\(stickFloor\(\), saved\)/);
+  assert.match(th, /el\.getBoundingClientRect\(\);[^\n]*\n\s*window\.scrollTo\(\{top:saved/);
   assert.match(th, /addEventListener\('click'/);
   // ★scrollTo 호출마다 behavior:'instant' 여야 한다★ — 문자열이 한 번만 있는지 보면
   // 한 곳만 'smooth' 로 바뀌어도 나머지 하나가 검사를 통과시킨다(실측: 187행·217행 각각 생존).
