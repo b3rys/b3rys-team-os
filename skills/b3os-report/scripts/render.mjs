@@ -184,7 +184,30 @@ ${noPanelHit} [href="#panel-${tabs[0].id}"]${activeBg}`;
   var TOP=104;          // 장 앵커 — 제목이 상단 탭 줄에 가리지 않는 자리
   var PANEL_TOP=112;    // 탭 첫머리 — .tab-panel 의 scroll-margin-top 과 같은 값
   var pos={}, current=null;
+  // ★탭 줄이 붙어 있는 자리로만 옮긴다★
+  //   .report-tabs 는 position:sticky 다. 문서에서 그 줄의 원래 자리에서 sticky top 을 뺀
+  //   지점부터 붙는다. 그런데 패널 첫머리로 가는 목표 스크롤이 ★그 지점과 정확히 같았다★
+  //   (실측 2026-09-07 · 여섯 탭 전부 목표 831 = 경계 831 · 여유 0). 그래서 창 너비·글꼴·그림 로딩으로
+  //   1px 만 어긋나도 줄이 풀려 아래로 내려앉는다 — 탭을 누를 때마다 화면이 튀어 보인다.
+  //   경계보다 STICK_PAD 만큼 더 내려가서 멈춘다.
+  // ★원래 자리는 탭 줄에서 못 읽는다★ — 붙어 있는 동안 그 줄을 읽으면 붙은 자리가 나온다
+  //   (실측: 스크롤 3000 에서 탭 줄은 3052, 바로 앞 #report-top 은 830 그대로).
+  //   그래서 sticky 가 아닌 앞 표식을 ★부를 때마다★ 읽는다. 한 번 재서 들고 있으면 그림·글꼴이
+  //   나중에 자리를 잡을 때 그 값이 낡는다.
+  var STICK_PAD=6;
+  var BAR=document.querySelector('.report-tabs');
+  var MARK=document.getElementById('report-top');
+  var STICK_TOP=BAR?(parseInt(getComputedStyle(BAR).top,10)||0):0;
+  function floorFrom(markY, stickTop, pad){ return Math.max(0, markY-stickTop+pad); }   // 값만 다루는 부분
+  function stickFloor(){
+    if(!BAR||!MARK) return 0;
+    return floorFrom(MARK.getBoundingClientRect().top+window.scrollY, STICK_TOP, STICK_PAD);
+  }
   function put(el, top){ window.scrollTo({top: Math.max(0, el.getBoundingClientRect().top+window.scrollY-top), behavior:'instant'}); }
+  // 바닥은 ★패널 첫머리와 저장 위치 복원에만★ 적용한다.
+  //   장 앵커(put)에는 안 쓴다 — 탭 앞 머리말에도 빈 앵커가 있을 수 있어 전부 경계를 지난다고
+  //   말할 수 없고, 머리말 앵커를 억지로 붙은 상태로 만들 이유도 없다.
+  function putPanel(el){ window.scrollTo({top: Math.max(stickFloor(), el.getBoundingClientRect().top+window.scrollY-PANEL_TOP), behavior:'instant'}); }
   function shown(){
     var els=document.querySelectorAll('.tab-panel');
     for(var i=0;i<els.length;i++) if(getComputedStyle(els[i]).display!=='none') return els[i].id;
@@ -214,9 +237,9 @@ ${noPanelHit} [href="#panel-${tabs[0].id}"]${activeBg}`;
       var saved=pos[el.id];
       if(typeof saved==='number'){
         el.getBoundingClientRect();           // 방금 열린 패널의 높이를 먼저 계산시킨다
-        window.scrollTo({top:saved, behavior:'instant'});
+        window.scrollTo({top:Math.max(stickFloor(), saved), behavior:'instant'});
       }
-      else put(el, PANEL_TOP);
+      else putPanel(el);
       return;
     }
     current=shown();

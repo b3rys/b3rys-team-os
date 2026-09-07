@@ -127,13 +127,31 @@ try {
   // ★rAF 금지★ — 배경 탭에서는 콜백이 실행되지 않아 이 코드가 통째로 안 돈다
   assert.doesNotMatch(th, /requestAnimationFrame\(/);   // 주석의 단어는 허용, ★호출★ 은 금지
   assert.match(th, /var PANEL_TOP=112;/);
-  assert.match(th, /put\(el, PANEL_TOP\);/);
+  // ★탭 줄이 붙은 채로 멈춰야 한다★ — 패널 첫머리로 가는 목표가 sticky 경계와 정확히 같아서
+  //   1px 만 어긋나도 줄이 풀려 내려앉았다(실측 2026-09-07: 여섯 탭 전부 여유 0). 바닥을 깐다.
+  assert.match(th, /var STICK_PAD=6;/);
+  assert.match(th, /function putPanel\(el\)\{[^}]*Math\.max\(stickFloor\(\)/);
+  assert.match(th, /else putPanel\(el\);/);
+  // ★원래 자리는 sticky 인 탭 줄에서 읽으면 안 된다★ — 붙어 있는 동안 붙은 자리가 나온다.
+  //   sticky 가 아닌 앞 표식(#report-top)을 부를 때마다 읽어야 그림·글꼴이 늦게 자리를 잡아도 맞다.
+  assert.match(th, /getElementById\('report-top'\)/);
+  assert.match(th, /function stickFloor\(\)\{[\s\S]*?MARK\.getBoundingClientRect\(\)\.top\+window\.scrollY/);
+  assert.doesNotMatch(th, /var BAR_NAT=/);   // 한 번 재서 들고 있으면 낡는다
+
+  // 경계 계산은 값으로 검사한다 — 문자열이 있는지가 아니라 실제로 그 값이 나오는지.
+  const floorSrc = th.match(/function floorFrom\([^)]*\)\{[^}]*\}/)[0];
+  const floorFrom = new Function(floorSrc + "; return floorFrom;")();
+  assert.equal(floorFrom(830, 52, 6), 784);   // 라이브 실측값 — 경계 778 보다 6 아래
+  assert.equal(floorFrom(830, 52, 0), 778);   // 완충이 없으면 경계와 같아진다(고치기 전 상태)
+  assert.equal(floorFrom(10, 52, 6), 0);      // 문서 맨 위 근처면 0 으로 깎는다
+  // 저장 위치로 돌아갈 때도 같은 바닥을 지킨다 — 조금만 읽던 탭으로 돌아가면 줄이 풀린다.
+  assert.match(th, /window\.scrollTo\(\{top:Math\.max\(stickFloor\(\), saved\)/);
   // 탭마다 읽던 자리를 기억한다. 떠나는 시점은 클릭이지 hashchange 가 아니다(그때는 이미 옮겨진 뒤다).
   assert.match(th, /pos\[current\]=window\.scrollY;/);
   assert.match(th, /if\(current===to\) delete pos\[current\];/);
   assert.match(th, /if\(typeof saved==='number'\)\{/);
   // 복원 직전에 레이아웃을 강제하지 않으면 문서가 짧아 값이 잘린다
-  assert.match(th, /el\.getBoundingClientRect\(\);[^\n]*\n\s*window\.scrollTo\(\{top:saved/);
+  assert.match(th, /el\.getBoundingClientRect\(\);[^\n]*\n\s*window\.scrollTo\(\{top:Math\.max\(stickFloor\(\), saved\)/);
   assert.match(th, /addEventListener\('click'/);
   // ★scrollTo 호출마다 behavior:'instant' 여야 한다★ — 문자열이 한 번만 있는지 보면
   // 한 곳만 'smooth' 로 바뀌어도 나머지 하나가 검사를 통과시킨다(실측: 187행·217행 각각 생존).
