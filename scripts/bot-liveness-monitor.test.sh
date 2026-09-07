@@ -336,8 +336,8 @@ q_fixture() {  # $1=분 전
   oc_ts=$(date -v-"${mins}"M "+%Y-%m-%dT%H:%M:%S" 2>/dev/null)
   h_ts=$(date -v-"${mins}"M "+%Y-%m-%d %H:%M:%S" 2>/dev/null)
   # 실제 로그는 증상과 원인이 ★다른 줄★ 이다(unavailable 줄에는 원인 필드가 없다).
-  printf '{"0":"Embedded agent failed: Auth profile \\"openai:x@y.z\\" is temporarily unavailable for openai/m.","time":"%s.000+09:00"}\n' "$oc_ts" > "$QDIR/openclaw.log"
-  printf '{"0":"provider failure","profileFailureReason":"rate_limit","providerRuntimeFailureKind":"rate_limit","rawErrorPreview":"You'"'"'ve reached your Codex subscription usage limit. Next reset in 6 hours.","time":"%s.000+09:00"}\n' "$oc_ts" >> "$QDIR/openclaw.log"
+  printf '{"0":"Embedded agent failed: Auth profile \\"openai:x@y.z\\" is temporarily unavailable for openai/m.","logLevelName":"ERROR","time":"%s.000+09:00"}\n' "$oc_ts" > "$QDIR/openclaw.log"
+  printf '{"0":"provider failure","profileFailureReason":"rate_limit","providerRuntimeFailureKind":"rate_limit","rawErrorPreview":"You'"'"'ve reached your Codex subscription usage limit. Next reset in 6 hours.","logLevelName":"WARN","time":"%s.000+09:00"}\n' "$oc_ts" >> "$QDIR/openclaw.log"
   mkdir -p "$QDIR/profiles/testprof/logs"
   printf '%s,000 WARNING gateway.run: Primary provider rate-limited (429): Codex provider quota exhausted (429); retry after 600s. Credentials are still valid.\n' "$h_ts" > "$QDIR/profiles/testprof/logs/gateway.error.log"
 }
@@ -366,8 +366,8 @@ pass_if_clean "창 밖의 옛 기록에는 알리지 않는다"
 q_fixture_nonquota() {
   local oc_ts; oc_ts=$(date -v-3M "+%Y-%m-%dT%H:%M:%S" 2>/dev/null)
   # ★두 줄이 섞인 상태★ — 증상 줄과 사용량이 아닌 원인 줄. 줄을 건너뛰어 짝지으면 오분류한다.
-  printf '{"0":"Auth profile \\"openai:x@y.z\\" is temporarily unavailable for openai/m.","time":"%s.000+09:00"}\n' "$oc_ts" > "$QDIR/openclaw.log"
-  printf '{"0":"provider failure","profileFailureReason":"auth_error","time":"%s.000+09:00"}\n' "$oc_ts" >> "$QDIR/openclaw.log"
+  printf '{"0":"Auth profile \\"openai:x@y.z\\" is temporarily unavailable for openai/m.","logLevelName":"ERROR","time":"%s.000+09:00"}\n' "$oc_ts" > "$QDIR/openclaw.log"
+  printf '{"0":"provider failure","profileFailureReason":"auth_error","logLevelName":"WARN","time":"%s.000+09:00"}\n' "$oc_ts" >> "$QDIR/openclaw.log"
   rm -rf "$QDIR/profiles"; mkdir -p "$QDIR/profiles"
 }
 q_fixture_nonquota
@@ -384,8 +384,8 @@ q_fixture_stale_cause() {
   local new_ts old_ts
   new_ts=$(date -v-3M "+%Y-%m-%dT%H:%M:%S" 2>/dev/null)
   old_ts=$(date -v-300M "+%Y-%m-%dT%H:%M:%S" 2>/dev/null)
-  printf '{"0":"provider failure","profileFailureReason":"rate_limit","time":"%s.000+09:00"}\n' "$old_ts" > "$QDIR/openclaw.log"
-  printf '{"0":"Auth profile \\"openai:x@y.z\\" is temporarily unavailable for openai/m.","time":"%s.000+09:00"}\n' "$new_ts" >> "$QDIR/openclaw.log"
+  printf '{"0":"provider failure","profileFailureReason":"rate_limit","logLevelName":"WARN","time":"%s.000+09:00"}\n' "$old_ts" > "$QDIR/openclaw.log"
+  printf '{"0":"Auth profile \\"openai:x@y.z\\" is temporarily unavailable for openai/m.","logLevelName":"ERROR","time":"%s.000+09:00"}\n' "$new_ts" >> "$QDIR/openclaw.log"
   rm -rf "$QDIR/profiles"; mkdir -p "$QDIR/profiles"
 }
 q_fixture_stale_cause
@@ -393,5 +393,17 @@ OUT=$(q_run 15)
 printf '%s' "$OUT" | grep -q "\[사용량\]" && { echo "FAIL: 창 밖의 옛 rate_limit 기록을 지금 사고의 원인으로 붙였다 — $OUT" >&2; RC=1; }
 printf '%s' "$OUT" | grep -q "\[제공자\]" || { echo "FAIL: 증상만 있을 때 원인 미확인 알림이 안 났다 — $OUT" >&2; RC=1; }
 pass_if_clean "창 밖의 옛 원인 기록을 창 안 증상에 붙이지 않는다"
+
+# ★대화 본문이 그 문구를 인용해도 오류가 아니다★
+# 실측: 이 검사를 리뷰하는 대화가 로그에 INFO 로 남아 알림이 났다. 레벨로 거른다.
+q_fixture_chat_quote() {
+  local ts; ts=$(date -v-3M "+%Y-%m-%dT%H:%M:%S" 2>/dev/null)
+  printf '{"0":"리뷰 의견: Auth profile \\"openai:x@y.z\\" is temporarily unavailable 줄과 profileFailureReason \\"rate_limit\\" 을 따로 찾고 있습니다","logLevelName":"INFO","time":"%s.000+09:00"}\n' "$ts" > "$QDIR/openclaw.log"
+  rm -rf "$QDIR/profiles"; mkdir -p "$QDIR/profiles"
+}
+q_fixture_chat_quote
+OUT=$(q_run 15)
+[ -z "$OUT" ] || { echo "FAIL: 대화 본문 인용을 오류로 알렸다 — $OUT" >&2; RC=1; }
+pass_if_clean "대화 본문이 그 문구를 인용해도 알리지 않는다"
 
 exit "$RC"
