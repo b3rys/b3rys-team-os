@@ -210,6 +210,17 @@ ${noPanelHit} [href="#panel-${tabs[0].id}"]${activeBg}`;
   //   장 앵커(put)에도 안 쓴다 — 탭 앞 머리말에도 빈 앵커가 있을 수 있고 머리말 앵커를
   //   억지로 붙은 상태로 만들 이유가 없다.
   function putPanel(el){ window.scrollTo({top: Math.max(stickFloor(), el.getBoundingClientRect().top+window.scrollY-PANEL_TOP), behavior:'instant'}); }
+  // ★그 부의 첫머리보다 위는 "읽던 자리" 가 아니다★
+  //   스크롤 0 은 문서 머리말 자리이지 그 부의 내용이 아니다. 그걸 저장해 두면 나중에 그 탭을
+  //   눌렀을 때 문서 맨 위로 튄다(실측 2026-09-07: 3부를 맨 위에서 보다 떠난 뒤, 1부에서 3000
+  //   까지 읽다가 3부를 누르니 0 으로 갔다. 탭 줄도 830 으로 내려앉았다).
+  //   복원할 때 손대면 읽던 자리를 잃으므로 ★저장할 때★ 첫머리로 올려 둔다.
+  function keep(id){
+    var el=document.getElementById(id);
+    if(!el) return window.scrollY;
+    var head=Math.max(0, el.getBoundingClientRect().top+window.scrollY-PANEL_TOP);
+    return Math.max(window.scrollY, head);
+  }
   function shown(){
     var els=document.querySelectorAll('.tab-panel');
     for(var i=0;i<els.length;i++) if(getComputedStyle(els[i]).display!=='none') return els[i].id;
@@ -222,7 +233,7 @@ ${noPanelHit} [href="#panel-${tabs[0].id}"]${activeBg}`;
     for(var i=0;i<tabs.length;i++) tabs[i].addEventListener('click', function(){
       var to=(this.getAttribute('href')||'').slice(1);
       if(current===to) delete pos[current];        // 같은 탭을 다시 누르면 첫머리로
-      else if(current) pos[current]=window.scrollY;
+      else if(current) pos[current]=keep(current);
     });
     current=shown();
   }
