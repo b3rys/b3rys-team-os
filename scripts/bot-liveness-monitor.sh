@@ -678,6 +678,9 @@ check_provider_quota() {
   now_epoch=$(date +%s); cutoff_epoch=$((now_epoch - QUOTA_WINDOW_MIN * 60))
 
   # openclaw — JSON 로그(한 줄 = 한 기록). 날짜별 파일이라 오늘 것만 본다.
+  # ★로그에는 대화 본문도 실린다★ — 이 문구를 인용한 팀원 메시지가 INFO 로 남는다(실측 1건).
+  #   그 줄을 오류로 세면 사고가 없는데 알림이 나간다. 그래서 로그 레벨로 먼저 거른다 —
+  #   증상은 ERROR, 원인 기록은 WARN 이다(실측). INFO 는 보지 않는다.
   # ★"temporarily unavailable" 은 증상이지 원인이 아니다★ — auth profile cooldown 의 공통 결과라
   #   인증 오류·일시적 provider 오류도 같은 줄을 낸다. 그리고 ★그 줄에는 원인 필드가 없다★
   #   (실측: unavailable 216줄 중 원인 필드를 가진 줄 0). 원인은 별도 기록에 남는다.
@@ -687,7 +690,7 @@ check_provider_quota() {
   if [ -f "$oc_log" ]; then
     local cause_line cause_ts cause_e why hint sym_line sym_ts sym_e
     # ① 원인 기록 — 실패 사유가 rate_limit 인 줄. 시각·안내문도 이 줄에서만 뽑는다.
-    cause_line=$(grep -E '"(profileFailureReason|failoverReason|providerRuntimeFailureKind)":"rate_limit"' "$oc_log" 2>/dev/null | tail -1)
+    cause_line=$(grep -E '"(profileFailureReason|failoverReason|providerRuntimeFailureKind)":"rate_limit"' "$oc_log" 2>/dev/null | grep -E '"logLevelName":"(ERROR|WARN)"' | tail -1)
     if [ -n "$cause_line" ]; then
       cause_ts=$(printf '%s' "$cause_line" | sed -n 's/.*"time":"\([0-9T:-]*\).*/\1/p' | tail -1)
       cause_e=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${cause_ts:-x}" +%s 2>/dev/null || echo 0)
@@ -702,7 +705,7 @@ check_provider_quota() {
     fi
     # ② 증상만 있고 원인 기록이 창 안에 없으면 원인 미확인으로 낸다. 사용량이라 부르지 않는다.
     if [ "$found" = "0" ]; then
-      sym_line=$(grep "temporarily unavailable" "$oc_log" 2>/dev/null | tail -1)
+      sym_line=$(grep "temporarily unavailable" "$oc_log" 2>/dev/null | grep '"logLevelName":"ERROR"' | tail -1)
       if [ -n "$sym_line" ]; then
         sym_ts=$(printf '%s' "$sym_line" | sed -n 's/.*"time":"\([0-9T:-]*\).*/\1/p' | tail -1)
         sym_e=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${sym_ts:-x}" +%s 2>/dev/null || echo 0)
