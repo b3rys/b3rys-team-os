@@ -135,33 +135,72 @@ if (tabs.length === 1) {
 if (tabs.length >= 2) {
   const panels = tabs.map((tb, k) => {
     const end = k + 1 < tabs.length ? tabs[k + 1].at : out.length;
-    return `<section id="panel-${tb.id}" class="tab-panel${k === 0 ? " is-default" : ""}" role="tabpanel" aria-labelledby="tab-${tb.id}">\n`
+    return `<section id="panel-${tb.id}" class="tab-panel${k === 0 ? " is-default is-active" : ""}" data-tab="${tb.id}" role="tabpanel" aria-labelledby="tab-${tb.id}">\n`
       + out.slice(tb.at, end).join("\n") + `\n</section>`;
   });
+  // ★탭은 링크로 두고, 스크립트가 있으면 가로챈다★
+  //   포털 뷰어는 보고서를 sandbox="allow-same-origin allow-popups" iframe 으로 띄운다 —
+  //   allow-scripts 가 없어 자바스크립트가 안 돈다(src/web/components/Reports.ts:1272).
+  //   그래서 링크와 :target 을 남긴다. 스크립트가 죽어도 탭이 동작한다.
+  //   스크립트가 살아 있으면(파일 주소로 직접 열 때) 클릭을 가로채 화면을 ★안 옮긴다★ —
+  //   브라우저의 앵커 이동을 따라다니며 위치를 저장·복원하다가 2026-09-07 하루에 결함이 넷 났다.
   const bar = `<div id="report-top"></div>\n<nav class="report-tabs" role="tablist" aria-label="보고서 탭">\n`
-    + tabs.map((tb) => `  <a id="tab-${tb.id}" class="report-tab" role="tab" href="#panel-${tb.id}">${esc(tb.label)}</a>`).join("\n")
+    + tabs.map((tb, k) => `  <a id="tab-${tb.id}" class="report-tab${k === 0 ? " is-active" : ""}" role="tab" href="#panel-${tb.id}" data-target="${tb.id}" aria-selected="${k === 0 ? "true" : "false"}">${esc(tb.label)}</a>`).join("\n")
     + `\n</nav>`;
   bodyHtml = out.slice(0, tabs[0].at).join("\n") + "\n" + bar + "\n" + panels.join("\n");
 
-  // 켜진 탭 표시. 패널 자체가 target 이거나(탭을 눌렀다), 패널 안의 무언가가 target 이다(목차를 눌렀다).
   const activeBg = "{background:color-mix(in srgb,var(--card) 78%,var(--green) 22%);color:var(--ink)}";
-  // ★어느 패널도 안 걸렸을 때만★ 첫 패널을 켠다. 단순히 :not(:has(:target)) 로 쓰면
-  // 패널 바깥(머리말)을 가리키는 주소에서 모든 패널이 닫혀 화면이 빈다.
-  const noPanelHit = `.wrap:not(:has(.tab-panel:target)):not(:has(.tab-panel :target))`;
-  // ★theme.css 에 이미 있는 것은 다시 쓰지 않는다★ —
-  // .report-tabs · .report-tab · .report-tab.is-active · .tab-panel{display:none} 은 테마 소관이고
-  // 생김새 기준은 references/ui-components.md 2절이 정한다(조용한 blurred row, 한 줄 가로 스크롤).
-  // 여기서 더하는 것은 ★:target 으로 어느 패널을 열지 고르는 규칙★ 뿐이다.
   tabsCss = `
 /* ★탭 보고서에서는 부드러운 스크롤을 끈다★ — theme.css 의 scroll-behavior:smooth 가 켜져 있으면
-   탭을 눌렀을 때 브라우저의 애니메이션과 아래 보정 코드의 이동이 서로 다투어 화면이 떨린다.
-   탭은 이동이지 효과가 아니다. */
+   깊은 앵커로 갈 때 브라우저 애니메이션과 아래 이동이 다투어 화면이 떨린다. */
 html{scroll-behavior:auto}
-.tab-panel:target,.tab-panel:has(:target){display:block}
-${noPanelHit} .tab-panel.is-default{display:block}
-.wrap div[id]:empty{scroll-margin-top:104px}
-${tabs.map((tb) => `.wrap:has(#panel-${tb.id}:target) [href="#panel-${tb.id}"],.wrap:has(#panel-${tb.id} :target) [href="#panel-${tb.id}"]${activeBg}`).join("\n")}
-${noPanelHit} [href="#panel-${tabs[0].id}"]${activeBg}`;
+.tab-panel{display:none}
+/* 스크립트가 안 도는 자리(포털 sandbox iframe) — 주소로 고른다 */
+.wrap:not(.js-tabs) .tab-panel:target,.wrap:not(.js-tabs) .tab-panel:has(:target){display:block}
+.wrap:not(.js-tabs):not(:has(.tab-panel:target)):not(:has(.tab-panel :target)) .tab-panel.is-default{display:block}
+${tabs.map((tb) => `.wrap:not(.js-tabs):has(#panel-${tb.id}:target) [href="#panel-${tb.id}"],.wrap:not(.js-tabs):has(#panel-${tb.id} :target) [href="#panel-${tb.id}"]${activeBg}`).join("\n")}
+.wrap:not(.js-tabs):not(:has(.tab-panel:target)):not(:has(.tab-panel :target)) [href="#panel-${tabs[0].id}"]${activeBg}
+/* 스크립트가 도는 자리 — 클래스로 고른다. 화면은 안 옮긴다 */
+.js-tabs .tab-panel.is-active{display:block}
+.js-tabs .report-tab.is-active${activeBg}
+.wrap div[id]:empty{scroll-margin-top:104px}`;
+
+  // ★화면을 옮기지 않는다★ — 탭 전환은 패널을 바꿔 끼우는 것이 전부다.
+  //   주소는 history.replaceState 로 조용히 바꾼다(브라우저 이동 없음).
+  //   깊은 앵커(#어느-장)로 들어온 경우에만 그 장이 든 패널을 켜고 ★한 번★ 옮긴다.
+  tabsJs = `
+(function(){
+  var TOP=104;   // 깊은 앵커 — 제목이 상단 탭 줄에 가리지 않는 자리
+  var wrap=document.querySelector('.wrap'); if(wrap) wrap.classList.add('js-tabs');   // 여기부터는 클래스로 고른다
+  var btns=[].slice.call(document.querySelectorAll('.report-tab[data-target]'));
+  var panels=[].slice.call(document.querySelectorAll('.tab-panel[data-tab]'));
+  if(!btns.length||!panels.length) return;
+  var first=panels[0].dataset.tab;
+  function has(name){ return panels.some(function(p){ return p.dataset.tab===name; }); }
+  function setTab(name, updateHash){
+    if(!has(name)) name=first;
+    btns.forEach(function(b){ var on=b.dataset.target===name; b.classList.toggle('is-active',on); b.setAttribute('aria-selected',on?'true':'false'); });
+    panels.forEach(function(p){ p.classList.toggle('is-active',p.dataset.tab===name); });
+    if(updateHash) history.replaceState(null,'','#tab='+encodeURIComponent(name));
+  }
+  function panelOf(el){ while(el&&el!==document.body){ if(el.classList&&el.classList.contains('tab-panel')) return el; el=el.parentNode; } return null; }
+  // 주소 해석 — #tab=<이름> 이면 그 탭, 그 밖의 #무언가 는 깊은 앵커로 본다.
+  function apply(){
+    var h=(location.hash||'');
+    var m=h.match(/tab=([^&]+)/);
+    if(m){ setTab(decodeURIComponent(m[1]), false); return; }
+    var id=h.length>1?decodeURIComponent(h.slice(1)):'';
+    var el=id?document.getElementById(id):null;
+    if(!el){ setTab(first,false); return; }
+    var host=panelOf(el);
+    setTab(host?host.dataset.tab:first, false);
+    // 패널을 켠 뒤에야 그 장의 자리가 정해진다. 그 자리에서 한 번만 옮긴다.
+    window.scrollTo({top: Math.max(0, el.getBoundingClientRect().top+window.scrollY-TOP), behavior:'instant'});
+  }
+  btns.forEach(function(b){ b.addEventListener('click', function(e){ e.preventDefault(); setTab(b.dataset.target,true); }); });
+  window.addEventListener('hashchange', apply);
+  apply();
+})();`;
 
   // ★스크롤 보정★ — 탭으로 나눠도 남는 문제가 하나 있다.
   // 목적지가 ★닫혀 있던 패널★ 안이면, 브라우저가 첫 스크롤을 시도하는 시점에
@@ -171,99 +210,6 @@ ${noPanelHit} [href="#panel-${tabs[0].id}"]${activeBg}`;
   // ★스크롤 보정 — 한 번만 움직인다★
   // 목적지가 닫혀 있던 탭 안이면 브라우저는 첫 스크롤 시점에 그 요소의 위치를 모른다(화면에 없어서다).
   // CSS 가 탭을 편 뒤에도 브라우저는 다시 시도하지 않으므로 여기서 한 번 옮긴다.
-  // ★여러 번 옮기면 화면이 떨린다★ — 그래서 탭 클릭은 1회, 깊은 앵커만 늦은 재배치를 한 번 더 확인하되
-  // 어긋난 폭이 4px 를 넘을 때만 실제로 움직인다.
-  // ★스크롤 보정★ — 두 가지 일을 한다.
-  //  ① 닫혀 있던 패널로 갈 때: 누르는 순간 그 패널은 display:none 이라 브라우저가 위치를 모른다.
-  //     그대로 두면 화면이 문서 맨 위로 가고 탭 줄이 가운데에 놓인다(실측 2026-09-02).
-  //  ② 탭마다 읽던 자리를 기억한다: 다른 탭에 갔다가 돌아오면 그 자리로 돌려놓는다.
-  //     처음 여는 탭은 그 부의 첫머리로 간다. 지금 켜진 탭을 다시 누르면 첫머리로 간다.
-  // ★어느 경우든 한 번만 옮긴다★ — 두 번 옮기면 화면이 튄다.
-  tabsJs = `
-(function(){
-  var TOP=104;          // 장 앵커 — 제목이 상단 탭 줄에 가리지 않는 자리
-  var PANEL_TOP=112;    // 탭 첫머리 — .tab-panel 의 scroll-margin-top 과 같은 값
-  var pos={}, current=null;
-  // ★탭 줄이 붙어 있는 자리로만 옮긴다★
-  //   .report-tabs 는 position:sticky 다. 문서에서 그 줄의 원래 자리에서 sticky top 을 뺀
-  //   지점부터 붙는다. 그런데 패널 첫머리로 가는 목표 스크롤이 ★그 지점과 정확히 같았다★
-  //   (실측 2026-09-07 · 여섯 탭 전부 목표 831 = 경계 831 · 여유 0). 그래서 창 너비·글꼴·그림 로딩으로
-  //   1px 만 어긋나도 줄이 풀려 아래로 내려앉는다 — 탭을 누를 때마다 화면이 튀어 보인다.
-  //   경계보다 STICK_PAD 만큼 더 내려가서 멈춘다.
-  // ★원래 자리는 탭 줄에서 못 읽는다★ — 붙어 있는 동안 그 줄을 읽으면 붙은 자리가 나온다
-  //   (실측: 스크롤 3000 에서 탭 줄은 3052, 바로 앞 #report-top 은 830 그대로).
-  //   그래서 sticky 가 아닌 앞 표식을 ★부를 때마다★ 읽는다. 한 번 재서 들고 있으면 그림·글꼴이
-  //   나중에 자리를 잡을 때 그 값이 낡는다.
-  var STICK_PAD=6;
-  var BAR=document.querySelector('.report-tabs');
-  var MARK=document.getElementById('report-top');
-  var STICK_TOP=BAR?(parseInt(getComputedStyle(BAR).top,10)||0):0;
-  function floorFrom(markY, stickTop, pad){ return Math.max(0, markY-stickTop+pad); }   // 값만 다루는 부분
-  function stickFloor(){
-    if(!BAR||!MARK) return 0;
-    return floorFrom(MARK.getBoundingClientRect().top+window.scrollY, STICK_TOP, STICK_PAD);
-  }
-  function put(el, top){ window.scrollTo({top: Math.max(0, el.getBoundingClientRect().top+window.scrollY-top), behavior:'instant'}); }
-  // 바닥은 ★패널 첫머리로 처음 갈 때만★ 쓴다.
-  //   저장 위치 복원에는 안 쓴다 — 읽던 자리보다 아래로 밀면 "탭을 누르면 화면이 내려간다" 가 된다.
-  //   그 자리에서 탭 줄이 안 붙어 있는 것은 원래 그 스크롤의 모습이지 결함이 아니다.
-  //   장 앵커(put)에도 안 쓴다 — 탭 앞 머리말에도 빈 앵커가 있을 수 있고 머리말 앵커를
-  //   억지로 붙은 상태로 만들 이유가 없다.
-  function putPanel(el){ window.scrollTo({top: Math.max(stickFloor(), el.getBoundingClientRect().top+window.scrollY-PANEL_TOP), behavior:'instant'}); }
-  // ★그 부의 첫머리보다 위는 "읽던 자리" 가 아니다★
-  //   스크롤 0 은 문서 머리말 자리이지 그 부의 내용이 아니다. 그걸 저장해 두면 나중에 그 탭을
-  //   눌렀을 때 문서 맨 위로 튄다(실측 2026-09-07: 3부를 맨 위에서 보다 떠난 뒤, 1부에서 3000
-  //   까지 읽다가 3부를 누르니 0 으로 갔다. 탭 줄도 830 으로 내려앉았다).
-  //   복원할 때 손대면 읽던 자리를 잃으므로 ★저장할 때★ 첫머리로 올려 둔다.
-  function keep(id){
-    var el=document.getElementById(id);
-    if(!el) return window.scrollY;
-    var head=Math.max(0, el.getBoundingClientRect().top+window.scrollY-PANEL_TOP);
-    return Math.max(window.scrollY, head);
-  }
-  function shown(){
-    var els=document.querySelectorAll('.tab-panel');
-    for(var i=0;i<els.length;i++) if(getComputedStyle(els[i]).display!=='none') return els[i].id;
-    return null;
-  }
-  // ★떠나기 전에 적어 둔다★ — hashchange 시점에는 브라우저가 이미 화면을 옮긴 뒤라 늦다.
-  //   클릭 시점은 주소가 바뀌기 전이므로 그때의 scrollY 가 그 탭에서 읽던 자리다.
-  function wire(){
-    var tabs=document.querySelectorAll('.report-tab');
-    for(var i=0;i<tabs.length;i++) tabs[i].addEventListener('click', function(){
-      var to=(this.getAttribute('href')||'').slice(1);
-      if(current===to) delete pos[current];        // 같은 탭을 다시 누르면 첫머리로
-      else if(current) pos[current]=keep(current);
-    });
-    current=shown();
-  }
-  function go(){
-    var h=location.hash; if(!h||h.length<2) return;
-    var el=document.getElementById(decodeURIComponent(h.slice(1))); if(!el) return;
-    var isTab=el.classList.contains('tab-panel');
-    // ★requestAnimationFrame 을 쓰지 않는다★ — 배경 탭에서는 콜백이 아예 실행되지 않는다(실측 2026-09-02:
-    //   document.hidden=true 인 탭에서 rAF 는 안 돌고 setTimeout 만 돈다. 그래서 이 코드가 한 줄도
-    //   실행되지 않은 채 "동작한다" 로 잘못 읽혔다). getBoundingClientRect 를 읽으면 :target 으로 바뀐
-    //   표시 상태가 그 자리에서 계산되므로, 프레임을 기다릴 이유가 없다.
-    if(isTab){
-      current=el.id;
-      var saved=pos[el.id];
-      if(typeof saved==='number'){
-        el.getBoundingClientRect();           // 방금 열린 패널의 높이를 먼저 계산시킨다
-        window.scrollTo({top:saved, behavior:'instant'});   // ★읽던 자리 그대로★ — 바닥을 대면 화면이 아래로 밀린다
-      }
-      else putPanel(el);
-      return;
-    }
-    current=shown();
-    put(el, TOP);
-    setTimeout(function(){                    // 깊은 앵커만 — 그림이 늦게 자리를 잡아 밀렸는지 본다
-      if(Math.abs(el.getBoundingClientRect().top-TOP)>4) put(el, TOP);
-    },400);
-  }
-  addEventListener('load',function(){ wire(); go(); });
-  addEventListener('hashchange',go);
-})();`;
 }
 
 const css = readFileSync(resolve(__dir, "../assets/theme.css"), "utf8");

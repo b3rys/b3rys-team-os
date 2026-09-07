@@ -101,11 +101,13 @@ try {
 
   // 패널 두 개, 첫 패널이 기본
   assert.equal((th.match(/<section id="panel-/g) || []).length, 2);
-  assert.match(th, /<section id="panel-a" class="tab-panel is-default"/);
+  assert.match(th, /<section id="panel-a" class="tab-panel is-default is-active" data-tab="a"/);
   assert.match(th, /<section id="panel-b" class="tab-panel"/);
   // 탭 줄은 theme.css 가 정한 컴포넌트를 그대로 쓴다(생김새를 렌더러가 다시 정의하지 않는다)
   assert.match(th, /<nav class="report-tabs" role="tablist"/);
-  assert.match(th, /<a id="tab-a" class="report-tab" role="tab" href="#panel-a">첫째<\/a>/);
+  // ★탭은 링크로 둔다★ — 포털 뷰어가 sandbox iframe(allow-scripts 없음)으로 띄워 스크립트를 막는다.
+  //   링크와 :target 을 남겨야 그 자리에서도 탭이 동작한다.
+  assert.match(th, /<a id="tab-a" class="report-tab is-active" role="tab" href="#panel-a" data-target="a" aria-selected="true">첫째<\/a>/);
   // ★내용이 제 패널에 들어갔나★ — 이걸 안 보면 패널만 생기고 본문이 통째로 한쪽에 몰려도 통과한다
   const segA = th.slice(th.indexOf('id="panel-a"'), th.indexOf('id="panel-b"'));
   assert.ok(segA.includes("내용가나다") && !segA.includes("내용라마바"));
@@ -114,62 +116,32 @@ try {
   assert.match(th, /<div id="a-1"><\/div>/);
   // 머리말은 패널 바깥
   assert.ok(th.indexOf("머리말은 탭 밖에 남는다") < th.indexOf('class="tab-panel'));
-  // 전환은 CSS :target — 스크립트가 막힌 곳(/reports 뷰어 iframe sandbox)에서도 돌아야 한다
-  assert.match(th, /\.tab-panel:target,\.tab-panel:has\(:target\)\{display:block\}/);
-  // 패널 바깥을 가리키는 주소에서 화면이 비지 않게, "어느 패널도 안 걸렸을 때만" 기본을 켠다
-  assert.match(th, /\.wrap:not\(:has\(\.tab-panel:target\)\):not\(:has\(\.tab-panel :target\)\) \.tab-panel\.is-default\{display:block\}/);
 
-  // ★탭은 이동이지 효과가 아니다★ — 부드러운 스크롤이 켜져 있으면 브라우저 애니메이션과
-  // 보정 이동이 다투어 화면이 떨린다. 그리고 보정은 탭 클릭에서 한 번만 움직여야 한다.
-  assert.match(th, /html\{scroll-behavior:auto\}/);
-  // 닫혀 있던 패널은 브라우저가 위치를 모른다 — 탭 클릭도 스크립트가 옮겨야 한다. 단 한 번만.
-  assert.match(th, /var isTab=el\.classList\.contains\('tab-panel'\);/);
-  // ★rAF 금지★ — 배경 탭에서는 콜백이 실행되지 않아 이 코드가 통째로 안 돈다
-  assert.doesNotMatch(th, /requestAnimationFrame\(/);   // 주석의 단어는 허용, ★호출★ 은 금지
-  assert.match(th, /var PANEL_TOP=112;/);
-  // ★탭 줄이 붙은 채로 멈춰야 한다★ — 패널 첫머리로 가는 목표가 sticky 경계와 정확히 같아서
-  //   1px 만 어긋나도 줄이 풀려 내려앉았다(실측 2026-09-07: 여섯 탭 전부 여유 0). 바닥을 깐다.
-  assert.match(th, /var STICK_PAD=6;/);
-  assert.match(th, /function putPanel\(el\)\{[^}]*Math\.max\(stickFloor\(\)/);
-  assert.match(th, /else putPanel\(el\);/);
-  // ★원래 자리는 sticky 인 탭 줄에서 읽으면 안 된다★ — 붙어 있는 동안 붙은 자리가 나온다.
-  //   sticky 가 아닌 앞 표식(#report-top)을 부를 때마다 읽어야 그림·글꼴이 늦게 자리를 잡아도 맞다.
-  assert.match(th, /getElementById\('report-top'\)/);
-  assert.match(th, /function stickFloor\(\)\{[\s\S]*?MARK\.getBoundingClientRect\(\)\.top\+window\.scrollY/);
-  assert.doesNotMatch(th, /var BAR_NAT=/);   // 한 번 재서 들고 있으면 낡는다
+  // 스크립트가 안 도는 자리 — 주소(:target)로 고른다
+  assert.match(th, /\.wrap:not\(\.js-tabs\) \.tab-panel:target/);
+  assert.match(th, /\.wrap:not\(\.js-tabs\):not\(:has\(\.tab-panel:target\)\):not\(:has\(\.tab-panel :target\)\) \.tab-panel\.is-default\{display:block\}/);
+  // 스크립트가 도는 자리 — 클래스로 고른다
+  assert.match(th, /\.js-tabs \.tab-panel\.is-active\{display:block\}/);
+  assert.match(th, /wrap\.classList\.add\('js-tabs'\)/);
 
-  // 경계 계산은 값으로 검사한다 — 문자열이 있는지가 아니라 실제로 그 값이 나오는지.
-  const floorSrc = th.match(/function floorFrom\([^)]*\)\{[^}]*\}/)[0];
-  const floorFrom = new Function(floorSrc + "; return floorFrom;")();
-  assert.equal(floorFrom(830, 52, 6), 784);   // 라이브 실측값 — 경계 778 보다 6 아래
-  assert.equal(floorFrom(830, 52, 0), 778);   // 완충이 없으면 경계와 같아진다(고치기 전 상태)
-  assert.equal(floorFrom(10, 52, 6), 0);      // 문서 맨 위 근처면 0 으로 깎는다
-  // 저장 위치로 돌아갈 때도 같은 바닥을 지킨다 — 조금만 읽던 탭으로 돌아가면 줄이 풀린다.
-  // ★복원은 읽던 자리 그대로★ — 바닥을 대면 탭을 누를 때 화면이 아래로 밀린다.
-  assert.match(th, /window\.scrollTo\(\{top:saved, behavior:'instant'\}\)/);
-  assert.doesNotMatch(th, /Math\.max\(stickFloor\(\), saved\)/);
-  // 탭마다 읽던 자리를 기억한다. 떠나는 시점은 클릭이지 hashchange 가 아니다(그때는 이미 옮겨진 뒤다).
-  // ★그 부의 첫머리보다 위는 저장하지 않는다★ — 스크롤 0 은 문서 머리말 자리이지 그 부의 내용이
-  //   아니다. 저장해 두면 나중에 그 탭을 눌렀을 때 문서 맨 위로 튄다(실측: 3000 에서 0 으로 갔다).
-  //   복원할 때 손대면 읽던 자리를 잃으므로 저장할 때 올린다.
-  assert.match(th, /pos\[current\]=keep\(current\);/);
-  assert.match(th, /function keep\(id\)\{[\s\S]*?Math\.max\(window\.scrollY, head\)/);
-  assert.doesNotMatch(th, /pos\[current\]=window\.scrollY;/);
-  assert.match(th, /if\(current===to\) delete pos\[current\];/);
-  assert.match(th, /if\(typeof saved==='number'\)\{/);
-  // 복원 직전에 레이아웃을 강제하지 않으면 문서가 짧아 값이 잘린다
-  assert.match(th, /el\.getBoundingClientRect\(\);[^\n]*\n\s*window\.scrollTo\(\{top:saved/);
-  assert.match(th, /addEventListener\('click'/);
-  // ★scrollTo 호출마다 behavior:'instant' 여야 한다★ — 문자열이 한 번만 있는지 보면
-  // 한 곳만 'smooth' 로 바뀌어도 나머지 하나가 검사를 통과시킨다(실측: 187행·217행 각각 생존).
-  // 그래서 ★호출 수와 instant 수가 같은지★ 를 센다.
+  // ★탭을 눌러도 화면을 옮기지 않는다★ — 브라우저 앵커 이동을 막고 패널만 바꿔 끼운다.
+  //   옮기는 코드를 두었다가 2026-09-07 하루에 결함이 넷 났다(경계 여유 0 · 맨 위로 튐 ·
+  //   복원이 화면을 밀어냄 · 저장값 0). 주소는 replaceState 로 조용히 바꾼다.
+  assert.match(th, /e\.preventDefault\(\);/);
+  assert.match(th, /history\.replaceState\(null,'','#tab='/);
+  assert.doesNotMatch(th, /pos\[current\]/);      // 읽던 자리 저장·복원 자체가 없어졌다
+  assert.doesNotMatch(th, /stickFloor\(/);
+  assert.doesNotMatch(th, /function keep\(/);
+  // 깊은 앵커로 들어온 경우에만 한 번 옮긴다
+  assert.match(th, /window\.scrollTo\(\{top: Math\.max\(0, el\.getBoundingClientRect\(\)\.top\+window\.scrollY-TOP\), behavior:'instant'\}\)/);
+  // ★scrollTo 는 하나뿐이고 instant 다★ — 여러 번 옮기면 화면이 튄다
   const scrollCalls = (th.match(/window\.scrollTo\(/g) || []).length;
-  const instantCalls = (th.match(/window\.scrollTo\(\{[^}]*behavior:'instant'\}\)/g) || []).length;
-  assert.equal(scrollCalls, instantCalls, `scrollTo ${scrollCalls}개 중 behavior:'instant' 는 ${instantCalls}개`);
-  assert.ok(scrollCalls >= 2, `scrollTo 호출이 ${scrollCalls}개다 — 보정 코드가 빠졌다`);
+  assert.equal(scrollCalls, 1, `scrollTo 가 ${scrollCalls}개다 — 탭 전환은 화면을 안 옮긴다`);
   assert.doesNotMatch(th, /behavior:'smooth'/);
-  assert.doesNotMatch(th, /setTimeout\(put,\s*\d+\)/); // 옛 다중 보정(200·700ms)이 남아 있지 않다
-  assert.equal((th.match(/setTimeout\(/g) || []).length, 1); // 늦은 재배치는 깊은 앵커용 1개뿐
+  // ★탭은 이동이지 효과가 아니다★
+  assert.match(th, /html\{scroll-behavior:auto\}/);
+  // ★rAF 금지★ — 배경 탭에서는 콜백이 실행되지 않아 이 코드가 통째로 안 돈다
+  assert.doesNotMatch(th, /requestAnimationFrame\(/);
 
   // ★표식이 없으면 탭도 없다★ — 기존 보고서가 영향받지 않는지
   const pmd = join(tmp, "plain.md"), pout = join(tmp, "plain.html");
