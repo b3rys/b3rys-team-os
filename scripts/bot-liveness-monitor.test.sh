@@ -325,4 +325,73 @@ grep -q "tok-must-not-leak" "$CURL_ARGV" && {
   RC=1
 }
 pass_if_clean "알림 발송 시 토큰이 curl 인자에 실리지 않는다"
+
+# ─── 사용량 소진(429) 감지 ───────────────────────────────────────────────
+# 이 검사가 없던 동안 codex·brief·devon·hermes 넷이 동시에 답을 못 했는데 감시기가 조용했다.
+# tmux·PID·health 는 전부 정상이었기 때문이다. 그래서 ★로그 문구★ 를 본다.
+# 여기서는 가짜 로그를 만들어 ① 창 안이면 잡고 ② 창 밖이면 조용한지를 본다.
+QDIR=$(mktemp -d); trap 'rm -rf "$QDIR"' EXIT
+q_fixture() {  # $1=분 전
+  local mins="$1" oc_ts h_ts
+  oc_ts=$(date -v-"${mins}"M "+%Y-%m-%dT%H:%M:%S" 2>/dev/null)
+  h_ts=$(date -v-"${mins}"M "+%Y-%m-%d %H:%M:%S" 2>/dev/null)
+  # 실제 로그는 증상과 원인이 ★다른 줄★ 이다(unavailable 줄에는 원인 필드가 없다).
+  printf '{"0":"Embedded agent failed: Auth profile \\"openai:x@y.z\\" is temporarily unavailable for openai/m.","time":"%s.000+09:00"}\n' "$oc_ts" > "$QDIR/openclaw.log"
+  printf '{"0":"provider failure","profileFailureReason":"rate_limit","providerRuntimeFailureKind":"rate_limit","rawErrorPreview":"You'"'"'ve reached your Codex subscription usage limit. Next reset in 6 hours.","time":"%s.000+09:00"}\n' "$oc_ts" >> "$QDIR/openclaw.log"
+  mkdir -p "$QDIR/profiles/testprof/logs"
+  printf '%s,000 WARNING gateway.run: Primary provider rate-limited (429): Codex provider quota exhausted (429); retry after 600s. Credentials are still valid.\n' "$h_ts" > "$QDIR/profiles/testprof/logs/gateway.error.log"
+}
+q_run() {  # $1=창(분) → 검출 줄만 출력
+  LIVENESS_STATE_DIR="$QDIR/state" LIVENESS_QUOTA_WINDOW_MIN="$1" \
+  LIVENESS_OPENCLAW_LOG="$QDIR/openclaw.log" LIVENESS_HERMES_PROFILES="$QDIR/profiles" \
+    bash "$SCRIPT" --dry-run 2>/dev/null | grep -E "\[(사용량|제공자)\]" || true
+}
+
+q_fixture 3
+OUT=$(q_run 15)
+printf '%s' "$OUT" | grep -q "\[사용량\] openclaw" || { echo "FAIL: 창 안 openclaw 사용량 소진을 못 잡았다" >&2; RC=1; }
+printf '%s' "$OUT" | grep -q "hermes(testprof)" || { echo "FAIL: 창 안 hermes 사용량 소진을 못 잡았다" >&2; RC=1; }
+printf '%s' "$OUT" | grep -q "경 풀림(retry after 600s)" || { echo "FAIL: 복구 시각을 계산하지 않았다" >&2; RC=1; }
+pass_if_clean "창 안의 사용량 소진은 런타임별로 각각 잡고 복구 시각을 낸다"
+
+q_fixture 120
+OUT=$(q_run 15)
+[ -z "$OUT" ] || { echo "FAIL: 창 밖(120분 전) 기록에 알림이 났다 — $OUT" >&2; RC=1; }
+pass_if_clean "창 밖의 옛 기록에는 알리지 않는다"
+
+# ★사용량이 아닌 cooldown 은 사용량이라고 하면 안 된다★
+# openclaw 의 "temporarily unavailable" 은 auth profile cooldown 의 공통 결과다.
+# 원인필드가 rate_limit 이 아니면 원인 미확인으로 낮춰야 한다 — 안 그러면 인증 오류를
+# 사용량으로 잘못 부르고 "재시작으로 안 풀린다" 까지 틀리게 단정한다.
+q_fixture_nonquota() {
+  local oc_ts; oc_ts=$(date -v-3M "+%Y-%m-%dT%H:%M:%S" 2>/dev/null)
+  # ★두 줄이 섞인 상태★ — 증상 줄과 사용량이 아닌 원인 줄. 줄을 건너뛰어 짝지으면 오분류한다.
+  printf '{"0":"Auth profile \\"openai:x@y.z\\" is temporarily unavailable for openai/m.","time":"%s.000+09:00"}\n' "$oc_ts" > "$QDIR/openclaw.log"
+  printf '{"0":"provider failure","profileFailureReason":"auth_error","time":"%s.000+09:00"}\n' "$oc_ts" >> "$QDIR/openclaw.log"
+  rm -rf "$QDIR/profiles"; mkdir -p "$QDIR/profiles"
+}
+q_fixture_nonquota
+OUT=$(q_run 15)
+printf '%s' "$OUT" | grep -q "\[사용량\]" && { echo "FAIL: 사용량이 아닌 cooldown 을 사용량으로 불렀다 — $OUT" >&2; RC=1; }
+printf '%s' "$OUT" | grep -q "\[제공자\]" || { echo "FAIL: 원인 미확인 알림이 안 났다 — $OUT" >&2; RC=1; }
+printf '%s' "$OUT" | grep -q "재시작으로 안 풀린다" && { echo "FAIL: 원인 미확인인데 재시작 무용을 단정했다" >&2; RC=1; }
+pass_if_clean "사용량이 아닌 cooldown 은 원인 미확인으로 낮춘다"
+
+# ★옛 원인 기록을 새 증상에 갖다 붙이면 안 된다★
+# 실제 로그에서 rate_limit 기록은 하루에 한 건인데 증상 줄은 216건이었다.
+# 창 밖의 옛 원인을 창 안 증상의 원인으로 부르면 지나간 사고를 지금 사고로 보고하게 된다.
+q_fixture_stale_cause() {
+  local new_ts old_ts
+  new_ts=$(date -v-3M "+%Y-%m-%dT%H:%M:%S" 2>/dev/null)
+  old_ts=$(date -v-300M "+%Y-%m-%dT%H:%M:%S" 2>/dev/null)
+  printf '{"0":"provider failure","profileFailureReason":"rate_limit","time":"%s.000+09:00"}\n' "$old_ts" > "$QDIR/openclaw.log"
+  printf '{"0":"Auth profile \\"openai:x@y.z\\" is temporarily unavailable for openai/m.","time":"%s.000+09:00"}\n' "$new_ts" >> "$QDIR/openclaw.log"
+  rm -rf "$QDIR/profiles"; mkdir -p "$QDIR/profiles"
+}
+q_fixture_stale_cause
+OUT=$(q_run 15)
+printf '%s' "$OUT" | grep -q "\[사용량\]" && { echo "FAIL: 창 밖의 옛 rate_limit 기록을 지금 사고의 원인으로 붙였다 — $OUT" >&2; RC=1; }
+printf '%s' "$OUT" | grep -q "\[제공자\]" || { echo "FAIL: 증상만 있을 때 원인 미확인 알림이 안 났다 — $OUT" >&2; RC=1; }
+pass_if_clean "창 밖의 옛 원인 기록을 창 안 증상에 붙이지 않는다"
+
 exit "$RC"

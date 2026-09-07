@@ -661,6 +661,84 @@ check_gateway "ai.openclaw.gateway" "codex/openclaw" "openclaw" "http://127.0.0.
 check_gateway "ai.hermes.gateway-b3ryshermes" "hermes" "hermes" "-" "hermes"
 check_gateway "$TEAMOS_LAUNCHD_PREFIX.b3rys-dev" "b3rys-dev" "b3rys-dev" "http://127.0.0.1:3000/" "-"
 
+# ─── 사용량 소진(429) 감지 (GD 2026-09-07 요청) ─────────────────────────────────
+# 왜 필요한가: 위 검사들은 ★프로세스가 살아있나★ 만 본다. 2026-09-07 에 codex·brief·devon·hermes
+#   넷이 동시에 답을 못 했는데 tmux·PID·health 는 전부 정상이라 이 모니터가 조용했다.
+#   원인은 공유 ChatGPT 계정의 사용량 소진이었고, 그 사실은 ★로그에만★ 찍힌다.
+# 무엇을 보나: 두 런타임이 서로 다른 문구를 쓰므로 둘 다 본다.
+#   openclaw : Auth profile "openai:<계정>" is temporarily unavailable
+#   hermes   : Primary provider rate-limited (429): ... quota exhausted (429); retry after <n>s
+# ★인증 실패와 사용량은 다르다★ — hermes 문구에 "Credentials are still valid" 가 붙는다.
+# alert-only(Type C). 재시작해도 안 풀리고 시간이 지나야 풀린다.
+QUOTA_WINDOW_MIN="${LIVENESS_QUOTA_WINDOW_MIN:-15}"   # 점검 주기(10분)보다 넓게 — 사이에 난 것을 놓치지 않는다
+check_provider_quota() {
+  # ★한 건만 보고하면 과소보고다★ — 계정 하나가 막히면 여러 런타임·프로필이 동시에 걸린다.
+  #   실측(2026-09-07): openclaw 와 hermes 두 프로필이 같은 시각대에 같이 걸렸다. 전부 줄로 낸다.
+  local now_epoch cutoff_epoch found=0
+  now_epoch=$(date +%s); cutoff_epoch=$((now_epoch - QUOTA_WINDOW_MIN * 60))
+
+  # openclaw — JSON 로그(한 줄 = 한 기록). 날짜별 파일이라 오늘 것만 본다.
+  # ★"temporarily unavailable" 은 증상이지 원인이 아니다★ — auth profile cooldown 의 공통 결과라
+  #   인증 오류·일시적 provider 오류도 같은 줄을 낸다. 그리고 ★그 줄에는 원인 필드가 없다★
+  #   (실측: unavailable 216줄 중 원인 필드를 가진 줄 0). 원인은 별도 기록에 남는다.
+  #   그래서 두 줄을 짝지어 읽지 않는다 — ★각자 자기 줄에서만 읽는다.★ 섞으면 다른 요청의
+  #   원인을 이 증상의 원인으로 부르게 된다.
+  local oc_log="${LIVENESS_OPENCLAW_LOG:-/tmp/openclaw/openclaw-$(date +%F).log}"
+  if [ -f "$oc_log" ]; then
+    local cause_line cause_ts cause_e why hint sym_line sym_ts sym_e
+    # ① 원인 기록 — 실패 사유가 rate_limit 인 줄. 시각·안내문도 이 줄에서만 뽑는다.
+    cause_line=$(grep -E '"(profileFailureReason|failoverReason|providerRuntimeFailureKind)":"rate_limit"' "$oc_log" 2>/dev/null | tail -1)
+    if [ -n "$cause_line" ]; then
+      cause_ts=$(printf '%s' "$cause_line" | sed -n 's/.*"time":"\([0-9T:-]*\).*/\1/p' | tail -1)
+      cause_e=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${cause_ts:-x}" +%s 2>/dev/null || echo 0)
+      if [ "$cause_e" -ge "$cutoff_epoch" ]; then
+        why=$(printf '%s' "$cause_line" | sed -n 's/.*"profileFailureReason":"\([a-z_]*\)".*/\1/p')
+        [ -n "$why" ] || why="rate_limit"
+        hint=$(printf '%s' "$cause_line" | grep -o "You've reached your [^\"]*" | head -1 | cut -d. -f1,2 | cut -c1-120)
+        found=1
+        ISSUES="${ISSUES}· [사용량] openclaw(codex·brief·devon) 사용량 소진 — $cause_ts · 원인필드 $why${hint:+ · \"$hint\"}. 재시작으로 안 풀린다. alert-only
+"
+      fi
+    fi
+    # ② 증상만 있고 원인 기록이 창 안에 없으면 원인 미확인으로 낸다. 사용량이라 부르지 않는다.
+    if [ "$found" = "0" ]; then
+      sym_line=$(grep "temporarily unavailable" "$oc_log" 2>/dev/null | tail -1)
+      if [ -n "$sym_line" ]; then
+        sym_ts=$(printf '%s' "$sym_line" | sed -n 's/.*"time":"\([0-9T:-]*\).*/\1/p' | tail -1)
+        sym_e=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${sym_ts:-x}" +%s 2>/dev/null || echo 0)
+        if [ "$sym_e" -ge "$cutoff_epoch" ]; then
+          found=1
+          ISSUES="${ISSUES}· [제공자] openclaw 인증 프로필 일시 사용불가 — $sym_ts · 창 안에 rate_limit 기록 없음. 사용량인지 인증·일시오류인지 안 갈린다. 확인 필요
+"
+        fi
+      fi
+    fi
+  fi
+
+  # hermes — 프로필별 텍스트 로그. retry after 초가 있으면 복구 시각까지 계산한다.
+  local d p line ts e retry_s extra base until_h
+  for d in "${LIVENESS_HERMES_PROFILES:-$HOME/.hermes/profiles}"/*/logs/gateway.error.log; do
+    [ -f "$d" ] || continue
+    p=$(basename "$(dirname "$(dirname "$d")")")
+    line=$(grep "quota exhausted (429)" "$d" 2>/dev/null | tail -1)
+    [ -n "$line" ] || continue
+    ts=$(printf '%s' "$line" | awk '{print $1" "$2}' | cut -d, -f1)
+    e=$(date -j -f "%Y-%m-%d %H:%M:%S" "$ts" +%s 2>/dev/null || echo 0)
+    [ "$e" -ge "$cutoff_epoch" ] || continue
+    retry_s=$(printf '%s' "$line" | sed -n 's/.*retry after \([0-9]*\)s.*/\1/p')
+    extra=""
+    if [ -n "$retry_s" ] && [ "$e" -gt 0 ]; then
+      until_h=$(date -r $((e + retry_s)) "+%H:%M" 2>/dev/null)
+      [ -n "$until_h" ] && extra=" · ${until_h} 경 풀림(retry after ${retry_s}s)"
+    fi
+    found=1
+    ISSUES="${ISSUES}· [사용량] hermes($p) 제공자 사용량 소진(429) — ${ts}${extra}. 프로세스는 정상이라 재시작으로 안 풀린다. alert-only
+"
+  done
+  return 0
+}
+check_provider_quota
+
 # OpenClaw Telegram provider stuck detector (Phase A, 2026-06-16 outage):
 # alert only when last inbound is stale AND provider state is stopped/disconnected.
 # It writes read-only dashboard status + audit_event; gateway restart/kickstart stays OFF unless
