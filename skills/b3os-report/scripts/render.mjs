@@ -204,9 +204,11 @@ ${noPanelHit} [href="#panel-${tabs[0].id}"]${activeBg}`;
     return floorFrom(MARK.getBoundingClientRect().top+window.scrollY, STICK_TOP, STICK_PAD);
   }
   function put(el, top){ window.scrollTo({top: Math.max(0, el.getBoundingClientRect().top+window.scrollY-top), behavior:'instant'}); }
-  // 바닥은 ★패널 첫머리와 저장 위치 복원에만★ 적용한다.
-  //   장 앵커(put)에는 안 쓴다 — 탭 앞 머리말에도 빈 앵커가 있을 수 있어 전부 경계를 지난다고
-  //   말할 수 없고, 머리말 앵커를 억지로 붙은 상태로 만들 이유도 없다.
+  // 바닥은 ★패널 첫머리로 처음 갈 때만★ 쓴다.
+  //   저장 위치 복원에는 안 쓴다 — 읽던 자리보다 아래로 밀면 "탭을 누르면 화면이 내려간다" 가 된다.
+  //   그 자리에서 탭 줄이 안 붙어 있는 것은 원래 그 스크롤의 모습이지 결함이 아니다.
+  //   장 앵커(put)에도 안 쓴다 — 탭 앞 머리말에도 빈 앵커가 있을 수 있고 머리말 앵커를
+  //   억지로 붙은 상태로 만들 이유가 없다.
   function putPanel(el){ window.scrollTo({top: Math.max(stickFloor(), el.getBoundingClientRect().top+window.scrollY-PANEL_TOP), behavior:'instant'}); }
   function shown(){
     var els=document.querySelectorAll('.tab-panel');
@@ -237,7 +239,7 @@ ${noPanelHit} [href="#panel-${tabs[0].id}"]${activeBg}`;
       var saved=pos[el.id];
       if(typeof saved==='number'){
         el.getBoundingClientRect();           // 방금 열린 패널의 높이를 먼저 계산시킨다
-        window.scrollTo({top:Math.max(stickFloor(), saved), behavior:'instant'});
+        window.scrollTo({top:saved, behavior:'instant'});   // ★읽던 자리 그대로★ — 바닥을 대면 화면이 아래로 밀린다
       }
       else putPanel(el);
       return;
