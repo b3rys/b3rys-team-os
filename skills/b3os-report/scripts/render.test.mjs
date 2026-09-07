@@ -149,7 +149,12 @@ try {
   assert.match(th, /window\.scrollTo\(\{top:saved, behavior:'instant'\}\)/);
   assert.doesNotMatch(th, /Math\.max\(stickFloor\(\), saved\)/);
   // 탭마다 읽던 자리를 기억한다. 떠나는 시점은 클릭이지 hashchange 가 아니다(그때는 이미 옮겨진 뒤다).
-  assert.match(th, /pos\[current\]=window\.scrollY;/);
+  // ★그 부의 첫머리보다 위는 저장하지 않는다★ — 스크롤 0 은 문서 머리말 자리이지 그 부의 내용이
+  //   아니다. 저장해 두면 나중에 그 탭을 눌렀을 때 문서 맨 위로 튄다(실측: 3000 에서 0 으로 갔다).
+  //   복원할 때 손대면 읽던 자리를 잃으므로 저장할 때 올린다.
+  assert.match(th, /pos\[current\]=keep\(current\);/);
+  assert.match(th, /function keep\(id\)\{[\s\S]*?Math\.max\(window\.scrollY, head\)/);
+  assert.doesNotMatch(th, /pos\[current\]=window\.scrollY;/);
   assert.match(th, /if\(current===to\) delete pos\[current\];/);
   assert.match(th, /if\(typeof saved==='number'\)\{/);
   // 복원 직전에 레이아웃을 강제하지 않으면 문서가 짧아 값이 잘린다
