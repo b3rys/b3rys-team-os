@@ -351,7 +351,7 @@ const CORE_RULE_COMPACT = [
   "- 낯선 용어·파일·필드는 무엇이며 왜 필요한지 설명한다. 지어낸 별명·비유로 대신하지 않는다.",
   "- 원자료의 사실·조건·불확실성을 유지한다. 근거 없는 단정·완료 보고·약속을 추가하지 않는다.",
   "- 필요한 설명은 남기고, 반복과 묻지 않은 세부는 뺀다.",
-  "- 기술 원리·논문 설명, 장애 원인·변경 이유 보고, 이해하기 어렵다는 지적을 받은 답변에는 b3os-how-to-explain 을 적용한다.",
+  "- 기술 원리·논문 설명, 장애 원인·변경 이유 보고, PR 본문·보고서, 남의 문장을 정확한 설명으로 고쳐 달라는 요청, 이해하기 어렵다는 지적을 받은 답변에는 b3os-how-to-explain 을 적용한다.",
   "",
   "> ⏰ **Show every time to the team lead in the team lead's LOCAL timezone — the machine's, from `date +%z` — never UTC.** Logs/DB are UTC; convert by that offset's hours AND minutes before showing (+0530 = 5h 30m).",
   "",
