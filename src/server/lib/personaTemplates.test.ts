@@ -90,32 +90,6 @@ describe("핵심룰 — '외부 전송' 판별 축", () => {
   });
 });
 
-describe("문장 작성 기준 — 산출물에 세 줄이 다 있나", () => {
-  const rule = (md: string): string => {
-    const i = md.indexOf("**문장 작성 기준**");
-    return i < 0 ? "" : md.slice(i, md.indexOf("\n\n", i));
-  };
-
-  for (const runtime of ["claude_channel", "openclaw", "hermes_agent", "codex"] as const) {
-    test(`${runtime} 산출물에 문장 작성 기준 세 줄`, () => {
-      const md =
-        runtime === "claude_channel"
-          ? buildPersona(claudeInput)
-          : buildAgentsMd({ ...claudeInput, runtime });
-      const block = rule(md);
-      expect(block, "★문장 작성 기준 블록 자체가 산출물에서 사라졌다★").not.toBe("");
-      for (const n of [1, 2, 3]) {
-        expect(block, `★${n}번 줄이 없다★`).toContain(`\n${n}. `);
-      }
-      expect(block, "★지운 4번이 되살아났다★").not.toContain("4. ");
-      expect(block, "★'같은 주장을 표현만 바꿔 반복하지 않는다' 가 빠졌다★").toContain(
-        "같은 주장을 표현만 바꿔 반복하지 않는다",
-      );
-      expect(block, "★'한 문장에 판단 하나' 가 빠졌다★").toContain("한 문장에 판단 하나");
-    });
-  }
-});
-
 // 이 블록은 Core Rules 안에서 맨 앞이어야 한다. 아래로 밀리면 읽히지 않으므로
 // 문구뿐 아니라 자리 자체를 검사한다.
 // 굵은 소제목이 목록 바로 다음 줄에 오면 마크다운이 그 줄을 마지막 항목의 이어붙임으로
@@ -140,7 +114,7 @@ describe("산출물 — 목록 바로 뒤에 굵은 소제목이 붙지 않나",
   }
 });
 
-describe("메시지 작성 원칙 — Core Rules 맨 앞에 있나", () => {
+describe("한국어 설명·보고 — Core Rules 맨 앞에 있나", () => {
   for (const runtime of ["claude_channel", "openclaw", "hermes_agent", "codex"] as const) {
     test(`${runtime} 산출물에서 Core Rules 첫 블록`, () => {
       const md =
@@ -148,90 +122,72 @@ describe("메시지 작성 원칙 — Core Rules 맨 앞에 있나", () => {
           ? buildPersona(claudeInput)
           : buildAgentsMd({ ...claudeInput, runtime });
       const core = md.indexOf("## ⭐ Core Rules");
-      const rule = md.indexOf("**메시지 작성 원칙**");
+      const rule = md.indexOf("**한국어 설명·보고**");
       const clock = md.indexOf("> ⏰");
       const base = md.indexOf("**Base execution**");
       expect(core, "★Core Rules 헤더가 없다★").toBeGreaterThan(-1);
-      expect(rule, "★메시지 작성 원칙이 없다★").toBeGreaterThan(core);
+      expect(rule, "★한국어 설명·보고 블록이 없다★").toBeGreaterThan(core);
       expect(rule, "★⏰ 줄보다 뒤로 밀렸다★").toBeLessThan(clock);
       // "⏰ 보다 앞" 은 "맨 앞" 이 아니다 — 헤더와 이 블록 사이에 다른 블록을 끼우는
       // 뮤턴트가 살아남는다. 그래서 헤더 다음 첫 내용이 이 블록인지 잰다.
       const afterHeader = md.slice(core).split("\n").slice(1).join("\n").trimStart();
-      expect(afterHeader.startsWith("**메시지 작성 원칙**"), "★헤더와 블록 사이에 다른 것이 끼었다★").toBe(true);
+      expect(afterHeader.startsWith("**한국어 설명·보고**"), "★헤더와 블록 사이에 다른 것이 끼었다★").toBe(true);
       expect(rule, "★Base execution 뒤로 밀렸다★").toBeLessThan(base);
     });
   }
 });
 
-describe("메시지 작성 원칙 — 산출물에 네 줄이 다 있나", () => {
+describe("한국어 설명·보고 — 산출물에 다섯 줄이 다 있나", () => {
   const rule = (md: string): string => {
-    const i = md.indexOf("**메시지 작성 원칙**");
+    const i = md.indexOf("**한국어 설명·보고**");
     return i < 0 ? "" : md.slice(i, md.indexOf("\n\n", i));
   };
 
+  // 2026-09-08 교체. 옛 "메시지 작성 원칙" 1~4 + "문장 작성 기준" 1~3(1,112자)을
+  // 이 다섯 줄(269자)로 줄이고, 상세 규칙·사례·검토 기준은 b3os-how-to-explain 으로 옮겼다.
+  // ★줄 앞머리만 고정하면 뒷문장을 지운 변이가 살아남는다★ — 다섯 줄을 통째로 고정한다.
+  const BULLETS = [
+    "- 질문의 답을 먼저 쓰고, 이해에 필요한 맥락만 덧붙인다.",
+    "- 낯선 용어·파일·필드는 무엇이며 왜 필요한지 설명한다. 지어낸 별명·비유로 대신하지 않는다.",
+    "- 원자료의 사실·조건·불확실성을 유지한다. 근거 없는 단정·완료 보고·약속을 추가하지 않는다.",
+    "- 필요한 설명은 남기고, 반복과 묻지 않은 세부는 뺀다.",
+    "- 기술 원리·논문 설명, 장애 원인·변경 이유 보고, 이해하기 어렵다는 지적을 받은 답변에는 b3os-how-to-explain 을 적용한다.",
+  ];
+
   for (const runtime of ["claude_channel", "openclaw", "hermes_agent", "codex"] as const) {
-    test(`${runtime} 산출물에 메시지 작성 원칙 네 줄`, () => {
+    test(`${runtime} 산출물에 한국어 설명·보고 다섯 줄`, () => {
       const md =
         runtime === "claude_channel"
           ? buildPersona(claudeInput)
           : buildAgentsMd({ ...claudeInput, runtime });
       const block = rule(md);
-      expect(block, "★메시지 작성 원칙 블록 자체가 산출물에서 사라졌다★").not.toBe("");
-      expect(block, "★지운 5번이 되살아났다★").not.toContain("5. ");
-      for (const n of [1, 2, 3, 4]) {
-        expect(block, `★${n}번 줄이 없다★`).toContain(`\n${n}. `);
+      expect(block, "★한국어 설명·보고 블록 자체가 산출물에서 사라졌다★").not.toBe("");
+      for (const bullet of BULLETS) {
+        expect(block, `★줄이 그대로 있지 않다: ${bullet.slice(0, 24)}★`).toContain(bullet);
       }
-      // GD 2026-09-05 — 지어낸 낱말(창구·제자리·실물)이 반복돼 2번에 넣은 문장.
-      // 물어본 것 밖의 배경설명·길이 초과가 반복돼 넣은 세 줄. 셋 다 산출물에서 확인한다.
-      expect(block, "★'물어본 것에만 답한다' 가 빠졌다★").toContain("물어본 것에만 답한다");
-      expect(block, "★배경설명 금지가 빠졌다★").toContain(
-        "요청하지 않은 배경설명을 덧붙이지 않는다",
-      );
-      expect(block, "★사실·추정·미확인 구분이 빠졌다★").toContain(
-        "사실, 추정, 미확인 사항을 명확히 구분한다",
-      );
-      expect(block, "★길이 규격이 빠졌다★").toContain(
-        "간단한 질문은 2~4문장, 복잡한 질문은 짧은 요약 뒤 최대 5개 항목으로 답한다",
-      );
-      expect(block, "★'말을 지어내지 않는다' 강조가 빠졌다★").toContain(
-        "★말을 지어내지 않는다.★",
-      );
-      expect(block, "★'원문은 그대로 쓴다' 가 빠졌다★").toContain("원문은 그대로 쓴다");
-      expect(block, "★'핵심만 얘기한다' 가 빠졌다★").toContain(
-        "전달하려고 하는 핵심만 얘기한다",
-      );
-      expect(block, "★'말을 늘리지 않는다' 가 빠졌다★").toContain("말을 늘리지 않는다");
-      // 팀버스에서 진행한 일을 맥락 없이 보고하면 읽는 쪽이 무슨 얘기인지 못 잡는다.
-      expect(block, "★'팀장은 팀원끼리 주고받은 내용을 모른다' 가 빠졌다★").toContain(
-        "팀장은 팀원끼리 주고받은 내용을 모른다",
-      );
-      // 판정법이 이 규칙의 실행부다. 문장만 있고 판정이 없으면 적용이 사람마다 갈린다.
-      // 판정이 한 갈래면 예시 7개 중 5개가 통과한다 — "창구" 는 BridgeWindowRequest 로
-      // 바꿔 쓸 수 있어서 "바꿔 쓸 수 없으면" 이라는 조건을 빠져나간다. 그래서 두 갈래다.
-      expect(block, "★원문 이름 갈래가 빠졌다★").toContain(
-        "원문 이름이 있는데 새 낱말을 만들었으면 지어낸 말이다",
-      );
-      expect(block, "★바꿔 쓸 수 없는 갈래가 빠졌다★").toContain(
-        "숫자·파일명·필드명으로도 바꿔 쓸 수 없으면 그것도 지어낸 말이다",
-      );
-      // 목록 제목과 BridgeWindowRequest 만 고정하면 예시 하나를 지워도 통과한다
-      // ("권한 열쇠" 삭제 뮤턴트가 57 pass 로 생존했다). 일곱 개를 각각 고정한다.
-      expect(block, "★쓰지 말아야 할 예시 목록이 빠졌다★").toContain("쓰지 말아야 할 예시");
-      // 낱말과 대응값이 각각 있는지만 보면 ★둘을 맞바꾼 변이가 살아남는다★
-      // (권한 열쇠→operation hash, 지문→approval key 로 교환해도 57 pass 였다).
-      // 렌더된 짝 문자열을 통째로 고정한다.
-      const COINAGE_PAIRS = [
-        '"값이 나간다"',
-        '"사실보다 넓다"',
-        '"창구"(코드 이름은 BridgeWindowRequest)',
-        '"권한 열쇠"(approval key)',
-        '"지문"(operation hash)',
-        '"팀장님이 첫 독자입니다"(아무도 안 읽고 그대로 갑니다)',
-        '"아직 아무도 눈으로 못 봤습니다"(화면으로 확인 못 했습니다)',
-      ];
-      for (const pair of COINAGE_PAIRS) {
-        expect(block, `★예시 짝 ${pair} 가 그대로 있지 않다★`).toContain(pair);
-      }
+      expect(block.split("\n").filter((l) => l.startsWith("- ")).length, "★줄 수가 다섯이 아니다★").toBe(5);
+      // 스킬 이름이 빠지면 상세 규칙으로 가는 유일한 통로가 끊긴다.
+      expect(block, "★스킬 이름이 빠졌다★").toContain("b3os-how-to-explain");
+      // 옛 블록이 같이 남아 있으면 두 규칙이 동시에 읽힌다.
+      expect(md, "★옛 '메시지 작성 원칙' 이 남아 있다★").not.toContain("**메시지 작성 원칙**");
+      expect(md, "★옛 '문장 작성 기준' 이 남아 있다★").not.toContain("**문장 작성 기준**");
+    });
+  }
+});
+
+// 스킬 목록은 각 SKILL.md 의 frontmatter trigger 에서 생성된다. 이 줄이 12명에게
+// 스킬 존재를 알리는 유일한 통로라, 위 블록이 이름을 불러도 목록에 없으면 못 찾는다.
+describe("스킬 목록 — b3os-how-to-explain 이 들어 있나", () => {
+  for (const runtime of ["claude_channel", "openclaw", "hermes_agent", "codex"] as const) {
+    test(`${runtime} 산출물 스킬 목록에 b3os-how-to-explain`, () => {
+      const md =
+        runtime === "claude_channel"
+          ? buildPersona(claudeInput)
+          : buildAgentsMd({ ...claudeInput, runtime });
+      const i = md.indexOf("**Skills — pick by trigger**");
+      expect(i, "★스킬 목록 자체가 없다★").toBeGreaterThan(-1);
+      const list = md.slice(i, md.indexOf("\n\n", i));
+      expect(list, "★b3os-how-to-explain 이 목록에 없다★").toContain("`b3os-how-to-explain`");
     });
   }
 });

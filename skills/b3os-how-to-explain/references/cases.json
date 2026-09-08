@@ -1,0 +1,86 @@
+[
+  {
+    "id": "A1",
+    "question": "BUILD.json을 갱신해야 대시보드 신원이 server와 web으로 갈라지지 않는다는 게 무슨 말인가요? 왜 이 작업이 필요한지 설명해 주세요.",
+    "reader": "개발 작업을 관리하지만 이 구현을 모른다. 필드명과 파일 경로를 보고 기능을 추측하게 하지 않는다.",
+    "source": "사용자가 제공한 화면 속 팀원 보고 내용이다. 실제 서비스에서 다시 확인한 결과는 아니다.\n서버의 /health는 server.commit과 web.commit 두 값을 제공한다.\nserver.commit은 서버를 시작할 때 git HEAD에서 읽는다.\nweb.commit은 dist/web/BUILD.json에서 읽는다.\nbun run build가 BUILD.json을 쓴다.\n현재 두 필드의 실제 값, 실제 빌드·재시작 완료 여부는 주어지지 않았다.",
+    "draft": "BUILD.json을 같이 갱신해야 대시보드 신원이 server와 web으로 갈라지지 않습니다."
+  },
+  {
+    "id": "A2",
+    "question": "BUILD.json을 갱신해야 대시보드 신원이 server와 web으로 갈라지지 않는다는 게 무슨 말인가요? 왜 이 작업이 필요한지 설명해 주세요.",
+    "reader": "개발 작업을 관리하지만 이 구현을 모른다. 필드명과 파일 경로를 보고 기능을 추측하게 하지 않는다.",
+    "source": "사용자가 제공한 화면 속 팀원 보고 내용이다. 실제 서비스에서 다시 확인한 결과는 아니다.\n서버의 /health는 server.commit과 web.commit 두 값을 제공한다.\nserver.commit은 서버를 시작할 때 git HEAD에서 읽는다.\nweb.commit은 dist/web/BUILD.json에서 읽는다.\nbun run build가 BUILD.json을 쓴다.\n현재 두 필드의 실제 값, 실제 빌드·재시작 완료 여부는 주어지지 않았다.",
+    "draft": "서버의 /health는 커밋을 두 개 내보냅니다. server.commit은 기동할 때 git HEAD에서 읽고, web.commit은 dist/web/BUILD.json에서 읽습니다. BUILD.json은 bun run build가 씁니다."
+  },
+  {
+    "id": "A3",
+    "question": "BUILD.json을 갱신해야 대시보드 신원이 server와 web으로 갈라지지 않는다는 게 무슨 말인가요? 왜 이 작업이 필요한지 설명해 주세요.",
+    "reader": "개발 작업을 관리하지만 이 구현을 모른다. 필드명과 파일 경로를 보고 기능을 추측하게 하지 않는다.",
+    "source": "사용자가 제공한 화면 속 팀원 보고 내용이다. 실제 서비스에서 다시 확인한 결과는 아니다.\n서버의 /health는 server.commit과 web.commit 두 값을 제공한다.\nserver.commit은 서버를 시작할 때 git HEAD에서 읽는다.\nweb.commit은 dist/web/BUILD.json에서 읽는다.\nbun run build가 BUILD.json을 쓴다.\n현재 두 필드의 실제 값, 실제 빌드·재시작 완료 여부는 주어지지 않았다.",
+    "draft": "서버와 웹 화면이 각각 어느 코드 버전으로 만들어졌는지 확인하기 위한 정보입니다. 서버의 코드 버전은 서버를 시작할 때 읽고, 웹 화면의 코드 버전은 웹을 빌드할 때 BUILD.json에 기록합니다. 서버만 재시작하고 웹을 빌드하지 않으면 웹 쪽에는 이전 빌드의 정보가 남을 수 있어, 웹을 함께 빌드해 이 파일을 갱신하겠다는 뜻입니다."
+  },
+  {
+    "id": "A4",
+    "question": "BUILD.json을 갱신해야 대시보드 신원이 server와 web으로 갈라지지 않는다는 게 무슨 말인가요? 왜 이 작업이 필요한지 설명해 주세요.",
+    "reader": "개발 작업을 관리하지만 이 구현을 모른다. 필드명과 파일 경로를 보고 기능을 추측하게 하지 않는다.",
+    "source": "사용자가 제공한 화면 속 팀원 보고 내용이다. 실제 서비스에서 다시 확인한 결과는 아니다.\n서버의 /health는 server.commit과 web.commit 두 값을 제공한다.\nserver.commit은 서버를 시작할 때 git HEAD에서 읽는다.\nweb.commit은 dist/web/BUILD.json에서 읽는다.\nbun run build가 BUILD.json을 쓴다.\n현재 두 필드의 실제 값, 실제 빌드·재시작 완료 여부는 주어지지 않았다.",
+    "draft": "서버와 웹 화면이 서로 다른 코드 버전으로 배포돼 있었습니다. 방금 둘을 다시 빌드하고 재시작해서 같은 버전으로 맞췄습니다."
+  },
+  {
+    "id": "A5",
+    "question": "StateBridge가 무엇을 어떻게 하는 방법인지 설명해 주세요.",
+    "reader": "AI agent가 협업한다는 것은 알지만 모델 내부 계산을 모른다.",
+    "source": "StateBridge가 무엇을 어떻게 하는 방법인지 설명해줘. AI agent가 협업한다는 개념은 알지만 모델 내부 구조는 잘 몰라.\n원문 내용: StateBridge extracts the sender agent's final-layer hidden states from its generated message. Hidden states are numerical vectors produced during computation in the model's layers. The receiver normally consumes input token embeddings, which are numerical vectors associated with text tokens. The method uses the input embeddings corresponding to the sender's message as reference embeddings. It aligns the hidden states to these reference embeddings using an orthogonal Procrustes transformation, then calibrates vector norms and adjusts vectors toward nearby vocabulary embeddings. The resulting continuous vectors are prepended to the receiver's prompt embeddings. The alignment does not require training a separate projector or updating the pretrained model. The sender still generates a message; its corresponding discrete tokens are not transmitted. In each experiment all agents use the same model weights.",
+    "draft": "StateBridge는 AI agent끼리 텍스트 대신 숫자 벡터를 주고받게 하는 방법입니다. 보내는 agent가 메시지를 생성할 때 모델 내부에서 만들어진 값을 그대로 받는 agent의 입력에 넣습니다.\n\n기본 동작부터 보면, 언어 모델은 입력 텍스트를 토큰 단위로 나누고 각 토큰을 미리 정해진 숫자 벡터(input token embedding)로 바꾼 뒤 계산을 시작합니다. 계산은 여러 층을 거치며 진행되고, 각 층은 토큰 위치마다 숫자 벡터를 하나씩 만들어냅니다. 이 중간 계산값을 hidden state라고 합니다. 보통의 agent 협업에서는 보내는 쪽이 만든 hidden state는 텍스트로 바뀌어 버려지고, 받는 쪽은 그 텍스트를 다시 embedding으로 바꿔서 시작합니다.\n\nStateBridge는 이 지점을 바꿉니다. 보내는 agent가 생성한 메시지에 대해 마지막 층의 hidden state를 꺼내고, 그 메시지의 토큰에 해당하는 input embedding을 기준값(reference embedding)으로 삼습니다. 같은 메시지에 대한 두 벡터 묶음이 있으므로, hidden state 쪽을 기준값에 맞추는 변환을 계산할 수 있습니다. 여기에 쓰는 orthogonal Procrustes 변환은 벡터 사이의 길이 관계를 바꾸지 않는 변환 중에서 기준값과 가장 가깝게 맞추는 것을 하나 찾아 전체에 적용하는 방식입니다.\n\n변환 후에도 두 가지 보정을 더 합니다. 벡터의 크기(norm)를 기준값 쪽에 맞추고, 각 벡터를 모델이 가진 어휘 embedding 중 가까운 것 쪽으로 조정합니다. 이렇게 나온 연속값 벡터들을 받는 agent의 prompt embedding 앞에 붙여서 입력으로 넣습니다. 보내는 agent는 여전히 메시지를 생성하지만, 그에 해당하는 토큰 자체는 전달하지 않습니다.\n\n조건은 두 가지입니다. 이 정렬 과정에는 별도의 projector를 학습시키거나 사전학습된 모델을 갱신하는 작업이 없습니다. 그리고 실험에서는 모든 agent가 같은 model weights를 사용했습니다."
+  },
+  {
+    "id": "A6",
+    "question": "이 검색 방식은 문장을 그대로 찾는 방식과 무엇이 다른가요?",
+    "reader": "검색은 사용해 봤지만 AI 모델 계산과 수학을 모른다.",
+    "source": "이 검색 기능은 문장을 그대로 찾는 것과 어떻게 달라? 모델 내부 구조는 몰라.\n테스트용 설계 자료: A document-search system divides documents into paragraphs. An encoder maps each paragraph to an embedding, a fixed-length list of numbers used to represent text for comparison. It applies the same encoder to the user query. The system compares the query embedding with paragraph embeddings using cosine similarity and returns the three paragraphs with the highest scores. The words in a returned paragraph need not exactly match the query. It does not generate an answer or update the encoder during a search. No accuracy evaluation is provided.",
+    "draft": "**차이는 비교 대상입니다.** 문장을 그대로 찾는 방식은 질의에 쓴 글자·단어가 문서에 들어 있는지를 확인해 일치하는 문단을 고릅니다. 이 검색은 글자를 맞춰 보지 않고, 문단과 질의를 각각 숫자 목록으로 바꾼 뒤 그 숫자 목록끼리 비교합니다. 그래서 자료에도 적혀 있듯이, 반환된 문단이 질의와 같은 단어를 쓰지 않을 수 있습니다.\n\n동작은 네 단계입니다. 먼저 문서를 문단 단위로 나눕니다. encoder가 각 문단을 embedding으로 바꾸는데, embedding은 텍스트를 비교하려고 만든, 길이가 정해진 숫자 목록입니다. 사용자가 질의를 입력하면 같은 encoder가 질의도 같은 형식의 숫자 목록으로 바꿉니다. 마지막으로 cosine similarity로 질의의 숫자 목록과 각 문단의 숫자 목록을 비교해 점수를 매기고, 점수가 높은 세 문단을 돌려줍니다.\n\n문단과 질의에 같은 encoder를 쓰는 점이 비교를 가능하게 합니다. 두 숫자 목록이 같은 방식으로 만들어져야 점수를 같은 기준으로 매길 수 있기 때문입니다. 다만 encoder가 어떤 근거로 그 숫자를 정하는지는 이 자료에 나와 있지 않습니다.\n\n조건도 함께 보시면 됩니다. 이 시스템은 점수 순으로 세 문단을 반환할 뿐, 답을 만들어 주지 않습니다. 검색하는 동안 encoder를 갱신하지도 않습니다. 그리고 이 방식이 실제로 얼마나 정확한지에 대한 평가 결과는 자료에 포함되어 있지 않습니다."
+  },
+  {
+    "id": "A7",
+    "question": "같은 코드를 쓰는데 왜 우리 팀만 시작 화면을 건너뛰는지, 이 코드를 근거로 설명해줘. 코드는 짧게 읽을 수 있어.\n테스트용 확인 자료:\nconst SHOW_SETUP = process.env.TEAM_READY !== \"1\";\nif (SHOW_SETUP) { openSetup(); }\nopenSetup()은 시작 설정 화면을 연다. 우리 팀은 TEAM_READY=\"1\"이고, 다른 팀은 TEAM_READY를 설정하지 않았다. 두 팀 모두 같은 버전으로 실행했다.",
+    "reader": "짧은 코드를 읽을 수 있고 분기 조건의 코드 근거를 요청했다.",
+    "source": "같은 코드를 쓰는데 왜 우리 팀만 시작 화면을 건너뛰는지, 이 코드를 근거로 설명해줘. 코드는 짧게 읽을 수 있어.\n테스트용 확인 자료:\nconst SHOW_SETUP = process.env.TEAM_READY !== \"1\";\nif (SHOW_SETUP) { openSetup(); }\nopenSetup()은 시작 설정 화면을 연다. 우리 팀은 TEAM_READY=\"1\"이고, 다른 팀은 TEAM_READY를 설정하지 않았다. 두 팀 모두 같은 버전으로 실행했다.",
+    "draft": "코드는 같지만 TEAM_READY 설정이 달라서 초기 설정 화면 표시 여부가 달라집니다. 조건은 process.env.TEAM_READY !== \"1\"입니다. 우리 팀은 TEAM_READY가 \"1\"이므로 SHOW_SETUP이 false여서 openSetup()을 호출하지 않습니다. 다른 팀은 설정이 없어 SHOW_SETUP이 true이므로 openSetup()을 호출해 초기 설정 화면을 엽니다."
+  },
+  {
+    "id": "A8",
+    "question": "“6,180px 떨어진 곳에 선다”를 정확한 설명으로 고쳐 주세요.",
+    "reader": "이 문장 외에는 모른다.",
+    "source": "원문은 “6,180px 떨어진 곳에 선다” 한 문장뿐이다.",
+    "draft": "무엇이 이동했는지, 어디를 기준으로 6,180px인지가 없어 뜻을 확정할 수 없습니다. 이동 대상과 거리의 기준이 필요합니다."
+  },
+  {
+    "id": "A9",
+    "question": "BUILD.json을 갱신해야 대시보드 신원이 server와 web으로 갈라지지 않는다는 게 무슨 말인가요? 왜 이 작업이 필요한지 설명해 주세요.",
+    "reader": "개발 작업을 관리하지만 이 구현을 모른다. 필드명과 파일 경로를 보고 기능을 추측하게 하지 않는다.",
+    "source": "사용자가 제공한 화면 속 팀원 보고 내용이다. 실제 서비스에서 다시 확인한 결과는 아니다.\n서버의 /health는 server.commit과 web.commit 두 값을 제공한다.\nserver.commit은 서버를 시작할 때 git HEAD에서 읽는다.\nweb.commit은 dist/web/BUILD.json에서 읽는다.\nbun run build가 BUILD.json을 쓴다.\n현재 두 필드의 실제 값, 실제 빌드·재시작 완료 여부는 주어지지 않았다.",
+    "draft": "현재 두 필드의 값이 없으므로 BUILD.json을 왜 갱신하는지 알 수 없습니다."
+  },
+  {
+    "id": "A10",
+    "question": "팀장에게 보낼 정정 메시지를 작성해줘. 작업 과정은 필요 없고, 전에 한 보고가 어떻게 틀렸는지 알려주면 돼.\n테스트용 확인 자료: 앞서 \"해상도 4종에서 확인했다\"고 보고했다. 실제 시험 설정에 등록된 해상도는 390px와 640px 두 종류뿐이다. 검사에 넣은 네 이름 중 mobile-small은 390px, mobile-large는 640px다. 나머지 tablet과 desktop은 등록되지 않은 이름이라 기본값 390px가 적용됐다. 네 번의 측정에서 가로 스크롤은 관찰되지 않았다. 태블릿·데스크톱 해상도에서 확인한 자료는 없다.",
+    "reader": "측정 보고를 받는 사람",
+    "source": "팀장에게 보낼 정정 메시지를 작성해줘. 작업 과정은 필요 없고, 전에 한 보고가 어떻게 틀렸는지 알려주면 돼.\n테스트용 확인 자료: 앞서 \"해상도 4종에서 확인했다\"고 보고했다. 실제 시험 설정에 등록된 해상도는 390px와 640px 두 종류뿐이다. 검사에 넣은 네 이름 중 mobile-small은 390px, mobile-large는 640px다. 나머지 tablet과 desktop은 등록되지 않은 이름이라 기본값 390px가 적용됐다. 네 번의 측정에서 가로 스크롤은 관찰되지 않았다. 태블릿·데스크톱 해상도에서 확인한 자료는 없다.",
+    "draft": "팀장님, 앞서 드린 \"해상도 4종에서 확인했다\"는 보고를 정정합니다. 실제로 확인된 해상도는 390px와 640px 두 종류입니다.\n\n시험 설정에 등록된 해상도가 390px, 640px 두 개뿐이었습니다. 검사에 넣은 네 이름 중 mobile-small이 390px, mobile-large가 640px에 해당하고, tablet과 desktop은 등록되지 않은 이름이어서 기본값인 390px로 실행됐습니다. 즉 네 번의 측정 중 세 번이 390px에서 이뤄진 셈입니다.\n\n네 번 모두 가로 스크롤은 관찰되지 않았습니다. 다만 이는 390px와 640px에 대한 결과이며, 태블릿·데스크톱 해상도에서 확인한 자료는 없습니다.\n\n해당 해상도를 시험 설정에 등록한 뒤 다시 측정해 결과를 공유하겠습니다."
+  },
+  {
+    "id": "A11",
+    "question": "이번 주 실행만 건너뛰게 했다는 게 실제로 뭘 바꿨다는 뜻인지 알려줘.\n확인 자료: 아래는 테스트용 일정이다. weekly-report의 next_run_at을 2026-09-11 09:00에서 2026-09-18 09:00으로 변경했다. 반복 주기 필드는 매주 금요일 09:00으로 그대로 두었다. skipped 필드를 새로 만들거나 기록하지 않았다.",
+    "reader": "예약 작업의 다음 실행이 언제인지 알고 싶다.",
+    "source": "이번 주 실행만 건너뛰게 했다는 게 실제로 뭘 바꿨다는 뜻인지 알려줘.\n확인 자료: 아래는 테스트용 일정이다. weekly-report의 next_run_at을 2026-09-11 09:00에서 2026-09-18 09:00으로 변경했다. 반복 주기 필드는 매주 금요일 09:00으로 그대로 두었다. skipped 필드를 새로 만들거나 기록하지 않았다.",
+    "draft": "다음 실행을 9월 11일 오전 9시에서 9월 18일 오전 9시로 바꿨습니다. 건너뛴 기록은 어느 로그에도 남지 않습니다."
+  },
+  {
+    "id": "A12",
+    "question": "같은 일을 두 사람이 왜 실행했나요?",
+    "reader": "작업을 팀원에게 맡기지만 내부 구현을 모른다.",
+    "source": "시스템은 일을 맡은 사람과 담당 기록의 만료 시각을 저장한다. 맡은 사람이 중단되면 다른 사람이 다시 맡을 수 있게 하려는 장치다. A가 11:00에 맡은 일의 기록이 11:11에 만료됐다. A는 계속 일하고 있었지만 B가 11:11:30에 같은 일을 맡았다.",
+    "draft": "A가 맡았다는 기록이 실제 작업보다 먼저 만료됐기 때문입니다. 시스템은 담당자가 중단됐을 때 다른 사람이 이어서 맡을 수 있도록 담당 기록에 만료 시각을 둡니다. 이번에는 A가 계속 일하는 중인데 11시 11분에 그 기록이 만료돼, B도 11시 11분 30초에 같은 일을 맡았습니다."
+  }
+]

@@ -1,0 +1,74 @@
+[
+  {
+    "id": "A1",
+    "expected": "revise",
+    "reason": "신원이 무엇을 뜻하는지와 갱신 이유가 없다.",
+    "origin": "새 사용자 이미지의 문제 문장. 띄어쓰기 정리"
+  },
+  {
+    "id": "A2",
+    "expected": "revise",
+    "reason": "사실에 가까운 필드 설명만 있다. 서버·웹의 코드 버전과 빌드 갱신 이유를 연결해야 한다.",
+    "origin": "새 사용자 이미지의 수정 답변. 띄어쓰기 정리"
+  },
+  {
+    "id": "A3",
+    "expected": "pass",
+    "reason": "대상·갱신 시점·이유를 설명하며 실제 불일치나 완료를 단정하지 않는다.",
+    "origin": "평가자가 만든 통과 예상 예문. 사용자 승인 예문 아님"
+  },
+  {
+    "id": "A4",
+    "expected": "revise",
+    "reason": "실제 불일치와 완료를 꾸며 냈다.",
+    "origin": "평가자가 만든 사실 오류 예문"
+  },
+  {
+    "id": "A5",
+    "expected": "revise",
+    "reason": "변환 값을 그대로 입력했다는 오류와 불필요한 계산 용어 나열.",
+    "origin": "실제 Claude v5 D3 응답"
+  },
+  {
+    "id": "A6",
+    "expected": "revise",
+    "reason": "원리에 필요한 비교는 설명했지만 encoder·코사인 유사도 등 불필요한 낯선 이름이 남는다. 경계 사례.",
+    "origin": "실제 Claude v5 H4 응답"
+  },
+  {
+    "id": "A7",
+    "expected": "pass",
+    "reason": "요청한 실제 조건과 결과를 보여 준다. 코드 용어라고 지우면 안 된다.",
+    "origin": "사례 L 유형의 시험용 사실에 평가자가 작성"
+  },
+  {
+    "id": "A8",
+    "expected": "pass",
+    "reason": "정보 부족을 구체적으로 짚는다. 동작을 추측해 수정하면 안 된다.",
+    "origin": "기존 사용자 이미지에서 파생한 평가자 예문"
+  },
+  {
+    "id": "A9",
+    "expected": "revise",
+    "reason": "현재 일치 여부는 모르지만 갱신 이유는 자료로 설명할 수 있다.",
+    "origin": "평가자가 만든 과도한 알 수 없음 예문"
+  },
+  {
+    "id": "A10",
+    "expected": "revise",
+    "reason": "요청하지 않은 재측정·공유 약속을 추가했다.",
+    "origin": "실제 Claude v5 H3 응답"
+  },
+  {
+    "id": "A11",
+    "expected": "revise",
+    "reason": "skipped 필드를 쓰지 않은 사실을 모든 로그의 부재로 확대했다.",
+    "origin": "사례 I 유형 시험용 사실에 평가자가 오류 추가"
+  },
+  {
+    "id": "A12",
+    "expected": "pass",
+    "reason": "무엇이 만료되고 왜 필요한지 설명한 뒤 실제 시점을 연결한다.",
+    "origin": "real-cases.md N 유형의 시험용 예문"
+  }
+]

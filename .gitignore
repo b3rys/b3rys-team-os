@@ -130,3 +130,11 @@ rules/design/
 # 배포는 GitHub Releases 자산으로만 한다 (대시보드 링크도 releases/latest/download 를 가리킨다).
 src/web/public/*.app.zip
 *.app.zip
+
+# ★공개 저장소에 올리지 않는 팀 내부 자료★
+# real-cases.md 는 팀원의 실제 반려 사례와 팀장이 직접 고쳐 준 문장이다.
+# 스킬은 이 파일이 없어도 동작한다(SKILL.md 규칙과 나머지 references 로 충분).
+# 로컬에는 남기고 git 에는 넣지 않는다.
+skills/b3os-how-to-explain/references/real-cases.md
+# 포팅 전 원본 스크립트 — 맥북 절대경로에 묶여 있어 이 기계에서 안 돈다.
+skills/b3os-how-to-explain/scripts/original/
