@@ -162,12 +162,16 @@ describe("한국어 설명·보고 — 산출물에 다섯 줄이 다 있나", (
           : buildAgentsMd({ ...claudeInput, runtime });
       const block = rule(md);
       expect(block, "★한국어 설명·보고 블록 자체가 산출물에서 사라졌다★").not.toBe("");
-      for (const bullet of BULLETS) {
-        expect(block, `★줄이 그대로 있지 않다: ${bullet.slice(0, 24)}★`).toContain(bullet);
-      }
-      expect(block.split("\n").filter((l) => l.startsWith("- ")).length, "★줄 수가 다섯이 아니다★").toBe(5);
-      // 스킬 이름이 빠지면 상세 규칙으로 가는 유일한 통로가 끊긴다.
+      // 스킬 이름이 빠지면 상세 규칙으로 가는 유일한 통로가 끊긴다. 아래 전문 대조에
+      // 흡수되지만, 그 경우 실패 메시지가 "블록이 다르다" 로만 나와서 따로 잰다.
       expect(block, "★스킬 이름이 빠졌다★").toContain("b3os-how-to-explain");
+      // ★toContain 은 지운 것만 잡고 붙인 것을 못 잡는다.★ 리뷰에서 실제로 세 변이가
+      // 살아남았다 — 줄 끝에 "단, 급하면 생략해도 된다." 를 덧붙이기 / 제목과 첫 줄
+      // 사이에 다른 줄 끼우기 / 줄 순서 바꾸기. 앞 둘은 규칙의 뜻을 뒤집는다.
+      // 그래서 부분 포함이 아니라 블록 전문을 그대로 대조한다.
+      expect(block, "★블록이 그대로가 아니다 — 붙임·끼움·순서 바뀜 포함★").toBe(
+        ["**한국어 설명·보고**", ...BULLETS].join("\n"),
+      );
       // 옛 블록이 같이 남아 있으면 두 규칙이 동시에 읽힌다.
       expect(md, "★옛 '메시지 작성 원칙' 이 남아 있다★").not.toContain("**메시지 작성 원칙**");
       expect(md, "★옛 '문장 작성 기준' 이 남아 있다★").not.toContain("**문장 작성 기준**");
