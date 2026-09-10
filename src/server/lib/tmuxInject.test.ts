@@ -38,6 +38,26 @@ describe("buildTmuxInjectionPrompt — 수집 fan-out 은 그룹이어도 버스
  * 룰이 팀원에게 `--hop <hop_count+1>` 을 시키므로, 여기서 또 올리면 ★메시지당 2씩★ 오른다
  * (실측 0→2→4→6…, 그래서 MAX_HOPS=16 이 실제로는 8메시지 한도로 동작했다).
  * 이 숫자들을 "+1 한 값" 으로 되돌리면 그 버그가 그대로 돌아온다. ★기대값을 코드에 맞추지 말 것.★ */
+// ★본문 바이트 보존★ (2026-09-08 실측 — proposal prop_5249b7567977)
+//   버스로 온 review_run.py 가 백틱 3개 → ʼ 3개로 바뀌어 도착했다. 치환은 tmuxInject.ts 의 한 줄이었고,
+//   전달은 load-buffer + bracketed paste 라 셸이 본문을 해석하지 않으므로 치환할 이유가 없다.
+//   여기서는 프롬프트 안의 <external_message> 본문이 입력과 ★바이트 동일★ 한지 잰다. 치환 한 글자만
+//   되살아나도 실패한다(뮤턴트: replace(/`/g,"ʼ") 복원 → fail).
+describe("buildTmuxInjectionPrompt — 본문을 바이트 그대로 넣는다", () => {
+  const BODY = "line1 `backtick` $(echo NO) $HOME \"dq\" 'sq' back\\slash 한글\nline2 ```json\n{\"a\": 1}\n```\ntail";
+  test("백틱·$·따옴표·역슬래시·한글·여러 줄·코드펜스가 그대로 들어간다", () => {
+    const prompt = buildTmuxInjectionPrompt({
+      session: "claude-demo", fromLabel: "codex", locale: "ko", threadId: "mcp-gd-bill", messageId: "msg-9",
+      hopCount: 0, body: BODY, source: "bus", kind: "teammate", agentId: "demo",
+    });
+    const start = prompt.indexOf(">\n", prompt.indexOf("<external_message")) + 2;
+    const end = prompt.indexOf("\n</external_message>", start);
+    expect(prompt.slice(start, end), "★본문이 입력과 다르다 — 어딘가에서 치환된다★").toBe(BODY);
+    expect(prompt).not.toContain("ʼ");
+    expect(prompt).not.toContain("＄");
+  });
+});
+
 describe("buildTmuxInjectionPrompt", () => {
   test("telegram group prompt keeps only message-specific routing, format, and loop-prevention tokens", () => {
     const prompt = buildTmuxInjectionPrompt({
