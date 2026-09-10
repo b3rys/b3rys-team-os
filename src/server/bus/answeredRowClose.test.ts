@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { closeAnsweredRecipient } from "./wakeDispatcher";
+import { recoverStaleClaims } from "../db/inbox/dispatch";
 
 const SRC = readFileSync(join(import.meta.dir, "wakeDispatcher.ts"), "utf8");
 
@@ -33,12 +34,10 @@ function freshDb(): Database {
   return db;
 }
 
-// recoverStaleClaims 와 같은 문장 (src/server/db/inbox/dispatch.ts:373) — lease 가 지난 dispatching 행만 되살린다
+// 원본 recoverStaleClaims 를 그대로 부른다 — SQL 을 베끼면 원본이 바뀔 때 시험이 조용히 낡는다(리뷰 steve).
+//   시험 테이블에는 그 UPDATE 가 만지는 컬럼(delivery_state·claimed_at·lease_until)이 다 있다.
 function staleClaimsSweep(db: Database): number {
-  return db.prepare(
-    `UPDATE message_recipient SET delivery_state='pending', claimed_at=NULL, lease_until=NULL
-     WHERE delivery_state='dispatching' AND lease_until < datetime('now')`,
-  ).run().changes;
+  return recoverStaleClaims(db);
 }
 
 describe("★답장 뒤 wake 실패 — 행을 닫아 재-wake 루프를 끊는다★", () => {

@@ -1509,6 +1509,8 @@ function notifyRequesterOfExpiry(
  *
  * 그래서 delivery_state 를 닫고 lease·claim 을 지운다. ★recipient_state 는 건드리지 않는다★ — 완료/후속보고
  * 추적은 별개다(dex 요구). 요청자 통지도 안 낸다: 답이 이미 가 있으니 "응답 없음" 통지는 거짓이 된다.
+ * WHERE 는 dispatching 만 본다 — 이 분기에 올 때 행은 늘 dispatching 이다. pending 은 닿을 수 없는 값이라
+ * 뺐다(리뷰 steve: 시험이 못 재는 방어 조건은 두지 않는다).
  */
 export function closeAnsweredRecipient(db: Database, messageId: string, agentId: string, lastError: string): number {
   const res = db.prepare(
@@ -1518,7 +1520,7 @@ export function closeAnsweredRecipient(db: Database, messageId: string, agentId:
          lease_until    = NULL,
          claimed_at     = NULL
      WHERE message_id = ? AND agent_id = ?
-       AND delivery_state IN ('dispatching', 'pending')`,
+       AND delivery_state = 'dispatching'`,
   ).run(`answered_before_wake_result:${lastError}`.slice(0, 500), messageId, agentId);
   return res.changes;
 }
