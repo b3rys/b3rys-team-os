@@ -266,6 +266,10 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
     attachmentBlock +
     // ★source·kind 순서★ (hermes/openclaw 봉투와 일관). kind 는 서버가 계산한 답-주소 종류이고,
     //   팀원은 이 값으로 답을 어디에 쓸지 정한다(룰 9039834). tg_msg_id 는 claude 전용(그룹 원본 react).
+    // ★이 태그가 프롬프트 본문의 첫 줄이어야 한다★ — 본문(escapedBody)은 이제 치환 없이 그대로 들어가므로
+    //   `!` 나 `/` 로 시작하는 줄이 그대로 붙는다. Claude TUI 는 입력의 ★첫 줄★ 접두(`!`=셸, `/`=슬래시 명령)만
+    //   해석하는데, 이 래퍼가 앞에 있어 본문 줄은 접두로 읽히지 않는다. 래퍼 순서를 바꾸면 그 방어가 사라진다
+    //   (리뷰 steve, PR #425).
     `<external_message source="${opts.source}" kind="${opts.kind}" from="${opts.fromLabel}" thread="${opts.threadId}" msg="${opts.messageId}"${opts.origTgMessageId ? ` tg_msg_id="${opts.origTgMessageId}"` : ""}${replyToMeta} ${hopMeta}>\n` +
     `${escapedBody}\n` +
     `</external_message>\n\n` +
