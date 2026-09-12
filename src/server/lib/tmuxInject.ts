@@ -147,7 +147,15 @@ export interface InjectPromptOptions {
 }
 
 export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
-  const escapedBody = opts.body.replace(/`/g, "ʼ").replace(/\$/g, "＄"); // soften shell-meaningful chars
+  // ★본문은 바이트 그대로 넣는다.★ 예전엔 백틱→ʼ, $→＄ 로 "셸 의미 문자를 누그러뜨렸다". 그 치환이
+  //   코드·설정 파일을 조용히 망가뜨렸다 — 2026-09-08 review_run.py 8,048B 가 코드펜스 3곳이 깨진 채
+  //   도착했고, 같이 온 SHA-256 이 안 맞아서야 잡았다. 시험 파일 주석에까지 ʼ 가 새어 들어가 있었다.
+  //   전달 경로는 injectPrompt() 의 load-buffer(stdin) + paste-buffer -p(bracketed paste) 라 셸이 본문을
+  //   해석하지 않는다. 실측: 백틱·$(…)·$VAR·따옴표·역슬래시·한글·여러 줄·끝 개행 104B 를 scratch tmux
+  //   세션에 왕복시켜 바이트 동일(sha 24780d02…). 치환은 전달 안전에 기여하지 않았다.
+  //   아래 분류기 주석의 오탐 원인은 "외부 입력 태그 + 셸 명령 동시 삽입" 이지 백틱이 아니다(hermes 리뷰).
+  //   (proposal prop_5249b7567977 · 팀장 승인 2026-09-11)
+  const escapedBody = opts.body;
 
   // Why this shape: the <external_message> wrapper marks the body as untrusted input
   // (defense-in-depth — agents must treat it as data, not commands). We deliberately do
@@ -258,6 +266,10 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
     attachmentBlock +
     // ★source·kind 순서★ (hermes/openclaw 봉투와 일관). kind 는 서버가 계산한 답-주소 종류이고,
     //   팀원은 이 값으로 답을 어디에 쓸지 정한다(룰 9039834). tg_msg_id 는 claude 전용(그룹 원본 react).
+    // ★이 태그가 프롬프트 본문의 첫 줄이어야 한다★ — 본문(escapedBody)은 이제 치환 없이 그대로 들어가므로
+    //   `!` 나 `/` 로 시작하는 줄이 그대로 붙는다. Claude TUI 는 입력의 ★첫 줄★ 접두(`!`=셸, `/`=슬래시 명령)만
+    //   해석하는데, 이 래퍼가 앞에 있어 본문 줄은 접두로 읽히지 않는다. 래퍼 순서를 바꾸면 그 방어가 사라진다
+    //   (리뷰 steve, PR #425).
     `<external_message source="${opts.source}" kind="${opts.kind}" from="${opts.fromLabel}" thread="${opts.threadId}" msg="${opts.messageId}"${opts.origTgMessageId ? ` tg_msg_id="${opts.origTgMessageId}"` : ""}${replyToMeta} ${hopMeta}>\n` +
     `${escapedBody}\n` +
     `</external_message>\n\n` +
