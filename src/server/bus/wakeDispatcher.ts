@@ -1497,6 +1497,34 @@ function notifyRequesterOfExpiry(
   }
 }
 
+/**
+ * 답장은 이미 왔는데 wake 결과가 실패로 돌아온 행을 ★닫는다★.
+ *
+ * 2026-09-07 실측: steve→devon 메시지 하나가 답장(45초 뒤) 이후 6시간 동안 64회 재-wake 됐다.
+ * 두 분기(exception · returned-false)가 recipientAlreadyAnswered() 로 답장을 알아채고 audit 만 남긴 채
+ * `return` 해서, 행이 delivery_state='dispatching' + 살아 있는 lease 그대로 남았다. lease 가 끝나면
+ * recoverStaleClaims 가 pending 으로 되돌리고(dispatching→pending 은 그 경로뿐) 디스패처가 같은 행을 다시
+ * 집어 adapter 를 또 부른다 → 240초 응답 창 만료 → 실패 → "이미 답함" → return … 6.0분 주기 무한 루프.
+ * 이번 주 이 분기 265회. (proposal prop_db4f21bcff46 · 리뷰 dex)
+ *
+ * 그래서 delivery_state 를 닫고 lease·claim 을 지운다. ★recipient_state 는 건드리지 않는다★ — 완료/후속보고
+ * 추적은 별개다(dex 요구). 요청자 통지도 안 낸다: 답이 이미 가 있으니 "응답 없음" 통지는 거짓이 된다.
+ * WHERE 는 dispatching 만 본다 — 이 분기에 올 때 행은 늘 dispatching 이다. pending 은 닿을 수 없는 값이라
+ * 뺐다(리뷰 steve: 시험이 못 재는 방어 조건은 두지 않는다).
+ */
+export function closeAnsweredRecipient(db: Database, messageId: string, agentId: string, lastError: string): number {
+  const res = db.prepare(
+    `UPDATE message_recipient
+     SET delivery_state = 'expired',
+         last_error     = ?,
+         lease_until    = NULL,
+         claimed_at     = NULL
+     WHERE message_id = ? AND agent_id = ?
+       AND delivery_state = 'dispatching'`,
+  ).run(`answered_before_wake_result:${lastError}`.slice(0, 500), messageId, agentId);
+  return res.changes;
+}
+
 export function recipientAlreadyAnswered(db: Database, messageId: string, agentId: string): boolean {
   const current = db.prepare(
     `SELECT recipient_state FROM message_recipient
@@ -1530,6 +1558,8 @@ function recordDispatchOutcome(
           agent_id: row.agent_id,
           detail: `exception:${errMsg}`.slice(0, 200),
         });
+        // exception 경로도 같다 — 닫지 않으면 같은 루프 (returned-false 분기 주석 참조)
+        closeAnsweredRecipient(db, row.message_id, row.agent_id, `exception:${errMsg}`);
         return;
       }
       db.prepare(
@@ -1623,6 +1653,8 @@ function recordDispatchOutcome(
         agent_id: row.agent_id,
         detail: lastError,
       });
+      // ★행을 닫지 않으면 lease 만료 뒤 recoverStaleClaims 가 되살려 6분마다 다시 깨운다★ (2026-09-07 64회)
+      closeAnsweredRecipient(db, row.message_id, row.agent_id, lastError);
       return;
     }
     db.prepare(
