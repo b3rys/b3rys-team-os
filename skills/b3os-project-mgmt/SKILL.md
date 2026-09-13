@@ -56,7 +56,7 @@ trigger: run a project (many lead requests over time)
 | **팀버스 (팀원)** | 위임·검토 결과 | `[태그] 한 줄 결론` + 근거 — CLAUDE.md 핵심룰(member↔member = function call) 그대로 | 인사·감사 없음 |
 | **저장소 (커밋·PR)** | 병합 | `b3os-github-workflow` — 핵심 3~5줄 + 사실·인과만 | 회고·의견 없음 |
 
-★텔레그램 정리 포맷★ — ★상태별 구획 + 항목 앞에 같은 상태 아이콘 반복.★ 실물은 `references/channel-formats.md`. 구획마다 다른 아이콘을 달면 "정신없다", 아이콘을 다 빼면 "그 포맷이 아니다" 는 답이 온다 (둘 다 실측).
+★텔레그램 정리 포맷★ — ★상태별 구획 + 항목 앞에 같은 상태 아이콘 반복.★ 실물은 `references/channel-formats.md`. 구획마다 다른 아이콘을 달면 읽기 어렵다는 반응, 아이콘을 다 빼면 원하는 모양이 아니라는 반응이 온다 (둘 다 실측).
 
 ```
 ✦ <프로젝트> 지금 상황입니다.
