@@ -78,6 +78,10 @@ trigger: run a project (many lead requests over time)
 <무엇> → <어디에 올림/들어감>, <다음>.
 ```
 
+## 프로젝트 종류별 하네스 구성 — `references/harness-by-project-type.md`
+
+프로젝트를 열 때 종류(앱·프로그램 / 리서치 / 문서·슬라이드 / 인프라)를 고르고 그 역할표로 에이전트를 짠다. 역할 정의는 프로젝트 저장소 `.claude/agents/` 에 파일로. 앱 개발은 아키(2회) · 공통부 담당(겸임) · 모듈 담당 N · 검증 1 — 만든 사람과 판정하는 사람을 나눈다.
+
 ## 보고 규율
 
 - 위임 뒤 대기는 `b3os-task-loop` 의 wait record(`recheck_at` · `fallback` · `escalation_after`)를 쓴다. 배달 성공은 일 시작이 아니다 — ★답장만이 신호★ 이고, 리듬을 넘기면 팀장에게 알린다.
