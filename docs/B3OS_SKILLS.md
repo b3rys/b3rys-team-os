@@ -11,6 +11,7 @@
 |---|---|---|
 | **b3os-bwf** | **skills** | **기본 과제 수행 워크플로우(b3os workflow) — 단일 진입점 stage router.** 과제 받으면 PM계획→팀배정→실행+품질방법→검증→보고+카드→학습hook. BWF≠harness(harness·multi-ai·judge·적대적리뷰는 BWF 안에서 고르는 품질방법). 얇은 오케스트레이터 — 하위 스킬 참조. rubric(`references/bwf-rubric.md`)+self-test(`scripts/bwf-selftest.sh`). 전 런타임. 팀 리뷰 7/7(2026-06-22) |
 | b3os-report | **skills** | 팀 표준 보고서 — MD 소스 → 아이폰 반응형 HTML+SVG 렌더(자체완결). `scripts/render.sh`·`publish.sh`. "보고서 써줘" |
+| **b3os-project-mgmt** | **skills** | ★프로젝트 관리·보고★ — 팀장 요구가 여러 번 쌓이는 일에서 지시를 빠짐없이 목록(TODO.md 정본)으로 잡고 칸반과 맞추며, 채널별(텔레그램 아이콘 정리·슬랙·팀버스·저장소) 정해진 모양으로 보고. "목록으로 관리해" "정리해서 보내봐" "다 처리했어?". `references/channel-formats.md`. owner=steve |
 | b3os-slack-format | **skills** | 슬랙 메시지 포맷 — 팀원이 슬랙에 올리는 실행·검증·인수인계·보고를 Slack mrkdwn+운영보고 구조로 정리. `scripts/md-to-slack.py`(**→*·##→볼드·-→•·링크·코드보존). "슬랙 포맷/정리해서 올려". owner=maintainer |
 | b3os-harness-playbook | **skills** | harness(sub agent 병렬) 플레이북 — **트리거 우선**("병렬 실소스 커버면 기본, 그 외 솔로") + ready-run 레시피(`templates/recipes.md`: audit·migration·N후보·release-verify) + 8품질패턴 + 런타임별(클로드 Workflow/openclaw 수동) + 비용게이트. §10 연계 (2026-06-14 #2 reframe) |
 | **b3os-ai-code-safety** | **skills** | **AI 생성/수정 코드 안전 체크리스트 — SOLID + Effects.** 코딩 작업·리뷰·완료 전, 특히 상태 변경·외부 side effect·동시성·트랜잭션·멱등성·재시도·webhook/queue/payment 경로에서 race condition, partial write, duplicate execution, hidden coupling을 점검한다. |
