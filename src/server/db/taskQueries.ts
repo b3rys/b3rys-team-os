@@ -8,6 +8,7 @@ import { nanoid } from "nanoid";
 
 export type TaskLane = "plan" | "doing" | "done";
 export const TASK_LANES: TaskLane[] = ["plan", "doing", "done"];
+export const DEFAULT_PROJECT_PREFIXES = ["infra", "codex", "scheduler", "pm"] as const;
 
 export interface Task {
   id: string;
@@ -21,6 +22,45 @@ export interface Task {
   sort_order: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface ProjectSummary {
+  name: string;
+  counts: Record<TaskLane, number>;
+  next_action: string | null;
+  owner: string | null;
+}
+
+function taskPrefix(title: string): string | null {
+  const match = title.match(/^\[([^\]]+)\]/);
+  return match ? match[1]!.trim().toLowerCase() : null;
+}
+
+function nextAction(description: string | null): string | null {
+  if (!description) return null;
+  const line = description.split(/\r?\n/).find((item) => /^\s*다음 액션\s*:/i.test(item));
+  return line?.replace(/^\s*다음 액션\s*:\s*/i, "").trim() || null;
+}
+
+/** Read-only projection over task rows. Prefix matching is case-insensitive. */
+export function summarizeProjects(tasks: Task[], promotedPrefixes: string[]): ProjectSummary[] {
+  const promoted = [...new Set(promotedPrefixes.map((p) => p.trim().toLowerCase()).filter(Boolean))];
+  return promoted.map((name) => {
+    const matching = tasks.filter((task) => taskPrefix(task.title) === name);
+    const doing = matching.filter((task) => task.column === "doing");
+    const projectCard = [...doing, ...matching.filter((task) => task.column === "plan"), ...matching.filter((task) => task.column === "done")]
+      .find((task) => nextAction(task.description));
+    return {
+      name,
+      counts: {
+        done: matching.filter((task) => task.column === "done").length,
+        doing: doing.length,
+        plan: matching.filter((task) => task.column === "plan").length,
+      },
+      next_action: projectCard ? nextAction(projectCard.description) : null,
+      owner: doing.find((task) => task.owner)?.owner ?? null,
+    };
+  });
 }
 
 interface TaskRow {

@@ -632,6 +632,7 @@ describe("settings: 팀명/태그라인", () => {
       owner_chat_id: "",
       locale: "ko",
       dm_capture: true, // 기본 on
+      project_prefixes: ["infra", "codex", "scheduler", "pm"],
       // ★GitHub 계정·승인자 — 셸 절차(release-preflight --mode merge)가 읽는 값 (2026-07-29)★
       //   ★기본이 빈 문자열인 게 핵심이다★ — 절차는 비면 진행하지 않는다.
       //   기본값으로 때우면 팀장 개인 계정으로 나가고, 그게 이 절차가 막으려는 일이다.
@@ -655,6 +656,7 @@ describe("settings: 팀명/태그라인", () => {
       owner_chat_id: "",
       locale: "ko",
       dm_capture: true, // 기본 on
+      project_prefixes: ["infra", "codex", "scheduler", "pm"],
       // ★GitHub 계정·승인자 — 셸 절차(release-preflight --mode merge)가 읽는 값 (2026-07-29)★
       //   ★기본이 빈 문자열인 게 핵심이다★ — 절차는 비면 진행하지 않는다.
       //   기본값으로 때우면 팀장 개인 계정으로 나가고, 그게 이 절차가 막으려는 일이다.

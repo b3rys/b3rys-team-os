@@ -13,6 +13,7 @@ import { renderTeamOs } from "./components/TeamOS";
 import { renderTopology } from "./components/TopologyView";
 import { renderTasksKanban, refreshTasksKanban } from "./components/TasksKanban";
 import { renderJobsView } from "./components/JobsView";
+import { renderProjectsView } from "./components/ProjectsView";
 import { renderTeamSearch } from "./components/TeamSearch";
 import { renderReports } from "./components/Reports";
 import { renderInboxView } from "./components/InboxView";
@@ -30,11 +31,11 @@ import { renderLiveBadge } from "./components/LiveBadge";
 import { renderIcon } from "./icons";
 
 const VIEW_GROUPS: Array<{ views: MainView[]; tabs: Array<{ id: MainView; label: string }> }> = [
-  { views: ["tasks", "jobs"], tabs: [{ id: "tasks", label: "Tasks" }, { id: "jobs", label: "Jobs" }] },
+  { views: ["tasks", "jobs", "projects"], tabs: [{ id: "tasks", label: "Tasks" }, { id: "jobs", label: "Jobs" }, { id: "projects", label: "Projects" }] },
   { views: ["inbox", "audit", "proposals"], tabs: [{ id: "inbox", label: "Inbox" }, { id: "audit", label: "Audit" }, { id: "proposals", label: "Proposal" }] },
   { views: ["teamos", "doc"], tabs: [{ id: "teamos", label: "OS" }, { id: "doc", label: "Docs" }] },
 ];
-const VALID_MAIN_VIEWS: MainView[] = ["tasks", "jobs", "monitoring", "busflow", "teamos", "topology", "search", "reports", "doc", "settings", "inbox", "audit", "proposals", "log", "thread", "config", "chat"];
+const VALID_MAIN_VIEWS: MainView[] = ["tasks", "jobs", "projects", "monitoring", "busflow", "teamos", "topology", "search", "reports", "doc", "settings", "inbox", "audit", "proposals", "log", "thread", "config", "chat"];
 const VIEW_STORAGE_KEY = "bill-dash-main-view";
 
 function isMainView(v: string | null): v is MainView {
@@ -272,6 +273,7 @@ function renderMainContent(root: HTMLElement) {
   let topoEl: HTMLDivElement | null = null;
   let tasksEl: HTMLDivElement | null = null;
   let jobsEl: HTMLDivElement | null = null;
+  let projectsEl: HTMLDivElement | null = null;
   let monitoringEl: HTMLDivElement | null = null;
   let searchEl: HTMLDivElement | null = null;
   let reportsEl: HTMLDivElement | null = null;
@@ -289,6 +291,7 @@ function renderMainContent(root: HTMLElement) {
   let topoRendered = false;
   let tasksRendered = false;
   let jobsRendered = false;
+  let projectsRendered = false;
   let monitoringRendered = false;
   let searchRendered = false;
   let reportsRendered = false;
@@ -357,6 +360,11 @@ function renderMainContent(root: HTMLElement) {
       jobsEl.className = "flex-1 flex flex-col min-h-0";
       root.appendChild(jobsEl);
     }
+    if (!projectsEl) {
+      projectsEl = document.createElement("div");
+      projectsEl.className = "flex-1 flex flex-col min-h-0";
+      root.appendChild(projectsEl);
+    }
     if (!monitoringEl) {
       monitoringEl = document.createElement("div");
       monitoringEl.className = "flex-1 flex flex-col min-h-0";
@@ -402,6 +410,7 @@ function renderMainContent(root: HTMLElement) {
     topoEl.style.display = mainView === "topology" ? "flex" : "none";
     tasksEl.style.display = mainView === "tasks" ? "flex" : "none";
     jobsEl.style.display = mainView === "jobs" ? "flex" : "none";
+    projectsEl.style.display = mainView === "projects" ? "flex" : "none";
     monitoringEl.style.display = mainView === "monitoring" ? "flex" : "none";
     searchEl.style.display = mainView === "search" ? "flex" : "none";
     reportsEl.style.display = mainView === "reports" ? "flex" : "none";
@@ -439,6 +448,9 @@ function renderMainContent(root: HTMLElement) {
     } else if (mainView === "jobs" && !jobsRendered) {
       renderJobsView(jobsEl);
       jobsRendered = true;
+    } else if (mainView === "projects" && !projectsRendered) {
+      renderProjectsView(projectsEl);
+      projectsRendered = true;
     } else if (mainView === "monitoring" && !monitoringRendered) {
       renderMonitoringView(monitoringEl);
       monitoringRendered = true;

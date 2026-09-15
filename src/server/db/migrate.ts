@@ -17,6 +17,9 @@ export function migrate(db: Database): void {
   const schemaPath = join(__dirname, "schema.sql");
   const schema = readFileSync(schemaPath, "utf-8");
   db.exec(schema);
+  db.prepare(
+    "INSERT INTO setting (key, value) VALUES ('project_prefixes', ?) ON CONFLICT(key) DO NOTHING",
+  ).run(JSON.stringify(["infra", "codex", "scheduler", "pm"]));
   widenAgentRuntimeChecks(db);
   widenSearchSourceTypes(db);
   runBusMigration(db);

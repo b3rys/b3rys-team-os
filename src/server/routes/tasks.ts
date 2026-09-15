@@ -7,6 +7,8 @@ import {
   deleteTask,
   getTask,
   TASK_LANES,
+  DEFAULT_PROJECT_PREFIXES,
+  summarizeProjects,
   type TaskLane,
 } from "../db/taskQueries";
 import { appendAudit } from "../db/queries";
@@ -83,6 +85,21 @@ export function createTaskRoutes(deps: TaskRouteDeps): Hono {
   // GET /api/tasks — all tasks, ordered plan→doing→done then sort_order.
   r.get("/tasks", (c) => {
     return c.json({ tasks: listTasks(deps.db) });
+  });
+
+  // GET /api/projects — promoted task-prefix aggregates. No project rows are stored.
+  r.get("/projects", (c) => {
+    const row = deps.db.prepare("SELECT value FROM setting WHERE key = 'project_prefixes'").get() as { value?: string } | undefined;
+    let prefixes: string[] = [...DEFAULT_PROJECT_PREFIXES];
+    if (row?.value !== undefined) {
+      try {
+        const parsed = JSON.parse(row.value);
+        prefixes = Array.isArray(parsed) && parsed.every((item) => typeof item === "string") ? parsed : [];
+      } catch {
+        prefixes = [];
+      }
+    }
+    return c.json({ projects: summarizeProjects(listTasks(deps.db), prefixes) });
   });
 
   // POST /api/tasks — { title, column?, owner? }. column defaults to 'plan'.
