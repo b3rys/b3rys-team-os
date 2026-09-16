@@ -15,6 +15,7 @@ import { renderTasksKanban, refreshTasksKanban } from "./components/TasksKanban"
 import { renderJobsView } from "./components/JobsView";
 import { renderTeamSearch } from "./components/TeamSearch";
 import { renderReports } from "./components/Reports";
+import { renderProjects } from "./components/Projects";
 import { renderInboxView } from "./components/InboxView";
 import { renderAuditView } from "./components/AuditView";
 import { renderProposalsView } from "./components/ProposalsView";
@@ -34,7 +35,7 @@ const VIEW_GROUPS: Array<{ views: MainView[]; tabs: Array<{ id: MainView; label:
   { views: ["inbox", "audit", "proposals"], tabs: [{ id: "inbox", label: "Inbox" }, { id: "audit", label: "Audit" }, { id: "proposals", label: "Proposal" }] },
   { views: ["teamos", "doc"], tabs: [{ id: "teamos", label: "OS" }, { id: "doc", label: "Docs" }] },
 ];
-const VALID_MAIN_VIEWS: MainView[] = ["tasks", "jobs", "monitoring", "busflow", "teamos", "topology", "search", "reports", "doc", "settings", "inbox", "audit", "proposals", "log", "thread", "config", "chat"];
+const VALID_MAIN_VIEWS: MainView[] = ["tasks", "jobs", "monitoring", "busflow", "teamos", "topology", "search", "reports", "projects", "doc", "settings", "inbox", "audit", "proposals", "log", "thread", "config", "chat"];
 const VIEW_STORAGE_KEY = "bill-dash-main-view";
 
 function isMainView(v: string | null): v is MainView {
@@ -57,6 +58,8 @@ function bootstrap() {
   const _savedView = localStorage.getItem(VIEW_STORAGE_KEY);
   if (isMainView(_bootView)) {
     store.getState().setMainView(_bootView as MainView);
+    // URL 로 특정 탭을 지목해 들어왔으면(예: /projects → ?view=projects) 모바일에서도 그 화면이 보이게 main 페인으로.
+    store.getState().setMobilePane("main");
   } else if (isMainView(_savedView)) {
     store.getState().setMainView(_savedView);
   }
@@ -65,6 +68,7 @@ function bootstrap() {
     store.getState().setDocSection(_bootDoc as DocSection);
   }
   let lastPersistedView = store.getState().mainView;
+  let prevViewForUrl: MainView = lastPersistedView;
   localStorage.setItem(VIEW_STORAGE_KEY, lastPersistedView);
   app.innerHTML = `
     <div id="metrics-bar"></div>
@@ -128,6 +132,9 @@ function bootstrap() {
     localStorage.setItem(VIEW_STORAGE_KEY, s.mainView);
     const url = new URL(location.href);
     url.searchParams.set("view", s.mainView);
+    // Projects 의 문서 deep-link 파라미터(id·doc)는 그 탭을 떠나면 지운다 — 다른 탭 URL 에 남지 않게.
+    if (s.mainView !== "projects") { url.searchParams.delete("id"); if (prevViewForUrl === "projects") url.searchParams.delete("doc"); }
+    prevViewForUrl = s.mainView;
     history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
   });
 
@@ -194,7 +201,7 @@ function bootstrap() {
 function renderTabs(root: HTMLElement) {
   const update = () => {
     const { mainView, selectedAgentId, agents } = store.getState();
-    root.classList.toggle("hidden", mainView === "reports");
+    root.classList.toggle("hidden", mainView === "reports" || mainView === "projects");
     const agentName = agents.find((a) => a.id === selectedAgentId)?.display_name ?? "—";
     const groupTabs = groupedViewTabs(mainView);
     const groupTabsHtml = groupTabs?.map((t) => `
@@ -216,7 +223,7 @@ function renderTabs(root: HTMLElement) {
       });
       return;
     }
-    if (mainView === "reports") {
+    if (mainView === "reports" || mainView === "projects") {
       root.innerHTML = "";
       return;
     }
@@ -275,6 +282,7 @@ function renderMainContent(root: HTMLElement) {
   let monitoringEl: HTMLDivElement | null = null;
   let searchEl: HTMLDivElement | null = null;
   let reportsEl: HTMLDivElement | null = null;
+  let projectsEl: HTMLDivElement | null = null;
   let settingsEl: HTMLDivElement | null = null;
   let inboxEl: HTMLDivElement | null = null;
   let auditEl: HTMLDivElement | null = null;
@@ -292,6 +300,7 @@ function renderMainContent(root: HTMLElement) {
   let monitoringRendered = false;
   let searchRendered = false;
   let reportsRendered = false;
+  let projectsRendered = false;
   let settingsRendered = false;
   let inboxRendered = false;
   let auditRendered = false;
@@ -372,6 +381,11 @@ function renderMainContent(root: HTMLElement) {
       reportsEl.className = "flex-1 flex flex-col min-h-0";
       root.appendChild(reportsEl);
     }
+    if (!projectsEl) {
+      projectsEl = document.createElement("div");
+      projectsEl.className = "flex-1 flex flex-col min-h-0";
+      root.appendChild(projectsEl);
+    }
     if (!settingsEl) {
       settingsEl = document.createElement("div");
       settingsEl.className = "flex-1 flex flex-col min-h-0";
@@ -405,6 +419,7 @@ function renderMainContent(root: HTMLElement) {
     monitoringEl.style.display = mainView === "monitoring" ? "flex" : "none";
     searchEl.style.display = mainView === "search" ? "flex" : "none";
     reportsEl.style.display = mainView === "reports" ? "flex" : "none";
+    projectsEl.style.display = mainView === "projects" ? "flex" : "none";
     settingsEl.style.display = mainView === "settings" ? "flex" : "none";
     inboxEl.style.display = mainView === "inbox" ? "flex" : "none";
     auditEl.style.display = mainView === "audit" ? "flex" : "none";
@@ -448,6 +463,9 @@ function renderMainContent(root: HTMLElement) {
     } else if (mainView === "reports" && !reportsRendered) {
       renderReports(reportsEl);
       reportsRendered = true;
+    } else if (mainView === "projects" && !projectsRendered) {
+      renderProjects(projectsEl);
+      projectsRendered = true;
     } else if (mainView === "settings") {
       if (!settingsRendered) { renderSettings(settingsEl); settingsRendered = true; }
       else if (enteredSettings) { void refreshSettingsSlack(); void refreshSettingsMembers(); } // 재진입(전환) 순간만 재조회 — 팀원 로스터도(퇴사/영입 후 stale 방지) · 매 update마다 X(스크롤 jank 방지)

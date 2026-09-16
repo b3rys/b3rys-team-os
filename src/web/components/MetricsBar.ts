@@ -210,6 +210,11 @@ export function renderMetricsBar(root: HTMLElement): void {
               title="${pick("팀 보고서", "Team reports")}">
               Reports
             </button>
+            <button id="global-projects-tab"
+              class="${navBtnClass(store.getState().mainView === "projects")}"
+              title="${pick("프로젝트 — GitHub 문서·진행 상태", "Projects — GitHub docs·progress")}">
+              Projects
+            </button>
             <button id="global-search-tab"
               class="px-2 py-1 rounded-md text-[11px] md:text-[13px] inline-flex items-center gap-1 ${store.getState().mainView === "search" ? "bg-surface-0 text-slate-100" : "text-slate-400 hover:bg-surface-3 hover:text-slate-200"}"
               title="${pick("팀 기록 검색 (개발중 — 벡터검색은 진화 중, 현재 텍스트검색)", "Search team records (in development — vector search evolving, lexical for now)")}">
@@ -444,6 +449,13 @@ export function renderMetricsBar(root: HTMLElement): void {
       e.stopPropagation();
       osMenuOpen = false;
       store.getState().setMainView("reports");
+      store.getState().setMobilePane("main");
+    });
+    const projectsBtn = root.querySelector<HTMLButtonElement>("#global-projects-tab");
+    projectsBtn?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      osMenuOpen = false;
+      store.getState().setMainView("projects");
       store.getState().setMobilePane("main");
     });
     const settingsBtn = root.querySelector<HTMLButtonElement>("#global-settings-tab");
