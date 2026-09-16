@@ -100,3 +100,21 @@ type ProjectSummary = {
 6. `/projects` 직접 접속 → Projects 화면. 모바일 폭(390)에서 가로 스크롤 없음.
 7. 기존 Reports 탭 회귀 0 (`bun test` 전체 + 기존 reports 테스트).
 8. 토큰이 응답·로그에 안 나온다.
+
+### §6 측정 결과 — 2026-09-16 · `a2c5a671` (검증자 Steve)
+
+격리 서버 `TEAM_HTTP_PORT=7899` + team.db 사본, 원본 md 는 `b3rys/steno` 를 replay(sha `6d2cce35`)·실조회(sha `c5b9a01`) 둘로 읽었다.
+
+| # | 어떻게 쟀나 | 값 | 판정 |
+| --- | --- | --- | --- |
+| 1 | replay 로 `GET /team/api/projects` · TODO.md 를 별도 파서로 직접 셈 · team.db 사본 `select` | steno 1건 · 4문서 exists · todo 30/50/153 = 직접 센 값 · kanban 3건 = DB `[steno]` plan·doing 3건 | 통과 |
+| 2 | DESIGN md 헤딩 수 vs `toc` · ```mermaid 수 vs `<figure class="project-diagram">` · 원문에 `<script>`·`onerror` 주입 후 렌더 | 헤딩 29=29 · mermaid 6=6(figure·mermaid-src·배지 각 6) · script 0 onerror 0 | 통과 |
+| 3 | `/doc/todo` 의 `current.items` 를 section 별로 셈 | 킵·GD 선택 대기·GD 답 대기·승인 대기 절의 plan 0건 (제외 12건) | 통과 |
+| 4 | `githubDocs.test.ts` TTL 케이스 + 뮤턴트(60_000→600_000) | 59,999ms 캐시·60,000ms 재조회 통과 · 뮤턴트 2 fail | 통과 |
+| 5 | 토큰 dummy 로 띄워 실제 502 · 캐시 있는 상태로 재기동 → stale · 화면 사진 | 502 `{"error":"github_unavailable","key":"branch"}` · 재기동 후 200 `stale:true` 목록 1건 · 화면=오류 문구+다시 시도 / stale 배지 | 통과 |
+| 6 | `curl -i /projects` · headless Chrome CDP 390 에뮬레이션 | 302 → `/team?view=projects` · 목록·DESIGN·TODO 세 화면 `scrollWidth` 390=390, 넘치는 요소 0 · toc 접힘 버튼 | 통과 |
+| 7 | `bun run typecheck` · `bun test` 전체 · Reports 탭 사진 | tsc 0 · 3151 pass / 0 fail / 8 skip (254 파일, personaPathSafety 14/14) · Reports 80건 정상 | 통과 |
+| 8 | `GITHUB_TOKEN=dummy-test-token` 으로 띄워 5개 경로 요청 뒤 로그·응답·캐시 파일 grep · `tests/projects/github-token.test.ts` | `dummy-test-token`/`ghp_`/`github_pat_`/`Authorization` 0건 · 헤더에는 실림(뮤턴트로 확인) | 통과 |
+
+- 참고: `projectTodo.ts` 는 §3 에 적힌 세 절 외에 `GD 답 대기` 절도 제외한다(6건). §3 의 문구 기준으로 세면 plan 56, 구현 기준 50 — 값이 다른 건 이 절 하나다.
+- 뮤턴트 5종 모두 테스트 FAIL: TTL 600초(2) · 킵 제외 제거(3) · 정제 제거(1) · 화면 실패→빈 목록(4) · 토큰 헤더 제거(2).
