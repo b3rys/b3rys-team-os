@@ -132,8 +132,8 @@ function bootstrap() {
     localStorage.setItem(VIEW_STORAGE_KEY, s.mainView);
     const url = new URL(location.href);
     url.searchParams.set("view", s.mainView);
-    // Projects 의 문서 deep-link 파라미터(id·doc)는 그 탭을 떠나면 지운다 — 다른 탭 URL 에 남지 않게.
-    if (s.mainView !== "projects") { url.searchParams.delete("id"); if (prevViewForUrl === "projects") url.searchParams.delete("doc"); }
+    // Projects 의 문서 deep-link 파라미터(id·doc·sec)는 그 탭을 떠나면 지운다 — 다른 탭 URL 에 남지 않게.
+    if (s.mainView !== "projects") { url.searchParams.delete("id"); url.searchParams.delete("sec"); if (prevViewForUrl === "projects") url.searchParams.delete("doc"); }
     prevViewForUrl = s.mainView;
     history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
   });

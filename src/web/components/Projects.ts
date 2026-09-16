@@ -3,11 +3,13 @@
 //   GET  <base>/api/projects                 → { projects: [ProjectSummary] }
 //   GET  <base>/api/projects/:id/doc/:key    → ProjectDoc (html 은 서버가 정제한 것 — 그대로 innerHTML)
 //   GET  <base>/api/projects/:id/doc/:key/raw → text/markdown (MD 토글)
-// URL 상태: /team?view=projects[&id=steno&doc=design] — 목록 ↔ 문서 deep-link.
+// URL 상태: /team?view=projects[&id=steno&doc=design[&sec=<anchor>]] — 목록 ↔ 문서 ↔ 절 deep-link.
+// 문서 본문은 절 탭(Reports 폼 탭과 같은 모양)으로 나눠 한 절만 전체 폭으로 보인다 — 자르기는 lib/projectSections.ts.
 // 개발 폴백: `?fixture=1` 일 때만, API 가 404 면 fixtures/projects-steno.example.json 을 쓴다.
 
 import { pick } from "../i18n";
 import { mdInlineToHtml } from "../lib/mdInline";
+import { sectionTabLabel, splitSections, type DocSection } from "../lib/projectSections";
 import { apiBase } from "../ws";
 
 export type ProjectDocKey = "readme" | "design" | "features" | "todo";
@@ -58,7 +60,7 @@ let _curKey: ProjectDocKey | null = null;
 let _curDoc: ProjectDoc | null = null;
 let _mode: "html" | "md" = "html";
 let _todoTab: "status" | "all" = "status";
-let _tocOpen = false;       // 모바일: toc 접힘 기본
+let _curSec: string | null = null;   // 절 탭(anchor). null = 첫 절
 let _doneOpen = false;      // TODO 현재 상태: 완료 접힘 기본
 let _rawCache = new Map<string, string>();
 
@@ -150,16 +152,17 @@ async function loadRaw(id: string, key: ProjectDocKey): Promise<string> {
 }
 
 // ── URL 상태 (?view=projects&id=…&doc=…) ──
-function readUrlState(): { id: string | null; doc: ProjectDocKey | null } {
+function readUrlState(): { id: string | null; doc: ProjectDocKey | null; sec: string | null } {
   const p = new URLSearchParams(window.location.search);
   const id = p.get("id");
   const doc = p.get("doc");
-  return { id, doc: doc && (DOC_KEYS as string[]).includes(doc) ? (doc as ProjectDocKey) : null };
+  return { id, doc: doc && (DOC_KEYS as string[]).includes(doc) ? (doc as ProjectDocKey) : null, sec: p.get("sec") || null };
 }
-function writeUrlState(id: string | null, doc: ProjectDocKey | null): void {
+function writeUrlState(id: string | null, doc: ProjectDocKey | null, sec: string | null = null): void {
   const url = new URL(window.location.href);
   if (id) url.searchParams.set("id", id); else url.searchParams.delete("id");
   if (doc) url.searchParams.set("doc", doc); else url.searchParams.delete("doc");
+  if (id && doc && sec) url.searchParams.set("sec", sec); else url.searchParams.delete("sec");
   const next = `${url.pathname}${url.search}${url.hash}`;
   if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== next) window.history.replaceState(null, "", next);
 }
@@ -211,11 +214,12 @@ function injectStyle(): void {
 .projects-prose table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.92em;display:block;overflow-x:auto}
 .projects-prose th,.projects-prose td{border:1px solid rgb(var(--border));padding:7px 11px;text-align:left}
 .projects-prose th{background:rgb(var(--surface-1));color:rgb(var(--slate-50));font-weight:600}
-.projects-toc a{display:block;color:rgb(var(--slate-400));text-decoration:none;padding:2px 0;line-height:1.4;overflow-wrap:anywhere}
-.projects-toc a:hover{color:rgb(var(--slate-100))}
-.projects-toc a[data-level="1"]{font-weight:600;color:rgb(var(--slate-200))}
-.projects-toc a[data-level="3"]{padding-left:12px;font-size:12px}
-.projects-toc a[data-level="4"],.projects-toc a[data-level="5"],.projects-toc a[data-level="6"]{padding-left:22px;font-size:12px}
+.projects-sec-tabs{scrollbar-width:thin}
+.projects-sec-tabs .projects-sec-tab{flex:0 0 auto;white-space:nowrap;text-transform:none;letter-spacing:0;max-width:100%}
+.projects-sec-sub a{color:rgb(var(--slate-300));text-decoration:none;line-height:1.5;overflow-wrap:anywhere}
+.projects-sec-sub a::before{content:"§ ";color:rgb(var(--slate-500))}
+.projects-sec-sub a:hover{color:rgb(var(--slate-100));text-decoration:underline;text-underline-offset:2px}
+.projects-sec-sub a[data-level="4"],.projects-sec-sub a[data-level="5"],.projects-sec-sub a[data-level="6"]{font-size:12px}
 .projects-raw{white-space:pre-wrap;overflow-wrap:anywhere;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.6;color:rgb(var(--slate-200))}`;
   document.head.appendChild(st);
 }
@@ -308,9 +312,21 @@ async function reload(): Promise<void> {
 }
 
 // ── 문서 화면 ──
-function tocHtml(doc: ProjectDoc): string {
-  if (!doc.toc?.length) return `<div class="text-[12px] text-slate-500">${pick("목차 없음", "No headings")}</div>`;
-  return `<nav class="projects-toc text-[13px]">${doc.toc.map((t) => `<a href="#${escape(t.anchor)}" data-level="${t.level}" data-anchor="${escape(t.anchor)}">${escape(t.text)}</a>`).join("")}</nav>`;
+// 절 탭 — Reports 의 `.reports-tab` 과 같은 클래스 토큰(색·라운드·글자). 라벨은 24자에서 자르고 전체는 title 로.
+const SEC_TAB_BASE = "projects-sec-tab px-3.5 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wide border transition-colors";
+const SEC_TAB_ON = "text-accent-green border-accent-green/35 bg-accent-green/10";
+const SEC_TAB_OFF = "text-slate-400 border-surface-3 bg-surface-2 hover:text-slate-200";
+function pickSection(secs: DocSection[], anchor: string | null): DocSection {
+  return (anchor && secs.find((s) => s.anchor === anchor)) || secs[0]!;
+}
+function sectionTabsHtml(secs: DocSection[], cur: DocSection): string {
+  if (secs.length < 2) return "";
+  const tabs = secs.map((s) => `<button class="${SEC_TAB_BASE} ${s === cur ? SEC_TAB_ON : SEC_TAB_OFF}" data-sec="${escape(s.anchor)}" title="${escape(s.label)}" aria-pressed="${s === cur}">${escape(sectionTabLabel(s.label))}</button>`).join("");
+  return `<div class="projects-sec-tabs flex gap-1.5 overflow-x-auto md:flex-wrap md:overflow-visible pb-1 -mb-1 min-w-0" role="tablist">${tabs}</div>`;
+}
+function sectionSubHtml(cur: DocSection): string {
+  if (!cur.children.length) return "";
+  return `<nav class="projects-sec-sub flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px] mt-2 min-w-0" aria-label="${pick("절 안 소제목", "Subheadings")}">${cur.children.map((t) => `<a href="#${escape(t.anchor)}" data-level="${t.level}" data-anchor="${escape(t.anchor)}">${escape(t.text)}</a>`).join("")}</nav>`;
 }
 
 function decorateMermaid(container: HTMLElement): number {
@@ -396,24 +412,18 @@ async function renderDoc(): Promise<void> {
             <div class="flex shrink-0" role="group" aria-label="HTML | MD">${modeBtn("html")}${modeBtn("md")}</div>
           </div>
           <div class="flex items-center gap-2 flex-wrap pb-2.5">
-            <button id="projects-toc-toggle" class="md:hidden inline-flex items-center gap-1 text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-surface-3 text-slate-300 bg-surface-2" aria-expanded="${_tocOpen}">${pick("목차", "Contents")} ${_tocOpen ? "▴" : "▾"}</button>
             ${isTodo && _mode === "html" ? `<div class="flex gap-1 rounded-lg border border-surface-3 bg-surface-2 p-0.5">${todoTabBtn("status", pick("현재 상태", "Status"))}${todoTabBtn("all", pick("전체", "All"))}</div>` : ""}
             <span class="ml-auto"></span>
             ${gh}
           </div>
         </div>
-        <div class="pt-4 grid grid-cols-1 md:grid-cols-[200px_minmax(0,1fr)] gap-6 min-w-0">
-          <aside id="projects-toc" class="${_tocOpen ? "block" : "hidden"} md:block md:sticky md:top-24 md:self-start md:max-h-[calc(100vh-8rem)] md:overflow-y-auto rounded-xl border border-surface-3 bg-surface-2 px-3 py-3 min-w-0">
-            <div class="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-1.5">${pick("목차", "Contents")}</div>
-            ${tocHtml(doc)}
-          </aside>
+        <div class="pt-4 min-w-0">
           <div id="projects-viewer" class="min-w-0"></div>
         </div>
       </div>
     </div>`;
 
   _root.querySelector("#projects-back")?.addEventListener("click", goList);
-  _root.querySelector<HTMLButtonElement>("#projects-toc-toggle")?.addEventListener("click", () => { _tocOpen = !_tocOpen; void renderDoc(); });
   _root.querySelectorAll<HTMLButtonElement>(".projects-mode").forEach((b) => b.addEventListener("click", () => {
     const m = b.dataset.mode as "html" | "md";
     if (m === _mode) return;
@@ -423,14 +433,6 @@ async function renderDoc(): Promise<void> {
     const t = b.dataset.todoTab as "status" | "all";
     if (t === _todoTab) return;
     _todoTab = t; void renderDoc();
-  }));
-  // toc 클릭 → 본문 헤딩으로 스크롤 (id 는 서버 anchor). 모바일은 누른 뒤 toc 를 접는다.
-  _root.querySelectorAll<HTMLAnchorElement>(".projects-toc a").forEach((a) => a.addEventListener("click", (e) => {
-    e.preventDefault();
-    const anchor = a.dataset.anchor ?? "";
-    const target = _root?.querySelector<HTMLElement>("#projects-viewer")?.querySelector<HTMLElement>(`[id="${anchor.replace(/"/g, '\\"')}"]`);
-    target?.scrollIntoView({ behavior: "smooth", block: "start" });
-    if (_tocOpen) { _tocOpen = false; _root?.querySelector("#projects-toc")?.classList.add("hidden"); }
   }));
 
   const viewer = _root.querySelector<HTMLDivElement>("#projects-viewer");
@@ -451,9 +453,31 @@ async function renderDoc(): Promise<void> {
     viewer.querySelector<HTMLButtonElement>("#projects-done-more")?.addEventListener("click", () => { _doneOpen = !_doneOpen; void renderDoc(); });
     return;
   }
-  // 서버가 정제한 HTML 을 그대로. mermaid 원문 블록에는 배지를 붙인다.
-  viewer.innerHTML = `<article class="projects-prose rounded-xl border border-surface-3 bg-surface-2 p-5 md:p-8">${doc.html}</article>`;
+  // 절 탭: 서버 html 을 최상위 헤딩에서 잘라 현재 절만 전체 폭으로. 탭 → URL &sec=, 하위 헤딩 링크 → 절 안 스크롤.
+  const secs = splitSections(doc.html, doc.toc ?? []);
+  const cur = pickSection(secs, _curSec);
+  _curSec = cur.anchor || null;
+  writeUrlState(id, key, secs.length > 1 ? _curSec : null);
+  viewer.innerHTML = `${sectionTabsHtml(secs, cur)}${sectionSubHtml(cur)}
+    <article class="projects-prose rounded-xl border border-surface-3 bg-surface-2 p-5 md:p-8 ${secs.length > 1 || cur.children.length ? "mt-3" : ""}" data-sec="${escape(cur.anchor)}">${cur.html}</article>`;
   decorateMermaid(viewer);
+  // 모바일(탭 줄 가로 스크롤): 현재 절 탭이 보이게 줄만 옆으로 민다 — 페이지 세로 스크롤은 건드리지 않는다.
+  const tabRow = viewer.querySelector<HTMLElement>(".projects-sec-tabs");
+  const onTab = tabRow?.querySelector<HTMLElement>('.projects-sec-tab[aria-pressed="true"]');
+  if (tabRow && onTab && tabRow.scrollWidth > tabRow.clientWidth) {
+    tabRow.scrollLeft = Math.max(0, onTab.getBoundingClientRect().left - tabRow.getBoundingClientRect().left + tabRow.scrollLeft - 12);
+  }
+  viewer.querySelectorAll<HTMLButtonElement>(".projects-sec-tab").forEach((b) => b.addEventListener("click", () => {
+    const a = b.dataset.sec ?? "";
+    if (a === (_curSec ?? "")) return;
+    _curSec = a || null;
+    void renderDoc();
+  }));
+  viewer.querySelectorAll<HTMLAnchorElement>(".projects-sec-sub a").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault();
+    const anchor = a.dataset.anchor ?? "";
+    viewer.querySelector<HTMLElement>(`[id="${anchor.replace(/"/g, '\\"')}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }));
 }
 
 async function openDoc(id: string, key: ProjectDocKey): Promise<void> {
@@ -463,7 +487,7 @@ async function openDoc(id: string, key: ProjectDocKey): Promise<void> {
   _curDoc = null;
   _mode = "html";
   _todoTab = "status";
-  _tocOpen = false;
+  _curSec = null;
   _doneOpen = false;
   writeUrlState(id, key);
   await renderDoc();
@@ -487,15 +511,15 @@ async function ensureLoaded(): Promise<void> {
 export function resetProjectsState(): void {
   _root = null; _projects = []; _loaded = false; _loadError = null;
   _view = "list"; _curId = null; _curKey = null; _curDoc = null;
-  _mode = "html"; _todoTab = "status"; _tocOpen = false; _doneOpen = false;
+  _mode = "html"; _todoTab = "status"; _curSec = null; _doneOpen = false;
   _rawCache = new Map();
 }
 
 export function renderProjects(root: HTMLElement): void {
   _root = root;
   injectStyle();
-  const { id, doc } = readUrlState();
-  if (id && doc) { _view = "doc"; _curId = id; _curKey = doc; _curDoc = null; }
+  const { id, doc, sec } = readUrlState();
+  if (id && doc) { _view = "doc"; _curId = id; _curKey = doc; _curDoc = null; _curSec = sec; }
   root.innerHTML = `<div class="h-full overflow-y-auto"><div class="max-w-3xl mx-auto px-4 md:px-6 py-5"><div class="text-slate-500 py-16 text-center">${pick("프로젝트 목록 불러오는 중…", "Loading projects…")}</div></div></div>`;
   void ensureLoaded().then(() => {
     if (!_root) return;
