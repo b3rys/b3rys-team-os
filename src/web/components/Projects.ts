@@ -332,6 +332,8 @@ function sectionSubHtml(cur: DocSection): string {
 function decorateMermaid(container: HTMLElement): number {
   const pres = Array.from(container.querySelectorAll<HTMLElement>("pre.mermaid-src"));
   for (const pre of pres) {
+    // 서버가 <figure> 안에 <figcaption class="mermaid-pending"> 를 이미 넣는다 — 그러면 배지를 겹쳐 붙이지 않는다(두 줄 중복).
+    if (pre.parentElement?.querySelector(".mermaid-pending")) continue;
     const badge = document.createElement("div");
     badge.className = "projects-mermaid-badge";
     badge.textContent = pick("다이어그램 (렌더 예정)", "Diagram (render pending)");

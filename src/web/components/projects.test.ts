@@ -165,9 +165,10 @@ describe("Projects 문서 화면", () => {
     expect(root.querySelector('.projects-sec-tab[data-sec="2-시스템-구조"]')?.getAttribute("aria-pressed")).toBe("true");
     expect(root.querySelectorAll("#projects-viewer h2")).toHaveLength(1);
     expect(root.querySelector("#projects-viewer article")?.getAttribute("data-sec")).toBe("2-시스템-구조");
-    // 서버 html 그대로 + mermaid 원문 블록 위 배지
+    // 서버 html 그대로 — 서버가 figcaption(mermaid-pending) 을 넣으므로 클라 배지는 안 겹친다(두 줄 중복 방지)
     expect(root.querySelectorAll("#projects-viewer pre.mermaid-src")).toHaveLength(1);
-    expect(root.querySelectorAll("#projects-viewer .projects-mermaid-badge")).toHaveLength(1);
+    expect(root.querySelectorAll("#projects-viewer .mermaid-pending")).toHaveLength(1);
+    expect(root.querySelectorAll("#projects-viewer .projects-mermaid-badge")).toHaveLength(0);
     expect(new URLSearchParams(window.location.search).get("sec")).toBe("2-시스템-구조");
     root.querySelector<HTMLButtonElement>("#projects-back")!.click();
     await tick();
