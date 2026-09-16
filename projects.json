@@ -1,0 +1,10 @@
+[
+  {
+    "id": "steno",
+    "name": "Steno",
+    "repo": "b3rys/steno",
+    "branch": "main",
+    "docs": { "readme": "README.md", "design": "DESIGN.md", "features": "FEATURES.md", "todo": "TODO.md" },
+    "kanbanPrefix": "[steno]"
+  }
+]

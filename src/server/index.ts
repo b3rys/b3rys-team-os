@@ -46,6 +46,7 @@ import { createTaskRoutes } from "./routes/tasks";
 import { createProposalRoutes } from "./routes/proposals";
 import { createSearchRoutes } from "./routes/search";
 import { createReportsApp } from "./routes/portal";
+import { createProjectRoutes } from "./routes/projects";
 import { createSettingsApp, PUBLIC_BUILD } from "./routes/settings";
 import { createAcceptanceRoutes } from "./routes/acceptance";
 import { createSchedulerRoutes } from "./routes/scheduler";
@@ -278,6 +279,7 @@ const app = new Hono();
 
 
 const api = new Hono();
+api.route("/", createProjectRoutes({ db }));
 
 api.use("*", async (c, next) => {
   await next();
@@ -718,6 +720,7 @@ function requestIsTrusted(request: Request): boolean {
 rootApp.use("*", createHostGate({ isTrusted: requestIsTrusted }));
 
 rootApp.route(BASE_PATH, app);
+rootApp.get("/projects", (c) => c.redirect(`${BASE_PATH}?view=projects`, 302));
 
 // 팀 결과물 포털 — /team 형제로 노출. 허브 next.config.ts rewrite 로 your-team.example.com/reports.
 // (2026-06-07 GD: /research 취소 — 모든 팀 산출물을 /reports 에 category 로 구분해 통합.)
