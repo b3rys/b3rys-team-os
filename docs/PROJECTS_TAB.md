@@ -72,7 +72,7 @@ type ProjectSummary = {
 - ```mermaid 블록 → 서버에서 SVG 로 변환해 인라인 (`@mermaid-js/mermaid-cli` 는 크롬 의존이라 ★쓰지 않는다★ — 우선 `beautiful-mermaid` 류 zero-dep 렌더러가 있으면 그것, 없으면 ★1차: `<pre class="mermaid-src">` 로 코드 그대로 + "다이어그램 렌더 예정" 배지★ 하고 `needs` 에 적는다. 보고서 iframe 의 실행 권한은 풀지 않는다).
 - 상대 링크·이미지: `[x](docs/y.md)` → 같은 프로젝트 문서면 `?view=projects&id=steno&doc=…`, 아니면 GitHub blob URL.
 - 원문 HTML 은 정제(script·on* 제거).
-- TODO 파싱 규칙(`b3os-project-mgmt` TODO.md 모양): 줄 시작 `- [~]` doing · `- [ ]` plan · `- [x]` done. ★킵·승인대기★ 절(`📌 킵`, `GD 선택 대기`, `승인 대기` 헤더 아래)의 `[ ]` 는 plan 에서 뺀다. `doingTitles` = `[~]` 줄의 첫 60자. "이번 주 완료" 는 안 센다(완료일 필드 없음).
+- TODO 파싱 규칙(`b3os-project-mgmt` TODO.md 모양): 줄 시작 `- [~]` doing · `- [ ]` plan · `- [x]` done. ★킵·대기★ 절(`📌 킵`, `GD 선택 대기`, `GD 답 대기`, `승인 대기` 헤더 아래)의 `[ ]` 는 plan 에서 뺀다 — 착수 예정으로 오인하지 않게. `doingTitles` = `[~]` 줄의 첫 60자. "이번 주 완료" 는 안 센다(완료일 필드 없음).
 
 ## 4. 화면 (`src/web/components/Projects.ts`, Reports 와 같은 자리·같은 스타일)
 
