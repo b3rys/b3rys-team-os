@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DOC_KEYS, GitHubDocs, ProjectSourceError, validateProjects, type ProjectRegistration, type DocKey } from "../lib/githubDocs";
 import { projectIntro } from "../lib/projectDocRender";
-import { parseProjectTodo } from "../lib/projectTodo";
+import { DEFAULT_EXCLUDE_SECTIONS, parseProjectTodo } from "../lib/projectTodo";
 import { leadActorId, trustedActorFromRequest } from "../lib/opAuth";
 
 interface ProjectDeps {
@@ -21,16 +21,17 @@ export function createProjectRoutes(deps: ProjectDeps) {
   const app = new Hono();
   app.use("*", async (c, next) => { await next(); c.header("Cache-Control", "no-store"); });
   app.onError((err, c) => c.json({ error: err instanceof ProjectSourceError ? err.reason : "projects_unavailable", key: err instanceof ProjectSourceError ? err.key : "project" }, 502));
+  const excludeSections = (p: ProjectRegistration) => p.excludeSections ?? [...DEFAULT_EXCLUDE_SECTIONS];
   async function summary(p: ProjectRegistration) {
     const snapshot = await source.get(p);
-    const { items: _items, ...todo } = parseProjectTodo(snapshot.docs.todo?.md ?? "");
+    const { items: _items, excludeSections: _ex, ...todo } = parseProjectTodo(snapshot.docs.todo?.md ?? "", excludeSections(p));
     const kanban = deps.db.prepare(`SELECT id, title, lane, updated_at AS updatedAt FROM task
       WHERE substr(title, 1, length(?)) = ? AND lane IN ('plan', 'doing') ORDER BY updated_at DESC, id`).all(p.kanbanPrefix, p.kanbanPrefix);
     return {
       id: p.id, name: p.name, repo: p.repo, branch: p.branch, sha: snapshot.sha,
       intro: projectIntro(snapshot.docs.readme?.md ?? ""),
       docs: DOC_KEYS.map(key => ({ key, path: p.docs[key], exists: snapshot.docs[key] !== null })),
-      todo, kanban, fetchedAt: snapshot.fetchedAt, stale: snapshot.stale,
+      todo, excludeSections: excludeSections(p), kanban, fetchedAt: snapshot.fetchedAt, stale: snapshot.stale,
     };
   }
   app.get("/projects", async c => c.json({ projects: await Promise.all(projects.map(summary)) }));
@@ -53,7 +54,7 @@ export function createProjectRoutes(deps: ProjectDeps) {
       return c.body(doc.md);
     }
     return c.json({ id: p.id, key, sha: snapshot.sha, ...doc, stale: snapshot.stale,
-      ...(key === "todo" ? { current: parseProjectTodo(doc.md) } : {}) });
+      ...(key === "todo" ? { current: parseProjectTodo(doc.md, excludeSections(p)) } : {}) });
   };
   app.get("/projects/:id/doc/:key", c => document(c, false));
   app.get("/projects/:id/doc/:key/raw", c => document(c, true));

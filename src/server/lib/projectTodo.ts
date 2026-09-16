@@ -1,8 +1,15 @@
 export type TodoState = "doing" | "plan" | "done";
 export interface TodoItem { state: TodoState; title: string; section: string }
 
-/** Keep excluded sections active through nested headings, but not their siblings. */
-export function parseProjectTodo(md: string) {
+/** Registry default when an entry has no `excludeSections` (docs/PROJECTS_TAB.md §1·§3). */
+export const DEFAULT_EXCLUDE_SECTIONS: readonly string[] = ["킵"];
+
+/**
+ * Parse TODO.md into current state. A heading containing any of `excludeSections`
+ * (substring match on the heading text) hides the `[ ]` items below it — through nested
+ * headings, but not its siblings. The list comes from the registry, not from code.
+ */
+export function parseProjectTodo(md: string, excludeSections: readonly string[] = DEFAULT_EXCLUDE_SECTIONS) {
   const items: TodoItem[] = [];
   const headings: { level: number; text: string; excluded: boolean }[] = [];
   let fence: { char: string; length: number } | undefined;
@@ -18,7 +25,7 @@ export function parseProjectTodo(md: string) {
     if (h) {
       const level = h[1]!.length;
       while (headings.length && headings.at(-1)!.level >= level) headings.pop();
-      headings.push({ level, text: h[2]!, excluded: /킵|GD\s*(?:선택|답)\s*대기|승인\s*대기/.test(h[2]!) });
+      headings.push({ level, text: h[2]!, excluded: excludeSections.some(needle => h[2]!.includes(needle)) });
       continue;
     }
     const task = line.match(/^\s*- \[([~ xX])\]\s+(.+)$/);
@@ -33,5 +40,6 @@ export function parseProjectTodo(md: string) {
     done: items.filter(x => x.state === "done").length,
     doingTitles: items.filter(x => x.state === "doing").map(x => [...x.title].slice(0, 60).join("")),
     items,
+    excludeSections: [...excludeSections],
   };
 }

@@ -98,11 +98,11 @@ describe("Projects 목록", () => {
     expect(root.querySelector('[data-count="done"]')?.textContent).toBe("40");
     // 지금 과제 = doingTitles 3 + 칸반 doing 1
     expect(root.querySelectorAll(".projects-tasks li")).toHaveLength(4);
-    expect(root.querySelector(".projects-tasks")?.textContent).toContain("[steno] 핵심코드 리뷰");
+    expect(root.querySelector(".projects-tasks")?.textContent).toContain("[steno] 과제 A");
     const gh = root.querySelector<HTMLAnchorElement>("a.projects-github")!;
     expect(gh.getAttribute("href")).toBe("https://github.com/b3rys/steno");
     expect(gh.getAttribute("target")).toBe("_blank");
-    expect(root.textContent).toContain("Vim 을 쓰는 사람을 위한 macOS 마크다운 편집기");
+    expect(root.textContent).toContain(fixture.summary.intro);
   });
 
   test("exists=false 문서 칩은 비활성(버튼이 아니다)", async () => {
@@ -190,7 +190,7 @@ describe("TODO 현재 상태", () => {
     await tick();
     expect(root.querySelector('.projects-todo-tab[data-todo-tab="status"]')?.getAttribute("aria-pressed")).toBe("true");
     expect(root.querySelectorAll('[data-todo-section="doing"] li')).toHaveLength(3);
-    expect(root.querySelector('[data-todo-section="doing"]')?.textContent).toContain("줄번호가 겹친다");
+    expect(root.querySelector('[data-todo-section="doing"]')?.textContent).toContain("줄번호 겹침");
     // fixture TODO.md: `- [ ]` 6줄 중 킵 절 1줄은 plan 에서 뺀다 → 5 (summary.todo.plan 과 같다)
     expect(root.querySelectorAll('[data-todo-section="plan"] li')).toHaveLength(5);
     expect(root.querySelector('[data-todo-section="plan"]')?.textContent).not.toContain("킵 — plan 에 안 센다");
@@ -201,11 +201,11 @@ describe("TODO 현재 상태", () => {
 
     root.querySelector<HTMLButtonElement>('.projects-todo-tab[data-todo-tab="all"]')!.click();
     await tick();
-    expect(root.querySelectorAll("#projects-viewer .projects-prose h2")).toHaveLength(2);
+    expect(root.querySelectorAll("#projects-viewer .projects-prose h2")).toHaveLength(3);
     expect(root.querySelectorAll('[data-todo-section]')).toHaveLength(0);
   });
 
-  test("parseTodoMd — 킵·승인대기 절의 [ ] 는 plan 에서 빠지고, 60자에서 자른다", async () => {
+  test("parseTodoMd — 제외 절(서버가 준 목록) 의 [ ] 는 plan 에서 빠지고, 60자에서 자른다", async () => {
     const { parseTodoMd } = await import("./Projects");
     const md = [
       "## 일",
@@ -214,16 +214,43 @@ describe("TODO 현재 상태", () => {
       "- [x] 한 것",
       "## 📌 킵",
       "- [ ] 킵 항목",
-      "### GD 선택 대기",
+      "### 선택 대기",
       "- [ ] 대기 항목",
       "## 다시 일",
       `- [ ] ${"가".repeat(80)}`,
     ].join("\n");
-    const r = parseTodoMd(md);
+    const r = parseTodoMd(md, ["킵", "선택 대기"]);
     expect(r.doing).toEqual(["하는 중"]);
     expect(r.done).toEqual(["한 것"]);
     expect(r.plan).toHaveLength(2);
     expect(r.plan[1]).toHaveLength(60);
+    // 목록은 화면이 아니라 서버 응답에서 온다 — 빈 목록이면 아무 절도 빼지 않는다
+    expect(parseTodoMd(md, []).plan).toHaveLength(4);
+    expect(parseTodoMd(md, ["킵"]).plan).toHaveLength(3);
+  });
+
+  test("현재 상태의 제외 절은 summary.excludeSections 를 쓴다 — 서버가 다른 목록을 주면 그대로 따른다", async () => {
+    const { renderProjects, resetProjectsState } = await import("./Projects");
+    const saved = globalThis.fetch;
+    const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (String(input).includes("/doc/todo")) return json(fixture.docs.todo);
+      return json({ projects: [{ ...fixture.summary, excludeSections: [] }] });
+    }) as unknown as typeof fetch;
+    try {
+      resetProjectsState();
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      renderProjects(root);
+      await tick();
+      root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="todo"]')!.click();
+      await tick();
+      // 제외 목록이 비면 킵 절의 1건도 plan 목록에 보인다 (6건)
+      expect(root.querySelectorAll('[data-todo-section="plan"] li')).toHaveLength(6);
+      expect(root.querySelector('[data-todo-section="plan"]')?.textContent).toContain("킵 — plan 에 안 센다");
+    } finally {
+      globalThis.fetch = saved;
+    }
   });
 });
 

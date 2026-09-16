@@ -8,17 +8,17 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 export const project: ProjectRegistration = { id: "sample", name: "Sample", repo: "example/sample", branch: "main", docs: { readme: "README.md", design: "DESIGN.md", features: "FEATURES.md", todo: "TODO.md" }, kanbanPrefix: "[sample]" };
 function setup() {
   const cacheDir = mkdtempSync(join(tmpdir(), "projects-source-")); dirs.push(cacheDir);
-  let now = 0, sha = "a".repeat(40), failure = false, missing = "";
+  let now = 0, sha = "a".repeat(40), failure = 0, missing = "";
   const calls: string[] = [];
   const fetcher = (async (url: string | URL | Request) => {
     const u = String(url); calls.push(u);
-    if (failure) return new Response("remote diagnostic must not leak", { status: 401 });
+    if (failure) return new Response("remote diagnostic must not leak", { status: failure });
     if (u.includes("/branches/")) return Response.json({ commit: { sha } });
     if (u.endsWith(missing) && missing) return new Response("", { status: 404 });
     return new Response("# Source\n\nIntro\n\n- [~] current");
   }) as typeof fetch;
   return { cacheDir, calls, fetcher, now: () => now,
-    advance: (ms: number) => { now += ms; }, sha: (value: string) => { sha = value; }, fail: () => { failure = true; }, missing: (value: string) => { missing = value; },
+    advance: (ms: number) => { now += ms; }, sha: (value: string) => { sha = value; }, fail: (status = 401) => { failure = status; }, missing: (value: string) => { missing = value; },
     source: new GitHubDocs({ cacheDir, fetch: fetcher, now: () => now, useToken: false }) };
 }
 describe("GitHub project snapshots", () => {
@@ -49,10 +49,21 @@ describe("GitHub project snapshots", () => {
     expect(stale.sha).toBe(first.sha);
     expect(stale.docs.todo).toEqual(first.docs.todo);
   });
-  test("cold failure is typed and never includes remote diagnostics", async () => {
-    const s = setup(); s.fail();
+  test("cold 401/403/404 on the branch is typed auth_or_not_found and never includes remote diagnostics", async () => {
+    for (const status of [401, 403, 404]) {
+      const s = setup(); s.fail(status);
+      try { await s.source.get(project); throw new Error("expected failure"); }
+      catch (e) {
+        expect(e).toBeInstanceOf(ProjectSourceError);
+        expect((e as ProjectSourceError).reason).toBe("github_auth_or_not_found"); expect((e as ProjectSourceError).key).toBe("branch");
+        expect((e as Error).message).not.toContain("diagnostic");
+      }
+    }
+  });
+  test("cold 5xx on the branch is github_unavailable", async () => {
+    const s = setup(); s.fail(503);
     try { await s.source.get(project); throw new Error("expected failure"); }
-    catch (e) { expect(e).toBeInstanceOf(ProjectSourceError); expect((e as Error).message).toBe("github_unavailable"); }
+    catch (e) { expect(e).toBeInstanceOf(ProjectSourceError); expect((e as ProjectSourceError).reason).toBe("github_unavailable"); expect((e as ProjectSourceError).key).toBe("branch"); }
   });
   test("restart can recover stale disk snapshot without GitHub", async () => {
     const s = setup(); const first = await s.source.get(project); s.fail();
@@ -71,6 +82,7 @@ describe("GitHub project snapshots", () => {
   });
   test("validates registry paths, identifiers and duplicate entries", () => {
     expect(validateProjects([project])).toEqual([project]);
-    for (const input of [[project, project], [{ ...project, repo: "https://evil.test" }], [{ ...project, docs: { ...project.docs, todo: "../private.md" } }]]) expect(() => validateProjects(input)).toThrow("invalid_project_registry");
+    expect(validateProjects([{ ...project, excludeSections: ["킵", "대기"] }])[0]!.excludeSections).toEqual(["킵", "대기"]);
+    for (const input of [[project, project], [{ ...project, repo: "https://evil.test" }], [{ ...project, docs: { ...project.docs, todo: "../private.md" } }], [{ ...project, excludeSections: "킵" }], [{ ...project, excludeSections: [""] }]]) expect(() => validateProjects(input)).toThrow("invalid_project_registry");
   });
 });

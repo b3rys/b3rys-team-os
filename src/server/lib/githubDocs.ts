@@ -8,6 +8,8 @@ export type DocKey = typeof DOC_KEYS[number];
 export interface ProjectRegistration {
   id: string; name: string; repo: string; branch: string;
   docs: Record<DocKey, string>; kanbanPrefix: string;
+  /** TODO.md headings containing any of these hide their `[ ]` items from plan (default: ["킵"]). */
+  excludeSections?: string[];
 }
 export interface ProjectDocument extends RenderedProjectDoc { md: string; path: string }
 export interface ProjectSnapshot {
@@ -17,6 +19,9 @@ export interface ProjectSnapshot {
 export class ProjectSourceError extends Error {
   constructor(public key: string, public reason = "github_unavailable") { super(reason); }
 }
+/** 401/403/404 mean the token or the repo/branch is wrong; anything else (5xx, network) is transient. */
+export const sourceFailureReason = (status: number) =>
+  status === 401 || status === 403 || status === 404 ? "github_auth_or_not_found" : "github_unavailable";
 export function validateProjects(input: unknown): ProjectRegistration[] {
   if (!Array.isArray(input)) throw new Error("invalid_project_registry");
   const seen = new Set<string>();
@@ -24,6 +29,7 @@ export function validateProjects(input: unknown): ProjectRegistration[] {
     if (!p || typeof p.id !== "string" || !/^[a-z0-9][a-z0-9_-]*$/.test(p.id) || seen.has(p.id) || typeof p.name !== "string" ||
       !/^[\w.-]+\/[\w.-]+$/.test(p.repo) || typeof p.branch !== "string" || !p.branch ||
       typeof p.kanbanPrefix !== "string" || !p.kanbanPrefix || !p.docs ||
+      (p.excludeSections !== undefined && (!Array.isArray(p.excludeSections) || p.excludeSections.some((x: unknown) => typeof x !== "string" || !x))) ||
       DOC_KEYS.some(key => typeof p.docs[key] !== "string" || !p.docs[key] || p.docs[key].startsWith("/") ||
         /[\\\u0000-\u001f?#]/.test(p.docs[key]) || p.docs[key].split("/").some((x: string) => x === ".." || x === "."))) {
       throw new Error("invalid_project_registry");
@@ -84,7 +90,7 @@ export class GitHubDocs {
     }
     try {
       const branch = await this.request(`https://api.github.com/repos/${p.repo}/branches/${encodeURIComponent(p.branch)}`, "branch");
-      if (!branch.ok) throw new ProjectSourceError("branch");
+      if (!branch.ok) throw new ProjectSourceError("branch", sourceFailureReason(branch.status));
       const payload = await branch.json() as { commit?: { sha?: string } };
       const sha = payload.commit?.sha;
       if (!sha || !/^[a-f0-9]{40,64}$/i.test(sha)) throw new ProjectSourceError("branch", "invalid_github_response");

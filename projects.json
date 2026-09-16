@@ -5,6 +5,7 @@
     "repo": "b3rys/steno",
     "branch": "main",
     "docs": { "readme": "README.md", "design": "DESIGN.md", "features": "FEATURES.md", "todo": "TODO.md" },
-    "kanbanPrefix": "[steno]"
+    "kanbanPrefix": "[steno]",
+    "excludeSections": ["킵", "선택 대기", "답 대기", "승인 대기"]
   }
 ]

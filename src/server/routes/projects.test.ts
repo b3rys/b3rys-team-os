@@ -33,6 +33,7 @@ describe("Projects API", () => {
     expect(res.status).toBe(200); expect(res.headers.get("cache-control")).toBe("no-store");
     const { projects } = await res.json(); const item = projects[0];
     expect(item.todo).toEqual({ doing: 1, plan: 1, done: 1, doingTitles: ["working"] });
+    expect(item.excludeSections).toEqual(["킵"]);
     expect(item.kanban.map((t: any) => t.id)).toEqual(["one", "two"]);
     expect(item.docs).toHaveLength(4); expect(item.docs.every((d: any) => d.exists)).toBe(true);
     expect(item.intro).toBe("Useful app.");
@@ -46,6 +47,19 @@ describe("Projects API", () => {
     expect(raw.headers.get("content-type")).toStartWith("text/markdown");
     expect(doc.needs).toEqual(["mermaid-svg"]);
     expect(doc.current.items.map((x: any) => x.title)).toEqual(["working", "done", "plan"]);
+    expect(doc.current.excludeSections).toEqual(["킵"]);
+  });
+  test("registry excludeSections drives both the list and the TODO document", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "projects-routes-")); const db = new Database(":memory:");
+    db.exec("CREATE TABLE task (id TEXT, title TEXT, lane TEXT, updated_at TEXT)");
+    cleanups.push(() => { db.close(); rmSync(dir, { recursive: true, force: true }); });
+    const source = new GitHubDocs({ cacheDir: dir, useToken: false, fetch: (async (url: any) => String(url).includes("/branches/")
+      ? Response.json({ commit: { sha: "b".repeat(40) } }) : new Response("# S\n\n## 📌 킵\n- [ ] held\n## 답 대기\n- [ ] waiting\n## next\n- [ ] plan")) as typeof fetch });
+    const app = new Hono(); app.route("/team/api", createProjectRoutes({ db, projects: [{ ...p, excludeSections: ["답 대기"] }], source }));
+    const item = (await (await app.request("/team/api/projects")).json()).projects[0];
+    expect(item.excludeSections).toEqual(["답 대기"]); expect(item.todo.plan).toBe(2);
+    const doc = await (await app.request("/team/api/projects/sample/doc/todo")).json();
+    expect(doc.current.excludeSections).toEqual(["답 대기"]); expect(doc.current.items.map((x: any) => x.title)).toEqual(["held", "plan"]);
   });
   test("unknown project/key and path traversal do not fetch arbitrary paths", async () => {
     const { app } = setup();
@@ -62,7 +76,7 @@ describe("Projects API", () => {
     const result = await (await warm.app.request("/team/api/projects")).json();
     expect(result.projects).toHaveLength(1); expect(result.projects[0].stale).toBe(true);
     const cold = setup(); cold.fail(); const response = await cold.app.request("/team/api/projects");
-    expect(response.status).toBe(502); expect(await response.json()).toEqual({ error: "github_unavailable", key: "branch" });
+    expect(response.status).toBe(502); expect(await response.json()).toEqual({ error: "github_auth_or_not_found", key: "branch" });
   });
   test("registered routes remain behind the existing root host gate", async () => {
     const { app } = setup();

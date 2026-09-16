@@ -55,7 +55,7 @@ describe("GitHub 토큰 — 헤더에만 실리고 어디에도 안 남는다", 
     const res = await app.request("http://localhost/team/api/projects");
     expect(res.status).toBe(502);
     const text = await res.text();
-    expect(text).toBe(JSON.stringify({ error: "github_unavailable", key: "branch" }));
+    expect(text).toBe(JSON.stringify({ error: "github_auth_or_not_found", key: "branch" }));
     expect(text).not.toContain(TOKEN); expect(text).not.toContain("bad credentials");
     expect(s.headers[0]).toBe(`Bearer ${TOKEN}`);
     let thrown: unknown;

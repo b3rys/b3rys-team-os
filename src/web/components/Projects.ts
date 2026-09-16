@@ -20,6 +20,8 @@ export interface ProjectSummary {
   intro: string;
   docs: { key: ProjectDocKey; path: string; exists: boolean }[];
   todo: { doing: number; plan: number; done: number; doingTitles: string[] };
+  /** TODO 헤더에 이 문자열이 들어가면 그 절의 `[ ]` 는 plan 에서 뺀다 — 정본은 서버(projects.json). */
+  excludeSections?: string[];
   kanban: { id: string; title: string; lane: "plan" | "doing"; updatedAt: string }[];
   fetchedAt: string;
   stale?: boolean;
@@ -34,6 +36,8 @@ export interface ProjectDoc {
   title: string;
   toc: { level: number; text: string; anchor: string }[];
   stale?: boolean;
+  /** TODO 문서만: 서버가 센 현재 상태 (excludeSections 포함). */
+  current?: { doing: number; plan: number; done: number; doingTitles: string[]; excludeSections?: string[] };
 }
 interface Fixture {
   summary: ProjectSummary;
@@ -82,10 +86,6 @@ export function relTime(iso: string | null | undefined, now: Date = new Date()):
 function fixtureMode(): boolean {
   return new URLSearchParams(window.location.search).get("fixture") === "1";
 }
-function isFixtureIdSteno(id: string | null): boolean {
-  return id === "steno";
-}
-
 async function loadFixture(): Promise<Fixture> {
   const mod = await import("../fixtures/projects-steno.example.json");
   return (mod.default ?? mod) as unknown as Fixture;
@@ -125,8 +125,10 @@ async function loadProjects(): Promise<void> {
 
 async function loadDoc(id: string, key: ProjectDocKey): Promise<ProjectDoc> {
   const { status, body, missing } = await fetchJson(`/${encodeURIComponent(id)}/doc/${key}`);
-  if (missing && fixtureMode() && isFixtureIdSteno(id)) {
+  if (missing && fixtureMode()) {
+    // fixture 는 프로젝트 하나 — 목록에 실린 첫 항목(= fixture summary) 의 id 만 받는다.
     const fx = await loadFixture();
+    if (id !== (_projects[0]?.id ?? fx.summary.id)) throw new Error(`HTTP ${status}`);
     const d = fx.docs[key];
     if (!d) throw new Error("fixture has no " + key);
     _rawCache.set(`${id}/${key}`, d.md);
@@ -162,14 +164,14 @@ function writeUrlState(id: string | null, doc: ProjectDocKey | null): void {
   if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== next) window.history.replaceState(null, "", next);
 }
 
-// ── TODO.md 현재 상태 파싱 (계약 §3 규칙과 같은 모양 — 킵·승인대기 절의 `[ ]` 는 plan 에서 뺀다) ──
-const KEEP_SECTION = /(킵|GD 선택 대기|승인 대기)/;
-export function parseTodoMd(md: string): { doing: string[]; plan: string[]; done: string[] } {
+// ── TODO.md 현재 상태 파싱 (계약 §3 규칙과 같은 모양) ──
+// 제외 절 목록은 서버 응답(ProjectSummary.excludeSections · TODO doc current.excludeSections)에서 온다 — 여기에 목록을 두지 않는다.
+export function parseTodoMd(md: string, excludeSections: readonly string[]): { doing: string[]; plan: string[]; done: string[] } {
   const doing: string[] = []; const plan: string[] = []; const done: string[] = [];
   let inKeep = false;
   for (const raw of String(md).replace(/\r\n/g, "\n").split("\n")) {
     const h = raw.match(/^(#{1,6})\s+(.*)$/);
-    if (h) { inKeep = KEEP_SECTION.test(h[2]!); continue; }
+    if (h) { inKeep = excludeSections.some((needle) => h[2]!.includes(needle)); continue; }
     const m = raw.match(/^\s*[-*]\s+\[([ ~x])\]\s+(.*)$/);
     if (!m) continue;
     const text = m[2]!.trim().slice(0, 60);
@@ -322,8 +324,8 @@ function decorateMermaid(container: HTMLElement): number {
   return pres.length;
 }
 
-function todoStatusHtml(p: ProjectSummary | null, md: string): string {
-  const parsed = parseTodoMd(md);
+function todoStatusHtml(p: ProjectSummary | null, doc: ProjectDoc): string {
+  const parsed = parseTodoMd(doc.md ?? "", doc.current?.excludeSections ?? p?.excludeSections ?? []);
   const doingTitles = p?.todo?.doingTitles?.length ? p.todo.doingTitles : parsed.doing;
   const counts = p?.todo ?? { doing: doingTitles.length, plan: parsed.plan.length, done: parsed.done.length };
   const kanban = (p?.kanban ?? []);
@@ -445,7 +447,7 @@ async function renderDoc(): Promise<void> {
     return;
   }
   if (isTodo && _todoTab === "status") {
-    viewer.innerHTML = `<div class="projects-todo-status">${todoStatusHtml(project, doc.md ?? "")}</div>`;
+    viewer.innerHTML = `<div class="projects-todo-status">${todoStatusHtml(project, doc)}</div>`;
     viewer.querySelector<HTMLButtonElement>("#projects-done-more")?.addEventListener("click", () => { _doneOpen = !_doneOpen; void renderDoc(); });
     return;
   }
