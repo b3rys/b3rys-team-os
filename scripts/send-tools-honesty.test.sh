@@ -323,6 +323,95 @@ grep -q "미배달이 아닙니다" <<<"$out" && pass "미배달로 오독하지
 [ $rc -eq 0 ] && pass "타임아웃은 실패로 단정하지 않는다 (exit 0)" || fail "타임아웃을 실패로 만들었다 (exit $rc)"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# A4 — 인자 검증 (셸 인자 쪼개짐 탐지)
+#
+# 본문에 큰따옴표가 있으면 바깥 인용이 본문 안쪽에서 닫히고, 그 뒤 인용 밖 공백에서 셸이
+# 단어를 쪼갠다. 쪼개진 토큰이 우연히 유효한 플래그면 파서가 그걸 정상 인자로 먹는다 —
+# 에러 없이 ★수신자나 우선순위가 바뀐 채 발송된다.★
+#
+# ★TEAM_BASE 를 죽은 포트로 고정한다★ — 가드가 빠져 있으면 이 케이스들은 curl 까지 도달한다.
+#   그대로 두면 테스트가 ★진짜로 broadcast 를 쏜다.★ 그게 아래 첫 케이스의 실패 모드다.
+# ★종료코드만 보면 거짓 통과한다★ — 가드가 없어도 curl 실패로 rc=7 이 나온다(실측).
+#   그래서 종료코드와 stderr 문구를 ★둘 다★ 단정한다.
+# ★아래 본문 리터럴의 따옴표는 어긋나 보이는 것이 정상이다 — 교정하면 재현이 사라진다.★
+DEADBASE="http://127.0.0.1:9/team"
+
+echo "── A4-1: 중복 --to 는 거절 (수신자가 조용히 바뀌는 경로) ──"
+out="$(TEAM_BASE="$DEADBASE" "$SEND" --to lisa --body "명령은 "send.sh --to broadcast"" 2>&1)"; rc=$?
+if [ $rc -ne 0 ] && grep -q -- "--body-file" <<<"$out"; then
+  pass "중복 --to 차단 + --body-file 안내 (exit $rc)"
+else
+  fail "★중복 --to 를 통과시켰다 (exit $rc)★ / out=$(tail -3 <<<"$out")"
+fi
+
+echo "── A4-2: 중복 --body 는 거절 ──"
+out="$(TEAM_BASE="$DEADBASE" "$SEND" --to lisa --body "x" --body "y" 2>&1)"; rc=$?
+if [ $rc -ne 0 ] && grep -q -- "--body-file" <<<"$out"; then
+  pass "중복 --body 차단 (exit $rc)"
+else
+  fail "중복 --body 를 통과시켰다 (exit $rc) / out=$(tail -3 <<<"$out")"
+fi
+
+echo "── A4-3: --priority 는 화이트리스트 밖 값을 거절 ──"
+out="$(TEAM_BASE="$DEADBASE" "$SEND" --to lisa --body "이건 "긴급 --priority high" 건" 2>&1)"; rc=$?
+if [ $rc -ne 0 ] && grep -qi "priority" <<<"$out"; then
+  pass "priority 쓰레기값 차단 (exit $rc)"
+else
+  fail "★priority='high 건' 을 통과시켰다 (exit $rc)★ / out=$(tail -3 <<<"$out")"
+fi
+
+echo "── A4-4: --type 도 화이트리스트 ──"
+out="$(TEAM_BASE="$DEADBASE" "$SEND" --to lisa --body "x" --type bogus 2>&1)"; rc=$?
+if [ $rc -ne 0 ] && grep -qi "type" <<<"$out"; then
+  pass "type 쓰레기값 차단 (exit $rc)"
+else
+  fail "type=bogus 를 통과시켰다 (exit $rc) / out=$(tail -3 <<<"$out")"
+fi
+
+echo "── A4-5: ★--mention 은 반복 지정이 계속 허용돼야 한다 (중복검사 회귀 지점)★ ──"
+# --mention 은 누적형이라 반복이 정상이다. 중복 플래그 검사에 휩쓸리면 슬랙 멘션이 통째로 막힌다.
+# ★종료코드로 단정하지 않는다★ — TEAM_BASE 가 죽은 포트라 rc=7 이 정상이고, 그걸 실패로 읽으면 거짓 실패다.
+out="$(TEAM_BASE="$DEADBASE" "$SEND" --to lisa --body "x" --mention U111 --mention U222 2>&1)"; rc=$?
+if grep -qi "중복\|duplicate" <<<"$out"; then
+  fail "★--mention 반복이 중복 플래그 검사에 걸렸다 — 반복 가능 플래그다★ / out=$(tail -3 <<<"$out")"
+else
+  pass "--mention 반복 허용됨 (인자 검증 통과, exit $rc)"
+fi
+
+echo "── A4-6: unknown arg 는 --body-file 을 안내한다 ──"
+# 모르는 인자의 흔한 원인이 본문 쪼개짐이라, 원인만 말하고 끝내면 다음 행동이 없다.
+out="$(TEAM_BASE="$DEADBASE" "$SEND" --to lisa --body "x" --nosuchflag 2>&1)"; rc=$?
+if [ $rc -ne 0 ] && grep -q -- "--body-file" <<<"$out"; then
+  pass "unknown arg 에 --body-file 안내 (exit $rc)"
+else
+  fail "unknown arg 안내가 없다 (exit $rc) / out=$(tail -3 <<<"$out")"
+fi
+
+echo "── A4-7: reply.sh 도 --body-file 을 받는다 ──"
+# send.sh 에만 있고 reply.sh 에는 없어서, 답장은 본문을 명령줄로만 보낼 수 있었다.
+REPLY_SH="$REPO/skills/b3os-team-inbox/scripts/reply.sh"
+[ -f "$REPLY_SH" ] || fail "reply.sh 가 없다: $REPLY_SH"
+# 없는 경로를 주면 ★--body-file 에 대한 에러★ 로 죽어야 한다 — 플래그 자체가 파싱된다는 증거다.
+out="$(TEAM_BASE="$DEADBASE" "$REPLY_SH" someid --body-file "$TMP/nope.txt" 2>&1)"; rc=$?
+# ★'--body-file' 이 stderr 에 있는지만 보면 거짓 통과한다★ — 플래그를 모르는 버전도
+#   "unknown arg: --body-file" 이라고 ★그 문자열을 그대로 출력★ 하기 때문이다(실측).
+#   그래서 'unknown arg 가 아닐 것' 과 '경로 문제라고 말할 것' 을 같이 단정한다.
+if [ $rc -ne 0 ] && ! grep -q "unknown arg" <<<"$out" && grep -q "경로가 없습니다" <<<"$out"; then
+  pass "reply.sh --body-file 파싱됨 + 없는 경로는 에러 (exit $rc)"
+else
+  fail "★reply.sh 가 --body-file 을 모른다 (exit $rc)★ / out=$(tail -3 <<<"$out")"
+fi
+# --body 와 동시 지정은 거절 (어느 쪽이 이겼는지 조용히 정해지면 안 된다)
+printf 'from file' > "$TMP/rbody.txt"
+out="$(TEAM_BASE="$DEADBASE" "$REPLY_SH" someid --body "inline" --body-file "$TMP/rbody.txt" 2>&1)"; rc=$?
+# 여기서도 종료코드만 보면 안 된다 — 플래그를 모르는 버전도 rc=1 로 죽는다(unknown arg).
+if [ $rc -ne 0 ] && grep -q "동시에" <<<"$out"; then
+  pass "reply.sh --body + --body-file 동시 지정 차단 (exit $rc)"
+else
+  fail "reply.sh 가 동시 지정을 그 사유로 막지 않는다 (exit $rc) / out=$(tail -3 <<<"$out")"
+fi
+
 echo
 if [ $FAILED -eq 0 ]; then echo "ALL PASS — send tools honesty"; else echo "FAILED — send tools honesty"; fi
 exit $FAILED
