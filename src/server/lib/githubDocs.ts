@@ -10,6 +10,8 @@ export interface ProjectRegistration {
   docs: Record<DocKey, string>; kanbanPrefix: string;
   /** TODO.md headings containing any of these hide their `[ ]` items from plan (default: ["킵"]). */
   excludeSections?: string[];
+  /** Name of the env var holding this project's read-only GitHub token (default: GITHUB_TOKEN). The value never lives in the registry. */
+  tokenEnv?: string;
 }
 export interface ProjectDocument extends RenderedProjectDoc { md: string; path: string }
 export interface ProjectSnapshot {
@@ -30,6 +32,7 @@ export function validateProjects(input: unknown): ProjectRegistration[] {
       !/^[\w.-]+\/[\w.-]+$/.test(p.repo) || typeof p.branch !== "string" || !p.branch ||
       typeof p.kanbanPrefix !== "string" || !p.kanbanPrefix || !p.docs ||
       (p.excludeSections !== undefined && (!Array.isArray(p.excludeSections) || p.excludeSections.some((x: unknown) => typeof x !== "string" || !x))) ||
+      (p.tokenEnv !== undefined && (typeof p.tokenEnv !== "string" || !/^[A-Z][A-Z0-9_]*$/.test(p.tokenEnv))) ||
       DOC_KEYS.some(key => typeof p.docs[key] !== "string" || !p.docs[key] || p.docs[key].startsWith("/") ||
         /[\\\u0000-\u001f?#]/.test(p.docs[key]) || p.docs[key].split("/").some((x: string) => x === ".." || x === "."))) {
       throw new Error("invalid_project_registry");
@@ -63,10 +66,12 @@ export class GitHubDocs {
     await writeFile(temporary, JSON.stringify(value), { mode: 0o600 });
     await rename(temporary, destination);
   }
-  private async request(url: string, key: string): Promise<Response> {
+  private async request(url: string, key: string, tokenEnv = "GITHUB_TOKEN"): Promise<Response> {
     const headers: Record<string, string> = { Accept: "application/vnd.github+json", "User-Agent": "b3os-projects" };
-    // Credentials are read only here and never included in cached data or errors.
-    if (this.opts.useToken !== false && process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+    // Credentials are read only here and never included in cached data or errors. Which env var holds the
+    // token is per project (`tokenEnv`), so one .env can carry GITHUB_TOKEN_STENO, GITHUB_TOKEN_LEDGER, …
+    const token = this.opts.useToken !== false ? process.env[tokenEnv] : undefined;
+    if (token) headers.Authorization = `Bearer ${token}`;
     try {
       return await this.fetcher(url, { headers, redirect: "error", signal: AbortSignal.timeout(15_000) });
     } catch { throw new ProjectSourceError(key); }
@@ -89,7 +94,7 @@ export class GitHubDocs {
         disk.docs && DOC_KEYS.every(k => disk.docs[k] === null || (typeof disk.docs[k]?.md === "string" && typeof disk.docs[k]?.html === "string"))) previous = disk;
     }
     try {
-      const branch = await this.request(`https://api.github.com/repos/${p.repo}/branches/${encodeURIComponent(p.branch)}`, "branch");
+      const branch = await this.request(`https://api.github.com/repos/${p.repo}/branches/${encodeURIComponent(p.branch)}`, "branch", p.tokenEnv);
       if (!branch.ok) throw new ProjectSourceError("branch", sourceFailureReason(branch.status));
       const payload = await branch.json() as { commit?: { sha?: string } };
       const sha = payload.commit?.sha;
@@ -101,7 +106,7 @@ export class GitHubDocs {
         if (cached && cached.path === p.docs[key] && typeof cached.md === "string") {
           docs[key] = { md: cached.md, path: p.docs[key], ...renderProjectDoc(cached.md, { ...p, sha, path: p.docs[key] }) }; return;
         }
-        const response = await this.request(`https://raw.githubusercontent.com/${p.repo}/${sha}/${pathEncode(p.docs[key])}`, key);
+        const response = await this.request(`https://raw.githubusercontent.com/${p.repo}/${sha}/${pathEncode(p.docs[key])}`, key, p.tokenEnv);
         if (response.status === 404 && !previous?.docs[key]) { docs[key] = null; return; }
         if (!response.ok) throw new ProjectSourceError(key);
         const md = await response.text();

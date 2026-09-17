@@ -38,6 +38,22 @@ describe("GitHub 토큰 — 헤더에만 실리고 어디에도 안 남는다", 
     expect(s.headers).toHaveLength(5);
     expect(s.headers.every(h => h === `Bearer ${TOKEN}`)).toBe(true);
   });
+  test("tokenEnv 가 있으면 그 이름의 env 를 쓰고 GITHUB_TOKEN 은 안 본다", async () => {
+    process.env.GITHUB_TOKEN = "wrong-" + TOKEN;
+    process.env.GITHUB_TOKEN_STENO = TOKEN;
+    try {
+      const s = setup("ok");
+      await s.source.get({ ...project, tokenEnv: "GITHUB_TOKEN_STENO" });
+      expect(s.headers).toHaveLength(5);
+      expect(s.headers.every(h => h === `Bearer ${TOKEN}`)).toBe(true);
+    } finally { delete process.env.GITHUB_TOKEN_STENO; }
+  });
+  test("tokenEnv 이름의 env 가 비어 있으면 무인증으로 간다 (다른 프로젝트 토큰을 빌리지 않는다)", async () => {
+    process.env.GITHUB_TOKEN = TOKEN;
+    const s = setup("ok");
+    await s.source.get({ ...project, tokenEnv: "GITHUB_TOKEN_MISSING" });
+    expect(s.headers.every(h => h === "")).toBe(true);
+  });
   test("캐시 파일에 토큰이 없다", async () => {
     process.env.GITHUB_TOKEN = TOKEN;
     const s = setup("ok");

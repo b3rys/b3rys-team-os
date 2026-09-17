@@ -66,7 +66,7 @@ type ProjectSummary = {
 
 - GitHub 원본: `https://raw.githubusercontent.com/<repo>/<sha>/<path>`. sha 는 `GET repos/<repo>/branches/<branch>` 를 ★60초★ TTL 로 재확인. 네 문서를 ★같은 sha★ 로 읽는다.
 - 캐시 키 = `repo + sha + path + RENDERER_VERSION`. 저장은 `var/projects-cache/` (git 밖). 파생본이다 — 편집 원본이 아니다.
-- private repo: 토큰은 서버 env `GITHUB_TOKEN` 만(로그·응답에 안 나감). 문서 응답도 `/team` 의 기존 열람 규칙을 따른다 — 토큰 숨기는 것만으로 문서 공개를 막지 못한다.
+- private repo: 토큰은 서버 env 만(로그·응답에 안 나감). ★어느 env 이름을 쓸지★는 항목의 `tokenEnv`(기본 `GITHUB_TOKEN`) — 값은 팀서버 루트 `.env`(gitignore)에, 프로젝트마다 `GITHUB_TOKEN_<ID>` 로 나눈다. 공개 repo 는 `tokenEnv` 없이 무인증. 문서 응답도 `/team` 의 기존 열람 규칙을 따른다 — 토큰 숨기는 것만으로 문서 공개를 막지 못한다.
 - 실패 동작: GitHub 401/404/네트워크 → 캐시가 있으면 캐시 + `stale: true`, 없으면 `{ error, key }` 502. 목록은 절대 빈 값으로 덮지 않는다(iCloud 교훈). `error` 는 브랜치 조회가 401/403/404 면 `github_auth_or_not_found`(토큰·저장소·브랜치 문제), 그 밖(네트워크·5xx)은 `github_unavailable`.
 
 ## 3. 렌더 (서버, 공통 렌더러 `src/server/lib/projectDocRender.ts`)
