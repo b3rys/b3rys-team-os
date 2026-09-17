@@ -1,4 +1,4 @@
-// 프로젝트 문서를 "절" 로 자른다 — Projects 문서 화면의 절 탭(Reports 폼 탭과 같은 모양) 재료.
+// 프로젝트 문서를 "절" 로 나눈다 — Projects 문서 화면의 왼쪽 목차 트리(절 · 하위 헤딩) 와 현재 절 판정 재료.
 // 입력은 서버 응답 그대로: 정제된 `html`(헤딩 `id` = toc anchor) + `toc`(level·text·anchor).
 // 절 = 문서의 최상위 헤딩. `#` 이 하나뿐이면 그 아래 `##` 로, `##` 가 없으면 `###` 로 내려간다.
 // 절 앞(제목~첫 절 헤딩 전)에 본문이 있으면 "개요" 절이 앞에 붙는다. 헤딩이 없으면 문서 전체가 절 하나.
@@ -9,13 +9,13 @@ export interface TocEntry { level: number; text: string; anchor: string }
 export interface DocSection {
   /** 절 헤딩의 id(= toc anchor). 개요 절은 제목 헤딩 id, 헤딩이 없으면 "". */
   anchor: string;
-  /** 탭 라벨 원문(헤딩 텍스트 전체). 자르기는 화면 몫. */
+  /** 절 라벨(헤딩 텍스트 전체). */
   label: string;
   /** 절 헤딩 level(1~6). 개요·헤딩 없음은 0. */
   level: number;
   /** 그 절의 HTML(절 헤딩 포함). */
   html: string;
-  /** 절 안 하위 헤딩 — 탭 줄 아래 링크 줄 재료. */
+  /** 절 안 하위 헤딩 — 트리의 들여쓴 줄 재료. */
   children: TocEntry[];
 }
 
@@ -29,12 +29,6 @@ export function sectionLevel(toc: readonly TocEntry[]): number {
   if (levels.filter((l) => l === min).length > 1) return min;
   const deeper = levels.filter((l) => l > min);
   return deeper.length ? Math.min(...deeper) : min;
-}
-
-/** 탭 라벨 — 24자 넘으면 자르고 … . 전체 텍스트는 title 속성으로. */
-export function sectionTabLabel(text: string, max = 24): string {
-  const chars = Array.from(text.trim());
-  return chars.length > max ? chars.slice(0, max).join("") + "…" : chars.join("");
 }
 
 function hasBody(nodes: readonly Node[], skipTitle: Element | null): boolean {

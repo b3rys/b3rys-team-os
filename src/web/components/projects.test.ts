@@ -12,6 +12,8 @@ const savedGlobals: Record<string, unknown> = {};
 let previousFetch: typeof fetch;
 // 어떤 서버를 흉내낼지 — "api": 계약대로 응답 · "404": 서버 없음
 let serverMode: "api" | "404" | "spa" = "api";
+// 문서 응답 바꿔치기 — 소제목(###) 이 있는 문서로 트리 children 을 볼 때
+let docOverride: Record<string, unknown> | null = null;
 const fetchLog: string[] = [];
 
 beforeAll(() => {
@@ -47,7 +49,7 @@ beforeAll(() => {
     if (!id) return json({ projects: [fixture.summary] });
     if (id !== "steno") return json({ error: "unknown project", key: id }, 404);
     if (!key) return json(fixture.summary);
-    const doc = (fixture.docs as Record<string, { md: string }>)[key];
+    const doc = (docOverride?.[key] as { md: string } | undefined) ?? (fixture.docs as Record<string, { md: string }>)[key];
     if (!doc) return json({ error: "unknown doc", key }, 404);
     if (raw) return new Response(doc.md, { status: 200, headers: { "content-type": "text/markdown" } });
     return json(doc);
@@ -56,12 +58,15 @@ beforeAll(() => {
 
 beforeEach(() => {
   serverMode = "api";
+  docOverride = null;
   fetchLog.length = 0;
   window.history.replaceState(null, "", "/team?view=projects");
 });
 
-afterEach(() => {
+afterEach(async () => {
   document.body.innerHTML = "";
+  const { resetPanelsState } = await import("../lib/panels");
+  resetPanelsState();
 });
 
 afterAll(() => {
@@ -128,23 +133,31 @@ describe("Projects 목록", () => {
 });
 
 describe("Projects 문서 화면", () => {
-  test("DESIGN 칩 → 절 탭 3(h1 하나뿐이라 h2 로 자름, 서문 없음) · 첫 절만 본문 · 왼쪽 toc 칸 없음 · GitHub blob 링크 · sha 7자 · URL deep-link", async () => {
+  test("DESIGN 칩 → 왼쪽 목차 트리(절 3: h1 하나뿐이라 h2 가 절) · 현재 절만 펼침·강조 · 본문은 전체 문서 · 절 탭 없음 · GitHub blob 링크 · sha 7자 · URL deep-link", async () => {
     const root = await mount();
     root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
     await tick();
-    expect(root.querySelector("#projects-toc")).toBeNull();
-    expect(root.querySelector(".projects-toc")).toBeNull();
-    const tabs = root.querySelectorAll<HTMLButtonElement>(".projects-sec-tab");
-    expect(tabs).toHaveLength(3);
-    expect(Array.from(tabs).map((b) => b.textContent)).toEqual(["1. 무엇을 만드나", "2. 시스템 구조", "3. 주요 클래스"]);
-    expect(tabs[0]!.getAttribute("aria-pressed")).toBe("true");
-    // 절 탭은 Reports 폼 탭과 같은 클래스 토큰
-    expect(tabs[0]!.className).toContain("text-accent-green border-accent-green/35 bg-accent-green/10");
-    expect(tabs[1]!.className).toContain("text-slate-400 border-surface-3 bg-surface-2");
-    // 본문은 현재 절(1) 만 — h2 하나, mermaid 는 2절에 있으니 아직 없음
-    expect(root.querySelectorAll("#projects-viewer h2")).toHaveLength(1);
-    expect(root.querySelector("#projects-viewer h2")?.textContent).toBe("1. 무엇을 만드나");
-    expect(root.querySelectorAll("#projects-viewer pre.mermaid-src")).toHaveLength(0);
+    expect(root.querySelector(".projects-sec-tabs")).toBeNull();
+    const toc = root.querySelector("#projects-toc")!;
+    expect(toc).not.toBeNull();
+    const secs = toc.querySelectorAll<HTMLElement>(".projects-toc-sec");
+    expect(secs).toHaveLength(3);
+    expect(Array.from(secs).map((el) => el.querySelector(".projects-toc-head")?.textContent)).toEqual(["1. 무엇을 만드나", "2. 시스템 구조", "3. 주요 클래스"]);
+    // 현재 절(첫 절)만 펼침·강조
+    expect(Array.from(secs).map((el) => el.dataset.open)).toEqual(["true", "false", "false"]);
+    expect(Array.from(secs).map((el) => el.querySelector(".projects-toc-head")?.getAttribute("aria-current"))).toEqual(["true", "false", "false"]);
+    // 소제목이 없는 절엔 캐럿 버튼이 없다
+    expect(toc.querySelectorAll(".projects-toc-caret[data-toggle]")).toHaveLength(0);
+    // 본문은 전체 문서 — h2 3개 모두, 2절의 mermaid 도 이미 있다(서버 figcaption 만, 클라 배지 없음)
+    expect(root.querySelectorAll("#projects-viewer h2")).toHaveLength(3);
+    expect(root.querySelectorAll("#projects-viewer article")).toHaveLength(1);
+    expect(root.querySelectorAll("#projects-viewer pre.mermaid-src")).toHaveLength(1);
+    expect(root.querySelectorAll("#projects-viewer .mermaid-pending")).toHaveLength(1);
+    expect(root.querySelectorAll("#projects-viewer .projects-mermaid-badge")).toHaveLength(0);
+    // 트리 칸은 데스크톱 220px 열, 모바일은 접힘(목차 버튼)
+    expect(toc.parentElement?.className).toContain("md:grid-cols-[220px_minmax(0,1fr)]");
+    expect(toc.className).toContain("hidden");
+    expect(root.querySelector("#projects-toc-toggle")?.getAttribute("aria-expanded")).toBe("false");
     const sha7 = fixture.summary.sha.slice(0, 7);
     expect(root.textContent).toContain(sha7);
     expect(root.querySelector<HTMLAnchorElement>("#projects-open-github")!.getAttribute("href"))
@@ -156,34 +169,84 @@ describe("Projects 문서 화면", () => {
     expect(p.get("sec")).toBe("1-무엇을-만드나");
   });
 
-  test("절 탭 클릭 → 그 절 HTML 만(mermaid 배지 포함) · URL &sec= 갱신 · 뒤로가면 sec 제거", async () => {
+  test("트리의 절 클릭 → 그 절이 현재(펼침·강조 이동) · URL &sec= 갱신 · 본문은 다시 안 그림(전체 그대로) · 뒤로가면 sec 제거", async () => {
     const root = await mount();
     root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
     await tick();
-    root.querySelector<HTMLButtonElement>('.projects-sec-tab[data-sec="2-시스템-구조"]')!.click();
+    const article = root.querySelector("#projects-viewer article")!;
+    root.querySelector<HTMLButtonElement>('.projects-toc-head[data-sec="2-시스템-구조"]')!.click();
     await tick();
-    expect(root.querySelector('.projects-sec-tab[data-sec="2-시스템-구조"]')?.getAttribute("aria-pressed")).toBe("true");
-    expect(root.querySelectorAll("#projects-viewer h2")).toHaveLength(1);
-    expect(root.querySelector("#projects-viewer article")?.getAttribute("data-sec")).toBe("2-시스템-구조");
-    // 서버 html 그대로 — 서버가 figcaption(mermaid-pending) 을 넣으므로 클라 배지는 안 겹친다(두 줄 중복 방지)
-    expect(root.querySelectorAll("#projects-viewer pre.mermaid-src")).toHaveLength(1);
-    expect(root.querySelectorAll("#projects-viewer .mermaid-pending")).toHaveLength(1);
-    expect(root.querySelectorAll("#projects-viewer .projects-mermaid-badge")).toHaveLength(0);
+    expect(root.querySelector('.projects-toc-head[data-sec="2-시스템-구조"]')?.getAttribute("aria-current")).toBe("true");
+    expect(root.querySelector('.projects-toc-head[data-sec="1-무엇을-만드나"]')?.getAttribute("aria-current")).toBe("false");
+    expect(root.querySelector('.projects-toc-sec[data-sec="2-시스템-구조"]')?.getAttribute("data-open")).toBe("true");
+    expect(root.querySelector('.projects-toc-sec[data-sec="1-무엇을-만드나"]')?.getAttribute("data-open")).toBe("false");
+    expect(root.querySelector("#projects-viewer article")).toBe(article); // 같은 노드 — 스크롤 이동만
+    expect(article.getAttribute("data-sec")).toBe("2-시스템-구조");
+    expect(root.querySelectorAll("#projects-viewer h2")).toHaveLength(3);
     expect(new URLSearchParams(window.location.search).get("sec")).toBe("2-시스템-구조");
     root.querySelector<HTMLButtonElement>("#projects-back")!.click();
     await tick();
     expect(new URLSearchParams(window.location.search).get("sec")).toBeNull();
   });
 
-  test("deep-link &sec=3-주요-클래스 로 부팅하면 그 절이 열린다 · 모르는 sec 은 첫 절", async () => {
+  test("소제목(###) 이 있는 문서: 절 아래 들여쓴 링크 · 캐럿으로 다른 절도 펼침 · 소제목 클릭 → 그 절이 현재 + 소제목 강조", async () => {
+    const H = (l: number, id: string, t = id) => `<h${l} id="${id}">${t}</h${l}>`;
+    const html = `${H(1, "t")}${H(2, "a")}<p>a</p>${H(3, "a-1")}<p>a1</p>${H(3, "a-2")}<p>a2</p>${H(2, "b")}<p>b</p>${H(3, "b-1")}<p>b1</p>${H(4, "b-1-1")}<p>b11</p>`;
+    const toc = [[1, "t"], [2, "a"], [3, "a-1"], [3, "a-2"], [2, "b"], [3, "b-1"], [4, "b-1-1"]].map(([level, anchor]) => ({ level, anchor, text: anchor }));
+    docOverride = { design: { ...fixture.docs.design, html, toc } };
+    const root = await mount();
+    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
+    await tick();
+    const secs = root.querySelectorAll<HTMLElement>(".projects-toc-sec");
+    expect(secs).toHaveLength(2);
+    expect(Array.from(secs[0]!.querySelectorAll("a")).map((a) => `${a.dataset.level}:${a.textContent}`)).toEqual(["3:a-1", "3:a-2"]);
+    expect(Array.from(secs[1]!.querySelectorAll("a")).map((a) => `${a.dataset.level}:${a.textContent}`)).toEqual(["3:b-1", "4:b-1-1"]);
+    expect(Array.from(secs).map((el) => el.dataset.open)).toEqual(["true", "false"]);
+    // 캐럿: 다른 절(b) 을 펼쳐 본다 — 현재 절(a) 은 그대로 펼침
+    secs[1]!.querySelector<HTMLButtonElement>(".projects-toc-caret[data-toggle]")!.click();
+    expect(Array.from(secs).map((el) => el.dataset.open)).toEqual(["true", "true"]);
+    expect(secs[1]!.querySelector(".projects-toc-caret")?.getAttribute("aria-expanded")).toBe("true");
+    secs[1]!.querySelector<HTMLButtonElement>(".projects-toc-caret[data-toggle]")!.click();
+    expect(Array.from(secs).map((el) => el.dataset.open)).toEqual(["true", "false"]);
+    // 소제목 b-1 클릭 → 절 b 가 현재(펼침), a 접힘, b-1 강조, URL sec=b
+    root.querySelector<HTMLAnchorElement>('.projects-toc-children a[data-anchor="b-1"]')!.click();
+    await tick();
+    expect(Array.from(secs).map((el) => el.dataset.open)).toEqual(["false", "true"]);
+    expect(secs[1]!.querySelector(".projects-toc-head")?.getAttribute("aria-current")).toBe("true");
+    expect(root.querySelector('.projects-toc-children a[data-anchor="b-1"]')?.getAttribute("aria-current")).toBe("true");
+    expect(root.querySelector('.projects-toc-children a[data-anchor="a-1"]')?.getAttribute("aria-current")).toBe("false");
+    expect(new URLSearchParams(window.location.search).get("sec")).toBe("b");
+    // 본문은 여전히 전체(h2 2 · h3 3)
+    expect(root.querySelectorAll("#projects-viewer h2")).toHaveLength(2);
+    expect(root.querySelectorAll("#projects-viewer h3")).toHaveLength(3);
+  });
+
+  test("모바일 목차 버튼: 칸만 보였다 감춤(본문 재렌더 없음) · 절 클릭 뒤 자동으로 접힘", async () => {
+    const root = await mount();
+    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
+    await tick();
+    const article = root.querySelector("#projects-viewer article")!;
+    const btn = root.querySelector<HTMLButtonElement>("#projects-toc-toggle")!;
+    btn.click();
+    expect(root.querySelector("#projects-toc")?.className).not.toContain("hidden");
+    expect(btn.getAttribute("aria-expanded")).toBe("true");
+    expect(root.querySelector("#projects-viewer article")).toBe(article);
+    root.querySelector<HTMLButtonElement>('.projects-toc-head[data-sec="3-주요-클래스"]')!.click();
+    expect(root.querySelector("#projects-toc")?.className).toContain("hidden");
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    expect(new URLSearchParams(window.location.search).get("sec")).toBe("3-주요-클래스");
+  });
+
+  test("deep-link &sec=3-주요-클래스 로 부팅하면 그 절이 현재 · 모르는 sec 은 첫 절", async () => {
     window.history.replaceState(null, "", "/team?view=projects&id=steno&doc=design&sec=3-주요-클래스");
     let root = await mount();
-    expect(root.querySelector('.projects-sec-tab[aria-pressed="true"]')?.getAttribute("data-sec")).toBe("3-주요-클래스");
-    expect(root.querySelector("#projects-viewer h2")?.textContent).toBe("3. 주요 클래스");
+    expect(root.querySelector('.projects-toc-head[aria-current="true"]')?.getAttribute("data-sec")).toBe("3-주요-클래스");
+    expect(root.querySelector("#projects-viewer article")?.getAttribute("data-sec")).toBe("3-주요-클래스");
+    expect(root.querySelectorAll("#projects-viewer h2")).toHaveLength(3);
     document.body.innerHTML = "";
     window.history.replaceState(null, "", "/team?view=projects&id=steno&doc=design&sec=없는-절");
     root = await mount();
-    expect(root.querySelector('.projects-sec-tab[aria-pressed="true"]')?.getAttribute("data-sec")).toBe("1-무엇을-만드나");
+    expect(root.querySelector('.projects-toc-head[aria-current="true"]')?.getAttribute("data-sec")).toBe("1-무엇을-만드나");
     expect(new URLSearchParams(window.location.search).get("sec")).toBe("1-무엇을-만드나");
   });
 
@@ -200,8 +263,8 @@ describe("Projects 문서 화면", () => {
     expect(root.querySelector('.projects-mode[data-mode="md"]')?.getAttribute("aria-pressed")).toBe("true");
     root.querySelector<HTMLButtonElement>('.projects-mode[data-mode="html"]')!.click();
     await tick();
-    expect(root.querySelectorAll("#projects-viewer h2")).toHaveLength(1);
-    expect(root.querySelectorAll(".projects-sec-tab")).toHaveLength(3);
+    expect(root.querySelectorAll("#projects-viewer h2")).toHaveLength(3);
+    expect(root.querySelectorAll(".projects-toc-sec")).toHaveLength(3);
   });
 
   test("뒤로 → 목록, URL 에서 id·doc 제거", async () => {
@@ -220,8 +283,62 @@ describe("Projects 문서 화면", () => {
     window.history.replaceState(null, "", "/team?view=projects&id=steno&doc=design");
     const root = await mount();
     expect(root.querySelectorAll(".projects-row")).toHaveLength(0);
-    expect(root.querySelectorAll(".projects-sec-tab")).toHaveLength(3);
-    expect(root.querySelectorAll("#projects-viewer h2")).toHaveLength(1);
+    expect(root.querySelectorAll(".projects-toc-sec")).toHaveLength(3);
+    expect(root.querySelectorAll("#projects-viewer h2")).toHaveLength(3);
+  });
+});
+
+describe("문서 화면 — 좌우 패널 자동 접기", () => {
+  test("문서 진입 → body 에 sidebar-collapsed·thread-panel-collapsed · 목록으로 복귀 → 들어오기 전 상태(왼쪽 펼침·오른쪽 접힘) 복원", async () => {
+    const { applyPanelCollapsed } = await import("../lib/panels");
+    applyPanelCollapsed("thread", true); // 들어오기 전: 오른쪽은 이미 접혀 있었다
+    const root = await mount();
+    expect(document.body.classList.contains("sidebar-collapsed")).toBe(false);
+    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
+    await tick();
+    expect(document.body.classList.contains("sidebar-collapsed")).toBe(true);
+    expect(document.body.classList.contains("thread-panel-collapsed")).toBe(true);
+    root.querySelector<HTMLButtonElement>("#projects-back")!.click();
+    await tick();
+    expect(document.body.classList.contains("sidebar-collapsed")).toBe(false);
+    expect(document.body.classList.contains("thread-panel-collapsed")).toBe(true);
+  });
+
+  test("다른 탭으로 나가면(setProjectsVisible(false)) 복원, 돌아오면(true) 다시 접힘", async () => {
+    const { setProjectsVisible } = await import("./Projects");
+    const root = await mount();
+    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="readme"]')!.click();
+    await tick();
+    expect(document.body.classList.contains("sidebar-collapsed")).toBe(true);
+    setProjectsVisible(false);
+    expect(document.body.classList.contains("sidebar-collapsed")).toBe(false);
+    expect(document.body.classList.contains("thread-panel-collapsed")).toBe(false);
+    setProjectsVisible(true);
+    expect(document.body.classList.contains("sidebar-collapsed")).toBe(true);
+    expect(document.body.classList.contains("thread-panel-collapsed")).toBe(true);
+  });
+
+  test("문서 안에서 사용자가 왼쪽을 직접 펼치면 — 복귀 때 그대로 두고, 다음 문서에서도 다시 안 접는다(오른쪽은 계속 자동)", async () => {
+    const { togglePanel } = await import("../lib/panels");
+    const root = await mount();
+    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
+    await tick();
+    expect(document.body.classList.contains("sidebar-collapsed")).toBe(true);
+    togglePanel("sidebar"); // = 왼쪽 접기 버튼 클릭
+    expect(document.body.classList.contains("sidebar-collapsed")).toBe(false);
+    root.querySelector<HTMLButtonElement>("#projects-back")!.click();
+    await tick();
+    expect(document.body.classList.contains("sidebar-collapsed")).toBe(false);
+    expect(document.body.classList.contains("thread-panel-collapsed")).toBe(false);
+    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="readme"]')!.click();
+    await tick();
+    expect(document.body.classList.contains("sidebar-collapsed")).toBe(false); // 존중
+    expect(document.body.classList.contains("thread-panel-collapsed")).toBe(true);
+    // 사용자가 문서 안에서 다시 접으면 존중 표시가 풀린다 → 복귀 시 접힌 채(사용자 선택), 다음 진입은 자동 접힘
+    togglePanel("sidebar");
+    root.querySelector<HTMLButtonElement>("#projects-back")!.click();
+    await tick();
+    expect(document.body.classList.contains("sidebar-collapsed")).toBe(true);
   });
 });
 
@@ -243,12 +360,12 @@ describe("TODO 현재 상태", () => {
 
     root.querySelector<HTMLButtonElement>('.projects-todo-tab[data-todo-tab="all"]')!.click();
     await tick();
-    // "전체" 안에서도 절 탭: h1 뒤 서문(p) 이 있으니 "개요" + h2 절 3 = 탭 4, 본문은 개요(h1 + p)
+    // "전체" 안에서는 목차 트리: h1 뒤 서문(p) 이 있으니 "개요" + h2 절 3 = 4 줄, 본문은 원문 전체(h1 1 + h2 3)
     expect(root.querySelectorAll('[data-todo-section]')).toHaveLength(0);
-    const tabs = root.querySelectorAll<HTMLButtonElement>(".projects-sec-tab");
-    expect(tabs).toHaveLength(4);
-    expect(tabs[0]!.textContent).toBe("개요");
-    expect(root.querySelectorAll("#projects-viewer .projects-prose h2")).toHaveLength(0);
+    const heads = root.querySelectorAll<HTMLButtonElement>(".projects-toc-head");
+    expect(heads).toHaveLength(4);
+    expect(heads[0]!.textContent).toBe("개요");
+    expect(root.querySelectorAll("#projects-viewer .projects-prose h2")).toHaveLength(3);
     expect(root.querySelectorAll("#projects-viewer .projects-prose h1")).toHaveLength(1);
     expect(root.querySelectorAll(".projects-todo-tab")).toHaveLength(2);
   });
@@ -327,8 +444,7 @@ describe("서버 404 폴백", () => {
     expect(root.querySelectorAll(".projects-row")).toHaveLength(1);
     root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
     await tick();
-    root.querySelector<HTMLButtonElement>('.projects-sec-tab[data-sec="2-시스템-구조"]')!.click();
-    await tick();
+    expect(root.querySelectorAll(".projects-toc-sec")).toHaveLength(3);
     expect(root.querySelectorAll("#projects-viewer pre.mermaid-src")).toHaveLength(1);
     root.querySelector<HTMLButtonElement>('.projects-mode[data-mode="md"]')!.click();
     await tick();
@@ -389,12 +505,5 @@ describe("splitSections — 순수 함수", () => {
     expect(one).toHaveLength(1);
     expect(one[0]!.anchor).toBe("t");
     expect(one[0]!.html).toBe(`${H(1, "t")}<p>본문</p>`);
-  });
-
-  test("sectionTabLabel — 24자 넘으면 자르고 …", async () => {
-    const { sectionTabLabel } = await import("../lib/projectSections");
-    expect(sectionTabLabel("짧은 제목")).toBe("짧은 제목");
-    expect(sectionTabLabel("가".repeat(24))).toBe("가".repeat(24));
-    expect(sectionTabLabel("가".repeat(25))).toBe("가".repeat(24) + "…");
   });
 });

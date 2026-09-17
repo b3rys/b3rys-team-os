@@ -15,7 +15,7 @@ import { renderTasksKanban, refreshTasksKanban } from "./components/TasksKanban"
 import { renderJobsView } from "./components/JobsView";
 import { renderTeamSearch } from "./components/TeamSearch";
 import { renderReports } from "./components/Reports";
-import { renderProjects } from "./components/Projects";
+import { renderProjects, setProjectsVisible } from "./components/Projects";
 import { renderInboxView } from "./components/InboxView";
 import { renderAuditView } from "./components/AuditView";
 import { renderProposalsView } from "./components/ProposalsView";
@@ -29,6 +29,7 @@ import { renderOnboarding } from "./components/Onboarding";
 import { renderUpdateCheck } from "./components/UpdateCheck";
 import { renderLiveBadge } from "./components/LiveBadge";
 import { renderIcon } from "./icons";
+import { initPanels, isPanelCollapsed, onPanelChange, PANEL_IDS, togglePanel, type Panel } from "./lib/panels";
 
 const VIEW_GROUPS: Array<{ views: MainView[]; tabs: Array<{ id: MainView; label: string }> }> = [
   { views: ["tasks", "jobs"], tabs: [{ id: "tasks", label: "Tasks" }, { id: "jobs", label: "Jobs" }] },
@@ -83,7 +84,8 @@ function bootstrap() {
       <div class="resize-handle" data-resize="thread" title="드래그하여 너비 조절"></div>
       <div id="activity-panel-wrap" class="flex md:contents"></div>
     </div>
-    <button id="thread-panel-toggle" class="thread-panel-toggle" type="button" title="THREADS 패널 접기/펼치기" aria-label="THREADS 패널 접기/펼치기"></button>
+    <button id="sidebar-panel-toggle" class="panel-toggle sidebar-panel-toggle" type="button" title="팀원 패널 접기/펼치기" aria-label="팀원 패널 접기/펼치기"></button>
+    <button id="thread-panel-toggle" class="panel-toggle thread-panel-toggle" type="button" title="THREADS 패널 접기/펼치기" aria-label="THREADS 패널 접기/펼치기"></button>
     <div id="mobile-tabs"></div>
   `;
 
@@ -117,7 +119,7 @@ function bootstrap() {
   renderUpdateCheck(app);
   renderLiveBadge(app);
   setupResizers();
-  setupThreadPanelToggle();
+  setupPanelToggles();
 
   // Drive responsive layout via body data-attribute (CSS handles the rest).
   const syncBodyPane = () => {
@@ -315,6 +317,8 @@ function renderMainContent(root: HTMLElement) {
     // 첫 진입(prevMainView === null)도 true 지만, 그때는 아래에서 초기 렌더 분기가 잡으므로
     // 재조회가 중복되지 않는다. Tasks 안에서 도는 store update 는 false(스크롤·입력 깜빡임 방지).
     const enteredTasks = mainView === "tasks" && prevMainView !== "tasks";
+    // Projects 문서 화면은 들어갈 때 좌우 패널을 접고 나갈 때 되돌린다 — 탭 전환 순간만 알린다.
+    if (mainView !== prevMainView && (mainView === "projects" || prevMainView === "projects")) setProjectsVisible(mainView === "projects");
     prevMainView = mainView;
     if (!logEl) {
       logEl = document.createElement("div");
@@ -528,23 +532,27 @@ function setupResizers() {
   });
 }
 
-function setupThreadPanelToggle() {
-  const btn = document.getElementById("thread-panel-toggle") as HTMLButtonElement | null;
-  if (!btn) return;
-  const key = "bill-dash-thread-collapsed";
-  const apply = (collapsed: boolean) => {
-    document.body.classList.toggle("thread-panel-collapsed", collapsed);
-    btn.innerHTML = renderIcon(collapsed ? "panel-right-open" : "panel-right-close", { size: 18 });
-    btn.title = collapsed ? "THREADS 패널 펼치기" : "THREADS 패널 접기";
+// 좌우 패널 접기 버튼 — 상태는 lib/panels.ts(body 클래스 + localStorage). 여기서는 아이콘·문구만 그린다.
+const PANEL_TOGGLE: Record<Panel, { id: string; icon: [open: string, close: string]; label: string }> = {
+  sidebar: { id: "sidebar-panel-toggle", icon: ["panel-left-open", "panel-left-close"], label: "팀원 패널" },
+  thread: { id: "thread-panel-toggle", icon: ["panel-right-open", "panel-right-close"], label: "THREADS 패널" },
+};
+function setupPanelToggles() {
+  const paint = (panel: Panel, collapsed: boolean) => {
+    const def = PANEL_TOGGLE[panel];
+    const btn = document.getElementById(def.id) as HTMLButtonElement | null;
+    if (!btn) return;
+    btn.innerHTML = renderIcon(collapsed ? def.icon[0] : def.icon[1], { size: 18 });
+    btn.title = `${def.label} ${collapsed ? "펼치기" : "접기"}`;
     btn.setAttribute("aria-label", btn.title);
     btn.setAttribute("aria-pressed", collapsed ? "true" : "false");
   };
-  apply(localStorage.getItem(key) === "1");
-  btn.addEventListener("click", () => {
-    const collapsed = !document.body.classList.contains("thread-panel-collapsed");
-    localStorage.setItem(key, collapsed ? "1" : "0");
-    apply(collapsed);
-  });
+  onPanelChange(paint);
+  initPanels();
+  for (const panel of PANEL_IDS) {
+    paint(panel, isPanelCollapsed(panel));
+    document.getElementById(PANEL_TOGGLE[panel].id)?.addEventListener("click", () => togglePanel(panel));
+  }
 }
 
 bootstrap();

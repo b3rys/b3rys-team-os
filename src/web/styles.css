@@ -238,13 +238,15 @@
   #agent-sidebar { width: var(--sidebar-w, 280px) !important; }
   #activity-panel-wrap > div { width: var(--thread-w, 300px) !important; }
   body.thread-panel-collapsed #activity-panel-wrap,
-  body.thread-panel-collapsed .resize-handle[data-resize="thread"] {
+  body.thread-panel-collapsed .resize-handle[data-resize="thread"],
+  body.sidebar-collapsed #agent-sidebar-wrap,
+  body.sidebar-collapsed .resize-handle[data-resize="sidebar"] {
     display: none !important;
   }
-  .thread-panel-toggle {
+  /* 왼쪽(팀원)·오른쪽(THREADS) 접기 버튼 — 같은 모양, 자리만 좌우. 접히면 그 칸이 사라져 본문(flex-1)이 폭을 먹는다. */
+  .panel-toggle {
     position: fixed;
     top: 4.75rem;
-    right: 0.75rem;
     z-index: 30;
     display: inline-flex;
     height: 2rem;
@@ -257,7 +259,9 @@
     color: #cbd5e1;
     box-shadow: 0 8px 20px rgba(2, 6, 23, 0.28);
   }
-  .thread-panel-toggle:hover {
+  .thread-panel-toggle { right: 0.75rem; }
+  .sidebar-panel-toggle { left: 0.75rem; }
+  .panel-toggle:hover {
     border-color: rgba(52, 211, 153, 0.55);
     color: #a7f3d0;
   }
@@ -317,7 +321,7 @@
   .proposal-resize-handle {
     display: none;
   }
-  .thread-panel-toggle {
+  .panel-toggle {
     display: none;
   }
   /* Proposal 탭 모바일 — 좌우 split(board|6px|448px detail) 인라인 그리드가 좁은 폭을 넘쳐

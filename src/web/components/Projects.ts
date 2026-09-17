@@ -4,12 +4,16 @@
 //   GET  <base>/api/projects/:id/doc/:key    → ProjectDoc (html 은 서버가 정제한 것 — 그대로 innerHTML)
 //   GET  <base>/api/projects/:id/doc/:key/raw → text/markdown (MD 토글)
 // URL 상태: /team?view=projects[&id=steno&doc=design[&sec=<anchor>]] — 목록 ↔ 문서 ↔ 절 deep-link.
-// 문서 본문은 절 탭(Reports 폼 탭과 같은 모양)으로 나눠 한 절만 전체 폭으로 보인다 — 자르기는 lib/projectSections.ts.
+// 문서 화면: 왼쪽 목차 트리(절마다 접기/펼치기, 현재 절만 펼침) + 본문은 ★전체 문서★ 한 번에(스크롤 이동).
+//   절 판정(현재 절·트리 재료)은 lib/projectSections.ts 의 splitSections. 스크롤 위치 → 현재 절 → &sec= 갱신.
+// 문서 화면에 들어가면 대시보드 좌우 패널(팀원·THREADS)을 접고, 목록·다른 탭으로 나가면 들어오기 전 상태로 되돌린다
+//   (사용자가 문서 안에서 직접 펼친 패널은 그 세션에선 다시 접지 않는다) — lib/panels.ts.
 // 개발 폴백: `?fixture=1` 일 때만, API 가 404 면 fixtures/projects-steno.example.json 을 쓴다.
 
 import { pick } from "../i18n";
 import { mdInlineToHtml } from "../lib/mdInline";
-import { sectionTabLabel, splitSections, type DocSection } from "../lib/projectSections";
+import { applyPanelCollapsed, isPanelCollapsed, onPanelChange, PANEL_IDS, type Panel } from "../lib/panels";
+import { splitSections, type DocSection } from "../lib/projectSections";
 import { apiBase } from "../ws";
 
 export type ProjectDocKey = "readme" | "design" | "features" | "todo";
@@ -60,9 +64,56 @@ let _curKey: ProjectDocKey | null = null;
 let _curDoc: ProjectDoc | null = null;
 let _mode: "html" | "md" = "html";
 let _todoTab: "status" | "all" = "status";
-let _curSec: string | null = null;   // 절 탭(anchor). null = 첫 절
+let _curSec: string | null = null;   // 현재 절(anchor). null = 첫 절
+let _curHead: string | null = null;  // 스크롤 위치의 헤딩(anchor) — 트리 강조
+let _tocOpen = new Set<string>();    // 트리에서 펼친 절(anchor). 현재 절이 바뀌면 그 절만
+let _tocMobileOpen = false;          // 모바일: 목차 접힘 기본
 let _doneOpen = false;      // TODO 현재 상태: 완료 접힘 기본
 let _rawCache = new Map<string, string>();
+
+// ── 좌우 패널 자동 접기 (문서 화면) ──
+// 들어갈 때 두 패널의 그때 상태를 적어 두고 접는다(저장 X). 나갈 때 사용자가 손대지 않은 패널만 그 상태로 되돌린다.
+// 사용자가 문서 안에서 직접 펼친 패널은 _keepOpen 에 올려 이 세션(페이지 수명)에선 다시 접지 않는다.
+let _panelsBefore: Partial<Record<Panel, boolean>> | null = null; // null = 문서 화면 밖
+let _panelsTouched = new Set<Panel>();
+const _keepOpen = new Set<Panel>();
+let _panelUnsub: (() => void) | null = null;
+let _visible = true; // main.ts 가 Projects 탭을 보이는 중인가
+
+function watchPanels(): void {
+  if (_panelUnsub) return;
+  _panelUnsub = onPanelChange((panel, collapsed, source) => {
+    if (source !== "user" || !_panelsBefore) return;
+    _panelsTouched.add(panel);
+    if (collapsed) _keepOpen.delete(panel); else _keepOpen.add(panel);
+  });
+}
+function enterDocPanels(): void {
+  if (_panelsBefore || !_visible) return;
+  watchPanels();
+  _panelsBefore = {};
+  _panelsTouched = new Set();
+  for (const p of PANEL_IDS) {
+    _panelsBefore[p] = isPanelCollapsed(p);
+    if (!_keepOpen.has(p)) applyPanelCollapsed(p, true);
+  }
+}
+function leaveDocPanels(): void {
+  if (!_panelsBefore) return;
+  const before = _panelsBefore;
+  _panelsBefore = null;
+  for (const p of PANEL_IDS) {
+    if (_panelsTouched.has(p)) continue;
+    applyPanelCollapsed(p, before[p] ?? false);
+  }
+  _panelsTouched = new Set();
+}
+/** main.ts: Projects 탭이 보이기 시작/끝날 때. 문서 화면이면 패널을 접거나 되돌린다. */
+export function setProjectsVisible(visible: boolean): void {
+  _visible = visible;
+  if (_view !== "doc") return;
+  if (visible) enterDocPanels(); else leaveDocPanels();
+}
 
 function escape(s: unknown): string {
   return String(s == null ? "" : s)
@@ -186,13 +237,15 @@ export function parseTodoMd(md: string, excludeSections: readonly string[]): { d
 }
 
 // ── 스타일 (Reports 의 prose 와 같은 톤, projects 전용 클래스) ──
+/** 문서 화면 sticky 헤더(제목 줄 + 버튼 줄) 높이 — 헤딩 scroll-margin-top 과 스크롤 추적 판정선이 같이 쓴다. */
+const HEAD_OFFSET = 116;
 function injectStyle(): void {
   if (document.getElementById("projects-prose-style")) return;
   const st = document.createElement("style");
   st.id = "projects-prose-style";
   st.textContent = `
 .projects-prose{font-size:14.5px;line-height:1.75;color:rgb(var(--slate-200));min-width:0;overflow-wrap:anywhere}
-.projects-prose h1,.projects-prose h2,.projects-prose h3,.projects-prose h4{color:rgb(var(--slate-50));font-weight:700;line-height:1.3;margin:1.4em 0 .5em;letter-spacing:-.01em;scroll-margin-top:72px}
+.projects-prose h1,.projects-prose h2,.projects-prose h3,.projects-prose h4{color:rgb(var(--slate-50));font-weight:700;line-height:1.3;margin:1.4em 0 .5em;letter-spacing:-.01em;scroll-margin-top:${HEAD_OFFSET}px}
 .projects-prose h1{font-size:1.6em;border-bottom:1px solid rgb(var(--border));padding-bottom:.3em}
 .projects-prose h2{font-size:1.35em}.projects-prose h3{font-size:1.15em}.projects-prose h4{font-size:1em}
 .projects-prose h1:first-child,.projects-prose h2:first-child{margin-top:0}
@@ -214,12 +267,21 @@ function injectStyle(): void {
 .projects-prose table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.92em;display:block;overflow-x:auto}
 .projects-prose th,.projects-prose td{border:1px solid rgb(var(--border));padding:7px 11px;text-align:left}
 .projects-prose th{background:rgb(var(--surface-1));color:rgb(var(--slate-50));font-weight:600}
-.projects-sec-tabs{scrollbar-width:thin}
-.projects-sec-tabs .projects-sec-tab{flex:0 0 auto;white-space:nowrap;text-transform:none;letter-spacing:0;max-width:100%}
-.projects-sec-sub a{color:rgb(var(--slate-300));text-decoration:none;line-height:1.5;overflow-wrap:anywhere}
-.projects-sec-sub a::before{content:"§ ";color:rgb(var(--slate-500))}
-.projects-sec-sub a:hover{color:rgb(var(--slate-100));text-decoration:underline;text-underline-offset:2px}
-.projects-sec-sub a[data-level="4"],.projects-sec-sub a[data-level="5"],.projects-sec-sub a[data-level="6"]{font-size:12px}
+#projects-toc{scroll-margin-top:${HEAD_OFFSET}px}
+.projects-toc{font-size:13px;line-height:1.4}
+.projects-toc-row{display:flex;align-items:flex-start;gap:2px;min-width:0}
+.projects-toc-caret{flex:0 0 18px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:5px;color:rgb(var(--slate-500));font-size:10px}
+.projects-toc-caret:hover{color:rgb(var(--slate-100));background:rgb(var(--surface-3) / .6)}
+.projects-toc-caret[aria-expanded="true"]{transform:rotate(90deg)}
+.projects-toc-head{flex:1 1 auto;min-width:0;text-align:left;padding:2px 6px;border-radius:6px;color:rgb(var(--slate-300));overflow-wrap:anywhere}
+.projects-toc-head:hover{color:rgb(var(--slate-100));background:rgb(var(--surface-3) / .5)}
+.projects-toc-head[aria-current="true"]{color:rgb(var(--slate-50));font-weight:600;background:rgb(var(--accent) / .14);box-shadow:inset 2px 0 0 rgb(var(--accent))}
+.projects-toc-children{display:flex;flex-direction:column;padding:1px 0 3px 32px}
+.projects-toc-sec[data-open="false"] .projects-toc-children{display:none}
+.projects-toc-children a{display:block;color:rgb(var(--slate-400));text-decoration:none;padding:1px 6px;border-radius:5px;font-size:12.5px;overflow-wrap:anywhere}
+.projects-toc-children a:hover{color:rgb(var(--slate-100));background:rgb(var(--surface-3) / .5)}
+.projects-toc-children a[aria-current="true"]{color:var(--accent-soft-text);font-weight:600}
+.projects-toc-children a[data-level="4"],.projects-toc-children a[data-level="5"],.projects-toc-children a[data-level="6"]{padding-left:16px;font-size:12px}
 .projects-raw{white-space:pre-wrap;overflow-wrap:anywhere;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.6;color:rgb(var(--slate-200))}`;
   document.head.appendChild(st);
 }
@@ -312,21 +374,36 @@ async function reload(): Promise<void> {
 }
 
 // ── 문서 화면 ──
-// 절 탭 — Reports 의 `.reports-tab` 과 같은 클래스 토큰(색·라운드·글자). 라벨은 24자에서 자르고 전체는 title 로.
-const SEC_TAB_BASE = "projects-sec-tab px-3.5 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wide border transition-colors";
-const SEC_TAB_ON = "text-accent-green border-accent-green/35 bg-accent-green/10";
-const SEC_TAB_OFF = "text-slate-400 border-surface-3 bg-surface-2 hover:text-slate-200";
+// 목차 트리 — 절(최상위 헤딩) 줄 + 그 아래 들여쓴 하위 헤딩. 현재 절만 펼침, 캐럿으로 다른 절도 펼쳐 볼 수 있다.
 function pickSection(secs: DocSection[], anchor: string | null): DocSection {
   return (anchor && secs.find((s) => s.anchor === anchor)) || secs[0]!;
 }
-function sectionTabsHtml(secs: DocSection[], cur: DocSection): string {
-  if (secs.length < 2) return "";
-  const tabs = secs.map((s) => `<button class="${SEC_TAB_BASE} ${s === cur ? SEC_TAB_ON : SEC_TAB_OFF}" data-sec="${escape(s.anchor)}" title="${escape(s.label)}" aria-pressed="${s === cur}">${escape(sectionTabLabel(s.label))}</button>`).join("");
-  return `<div class="projects-sec-tabs flex gap-1.5 overflow-x-auto md:flex-wrap md:overflow-visible pb-1 -mb-1 min-w-0" role="tablist">${tabs}</div>`;
+/** 트리를 보일 만한가 — 절이 둘 이상이거나 하위 헤딩이 있을 때. 헤딩 없는 문서는 본문만 전체 폭. */
+function hasToc(secs: DocSection[]): boolean {
+  return secs.length > 1 || (secs[0]?.children.length ?? 0) > 0;
 }
-function sectionSubHtml(cur: DocSection): string {
-  if (!cur.children.length) return "";
-  return `<nav class="projects-sec-sub flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px] mt-2 min-w-0" aria-label="${pick("절 안 소제목", "Subheadings")}">${cur.children.map((t) => `<a href="#${escape(t.anchor)}" data-level="${t.level}" data-anchor="${escape(t.anchor)}">${escape(t.text)}</a>`).join("")}</nav>`;
+function tocTreeHtml(secs: DocSection[], cur: DocSection): string {
+  const rows = secs.map((s) => {
+    const open = s === cur || _tocOpen.has(s.anchor);
+    const caret = s.children.length
+      ? `<button class="projects-toc-caret" type="button" data-toggle="${escape(s.anchor)}" aria-expanded="${open}" aria-label="${pick("소제목 접기/펼치기", "Toggle subheadings")}">▶</button>`
+      : `<span class="projects-toc-caret" aria-hidden="true"></span>`;
+    const kids = s.children.length
+      ? `<div class="projects-toc-children">${s.children.map((t) => `<a href="#${escape(t.anchor)}" data-level="${t.level}" data-anchor="${escape(t.anchor)}" aria-current="${t.anchor === _curHead}">${escape(t.text)}</a>`).join("")}</div>`
+      : "";
+    return `<div class="projects-toc-sec" data-sec="${escape(s.anchor)}" data-open="${open}">
+      <div class="projects-toc-row">${caret}<button class="projects-toc-head" type="button" data-sec="${escape(s.anchor)}" title="${escape(s.label)}" aria-current="${s === cur}">${escape(s.label)}</button></div>
+      ${kids}</div>`;
+  }).join("");
+  return `<nav class="projects-toc" aria-label="${pick("목차", "Contents")}">${rows}</nav>`;
+}
+/** 헤딩 anchor → 그 헤딩이 속한 절. 절 헤딩 자체면 그 절. */
+function sectionOf(secs: DocSection[], anchor: string): DocSection | null {
+  return secs.find((s) => s.anchor === anchor || s.children.some((c) => c.anchor === anchor)) ?? null;
+}
+function scrollToAnchor(viewer: HTMLElement, anchor: string, smooth = true): void {
+  const target = anchor ? viewer.querySelector<HTMLElement>(`[id="${anchor.replace(/"/g, '\\"')}"]`) : viewer;
+  target?.scrollIntoView?.({ behavior: smooth ? "smooth" : "auto", block: "start" });
 }
 
 function decorateMermaid(container: HTMLElement): number {
@@ -393,6 +470,7 @@ async function renderDoc(): Promise<void> {
   }
   if (!_root || _curId !== id || _curKey !== key) return;
   _curDoc = doc;
+  enterDocPanels();
 
   const repo = project?.repo ?? "";
   const gh = repo ? `<a id="projects-open-github" href="${escape(blobUrl({ repo, sha: doc.sha }, doc.path))}" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-surface-3 text-slate-200 bg-surface-2 hover:text-slate-100 hover:border-accent-green/45 hover:bg-surface-0 transition-colors"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>${pick("GitHub 에서 보기", "View on GitHub")}</a>` : "";
@@ -400,6 +478,15 @@ async function renderDoc(): Promise<void> {
   const isTodo = key === "todo";
   const todoTabBtn = (t: "status" | "all", label: string) => `<button class="projects-todo-tab px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors ${_todoTab === t ? "text-slate-100 bg-surface-0 border-surface-3" : "text-slate-400 border-transparent hover:text-slate-200"}" data-todo-tab="${t}" aria-pressed="${_todoTab === t}">${label}</button>`;
   const stale = doc.stale ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold border text-txt-amber border-amber-400/25 bg-amber-400/10">stale</span>` : "";
+  // 목차 트리는 HTML 본문(TODO 는 "전체" 탭)에서만. 절 판정은 splitSections — 본문은 자르지 않고 전체를 보인다.
+  const treeMode = _mode === "html" && !(isTodo && _todoTab === "status");
+  const secs = treeMode ? splitSections(doc.html, doc.toc ?? []) : [];
+  const cur = treeMode ? pickSection(secs, _curSec) : null;
+  const showToc = treeMode && hasToc(secs);
+  if (cur) {
+    if ((cur.anchor || null) !== _curSec) { _curSec = cur.anchor || null; _tocOpen = new Set(); }
+    if (_curHead && sectionOf(secs, _curHead) !== cur) _curHead = null;
+  }
 
   _root.innerHTML = `
     <div data-projects-doc-scroll class="h-full overflow-y-auto overflow-x-hidden">
@@ -414,18 +501,24 @@ async function renderDoc(): Promise<void> {
             <div class="flex shrink-0" role="group" aria-label="HTML | MD">${modeBtn("html")}${modeBtn("md")}</div>
           </div>
           <div class="flex items-center gap-2 flex-wrap pb-2.5">
+            ${showToc ? `<button id="projects-toc-toggle" type="button" class="md:hidden inline-flex items-center gap-1 text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-surface-3 text-slate-300 bg-surface-2" aria-expanded="${_tocMobileOpen}">${pick("목차", "Contents")} ${_tocMobileOpen ? "▴" : "▾"}</button>` : ""}
             ${isTodo && _mode === "html" ? `<div class="flex gap-1 rounded-lg border border-surface-3 bg-surface-2 p-0.5">${todoTabBtn("status", pick("현재 상태", "Status"))}${todoTabBtn("all", pick("전체", "All"))}</div>` : ""}
             <span class="ml-auto"></span>
             ${gh}
           </div>
         </div>
-        <div class="pt-4 min-w-0">
+        <div class="pt-4 min-w-0 ${showToc ? "grid grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)] gap-5" : ""}">
+          ${showToc && cur ? `<aside id="projects-toc" class="${_tocMobileOpen ? "block" : "hidden"} md:block md:sticky md:top-24 md:self-start md:max-h-[calc(100vh-8rem)] md:overflow-y-auto rounded-xl border border-surface-3 bg-surface-2 px-2 py-2.5 min-w-0">
+            <div class="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-1 px-2">${pick("목차", "Contents")}</div>
+            ${tocTreeHtml(secs, cur)}
+          </aside>` : ""}
           <div id="projects-viewer" class="min-w-0"></div>
         </div>
       </div>
     </div>`;
 
   _root.querySelector("#projects-back")?.addEventListener("click", goList);
+  _root.querySelector<HTMLButtonElement>("#projects-toc-toggle")?.addEventListener("click", () => setMobileToc(!_tocMobileOpen));
   _root.querySelectorAll<HTMLButtonElement>(".projects-mode").forEach((b) => b.addEventListener("click", () => {
     const m = b.dataset.mode as "html" | "md";
     if (m === _mode) return;
@@ -455,31 +548,112 @@ async function renderDoc(): Promise<void> {
     viewer.querySelector<HTMLButtonElement>("#projects-done-more")?.addEventListener("click", () => { _doneOpen = !_doneOpen; void renderDoc(); });
     return;
   }
-  // 절 탭: 서버 html 을 최상위 헤딩에서 잘라 현재 절만 전체 폭으로. 탭 → URL &sec=, 하위 헤딩 링크 → 절 안 스크롤.
-  const secs = splitSections(doc.html, doc.toc ?? []);
-  const cur = pickSection(secs, _curSec);
-  _curSec = cur.anchor || null;
+  // 본문은 전체 문서 한 번에. 트리(절 헤딩·소제목) 클릭 → 그 헤딩으로 스크롤 + 현재 절 갱신(&sec=). 스크롤 → 현재 절·헤딩 추적.
+  if (!cur) return;
   writeUrlState(id, key, secs.length > 1 ? _curSec : null);
-  viewer.innerHTML = `${sectionTabsHtml(secs, cur)}${sectionSubHtml(cur)}
-    <article class="projects-prose rounded-xl border border-surface-3 bg-surface-2 p-5 md:p-8 ${secs.length > 1 || cur.children.length ? "mt-3" : ""}" data-sec="${escape(cur.anchor)}">${cur.html}</article>`;
+  viewer.innerHTML = `<article class="projects-prose rounded-xl border border-surface-3 bg-surface-2 p-5 md:p-8" data-sec="${escape(_curSec ?? "")}">${doc.html}</article>`;
   decorateMermaid(viewer);
-  // 모바일(탭 줄 가로 스크롤): 현재 절 탭이 보이게 줄만 옆으로 민다 — 페이지 세로 스크롤은 건드리지 않는다.
-  const tabRow = viewer.querySelector<HTMLElement>(".projects-sec-tabs");
-  const onTab = tabRow?.querySelector<HTMLElement>('.projects-sec-tab[aria-pressed="true"]');
-  if (tabRow && onTab && tabRow.scrollWidth > tabRow.clientWidth) {
-    tabRow.scrollLeft = Math.max(0, onTab.getBoundingClientRect().left - tabRow.getBoundingClientRect().left + tabRow.scrollLeft - 12);
+  if (_curSec && secs.length > 1 && cur && secs[0] !== cur) scrollToAnchor(viewer, cur.anchor, false);
+  bindTocTree(viewer, secs);
+  watchScroll(viewer, secs);
+}
+
+/** 모바일 목차 칸 보이기/감추기 — 다시 그리지 않는다(현재 절로 재스크롤 방지). 펼치면 그 칸이 보이게 스크롤. */
+function setMobileToc(open: boolean): void {
+  const toc = _root?.querySelector<HTMLElement>("#projects-toc");
+  const btn = _root?.querySelector<HTMLButtonElement>("#projects-toc-toggle");
+  if (!toc || !btn) return;
+  _tocMobileOpen = open;
+  toc.classList.toggle("hidden", !open);
+  btn.setAttribute("aria-expanded", String(open));
+  btn.textContent = `${pick("목차", "Contents")} ${open ? "▴" : "▾"}`;
+  if (open) toc.scrollIntoView?.({ behavior: "smooth", block: "start" });
+}
+
+/** 트리의 현재 절·현재 헤딩 표시만 갱신 — 본문은 다시 그리지 않는다. */
+function paintToc(secs: DocSection[]): void {
+  const toc = _root?.querySelector<HTMLElement>("#projects-toc");
+  if (!toc) return;
+  const cur = pickSection(secs, _curSec);
+  toc.querySelectorAll<HTMLElement>(".projects-toc-sec").forEach((el) => {
+    const a = el.dataset.sec ?? "";
+    const open = a === cur.anchor || _tocOpen.has(a);
+    el.dataset.open = String(open);
+    el.querySelector(".projects-toc-caret[data-toggle]")?.setAttribute("aria-expanded", String(open));
+    el.querySelector(".projects-toc-head")?.setAttribute("aria-current", String(a === cur.anchor));
+  });
+  toc.querySelectorAll<HTMLAnchorElement>(".projects-toc-children a").forEach((a) => a.setAttribute("aria-current", String(a.dataset.anchor === _curHead)));
+  _root?.querySelector("#projects-viewer article")?.setAttribute("data-sec", cur.anchor);
+  // 현재 줄이 목차 칸 밖이면 목차 칸만 스크롤(페이지는 안 건드림)
+  const on = toc.querySelector<HTMLElement>('.projects-toc-children a[aria-current="true"]') ?? toc.querySelector<HTMLElement>('.projects-toc-head[aria-current="true"]');
+  if (on && typeof on.getBoundingClientRect === "function" && toc.scrollHeight > toc.clientHeight) {
+    const r = on.getBoundingClientRect(); const t = toc.getBoundingClientRect();
+    if (r.top < t.top || r.bottom > t.bottom) toc.scrollTop += r.top - t.top - t.height / 3;
   }
-  viewer.querySelectorAll<HTMLButtonElement>(".projects-sec-tab").forEach((b) => b.addEventListener("click", () => {
+}
+
+function setCurrent(secs: DocSection[], sec: string | null, head: string | null): void {
+  const nextSec = sec || null;
+  if (nextSec !== _curSec) { _curSec = nextSec; _tocOpen = new Set(); }
+  _curHead = head;
+  if (_curId && _curKey) writeUrlState(_curId, _curKey, secs.length > 1 ? _curSec : null);
+  paintToc(secs);
+}
+
+function bindTocTree(viewer: HTMLElement, secs: DocSection[]): void {
+  const toc = _root?.querySelector<HTMLElement>("#projects-toc");
+  if (!toc) return;
+  const closeMobile = () => { if (_tocMobileOpen) setMobileToc(false); };
+  toc.querySelectorAll<HTMLButtonElement>(".projects-toc-head").forEach((b) => b.addEventListener("click", () => {
     const a = b.dataset.sec ?? "";
-    if (a === (_curSec ?? "")) return;
-    _curSec = a || null;
-    void renderDoc();
+    _scrollLock = Date.now() + 900; // 부드러운 스크롤 동안 스크롤 추적이 되돌리지 않게
+    setCurrent(secs, a, null);
+    scrollToAnchor(viewer, a);
+    closeMobile();
   }));
-  viewer.querySelectorAll<HTMLAnchorElement>(".projects-sec-sub a").forEach((a) => a.addEventListener("click", (e) => {
+  toc.querySelectorAll<HTMLButtonElement>(".projects-toc-caret[data-toggle]").forEach((b) => b.addEventListener("click", () => {
+    const a = b.dataset.toggle ?? "";
+    const cur = pickSection(secs, _curSec);
+    // 현재 절은 기본 펼침 — 캐럿으로 접으면 _tocOpen 이 아니라 별도 표시가 필요하니, 현재 절은 접지 않는다(항상 보임).
+    if (a === cur.anchor) return;
+    if (_tocOpen.has(a)) _tocOpen.delete(a); else _tocOpen.add(a);
+    paintToc(secs);
+  }));
+  toc.querySelectorAll<HTMLAnchorElement>(".projects-toc-children a").forEach((a) => a.addEventListener("click", (e) => {
     e.preventDefault();
     const anchor = a.dataset.anchor ?? "";
-    viewer.querySelector<HTMLElement>(`[id="${anchor.replace(/"/g, '\\"')}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    _scrollLock = Date.now() + 900;
+    setCurrent(secs, sectionOf(secs, anchor)?.anchor ?? _curSec, anchor);
+    scrollToAnchor(viewer, anchor);
+    closeMobile();
   }));
+}
+
+// 스크롤 추적: 본문 스크롤 칸의 위쪽(sticky 헤더 아래) 을 지난 마지막 헤딩 = 현재 헤딩 → 그 절이 현재 절.
+// HEAD_OFFSET = 헤딩 scroll-margin-top(sticky 헤더 두 줄 높이) — 판정선은 그보다 조금 아래여야 방금 스크롤한 헤딩이 "현재" 가 된다.
+let _scrollLock = 0;
+let _scrollRaf = 0;
+function watchScroll(viewer: HTMLElement, secs: DocSection[]): void {
+  const scroller = _root?.querySelector<HTMLElement>("[data-projects-doc-scroll]");
+  if (!scroller || !secs.length || typeof scroller.addEventListener !== "function") return;
+  const headings = Array.from(viewer.querySelectorAll<HTMLElement>("h1[id],h2[id],h3[id],h4[id],h5[id],h6[id]"));
+  const onScroll = () => {
+    if (_scrollRaf) return;
+    _scrollRaf = requestAnimationFrame(() => {
+      _scrollRaf = 0;
+      if (Date.now() < _scrollLock) return;
+      const top = scroller.getBoundingClientRect().top + HEAD_OFFSET + 8; // 헤딩이 sticky 헤더 아래(scroll-margin-top) 에 닿으면 그 헤딩
+      let last: HTMLElement | null = null;
+      for (const h of headings) { if (h.getBoundingClientRect().top <= top) last = h; else break; }
+      const anchor = last?.id ?? "";
+      const sec = anchor ? sectionOf(secs, anchor) : secs[0]!;
+      const head = sec && anchor !== sec.anchor ? anchor : null;
+      const nextSec = sec?.anchor ?? "";
+      if ((nextSec || null) === _curSec && head === _curHead) return;
+      setCurrent(secs, nextSec, head);
+    });
+  };
+  scroller.addEventListener("scroll", onScroll, { passive: true });
 }
 
 async function openDoc(id: string, key: ProjectDocKey): Promise<void> {
@@ -489,7 +663,7 @@ async function openDoc(id: string, key: ProjectDocKey): Promise<void> {
   _curDoc = null;
   _mode = "html";
   _todoTab = "status";
-  _curSec = null;
+  _curSec = null; _curHead = null; _tocOpen = new Set(); _tocMobileOpen = false;
   _doneOpen = false;
   writeUrlState(id, key);
   await renderDoc();
@@ -500,6 +674,7 @@ function goList(): void {
   _curId = null;
   _curKey = null;
   _curDoc = null;
+  leaveDocPanels();
   writeUrlState(null, null);
   renderList();
 }
@@ -513,8 +688,10 @@ async function ensureLoaded(): Promise<void> {
 export function resetProjectsState(): void {
   _root = null; _projects = []; _loaded = false; _loadError = null;
   _view = "list"; _curId = null; _curKey = null; _curDoc = null;
-  _mode = "html"; _todoTab = "status"; _curSec = null; _doneOpen = false;
+  _mode = "html"; _todoTab = "status"; _curSec = null; _curHead = null; _tocOpen = new Set(); _tocMobileOpen = false; _doneOpen = false;
   _rawCache = new Map();
+  _panelsBefore = null; _panelsTouched = new Set(); _keepOpen.clear(); _visible = true; _scrollLock = 0;
+  if (_panelUnsub) { _panelUnsub(); _panelUnsub = null; }
 }
 
 export function renderProjects(root: HTMLElement): void {
