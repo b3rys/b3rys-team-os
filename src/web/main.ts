@@ -15,6 +15,7 @@ import { renderTasksKanban, refreshTasksKanban } from "./components/TasksKanban"
 import { renderJobsView } from "./components/JobsView";
 import { renderTeamSearch } from "./components/TeamSearch";
 import { renderReports } from "./components/Reports";
+import { renderProjects, setProjectsVisible } from "./components/Projects";
 import { renderInboxView } from "./components/InboxView";
 import { renderAuditView } from "./components/AuditView";
 import { renderProposalsView } from "./components/ProposalsView";
@@ -28,13 +29,14 @@ import { renderOnboarding } from "./components/Onboarding";
 import { renderUpdateCheck } from "./components/UpdateCheck";
 import { renderLiveBadge } from "./components/LiveBadge";
 import { renderIcon } from "./icons";
+import { initPanels, isPanelCollapsed, onPanelChange, PANEL_IDS, togglePanel, type Panel } from "./lib/panels";
 
 const VIEW_GROUPS: Array<{ views: MainView[]; tabs: Array<{ id: MainView; label: string }> }> = [
   { views: ["tasks", "jobs"], tabs: [{ id: "tasks", label: "Tasks" }, { id: "jobs", label: "Jobs" }] },
   { views: ["inbox", "audit", "proposals"], tabs: [{ id: "inbox", label: "Inbox" }, { id: "audit", label: "Audit" }, { id: "proposals", label: "Proposal" }] },
   { views: ["teamos", "doc"], tabs: [{ id: "teamos", label: "OS" }, { id: "doc", label: "Docs" }] },
 ];
-const VALID_MAIN_VIEWS: MainView[] = ["tasks", "jobs", "monitoring", "busflow", "teamos", "topology", "search", "reports", "doc", "settings", "inbox", "audit", "proposals", "log", "thread", "config", "chat"];
+const VALID_MAIN_VIEWS: MainView[] = ["tasks", "jobs", "monitoring", "busflow", "teamos", "topology", "search", "reports", "projects", "doc", "settings", "inbox", "audit", "proposals", "log", "thread", "config", "chat"];
 const VIEW_STORAGE_KEY = "bill-dash-main-view";
 
 function isMainView(v: string | null): v is MainView {
@@ -57,6 +59,8 @@ function bootstrap() {
   const _savedView = localStorage.getItem(VIEW_STORAGE_KEY);
   if (isMainView(_bootView)) {
     store.getState().setMainView(_bootView as MainView);
+    // URL 로 특정 탭을 지목해 들어왔으면(예: /projects → ?view=projects) 모바일에서도 그 화면이 보이게 main 페인으로.
+    store.getState().setMobilePane("main");
   } else if (isMainView(_savedView)) {
     store.getState().setMainView(_savedView);
   }
@@ -65,6 +69,7 @@ function bootstrap() {
     store.getState().setDocSection(_bootDoc as DocSection);
   }
   let lastPersistedView = store.getState().mainView;
+  let prevViewForUrl: MainView = lastPersistedView;
   localStorage.setItem(VIEW_STORAGE_KEY, lastPersistedView);
   app.innerHTML = `
     <div id="metrics-bar"></div>
@@ -79,7 +84,8 @@ function bootstrap() {
       <div class="resize-handle" data-resize="thread" title="드래그하여 너비 조절"></div>
       <div id="activity-panel-wrap" class="flex md:contents"></div>
     </div>
-    <button id="thread-panel-toggle" class="thread-panel-toggle" type="button" title="THREADS 패널 접기/펼치기" aria-label="THREADS 패널 접기/펼치기"></button>
+    <button id="sidebar-panel-toggle" class="panel-toggle sidebar-panel-toggle" type="button" title="팀원 패널 접기/펼치기" aria-label="팀원 패널 접기/펼치기"></button>
+    <button id="thread-panel-toggle" class="panel-toggle thread-panel-toggle" type="button" title="THREADS 패널 접기/펼치기" aria-label="THREADS 패널 접기/펼치기"></button>
     <div id="mobile-tabs"></div>
   `;
 
@@ -113,7 +119,7 @@ function bootstrap() {
   renderUpdateCheck(app);
   renderLiveBadge(app);
   setupResizers();
-  setupThreadPanelToggle();
+  setupPanelToggles();
 
   // Drive responsive layout via body data-attribute (CSS handles the rest).
   const syncBodyPane = () => {
@@ -128,6 +134,9 @@ function bootstrap() {
     localStorage.setItem(VIEW_STORAGE_KEY, s.mainView);
     const url = new URL(location.href);
     url.searchParams.set("view", s.mainView);
+    // Projects 의 문서 deep-link 파라미터(id·doc·sec)는 그 탭을 떠나면 지운다 — 다른 탭 URL 에 남지 않게.
+    if (s.mainView !== "projects") { url.searchParams.delete("id"); url.searchParams.delete("sec"); if (prevViewForUrl === "projects") url.searchParams.delete("doc"); }
+    prevViewForUrl = s.mainView;
     history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
   });
 
@@ -194,7 +203,7 @@ function bootstrap() {
 function renderTabs(root: HTMLElement) {
   const update = () => {
     const { mainView, selectedAgentId, agents } = store.getState();
-    root.classList.toggle("hidden", mainView === "reports");
+    root.classList.toggle("hidden", mainView === "reports" || mainView === "projects");
     const agentName = agents.find((a) => a.id === selectedAgentId)?.display_name ?? "—";
     const groupTabs = groupedViewTabs(mainView);
     const groupTabsHtml = groupTabs?.map((t) => `
@@ -216,7 +225,7 @@ function renderTabs(root: HTMLElement) {
       });
       return;
     }
-    if (mainView === "reports") {
+    if (mainView === "reports" || mainView === "projects") {
       root.innerHTML = "";
       return;
     }
@@ -275,6 +284,7 @@ function renderMainContent(root: HTMLElement) {
   let monitoringEl: HTMLDivElement | null = null;
   let searchEl: HTMLDivElement | null = null;
   let reportsEl: HTMLDivElement | null = null;
+  let projectsEl: HTMLDivElement | null = null;
   let settingsEl: HTMLDivElement | null = null;
   let inboxEl: HTMLDivElement | null = null;
   let auditEl: HTMLDivElement | null = null;
@@ -292,6 +302,7 @@ function renderMainContent(root: HTMLElement) {
   let monitoringRendered = false;
   let searchRendered = false;
   let reportsRendered = false;
+  let projectsRendered = false;
   let settingsRendered = false;
   let inboxRendered = false;
   let auditRendered = false;
@@ -306,6 +317,8 @@ function renderMainContent(root: HTMLElement) {
     // 첫 진입(prevMainView === null)도 true 지만, 그때는 아래에서 초기 렌더 분기가 잡으므로
     // 재조회가 중복되지 않는다. Tasks 안에서 도는 store update 는 false(스크롤·입력 깜빡임 방지).
     const enteredTasks = mainView === "tasks" && prevMainView !== "tasks";
+    // Projects 문서 화면은 들어갈 때 좌우 패널을 접고 나갈 때 되돌린다 — 탭 전환 순간만 알린다.
+    if (mainView !== prevMainView && (mainView === "projects" || prevMainView === "projects")) setProjectsVisible(mainView === "projects");
     prevMainView = mainView;
     if (!logEl) {
       logEl = document.createElement("div");
@@ -372,6 +385,11 @@ function renderMainContent(root: HTMLElement) {
       reportsEl.className = "flex-1 flex flex-col min-h-0";
       root.appendChild(reportsEl);
     }
+    if (!projectsEl) {
+      projectsEl = document.createElement("div");
+      projectsEl.className = "flex-1 flex flex-col min-h-0";
+      root.appendChild(projectsEl);
+    }
     if (!settingsEl) {
       settingsEl = document.createElement("div");
       settingsEl.className = "flex-1 flex flex-col min-h-0";
@@ -405,6 +423,7 @@ function renderMainContent(root: HTMLElement) {
     monitoringEl.style.display = mainView === "monitoring" ? "flex" : "none";
     searchEl.style.display = mainView === "search" ? "flex" : "none";
     reportsEl.style.display = mainView === "reports" ? "flex" : "none";
+    projectsEl.style.display = mainView === "projects" ? "flex" : "none";
     settingsEl.style.display = mainView === "settings" ? "flex" : "none";
     inboxEl.style.display = mainView === "inbox" ? "flex" : "none";
     auditEl.style.display = mainView === "audit" ? "flex" : "none";
@@ -448,6 +467,9 @@ function renderMainContent(root: HTMLElement) {
     } else if (mainView === "reports" && !reportsRendered) {
       renderReports(reportsEl);
       reportsRendered = true;
+    } else if (mainView === "projects" && !projectsRendered) {
+      renderProjects(projectsEl);
+      projectsRendered = true;
     } else if (mainView === "settings") {
       if (!settingsRendered) { renderSettings(settingsEl); settingsRendered = true; }
       else if (enteredSettings) { void refreshSettingsSlack(); void refreshSettingsMembers(); } // 재진입(전환) 순간만 재조회 — 팀원 로스터도(퇴사/영입 후 stale 방지) · 매 update마다 X(스크롤 jank 방지)
@@ -510,23 +532,27 @@ function setupResizers() {
   });
 }
 
-function setupThreadPanelToggle() {
-  const btn = document.getElementById("thread-panel-toggle") as HTMLButtonElement | null;
-  if (!btn) return;
-  const key = "bill-dash-thread-collapsed";
-  const apply = (collapsed: boolean) => {
-    document.body.classList.toggle("thread-panel-collapsed", collapsed);
-    btn.innerHTML = renderIcon(collapsed ? "panel-right-open" : "panel-right-close", { size: 18 });
-    btn.title = collapsed ? "THREADS 패널 펼치기" : "THREADS 패널 접기";
+// 좌우 패널 접기 버튼 — 상태는 lib/panels.ts(body 클래스 + localStorage). 여기서는 아이콘·문구만 그린다.
+const PANEL_TOGGLE: Record<Panel, { id: string; icon: [open: string, close: string]; label: string }> = {
+  sidebar: { id: "sidebar-panel-toggle", icon: ["panel-left-open", "panel-left-close"], label: "팀원 패널" },
+  thread: { id: "thread-panel-toggle", icon: ["panel-right-open", "panel-right-close"], label: "THREADS 패널" },
+};
+function setupPanelToggles() {
+  const paint = (panel: Panel, collapsed: boolean) => {
+    const def = PANEL_TOGGLE[panel];
+    const btn = document.getElementById(def.id) as HTMLButtonElement | null;
+    if (!btn) return;
+    btn.innerHTML = renderIcon(collapsed ? def.icon[0] : def.icon[1], { size: 18 });
+    btn.title = `${def.label} ${collapsed ? "펼치기" : "접기"}`;
     btn.setAttribute("aria-label", btn.title);
     btn.setAttribute("aria-pressed", collapsed ? "true" : "false");
   };
-  apply(localStorage.getItem(key) === "1");
-  btn.addEventListener("click", () => {
-    const collapsed = !document.body.classList.contains("thread-panel-collapsed");
-    localStorage.setItem(key, collapsed ? "1" : "0");
-    apply(collapsed);
-  });
+  onPanelChange(paint);
+  initPanels();
+  for (const panel of PANEL_IDS) {
+    paint(panel, isPanelCollapsed(panel));
+    document.getElementById(PANEL_TOGGLE[panel].id)?.addEventListener("click", () => togglePanel(panel));
+  }
 }
 
 bootstrap();

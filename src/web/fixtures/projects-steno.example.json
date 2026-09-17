@@ -1,0 +1,158 @@
+{
+  "summary": {
+    "id": "steno",
+    "name": "Steno",
+    "repo": "b3rys/steno",
+    "branch": "main",
+    "sha": "0123456789abcdef0123456789abcdef01234567",
+    "intro": "장부(ledger)를 마크다운 파일로 기록하는 macOS 앱. 항목은 그냥 .md 파일이고, 폴더를 열면 Finder 에서 그대로 보인다.",
+    "docs": [
+      {
+        "key": "readme",
+        "path": "README.md",
+        "exists": true
+      },
+      {
+        "key": "design",
+        "path": "DESIGN.md",
+        "exists": true
+      },
+      {
+        "key": "features",
+        "path": "FEATURES.md",
+        "exists": true
+      },
+      {
+        "key": "todo",
+        "path": "TODO.md",
+        "exists": true
+      }
+    ],
+    "todo": {
+      "doing": 3,
+      "plan": 5,
+      "done": 40,
+      "doingTitles": [
+        "과제 01 — `Cmd+[` `Cmd+]` 를 들여쓰기로 되돌리고 탐색을 `Cmd+Ctrl+←` `→` 로",
+        "과제 02 — 줄번호 겹침 (`ledger-002`)",
+        "과제 03 — PR #1 — 설정 화면 (`feature/settings` · `0000001`)"
+      ]
+    },
+    "excludeSections": [
+      "킵",
+      "선택 대기",
+      "답 대기",
+      "승인 대기"
+    ],
+    "kanban": [
+      {
+        "id": "task-steno-a",
+        "title": "[steno] 과제 A — 편집기 원문+꾸밈 구조 리뷰",
+        "lane": "doing",
+        "updatedAt": "2026-01-04T01:20:00.000Z"
+      }
+    ],
+    "fetchedAt": "2026-01-05T00:00:00.000Z"
+  },
+  "docs": {
+    "readme": {
+      "id": "steno",
+      "key": "readme",
+      "sha": "0123456789abcdef0123456789abcdef01234567",
+      "path": "README.md",
+      "html": "<h1 id=\"steno\">Steno</h1>\n<p>장부(ledger)를 마크다운 파일로 기록하는 macOS 앱. 항목은 그냥 <code>.md</code> 파일이고, 폴더를 열면 Finder 에서 그대로 보인다.</p>\n<ul><li>플랫폼: macOS 14 이상</li><li>bundle id: <code>com.example.steno</code></li></ul>",
+      "md": "# Steno\n\n장부(ledger)를 마크다운 파일로 기록하는 macOS 앱. 항목은 그냥 `.md` 파일이고, 폴더를 열면 Finder 에서 그대로 보인다.\n\n- 플랫폼: macOS 14 이상\n- bundle id: `com.example.steno`\n",
+      "title": "Steno",
+      "toc": [
+        {
+          "level": 1,
+          "text": "Steno",
+          "anchor": "steno"
+        }
+      ]
+    },
+    "design": {
+      "id": "steno",
+      "key": "design",
+      "sha": "0123456789abcdef0123456789abcdef01234567",
+      "path": "DESIGN.md",
+      "html": "<h1 id=\"steno-설계\">Steno 설계</h1>\n<h2 id=\"1-무엇을-만드나\">1. 무엇을 만드나</h2>\n<p>장부(ledger)를 마크다운 파일로 기록하는 macOS 앱. 항목은 그냥 <code>.md</code> 파일이다.</p>\n<h2 id=\"2-시스템-구조\">2. 시스템 구조</h2>\n<p>앱은 두 겹이다. 바깥은 macOS 앱, 안쪽은 그 창에 띄운 웹 화면이다.</p>\n<figure class=\"project-diagram\"><figcaption class=\"mermaid-pending\">다이어그램 렌더 예정</figcaption><pre class=\"mermaid-src\"><code>flowchart TB\n  subgraph Shell[&quot;앱 셸 · SwiftUI&quot;]\n    SV[&quot;ShellView&lt;br/&gt;창 · 두 칸 배치&quot;]\n    LL[&quot;LedgerListView&lt;br/&gt;왼쪽 목록&quot;]\n    EV[&quot;EditorView&lt;br/&gt;오른쪽 편집기 자리&quot;]\n  end\n  subgraph Core[&quot;LedgerCore · 순수 Swift&quot;]\n    LS[&quot;LedgerStore&lt;br/&gt;폴더 ↔ 항목&quot;]\n  end\n  FS[(&quot;항목 폴더&lt;br/&gt;~/Documents/Ledger&quot;)]\n  SV --&gt; LL &amp; EV\n  LL --&gt; LS\n  LS --&gt; FS</code></pre></figure>\n<p>의존은 아래로만 흐른다. <code>LedgerCore</code> 와 <code>LedgerBridge</code> 는 SwiftUI·WebKit 를 쓰지 않는다.</p>\n<h2 id=\"3-주요-클래스\">3. 주요 클래스</h2>\n<ul><li><code>ShellLedgerStore</code> — 목록 · 선택 · 저장 시점</li><li><code>EditorBridge</code> — 메시지 처리</li></ul>",
+      "md": "# Steno 설계\n\n## 1. 무엇을 만드나\n\n장부(ledger)를 마크다운 파일로 기록하는 macOS 앱. 항목은 그냥 `.md` 파일이다.\n\n## 2. 시스템 구조\n\n앱은 두 겹이다. 바깥은 macOS 앱, 안쪽은 그 창에 띄운 웹 화면이다.\n\n```mermaid\nflowchart TB\n  subgraph Shell[\"앱 셸 · SwiftUI\"]\n    SV[\"ShellView<br/>창 · 두 칸 배치\"]\n    LL[\"LedgerListView<br/>왼쪽 목록\"]\n    EV[\"EditorView<br/>오른쪽 편집기 자리\"]\n  end\n  subgraph Core[\"LedgerCore · 순수 Swift\"]\n    LS[\"LedgerStore<br/>폴더 ↔ 항목\"]\n  end\n  FS[(\"항목 폴더<br/>~/Documents/Ledger\")]\n  SV --> LL & EV\n  LL --> LS\n  LS --> FS\n```\n\n의존은 아래로만 흐른다. `LedgerCore` 와 `LedgerBridge` 는 SwiftUI·WebKit 를 쓰지 않는다.\n\n## 3. 주요 클래스\n\n- `ShellLedgerStore` — 목록 · 선택 · 저장 시점\n- `EditorBridge` — 메시지 처리\n",
+      "title": "Steno 설계",
+      "toc": [
+        {
+          "level": 1,
+          "text": "Steno 설계",
+          "anchor": "steno-설계"
+        },
+        {
+          "level": 2,
+          "text": "1. 무엇을 만드나",
+          "anchor": "1-무엇을-만드나"
+        },
+        {
+          "level": 2,
+          "text": "2. 시스템 구조",
+          "anchor": "2-시스템-구조"
+        },
+        {
+          "level": 2,
+          "text": "3. 주요 클래스",
+          "anchor": "3-주요-클래스"
+        }
+      ]
+    },
+    "features": {
+      "id": "steno",
+      "key": "features",
+      "sha": "0123456789abcdef0123456789abcdef01234567",
+      "path": "FEATURES.md",
+      "html": "<h1 id=\"steno-기능-목록\">Steno 기능 목록</h1>\n<h2 id=\"1-편집\">1. 편집</h2>\n<ul><li><input type=\"checkbox\" disabled checked aria-label=\"완료\">CodeMirror 6 + Vim 모드</li><li><input type=\"checkbox\" disabled checked aria-label=\"완료\">인라인 렌더</li></ul>",
+      "md": "# Steno 기능 목록\n\n## 1. 편집\n\n- [x] CodeMirror 6 + Vim 모드\n- [x] 인라인 렌더\n",
+      "title": "Steno 기능 목록",
+      "toc": [
+        {
+          "level": 1,
+          "text": "Steno 기능 목록",
+          "anchor": "steno-기능-목록"
+        },
+        {
+          "level": 2,
+          "text": "1. 편집",
+          "anchor": "1-편집"
+        }
+      ]
+    },
+    "todo": {
+      "id": "steno",
+      "key": "todo",
+      "sha": "0123456789abcdef0123456789abcdef01234567",
+      "path": "TODO.md",
+      "html": "<h1 id=\"steno--작업-트래커\">steno — 작업 트래커</h1>\n<p><code>[x]</code> 완료 · <code>[~]</code> 진행중 · <code>[ ]</code> 미착수</p>\n<h2 id=\"1단계--편집--목록\">1단계 — 편집 + 목록</h2>\n<ul><li><input type=\"checkbox\" disabled checked aria-label=\"완료\">SwiftUI 셸 + WKWebView + CodeMirror 6 편집기</li><li><input type=\"checkbox\" disabled checked aria-label=\"완료\">Vim 모드 · 일반 모드 전환, 편집기 아래 표시를 눌러 전환</li><li><input type=\"checkbox\" disabled checked aria-label=\"완료\">인라인 렌더</li><li><input type=\"checkbox\" disabled checked aria-label=\"완료\">항목 목록 · 자동 저장 (마지막 입력 0.8초 뒤, 항목 전환 시)</li><li><input type=\"checkbox\" disabled checked aria-label=\"완료\">이미지 드롭 → attachments/ 복사 + 붙임말</li><li><input type=\"checkbox\" disabled aria-label=\"계획\">파일명 정책 — 첫 줄을 파일명으로 할지</li><li><input type=\"checkbox\" disabled aria-label=\"계획\">폴더 만들기 (항목 위 <code>+</code> 버튼) — 저장 구조를 바꾼다</li><li><input type=\"checkbox\" disabled aria-label=\"계획\">복제 사본 이름 — &quot;X 사본&quot; → &quot;X 사본 2&quot; 로 올린다</li><li><input type=\"checkbox\" disabled aria-label=\"계획\">폴더 이름 바꾸기·삭제 — 지금은 Finder 에서 해야 한다</li><li><input type=\"checkbox\" disabled aria-label=\"계획\">Swift 테스트 — 이 기계에서 안 돈다</li></ul>\n<h2 id=\"2026-01-04--56차-배포와-남은-것\">2026-01-04 — 5·6차 배포와 남은 것</h2>\n<ul><li><input type=\"checkbox\" disabled aria-label=\"진행중\"><span class=\"task-doing\">진행중</span> 과제 01 — <code>Cmd+[</code> <code>Cmd+]</code> 를 들여쓰기로 되돌리고 탐색을 <code>Cmd+Ctrl+←</code> <code>→</code> 로</li><li><input type=\"checkbox\" disabled aria-label=\"진행중\"><span class=\"task-doing\">진행중</span> 과제 02 — 줄번호 겹침 (<code>ledger-002</code>)</li><li><input type=\"checkbox\" disabled aria-label=\"진행중\"><span class=\"task-doing\">진행중</span> 과제 03 — PR #1 — 설정 화면 (<code>feature/settings</code> · <code>0000001</code>)</li></ul>\n<h2 id=\"-프로젝트-관리-스킬--킵\">📌 프로젝트 관리 스킬 — ★킵★</h2>\n<ul><li><input type=\"checkbox\" disabled aria-label=\"계획\">TODO.md 기반 프로젝트 관리 페이지 (킵 — plan 에 안 센다)</li></ul>",
+      "md": "# steno — 작업 트래커\n\n`[x]` 완료 · `[~]` 진행중 · `[ ]` 미착수\n\n## 1단계 — 편집 + 목록\n\n- [x] SwiftUI 셸 + WKWebView + CodeMirror 6 편집기\n- [x] Vim 모드 · 일반 모드 전환, 편집기 아래 표시를 눌러 전환\n- [x] 인라인 렌더\n- [x] 항목 목록 · 자동 저장 (마지막 입력 0.8초 뒤, 항목 전환 시)\n- [x] 이미지 드롭 → attachments/ 복사 + 붙임말\n- [ ] 파일명 정책 — 첫 줄을 파일명으로 할지\n- [ ] 폴더 만들기 (항목 위 `+` 버튼) — 저장 구조를 바꾼다\n- [ ] 복제 사본 이름 — \"X 사본\" → \"X 사본 2\" 로 올린다\n- [ ] 폴더 이름 바꾸기·삭제 — 지금은 Finder 에서 해야 한다\n- [ ] Swift 테스트 — 이 기계에서 안 돈다\n\n## 2026-01-04 — 5·6차 배포와 남은 것\n\n- [~] 과제 01 — `Cmd+[` `Cmd+]` 를 들여쓰기로 되돌리고 탐색을 `Cmd+Ctrl+←` `→` 로\n- [~] 과제 02 — 줄번호 겹침 (`ledger-002`)\n- [~] 과제 03 — PR #1 — 설정 화면 (`feature/settings` · `0000001`)\n\n## 📌 프로젝트 관리 스킬 — ★킵★\n\n- [ ] TODO.md 기반 프로젝트 관리 페이지 (킵 — plan 에 안 센다)\n",
+      "title": "steno — 작업 트래커",
+      "toc": [
+        {
+          "level": 1,
+          "text": "steno — 작업 트래커",
+          "anchor": "steno--작업-트래커"
+        },
+        {
+          "level": 2,
+          "text": "1단계 — 편집 + 목록",
+          "anchor": "1단계--편집--목록"
+        },
+        {
+          "level": 2,
+          "text": "2026-01-04 — 5·6차 배포와 남은 것",
+          "anchor": "2026-01-04--56차-배포와-남은-것"
+        },
+        {
+          "level": 2,
+          "text": "📌 프로젝트 관리 스킬 — ★킵★",
+          "anchor": "-프로젝트-관리-스킬--킵"
+        }
+      ]
+    }
+  }
+}

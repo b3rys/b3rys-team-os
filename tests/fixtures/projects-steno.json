@@ -1,0 +1,99 @@
+{
+  "projects": [
+    {
+      "id": "steno",
+      "name": "Steno",
+      "repo": "b3rys/steno",
+      "branch": "main",
+      "sha": "0123456789abcdef0123456789abcdef01234567",
+      "intro": "장부(ledger)를 마크다운 파일로 기록하는 macOS 앱. 항목은 그냥 .md 파일이고, 폴더를 열면 Finder 에서 그대로 보인다.",
+      "docs": [
+        {
+          "key": "readme",
+          "path": "README.md",
+          "exists": true
+        },
+        {
+          "key": "design",
+          "path": "DESIGN.md",
+          "exists": true
+        },
+        {
+          "key": "features",
+          "path": "FEATURES.md",
+          "exists": true
+        },
+        {
+          "key": "todo",
+          "path": "TODO.md",
+          "exists": true
+        }
+      ],
+      "todo": {
+        "doing": 30,
+        "plan": 50,
+        "done": 153,
+        "doingTitles": [
+          "과제 01 — 입력 화면의 여백 손질 (`ledger-001`)",
+          "과제 02 — 목록 화면의 포커스 손질 (`ledger-002`)",
+          "과제 03 — 검색 화면의 정렬 손질 (`ledger-003`)",
+          "과제 04 — 내보내기 화면의 여백 손질 (`ledger-004`)",
+          "과제 05 — 동기화 화면의 포커스 손질 (`ledger-005`)",
+          "과제 06 — 설정 화면의 정렬 손질 (`ledger-006`)",
+          "과제 07 — 단축키 화면의 여백 손질 (`ledger-007`)",
+          "과제 08 — 테마 화면의 포커스 손질 (`ledger-008`)",
+          "과제 09 — 첨부 화면의 정렬 손질 (`ledger-009`)",
+          "과제 10 — 백업 화면의 여백 손질 (`ledger-010`)",
+          "과제 11 — 입력 화면의 포커스 손질 (`ledger-011`)",
+          "과제 12 — 목록 화면의 정렬 손질 (`ledger-012`)",
+          "과제 13 — 검색 화면의 여백 손질 (`ledger-013`)",
+          "과제 14 — 내보내기 화면의 포커스 손질 (`ledger-014`)",
+          "과제 15 — 동기화 화면의 정렬 손질 (`ledger-015`)",
+          "과제 16 — 설정 화면의 여백 손질 (`ledger-016`)",
+          "과제 17 — 단축키 화면의 포커스 손질 (`ledger-017`)",
+          "과제 18 — 테마 화면의 정렬 손질 (`ledger-018`)",
+          "과제 19 — 첨부 화면의 여백 손질 (`ledger-019`)",
+          "과제 20 — 백업 화면의 포커스 손질 (`ledger-020`)",
+          "과제 21 — 입력 화면의 정렬 손질 (`ledger-021`)",
+          "과제 22 — 목록 화면의 여백 손질 (`ledger-022`)",
+          "과제 23 — 검색 화면의 포커스 손질 (`ledger-023`)",
+          "과제 24 — 내보내기 화면의 정렬 손질 (`ledger-024`)",
+          "과제 25 — 동기화 화면의 여백 손질 (`ledger-025`)",
+          "과제 26 — 설정 화면의 포커스 손질 (`ledger-026`)",
+          "과제 27 — 단축키 화면의 정렬 손질 (`ledger-027`)",
+          "과제 28 — 테마 화면의 여백 손질 (`ledger-028`)",
+          "과제 29 — 첨부 화면의 포커스 손질 (`ledger-029`)",
+          "과제 30 — 백업 화면의 정렬 손질 (`ledger-030`)"
+        ]
+      },
+      "excludeSections": [
+        "킵",
+        "선택 대기",
+        "답 대기",
+        "승인 대기"
+      ],
+      "kanban": [
+        {
+          "id": "task-steno-a",
+          "title": "[steno] 과제 A — 장부 입력 화면 정리",
+          "lane": "plan",
+          "updatedAt": "2026-01-03 09:00:00"
+        },
+        {
+          "id": "task-steno-b",
+          "title": "[steno] 과제 B — 기본기능 7건 수정·검증",
+          "lane": "doing",
+          "updatedAt": "2026-01-02 09:00:00"
+        },
+        {
+          "id": "task-steno-c",
+          "title": "[steno] 과제 C — 피드백 5건 구현",
+          "lane": "doing",
+          "updatedAt": "2026-01-01 09:00:00"
+        }
+      ],
+      "fetchedAt": "2026-01-05T00:00:00.000Z",
+      "stale": false
+    }
+  ]
+}
