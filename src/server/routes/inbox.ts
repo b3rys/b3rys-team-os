@@ -18,7 +18,7 @@ import { coordinatorId } from "../lib/capabilities";
 import { appendAudit } from "../db/queries";
 import { recordReportDelivery } from "../bus/deliveryRecord";
 import { appendAuditFile } from "../lib/auditFile";
-import { maybeCreatePendingFollowup, createSelfFollowup } from "../bus/followupTracker";
+import { maybeCreatePendingFollowup, createSelfFollowup, getAgentRuntime } from "../bus/followupTracker";
 import { broadcastRecipientIds, isTeamOfficialMember } from "../lib/agentMembership";
 import { ambientAgents } from "../lib/registry";
 import { lateAnswerPush } from "../mcp/mcpAsk";
@@ -537,7 +537,26 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       return c.json({ ok: false, reason: "unknown_agent" }, 404);
     const duration = typeof body?.duration === "string" ? body.duration : null;
     const result = createSelfFollowup(deps.db, { agentId, threadId, duration });
-    if (!result.ok) return c.json(result, 422);
+    if (!result.ok) {
+      // 사유만 돌려주면 받는 쪽이 다음에 무엇을 할지 모른다 — 그리고 거부를 보고도 "등록됐겠지" 로
+      // 넘어가면 보고가 통째로 빠진다. 등록 대상 밖 런타임에는 ★실재하는 대안★을 같이 돌려준다
+      // (칸반 doing 카드는 60분 이상 조용하면 task-continuation-guard 가 owner 를 깨운다).
+      // runtime 은 고정 문자열이 아니라 조회한 값이다 — claude_channel 외의 런타임도 이 경로로 거부된다.
+      if (result.reason === "not_one_shot_runtime") {
+        const runtime = getAgentRuntime(deps.db, agentId) ?? "unknown";
+        return c.json(
+          {
+            ...result,
+            alternative:
+              `이 런타임(${runtime})은 자가등록 대상이 아닙니다. ` +
+              `대신 (1) 위임 본문에 ETA 를 적고 (2) 작업을 칸반 doing 카드로 등록하세요 — ` +
+              `60분 이상 조용하면 continuation-guard 가 깨웁니다.`,
+          },
+          422,
+        );
+      }
+      return c.json(result, 422);
+    }
     appendAudit(deps.db, agentId, "followup_self_registered", result.id, {
       thread_id: threadId,
       deadline_at: result.deadlineAt,

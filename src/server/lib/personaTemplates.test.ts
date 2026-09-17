@@ -599,3 +599,34 @@ guardTest("opt-in override — 실 팀원 루트를 가리키면 무시하고 �
   expect(out.exitCode, `stderr: ${out.stderr.toString().slice(0, 400)}`).toBe(0);
   expect(out.stdout.toString().trim().split("\n").pop()).toBe("blocked");
 });
+
+// Base execution 의 보고 가드 줄은 ★실행 조건까지★ 말해야 한다.
+//
+// 왜: 이 줄은 "보고를 빚지고 이번 턴에 안 끝나면 expect-report.sh 를 등록하라" 고만 지시했다.
+//   그런데 서버는 턴기반 런타임(openclaw/hermes_agent)만 등록을 받고 나머지는 거부한다.
+//   조건이 빠진 규칙은 ★대상이 아닌 런타임의 팀원에게 실행 불가능한 지시★ 가 되고,
+//   거부를 못 보면 "등록했으니 알림이 오겠지" 로 보고가 통째로 누락된다.
+describe("Base execution — 보고 가드 줄이 런타임 조건을 말하나", () => {
+  for (const runtime of ["claude_channel", "openclaw", "hermes_agent", "codex"] as const) {
+    test(`${runtime} 산출물`, () => {
+      const md =
+        runtime === "claude_channel"
+          ? buildPersona(claudeInput)
+          : buildAgentsMd({ ...claudeInput, runtime });
+      const line = md
+        .split("\n")
+        .find((l) => l.includes("expect-report.sh --thread"));
+      expect(line, "★보고 가드 줄 자체가 없다★").toBeTruthy();
+      const text = line ?? "";
+      // ① 누가 등록되는가 ② 안 되면 무슨 사유로 거부되는가 ③ 대신 무엇을 하는가 — 셋이 다 있어야
+      // 규칙을 읽은 사람이 자기 런타임에서 무엇을 할지 판단할 수 있다.
+      expect(text, "★대상 런타임이 안 적혀 있다★").toContain("openclaw/hermes_agent");
+      expect(text, "★거부 사유 이름이 없다 — 받은 응답과 규칙을 연결할 수 없다★").toContain(
+        "not_one_shot_runtime",
+      );
+      expect(text, "★대안(칸반 카드)이 없다★").toContain("kanban");
+      // 거부를 '등록됨' 으로 오인하는 것이 이 줄이 막으려는 실패다.
+      expect(text.toLowerCase(), "★거부가 등록이 아니라는 말이 없다★").toContain("no nudge will come");
+    });
+  }
+});

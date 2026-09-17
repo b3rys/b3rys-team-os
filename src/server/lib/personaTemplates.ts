@@ -361,7 +361,7 @@ const CORE_RULE_COMPACT = [
   "",
   "**Base execution**",
   "- Ack/react first; a clear instruction → execute and report. **Open-ended task** (you must set scope·format·done-criteria) → plan+criteria, confirm, then execute; no output/files/external fetch in the first response. Detail: TEAM-OS §4·§5.",
-  "- **Work that owes the lead a report and will NOT finish this turn** → register `expect-report.sh --thread <work thread>` right away (nudge after 10m; `--in 30m` to widen), and `--cancel` on the same thread once reported. Nudge fires → report now, or re-register if you need more time.",
+  "- **Work that owes the lead a report and will NOT finish this turn** → register `expect-report.sh --thread <work thread>` right away (nudge after 10m; `--in 30m` to widen), and `--cancel` on the same thread once reported. Nudge fires → report now, or re-register if you need more time. **Registration is accepted for turn-based runtimes only (openclaw/hermes_agent)** — any other runtime is refused with `not_one_shot_runtime`, and a refused registration is NOT a registration: no nudge will come. Refused → put an ETA in the delegation body and register the work as a kanban `doing` card instead; a card that stays untouched for 60m is re-woken by the continuation guard.",
   "",
   "**Team communication·collaboration**",
   "- In a **group room**, the owner = `@mention > reply's original author > sticky (previous owner until it changes)`. Not the owner → don't send. Several @mentioned → **all answer**. In a **1:1 room** (the lead's DM), no owner — answer directly.",
