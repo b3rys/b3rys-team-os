@@ -28,8 +28,8 @@ trigger: run a project (many lead requests over time)
 | --- | --- | --- |
 | 0 시작 | 팀장 한 마디로 시작. 담당(PM) 정함. 저장소(없으면 새로) + 네 문서 뼈대 README(무엇·왜)·DESIGN(구조·다이어그램)·FEATURES(되는 것)·TODO(할 일·상태). 팀서버 `projects.json` 에 한 줄 등록 → Projects 탭에 뜬다. 칸반 카드 1장 `[id] 프로젝트 — 지금 과제`. 에이전트 팀 설계(`references/agent-team-by-domain.md`) | 저장소 4문서 · `projects.json` 1줄 · 칸반 카드 · `.claude/agents/` |
 | 1 요구 | 팀장 메시지 하나 = TODO 항목 하나 이상(요지·시각·사진). 킵은 `📌 킵` 절, 착수 안 함. 방향이 바뀌면 지우지 않고 "HH:MM 뒤집음" | `TODO.md` |
-| 2 실행 | 10분 단위 마일스톤. 큰 과제면 칸반 카드 갱신(다음 액션·재개 시각·fallback). 하네스: 계약 → 모듈 병렬 → 통합 → 아키·검증 → 게이트 → 배포/공증. ★30분마다 팀장에게 두 줄★ | PR(리뷰·머지 게이트) · `docs/acceptance`(케이스↔검사) · 카드 description |
-| 3 산출물 자리 | 코드·문서 = 저장소 / 상태 = TODO `[~][ ][x]` + 칸반 lane / 검증 근거 = `docs/acceptance` / 리서치·발표 = `/reports` / 화면 = Projects 탭이 저장소 md 를 자동으로 보여 준다 — 프로젝트 상태 보고서를 따로 만들지 않는다. 기능이 바뀌면 FEATURES, 구조가 바뀌면 DESIGN, 작업 근거는 TODO | 저장소 · Projects 탭(뷰) |
+| 2 실행 | 10분 단위 마일스톤. 큰 과제면 칸반 카드 갱신(다음 액션·재개 시각·fallback). 하네스: 계약 → 모듈 병렬 → 통합 → 아키·검증 → 게이트 → 배포/공증. 긴 작업은 30분 단위로 진행 두 줄(마일스톤·지연·막힘이 없으면 생략) — 보고를 빚진 긴 작업은 expect-report 등록 | PR(리뷰·머지 게이트) · 검증 근거 폴더(`docs/acceptance` — 기능별 케이스 ↔ 검사 파일 매핑과 인수 매니페스트) · 카드 description |
+| 3 산출물 자리 | 코드·문서 = 저장소 / 상태 = TODO `[~][ ][x]` + 칸반 lane / 검증 근거 = 저장소의 검증 근거 폴더(예: `docs/acceptance`) / 리서치·발표 = `/reports` / 화면 = Projects 탭이 저장소 md 를 자동으로 보여 준다 — 프로젝트 상태 보고서를 따로 만들지 않는다. 기능이 바뀌면 FEATURES, 구조가 바뀌면 DESIGN, 작업 근거는 TODO | 저장소 · Projects 탭(뷰) |
 | 4 닫기 | TODO `[x]` + 카드 done + FEATURES 반영 + 배포/공증 링크. 배운 규칙은 스킬에, 실수는 메모리·SHARED.md 에(저장소엔 안 남김) | 스킬 PR · SHARED.md |
 
 Projects 탭(`docs/PROJECTS_TAB.md`)이 TODO 의 `[~]` 를 "진행중" 으로 센다 — ★끝난 항목을 `[~]` 로 두면 탭 숫자가 거짓이 된다.★ 상태는 바뀌는 순간 갱신한다.
