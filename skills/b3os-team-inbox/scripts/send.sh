@@ -27,23 +27,47 @@ BASE="${TEAM_BASE:-http://127.0.0.1:7878/team}"
 TO=""; BODY=""; THREAD=""; REPLY_TO=""; TYPE="dm"; PRIORITY="normal"; FROM=""; HOP=""; SYNC=""; DIRECT_TO_GD=""; SOURCE_THREAD=""; EXPECT_REPORT_BY=""; INDIVIDUAL=""; EPISODE=""
 BODY_FILE=""; BODY_SET=""; CONFIRM=""; MENTIONS=""; ALL_HANDS=""
 
+# ★같은 플래그를 두 번 받으면 죽는다★ — 이건 오타 방지가 아니라 ★셸 인자 쪼개짐 탐지기★ 다.
+#   본문에 큰따옴표가 들어가면 바깥 인용이 본문 안쪽에서 닫히고, 그 뒤 인용 밖 공백에서 셸이
+#   단어를 쪼갠다. 쪼개진 나머지 토큰이 우연히 유효한 플래그면 파서가 그걸 정상 인자로 먹는다.
+#   실측:
+#     --to lisa --body "명령은 "send.sh --to broadcast""
+#       → argv = [--body, "명령은 send.sh", --to, broadcast] → ★수신자가 lisa 에서 broadcast 로 바뀐 채 exit 0★
+#     --to lisa --body "이건 "긴급 --priority high" 건"
+#       → argv = [--body, "이건 긴급", --priority, "high 건"] → priority 에 쓰레기값이 들어간 채 exit 0
+#   두 경우 모두 ★에러가 없다★. 남는 유일한 신호가 "같은 플래그가 두 번 나왔다" 이다.
+#   값을 받는 플래그만 본다 — 값 없는 스위치(--direct-to-gd 등)의 반복은 이 사고의 서명이 아니다.
+#   ★--mention 은 반복 지정이 정상이라 여기서 제외한다★ (MENTIONS 에 누적된다).
+SEEN_FLAGS=""
+dup_guard() {
+  case " $SEEN_FLAGS " in
+    *" $1 "*)
+      echo "✖ 같은 플래그를 중복 지정했다: $1" >&2
+      echo "  본문에 큰따옴표가 있으면 셸이 인용을 끊어 인자가 쪼개지고, 쪼개진 토큰이" >&2
+      echo "  우연히 플래그로 먹힐 수 있다 — 수신자/우선순위가 조용히 바뀐다." >&2
+      echo "  본문은 --body-file <경로> 로 보내라." >&2
+      exit 1 ;;
+  esac
+  SEEN_FLAGS="$SEEN_FLAGS $1"
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
-    --to) TO="$2"; shift 2 ;;
-    --body) BODY="$2"; BODY_SET=1; shift 2 ;;
+    --to) dup_guard --to; TO="$2"; shift 2 ;;
+    --body) dup_guard --body; BODY="$2"; BODY_SET=1; shift 2 ;;
     # ★--body-file — 본문을 셸 명령줄에 싣지 않는 경로★ (2026-07-30)
     #   본문에 홑따옴표·백틱·$(cmd)·$VAR 가 있으면 셸이 그것을 해석한다. 실측 사고 2건:
     #   · 백틱이 명령치환돼 본문 일부가 ★조용히 사라졌고★ send 는 성공으로 떴다
     #   · 홑따옴표가 문자열을 끊어 인자 파싱 오류로 죽었다 — 이건 죽어서 오히려 알아챌 수 있었다
     #   회피법(--body "$(cat 파일)")이 있었지만 ★아는 사람만 안전한 것은 고쳐진 게 아니다.★
-    --body-file) BODY_FILE="$2"; shift 2 ;;
+    --body-file) dup_guard --body-file; BODY_FILE="$2"; shift 2 ;;
     # --mention <U…|이름>: 반복 가능. ★슬랙 스레드로 나갈 때만★ 본문 맨 앞에 <@ID> 를 붙인다.
     #   slack-post.sh 와 ★같은 옵션 이름·같은 값 형식·같은 사전★ 이다(두 도구의 규약을 하나로).
     --mention) MENTIONS="$MENTIONS $2"; shift 2 ;;
-    --thread) THREAD="$2"; shift 2 ;;
-    --in-reply-to) REPLY_TO="$2"; shift 2 ;;
-    --type) TYPE="$2"; shift 2 ;;
-    --priority) PRIORITY="$2"; shift 2 ;;
+    --thread) dup_guard --thread; THREAD="$2"; shift 2 ;;
+    --in-reply-to) dup_guard --in-reply-to; REPLY_TO="$2"; shift 2 ;;
+    --type) dup_guard --type; TYPE="$2"; shift 2 ;;
+    --priority) dup_guard --priority; PRIORITY="$2"; shift 2 ;;
     # ★--from 은 막는다 — 신원은 ★주장★ 이 아니라 ★사실★ 이다.★ (GD 2026-07-14)
     #   룰이 "send.sh --from <you>" 라고 시키고, 스킬 예시가 그 자리에 'codex' 를 보여줬다.
     #   → devon 이 <you> 에 ★codex★ 를 넣었다 (7/12 예시 커밋 당일부터, 오늘까지 68회).
@@ -57,30 +81,53 @@ while [ $# -gt 0 ]; do
         echo "  (운영 대리발신: B3OS_FROM_OVERRIDE=1 이 필요하다)" >&2
         exit 1
       fi
-      FROM="$2"; shift 2 ;;
-    --hop) HOP="$2"; shift 2 ;;
-    --sync) SYNC="$2"; shift 2 ;;
+      dup_guard --from; FROM="$2"; shift 2 ;;
+    --hop) dup_guard --hop; HOP="$2"; shift 2 ;;
+    --sync) dup_guard --sync; SYNC="$2"; shift 2 ;;
     --direct-to-gd) DIRECT_TO_GD="1"; shift ;;
     # 팀원 broadcast를 방 게시 1건 + 정식·활성 전원 수신행으로 보낸다.
     # 사유를 감사에 남기며, 본문에 @all을 쓰는 것과 무관한 명시적 발신 옵션이다.
-    --all-hands) ALL_HANDS="${2:-}"; [ -n "$ALL_HANDS" ] || { echo "ERROR: $1 requires a reason" >&2; exit 1; }; shift 2 ;;
+    --all-hands) dup_guard --all-hands; ALL_HANDS="${2:-}"; [ -n "$ALL_HANDS" ] || { echo "ERROR: $1 requires a reason" >&2; exit 1; }; shift 2 ;;
     # ★개별보고 위임 표시★ — "각자 GD께 직접 보고해라" 로 뿌릴 때 붙인다. 서버가 [마감] 독촉을 안 보낸다.
     #   안 붙여도 고장나지 않는다: 독촉이 한 번 올 뿐이고 그 본문이 "개별보고면 무시하세요" 라고 알려준다.
     --individual) INDIVIDUAL="1"; shift ;;
-    --source-thread) SOURCE_THREAD="$2"; shift 2 ;;
-    --expect-report-by) EXPECT_REPORT_BY="$2"; shift 2 ;;
+    --source-thread) dup_guard --source-thread; SOURCE_THREAD="$2"; shift 2 ;;
+    --expect-report-by) dup_guard --expect-report-by; EXPECT_REPORT_BY="$2"; shift 2 ;;
     # comm-suite v3 결합키 — meta.episode 로 실림(기존 플래그 패턴 그대로, 서버 통과·마이그레이션 0).
-    --episode) EPISODE="$2"; shift 2 ;;
+    --episode) dup_guard --episode; EPISODE="$2"; shift 2 ;;
     # ★--confirm [초] — 실제 배달됐는지 확인한다★ (2026-07-30)
     #   POST 응답은 '행이 들어갔다' 까지만 안다. 차단 판정은 그 뒤 dispatcher 가 비동기로 한다
     #   (poll 1500ms). 그래서 POST 시점에 배달 여부를 아는 것은 ★구조적으로 불가능★ 하다.
     #   이 플래그는 판정이 날 때까지 잠깐 기다렸다 사실을 말한다. 기본 5초(dispatcher 3틱).
     --confirm) case "${2:-}" in ''|--*) CONFIRM=5 ;; *) CONFIRM="$2"; shift ;; esac; shift ;;
-    *) echo "unknown arg: $1" >&2; exit 1 ;;
+    # 모르는 인자의 흔한 원인은 오타가 아니라 본문이 셸에서 쪼개졌기 때문이다 — 그래서 다음 행동을 같이 적는다.
+    *) echo "unknown arg: $1" >&2
+       echo "  본문에 큰따옴표가 있으면 셸이 인자를 쪼개 이런 토큰이 생긴다 — 본문은 --body-file <경로> 로 보내라." >&2
+       exit 1 ;;
   esac
 done
 
 [ -z "$TO" ] && { echo "ERROR: --to required" >&2; exit 1; }
+
+# ─── 값 화이트리스트 ──────────────────────────────────────────────────────
+# 이 두 값은 여기서 한 번도 검사되지 않았다. 서버 message.priority 에는
+# CHECK(priority IN ('low','normal','high')) 가 있으므로 잘못된 값은 결국 거절되지만,
+# ★그 거절은 본문을 이미 보낸 뒤에 나오는 서버 응답★ 이라 무엇이 틀렸는지 여기서 안 알려준다.
+# 그리고 셸 인자 쪼개짐은 --priority 에 "high 건" 같은 값을 넣는다 — 그 형태를 여기서 잡는다.
+case "$PRIORITY" in
+  low|normal|high) ;;
+  *) echo "✖ --priority 는 low|normal|high 중 하나여야 한다 (받은 값: '$PRIORITY')" >&2
+     echo "  값에 공백이 섞여 있으면 본문이 셸에서 쪼개진 것이다 — 본문은 --body-file <경로> 로 보내라." >&2
+     exit 1 ;;
+esac
+# --type 은 서버 스키마에 CHECK 가 없다. 허용값은 이 도구가 문서화한 것을 정본으로 본다
+# (skills/b3os-team-inbox/SKILL.md 의 `--type dm|reply|status`).
+case "$TYPE" in
+  dm|reply|status) ;;
+  *) echo "✖ --type 은 dm|reply|status 중 하나여야 한다 (받은 값: '$TYPE')" >&2
+     echo "  값에 공백이 섞여 있으면 본문이 셸에서 쪼개진 것이다 — 본문은 --body-file <경로> 로 보내라." >&2
+     exit 1 ;;
+esac
 [ -n "$ALL_HANDS" ] && [ "$TO" != "broadcast" ] && {
   echo "ERROR: --all-hands 는 --to broadcast 에만 사용할 수 있습니다" >&2
   exit 1
