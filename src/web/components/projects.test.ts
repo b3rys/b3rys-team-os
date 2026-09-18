@@ -507,3 +507,79 @@ describe("splitSections — 순수 함수", () => {
     expect(one[0]!.html).toBe(`${H(1, "t")}<p>본문</p>`);
   });
 });
+
+describe("문서 헤더 — 한 줄 · 문서 전환 칩 · 새창 · 글자 크기 (팀장 2026-09-18)", () => {
+  test("헤더 첫 줄에 GitHub(아이콘+글자)·문서 칩·새창·HTML/MD 가 있고, 현재 문서 칩은 선택 모양", async () => {
+    const root = await mount();
+    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
+    await tick();
+    const gh = root.querySelector<HTMLAnchorElement>("#projects-open-github")!;
+    expect(gh.textContent).toContain("GitHub");
+    expect(gh.querySelector("svg")).not.toBeNull();
+    const chips = [...root.querySelectorAll(".projects-doc-chip")].map((c) => c.textContent?.trim());
+    expect(chips).toEqual(["README", "DESIGN", "FEATURES", "TODO"]);
+    expect(root.querySelector('.projects-doc-chip[aria-current="page"]')?.textContent?.trim()).toBe("DESIGN");
+    expect(root.querySelectorAll("button[data-doc-chip]")).toHaveLength(3);
+    const win = root.querySelector<HTMLAnchorElement>("#projects-open-window")!;
+    expect(win.getAttribute("href")).toContain("/api/projects/steno/doc/design/page");
+    expect(win.getAttribute("href")).not.toContain("mode=md");
+    expect(win.getAttribute("target")).toBe("_blank");
+  });
+
+  test("메타 줄에 프로젝트 이름·파일·sha 가 있고, sticky 헤더 높이를 재서 --projects-head 로 반영한다", async () => {
+    const root = await mount();
+    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
+    await tick();
+    const head = root.querySelector<HTMLElement>("[data-projects-doc-head]")!;
+    expect(head).not.toBeNull();
+    expect(head.textContent).toContain("Steno · DESIGN.md");
+    const { measureHeadOffset } = await import("./Projects");
+    // happy-dom 은 레이아웃이 없어 0 → 기본값 유지, 변수도 안 박는다
+    expect(measureHeadOffset()).toBe(72);
+    expect(root.style.getPropertyValue("--projects-head")).toBe("");
+    Object.defineProperty(head, "offsetHeight", { value: 54, configurable: true });
+    expect(measureHeadOffset()).toBe(66);
+    expect(root.style.getPropertyValue("--projects-head")).toBe("66px");
+  });
+
+  test("칩으로 다른 문서로 넘어가면 HTML/MD 모드가 유지되고 새창 링크도 그 모드·그 문서를 가리킨다", async () => {
+    const root = await mount();
+    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
+    await tick();
+    root.querySelector<HTMLButtonElement>('.projects-mode[data-mode="md"]')!.click();
+    await tick();
+    root.querySelector<HTMLButtonElement>('button[data-doc-chip="features"]')!.click();
+    await tick();
+    expect(new URLSearchParams(window.location.search).get("doc")).toBe("features");
+    expect(root.querySelector('.projects-doc-chip[aria-current="page"]')?.textContent?.trim()).toBe("FEATURES");
+    expect(root.querySelector('.projects-mode[data-mode="md"]')?.getAttribute("aria-pressed")).toBe("true");
+    expect(root.querySelector<HTMLAnchorElement>("#projects-open-window")!.getAttribute("href")).toContain("/doc/features/page?mode=md");
+  });
+
+  test("목록 카드에도 새창 링크(README·HTML 로 시작)", async () => {
+    const root = await mount();
+    const a = root.querySelector<HTMLAnchorElement>(".projects-window")!;
+    expect(a.getAttribute("href")).toContain("/api/projects/steno/doc/readme/page");
+    expect(a.getAttribute("target")).toBe("_blank");
+  });
+
+  test("⌘= / ⌘− / ⌘0 — 문서 화면에서만 90/100/110/125 를 오가고 % 배지를 띄운다 · 목록에서는 무시", async () => {
+    const { handleZoomKey, currentZoom } = await import("./Projects");
+    const root = await mount();
+    const key = (k: string) => { const e = new window.KeyboardEvent("keydown", { key: k, metaKey: true, cancelable: true }); const handled = handleZoomKey(e as unknown as KeyboardEvent); return { handled, prevented: e.defaultPrevented }; };
+    expect(key("=").handled).toBe(false);      // 목록 화면 — 브라우저 확대에 맡긴다
+    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
+    await tick();
+    expect(key("=")).toEqual({ handled: true, prevented: true });
+    expect(currentZoom()).toBe(110);
+    expect(root.style.getPropertyValue("--projects-zoom")).toBe("1.1");
+    expect(document.getElementById("projects-zoom-badge")?.textContent).toBe("110%");
+    key("="); expect(currentZoom()).toBe(125);
+    key("="); expect(currentZoom()).toBe(125);  // 상한
+    key("-"); key("-"); key("-"); expect(currentZoom()).toBe(90);
+    key("-"); expect(currentZoom()).toBe(90);   // 하한
+    key("0"); expect(currentZoom()).toBe(100);
+    expect(window.localStorage.getItem("bill-dash-projects-zoom")).toBe("100");
+    document.getElementById("projects-zoom-badge")?.remove();
+  });
+});

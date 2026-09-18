@@ -14,6 +14,8 @@ import { pick } from "../i18n";
 import { mdInlineToHtml } from "../lib/mdInline";
 import { applyPanelCollapsed, isPanelCollapsed, onPanelChange, PANEL_IDS, type Panel } from "../lib/panels";
 import { splitSections, type DocSection } from "../lib/projectSections";
+import { proseCss } from "../../shared/projectsProse";
+import { renderIcon } from "../icons";
 import { apiBase } from "../ws";
 
 export type ProjectDocKey = "readme" | "design" | "features" | "todo";
@@ -79,6 +81,44 @@ let _panelsTouched = new Set<Panel>();
 const _keepOpen = new Set<Panel>();
 let _panelUnsub: (() => void) | null = null;
 let _visible = true; // main.ts 가 Projects 탭을 보이는 중인가
+
+// 글자 크기 — 문서 화면에서만, ⌘= / ⌘− / ⌘0. 크롬처럼 바꿀 때 상단에 % 를 잠깐 띄운다(팀장 2026-09-18).
+export const ZOOM_STEPS = [90, 100, 110, 125] as const;
+const ZOOM_KEY = "bill-dash-projects-zoom";
+let _zoom = 100;
+let _keysBound = false;
+let _zoomBadgeTimer: ReturnType<typeof setTimeout> | null = null;
+function loadZoom(): void { try { const v = Number(window.localStorage.getItem(ZOOM_KEY)); if ((ZOOM_STEPS as readonly number[]).includes(v)) _zoom = v; } catch { /* 저장 없음 */ } }
+function applyZoom(show: boolean): void {
+  _root?.style.setProperty("--projects-zoom", String(_zoom / 100));
+  try { window.localStorage.setItem(ZOOM_KEY, String(_zoom)); } catch { /* 표시만 */ }
+  if (!show) return;
+  let badge = document.getElementById("projects-zoom-badge");
+  if (!badge) { badge = document.createElement("div"); badge.id = "projects-zoom-badge"; document.body.appendChild(badge); }
+  badge.textContent = `${_zoom}%`;
+  badge.classList.remove("out");
+  if (_zoomBadgeTimer) clearTimeout(_zoomBadgeTimer);
+  _zoomBadgeTimer = setTimeout(() => { badge?.classList.add("out"); _zoomBadgeTimer = setTimeout(() => badge?.remove(), 300); }, 900);
+}
+/** ⌘=(+) 크게 · ⌘− 작게 · ⌘0 100%. 문서 화면이 보일 때만 잡고, 그때만 브라우저 기본 확대를 막는다. */
+export function handleZoomKey(e: KeyboardEvent): boolean {
+  if (_view !== "doc" || !_visible || !(e.metaKey || e.ctrlKey) || e.altKey) return false;
+  const k = e.key;
+  const i = (ZOOM_STEPS as readonly number[]).indexOf(_zoom);
+  let next = _zoom;
+  if (k === "=" || k === "+") next = ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, i + 1)]!;
+  else if (k === "-" || k === "_") next = ZOOM_STEPS[Math.max(0, i - 1)]!;
+  else if (k === "0") next = 100;
+  else return false;
+  e.preventDefault();
+  _zoom = next; applyZoom(true);
+  return true;
+}
+export function currentZoom(): number { return _zoom; }
+function bindZoomKeys(): void {
+  if (_keysBound) return; _keysBound = true;
+  document.addEventListener("keydown", (e) => { handleZoomKey(e); });
+}
 
 function watchPanels(): void {
   if (_panelUnsub) return;
@@ -237,57 +277,44 @@ export function parseTodoMd(md: string, excludeSections: readonly string[]): { d
 }
 
 // ── 스타일 (Reports 의 prose 와 같은 톤, projects 전용 클래스) ──
-/** 문서 화면 sticky 헤더(제목 줄 + 버튼 줄) 높이 — 헤딩 scroll-margin-top 과 스크롤 추적 판정선이 같이 쓴다. */
-const HEAD_OFFSET = 116;
+/** 문서 화면 sticky 헤더 높이의 기본값(한 줄 + 여백). 실제 높이는 렌더 뒤 measureHeadOffset 이 재서 --projects-head 로 덮는다 — 헤딩 scroll-margin-top 과 스크롤 추적 판정선이 같이 쓴다. */
+const HEAD_OFFSET = 72;
+let _headOffset = HEAD_OFFSET;
+let _headObserver: ResizeObserver | null = null;
+/** sticky 헤더의 실제 높이를 재서 --projects-head(px) 로 반영. 잴 수 없으면(레이아웃 없음) 기본값 유지. */
+export function measureHeadOffset(): number {
+  const head = _root?.querySelector<HTMLElement>("[data-projects-doc-head]");
+  const h = head?.offsetHeight ?? 0;
+  if (!_root || !head || !h) return _headOffset;
+  _headOffset = h + 12;
+  _root.style.setProperty("--projects-head", `${_headOffset}px`);
+  return _headOffset;
+}
+function observeHead(): void {
+  _headObserver?.disconnect();
+  _headObserver = null;
+  const head = _root?.querySelector<HTMLElement>("[data-projects-doc-head]");
+  if (!head || typeof ResizeObserver === "undefined") return;
+  _headObserver = new ResizeObserver(() => measureHeadOffset());
+  _headObserver.observe(head);
+}
 function injectStyle(): void {
   if (document.getElementById("projects-prose-style")) return;
   const st = document.createElement("style");
   st.id = "projects-prose-style";
-  st.textContent = `
-.projects-prose{font-size:14.5px;line-height:1.75;color:rgb(var(--slate-200));min-width:0;overflow-wrap:anywhere}
-.projects-prose h1,.projects-prose h2,.projects-prose h3,.projects-prose h4{color:rgb(var(--slate-50));font-weight:700;line-height:1.3;margin:1.4em 0 .5em;letter-spacing:-.01em;scroll-margin-top:${HEAD_OFFSET}px}
-.projects-prose h1{font-size:1.6em;border-bottom:1px solid rgb(var(--border));padding-bottom:.3em}
-.projects-prose h2{font-size:1.35em}.projects-prose h3{font-size:1.15em}.projects-prose h4{font-size:1em}
-.projects-prose h1:first-child,.projects-prose h2:first-child{margin-top:0}
-.projects-prose p{margin:.7em 0}
-.projects-prose ul,.projects-prose ol{margin:.7em 0;padding-left:1.5em}
-.projects-prose ul.task-list{list-style:none;padding-left:.2em}
-.projects-prose li{margin:.3em 0}
-.projects-prose a{color:var(--accent-soft-text);text-decoration:underline;text-underline-offset:2px}
-.projects-prose code{background:rgb(var(--surface-0));border:1px solid rgb(var(--border));border-radius:5px;padding:.1em .4em;font-size:.88em;font-family:ui-monospace,Menlo,monospace;color:var(--accent-soft-text)}
-.projects-prose pre{background:rgb(var(--surface-0));border:1px solid rgb(var(--border));border-radius:10px;padding:14px 16px;overflow-x:auto;margin:1em 0;max-width:100%}
-.projects-prose pre code{background:none;border:0;padding:0;color:rgb(var(--slate-200))}
-.projects-prose pre.mermaid-src{margin-top:0;border-top-left-radius:0;border-top-right-radius:0}
-.projects-prose .projects-mermaid-badge{display:inline-flex;align-items:center;gap:6px;margin-top:1em;padding:3px 10px;border:1px solid rgb(var(--border));border-bottom:0;border-radius:8px 8px 0 0;background:rgb(var(--surface-1));font-size:11px;font-weight:600;color:var(--txt-amber)}
-.projects-prose blockquote{border-left:3px solid rgb(var(--accent) / .5);padding:.2em 0 .2em 14px;margin:1em 0;color:rgb(var(--slate-400))}
-.projects-prose strong{color:rgb(var(--slate-50));font-weight:600}
-.projects-prose hr{border:0;border-top:1px solid rgb(var(--border));margin:1.6em 0}
-.projects-prose img{max-width:100%;height:auto}
-.projects-prose .table-wrap,.projects-prose table{max-width:100%}
-.projects-prose table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.92em;display:block;overflow-x:auto}
-.projects-prose th,.projects-prose td{border:1px solid rgb(var(--border));padding:7px 11px;text-align:left}
-.projects-prose th{background:rgb(var(--surface-1));color:rgb(var(--slate-50));font-weight:600}
-#projects-toc{scroll-margin-top:${HEAD_OFFSET}px}
-.projects-toc{font-size:13px;line-height:1.4}
-.projects-toc-row{display:flex;align-items:flex-start;gap:2px;min-width:0}
-.projects-toc-caret{flex:0 0 18px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:5px;color:rgb(var(--slate-500));font-size:10px}
-.projects-toc-caret:hover{color:rgb(var(--slate-100));background:rgb(var(--surface-3) / .6)}
-.projects-toc-caret[aria-expanded="true"]{transform:rotate(90deg)}
-.projects-toc-head{flex:1 1 auto;min-width:0;text-align:left;padding:2px 6px;border-radius:6px;color:rgb(var(--slate-300));overflow-wrap:anywhere}
-.projects-toc-head:hover{color:rgb(var(--slate-100));background:rgb(var(--surface-3) / .5)}
-.projects-toc-head[aria-current="true"]{color:rgb(var(--slate-50));font-weight:600;background:rgb(var(--accent) / .14);box-shadow:inset 2px 0 0 rgb(var(--accent))}
-.projects-toc-children{display:flex;flex-direction:column;padding:1px 0 3px 32px}
-.projects-toc-sec[data-open="false"] .projects-toc-children{display:none}
-.projects-toc-children a{display:block;color:rgb(var(--slate-400));text-decoration:none;padding:1px 6px;border-radius:5px;font-size:12.5px;overflow-wrap:anywhere}
-.projects-toc-children a:hover{color:rgb(var(--slate-100));background:rgb(var(--surface-3) / .5)}
-.projects-toc-children a[aria-current="true"]{color:var(--accent-soft-text);font-weight:600}
-.projects-toc-children a[data-level="4"],.projects-toc-children a[data-level="5"],.projects-toc-children a[data-level="6"]{padding-left:16px;font-size:12px}
-.projects-raw{white-space:pre-wrap;overflow-wrap:anywhere;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.6;color:rgb(var(--slate-200))}`;
+  st.textContent = proseCss(HEAD_OFFSET) + `
+.projects-prose{font-size:calc(14.5px * var(--projects-zoom, 1))}
+.projects-raw{font-size:calc(12.5px * var(--projects-zoom, 1))}
+.projects-todo-status{zoom:var(--projects-zoom, 1)}
+#projects-zoom-badge{position:fixed;top:56px;left:50%;transform:translateX(-50%);z-index:80;padding:4px 12px;border-radius:8px;background:rgb(var(--surface-0) / .82);color:rgb(var(--slate-50));font-size:12px;font-weight:600;letter-spacing:.02em;pointer-events:none;transition:opacity .25s;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+#projects-zoom-badge.out{opacity:0}`;
   document.head.appendChild(st);
 }
 
 // ── 목록 ──
 function githubUrl(p: ProjectSummary): string { return `https://github.com/${p.repo}`; }
+/** 새창 페이지 — 서버가 만드는 독립 HTML(문서 전환 바 포함). mode=md 면 원문. */
+function pageUrl(id: string, key: ProjectDocKey, mode: "html" | "md"): string { return `${apiBase()}/api/projects/${encodeURIComponent(id)}/doc/${key}/page${mode === "md" ? "?mode=md" : ""}`; }
 function blobUrl(p: { repo: string; sha: string }, path: string): string { return `https://github.com/${p.repo}/blob/${p.sha}/${path}`; }
 
 function chipHtml(p: ProjectSummary, d: ProjectSummary["docs"][number]): string {
@@ -319,6 +346,7 @@ function renderList(): void {
         <span class="absolute left-0 top-0 bottom-0 w-[3px] bg-accent-green opacity-0 group-hover:opacity-100 transition-opacity"></span>
         <div class="flex items-start gap-2 flex-wrap">
           <div class="min-w-0 flex-1 text-[15px] font-semibold text-slate-100 leading-snug">${escape(p.name)}<span class="ml-2 text-[11px] font-normal text-slate-500 font-mono">${escape(p.id)}</span></div>
+          <a class="projects-window shrink-0 inline-flex items-center gap-1 text-[12px] font-semibold text-slate-300 hover:text-accent-greenSoft mr-3" href="${escape(pageUrl(p.id, "readme", "html"))}" target="_blank" rel="noopener" title="${pick("새창에서 보기 — 문서를 돌려가며 볼 수 있다", "Open in a new window")}">${renderIcon("external-link", { size: 13 })}<span>${pick("새창", "Window")}</span></a>
           <a class="projects-github shrink-0 inline-flex items-center gap-1 text-[12px] font-semibold text-slate-300 hover:text-accent-greenSoft" href="${escape(githubUrl(p))}" target="_blank" rel="noopener" title="${escape(p.repo)} · ${escape(p.branch)}">
             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>GitHub</a>
         </div>
@@ -473,7 +501,16 @@ async function renderDoc(): Promise<void> {
   enterDocPanels();
 
   const repo = project?.repo ?? "";
-  const gh = repo ? `<a id="projects-open-github" href="${escape(blobUrl({ repo, sha: doc.sha }, doc.path))}" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-surface-3 text-slate-200 bg-surface-2 hover:text-slate-100 hover:border-accent-green/45 hover:bg-surface-0 transition-colors"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>${pick("GitHub 에서 보기", "View on GitHub")}</a>` : "";
+  const gh = repo ? `<a id="projects-open-github" href="${escape(blobUrl({ repo, sha: doc.sha }, doc.path))}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-[12px] font-semibold text-slate-300 hover:text-accent-greenSoft whitespace-nowrap" title="${pick("GitHub 에서 이 파일 보기", "View this file on GitHub")}">${renderIcon("github", { size: 13 })}<span>GitHub</span></a>` : "";
+  // 문서 전환 칩 — 목록 카드와 같은 모양, 현재 문서는 채운 모양. 없는 문서는 비활성.
+  const docChips = DOC_KEYS.map((k) => {
+    const d = project?.docs.find((x) => x.key === k);
+    const base = "projects-doc-chip inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide border";
+    if (d && !d.exists) return `<span class="${base} text-slate-600 border-surface-3/60 bg-transparent cursor-not-allowed" aria-disabled="true">${DOC_LABEL[k]}</span>`;
+    return k === key
+      ? `<span class="${base} text-slate-50 border-accent-green/70 bg-accent-green/25" aria-current="page">${DOC_LABEL[k]}</span>`
+      : `<button class="${base} text-txt-green border-accent-green/30 bg-accent-green/10 hover:brightness-110" type="button" data-doc-chip="${k}">${DOC_LABEL[k]}</button>`;
+  }).join("");
   const modeBtn = (m: "html" | "md") => `<button class="projects-mode px-3 py-1 text-xs font-semibold uppercase tracking-wide border transition-colors ${m === "html" ? "rounded-l-lg" : "rounded-r-lg -ml-px"} ${_mode === m ? "text-accent-green border-accent-green/35 bg-accent-green/10" : "text-slate-400 border-surface-3 bg-surface-2 hover:text-slate-200"}" data-mode="${m}" aria-pressed="${_mode === m}">${m.toUpperCase()}</button>`;
   const isTodo = key === "todo";
   const todoTabBtn = (t: "status" | "all", label: string) => `<button class="projects-todo-tab px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors ${_todoTab === t ? "text-slate-100 bg-surface-0 border-surface-3" : "text-slate-400 border-transparent hover:text-slate-200"}" data-todo-tab="${t}" aria-pressed="${_todoTab === t}">${label}</button>`;
@@ -491,21 +528,21 @@ async function renderDoc(): Promise<void> {
   _root.innerHTML = `
     <div data-projects-doc-scroll class="h-full overflow-y-auto overflow-x-hidden">
       <div class="w-full px-4 md:px-6 pb-20 min-w-0">
-        <div class="sticky top-0 z-20 -mx-4 md:-mx-6 px-4 md:px-6 bg-surface-1/95 backdrop-blur border-b border-surface-3">
-          <div class="flex items-center gap-3 py-2.5 min-w-0">
+        <div data-projects-doc-head class="sticky top-0 z-20 -mx-4 md:-mx-6 px-4 md:px-6 bg-surface-1/95 backdrop-blur border-b border-surface-3">
+          <div class="flex items-center gap-3 py-2 min-w-0 flex-wrap">
             ${backBtn}
-            <div class="min-w-0 flex-1">
-              <div class="text-[15px] font-semibold text-slate-100 truncate" title="${escape(doc.title)}">${escape(doc.title)}</div>
-              <div class="text-[11px] text-slate-500 leading-snug break-words">${escape(project?.name ?? id)} · ${escape(doc.path)} · <span class="font-mono">${escape(doc.sha.slice(0, 7))}</span> ${stale}</div>
+            <div class="min-w-0 flex items-baseline gap-2 flex-wrap">
+              <span class="text-[15px] font-semibold text-slate-100 truncate" title="${escape(doc.title)}">${escape(doc.title)}</span>
+              <span class="text-[11px] text-slate-500 leading-snug whitespace-nowrap">${escape(project?.name ?? id)} · ${escape(doc.path)} · <span class="font-mono">${escape(doc.sha.slice(0, 7))}</span> ${stale}</span>
+              ${gh}
             </div>
+            <span class="ml-auto"></span>
+            <div class="flex items-center gap-1 flex-wrap" role="group" aria-label="${pick("문서 전환", "Switch document")}">${docChips}</div>
+            ${showToc ? `<button id="projects-toc-toggle" type="button" class="md:hidden inline-flex items-center gap-1 text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-surface-3 text-slate-300 bg-surface-2" aria-expanded="${_tocMobileOpen}">${pick("목차", "Contents")}</button>` : ""}
+            <a id="projects-open-window" href="${escape(pageUrl(id, key, _mode))}" target="_blank" rel="noopener" title="${pick("새창에서 보기 (현재 모드로)", "Open in a new window (current mode)")}" class="inline-flex items-center justify-center w-8 h-7 rounded-lg border border-surface-3 text-slate-300 bg-surface-2 hover:text-slate-100 hover:border-accent-green/40">${renderIcon("external-link", { size: 14 })}</a>
             <div class="flex shrink-0" role="group" aria-label="HTML | MD">${modeBtn("html")}${modeBtn("md")}</div>
           </div>
-          <div class="flex items-center gap-2 flex-wrap pb-2.5">
-            ${showToc ? `<button id="projects-toc-toggle" type="button" class="md:hidden inline-flex items-center gap-1 text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-surface-3 text-slate-300 bg-surface-2" aria-expanded="${_tocMobileOpen}">${pick("목차", "Contents")} ${_tocMobileOpen ? "▴" : "▾"}</button>` : ""}
-            ${isTodo && _mode === "html" ? `<div class="flex gap-1 rounded-lg border border-surface-3 bg-surface-2 p-0.5">${todoTabBtn("status", pick("현재 상태", "Status"))}${todoTabBtn("all", pick("전체", "All"))}</div>` : ""}
-            <span class="ml-auto"></span>
-            ${gh}
-          </div>
+          ${isTodo && _mode === "html" ? `<div class="flex items-center gap-2 pb-2"><div class="flex gap-1 rounded-lg border border-surface-3 bg-surface-2 p-0.5">${todoTabBtn("status", pick("현재 상태", "Status"))}${todoTabBtn("all", pick("전체", "All"))}</div></div>` : ""}
         </div>
         <div class="pt-4 min-w-0 ${showToc ? "grid grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)] gap-5" : ""}">
           ${showToc && cur ? `<aside id="projects-toc" class="${_tocMobileOpen ? "block" : "hidden"} md:block md:sticky md:top-24 md:self-start md:max-h-[calc(100vh-8rem)] md:overflow-y-auto rounded-xl border border-surface-3 bg-surface-2 px-2 py-2.5 min-w-0">
@@ -518,6 +555,7 @@ async function renderDoc(): Promise<void> {
     </div>`;
 
   _root.querySelector("#projects-back")?.addEventListener("click", goList);
+  _root.querySelectorAll<HTMLButtonElement>("[data-doc-chip]").forEach((b) => b.addEventListener("click", () => { void openDoc(id, b.dataset.docChip as ProjectDocKey); }));
   _root.querySelector<HTMLButtonElement>("#projects-toc-toggle")?.addEventListener("click", () => setMobileToc(!_tocMobileOpen));
   _root.querySelectorAll<HTMLButtonElement>(".projects-mode").forEach((b) => b.addEventListener("click", () => {
     const m = b.dataset.mode as "html" | "md";
@@ -555,6 +593,8 @@ async function renderDoc(): Promise<void> {
   decorateMermaid(viewer);
   if (_curSec && secs.length > 1 && cur && secs[0] !== cur) scrollToAnchor(viewer, cur.anchor, false);
   bindTocTree(viewer, secs);
+  measureHeadOffset();
+  observeHead();
   watchScroll(viewer, secs);
 }
 
@@ -630,7 +670,7 @@ function bindTocTree(viewer: HTMLElement, secs: DocSection[]): void {
 }
 
 // 스크롤 추적: 본문 스크롤 칸의 위쪽(sticky 헤더 아래) 을 지난 마지막 헤딩 = 현재 헤딩 → 그 절이 현재 절.
-// HEAD_OFFSET = 헤딩 scroll-margin-top(sticky 헤더 두 줄 높이) — 판정선은 그보다 조금 아래여야 방금 스크롤한 헤딩이 "현재" 가 된다.
+// _headOffset = 헤딩 scroll-margin-top(sticky 헤더 실측 높이) — 판정선은 그보다 조금 아래여야 방금 스크롤한 헤딩이 "현재" 가 된다.
 let _scrollLock = 0;
 let _scrollRaf = 0;
 function watchScroll(viewer: HTMLElement, secs: DocSection[]): void {
@@ -642,7 +682,7 @@ function watchScroll(viewer: HTMLElement, secs: DocSection[]): void {
     _scrollRaf = requestAnimationFrame(() => {
       _scrollRaf = 0;
       if (Date.now() < _scrollLock) return;
-      const top = scroller.getBoundingClientRect().top + HEAD_OFFSET + 8; // 헤딩이 sticky 헤더 아래(scroll-margin-top) 에 닿으면 그 헤딩
+      const top = scroller.getBoundingClientRect().top + _headOffset + 8; // 헤딩이 sticky 헤더 아래(scroll-margin-top) 에 닿으면 그 헤딩
       let last: HTMLElement | null = null;
       for (const h of headings) { if (h.getBoundingClientRect().top <= top) last = h; else break; }
       const anchor = last?.id ?? "";
@@ -657,11 +697,12 @@ function watchScroll(viewer: HTMLElement, secs: DocSection[]): void {
 }
 
 async function openDoc(id: string, key: ProjectDocKey): Promise<void> {
+  const switching = _view === "doc" && _curId === id;   // 헤더 칩으로 같은 프로젝트의 다른 문서로 — HTML/MD 모드는 유지
   _view = "doc";
   _curId = id;
   _curKey = key;
   _curDoc = null;
-  _mode = "html";
+  if (!switching) _mode = "html";
   _todoTab = "status";
   _curSec = null; _curHead = null; _tocOpen = new Set(); _tocMobileOpen = false;
   _doneOpen = false;
@@ -690,13 +731,15 @@ export function resetProjectsState(): void {
   _view = "list"; _curId = null; _curKey = null; _curDoc = null;
   _mode = "html"; _todoTab = "status"; _curSec = null; _curHead = null; _tocOpen = new Set(); _tocMobileOpen = false; _doneOpen = false;
   _rawCache = new Map();
-  _panelsBefore = null; _panelsTouched = new Set(); _keepOpen.clear(); _visible = true; _scrollLock = 0;
+  _panelsBefore = null; _panelsTouched = new Set(); _keepOpen.clear(); _visible = true; _scrollLock = 0; _zoom = 100;
+  _headOffset = HEAD_OFFSET; _headObserver?.disconnect(); _headObserver = null;
   if (_panelUnsub) { _panelUnsub(); _panelUnsub = null; }
 }
 
 export function renderProjects(root: HTMLElement): void {
   _root = root;
   injectStyle();
+  loadZoom(); applyZoom(false); bindZoomKeys();
   const { id, doc, sec } = readUrlState();
   if (id && doc) { _view = "doc"; _curId = id; _curKey = doc; _curDoc = null; _curSec = sec; }
   root.innerHTML = `<div class="h-full overflow-y-auto"><div class="max-w-3xl mx-auto px-4 md:px-6 py-5"><div class="text-slate-500 py-16 text-center">${pick("프로젝트 목록 불러오는 중…", "Loading projects…")}</div></div></div>`;

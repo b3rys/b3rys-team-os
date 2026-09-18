@@ -87,3 +87,36 @@ describe("Projects API", () => {
     expect(src).toContain('api.route("/", createProjectRoutes({ db }))');
   });
 });
+
+describe("새창 페이지 /doc/:key/page", () => {
+  test("html 모드: 독립 HTML(문서 전환 바 + 본문), 스크립트 없음·CSP 있음·현재 문서 칩 on", async () => {
+    const { app } = setup();
+    const res = await app.request("http://localhost/team/api/projects/sample/doc/readme/page");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toStartWith("text/html");
+    expect(res.headers.get("x-project-sha")).toBe("a".repeat(40));
+    const html = await res.text();
+    expect(html).toContain("<!doctype html>");
+    expect(html).toContain("Content-Security-Policy");
+    expect(html).toContain("base-uri 'none'; form-action 'none'");
+    expect(html).not.toContain("<script");
+    expect(html).toContain('class="chip on"');                       // 현재 문서(README) 칩
+    expect(html).toContain('href="/team/api/projects/sample/doc/design/page"');   // 같은 창에서 다른 문서로
+    expect(html).toContain('href="/team/api/projects/sample/doc/readme/page?mode=md"'); // MD 링크
+    expect(html).toContain('<article class="projects-prose">');
+    expect(html).toContain("Useful app.");
+  });
+  test("md 모드: 원문을 이스케이프한 <pre> — 마크다운의 < 가 태그가 되지 않는다", async () => {
+    const { app } = setup();
+    const html = await (await app.request("http://localhost/team/api/projects/sample/doc/readme/page?mode=md")).text();
+    expect(html).toContain('<pre class="projects-raw">');
+    expect(html).toContain("```mermaid");
+    expect(html).not.toContain("<article");
+    expect(html).toContain('class="mode on" href="/team/api/projects/sample/doc/readme/page?mode=md"');
+  });
+  test("모르는 프로젝트·문서는 404", async () => {
+    const { app } = setup();
+    expect((await app.request("http://localhost/team/api/projects/nope/doc/readme/page")).status).toBe(404);
+    expect((await app.request("http://localhost/team/api/projects/sample/doc/secret/page")).status).toBe(404);
+  });
+});
