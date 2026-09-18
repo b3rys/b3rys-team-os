@@ -7,6 +7,14 @@
 //   테스트는 "부팅을 한 번 거친 상태"를 전제하므로, 없을 때만 그 부팅 단계를 재현한다.
 import { existsSync } from "node:fs";
 import { renderTeamOs } from "./teamOsRender";
+import { renderSkillsMd } from "./skillsRender";
+import { SKILLS_MD_PATH } from "./personaTemplates";
+import { existsSync as _exists } from "node:fs";
+
+/** rules/SKILLS.md 는 렌더 산출물(gitignore) — 깨끗한 clone 엔 없다. 없을 때만 부팅 렌더를 재현한다(TEAM-OS 와 같은 취급). */
+export function ensureRenderedSkillsMd(): void {
+  if (!_exists(SKILLS_MD_PATH)) renderSkillsMd();
+}
 import { REPO_ROOT } from "./personaTemplates";
 
 /**

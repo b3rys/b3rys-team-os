@@ -13,6 +13,8 @@ export function buildSkillsMd(): string {
     "",
     buildSkillTable(),
     "",
+    "**여러 trigger 가 맞으면 전부 적용한다 — 하나만 고르지 않는다.** 순서는 격리·안전이 먼저, 절차가 그다음: 예를 들어 b3os 자체를 고쳐 PR 을 내는 일은 `b3os-infra-safety`(워크트리 격리) → `b3os-github-workflow`(브랜치·PR·머지).",
+    "",
   ].join("\n");
 }
 

@@ -12,6 +12,9 @@ describe("rules/SKILLS.md 렌더", () => {
     expect(md.startsWith("# SKILLS")).toBe(true);
     expect(md).toContain(buildSkillTable());
     expect(md).toContain("손으로 고치지 않는다");
+    // 겹쳐 쓰기 규칙은 Core Rules 에서 뺐다(팀장 09-18) — 목록 파일이 대신 품는다. 순서까지 고정(codex 리뷰 #435).
+    expect(md).toContain("여러 trigger 가 맞으면 전부 적용한다");
+    expect(md).toMatch(/`b3os-infra-safety`[^\n]*→[^\n]*`b3os-github-workflow`/);
   });
   it("renderSkillsMd 는 파일을 만들고, 두 번째 호출은 changed=false (내용 동일이면 안 건드림) — 시험은 라이브 rules/ 를 건드리지 않는다", () => {
     const target = join(mkdtempSync(join(tmpdir(), "skills-md-")), "SKILLS.md");

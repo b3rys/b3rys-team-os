@@ -1,6 +1,7 @@
 // Claude 전용 소통 섹션(SECTION_CLAUDE_COMMS) 주입 — idempotency + runtime-split 회귀 가드.
 // churn 버그(comms가 마지막 섹션이면 매 실행 재기록) 재발 방지.
 import { buildSkillsMd } from "./skillsRender";
+import { SKILLS_MD_PATH } from "./personaTemplates";
 import { describe, test, expect } from "bun:test";
 import { afterEach } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
@@ -196,6 +197,8 @@ describe("스킬 목록 — 규칙 파일이 아니라 rules/SKILLS.md 에 있�
       expect(md, "★목록이 규칙 파일 본문에 다시 들어왔다★").not.toContain("**Skills — pick by trigger**");
       expect(md, "★SKILLS.md 를 가리키는 줄이 없다★").toContain("SKILLS.md");
       if (runtime === "claude_channel") expect(md).toContain("\n@SKILLS.md\n");
+      else expect(md, "★브릿지 런타임의 경로가 렌더 경로(SKILLS_MD_PATH)와 다르다★").toContain(SKILLS_MD_PATH.replace(process.env.HOME ?? "\u0000", "~"));
+      expect(buildSkillsMd(), "★목록 파일에 겹쳐 쓰기 규칙이 없다★").toContain("여러 trigger 가 맞으면 전부 적용한다");
     });
   }
 });
