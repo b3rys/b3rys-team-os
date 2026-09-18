@@ -413,11 +413,10 @@ function hasToc(secs: DocSection[]): boolean {
 /** 목차 글자 — 제목의 이모지·장식 기호(★✦✓ 등)를 빼고 공백을 정리한다. 본문 제목은 그대로, 목차만 담백하게(팀장 2026-09-18). */
 export function tocLabel(text: string): string {
   return text
-    .replace(/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{FE0F}\u{200D}\u{20E3}]/gu, "")
+    .replace(/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}\u{E0020}-\u{E007F}\u{FE0F}\u{200D}\u{20E3}]/gu, "")
     .replace(/[★☆✦✧✓✔✗✘◆◇■□●○▶▷►]/g, "")
     .replace(/\s+/g, " ")
-    .replace(/^[\s\-·—–:]+|[\s\-·—–:]+$/g, "")
-    .trim() || text.trim();
+    .replace(/^[\s\-·—–:]+|[\s\-·—–:]+$/g, "") || text.trim();
 }
 function tocTreeHtml(secs: DocSection[], cur: DocSection): string {
   const rows = secs.map((s) => {
@@ -426,10 +425,10 @@ function tocTreeHtml(secs: DocSection[], cur: DocSection): string {
       ? `<button class="projects-toc-caret" type="button" data-toggle="${escape(s.anchor)}" aria-expanded="${open}" aria-label="${pick("소제목 접기/펼치기", "Toggle subheadings")}">▶</button>`
       : `<span class="projects-toc-caret" aria-hidden="true"></span>`;
     const kids = s.children.length
-      ? `<div class="projects-toc-children">${s.children.map((t) => `<a href="#${escape(t.anchor)}" data-level="${t.level}" data-anchor="${escape(t.anchor)}" title="${escape(t.text)}" aria-current="${t.anchor === _curHead}">${escape(tocLabel(t.text))}</a>`).join("")}</div>`
+      ? `<div class="projects-toc-children">${s.children.map((t) => `<a href="#${escape(t.anchor)}" data-level="${t.level}" data-anchor="${escape(t.anchor)}" title="${escape(t.text)}" aria-current="${t.anchor === _curHead}"><span class="projects-toc-label">${escape(tocLabel(t.text))}</span></a>`).join("")}</div>`
       : "";
     return `<div class="projects-toc-sec" data-sec="${escape(s.anchor)}" data-open="${open}">
-      <div class="projects-toc-row">${caret}<button class="projects-toc-head" type="button" data-sec="${escape(s.anchor)}" title="${escape(s.label)}" aria-current="${s === cur}">${escape(tocLabel(s.label))}</button></div>
+      <div class="projects-toc-row">${caret}<button class="projects-toc-head" type="button" data-sec="${escape(s.anchor)}" title="${escape(s.label)}" aria-current="${s === cur}"><span class="projects-toc-label">${escape(tocLabel(s.label))}</span></button></div>
       ${kids}</div>`;
   }).join("");
   return `<nav class="projects-toc" aria-label="${pick("목차", "Contents")}">${rows}</nav>`;

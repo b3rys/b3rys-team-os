@@ -558,12 +558,28 @@ describe("문서 헤더 — 한 줄 · 문서 전환 칩 · 새창 · 글자 크
 
   test("목차 글자는 이모지·장식 기호를 뺀다(tocLabel) — 본문 제목·title 은 원문 그대로", async () => {
     const { tocLabel } = await import("./Projects");
-    expect(tocLabel("🔄 GD 실사용 피드백 (2026-09-06)")).toBe("GD 실사용 피드백 (2026-09-06)");
-    expect(tocLabel("📌 프로젝트 관리 스킬 — ★킵. Cmd+K 때 같이 만든다★")).toBe("프로젝트 관리 스킬 — 킵. Cmd+K 때 같이 만든다");
-    expect(tocLabel("🎯 Steno 목표 (GD 2026-09-13 12:24) — 킵")).toBe("Steno 목표 (GD 2026-09-13 12:24) — 킵");
+    expect(tocLabel("🔄 실사용 피드백 (2026-01-01)")).toBe("실사용 피드백 (2026-01-01)");
+    expect(tocLabel("📌 예시 절 — ★나중에 손본다★")).toBe("예시 절 — 나중에 손본다");
+    expect(tocLabel("🎯 목표 (2026-01-02 10:00) — 킵")).toBe("목표 (2026-01-02 10:00) — 킵");
     expect(tocLabel("✅ 완료된 것 🧹")).toBe("완료된 것");
-    expect(tocLabel("1단계 — Typora 식 편집")).toBe("1단계 — Typora 식 편집");
+    expect(tocLabel("1단계 — 편집기 만들기")).toBe("1단계 — 편집기 만들기");
+    expect(tocLabel("★ 킵 ★ 하나")).toBe("킵 하나");   // 공백 축약
+    expect(tocLabel("—킵—")).toBe("킵");               // 앞뒤 대시
+    expect(tocLabel("완료: ✅")).toBe("완료");           // 뒤 콜론
+    expect(tocLabel("👍🏽 굿")).toBe("굿");              // 피부색 수식자까지
     expect(tocLabel("🎉")).toBe("🎉"); // 전부 기호면 원문 유지
+    // DOM: 목차 글자는 정리본, title 은 원문
+    const root = await mount();
+    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="todo"]')!.click();
+    await tick();
+    root.querySelector<HTMLButtonElement>('button[data-todo-tab="all"]')?.click();
+    await tick();
+    const heads = [...root.querySelectorAll<HTMLButtonElement>(".projects-toc-head")];
+    const decorated = heads.find((b) => /\p{Extended_Pictographic}/u.test(b.title));
+    expect(decorated).toBeDefined();
+    expect(decorated!.textContent?.trim()).toBe(tocLabel(decorated!.title));
+    expect(decorated!.textContent?.trim()).not.toBe(decorated!.title);
+    expect(decorated!.querySelector(".projects-toc-label")).not.toBeNull();
   });
 
   test("목록 카드에도 새창 링크(README·HTML 로 시작)", async () => {
