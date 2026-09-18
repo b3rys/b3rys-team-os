@@ -251,22 +251,22 @@
     top: 0.85rem;
     z-index: 30;
     display: inline-flex;
-    height: 1.5rem;
-    width: 1.5rem;
+    height: 1.25rem;
+    width: 1.25rem;
     align-items: center;
     justify-content: center;
-    border: 1px solid rgb(var(--accent) / 0.7);
-    border-radius: 0.375rem;
+    border: 1px solid rgb(var(--accent) / 0.8);
+    border-radius: 0.3rem;
     background: rgb(var(--surface-1) / 0.9);
     color: rgb(var(--accent));
   }
-  .sidebar-panel-toggle { left: calc(0.75rem + var(--sidebar-w, 280px) - 1.5rem - 0.4rem); }
+  .sidebar-panel-toggle { left: calc(0.75rem + var(--sidebar-w, 280px) - 1.25rem - 0.5rem); }
   .thread-panel-toggle { right: 1.15rem; }   /* THREADS 패널의 오른쪽 위 모서리 안쪽 */
   body.sidebar-collapsed .sidebar-panel-toggle { left: 1.15rem; }
   body.thread-panel-collapsed .thread-panel-toggle { right: 1.15rem; }
   /* 접힌 쪽의 버튼은 본문 패널의 탭 줄 위에 오므로, 탭 글자가 버튼 밑으로 들어가지 않게 그쪽 여백을 연다. */
-  body.sidebar-collapsed #main-tabs { padding-left: 2.6rem; }
-  body.thread-panel-collapsed #main-tabs { padding-right: 2.6rem; }
+  body.sidebar-collapsed #main-tabs { padding-left: 2.3rem; }
+  body.thread-panel-collapsed #main-tabs { padding-right: 2.3rem; }
   .panel-toggle:hover {
     background: rgb(var(--accent) / 0.12);
     border-color: rgb(var(--accent));
