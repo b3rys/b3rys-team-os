@@ -1,3 +1,5 @@
+import { MERMAID_INLINE_JS } from "./mermaidFigures";
+
 // Projects 문서 본문(.projects-prose) 스타일 — 대시보드(Projects.ts)와 새창 페이지(routes/projects.ts) 가 같은 규칙을 쓴다.
 //   한 곳에만 두면 다른 쪽이 조용히 어긋난다. 색은 대시보드 CSS 변수(--slate-*, --accent 등)를 그대로 쓰고,
 //   새창 페이지는 그 변수 값을 자기 :root 에 박아 온다(PAGE_VARS_CSS).
@@ -67,8 +69,6 @@ export const STANDALONE_CSP = "default-src 'none'; img-src https: data:; style-s
 export function standaloneCsp(nonce?: string | null): string {
   return nonce ? `${STANDALONE_CSP}; script-src 'self' 'nonce-${nonce}'` : STANDALONE_CSP;
 }
-import { MERMAID_INLINE_JS } from "./mermaidFigures";
-
 export const DOC_KEYS_ORDER = ["readme", "design", "features", "todo"] as const;
 export const DOC_LABELS: Record<string, string> = { readme: "README", design: "DESIGN", features: "FEATURES", todo: "TODO" };
 

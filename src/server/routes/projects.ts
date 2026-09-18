@@ -20,7 +20,8 @@ export function createProjectRoutes(deps: ProjectDeps) {
   const projects = validateProjects(deps.projects ?? JSON.parse(readFileSync(join(root, "projects.json"), "utf8")));
   const source = deps.source ?? new GitHubDocs({ cacheDir: join(root, "var/projects-cache") });
   const app = new Hono();
-  app.use("*", async (c, next) => { await next(); c.header("Cache-Control", "no-store"); });
+  // 문서 응답은 no-store. mermaid 번들(불변 파일)만 예외 — 새창마다 5MB 를 다시 받지 않게.
+  app.use("*", async (c, next) => { await next(); if (!c.req.path.endsWith("/projects/vendor/mermaid.min.js")) c.header("Cache-Control", "no-store"); });
   app.onError((err, c) => c.json({ error: err instanceof ProjectSourceError ? err.reason : "projects_unavailable", key: err instanceof ProjectSourceError ? err.key : "project" }, 502));
   const excludeSections = (p: ProjectRegistration) => p.excludeSections ?? [...DEFAULT_EXCLUDE_SECTIONS];
   async function summary(p: ProjectRegistration) {
@@ -81,7 +82,9 @@ export function createProjectRoutes(deps: ProjectDeps) {
     const mode = c.req.query("mode") === "md" ? "md" : "html";
     const exists = Object.fromEntries(DOC_KEYS.map(k => [k, snapshot.docs[k] !== null]));
     const basePath = process.env.BASE_PATH ?? "/team";
-    const mermaidNonce = mode === "html" && doc.needs.includes("mermaid-svg") && MERMAID_PATH ? crypto.randomUUID().replace(/-/g, "") : null;
+    const mermaidNonce = mode === "html" && doc.needs.includes("mermaid-svg") && MERMAID_PATH
+      ? Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64url") // 128비트, 요청마다 새로
+      : null;
     c.header("Content-Type", "text/html; charset=utf-8");
     c.header("X-Content-Type-Options", "nosniff");
     c.header("Content-Security-Policy", `${standaloneCsp(mermaidNonce)}; frame-ancestors 'none'`);

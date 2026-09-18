@@ -10,7 +10,8 @@ export interface MermaidLike {
 
 export function mermaidConfig(dark: boolean): Record<string, unknown> {
   // securityLevel strict: 라벨의 HTML 을 DOMPurify 로 정제, 클릭 콜백 금지.
-  return { startOnLoad: false, securityLevel: "strict", theme: dark ? "dark" : "neutral", fontFamily: "inherit" };
+  // suppressErrorRendering: 문법 오류 때 mermaid 가 body 끝에 별도 오류 SVG 를 붙이는 것을 막는다(우리는 캡션으로 알린다).
+  return { startOnLoad: false, securityLevel: "strict", suppressErrorRendering: true, theme: dark ? "dark" : "neutral", fontFamily: "inherit" };
 }
 
 /** figure 하나하나를 SVG 로 바꾼다. 문법 오류인 figure 는 원문 <pre> 를 두고 캡션만 오류 문구로. */
@@ -19,7 +20,7 @@ export async function renderMermaidFigures(
   mermaid: MermaidLike,
   opts: { dark: boolean; errorText: string; idPrefix?: string },
 ): Promise<{ ok: number; failed: number }> {
-  const figs = Array.from(container.querySelectorAll<HTMLElement>("figure.project-diagram:not([data-rendered])"));
+  const figs = Array.from(container.querySelectorAll<HTMLElement>("figure.project-diagram")).filter((f) => !f.hasAttribute("data-rendered"));
   if (!figs.length) return { ok: 0, failed: 0 };
   mermaid.initialize(mermaidConfig(opts.dark));
   let ok = 0, failed = 0, i = 0;
@@ -45,12 +46,13 @@ export async function renderMermaidFigures(
   return { ok, failed };
 }
 
-/** 새창 페이지용 — 위 함수와 같은 절차의 순수 JS(빌드 없이 <script nonce> 로 들어간다). 바꾸면 위 함수도 같이. */
+/** 새창 페이지용 — 위 함수와 같은 절차의 순수 JS(빌드 없이 <script nonce> 로 들어간다).
+ *  설정 객체는 mermaidConfig() 를 JSON 으로 박아 넣어 TS 쪽과 갈라질 수 없다. 절차가 바뀌면 위 함수도 같이. */
 export const MERMAID_INLINE_JS =
-  '(function(){var figs=document.querySelectorAll("figure.project-diagram:not([data-rendered])");' +
+  '(function(){var figs=Array.prototype.filter.call(document.querySelectorAll("figure.project-diagram"),function(f){return !f.hasAttribute("data-rendered")});' +
   'if(!figs.length||!window.mermaid)return;' +
   'var dark=window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches;' +
-  'mermaid.initialize({startOnLoad:false,securityLevel:"strict",theme:dark?"dark":"neutral",fontFamily:"inherit"});' +
+  `mermaid.initialize(dark?${JSON.stringify(mermaidConfig(true))}:${JSON.stringify(mermaidConfig(false))});` +
   'var i=0,stamp=Date.now().toString(36);' +
   'figs.forEach(function(fig){var pre=fig.querySelector("pre.mermaid-src");var cap=fig.querySelector(".mermaid-pending");' +
   'mermaid.render("pd-"+stamp+"-"+(i++),pre?pre.textContent:"").then(function(r){' +
