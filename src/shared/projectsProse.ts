@@ -36,16 +36,16 @@ export function proseCss(headOffset: number): string {
 .projects-prose th{background:rgb(var(--surface-1));color:rgb(var(--slate-50));font-weight:600}
 #projects-toc{scroll-margin-top:var(--projects-head, ${headOffset}px)}
 .projects-toc{font-size:13px;line-height:1.4}
-.projects-toc-row{display:flex;align-items:flex-start;gap:2px;min-width:0}
-.projects-toc-caret{flex:0 0 18px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:5px;color:rgb(var(--slate-500));font-size:10px}
+.projects-toc-row{display:flex;align-items:flex-start;gap:1px;min-width:0}
+.projects-toc-caret{flex:0 0 16px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:5px;color:rgb(var(--slate-600));font-size:8px;opacity:.8;transition:transform .12s}
 .projects-toc-caret:hover{color:rgb(var(--slate-100));background:rgb(var(--surface-3) / .6)}
 .projects-toc-caret[aria-expanded="true"]{transform:rotate(90deg)}
-.projects-toc-head{flex:1 1 auto;min-width:0;text-align:left;padding:2px 6px;border-radius:6px;color:rgb(var(--slate-300));overflow-wrap:anywhere}
+.projects-toc-head{flex:1 1 auto;min-width:0;text-align:left;padding:3px 6px;border-radius:6px;color:rgb(var(--slate-300));display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;line-height:1.35}
 .projects-toc-head:hover{color:rgb(var(--slate-100));background:rgb(var(--surface-3) / .5)}
 .projects-toc-head[aria-current="true"]{color:rgb(var(--slate-50));font-weight:600;background:rgb(var(--accent) / .14);box-shadow:inset 2px 0 0 rgb(var(--accent))}
-.projects-toc-children{display:flex;flex-direction:column;padding:1px 0 3px 32px}
+.projects-toc-children{display:flex;flex-direction:column;padding:1px 0 4px 22px}
 .projects-toc-sec[data-open="false"] .projects-toc-children{display:none}
-.projects-toc-children a{display:block;color:rgb(var(--slate-400));text-decoration:none;padding:1px 6px;border-radius:5px;font-size:12.5px;overflow-wrap:anywhere}
+.projects-toc-children a{display:block;color:rgb(var(--slate-400));text-decoration:none;padding:2px 6px;border-radius:5px;font-size:12.5px;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;line-height:1.35}
 .projects-toc-children a:hover{color:rgb(var(--slate-100));background:rgb(var(--surface-3) / .5)}
 .projects-toc-children a[aria-current="true"]{color:var(--accent-soft-text);font-weight:600}
 .projects-toc-children a[data-level="4"],.projects-toc-children a[data-level="5"],.projects-toc-children a[data-level="6"]{padding-left:16px;font-size:12px}

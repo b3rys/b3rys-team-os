@@ -154,8 +154,8 @@ describe("Projects 문서 화면", () => {
     expect(root.querySelectorAll("#projects-viewer pre.mermaid-src")).toHaveLength(1);
     expect(root.querySelectorAll("#projects-viewer .mermaid-pending")).toHaveLength(1);
     expect(root.querySelectorAll("#projects-viewer .projects-mermaid-badge")).toHaveLength(0);
-    // 트리 칸은 데스크톱 220px 열, 모바일은 접힘(목차 버튼)
-    expect(toc.parentElement?.className).toContain("md:grid-cols-[220px_minmax(0,1fr)]");
+    // 트리 칸은 데스크톱 240px 열, 모바일은 접힘(목차 버튼)
+    expect(toc.parentElement?.className).toContain("md:grid-cols-[240px_minmax(0,1fr)]");
     expect(toc.className).toContain("hidden");
     expect(root.querySelector("#projects-toc-toggle")?.getAttribute("aria-expanded")).toBe("false");
     const sha7 = fixture.summary.sha.slice(0, 7);
@@ -554,6 +554,16 @@ describe("문서 헤더 — 한 줄 · 문서 전환 칩 · 새창 · 글자 크
     expect(root.querySelector('.projects-doc-chip[aria-current="page"]')?.textContent?.trim()).toBe("FEATURES");
     expect(root.querySelector('.projects-mode[data-mode="md"]')?.getAttribute("aria-pressed")).toBe("true");
     expect(root.querySelector<HTMLAnchorElement>("#projects-open-window")!.getAttribute("href")).toContain("/doc/features/page?mode=md");
+  });
+
+  test("목차 글자는 이모지·장식 기호를 뺀다(tocLabel) — 본문 제목·title 은 원문 그대로", async () => {
+    const { tocLabel } = await import("./Projects");
+    expect(tocLabel("🔄 GD 실사용 피드백 (2026-09-06)")).toBe("GD 실사용 피드백 (2026-09-06)");
+    expect(tocLabel("📌 프로젝트 관리 스킬 — ★킵. Cmd+K 때 같이 만든다★")).toBe("프로젝트 관리 스킬 — 킵. Cmd+K 때 같이 만든다");
+    expect(tocLabel("🎯 Steno 목표 (GD 2026-09-13 12:24) — 킵")).toBe("Steno 목표 (GD 2026-09-13 12:24) — 킵");
+    expect(tocLabel("✅ 완료된 것 🧹")).toBe("완료된 것");
+    expect(tocLabel("1단계 — Typora 식 편집")).toBe("1단계 — Typora 식 편집");
+    expect(tocLabel("🎉")).toBe("🎉"); // 전부 기호면 원문 유지
   });
 
   test("목록 카드에도 새창 링크(README·HTML 로 시작)", async () => {
