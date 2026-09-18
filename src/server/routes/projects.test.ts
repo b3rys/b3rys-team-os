@@ -99,6 +99,7 @@ describe("새창 페이지 /doc/:key/page", () => {
     expect(html).toContain("<!doctype html>");
     expect(html).toContain("Content-Security-Policy");
     expect(html).toContain("base-uri 'none'; form-action 'none'");
+    expect(html).toContain("prefers-color-scheme: light"); // 대시보드처럼 시스템 라이트/다크를 따른다
     expect(html).not.toContain("<script");
     expect(html).toContain('class="chip on"');                       // 현재 문서(README) 칩
     expect(html).toContain('href="/team/api/projects/sample/doc/design/page"');   // 같은 창에서 다른 문서로

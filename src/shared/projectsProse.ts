@@ -45,7 +45,9 @@ export function proseCss(headOffset: number): string {
 }
 
 /** 새창(독립) 페이지용 변수 — src/web/styles.css 의 다크 팔레트와 같은 값. */
-export const PAGE_VARS_CSS = `:root{--slate-50:246 247 249;--slate-100:240 242 244;--slate-200:218 220 225;--slate-300:188 191 198;--slate-400:157 161 169;--slate-500:144 151 160;--slate-600:117 123 133;--surface-0:14 16 19;--surface-1:24 26 31;--surface-2:30 33 39;--surface-3:44 48 56;--border:52 57 66;--accent:61 220 132;--accent-soft-text:#6fd9a0}`;
+// 대시보드 styles.css 의 :root 값과 같게(다크 기본 · 라이트는 prefers-color-scheme 오버라이드). 값이 바뀌면 여기도 맞춘다.
+export const PAGE_VARS_CSS = `:root{color-scheme:dark light;--surface-0:13 15 18;--surface-1:20 22 25;--surface-2:23 25 29;--surface-3:33 36 42;--border:43 47 54;--slate-50:246 247 249;--slate-100:240 242 244;--slate-200:218 220 225;--slate-300:188 191 198;--slate-400:157 161 169;--slate-500:144 151 160;--slate-600:117 123 133;--accent:61 220 132;--accent-soft-text:#6fd9a0;--txt-amber:#f0bd6a}
+@media (prefers-color-scheme: light){:root{--surface-0:236 238 241;--surface-1:243 244 246;--surface-2:247 248 250;--surface-3:255 255 255;--border:231 232 236;--slate-50:20 21 26;--slate-100:28 29 34;--slate-200:51 53 60;--slate-300:74 77 85;--slate-400:80 83 91;--slate-500:92 95 103;--slate-600:109 112 121;--accent:31 157 90;--accent-soft-text:#198a52;--txt-amber:#875a0e}}`;
 
 export const DOC_KEYS_ORDER = ["readme", "design", "features", "todo"] as const;
 export const DOC_LABELS: Record<string, string> = { readme: "README", design: "DESIGN", features: "FEATURES", todo: "TODO" };
