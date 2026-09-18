@@ -15,6 +15,7 @@ import { mdInlineToHtml } from "../lib/mdInline";
 import { applyPanelCollapsed, isPanelCollapsed, onPanelChange, PANEL_IDS, type Panel } from "../lib/panels";
 import { splitSections, type DocSection } from "../lib/projectSections";
 import { proseCss } from "../../shared/projectsProse";
+import { renderMermaidFigures, type MermaidLike } from "../../shared/mermaidFigures";
 import { renderIcon } from "../icons";
 import { apiBase } from "../ws";
 
@@ -442,17 +443,23 @@ function scrollToAnchor(viewer: HTMLElement, anchor: string, smooth = true): voi
   target?.scrollIntoView?.({ behavior: smooth ? "smooth" : "auto", block: "start" });
 }
 
+// mermaid 는 5MB 라 문서에 다이어그램이 있을 때만 별도 청크로 받는다. 테스트는 setMermaidLoader 로 가짜를 넣는다.
+let _mermaidLoader: () => Promise<MermaidLike> = () => import("mermaid").then((m) => (m.default ?? m) as unknown as MermaidLike);
+let _mermaidMod: Promise<MermaidLike> | null = null;
+export function setMermaidLoader(fn: (() => Promise<MermaidLike>) | null): void {
+  _mermaidLoader = fn ?? (() => import("mermaid").then((m) => (m.default ?? m) as unknown as MermaidLike));
+  _mermaidMod = null;
+}
+/** 다이어그램 figure 를 SVG 로. 로드·렌더 실패 시 서버가 넣은 "렌더 예정" 캡션과 원문이 그대로 남는다. */
 function decorateMermaid(container: HTMLElement): number {
-  const pres = Array.from(container.querySelectorAll<HTMLElement>("pre.mermaid-src"));
-  for (const pre of pres) {
-    // 서버가 <figure> 안에 <figcaption class="mermaid-pending"> 를 이미 넣는다 — 그러면 배지를 겹쳐 붙이지 않는다(두 줄 중복).
-    if (pre.parentElement?.querySelector(".mermaid-pending")) continue;
-    const badge = document.createElement("div");
-    badge.className = "projects-mermaid-badge";
-    badge.textContent = pick("다이어그램 (렌더 예정)", "Diagram (render pending)");
-    pre.parentElement?.insertBefore(badge, pre);
-  }
-  return pres.length;
+  const count = container.querySelectorAll("figure.project-diagram").length;
+  if (!count) return 0;
+  const dark = typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches;
+  _mermaidMod ??= _mermaidLoader();
+  void _mermaidMod
+    .then((m) => renderMermaidFigures(container, m, { dark, errorText: pick("다이어그램 문법 오류 — 원문 표시", "Diagram syntax error — showing source") }))
+    .catch(() => { _mermaidMod = null; });
+  return count;
 }
 
 function todoStatusHtml(p: ProjectSummary | null, doc: ProjectDoc): string {

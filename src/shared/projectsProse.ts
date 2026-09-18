@@ -1,3 +1,5 @@
+import { MERMAID_INLINE_JS } from "./mermaidFigures";
+
 // Projects 문서 본문(.projects-prose) 스타일 — 대시보드(Projects.ts)와 새창 페이지(routes/projects.ts) 가 같은 규칙을 쓴다.
 //   한 곳에만 두면 다른 쪽이 조용히 어긋난다. 색은 대시보드 CSS 변수(--slate-*, --accent 등)를 그대로 쓰고,
 //   새창 페이지는 그 변수 값을 자기 :root 에 박아 온다(PAGE_VARS_CSS).
@@ -25,7 +27,10 @@ export function proseCss(headOffset: number): string {
 .projects-prose pre{background:rgb(var(--surface-0));border:1px solid rgb(var(--border));border-radius:10px;padding:14px 16px;overflow-x:auto;margin:1em 0;max-width:100%}
 .projects-prose pre code{background:none;border:0;padding:0;color:rgb(var(--slate-200))}
 .projects-prose pre.mermaid-src{margin-top:0;border-top-left-radius:0;border-top-right-radius:0}
-.projects-prose .projects-mermaid-badge{display:inline-flex;align-items:center;gap:6px;margin-top:1em;padding:3px 10px;border:1px solid rgb(var(--border));border-bottom:0;border-radius:8px 8px 0 0;background:rgb(var(--surface-1));font-size:11px;font-weight:600;color:var(--txt-amber)}
+.projects-prose figure.project-diagram{margin:1.2em 0}
+.projects-prose figure.project-diagram figcaption.mermaid-pending{font-size:11px;font-weight:600;color:var(--txt-amber);margin-bottom:4px}
+.projects-prose .project-diagram-svg{overflow-x:auto;padding:12px 14px;border:1px solid rgb(var(--border));border-radius:10px;background:rgb(var(--surface-1))}
+.projects-prose .project-diagram-svg svg{max-width:100%;height:auto;display:block;margin:0 auto}
 .projects-prose blockquote{border-left:3px solid rgb(var(--accent) / .5);padding:.2em 0 .2em 14px;margin:1em 0;color:rgb(var(--slate-400))}
 .projects-prose strong{color:rgb(var(--slate-50));font-weight:600}
 .projects-prose hr{border:0;border-top:1px solid rgb(var(--border));margin:1.6em 0}
@@ -60,6 +65,10 @@ export const PAGE_VARS_CSS = `:root{color-scheme:dark light;--surface-0:13 15 18
 
 /** 새창 페이지 CSP. meta 와 응답 헤더 양쪽에 같은 값을 쓴다(헤더에는 frame-ancestors 를 더한다 — meta 로는 못 건다). */
 export const STANDALONE_CSP = "default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
+/** 다이어그램이 있는 문서만 스크립트를 허용한다 — 우리 서버의 mermaid 파일('self') + nonce 가 붙은 인라인 하나. */
+export function standaloneCsp(nonce?: string | null): string {
+  return nonce ? `${STANDALONE_CSP}; script-src 'self' 'nonce-${nonce}'` : STANDALONE_CSP;
+}
 export const DOC_KEYS_ORDER = ["readme", "design", "features", "todo"] as const;
 export const DOC_LABELS: Record<string, string> = { readme: "README", design: "DESIGN", features: "FEATURES", todo: "TODO" };
 
@@ -73,8 +82,14 @@ export function standaloneDocPage(opts: {
   projectId: string; projectName: string; title: string; path: string; sha: string;
   key: string; mode: "html" | "md"; html: string; md: string;
   exists: Record<string, boolean>; basePath: string; githubUrl: string | null;
+  /** 문서에 mermaid 펜스가 있을 때만 — nonce 는 요청마다 새로. html 모드에서만 쓴다. */
+  mermaidNonce?: string | null;
 }): string {
   const { projectId, projectName, title, path, sha, key, mode, basePath, githubUrl } = opts;
+  const nonce = mode === "html" ? opts.mermaidNonce ?? null : null;
+  const scripts = nonce
+    ? `\n<script nonce="${esc(nonce)}" src="${esc(`${basePath}/api/projects/vendor/mermaid.min.js`)}"></script>\n<script nonce="${esc(nonce)}">${MERMAID_INLINE_JS}</script>`
+    : "";
   const pageUrl = (k: string, m: "html" | "md") => `${basePath}/api/projects/${encodeURIComponent(projectId)}/doc/${k}/page${m === "md" ? "?mode=md" : ""}`;
   const chips = DOC_KEYS_ORDER.map((k) => opts.exists[k]
     ? `<a class="chip${k === key ? " on" : ""}" href="${esc(pageUrl(k, mode))}">${DOC_LABELS[k]}</a>`
@@ -85,7 +100,7 @@ export function standaloneDocPage(opts: {
     : `<article class="projects-prose">${opts.html}</article>`;
   return `<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="${STANDALONE_CSP}">
+<meta http-equiv="Content-Security-Policy" content="${standaloneCsp(nonce)}">
 <title>${esc(projectName)} · ${esc(title)}</title>
 <style>${PAGE_VARS_CSS}
 html,body{margin:0;background:rgb(var(--surface-1));color:rgb(var(--slate-200));font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
@@ -100,5 +115,5 @@ main{max-width:1100px;margin:0 auto;padding:20px 24px 80px}
 .projects-raw{white-space:pre-wrap;overflow-wrap:anywhere;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.6;color:rgb(var(--slate-200));background:rgb(var(--surface-2));border:1px solid rgb(var(--surface-3));border-radius:12px;padding:16px 20px}
 ${proseCss(64)}</style></head>
 <body><div class="bar"><span class="t">${esc(projectName)}</span><span class="m">${esc(path)} · ${esc(sha.slice(0, 7))}</span>${githubUrl ? `<a class="gh" href="${esc(githubUrl)}" target="_blank" rel="noopener">GitHub</a>` : ""}<span class="sp"></span>${chips}<span style="width:8px"></span>${modes}</div>
-<main>${body}</main></body></html>`;
+<main>${body}</main>${scripts}</body></html>`;
 }

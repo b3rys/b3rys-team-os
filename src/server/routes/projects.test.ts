@@ -19,6 +19,7 @@ function setup() {
   const source = new GitHubDocs({ cacheDir: dir, useToken: false, fetch: (async (url: any) => {
     if (fail) return new Response("upstream details", { status: 401 });
     if (String(url).includes("/branches/")) return Response.json({ commit: { sha: "a".repeat(40) } });
+    if (String(url).endsWith("/DESIGN.md")) return new Response("# Design\n\nNo diagrams here.\n");
     return new Response("# Sample\n\nUseful app.\n\n<script>alert(1)</script>\n\n- [~] working\n- [x] done\n## 📌 킵\n- [ ] held\n## next\n- [ ] plan\n\n```mermaid\ngraph TD\nA-->B\n```");
   }) as typeof fetch });
   const app = new Hono();
@@ -95,22 +96,48 @@ describe("새창 페이지 /doc/:key/page", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toStartWith("text/html");
     expect(res.headers.get("x-project-sha")).toBe("a".repeat(40));
-    expect(res.headers.get("content-security-policy")).toBe("default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+    // 이 픽스처엔 mermaid 펜스가 있다 → 스크립트는 우리 서버('self') + 요청마다 새 nonce 인라인 하나만
+    const csp = res.headers.get("content-security-policy")!;
+    expect(csp).toMatch(/^default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; script-src 'self' 'nonce-[A-Za-z0-9_-]{22}'; frame-ancestors 'none'$/);
+    const nonce = csp.match(/'nonce-([A-Za-z0-9_-]{22})'/)![1]!;
     const html = await res.text();
+    expect(html).toContain(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; script-src 'self' 'nonce-${nonce}'">`);
+    expect(html).toContain(`<script nonce="${nonce}" src="/team/api/projects/vendor/mermaid.min.js"></script>`);
+    expect(html).toContain(`<script nonce="${nonce}">(function(){var figs=Array.prototype.filter.call(document.querySelectorAll("figure.project-diagram")`);
+    expect(html.match(/<script/g)).toHaveLength(2);
+    expect(html).toContain('<figure class="project-diagram">');
+    const res2 = await app.request("http://localhost/team/api/projects/sample/doc/readme/page");
+    expect(res2.headers.get("content-security-policy")).not.toBe(csp); // nonce 는 요청마다 다르다
+    // mermaid 펜스가 없는 html 문서(DESIGN 픽스처)는 예전 그대로 — script-src 없음·<script> 0
+    const res3 = await app.request("http://localhost/team/api/projects/sample/doc/design/page");
+    expect(res3.headers.get("content-security-policy")).toBe("default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+    const html3 = await res3.text();
+    expect(html3).not.toContain("<script");
+    expect(html3).toContain("No diagrams here.");
     expect(html).toContain("<!doctype html>");
-    expect(html).toContain("Content-Security-Policy");
-    expect(html).toContain("base-uri 'none'; form-action 'none'");
     expect(html).toContain("prefers-color-scheme: light"); // 대시보드처럼 시스템 라이트/다크를 따른다
-    expect(html).not.toContain("<script");
     expect(html).toContain('class="chip on"');                       // 현재 문서(README) 칩
     expect(html).toContain('href="/team/api/projects/sample/doc/design/page"');   // 같은 창에서 다른 문서로
     expect(html).toContain('href="/team/api/projects/sample/doc/readme/page?mode=md"'); // MD 링크
     expect(html).toContain('<article class="projects-prose">');
     expect(html).toContain("Useful app.");
   });
-  test("md 모드: 원문을 이스케이프한 <pre> — 마크다운의 < 가 태그가 되지 않는다", async () => {
+  test("mermaid 번들 경로: 우리 서버가 node_modules 의 파일을 JS 로 준다", async () => {
     const { app } = setup();
-    const html = await (await app.request("http://localhost/team/api/projects/sample/doc/readme/page?mode=md")).text();
+    const res = await app.request("http://localhost/team/api/projects/vendor/mermaid.min.js");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toStartWith("application/javascript");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("cache-control")).toBe("public, max-age=86400"); // 문서용 no-store 미들웨어가 덮지 않는다
+    const head = (await res.text()).slice(0, 4000);
+    expect(head).toContain("mermaid");
+  });
+  test("md 모드: 원문을 이스케이프한 <pre> — 마크다운의 < 가 태그가 되지 않는다 · 스크립트 없음", async () => {
+    const { app } = setup();
+    const res = await app.request("http://localhost/team/api/projects/sample/doc/readme/page?mode=md");
+    expect(res.headers.get("content-security-policy")).toBe("default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+    const html = await res.text();
+    expect(html).not.toContain("<script");
     expect(html).toContain('<pre class="projects-raw">');
     expect(html).toContain("```mermaid");
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;"); // 원문의 태그는 글자로만
