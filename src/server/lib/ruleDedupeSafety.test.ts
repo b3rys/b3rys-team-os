@@ -34,14 +34,14 @@ const teamOsRendered: string | null = existsSync(renderedPath) ? readFileSync(re
 
 /** 핵심룰에서 뺀 5개의 ★실행 세부★ — 주제어가 아니라 그 결정을 쓸 수 있게 만드는 문구다. */
 const MOVED_DETAILS = [
-  "respond before autonomous work",              // ① 자율 작업보다 팀장 메시지가 먼저
-  "ack or react first",                          // ①
-  "greeting/status/opinion/wording/simple lookup", // ② 가벼운 질문의 범위
-  "no output, files, or external fetch in the first response", // ③ 첫 응답 금지
-  "must you invent the criteria?",               // ③ 열린과제 판별 테스트
-  "briefly, in one consolidated response",       // ④ 한 번에 묶어 짧게
-  "who·context·task·done-criteria·deadline",     // ⑤ 핸드오프 구성요소
-  "outside your role → PM and delegate",         // ⑤ 역할 밖이면 위임
+  "자율 작업보다 먼저 답한다",                    // ① 자율 작업보다 팀장 메시지가 먼저
+  "먼저 ack",                                     // ①
+  "인사·상태·의견·표현·간단 조회",                 // ② 가벼운 질문의 범위
+  "첫 응답에 산출물·파일·외부 조회 없음",          // ③ 첫 응답 금지
+  "기준을 내가 지어내야 하나",                     // ③ 열린과제 판별 테스트
+  "한 번에",                                      // ④ 한 번에 묶어 짧게
+  "누가·맥락·과제·완료기준·기한",                  // ⑤ 핸드오프 구성요소
+  "내 역할 밖이면 PM 이 위임",                     // ⑤ 역할 밖이면 위임
 ];
 
 describe("★핵심룰에서 뺀 절차는 TEAM-OS 가 '실행 가능한 형태로' 받아야 한다★", () => {
@@ -82,8 +82,8 @@ describe("★핵심룰에서 뺀 절차는 TEAM-OS 가 '실행 가능한 형태�
         id: "tester", display_name: "Tester", role: "QA",
         runtime, owner_name: "GD", team_name: "b3rys",
       } as never);
-      for (const d of ["respond before autonomous work", "must you invent the criteria?",
-                       "who·context·task·done-criteria·deadline", "outside your role → PM and delegate"]) {
+      for (const d of ["자율 작업보다 먼저 답한다", "기준을 내가 지어내야 하나",
+                       "누가·맥락·과제·완료기준·기한", "내 역할 밖이면 PM 이 위임"]) {
         expect(agents, `★${runtime} 파일에 없다: "${d}"★ — 이 런타임은 TEAM-OS 를 안 싣는다.`)
           .toContain(d);
       }

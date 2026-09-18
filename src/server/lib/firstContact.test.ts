@@ -41,7 +41,7 @@ test("★페르소나와 지시서가 같은 파일 이름을 본다★ — 어�
   ]) {
     expect(doc).toContain(JOIN_FLAG_FILE);
     // 파일을 ★읽고·따르고·지우라★ 는 세 지시가 다 있어야 절차가 끝까지 돈다.
-    expect(doc).toMatch(/read it, follow it, then `rm` it/i);
+    expect(doc).toMatch(/읽고 따른 뒤 `rm` 한다/);
   }
 });
 
@@ -73,10 +73,10 @@ test("★톤 지시가 렌더본에 항상 있다★ — SOUL.md 는 선택 파�
     buildAgentsMd({ ...M, runtime: "openclaw" }),
     buildAgentsMd({ ...M, runtime: "hermes_agent" }),
   ]) {
-    expect(doc).toMatch(/friendly but technically precise/i);
-    expect(doc).toMatch(/short, clear answers/i);
+    expect(doc).toMatch(/친근하되 기술적으로 정확/);
+    expect(doc).toMatch(/짧고 명확하게/);
     // 용어 풀이 — 이건 어디에도 중복이 없다.
-    expect(doc).toMatch(/gloss jargon/i);
+    expect(doc).toMatch(/풀어 쓴다/);
   }
 });
 });

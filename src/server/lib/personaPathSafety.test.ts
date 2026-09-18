@@ -12,6 +12,7 @@
 import { describe, expect, it } from "bun:test";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { buildAgentsMd, buildPersona, REPO_ROOT } from "./personaTemplates";
+import { buildSkillsMd } from "./skillsRender";
 
 const RUNTIMES = ["claude_channel", "openclaw", "hermes"] as const;
 
@@ -68,28 +69,23 @@ describe("★스킬 목록은 디렉터리에서 생성된다 — 손으로 나�
   const undeclared = skillNames.filter((n) => !declared.includes(n));
 
   it("trigger 를 선언한 스킬은 전부 나온다 (선언 0개면 목록도 비어야 한다 — 머지 전 상태)", () => {
-    for (const runtime of RUNTIMES) {
-      const missing = declared.filter((n) => !render(runtime).includes(n));
-      expect(missing, `★${runtime} 룰에 빠진 스킬★: ${missing.join(", ")}`).toHaveLength(0);
-    }
+    const md = buildSkillsMd();  // 목록은 규칙 파일이 아니라 rules/SKILLS.md 렌더본에 있다
+    const missing = declared.filter((n) => !md.includes(n));
+    expect(missing, `★SKILLS.md 에 빠진 스킬★: ${missing.join(", ")}`).toHaveLength(0);
   });
 
   it("★은퇴(deprecated)한 스킬은 목록에 나가지 않는다★ — trigger 가 붙어 있어도", () => {
     const dep = skillNames.filter((n) =>
       /deprecat/i.test(readFileSync(`${REPO_ROOT}/skills/${n}/SKILL.md`, "utf8").slice(0, 800)));
-    for (const runtime of RUNTIMES) {
-      const line = render(runtime).split("\n").find((l) => l.includes("→ `b3os-")) ?? "";
-      const leaked = dep.filter((n) => line.includes(n));
-      expect(leaked, `★은퇴한 스킬을 안내한다★: ${leaked.join(", ")}`).toHaveLength(0);
-    }
+    const line = buildSkillsMd().split("\n").find((l) => l.includes("→ `b3os-")) ?? "";
+    const leaked = dep.filter((n) => line.includes(n));
+    expect(leaked, `★은퇴한 스킬을 안내한다★: ${leaked.join(", ")}`).toHaveLength(0);
   });
 
   it("★trigger 를 선언하지 않은 스킬은 새어나가지 않는다★ — 기본값은 비공개다", () => {
-    for (const runtime of RUNTIMES) {
-      const line = render(runtime).split("\n").find((l) => l.includes("→ `b3os-")) ?? "";
-      const leaked = undeclared.filter((n) => line.includes(n));
-      expect(leaked, `★선언 안 한 스킬이 나갔다★: ${leaked.join(", ")}`).toHaveLength(0);
-    }
+    const line = buildSkillsMd().split("\n").find((l) => l.includes("→ `b3os-")) ?? "";
+    const leaked = undeclared.filter((n) => line.includes(n));
+    expect(leaked, `★선언 안 한 스킬이 나갔다★: ${leaked.join(", ")}`).toHaveLength(0);
   });
 
   it("룰에 없는 스킬 이름을 지어내지 않는다 — 존재하지 않는 스킬로 안내하면 팀원이 헤맨다", () => {

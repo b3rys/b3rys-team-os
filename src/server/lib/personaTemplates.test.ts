@@ -1,5 +1,7 @@
 // Claude 전용 소통 섹션(SECTION_CLAUDE_COMMS) 주입 — idempotency + runtime-split 회귀 가드.
 // churn 버그(comms가 마지막 섹션이면 매 실행 재기록) 재발 방지.
+import { buildSkillsMd } from "./skillsRender";
+import { SKILLS_MD_PATH } from "./personaTemplates";
 import { describe, test, expect } from "bun:test";
 import { afterEach } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
@@ -40,7 +42,7 @@ test("openclaw AGENTS.md엔 claude 전용 comms 미포함 + registry 정체성 �
 });
 
 test("runtime-split: buildAgentsMd가 Skill Workshop(openclaw 전용)을 hermes엔 미포함", () => {
-  const MARKER = "OpenClaw's own Skill Workshop";
+  const MARKER = "OpenClaw 의 Skill Workshop 이 아니다";
   expect(buildAgentsMd({ ...claudeInput, runtime: "openclaw" }).includes(MARKER)).toBe(true);
   expect(buildAgentsMd({ ...claudeInput, runtime: "hermes_agent" }).includes(MARKER)).toBe(false);
 });
@@ -58,14 +60,14 @@ test("runtime-split: buildAgentsMd가 Skill Workshop(openclaw 전용)을 hermes�
  */
 describe("핵심룰 — '외부 전송' 판별 축", () => {
   const approvalBullet = (md: string): string =>
-    md.split("\n").find((l) => l.includes("external send")) ?? "";
+    md.split("\n").find((l) => l.includes("외부 발송")) ?? "";
 
   for (const runtime of ["openclaw", "hermes_agent"] as const) {
     test(`${runtime} 산출물에 판별 축이 들어간다 — 단어만 남으면 뜻이 매번 다시 만들어진다`, () => {
       const bullet = approvalBullet(buildAgentsMd({ ...claudeInput, runtime }));
-      expect(bullet, "★승인 게이트 줄을 못 찾았다★").toContain("external send");
-      expect(bullet, "★판별 축(누가 받는가)이 없다★").toMatch(/who receives|recipient/);
-      expect(bullet, "★저장소 안 작업이 외부 전송이 아니라는 것이 빠졌다★").toMatch(/repo|PR/);
+      expect(bullet, "★승인 게이트 줄을 못 찾았다★").toContain("외부 발송");
+      expect(bullet, "★판별 축(누가 받는가)이 없다★").toMatch(/받는 사람/);
+      expect(bullet, "★저장소 안 작업이 외부 전송이 아니라는 것이 빠졌다★").toMatch(/저장소|PR/);
     });
   }
 
@@ -84,9 +86,9 @@ describe("핵심룰 — '외부 전송' 판별 축", () => {
       join(import.meta.dir, "../../../rules/TEAM-OS.template.md"),
       "utf8",
     );
-    const bullet = template.split("\n").find((l) => l.includes("Approval gate")) ?? "";
-    expect(bullet, "★승인 게이트 줄을 못 찾았다★").toContain("external send");
-    expect(bullet, "★판별 축(누가 받는가)이 없다★").toMatch(/who receives|recipient/);
+    const bullet = template.split("\n").find((l) => l.includes("승인 게이트")) ?? "";
+    expect(bullet, "★승인 게이트 줄을 못 찾았다★").toContain("외부 발송");
+    expect(bullet, "★판별 축(누가 받는가)이 없다★").toMatch(/받는 사람/);
   });
 });
 
@@ -124,7 +126,7 @@ describe("한국어 설명·보고 — Core Rules 맨 앞에 있나", () => {
       const core = md.indexOf("## ⭐ Core Rules");
       const rule = md.indexOf("**한국어 설명·보고**");
       const clock = md.indexOf("> ⏰");
-      const base = md.indexOf("**Base execution**");
+      const base = md.indexOf("**기본 실행**");
       expect(core, "★Core Rules 헤더가 없다★").toBeGreaterThan(-1);
       expect(rule, "★한국어 설명·보고 블록이 없다★").toBeGreaterThan(core);
       expect(rule, "★⏰ 줄보다 뒤로 밀렸다★").toBeLessThan(clock);
@@ -181,17 +183,22 @@ describe("한국어 설명·보고 — 산출물에 다섯 줄이 다 있나", (
 
 // 스킬 목록은 각 SKILL.md 의 frontmatter trigger 에서 생성된다. 이 줄이 12명에게
 // 스킬 존재를 알리는 유일한 통로라, 위 블록이 이름을 불러도 목록에 없으면 못 찾는다.
-describe("스킬 목록 — b3os-how-to-explain 이 들어 있나", () => {
+describe("스킬 목록 — 규칙 파일이 아니라 rules/SKILLS.md 에 있다", () => {
+  // 목록이 규칙 파일 본문에 있으면 스킬 하나 추가가 12명 규칙 파일 재생성이 된다(팀장 2026-09-18).
+  // 규칙 파일은 가리키기만 하고(claude=@SKILLS.md · 그 외=경로), 목록 자체는 SKILLS.md 렌더본에 있다.
+  test("SKILLS.md 렌더본에 b3os-how-to-explain 이 있고 표 헤더가 있다", () => {
+    const md = buildSkillsMd();
+    expect(md).toContain("**Skills — pick by trigger**");
+    expect(md, "★b3os-how-to-explain 이 목록에 없다★").toContain("`b3os-how-to-explain`");
+  });
   for (const runtime of ["claude_channel", "openclaw", "hermes_agent", "codex"] as const) {
-    test(`${runtime} 산출물 스킬 목록에 b3os-how-to-explain`, () => {
-      const md =
-        runtime === "claude_channel"
-          ? buildPersona(claudeInput)
-          : buildAgentsMd({ ...claudeInput, runtime });
-      const i = md.indexOf("**Skills — pick by trigger**");
-      expect(i, "★스킬 목록 자체가 없다★").toBeGreaterThan(-1);
-      const list = md.slice(i, md.indexOf("\n\n", i));
-      expect(list, "★b3os-how-to-explain 이 목록에 없다★").toContain("`b3os-how-to-explain`");
+    test(`${runtime} 규칙 파일은 목록을 품지 않고 SKILLS.md 를 가리킨다`, () => {
+      const md = runtime === "claude_channel" ? buildPersona(claudeInput) : buildAgentsMd({ ...claudeInput, runtime });
+      expect(md, "★목록이 규칙 파일 본문에 다시 들어왔다★").not.toContain("**Skills — pick by trigger**");
+      expect(md, "★SKILLS.md 를 가리키는 줄이 없다★").toContain("SKILLS.md");
+      if (runtime === "claude_channel") expect(md).toContain("\n@SKILLS.md\n");
+      else expect(md, "★브릿지 런타임의 경로가 렌더 경로(SKILLS_MD_PATH)와 다르다★").toContain(SKILLS_MD_PATH.replace(process.env.HOME ?? "\u0000", "~"));
+      expect(buildSkillsMd(), "★목록 파일에 겹쳐 쓰기 규칙이 없다★").toContain("여러 trigger 가 맞으면 전부 적용한다");
     });
   }
 });
@@ -224,7 +231,7 @@ test("stripClaudeComms로 섹션 제거", () => {
 });
 
 test("SECTION_CLAUDE_COMMS는 reply 도구 핵심 문구 포함", () => {
-  expect(SECTION_CLAUDE_COMMS.includes("reply tool actually sends")).toBe(true);
+  expect(SECTION_CLAUDE_COMMS.includes("호출로만 도착한다")).toBe(true);
 });
 
 // ── i18n 영어룰 파일럿 override — teamOsPathFor + buildAgentsMd 임베드 경로 ──
@@ -281,15 +288,14 @@ const PERSONA = "# Steve\n\n" + SECTION_CORE_RULE + "\n\n## 능력\n\n- 풀스�
 
 test("SECTION_CORE_RULE_EN: 언어 불변(사용자 언어 유지) + 핵심 구조 보존", () => {
   expect(SECTION_CORE_RULE_EN.includes("## ⭐ Core Rules")).toBe(true);
-  expect(SECTION_CORE_RULE_EN.includes("reply in the language and register the user wrote in")).toBe(true);
-  expect(SECTION_CORE_RULE_EN.includes("Korean in → Korean out")).toBe(true);
+  expect(SECTION_CORE_RULE_EN.includes("사용자가 쓴 언어와 격식으로")).toBe(true);
   // 언어불변 라인엔 팀-특정(존대 for GD) 하드코딩 누출 없어야 — public-safe
   expect(SECTION_CORE_RULE_EN.includes("폴라이트 코리안")).toBe(false);
   expect(SECTION_CORE_RULE_EN.includes("polite Korean (존대) for GD")).toBe(false);
   // 3개 정책 블록 보존 (압축 구조: 기본실행/팀소통협업/안전검증 전체압축)
-  expect(SECTION_CORE_RULE_EN.includes("**Base execution**")).toBe(true);
-  expect(SECTION_CORE_RULE_EN.includes("**Team communication·collaboration**")).toBe(true);
-  expect(SECTION_CORE_RULE_EN.includes("**Safety·verification**")).toBe(true);
+  expect(SECTION_CORE_RULE_EN.includes("**기본 실행**")).toBe(true);
+  expect(SECTION_CORE_RULE_EN.includes("**팀 소통**")).toBe(true);
+  expect(SECTION_CORE_RULE_EN.includes("**안전·검증**")).toBe(true);
 });
 
 test("SECTION_CORE_RULE compatibility export points to the single core snippet", () => {
@@ -373,7 +379,7 @@ const countOf = (s: string, sub: string) => s.split(sub).length - 1;
 test("핵심룰 compatibility const: {{TEAM}}/{{OWNER}} 각 정확히 1회(상단 선언만) + 본문은 일반어", () => {
   expect(countOf(SECTION_CORE_RULE, "{{OWNER}}")).toBe(1); // 상단 선언 1회만, 본문 누출 0
   expect(countOf(SECTION_CORE_RULE, "{{TEAM}}")).toBe(1);
-  expect(SECTION_CORE_RULE.includes("the team lead")).toBe(true); // 본문 일반어
+  expect(SECTION_CORE_RULE.includes("팀장")).toBe(true); // 본문 일반어
   expect(SECTION_CORE_RULE.includes("GD message")).toBe(false); // 하드코딩 없음
   expect(SECTION_CORE_RULE.includes("GD reconfirms")).toBe(false);
 });
@@ -381,7 +387,7 @@ test("핵심룰 compatibility const: {{TEAM}}/{{OWNER}} 각 정확히 1회(상�
 test("핵심룰 const(EN): {{TEAM}}/{{OWNER}} 각 정확히 1회(상단 선언만) + 본문은 'the team lead'", () => {
   expect(countOf(SECTION_CORE_RULE_EN, "{{OWNER}}")).toBe(1);
   expect(countOf(SECTION_CORE_RULE_EN, "{{TEAM}}")).toBe(1);
-  expect(SECTION_CORE_RULE_EN.includes("the team lead")).toBe(true); // 본문 일반어
+  expect(SECTION_CORE_RULE_EN.includes("팀장")).toBe(true); // 본문 일반어
   expect(SECTION_CORE_RULE_EN.includes("GD message")).toBe(false);
   expect(SECTION_CORE_RULE_EN.includes("GD reconfirms")).toBe(false);
   expect(SECTION_CORE_RULE_EN.includes("GD specifies")).toBe(false);
@@ -391,7 +397,7 @@ test("coreRuleFor('bill','GD','b3rys'): 라이브 → 'GD'·'b3rys' 박힘, {{OW
   const r = coreRuleFor("bill", "GD", "b3rys");
   expect(r.includes("GD")).toBe(true);
   expect(r.includes("b3rys")).toBe(true);
-  expect(r.includes("the team lead")).toBe(true); // 본문 일반어(EN) 유지
+  expect(r.includes("팀장")).toBe(true); // 본문 일반어 유지
   expect(r.includes("{{OWNER}}")).toBe(false); // 라이브 페르소나에 placeholder 누출 = 실패
   expect(r.includes("{{TEAM}}")).toBe(false);
 });
@@ -400,14 +406,14 @@ test("coreRuleFor('bill') (owner/team 미지정): 퍼블릭-safe — {{OWNER}}/{
   const r = coreRuleFor("bill");
   expect(countOf(r, "{{OWNER}}")).toBe(1);
   expect(countOf(r, "{{TEAM}}")).toBe(1);
-  expect(r.includes("the team lead")).toBe(true); // 일반어 본문(EN)은 owner/team 무관하게 항상 존재
+  expect(r.includes("팀장")).toBe(true); // 일반어 본문은 owner/team 무관하게 항상 존재
 });
 
 test("buildAgentsMd(openclaw, owner_name:'GD', team_name:'b3rys'): 'GD'·'b3rys' 박힘, placeholder 누출 0", () => {
   const md = buildAgentsMd({ id: "x", display_name: "X", role: "dev", runtime: "openclaw", owner_name: "GD", team_name: "b3rys" });
   expect(md.includes("GD")).toBe(true);
   expect(md.includes("b3rys")).toBe(true);
-  expect(md.includes("the team lead")).toBe(true);
+  expect(md.includes("팀장")).toBe(true);
   expect(md.includes("{{OWNER}}")).toBe(false); // 라이브 생성물에 placeholder 누출 금지
   expect(md.includes("{{TEAM}}")).toBe(false);
 });
@@ -416,7 +422,7 @@ test("buildAgentsMd(openclaw, owner/team 없음): 퍼블릭 템플릿 — 핵심
   const md = buildAgentsMd({ id: "x", display_name: "X", role: "dev", runtime: "openclaw" });
   expect(md.includes("{{OWNER}}")).toBe(true);
   expect(md.includes("{{TEAM}}")).toBe(true);
-  expect(md.includes("the team lead")).toBe(true); // 일반어 본문(EN)
+  expect(md.includes("팀장")).toBe(true); // 일반어 본문
 });
 
 // extractCustomPersona 룰섹션 제거 검증 (config GET fallback용, buildPersonaFromCustom 제거로 round-trip 테스트는 폐기).
