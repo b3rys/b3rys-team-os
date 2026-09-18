@@ -438,13 +438,26 @@ RMID="m_fixture_1"
 # 네트워크 흔적: 조회 단계에 도달했다는 표시.
 reply_netmark() { grep -qE "curl|못 찾음|답장 대상|↳ reply" <<<"$1"; }
 
-# 막혀야 하는 입력: 종료코드가 0이 아니고 ★네트워크 흔적이 없어야★ 한다.
+# 막혀야 하는 입력: 세 겹으로 단정한다.
+#   ① 종료코드가 0이 아니다  ② 네트워크 흔적이 없다  ③ ★그 가드가 실제로 뱉는 문구가 있다★
+#
+# ★③ 이 없으면 ①②만으로는 가드가 0개여도 전부 '막힘' 으로 읽힌다.★ ② 는 부정 단정이고,
+# 그 증거를 만드는 것은 죽은 포트가 뱉는 `curl: (7)` 한 줄뿐이다. 조회가 조용히 성공하는
+# 상황(스텁·프록시·포트 점유)에서는 그 줄이 사라지고, 사라진 증거는 '도달하지 않았다' 와
+# 구분되지 않는다. 실측으로 확인됐다 — 가드 없는 reply.sh 에 조용히 성공하는 curl 을 놓으면
+# ①② 만으로는 전부 통과한다.
+#
+# ③ 은 케이스마다 ★자기 가드의 문구★ 를 받는다. 공통 정규식 하나로 묶으면 A 케이스가
+# B 가드의 메시지로 통과할 수 있다 — 어느 가드가 걸렸는지까지 고정해야 회귀를 잡는다.
+# (이 파일 A3-2 주석: 부정 단정에는 '실제로 끝까지 갔다' 는 증거를 같이 본다. A4-7 도 같은 이유로 두 겹이다.)
 reply_blocked() {
-  local d="$1"; shift
+  local d="$1" expect="$2"; shift 2
   local out rc
   out="$(TEAM_BASE="$DEADBASE" "$REPLY_SH" "$@" 2>&1)"; rc=$?
-  if [ $rc -ne 0 ] && ! reply_netmark "$out"; then
+  if [ $rc -ne 0 ] && ! reply_netmark "$out" && grep -qE "$expect" <<<"$out"; then
     pass "막힘 | $d"
+  elif [ $rc -ne 0 ] && ! reply_netmark "$out"; then
+    fail "★가드 문구 없이 죽었다 — 무엇이 막았는지 알 수 없다★ | $d (exit $rc) / $(tail -1 <<<"$out")"
   else
     fail "★누수★ | $d (exit $rc) / $(tail -1 <<<"$out")"
   fi
@@ -462,13 +475,13 @@ reply_passes() {
 }
 
 echo "── A5-a: 막혀야 하는 입력 (종료코드 + 네트워크 미도달) ──"
-reply_blocked "--body 중복"             "$RMID" --body AAA --body BBB
-reply_blocked "--priority 중복"          "$RMID" --body x --priority high --priority low
-reply_blocked "--hop 중복"               "$RMID" --body x --hop 1 --hop 2
-reply_blocked "--body-file 중복"         "$RMID" --body-file "$RB1" --body-file "$RB2"
-reply_blocked "--priority 화이트리스트 밖" "$RMID" --body x --priority bogus
+reply_blocked "--body 중복"             "중복 지정했다: --body$"      "$RMID" --body AAA --body BBB
+reply_blocked "--priority 중복"          "중복 지정했다: --priority"   "$RMID" --body x --priority high --priority low
+reply_blocked "--hop 중복"               "중복 지정했다: --hop"        "$RMID" --body x --hop 1 --hop 2
+reply_blocked "--body-file 중복"         "중복 지정했다: --body-file"  "$RMID" --body-file "$RB1" --body-file "$RB2"
+reply_blocked "--priority 화이트리스트 밖" "\-\-priority 는 low\|normal\|high" "$RMID" --body x --priority bogus
 # 이건 이미 막혀 있던 것이다 — 가드를 추가하다 깨뜨리지 않았는지 재는 회귀 단정이다.
-reply_blocked "--body + --body-file 동시"  "$RMID" --body x --body-file "$RB1"
+reply_blocked "--body + --body-file 동시"  "동시에 쓸 수 없습니다"       "$RMID" --body x --body-file "$RB1"
 
 echo "── A5-b: ★통과해야 하는 입력 (과차단 회귀 지점)★ ──"
 reply_passes "--body 단독"              "$RMID" --body "정상 본문"
