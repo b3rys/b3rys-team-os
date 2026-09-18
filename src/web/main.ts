@@ -543,7 +543,7 @@ function setupPanelToggles() {
     const def = PANEL_TOGGLE[panel];
     const btn = document.getElementById(def.id) as HTMLButtonElement | null;
     if (!btn) return;
-    btn.innerHTML = renderIcon(collapsed ? def.icon[0] : def.icon[1], { size: 12 });
+    btn.innerHTML = renderIcon(collapsed ? def.icon[0] : def.icon[1], { size: 14 });
     btn.title = `${def.label} ${collapsed ? "펼치기" : "접기"}`;
     btn.setAttribute("aria-label", btn.title);
     btn.setAttribute("aria-pressed", collapsed ? "true" : "false");

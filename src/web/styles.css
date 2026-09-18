@@ -255,21 +255,22 @@
     width: 1.25rem;
     align-items: center;
     justify-content: center;
-    border: 1px solid rgb(var(--accent) / 0.8);
+    border: 0;                 /* 겉 테두리 없음 — 초록 아이콘(글리프)만 (팀장 2026-09-18) */
     border-radius: 0.3rem;
-    background: rgb(var(--surface-1) / 0.9);
+    background: transparent;
     color: rgb(var(--accent));
   }
   .sidebar-panel-toggle { left: calc(0.75rem + var(--sidebar-w, 280px) - 1.25rem - 0.5rem); }
   .thread-panel-toggle { right: 1.15rem; }   /* THREADS 패널의 오른쪽 위 모서리 안쪽 */
-  body.sidebar-collapsed .sidebar-panel-toggle { left: 1.15rem; }
-  body.thread-panel-collapsed .thread-panel-toggle { right: 1.15rem; }
-  /* 접힌 쪽의 버튼은 본문 패널의 탭 줄 위에 오므로, 탭 글자가 버튼 밑으로 들어가지 않게 그쪽 여백을 연다. */
-  body.sidebar-collapsed #main-tabs { padding-left: 2.3rem; }
-  body.thread-panel-collapsed #main-tabs { padding-right: 2.3rem; }
+  /* 접힌 상태(가운데만 보는 모드): 펼치기 버튼은 본문 패널 안이 아니라 ★바깥 경계★(창 가장자리)에 붙인다 —
+     본문 패널 조작 버튼처럼 보이지 않게(팀장 2026-09-18). 가장자리에 붙는 탭 모양: 바깥쪽 모서리는 각지게. */
+  body.sidebar-collapsed .sidebar-panel-toggle { left: 0; }
+  body.thread-panel-collapsed .thread-panel-toggle { right: 0; }
+  /* 버튼이 본문 패널 왼쪽 여백(0.75rem)을 넘어 탭 줄 첫 글자를 덮지 않게 그쪽 여백만 조금 연다. */
+  body.sidebar-collapsed #main-tabs { padding-left: 1.4rem; }
+  body.thread-panel-collapsed #main-tabs { padding-right: 1.4rem; }
   .panel-toggle:hover {
     background: rgb(var(--accent) / 0.12);
-    border-color: rgb(var(--accent));
   }
   .resize-handle {
     flex: 0 0 6px;
