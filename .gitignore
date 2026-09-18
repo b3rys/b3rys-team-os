@@ -118,6 +118,8 @@ rules/SHARED.md
 
 # rules/TEAM-OS.md = 렌더 output(rules/TEAM-OS.template.md 에서 startup·설정저장 시 생성). template 만 track.
 rules/TEAM-OS.md
+# rules/SKILLS.md = 렌더 output(skills/*/SKILL.md trigger 에서 생성). 규칙 파일이 스킬 변경마다 안 바뀌게 분리.
+rules/SKILLS.md
 
 # 런타임 상태 로그 · 내부 draft/설계 문서 (공개 제품 아님)
 logs/*.json

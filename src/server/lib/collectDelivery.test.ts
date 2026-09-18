@@ -88,7 +88,7 @@ describe("★모든 런타임이 '어디로·어떻게 보내는지' 를 읽는�
   it("★불변식: 말하려면 보내라. 안 보내면 아무 말도 안 한 것★", () => {
     forEveryRuntime((rule, runtime) => {
       expect(rule, `${runtime}: 자가발신 불변식이 룰에 없다`).toContain(
-        "To speak, you must send. If you do not send, you have said nothing.",
+        "보내지 않으면 말한 것이 아니다",
       );
     });
   });
@@ -96,28 +96,28 @@ describe("★모든 런타임이 '어디로·어떻게 보내는지' 를 읽는�
   it("★세 배송처가 전부 명시된다★ — 팀원에게 · 단톡방에 · 팀장께 (하나라도 빠지면 그 경로가 조용히 죽는다)", () => {
     forEveryRuntime((rule, runtime) => {
       expect(rule, `${runtime}: 종합 배달이 '요청 발원지로' 라는 지시가 없다`).toContain(
-        "Deliver the synthesis to where the request came from",
+        "종합은 요청이 온 곳으로",
       );
       // ★배송처 origin-mapping (2026-07-17 codex·hermes 리뷰가 잡음)★: 압축 때 이걸 뺐더니 그룹방 발 수집을
       //   --direct-to-gd(DM) 로 오배송할 여지가 생겼다. 발원지→목적지 매핑을 복원.
       expect(rule, `${runtime}: 1:1발 수집을 broadcast 금지하는 가드가 없다`).toContain(
-        "never broadcast a 1:1/DM-originated collection",
+        "DM 에서 시작한 수집을 broadcast 하지 않는다",
       );
       // ① 요청자(팀원)에게 — 같은 thread 로
       expect(rule, `${runtime}: 요청자 배송 경로(send.sh --to)가 없다`).toContain(
-        "`send.sh --to <requester> --thread <the same thread>`",
+        "`send.sh --to <requester> --thread <같은 스레드>`",
       );
       // ② 단톡방(그룹) — broadcast. [A] 에선 서버가 대신 올려줬다 → 이제 팀원이 직접 올려야 한다.
       expect(rule, `${runtime}: 그룹방 배송 경로(--to broadcast)가 없다`).toContain(
-        "`send.sh --to broadcast --thread <that room's thread>`",
+        "`send.sh --to broadcast --thread <그 방 스레드>`",
       );
       // ③ 팀장께 직보
       expect(rule, `${runtime}: 팀장 직보 경로(1:1/DM → --direct-to-gd)가 없다`).toContain(
-        "**lead's 1:1/DM** → `--direct-to-gd`",
+        "팀장 1:1 → `--direct-to-gd`",
       );
       // claude 는 브릿지가 없다 → 1:1 DM 의 유일한 도달 경로는 자기 reply 도구. 룰이 그걸 말해준다.
       expect(rule, `${runtime}: claude 의 1:1 도달 경로(reply 도구)가 없다`).toContain(
-        "reply tool for the lead's 1:1 DM",
+        "claude 는 reply 도구",
       );
     });
   });
@@ -126,22 +126,22 @@ describe("★모든 런타임이 '어디로·어떻게 보내는지' 를 읽는�
     forEveryRuntime((rule, runtime) => {
       // [A] 의 '왜' = "턴 본문은 나를 깨운 사람에게 라우팅된다".
       // [B] 의 '왜' = ★"턴 본문은 아무 데도 안 간다"★ — 더 단순하고 더 강하다.
-      expect(rule, `${runtime}: 턴 본문이 메모라는 설명이 없다`).toContain("your own scratchpad");
-      expect(rule, `${runtime}: 턴 본문이 아무에게도 안 닿는다는 설명이 없다`).toContain("it reaches no one");
+      expect(rule, `${runtime}: 턴 본문이 메모라는 설명이 없다`).toContain("내 메모장");
+      expect(rule, `${runtime}: 턴 본문이 아무에게도 안 닿는다는 설명이 없다`).toContain("아무에게도 가지 않는다");
     });
   });
 
   it("★침묵할 수단이 있다 — 그리고 그건 '그냥 안 보내는 것' 이다★ (토큰 없음)", () => {
     // ★2026-07-17: 이 보장을 ★핵심룰★ 기준으로 옮겼다.★
     //   옛 테스트는 Collection 룰의 "If you have nothing to say, simply do not send" 를 잡았는데,
-    //   그건 핵심룰의 "If you do not send, you have said nothing" + "Silence needs no marker" 와
+    //   그건 핵심룰의 "보내지 않으면 말한 것이 아니다" + "Silence needs no marker" 와
     //   ★같은 말을 같은 파일에서 두 번★ 하는 것이었다. 문장을 지우되 ★보장은 그대로 강제한다★ —
     //   침묵하는 법(안 보내면 됨) + 토큰 불필요, 둘 다 여전히 모든 런타임 룰에 있어야 통과한다.
     forEveryRuntime((rule, runtime) => {
       expect(rule, `${runtime}: 침묵 방법(안 보내면 말 안 한 것)을 안 알려준다`).toContain(
-        "If you do not send, you have said nothing",
+        "보내지 않으면 말한 것이 아니다",
       );
-      expect(rule, `${runtime}: 침묵에 마커가 필요없다는 말이 없다`).toContain("Silence needs no marker");
+      expect(rule, `${runtime}: 침묵에 마커가 필요없다는 말이 없다`).toContain("침묵에는 표시가 필요 없다");
     });
   });
 });
@@ -188,7 +188,7 @@ describe("★★룰이 [A] 로 돌아가면 빨개진다★★", () => {
   it("★서버가 답을 모아준다고 약속하지 않는다★ — 그 코드(gdCollect)는 삭제됐다. 약속하면 팀원이 영원히 기다린다", () => {
     forEveryRuntime((rule, runtime) => {
       expect(rule, `${runtime}: 팀원이 직접 모은다는 사실이 룰에 없다`).toContain(
-        "You gather the answers yourself",
+        "답은 내가 직접 모은다",
       );
       expect(rule, `${runtime}: 서버가 답을 번들로 준다는 거짓 약속이 돌아왔다`).not.toContain(
         "will bundle the answers and will wake you",
@@ -209,23 +209,23 @@ describe("★★룰이 [A] 로 돌아가면 빨개진다★★", () => {
 describe("★보고 시점 룰(REPORT_WHEN)은 런타임 무관 — 전원이 받는다★", () => {
   it("★전원 답하기 전엔 종합을 보내지 않는다★ (실측: 반쪽 보고가 나갔다 — 중복보다 나쁘다)", () => {
     forEveryRuntime((rule, runtime) => {
-      expect(rule, `${runtime}`).toContain("Until everyone has answered, do not send a synthesis");
+      expect(rule, `${runtime}`).toContain("전원이 답하기 전에는 종합을 보내지 않는다");
     });
   });
 
   it("★마지막 답/마감 때 완전한 종합을 요청자에게 한 번만 보낸다★", () => {
     forEveryRuntime((rule, runtime) => {
-      expect(rule, `${runtime}`).toContain("send ONE complete synthesis");
-      expect(rule, `${runtime}`).toContain("Do not re-report a request you already reported");
+      expect(rule, `${runtime}`).toContain("종합 하나를 보내고");
+      expect(rule, `${runtime}`).toContain("이미 보고한 요청은 다시 보고하지 않는다");
       // ★late-fold reconcile 가드★: '재보고 금지' 와 TEAM-OS §5
       //   '무응답자 늦은 답 나중에 반영' 충돌을 addendum 예외로 해소. 문구가 압축서 재손실되지 않게 고정.
-      expect(rule, `${runtime}`).toContain("add it in a short follow-up");
+      expect(rule, `${runtime}`).toContain("늦은 답은 짧은 후속으로");
     });
   });
 
   it("★끝내 침묵하는 사람이 있으면 그를 밝힌다★ (무한 대기 금지)", () => {
     forEveryRuntime((rule, runtime) => {
-      expect(rule, `${runtime}`).toContain("name anyone who never answered");
+      expect(rule, `${runtime}`).toContain("미응답자 이름을 적는다");
     });
   });
 
@@ -233,15 +233,15 @@ describe("★보고 시점 룰(REPORT_WHEN)은 런타임 무관 — 전원이 �
     // 실측(2026-07-13): 팀장이 같은 방에 위임을 연달아 둘 보냈다 → hermes 가 "이 스레드엔 이미 종합을 냈다" 로
     //   읽고 ★두 번째 과제를 통째로 증발시켰다.★ 압축 룰: '늦은 답=이미 보낸 질문의 답, 새 과제 아님 + 각 답을 그 요청에 맞춰라'.
     forEveryRuntime((rule, runtime) => {
-      expect(rule, `${runtime}`).toContain("match each answer to its own request");
-      expect(rule, `${runtime}`).toContain("two separate syntheses");
+      expect(rule, `${runtime}`).toContain("각 요청에 맞춘다");
+      expect(rule, `${runtime}`).toContain("종합도 둘");
       // ★회귀 가드 (이 문장은 2번 죽고 2번 살아났다)★: fce0ddd 압축이 삭제 → hermes 라이브 오판 →
       //   e9a9c35(64분 뒤) '두-수집 회귀 복원'. 2026-07-17 압축이 또 삭제 → steve 리뷰가 잡음 → 재복원.
       //   ★교훈(steve): '원칙문이 의미를 담는다'는 e9a9c35가 이미 반증한 가설이다. 금지문(Do not re-report)과
       //   허용문(report it) 을 ★둘 다★ 명시해야 표면이 '보고하지 마라'로 비대칭되지 않는다.★
       //   이 assertion 은 회귀-복원 커밋 소유 → 압축 편의로 삭제 금지.
-      expect(rule, `${runtime}`).toContain("a collection is identified by the request, not the thread or topic");
-      expect(rule, `${runtime}`).toContain("a new ask is a new collection even if the topic repeats");
+      expect(rule, `${runtime}`).toContain("수집은 요청 단위다");
+      expect(rule, `${runtime}`).toContain("같은 주제라도 새 요청은 새 수집이다");
     });
   });
 
@@ -250,7 +250,7 @@ describe("★보고 시점 룰(REPORT_WHEN)은 런타임 무관 — 전원이 �
     //   ① [마감] 개념 존재 ② 재보고 금지 일반 가드 존재 — 마감-이미보고는 이 일반 가드가 포괄한다.
     forEveryRuntime((rule, runtime) => {
       expect(rule, `${runtime}`).toContain("[마감]");
-      expect(rule, `${runtime}`).toContain("Do not re-report a request you already reported");
+      expect(rule, `${runtime}`).toContain("이미 보고한 요청은 다시 보고하지 않는다");
     });
   });
 });
@@ -264,14 +264,14 @@ describe("★보고 시점 룰(REPORT_WHEN)은 런타임 무관 — 전원이 �
 describe("★재팬아웃 금지 — 전 런타임★", () => {
   it("★기여자의 답으로 깨어난 것은 '새 과제' 가 아니다 → 다시 팬아웃하지 않는다★", () => {
     forEveryRuntime((rule, runtime) => {
-      expect(rule, `${runtime}`).toContain("not a new task");
-      expect(rule, `${runtime}`).toContain("do not re-fan-out");
+      expect(rule, `${runtime}`).toContain("새 과제가 아니니");
+      expect(rule, `${runtime}`).toContain("다시 fan-out 하지 않고");
     });
   });
 
   it("★팬아웃에 --direct-to-gd 를 붙이지 않는다★ — 붙이면 팀장이 종합 1개 대신 N개 보고를 받는다", () => {
     forEveryRuntime((rule, runtime) => {
-      expect(rule, `${runtime}`).toContain("Never put `--direct-to-gd` on the fan-out asks");
+      expect(rule, `${runtime}`).toContain("fan-out 에 `--direct-to-gd` 를 붙이지 않는다");
     });
   });
 });
@@ -287,8 +287,8 @@ describe("★실제 팀원 파일에 자가발신 룰이 실린다★ (렌더 �
       id: "steve", display_name: "Steve", role: "dev", runtime: "claude_channel",
       owner_name: "GD", team_name: "b3rys",
     });
-    expect(p).toContain("To speak, you must send. If you do not send, you have said nothing.");
-    expect(p).toContain("reply tool for the lead's 1:1 DM");
+    expect(p).toContain("보내지 않으면 말한 것이 아니다");
+    expect(p).toContain("claude 는 reply 도구");
     expect(p).not.toContain("[NO_REPLY]");
   });
 
@@ -299,7 +299,7 @@ describe("★실제 팀원 파일에 자가발신 룰이 실린다★ (렌더 �
         owner_name: "GD", team_name: "b3rys",
       });
       expect(md, `${runtime}: AGENTS.md 에 자가발신 불변식이 없다`).toContain(
-        "To speak, you must send. If you do not send, you have said nothing.",
+        "보내지 않으면 말한 것이 아니다",
       );
       expect(md, `${runtime}: AGENTS.md 에 그룹방 경로가 없다`).toContain("`send.sh --to broadcast");
       expect(md, `${runtime}: AGENTS.md 에 침묵 토큰이 돌아왔다`).not.toContain("[NO_REPLY]");

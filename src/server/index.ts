@@ -53,6 +53,7 @@ import { createSchedulerRoutes } from "./routes/scheduler";
 import { createCiStatusRoutes } from "./routes/ciStatus";
 import { ensureDailyTaskReviewJobs, ensureWeeklySelfLearningJobs } from "./scheduler/core";
 import { renderAndRepoint } from "./lib/teamOsRender";
+import { renderSkillsMd } from "./lib/skillsRender";
 import { installProgressHook, repairProgressHook, repairReplyGuardHook, ensureOwnerGateHook } from "./runtimes/claude/launcher";
 import { writeMemberPersona, savePersonaFile } from "./lib/writeMemberPersona";
 import { refreshLoadingFiles } from "./lib/refreshLoadingFiles";
@@ -151,6 +152,7 @@ try {
   const ownerRow = db.query("SELECT value FROM setting WHERE key = 'owner_name'").get() as { value: string } | null;
   const claudeIds = agents.filter((a) => a.runtime === "claude_channel").map((a) => a.id);
   const rr = renderAndRepoint(ownerRow?.value ?? null, claudeIds);
+  { const sk = renderSkillsMd(); if (!sk.ok) console.error(`[boot] rules/SKILLS.md 렌더 실패: ${sk.error}`); }
   console.log(`[teamos-render] owner='${rr.owner}' repointed=${rr.repointed.join(",") || "none"}`);
 
   // ★팀 학습 로그도 없으면 만든다★ — TEAM-OS.md 와 같은 방식(템플릿만 track, 실사용 파일은 생성).
