@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DOC_KEYS, GitHubDocs, ProjectSourceError, validateProjects, type ProjectRegistration, type DocKey } from "../lib/githubDocs";
 import { projectIntro } from "../lib/projectDocRender";
+import { STANDALONE_CSP, standaloneDocPage } from "../../shared/projectsProse";
 import { DEFAULT_EXCLUDE_SECTIONS, parseProjectTodo } from "../lib/projectTodo";
 import { leadActorId, trustedActorFromRequest } from "../lib/opAuth";
 
@@ -58,6 +59,27 @@ export function createProjectRoutes(deps: ProjectDeps) {
   };
   app.get("/projects/:id/doc/:key", c => document(c, false));
   app.get("/projects/:id/doc/:key/raw", c => document(c, true));
+  // 새창 페이지 — 그 창 안에서 같은 프로젝트의 문서를 돌려볼 수 있게 상단 바가 붙은 독립 HTML(팀장 2026-09-18).
+  //   ?mode=md 면 원문을 <pre> 로. 스크립트 0 · CSP default-src 'none'. 열람 규칙은 다른 문서 응답과 같다(/team 아래).
+  app.get("/projects/:id/doc/:key/page", async c => {
+    const p = projects.find(p => p.id === c.req.param("id"));
+    const key = c.req.param("key") as DocKey;
+    if (!p || !DOC_KEYS.includes(key)) return c.json({ error: "document_not_found", key }, 404);
+    const snapshot = await source.get(p);
+    const doc = snapshot.docs[key];
+    if (!doc) return c.json({ error: "document_not_found", key }, 404);
+    const mode = c.req.query("mode") === "md" ? "md" : "html";
+    const exists = Object.fromEntries(DOC_KEYS.map(k => [k, snapshot.docs[k] !== null]));
+    const basePath = process.env.BASE_PATH ?? "/team";
+    c.header("Content-Type", "text/html; charset=utf-8");
+    c.header("X-Content-Type-Options", "nosniff");
+    c.header("Content-Security-Policy", `${STANDALONE_CSP}; frame-ancestors 'none'`);
+    c.header("X-Project-Sha", snapshot.sha);
+    return c.body(standaloneDocPage({
+      projectId: p.id, projectName: p.name, title: doc.title, path: doc.path, sha: snapshot.sha, key, mode,
+      html: doc.html, md: doc.md, exists, basePath, githubUrl: `https://github.com/${p.repo}/blob/${snapshot.sha}/${doc.path}`,
+    }));
+  });
   app.post("/projects/:id/refresh", async c => {
     const actor = trustedActorFromRequest(c.req.raw, { loopbackDashboardActor: leadActorId(deps.db) });
     if (!actor.ok) return c.json({ error: actor.error }, (actor.status ?? 403) as 401 | 403 | 503);

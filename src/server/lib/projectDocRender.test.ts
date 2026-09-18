@@ -9,9 +9,18 @@ describe("project document renderer", () => {
     expect(result.toc.map(x => x.anchor)).toEqual(["project", "구조", "구조-1"]);
     expect(result.html).toContain('id="구조-1"');
   });
+  test("체크박스 목록은 ul.task-list + li.task.is-{done,doing,todo}, 글은 .task-text 에 — 일반 목록은 그대로", () => {
+    const html = render("- [x] done\n- [~] doing\n- [ ] later\n  - child\n\n- plain").html;
+    expect(html).toContain('<ul class="task-list"><li class="task is-done"><input type="checkbox" tabindex="-1" checked aria-label="완료"><span class="task-text">done</span></li>');
+    expect(html).toContain('<li class="task is-doing"><input type="checkbox" tabindex="-1" aria-label="진행중"><span class="task-text"><span class="task-doing">진행중</span> doing</span></li>');
+    expect(html).toContain('<li class="task is-todo"><input type="checkbox" tabindex="-1" aria-label="계획"><span class="task-text">later</span><ul><li>child</li></ul></li>');
+    expect(html).toContain("<ul><li>plain</li></ul>");
+    expect(html.match(/class="task-list"/g)).toHaveLength(1);
+  });
+
   test("renders tables, list nesting, quotes, checkboxes and strikethrough", () => {
     const html = render("| A | B |\n| --- | --- |\n| one | two |\n\n- [x] done\n- [~] doing\n  - child\n\n> **quote**\n\n~~old~~").html;
-    for (const tag of ["<table>", "<th>A</th>", "<ul>", "<blockquote>", "<strong>quote</strong>", "<del>old</del>", "disabled checked", 'class="task-doing"', "child"]) expect(html).toContain(tag);
+    for (const tag of ["<table>", "<th>A</th>", "<ul>", "<blockquote>", "<strong>quote</strong>", "<del>old</del>", "tabindex=\"-1\" checked", 'class="task-doing"', "child"]) expect(html).toContain(tag);
   });
   test("preserves all Mermaid diagrams safely and records pending work", () => {
     const result = render(Array.from({ length: 6 }, (_, n) => "```mermaid\ngraph TD\nA-->B" + n + "\n```").join("\n\n"));
