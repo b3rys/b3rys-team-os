@@ -55,23 +55,30 @@ FIX="$TMP/body.txt"
   printf '%s\n' '★ 유니코드 · 여러 줄'
 } > "$FIX"
 
+# ★발송이 실제로 나갈 수 있는 케이스는 죽은 포트로 고정한다★
+#   아래 A1-1~A1-4 는 지금 인자·파일 검증에서 curl 전에 죽는다. 그 검증이 나중에 빠지면
+#   기본 TEAM_BASE(살아있는 팀 버스)로 ★시험이 진짜 메시지를 쏜다.★ 가드가 사라졌을 때
+#   조용히 발송되는 것을 막는 것이 이 고정의 목적이다 — 지금 무해하다는 것은 이유가 못 된다.
+#   curl 을 가짜로 바꿔 쓰는 케이스(A1-5·A1-6·A2-x)는 이미 격리돼 있어 대상이 아니다.
+DEADBASE="http://127.0.0.1:9/team"
+
 echo "── A1-1: --body 와 --body-file 동시 지정은 거절 ──"
-out="$("$SEND" --to lisa --body "x" --body-file "$FIX" 2>&1)"; rc=$?
+out="$(TEAM_BASE="$DEADBASE" "$SEND" --to lisa --body "x" --body-file "$FIX" 2>&1)"; rc=$?
 [ $rc -ne 0 ] && pass "거절됨 (exit $rc)" || fail "동시 지정을 통과시켰다"
 grep -q "동시에" <<<"$out" && pass "사유 설명 있음" || fail "사유 설명 없음: $out"
 
 echo "── A1-2: 없는 파일은 에러로 죽는다 (빈 본문으로 조용히 보내지 않는다) ──"
-out="$("$SEND" --to lisa --body-file "$TMP/nope.txt" 2>&1)"; rc=$?
+out="$(TEAM_BASE="$DEADBASE" "$SEND" --to lisa --body-file "$TMP/nope.txt" 2>&1)"; rc=$?
 [ $rc -ne 0 ] && pass "죽었다 (exit $rc)" || fail "없는 파일인데 계속 진행했다"
 grep -qE "없습니다|경로" <<<"$out" && pass "경로 문제를 알려준다" || fail "메시지 불명확: $out"
 
 echo "── A1-3: 빈 파일도 에러 ──"
 : > "$TMP/empty.txt"
-out="$("$SEND" --to lisa --body-file "$TMP/empty.txt" 2>&1)"; rc=$?
+out="$(TEAM_BASE="$DEADBASE" "$SEND" --to lisa --body-file "$TMP/empty.txt" 2>&1)"; rc=$?
 [ $rc -ne 0 ] && pass "빈 파일 거절 (exit $rc)" || fail "빈 본문으로 보내려 했다"
 
 echo "── A1-4: 디렉토리를 주면 에러 ──"
-out="$("$SEND" --to lisa --body-file "$TMP" 2>&1)"; rc=$?
+out="$(TEAM_BASE="$DEADBASE" "$SEND" --to lisa --body-file "$TMP" 2>&1)"; rc=$?
 [ $rc -ne 0 ] && pass "디렉토리 거절 (exit $rc)" || fail "디렉토리를 본문으로 읽으려 했다"
 
 echo "── A1-5: ★본문이 문자 단위로 보존되는가★ (핵심) ──"
@@ -335,7 +342,7 @@ grep -q "미배달이 아닙니다" <<<"$out" && pass "미배달로 오독하지
 # ★종료코드만 보면 거짓 통과한다★ — 가드가 없어도 curl 실패로 rc=7 이 나온다(실측).
 #   그래서 종료코드와 stderr 문구를 ★둘 다★ 단정한다.
 # ★아래 본문 리터럴의 따옴표는 어긋나 보이는 것이 정상이다 — 교정하면 재현이 사라진다.★
-DEADBASE="http://127.0.0.1:9/team"
+# DEADBASE 는 파일 위쪽(A1 앞)에서 정의한다.
 
 echo "── A4-1: 중복 --to 는 거절 (수신자가 조용히 바뀌는 경로) ──"
 out="$(TEAM_BASE="$DEADBASE" "$SEND" --to lisa --body "명령은 "send.sh --to broadcast"" 2>&1)"; rc=$?
