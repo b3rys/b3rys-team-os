@@ -42,7 +42,7 @@ export function proseCss(headOffset: number): string {
 .projects-toc-caret[aria-expanded="true"]{transform:rotate(90deg)}
 .projects-toc-head{flex:1 1 auto;min-width:0;text-align:left;padding:3px 6px;border-radius:6px;color:rgb(var(--slate-300));display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;line-height:1.35}
 .projects-toc-head:hover{color:rgb(var(--slate-100));background:rgb(var(--surface-3) / .5)}
-.projects-toc-head[aria-current="true"]{color:rgb(var(--slate-50));font-weight:600;background:rgb(var(--accent) / .14);box-shadow:inset 2px 0 0 rgb(var(--accent))}
+.projects-toc-head[aria-current="true"]{color:rgb(var(--slate-50));font-weight:600;background:rgb(var(--accent) / .14)}
 .projects-toc-children{display:flex;flex-direction:column;padding:1px 0 4px 22px}
 .projects-toc-sec[data-open="false"] .projects-toc-children{display:none}
 .projects-toc-children a{display:block;color:rgb(var(--slate-400));text-decoration:none;padding:2px 6px;border-radius:5px;font-size:12.5px;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;line-height:1.35}
