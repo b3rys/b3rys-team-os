@@ -6,6 +6,7 @@
     "branch": "main",
     "docs": { "readme": "README.md", "design": "DESIGN.md", "features": "FEATURES.md", "todo": "TODO.md" },
     "kanbanPrefix": "[steno]",
-    "excludeSections": ["킵", "선택 대기", "답 대기", "승인 대기"]
+    "excludeSections": ["킵", "선택 대기", "답 대기", "승인 대기"],
+    "tokenEnv": "GITHUB_TOKEN_STENO"
   }
 ]
