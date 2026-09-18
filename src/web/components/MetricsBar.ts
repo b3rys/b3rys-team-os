@@ -163,13 +163,14 @@ export function renderMetricsBar(root: HTMLElement): void {
             <span class="text-slate-500 text-[10px] md:text-xs whitespace-nowrap">${agents.length} agents</span>
             <div class="relative ml-1" data-navmenu="tasks">
               <button id="global-tasks-menu"
-                class="${navBtnClass(store.getState().mainView === "tasks" || store.getState().mainView === "jobs")}"
-                title="${pick("Tasks — 전체 과제와 운영 Jobs", "Tasks — all tasks and operational Jobs")}">
+                class="${navBtnClass(store.getState().mainView === "tasks" || store.getState().mainView === "jobs" || store.getState().mainView === "projects")}"
+                title="${pick("Tasks — 전체 과제 · 운영 Jobs · Projects", "Tasks — all tasks · operational Jobs · Projects")}">
                 Tasks ▾
               </button>
               ${tasksMenuOpen ? `<div id="tasks-menu-dropdown" class="absolute left-0 top-full z-50 w-40 overflow-hidden rounded-md border border-surface-3 bg-surface-2 shadow-xl">
                 ${navMenuItem("global-tasks-tab", pick("전체 과제", "All Tasks"), store.getState().mainView === "tasks")}
                 ${navMenuItem("global-jobs-tab", "Jobs", store.getState().mainView === "jobs")}
+                ${navMenuItem("global-projects-tab", "Projects", store.getState().mainView === "projects")}
               </div>` : ""}
             </div>
             <div class="relative" data-navmenu="inbox">
@@ -209,11 +210,6 @@ export function renderMetricsBar(root: HTMLElement): void {
               class="${navBtnClass(store.getState().mainView === "reports")}"
               title="${pick("팀 보고서", "Team reports")}">
               Reports
-            </button>
-            <button id="global-projects-tab"
-              class="${navBtnClass(store.getState().mainView === "projects")}"
-              title="${pick("프로젝트 — GitHub 문서·진행 상태", "Projects — GitHub docs·progress")}">
-              Projects
             </button>
             <button id="global-search-tab"
               class="px-2 py-1 rounded-md text-[11px] md:text-[13px] inline-flex items-center gap-1 ${store.getState().mainView === "search" ? "bg-surface-0 text-slate-100" : "text-slate-400 hover:bg-surface-3 hover:text-slate-200"}"
@@ -451,9 +447,11 @@ export function renderMetricsBar(root: HTMLElement): void {
       store.getState().setMainView("reports");
       store.getState().setMobilePane("main");
     });
+    // Projects 는 Tasks 드롭다운 항목(전체 과제 · Jobs · Projects) — Jobs 와 같은 닫기 규칙.
     const projectsBtn = root.querySelector<HTMLButtonElement>("#global-projects-tab");
     projectsBtn?.addEventListener("click", (e) => {
       e.stopPropagation();
+      tasksMenuOpen = false;
       osMenuOpen = false;
       store.getState().setMainView("projects");
       store.getState().setMobilePane("main");

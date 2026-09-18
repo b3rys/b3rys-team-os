@@ -456,7 +456,7 @@ async function renderDoc(): Promise<void> {
   const id = _curId; const key = _curKey;
   const project = _projects.find((p) => p.id === id) ?? null;
   const backBtn = `<button id="projects-back" title="${pick("프로젝트 목록으로", "Back to project list")}" class="inline-flex items-center gap-1.5 shrink-0 text-txt-green text-sm font-semibold px-3 py-1.5 rounded-lg border border-accent-green/45 bg-accent-green/12 hover:bg-accent-green/20 hover:border-accent-green/70 transition-colors">← ${pick("목록", "List")}</button>`;
-  _root.innerHTML = `<div class="h-full overflow-y-auto"><div class="max-w-5xl mx-auto px-4 md:px-6 py-5">${backBtn}<div class="text-slate-500 py-16 text-center">${pick("문서 불러오는 중…", "Loading document…")}</div></div></div>`;
+  _root.innerHTML = `<div class="h-full overflow-y-auto"><div class="w-full px-4 md:px-6 py-5">${backBtn}<div class="text-slate-500 py-16 text-center">${pick("문서 불러오는 중…", "Loading document…")}</div></div></div>`;
   _root.querySelector("#projects-back")?.addEventListener("click", goList);
 
   let doc: ProjectDoc;
@@ -464,7 +464,7 @@ async function renderDoc(): Promise<void> {
     doc = _curDoc && _curDoc.id === id && _curDoc.key === key ? _curDoc : await loadDoc(id, key);
   } catch (e) {
     if (!_root || _curId !== id || _curKey !== key) return;
-    _root.innerHTML = `<div class="h-full overflow-y-auto"><div class="max-w-5xl mx-auto px-4 md:px-6 py-5">${backBtn}<div class="projects-error text-center text-txt-red py-16"><div class="font-medium">${pick("문서를 불러오지 못했습니다", "Failed to load document")}</div><div class="text-xs text-slate-500 mt-1">${escape(id)}/${escape(key)} · ${escape((e as Error).message)}</div></div></div></div>`;
+    _root.innerHTML = `<div class="h-full overflow-y-auto"><div class="w-full px-4 md:px-6 py-5">${backBtn}<div class="projects-error text-center text-txt-red py-16"><div class="font-medium">${pick("문서를 불러오지 못했습니다", "Failed to load document")}</div><div class="text-xs text-slate-500 mt-1">${escape(id)}/${escape(key)} · ${escape((e as Error).message)}</div></div></div></div>`;
     _root.querySelector("#projects-back")?.addEventListener("click", goList);
     return;
   }
@@ -490,7 +490,7 @@ async function renderDoc(): Promise<void> {
 
   _root.innerHTML = `
     <div data-projects-doc-scroll class="h-full overflow-y-auto overflow-x-hidden">
-      <div class="max-w-5xl mx-auto px-4 md:px-6 pb-20 min-w-0">
+      <div class="w-full px-4 md:px-6 pb-20 min-w-0">
         <div class="sticky top-0 z-20 -mx-4 md:-mx-6 px-4 md:px-6 bg-surface-1/95 backdrop-blur border-b border-surface-3">
           <div class="flex items-center gap-3 py-2.5 min-w-0">
             ${backBtn}

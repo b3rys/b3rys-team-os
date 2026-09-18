@@ -32,7 +32,8 @@ import { renderIcon } from "./icons";
 import { initPanels, isPanelCollapsed, onPanelChange, PANEL_IDS, togglePanel, type Panel } from "./lib/panels";
 
 const VIEW_GROUPS: Array<{ views: MainView[]; tabs: Array<{ id: MainView; label: string }> }> = [
-  { views: ["tasks", "jobs"], tabs: [{ id: "tasks", label: "Tasks" }, { id: "jobs", label: "Jobs" }] },
+  // Projects 는 Tasks 묶음의 세 번째 서브탭 — 상단 별도 탭이 아니다(팀장 2026-09-18).
+  { views: ["tasks", "jobs", "projects"], tabs: [{ id: "tasks", label: "Tasks" }, { id: "jobs", label: "Jobs" }, { id: "projects", label: "Projects" }] },
   { views: ["inbox", "audit", "proposals"], tabs: [{ id: "inbox", label: "Inbox" }, { id: "audit", label: "Audit" }, { id: "proposals", label: "Proposal" }] },
   { views: ["teamos", "doc"], tabs: [{ id: "teamos", label: "OS" }, { id: "doc", label: "Docs" }] },
 ];
@@ -74,7 +75,9 @@ function bootstrap() {
   app.innerHTML = `
     <div id="metrics-bar"></div>
     <div id="health-banner"></div>
-    <div class="flex-1 flex min-h-0 overflow-hidden bg-surface-2 gap-1 px-3 pb-3 pt-1.5">
+    <div id="panes" class="relative flex-1 flex min-h-0 overflow-hidden bg-surface-2 gap-1 px-3 pb-3 pt-1.5">
+      <button id="sidebar-panel-toggle" class="panel-toggle sidebar-panel-toggle" type="button" title="팀원 패널 접기/펼치기" aria-label="팀원 패널 접기/펼치기"></button>
+      <button id="thread-panel-toggle" class="panel-toggle thread-panel-toggle" type="button" title="THREADS 패널 접기/펼치기" aria-label="THREADS 패널 접기/펼치기"></button>
       <div id="agent-sidebar-wrap" class="flex md:contents"></div>
       <div class="resize-handle" data-resize="sidebar" title="드래그하여 너비 조절"></div>
       <div id="main-panel-wrap" class="flex-1 flex flex-col min-h-0 min-w-0 float-panel overflow-hidden">
@@ -84,8 +87,6 @@ function bootstrap() {
       <div class="resize-handle" data-resize="thread" title="드래그하여 너비 조절"></div>
       <div id="activity-panel-wrap" class="flex md:contents"></div>
     </div>
-    <button id="sidebar-panel-toggle" class="panel-toggle sidebar-panel-toggle" type="button" title="팀원 패널 접기/펼치기" aria-label="팀원 패널 접기/펼치기"></button>
-    <button id="thread-panel-toggle" class="panel-toggle thread-panel-toggle" type="button" title="THREADS 패널 접기/펼치기" aria-label="THREADS 패널 접기/펼치기"></button>
     <div id="mobile-tabs"></div>
   `;
 
@@ -203,7 +204,7 @@ function bootstrap() {
 function renderTabs(root: HTMLElement) {
   const update = () => {
     const { mainView, selectedAgentId, agents } = store.getState();
-    root.classList.toggle("hidden", mainView === "reports" || mainView === "projects");
+    root.classList.toggle("hidden", mainView === "reports");
     const agentName = agents.find((a) => a.id === selectedAgentId)?.display_name ?? "—";
     const groupTabs = groupedViewTabs(mainView);
     const groupTabsHtml = groupTabs?.map((t) => `
@@ -225,7 +226,7 @@ function renderTabs(root: HTMLElement) {
       });
       return;
     }
-    if (mainView === "reports" || mainView === "projects") {
+    if (mainView === "reports") {
       root.innerHTML = "";
       return;
     }
@@ -542,7 +543,7 @@ function setupPanelToggles() {
     const def = PANEL_TOGGLE[panel];
     const btn = document.getElementById(def.id) as HTMLButtonElement | null;
     if (!btn) return;
-    btn.innerHTML = renderIcon(collapsed ? def.icon[0] : def.icon[1], { size: 18 });
+    btn.innerHTML = renderIcon(collapsed ? def.icon[0] : def.icon[1], { size: 14 });
     btn.title = `${def.label} ${collapsed ? "펼치기" : "접기"}`;
     btn.setAttribute("aria-label", btn.title);
     btn.setAttribute("aria-pressed", collapsed ? "true" : "false");
