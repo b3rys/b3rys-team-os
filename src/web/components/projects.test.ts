@@ -7,6 +7,15 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import { Window } from "happy-dom";
 import fixture from "../fixtures/projects-steno.example.json";
 
+// 가짜 mermaid — 진짜(5MB)는 테스트에서 안 받는다. render 가 준 svg 를 figure 에 넣는 절차만 잰다.
+const fakeMermaid = {
+  calls: [] as { id: string; src: string }[],
+  fail: false,
+  initialized: null as Record<string, unknown> | null,
+  initialize(cfg: Record<string, unknown>) { this.initialized = cfg; },
+  async render(id: string, src: string) { this.calls.push({ id, src }); if (this.fail) throw new Error("parse"); return { svg: `<svg data-fake="1" data-id="${id}"></svg>` }; },
+};
+
 const installedGlobals: string[] = [];
 const savedGlobals: Record<string, unknown> = {};
 let previousFetch: typeof fetch;
@@ -81,8 +90,10 @@ afterAll(() => {
 const tick = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function mount(): Promise<HTMLElement> {
-  const { renderProjects, resetProjectsState } = await import("./Projects");
+  const { renderProjects, resetProjectsState, setMermaidLoader } = await import("./Projects");
   resetProjectsState();
+  fakeMermaid.calls = []; fakeMermaid.fail = false; fakeMermaid.initialized = null;
+  setMermaidLoader(() => Promise.resolve(fakeMermaid));
   const root = document.createElement("div");
   document.body.appendChild(root);
   renderProjects(root);
@@ -151,9 +162,12 @@ describe("Projects 문서 화면", () => {
     // 본문은 전체 문서 — h2 3개 모두, 2절의 mermaid 도 이미 있다(서버 figcaption 만, 클라 배지 없음)
     expect(root.querySelectorAll("#projects-viewer h2")).toHaveLength(3);
     expect(root.querySelectorAll("#projects-viewer article")).toHaveLength(1);
-    expect(root.querySelectorAll("#projects-viewer pre.mermaid-src")).toHaveLength(1);
-    expect(root.querySelectorAll("#projects-viewer .mermaid-pending")).toHaveLength(1);
-    expect(root.querySelectorAll("#projects-viewer .projects-mermaid-badge")).toHaveLength(0);
+    // 2절의 mermaid figure 는 (가짜) mermaid 로 SVG 가 됐다 — 원문 <pre>·"렌더 예정" 캡션은 사라진다
+    expect(root.querySelectorAll("#projects-viewer figure.project-diagram[data-rendered=\"1\"] .project-diagram-svg svg[data-fake]")).toHaveLength(1);
+    expect(root.querySelectorAll("#projects-viewer pre.mermaid-src")).toHaveLength(0);
+    expect(root.querySelectorAll("#projects-viewer .mermaid-pending")).toHaveLength(0);
+    expect(fakeMermaid.calls.map((c) => c.src.trim().split("\n")[0])).toEqual(["flowchart TB"]);
+    expect(fakeMermaid.initialized?.securityLevel).toBe("strict");
     // 트리 칸은 데스크톱 240px 열, 모바일은 접힘(목차 버튼)
     expect(toc.parentElement?.className).toContain("md:grid-cols-[240px_minmax(0,1fr)]");
     expect(toc.className).toContain("hidden");
@@ -445,7 +459,7 @@ describe("서버 404 폴백", () => {
     root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
     await tick();
     expect(root.querySelectorAll(".projects-toc-sec")).toHaveLength(3);
-    expect(root.querySelectorAll("#projects-viewer pre.mermaid-src")).toHaveLength(1);
+    expect(root.querySelectorAll("#projects-viewer figure.project-diagram .project-diagram-svg svg[data-fake]")).toHaveLength(1); // fixture 의 mermaid 도 (가짜로) 렌더
     root.querySelector<HTMLButtonElement>('.projects-mode[data-mode="md"]')!.click();
     await tick();
     expect(root.querySelector("#projects-viewer pre.projects-raw")?.textContent).toContain("# Steno 설계");
@@ -580,6 +594,28 @@ describe("문서 헤더 — 한 줄 · 문서 전환 칩 · 새창 · 글자 크
     expect(decorated!.textContent?.trim()).toBe(tocLabel(decorated!.title));
     expect(decorated!.textContent?.trim()).not.toBe(decorated!.title);
     expect(decorated!.querySelector(".projects-toc-label")).not.toBeNull();
+  });
+
+  test("mermaid 문법 오류면 원문 <pre> 를 두고 캡션만 오류 문구로 — 로더 실패면 서버 캡션 그대로", async () => {
+    const root = await mount();          // mount 가 fail 을 초기화하므로 그 뒤에 켠다
+    fakeMermaid.fail = true;
+    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
+    await tick();
+    const fig = root.querySelector<HTMLElement>("#projects-viewer figure.project-diagram")!;
+    expect(fig.dataset.rendered).toBe("error");
+    expect(fig.querySelector("pre.mermaid-src")).not.toBeNull();
+    expect(fig.querySelector(".mermaid-pending")?.textContent).toContain("문법 오류");
+    // 로더 자체가 실패하면(청크 못 받음) 서버가 넣은 "렌더 예정" 캡션과 원문이 그대로 남는다
+    const { setMermaidLoader, resetProjectsState, renderProjects } = await import("./Projects");
+    resetProjectsState();
+    setMermaidLoader(() => Promise.reject(new Error("chunk")));
+    const root2 = document.createElement("div"); document.body.appendChild(root2); renderProjects(root2); await tick();
+    root2.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')?.click(); // URL 이 이미 design 딥링크면 목록 칩이 없다
+    await tick();
+    const fig2 = root2.querySelector<HTMLElement>("#projects-viewer figure.project-diagram")!;
+    expect(fig2.dataset.rendered).toBeUndefined();
+    expect(fig2.querySelector(".mermaid-pending")?.textContent).toContain("렌더 예정");
+    expect(fig2.querySelector("pre.mermaid-src")).not.toBeNull();
   });
 
   test("목록 카드에도 새창 링크(README·HTML 로 시작)", async () => {

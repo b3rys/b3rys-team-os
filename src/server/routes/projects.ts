@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DOC_KEYS, GitHubDocs, ProjectSourceError, validateProjects, type ProjectRegistration, type DocKey } from "../lib/githubDocs";
 import { projectIntro } from "../lib/projectDocRender";
-import { STANDALONE_CSP, standaloneDocPage } from "../../shared/projectsProse";
+import { standaloneCsp, standaloneDocPage } from "../../shared/projectsProse";
 import { DEFAULT_EXCLUDE_SECTIONS, parseProjectTodo } from "../lib/projectTodo";
 import { leadActorId, trustedActorFromRequest } from "../lib/opAuth";
 
@@ -61,6 +61,16 @@ export function createProjectRoutes(deps: ProjectDeps) {
   app.get("/projects/:id/doc/:key/raw", c => document(c, true));
   // 새창 페이지 — 그 창 안에서 같은 프로젝트의 문서를 돌려볼 수 있게 상단 바가 붙은 독립 HTML(팀장 2026-09-18).
   //   ?mode=md 면 원문을 <pre> 로. 스크립트 0 · CSP default-src 'none'. 열람 규칙은 다른 문서 응답과 같다(/team 아래).
+  // mermaid 브라우저 번들 — 새창 페이지가 CSP script-src 'self' 로 이 경로만 허용한다. 파일은 node_modules 의 것을 그대로.
+  const MERMAID_PATH = (() => { try { return fileURLToPath(import.meta.resolve("mermaid/dist/mermaid.min.js")); } catch { return null; } })();
+  app.get("/projects/vendor/mermaid.min.js", c => {
+    if (!MERMAID_PATH) return c.json({ error: "vendor_missing" }, 404);
+    return new Response(Bun.file(MERMAID_PATH), { headers: {
+      "Content-Type": "application/javascript; charset=utf-8",
+      "Cache-Control": "public, max-age=86400",
+      "X-Content-Type-Options": "nosniff",
+    } });
+  });
   app.get("/projects/:id/doc/:key/page", async c => {
     const p = projects.find(p => p.id === c.req.param("id"));
     const key = c.req.param("key") as DocKey;
@@ -71,13 +81,15 @@ export function createProjectRoutes(deps: ProjectDeps) {
     const mode = c.req.query("mode") === "md" ? "md" : "html";
     const exists = Object.fromEntries(DOC_KEYS.map(k => [k, snapshot.docs[k] !== null]));
     const basePath = process.env.BASE_PATH ?? "/team";
+    const mermaidNonce = mode === "html" && doc.needs.includes("mermaid-svg") && MERMAID_PATH ? crypto.randomUUID().replace(/-/g, "") : null;
     c.header("Content-Type", "text/html; charset=utf-8");
     c.header("X-Content-Type-Options", "nosniff");
-    c.header("Content-Security-Policy", `${STANDALONE_CSP}; frame-ancestors 'none'`);
+    c.header("Content-Security-Policy", `${standaloneCsp(mermaidNonce)}; frame-ancestors 'none'`);
     c.header("X-Project-Sha", snapshot.sha);
     return c.body(standaloneDocPage({
       projectId: p.id, projectName: p.name, title: doc.title, path: doc.path, sha: snapshot.sha, key, mode,
       html: doc.html, md: doc.md, exists, basePath, githubUrl: `https://github.com/${p.repo}/blob/${snapshot.sha}/${doc.path}`,
+      mermaidNonce,
     }));
   });
   app.post("/projects/:id/refresh", async c => {
