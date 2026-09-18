@@ -422,46 +422,65 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 # A5 — reply.sh 자체 인자 가드
 #
-# ★send.sh 의 가드는 여기를 볼 수 없다★ — reply.sh 는 ARGS 배열에 `--body` 를 한 번만 실어
-# 넘기므로, 덮인 뒤의 값 하나만 send.sh 에 도착한다. 실측: `--body "AAA" --body "BBB"` 가
-# ★에러 없이 BBB 로 덮이고 exit 0★ 이었다. 그래서 reply.sh 안에 같은 형태의 가드를 둔다.
+# ★send.sh 의 가드는 여기를 볼 수 없다★ — reply.sh 는 send.sh 로 넘기는 인자 배열에
+# `--body` 를 한 번만 싣는다. 덮인 뒤의 값 하나만 도착하므로, 중복 자체가 하류에 보이지 않는다.
+# 실측: `--body "AAA" --body "BBB"` 가 에러 없이 BBB 로 덮이고 exit 0 이었다.
+#
+# ★판정에 종료코드를 쓰면 전부 거짓 통과한다★ — reply.sh 는 인자 파싱 뒤 curl 로 원본
+# 메시지를 먼저 조회한다. TEAM_BASE 가 죽은 포트면 ★어떤 입력이든 exit!=0★ 이 되어,
+# 가드가 0개여도 전부 '막힘' 으로 보인다.
+# 구분자는 ★네트워크 단계에 도달했는지★ 다 — 인자 가드에 걸리면 조회까지 가지 못한다.
 REPLY_SH="$REPO/skills/b3os-team-inbox/scripts/reply.sh"
+RB1="$TMP/rb1.txt"; RB2="$TMP/rb2.txt"
+printf '본문 한 줄\n둘째 줄\n' > "$RB1"; printf '다른 본문\n' > "$RB2"
+RMID="m_fixture_1"
 
-echo "── A5-1: reply.sh 중복 --body 는 거절 ──"
-out="$(TEAM_BASE="$DEADBASE" "$REPLY_SH" someid --body "AAA" --body "BBB" 2>&1)"; rc=$?
-if [ $rc -ne 0 ] && grep -q "중복" <<<"$out"; then
-  pass "reply.sh 중복 --body 차단 (exit $rc)"
-else
-  fail "★reply.sh 가 중복 --body 를 통과시켰다 (exit $rc)★ / out=$(tail -3 <<<"$out")"
-fi
+# 네트워크 흔적: 조회 단계에 도달했다는 표시.
+reply_netmark() { grep -qE "curl|못 찾음|답장 대상|↳ reply" <<<"$1"; }
 
-echo "── A5-2: reply.sh 중복 --priority·--hop 도 거절 ──"
-out="$(TEAM_BASE="$DEADBASE" "$REPLY_SH" someid --body "x" --priority low --priority high 2>&1)"; rc=$?
-[ $rc -ne 0 ] && grep -q "중복" <<<"$out" \
-  && pass "중복 --priority 차단 (exit $rc)" \
-  || fail "중복 --priority 를 통과시켰다 (exit $rc) / out=$(tail -3 <<<"$out")"
-out="$(TEAM_BASE="$DEADBASE" "$REPLY_SH" someid --body "x" --hop 1 --hop 2 2>&1)"; rc=$?
-[ $rc -ne 0 ] && grep -q "중복" <<<"$out" \
-  && pass "중복 --hop 차단 (exit $rc)" \
-  || fail "중복 --hop 을 통과시켰다 (exit $rc) / out=$(tail -3 <<<"$out")"
+# 막혀야 하는 입력: 종료코드가 0이 아니고 ★네트워크 흔적이 없어야★ 한다.
+reply_blocked() {
+  local d="$1"; shift
+  local out rc
+  out="$(TEAM_BASE="$DEADBASE" "$REPLY_SH" "$@" 2>&1)"; rc=$?
+  if [ $rc -ne 0 ] && ! reply_netmark "$out"; then
+    pass "막힘 | $d"
+  else
+    fail "★누수★ | $d (exit $rc) / $(tail -1 <<<"$out")"
+  fi
+}
+# 통과해야 하는 입력: 반대로 ★네트워크 단계까지 가야★ 한다. 여기서 막히면 답장 자체가 안 된다.
+reply_passes() {
+  local d="$1"; shift
+  local out rc
+  out="$(TEAM_BASE="$DEADBASE" "$REPLY_SH" "$@" 2>&1)"; rc=$?
+  if reply_netmark "$out"; then
+    pass "통과 | $d"
+  else
+    fail "★오탐★ | $d (exit $rc) / $(tail -1 <<<"$out")"
+  fi
+}
 
-echo "── A5-3: reply.sh --priority 화이트리스트 ──"
-out="$(TEAM_BASE="$DEADBASE" "$REPLY_SH" someid --body "x" --priority "high 건" 2>&1)"; rc=$?
-if [ $rc -ne 0 ] && grep -q -- "--priority 는" <<<"$out"; then
-  pass "reply.sh priority 쓰레기값 차단 (exit $rc)"
-else
-  fail "★reply.sh 가 priority='high 건' 을 통과시켰다 (exit $rc)★ / out=$(tail -3 <<<"$out")"
-fi
+echo "── A5-a: 막혀야 하는 입력 (종료코드 + 네트워크 미도달) ──"
+reply_blocked "--body 중복"             "$RMID" --body AAA --body BBB
+reply_blocked "--priority 중복"          "$RMID" --body x --priority high --priority low
+reply_blocked "--hop 중복"               "$RMID" --body x --hop 1 --hop 2
+reply_blocked "--body-file 중복"         "$RMID" --body-file "$RB1" --body-file "$RB2"
+reply_blocked "--priority 화이트리스트 밖" "$RMID" --body x --priority bogus
+# 이건 이미 막혀 있던 것이다 — 가드를 추가하다 깨뜨리지 않았는지 재는 회귀 단정이다.
+reply_blocked "--body + --body-file 동시"  "$RMID" --body x --body-file "$RB1"
 
-echo "── A5-4: ★정상 값은 막지 않는다 (과차단 회귀 지점)★ ──"
-# 화이트리스트가 정상 값까지 막으면 답장 자체가 안 된다. TEAM_BASE 가 죽은 포트라
-# 종료코드는 어차피 0이 아니므로, ★화이트리스트 문구가 안 나온 것★ 만 단정한다.
-for v in low normal high; do
-  out="$(TEAM_BASE="$DEADBASE" "$REPLY_SH" someid --body "x" --priority "$v" 2>&1)"
-  grep -q -- "--priority 는" <<<"$out" \
-    && fail "★정상 값 --priority $v 를 막았다★ / out=$(tail -3 <<<"$out")" \
-    || pass "--priority $v 통과"
-done
+echo "── A5-b: ★통과해야 하는 입력 (과차단 회귀 지점)★ ──"
+reply_passes "--body 단독"              "$RMID" --body "정상 본문"
+reply_passes "--priority high"          "$RMID" --body x --priority high
+reply_passes "--priority low"           "$RMID" --body x --priority low
+reply_passes "--priority normal"        "$RMID" --body x --priority normal
+reply_passes "--hop 3"                  "$RMID" --body x --hop 3
+reply_passes "--hop 0 (경계)"            "$RMID" --body x --hop 0
+reply_passes "--body-file"              "$RMID" --body-file "$RB1"
+reply_passes "--body-file + priority"   "$RMID" --body-file "$RB1" --priority high
+reply_passes "--body + --hop + priority" "$RMID" --body x --hop 2 --priority high
+reply_passes "--dry-run 조합"            "$RMID" --body x --dry-run
 
 echo
 if [ $FAILED -eq 0 ]; then echo "ALL PASS — send tools honesty"; else echo "FAILED — send tools honesty"; fi
