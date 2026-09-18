@@ -10,8 +10,16 @@ export function proseCss(headOffset: number): string {
 .projects-prose h1:first-child,.projects-prose h2:first-child{margin-top:0}
 .projects-prose p{margin:.7em 0}
 .projects-prose ul,.projects-prose ol{margin:.7em 0;padding-left:1.5em}
-.projects-prose ul.task-list{list-style:none;padding-left:.2em}
-.projects-prose li{margin:.3em 0}
+.projects-prose li{margin:.35em 0}
+.projects-prose li>p{margin:.25em 0}
+.projects-prose ul.task-list{list-style:none;padding-left:.1em}
+.projects-prose li.task{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:.65em;align-items:start;margin:.45em 0}
+.projects-prose li.task>input{grid-column:1;margin:.42em 0 0;width:15px;height:15px;accent-color:rgb(var(--accent));pointer-events:none}
+.projects-prose li.task>.task-text{grid-column:2;min-width:0}
+.projects-prose li.task>:not(input):not(.task-text){grid-column:2}
+.projects-prose li.task.is-done>.task-text,.projects-prose li.task.is-done>p{color:rgb(var(--slate-500))}
+.projects-prose li.task.is-done>.task-text strong,.projects-prose li.task.is-done>.task-text code{color:rgb(var(--slate-500))}
+.projects-prose .task-doing{display:inline-block;vertical-align:.08em;margin-right:.15em;padding:0 .45em;border-radius:5px;border:1px solid var(--txt-amber);color:var(--txt-amber);font-size:.72em;font-weight:700;line-height:1.5;letter-spacing:.03em}
 .projects-prose a{color:var(--accent-soft-text);text-decoration:underline;text-underline-offset:2px}
 .projects-prose code{background:rgb(var(--surface-0));border:1px solid rgb(var(--border));border-radius:5px;padding:.1em .4em;font-size:.88em;font-family:ui-monospace,Menlo,monospace;color:var(--accent-soft-text)}
 .projects-prose pre{background:rgb(var(--surface-0));border:1px solid rgb(var(--border));border-radius:10px;padding:14px 16px;overflow-x:auto;margin:1em 0;max-width:100%}

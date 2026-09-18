@@ -133,16 +133,24 @@ export function renderProjectDoc(md: string, ctx: RenderContext): RenderedProjec
       if (li) {
         const indent = li[1]!.length, ordered = /^\d/.test(li[2]!);
         const tag = ordered ? "ol" : "ul";
-        let list = `<${tag}>`;
+        const items: string[] = [];
+        let anyTask = false;
         while (i < lines.length) {
           const current = lines[i]!.match(/^(\s*)([-+*]|\d+[.)])\s+(.*)$/);
           if (!current || current[1]!.length !== indent || /^\d/.test(current[2]!) !== ordered) break;
           const body = current[3]!, task = body.match(/^\[([ xX~])\]\s+(.*)$/);
           const content: string[] = []; i++;
           while (i < lines.length && lines[i]!.trim() && /^\s/.test(lines[i]!) && lines[i]!.match(/^\s*/)![0].length > indent) content.push(lines[i++]!.slice(indent + 2));
-          list += `<li>${task ? `<input type="checkbox" disabled${/[xX]/.test(task[1]!) ? " checked" : ""} aria-label="${task[1] === "~" ? "진행중" : task[1] === " " ? "계획" : "완료"}">${task[1] === "~" ? '<span class="task-doing">진행중</span> ' : ""}${inline(task[2]!, ctx)}` : inline(body, ctx)}${content.length ? blocks(content, depth + 1) : ""}</li>`;
+          if (task) {
+            anyTask = true;
+            const state = task[1] === "~" ? "doing" : task[1] === " " ? "todo" : "done";
+            const label = state === "doing" ? "진행중" : state === "todo" ? "계획" : "완료";
+            items.push(`<li class="task is-${state}"><input type="checkbox" tabindex="-1"${state === "done" ? " checked" : ""} aria-label="${label}"><span class="task-text">${state === "doing" ? '<span class="task-doing">진행중</span> ' : ""}${inline(task[2]!, ctx)}</span>${content.length ? blocks(content, depth + 1) : ""}</li>`);
+          } else {
+            items.push(`<li>${inline(body, ctx)}${content.length ? blocks(content, depth + 1) : ""}</li>`);
+          }
         }
-        out.push(list + `</${tag}>`); continue;
+        out.push(`<${tag}${anyTask ? ' class="task-list"' : ""}>${items.join("")}</${tag}>`); continue;
       }
       const paragraph = [line]; i++;
       while (i < lines.length && lines[i]!.trim() && !/^\s*(?:#{1,6}\s|>|`{3,}|~{3,}|[-+*]\s|\d+[.)]\s)/.test(lines[i]!) && !(i + 1 < lines.length && isTableRule(lines[i + 1]!))) paragraph.push(lines[i++]!);
