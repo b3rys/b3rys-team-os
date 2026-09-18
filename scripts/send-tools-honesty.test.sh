@@ -412,6 +412,50 @@ else
   fail "reply.sh 가 동시 지정을 그 사유로 막지 않는다 (exit $rc) / out=$(tail -3 <<<"$out")"
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+# A5 — reply.sh 자체 인자 가드
+#
+# ★send.sh 의 가드는 여기를 볼 수 없다★ — reply.sh 는 ARGS 배열에 `--body` 를 한 번만 실어
+# 넘기므로, 덮인 뒤의 값 하나만 send.sh 에 도착한다. 실측: `--body "AAA" --body "BBB"` 가
+# ★에러 없이 BBB 로 덮이고 exit 0★ 이었다. 그래서 reply.sh 안에 같은 형태의 가드를 둔다.
+REPLY_SH="$REPO/skills/b3os-team-inbox/scripts/reply.sh"
+
+echo "── A5-1: reply.sh 중복 --body 는 거절 ──"
+out="$(TEAM_BASE="$DEADBASE" "$REPLY_SH" someid --body "AAA" --body "BBB" 2>&1)"; rc=$?
+if [ $rc -ne 0 ] && grep -q "중복" <<<"$out"; then
+  pass "reply.sh 중복 --body 차단 (exit $rc)"
+else
+  fail "★reply.sh 가 중복 --body 를 통과시켰다 (exit $rc)★ / out=$(tail -3 <<<"$out")"
+fi
+
+echo "── A5-2: reply.sh 중복 --priority·--hop 도 거절 ──"
+out="$(TEAM_BASE="$DEADBASE" "$REPLY_SH" someid --body "x" --priority low --priority high 2>&1)"; rc=$?
+[ $rc -ne 0 ] && grep -q "중복" <<<"$out" \
+  && pass "중복 --priority 차단 (exit $rc)" \
+  || fail "중복 --priority 를 통과시켰다 (exit $rc) / out=$(tail -3 <<<"$out")"
+out="$(TEAM_BASE="$DEADBASE" "$REPLY_SH" someid --body "x" --hop 1 --hop 2 2>&1)"; rc=$?
+[ $rc -ne 0 ] && grep -q "중복" <<<"$out" \
+  && pass "중복 --hop 차단 (exit $rc)" \
+  || fail "중복 --hop 을 통과시켰다 (exit $rc) / out=$(tail -3 <<<"$out")"
+
+echo "── A5-3: reply.sh --priority 화이트리스트 ──"
+out="$(TEAM_BASE="$DEADBASE" "$REPLY_SH" someid --body "x" --priority "high 건" 2>&1)"; rc=$?
+if [ $rc -ne 0 ] && grep -q -- "--priority 는" <<<"$out"; then
+  pass "reply.sh priority 쓰레기값 차단 (exit $rc)"
+else
+  fail "★reply.sh 가 priority='high 건' 을 통과시켰다 (exit $rc)★ / out=$(tail -3 <<<"$out")"
+fi
+
+echo "── A5-4: ★정상 값은 막지 않는다 (과차단 회귀 지점)★ ──"
+# 화이트리스트가 정상 값까지 막으면 답장 자체가 안 된다. TEAM_BASE 가 죽은 포트라
+# 종료코드는 어차피 0이 아니므로, ★화이트리스트 문구가 안 나온 것★ 만 단정한다.
+for v in low normal high; do
+  out="$(TEAM_BASE="$DEADBASE" "$REPLY_SH" someid --body "x" --priority "$v" 2>&1)"
+  grep -q -- "--priority 는" <<<"$out" \
+    && fail "★정상 값 --priority $v 를 막았다★ / out=$(tail -3 <<<"$out")" \
+    || pass "--priority $v 통과"
+done
+
 echo
 if [ $FAILED -eq 0 ]; then echo "ALL PASS — send tools honesty"; else echo "FAILED — send tools honesty"; fi
 exit $FAILED
