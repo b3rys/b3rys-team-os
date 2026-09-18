@@ -154,8 +154,8 @@ describe("Projects 문서 화면", () => {
     expect(root.querySelectorAll("#projects-viewer pre.mermaid-src")).toHaveLength(1);
     expect(root.querySelectorAll("#projects-viewer .mermaid-pending")).toHaveLength(1);
     expect(root.querySelectorAll("#projects-viewer .projects-mermaid-badge")).toHaveLength(0);
-    // 트리 칸은 데스크톱 220px 열, 모바일은 접힘(목차 버튼)
-    expect(toc.parentElement?.className).toContain("md:grid-cols-[220px_minmax(0,1fr)]");
+    // 트리 칸은 데스크톱 240px 열, 모바일은 접힘(목차 버튼)
+    expect(toc.parentElement?.className).toContain("md:grid-cols-[240px_minmax(0,1fr)]");
     expect(toc.className).toContain("hidden");
     expect(root.querySelector("#projects-toc-toggle")?.getAttribute("aria-expanded")).toBe("false");
     const sha7 = fixture.summary.sha.slice(0, 7);
@@ -554,6 +554,32 @@ describe("문서 헤더 — 한 줄 · 문서 전환 칩 · 새창 · 글자 크
     expect(root.querySelector('.projects-doc-chip[aria-current="page"]')?.textContent?.trim()).toBe("FEATURES");
     expect(root.querySelector('.projects-mode[data-mode="md"]')?.getAttribute("aria-pressed")).toBe("true");
     expect(root.querySelector<HTMLAnchorElement>("#projects-open-window")!.getAttribute("href")).toContain("/doc/features/page?mode=md");
+  });
+
+  test("목차 글자는 이모지·장식 기호를 뺀다(tocLabel) — 본문 제목·title 은 원문 그대로", async () => {
+    const { tocLabel } = await import("./Projects");
+    expect(tocLabel("🔄 실사용 피드백 (2026-01-01)")).toBe("실사용 피드백 (2026-01-01)");
+    expect(tocLabel("📌 예시 절 — ★나중에 손본다★")).toBe("예시 절 — 나중에 손본다");
+    expect(tocLabel("🎯 목표 (2026-01-02 10:00) — 킵")).toBe("목표 (2026-01-02 10:00) — 킵");
+    expect(tocLabel("✅ 완료된 것 🧹")).toBe("완료된 것");
+    expect(tocLabel("1단계 — 편집기 만들기")).toBe("1단계 — 편집기 만들기");
+    expect(tocLabel("★ 킵 ★ 하나")).toBe("킵 하나");   // 공백 축약
+    expect(tocLabel("—킵—")).toBe("킵");               // 앞뒤 대시
+    expect(tocLabel("완료: ✅")).toBe("완료");           // 뒤 콜론
+    expect(tocLabel("👍🏽 굿")).toBe("굿");              // 피부색 수식자까지
+    expect(tocLabel("🎉")).toBe("🎉"); // 전부 기호면 원문 유지
+    // DOM: 목차 글자는 정리본, title 은 원문
+    const root = await mount();
+    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="todo"]')!.click();
+    await tick();
+    root.querySelector<HTMLButtonElement>('button[data-todo-tab="all"]')?.click();
+    await tick();
+    const heads = [...root.querySelectorAll<HTMLButtonElement>(".projects-toc-head")];
+    const decorated = heads.find((b) => /\p{Extended_Pictographic}/u.test(b.title));
+    expect(decorated).toBeDefined();
+    expect(decorated!.textContent?.trim()).toBe(tocLabel(decorated!.title));
+    expect(decorated!.textContent?.trim()).not.toBe(decorated!.title);
+    expect(decorated!.querySelector(".projects-toc-label")).not.toBeNull();
   });
 
   test("목록 카드에도 새창 링크(README·HTML 로 시작)", async () => {

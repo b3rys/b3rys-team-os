@@ -410,6 +410,14 @@ function pickSection(secs: DocSection[], anchor: string | null): DocSection {
 function hasToc(secs: DocSection[]): boolean {
   return secs.length > 1 || (secs[0]?.children.length ?? 0) > 0;
 }
+/** 목차 글자 — 제목의 이모지·장식 기호(★✦✓ 등)를 빼고 공백을 정리한다. 본문 제목은 그대로, 목차만 담백하게(팀장 2026-09-18). */
+export function tocLabel(text: string): string {
+  return text
+    .replace(/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}\u{E0020}-\u{E007F}\u{FE0F}\u{200D}\u{20E3}]/gu, "")
+    .replace(/[★☆✦✧✓✔✗✘◆◇■□●○▶▷►]/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s\-·—–:]+|[\s\-·—–:]+$/g, "") || text.trim();
+}
 function tocTreeHtml(secs: DocSection[], cur: DocSection): string {
   const rows = secs.map((s) => {
     const open = s === cur || _tocOpen.has(s.anchor);
@@ -417,10 +425,10 @@ function tocTreeHtml(secs: DocSection[], cur: DocSection): string {
       ? `<button class="projects-toc-caret" type="button" data-toggle="${escape(s.anchor)}" aria-expanded="${open}" aria-label="${pick("소제목 접기/펼치기", "Toggle subheadings")}">▶</button>`
       : `<span class="projects-toc-caret" aria-hidden="true"></span>`;
     const kids = s.children.length
-      ? `<div class="projects-toc-children">${s.children.map((t) => `<a href="#${escape(t.anchor)}" data-level="${t.level}" data-anchor="${escape(t.anchor)}" aria-current="${t.anchor === _curHead}">${escape(t.text)}</a>`).join("")}</div>`
+      ? `<div class="projects-toc-children">${s.children.map((t) => `<a href="#${escape(t.anchor)}" data-level="${t.level}" data-anchor="${escape(t.anchor)}" title="${escape(t.text)}" aria-current="${t.anchor === _curHead}"><span class="projects-toc-label">${escape(tocLabel(t.text))}</span></a>`).join("")}</div>`
       : "";
     return `<div class="projects-toc-sec" data-sec="${escape(s.anchor)}" data-open="${open}">
-      <div class="projects-toc-row">${caret}<button class="projects-toc-head" type="button" data-sec="${escape(s.anchor)}" title="${escape(s.label)}" aria-current="${s === cur}">${escape(s.label)}</button></div>
+      <div class="projects-toc-row">${caret}<button class="projects-toc-head" type="button" data-sec="${escape(s.anchor)}" title="${escape(s.label)}" aria-current="${s === cur}"><span class="projects-toc-label">${escape(tocLabel(s.label))}</span></button></div>
       ${kids}</div>`;
   }).join("");
   return `<nav class="projects-toc" aria-label="${pick("목차", "Contents")}">${rows}</nav>`;
@@ -544,7 +552,7 @@ async function renderDoc(): Promise<void> {
           </div>
           ${isTodo && _mode === "html" ? `<div class="flex items-center gap-2 pb-2"><div class="flex gap-1 rounded-lg border border-surface-3 bg-surface-2 p-0.5">${todoTabBtn("status", pick("현재 상태", "Status"))}${todoTabBtn("all", pick("전체", "All"))}</div></div>` : ""}
         </div>
-        <div class="pt-4 min-w-0 ${showToc ? "grid grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)] gap-5" : ""}">
+        <div class="pt-4 min-w-0 ${showToc ? "grid grid-cols-1 md:grid-cols-[240px_minmax(0,1fr)] gap-5" : ""}">
           ${showToc && cur ? `<aside id="projects-toc" class="${_tocMobileOpen ? "block" : "hidden"} md:block md:sticky md:top-24 md:self-start md:max-h-[calc(100vh-8rem)] md:overflow-y-auto rounded-xl border border-surface-3 bg-surface-2 px-2 py-2.5 min-w-0">
             <div class="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-1 px-2">${pick("목차", "Contents")}</div>
             ${tocTreeHtml(secs, cur)}
