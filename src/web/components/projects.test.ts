@@ -564,7 +564,7 @@ describe("문서 헤더 — 한 줄 · 문서 전환 칩 · 새창 · 글자 크
   });
 
   test("⌘= / ⌘− / ⌘0 — 문서 화면에서만 90/100/110/125 를 오가고 % 배지를 띄운다 · 목록에서는 무시", async () => {
-    const { handleZoomKey, currentZoom } = await import("./Projects");
+    const { handleZoomKey, currentZoom, setProjectsVisible } = await import("./Projects");
     const root = await mount();
     const key = (k: string) => { const e = new window.KeyboardEvent("keydown", { key: k, metaKey: true, cancelable: true }); const handled = handleZoomKey(e as unknown as KeyboardEvent); return { handled, prevented: e.defaultPrevented }; };
     expect(key("=").handled).toBe(false);      // 목록 화면 — 브라우저 확대에 맡긴다
@@ -580,6 +580,13 @@ describe("문서 헤더 — 한 줄 · 문서 전환 칩 · 새창 · 글자 크
     key("-"); expect(currentZoom()).toBe(90);   // 하한
     key("0"); expect(currentZoom()).toBe(100);
     expect(window.localStorage.getItem("bill-dash-projects-zoom")).toBe("100");
+    setProjectsVisible(false);                  // 다른 탭 — 브라우저 확대를 가로채지 않는다
+    expect(key("=")).toEqual({ handled: false, prevented: false });
+    expect(currentZoom()).toBe(100);
+    setProjectsVisible(true);
+    expect(key("=").handled).toBe(true);
+    expect(currentZoom()).toBe(110);
+    key("0");
     document.getElementById("projects-zoom-badge")?.remove();
   });
 });

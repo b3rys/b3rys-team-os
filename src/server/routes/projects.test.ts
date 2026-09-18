@@ -19,7 +19,7 @@ function setup() {
   const source = new GitHubDocs({ cacheDir: dir, useToken: false, fetch: (async (url: any) => {
     if (fail) return new Response("upstream details", { status: 401 });
     if (String(url).includes("/branches/")) return Response.json({ commit: { sha: "a".repeat(40) } });
-    return new Response("# Sample\n\nUseful app.\n\n- [~] working\n- [x] done\n## 📌 킵\n- [ ] held\n## next\n- [ ] plan\n\n```mermaid\ngraph TD\nA-->B\n```");
+    return new Response("# Sample\n\nUseful app.\n\n<script>alert(1)</script>\n\n- [~] working\n- [x] done\n## 📌 킵\n- [ ] held\n## next\n- [ ] plan\n\n```mermaid\ngraph TD\nA-->B\n```");
   }) as typeof fetch });
   const app = new Hono();
   app.route("/team/api", createProjectRoutes({ db, projects: [p], source }));
@@ -95,6 +95,7 @@ describe("새창 페이지 /doc/:key/page", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toStartWith("text/html");
     expect(res.headers.get("x-project-sha")).toBe("a".repeat(40));
+    expect(res.headers.get("content-security-policy")).toBe("default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
     const html = await res.text();
     expect(html).toContain("<!doctype html>");
     expect(html).toContain("Content-Security-Policy");
@@ -112,6 +113,8 @@ describe("새창 페이지 /doc/:key/page", () => {
     const html = await (await app.request("http://localhost/team/api/projects/sample/doc/readme/page?mode=md")).text();
     expect(html).toContain('<pre class="projects-raw">');
     expect(html).toContain("```mermaid");
+    expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;"); // 원문의 태그는 글자로만
+    expect(html).not.toContain("<script");
     expect(html).not.toContain("<article");
     expect(html).toContain('class="mode on" href="/team/api/projects/sample/doc/readme/page?mode=md"');
   });

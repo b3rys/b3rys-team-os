@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DOC_KEYS, GitHubDocs, ProjectSourceError, validateProjects, type ProjectRegistration, type DocKey } from "../lib/githubDocs";
 import { projectIntro } from "../lib/projectDocRender";
-import { standaloneDocPage } from "../../shared/projectsProse";
+import { STANDALONE_CSP, standaloneDocPage } from "../../shared/projectsProse";
 import { DEFAULT_EXCLUDE_SECTIONS, parseProjectTodo } from "../lib/projectTodo";
 import { leadActorId, trustedActorFromRequest } from "../lib/opAuth";
 
@@ -73,6 +73,7 @@ export function createProjectRoutes(deps: ProjectDeps) {
     const basePath = process.env.BASE_PATH ?? "/team";
     c.header("Content-Type", "text/html; charset=utf-8");
     c.header("X-Content-Type-Options", "nosniff");
+    c.header("Content-Security-Policy", `${STANDALONE_CSP}; frame-ancestors 'none'`);
     c.header("X-Project-Sha", snapshot.sha);
     return c.body(standaloneDocPage({
       projectId: p.id, projectName: p.name, title: doc.title, path: doc.path, sha: snapshot.sha, key, mode,

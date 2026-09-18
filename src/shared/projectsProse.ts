@@ -57,6 +57,8 @@ export function proseCss(headOffset: number): string {
 export const PAGE_VARS_CSS = `:root{color-scheme:dark light;--surface-0:13 15 18;--surface-1:20 22 25;--surface-2:23 25 29;--surface-3:33 36 42;--border:43 47 54;--slate-50:246 247 249;--slate-100:240 242 244;--slate-200:218 220 225;--slate-300:188 191 198;--slate-400:157 161 169;--slate-500:144 151 160;--slate-600:117 123 133;--accent:61 220 132;--accent-soft-text:#6fd9a0;--txt-amber:#f0bd6a}
 @media (prefers-color-scheme: light){:root{--surface-0:236 238 241;--surface-1:243 244 246;--surface-2:247 248 250;--surface-3:255 255 255;--border:231 232 236;--slate-50:20 21 26;--slate-100:28 29 34;--slate-200:51 53 60;--slate-300:74 77 85;--slate-400:80 83 91;--slate-500:92 95 103;--slate-600:109 112 121;--accent:31 157 90;--accent-soft-text:#198a52;--txt-amber:#875a0e}}`;
 
+/** 새창 페이지 CSP. meta 와 응답 헤더 양쪽에 같은 값을 쓴다(헤더에는 frame-ancestors 를 더한다 — meta 로는 못 건다). */
+export const STANDALONE_CSP = "default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
 export const DOC_KEYS_ORDER = ["readme", "design", "features", "todo"] as const;
 export const DOC_LABELS: Record<string, string> = { readme: "README", design: "DESIGN", features: "FEATURES", todo: "TODO" };
 
@@ -82,7 +84,7 @@ export function standaloneDocPage(opts: {
     : `<article class="projects-prose">${opts.html}</article>`;
   return `<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="${STANDALONE_CSP}">
 <title>${esc(projectName)} · ${esc(title)}</title>
 <style>${PAGE_VARS_CSS}
 html,body{margin:0;background:rgb(var(--surface-1));color:rgb(var(--slate-200));font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
