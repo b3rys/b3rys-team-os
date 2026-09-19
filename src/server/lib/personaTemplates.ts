@@ -4,8 +4,10 @@
 //   정체 → ⭐핵심룰 → 능력 → 톤 → 작업 컨텍스트 → 팀 공유 → 글로벌 규칙
 // 언어 = 한글. 팀 공통 규칙(미션·멤버·소통·현황)은 **복붙 안 함** — 단일 정본 TEAM-OS/SHARED 참조.
 //
-// TEAM-OS 참조는 "런타임이 로딩하는 파일"에만:
-//   - claude_channel → loadingFile=CLAUDE.md → @TEAM-OS.md import 포함, 풀 템플릿 / persona_file=SOUL.md.
+// TEAM-OS 참조는 "런타임이 로딩하는 파일"에만 — ★어느 런타임도 TEAM-OS 를 인라인하지 않는다(2026-09-19 팀장 결정)★:
+//   규칙 파일에는 요약(핵심룰 + 규칙 로딩 절)만 싣고, TEAM-OS 는 팀 운영·라우팅 일을 할 때 직접 읽는다.
+//   claude 도 예전엔 @TEAM-OS.md 로 매 턴 2,500 토큰을 실었는데, openclaw·hermes 와 같은 방식으로 맞췄다.
+//   - claude_channel → loadingFile=CLAUDE.md → @SOUL.md·@SKILLS.md import, 풀 템플릿 / persona_file=SOUL.md.
 //   - openclaw/hermes/codex → loadingFile=AGENTS.md(buildAgentsMd, 풀 템플릿+참조) / persona_file=SOUL.md.
 
 import { resolve } from "node:path";
@@ -385,17 +387,12 @@ export const SECTION_CORE_RULE_EN = CORE_RULE_COMPACT;
 export const SECTION_CORE_RULE = CORE_RULE_COMPACT;
 
 /**
- * ★TEAM-OS 와 겹치던 절차 5줄은 핵심룰에서 뺐다.★
+ * ★TEAM-OS 와 겹치던 절차 5줄은 핵심룰에서 뺐다.★ 그 실행 세부는 아래 한 줄로 ★전 런타임의★ 규칙 로딩 절에 싣는다.
  *
- * ★런타임별로 다른 핵심룰을 주는 방식은 쓰지 않는다.★ 처음엔 claude 만 빼려 했는데
- * `collectDelivery.test.ts` 의 ★"전 런타임이 바이트 단위로 같은 룰을 읽는다"★ 가드가 즉시 빨개졌다.
- * 그 가드는 옛 오배송 사고(수집 종합이 엉뚱한 사람에게 3/7)의 기억이다 — 우회하지 않는다.
- *
- * 그래서 구조로 푼다: ★핵심룰에서는 전 런타임 공통으로 빼고★, TEAM-OS 를 @import 하지 않는
- * openclaw·hermes 에게만 `ruleLoadingBlock` 에서 한 줄로 돌려준다(그 블록은 원래 그 두 런타임 전용이다).
- *   · claude   → @TEAM-OS.md 로 §4·§5 전문을 이미 싣는다 → 순수 절감
- *   · openclaw·hermes → 같은 파일 다른 절에 실린다 → 순증감 0
- * 결과: 핵심룰은 여전히 ★바이트 단위로 동일★ 하고, claude 만 중복이 사라진다.
+ * ★런타임별로 다른 핵심룰을 주는 방식은 쓰지 않는다.★ `collectDelivery.test.ts` 의
+ * ★"전 런타임이 바이트 단위로 같은 룰을 읽는다"★ 가드가 옛 오배송 사고의 기억이라 우회하지 않는다.
+ * 2026-09-19 부터 claude 도 TEAM-OS 를 인라인하지 않으므로, 이 한 줄이 12명 모두의 "실행 가능한 형태" 다
+ * (`ruleDedupeSafety.test.ts` 가 네 런타임 파일 전부에서 이 세부를 찾는다). TEAM-OS 쪽 같은 문장은 뺐다.
  */
 const PROCEDURE_MOVED_TO_TEAMOS =
   "- 팀장 메시지에는 자율 작업보다 먼저 답한다(지시·확인에는 먼저 ack). 가벼운 질문(인사·상태·의견·표현·간단 조회)은 바로 답한다. 범위·완료기준을 내가 정해야 하는 과제 → 계획·기준을 먼저 확인받고 실행(첫 응답에 산출물·파일·외부 조회 없음). 판별: 기준을 내가 지어내야 하나? 아니면 명확한 지시 → 실행하고 보고. 긴 작업은 중단 가능하게, 보고는 의미 있는 변경·지연·막힘만 짧게 한 번에. 인계 = 누가·맥락·과제·완료기준·기한 + ack, done·blocked·확인 대기까지 추적. 역할은 `agents.json`, 내 역할 밖이면 PM 이 위임. (정본 = TEAM-OS §4·§5)";
@@ -418,9 +415,7 @@ export function coreRuleFor(
   //   writeMemberPersona(영입·스왑·저장) 말고 ★regenerate-persona(핵심룰 재적용) 는 injectCoreRule+coreRuleFor
   //   외과 경로를 탄다.★ 여기에 모드를 안 걸면, 플래그를 꺼도 재렌더된 룰은 여전히 "서버가 번들로 깨워준다"고
   //   말하고 collector 는 오지 않을 번들을 무한히 기다린다(2026-07-12 라이브에서 실제로 이렇게 안 먹혔다).
-  const base = applyCollectMode(subTeam(subOwner(SECTION_CORE_RULE_EN, ownerName), teamName), runtime);
-  // claude 만 TEAM-OS 를 @import 로 같이 싣는다 → 겹치는 절차 5줄을 뺀다. 다른 런타임은 원문 그대로.
-  return base;
+  return applyCollectMode(subTeam(subOwner(SECTION_CORE_RULE_EN, ownerName), teamName), runtime);
 }
 
 /**
@@ -594,21 +589,20 @@ function sectionWorkspace(i: PersonaInput): string {
 }
 
 /**
- * openclaw/hermes 룰 로딩 필독 블록 — openclaw는 @import 자동인라인이 없어 TEAM-OS 전문이
- * 컨텍스트에 안 들어온다(요약만). 깊은 룰은 "정본을 직접 읽어라"로 메운다(Codi A/B에서 증명, 2026-06-27).
+ * 룰 로딩 블록 — ★전 런타임 공용★. TEAM-OS 전문은 어느 규칙 파일에도 인라인되지 않는다(2026-09-19 팀장 결정,
+ * claude 도 매 턴 2,500 토큰 절감). 깊은 룰은 "정본을 직접 읽어라"로 메운다(Codi A/B에서 증명, 2026-06-27).
  * 라이브 stale 파일 보강(scripts/fix-rule-loading.ts)에서도 동일 블록 재사용 → 단일 출처.
+ * runtime별 분기: Skill Workshop 구분은 openclaw 전용(hermes엔 Skill Workshop 기능 자체가 없음 →).
  */
-// 룰 로딩 블록 — openclaw·hermes 는 @import 자동인라인이 없어 이 요약+정본 직독으로 메운다.
-// runtime별 분기: Skill Workshop 구분은 openclaw 전용(hermes엔 Skill Workshop 기능 자체가 없음 →).
 export function ruleLoadingBlock(runtime: string, agentId?: string): string {
   const isOpenclaw = runtime === "openclaw";
   const teamOsPath = teamOsPathFor(agentId); // 파일럿 대상이면 영어 드래프트 경로, 그 외 정본
   return [
-    "## 📚 규칙 로딩 (openclaw·hermes 필독 — @import 자동 인라인 없음)",
+    "## 📚 규칙 로딩 (필독 — TEAM-OS 는 자동으로 들어오지 않는다)",
     "",
     PROCEDURE_MOVED_TO_TEAMOS,
     "",
-    "⚠️ 이 런타임은 TEAM-OS 전문을 자동으로 넣어 주지 않는다(이 파일의 요약만 보인다). **팀 운영·규칙·워크플로를 묻거나 그 일을 할 때는 요약을 되풀이하지 말고 아래 정본을 직접 읽고 구체적으로 답하고 실행한다 — 허락을 기다리지 않는다.**",
+    "⚠️ TEAM-OS 전문은 자동으로 들어오지 않는다(이 파일의 요약만 보인다). **팀 운영·규칙·워크플로를 묻거나 그 일을 할 때는 요약을 되풀이하지 말고 아래 정본을 직접 읽고 구체적으로 답하고 실행한다 — 허락을 기다리지 않는다.**",
     "",
     "위 ⭐ Core Rules 가 기본이고, 절차·예외는 이 요약 대신 정본을 읽는다:",
     "- 주인 규칙·직접 답장·인계 추적: TEAM-OS §2·§5.",
@@ -683,22 +677,25 @@ function buildSkillTable(): string {  // rules/SKILLS.md 본문 (skillsRender.ts
 export const SKILLS_MD_PATH = `${REPO_ROOT}/rules/SKILLS.md`;
 export { buildSkillTable };
 
-/** 팀 공유 — 런타임별 로딩(claude=@import / openclaw·hermes=경로참조). 공통 규칙 복붙 안 함. */
+/** 팀 공유 — TEAM-OS 는 전 런타임 경로 참조(인라인 없음). claude 만 SKILLS.md 를 @import 로 싣는다. 공통 규칙 복붙 안 함. */
 function sectionTeamShare(runtime: string, agentId?: string): string {
   if (runtime === "claude_channel") {
     return [
       "## Team share",
       "",
-      "@TEAM-OS.md",
-      "",
       // ★경로 기준을 맨 위에 한 번만 선언한다★ — 이후는 전부 `b3os/...` 상대로 쓴다.
       //   긴 절대경로를 절마다 반복하지 않으면서 "무엇 기준인지" 는 파일 안에 남는다.
       `- **Paths**: \`b3os\` = \`${tilde(REPO_ROOT)}\`. 아래 경로는 전부 이 기준의 상대 경로다(내 작업 디렉터리가 아니다).`,
-      "- `b3os/rules/SHARED.md` — 팀 현황·학습 로그. 필요할 때 읽는다.",
-      "- 팀 미션·팀원·소통·주인 규칙은 위 TEAM-OS 하나가 정본이다. **팀 운영·워크플로·스킬을 깊이 물으면 이 요약을 되풀이하지 말고 정본(`b3os/docs/`, 해당 `SKILL.md`)을 직접 읽는다** (@import 는 TEAM-OS 까지만 인라인한다).",
+      // ★TEAM-OS 는 인라인하지 않는다★ (2026-09-19 팀장 결정) — 매 턴 2,500 토큰이 앞에 실리던 것을 뺐다.
+      //   openclaw·hermes 와 같은 방식: 요약은 아래 규칙 로딩 절, 전문은 필요할 때 읽는다. 워크스페이스 심링크는 남겨 둔다.
+      `- 팀 공통 규칙(미션·팀원·소통·주인 규칙): \`${tilde(teamOsPathFor(agentId))}\` — **팀 운영·라우팅·과제 관리 일을 할 때 읽는다.** 매 턴 자동으로 들어오지 않는다(작업 디렉터리의 \`TEAM-OS.md\` 심링크로도 읽을 수 있다).`,
+      "- 팀 현황·학습 로그: `b3os/rules/SHARED.md` — 필요할 때 읽는다.",
+      "- 팀 공통 규칙은 TEAM-OS 하나가 정본이다(여기에 복사하지 않는다). **팀 운영·워크플로·스킬을 깊이 물으면 이 요약을 되풀이하지 말고 정본(`b3os/docs/`, 해당 `SKILL.md`)을 직접 읽는다.**",
       "",
       "@SKILLS.md",
       `- 위 SKILLS.md = trigger→스킬 목록(skills 폴더에서 자동 생성 · 카탈로그 \`${tilde(REPO_ROOT)}/docs/B3OS_SKILLS.md\`). 스킬이 바뀌어도 이 파일은 바뀌지 않는다.`,
+      "",
+      ruleLoadingBlock(runtime, agentId),
     ].join("\n");
   }
   return [

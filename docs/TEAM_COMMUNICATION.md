@@ -315,7 +315,7 @@ m6 디스패치 때 `countAutoRounds(parent=m5)`가 m5→…→m0을 걸어 에�
 - 없음 → 소개 스킵, 바로 답.
 
 ### 5-4. 룰 로딩 (런타임별)
-- **claude**: 로딩파일=CLAUDE.md. `@SOUL.md`·`@TEAM-OS.md` @import로 자동 인라인(전체 TEAM-OS 통째 로드).
+- **claude**: 로딩파일=CLAUDE.md. `@SOUL.md`·`@SKILLS.md` 만 @import 로 자동 인라인. TEAM-OS 는 인라인하지 않는다(2026-09-19, 매 턴 2,500 토큰 절감) — 다른 런타임과 같은 "📚 룰 로딩" 블록 + 정본 경로.
 - **openclaw/hermes/codex**: 로딩파일=AGENTS.md. ★@import 자동 인라인 없음★ → "📚 룰 로딩" 블록으로 "이 런타임은 TEAM-OS 자동주입 안 됨, 아래 정본 경로를 직접 읽어라"(TEAM-OS §2/§5 owner+handoff, §4 실행/안전, §10 kanban) 지시.
 
 ### 5-5. 활성화 순서 (claude, activateMember)

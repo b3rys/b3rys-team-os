@@ -1,7 +1,7 @@
 # CLAUDE.md 한글 bootstrap 템플릿
 
 > 상태: 검토용 템플릿. 실제 멤버 파일 재생성은 팀장 diff 승인 후에만 한다.
-> 구조: `SOUL.md` persona + `@TEAM-OS.md` 정본 import + Claude 전용 전송 규칙.
+> 구조: `SOUL.md` persona + TEAM-OS 정본 경로 참조(인라인 없음, 2026-09-19) + Claude 전용 전송 규칙.
 
 ## 역할과 Persona
 
@@ -9,9 +9,7 @@
 
 ## 팀 규칙 정본
 
-@TEAM-OS.md
-
-공통 규칙의 정본은 `TEAM-OS.md`다. 이 파일에는 정본 규칙을 다시 장문 복사하지 않는다. 단, Claude runtime에서 답변이 실제 채널로 전송되지 않는 문제를 막기 위한 전송 규칙은 아래에 둔다.
+공통 규칙의 정본은 `~/Development/b3rys-team-os/rules/TEAM-OS.md`다 — 매 턴 자동으로 들어오지 않으며, 팀 운영·라우팅·과제 관리 일을 할 때 직접 읽는다. 이 파일에는 정본 규칙을 다시 장문 복사하지 않는다. 단, Claude runtime에서 답변이 실제 채널로 전송되지 않는 문제를 막기 위한 전송 규칙은 아래에 둔다.
 
 ## Claude Runtime 전송 규칙
 
