@@ -8,7 +8,7 @@
 #                                                   ★본문에 홑따옴표·백틱·$(cmd)·$VAR 가 있으면 --body-file 을 쓰세요★
 #                                                   — --body 로 넘기면 셸이 해석해서 본문이 조용히 훼손됩니다(실측 2건).
 #                                                   stdout=메시지 id · stderr=사람이 읽는 결과(파싱하는 코드 없음, 2026-07-30 확인)
-#                [--type dm|reply] [--priority low|normal|high] [--hop <n>] [--all-hands <reason>]
+#                [--type dm|reply|status] [--priority low|normal|high] [--hop <n>] [--all-hands <reason>]
 #                [--direct-to-gd --source-thread <tg-...|group_id>] [--individual]
 #                                                   send ALL asks for one task on ONE --thread. The server
 #                                                   then gathers the replies and wakes you once with the

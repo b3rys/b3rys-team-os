@@ -55,23 +55,30 @@ FIX="$TMP/body.txt"
   printf '%s\n' '★ 유니코드 · 여러 줄'
 } > "$FIX"
 
+# ★발송이 실제로 나갈 수 있는 케이스는 죽은 포트로 고정한다★
+#   아래 A1-1~A1-4 는 지금 인자·파일 검증에서 curl 전에 죽는다. 그 검증이 나중에 빠지면
+#   기본 TEAM_BASE(살아있는 팀 버스)로 ★시험이 진짜 메시지를 쏜다.★ 가드가 사라졌을 때
+#   조용히 발송되는 것을 막는 것이 이 고정의 목적이다 — 지금 무해하다는 것은 이유가 못 된다.
+#   curl 을 가짜로 바꿔 쓰는 케이스(A1-5·A1-6·A2-x)는 이미 격리돼 있어 대상이 아니다.
+DEADBASE="http://127.0.0.1:9/team"
+
 echo "── A1-1: --body 와 --body-file 동시 지정은 거절 ──"
-out="$("$SEND" --to lisa --body "x" --body-file "$FIX" 2>&1)"; rc=$?
+out="$(TEAM_BASE="$DEADBASE" "$SEND" --to lisa --body "x" --body-file "$FIX" 2>&1)"; rc=$?
 [ $rc -ne 0 ] && pass "거절됨 (exit $rc)" || fail "동시 지정을 통과시켰다"
 grep -q "동시에" <<<"$out" && pass "사유 설명 있음" || fail "사유 설명 없음: $out"
 
 echo "── A1-2: 없는 파일은 에러로 죽는다 (빈 본문으로 조용히 보내지 않는다) ──"
-out="$("$SEND" --to lisa --body-file "$TMP/nope.txt" 2>&1)"; rc=$?
+out="$(TEAM_BASE="$DEADBASE" "$SEND" --to lisa --body-file "$TMP/nope.txt" 2>&1)"; rc=$?
 [ $rc -ne 0 ] && pass "죽었다 (exit $rc)" || fail "없는 파일인데 계속 진행했다"
 grep -qE "없습니다|경로" <<<"$out" && pass "경로 문제를 알려준다" || fail "메시지 불명확: $out"
 
 echo "── A1-3: 빈 파일도 에러 ──"
 : > "$TMP/empty.txt"
-out="$("$SEND" --to lisa --body-file "$TMP/empty.txt" 2>&1)"; rc=$?
+out="$(TEAM_BASE="$DEADBASE" "$SEND" --to lisa --body-file "$TMP/empty.txt" 2>&1)"; rc=$?
 [ $rc -ne 0 ] && pass "빈 파일 거절 (exit $rc)" || fail "빈 본문으로 보내려 했다"
 
 echo "── A1-4: 디렉토리를 주면 에러 ──"
-out="$("$SEND" --to lisa --body-file "$TMP" 2>&1)"; rc=$?
+out="$(TEAM_BASE="$DEADBASE" "$SEND" --to lisa --body-file "$TMP" 2>&1)"; rc=$?
 [ $rc -ne 0 ] && pass "디렉토리 거절 (exit $rc)" || fail "디렉토리를 본문으로 읽으려 했다"
 
 echo "── A1-5: ★본문이 문자 단위로 보존되는가★ (핵심) ──"
@@ -335,7 +342,7 @@ grep -q "미배달이 아닙니다" <<<"$out" && pass "미배달로 오독하지
 # ★종료코드만 보면 거짓 통과한다★ — 가드가 없어도 curl 실패로 rc=7 이 나온다(실측).
 #   그래서 종료코드와 stderr 문구를 ★둘 다★ 단정한다.
 # ★아래 본문 리터럴의 따옴표는 어긋나 보이는 것이 정상이다 — 교정하면 재현이 사라진다.★
-DEADBASE="http://127.0.0.1:9/team"
+# DEADBASE 는 파일 위쪽(A1 앞)에서 정의한다.
 
 echo "── A4-1: 중복 --to 는 거절 (수신자가 조용히 바뀌는 경로) ──"
 out="$(TEAM_BASE="$DEADBASE" "$SEND" --to lisa --body "명령은 "send.sh --to broadcast"" 2>&1)"; rc=$?
@@ -411,6 +418,82 @@ if [ $rc -ne 0 ] && grep -q "동시에" <<<"$out"; then
 else
   fail "reply.sh 가 동시 지정을 그 사유로 막지 않는다 (exit $rc) / out=$(tail -3 <<<"$out")"
 fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# A5 — reply.sh 자체 인자 가드
+#
+# ★send.sh 의 가드는 여기를 볼 수 없다★ — reply.sh 는 send.sh 로 넘기는 인자 배열에
+# `--body` 를 한 번만 싣는다. 덮인 뒤의 값 하나만 도착하므로, 중복 자체가 하류에 보이지 않는다.
+# 실측: `--body "AAA" --body "BBB"` 가 에러 없이 BBB 로 덮이고 exit 0 이었다.
+#
+# ★판정에 종료코드를 쓰면 전부 거짓 통과한다★ — reply.sh 는 인자 파싱 뒤 curl 로 원본
+# 메시지를 먼저 조회한다. TEAM_BASE 가 죽은 포트면 ★어떤 입력이든 exit!=0★ 이 되어,
+# 가드가 0개여도 전부 '막힘' 으로 보인다.
+# 구분자는 ★네트워크 단계에 도달했는지★ 다 — 인자 가드에 걸리면 조회까지 가지 못한다.
+REPLY_SH="$REPO/skills/b3os-team-inbox/scripts/reply.sh"
+RB1="$TMP/rb1.txt"; RB2="$TMP/rb2.txt"
+printf '본문 한 줄\n둘째 줄\n' > "$RB1"; printf '다른 본문\n' > "$RB2"
+RMID="m_fixture_1"
+
+# 네트워크 흔적: 조회 단계에 도달했다는 표시.
+reply_netmark() { grep -qE "curl|못 찾음|답장 대상|↳ reply" <<<"$1"; }
+
+# 막혀야 하는 입력: 세 겹으로 단정한다.
+#   ① 종료코드가 0이 아니다  ② 네트워크 흔적이 없다  ③ ★그 가드가 실제로 뱉는 문구가 있다★
+#
+# ★③ 이 없으면 ①②만으로는 가드가 0개여도 전부 '막힘' 으로 읽힌다.★ ② 는 부정 단정이고,
+# 그 증거를 만드는 것은 죽은 포트가 뱉는 `curl: (7)` 한 줄뿐이다. 조회가 조용히 성공하는
+# 상황(스텁·프록시·포트 점유)에서는 그 줄이 사라지고, 사라진 증거는 '도달하지 않았다' 와
+# 구분되지 않는다. 실측으로 확인됐다 — 가드 없는 reply.sh 에 조용히 성공하는 curl 을 놓으면
+# ①② 만으로는 전부 통과한다.
+#
+# ③ 은 케이스마다 ★자기 가드의 문구★ 를 받는다. 공통 정규식 하나로 묶으면 A 케이스가
+# B 가드의 메시지로 통과할 수 있다 — 어느 가드가 걸렸는지까지 고정해야 회귀를 잡는다.
+# (이 파일 A3-2 주석: 부정 단정에는 '실제로 끝까지 갔다' 는 증거를 같이 본다. A4-7 도 같은 이유로 두 겹이다.)
+reply_blocked() {
+  local d="$1" expect="$2"; shift 2
+  local out rc
+  out="$(TEAM_BASE="$DEADBASE" "$REPLY_SH" "$@" 2>&1)"; rc=$?
+  if [ $rc -ne 0 ] && ! reply_netmark "$out" && grep -qE "$expect" <<<"$out"; then
+    pass "막힘 | $d"
+  elif [ $rc -ne 0 ] && ! reply_netmark "$out"; then
+    fail "★가드 문구 없이 죽었다 — 무엇이 막았는지 알 수 없다★ | $d (exit $rc) / $(tail -1 <<<"$out")"
+  else
+    fail "★누수★ | $d (exit $rc) / $(tail -1 <<<"$out")"
+  fi
+}
+# 통과해야 하는 입력: 반대로 ★네트워크 단계까지 가야★ 한다. 여기서 막히면 답장 자체가 안 된다.
+reply_passes() {
+  local d="$1"; shift
+  local out rc
+  out="$(TEAM_BASE="$DEADBASE" "$REPLY_SH" "$@" 2>&1)"; rc=$?
+  if reply_netmark "$out"; then
+    pass "통과 | $d"
+  else
+    fail "★오탐★ | $d (exit $rc) / $(tail -1 <<<"$out")"
+  fi
+}
+
+echo "── A5-a: 막혀야 하는 입력 (종료코드 + 네트워크 미도달) ──"
+reply_blocked "--body 중복"             "중복 지정했다: --body$"      "$RMID" --body AAA --body BBB
+reply_blocked "--priority 중복"          "중복 지정했다: --priority"   "$RMID" --body x --priority high --priority low
+reply_blocked "--hop 중복"               "중복 지정했다: --hop"        "$RMID" --body x --hop 1 --hop 2
+reply_blocked "--body-file 중복"         "중복 지정했다: --body-file"  "$RMID" --body-file "$RB1" --body-file "$RB2"
+reply_blocked "--priority 화이트리스트 밖" "\-\-priority 는 low\|normal\|high" "$RMID" --body x --priority bogus
+# 이건 이미 막혀 있던 것이다 — 가드를 추가하다 깨뜨리지 않았는지 재는 회귀 단정이다.
+reply_blocked "--body + --body-file 동시"  "동시에 쓸 수 없습니다"       "$RMID" --body x --body-file "$RB1"
+
+echo "── A5-b: ★통과해야 하는 입력 (과차단 회귀 지점)★ ──"
+reply_passes "--body 단독"              "$RMID" --body "정상 본문"
+reply_passes "--priority high"          "$RMID" --body x --priority high
+reply_passes "--priority low"           "$RMID" --body x --priority low
+reply_passes "--priority normal"        "$RMID" --body x --priority normal
+reply_passes "--hop 3"                  "$RMID" --body x --hop 3
+reply_passes "--hop 0 (경계)"            "$RMID" --body x --hop 0
+reply_passes "--body-file"              "$RMID" --body-file "$RB1"
+reply_passes "--body-file + priority"   "$RMID" --body-file "$RB1" --priority high
+reply_passes "--body + --hop + priority" "$RMID" --body x --hop 2 --priority high
+reply_passes "--dry-run 조합"            "$RMID" --body x --dry-run
 
 echo
 if [ $FAILED -eq 0 ]; then echo "ALL PASS — send tools honesty"; else echo "FAILED — send tools honesty"; fi
