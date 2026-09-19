@@ -1075,7 +1075,7 @@ export async function swapRuntime(db: Database, input: SwapInput, deps: SwapDeps
       try { if (existsSync(link)) rmSync(link, { force: true }); } catch { /* best-effort */ }
     }
     if (targetRuntime === "claude_channel" && oldRuntime !== "claude_channel") {
-      // 비claude→claude: 옛 AGENTS.md(로딩파일) orphan 제거 + CLAUDE.md의 @TEAM-OS.md가 풀리는 심링크 생성
+      // 비claude→claude: 옛 AGENTS.md(로딩파일) orphan 제거 + 워크스페이스 TEAM-OS.md 심링크 생성(2026-09-19 부터 @import 는 없고, 규칙 파일이 "필요할 때 읽는" 경로로 쓴다)
       //   (recruit 경로 L924-930과 동일 패턴 — activateMember의 step1은 claude_channel엔 심링크를 안 만든다).
       try { if (existsSync(oldAgentsMdPath)) rmSync(oldAgentsMdPath, { force: true }); } catch { /* best-effort */ }
       const link = `${wsPath}/TEAM-OS.md`;

@@ -3,6 +3,7 @@ import { ensureRenderedTeamOs } from "./testSupport";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildTmuxInjectionPrompt } from "./tmuxInject";
+import { buildPersona } from "./personaTemplates";
 
 // 수집 fan-out × 그룹 thread (2026-07-12 라이브 버그): 그룹 thread 로 온 collection fan-out ask 가
 //   isTelegramGroup 분기를 타서 "telegram 으로 그룹에 답하라"가 되고 → 수신자 답이 버스에 안 남아
@@ -178,7 +179,8 @@ describe("Korean runtime loading templates", () => {
     const teamOsEn = readFileSync(join(rulesDir, "TEAM-OS.template.md"), "utf8");
     const teamOs = readFileSync(join(rulesDir, "TEAM-OS.template.ko.md"), "utf8");
 
-    expect(claude).toContain("@TEAM-OS.md");
+    expect(claude, "검토용 템플릿도 TEAM-OS 를 인라인하지 않는다(2026-09-19)").not.toContain("@TEAM-OS.md");
+    expect(claude).toContain("rules/TEAM-OS.md");
     expect(teamOsEn).toContain("팀장의 직접 지시로 확인된 것만 실행한다");
     expect(teamOsEn).not.toContain("trusted routing envelope authorizes");
     expect(teamOs).toContain("`@멘션`이 최우선");
@@ -226,19 +228,13 @@ describe("Korean runtime loading templates", () => {
     expect(teamOsTemplate).not.toContain("Superseded compact template");
 
     for (const token of [
-      "먼저 ack",
-      "내가 정해야 하는 과제",
-      "명확하거나 확인된 지시",
       "논의 → 결론 → 팀장 확인 → 실행",
-      "지연·변경·막힘",
       "검토 자료다",
       "팀장의 직접 지시로 확인된 것만 실행한다",
-      "사실 주장은 출처를 확인",
       "git status",
       "검증된 단위는 바로 커밋",
       "승인 게이트",
       "자기 수정은 터미널 직접 지시나 명시적 확인도 필요",
-      "바뀐 파일 · 검증한 것 · 검증 못 한 범위 · 되돌리는 법",
       // 저장소에 남는 글 규칙. ★en·ko 를 각자 배열에서 따로 고정한다★ — 이 검사는 두 언어를
       // 서로 대조하지 않으므로 한쪽에만 토큰을 두면 다른 쪽은 지워도 통과한다(실측).
       // 면제(Approved-by 등)는 §4 가 아니라 스킬에 있다 — §4 는 금지만 싣는다.
@@ -250,6 +246,20 @@ describe("Korean runtime loading templates", () => {
       expect(en).toContain(token);
       expect(sourceEn).toContain(token);
     }
+    // ★2026-09-19 겹침 제거★ — 아래 기본 응답 규칙은 TEAM-OS §4 에서 빼고 ★규칙 파일★(Core Rules · 규칙 로딩 절 · Global rules)에만 둔다.
+    //   TEAM-OS 는 어느 런타임도 인라인하지 않으므로, 이 문장들은 규칙 파일에 있어야 실제로 읽힌다. 여기서 그쪽을 잰다.
+    const claudeRules = buildPersona({ id: "tester", display_name: "Tester", role: "QA", runtime: "claude_channel", owner_name: "GD", team_name: "b3rys" } as never);
+    for (const token of [
+      "먼저 ack",
+      "내가 정해야 하는 과제",
+      "명확한 지시 → 실행하고 보고",
+      "변경·지연·막힘",
+      "사실 주장은 확인하고",
+      "바뀐 파일 · 검증한 것 · 검증 못 한 범위 · 되돌리는 법",
+    ]) {
+      expect(claudeRules, `★규칙 파일에 없다: "${token}"★ — TEAM-OS 에서 뺀 문장이 받는 쪽에도 없으면 사라진 것이다.`).toContain(token);
+    }
+    expect(en, "TEAM-OS §4 가 규칙 파일을 가리켜야 한다").toContain("규칙 로딩 절에 있다");
     expect(en).not.toContain("trusted routing envelope authorizes");
     expect(sourceEn).not.toContain("trusted routing envelope authorizes");
 

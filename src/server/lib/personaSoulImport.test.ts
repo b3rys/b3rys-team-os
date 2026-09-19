@@ -32,9 +32,10 @@ describe("claude persona import", () => {
     expect(render("claude_channel")).not.toContain("`@SOUL.md`");
   });
 
-  test("★같은 파일의 다른 import 도 맨 줄이다★ — @TEAM-OS.md 가 잘 되던 이유가 그것이다", () => {
+  test("★같은 파일의 다른 import 도 맨 줄이다★ — @SKILLS.md (TEAM-OS 는 2026-09-19 부터 인라인하지 않는다)", () => {
     const lines = render("claude_channel").split("\n");
-    expect(lines).toContain("@TEAM-OS.md");
+    expect(lines).toContain("@SKILLS.md");
+    expect(lines).not.toContain("@TEAM-OS.md");
   });
 
   test("★대조군 — codex 는 @import 를 쓰지 않는다★ (본문을 직접 싣는다)", () => {

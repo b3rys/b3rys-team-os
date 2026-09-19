@@ -39,17 +39,32 @@ const MOVED_DETAILS = [
   "인사·상태·의견·표현·간단 조회",                 // ② 가벼운 질문의 범위
   "첫 응답에 산출물·파일·외부 조회 없음",          // ③ 첫 응답 금지
   "기준을 내가 지어내야 하나",                     // ③ 열린과제 판별 테스트
-  "한 번에",                                      // ④ 한 번에 묶어 짧게
+  "짧게 한 번에",                                 // ④ 한 번에 묶어 짧게 (하네스 지적: "한 번에" 만으로는 다른 문장에도 걸린다)
   "누가·맥락·과제·완료기준·기한",                  // ⑤ 핸드오프 구성요소
   "내 역할 밖이면 PM 이 위임",                     // ⑤ 역할 밖이면 위임
 ];
 
-describe("★핵심룰에서 뺀 절차는 TEAM-OS 가 '실행 가능한 형태로' 받아야 한다★", () => {
-  it("TEAM-OS 정본에 세부가 전부 있다 — 하나라도 빠지면 claude 가 그 결정을 잃는다", () => {
-    for (const d of MOVED_DETAILS) {
-      expect(teamOs, `★TEAM-OS 에 없다: "${d}"★ — 핵심룰에서 뺐는데 받는 쪽에 없으면 그냥 사라진 것이다.`)
-        .toContain(d);
+describe("★핵심룰에서 뺀 절차는 각 런타임의 규칙 파일이 '실행 가능한 형태로' 받아야 한다★", () => {
+  // 2026-09-19: TEAM-OS 는 어느 런타임도 인라인하지 않는다(팀장 결정) → 세부는 ★규칙 파일 자체★(규칙 로딩 절)에 있어야 한다.
+  //   TEAM-OS 쪽 같은 문장은 뺐다(겹침 제거). 그래서 이 검사의 대상이 TEAM-OS 템플릿에서 네 런타임 파일로 바뀌었다.
+  const member = { id: "tester", display_name: "Tester", role: "QA", owner_name: "GD", team_name: "b3rys" };
+  const files: Array<[string, string]> = [
+    ["claude_channel", buildPersona({ ...member, runtime: "claude_channel" } as never)],
+    ...["openclaw", "hermes_agent", "codex"].map((runtime): [string, string] => [runtime, buildAgentsMd({ ...member, runtime } as never)]),
+  ];
+  it("네 런타임 규칙 파일 전부에 세부가 있다 — 하나라도 빠지면 그 런타임이 그 결정을 잃는다", () => {
+    for (const [runtime, text] of files) {
+      for (const d of MOVED_DETAILS) {
+        expect(text, `★${runtime} 규칙 파일에 없다: "${d}"★ — 핵심룰에서 뺐는데 받는 쪽에 없으면 그냥 사라진 것이다.`)
+          .toContain(d);
+      }
     }
+  });
+  it("TEAM-OS 는 그 세부를 되풀이하지 않는다 — 같은 룰이 두 군데면 한쪽만 고치고 '완료' 가 된다", () => {
+    for (const d of ["자율 작업보다 먼저 답한다", "첫 응답에 산출물·파일·외부 조회 없음", "기준을 내가 지어내야 하나", "누가·맥락·과제·완료기준·기한", "내 역할 밖이면 PM 이 위임"]) {
+      expect(teamOs, `★TEAM-OS 에 다시 들어왔다: "${d}"★`).not.toContain(d);
+    }
+    expect(teamOs).toContain("규칙 로딩 절에 있다"); // 대신 어디 있는지 가리킨다
   });
 
   // ★'외부 전송' 판별 축 검사는 personaTemplates.test.ts 에 있다.★
@@ -66,27 +81,30 @@ describe("★핵심룰에서 뺀 절차는 TEAM-OS 가 '실행 가능한 형태�
     expect(teamOsRendered).toBe(teamOsTemplate);
   });
 
-  it("★claude 는 @TEAM-OS.md 를 반드시 싣는다★ — 이게 이번 중복 제거의 전제다 (lui 지적: 단일 실패점)", () => {
-    const claude = buildPersona({
-      id: "tester", display_name: "Tester", role: "QA",
-      runtime: "claude_channel", owner_name: "GD", team_name: "b3rys",
-    } as never);
-    // import 가 빠지면 claude 는 ★에러 없이 조용히★ 위 5개를 전부 잃는다.
-    expect(claude, "★@TEAM-OS.md import 가 없다★ — 뺀 절차를 받을 통로가 사라졌다.")
-      .toContain("@TEAM-OS.md");
+  it("★규칙 로딩 절이 가리키는 TEAM-OS 절 번호가 실제 제목과 맞는다★ — 이 목록이 정본을 읽는 유일한 단서다 (하네스 손실 감사 2026-09-19)", () => {
+    const [, claude] = files[0]!;
+    const block = claude.slice(claude.indexOf("## 📚 규칙 로딩"));
+    // 절 번호 → 그 절 제목에 있어야 하는 말. 번호를 잘못 적으면(작업루프를 §10 으로) 여기서 잡힌다.
+    const expected: Record<string, string> = { "2": "말하기", "3": "규칙 우선순위", "4": "공통 응답 규칙", "5": "협업 규칙", "8": "현재 상태", "9": "팀 학습", "10": "과제 관리", "11": "작업루프", "12": "동시 작업" };
+    const cited = new Set([...block.matchAll(/§(\d+)/g)].map((m) => m[1]!));
+    for (const n of Object.keys(expected)) expect(cited, `★규칙 로딩 절이 TEAM-OS §${n}(${expected[n]}) 을 가리키지 않는다★`).toContain(n);
+    for (const n of cited) {
+      const heading = new RegExp(`^## ${n}\\. (.+)$`, "m").exec(teamOs)?.[1] ?? "";
+      expect(heading, `★TEAM-OS 에 §${n} 제목이 없다★`).not.toBe("");
+      if (expected[n]) expect(heading, `★§${n} 은 "${expected[n]}" 이어야 하는데 "${heading}" 이다★`).toContain(expected[n]!);
+    }
+    // 가리키는 말도 제목과 어긋나면 안 된다 — 작업루프는 §11, 동시 작업은 §12
+    expect(block).toMatch(/작업루프[^\n]*§11/);
+    expect(block).toMatch(/워크트리 격리[^\n]*§12/);
+    expect(block).not.toMatch(/작업루프[^\n]*§10/);
   });
 
-  it("★openclaw·hermes 는 TEAM-OS 를 자동 로딩하지 않는다 → 자기 파일에 세부를 받는다★", () => {
-    for (const runtime of ["openclaw", "hermes"]) {
-      const agents = buildAgentsMd({
-        id: "tester", display_name: "Tester", role: "QA",
-        runtime, owner_name: "GD", team_name: "b3rys",
-      } as never);
-      for (const d of ["자율 작업보다 먼저 답한다", "기준을 내가 지어내야 하나",
-                       "누가·맥락·과제·완료기준·기한", "내 역할 밖이면 PM 이 위임"]) {
-        expect(agents, `★${runtime} 파일에 없다: "${d}"★ — 이 런타임은 TEAM-OS 를 안 싣는다.`)
-          .toContain(d);
-      }
-    }
+  it("★claude 도 TEAM-OS 를 인라인하지 않는다★ — 대신 정본 경로와 '언제 읽는가' 가 있다 (2026-09-19)", () => {
+    const [, claude] = files[0]!;
+    expect(claude, "★@TEAM-OS.md 인라인이 되살아났다★ — 매 턴 2,500 토큰이 다시 실린다.").not.toContain("@TEAM-OS.md");
+    expect(claude).toContain("rules/TEAM-OS.md");
+    expect(claude).toContain("팀 운영·라우팅·과제 관리 일을 할 때 읽는다");
+    expect(claude).toContain("## 📚 규칙 로딩");
+    expect(claude, "SKILLS.md 인라인은 그대로다").toContain("\n@SKILLS.md\n");
   });
 });
