@@ -604,11 +604,18 @@ export function ruleLoadingBlock(runtime: string, agentId?: string): string {
     "",
     "⚠️ TEAM-OS 전문은 자동으로 들어오지 않는다(이 파일의 요약만 보인다). **팀 운영·규칙·워크플로를 묻거나 그 일을 할 때는 요약을 되풀이하지 말고 아래 정본을 직접 읽고 구체적으로 답하고 실행한다 — 허락을 기다리지 않는다.**",
     "",
+    // ★절 번호는 TEAM-OS.template.md 의 "## N." 제목과 맞아야 한다★ — ruleDedupeSafety.test 가 대조한다.
+    //   (하네스 손실 감사 2026-09-19: 작업루프가 §11 인데 §10 으로 적혀 있었고, §12 동시 작업은 아예 빠져 있었다.
+    //    TEAM-OS 를 인라인하던 때는 무해했지만, 이제 이 목록이 claude 가 정본을 읽는 유일한 단서다.)
     "위 ⭐ Core Rules 가 기본이고, 절차·예외는 이 요약 대신 정본을 읽는다:",
     "- 주인 규칙·직접 답장·인계 추적: TEAM-OS §2·§5.",
+    "- 규칙 우선순위(런타임 안전 > TEAM-OS > 개인 설정): TEAM-OS §3.",
     "- 실행 순서·안전 게이트·리뷰/검증·배포/게시/머지 정책: TEAM-OS §4.",
-    "- 칸반·과제 소유·주행/완전자율·작업루프: TEAM-OS §10 + 해당 `b3os-*` 스킬.",
-    "- proposal·self-learning 거버넌스: TEAM-OS §9 + `docs/TEAM_LOOP_WORKFLOW.md`.",
+    "- 자주 바뀌는 현재 값(팀원·환경): TEAM-OS §8 → `rules/STATE.md`.",
+    "- proposal·self-learning·컴팩팅 거버넌스: TEAM-OS §9 + `docs/TEAM_LOOP_WORKFLOW.md`.",
+    "- 칸반·과제 소유·주행/완전자율·하네스 규모: TEAM-OS §10 + 해당 `b3os-*` 스킬.",
+    "- `[작업루프: …]` 로 깨어났을 때 닫는 법: TEAM-OS §11 + `b3os-task-loop`.",
+    "- b3os 자체를 고칠 때(브랜치·워크트리 격리 · `agents.json`/`team.db` · 백업): TEAM-OS §12 + `b3os-infra-safety`.",
     ...(isOpenclaw
       ? ["- **스킬 제작은 b3os 방식이 기본이다(OpenClaw 의 Skill Workshop 이 아니다)**: 개선·제안은 **b3os proposal**(`prop_...`)로, 실제 도구·스킬은 **b3os 스킬 시스템**(`skills/b3os-<영역>-<기능>`)에 만든다. OpenClaw 의 `skill_workshop` 은 진짜 Skill Workshop 제안에만 쓴다(b3os `prop_...` 과 혼동하지 않는다)."]
       : []),

@@ -39,7 +39,7 @@ const MOVED_DETAILS = [
   "인사·상태·의견·표현·간단 조회",                 // ② 가벼운 질문의 범위
   "첫 응답에 산출물·파일·외부 조회 없음",          // ③ 첫 응답 금지
   "기준을 내가 지어내야 하나",                     // ③ 열린과제 판별 테스트
-  "한 번에",                                      // ④ 한 번에 묶어 짧게
+  "짧게 한 번에",                                 // ④ 한 번에 묶어 짧게 (하네스 지적: "한 번에" 만으로는 다른 문장에도 걸린다)
   "누가·맥락·과제·완료기준·기한",                  // ⑤ 핸드오프 구성요소
   "내 역할 밖이면 PM 이 위임",                     // ⑤ 역할 밖이면 위임
 ];
@@ -79,6 +79,24 @@ describe("★핵심룰에서 뺀 절차는 각 런타임의 규칙 파일이 '�
    */
   it.skipIf(teamOsRendered === null)("템플릿과 렌더본이 같다 — 한쪽만 고치면 다음 렌더에 되돌아간다", () => {
     expect(teamOsRendered).toBe(teamOsTemplate);
+  });
+
+  it("★규칙 로딩 절이 가리키는 TEAM-OS 절 번호가 실제 제목과 맞는다★ — 이 목록이 정본을 읽는 유일한 단서다 (하네스 손실 감사 2026-09-19)", () => {
+    const [, claude] = files[0]!;
+    const block = claude.slice(claude.indexOf("## 📚 규칙 로딩"));
+    // 절 번호 → 그 절 제목에 있어야 하는 말. 번호를 잘못 적으면(작업루프를 §10 으로) 여기서 잡힌다.
+    const expected: Record<string, string> = { "2": "말하기", "3": "규칙 우선순위", "4": "공통 응답 규칙", "5": "협업 규칙", "8": "현재 상태", "9": "팀 학습", "10": "과제 관리", "11": "작업루프", "12": "동시 작업" };
+    const cited = new Set([...block.matchAll(/§(\d+)/g)].map((m) => m[1]!));
+    for (const n of Object.keys(expected)) expect(cited, `★규칙 로딩 절이 TEAM-OS §${n}(${expected[n]}) 을 가리키지 않는다★`).toContain(n);
+    for (const n of cited) {
+      const heading = new RegExp(`^## ${n}\\. (.+)$`, "m").exec(teamOs)?.[1] ?? "";
+      expect(heading, `★TEAM-OS 에 §${n} 제목이 없다★`).not.toBe("");
+      if (expected[n]) expect(heading, `★§${n} 은 "${expected[n]}" 이어야 하는데 "${heading}" 이다★`).toContain(expected[n]!);
+    }
+    // 가리키는 말도 제목과 어긋나면 안 된다 — 작업루프는 §11, 동시 작업은 §12
+    expect(block).toMatch(/작업루프[^\n]*§11/);
+    expect(block).toMatch(/워크트리 격리[^\n]*§12/);
+    expect(block).not.toMatch(/작업루프[^\n]*§10/);
   });
 
   it("★claude 도 TEAM-OS 를 인라인하지 않는다★ — 대신 정본 경로와 '언제 읽는가' 가 있다 (2026-09-19)", () => {

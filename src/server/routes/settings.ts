@@ -1259,7 +1259,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       try {
         writeFileSync(join(_paths.workspace_path, JOIN_FLAG_FILE), joinInstructions(display_name, role));
       } catch { /* best-effort */ }
-      // claude_channel: CLAUDE.md 의 `@TEAM-OS.md`(상대) 가 풀리도록 workspace 에 심링크 생성(Steve 패턴).
+      // claude_channel: workspace 에 TEAM-OS.md 심링크 생성(Steve 패턴). 2026-09-19 부터 CLAUDE.md 는 @import 하지 않고 이 경로를 "필요할 때 읽는" 용도로 쓴다.
       if (runtime === "claude_channel") {
         const link = join(_paths.workspace_path, "TEAM-OS.md");
         if (!existsSync(link)) {
