@@ -150,6 +150,15 @@ describe("hermes 브리지 — 스레드별 세션 이어가기", () => {
     expect(calls).toHaveLength(2);
   });
 
+  test("stderr 문구가 바뀌어도 usage-file 의 구조화 failure(session not found) 만으로 폴백한다 (1차 = 구조화 신호)", async () => {
+    setHermesSession("ames", "t1", "GONE");
+    scripts.push({ code: 1, err: "hermes -z: agent failed\n",
+      usage: { failed: true, failure: "session not found: GONE", session_id: null } });
+    scripts.push({ out: "새 세션 답", usage: { completed: true, session_id: "FRESH" } });
+    expect(await turn(ames, "t1", "m1")).toBe("새 세션 답");
+    expect(calls).toHaveLength(2);
+  });
+
   test("resume 가 다른 이유로 실패하면 재시도하지 않고 그대로 실패한다 (턴 도중 이미 팬아웃했을 수 있다)", async () => {
     setHermesSession("ames", "t1", "S1");
     scripts.push({ out: "API call failed after 3 retries: HTTP 429: limit",
