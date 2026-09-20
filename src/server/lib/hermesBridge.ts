@@ -10,7 +10,8 @@ import { existsSync, readFileSync } from "node:fs";
 import type { AgentRecord } from "../types";
 import { pick, type Locale } from "./i18n";
 import { teamContextLabel } from "../channels/registry";
-import { isRuntimeFailureOutput, readTurnFailure } from "./runtimeFailureOutput";
+import { isRuntimeFailureOutput, readTurnReport } from "./runtimeFailureOutput";
+import { clearHermesSession, getHermesSession, setHermesSession } from "./hermesSessionStore";
 import { appendAuditFile } from "./auditFile";
 import { hermesBinary, HERMES_ROOT, runtimeCwdForAgent } from "./paths";
 
@@ -304,7 +305,41 @@ export function __setHermesBridgeTestDeps(deps?: { spawn?: SpawnFn }): void {
 }
 export const HERMES_TURN_TIMEOUT_MS = Number(process.env.HERMES_TURN_TIMEOUT_MS ?? 600_000);
 
+/**
+ * 한 턴 = 한 `hermes -z` 프로세스. 프로세스는 턴이 끝나면 죽지만 대화는 hermes 세션에 남는다.
+ * 같은 버스 스레드의 다음 턴은 저장된 session id 로 `--resume` 해 그 대화를 이어간다
+ * (`hermesSessionStore`). 저장된 id 를 hermes 가 모르면(세션 정리·프로필 초기화) 그 id 를 지우고
+ * 한 번만 새 세션으로 다시 돈다 — 다른 실패는 재시도하지 않는다(턴 도중 팬아웃을 이미 보냈을 수 있다).
+ */
 export async function runHermesTeamTurn(opts: HermesTurnOptions): Promise<string> {
+  const resumeId = getHermesSession(opts.agent.id, opts.threadId);
+  const first = await runHermesProcess(opts, resumeId);
+  if (first.kind === "ok") {
+    if (first.sessionId) setHermesSession(opts.agent.id, opts.threadId, first.sessionId);
+    return first.out;
+  }
+  if (resumeId && first.sessionNotFound) {
+    clearHermesSession(opts.agent.id, opts.threadId);
+    appendAuditFile("hermes_bridge", "resume_session_not_found", opts.messageId, {
+      agent_id: opts.agent.id,
+      thread_id: opts.threadId,
+      session_id: resumeId,
+    });
+    const second = await runHermesProcess(opts, null);
+    if (second.kind === "ok") {
+      if (second.sessionId) setHermesSession(opts.agent.id, opts.threadId, second.sessionId);
+      return second.out;
+    }
+    throw second.error;
+  }
+  throw first.error;
+}
+
+type HermesProcessResult =
+  | { kind: "ok"; out: string; sessionId: string | null }
+  | { kind: "failed"; error: Error; sessionNotFound: boolean };
+
+function runHermesProcess(opts: HermesTurnOptions, resumeId: string | null): Promise<HermesProcessResult> {
   const cmd = hermesCommand(opts.agent);
   const prompt = buildPrompt(opts);
   const runtimeCwd = runtimeCwdForAgent(opts.agent);
@@ -321,8 +356,12 @@ export async function runHermesTeamTurn(opts: HermesTurnOptions): Promise<string
   // ★이 턴이 실패였는지 hermes 에게 ★구조적으로★ 묻는다.★ (문장 매칭이 아니다 — 아래 readTurnFailure 참조)
   //   `--usage-file` 은 실행 후 JSON 을 쓴다. ★실패해도 쓴다.★ 실패 분기 24개가 전부 completed:false 다.
   const usagePath = join(tmpdir(), `hermes-usage-${opts.agent.id}-${opts.messageId}-${process.pid}.json`);
-  return new Promise((resolve, reject) => {
-    const proc = spawnForBridge(cmd, ["-z", prompt, "--usage-file", usagePath], {
+  const args = ["-z", prompt, "--usage-file", usagePath];
+  if (resumeId) args.push("--resume", resumeId);
+  return new Promise((resolve) => {
+    const failed = (error: Error, sessionNotFound = false): void =>
+      resolve({ kind: "failed", error, sessionNotFound });
+    const proc = spawnForBridge(cmd, args, {
       cwd: runtimeCwd,
       // ★팀원의 정체를 ★명시적으로★ 알려준다 — 추측하게 두지 않는다.★ (2026-07-13 실측 사고)
       //
@@ -364,7 +403,7 @@ export async function runHermesTeamTurn(opts: HermesTurnOptions): Promise<string
       proc.kill();
       killEscalation = setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* 이미 죽음 */ } }, KILL_ESCALATION_MS);
       killEscalation.unref?.();
-      reject(new Error(`hermes_timeout (idle ${Math.round(timeoutMs / 1000)}s)`));
+      failed(new Error(`hermes_timeout (idle ${Math.round(timeoutMs / 1000)}s)`));
     };
     const bumpIdle = (): void => {
       clearTimeout(idleTimer);
@@ -397,7 +436,7 @@ export async function runHermesTeamTurn(opts: HermesTurnOptions): Promise<string
     proc.stderr.on("data", (c) => { stderr += c.toString(); bumpIdle(); noteAlive(); });
     proc.on("error", (e) => {
       clearIdle();
-      reject(e);
+      failed(e);
     });
     proc.on("close", (code) => {
       clearIdle();
@@ -407,7 +446,8 @@ export async function runHermesTeamTurn(opts: HermesTurnOptions): Promise<string
       //   그중 1건은 ★broadcast 로 팀 전체에★).
       // ★1차 = 구조화 신호(usage-file).★ 실패 분기 24개를 한 번에 덮는다. 2차 = 알려진 문장(그물).
       //   ★reject 로 넘긴다 — 이 콜백 안에서 throw 하면 Promise 가 안 죽고 uncaught 로 샌다.★
-      const failure = readTurnFailure(usagePath); // (읽고 지운다)
+      const report = readTurnReport(usagePath); // (읽고 지운다)
+      const failure = report.failure;
       if (code === 0) {
         const out = stdout.trim();
         if (failure || isRuntimeFailureOutput(out)) {
@@ -420,14 +460,17 @@ export async function runHermesTeamTurn(opts: HermesTurnOptions): Promise<string
             reason: why,
             suppressed_body: out.slice(0, 500),
           });
-          reject(new Error("hermes_incomplete_turn:" + why));
+          failed(new Error("hermes_incomplete_turn:" + why), report.sessionNotFound);
           return;
         }
-        if (out) resolve(out);
-        else reject(new Error("hermes_empty_response"));
+        if (out) resolve({ kind: "ok", out, sessionId: report.sessionId });
+        else failed(new Error("hermes_empty_response"));
         return;
       }
-      reject(new Error(("hermes_exit_" + code + ":" + stderr).slice(0, 1000)));
+      // 실측: `--resume <없는 id>` 는 exit 1 + stderr "session not found: <id>" 다. usage-file 이 못 쓰였을 때를
+      //   대비해 stderr 도 같이 본다 — 둘 중 하나면 세션 없음.
+      const notFound = report.sessionNotFound || /session not found\b/i.test(stderr);
+      failed(new Error(("hermes_exit_" + code + ":" + stderr).slice(0, 1000)), notFound);
     });
   });
 }
