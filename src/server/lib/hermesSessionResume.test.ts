@@ -10,12 +10,12 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentRecord } from "../types";
 import { runHermesTeamTurn, __setHermesBridgeTestDeps } from "./hermesBridge";
-import { getHermesSession, setHermesSession } from "./hermesSessionStore";
+import { clearHermesSession, getHermesSession, setHermesSession } from "./hermesSessionStore";
 
 const ames: AgentRecord = {
   id: "ames", display_name: "Ames", role: "analyst", runtime: "hermes_agent",
@@ -117,6 +117,24 @@ describe("hermes 브리지 — 스레드별 세션 이어가기", () => {
     expect(getHermesSession("ames", "t1")).toBe("S1");
     expect(getHermesSession("ames", "t2")).toBe("S2");
     expect(getHermesSession("forin", "t1")).toBe("S3");
+  });
+
+  test("같은 팀원의 두 스레드 턴이 같은 순간에 끝나도 두 매핑이 다 남는다 (read-modify-write 유실 없음)", async () => {
+    scripts.push({ out: "a", usage: { completed: true, session_id: "S1" } });
+    scripts.push({ out: "b", usage: { completed: true, session_id: "S2" } });
+    // 가짜 spawn 은 둘 다 5ms 뒤 같은 틱 근처에서 close 한다 → 두 close 핸들러가 연달아 set 을 부른다
+    await Promise.all([turn(ames, "t1", "m1"), turn(ames, "t2", "m2")]);
+    expect(getHermesSession("ames", "t1")).toBe("S1");
+    expect(getHermesSession("ames", "t2")).toBe("S2");
+    // set 과 clear 가 섞여도 마찬가지 — 각 호출이 동기로 완주한다
+    setHermesSession("ames", "t3", "S3");
+    clearHermesSession("ames", "t1");
+    setHermesSession("ames", "t4", "S4");
+    expect(getHermesSession("ames", "t1")).toBeNull();
+    expect(getHermesSession("ames", "t2")).toBe("S2");
+    expect(getHermesSession("ames", "t3")).toBe("S3");
+    expect(getHermesSession("ames", "t4")).toBe("S4");
+    expect(readdirSync(dir).filter((f) => f.endsWith(".tmp")), "임시 파일이 남지 않는다").toEqual([]);
   });
 
   test("hermes 가 세션을 모르면(session not found) 그 id 를 지우고 한 번만 새 세션으로 다시 돈다", async () => {

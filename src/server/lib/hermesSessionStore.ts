@@ -57,11 +57,18 @@ function readFile(agentId: string): SessionFile {
   }
 }
 
+/**
+ * 동시성 메모: get/set/clear 는 처음부터 끝까지 동기(readFileSync → writeFileSync → renameSync, await 없음)라
+ * 한 서버 프로세스 안에서는 두 턴이 같은 순간에 끝나도 read-modify-write 가 끼어들지 못한다(이벤트 루프가
+ * 하나씩 완주시킨다). 갱신 유실이 나려면 ★다른 프로세스★ 가 같은 파일을 써야 하는데, 이 파일을 쓰는 건
+ * 서버뿐이다. tmp 이름은 프로세스별 + 호출 번호로 유일하게 해 다른 프로세스와도 rename 이 충돌하지 않게 한다.
+ */
+let writeSeq = 0;
 function writeFile(agentId: string, data: SessionFile): void {
   const dir = sessionsDir();
   mkdirSync(dir, { recursive: true });
   const target = filePath(agentId);
-  const tmp = `${target}.${process.pid}.tmp`;
+  const tmp = `${target}.${process.pid}.${++writeSeq}.tmp`;
   writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n");
   renameSync(tmp, target); // 원자적 교체 — 반쯤 쓰인 파일을 다음 턴이 읽지 않게
 }
