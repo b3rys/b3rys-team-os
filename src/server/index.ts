@@ -61,6 +61,8 @@ import { persistOwnerChatIdIfEmpty } from "./runtimes/codex/launcher";
 import { createApprovalsApp } from "./routes/approvals";
 import { createPermissionGateRoutes } from "./routes/permissionGate";
 import { buildMcpHttpApp } from "./mcp/mcpHttpRoute";
+import { apiCfGate } from "./lib/apiCfGate";
+import { appendAuditFile } from "./lib/auditFile";
 import { configureLeadActorDb, leadActorId, trustedActorFromRequest } from "./lib/opAuth";
 import { createHostGate } from "./lib/hostGate";
 import { DEFAULT_MEDIA_DIR, contentTypeForMediaFile, resolveMediaPath } from "./lib/mediaStore";
@@ -281,6 +283,10 @@ const app = new Hono();
 
 
 const api = new Hono();
+// ★/api 원격 게이트 — 맨 앞에 둔다.★ Hono 는 등록 순서대로 실행하므로 라우트 뒤에 두면 그 라우트는 검사 없이 답한다.
+//   로컬 호출(Host=loopback, CF 헤더 없음)은 검사 없이 통과 — 팀원 스크립트·대시보드 로컬 경로 그대로.
+//   원격(터널 경유)은 CF Access 증명서(JWT)를 검증한다. env B3OS_API_CF_AUD 가 비어 있으면 게이트는 꺼져 있다(현행 유지).
+api.use("*", apiCfGate({ onDeny: (reason, detail) => appendAuditFile("api_cf_gate", "denied", reason, detail) }));
 api.route("/", createProjectRoutes({ db }));
 
 api.use("*", async (c, next) => {

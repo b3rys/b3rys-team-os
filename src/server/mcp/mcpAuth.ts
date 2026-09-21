@@ -100,6 +100,25 @@ export function loadMcpAuthConfig(env: Record<string, string | undefined> = proc
  * 요청 하나를 인증한다. ★설정이 비어 있으면 열지 않고 막는다★(fail-closed) —
  * 설정을 깜빡한 서버가 조용히 무인증으로 열리는 게 가장 위험하다.
  */
+/**
+ * CF Access 증명서 하나를 검증한다 — 서명(팀 도메인 JWKS)·iss·aud·exp/nbf.
+ * MCP 창구와 /api 게이트가 같은 함수를 쓴다(검증 규칙이 두 군데서 따로 늙지 않게).
+ * `audience` 는 하나 또는 여럿(같은 서버 앞에 Access 앱이 둘일 때).
+ * 실패 이유는 밖으로 자세히 알리지 않는다 — 어느 단계에서 걸렸는지가 공격자에게 힌트가 된다.
+ */
+export async function verifyCfAccessJwt(
+  token: string,
+  teamDomain: string,
+  audience: string | string[],
+): Promise<JWTPayload | null> {
+  try {
+    const verified = await jwtVerify(token, jwksFor(teamDomain), { audience, issuer: `https://${teamDomain}` });
+    return verified.payload;
+  } catch {
+    return null;
+  }
+}
+
 export async function authenticateMcpRequest(req: Request, cfg: McpAuthConfig): Promise<McpAuthResult> {
   if (!cfg.teamDomain || !cfg.audience) {
     return { ok: false, status: 403, reason: "mcp_auth_not_configured" };
@@ -107,17 +126,9 @@ export async function authenticateMcpRequest(req: Request, cfg: McpAuthConfig): 
   const token = req.headers.get(CF_JWT_HEADER)?.trim();
   if (!token) return { ok: false, status: 401, reason: "missing_access_jwt" };
 
-  let payload: JWTPayload;
-  try {
-    const verified = await jwtVerify(token, jwksFor(cfg.teamDomain), {
-      audience: cfg.audience,
-      issuer: `https://${cfg.teamDomain}`,
-    });
-    payload = verified.payload;
-  } catch {
-    // 서명·만료·aud·iss 중 하나라도 어긋나면 여기로 온다. 이유를 밖으로 자세히 알리지 않는다.
-    return { ok: false, status: 401, reason: "invalid_access_jwt" };
-  }
+  const payload = await verifyCfAccessJwt(token, cfg.teamDomain, cfg.audience);
+  // 서명·만료·aud·iss 중 하나라도 어긋나면 null 이다.
+  if (!payload) return { ok: false, status: 401, reason: "invalid_access_jwt" };
 
   const subj = subjectFromPayload(payload);
   if (!subj) return { ok: false, status: 403, reason: "no_subject_in_jwt" };
