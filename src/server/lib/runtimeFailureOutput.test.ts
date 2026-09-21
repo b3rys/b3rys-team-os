@@ -75,11 +75,11 @@ describe("★배선 — 모듈만 있고 안 쓰면 아무것도 안 고쳐진�
 
   it("브리지가 ★--usage-file 을 실제로 넘긴다★ (안 넘기면 구조화 신호가 영영 안 생긴다)", () => {
     expect(BRIDGE).toContain('"--usage-file", usagePath');
-    expect(BRIDGE).toContain("readTurnFailure(usagePath)");
+    expect(BRIDGE).toContain("readTurnReport(usagePath)"); // 실패 판정 + session_id 를 한 번에 읽는다
   });
 
-  it("★reject 로 넘긴다★ — proc.on('close') 콜백 안이라 throw 하면 Promise 가 안 죽고 uncaught 로 샌다", () => {
-    expect(BRIDGE).toMatch(/reject\(new Error\("hermes_incomplete_turn:"/);
+  it("★값으로 넘긴다★ — proc.on('close') 콜백 안이라 throw 하면 Promise 가 안 죽고 uncaught 로 샌다", () => {
+    expect(BRIDGE).toMatch(/failed\(new Error\("hermes_incomplete_turn:"/);
     expect(BRIDGE).not.toMatch(/failure \|\| isRuntimeFailureOutput\(out\)\) \{[\s\S]{0,80}throw /);
   });
 

@@ -35,11 +35,29 @@ export interface TurnFailure {
  * 판정 불가(파일 없음·깨짐)면 null — ★모르면 실패로 몰지 않는다★ (정상 답을 죽이는 게 더 나쁘다).
  */
 export function readTurnFailure(usagePath: string): TurnFailure | null {
+  return readTurnReport(usagePath).failure;
+}
+
+export interface TurnReport {
+  /** 실패였으면 사유. 정상·판정 불가면 null. */
+  failure: TurnFailure | null;
+  /** hermes 가 이 턴을 담은 세션 id (`--resume` 에 넘길 값). 없으면 null. 실패 턴도 null 이다. */
+  sessionId: string | null;
+  /** 실패 사유가 "그 세션을 모른다" 인가 — `--resume <id>` 의 id 가 hermes 쪽에 없을 때. */
+  sessionNotFound: boolean;
+}
+
+/**
+ * usage-file 을 읽어 실패 여부와 session id 를 함께 돌려주고 파일을 지운다.
+ * 판정 불가(파일 없음·깨짐)면 failure=null·sessionId=null — ★모르면 실패로 몰지 않는다★.
+ */
+export function readTurnReport(usagePath: string): TurnReport {
+  const none: TurnReport = { failure: null, sessionId: null, sessionNotFound: false };
   let raw: string;
   try {
     raw = readFileSync(usagePath, "utf8");
   } catch {
-    return null; // hermes 가 파일을 못 썼다(best-effort) → 판정 불가
+    return none; // hermes 가 파일을 못 썼다(best-effort) → 판정 불가
   } finally {
     try {
       rmSync(usagePath, { force: true });
@@ -52,7 +70,7 @@ export function readTurnFailure(usagePath: string): TurnFailure | null {
   try {
     report = JSON.parse(raw) as Record<string, unknown>;
   } catch {
-    return null;
+    return none;
   }
 
   // ★명시적 false 일 때만★ 실패. (true = 성공, 없음/null = 판정 불가 → 둘 다 통과)
@@ -71,9 +89,13 @@ export function readTurnFailure(usagePath: string): TurnFailure | null {
       typeof report.failure === "string" && report.failure
         ? report.failure
         : "hermes turn did not complete (completed=false)";
-    return { reason: reason.slice(0, 200) };
+    // 실측(2026-09-20, hermes 0.21.3): `--resume <없는 id>` → exit 1, stderr "hermes -z: agent failed:
+    //   session not found: <id>", usage-file `failed:true, failure:"session not found: <id>", session_id:null`.
+    const sessionNotFound = /^session not found\b/i.test(reason.trim());
+    return { failure: { reason: reason.slice(0, 200) }, sessionId: null, sessionNotFound };
   }
-  return null;
+  const sessionId = typeof report.session_id === "string" && report.session_id ? report.session_id : null;
+  return { failure: null, sessionId, sessionNotFound: false };
 }
 
 /**
