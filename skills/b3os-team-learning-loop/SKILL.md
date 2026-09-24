@@ -8,7 +8,7 @@ trigger: record a team lesson
 
 이 스킬은 b3rys 팀의 weekly self-learning(주간 자가학습) 세션을 운영할 때 사용한다. 목적은 문서 작업량을 늘리는 것이 아니라, 팀 정책·스킬·개인 설정·프로젝트 운영을 실제로 개선하고 그 개선이 측정되게 만드는 것이다.
 
-> **BWF와의 관계 (2026-06-22, 팀 7/7 합의)**: learning-loop은 `b3os-bwf`와 **별도**다. BWF=개별 과제 실행(미시) / learning-loop=주간 메타-개선(거시·cadence·승인게이트 다름). BWF 6단계의 "학습 hook"이 만든 교훈·재발사례·검증증거가 이 루프의 **입력**으로 흘러든다(합치지 않고 데이터만 연계).
+> **BWF와의 관계**: learning-loop은 `b3os-bwf`와 **별도**다. BWF=개별 과제 실행(미시) / learning-loop=주간 메타-개선(거시·cadence·승인게이트 다름). BWF 6단계의 "학습 hook"이 만든 교훈·재발사례·검증증거가 이 루프의 **입력**으로 흘러든다(합치지 않고 데이터만 연계).
 
 ## 핵심 역할
 
@@ -68,9 +68,9 @@ trigger: record a team lesson
    - 월간 지표가 행동 개선을 보여주지 못하면 측정 항목을 바꾼다.
    - 서브주제의 수명이 끝났으면 종료하고 새 주제는 최소 필드로만 추가한다.
 
-## Tasks 칸반 쿼리 (정본 — schema-safe, 2026-06-15 운영 검증)
+## Tasks 칸반 쿼리 (정본 — schema-safe)
 
-위 입력 수집(1번)에서 Tasks 칸반을 볼 때는 **반드시 아래 정본 쿼리만 사용**한다. `team.db`의 `task` 테이블을 즉흥 SQL로 치지 말 것 — 옛 컬럼명(`status`, `priority`, `next_action`, `blocker`, `needs_gd_decision`)은 **더 이상 존재하지 않아** 쿼리가 깨진다(2026-06-12 weekly 05:00 run sqlite 실패 원인).
+위 입력 수집(1번)에서 Tasks 칸반을 볼 때는 **반드시 아래 정본 쿼리만 사용**한다. `team.db`의 `task` 테이블을 즉흥 SQL로 치지 말 것 — 옛 컬럼명(`status`, `priority`, `next_action`, `blocker`, `needs_gd_decision`)은 **더 이상 존재하지 않아** 쿼리가 깨진다.
 
 현재 `task` 스키마: `id, title, lane, owner, sort_order, created_at, updated_at, description`
 - `lane` = 칸반 컬럼(`plan` / `doing` / `done`). 옛 `status`의 대체.

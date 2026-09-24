@@ -73,7 +73,7 @@ description: 웹 대시보드/웹앱을 Apple 네이티브 셸(.app)로 빠르�
 - 골격 저장소 — Steno, b3os.app 실사용 검증
 - 패턴 박제: 골격의 `docs/Architecture.md` "주요 결정" Q/A (커밋 `5f80a8e`)
 - viewport 근본해결: 골격의 `WebView.swift`·`AppShell.swift` (커밋 `c626beb`, `ac8ed27` — 측정 기반)
-- **레시피 재현 evidence**: 이 레시피(골격의 `package-macos-app.sh`)로 빌드한 `b3os.app` → `.build/b3os-latest.zip`(397KB, 2026-06-24 빌드), the team lead 실기 확인 + `<dashboard-domain>` 배포본. 빌드 로그는 이 스킬의 [`references/build-evidence.md`](references/build-evidence.md).
+- **레시피 재현 evidence**: 이 레시피(골격의 `package-macos-app.sh`)로 빌드한 `b3os.app` → `.build/b3os-latest.zip`(397KB, 2026-06-24 빌드), 실기 실행 확인 + `<dashboard-domain>` 배포본. 빌드 로그는 이 스킬의 [`references/build-evidence.md`](references/build-evidence.md).
 
 ## 유지보수 — owner · 갱신 트리거
 

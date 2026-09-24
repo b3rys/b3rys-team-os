@@ -86,7 +86,7 @@ openclaw doctor
 
 ### ⚠️ Node 격리 — 런타임 간 node 얽힘 방지 (Hermes+OpenClaw 병행 시 필수)
 
-`openclaw onboard --install-daemon` 은 **그 순간 PATH에서 잡힌 node의 절대경로를 openclaw LaunchAgent(plist)에 그대로 박습니다.** 그 node가 다른 런타임 소유(예: Hermes 가 번들한 `~/.hermes/node/bin/node`)면, 나중에 그 런타임을 지울 때(`hermes uninstall --full` → `~/.hermes` 통째 삭제) **openclaw 게이트웨이가 다음 기동부터 죽습니다.** 실측: openclaw plist가 `~/.hermes/node/bin/node` 를 물고 있어 hermes 제거가 openclaw 를 깨뜨림(2026-07-24). 원칙 — **각 런타임 daemon 은 런타임-독립 시스템 node 로 돌려라.**
+`openclaw onboard --install-daemon` 은 **그 순간 PATH에서 잡힌 node의 절대경로를 openclaw LaunchAgent(plist)에 그대로 박습니다.** 그 node가 다른 런타임 소유(예: Hermes 가 번들한 `~/.hermes/node/bin/node`)면, 나중에 그 런타임을 지울 때(`hermes uninstall --full` → `~/.hermes` 통째 삭제) **openclaw 게이트웨이가 다음 기동부터 죽습니다.** 실측: openclaw plist가 `~/.hermes/node/bin/node` 를 물고 있어 hermes 제거가 openclaw 를 깨뜨림. 원칙 — **각 런타임 daemon 은 런타임-독립 시스템 node 로 돌려라.**
 
 **① 설치 전 — 시스템 node 가 먼저 잡히는지 확인**(daemon 설치 직전):
 ```bash

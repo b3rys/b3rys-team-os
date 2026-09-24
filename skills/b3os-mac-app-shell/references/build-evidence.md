@@ -9,7 +9,7 @@
   - 빌드 방법: `bash scripts/package-macos-app.sh` (= 이 스킬 §절차 7).
   - `APP_NAME=b3os.app`, `PRODUCT_NAME=B3rysMacApp`, webURL=`<dashboard-domain>/team`(테스트), ad-hoc 서명.
   - 배포본: `<dashboard-domain>/team/B3rys-unsigned-test.zip` (397KB).
-- **실기 검증**: the team lead가 맥에서 실행 → "맥앱 잘 나온다 굿!!!"(2026-06-24). 창 채움(위 벌어짐/아래 잘림) 회귀 없음 확인 = viewport 3종세트가 실제로 효과.
+- **실기 검증**: 맥에서 실행해 확인. 창 채움(위 벌어짐/아래 잘림) 회귀 없음 확인 = viewport 3종세트가 실제로 효과.
 
 ## 재현 절차 (골격 저장소 접근 권한이 있는 팀원)
 

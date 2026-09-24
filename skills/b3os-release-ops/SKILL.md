@@ -23,9 +23,9 @@ trigger: deploy or cut a release
 | 문서 오탈자, 링크, 포맷팅 | 가능 | clean worktree, preflight, 가능하면 리뷰 |
 | 테스트만 수정, 제품 동작 불변 | 제한적 가능 | 관련 테스트, preflight, 리뷰 1명 |
 | 코드 동작 변경 | 불가 | PR, CI/typecheck, member review, 필요 시 harness |
-| DB·권한·보안·시크릿 | 불가 | GD 승인, 리뷰, rollback, 감사 로그 |
-| live deploy/restart | 불가 | GD/운영 승인, dry-run, build, acceptance, rollback |
-| branch protection/force-push | 불가 | GD 승인, 2명 또는 harness review, backup, audit |
+| DB·권한·보안·시크릿 | 불가 | 팀장 승인, 리뷰, rollback, 감사 로그 |
+| live deploy/restart | 불가 | 팀장/운영 승인, dry-run, build, acceptance, rollback |
+| branch protection/force-push | 불가 | 팀장 승인, 2명 또는 harness review, backup, audit |
 
 ## 표준 실행 절차
 
@@ -88,7 +88,7 @@ bun run service restart                               # 상시가동 미등록�
 
 ## Force-push / history rewrite
 
-GD 승인 없이는 금지다. 승인 후에도 다음을 모두 만족해야 한다.
+팀장 승인 없이는 금지다. 승인 후에도 다음을 모두 만족해야 한다.
 
 - 원격 현재 SHA 백업.
 - rollback branch/tag 준비.

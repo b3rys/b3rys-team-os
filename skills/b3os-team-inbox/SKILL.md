@@ -181,8 +181,7 @@ skills/b3os-team-inbox/scripts/bus-recall.sh --me ames --with bill
 
 ## 슬랙에 글 올리기 (`slack-post.sh`)
 
-★도구는 처음부터 있었는데 이 문서가 안 가리켜서, 2026-07-27 에 팀원 둘이 각자 코드를 뒤져
-서로 다른 경로를 팠다★(한 명은 봇 토큰 파일을 직접 열었다 — 그게 제일 나쁘다). 정본은 이것 하나다.
+★슬랙 게시 경로는 이것 하나다.★ 코드를 뒤져 다른 경로를 만들지 않는다 — 특히 봇 토큰 파일을 직접 열지 않는다.
 
 ```bash
 skills/b3os-team-inbox/scripts/slack-post.sh --channel <C...> --text "..."

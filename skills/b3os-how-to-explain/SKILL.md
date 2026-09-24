@@ -50,7 +50,7 @@ entry: references/writing-checklist.md
 | 파일 | 언제 |
 |---|---|
 | `references/writing-checklist.md` | 빈 화면에서 시작할 때. 채울 다섯 칸과 보내기 전 훑는 아홉 가지 |
-| `references/real-cases.md` | 실제로 반려된 문장과 팀장이 직접 고쳐 준 전후. 같은 실수를 반복할 때. ★이 저장소는 공개라 이 파일만 git 에 넣지 않는다★ — 로컬에만 있고, 없어도 나머지로 스킬은 동작한다 |
+| `references/real-cases.md` | 실제로 반려된 문장과 고친 전후. 같은 실수를 반복할 때. ★이 저장소는 공개라 이 파일만 git 에 넣지 않는다★ — 로컬에만 있고, 없어도 나머지로 스킬은 동작한다 |
 | `references/auditor.md` | 남의 초안(또는 내 초안)을 검토할 때 쓰는 판정 기준 |
 | `references/rewriter.md` | 검토에서 나온 지적을 반영해 다시 쓸 때 |
 | `references/cases.json` · `expected.json` | 검토 기준이 제대로 도는지 재는 시험 문항 12개와 기대 판정 |
@@ -77,6 +77,6 @@ cd scripts && python3 -m unittest discover -s . -p 'test_review_pipeline.py' -v
 
 ## 이 스킬의 내력
 
-- 2026-09-08 `gd-el10`(claude 5명만 보던 개인 스킬)을 폐지하고 이 스킬로 합쳤다. 실제 사례(`real-cases.md`)와 쓰는 순서(`writing-checklist.md`)가 거기서 왔다.
+- 폐지된 `gd-el10` 스킬을 이 스킬로 합쳤다. 실제 사례(`real-cases.md`)와 쓰는 순서(`writing-checklist.md`)가 거기서 왔다.
 - 본문 규칙과 `auditor.md`·`rewriter.md`·`cases.json`·`expected.json` 은 맥북 Codex 가 만든 v7 이다.
 - **규칙이나 스킬만으로 설명 품질이 보장되지는 않는다.** 만든 쪽 검증에서도 Claude 의 논문·검색 답변 두 건이 재검토에서 다시 수정 대상으로 분류됐다.
