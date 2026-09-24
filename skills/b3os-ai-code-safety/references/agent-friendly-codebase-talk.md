@@ -10,7 +10,7 @@ Verdicts: **Adopt** = use as is · **Adapt** = use in our form · **Later** = us
 |---|---|---|
 | Agents scale only as far as you trust one agent's output. Plot: number of agents vs. trust; you move right only after trust rises. Don't jump to 100 agents — you burn tokens. | Adopt | Parallel teammates only on work whose verification is automated; otherwise one owner + review. |
 | Order: verification → skills → codebase structure → move review rules into lint/CI → scale out. Don't skip steps. | Adopt | Same order in project setup; each step is a row in the feature ↔ verification table. |
-| A manager who doesn't trust the team watches over shoulders; the team then moves at the supervisor's speed. | Adopt | The human reviewing every agent output by hand is the bottleneck to remove, not a safety net to keep. |
+| A manager who doesn't trust the team watches over shoulders; the team then moves at the supervisor's speed. | Adapt | Remove the relay work (a human copying screenshots/errors, re-running checks by hand); keep the required review and approval gates (TEAM-OS §4). |
 
 ## 2. Verification is the first capability
 
