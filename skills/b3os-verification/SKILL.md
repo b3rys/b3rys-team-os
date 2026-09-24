@@ -18,6 +18,10 @@ Where this sits among the team skills:
 
 The core idea: a check you set up once must keep protecting you. A new feature or a bug fix ends with **one row in the feature table + a test + a deliberately broken version that the test catches**. The runner does the rest, every time.
 
+Passing the runner is evidence for review and approval (TEAM-OS §4), not a substitute for them.
+
+**Scope:** §1–5 apply to every change. §6–7 (one app window, the app runner) apply to products with a running app; for server or script work, skip them.
+
 ---
 
 ## 1. Three principles
@@ -33,7 +37,7 @@ Left alone, verification decays: code moves and checks stop meaning anything, th
 | Ratchet | Rule |
 |---|---|
 | ① One bug = one test | A bug fix ships with a repro test **and** a mutant (the fix reverted) on which that test fails. The same bug cannot come back silently. |
-| ② Twice = a check | A review comment or feedback that repeats twice becomes an executable check (test, lint, CI rule, script guard) — not a line in a doc. |
+| ② Twice = a check | A review comment or feedback that repeats twice becomes an executable check (test, lint, CI rule, script guard) — not a line in a doc. Same rule as ai-code-safety's enforcement layers (a comment made twice moves one layer up). |
 | ③ Baselines only tighten | Improve → re-pin. Regress → block. Never loosen silently. A baseline change records the value and the condition (load, build type). |
 | ④ Wrong checks accumulate | Every check that was itself wrong becomes a triage rule (symptom → cause → action) or a known-flaky entry, so the runner classifies it next time. |
 | ⑤ Gap count only goes down | Per build, count rows without an app check, without mutant proof, and UNPROVEN (a mutant that passed). The count must not rise; the runner fails the run if it does. |
@@ -87,7 +91,7 @@ Tests are often wrong. On FAIL, first decide: **check, environment, or product?*
 
 - **One app at a time.** Before an app check, the running-instance count must be 0. If another instance appears mid-run, stop and report its pid.
 - **No auto-start loops.** A "relaunch when it quits" wait loop cuts into someone else's turn. Checks run once and end; a rerun is decided by the triage rule, once.
-- **Turns are explicit.** Take the window on GO, give it back with "탐침 끝". Before sending GO to the next agent, get the current holder's stop.
+- **Turns are explicit.** Take the window on GO, give it back with "탐침 끝" (the agreed stop phrase). Before sending GO to the next agent, get the current holder's stop.
 - **Probe bundle id only.** Launch under a dedicated probe bundle id; the user's app id would overwrite user settings (scroll positions, last note, theme). To measure a given build, wrap its binary/resources under the probe id and ad-hoc re-sign.
 - **Never touch user folders.** Test data lives in temp folders only; a source-scanning test enforces it.
 - **Reset accumulated probe settings once per run** (not per launch — some probes relaunch within a run on purpose).
@@ -107,11 +111,13 @@ headless fast tier → unit suite → equivalence tier → bundle stamp → app 
 
 ## 8. Apply by size
 
+Verification rows only; the structure/code rows live in `b3os-ai-code-safety` ("Apply by project size") — read both.
+
 | Always (solo included) | Situational (grows with the product) |
 |---|---|
-| Principle ① run it · ratchet ① one bug = one test · the structure/code basics (one representative pattern per concept, hot paths kept light, dangerous paths fail loudly) | Feature ↔ verification table with access · forbidden-dependency CI · per-feature app checks · automatic baseline comparison · bug auto-repro through the table · the full runner |
+| Principle ① run it · ratchet ① one bug = one test | Feature ↔ verification table with access · per-feature app checks · automatic baseline comparison · bug auto-repro through the table · the full runner |
 
-Solo work and prototypes: speed first — the left column only. A long-lived product that several agents change: both columns. The structure/code cell is never optional.
+Solo work and prototypes: speed first — the left column only. A long-lived product that several agents change: both columns.
 
 ## 9. Examples (from a macOS notes app)
 
