@@ -50,6 +50,24 @@ Two throughlines:
 
 ---
 
+## Agent-friendly structure (adapted, not adopted wholesale)
+
+AI agents work from a narrow slice of the codebase — the open file and its neighbours. Their habits are predictable, so treat them as **design input** and shape the structure so the easy path is the correct one. This is adapted from an outside talk (Cursor, "1,000 PRs a month", `o_7vTaHOL28`); keep only what our own failures confirm, and re-check before applying a rule to a new codebase.
+
+| Predictable agent habit | What it produced in our code | Structural answer |
+|---|---|---|
+| Mimics the nearest pattern | A view observed the whole store because its neighbour did → redrew on every unrelated change | Make the nearest example the right one: one canonical pattern per concept, next to where new code is written |
+| Stuffs code into the file already open | Cleanup of stale entries sat inside a per-keystroke/per-switch function → O(table) work on the hot path | One folder/file per feature; the entry point says where new behaviour goes; hot paths stay small |
+| Takes the shortest path that compiles | Save wrote to the stale path → silently recreated the old file | Make the unsafe path fail loudly (guard + test), not merely discouraged |
+| Adds a new function beside the old one / copies a helper | Two block types shared one incremental-list helper; a gap in it produced the same bug in both | One owner per concept; extend through a registry/interface, and test the shared owner once for every user |
+| Follows the instruction over a written rule | Rules in docs were skipped under time pressure | Rules that matter become checks (test / lint / CI), not prose |
+
+**Enforcement strength, weakest → strongest:** prose rule / skill → review comment → headless test that fails → lint/type/compiler → CI gate. Put a rule as far right as it is worth; a rule stated twice in review moves one step right.
+
+**When NOT to apply:** don't restructure a working area only to match this table — apply it when you are already changing that area, or when a bug of the listed kind appears. Don't add CI rules for a pattern seen once. A full rewrite "for agents" needs its own cost/benefit case; it is not implied by this section.
+
+---
+
 ## Refactoring — when the code smells
 
 The smell is the signal; the refactor is the response. The two GD called out first:
@@ -311,4 +329,5 @@ export const remainingForFreeShip = (total: number): number =>
 - Structure: SOLID (dependency direction, SRP/ISP/DIP as coupling); functional core / imperative shell (side-effect isolation).
 - Refactoring: Fowler, *Refactoring* (code smells — shotgun surgery, divergent change, feature envy, duplicated code); Feathers, *Working Effectively with Legacy Code* (pin tests before changing structure).
 - Operational gates: race condition, partial write, atomic operation, transaction, idempotency key. Video: Nomad Coders, YouTube `ThYV4Kpf9Bk`.
+- Agent-friendly structure: Lauren Tan (Cursor) talk, YouTube `o_7vTaHOL28` — agent habits as design input; enforcement by compiler/lint/CI over prose. Adapted with our own failure cases, not adopted wholesale.
 - b3rys lessons: data-source bug + behavior-verify (`feedback_verify_actual_behavior_not_tsc`, 2026-07-06); lifecycle + refactoring framing (GD 2026-07-06).
