@@ -61,6 +61,6 @@ Verdicts: **Adopt** = use as is · **Adapt** = use in our form · **Later** = us
 
 ## When this does not apply
 
-- Prototypes, spikes and small or short-lived projects: keep them light; none of the structural rules or CI gates are required.
+- Prototypes, spikes, solo and short-lived projects put speed first: keep the structure-and-code basics (SKILL.md "Always" column) and skip the situational tooling (feature map, CI bans, evals, cloud repro, full runner).
 - A working area you are not changing: don't restructure it to match these notes.
 - Anything seen once: note it; turn it into a check only when it repeats.

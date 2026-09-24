@@ -66,7 +66,14 @@ AI agents work from a narrow slice of the codebase — the open file and its nei
 
 **The cost of moving a rule up:** the stronger the layer, the more a false positive costs — a check that blocks legitimate changes ends up deleted. Before moving a rule up, run the check against the broken case (it must fail) and a legitimate change (it must pass).
 
-**Scope:** long-lived codebases that several agents change. Not for prototypes, spikes or small short-lived projects — keep those light.
+**Apply by project size — general rule, then fit to the situation:**
+
+| Always (any project, including solo) | Situational — add as the project grows |
+|---|---|
+| The structural answers in the table above: one canonical pattern per concept, small hot paths, unsafe paths fail loudly, one owner per concept, new behaviour in its own file | Feature map, blocked-dependency CI rules, framework bans, per-feature app checks, skill evals, automatic bug repro, a full release runner |
+| A failing test for a bug you fixed | Moving review comments into lint/CI (once they repeat) |
+
+Solo and prototype projects put speed first: take only the left column. Long-lived codebases that several agents change take both. The structure-and-code column is never optional.
 
 **Full notes and our verdict per point** (verification first, feature map, skills + evals, cloud repro, enforcement layers, bans, PR size, token ROI): `references/agent-friendly-codebase-talk.md`.
 
