@@ -68,10 +68,11 @@ AI agents work from a narrow slice of the codebase — the open file and its nei
 
 **Apply by project size — general rule, then fit to the situation:**
 
+Structure/code rows only; the verification rows (feature map, per-feature app checks, runner, baselines) live in `b3os-verification` ("Apply by size") — read both.
+
 | Always (any project, including solo) | Situational — add as the project grows |
 |---|---|
-| The structural answers in the table above: one canonical pattern per concept, small hot paths, unsafe paths fail loudly, one owner per concept, new behaviour in its own file | Feature map, blocked-dependency CI rules, framework bans, per-feature app checks, skill evals, automatic bug repro, a full release runner |
-| A failing test for a bug you fixed | Moving review comments into lint/CI (once they repeat) |
+| The structural answers in the table above: one canonical pattern per concept, small hot paths, unsafe paths fail loudly, one owner per concept, new behaviour in its own file | Blocked-dependency CI rules, framework bans, moving review comments into lint/CI once they repeat |
 
 Solo and prototype projects put speed first: take only the left column. Long-lived codebases that several agents change take both. The structure-and-code column is never optional.
 
