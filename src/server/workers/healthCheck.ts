@@ -13,6 +13,7 @@ import type { Database } from "bun:sqlite";
 import type { AgentRecord } from "../types";
 import { listStatuses, appendAudit } from "../db/queries";
 import { classifyAll, type HealthLevel } from "../lib/health";
+import { quotaBlockMap } from "../lib/runtimeQuota";
 import { checkEssentialSettings } from "../lib/runtimeEssentials";
 import { restartAgent } from "../lib/agentControl";
 import {
@@ -104,7 +105,7 @@ export function startHealthCheck(deps: HealthDeps): () => void {
     ticking = true;
     try {
       const agents = deps.agents();
-      const verdicts = classifyAll(listStatuses(deps.db), agents);
+      const verdicts = classifyAll(listStatuses(deps.db), agents, Date.now(), quotaBlockMap(deps.db));
       for (const v of verdicts) {
         const prev = lastLevel.get(v.agentId) ?? "ok";
         if (v.level === "danger" && prev !== "danger") {

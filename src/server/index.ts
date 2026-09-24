@@ -32,6 +32,7 @@ import { startSchedulerWorker } from "./workers/schedulerWorker";
 import { startFollowupWorker } from "./workers/followupWorker";
 import { startDmSyncWorker } from "./workers/dmSyncWorker";
 import { classifyAll } from "./lib/health";
+import { quotaBlockMap } from "./lib/runtimeQuota";
 import { startWakeDispatcher } from "./bus/wakeDispatcher";
 import { computeLearningStats } from "./lib/learningStats";
 import { teamOsSnapshot } from "./lib/teamosProbe";
@@ -336,7 +337,7 @@ api.get("/alerts", (c) => {
 
 // Per-agent health classification (health-check Phase 1, observe-only).
 api.get("/health/agents", (c) => {
-  const verdicts = classifyAll(listStatuses(db), agents);
+  const verdicts = classifyAll(listStatuses(db), agents, Date.now(), quotaBlockMap(db));
   const summary = {
     danger: verdicts.filter((v) => v.level === "danger").map((v) => v.agentId),
     warn: verdicts.filter((v) => v.level === "warn").map((v) => v.agentId),

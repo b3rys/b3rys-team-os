@@ -32,6 +32,14 @@ import {
 } from "../db/inboxQueries";
 import { appendAudit } from "../db/queries";
 import { insertMessage } from "../db/inboxQueries";
+import {
+  clearQuotaBlocked,
+  getQuotaBlock,
+  isOpenclawNoResponseDetail,
+  isQuotaExhaustedDetail,
+  markQuotaBlocked,
+  probeOpenclawUsage,
+} from "../lib/runtimeQuota";
 import { recoverB3osNativeInflight } from "../runtimes/b3osNative/recovery";
 import { recoverCodexInflight } from "../runtimes/codex/recovery";
 import { appendAuditFile } from "../lib/auditFile";
@@ -1469,7 +1477,12 @@ function notifyRequesterOfExpiry(
     //   → 제3자가 중복 작업 직전, 위임자가 저장소를 직접 확인해서 막았다.
     //   ★실제 뜻은 "정해진 대기 시간 안에 응답이 안 왔다" 이지 "못 했다" 가 아니다.★
     //   그리고 이 문구가 ★"없이 마감해도 된다" 고 권했다★ — 위임자는 그 말대로 한 것이다.
+    const quota = getQuotaBlock(db, row.agent_id);
+    const quotaNote = quota
+      ? `${row.agent_id} 는 Codex/OpenAI 한도 상태로 확인됐습니다${quota.resetHint ? ` (리셋까지 ${quota.resetHint})` : ""}. `
+      : "";
     const body =
+      quotaNote +
       `[응답 대기] ${row.agent_id} 에게서 아직 응답이 없습니다 — 대기 시간 초과 (${reason}). ` +
       `${row.agent_id} 가 작업 중일 수 있습니다: ★다시 시키기 전에 그쪽 작업물(브랜치·PR·카드)을 먼저 확인하세요.★ ` +
       `이 요청은 자동 재시도되지 않습니다 — 확인 후 ${row.agent_id} 없이 마감하셔도 됩니다. ` +
@@ -1731,8 +1744,98 @@ export async function dispatchRow(
 ): Promise<void> {
   const plan = buildDispatchPlan(db, row, agents, claudeAdapter, openclawAdapter, hermesAdapter, b3osNativeAdapter, codexAdapter);
   if (plan.kind === "skip") return;
+  notifySenderOfQuota(db, row, agents);   // 전달은 막지 않는다 — 안내만
   const outcome = await invokeWakeAdapter(plan.adapter, row.agent_id, row, plan.teamContext);
+  await observeQuota(db, row, plan.targetAgent, outcome);   // 만기 통지가 한도 사유를 쓸 수 있게 기록보다 먼저
   recordDispatchOutcome(db, row, plan.targetAgent, outcome, syncDeps, agents);
+}
+
+/**
+ * wake 결과로 한도 상태를 기록·해제한다(lib/runtimeQuota.ts).
+ *   · 성공 → 해제
+ *   · 실패 문구가 한도 소진 → 기록
+ *   · openclaw 무응답 만기 → 원인이 안 남으므로 사용량을 한 번 조회해 0% 일 때만 기록
+ * 조회 원문은 계정 식별자를 담고 있어 audit 에는 남은 % 와 리셋까지 시간만 적는다.
+ */
+async function observeQuota(
+  db: Database,
+  row: PendingDispatchRow,
+  targetAgent: AgentRecord,
+  outcome: { result?: WakeResult; exception?: string },
+  probe: typeof probeOpenclawUsage = probeOpenclawUsage,
+): Promise<void> {
+  try {
+    if (outcome.result?.deferred) return;
+    if (outcome.result?.ok) {
+      if (clearQuotaBlocked(db, row.agent_id)) {
+        appendAudit(db, "bus_dispatcher", "quota_block_cleared", row.agent_id, { via: "wake_ok", message_id: row.message_id });
+      }
+      return;
+    }
+    const detail = outcome.exception ?? outcome.result?.detail ?? null;
+    if (isQuotaExhaustedDetail(detail)) {
+      if (markQuotaBlocked(db, row.agent_id, "wake_error")) {
+        appendAudit(db, "bus_dispatcher", "quota_block_detected", row.agent_id, { source: "wake_error", message_id: row.message_id });
+      }
+      return;
+    }
+    if (targetAgent.runtime === "openclaw" && isOpenclawNoResponseDetail(detail)) {
+      const usage = await probe();
+      if (usage && usage.percentLeft === 0) {
+        const isNew = markQuotaBlocked(db, row.agent_id, "openclaw_usage", { resetInMs: usage.resetInMs, resetHint: usage.resetIn });
+        if (isNew) {
+          appendAudit(db, "bus_dispatcher", "quota_block_detected", row.agent_id, {
+            source: "openclaw_usage", percent_left: 0, reset_in: usage.resetIn, message_id: row.message_id,
+          });
+        }
+      }
+    }
+  } catch (e) {
+    appendAuditFile("bus_dispatcher", "quota_observe_failed", row.message_id, {
+      agent_id: row.agent_id,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+export { observeQuota as observeQuotaForTest };
+
+/**
+ * 한도 상태인 팀원에게 보낸 사람에게 한 번 알린다. 메시지는 그대로 전달한다.
+ * 같은 한도 구간(since)에서 같은 발신자→수신자 쌍은 한 번만 — 여러 건을 보내도 알림이 쌓이지 않는다.
+ * insertMessage 는 dedupe_key 로 막지 않으므로 여기서 먼저 찾는다.
+ */
+export function notifySenderOfQuota(db: Database, row: PendingDispatchRow, agents: AgentRecord[]): void {
+  try {
+    if (row.source !== "agent") return;
+    const sender = row.from_agent_id;
+    if (!sender || sender === row.agent_id) return;
+    if (!agents.some((a) => a.id === sender)) return;
+    const block = getQuotaBlock(db, row.agent_id);
+    if (!block) return;
+    const key = `quota-notice:${sender}:${row.agent_id}:${block.since}`;
+    if (db.prepare(`SELECT 1 FROM message WHERE dedupe_key = ? LIMIT 1`).get(key)) return;
+    const reset = block.resetHint ? ` (리셋까지 ${block.resetHint})` : "";
+    const msg = insertMessage(db, {
+      thread_id: row.thread_id,
+      from_agent_id: "system",
+      to_agent_id: sender,
+      type: "dm",
+      body:
+        `[한도 안내] ${row.agent_id} 는 지금 Codex/OpenAI 한도 상태일 수 있습니다${reset}. ` +
+        `메시지는 그대로 전달했습니다. 답이 늦거나 오지 않을 수 있으니 급하면 다른 팀원에게 맡기세요.`,
+      source: "system",
+      hop_count: 0,
+      priority: "normal",
+      dedupe_key: key,
+    } as Parameters<typeof insertMessage>[1]);
+    appendAudit(db, "bus_dispatcher", "quota_notified_sender", row.message_id, {
+      sender, blocked_agent: row.agent_id, notice_id: msg.id,
+    });
+  } catch (e) {
+    appendAuditFile("bus_dispatcher", "quota_notify_failed", row.message_id, {
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
 }
 
 // ─── Worker ───────────────────────────────────────────────────────────────────
