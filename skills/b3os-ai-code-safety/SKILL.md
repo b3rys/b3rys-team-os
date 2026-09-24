@@ -50,6 +50,38 @@ Two throughlines:
 
 ---
 
+## Agent-friendly structure (adapted, not adopted wholesale)
+
+AI agents work from a narrow slice of the codebase — the open file and its neighbours. Their habits are predictable, so treat them as **design input** and shape the structure so the easy path is the correct one. This is adapted from a video introducing a Cursor engineer's talk (YouTube `o_7vTaHOL28`); keep only what our own failures confirm, and re-check before applying a rule to a new codebase.
+
+| Predictable agent habit | What it produced in our code | Structural answer |
+|---|---|---|
+| Mimics the nearest pattern | A view observed the whole store because its neighbour did → redrew on every unrelated change | Make the nearest example the right one: one canonical pattern per concept, next to where new code is written |
+| Stuffs code into the file already open | Cleanup of stale entries sat inside a per-keystroke/per-switch function → O(table) work on the hot path | One folder/file per feature (for new features); the entry point says where new behaviour goes; hot paths stay small |
+| Takes the shortest path that compiles | Save wrote to the stale path → silently recreated the old file | Make the unsafe path fail loudly (guard + test), not merely discouraged |
+| Adds a new function beside the old one / copies a helper | Two block types shared one incremental-list helper; a gap in it produced the same bug in both | One owner per concept; extend through a registry/interface, and test the shared owner once for every user |
+| Follows the instruction over a written rule | A written agreement (rebuild the bundled web assets after a source merge) was broken again and again; the release shipped stale code until it became a check | Rules that matter become checks (test / lint / CI), not prose |
+
+**Enforcement layers, strongest first:** (1) the codebase itself — structure where the wrong thing is hard to write (feature folders for new code, one owner per concept); (2) blocked dependencies and static analysis — lint, types, compiler diagnostics, run in CI; (3) tests that fail on the bad case; (4) review comments; (5) prose rules and skills — agents can forget or skip these, so never rely on them alone. A rule stated twice in review moves one layer up.
+
+**The cost of moving a rule up:** the stronger the layer, the more a false positive costs — a check that blocks legitimate changes ends up deleted. Before moving a rule up, run the check against the broken case (it must fail) and a legitimate change (it must pass).
+
+**Apply by project size — general rule, then fit to the situation:**
+
+Structure/code rows only; the verification rows (feature map, per-feature app checks, runner, baselines) live in `b3os-verification` ("Apply by size") — read both.
+
+| Always (any project, including solo) | Situational — add as the project grows |
+|---|---|
+| The structural answers in the table above: one canonical pattern per concept, small hot paths, unsafe paths fail loudly, one owner per concept, new behaviour in its own file | Blocked-dependency CI rules, framework bans, moving review comments into lint/CI once they repeat |
+
+Solo and prototype projects put speed first: take only the left column. Long-lived codebases that several agents change take both. The structure-and-code column is never optional.
+
+**Full notes and our verdict per point** (verification first, feature map, skills + evals, cloud repro, enforcement layers, bans, PR size, token ROI): `references/agent-friendly-codebase-talk.md`.
+
+**When NOT to apply:** don't restructure a working area only to match this table — apply it when you are already changing that area, or when a bug of the listed kind appears. Don't add CI rules for a pattern seen once. A full rewrite "for agents" needs its own cost/benefit case; it is not implied by this section.
+
+---
+
 ## Refactoring — when the code smells
 
 The smell is the signal; the refactor is the response. The two GD called out first:
@@ -311,4 +343,5 @@ export const remainingForFreeShip = (total: number): number =>
 - Structure: SOLID (dependency direction, SRP/ISP/DIP as coupling); functional core / imperative shell (side-effect isolation).
 - Refactoring: Fowler, *Refactoring* (code smells — shotgun surgery, divergent change, feature envy, duplicated code); Feathers, *Working Effectively with Legacy Code* (pin tests before changing structure).
 - Operational gates: race condition, partial write, atomic operation, transaction, idempotency key. Video: Nomad Coders, YouTube `ThYV4Kpf9Bk`.
+- Agent-friendly structure: a video introducing a Cursor engineer's talk, YouTube `o_7vTaHOL28` — agent habits as design input; enforcement by codebase structure and compiler/lint/CI over prose. Adapted with our own failure cases, not adopted wholesale.
 - b3rys lessons: data-source bug + behavior-verify (`feedback_verify_actual_behavior_not_tsc`, 2026-07-06); lifecycle + refactoring framing (GD 2026-07-06).
