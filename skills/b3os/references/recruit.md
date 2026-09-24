@@ -147,13 +147,13 @@ curl -s -X POST http://localhost:$PORT/team/api/ot/<ot_id>/activate
 
 ## Step F — telegram 플러그인 (claude 런타임 — ★자동, 수동 단계 없음★)
 
-활성화(Step E) 런처가 telegram 플러그인 enable(`~/.claude/settings.json` 의 `enabledPlugins` 직접·원자적 기록, 머신당 1회)과 첫부팅 poller 복구(`/mcp reconnect` 자동 주입)를 **모두 처리**한다 — 사람·에이전트가 수동으로 깔 것이 없다. (2026-07-25 5db5510)
+활성화(Step E) 런처가 telegram 플러그인 enable(`~/.claude/settings.json` 의 `enabledPlugins` 직접·원자적 기록, 머신당 1회)과 첫부팅 poller 복구(`/mcp reconnect` 자동 주입)를 **모두 처리**한다 — 사람·에이전트가 수동으로 깔 것이 없다.
 
-> ⛔ **`claude plugin install` / `/plugin install` 을 돌리지 말 것** — 그 명령은 공유 플러그인 캐시(`…/telegram/<ver>/`)를 temp 빌드 후 ★inode 째 스왑★해, 같은 캐시에서 실행 중인 다른 팀원 봇 세션의 cwd 를 unlink 시킨다(하네스 CONFIRMED 2026-07-25). enable 은 settings.json 키 기록이 전부라 install 은 불필요할뿐더러 해롭다. 재영입 에이전트가 "수동 설치"를 하려 하면 **하지 말고 그냥 재활성화만** 한다.
+> ⛔ **`claude plugin install` / `/plugin install` 을 돌리지 말 것** — 그 명령은 공유 플러그인 캐시(`…/telegram/<ver>/`)를 temp 빌드 후 ★inode 째 스왑★해, 같은 캐시에서 실행 중인 다른 팀원 봇 세션의 cwd 를 unlink 시킨다(하네스 확인). enable 은 settings.json 키 기록이 전부라 install 은 불필요할뿐더러 해롭다. 재영입 에이전트가 "수동 설치"를 하려 하면 **하지 말고 그냥 재활성화만** 한다.
 
 ## Step G — 페어링 / 접근 승인 (★ 사람, 런타임별)
 
-- **openclaw**: 새 에이전트가 "이 봇에 말할 수 있는 사람"을 모르면 GD에게 페어링을 요구한다.
+- **openclaw**: 새 에이전트가 "이 봇에 말할 수 있는 사람"을 모르면 팀장에게 페어링을 요구한다.
   사용자가 봇에 DM 1번 → 대시보드 **[접근 승인]** 또는
   `POST /team/api/ot/<ot_id>/pair-approve` → 서버가 pending 요청을 읽어 executor로 승인(터미널 0).
 - **claude_channel** (★openclaw 와 승인법이 다르다★): 봇 DM 접근은 access.json allowlist. 첫 claude 팀원 = 봇에 첫 메시지 → 6자리 코드 응답 → 승인. ★승인법(항상 작동): **Claude Code 가 `~/.claude/channels/telegram-<id>/access.json` 의 `allowFrom` 에 본인 DM chat_id 를 추가하고 `dmPolicy` 를 `allowlist` 로** 바꾼다★(activate 가 출력하는 [F] 안내와 동일). `setup-claude-telegram-bot` 스킬이 있으면 `promote-pending.sh <id> <code>` 도 가능. ★`pair-approve`/대시보드 [접근 승인] 은 openclaw 전용이라 claude 엔 no-op(`skipped:true` 거짓성공)★ — claude 에 쓰면 안 된다. 2번째부터의 claude 팀원은 첫 팀원의 `allowFrom` 을 **자동 승계**(seedClaudeAccess = 기존 claude 멤버 access.json 참조)해 페어링 불필요(첫 멤버는 참조할 게 없어 `dmPolicy:pairing` 시드 = 수동 승인이 정상).

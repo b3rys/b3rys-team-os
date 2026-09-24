@@ -46,7 +46,7 @@ claude 순서:
    ls ~/.claude/channels/telegram-<id>/bot.pid   # 있으면 poller 폴링 중(= 진짜 대화됨)
    ```
    죽어 있으면(bot.pid 없음) — telegram MCP 가 스폰됐다가 ★토큰을 못 찾아 즉시 종료★된 것이다(★타임아웃 아님★ — 로그상 ~100ms 만에
-   `Connection failed`). ★진짜 근본(2026-07-25 Mac Studio fresh clone 실측 확정)★: telegram MCP(server.ts)는 봇 토큰을
+   `Connection failed`). ★근본 원인(fresh clone 실측)★: telegram MCP(server.ts)는 봇 토큰을
    `TELEGRAM_STATE_DIR/.env` 에서 읽는데, `TELEGRAM_STATE_DIR`(멤버별 채널 dir) 는 세션 env 상속에만 의존한다(플러그인 `.mcp.json` 에
    env 블록 없음). 이 상속이 되려면 ★telegram 플러그인이 user scope 로 enable★ 돼 있어야 한다 — 그래야 `--channels plugin:telegram@…`
    가 CC 에서 "채널"로 붙고 CC 가 세션의 STATE_DIR 를 MCP 서브프로세스에 넘긴다. user scope enable 이 없으면(fresh clone) MCP 가

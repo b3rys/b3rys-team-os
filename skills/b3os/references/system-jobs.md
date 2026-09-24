@@ -28,7 +28,7 @@
 | **health check** | `agent_status` 를 주기 분류해 위험 전이 감지 — **관측 전용(observe-only Phase 1)**, 자동 조치는 안 함 | ~30s | `[health] started` |
 | **proposal sweeper** | proposal(개선 제안) 파이프라인이 담당자 무응답으로 정체되면 복구하는 안전망 | 주기 | — |
 | **followup worker** | pending follow-up 을 재기동 — one-shot 재알림(예: 팀장 응답 리마인더/`expect-report`) | ~60s | — |
-| **wake dispatcher** | 팀 버스 wake 디스패치 — 팀원을 실제로 깨우는 주체. ★기본 ON★(GD 2026-07-19): 명시적 `BUS_DISPATCH_ENABLED=false` 일 때만 shadow(결정만 로깅). | ~1.5s | `[bus_dispatcher] started — enabled=true poll=1500ms` |
+| **wake dispatcher** | 팀 버스 wake 디스패치 — 팀원을 실제로 깨우는 주체. ★기본 ON★: 명시적 `BUS_DISPATCH_ENABLED=false` 일 때만 shadow(결정만 로깅). | ~1.5s | `[bus_dispatcher] started — enabled=true poll=1500ms` |
 | **teamos render** | 부팅 시 1회 — 팀 페르소나·핵심룰을 템플릿에서 각 팀원 파일(`CLAUDE.md`/`AGENTS.md`/`SOUL.md`)로 렌더 | 부팅 1회 | `[teamos-render]` |
 
 ## 2) 조건부 (설정이 있어야 실제 동작)
