@@ -62,9 +62,13 @@ AI agents work from a narrow slice of the codebase — the open file and its nei
 | Adds a new function beside the old one / copies a helper | Two block types shared one incremental-list helper; a gap in it produced the same bug in both | One owner per concept; extend through a registry/interface, and test the shared owner once for every user |
 | Follows the instruction over a written rule | A written agreement (rebuild the bundled web assets after a source merge) was broken again and again; the release shipped stale code until it became a check | Rules that matter become checks (test / lint / CI), not prose |
 
-**Enforcement layers, strongest first:** (1) the codebase itself — structure where the wrong thing is hard to write (feature folders, one owner per concept); (2) blocked dependencies and static analysis — lint, types, compiler diagnostics, run in CI; (3) tests that fail on the bad case; (4) review comments; (5) prose rules and skills — agents can forget or skip these, so never rely on them alone. A rule stated twice in review moves one layer up.
+**Enforcement layers, strongest first:** (1) the codebase itself — structure where the wrong thing is hard to write (feature folders for new code, one owner per concept); (2) blocked dependencies and static analysis — lint, types, compiler diagnostics, run in CI; (3) tests that fail on the bad case; (4) review comments; (5) prose rules and skills — agents can forget or skip these, so never rely on them alone. A rule stated twice in review moves one layer up.
 
 **The cost of moving a rule up:** the stronger the layer, the more a false positive costs — a check that blocks legitimate changes ends up deleted. Before moving a rule up, run the check against the broken case (it must fail) and a legitimate change (it must pass).
+
+**Scope:** long-lived codebases that several agents change. Not for prototypes, spikes or small short-lived projects — keep those light.
+
+**Full notes and our verdict per point** (verification first, feature map, skills + evals, cloud repro, enforcement layers, bans, PR size, token ROI): `references/agent-friendly-codebase-talk.md`.
 
 **When NOT to apply:** don't restructure a working area only to match this table — apply it when you are already changing that area, or when a bug of the listed kind appears. Don't add CI rules for a pattern seen once. A full rewrite "for agents" needs its own cost/benefit case; it is not implied by this section.
 
