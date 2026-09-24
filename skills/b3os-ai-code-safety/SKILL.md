@@ -16,7 +16,7 @@ Two throughlines:
 
 ## Phase 1 — Design (structure before writing)
 
-- **Data flow / source of truth first.** Map read → transform → write, and name the single source of truth for each piece of state. Confirm you read the live source, not a synced mirror that drops fields. (Root of the 2026-07-06 dashboard bug: a read hit the DB-synced registry, which lacked the `purpose` field, instead of `agents.json` where it lives — the code compiled and passed units, the output was wrong.)
+- **Data flow / source of truth first.** Map read → transform → write, and name the single source of truth for each piece of state. Confirm you read the live source, not a synced mirror that drops fields. (Example: reading a synced copy that lacks a field compiles and passes unit tests, but the output is wrong.)
 - **SOLID as coupling design, not class patterns.** (SOLID = five object-oriented design principles; here we use them as a low-coupling lens, not a class-pattern checklist.) Dependencies point **inward** — domain/use-case logic does not depend on framework/ORM/HTTP/infra (**DIP**, dependency inversion: depend on an abstraction, not a concrete infra type). One reason to change per module (**SRP**, single responsibility). Depend on the small slice you actually use (**ISP**, interface segregation: small interfaces). Add an abstraction only when a real extension axis exists (skip speculative **OCP**, open/closed).
 - **Module boundaries hide volatile decisions.** A module's public contract is a schema/interface/event/API; its private choices (storage, format, algorithm) stay hidden and swappable. One owner per concern — no two modules writing the same mutable state.
 
@@ -46,21 +46,20 @@ Two throughlines:
   2. **격리 실행** — 공유 작업트리가 아니라 사본이나 별도 worktree 에서 돌린다.
   3. **원복 확인** — 끝나고 `git status` / `git diff` 로 되돌아왔는지 **눈으로 본다.** ★`git checkout --` 은 HEAD 기준이라 같은 파일의 미커밋 작업까지 지운다★ — 사본을 떠두고 사본에서 복원한다.
   - 적용됐는데도 테스트가 통과하면 **다음은 입력을 의심한다** — 변이는 걸렸는데 테스트 입력이 그 분기를 안 지나갔을 수 있다.
-  - *(실패 사례 2026-07-31: ①패턴 불일치로 변이가 안 걸렸는데 통과를 "테스트가 약하다"로 읽을 뻔했다 ②`git checkout --` 으로 그날 쓴 코드를 통째로 날렸다 ③반증 실험이 공유 트리 상수를 되돌리지 않아 빌드 산출물까지 오염됐다. 한 주에 세 명이 각각 밟았다.)*
 
 ---
 
 ## Agent-friendly structure (adapted, not adopted wholesale)
 
-AI agents work from a narrow slice of the codebase — the open file and its neighbours. Their habits are predictable, so treat them as **design input** and shape the structure so the easy path is the correct one. This is adapted from a video introducing a Cursor engineer's talk (YouTube `o_7vTaHOL28`); keep only what our own failures confirm, and re-check before applying a rule to a new codebase.
+AI agents work from a narrow slice of the codebase — the open file and its neighbours. Their habits are predictable, so treat them as **design input** and shape the structure so the easy path is the correct one. Source: a Cursor engineer's talk (YouTube `o_7vTaHOL28`), adapted — not adopted wholesale.
 
-| Predictable agent habit | What it produced in our code | Structural answer |
+| Agent habit | Example defect | Structural answer |
 |---|---|---|
-| Mimics the nearest pattern | A view observed the whole store because its neighbour did → redrew on every unrelated change | Make the nearest example the right one: one canonical pattern per concept, next to where new code is written |
-| Stuffs code into the file already open | Cleanup of stale entries sat inside a per-keystroke/per-switch function → O(table) work on the hot path | One folder/file per feature (for new features); the entry point says where new behaviour goes; hot paths stay small |
-| Takes the shortest path that compiles | Save wrote to the stale path → silently recreated the old file | Make the unsafe path fail loudly (guard + test), not merely discouraged |
-| Adds a new function beside the old one / copies a helper | Two block types shared one incremental-list helper; a gap in it produced the same bug in both | One owner per concept; extend through a registry/interface, and test the shared owner once for every user |
-| Follows the instruction over a written rule | A written agreement (rebuild the bundled web assets after a source merge) was broken again and again; the release shipped stale code until it became a check | Rules that matter become checks (test / lint / CI), not prose |
+| Mimics the nearest pattern | A view copies its neighbour's whole-store observation → redraws on every unrelated change | Make the nearest example the right one: one canonical pattern per concept, next to where new code is written |
+| Stuffs code into the file already open | Cleanup placed inside a per-keystroke function → O(table) work on the hot path | One folder/file per feature (for new features); the entry point says where new behaviour goes; hot paths stay small |
+| Takes the shortest path that compiles | Save writes to a stale path → silently recreates the old file | Make the unsafe path fail loudly (guard + test), not merely discouraged |
+| Adds a new function beside the old one / copies a helper | Two types share a copied helper; one gap → the same bug in both | One owner per concept; extend through a registry/interface, and test the shared owner once for every user |
+| Follows the instruction over a written rule | A written rule (rebuild the bundle after a merge) is skipped → stale code ships | Rules that matter become checks (test / lint / CI), not prose |
 
 **Enforcement layers, strongest first:** (1) the codebase itself — structure where the wrong thing is hard to write (feature folders for new code, one owner per concept); (2) blocked dependencies and static analysis — lint, types, compiler diagnostics, run in CI; (3) tests that fail on the bad case; (4) review comments; (5) prose rules and skills — agents can forget or skip these, so never rely on them alone. A rule stated twice in review moves one layer up.
 
@@ -84,7 +83,7 @@ Solo and prototype projects put speed first: take only the left column. Long-liv
 
 ## Refactoring — when the code smells
 
-The smell is the signal; the refactor is the response. The two GD called out first:
+The smell is the signal; the refactor is the response. The two most common:
 
 - **"I fixed one thing and something unrelated broke" (ripple).** Meaning: **tight coupling / a hidden dependency** — the two places share mutable state or one reaches into the other's internals. Fix: make the dependency explicit and route it through a **boundary/interface**; give the shared concern a **single owner** so callers depend on the contract, not the internals.
 - **"One change forces edits in many files" (shotgun surgery).** Meaning: **the concept isn't localized** — one responsibility is smeared across many modules. Fix: **gather** the scattered logic into one module so that concept has a single place to change.
@@ -126,7 +125,7 @@ AI code safety:
 
 ## Worked Examples (before → after)
 
-> 팀 하네스 조사 + 적대 교차검증 통과(2026-07-06): 각 예제는 정확성·원칙 부합·과적용 아님을 독립 리뷰어가 검증했다.
+> Each example was checked by an independent reviewer for correctness, fit to the principles, and not over-applying them.
 
 ### 의존성 역전(DIP): 도메인이 인프라가 아닌 추상에 의존
 
@@ -343,5 +342,4 @@ export const remainingForFreeShip = (total: number): number =>
 - Structure: SOLID (dependency direction, SRP/ISP/DIP as coupling); functional core / imperative shell (side-effect isolation).
 - Refactoring: Fowler, *Refactoring* (code smells — shotgun surgery, divergent change, feature envy, duplicated code); Feathers, *Working Effectively with Legacy Code* (pin tests before changing structure).
 - Operational gates: race condition, partial write, atomic operation, transaction, idempotency key. Video: Nomad Coders, YouTube `ThYV4Kpf9Bk`.
-- Agent-friendly structure: a video introducing a Cursor engineer's talk, YouTube `o_7vTaHOL28` — agent habits as design input; enforcement by codebase structure and compiler/lint/CI over prose. Adapted with our own failure cases, not adopted wholesale.
-- b3rys lessons: data-source bug + behavior-verify (`feedback_verify_actual_behavior_not_tsc`, 2026-07-06); lifecycle + refactoring framing (GD 2026-07-06).
+- Agent-friendly structure: a video introducing a Cursor engineer's talk, YouTube `o_7vTaHOL28` — agent habits as design input; enforcement by codebase structure and compiler/lint/CI over prose. Adapted, not adopted wholesale.
