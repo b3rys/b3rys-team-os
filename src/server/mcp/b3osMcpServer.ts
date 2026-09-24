@@ -15,6 +15,7 @@ import { inboxFor } from "../db/inboxQueries";
 import { listTasks, createTask, updateTask } from "../db/taskQueries";
 import { recallDmMessages } from "../db/dmCapture";
 import { classifyAll } from "../lib/health";
+import { quotaBlockMap } from "../lib/runtimeQuota";
 import { ambientAgents } from "../lib/registry"; // 정규 팀원 여부·별칭의 정본은 agents.json 이다 (DB 표에는 없다)
 import { isTeamOfficialMember } from "../lib/agentMembership";
 import { isMcpEnabled } from "../lib/captureConfig"; // ★HTTP 와 같은 스위치★ — 창구를 끄면 stdio 도 안 붙는다
@@ -181,7 +182,7 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
         "b3rys 팀 각 멤버의 헬스 상태(ok/warn/danger)와 요약을 반환한다. 읽기 전용 — 대시보드와 동일 소스.",
     },
     async () => {
-      const verdicts = classifyAll(listStatuses(db), listAgents(db));
+      const verdicts = classifyAll(listStatuses(db), listAgents(db), Date.now(), quotaBlockMap(db));
       const summary = {
         danger: verdicts.filter((v) => v.level === "danger").map((v) => v.agentId),
         warn: verdicts.filter((v) => v.level === "warn").map((v) => v.agentId),
