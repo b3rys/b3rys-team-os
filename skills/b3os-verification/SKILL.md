@@ -32,7 +32,7 @@ Passing the runner is evidence for review and approval (TEAM-OS §4), not a subs
 
 ## 2. Five ratchets — verification that only gets stronger
 
-Left alone, verification decays: code moves and checks stop meaning anything, thresholds loosen quietly, the same mistake comes back. These five only move one way.
+Each moves in one direction only.
 
 | Ratchet | Rule |
 |---|---|
@@ -119,11 +119,11 @@ Verification rows only; the structure/code rows live in `b3os-ai-code-safety` ("
 
 Solo work and prototypes: speed first — the left column only. A long-lived product that several agents change: both columns.
 
-## 9. Examples (from a macOS notes app)
+## 9. Examples (a macOS notes app)
 
-1. **Ratchet ① — whole-table delete.** Deleting a whole Markdown table left the incremental block list pointing at it; later edits failed. The fix shipped with a randomized test (1,500 whole-table deletes); reverting the one-line fix made 6 of those tests fail.
-2. **Ratchet ② — the bundle stamp.** "Source merged, bundle not rebuilt, app shows old behaviour" happened twice. Now a stamp holds the input hash and the bundle hash; the notarization script refuses to start on a mismatch. Nobody has to remember.
-3. **A wrong check — windowless synthetic events.** A panel-scroll check failed with all 30 events rejected as "another window's". The probe sent windowless events; fixing the probe made all 3 steps pass. The runner now classifies this symptom as "check".
-4. **A suspicious number — inflated timing.** Note switching measured 50 ms against a 33 ms target. Broken down, about half came from ~3,400 entries accumulated in the probe's settings, scanned on every switch. The product now writes that record only on change; the runner resets it once per run. Clean result: 31 ms in debug and release (from 721 ms before the switch work).
-5. **Adding a feature — a notice delay 5 s → 1 s.** One table row (access: delete a note → undo), a test (no notice at 0.5 s, notice at 1.5 s), and a mutant (restore 5 s → the test fails). That is the whole job; the runner guards it from then on.
-6. **By size.** A one-person script: when fixing a bug, add the one test (example 1). A product like the notes app: sections 1–7 in full.
+1. **Ratchet ①** — whole-table delete left a stale block. Fix + randomized test (1,500 deletes); reverting the fix → 6 fail.
+2. **Ratchet ②** — "source merged, bundle stale". A hash stamp; the release script refuses a mismatch.
+3. **Wrong check** — 30 synthetic events rejected as another window's. The probe sent windowless events; fixed probe → PASS. Now a triage rule.
+4. **Environment** — note switch 50 ms vs 33 ms target; ~half was 3,400 accumulated probe-settings entries. Reset once per run + write only on change → 31 ms.
+5. **New feature** — notice delay 1 s: one row, a test (none at 0.5 s, shown at 1.5 s), a mutant (5 s → test fails).
+6. **By size** — solo script: example 1 only. Long-lived app: §1–7.
