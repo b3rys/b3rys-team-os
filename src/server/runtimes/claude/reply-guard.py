@@ -16,8 +16,15 @@
   · react/편집만으론 '답'이 아님 → reply·edit_message 만 send 로 인정.
   · 무한루프 방지: 같은 턴 최대 2회만 block(그 뒤엔 통과 — 유실 감수하되 세션 안 막음).
   · 어떤 에러도 턴을 막지 않는다(항상 allow=exit0).
+
+기록 지연: 훅이 도는 순간 transcript 파일에 이번 턴의 reply 줄이 아직 안 써져 있을 수 있다.
+  실측 — reply 가 8~10초 먼저 찍힌 턴이 막혔고, 같은 파일을 reply 줄까지 잘라 다시 먹이면 통과했다.
+  그래서 transcript 보다 먼저 훅 입력(stdin)의 tool_calls·last_assistant_message 를 본다.
+  입력에 없으면 transcript 를 읽고, 못 찾으면 잠깐 다시 읽는다(REPLY_GUARD_RETRY_MS, 기본 1500).
+  그래도 막을 때 경고문은 "이미 보냈으면 다시 보내지 마라" 를 먼저 말한다 — 잘못 막혀도 중복 발송이 나지 않게.
+  판정 근거는 transcript 옆 .reply-guard-decisions.log 에 한 줄씩 남는다(어느 근거가 결정했는지 재기 위해).
 """
-import sys, json, os, re
+import sys, json, os, re, time
 
 CHANNEL_TAG_RE = re.compile(r'<channel\b[^>]*>')
 CHAT_ID_RE = re.compile(r'chat_id="(-?\d+)"')
@@ -55,9 +62,59 @@ def _reply_or_edit_toolcall(content):
         return False
     for b in content:
         if isinstance(b, dict) and b.get("type") == "tool_use":
-            name = b.get("name", "") or ""
-            if ("telegram" in name and "reply" in name) or "edit_message" in name:
+            if _is_send_tool(b.get("name", "")):
                 return True
+    return False
+
+
+def _is_send_tool(name):
+    name = name or ""
+    return ("telegram" in name and "reply" in name) or "edit_message" in name
+
+
+def _stdin_saw_send(data):
+    """훅 입력에 이번 턴 툴콜 정보가 있으면 그걸로 판정한다. True=보냄 / False=입력상 안 보냄 / None=입력에 정보 없음."""
+    seen_info = False
+    calls = data.get("tool_calls")
+    if isinstance(calls, list):
+        seen_info = True
+        for t in calls:
+            if isinstance(t, dict) and _is_send_tool(t.get("tool_name") or t.get("name")):
+                return True
+    lam = data.get("last_assistant_message")
+    if isinstance(lam, dict):
+        content = lam.get("content", (lam.get("message") or {}).get("content") if isinstance(lam.get("message"), dict) else None)
+        if isinstance(content, list):
+            seen_info = True
+            if _reply_or_edit_toolcall(content):
+                return True
+    return False if seen_info else None
+
+
+def _log_decision(tp, decision, source, waited_ms=0):
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(tp)), ".reply-guard-decisions.log")
+        if os.path.exists(path) and os.path.getsize(path) > 256 * 1024:
+            open(path, "w").close()
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": int(time.time()), "decision": decision, "source": source, "waited_ms": waited_ms}) + "\n")
+    except Exception:
+        pass
+
+
+def _read_lines(tp):
+    return open(tp, encoding="utf-8").read().splitlines()
+
+
+def _transcript_saw_send(lines, after_idx):
+    for i in range(after_idx + 1, len(lines)):
+        try:
+            ev = json.loads(lines[i])
+        except Exception:
+            continue
+        msg = ev.get("message", {}) or {}
+        if _reply_or_edit_toolcall(msg.get("content", "")):
+            return True
     return False
 
 
@@ -84,7 +141,7 @@ def main():
     if not tp or not os.path.exists(tp):
         return allow()
     try:
-        lines = open(tp, encoding="utf-8").read().splitlines()
+        lines = _read_lines(tp)
     except Exception:
         return allow()
 
@@ -121,14 +178,30 @@ def main():
         return allow()
 
     # 3) 이 턴에 reply/edit_message 툴콜이 있었나?
-    for i in range(last_user_idx + 1, len(lines)):
+    #    ① 훅 입력(stdin) — 파일 기록 지연과 무관하다.
+    stdin_says = _stdin_saw_send(data)
+    if stdin_says is True:
+        _log_decision(tp, "allow", "stdin")
+        return allow()
+    #    ② transcript — 못 찾으면 잠깐 다시 읽는다(기록 지연).
+    if _transcript_saw_send(lines, last_user_idx):
+        _log_decision(tp, "allow", "transcript")
+        return allow()
+    try:
+        budget_ms = max(0, int(os.environ.get("REPLY_GUARD_RETRY_MS", "1500")))
+    except ValueError:
+        budget_ms = 1500
+    waited = 0
+    while waited < budget_ms:
+        time.sleep(0.25)
+        waited += 250
         try:
-            ev = json.loads(lines[i])
+            lines = _read_lines(tp)
         except Exception:
-            continue
-        msg = ev.get("message", {}) or {}
-        if _reply_or_edit_toolcall(msg.get("content", "")):
-            return allow()  # 보냄 → OK
+            break
+        if _transcript_saw_send(lines, last_user_idx):
+            _log_decision(tp, "allow", "transcript_retry", waited)
+            return allow()
 
     # 4) 무한루프 방지 — 같은 턴 최대 2회 block.
     try:
@@ -150,8 +223,11 @@ def main():
     except Exception:
         pass
 
+    _log_decision(tp, "block", "stdin_none" if stdin_says is None else "stdin_no_send", waited)
     block(
-        "⚠️ 이번 턴에 텔레그램 1:1 메시지를 받았는데 아직 reply 도구로 답을 보내지 않았습니다. "
+        "⚠️ 이번 턴에 이미 reply 도구로 답을 보냈다면 다시 보내지 말고 그대로 끝내세요 — "
+        "기록이 늦게 써져 이 경고가 잘못 뜰 수 있습니다. "
+        "아직 안 보냈다면: 이번 턴에 텔레그램 1:1 메시지를 받았는데 reply 도구로 답을 보내지 않았습니다. "
         "작업 화면(transcript)에 쓴 글은 상대에게 도달하지 않아요 — 지금 "
         "`mcp__plugin_telegram_telegram__reply` 도구를 호출해서 답을 실제로 전송하세요. "
         "(답할 내용이 없다면 이 경고는 곧 사라집니다.)"
