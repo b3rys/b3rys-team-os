@@ -24,6 +24,9 @@ Two throughlines:
   - **A mutant in one area fails another area's tests** (primary): that is a side-effect coupling point — split there.
   - **A state judged from three or more fields combined by `if`s** → one state value + one `reduce(state, event) → (state, effects)` table; every cell written, an empty cell fails a test.
   - **Line count of a file or function** (signal only): report it, don't fail on it. A very long function or a file with many unrelated sections is where to look first.
+
+## Phase 2 — Write (structure that reduces side effects)
+
 - **Pure core, effects at the edges (functional core / imperative shell** — a pure, side-effect-free core of logic wrapped by a thin I/O layer at the edges**).** Keep business logic pure: inputs → outputs, no hidden I/O. Push DB, network, filesystem, time, random, and env reads to adapters at the module edge. A pure core is testable without live services and has no spooky action at a distance.
 - **Immutability first.** Prefer `const` and immutable values. A class field that never changes is a **constant**, not mutable state — declare it so. Minimize shared mutable state; it is the raw material of concurrency bugs and ripple effects.
 - **Replace conditional sprawl with data or polymorphism.** A `switch`/`if-else` on a type that grows, or the same branch repeated in several files, is a smell. Replace with a **lookup map**, a **factory/strategy**, or polymorphism — so a new case is one new entry, not a new branch edited in N places.
