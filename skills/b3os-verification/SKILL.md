@@ -86,6 +86,11 @@ Tests are often wrong. On FAIL, first decide: **check, environment, or product?*
 | "Looks like X" from reading source | Unconfirmed diagnosis | Check · candidate only; confirm with a repro or an anchor/log trace |
 | Timing slightly over the line under load | First-sample outlier + high load | Timing · record load, rerun once; twice over = product |
 | Incremental state keeps a deleted structure | Real defect | Product · repro test + mutant (ratchet ①) |
+| A timing is sometimes ~1 s too long | The check waited on every animation in the window; an unrelated always-running one (an editor caret blink) was still going | Check · judge only the target pane; see the one-run rule below |
+| A chained family fails many phases at once, logs cut off, no crash report | Something outside killed the app (another test's cleanup) | Environment · teardown kills only its own processes; record fixed causes in a data table so the repeat-flake warning skips runs before the fix |
+| A file-watcher test misses a notice only in full runs | The OS event service lags under a flood of file changes | Environment · on a missed notice, probe the service: alive = real FAIL, silent = visible SKIPPED (never PASS) |
+
+**Settle a suspicious number in one run.** Don't run the app again and again to test one hypothesis at a time. The first diagnostic run records all at once: (1) each condition the verdict waits on and its value, (2) what is still blocking (the animating layer, its key and duration, or a `sample` of a busy thread), (3) a control of the unmodified app in the same run. A chained FAIL: look for a crash report first — none means it was killed from outside. If finding a cause took an hour or more, add a row to this table when done.
 
 ## 6. Shared-resource rules (one app window)
 
