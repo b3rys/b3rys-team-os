@@ -43,6 +43,7 @@ import { loadAgentCreds, hasSlackTokenFile } from "./lib/slack";
 import { createRouterRoutes } from "./routes/router";
 import { createBusRoutes } from "./routes/bus";
 import { createMonitoringRoutes } from "./routes/monitoring";
+import { createNotesRoutes } from "./routes/notes";
 import { createTaskRoutes } from "./routes/tasks";
 import { createProposalRoutes } from "./routes/proposals";
 import { createSearchRoutes } from "./routes/search";
@@ -469,6 +470,9 @@ api.route("/", busApi);
 
 const monitoringApi = createMonitoringRoutes({ db });
 api.route("/", monitoringApi);
+
+// 팀원 → 팀장 편집기(Steno) 파일 우편함. 원격은 위 apiCfGate 를 지난다.
+api.route("/", createNotesRoutes({ db, memberIds: () => agents.map((a) => a.id) }));
 
 // CI 결과는 ★읽기 전용★ — 여기서 테스트를 돌리지 않는다(routes/ciStatus.ts 주석 참고).
 const ciStatusApi = createCiStatusRoutes();

@@ -101,6 +101,9 @@ export function writeClaudeBridgeFiles(id: string): ClaudeBridgePaths {
  * 1:1 텔레그램 DM 턴을 reply 없이 끝내려 하면 차단·재프롬프트(Claude send-drift 안전망).
  *  워크스페이스 스코프라 user 전역 ~/.claude·오너 Claude Code엔 영향 0. 기존 settings.json 있으면 Stop 배열에 병합(중복 방지).
  *  best-effort — 설치 실패해도 활성화는 막지 않는다. */
+/** reply-guard 보냄 표식을 거는 도구 — 텔레그램 reply·edit_message. */
+export const REPLY_GUARD_MARK_MATCHER = "mcp__plugin_telegram_telegram__reply|mcp__plugin_telegram_telegram__edit_message";
+
 export function installReplyGuardHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
   assertId(id);
   const membersRoot = roots?.membersRoot ?? MEMBERS_ROOT;
@@ -124,6 +127,12 @@ export function installReplyGuardHook(id: string, roots?: { membersRoot?: string
       stop.push({ hooks: [{ type: "command", command: `python3 "${hookDst}"` }] });
     }
     hooks.Stop = stop;
+    // 보냄 표식(PostToolUse) — transcript 기록 지연과 무관하게 "이번 턴 보냈다" 를 Stop 판정에 넘긴다.
+    const post = Array.isArray(hooks.PostToolUse) ? (hooks.PostToolUse as unknown[]) : [];
+    if (!JSON.stringify(post).includes("reply-guard.py")) {
+      post.push({ matcher: REPLY_GUARD_MARK_MATCHER, hooks: [{ type: "command", command: `python3 "${hookDst}" --mark` }] });
+    }
+    hooks.PostToolUse = post;
     settings.hooks = hooks;
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
   } catch { /* best-effort */ }
@@ -362,9 +371,9 @@ export function uninstallOutboundHook(id: string): void {
 }
 
 /** Stop 훅에서 특정 파일 훅 제거(+파일 삭제). uninstallOutboundHook 로직 일반화(Tier2 live 승격 시 reply-guard/recovery 제거). */
-function uninstallStopHookByFile(id: string, hookFile: string): void {
+function uninstallStopHookByFile(id: string, hookFile: string, membersRoot: string = MEMBERS_ROOT): void {
   assertId(id);
-  const dotClaude = `${MEMBERS_ROOT}/${id}/.claude`;
+  const dotClaude = `${membersRoot}/${id}/.claude`;
   const settingsPath = `${dotClaude}/settings.json`;
   const hookDst = `${dotClaude}/hooks/${hookFile}`;
   try {
@@ -381,7 +390,24 @@ function uninstallStopHookByFile(id: string, hookFile: string): void {
 }
 
 /** reply-guard Stop 훅 제거 — Tier2 live(마커모드)에선 reply 도구를 안 써 매턴 block 방지. */
-export function uninstallReplyGuardHook(id: string): void { uninstallStopHookByFile(id, "reply-guard.py"); }
+export function uninstallReplyGuardHook(id: string, roots?: { membersRoot?: string }): void {
+  assertId(id);
+  const membersRoot = roots?.membersRoot ?? MEMBERS_ROOT;
+  // PostToolUse 표식 배선도 걷는다 — 파일만 지우면 reply 때마다 없는 파일을 부르는 훅 오류가 난다.
+  try {
+    const settingsPath = `${membersRoot}/${id}/.claude/settings.json`;
+    if (existsSync(settingsPath)) {
+      const p = JSON.parse(readFileSync(settingsPath, "utf-8")) as Record<string, unknown>;
+      const hooks = (p.hooks && typeof p.hooks === "object" ? p.hooks : {}) as Record<string, unknown>;
+      if (Array.isArray(hooks.PostToolUse)) {
+        hooks.PostToolUse = (hooks.PostToolUse as unknown[]).filter((h) => !JSON.stringify(h).includes("reply-guard.py"));
+        p.hooks = hooks;
+        writeFileSync(settingsPath, JSON.stringify(p, null, 2) + "\n");
+      }
+    }
+  } catch { /* best-effort */ }
+  uninstallStopHookByFile(id, "reply-guard.py", membersRoot);
+}
 
 /** tg-reply-recovery Stop 훅 제거 — 훅 자체가 삭제됐다. 이 함수는 이미 설치된 멤버에서
  *  등록을 걷어내는 self-heal 용으로만 남는다(활성화·퇴사 때 호출). 잔재가 다 걷히면 같이 지운다. */
