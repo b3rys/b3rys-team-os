@@ -19,9 +19,13 @@
 
 기록 지연: 훅이 도는 순간 transcript 파일에 이번 턴의 reply 줄이 아직 안 써져 있을 수 있다.
   실측 — reply 가 8~10초 먼저 찍힌 턴이 막혔고, 같은 파일을 reply 줄까지 잘라 다시 먹이면 통과했다.
-  그래서 transcript 보다 먼저 훅 입력(stdin)의 tool_calls·last_assistant_message 를 본다.
-  입력에 없으면 transcript 를 읽고, 못 찾으면 잠깐 다시 읽는다(REPLY_GUARD_RETRY_MS, 기본 1500).
-  그래도 막을 때 경고문은 "이미 보냈으면 다시 보내지 마라" 를 먼저 말한다 — 잘못 막혀도 중복 발송이 나지 않게.
+  그래서 transcript 에 기대지 않는 표식을 쓴다:
+  · `--mark` 모드 = PostToolUse 훅(reply·edit_message 에만). 도구가 성공한 직후 동기로 돌아
+    transcript 옆 `.reply-guard-sent.json` 에 {session_id: 시각} 을 남긴다.
+  · Stop 판정은 표식이 이번 턴 트리거(마지막 1:1 입력)보다 뒤면 통과. 표식이 없으면 transcript 를 보고,
+    그래도 없으면 — 이 세션에 표식이 한 번도 없을 때만(배선 전) — 잠깐 다시 읽는다(REPLY_GUARD_RETRY_MS, 기본 1500).
+  · 그래도 막을 때 경고문은 "이미 보냈으면 다시 보내지 마라" 를 먼저 말한다 — 잘못 막혀도 중복 발송이 나지 않게.
+  · Stop 훅 입력(stdin)에는 이번 턴 툴콜 목록이 없다(설치 CLI 기준 last_assistant_message 는 글자뿐) — 그래서 쓰지 않는다.
   판정 근거는 transcript 옆 .reply-guard-decisions.log 에 한 줄씩 남는다(어느 근거가 결정했는지 재기 위해).
 """
 import sys, json, os, re, time
@@ -72,23 +76,50 @@ def _is_send_tool(name):
     return ("telegram" in name and "reply" in name) or "edit_message" in name
 
 
-def _stdin_saw_send(data):
-    """훅 입력에 이번 턴 툴콜 정보가 있으면 그걸로 판정한다. True=보냄 / False=입력상 안 보냄 / None=입력에 정보 없음."""
-    seen_info = False
-    calls = data.get("tool_calls")
-    if isinstance(calls, list):
-        seen_info = True
-        for t in calls:
-            if isinstance(t, dict) and _is_send_tool(t.get("tool_name") or t.get("name")):
-                return True
-    lam = data.get("last_assistant_message")
-    if isinstance(lam, dict):
-        content = lam.get("content", (lam.get("message") or {}).get("content") if isinstance(lam.get("message"), dict) else None)
-        if isinstance(content, list):
-            seen_info = True
-            if _reply_or_edit_toolcall(content):
-                return True
-    return False if seen_info else None
+MARK_FILE = ".reply-guard-sent.json"
+
+
+def _mark_path(tp):
+    return os.path.join(os.path.dirname(os.path.abspath(tp)), MARK_FILE)
+
+
+def _load_marks(tp):
+    try:
+        st = json.load(open(_mark_path(tp)))
+        return st if isinstance(st, dict) else {}
+    except Exception:
+        return {}
+
+
+def mark():
+    """PostToolUse — reply·edit_message 가 성공한 직후 '이 세션 보냄' 시각을 남긴다."""
+    try:
+        data = json.loads(sys.stdin.read() or "{}")
+    except Exception:
+        return
+    if not _is_send_tool(data.get("tool_name")):
+        return
+    tp, sid = data.get("transcript_path"), data.get("session_id")
+    if not tp or not sid:
+        return
+    st = _load_marks(tp)
+    st[str(sid)] = time.time()
+    if len(st) > 20:  # 오래된 세션 정리
+        st = dict(sorted(st.items(), key=lambda kv: kv[1] if isinstance(kv[1], (int, float)) else 0)[-20:])
+    try:
+        tmp = _mark_path(tp) + ".tmp"
+        json.dump(st, open(tmp, "w"))
+        os.replace(tmp, _mark_path(tp))
+    except Exception:
+        pass
+
+
+def _iso_to_epoch(ts):
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
 
 
 def _log_decision(tp, decision, source, waited_ms=0):
@@ -178,30 +209,39 @@ def main():
         return allow()
 
     # 3) 이 턴에 reply/edit_message 툴콜이 있었나?
-    #    ① 훅 입력(stdin) — 파일 기록 지연과 무관하다.
-    stdin_says = _stdin_saw_send(data)
-    if stdin_says is True:
-        _log_decision(tp, "allow", "stdin")
+    #    ① PostToolUse 표식 — 파일 기록 지연과 무관하다.
+    sid = str(data.get("session_id") or "")
+    marks = _load_marks(tp)
+    marked_at = marks.get(sid) if sid else None
+    try:
+        trigger_ts = _iso_to_epoch(json.loads(lines[last_user_idx]).get("timestamp"))
+    except Exception:
+        trigger_ts = None
+    if isinstance(marked_at, (int, float)) and trigger_ts is not None and marked_at > trigger_ts:
+        _log_decision(tp, "allow", "marker")
         return allow()
-    #    ② transcript — 못 찾으면 잠깐 다시 읽는다(기록 지연).
+    #    ② transcript
     if _transcript_saw_send(lines, last_user_idx):
         _log_decision(tp, "allow", "transcript")
         return allow()
-    try:
-        budget_ms = max(0, int(os.environ.get("REPLY_GUARD_RETRY_MS", "1500")))
-    except ValueError:
-        budget_ms = 1500
+    #    ③ 이 세션에 표식이 있었으면 배선이 살아 있다 → 이번 턴 표식이 없으면 진짜 안 보낸 것. 기다리지 않는다.
+    #       표식이 한 번도 없으면(배선 전·첫 답) transcript 를 잠깐 다시 읽는다.
     waited = 0
-    while waited < budget_ms:
-        time.sleep(0.25)
-        waited += 250
+    if not isinstance(marked_at, (int, float)):
         try:
-            lines = _read_lines(tp)
-        except Exception:
-            break
-        if _transcript_saw_send(lines, last_user_idx):
-            _log_decision(tp, "allow", "transcript_retry", waited)
-            return allow()
+            budget_ms = max(0, int(os.environ.get("REPLY_GUARD_RETRY_MS", "1500")))
+        except ValueError:
+            budget_ms = 1500
+        while waited < budget_ms:
+            time.sleep(0.25)
+            waited += 250
+            try:
+                lines = _read_lines(tp)
+            except Exception:
+                break
+            if _transcript_saw_send(lines, last_user_idx):
+                _log_decision(tp, "allow", "transcript_retry", waited)
+                return allow()
 
     # 4) 무한루프 방지 — 같은 턴 최대 2회 block.
     try:
@@ -223,7 +263,7 @@ def main():
     except Exception:
         pass
 
-    _log_decision(tp, "block", "stdin_none" if stdin_says is None else "stdin_no_send", waited)
+    _log_decision(tp, "block", "marker_wired_no_send" if isinstance(marked_at, (int, float)) else "no_marker", waited)
     block(
         "⚠️ 이번 턴에 이미 reply 도구로 답을 보냈다면 다시 보내지 말고 그대로 끝내세요 — "
         "기록이 늦게 써져 이 경고가 잘못 뜰 수 있습니다. "
@@ -236,6 +276,9 @@ def main():
 
 if __name__ == "__main__":
     try:
+        if "--mark" in sys.argv[1:]:
+            mark()
+            sys.exit(0)
         main()
     except Exception:
         sys.exit(0)
