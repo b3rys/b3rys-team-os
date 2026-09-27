@@ -4,6 +4,7 @@
 import type { AgentStatus, AgentRecord } from "../types";
 import { isTeamOfficialMember } from "./agentMembership";
 import { isSubscriptionNeededDetail } from "./runtimeSubscription";
+import type { QuotaBlock } from "./runtimeQuota";
 
 export type HealthLevel = "ok" | "warn" | "danger";
 export type CapacityStatus = "ok" | "limit" | "usage_credits";
@@ -55,7 +56,7 @@ function runtimeBlockedReason(line: string | null | undefined): { level: HealthL
     return { level: "warn", reason: "Codex Telegram 브리지 점검" };
   }
   if (isSubscriptionNeededDetail(line)) {
-    return { level: "danger", reason: "Codex/OpenAI 한도" };
+    return { level: "danger", reason: QUOTA_REASON };
   }
   if (/codex runtime failed:\s*exit_0\b/i.test(line)) {
     return null;
@@ -89,7 +90,14 @@ export function parseUtc(ts: string | null): number | null {
  * - ctx 높음/포화, probe stale, 현재 출력 갱신 중 → warn
  * - claude 봇인데 tmux_pid 없음 → danger(세션 다운)
  */
-export function classifyHealth(s: AgentStatus, agent?: AgentRecord, now = Date.now()): HealthVerdict {
+export const QUOTA_REASON = "Codex/OpenAI 한도";
+
+export function classifyHealth(
+  s: AgentStatus,
+  agent?: AgentRecord,
+  now = Date.now(),
+  quota: QuotaBlock | null = null,
+): HealthVerdict {
   const reasons: string[] = [];
   const contextReasons: string[] = [];
   let livenessLevel: HealthLevel = "ok";
@@ -120,6 +128,13 @@ export function classifyHealth(s: AgentStatus, agent?: AgentRecord, now = Date.n
   if (blockedReason) {
     livenessLevel = worse(livenessLevel, blockedReason.level);
     reasons.push(blockedReason.reason);
+  }
+
+  // 로그 줄에는 안 오고 wake 결과로만 드러나는 한도(hermes·openclaw) — lib/runtimeQuota.ts 가 기록한다.
+  // 이미 로그 줄로 같은 사유가 잡혔으면 두 번 적지 않는다.
+  if (quota && quota.resetAt > now && !reasons.includes(QUOTA_REASON)) {
+    livenessLevel = worse(livenessLevel, "danger");
+    reasons.push(quota.resetHint ? `${QUOTA_REASON} · 리셋까지 ${quota.resetHint}` : QUOTA_REASON);
   }
 
   if (s.state === "offline") {
@@ -157,6 +172,7 @@ export function classifyAll(
   statuses: AgentStatus[],
   agents: AgentRecord[],
   now = Date.now(),
+  quota: ReadonlyMap<string, QuotaBlock> = new Map(),
 ): HealthVerdict[] {
   const byId = new Map(agents.map((a) => [a.id, a]));
   return statuses.filter((s) => {
@@ -164,6 +180,6 @@ export function classifyAll(
     return agent != null && isTeamOfficialMember(agent);
   }).map((s) => {
     const agent = byId.get(s.agent_id);
-    return classifyHealth(s, agent, now);
+    return classifyHealth(s, agent, now, quota.get(s.agent_id) ?? null);
   });
 }

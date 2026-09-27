@@ -38,6 +38,16 @@ export function migrate(db: Database): void {
   } catch {
     /* 이미 존재 */
   }
+  // 팀원별 런타임 한도 소진 기록(lib/runtimeQuota.ts). 행이 있고 reset_at_ms 가 미래면 '한도'.
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS agent_quota_block (
+       agent_id TEXT PRIMARY KEY,
+       source TEXT NOT NULL,
+       since_ms INTEGER NOT NULL,
+       reset_at_ms INTEGER NOT NULL,
+       reset_hint TEXT
+     )`,
+  );
   // 팀원 → 팀장 편집기 파일 우편함(routes/notes.ts). 쌓기만 한다 — 갱신·삭제 경로 없음.
   db.exec(
     `CREATE TABLE IF NOT EXISTS team_note (
