@@ -362,23 +362,33 @@ export async function applyAll(members: Member[], target: { model: string; effor
   }
   const ocBackup = `${oc[0]!.configPath}.bak-rollout-${stamp}`;
   if (yes) copyFileSync(oc[0]!.configPath, ocBackup);
-  const changed: Member[] = [];
-  for (const m of oc) {
-    const s = await applyMember(m, target, env, run, yes, stamp);
-    steps.push(...s);
-    if (s.some((x) => x.action === "config set" && x.ok)) changed.push(m);
-  }
-  if (!yes || changed.length === 0) return steps;
-  const r = await run([env.openclawBin, "gateway", "restart"], { timeoutMs: 180_000 });
-  steps.push({ member: "openclaw", action: "restart", ok: r.code === 0, detail: "게이트웨이 재시작(openclaw 팀원 전원 잠깐 멈춤)" });
-  const after = readFileSync(oc[0]!.configPath, "utf-8");
-  const bad = changed.filter((m) => readCurrent(m, after).model !== target.model);
-  if (r.code !== 0 || bad.length > 0) {
-    copyFileSync(ocBackup, oc[0]!.configPath);
-    const back = await run([env.openclawBin, "gateway", "restart"], { timeoutMs: 180_000 });
-    steps.push({ member: "openclaw", action: "rollback", ok: back.code === 0, detail: `openclaw.json 복원(${ocBackup}) + 재시작` });
-  } else {
-    steps.push({ member: "openclaw", action: "verify", ok: true, detail: `설정 ${changed.length}명 반영 · 실제 응답 모델은 각 팀원의 다음 턴 기록으로 확인 필요` });
+  const restoreOc = async (why: string) => {
+    try {
+      copyFileSync(ocBackup, oc[0]!.configPath);
+      const back = await run([env.openclawBin, "gateway", "restart"], { timeoutMs: 180_000 });
+      steps.push({ member: "openclaw", action: "rollback", ok: back.code === 0, detail: `${why} → openclaw.json 복원(${ocBackup}) + 재시작` });
+    } catch (e) {
+      steps.push({ member: "openclaw", action: "rollback", ok: false, detail: `${why} → 복원 실패: ${(e as Error).message} — 백업 ${ocBackup} 를 손으로` });
+    }
+  };
+  // ★백업 뒤의 모든 경로는 '반영 확인' 또는 '복원' 으로 끝난다★ — config set 도중·재시작 도중 예외도 복원으로.
+  try {
+    const changed: Member[] = [];
+    for (const m of oc) {
+      const s = await applyMember(m, target, env, run, yes, stamp);
+      steps.push(...s);
+      if (s.some((x) => x.action === "config set" && x.ok)) changed.push(m);
+    }
+    if (!yes || changed.length === 0) return steps;
+    const r = await run([env.openclawBin, "gateway", "restart"], { timeoutMs: 180_000 });
+    steps.push({ member: "openclaw", action: "restart", ok: r.code === 0, detail: "게이트웨이 재시작(openclaw 팀원 전원 잠깐 멈춤)" });
+    const after = readFileSync(oc[0]!.configPath, "utf-8");
+    const bad = changed.filter((m) => readCurrent(m, after).model !== target.model);
+    if (r.code !== 0 || bad.length > 0) await restoreOc(r.code !== 0 ? `재시작 실패(exit ${r.code})` : `반영 안 됨: ${bad.map((m) => m.id).join(",")}`);
+    else steps.push({ member: "openclaw", action: "verify", ok: true, detail: `설정 ${changed.length}명 반영 · 실제 응답 모델은 각 팀원의 다음 턴 기록으로 확인 필요` });
+  } catch (e) {
+    steps.push({ member: "openclaw", action: "error", ok: false, detail: (e as Error).message });
+    if (yes) await restoreOc("예외");
   }
   return steps;
 }
