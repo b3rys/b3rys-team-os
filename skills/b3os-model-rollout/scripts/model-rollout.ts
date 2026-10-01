@@ -17,7 +17,11 @@ const REPO_ROOT = resolve(import.meta.dir, "../../..");
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
-  return i > 0 ? process.argv[i + 1] : undefined;
+  if (i <= 0) return undefined;
+  const v = process.argv[i + 1];
+  // 값 자리에 다음 옵션이 오면(예: --model --yes) 값이 없는 것으로 본다.
+  if (v === undefined || v.startsWith("--")) { console.error(`--${name} 뒤에 값이 없습니다`); process.exit(2); }
+  return v;
 }
 const has = (name: string) => process.argv.includes(`--${name}`);
 

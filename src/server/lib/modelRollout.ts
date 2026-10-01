@@ -208,6 +208,8 @@ function newestSessionModel(codexHome: string, after: number): string | null {
 /** 실제 호출로 확인한다. override=null 이면 설정 파일의 기본값으로(적용 뒤 검증용). */
 export async function checkMember(member: Member, target: { model: string | null; effort: string | null }, env: Env, run: Runner): Promise<CheckResult> {
   const base = { member: member.id, runtime: member.runtime };
+  const bad = validateTarget(target);
+  if (bad) return { ...base, verdict: "unknown", actualModel: null, detail: bad };
   if (member.runtime === "hermes_agent") {
     const dir = mkdtempSync(join(tmpdir(), "model-rollout-"));
     const usage = join(dir, "usage.json");
@@ -221,7 +223,8 @@ export async function checkMember(member: Member, target: { model: string | null
       const ok = !target.model || u.model === target.model;
       return { ...base, verdict: ok ? "works" : "not_supported", actualModel: u.model, detail: ok ? "one-shot 응답" : `요청 ${target.model} → 실제 ${u.model}` };
     }
-    return { ...base, verdict: "unknown", actualModel: u.model ?? null, detail: classifyFailure(r) };
+    const why = classifyFailure(r);
+    return { ...base, verdict: why === "모델을 모름" ? "not_supported" : "unknown", actualModel: u.model ?? null, detail: why };
   }
   if (member.runtime === "codex") {
     const dir = mkdtempSync(join(tmpdir(), "model-rollout-"));
@@ -236,7 +239,8 @@ export async function checkMember(member: Member, target: { model: string | null
       const ok = !target.model || actual === target.model;
       return { ...base, verdict: ok ? "works" : "not_supported", actualModel: actual, detail: ok ? "exec 응답(세션 기록)" : `요청 ${target.model} → 실제 ${actual}` };
     }
-    return { ...base, verdict: "unknown", actualModel: actual, detail: classifyFailure(r) };
+    const why = classifyFailure(r);
+    return { ...base, verdict: why === "모델을 모름" ? "not_supported" : "unknown", actualModel: actual, detail: why };
   }
   // openclaw: 게이트웨이 자신의 판정(models list 의 available)을 본다. 목록에 없으면 설정으로는 못 연다.
   const r = await run([env.openclawBin, "models", "list", "--json"], { timeoutMs: 120_000 });
@@ -261,6 +265,17 @@ export function classifyFailure(r: RunResult): string {
   if (/401|unauthori[sz]ed|token_invalidated|sign in|login/i.test(text)) return "인증(미확인)";
   if (/unknown model|model_not_found|does not exist|not supported/i.test(text)) return "모델을 모름";
   return `실패(exit ${r.code})`;
+}
+
+// ─── 입력 검사 — 설정 파일에 그대로 쓰이므로 줄바꿈·따옴표·옵션 이름이 들어오면 안 된다 ────────────
+export const EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+const MODEL_RE = /^[A-Za-z0-9._:\/-]+$/;
+
+/** 문제가 있으면 이유, 없으면 null. */
+export function validateTarget(target: { model: string | null; effort: string | null }): string | null {
+  if (target.model != null && (!MODEL_RE.test(target.model) || target.model.startsWith("-"))) return `모델 이름이 올바르지 않음: ${JSON.stringify(target.model)}`;
+  if (target.effort != null && !(EFFORTS as readonly string[]).includes(target.effort)) return `effort 는 ${EFFORTS.join("·")} 중 하나: ${JSON.stringify(target.effort)}`;
+  return null;
 }
 
 // ─── 적용(apply) ──────────────────────────────────────────────────────────────────
@@ -295,24 +310,48 @@ export async function applyMember(member: Member, target: { model: string; effor
   writeFileSync(member.configPath, next);
   steps.push({ member: member.id, action: "write", ok: true, detail: `백업 ${backup}` });
 
-  const restart = await run(["launchctl", "kickstart", "-k", `gui/${env.uid}/${member.serviceLabel}`], { timeoutMs: 60_000 });
-  steps.push({ member: member.id, action: "restart", ok: restart.code === 0, detail: member.serviceLabel });
-
-  const verify = await checkMember(member, { model: null, effort: null }, env, run);
-  const ok = verify.verdict === "works" && verify.actualModel === target.model;
-  steps.push({ member: member.id, action: "verify", ok, detail: `${verify.detail} · 실제 ${verify.actualModel ?? "?"}` });
-  if (!ok) {
-    copyFileSync(backup, member.configPath);
-    const back = await run(["launchctl", "kickstart", "-k", `gui/${env.uid}/${member.serviceLabel}`], { timeoutMs: 60_000 });
-    steps.push({ member: member.id, action: "rollback", ok: back.code === 0, detail: `백업 복원 + 재시작` });
+  const kick = () => run(["launchctl", "kickstart", "-k", `gui/${env.uid}/${member.serviceLabel}`], { timeoutMs: 60_000 });
+  const rollback = async (why: string) => {
+    try {
+      copyFileSync(backup, member.configPath);
+      const back = await kick();
+      steps.push({ member: member.id, action: "rollback", ok: back.code === 0, detail: `${why} → 백업 복원 + 재시작` });
+    } catch (e) {
+      steps.push({ member: member.id, action: "rollback", ok: false, detail: `${why} → 복원 실패: ${(e as Error).message} — 백업 ${backup} 를 손으로` });
+    }
+  };
+  // ★쓴 뒤의 모든 경로는 '성공 확인' 또는 '복원' 둘 중 하나로 끝난다★ — 예외도 복원으로.
+  try {
+    const restart = await kick();
+    steps.push({ member: member.id, action: "restart", ok: restart.code === 0, detail: member.serviceLabel });
+    // 재시작 실패면 돌고 있는 서비스는 옛 설정 그대로다. 확인(one-shot)은 새 프로세스라 그걸 대신 못 잰다 → 복원.
+    if (restart.code !== 0) { await rollback(`재시작 실패(exit ${restart.code})`); return steps; }
+    const verify = await checkMember(member, { model: null, effort: null }, env, run);
+    const ok = verify.verdict === "works" && verify.actualModel === target.model;
+    steps.push({ member: member.id, action: "verify", ok, detail: `${verify.detail} · 실제 ${verify.actualModel ?? "?"}` });
+    if (!ok) await rollback("확인 실패");
+  } catch (e) {
+    steps.push({ member: member.id, action: "error", ok: false, detail: (e as Error).message });
+    await rollback("예외");
   }
   return steps;
 }
 
 export async function applyAll(members: Member[], target: { model: string; effort: string | null }, env: Env, run: Runner, yes: boolean, stamp: string): Promise<ApplyStep[]> {
   const steps: ApplyStep[] = [];
+  const invalid = validateTarget(target);
+  if (invalid) return [{ member: "-", action: "refuse", ok: false, detail: invalid }];
   const oc = members.filter((m) => m.runtime === "openclaw");
-  for (const m of members.filter((m) => m.runtime !== "openclaw")) steps.push(...await applyMember(m, target, env, run, yes, stamp));
+  const rest = members.filter((m) => m.runtime !== "openclaw");
+  for (let i = 0; i < rest.length; i++) {
+    const s = await applyMember(rest[i]!, target, env, run, yes, stamp);
+    steps.push(...s);
+    // 한 팀원에서 실패하면 멈춘다 — 안 되는 모델로 전원을 재시작·복원하지 않는다.
+    if (yes && s.some((x) => !x.ok)) {
+      for (const m of [...rest.slice(i + 1), ...oc]) steps.push({ member: m.id, action: "skip", ok: false, detail: `앞 팀원(${rest[i]!.id}) 실패로 중단` });
+      return steps;
+    }
+  }
   if (oc.length === 0) return steps;
 
   // openclaw: 바꾸기 전에 게이트웨이가 그 모델을 아는지부터 — 모르면 아무도 안 바꾼다.

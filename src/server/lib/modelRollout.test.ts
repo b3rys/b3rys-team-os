@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  applyAll, checkMember, classifyFailure, listMembers, readCurrent, tomlTopGet, tomlTopSet, writeModel, yamlGet, yamlSet,
+  applyAll, checkMember, classifyFailure, listMembers, readCurrent, tomlTopGet, tomlTopSet, validateTarget, writeModel, yamlGet, yamlSet,
   type Env, type Member, type Runner,
 } from "./modelRollout";
 
@@ -201,5 +201,71 @@ describe("apply", () => {
     expect(steps[0]).toMatchObject({ action: "skip", ok: false });
     expect(calls.some((c) => c[1] === "gateway" || c[1] === "config")).toBe(false);
     expect(readdirSync(join(home, ".openclaw")).some((f) => f.includes("bak-rollout"))).toBe(false);
+  });
+});
+
+describe("리뷰 반영 — 쓴 뒤의 모든 길은 확인 또는 복원", () => {
+  const target = { model: "gpt-6.1-sol", effort: "medium" };
+  test("쓴 뒤 예외 → 백업 복원 + 재시작, 예외가 밖으로 새지 않는다", async () => {
+    const h = listMembers(join(home, "agents.json"), env)[0]!;
+    let n = 0;
+    const run: Runner = async (cmd) => {
+      if (cmd[0] === "launchctl") { n++; if (n === 1) throw new Error("boom"); return { code: 0, stdout: "", stderr: "" }; }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const steps = await applyAll([h], target, env, run, true, "e1");
+    expect(steps.find((s) => s.action === "error")!.detail).toBe("boom");
+    expect(steps.find((s) => s.action === "rollback")!.ok).toBe(true);
+    expect(readFileSync(h.configPath, "utf-8")).toBe(HERMES_YAML);
+  });
+  test("재시작 실패 → 확인이 성공해도 복원(돌고 있는 서비스는 옛 설정)", async () => {
+    const h = listMembers(join(home, "agents.json"), env)[0]!;
+    let kicks = 0;
+    const base = fakeRunner({ model: () => "gpt-6.1-sol" });
+    const run: Runner = async (cmd, o) => {
+      if (cmd[0] === "launchctl") { kicks++; return { code: kicks === 1 ? 113 : 0, stdout: "", stderr: "" }; }
+      return base.run(cmd, o);
+    };
+    const steps = await applyAll([h], target, env, run, true, "e2");
+    expect(steps.find((s) => s.action === "restart")!.ok).toBe(false);
+    expect(steps.some((s) => s.action === "verify")).toBe(false);
+    expect(steps.find((s) => s.action === "rollback")!.detail).toContain("재시작 실패");
+    expect(readFileSync(h.configPath, "utf-8")).toBe(HERMES_YAML);
+  });
+  const badInputs: Array<[string, string | null]> = [
+    ["gpt-6-sol\n  provider: attacker", null],
+    ['gpt"x', null],
+    ["--yes", null],
+    ["gpt-6.1-sol", "ultra"],
+    ["gpt-6.1-sol", "medium\nx"],
+  ];
+  for (const [model, effort] of badInputs) {
+    test(`잘못된 입력 거절: ${JSON.stringify(model)} / ${JSON.stringify(effort)}`, async () => {
+      const ms = listMembers(join(home, "agents.json"), env);
+      const { run, calls } = fakeRunner({});
+      const steps = await applyAll(ms, { model, effort }, env, run, true, "e3");
+      expect(steps).toHaveLength(1);
+      expect(steps[0]).toMatchObject({ action: "refuse", ok: false });
+      expect(calls).toEqual([]);
+      expect(readFileSync(ms[0]!.configPath, "utf-8")).toBe(HERMES_YAML);
+      expect((await checkMember(ms[0]!, { model, effort }, env, run)).verdict).toBe("unknown");
+      expect(calls).toEqual([]);
+    });
+  }
+  test("validateTarget 정상 입력은 통과", () => {
+    for (const m of ["gpt-6.1-sol", "claude-sonnet-5-5", "openai/gpt-6-astra", "org:model_v2"]) expect(validateTarget({ model: m, effort: "high" })).toBeNull();
+  });
+  test("model_not_found 류 실패는 not_supported", async () => {
+    const m = listMembers(join(home, "agents.json"), env)[1]!;
+    const run: Runner = async () => ({ code: 1, stdout: "", stderr: "Error: model_not_found" });
+    expect((await checkMember(m, { model: "gpt-x", effort: null }, env, run)).verdict).toBe("not_supported");
+  });
+  test("한 팀원이 실패하면 나머지는 건드리지 않고 멈춘다", async () => {
+    const ms = listMembers(join(home, "agents.json"), env);
+    const { run, calls } = fakeRunner({ model: () => "gpt-6-astra", ocModels: [{ key: "openai/gpt-6.1-sol", available: true }] });
+    const steps = await applyAll(ms, target, env, run, true, "e4");
+    expect(steps.filter((s) => s.detail.includes("실패로 중단")).map((s) => s.member)).toEqual(["dx", "devon"]);
+    expect(readFileSync(ms[1]!.configPath, "utf-8")).toBe(CODEX_TOML);
+    expect(calls.some((c) => c[0] === "openclaw")).toBe(false);
   });
 });
