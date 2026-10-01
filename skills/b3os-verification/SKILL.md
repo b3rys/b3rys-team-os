@@ -28,7 +28,7 @@ Passing the runner is evidence for review and approval (TEAM-OS §4), not a subs
 
 1. **Run it; don't read it.** A diagnosis from reading source is a *candidate*. It is not a conclusion until a repro or a measurement confirms it.
 2. **The feature ↔ verification table is the single source.** One feature = one row. Each row has: source files (for change-scoped runs) · headless tests · app check (family + steps) · performance gate with baseline · the mutant and whether it is proven caught · last result (date, sha, verdict) · gaps · **access** (UI path, shortcut, probe anchor ids — so any agent can map a vague report or a screenshot to a feature and drive it).
-3. **Budget first.** One fix = 10 minutes; tests and verification included = 30 minutes. If a check would blow the budget, say so early and change the method (split, parallelize, move it headless). Do not drop the spec to fit the time.
+3. **Time and sizing:** follow `b3os-project-mgmt` "진행 규칙" (the single source). Do not drop the spec to fit the time.
 
 ## 2. Five ratchets — verification that only gets stronger
 
