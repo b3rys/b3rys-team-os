@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { checkGatewayLiveness, gatewayLabel, openclawGatewayLabel, type LaunchdProbe } from "./gatewayLiveness";
+import { checkGatewayLiveness, gatewayLabel, interpretLaunchctlList, openclawGatewayLabel, type LaunchdProbe } from "./gatewayLiveness";
 
 const probeOf = (state: ReturnType<LaunchdProbe>): LaunchdProbe => () => state;
 
@@ -65,5 +65,22 @@ describe("openclawGatewayLabel — openclaw 자신의 라벨 규칙과 같게", 
       () => { called++; return { loaded: false, pid: null }; }, { OPENCLAW_LAUNCHD_LABEL: "bad label" });
     expect(r).toEqual([]);
     expect(called).toBe(0);
+  });
+});
+
+describe("interpretLaunchctlList — 종료 코드를 상태로", () => {
+  const listed = `{\n\t"Label" = "ai.openclaw.gateway";\n\t"PID" = 68296;\n};`;
+  test("0 + PID → 로드·실행 중", () =>
+    expect(interpretLaunchctlList({ status: 0, stdout: listed })).toEqual({ loaded: true, pid: 68296 }));
+  test("0 + PID 없음 → 로드됐지만 프로세스 없음", () =>
+    expect(interpretLaunchctlList({ status: 0, stdout: `{\n\t"Label" = "x";\n};` })).toEqual({ loaded: true, pid: null }));
+  test("★113(그런 서비스 없음)만 미로드★", () =>
+    expect(interpretLaunchctlList({ status: 113, stdout: "" })).toEqual({ loaded: false, pid: null }));
+  test("★그 밖의 0 아닌 값은 판정 보류(null)★ — 권한·domain 오류를 장애로 바꾸지 않는다", () => {
+    for (const status of [1, 3, 5, 37, 112, 150]) expect(interpretLaunchctlList({ status, stdout: "" })).toBeNull();
+  });
+  test("실행 실패·종료 코드 없음은 판정 보류", () => {
+    expect(interpretLaunchctlList({ status: null })).toBeNull();
+    expect(interpretLaunchctlList({ status: 0, error: new Error("ENOENT") })).toBeNull();
   });
 });

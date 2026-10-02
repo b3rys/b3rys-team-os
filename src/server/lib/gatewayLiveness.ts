@@ -19,16 +19,20 @@ export type LaunchdProbe = (label: string) => LaunchdState | null;
 /** launchctl list 가 '그런 서비스 없음' 일 때 내는 종료 코드. */
 export const LAUNCHCTL_NOT_FOUND = 113;
 
-export const defaultLaunchdProbe: LaunchdProbe = (label) => {
-  if (process.platform !== "darwin") return null;
-  const r = spawnSync("launchctl", ["list", label], { encoding: "utf8", timeout: 5000 });
+/** launchctl list <label> 실행 결과를 상태로 읽는다(순수 — 시험 가능).
+ *  0 = 로드됨(PID 가 있으면 실행 중) · 113 = 그런 서비스 없음 · 그 밖·실행 실패 = 잴 수 없음(null). */
+export function interpretLaunchctlList(r: { status: number | null; stdout?: string | null; error?: unknown }): LaunchdState | null {
   if (r.error || r.status === null) return null;
-  // launchctl list <label>: 로드돼 있으면 0, 없는 라벨이면 113(ESRCH 계열, 실측 "Could not find service").
-  //   그 밖의 0 아닌 값(권한·domain 오류 등)은 '없다' 가 아니라 '잴 수 없다' 다 — 판정 보류.
+  // 그 밖의 0 아닌 값(권한·domain 오류 등)은 '없다' 가 아니라 '잴 수 없다' 다 — 판정 보류.
   if (r.status === LAUNCHCTL_NOT_FOUND) return { loaded: false, pid: null };
   if (r.status !== 0) return null;
   const m = /"PID"\s*=\s*(\d+);/.exec(r.stdout ?? "");
   return { loaded: true, pid: m ? Number(m[1]) : null };
+}
+
+export const defaultLaunchdProbe: LaunchdProbe = (label) => {
+  if (process.platform !== "darwin") return null;
+  return interpretLaunchctlList(spawnSync("launchctl", ["list", label], { encoding: "utf8", timeout: 5000 }));
 };
 
 /**

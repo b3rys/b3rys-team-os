@@ -84,6 +84,12 @@ openclaw doctor
 > - 둘 다 ChatGPT 구독 OAuth 이며 **API 키가 아니다**(`OPENAI_API_KEY` 불필요). API 키로 붙이는 건 사용자가 명시적으로 원할 때만.
 > - **Node**: 25.9+ 허용. 위 openclaw/codex 플러그인 crash 는 플러그인↔호스트 API 문제이지 Node 버전 문제가 아니며 LTS 다운그레이드로 해결되지 않는다.
 
+### 이름 있는 프로필·라벨로 게이트웨이를 띄웠다면 — b3os 서버에도 같은 값
+
+OpenClaw 게이트웨이의 launchd 라벨은 `OPENCLAW_LAUNCHD_LABEL` → `OPENCLAW_PROFILE`(`ai.openclaw.<profile>`) → 기본 `ai.openclaw.gateway` 순으로 정해집니다. `openclaw.json` 에는 자기가 어느 프로필인지 적혀 있지 않아 b3os 가 거꾸로 알아낼 수 없습니다.
+
+그래서 기본 프로필이 아니면 **b3os 서버 프로세스 env 에도 같은 `OPENCLAW_PROFILE`(또는 `OPENCLAW_LAUNCHD_LABEL`)을 둡니다**(team-os 저장소 `.env` 또는 서버 LaunchAgent 의 env). 서버가 띄우는 `openclaw` CLI 자식도 이 env 를 물려받으므로 메시지 전달과 health 점검(게이트웨이 생존 확인)이 같은 게이트웨이를 봅니다. 값이 다르면 health 점검이 '게이트웨이 launchd 미로드' 를 잘못 알립니다.
+
 ### ⚠️ Node 격리 — 런타임 간 node 얽힘 방지 (Hermes+OpenClaw 병행 시 필수)
 
 `openclaw onboard --install-daemon` 은 **그 순간 PATH에서 잡힌 node의 절대경로를 openclaw LaunchAgent(plist)에 그대로 박습니다.** 그 node가 다른 런타임 소유(예: Hermes 가 번들한 `~/.hermes/node/bin/node`)면, 나중에 그 런타임을 지울 때(`hermes uninstall --full` → `~/.hermes` 통째 삭제) **openclaw 게이트웨이가 다음 기동부터 죽습니다.** 실측: openclaw plist가 `~/.hermes/node/bin/node` 를 물고 있어 hermes 제거가 openclaw 를 깨뜨림. 원칙 — **각 런타임 daemon 은 런타임-독립 시스템 node 로 돌려라.**
