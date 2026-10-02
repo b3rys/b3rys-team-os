@@ -147,7 +147,7 @@ Handoff 메시지는 짧고 실행 가능해야 한다.
 ## 어떻게 (입력·갱신)
 
 - **대시보드**: /team → Tasks. 컬럼별 "+ 과제 추가"(제목+담당자), 카드 ▸ 펼쳐 description 작성, 담당자 드롭다운 변경, ◀▶ 컬럼 이동, ✕ 삭제. 담당자 필터로 내 과제만 보기.
-- **API**(자동화/스크립트): `POST /team/api/tasks {title, column, owner, description}` · `PATCH /team/api/tasks/:id {title?, column?, owner?, description?}` · `DELETE /team/api/tasks/:id`. column = plan|doing|done.
+- **API**(자동화/스크립트): `POST /team/api/tasks {title, column, owner, description}` · `PATCH /team/api/tasks/:id {title?, column?, owner?, description?}` · `DELETE /team/api/tasks/:id`. column = plan|doing|done. PATCH 는 title·column·owner·description·sort_order·held·hold_reason·review_at 만 받는다 — 다른 키(예: lane·status·summary)가 하나라도 있으면 아무것도 바꾸지 않고 400 `unsupported_fields` 를 돌려준다.
 
 ## 예시
 

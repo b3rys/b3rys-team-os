@@ -1,10 +1,10 @@
 // codex 런처(M4) 순수 렌더러 테스트 — fs/launchctl 부작용 없음. 보안핀: 토큰이 plist/wrapper 평문에 안 들어감.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
-import { codexBridgeLaunchdLabel, codexBridgePaths, renderLaunchWrapper, renderBridgePlist, ensureCodexHome, renderMinimalCodexConfig, persistOwnerChatIdIfEmpty } from "./launcher";
+import { codexBinLine, codexBridgeLaunchdLabel, codexBridgePaths, renderLaunchWrapper, renderBridgePlist, ensureCodexHome, renderMinimalCodexConfig, persistOwnerChatIdIfEmpty } from "./launcher";
 
 describe("persistOwnerChatIdIfEmpty — 자동저장(자연 도출값 persist, 사용자 입력 보호)", () => {
   test("기존 owner_chat_id 는 절대 덮지 않는다(사용자 입력 우선)", () => {
@@ -75,6 +75,29 @@ describe("codex launcher (M4) — 순수 렌더러", () => {
     // PATH 에 bun 설치경로가 있어야 launchd 최소 PATH 에서도 exec bun 이 해석됨(없으면 respawn-loop). claude launcher 와 동일 세트.
     expect(sh).toContain(`export PATH="${process.env.HOME ?? ""}/.bun/bin:`); // ~/.bun/bin 선두(공식 인스톨러 경로)
     expect(sh).toContain("/usr/local/bin"); // Intel homebrew
+  });
+
+  describe("wrapper 의 CODEX_BIN — 서버와 브리지가 같은 codex 를 쓴다", () => {
+    const saved = process.env.CODEX_BIN;
+    afterEach(() => { if (saved === undefined) delete process.env.CODEX_BIN; else process.env.CODEX_BIN = saved; });
+
+    test("서버 env 에 있으면 wrapper 가 그대로 export 한다(exec bun 보다 앞)", () => {
+      process.env.CODEX_BIN = "/opt/codex-npm/bin/codex";
+      const sh = renderLaunchWrapper(codexBridgePaths("cody"));
+      expect(sh).toContain(`export CODEX_BIN="/opt/codex-npm/bin/codex"`);
+      expect(sh.indexOf("export CODEX_BIN=")).toBeLessThan(sh.indexOf("exec bun"));
+    });
+
+    test("★없거나 비었으면 줄 자체가 없다★ — 빈 값 export 는 브리지 spawn(\"\") 즉사", () => {
+      delete process.env.CODEX_BIN;
+      expect(renderLaunchWrapper(codexBridgePaths("cody"))).not.toContain("CODEX_BIN");
+      process.env.CODEX_BIN = "   ";
+      expect(renderLaunchWrapper(codexBridgePaths("cody"))).not.toContain("CODEX_BIN");
+    });
+
+    test("셸 특수문자는 이스케이프된다", () => {
+      expect(codexBinLine('/a b/$x"`c')).toEqual(['export CODEX_BIN="/a b/\\$x\\"\\`c"']);
+    });
   });
 
   test("ensureCodexHome: CODEX_HOME 디렉토리 보장(없으면 codex exec 즉사→Codi 인시던트 재발)", () => {

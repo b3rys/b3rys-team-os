@@ -147,6 +147,10 @@ export class EssentialsOpNotifier {
   }
 }
 
+function teamBase(): string {
+  return (process.env.TEAM_BASE_URL ?? "http://127.0.0.1:7878/team").replace(/\/$/, "");
+}
+
 /** 사람이 읽고 바로 조치할 수 있는 본문. 조치 명령까지 실어 보낸다. */
 export function buildEssentialsDownBody(opts: {
   agentId: string;
@@ -159,9 +163,10 @@ export function buildEssentialsDownBody(opts: {
     `  runtime : ${opts.runtime}`,
     `  missing : ${opts.missing.join(", ")}`,
     ``,
-    `조치(claude 멤버의 poller:claude bot.pid 인 경우):`,
-    `  src/server/runtimes/claude/start-telegram-channel.sh ${opts.agentId} --force`,
-    `  ※ --force 없이 재실행하면 'Session already running' no-op 으로 빠져 복구되지 않습니다.`,
+    `조치 — 서버의 재시작 API 로 다시 띄운다(작업 폴더·대화 기록 유지):`,
+    `  curl -s -X POST ${teamBase()}/api/members/${opts.agentId}/restart -H 'content-type: application/json' -d '{"fresh":false}'`,
+    `  ※ 기동 스크립트를 손으로 실행하지 마세요 — 서버가 넘기는 작업 폴더·resume 설정이 없어 다른 폴더에서 대화 기록 없이 새로 뜹니다.`,
+    `확인: 응답 detail 에 'poller 기동 확인' 또는 'poller 복구' 가 있고, 1분 안에 이 스레드로 '정상으로 돌아왔습니다' 회복 알림이 오면 복구된 것입니다.`,
     ``,
     `확인 후 팀장님께 직접 보고해 주세요(이 알림은 system 발신이라 회신 대상이 없습니다).`,
   ].join("\n");

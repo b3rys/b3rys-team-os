@@ -14,6 +14,9 @@ import { appendAuditFile } from "../lib/auditFile";
 import { emitLoopEventSafe, EVENT, makeEpisodeId } from "../metrics/loopEvent";
 import { ensureThread, insertMessage } from "../db/inbox/messages";
 
+/** PATCH /tasks/:id 가 받는 키 — 이 밖의 키는 요청 전체를 400 으로 거절한다. */
+export const TASK_PATCH_FIELDS = ["title", "column", "owner", "description", "sort_order", "held", "hold_reason", "review_at"];
+
 interface TaskRouteDeps {
   db: Database;
 }
@@ -110,7 +113,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): Hono {
     return c.json({ ok: true, task }, 201);
   });
 
-  // PATCH /api/tasks/:id — partial update { title?, column?, owner?, sort_order? }.
+  // PATCH /api/tasks/:id — partial update. 허용 키 밖의 키가 있으면 400(unsupported_fields).
   r.patch("/tasks/:id", async (c) => {
     const id = c.req.param("id");
     let body: {
@@ -127,6 +130,24 @@ export function createTaskRoutes(deps: TaskRouteDeps): Hono {
       body = await c.req.json();
     } catch {
       return c.json({ ok: false, error: "invalid json body" }, 400);
+    }
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      return c.json({ ok: false, error: "body must be a JSON object" }, 400);
+    }
+    // 모르는 키는 버리지 않고 요청 전체를 거절한다 — 버리고 ok 를 주면 이름을 틀린 쪽이
+    // 아무것도 안 바뀐 카드를 바뀐 것으로 믿는다. 거절은 어떤 변경·알림·audit 보다 먼저다.
+    const unknownFields = Object.keys(body).filter((k) => !TASK_PATCH_FIELDS.includes(k));
+    if (unknownFields.length) {
+      return c.json(
+        {
+          ok: false,
+          error: `unsupported_fields: ${unknownFields.join(",")}`,
+          unknown_fields: unknownFields,
+          allowed_fields: TASK_PATCH_FIELDS,
+          hint: "레인은 column, 본문은 description 으로 보낸다 (DB 칸 이름 lane 이 아니다).",
+        },
+        400,
+      );
     }
     if (body.title !== undefined && (typeof body.title !== "string" || body.title.trim() === "")) {
       return c.json({ ok: false, error: "invalid title" }, 400);
