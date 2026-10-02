@@ -197,7 +197,8 @@ if (import.meta.main) {
     console.log(JSON.stringify(redact ? findings.map(({ file, line, kind }) => ({ file, line, kind })) : findings));
   } else {
     if (findings.length === 0) {
-      console.log(`✓ public content lint: 추가된 줄에 걸린 것 없음 (${scope})`);
+      // 일부 검사를 못 했으면 ✓ 를 찍지 않는다 — '안 걸림' 과 '안 쟀음' 을 갈라 보이게.
+      console.log(`${cannot.length ? "⚠" : "✓"} public content lint: 추가된 줄에 걸린 것 없음 (${scope})`);
     } else {
       console.log(`⚠ public content lint: ${findings.length}건 — 공개 저장소에 들어가도 되는지 확인하세요(막지 않음) (${scope})`);
       for (const f of findings) {
