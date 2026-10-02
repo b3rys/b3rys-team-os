@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { writeMemberPersona, savePersonaFile } from "./writeMemberPersona";
 import { ensureRenderedTeamOs, ensureRenderedSkillsMd } from "./testSupport";
 import { SKILLS_MD_PATH } from "./personaTemplates";
+import { buildSkillsCopy, SKILLS_COPY_MARKER_PREFIX } from "./skillsRender";
 
 // 워크스페이스의 TEAM-OS.md 심링크는 rules/TEAM-OS.md(런타임 렌더본·gitignore)를 가리킨다.
 // 깨끗한 clone 엔 그 파일이 없어 심링크가 깨진 것으로 보인다 → 없을 때만 부팅 렌더를 재현.
@@ -199,56 +200,56 @@ describe("★TEAM-OS.md 심링크 — persona 를 쓰면 항상 걸린다★", (
 });
 
 /**
- * ★SKILLS.md 심링크 — 스킬 목록을 규칙 파일 밖으로 뺀 자리(#435)★
- * CLAUDE.md 의 `@SKILLS.md` 는 워크스페이스에 그 이름의 심링크가 rules/SKILLS.md 를 가리킬 때만 풀린다.
- * 문자열 "SKILLS.md" 가 규칙 파일에 있는 것과 실제로 닿는 것은 다르다(codex 리뷰) — 여기서 도달을 잰다.
+ * ★SKILLS.md 복사본 — persona 를 쓰면 항상 맞춰진다★
+ * Claude Code 는 작업 폴더 밖 파일을 @import 하지 않는다. rules/SKILLS.md 로 가는 심링크는 폴더 밖이라 `@SKILLS.md` 가
+ * 빈다. 그래서 워크스페이스에 표식 달린 실파일(복사본)을 둔다. 여기서는 파일 종류와 내용이 원본과 같은지를 잰다.
  */
-describe("★SKILLS.md 심링크 — persona 를 쓰면 항상 걸린다★", () => {
+describe("★SKILLS.md 복사본 — persona 를 쓰면 항상 맞춰진다★", () => {
   const mk = () => mkdtempSync(join(tmpdir(), "wmp-skills-"));
   const base = (ws: string, runtime: string) => ({
     id: "newbie", display_name: "Newbie", role: "QA", runtime,
     purpose: "## Role\nQA", workspace_path: ws, persona_file: join(ws, "SOUL.md"),
   });
 
-  test("★영입(claude) → SKILLS.md 심링크가 rules/SKILLS.md 를 가리키고 실제로 열린다★", () => {
+  test("★영입(claude) → SKILLS.md 는 심링크가 아닌 실파일이고 내용 = 표식 + rules/SKILLS.md★", () => {
     const ws = mk();
     writeMemberPersona(base(ws, "claude_channel"));
-    const link = join(ws, "SKILLS.md");
-    expect(lstatSync(link).isSymbolicLink()).toBe(true);
-    expect(readlinkSync(link)).toBe(SKILLS_MD_PATH);
-    expect(existsSync(link), "★심링크는 있는데 대상이 없다 — @SKILLS.md 가 조용히 증발한다★").toBe(true);
-    expect(readFileSync(link, "utf-8")).toContain("**Skills — pick by trigger**");
+    const file = join(ws, "SKILLS.md");
+    expect(lstatSync(file).isSymbolicLink(), "★심링크면 폴더 밖이라 claude 가 안 읽는다★").toBe(false);
+    expect(readFileSync(file, "utf-8")).toBe(buildSkillsCopy(readFileSync(SKILLS_MD_PATH, "utf-8")));
+    expect(readFileSync(file, "utf-8")).toContain("**Skills — pick by trigger**");
     expect(readFileSync(join(ws, "CLAUDE.md"), "utf-8")).toContain("\n@SKILLS.md\n");
   });
 
-  test("★브릿지 런타임(openclaw)도 링크가 걸리고, AGENTS.md 의 절대경로가 그 파일이다★", () => {
+  test("★브릿지 런타임(openclaw)도 복사본이 생기고, AGENTS.md 의 절대경로는 렌더 원본이다★", () => {
     const ws = mk();
     writeMemberPersona(base(ws, "openclaw"));
-    expect(lstatSync(join(ws, "SKILLS.md")).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(ws, "SKILLS.md")).isFile()).toBe(true);
     const agents = readFileSync(join(ws, "AGENTS.md"), "utf-8");
     const tilde = SKILLS_MD_PATH.replace(process.env.HOME ?? "\u0000", "~");
     expect(agents, "★AGENTS.md 가 가리키는 경로가 렌더 경로와 다르다★").toContain(tilde);
     expect(existsSync(SKILLS_MD_PATH)).toBe(true);
   });
 
-  test("★사람이 쓴 일반 파일 SKILLS.md 는 건드리지 않는다★", () => {
+  test("★사람이 쓴 일반 파일 SKILLS.md(표식 없음)는 건드리지 않는다★", () => {
     const ws = mk();
-    const link = join(ws, "SKILLS.md");
+    const file = join(ws, "SKILLS.md");
     mkdirSync(ws, { recursive: true });
-    writeFileSync(link, "손으로 쓴 목록");
+    writeFileSync(file, "손으로 쓴 목록");
     writeMemberPersona(base(ws, "claude_channel"));
-    expect(lstatSync(link).isSymbolicLink()).toBe(false);
-    expect(readFileSync(link, "utf-8")).toBe("손으로 쓴 목록");
+    expect(lstatSync(file).isSymbolicLink()).toBe(false);
+    expect(readFileSync(file, "utf-8")).toBe("손으로 쓴 목록");
   });
 
-  test("★깨진 SKILLS.md 심링크는 고쳐준다★", () => {
-    const ws = mk();
-    const link = join(ws, "SKILLS.md");
-    mkdirSync(ws, { recursive: true });
-    symlinkSync(join(ws, "없는파일.md"), link);
-    expect(existsSync(link)).toBe(false);
-    writeMemberPersona(base(ws, "claude_channel"));
-    expect(existsSync(link)).toBe(true);
-    expect(readlinkSync(link)).toBe(SKILLS_MD_PATH);
+  test("★옛 심링크(살아 있는 것·깨진 것)는 복사본으로 바뀐다★", () => {
+    for (const target of [SKILLS_MD_PATH, "없는파일.md"]) {
+      const ws = mk();
+      const file = join(ws, "SKILLS.md");
+      symlinkSync(target === SKILLS_MD_PATH ? target : join(ws, target), file);
+      writeMemberPersona(base(ws, "claude_channel"));
+      expect(lstatSync(file).isSymbolicLink(), `${target}`).toBe(false);
+      expect(readFileSync(file, "utf-8").startsWith(SKILLS_COPY_MARKER_PREFIX)).toBe(true);
+    }
+    expect(readFileSync(SKILLS_MD_PATH, "utf-8").startsWith(SKILLS_COPY_MARKER_PREFIX), "★원본이 덮였다★").toBe(false);
   });
 });
