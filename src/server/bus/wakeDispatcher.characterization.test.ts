@@ -18,6 +18,7 @@
  * in afterAll. shadow(enabled=false) behavior is out of scope here (left to existing tests).
  */
 import { describe, test, expect, beforeEach, afterAll, afterEach } from "bun:test";
+import { markQuotaBlocked } from "../lib/runtimeQuota";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
 import { insertMessage } from "../db/inboxQueries";
@@ -436,5 +437,85 @@ describe("dispatchRow — ack_loop guard (deterministic)", () => {
     const claude = spyAdapter(() => ({ ok: true }));
     for (const r of rows) await dispatch(db, r, { claude: claude.adapter });
     expect(claude.calls).toBe(3); // flag 없으면 다 wake
+  });
+});
+
+// ─── 한도 보류 — 한도 중인 팀원은 깨우지 않고 리셋 뒤로 미룬다 ──────────────────
+describe("dispatchRow — 한도 보류", () => {
+  const lease = (mid: string, aid: string) =>
+    (db.prepare(`SELECT lease_until FROM message_recipient WHERE message_id=? AND agent_id=?`).get(mid, aid) as { lease_until: string | null }).lease_until;
+  const holdAudits = () =>
+    (db.prepare(`SELECT count(*) c FROM audit_event WHERE action='quota_hold'`).get() as { c: number }).c;
+
+  test("★한도 중이면 adapter 를 부르지 않고 pending 으로 리셋 뒤까지 미룬다★", async () => {
+    markQuotaBlocked(db, "codex", "openclaw_usage", { resetInMs: 2 * 60 * 60 * 1000, resetHint: "2h" });
+    const row = pendingRowFor(db, "codex");
+    const oc = spyAdapter(() => ({ ok: true }));
+    await dispatch(db, row, { openclaw: oc.adapter });
+    expect(oc.calls).toBe(0);
+    const r = rcpt(db, row.message_id, "codex");
+    expect(r?.delivery_state).toBe("pending");
+    expect(r?.last_error).toBe("quota_hold");
+    expect(r?.retry_count).toBe(0);
+    // 리셋(2h) + 여유 60s 뒤 — 지금으로부터 1h59m 보다 뒤여야 워커가 그 전에 다시 집지 않는다
+    const until = Date.parse(String(lease(row.message_id, "codex")).replace(" ", "T") + "Z");
+    expect(until - Date.now()).toBeGreaterThan(119 * 60 * 1000);
+    expect(holdAudits()).toBe(1);
+    // 보낸 사람(steve)에게 '자동 전달' 안내 1건
+    const notice = db.prepare(`SELECT body FROM message WHERE to_agent_id='steve' AND dedupe_key LIKE 'quota-notice:%'`).get() as { body: string } | null;
+    expect(notice?.body).toContain("자동으로 전달");
+  });
+
+  test("한도 기록이 없으면 평소대로 깨운다", async () => {
+    const row = pendingRowFor(db, "codex");
+    const oc = spyAdapter(() => ({ ok: true }));
+    await dispatch(db, row, { openclaw: oc.adapter });
+    expect(oc.calls).toBe(1);
+    expect(holdAudits()).toBe(0);
+  });
+
+  test("리셋 시각이 지난 기록은 무시하고 깨운다", async () => {
+    markQuotaBlocked(db, "codex", "wake_error", { resetInMs: 1000, now: Date.now() - 10_000 });
+    const row = pendingRowFor(db, "codex");
+    const oc = spyAdapter(() => ({ ok: true }));
+    await dispatch(db, row, { openclaw: oc.adapter });
+    expect(oc.calls).toBe(1);
+  });
+
+  test("★리셋이 며칠 뒤여도 한 번의 보류는 생성 + 24시간을 넘지 않는다★ (주간 한도)", async () => {
+    markQuotaBlocked(db, "codex", "openclaw_usage", { resetInMs: 4 * 24 * 60 * 60 * 1000, resetHint: "4d" });
+    const row = pendingRowFor(db, "codex");
+    const oc = spyAdapter(() => ({ ok: true }));
+    await dispatch(db, row, { openclaw: oc.adapter });
+    expect(oc.calls).toBe(0);
+    const until = Date.parse(String(lease(row.message_id, "codex")).replace(" ", "T") + "Z");
+    const created = Date.parse(String(row.created_at).replace(" ", "T") + "Z");
+    expect(until - created).toBeLessThanOrEqual(24 * 60 * 60 * 1000 + 1000);
+    expect(until - Date.now()).toBeGreaterThan(23 * 60 * 60 * 1000);
+  });
+
+  test("★24시간보다 오래된 메시지는 더 미루지 않는다★ — 원래 경로로", async () => {
+    markQuotaBlocked(db, "codex", "openclaw_usage", { resetInMs: 60 * 60 * 1000 });
+    const row = { ...pendingRowFor(db, "codex"), created_at: "2020-01-01 00:00:00" };
+    const oc = spyAdapter(() => ({ ok: true }));
+    await dispatch(db, row, { openclaw: oc.adapter });
+    expect(oc.calls).toBe(1);
+    expect(holdAudits()).toBe(0);
+  });
+
+  test("★wake 가 한도 오류로 실패하면 만기 대신 보류한다★ (openclaw no-retry 정책보다 앞)", async () => {
+    const row = pendingRowFor(db, "codex");
+    await dispatch(db, row, { openclaw: { async wake() { return { ok: false, detail: "provider error: insufficient_quota" }; } } });
+    const r = rcpt(db, row.message_id, "codex");
+    expect(r?.delivery_state).toBe("pending");
+    expect(r?.last_error).toBe("quota_hold");
+    expect(holdAudits()).toBe(1);
+  });
+
+  test("한도와 무관한 실패는 원래대로 만기", async () => {
+    const row = pendingRowFor(db, "codex");
+    await dispatch(db, row, { openclaw: { async wake() { return { ok: false, detail: "gateway_500" }; } } });
+    expect(rcpt(db, row.message_id, "codex")?.delivery_state).toBe("expired");
+    expect(holdAudits()).toBe(0);
   });
 });

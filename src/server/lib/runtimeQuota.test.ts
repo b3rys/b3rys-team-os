@@ -195,7 +195,7 @@ describe("dispatcher — wake 결과로 기록·해제", () => {
   });
 });
 
-describe("발신자 안내 — 막지 않고 한 구간에 한 번", () => {
+describe("발신자 안내 — 한 구간에 한 번", () => {
   const agents = [{ id: "steve" }, { id: "devon" }, { id: "lui" }] as unknown as AgentRecord[];
   const notices = () =>
     (db.prepare(`SELECT to_agent_id, body FROM message WHERE dedupe_key LIKE 'quota-notice:%'`).all() as Array<{ to_agent_id: string; body: string }>);
@@ -209,7 +209,7 @@ describe("발신자 안내 — 막지 않고 한 구간에 한 번", () => {
     const n = notices();
     expect(n.length).toBe(1);
     expect(n[0]!.to_agent_id).toBe("steve");
-    expect(n[0]!.body).toContain("그대로 전달");
+    expect(n[0]!.body).toContain("자동으로 전달");
     expect(n[0]!.body).toContain("1d 10h");
   });
   test("다른 발신자는 따로 한 번", () => {
