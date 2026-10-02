@@ -118,6 +118,13 @@ export function codexBridgePaths(id: string): CodexBridgePaths {
   };
 }
 
+/** wrapper 의 CODEX_BIN 줄 — 값이 비었으면 줄 자체를 만들지 않는다. */
+export function codexBinLine(bin: string | undefined): string[] {
+  const v = bin?.trim();
+  if (!v) return [];
+  return [`export CODEX_BIN="${v.replace(/(["\\$`])/g, "\\$1")}"`];
+}
+
 /** 런처 셸 본문(순수 — 테스트 가능). 토큰은 파일에서 env로(stdout 노출 X). */
 export function renderLaunchWrapper(p: CodexBridgePaths): string {
   return [
@@ -135,6 +142,9 @@ export function renderLaunchWrapper(p: CodexBridgePaths): string {
     `export B3OS_REPO_ROOT="${REPO_ROOT}"`,
     `export TEAM_BASE_URL="${process.env.TEAM_BASE_URL ?? "http://127.0.0.1:7878/team"}"`,
     `export CODEX_SCHEDULE_TOOL_ENABLED="${process.env.CODEX_SCHEDULE_TOOL_ENABLED ?? "false"}"`,
+    // 서버가 쓰는 codex 실행 파일을 브리지도 쓴다. 값이 있을 때만 넣는다 — 빈 값을 export 하면
+    // runner·appServerClient 의 `CODEX_BIN ?? "codex"` 가 빈 문자열을 그대로 써서 spawn("") 으로 즉사한다.
+    ...codexBinLine(process.env.CODEX_BIN),
     // launchd 는 최소 PATH 로 wrapper 를 띄운다(plist 에 EnvironmentVariables 없음) → bun 설치경로를 명시해야 respawn-loop 안 남.
     // claude launcher(claude/launcher.ts) 와 동일 세트: ~/.bun/bin(공식 인스톨러) · ~/.local/bin · /opt/homebrew/bin(Apple Silicon) · /usr/local/bin(Intel homebrew).
     `export PATH="${HOME}/.bun/bin:${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"`,
