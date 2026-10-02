@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { buildMatchers, headerPath, lintDiff, readJsonArray } from "./public-content-lint";
 
 const agents = [
@@ -102,15 +105,19 @@ describe("diff 파싱 (steve 7)", () => {
 describe("readJsonArray — 못 읽으면 숨기지 않는다 (steve 2)", () => {
   test("없는 파일·JSON 아님·모양 다름은 error 를 돌려준다", () => {
     expect(readJsonArray("/no/such/file.json").error).toContain("파일 없음");
-    const tmp = `${import.meta.dir}/.tmp-lint-${process.pid}.json`;
-    Bun.write(tmp, "<html>");
-    return Bun.sleep(5).then(() => {
+    // 소스 폴더가 아니라 OS 임시 폴더에 쓰고, 실패해도 지운다.
+    const dir = mkdtempSync(join(tmpdir(), "lint-test-"));
+    const tmp = join(dir, "roster.json");
+    try {
+      writeFileSync(tmp, "<html>");
       expect(readJsonArray(tmp, "agents").error).toContain("JSON 아님");
-      require("node:fs").writeFileSync(tmp, JSON.stringify({ other: [] }));
+      writeFileSync(tmp, JSON.stringify({ other: [] }));
       expect(readJsonArray(tmp, "agents").error).toContain("모양이 다름");
-      require("node:fs").writeFileSync(tmp, JSON.stringify({ agents: [{ id: "x" }] }));
+      writeFileSync(tmp, JSON.stringify({ agents: [{ id: "x" }] }));
       expect(readJsonArray(tmp, "agents")).toEqual({ items: [{ id: "x" }] });
-      require("node:fs").rmSync(tmp);
-    });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   });
 });
