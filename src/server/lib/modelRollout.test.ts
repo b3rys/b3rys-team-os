@@ -269,3 +269,43 @@ describe("리뷰 반영 — 쓴 뒤의 모든 길은 확인 또는 복원", () =
     expect(calls.some((c) => c[0] === "openclaw")).toBe(false);
   });
 });
+
+describe("openclaw 복원 — 백업 뒤 예외·재시작 실패도 복원으로 끝난다", () => {
+  const target = { model: "gpt-6.1-sol", effort: null };
+  const ocPath = () => join(home, ".openclaw/openclaw.json");
+  test("config set 도중 예외 → openclaw.json 복원 + 재시작, 예외가 밖으로 안 샌다", async () => {
+    const o = listMembers(join(home, "agents.json"), env)[2]!;
+    const before = readFileSync(ocPath(), "utf-8");
+    const calls: string[][] = [];
+    const run: Runner = async (cmd) => {
+      calls.push(cmd);
+      if (cmd[1] === "models") return { code: 0, stdout: JSON.stringify({ models: [{ key: "openai/gpt-6.1-sol", available: true }] }), stderr: "" };
+      if (cmd[1] === "config") { writeFileSync(ocPath(), "{ broken"); throw new Error("set exploded"); }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const steps = await applyAll([o], target, env, run, true, "o1");
+    expect(steps.find((s) => s.action === "error")!.detail).toBe("set exploded");
+    expect(steps.find((s) => s.action === "rollback")!.ok).toBe(true);
+    expect(readFileSync(ocPath(), "utf-8")).toBe(before);
+    expect(calls.some((c) => c[1] === "gateway")).toBe(true);
+  });
+  test("게이트웨이 재시작 실패 → 복원 + 재시작", async () => {
+    const o = listMembers(join(home, "agents.json"), env)[2]!;
+    const before = readFileSync(ocPath(), "utf-8");
+    let restarts = 0;
+    const run: Runner = async (cmd) => {
+      if (cmd[1] === "models") return { code: 0, stdout: JSON.stringify({ models: [{ key: "openai/gpt-6.1-sol", available: true }] }), stderr: "" };
+      if (cmd[1] === "config") {
+        const d = JSON.parse(readFileSync(ocPath(), "utf-8"));
+        d.agents.entries[cmd[3]!.split(".")[2]!].model = cmd[4];
+        writeFileSync(ocPath(), JSON.stringify(d));
+        return { code: 0, stdout: "", stderr: "" };
+      }
+      if (cmd[1] === "gateway") { restarts++; return { code: restarts === 1 ? 1 : 0, stdout: "", stderr: "" }; }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const steps = await applyAll([o], target, env, run, true, "o2");
+    expect(steps.find((s) => s.action === "rollback")!.detail).toContain("재시작 실패");
+    expect(readFileSync(ocPath(), "utf-8")).toBe(before);
+  });
+});
