@@ -1778,7 +1778,10 @@ export function holdForQuotaIfBlocked(db: Database, row: PendingDispatchRow, now
     if (!block) return false;
     const createdMs = Date.parse(String(row.created_at).replace(" ", "T") + (String(row.created_at).includes("Z") ? "" : "Z"));
     if (Number.isFinite(createdMs) && now - createdMs > QUOTA_HOLD_MAX_AGE_MS) return false;
-    const untilSec = Math.ceil(block.resetAt / 1000) + QUOTA_HOLD_SLACK_SEC;
+    // 한 번의 보류도 상한에 묶는다 — 주간 한도면 리셋이 며칠 뒤다. 상한에 닿으면 깨워 보고,
+    //   여전히 한도면 다음 판에서 '24h 초과' 로 원래 경로(만기·통지)로 간다. 총 대기 ≤ 24h.
+    let untilSec = Math.ceil(block.resetAt / 1000) + QUOTA_HOLD_SLACK_SEC;
+    if (Number.isFinite(createdMs)) untilSec = Math.min(untilSec, Math.ceil((createdMs + QUOTA_HOLD_MAX_AGE_MS) / 1000));
     db.prepare(
       `UPDATE message_recipient
           SET delivery_state   = 'pending',

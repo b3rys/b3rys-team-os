@@ -482,6 +482,18 @@ describe("dispatchRow — 한도 보류", () => {
     expect(oc.calls).toBe(1);
   });
 
+  test("★리셋이 며칠 뒤여도 한 번의 보류는 생성 + 24시간을 넘지 않는다★ (주간 한도)", async () => {
+    markQuotaBlocked(db, "codex", "openclaw_usage", { resetInMs: 4 * 24 * 60 * 60 * 1000, resetHint: "4d" });
+    const row = pendingRowFor(db, "codex");
+    const oc = spyAdapter(() => ({ ok: true }));
+    await dispatch(db, row, { openclaw: oc.adapter });
+    expect(oc.calls).toBe(0);
+    const until = Date.parse(String(lease(row.message_id, "codex")).replace(" ", "T") + "Z");
+    const created = Date.parse(String(row.created_at).replace(" ", "T") + "Z");
+    expect(until - created).toBeLessThanOrEqual(24 * 60 * 60 * 1000 + 1000);
+    expect(until - Date.now()).toBeGreaterThan(23 * 60 * 60 * 1000);
+  });
+
   test("★24시간보다 오래된 메시지는 더 미루지 않는다★ — 원래 경로로", async () => {
     markQuotaBlocked(db, "codex", "openclaw_usage", { resetInMs: 60 * 60 * 1000 });
     const row = { ...pendingRowFor(db, "codex"), created_at: "2020-01-01 00:00:00" };
