@@ -1744,10 +1744,64 @@ export async function dispatchRow(
 ): Promise<void> {
   const plan = buildDispatchPlan(db, row, agents, claudeAdapter, openclawAdapter, hermesAdapter, b3osNativeAdapter, codexAdapter);
   if (plan.kind === "skip") return;
-  notifySenderOfQuota(db, row, agents);   // 전달은 막지 않는다 — 안내만
+  // 한도 중인 팀원은 깨우지 않는다 — 깨워 봐야 실패하고, 실패하면 만기(재시도 없음)로 메시지를 잃는다.
+  //   리셋 시각 뒤로 미뤄 두었다가 그때 다시 깨운다.
+  if (holdForQuotaIfBlocked(db, row)) {
+    notifySenderOfQuota(db, row, agents);
+    return;
+  }
   const outcome = await invokeWakeAdapter(plan.adapter, row.agent_id, row, plan.teamContext);
   await observeQuota(db, row, plan.targetAgent, outcome);   // 만기 통지가 한도 사유를 쓸 수 있게 기록보다 먼저
+  // 이번 wake 가 ★한도 오류로★ 실패했으면(턴이 돌지 않았다) 만기 대신 리셋 뒤로 미룬다.
+  //   openclaw 무응답 + 사용량 0% 로 추정한 경우는 여기 들지 않는다 — 주입은 됐을 수 있어 재시도가 중복 턴을 낼 수 있다.
+  if (!outcome.result?.ok && !outcome.result?.deferred && isQuotaExhaustedDetail(outcome.exception ?? outcome.result?.detail ?? null)
+      && holdForQuotaIfBlocked(db, row)) {
+    notifySenderOfQuota(db, row, agents);
+    return;
+  }
   recordDispatchOutcome(db, row, plan.targetAgent, outcome, syncDeps, agents);
+}
+
+/** 한도 보류의 상한 — 이보다 오래된 메시지는 더 미루지 않고 원래 경로(만기·통지)로 보낸다. */
+export const QUOTA_HOLD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/** 리셋 시각 바로 다음이 아니라 조금 뒤에 깨운다 — 리셋 직후 경계에서 다시 실패하지 않게. */
+const QUOTA_HOLD_SLACK_SEC = 60;
+
+/**
+ * 받는 팀원이 한도 상태면 이 행을 리셋 시각 뒤로 미룬다(pending + lease_until). 미뤘으면 true.
+ * 워커는 lease_until 이 지난 pending 만 집으므로 그때까지 다시 깨우지 않는다. 리셋이 지나면
+ * getQuotaBlock 이 빈 값을 돌려줘 정상 경로로 간다.
+ */
+export function holdForQuotaIfBlocked(db: Database, row: PendingDispatchRow, now = Date.now()): boolean {
+  try {
+    const block = getQuotaBlock(db, row.agent_id, now);
+    if (!block) return false;
+    const createdMs = Date.parse(String(row.created_at).replace(" ", "T") + (String(row.created_at).includes("Z") ? "" : "Z"));
+    if (Number.isFinite(createdMs) && now - createdMs > QUOTA_HOLD_MAX_AGE_MS) return false;
+    const untilSec = Math.ceil(block.resetAt / 1000) + QUOTA_HOLD_SLACK_SEC;
+    db.prepare(
+      `UPDATE message_recipient
+          SET delivery_state   = 'pending',
+              claimed_at       = NULL,
+              lease_until      = datetime(?, 'unixepoch'),
+              last_error       = 'quota_hold',
+              deferred_count   = COALESCE(deferred_count, 0) + 1,
+              last_deferred_at = datetime('now')
+        WHERE message_id = ? AND agent_id = ?`,
+    ).run(untilSec, row.message_id, row.agent_id);
+    appendAudit(db, "bus_dispatcher", "quota_hold", row.message_id, {
+      agent_id: row.agent_id,
+      until: new Date(untilSec * 1000).toISOString(),
+      reset_hint: block.resetHint,
+    });
+    return true;
+  } catch (e) {
+    appendAuditFile("bus_dispatcher", "quota_hold_failed", row.message_id, {
+      agent_id: row.agent_id,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return false;
+  }
 }
 
 /**
@@ -1800,7 +1854,7 @@ async function observeQuota(
 export { observeQuota as observeQuotaForTest };
 
 /**
- * 한도 상태인 팀원에게 보낸 사람에게 한 번 알린다. 메시지는 그대로 전달한다.
+ * 한도 상태인 팀원에게 보낸 사람에게 한 번 알린다. 메시지는 리셋 뒤로 보류된다(holdForQuotaIfBlocked).
  * 같은 한도 구간(since)에서 같은 발신자→수신자 쌍은 한 번만 — 여러 건을 보내도 알림이 쌓이지 않는다.
  * insertMessage 는 dedupe_key 로 막지 않으므로 여기서 먼저 찾는다.
  */
@@ -1821,8 +1875,9 @@ export function notifySenderOfQuota(db: Database, row: PendingDispatchRow, agent
       to_agent_id: sender,
       type: "dm",
       body:
-        `[한도 안내] ${row.agent_id} 는 지금 Codex/OpenAI 한도 상태일 수 있습니다${reset}. ` +
-        `메시지는 그대로 전달했습니다. 답이 늦거나 오지 않을 수 있으니 급하면 다른 팀원에게 맡기세요.`,
+        `[한도 안내] ${row.agent_id} 는 지금 Codex/OpenAI 한도 상태입니다${reset}. ` +
+        `보낸 메시지는 보관했다가 한도가 풀리면 자동으로 전달합니다 — 다시 보내지 않아도 됩니다. ` +
+        `급하면 다른 팀원에게 맡기세요.`,
       source: "system",
       hop_count: 0,
       priority: "normal",
