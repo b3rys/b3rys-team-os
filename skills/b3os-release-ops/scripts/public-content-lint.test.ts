@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildMatchers, lintDiff } from "./public-content-lint";
+import { buildMatchers, headerPath, lintDiff, readJsonArray } from "./public-content-lint";
 
 const agents = [
   { id: "bill", display_name: "Bill", telegram_bot_username: "team_bill_bot" },
@@ -66,5 +66,51 @@ describe("경로·줄", () => {
     const f = lintDiff(diff, m);
     expect(f.length).toBe(1);
     expect(f[0]).toMatchObject({ file: "d.md", line: 6, kind: "member" });
+  });
+});
+
+describe("경계·하한 (steve 뮤턴트 보강)", () => {
+  test("GD 앞의 - . / 는 낱말이 아니다 — 플래그·경로·확장자", () => {
+    expect(kinds("x.sh", ["run --x-GD", "open docs/GD", "file.GD"])).toEqual([]);
+    expect(kinds("x.md", ["(GD 확인)"])).toEqual(["lead"]);
+  });
+  test("세 글자 미만 표시이름은 이름으로 쓰지 않는다", () => {
+    const mm = buildMatchers({ agents: [{ id: "al", display_name: "Al" }], projects: [] });
+    expect(mm.coverage.members).toBe(0);
+    expect(kinds("x.md", ["Al said"], mm)).toEqual([]);
+  });
+  test("빈 명단이면 팀원 검사가 꺼졌음을 coverage 로 드러낸다", () => {
+    const mm = buildMatchers({ agents: [], projects: [] });
+    expect(mm.member).toBeNull();
+    expect(mm.coverage).toEqual({ members: 0, projects: 0, owner: false });
+    expect(buildMatchers({ agents, projects, ownerName: "Kim Lead" }).coverage).toEqual({ members: 6, projects: 1, owner: true });
+  });
+});
+
+describe("diff 파싱 (steve 7)", () => {
+  test("내용이 '++' 로 시작하는 추가 줄도 검사하고 줄 번호를 센다", () => {
+    const diff = ["--- a/d.md", "+++ b/d.md", "@@ -1,0 +1,2 @@", "+++ Devon 메모", "+보통 줄 Devon"].join("\n");
+    const f = lintDiff(diff, m);
+    expect(f.map((x) => [x.file, x.line])).toEqual([["d.md", 1], ["d.md", 2]]);
+  });
+  test("따옴표로 감싼 경로를 푼다", () => {
+    expect(headerPath('+++ "b/docs/a b.md"')).toBe("docs/a b.md");
+    expect(headerPath("+++ b/docs/x.md\t")).toBe("docs/x.md");
+  });
+});
+
+describe("readJsonArray — 못 읽으면 숨기지 않는다 (steve 2)", () => {
+  test("없는 파일·JSON 아님·모양 다름은 error 를 돌려준다", () => {
+    expect(readJsonArray("/no/such/file.json").error).toContain("파일 없음");
+    const tmp = `${import.meta.dir}/.tmp-lint-${process.pid}.json`;
+    Bun.write(tmp, "<html>");
+    return Bun.sleep(5).then(() => {
+      expect(readJsonArray(tmp, "agents").error).toContain("JSON 아님");
+      require("node:fs").writeFileSync(tmp, JSON.stringify({ other: [] }));
+      expect(readJsonArray(tmp, "agents").error).toContain("모양이 다름");
+      require("node:fs").writeFileSync(tmp, JSON.stringify({ agents: [{ id: "x" }] }));
+      expect(readJsonArray(tmp, "agents")).toEqual({ items: [{ id: "x" }] });
+      require("node:fs").rmSync(tmp);
+    });
   });
 });

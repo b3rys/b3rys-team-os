@@ -142,21 +142,26 @@ if [ "$MODE" = "merge" ] || [ "$MODE" = "hotfix" ] || [ "$MODE" = "force-push" ]
   LINT_TS="$SCRIPT_DIR/public-content-lint.ts"
   LINT_ALLOW="$SCRIPT_DIR/../public-lint-allow.txt"
   AGENTS_URL="${SETTINGS_URL%/settings}/agents"
+  PROJECTS_URL="${SETTINGS_URL%/settings}/projects"
   if command -v bun >/dev/null 2>&1 && [ -f "$LINT_TS" ]; then
     LINT_TMP="$(mktemp -d)"
-    if curl -fsS "$AGENTS_URL" -o "$LINT_TMP/agents.json" 2>/dev/null; then
-      OWNER_NAME="$(curl -fsS "$SETTINGS_URL" 2>/dev/null | python3 -c 'import json,sys
+    # 명단 파일엔 팀원 이름이 들어 있다 — 중단돼도 지운다.
+    trap 'rm -rf "$LINT_TMP"' EXIT
+    # 연결은 받고 답을 안 주는 서버에 게이트가 멈추지 않게 시간 제한을 둔다.
+    curl -fsS --connect-timeout 2 -m 5 "$AGENTS_URL" -o "$LINT_TMP/agents.json" 2>/dev/null || true
+    curl -fsS --connect-timeout 2 -m 5 "$PROJECTS_URL" -o "$LINT_TMP/projects.json" 2>/dev/null || true
+    OWNER_NAME="$(curl -fsS --connect-timeout 2 -m 5 "$SETTINGS_URL" 2>/dev/null | python3 -c 'import json,sys
 try:
   d=json.load(sys.stdin); s=d.get("settings",d)
   v=s.get("owner_name") if isinstance(s,dict) else None
   print(v.get("value","") if isinstance(v,dict) else (v or ""))
 except Exception: pass' || true)"
-      git diff "$BASE"...HEAD | bun "$LINT_TS" --agents "$LINT_TMP/agents.json" --projects projects.json \
-        --owner-name "$OWNER_NAME" --allow "$LINT_ALLOW" || warn "public content lint failed to run (검사 못 함)"
-    else
-      warn "public content lint skipped — roster unreadable at $AGENTS_URL (검사 못 함, 통과 아님)"
-    fi
+    # 명단·목록을 못 읽은 경우는 린트가 스스로 '검사 못 함' 으로 찍는다(빈 파일 = 읽기 실패).
+    git diff "$BASE"...HEAD | bun "$LINT_TS" --agents "$LINT_TMP/agents.json" \
+      --projects projects.json --projects "$LINT_TMP/projects.json" \
+      --owner-name "$OWNER_NAME" --allow "$LINT_ALLOW" || warn "public content lint failed to run (검사 못 함)"
     rm -rf "$LINT_TMP"
+    trap - EXIT
   else
     warn "public content lint skipped — bun or $LINT_TS missing (검사 못 함, 통과 아님)"
   fi
@@ -240,7 +245,7 @@ if [ "$MODE" = "merge" ] && [ "$CHECK_APPROVER" -eq 1 ]; then
   fi
   [ -n "$PR_NUMBER" ] || fail "PR number unknown; pass --pr <n> (or run on a branch with an open PR)"
 
-  SETTINGS_JSON="$(curl -fsS "$SETTINGS_URL" 2>/dev/null || true)"
+  SETTINGS_JSON="$(curl -fsS --connect-timeout 2 -m 5 "$SETTINGS_URL" 2>/dev/null || true)"
   # ★설정을 못 읽으면 통과시키지 않는다★ — '확인 불가' 는 '통과' 가 아니다.
   [ -n "$SETTINGS_JSON" ] || fail "settings unreadable at $SETTINGS_URL — cannot verify approver (this is 'unknown', not 'ok')"
 
