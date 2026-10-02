@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { runInNewContext } from "node:vm";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -14,7 +15,37 @@ try {
   writeFileSync(md, `# 라이트 보고서\n\n<div class="outer">\n  <div class="hint">안내</div>\n  <svg viewBox="0 0 100 40" role="img" aria-label="테스트 차트">\n    <rect x="1" y="1" width="98" height="38" fill="#ffffff"/>\n    <text x="50" y="24" text-anchor="middle" fill="#172033">정상 SVG</text>\n  </svg>\n</div>\n\n<figure><figcaption>한눈에 보기</figcaption><div class="mobile-infographic"><div class="mi-card mi-blue"><h4>모바일</h4><p>세로 카드</p></div></div><svg class="desktop-infographic" viewBox="0 0 100 40"><text x="10" y="20">데스크톱</text></svg></figure>\n\n본문입니다.\n`, "utf8");
   execFileSync(process.execPath, [join(here, "render.mjs"), md, out, "--title", "테스트"], { stdio: "pipe" });
   const html = readFileSync(out, "utf8");
-  assert.match(html, /<html lang="ko" data-theme="dark">/);
+  assert.match(html, /<html lang="ko" data-theme="auto">/);
+  const themeCss=readFileSync(join(here,"../assets/theme.css"),"utf8");
+  assert.equal((html.match(/\[data-theme="auto"\]/g)||[]).length,(themeCss.match(/\[data-theme="light"\]/g)||[]).length,'every light selector needs a script-free system equivalent');
+  const themeScript = html.match(/<script>\s*([\s\S]*?\}\)\(\);)/)[1];
+  function themeState(systemLight, saved, storageBlocked=false) {
+    const state={theme:null,writes:0,saved};
+    const buttons={ 'theme-dark': {classList:{toggle(){}}}, 'theme-light': {classList:{toggle(){}}} };
+    const media={matches:systemLight,addEventListener(_type,fn){state.change=fn}};
+    runInNewContext(themeScript, {
+      document:{documentElement:{setAttribute(_key,value){state.theme=value}},getElementById(id){return buttons[id]}},
+      window:{matchMedia(){return media}},
+      localStorage:{getItem(){if(storageBlocked)throw Error('blocked');return saved},setItem(_key,value){if(storageBlocked)throw Error('blocked');state.saved=value;state.writes++}}
+    });
+    return {...state, state, buttons};
+  }
+  for (const light of [true,false]) {
+    const t=themeState(light,null);
+    assert.equal(t.state.theme,light?'light':'dark');
+    assert.equal(t.state.writes,0,'automatic choice must not become a saved override');
+    t.state.change({matches:!light});
+    assert.equal(t.state.theme,light?'dark':'light');
+    t.buttons['theme-light'].onclick();
+    t.state.change({matches:false});
+    assert.equal(t.state.theme,'light','manual choice wins over later system changes');
+    assert.equal(t.state.saved,'light');
+  }
+  assert.equal(themeState(true,'dark').state.theme,'dark');
+  assert.equal(themeState(false,'light').state.theme,'light');
+  assert.equal(themeState(true,'invalid').state.theme,'light');
+  assert.equal(themeState(true,null,true).state.theme,'light');
+  assert.match(html, /@media\(prefers-color-scheme:light\)\{\[data-theme="auto"\]/);
   assert.match(html, /color-scheme:dark/);
   assert.match(html, /--bg:#0a0f0d/);
   assert.match(html, /--card:#111a15/);
