@@ -31,28 +31,41 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$THREAD" ] || { echo "usage: expect-report.sh --thread <t> [--in 10m] [--cancel]" >&2; exit 2; }
-ME="${EXPECT_REPORT_ME:-$("$HERE/_me.sh")}"
+ME="$("$HERE/_me.sh")"
 [ -n "$ME" ] || { echo "✖ 신원 해석 실패 (_me.sh) — 멤버 워크스페이스에서 실행해라" >&2; exit 1; }
 
-# 리마인더 id 를 thread 별로 기억한다(--cancel 용). 파일 이름에 쓸 수 없는 글자는 _ 로.
-SAFE_THREAD="$(printf '%s' "$THREAD" | tr -c 'A-Za-z0-9._-' '_')"
-STATE_FILE="$STATE_DIR/${ME}__${SAFE_THREAD}.id"
+# JSON 은 문자열을 이어 붙이지 않고 python 으로 만든다 — thread 에 " 나 \ 가 들어도 깨지지 않는다.
+json_obj() { python3 -c 'import json,sys; it=iter(sys.argv[1:]); print(json.dumps(dict(zip(it,it)), ensure_ascii=False))' "$@"; }
+valid_job_id() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9_-]{1,64}$'; }
+
+# 리마인더 id 를 thread 별로 기억한다(--cancel 용). 파일 이름은 thread 의 해시 — 글자를 바꿔 끼우면
+#   서로 다른 thread(a/b·a:b)가 같은 파일이 되고, 긴 thread 는 파일 이름 한도를 넘는다.
+THREAD_KEY="$(printf '%s' "$THREAD" | shasum -a 256 | cut -c1-32)"
+STATE_FILE="$STATE_DIR/${ME}__${THREAD_KEY}.id"
+
+# 서버에서 리마인더를 취소한다. 취소됐거나 이미 없으면(404 = 발화·취소 끝) 0, 그 밖은 1.
+cancel_job() {
+  local id="$1" code
+  valid_job_id "$id" || { echo "✖ 상태 파일의 job id 가 이상하다: $id" >&2; return 1; }
+  code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$API/schedules/$id/cancel" -H 'content-type: application/json' -d '{}' || echo 000)"
+  case "$code" in 200|404) return 0 ;; *) echo "✖ 리마인더 취소 실패 (HTTP $code): $id" >&2; return 1 ;; esac
+}
 
 if [ -n "$CANCEL" ]; then
   curl -sS -X DELETE "$API/followup/self" -H 'content-type: application/json' \
-    -d "{\"agent_id\":\"$ME\",\"thread_id\":\"$THREAD\"}"
+    -d "$(json_obj agent_id "$ME" thread_id "$THREAD")"
   echo
   if [ -f "$STATE_FILE" ]; then
-    JOB_ID="$(cat "$STATE_FILE")"
-    curl -sS -X POST "$API/schedules/$JOB_ID/cancel" -H 'content-type: application/json' -d '{}'
-    echo
+    # 서버 취소가 실패하면 상태를 남긴다 — 지우면 그 리마인더를 다시는 못 지운다.
+    cancel_job "$(cat "$STATE_FILE")" || exit 1
     rm -f "$STATE_FILE"
+    echo '{"ok":true,"cancelled_reminder":true}'
   fi
   exit 0
 fi
 
 RESP="$(curl -sS -X POST "$API/followup/self" -H 'content-type: application/json' \
-  -d "{\"agent_id\":\"$ME\",\"thread_id\":\"$THREAD\",\"duration\":\"${IN:-10m}\"}")"
+  -d "$(json_obj agent_id "$ME" thread_id "$THREAD" duration "${IN:-10m}")")"
 case "$RESP" in
   *not_one_shot_runtime*) ;;
   *) echo "$RESP"; exit 0 ;;
@@ -77,21 +90,30 @@ me, thread, delay = sys.argv[1], sys.argv[2], int(sys.argv[3])
 mins = max(1, round(delay / 60))
 body = (f"[보고 리마인더] thread={thread} — {mins}분 전에 '팀장님께 보고할 일' 로 걸어 둔 리마인더다. "
         f"보고했으면 아무것도 하지 않는다. 안 했으면 지금 보고하거나, 더 걸리면 expect-report.sh 로 다시 건다.")
-print(json.dumps({"target_agent_id": me, "delay_seconds": delay, "title": f"expect-report {thread}"[:200], "body": body}, ensure_ascii=False))
+print(json.dumps({"target_agent_id": me, "delay_seconds": delay, "title": f"expect-report {thread}"[:200], "body": body[:2000]}, ensure_ascii=False))
 PY
 )"
+mkdir -p "$STATE_DIR"
 RESP2="$(curl -sS -X POST "$API/schedules/reminder" -H 'content-type: application/json' -d "$BODY_JSON")"
 JOB_ID="$(printf '%s' "$RESP2" | python3 -c 'import json,sys
 try: print(json.load(sys.stdin)["job"]["id"])
 except Exception: pass')"
-if [ -z "$JOB_ID" ]; then
+if [ -z "$JOB_ID" ] || ! valid_job_id "$JOB_ID"; then
   echo "✖ 리마인더 등록 실패: $RESP2" >&2
   exit 1
 fi
-mkdir -p "$STATE_DIR"
-# 같은 thread 에 이미 걸린 리마인더가 있으면 새 것으로 바꾼다(중복 알림 방지).
-if [ -f "$STATE_FILE" ]; then
-  curl -sS -o /dev/null -X POST "$API/schedules/$(cat "$STATE_FILE")/cancel" -H 'content-type: application/json' -d '{}' || true
+# 새 것을 기억한 다음에 옛 것을 취소한다. 기억에 실패하면 방금 만든 것을 지운다(고아 리마인더 방지).
+OLD_ID=""
+[ -f "$STATE_FILE" ] && OLD_ID="$(cat "$STATE_FILE")"
+TMP_FILE="$STATE_FILE.$$"
+if ! { printf '%s' "$JOB_ID" > "$TMP_FILE" && mv -f "$TMP_FILE" "$STATE_FILE"; }; then
+  rm -f "$TMP_FILE"
+  cancel_job "$JOB_ID" || true
+  echo "✖ 상태 파일을 쓰지 못해 방금 만든 리마인더를 취소했다: $STATE_FILE" >&2
+  exit 1
 fi
-printf '%s' "$JOB_ID" > "$STATE_FILE"
+# 같은 thread 에 걸려 있던 리마인더는 바꾼다(중복 알림 방지). 실패해도 새 등록은 유효하다.
+if [ -n "$OLD_ID" ] && [ "$OLD_ID" != "$JOB_ID" ]; then
+  cancel_job "$OLD_ID" || echo "⚠ 앞 리마인더 취소 실패 — 알림이 한 번 더 올 수 있다: $OLD_ID" >&2
+fi
 echo "{\"ok\":true,\"via\":\"scheduler_reminder\",\"job_id\":\"$JOB_ID\",\"delay_seconds\":$DELAY}"

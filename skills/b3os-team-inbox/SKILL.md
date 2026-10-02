@@ -255,7 +255,7 @@ skills/b3os-team-inbox/scripts/expect-report.sh --thread <t> --in 30m         # 
 skills/b3os-team-inbox/scripts/expect-report.sh --thread <t> --cancel         # 보고 마쳤으면 정리
 ```
 
-기한 내 보고(버스/`--direct-to-gd`)하면 알림은 자동 무시된다. 알림은 ★딱 한 번★ — 받으면 보고하거나 다시 걸면 된다.
+알림은 ★딱 한 번★ — 받으면 보고하거나 다시 걸면 된다.
 
-- openclaw·hermes_agent: 서버가 기한 안의 보고를 직접 확인한다. 보고가 보이면 알림을 내지 않는다.
+- openclaw·hermes_agent: 서버가 기한 안의 보고(버스/`--direct-to-gd`)를 직접 확인한다. 보고가 보이면 알림을 내지 않는다.
 - claude·codex: 팀장 1:1 보고가 서버에 보이지 않아서, 대신 팀 스케줄러에 나를 깨우는 1회성 리마인더를 건다(응답 `"via":"scheduler_reminder"`). 깨어나면 보고했는지 스스로 보고 판단한다. 보고를 마쳤으면 `--cancel` 로 리마인더를 지운다. 같은 thread 로 다시 걸면 앞의 리마인더를 바꾼다.
