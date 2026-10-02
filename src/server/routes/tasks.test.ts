@@ -275,3 +275,57 @@ describe("tasks — 카드변경 담당자 알림", () => {
     expect(lastNotice(db, "dbak")).toBeNull();
   });
 });
+
+describe("tasks PATCH — 모르는 키는 거절한다", () => {
+  const patch = (app: ReturnType<typeof setup>["app"], id: string, body: unknown) =>
+    app.request(`/tasks/${id}?actor=dbak`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const row = (db: Database, id: string) =>
+    db.query(`SELECT title, lane, description, owner FROM task WHERE id=?`).get(id);
+
+  test("모르는 키만 보내면 400 이고 카드는 그대로다 — 틀린 키·허용 키 목록을 돌려준다", async () => {
+    const { app, db } = setup();
+    const card = await createCard(app, { title: "원래", column: "plan", description: "원본" });
+    const before = row(db, card.id);
+    const r = await patch(app, card.id, { lane: "doing", body: "바뀜" });
+    expect(r.status).toBe(400);
+    const j = await r.json();
+    expect(j.ok).toBe(false);
+    expect(j.unknown_fields).toEqual(["lane", "body"]);
+    expect(j.allowed_fields).toContain("column");
+    expect(j.allowed_fields).toContain("description");
+    expect(row(db, card.id)).toEqual(before);
+  });
+
+  test("★맞는 키와 틀린 키가 섞이면 맞는 쪽도 반영하지 않는다★ — 알림·audit 도 없다", async () => {
+    const { app, db } = setup();
+    const card = await createCard(app, { title: "원래", column: "plan", owner: "steve" });
+    const before = row(db, card.id);
+    const audits = db.query(`SELECT count(*) c FROM audit_event`).get();
+    const msgs = db.query(`SELECT count(*) c FROM message`).get();
+    const r = await patch(app, card.id, { title: "새 제목", owner: "bill", status: "done" });
+    expect(r.status).toBe(400);
+    expect((await r.json()).unknown_fields).toEqual(["status"]);
+    expect(row(db, card.id)).toEqual(before);
+    expect(db.query(`SELECT count(*) c FROM audit_event`).get()).toEqual(audits);
+    expect(db.query(`SELECT count(*) c FROM message`).get()).toEqual(msgs);
+  });
+
+  test("허용 키만 보내면 그대로 반영된다 (column·description)", async () => {
+    const { app, db } = setup();
+    const card = await createCard(app, { title: "원래", column: "plan", description: "원본" });
+    const r = await patch(app, card.id, { column: "doing", description: "바뀜" });
+    expect(r.status).toBe(200);
+    expect(row(db, card.id)).toMatchObject({ lane: "doing", description: "바뀜" });
+  });
+
+  test("배열·null 본문은 400", async () => {
+    const { app } = setup();
+    const card = await createCard(app, { title: "원래", column: "plan" });
+    expect((await patch(app, card.id, [1])).status).toBe(400);
+    expect((await patch(app, card.id, null)).status).toBe(400);
+  });
+});
