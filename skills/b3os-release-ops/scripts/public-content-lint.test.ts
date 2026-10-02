@@ -119,5 +119,4 @@ describe("readJsonArray — 못 읽으면 숨기지 않는다 (steve 2)", () => 
       rmSync(dir, { recursive: true, force: true });
     }
   });
-  });
 });
