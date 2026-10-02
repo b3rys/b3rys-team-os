@@ -230,9 +230,19 @@ describe("본문 — 사람이 바로 조치할 수 있어야 한다", () => {
     expect(body).toContain("90초");
   });
 
-  test("★복구 명령에 --force 가 있다★ (없으면 'Session already running' no-op 함정)", () => {
-    expect(body).toContain("--force");
-    expect(body).toContain("Session already running");
+  test("★복구 명령은 재시작 API 다★ — 폴더·대화 기록을 유지하는 경로", () => {
+    expect(body).toContain("/api/members/lisa/restart");
+    expect(body).toContain('{"fresh":false}');
+  });
+
+  test("★기동 스크립트를 바로 치라는 줄이 없다★ (손 실행 = 다른 폴더·새 세션)", () => {
+    expect(body).not.toMatch(/^\s*\S*start-telegram-channel\.sh/m);
+    expect(body).not.toContain("--force");
+  });
+
+  test("조치 뒤 확인 방법을 담는다", () => {
+    expect(body).toContain("정상으로 돌아왔습니다");
+    expect(body).toContain("poller");
   });
 
   test("system 발신이라 회신 대상이 없음을 명시한다 (--to system 블랙홀 방지)", () => {
