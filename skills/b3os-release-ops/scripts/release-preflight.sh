@@ -11,6 +11,7 @@ PR_NUMBER=""
 CHECK_APPROVER=1
 SKIP_REASON=""
 SETTINGS_URL="${B3OS_SETTINGS_URL:-http://127.0.0.1:7878/team/api/settings}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
   cat <<'USAGE'
@@ -134,6 +135,31 @@ if [ "$MODE" = "merge" ] || [ "$MODE" = "hotfix" ] || [ "$MODE" = "force-push" ]
     fail "non-noreply author/committer email found in $BASE..HEAD"
   fi
   ok "all $AHEAD_COUNT commit author/committer emails are GitHub noreply"
+
+  # ── 공개 저장소 내용 검사(경고만) — 추가된 줄의 팀원 이름·팀장 인용·내부 프로젝트명 ─────────
+  #   리뷰어가 손으로 grep 하던 것을 옮겼다. ★막지 않는다★ — 위치만 보여주고 판단은 사람이 한다.
+  #   명단은 라이브 서버에서 읽는다(agents.json 은 저장소에 없다). 못 읽으면 '검사 못 함' 으로 찍는다.
+  LINT_TS="$SCRIPT_DIR/public-content-lint.ts"
+  LINT_ALLOW="$SCRIPT_DIR/../public-lint-allow.txt"
+  AGENTS_URL="${SETTINGS_URL%/settings}/agents"
+  if command -v bun >/dev/null 2>&1 && [ -f "$LINT_TS" ]; then
+    LINT_TMP="$(mktemp -d)"
+    if curl -fsS "$AGENTS_URL" -o "$LINT_TMP/agents.json" 2>/dev/null; then
+      OWNER_NAME="$(curl -fsS "$SETTINGS_URL" 2>/dev/null | python3 -c 'import json,sys
+try:
+  d=json.load(sys.stdin); s=d.get("settings",d)
+  v=s.get("owner_name") if isinstance(s,dict) else None
+  print(v.get("value","") if isinstance(v,dict) else (v or ""))
+except Exception: pass' || true)"
+      git diff "$BASE"...HEAD | bun "$LINT_TS" --agents "$LINT_TMP/agents.json" --projects projects.json \
+        --owner-name "$OWNER_NAME" --allow "$LINT_ALLOW" || warn "public content lint failed to run (검사 못 함)"
+    else
+      warn "public content lint skipped — roster unreadable at $AGENTS_URL (검사 못 함, 통과 아님)"
+    fi
+    rm -rf "$LINT_TMP"
+  else
+    warn "public content lint skipped — bun or $LINT_TS missing (검사 못 함, 통과 아님)"
+  fi
 fi
 
 if [ "$MODE" = "post-merge" ]; then
