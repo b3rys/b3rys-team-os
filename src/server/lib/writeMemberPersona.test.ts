@@ -241,15 +241,26 @@ describe("★SKILLS.md 복사본 — persona 를 쓰면 항상 맞춰진다★",
     expect(readFileSync(file, "utf-8")).toBe("손으로 쓴 목록");
   });
 
-  test("★옛 심링크(살아 있는 것·깨진 것)는 복사본으로 바뀐다★", () => {
-    for (const target of [SKILLS_MD_PATH, "없는파일.md"]) {
-      const ws = mk();
-      const file = join(ws, "SKILLS.md");
-      symlinkSync(target === SKILLS_MD_PATH ? target : join(ws, target), file);
-      writeMemberPersona(base(ws, "claude_channel"));
-      expect(lstatSync(file).isSymbolicLink(), `${target}`).toBe(false);
-      expect(readFileSync(file, "utf-8").startsWith(SKILLS_COPY_MARKER_PREFIX)).toBe(true);
-    }
-    expect(readFileSync(SKILLS_MD_PATH, "utf-8").startsWith(SKILLS_COPY_MARKER_PREFIX), "★원본이 덮였다★").toBe(false);
+  // ★실제 rules/SKILLS.md 로 심링크를 걸지 않는다★ — 워크트리에서도 SKILLS_MD_PATH 는 라이브 파일이다.
+  //   코드가 심링크를 따라 쓰면 bun test 가 라이브 파일을 덮는다. 원본을 가리키는 옛 심링크 교체는
+  //   skillsRender.test.ts 에서 임시 원본으로 잰다. 여기서는 tmp 대상만 쓴다.
+  test("★깨진 옛 심링크는 복사본으로 바뀐다★", () => {
+    const ws = mk();
+    const file = join(ws, "SKILLS.md");
+    symlinkSync(join(ws, "없는파일.md"), file);
+    writeMemberPersona(base(ws, "claude_channel"));
+    expect(lstatSync(file).isSymbolicLink()).toBe(false);
+    expect(readFileSync(file, "utf-8").startsWith(SKILLS_COPY_MARKER_PREFIX)).toBe(true);
+  });
+
+  test("★폴더 안 다른 파일을 가리키는 살아 있는 심링크는 사람이 둔 것 — 그대로★", () => {
+    const ws = mk();
+    const mine = join(ws, "my-list.md");
+    writeFileSync(mine, "내 목록");
+    const file = join(ws, "SKILLS.md");
+    symlinkSync(mine, file);
+    writeMemberPersona(base(ws, "claude_channel"));
+    expect(lstatSync(file).isSymbolicLink()).toBe(true);
+    expect(readFileSync(mine, "utf-8")).toBe("내 목록");
   });
 });

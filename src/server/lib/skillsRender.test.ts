@@ -3,7 +3,7 @@ import { describe, expect, it } from "bun:test";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildSkillsCopy, buildSkillsMd, ensureSkillsCopy, renderSkillsMd, SKILLS_COPY_MARKER, syncSkillsCopies } from "./skillsRender";
+import { buildSkillsCopy, buildSkillsMd, ensureSkillsCopy, refreshSkillsMd, renderSkillsMd, SKILLS_COPY_MARKER, syncSkillsCopies } from "./skillsRender";
 import { SKILLS_MD_PATH, buildSkillTable } from "./personaTemplates";
 
 describe("rules/SKILLS.md 렌더", () => {
@@ -92,5 +92,42 @@ describe("워크스페이스 SKILLS.md 복사본", () => {
     expect(existsSync(ghost)).toBe(false);
     expect(readFileSync(dest, "utf-8")).toBe(buildSkillsCopy(readFileSync(rendered, "utf-8")));
     expect(readFileSync(dest, "utf-8")).toBe(buildSkillsCopy(buildSkillsMd()));
+  });
+
+  it("다른 파일을 가리키는 살아 있는 심링크 → 그대로(사람이 둔 것)", () => {
+    const { source, ws, dest } = setup();
+    const mine = join(ws, "my-list.md");
+    writeFileSync(mine, "내 목록\n");
+    symlinkSync(mine, dest);
+    expect(ensureSkillsCopy(ws, source)).toBe("kept_user_file");
+    expect(lstatSync(dest).isSymbolicLink()).toBe(true);
+    expect(readFileSync(mine, "utf-8")).toBe("내 목록\n");
+  });
+
+  it("SKILLS.md 자리에 디렉터리 → 그대로", () => {
+    const { source, ws, dest } = setup();
+    mkdirSync(dest);
+    expect(ensureSkillsCopy(ws, source)).toBe("kept_user_file");
+    expect(lstatSync(dest).isDirectory()).toBe(true);
+  });
+
+  it("refreshSkillsMd = 렌더 + 복사본 동기화 (렌더 실패면 복사본을 건드리지 않는다)", () => {
+    const { ws, dest } = setup();
+    const target = join(mkdtempSync(join(tmpdir(), "skills-md-")), "SKILLS.md");
+    const r = refreshSkillsMd([ws], target);
+    expect(r.render.ok).toBe(true);
+    expect(r.copies[ws]).toBe("written");
+    expect(readFileSync(dest, "utf-8")).toBe(buildSkillsCopy(buildSkillsMd()));
+    const bad = refreshSkillsMd([ws], join(ws, "없는폴더", "SKILLS.md"));
+    expect(bad.render.ok).toBe(false);
+    expect(bad.copies).toEqual({});
+  });
+
+  it("렌더하는 곳(부팅·설정 저장)은 refreshSkillsMd 를 쓴다 — renderSkillsMd 직접 호출이면 복사본이 옛 목록으로 남는다", () => {
+    for (const rel of ["../index.ts", "../routes/settings.ts"]) {
+      const src = readFileSync(join(import.meta.dir, rel), "utf-8");
+      expect(src, `${rel} 가 refreshSkillsMd 를 안 부른다`).toMatch(/refreshSkillsMd\(/);
+      expect(src, `${rel} 가 renderSkillsMd 를 직접 부른다`).not.toMatch(/renderSkillsMd\(/);
+    }
   });
 });

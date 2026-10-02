@@ -2,7 +2,7 @@
 //   왜: 목록이 CLAUDE.md·AGENTS.md 본문에 박혀 있으면 스킬 하나 추가가 12명 규칙 파일 재생성이 된다(팀장 2026-09-18).
 //   claude 는 CLAUDE.md 의 `@SKILLS.md`(워크스페이스의 복사본 — ensureSkillsCopy) 로 인라인, 나머지 런타임은 세션 시작 때 경로로 읽는다.
 //   TEAM-OS.md 와 같은 방식: 소스는 skills/*/SKILL.md 의 trigger 줄, 산출물은 rules/SKILLS.md(gitignore).
-import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildSkillTable, SKILLS_MD_PATH } from "./personaTemplates";
 
@@ -50,8 +50,9 @@ export type SkillsCopyResult = "written" | "unchanged" | "kept_user_file" | "no_
 
 /**
  * 워크스페이스의 SKILLS.md 를 rules/SKILLS.md 의 복사본으로 맞춘다.
- *   없음 → 만든다 · 심링크(살아 있든 깨졌든) → 복사본으로 바꾼다 · 표식 파일 → 내용이 다르면 갱신
- *   표식 없는 일반 파일·디렉터리 → 그대로 둔다 · 원본을 못 읽으면 아무것도 바꾸지 않는다.
+ *   없음 → 만든다 · 옛 심링크(원본을 가리키거나 깨진 것) → 복사본으로 바꾼다 · 표식 파일 → 내용이 다르면 갱신
+ *   다른 곳을 가리키는 살아 있는 심링크·표식 없는 일반 파일·디렉터리 → 그대로 둔다(사람이 둔 것일 수 있다)
+ *   원본을 못 읽으면 아무것도 바꾸지 않는다.
  */
 export function ensureSkillsCopy(workspace: string, source: string = SKILLS_MD_PATH): SkillsCopyResult {
   let src: string;
@@ -61,7 +62,11 @@ export function ensureSkillsCopy(workspace: string, source: string = SKILLS_MD_P
   try {
     let st: ReturnType<typeof lstatSync> | null = null;
     try { st = lstatSync(dest); } catch { st = null; }
-    if (st && !st.isSymbolicLink()) {
+    if (st?.isSymbolicLink()) {
+      let target = "";
+      try { target = readlinkSync(dest); } catch { /* 못 읽으면 아래 existsSync 로 판정 */ }
+      if (target !== source && existsSync(dest)) return "kept_user_file";
+    } else if (st) {
       if (!st.isFile()) return "kept_user_file";
       const cur = readFileSync(dest, "utf-8");
       if (!cur.startsWith(SKILLS_COPY_MARKER_PREFIX)) return "kept_user_file";
@@ -86,4 +91,17 @@ export function syncSkillsCopies(workspaces: string[], source: string = SKILLS_M
     out[ws] = ensureSkillsCopy(ws, source);
   }
   return out;
+}
+
+/**
+ * rules/SKILLS.md 렌더 + 팀원 복사본 동기화를 한 번에 한다. 렌더하는 곳(부팅·설정 저장)은 전부 이 함수를 쓴다 —
+ * 렌더만 하고 동기화를 빠뜨리면 복사본이 옛 목록으로 남는다.
+ */
+export function refreshSkillsMd(
+  workspaces: string[],
+  target: string = SKILLS_MD_PATH,
+): { render: ReturnType<typeof renderSkillsMd>; copies: Record<string, SkillsCopyResult> } {
+  const render = renderSkillsMd(target);
+  const copies = render.ok ? syncSkillsCopies(workspaces, target) : {};
+  return { render, copies };
 }

@@ -55,7 +55,7 @@ import { verifyFirstModelCall, type FirstModelCallResult } from "../lib/runtimeS
 import { hasCapability, COORDINATOR_CAPABILITY } from "../lib/capabilities";
 import { hasSlackTokenFile, loadAgentCreds, saveAgentCreds, removeAgentCreds, slackTokensDir, postMessage } from "../lib/slack";
 import { renderAndRepoint, TEAM_OS_TEMPLATE_PATH, LIVE_TEAM_OS_PATH } from "../lib/teamOsRender";
-import { renderSkillsMd } from "../lib/skillsRender";
+import { refreshSkillsMd } from "../lib/skillsRender";
 import { HERMES_BASE_PROFILE } from "../lib/paths";
 import { isHermesProfileProtected } from "../lib/hermesBaseProfile";
 import { latestCaptureNonBotSender, listDiscoveredGroups } from "../lib/telegramLeadDetection";
@@ -351,10 +351,12 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
   const renderOwner = () => {
     if (!isLiveRules) return;
     try {
-      const claudeIds = readAgents().filter((a: any) => a.runtime === "claude_channel").map((a: any) => a.id);
+      const agentList = readAgents();
+      const claudeIds = agentList.filter((a: any) => a.runtime === "claude_channel").map((a: any) => a.id);
       const v = getSetting(db, "owner_name");
       const r = renderAndRepoint(v, claudeIds);
-      renderSkillsMd();
+      // 렌더와 팀원 복사본 동기화를 같이 — 렌더만 하면 워크스페이스 SKILLS.md 가 옛 목록으로 남는다.
+      refreshSkillsMd(agentList.map((a: any) => a.workspace_path).filter((w: unknown): w is string => typeof w === "string"));
       appendAudit(db, "user", "teamos_owner_rendered", "team", { owner: r.owner, repointed: r.repointed, ok: r.ok });
     } catch { /* best-effort */ }
   };
