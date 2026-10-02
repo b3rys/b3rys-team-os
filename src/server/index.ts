@@ -55,7 +55,7 @@ import { createSchedulerRoutes } from "./routes/scheduler";
 import { createCiStatusRoutes } from "./routes/ciStatus";
 import { ensureDailyTaskReviewJobs, ensureWeeklySelfLearningJobs } from "./scheduler/core";
 import { renderAndRepoint } from "./lib/teamOsRender";
-import { renderSkillsMd, syncSkillsCopies } from "./lib/skillsRender";
+import { refreshSkillsMd } from "./lib/skillsRender";
 import { installProgressHook, repairProgressHook, repairReplyGuardHook, ensureOwnerGateHook } from "./runtimes/claude/launcher";
 import { writeMemberPersona, savePersonaFile } from "./lib/writeMemberPersona";
 import { refreshLoadingFiles } from "./lib/refreshLoadingFiles";
@@ -159,16 +159,15 @@ try {
   const claudeIds = agents.filter((a) => a.runtime === "claude_channel").map((a) => a.id);
   const rr = renderAndRepoint(ownerRow?.value ?? null, claudeIds);
   {
-    const sk = renderSkillsMd();
+    // 팀원 워크스페이스의 SKILLS.md 는 복사본이라 원본을 렌더할 때 같이 갱신한다.
+    const { render: sk, copies } = refreshSkillsMd(agents.map((a) => a.workspace_path));
     if (!sk.ok) console.error(`[boot] rules/SKILLS.md 렌더 실패: ${sk.error}`);
-    else {
-      // 팀원 워크스페이스의 SKILLS.md 는 복사본이라 원본이 바뀌면 같이 갱신해야 한다.
-      const sc = syncSkillsCopies(agents.map((a) => a.workspace_path));
-      const bad = Object.entries(sc).filter(([, r]) => r === "error" || r === "no_source");
-      const written = Object.values(sc).filter((r) => r === "written").length;
-      if (bad.length) console.error(`[boot] SKILLS.md 복사본 실패: ${bad.map(([w, r]) => `${w}=${r}`).join(", ")}`);
-      if (written) console.log(`[skills-copy] written=${written}`);
-    }
+    const bad = Object.entries(copies).filter(([, r]) => r === "error" || r === "no_source");
+    const kept = Object.entries(copies).filter(([, r]) => r === "kept_user_file").map(([w]) => w);
+    const written = Object.values(copies).filter((r) => r === "written").length;
+    if (bad.length) console.error(`[boot] SKILLS.md 복사본 실패: ${bad.map(([w, r]) => `${w}=${r}`).join(", ")}`);
+    if (kept.length) console.log(`[skills-copy] 사람이 둔 SKILLS.md 라 갱신 안 함(@SKILLS.md 는 그 파일을 읽는다): ${kept.join(", ")}`);
+    if (written) console.log(`[skills-copy] written=${written}`);
   }
   console.log(`[teamos-render] owner='${rr.owner}' repointed=${rr.repointed.join(",") || "none"}`);
 
