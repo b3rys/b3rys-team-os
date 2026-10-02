@@ -15,6 +15,7 @@ import { listStatuses, appendAudit } from "../db/queries";
 import { classifyAll, type HealthLevel } from "../lib/health";
 import { quotaBlockMap } from "../lib/runtimeQuota";
 import { checkEssentialSettings } from "../lib/runtimeEssentials";
+import { checkGatewayLiveness, type LaunchdProbe } from "../lib/gatewayLiveness";
 import { restartAgent } from "../lib/agentControl";
 import {
   EssentialsOpNotifier,
@@ -36,6 +37,10 @@ const AUTOFIX_ENABLED = process.env.HEALTH_AUTOFIX_ENABLED === "1";
 interface HealthDeps {
   db: Database;
   agents: () => AgentRecord[];
+  /** 게이트웨이 launchd 상태를 재는 함수(시험용 주입). 기본은 launchctl list. */
+  launchdProbe?: LaunchdProbe;
+  /** 설정 검사(시험용 주입). 기본은 runtimeEssentials 레지스트리. */
+  checkSettings?: typeof checkEssentialSettings;
 }
 
 /**
@@ -131,7 +136,13 @@ export function startHealthCheck(deps: HealthDeps): () => void {
         //   registry 는 disabled 멤버도 목록에 남긴다(ambientAgents: enabled = a.enabled !== false)
         //   → 여기서 명시적으로 건너뛰지 않으면 검사 대상에 그대로 들어온다.
         if (agent.enabled === false) continue;
-        const essentials = await checkEssentialSettings(agent);
+        // 설정 검사(essentials) + 지금 살아 있나(게이트웨이 프로세스). 설정만 보면 게이트웨이가
+        //   launchd 에서 내려가 있어도 정상으로 나온다 — 그래서 둘을 합쳐 한 항목 목록으로 본다.
+        const settings = await (deps.checkSettings ?? checkEssentialSettings)(agent);
+        const gatewayMissing = checkGatewayLiveness(agent, deps.launchdProbe);
+        const essentials = gatewayMissing.length
+          ? { ...settings, ok: false, missing: [...settings.missing, ...gatewayMissing] }
+          : settings;
         const key = essentials.ok ? "ok" : JSON.stringify({ runtime: agent.runtime, missing: essentials.missing });
         const prevKey = lastEssentialsKey.get(agent.id);
         if (!essentials.ok && prevKey !== key) {
