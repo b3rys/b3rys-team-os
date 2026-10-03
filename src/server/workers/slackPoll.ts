@@ -77,12 +77,31 @@ async function fetchHistory(channel: string, oldest: number): Promise<SlackHisto
   });
 }
 
-// 쓰레드 댓글은 conversations.history 에 안 나온다(최상위 글만 준다). 최근 최상위 글 50개의 latest_reply 를 보고,
+// 쓰레드 댓글은 conversations.history 에 안 나온다(최상위 글만 준다). 최상위 글의 latest_reply 를 보고,
 // 본 적 없는 댓글이 생긴 쓰레드만 conversations.replies 로 가져온다.
-const THREAD_RECENT_LIMIT = Number(process.env.TEAM_SLACK_POLL_THREAD_PARENTS ?? 50);
+// 살펴보는 범위 = 최근 THREAD_WINDOW_SEC(기본 7일) 안에 시작된 쓰레드 전부(페이지를 넘겨 가며, 최대 THREAD_MAX_PAGES 쪽).
+// ★한계★: 그보다 오래 전에 시작된 쓰레드에 새로 달린 댓글은 못 본다 — 그런 대화는 새 글로 다시 시작한다.
+const THREAD_WINDOW_SEC = Number(process.env.TEAM_SLACK_POLL_THREAD_WINDOW_SEC ?? 7 * 24 * 3600);
+const THREAD_MAX_PAGES = Number(process.env.TEAM_SLACK_POLL_THREAD_MAX_PAGES ?? 5);
 
-async function fetchRecentParents(channel: string): Promise<SlackHistoryResponse> {
-  return slackGet("conversations.history", { channel, limit: String(THREAD_RECENT_LIMIT) });
+interface SlackPagedResponse extends SlackHistoryResponse {
+  response_metadata?: { next_cursor?: string };
+}
+
+async function fetchThreadParents(channel: string): Promise<SlackHistoryResponse> {
+  const since = Date.now() / 1000 - THREAD_WINDOW_SEC;
+  const all: SlackHistoryMessage[] = [];
+  let cursor = "";
+  for (let page = 0; page < THREAD_MAX_PAGES; page++) {
+    const params: Record<string, string> = { channel, limit: "200", oldest: String(since) };
+    if (cursor) params.cursor = cursor;
+    const res = (await slackGet("conversations.history", params)) as SlackPagedResponse;
+    if (!res.ok) return res;
+    all.push(...(res.messages ?? []));
+    cursor = res.response_metadata?.next_cursor ?? "";
+    if (!cursor) break;
+  }
+  return { ok: true, messages: all };
 }
 
 async function fetchReplies(channel: string, threadTs: string, oldest: number): Promise<SlackHistoryResponse> {
@@ -187,7 +206,7 @@ async function pollOnce(
     cursors.set(channel, newest);
 
     // 쓰레드 댓글 — 최상위 글과 같은 멘션 처리. 실패해도 최상위 처리는 이미 끝났다.
-    const parents = await fetchRecentParents(channel);
+    const parents = await fetchThreadParents(channel);
     if (!parents.ok) {
       appendAudit(deps.db, "system", "slack_poll_failed", null, { channel, error: parents.error, step: "thread_parents" });
       continue;

@@ -48,6 +48,7 @@ const parentTs = `${now - 100}.000100`;
 const oldReplyTs = `${now - 7200}.000200`; // 폴링 시작 전(lookback 밖)
 const newReplyTs = `${now - 50}.000300`;
 let replyCalls = 0;
+let historyPages = 0;
 const realFetch = globalThis.fetch;
 
 beforeAll(() => {
@@ -56,10 +57,21 @@ beforeAll(() => {
     const method = url.pathname.split("/").pop();
     if (method === "conversations.history") {
       // 최상위 글: 부모 하나(멘션 없음). 댓글은 여기 안 나온다 — Slack 실제 동작과 같게.
-      return Response.json({
-        ok: true,
-        messages: [{ ts: parentTs, user: "UGD", text: "[b3chat] 주제", reply_count: 2, latest_reply: newReplyTs }],
-      });
+      const parent = { ts: parentTs, user: "UGD", text: "[b3chat] 주제", reply_count: 2, latest_reply: newReplyTs };
+      if (url.searchParams.get("limit") === "200") {
+        // 쓰레드 훑기: 활성 쓰레드는 ★둘째 쪽★에 있다(최근 글에 밀려난 오래된 쓰레드 — 리뷰가 잡은 경로)
+        if (!url.searchParams.get("cursor")) {
+          historyPages++;
+          return Response.json({
+            ok: true,
+            messages: [{ ts: `${now - 10}.000900`, user: "UGD", text: "최근 잡담" }],
+            response_metadata: { next_cursor: "page2" },
+          });
+        }
+        historyPages++;
+        return Response.json({ ok: true, messages: [parent], response_metadata: { next_cursor: "" } });
+      }
+      return Response.json({ ok: true, messages: [parent] });
     }
     if (method === "conversations.replies") {
       replyCalls++;
@@ -95,6 +107,7 @@ test("쓰레드 댓글의 @멘션이 handleAppMention 으로 간다 — 한 번�
   stop();
   expect(handled).toEqual([{ text: `<@${BILL_UID}> 쓰레드 댓글`, ts: newReplyTs, thread_ts: parentTs }]);
   expect(replyCalls).toBe(1);
+  expect(historyPages).toBe(2); // 첫 쪽에 없던 쓰레드를 둘째 쪽까지 넘겨 찾았다
 });
 
 test("다시 시작해도 floor 이전 댓글(옛 댓글)은 되살리지 않는다", async () => {
