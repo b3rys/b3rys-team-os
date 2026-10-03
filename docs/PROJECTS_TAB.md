@@ -21,7 +21,7 @@ GitHub 저장소 (원본)                        team.db (원본)               
 - **원본 md** = 저장소의 네 문서. Projects 탭은 ★읽기만★ 한다 — 고치는 곳은 GitHub(PR). 렌더·캐시는 파생본.
 - **칸반 카드** = 그 프로젝트의 "지금 하는 큰 과제". TODO 항목 하나하나가 카드가 아니다. 연결은 카드 제목의 접두 `[<id>]` (`kanbanPrefix`) — 추가 필드 없이 지금 쓰는 관습 그대로.
 - **상태 두 축**: TODO.md 의 `[~]/[ ]/[x]` 는 항목 상태(세밀), 칸반 lane 은 과제 상태(굵음). 탭은 둘을 나란히 보여 주고 합치지 않는다.
-- **흐름**: 팀장 지시 → TODO.md 항목(정본) → 큰 과제면 칸반 카드 → 구현 → TODO `[x]` + 카드 done → 기능이 바뀌었으면 FEATURES 갱신(작업 근거는 TODO 에 남긴다). 정본은 `b3os-project-mgmt` 스킬.
+- **흐름**: 팀장 지시 → TODO.md 항목(정본) → 큰 과제면 칸반 카드 → 구현 → TODO `[x]` + 카드 done → 기능이 바뀌었으면 FEATURES 갱신(작업 근거는 TODO 에 남긴다). 정본은 `b3os-sf` 스킬.
 
 ## 1. 등록정보 — `projects.json` (저장소 루트, git 추적)
 
@@ -75,7 +75,7 @@ type ProjectSummary = {
 - ```mermaid 블록 → 서버에서 SVG 로 변환해 인라인 (`@mermaid-js/mermaid-cli` 는 크롬 의존이라 ★쓰지 않는다★ — 우선 `beautiful-mermaid` 류 zero-dep 렌더러가 있으면 그것, 없으면 ★1차: `<pre class="mermaid-src">` 로 코드 그대로 + "다이어그램 렌더 예정" 배지★ 하고 `needs` 에 적는다. 보고서 iframe 의 실행 권한은 풀지 않는다).
 - 상대 링크·이미지: `[x](docs/y.md)` → 같은 프로젝트 문서면 `?view=projects&id=steno&doc=…`, 아니면 GitHub blob URL.
 - 원문 HTML 은 정제(script·on* 제거).
-- TODO 파싱 규칙(`b3os-project-mgmt` TODO.md 모양): 줄 시작 `- [~]` doing · `- [ ]` plan · `- [x]` done. ★제외 절★(헤더 줄에 등록정보 `excludeSections` 의 문자열이 들어가는 절 — 기본 `킵`; steno 는 `킵`·`선택 대기`·`답 대기`·`승인 대기`)의 `[ ]` 는 plan 에서 뺀다 — 착수 예정으로 오인하지 않게. 하위 헤더까지 이어지고 형제 헤더에서 풀린다. `doingTitles` = `[~]` 줄의 첫 60자. "이번 주 완료" 는 안 센다(완료일 필드 없음).
+- TODO 파싱 규칙(`b3os-sf` TODO.md 모양): 줄 시작 `- [~]` doing · `- [ ]` plan · `- [x]` done. ★제외 절★(헤더 줄에 등록정보 `excludeSections` 의 문자열이 들어가는 절 — 기본 `킵`; steno 는 `킵`·`선택 대기`·`답 대기`·`승인 대기`)의 `[ ]` 는 plan 에서 뺀다 — 착수 예정으로 오인하지 않게. 하위 헤더까지 이어지고 형제 헤더에서 풀린다. `doingTitles` = `[~]` 줄의 첫 60자. "이번 주 완료" 는 안 센다(완료일 필드 없음).
 
 ## 4. 화면 (`src/web/components/Projects.ts`, Reports 와 같은 자리·같은 스타일)
 

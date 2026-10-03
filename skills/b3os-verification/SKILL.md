@@ -12,7 +12,7 @@ Where this sits among the team skills:
 | Skill | Question it answers |
 |---|---|
 | `b3os-ai-code-safety` | How do we build it? (structure, refactoring) |
-| `b3os-project-mgmt` | How do we manage and report it? |
+| `b3os-sf` | How do we manage and report it? |
 | `b3os-harness-playbook` | How do we split it across parallel agents? |
 | **`b3os-verification`** | **How do we prove the result is right — now and on every later change?** |
 
