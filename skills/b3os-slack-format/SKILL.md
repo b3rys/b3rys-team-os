@@ -19,7 +19,7 @@ trigger: post to Slack
 채널이 새 글로 덮이면 무엇이 정해졌는지 찾을 수 없다. 대화는 주제마다 쓰레드 하나에 모은다.
 
 1. **새 글(쓰레드 시작)은 새 주제일 때만.** 주제 = 결정 하나 또는 마일스톤 하나. 첫 줄은 `[프로젝트] 주제` + 1~3줄.
-2. **같은 주제의 후속은 전부 그 쓰레드 댓글로.** 같은 주제로 새 글을 열지 않는다. 댓글을 달 때 `slack-post.sh --thread <부모 ts>`.
+2. **같은 주제의 후속은 전부 그 쓰레드 댓글로.** 같은 주제로 새 글을 열지 않는다. 댓글 명령은 아래 "사용법" 2) 의 `--thread` 줄. 부모 ts 는 쓰레드를 연 게시 결과(`✓ posted ts=…`)나 받은 멘션의 `thread_ts` 에 있다.
 3. **쓰레드를 여는 사람은 팀장과 그 채널 담당만.** 다른 팀원은 댓글로 하고, 새 주제가 필요하면 담당에게 말한다. 채널 담당은 채널을 열 때 정한다.
 4. **댓글은 불린(@멘션) 사람만 답한다.** 1~3줄, 같은 말 반복 금지. 긴 내용(설계·보고서)은 링크로.
 5. **주제가 끝나면** 마지막 댓글로 `✅ 정리: <결정 한 줄>` 을 단다. 나중에 찾는 사람은 쓰레드 끝의 이 줄만 읽으면 된다.
@@ -67,13 +67,15 @@ briefing-agent 스타일처럼 가볍고 읽히는 일반 메시지 패턴. Bloc
 python3 skills/b3os-slack-format/scripts/md-to-slack.py <input.md>     # 또는 stdin
 ```
    (`**볼드**`→`*볼드*`, `##헤더`→`*헤더*`, `-불릿`→`•`, `[텍스트](url)`→`<url|텍스트>`, 코드/코드블록 보존)
-2) 변환 결과를 슬랙에 게시:
+2) 변환 결과를 슬랙에 게시 — ★게시 경로는 `slack-post.sh` 하나★(`b3os-team-inbox` 규칙). ★자기 작업 폴더에서★ 돌린다 — 스크립트가 지금 폴더(또는 tmux 세션)로 "누가 올리는지" 를 찾는다. `<b3os>` = b3os 저장소 경로:
 ```
-curl -s -X POST http://127.0.0.1:7878/team/api/slack/post \
-  -H "Content-Type: application/json" \
-  -d "$(python3 -c 'import json,sys;print(json.dumps({"agent_id":"<나>","channel":"<채널>","text":sys.stdin.read()}))' < slack.txt)"
+python3 <b3os>/skills/b3os-slack-format/scripts/md-to-slack.py note.md > slack.txt
+# 새 글(새 주제일 때만 — 위 쓰레드 규칙)
+bash <b3os>/skills/b3os-team-inbox/scripts/slack-post.sh --channel <C채널ID> --text-file slack.txt --mention <받을 사람>
+# 쓰레드 댓글
+bash <b3os>/skills/b3os-team-inbox/scripts/slack-post.sh --channel <C채널ID> --text-file slack.txt --thread <부모 ts>
 ```
-   (스레드 댓글이면 body 에 `"thread_ts":"<부모 ts>"` 추가)
+   다른 폴더에서 돌려야 하면 앞에 `GD_AGENT_ID=<내 id>` 를 붙인다. 본문은 `--text-file` 로 넘긴다(홑따옴표·백틱이 셸에서 깨지지 않게). 멘션이 없으면 아무에게도 알림이 가지 않는다.
 
 ## 예시 (examples/) + 회귀 테스트
 실전 예시 3종 — 그대로 참고하거나 md-to-slack 입력으로:
