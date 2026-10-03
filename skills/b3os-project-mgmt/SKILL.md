@@ -12,6 +12,21 @@ trigger: run a project (many lead requests over time)
 - "목록으로 관리해" · "정리해서 보내봐" · "다 처리했어?" · "지금까지 나온 말로 정리하자".
 - 킥오프 · 마일스톤 · 배포본 전달 · 다른 팀원에게 인계.
 
+## 한눈에 — 시작 · 개발 · 운영
+
+```
+① 시작(한 번)        요구 정리★(목표·안 할 것·완료 기준) → 초기 설계★(구조 그림·기술 선택, 팀원 리뷰)
+                     → 뼈대(저장소 · README·DESIGN·FEATURES·TODO · CI · projects.json 한 줄 · 칸반 카드 · 에이전트 팀) — 첫 PR 부터 리뷰
+                                                              → 이 스킬 · references/agent-team-by-domain.md
+② 개발(요청마다)     요 만 검 리 문★ 내 보★ 배
+                     요청 → 만들기 → 검사 → 리뷰 → 문(머지 승인) → 내보내기 → 보고(실사용 확인) → 배우기(TODO·노하우·설계 문서)
+                                                              → b3os-bwf · b3os-github-workflow · b3os-release-ops · b3os-team-learning-loop
+③ 운영(내보낸 뒤)    감시(살아 있나·느려졌나 자동 확인, 이상하면 알림) · 장애(되돌리기 먼저 → 원인 → 고침은 ②로)
+                     · 정비(의존성·런타임 업데이트는 백업 후) · 피드백(사용 중 요청·버그 → ② 요청으로)
+                                                              → b3os-release-ops
+★ = 팀장 확인(시작 2번 · 개발 2번)
+```
+
 ## 정본은 둘, 뷰는 여럿
 
 | 무엇 | 정본 | 어디 |
@@ -26,7 +41,6 @@ trigger: run a project (many lead requests over time)
 
 | 단계 | 하는 일 | 산출물 (어디에) |
 | --- | --- | --- |
-| 0 시작 | 팀장 한 마디로 시작. 담당(PM) 정함. 저장소(없으면 새로) + 네 문서 뼈대 README(무엇·왜)·DESIGN(구조·다이어그램)·FEATURES(되는 것)·TODO(할 일·상태). 팀서버 `projects.json` 에 한 줄 등록 → Projects 탭에 뜬다. 칸반 카드 1장 `[id] 프로젝트 — 지금 과제`. 에이전트 팀 설계(`references/agent-team-by-domain.md`). 구조 가드는 아래 "구조 가드" 기준으로 | 저장소 4문서 · `projects.json` 1줄 · 칸반 카드 · `.claude/agents/` |
 | 1 요구 | 팀장 메시지 하나 = TODO 항목 하나 이상(요지·시각·사진). 킵은 `📌 킵` 절, 착수 안 함. 방향이 바뀌면 지우지 않고 "HH:MM 뒤집음" | `TODO.md` |
 | 2 실행 | 10분 단위 마일스톤. 큰 과제면 칸반 카드 갱신(다음 액션·재개 시각·fallback). 하네스: 계약 → 모듈 병렬 → 통합 → 아키·검증 → 게이트 → 배포/공증. 긴 작업은 30분 단위로 진행 두 줄(마일스톤·지연·막힘이 없으면 생략) — 보고를 빚진 긴 작업은 expect-report 등록 | PR(리뷰·머지 게이트) · 검증 근거 폴더(`docs/acceptance` — 기능별 케이스 ↔ 검사 파일 매핑과 인수 매니페스트) · 카드 description |
 | 3 산출물 자리 | 코드·문서 = 저장소 / 상태 = TODO `[~][ ][x]` + 칸반 lane / 검증 근거 = 저장소의 검증 근거 폴더(예: `docs/acceptance`) / 리서치·발표 = `/reports` / 화면 = Projects 탭이 저장소 md 를 자동으로 보여 준다 — 프로젝트 상태 보고서를 따로 만들지 않는다. 기능이 바뀌면 FEATURES, 구조가 바뀌면 DESIGN, 작업 근거는 TODO | 저장소 · Projects 탭(뷰) |
