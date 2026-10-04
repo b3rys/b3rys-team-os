@@ -155,7 +155,9 @@ async function setCodex(id: string, enabled: boolean): Promise<ControlResult> {
   const uid = process.getuid?.() ?? 0;
   const label = codexBridgeLaunchdLabel(id);
   if (enabled) {
-    const p = writeCodexBridgeFiles(id); // wrapper+plist 보장(idempotent). 토큰은 활성화 단계서 별도 배치.
+    let p: ReturnType<typeof writeCodexBridgeFiles>;
+    try { p = writeCodexBridgeFiles(id); } // wrapper+plist 보장(idempotent). 토큰은 활성화 단계서 별도 배치.
+    catch (e) { return { ok: false, detail: `브리지 기동 안 함: ${e instanceof Error ? e.message : String(e)}` }; }
     const r = await run(["launchctl", "bootstrap", `gui/${uid}`, p.plist]);
     if (r.code !== 0) { const k = await run(["launchctl", "kickstart", "-k", `gui/${uid}/${label}`]); return { ok: k.code === 0, detail: k.code === 0 ? `codex ${id} 브리지 기동(+버스 활성)` : `브리지 기동 실패: ${k.out.slice(-150)}` }; }
     return { ok: true, detail: `codex ${id} 브리지 기동(+버스 활성)` };

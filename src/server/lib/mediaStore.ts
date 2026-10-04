@@ -135,9 +135,11 @@ export function contentTypeForMediaFile(file: string): string {
 export async function storeTelegramMedia(
   token: string,
   ref: TelegramMediaRef,
-  opts: { mediaDir?: string; urlBase?: string } = {},
+  /** apiBase — 봇 API 주소(팀원 채널). 없으면 텔레그램. */
+  opts: { mediaDir?: string; urlBase?: string; apiBase?: string } = {},
 ): Promise<StoredMedia> {
-  const getFile = await fetch(`https://api.telegram.org/bot${token}/getFile`, {
+  const apiBase = opts.apiBase ?? "https://api.telegram.org";
+  const getFile = await fetch(`${apiBase}/bot${token}/getFile`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ file_id: ref.file_id }),
@@ -156,7 +158,7 @@ export async function storeTelegramMedia(
 
   mkdirSync(mediaDir, { recursive: true, mode: 0o700 });
   if (!existsSync(localPath)) {
-    const fileRes = await fetch(`https://api.telegram.org/file/bot${token}/${info.result.file_path}`);
+    const fileRes = await fetch(`${apiBase}/file/bot${token}/${info.result.file_path}`);
     if (!fileRes.ok) throw new Error(`telegram file download failed: ${fileRes.status}`);
     await Bun.write(localPath, await fileRes.arrayBuffer());
   }

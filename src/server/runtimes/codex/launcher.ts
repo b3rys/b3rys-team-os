@@ -11,6 +11,7 @@ import { writeFileSync, mkdirSync, chmodSync, existsSync, rmSync, lstatSync, rea
 import { dirname, join } from "node:path";
 import { REPO_ROOT, MEMBERS_ROOT } from "../../lib/personaTemplates";
 import { getCaptureGroupId } from "../../lib/captureConfig";
+import { DEFAULT_CHANNEL, assertChannelUsable, channelEnvLines, readMemberChannel, type MemberChannel } from "../../lib/memberChannel";
 import { renderSeededCodexConfig } from "./configSeed";
 import { Database } from "bun:sqlite";
 
@@ -101,9 +102,11 @@ export interface CodexBridgePaths {
   log: string;
   pidFile: string; // 첫 getUpdates 성공 후 bridge.ts가 쓰는 ready marker
   allowFrom: string; // 발신자 게이트 시드(comma-sep chat_id) → wrapper 가 CODEX_ALLOW_FROM 으로 export
+  channel: MemberChannel; // 봇이 붙는 메신저(텔레그램 기본·b3chat) — lib/memberChannel.ts
 }
 
-export function codexBridgePaths(id: string): CodexBridgePaths {
+/** channel 을 안 주면 기본(텔레그램) — 경로만 필요한 호출(pidFile·tokenFile 등)은 agents.json 을 읽지 않는다. */
+export function codexBridgePaths(id: string, channel: MemberChannel = DEFAULT_CHANNEL): CodexBridgePaths {
   const label = codexBridgeLaunchdLabel(id);
   return {
     label,
@@ -114,7 +117,9 @@ export function codexBridgePaths(id: string): CodexBridgePaths {
     codexHome: `${HOME}/.codex-agents/${id}`,
     log: `${REPO_ROOT}/var/codex-bridge/${id}.log`,
     pidFile: `${REPO_ROOT}/var/codex-bridge/${id}.pid`,
-    allowFrom: resolveCodexAllowFrom(),
+    // 채널에 허용 방 목록이 있으면 그것(b3chat 방 id). 없으면 팀 공통 시드(팀장 DM + 팀 그룹) 그대로.
+    allowFrom: channel.allowFrom ? channel.allowFrom.join(",") : resolveCodexAllowFrom(),
+    channel,
   };
 }
 
@@ -145,6 +150,8 @@ export function renderLaunchWrapper(p: CodexBridgePaths): string {
     // 서버가 쓰는 codex 실행 파일을 브리지도 쓴다. 값이 있을 때만 넣는다 — 빈 값을 export 하면
     // runner·appServerClient 의 `CODEX_BIN ?? "codex"` 가 빈 문자열을 그대로 써서 spawn("") 으로 즉사한다.
     ...codexBinLine(process.env.CODEX_BIN),
+    // 봇 API 주소·채널 종류 — 채널 설정이 있는 팀원만. 없으면 줄이 없어 wrapper 가 지금과 같다.
+    ...channelEnvLines(p.channel),
     // launchd 는 최소 PATH 로 wrapper 를 띄운다(plist 에 EnvironmentVariables 없음) → bun 설치경로를 명시해야 respawn-loop 안 남.
     // claude launcher(claude/launcher.ts) 와 동일 세트: ~/.bun/bin(공식 인스톨러) · ~/.local/bin · /opt/homebrew/bin(Apple Silicon) · /usr/local/bin(Intel homebrew).
     `export PATH="${HOME}/.bun/bin:${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"`,
@@ -259,7 +266,9 @@ export function ensureCodexHome(p: CodexBridgePaths): void {
 
 /** wrapper+plist 파일 생성(파일 쓰기만 — launchctl 로드는 호출자가 게이트 뒤에서). idempotent. */
 export function writeCodexBridgeFiles(id: string): CodexBridgePaths {
-  const p = codexBridgePaths(id);
+  const p = codexBridgePaths(id, readMemberChannel(id));
+  // ★채널 설정이 틀리면 파일을 쓰기 전에 멈춘다★ — 옛 wrapper 를 덮어 반쯤 바뀐 상태를 만들지 않는다.
+  assertChannelUsable(p.channel, `codex ${id}`);
   ensureCodexHome(p); // CODEX_HOME 없으면 codex exec 즉사 → 활성화 시 보장
   mkdirSync(dirname(p.wrapper), { recursive: true });
   mkdirSync(dirname(p.plist), { recursive: true });

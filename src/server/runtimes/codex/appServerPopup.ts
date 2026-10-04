@@ -19,6 +19,7 @@ import { CodexApprovalCorrelationStore } from "./state";
 import { appendAudit } from "../../db/queries";
 import { readFileSync } from "node:fs";
 import { codexBridgePaths, resolveOwnerDmId } from "./launcher";
+import { readMemberChannel, type MemberChannel } from "../../lib/memberChannel";
 
 /** ★Phase1 ③: 이 서버 프로세스 인스턴스 id — 재시작 감지용(옛 팝업을 새 프로세스가 새 turn에 재결합 금지).★ */
 export const PROCESS_INSTANCE = randomUUID();
@@ -855,6 +856,8 @@ export async function sendApprovalToMemberRoom(
     token?: string; chatId?: string; fetchFn?: typeof fetch; resolveDestination?: () => string | null;
     /** ★위험 표시★ — tierDReasons 결과. 카드에 적고, 있으면 '항상 허용' 버튼을 빼는 근거가 된다. */
     risks?: string[];
+    /** 이 팀원의 채널(시험 주입). 없으면 agents.json 의 channel. */
+    channel?: MemberChannel;
   } = {},
 ): Promise<boolean> {
   const risks = deps.risks ?? [];
@@ -880,8 +883,20 @@ export async function sendApprovalToMemberRoom(
   //   ★목적지 해석기를 주입 가능하게 둔다★ — 그래야 시험이 "인가 목록" 과 "팀 리드 DM" 을
   //   ★서로 다른 값으로★ 놓고 어느 쪽을 쓰는지 실제로 가를 수 있다. 이 기계에서는 두 값이 우연히
   //   같아서, 주입 없이는 옛 버그 코드로 되돌려도 시험이 초록으로 통과한다.
-  const chatId = deps.chatId ?? (deps.resolveDestination ?? resolveOwnerDmId)();
-  if (!token || !chatId) return false;
+  // ★b3chat 팀원은 owner_chat 으로 보낸다★ — b3chat 의 1:1 방 id 는 텔레그램 팀장 DM 과 다른 값이다.
+  //   여기서도 인가 목록(allow_from)은 목적지로 쓰지 않는다. 없으면 보내지 않는다.
+  const channel = deps.channel ?? readMemberChannel(agentId);
+  const b3chat = channel.kind === "b3chat";
+  const chatId = deps.chatId ?? (b3chat ? channel.ownerChat : (deps.resolveDestination ?? resolveOwnerDmId)());
+  if (!token || !chatId) {
+    if (b3chat && token) console.warn(`[codex-approval] ★b3chat owner_chat 이 없어 승인 요청을 못 띄운다★ agent=${agentId} request=${requestId}`);
+    return false;
+  }
+  if (channel.error) {
+    console.warn(`[codex-approval] ★채널 설정 오류(${channel.error}) — 승인 요청을 보내지 않는다★ agent=${agentId} request=${requestId}`);
+    return false;
+  }
+  if (b3chat) return sendApprovalPlain(channel.apiBase, token, chatId, agentId, requestId, req, risks, deps.fetchFn ?? fetch);
 
   // ★간결하게★ — 사람이 폰에서 한눈에 보고 누른다. 무엇을 하려는지 한 줄, 그 아래 대상.
   const { title, detail } = approvalSummary(req);
@@ -921,6 +936,48 @@ export async function sendApprovalToMemberRoom(
     });
     return res.ok;
   } catch { return false; }
+}
+
+/**
+ * ★b3chat 채널의 승인 요청 — 글자로 남긴다.★
+ *
+ * b3chat 은 parse_mode 를 무시하고(HTML 태그가 그대로 보인다) 버튼(reply_markup)도 저장하지 않는다.
+ * 버튼 처리(answerCallbackQuery·editMessageReplyMarkup)가 서버에 들어오면 버튼은 그대로 쓰이게
+ * 같이 싣되, ★버튼이 안 보여도 무엇을 승인해야 하는지는 대화에 남게★ 글자를 기본으로 한다.
+ * 버튼째로 거절되면(404 등) 버튼 없이 한 번 더 보내고, 그것도 안 되면 로그에 분명히 남긴다.
+ * 팀원 방 승인은 op 방 /approve 에도 안 뜨므로(belongsToMemberRoom) 버튼이 없으면 만료까지 기다린 뒤 실행되지 않는다.
+ */
+async function sendApprovalPlain(
+  apiBase: string, token: string, chatId: string, agentId: string, requestId: string,
+  req: ApprovalRequest, risks: string[], doFetch: typeof fetch,
+): Promise<boolean> {
+  const { title, detail } = approvalSummary(req);
+  const text = [
+    `승인 필요: ${title}`,
+    detail ?? "",
+    risks.length ? `위험 표시: ${risks.join(" · ")}` : "",
+    `버튼이 안 보이면 이 채널에서는 아직 승인할 수 없다 — 시간이 지나면 실행되지 않고 끝난다 (요청 ${requestId})`,
+  ].filter(Boolean).join("\n\n");
+  const buttons = risks.length
+    ? [{ text: "한번 허용", callback_data: `pg1:${requestId}` }, { text: "이 세션", callback_data: `pgs:${requestId}` }, { text: "거절", callback_data: `pgd:${requestId}` }]
+    : [{ text: "한번 허용", callback_data: `pg1:${requestId}` }, { text: "이 세션", callback_data: `pgs:${requestId}` }, { text: "항상 허용", callback_data: `pga:${requestId}` }, { text: "거절", callback_data: `pgd:${requestId}` }];
+  const post = async (body: Record<string, unknown>): Promise<{ ok: boolean; reason: string }> => {
+    try {
+      const res = await doFetch(`${apiBase}/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error_code?: number; description?: string };
+      return res.ok && j.ok === true ? { ok: true, reason: "" } : { ok: false, reason: `code=${j.error_code ?? res.status} ${j.description ?? ""}`.trim() };
+    } catch (e) { return { ok: false, reason: e instanceof Error ? e.message : String(e) }; }
+  };
+  const first = await post({ chat_id: chatId, text, reply_markup: { inline_keyboard: [buttons] } });
+  if (first.ok) return true;
+  console.warn(`[codex-approval] b3chat 승인 버튼 전송 실패 → 글자만 재전송: agent=${agentId} request=${requestId} ${first.reason}`);
+  const second = await post({ chat_id: chatId, text });
+  if (!second.ok) console.warn(`[codex-approval] ★b3chat 승인 요청 전송 실패 — 대화에 안 남았다★ agent=${agentId} request=${requestId} ${second.reason}`);
+  return second.ok;
 }
 
 /**
