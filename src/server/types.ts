@@ -8,6 +8,8 @@ export interface AgentRecord {
   display_name: string;
   /** @멘션 별칭 (한글 이름·단축형). 라우터가 자동 로드 — 추가 시 코드 수정 불필요. */
   nicknames?: string[];
+  /** 봇이 붙는 메신저 서버(lib/memberChannel). 없으면 텔레그램 — kind·api_base·allow_from·owner_chat. */
+  channel?: { kind?: string; api_base?: string; allow_from?: Array<string | number>; owner_chat?: string | number };
   role: string;
   /**
    * 동작 capability 플래그 (additive — 없으면 빈 배열). 코드의 하드코딩 agent-id 비교를 대체.

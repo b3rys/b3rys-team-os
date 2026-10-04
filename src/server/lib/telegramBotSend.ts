@@ -30,6 +30,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import type { AgentRecord } from "../types";
 import { REPO_ROOT } from "./personaTemplates";
+import { memberChannel } from "./memberChannel";
 
 /** 토큰을 찾을 때 필요한 최소 정보. AgentRecord 전체를 요구하지 않는다(테스트가 쉬워진다). */
 export interface BotTokenLookup {
@@ -98,7 +99,8 @@ export async function sendAsAgentBot(
   const token = botTokenFor(agent);
   if (!token) return { ok: false, error: "no_bot_token" };
   try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    // 그 팀원 채널의 봇 API(b3chat 등). channel 이 없으면 텔레그램 — 지금과 같다.
+    const res = await fetch(`${memberChannel(agent).apiBase}/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // ★4096자 제한★ — 넘으면 텔레그램이 통째로 거절한다(=보고 유실). 잘라서라도 보낸다.

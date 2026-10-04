@@ -19,6 +19,7 @@ import { createSerialTurnQueue } from "./serialTurnQueue";
 import { startBridgeWindow, groupTurnCall } from "./bridgeWindow";
 import { makeChatSessionStore, NOOP_DM_SESSION_STORE, type DmSessionStore } from "./dmSessionStore";
 import { toMarkdownV2, splitForTelegram, toPlain } from "./telegramMarkdown";
+import { channelFromEnv, isGroupChat, type MemberChannel } from "../../lib/memberChannel";
 import { steerActiveTurn } from "./activeTurns";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
@@ -33,6 +34,8 @@ import { codexRuntimePreflight, codexConfiguredGrants } from "./permissions";
 import { appendLine, renderBubble, fits, EDIT_MIN_INTERVAL_MS, type ProgressLine } from "./progressLines";
 
 export interface BridgeDeps {
+  /** 이 팀원의 채널(시험 주입). 없으면 런처가 넣은 env(CODEX_CHANNEL_KIND·TELEGRAM_API_BASE)에서 읽는다. */
+  channel?: MemberChannel;
   /** codex 한 턴 구동(기본 runCodexTurn — 테스트 mock). */
   runTurn?: (opts: CodexTurnOptions) => Promise<CodexTurnResult>;
   /** 텔레그램 발신 → 보낸 message_id 반환(작업중 메시지 교체용). */
@@ -639,6 +642,11 @@ export async function handleMessage(
    *   ★플래그로 게이트를 끄는 게 아니라, 게이트가 애초에 그 입구의 것이다.★
    */
   ingress: "poll" | "window" = "poll",
+  /**
+   * ★그룹 방인가 — 폴 루프가 chat.type 으로 정해 넘긴다(isGroupChat: private 가 아니면 그룹).★
+   *   b3chat 은 방 id 가 양수라 "음수 = 그룹" 이 안 맞는다. 안 넘기면 예전 판정(chatId<0).
+   */
+  isGroup?: boolean,
 ): Promise<{ ok: boolean; turnOk: boolean; reply: string; detail: string }> {
   // ★브리지도 app-server 로 간다.★
   //   전에는 브리지만 옛 exec 경로였다 — 그래서 ★사람이 직접 말 거는 길에만★ 그때까지의 개선
@@ -661,7 +669,12 @@ export async function handleMessage(
   //   그게 승인 요청의 주인으로도 쓰인다 — 실제로 dex 요청 4건이 codex 앞으로 기록됐다.
   const selfAgentId = deps.agentId ?? process.env.CODEX_AGENT_ID ?? "codex";
 
-  if (ingress === "poll" && chatId < 0 && messageId !== undefined) {
+  // ★b3chat 팀원은 이 차단을 지나지 않는다★ — b3chat 서버가 이미 멘션·답장·1:1 만 골라 보내고,
+  //   그룹을 capture→bus 로 넘기는 길이 아직 없다(텔레그램 capture 는 텔레그램 그룹만 본다).
+  //   막으면 그 팀원은 그룹에서 영영 말을 못 듣는다.
+  const channel = deps.channel ?? channelFromEnv();
+  const group = isGroup ?? chatId < 0;
+  if (ingress === "poll" && group && channel.kind !== "b3chat" && messageId !== undefined) {
     const shadowOn = process.env.CODEX_GROUP_NATIVE_DENY_SHADOW === "true";
     // ★기본값 = 켜짐★ (제품 결정 2026-08-24): 그룹은 다른 런타임과 같이 capture→bus 로만 받는다.
     //   native 가 그룹에 직접 답하면 ★자기 앞으로 온 것이 아닌 호출에도 답한다★ — 실측: 그룹에서
@@ -962,7 +975,10 @@ export function resetChatThreads(): void {
 }
 
 // ── 라이브 텔레그램 I/O (토큰 필요 — 봇별 CODEX_BOT_TOKEN) ─────────────────────────
-const TG_API = "https://api.telegram.org";
+// 봇 API 주소 — 런처가 팀원 채널대로 TELEGRAM_API_BASE 를 넣는다(없으면 텔레그램).
+const TG_API = channelFromEnv().apiBase;
+/** b3chat 은 parse_mode 를 무시하고 글자를 그대로 저장한다 — MarkdownV2 로 보내면 \ 가 화면에 남는다. */
+const PLAIN_ONLY = channelFromEnv().kind === "b3chat";
 
 /** 텔레그램 발신 → 보낸 message_id 반환(작업중 메시지 교체용). */
 /**
@@ -970,10 +986,12 @@ const TG_API = "https://api.telegram.org";
  * 주입 없이는 시험에서 한 번도 실행되지 않는다. 정말 필요한 순간에 처음 돌면 거기서 또 틀려도
  * 알 방법이 없고, 그 결과가 ★답이 통째로 사라짐★ — 이 코드가 막으려던 바로 그 상황이다.
  */
-export function tgSend(token: string, fetchFn: typeof fetch = fetch): NonNullable<BridgeDeps["sendMessage"]> {
+export function tgSend(token: string, fetchFn: typeof fetch = fetch, opts: { apiBase?: string; plainOnly?: boolean } = {}): NonNullable<BridgeDeps["sendMessage"]> {
+  const apiBase = opts.apiBase ?? TG_API;
+  const plainOnly = opts.plainOnly ?? PLAIN_ONLY;
   let lastReason = "";
   const post = async (body: Record<string, unknown>): Promise<number | null> => {
-    const res = await fetchFn(`${TG_API}/bot${token}/sendMessage`, {
+    const res = await fetchFn(`${apiBase}/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -985,6 +1003,11 @@ export function tgSend(token: string, fetchFn: typeof fetch = fetch): NonNullabl
   };
   return async (chatId, text) => {
     try {
+      if (plainOnly) {
+        const id = await post({ chat_id: chatId, text: toPlain(text) });
+        if (id === null) console.warn(`[codex-bridge] ★전송 실패 — 이 답은 안 나간다★: ${lastReason}`);
+        return id;
+      }
       const id = await post({ chat_id: chatId, text, parse_mode: "MarkdownV2" });
       if (id !== null) return id;
       // ★MarkdownV2 로 거부되면 표시를 걷어내고 한 번 더.★ 이스케이프 한 곳이 어긋났다고
@@ -1025,9 +1048,11 @@ export function tgFailureReason(j: { description?: string; error_code?: number; 
   ].filter(Boolean).join(" · ") || "사유 없음(응답에 description 이 없다)";
 }
 
-export function tgEdit(token: string, fetchFn: typeof fetch = fetch): NonNullable<BridgeDeps["editMessage"]> {
+export function tgEdit(token: string, fetchFn: typeof fetch = fetch, opts: { apiBase?: string; plainOnly?: boolean } = {}): NonNullable<BridgeDeps["editMessage"]> {
+  const apiBase = opts.apiBase ?? TG_API;
+  const plainOnly = opts.plainOnly ?? PLAIN_ONLY;
   const post = async (body: Record<string, unknown>): Promise<{ ok: boolean; reason: string }> => {
-    const res = await fetchFn(`${TG_API}/bot${token}/editMessageText`, {
+    const res = await fetchFn(`${apiBase}/bot${token}/editMessageText`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -1037,6 +1062,11 @@ export function tgEdit(token: string, fetchFn: typeof fetch = fetch): NonNullabl
   };
   return async (chatId, messageId, text) => {
     try {
+      if (plainOnly) {
+        const only = await post({ chat_id: chatId, message_id: messageId, text: toPlain(text) });
+        if (!only.ok) console.warn(`[codex-bridge] ★편집 실패 → 새 버블로 갈라진다★: ${only.reason}`);
+        return only.ok;
+      }
       const first = await post({ chat_id: chatId, message_id: messageId, text, parse_mode: "MarkdownV2" });
       if (first.ok) return true;
       console.warn(`[codex-bridge] 1차 편집 실패(MarkdownV2) → 순수 텍스트로 재전송: ${first.reason}`);
@@ -1072,7 +1102,8 @@ interface TgUpdate {
   update_id: number;
   message?: {
     message_id: number;
-    chat: { id: number };
+    /** private | group | supergroup | channel (텔레그램) — b3chat 도 같은 값을 쓴다. */
+    chat: { id: number; type?: string };
     text?: string;
     /** ★사진에 달린 설명★ — 사진 메시지는 text 가 아니라 caption 으로 온다. */
     caption?: string;
@@ -1445,7 +1476,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
           runTurnFor: async () => {
             const r = await handleMessage(chatId, text, messageId, live, hasMedia && msg
               ? () => downloadDmAttachmentsSafe(token, msg)
-              : undefined);
+              : undefined, "poll", isGroupChat(msg?.chat));
             console.log(`[codex-bridge] → ${r.detail}: ${r.reply.slice(0, 60)}`);
           },
           react: () => { if (messageId !== undefined) void live.reactMessage?.(chatId, messageId, "👀"); },
