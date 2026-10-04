@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.b3os.steno-inbox-writer</string>
+  <key>ProgramArguments</key>
+  <array><string>__B3OS_HOME__/Library/Application Support/b3os/bin/steno-inbox-writer</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>WatchPaths</key>
+  <array><string>__B3OS_HOME__/Library/Application Support/b3os/steno-outbox</string></array>
+  <key>StandardOutPath</key><string>__B3OS_HOME__/Library/Logs/b3os-steno-inbox-writer.log</string>
+  <key>StandardErrorPath</key><string>__B3OS_HOME__/Library/Logs/b3os-steno-inbox-writer.log</string>
+</dict>
+</plist>

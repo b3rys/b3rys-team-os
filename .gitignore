@@ -101,7 +101,8 @@ archiving/
 /TODO.md
 /SPEC.md
 rules/archive/
-/tools/
+/tools/*
+!/tools/steno-inbox-writer/
 /research/
 .env.bak*
 agents.json.bak*
