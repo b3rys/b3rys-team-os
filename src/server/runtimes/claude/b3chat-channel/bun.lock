@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "claude-channel-telegram",
+      "name": "b3chat-channel",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.0.0",
         "grammy": "^1.21.0",
