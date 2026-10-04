@@ -2,7 +2,7 @@
 
 ## 운영 원칙
 
-개발 품질을 우선하면서 일반 작업의 고가 모델 사용을 줄인다. 구형 모델이 항상 저렴하지 않으며, API 단가와 구독 한도는 다르다. 부모 모델을 상속한 실행을 작업별 모델 선택의 성공으로 기록하지 않는다.
+개발 품질을 우선하면서 일반 작업의 고가 모델 사용을 줄인다. OpenAI 계열 하네스의 기본 모델은 `gpt-6.1-sol`이며, `gpt-6-astra`는 복잡·고위험 작업에만 승격해 사용한다. 구형 모델이 항상 저렴하지 않으며, API 단가와 구독 한도는 다르다. 부모 모델을 상속한 실행을 작업별 모델 선택의 성공으로 기록하지 않는다.
 
 ## 도입 대상 매핑
 
@@ -10,10 +10,10 @@
 
 | 작업 | Anthropic 후보 | OpenAI 후보 | effort |
 |---|---|---|---|
-| 단순 수집·정형 처리 | Sonnet 5.5 | GPT-6 Sol | low |
-| 일반 개발·테스트·리뷰 | Sonnet 5.5 | GPT-6 Sol | high |
-| 일반 문서·요약 | Sonnet 5.5 | GPT-6 Sol | medium |
-| 복잡·고위험 판단·검증 | Opus 5.5 | GPT-6 Astra | high |
+| 단순 수집·정형 처리 | Sonnet 5.5 | GPT-6.1 Sol (`gpt-6.1-sol`) | low |
+| 일반 개발·테스트·리뷰 | Sonnet 5.5 | GPT-6.1 Sol (`gpt-6.1-sol`) | high |
+| 일반 문서·요약 | Sonnet 5.5 | GPT-6.1 Sol (`gpt-6.1-sol`) | medium |
+| 복잡·고위험 판단·검증 | Opus 5.5 | GPT-6 Astra (`gpt-6-astra`) | high |
 
 Opus high와 Astra high는 역할의 대응이지 벤치마크 동등성 선언이 아니다. xhigh/max는 실패 분석 뒤 예외 적용한다. mini/Haiku 등 더 낮은 티어는 개발 기본값에 자동 편입하지 않는다.
 
