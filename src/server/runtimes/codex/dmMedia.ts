@@ -11,6 +11,7 @@
  * 여러 장을 보내면 텔레그램이 ★한 장씩 따로★ 보내므로 각 메시지가 각자 처리된다.
  */
 import { storeTelegramMedia, type StoredMedia, type TelegramMediaRef } from "../../lib/mediaStore";
+import { TELEGRAM_API_BASE, channelFromEnv } from "../../lib/memberChannel";
 
 /** 텔레그램 메시지에서 우리가 읽는 부분만. (브리지의 TgUpdate 와 같은 모양) */
 export interface DmMessageMedia {
@@ -108,13 +109,19 @@ export interface DmAttachments {
 export async function downloadDmAttachments(
   token: string,
   msg: DmMessageMedia,
-  opts: { store?: typeof storeTelegramMedia; mediaDir?: string } = {},
+  opts: { store?: typeof storeTelegramMedia; mediaDir?: string; apiBase?: string } = {},
 ): Promise<DmAttachments> {
   const store = opts.store ?? storeTelegramMedia;
+  // 팀원 채널(b3chat 등)이면 그 서버에서 받는다. 텔레그램이면 옵션을 지금과 똑같이 넘긴다.
+  const apiBase = opts.apiBase ?? channelFromEnv().apiBase;
+  const storeOpts = {
+    ...(opts.mediaDir ? { mediaDir: opts.mediaDir } : {}),
+    ...(apiBase !== TELEGRAM_API_BASE ? { apiBase } : {}),
+  };
   const out: DmAttachments = { imagePaths: [], files: [], failed: [] };
   for (const ref of dmMediaRefs(msg)) {
     try {
-      const saved = await store(token, ref, opts.mediaDir ? { mediaDir: opts.mediaDir } : {});
+      const saved = await store(token, ref, storeOpts);
       if (isImageMedia(saved)) out.imagePaths.push(saved.file_path);
       else out.files.push(saved);
     } catch (e) {
@@ -144,7 +151,7 @@ export async function attachmentsOrFailure(load: () => Promise<DmAttachments>): 
 export function downloadDmAttachmentsSafe(
   token: string,
   msg: DmMessageMedia,
-  opts: { store?: typeof storeTelegramMedia; mediaDir?: string } = {},
+  opts: { store?: typeof storeTelegramMedia; mediaDir?: string; apiBase?: string } = {},
 ): Promise<DmAttachments> {
   return attachmentsOrFailure(() => downloadDmAttachments(token, msg, opts));
 }
