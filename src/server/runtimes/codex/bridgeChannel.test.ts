@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { handleMessage, resetChatThreads, runBridge, tgEdit, tgSend, type BridgeDeps } from "./bridge";
 import { downloadDmAttachments } from "./dmMedia";
+import { NOOP_DM_SESSION_STORE } from "./dmSessionStore";
 import { sendApprovalToMemberRoom } from "./appServerPopup";
 import { storeTelegramMedia } from "../../lib/mediaStore";
 import { validateBotToken } from "../../lib/rotateToken";
@@ -245,7 +246,11 @@ describe("브리지 시작 — 채널 설정 오류면 폴링하지 않는다", 
     globalThis.fetch = ((u: string) => { urls.push(String(u)); return new Promise<Response>(() => {}); }) as unknown as typeof fetch;
     try {
       const done = await Promise.race([
-        runBridge({ channel: parseMemberChannel({ kind: "b3chat", owner_chat: "2" }) }).then(() => "returned"),
+        // 가드가 깨져도 라이브 team.db·전송에 닿지 않게 세션 저장소·발신을 대신 넣는다.
+        runBridge({
+          channel: parseMemberChannel({ kind: "b3chat", owner_chat: "2" }),
+          dmSessions: NOOP_DM_SESSION_STORE, sendMessage: async () => null, editMessage: async () => false, reactMessage: async () => false,
+        }).then(() => "returned"),
         new Promise((r) => setTimeout(() => r("still-running"), 1000)),
       ]);
       expect(done).toBe("returned");

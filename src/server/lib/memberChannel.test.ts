@@ -1,12 +1,12 @@
 // 팀원별 채널(kind·api_base·allow_from·owner_chat) — 기본값·검증·그룹 판정·wrapper env.
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  B3CHAT_API_BASE_INVALID, DEFAULT_CHANNEL, TELEGRAM_API_BASE, channelEnvLines, channelFromEnv, isGroupChat, parseMemberChannel, readMemberChannel,
+  B3CHAT_API_BASE_INVALID, DEFAULT_CHANNEL, assertChannelUsable, TELEGRAM_API_BASE, channelEnvLines, channelFromEnv, isGroupChat, parseMemberChannel, readMemberChannel,
 } from "./memberChannel";
-import { codexBridgePaths, renderLaunchWrapper, writeCodexBridgeFiles } from "../runtimes/codex/launcher";
+import { codexBridgePaths, renderLaunchWrapper } from "../runtimes/codex/launcher";
 import { sendAsAgentBot } from "./telegramBotSend";
 import type { AgentRecord } from "../types";
 
@@ -107,17 +107,14 @@ describe("b3chat 주소가 틀리면 fail-closed — 텔레그램으로 떨어�
     expect(ch.error).toBe(B3CHAT_API_BASE_INVALID);
     expect(ch.apiBase).not.toBe(TELEGRAM_API_BASE);
   });
-  test("런처: 틀린 b3chat 팀원은 wrapper·plist 를 쓰기 전에 멈춘다", () => {
-    const prev = process.env.TEAM_AGENT_REGISTRY;
-    process.env.TEAM_AGENT_REGISTRY = registry([{ id: "zzbadchan", runtime: "codex", channel: { kind: "b3chat", api_base: "http://evil.example.com" } }]);
-    try {
-      expect(() => writeCodexBridgeFiles("zzbadchan")).toThrow(/채널 설정 오류/);
-      const p = codexBridgePaths("zzbadchan");
-      expect(existsSync(p.wrapper)).toBe(false);
-      expect(existsSync(p.plist)).toBe(false);
-    } finally {
-      if (prev === undefined) delete process.env.TEAM_AGENT_REGISTRY; else process.env.TEAM_AGENT_REGISTRY = prev;
-    }
+  // ★writeCodexBridgeFiles 는 부르지 않는다★ — 실제 LaunchAgents·var 경로에 쓴다. 가드가 깨진 뮤턴트에서
+  //   진짜 plist 가 생겼다. 파일을 쓰기 직전에 부르는 렌더가 throw 하는지만 메모리에서 잰다.
+  test("런처: 틀린 b3chat 팀원은 wrapper 렌더가 throw(파일 쓰기 전 단계)", () => {
+    const p = registry([{ id: "zzbadchan", runtime: "codex", channel: { kind: "b3chat", api_base: "http://evil.example.com" } }]);
+    const paths = codexBridgePaths("zzbadchan", readMemberChannel("zzbadchan", p));
+    expect(paths.channel.error).toBe(B3CHAT_API_BASE_INVALID);
+    expect(() => renderLaunchWrapper(paths)).toThrow(/채널 설정 오류/);
+    expect(() => assertChannelUsable(paths.channel, "x")).toThrow();
   });
   test("릴레이: 틀린 b3chat 팀원은 보내지 않는다(토큰 조회 전)", async () => {
     const r = await sendAsAgentBot({ id: "zzbadchan", runtime: "codex", channel: { kind: "b3chat" } } as unknown as AgentRecord, "2", "x");
