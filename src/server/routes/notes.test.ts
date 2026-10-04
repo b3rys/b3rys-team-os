@@ -16,6 +16,14 @@ const get = async (qs = "") => {
   const r = await app.request(`/notes${qs}`);
   return { status: r.status, body: (await r.json()) as { notes: Array<Record<string, unknown>>; error?: string } };
 };
+const claim = async (body: unknown) => {
+  const r = await app.request("/notes/claim", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: r.status, body: (await r.json()) as { claimed?: number[]; error?: string } };
+};
 
 beforeEach(() => {
   db = openDb(":memory:");
@@ -96,6 +104,61 @@ describe("GET /notes", () => {
       expect(r.status).toBe(404);
     }
     expect((await get()).body.notes.length).toBe(1);
+  });
+});
+
+describe("library claim", () => {
+  test("같은 library는 한 번만 claim하고 GET에서 제외한다", async () => {
+    const created = await post({ from_agent_id: "bill", format: "md", content: "A" });
+    const id = ((await created.json()) as { id: number }).id;
+
+    expect(await claim({ library: "icloud.library-1", ids: [id] })).toEqual({ status: 200, body: { claimed: [id] } });
+    expect(await claim({ library: "icloud.library-1", ids: [id] })).toEqual({ status: 200, body: { claimed: [] } });
+    expect((await get("?library=icloud.library-1")).body.notes).toEqual([]);
+  });
+
+  test("다른 library와 library 없는 구형 GET에는 그대로 보인다", async () => {
+    const created = await post({ from_agent_id: "bill", format: "md", content: "A" });
+    const id = ((await created.json()) as { id: number }).id;
+    await claim({ library: "library-a", ids: [id] });
+
+    expect((await get("?library=library-b")).body.notes.map((note) => note.id)).toEqual([id]);
+    expect((await get()).body.notes.map((note) => note.id)).toEqual([id]);
+  });
+
+  test("존재하지 않는 note id와 한 요청 안의 중복 id는 무시한다", async () => {
+    const created = await post({ from_agent_id: "bill", format: "md", content: "A" });
+    const id = ((await created.json()) as { id: number }).id;
+    expect((await claim({ library: "library-a", ids: [id, id, 999_999] })).body.claimed).toEqual([id]);
+  });
+
+  test("동시에 같은 library와 note를 claim하면 한 요청만 성공한다", async () => {
+    const created = await post({ from_agent_id: "bill", format: "md", content: "A" });
+    const id = ((await created.json()) as { id: number }).id;
+    const results = await Promise.all([
+      claim({ library: "library-a", ids: [id] }),
+      claim({ library: "library-a", ids: [id] }),
+    ]);
+
+    expect(results.map((result) => result.body.claimed).sort((a, b) => (a?.length ?? 0) - (b?.length ?? 0))).toEqual([
+      [],
+      [id],
+    ]);
+  });
+
+  test("library와 ids를 검증한다", async () => {
+    for (const library of ["", " leading", "has space", "x".repeat(129)]) {
+      const response = await claim({ library, ids: [] });
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe("invalid_library");
+    }
+    for (const ids of [null, "1", [0], [-1], [1.5], ["1"]]) {
+      const response = await claim({ library: "library-a", ids });
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe("ids_must_be_positive_integers");
+    }
+    expect((await get("?library=")).body.error).toBe("invalid_library");
+    expect((await get("?library=has%20space")).body.error).toBe("invalid_library");
   });
 });
 

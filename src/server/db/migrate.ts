@@ -59,6 +59,14 @@ export function migrate(db: Database): void {
        created_at TEXT NOT NULL
      )`,
   );
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS team_note_claim (
+       library_id TEXT NOT NULL,
+       note_id INTEGER NOT NULL REFERENCES team_note(id) ON DELETE CASCADE,
+       claimed_at TEXT NOT NULL,
+       PRIMARY KEY (library_id, note_id)
+     )`,
+  );
   // 그룹 owner 영속화(2026-06-05 GD): 재시작에도 owner 유지. 단일 작은 행(thread_id='group').
   db.exec(
     `CREATE TABLE IF NOT EXISTS group_owner (

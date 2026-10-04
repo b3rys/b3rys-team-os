@@ -1,7 +1,8 @@
 // 팀원 → 팀장 편집기(Steno) 파일 우편함.
 //
 //   POST /api/notes  {from_agent_id, name?, format: "md"|"html", content}  → 201 {id, name}
-//   GET  /api/notes?after=<id>&limit=<n>  → {notes: [{id, from_agent_id, name, format, content, created_at}]} (id 오름차순)
+//   GET  /api/notes?after=<id>&limit=<n>&library=<id>  → {notes: [{id, from_agent_id, name, format, content, created_at}]} (id 오름차순)
+//   POST /api/notes/claim  {library, ids: number[]} → {claimed: number[]}
 //
 // 팀원이 쓴 보고서(md·html)를 팀장 맥북 Steno 의 "받은 파일/" 폴더로 보내는 전용 통로다.
 // /api/inbox 는 팀장 DM 과 섞이고 본문 길이 제한이 있어 따로 둔다.
@@ -19,6 +20,8 @@ export const DEFAULT_MAX_BYTES = 1024 * 1024;
 export const DEFAULT_LIMIT = 50;
 export const MAX_LIMIT = 50;
 const NAME_MAX = 120;
+export const LIBRARY_ID_MAX = 128;
+const LIBRARY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
 export interface NoteRow {
   id: number;
@@ -39,6 +42,15 @@ interface NotesDeps {
 export function notesMaxBytes(env: Record<string, string | undefined> = process.env): number {
   const n = Number(env.B3OS_NOTES_MAX_BYTES);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_MAX_BYTES;
+}
+
+function validLibraryId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= LIBRARY_ID_MAX &&
+    LIBRARY_ID_PATTERN.test(value)
+  );
 }
 
 /**
@@ -108,12 +120,52 @@ export function createNotesRoutes(deps: NotesDeps): Hono {
     if (!/^\d+$/.test(limitRaw)) return c.json({ error: "limit_must_be_integer" }, 400);
     const after = Number(afterRaw);
     const limit = Math.min(Math.max(Number(limitRaw), 1), MAX_LIMIT);
-    const rows = deps.db
-      .prepare(
-        `SELECT id, from_agent, name, format, content, created_at FROM team_note WHERE id > ? ORDER BY id ASC LIMIT ?`,
-      )
-      .all(after, limit) as DbRow[];
+    const library = c.req.query("library");
+    if (library !== undefined && !validLibraryId(library)) {
+      return c.json({ error: "invalid_library" }, 400);
+    }
+    const rows = library === undefined
+      ? deps.db
+          .prepare(
+            `SELECT id, from_agent, name, format, content, created_at FROM team_note WHERE id > ? ORDER BY id ASC LIMIT ?`,
+          )
+          .all(after, limit) as DbRow[]
+      : deps.db
+          .prepare(
+            `SELECT n.id, n.from_agent, n.name, n.format, n.content, n.created_at
+               FROM team_note n
+              WHERE n.id > ?
+                AND NOT EXISTS (
+                  SELECT 1 FROM team_note_claim c WHERE c.library_id = ? AND c.note_id = n.id
+                )
+              ORDER BY n.id ASC
+              LIMIT ?`,
+          )
+          .all(after, library, limit) as DbRow[];
     return c.json({ notes: rows.map(toNote) });
+  });
+
+  app.post("/notes/claim", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body || typeof body !== "object") return c.json({ error: "invalid_json" }, 400);
+    if (!validLibraryId(body.library)) return c.json({ error: "invalid_library" }, 400);
+    if (!Array.isArray(body.ids) || !body.ids.every((id) => Number.isSafeInteger(id) && Number(id) > 0)) {
+      return c.json({ error: "ids_must_be_positive_integers" }, 400);
+    }
+
+    const insert = deps.db.prepare(
+      `INSERT OR IGNORE INTO team_note_claim (library_id, note_id, claimed_at)
+       SELECT ?, id, ? FROM team_note WHERE id = ?`,
+    );
+    const claim = deps.db.transaction((ids: number[]) => {
+      const claimed: number[] = [];
+      const claimedAt = new Date().toISOString();
+      for (const id of new Set(ids)) {
+        if (insert.run(body.library as string, claimedAt, id).changes === 1) claimed.push(id);
+      }
+      return claimed;
+    });
+    return c.json({ claimed: claim(body.ids as number[]) });
   });
 
   return app;
