@@ -3,7 +3,7 @@
  * MCP stdio 서버로 실행해 JSON-RPC 로 몰아 본다. 실제 b3chat·텔레그램·Claude 세션은 쓰지 않는다.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import type { Subprocess } from 'bun'
@@ -123,7 +123,10 @@ describe.skipIf(!HAS_DEPS)('b3chat 채널 플러그인 — 가짜 b3chat 서버 
     env.NO_PROXY = '127.0.0.1,localhost'
     env.no_proxy = '127.0.0.1,localhost'
 
-    proc = Bun.spawn(['bun', 'server.ts'], { cwd: HERE, env, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' })
+    // 플러그인 .mcp.json 의 b3chat 항목 그대로 실행한다(${CLAUDE_PLUGIN_ROOT} = 이 폴더) — 플러그인 배선까지 같이 잰다.
+    const entry = JSON.parse(readFileSync(join(HERE, '.mcp.json'), 'utf8')).mcpServers.b3chat
+    const args = (entry.args as string[]).map(a => a.replaceAll('${CLAUDE_PLUGIN_ROOT}', HERE))
+    proc = Bun.spawn([entry.command, ...args], { cwd: tmpdir(), env, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' })
     ;(async () => {
       const dec = new TextDecoder()
       let buf = ''

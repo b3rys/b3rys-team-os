@@ -5,7 +5,7 @@
   "type": "module",
   "bin": "./server.ts",
   "scripts": {
-    "start": "bun server.ts",
+    "start": "bun install --frozen-lockfile --no-summary 1>&2 && bun server.ts",
     "test": "bun test"
   },
   "dependencies": {

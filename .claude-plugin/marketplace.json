@@ -1,0 +1,14 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "b3os",
+  "description": "b3os 팀 플러그인 (제안 — 아직 어디에도 등록하지 않음)",
+  "owner": { "name": "b3rys team (b3os)" },
+  "plugins": [
+    {
+      "name": "b3chat",
+      "description": "b3chat channel for Claude Code — b3os 팀 메신저와 세션을 잇는 채널 (Telegram 채널 플러그인 0.0.7 파생, Apache-2.0)",
+      "category": "productivity",
+      "source": "./src/server/runtimes/claude/b3chat-channel"
+    }
+  ]
+}

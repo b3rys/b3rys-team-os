@@ -26,4 +26,6 @@ header comment of server.ts:
      return an error; inbound photos deliver their caption only.
   8. MCP server name "b3chat" and b3chat wording in the instructions.
 Added files: b3chat.ts (helpers), tests, README.md, NOTICE.
-package.json: name "b3chat-channel", start script "bun server.ts", test script.
+Plugin layout copied from the original: .claude-plugin/plugin.json (name b3chat),
+.mcp.json (same command pattern, server name b3chat), .npmrc (unchanged).
+package.json: name "b3chat-channel", start script uses --frozen-lockfile, test script.

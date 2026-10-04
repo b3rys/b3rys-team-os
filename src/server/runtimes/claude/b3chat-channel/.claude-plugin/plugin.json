@@ -1,0 +1,8 @@
+{
+  "name": "b3chat",
+  "description": "b3chat channel for Claude Code — b3os 팀 메신저(b3chat, 텔레그램 호환 봇 API)와 세션을 잇는 채널. Derived from the official Telegram channel plugin 0.0.7 (Anthropic, Apache-2.0); see NOTICE.",
+  "version": "0.0.1",
+  "author": { "name": "b3rys team (b3os)" },
+  "license": "Apache-2.0",
+  "keywords": ["b3chat", "b3os", "messaging", "channel", "mcp"]
+}
