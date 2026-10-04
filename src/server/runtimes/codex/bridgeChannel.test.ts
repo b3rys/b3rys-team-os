@@ -241,9 +241,14 @@ describe("브리지 시작 — 채널 설정 오류면 폴링하지 않는다", 
     const prevFetch = globalThis.fetch;
     const urls: string[] = [];
     process.env.CODEX_BOT_TOKEN = "T";
-    globalThis.fetch = (async (u: string) => { urls.push(String(u)); return new Response("{}"); }) as unknown as typeof fetch;
+    // ★가드가 깨져도 시험이 멈추지 않게★ — 가짜 fetch 는 영영 답하지 않고(폴 루프가 돌지 못한다), 1초만 기다린다.
+    globalThis.fetch = ((u: string) => { urls.push(String(u)); return new Promise<Response>(() => {}); }) as unknown as typeof fetch;
     try {
-      await runBridge({ channel: parseMemberChannel({ kind: "b3chat", owner_chat: "2" }) });
+      const done = await Promise.race([
+        runBridge({ channel: parseMemberChannel({ kind: "b3chat", owner_chat: "2" }) }).then(() => "returned"),
+        new Promise((r) => setTimeout(() => r("still-running"), 1000)),
+      ]);
+      expect(done).toBe("returned");
       expect(urls).toEqual([]);
     } finally {
       globalThis.fetch = prevFetch;
