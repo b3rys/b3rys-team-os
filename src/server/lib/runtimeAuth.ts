@@ -110,6 +110,18 @@ function binaryExists(cmd: string, ...paths: string[]): boolean {
   return paths.some((p) => { try { return existsSync(p); } catch { return false; } });
 }
 
+/**
+ * 사전점검이 실행해 볼 codex — ★CODEX_BIN 이 있으면 그것이 먼저다.★
+ * 브리지 wrapper 는 CODEX_BIN 을 그대로 export 해 그 파일로 돈다(launcher codexBinLine). 점검이 PATH 를 먼저 보면
+ * 실제로 돌 파일이 아니라 PATH 의 다른 설치본을 재게 된다 — 그 설치본이 macOS 격리로 안 뜨면 멀쩡한 영입이 막힌다.
+ * CODEX_BIN 이 없거나 그 경로에 파일이 없으면 예전 순서(PATH → 흔한 경로).
+ */
+export function resolveCodexBin(env: Record<string, string | undefined> = process.env): string | null {
+  const explicit = env.CODEX_BIN;
+  if (explicit) { try { if (existsSync(explicit)) return explicit; } catch { /* 아래로 */ } }
+  return resolveBinPath("codex", explicit ?? CODEX_BIN, "/opt/homebrew/bin/codex", "/usr/local/bin/codex", `${HOME}/.local/bin/codex`);
+}
+
 /** 실행할 바이너리 절대경로 해석 — Bun.which(PATH) 우선, 없으면 첫 존재 경로. 없으면 null. */
 function resolveBinPath(cmd: string, ...paths: string[]): string | null {
   try { const w = (typeof Bun !== "undefined" && Bun.which) ? Bun.which(cmd) : null; if (w) return w; } catch { /* ignore */ }
@@ -224,7 +236,7 @@ async function checkCodexAuth(runtime: string): Promise<RuntimeAuthResult> {
   //   preflight를 통과한 뒤 first-model-call에서 불투명한 exit_null로만 실패해 원인 진단이 안 된다. `codex --version`을
   //   실제 실행해 실행가능·미격리를 확인하고, 실패 시 원인 명확한 fixHint를 준다.
   {
-    const cbin = resolveBinPath("codex", process.env.CODEX_BIN ?? CODEX_BIN, "/opt/homebrew/bin/codex", "/usr/local/bin/codex", `${HOME}/.local/bin/codex`);
+    const cbin = resolveCodexBin();
     const run = cbin ? binaryRunnable(cbin) : { ok: false, reason: "경로 해석 실패" };
     if (!run.ok) {
       return { ...base, loggedIn: false, detail: `codex 바이너리 실행 불가: ${run.reason}`, fixHint: CODEX_UNRUNNABLE_HINT };
