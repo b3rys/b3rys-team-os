@@ -730,7 +730,7 @@ function sectionTeamShare(runtime: string, agentId?: string): string {
 const SECTION_GLOBAL = [
   "## Global rules",
   "",
-  "- 구현 마일스톤은 10분 단위. 환경별(dev/stage/prod) 설정은 명시적으로 분리한다.",
+  "- 기본 작업단위 10분. 환경별(dev/stage/prod) 설정은 명시적으로 분리한다.",
   "- 반복 운영은 자동화한다. 외부 고객에게 터미널이나 스크립트 실행을 시키지 않는다.",
   "- 모든 변경은 [바뀐 파일 · 검증한 것 · 검증 못 한 범위 · 되돌리는 법] 으로 보고한다.",
 ].join("\n");
