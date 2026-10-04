@@ -11,7 +11,7 @@ import { writeFileSync, mkdirSync, chmodSync, existsSync, rmSync, lstatSync, rea
 import { dirname, join } from "node:path";
 import { REPO_ROOT, MEMBERS_ROOT } from "../../lib/personaTemplates";
 import { getCaptureGroupId } from "../../lib/captureConfig";
-import { DEFAULT_CHANNEL, channelEnvLines, readMemberChannel, type MemberChannel } from "../../lib/memberChannel";
+import { DEFAULT_CHANNEL, assertChannelUsable, channelEnvLines, readMemberChannel, type MemberChannel } from "../../lib/memberChannel";
 import { renderSeededCodexConfig } from "./configSeed";
 import { Database } from "bun:sqlite";
 
@@ -267,6 +267,8 @@ export function ensureCodexHome(p: CodexBridgePaths): void {
 /** wrapper+plist 파일 생성(파일 쓰기만 — launchctl 로드는 호출자가 게이트 뒤에서). idempotent. */
 export function writeCodexBridgeFiles(id: string): CodexBridgePaths {
   const p = codexBridgePaths(id, readMemberChannel(id));
+  // ★채널 설정이 틀리면 파일을 쓰기 전에 멈춘다★ — 옛 wrapper 를 덮어 반쯤 바뀐 상태를 만들지 않는다.
+  assertChannelUsable(p.channel, `codex ${id}`);
   ensureCodexHome(p); // CODEX_HOME 없으면 codex exec 즉사 → 활성화 시 보장
   mkdirSync(dirname(p.wrapper), { recursive: true });
   mkdirSync(dirname(p.plist), { recursive: true });

@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { handleMessage, resetChatThreads, tgEdit, tgSend, type BridgeDeps } from "./bridge";
+import { handleMessage, resetChatThreads, runBridge, tgEdit, tgSend, type BridgeDeps } from "./bridge";
 import { downloadDmAttachments } from "./dmMedia";
 import { sendApprovalToMemberRoom } from "./appServerPopup";
 import { storeTelegramMedia } from "../../lib/mediaStore";
@@ -210,6 +210,13 @@ describe("승인 요청 — b3chat 은 글자로 남긴다", () => {
     expect(calls.length).toBe(0);
   });
 
+  test("채널 설정 오류(b3chat 주소 없음) → 보내지 않는다", async () => {
+    const { calls, fetchFn } = recorder([200]);
+    const bad = parseMemberChannel({ kind: "b3chat", owner_chat: "2" });
+    expect(await sendApprovalToMemberRoom("bee", "prm_abc", req, { token: "T", fetchFn, channel: bad })).toBe(false);
+    expect(calls.length).toBe(0);
+  });
+
   test("텔레그램(기본) → api.telegram.org · HTML · 팀장 DM — 지금과 같다", async () => {
     const { calls, fetchFn } = recorder([200]);
     expect(await sendApprovalToMemberRoom("cody", "prm_abc", req, { token: "T", fetchFn, channel: DEFAULT_CHANNEL, resolveDestination: () => "777" })).toBe(true);
@@ -225,5 +232,22 @@ describe("토큰 확인(getMe) 형식", () => {
     expect(await validateBotToken(b3)).toEqual({ ok: false, error: "bot_token_invalid" });
     // b3chat 주소면 형식 통과 → getMe 로 간다(여기선 닫힌 포트라 getme_failed)
     expect(await validateBotToken(b3, "http://127.0.0.1:1")).toEqual({ ok: false, error: "getme_failed" });
+  });
+});
+
+describe("브리지 시작 — 채널 설정 오류면 폴링하지 않는다", () => {
+  test("b3chat 주소 없음 → getMe·getUpdates 0회로 끝난다", async () => {
+    const prevTok = process.env.CODEX_BOT_TOKEN;
+    const prevFetch = globalThis.fetch;
+    const urls: string[] = [];
+    process.env.CODEX_BOT_TOKEN = "T";
+    globalThis.fetch = (async (u: string) => { urls.push(String(u)); return new Response("{}"); }) as unknown as typeof fetch;
+    try {
+      await runBridge({ channel: parseMemberChannel({ kind: "b3chat", owner_chat: "2" }) });
+      expect(urls).toEqual([]);
+    } finally {
+      globalThis.fetch = prevFetch;
+      if (prevTok === undefined) delete process.env.CODEX_BOT_TOKEN; else process.env.CODEX_BOT_TOKEN = prevTok;
+    }
   });
 });

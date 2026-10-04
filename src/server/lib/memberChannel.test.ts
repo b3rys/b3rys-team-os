@@ -1,12 +1,14 @@
 // 팀원별 채널(kind·api_base·allow_from·owner_chat) — 기본값·검증·그룹 판정·wrapper env.
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  DEFAULT_CHANNEL, TELEGRAM_API_BASE, channelEnvLines, channelFromEnv, isGroupChat, parseMemberChannel, readMemberChannel,
+  B3CHAT_API_BASE_INVALID, DEFAULT_CHANNEL, TELEGRAM_API_BASE, channelEnvLines, channelFromEnv, isGroupChat, parseMemberChannel, readMemberChannel,
 } from "./memberChannel";
-import { codexBridgePaths, renderLaunchWrapper } from "../runtimes/codex/launcher";
+import { codexBridgePaths, renderLaunchWrapper, writeCodexBridgeFiles } from "../runtimes/codex/launcher";
+import { sendAsAgentBot } from "./telegramBotSend";
+import type { AgentRecord } from "../types";
 
 function registry(agents: unknown[]): string {
   const p = join(mkdtempSync(join(tmpdir(), "b3os-chan-")), "agents.json");
@@ -37,9 +39,9 @@ describe("parseMemberChannel", () => {
     expect(parseMemberChannel({ kind: "b3chat", api_base: "https://chat.example.com/", allow_from: [12, "40", "x"], owner_chat: 12 }))
       .toEqual({ kind: "b3chat", apiBase: "https://chat.example.com", allowFrom: ["12", "40"], ownerChat: "12" });
   });
-  test("평문 http 는 같은 기계만 — 그 밖이면 텔레그램 주소로 떨어진다", () => {
+  test("평문 http 는 같은 기계만 — 그 밖이면 b3chat 은 오류(아래 fail-closed)", () => {
     expect(parseMemberChannel({ kind: "b3chat", api_base: "http://127.0.0.1:8741" }).apiBase).toBe("http://127.0.0.1:8741");
-    expect(parseMemberChannel({ kind: "b3chat", api_base: "http://evil.example.com" }).apiBase).toBe(TELEGRAM_API_BASE);
+    expect(parseMemberChannel({ kind: "b3chat", api_base: "http://evil.example.com" }).error).toBe(B3CHAT_API_BASE_INVALID);
   });
   test("모르는 kind 는 telegram", () => expect(parseMemberChannel({ kind: "slack" }).kind).toBe("telegram"));
 });
@@ -82,5 +84,43 @@ describe("런처 wrapper", () => {
     expect(w).toContain('export CODEX_CHANNEL_KIND="b3chat"');
     expect(w).toContain('export TELEGRAM_API_BASE="http://127.0.0.1:8741"');
     expect(w).toContain('export CODEX_OWNER_CHAT="7"');
+  });
+});
+
+describe("b3chat 주소가 틀리면 fail-closed — 텔레그램으로 떨어지지 않는다", () => {
+  // ★토큰이 api.telegram.org 로 나가면 안 된다★ (리뷰 지적)
+  for (const [label, base] of [["없음", undefined], ["빈 값", ""], ["외부 http", "http://evil.example.com"], ["형식 밖", "chat.example.com"]] as const) {
+    test(`b3chat api_base ${label} → error, 주소 비움`, () => {
+      const ch = parseMemberChannel({ kind: "b3chat", api_base: base, allow_from: ["2"], owner_chat: "2" });
+      expect(ch.error).toBe(B3CHAT_API_BASE_INVALID);
+      expect(ch.apiBase).not.toBe(TELEGRAM_API_BASE);
+      expect(() => channelEnvLines(ch)).toThrow();
+    });
+  }
+  test("텔레그램은 주소가 틀려도 기본 주소 — 지금과 같다(오류 아님)", () => {
+    const ch = parseMemberChannel({ kind: "telegram", api_base: "http://evil.example.com" });
+    expect(ch.error).toBeUndefined();
+    expect(ch.apiBase).toBe(TELEGRAM_API_BASE);
+  });
+  test("env: b3chat 인데 TELEGRAM_API_BASE 없음 → error", () => {
+    const ch = channelFromEnv({ CODEX_CHANNEL_KIND: "b3chat" });
+    expect(ch.error).toBe(B3CHAT_API_BASE_INVALID);
+    expect(ch.apiBase).not.toBe(TELEGRAM_API_BASE);
+  });
+  test("런처: 틀린 b3chat 팀원은 wrapper·plist 를 쓰기 전에 멈춘다", () => {
+    const prev = process.env.TEAM_AGENT_REGISTRY;
+    process.env.TEAM_AGENT_REGISTRY = registry([{ id: "zzbadchan", runtime: "codex", channel: { kind: "b3chat", api_base: "http://evil.example.com" } }]);
+    try {
+      expect(() => writeCodexBridgeFiles("zzbadchan")).toThrow(/채널 설정 오류/);
+      const p = codexBridgePaths("zzbadchan");
+      expect(existsSync(p.wrapper)).toBe(false);
+      expect(existsSync(p.plist)).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env.TEAM_AGENT_REGISTRY; else process.env.TEAM_AGENT_REGISTRY = prev;
+    }
+  });
+  test("릴레이: 틀린 b3chat 팀원은 보내지 않는다(토큰 조회 전)", async () => {
+    const r = await sendAsAgentBot({ id: "zzbadchan", runtime: "codex", channel: { kind: "b3chat" } } as unknown as AgentRecord, "2", "x");
+    expect(r).toEqual({ ok: false, error: `channel_invalid:${B3CHAT_API_BASE_INVALID}` });
   });
 });

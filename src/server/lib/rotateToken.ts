@@ -150,7 +150,10 @@ export async function rotateBotToken(
   newToken: string,
 ): Promise<RotateResult> {
   // 1) 새 토큰 검증(살아있는 봇). 실패 시 기존 안 건드림.
-  const v = await validateBotToken(newToken.trim(), memberChannel(agent).apiBase);
+  // 채널 설정이 틀리면 확인 요청도 보내지 않는다(새 토큰을 엉뚱한 서버로 보내지 않는다).
+  const ch = memberChannel(agent);
+  if (ch.error) return { ok: false, error: "bot_token_invalid", detail: `채널 설정 오류(${ch.error}) — api_base 를 고친 뒤 다시(기존 유지).` };
+  const v = await validateBotToken(newToken.trim(), ch.apiBase);
   if (!v.ok) {
     const detail = v.error === "bot_token_invalid" ? "BotFather 토큰 형식이 아니에요(기존 유지)."
       : v.error === "bot_token_dead" ? "토큰이 유효하지 않거나 죽은 봇이에요(getMe 실패) — 기존 토큰 유지."

@@ -892,6 +892,10 @@ export async function sendApprovalToMemberRoom(
     if (b3chat && token) console.warn(`[codex-approval] ★b3chat owner_chat 이 없어 승인 요청을 못 띄운다★ agent=${agentId} request=${requestId}`);
     return false;
   }
+  if (channel.error) {
+    console.warn(`[codex-approval] ★채널 설정 오류(${channel.error}) — 승인 요청을 보내지 않는다★ agent=${agentId} request=${requestId}`);
+    return false;
+  }
   if (b3chat) return sendApprovalPlain(channel.apiBase, token, chatId, agentId, requestId, req, risks, deps.fetchFn ?? fetch);
 
   // ★간결하게★ — 사람이 폰에서 한눈에 보고 누른다. 무엇을 하려는지 한 줄, 그 아래 대상.

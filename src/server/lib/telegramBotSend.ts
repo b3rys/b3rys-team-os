@@ -96,11 +96,14 @@ export async function sendAsAgentBot(
   chatId: string,
   text: string,
 ): Promise<{ ok: boolean; error?: string }> {
+  // 채널 설정이 틀리면 보내지 않는다(토큰을 엉뚱한 서버로 보내지 않는다) — 토큰을 읽기도 전에.
+  const ch = memberChannel(agent);
+  if (ch.error) return { ok: false, error: `channel_invalid:${ch.error}` };
   const token = botTokenFor(agent);
   if (!token) return { ok: false, error: "no_bot_token" };
   try {
     // 그 팀원 채널의 봇 API(b3chat 등). channel 이 없으면 텔레그램 — 지금과 같다.
-    const res = await fetch(`${memberChannel(agent).apiBase}/bot${token}/sendMessage`, {
+    const res = await fetch(`${ch.apiBase}/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // ★4096자 제한★ — 넘으면 텔레그램이 통째로 거절한다(=보고 유실). 잘라서라도 보낸다.

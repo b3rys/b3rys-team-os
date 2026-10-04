@@ -27,6 +27,23 @@ export interface MemberChannel {
   allowFrom: string[] | null;
   /** null = 설정 없음(기존 팀장 DM 해석을 쓴다) */
   ownerChat: string | null;
+  /**
+   * 설정이 틀려 이 채널로 띄우면 안 된다(fail-closed). 지금은 b3chat 인데 api_base 가 없거나 형식 밖일 때.
+   * ★텔레그램 주소로 떨어뜨리지 않는다★ — 그러면 b3chat 봇 토큰이 api.telegram.org 로 나간다.
+   */
+  error?: string;
+}
+
+export const B3CHAT_API_BASE_INVALID = "b3chat_api_base_invalid";
+
+/** 받을 수 있는 api_base 인가 — https, 또는 같은 기계 시험용 http://127.0.0.1·localhost. */
+function validApiBase(base: string): boolean {
+  return /^https:\/\/[^\s/]+/.test(base) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(base);
+}
+
+/** 이 채널로 띄우면 안 되면 throw — 런처·릴레이·토큰 확인이 한 문구로 막는다. */
+export function assertChannelUsable(ch: MemberChannel, who: string): void {
+  if (ch.error) throw new Error(`${who}: 채널 설정 오류(${ch.error}) — b3chat 은 api_base(https://… 또는 http://127.0.0.1)가 있어야 한다. 띄우지 않는다.`);
 }
 
 export const DEFAULT_CHANNEL: MemberChannel = Object.freeze({
@@ -44,13 +61,16 @@ export function parseMemberChannel(raw: unknown): MemberChannel {
   const r = raw as Record<string, unknown>;
   const kind: MemberChannelKind = r.kind === "b3chat" ? "b3chat" : "telegram";
   const base = typeof r.api_base === "string" ? r.api_base.trim().replace(/\/+$/, "") : "";
-  // https 만 받는다(같은 기계 시험용 http://127.0.0.1·localhost 는 허용). 그 밖이면 기본 주소.
-  const apiBase = /^https:\/\/[^\s/]+/.test(base) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(base) ? base : TELEGRAM_API_BASE;
   const allowFrom = Array.isArray(r.allow_from)
     ? r.allow_from.map((v) => String(v).trim()).filter((v) => ID_RE.test(v))
     : null;
   const owner = r.owner_chat == null ? "" : String(r.owner_chat).trim();
-  return { kind, apiBase, allowFrom, ownerChat: ID_RE.test(owner) ? owner : null };
+  const ownerChat = ID_RE.test(owner) ? owner : null;
+  // https 만 받는다(같은 기계 시험용 http://127.0.0.1·localhost 는 허용).
+  if (validApiBase(base)) return { kind, apiBase: base, allowFrom, ownerChat };
+  // ★b3chat 은 텔레그램 주소로 떨어뜨리지 않는다(fail-closed).★ 텔레그램은 비었거나 틀리면 기본 주소 — 지금과 같다.
+  if (kind === "b3chat") return { kind, apiBase: "", allowFrom, ownerChat, error: B3CHAT_API_BASE_INVALID };
+  return { kind, apiBase: TELEGRAM_API_BASE, allowFrom, ownerChat };
 }
 
 /** 팀원 기록(이미 읽은 agents.json 항목) → 채널. 서버 프로세스 쪽(릴레이·토큰 확인)에서 쓴다. */
@@ -75,12 +95,10 @@ export function channelFromEnv(env: Record<string, string | undefined> = process
   const kind = env.CODEX_CHANNEL_KIND === "b3chat" ? "b3chat" : "telegram";
   const base = (env.TELEGRAM_API_BASE ?? "").trim().replace(/\/+$/, "");
   const owner = (env.CODEX_OWNER_CHAT ?? "").trim();
-  return {
-    kind,
-    apiBase: base || TELEGRAM_API_BASE,
-    allowFrom: null, // 브리지의 허용 목록은 CODEX_ALLOW_FROM 이 정본(런처가 이미 채널 값으로 채운다)
-    ownerChat: ID_RE.test(owner) ? owner : null,
-  };
+  const ownerChat = ID_RE.test(owner) ? owner : null;
+  // 브리지의 허용 목록은 CODEX_ALLOW_FROM 이 정본(런처가 이미 채널 값으로 채운다)
+  if (kind === "b3chat" && !validApiBase(base)) return { kind, apiBase: "", allowFrom: null, ownerChat, error: B3CHAT_API_BASE_INVALID };
+  return { kind, apiBase: base || TELEGRAM_API_BASE, allowFrom: null, ownerChat };
 }
 
 /** 받은 메시지의 chat 이 그룹인가. 텔레그램 type 은 private/group/supergroup/channel — ★private 가 아니면 그룹★.
@@ -93,6 +111,7 @@ export function isGroupChat(chat: { type?: unknown; id?: unknown } | null | unde
 
 /** wrapper 에 넣을 env 줄 — 채널 설정이 있을 때만(없으면 wrapper 는 지금과 바이트까지 같다). */
 export function channelEnvLines(ch: MemberChannel): string[] {
+  assertChannelUsable(ch, "wrapper");
   if (ch.kind === "telegram" && ch.apiBase === TELEGRAM_API_BASE && ch.ownerChat == null) return [];
   const q = (v: string) => `"${v.replace(/(["\\$`])/g, "\\$1")}"`;
   const lines = [`export CODEX_CHANNEL_KIND=${q(ch.kind)}`, `export TELEGRAM_API_BASE=${q(ch.apiBase)}`];

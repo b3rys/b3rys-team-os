@@ -19,7 +19,7 @@ import { createSerialTurnQueue } from "./serialTurnQueue";
 import { startBridgeWindow, groupTurnCall } from "./bridgeWindow";
 import { makeChatSessionStore, NOOP_DM_SESSION_STORE, type DmSessionStore } from "./dmSessionStore";
 import { toMarkdownV2, splitForTelegram, toPlain } from "./telegramMarkdown";
-import { channelFromEnv, isGroupChat, type MemberChannel } from "../../lib/memberChannel";
+import { assertChannelUsable, channelFromEnv, isGroupChat, type MemberChannel } from "../../lib/memberChannel";
 import { steerActiveTurn } from "./activeTurns";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
@@ -1305,6 +1305,10 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     console.error("[codex-bridge] CODEX_BOT_TOKEN 미설정 — 라이브 폴링 불가.");
     return;
   }
+  // ★채널 설정이 틀리면 폴링하지 않는다★ — b3chat 인데 주소가 없으면 텔레그램으로 떨어지지 않고 멈춘다
+  //   (그 토큰이 api.telegram.org 로 나가면 안 된다). 런처가 먼저 막지만 wrapper 를 손으로 고친 경우의 두 번째 벽.
+  try { assertChannelUsable(deps.channel ?? channelFromEnv(), "codex-bridge"); }
+  catch (e) { console.error(`[codex-bridge] ${e instanceof Error ? e.message : String(e)}`); return; }
 	  // 발신자 게이트(allowlist, fail-closed): claude access.json allowFrom / openclaw ownerAllowFrom 와 동일 목적.
 	  // 텔레그램은 봇 @username 아는 누구나 DM 가능 → 게이트 없으면 임의 사용자가 이 봇 정체성으로 codex 턴(quota/비용) 소진.
 	  // CODEX_ALLOW_FROM=comma-sep chat_id (오너 DM·팀그룹, 런처가 자동 시드). 그 외 발신자 무시+audit. 미설정 시 전체 차단.
