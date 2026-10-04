@@ -25,7 +25,8 @@ Claude Code 세션을 b3chat(팀 자체 메신저, 텔레그램 호환 봇 API)�
 ## 불러오는 법
 
 세션 작업 폴더의 `.mcp.json` 에 서버 `b3chat` 을 등록하고(`command: bun`, `args: ["<이 폴더>/server.ts"]`, `env: {"B3CHAT_STATE_DIR": "…"}`),
-`claude --dangerously-load-development-channels server:b3chat` 로 띄운다. 이 연결(런처 배선)은 다음 단계에서 한다.
+`claude --dangerously-load-development-channels server:b3chat` 로 띄운다. 이 옵션을 쓰면 시작할 때 개발용 채널 경고 창이 뜨는데,
+시작 스크립트가 그 창을 자동으로 확인한다. 런처·시작 스크립트 연결은 다음 단계에서 한다(이 폴더에는 아직 없다).
 
 ## 테스트
 
