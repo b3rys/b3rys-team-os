@@ -45,18 +45,21 @@ describe("steno-send.sh", () => {
     expect(readFileSync(join(outbox, "같은 2.md"), "utf8")).toBe("new");
   });
 
-  test("경로 이름, 형식 밖, 빈 파일, 1MB 초과를 거절한다", async () => {
+  test("경로 이름, 형식 밖, 민감한 이름, 빈 파일, 20MB 초과를 거절한다", async () => {
     const md = join(home, "x.md");
     writeFileSync(md, "x");
     expect((await run([md, "--name", "../x.md"])).code).toBe(1);
-    const txt = join(home, "x.txt");
-    writeFileSync(txt, "x");
-    expect((await run([txt])).code).toBe(1);
+    const app = join(home, "x.app");
+    writeFileSync(app, "x");
+    expect((await run([app])).code).toBe(1);
+    for (const name of [".env", "client-secret.txt", "db-CREDENTIAL.md", "api_token.json"]) {
+      expect((await run([md, "--name", name])).code).toBe(1);
+    }
     const empty = join(home, "empty.md");
     writeFileSync(empty, "");
     expect((await run([empty])).code).toBe(1);
     const big = join(home, "big.md");
-    writeFileSync(big, Buffer.alloc(1_048_577));
+    writeFileSync(big, Buffer.alloc(20 * 1_048_576 + 1));
     expect((await run([big])).code).toBe(1);
   });
 });
