@@ -1,16 +1,17 @@
 #!/bin/bash
-# 보고서 파일(md·html)을 권한 분리된 로컬 outbox에 넣는다.
+# Steno 지원 파일을 권한 분리된 로컬 outbox에 넣는다.
 #
-# Usage: steno-send.sh <file.md|file.html> [--name <받는 쪽 파일 이름>]
+# Usage: steno-send.sh <file> [--name <받는 쪽 파일 이름>]
 #
-#   · 형식은 확장자로 정한다: .md·.markdown → md, .html·.htm → html. 그 밖은 거절.
+#   · Steno 폴더 목록 지원 확장자와 그림·zip만 받는다.
 #   · --name 을 안 주면 파일 이름 그대로 쓴다. 경로가 포함된 이름은 거절한다.
-#   · 크기 상한은 1 MB다.
+#   · 크기 상한은 20 MB다.
 #   · 보낸 것은 덮어쓰거나 지울 수 없다. 고친 판은 새로 보낸다.
 # 성공하면 outbox 파일 이름을 stdout 에 찍고 0 으로 끝난다. 실패하면 이유를 stderr 에 찍고 1.
 set -uo pipefail
 OUTBOX="$HOME/Library/Application Support/b3os/steno-outbox"
-MAX_BYTES=1048576
+MAX_BYTES=20971520
+ALLOWED="md markdown txt text log csv tsv json yml yaml toml ini conf cfg properties env py rb go rs swift sh bash zsh sql js jsx mjs cjs ts tsx mts cts html htm css xml svg java kt kts scala cs c h cpp cc cxx hpp hh m png jpg jpeg gif webp heic zip"
 
 FILE=""; NAME=""
 while [ $# -gt 0 ]; do
@@ -21,21 +22,22 @@ while [ $# -gt 0 ]; do
     *) [ -z "$FILE" ] || { echo "✖ 파일은 하나만 보낸다" >&2; exit 1; }; FILE="$1"; shift ;;
   esac
 done
-[ -n "$FILE" ] || { echo "✖ 보낼 파일을 주세요: steno-send.sh <file.md|file.html> [--name <이름>]" >&2; exit 1; }
+[ -n "$FILE" ] || { echo "✖ 보낼 파일을 주세요: steno-send.sh <file> [--name <이름>]" >&2; exit 1; }
 [ -f "$FILE" ] || { echo "✖ 파일이 없다: $FILE" >&2; exit 1; }
 [ -s "$FILE" ] || { echo "✖ 빈 파일이다: $FILE" >&2; exit 1; }
-[ "$(stat -f %z "$FILE")" -le "$MAX_BYTES" ] || { echo "✖ 1MB 이하만 보낼 수 있다: $FILE" >&2; exit 1; }
-
-case "$(printf '%s' "$FILE" | tr '[:upper:]' '[:lower:]')" in
-  *.md|*.markdown) FORMAT="md" ;;
-  *.html|*.htm) FORMAT="html" ;;
-  *) echo "✖ md·html 만 보낼 수 있다: $FILE" >&2; exit 1 ;;
+[ "$(stat -f %z "$FILE")" -le "$MAX_BYTES" ] || { echo "✖ 20MB 이하만 보낼 수 있다: $FILE" >&2; exit 1; }
+SOURCE_EXT="$(printf '%s' "${FILE##*.}" | tr '[:upper:]' '[:lower:]')"
+case " $ALLOWED " in
+  *" $SOURCE_EXT "*) ;;
+  *) echo "✖ Steno 지원 파일·그림·zip만 보낼 수 있다: $FILE" >&2; exit 1 ;;
 esac
+
 [ -n "$NAME" ] || NAME="$(basename "$FILE")"
 case "$NAME" in ""|.|..|*/*) echo "✖ 파일 이름에 경로를 쓸 수 없다: $NAME" >&2; exit 1;; esac
-case "$(printf '%s' "$NAME" | tr '[:upper:]' '[:lower:]')" in
-  *.md|*.html) ;;
-  *) NAME="${NAME%.*}.$FORMAT" ;;
+EXT="$(printf '%s' "${NAME##*.}" | tr '[:upper:]' '[:lower:]')"
+case " $ALLOWED " in
+  *" $EXT "*) ;;
+  *) echo "✖ Steno 지원 파일·그림·zip만 보낼 수 있다: $NAME" >&2; exit 1 ;;
 esac
 
 umask 077
