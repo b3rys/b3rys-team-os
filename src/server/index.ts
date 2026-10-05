@@ -64,6 +64,8 @@ import { createApprovalsApp } from "./routes/approvals";
 import { createPermissionGateRoutes } from "./routes/permissionGate";
 import { buildMcpHttpApp } from "./mcp/mcpHttpRoute";
 import { apiCfGate } from "./lib/apiCfGate";
+import { ensureLinkKey, linkKeyPath } from "./lib/b3chatLink";
+import { createB3chatTeammateRoutes } from "./routes/b3chatTeammate";
 import { appendAuditFile } from "./lib/auditFile";
 import { configureLeadActorDb, leadActorId, trustedActorFromRequest } from "./lib/opAuth";
 import { createHostGate } from "./lib/hostGate";
@@ -504,6 +506,9 @@ const settingsApi = createSettingsApp({
   restartCapture, // capture 토큰/그룹 저장 시 서버 재시작 없이 즉시 적용
 });
 api.route("/", settingsApi);
+// b3chat 앱 [팀원 추가] — 같은 맥의 b3chat 서버만 부른다(같은 기계 직접 + 공유 비밀 키).
+try { ensureLinkKey(linkKeyPath(REGISTRY_PATH)); } catch (e) { console.error("[b3chat-link] 키 파일 생성 실패:", (e as Error).message); }
+api.route("/", createB3chatTeammateRoutes({ db, settings: settingsApi, registryPath: REGISTRY_PATH, onRegistryChanged: reloadRegistryFromDisk }));
 
 const acceptanceApi = createAcceptanceRoutes({
   db,

@@ -28,6 +28,11 @@ export interface BridgeWindowRequest {
   origTgMessageId?: string;
   teamContext?: string;
   attachments?: { kind: string; value: string; note?: string }[];
+  /**
+   * 없으면 그룹 턴(기존). "greeting" = 막 만든 팀원의 첫 인사 — 브리지가 평소 1:1 처리로 팀장 방(groupId)에 답한다.
+   * 브리지가 돌고 있다는 증거가 이 인사라서, 서버가 대신 쓰지 않고 이 창구로 넣는다.
+   */
+  kind?: "greeting";
 }
 
 /** bridge window 파일에 적히는 것. ★토큰은 이 파일 밖으로 나가지 않는다★ — 로그·audit·에러에 안 싣는다. */
@@ -117,6 +122,7 @@ export function decideWindowRequest(
   }
   // ★남의 신원으로 도는 것을 막는다★ — 이 bridge window는 자기 팀원 것만 받는다.
   if (req.agentId !== opts.selfAgentId) return { accept: false, status: 403, reason: "agent_mismatch" };
+  if (req.kind !== undefined && req.kind !== "greeting") return { accept: false, status: 400, reason: "bad_kind" };
   return { accept: true };
 }
 
