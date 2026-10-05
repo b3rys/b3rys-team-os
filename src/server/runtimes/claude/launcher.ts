@@ -159,6 +159,8 @@ export function installReplyGuardHook(id: string, roots?: { membersRoot?: string
  *  `roots` 는 ★테스트 이음매★ — 안 주면 실제 경로를 쓴다(실 FS 격리: seedGroupIntoClaudeMembers 와 같은 방식). */
 export function installProgressHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
   assertId(id);
+  // This hook uses Telegram Bot API methods, not the development b3chat channel.
+  if (claudeChannel(id).kind === "b3chat") return;
   const membersRoot = roots?.membersRoot ?? MEMBERS_ROOT;
   const repoRoot = roots?.repoRoot ?? REPO_ROOT;
   const dotClaude = `${membersRoot}/${id}/.claude`;
@@ -341,10 +343,11 @@ export function installOutboundHook(id: string, opts: { dryRun?: boolean } = {})
   const hookDst = `${dotClaude}/hooks/tg-outbound.py`;
   const settingsPath = `${dotClaude}/settings.json`;
   const src = `${REPO_ROOT}/src/server/runtimes/claude/tg-outbound.py`;
-  const tokenEnv = `${homedir()}/.claude/channels/telegram-${id}/.env`;
+  const tokenEnv = claudeBridgePaths(id).envFile;
   try {
     if (!existsSync(src)) return; // 소스 없으면 skip
     mkdirSync(`${dotClaude}/hooks`, { recursive: true });
+    installChannelDescriptor(`${dotClaude}/hooks`, REPO_ROOT);
     writeFileSync(hookDst, readFileSync(src, "utf-8"));
     try { chmodSync(hookDst, 0o755); } catch { /* best-effort */ }
     let settings: Record<string, unknown> = {};

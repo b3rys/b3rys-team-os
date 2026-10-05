@@ -22,6 +22,7 @@ import {
   applyCollectMode,
 } from "./personaTemplates";
 import { isTier2Outbound } from "../runtimes/claude/tier2Flag";
+import { readMemberChannel } from "./memberChannel";
 
 export interface WriteMemberPersonaInput {
   id: string;
@@ -138,6 +139,7 @@ export function renderLoadingFile(m: WriteMemberPersonaInput): { path: string; c
     owner_name: m.owner_name,
     team_name: m.team_name,
     tier2_outbound: isTier2Outbound(m.id),
+    channel: readMemberChannel(m.id),
     // ★codex 는 SOUL.md 를 안 읽는다★ — 그 런타임만 본문을 실어 보낸다(위 personaPointer 주석의 실측).
     //   읽어오지 못하면 안 넣는다: 없는 페르소나를 지어내지 않는다.
     soul_text: m.runtime === "codex" ? readSoulText(targets.personaFile) : undefined,

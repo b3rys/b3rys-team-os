@@ -13,6 +13,7 @@
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import channelDescriptors from "../runtimes/claude/channel-descriptors.json";
 
 const HOME = process.env.HOME ?? "";
 // 정본 경로 = team-os repo 루트 기준 (퍼블릭 포터블 — 하드코딩 금지 Q3).
@@ -211,6 +212,7 @@ interface PersonaInput {
    * 다른 런타임은 안 넘긴다 — 참조가 실제로 닿으므로 본문을 두 벌 두면 어긋난다.
    */
   soul_text?: string;
+  channel?: { kind?: string };
 }
 
 // 핵심룰 텍스트의 {{OWNER}} 플레이스홀더를 팀장 이름으로 치환. (안전: ownerName 없으면 원문 그대로 — 퍼블릭 export는 {{OWNER}} 유지)
@@ -501,8 +503,14 @@ export function stripClaudeComms(personaText: string): string {
 
 /** 기존 CLAUDE.md에 "## 소통 주의 (Claude 런타임)" 섹션만 주입/교체(surgical, 커스텀 보존, idempotent).
  *  tier2=true면 SECTION_CLAUDE_COMMS_TIER2(마커 전송) 주입 — 같은 헤더라 tier2↔기존 양방향 멱등 교체(롤백=tier2:false 재호출). */
-export function injectClaudeComms(personaText: string, tier2 = false): string {
+export function claudeCommsSection(tier2 = false, kind = "telegram"): string {
+  if (kind === "b3chat" && tier2) throw new Error("b3chat Tier2 marker sending is unsupported");
   const section = tier2 ? SECTION_CLAUDE_COMMS_TIER2 : SECTION_CLAUDE_COMMS;
+  return kind === "b3chat" ? section.replaceAll(channelDescriptors.telegram.replyTool, channelDescriptors.b3chat.replyTool) : section;
+}
+
+export function injectClaudeComms(personaText: string, tier2 = false, kind = "telegram"): string {
+  const section = claudeCommsSection(tier2, kind);
   const mid = /## (?:소통 주의 \(Claude 런타임\)|Communication note \(Claude runtime\))[\s\S]*?(?=\n## )/; // 뒤에 다른 ## 섹션 있을 때
   if (mid.test(personaText)) return personaText.replace(mid, section + "\n");
   const end = /## (?:소통 주의 \(Claude 런타임\)|Communication note \(Claude runtime\))[\s\S]*$/; // 마지막 섹션일 때(뒤에 ## 없음) — churn 방지
@@ -803,7 +811,7 @@ export function buildPersona(i: PersonaInput): string {
     sectionIdentity(i), "",
     personaPointer(i), "",
     coreRuleFor(i.id, i.owner_name, i.team_name), "",
-    (i.tier2_outbound ? SECTION_CLAUDE_COMMS_TIER2 : SECTION_CLAUDE_COMMS), "",   // ★ Core Rule 직후. tier2=마커 전송(malform 0), 기본=reply 도구.
+    claudeCommsSection(i.tier2_outbound, i.channel?.kind), "",
     sectionFirstContact(i), "",   // 신규 합류 첫 발화 자기소개+OT 확인 (이전 dead sectionTone 배선)
     sectionWorkspace(i), "",
     sectionTeamShare("claude_channel"), "",

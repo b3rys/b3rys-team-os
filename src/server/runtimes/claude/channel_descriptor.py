@@ -17,7 +17,7 @@ def channel_for_tag(tag):
     if not m:
         return None
     for kind, descriptor in CHANNELS.items():
-        if m.group(1) in (descriptor["source"], descriptor["source"] + (":telegram" if kind == "telegram" else "")):
+        if m.group(1) in [descriptor["source"], *descriptor["sourceAliases"]]:
             return kind, descriptor
     return None
 

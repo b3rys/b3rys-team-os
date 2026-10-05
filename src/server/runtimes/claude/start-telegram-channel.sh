@@ -51,7 +51,14 @@ fi
 BOT_NAME="${ARGS[0]:-claude}"   # 비우면 default = "claude" (multi-bot ready)
 [[ "$BOT_NAME" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo "ERROR: invalid member id" >&2; exit 1; }
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CHANNEL_KIND="$(bun "$_SCRIPT_DIR/channelConfig.ts" "$BOT_NAME")"
+_CONFIG_BUN="$(command -v bun || true)"
+if [[ -z "$_CONFIG_BUN" ]]; then
+  for _candidate in "$HOME/.bun/bin/bun" "$HOME/.local/bin/bun" /opt/homebrew/bin/bun /usr/local/bin/bun; do
+    if [[ -x "$_candidate" ]]; then _CONFIG_BUN="$_candidate"; break; fi
+  done
+fi
+[[ -n "$_CONFIG_BUN" ]] || { echo "ERROR: Bun not installed" >&2; exit 1; }
+CHANNEL_KIND="$("$_CONFIG_BUN" "$_SCRIPT_DIR/channelConfig.ts" "$BOT_NAME")"
 PLUGIN="telegram@claude-plugins-official"
 # 모델: ★기본값 없음★ (2026-07-25 GD 결정). 비우면 --model 플래그를 아예 붙이지 않아
 #   claude 가 저장된 기본값(사용자가 /model 로 고른 값)을 그대로 쓴다.
@@ -102,7 +109,7 @@ if [[ ! -d "$WORKDIR" ]]; then
 fi
 
 if [[ "$CHANNEL_KIND" == "b3chat" ]]; then
-  bun "$_SCRIPT_DIR/channelConfig.ts" "$BOT_NAME" "$WORKDIR" >/dev/null
+  "$_CONFIG_BUN" "$_SCRIPT_DIR/channelConfig.ts" "$BOT_NAME" "$WORKDIR" >/dev/null
 fi
 PLUGIN_ENV="$STATE_DIR/.env"
 
@@ -248,9 +255,8 @@ fi
 #    안전장치로만 유지. 진짜 근본=부팅 MCP 열거 누락이며 복구는 activation 의 auto-reconnect 가 담당.)
 # ★멱등★: 이미 enable 돼 있으면 skip(머신당 1회, 첫 멤버만 기록).
 if [[ "$CHANNEL_KIND" == "b3chat" ]]; then
-  INNER_CMD="${BUN_PATH_ENV}$(printf 'B3CHAT_STATE_DIR=%q %q --dangerously-load-development-channels server:b3chat' "$STATE_DIR" "$CLAUDE_BIN")$MODEL_FLAG$PERM_FLAG"
+  INNER_CMD="${BUN_PATH_ENV}$(printf 'B3CHAT_STATE_DIR=%q python3 %q %q --strict-mcp-config --mcp-config %q --setting-sources project --dangerously-load-development-channels server:b3chat' "$STATE_DIR" "$_SCRIPT_DIR/launch-b3chat.py" "$CLAUDE_BIN" "$WORKDIR/.mcp.json")$MODEL_FLAG$PERM_FLAG"
   [[ $RESUME_FLAG -eq 1 ]] && INNER_CMD="$INNER_CMD --continue"
-  INNER_CMD="env -u TELEGRAM_STATE_DIR -u TELEGRAM_BOT_TOKEN -u TELEGRAM_API_BASE $INNER_CMD"
 fi
 if [[ "$CHANNEL_KIND" == "telegram" ]]; then
 _USER_SETTINGS="$HOME/.claude/settings.json"

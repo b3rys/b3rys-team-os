@@ -12,6 +12,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installProgressHook, repairProgressHook, repairReplyGuardHook, installOwnerGateHook, ensureOwnerGateHook } from "./launcher";
+import { seedChannelDescriptorRepo } from "./hookTestFixtures";
 
 const ID = "testmember";
 let dirs: string[] = [];
@@ -105,6 +106,7 @@ describe("reply-guard 훅 파일 수리", () => {
     dirs.push(base);
     const repoRoot = join(base, "b3os");
     const membersRoot = join(base, "members");
+    seedChannelDescriptorRepo(repoRoot);
     mkdirSync(join(repoRoot, "src/server/runtimes/claude"), { recursive: true });
     writeFileSync(join(repoRoot, "src/server/runtimes/claude/reply-guard.py"), "# NEW\n");
     const dotClaude = join(membersRoot, ID, ".claude");
@@ -137,6 +139,7 @@ describe("owner-gate 훅 설치·수리", () => {
     dirs.push(base);
     const repoRoot = join(base, "b3os");
     const membersRoot = join(base, "members");
+    seedChannelDescriptorRepo(repoRoot);
     mkdirSync(join(repoRoot, "hooks"), { recursive: true });
     writeFileSync(join(repoRoot, "hooks", "telegram-owner-gate.py"), "# NEW\n");
     const dotClaude = join(membersRoot, ID, ".claude");

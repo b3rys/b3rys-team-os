@@ -999,6 +999,7 @@ async function handleInbound(
       content: text,
       meta: {
         chat_id,
+        chat_type: ctx.chat?.type ?? "unknown",
         ...(msgId != null ? { message_id: String(msgId) } : {}),
         user: from.username ?? String(from.id),
         user_id: String(from.id),

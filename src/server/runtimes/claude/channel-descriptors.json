@@ -3,6 +3,7 @@
     "stateEnv": "TELEGRAM_STATE_DIR",
     "tokenEnv": "TELEGRAM_BOT_TOKEN",
     "source": "plugin:telegram",
+    "sourceAliases": ["plugin:telegram:telegram"],
     "replyTool": "mcp__plugin_telegram_telegram__reply",
     "editTool": "mcp__plugin_telegram_telegram__edit_message",
     "reconnect": "plugin:telegram:telegram",
@@ -11,7 +12,8 @@
   "b3chat": {
     "stateEnv": "B3CHAT_STATE_DIR",
     "tokenEnv": "B3CHAT_BOT_TOKEN",
-    "source": "server:b3chat",
+    "source": "b3chat",
+    "sourceAliases": ["server:b3chat"],
     "replyTool": "mcp__b3chat__reply",
     "editTool": "mcp__b3chat__edit_message",
     "reconnect": "b3chat",

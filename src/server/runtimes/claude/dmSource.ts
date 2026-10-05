@@ -90,13 +90,13 @@ function textOf(content: unknown): string {
  *  가 있으면 버렸다 — 그래서 ★팀장이 룰 스니펫을 붙여넣기만 해도 그 DM 이 통째로 유실됐다.★
  *  ("이 <external_message> 태그 파싱 어떻게 해?" → 기록 안 됨). 실제로 팀장은 룰·포맷을 자주 붙여넣는다.
  *  진짜 버스 메시지는 ★<external_message 로 시작★ 하므로, 시작 위치로만 판정한다. */
-function inboundFromChannelText(text: string, gdChat: string, source: string, kind: string): { mid: string; body: string } | null {
+function inboundFromChannelText(text: string, gdChat: string, sources: string[], kind: string): { mid: string; body: string } | null {
   const head = text.trimStart();
   if (!head.startsWith("<channel")) return null; // 버스 주입·팀 메시지는 <channel 로 시작하지 않는다
   const tag = head.match(/^<channel\b[^>]*>/)?.[0] ?? "";
   if (!tag.includes(`chat_id="${gdChat}"`)) return null;
   const tagSource = tag.match(/\bsource="([^"]+)"/)?.[1];
-  if (tagSource !== source && !(kind === "telegram" && tagSource === source + ":telegram")) return null;
+  if (!tagSource || !sources.includes(tagSource)) return null;
   if (kind === "b3chat" && !tag.includes('chat_type="private"')) return null;
   const mid = head.match(/message_id="(\d+)"/)?.[1];
   const body = (head.match(/>\s*([\s\S]*?)\s*<\/channel>/)?.[1] ?? "").trim();
@@ -137,7 +137,7 @@ export function parseClaudeGdDms(memberId: string, workspacePath: string, ownerC
       //   실측(이 세션): "잠시만"·"오케이 고 하고 풀테스트" 가 dm_message 에 하나도 안 남았다.
       //   하필 인터럽트가 ★"빌 응답??" 같은 재촉★ 이라, 제일 중요한 메시지가 기록에서 빠지고 있었다.
       if (ev.type === "queue-operation" && ev.operation === "enqueue" && typeof ev.content === "string") {
-        const hit = inboundFromChannelText(ev.content, GD_CHAT, d.source, d.kind);
+        const hit = inboundFromChannelText(ev.content, GD_CHAT, [d.source, ...d.sourceAliases], d.kind);
         if (hit) {
           out.push({
             memberId,
@@ -155,7 +155,7 @@ export function parseClaudeGdDms(memberId: string, workspacePath: string, ownerC
       // INBOUND ①: 일반 턴의 GD 1:1 채널 메시지(엄격필터). external_message(팀/버스)는 배제.
       if (role === "user") {
         const text = textOf(msg.content);
-        const hit = inboundFromChannelText(text, GD_CHAT, d.source, d.kind);
+        const hit = inboundFromChannelText(text, GD_CHAT, [d.source, ...d.sourceAliases], d.kind);
         if (hit) {
           const mid = hit.mid;
           const body = hit.body;
