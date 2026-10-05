@@ -34,6 +34,13 @@ esac
 
 [ -n "$NAME" ] || NAME="$(basename "$FILE")"
 case "$NAME" in ""|.|..|*/*) echo "✖ 파일 이름에 경로를 쓸 수 없다: $NAME" >&2; exit 1;; esac
+LOWER_NAME="$(printf '%s' "$NAME" | tr '[:upper:]' '[:lower:]')"
+case "$LOWER_NAME" in
+  .env|*secret*|*credential*|*token*)
+    echo "✖ 비밀값이 들어갈 수 있는 파일 이름은 보낼 수 없다: $NAME" >&2
+    exit 1
+    ;;
+esac
 EXT="$(printf '%s' "${NAME##*.}" | tr '[:upper:]' '[:lower:]')"
 case " $ALLOWED " in
   *" $EXT "*) ;;

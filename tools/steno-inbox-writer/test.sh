@@ -69,5 +69,11 @@ if HOME="$SEND_HOME" "$HERE/../../skills/b3os-team-inbox/scripts/steno-send.sh" 
   echo "FAIL: steno-send extension" >&2; exit 1
 fi
 pass=$((pass + 1))
+for name in .env client-secret.txt db-CREDENTIAL.md api_token.json; do
+  if HOME="$SEND_HOME" "$HERE/../../skills/b3os-team-inbox/scripts/steno-send.sh" "$TMP/send.png" --name "$name" >/dev/null 2>&1; then
+    echo "FAIL: steno-send sensitive name $name" >&2; exit 1
+  fi
+  pass=$((pass + 1))
+done
 
 echo "PASS: $pass steno-inbox-writer checks"
