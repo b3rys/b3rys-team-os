@@ -13,7 +13,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { getConnInfo } from "hono/bun";
 import type { Database } from "bun:sqlite";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { LINK_HEADER, isDirectLocal, linkSecretMatches, readLinkKey } from "../lib/b3chatLink";
@@ -59,7 +59,7 @@ export interface B3chatTeammateDeps {
 interface JobRow {
   id: string; member_id: string; display_name: string; room_id: string; state: JobState;
   stage: string; code: string | null; retryable: number; greeting: string | null;
-  cleanup: string | null; created_at: string; updated_at: string;
+  cleanup: string | null; token_hash: string | null; created_at: string; updated_at: string;
 }
 
 function ensureJobTable(db: Database): void {
@@ -74,9 +74,15 @@ function ensureJobTable(db: Database): void {
     retryable INTEGER NOT NULL DEFAULT 0,
     greeting TEXT,
     cleanup TEXT,
+    token_hash TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now')),
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now'))
   )`);
+}
+
+/** 같은 요청의 재전송인지 가리는 지문 — 토큰 자체는 저장하지 않는다. */
+function requestFingerprint(token: string, roomId: string, apiBase: string): string {
+  return createHash("sha256").update(`${token}\n${roomId}\n${apiBase}`).digest("hex");
 }
 
 function defaultRemoteAddress(c: Context): string | null {
@@ -108,6 +114,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
   const app = new Hono();
   const { db, settings, registryPath } = deps;
   ensureJobTable(db);
+  try { db.run("ALTER TABLE b3chat_teammate_job ADD COLUMN token_hash TEXT"); } catch { /* 이미 있음 */ }
   const keyPath = deps.linkKeyPath ?? join(dirname(registryPath), "var", "secrets", "b3chat-link.key");
   const remote = deps.remoteAddress ?? defaultRemoteAddress;
   const validate = deps.validateToken ?? validateBotToken;
@@ -157,26 +164,32 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
       || !/^[1-9]\d*$/.test(roomId) || channel.error || !TOKEN_RE.test(token)) {
       return fail(c, 400, "bad_request", "input");
     }
-    // 이름(id) 충돌 — 이미 명단에 있거나, 같은 id 로 진행 중인 작업이 있으면.
+    // ★같은 요청의 재전송이면 같은 작업을 돌려준다(응답 유실 대비 — 멱등).★
+    //   같음 = 같은 id + 같은 토큰·방·주소(지문). 실패로 끝난 작업은 되돌림이 끝났으니 새 작업으로 다시 한다.
+    const fp = requestFingerprint(token, roomId, channel.apiBase);
+    const prev = db.query("SELECT * FROM b3chat_teammate_job WHERE member_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(id) as JobRow | null;
+    if (prev && prev.state !== "failed") {
+      if (prev.token_hash === fp) return c.json({ ok: true, job_id: prev.id, member_id: id, state: prev.state, duplicate: true }, 200);
+      return fail(c, 409, "name_taken", "input");
+    }
+    // 이름(id) 충돌 — 이 경로로 만든 게 아닌 팀원이 이미 그 id 를 쓰고 있으면.
     let exists = false;
     try { exists = readList().some((a) => a?.id === id); } catch { return fail(c, 500, "internal", "input", true); }
-    const busy = db.query("SELECT 1 FROM b3chat_teammate_job WHERE member_id = ? AND state IN ('creating','configuring','starting')").get(id);
-    if (exists || busy) return fail(c, 409, "name_taken", "input");
+    if (exists) return fail(c, 409, "name_taken", "input");
     // 봇이 그 서버에서 살아 있나 — 토큰은 그 채널 주소로만 보낸다.
     const live = await validate(token, channel.apiBase);
     if (!live.ok) return fail(c, 400, "bot_check_failed", "input", live.error === "getme_failed");
 
     const jobId = `b3t_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    db.query("INSERT INTO b3chat_teammate_job (id, member_id, display_name, room_id, state, stage) VALUES (?, ?, ?, ?, 'creating', 'accepted')")
-      .run(jobId, id, displayName, roomId);
+    db.query("INSERT INTO b3chat_teammate_job (id, member_id, display_name, room_id, state, stage, token_hash) VALUES (?, ?, ?, ?, 'creating', 'accepted', ?)")
+      .run(jobId, id, displayName, roomId, fp);
     void runJob({ jobId, id, displayName, role, roomId, token, apiBase: channel.apiBase })
       .catch(() => setJob(jobId, { state: "failed", stage: "internal", code: "internal", retryable: 1 }))
       .finally(() => deps.onJobSettled?.(jobId));
     return c.json({ ok: true, job_id: jobId, member_id: id, state: "creating" }, 202);
   });
 
-  app.get("/members/b3chat/:job_id", (c) => {
-    const row = db.query("SELECT * FROM b3chat_teammate_job WHERE id = ?").get(c.req.param("job_id")) as JobRow | null;
+  const jobView = (c: Context, row: JobRow | null) => {
     if (!row) return fail(c, 404, "not_found", "status");
     return c.json({
       ok: row.state !== "failed",
@@ -184,24 +197,33 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
       state: row.state, stage: row.stage, code: row.code, retryable: row.retryable === 1,
       greeting: row.greeting, cleanup: row.cleanup,
     });
-  });
+  };
+  // 팀원 id 로도 읽는다 — b3chat 이 job_id 를 못 받았을 때(응답 유실) 결과를 되찾게. 가장 최근 작업.
+  app.get("/members/b3chat/member/:member_id", (c) =>
+    jobView(c, db.query("SELECT * FROM b3chat_teammate_job WHERE member_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(c.req.param("member_id")) as JobRow | null));
+  app.get("/members/b3chat/:job_id", (c) =>
+    jobView(c, db.query("SELECT * FROM b3chat_teammate_job WHERE id = ?").get(c.req.param("job_id")) as JobRow | null));
 
   async function runJob(j: { jobId: string; id: string; displayName: string; role: string; roomId: string; token: string; apiBase: string }): Promise<void> {
     const { jobId, id } = j;
     let recruited = false;
+    // ★failed 는 되돌림이 끝난 뒤에 적는다★ — b3chat 이 failed 를 보고 봇을 끄는 순간 b3os 쪽 등록도 이미 없어야 한다.
     const failJob = async (stage: string, code: JobCode, retryable: boolean) => {
-      setJob(jobId, { state: "failed", stage, code, retryable: retryable ? 1 : 0 });
-      if (!recruited) return;
-      // ★되돌림 = 기존 퇴사 API★ — 런타임 정리·명단·토큰·작업폴더 보관까지 한 경로로.
-      try {
-        const r = await settings.request(`/members/${id}`, {
-          method: "DELETE", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ confirm_name: j.displayName }),
-        });
-        setJob(jobId, { cleanup: r.ok ? "removed" : `remove_failed_${r.status}` });
-      } catch {
-        setJob(jobId, { cleanup: "remove_failed" });
+      let cleanup: string | null = null;
+      if (recruited) {
+        // 되돌림 = 기존 퇴사 API — 런타임 정리·명단·토큰·작업폴더 보관까지 한 경로로.
+        setJob(jobId, { stage: `${stage}_cleanup` });
+        try {
+          const r = await settings.request(`/members/${id}`, {
+            method: "DELETE", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ confirm_name: j.displayName }),
+          });
+          cleanup = r.ok ? "removed" : `remove_failed_${r.status}`;
+        } catch {
+          cleanup = "remove_failed";
+        }
       }
+      setJob(jobId, { state: "failed", stage, code, retryable: retryable ? 1 : 0, cleanup });
     };
 
     // 1) 등록

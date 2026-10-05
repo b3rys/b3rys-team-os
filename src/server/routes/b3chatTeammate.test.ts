@@ -13,7 +13,7 @@ const KEY = "k".repeat(43);
 const TOKEN = `7:${"t".repeat(43)}`;
 const BODY = { id: "testmate", display_name: "테스트메이트", role: "시험", runtime: "codex", api_base: "http://127.0.0.1:8741", room_id: "5", bot_token: TOKEN };
 
-function setup(opts: { activate?: () => Response | Promise<Response>; greetedAfter?: number; bridgeOk?: boolean; tokenOk?: boolean; existing?: string[] } = {}) {
+function setup(opts: { activate?: () => Response | Promise<Response>; greetedAfter?: number; bridgeOk?: boolean; tokenOk?: boolean; existing?: string[]; removeGate?: Promise<void> } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "b3t-"));
   const registryPath = join(dir, "agents.json");
   writeFileSync(registryPath, JSON.stringify((opts.existing ?? ["bill"]).map((id) => ({ id, display_name: id, role: "x", runtime: "codex" })), null, 2));
@@ -33,6 +33,7 @@ function setup(opts: { activate?: () => Response | Promise<Response>; greetedAft
   settings.delete("/members/:id", async (c) => {
     const b = await c.req.json();
     calls.push(`remove:${c.req.param("id")}:${b.confirm_name}`);
+    if (opts.removeGate) await opts.removeGate;
     return c.json({ ok: true });
   });
   const bridgeReqs: BridgeWindowRequest[] = [];
@@ -181,5 +182,61 @@ describe("부품", () => {
     expect(decideWindowRequest({ ...base, kind: "greeting" }, opts)).toEqual({ accept: true });
     expect(decideWindowRequest({ ...base, kind: "evil" as "greeting" }, opts)).toMatchObject({ accept: false, reason: "bad_kind" });
     expect(decideWindowRequest(base, opts)).toEqual({ accept: true });
+  });
+});
+
+describe("분산 실패 경계 — 응답이 사라져도 결과를 되찾는다", () => {
+  test("같은 요청 재전송(진행 중·완료 뒤) → 같은 job_id, 새로 안 만든다", async () => {
+    const s = setup();
+    const first = await s.post(BODY);
+    const { job_id } = (await first.clone().json()) as { job_id: string };
+    const again = await s.post(BODY);
+    expect(again.status).toBe(200);
+    expect(await again.json()).toMatchObject({ ok: true, job_id, duplicate: true });
+    await s.waitJob(first);
+    const after = await s.post(BODY);
+    expect(((await after.json()) as { job_id: string }).job_id).toBe(job_id);
+    expect(s.calls.filter((x) => x.startsWith("recruit")).length).toBe(1);
+  });
+  test("같은 id 인데 다른 토큰·방 → 409 name_taken(남의 재전송으로 보지 않는다)", async () => {
+    const s = setup();
+    await s.post(BODY);
+    const r = await s.post({ ...BODY, room_id: "6" });
+    expect(r.status).toBe(409);
+  });
+  test("팀원 id 로 상태 조회 — job_id 를 못 받았어도", async () => {
+    const s = setup();
+    const job = await s.waitJob(await s.post(BODY));
+    const r = await s.app.request("/members/b3chat/member/testmate", { headers: { "x-b3chat-link": KEY } });
+    expect(await r.json()).toMatchObject({ job_id: job.job_id, state: "ready" });
+    const none = await s.app.request("/members/b3chat/member/nobody", { headers: { "x-b3chat-link": KEY } });
+    expect(none.status).toBe(404);
+  });
+  test("failed 는 되돌림(퇴사 API)이 끝난 뒤에야 보인다", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const s = setup({ activate: () => Response.json({ ok: false }), removeGate: gate });
+    const res = await s.post(BODY);
+    const { job_id } = (await res.clone().json()) as { job_id: string };
+    // 되돌림이 막혀 있는 동안
+    for (let i = 0; i < 50 && !s.calls.some((x) => x.startsWith("remove")); i++) await new Promise((r) => setTimeout(r, 2));
+    const mid = (await (await s.get(job_id)).json()) as { state: string; stage: string };
+    expect(mid.state).not.toBe("failed");
+    expect(mid.stage).toBe("activate_cleanup");
+    release();
+    const done = await s.waitJob(res);
+    expect(done).toMatchObject({ state: "failed", code: "start_failed", cleanup: "removed" });
+  });
+  test("실패로 끝난 뒤 같은 요청 → 새 작업으로 다시(되돌림이 끝났으니)", async () => {
+    let n = 0;
+    const s = setup({ activate: () => (++n === 1 ? Response.json({ ok: false }) : Response.json({ ok: true })) });
+    const first = await s.waitJob(await s.post(BODY));
+    expect(first.state).toBe("failed");
+    // 퇴사 API 는 가짜라 명단에서 안 지운다 — 실제 퇴사처럼 지워 준다
+    const list = JSON.parse(readFileSync(s.registryPath, "utf-8")).filter((a: { id: string }) => a.id !== "testmate");
+    writeFileSync(s.registryPath, JSON.stringify(list));
+    const second = await s.waitJob(await s.post(BODY));
+    expect(second.job_id).not.toBe(first.job_id);
+    expect(second.state).toBe("ready");
   });
 });
