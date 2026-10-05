@@ -20,6 +20,13 @@ import { HERMES_BASE_PROFILE, MANUALS_DIR, runtimeCwdForAgent } from "./paths";
 import { isHermesMemberProtected, isHermesProfileProtected } from "./hermesBaseProfile";
 import { appendAuditFile } from "./auditFile";
 import { codexBridgePaths, placeCodexToken, writeCodexBridgeFiles, removeCodexBridgeFiles, resolveOwnerDmId } from "../runtimes/codex/launcher";
+import { descendantPids, readBridgePid, waitForExit } from "../runtimes/codex/bridgeProcess";
+
+/** 지금 도는 그 팀원 브리지와 자식들 — ready 표시 파일의 pid 기준. 표시가 없으면 빈 목록(기다릴 것 없음). */
+function liveCodexBridgePids(id: string): number[] {
+  const pid = readBridgePid(codexBridgePaths(id).pidFile, id);
+  return pid ? [pid, ...descendantPids(pid)] : [];
+}
 import { ensureClaudePollerUp } from "../runtimes/claude/pollerHealth";
 import { placeClaudeToken, writeClaudeBridgeFiles, seedClaudeTrust, seedClaudeAccess, killClaudeTmux, reconnectClaudeTelegram, claudeBridgePaths, installReplyGuardHook, installOwnerGateHook, installOutboundHook, installProgressHook, uninstallOutboundHook, uninstallReplyGuardHook, uninstallRecoveryHook, removeClaudeBridgeFiles } from "../runtimes/claude/launcher";
 import { isTier2Outbound, isTier2Shadow } from "../runtimes/claude/tier2Flag";
@@ -103,6 +110,11 @@ export interface TeardownDeps {
   existsSync?: typeof existsSync;
   rmSync?: typeof rmSync;
   sleepMs?: number; // hermes teardown 전 대기(기본 1500ms, 프로필 dir 파일잠금 레이스 방지) — 테스트에서 0으로 단축
+  /** codex: 끄기 전에 잡아 둘 브리지·자식 pid(시험은 가짜 프로세스) */
+  codexBridgePids?: (id: string) => number[];
+  /** codex: 끈 뒤 그 pid 들이 사라질 때까지 기다리는 상한(기본 10초) */
+  codexExitWaitMs?: number;
+  isAlive?: (pid: number) => boolean;
 }
 
 export async function teardownRuntime(
@@ -122,9 +134,14 @@ export async function teardownRuntime(
 
   // codex teardown: 브리지 정지(bootout) + plist/wrapper/토큰/CODEX_HOME 정리 — 고아 프로세스·잔존 시크릿 방지(best-effort).
   if (runtime === "codex") {
+    // ★끄기 전에 브리지·자식(codex app-server) pid 를 잡고, 끈 뒤 사라질 때까지 기다렸다 지운다.★
+    //   바로 지우면 꺼지던 프로세스가 CODEX_HOME 잠금 폴더를 다시 만든다(실측).
+    let pids: number[] = [];
+    try { pids = (opts.codexBridgePids ?? liveCodexBridgePids)(id); } catch { pids = []; }
     try { await doSetAgentEnabled(id, "codex", false); } catch { /* best-effort */ }
+    const exited = await waitForExit(pids, { timeoutMs: opts.codexExitWaitMs ?? 10_000, isAlive: opts.isAlive });
     try { doRemoveCodexBridgeFiles(id, { removeToken: true, removeHome: true }); } catch { /* best-effort */ }
-    return { ok: true, detail: "codex teardown 완료(best-effort)" };
+    return { ok: true, detail: exited ? "codex teardown 완료(브리지 종료 확인)" : "codex teardown 완료(브리지 종료 미확인 — 상한 초과, 잔여 파일 확인 필요)" };
   }
   // claude_channel teardown: 봇 LaunchAgent 정지(bootout) + plist/.env(토큰) 정리 — 고아 tmux·잔존 시크릿 방지(best-effort).
   if (runtime === "claude_channel") {
