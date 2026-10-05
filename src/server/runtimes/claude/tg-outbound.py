@@ -26,6 +26,9 @@ import time
 import hashlib
 import subprocess
 import tempfile
+from channel_descriptor import active_channel
+
+CHANNEL_KIND, CHANNEL = active_channel()
 
 HOME = os.path.expanduser("~")
 TOKEN_ENV = os.environ.get("TG_OUTBOUND_ENV", os.environ.get("TG_RECOVERY_ENV", f"{HOME}/.claude/hooks/tg-recovery.env"))
@@ -44,7 +47,7 @@ TG_SEND_CANDIDATES = [
 SEND_OPEN = re.compile(r'‹‹‹b3os-send(?:\s+to=([0-9-]+))?›››')
 END_MARK = "‹‹‹b3os-end›››"
 # malform reply 안전망(recovery) — antml prefix 유무 모두.
-REPLY_BLOCK = re.compile(r'<(?:antml:)?invoke\s+name="mcp__plugin_telegram_telegram__reply">([\s\S]*?)</(?:antml:)?invoke>')
+REPLY_BLOCK = re.compile(r'<(?:antml:)?invoke\s+name="' + re.escape(CHANNEL["replyTool"]) + r'">([\s\S]*?)</(?:antml:)?invoke>')
 PARAM_CHAT = re.compile(r'<(?:antml:)?parameter\s+name="chat_id">([\s\S]*?)</(?:antml:)?parameter>')
 PARAM_TEXT = re.compile(r'<(?:antml:)?parameter\s+name="text">([\s\S]*?)</(?:antml:)?parameter>')
 GENERIC_LEAK = [
@@ -64,7 +67,7 @@ def log(msg):
 def _agent_id():
     """공유 로그 attribution — TG_OUTBOUND_ENV 경로(~/.claude/channels/telegram-<id>/.env)에서 멤버 id 추출.
     steve/bill이 같은 유저 HOME의 로그를 공유하므로 [SHADOW-OBS agent=<id>]로 누가 남긴 관찰인지 정확히."""
-    m = re.search(r'/telegram-([a-z0-9_-]+)/', TOKEN_ENV)
+    m = re.search(r'/' + CHANNEL_KIND + r'-([a-z0-9_-]+)/', TOKEN_ENV)
     return m.group(1) if m else "?"
 
 
@@ -93,7 +96,7 @@ def last_assistant_text(lines):
 
 
 # 실제 telegram 전송 도구만 (tool_result가 '전송 성공'인지 판정할 때, 이 도구의 result만 카운트).
-REPLY_TOOL_NAMES = ("mcp__plugin_telegram_telegram__reply",)
+REPLY_TOOL_NAMES = (CHANNEL["replyTool"],)
 
 
 def _tool_use_names(lines):
@@ -299,6 +302,10 @@ def tg_send_script():
 def send_via_tg(chat_id, body):
     """tg-send.sh 1회 호출. ★transient 재시도는 tg-send.sh가 per-chunk로 처리★(성공 청크 재전송 방지).
     여기서 감싸 재시도하면 멀티청크 부분실패 시 성공 청크를 중복 전송하므로 단일 호출만. 성공 True."""
+    if CHANNEL_KIND != "telegram":
+        # Tier2 is inactive. Never route a b3chat credential through the Telegram sender.
+        log("[ERR] b3chat marker sending unsupported; use the b3chat reply tool")
+        return False
     script = tg_send_script()
     if not script:
         log("[ERR] tg-send.sh not found")

@@ -49,6 +49,9 @@ if [[ "${RESUME:-}" == "1" || "${RESUME:-}" == "true" ]]; then
 fi
 
 BOT_NAME="${ARGS[0]:-claude}"   # 비우면 default = "claude" (multi-bot ready)
+[[ "$BOT_NAME" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo "ERROR: invalid member id" >&2; exit 1; }
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CHANNEL_KIND="$(bun "$_SCRIPT_DIR/channelConfig.ts" "$BOT_NAME")"
 PLUGIN="telegram@claude-plugins-official"
 # 모델: ★기본값 없음★ (2026-07-25 GD 결정). 비우면 --model 플래그를 아예 붙이지 않아
 #   claude 가 저장된 기본값(사용자가 /model 로 고른 값)을 그대로 쓴다.
@@ -60,6 +63,7 @@ CLAUDE_MODEL="${CLAUDE_MODEL:-}"
 
 SESSION_NAME="claude-$BOT_NAME"
 STATE_DIR="$HOME/.claude/channels/telegram-$BOT_NAME"
+if [[ "$CHANNEL_KIND" == "b3chat" ]]; then STATE_DIR="$HOME/.claude/channels/b3chat-$BOT_NAME"; fi
 
 # WORKDIR 결정 — 우선순위:
 #   1) 환경변수 WORKDIR (서버 launcher 가 항상 MEMBERS_ROOT/<id> 로 명시 전달 = 프로덕션 경로)
@@ -97,6 +101,9 @@ if [[ ! -d "$WORKDIR" ]]; then
   exit 1
 fi
 
+if [[ "$CHANNEL_KIND" == "b3chat" ]]; then
+  bun "$_SCRIPT_DIR/channelConfig.ts" "$BOT_NAME" "$WORKDIR" >/dev/null
+fi
 PLUGIN_ENV="$STATE_DIR/.env"
 
 # ─── Pre-flight ───────────────────────────────────────────────────────────
@@ -240,6 +247,12 @@ fi
 #   (scope 는 실패의 근본이 아니다 — 하네스 4-way 로 반증(양 워크스페이스 settings 바이트 동일). enable 은 채널 인식용
 #    안전장치로만 유지. 진짜 근본=부팅 MCP 열거 누락이며 복구는 activation 의 auto-reconnect 가 담당.)
 # ★멱등★: 이미 enable 돼 있으면 skip(머신당 1회, 첫 멤버만 기록).
+if [[ "$CHANNEL_KIND" == "b3chat" ]]; then
+  INNER_CMD="${BUN_PATH_ENV}$(printf 'B3CHAT_STATE_DIR=%q %q --dangerously-load-development-channels server:b3chat' "$STATE_DIR" "$CLAUDE_BIN")$MODEL_FLAG$PERM_FLAG"
+  [[ $RESUME_FLAG -eq 1 ]] && INNER_CMD="$INNER_CMD --continue"
+  INNER_CMD="env -u TELEGRAM_STATE_DIR -u TELEGRAM_BOT_TOKEN -u TELEGRAM_API_BASE $INNER_CMD"
+fi
+if [[ "$CHANNEL_KIND" == "telegram" ]]; then
 _USER_SETTINGS="$HOME/.claude/settings.json"
 if grep -q "\"$PLUGIN\"" "$_USER_SETTINGS" 2>/dev/null; then
   echo "  MCP plugin  : $PLUGIN 이미 user-scope enable(skip)"
@@ -272,6 +285,7 @@ except Exception:
   echo "  MCP plugin  : $PLUGIN user-scope enable ✓ (settings.json 직접, 캐시 무접촉)"
 else
   echo "  ⚠ MCP plugin enable 자동기록 실패(계속) — 안 붙으면 세션에서 /plugin 으로 수동 enable"
+fi
 fi
 
 # ★pre-warm 제거는 유지(2026-07-25 하네스 4-way 확정)★: 이전엔 "콜드 `bun install` → CC 30s MCP 핸드셰이크 초과 →
@@ -412,6 +426,9 @@ fi
 
 _spawn_t0=$(date +%s)
 tmux new-session -d -s "$SESSION_NAME" -c "$WORKDIR" "$INNER_CMD"
+if [[ "$CHANNEL_KIND" == "b3chat" ]]; then
+  python3 "$_SCRIPT_DIR/confirm-development-channel.py" "$SESSION_NAME" || true
+fi
 
 # 내 poller 가 bot.pid 를 ★새로★ 쓸 때까지 락을 쥔 채 기다린다(= 캐시 링크 완료 신호).
 #   기존 bot.pid 가 남아있을 수 있으므로 mtime 이 스폰 이후인지 본다(오래된 파일로 조기 통과 방지).
@@ -443,8 +460,8 @@ echo "Attach: tmux attach -t $SESSION_NAME"
 
 # ─── First-time pairing hint ──────────────────────────────────────────────
 
-if [[ ! -s "$STATE_DIR/access.json" ]] \
-  || ! grep -q '"allowFrom"' "$STATE_DIR/access.json" 2>/dev/null; then
+if [[ "$CHANNEL_KIND" == "telegram" ]] && { [[ ! -s "$STATE_DIR/access.json" ]] \
+  || ! grep -q '"allowFrom"' "$STATE_DIR/access.json" 2>/dev/null; }; then
   echo ""
   echo "─── 첫 셋업 — 다음 단계 ───────────────────────────────────────"
   echo ""
