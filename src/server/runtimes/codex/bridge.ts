@@ -187,10 +187,11 @@ function firstContactMarker(agentId: string): string {
   const dir = process.env.B3OS_FIRST_CONTACT_DIR ?? resolve(REPO_ROOT, "var/first-contact");
   return resolve(dir, `${agentId}.done`);
 }
-function hasGreetedFirstContact(agentId: string): boolean {
+export function hasGreetedFirstContact(agentId: string): boolean {
   try { return existsSync(firstContactMarker(agentId)); } catch { return false; }
 }
-function markGreetedFirstContact(agentId: string): void {
+/** 첫 인사를 했다고 남긴다 — 앱 [팀원 추가] 가 첫 인사를 먼저 보낸 뒤에도 쓴다(첫 글에 다시 소개하지 않게). */
+export function markGreetedFirstContact(agentId: string): void {
   try {
     const p = firstContactMarker(agentId);
     mkdirSync(dirname(p), { recursive: true });
@@ -1382,6 +1383,19 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
       const chatId = Number(r.groupId);
       if (!Number.isFinite(chatId)) {
         console.log(`[codex-bridge] 창구 요청 무시: groupId 가 숫자가 아니다 msg=${r.messageId}`);
+        return;
+      }
+      // ★첫 인사(앱 [팀원 추가])★ — 팀장 방에만, 평소 1:1 처리 그대로(같은 세션·같은 봇). 첫 접촉 표시도 거기서 남는다.
+      if (r.kind === "greeting") {
+        const owner = Number(channelFromEnv().ownerChat ?? NaN);
+        if (chatId !== owner) {
+          console.log(`[codex-bridge] 창구 인사 무시: 팀장 방이 아니다 msg=${r.messageId}`);
+          return;
+        }
+        turns.enqueue(async () => {
+          const res = await handleMessage(chatId, r.body, undefined, live, undefined, "window", false);
+          console.log(`[codex-bridge] 창구 인사 → ${res.detail}`);
+        });
         return;
       }
       const tgMsgId = r.origTgMessageId ? Number(r.origTgMessageId) : undefined;
