@@ -1,3 +1,4 @@
+// 받은 파일 넣기: steno-send.sh 가 권한 없는 outbox 에 둔 파일을 Steno "받은 파일" 로 옮긴다.
 import Darwin
 import Foundation
 
@@ -11,10 +12,10 @@ private let allowedExtensions: Set<String> = [
 ]
 
 private func fail(_ message: String) {
-    FileHandle.standardError.write(Data(("steno-inbox-writer: \(message)\n").utf8))
+    FileHandle.standardError.write(Data(("steno-helper 받은 파일: \(message)\n").utf8))
 }
 
-private func validName(_ name: String) -> Bool {
+func validName(_ name: String) -> Bool {
     guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains("\0") else { return false }
     return allowedExtensions.contains((name as NSString).pathExtension.lowercased())
 }
@@ -85,7 +86,7 @@ private func copyFile(sourceDir: Int32, destinationDir: Int32, name: String) -> 
     return true
 }
 
-private func run(sourcePath: String, destinationPath: String) -> Int32 {
+func runInbox(sourcePath: String, destinationPath: String) -> Int32 {
     guard let resolvedDestination = realpath(destinationPath, nil) else { fail("받은 파일 폴더를 확인할 수 없음"); return 1 }
     defer { free(resolvedDestination) }
     guard String(cString: resolvedDestination) == destinationPath else { fail("받은 파일 폴더가 심볼릭 링크이거나 경로가 바뀜"); return 1 }
@@ -108,15 +109,3 @@ private func run(sourcePath: String, destinationPath: String) -> Int32 {
     }
     return rejected ? 1 : 0
 }
-
-#if STENO_WRITER_TESTING
-if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--validate-name" {
-    exit(validName(CommandLine.arguments[2]) ? 0 : 1)
-}
-guard CommandLine.arguments.count == 3 else { exit(64) }
-exit(run(sourcePath: CommandLine.arguments[1], destinationPath: CommandLine.arguments[2]))
-#else
-let home = NSHomeDirectory()
-exit(run(sourcePath: home + "/Library/Application Support/b3os/steno-outbox",
-         destinationPath: home + "/Documents/Steno/받은 파일"))
-#endif
