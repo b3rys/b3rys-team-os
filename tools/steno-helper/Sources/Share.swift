@@ -15,7 +15,7 @@ private let allowedExtensions: Set<String> = [
 private let sensitiveWords = ["secret", "credential", "token", "password"]
 
 private func log(_ message: String) {
-    FileHandle.standardError.write(Data(("steno-share-sync: \(message)\n").utf8))
+    FileHandle.standardError.write(Data(("steno-helper 팀 공유: \(message)\n").utf8))
 }
 
 func shareable(_ name: String) -> Bool {
@@ -95,7 +95,7 @@ private func copyState(_ dir: Int32, _ name: String) -> CopyState {
 // manifest: 이름 → 사본을 마지막으로 만들 때의 원본 해시(base)와 지금 원본 해시(source).
 private typealias Manifest = [String: [String: String]]
 
-func run(sourcePath: String, destinationPath: String) -> Int32 {
+func runShare(sourcePath: String, destinationPath: String) -> Int32 {
     let sourceDir = open(sourcePath, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
     guard sourceDir >= 0 else {
         if errno == ENOENT { return 0 }  // 팀 공유 폴더가 아직 없으면 할 일이 없다.
@@ -159,15 +159,3 @@ func run(sourcePath: String, destinationPath: String) -> Int32 {
           writeAtomically(destDir, manifestName, encoded) else { log("manifest 쓰기 실패"); return 1 }
     return failed ? 1 : 0
 }
-
-#if STENO_SHARE_TESTING
-guard CommandLine.arguments.count == 3 else { exit(64) }
-exit(run(sourcePath: CommandLine.arguments[1], destinationPath: CommandLine.arguments[2]))
-#else
-// 라이브러리 위치는 Steno 앱과 같은 규칙: STENO_LIBRARY → ~/Documents/Steno. 폴더 이름 "팀 공유" 는 고정.
-let home = NSHomeDirectory()
-let env = ProcessInfo.processInfo.environment["STENO_LIBRARY"] ?? ""
-let library = env.hasPrefix("/") ? env : home + "/Documents/Steno"
-exit(run(sourcePath: library + "/팀 공유",
-         destinationPath: home + "/Library/Application Support/b3os/steno-shared"))
-#endif

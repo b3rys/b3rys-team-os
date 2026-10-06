@@ -3,28 +3,28 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TMP="$(mktemp -d)"; TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
-BIN="$TMP/steno-inbox-writer-test"
-swiftc -D STENO_WRITER_TESTING "$HERE/Sources/main.swift" -o "$BIN"
+BIN="${STENO_HELPER_TEST_BIN:-$TMP/steno-helper-test}"
+[ -x "$BIN" ] || swiftc -D STENO_HELPER_TESTING "$HERE"/Sources/*.swift -o "$BIN"
 pass=0
 expect_reject() {
-  if "$BIN" "$1" "$2" >/dev/null 2>&1; then echo "FAIL: $3" >&2; exit 1; fi
+  if "$BIN" --inbox "$1" "$2" >/dev/null 2>&1; then echo "FAIL: $3" >&2; exit 1; fi
   pass=$((pass + 1))
 }
 mkdir -p "$TMP/outbox" "$TMP/inbox"
 
 printf ok > "$TMP/outbox/정상.md"
-"$BIN" "$TMP/outbox" "$TMP/inbox"
+"$BIN" --inbox "$TMP/outbox" "$TMP/inbox"
 test "$(cat "$TMP/inbox/정상.md")" = ok && test ! -e "$TMP/outbox/정상.md"
 pass=$((pass + 1))
 
 printf old > "$TMP/inbox/충돌.md"; printf new > "$TMP/outbox/충돌.md"
-"$BIN" "$TMP/outbox" "$TMP/inbox"
+"$BIN" --inbox "$TMP/outbox" "$TMP/inbox"
 test "$(cat "$TMP/inbox/충돌.md")" = old && test "$(cat "$TMP/inbox/충돌 2.md")" = new
 pass=$((pass + 1))
 
 for ext in txt json swift svg png heic zip sh; do
   printf data > "$TMP/outbox/대표.$ext"
-  "$BIN" "$TMP/outbox" "$TMP/inbox"
+  "$BIN" --inbox "$TMP/outbox" "$TMP/inbox"
   test "$(cat "$TMP/inbox/대표.$ext")" = data
   pass=$((pass + 1))
 done
@@ -76,4 +76,4 @@ for name in .env client-secret.txt db-CREDENTIAL.md api_token.json; do
   pass=$((pass + 1))
 done
 
-echo "PASS: $pass steno-inbox-writer checks"
+echo "PASS: $pass 받은 파일 checks"

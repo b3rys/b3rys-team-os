@@ -102,8 +102,7 @@ archiving/
 /SPEC.md
 rules/archive/
 /tools/*
-!/tools/steno-inbox-writer/
-!/tools/steno-share-sync/
+!/tools/steno-helper/
 /research/
 .env.bak*
 agents.json.bak*

@@ -3,7 +3,7 @@
 
 Usage: steno-share-return.py <팀 폴더 안 파일 이름> --as <팀원 이름>
 
-- 도우미(steno-share-sync)를 한 번 돌려 지금 원본 해시를 manifest 에 받는다.
+- Steno 도우미(steno-helper)를 한 번 돌려 지금 원본 해시를 manifest 에 받는다.
 - 사본을 만든 뒤 원본이 그대로면 steno-mcp edit_note 로 원본 자리에 쓴다.
   Steno 가 "<이름>이 고침 ✦" 표시와 ⌘⌥Z 되돌리기를 붙인다.
 - 원본이 바뀌었거나 확인이 안 되면 덮지 않고 create_note 로 "AAA (<이름> 수정).md" 를 만든다.
@@ -36,7 +36,7 @@ def refresh_manifest():
             subprocess.run(["/bin/sh", "-c", hook], check=True)
         return True
     before = os.stat(MANIFEST).st_mtime if os.path.exists(MANIFEST) else 0
-    subprocess.run(["launchctl", "kickstart", f"gui/{os.getuid()}/com.b3os.steno-share-sync"],
+    subprocess.run(["launchctl", "kickstart", f"gui/{os.getuid()}/com.b3os.steno-helper"],
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(20):
         if os.path.exists(MANIFEST) and os.stat(MANIFEST).st_mtime > before:

@@ -3,14 +3,14 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TMP="$(mktemp -d)"; TMP="$(cd "$TMP" && pwd -P)"
 trap 'chmod -R u+rw "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
-BIN="$TMP/steno-share-sync-test"
-swiftc -D STENO_SHARE_TESTING "$HERE/Sources/main.swift" -o "$BIN"
+BIN="${STENO_HELPER_TEST_BIN:-$TMP/steno-helper-test}"
+[ -x "$BIN" ] || swiftc -D STENO_HELPER_TESTING "$HERE"/Sources/*.swift -o "$BIN"
 SRC="$TMP/팀 공유"; DST="$TMP/shared"
 mkdir -p "$SRC" "$DST"
 pass=0
 ok() { pass=$((pass + 1)); }
 fail() { echo "FAIL: $1" >&2; exit 1; }
-sync() { "$BIN" "$SRC" "$DST" 2>/dev/null || true; }
+sync() { "$BIN" --share "$SRC" "$DST" 2>/dev/null || true; }
 srcsum() { find "$SRC" -type f -exec shasum {} + | sort; }
 
 # 1. 처음 복사 + manifest 기록, 원본 무수정
@@ -90,8 +90,8 @@ printf e > "$SRC/EEE.md"; ln -s "$TMP/victim.txt" "$DST/EEE.md"; sync
 
 # 10. 팀 폴더가 링크면 거절, 팀 공유가 없으면 조용히 끝
 ln -s "$DST" "$TMP/linked"
-if "$BIN" "$SRC" "$TMP/linked" 2>/dev/null; then fail "linked destination"; fi; ok
-"$BIN" "$TMP/없음" "$DST" || fail "missing source should be ok"; ok
+if "$BIN" --share "$SRC" "$TMP/linked" 2>/dev/null; then fail "linked destination"; fi; ok
+"$BIN" --share "$TMP/없음" "$DST" || fail "missing source should be ok"; ok
 
 # 11. 되돌려 넣기: 원본 그대로면 edit_note, 바뀌었으면 create_note "(빌 수정)", 같으면 할 일 없음
 RH="$TMP/home"; RS="$RH/Library/Application Support/b3os/steno-shared"; mkdir -p "$RS"
@@ -161,4 +161,4 @@ for bad in "a/b" "../x" ".hidden" "$(printf 'a\nb')" "1234567890123456789012345"
   if ret AAA.md --as "$bad" 2>/dev/null; then fail "return bad member $bad"; fi; ok
 done
 
-echo "PASS: $pass steno-share-sync checks"
+echo "PASS: $pass 팀 공유 checks"
