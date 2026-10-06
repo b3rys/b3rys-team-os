@@ -35,7 +35,9 @@ SF는 결과물 품질·과제 수행 시간·과제 수행 토큰량을 함께 
 
 개발 속도는 구조화와 변경 영향 범위에 맞춘 검사 단계로 확보한다. 공유 기계에서는 검사 순번과 자동 재검사를 제어하고, 기다리는 동안 헤드리스 작업을 겹쳐 돌린다. 상세: [`references/dev-mode-operations.md`](references/dev-mode-operations.md)
 
-AI 팀이 기능을 만들 때 지키는 8개 코딩 원칙과 점검법: [`references/ai-team-coding-guidelines.md`](references/ai-team-coding-guidelines.md)
+AI 팀이 기능을 만들 때 지키는 11개 코딩 원칙과 점검법: [`references/ai-team-coding-guidelines.md`](references/ai-team-coding-guidelines.md)
+
+구조 정리(리팩터링)는 신호가 보일 때 앱 전체 지도로 재고, 위험 순으로 옮기고, 래칫으로 지킨다. 구현 첫날부터 지킬 구조 규칙은 시작 단계에 둔다. 상세: [`references/structure-refactor.md`](references/structure-refactor.md) · [`references/start.md`](references/start.md#구현-첫날부터-지킬-구조-규칙)
 
 ### 3. 출시
 
