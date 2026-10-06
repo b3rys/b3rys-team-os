@@ -227,7 +227,7 @@ function card(title: string, body: string): string {
 }
 
 export function compactionPanel(metrics: CompactionMetrics): string {
-  const tokens = (n: number | null): string => n === null ? "—" : n.toLocaleString();
+  const tokens = (n: number | null): string => n === null ? "—" : n.toLocaleString(undefined, { maximumFractionDigits: 0 });
   const table = (stats: CompactionMemberStat[], label: string): string => `
     <div class="mb-1 text-xs text-slate-500">${label}</div>
     <div class="overflow-x-auto mb-3"><table class="w-full text-sm"><thead><tr class="text-xs text-slate-500 text-left">

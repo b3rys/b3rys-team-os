@@ -3,6 +3,7 @@
 | 기능 / 접근 | 소스 | 자동 검사 | 화면 검사 | 경계 오류 주입 | 미검증 |
 |---|---|---|---|---|---|
 | Monitoring → 멤버별 홉 옆 멤버별 압축. 24h/7d 횟수·평균 전후 토큰, 0회와 미계측 구분 | `src/server/lib/compactionMetrics.ts`, `src/server/lib/monitoringStatus.ts`, `src/server/routes/monitoring.ts`, `src/web/components/MonitoringView.ts` | `monitoringStatus.compactionMetrics.test.ts`, `MonitoringView.compaction.test.ts` | DOM 표의 0회·미계측·누락 토큰·ID 이스케이프·한국어/영어 검사 | 기간 시작 경계를 `>=`에서 `>`로 바꾸면 2개 시험 실패, 원본 복원 확인 | 라이브 세션 데이터·실제 브라우저 배치·운영 부하. 머지·배포 후 별도 확인 |
+| 평균 전후 토큰 정수 표시 (24h/7d) | `src/web/components/MonitoringView.ts` | `MonitoringView.compaction.test.ts`: 833397.75 → 833,398, 243791.833 → 243,792; 서버 원값 유지 | 두 표의 DOM 토큰 셀 검사 | 정수 포맷 제거 시 1개 시험 실패, 원본 복원 확인 | 실제 브라우저·배포 후 확인 |
 
 ## 집계 기준
 
