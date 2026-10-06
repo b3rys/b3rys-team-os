@@ -2,19 +2,21 @@
 //   새 쓰기 0, 새 probe 0. 서버측 15초 캐시로 요청마다 로그/db 풀조회 방지(부하0).
 import { Hono } from "hono";
 import type { Database } from "bun:sqlite";
-import { readLivenessStatus, readDmHealth, readHermesRuntimeHealth, readOpenClawTelegramIngressStatus, readHopMetrics } from "../lib/monitoringStatus";
+import { readLivenessStatus, readDmHealth, readHermesRuntimeHealth, readOpenClawTelegramIngressStatus, readHopMetrics, createCompactionMetricsReader, COMPACTION_CACHE_MS, type CompactionReaderOptions } from "../lib/monitoringStatus";
 
 interface MonitoringDeps {
   db: Database;
+  compaction?: CompactionReaderOptions;
 }
 
 const CACHE_MS = 15_000;
 
 export function createMonitoringRoutes(deps: MonitoringDeps): Hono {
   const app = new Hono();
+  const readCompactionMetrics = createCompactionMetricsReader(deps.compaction);
   let cache: { at: number; body: Record<string, unknown> } | null = null;
 
-  app.get("/monitoring", (c) => {
+  app.get("/monitoring", async (c) => {
     const now = Date.now();
     if (cache && now - cache.at < CACHE_MS) {
       return c.json({ ...cache.body, cached: true });
@@ -25,6 +27,8 @@ export function createMonitoringRoutes(deps: MonitoringDeps): Hono {
       hermes: readHermesRuntimeHealth(deps.db),
       ingress: readOpenClawTelegramIngressStatus(deps.db),
       hopMetrics: readHopMetrics(deps.db),
+      compactionMetrics: await readCompactionMetrics(),
+      compactionCacheMs: deps.compaction?.cacheMs ?? COMPACTION_CACHE_MS,
       generatedAt: new Date().toISOString(),
       cacheMs: CACHE_MS,
     };
