@@ -38,14 +38,14 @@ const SRC = readFileSync(join(import.meta.dir, "wakeDispatcher.ts"), "utf8");
  */
 describe("★스레드 문맥 — 전 팀원, 같은 형식★", () => {
   it("★깨워진 스레드는 권한 게이트를 안 탄다★ (그룹방 포함 — GD 결정)", () => {
-    expect(SRC).toContain("const teamContext = buildTeamContext(db, row.thread_id, row.agent_id);");
+    expect(SRC).toContain("const teamContext = buildTeamContext(db, row.thread_id, row.agent_id, row.message_id);");
     // ★런타임·권한으로 갈라지지 않는다★ — 갈라지는 순간 누군가는 못 보고, 못 보면 룰을 못 지킨다
     expect(SRC).not.toContain("teamContextForAgent(row.agent_id, buildTeamContext");
     expect(SRC).not.toContain("buildOwnConversationContext");
   });
 
   it("★관점 인자를 넘긴다★ — 누구 눈으로 보는지 알아야 '네가 보낸 것' 을 표시한다", () => {
-    expect(SRC).toContain("buildTeamContext(db, row.thread_id, row.agent_id)");
+    expect(SRC).toContain("buildTeamContext(db, row.thread_id, row.agent_id, row.message_id)");
   });
 
   it("★스레드 밖은 여전히 안 준다★ — '깨워진 그 대화' 만이다 (팀 전체 가시성과는 다른 얘기)", () => {

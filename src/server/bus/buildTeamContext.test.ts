@@ -58,3 +58,18 @@ describe("buildTeamContext — 자기것만·5건 (그룹·버스 통일, GD 202
     expect(ctx).not.toContain("딴-대화 리뷰 요청"); // ★버스도 남의 딴-대화 제거(신 동작 증명 — fix 끄면 빨개짐)
   });
 });
+
+describe("buildTeamContext — 지금 배달하는 메시지는 이력에서 뺀다", () => {
+  test("excludeMessageId 로 준 메시지는 이력에 없고, 나머지는 그대로", () => {
+    const db = setup();
+    put(db, "task-1", "codex", "steve", "앞선 요청 본문");
+    const cur = put(db, "task-1", "steve", "codex", "지금 배달하는 답 본문");
+    const id = (cur as { stored?: { id: string } }).stored?.id;
+    expect(id).toBeTruthy();
+    const withAll = buildTeamContext(db, "task-1", "codex");
+    expect(withAll).toContain("지금 배달하는 답 본문");
+    const ctx = buildTeamContext(db, "task-1", "codex", id);
+    expect(ctx).toContain("앞선 요청 본문");
+    expect(ctx).not.toContain("지금 배달하는 답 본문");
+  });
+});
