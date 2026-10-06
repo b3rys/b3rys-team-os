@@ -283,7 +283,7 @@ if os.environ.get('EXPECT_REPORT_BY', '').strip():
 #   ★글자 해석이 아니라 칸이다★ — 본문에 '각자 보고하세요' 라고 써도 서버는 본문을 안 읽는다.
 if os.environ.get('INDIVIDUAL'):
     meta['individual'] = True
-# no_wake: 보낸 쪽이 "깨우지 마라" 를 단 정보성 메시지. 서버 디스패처가 이 칸만 보고 inbox-only 로 둔다.
+# no_wake: 보낸 쪽이 깨우지 말라고 표시한 정보성 메시지. 서버 디스패처가 이 칸만 보고 inbox-only 로 둔다.
 if os.environ.get('NO_WAKE'):
     meta['no_wake'] = True
 # episode: comm-suite v3 판정 결합키. probe 가 발신 시 심고 answer/report 가 같은 값을 달면
