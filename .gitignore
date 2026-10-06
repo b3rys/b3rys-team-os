@@ -103,6 +103,7 @@ archiving/
 rules/archive/
 /tools/*
 !/tools/steno-inbox-writer/
+!/tools/steno-share-sync/
 /research/
 .env.bak*
 agents.json.bak*
