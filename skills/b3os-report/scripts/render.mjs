@@ -213,14 +213,16 @@ ${tabs.map((tb) => `.wrap:not(.js-tabs):has(#panel-${tb.id}:target) [href="#pane
 }
 
 const css = readFileSync(resolve(__dir, "../assets/theme.css"), "utf8");
+// System colors also work in script-disabled report viewers.
+const systemThemeCss = "@media(prefers-color-scheme:light){" + [...css.matchAll(/\[data-theme="light"\][^{}]*\{[^{}]*\}/g)].map(m => m[0].replaceAll('[data-theme="light"]', '[data-theme="auto"]')).join("\n") + "}";
 const docTitle = title || (lines.find((l) => /^#\s+/.test(l)) || "# 보고서").replace(/^#\s+/, "").trim();
 const html = `<!doctype html>
-<html lang="ko" data-theme="dark"><head>
+<html lang="ko" data-theme="auto"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${esc(docTitle)}</title>
 <style>
-${css}${tabsCss}
+${css}${systemThemeCss}${tabsCss}
 </style>
 </head><body><div class="report-shell">
   <div class="report-toolbar">
@@ -235,9 +237,15 @@ ${bodyHtml}
 <script>
 (function(){
   var root=document.documentElement,d=document.getElementById('theme-dark'),l=document.getElementById('theme-light');
-  function setTheme(t){root.setAttribute('data-theme',t);try{localStorage.setItem('b3os-report-theme',t)}catch(e){};d.classList.toggle('active',t==='dark');l.classList.toggle('active',t==='light')}
-  try{var saved=localStorage.getItem('b3os-report-theme'); if(saved==='light') setTheme('light');}catch(e){}
-  d.onclick=function(){setTheme('dark')}; l.onclick=function(){setTheme('light')};
+  var preference=null, media=window.matchMedia('(prefers-color-scheme: light)');
+  function applyTheme(t){root.setAttribute('data-theme',t);d.classList.toggle('active',t==='dark');l.classList.toggle('active',t==='light')}
+  function chooseTheme(t){preference=t;applyTheme(t);try{localStorage.setItem('b3os-report-theme',t)}catch(e){}}
+  try{var saved=localStorage.getItem('b3os-report-theme');if(saved==='light'||saved==='dark')preference=saved}catch(e){}
+  applyTheme(preference||(media.matches?'light':'dark'));
+  function systemChanged(e){if(!preference)applyTheme(e.matches?'light':'dark')}
+  if(media.addEventListener)media.addEventListener('change',systemChanged);
+  else if(media.addListener)media.addListener(systemChanged);
+  d.onclick=function(){chooseTheme('dark')};l.onclick=function(){chooseTheme('light')};
 })();${tabsJs}
 </script></body></html>
 `;
