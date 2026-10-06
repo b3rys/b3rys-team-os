@@ -227,10 +227,10 @@ MODEL_DESC="--model ${CLAUDE_MODEL:-생략(저장된 기본값)}"
 #   · 서브에이전트 기본 모델: 지정이 없으면 부모 모델(Opus)을 물려받아 하네스가 Opus 로 돌았다.
 #     기본은 소넷, 크리티컬한 일은 Agent 호출에서 model 을 명시해 올린다.
 #   · 자동 압축 창: 1M 문맥 모델은 대화가 수십만 토큰까지 쌓인 채 호출마다 그 전체를 다시 읽는다
-#     (측정: 호출당 약 55만). 20만 창에서 압축되게 해 호출당 재독을 줄인다.
+#     (측정: 호출당 약 55만). 50만 창에서 압축되게 해 호출당 재독을 줄인다.
 #   값을 바꾸려면 env 로 덮어쓴다. 빈 문자열이면 그 항목을 붙이지 않는다.
 CLAUDE_CODE_SUBAGENT_MODEL="${CLAUDE_CODE_SUBAGENT_MODEL-claude-sonnet-5-5}"
-CLAUDE_CODE_AUTO_COMPACT_WINDOW="${CLAUDE_CODE_AUTO_COMPACT_WINDOW-200000}"
+CLAUDE_CODE_AUTO_COMPACT_WINDOW="${CLAUDE_CODE_AUTO_COMPACT_WINDOW-500000}"
 COST_ENV=""
 [[ -n "$CLAUDE_CODE_SUBAGENT_MODEL" ]] && COST_ENV+="$(printf 'CLAUDE_CODE_SUBAGENT_MODEL=%q ' "$CLAUDE_CODE_SUBAGENT_MODEL")"
 [[ -n "$CLAUDE_CODE_AUTO_COMPACT_WINDOW" ]] && COST_ENV+="$(printf 'CLAUDE_CODE_AUTO_COMPACT_WINDOW=%q ' "$CLAUDE_CODE_AUTO_COMPACT_WINDOW")"
