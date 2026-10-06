@@ -33,3 +33,20 @@ test("English labels and empty windows", () => {
   expect(html).toContain("Last 7d");
   expect(html).toContain("No data");
 });
+
+test("fractional token averages display as rounded integers in both windows", () => {
+  const win = new Window();
+  win.SyntaxError = SyntaxError;
+  const root = win.document.createElement("div");
+  const stats = [{ memberId: "claude", count: 4, avgPreTokens: 833397.75, avgPostTokens: 243791.833, measured: true }];
+  root.innerHTML = compactionPanel({ window24h: stats, window7d: stats });
+  const tables = root.querySelectorAll("table");
+  expect(tables.length).toBe(2);
+  for (const table of tables) {
+    const cells = table.querySelectorAll("tbody td");
+    expect(cells[2]!.textContent).toBe("833,398");
+    expect(cells[3]!.textContent).toBe("243,792");
+  }
+  expect(stats[0]!.avgPreTokens).toBe(833397.75);
+  expect(stats[0]!.avgPostTokens).toBe(243791.833);
+});
