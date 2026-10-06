@@ -7,6 +7,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { botLivenessLogPath } from "./livenessMonitor";
+export { readCompactionMetrics, createCompactionMetricsReader, COMPACTION_CACHE_MS } from "./compactionMetrics";
+export type { CompactionMetrics, CompactionMemberStat, CompactionReaderOptions } from "./compactionMetrics";
 const INGRESS_STATUS_FILE =
   process.env.OPENCLAW_TELEGRAM_STATUS_FILE ||
   join(homedir(), "Development/b3rys-team-os/var/openclaw-telegram-ingress-status.json");

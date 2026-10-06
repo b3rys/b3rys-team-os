@@ -2,6 +2,7 @@
 //   ① 봇 liveness 모니터 상태  ② DM 저장(dm_message) health. 데이터: GET /api/monitoring(서버 30초 캐시).
 import { apiBase } from "../ws";
 import { pick } from "../i18n";
+import type { CompactionMetrics, CompactionMemberStat } from "../../server/lib/compactionMetrics";
 
 interface LivenessStatus {
   available: boolean;
@@ -69,6 +70,7 @@ interface MonitoringData {
   hermes?: HermesRuntimeHealth;
   ingress: IngressStatus;
   hopMetrics: HopMetrics;
+  compactionMetrics?: CompactionMetrics;
   generatedAt: string;
   cached?: boolean;
 }
@@ -224,6 +226,28 @@ function card(title: string, body: string): string {
     <h3 class="text-sm font-semibold text-slate-100 mb-3">${title}</h3>${body}</section>`;
 }
 
+export function compactionPanel(metrics: CompactionMetrics): string {
+  const tokens = (n: number | null): string => n === null ? "—" : n.toLocaleString();
+  const table = (stats: CompactionMemberStat[], label: string): string => `
+    <div class="mb-1 text-xs text-slate-500">${label}</div>
+    <div class="overflow-x-auto mb-3"><table class="w-full text-sm"><thead><tr class="text-xs text-slate-500 text-left">
+      <th class="pb-1 pr-3 font-medium">${pick("멤버", "Member")}</th>
+      <th class="pb-1 pr-3 font-medium text-right">${pick("횟수", "Count")}</th>
+      <th class="pb-1 pr-3 font-medium text-right">${pick("평균 전 토큰", "Avg tokens before")}</th>
+      <th class="pb-1 font-medium text-right">${pick("평균 후 토큰", "Avg tokens after")}</th>
+    </tr></thead><tbody>${stats.map((s) => `
+      <tr class="border-t border-slate-800/60">
+        <td class="py-1 pr-3 text-slate-100">${escape(s.memberId)}</td>
+        ${s.measured ? `<td class="py-1 pr-3 text-right text-slate-200">${s.count.toLocaleString()}</td>
+        <td class="py-1 pr-3 text-right text-slate-400">${tokens(s.avgPreTokens)}</td>
+        <td class="py-1 text-right text-slate-400">${tokens(s.avgPostTokens)}</td>`
+        : `<td colspan="3" class="py-1 text-right text-slate-500">${pick("미계측", "Not measured")}</td>`}
+      </tr>`).join("") || `<tr><td colspan="4" class="py-2 text-slate-500">${pick("데이터 없음", "No data")}</td></tr>`}</tbody></table></div>`;
+  return `<div class="text-xs text-slate-400 mb-2">${pick("대화 자동 압축 횟수 · 최대 5분 간격 집계 · 기록에 없는 토큰은 —", "Conversation compactions · refreshed up to every 5 min · unrecorded tokens shown as —")}</div>
+    ${table(metrics.window24h, pick("최근 24시간", "Last 24h"))}
+    ${table(metrics.window7d, pick("최근 7일", "Last 7d"))}`;
+}
+
 export function renderMonitoringView(root: HTMLElement): void {
   root.innerHTML = `<div class="p-4 text-sm text-slate-400">${pick("모니터링 불러오는 중…", "Loading monitoring…")}</div>`;
   const load = async (): Promise<void> => {
@@ -241,7 +265,8 @@ export function renderMonitoringView(root: HTMLElement): void {
             ${card(pick("봇 Liveness 모니터", "Bot liveness monitor"), livenessPanel(d.liveness))}
             ${card(pick("DM 저장 상태", "DM capture health"), dmPanel(d.dmHealth))}
             <div class="xl:col-span-2">${card(pick("런타임 상태", "Runtime status"), runtimePanel(d.hermes ?? EMPTY_HERMES, d.ingress))}</div>
-            <div class="xl:col-span-2">${card(pick("멤버별 홉 (1턴1홉 계측)", "Hops per member (1-turn-1-hop)"), hopPanel(d.hopMetrics))}</div>
+            ${card(pick("멤버별 홉 (1턴1홉 계측)", "Hops per member (1-turn-1-hop)"), hopPanel(d.hopMetrics))}
+            ${card(pick("멤버별 압축", "Compactions per member"), compactionPanel(d.compactionMetrics ?? { window24h: [], window7d: [] }))}
           </div>
         </div>`;
     } catch (e) {
