@@ -66,17 +66,19 @@ private func writeAtomically(_ dir: Int32, _ name: String, _ data: Data) -> Bool
     return true
 }
 
-private func listNames(_ dir: Int32) -> [String] {
-    guard let stream = fdopendir(dup(dir)) else { return [] }
+// 목록을 끝까지 읽지 못하면 nil. 부분 목록으로 "빠진 노트"를 판단하면 사본을 잘못 지운다.
+private func listNames(_ dir: Int32) -> [String]? {
+    guard let stream = fdopendir(dup(dir)) else { return nil }
     defer { closedir(stream) }
     var names: [String] = []
-    while let entry = readdir(stream) {
+    while true {
+        errno = 0
+        guard let entry = readdir(stream) else { return errno == 0 ? names : nil }
         let name = withUnsafePointer(to: &entry.pointee.d_name) {
             $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXNAMLEN) + 1) { String(cString: $0) }
         }
         names.append(name)
     }
-    return names
 }
 
 // manifest: 이름 → 사본을 마지막으로 만들 때의 원본 해시(base)와 지금 원본 해시(source).
@@ -94,9 +96,10 @@ func run(sourcePath: String, destinationPath: String) -> Int32 {
     if let raw = readRegular(destDir, manifestName),
        let parsed = try? JSONSerialization.jsonObject(with: raw) as? Manifest { manifest = parsed }
 
+    guard let listed = listNames(sourceDir) else { log("팀 공유 목록 읽기 실패, 이번 주기는 건너뜀"); return 1 }
     var seen = Set<String>()
     var failed = false
-    for name in listNames(sourceDir) where shareable(name) {
+    for name in listed where shareable(name) {
         // 목록에 있으면 "있는 노트"다. iCloud 에서 아직 안 받은 파일은 읽기가 실패해도 사본을 지우지 않는다.
         seen.insert(name)
         guard let source = readRegular(sourceDir, name) else { log("이번엔 못 읽어 건너뜀(링크·폴더·크기·iCloud 미다운로드): \(name)"); continue }

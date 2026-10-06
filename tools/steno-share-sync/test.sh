@@ -62,6 +62,10 @@ printf d > "$SRC/DDD.md"; sync
 chmod 000 "$SRC/DDD.md"; sync; chmod 600 "$SRC/DDD.md"
 [ "$(cat "$DST/DDD.md")" = d ] || fail "unreadable keeps copy"; ok
 
+# 8b. 팀 공유 폴더를 못 읽으면(권한·iCloud 오류) 사본을 하나도 지우지 않음
+chmod 300 "$SRC"; sync; chmod 700 "$SRC"
+[ "$(cat "$DST/DDD.md")" = d ] && [ -e "$DST/AAA.md" ] || fail "unreadable folder keeps copies"; ok
+
 # 9. 팀 폴더 안 같은 이름 링크 → 링크 대상은 안 바뀌고 링크만 교체
 printf target > "$TMP/victim.txt"
 printf e > "$SRC/EEE.md"; ln -s "$TMP/victim.txt" "$DST/EEE.md"; sync
@@ -102,5 +106,8 @@ printf '{}' > "$RS/.manifest.json"
 : > "$TMP/log"; ret AAA.md --as 빌
 grep -q create_note "$TMP/log" || fail "return unknown base makes copy"; ok
 if ret ../x.md --as 빌 2>/dev/null; then fail "return bad name"; fi; ok
+for bad in "a/b" "../x" ".hidden" "$(printf 'a\nb')" "1234567890123456789012345"; do
+  if ret AAA.md --as "$bad" 2>/dev/null; then fail "return bad member $bad"; fi; ok
+done
 
 echo "PASS: $pass steno-share-sync checks"

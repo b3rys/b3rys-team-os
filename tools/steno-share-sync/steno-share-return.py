@@ -77,8 +77,12 @@ def main():
     if len(argv) != 3 or argv[1] != "--as":
         die("사용법: steno-share-return.py <파일 이름> --as <팀원 이름>")
     name, member = argv[0], argv[2].strip()
-    if not name or "/" in name or name.startswith(".") or not member:
-        die("파일 이름이나 팀원 이름이 올바르지 않음")
+    if not name or "/" in name or name.startswith(".") or "\0" in name:
+        die("파일 이름이 올바르지 않음")
+    # 팀원 이름은 새 노트 이름에 들어간다. 경로 조각·제어 문자·긴 이름을 막는다.
+    if not member or len(member) > 24 or any(c in member for c in "/\\:") or member.startswith(".") \
+            or any(ord(c) < 32 or ord(c) == 127 for c in member):
+        die("팀원 이름이 올바르지 않음(24자 이하, / \\ : 제어 문자 금지)")
     path = os.path.join(SHARED, name)
     if os.path.islink(path) or not os.path.isfile(path):
         die(f"팀 폴더에 그 파일이 없음: {name}")
