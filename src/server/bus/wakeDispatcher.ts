@@ -911,7 +911,16 @@ const CTX_HOURS_GROUP = Number(process.env.CTX_HOURS_GROUP ?? 6);
 //   지금 둘 다 5인 것은 우연이고, 목적이 갈리면 값도 다시 갈린다.
 const CTX_MSGS_OWN = Number(process.env.CTX_MSGS_OWN ?? 5);
 
-export function buildTeamContext(db: Database, threadId: string, agentId?: string): string {
+export function senderAskedNoWake(metaJson: string | null | undefined): boolean {
+  if (!metaJson) return false;
+  try {
+    return (JSON.parse(metaJson) as { no_wake?: unknown }).no_wake === true;
+  } catch {
+    return false;
+  }
+}
+
+export function buildTeamContext(db: Database, threadId: string, agentId?: string, excludeMessageId?: string): string {
   try {
     // ★6시간 안에 아무것도 없으면 빈 문맥이었다★
     //   → 하루 뒤 재개된 위임에서 collector 가 ★자기가 이미 뭘 했는지도 모른 채★ 돈다.
@@ -927,6 +936,8 @@ export function buildTeamContext(db: Database, threadId: string, agentId?: strin
     const fetchHours = isGroupRoom ? CTX_HOURS_GROUP : CTX_HOURS;
     const fetchLimit = 40; // 그룹·버스 모두 필터를 견디게 넉넉히 뽑고 아래서 5건으로 자른다
     let recent = recentThreadMessages(db, threadId, fetchLimit, fetchHours);
+    // 지금 배달하는 메시지는 본문으로 따로 들어간다. 이력에도 넣으면 같은 글을 두 번 읽힌다.
+    if (excludeMessageId) recent = recent.filter((m) => m.id !== excludeMessageId);
     if (agentId) {
       // ★자기것 + 나에게 온 것만 · 5건 (그룹·버스 통일, 분기 없음)★.
       // from=나(내 팬아웃·발언) OR to=나(기여자 답·요구사항)만. 남의 딴-대화(예: codex→demis 리뷰 팬아웃)를 제거.
@@ -1089,6 +1100,27 @@ function buildDispatchPlan(
       from: row.from_agent_id,
       thread_id: row.thread_id,
       body_preview: row.body.slice(0, 40),
+    });
+    return { kind: "skip" };
+  }
+
+  // 보낸 쪽이 "깨우지 마라"(send.sh --no-wake → meta.no_wake)를 단 팀원 메시지는 inbox-only.
+  // 받는 팀원은 다음에 일로 깨어날 때 이 스레드 이력·inbox 에서 본다. 깨우기 한 번 = 받는 쪽 대화
+  // 전체 재독이라 접수·진행 알림 같은 정보성 메시지가 큰 비용이었다. 사람·시스템 발신과 broadcast 는
+  // 이 표시가 있어도 늘 깨운다.
+  if (row.source === "agent" && row.to_agent_id !== "broadcast" && senderAskedNoWake(row.meta_json)) {
+    db.prepare(
+      `UPDATE message_recipient
+       SET delivery_state = 'completed',
+           last_error     = 'sender_no_wake',
+           lease_until    = NULL,
+           claimed_at     = NULL
+       WHERE message_id = ? AND agent_id = ?`,
+    ).run(row.message_id, row.agent_id);
+    appendAuditFile("bus_dispatcher", "sender_no_wake", row.message_id, {
+      agent_id: row.agent_id,
+      from: row.from_agent_id,
+      thread_id: row.thread_id,
     });
     return { kind: "skip" };
   }
@@ -1317,7 +1349,7 @@ function buildDispatchPlan(
   //     ★방향 표시도, '네가 보낸 것' 마커도 없는 옛 형식이었다★ — 위에서 고친 그 문제를 그대로 갖고 있었다.
   //   → ★깨워진 스레드의 문맥은 전 팀원에게, 같은 형식으로.★ (full_context 특권 불필요)
   //   (팀 전체·타 스레드 가시성은 별개다 — 여긴 ★네가 깨워진 그 대화★ 만 준다)
-  const teamContext = buildTeamContext(db, row.thread_id, row.agent_id);
+  const teamContext = buildTeamContext(db, row.thread_id, row.agent_id, row.message_id);
   return { kind: "invoke", adapter, targetAgent, teamContext };
 }
 

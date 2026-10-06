@@ -17,6 +17,7 @@
 #                [--expect-report-by <duration>]   e.g. 10m, 30m, 2h — track a report from a
 #                                                   one-shot recipient (openclaw/hermes); if none
 #                                                   by the deadline the server re-wakes them once.
+#                [--no-wake]                       받는 팀원을 깨우지 않는다(접수·진행 알림용). 요청·결과엔 쓰지 않는다.
 #                [--episode <id>]                  comm-suite v3 판정 결합키(meta.episode). probe 발신 시
 #                                                   심어 answer/report 를 그 수집에 묶는다(측정=배포·codex-d).
 #                                                   기존 meta 플래그와 같은 경로(마이그레이션 0). 안 붙이면 무영향.
@@ -24,7 +25,7 @@ set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BASE="${TEAM_BASE:-http://127.0.0.1:7878/team}"
 
-TO=""; BODY=""; THREAD=""; REPLY_TO=""; TYPE="dm"; PRIORITY="normal"; FROM=""; HOP=""; SYNC=""; DIRECT_TO_GD=""; SOURCE_THREAD=""; EXPECT_REPORT_BY=""; INDIVIDUAL=""; EPISODE=""
+TO=""; BODY=""; THREAD=""; REPLY_TO=""; TYPE="dm"; PRIORITY="normal"; FROM=""; HOP=""; SYNC=""; DIRECT_TO_GD=""; SOURCE_THREAD=""; EXPECT_REPORT_BY=""; INDIVIDUAL=""; EPISODE=""; NO_WAKE=""
 BODY_FILE=""; BODY_SET=""; CONFIRM=""; MENTIONS=""; ALL_HANDS=""
 
 # ★같은 플래그를 두 번 받으면 죽는다★ — 이건 오타 방지가 아니라 ★셸 인자 쪼개짐 탐지기★ 다.
@@ -91,6 +92,10 @@ while [ $# -gt 0 ]; do
     # ★개별보고 위임 표시★ — "각자 GD께 직접 보고해라" 로 뿌릴 때 붙인다. 서버가 [마감] 독촉을 안 보낸다.
     #   안 붙여도 고장나지 않는다: 독촉이 한 번 올 뿐이고 그 본문이 "개별보고면 무시하세요" 라고 알려준다.
     --individual) INDIVIDUAL="1"; shift ;;
+    # ★--no-wake — 받는 팀원을 깨우지 않는다★. 접수·진행 알림처럼 답이 필요 없는 정보성 메시지용.
+    #   깨우기 한 번 = 받는 쪽이 쌓인 대화 전체를 다시 읽는 비용이다. 받는 쪽은 다음에 일로 깨어날 때 본다.
+    #   요청·결과·막힘·질문에는 붙이지 않는다(그건 깨워야 한다). broadcast·--direct-to-gd 와는 같이 못 쓴다.
+    --no-wake) NO_WAKE="1"; shift ;;
     --source-thread) dup_guard --source-thread; SOURCE_THREAD="$2"; shift 2 ;;
     --expect-report-by) dup_guard --expect-report-by; EXPECT_REPORT_BY="$2"; shift 2 ;;
     # comm-suite v3 결합키 — meta.episode 로 실림(기존 플래그 패턴 그대로, 서버 통과·마이그레이션 0).
@@ -245,7 +250,10 @@ for _m in $MENTIONS; do
 done
 
 # Build JSON via python to handle escaping safely.
-PAYLOAD=$(MENTION_IDS="$MENTION_IDS" BODY="$BODY" FROM="$FROM" TO="$TO" THREAD="$THREAD" REPLY_TO="$REPLY_TO" TYPE="$TYPE" PRIORITY="$PRIORITY" HOP="$HOP" SYNC="$SYNC" DIRECT_TO_GD="$DIRECT_TO_GD" SOURCE_THREAD="$SOURCE_THREAD" EXPECT_REPORT_BY="$EXPECT_REPORT_BY" INDIVIDUAL="$INDIVIDUAL" EPISODE="$EPISODE" ALL_HANDS="$ALL_HANDS" python3 -c "
+if [ -n "$NO_WAKE" ] && { [ "$TO" = "broadcast" ] || [ -n "$DIRECT_TO_GD" ]; }; then
+  echo "ERROR: --no-wake 는 팀원 한 명에게 보내는 메시지에만 쓸 수 있습니다(broadcast·--direct-to-gd 불가)" >&2; exit 1
+fi
+PAYLOAD=$(NO_WAKE="$NO_WAKE" MENTION_IDS="$MENTION_IDS" BODY="$BODY" FROM="$FROM" TO="$TO" THREAD="$THREAD" REPLY_TO="$REPLY_TO" TYPE="$TYPE" PRIORITY="$PRIORITY" HOP="$HOP" SYNC="$SYNC" DIRECT_TO_GD="$DIRECT_TO_GD" SOURCE_THREAD="$SOURCE_THREAD" EXPECT_REPORT_BY="$EXPECT_REPORT_BY" INDIVIDUAL="$INDIVIDUAL" EPISODE="$EPISODE" ALL_HANDS="$ALL_HANDS" python3 -c "
 import json, os
 p = {
   'from_agent_id': os.environ['FROM'],
@@ -275,6 +283,9 @@ if os.environ.get('EXPECT_REPORT_BY', '').strip():
 #   ★글자 해석이 아니라 칸이다★ — 본문에 '각자 보고하세요' 라고 써도 서버는 본문을 안 읽는다.
 if os.environ.get('INDIVIDUAL'):
     meta['individual'] = True
+# no_wake: 보낸 쪽이 "깨우지 마라" 를 단 정보성 메시지. 서버 디스패처가 이 칸만 보고 inbox-only 로 둔다.
+if os.environ.get('NO_WAKE'):
+    meta['no_wake'] = True
 # episode: comm-suite v3 판정 결합키. probe 가 발신 시 심고 answer/report 가 같은 값을 달면
 #   판정기가 json_extract(meta_json,'\$.episode') 로 그 수집만 묶는다(measure=deploy·codex-d).
 if os.environ.get('EPISODE', '').strip():

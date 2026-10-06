@@ -519,3 +519,37 @@ describe("dispatchRow — 한도 보류", () => {
     expect(holdAudits()).toBe(0);
   });
 });
+
+// ─── sender no-wake: 보낸 쪽이 meta.no_wake 를 단 팀원 메시지는 받는 쪽을 깨우지 않는다 ───
+describe("dispatchRow — sender no_wake (send.sh --no-wake)", () => {
+  test("agent 발신 + meta.no_wake → completed inbox-only, adapter NOT called", async () => {
+    const row = pendingRowFor(db, "bill", { body: "접수. 같은 브랜치에서 진행합니다", meta: { no_wake: true } });
+    const claude = spyAdapter(() => ({ ok: true }));
+    await dispatch(db, row, { claude: claude.adapter });
+    expect(claude.calls).toBe(0);
+    const r = rcpt(db, row.message_id, "bill");
+    expect(r?.delivery_state).toBe("completed");
+    expect(r?.last_error).toBe("sender_no_wake");
+  });
+
+  test("표시가 없으면 같은 본문도 깨운다", async () => {
+    const row = pendingRowFor(db, "bill", { body: "접수. 같은 브랜치에서 진행합니다" });
+    const claude = spyAdapter(() => ({ ok: true }));
+    await dispatch(db, row, { claude: claude.adapter });
+    expect(claude.calls).toBe(1);
+  });
+
+  test("사람·시스템 발신(source≠agent)은 no_wake 가 있어도 깨운다", async () => {
+    const row = pendingRowFor(db, "bill", { from_agent_id: "user", source: "user", body: "이거 해줘", meta: { no_wake: true } });
+    const claude = spyAdapter(() => ({ ok: true }));
+    await dispatch(db, row, { claude: claude.adapter });
+    expect(claude.calls).toBe(1);
+  });
+
+  test("no_wake 가 true 가 아니면(문자열 등) 깨운다", async () => {
+    const row = pendingRowFor(db, "bill", { body: "x", meta: { no_wake: "true" } });
+    const claude = spyAdapter(() => ({ ok: true }));
+    await dispatch(db, row, { claude: claude.adapter });
+    expect(claude.calls).toBe(1);
+  });
+});
