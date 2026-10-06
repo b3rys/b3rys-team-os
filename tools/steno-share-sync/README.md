@@ -27,7 +27,7 @@ tools/steno-share-sync/steno-share-return.py AAA.md --as 빌
 
 1. 도우미를 한 번 돌려(`launchctl kickstart`) manifest 를 새로 받는다.
 2. `base == source` 이면, 즉 사본을 만든 뒤 원본이 그대로이면 `edit_note` 로 원본 자리에 쓴다. Steno 가 "빌이 고침 ✦" 표시와 ⌘⌥Z 되돌리기를 붙인다.
-3. `edit_note` 에는 `expected_sha256`(base)을 함께 보낸다. 그사이 원본이 바뀌었으면 Steno 가 거절하고, 거절되면 4번으로 간다.
+3. `edit_note` 에는 `expected_sha256`(base)을 함께 보낸다. 그사이 원본이 바뀌었으면 Steno 가 거절하고, 거절되면 4번으로 간다. 먼저 `tools/list` 에서 edit_note 가 이 인자를 아는지 보고, 모르는 Steno 면(모르는 인자는 조용히 무시된다) edit_note 를 부르지 않고 4번으로 간다.
 4. 원본이 바뀌었거나, 지금 원본을 읽지 못했거나(manifest source = `unreadable`), manifest 를 새로 받지 못했으면 덮지 않는다. 대신 `create_note` 로 `팀 공유/AAA (빌 수정).md` 를 만든다. 같은 이름이 있으면 Steno 가 " 2" 를 붙인다. 1단계에서 따로 만들기는 md·html 만 된다. 다른 형식은 거절하고 아무것도 쓰지 않는다.
 
 쓰기는 전부 steno-mcp 가 한다. steno-mcp 위치는 기본 `/Applications/Steno.app/Contents/MacOS/steno-mcp` 이고, `STENO_MCP` 로 바꿀 수 있다. Steno 설정의 AI 편집 범위가 `팀 공유` 를 허용해야 한다.

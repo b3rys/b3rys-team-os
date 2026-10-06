@@ -106,6 +106,10 @@ for line in sys.stdin:
     elif m.get("method") == "tools/call":
         with open(os.environ["FAKE_LOG"], "a") as f: f.write(json.dumps(m["params"], ensure_ascii=False) + "\n")
         print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {"content": [{"type": "text", "text": "ok"}]}}))
+    elif m.get("method") == "tools/list":
+        props = {"path": {}, "content": {}}
+        if not os.environ.get("FAKE_NO_HASH"): props["expected_sha256"] = {}
+        print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {"tools": [{"name": "edit_note", "inputSchema": {"properties": props}}]}}))
     elif "id" in m:
         print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {}}))
 STUB
@@ -119,6 +123,9 @@ grep -q '"name": "edit_note"' "$TMP/log" && grep -q '"path": "팀 공유/AAA.md"
 grep -q "\"expected_sha256\": \"$(h orig)\"" "$TMP/log" || fail "return expected hash"; ok
 : > "$TMP/log"; FAKE_REFUSE_EDIT=1 ret AAA.md --as 빌
 grep -q edit_note "$TMP/log" && grep -q '"name": "AAA (빌 수정)"' "$TMP/log" && grep -q '"format": "md"' "$TMP/log" || fail "edit refused falls back to copy"; ok
+# Steno 가 expected_sha256 을 모르면(스키마에 없음) edit_note 를 부르지 않고 사본
+: > "$TMP/log"; FAKE_NO_HASH=1 ret AAA.md --as 빌
+! grep -q edit_note "$TMP/log" && grep -q create_note "$TMP/log" || fail "no hash support makes copy"; ok
 # 원본을 못 읽은 상태(source=unreadable)면 원본 자리에 쓰지 않음
 printf '{"AAA.md":{"base":"%s","source":"unreadable"}}' "$(h orig)" > "$RS/.manifest.json"
 : > "$TMP/log"; ret AAA.md --as 빌

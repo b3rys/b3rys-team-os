@@ -46,7 +46,8 @@ class Refused(Exception):
     pass
 
 
-def call_mcp(member, tool, arguments):
+def mcp_request(member, method, params):
+    """steno-mcp 를 띄워 initialize 뒤 요청 하나를 보내고 그 응답(dict)을 돌려준다."""
     args = [MCP]
     library = os.environ.get("STENO_LIBRARY", "")
     if library.startswith("/"):
@@ -56,7 +57,7 @@ def call_mcp(member, tool, arguments):
          "params": {"protocolVersion": "2025-06-18", "capabilities": {},
                     "clientInfo": {"name": member, "version": "1"}}},
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
-        {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": tool, "arguments": arguments}},
+        {"jsonrpc": "2.0", "id": 2, "method": method, "params": params},
     ]
     stdin = "".join(json.dumps(m, ensure_ascii=False) + "\n" for m in messages)
     try:
@@ -69,12 +70,27 @@ def call_mcp(member, tool, arguments):
         except ValueError:
             continue
         if reply.get("id") == 2:
-            result = reply.get("result") or {}
-            text = " ".join(c.get("text", "") for c in result.get("content", []))
-            if reply.get("error") or result.get("isError"):
-                raise Refused(f"{tool} 거절: {text or reply.get('error')}")
-            return text
-    die(f"{tool} 응답 없음")
+            return reply
+    die(f"{method} 응답 없음")
+
+
+def call_mcp(member, tool, arguments):
+    reply = mcp_request(member, "tools/call", {"name": tool, "arguments": arguments})
+    result = reply.get("result") or {}
+    text = " ".join(c.get("text", "") for c in result.get("content", []))
+    if reply.get("error") or result.get("isError"):
+        raise Refused(f"{tool} 거절: {text or reply.get('error')}")
+    return text
+
+
+def edit_checks_hash(member):
+    """edit_note 가 expected_sha256 을 아는지 tools/list 스키마로 본다.
+    모르는 인자는 서버가 조용히 무시하므로, 모르면 원본 자리에 쓰면 안 된다."""
+    tools = (mcp_request(member, "tools/list", {}).get("result") or {}).get("tools") or []
+    for tool in tools:
+        if tool.get("name") == "edit_note":
+            return "expected_sha256" in ((tool.get("inputSchema") or {}).get("properties") or {})
+    return False
 
 
 def main():
@@ -119,6 +135,8 @@ def main():
         reason = "원본 상태를 확인하지 못해"
     elif not base or base != source:
         reason = "원본도 바뀌었거나 지금 원본을 읽지 못해"
+    elif not edit_checks_hash(member):
+        reason = "이 Steno 는 원본 해시 확인(expected_sha256)을 지원하지 않아"
     else:
         try:
             # expected_sha256: 그사이 원본이 바뀌었으면 steno-mcp 가 거절한다(Steno 쪽 지원 후 유효).
