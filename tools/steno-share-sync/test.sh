@@ -123,6 +123,17 @@ grep -q '"name": "edit_note"' "$TMP/log" && grep -q '"path": "팀 공유/AAA.md"
 grep -q "\"expected_sha256\": \"$(h orig)\"" "$TMP/log" || fail "return expected hash"; ok
 : > "$TMP/log"; FAKE_REFUSE_EDIT=1 ret AAA.md --as 빌
 grep -q edit_note "$TMP/log" && grep -q '"name": "AAA (빌 수정)"' "$TMP/log" && grep -q '"format": "md"' "$TMP/log" || fail "edit refused falls back to copy"; ok
+# 순서 경합: 사본 v1(=기준) 상태에서 return 시작 → 도우미가 사본·기준을 v2 로 갱신 → 옛 v1 을 보내면 안 됨
+printf v1 > "$RS/RACE.md"
+printf '{"RACE.md":{"base":"%s","source":"%s"}}' "$(h v1)" "$(h v1)" > "$RS/.manifest.json"
+: > "$TMP/log"
+STENO_SHARE_TEST_REFRESH="printf v2 > '$RS/RACE.md'; printf '{\"RACE.md\":{\"base\":\"$(h v2)\",\"source\":\"$(h v2)\"}}' > '$RS/.manifest.json'" \
+  ret RACE.md --as 빌
+[ ! -s "$TMP/log" ] || fail "race: stale copy sent"; ok
+# 사본이 기준 판 그대로면(고친 것 없음) 아무것도 보내지 않음
+printf '{"RACE.md":{"base":"%s","source":"%s"}}' "$(h v2)" "$(h v3)" > "$RS/.manifest.json"
+: > "$TMP/log"; ret RACE.md --as 빌; [ ! -s "$TMP/log" ] || fail "unchanged copy sends nothing"; ok
+printf '{"AAA.md":{"base":"%s","source":"%s"}}' "$(h orig)" "$(h orig)" > "$RS/.manifest.json"
 # Steno 가 expected_sha256 을 모르면(스키마에 없음) edit_note 를 부르지 않고 사본
 : > "$TMP/log"; FAKE_NO_HASH=1 ret AAA.md --as 빌
 ! grep -q edit_note "$TMP/log" && grep -q create_note "$TMP/log" || fail "no hash support makes copy"; ok

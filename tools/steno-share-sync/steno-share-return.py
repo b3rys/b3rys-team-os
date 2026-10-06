@@ -31,6 +31,9 @@ def die(message):
 def refresh_manifest():
     """도우미를 한 번 돌리고 manifest 가 새로 쓰였는지 본다. 못 보면 False."""
     if os.environ.get("STENO_SHARE_NO_KICK") == "1":
+        hook = os.environ.get("STENO_SHARE_TEST_REFRESH")  # 시험 전용: 도우미 한 번 돈 것을 흉내
+        if hook:
+            subprocess.run(["/bin/sh", "-c", hook], check=True)
         return True
     before = os.stat(MANIFEST).st_mtime if os.path.exists(MANIFEST) else 0
     subprocess.run(["launchctl", "kickstart", f"gui/{os.getuid()}/com.b3os.steno-share-sync"],
@@ -107,14 +110,15 @@ def main():
     path = os.path.join(SHARED, name)
     if os.path.islink(path) or not os.path.isfile(path):
         die(f"팀 폴더에 그 파일이 없음: {name}")
+    # 도우미를 먼저 돌리고 그 뒤에 사본을 읽는다. 먼저 읽으면 도우미가 사본·기준을 새 원본으로
+    # 바꾼 뒤에도 옛 내용을 새 기준 해시와 함께 보내 원본을 옛 판으로 되돌릴 수 있다.
+    fresh = refresh_manifest()
     with open(path, "rb") as f:
         data = f.read()
     try:
         content = data.decode("utf-8")
     except UnicodeDecodeError:
         die("글 파일만 되돌려 넣을 수 있음(UTF-8)")
-
-    fresh = refresh_manifest()
     try:
         with open(MANIFEST, encoding="utf-8") as f:
             manifest = json.load(f)
@@ -124,8 +128,13 @@ def main():
     entry = manifest.get(key) or {}
     file = entry.get("file") or name  # Steno 쪽 실제 파일 이름(NFD 일 수 있다)
     base, source = entry.get("base"), entry.get("source")
-    if source and hashlib.sha256(data).hexdigest() == source:
+    copy_hash = hashlib.sha256(data).hexdigest()
+    if source and copy_hash == source:
         print("이미 원본과 같음, 할 일 없음")
+        return
+    if base and copy_hash == base:
+        # 사본이 기준 판 그대로다 = 팀원이 고친 것이 없다. 보내면 원본을 옛 판으로 되돌릴 뿐이다.
+        print("사본에 고친 것이 없음, 할 일 없음")
         return
 
     stem, ext = os.path.splitext(file)
