@@ -81,12 +81,26 @@ private func listNames(_ dir: Int32) -> [String]? {
     }
 }
 
+private enum CopyState { case absent, unreadable, hash(String) }
+
+// 사본이 없을 때만 absent. 있는데 못 읽으면(크기·권한) 덮거나 지우지 않도록 unreadable.
+private func copyState(_ dir: Int32, _ name: String) -> CopyState {
+    var st = stat()
+    if fstatat(dir, name, &st, AT_SYMLINK_NOFOLLOW) != 0 { return errno == ENOENT ? .absent : .unreadable }
+    if (st.st_mode & S_IFMT) == S_IFLNK { return .absent }  // 링크는 rename 으로 교체된다
+    guard let data = readRegular(dir, name) else { return .unreadable }
+    return .hash(sha256(data))
+}
+
 // manifest: 이름 → 사본을 마지막으로 만들 때의 원본 해시(base)와 지금 원본 해시(source).
 private typealias Manifest = [String: [String: String]]
 
 func run(sourcePath: String, destinationPath: String) -> Int32 {
     let sourceDir = open(sourcePath, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-    guard sourceDir >= 0 else { return 0 }  // 팀 공유 폴더가 아직 없으면 할 일이 없다.
+    guard sourceDir >= 0 else {
+        if errno == ENOENT { return 0 }  // 팀 공유 폴더가 아직 없으면 할 일이 없다.
+        log("팀 공유 폴더 열기 실패(errno \(errno), 문서 폴더 권한 확인)"); return 1
+    }
     defer { close(sourceDir) }
     let destDir = open(destinationPath, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
     guard destDir >= 0 else { log("팀 폴더 열기 실패(링크이거나 없음)"); return 1 }
@@ -100,29 +114,45 @@ func run(sourcePath: String, destinationPath: String) -> Int32 {
     var seen = Set<String>()
     var failed = false
     for name in listed where shareable(name) {
-        // 목록에 있으면 "있는 노트"다. iCloud 에서 아직 안 받은 파일은 읽기가 실패해도 사본을 지우지 않는다.
-        seen.insert(name)
-        guard let source = readRegular(sourceDir, name) else { log("이번엔 못 읽어 건너뜀(링크·폴더·크기·iCloud 미다운로드): \(name)"); continue }
+        // manifest 키는 NFC 로 맞추고, 디스크 이름은 "file" 칸에 그대로 둔다(다른 맥에서 NFD 로 올 수 있다).
+        let key = name.precomposedStringWithCanonicalMapping
+        // 목록에 있으면 "있는 노트"다. 못 읽어도 사본을 지우지 않는다.
+        seen.insert(key)
+        let base = manifest[key]?["base"] ?? ""
+        guard let source = readRegular(sourceDir, name) else {
+            // iCloud 미다운로드 등: 지금 원본을 모르므로 되돌려 넣기가 원본 자리에 쓰지 못하게 표시한다.
+            manifest[key] = ["base": base, "source": "unreadable", "file": name]
+            log("이번엔 못 읽어 건너뜀(링크·폴더·크기·iCloud 미다운로드): \(name)")
+            continue
+        }
         let sourceHash = sha256(source)
-        let base = manifest[name]?["base"]
-        let copyHash = readRegular(destDir, name).map(sha256)
-        if copyHash == nil || copyHash == base || copyHash == sourceHash {
-            // 사본이 없거나, 팀원이 안 고쳤거나, 이미 원본과 같다 → 원본으로 맞춘다.
+        switch copyState(destDir, name) {
+        case .unreadable:
+            manifest[key] = ["base": base, "source": sourceHash, "file": name]
+            log("사본을 읽지 못해 건드리지 않음: \(name)")
+        case .absent:
+            if !writeAtomically(destDir, name, source) { log("사본 쓰기 실패: \(name)"); failed = true; continue }
+            manifest[key] = ["base": sourceHash, "source": sourceHash, "file": name]
+        case .hash(let copyHash) where copyHash == base || copyHash == sourceHash:
+            // 팀원이 안 고쳤거나 이미 원본과 같다 → 원본으로 맞춘다.
             if copyHash != sourceHash, !writeAtomically(destDir, name, source) { log("사본 쓰기 실패: \(name)"); failed = true; continue }
-            manifest[name] = ["base": sourceHash, "source": sourceHash]
-        } else {
+            manifest[key] = ["base": sourceHash, "source": sourceHash, "file": name]
+        case .hash:
             // 팀원이 고친 사본이 아직 되돌아가지 않았다 → 덮지 않고 지금 원본 해시만 적는다.
-            manifest[name] = ["base": base ?? "", "source": sourceHash]
+            manifest[key] = ["base": base, "source": sourceHash, "file": name]
             if base != sourceHash { log("원본과 사본이 둘 다 바뀜, 사본 유지: \(name)") }
         }
     }
-    for name in manifest.keys where !seen.contains(name) {
-        let copyHash = readRegular(destDir, name).map(sha256)
-        if copyHash == nil || copyHash == manifest[name]?["base"] {
-            _ = unlinkat(destDir, name, 0)
-            manifest[name] = nil
-        } else {
-            log("팀 공유에서 빠졌지만 고친 사본이라 남김: \(name)")
+    for key in manifest.keys where !seen.contains(key) {
+        let file = manifest[key]?["file"] ?? key
+        switch copyState(destDir, file) {
+        case .absent:
+            manifest[key] = nil
+        case .hash(let copyHash) where copyHash == manifest[key]?["base"]:
+            _ = unlinkat(destDir, file, 0)
+            manifest[key] = nil
+        default:
+            log("팀 공유에서 빠졌지만 고친(또는 못 읽은) 사본이라 남김: \(file)")
         }
     }
     guard let encoded = try? JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys]),

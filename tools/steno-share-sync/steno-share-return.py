@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 import time
+import unicodedata
 
 SHARED = os.path.expanduser("~/Library/Application Support/b3os/steno-shared")
 MANIFEST = os.path.join(SHARED, ".manifest.json")
@@ -39,6 +40,10 @@ def refresh_manifest():
             return True
         time.sleep(0.5)
     return False
+
+
+class Refused(Exception):
+    pass
 
 
 def call_mcp(member, tool, arguments):
@@ -67,7 +72,7 @@ def call_mcp(member, tool, arguments):
             result = reply.get("result") or {}
             text = " ".join(c.get("text", "") for c in result.get("content", []))
             if reply.get("error") or result.get("isError"):
-                die(f"{tool} 거절: {text or reply.get('error')}")
+                raise Refused(f"{tool} 거절: {text or reply.get('error')}")
             return text
     die(f"{tool} 응답 없음")
 
@@ -82,7 +87,7 @@ def main():
     # 팀원 이름은 새 노트 이름에 들어간다. 경로 조각·제어 문자·긴 이름을 막는다.
     if not member or len(member) > 24 or any(c in member for c in "/\\:") or member.startswith(".") \
             or any(ord(c) < 32 or ord(c) == 127 for c in member):
-        die("팀원 이름이 올바르지 않음(24자 이하, / \\ : 제어 문자 금지)")
+        die("팀원 이름이 올바르지 않음(24자 이하, / \\ : 제어 문자·점 시작 금지)")
     path = os.path.join(SHARED, name)
     if os.path.islink(path) or not os.path.isfile(path):
         die(f"팀 폴더에 그 파일이 없음: {name}")
@@ -96,26 +101,41 @@ def main():
     fresh = refresh_manifest()
     try:
         with open(MANIFEST, encoding="utf-8") as f:
-            entry = json.load(f).get(name) or {}
+            manifest = json.load(f)
     except (OSError, ValueError):
-        entry = {}
+        manifest = {}
+    key = unicodedata.normalize("NFC", name)
+    entry = manifest.get(key) or {}
+    file = entry.get("file") or name  # Steno 쪽 실제 파일 이름(NFD 일 수 있다)
     base, source = entry.get("base"), entry.get("source")
     if source and hashlib.sha256(data).hexdigest() == source:
         print("이미 원본과 같음, 할 일 없음")
         return
 
-    if fresh and base and base == source:
-        text = call_mcp(member, "edit_note", {"path": f"{FOLDER}/{name}", "content": content})
-        print(f"원본 자리에 반영함: {FOLDER}/{name} {text}")
+    stem, ext = os.path.splitext(file)
+    fmt = {".md": "md", ".markdown": "md", ".html": "html", ".htm": "html"}.get(ext.lower())
+    reason = None
+    if not fresh:
+        reason = "원본 상태를 확인하지 못해"
+    elif not base or base != source:
+        reason = "원본도 바뀌었거나 지금 원본을 읽지 못해"
     else:
-        stem, ext = os.path.splitext(name)
-        why = "원본도 바뀌어" if fresh else "원본 상태를 확인하지 못해"
-        arguments = {"content": content, "name": f"{stem} ({member} 수정){ext}", "folder": FOLDER}
-        if ext:
-            arguments["format"] = ext.lstrip(".")
-        text = call_mcp(member, "create_note", arguments)
-        print(f"{why} 덮지 않고 따로 만듦: {stem} ({member} 수정){ext} {text}")
-
+        try:
+            # expected_sha256: 그사이 원본이 바뀌었으면 steno-mcp 가 거절한다(Steno 쪽 지원 후 유효).
+            text = call_mcp(member, "edit_note", {"path": f"{FOLDER}/{file}", "content": content,
+                                                  "expected_sha256": base})
+            print(f"원본 자리에 반영함: {FOLDER}/{file} {text}")
+            return
+        except Refused as error:
+            reason = f"원본 자리에 쓰지 못해({error})"
+    if not fmt:
+        die(f"{reason} 따로 만들어야 하는데, 1단계는 md·html 만 따로 만들 수 있음: {file}")
+    new_name = f"{stem} ({member} 수정)"
+    try:
+        text = call_mcp(member, "create_note", {"content": content, "name": new_name, "format": fmt, "folder": FOLDER})
+    except Refused as error:
+        die(str(error))
+    print(f"{reason} 덮지 않고 따로 만듦: {new_name}.{fmt} {text}")
 
 if __name__ == "__main__":
     main()

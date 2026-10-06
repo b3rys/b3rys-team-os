@@ -13,7 +13,9 @@ case "$LIBRARY" in /*) ;; *) echo "STENO_LIBRARY 는 절대 경로여야 합니�
 install -d -m 700 "$BIN_DIR" "$SHARED" "$HOME/Library/LaunchAgents"
 swiftc -O "$HERE/Sources/main.swift" -o "$BIN_DIR/steno-share-sync"
 chmod 700 "$BIN_DIR/steno-share-sync"
-sed -e "s|__B3OS_HOME__|$HOME|g" -e "s|__STENO_LIBRARY__|$LIBRARY|g" \
+# plist(XML) 용으로 & < 를 먼저 바꾸고, 그다음 sed 치환 문자열용으로 & | \ 를 이스케이프한다.
+esc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/[&|\\]/\\&/g'; }
+sed -e "s|__B3OS_HOME__|$(esc "$HOME")|g" -e "s|__STENO_LIBRARY__|$(esc "$LIBRARY")|g" \
   "$HERE/com.b3os.steno-share-sync.plist.template" > "$PLIST"
 chmod 600 "$PLIST"
 echo "설치됨(아직 등록되지 않음): $BIN_DIR/steno-share-sync"

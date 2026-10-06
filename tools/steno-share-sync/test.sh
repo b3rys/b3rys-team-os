@@ -59,8 +59,25 @@ rm "$SRC/BBB.md" "$SRC/CCC.md"; sync
 
 # 8. 목록엔 있지만 못 읽는 파일(iCloud 미다운로드 대역) → 사본 안 지움
 printf d > "$SRC/DDD.md"; sync
-chmod 000 "$SRC/DDD.md"; sync; chmod 600 "$SRC/DDD.md"
+chmod 000 "$SRC/DDD.md"; sync
+grep -A3 '"DDD.md"' "$DST/.manifest.json" | grep -q '"source" : "unreadable"' || fail "unreadable marks source"; ok
+chmod 600 "$SRC/DDD.md"
 [ "$(cat "$DST/DDD.md")" = d ] || fail "unreadable keeps copy"; ok
+
+# 8a. 사본을 못 읽으면(권한) 원본이 바뀌어도 덮지 않음
+printf f1 > "$SRC/FFF.md"; sync; chmod 000 "$DST/FFF.md"
+printf f2 > "$SRC/FFF.md"; sync; chmod 600 "$DST/FFF.md"
+[ "$(cat "$DST/FFF.md")" = f1 ] || fail "unreadable copy untouched"; ok
+
+# 8c. NFD 이름: manifest 키는 NFC, file 칸은 디스크 이름
+nfd="$(python3 -c 'import unicodedata;print(unicodedata.normalize("NFD","한글.md"))')"
+printf k > "$SRC/$nfd"; sync
+python3 - "$DST/.manifest.json" <<'PY' || fail "nfc key"
+import json, sys, unicodedata
+m = json.load(open(sys.argv[1])); e = m[unicodedata.normalize("NFC", "한글.md")]
+assert e["file"] == unicodedata.normalize("NFD", "한글.md")
+PY
+ok
 
 # 8b. 팀 공유 폴더를 못 읽으면(권한·iCloud 오류) 사본을 하나도 지우지 않음
 chmod 300 "$SRC"; sync; chmod 700 "$SRC"
@@ -83,7 +100,10 @@ cat > "$TMP/fake-mcp" <<'STUB'
 import json, os, sys
 for line in sys.stdin:
     m = json.loads(line)
-    if m.get("method") == "tools/call":
+    if m.get("method") == "tools/call" and m["params"]["name"] == "edit_note" and os.environ.get("FAKE_REFUSE_EDIT"):
+        with open(os.environ["FAKE_LOG"], "a") as f: f.write(json.dumps(m["params"], ensure_ascii=False) + "\n")
+        print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {"isError": True, "content": [{"type": "text", "text": "stale"}]}}))
+    elif m.get("method") == "tools/call":
         with open(os.environ["FAKE_LOG"], "a") as f: f.write(json.dumps(m["params"], ensure_ascii=False) + "\n")
         print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {"content": [{"type": "text", "text": "ok"}]}}))
     elif "id" in m:
@@ -96,9 +116,22 @@ printf edited > "$RS/AAA.md"
 printf '{"AAA.md":{"base":"%s","source":"%s"}}' "$(h orig)" "$(h orig)" > "$RS/.manifest.json"
 : > "$TMP/log"; ret AAA.md --as 빌
 grep -q '"name": "edit_note"' "$TMP/log" && grep -q '"path": "팀 공유/AAA.md"' "$TMP/log" || fail "return edit"; ok
+grep -q "\"expected_sha256\": \"$(h orig)\"" "$TMP/log" || fail "return expected hash"; ok
+: > "$TMP/log"; FAKE_REFUSE_EDIT=1 ret AAA.md --as 빌
+grep -q edit_note "$TMP/log" && grep -q '"name": "AAA (빌 수정)"' "$TMP/log" && grep -q '"format": "md"' "$TMP/log" || fail "edit refused falls back to copy"; ok
+# 원본을 못 읽은 상태(source=unreadable)면 원본 자리에 쓰지 않음
+printf '{"AAA.md":{"base":"%s","source":"unreadable"}}' "$(h orig)" > "$RS/.manifest.json"
+: > "$TMP/log"; ret AAA.md --as 빌
+! grep -q edit_note "$TMP/log" && grep -q create_note "$TMP/log" || fail "unreadable source no edit"; ok
+# md·html 아닌 파일은 따로 만들기를 거절하고 아무것도 쓰지 않음, htm 은 html 형식
+printf x > "$RS/BBB.txt"; printf '{"BBB.txt":{"base":"a","source":"b"}}' > "$RS/.manifest.json"
+: > "$TMP/log"; if ret BBB.txt --as 빌 2>/dev/null; then fail "txt copy refused"; fi; [ ! -s "$TMP/log" ] || fail "txt no call"; ok
+printf x > "$RS/CCC.htm"; printf '{"CCC.htm":{"base":"a","source":"b"}}' > "$RS/.manifest.json"
+: > "$TMP/log"; ret CCC.htm --as 빌; grep -q '"format": "html"' "$TMP/log" || fail "htm format"; ok
+printf '{"AAA.md":{"base":"%s","source":"%s"}}' "$(h orig)" "$(h orig)" > "$RS/.manifest.json"
 printf '{"AAA.md":{"base":"%s","source":"%s"}}' "$(h orig)" "$(h gdnew)" > "$RS/.manifest.json"
 : > "$TMP/log"; ret AAA.md --as 빌
-grep -q '"name": "create_note"' "$TMP/log" && grep -q 'AAA (빌 수정).md' "$TMP/log" && ! grep -q edit_note "$TMP/log" || fail "return conflict copy"; ok
+grep -q '"name": "create_note"' "$TMP/log" && grep -q '"name": "AAA (빌 수정)"' "$TMP/log" && ! grep -q edit_note "$TMP/log" || fail "return conflict copy"; ok
 printf '{"AAA.md":{"base":"%s","source":"%s"}}' "$(h orig)" "$(h edited)" > "$RS/.manifest.json"
 : > "$TMP/log"; ret AAA.md --as 빌
 [ ! -s "$TMP/log" ] || fail "return no-op"; ok
