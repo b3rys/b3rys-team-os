@@ -7,6 +7,7 @@ BIN="${STENO_HELPER_TEST_BIN:-$TMP/steno-helper-test}"
 [ -x "$BIN" ] || swiftc -D STENO_HELPER_TESTING "$HERE"/Sources/*.swift -o "$BIN"
 SRC="$TMP/팀 공유"; DST="$TMP/shared"
 mkdir -p "$SRC" "$DST"
+printf team > "$SRC/.steno-folder"
 pass=0
 ok() { pass=$((pass + 1)); }
 fail() { echo "FAIL: $1" >&2; exit 1; }
@@ -161,4 +162,10 @@ for bad in "a/b" "../x" ".hidden" "$(printf 'a\nb')" "1234567890123456789012345"
   if ret AAA.md --as "$bad" 2>/dev/null; then fail "return bad member $bad"; fi; ok
 done
 
+
+# Same-named user folders must not be shared.
+rm "$SRC/.steno-folder"
+printf private > "$SRC/Private.md"
+sync
+[ ! -e "$DST/Private.md" ] || fail "unmarked user folder shared"; ok
 echo "PASS: $pass 팀 공유 checks"

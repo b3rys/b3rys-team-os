@@ -102,6 +102,10 @@ func runShare(sourcePath: String, destinationPath: String) -> Int32 {
         log("팀 공유 폴더 열기 실패(errno \(errno), 문서 폴더 권한 확인)"); return 1
     }
     defer { close(sourceDir) }
+    guard URL(fileURLWithPath: sourcePath).lastPathComponent == "팀 공유",
+          readRegular(sourceDir, ".steno-folder") == Data("team".utf8) else {
+        log("Steno 팀 공유 표시가 없어 이번 주기는 건너뜀"); return 0
+    }
     let destDir = open(destinationPath, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
     guard destDir >= 0 else { log("팀 폴더 열기 실패(링크이거나 없음)"); return 1 }
     defer { close(destDir) }

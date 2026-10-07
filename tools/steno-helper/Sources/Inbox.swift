@@ -87,6 +87,28 @@ private func copyFile(sourceDir: Int32, destinationDir: Int32, name: String) -> 
 }
 
 func runInbox(sourcePath: String, destinationPath: String) -> Int32 {
+    // Create only the final folder under an already-existing canonical parent.
+    if !FileManager.default.fileExists(atPath: destinationPath) {
+        let target = URL(fileURLWithPath: destinationPath)
+        let parent = target.deletingLastPathComponent().path
+        guard let resolvedParent = realpath(parent, nil) else { fail("받은 파일 상위 폴더 없음"); return 1 }
+        let canonicalParent = String(cString: resolvedParent)
+        free(resolvedParent)
+        guard canonicalParent == parent else { fail("받은 파일 상위 경로가 링크임"); return 1 }
+        let parentFD = open(parent, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard parentFD >= 0 else { return 1 }
+        defer { close(parentFD) }
+        guard mkdirat(parentFD, target.lastPathComponent, 0o700) == 0 else { fail("받은 파일 생성 실패"); return 1 }
+        let folderFD = openat(parentFD, target.lastPathComponent, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard folderFD >= 0 else { return 1 }
+        defer { close(folderFD) }
+        let markerFD = openat(folderFD, ".steno-folder", O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard markerFD >= 0 else { fail("받은 파일 표시 생성 실패"); return 1 }
+        defer { close(markerFD) }
+        let marker = Array("received".utf8)
+        guard marker.withUnsafeBytes({ write(markerFD, $0.baseAddress, $0.count) }) == marker.count,
+              fsync(markerFD) == 0 else { fail("받은 파일 표시 쓰기 실패"); return 1 }
+    }
     guard let resolvedDestination = realpath(destinationPath, nil) else { fail("받은 파일 폴더를 확인할 수 없음"); return 1 }
     defer { free(resolvedDestination) }
     guard String(cString: resolvedDestination) == destinationPath else { fail("받은 파일 폴더가 심볼릭 링크이거나 경로가 바뀜"); return 1 }

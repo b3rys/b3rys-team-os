@@ -76,4 +76,8 @@ for name in .env client-secret.txt db-CREDENTIAL.md api_token.json; do
   pass=$((pass + 1))
 done
 
+mkdir -p "$TMP/new-library"
+"$BIN" --inbox "$TMP/outbox" "$TMP/new-library/받은 파일"
+test "$(cat "$TMP/new-library/받은 파일/.steno-folder")" = received
+pass=$((pass + 1))
 echo "PASS: $pass 받은 파일 checks"
