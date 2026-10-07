@@ -11,6 +11,11 @@ case "$LIBRARY" in /*) ;; *) echo "STENO_LIBRARY 는 절대 경로여야 합니�
 
 install -d -m 700 "$BIN_DIR" "$SUPPORT/steno-outbox" "$SUPPORT/steno-share-outbox" "$SUPPORT/steno-shared" "$HOME/Library/LaunchAgents"
 swiftc -O "$HERE"/Sources/*.swift -o "$BIN_DIR/steno-helper"
+SIGN_ID='Developer ID Application: GUE DON JUNG (7NTC94U74E)'
+if ! security find-identity -v -p codesigning | grep -Fq "\"$SIGN_ID\""; then
+  SIGN_ID='-'
+fi
+codesign --force --sign "$SIGN_ID" --identifier com.b3os.steno-helper "$BIN_DIR/steno-helper"
 chmod 700 "$BIN_DIR/steno-helper"
 # plist(XML) 용으로 & < 를 먼저 바꾸고, 그다음 sed 치환 문자열용으로 & | \ 를 이스케이프한다.
 esc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/[&|\\]/\\&/g'; }
