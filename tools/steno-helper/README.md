@@ -63,7 +63,9 @@ tools/steno-helper/install.sh        # 라이브러리를 옮겨 썼다면 STENO
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.b3os.steno-helper.plist
 ```
 
-도우미가 처음 문서 폴더에 접근할 때 뜨는 허락 창에서 허용한다(사람 손, 한 번). 바이너리를 다시 빌드하면 서명이 바뀌어 다시 허락해야 한다.
+설치 스크립트는 키체인에 유효한 `Developer ID Application: GUE DON JUNG (7NTC94U74E)` 서명 신원이 있으면 이를 사용하고, 없으면 임시(ad-hoc) 서명을 사용한다. 식별자는 두 경우 모두 `com.b3os.steno-helper`로 고정한다.
+
+도우미가 처음 문서 폴더에 접근할 때 뜨는 허락 창에서 허용한다(사람 손). 임시 서명에서 Developer ID 서명으로 전환할 때도 새 허용이 필요할 수 있다. 임시 서명은 재빌드하면 다시 허락해야 할 수 있다. Developer ID로 서명했는지는 `codesign -dv --verbose=4 ~/Library/"Application Support"/b3os/bin/steno-helper`의 `Authority`와 `TeamIdentifier`로 확인한다.
 
 ### 예전 도우미 두 개에서 옮길 때
 
