@@ -26,6 +26,7 @@ func shareable(_ name: String) -> Bool {
 }
 
 private func readRegular(_ dir: Int32, _ name: String) -> Data? {
+    guard locallyReadableRegular(dir, name) else { return nil }
     let fd = openat(dir, name, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
     guard fd >= 0 else { return nil }
     defer { close(fd) }
