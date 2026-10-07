@@ -28,7 +28,7 @@ import { loadAgentCreds } from "../lib/slack";
 import { getCaptureGroupId } from "../lib/captureConfig";
 import { getChannel } from "../channels/registry";
 import type { WsEvent, AgentRecord } from "../types";
-import { buildDeadReceiverNote, isTelegramReceiverDown, pickReplyRecipient } from "../lib/deadReceiverNote";
+import { appendDeadReceiverNote, buildDeadReceiverNote, isTelegramChannel, isTelegramReceiverDown, pickReplyRecipient } from "../lib/deadReceiverNote";
 
 interface InboxRouteDeps {
   db: Database;
@@ -411,12 +411,13 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
             dest = { chatId: dm, kind: "telegram_dm" };
             // 발신자 봇으로 게시되므로, 발신자 수신이 죽어 있으면 이 대화의 답은 아무에게도 안 간다.
             //   본문(stored.body)은 그대로 두고 게시 텍스트 끝에만 시스템 줄을 붙인다. 판정 실패는 경고 없음으로 둔다.
-            const down = await Promise.resolve()
+            // 텔레그램 채널 발신자만 — 다른 채널(b3chat 등)은 텔레그램 poller 가 없어 '끊김' 으로 오판된다.
+            const down = isTelegramChannel(agent) && await Promise.resolve()
               .then(() => (deps.receiverDown ?? isTelegramReceiverDown)(agent))
               .catch(() => false);
             if (down) {
               const replyTo = pickReplyRecipient(deps.agents?.() ?? [], agent.id);
-              relayText = `${stored.body}\n\n${buildDeadReceiverNote(agent, replyTo)}`;
+              relayText = appendDeadReceiverNote(stored.body, buildDeadReceiverNote(agent, replyTo));
               appendAuditFile(env.from_agent_id, "direct_to_gd_receiver_down_note", stored.id, { reply_to: replyTo?.id ?? null });
             }
           }
