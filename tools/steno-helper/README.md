@@ -12,6 +12,8 @@
 ## 1. 받은 파일 넣기 (Sources/Inbox.swift)
 
 `steno-send.sh` 가 권한 없는 outbox 에 둔 Steno 지원 텍스트 파일, 그림, zip 을 `받은 파일` 로 옮긴다.
+- 새 `받은 파일` 폴더에는 `.steno-folder` 파일(내용 `received`)을 만든다.
+- 이름과 표시가 맞는 시스템 폴더에만 넣는다. 기존 표시 없는 폴더는 건너뛰고 outbox 파일을 보존한다. 기존 시스템 폴더의 표시 추가는 Steno 앱의 최초 1회 업데이트 처리가 맡는다.
 - zip 은 풀지 않는다.
 - 두 경로는 소스에 고정돼 있어 실행 인자나 환경으로 바꿀 수 없다.
 - 파일 하나의 상한은 20MB 다. 폴더와 링크는 받지 않는다.
@@ -21,6 +23,7 @@
 
 라이브러리는 Steno 앱과 같은 규칙으로 정한다: `STENO_LIBRARY` → `~/Documents/Steno`. 폴더 이름 `팀 공유` 는 고정이다.
 
+- 이름 `팀 공유`와 `.steno-folder` 내용 `team`이 모두 맞을 때만 복사한다. 표시 없는 사용자 폴더는 건너뛴다.
 - `팀 공유` 바로 아래 파일만 복사한다. 하위 폴더, 숨김 파일, `.steno` 사이드카, 링크, 20MB 초과, 이름에 secret·credential·token·password 가 든 파일은 건너뛴다.
 - 라이브러리 쪽에는 아무것도 쓰거나 지우지 않는다.
 - `steno-shared/.manifest.json` 에 파일마다 해시 두 개를 적는다. `base` 는 사본을 만들 때의 원본 해시, `source` 는 마지막으로 본 원본 해시다. 원본을 못 읽으면 `source` 를 `unreadable` 로 적는다.
