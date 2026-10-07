@@ -130,4 +130,24 @@ describe("워크스페이스 SKILLS.md 복사본", () => {
       expect(src, `${rel} 가 renderSkillsMd 를 직접 부른다`).not.toMatch(/renderSkillsMd\(/);
     }
   });
+
+  it("임시 파일 경로에 다른 파일을 가리키는 심링크가 미리 있으면 → 따라가지 않고 error, 그 파일·SKILLS.md 는 그대로", () => {
+    const { source, ws, dest } = setup();
+    const soul = join(ws, "SOUL.md");
+    writeFileSync(soul, "페르소나\n");
+    const fixed = "fixed";
+    symlinkSync(soul, `${dest}.tmp-${process.pid}-${fixed}`);
+    expect(ensureSkillsCopy(ws, source, { tmpSuffix: () => fixed })).toBe("error");
+    expect(readFileSync(soul, "utf-8"), "★tmp 심링크를 따라가 다른 파일을 덮었다★").toBe("페르소나\n");
+    expect(existsSync(dest)).toBe(false);
+    expect(lstatSync(`${dest}.tmp-${process.pid}-${fixed}`).isSymbolicLink(), "★미리 놓인 경로를 건드렸다★").toBe(true);
+  });
+
+  it("임시 파일 이름은 호출마다 다르다(무작위 꼬리) — 정상 경로는 written", () => {
+    const { source, ws } = setup();
+    const seen: string[] = [];
+    const r = ensureSkillsCopy(ws, source, { tmpSuffix: () => { const v = Math.random().toString(36).slice(2); seen.push(v); return v; } });
+    expect(r).toBe("written");
+    expect(seen.length).toBe(1);
+  });
 });

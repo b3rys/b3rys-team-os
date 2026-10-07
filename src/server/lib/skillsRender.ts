@@ -3,6 +3,7 @@
 //   claude 는 CLAUDE.md 의 `@SKILLS.md`(워크스페이스의 복사본 — ensureSkillsCopy) 로 인라인, 나머지 런타임은 세션 시작 때 경로로 읽는다.
 //   TEAM-OS.md 와 같은 방식: 소스는 skills/*/SKILL.md 의 trigger 줄, 산출물은 rules/SKILLS.md(gitignore).
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { buildSkillTable, SKILLS_MD_PATH } from "./personaTemplates";
 
@@ -54,7 +55,11 @@ export type SkillsCopyResult = "written" | "unchanged" | "kept_user_file" | "no_
  *   다른 곳을 가리키는 살아 있는 심링크·표식 없는 일반 파일·디렉터리 → 그대로 둔다(사람이 둔 것일 수 있다)
  *   원본을 못 읽으면 아무것도 바꾸지 않는다.
  */
-export function ensureSkillsCopy(workspace: string, source: string = SKILLS_MD_PATH): SkillsCopyResult {
+export function ensureSkillsCopy(
+  workspace: string,
+  source: string = SKILLS_MD_PATH,
+  opts: { tmpSuffix?: () => string } = {},
+): SkillsCopyResult {
   let src: string;
   try { src = readFileSync(source, "utf-8"); } catch { return "no_source"; }
   const dest = join(workspace, "SKILLS.md");
@@ -74,9 +79,19 @@ export function ensureSkillsCopy(workspace: string, source: string = SKILLS_MD_P
     }
     mkdirSync(workspace, { recursive: true });
     // rename 은 심링크 자체를 갈아끼운다(대상 파일을 따라가 덮지 않는다) — rules/SKILLS.md 원본은 안전하다.
-    const tmp = `${dest}.tmp-${process.pid}`;
-    try { writeFileSync(tmp, text, "utf-8"); renameSync(tmp, dest); }
-    catch (e) { try { if (existsSync(tmp)) unlinkSync(tmp); } catch { /* keep original error */ } throw e; }
+    // 임시 파일은 flag "wx"(O_EXCL)로 새로 만든다. 그 경로에 파일·심링크가 이미 있으면 따라가지 않고 실패한다 —
+    // 워크스페이스는 팀원이 쓰는 폴더라, 미리 놓인 tmp 심링크가 다른 파일(예: SOUL.md)을 가리킬 수 있다.
+    // 이미 있으면 그 경로는 건드리지 않고 error 로 끝낸다(지우지도 않는다).
+    const tmp = `${dest}.tmp-${process.pid}-${(opts.tmpSuffix ?? (() => randomBytes(6).toString("hex")))()}`;
+    let created = false;
+    try {
+      writeFileSync(tmp, text, { encoding: "utf-8", flag: "wx" });
+      created = true;
+      renameSync(tmp, dest);
+    } catch (e) {
+      if (created) { try { unlinkSync(tmp); } catch { /* keep original error */ } }
+      throw e;
+    }
     return "written";
   } catch {
     return "error";
