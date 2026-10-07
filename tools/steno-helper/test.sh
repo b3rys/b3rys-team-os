@@ -8,6 +8,7 @@ swiftc -D STENO_HELPER_TESTING "$HERE"/Sources/*.swift -o "$STENO_HELPER_TEST_BI
 "$HERE/test-inbox.sh"
 "$HERE/test-share.sh"
 python3 "$HERE/test-dataless.py"
+python3 "$HERE/test-original-dataless.py"
 
 if [ -n "${STENO_MERGE_FIXTURES:-}" ]; then
   "$STENO_HELPER_TEST_BIN" --merge-table "$STENO_MERGE_FIXTURES"

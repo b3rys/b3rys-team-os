@@ -92,12 +92,14 @@ private func propose(source: Int32, pendingName: String, id: String, state: Int3
     defer { close(folder) }
     let requestName = id + ".json", replyName = id + ".reply.json"
     let raw: Data
-    if let saved = uploadReadRegular(source, pendingName) { raw = saved }
+    let saved = uploadReadRegular(source, pendingName).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    if let saved, saved["id"] != nil,
+       let value = try? JSONSerialization.data(withJSONObject: saved, options: [.sortedKeys]) { raw = value }
     else {
         let record = uploadReadRegular(state, "open-notes.json")
         var request: [String: Any] = ["id": id, "path": absolute,
             "base": base, "proposed": proposed, "editor": editor,
-            "createdAt": ISO8601DateFormatter().string(from: Date())]
+            "createdAt": saved?["createdAt"] ?? ISO8601DateFormatter().string(from: Date())]
         if let record { request["openRecord"] = record.base64EncodedString() }
         guard let value = try? JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]),
               uploadWriteAtomically(source, pendingName, value) else { return (.pending, nil) }
@@ -137,16 +139,30 @@ private func applyReturn(_ request: ShareReturnRequest, data: Data, baseline: Da
     let absolute = libraryPath + "/팀 공유/" + request.file
     let status = noteState(state: state, absolutePath: absolute)
     returnLog("\(request.file) 상태=\(status.rawValue)")
-    guard let original = uploadReadRegular(destination, request.file),
-          let originalInfo = regularSingleLink(destination, request.file) else { return .copy }
+    let pendingName = ".return-" + id + ".pending"
+    guard let original = uploadReadRegular(destination, request.file) else {
+        let saved = uploadReadRegular(source, pendingName).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        if let saved {
+            guard let created = saved["createdAt"] as? String,
+                  let date = ISO8601DateFormatter().date(from: created) else { return .pending }
+            if Date().timeIntervalSince(date) >= 300 { return .copy }
+        } else {
+            let waiting = ["createdAt": ISO8601DateFormatter().string(from: Date())]
+            guard let raw = try? JSONSerialization.data(withJSONObject: waiting),
+                  uploadWriteAtomically(source, pendingName, raw) else { return .pending }
+        }
+        requestSourceDownload(URL(fileURLWithPath: absolute))
+        returnLog("\(request.file) 원본 읽기 대기 → 다음 30초 주기 재확인")
+        return .pending
+    }
+    guard let originalInfo = regularSingleLink(destination, request.file) else { return .copy }
     let baseline = baseline ?? (uploadSHA256(original) == request.base ? original : nil)
     guard let baseline, let baseText = String(data: baseline, encoding: .utf8),
           let proposedText = String(data: data, encoding: .utf8) else { return .copy }
     var appSaysClosed = false
     var openRecord = uploadReadRegular(state, "open-notes.json")
-    let pendingName = ".return-" + id + ".pending"
-    var pendingInfo = stat()
-    if status != .closed || fstatat(source, pendingName, &pendingInfo, AT_SYMLINK_NOFOLLOW) == 0 {
+    let pending = uploadReadRegular(source, pendingName).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    if status != .closed || pending?["id"] != nil {
         let (result, capturedRecord) = propose(source: source, pendingName: pendingName, id: id,
             state: state, absolute: absolute, base: baseText, proposed: proposedText, editor: request.member)
         openRecord = capturedRecord

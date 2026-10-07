@@ -9,7 +9,7 @@ share = (root / 'Sources/Share.swift').read_text()
 io = (root / 'Sources/UploadFileIO.swift').read_text()
 returns = (root / 'Sources/ShareReturn.swift').read_text()
 # Keep the production readers and shared predicate; substitute only POSIX calls.
-code = share[share.index('private func readRegular('):share.index('\nprivate func requestSourceDownload')]
+code = share[share.index('private func readRegular('):share.index('\nfunc requestSourceDownload')]
 code += io[io.index('func locallyReadableRegular('):io.index('\nfunc uploadSHA256')]
 code += returns[returns.index('private struct HeldNotes:'):returns.index('private struct EditMark:')]
 code += returns[returns.index('private func decoder()'):returns.index('func childDirectory(')]

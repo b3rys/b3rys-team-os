@@ -190,7 +190,11 @@ with tempfile.TemporaryDirectory() as tmp:
     request('closed.md'); upload()
     check((team / 'closed.md').read_bytes() == b'edited', 'live record without held note permits replacement')
     request('deleted.md'); (team / 'deleted.md').unlink(); upload()
-    check((team / 'deleted (빌 수정).md').read_bytes() == b'edited' and not list(out.iterdir()), 'deleted original makes copy and consumes queue')
+    check(not (team / 'deleted (빌 수정).md').exists() and list(out.glob('*.pending')), 'missing original waits before copy')
+    pending = next(out.glob('*.pending')); item = json.loads(pending.read_text())
+    item['createdAt'] = '2026-01-01T00:00:00Z'; pending.write_text(json.dumps(item))
+    upload()
+    check((team / 'deleted (빌 수정).md').read_bytes() == b'edited' and not list(out.iterdir()), 'missing original makes copy after five minutes')
 
     (state / 'ai-edits.json').write_text('broken')
     request('bad-marks.md')

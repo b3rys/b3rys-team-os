@@ -60,7 +60,7 @@ func hasTeamMarker(directory: Int32, path: String) -> Bool {
     }
 }
 
-private func requestSourceDownload(_ url: URL) {
+func requestSourceDownload(_ url: URL) {
     do {
         try FileManager.default.startDownloadingUbiquitousItem(at: url)
         log("iCloud 내려받기 요청: \(url.lastPathComponent)")
