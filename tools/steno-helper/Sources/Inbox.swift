@@ -2,6 +2,26 @@
 import Darwin
 import Foundation
 
+enum HelperSystemFolder: CaseIterable {
+    case received, team
+    static let table: [Self: (name: String, marker: String)] = [
+        .received: ("받은 파일", "received"), .team: ("팀 공유", "team")
+    ]
+    static let markerFile = ".steno-folder"
+    static func matches(_ kind: Self, directory: Int32, path: String) -> Bool {
+        let spec = table[kind]!
+        guard URL(fileURLWithPath: path).lastPathComponent == spec.name else { return false }
+        let fd = openat(directory, markerFile, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG,
+              info.st_size == spec.marker.utf8.count else { return false }
+        var bytes = [UInt8](repeating: 0, count: spec.marker.utf8.count)
+        return read(fd, &bytes, bytes.count) == bytes.count && bytes == Array(spec.marker.utf8)
+    }
+}
+
 private let maxBytes: off_t = 20 * 1_048_576
 private let allowedExtensions: Set<String> = [
     "md", "markdown", "txt", "text", "log", "csv", "tsv", "json", "yml", "yaml", "toml",
@@ -102,10 +122,10 @@ func runInbox(sourcePath: String, destinationPath: String) -> Int32 {
         let folderFD = openat(parentFD, target.lastPathComponent, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard folderFD >= 0 else { return 1 }
         defer { close(folderFD) }
-        let markerFD = openat(folderFD, ".steno-folder", O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        let markerFD = openat(folderFD, HelperSystemFolder.markerFile, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard markerFD >= 0 else { fail("받은 파일 표시 생성 실패"); return 1 }
         defer { close(markerFD) }
-        let marker = Array("received".utf8)
+        let marker = Array(HelperSystemFolder.table[.received]!.marker.utf8)
         guard marker.withUnsafeBytes({ write(markerFD, $0.baseAddress, $0.count) }) == marker.count,
               fsync(markerFD) == 0 else { fail("받은 파일 표시 쓰기 실패"); return 1 }
     }
@@ -118,6 +138,9 @@ func runInbox(sourcePath: String, destinationPath: String) -> Int32 {
     let destinationDir = open(destinationPath, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
     guard destinationDir >= 0 else { fail("받은 파일 폴더 열기 실패"); return 1 }
     defer { close(destinationDir) }
+    guard HelperSystemFolder.matches(.received, directory: destinationDir, path: destinationPath) else {
+        fail("Steno 받은 파일 표시가 없어 이번 주기는 건너뜀"); return 0
+    }
     guard let directory = fdopendir(dup(sourceDir)) else { fail("outbox 읽기 실패"); return 1 }
     defer { closedir(directory) }
     var rejected = false
