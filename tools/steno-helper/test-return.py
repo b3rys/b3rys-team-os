@@ -149,7 +149,12 @@ with tempfile.TemporaryDirectory() as tmp:
     check((team / 'unknown-after-reply.md').read_bytes() == b'original' and (team / 'unknown-after-reply (빌 수정).md').exists(), 'notOpen followed by unknown state never writes original')
 
     (state / 'open-notes.json').write_text('broken')
-    request('broken.md'); upload()
+    request('broken.md')
+    request_filename = next(out.glob('.return-*.json')).name
+    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env, capture_output=True, text=True, check=True)
+    logs = [json.loads(line.split('steno-helper 반환: ', 1)[1]) for line in result.stderr.splitlines() if line.startswith('steno-helper 반환: ')]
+    check(any(x['id'] == request_filename[len('.return-'):-len('.json')] and x['file'] == 'broken.md' and x['reason'] == 'noteStateUnknown' for x in logs), 'unknown fallback log carries return request ID and reason')
+    check(any(x['event'] == 'copy' and x['reason'] == 'broken (빌 수정).md' for x in logs), 'copy log records actual published name')
     check((team / 'broken.md').read_bytes() == b'original', 'unreadable state original untouched')
     check((team / 'broken (빌 수정).md').exists(), 'unreadable state produces copy')
     record['held'] = []; record['current'] = None
