@@ -4,7 +4,15 @@ import Foundation
 
 private let maxBytes = 20 * 1_048_576
 
+// Inspect metadata before open: dataless iCloud items can block on hydration.
+func locallyReadableRegular(_ dir: Int32, _ name: String) -> Bool {
+    var info = stat()
+    return fstatat(dir, name, &info, AT_SYMLINK_NOFOLLOW) == 0 &&
+        (info.st_mode & S_IFMT) == S_IFREG && (info.st_flags & UInt32(SF_DATALESS)) == 0
+}
+
 func uploadReadRegular(_ dir: Int32, _ name: String) -> Data? {
+    guard locallyReadableRegular(dir, name) else { return nil }
     let fd = openat(dir, name, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
     guard fd >= 0 else { return nil }
     defer { close(fd) }
@@ -59,4 +67,3 @@ func uploadListNames(_ dir: Int32) -> [String]? {
         names.append(name)
     }
 }
-
