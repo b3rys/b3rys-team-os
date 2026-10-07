@@ -52,8 +52,7 @@ func hasTeamMarker(directory: Int32, path: String) -> Bool {
     var info = stat()
     if fstatat(directory, ".steno-folder", &info, AT_SYMLINK_NOFOLLOW) == 0,
        (info.st_mode & S_IFMT) == S_IFREG, (info.st_flags & UInt32(SF_DATALESS)) != 0 {
-        requestSourceDownload(URL(fileURLWithPath: path).appendingPathComponent(".steno-folder"))
-        return false // 본문을 확인하는 다음 주기까지 쓰기·복사를 허용하지 않는다.
+        return true
     }
     return [".steno-folder.icloud", "..steno-folder.icloud"].contains { name in
         var info = stat()
