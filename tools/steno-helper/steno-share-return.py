@@ -4,10 +4,9 @@
 Usage: steno-share-return.py <팀 폴더 안 파일 이름> --as <팀원 이름>
 
 - Steno 도우미(steno-helper)를 한 번 돌려 지금 원본 해시를 manifest 에 받는다.
-- 사본을 만든 뒤 원본이 그대로면 steno-mcp edit_note 로 원본 자리에 쓴다.
-  Steno 가 "<이름>이 고침 ✦" 표시와 ⌘⌥Z 되돌리기를 붙인다.
-- 원본이 바뀌었거나 확인이 안 되면 덮지 않고 create_note 로 "AAA (<이름> 수정).md" 를 만든다.
-Documents 에 직접 쓰지 않는다. 쓰기는 전부 steno-mcp 가 한다.
+- 고친 사본과 기준 해시를 steno-share-outbox 에 두고 도우미에게 되돌리기를 요청한다.
+- 도우미는 현재 원본 해시·열린 노트를 확인해 원본 또는 "AAA (<이름> 수정).md" 에 쓴다.
+Documents 에 직접 쓰지 않으며 Steno MCP 를 실행하지 않는다.
 """
 import hashlib
 import json
@@ -16,11 +15,12 @@ import subprocess
 import sys
 import time
 import unicodedata
+import uuid
 
 SHARED = os.path.expanduser("~/Library/Application Support/b3os/steno-shared")
 MANIFEST = os.path.join(SHARED, ".manifest.json")
 FOLDER = "팀 공유"
-MCP = os.environ.get("STENO_MCP", "/Applications/Steno.app/Contents/MacOS/steno-mcp")
+OUTBOX = os.path.expanduser("~/Library/Application Support/b3os/steno-share-outbox")
 
 
 def die(message):
@@ -45,57 +45,6 @@ def refresh_manifest():
     return False
 
 
-class Refused(Exception):
-    pass
-
-
-def mcp_request(member, method, params):
-    """steno-mcp 를 띄워 initialize 뒤 요청 하나를 보내고 그 응답(dict)을 돌려준다."""
-    args = [MCP]
-    library = os.environ.get("STENO_LIBRARY", "")
-    if library.startswith("/"):
-        args += ["--library", library]
-    messages = [
-        {"jsonrpc": "2.0", "id": 1, "method": "initialize",
-         "params": {"protocolVersion": "2025-06-18", "capabilities": {},
-                    "clientInfo": {"name": member, "version": "1"}}},
-        {"jsonrpc": "2.0", "method": "notifications/initialized"},
-        {"jsonrpc": "2.0", "id": 2, "method": method, "params": params},
-    ]
-    stdin = "".join(json.dumps(m, ensure_ascii=False) + "\n" for m in messages)
-    try:
-        out = subprocess.run(args, input=stdin, capture_output=True, text=True, timeout=120).stdout
-    except (OSError, subprocess.TimeoutExpired) as error:
-        die(f"steno-mcp 실행 실패: {error}")
-    for line in out.splitlines():
-        try:
-            reply = json.loads(line)
-        except ValueError:
-            continue
-        if reply.get("id") == 2:
-            return reply
-    die(f"{method} 응답 없음")
-
-
-def call_mcp(member, tool, arguments):
-    reply = mcp_request(member, "tools/call", {"name": tool, "arguments": arguments})
-    result = reply.get("result") or {}
-    text = " ".join(c.get("text", "") for c in result.get("content", []))
-    if reply.get("error") or result.get("isError"):
-        raise Refused(f"{tool} 거절: {text or reply.get('error')}")
-    return text
-
-
-def edit_checks_hash(member):
-    """edit_note 가 expected_sha256 을 아는지 tools/list 스키마로 본다.
-    모르는 인자는 서버가 조용히 무시하므로, 모르면 원본 자리에 쓰면 안 된다."""
-    tools = (mcp_request(member, "tools/list", {}).get("result") or {}).get("tools") or []
-    for tool in tools:
-        if tool.get("name") == "edit_note":
-            return "expected_sha256" in ((tool.get("inputSchema") or {}).get("properties") or {})
-    return False
-
-
 def main():
     argv = sys.argv[1:]
     if len(argv) != 3 or argv[1] != "--as":
@@ -113,10 +62,15 @@ def main():
     # 도우미를 먼저 돌리고 그 뒤에 사본을 읽는다. 먼저 읽으면 도우미가 사본·기준을 새 원본으로
     # 바꾼 뒤에도 옛 내용을 새 기준 해시와 함께 보내 원본을 옛 판으로 되돌릴 수 있다.
     fresh = refresh_manifest()
-    with open(path, "rb") as f:
-        data = f.read()
+    import stat
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as f:
+        info = os.fstat(f.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 20 * 1024 * 1024:
+            die("사본은 링크 없는 20MB 이하 일반 파일이어야 함")
+        data = f.read(20 * 1024 * 1024 + 1)
     try:
-        content = data.decode("utf-8")
+        data.decode("utf-8")
     except UnicodeDecodeError:
         die("글 파일만 되돌려 넣을 수 있음(UTF-8)")
     try:
@@ -137,32 +91,28 @@ def main():
         print("사본에 고친 것이 없음, 할 일 없음")
         return
 
-    stem, ext = os.path.splitext(file)
-    fmt = {".md": "md", ".markdown": "md", ".html": "html", ".htm": "html"}.get(ext.lower())
-    reason = None
-    if not fresh:
-        reason = "원본 상태를 확인하지 못해"
-    elif not base or base != source:
-        reason = "원본도 바뀌었거나 지금 원본을 읽지 못해"
-    elif not edit_checks_hash(member):
-        reason = "이 Steno 는 원본 해시 확인(expected_sha256)을 지원하지 않아"
-    else:
-        try:
-            # expected_sha256: 그사이 원본이 바뀌었으면 steno-mcp 가 거절한다(Steno 쪽 지원 후 유효).
-            text = call_mcp(member, "edit_note", {"path": f"{FOLDER}/{file}", "content": content,
-                                                  "expected_sha256": base})
-            print(f"원본 자리에 반영함: {FOLDER}/{file} {text}")
-            return
-        except Refused as error:
-            reason = f"원본 자리에 쓰지 못해({error})"
-    if not fmt:
-        die(f"{reason} 따로 만들어야 하는데, 1단계는 md·html 만 따로 만들 수 있음: {file}")
-    new_name = f"{stem} ({member} 수정)"
-    try:
-        text = call_mcp(member, "create_note", {"content": content, "name": new_name, "format": fmt, "folder": FOLDER})
-    except Refused as error:
-        die(str(error))
-    print(f"{reason} 덮지 않고 따로 만듦: {new_name}.{fmt} {text}")
+    if not file or "/" in file or file.startswith(".") or "\0" in file:
+        die("manifest 의 파일 이름이 올바르지 않음")
+    if len(data) == 0 or len(data) > 20 * 1024 * 1024:
+        die("빈 파일 또는 20MB 초과는 보낼 수 없음")
+    # Only the helper can access Documents. Publish payload first, request last.
+    os.makedirs(OUTBOX, mode=0o700, exist_ok=True)
+    if os.path.realpath(OUTBOX) != OUTBOX or os.path.islink(OUTBOX):
+        die("팀 공유 보낼 칸이 링크임")
+    identifier = str(uuid.uuid4())
+    payload = os.path.join(OUTBOX, ".return-" + identifier + ".data")
+    request = os.path.join(OUTBOX, ".return-" + identifier + ".json")
+    metadata = {"file": file, "member": member, "base": base if fresh else None,
+                "sha256": copy_hash}
+    for target, value in [(payload, data), (request, json.dumps(metadata, ensure_ascii=False).encode("utf-8"))]:
+        temporary = target + ".tmp"
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(value)
+            f.flush()
+            os.fsync(f.fileno())
+        os.rename(temporary, target)
+    print(f"팀 공유 도우미에 되돌리기 요청함: {file} ({identifier})")
 
 if __name__ == "__main__":
     main()

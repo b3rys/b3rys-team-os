@@ -9,7 +9,7 @@ PLIST="$HOME/Library/LaunchAgents/com.b3os.steno-helper.plist"
 LIBRARY="${STENO_LIBRARY:-$HOME/Documents/Steno}"
 case "$LIBRARY" in /*) ;; *) echo "STENO_LIBRARY 는 절대 경로여야 합니다" >&2; exit 1 ;; esac
 
-install -d -m 700 "$BIN_DIR" "$SUPPORT/steno-outbox" "$SUPPORT/steno-shared" "$HOME/Library/LaunchAgents"
+install -d -m 700 "$BIN_DIR" "$SUPPORT/steno-outbox" "$SUPPORT/steno-share-outbox" "$SUPPORT/steno-shared" "$HOME/Library/LaunchAgents"
 swiftc -O "$HERE"/Sources/*.swift -o "$BIN_DIR/steno-helper"
 chmod 700 "$BIN_DIR/steno-helper"
 # plist(XML) 용으로 & < 를 먼저 바꾸고, 그다음 sed 치환 문자열용으로 & | \ 를 이스케이프한다.

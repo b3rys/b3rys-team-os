@@ -61,7 +61,7 @@ test "$(cat "$TMP/secret")" = secret && test ! -e "$TMP/inbox/심볼릭 3.md"
 
 SEND_HOME="$TMP/send-home"; mkdir -p "$SEND_HOME"
 printf image > "$TMP/send.png"
-HOME="$SEND_HOME" "$HERE/../../skills/b3os-team-inbox/scripts/steno-send.sh" "$TMP/send.png" >/dev/null
+HOME="$SEND_HOME" "$HERE/../../skills/b3os-team-inbox/scripts/steno-send.sh" "$TMP/send.png" --to-received >/dev/null
 test -f "$SEND_HOME/Library/Application Support/b3os/steno-outbox/send.png"
 pass=$((pass + 1))
 printf x > "$TMP/send.command"
