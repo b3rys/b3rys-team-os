@@ -4,6 +4,7 @@ import datetime
 import hashlib
 import json
 import os
+import socket
 from pathlib import Path
 import subprocess
 import sys
@@ -37,6 +38,11 @@ with tempfile.TemporaryDirectory() as tmp:
     env = dict(os.environ, HOME=str(home), STENO_SHARE_NO_KICK='1')
     env.pop('STENO_SHARE_TEST_REFRESH', None)
 
+    def write_record(value):
+        temporary = state / 'open-record.tmp'
+        temporary.write_text(value)
+        temporary.replace(state / 'open-notes.json')
+
     def request(name, original=b'original', edited=b'edited', source=None, base=None, baseline=b'original'):
         (team / name).write_bytes(original)
         (shared / name).write_bytes(edited)
@@ -47,6 +53,8 @@ with tempfile.TemporaryDirectory() as tmp:
         subprocess.run([sys.executable, producer, name, '--as', '빌'], env=env, check=True, stdout=subprocess.DEVNULL)
 
     def upload(extra=None):
+        subprocess.run([binary, '--upload', str(out), str(lib)], env=dict(env, **(extra or {})), check=True)
+        time.sleep(0.05)
         subprocess.run([binary, '--upload', str(out), str(lib)], env=dict(env, **(extra or {})), check=True)
 
     request('same.md')
@@ -71,9 +79,9 @@ with tempfile.TemporaryDirectory() as tmp:
     # A real live pid, not a mocked liveness result. ps reports start to whole seconds.
     start = subprocess.check_output(['ps', '-p', str(os.getpid()), '-o', 'lstart='], text=True).strip()
     epoch = datetime.datetime.strptime(start, '%a %b %d %H:%M:%S %Y').timestamp()
-    record = {'pid': os.getpid(), 'processStart': epoch, 'updatedAt': '2026-10-07T00:00:00Z',
+    record = {'host': socket.gethostname(), 'pid': os.getpid(), 'processStart': epoch, 'updatedAt': '2026-10-07T00:00:00Z',
               'held': [str(team / 'held.md')], 'current': str(team / 'held.md')}
-    (state / 'open-notes.json').write_text(json.dumps(record))
+    write_record(json.dumps(record))
     received = []
     def reply_once(status='applied', before_reply=None):
         folder = state / 'mcp-proposals'
@@ -108,7 +116,8 @@ with tempfile.TemporaryDirectory() as tmp:
 
     request('held.md'); shared.chmod(0o500)
     thread = threading.Thread(target=reply_once); thread.start()
-    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env); thread.join(); shared.chmod(0o700)
+    upload(); thread.join(); shared.chmod(0o700)
+    result = subprocess.CompletedProcess([], 0)
     check(result.returncode == 0 and not list(out.iterdir()), 'applied is terminal even if team receipt fails')
     upload()
     check(not list((state / 'mcp-proposals').iterdir()) and not (team / 'held (빌 수정).md').exists(), 'applied receipt failure is never replayed')
@@ -116,13 +125,20 @@ with tempfile.TemporaryDirectory() as tmp:
     request('held.md')
     result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env)
     check(result.returncode == 0, 'held timeout safely finishes')
-    check((team / 'held (빌 수정).md').read_bytes() == b'edited', 'held timeout alone produces copy')
+    check(not (team / 'held (빌 수정).md').exists() and list(out.glob('*.pending')), 'no reply retains queue without immediate copy')
+    pending = next(out.glob('*.pending'))
+    item = json.loads(pending.read_text()); first_id = item['id']
+    upload()
+    check(json.loads(pending.read_text())['id'] == first_id and len(list((state / 'mcp-proposals').glob('*.json'))) == 1, 'next cycle reuses one proposal UUID')
+    item['createdAt'] = '2026-01-01T00:00:00Z'; pending.write_text(json.dumps(item))
+    upload()
+    check((team / 'held (빌 수정).md').read_bytes() == b'edited', 'five-minute timeout alone produces copy')
     check((team / 'held.md').read_bytes() == b'original', 'held timeout preserves original')
 
     for status in ['stale', 'refused', 'saveFailed']:
         name = status + '.md'
         record['held'] = [str(team / name)]; record['current'] = str(team / name)
-        (state / 'open-notes.json').write_text(json.dumps(record))
+        write_record(json.dumps(record))
         request(name)
         thread = threading.Thread(target=lambda: reply_once(status)); thread.start(); upload(); thread.join()
         check((team / (status + ' (빌 수정).md')).read_bytes() == b'edited' and not list(out.iterdir()), status + ' makes one copy and consumes queue')
@@ -130,7 +146,7 @@ with tempfile.TemporaryDirectory() as tmp:
         check(not (team / (status + ' (빌 수정) 2.md')).exists(), status + ' produces no duplicate on next pass')
 
     record['held'] = [str(team / 'not-open.md')]; record['current'] = record['held'][0]
-    (state / 'open-notes.json').write_text(json.dumps(record))
+    write_record(json.dumps(record))
     request('not-open.md', original=b'A\nb', edited=b'a\nB', baseline=b'a\nb')
     thread = threading.Thread(target=lambda: reply_once('notOpen')); thread.start(); upload(); thread.join()
     check((team / 'not-open.md').read_bytes() == b'A\nB' and not (team / 'not-open (빌 수정).md').exists(), 'notOpen takes closed merge path')
@@ -138,22 +154,39 @@ with tempfile.TemporaryDirectory() as tmp:
     request('not-open.md')
     def reopen():
         record['updatedAt'] = '2026-10-07T01:00:00Z'
-        (state / 'open-notes.json').write_text(json.dumps(record))
+        write_record(json.dumps(record))
     thread = threading.Thread(target=lambda: reply_once('notOpen', before_reply=reopen)); thread.start(); upload(); thread.join()
     check((team / 'not-open.md').read_bytes() == b'original' and (team / 'not-open (빌 수정).md').read_bytes() == b'edited', 'notOpen followed by new held record falls back without original write')
 
     record['held'] = [str(team / 'unknown-after-reply.md')]; record['current'] = record['held'][0]
-    (state / 'open-notes.json').write_text(json.dumps(record)); request('unknown-after-reply.md')
-    thread = threading.Thread(target=lambda: reply_once('notOpen', before_reply=lambda: (state / 'open-notes.json').write_text('broken')))
+    write_record(json.dumps(record)); request('unknown-after-reply.md')
+    thread = threading.Thread(target=lambda: reply_once('notOpen', before_reply=lambda: write_record('broken')))
     thread.start(); upload(); thread.join()
     check((team / 'unknown-after-reply.md').read_bytes() == b'original' and (team / 'unknown-after-reply (빌 수정).md').exists(), 'notOpen followed by unknown state never writes original')
 
-    (state / 'open-notes.json').write_text('broken')
+    write_record('broken')
     request('broken.md'); upload()
     check((team / 'broken.md').read_bytes() == b'original', 'unreadable state original untouched')
-    check((team / 'broken (빌 수정).md').exists(), 'unreadable state produces copy')
+    check(not (team / 'broken (빌 수정).md').exists(), 'unreadable state queues proposal instead of copy')
+    reply_once('notOpen'); upload()
+    check((team / 'broken.md').read_bytes() == b'edited', 'app notOpen permits merge with unchanged unreadable state')
+
+    remote = dict(record, host='other-mac', pid=2147483647, processStart=0,
+                  held=['/Users/other/Library/Mobile Documents/Steno/팀 공유/remote.md'])
+    write_record(json.dumps(remote)); request('remote.md')
+    upload()
+    pending = next(out.glob('*.pending')); item = json.loads(pending.read_text())
+    check(item['path'] == str(team / 'remote.md'), 'remote proposal preserves existing format')
+    check((team / 'remote.md').read_bytes() == b'original' and not (team / 'remote (빌 수정).md').exists(), 'remote PID is not checked on this Mac')
+    reply_once(); upload()
+    check(not list(out.iterdir()), 'late remote applied consumes pending return without copy')
+
+    legacy = dict(record); legacy.pop('host')
+    write_record(json.dumps(legacy)); request('legacy.md'); upload()
+    check((team / 'legacy.md').read_bytes() == b'original' and list(out.glob('*.pending')), 'hostless record cannot authorize a local write')
+    reply_once('notOpen'); upload()
     record['held'] = []; record['current'] = None
-    (state / 'open-notes.json').write_text(json.dumps(record))
+    write_record(json.dumps(record))
     request('closed.md'); upload()
     check((team / 'closed.md').read_bytes() == b'edited', 'live record without held note permits replacement')
     request('deleted.md'); (team / 'deleted.md').unlink(); upload()
