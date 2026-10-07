@@ -76,13 +76,14 @@ with tempfile.TemporaryDirectory() as tmp:
               'held': [str(team / 'held.md')], 'current': str(team / 'held.md')}
     (state / 'open-notes.json').write_text(json.dumps(record))
     received = []
-    def reply_once(status='applied'):
+    def reply_once(status='applied', before_reply=None):
         folder = state / 'mcp-proposals'
         for _ in range(100):
             files = list(folder.glob('*.json')) if folder.exists() else []
             files = [p for p in files if not p.name.endswith('.reply.json')]
             if files:
                 item = json.loads(files[0].read_text()); received.append(item)
+                if before_reply: before_reply()
                 temp = folder / 'reply.tmp'
                 temp.write_text(json.dumps({'status': status}))
                 temp.rename(folder / (item['id'] + '.reply.json'))
@@ -105,6 +106,36 @@ with tempfile.TemporaryDirectory() as tmp:
     check(proposal['path'] == str(team / 'held.md') and proposal['editor'] == '빌', 'MCPProposal path/editor')
     check(proposal['base'] == 'original' and proposal['proposed'] == 'edited' and uuid.UUID(proposal['id']), 'MCPProposal body/UUID')
     check(not list((state / 'mcp-proposals').iterdir()), 'proposal request/reply cleaned up')
+
+    request('held.md')
+    shared.chmod(0o500)  # App may save successfully while the team's receipt fails.
+    thread = threading.Thread(target=reply_once); thread.start()
+    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env); thread.join()
+    shared.chmod(0o700)
+    check(result.returncode != 0 and list(out.glob('.return-*.json')), 'held applied receipt failure retains queue')
+    check(list((state / 'helper-return-journal').glob('*.proposal')), 'held applied has durable completion')
+    for p in (state / 'mcp-proposals').iterdir(): p.unlink()  # App's later sweep must be harmless.
+    (team / 'held.md').write_bytes(b'GD-newer-input')
+    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env)
+    check(result.returncode == 0 and (team / 'held.md').read_bytes() == b'GD-newer-input', 'held receipt retry never reapplies over later GD input')
+    check(not list((state / 'mcp-proposals').iterdir()), 'held receipt retry sends no second proposal')
+    check(not (team / 'held (빌 수정).md').exists(), 'held receipt retry makes no timeout copy')
+    check(not list(out.iterdir()) and not list((state / 'helper-return-journal').glob('*.proposal')), 'held completion consumes queue and journal only after acknowledgment')
+
+    request('held.md')
+    def fail_completion_write():
+        reply_once(before_reply=lambda: (state / 'helper-return-journal').chmod(0o500))
+    thread = threading.Thread(target=fail_completion_write); thread.start()
+    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env); thread.join()
+    (state / 'helper-return-journal').chmod(0o700)
+    check(result.returncode != 0 and list(out.glob('.return-*.json')), 'completion write failure retains pending request')
+    for p in (state / 'mcp-proposals').iterdir(): p.unlink()
+    (team / 'held.md').write_bytes(b'GD-after-uncertain-result')
+    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env)
+    check(result.returncode != 0 and list(out.glob('.return-*.json')), 'pending request without reply remains unresolved')
+    check((team / 'held.md').read_bytes() == b'GD-after-uncertain-result' and not list((state / 'mcp-proposals').iterdir()), 'uncertain result never resubmits or edits newer input')
+    for p in out.iterdir(): p.unlink()
+    for p in (state / 'helper-return-journal').glob('*.proposal'): p.unlink()
 
     request('held.md')
     result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env)
@@ -197,6 +228,21 @@ with tempfile.TemporaryDirectory() as tmp:
     result = subprocess.run([binary, '--upload', str(out), str(lib)], env=dict(env, STENO_TEST_FAIL_MARK_COMMIT='1'))
     check(result.returncode != 0 and (team / 'marks-crash.md').read_bytes() == b'edited', 'simulated interruption follows body commit')
     check(list((state / 'helper-return-journal').glob('*.json')), 'interrupted commit retains recovery journal')
+    journal_dir = state / 'helper-return-journal'
+    journal_file = next(journal_dir.glob('*.json'))
+    journal_file.chmod(0o000)
+    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env)
+    if journal_file.exists(): journal_file.chmod(0o600)
+    check(result.returncode != 0 and list(out.glob('.return-*.json')), 'unreadable recovery record preserves request')
+    journal_dir.chmod(0o000)
+    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env)
+    journal_dir.chmod(0o700)
+    check(result.returncode != 0 and list(out.glob('.return-*.json')), 'unreadable recovery folder preserves request')
+    raw_journal = journal_file.read_bytes()
+    journal_file.write_text('{broken')
+    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env)
+    journal_file.write_bytes(raw_journal)
+    check(result.returncode != 0 and list(out.glob('.return-*.json')), 'malformed recovery record preserves request')
     upload()
     check('팀 공유/marks-crash.md' in json.loads((state / 'ai-edits.json').read_text()), 'retry repairs marks rather than swallowing noop')
     check(not list((state / 'helper-return-journal').glob('*.json')), 'finished return removes recovery journal')

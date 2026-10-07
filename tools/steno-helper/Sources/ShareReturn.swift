@@ -80,22 +80,26 @@ private func memberValid(_ member: String) -> Bool {
     !member.contains(where: { $0 == "/" || $0 == "\\" || $0 == ":" || $0.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) })
 }
 private enum ReturnResult { case applied, copy, failed }
+private struct ProposalJournal: Codable {
+    let file: String; let member: String; let base: String?; let submittedSHA: String
+    var applied: Bool
+}
 
 // MCPProposal wire format. Only the app modifies a held note; a refusal never
 // falls through into a direct file write. Unknown state/timeout alone make copies.
-private func propose(state: Int32, absolute: String, base: String, proposed: String, editor: String) -> ReturnResult {
+private func propose(state: Int32, id: String, absolute: String, base: String, proposed: String, editor: String, resume: Bool = false) -> ReturnResult {
     let folder = childDirectory(state, "mcp-proposals")
     guard folder >= 0 else { return .failed }
     defer { close(folder) }
-    let id = UUID().uuidString
     let requestName = id + ".json", replyName = id + ".reply.json"
-    defer { _ = unlinkat(folder, requestName, 0); _ = unlinkat(folder, replyName, 0) }
     let request: [String: Any] = ["id": id, "path": absolute, "base": base, "proposed": proposed,
                                  "editor": editor, "createdAt": ISO8601DateFormatter().string(from: Date())]
-    guard let raw = try? JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]),
-          uploadWriteAtomically(folder, requestName, raw) else { return .failed }
-    DistributedNotificationCenter.default().postNotificationName(
-        .init("com.b3rys.steno.mcp.proposal"), object: id, userInfo: nil, deliverImmediately: true)
+    if !resume {
+        guard let raw = try? JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]),
+              uploadWriteAtomically(folder, requestName, raw) else { return .failed }
+        DistributedNotificationCenter.default().postNotificationName(
+            .init("com.b3rys.steno.mcp.proposal"), object: id, userInfo: nil, deliverImmediately: true)
+    }
     var timeout: Double = 15
     #if STENO_HELPER_TESTING
     if let raw = ProcessInfo.processInfo.environment["STENO_TEST_PROPOSAL_TIMEOUT"],
@@ -111,9 +115,37 @@ private func propose(state: Int32, absolute: String, base: String, proposed: Str
             default: return .failed
             }
         }
+        // An interrupted submission is never sent twice. If its durable app
+        // reply is unavailable, retain the queue for explicit recovery.
+        if resume { return .failed }
         Thread.sleep(forTimeInterval: 0.05)
     }
     return .copy
+}
+
+private func heldReturn(_ request: ShareReturnRequest, id: String, data: Data, state: Int32,
+                        absolute: String, base: String, proposed: String, resume: Bool) -> ReturnResult {
+    let journal = childDirectory(state, "helper-return-journal")
+    guard journal >= 0 else { return .failed }
+    defer { close(journal) }
+    var record = ProposalJournal(file: request.file, member: request.member, base: request.base,
+                                 submittedSHA: uploadSHA256(data), applied: false)
+    if resume {
+        guard let raw = uploadReadRegular(journal, id + ".proposal"),
+              let saved = try? decoder().decode(ProposalJournal.self, from: raw),
+              saved.file == record.file, saved.member == record.member, saved.base == record.base,
+              saved.submittedSHA == record.submittedSHA else { return .failed }
+        record = saved
+        if saved.applied { return .applied }
+    } else {
+        guard let raw = encoded(record), uploadWriteAtomically(journal, id + ".proposal", raw) else { return .failed }
+    }
+    let result = propose(state: state, id: id, absolute: absolute, base: base, proposed: proposed, editor: request.member, resume: resume)
+    if case .applied = result {
+        record.applied = true
+        guard let raw = encoded(record), uploadWriteAtomically(journal, id + ".proposal", raw) else { return .failed }
+    }
+    return result
 }
 
 private func applyReturn(_ request: ShareReturnRequest, id: String, data: Data, baseline: Data?, destination: Int32,
@@ -125,9 +157,22 @@ private func applyReturn(_ request: ShareReturnRequest, id: String, data: Data, 
     // Recovery precedes no-op and editor routing: a previous body commit must not
     // disappear merely because the next attempt sees those already-written bytes.
     let journalFolder = openat(state, "helper-return-journal", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+    guard journalFolder >= 0 || errno == ENOENT else { return .failed }
     if journalFolder >= 0 {
         defer { close(journalFolder) }
-        if let raw = uploadReadRegular(journalFolder, id + ".json") {
+        var proposalInfo = stat()
+        let hasProposal = fstatat(journalFolder, id + ".proposal", &proposalInfo, AT_SYMLINK_NOFOLLOW) == 0
+        guard hasProposal || errno == ENOENT else { return .failed }
+        if hasProposal {
+            guard (proposalInfo.st_mode & S_IFMT) == S_IFREG, proposalInfo.st_nlink == 1 else { return .failed }
+            return heldReturn(request, id: id, data: data, state: state, absolute: absolute, base: "", proposed: "", resume: true)
+        }
+        var journalInfo = stat()
+        let journalExists = fstatat(journalFolder, id + ".json", &journalInfo, AT_SYMLINK_NOFOLLOW) == 0
+        guard journalExists || errno == ENOENT else { return .failed }
+        if journalExists {
+            guard (journalInfo.st_mode & S_IFMT) == S_IFREG, journalInfo.st_nlink == 1,
+                  let raw = uploadReadRegular(journalFolder, id + ".json") else { return .failed }
             guard let journal = try? decoder().decode(EditJournal.self, from: raw), journal.file == request.file,
                   let info = regularSingleLink(destination, request.file), let current = uploadReadRegular(destination, request.file) else { return .failed }
             if UInt64(info.st_ino) == journal.mark.fileNumber && uploadSHA256(current) == journal.updatedSHA {
@@ -151,7 +196,7 @@ private func applyReturn(_ request: ShareReturnRequest, id: String, data: Data, 
     guard let baseline, let baseText = String(data: baseline, encoding: .utf8),
           let proposedText = String(data: data, encoding: .utf8) else { return .failed }
     if status == .held {
-        return propose(state: state, absolute: absolute, base: baseText, proposed: proposedText, editor: request.member)
+        return heldReturn(request, id: id, data: data, state: state, absolute: absolute, base: baseText, proposed: proposedText, resume: false)
     }
     guard let original, let originalInfo = regularSingleLink(destination, request.file),
           let currentText = String(data: original, encoding: .utf8),
@@ -245,7 +290,13 @@ func consumeReturn(source: Int32, sourcePath: String, requestName: String, desti
     if state >= 0 {
         defer { close(state) }
         let journal = openat(state, "helper-return-journal", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        if journal >= 0 { _ = unlinkat(journal, id + ".json", 0); close(journal) }
+        if journal >= 0 {
+            _ = unlinkat(journal, id + ".json", 0); _ = unlinkat(journal, id + ".proposal", 0); close(journal)
+        }
+        let proposals = openat(state, "mcp-proposals", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        if proposals >= 0 {
+            _ = unlinkat(proposals, id + ".json", 0); _ = unlinkat(proposals, id + ".reply.json", 0); close(proposals)
+        }
         _ = unlinkat(state, ".helper-marks-" + id, 0)
     }
     return true
