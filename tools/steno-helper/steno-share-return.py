@@ -4,8 +4,8 @@
 Usage: steno-share-return.py <팀 폴더 안 파일 이름> --as <팀원 이름>
 
 - Steno 도우미(steno-helper)를 한 번 돌려 지금 원본 해시를 manifest 에 받는다.
-- 고친 사본과 기준 해시를 steno-share-outbox 에 두고 도우미에게 되돌리기를 요청한다.
-- 도우미는 현재 원본 해시·열린 노트를 확인해 원본 또는 "AAA (<이름> 수정).md" 에 쓴다.
+- 고친 사본과 본문 해시를 steno-share-outbox 에 두고 도우미에게 되돌리기를 요청한다.
+- 도우미는 원본을 읽거나 바꾸지 않고 "AAA (<이름> 수정).md" 새 사본만 만든다.
 Documents 에 직접 쓰지 않으며 Steno MCP 를 실행하지 않는다.
 """
 import hashlib
@@ -61,7 +61,7 @@ def main():
         die(f"팀 폴더에 그 파일이 없음: {name}")
     # 도우미를 먼저 돌리고 그 뒤에 사본을 읽는다. 먼저 읽으면 도우미가 사본·기준을 새 원본으로
     # 바꾼 뒤에도 옛 내용을 새 기준 해시와 함께 보내 원본을 옛 판으로 되돌릴 수 있다.
-    fresh = refresh_manifest()
+    refresh_manifest()
     import stat
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as f:
@@ -103,30 +103,7 @@ def main():
     payload = os.path.join(OUTBOX, ".return-" + identifier + ".data")
     request = os.path.join(OUTBOX, ".return-" + identifier + ".json")
     values = [(payload, data)]
-    has_base_payload = False
-    if isinstance(base, str) and len(base) == 64 and all(c in "0123456789abcdef" for c in base):
-        snapshot = os.path.join(SHARED, ".bases", base + ".data")
-        try:
-            # Reject linked components and bound the read; never read Documents here.
-            if os.path.realpath(snapshot) != snapshot:
-                die("기준 본문 경로가 링크임")
-            fd = os.open(snapshot, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-            with os.fdopen(fd, "rb") as f:
-                info = os.fstat(f.fileno())
-                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-                    die("기준 본문이 일반 파일이 아님")
-                base_data = f.read(20 * 1024 * 1024 + 1)
-            if len(base_data) > 20 * 1024 * 1024 or hashlib.sha256(base_data).hexdigest() != base:
-                die("기준 본문 해시가 맞지 않음")
-            base_data.decode("utf-8")
-            values.append((os.path.join(OUTBOX, ".return-" + identifier + ".base"), base_data))
-            has_base_payload = True
-        except FileNotFoundError:
-            pass  # A legacy manifest can still be returned when the helper's current bytes match base.
-        except UnicodeDecodeError:
-            die("합치기 기준 본문은 UTF-8이어야 함")
-    metadata = {"file": file, "member": member, "base": base,
-                "basePayload": has_base_payload, "sha256": copy_hash}
+    metadata = {"file": file, "member": member, "sha256": copy_hash}
     values.append((request, json.dumps(metadata, ensure_ascii=False).encode("utf-8")))
     for target, value in values:
         temporary = target + ".tmp"

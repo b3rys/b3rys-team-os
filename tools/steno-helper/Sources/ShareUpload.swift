@@ -62,7 +62,7 @@ func runShareUpload(sourcePath: String, libraryPath: String) -> Int32 {
     var failed = false
     for name in names where name != "." && name != ".." {
         if name.hasPrefix(".return-") && name.hasSuffix(".json") {
-            if !consumeReturn(source: source, sourcePath: sourcePath, requestName: name, destination: destination, library: library, libraryPath: libraryPath) { failed = true }
+            if !consumeReturn(source: source, requestName: name, destination: destination) { failed = true }
             continue
         }
         // A producer publishes data first, metadata last. Never upload a partial request.

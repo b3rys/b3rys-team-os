@@ -8,38 +8,6 @@ import Foundation
 
 #if STENO_HELPER_TESTING
 let args = CommandLine.arguments
-if args.count == 3, args[1] == "--watch-proposal-log" {
-    let log = URL(fileURLWithPath: args[2])
-    FileManager.default.createFile(atPath: log.path, contents: Data())
-    let observer = DistributedNotificationCenter.default().addObserver(forName: .init("com.b3rys.steno.mcp.proposal"), object: nil, queue: nil) { note in
-        if let id = note.object as? String, let handle = try? FileHandle(forWritingTo: log) {
-            defer { try? handle.close() }
-            _ = try? handle.seekToEnd(); try? handle.write(contentsOf: Data((id + "\n").utf8))
-        }
-    }
-    try? Data("ready".utf8).write(to: URL(fileURLWithPath: log.path + ".ready"))
-    let deadline = Date().addingTimeInterval(3)
-    while Date() < deadline {
-        _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
-        if let data = try? Data(contentsOf: log), !data.isEmpty { break }
-    }
-    DistributedNotificationCenter.default().removeObserver(observer)
-    exit(0)
-}
-if args.count == 3, args[1] == "--merge-table" {
-    struct Row: Decodable { let name: String; let base: String; let current: String; let proposed: String; let expected: String }
-    do {
-        struct Table: Decodable { let version: Int; let cellLimit: Int; let cases: [Row] }
-        let table = try JSONDecoder().decode(Table.self, from: Data(contentsOf: URL(fileURLWithPath: args[2])))
-        guard table.version == 1 && table.cellLimit == 4_000_000 else { exit(1) }
-        let rows = table.cases
-        for row in rows {
-            let actual = try mergeLines(base: row.base, current: row.current, proposed: row.proposed)
-            guard actual.utf8.elementsEqual(row.expected.utf8) else { fputs("FAIL: merge \(row.name)\n", stderr); exit(1) }
-        }
-        print("PASS: \(rows.count) shared Swift merge rows"); exit(0)
-    } catch { fputs("FAIL: merge table \(error)\n", stderr); exit(1) }
-}
 if args.count == 3, args[1] == "--validate-name" { exit(validName(args[2]) ? 0 : 1) }
 guard args.count == 4 else { exit(64) }
 switch args[1] {
