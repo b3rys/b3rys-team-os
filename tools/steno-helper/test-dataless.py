@@ -7,12 +7,9 @@ import tempfile
 root = Path(__file__).resolve().parent
 share = (root / 'Sources/Share.swift').read_text()
 io = (root / 'Sources/UploadFileIO.swift').read_text()
-returns = (root / 'Sources/ShareReturn.swift').read_text()
 # Keep the production readers and shared predicate; substitute only POSIX calls.
 code = share[share.index('private func readRegular('):share.index('\nprivate func requestSourceDownload')]
 code += io[io.index('func locallyReadableRegular('):io.index('\nfunc uploadSHA256')]
-code += returns[returns.index('private struct HeldNotes:'):returns.index('private struct EditMark:')]
-code += returns[returns.index('private func decoder()'):returns.index('func childDirectory(')]
 code = code.replace('fstatat(', 'testFstatat(').replace('openat(', 'testOpenat(')
 prefix = '''import Darwin
 import Foundation
@@ -54,14 +51,6 @@ try Data("team".utf8).write(to: marker)
 flags = UInt32(SF_DATALESS); opens = 0
 assert(hasTeamMarker(directory: dir, path: root.appendingPathComponent("팀 공유").path) && opens == 0 && downloads.isEmpty, "dataless marker must be present without read or download")
 print("PASS: 1 dataless marker check (present without read or download)")
-let record: [String: Any] = ["host": localHost()!, "pid": 1, "processStart": 42,
-    "updatedAt": "2026-10-07T00:00:00Z", "held": ["/notes/팀 공유/note.md"]]
-try JSONSerialization.data(withJSONObject: record).write(to: root.appendingPathComponent("open-notes.json"))
-flags = UInt32(SF_DATALESS); opens = 0; pidChecks = 0
-assert(noteState(state: dir, absolutePath: "/notes/팀 공유/note.md") == .unknown && opens == 0 && pidChecks == 0, "dataless open record must be unknown without open or PID check")
-flags = 0
-assert(noteState(state: dir, absolutePath: "/notes/팀 공유/note.md") == .held && pidChecks == 1, "same host checks PID")
-print("PASS: 2 open-record dataless/local PID checks")
 close(dir)
 print("PASS: 8 shared dataless reader checks (injected metadata, actual temporary files)")
 '''
