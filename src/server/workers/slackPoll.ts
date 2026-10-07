@@ -56,20 +56,40 @@ function tsToNumber(ts: string | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-async function slackGet(method: string, params: Record<string, string>): Promise<SlackHistoryResponse> {
-  const tokenAgent = tokenAgentId();
-  const creds = tokenAgent ? loadAgentCreds(tokenAgent) : null;
-  if (!creds) return { ok: false, error: `missing_creds_for_${tokenAgent ?? "unknown"}` };
-  const url = new URL(`https://slack.com/api/${method}`);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${creds.bot_token}` },
-  });
-  return (await res.json()) as SlackHistoryResponse;
+// 이 폴러의 모든 채널이 메서드별 예산을 공유한다. Tier 3(50+/분) 아래로 제한하고
+// 429의 Retry-After 동안 재요청하지 않는다. 다른 Slack 클라이언트의 호출은 이 예산 밖이다.
+const CALLS_PER_MINUTE = 40;
+type SlackGet = (method: string, params: Record<string, string>) => Promise<SlackHistoryResponse>;
+
+export function createSlackGetter(): SlackGet {
+  const calls = new Map<string, number[]>();
+  const retryAt = new Map<string, number>();
+  return async (method, params) => {
+    const now = Date.now();
+    if (now < (retryAt.get(method) ?? 0)) return { ok: false, error: "rate_limit_backoff" };
+    const recent = (calls.get(method) ?? []).filter((ts) => ts > now - 60_000);
+    calls.set(method, recent);
+    if (recent.length >= CALLS_PER_MINUTE) return { ok: false, error: "rate_budget_exhausted" };
+    const tokenAgent = tokenAgentId();
+    const creds = tokenAgent ? loadAgentCreds(tokenAgent) : null;
+    if (!creds) return { ok: false, error: `missing_creds_for_${tokenAgent ?? "unknown"}` };
+    recent.push(now);
+    const url = new URL(`https://slack.com/api/${method}`);
+    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${creds.bot_token}` } });
+    if (res.status === 429) {
+      const seconds = Number(res.headers.get("Retry-After") ?? 60);
+      retryAt.set(method, now + (Number.isFinite(seconds) && seconds > 0 ? seconds : 60) * 1000);
+      return { ok: false, error: "ratelimited" };
+    }
+    return (await res.json()) as SlackHistoryResponse;
+  };
 }
 
-async function fetchHistory(channel: string, oldest: number): Promise<SlackHistoryResponse> {
-  return slackGet("conversations.history", {
+const slackGet = createSlackGetter();
+
+async function fetchHistory(channel: string, oldest: number, get: SlackGet): Promise<SlackHistoryResponse> {
+  return get("conversations.history", {
     channel,
     limit: "50",
     oldest: String(oldest),
@@ -77,35 +97,44 @@ async function fetchHistory(channel: string, oldest: number): Promise<SlackHisto
   });
 }
 
-// 쓰레드 댓글은 conversations.history 에 안 나온다(최상위 글만 준다). 최상위 글의 latest_reply 를 보고,
-// 본 적 없는 댓글이 생긴 쓰레드만 conversations.replies 로 가져온다.
-// 살펴보는 범위 = 최근 THREAD_WINDOW_SEC(기본 7일) 안에 시작된 쓰레드 전부(페이지를 넘겨 가며, 최대 THREAD_MAX_PAGES 쪽).
-// ★한계★: 그보다 오래 전에 시작된 쓰레드에 새로 달린 댓글은 못 본다 — 그런 대화는 새 글로 다시 시작한다.
+// history는 부모 ts 순이다. 부모 탐색 범위와 답글 활동 범위를 분리한다.
+// 90일 안의 부모를 최대 5쪽(쪽당 200개) 읽고 최근 7일 내 답글이 있는 것만 반환한다.
+// 90일 밖 또는 페이지 상한 뒤의 부모는 못 읽는다. 상한으로 잘린 스캔은 audit에 남긴다.
 const THREAD_WINDOW_SEC = Number(process.env.TEAM_SLACK_POLL_THREAD_WINDOW_SEC ?? 7 * 24 * 3600);
+const THREAD_PARENT_LOOKBACK_SEC = Number(process.env.TEAM_SLACK_POLL_THREAD_PARENT_LOOKBACK_SEC ?? 90 * 24 * 3600);
 const THREAD_MAX_PAGES = Number(process.env.TEAM_SLACK_POLL_THREAD_MAX_PAGES ?? 5);
+const THREAD_MAX_REPLIES = 10; // 채널당 tick에서 조회할 스레드 수. 전역 메서드 예산도 적용한다.
 
 interface SlackPagedResponse extends SlackHistoryResponse {
   response_metadata?: { next_cursor?: string };
 }
 
-async function fetchThreadParents(channel: string): Promise<SlackHistoryResponse> {
-  const since = Date.now() / 1000 - THREAD_WINDOW_SEC;
+async function fetchThreadParents(deps: SlackPollDeps, channel: string, get: SlackGet): Promise<SlackHistoryResponse> {
+  const now = Date.now() / 1000;
+  const since = now - Math.max(THREAD_PARENT_LOOKBACK_SEC, THREAD_WINDOW_SEC);
+  const activeSince = now - THREAD_WINDOW_SEC;
   const all: SlackHistoryMessage[] = [];
   let cursor = "";
   for (let page = 0; page < THREAD_MAX_PAGES; page++) {
     const params: Record<string, string> = { channel, limit: "200", oldest: String(since) };
     if (cursor) params.cursor = cursor;
-    const res = (await slackGet("conversations.history", params)) as SlackPagedResponse;
+    const res = (await get("conversations.history", params)) as SlackPagedResponse;
     if (!res.ok) return res;
-    all.push(...(res.messages ?? []));
-    cursor = res.response_metadata?.next_cursor ?? "";
+    all.push(...(res.messages ?? []).filter((p) => tsToNumber(p.latest_reply) >= activeSince));
+    cursor = res.response_metadata?.next_cursor?.trim() ?? "";
     if (!cursor) break;
+  }
+  if (cursor) {
+    appendAudit(deps.db, "system", "slack_poll_thread_scan_capped", null, {
+      channel, max_pages: THREAD_MAX_PAGES, parent_lookback_sec: now - since,
+      thread_window_sec: THREAD_WINDOW_SEC,
+    });
   }
   return { ok: true, messages: all };
 }
 
-async function fetchReplies(channel: string, threadTs: string, oldest: number): Promise<SlackHistoryResponse> {
-  return slackGet("conversations.replies", {
+async function fetchReplies(channel: string, threadTs: string, oldest: number, get: SlackGet): Promise<SlackHistoryResponse> {
+  return get("conversations.replies", {
     channel,
     ts: threadTs,
     oldest: String(oldest),
@@ -126,7 +155,7 @@ export function threadsDue(
   const due: { threadTs: string; oldest: number }[] = [];
   for (const p of parents) {
     if (!p.ts || !p.reply_count || !p.latest_reply) continue;
-    const seen = threadCursors.get(p.ts) ?? floor;
+    const seen = Math.max(threadCursors.get(p.ts) ?? floor, floor);
     if (tsToNumber(p.latest_reply) > seen) due.push({ threadTs: p.ts, oldest: seen });
   }
   return due;
@@ -178,18 +207,19 @@ async function handleMessage(
   await handleAppMention({ db: deps.db, broadcast: deps.broadcast, agents }, ev);
 }
 
-async function pollOnce(
+export async function pollOnce(
   deps: SlackPollDeps,
   cursors: Map<string, number>,
   threadCursors: Map<string, Map<string, number>>,
   floor: number,
+  get: SlackGet = slackGet,
 ): Promise<void> {
   const agents = deps.agents();
   const knownMentionIds = new Set(agents.map((a) => a.slack_bot_user_id).filter(Boolean));
 
   for (const channel of CHANNELS) {
     const oldest = cursors.get(channel) ?? floor;
-    const history = await fetchHistory(channel, oldest);
+    const history = await fetchHistory(channel, oldest, get);
     if (!history.ok) {
       appendAudit(deps.db, "system", "slack_poll_failed", null, { channel, error: history.error });
       continue;
@@ -206,15 +236,22 @@ async function pollOnce(
     cursors.set(channel, newest);
 
     // 쓰레드 댓글 — 최상위 글과 같은 멘션 처리. 실패해도 최상위 처리는 이미 끝났다.
-    const parents = await fetchThreadParents(channel);
+    const parents = await fetchThreadParents(deps, channel, get);
     if (!parents.ok) {
       appendAudit(deps.db, "system", "slack_poll_failed", null, { channel, error: parents.error, step: "thread_parents" });
       continue;
     }
     const tc = threadCursors.get(channel) ?? new Map<string, number>();
     threadCursors.set(channel, tc);
-    for (const { threadTs, oldest: since } of threadsDue(parents.messages ?? [], tc, floor)) {
-      const replies = await fetchReplies(channel, threadTs, since);
+    // 미조회 스레드(floor)를 먼저 읽어, 이미 읽은 활성 스레드가 예산을 독점하지 않게 한다.
+    const due = threadsDue(parents.messages ?? [], tc, floor).sort((a, b) => a.oldest - b.oldest);
+    if (due.length > THREAD_MAX_REPLIES) {
+      appendAudit(deps.db, "system", "slack_poll_thread_replies_capped", null, {
+        channel, due: due.length, max_threads: THREAD_MAX_REPLIES,
+      });
+    }
+    for (const { threadTs, oldest: since } of due.slice(0, THREAD_MAX_REPLIES)) {
+      const replies = await fetchReplies(channel, threadTs, since, get);
       if (!replies.ok) {
         appendAudit(deps.db, "system", "slack_poll_failed", null, { channel, error: replies.error, step: "thread_replies" });
         continue;
