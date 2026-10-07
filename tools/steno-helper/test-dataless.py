@@ -8,13 +8,15 @@ root = Path(__file__).resolve().parent
 share = (root / 'Sources/Share.swift').read_text()
 io = (root / 'Sources/UploadFileIO.swift').read_text()
 # Keep the production readers and shared predicate; substitute only POSIX calls.
-code = share[share.index('private func readRegular('):share.index('\nfunc hasTeamMarker')]
+code = share[share.index('private func readRegular('):share.index('\nprivate func requestSourceDownload')]
 code += io[io.index('func locallyReadableRegular('):io.index('\nfunc uploadSHA256')]
 code = code.replace('fstatat(', 'testFstatat(').replace('openat(', 'testOpenat(')
 prefix = '''import Darwin
 import Foundation
 private let maxBytes = 20 * 1_048_576
 var flags: UInt32 = 0, opens = 0
+var downloads: [URL] = []
+func requestSourceDownload(_ url: URL) { downloads.append(url) }
 func testFstatat(_ dir: Int32, _ name: String, _ info: UnsafeMutablePointer<stat>, _ options: Int32) -> Int32 {
     let result = Darwin.fstatat(dir, name, info, options)
     if result == 0 { info.pointee.st_flags |= flags }
@@ -41,6 +43,16 @@ for reader in [readRegular, uploadReadRegular] {
     flags = 0
     assert(reader(dir, "dir.md") == nil && opens == 0, "nonregular must not open")
 }
+let marker = root.appendingPathComponent(".steno-folder")
+try Data("team".utf8).write(to: marker)
+flags = UInt32(SF_DATALESS); opens = 0
+assert(!hasTeamMarker(directory: dir, path: root.appendingPathComponent("팀 공유").path))
+assert(opens == 0 && downloads.count == 1 && downloads[0].lastPathComponent == ".steno-folder", "pending marker must request download without open")
+flags = 0
+assert(hasTeamMarker(directory: dir, path: root.appendingPathComponent("팀 공유").path), "downloaded team marker must allow next cycle")
+try Data("not-team".utf8).write(to: marker)
+assert(!hasTeamMarker(directory: dir, path: root.appendingPathComponent("팀 공유").path), "wrong marker must not allow")
+print("PASS: 3 pending marker checks (download request, next cycle, wrong content)")
 close(dir)
 print("PASS: 8 shared dataless reader checks (injected metadata, actual temporary files)")
 '''
