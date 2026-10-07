@@ -26,7 +26,10 @@ func shareable(_ name: String) -> Bool {
 }
 
 private func readRegular(_ dir: Int32, _ name: String) -> Data? {
-    let fd = openat(dir, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+    #if STENO_HELPER_TESTING
+    if ProcessInfo.processInfo.environment["STENO_HELPER_TEST_UNREADABLE"] == name { return nil }
+    #endif
+    let fd = openat(dir, name, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
     guard fd >= 0 else { return nil }
     defer { close(fd) }
     var st = stat()
@@ -41,6 +44,34 @@ private func readRegular(_ dir: Int32, _ name: String) -> Data? {
         guard data.count <= maxBytes else { return nil }
     }
     return data
+}
+
+private func hasTeamMarker(directory: Int32, path: String) -> Bool {
+    guard URL(fileURLWithPath: path).lastPathComponent == "팀 공유" else { return false }
+    if let data = readRegular(directory, ".steno-folder"), let marker = String(data: data, encoding: .utf8) {
+        return marker.trimmingCharacters(in: .whitespacesAndNewlines) == "team"
+    }
+    return [".steno-folder.icloud", "..steno-folder.icloud"].contains { name in
+        var info = stat()
+        return fstatat(directory, name, &info, AT_SYMLINK_NOFOLLOW) == 0 && (info.st_mode & S_IFMT) == S_IFREG
+    }
+}
+
+private func requestSourceDownload(_ url: URL) {
+    do {
+        #if STENO_HELPER_TESTING
+        if let path = ProcessInfo.processInfo.environment["STENO_HELPER_TEST_DOWNLOAD_LOG"] {
+            let file = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
+            defer { try? file.close() }
+            try file.seekToEnd()
+            try file.write(contentsOf: Data((url.lastPathComponent + "\n").utf8))
+            log("iCloud 내려받기 요청: \(url.lastPathComponent)")
+            return
+        }
+        #endif
+        try FileManager.default.startDownloadingUbiquitousItem(at: url)
+        log("iCloud 내려받기 요청: \(url.lastPathComponent)")
+    } catch { log("iCloud 내려받기 요청 실패: \(url.lastPathComponent) (\(error.localizedDescription))") }
 }
 
 private func sha256(_ data: Data) -> String {
@@ -102,7 +133,7 @@ func runShare(sourcePath: String, destinationPath: String) -> Int32 {
         log("팀 공유 폴더 열기 실패(errno \(errno), 문서 폴더 권한 확인)"); return 1
     }
     defer { close(sourceDir) }
-    guard HelperSystemFolder.matches(.team, directory: sourceDir, path: sourcePath) else {
+    guard hasTeamMarker(directory: sourceDir, path: sourcePath) else {
         log("Steno 팀 공유 표시가 없어 이번 주기는 건너뜀"); return 0
     }
     let destDir = open(destinationPath, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
@@ -124,11 +155,18 @@ func runShare(sourcePath: String, destinationPath: String) -> Int32 {
         let base = manifest[key]?["base"] ?? ""
         guard let source = readRegular(sourceDir, name) else {
             // iCloud 미다운로드 등: 지금 원본을 모르므로 되돌려 넣기가 원본 자리에 쓰지 못하게 표시한다.
-            manifest[key] = ["base": base, "source": "unreadable", "file": name]
+            if manifest[key]?["downloadRequested"] != "1" {
+                var info = stat()
+                if fstatat(sourceDir, name, &info, AT_SYMLINK_NOFOLLOW) == 0, (info.st_mode & S_IFMT) == S_IFREG {
+                    requestSourceDownload(URL(fileURLWithPath: sourcePath).appendingPathComponent(name))
+                }
+            }
+            manifest[key] = ["base": base, "source": "unreadable", "file": name, "downloadRequested": "1"]
             log("이번엔 못 읽어 건너뜀(링크·폴더·크기·iCloud 미다운로드): \(name)")
             continue
         }
         let sourceHash = sha256(source)
+        let downloadRequested = manifest[key]?["downloadRequested"]
         switch copyState(destDir, name) {
         case .unreadable:
             manifest[key] = ["base": base, "source": sourceHash, "file": name]
@@ -145,6 +183,7 @@ func runShare(sourcePath: String, destinationPath: String) -> Int32 {
             manifest[key] = ["base": base, "source": sourceHash, "file": name]
             if base != sourceHash { log("원본과 사본이 둘 다 바뀜, 사본 유지: \(name)") }
         }
+        if let downloadRequested { manifest[key]?["downloadRequested"] = downloadRequested }
     }
     for key in manifest.keys where !seen.contains(key) {
         let file = manifest[key]?["file"] ?? key

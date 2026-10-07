@@ -2,26 +2,6 @@
 import Darwin
 import Foundation
 
-enum HelperSystemFolder: CaseIterable {
-    case received, team
-    static let table: [Self: (name: String, marker: String)] = [
-        .received: ("받은 파일", "received"), .team: ("팀 공유", "team")
-    ]
-    static let markerFile = ".steno-folder"
-    static func matches(_ kind: Self, directory: Int32, path: String) -> Bool {
-        let spec = table[kind]!
-        guard URL(fileURLWithPath: path).lastPathComponent == spec.name else { return false }
-        let fd = openat(directory, markerFile, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
-        guard fd >= 0 else { return false }
-        defer { close(fd) }
-        var info = stat()
-        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG,
-              info.st_size == spec.marker.utf8.count else { return false }
-        var bytes = [UInt8](repeating: 0, count: spec.marker.utf8.count)
-        return read(fd, &bytes, bytes.count) == bytes.count && bytes == Array(spec.marker.utf8)
-    }
-}
-
 private let maxBytes: off_t = 20 * 1_048_576
 private let allowedExtensions: Set<String> = [
     "md", "markdown", "txt", "text", "log", "csv", "tsv", "json", "yml", "yaml", "toml",
@@ -107,28 +87,6 @@ private func copyFile(sourceDir: Int32, destinationDir: Int32, name: String) -> 
 }
 
 func runInbox(sourcePath: String, destinationPath: String) -> Int32 {
-    // Create only the final folder under an already-existing canonical parent.
-    if !FileManager.default.fileExists(atPath: destinationPath) {
-        let target = URL(fileURLWithPath: destinationPath)
-        let parent = target.deletingLastPathComponent().path
-        guard let resolvedParent = realpath(parent, nil) else { fail("받은 파일 상위 폴더 없음"); return 1 }
-        let canonicalParent = String(cString: resolvedParent)
-        free(resolvedParent)
-        guard canonicalParent == parent else { fail("받은 파일 상위 경로가 링크임"); return 1 }
-        let parentFD = open(parent, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard parentFD >= 0 else { return 1 }
-        defer { close(parentFD) }
-        guard mkdirat(parentFD, target.lastPathComponent, 0o700) == 0 else { fail("받은 파일 생성 실패"); return 1 }
-        let folderFD = openat(parentFD, target.lastPathComponent, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard folderFD >= 0 else { return 1 }
-        defer { close(folderFD) }
-        let markerFD = openat(folderFD, HelperSystemFolder.markerFile, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard markerFD >= 0 else { fail("받은 파일 표시 생성 실패"); return 1 }
-        defer { close(markerFD) }
-        let marker = Array(HelperSystemFolder.table[.received]!.marker.utf8)
-        guard marker.withUnsafeBytes({ write(markerFD, $0.baseAddress, $0.count) }) == marker.count,
-              fsync(markerFD) == 0 else { fail("받은 파일 표시 쓰기 실패"); return 1 }
-    }
     guard let resolvedDestination = realpath(destinationPath, nil) else { fail("받은 파일 폴더를 확인할 수 없음"); return 1 }
     defer { free(resolvedDestination) }
     guard String(cString: resolvedDestination) == destinationPath else { fail("받은 파일 폴더가 심볼릭 링크이거나 경로가 바뀜"); return 1 }
@@ -138,9 +96,6 @@ func runInbox(sourcePath: String, destinationPath: String) -> Int32 {
     let destinationDir = open(destinationPath, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
     guard destinationDir >= 0 else { fail("받은 파일 폴더 열기 실패"); return 1 }
     defer { close(destinationDir) }
-    guard HelperSystemFolder.matches(.received, directory: destinationDir, path: destinationPath) else {
-        fail("Steno 받은 파일 표시가 없어 이번 주기는 건너뜀"); return 0
-    }
     guard let directory = fdopendir(dup(sourceDir)) else { fail("outbox 읽기 실패"); return 1 }
     defer { closedir(directory) }
     var rejected = false

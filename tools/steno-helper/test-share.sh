@@ -7,7 +7,7 @@ BIN="${STENO_HELPER_TEST_BIN:-$TMP/steno-helper-test}"
 [ -x "$BIN" ] || swiftc -D STENO_HELPER_TESTING "$HERE"/Sources/*.swift -o "$BIN"
 SRC="$TMP/팀 공유"; DST="$TMP/shared"
 mkdir -p "$SRC" "$DST"
-printf team > "$SRC/.steno-folder"
+printf " team\n" > "$SRC/.steno-folder"
 pass=0
 ok() { pass=$((pass + 1)); }
 fail() { echo "FAIL: $1" >&2; exit 1; }
@@ -168,4 +168,24 @@ rm "$SRC/.steno-folder"
 printf private > "$SRC/Private.md"
 sync
 [ ! -e "$DST/Private.md" ] || fail "unmarked user folder shared"; ok
+# An iCloud marker placeholder identifies the folder while its contents are pending.
+: > "$SRC/.steno-folder.icloud"
+sync
+[ "$(cat "$DST/Private.md")" = private ] || fail "cloud marker placeholder"; ok
+rm "$SRC/.steno-folder.icloud"
+printf team > "$SRC/.steno-folder"
+
+# An unreadable cloud source requests downloading once across helper invocations.
+printf pending > "$SRC/Cloud.md"
+: > "$TMP/download-requests"
+STENO_HELPER_TEST_UNREADABLE=Cloud.md STENO_HELPER_TEST_DOWNLOAD_LOG="$TMP/download-requests" sync
+[ "$(cat "$TMP/download-requests")" = Cloud.md ] || fail "cloud download request"; ok
+STENO_HELPER_TEST_UNREADABLE=Cloud.md STENO_HELPER_TEST_DOWNLOAD_LOG="$TMP/download-requests" sync
+[ "$(wc -l < "$TMP/download-requests" | tr -d ' ')" = 1 ] || fail "cloud download requested repeatedly"; ok
+sync
+[ "$(cat "$DST/Cloud.md")" = pending ] || fail "cloud source copied on next readable cycle"; ok
+
+STENO_HELPER_TEST_UNREADABLE=Cloud.md STENO_HELPER_TEST_DOWNLOAD_LOG="$TMP/download-requests" sync
+[ "$(wc -l < "$TMP/download-requests" | tr -d ' ')" = 1 ] || fail "known file re-requested after becoming readable"; ok
+
 echo "PASS: $pass 팀 공유 checks"
