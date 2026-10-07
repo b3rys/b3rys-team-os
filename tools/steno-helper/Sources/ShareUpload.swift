@@ -66,7 +66,7 @@ func runShareUpload(sourcePath: String, libraryPath: String) -> Int32 {
             continue
         }
         // A producer publishes data first, metadata last. Never upload a partial request.
-        if name.hasPrefix(".return-") && (name.hasSuffix(".data") || name.hasSuffix(".base") || name.hasSuffix(".tmp")) || name.hasPrefix(".steno-send.") { continue }
+        if name.hasPrefix(".return-") && (name.hasSuffix(".data") || name.hasSuffix(".base") || name.hasSuffix(".tmp") || name.hasSuffix(".pending")) || name.hasPrefix(".steno-send.") { continue }
         guard !name.hasPrefix("."), validName(name),
               let info = regularSingleLink(source, name), let data = uploadReadRegular(source, name), !data.isEmpty else {
             uploadLog("이름·링크·폴더·크기 조건 거절: \(name)"); failed = true; continue
