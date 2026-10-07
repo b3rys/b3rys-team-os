@@ -6,7 +6,7 @@ private func uploadLog(_ message: String) {
 }
 
 // Every path component must be canonical; O_NOFOLLOW alone only checks the final one.
-private func canonicalDirectory(_ path: String) -> Int32 {
+func canonicalDirectory(_ path: String) -> Int32 {
     guard let resolved = realpath(path, nil) else { return -1 }
     defer { free(resolved) }
     guard String(cString: resolved) == path else { errno = ELOOP; return -1 }
@@ -55,20 +55,18 @@ func runShareUpload(sourcePath: String, libraryPath: String) -> Int32 {
     let destination = openat(library, "팀 공유", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
     guard destination >= 0 else { uploadLog("팀 공유 폴더 열기 실패"); return 1 }
     defer { close(destination) }
-    guard URL(fileURLWithPath: destinationPath).lastPathComponent == "팀 공유",
-          let marker = uploadReadRegular(destination, ".steno-folder"),
-          String(data: marker, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) == "team" else {
+    guard hasTeamMarker(directory: destination, path: destinationPath) else {
         uploadLog("Steno 팀 공유 표시가 없어 건너뜀"); return 0
     }
     guard let names = uploadListNames(source) else { return 1 }
     var failed = false
     for name in names where name != "." && name != ".." {
         if name.hasPrefix(".return-") && name.hasSuffix(".json") {
-            if !consumeReturn(source: source, requestName: name, destination: destination, library: library, libraryPath: libraryPath) { failed = true }
+            if !consumeReturn(source: source, sourcePath: sourcePath, requestName: name, destination: destination, library: library, libraryPath: libraryPath) { failed = true }
             continue
         }
         // A producer publishes data first, metadata last. Never upload a partial request.
-        if name.hasPrefix(".return-") && name.hasSuffix(".data") || name.hasPrefix(".steno-send.") { continue }
+        if name.hasPrefix(".return-") && (name.hasSuffix(".data") || name.hasSuffix(".base") || name.hasSuffix(".tmp")) || name.hasPrefix(".steno-send.") { continue }
         guard !name.hasPrefix("."), validName(name),
               let info = regularSingleLink(source, name), let data = uploadReadRegular(source, name), !data.isEmpty else {
             uploadLog("이름·링크·폴더·크기 조건 거절: \(name)"); failed = true; continue

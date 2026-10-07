@@ -93,8 +93,8 @@ def main():
 
     if not file or "/" in file or file.startswith(".") or "\0" in file:
         die("manifest 의 파일 이름이 올바르지 않음")
-    if len(data) == 0 or len(data) > 20 * 1024 * 1024:
-        die("빈 파일 또는 20MB 초과는 보낼 수 없음")
+    if len(data) > 20 * 1024 * 1024:
+        die("20MB 초과는 보낼 수 없음")
     # Only the helper can access Documents. Publish payload first, request last.
     os.makedirs(OUTBOX, mode=0o700, exist_ok=True)
     if os.path.realpath(OUTBOX) != OUTBOX or os.path.islink(OUTBOX):
@@ -102,9 +102,33 @@ def main():
     identifier = str(uuid.uuid4())
     payload = os.path.join(OUTBOX, ".return-" + identifier + ".data")
     request = os.path.join(OUTBOX, ".return-" + identifier + ".json")
-    metadata = {"file": file, "member": member, "base": base if fresh else None,
-                "sha256": copy_hash}
-    for target, value in [(payload, data), (request, json.dumps(metadata, ensure_ascii=False).encode("utf-8"))]:
+    values = [(payload, data)]
+    has_base_payload = False
+    if isinstance(base, str) and len(base) == 64 and all(c in "0123456789abcdef" for c in base):
+        snapshot = os.path.join(SHARED, ".bases", base + ".data")
+        try:
+            # Reject linked components and bound the read; never read Documents here.
+            if os.path.realpath(snapshot) != snapshot:
+                die("기준 본문 경로가 링크임")
+            fd = os.open(snapshot, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(fd, "rb") as f:
+                info = os.fstat(f.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    die("기준 본문이 일반 파일이 아님")
+                base_data = f.read(20 * 1024 * 1024 + 1)
+            if len(base_data) > 20 * 1024 * 1024 or hashlib.sha256(base_data).hexdigest() != base:
+                die("기준 본문 해시가 맞지 않음")
+            base_data.decode("utf-8")
+            values.append((os.path.join(OUTBOX, ".return-" + identifier + ".base"), base_data))
+            has_base_payload = True
+        except FileNotFoundError:
+            pass  # A legacy manifest can still be returned when the helper's current bytes match base.
+        except UnicodeDecodeError:
+            die("합치기 기준 본문은 UTF-8이어야 함")
+    metadata = {"file": file, "member": member, "base": base,
+                "basePayload": has_base_payload, "sha256": copy_hash}
+    values.append((request, json.dumps(metadata, ensure_ascii=False).encode("utf-8")))
+    for target, value in values:
         temporary = target + ".tmp"
         fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, "wb") as f:
