@@ -26,9 +26,6 @@ func shareable(_ name: String) -> Bool {
 }
 
 private func readRegular(_ dir: Int32, _ name: String) -> Data? {
-    #if STENO_HELPER_TESTING
-    if ProcessInfo.processInfo.environment["STENO_HELPER_TEST_UNREADABLE"] == name { return nil }
-    #endif
     let fd = openat(dir, name, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
     guard fd >= 0 else { return nil }
     defer { close(fd) }
@@ -59,16 +56,6 @@ func hasTeamMarker(directory: Int32, path: String) -> Bool {
 
 private func requestSourceDownload(_ url: URL) {
     do {
-        #if STENO_HELPER_TESTING
-        if let path = ProcessInfo.processInfo.environment["STENO_HELPER_TEST_DOWNLOAD_LOG"] {
-            let file = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
-            defer { try? file.close() }
-            try file.seekToEnd()
-            try file.write(contentsOf: Data((url.lastPathComponent + "\n").utf8))
-            log("iCloud 내려받기 요청: \(url.lastPathComponent)")
-            return
-        }
-        #endif
         try FileManager.default.startDownloadingUbiquitousItem(at: url)
         log("iCloud 내려받기 요청: \(url.lastPathComponent)")
     } catch { log("iCloud 내려받기 요청 실패: \(url.lastPathComponent) (\(error.localizedDescription))") }

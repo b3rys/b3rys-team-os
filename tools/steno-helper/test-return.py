@@ -34,9 +34,8 @@ with tempfile.TemporaryDirectory() as tmp:
     shared = home / 'Library/Application Support/b3os/steno-shared'
     out = home / 'Library/Application Support/b3os/steno-share-outbox'
     shared.mkdir(parents=True)
-    env = dict(os.environ, HOME=str(home), STENO_SHARE_NO_KICK='1', STENO_TEST_PROPOSAL_TIMEOUT='0.2')
+    env = dict(os.environ, HOME=str(home), STENO_SHARE_NO_KICK='1')
     env.pop('STENO_SHARE_TEST_REFRESH', None)
-    env.pop('STENO_TEST_APP_RUNNING', None)
 
     def request(name, original=b'original', edited=b'edited', source=None, base=None, baseline=b'original'):
         (team / name).write_bytes(original)
@@ -107,35 +106,12 @@ with tempfile.TemporaryDirectory() as tmp:
     check(proposal['base'] == 'original' and proposal['proposed'] == 'edited' and uuid.UUID(proposal['id']), 'MCPProposal body/UUID')
     check(not list((state / 'mcp-proposals').iterdir()), 'proposal request/reply cleaned up')
 
-    request('held.md')
-    shared.chmod(0o500)  # App may save successfully while the team's receipt fails.
+    request('held.md'); shared.chmod(0o500)
     thread = threading.Thread(target=reply_once); thread.start()
-    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env); thread.join()
-    shared.chmod(0o700)
-    check(result.returncode != 0 and list(out.glob('.return-*.json')), 'held applied receipt failure retains queue')
-    check(list((state / 'helper-return-journal').glob('*.proposal')), 'held applied has durable completion')
-    for p in (state / 'mcp-proposals').iterdir(): p.unlink()  # App's later sweep must be harmless.
-    (team / 'held.md').write_bytes(b'GD-newer-input')
-    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env)
-    check(result.returncode == 0 and (team / 'held.md').read_bytes() == b'GD-newer-input', 'held receipt retry never reapplies over later GD input')
-    check(not list((state / 'mcp-proposals').iterdir()), 'held receipt retry sends no second proposal')
-    check(not (team / 'held (빌 수정).md').exists(), 'held receipt retry makes no timeout copy')
-    check(not list(out.iterdir()) and not list((state / 'helper-return-journal').glob('*.proposal')), 'held completion consumes queue and journal only after acknowledgment')
-
-    request('held.md')
-    def fail_completion_write():
-        reply_once(before_reply=lambda: (state / 'helper-return-journal').chmod(0o500))
-    thread = threading.Thread(target=fail_completion_write); thread.start()
-    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env); thread.join()
-    (state / 'helper-return-journal').chmod(0o700)
-    check(result.returncode != 0 and list(out.glob('.return-*.json')), 'completion write failure retains pending request')
-    for p in (state / 'mcp-proposals').iterdir(): p.unlink()
-    (team / 'held.md').write_bytes(b'GD-after-uncertain-result')
-    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env)
-    check(result.returncode != 0 and list(out.glob('.return-*.json')), 'pending request without reply remains unresolved')
-    check((team / 'held.md').read_bytes() == b'GD-after-uncertain-result' and not list((state / 'mcp-proposals').iterdir()), 'uncertain result never resubmits or edits newer input')
-    for p in out.iterdir(): p.unlink()
-    for p in (state / 'helper-return-journal').glob('*.proposal'): p.unlink()
+    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env); thread.join(); shared.chmod(0o700)
+    check(result.returncode == 0 and not list(out.iterdir()), 'applied is terminal even if team receipt fails')
+    upload()
+    check(not list((state / 'mcp-proposals').iterdir()) and not (team / 'held (빌 수정).md').exists(), 'applied receipt failure is never replayed')
 
     request('held.md')
     result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env)
@@ -143,34 +119,50 @@ with tempfile.TemporaryDirectory() as tmp:
     check((team / 'held (빌 수정).md').read_bytes() == b'edited', 'held timeout alone produces copy')
     check((team / 'held.md').read_bytes() == b'original', 'held timeout preserves original')
 
-    request('held.md')
-    thread = threading.Thread(target=lambda: reply_once('refused')); thread.start()
-    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env); thread.join()
-    check(result.returncode != 0, 'held refusal is visible failure')
-    check(len(list(out.glob('.return-*.json'))) == 1, 'held refusal preserves queued request')
-    check(not (team / 'held (빌 수정) 2.md').exists(), 'refusal never writes copy')
-    for p in out.iterdir(): p.unlink()
+    for status in ['stale', 'refused', 'saveFailed']:
+        name = status + '.md'
+        record['held'] = [str(team / name)]; record['current'] = str(team / name)
+        (state / 'open-notes.json').write_text(json.dumps(record))
+        request(name)
+        thread = threading.Thread(target=lambda: reply_once(status)); thread.start(); upload(); thread.join()
+        check((team / (status + ' (빌 수정).md')).read_bytes() == b'edited' and not list(out.iterdir()), status + ' makes one copy and consumes queue')
+        upload()
+        check(not (team / (status + ' (빌 수정) 2.md')).exists(), status + ' produces no duplicate on next pass')
 
+    record['held'] = [str(team / 'not-open.md')]; record['current'] = record['held'][0]
+    (state / 'open-notes.json').write_text(json.dumps(record))
+    request('not-open.md', original=b'A\nb', edited=b'a\nB', baseline=b'a\nb')
+    thread = threading.Thread(target=lambda: reply_once('notOpen')); thread.start(); upload(); thread.join()
+    check((team / 'not-open.md').read_bytes() == b'A\nB' and not (team / 'not-open (빌 수정).md').exists(), 'notOpen takes closed merge path')
+
+    request('not-open.md')
+    def reopen():
+        record['updatedAt'] = '2026-10-07T01:00:00Z'
+        (state / 'open-notes.json').write_text(json.dumps(record))
+    thread = threading.Thread(target=lambda: reply_once('notOpen', before_reply=reopen)); thread.start(); upload(); thread.join()
+    check((team / 'not-open.md').read_bytes() == b'original' and (team / 'not-open (빌 수정).md').read_bytes() == b'edited', 'notOpen followed by new held record falls back without original write')
+
+    record['held'] = [str(team / 'unknown-after-reply.md')]; record['current'] = record['held'][0]
+    (state / 'open-notes.json').write_text(json.dumps(record)); request('unknown-after-reply.md')
+    thread = threading.Thread(target=lambda: reply_once('notOpen', before_reply=lambda: (state / 'open-notes.json').write_text('broken')))
+    thread.start(); upload(); thread.join()
+    check((team / 'unknown-after-reply.md').read_bytes() == b'original' and (team / 'unknown-after-reply (빌 수정).md').exists(), 'notOpen followed by unknown state never writes original')
 
     (state / 'open-notes.json').write_text('broken')
     request('broken.md'); upload()
     check((team / 'broken.md').read_bytes() == b'original', 'unreadable state original untouched')
     check((team / 'broken (빌 수정).md').exists(), 'unreadable state produces copy')
-    (state / 'open-notes.json').unlink()
-    request('unknown.md'); upload({'STENO_TEST_APP_RUNNING': '1'})
-    check((team / 'unknown.md').read_bytes() == b'original', 'running app missing state original untouched')
-    check((team / 'unknown (빌 수정).md').exists(), 'running app missing state produces copy')
-
-    record['pid'] = 2147483647
+    record['held'] = []; record['current'] = None
     (state / 'open-notes.json').write_text(json.dumps(record))
-    request('dead.md'); upload()
-    check((team / 'dead.md').read_bytes() == b'edited', 'dead pid permits replacement')
-    (state / 'open-notes.json').unlink()
+    request('closed.md'); upload()
+    check((team / 'closed.md').read_bytes() == b'edited', 'live record without held note permits replacement')
+    request('deleted.md'); (team / 'deleted.md').unlink(); upload()
+    check((team / 'deleted (빌 수정).md').read_bytes() == b'edited' and not list(out.iterdir()), 'deleted original makes copy and consumes queue')
 
     (state / 'ai-edits.json').write_text('broken')
     request('bad-marks.md')
     result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env)
-    check(result.returncode != 0, 'malformed marks visibly refused')
+    check(result.returncode == 0 and (team / 'bad-marks (빌 수정).md').read_bytes() == b'edited', 'malformed marks makes fallback copy')
     check((team / 'bad-marks.md').read_bytes() == b'original', 'malformed marks never overwritten')
     check((state / 'ai-edits.json').read_text() == 'broken', 'existing malformed marks retained')
     for p in out.iterdir(): p.unlink()
@@ -220,32 +212,16 @@ with tempfile.TemporaryDirectory() as tmp:
     state.chmod(0o500)
     result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env)
     state.chmod(0o700)
-    check(result.returncode != 0 and (team / 'marks-permission.md').read_bytes() == b'original', 'marks preparation failure precedes body write')
+    check(result.returncode == 0 and (team / 'marks-permission (빌 수정).md').read_bytes() == b'edited' and not list(out.iterdir()), 'write failure makes one copy and consumes queue')
     upload()
-    check((team / 'marks-permission.md').read_bytes() == b'edited' and '팀 공유/marks-permission.md' in json.loads((state / 'ai-edits.json').read_text()), 'permission retry commits body and marks together')
+    check(not (team / 'marks-permission (빌 수정) 2.md').exists(), 'write failure is terminal, no duplicate copy')
 
-    request('marks-crash.md')
-    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=dict(env, STENO_TEST_FAIL_MARK_COMMIT='1'))
-    check(result.returncode != 0 and (team / 'marks-crash.md').read_bytes() == b'edited', 'simulated interruption follows body commit')
-    check(list((state / 'helper-return-journal').glob('*.json')), 'interrupted commit retains recovery journal')
-    journal_dir = state / 'helper-return-journal'
-    journal_file = next(journal_dir.glob('*.json'))
-    journal_file.chmod(0o000)
-    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env)
-    if journal_file.exists(): journal_file.chmod(0o600)
-    check(result.returncode != 0 and list(out.glob('.return-*.json')), 'unreadable recovery record preserves request')
-    journal_dir.chmod(0o000)
-    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env)
-    journal_dir.chmod(0o700)
-    check(result.returncode != 0 and list(out.glob('.return-*.json')), 'unreadable recovery folder preserves request')
-    raw_journal = journal_file.read_bytes()
-    journal_file.write_text('{broken')
-    result = subprocess.run([binary, '--upload', str(out), str(lib)], env=env)
-    journal_file.write_bytes(raw_journal)
-    check(result.returncode != 0 and list(out.glob('.return-*.json')), 'malformed recovery record preserves request')
-    upload()
-    check('팀 공유/marks-crash.md' in json.loads((state / 'ai-edits.json').read_text()), 'retry repairs marks rather than swallowing noop')
-    check(not list((state / 'helper-return-journal').glob('*.json')), 'finished return removes recovery journal')
+    request('crlf.md', original=b'A\r\nb\r\n', edited=b'a\nB\n', baseline=b'a\r\nb\r\n'); upload()
+    check((team / 'crlf.md').read_bytes() == b'A\r\nB\r\n', 'closed merge preserves CRLF')
+    before_backups = list((state / 'trash').iterdir())
+    before_marks = (state / 'ai-edits.json').read_bytes()
+    request('same-current.md', original=b'edited', edited=b'edited'); upload()
+    check(list((state / 'trash').iterdir()) == before_backups and (state / 'ai-edits.json').read_bytes() == before_marks, 'merge equal to current makes no backup or mark')
 
     (shared / 'noop.md').write_bytes(b'original')
     (shared / '.manifest.json').write_text(json.dumps({'noop.md': {'base': h(b'original'), 'source': h(b'newer')}}))

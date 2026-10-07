@@ -22,13 +22,6 @@ private struct EditMark: Codable {
     let backup: String
     let fileNumber: UInt64?
 }
-private struct EditJournal: Codable {
-    let file: String
-    let originalSHA: String
-    let originalNumber: UInt64
-    let updatedSHA: String
-    let mark: EditMark
-}
 private func encoded<T: Encodable>(_ value: T) -> Data? {
     let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
     encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
@@ -51,11 +44,7 @@ private func processStart(_ pid: Int32) -> Double? {
     return Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000
 }
 private func appMayBeRunning() -> Bool {
-    #if STENO_HELPER_TESTING
-    return ProcessInfo.processInfo.environment["STENO_TEST_APP_RUNNING"] == "1"
-    #else
     return !NSRunningApplication.runningApplications(withBundleIdentifier: "com.b3rys.steno").isEmpty
-    #endif
 }
 private func decoder() -> JSONDecoder {
     let value = JSONDecoder(); value.dateDecodingStrategy = .iso8601; return value
@@ -79,183 +68,92 @@ private func memberValid(_ member: String) -> Bool {
     !member.isEmpty && member.count <= 24 && !member.hasPrefix(".") &&
     !member.contains(where: { $0 == "/" || $0 == "\\" || $0 == ":" || $0.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) })
 }
-private enum ReturnResult { case applied, copy, failed }
-private struct ProposalJournal: Codable {
-    let file: String; let member: String; let base: String?; let submittedSHA: String
-    var applied: Bool
-}
+private enum ReturnResult { case applied, copy, notOpen }
 
-// MCPProposal wire format. Only the app modifies a held note; a refusal never
-// falls through into a direct file write. Unknown state/timeout alone make copies.
-private func propose(state: Int32, id: String, absolute: String, base: String, proposed: String, editor: String, resume: Bool = false) -> ReturnResult {
+// One request, one reply. Only the app changes a held note; failure makes a copy.
+private func propose(state: Int32, absolute: String, base: String, proposed: String, editor: String) -> ReturnResult {
     let folder = childDirectory(state, "mcp-proposals")
-    guard folder >= 0 else { return .failed }
+    guard folder >= 0 else { return .copy }
     defer { close(folder) }
-    let requestName = id + ".json", replyName = id + ".reply.json"
+    let id = UUID().uuidString, requestName = id + ".json", replyName = id + ".reply.json"
+    defer { _ = unlinkat(folder, requestName, 0); _ = unlinkat(folder, replyName, 0) }
     let request: [String: Any] = ["id": id, "path": absolute, "base": base, "proposed": proposed,
-                                 "editor": editor, "createdAt": ISO8601DateFormatter().string(from: Date())]
-    if !resume {
-        guard let raw = try? JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]),
-              uploadWriteAtomically(folder, requestName, raw) else { return .failed }
-        DistributedNotificationCenter.default().postNotificationName(
-            .init("com.b3rys.steno.mcp.proposal"), object: id, userInfo: nil, deliverImmediately: true)
-    }
-    var timeout: Double = 15
-    #if STENO_HELPER_TESTING
-    if let raw = ProcessInfo.processInfo.environment["STENO_TEST_PROPOSAL_TIMEOUT"],
-       let seconds = Double(raw), seconds >= 0.05 && seconds <= 2 { timeout = seconds }
-    #endif
-    let deadline = Date().addingTimeInterval(timeout)
+        "editor": editor, "createdAt": ISO8601DateFormatter().string(from: Date())]
+    guard let raw = try? JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]),
+          uploadWriteAtomically(folder, requestName, raw) else { return .copy }
+    DistributedNotificationCenter.default().postNotificationName(
+        .init("com.b3rys.steno.mcp.proposal"), object: id, userInfo: nil, deliverImmediately: true)
+    let deadline = Date().addingTimeInterval(15)
     while Date() < deadline {
         if let raw = uploadReadRegular(folder, replyName),
            let reply = try? JSONSerialization.jsonObject(with: raw) as? [String: String], let status = reply["status"] {
-            switch status {
-            case "applied": return .applied
-            case "stale", "notOpen", "refused", "saveFailed": return .failed
-            default: return .failed
-            }
+            return status == "applied" ? .applied : status == "notOpen" ? .notOpen : .copy
         }
-        // An interrupted submission is never sent twice. If its durable app
-        // reply is unavailable, retain the queue for explicit recovery.
-        if resume { return .failed }
         Thread.sleep(forTimeInterval: 0.05)
     }
     return .copy
 }
 
-private func heldReturn(_ request: ShareReturnRequest, id: String, data: Data, state: Int32,
-                        absolute: String, base: String, proposed: String, resume: Bool) -> ReturnResult {
-    let journal = childDirectory(state, "helper-return-journal")
-    guard journal >= 0 else { return .failed }
-    defer { close(journal) }
-    var record = ProposalJournal(file: request.file, member: request.member, base: request.base,
-                                 submittedSHA: uploadSHA256(data), applied: false)
-    if resume {
-        guard let raw = uploadReadRegular(journal, id + ".proposal"),
-              let saved = try? decoder().decode(ProposalJournal.self, from: raw),
-              saved.file == record.file, saved.member == record.member, saved.base == record.base,
-              saved.submittedSHA == record.submittedSHA else { return .failed }
-        record = saved
-        if saved.applied { return .applied }
-    } else {
-        guard let raw = encoded(record), uploadWriteAtomically(journal, id + ".proposal", raw) else { return .failed }
-    }
-    let result = propose(state: state, id: id, absolute: absolute, base: base, proposed: proposed, editor: request.member, resume: resume)
-    if case .applied = result {
-        record.applied = true
-        guard let raw = encoded(record), uploadWriteAtomically(journal, id + ".proposal", raw) else { return .failed }
-    }
-    return result
-}
-
-private func applyReturn(_ request: ShareReturnRequest, id: String, data: Data, baseline: Data?, destination: Int32,
+private func applyReturn(_ request: ShareReturnRequest, data: Data, baseline: Data?, destination: Int32,
                          library: Int32, libraryPath: String) -> ReturnResult {
     let state = childDirectory(library, ".steno")
-    guard state >= 0 else { return .failed }
+    guard state >= 0 else { return .copy }
     defer { close(state) }
     let absolute = libraryPath + "/팀 공유/" + request.file
-    // Recovery precedes no-op and editor routing: a previous body commit must not
-    // disappear merely because the next attempt sees those already-written bytes.
-    let journalFolder = openat(state, "helper-return-journal", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-    guard journalFolder >= 0 || errno == ENOENT else { return .failed }
-    if journalFolder >= 0 {
-        defer { close(journalFolder) }
-        var proposalInfo = stat()
-        let hasProposal = fstatat(journalFolder, id + ".proposal", &proposalInfo, AT_SYMLINK_NOFOLLOW) == 0
-        guard hasProposal || errno == ENOENT else { return .failed }
-        if hasProposal {
-            guard (proposalInfo.st_mode & S_IFMT) == S_IFREG, proposalInfo.st_nlink == 1 else { return .failed }
-            return heldReturn(request, id: id, data: data, state: state, absolute: absolute, base: "", proposed: "", resume: true)
-        }
-        var journalInfo = stat()
-        let journalExists = fstatat(journalFolder, id + ".json", &journalInfo, AT_SYMLINK_NOFOLLOW) == 0
-        guard journalExists || errno == ENOENT else { return .failed }
-        if journalExists {
-            guard (journalInfo.st_mode & S_IFMT) == S_IFREG, journalInfo.st_nlink == 1,
-                  let raw = uploadReadRegular(journalFolder, id + ".json") else { return .failed }
-            guard let journal = try? decoder().decode(EditJournal.self, from: raw), journal.file == request.file,
-                  let info = regularSingleLink(destination, request.file), let current = uploadReadRegular(destination, request.file) else { return .failed }
-            if UInt64(info.st_ino) == journal.mark.fileNumber && uploadSHA256(current) == journal.updatedSHA {
-                guard var marks = readMarks(state) else { return .failed }
-                marks["팀 공유/" + request.file] = journal.mark
-                guard let raw = encoded(marks), uploadWriteAtomically(state, "ai-edits.json", raw) else { return .failed }
-                return .applied
-            }
-            // A prepared but uncommitted body may be rebuilt. A body changed after
-            // our commit is never rewritten by a retry of that same request.
-            guard UInt64(info.st_ino) == journal.originalNumber && uploadSHA256(current) == journal.originalSHA else { return .failed }
-            _ = unlinkat(journalFolder, id + ".json", 0)
-            _ = unlinkat(destination, ".helper-body-" + id, 0)
-            _ = unlinkat(state, ".helper-marks-" + id, 0)
-        }
-    }
     let status = noteState(state: state, absolutePath: absolute)
-    if status == .unknown { return .copy }
-    let original = uploadReadRegular(destination, request.file)
-    let baseline = baseline ?? original.flatMap { uploadSHA256($0) == request.base ? $0 : nil }
+    guard status != .unknown, let original = uploadReadRegular(destination, request.file),
+          let originalInfo = regularSingleLink(destination, request.file) else { return .copy }
+    let baseline = baseline ?? (uploadSHA256(original) == request.base ? original : nil)
     guard let baseline, let baseText = String(data: baseline, encoding: .utf8),
-          let proposedText = String(data: data, encoding: .utf8) else { return .failed }
+          let proposedText = String(data: data, encoding: .utf8) else { return .copy }
+    var appSaysClosed = false
+    let openRecord = uploadReadRegular(state, "open-notes.json")
     if status == .held {
-        return heldReturn(request, id: id, data: data, state: state, absolute: absolute, base: baseText, proposed: proposedText, resume: false)
+        switch propose(state: state, absolute: absolute, base: baseText, proposed: proposedText, editor: request.member) {
+        case .applied: return .applied
+        case .copy: return .copy
+        case .notOpen: appSaysClosed = true
+        }
     }
-    guard let original, let originalInfo = regularSingleLink(destination, request.file),
-          let currentText = String(data: original, encoding: .utf8),
-          let merged = try? mergeLines(base: baseText, current: currentText, proposed: proposedText) else { return .failed }
-    let updated = Data(merged.utf8)
-    guard updated.count <= 20 * 1_048_576 else { return .failed }
+    guard let currentText = String(data: original, encoding: .utf8),
+          let merged = try? mergeLines(base: baseText, current: currentText, proposed: proposedText) else { return .copy }
+    let text = currentText.contains("\r\n") ? merged.replacingOccurrences(of: "\n", with: "\r\n") : merged
+    let updated = Data(text.utf8)
+    guard updated.count <= 20 * 1_048_576 else { return .copy }
     if updated == original { return .applied }
-    guard var marks = readMarks(state) else { return .failed }
-    let journal = childDirectory(state, "helper-return-journal")
-    guard journal >= 0 else { return .failed }
-    defer { close(journal) }
+    guard var marks = readMarks(state) else { return .copy }
     let trash = childDirectory(state, "trash")
-    guard trash >= 0 else { return .failed }
+    guard trash >= 0 else { return .copy }
     defer { close(trash) }
     let now = Date(), entryName = "\(Int64(Date().timeIntervalSince1970))-\(UUID().uuidString)"
-    guard mkdirat(trash, entryName, 0o700) == 0 else { return .failed }
+    guard mkdirat(trash, entryName, 0o700) == 0 else { return .copy }
     let entry = openat(trash, entryName, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-    guard entry >= 0 else { return .failed }
+    guard entry >= 0 else { return .copy }
     defer { close(entry) }
     var keepBackup = false
     defer {
         if !keepBackup {
-            _ = unlinkat(entry, request.file, 0)
-            _ = unlinkat(entry, request.file + ".steno-meta.json", 0)
+            _ = unlinkat(entry, request.file, 0); _ = unlinkat(entry, request.file + ".steno-meta.json", 0)
             _ = unlinkat(trash, entryName, AT_REMOVEDIR)
         }
     }
     let meta: [String: Any] = ["originalPath": absolute, "deletedAt": ISO8601DateFormatter().string(from: now),
-                               "memos": [], "memoSeen": [:], "memoAnchor": [:], "editedBy": request.member]
+        "memos": [], "memoSeen": [:], "memoAnchor": [:], "editedBy": request.member]
     guard let metaData = try? JSONSerialization.data(withJSONObject: meta, options: [.sortedKeys]),
           uploadWriteAtomically(entry, request.file, original),
-          uploadWriteAtomically(entry, request.file + ".steno-meta.json", metaData) else { return .failed }
-    let bodyName = ".helper-body-" + id, marksName = ".helper-marks-" + id
-    guard uploadWriteAtomically(destination, bodyName, updated), let staged = regularSingleLink(destination, bodyName) else { return .failed }
-    var retainStages = false
-    defer {
-        if !retainStages { _ = unlinkat(destination, bodyName, 0); _ = unlinkat(state, marksName, 0) }
-    }
-    let mark = EditMark(editor: request.member, at: now,
-        backup: libraryPath + "/.steno/trash/" + entryName + "/" + request.file, fileNumber: UInt64(staged.st_ino))
-    marks["팀 공유/" + request.file] = mark
-    let record = EditJournal(file: request.file, originalSHA: uploadSHA256(original), originalNumber: UInt64(originalInfo.st_ino),
-                             updatedSHA: uploadSHA256(updated), mark: mark)
-    guard let marksData = encoded(marks), let journalData = encoded(record),
-          uploadWriteAtomically(state, marksName, marksData),
-          uploadWriteAtomically(journal, id + ".json", journalData) else { return .failed }
-    guard regularSingleLink(destination, request.file)?.st_ino == originalInfo.st_ino,
-          uploadReadRegular(destination, request.file) == original, noteState(state: state, absolutePath: absolute) == .closed else {
-        _ = unlinkat(journal, id + ".json", 0); return .failed
-    }
-    guard renameat(destination, bodyName, destination, request.file) == 0 else {
-        _ = unlinkat(journal, id + ".json", 0); return .failed
-    }
-    retainStages = true
+          uploadWriteAtomically(entry, request.file + ".steno-meta.json", metaData) else { return .copy }
+    guard uploadWriteAtomically(destination, request.file, updated, beforeRename: {
+        let latestState = noteState(state: state, absolutePath: absolute)
+        return regularSingleLink(destination, request.file)?.st_ino == originalInfo.st_ino &&
+        uploadReadRegular(destination, request.file) == original &&
+        (latestState == .closed || (latestState == .held && appSaysClosed && openRecord != nil &&
+         uploadReadRegular(state, "open-notes.json") == openRecord))
+    }) else { return .copy }
     keepBackup = true
-    #if STENO_HELPER_TESTING
-    if ProcessInfo.processInfo.environment["STENO_TEST_FAIL_MARK_COMMIT"] == "1" { return .failed }
-    #endif
-    guard renameat(state, marksName, state, "ai-edits.json") == 0 else { return .failed }
+    marks["팀 공유/" + request.file] = EditMark(editor: request.member, at: now,
+        backup: libraryPath + "/.steno/trash/" + entryName + "/" + request.file,
+        fileNumber: regularSingleLink(destination, request.file).map { UInt64($0.st_ino) })
+    guard let raw = encoded(marks), uploadWriteAtomically(state, "ai-edits.json", raw) else { return .copy }
     return .applied
 }
 
@@ -275,29 +173,15 @@ func consumeReturn(source: Int32, sourcePath: String, requestName: String, desti
               uploadSHA256(value) == request.base else { return false }
         baseline = value; baseInfo = info
     }
-    switch applyReturn(request, id: id, data: data, baseline: baseline, destination: destination, library: library, libraryPath: libraryPath) {
-    case .failed: return false
-    case .copy:
+    switch applyReturn(request, data: data, baseline: baseline, destination: destination, library: library, libraryPath: libraryPath) {
+    case .copy, .notOpen:
         let ns = request.file as NSString
         let name = "\(ns.deletingPathExtension) (\(request.member) 수정).\(ns.pathExtension)"
         guard publishNew(destination, name, data) != nil else { return false }
     case .applied:
-        guard acknowledgeReturn(sourcePath: sourcePath, file: request.file, data: data) else { return false }
+        _ = acknowledgeReturn(sourcePath: sourcePath, file: request.file, data: data)
     }
     guard removeUnchanged(source, requestName, requestInfo, raw), removeUnchanged(source, payload, payloadInfo, data) else { return false }
     if let baseInfo, let baseline, !removeUnchanged(source, baseName, baseInfo, baseline) { return false }
-    let state = openat(library, ".steno", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-    if state >= 0 {
-        defer { close(state) }
-        let journal = openat(state, "helper-return-journal", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        if journal >= 0 {
-            _ = unlinkat(journal, id + ".json", 0); _ = unlinkat(journal, id + ".proposal", 0); close(journal)
-        }
-        let proposals = openat(state, "mcp-proposals", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        if proposals >= 0 {
-            _ = unlinkat(proposals, id + ".json", 0); _ = unlinkat(proposals, id + ".reply.json", 0); close(proposals)
-        }
-        _ = unlinkat(state, ".helper-marks-" + id, 0)
-    }
     return true
 }

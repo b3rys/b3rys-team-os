@@ -1,6 +1,6 @@
 import Foundation
 
-// Same deterministic line/hunk rules as Steno web/src/line-merge.js.
+// Same deterministic line/hunk rules as Steno web/src/team-share-merge.js.
 enum LineMergeError: Error { case tooLarge }
 private struct LineHunk {
     let start: Int
@@ -52,7 +52,7 @@ private func lineHunks(_ base: [String], _ changed: [String]) throws -> [LineHun
     return result
 }
 private func overlaps(_ a: LineHunk, _ b: LineHunk) -> Bool {
-    if a.start == a.end && b.start == b.end { return a.start == b.start }
+    if a.start == a.end && b.start == b.end { return false }
     if a.start == a.end { return b.start < a.start && a.start < b.end }
     if b.start == b.end { return a.start < b.start && b.start < a.end }
     return max(a.start, b.start) < min(a.end, b.end)
@@ -67,9 +67,11 @@ func mergeLines(base: String, current: String, proposed: String) throws -> Strin
     let currentHunks = try lineHunks(lines, current.components(separatedBy: "\n"))
     let proposedHunks = try lineHunks(lines, proposed.components(separatedBy: "\n"))
     let retained = currentHunks.filter { old in !proposedHunks.contains { overlaps(old, $0) } }
-    let all = (retained + proposedHunks).sorted { a, b in
-        a.start != b.start ? a.start < b.start : a.end < b.end
-    }
+    let all = (retained + proposedHunks).enumerated().sorted { a, b in
+        if a.element.start != b.element.start { return a.element.start < b.element.start }
+        if a.element.end != b.element.end { return a.element.end < b.element.end }
+        return a.offset < b.offset // current insertion precedes proposed at the same point
+    }.map { $0.element }
     var output: [String] = [], position = 0
     for hunk in all {
         output.append(contentsOf: lines[position..<hunk.start])

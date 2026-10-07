@@ -131,15 +131,29 @@ printf team > "$SRC/.steno-folder"
 
 # An unreadable cloud source requests downloading once across helper invocations.
 printf pending > "$SRC/Cloud.md"
-: > "$TMP/download-requests"
-STENO_HELPER_TEST_UNREADABLE=Cloud.md STENO_HELPER_TEST_DOWNLOAD_LOG="$TMP/download-requests" sync
-[ "$(cat "$TMP/download-requests")" = Cloud.md ] || fail "cloud download request"; ok
-STENO_HELPER_TEST_UNREADABLE=Cloud.md STENO_HELPER_TEST_DOWNLOAD_LOG="$TMP/download-requests" sync
-[ "$(wc -l < "$TMP/download-requests" | tr -d ' ')" = 1 ] || fail "cloud download requested repeatedly"; ok
+chmod 000 "$SRC/Cloud.md"
+sync
+python3 - "$DST/.manifest.json" <<'CHECK'
+import json,sys
+assert json.load(open(sys.argv[1]))['Cloud.md']['downloadRequested'] == '1'
+CHECK
+ok
+sync
+python3 - "$DST/.manifest.json" <<'CHECK'
+import json,sys
+assert json.load(open(sys.argv[1]))['Cloud.md']['downloadRequested'] == '1'
+CHECK
+ok
+chmod 600 "$SRC/Cloud.md"
 sync
 [ "$(cat "$DST/Cloud.md")" = pending ] || fail "cloud source copied on next readable cycle"; ok
-
-STENO_HELPER_TEST_UNREADABLE=Cloud.md STENO_HELPER_TEST_DOWNLOAD_LOG="$TMP/download-requests" sync
-[ "$(wc -l < "$TMP/download-requests" | tr -d ' ')" = 1 ] || fail "known file re-requested after becoming readable"; ok
+chmod 000 "$SRC/Cloud.md"
+sync
+python3 - "$DST/.manifest.json" <<'CHECK'
+import json,sys
+assert json.load(open(sys.argv[1]))['Cloud.md']['downloadRequested'] == '1'
+CHECK
+ok
+chmod 600 "$SRC/Cloud.md"
 
 echo "PASS: $pass 팀 공유 checks"
