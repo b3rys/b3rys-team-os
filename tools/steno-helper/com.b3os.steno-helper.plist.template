@@ -9,7 +9,7 @@
   <dict><key>STENO_LIBRARY</key><string>__STENO_LIBRARY__</string></dict>
   <key>RunAtLoad</key><true/>
   <key>WatchPaths</key>
-  <array><string>__B3OS_HOME__/Library/Application Support/b3os/steno-outbox</string></array>
+  <array><string>__B3OS_HOME__/Library/Application Support/b3os/steno-outbox</string><string>__B3OS_HOME__/Library/Application Support/b3os/steno-share-outbox</string></array>
   <key>StartInterval</key><integer>30</integer>
   <key>StandardOutPath</key><string>__B3OS_HOME__/Library/Logs/b3os-steno-helper.log</string>
   <key>StandardErrorPath</key><string>__B3OS_HOME__/Library/Logs/b3os-steno-helper.log</string>

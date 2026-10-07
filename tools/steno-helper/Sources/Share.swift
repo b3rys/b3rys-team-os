@@ -26,7 +26,7 @@ func shareable(_ name: String) -> Bool {
 }
 
 private func readRegular(_ dir: Int32, _ name: String) -> Data? {
-    let fd = openat(dir, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+    let fd = openat(dir, name, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
     guard fd >= 0 else { return nil }
     defer { close(fd) }
     var st = stat()
@@ -41,6 +41,24 @@ private func readRegular(_ dir: Int32, _ name: String) -> Data? {
         guard data.count <= maxBytes else { return nil }
     }
     return data
+}
+
+func hasTeamMarker(directory: Int32, path: String) -> Bool {
+    guard URL(fileURLWithPath: path).lastPathComponent == "팀 공유" else { return false }
+    if let data = readRegular(directory, ".steno-folder"), let marker = String(data: data, encoding: .utf8) {
+        return marker.trimmingCharacters(in: .whitespacesAndNewlines) == "team"
+    }
+    return [".steno-folder.icloud", "..steno-folder.icloud"].contains { name in
+        var info = stat()
+        return fstatat(directory, name, &info, AT_SYMLINK_NOFOLLOW) == 0 && (info.st_mode & S_IFMT) == S_IFREG
+    }
+}
+
+private func requestSourceDownload(_ url: URL) {
+    do {
+        try FileManager.default.startDownloadingUbiquitousItem(at: url)
+        log("iCloud 내려받기 요청: \(url.lastPathComponent)")
+    } catch { log("iCloud 내려받기 요청 실패: \(url.lastPathComponent) (\(error.localizedDescription))") }
 }
 
 private func sha256(_ data: Data) -> String {
@@ -102,10 +120,24 @@ func runShare(sourcePath: String, destinationPath: String) -> Int32 {
         log("팀 공유 폴더 열기 실패(errno \(errno), 문서 폴더 권한 확인)"); return 1
     }
     defer { close(sourceDir) }
+    guard hasTeamMarker(directory: sourceDir, path: sourcePath) else {
+        log("Steno 팀 공유 표시가 없어 이번 주기는 건너뜀"); return 0
+    }
     let destDir = open(destinationPath, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
     guard destDir >= 0 else { log("팀 폴더 열기 실패(링크이거나 없음)"); return 1 }
     defer { close(destDir) }
 
+    let basesDir = childDirectory(destDir, ".bases")
+    guard basesDir >= 0 else { log("기준 본문 폴더를 열지 못함"); return 1 }
+    defer { close(basesDir) }
+
+    var accepted: [String: String] = [:]
+    var receiptInfo = stat()
+    if fstatat(destDir, ".returns.json", &receiptInfo, AT_SYMLINK_NOFOLLOW) == 0 {
+        guard let raw = readRegular(destDir, ".returns.json"),
+              let parsed = try? JSONSerialization.jsonObject(with: raw) as? [String: String] else { return 1 }
+        accepted = parsed
+    } else if errno != ENOENT { return 1 }
     var manifest: Manifest = [:]
     if let raw = readRegular(destDir, manifestName),
        let parsed = try? JSONSerialization.jsonObject(with: raw) as? Manifest { manifest = parsed }
@@ -118,14 +150,26 @@ func runShare(sourcePath: String, destinationPath: String) -> Int32 {
         let key = name.precomposedStringWithCanonicalMapping
         // 목록에 있으면 "있는 노트"다. 못 읽어도 사본을 지우지 않는다.
         seen.insert(key)
-        let base = manifest[key]?["base"] ?? ""
+        let lastReturn = manifest[key]?["lastReturn"]
+        if accepted[key] != nil && accepted[key] == lastReturn { accepted[key] = nil }
+        let acceptedHash = accepted[key]
+        let base = acceptedHash ?? manifest[key]?["base"] ?? ""
         guard let source = readRegular(sourceDir, name) else {
             // iCloud 미다운로드 등: 지금 원본을 모르므로 되돌려 넣기가 원본 자리에 쓰지 못하게 표시한다.
-            manifest[key] = ["base": base, "source": "unreadable", "file": name]
+            if manifest[key]?["downloadRequested"] != "1" {
+                var info = stat()
+                if fstatat(sourceDir, name, &info, AT_SYMLINK_NOFOLLOW) == 0, (info.st_mode & S_IFMT) == S_IFREG {
+                    requestSourceDownload(URL(fileURLWithPath: sourcePath).appendingPathComponent(name))
+                }
+            }
+            manifest[key] = ["base": base, "source": "unreadable", "file": name, "downloadRequested": "1"]
+            if let lastReturn { manifest[key]?["lastReturn"] = lastReturn }
             log("이번엔 못 읽어 건너뜀(링크·폴더·크기·iCloud 미다운로드): \(name)")
             continue
         }
         let sourceHash = sha256(source)
+        let downloadRequested = manifest[key]?["downloadRequested"]
+        var consumeAccepted = false
         switch copyState(destDir, name) {
         case .unreadable:
             manifest[key] = ["base": base, "source": sourceHash, "file": name]
@@ -133,15 +177,28 @@ func runShare(sourcePath: String, destinationPath: String) -> Int32 {
         case .absent:
             if !writeAtomically(destDir, name, source) { log("사본 쓰기 실패: \(name)"); failed = true; continue }
             manifest[key] = ["base": sourceHash, "source": sourceHash, "file": name]
+            consumeAccepted = true
         case .hash(let copyHash) where copyHash == base || copyHash == sourceHash:
             // 팀원이 안 고쳤거나 이미 원본과 같다 → 원본으로 맞춘다.
             if copyHash != sourceHash, !writeAtomically(destDir, name, source) { log("사본 쓰기 실패: \(name)"); failed = true; continue }
             manifest[key] = ["base": sourceHash, "source": sourceHash, "file": name]
+            consumeAccepted = true
         case .hash:
+            consumeAccepted = true
             // 팀원이 고친 사본이 아직 되돌아가지 않았다 → 덮지 않고 지금 원본 해시만 적는다.
             manifest[key] = ["base": base, "source": sourceHash, "file": name]
             if base != sourceHash { log("원본과 사본이 둘 다 바뀜, 사본 유지: \(name)") }
         }
+        if manifest[key]?["base"] == sourceHash {
+            guard uploadWriteAtomically(basesDir, sourceHash + ".data", source) else {
+                log("합치기 기준 본문 보관 실패: \(name)"); failed = true; continue
+            }
+        }
+        if consumeAccepted, let acceptedHash {
+            manifest[key]?["lastReturn"] = acceptedHash
+            accepted[key] = nil
+        } else if let lastReturn { manifest[key]?["lastReturn"] = lastReturn }
+        if let downloadRequested { manifest[key]?["downloadRequested"] = downloadRequested }
     }
     for key in manifest.keys where !seen.contains(key) {
         let file = manifest[key]?["file"] ?? key
@@ -157,5 +214,13 @@ func runShare(sourcePath: String, destinationPath: String) -> Int32 {
     }
     guard let encoded = try? JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys]),
           writeAtomically(destDir, manifestName, encoded) else { log("manifest 쓰기 실패"); return 1 }
+    guard let receipts = try? JSONSerialization.data(withJSONObject: accepted, options: [.sortedKeys]),
+          uploadWriteAtomically(destDir, ".returns.json", receipts) else { return 1 }
+    let referenced = Set(manifest.values.compactMap { $0["base"] }.map { $0 + ".data" })
+    if let snapshots = uploadListNames(basesDir) {
+        for name in snapshots where name.count == 69 && name.hasSuffix(".data") && !referenced.contains(name) {
+            if regularSingleLink(basesDir, name) != nil { _ = unlinkat(basesDir, name, 0) }
+        }
+    }
     return failed ? 1 : 0
 }

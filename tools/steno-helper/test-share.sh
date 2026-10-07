@@ -7,6 +7,7 @@ BIN="${STENO_HELPER_TEST_BIN:-$TMP/steno-helper-test}"
 [ -x "$BIN" ] || swiftc -D STENO_HELPER_TESTING "$HERE"/Sources/*.swift -o "$BIN"
 SRC="$TMP/팀 공유"; DST="$TMP/shared"
 mkdir -p "$SRC" "$DST"
+printf " team\n" > "$SRC/.steno-folder"
 pass=0
 ok() { pass=$((pass + 1)); }
 fail() { echo "FAIL: $1" >&2; exit 1; }
@@ -93,72 +94,66 @@ ln -s "$DST" "$TMP/linked"
 if "$BIN" --share "$SRC" "$TMP/linked" 2>/dev/null; then fail "linked destination"; fi; ok
 "$BIN" --share "$TMP/없음" "$DST" || fail "missing source should be ok"; ok
 
-# 11. 되돌려 넣기: 원본 그대로면 edit_note, 바뀌었으면 create_note "(빌 수정)", 같으면 할 일 없음
-RH="$TMP/home"; RS="$RH/Library/Application Support/b3os/steno-shared"; mkdir -p "$RS"
-cat > "$TMP/fake-mcp" <<'STUB'
-#!/usr/bin/env python3
-import json, os, sys
-for line in sys.stdin:
-    m = json.loads(line)
-    if m.get("method") == "tools/call" and m["params"]["name"] == "edit_note" and os.environ.get("FAKE_REFUSE_EDIT"):
-        with open(os.environ["FAKE_LOG"], "a") as f: f.write(json.dumps(m["params"], ensure_ascii=False) + "\n")
-        print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {"isError": True, "content": [{"type": "text", "text": "stale"}]}}))
-    elif m.get("method") == "tools/call":
-        with open(os.environ["FAKE_LOG"], "a") as f: f.write(json.dumps(m["params"], ensure_ascii=False) + "\n")
-        print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {"content": [{"type": "text", "text": "ok"}]}}))
-    elif m.get("method") == "tools/list":
-        props = {"path": {}, "content": {}}
-        if not os.environ.get("FAKE_NO_HASH"): props["expected_sha256"] = {}
-        print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {"tools": [{"name": "edit_note", "inputSchema": {"properties": props}}]}}))
-    elif "id" in m:
-        print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {}}))
-STUB
-chmod +x "$TMP/fake-mcp"
-h() { printf %s "$1" | shasum -a 256 | cut -d' ' -f1; }
-ret() { HOME="$RH" STENO_MCP="$TMP/fake-mcp" STENO_SHARE_NO_KICK=1 FAKE_LOG="$TMP/log" "$HERE/steno-share-return.py" "$@" >/dev/null; }
-printf edited > "$RS/AAA.md"
-printf '{"AAA.md":{"base":"%s","source":"%s"}}' "$(h orig)" "$(h orig)" > "$RS/.manifest.json"
-: > "$TMP/log"; ret AAA.md --as 빌
-grep -q '"name": "edit_note"' "$TMP/log" && grep -q '"path": "팀 공유/AAA.md"' "$TMP/log" || fail "return edit"; ok
-grep -q "\"expected_sha256\": \"$(h orig)\"" "$TMP/log" || fail "return expected hash"; ok
-: > "$TMP/log"; FAKE_REFUSE_EDIT=1 ret AAA.md --as 빌
-grep -q edit_note "$TMP/log" && grep -q '"name": "AAA (빌 수정)"' "$TMP/log" && grep -q '"format": "md"' "$TMP/log" || fail "edit refused falls back to copy"; ok
-# 순서 경합: 사본 v1(=기준) 상태에서 return 시작 → 도우미가 사본·기준을 v2 로 갱신 → 옛 v1 을 보내면 안 됨
-printf v1 > "$RS/RACE.md"
-printf '{"RACE.md":{"base":"%s","source":"%s"}}' "$(h v1)" "$(h v1)" > "$RS/.manifest.json"
-: > "$TMP/log"
-STENO_SHARE_TEST_REFRESH="printf v2 > '$RS/RACE.md'; printf '{\"RACE.md\":{\"base\":\"$(h v2)\",\"source\":\"$(h v2)\"}}' > '$RS/.manifest.json'" \
-  ret RACE.md --as 빌
-[ ! -s "$TMP/log" ] || fail "race: stale copy sent"; ok
-# 사본이 기준 판 그대로면(고친 것 없음) 아무것도 보내지 않음
-printf '{"RACE.md":{"base":"%s","source":"%s"}}' "$(h v2)" "$(h v3)" > "$RS/.manifest.json"
-: > "$TMP/log"; ret RACE.md --as 빌; [ ! -s "$TMP/log" ] || fail "unchanged copy sends nothing"; ok
-printf '{"AAA.md":{"base":"%s","source":"%s"}}' "$(h orig)" "$(h orig)" > "$RS/.manifest.json"
-# Steno 가 expected_sha256 을 모르면(스키마에 없음) edit_note 를 부르지 않고 사본
-: > "$TMP/log"; FAKE_NO_HASH=1 ret AAA.md --as 빌
-! grep -q edit_note "$TMP/log" && grep -q create_note "$TMP/log" || fail "no hash support makes copy"; ok
-# 원본을 못 읽은 상태(source=unreadable)면 원본 자리에 쓰지 않음
-printf '{"AAA.md":{"base":"%s","source":"unreadable"}}' "$(h orig)" > "$RS/.manifest.json"
-: > "$TMP/log"; ret AAA.md --as 빌
-! grep -q edit_note "$TMP/log" && grep -q create_note "$TMP/log" || fail "unreadable source no edit"; ok
-# md·html 아닌 파일은 따로 만들기를 거절하고 아무것도 쓰지 않음, htm 은 html 형식
-printf x > "$RS/BBB.txt"; printf '{"BBB.txt":{"base":"a","source":"b"}}' > "$RS/.manifest.json"
-: > "$TMP/log"; if ret BBB.txt --as 빌 2>/dev/null; then fail "txt copy refused"; fi; [ ! -s "$TMP/log" ] || fail "txt no call"; ok
-printf x > "$RS/CCC.htm"; printf '{"CCC.htm":{"base":"a","source":"b"}}' > "$RS/.manifest.json"
-: > "$TMP/log"; ret CCC.htm --as 빌; grep -q '"format": "html"' "$TMP/log" || fail "htm format"; ok
-printf '{"AAA.md":{"base":"%s","source":"%s"}}' "$(h orig)" "$(h orig)" > "$RS/.manifest.json"
-printf '{"AAA.md":{"base":"%s","source":"%s"}}' "$(h orig)" "$(h gdnew)" > "$RS/.manifest.json"
-: > "$TMP/log"; ret AAA.md --as 빌
-grep -q '"name": "create_note"' "$TMP/log" && grep -q '"name": "AAA (빌 수정)"' "$TMP/log" && ! grep -q edit_note "$TMP/log" || fail "return conflict copy"; ok
-printf '{"AAA.md":{"base":"%s","source":"%s"}}' "$(h orig)" "$(h edited)" > "$RS/.manifest.json"
-: > "$TMP/log"; ret AAA.md --as 빌
-[ ! -s "$TMP/log" ] || fail "return no-op"; ok
-printf '{}' > "$RS/.manifest.json"
-: > "$TMP/log"; ret AAA.md --as 빌
-grep -q create_note "$TMP/log" || fail "return unknown base makes copy"; ok
-if ret ../x.md --as 빌 2>/dev/null; then fail "return bad name"; fi; ok
-for bad in "a/b" "../x" ".hidden" "$(printf 'a\nb')" "1234567890123456789012345"; do
-  if ret AAA.md --as "$bad" 2>/dev/null; then fail "return bad member $bad"; fi; ok
-done
+# New upload: bytes/SHA, collision suffix and stripped execute bits.
+LIB="$TMP/library"; OUT="$TMP/share-outbox"
+mkdir -p "$LIB/팀 공유" "$OUT"; printf team > "$LIB/팀 공유/.steno-folder"
+printf upload > "$OUT/new.md"; chmod 700 "$OUT/new.md"
+"$BIN" --upload "$OUT" "$LIB"
+[ "$(shasum -a 256 "$LIB/팀 공유/new.md" | cut -d' ' -f1)" = "$(printf upload | shasum -a 256 | cut -d' ' -f1)" ] || fail "new upload SHA"; ok
+[ "$(stat -f %Lp "$LIB/팀 공유/new.md")" = 600 ] || fail "upload mode"; ok
+[ ! -e "$OUT/new.md" ] || fail "upload consumes source"; ok
+printf second > "$OUT/new.md"; "$BIN" --upload "$OUT" "$LIB"
+[ "$(cat "$LIB/팀 공유/new.md")" = upload ] && [ "$(cat "$LIB/팀 공유/new 2.md")" = second ] || fail "upload collision"; ok
+ln -s "$TMP/outside.md" "$OUT/link.md"; mkdir "$OUT/folder.md"
+dd if=/dev/zero of="$OUT/big.md" bs=1048576 count=21 2>/dev/null
+if "$BIN" --upload "$OUT" "$LIB" 2>/dev/null; then fail "unsafe upload accepted"; fi
+for n in link.md folder.md big.md; do [ ! -e "$LIB/팀 공유/$n" ] || fail "unsafe upload $n"; ok; done
+rm "$OUT/link.md" "$OUT/big.md"; rmdir "$OUT/folder.md"
+SEND_HOME="$TMP/send-home"; mkdir -p "$SEND_HOME"
+printf send > "$TMP/send.md"
+HOME="$SEND_HOME" "$HERE/../../skills/b3os-team-inbox/scripts/steno-send.sh" "$TMP/send.md" >/dev/null
+[ -f "$SEND_HOME/Library/Application Support/b3os/steno-share-outbox/send.md" ] || fail "send defaults to team"; ok
+
+python3 "$HERE/test-return.py" "$BIN" "$HERE/steno-share-return.py"
+
+
+# Same-named user folders must not be shared.
+rm "$SRC/.steno-folder"
+printf private > "$SRC/Private.md"
+sync
+[ ! -e "$DST/Private.md" ] || fail "unmarked user folder shared"; ok
+# An iCloud marker placeholder identifies the folder while its contents are pending.
+: > "$SRC/.steno-folder.icloud"
+sync
+[ "$(cat "$DST/Private.md")" = private ] || fail "cloud marker placeholder"; ok
+rm "$SRC/.steno-folder.icloud"
+printf team > "$SRC/.steno-folder"
+
+# An unreadable cloud source requests downloading once across helper invocations.
+printf pending > "$SRC/Cloud.md"
+chmod 000 "$SRC/Cloud.md"
+sync
+python3 - "$DST/.manifest.json" <<'CHECK'
+import json,sys
+assert json.load(open(sys.argv[1]))['Cloud.md']['downloadRequested'] == '1'
+CHECK
+ok
+sync
+python3 - "$DST/.manifest.json" <<'CHECK'
+import json,sys
+assert json.load(open(sys.argv[1]))['Cloud.md']['downloadRequested'] == '1'
+CHECK
+ok
+chmod 600 "$SRC/Cloud.md"
+sync
+[ "$(cat "$DST/Cloud.md")" = pending ] || fail "cloud source copied on next readable cycle"; ok
+chmod 000 "$SRC/Cloud.md"
+sync
+python3 - "$DST/.manifest.json" <<'CHECK'
+import json,sys
+assert json.load(open(sys.argv[1]))['Cloud.md']['downloadRequested'] == '1'
+CHECK
+ok
+chmod 600 "$SRC/Cloud.md"
 
 echo "PASS: $pass 팀 공유 checks"

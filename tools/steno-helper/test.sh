@@ -7,3 +7,9 @@ export STENO_HELPER_TEST_BIN="$TMP/steno-helper-test"
 swiftc -D STENO_HELPER_TESTING "$HERE"/Sources/*.swift -o "$STENO_HELPER_TEST_BIN"
 "$HERE/test-inbox.sh"
 "$HERE/test-share.sh"
+
+if [ -n "${STENO_MERGE_FIXTURES:-}" ]; then
+  "$STENO_HELPER_TEST_BIN" --merge-table "$STENO_MERGE_FIXTURES"
+else
+  echo "SKIP: JS/Swift shared merge table — set STENO_MERGE_FIXTURES to Steno web/test/fixtures/team-share-merge.json" >&2
+fi
