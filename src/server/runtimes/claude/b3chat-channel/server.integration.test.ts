@@ -109,7 +109,7 @@ describe.skipIf(!HAS_DEPS)('b3chat 채널 플러그인 — 가짜 b3chat 서버 
       dmPolicy: 'allowlist',
       allowFrom: ['10', '11'],
       ownerChat: '10',
-      groups: {},
+      groups: { '40': { requireMention: true, allowFrom: ['1'] } },
     }))
 
     const env: Record<string, string> = {}
@@ -232,6 +232,24 @@ describe.skipIf(!HAS_DEPS)('b3chat 채널 플러그인 — 가짜 b3chat 서버 
     expect(note.params.meta.image_path).toBeUndefined()
     await Bun.sleep(300)
     expect(channelNotes().length).toBe(n0 + 1)
+  }, 15000)
+
+  test('positive-ID group: exact plain-text mention is delivered without Telegram entities', async () => {
+    const n0 = channelNotes().length
+    const from = { id: 1, is_bot: false, first_name: 'GD', username: 'gd' }
+    pushUpdate({ message_id: 701, chat: { id: 40, type: 'group' }, from, text: '@claudemember_other not ours' })
+    pushUpdate({ message_id: 702, chat: { id: 40, type: 'group' }, from, text: 'no mention' })
+    pushUpdate({ message_id: 703, chat: { id: 40, type: 'group' }, from: { ...from, id: 2 }, text: '@claudemember denied sender' })
+    pushUpdate({ message_id: 704, chat: { id: 41, type: 'group' }, from, text: '@claudemember denied room' })
+    pushUpdate({ message_id: 705, chat: { id: 40, type: 'group' }, from, text: '@claudemember group ping' })
+    const note = await waitFor(() => channelNotes()[n0], 'group notification')
+    expect(note.params.content).toBe('@claudemember group ping')
+    expect(note.params.meta).toMatchObject({ chat_id: '40', chat_type: 'group', message_id: '705' })
+    await Bun.sleep(300)
+    expect(channelNotes().length).toBe(n0 + 1)
+    const reply = await rpc('tools/call', { name: 'reply', arguments: { chat_id: '40', text: 'group reply', reply_to: '705' } })
+    expect(reply.result.isError).toBeUndefined()
+    expect(calls.find(c => c.method === 'sendMessage' && c.body.text === 'group reply')?.body.reply_parameters).toEqual({ message_id: 705 })
   }, 15000)
 
   test('받은 사진: 글(캡션)만, image_path 없음', async () => {

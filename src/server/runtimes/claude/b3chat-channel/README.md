@@ -13,7 +13,11 @@ Claude Code 세션을 b3chat(팀 자체 메신저, 텔레그램 호환 봇 API)�
 - `access.json`
   - `allowFrom` — 받고 보낼 수 있는 **방 id(chat.id)** 목록. b3chat 의 1:1 방 id 는 사람 id 와 다르다.
   - `ownerChat` — 권한 요청을 받을 방 id. 없으면 권한 요청을 보내지 않는다.
-  - `dmPolicy`·`groups` 등 나머지 필드는 원본과 같다.
+  - `groups` — 그룹 방 id별 접근 정책. 런처는 등록된 `channel.allow_from` 방마다 기본 `requireMention: true`를 만들며, 기존 개별 정책은 보존한다.
+  - `dmPolicy` 등 나머지 필드는 원본과 같다.
+
+그룹에서는 정확한 `@봇username` 멘션 또는 봇 글에 대한 답장을 요구한다.
+b3chat의 일반 글 멘션은 Telegram의 `entities` 메타데이터가 없어도 인식한다.
 
 `B3CHAT_ACCESS_MODE` 는 기본 `static` 이다(페어링 없음, `access.json` 은 시작할 때 한 번 읽는다).
 
@@ -45,7 +49,10 @@ Claude Code 세션을 b3chat(팀 자체 메신저, 텔레그램 호환 봇 API)�
 ```
 
 `B3CHAT_STATE_DIR=<상태 폴더> claude --dangerously-load-development-channels server:b3chat` 로 띄운다. 시작할 때 개발용 채널 경고 창이 뜨는데,
-시작 스크립트가 그 창을 자동으로 확인한다. 런처·시작 스크립트 연결은 다음 단계에서 한다(이 폴더에는 아직 없다).
+`../start-telegram-channel.sh`가 로컬 b3chat 개발용 채널 경고만 확인한다.
+등록된 팀원의 `channel.kind`가 `b3chat`이면 런처는 해당 상태 폴더와 프로젝트 MCP 설정을 준비하고,
+`../launch-b3chat.py`로 상속된 `TELEGRAM_*` 환경변수를 제거한 Claude 프로세스를 실행한다.
+로그인·작업 폴더 신뢰·도구 권한 창은 자동으로 승인하지 않는다.
 
 ## 불러오는 법 ② 플러그인 (정식 경로, 아직 안 함)
 
@@ -62,3 +69,6 @@ bun test
 
 `b3chat.test.ts` 는 접근 판단·주소 검사·첨부 오류 단위 테스트, `server.integration.test.ts` 는 가짜 b3chat 서버(127.0.0.1 임의 포트)에 대고
 플러그인 `.mcp.json` 의 `b3chat` 항목 그대로(MCP stdio) 실행하는 통합 테스트다. 저장소 루트 `tsc` 대상에서는 빠져 있다(`grammy` 는 이 폴더에만 설치).
+
+`../b3chatLifecycle.test.ts`는 별도 HOME·등록 파일·멤버 폴더에서 필수 설정, 가짜 토큰 교체와 복원,
+그룹 접근 초기 설정, 페르소나의 채널별 도구 선택과 SOUL 보존을 검증한다. 실제 서비스나 자격증명은 사용하지 않는다.

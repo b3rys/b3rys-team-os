@@ -39,7 +39,7 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, 
 import { homedir } from 'os'
 import { execFileSync } from 'child_process'
 import { join, extname, sep } from 'path'
-import { parseApiBase, isDmAllowed, permissionTargets, assertNoFiles, ATTACHMENT_UNSUPPORTED } from './b3chat.ts'
+import { parseApiBase, isDmAllowed, mentionsBot, permissionTargets, assertNoFiles, ATTACHMENT_UNSUPPORTED } from './b3chat.ts'
 
 // b3chat: [1] 상태 폴더는 필수 — 텔레그램 기본 경로로 떨어지면 실제 텔레그램 상태를 건드린다.
 if (!process.env.B3CHAT_STATE_DIR) {
@@ -341,6 +341,7 @@ function dmCommandGate(ctx: Context): { access: Access; senderId: string } | nul
 function isMentioned(ctx: Context, extraPatterns?: string[]): boolean {
   const entities = ctx.message?.entities ?? ctx.message?.caption_entities ?? []
   const text = ctx.message?.text ?? ctx.message?.caption ?? ''
+  if (mentionsBot(text, botUsername)) return true
   for (const e of entities) {
     if (e.type === 'mention') {
       const mentioned = text.slice(e.offset, e.offset + e.length)

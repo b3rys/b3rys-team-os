@@ -31,6 +31,13 @@ export function isDmAllowed(allowFrom: string[], chatType: string | undefined, c
   return chatType === 'private' && allowFrom.includes(chatId)
 }
 
+// b3chat updates carry plain text without Telegram mention entities.
+export function mentionsBot(text: string, username: string): boolean {
+  if (!username) return false
+  const escaped = username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(^|[^A-Za-z0-9_])@${escaped}(?=$|[^A-Za-z0-9_])`, 'i').test(text)
+}
+
 // 권한 요청은 ownerChat 한 방에만 보낸다. 없으면 아무 데도 보내지 않는다.
 export function permissionTargets(access: { ownerChat?: string }): string[] {
   return access.ownerChat ? [access.ownerChat] : []

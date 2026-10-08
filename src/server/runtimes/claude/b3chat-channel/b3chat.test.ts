@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { ATTACHMENT_UNSUPPORTED, assertNoFiles, isDmAllowed, parseApiBase, permissionTargets } from './b3chat.ts'
+import { ATTACHMENT_UNSUPPORTED, assertNoFiles, isDmAllowed, mentionsBot, parseApiBase, permissionTargets } from './b3chat.ts'
 
 describe('isDmAllowed — b3chat DM 허용은 chat.id 로 정한다', () => {
   test('private 방 id 가 allowFrom 에 있으면 허용', () => {
@@ -16,6 +16,18 @@ describe('isDmAllowed — b3chat DM 허용은 chat.id 로 정한다', () => {
   })
   test('빈 allowFrom 은 전부 거절', () => {
     expect(isDmAllowed([], 'private', '10')).toBe(false)
+  })
+})
+
+describe('plain-text group mentions without Telegram entities', () => {
+  test('matches an exact username with punctuation and case folding', () => {
+    for (const text of ['@cleobot hello', 'hello @CLEOBOT!', '(@cleobot)']) expect(mentionsBot(text, 'cleobot')).toBe(true)
+  })
+  test('rejects another bot, longer username and email-like text', () => {
+    for (const text of ['@other hello', '@cleobot_other', '@cleobot2', 'mail@cleobot', 'cleobot']) expect(mentionsBot(text, 'cleobot')).toBe(false)
+    expect(mentionsBot('@', '')).toBe(false)
+    expect(mentionsBot('@aXb', 'a.b')).toBe(false)
+    expect(mentionsBot('@a.b', 'a.b')).toBe(true)
   })
 })
 
