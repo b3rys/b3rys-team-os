@@ -213,8 +213,9 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     const row = db.query("SELECT * FROM b3chat_teammate_job WHERE member_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(id) as JobRow | null;
     if (!row) return fail(c, 404, "not_found", "remove");
     if (row.state === "removed") return c.json({ ok: true, member_id: id, state: "removed" }, 200);
-    if (row.state === "removing" || removing.has(id)) return c.json({ ok: true, member_id: id, state: "removing" }, 202);
-    if (row.state !== "ready" && row.state !== "failed" && row.state !== "remove_failed") return fail(c, 409, "teammate_busy", "remove");
+    if (removing.has(id)) return c.json({ ok: true, member_id: id, state: "removing" }, 202);
+    // removing 인데 도는 작업이 없다 = 서버가 중간에 재시작됐다. 다시 시작한다(퇴사 API 는 이미 지운 팀원에 404 → removed).
+    if (row.state !== "ready" && row.state !== "failed" && row.state !== "remove_failed" && row.state !== "removing") return fail(c, 409, "teammate_busy", "remove");
     removing.add(id);
     setJob(row.id, { state: "removing", stage: "remove", code: null, retryable: 0 });
     void removeMember(row.id, id)

@@ -336,6 +336,18 @@ describe("지우기 — 앱에서 만든 팀원만, 퇴사 API 한 경로로", (
     const j = await s.waitJob(await s.post(BODY));
     expect(j.state).toBe("ready");
   });
+  test("재시작으로 removing 에 남은 작업 → 다시 보내면 이어서 끝낸다", async () => {
+    const s = setup();
+    const jobId = await ready(s);
+    s.deps.db.query("UPDATE b3chat_teammate_job SET state = 'removing' WHERE id = ?").run(jobId);
+    const fresh = createB3chatTeammateRoutes(s.deps);
+    const done = s.settle(jobId);
+    const r = await fresh.request("/members/b3chat/member/testmate", { method: "DELETE", headers: { "x-b3chat-link": KEY } });
+    expect(r.status).toBe(202);
+    await done;
+    expect((await s.byMember("testmate")).state).toBe("removed");
+    expect(s.calls.filter((x) => x.startsWith("remove:")).length).toBe(1);
+  });
   test("인증 없으면 403 — 퇴사 API 안 부름", async () => {
     const s = setup();
     await ready(s);
