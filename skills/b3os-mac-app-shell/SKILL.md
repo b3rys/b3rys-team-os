@@ -65,6 +65,7 @@ description: 웹 대시보드/웹앱을 Apple 네이티브 셸(.app)로 빠르�
 
 - [`references/viewport-and-gotchas.md`](references/viewport-and-gotchas.md) — **WebView 창 채움 버그(위 벌어짐/아래 잘림) 회귀주의**. NonIntrinsicWebView + autoresizing pin 3종세트. 제거 금지.
 - [`references/build-sign-notarize.md`](references/build-sign-notarize.md) — 패키징 스크립트, ad-hoc vs Developer ID, notarization, 미서명 테스트 배포.
+- [`references/fast-test-delivery.md`](references/fast-test-delivery.md) — 기능 추가·버그 수정을 공증본 zip 으로 건네는 한 명령 흐름(시험 ‖ 공증 동시, 받은 쪽 검증, 태그 하나만 push). 실측 약 9분.
 
 ## 근거 / evidence
 
