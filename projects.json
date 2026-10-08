@@ -18,15 +18,5 @@
     "kanbanPrefix": "[b3chat]",
     "excludeSections": ["킵"],
     "tokenEnv": "GITHUB_TOKEN_B3CHAT"
-  },
-  {
-    "id": "tally",
-    "name": "tally",
-    "repo": "b3rys/tally",
-    "branch": "main",
-    "docs": { "readme": "README.md", "design": "DESIGN.md", "features": "FEATURES.md", "todo": "TODO.md" },
-    "kanbanPrefix": "[tally]",
-    "excludeSections": ["킵"],
-    "tokenEnv": "GITHUB_TOKEN_TALLY"
   }
 ]
