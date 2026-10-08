@@ -2,10 +2,10 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { Hono } from "hono";
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createB3chatTeammateRoutes, pidsWithCodexHome, residueOf, setModelLine, type B3chatTeammateDeps, type Residue } from "./b3chatTeammate";
+import { archiveWorkspaceAt, createB3chatTeammateRoutes, pidsWithCodexHome, residueOf, setModelLine, type B3chatTeammateDeps, type Residue } from "./b3chatTeammate";
 import { decideWindowRequest, type BridgeWindowRequest } from "../runtimes/codex/bridgeWindow";
 import { isDirectLocal, linkSecretMatches } from "../lib/b3chatLink";
 
@@ -440,5 +440,38 @@ describe("남은 것 세기 — 순수 단계", () => {
       "  104 bun other.ts HOME=/h",
     ].join("\n");
     expect(pidsWithCodexHome(ps, "/h/.codex-agents/mate")).toEqual([101, 102]);
+  });
+  test("CODEX_HOME 은 그 변수만 — 이름에 CODEX_HOME 이 들어간 다른 변수는 아니다(앞에 와도·혼자 있어도)", () => {
+    const ps = [
+      "  201 bun bridge.ts ORIGINAL_CODEX_HOME=/fake/mate2 CODEX_HOME=/fake/mate",
+      "  202 bun other.ts OTHER_CODEX_HOME=/fake/mate",
+    ].join("\n");
+    expect(pidsWithCodexHome(ps, "/fake/mate")).toEqual([201]);
+  });
+  test("확인 명령이 실패하면 없음이 아니라 unverified", () => {
+    const boom = () => { throw new Error("ps failed"); };
+    expect(residueOf("zzgone", { ...none, envPids: boom })).toEqual(["unverified"]);
+    expect(residueOf("zzgone", { ...none, launchdLoaded: boom, envPids: boom })).toEqual(["unverified"]);
+  });
+  test("슬랙 토큰 파일도 남은 것으로 센다", () => {
+    const prev = process.env.SLACK_TOKENS_DIR;
+    process.env.SLACK_TOKENS_DIR = "/zz-slack";
+    try {
+      expect(residueOf("zzgone", { ...none, exists: (p) => p.startsWith("/zz-slack/") && p.includes("zzgone") })).toEqual(["files"]);
+    } finally {
+      if (prev === undefined) delete process.env.SLACK_TOKENS_DIR; else process.env.SLACK_TOKENS_DIR = prev;
+    }
+  });
+  test("작업폴더 보관 — 기본 위치가 아니어도 그 id 이름의 폴더면 옮기고, 이름이 다르면 손대지 않는다", () => {
+    const root = mkdtempSync(join(tmpdir(), "b3arch-"));
+    const ws = join(root, "custom", "zzmate");
+    mkdirSync(ws, { recursive: true });
+    const dest = archiveWorkspaceAt("zzmate", ws, join(root, ".archived"));
+    expect(dest && existsSync(dest)).toBe(true);
+    expect(existsSync(ws)).toBe(false);
+    const other = join(root, "custom", "someone");
+    mkdirSync(other, { recursive: true });
+    expect(archiveWorkspaceAt("zzmate", other, join(root, ".archived"))).toBeNull();
+    expect(existsSync(other)).toBe(true);
   });
 });
