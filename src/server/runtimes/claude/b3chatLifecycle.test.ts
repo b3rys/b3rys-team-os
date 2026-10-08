@@ -116,8 +116,11 @@ describe("Claude b3chat lifecycle — scratch HOME subprocesses", () => {
       seedB3chatAccess(state, channel);
       assert.deepEqual(JSON.parse(read(path)).groups["40"], { requireMention: true, allowFrom: ["1"] });
       assert.deepEqual(JSON.parse(read(path)).allowFrom, ["12", "40"]);
+      seedB3chatAccess(state, { ...channel, allowFrom: ["12"] });
+      assert.deepEqual(JSON.parse(read(path)).groups, { "12": { requireMention: true } });
+      assert.deepEqual(JSON.parse(read(path)).allowFrom, ["12"]);
       const once = read(path);
-      seedB3chatAccess(state, channel);
+      seedB3chatAccess(state, { ...channel, allowFrom: ["12"] });
       assert.equal(read(path), once);
     `);
   });

@@ -13,11 +13,14 @@ Claude Code 세션을 b3chat(팀 자체 메신저, 텔레그램 호환 봇 API)�
 - `access.json`
   - `allowFrom` — 받고 보낼 수 있는 **방 id(chat.id)** 목록. b3chat 의 1:1 방 id 는 사람 id 와 다르다.
   - `ownerChat` — 권한 요청을 받을 방 id. 없으면 권한 요청을 보내지 않는다.
-  - `groups` — 그룹 방 id별 접근 정책. 런처는 등록된 `channel.allow_from` 방마다 기본 `requireMention: true`를 만들며, 기존 개별 정책은 보존한다.
+  - `groups` — 그룹 방 id별 접근 정책. 런처는 현재 `channel.allow_from` 방만으로 다시 구성한다. 기본은 `requireMention: true`이며, 남는 방의 기존 개별 정책만 보존한다. 목록에서 빠진 방은 제거한다.
   - `dmPolicy` 등 나머지 필드는 원본과 같다.
 
 그룹에서는 정확한 `@봇username` 멘션 또는 봇 글에 대한 답장을 요구한다.
 b3chat의 일반 글 멘션은 Telegram의 `entities` 메타데이터가 없어도 인식한다.
+
+권한 승인·거부는 `ownerChat`의 허용된 1:1 방에서 실제 미결 요청에 답할 때만 처리한다.
+글 답장과 버튼 응답 모두 같은 조건을 적용하며, 처리한 요청의 반복 응답은 무시한다.
 
 `B3CHAT_ACCESS_MODE` 는 기본 `static` 이다(페어링 없음, `access.json` 은 시작할 때 한 번 읽는다).
 

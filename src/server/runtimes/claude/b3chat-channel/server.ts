@@ -456,10 +456,13 @@ const mcp = new Server(
 // Stores full permission details for "See more" expansion keyed by request_id.
 const pendingPermissions = new Map<string, { tool_name: string; description: string; input_preview: string }>()
 
-// Receive permission_request from CC → format → send to all allowlisted DMs.
-// Groups are intentionally excluded — the security thread resolution was
-// "single-user mode for official plugins." Anyone in access.allowFrom
-// already passed explicit pairing; group members haven't.
+function canResolvePermission(access: Access, chatType: string | undefined, chatId: string, requestId: string): boolean {
+  return access.ownerChat === chatId
+    && isDmAllowed(access.allowFrom, chatType, chatId)
+    && pendingPermissions.has(requestId)
+}
+
+// Permission requests go only to ownerChat; other conversations cannot resolve them.
 mcp.setNotificationHandler(
   z.object({
     method: z.literal('notifications/claude/channel/permission_request'),
@@ -773,7 +776,7 @@ bot.command('status', async ctx => {
 
 // Inline-button handler for permission requests. Callback data is
 // `perm:allow:<id>`, `perm:deny:<id>`, or `perm:more:<id>`.
-// Security mirrors the text-reply path: allowFrom must contain the sender.
+// Both reply paths require the owner's private room and an unresolved request.
 bot.on('callback_query:data', async ctx => {
   const data = ctx.callbackQuery.data
   const m = /^perm:(allow|deny|more):([a-km-z]{5})$/.exec(data)
@@ -782,7 +785,7 @@ bot.on('callback_query:data', async ctx => {
     return
   }
   const access = loadAccess()
-  if (!isDmAllowed(access.allowFrom, ctx.chat?.type, String(ctx.chat?.id ?? ''))) { // b3chat: [6]
+  if (!canResolvePermission(access, ctx.chat?.type, String(ctx.chat?.id ?? ''), m[2]!)) {
     await ctx.answerCallbackQuery({ text: 'Not authorized.' }).catch(() => {})
     return
   }
@@ -945,16 +948,17 @@ async function handleInbound(
   const chat_id = String(ctx.chat!.id)
   const msgId = ctx.message?.message_id
 
-  // Permission-reply intercept: if this looks like "yes xxxxx" for a
-  // pending permission request, emit the structured event instead of
-  // relaying as chat. The sender is already gate()-approved at this point
-  // (non-allowlisted senders were dropped above), so we trust the reply.
+  // Conversation access does not confer permission approval authority.
+  // Resolve only a live request from the owner's private room, once.
   const permMatch = PERMISSION_REPLY_RE.exec(text)
   if (permMatch) {
+    const request_id = permMatch[2]!.toLowerCase()
+    if (!canResolvePermission(access, ctx.chat?.type, chat_id, request_id)) return
+    pendingPermissions.delete(request_id)
     void mcp.notification({
       method: 'notifications/claude/channel/permission',
       params: {
-        request_id: permMatch[2]!.toLowerCase(),
+        request_id,
         behavior: permMatch[1]!.toLowerCase().startsWith('y') ? 'allow' : 'deny',
       },
     })

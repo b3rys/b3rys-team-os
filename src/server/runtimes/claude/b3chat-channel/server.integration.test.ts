@@ -93,6 +93,7 @@ describe.skipIf(!HAS_DEPS)('b3chat 채널 플러그인 — 가짜 b3chat 서버 
           case 'editMessageText':
             return ok({ message_id: Number(body.message_id), date: 0, chat: { id: Number(body.chat_id), type: 'private' }, from: BOT, text: body.text })
           case 'setMessageReaction':
+          case 'answerCallbackQuery':
           case 'sendChatAction':
           case 'deleteWebhook':
           case 'setMyCommands':
@@ -261,6 +262,54 @@ describe.skipIf(!HAS_DEPS)('b3chat 채널 플러그인 — 가짜 b3chat 서버 
     expect(calls.some(c => c.method === 'getFile')).toBe(false)
   }, 15000)
 
+  test('permission text: only owner private room can resolve a pending request once', async () => {
+    const permissions = () => lines.filter(l => l.method === 'notifications/claude/channel/permission')
+    const from = { id: 1, is_bot: false, first_name: 'GD' }
+    const before = calls.length
+    const count = permissions().length
+    send({ jsonrpc: '2.0', method: 'notifications/claude/channel/permission_request', params: { request_id: 'abcdf', tool_name: 'Bash', description: 'test only', input_preview: '{}' } })
+    await waitFor(() => calls.slice(before).some(c => c.method === 'sendMessage' && String(c.body.text).includes('yes abcdf')), 'text permission request')
+    pushUpdate({ message_id: 801, chat: { id: 11, type: 'private' }, from, text: 'yes abcdf' })
+    pushUpdate({ message_id: 802, chat: { id: 40, type: 'group' }, from, text: 'yes abcdf', reply_to_message: { message_id: 800, from: BOT, chat: { id: 40, type: 'group' }, date: 0, text: 'permission' } })
+    pushUpdate({ message_id: 803, chat: { id: 10, type: 'private' }, from, text: 'yes zzzzz' })
+    const n0 = channelNotes().length
+    pushUpdate({ message_id: 804, chat: { id: 10, type: 'private' }, from, text: 'text permission barrier' })
+    await waitFor(() => channelNotes().slice(n0).find(n => n.params.content === 'text permission barrier'), 'text rejection barrier')
+    expect(permissions().length).toBe(count)
+    pushUpdate({ message_id: 805, chat: { id: 10, type: 'private' }, from, text: 'yes abcdf' })
+    await waitFor(() => permissions()[count], 'owner text permission')
+    expect(permissions()[count].params).toEqual({ request_id: 'abcdf', behavior: 'allow' })
+    pushUpdate({ message_id: 806, chat: { id: 10, type: 'private' }, from, text: 'yes abcdf' })
+    pushUpdate({ message_id: 807, chat: { id: 10, type: 'private' }, from, text: 'text replay barrier' })
+    await waitFor(() => channelNotes().find(n => n.params.content === 'text replay barrier'), 'text replay barrier')
+    expect(permissions().length).toBe(count + 1)
+  }, 15000)
+
+  test('permission callback: owner private room and actual pending request are both required', async () => {
+    const permissions = () => lines.filter(l => l.method === 'notifications/claude/channel/permission')
+    const from = { id: 1, is_bot: false, first_name: 'GD' }
+    const callback = (id: string, chatId: number, type: string, code: string, behavior = 'allow') => updates.push({ update_id: nextUpdateId++, callback_query: {
+      id, from, chat_instance: 'test', data: `perm:${behavior}:${code}`,
+      message: { message_id: 900, date: 0, chat: { id: chatId, type }, from: BOT, text: 'permission' },
+    } })
+    const before = calls.length
+    const count = permissions().length
+    send({ jsonrpc: '2.0', method: 'notifications/claude/channel/permission_request', params: { request_id: 'bbcde', tool_name: 'Bash', description: 'callback test', input_preview: '{}' } })
+    await waitFor(() => calls.slice(before).some(c => c.method === 'sendMessage' && String(c.body.text).includes('yes bbcde')), 'callback permission request')
+    callback('other-private', 11, 'private', 'bbcde')
+    callback('group', 40, 'group', 'bbcde')
+    callback('owner-id-group', 10, 'group', 'bbcde')
+    callback('unknown', 10, 'private', 'zzzzz')
+    await waitFor(() => calls.slice(before).filter(c => c.method === 'answerCallbackQuery').length >= 4, 'rejected callbacks')
+    expect(permissions().length).toBe(count)
+    callback('owner', 10, 'private', 'bbcde', 'deny')
+    await waitFor(() => permissions()[count], 'owner callback')
+    expect(permissions()[count].params).toEqual({ request_id: 'bbcde', behavior: 'deny' })
+    callback('replay', 10, 'private', 'bbcde')
+    await waitFor(() => calls.slice(before).find(c => c.method === 'answerCallbackQuery' && c.body.callback_query_id === 'replay'), 'callback replay')
+    expect(permissions().length).toBe(count + 1)
+  }, 15000)
+
   test('권한 요청은 ownerChat 한 곳에만, 글 답장 "yes <code>" 로 승인', async () => {
     const before = calls.length
     send({ jsonrpc: '2.0', method: 'notifications/claude/channel/permission_request', params: { request_id: 'abcde', tool_name: 'Bash', description: 'ls 실행', input_preview: '{}' } })
@@ -272,7 +321,7 @@ describe.skipIf(!HAS_DEPS)('b3chat 채널 플러그인 — 가짜 b3chat 서버 
     expect(sm[0].body.text).toContain('yes abcde')
 
     pushUpdate({ message_id: 606, chat: { id: 10, type: 'private' }, from: { id: 1, is_bot: false, first_name: 'GD' }, text: 'yes abcde' })
-    const perm = await waitFor(() => lines.find(l => l.method === 'notifications/claude/channel/permission'), 'permission reply')
+    const perm = await waitFor(() => lines.find(l => l.method === 'notifications/claude/channel/permission' && l.params.request_id === 'abcde'), 'permission reply')
     expect(perm.params).toEqual({ request_id: 'abcde', behavior: 'allow' })
   }, 15000)
 })

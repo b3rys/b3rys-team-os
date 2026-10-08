@@ -48,10 +48,10 @@ export function seedB3chatAccess(stateDir: string, channel: MemberChannel): void
   try { current = JSON.parse(readFileSync(path, "utf8")); }
   catch (error: any) { if (error.code !== "ENOENT") throw error; }
   if (!current || typeof current !== "object" || Array.isArray(current)) throw new Error("invalid b3chat access.json");
-  const groups = { ...current.groups };
+  const groups: Record<string, unknown> = {};
   // The registry lists allowed room IDs, including positive-ID group rooms.
   // Require a mention by default; preserve any explicitly configured policy.
-  for (const id of channel.allowFrom ?? []) groups[id] ??= { requireMention: true };
+  for (const id of channel.allowFrom ?? []) groups[id] = current.groups?.[id] ?? { requireMention: true };
   // Registry is authoritative for static b3chat access. No Telegram pairing/group inheritance.
   atomicChannelWrite(path, JSON.stringify({ ...current, dmPolicy: "allowlist",
     allowFrom: channel.allowFrom ?? [], ownerChat: channel.ownerChat ?? undefined,
