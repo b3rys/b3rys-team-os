@@ -16,6 +16,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
+import { copyChannelDescriptorFixture, isolatedHookEnvironment } from "./hookTestFixtures";
 
 const HOOK = join(import.meta.dir, "../../../../hooks/telegram-owner-gate.py");
 const GROUP = "-1009999999999"; // 테스트 전용 가짜 값
@@ -36,17 +37,18 @@ afterEach(() => {
  *  ★막는 축을 재는 테스트가 조용히 무의미해진다.★ (실제로 그렇게 한 번 통과할 뻔했다.)
  */
 async function gateBlocks(chatId: string, text: string, routeUrl: string, env: Record<string, string> = {}): Promise<boolean> {
+  const root = mkdtempSync(join(tmpdir(), "b3os-gate-env-"));
+  dirs.push(root);
   const prompt = `<channel source="plugin:telegram:telegram" chat_id="${chatId}" message_id="8199">${text}</channel>`;
   const child = execFileAsync("python3", [HOOK], {
     encoding: "utf-8",
-    env: {
-      ...process.env,
+    env: isolatedHookEnvironment(root, {
       OWNER_GATE_SELF: "steve",
       OWNER_GATE_GROUP: GROUP,
       OWNER_GATE_ROUTE_URL: routeUrl,
       B3OS_ROOT: "",
       ...env,
-    },
+    }),
   });
   child.child.stdin?.end(JSON.stringify({ prompt }));
   const { stdout } = await child;
@@ -120,8 +122,10 @@ describe("owner-gate — 배포 위치에서 단톡방 id 를 구한다", () => 
     writeFileSync(join(root, ".env"), `TEAM_GROUP_ID=${GROUP}\n`);
     const dst = join(hooks, "telegram-owner-gate.py");
     copyFileSync(HOOK, dst);
+    copyChannelDescriptorFixture(hooks);
     const py = [
       "import importlib.util,sys",
+      `sys.path.insert(0, ${JSON.stringify(hooks)})`,
       `s=importlib.util.spec_from_file_location("g", ${JSON.stringify(dst)})`,
       "m=importlib.util.module_from_spec(s)",
       "try: s.loader.exec_module(m)",
@@ -129,7 +133,7 @@ describe("owner-gate — 배포 위치에서 단톡방 id 를 구한다", () => 
       "sys.stdout.write(m._team_group())",
     ].join("\n");
     return execFileSync("python3", ["-c", py], {
-      env: { ...process.env, OWNER_GATE_GROUP: "", B3OS_ROOT: withRoot ? root : "" },
+      env: isolatedHookEnvironment(base, { OWNER_GATE_GROUP: "", B3OS_ROOT: withRoot ? root : "" }),
       encoding: "utf-8",
     });
   }

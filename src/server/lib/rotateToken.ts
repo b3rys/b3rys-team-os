@@ -8,6 +8,7 @@ import { REPO_ROOT } from "./personaTemplates";
 import { TELEGRAM_API_BASE, memberChannel } from "./memberChannel";
 import type { AgentRecord } from "../types";
 import { waitForEssentialSettings } from "./runtimeEssentials";
+import { claudeChannel } from "../runtimes/claude/channelConfig";
 
 const HOME = process.env.HOME ?? "";
 const GETME_TIMEOUT_MS = 8_000;
@@ -85,7 +86,8 @@ export function resolveTokenStore(runtime: string, id: string, agent: AgentRecor
     return plainFileStore(`${REPO_ROOT}/var/secrets/${id}.bot-token`);
   }
   if (runtime === "claude_channel") {
-    return envFileStore(`${HOME}/.claude/channels/telegram-${id}/.env`, "TELEGRAM_BOT_TOKEN");
+    const channel = claudeChannel(id, memberChannel(agent));
+    return envFileStore(`${HOME}/.claude/channels/${channel.kind}-${id}/.env`, channel.tokenEnv);
   }
   if (runtime === "openclaw") {
     // openclaw 파일기반 계정(devon/lui/forin 등) = ~/.openclaw/credentials/telegram-<account>-token.txt. account=openclaw_agent_id ?? id.

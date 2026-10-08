@@ -5,6 +5,8 @@ import { createHash } from "node:crypto";
 import { closeSync, existsSync, fstatSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import type { DmMessageInput } from "../../db/dmCapture";
+import { claudeChannel } from "./channelConfig";
+import type { MemberChannel } from "../../lib/memberChannel";
 
 
 // 세션 jsonl은 append-only(새 이벤트가 파일 끝에 추가)라, 끝 일부만 읽어도 최신 DM을 다 잡는다.
@@ -88,17 +90,22 @@ function textOf(content: unknown): string {
  *  가 있으면 버렸다 — 그래서 ★팀장이 룰 스니펫을 붙여넣기만 해도 그 DM 이 통째로 유실됐다.★
  *  ("이 <external_message> 태그 파싱 어떻게 해?" → 기록 안 됨). 실제로 팀장은 룰·포맷을 자주 붙여넣는다.
  *  진짜 버스 메시지는 ★<external_message 로 시작★ 하므로, 시작 위치로만 판정한다. */
-function inboundFromChannelText(text: string, gdChat: string): { mid: string; body: string } | null {
+function inboundFromChannelText(text: string, gdChat: string, sources: string[], kind: string): { mid: string; body: string } | null {
   const head = text.trimStart();
   if (!head.startsWith("<channel")) return null; // 버스 주입·팀 메시지는 <channel 로 시작하지 않는다
-  if (!head.includes(`chat_id="${gdChat}"`)) return null;
-  if (!head.includes('source="plugin:telegram')) return null;
+  const tag = head.match(/^<channel\b[^>]*>/)?.[0] ?? "";
+  if (!tag.includes(`chat_id="${gdChat}"`)) return null;
+  const tagSource = tag.match(/\bsource="([^"]+)"/)?.[1];
+  if (!tagSource || !sources.includes(tagSource)) return null;
+  if (kind === "b3chat" && !tag.includes('chat_type="private"')) return null;
   const mid = head.match(/message_id="(\d+)"/)?.[1];
   const body = (head.match(/>\s*([\s\S]*?)\s*<\/channel>/)?.[1] ?? "").trim();
   return mid && body ? { mid, body } : null;
 }
 
-export function parseClaudeGdDms(memberId: string, workspacePath: string, ownerChatId: string, opts: { sessionLimit?: number } = {}): DmMessageInput[] {
+export function parseClaudeGdDms(memberId: string, workspacePath: string, ownerChatId: string, opts: { sessionLimit?: number; channel?: MemberChannel } = {}): DmMessageInput[] {
+  const d = claudeChannel(memberId, opts.channel);
+  if (d.kind === "b3chat") ownerChatId = d.channel.ownerChat ?? "";
   if (!ownerChatId) return []; // owner_chat_id 미설정 → 캡처 없음(무동작이 오동작보다 낫다)
   const GD_CHAT = ownerChatId;
   const files = recentSessionFiles(sessionDirFor(workspacePath), opts.sessionLimit ?? 3);
@@ -130,7 +137,7 @@ export function parseClaudeGdDms(memberId: string, workspacePath: string, ownerC
       //   실측(이 세션): "잠시만"·"오케이 고 하고 풀테스트" 가 dm_message 에 하나도 안 남았다.
       //   하필 인터럽트가 ★"빌 응답??" 같은 재촉★ 이라, 제일 중요한 메시지가 기록에서 빠지고 있었다.
       if (ev.type === "queue-operation" && ev.operation === "enqueue" && typeof ev.content === "string") {
-        const hit = inboundFromChannelText(ev.content, GD_CHAT);
+        const hit = inboundFromChannelText(ev.content, GD_CHAT, [d.source, ...d.sourceAliases], d.kind);
         if (hit) {
           out.push({
             memberId,
@@ -138,7 +145,7 @@ export function parseClaudeGdDms(memberId: string, workspacePath: string, ownerC
             direction: "in",
             body: hit.body,
             createdAt: new Date(ts),
-            dedupeKey: `telegram:${GD_CHAT}:${hit.mid}`, // 일반 턴과 같은 키 → 양쪽에 잡혀도 1건
+            dedupeKey: `${d.kind}:${GD_CHAT}:${hit.mid}`, // 일반 턴과 같은 키 → 양쪽에 잡혀도 1건
             sourceRef: `claude:${src}`,
           });
         }
@@ -148,7 +155,7 @@ export function parseClaudeGdDms(memberId: string, workspacePath: string, ownerC
       // INBOUND ①: 일반 턴의 GD 1:1 채널 메시지(엄격필터). external_message(팀/버스)는 배제.
       if (role === "user") {
         const text = textOf(msg.content);
-        const hit = inboundFromChannelText(text, GD_CHAT);
+        const hit = inboundFromChannelText(text, GD_CHAT, [d.source, ...d.sourceAliases], d.kind);
         if (hit) {
           const mid = hit.mid;
           const body = hit.body;
@@ -159,7 +166,7 @@ export function parseClaudeGdDms(memberId: string, workspacePath: string, ownerC
               direction: "in",
               body,
               createdAt: new Date(ts),
-              dedupeKey: `telegram:${GD_CHAT}:${mid}`,
+              dedupeKey: `${d.kind}:${GD_CHAT}:${mid}`,
               sourceRef: `claude:${src}`,
             });
           }
@@ -169,7 +176,7 @@ export function parseClaudeGdDms(memberId: string, workspacePath: string, ownerC
       // OUTBOUND: reply 도구로 GD에게 보낸 답.
       if (role === "assistant" && Array.isArray(msg.content)) {
         for (const c of msg.content as Array<{ type?: string; name?: string; input?: { chat_id?: unknown; text?: unknown } }>) {
-          if (c?.type === "tool_use" && typeof c.name === "string" && c.name.endsWith("__reply")) {
+          if (c?.type === "tool_use" && c.name === d.replyTool) {
             const inp = c.input ?? {};
             const body = typeof inp.text === "string" ? inp.text : "";
             if (String(inp.chat_id ?? "") === GD_CHAT && body.trim()) {
@@ -180,7 +187,7 @@ export function parseClaudeGdDms(memberId: string, workspacePath: string, ownerC
                 direction: "out",
                 body,
                 createdAt: new Date(ts),
-                dedupeKey: `telegram:${GD_CHAT}:out:${h}`,
+                dedupeKey: `${d.kind}:${GD_CHAT}:out:${h}`,
                 sourceRef: `claude:${src}`,
               });
             }

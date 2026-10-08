@@ -9,6 +9,8 @@ import { spawnSync } from "node:child_process";
 import { claudeTelegramLaunchdLabel } from "../../lib/agentControl";
 import { MEMBERS_ROOT, REPO_ROOT } from "../../lib/personaTemplates";
 import { getCaptureGroupId } from "../../lib/captureConfig";
+import { readMemberChannel, type MemberChannel } from "../../lib/memberChannel";
+import { claudeChannel, atomicChannelWrite, prepareB3chatWorkspace, seedB3chatAccess } from "./channelConfig";
 
 const HOME = process.env.HOME ?? "";
 // ★vendored 시작 스크립트 — repo 내(src/, 공개 export 포함)에서 REPO_ROOT로 해석. 기존 ~/.claude/skills 개인스킬 의존 제거(퍼블릭 fresh 클론서 봇 안 뜨던 #1 blocker).
@@ -32,10 +34,11 @@ function assertId(id: string): void {
   if (!/^[a-z0-9_-]+$/i.test(id)) throw new Error(`invalid claude member id: ${id}`);
 }
 
-export function claudeBridgePaths(id: string): ClaudeBridgePaths {
+export function claudeBridgePaths(id: string, channel: MemberChannel = readMemberChannel(id)): ClaudeBridgePaths {
   assertId(id);
+  const d = claudeChannel(id, channel);
   const label = claudeTelegramLaunchdLabel(id);
-  const stateDir = `${HOME}/.claude/channels/telegram-${id}`;
+  const stateDir = `${HOME}/.claude/channels/${d.kind}-${id}`;
   return {
     id,
     label,
@@ -49,12 +52,12 @@ export function claudeBridgePaths(id: string): ClaudeBridgePaths {
 /** 토큰을 claude 채널 .env(TELEGRAM_BOT_TOKEN)에 0600 저장. 값 노출 없음.
  * ★atomic(temp+rename): truncate-in-place로 쓰면 poller가 하필 그 순간 읽을 때 빈 파일→토큰로드 실패→poller 즉사(하네스 근본원인). rename은 원자적이라 빈 창이 없음. */
 export function placeClaudeToken(id: string, token: string): string {
-  const p = claudeBridgePaths(id);
-  mkdirSync(p.stateDir, { recursive: true });
-  const tmp = `${p.envFile}.tmp`;
-  writeFileSync(tmp, `TELEGRAM_BOT_TOKEN=${token.trim()}\n`, { mode: 0o600 });
-  try { chmodSync(tmp, 0o600); } catch { /* best-effort */ }
-  renameSync(tmp, p.envFile); // 원자적 교체 — 부분/빈 파일 창 없음
+  const d = claudeChannel(id);
+  const p = claudeBridgePaths(id, d.channel);
+  const value = token.trim();
+  if (!value || /[\r\n\0]/.test(value)) throw new Error("invalid channel token");
+  if (/[\r\n\0]/.test(d.channel.apiBase)) throw new Error("invalid channel API base");
+  atomicChannelWrite(p.envFile, `${d.tokenEnv}=${value}\n` + (d.kind === "b3chat" ? `B3CHAT_API_BASE=${d.channel.apiBase}\n` : ""));
   return p.envFile;
 }
 
@@ -91,6 +94,7 @@ function renderClaudePlist(p: ClaudeBridgePaths): string {
 /** LaunchAgent plist 생성(setClaude bootstrap 대상). idempotent — 파일 쓰기만, launchctl은 setAgentEnabled가. */
 export function writeClaudeBridgeFiles(id: string): ClaudeBridgePaths {
   const p = claudeBridgePaths(id);
+  if (claudeChannel(id).kind === "b3chat") prepareB3chatWorkspace(`${MEMBERS_ROOT}/${id}`, REPO_ROOT, p.stateDir);
   mkdirSync(dirname(p.plist), { recursive: true });
   mkdirSync(p.stateDir, { recursive: true });
   writeFileSync(p.plist, renderClaudePlist(p), "utf-8");
@@ -104,6 +108,12 @@ export function writeClaudeBridgeFiles(id: string): ClaudeBridgePaths {
 /** reply-guard 보냄 표식을 거는 도구 — 텔레그램 reply·edit_message. */
 export const REPLY_GUARD_MARK_MATCHER = "mcp__plugin_telegram_telegram__reply|mcp__plugin_telegram_telegram__edit_message";
 
+function installChannelDescriptor(hooksDir: string, repoRoot: string): void {
+  for (const file of ["channel_descriptor.py", "channel-descriptors.json"]) {
+    writeFileSync(`${hooksDir}/${file}`, readFileSync(`${repoRoot}/src/server/runtimes/claude/${file}`));
+  }
+}
+
 export function installReplyGuardHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
   assertId(id);
   const membersRoot = roots?.membersRoot ?? MEMBERS_ROOT;
@@ -115,6 +125,7 @@ export function installReplyGuardHook(id: string, roots?: { membersRoot?: string
   try {
     if (!existsSync(src)) return; // 소스 없으면 skip
     mkdirSync(`${dotClaude}/hooks`, { recursive: true });
+    installChannelDescriptor(`${dotClaude}/hooks`, repoRoot);
     writeFileSync(hookDst, readFileSync(src, "utf-8"));
     try { chmodSync(hookDst, 0o755); } catch { /* best-effort */ }
     let settings: Record<string, unknown> = {};
@@ -129,9 +140,11 @@ export function installReplyGuardHook(id: string, roots?: { membersRoot?: string
     hooks.Stop = stop;
     // 보냄 표식(PostToolUse) — transcript 기록 지연과 무관하게 "이번 턴 보냈다" 를 Stop 판정에 넘긴다.
     const post = Array.isArray(hooks.PostToolUse) ? (hooks.PostToolUse as unknown[]) : [];
-    if (!JSON.stringify(post).includes("reply-guard.py")) {
-      post.push({ matcher: REPLY_GUARD_MARK_MATCHER, hooks: [{ type: "command", command: `python3 "${hookDst}" --mark` }] });
-    }
+    const d = claudeChannel(id);
+    const markEntry = { matcher: `${d.replyTool}|${d.editTool}`, hooks: [{ type: "command", command: `python3 "${hookDst}" --mark` }] };
+    const markIndex = post.findIndex((e) => JSON.stringify(e).includes("reply-guard.py"));
+    if (markIndex < 0) post.push(markEntry);
+    else post[markIndex] = markEntry;
     hooks.PostToolUse = post;
     settings.hooks = hooks;
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
@@ -146,6 +159,8 @@ export function installReplyGuardHook(id: string, roots?: { membersRoot?: string
  *  `roots` 는 ★테스트 이음매★ — 안 주면 실제 경로를 쓴다(실 FS 격리: seedGroupIntoClaudeMembers 와 같은 방식). */
 export function installProgressHook(id: string, roots?: { membersRoot?: string; repoRoot?: string }): void {
   assertId(id);
+  // This hook uses Telegram Bot API methods, not the development b3chat channel.
+  if (claudeChannel(id).kind === "b3chat") return;
   const membersRoot = roots?.membersRoot ?? MEMBERS_ROOT;
   const repoRoot = roots?.repoRoot ?? REPO_ROOT;
   const dotClaude = `${membersRoot}/${id}/.claude`;
@@ -235,6 +250,7 @@ export function installOwnerGateHook(id: string, roots?: { membersRoot?: string;
   try {
     if (!existsSync(src)) return; // 소스 없으면 skip
     mkdirSync(`${dotClaude}/hooks`, { recursive: true });
+    installChannelDescriptor(`${dotClaude}/hooks`, repoRoot);
     writeFileSync(hookDst, readFileSync(src, "utf-8"));
     try { chmodSync(hookDst, 0o755); } catch { /* best-effort */ }
     let settings: Record<string, unknown> = {};
@@ -327,10 +343,11 @@ export function installOutboundHook(id: string, opts: { dryRun?: boolean } = {})
   const hookDst = `${dotClaude}/hooks/tg-outbound.py`;
   const settingsPath = `${dotClaude}/settings.json`;
   const src = `${REPO_ROOT}/src/server/runtimes/claude/tg-outbound.py`;
-  const tokenEnv = `${homedir()}/.claude/channels/telegram-${id}/.env`;
+  const tokenEnv = claudeBridgePaths(id).envFile;
   try {
     if (!existsSync(src)) return; // 소스 없으면 skip
     mkdirSync(`${dotClaude}/hooks`, { recursive: true });
+    installChannelDescriptor(`${dotClaude}/hooks`, REPO_ROOT);
     writeFileSync(hookDst, readFileSync(src, "utf-8"));
     try { chmodSync(hookDst, 0o755); } catch { /* best-effort */ }
     let settings: Record<string, unknown> = {};
@@ -460,6 +477,11 @@ export function seedClaudeTrust(id: string): void {
 export function seedClaudeAccess(id: string): void {
   assertId(id);
   const p = claudeBridgePaths(id);
+  const channel = readMemberChannel(id);
+  if (channel.kind === "b3chat") {
+    seedB3chatAccess(p.stateDir, channel);
+    return;
+  }
   try {
     const targetAccess = `${p.stateDir}/access.json`;
     if (existsSync(targetAccess)) {

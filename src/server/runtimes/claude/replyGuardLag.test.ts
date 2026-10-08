@@ -7,8 +7,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { installReplyGuardHook, uninstallReplyGuardHook, REPLY_GUARD_MARK_MATCHER } from "./launcher";
+import { isolatedHookEnvironment, seedChannelDescriptorRepo } from "./hookTestFixtures";
 
 const HOOK = join(import.meta.dir, "reply-guard.py");
 const DM_CHAT = "9999999999";
@@ -41,7 +42,7 @@ function setup(events: unknown[]) {
   return { dir, tp };
 }
 function run(args: string[], input: Record<string, unknown>, env: Record<string, string> = {}): string {
-  return execFileSync("python3", [HOOK, ...args], { input: JSON.stringify(input), encoding: "utf-8", env: { ...process.env, ...env } });
+  return execFileSync("python3", [HOOK, ...args], { input: JSON.stringify(input), encoding: "utf-8", env: isolatedHookEnvironment(dirname(String(input.transcript_path)), env) });
 }
 const stop = (tp: string, env: Record<string, string> = {}) => run([], { transcript_path: tp, session_id: SID }, env);
 const markSend = (tp: string, tool = "mcp__plugin_telegram_telegram__reply", sid = SID) =>
@@ -102,7 +103,7 @@ describe("Stop — 표식이 먼저", () => {
 describe("표식 배선 전 — transcript 를 잠깐 다시 읽는다", () => {
   test("훅이 도는 중에 reply 줄이 늦게 써지면 통과", async () => {
     const { dir, tp } = setup([userTurn(iso(3000)), thinkingOnly]);
-    const child = spawn("python3", [HOOK], { env: { ...process.env, REPLY_GUARD_RETRY_MS: "2000" } });
+    const child = spawn("python3", [HOOK], { env: isolatedHookEnvironment(dir, { REPLY_GUARD_RETRY_MS: "2000" }) });
     let out = "";
     child.stdout.on("data", (d) => { out += String(d); });
     child.stdin.end(JSON.stringify({ transcript_path: tp, session_id: SID }));
@@ -135,6 +136,7 @@ describe("설치·제거 배선", () => {
     dirs.push(root);
     const membersRoot = join(root, "members");
     const repoRoot = join(root, "repo");
+    seedChannelDescriptorRepo(repoRoot);
     mkdirSync(join(repoRoot, "src/server/runtimes/claude"), { recursive: true });
     writeFileSync(join(repoRoot, "src/server/runtimes/claude/reply-guard.py"), readFileSync(HOOK, "utf-8"));
     mkdirSync(join(membersRoot, "m1", ".claude"), { recursive: true });
@@ -145,6 +147,10 @@ describe("설치·제거 배선", () => {
     installReplyGuardHook("m1", r);
     installReplyGuardHook("m1", r);
     const h = r.settings().hooks;
+    for (const file of ["channel_descriptor.py", "channel-descriptors.json"]) {
+      expect(readFileSync(join(r.membersRoot, "m1/.claude/hooks", file), "utf-8"))
+        .toBe(readFileSync(join(import.meta.dir, file), "utf-8"));
+    }
     expect(JSON.stringify(h.Stop).match(/reply-guard\.py/g)!.length).toBe(1);
     expect(h.PostToolUse.length).toBe(1);
     expect(h.PostToolUse[0].matcher).toBe(REPLY_GUARD_MARK_MATCHER);

@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import { installOwnerGateHook, ensureOwnerGateHook } from "./launcher";
+import { isolatedHookEnvironment, seedChannelDescriptorRepo } from "./hookTestFixtures";
 
 const execFileAsync = promisify(execFile);
 const HOOK = join(import.meta.dir, "../../../../hooks/telegram-owner-gate.py");
@@ -58,12 +59,11 @@ async function realisticRouter(targets: string[]): Promise<{ url: string; seen: 
 /** 훅 실행. env 를 그대로 준다(OWNER_GATE_SELF 를 일부러 빼는 게 이 검증의 핵심). */
 async function runHook(chatId: string, text: string, routeUrl: string, env: Record<string, string>): Promise<string> {
   const prompt = `<channel source="plugin:telegram:telegram" chat_id="${chatId}" message_id="8199">${text}</channel>`;
-  const base = { ...process.env } as Record<string, string>;
-  delete base.OWNER_GATE_SELF;
-  delete base.TELEGRAM_STATE_DIR;
+  const root = mkdtempSync(join(tmpdir(), "b3os-self-env-"));
+  dirs.push(root);
   const child = execFileAsync("python3", [HOOK], {
     encoding: "utf-8",
-    env: { ...base, OWNER_GATE_GROUP: GROUP, OWNER_GATE_ROUTE_URL: routeUrl, B3OS_ROOT: "", ...env },
+    env: isolatedHookEnvironment(root, { OWNER_GATE_GROUP: GROUP, OWNER_GATE_ROUTE_URL: routeUrl, B3OS_ROOT: "", ...env }),
   });
   child.child.stdin?.end(JSON.stringify({ prompt }));
   const { stdout } = await child;
@@ -130,6 +130,7 @@ function member(existing: string | null): { root: string; membersRoot: string; r
   dirs.push(base);
   const membersRoot = join(base, "members");
   const repoRoot = join(base, "repo");
+  seedChannelDescriptorRepo(repoRoot);
   mkdirSync(join(membersRoot, "m1", ".claude"), { recursive: true });
   mkdirSync(join(repoRoot, "hooks"), { recursive: true });
   writeFileSync(join(repoRoot, "hooks", "telegram-owner-gate.py"), readFileSync(HOOK, "utf-8"));
@@ -158,6 +159,10 @@ describe("축2·축4 — 설치가 기존 배선을 건드리는가 / 반복하�
     expect(s.hooks.PreToolUse.length).toBe(1);
     expect(s.hooks.PreCompact.length).toBe(1);
     expect(s.permissions).toEqual({ allow: ["Bash"] });   // 훅 밖 키도 보존
+    for (const file of ["channel_descriptor.py", "channel-descriptors.json"]) {
+      expect(readFileSync(join(m.membersRoot, "m1/.claude/hooks", file), "utf-8"))
+        .toBe(readFileSync(join(import.meta.dir, file), "utf-8"));
+    }
   });
 
   test("★부팅 갱신(ensure) 10회도 멱등★", () => {

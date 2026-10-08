@@ -1,0 +1,31 @@
+b3chat channel plugin for Claude Code
+
+This folder is derived from the official Telegram channel plugin for Claude Code:
+  - Source: anthropics/claude-plugins-official, external_plugins/telegram
+  - Version: 0.0.7 (Claude Code plugin cache: claude-plugins-official/telegram/0.0.7)
+  - License: Apache License 2.0 (see LICENSE in this folder, copied unchanged)
+  - Copyright: Anthropic, PBC and the original contributors
+
+Files copied: server.ts, package.json, bun.lock, LICENSE.
+The copied server.ts came from the local plugin cache, which differs from the
+marketplace copy of 0.0.7 by one local patch (reply_to_message_id / reply_to_user /
+reply_to_text in inbound meta). That patch is kept.
+
+Changes made by the b3rys team (b3os) — every changed spot is also listed in the
+header comment of server.ts:
+  1. State directory from the required env B3CHAT_STATE_DIR (no Telegram default).
+  2. Bot token from B3CHAT_BOT_TOKEN and API base from B3CHAT_API_BASE in STATE_DIR/.env;
+     the API base must be https:// or http://127.0.0.1 / http://localhost.
+  3. Access mode defaults to static (B3CHAT_ACCESS_MODE), no pairing.
+  4. grammy Bot uses apiRoot = B3CHAT_API_BASE.
+  5. New access.json field ownerChat; permission requests go only there and explain
+     the text reply "yes <code>" / "no <code>".
+  6. DM permission is decided by chat.id in allowFrom (b3chat private room id differs
+     from the sender id).
+  7. File attachments are not supported yet: reply with files and download_attachment
+     return an error; inbound photos deliver their caption only.
+  8. MCP server name "b3chat" and b3chat wording in the instructions.
+Added files: b3chat.ts (helpers), tests, README.md, NOTICE.
+Plugin layout copied from the original: .claude-plugin/plugin.json (name b3chat),
+.mcp.json (same command pattern, server name b3chat), .npmrc (unchanged).
+package.json: name "b3chat-channel", start script uses --frozen-lockfile, test script.

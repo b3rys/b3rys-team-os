@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { AgentRecord } from "../types";
 import { REPO_ROOT } from "./personaTemplates";
+import { readMemberChannel } from "./memberChannel";
+import { claudeChannel } from "../runtimes/claude/channelConfig";
 
 const HOME = process.env.HOME ?? "";
 
@@ -147,7 +149,8 @@ export function createRuntimeEssentialsRegistry(deps: RuntimeEssentialDeps = {})
   class ClaudeEssentials implements RuntimeEssentials {
     readonly runtime = "claude_channel";
     check(agent: Pick<AgentRecord, "id">): EssentialCheckResult {
-      const stateDir = `${d.home}/.claude/channels/telegram-${agent.id}`;
+      const channel = claudeChannel(agent.id, readMemberChannel(agent.id, process.env.TEAM_AGENT_REGISTRY ?? `${d.repoRoot}/agents.json`));
+      const stateDir = `${d.home}/.claude/channels/${channel.kind}-${agent.id}`;
       const paths = {
         envFile: `${stateDir}/.env`,
         stateDir,
@@ -156,7 +159,8 @@ export function createRuntimeEssentialsRegistry(deps: RuntimeEssentialDeps = {})
       };
       const accessFile = `${paths.stateDir}/access.json`;
       const missing: string[] = [];
-      if (!hasDotenvKey(paths.envFile, "TELEGRAM_BOT_TOKEN", d)) missing.push("token:claude .env TELEGRAM_BOT_TOKEN");
+      if (!hasDotenvKey(paths.envFile, channel.tokenEnv, d)) missing.push(`token:claude .env ${channel.tokenEnv}`);
+      if (channel.kind === "b3chat" && !hasDotenvKey(paths.envFile, "B3CHAT_API_BASE", d)) missing.push("channel:claude .env B3CHAT_API_BASE");
       let pendingPairing = false;
       if (!hasJsonArrayKey(accessFile, "allowFrom", d)) {
         missing.push("allowFrom:claude access.json");

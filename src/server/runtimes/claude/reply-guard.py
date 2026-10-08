@@ -29,6 +29,7 @@
   판정 근거는 transcript 옆 .reply-guard-decisions.log 에 한 줄씩 남는다(어느 근거가 결정했는지 재기 위해).
 """
 import sys, json, os, re, time
+from channel_descriptor import CHANNELS, active_channel, channel_for_tag, is_group
 
 CHANNEL_TAG_RE = re.compile(r'<channel\b[^>]*>')
 CHAT_ID_RE = re.compile(r'chat_id="(-?\d+)"')
@@ -73,7 +74,8 @@ def _reply_or_edit_toolcall(content):
 
 def _is_send_tool(name):
     name = name or ""
-    return ("telegram" in name and "reply" in name) or "edit_message" in name
+    _, d = active_channel()
+    return name in (d["replyTool"], d["editTool"])
 
 
 MARK_FILE = ".reply-guard-sent.json"
@@ -155,7 +157,8 @@ def _telegram_chat_id(text):
     ★텔레그램은 그룹/슈퍼그룹 chat_id 가 음수, 1:1 이 양수다.★ 그게 유일하게 믿을 수 있는 구분이다.
     """
     for tag in CHANNEL_TAG_RE.findall(text or ""):
-        if "plugin:telegram" not in tag:
+        found = channel_for_tag(tag)
+        if not found:
             continue
         m = CHAT_ID_RE.search(tag)
         if m:
@@ -196,8 +199,10 @@ def main():
         return allow()
 
     # 2) 1:1 텔레그램 DM 턴인가? (그룹은 owner 아니면 침묵이 정상 → 관여 안 함)
-    if '<channel source="plugin:telegram' not in last_user_text:
+    tag = next((t for t in CHANNEL_TAG_RE.findall(last_user_text) if channel_for_tag(t)), None)
+    if tag is None:
         return allow()
+    kind, descriptor = channel_for_tag(tag)
 
     # ★단톡방이면 관여하지 않는다.★ 예전에는 이 검사가 없어서 ★플러그인으로 들어온 단톡방 글까지
     #   1:1 로 쳤다.★ 단톡방은 답하는 방법이 다르다 — `send.sh --to broadcast` 다. 그런데 가드가
@@ -205,7 +210,7 @@ def main():
     #   기록이 0건★ 이 된다. 즉 가드가 룰 위반을 유도한다.
     # ★모르면 1:1 로 친다★ — 단톡방 오탐보다 ★1:1 미답이 훨씬 나쁘다★ (퍼블릭 사용자는 주로 1:1 이다).
     chat_id = _telegram_chat_id(last_user_text)
-    if chat_id is not None and chat_id.startswith("-"):
+    if is_group(kind, tag, chat_id):
         return allow()
 
     # 3) 이 턴에 reply/edit_message 툴콜이 있었나?
@@ -267,9 +272,9 @@ def main():
     block(
         "⚠️ 이번 턴에 이미 reply 도구로 답을 보냈다면 다시 보내지 말고 그대로 끝내세요 — "
         "기록이 늦게 써져 이 경고가 잘못 뜰 수 있습니다. "
-        "아직 안 보냈다면: 이번 턴에 텔레그램 1:1 메시지를 받았는데 reply 도구로 답을 보내지 않았습니다. "
+        f"아직 안 보냈다면: 이번 턴에 {descriptor['label']} 1:1 메시지를 받았는데 reply 도구로 답을 보내지 않았습니다. "
         "작업 화면(transcript)에 쓴 글은 상대에게 도달하지 않아요 — 지금 "
-        "`mcp__plugin_telegram_telegram__reply` 도구를 호출해서 답을 실제로 전송하세요. "
+        f"`{descriptor['replyTool']}` 도구를 호출해서 답을 실제로 전송하세요. "
         "(답할 내용이 없다면 이 경고는 곧 사라집니다.)"
     )
 

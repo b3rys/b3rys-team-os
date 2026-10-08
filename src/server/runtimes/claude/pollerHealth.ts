@@ -8,6 +8,8 @@
 //   대시보드도 정상으로 보이는데 메시지만 안 들어온다. 오류도 안 난다. 사람이 눈치챌 때까지 방치된다.
 import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { claudeChannel } from "./channelConfig";
+import type { MemberChannel } from "../../lib/memberChannel";
 
 const SAFE_ID = /^[a-z0-9_-]+$/i;
 
@@ -18,12 +20,12 @@ const SAFE_ID = /^[a-z0-9_-]+$/i;
 export async function waitForClaudePoller(
   id: string,
   timeoutMs: number,
-  opts?: { homeDir?: string; intervalMs?: number; pidAlive?: (pid: number) => boolean },
+  opts?: { homeDir?: string; intervalMs?: number; pidAlive?: (pid: number) => boolean; channel?: MemberChannel },
 ): Promise<boolean> {
   if (!SAFE_ID.test(id)) return false;
   const home = opts?.homeDir ?? process.env.HOME ?? "";
   const intervalMs = opts?.intervalMs ?? 1500;
-  const pidFile = `${home}/.claude/channels/telegram-${id}/bot.pid`;
+  const pidFile = `${home}/.claude/channels/${claudeChannel(id, opts?.channel).kind}-${id}/bot.pid`;
   const pidAlive = opts?.pidAlive ?? ((pid: number) => {
     try { process.kill(pid, 0); return true; } catch { return false; }
   });
@@ -59,7 +61,8 @@ export function reconnectClaudeTelegram(id: string): boolean {
   if (!SAFE_ID.test(id)) throw new Error(`unsafe agent id: ${id}`);
   try {
     if (spawnSync("tmux", ["has-session", "-t", `claude-${id}`], { stdio: "ignore" }).status !== 0) return false;
-    spawnSync("tmux", ["send-keys", "-t", `claude-${id}`, "/mcp reconnect plugin:telegram:telegram", "Enter"], { stdio: "ignore" });
+    const d = claudeChannel(id);
+    spawnSync("tmux", ["send-keys", "-t", `claude-${id}`, `/mcp reconnect ${d.reconnect}`, "Enter"], { stdio: "ignore" });
     return true;
   } catch { return false; }
 }
@@ -98,9 +101,10 @@ export async function ensureClaudePollerUp(
   const recheckMs = opts?.recheckMs ?? 12000;
   const wait = opts?.wait ?? ((i, ms) => waitForClaudePoller(i, ms));
   const reconnect = opts?.reconnect ?? reconnectClaudeTelegram;
+  const label = claudeChannel(id).label;
 
   let ok = await wait(id, waitMs);
-  if (ok) return { ok: true, recovered: false, attempts: 0, detail: "텔레그램 poller 기동 확인" };
+  if (ok) return { ok: true, recovered: false, attempts: 0, detail: `${label} poller 기동 확인` };
 
   let attempts = 0;
   for (; !ok && attempts < maxAttempts; ) {
@@ -114,7 +118,7 @@ export async function ensureClaudePollerUp(
     recovered: ok && attempts > 0,
     attempts,
     detail: ok
-      ? `텔레그램 poller 복구(auto-reconnect ${attempts}회)`
-      : `★텔레그램 poller 미기동★ — auto-reconnect ${attempts}회 시도했으나 미복구. 세션에서 /mcp reconnect 재시도 가능`,
+      ? `${label} poller 복구(auto-reconnect ${attempts}회)`
+      : `★${label} poller 미기동★ — auto-reconnect ${attempts}회 시도했으나 미복구. 세션에서 /mcp reconnect 재시도 가능`,
   };
 }

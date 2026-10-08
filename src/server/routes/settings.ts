@@ -14,6 +14,7 @@ import { captureConfigStatus, setCaptureToken, setCaptureGroupId, setRouterEnabl
 // ★설정 키 이름은 approvals.ts 정본을 쓴다★ — 문자열을 여기 다시 적으면 그 순간 갈린다.
 import { MERGE_APPROVERS_SETTING_KEY } from "../lib/approvals";
 import { configureLeadActorDb, leadActorId, leadActorSource, trustedActorFromRequest } from "../lib/opAuth";
+import { readMemberChannel } from "../lib/memberChannel";
 
 type PersonaRuleTarget = { file: string; op: "inject" | "strip" };
 const uniqueTargets = (targets: PersonaRuleTarget[]): PersonaRuleTarget[] =>
@@ -1314,7 +1315,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       try {
         if (!existsSync(f)) continue;
         const cur = readFileSync(f, "utf-8");
-        const next = op === "inject" ? injectClaudeComms(cur) : stripClaudeComms(cur);
+        const next = op === "inject" ? injectClaudeComms(cur, false, readMemberChannel(id).kind) : stripClaudeComms(cur);
         if (next === cur) continue;
         backup(f, backedUp);
         writeFileSync(f, next, "utf-8");
@@ -1517,7 +1518,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
         try {
           if (!existsSync(f)) { if (op === "inject") missing.push(f); continue; }
           const cur = readFileSync(f, "utf-8");
-          const next = op === "inject" ? injectClaudeComms(cur) : stripClaudeComms(cur);
+          const next = op === "inject" ? injectClaudeComms(cur, false, readMemberChannel(agent.id).kind) : stripClaudeComms(cur);
           if (next === cur) continue;
           backup(f, backedUp);
           writeFileSync(f, next, "utf-8");

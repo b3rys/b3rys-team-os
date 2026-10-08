@@ -48,6 +48,12 @@ import sys
 import os
 import json
 import re
+try:
+    from channel_descriptor import CHANNELS, channel_for_tag, is_group
+except ModuleNotFoundError:
+    # Source-tree execution; installed copies have these files beside the hook.
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../src/server/runtimes/claude"))
+    from channel_descriptor import CHANNELS, channel_for_tag, is_group
 
 def _self_id():
     """이 세션이 누구인가. 런처가 `OWNER_GATE_SELF` 로 실어준다.
@@ -63,10 +69,11 @@ def _self_id():
     env = os.environ.get("OWNER_GATE_SELF")
     if env:
         return env
-    sd = os.environ.get("TELEGRAM_STATE_DIR", "")
-    base = os.path.basename(sd.rstrip("/"))
-    if base.startswith("telegram-"):
-        return base[len("telegram-"):]
+    for kind in ("b3chat", "telegram"):
+        sd = os.environ.get(CHANNELS[kind]["stateEnv"], "")
+        base = os.path.basename(sd.rstrip("/"))
+        if base.startswith(kind + "-"):
+            return base[len(kind) + 1:]
     return ""
 
 
@@ -137,7 +144,7 @@ def main():
 
     # 가장 최근 telegram <channel ...>TEXT</channel> 블록 추출
     blocks = re.findall(r"<channel\b([^>]*)>(.*?)</channel>", prompt, re.DOTALL)
-    tg = [(attrs, text) for attrs, text in blocks if "telegram" in attrs]
+    tg = [(attrs, text) for attrs, text in blocks if channel_for_tag(attrs)]
     if not tg:
         allow()  # telegram 채널 메시지 아님(주입/일반 prompt) → 통과
 
@@ -149,7 +156,8 @@ def main():
     #   방이 둘 이상인 설치(공개·다른 팀)에는 ★게이트가 아예 없는 방★ 이 생긴다.
     #   같은 저장소의 `reply-guard.py` 도 부호로 가른다 — ★두 훅의 1:1 정의를 같게 둔다.★
     #   `GROUP_ID` 는 "어느 방인지" 를 로그로 남기는 용도로만 쓴다(판정에서 뺀다).
-    if not chat_id.startswith("-"):
+    kind, _ = channel_for_tag(attrs)
+    if not is_group(kind, attrs, chat_id):
         allow()  # 1:1 DM → 통과(DM 은 항상 owner). 라우터에 묻지도 않는다.
     mid = re.search(r'message_id="([^"]+)"', attrs)
     tg_msg_id = mid.group(1) if mid else ""
