@@ -13,7 +13,7 @@ const KEY = "k".repeat(43);
 const TOKEN = `7:${"t".repeat(43)}`;
 const BODY = { id: "testmate", display_name: "테스트메이트", role: "시험", runtime: "codex", api_base: "http://127.0.0.1:8741", room_id: "5", bot_token: TOKEN };
 
-function setup(opts: { activate?: () => Response | Promise<Response>; greetedAfter?: number; bridgeOk?: boolean; tokenOk?: boolean; existing?: string[]; removeGate?: Promise<void> } = {}) {
+function setup(opts: { activate?: () => Response | Promise<Response>; greetedAfter?: number; bridgeOk?: boolean; tokenOk?: boolean; existing?: string[]; removeGate?: Promise<void>; removeStatus?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "b3t-"));
   const registryPath = join(dir, "agents.json");
   writeFileSync(registryPath, JSON.stringify((opts.existing ?? ["bill"]).map((id) => ({ id, display_name: id, role: "x", runtime: "codex" })), null, 2));
@@ -34,6 +34,9 @@ function setup(opts: { activate?: () => Response | Promise<Response>; greetedAft
     const b = await c.req.json();
     calls.push(`remove:${c.req.param("id")}:${b.confirm_name}`);
     if (opts.removeGate) await opts.removeGate;
+    if (opts.removeStatus && opts.removeStatus !== 200) return c.json({ error: "x" }, opts.removeStatus as 500);
+    const list = JSON.parse(readFileSync(registryPath, "utf-8")).filter((m: { id: string }) => m.id !== c.req.param("id"));
+    writeFileSync(registryPath, JSON.stringify(list, null, 2));
     return c.json({ ok: true });
   });
   const bridgeReqs: BridgeWindowRequest[] = [];
@@ -59,7 +62,11 @@ function setup(opts: { activate?: () => Response | Promise<Response>; greetedAft
     await new Promise<void>((r) => { settled[j.job_id] = r; });
     return (await (await get(j.job_id)).json()) as Record<string, unknown>;
   };
-  return { dir, registryPath, calls, bridgeReqs, app, post, get, waitJob, deps };
+  const del = (id: string, headers: Record<string, string> = { "x-b3chat-link": KEY }) =>
+    app.request(`/members/b3chat/member/${id}`, { method: "DELETE", headers });
+  const byMember = async (id: string) => (await (await app.request(`/members/b3chat/member/${id}`, { headers: { "x-b3chat-link": KEY } })).json()) as Record<string, unknown>;
+  const settle = (jobId: string) => new Promise<void>((r) => { settled[jobId] = r; });
+  return { dir, registryPath, calls, bridgeReqs, app, post, get, waitJob, deps, del, byMember, settle };
 }
 
 describe("인증 — 같은 기계 직접 + 공유 비밀", () => {
@@ -238,5 +245,101 @@ describe("분산 실패 경계 — 응답이 사라져도 결과를 되찾는다
     const second = await s.waitJob(await s.post(BODY));
     expect(second.job_id).not.toBe(first.job_id);
     expect(second.state).toBe("ready");
+  });
+});
+
+describe("지우기 — 앱에서 만든 팀원만, 퇴사 API 한 경로로", () => {
+  const ready = async (s: ReturnType<typeof setup>) => {
+    const j = await s.waitJob(await s.post(BODY));
+    expect(j.state).toBe("ready");
+    return j.job_id as string;
+  };
+  test("ready → DELETE 202 removing → 퇴사 API → removed, 명단에서 빠짐", async () => {
+    const s = setup();
+    const jobId = await ready(s);
+    const done = s.settle(jobId);
+    const r = await s.del("testmate");
+    expect(r.status).toBe(202);
+    expect((await r.json()).state).toBe("removing");
+    await done;
+    expect((await s.byMember("testmate")).state).toBe("removed");
+    expect(s.calls.filter((x) => x.startsWith("remove:"))).toEqual(["remove:testmate:테스트메이트"]);
+    expect(JSON.parse(readFileSync(s.registryPath, "utf-8")).map((m: { id: string }) => m.id)).toEqual(["bill"]);
+    const again = await s.del("testmate");
+    expect(again.status).toBe(200);
+    expect((await again.json()).state).toBe("removed");
+    expect(s.calls.filter((x) => x.startsWith("remove:")).length).toBe(1);
+  });
+  test("removing 중 다시 보내도 퇴사는 한 번", async () => {
+    let open!: () => void;
+    const s = setup({ removeGate: new Promise<void>((r) => { open = r; }) });
+    const jobId = await ready(s);
+    const done = s.settle(jobId);
+    expect((await s.del("testmate")).status).toBe(202);
+    const second = await s.del("testmate");
+    expect(second.status).toBe(202);
+    expect((await second.json()).state).toBe("removing");
+    open();
+    await done;
+    expect(s.calls.filter((x) => x.startsWith("remove:")).length).toBe(1);
+  });
+  test("퇴사 API 실패 → remove_failed cleanup_failed retryable, 다시 보내면 다시 시도", async () => {
+    const s = setup({ removeStatus: 500 });
+    const jobId = await ready(s);
+    let done = s.settle(jobId);
+    await s.del("testmate");
+    await done;
+    const v = await s.byMember("testmate");
+    expect([v.state, v.code, v.retryable, v.ok]).toEqual(["remove_failed", "cleanup_failed", true, false]);
+    done = s.settle(jobId);
+    expect((await s.del("testmate")).status).toBe(202);
+    await done;
+    expect(s.calls.filter((x) => x.startsWith("remove:")).length).toBe(2);
+  });
+  test("이 경로로 만든 기록이 없는 팀원(기존 팀원) → 404, 퇴사 API 안 부름", async () => {
+    const s = setup();
+    const r = await s.del("bill");
+    expect(r.status).toBe(404);
+    expect(s.calls.some((x) => x.startsWith("remove:"))).toBe(false);
+    expect(JSON.parse(readFileSync(s.registryPath, "utf-8")).map((m: { id: string }) => m.id)).toEqual(["bill"]);
+  });
+  test("만드는 중 → 409 teammate_busy", async () => {
+    let release!: () => void;
+    const s = setup({ activate: () => new Promise<Response>((r) => { release = () => r(Response.json({ ok: true, steps: [] })); }) });
+    const res = await s.post(BODY);
+    const { job_id } = (await res.json()) as { job_id: string };
+    const settled = s.settle(job_id);
+    while (!release) await new Promise((r) => setTimeout(r, 2));
+    const r = await s.del("testmate");
+    expect(r.status).toBe(409);
+    expect((await r.json()).code).toBe("teammate_busy");
+    release();
+    await settled;
+  });
+  test("만들기 실패로 이미 되돌린 팀원 → 퇴사 다시 안 부르고 removed", async () => {
+    const s = setup({ activate: () => Response.json({ ok: false, error: "runtime_auth_required" }) });
+    const j = await s.waitJob(await s.post(BODY));
+    expect(j.state).toBe("failed");
+    const before = s.calls.filter((x) => x.startsWith("remove:")).length;
+    const done = s.settle(j.job_id as string);
+    await s.del("testmate");
+    await done;
+    expect((await s.byMember("testmate")).state).toBe("removed");
+    expect(s.calls.filter((x) => x.startsWith("remove:")).length).toBe(before);
+  });
+  test("지운 뒤 같은 id 로 다시 만들 수 있다", async () => {
+    const s = setup();
+    const jobId = await ready(s);
+    const done = s.settle(jobId);
+    await s.del("testmate");
+    await done;
+    const j = await s.waitJob(await s.post(BODY));
+    expect(j.state).toBe("ready");
+  });
+  test("인증 없으면 403 — 퇴사 API 안 부름", async () => {
+    const s = setup();
+    await ready(s);
+    expect((await s.del("testmate", {})).status).toBe(403);
+    expect(s.calls.some((x) => x.startsWith("remove:"))).toBe(false);
   });
 });

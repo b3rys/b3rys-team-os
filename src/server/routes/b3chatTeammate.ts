@@ -30,8 +30,8 @@ const ID_RE = /^[a-z][a-z0-9_-]{1,31}$/;
 const TOKEN_RE = /^[1-9]\d*:[A-Za-z0-9_-]{30,}$/;
 const ACTIVATE_TIMEOUT_MS = 180_000;
 
-export type JobState = "creating" | "configuring" | "starting" | "ready" | "failed";
-export type JobCode = "name_taken" | "ai_not_ready" | "bot_check_failed" | "start_failed" | "timeout" | "internal";
+export type JobState = "creating" | "configuring" | "starting" | "ready" | "failed" | "removing" | "removed" | "remove_failed";
+export type JobCode = "name_taken" | "ai_not_ready" | "bot_check_failed" | "start_failed" | "timeout" | "internal" | "teammate_busy" | "cleanup_failed";
 
 export interface B3chatTeammateDeps {
   db: Database;
@@ -168,7 +168,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     //   같음 = 같은 id + 같은 토큰·방·주소(지문). 실패로 끝난 작업은 되돌림이 끝났으니 새 작업으로 다시 한다.
     const fp = requestFingerprint(token, roomId, channel.apiBase);
     const prev = db.query("SELECT * FROM b3chat_teammate_job WHERE member_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(id) as JobRow | null;
-    if (prev && prev.state !== "failed") {
+    if (prev && prev.state !== "failed" && prev.state !== "removed") {
       if (prev.token_hash === fp) return c.json({ ok: true, job_id: prev.id, member_id: id, state: prev.state, duplicate: true }, 200);
       return fail(c, 409, "name_taken", "input");
     }
@@ -192,7 +192,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
   const jobView = (c: Context, row: JobRow | null) => {
     if (!row) return fail(c, 404, "not_found", "status");
     return c.json({
-      ok: row.state !== "failed",
+      ok: row.state !== "failed" && row.state !== "remove_failed",
       job_id: row.id, member_id: row.member_id, room_id: row.room_id,
       state: row.state, stage: row.stage, code: row.code, retryable: row.retryable === 1,
       greeting: row.greeting, cleanup: row.cleanup,
@@ -203,6 +203,40 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     jobView(c, db.query("SELECT * FROM b3chat_teammate_job WHERE member_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(c.req.param("member_id")) as JobRow | null));
   app.get("/members/b3chat/:job_id", (c) =>
     jobView(c, db.query("SELECT * FROM b3chat_teammate_job WHERE id = ?").get(c.req.param("job_id")) as JobRow | null));
+
+  // ── 지우기 — b3chat 앱 [팀원 지우기]. 이 경로로 만든 팀원만(작업 기록이 있는 팀원만) 지운다. ──
+  //   202 removing 즉시 → 뒤에서 기존 퇴사 API(런타임 끄기·종료 확인·파일·명단) → removed | remove_failed.
+  //   상태는 GET /members/b3chat/member/:member_id 로 읽는다. 같은 요청을 다시 보내도 퇴사는 한 번만 돈다.
+  const removing = new Set<string>();
+  app.delete("/members/b3chat/member/:member_id", (c) => {
+    const id = c.req.param("member_id");
+    const row = db.query("SELECT * FROM b3chat_teammate_job WHERE member_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(id) as JobRow | null;
+    if (!row) return fail(c, 404, "not_found", "remove");
+    if (row.state === "removed") return c.json({ ok: true, member_id: id, state: "removed" }, 200);
+    if (row.state === "removing" || removing.has(id)) return c.json({ ok: true, member_id: id, state: "removing" }, 202);
+    if (row.state !== "ready" && row.state !== "failed" && row.state !== "remove_failed") return fail(c, 409, "teammate_busy", "remove");
+    removing.add(id);
+    setJob(row.id, { state: "removing", stage: "remove", code: null, retryable: 0 });
+    void removeMember(row.id, id)
+      .catch(() => setJob(row.id, { state: "remove_failed", stage: "remove", code: "cleanup_failed", retryable: 1 }))
+      .finally(() => { removing.delete(id); deps.onJobSettled?.(row.id); });
+    return c.json({ ok: true, member_id: id, state: "removing" }, 202);
+  });
+
+  async function removeMember(jobId: string, id: string): Promise<void> {
+    let target: any;
+    try { target = readList().find((a) => a?.id === id); } catch {
+      return setJob(jobId, { state: "remove_failed", stage: "remove", code: "cleanup_failed", retryable: 1 });
+    }
+    // 이미 명단에 없다 = 만들기 실패 때 되돌렸거나 전에 지웠다. 할 일 없이 끝.
+    if (!target) return setJob(jobId, { state: "removed", stage: "removed", cleanup: "removed" });
+    const r = await settings.request(`/members/${id}`, {
+      method: "DELETE", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirm_name: target.display_name }),
+    });
+    if (r.ok || r.status === 404) return setJob(jobId, { state: "removed", stage: "removed", cleanup: "removed" });
+    setJob(jobId, { state: "remove_failed", stage: "remove", code: "cleanup_failed", retryable: 1, cleanup: `remove_failed_${r.status}` });
+  }
 
   async function runJob(j: { jobId: string; id: string; displayName: string; role: string; roomId: string; token: string; apiBase: string }): Promise<void> {
     const { jobId, id } = j;
