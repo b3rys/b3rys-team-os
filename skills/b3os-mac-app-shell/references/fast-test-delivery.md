@@ -30,15 +30,19 @@
 
 ## 받은 쪽 검증 (verify-zip.sh) — 사람에게 주기 전 마지막 문
 
-zip 을 임시 폴더에 풀고, **인터넷에서 내려받은 것처럼 격리 속성(quarantine)을 붙인 뒤**:
+zip 은 **확장 속성 없이** 만든다: `ditto -c -k --norsrc --keepParent <앱 또는 버전 폴더> <zip>`.
+zip 을 임시 폴더에 **`unzip` 으로** 풀고(`ditto -x` 금지 — 아래 참고), **인터넷에서 내려받은 것처럼 격리 속성(quarantine)을 붙인 뒤**:
 
+0. `codesign --verify --deep --strict <app>` — 앱 안 모든 파일이 서명(봉인)과 맞는지. 군더더기 파일 하나만 있어도 실패
 1. `xcrun stapler validate <app>` — 공증 표가 앱에 붙었는지
 2. `spctl -a -t exec -vv <app>` — Gatekeeper 가 실행을 허락하는지
 3. 번들 안 도우미 실행 파일 확인(앱별)
 4. 빌드 폴더 없이 실행되는지(개발 경로에 기대는 코드가 없는지)
 5. (두 아키텍처로 내는 앱) `lipo -archs <app>/Contents/MacOS/<실행 파일>` 에 `arm64 x86_64` 둘 다
 
-넷 다 통과해야 zip 을 남긴다. 실패하면 zip 을 지운다.
+모두 통과해야 zip 을 남긴다.
+
+★왜 `unzip` + `--deep --strict` 인가 (Steno 0.7.30, 10-08)★: `ditto -c -k` 는 파일의 확장 속성(macOS 가 붙이는 com.apple.provenance 등)을 `._이름` 파일로 zip 에 넣는다. 받는 사람이 Finder 더블클릭(아카이브 유틸리티)으로 풀면, **안에 framework(예: Sparkle)가 있을 때** 그 심볼릭 링크 자리의 `._` 파일이 앱 안에 그대로 남아 서명 봉인이 깨지고 Gatekeeper 가 "Apple은 … 악성 코드가 없음을 확인할 수 없습니다" 로 막는다 — **공증은 정상인데도**. `ditto -x` 는 `._` 를 다시 합쳐 줘서 검증이 통과해 버린다(우리가 놓친 이유). Finder 와 똑같이 풀어 보려면 `open -W -g -a "Archive Utility" <zip>`. 실패하면 zip 을 지운다.
 
 ## 전달 (deliver.sh)
 
@@ -69,6 +73,7 @@ zip 을 임시 폴더에 풀고, **인터넷에서 내려받은 것처럼 격리
 |---|---|---|
 | 앱 확인이 전부 실패 | 맥 앞에 시스템 알림 창(UserNotificationCenter)이 떠 있어 앱이 앞으로 못 나옴 | 시작 전에 닫는다(스크립트가 자동) |
 | 공증 "No Keychain password item found" | 세션 잠김 | API 키 파일로 전환 |
+| 공증 정상인데 받은 쪽에서 "악성 코드 확인 불가" | zip 에 들어간 `._` 확장 속성 파일이 Finder 풀기 뒤 framework 안에 남아 봉인 깨짐 | `ditto -c -k --norsrc` 로 zip · 검증은 `unzip` + `codesign --verify --deep --strict` |
 | 공증 거절: 파일 이름 | 번들 안 비ASCII 파일 이름 | zip 전에 검사해서 멈춘다 |
 | 태그 push 가 GitHub 500 | 일시 오류 | 같은 명령 다시(같은 sha 의 태그는 통과) |
 | 시험 중 HEAD 가 바뀜 | 빌드 중에 같은 작업 트리에 커밋 | 빌드 중엔 그 트리에 커밋하지 않는다. 스크립트가 감지해 멈춘다 |
