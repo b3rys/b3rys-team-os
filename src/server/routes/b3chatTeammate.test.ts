@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createB3chatTeammateRoutes, setModelLine, type B3chatTeammateDeps } from "./b3chatTeammate";
+import { createB3chatTeammateRoutes, pidsWithCodexHome, residueOf, setModelLine, type B3chatTeammateDeps, type Residue } from "./b3chatTeammate";
 import { decideWindowRequest, type BridgeWindowRequest } from "../runtimes/codex/bridgeWindow";
 import { isDirectLocal, linkSecretMatches } from "../lib/b3chatLink";
 
@@ -13,7 +13,7 @@ const KEY = "k".repeat(43);
 const TOKEN = `7:${"t".repeat(43)}`;
 const BODY = { id: "testmate", display_name: "테스트메이트", role: "시험", runtime: "codex", api_base: "http://127.0.0.1:8741", room_id: "5", bot_token: TOKEN };
 
-function setup(opts: { activate?: () => Response | Promise<Response>; greetedAfter?: number; bridgeOk?: boolean; tokenOk?: boolean; existing?: string[]; removeGate?: Promise<void>; removeStatus?: number } = {}) {
+function setup(opts: { activate?: () => Response | Promise<Response>; greetedAfter?: number; bridgeOk?: boolean; tokenOk?: boolean; existing?: string[]; removeGate?: Promise<void>; removeStatus?: number; residue?: Residue[]; cleanWorks?: boolean } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "b3t-"));
   const registryPath = join(dir, "agents.json");
   writeFileSync(registryPath, JSON.stringify((opts.existing ?? ["bill"]).map((id) => ({ id, display_name: id, role: "x", runtime: "codex" })), null, 2));
@@ -42,6 +42,7 @@ function setup(opts: { activate?: () => Response | Promise<Response>; greetedAft
   const bridgeReqs: BridgeWindowRequest[] = [];
   let greetPolls = 0;
   const settled: Record<string, () => void> = {};
+  const residue: Residue[] = [...(opts.residue ?? [])];
   const db = new Database(":memory:");
   const deps: B3chatTeammateDeps = {
     db, settings, registryPath, linkKeyPath: keyPath,
@@ -52,6 +53,15 @@ function setup(opts: { activate?: () => Response | Promise<Response>; greetedAft
     greeted: () => ++greetPolls > (opts.greetedAfter ?? 1),
     greetingWaitMs: 200, pollMs: 2, activateTimeoutMs: 100,
     onJobSettled: (id) => settled[id]?.(),
+    // ★실제 확인·정리는 절대 부르지 않는다★ — 실제 홈·launchd·프로세스에 닿는다.
+    inspectResidue: (id) => {
+      const inList = JSON.parse(readFileSync(registryPath, "utf-8")).some((m: { id: string }) => m.id === id);
+      return [...(inList ? (["registry"] as Residue[]) : []), ...residue];
+    },
+    cleanResidue: (_id, left) => {
+      calls.push(`clean:${left.join(",")}`);
+      if (opts.cleanWorks !== false && !left.includes("registry")) residue.splice(0);
+    },
   };
   const app = createB3chatTeammateRoutes(deps);
   const post = (body: unknown, headers: Record<string, string> = { "x-b3chat-link": KEY }) =>
@@ -66,7 +76,7 @@ function setup(opts: { activate?: () => Response | Promise<Response>; greetedAft
     app.request(`/members/b3chat/member/${id}`, { method: "DELETE", headers });
   const byMember = async (id: string) => (await (await app.request(`/members/b3chat/member/${id}`, { headers: { "x-b3chat-link": KEY } })).json()) as Record<string, unknown>;
   const settle = (jobId: string) => new Promise<void>((r) => { settled[jobId] = r; });
-  return { dir, registryPath, calls, bridgeReqs, app, post, get, waitJob, deps, del, byMember, settle };
+  return { dir, registryPath, calls, bridgeReqs, app, post, get, waitJob, deps, del, byMember, settle, residue };
 }
 
 describe("인증 — 같은 기계 직접 + 공유 비밀", () => {
@@ -348,10 +358,87 @@ describe("지우기 — 앱에서 만든 팀원만, 퇴사 API 한 경로로", (
     expect((await s.byMember("testmate")).state).toBe("removed");
     expect(s.calls.filter((x) => x.startsWith("remove:")).length).toBe(1);
   });
+  test("퇴사 API 가 200 이어도 프로세스가 남으면 removed 가 아니다 — 한 번 더 정리 후에도 남으면 remove_failed", async () => {
+    const s = setup({ residue: ["process"], cleanWorks: false });
+    const jobId = await ready(s);
+    let done = s.settle(jobId);
+    await s.del("testmate");
+    await done;
+    const v = await s.byMember("testmate");
+    expect([v.state, v.code, v.cleanup]).toEqual(["remove_failed", "cleanup_failed", "left:process"]);
+    expect(s.calls.filter((x) => x.startsWith("clean:"))).toEqual(["clean:process"]);
+    // 명단은 이미 없다 — 다시 보내면 퇴사 API 없이 남은 것만 치우고, 다 사라지면 removed
+    s.residue.splice(0, s.residue.length, "files");
+    done = s.settle(jobId);
+    s.deps.cleanResidue = undefined;
+    const s2 = createB3chatTeammateRoutes({ ...s.deps, cleanResidue: (_id, left) => { s.calls.push(`clean2:${left.join(",")}`); s.residue.splice(0); } });
+    expect((await s2.request("/members/b3chat/member/testmate", { method: "DELETE", headers: { "x-b3chat-link": KEY } })).status).toBe(202);
+    await done;
+    expect((await s.byMember("testmate")).state).toBe("removed");
+    expect(s.calls.filter((x) => x.startsWith("remove:")).length).toBe(1);
+    expect(s.calls).toContain("clean2:files");
+  });
+  test("남은 것이 처음 정리로 사라지면 removed", async () => {
+    const s = setup({ residue: ["launchd", "files"] });
+    const jobId = await ready(s);
+    const done = s.settle(jobId);
+    await s.del("testmate");
+    await done;
+    expect((await s.byMember("testmate")).state).toBe("removed");
+    expect(s.calls).toContain("clean:launchd,files");
+  });
+  test("명단의 작업폴더 위치를 지우기 전에 기록하고, 재시도도 그 위치를 센다", async () => {
+    const seen: string[] = [];
+    const s = setup();
+    const jobId = await ready(s);
+    const now = JSON.parse(readFileSync(s.registryPath, "utf-8"));
+    now.find((m: { id: string }) => m.id === "testmate").workspace_path = "/custom/testmate";
+    writeFileSync(s.registryPath, JSON.stringify(now));
+    const app2 = createB3chatTeammateRoutes({ ...s.deps, inspectResidue: (_id, ws) => { seen.push(ws); return []; } });
+    const done = s.settle(jobId);
+    await app2.request("/members/b3chat/member/testmate", { method: "DELETE", headers: { "x-b3chat-link": KEY } });
+    await done;
+    expect(seen).toEqual(["/custom/testmate"]);
+  });
+  test("퇴사 API 가 명단을 못 지우면(500) 명단은 여기서 건드리지 않고 remove_failed", async () => {
+    const s = setup({ removeStatus: 500 });
+    const jobId = await ready(s);
+    const done = s.settle(jobId);
+    await s.del("testmate");
+    await done;
+    const v = await s.byMember("testmate");
+    expect([v.state, v.cleanup]).toEqual(["remove_failed", "offboard_500"]);
+    expect(JSON.parse(readFileSync(s.registryPath, "utf-8")).map((m: { id: string }) => m.id)).toContain("testmate");
+  });
   test("인증 없으면 403 — 퇴사 API 안 부름", async () => {
     const s = setup();
     await ready(s);
     expect((await s.del("testmate", {})).status).toBe(403);
     expect(s.calls.some((x) => x.startsWith("remove:"))).toBe(false);
+  });
+});
+
+describe("남은 것 세기 — 순수 단계", () => {
+  const none = { registryHas: () => false, launchdLoaded: () => false, envPids: () => [], exists: () => false };
+  test("작업폴더는 명단에 적혀 있던 위치로 센다", () => {
+    expect(residueOf("zzgone", { ...none, exists: (p) => p === "/custom/zzgone" }, "/custom/zzgone")).toEqual(["workdir"]);
+    expect(residueOf("zzgone", { ...none, exists: (p) => p === "/custom/zzgone" }, "/other")).toEqual([]);
+  });
+  test("아무것도 없으면 빈 목록, 종류마다 하나씩", () => {
+    expect(residueOf("zzgone", none)).toEqual([]);
+    expect(residueOf("zzgone", { ...none, registryHas: () => true })).toEqual(["registry"]);
+    expect(residueOf("zzgone", { ...none, launchdLoaded: (l) => l.endsWith("zzgone") })).toEqual(["launchd"]);
+    expect(residueOf("zzgone", { ...none, envPids: (h) => (h.endsWith("/.codex-agents/zzgone") ? [42] : []) })).toEqual(["process"]);
+    expect(residueOf("zzgone", { ...none, exists: (p) => p.endsWith("/zzgone.window.json") })).toEqual(["files"]);
+    expect(residueOf("zzgone", { ...none, exists: (p) => p.endsWith("/.codex-agents/zzgone") })).toEqual(["files"]);
+  });
+  test("CODEX_HOME 은 정확히 그 값만 — 이름이 앞부분만 같은 남의 홈은 아니다", () => {
+    const ps = [
+      "  101 bun bridge.ts CODEX_HOME=/h/.codex-agents/mate PATH=/bin",
+      "  102 codex app-server CODEX_HOME=/h/.codex-agents/mate",
+      "  103 bun bridge.ts CODEX_HOME=/h/.codex-agents/mate2 PATH=/bin",
+      "  104 bun other.ts HOME=/h",
+    ].join("\n");
+    expect(pidsWithCodexHome(ps, "/h/.codex-agents/mate")).toEqual([101, 102]);
   });
 });

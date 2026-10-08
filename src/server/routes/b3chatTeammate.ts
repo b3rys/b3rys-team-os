@@ -21,6 +21,9 @@ import { parseMemberChannel } from "../lib/memberChannel";
 import { validateBotToken } from "../lib/rotateToken";
 import { writeRegistrySafely } from "../lib/registrySafety";
 import { codexBridgePaths, ensureCodexHome } from "../runtimes/codex/launcher";
+import { archiveWorkspace, teardownRuntime } from "../lib/activation";
+import { memberPaths } from "../lib/personaTemplates";
+import { execFileSync } from "node:child_process";
 import { hasGreetedFirstContact } from "../runtimes/codex/bridge";
 import { callCodexBridge, type CodexBridgeCallResult } from "../lib/codexBridgeClient";
 import type { BridgeWindowRequest } from "../runtimes/codex/bridgeWindow";
@@ -52,6 +55,10 @@ export interface B3chatTeammateDeps {
   activateTimeoutMs?: number;
   /** 모델 설정 쓰기(기본: 그 팀원 CODEX_HOME 의 config.toml) — 시험은 실제 홈을 건드리지 않게 대신 넣는다 */
   prepareModel?: (id: string) => void;
+  /** 지운 뒤 남은 것(명단·launchd·프로세스·파일·작업폴더) — 기본은 실제 확인. 시험은 반드시 대신 넣는다. */
+  inspectResidue?: (id: string, workspace: string) => Promise<Residue[]> | Residue[];
+  /** 남은 것을 한 번 더 정리(명단 밖에서) — 기본은 실제 정리. 시험은 반드시 대신 넣는다. */
+  cleanResidue?: (id: string, left: Residue[]) => Promise<void> | void;
   /** 시험이 뒤 작업 완료를 기다릴 수 있게 */
   onJobSettled?: (jobId: string) => void;
 }
@@ -60,6 +67,58 @@ interface JobRow {
   id: string; member_id: string; display_name: string; room_id: string; state: JobState;
   stage: string; code: string | null; retryable: number; greeting: string | null;
   cleanup: string | null; token_hash: string | null; created_at: string; updated_at: string;
+}
+
+export type Residue = "registry" | "launchd" | "process" | "files" | "workdir";
+
+export interface ResidueProbe {
+  registryHas: (id: string) => boolean;
+  launchdLoaded: (label: string) => boolean;
+  /** 그 팀원 CODEX_HOME 으로 도는 프로세스(브리지·app-server). 이름이 같은 남의 프로세스와 env 로 가른다. */
+  envPids: (codexHome: string) => number[];
+  exists: (path: string) => boolean;
+}
+
+/** 지운 뒤 남은 것을 종류별로 센다 — 하나라도 있으면 removed 가 아니다. */
+export function residueOf(id: string, probe: ResidueProbe, workspace = memberPaths(id, "codex").workspace_path): Residue[] {
+  const p = codexBridgePaths(id);
+  const out: Residue[] = [];
+  if (probe.registryHas(id)) out.push("registry");
+  if (probe.launchdLoaded(p.label)) out.push("launchd");
+  if (probe.envPids(p.codexHome).length) out.push("process");
+  const files = [p.plist, p.wrapper, p.tokenFile, p.pidFile, join(dirname(p.pidFile), `${id}.window.json`), p.log, p.codexHome];
+  if (files.some((f) => probe.exists(f))) out.push("files");
+  if (probe.exists(workspace)) out.push("workdir");
+  return out;
+}
+
+/** ps 의 env 열에서 CODEX_HOME=<home> 인 프로세스만 — 값은 이 함수 밖으로 내보내지 않는다. macOS ps 는 대시 없는 axeww 여야 env 가 붙는다(-axeww 는 안 붙는다, 실측). */
+export function pidsWithCodexHome(psOutput: string, codexHome: string): number[] {
+  const needle = `CODEX_HOME=${codexHome}`;
+  const pids: number[] = [];
+  for (const line of psOutput.split("\n")) {
+    const m = /^\s*(\d+)\s(.*)$/.exec(line);
+    if (!m) continue;
+    const rest = m[2] ?? "";
+    const at = rest.indexOf(needle);
+    if (at < 0) continue;
+    const next = rest.charAt(at + needle.length);
+    if (next === "" || next === " ") pids.push(Number(m[1]));
+  }
+  return pids;
+}
+
+function realProbe(readIds: () => string[]): ResidueProbe {
+  return {
+    registryHas: (id) => readIds().includes(id),
+    launchdLoaded: (label) => {
+      try { execFileSync("launchctl", ["print", `gui/${process.getuid?.() ?? 501}/${label}`], { stdio: "ignore" }); return true; } catch { return false; }
+    },
+    envPids: (home) => {
+      try { return pidsWithCodexHome(execFileSync("ps", ["axeww", "-o", "pid=,command="], { encoding: "utf-8", maxBuffer: 64 << 20 }), home); } catch { return []; }
+    },
+    exists: existsSync,
+  };
 }
 
 function ensureJobTable(db: Database): void {
@@ -115,6 +174,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
   const { db, settings, registryPath } = deps;
   ensureJobTable(db);
   try { db.run("ALTER TABLE b3chat_teammate_job ADD COLUMN token_hash TEXT"); } catch { /* 이미 있음 */ }
+  try { db.run("ALTER TABLE b3chat_teammate_job ADD COLUMN workspace TEXT"); } catch { /* 이미 있음 */ }
   const keyPath = deps.linkKeyPath ?? join(dirname(registryPath), "var", "secrets", "b3chat-link.key");
   const remote = deps.remoteAddress ?? defaultRemoteAddress;
   const validate = deps.validateToken ?? validateBotToken;
@@ -125,6 +185,17 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const activateTimeout = deps.activateTimeoutMs ?? ACTIVATE_TIMEOUT_MS;
   const prepareModel = deps.prepareModel ?? writeTeammateModel;
+  const inspectResidue = deps.inspectResidue ?? ((id: string, ws: string) => residueOf(id, realProbe(() => readList().map((a) => a?.id)), ws));
+  const cleanResidue = deps.cleanResidue ?? (async (id: string, left: Residue[]) => {
+    // 명단에 남았으면 여기서 손대지 않는다 — 명단 제거는 퇴사 API 한 곳에서만(다음 재시도가 그 API 를 다시 부른다).
+    if (left.includes("registry")) return;
+    const home = codexBridgePaths(id).codexHome;
+    const probe = realProbe(() => []);
+    if (left.some((k) => k === "launchd" || k === "process" || k === "files")) {
+      await teardownRuntime(id, "codex", undefined, { codexBridgePids: () => probe.envPids(home) });
+    }
+    if (left.includes("workdir")) archiveWorkspace(id, "codex");
+  });
 
   const fail = (c: Context, status: 400 | 403 | 404 | 409 | 500, code: JobCode | "forbidden" | "bad_request" | "not_found", stage: string, retryable = false) =>
     c.json({ ok: false, code, retryable, stage }, status);
@@ -225,18 +296,33 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
   });
 
   async function removeMember(jobId: string, id: string): Promise<void> {
+    const failed = (cleanup: string) => setJob(jobId, { state: "remove_failed", stage: "remove", code: "cleanup_failed", retryable: 1, cleanup });
     let target: any;
-    try { target = readList().find((a) => a?.id === id); } catch {
-      return setJob(jobId, { state: "remove_failed", stage: "remove", code: "cleanup_failed", retryable: 1 });
+    try { target = readList().find((a) => a?.id === id); } catch { return failed("registry_unreadable"); }
+    // 명단을 지우기 전에 복구에 필요한 것(작업폴더 위치)을 작업 기록에 남긴다 — 명단이 사라진 뒤 재시도도 같은 곳을 센다.
+    if (target) {
+      db.query("UPDATE b3chat_teammate_job SET workspace = ? WHERE id = ?")
+        .run(typeof target.workspace_path === "string" && target.workspace_path ? target.workspace_path : memberPaths(id, "codex").workspace_path, jobId);
     }
-    // 이미 명단에 없다 = 만들기 실패 때 되돌렸거나 전에 지웠다. 할 일 없이 끝.
-    if (!target) return setJob(jobId, { state: "removed", stage: "removed", cleanup: "removed" });
-    const r = await settings.request(`/members/${id}`, {
-      method: "DELETE", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ confirm_name: target.display_name }),
-    });
-    if (r.ok || r.status === 404) return setJob(jobId, { state: "removed", stage: "removed", cleanup: "removed" });
-    setJob(jobId, { state: "remove_failed", stage: "remove", code: "cleanup_failed", retryable: 1, cleanup: `remove_failed_${r.status}` });
+    const ws = (db.query("SELECT workspace FROM b3chat_teammate_job WHERE id = ?").get(jobId) as { workspace: string | null } | null)?.workspace
+      ?? memberPaths(id, "codex").workspace_path;
+    // 1) 명단에 있으면 기존 퇴사 API(명단·OT·슬랙·작업폴더 보관·감사까지 한 경로). ★200 이어도 정리 완료의 증거가 아니다★ —
+    //    그 API 는 종료 미확인·파일 삭제 오류에도 200 을 준다. 그래서 아래 2) 에서 남은 것을 직접 센다.
+    if (target) {
+      const r = await settings.request(`/members/${id}`, {
+        method: "DELETE", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confirm_name: target.display_name }),
+      });
+      if (!r.ok && r.status !== 404) return failed(`offboard_${r.status}`);
+    }
+    // 2) 남은 것 → 있으면 한 번 더 정리 → 다시 센다. 명단이 이미 없어도(지난번 중간에 멈춤) 여기서 이어서 치운다.
+    let left = await inspectResidue(id, ws);
+    if (left.length) {
+      try { await cleanResidue(id, left); } catch { /* 다시 세어 판정 */ }
+      left = await inspectResidue(id, ws);
+    }
+    if (left.length) return failed(`left:${left.join(",")}`);
+    setJob(jobId, { state: "removed", stage: "removed", code: null, retryable: 0, cleanup: "removed" });
   }
 
   async function runJob(j: { jobId: string; id: string; displayName: string; role: string; roomId: string; token: string; apiBase: string }): Promise<void> {
