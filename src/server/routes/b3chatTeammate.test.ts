@@ -48,6 +48,7 @@ function setup(opts: { activate?: () => Response | Promise<Response>; greetedAft
     db, settings, registryPath, linkKeyPath: keyPath,
     remoteAddress: () => "127.0.0.1",
     validateToken: async () => (opts.tokenOk === false ? { ok: false, error: "bot_token_dead" } : { ok: true, username: "testmate" }),
+    modelConfigPath: (id) => join(dir, `${id}.config.toml`),
     prepareModel: (id) => calls.push(`model:${id}`),
     callBridge: async (r) => { bridgeReqs.push(r); return opts.bridgeOk === false ? { ok: false, reason: "no_window" } : { ok: true, duplicate: false }; },
     greeted: () => ++greetPolls > (opts.greetedAfter ?? 1),
@@ -474,4 +475,23 @@ describe("남은 것 세기 — 순수 단계", () => {
     expect(archiveWorkspaceAt("zzmate", other, join(root, ".archived"))).toBeNull();
     expect(existsSync(other)).toBe(true);
   });
+});
+
+describe("cogs model selection",()=>{
+ test("only app-created Codex teammate accepts a verified model",async()=>{
+  const s=setup(); await s.waitJob(await s.post(BODY));
+  const path=join(s.dir,"testmate.config.toml");
+  writeFileSync(path,'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "low"\n');
+  const request=(method:string,model?:string)=>s.app.request("/members/b3chat/member/testmate/model",{method,headers:{"x-b3chat-link":KEY,"content-type":"application/json"},...(model ? {body:JSON.stringify({model})}: {})});
+  const read=await request("GET");expect(read.status).toBe(200);
+  expect(await read.json()).toMatchObject({model:"gpt-6.1-sol",models:["gpt-6-luna","gpt-6.1-sol"],restart_required:false});
+  const bad=await request("PUT","sonnet");expect(bad.status).toBe(400);
+  expect(readFileSync(path,"utf-8")).toContain('model = "gpt-6.1-sol"');
+  const saved=await request("PUT","gpt-6-luna");expect(saved.status).toBe(200);
+  expect(await saved.json()).toMatchObject({model:"gpt-6-luna",applies:"next_request"});
+  expect(readFileSync(path,"utf-8")).toContain('model_reasoning_effort = "low"');
+  const forbidden=await s.app.request("/members/b3chat/member/testmate/model",{headers:{}});expect(forbidden.status).toBe(403);
+  const list=JSON.parse(readFileSync(s.registryPath,"utf-8"));list.find((a: {id:string}) => a.id === "testmate").team_official_member=true;writeFileSync(s.registryPath,JSON.stringify(list));
+  expect((await request("PUT","gpt-6.1-sol")).status).toBe(404);
+ });
 });

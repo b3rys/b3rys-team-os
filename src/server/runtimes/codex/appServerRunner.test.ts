@@ -51,3 +51,17 @@ test("★대조군 — 넘겨야 하는 것은 그대로 간다★ (cwd · model
   const a = await startArgs({ cwd: "/tmp/ws", model: "gpt-x", resumeSessionId: "th_prev" });
   expect({ cwd: a.cwd, model: a.model, resume: a.resumeThreadId }).toEqual({ cwd: "/tmp/ws", model: "gpt-x", resume: "th_prev" });
 });
+
+test("partial assistant text is forwarded to the channel before completion", async () => {
+  const texts: string[] = [];
+  const client = () => ({
+    currentThreadId:"partial-thread", async start() {}, async startThread() { return "partial-thread"; },
+    async runTurn(_prompt: string, handlers: {onDelta?: (text: string) => void}) {
+      handlers.onDelta?.("first"); handlers.onDelta?.(" second");
+      expect(texts).toEqual(["first"," second"]);
+      return {status:"completed",finalText:"first second",turnId:"partial-turn",detail:""};
+    }, close() {},
+  }) as unknown as import("./appServerClient").CodexAppServerClient;
+  const result=await runViaAppServer({agentId:"probe",prompt:"p",onDelta:text=>texts.push(text)},undefined,client);
+  expect(result.reply).toBe("first second");
+});
