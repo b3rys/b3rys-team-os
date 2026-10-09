@@ -40,7 +40,7 @@ A schema library (zod, valibot) does the same job; the point is that the check e
 
 ## Fakes in tests
 
-`mock.module` / `vi.mock` / `jest.mock` replace a module for the whole test file. Replacing an outside system (a third-party SDK, a token reader) is fine. Replacing a function of the project's own modules is not: the real function can change its arguments or stop writing, and the test stays green. Example in this repo: `src/server/workers/slackPoll.test.ts` fakes the Slack token reader (outside — fine) and also `handleAppMention` and `appendAudit` (own modules — candidates to replace with a real in-memory DB).
+`mock.module` / `vi.mock` / `jest.mock` replace a module for the whole test file. Replacing an outside system (a third-party SDK, a token reader) is fine, and so is passing a fake into an injected interface. Replacing project functions that the tested code imports directly is the risky case: the real function can change its arguments or stop writing, and the test stays green. Example in this repo: `src/server/workers/slackPoll.test.ts` fakes the Slack token reader (outside — fine) and also `handleAppMention` and `appendAudit` (project functions imported directly — candidates to pass in as dependencies, or to run for real against an in-memory DB with their own test).
 
 ## Lint candidates
 
@@ -49,7 +49,7 @@ From `dmmulroy/anti-slop` (Oxlint JS plugin, vendored by copying):
 - `no-chained-type-assertions` — `as unknown as T`
 - `require-safety-comment-for-type-assertion` — a non-`const` assertion needs a nearby `SAFETY:` line
 - `no-widen-then-assert` — widen to `unknown`/`any`/`object`, then assert back
-- `no-module-mocking` — `vi.mock` / `jest.mock` (too strict on its own: outside systems are fine to fake; use with an allow-list or as a warning)
+- `no-module-mocking` — `vi.mock` / `jest.mock` (too strict on its own: outside systems and injected interfaces are fine to fake; use with an allow-list or as a warning)
 
 **Limits:** the rules read syntax within one file; they do not run the type checker and cannot see contracts in other files. A `SAFETY:` rule checks that a comment exists, not that it is true — the reviewer still opens the named check.
 

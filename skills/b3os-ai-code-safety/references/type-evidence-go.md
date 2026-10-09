@@ -1,6 +1,6 @@
 # Type evidence — Go
 
-**What goes wrong:** a type assertion without the `ok` form panics when the value is a different type. In a server, an unrecovered panic in a handler goroutine can take the whole process down.
+**What goes wrong:** a type assertion is checked at run time; without the `ok` form, a failed check panics instead of returning a value the code can handle. In a server, an unrecovered panic in a handler goroutine can take the whole process down.
 
 ## Patterns
 
@@ -32,7 +32,7 @@ Only when the value was put there by the same package a few lines earlier (e.g. 
 
 ## Fakes in tests
 
-Interfaces are Go's normal seam: fake the outside system (HTTP client, clock, third-party API) behind an interface; run the project's own store/handler code for real against a temporary database (`t.TempDir()` SQLite, or `httptest.Server` for HTTP).
+Interfaces are Go's normal seam: a fake passed into an interface is fine — outside systems (HTTP client, clock, third-party API) or the project's own ports. Don't fake the code the test is checking, and give each important real adapter its own test against a temporary resource (`t.TempDir()` SQLite, or `httptest.Server` for HTTP).
 
 ## Lint candidates
 

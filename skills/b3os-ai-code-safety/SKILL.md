@@ -32,8 +32,8 @@ Two throughlines:
 - **Replace conditional sprawl with data or polymorphism.** A `switch`/`if-else` on a type that grows, or the same branch repeated in several files, is a smell. Replace with a **lookup map**, a **factory/strategy**, or polymorphism — so a new case is one new entry, not a new branch edited in N places.
 - **Small functions, small interfaces.** One function = one job; one interface = the narrow capability the caller needs. Small units are the precondition for cheap refactoring.
 - **Isolate the effect by name.** Effectful functions are explicit: `save*`, `publish*`, `charge*`, `send*`, `delete*` at the edges — never buried inside pure-looking logic.
-- **Check input where it is read; don't assert it.** Data that comes from outside the program — JSON, a DB column, a file, a network response, user input — is checked in code at the point where it is read, and only then becomes a concrete type. A type assertion (`x as T`, `as!`, `x.(T)`) or a checker suppression tells the compiler "trust me" and skips that check: when the data is different, TypeScript code goes quietly wrong and Swift/Go code crashes.
-- **An unavoidable assertion names what makes it safe.** When a forced cast, forced `try`, forced unwrap, or checker suppression is genuinely safe (e.g. a regex pattern fixed in source), write the condition that makes it safe and the code location or *existing* test that guarantees it. The reviewer opens the named test; a comment alone is not proof. Per-language patterns and exceptions: `references/type-evidence-<language>.md`.
+- **Check input where it is read; don't assert it.** Data that comes from outside the program — JSON, a DB column, a file, a network response, user input — is checked in code at the point where it is read, and only then becomes a concrete type. A TypeScript assertion (`x as T`) or a checker suppression tells the compiler "trust me" and adds no run-time check, so different data goes through quietly wrong. Swift `as!` / forced unwrap and Go `x.(T)` do check at run time — and stop the program (trap/panic) when the check fails, instead of letting the code handle it. Neither replaces checking the data where it is read.
+- **An unavoidable assertion names what makes it safe.** When a forced cast, forced `try`, forced unwrap, or checker suppression is genuinely safe — there is a demonstrated invariant, e.g. a regex pattern written in source and built by a test, or a constructor that only receives already-validated parts — write the condition that makes it safe and the code location or *existing* test that guarantees it. The reviewer opens the named test; a comment alone is not proof. Per-language patterns and exceptions: `references/type-evidence-<language>.md`.
 
 **Operational Effect gates** (apply while writing; the correctness AI most often misses):
 1. **Side-effect boundary** — every effect named, placed at an edge, and known whether it can run twice.
@@ -53,7 +53,7 @@ Two throughlines:
   2. **격리 실행** — 공유 작업트리가 아니라 사본이나 별도 worktree 에서 돌린다.
   3. **원복 확인** — 끝나고 `git status` / `git diff` 로 되돌아왔는지 **눈으로 본다.** ★`git checkout --` 은 HEAD 기준이라 같은 파일의 미커밋 작업까지 지운다★ — 사본을 떠두고 사본에서 복원한다.
   - 적용됐는데도 테스트가 통과하면 **다음은 입력을 의심한다** — 변이는 걸렸는데 테스트 입력이 그 분기를 안 지나갔을 수 있다.
-- **Run your own code for real; fake only what you don't own.** A test may replace systems outside the project (a third-party API, the network, the clock, a token reader) — not functions of your own modules. A faked own function keeps the test green after the real one changes (its arguments, its write). Use a real throwaway resource instead (an in-memory DB). Add one case each for malformed input and for the failure path of an important connection.
+- **Don't fake what the test is checking.** Run the responsibility under test for real. Doubles belong at an explicit dependency boundary — an injected interface (like `OrderRepository` below) or an outside system (a third-party API, the network, the clock) — not as a module-level replacement of project functions the tested code calls directly: a replaced function keeps the test green after the real one changes its arguments or stops writing. The real adapter behind each important boundary gets its own test against a real throwaway resource (an in-memory DB, a local test server). Add one case each for malformed input and for the failure path of that connection.
 
 ---
 
@@ -73,7 +73,7 @@ AI agents work from a narrow slice of the codebase — the open file and its nei
 
 **The cost of moving a rule up:** the stronger the layer, the more a false positive costs — a check that blocks legitimate changes ends up deleted. Before moving a rule up, run the check against the broken case (it must fail) and a legitimate change (it must pass).
 
-**Moving the type-evidence rules up (lint/CI):** pick candidate rules per language (`references/type-evidence-<language>.md`), try each on a broken, a valid, and an allowed-exception example, then record today's count as a baseline — product code and probe/test code counted separately — and fail CI only when the count rises. A one-line fix must not force someone to clean up every old violation in that file. "Fake only what you don't own" cannot be checked by a tool; it lives as a line in the review report below.
+**Moving the type-evidence rules up (lint/CI):** pick candidate rules per language (`references/type-evidence-<language>.md`), try each on a broken, a valid, and an allowed-exception example, then record today's violations as a baseline — each one identified by rule and location (tolerant of moved lines), product code and probe/test code kept separate — and fail CI on any violation not in the baseline or made worse. A total count alone lets a new violation hide behind a fixed old one; use counts for reporting, not for the gate. A one-line fix must not force someone to clean up every old violation in that file. "Don't fake what the test is checking" cannot be checked by a tool; it lives as a line in the review report below.
 
 **Apply by project size — general rule, then fit to the situation:**
 
@@ -131,7 +131,7 @@ AI code safety:
 - refactor applied (smell → move), if any:
 - tests + behavior evidence (real run, not just tsc/unit):
 - new type assertions / checker suppressions — what makes each safe + the existing test or code that guarantees it:
-- fakes in tests — only systems outside the project? (if an own function is faked: why):
+- fakes in tests — at an explicit dependency boundary, not replacing what the test checks? real adapter tested separately?:
 - reviewer (harness or member) + what they verified:
 - unverified scope · rollback path:
 ```
@@ -349,7 +349,7 @@ export const remainingForFreeShip = (total: number): number =>
 - "Let's make interfaces for everything" without a real volatility boundary. · "We used a transaction, so it's safe."
 - Refactor + feature change in one commit. · Refactoring without pinning behavior first.
 - Adding another branch to a growing switch instead of a map/strategy.
-- `as unknown as T` / `as!` / `try!` to silence the compiler. · A "SAFETY" comment that names a test which does not exist. · Faking your own module so the test passes.
+- `as unknown as T` / `as!` / `try!` to silence the compiler. · A "SAFETY" comment that names a test which does not exist. · Replacing the code under test (or a function it calls directly) with a fake so the test passes.
 
 ## Source Anchors
 

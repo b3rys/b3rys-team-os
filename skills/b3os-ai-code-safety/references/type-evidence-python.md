@@ -35,7 +35,7 @@ pydantic / dataclass validators do the same job for larger shapes.
 
 ## Fakes in tests
 
-`unittest.mock.patch` on an outside system (HTTP, clock, SDK) is fine. Patching the project's own functions keeps the test green after the real function changes; use a real temporary resource (`tmp_path`, in-memory SQLite) instead.
+`unittest.mock.patch` on an outside system (HTTP, clock, SDK), or a fake passed in as a dependency, is fine. Patching project functions that the tested code calls directly keeps the test green after the real function changes; pass them in as dependencies, and test the real one against a temporary resource (`tmp_path`, in-memory SQLite).
 
 ## Lint candidates
 

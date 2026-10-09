@@ -1,29 +1,29 @@
 # Type evidence — Swift
 
-**What goes wrong:** Swift checks types and thread safety while compiling. The forced forms (`as!`, `try!`, `!`) skip a check and **crash the app** when the assumption is false — in release builds too. The concurrency escape hatches skip the compiler's data-race check and can corrupt state silently.
+**What goes wrong:** Swift checks types and thread safety while compiling. The forced forms (`as!`, `try!`, `!`) still check at run time, but when the check fails they **stop the app** (trap) instead of letting the code recover — in release builds too. The concurrency escape hatches turn off the compiler's data-race check and can corrupt state silently.
 
 ## Patterns
 
-| Pattern | What it skips | Failure when wrong |
+| Pattern | What it gives up | Failure when wrong |
 |---|---|---|
-| `x as! T` | the type check | crash |
+| `x as! T` | recovering from a wrong type | crash |
 | `try! f()` | handling the error | crash |
-| `optional!` | the nil check | crash |
-| `dict[key]!` | "this key exists" | crash |
+| `optional!` | handling nil | crash |
+| `dict[key]!` | handling a missing key | crash |
 | `fatalError(...)`, `precondition(...)` | — (deliberate stop) | crash, release builds included |
 | `unsafeBitCast(x, to: T.self)` | the type system entirely (reinterprets memory) | undefined behavior |
-| `nonisolated(unsafe)` | data-race check on a variable | silent corruption |
-| `@unchecked Sendable` | data-race check on a type | silent corruption |
-| `MainActor.assumeIsolated { }` | "am I on the main thread?" at compile time | crash if called off main |
+| `nonisolated(unsafe)` | the compile-time data-race check on a variable | silent corruption |
+| `@unchecked Sendable` | the compile-time data-race check on a type | silent corruption |
+| `MainActor.assumeIsolated { }` | the compile-time main-thread check | crash if called off main |
 
 ## When a forced form is acceptable
 
-The value that could fail must be **fixed in source**, not computed at run time.
+There must be a **demonstrated invariant** — a reason the failure cannot happen that someone can check. The most common one: the value that could fail is written in source, not computed at run time.
 
 ```swift
-// Acceptable — the pattern text is written in the code and never changes.
-// If it compiled into a working regex once, it does on every machine, every launch.
-// SAFETY: fixed pattern; <existing test name> builds it on every run.
+// Acceptable — the pattern text is written in the code and never changes,
+// and a test builds it, so a bad pattern fails in CI before release.
+// SAFETY: fixed pattern; <existing test name> builds it.
 private static let pattern = try! NSRegularExpression(pattern: "&(#[0-9]{1,7}|[A-Za-z][A-Za-z0-9]{1,31});")
 
 // Not acceptable — the pattern comes from the user; a missing bracket crashes the app.
