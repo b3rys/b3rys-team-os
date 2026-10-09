@@ -43,6 +43,6 @@ Faking the AI provider or the network is fine (outside the project). Screen stat
 
 ## Lint candidates
 
-SwiftLint: `force_cast`, `force_try`, `force_unwrapping` (opt-in). Custom regex rules for `nonisolated(unsafe)`, `@unchecked Sendable`, `unsafeBitCast` that fail only when the count rises.
+SwiftLint: `force_cast`, `force_try`, `force_unwrapping` (opt-in). Custom regex rules for `nonisolated(unsafe)`, `@unchecked Sendable`, `unsafeBitCast`, gated by the per-violation baseline in `SKILL.md` (fail only on violations that are new or worse, not on a total count).
 
 **Counting:** probe/test harness code legitimately uses forced forms; count it separately from product code, or the baseline looks larger than the product risk. Turn on per the baseline procedure in `SKILL.md`.
