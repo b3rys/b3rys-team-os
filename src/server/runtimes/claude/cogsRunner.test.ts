@@ -13,7 +13,7 @@ test("app Claude launch strips Telegram credentials and ignores workspace plugin
  writeFileSync(binary,`#!/usr/bin/env python3
 import json,os,sys
 args=sys.argv[1:]
-json.dump({'telegram_keys':[k for k in os.environ if k.startswith('TELEGRAM_')],'bot_key': 'CODEX_BOT_TOKEN' in os.environ,'cwd':os.getcwd(),'project_settings':os.path.exists('.claude/settings.json'),'args':args},open(${JSON.stringify(capture)},'w'))
+json.dump({'telegram_keys':[k for k in os.environ if k.startswith('TELEGRAM_')],'bot_key': 'CODEX_BOT_TOKEN' in os.environ,'cwd':os.getcwd(),'project_settings':os.path.exists('.claude/settings.json'),'args':args,'pgid':os.getpgrp(),'parent_pgid':os.getpgid(os.getppid())},open(${JSON.stringify(capture)},'w'))
 print(json.dumps({'type':'stream_event','session_id':'session-probe','event':{'type':'content_block_delta','delta':{'type':'text_delta','text':'첫 글자'}}}),flush=True)
 print(json.dumps({'type':'result','result':'완료','is_error':False,'session_id':'session-probe'}),flush=True)
 `);chmodSync(binary,0o700);
@@ -23,6 +23,7 @@ print(json.dumps({'type':'result','result':'완료','is_error':False,'session_id
   const deltas:string[]=[];const result=await runClaudeCogsTurn({agentId:"testmate",cwd:workspace,codexHome:home,prompt:"question",model:"sonnet",onDelta:text=>deltas.push(text)});
   expect(result.ok).toBe(true);expect(deltas).toEqual(["첫 글자"]);expect(result.reply).toBe("완료");
   const observed=JSON.parse(readFileSync(capture,"utf-8"));
+  expect(observed.pgid).toBe(observed.parent_pgid);
   expect(observed.telegram_keys).toEqual([]);expect(observed.bot_key).toBe(false);expect(observed.cwd).toBe(realpathSync(join(home,"runtime")));expect(observed.project_settings).toBe(false);
   expect(observed.args).toContain("--safe-mode");expect(observed.args).toContain("--strict-mcp-config");expect(observed.args).toContain("--include-partial-messages");
   expect(JSON.parse(observed.args[observed.args.indexOf("--mcp-config")+1])).toEqual({mcpServers:{}});
@@ -41,6 +42,37 @@ test("Claude app wrapper uses its app channel and no Telegram launcher",()=>{
 });
 test("Claude model values are validated before spawn",()=>{
  expect(()=>claudeCogsArguments({agentId:"testmate",prompt:"x",model:"gpt-6-luna"},"")).toThrow("unsupported_model");
+});
+
+test("Claude timeout force-kills an unresponsive CLI without replacing bridge signal handlers",async()=>{
+ const root=mkdtempSync(join(tmpdir(),"cogs-claude-timeout-"));
+ const binary=join(root,"fake-claude"),capture=join(root,"pid");
+ writeFileSync(binary,`#!/usr/bin/env python3
+import json,os,signal,time
+signal.signal(signal.SIGTERM,signal.SIG_IGN)
+open(${JSON.stringify(capture)},'w').write(str(os.getpid()))
+print(json.dumps({'type':'stream_event','event':{'type':'content_block_delta','delta':{'type':'text_delta','text':'ready'}}}),flush=True)
+while True: time.sleep(1)
+`);chmodSync(binary,0o700);
+ const prior=process.env.CLAUDE_BIN;
+ const termListeners=process.listeners("SIGTERM"),intListeners=process.listeners("SIGINT");
+ process.env.CLAUDE_BIN=binary;
+ let childPid:number|undefined;
+ try {
+  let handlersUnchanged=false;
+  const result=await runClaudeCogsTurn({agentId:"testmate",prompt:"x",timeoutMs:1000,onDelta:()=>{
+   childPid=Number(readFileSync(capture,"utf-8"));
+   handlersUnchanged=process.listeners("SIGTERM").length===termListeners.length && process.listeners("SIGINT").length===intListeners.length;
+  }});
+  expect(result.ok).toBe(false);expect(result.detail).toBe("timeout");
+  expect(handlersUnchanged).toBe(true);expect(childPid).toBeDefined();
+  expect(()=>process.kill(childPid!,0)).toThrow();
+  expect(process.listeners("SIGTERM")).toEqual(termListeners);expect(process.listeners("SIGINT")).toEqual(intListeners);
+ } finally {
+  if(childPid){try{process.kill(childPid,"SIGKILL");}catch{/* already gone */}}
+  if(prior===undefined)delete process.env.CLAUDE_BIN;else process.env.CLAUDE_BIN=prior;
+  rmSync(root,{recursive:true,force:true});
+ }
 });
 
  test("Claude app launcher seeds Sonnet only for a missing config",()=>{

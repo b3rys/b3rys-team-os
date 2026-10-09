@@ -32,13 +32,13 @@ export async function runClaudeCogsTurn(opts: CodexTurnOptions): Promise<CodexTu
       ...["SOUL.md","CLAUDE.md"].map(name=>{try{return readFileSync(join(opts.cwd ?? cwd,name),"utf-8");}catch{return "";}}),
       "This conversation is in the cogs app. Return your answer as assistant text; the bridge delivers it. Do not use Telegram plugins or messenger sending scripts."].join("\n");
     const child=spawn(process.env.CLAUDE_BIN || "claude",claudeCogsArguments(opts,persona),
-      {cwd,env:claudeCogsEnvironment(process.env),stdio:["pipe","pipe","ignore"],detached:true});
-    const kill=()=>{if(child.pid){try{process.kill(-child.pid,"SIGTERM");}catch{/* already gone */}}};
-    const force=()=>{if(child.pid){try{process.kill(-child.pid,"SIGKILL");}catch{/* already gone */}}};
+      // Keep the CLI in the bridge's process group for LaunchAgent teardown.
+      {cwd,env:claudeCogsEnvironment(process.env),stdio:["pipe","pipe","ignore"],detached:false});
+    const kill=()=>{try{child.kill("SIGTERM");}catch{/* already gone */}};
+    const force=()=>{try{child.kill("SIGKILL");}catch{/* already gone */}};
     let forceTimer:ReturnType<typeof setTimeout>|undefined;
     const timer=setTimeout(()=>{failure=true;detail="timeout";kill();forceTimer=setTimeout(force,1000);},opts.timeoutMs ?? 210000);
     const stop=()=>{kill();force();};
-    process.once("SIGTERM",stop);process.once("SIGINT",stop);
     const ended=new Promise<number|null>((resolve,reject)=>{child.once("error",reject);child.once("close",resolve);});
     // Register rejection handler before reading the stream.
     void ended.catch(()=>{});
@@ -66,7 +66,7 @@ export async function runClaudeCogsTurn(opts: CodexTurnOptions): Promise<CodexTu
       if(await ended !== 0){failure=true;if(detail !== "timeout")detail="runtime_failed";}
     } finally {
       clearTimeout(timer);if(forceTimer)clearTimeout(forceTimer);
-      process.off("SIGTERM",stop);process.off("SIGINT",stop);stop();
+      stop();
     }
     return {ok:!failure && !!text.trim(),reply:text,sessionId,detail,elapsedMs:Date.now()-started};
   } catch {return {ok:false,reply:text,sessionId,detail:"runtime_failed",elapsedMs:Date.now()-started};}
