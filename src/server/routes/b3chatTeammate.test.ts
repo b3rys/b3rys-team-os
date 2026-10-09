@@ -116,7 +116,7 @@ describe("인증 — 같은 기계 직접 + 공유 비밀", () => {
 describe("입력", () => {
   test("모양이 틀리면 400 bad_request (id·runtime·room·api_base·토큰)", async () => {
     const s = setup();
-    for (const patch of [{ id: "Bad Id" }, { id: "1abc" }, { runtime: "claude_channel" }, { room_id: "0" }, { api_base: "http://evil.example.com" }, { bot_token: "nope" }, { display_name: "" }]) {
+    for (const patch of [{ id: "Bad Id" }, { id: "1abc" }, { runtime: "unsupported" }, { room_id: "0" }, { api_base: "http://evil.example.com" }, { bot_token: "nope" }, { display_name: "" }]) {
       const r = await s.post({ ...BODY, ...patch });
       expect(r.status).toBe(400);
       expect(((await r.json()) as { code: string }).code).toBe("bad_request");
@@ -495,3 +495,14 @@ describe("cogs model selection",()=>{
   expect((await request("PUT","gpt-6.1-sol")).status).toBe(404);
  });
 });
+
+ test("Claude app teammate recruits its runtime and accepts only Sonnet or Opus",async()=>{
+  const s=setup();const job=await s.waitJob(await s.post({...BODY,runtime:"claude_channel"}));
+  expect(job.state).toBe("ready");expect(s.calls).toContain("recruit:testmate:claude_channel");
+  const path=join(s.dir,"testmate.config.toml");writeFileSync(path,'model = "sonnet"\n[other]\nvalue = "keep"\n');
+  const req=(model?:string)=>s.app.request("/members/b3chat/member/testmate/model",{method:model ? "PUT":"GET",headers:{"x-b3chat-link":KEY,"content-type":"application/json"},...(model ? {body:JSON.stringify({model})}:{})});
+  expect(await (await req()).json()).toMatchObject({runtime:"claude",model:"sonnet",models:["sonnet","opus"]});
+  expect((await req("gpt-6-luna")).status).toBe(400);
+  expect(await (await req("opus")).json()).toMatchObject({model:"opus",restart_required:false,applies:"next_request"});
+  expect(readFileSync(path,"utf-8")).toContain('value = "keep"');
+ });

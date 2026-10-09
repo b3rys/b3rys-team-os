@@ -1355,3 +1355,16 @@ describe("cogs partial replies",()=>{
   expect(edits[0]?.at).toBeGreaterThanOrEqual(300);
  });
 });
+
+test("cogs turn failure preserves streamed text and ends response state",async()=>{
+ const home=mkdtempSync(join(tmpdir(),"cogs-failure-home-"));
+ const edits:{text:string;state?:string}[]=[];
+ const result=await handleMessage(92,"question",5,{
+  agentId:"failureprobe",codexHome:home,workdir:home,sandbox:"read-only",
+  channel:{kind:"b3chat",apiBase:"http://127.0.0.1:8741",allowFrom:["92"],ownerChat:"92"},
+  sendMessage:async()=>6,editMessage:async(_chat,_id,text,state)=>{edits.push({text,state});return true;},
+  runTurn:async options=>{options.onDelta?.("부분 본문");return {ok:false,reply:"",detail:"timeout",elapsedMs:0};},
+ });
+ expect(result.turnOk).toBe(false);expect(edits.at(-1)?.state).toBe("complete");
+ expect(edits.at(-1)?.text).toContain("부분 본문");expect(edits.at(-1)?.text).toContain("응답을");
+});

@@ -1,3 +1,5 @@
+import { readMemberChannel } from "./memberChannel";
+import { claudeCogsPaths, writeClaudeCogsFiles, removeClaudeCogsFiles } from "../runtimes/claude/cogsLauncher";
 // 대시보드-실행-활성화: 영입 마지막 단계 = 서버가 런타임을 활성화한다.
 // = 수동(데본·루이 손으로 AGENTS.md·런타임)이던 걸 자동화. GD 클릭 → 서버 실행 → 터미널 0.
 //
@@ -114,6 +116,8 @@ export interface TeardownDeps {
   codexBridgePids?: (id: string) => number[];
   /** codex: 끈 뒤 그 pid 들이 사라질 때까지 기다리는 상한(기본 10초) */
   codexExitWaitMs?: number;
+  appChannel?: boolean;
+  removeClaudeCogsFiles?: typeof removeClaudeCogsFiles;
   isAlive?: (pid: number) => boolean;
 }
 
@@ -133,14 +137,15 @@ export async function teardownRuntime(
   const HH = process.env.HOME ?? "";
 
   // codex teardown: 브리지 정지(bootout) + plist/wrapper/토큰/CODEX_HOME 정리 — 고아 프로세스·잔존 시크릿 방지(best-effort).
-  if (runtime === "codex") {
+  if (runtime === "codex" || (runtime === "claude_channel" && (opts.appChannel ?? readMemberChannel(id).kind === "b3chat"))) {
+    const cogsClaude = runtime === "claude_channel";
     // ★끄기 전에 브리지·자식(codex app-server) pid 를 잡고, 끈 뒤 사라질 때까지 기다렸다 지운다.★
     //   바로 지우면 꺼지던 프로세스가 CODEX_HOME 잠금 폴더를 다시 만든다(실측).
     let pids: number[] = [];
-    try { pids = (opts.codexBridgePids ?? liveCodexBridgePids)(id); } catch { pids = []; }
-    try { await doSetAgentEnabled(id, "codex", false); } catch { /* best-effort */ }
+    try { pids = opts.codexBridgePids ? opts.codexBridgePids(id) : cogsClaude ? (()=>{const pid=readBridgePid(claudeCogsPaths(id).pidFile,id);return pid ? [pid,...descendantPids(pid)] : [];})() : liveCodexBridgePids(id); } catch { pids = []; }
+    try { await doSetAgentEnabled(id, runtime, false, cogsClaude ? {...readMemberChannel(id),kind:"b3chat"} : undefined); } catch { /* best-effort */ }
     const exited = await waitForExit(pids, { timeoutMs: opts.codexExitWaitMs ?? 10_000, isAlive: opts.isAlive });
-    try { doRemoveCodexBridgeFiles(id, { removeToken: true, removeHome: true }); } catch { /* best-effort */ }
+    try { cogsClaude ? (opts.removeClaudeCogsFiles ?? removeClaudeCogsFiles)(id) : doRemoveCodexBridgeFiles(id, { removeToken: true, removeHome: true }); } catch { /* best-effort */ }
     return { ok: true, detail: exited ? "codex teardown 완료(브리지 종료 확인)" : "codex teardown 완료(브리지 종료 미확인 — 상한 초과, 잔여 파일 확인 필요)" };
   }
   // claude_channel teardown: 봇 LaunchAgent 정지(bootout) + plist/.env(토큰) 정리 — 고아 tmux·잔존 시크릿 방지(best-effort).
@@ -606,23 +611,24 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
 
   // 3) 런타임 활성화(self-mod — 인가된 executor에서만)
   // codex: 텔레그램 브리지 = 토큰 배치 → wrapper/plist 생성 → LaunchAgent bootstrap.
-  if (runtime === "codex") {
+  if (runtime === "codex" || (runtime === "claude_channel" && readMemberChannel(id,input.registryPath).kind === "b3chat")) {
+    const cogsClaude = runtime === "claude_channel";
     if (process.env.APPROVAL_EXECUTION_ENABLED !== "1") {
       steps.push({ step: "runtime", ok: false, detail: "실행 OFF(APPROVAL_EXECUTION_ENABLED≠1) — codex 브리지 기동 건너뜀" });
       return { ok: false, steps, error: "런타임 활성화 권한 OFF(팀장 인가 필요)" };
     }
     try {
       placeCodexToken(id, bot_token);
-      const bridgePaths = writeCodexBridgeFiles(id);
+      const bridgePaths = cogsClaude ? writeClaudeCogsFiles(id,readMemberChannel(id,input.registryPath)) : writeCodexBridgeFiles(id);
       try { rmSync(bridgePaths.pidFile, { force: true }); } catch { /* stale marker cleanup best-effort */ }
       appendAuditFile("activation", "runtime_start", id, { runtime });
-      const res = await setAgentEnabled(id, "codex", true); // 브리지 LaunchAgent bootstrap + off명단 해제
+      const res = await setAgentEnabled(id, runtime, true,cogsClaude ? readMemberChannel(id,input.registryPath) : undefined); // 브리지 LaunchAgent bootstrap + off명단 해제
       appendAuditFile("activation", res.ok ? "runtime_done" : "runtime_failed", id, { runtime });
       steps.push({ step: "runtime", ok: res.ok, detail: res.detail });
       if (!res.ok) return { ok: false, steps, error: "codex 브리지 기동 실패" };
       const rawWait = process.env.TEAMOS_POLLER_WAIT_MS;
       const pollerWaitMs = rawWait !== undefined && Number.isFinite(Number(rawWait)) ? Number(rawWait) : 28000;
-      const pollerOk = await waitForCodexPoller(id, pollerWaitMs);
+      const pollerOk = await waitForCodexPoller(id, pollerWaitMs, {pidFile:bridgePaths.pidFile});
       steps.push({ step: "poller", ok: pollerOk, detail: pollerOk ? "codex 브리지 poller 기동 확인(getUpdates ready marker)" : "codex 브리지 poller 미기동(ready marker 없음 — 봇이 메시지를 못 받음, 재활성화 필요)" });
       if (!pollerOk) return { ok: false, steps, error: "codex 브리지 poller 미기동 — 봇이 메시지를 받지 못합니다(재활성화하세요)" };
       if (!(await pushEssentialStep(steps, { id, runtime })).ok) return { ok: false, steps, error: "codex 필수설정 누락 — 재활성화/설정 복구 필요" };

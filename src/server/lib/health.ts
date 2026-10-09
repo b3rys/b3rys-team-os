@@ -1,3 +1,4 @@
+import { readMemberChannel } from "./memberChannel";
 // 에이전트 health 분류 (health-check Phase 1 — observe-only).
 // agent_status(ctx_percent / state / tmux_pid / probed_at)를 읽어 ok/warn/danger 로 분류.
 // 자동 조치(Phase 2)는 별도 — 여기선 판정만.
@@ -142,7 +143,7 @@ export function classifyHealth(
     reasons.push("offline (세션 다운)");
   }
 
-  if (agent?.runtime === "claude_channel" && s.tmux_pid == null && s.state !== "offline") {
+  if (agent?.runtime === "claude_channel" && readMemberChannel(agent.id).kind !== "b3chat" && s.tmux_pid == null && s.state !== "offline") {
     livenessLevel = worse(livenessLevel, "danger");
     reasons.push("tmux 세션 없음");
   }

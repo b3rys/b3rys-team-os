@@ -1,3 +1,5 @@
+import { readMemberChannel } from "../lib/memberChannel";
+import { claudeCogsPaths } from "../runtimes/claude/cogsLauncher";
 import type { Database } from "bun:sqlite";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -388,6 +390,10 @@ export const LIVENESS_PROBES = new Map<string, LivenessProbe>([
   [
     "claude_tmux",
     async (agent, db) => {
+      if (readMemberChannel(agent.id).kind === "b3chat") {
+        const bridge = codexBridgeLiveness(agent.id,{pidFile:claudeCogsPaths(agent.id).pidFile});
+        return buildClaudeCogsStatus(agent.id,bridge);
+      }
       if (!agent.tmux_session) return offlineStatus(agent.id);
       const exists = await tmuxSessionExists(agent.tmux_session);
       const pid = exists ? await tmuxPid(agent.tmux_session) : null;
@@ -468,4 +474,8 @@ export function startStatusProbe(
     stopped = true;
     clearInterval(interval);
   };
+}
+
+export function buildClaudeCogsStatus(agentId:string,bridge:CodexBridgeLiveness):AgentStatus {
+  return {...offlineStatus(agentId),state:bridge.ok ? "idle" : "offline",last_log_line:bridge.ok ? "Claude app bridge ready" : "Claude app bridge unavailable"};
 }

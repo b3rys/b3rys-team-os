@@ -1,3 +1,4 @@
+import { claudeCogsPaths } from "../runtimes/claude/cogsLauncher";
 /**
  * b3chat 앱 [팀원 추가] — b3chat 서버가 같은 맥의 b3os 에 새 AI 팀원을 만들어 달라고 부르는 길.
  *
@@ -59,7 +60,7 @@ export interface B3chatTeammateDeps {
   pollMs?: number;
   activateTimeoutMs?: number;
   /** 모델 설정 쓰기(기본: 그 팀원 CODEX_HOME 의 config.toml) — 시험은 실제 홈을 건드리지 않게 대신 넣는다 */
-  prepareModel?: (id: string) => void;
+  prepareModel?: (id: string, runtime?: string) => void;
   modelConfigPath?: (id: string) => string;
   /** 지운 뒤 남은 것(명단·launchd·프로세스·파일·작업폴더) — 기본은 실제 확인. 시험은 반드시 대신 넣는다. */
   inspectResidue?: (id: string, workspace: string) => Promise<Residue[]> | Residue[];
@@ -88,8 +89,8 @@ export interface ResidueProbe {
 }
 
 /** 지운 뒤 남은 것을 종류별로 센다 — 하나라도 있으면 removed 가 아니다. */
-export function residueOf(id: string, probe: ResidueProbe, workspace = memberPaths(id, "codex").workspace_path): Residue[] {
-  const p = codexBridgePaths(id);
+export function residueOf(id: string, probe: ResidueProbe, workspace = memberPaths(id, "codex").workspace_path, runtime = "codex"): Residue[] {
+  const p = runtime === "claude_channel" ? claudeCogsPaths(id) : codexBridgePaths(id);
   const out: Residue[] = [];
   const check = (kind: Residue, f: () => boolean) => {
     try { if (f()) out.push(kind); } catch { if (!out.includes("unverified")) out.push("unverified"); }
@@ -180,11 +181,12 @@ export function greetingPrompt(displayName: string, role: string): string {
 
 /** 그 팀원 config.toml 의 model 을 고정한다. 없을 때만 시드 — activate 는 이미 있는 config 를 덮지 않는다. */
 
-function writeTeammateModel(id: string): void {
-  const p = codexBridgePaths(id);
-  ensureCodexHome(p);
+function writeTeammateModel(id: string, runtime = "codex"): void {
+  const p = runtime === "claude_channel" ? claudeCogsPaths(id) : codexBridgePaths(id);
+  if (runtime === "codex") ensureCodexHome(p);
+  else mkdirSync(p.codexHome,{recursive:true});
   const cfg = join(p.codexHome, "config.toml");
-  writeFileSync(cfg, setModelLine(existsSync(cfg) ? readFileSync(cfg, "utf-8") : "", B3CHAT_TEAMMATE_MODEL), "utf-8");
+  writeFileSync(cfg, setModelLine(existsSync(cfg) ? readFileSync(cfg, "utf-8") : "", runtime === "claude_channel" ? "sonnet" : B3CHAT_TEAMMATE_MODEL), "utf-8");
 }
 
 export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
@@ -193,24 +195,27 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
   ensureJobTable(db);
   try { db.run("ALTER TABLE b3chat_teammate_job ADD COLUMN token_hash TEXT"); } catch { /* 이미 있음 */ }
   try { db.run("ALTER TABLE b3chat_teammate_job ADD COLUMN workspace TEXT"); } catch { /* 이미 있음 */ }
+  try { db.run("ALTER TABLE b3chat_teammate_job ADD COLUMN runtime TEXT NOT NULL DEFAULT 'codex'"); } catch { /* already migrated */ }
+  const memberRuntime = (id:string):string => (db.query("SELECT runtime FROM b3chat_teammate_job WHERE member_id=? ORDER BY rowid DESC LIMIT 1").get(id) as {runtime:string}|null)?.runtime ?? "codex";
   const keyPath = deps.linkKeyPath ?? join(dirname(registryPath), "var", "secrets", "b3chat-link.key");
   const remote = deps.remoteAddress ?? defaultRemoteAddress;
   const validate = deps.validateToken ?? validateBotToken;
-  const callBridge = deps.callBridge ?? ((req: BridgeWindowRequest) => callCodexBridge(req, { pidFile: codexBridgePaths(req.agentId).pidFile }));
+  const callBridge = deps.callBridge ?? ((req: BridgeWindowRequest) => callCodexBridge(req, { pidFile: (readList().find(a=>a?.id === req.agentId)?.runtime === "claude_channel" ? claudeCogsPaths(req.agentId) : codexBridgePaths(req.agentId)).pidFile }));
   const greeted = deps.greeted ?? hasGreetedFirstContact;
   const greetingWait = deps.greetingWaitMs ?? 150_000;
   const pollMs = deps.pollMs ?? 2_000;
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const activateTimeout = deps.activateTimeoutMs ?? ACTIVATE_TIMEOUT_MS;
   const prepareModel = deps.prepareModel ?? writeTeammateModel;
-  const inspectResidue = deps.inspectResidue ?? ((id: string, ws: string) => residueOf(id, realProbe(() => readList().map((a) => a?.id)), ws));
+  const inspectResidue = deps.inspectResidue ?? ((id: string, ws: string) => residueOf(id, realProbe(() => readList().map((a) => a?.id)), ws, memberRuntime(id)));
   const cleanResidue = deps.cleanResidue ?? (async (id: string, left: Residue[], ws: string) => {
     // 명단에 남았으면 여기서 손대지 않는다 — 명단 제거는 퇴사 API 한 곳에서만(다음 재시도가 그 API 를 다시 부른다).
     if (left.includes("registry")) return;
-    const home = codexBridgePaths(id).codexHome;
+    const runtime = memberRuntime(id);
+    const home = (runtime === "claude_channel" ? claudeCogsPaths(id) : codexBridgePaths(id)).codexHome;
     const probe = realProbe(() => []);
     if (left.some((k) => k === "launchd" || k === "process" || k === "files")) {
-      await teardownRuntime(id, "codex", undefined, { codexBridgePids: () => probe.envPids(home) });
+      await teardownRuntime(id, runtime, undefined, { appChannel:runtime === "claude_channel", codexBridgePids: () => probe.envPids(home) });
     }
     if (left.includes("files")) { try { removeAgentCreds(id); } catch { /* 다시 세어 판정 */ } }
     if (left.includes("workdir")) archiveWorkspaceAt(id, ws);
@@ -247,15 +252,16 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     const member = readList().find(a => a.id === id);
     if (!member || member.team_official_member !== false || member.channel?.kind !== "b3chat") return c.json({code:"not_found"},404);
     // Claude provisioning is handled by its own runtime adapter.
-    if (member.runtime !== "codex") return c.json({code:"unsupported_runtime"},400);
-    const path = deps.modelConfigPath?.(id) ?? join(codexBridgePaths(id).codexHome,"config.toml");
+    if (member.runtime !== "codex" && member.runtime !== "claude_channel") return c.json({code:"unsupported_runtime"},400);
+    const runtime = member.runtime === "codex" ? "codex" : "claude";
+    const path = deps.modelConfigPath?.(id) ?? join((runtime === "claude" ? claudeCogsPaths(id) : codexBridgePaths(id)).codexHome,"config.toml");
     try {
       if (c.req.method === "PUT") {
         const body = await c.req.json();
-        if (!body || typeof body.model !== "string" || !(COGS_MODELS.codex as readonly string[]).includes(body.model)) return c.json({code:"unsupported_model"},400);
-        saveModel(path,"codex",body.model);
+        if (!body || typeof body.model !== "string" || !(COGS_MODELS[runtime] as readonly string[]).includes(body.model)) return c.json({code:"unsupported_model"},400);
+        saveModel(path,runtime,body.model);
       }
-      return c.json({runtime:"codex",model:readModel(path),models:COGS_MODELS.codex,restart_required:false,applies:"next_request"});
+      return c.json({runtime,model:readModel(path),models:COGS_MODELS[runtime],restart_required:false,applies:"next_request"});
     } catch { return c.json({code:"model_unavailable"},503); }
   };
   app.get("/members/b3chat/member/:memberId/model",memberModel);
@@ -270,13 +276,13 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     const roomId = body.room_id == null ? "" : String(body.room_id).trim();
     const token = typeof body.bot_token === "string" ? body.bot_token.trim() : "";
     const channel = parseMemberChannel({ kind: "b3chat", api_base: body.api_base, allow_from: [roomId], owner_chat: roomId });
-    if (!ID_RE.test(id) || !displayName || displayName.length > 40 || body.runtime !== "codex"
+    if (!ID_RE.test(id) || !displayName || displayName.length > 40 || (body.runtime !== "codex" && body.runtime !== "claude_channel")
       || !/^[1-9]\d*$/.test(roomId) || channel.error || !TOKEN_RE.test(token)) {
       return fail(c, 400, "bad_request", "input");
     }
     // ★같은 요청의 재전송이면 같은 작업을 돌려준다(응답 유실 대비 — 멱등).★
     //   같음 = 같은 id + 같은 토큰·방·주소(지문). 실패로 끝난 작업은 되돌림이 끝났으니 새 작업으로 다시 한다.
-    const fp = requestFingerprint(token, roomId, channel.apiBase);
+    const fp = requestFingerprint(token, roomId, channel.apiBase + (body.runtime === "claude_channel" ? "\nclaude_channel" : ""));
     const prev = db.query("SELECT * FROM b3chat_teammate_job WHERE member_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(id) as JobRow | null;
     if (prev && prev.state !== "failed" && prev.state !== "removed") {
       if (prev.token_hash === fp) return c.json({ ok: true, job_id: prev.id, member_id: id, state: prev.state, duplicate: true }, 200);
@@ -293,7 +299,8 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     const jobId = `b3t_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
     db.query("INSERT INTO b3chat_teammate_job (id, member_id, display_name, room_id, state, stage, token_hash) VALUES (?, ?, ?, ?, 'creating', 'accepted', ?)")
       .run(jobId, id, displayName, roomId, fp);
-    void runJob({ jobId, id, displayName, role, roomId, token, apiBase: channel.apiBase })
+    db.query("UPDATE b3chat_teammate_job SET runtime=? WHERE id=?").run(body.runtime,jobId);
+    void runJob({ jobId, id, displayName, role, roomId, token, apiBase: channel.apiBase, runtime:body.runtime as string })
       .catch(() => setJob(jobId, { state: "failed", stage: "internal", code: "internal", retryable: 1 }))
       .finally(() => deps.onJobSettled?.(jobId));
     return c.json({ ok: true, job_id: jobId, member_id: id, state: "creating" }, 202);
@@ -364,7 +371,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     setJob(jobId, { state: "removed", stage: "removed", code: null, retryable: 0, cleanup: "removed" });
   }
 
-  async function runJob(j: { jobId: string; id: string; displayName: string; role: string; roomId: string; token: string; apiBase: string }): Promise<void> {
+  async function runJob(j: { jobId: string; id: string; displayName: string; role: string; roomId: string; token: string; apiBase: string; runtime: string }): Promise<void> {
     const { jobId, id } = j;
     let recruited = false;
     // ★failed 는 되돌림이 끝난 뒤에 적는다★ — b3chat 이 failed 를 보고 봇을 끄는 순간 b3os 쪽 등록도 이미 없어야 한다.
@@ -390,7 +397,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     setJob(jobId, { state: "configuring", stage: "recruit" });
     const rec = await settings.request("/members/recruit", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id, display_name: j.displayName, role: j.role || "AI 팀원", runtime: "codex" }),
+      body: JSON.stringify({ id, display_name: j.displayName, role: j.role || "AI 팀원", runtime: j.runtime }),
     });
     const recBody = (await rec.json().catch(() => ({}))) as { ok?: boolean; ot_id?: string; error?: string };
     if (rec.status === 409) return failJob("recruit", "name_taken", false);
@@ -424,7 +431,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     }
     setJob(jobId, { stage: "model" });
     try {
-      prepareModel(id);
+      prepareModel(id,j.runtime);
     } catch {
       return failJob("model", "internal", true);
     }

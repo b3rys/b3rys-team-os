@@ -237,3 +237,14 @@ describe("runtime essentials strategy registry", () => {
     });
   });
 });
+
+ test("Claude app essentials use app marker and model config without Telegram state",async()=>{
+  const {home,repo}=tmpRoot();const id="testmate";
+  write(join(repo,"var/secrets",`${id}.bot-token`),"fixture");
+  write(join(repo,"var/claude-cogs",`${id}-launch.sh`),'export CODEX_ALLOW_FROM="5"\n');
+  write(join(repo,"var/claude-cogs",`${id}.pid`),JSON.stringify({pid:4242,agentId:id}));
+  write(join(home,"Library/LaunchAgents",`com.${process.env.USER || "local"}.claude-cogs-${id}.plist`),"<plist/>");
+  write(join(home,".claude-agents",id,"config.toml"),'model = "sonnet"\n');
+  const registry=createRuntimeEssentialsRegistry({home,repoRoot:repo,pidAlive:pid=>pid===4242,channelKind:()=>"b3chat"});
+  expect(await checkEssentialSettings({id,runtime:"claude_channel"} as any,registry)).toEqual({ok:true,missing:[],canAutoFix:false});
+ });

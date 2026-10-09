@@ -406,4 +406,15 @@ OUT=$(q_run 15)
 [ -z "$OUT" ] || { echo "FAIL: 대화 본문 인용을 오류로 알렸다 — $OUT" >&2; RC=1; }
 pass_if_clean "대화 본문이 그 문구를 인용해도 알리지 않는다"
 
+# App-only Claude members must not enter Telegram monitoring or auto-recovery.
+printf '%s\n' '[{"id":"testmate","runtime":"claude_channel","channel":{"kind":"b3chat"}}]' > "$T/agents.json"
+: > "$LAUNCHCTL_CALLS"
+: > "$RESTART_CALLS"
+bash "$SCRIPT" > "$T/app-only-out.txt" 2> "$T/app-only-err.txt"
+if [ -s "$LAUNCHCTL_CALLS" ] || [ -s "$RESTART_CALLS" ]; then
+  echo "FAIL: app-only Claude registry triggered Telegram recovery" >&2
+  RC=1
+fi
+pass_if_clean "앱 Claude 팀원은 텔레그램 복구 대상에서 제외함"
+
 exit "$RC"

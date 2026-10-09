@@ -1,3 +1,5 @@
+import { readMemberChannel, type MemberChannel } from "./memberChannel";
+import { claudeCogsPaths, writeClaudeCogsFiles } from "../runtimes/claude/cogsLauncher";
 // 팀원 onoff 서킷브레이커 — 서버 executor 가 런타임별로 에이전트를 정지/기동(터미널 0).
 // 비상 시 GD 가 팀방 /onoff 탭으로 폭주 팀원을 즉시 끈다(2026-06-11 forin 자율-폭주 인시던트 대응).
 //
@@ -151,12 +153,12 @@ async function setHermes(id: string, enabled: boolean): Promise<ControlResult> {
 
 /** codex 런타임: ①버스 어댑터(in-process)는 off 명단(markOff)+adapter isAgentOff로 차단 ②per-member 텔레그램 브리지는
  *  LaunchAgent bootstrap/bootout. off 명단도 같이 기록돼 auto-heal이 안 되살림(claude 패턴 동일). */
-async function setCodex(id: string, enabled: boolean): Promise<ControlResult> {
+async function setCodex(id: string, enabled: boolean, cogsClaude = false, channel?: MemberChannel): Promise<ControlResult> {
   const uid = process.getuid?.() ?? 0;
-  const label = codexBridgeLaunchdLabel(id);
+  const label = cogsClaude ? claudeCogsPaths(id).label : codexBridgeLaunchdLabel(id);
   if (enabled) {
     let p: ReturnType<typeof writeCodexBridgeFiles>;
-    try { p = writeCodexBridgeFiles(id); } // wrapper+plist 보장(idempotent). 토큰은 활성화 단계서 별도 배치.
+    try { p = cogsClaude ? writeClaudeCogsFiles(id,channel) : writeCodexBridgeFiles(id); } // wrapper+plist 보장(idempotent). 토큰은 활성화 단계서 별도 배치.
     catch (e) { return { ok: false, detail: `브리지 기동 안 함: ${e instanceof Error ? e.message : String(e)}` }; }
     const r = await run(["launchctl", "bootstrap", `gui/${uid}`, p.plist]);
     if (r.code !== 0) { const k = await run(["launchctl", "kickstart", "-k", `gui/${uid}/${label}`]); return { ok: k.code === 0, detail: k.code === 0 ? `codex ${id} 브리지 기동(+버스 활성)` : `브리지 기동 실패: ${k.out.slice(-150)}` }; }
@@ -171,14 +173,14 @@ async function setCodex(id: string, enabled: boolean): Promise<ControlResult> {
  * 팀원 정지/기동. enabled=false 면 의도적 off 명단에 추가(auto-heal 이 안 되살림).
  * ⚠ self-mod 실행 — APPROVAL_EXECUTION_ENABLED=1 + 인증된 /onoff 탭에서만.
  */
-export async function setAgentEnabled(agentId: string, runtime: string, enabled: boolean): Promise<ControlResult> {
+export async function setAgentEnabled(agentId: string, runtime: string, enabled: boolean, channel?: MemberChannel): Promise<ControlResult> {
   if (!execOn()) return { ok: false, detail: "실행 OFF(APPROVAL_EXECUTION_ENABLED≠1) — 팀장 인가 필요" };
   // off 는 명단 먼저 기록(실행 중 auto-heal 이 끼어들어 되살리는 레이스 방지). on 은 실행 후 해제.
   if (!enabled) markOff(agentId, true);
   let res: ControlResult;
   try {
     if (runtime === "openclaw") res = await setOpenclaw(agentId, enabled);
-    else if (runtime === "claude_channel") res = await setClaude(agentId, enabled);
+    else if (runtime === "claude_channel") res = (channel ?? readMemberChannel(agentId)).kind === "b3chat" ? await setCodex(agentId, enabled, true,channel) : await setClaude(agentId, enabled);
     else if (runtime === "hermes_agent") res = await setHermes(agentId, enabled);
     else if (runtime === "codex") res = await setCodex(agentId, enabled);
     else res = { ok: false, detail: `지원 안 하는 런타임: ${runtime}` };
@@ -220,6 +222,10 @@ export async function restartAgent(agentId: string, runtime: string, fresh = fal
   if (isAgentOff(agentId)) return { ok: false, detail: `${agentId} 는 정지(off) 상태 — 재시작 말고 🟢 기동을 쓰세요` };
   const uid = process.getuid?.() ?? 0;
   try {
+    if (runtime === "claude_channel" && readMemberChannel(agentId).kind === "b3chat") {
+      const stopped = await setCodex(agentId, false, true);
+      return stopped.ok ? await setCodex(agentId, true, true) : stopped;
+    }
     if (runtime === "claude_channel") {
       // fresh=새 세션(컨텍스트 비움, --fresh) / 기본=컨텍스트 유지(--resume). 둘 다 최신 CLAUDE.md 로드.
       const flag = fresh ? "--fresh" : "--resume";
