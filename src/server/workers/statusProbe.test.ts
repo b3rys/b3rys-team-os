@@ -1,3 +1,4 @@
+import { buildClaudeCogsStatus } from "./statusProbe";
 // statusProbe characterization tests — P1b 안전망 (리팩토링 전 현재 동작 고정).
 // 순수 헬퍼(extractCtxPercent·computeStateFromActivity)부터 핀. 외부호출(tmux/openclaw/hermes) 분기는
 // 후속 단계에서 status-builder 추출 후 추가.
@@ -398,3 +399,8 @@ describe("LIVENESS_PROBES 레지스트리 (Steve Q2: openclaw 캐시 live-bindin
     expect(fallback.ctx_percent).toBe(null);
   });
 });
+
+ test("Claude app status follows its bridge rather than a Telegram tmux session",()=>{
+  expect(buildClaudeCogsStatus("testmate",{ok:true,line:"ready"})).toMatchObject({state:"idle",tmux_pid:null});
+  expect(buildClaudeCogsStatus("testmate",{ok:false,line:"gone"})).toMatchObject({state:"offline"});
+ });

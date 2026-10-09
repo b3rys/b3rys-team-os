@@ -67,14 +67,17 @@ finish_status() { printf '%s bot-liveness DONE status=%s\n' "$(date '+%Y-%m-%d %
 : "${TEAMOS_AGENT_OFF_FILE:=$B3OS_ROOT/var/agent-off.txt}"
 : "${LIVENESS_LA_AUTOHEAL:=0}"
 _AGENTS_JSON="$TEAM_AGENT_REGISTRY"
+_BOTS_REGISTRY_FAILED=0
 _BOTS_STR="$(python3 -c "
 import json
 a=json.load(open('$_AGENTS_JSON'))
 ms=a if isinstance(a,list) else a.get('agents',[])
-print(' '.join(m['id'] for m in ms if m.get('runtime')=='claude_channel' and m.get('enabled', True) is not False))" 2>/dev/null)"
+print(' '.join(m['id'] for m in ms if m.get('runtime')=='claude_channel' and m.get('enabled', True) is not False and (m.get('channel') or {}).get('kind') != 'b3chat'))" 2>/dev/null)" || _BOTS_REGISTRY_FAILED=1
 _BOTS_WARN=""
 if [ -n "$_BOTS_STR" ]; then
   read -r -a BOTS <<< "$_BOTS_STR"
+elif [ "$_BOTS_REGISTRY_FAILED" = 0 ]; then
+  BOTS=() # A valid app-only registry has no Telegram bots to monitor.
 else
   # ★폴백을 하드코딩으로 두면 조용한 퇴행이다 (codex·steve 교차검증 2026-08-03)★
   #   옛 폴백은 (bill steve demis dbak) 라 ★lui 가 소리없이 감시에서 빠졌다.★ 게다가 경고를 stderr 로 냈는데
@@ -122,6 +125,7 @@ agents = data if isinstance(data, list) else data.get("agents", [])
 matched = any(
     item.get("id") == sys.argv[2]
     and item.get("runtime") == "claude_channel"
+    and (item.get("channel") or {}).get("kind") != "b3chat"
     and item.get("enabled", True) is not False
     for item in agents
 )

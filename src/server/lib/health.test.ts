@@ -1,3 +1,6 @@
+import {mkdtempSync,writeFileSync,rmSync} from "node:fs";
+import {join} from "node:path";
+import {tmpdir} from "node:os";
 import { describe, expect, test } from "bun:test";
 import { classifyAll, classifyHealth, parseUtc } from "./health";
 import type { AgentStatus, AgentRecord } from "../types";
@@ -221,3 +224,10 @@ describe("parseUtc — 시간대 표시자", () => {
     expect(parseUtc("not-a-date")).toBe(null);
   });
 });
+
+ test("Claude app bridge without Telegram tmux is healthy",()=>{
+  const root=mkdtempSync(join(tmpdir(),"claude-cogs-health-"));const prior=process.env.TEAM_AGENT_REGISTRY;
+  const registry=join(root,"agents.json");writeFileSync(registry,JSON.stringify([{id:"testmate",channel:{kind:"b3chat",api_base:"http://127.0.0.1:8741"}}]));process.env.TEAM_AGENT_REGISTRY=registry;
+  try {expect(classifyHealth(mk({agent_id:"testmate",state:"idle",tmux_pid:null}),{...claudeAgent,id:"testmate"},now).level).toBe("ok");}
+  finally {if(prior===undefined)delete process.env.TEAM_AGENT_REGISTRY;else process.env.TEAM_AGENT_REGISTRY=prior;rmSync(root,{recursive:true,force:true});}
+ });

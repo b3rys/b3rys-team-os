@@ -952,7 +952,10 @@ export async function handleMessage(
     } else {
       console.warn(`[codex-bridge] 턴 실패했지만 세션은 유지한다(thread 살아 있음): ${result.detail ?? "사유 없음"}`);
     }
-    const errText = toMarkdownV2("⚠️ 일시적으로 응답을 만들지 못했어요. 잠시 후 다시 시도해 주세요.");
+    const notice = "⚠️ 일시적으로 응답을 만들지 못했어요. 잠시 후 다시 시도해 주세요.";
+    const suffix = "\n\n" + notice;
+    const partial = isCogs ? (cogsBody || result.reply) : "";
+    const errText = toMarkdownV2(partial ? Array.from(partial).slice(0,4096-Array.from(suffix).length).join("") + suffix : notice);
     // ★마지막 버블에 쓴다★ — 넘김이 일어났으면 첫 버블에 쓸 경우 오류가 진행 줄 위로 올라간다.
     if (bubbleId !== null) await edit(chatId, bubbleId, errText, isCogs ? "complete" : undefined);
     else await send(chatId, errText, isCogs ? { state: "complete", replyTo: messageId } : undefined);
