@@ -1327,3 +1327,31 @@ describe("deliverGroupReply — 실제로 서버 입구에 넣는다", () => {
     expect(String(audits[0]?.detail)).toContain("unknown agent");
   });
 });
+
+describe("cogs partial replies",()=>{
+ test("assistant deltas replace waiting in 400ms batches and completion is last",async()=>{
+  const edits: {text:string;state?:string;at:number}[]=[];
+  const home=mkdtempSync(join(tmpdir(),"cogs-home-"));
+  writeFileSync(join(home,"config.toml"),'model = "gpt-6-luna"\n');
+  const start=Date.now();
+  const result=await handleMessage(91,"question",5,{
+   agentId:"cogsprobe",codexHome:home,workdir:home,sandbox:"read-only",
+   channel:{kind:"b3chat",apiBase:"http://127.0.0.1:8741",allowFrom:["91"],ownerChat:"91"},
+   sendMessage:async(_chat,text,response)=>{expect(text).toBe("받았어요");expect(response).toEqual({state:"waiting",replyTo:5});return 6;},
+   editMessage:async(_chat,_id,text,state)=>{edits.push({text,state,at:Date.now()-start});return true;},
+   runTurn:async o=>{
+    expect(o.model).toBe("gpt-6-luna");
+    o.onDelta?.("first");o.onDelta?.(" second");
+    await Bun.sleep(450);
+    expect(edits.length).toBe(1);expect(edits[0]?.state).toBe("streaming");
+    o.onActivity?.("late tool signal");
+    o.onDelta?.(" third");await Bun.sleep(450);
+    return ok("final", "cogs-session");
+   },
+  });
+  expect(result.turnOk).toBe(true);expect(edits.at(-1)?.state).toBe("complete");
+  expect(edits.at(-1)?.text).toBe("final");
+  expect(edits.every(e=>!e.text.includes("late tool signal"))).toBe(true);
+  expect(edits[0]?.at).toBeGreaterThanOrEqual(300);
+ });
+});

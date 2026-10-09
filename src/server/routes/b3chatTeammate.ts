@@ -31,7 +31,9 @@ import { hasGreetedFirstContact } from "../runtimes/codex/bridge";
 import { callCodexBridge, type CodexBridgeCallResult } from "../lib/codexBridgeClient";
 import type { BridgeWindowRequest } from "../runtimes/codex/bridgeWindow";
 
-export const B3CHAT_TEAMMATE_MODEL = "gpt-6.1-sol";
+import { COGS_MODELS, readModel, saveModel, setModelLine } from "../lib/b3chatModels";
+export { setModelLine } from "../lib/b3chatModels";
+export const B3CHAT_TEAMMATE_MODEL = "gpt-6-luna";
 const ID_RE = /^[a-z][a-z0-9_-]{1,31}$/;
 const TOKEN_RE = /^[1-9]\d*:[A-Za-z0-9_-]{30,}$/;
 const ACTIVATE_TIMEOUT_MS = 180_000;
@@ -58,6 +60,7 @@ export interface B3chatTeammateDeps {
   activateTimeoutMs?: number;
   /** 모델 설정 쓰기(기본: 그 팀원 CODEX_HOME 의 config.toml) — 시험은 실제 홈을 건드리지 않게 대신 넣는다 */
   prepareModel?: (id: string) => void;
+  modelConfigPath?: (id: string) => string;
   /** 지운 뒤 남은 것(명단·launchd·프로세스·파일·작업폴더) — 기본은 실제 확인. 시험은 반드시 대신 넣는다. */
   inspectResidue?: (id: string, workspace: string) => Promise<Residue[]> | Residue[];
   /** 남은 것을 한 번 더 정리(명단 밖에서) — 기본은 실제 정리. 시험은 반드시 대신 넣는다. */
@@ -176,10 +179,6 @@ export function greetingPrompt(displayName: string, role: string): string {
 }
 
 /** 그 팀원 config.toml 의 model 을 고정한다. 없을 때만 시드 — activate 는 이미 있는 config 를 덮지 않는다. */
-export function setModelLine(cur: string, model: string): string {
-  const line = `model = "${model}"`;
-  return /^model\s*=.*$/m.test(cur) ? cur.replace(/^model\s*=.*$/m, line) : `${line}\n${cur}`;
-}
 
 function writeTeammateModel(id: string): void {
   const p = codexBridgePaths(id);
@@ -241,6 +240,26 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     const raw = JSON.parse(readFileSync(registryPath, "utf-8")) as unknown;
     return Array.isArray(raw) ? raw : ((raw as { agents?: any[] }).agents ?? []);
   };
+
+  const memberModel = async (c: Context) => {
+    const id = c.req.param("memberId");
+    if (!id || !ID_RE.test(id)) return c.json({code:"not_found"},404);
+    const member = readList().find(a => a.id === id);
+    if (!member || member.team_official_member !== false || member.channel?.kind !== "b3chat") return c.json({code:"not_found"},404);
+    // Claude provisioning is handled by its own runtime adapter.
+    if (member.runtime !== "codex") return c.json({code:"unsupported_runtime"},400);
+    const path = deps.modelConfigPath?.(id) ?? join(codexBridgePaths(id).codexHome,"config.toml");
+    try {
+      if (c.req.method === "PUT") {
+        const body = await c.req.json();
+        if (!body || typeof body.model !== "string" || !(COGS_MODELS.codex as readonly string[]).includes(body.model)) return c.json({code:"unsupported_model"},400);
+        saveModel(path,"codex",body.model);
+      }
+      return c.json({runtime:"codex",model:readModel(path),models:COGS_MODELS.codex,restart_required:false,applies:"next_request"});
+    } catch { return c.json({code:"model_unavailable"},503); }
+  };
+  app.get("/members/b3chat/member/:memberId/model",memberModel);
+  app.put("/members/b3chat/member/:memberId/model",memberModel);
 
   app.post("/members/b3chat", async (c) => {
     let body: Record<string, unknown>;

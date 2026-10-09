@@ -55,6 +55,8 @@ export interface CodexTurnOptions {
   onActivity?: (line: string, itemId?: string) => void;
   /** 지금 어느 단계인가 — 맨 윗줄에서 교체된다(쌓이지 않는다). */
   onStatus?: (line: string) => void;
+  /** Partial assistant text; reasoning text is never forwarded. */
+  onDelta?: (text: string) => void;
   /**
    * ★사람이 붙인 그림의 로컬 경로.★ 본문에 경로를 적어주는 것과 다르다 —
    * 적어주면 codex 는 파일을 ★바이트로 읽을 뿐★ 이고, 입력 아이템으로 넣어야 ★본다.★
