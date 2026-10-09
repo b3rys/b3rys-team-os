@@ -1,3 +1,4 @@
+import { modelLine } from "../../lib/b3chatModels";
 /**
  * codex runtime — 채널 I/O 브리지 (M2).
  *
@@ -1539,7 +1540,6 @@ if (import.meta.main) void runBridge();
 
 export function configuredCogsModel(home: string): string | undefined {
   try {
-    const top = readFileSync(`${home}/config.toml`, "utf-8").split(/^\s*\[/m)[0] ?? "";
-    return /^model\s*=\s*"([^"\n]+)"/m.exec(top)?.[1];
+    return modelLine(readFileSync(`${home}/config.toml`, "utf-8")) ?? undefined;
   } catch { return undefined; }
 }
