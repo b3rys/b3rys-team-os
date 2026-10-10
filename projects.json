@@ -12,7 +12,7 @@
   {
     "id": "b3chat",
     "name": "b3chat",
-    "repo": "b3rys/b3chat",
+    "repo": "b3rys/cogs",
     "branch": "main",
     "docs": { "readme": "README.md", "design": "DESIGN.md", "features": "FEATURES.md", "todo": "TODO.md" },
     "kanbanPrefix": "[b3chat]",
