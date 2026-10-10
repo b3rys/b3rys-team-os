@@ -81,7 +81,11 @@ for root, dirs, files in os.walk(ws):
               (d == 'DerivedData' and os.path.isdir(os.path.join(p, 'Build')))
         if gen or d in ('node_modules', '.git'):
             dirs.remove(d)
-            if gen: print('/' + base + '/' + os.path.relpath(p, ws) + '/')
+            if gen:
+                rel = '/' + base + '/' + os.path.relpath(p, ws) + '/'
+                if '\n' in rel or '\r' in rel: continue  # 줄 단위 필터로 못 적는 경로는 빼지 않는다(담는 쪽이 안전)
+                # rsync 패턴 문자(* ? [ \\)를 이스케이프해 그 경로 하나에만 맞게 한다.
+                print(''.join('\\' + c if c in '*?[\\' else c for c in rel))
 PY
   rsync -a "${EX_MEMBER[@]}" --exclude-from="$EXF" "$ws" "$STAGE/home/Development/" 2>/dev/null || true
   COPIED=$((COPIED+1))
