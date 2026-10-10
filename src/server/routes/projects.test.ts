@@ -79,6 +79,27 @@ describe("Projects API", () => {
     const cold = setup(); cold.fail(); const response = await cold.app.request("/team/api/projects");
     expect(response.status).toBe(502); expect(await response.json()).toEqual({ error: "github_auth_or_not_found", key: "branch" });
   });
+  test("one project's cold auth failure does not take down the list (#511)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "projects-routes-")); const db = new Database(":memory:");
+    db.exec("CREATE TABLE task (id TEXT, title TEXT, lane TEXT, updated_at TEXT)");
+    cleanups.push(() => { db.close(); rmSync(dir, { recursive: true, force: true }); });
+    const bad: ProjectRegistration = { ...p, id: "bad", name: "Bad", repo: "example/bad", kanbanPrefix: "[bad]" };
+    for (const status of [401, 403, 404]) {
+      const source = new GitHubDocs({ cacheDir: join(dir, String(status)), useToken: false, fetch: (async (url: any) => {
+        if (String(url).includes("example/bad")) return new Response("secret upstream details", { status });
+        if (String(url).includes("/branches/")) return Response.json({ commit: { sha: "a".repeat(40) } });
+        return new Response("# Sample\n\nUseful app.\n");
+      }) as typeof fetch });
+      const app = new Hono(); app.route("/team/api", createProjectRoutes({ db, projects: [p, bad], source }));
+      const response = await app.request("/team/api/projects");
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.projects.map((x: any) => x.id)).toEqual(["sample"]);
+      expect(body.failed).toEqual([{ id: "bad", error: "github_auth_or_not_found", key: "branch" }]);
+      expect(JSON.stringify(body)).not.toContain("secret upstream details");
+      expect((await app.request("/team/api/projects/sample")).status).toBe(200);
+    }
+  });
   test("registered routes remain behind the existing root host gate", async () => {
     const { app } = setup();
     const root = new Hono(); root.use("*", createHostGate({ isTrusted: () => false })); root.route("/", app);
