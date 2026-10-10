@@ -85,6 +85,7 @@ for root, dirs, files in os.walk(ws):
                 rel = '/' + base + '/' + os.path.relpath(p, ws) + '/'
                 if '\n' in rel or '\r' in rel: continue  # 줄 단위 필터로 못 적는 경로는 빼지 않는다(담는 쪽이 안전)
                 # rsync 패턴 문자(* ? [ \\)를 이스케이프해 그 경로 하나에만 맞게 한다.
+                # 알려진 예외: 역슬래시만 있고 다른 패턴 문자가 없는 경로는 안 맞아 빌드 캐시가 담긴다(작업물 유실 없음).
                 print(''.join('\\' + c if c in '*?[\\' else c for c in rel))
 PY
   rsync -a "${EX_MEMBER[@]}" --exclude-from="$EXF" "$ws" "$STAGE/home/Development/" 2>/dev/null || true
