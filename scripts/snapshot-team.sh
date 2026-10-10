@@ -11,6 +11,9 @@ LIVE_DIR="${B3OS_LIVE_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 DEST="${B3OS_SNAPSHOT_DEST:-$HOME/Library/Mobile Documents/com~apple~CloudDocs/Documents/b3os-live}"
 STAMP="$(date '+%Y%m%d-%H%M%S')"
 STAGE="$(mktemp -d)/b3os-snapshot-$STAMP"
+# 실패해도 임시 복사본을 남기지 않는다 — set -e 로 중간에 멈추면 아래 정리 줄까지 가지 못해
+# 수십 GB 반쪽 복사본이 임시 폴더에 남는다(공간 부족으로 실패하면 공간을 더 막는다).
+trap 'rm -rf "$(dirname "$STAGE")"' EXIT
 say(){ printf "\033[32m%s\033[0m\n" "$1"; }
 warn(){ printf "\033[33m%s\033[0m\n" "$1"; }
 mkdir -p "$DEST" "$STAGE"/{tree,home/Development,home/.claude,home/.hermes,launchd}
@@ -35,7 +38,10 @@ EX_TREE=("${EX_COMMON[@]}" --exclude='models' --exclude='team-search-eval' --exc
 #   ★.git 도 담는다★ (GD 2026-08-03). 팀원 워크스페이스는 원격이 없을 수 있어서, .git 을 빼면
 #   "파일은 복구되는데 언제 왜 바꿨는지는 사라지는" 반쪽 스냅샷이 된다. 스냅샷은 그야말로 스냅샷이다.
 #   비용: 실측 4MB (등록 12명 중 git repo 는 bill·lui 둘뿐) — 405MB 묶음의 1%.
-EX_MEMBER=("${EX_BASE[@]}")
+# 다만 다시 만들 수 있는 큰 것은 뺀다 — git 작업 사본(wt·worktrees)·빌드 결과물·앱 묶음.
+#   작업 사본은 원격 브랜치에, 빌드 결과물은 소스에서 다시 나온다. 이게 들어가면 하루 묶음이 수십 GB 가 된다.
+EX_MEMBER=("${EX_BASE[@]}" --exclude='wt' --exclude='worktrees' --exclude='.worktrees'
+    --exclude='.build' --exclude='DerivedData' --exclude='*.app' --exclude='*.dmg' --exclude='*.zip' --exclude='*.ipa')
 
 # hermes 프로필 — 대화state·홈·캐시·bin·모델·세션·미디어·스킬(repo서 옴)은 재생성 가능
 EX_HERMES=("${EX_COMMON[@]}" --exclude='state.db' --exclude='state.db-*' --exclude='state-snapshots'
