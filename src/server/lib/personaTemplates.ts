@@ -661,7 +661,7 @@ function readSkillTriggers(): Array<{ name: string; trigger: string; script: str
       const e = /^entry:\s*(.+)$/m.exec(front);   // ★선언한 것만★ — 디렉터리를 뒤져 추측하지 않는다
       if (e?.[1]) script = e[1].trim().replace(/^["']|["']$/g, "");
     }
-    // 단축어(팀장 10-10 "주요 스킬 및 단축어") — 본문 맨 위 체크리스트의 이름. 선언한 스킬만 맨 위 한 줄에 모인다.
+    // 단축어 — 본문 맨 위 체크리스트의 이름. 선언한 스킬만 맨 위 한 줄에 모인다.
     let mnemonic = "";
     if (front) {
       const m = /^mnemonic:\s*(.+)$/m.exec(front);
