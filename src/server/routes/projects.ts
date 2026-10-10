@@ -36,7 +36,18 @@ export function createProjectRoutes(deps: ProjectDeps) {
       todo, excludeSections: excludeSections(p), kanban, fetchedAt: snapshot.fetchedAt, stale: snapshot.stale,
     };
   }
-  app.get("/projects", async c => c.json({ projects: await Promise.all(projects.map(summary)) }));
+  // 프로젝트마다 따로 읽는다 — 한 프로젝트의 토큰·저장소 문제(캐시도 없을 때)가 목록 전체를 502 로 만들지 않게(#511).
+  //   일부만 실패: 200 + 성공한 것만 projects, 실패한 것은 failed[{id,error,key}] (토큰·응답 본문은 담지 않는다).
+  //   전부 실패: 예전처럼 첫 오류를 던져 502 {error,key} — 화면은 빈 목록 대신 오류+다시 시도.
+  app.get("/projects", async c => {
+    const settled = await Promise.allSettled(projects.map(summary));
+    const ok = settled.flatMap(r => r.status === "fulfilled" ? [r.value] : []);
+    const failed = settled.flatMap((r, i) => r.status === "rejected" ? [{ id: projects[i]!.id,
+      error: r.reason instanceof ProjectSourceError ? r.reason.reason : "projects_unavailable",
+      key: r.reason instanceof ProjectSourceError ? r.reason.key : "project" }] : []);
+    if (!ok.length && settled.length) throw (settled[0] as PromiseRejectedResult).reason;
+    return c.json(failed.length ? { projects: ok, failed } : { projects: ok });
+  });
   app.get("/projects/:id", async c => {
     const p = projects.find(p => p.id === c.req.param("id"));
     return p ? c.json(await summary(p)) : c.json({ error: "project_not_found", key: c.req.param("id") }, 404);
