@@ -11,6 +11,9 @@ LIVE_DIR="${B3OS_LIVE_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 DEST="${B3OS_SNAPSHOT_DEST:-$HOME/Library/Mobile Documents/com~apple~CloudDocs/Documents/b3os-live}"
 STAMP="$(date '+%Y%m%d-%H%M%S')"
 STAGE="$(mktemp -d)/b3os-snapshot-$STAMP"
+# 실패해도 임시 복사본을 남기지 않는다 — set -e 로 중간에 멈추면 아래 정리 줄까지 가지 못해
+# 수십 GB 반쪽 복사본이 임시 폴더에 남는다(공간 부족으로 실패하면 공간을 더 막는다).
+trap 'rm -rf "$(dirname "$STAGE")"' EXIT
 say(){ printf "\033[32m%s\033[0m\n" "$1"; }
 warn(){ printf "\033[33m%s\033[0m\n" "$1"; }
 mkdir -p "$DEST" "$STAGE"/{tree,home/Development,home/.claude,home/.hermes,launchd}
@@ -63,7 +66,29 @@ EXPECTED=0; COPIED=0
 while IFS= read -r ws; do
   [ -n "$ws" ] && EXPECTED=$((EXPECTED+1))
   [ -n "$ws" ] && [ -d "$ws" ] || continue
-  rsync -a "${EX_MEMBER[@]}" "$ws" "$STAGE/home/Development/" 2>/dev/null || true
+  # 빌드 결과물만 뺀다 — 이름이 아니라 '빌드 도구가 만든 폴더'인지 확인한 경로만.
+  #   .build = 옆에 Package.swift 가 있는 SwiftPM 출력 · DerivedData = 안에 Build/ 가 있는 Xcode 출력.
+  #   작업 사본(wt 등)의 소스·미커밋 변경은 그대로 담는다. 경로는 rsync 전송 루트(워크스페이스 이름) 기준으로 고정한다.
+  EXF="$(dirname "$STAGE")/exclude-$(basename "$ws").txt"
+  python3 - "$ws" > "$EXF" <<'PY' || : > "$EXF"
+import os, sys
+ws = sys.argv[1]; base = os.path.basename(ws.rstrip('/'))
+for root, dirs, files in os.walk(ws):
+    for d in list(dirs):
+        p = os.path.join(root, d)
+        if os.path.islink(p): dirs.remove(d); continue
+        gen = (d == '.build' and os.path.isfile(os.path.join(root, 'Package.swift'))) or \
+              (d == 'DerivedData' and os.path.isdir(os.path.join(p, 'Build')))
+        if gen or d in ('node_modules', '.git'):
+            dirs.remove(d)
+            if gen:
+                rel = '/' + base + '/' + os.path.relpath(p, ws) + '/'
+                if '\n' in rel or '\r' in rel: continue  # 줄 단위 필터로 못 적는 경로는 빼지 않는다(담는 쪽이 안전)
+                # rsync 패턴 문자(* ? [ \\)를 이스케이프해 그 경로 하나에만 맞게 한다.
+                # 알려진 예외: 역슬래시만 있고 다른 패턴 문자가 없는 경로는 안 맞아 빌드 캐시가 담긴다(작업물 유실 없음).
+                print(''.join('\\' + c if c in '*?[\\' else c for c in rel))
+PY
+  rsync -a "${EX_MEMBER[@]}" --exclude-from="$EXF" "$ws" "$STAGE/home/Development/" 2>/dev/null || true
   COPIED=$((COPIED+1))
 done <<EOF
 $MEMBERS
