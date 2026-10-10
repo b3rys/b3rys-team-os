@@ -38,10 +38,7 @@ EX_TREE=("${EX_COMMON[@]}" --exclude='models' --exclude='team-search-eval' --exc
 #   ★.git 도 담는다★ (GD 2026-08-03). 팀원 워크스페이스는 원격이 없을 수 있어서, .git 을 빼면
 #   "파일은 복구되는데 언제 왜 바꿨는지는 사라지는" 반쪽 스냅샷이 된다. 스냅샷은 그야말로 스냅샷이다.
 #   비용: 실측 4MB (등록 12명 중 git repo 는 bill·lui 둘뿐) — 405MB 묶음의 1%.
-# 다만 다시 만들 수 있는 큰 것은 뺀다 — git 작업 사본(wt·worktrees)·빌드 결과물·앱 묶음.
-#   작업 사본은 원격 브랜치에, 빌드 결과물은 소스에서 다시 나온다. 이게 들어가면 하루 묶음이 수십 GB 가 된다.
-EX_MEMBER=("${EX_BASE[@]}" --exclude='wt' --exclude='worktrees' --exclude='.worktrees'
-    --exclude='.build' --exclude='DerivedData' --exclude='*.app' --exclude='*.dmg' --exclude='*.zip' --exclude='*.ipa')
+EX_MEMBER=("${EX_BASE[@]}")
 
 # hermes 프로필 — 대화state·홈·캐시·bin·모델·세션·미디어·스킬(repo서 옴)은 재생성 가능
 EX_HERMES=("${EX_COMMON[@]}" --exclude='state.db' --exclude='state.db-*' --exclude='state-snapshots'
@@ -69,7 +66,24 @@ EXPECTED=0; COPIED=0
 while IFS= read -r ws; do
   [ -n "$ws" ] && EXPECTED=$((EXPECTED+1))
   [ -n "$ws" ] && [ -d "$ws" ] || continue
-  rsync -a "${EX_MEMBER[@]}" "$ws" "$STAGE/home/Development/" 2>/dev/null || true
+  # 빌드 결과물만 뺀다 — 이름이 아니라 '빌드 도구가 만든 폴더'인지 확인한 경로만.
+  #   .build = 옆에 Package.swift 가 있는 SwiftPM 출력 · DerivedData = 안에 Build/ 가 있는 Xcode 출력.
+  #   작업 사본(wt 등)의 소스·미커밋 변경은 그대로 담는다. 경로는 rsync 전송 루트(워크스페이스 이름) 기준으로 고정한다.
+  EXF="$(dirname "$STAGE")/exclude-$(basename "$ws").txt"
+  python3 - "$ws" > "$EXF" <<'PY' || : > "$EXF"
+import os, sys
+ws = sys.argv[1]; base = os.path.basename(ws.rstrip('/'))
+for root, dirs, files in os.walk(ws):
+    for d in list(dirs):
+        p = os.path.join(root, d)
+        if os.path.islink(p): dirs.remove(d); continue
+        gen = (d == '.build' and os.path.isfile(os.path.join(root, 'Package.swift'))) or \
+              (d == 'DerivedData' and os.path.isdir(os.path.join(p, 'Build')))
+        if gen or d in ('node_modules', '.git'):
+            dirs.remove(d)
+            if gen: print('/' + base + '/' + os.path.relpath(p, ws) + '/')
+PY
+  rsync -a "${EX_MEMBER[@]}" --exclude-from="$EXF" "$ws" "$STAGE/home/Development/" 2>/dev/null || true
   COPIED=$((COPIED+1))
 done <<EOF
 $MEMBERS
