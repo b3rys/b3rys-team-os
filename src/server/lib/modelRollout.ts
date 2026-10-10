@@ -28,6 +28,11 @@ export interface Member {
   handle: string;
   /** hermes 는 provider 도 같이 넘겨야 one-shot 이 된다 */
   provider?: string;
+  /**
+   * openclaw 쪽 에이전트 id(openclaw.json agents.entries 의 키). b3os 팀원 이름과 다를 수 있다.
+   * openclaw CLI 의 --agent 에는 이 값을 넘긴다. 없으면 handle 로 떨어진다.
+   */
+  openclawAgentId?: string;
 }
 
 export interface CurrentModel { model: string | null; effort: string | null }
@@ -171,7 +176,7 @@ export function listMembers(registryPath: string, env: Env): Member[] {
       const cfg = JSON.parse(readFileSync(ocPath, "utf-8")) as { agents?: { entries?: Record<string, { model?: unknown }> } };
       for (const [id, entry] of Object.entries(cfg.agents?.entries ?? {})) {
         if (entry?.model == null) continue; // 모델을 따로 안 정한 에이전트는 기본값을 따른다 — 전환 대상 아님
-        out.push({ id, runtime: "openclaw", configPath: ocPath, handle: id, serviceLabel: "ai.openclaw.gateway" });
+        out.push({ id, runtime: "openclaw", configPath: ocPath, handle: id, openclawAgentId: id, serviceLabel: "ai.openclaw.gateway" });
       }
     } catch { /* 깨진 설정이면 openclaw 는 목록에서 뺀다 */ }
   }
@@ -243,7 +248,10 @@ export async function checkMember(member: Member, target: { model: string | null
     return { ...base, verdict: why === "모델을 모름" ? "not_supported" : "unknown", actualModel: actual, detail: why };
   }
   // openclaw: 게이트웨이 자신의 판정(models list 의 available)을 본다. 목록에 없으면 설정으로는 못 연다.
-  const r = await run([env.openclawBin, "models", "list", "--json"], { timeoutMs: 120_000 });
+  // 에이전트가 여럿인 openclaw 는 --agent 없이 부르면 "model inspection has no explicit owner" 로 거부한다.
+  // --agent 에는 openclaw 쪽 id 를 넘긴다(b3os 팀원 이름을 넘기면 openclaw 가 unknown agent id 로 거부한다).
+  const ocAgent = member.openclawAgentId ?? member.handle;
+  const r = await run([env.openclawBin, "models", "list", "--agent", ocAgent, "--json"], { timeoutMs: 120_000 });
   if (r.code !== 0) return { ...base, verdict: "unknown", actualModel: null, detail: classifyFailure(r) };
   let items: Array<{ key?: string; available?: boolean | null }> = [];
   try {

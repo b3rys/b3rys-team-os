@@ -150,6 +150,36 @@ describe("check — 설정을 바꾸지 않는다", () => {
     const r = await checkMember(m, { model: "gpt-6.1-sol", effort: "medium" }, env, fakeRunner({ model: (cmd) => cmd[cmd.lastIndexOf("-m") + 1] ?? null }).run);
     expect(r).toMatchObject({ verdict: "works", actualModel: "gpt-6.1-sol" });
   });
+  test("openclaw: models list 에 --agent <openclaw id> 를 넘긴다 — b3os 이름(handle)과 다르면 openclaw id 쪽", async () => {
+    const m: Member = { id: "codex", runtime: "openclaw", configPath: "", serviceLabel: "", handle: "codex", openclawAgentId: "gd" };
+    const { run, calls } = fakeRunner({ ocModels: [{ key: "openai/gpt-6.1-sol", available: true }] });
+    expect((await checkMember(m, { model: "gpt-6.1-sol", effort: null }, env, run)).verdict).toBe("works");
+    const list = calls.find((c) => c[0] === "openclaw" && c[1] === "models")!;
+    expect(list.slice(0, 5)).toEqual(["openclaw", "models", "list", "--agent", "gd"]);
+    expect(list).not.toContain("codex");
+  });
+
+  test("openclaw: openclaw id 가 없으면 handle 로 떨어진다", async () => {
+    const m: Member = { id: "devon", runtime: "openclaw", configPath: "", serviceLabel: "", handle: "devon" };
+    const { run, calls } = fakeRunner({ ocModels: [{ key: "openai/gpt-6.1-sol", available: true }] });
+    await checkMember(m, { model: "gpt-6.1-sol", effort: null }, env, run);
+    const list = calls.find((c) => c[0] === "openclaw" && c[1] === "models")!;
+    expect(list[list.indexOf("--agent") + 1]).toBe("devon");
+  });
+
+  test("openclaw: 명단은 openclaw.json 의 키를 openclaw id 로 싣는다(에이전트 여럿)", () => {
+    const ms = listMembers(join(home, "agents.json"), env).filter((m) => m.runtime === "openclaw");
+    expect(ms.map((m) => [m.id, m.openclawAgentId])).toEqual([["devon", "devon"]]);
+  });
+
+  test("openclaw: applyAll 의 게이트 확인도 같은 --agent 로 부른다", async () => {
+    const m: Member = { id: "codex", runtime: "openclaw", configPath: join(home, ".openclaw/openclaw.json"), serviceLabel: "ai.openclaw.gateway", handle: "codex", openclawAgentId: "gd" };
+    const { run, calls } = fakeRunner({ ocModels: [] });
+    await applyAll([m], { model: "gpt-6.1-sol", effort: null }, env, run, false, "t-agent");
+    const list = calls.find((c) => c[0] === "openclaw" && c[1] === "models")!;
+    expect(list[list.indexOf("--agent") + 1]).toBe("gd");
+  });
+
   test("openclaw: 게이트웨이 목록 available 만 믿는다", async () => {
     const m = listMembers(join(home, "agents.json"), env)[2]!;
     expect((await checkMember(m, { model: "gpt-6.1-sol", effort: null }, env, fakeRunner({ ocModels: [{ key: "openai/gpt-6.1-sol", available: null }] }).run)).verdict).toBe("not_supported");
