@@ -33,6 +33,8 @@ SF는 결과물 품질·과제 수행 시간·과제 수행 토큰량을 함께 
 
 요청마다 `요청 → 만들기 → 검사 → 리뷰 → 머지 승인 → 내보내기 → 보고 → 배우기`를 돈다. 구조 가드와 진행 점검은 개발 순환 안에서 함께 적용한다. 상세: [`references/development.md`](references/development.md)
 
+팀장이 시험판을 쓰며 지적을 연달아 보낼 때(받기 → 원인 확정 → 맡기기 → 리뷰 → 시험판 전달 → 배우기)와 팀장 부재 중 운영: [`references/development.md`](references/development.md#팀장-실사용-피드백-순환-시험판-연속-전달)
+
 개발 속도는 구조화와 변경 영향 범위에 맞춘 검사 단계로 확보한다. 공유 기계에서는 검사 순번과 자동 재검사를 제어하고, 기다리는 동안 헤드리스 작업을 겹쳐 돌린다. 상세: [`references/dev-mode-operations.md`](references/dev-mode-operations.md)
 
 AI 팀이 기능을 만들 때 지키는 11개 코딩 원칙과 점검법: [`references/ai-team-coding-guidelines.md`](references/ai-team-coding-guidelines.md)
