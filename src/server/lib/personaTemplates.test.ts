@@ -191,6 +191,14 @@ describe("스킬 목록 — 규칙 파일이 아니라 rules/SKILLS.md 에 있�
     expect(md).toContain("**Skills — pick by trigger**");
     expect(md, "★b3os-how-to-explain 이 목록에 없다★").toContain("`b3os-how-to-explain`");
   });
+  test("mnemonic 을 선언한 스킬은 맨 위 단축어 줄에 같은 단축어끼리 묶여 나온다", () => {
+    const md = buildSkillsMd();
+    const line = md.split("\n").find((l) => l.startsWith("**주요 단축어"));
+    expect(line, "★단축어 줄이 없다★").toBeDefined();
+    expect(line).toContain("BEFORE");
+    expect(line).toContain("`b3os-sf`");
+    expect(line).toContain("`b3os-ai-code-safety`");
+  });
   for (const runtime of ["claude_channel", "openclaw", "hermes_agent", "codex"] as const) {
     test(`${runtime} 규칙 파일은 목록을 품지 않고 SKILLS.md 를 가리킨다`, () => {
       const md = runtime === "claude_channel" ? buildPersona(claudeInput) : buildAgentsMd({ ...claudeInput, runtime });

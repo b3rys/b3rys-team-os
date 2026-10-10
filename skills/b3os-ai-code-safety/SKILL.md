@@ -2,12 +2,13 @@
 name: b3os-ai-code-safety
 description: b3rys software-structure and refactoring guide for AI-generated or AI-modified code. Use when designing a program's structure, writing non-trivial code, reviewing code, or refactoring when the code "smells" (a change forces edits in many places, or a fix breaks something unrelated). Covers SOLID/module boundaries, side-effect-reducing structure (pure core, immutability, dependency injection, map/factory over conditional sprawl), the operational Effect gates (concurrency, transaction, idempotency), and how to refactor common code smells.
 trigger: merge AI-written code
+mnemonic: "BEFORE(검증·머지·완료 보고 전) — 진짜인가·같은 조건·쪼개 좁히기·깨 보기·화면·임시 코드 지우기"
 ---
 
 # b3rys AI Code Safety — Structure & Refactoring
 
-> **검증은 BEFORE** — 머지·배포·"됐다" 보고 전에 여섯 줄을 훑는다(팀장님 10-10 · 2026-10-09 노트 바꾸기 속도 작업에서 나온 순서).
-> - **B 진짜 그것인가** — 띄운 앱·잰 바이너리가 그 커밋인가(경로·mtime·sha). 10-09 바이섹트가 매번 같은 최신 앱을 재서 "코드 탓 아님"이라 틀리게 보고했다.
+> **검증은 BEFORE** — 머지·배포·"됐다" 보고 전에 여섯 줄을 훑는다.
+> - **B 진짜 그것인가** — 띄운 앱·잰 바이너리가 그 커밋인가(경로·mtime·sha). 빌드한 것과 띄운 것이 다르면 모든 측정이 같은 값이 나와 원인을 잘못 짚는다.
 > - **E 같은 조건 전후** — 성공 기준·허용 오차를 재기 전에 정하고, 같은 부하·같은 데이터로 전과 후를 잰다.
 > - **F 큰 차이부터 쪼개 좁히기** — 느리거나 틀린 결과를 메인 로직의 큰 덩어리로 나눠 각각 재고, 가장 큰 덩어리부터 다시 나눈다.
 > - **O 일부러 깨 보기 + 다른 눈** — 고친 부분을 되돌리면 시험이 실패하는지(뮤턴트) 보고, 별도 리뷰어가 낡은 캐시·순서 역전·종료 유실·빠진 상태를 본다. 근거: [`b3os-verification` §4](../b3os-verification/SKILL.md).

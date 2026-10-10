@@ -641,10 +641,10 @@ export function ruleLoadingBlock(runtime: string, agentId?: string): string {
  * ★은퇴한 스킬에 trigger 를 달지 않는 것은 사람 책임이고, personaPathSafety 테스트가 그걸 잡는다.★
  * → 스킬 추가 = SKILL.md 만 만들면 끝. 룰 파일은 안 건드린다.
  */
-function readSkillTriggers(): Array<{ name: string; trigger: string; script: string }> {
+function readSkillTriggers(): Array<{ name: string; trigger: string; script: string; mnemonic: string }> {
   const dir = `${REPO_ROOT}/skills`;
   if (!existsSync(dir)) return [];
-  const out: Array<{ name: string; trigger: string; script: string }> = [];
+  const out: Array<{ name: string; trigger: string; script: string; mnemonic: string }> = [];
   for (const name of readdirSync(dir).sort()) {
     const md = `${dir}/${name}/SKILL.md`;
     if (!existsSync(md)) continue;
@@ -661,8 +661,14 @@ function readSkillTriggers(): Array<{ name: string; trigger: string; script: str
       const e = /^entry:\s*(.+)$/m.exec(front);   // ★선언한 것만★ — 디렉터리를 뒤져 추측하지 않는다
       if (e?.[1]) script = e[1].trim().replace(/^["']|["']$/g, "");
     }
+    // 단축어(팀장 10-10 "주요 스킬 및 단축어") — 본문 맨 위 체크리스트의 이름. 선언한 스킬만 맨 위 한 줄에 모인다.
+    let mnemonic = "";
+    if (front) {
+      const m = /^mnemonic:\s*(.+)$/m.exec(front);
+      if (m?.[1]) mnemonic = m[1].trim().replace(/^["']|["']$/g, "");
+    }
     if (!trigger) continue;   // ★선언하지 않은 스킬은 나가지 않는다★ — 새 스킬의 기본값은 '비공개'
-    out.push({ name, trigger, script });
+    out.push({ name, trigger, script, mnemonic });
   }
   return out;
 }
@@ -672,12 +678,17 @@ function buildSkillTable(): string {  // rules/SKILLS.md 본문 (skillsRender.ts
   const line = skills
     .map((s) => `${s.trigger} → \`${s.name}\`${s.script ? ` (\`${s.script}\`)` : ""}`)
     .join(" · ");
+  // 같은 단축어를 쓰는 스킬은 한 줄로 묶는다(예: BEFORE → b3os-sf · b3os-ai-code-safety).
+  const byMnemonic = new Map<string, string[]>();
+  for (const s of skills) if (s.mnemonic) byMnemonic.set(s.mnemonic, [...(byMnemonic.get(s.mnemonic) ?? []), s.name]);
+  const mnemonics = [...byMnemonic].map(([m, names]) => `${m} → ${names.map((n) => `\`${n}\``).join(" · ")}`);
   // 경로는 ★맨 위 b3os= 기준★ 을 한 번만 선언하고 이후는 상대로 쓴다.
   return [
     // ★카탈로그·스킬 경로는 절대경로로 둔다★ — 기존 가드("스킬 카탈로그도 절대경로, 양 런타임")가 막는다.
     //   그 가드는 상대경로를 못 푸는 런타임에서 실제로 터져서 생긴 것이라 우회하지 않는다.
     `**Skills — pick by trigger** (\`${tilde(REPO_ROOT)}/skills/<name>/SKILL.md\` · index \`${tilde(REPO_ROOT)}/docs/B3OS_SKILLS.md\`):`,
     line + ".",
+    ...(mnemonics.length ? ["", `**주요 단축어 — 스킬 맨 위 체크리스트**: ${mnemonics.join(" · ")}.`] : []),
   ].join("\n");
 }
 
