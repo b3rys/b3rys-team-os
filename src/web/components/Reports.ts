@@ -1091,6 +1091,20 @@ function detailTagsHtml(report: Report): string {
   return `${(report.tags ?? []).map((t) => tagBadge(t)).join("")}<button id="reports-edit-tags" class="inline-flex h-6 items-center px-2 rounded-md text-[12px] font-medium text-slate-400 hover:bg-surface-0 hover:text-slate-100 transition-colors">＋ ${pick("태그 편집", "Edit tags")}</button>`;
 }
 
+// 상세의 ⋯ 메뉴(<details>)는 바깥을 누르거나 Esc 를 누르면 닫는다. 문서에 한 번만 건다(다시 그릴 때마다 쌓이지 않게).
+let _moreMenuCloserBound = false;
+function bindMoreMenuCloser(): void {
+  if (_moreMenuCloserBound) return;
+  _moreMenuCloserBound = true;
+  const closeAll = (keep?: Node | null) => {
+    document.querySelectorAll<HTMLDetailsElement>("details.reports-more[open]").forEach((d) => {
+      if (!keep || !d.contains(keep)) d.open = false;
+    });
+  };
+  document.addEventListener("click", (e) => closeAll(e.target as Node | null));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAll(); });
+}
+
 // ── 렌더: 상세 ────────────────────────────────────────────────────
 async function renderDetail(): Promise<void> {
   if (!_root || !_curId) return;
@@ -1177,6 +1191,7 @@ async function renderDetail(): Promise<void> {
     </div>`;
 
   _root.querySelector("#reports-back")?.addEventListener("click", goList);
+  bindMoreMenuCloser();
   const detailScroller = _root.querySelector<HTMLElement>("[data-reports-detail-scroll]");
   if (detailScroller && _detailScrollTop) detailScroller.scrollTop = _detailScrollTop;
   _root.querySelector<HTMLButtonElement>(".reports-star-detail")?.addEventListener("click", async () => {
@@ -1213,6 +1228,7 @@ async function renderDetail(): Promise<void> {
   _root.querySelector<HTMLButtonElement>("#reports-edit-tags")?.addEventListener("click", handleEditTags);
   _root.querySelector<HTMLButtonElement>("#reports-delete-detail")?.addEventListener("click", async () => {
     const btn = _root?.querySelector<HTMLButtonElement>("#reports-delete-detail");
+    btn?.closest("details")?.removeAttribute("open");
     if (!await showConfirm({ message: pick(`보고서 "${meta.title}"을(를) 목록에서 삭제할까요?\n\n첨부 파일은 디스크에 남고, 대시보드 등록 정보만 삭제됩니다.`, `Delete report "${meta.title}" from the list?\n\nThe attached files stay on disk; only the dashboard registration is removed.`), danger: true })) return;
     if (btn) btn.disabled = true;
     try {
