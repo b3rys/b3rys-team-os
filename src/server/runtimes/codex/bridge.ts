@@ -867,7 +867,7 @@ export async function handleMessage(
     if (isCogs) {
       cogsActivity = cogsActivityLine(item);
       headLine = cogsActivity;
-      cogsState = "activity";
+      cogsState = cogsBody ? "streaming" : "activity";
       dirty = true;
       schedule();
       return;

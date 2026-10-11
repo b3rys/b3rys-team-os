@@ -2,6 +2,7 @@ import { expect,test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cogsActivityLine } from "../codex/cogsActivity";
 import { claudeCogsArguments, runClaudeCogsTurn } from "./cogsRunner";
 import { claudeCogsPaths,renderClaudeCogsWrapper,writeClaudeCogsFilesAt } from "./cogsLauncher";
 
@@ -14,14 +15,16 @@ test("app Claude launch strips Telegram credentials and ignores workspace plugin
 import json,os,sys
 args=sys.argv[1:]
 json.dump({'telegram_keys':[k for k in os.environ if k.startswith('TELEGRAM_')],'bot_key': 'CODEX_BOT_TOKEN' in os.environ,'cwd':os.getcwd(),'project_settings':os.path.exists('.claude/settings.json'),'args':args,'pgid':os.getpgrp(),'parent_pgid':os.getpgid(os.getppid())},open(${JSON.stringify(capture)},'w'))
+print(json.dumps({'type':'stream_event','event':{'type':'content_block_start','content_block':{'name':'WebSearch'}}}),flush=True)
+print(json.dumps({'type':'stream_event','event':{'type':'content_block_delta','delta':{'type':'input_json_delta','partial_json':json.dumps({'query':'fixture search'})}}}),flush=True)
 print(json.dumps({'type':'stream_event','session_id':'session-probe','event':{'type':'content_block_delta','delta':{'type':'text_delta','text':'첫 글자'}}}),flush=True)
 print(json.dumps({'type':'result','result':'완료','is_error':False,'session_id':'session-probe'}),flush=True)
 `);chmodSync(binary,0o700);
  const prior={binary:process.env.CLAUDE_BIN,token:process.env.TELEGRAM_BOT_TOKEN,state:process.env.TELEGRAM_STATE_DIR,bot:process.env.CODEX_BOT_TOKEN};
  process.env.CLAUDE_BIN=binary;process.env.TELEGRAM_BOT_TOKEN="fixture-token";process.env.TELEGRAM_STATE_DIR=workspace;process.env.CODEX_BOT_TOKEN="fixture-app-token";
  try {
-  const deltas:string[]=[];const result=await runClaudeCogsTurn({agentId:"testmate",cwd:workspace,codexHome:home,prompt:"question",model:"sonnet",onDelta:text=>deltas.push(text)});
-  expect(result.ok).toBe(true);expect(deltas).toEqual(["첫 글자"]);expect(result.reply).toBe("완료");
+  const activities:string[]=[];const deltas:string[]=[];const result=await runClaudeCogsTurn({agentId:"testmate",cwd:workspace,codexHome:home,prompt:"question",model:"sonnet",onActivity:(_line,_id,item)=>activities.push(cogsActivityLine(item)),onDelta:text=>deltas.push(text)});
+  expect(activities).toEqual(["🌐 search fixture search"]);expect(result.ok).toBe(true);expect(deltas).toEqual(["첫 글자"]);expect(result.reply).toBe("완료");
   const observed=JSON.parse(readFileSync(capture,"utf-8"));
   expect(observed.pgid).toBe(observed.parent_pgid);
   expect(observed.telegram_keys).toEqual([]);expect(observed.bot_key).toBe(false);expect(observed.cwd).toBe(realpathSync(join(home,"runtime")));expect(observed.project_settings).toBe(false);
