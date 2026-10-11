@@ -225,8 +225,10 @@ function injectProseStyle(): void {
   document.head.appendChild(st);
 }
 
-// 형식 배지(HTML·MD·PDF…) — 심플 원칙: 색 채움 없이 같은 모양의 얇은 테두리 하나. 형식은 글자로 구분한다.
-function badgeClass(_t: string): string {
+// 형식 배지(HTML·MD·PDF…) — 같은 모양의 얇은 테두리. HTML 만 초록으로 눈에 띄게(프로젝트 탭 문서 칩과 같은 토큰),
+// 나머지 형식은 회색 그대로 둔다.
+export function badgeClass(t: string): string {
+  if (t.toLowerCase() === "html") return "text-txt-green border-accent-green/30 bg-accent-green/10 hover:brightness-110";
   return "text-slate-500 border-surface-3 bg-transparent hover:text-slate-100";
 }
 
