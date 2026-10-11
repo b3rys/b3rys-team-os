@@ -11,10 +11,10 @@
   },
   {
     "id": "b3chat",
-    "name": "b3chat",
+    "name": "cogs",
     "repo": "b3rys/cogs",
     "branch": "main",
-    "docs": { "readme": "README.md", "design": "DESIGN.md", "features": "FEATURES.md", "todo": "TODO.md" },
+    "docs": { "readme": "README.md", "project": "PROJECT.md", "design": "DESIGN.md", "features": "FEATURES.md", "todo": "TODO.md" },
     "kanbanPrefix": "[b3chat]",
     "excludeSections": ["킵"],
     "tokenEnv": "GITHUB_TOKEN_B3CHAT"
@@ -24,7 +24,7 @@
     "name": "tally",
     "repo": "b3rys/tally",
     "branch": "main",
-    "docs": { "readme": "README.md", "design": "DESIGN.md", "features": "FEATURES.md", "todo": "TODO.md" },
+    "docs": { "readme": "README.md", "project": "PROJECT.md", "design": "DESIGN.md", "features": "FEATURES.md", "todo": "TODO.md" },
     "kanbanPrefix": "[tally]",
     "excludeSections": ["킵"],
     "tokenEnv": "GITHUB_TOKEN_TALLY"

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DOC_KEYS, GitHubDocs, ProjectSourceError, validateProjects, type ProjectRegistration, type DocKey } from "../lib/githubDocs";
+import { DOC_KEYS, GitHubDocs, registeredDocKeys, ProjectSourceError, validateProjects, type ProjectRegistration, type DocKey } from "../lib/githubDocs";
 import { projectIntro } from "../lib/projectDocRender";
 import { standaloneCsp, standaloneDocPage } from "../../shared/projectsProse";
 import { DEFAULT_EXCLUDE_SECTIONS, parseProjectTodo } from "../lib/projectTodo";
@@ -32,7 +32,7 @@ export function createProjectRoutes(deps: ProjectDeps) {
     return {
       id: p.id, name: p.name, repo: p.repo, branch: p.branch, sha: snapshot.sha,
       intro: projectIntro(snapshot.docs.readme?.md ?? ""),
-      docs: DOC_KEYS.map(key => ({ key, path: p.docs[key], exists: snapshot.docs[key] !== null })),
+      docs: registeredDocKeys(p).map(key => ({ key, path: p.docs[key], exists: snapshot.docs[key] !== null })),
       todo, excludeSections: excludeSections(p), kanban, fetchedAt: snapshot.fetchedAt, stale: snapshot.stale,
     };
   }
@@ -91,7 +91,7 @@ export function createProjectRoutes(deps: ProjectDeps) {
     const doc = snapshot.docs[key];
     if (!doc) return c.json({ error: "document_not_found", key }, 404);
     const mode = c.req.query("mode") === "md" ? "md" : "html";
-    const exists = Object.fromEntries(DOC_KEYS.map(k => [k, snapshot.docs[k] !== null]));
+    const exists = Object.fromEntries(registeredDocKeys(p).map(k => [k, snapshot.docs[k] !== null]));
     const basePath = process.env.BASE_PATH ?? "/team";
     const mermaidNonce = mode === "html" && doc.needs.includes("mermaid-svg") && MERMAID_PATH
       ? Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64url") // 128비트, 요청마다 새로

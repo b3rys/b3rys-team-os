@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { createProjectRoutes } from "./projects";
-import { GitHubDocs, type ProjectRegistration } from "../lib/githubDocs";
+import { GitHubDocs, validateProjects, type ProjectRegistration } from "../lib/githubDocs";
 import { createHostGate } from "../lib/hostGate";
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
@@ -170,5 +170,60 @@ describe("새창 페이지 /doc/:key/page", () => {
     const { app } = setup();
     expect((await app.request("http://localhost/team/api/projects/nope/doc/readme/page")).status).toBe(404);
     expect((await app.request("http://localhost/team/api/projects/sample/doc/secret/page")).status).toBe(404);
+  });
+});
+
+describe("PROJECT.md — 선택 문서 키", () => {
+  function setupWith(projects: ProjectRegistration[]) {
+    const dir = mkdtempSync(join(tmpdir(), "projects-optional-"));
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE task (id TEXT, title TEXT, lane TEXT, updated_at TEXT)");
+    const fetched: string[] = [];
+    const source = new GitHubDocs({ cacheDir: dir, useToken: false, fetch: (async (url: any) => {
+      fetched.push(String(url));
+      if (String(url).includes("/branches/")) return Response.json({ commit: { sha: "b".repeat(40) } });
+      if (String(url).endsWith("/PROJECT.md")) return new Response("# Project\n\nWhy this exists.\n");
+      return new Response("# Doc\n\nBody.\n");
+    }) as typeof fetch });
+    const app = new Hono();
+    app.route("/team/api", createProjectRoutes({ db, projects, source }));
+    cleanups.push(() => { db.close(); rmSync(dir, { recursive: true, force: true }); });
+    return { app, fetched };
+  }
+  const withProject: ProjectRegistration = { ...p, id: "withdoc", docs: { ...p.docs, project: "PROJECT.md" } };
+
+  test("등록 검증: project 는 없어도 통과, 있으면 다른 문서와 같은 경로 규칙", () => {
+    expect(validateProjects([p])).toEqual([p]);
+    expect(validateProjects([withProject])).toEqual([withProject]);
+    for (const bad of ["", "/abs.md", "../PROJECT.md", "a/./b.md", "x?.md"]) {
+      expect(() => validateProjects([{ ...p, docs: { ...p.docs, project: bad } }])).toThrow("invalid_project_registry");
+    }
+    // 필수 문서는 여전히 필수다
+    const { todo: _todo, ...noTodo } = p.docs;
+    expect(() => validateProjects([{ ...p, docs: noTodo }])).toThrow("invalid_project_registry");
+  });
+
+  test("등록한 프로젝트: 목록 순서 README → PROJECT → DESIGN → FEATURES → TODO, 새창 페이지에 PROJECT 칩", async () => {
+    const { app, fetched } = setupWith([withProject]);
+    const { projects } = await (await app.request("/team/api/projects")).json();
+    expect(projects[0].docs.map((d: any) => d.key)).toEqual(["readme", "project", "design", "features", "todo"]);
+    expect(projects[0].docs.find((d: any) => d.key === "project")).toEqual({ key: "project", path: "PROJECT.md", exists: true });
+    expect(fetched.some((u) => u.endsWith("/PROJECT.md"))).toBe(true);
+    const doc = await (await app.request("/team/api/projects/withdoc/doc/project")).json();
+    expect(doc.md).toContain("Why this exists.");
+    const html = await (await app.request("/team/api/projects/withdoc/doc/readme/page")).text();
+    expect(html).toContain('href="/team/api/projects/withdoc/doc/project/page">PROJECT</a>');
+    expect(html.indexOf(">README<")).toBeLessThan(html.indexOf(">PROJECT<"));
+    expect(html.indexOf(">PROJECT<")).toBeLessThan(html.indexOf(">DESIGN<"));
+  });
+
+  test("등록하지 않은 프로젝트: GitHub 에 묻지 않고, 목록·새창 페이지에 PROJECT 가 아예 없다(비활성 칩도 아님)", async () => {
+    const { app, fetched } = setupWith([p]);
+    const { projects } = await (await app.request("/team/api/projects")).json();
+    expect(projects[0].docs.map((d: any) => d.key)).toEqual(["readme", "design", "features", "todo"]);
+    expect(fetched.some((u) => u.endsWith("/PROJECT.md"))).toBe(false);
+    expect((await app.request("/team/api/projects/sample/doc/project")).status).toBe(404);
+    const html = await (await app.request("/team/api/projects/sample/doc/readme/page")).text();
+    expect(html).not.toContain("PROJECT");
   });
 });

@@ -69,8 +69,8 @@ export const STANDALONE_CSP = "default-src 'none'; img-src https: data:; style-s
 export function standaloneCsp(nonce?: string | null): string {
   return nonce ? `${STANDALONE_CSP}; script-src 'self' 'nonce-${nonce}'` : STANDALONE_CSP;
 }
-export const DOC_KEYS_ORDER = ["readme", "design", "features", "todo"] as const;
-export const DOC_LABELS: Record<string, string> = { readme: "README", design: "DESIGN", features: "FEATURES", todo: "TODO" };
+export const DOC_KEYS_ORDER = ["readme", "project", "design", "features", "todo"] as const;
+export const DOC_LABELS: Record<string, string> = { readme: "README", project: "PROJECT", design: "DESIGN", features: "FEATURES", todo: "TODO" };
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
@@ -91,7 +91,8 @@ export function standaloneDocPage(opts: {
     ? `\n<script nonce="${esc(nonce)}" src="${esc(`${basePath}/api/projects/vendor/mermaid.min.js`)}"></script>\n<script nonce="${esc(nonce)}">${MERMAID_INLINE_JS}</script>`
     : "";
   const pageUrl = (k: string, m: "html" | "md") => `${basePath}/api/projects/${encodeURIComponent(projectId)}/doc/${k}/page${m === "md" ? "?mode=md" : ""}`;
-  const chips = DOC_KEYS_ORDER.map((k) => opts.exists[k]
+  // exists 에 키가 없으면 그 프로젝트에 등록되지 않은 선택 문서 — 칩을 그리지 않는다.
+  const chips = DOC_KEYS_ORDER.filter((k) => k in opts.exists).map((k) => opts.exists[k]
     ? `<a class="chip${k === key ? " on" : ""}" href="${esc(pageUrl(k, mode))}">${DOC_LABELS[k]}</a>`
     : `<span class="chip off">${DOC_LABELS[k]}</span>`).join("");
   const modes = (["html", "md"] as const).map((m) => `<a class="mode${m === mode ? " on" : ""}" href="${esc(pageUrl(key, m))}">${m.toUpperCase()}</a>`).join("");
