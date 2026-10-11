@@ -1103,6 +1103,8 @@ function bindMoreMenuCloser(): void {
   };
   document.addEventListener("click", (e) => closeAll(e.target as Node | null));
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAll(); });
+  // 보고서 미리보기(iframe) 안을 누르면 클릭이 이 문서로 오지 않는다 — 대신 창이 포커스를 잃으므로 그때 닫는다.
+  window.addEventListener("blur", () => closeAll());
 }
 
 // ── 렌더: 상세 ────────────────────────────────────────────────────
