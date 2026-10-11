@@ -17,8 +17,17 @@
  * 라이브가 커밋을 말해주지 않거나(옛 빌드·git 없음), 그 커밋이 이 저장소에 없으면(강제푸시·얕은 클론)
  * ★"최신인가 보다" 로 넘어가지 않는다.★ blocked 로 끝내고 사람이 본다.
  *
- * 사용: bun run scripts/deploy-plan.ts [--health <url>] [--target <ref>] [--json]
+ * 사용: bun run scripts/deploy-plan.ts [--health <url>] [--target <ref>] [--json | --flags]
+ *       bun run scripts/deploy-plan.ts --verify <plan.json> [--health <url>]
  *   종료코드 0 = 판단 성공(할 일이 없어도 0) · 2 = blocked(사람이 봐야 함) · 1 = 사용법·실행 오류
+ *           · 3 = --verify 실패(라이브가 target 이 아니다)
+ *
+ * ■ 셸이 판단을 읽는 법 — ★`--flags` 한 줄만 믿는다★
+ * 배포 스크립트가 JSON 을 셸에서 다시 해석하면, 그 사이에 섞인 출력(경고·셸 환경이 붙인 줄)
+ * 때문에 값이 '0' 도 '1' 도 아닌 것이 될 수 있다. 그러면 빌드도 재시작도 하지 않고, 검증도
+ * '건드린 층만' 보니 ★아무것도 안 했는데 성공으로 끝난다.★ 그래서 `--flags` 는 정확히
+ * `build=0|1 restart=0|1` 한 줄만 표준출력에 찍고, 셸은 그 형식이 아니면 ★멈춘다★
+ * (형식 판정은 `parseFlagsLine` — 시험이 붙는 곳).
  */
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
@@ -219,13 +228,45 @@ export function verifyAfterDeploy(plan: Plan, after: Record<Layer, LivePoint>): 
   const problems: string[] = [];
   for (const layer of Object.keys(LAYER_PATHS) as Layer[]) {
     const didAct = layer === "server" ? plan.actions.restart : plan.actions.build;
-    if (!didAct) continue; // 안 건드린 층은 옛 커밋이 정상이다
+    // ★'한 동작' 만이 아니라 '바뀐 층' 도 본다.★ 동작 판단이 어떤 이유로든 틀려 아무것도 안 했을 때,
+    //   한 동작만 보면 검사할 층이 없어 ★성공으로 끝난다★(실제로 그렇게 성공이 찍혔다).
+    //   바뀐 파일이 있는 층은 반드시 target 이어야 한다.
+    const mustMatch = didAct || plan.changed[layer].length > 0;
+    if (!mustMatch) continue; // 안 바뀌고 안 건드린 층은 옛 커밋이 정상이다
     const now = after[layer].commit;
     if (now !== plan.target) {
       problems.push(`${layer} 층이 아직 ${now ? now.slice(0, 8) : "모름"} 이다 — ${plan.target.slice(0, 8)} 이어야 한다`);
     }
   }
   return { ok: problems.length === 0, problems };
+}
+
+/** 셸에 넘기는 판단 한 줄. 형식은 `parseFlagsLine` 과 짝이다. */
+export function formatFlagsLine(plan: Plan): string {
+  return `build=${plan.actions.build ? 1 : 0} restart=${plan.actions.restart ? 1 : 0}`;
+}
+
+/**
+ * ★판단 한 줄을 엄격하게 읽는다★ — 정확히 `build=0|1 restart=0|1` 이 아니면 null.
+ * 빈 값·여러 줄·앞뒤에 다른 글자가 붙은 값은 모두 '모르는 상태' 다. 모르는 상태로 배포하지 않는다.
+ * (셸 쪽은 같은 정규식으로 검사한다: ^build=([01]) restart=([01])$)
+ */
+export function parseFlagsLine(raw: string): { build: 0 | 1; restart: 0 | 1 } | null {
+  const m = /^build=([01]) restart=([01])$/.exec(raw);
+  if (!m) return null;
+  return { build: m[1] === "1" ? 1 : 0, restart: m[2] === "1" ? 1 : 0 };
+}
+
+/** --verify 가 읽는 계획 파일이 정말 계획인지 확인한다. 아니면 null(검증을 '통과' 로 치지 않는다). */
+export function parsePlanJson(text: string): Plan | null {
+  let v: unknown;
+  try { v = JSON.parse(text); } catch { return null; }
+  const p = v as Partial<Plan>;
+  const isList = (x: unknown) => Array.isArray(x) && x.every((y) => typeof y === "string");
+  if (!p || typeof p !== "object" || typeof p.target !== "string" || !/^[0-9a-f]{40}$/.test(p.target) ||
+    !p.actions || typeof p.actions.build !== "boolean" || typeof p.actions.restart !== "boolean" ||
+    !p.changed || !isList(p.changed.server) || !isList(p.changed.web)) return null;
+  return p as Plan;
 }
 
 // ── 실제 저장소·라이브를 읽는 얇은 껍데기 (위 순수 함수에 주입한다) ──────────────
@@ -315,6 +356,29 @@ if (import.meta.main) {
   const healthUrl = arg("--health", `http://127.0.0.1:${process.env.TEAM_HTTP_PORT ?? 7878}/health`);
   const targetRef = arg("--target", "origin/main");
   const asJson = argv.includes("--json");
+  const asFlags = argv.includes("--flags");
+
+  // ── 배포 후 검증: 배포 전에 저장한 계획과 지금 라이브를 대조한다 ──
+  if (argv.includes("--verify")) {
+    const file = arg("--verify", "");
+    const plan = file ? parsePlanJson(await Bun.file(file).text().catch(() => "")) : null;
+    if (!plan) {
+      console.error(`✗ 계획 파일을 읽지 못했다: ${file || "(없음)"} — ★검증을 통과로 치지 않는다.★`);
+      process.exit(3);
+    }
+    let after: Record<Layer, LivePoint>;
+    try {
+      after = await fetchLive(healthUrl);
+    } catch (e) {
+      console.error(`✗ 배포 후 라이브에 물어보지 못했다(${healthUrl}): ${(e as Error).message}`);
+      process.exit(3);
+    }
+    const v = verifyAfterDeploy(plan, after);
+    for (const problem of v.problems) console.error(`✗ ${problem}`);
+    const short = (x: string | null) => (x ? x.slice(0, 8) : "모름");
+    console.log(`server=${short(after.server.commit)} web=${short(after.web.commit)} target=${short(plan.target)}`);
+    process.exit(v.ok ? 0 : 3);
+  }
 
   const targetSha = git(["rev-parse", targetRef]);
   if (!targetSha.ok) {
@@ -341,7 +405,12 @@ if (import.meta.main) {
     canonicalBranch: arg("--canonical-branch", "main"),
   });
 
-  if (asJson) {
+  if (asFlags) {
+    // ★표준출력은 판단 한 줄뿐이다.★ 경고·멈춤 사유는 표준에러로 — 셸이 섞어 읽지 않게.
+    for (const w of plan.warnings) console.error(`⚠ ${w}`);
+    if (plan.blocked) console.error(`★멈춤★ — ${plan.blocked}`);
+    else console.log(formatFlagsLine(plan));
+  } else if (asJson) {
     console.log(JSON.stringify(plan, null, 2));
   } else {
     const short = (s: string | null) => (s ? s.slice(0, 8) : "모름");

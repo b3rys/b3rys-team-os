@@ -6,14 +6,18 @@
 //
 // ★가짜 상류를 만들되, 검사 대상은 진짜 판단 함수다★ — planDeploy 는 순수 함수라 저장소를 안 읽는다.
 // (주입하는 건 "무엇이 바뀌었나" 라는 ★사실★ 이지, 판단이 아니다)
-import { test, expect } from "bun:test";
-import { readdirSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { test, expect, describe } from "bun:test";
+import { readdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   planDeploy,
   verifyAfterDeploy,
+  formatFlagsLine,
+  parseFlagsLine,
+  parsePlanJson,
   LAYER_PATHS,
   CONFIG_NOT_IN_ANY_LAYER,
   type Layer,
@@ -340,4 +344,112 @@ test("★공유 코드는 양쪽 층에 다 든다★ — 한쪽만 반영되면
   expect(LAYER_PATHS.web).toContain("src/web");
   expect(LAYER_PATHS.server).not.toContain("src/web");
   expect(LAYER_PATHS.web).not.toContain("src/server");
+});
+
+// ── ★판단을 못 읽었는데 성공으로 끝나지 않게★ ─────────────────────────────────
+//
+// 실제로 있었던 일: 배포 스크립트가 판단(JSON)을 셸에서 다시 해석하다 빌드·재시작 값이 '0' 도 '1' 도
+// 아닌 값이 됐다. 그래서 아무것도 안 했고, 검증은 '한 동작' 만 보니 검사할 층이 없어 ★성공★ 이 찍혔다.
+// 화면 층에는 바뀐 파일이 있었고, 라이브 화면은 옛 커밋이었다.
+
+test("★사고 재현★ — 동작 판단이 비었어도, 바뀐 파일이 있는 층이 옛 커밋이면 실패다", () => {
+  const plan: Plan = {
+    blocked: null,
+    actions: { restart: false, build: false }, // 판단을 못 읽어 아무것도 안 한 상태
+    changed: { server: [], web: ["src/web/styles.css"] },
+    target: SHA.target,
+    warnings: [],
+  };
+  const v = verifyAfterDeploy(plan, live(SHA.server, SHA.web));
+  expect(v.ok).toBe(false);
+  expect(v.problems).toHaveLength(1);
+  expect(v.problems[0]).toContain("web");
+});
+
+test("대조군 — 바뀐 것도 한 것도 없는 층은 옛 커밋이어도 정상이다", () => {
+  const plan: Plan = {
+    blocked: null,
+    actions: { restart: false, build: false },
+    changed: { server: [], web: [] },
+    target: SHA.target,
+    warnings: [],
+  };
+  expect(verifyAfterDeploy(plan, live(SHA.server, SHA.web)).ok).toBe(true);
+});
+
+test("판단 한 줄은 정확한 형식만 받는다 — 빈 값·여러 줄·덧붙은 글자는 모르는 상태", () => {
+  expect(parseFlagsLine("build=1 restart=0")).toEqual({ build: 1, restart: 0 });
+  expect(parseFlagsLine("build=0 restart=1")).toEqual({ build: 0, restart: 1 });
+  for (const bad of ["", "1", "build= restart=", "build=1 restart=0\n", "noise\nbuild=1 restart=0",
+    " build=1 restart=0", "build=1  restart=0", "build=2 restart=0", "build=true restart=false", "build=1"]) {
+    expect(parseFlagsLine(bad)).toBeNull();
+  }
+});
+
+test("판단 한 줄은 계획과 왕복한다", () => {
+  for (const [build, restart] of [[false, false], [true, false], [false, true], [true, true]] as const) {
+    const plan: Plan = { blocked: null, actions: { build, restart }, changed: { server: [], web: [] }, target: SHA.target, warnings: [] };
+    expect(parseFlagsLine(formatFlagsLine(plan))).toEqual({ build: build ? 1 : 0, restart: restart ? 1 : 0 });
+  }
+});
+
+test("계획 파일이 계획이 아니면 null — 검증을 통과로 치지 않는다", () => {
+  const ok: Plan = { blocked: null, actions: { build: true, restart: false }, changed: { server: [], web: ["a"] }, target: SHA.target, warnings: [] };
+  expect(parsePlanJson(JSON.stringify(ok))).toEqual(ok);
+  for (const bad of ["", "not json", "{}", JSON.stringify({ ...ok, target: "abc" }),
+    JSON.stringify({ ...ok, actions: { build: 1, restart: 0 } }), JSON.stringify({ ...ok, changed: { web: [] } })]) {
+    expect(parsePlanJson(bad)).toBeNull();
+  }
+});
+
+// ── 실제 CLI 를 돌려본다: 가짜 /health 를 세우고 --verify · --flags 의 종료코드와 출력을 잰다 ──
+describe("CLI — 배포 스크립트가 실제로 부르는 모드", () => {
+  const script = join(repoRoot(), "scripts", "deploy-plan.ts");
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot(), encoding: "utf8" }).stdout.trim();
+  function withHealth(body: unknown) {
+    const server = Bun.serve({ port: 0, fetch: () => Response.json(body) });
+    return { url: `http://127.0.0.1:${server.port}/health`, stop: () => server.stop(true) };
+  }
+  async function runAsync(args: string[]) {
+    const proc = Bun.spawn(["bun", "run", script, ...args], { cwd: repoRoot(), stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+    return { status: await proc.exited, stdout, stderr };
+  }
+
+  test("--verify: 바뀐 화면 층이 옛 커밋이면 종료코드 3", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "deploy-verify-"));
+    const planFile = join(dir, "plan.json");
+    writeFileSync(planFile, JSON.stringify({ blocked: null, actions: { build: false, restart: false },
+      changed: { server: [], web: ["src/web/x.ts"] }, target: head, warnings: [] }));
+    const h = withHealth({ server: { commit: "d".repeat(40) }, web: { commit: "d".repeat(40) } });
+    try {
+      const r = await runAsync(["--verify", planFile, "--health", h.url]);
+      expect(r.status).toBe(3);
+      expect(r.stderr).toContain("web");
+    } finally { h.stop(); rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  test("--verify: 라이브가 target 이면 0 · 계획 파일이 없으면 3", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "deploy-verify-"));
+    const planFile = join(dir, "plan.json");
+    writeFileSync(planFile, JSON.stringify({ blocked: null, actions: { build: true, restart: true },
+      changed: { server: ["src/server/x.ts"], web: ["src/web/x.ts"] }, target: head, warnings: [] }));
+    const h = withHealth({ server: { commit: head }, web: { commit: head } });
+    try {
+      expect((await runAsync(["--verify", planFile, "--health", h.url])).status).toBe(0);
+      expect((await runAsync(["--verify", join(dir, "missing.json"), "--health", h.url])).status).toBe(3);
+    } finally { h.stop(); rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  test("--flags: 표준출력은 판단 한 줄뿐이고 형식 검사를 통과한다", async () => {
+    const h = withHealth({ server: { commit: head }, web: { commit: head } });
+    try {
+      const r = await runAsync(["--flags", "--target", head, "--health", h.url]);
+      expect(r.status).toBe(0);
+      expect(r.stdout.endsWith("\n")).toBe(true);
+      const line = r.stdout.slice(0, -1);
+      expect(line.includes("\n")).toBe(false);
+      expect(parseFlagsLine(line)).toEqual({ build: 0, restart: 0 });
+    } finally { h.stop(); }
+  });
 });
