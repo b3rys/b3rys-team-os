@@ -91,6 +91,9 @@ export function canSendAsBot(agent: BotTokenLookup, root: string = REPO_ROOT): b
  * 팀원의 봇으로 chat 에 게시한다. ★토큰 값은 어떤 경로로도 밖에 안 나간다.★
  * 실패해도 throw 하지 않는다 — 호출부가 배달기록을 남길 수 있게 boolean 만 돌려준다.
  */
+/** 게시 텍스트 상한(UTF-16 단위). 텔레그램 4096 제한보다 여유를 둔다 — 넘는 부분은 잘려 나간다. */
+export const TELEGRAM_SEND_LIMIT = 4000;
+
 export async function sendAsAgentBot(
   agent: AgentRecord,
   chatId: string,
@@ -107,7 +110,7 @@ export async function sendAsAgentBot(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // ★4096자 제한★ — 넘으면 텔레그램이 통째로 거절한다(=보고 유실). 잘라서라도 보낸다.
-      body: JSON.stringify({ chat_id: chatId, text: text.slice(0, 4000), disable_web_page_preview: true }),
+      body: JSON.stringify({ chat_id: chatId, text: text.slice(0, TELEGRAM_SEND_LIMIT), disable_web_page_preview: true }),
     });
     if (res.ok) return { ok: true };
     // ★에러 본문에 토큰이 없다★ (텔레그램은 description 만 준다) — 그대로 남겨도 안전하다.

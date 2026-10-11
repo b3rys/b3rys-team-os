@@ -28,6 +28,7 @@ import { loadAgentCreds } from "../lib/slack";
 import { getCaptureGroupId } from "../lib/captureConfig";
 import { getChannel } from "../channels/registry";
 import type { WsEvent, AgentRecord } from "../types";
+import { appendDeadReceiverNote, buildDeadReceiverNote, isTelegramChannel, isTelegramReceiverDown, pickReplyRecipient } from "../lib/deadReceiverNote";
 
 interface InboxRouteDeps {
   db: Database;
@@ -35,6 +36,8 @@ interface InboxRouteDeps {
   registeredAgentIds: () => Set<string>;
   /** ★[B] 릴레이용★ — 팀원 본인의 봇으로 텔레그램에 게시하려면 AgentRecord(토큰)가 필요하다. */
   agents?: () => AgentRecord[];
+  /** direct_to_gd 릴레이 직전 발신자 텔레그램 수신 판정. 기본 = 런타임 essentials 의 poller 항목. 시험 주입용. */
+  receiverDown?: (agent: AgentRecord) => boolean | Promise<boolean>;
 }
 
 /** 팀장 DM chat id (setting). 없으면 --direct-to-gd 릴레이 불가. */
@@ -404,7 +407,20 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
           // ★위임에 direct_to_gd 오마킹은 여기 오기 전에 거부된다★ (프로토콜 에러, 위 조기검증 —
           //   direct_to_gd + in_reply_to 없음 → 400). 그래서 여기 오는 direct_to_gd 는 ★정상 보고★(in_reply_to 있음)뿐.
           const dm = ownerDmChatId(deps.db);
-          if (dm) dest = { chatId: dm, kind: "telegram_dm" };
+          if (dm) {
+            dest = { chatId: dm, kind: "telegram_dm" };
+            // 발신자 봇으로 게시되므로, 발신자 수신이 죽어 있으면 이 대화의 답은 아무에게도 안 간다.
+            //   본문(stored.body)은 그대로 두고 게시 텍스트 끝에만 시스템 줄을 붙인다. 판정 실패는 경고 없음으로 둔다.
+            // 텔레그램 채널 발신자만 — 다른 채널(b3chat 등)은 텔레그램 poller 가 없어 '끊김' 으로 오판된다.
+            const down = isTelegramChannel(agent) && await Promise.resolve()
+              .then(() => (deps.receiverDown ?? isTelegramReceiverDown)(agent))
+              .catch(() => false);
+            if (down) {
+              const replyTo = pickReplyRecipient(deps.agents?.() ?? [], agent.id);
+              relayText = appendDeadReceiverNote(stored.body, buildDeadReceiverNote(agent, replyTo));
+              appendAuditFile(env.from_agent_id, "direct_to_gd_receiver_down_note", stored.id, { reply_to: replyTo?.id ?? null });
+            }
+          }
           // ★★슬랙 스레드의 답을 텔레그램 단톡방에 게시하지 않는다★★ (codex 리뷰 — ★내가 오늘 만든 유출★)
           //   아침까지는 텔레그램 릴레이가 `thread_id.startsWith("tg-")` 조건이라 슬랙 스레드가 ★자동 제외★ 됐다.
           // 내가 그 조건을 없애면서(맞는 방향이었다) ★슬랙 답이 팀장님 텔레그램 방으로도 새게 됐다.★
