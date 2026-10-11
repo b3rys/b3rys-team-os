@@ -843,9 +843,17 @@ function renderList(): void {
     const selected = _selectedReportIds.has(r.id);
     return `
       <div class="reports-card group relative w-full text-left border-b border-surface-3 ${selected ? "bg-accent-green/[0.06]" : ""} px-2 py-3.5 hover:bg-surface-0/70 transition-colors overflow-hidden" data-id="${escape(r.id)}" data-category="${escape(catOf(r))}" role="button" tabindex="0">
-        <div class="flex items-start gap-2">
-          ${_selectionMode ? `<button class="reports-select mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 ${selected ? "border-accent-green bg-accent-green/20 text-accent-green" : "border-surface-3 text-transparent"}" data-id="${escape(r.id)}" aria-label="${pick("보고서 선택", "Select report")}" aria-pressed="${selected}"><span class="text-[11px] leading-none">✓</span></button>` : ""}
-          <div class="min-w-0 flex-1 text-[15px] font-semibold text-slate-100 leading-snug">${escape(r.title)}</div>
+        <div class="flex items-start gap-2 2xl:items-center 2xl:gap-4">
+          ${_selectionMode ? `<button class="reports-select mt-0.5 2xl:mt-0 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 ${selected ? "border-accent-green bg-accent-green/20 text-accent-green" : "border-surface-3 text-transparent"}" data-id="${escape(r.id)}" aria-label="${pick("보고서 선택", "Select report")}" aria-pressed="${selected}"><span class="text-[11px] leading-none">✓</span></button>` : ""}
+          <div class="min-w-0 flex-1">
+            <div class="text-[15px] font-semibold text-slate-100 leading-snug 2xl:truncate">${escape(r.title)}</div>
+            ${r.summary ? `<div class="text-[13px] text-slate-400 leading-relaxed mt-1 line-clamp-1">${escape(r.summary)}</div>` : ""}
+            <div class="flex items-center gap-2 flex-wrap text-xs text-slate-500 mt-1 2xl:hidden"><span class="text-accent-greenSoft font-medium">${escape(r.author || "—")}</span><span>·</span><span class="tabular-nums">${fmtDate(r.created_at)}</span>${(r.tags ?? []).map((t) => tagBadge(t, true)).join("")}${badges}</div>
+            ${(r.tags ?? []).length ? `<div class="hidden 2xl:flex items-center gap-1.5 mt-1.5">${(r.tags ?? []).map((t) => tagBadge(t, true)).join("")}</div>` : ""}
+          </div>
+          <div class="hidden 2xl:block w-20 shrink-0 truncate text-[13px] text-accent-greenSoft font-medium">${escape(r.author || "—")}</div>
+          <div class="hidden 2xl:block w-32 shrink-0 text-[13px] tabular-nums text-slate-500">${fmtDate(r.created_at)}</div>
+          <div class="hidden 2xl:flex w-24 shrink-0 items-center gap-1">${badges}</div>
           <div class="flex shrink-0 items-center gap-1">
             ${starButton(r, "card")}
             <button class="reports-delete inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-surface-0 hover:text-txt-red" data-id="${escape(r.id)}" data-title="${escape(r.title)}" title="${pick("보고서 삭제", "Delete report")}" aria-label="${pick("보고서 삭제", "Delete report")}">
@@ -853,8 +861,6 @@ function renderList(): void {
             </button>
           </div>
         </div>
-        ${r.summary ? `<div class="text-[13px] text-slate-400 leading-relaxed mt-1.5 line-clamp-1">${escape(r.summary)}</div>` : ""}
-        <div class="flex items-center gap-2 flex-wrap text-xs text-slate-500 mt-1"><span class="text-accent-greenSoft font-medium">${escape(r.author || "—")}</span><span>·</span><span class="tabular-nums">${fmtDate(r.created_at)}</span>${(r.tags ?? []).map((t) => tagBadge(t, true)).join("")}${badges}</div>
       </div>`;
   }).join("");
 
@@ -886,25 +892,26 @@ function renderList(): void {
   const editBtn = "shrink-0 inline-flex h-7 items-center gap-1 px-2 rounded-md text-[12px] font-medium text-slate-500 hover:bg-surface-0 hover:text-slate-200";
   _root.innerHTML = `
     <div data-reports-list-scroll class="h-full overflow-y-auto">
-      <div class="w-full max-w-6xl mx-auto px-4 md:px-8 py-5 pb-20">
-        <div class="mb-4 rounded-xl border border-surface-3 bg-surface-2">
-          <div class="flex gap-2 p-3">
-            <div class="relative flex-1"><svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-              <input id="reports-q" type="search" placeholder="${pick("제목·작성자·요약 검색", "Search title · author · summary")}" value="${escape(_query)}" class="h-9 w-full bg-surface-1 border border-surface-3 rounded-lg text-sm text-slate-200 pl-9 pr-3 outline-none focus:border-accent-green/40 placeholder:text-slate-600" />
+      <div class="w-full max-w-[1400px] mx-auto px-4 md:px-8 py-5 pb-20">
+        <div class="mb-3 space-y-2.5">
+          <div class="flex flex-col gap-2 2xl:flex-row 2xl:items-center">
+            <div class="flex gap-2 2xl:w-80 2xl:shrink-0">
+              <div class="relative flex-1"><svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+                <input id="reports-q" type="search" placeholder="${pick("제목·작성자·요약 검색", "Search title · author · summary")}" value="${escape(_query)}" class="h-9 w-full bg-surface-2 border border-surface-3 rounded-lg text-sm text-slate-200 pl-9 pr-3 outline-none focus:border-accent-green/40 placeholder:text-slate-600" />
+              </div>
+              <button id="reports-selection-mode" class="h-9 shrink-0 px-3.5 rounded-lg text-[13px] font-semibold border border-surface-3 bg-surface-2 text-slate-300 hover:text-slate-100 2xl:hidden">${_selectionMode ? pick("선택 해제", "Deselect") : pick("선택", "Select")}</button>
             </div>
-            <button id="reports-selection-mode" class="h-9 shrink-0 px-3.5 rounded-lg text-[13px] font-semibold border border-surface-3 bg-surface-1 text-slate-300 hover:text-slate-100">${_selectionMode ? pick("선택 해제", "Deselect") : pick("선택", "Select")}</button>
-          </div>
-          <div class="border-t border-surface-3 px-3 py-2.5 space-y-2">
-            <div class="flex items-start gap-2">
-              <span class="${rowLabel}">${pick("분류", "Category")}</span>
-              <div class="reports-chiprow flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto md:flex-wrap md:overflow-visible">${pills}</div>
+            <div class="flex min-w-0 flex-1 items-center gap-2">
+              <span class="${rowLabel} !pt-0">${pick("분류", "Category")}</span>
+              <div class="reports-chiprow flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">${pills}</div>
               <button id="reports-manage-categories" class="${editBtn}">✎ ${pick("편집", "Edit")}</button>
             </div>
-            <div class="flex items-start gap-2">
-              <span class="${rowLabel}">${pick("태그", "Tags")}</span>
-              <div class="reports-chiprow flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto md:flex-wrap md:overflow-visible">${tagPills || `<span class="text-xs text-slate-600">${pick("등록된 태그 없음", "No tags yet")}</span>`}</div>
-              <button id="reports-manage-tags" class="${editBtn}">✎ ${pick("편집", "Edit")}</button>
-            </div>
+            <button data-selection-wide class="hidden h-9 shrink-0 px-3.5 rounded-lg text-[13px] font-semibold border border-surface-3 bg-surface-2 text-slate-300 hover:text-slate-100 2xl:inline-flex 2xl:items-center">${_selectionMode ? pick("선택 해제", "Deselect") : pick("선택", "Select")}</button>
+          </div>
+          <div class="flex items-center gap-2 2xl:pl-[20.5rem]">
+            <span class="${rowLabel} !pt-0">${pick("태그", "Tags")}</span>
+            <div class="reports-chiprow flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">${tagPills || `<span class="text-xs text-slate-600">${pick("등록된 태그 없음", "No tags yet")}</span>`}</div>
+            <button id="reports-manage-tags" class="${editBtn}">✎ ${pick("편집", "Edit")}</button>
           </div>
         </div>
         ${selectionBar}
@@ -946,6 +953,9 @@ function renderList(): void {
     _selectionMode = !_selectionMode;
     if (!_selectionMode) clearReportSelection();
     renderListPreservingScroll();
+  });
+  _root.querySelector<HTMLButtonElement>("[data-selection-wide]")?.addEventListener("click", () => {
+    _root?.querySelector<HTMLButtonElement>("#reports-selection-mode")?.click();
   });
   _root.querySelector<HTMLButtonElement>("#reports-cancel-selection")?.addEventListener("click", () => {
     clearReportSelection();
@@ -1116,32 +1126,38 @@ async function renderDetail(): Promise<void> {
   _root.innerHTML = `
     <div data-reports-detail-scroll class="h-full overflow-y-auto">
       <div class="w-full max-w-[1400px] mx-auto px-4 md:px-8 pb-20">
-        <!-- 상단 sticky 헤더: 스크롤해도 돌아가기·제목·폼토글 항상 노출 -->
+        <!-- 상단 sticky 헤더: ← · 제목 + 메타 한 줄 · 오른쪽 같은 크기 아이콘 묶음(삭제는 ⋯ 메뉴 안) -->
         <div class="sticky top-0 z-20 -mx-4 md:-mx-8 px-4 md:px-8 bg-surface-1/95 backdrop-blur border-b border-surface-3">
-          <div class="flex flex-col gap-2 py-2.5 md:flex-row md:items-center md:gap-3">
-            <div class="flex min-w-0 flex-1 items-center gap-3">
-              <button id="reports-back" title="${pick("보고서 목록으로", "Back to report list")}" class="${act}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><path d="M15 18l-6-6 6-6"/></svg>${pick("목록", "List")}</button>
-              <div class="text-[16px] font-semibold text-slate-100 truncate flex-1" title="${escape(meta.title)}">${escape(meta.title)}</div>
+          <div class="flex flex-col gap-2 py-3 md:flex-row md:items-start md:gap-4">
+            <div class="flex min-w-0 flex-1 items-start gap-3">
+              <button id="reports-back" title="${pick("보고서 목록으로", "Back to report list")}" class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-surface-3 bg-surface-1 text-slate-400 hover:text-slate-100 hover:border-slate-500/40 cursor-pointer transition-colors"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg><span class="sr-only">${pick("목록", "List")}</span></button>
+              <div class="min-w-0 flex-1">
+                <div class="text-[17px] font-semibold text-slate-100 leading-8 truncate" title="${escape(meta.title)}">${escape(meta.title)}</div>
+                <div class="flex items-center gap-x-2 gap-y-1 flex-wrap text-[12.5px] text-slate-500">
+                  ${category ? `<span class="inline-flex h-5 items-center px-1.5 rounded text-[11px] font-semibold border text-txt-green border-accent-green/30 bg-accent-green/10">${escape(category)}</span>` : ""}
+                  <span class="text-accent-greenSoft font-medium">${escape(author)}</span><span>·</span><span class="tabular-nums">${fmtDate(meta.created_at)}</span>
+                  <span id="reports-detail-tags" class="inline-flex items-center gap-1.5 flex-wrap">${detailTagsHtml(meta)}</span>
+                  <button id="reports-reqtoggle" class="${metaBtn.replace("text-slate-400", "text-accent-greenSoft")}">${pick("✉ 요청하기", "✉ Request")}</button>
+                </div>
+              </div>
             </div>
-            <div class="flex items-center gap-1.5 flex-wrap">
+            <div class="flex items-center gap-1.5 pl-11 md:pl-0">
               ${forms.length ? `<div class="inline-flex h-8 items-center gap-0.5 rounded-lg border border-surface-3 bg-surface-1 p-0.5">${tabs}</div>
-              <a id="reports-open" target="_blank" rel="noopener" title="${pick("새 탭에서 크게 보기 — 보고서를 브라우저 새 창으로 엽니다", "Open larger in a new tab — opens the report in a new browser window")}" class="${act}"><svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>${pick("새창보기", "New window")}</a>
-              <a id="reports-dl" class="${act}"><svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 21h16"/></svg>${pick("다운로드", "Download")}</a>` : ""}
+              <a id="reports-open" target="_blank" rel="noopener" title="${pick("새 탭에서 크게 보기 — 보고서를 브라우저 새 창으로 엽니다", "Open larger in a new tab — opens the report in a new browser window")}" class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-surface-3 bg-surface-1 text-slate-400 hover:text-slate-100 hover:border-slate-500/40 cursor-pointer transition-colors"><svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg><span class="sr-only">${pick("새창보기", "New window")}</span></a>
+              <a id="reports-dl" title="${pick("다운로드", "Download")}" class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-surface-3 bg-surface-1 text-slate-400 hover:text-slate-100 hover:border-slate-500/40 cursor-pointer transition-colors"><svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 21h16"/></svg><span class="sr-only">${pick("다운로드", "Download")}</span></a>` : ""}
               ${starButton(meta, "detail")}
-              <button id="reports-delete-detail" class="${act} hover:!text-txt-red hover:!border-red-400/40"><svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>${pick("삭제", "Delete")}</button>
+              <details class="reports-more relative">
+                <summary class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-surface-3 bg-surface-1 text-slate-400 hover:text-slate-100 hover:border-slate-500/40 cursor-pointer transition-colors list-none [&::-webkit-details-marker]:hidden" title="${pick("더보기", "More")}"><svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></summary>
+                <div class="absolute right-0 z-30 mt-1 min-w-[8rem] rounded-lg border border-surface-3 bg-surface-1 p-1 shadow-lg">
+                  <button id="reports-delete-detail" class="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-txt-red hover:bg-red-400/10"><svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>${pick("삭제", "Delete")}</button>
+                </div>
+              </details>
             </div>
           </div>
         </div>
 
         <div class="pt-4">
-          <!-- 메타 한 줄: 분류(있을 때만)·작성자·시각·태그·태그 편집·요청하기 -->
-          <div class="flex items-center gap-x-2 gap-y-1.5 flex-wrap text-[13px] text-slate-500">
-            ${category ? `<span class="inline-flex h-6 items-center px-2 rounded-md text-[12px] font-semibold border text-txt-green border-accent-green/30 bg-accent-green/10">${escape(category)}</span>` : ""}
-            <span class="text-accent-greenSoft font-medium">${escape(author)}</span><span>·</span><span class="tabular-nums">${fmtDate(meta.created_at)}</span>
-            <span id="reports-detail-tags" class="inline-flex items-center gap-1.5 flex-wrap">${detailTagsHtml(meta)}</span>
-            <button id="reports-reqtoggle" class="${metaBtn.replace("text-slate-400", "text-accent-greenSoft")}">${pick("✉ 요청하기", "✉ Request")}</button>
-          </div>
-          ${meta.summary ? `<div class="max-w-[75ch] text-sm text-slate-400 leading-relaxed mt-3 pl-3 border-l-2 border-surface-3">${escape(meta.summary)}</div>` : ""}
+          ${meta.summary ? `<div class="max-w-[75ch] text-sm text-slate-400 leading-relaxed pl-3 border-l-2 border-surface-3">${escape(meta.summary)}</div>` : ""}
 
           <div class="reports-reqbox">
             <div id="reports-reqform" class="hidden mt-3 max-w-3xl bg-surface-2 border border-surface-3 rounded-xl p-4">
