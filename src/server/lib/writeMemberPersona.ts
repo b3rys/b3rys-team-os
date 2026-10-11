@@ -12,7 +12,7 @@
 import { existsSync, readFileSync, copyFileSync, mkdirSync, writeFileSync, symlinkSync, lstatSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { LIVE_TEAM_OS_PATH } from "./teamOsRender";
-import { SKILLS_MD_PATH } from "./personaTemplates";
+import { ensureSkillsCopy } from "./skillsRender";
 import {
   buildPersona,
   buildAgentsMd,
@@ -63,8 +63,6 @@ export interface WriteMemberPersonaResult {
  * (사람이 기억해야 하는 절차로 두지 않는다.)
  */
 function ensureTeamOsLink(workspace: string): void { ensureRulesLink(workspace, "TEAM-OS.md", LIVE_TEAM_OS_PATH); }
-/** 같은 규칙으로 SKILLS.md 심링크 — CLAUDE.md 의 `@SKILLS.md` 가 풀리게 (스킬 목록을 규칙 파일 밖으로 뺀 자리). */
-function ensureSkillsLink(workspace: string): void { ensureRulesLink(workspace, "SKILLS.md", SKILLS_MD_PATH); }
 function ensureRulesLink(workspace: string, name: string, target: string): void {
   const link = join(workspace, name);
   let st: ReturnType<typeof lstatSync> | null = null;
@@ -190,7 +188,7 @@ export function writeMemberPersona(m: WriteMemberPersonaInput): WriteMemberPerso
   //   SOUL 이 없어도 안전하다: @SOUL.md 는 대상이 없으면 조용히 증발하고 본문은 정상 로드된다.
 
   ensureTeamOsLink(workspace);   // ★영입 때부터 팀 룰 정본을 읽을 수 있게★ (GD 2026-07-13)
-  ensureSkillsLink(workspace);   // 스킬 목록도 같은 방식(@SKILLS.md)
+  ensureSkillsCopy(workspace);   // 스킬 목록은 심링크가 아니라 복사본 — 폴더 밖 @import 는 claude 가 안 읽는다
 
   return { written, backedUp };
 }
