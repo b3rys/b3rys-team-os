@@ -21,7 +21,7 @@ function containsPath(root: string, path: string): boolean {
 export function assertCogsWorkspace(workspace: string, registryPath = cogsRegistryPath(), repoRoots = [REPO_ROOT, resolve(import.meta.dir, "../../../..")]): string {
   const root = realpathSync(workspace);
   if (/[\[\]*?{}()\n\r]/.test(root) || root === "/") throw new Error("invalid_cogs_workspace");
-  if ([registryPath, ...repoRoots].some(path => containsPath(root, resolve(path)) || containsPath(root, canonicalPath(path)))) {
+  if ([registryPath, ...repoRoots].some(path => containsPath(root, join(canonicalPath(dirname(resolve(path))), basename(path))) || containsPath(root, canonicalPath(path)))) {
     throw new Error("cogs_workspace_contains_control_files");
   }
   return root;
