@@ -30,7 +30,7 @@ print(json.dumps({'type':'result','result':'완료','is_error':False,'session_id
   expect(JSON.parse(observed.args[observed.args.indexOf("--mcp-config")+1])).toEqual({mcpServers:{}});
   const settings=JSON.parse(observed.args[observed.args.indexOf("--settings")+1]);expect(settings.enabledPlugins).toEqual({});expect(settings.disableAllHooks).toBe(true);
   expect(existsSync(join(workspace,".claude","settings.json"))).toBe(true);
-  expect(claudeCogsArguments({agentId:"testmate",prompt:"next",model:"opus",resumeSessionId:result.sessionId},"")).toContain("--resume");
+  expect(claudeCogsArguments({agentId:"testmate",cwd:workspace,prompt:"next",model:"opus",resumeSessionId:result.sessionId},"")).toContain("--resume");
  } finally {
   for(const [key,value] of Object.entries({CLAUDE_BIN:prior.binary,TELEGRAM_BOT_TOKEN:prior.token,TELEGRAM_STATE_DIR:prior.state,CODEX_BOT_TOKEN:prior.bot})) {if(value===undefined)delete process.env[key];else process.env[key]=value;}
   rmSync(root,{recursive:true,force:true});
@@ -101,4 +101,22 @@ else: open(${JSON.stringify(sentinel)},"w").write("executed")
   const result=await runClaudeCogsTurn({agentId:"fixture",cwd:root,prompt:"fixture"});
   expect(result.ok).toBe(false);expect(result.detail).toBe("cogs_folder_cli_unsupported");expect(existsSync(sentinel)).toBe(false);
  } finally {if(prior===undefined)delete process.env.CLAUDE_BIN;else process.env.CLAUDE_BIN=prior;rmSync(root,{recursive:true,force:true});}
+});
+
+test("unsafe workspace is rejected before even launching the CLI",async()=>{
+ const root=mkdtempSync(join(tmpdir(),"cogs-unsafe-workspace-")),registry=join(root,"agents.json"),binary=join(root,"fake-cli"),sentinel=join(root,"executed");
+ writeFileSync(registry,'[{"id":"fixture","cogs_tool_scope":"folder"}]');
+ writeFileSync(binary,`#!/usr/bin/env python3
+open(${JSON.stringify(sentinel)},"w").write("executed")
+`);chmodSync(binary,0o700);
+ const priorBinary=process.env.CLAUDE_BIN,priorRegistry=process.env.TEAM_AGENT_REGISTRY;
+ process.env.CLAUDE_BIN=binary;process.env.TEAM_AGENT_REGISTRY=registry;
+ try {
+  const result=await runClaudeCogsTurn({agentId:"fixture",cwd:root,prompt:"fixture"});
+  expect(result.ok).toBe(false);expect(result.detail).toBe("cogs_workspace_contains_control_files");expect(existsSync(sentinel)).toBe(false);
+ } finally {
+  if(priorBinary===undefined)delete process.env.CLAUDE_BIN;else process.env.CLAUDE_BIN=priorBinary;
+  if(priorRegistry===undefined)delete process.env.TEAM_AGENT_REGISTRY;else process.env.TEAM_AGENT_REGISTRY=priorRegistry;
+  rmSync(root,{recursive:true,force:true});
+ }
 });

@@ -1,10 +1,10 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createInterface } from "node:readline";
 import type { CodexTurnOptions, CodexTurnResult } from "../codex/runner";
-import { cogsToolPolicy, readCogsToolScope, type CogsToolScope } from "./cogsToolPolicy";
+import { assertCogsWorkspace, cogsToolPolicy, readCogsToolScope, type CogsToolScope } from "./cogsToolPolicy";
 import { COGS_MODELS } from "../../lib/b3chatModels";
 
 export function claudeCogsEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -32,6 +32,7 @@ export async function runClaudeCogsTurn(opts: CodexTurnOptions): Promise<CodexTu
   let toolName="", toolInput="";
   try {
     const scope = readCogsToolScope(opts.agentId);
+    const workspace = assertCogsWorkspace(cwd);
     const binary = process.env.CLAUDE_BIN || "claude";
     if (scope === "folder") {
       const version = spawnSync(binary, ["--version"], {env:claudeCogsEnvironment(process.env),encoding:"utf8",timeout:5000});
@@ -40,7 +41,6 @@ export async function runClaudeCogsTurn(opts: CodexTurnOptions): Promise<CodexTu
         return {ok:false,reply:"",detail:"cogs_folder_cli_unsupported",elapsedMs:Date.now()-started};
       }
     }
-    const workspace = realpathSync(cwd);
     const persona=[`You are AI teammate ${opts.agentId}. Reply directly in Korean. Your workspace is ${workspace}.`,
       ...["SOUL.md","CLAUDE.md"].map(name=>{try{return readFileSync(join(opts.cwd ?? cwd,name),"utf-8");}catch{return "";}}),
       "This conversation is in the cogs app. Return your answer as assistant text; the bridge delivers it. Do not use Telegram plugins or messenger sending scripts."].join("\n");
@@ -82,6 +82,6 @@ export async function runClaudeCogsTurn(opts: CodexTurnOptions): Promise<CodexTu
       stop();
     }
     return {ok:!failure && !!text.trim(),reply:text,sessionId,detail,elapsedMs:Date.now()-started};
-  } catch {return {ok:false,reply:text,sessionId,detail:"runtime_failed",elapsedMs:Date.now()-started};}
+  } catch (error) {return {ok:false,reply:text,sessionId,detail:error instanceof Error && error.message === "cogs_workspace_contains_control_files" ? error.message : "runtime_failed",elapsedMs:Date.now()-started};}
   finally {if(temporary)rmSync(cwd,{recursive:true,force:true});}
 }

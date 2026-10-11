@@ -12,6 +12,14 @@ turn startup. Missing, unknown, malformed, and duplicate-member settings use
 runs in the member workspace's canonical path with `--restricted`, no project or
 user settings sources, no hooks/plugins/MCP servers, outside-read blocking,
 path-scoped write approval, and automatic denial of permission prompts.
+Write/Edit of `SOUL.md`, `CLAUDE.md`, and `.claude/**` are explicitly denied,
+including their resolved symlink targets. A workspace containing the server's
+registry path or either the main/deployed repository root is rejected before
+CLI startup, even when the registry file does not yet exist.
+
+WebFetch/WebSearch can send readable folder contents outside the machine;
+folder scope restricts file access, not web data disclosure.
+
 Credentials named `.env`, `.env.*`, and `~/.secrets` are denied. Claude Code
 2.1.296 or newer is required; older/unrecognized versions fail before execution.
 
@@ -26,6 +34,27 @@ not reach a Bash invocation, so its filesystem/network isolation was not
 verified. File tools use Claude Code permissions; the Bash sandbox does not
 cover them. Shell read/write/network and inside-command acceptance remain
 unverified. Enable folder Bash only after those checks pass with OS enforcement.
+
+## Execution host and deployment prerequisite
+
+The runner spawns the CLI locally on the machine running the Claude app bridge;
+it does not forward turns to a separate host. It uses `CLAUDE_BIN` when configured,
+otherwise `claude` from the bridge's PATH. The launcher prepends the user's
+`.local/bin` to PATH and executes the bridge locally through its LaunchAgent.
+
+Before deploying, check the effective CLI on **each bridge host**, using the
+same binary selection and user as the service. For the default selection:
+
+```sh
+command -v claude
+claude --version
+```
+
+For a configured override, run `"$CLAUDE_BIN" --version` instead. Do not print
+other environment variables. Require 2.1.296 or newer before starting folder
+teammates, then run the live probe on that host before rollout. A host at 2.1.287
+will return `cogs_folder_cli_unsupported`; updating another machine does not
+satisfy this check.
 
 ## Reproduce
 

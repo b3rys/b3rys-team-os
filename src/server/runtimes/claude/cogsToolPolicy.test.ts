@@ -1,8 +1,8 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cogsToolPolicy, readCogsToolScope } from "./cogsToolPolicy";
+import { assertCogsWorkspace, cogsToolPolicy, readCogsToolScope } from "./cogsToolPolicy";
 import { claudeCogsArguments } from "./cogsRunner";
 
 test("scope comes only from server registry; missing, unknown and ambiguous values close to folder", () => {
@@ -31,5 +31,32 @@ test("folder exposes scoped file tools and web; full exposes normal built-ins an
   expect(folder.settings).toHaveProperty("permissions.blockReadsOutsideWorkingDirectories",true);
   expect(full.tools).toBe("default");expect(full.allowed).toContain("Bash");expect(full.allowed).toContain("Write");
   expect(full.flags).not.toContain("--restricted");
+ } finally {rmSync(dir,{recursive:true,force:true});}
+});
+
+test("workspace containing server registry or repository is rejected, including aliases and missing registry",()=>{
+ const dir=mkdtempSync(join(tmpdir(),"cogs-controls-"));
+ const repo=join(dir,"repo"),member=join(dir,"member"),registry=join(repo,"agents.json");
+ mkdirSync(repo);mkdirSync(member);writeFileSync(registry,"[]");symlinkSync(dir,join(dir,"alias"),"dir");
+ try {
+  expect(()=>assertCogsWorkspace(dir,registry,[repo])).toThrow("cogs_workspace_contains_control_files");
+  expect(()=>assertCogsWorkspace(repo,registry,[repo])).toThrow("cogs_workspace_contains_control_files");
+  expect(()=>assertCogsWorkspace(join(dir,"alias"),registry,[repo])).toThrow("cogs_workspace_contains_control_files");
+  expect(()=>assertCogsWorkspace(dir,join(repo,"missing.json"),[])).toThrow("cogs_workspace_contains_control_files");
+  expect(()=>assertCogsWorkspace(member,registry,[repo])).not.toThrow();
+  symlinkSync(registry,join(member,"registry-link.json"));
+  expect(()=>assertCogsWorkspace(member,join(member,"registry-link.json"),[])).toThrow("cogs_workspace_contains_control_files");
+ } finally {rmSync(dir,{recursive:true,force:true});}
+});
+test("folder Write/Edit deny persona, configuration, and resolved persona aliases",()=>{
+ const dir=mkdtempSync(join(tmpdir(),"cogs-persona-"));
+ writeFileSync(join(dir,"backing.md"),"synthetic");symlinkSync(join(dir,"backing.md"),join(dir,"SOUL.md"));
+ try {
+  const policy=cogsToolPolicy(dir,"folder");
+  const deny=(policy.settings as any).permissions.deny as string[];
+  for(const name of ["SOUL.md","CLAUDE.md",".claude","backing.md"]) {
+   for(const tool of ["Write","Edit"]) expect(deny.some(rule=>rule.endsWith(`/${name})`)&&rule.startsWith(tool))).toBe(true);
+  }
+  expect(deny.some(rule=>rule.endsWith("/.claude/**)")&&rule.startsWith("Write"))).toBe(true);
  } finally {rmSync(dir,{recursive:true,force:true});}
 });

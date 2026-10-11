@@ -12,7 +12,18 @@ mkdirSync(workspace);mkdirSync(outside);mkdirSync(join(outside,".secrets"));
 writeFileSync(join(workspace,"inside.txt"),"synthetic fixture\n");
 for(const path of [join(outside,"dummy.txt"),join(outside,".env"),join(outside,".secrets","dummy")]) writeFileSync(path,"synthetic fixture\n");
 symlinkSync(outside,join(workspace,"escape"),"dir");
+const protectedFiles=["SOUL.md","CLAUDE.md",".claude/settings.json"];
+mkdirSync(join(workspace,".claude"));
+for(const name of protectedFiles) writeFileSync(join(workspace,name),"synthetic fixture\n");
+// Alias read/write exercises protection of the resolved persona target.
+symlinkSync(join(workspace,"SOUL.md"),join(workspace,"persona-alias.md"));
+const protectedCases=[...protectedFiles,"persona-alias.md"].flatMap(name=>[
+ ["Read",{file_path:join(workspace,name)},false,`protected-read-${name}`],
+ ["Write",{file_path:join(workspace,name),content:"changed"},true,`protected-write-${name}`],
+ ["Edit",{file_path:join(workspace,name),old_string:"synthetic",new_string:"changed"},true,`protected-edit-${name}`],
+] as const);
 const cases=[
+ ...protectedCases,
  ["Read",{file_path:"/etc/hosts"},true,"absolute-system"],
  ["Read",{file_path:join(outside,"dummy.txt")},true,"absolute-outside"],
  ["Read",{file_path:join(outside,".env")},true,"outside-env"],
@@ -56,7 +67,8 @@ try {
  const exit=await ended;
  for(let i=0;i<cases.length;i++) {const passed=results.has(i)&&results.get(i)===cases[i][2];console.log(`${passed?"PASS":"UNVERIFIED_OR_FAIL"} ${cases[i][3]} reason=${reasons.get(i)??"no_result"}`)}
  console.log(`${bashAbsent?"PASS":"FAIL"} bash-outside-write/read/secrets-disabled`);
- const filesIntact=readFileSync(join(outside,"dummy.txt"),"utf8")==="synthetic fixture\n" && readFileSync(join(workspace,"inside.txt"),"utf8")==="updated fixture\n" && existsSync(join(workspace,"new.txt")) && readFileSync(join(workspace,"new.txt"),"utf8")==="synthetic";
+ const personasIntact=protectedFiles.every(name=>readFileSync(join(workspace,name),"utf8")==="synthetic fixture\n");
+ const filesIntact=personasIntact&&readFileSync(join(outside,"dummy.txt"),"utf8")==="synthetic fixture\n" && readFileSync(join(workspace,"inside.txt"),"utf8")==="updated fixture\n" && existsSync(join(workspace,"new.txt")) && readFileSync(join(workspace,"new.txt"),"utf8")==="synthetic";
  console.log(`${filesIntact?"PASS":"FAIL"} actual-file-effects`);
  const passed=filesIntact&&bashAbsent&&results.size===cases.length&&cases.every((c,i)=>results.get(i)===c[2])&&!existsSync(join(outside,"write.txt"));
  console.log(`RESULT ${passed?"PASS":"FAIL"} attempts=${attempt} completed=${results.size} timeout=${timeout} cli_exit=${exit}`);
