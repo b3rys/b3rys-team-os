@@ -1368,3 +1368,37 @@ test("cogs turn failure preserves streamed text and ends response state",async()
  expect(result.turnOk).toBe(false);expect(edits.at(-1)?.state).toBe("complete");
  expect(edits.at(-1)?.text).toContain("부분 본문");expect(edits.at(-1)?.text).toContain("응답을");
 });
+
+test("cogs search → write → search reaches app requests after reply starts, with separate activity", async () => {
+  const home = mkdtempSync(join(tmpdir(), "cogs-activity-home-"));
+  const requests: Record<string, unknown>[] = [];
+  const fetchFn = (async (_url: unknown, init?: RequestInit) => {
+    requests.push(JSON.parse(String(init?.body)));
+    return Response.json({ ok: true, result: { message_id: 6 } });
+  }) as typeof fetch;
+  const transport = { apiBase: "http://app.invalid", plainOnly: true };
+  const result = await handleMessage(93, "question", 5, {
+    agentId: "activityprobe", codexHome: home, workdir: home, sandbox: "read-only",
+    channel: { kind: "b3chat", apiBase: transport.apiBase, allowFrom: ["93"], ownerChat: "93" },
+    sendMessage: tgSend("fixture", fetchFn, transport),
+    editMessage: tgEdit("fixture", fetchFn, transport),
+    runTurn: async options => {
+      options.onActivity?.("legacy search", "search-1", { type: "webSearch", query: "first query" });
+      await Bun.sleep(450);
+      options.onDelta?.("partial answer");
+      await Bun.sleep(450);
+      options.onActivity?.("legacy write", "write-1", { type: "fileChange", changes: [{ path: "/tmp/work/note.md", kind: { type: "add" } }] });
+      await Bun.sleep(450);
+      options.onActivity?.("legacy search", "search-2", { type: "webSearch", action: { queries: ["second query"] } });
+      // Finish immediately: a queued last tool event must still be delivered.
+      return ok("final answer");
+    },
+  });
+  expect(result.turnOk).toBe(true);
+  const activities = requests.filter(r => r.cogs_response_state === "activity");
+  expect(activities.map(r => r.cogs_activity)).toEqual(["🌐 search first query", "📝 write note.md", "🌐 search second query"]);
+  expect(activities.slice(1).every(r => r.text === "partial answer")).toBe(true);
+  expect(requests.at(-1)?.cogs_response_state).toBe("complete");
+  expect(requests.at(-1)?.cogs_activity).toBe("");
+  expect(requests.at(-1)?.text).toBe("final answer");
+});
