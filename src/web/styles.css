@@ -1,4 +1,14 @@
 @tailwind base;
+
+/* 글꼴 — Pretendard Variable(OFL-1.1, 라이선스: fonts/Pretendard-LICENSE-OFL.txt).
+   외부 CDN 없이 빌드에 포함해 로컬에서 그대로 쓴다(오프라인에서도 같은 글꼴). */
+@font-face {
+  font-family: "Pretendard Variable";
+  src: url("./fonts/PretendardVariable.woff2") format("woff2-variations");
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+}
 @tailwind components;
 @tailwind utilities;
 
