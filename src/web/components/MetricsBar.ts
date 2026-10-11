@@ -264,6 +264,16 @@ export function renderMetricsBar(root: HTMLElement): void {
       if (mb) mb.scrollLeft = prevScrollLeft;
     }
 
+    // 모바일에서 메뉴 드롭다운은 fixed 라(가로스크롤 클립 회피) CSS 계산값은 노치 높이·줄 높이에 따라 어긋난다.
+    // 실제 메뉴 줄 아래 경계에 붙인다.
+    if (window.matchMedia("(max-width: 767px)").matches) {
+      const bottom = root.querySelector<HTMLElement>(".metric-bar")?.getBoundingClientRect().bottom;
+      if (bottom !== undefined) {
+        root.querySelectorAll<HTMLElement>("#tasks-menu-dropdown, #inbox-menu-dropdown, #doc-menu-dropdown")
+          .forEach((el) => { el.style.top = `${bottom}px`; });
+      }
+    }
+
     const toggle = root.querySelector<HTMLButtonElement>("#alerts-toggle");
     toggle?.addEventListener("click", (e) => {
       e.stopPropagation();
