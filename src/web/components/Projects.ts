@@ -319,7 +319,7 @@ function pageUrl(id: string, key: ProjectDocKey, mode: "html" | "md"): string { 
 function blobUrl(p: { repo: string; sha: string }, path: string): string { return `https://github.com/${p.repo}/blob/${p.sha}/${path}`; }
 
 function chipHtml(p: ProjectSummary, d: ProjectSummary["docs"][number]): string {
-  const base = "projects-chip inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide border";
+  const base = "projects-chip inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wide border";
   if (!d.exists) {
     return `<span class="${base} text-slate-600 border-surface-3/60 bg-transparent cursor-not-allowed" data-doc="${d.key}" data-disabled="1" aria-disabled="true" title="${pick(`${d.path} 없음`, `${d.path} missing`)}">${DOC_LABEL[d.key]}</span>`;
   }
@@ -341,7 +341,7 @@ function renderList(): void {
     const taskHtml = tasks.length
       ? `<ul class="projects-tasks mt-2 space-y-0.5">${tasks.map((t) => `<li class="text-[13px] text-slate-300 leading-snug flex gap-1.5 min-w-0"><span class="text-accent-greenSoft shrink-0">▸</span><span class="min-w-0 break-words">${mdInlineToHtml(t)}</span></li>`).join("")}</ul>`
       : `<div class="mt-2 text-[12px] text-slate-500">${pick("진행중인 과제 없음", "No task in progress")}</div>`;
-    const stale = p.stale ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold border text-txt-amber border-amber-400/25 bg-amber-400/10" title="${pick("GitHub 조회 실패 — 캐시본", "GitHub fetch failed — cached copy")}">stale</span>` : "";
+    const stale = p.stale ? `<span class="px-1.5 py-0.5 rounded text-[11px] font-semibold border text-txt-amber border-amber-400/25 bg-amber-400/10" title="${pick("GitHub 조회 실패 — 캐시본", "GitHub fetch failed — cached copy")}">stale</span>` : "";
     return `
       <div class="projects-row group relative w-full text-left rounded-xl border border-surface-3 bg-surface-2 px-4 py-3 hover:bg-surface-3/60 transition-colors overflow-hidden" data-id="${escape(p.id)}">
         <span class="absolute left-0 top-0 bottom-0 w-[3px] bg-accent-green opacity-0 group-hover:opacity-100 transition-opacity"></span>
@@ -478,7 +478,7 @@ function todoStatusHtml(p: ProjectSummary | null, doc: ProjectDoc): string {
   const kanbanHtml = kanban.length
     ? `<section class="rounded-xl border border-surface-3 bg-surface-2 px-4 py-3" data-todo-section="kanban">
         <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">${pick("칸반 과제", "Kanban tasks")}<span class="ml-2 text-slate-500 normal-case tracking-normal font-mono">${kanban.length}</span></div>
-        <ul class="mt-2 space-y-1">${kanban.map((k) => `<li class="flex gap-2 min-w-0 text-[13.5px] text-slate-200"><span class="shrink-0 px-1.5 rounded text-[10px] font-semibold border ${k.lane === "doing" ? "text-txt-amber border-amber-400/25 bg-amber-400/10" : "text-txt-blue border-blue-400/25 bg-blue-400/10"}">${k.lane}</span><span class="min-w-0 break-words">${escape(k.title)}</span></li>`).join("")}</ul>
+        <ul class="mt-2 space-y-1">${kanban.map((k) => `<li class="flex gap-2 min-w-0 text-[13.5px] text-slate-200"><span class="shrink-0 px-1.5 rounded text-[11px] font-semibold border ${k.lane === "doing" ? "text-txt-amber border-amber-400/25 bg-amber-400/10" : "text-txt-blue border-blue-400/25 bg-blue-400/10"}">${k.lane}</span><span class="min-w-0 break-words">${escape(k.title)}</span></li>`).join("")}</ul>
       </section>`
     : "";
   const DONE_PREVIEW = 5;
@@ -520,7 +520,7 @@ async function renderDoc(): Promise<void> {
   // 문서 전환 칩 — 목록 카드와 같은 모양, 현재 문서는 채운 모양. 없는 문서는 비활성.
   const docChips = DOC_KEYS.map((k) => {
     const d = project?.docs.find((x) => x.key === k);
-    const base = "projects-doc-chip inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide border";
+    const base = "projects-doc-chip inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wide border";
     if (d && !d.exists) return `<span class="${base} text-slate-600 border-surface-3/60 bg-transparent cursor-not-allowed" aria-disabled="true">${DOC_LABEL[k]}</span>`;
     return k === key
       ? `<span class="${base} text-slate-50 border-accent-green/70 bg-accent-green/25" aria-current="page">${DOC_LABEL[k]}</span>`
@@ -529,7 +529,7 @@ async function renderDoc(): Promise<void> {
   const modeBtn = (m: "html" | "md") => `<button class="projects-mode px-3 py-1 text-xs font-semibold uppercase tracking-wide border transition-colors ${m === "html" ? "rounded-l-lg" : "rounded-r-lg -ml-px"} ${_mode === m ? "text-accent-green border-accent-green/35 bg-accent-green/10" : "text-slate-400 border-surface-3 bg-surface-2 hover:text-slate-200"}" data-mode="${m}" aria-pressed="${_mode === m}">${m.toUpperCase()}</button>`;
   const isTodo = key === "todo";
   const todoTabBtn = (t: "status" | "all", label: string) => `<button class="projects-todo-tab px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors ${_todoTab === t ? "text-slate-100 bg-surface-0 border-surface-3" : "text-slate-400 border-transparent hover:text-slate-200"}" data-todo-tab="${t}" aria-pressed="${_todoTab === t}">${label}</button>`;
-  const stale = doc.stale ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold border text-txt-amber border-amber-400/25 bg-amber-400/10">stale</span>` : "";
+  const stale = doc.stale ? `<span class="px-1.5 py-0.5 rounded text-[11px] font-semibold border text-txt-amber border-amber-400/25 bg-amber-400/10">stale</span>` : "";
   // 목차 트리는 HTML 본문(TODO 는 "전체" 탭)에서만. 절 판정은 splitSections — 본문은 자르지 않고 전체를 보인다.
   const treeMode = _mode === "html" && !(isTodo && _todoTab === "status");
   const secs = treeMode ? splitSections(doc.html, doc.toc ?? []) : [];
@@ -561,7 +561,7 @@ async function renderDoc(): Promise<void> {
         </div>
         <div class="pt-4 min-w-0 ${showToc ? "grid grid-cols-1 md:grid-cols-[240px_minmax(0,1fr)] gap-5" : ""}">
           ${showToc && cur ? `<aside id="projects-toc" class="${_tocMobileOpen ? "block" : "hidden"} md:block md:sticky md:top-24 md:self-start md:max-h-[calc(100vh-8rem)] md:overflow-y-auto rounded-xl border border-surface-3 bg-surface-2 px-2 py-2.5 min-w-0">
-            <div class="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-1 px-2">${pick("목차", "Contents")}</div>
+            <div class="text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1 px-2">${pick("목차", "Contents")}</div>
             ${tocTreeHtml(secs, cur)}
           </aside>` : ""}
           <div id="projects-viewer" class="min-w-0"></div>

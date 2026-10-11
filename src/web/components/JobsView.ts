@@ -219,7 +219,7 @@ export function renderJobsView(root: HTMLElement): void {
       <div class="flex-1 flex flex-col min-h-0">
         <div class="flex items-center justify-between px-4 py-2 border-b border-surface-3 shrink-0 bg-surface-1">
           <div class="text-sm font-semibold">${pick("Jobs · 운영 예약 작업", "Jobs · Operational scheduled jobs")}</div>
-          <span class="text-[10px] text-slate-500">${loadError ? pick("오프라인", "Offline") : "read-only — /api/teamos"}</span>
+          <span class="text-[11px] text-slate-500">${loadError ? pick("오프라인", "Offline") : "read-only — /api/teamos"}</span>
         </div>
         ${bodyHtml()}
       </div>`;

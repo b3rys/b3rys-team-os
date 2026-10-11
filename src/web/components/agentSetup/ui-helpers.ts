@@ -19,7 +19,7 @@ export function healthExampleCard(title: string, badge: string, badgeTone: strin
     <div class="rounded-lg border border-surface-3 bg-surface-2/60 p-3">
       <div class="mb-2 flex items-center justify-between gap-2">
         <div class="text-sm font-semibold text-slate-100">${escape(title)}</div>
-        <span class="inline-flex items-center rounded border px-2 py-0.5 text-[10px] uppercase tracking-wide ${badgeTone}">${escape(badge)}</span>
+        <span class="inline-flex items-center rounded border px-2 py-0.5 text-[11px] uppercase tracking-wide ${badgeTone}">${escape(badge)}</span>
       </div>
       <p class="text-xs leading-5 text-slate-300">${meaning}</p>
       <div class="mt-2 space-y-1 text-[11px] leading-5 text-slate-400">
@@ -31,7 +31,7 @@ export function healthExampleCard(title: string, badge: string, badgeTone: strin
 export function section(title: string, eyebrow: string, body: string): string {
   return `
     <section class="rounded-xl border border-surface-3 bg-surface-1 p-4">
-      <div class="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500 mb-1">${escape(eyebrow)}</div>
+      <div class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 mb-1">${escape(eyebrow)}</div>
       <h2 class="text-base font-semibold text-slate-100 mb-3">${escape(title)}</h2>
       ${body}
     </section>`;

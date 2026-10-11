@@ -306,10 +306,10 @@ export function renderTopology(root: HTMLElement): void {
   function legendHtml(): string {
     const items: NodeStatus[] = ["healthy", "pending", "stuck", "offline", "idle"];
     const chips = items.map((s) =>
-      `<span class="inline-flex items-center gap-1 text-[10px] text-slate-400">
+      `<span class="inline-flex items-center gap-1 text-[11px] text-slate-400">
         <span class="w-2.5 h-2.5 rounded-full" style="background:${STATUS_COLOR[s]}"></span>${STATUS_LABEL[s]}</span>`
     ).join("");
-    const note = `<span class="text-[10px] text-slate-500">${pick(`· 실선↓ 유입(capture) · 점선↑ 답변 미러 · <span style="color:#06b6d4">청록 점멸</span>=전송중 · <span style="color:#94a3b8">미완(오래됨)</span>=과거 잔여(정상)`, `· solid↓ inbound(capture) · dotted↑ reply mirror · <span style="color:#06b6d4">cyan blink</span>=Sending · <span style="color:#94a3b8">unfinished(old)</span>=past residual(Healthy)`)}</span>`;
+    const note = `<span class="text-[11px] text-slate-500">${pick(`· 실선↓ 유입(capture) · 점선↑ 답변 미러 · <span style="color:#06b6d4">청록 점멸</span>=전송중 · <span style="color:#94a3b8">미완(오래됨)</span>=과거 잔여(정상)`, `· solid↓ inbound(capture) · dotted↑ reply mirror · <span style="color:#06b6d4">cyan blink</span>=Sending · <span style="color:#94a3b8">unfinished(old)</span>=past residual(Healthy)`)}</span>`;
     return chips + note;
   }
 
@@ -335,8 +335,8 @@ export function renderTopology(root: HTMLElement): void {
       .filter((k) => (totals[k] ?? 0) > 0)
       .map((k) => {
         const sty = STATE_STYLE[k] ?? { label: k, color: "#94a3b8" };
-        return `<span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium" style="background:${sty.color}22;color:${sty.color}">${sty.label} ${totals[k] ?? 0}</span>`;
-      }).join(" ") || `<span class="text-[10px] text-slate-600">${pick("메시지 없음", "No messages")}</span>`;
+        return `<span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium" style="background:${sty.color}22;color:${sty.color}">${sty.label} ${totals[k] ?? 0}</span>`;
+      }).join(" ") || `<span class="text-[11px] text-slate-600">${pick("메시지 없음", "No messages")}</span>`;
     const list = (ids: string[]) => ids.map((id) => escape(displayName(id))).join(", ");
     return `
       <div class="p-4">
@@ -347,11 +347,11 @@ export function renderTopology(root: HTMLElement): void {
           </div>
           <button data-act="close" class="text-slate-500 hover:text-slate-300 text-sm">✕</button>
         </div>
-        ${at ? `<div class="text-[10px] text-slate-600 mt-0.5">${pick(`${escape(at.slice(11, 19))} 기준`, `as of ${escape(at.slice(11, 19))}`)}</div>` : ""}
+        ${at ? `<div class="text-[11px] text-slate-600 mt-0.5">${pick(`${escape(at.slice(11, 19))} 기준`, `as of ${escape(at.slice(11, 19))}`)}</div>` : ""}
         <div class="mt-3 grid grid-cols-3 gap-2 text-center">
-          <div class="rounded bg-surface-2 p-2"><div class="text-lg font-bold text-slate-100">${members.length}</div><div class="text-[10px] text-slate-500">${pick("등록 멤버", "Registered members")}</div></div>
-          <div class="rounded bg-surface-2 p-2"><div class="text-lg font-bold text-slate-100">${reachable}</div><div class="text-[10px] text-slate-500">${pick("활성(응답가능)", "Active (reachable)")}</div></div>
-          <div class="rounded bg-surface-2 p-2"><div class="text-lg font-bold text-cyan-400">${inflight}</div><div class="text-[10px] text-slate-500">${pick("전송중 합", "Sending total")}</div></div>
+          <div class="rounded bg-surface-2 p-2"><div class="text-lg font-bold text-slate-100">${members.length}</div><div class="text-[11px] text-slate-500">${pick("등록 멤버", "Registered members")}</div></div>
+          <div class="rounded bg-surface-2 p-2"><div class="text-lg font-bold text-slate-100">${reachable}</div><div class="text-[11px] text-slate-500">${pick("활성(응답가능)", "Active (reachable)")}</div></div>
+          <div class="rounded bg-surface-2 p-2"><div class="text-lg font-bold text-cyan-400">${inflight}</div><div class="text-[11px] text-slate-500">${pick("전송중 합", "Sending total")}</div></div>
         </div>
         <div class="text-[11px] text-slate-400 mt-3 mb-1">${pick("delivery_state 전체 합", "delivery_state total")}</div>
         <div class="flex flex-wrap gap-1">${chips}</div>
@@ -360,7 +360,7 @@ export function renderTopology(root: HTMLElement): void {
           ? `<div class="text-[11px] text-status-blocked mt-2">${pick(`⚠ 최근 멈춤: ${list(stuckMembers)}`, `⚠ Recently stuck: ${list(stuckMembers)}`)}</div>`
           : `<div class="text-[11px] text-accent-green mt-2">${pick("✓ 최근 멈춤 없음", "✓ No recent stuck")}</div>`}
         ${offlineMembers.length ? `<div class="text-[11px] text-status-blocked mt-1">${pick(`오프라인: ${list(offlineMembers)}`, `Offline: ${list(offlineMembers)}`)}</div>` : ""}
-        <div class="text-[10px] text-slate-600 mt-3">${pick("멤버 노드를 클릭하면 개별 pending 관리로 전환됩니다.", "Click a member node to switch to individual pending management.")}</div>
+        <div class="text-[11px] text-slate-600 mt-3">${pick("멤버 노드를 클릭하면 개별 pending 관리로 전환됩니다.", "Click a member node to switch to individual pending management.")}</div>
       </div>`;
   }
 
@@ -381,9 +381,9 @@ export function renderTopology(root: HTMLElement): void {
       .filter((k) => (m?.counts[k] ?? 0) > 0)
       .map((k) => {
         const sty = STATE_STYLE[k] ?? { label: k, color: "#94a3b8" };
-        return `<span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium"
+        return `<span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium"
           style="background:${sty.color}22;color:${sty.color}">${sty.label} ${m?.counts[k]}</span>`;
-      }).join(" ") || `<span class="text-[10px] text-slate-600">${pick("메시지 없음", "No messages")}</span>`;
+      }).join(" ") || `<span class="text-[11px] text-slate-600">${pick("메시지 없음", "No messages")}</span>`;
 
     const inflightNote = (m?.inflight?.count ?? 0) > 0
       ? `<div class="text-[11px] mt-1 ${st === "stuck" ? "text-status-blocked" : "text-slate-400"}">
@@ -414,7 +414,7 @@ export function renderTopology(root: HTMLElement): void {
           <div class="text-sm font-semibold text-amber-400">${pick(`확인: ${name} → ${verb}`, `Confirm: ${name} → ${verb}`)}</div>
           <div class="text-[11px] text-slate-300 mt-1">${pick(`${p.affected_count}건이 <b>${panel.action === "expire" ? "expired" : "completed"}</b> 처리됩니다.`, `${p.affected_count} will be set to <b>${panel.action === "expire" ? "expired" : "completed"}</b>.`)}
             ${p.skipped_recent > 0 ? pick(`(30초 미만 ${p.skipped_recent}건은 보호되어 제외)`, `(${p.skipped_recent} under 30s protected & excluded)`) : ""}</div>
-          <div class="text-[10px] text-slate-500 mt-0.5">${pick("전송중(dispatching/wake_dispatched)은 절대 건드리지 않습니다.", "Sending (dispatching/wake_dispatched) is never touched.")}</div>
+          <div class="text-[11px] text-slate-500 mt-0.5">${pick("전송중(dispatching/wake_dispatched)은 절대 건드리지 않습니다.", "Sending (dispatching/wake_dispatched) is never touched.")}</div>
           <div class="mt-2 flex gap-2">
             <button data-act="confirm" class="px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-[11px] font-semibold text-slate-900" ${panel.busy ? "disabled" : ""}>${panel.busy ? pick("처리 중…", "Processing…") : pick(`확정 (${p.affected_count}건)`, `Apply (${p.affected_count})`)}</button>
             <button data-act="cancel" class="px-3 py-1 rounded text-[11px] text-slate-400 hover:bg-surface-3">${pick("취소", "Cancel")}</button>
@@ -429,8 +429,8 @@ export function renderTopology(root: HTMLElement): void {
             <button data-act="expire" class="px-3 py-1.5 rounded bg-surface-3 hover:bg-surface-0 text-[11px] font-semibold text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed" ${disabled}>${pick("만료 expire", "Expire")}</button>
             <button data-act="complete" class="px-3 py-1.5 rounded bg-surface-3 hover:bg-surface-0 text-[11px] font-semibold text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed" ${disabled}>${pick("완료 complete", "Complete")}</button>
           </div>
-          ${resolvable === 0 ? `<div class="text-[10px] text-slate-600">${pick("처리 가능한 건이 없습니다 (방금 도착분은 30초간 보호).", "Nothing to resolve (just-arrived items are protected for 30s).")}</div>` : ""}
-          ${panel.busy ? `<div class="text-[10px] text-slate-500">${pick("미리보기 중…", "Previewing…")}</div>` : ""}
+          ${resolvable === 0 ? `<div class="text-[11px] text-slate-600">${pick("처리 가능한 건이 없습니다 (방금 도착분은 30초간 보호).", "Nothing to resolve (just-arrived items are protected for 30s).")}</div>` : ""}
+          ${panel.busy ? `<div class="text-[11px] text-slate-500">${pick("미리보기 중…", "Previewing…")}</div>` : ""}
         </div>`;
     }
 
@@ -443,7 +443,7 @@ export function renderTopology(root: HTMLElement): void {
           <div class="flex items-center gap-2">
             <span class="w-2.5 h-2.5 rounded-full" style="background:${STATUS_COLOR[st]}"></span>
             <span class="text-sm font-semibold text-slate-100">${escape(name)}</span>
-            <span class="text-[10px] text-slate-500">${STATUS_LABEL[st]}</span>
+            <span class="text-[11px] text-slate-500">${STATUS_LABEL[st]}</span>
           </div>
           <button data-act="close" class="text-slate-500 hover:text-slate-300 text-sm">✕</button>
         </div>
@@ -468,7 +468,7 @@ export function renderTopology(root: HTMLElement): void {
           <div class="flex items-center gap-2">
             <div class="text-sm font-semibold">${pick("버스 토폴로지", "Bus topology")}</div>
             <span class="w-2 h-2 rounded-full bg-accent-green animate-pulse" title="live"></span>
-            ${at ? `<span class="text-[10px] text-slate-600">${escape(at.slice(11, 19))}</span>` : ""}
+            ${at ? `<span class="text-[11px] text-slate-600">${escape(at.slice(11, 19))}</span>` : ""}
           </div>
           <div class="flex items-center gap-2.5 flex-wrap">${legendHtml()}</div>
         </div>

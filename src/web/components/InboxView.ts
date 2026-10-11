@@ -71,7 +71,7 @@ function closeReasonChip(r: BusFlowRecipient): string {
     other: { label: r.close_reason, cls: "text-slate-400 border-slate-600/40" },
   };
   const { label, cls } = map[cat]!;
-  return `<span class="px-1.5 py-0.5 rounded text-[10.5px] border ${cls}" title="${escape(r.close_reason)}">${escape(label)}</span>`;
+  return `<span class="px-1.5 py-0.5 rounded text-[11px] border ${cls}" title="${escape(r.close_reason)}">${escape(label)}</span>`;
 }
 
 function row(m: BusFlowMessage): string {

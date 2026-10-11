@@ -81,7 +81,7 @@ function seedPanelHtml(collapsed: boolean): string {
             <div class="rounded-md border border-surface-3 bg-surface-1 p-2">
               <div class="mb-2 flex items-center justify-between gap-2">
                 <div class="text-[12px] font-semibold text-slate-200">${escape(label)}</div>
-                <span class="text-[10px] text-slate-600">${seeds.length}</span>
+                <span class="text-[11px] text-slate-600">${seeds.length}</span>
               </div>
               <div class="flex flex-col gap-1.5">
                 ${seeds.map((seed) => `
@@ -150,11 +150,11 @@ export function renderTeamSearch(root: HTMLElement): void {
             <div class="text-sm font-semibold text-slate-100 break-words">${r.rank}. ${escape(r.title)}</div>
             <div class="mt-1 text-[11px] text-slate-500 break-words">${escape(fmtMeta(r))}</div>
           </div>
-          <span class="shrink-0 rounded bg-surface-1 px-1.5 py-0.5 text-[10px] text-slate-400">${escape(r.source_type)}</span>
+          <span class="shrink-0 rounded bg-surface-1 px-1.5 py-0.5 text-[11px] text-slate-400">${escape(r.source_type)}</span>
         </div>
         <div class="mt-2 text-[13px] leading-5 text-slate-200 break-words">${escape(r.excerpt)}</div>
         <div class="mt-2 text-[11px] text-slate-500">${escape(freshness)} · ${pick("색인", "Indexed")} ${escape(r.indexed_at)}</div>
-        <div class="mt-2 font-mono text-[10px] text-slate-600 break-all">${escape(r.source_ref)}</div>
+        <div class="mt-2 font-mono text-[11px] text-slate-600 break-all">${escape(r.source_ref)}</div>
       </div>`;
   }
 

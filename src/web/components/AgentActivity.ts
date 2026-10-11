@@ -124,22 +124,22 @@ function renderInto(root: HTMLElement, agent: Agent, msgs: Message[], myId: stri
       const counterpart = dir === "out" ? m.to_agent_id : m.from_agent_id;
       const dirBadge =
         dir === "out"
-          ? `<span class="text-[10px] text-accent-greenSoft">OUT</span>`
-          : `<span class="text-[10px] text-status-info">IN</span>`;
+          ? `<span class="text-[11px] text-accent-greenSoft">OUT</span>`
+          : `<span class="text-[11px] text-status-info">IN</span>`;
       const hopBadge =
-        m.hop_count >= 3 ? `<span class="text-[10px] text-status-idle">↻${m.hop_count}</span>` : "";
+        m.hop_count >= 3 ? `<span class="text-[11px] text-status-idle">↻${m.hop_count}</span>` : "";
       const expiredBadge =
         m.delivery_status === "expired"
-          ? `<span class="text-[10px] text-status-blocked">${pick("만료", "Expired")}</span>`
+          ? `<span class="text-[11px] text-status-blocked">${pick("만료", "Expired")}</span>`
           : "";
       return `
         <div class="flex gap-3 border-l-4 ${borderClass} pl-3 py-2 hover:bg-surface-2 transition-colors">
-          <div class="text-[10px] text-slate-500 mt-1 w-12 shrink-0 font-mono">${tlabel}</div>
+          <div class="text-[11px] text-slate-500 mt-1 w-12 shrink-0 font-mono">${tlabel}</div>
           <div class="flex-1 min-w-0">
             <div class="flex items-baseline gap-2 mb-0.5 flex-wrap">
               ${dirBadge}
               <span class="text-xs text-slate-400">${arrow} ${escape(counterpart)}</span>
-              <span class="text-[10px] text-slate-600">thread ${m.thread_id.slice(0, 6)}</span>
+              <span class="text-[11px] text-slate-600">thread ${m.thread_id.slice(0, 6)}</span>
               ${hopBadge}${expiredBadge}
             </div>
             <div class="text-sm text-slate-200 whitespace-pre-wrap break-words">${escape(m.body)}</div>

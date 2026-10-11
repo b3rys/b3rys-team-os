@@ -39,7 +39,7 @@ export function renderThreadList(root: HTMLElement): void {
         <div class="text-xs text-slate-500 leading-relaxed">
           ${pick("아직 thread 가 없습니다.", "No threads yet.")}<br>
           ${pick("API 로 메시지 보내거나 (아래) 입력박스로 시작:", "Send a message via the API (below) or start with the input box:")}
-          <pre class="mt-2 text-[10px] text-slate-600 bg-surface-0 p-2 rounded">curl -X POST /team/api/inbox \\
+          <pre class="mt-2 text-[11px] text-slate-600 bg-surface-0 p-2 rounded">curl -X POST /team/api/inbox \\
   -d '{"from_agent_id":"bill",
        "to_agent_id":"steve",
        "body":"안녕"}'</pre>
@@ -61,7 +61,7 @@ export function renderThreadList(root: HTMLElement): void {
             return `
               <span class="inline-flex items-center gap-0.5 min-w-0 max-w-[5.5rem]">
                 <span class="text-accent-greenSoft shrink-0">${renderIcon(iconName, { size: 12 })}</span>
-                <span class="truncate text-[10px] normal-case font-medium text-slate-400">${escape(label)}</span>
+                <span class="truncate text-[11px] normal-case font-medium text-slate-400">${escape(label)}</span>
               </span>`;
           })
           .join("");
@@ -71,10 +71,10 @@ export function renderThreadList(root: HTMLElement): void {
             <div class="flex items-center justify-between gap-2 mb-1">
               <div class="flex items-center gap-1.5 min-w-0">
                 <span style="background:${dot}" class="inline-block w-1.5 h-1.5 rounded-full shrink-0"></span>
-                <span class="flex items-center gap-0.5 text-[10px] text-slate-500 uppercase font-semibold">${kindIconHtml}${kindLabel}</span>
+                <span class="flex items-center gap-0.5 text-[11px] text-slate-500 uppercase font-semibold">${kindIconHtml}${kindLabel}</span>
                 <span class="flex items-center gap-1 min-w-0 overflow-hidden">${partsIcons}</span>
               </div>
-              <span class="text-[10px] text-slate-500">${last}</span>
+              <span class="text-[11px] text-slate-500">${last}</span>
             </div>
             <div class="text-xs text-slate-300 truncate">${escape(t.title)}</div>
           </button>`;

@@ -21,7 +21,7 @@ function section(title: string, sub: string, inner: string): string {
     <div class="rounded-lg border border-surface-3 bg-surface-1 p-4">
       <div class="flex items-baseline justify-between mb-2">
         <div class="text-sm font-semibold text-slate-100">${title}</div>
-        <div class="text-[10px] uppercase tracking-widest text-slate-500">${sub}</div>
+        <div class="text-[11px] uppercase tracking-widest text-slate-500">${sub}</div>
       </div>
       ${inner}
     </div>`;
@@ -156,7 +156,7 @@ function scheduledRow(s: TeamOsScheduled): string {
         <span class="text-sm text-slate-100 font-mono truncate flex-1 min-w-0" title="${escape(s.label)}">${escape(s.label)}</span>
         <span class="text-[11px] text-slate-400 whitespace-nowrap">${escape(s.detail)}</span>
         ${off}
-        <span class="text-[10px] text-slate-500 w-14 text-right">${srcTag}</span>
+        <span class="text-[11px] text-slate-500 w-14 text-right">${srcTag}</span>
       </div>
       ${desc}
     </div>`;
@@ -190,10 +190,10 @@ function ingressBlock(snap: TeamOsSnapshot): string {
   const dot = level === "danger" ? "bg-status-blocked" : level === "warn" ? "bg-status-idle" : "bg-accent-green";
   const badge =
     level === "danger"
-      ? `<span class="text-[10px] px-1.5 py-0.5 rounded font-semibold" style="background:#ef444422;color:#fca5a5">ingress stuck</span>`
+      ? `<span class="text-[11px] px-1.5 py-0.5 rounded font-semibold" style="background:#ef444422;color:#fca5a5">ingress stuck</span>`
       : level === "warn"
-        ? `<span class="text-[10px] px-1.5 py-0.5 rounded font-semibold" style="background:#f59e0b22;color:#fbbf24">watch</span>`
-        : `<span class="text-[10px] px-1.5 py-0.5 rounded font-semibold" style="background:#22c55e22;color:#86efac">ok</span>`;
+        ? `<span class="text-[11px] px-1.5 py-0.5 rounded font-semibold" style="background:#f59e0b22;color:#fbbf24">watch</span>`
+        : `<span class="text-[11px] px-1.5 py-0.5 rounded font-semibold" style="background:#22c55e22;color:#86efac">ok</span>`;
   const auto = h.auto_recover_enabled
     ? `<span class="text-status-blocked font-semibold">ON</span>`
     : `<span class="text-slate-300">OFF</span>`;
@@ -242,7 +242,7 @@ function renderInto(root: HTMLElement, snap: TeamOsSnapshot | null): void {
       <div class="flex items-center gap-2 mb-1">
         <span class="text-base">🛰️</span>
         <span class="text-sm font-semibold text-slate-100">TEAM OP</span>
-        <span class="text-[10px] px-1.5 py-0.5 rounded font-semibold" style="background:#f59e0b22;color:#f59e0b">${pick("필수 인프라", "Required infra")}</span>
+        <span class="text-[11px] px-1.5 py-0.5 rounded font-semibold" style="background:#f59e0b22;color:#f59e0b">${pick("필수 인프라", "Required infra")}</span>
         ${capState === "active"
           ? `<span class="inline-flex items-center gap-1 text-[11px] text-slate-300"><span class="w-2 h-2 rounded-full bg-accent-green"></span>${pick("활성", "Active")}</span>`
           : capState === "partial"

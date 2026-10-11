@@ -24,3 +24,12 @@ service or product, please credit it (e.g. "Powered by b3os").
 "b3os" and "b3rys", and their logos, are trademarks of b3rys. The code is
 free to use; please contact us before using the names or logos in your own
 product name or branding.
+
+---
+
+Third-party font / 서드파티 글꼴
+
+src/web/fonts/PretendardVariable.woff2 — Pretendard 1.3.9
+Copyright (c) 2021, Kil Hyung-jin (https://github.com/orioncactus/pretendard)
+Licensed under the SIL Open Font License, Version 1.1.
+Full license text: src/web/fonts/Pretendard-LICENSE-OFL.txt
