@@ -104,7 +104,8 @@ export class GitHubDocs {
     if (!previous) {
       const disk = await this.readCache("snapshot-" + registryKey);
       if (disk && /^[a-f0-9]{40,64}$/i.test(disk.sha) && typeof disk.fetchedAt === "string" &&
-        disk.docs && DOC_KEYS.every(k => disk.docs[k] == null || (typeof disk.docs[k]?.md === "string" && typeof disk.docs[k]?.html === "string"))) {
+        disk.docs && DOC_KEYS.every(k => disk.docs[k] === null || (disk.docs[k] === undefined && isOptionalDocKey(k)) ||
+          (typeof disk.docs[k]?.md === "string" && typeof disk.docs[k]?.html === "string"))) {
         this.normalizeDocs(disk.docs);
         previous = disk;
       }

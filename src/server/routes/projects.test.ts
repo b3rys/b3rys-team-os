@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -215,6 +215,31 @@ describe("PROJECT.md — 선택 문서 키", () => {
     expect(html).toContain('href="/team/api/projects/withdoc/doc/project/page">PROJECT</a>');
     expect(html.indexOf(">README<")).toBeLessThan(html.indexOf(">PROJECT<"));
     expect(html.indexOf(">PROJECT<")).toBeLessThan(html.indexOf(">DESIGN<"));
+  });
+
+  // GitHub 가 안 될 때 디스크 캐시로 버틴다. 예전 캐시에는 project 키가 없다 — 그건 받아들이되,
+  // ★필수 문서가 빠진 캐시까지 받아들이면★ 목록은 '있음' 인데 열면 404 가 된다.
+  async function staleAfterEditingCache(edit: (docs: Record<string, unknown>) => void) {
+    const dir = mkdtempSync(join(tmpdir(), "projects-cache-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const ok = new GitHubDocs({ cacheDir: dir, useToken: false, fetch: (async (url: any) =>
+      String(url).includes("/branches/") ? Response.json({ commit: { sha: "c".repeat(40) } }) : new Response("# Doc\n\nBody.\n")) as typeof fetch });
+    await ok.get(withProject);
+    const file = join(dir, readdirSync(dir).find((f) => f.startsWith("snapshot-"))!);
+    const snap = JSON.parse(readFileSync(file, "utf8"));
+    edit(snap.docs);
+    writeFileSync(file, JSON.stringify(snap));
+    const down = new GitHubDocs({ cacheDir: dir, useToken: false, fetch: (async (_url: any) => new Response("down", { status: 503 })) as typeof fetch });
+    return down.get(withProject);
+  }
+  test("디스크 캐시: project 만 빠진 예전 캐시는 복구한다(project=null, stale)", async () => {
+    const snap = await staleAfterEditingCache((docs) => { delete docs.project; });
+    expect(snap.stale).toBe(true);
+    expect(snap.docs.project).toBeNull();
+    expect(snap.docs.todo?.md).toContain("Body.");
+  });
+  test("디스크 캐시: 필수 문서(todo)가 빠진 캐시는 받아들이지 않는다", async () => {
+    await expect(staleAfterEditingCache((docs) => { delete docs.todo; })).rejects.toThrow();
   });
 
   test("등록하지 않은 프로젝트: GitHub 에 묻지 않고, 목록·새창 페이지에 PROJECT 가 아예 없다(비활성 칩도 아님)", async () => {
