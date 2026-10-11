@@ -1,39 +1,52 @@
-import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createInterface } from "node:readline";
 import type { CodexTurnOptions, CodexTurnResult } from "../codex/runner";
+import { cogsToolPolicy, readCogsToolScope, type CogsToolScope } from "./cogsToolPolicy";
 import { COGS_MODELS } from "../../lib/b3chatModels";
 
 export function claudeCogsEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(source).filter(([key])=>
     !key.startsWith("TELEGRAM_") && !key.startsWith("CODEX_") && key !== "CLAUDECODE" && key !== "CLAUDE_CODE_SESSION_ID"));
 }
-export function claudeCogsArguments(opts: CodexTurnOptions, system: string): string[] {
+export function claudeCogsArguments(opts: CodexTurnOptions, system: string, workspace = opts.cwd ?? process.cwd(), scope: CogsToolScope = readCogsToolScope(opts.agentId)): string[] {
   const model=opts.model ?? "sonnet";
   if (!(COGS_MODELS.claude as readonly string[]).includes(model)) throw new Error("unsupported_model");
+  const policy = cogsToolPolicy(workspace, scope);
   return ["-p","--model",model,"--output-format","stream-json","--include-partial-messages","--verbose",
-    "--safe-mode","--setting-sources","","--settings",JSON.stringify({disableAllHooks:true,enabledPlugins:{}}),
+    "--safe-mode","--setting-sources","","--settings",JSON.stringify(policy.settings),
     "--strict-mcp-config","--mcp-config",JSON.stringify({mcpServers:{}}),
-    "--tools","WebSearch","--allowedTools","WebSearch","--append-system-prompt",system,
+    ...policy.flags,"--permission-mode","dontAsk","--permission-prompts","none",
+    "--tools",policy.tools,"--allowedTools",...policy.allowed,"--append-system-prompt",system,
     ...(opts.resumeSessionId ? ["--resume",opts.resumeSessionId] : [])];
 }
 export async function runClaudeCogsTurn(opts: CodexTurnOptions): Promise<CodexTurnResult> {
   const started=Date.now();
-  // No project .claude directory or plugin settings from the member workspace.
-  const temporary = !opts.codexHome;
-  const cwd=opts.codexHome ? join(opts.codexHome,"runtime") : mkdtempSync(join(tmpdir(),"b3chat-claude-"));
+  // Safe/restricted mode ignores workspace customizations; cwd is the allowed member folder.
+  const temporary = !opts.cwd && !opts.codexHome;
+  const cwd=opts.cwd ?? (opts.codexHome ? join(opts.codexHome,"runtime") : mkdtempSync(join(tmpdir(),"b3chat-claude-")));
   mkdirSync(cwd,{recursive:true,mode:0o700});
   let text="", sessionId:string|undefined, failure=false, detail="complete", sawPartial=false;
   let toolName="", toolInput="";
   try {
-    const persona=[`You are AI teammate ${opts.agentId}. Reply directly in Korean. Your workspace is ${opts.cwd ?? ""}.`,
+    const scope = readCogsToolScope(opts.agentId);
+    const binary = process.env.CLAUDE_BIN || "claude";
+    if (scope === "folder") {
+      const version = spawnSync(binary, ["--version"], {env:claudeCogsEnvironment(process.env),encoding:"utf8",timeout:5000});
+      const match = /^(\d+)\.(\d+)\.(\d+)\s/.exec(version.stdout ?? "");
+      if (version.status !== 0 || !match || Number(match[1]) < 2 || (Number(match[1]) === 2 && (Number(match[2]) < 1 || (Number(match[2]) === 1 && Number(match[3]) < 296)))) {
+        return {ok:false,reply:"",detail:"cogs_folder_cli_unsupported",elapsedMs:Date.now()-started};
+      }
+    }
+    const workspace = realpathSync(cwd);
+    const persona=[`You are AI teammate ${opts.agentId}. Reply directly in Korean. Your workspace is ${workspace}.`,
       ...["SOUL.md","CLAUDE.md"].map(name=>{try{return readFileSync(join(opts.cwd ?? cwd,name),"utf-8");}catch{return "";}}),
       "This conversation is in the cogs app. Return your answer as assistant text; the bridge delivers it. Do not use Telegram plugins or messenger sending scripts."].join("\n");
-    const child=spawn(process.env.CLAUDE_BIN || "claude",claudeCogsArguments(opts,persona),
+    const child=spawn(binary,claudeCogsArguments(opts,persona,workspace,scope),
       // Keep the CLI in the bridge's process group for LaunchAgent teardown.
-      {cwd,env:claudeCogsEnvironment(process.env),stdio:["pipe","pipe","ignore"],detached:false});
+      {cwd:workspace,env:claudeCogsEnvironment(process.env),stdio:["pipe","pipe","ignore"],detached:false});
     const kill=()=>{try{child.kill("SIGTERM");}catch{/* already gone */}};
     const force=()=>{try{child.kill("SIGKILL");}catch{/* already gone */}};
     let forceTimer:ReturnType<typeof setTimeout>|undefined;

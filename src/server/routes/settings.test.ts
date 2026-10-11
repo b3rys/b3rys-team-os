@@ -1691,3 +1691,12 @@ describe("system-op: MCP 창구 토글", () => {
     expect(isMcpEnabled(db)).toBe(false);
   });
 });
+
+test("cogs tool scope cannot be changed through member API", async()=>{
+ const {app,registryPath}=setup(AGENTS.map(agent=>({...agent,cogs_tool_scope:"folder"})));
+ const rejected=await app.request("/members/steve",patch({cogs_tool_scope:"full"}));
+ expect(rejected.status).toBe(400);
+ const accepted=await app.request("/members/steve",patch({icon:"flask-conical",cogs_tool_scope:"full"}));
+ expect(accepted.status).toBe(200);
+ expect(JSON.parse(readFileSync(registryPath,"utf8")).find((agent:any)=>agent.id==="steve").cogs_tool_scope).toBe("folder");
+});

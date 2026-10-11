@@ -12,6 +12,7 @@ test("app Claude launch strips Telegram credentials and ignores workspace plugin
  writeFileSync(join(workspace,".claude","settings.json"),JSON.stringify({enabledPlugins:{"telegram@claude-plugins-official":true},hooks:{Stop:[{hooks:[{type:"command",command:"exit 99"}]}]}}));
  writeFileSync(binary,`#!/usr/bin/env python3
 import json,os,sys
+if "--version" in sys.argv: print("2.1.296 (Claude Code)"); sys.exit(0)
 args=sys.argv[1:]
 json.dump({'telegram_keys':[k for k in os.environ if k.startswith('TELEGRAM_')],'bot_key': 'CODEX_BOT_TOKEN' in os.environ,'cwd':os.getcwd(),'project_settings':os.path.exists('.claude/settings.json'),'args':args,'pgid':os.getpgrp(),'parent_pgid':os.getpgid(os.getppid())},open(${JSON.stringify(capture)},'w'))
 print(json.dumps({'type':'stream_event','session_id':'session-probe','event':{'type':'content_block_delta','delta':{'type':'text_delta','text':'첫 글자'}}}),flush=True)
@@ -24,7 +25,7 @@ print(json.dumps({'type':'result','result':'완료','is_error':False,'session_id
   expect(result.ok).toBe(true);expect(deltas).toEqual(["첫 글자"]);expect(result.reply).toBe("완료");
   const observed=JSON.parse(readFileSync(capture,"utf-8"));
   expect(observed.pgid).toBe(observed.parent_pgid);
-  expect(observed.telegram_keys).toEqual([]);expect(observed.bot_key).toBe(false);expect(observed.cwd).toBe(realpathSync(join(home,"runtime")));expect(observed.project_settings).toBe(false);
+  expect(observed.telegram_keys).toEqual([]);expect(observed.bot_key).toBe(false);expect(observed.cwd).toBe(realpathSync(workspace));expect(observed.project_settings).toBe(true);
   expect(observed.args).toContain("--safe-mode");expect(observed.args).toContain("--strict-mcp-config");expect(observed.args).toContain("--include-partial-messages");
   expect(JSON.parse(observed.args[observed.args.indexOf("--mcp-config")+1])).toEqual({mcpServers:{}});
   const settings=JSON.parse(observed.args[observed.args.indexOf("--settings")+1]);expect(settings.enabledPlugins).toEqual({});expect(settings.disableAllHooks).toBe(true);
@@ -48,7 +49,8 @@ test("Claude timeout force-kills an unresponsive CLI without replacing bridge si
  const root=mkdtempSync(join(tmpdir(),"cogs-claude-timeout-"));
  const binary=join(root,"fake-claude"),capture=join(root,"pid");
  writeFileSync(binary,`#!/usr/bin/env python3
-import json,os,signal,time
+import json,os,signal,time,sys
+if "--version" in sys.argv: print("2.1.296 (Claude Code)"); sys.exit(0)
 signal.signal(signal.SIGTERM,signal.SIG_IGN)
 open(${JSON.stringify(capture)},'w').write(str(os.getpid()))
 print(json.dumps({'type':'stream_event','event':{'type':'content_block_delta','delta':{'type':'text_delta','text':'ready'}}}),flush=True)
@@ -86,3 +88,17 @@ while True: time.sleep(1)
    expect(readFileSync(paths.plist,"utf-8")).toContain("claude-cogs-testmate");
   } finally {rmSync(root,{recursive:true,force:true});}
  });
+
+test("folder rejects older CLI before executing any prompt", async()=>{
+ const root=mkdtempSync(join(tmpdir(),"cogs-old-cli-")),binary=join(root,"fake-cli"),sentinel=join(root,"executed");
+ writeFileSync(binary,`#!/usr/bin/env python3
+import sys
+if "--version" in sys.argv: print("2.1.256 (Claude Code)")
+else: open(${JSON.stringify(sentinel)},"w").write("executed")
+`);chmodSync(binary,0o700);
+ const prior=process.env.CLAUDE_BIN;process.env.CLAUDE_BIN=binary;
+ try {
+  const result=await runClaudeCogsTurn({agentId:"fixture",cwd:root,prompt:"fixture"});
+  expect(result.ok).toBe(false);expect(result.detail).toBe("cogs_folder_cli_unsupported");expect(existsSync(sentinel)).toBe(false);
+ } finally {if(prior===undefined)delete process.env.CLAUDE_BIN;else process.env.CLAUDE_BIN=prior;rmSync(root,{recursive:true,force:true});}
+});
