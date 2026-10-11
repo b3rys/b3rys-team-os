@@ -406,8 +406,8 @@ test("계획 파일이 계획이 아니면 null — 검증을 통과로 치지 �
 describe("CLI — 배포 스크립트가 실제로 부르는 모드", () => {
   const script = join(repoRoot(), "scripts", "deploy-plan.ts");
   const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot(), encoding: "utf8" }).stdout.trim();
-  function withHealth(body: unknown) {
-    const server = Bun.serve({ port: 0, fetch: () => Response.json(body) });
+  function withHealth(body: unknown, status = 200) {
+    const server = Bun.serve({ port: 0, fetch: () => Response.json(body, { status }) });
     return { url: `http://127.0.0.1:${server.port}/health`, stop: () => server.stop(true) };
   }
   async function runAsync(args: string[]) {
@@ -441,6 +441,57 @@ describe("CLI — 배포 스크립트가 실제로 부르는 모드", () => {
     } finally { h.stop(); rmSync(dir, { recursive: true, force: true }); }
   });
 
+  // 리뷰에서 실제 CLI 로 재현된 두 구멍: 관측 실패가 통과했고, 멈춘 계획이 통과했다.
+  function planFile(plan: unknown) {
+    const dir = mkdtempSync(join(tmpdir(), "deploy-verify-"));
+    const file = join(dir, "plan.json");
+    writeFileSync(file, JSON.stringify(plan));
+    return { file, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+  const noop = { blocked: null, actions: { build: false, restart: false }, changed: { server: [], web: [] }, warnings: [] };
+
+  test("--verify: /health 가 200 이지만 커밋을 말하지 않으면 3 (할 일 없는 계획이어도)", async () => {
+    const pf = planFile({ ...noop, target: head });
+    const h = withHealth({});
+    try {
+      const r = await runAsync(["--verify", pf.file, "--health", h.url]);
+      expect(r.status).toBe(3);
+      expect(r.stderr).toContain("관측 실패");
+    } finally { h.stop(); pf.cleanup(); }
+  });
+
+  test("--verify: /health 가 500 이면 본문에 target 커밋이 있어도 3", async () => {
+    const pf = planFile({ ...noop, actions: { build: true, restart: true }, changed: { server: ["s"], web: ["w"] }, target: head });
+    const h = withHealth({ server: { commit: head }, web: { commit: head } }, 500);
+    try {
+      expect((await runAsync(["--verify", pf.file, "--health", h.url])).status).toBe(3);
+    } finally { h.stop(); pf.cleanup(); }
+  });
+
+  test("--verify: 멈춘(blocked) 계획은 3 — 할 일이 없어 보여도 통과가 아니다", async () => {
+    const pf = planFile({ ...noop, blocked: "web 층이 자기 커밋을 말하지 않는다", target: head });
+    const h = withHealth({ server: { commit: head }, web: { commit: head } });
+    try {
+      const r = await runAsync(["--verify", pf.file, "--health", h.url]);
+      expect(r.status).toBe(3);
+      expect(r.stderr).toContain("멈춘");
+    } finally { h.stop(); pf.cleanup(); }
+  });
+
+  test("--flags --from: 저장한 계획에서 한 줄만 꺼낸다 · 멈춘 계획은 2 · 못 읽으면 1", async () => {
+    const ok = planFile({ ...noop, actions: { build: true, restart: false }, changed: { server: [], web: ["w"] }, target: head });
+    const blocked = planFile({ ...noop, blocked: "멈춤 사유", target: head });
+    try {
+      const r = await runAsync(["--flags", "--from", ok.file]);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe("build=1 restart=0\n");
+      const b = await runAsync(["--flags", "--from", blocked.file]);
+      expect(b.status).toBe(2);
+      expect(b.stdout).toBe("");
+      expect((await runAsync(["--flags", "--from", ok.file + ".missing"])).status).toBe(1);
+    } finally { ok.cleanup(); blocked.cleanup(); }
+  });
+
   test("--flags: 표준출력은 판단 한 줄뿐이고 형식 검사를 통과한다", async () => {
     const h = withHealth({ server: { commit: head }, web: { commit: head } });
     try {
@@ -452,4 +503,12 @@ describe("CLI — 배포 스크립트가 실제로 부르는 모드", () => {
       expect(parseFlagsLine(line)).toEqual({ build: 0, restart: 0 });
     } finally { h.stop(); }
   });
+});
+
+test("멈춘 계획은 검증을 통과하지 못한다 · 라이브 커밋을 모르면 통과하지 못한다", () => {
+  const base: Plan = { blocked: null, actions: { build: false, restart: false }, changed: { server: [], web: [] }, target: SHA.target, warnings: [] };
+  expect(verifyAfterDeploy({ ...base, blocked: "사유" }, live(SHA.target, SHA.target)).ok).toBe(false);
+  expect(verifyAfterDeploy(base, live(null, SHA.web)).ok).toBe(false);
+  expect(verifyAfterDeploy(base, live(SHA.server, null)).ok).toBe(false);
+  expect(parsePlanJson(JSON.stringify({ ...base, blocked: 3 }))).toBeNull();
 });

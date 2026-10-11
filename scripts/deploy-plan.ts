@@ -18,6 +18,7 @@
  * ★"최신인가 보다" 로 넘어가지 않는다.★ blocked 로 끝내고 사람이 본다.
  *
  * 사용: bun run scripts/deploy-plan.ts [--health <url>] [--target <ref>] [--json | --flags]
+ *       bun run scripts/deploy-plan.ts --flags --from <plan.json>   (저장한 계획에서 판단 한 줄만)
  *       bun run scripts/deploy-plan.ts --verify <plan.json> [--health <url>]
  *   종료코드 0 = 판단 성공(할 일이 없어도 0) · 2 = blocked(사람이 봐야 함) · 1 = 사용법·실행 오류
  *           · 3 = --verify 실패(라이브가 target 이 아니다)
@@ -226,6 +227,13 @@ export function treeWarnings(input: Pick<PlanInput, "tree" | "canonicalBranch">)
  */
 export function verifyAfterDeploy(plan: Plan, after: Record<Layer, LivePoint>): { ok: boolean; problems: string[] } {
   const problems: string[] = [];
+  // ★멈춘 계획은 검증할 대상이 없다 — 그래서 통과로 치지 않는다.★ (동작·변경이 모두 비어 '할 것 없음' 처럼 보인다)
+  if (plan.blocked) return { ok: false, problems: [`계획이 멈춘 상태다: ${plan.blocked}`] };
+  // ★라이브가 자기 커밋을 말하지 않으면 '바뀐 층이 없으니 정상' 으로 넘어가지 않는다.★ 관측 실패는 실패다.
+  for (const layer of Object.keys(LAYER_PATHS) as Layer[]) {
+    if (!after[layer].commit) problems.push(`${layer} 층이 배포 후 자기 커밋을 말하지 않는다 — 관측 실패`);
+  }
+  if (problems.length) return { ok: false, problems };
   for (const layer of Object.keys(LAYER_PATHS) as Layer[]) {
     const didAct = layer === "server" ? plan.actions.restart : plan.actions.build;
     // ★'한 동작' 만이 아니라 '바뀐 층' 도 본다.★ 동작 판단이 어떤 이유로든 틀려 아무것도 안 했을 때,
@@ -264,6 +272,7 @@ export function parsePlanJson(text: string): Plan | null {
   const p = v as Partial<Plan>;
   const isList = (x: unknown) => Array.isArray(x) && x.every((y) => typeof y === "string");
   if (!p || typeof p !== "object" || typeof p.target !== "string" || !/^[0-9a-f]{40}$/.test(p.target) ||
+    !(p.blocked === null || typeof p.blocked === "string") ||
     !p.actions || typeof p.actions.build !== "boolean" || typeof p.actions.restart !== "boolean" ||
     !p.changed || !isList(p.changed.server) || !isList(p.changed.web)) return null;
   return p as Plan;
@@ -341,6 +350,8 @@ export function realTreeState(): TreeState {
 
 async function fetchLive(healthUrl: string): Promise<Record<Layer, LivePoint>> {
   const res = await fetch(healthUrl, { signal: AbortSignal.timeout(5000) });
+  // ★응답 본문보다 상태가 먼저다★ — 오류 응답의 본문에 커밋이 적혀 있어도 그건 관측이 아니다.
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const body = (await res.json()) as { server?: { commit?: unknown }; web?: { commit?: unknown } };
   const pick = (v: unknown): string | null => (typeof v === "string" && /^[0-9a-f]{40}$/.test(v) ? v : null);
   return { server: { commit: pick(body.server?.commit) }, web: { commit: pick(body.web?.commit) } };
@@ -357,6 +368,16 @@ if (import.meta.main) {
   const targetRef = arg("--target", "origin/main");
   const asJson = argv.includes("--json");
   const asFlags = argv.includes("--flags");
+
+  // ── 저장한 계획에서 판단 한 줄만 꺼낸다 — 계획을 두 번 계산하지 않게(두 시점의 관측이 다를 수 있다) ──
+  if (asFlags && argv.includes("--from")) {
+    const file = arg("--from", "");
+    const plan = file ? parsePlanJson(await Bun.file(file).text().catch(() => "")) : null;
+    if (!plan) { console.error(`✗ 계획 파일을 읽지 못했다: ${file || "(없음)"}`); process.exit(1); }
+    if (plan.blocked) { console.error(`★멈춤★ — ${plan.blocked}`); process.exit(2); }
+    console.log(formatFlagsLine(plan));
+    process.exit(0);
+  }
 
   // ── 배포 후 검증: 배포 전에 저장한 계획과 지금 라이브를 대조한다 ──
   if (argv.includes("--verify")) {
