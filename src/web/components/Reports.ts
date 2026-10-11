@@ -893,24 +893,24 @@ function renderList(): void {
   _root.innerHTML = `
     <div data-reports-list-scroll class="h-full overflow-y-auto">
       <div class="w-full max-w-[1400px] mx-auto px-4 md:px-8 py-5 pb-20">
-        <div class="mb-3 space-y-2.5">
-          <div class="flex flex-col gap-2 2xl:flex-row 2xl:items-center">
-            <div class="flex gap-2 2xl:w-80 2xl:shrink-0">
-              <div class="relative flex-1"><svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-                <input id="reports-q" type="search" placeholder="${pick("제목·작성자·요약 검색", "Search title · author · summary")}" value="${escape(_query)}" class="h-9 w-full bg-surface-2 border border-surface-3 rounded-lg text-sm text-slate-200 pl-9 pr-3 outline-none focus:border-accent-green/40 placeholder:text-slate-600" />
+        <!-- 도구막대: 분류·태그 칩은 표 왼쪽 끝에서 시작, 검색·선택은 분류 줄 오른쪽 끝(모바일은 맨 위 한 줄) -->
+        <div class="mb-3 space-y-2">
+          <div class="flex flex-wrap items-start gap-2 md:flex-nowrap">
+            <div class="order-first flex w-full items-center gap-2 md:order-none md:w-auto md:shrink-0 md:pl-2">
+              <div class="relative flex-1 md:flex-none"><svg class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+                <input id="reports-q" type="search" placeholder="${pick("제목·작성자·요약 검색", "Search title · author · summary")}" value="${escape(_query)}" class="h-8 w-full ${_query ? "md:w-72" : "md:w-52"} md:focus:w-72 transition-[width] duration-200 rounded-md border border-transparent bg-surface-2 pl-8 pr-2 text-[13px] text-slate-200 outline-none focus:border-accent-green/40 placeholder:text-slate-500" />
               </div>
-              <button id="reports-selection-mode" class="h-9 shrink-0 px-3.5 rounded-lg text-[13px] font-semibold border border-surface-3 bg-surface-2 text-slate-300 hover:text-slate-100 2xl:hidden">${_selectionMode ? pick("선택 해제", "Deselect") : pick("선택", "Select")}</button>
+              <button id="reports-selection-mode" class="h-8 shrink-0 px-3 rounded-md border border-surface-3 text-[12px] font-semibold text-slate-300 hover:text-slate-100 hover:bg-surface-2">${_selectionMode ? pick("선택 해제", "Deselect") : pick("선택", "Select")}</button>
             </div>
-            <div class="flex min-w-0 flex-1 items-center gap-2">
-              <span class="${rowLabel} !pt-0">${pick("분류", "Category")}</span>
-              <div class="reports-chiprow flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">${pills}</div>
+            <div class="flex min-w-0 flex-1 items-start gap-2 md:-order-1">
+              <span class="${rowLabel}">${pick("분류", "Category")}</span>
+              <div class="reports-chiprow flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto md:flex-wrap md:overflow-visible">${pills}</div>
               <button id="reports-manage-categories" class="${editBtn}">✎ ${pick("편집", "Edit")}</button>
             </div>
-            <button data-selection-wide class="hidden h-9 shrink-0 px-3.5 rounded-lg text-[13px] font-semibold border border-surface-3 bg-surface-2 text-slate-300 hover:text-slate-100 2xl:inline-flex 2xl:items-center">${_selectionMode ? pick("선택 해제", "Deselect") : pick("선택", "Select")}</button>
           </div>
-          <div class="flex items-center gap-2 2xl:pl-[20.5rem]">
-            <span class="${rowLabel} !pt-0">${pick("태그", "Tags")}</span>
-            <div class="reports-chiprow flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">${tagPills || `<span class="text-xs text-slate-600">${pick("등록된 태그 없음", "No tags yet")}</span>`}</div>
+          <div class="flex items-start gap-2">
+            <span class="${rowLabel}">${pick("태그", "Tags")}</span>
+            <div class="reports-chiprow flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto md:flex-wrap md:overflow-visible">${tagPills || `<span class="text-xs text-slate-600">${pick("등록된 태그 없음", "No tags yet")}</span>`}</div>
             <button id="reports-manage-tags" class="${editBtn}">✎ ${pick("편집", "Edit")}</button>
           </div>
         </div>
@@ -953,9 +953,6 @@ function renderList(): void {
     _selectionMode = !_selectionMode;
     if (!_selectionMode) clearReportSelection();
     renderListPreservingScroll();
-  });
-  _root.querySelector<HTMLButtonElement>("[data-selection-wide]")?.addEventListener("click", () => {
-    _root?.querySelector<HTMLButtonElement>("#reports-selection-mode")?.click();
   });
   _root.querySelector<HTMLButtonElement>("#reports-cancel-selection")?.addEventListener("click", () => {
     clearReportSelection();
