@@ -894,7 +894,7 @@ function renderList(): void {
     <div data-reports-list-scroll class="h-full overflow-y-auto">
       <div class="w-full max-w-[1400px] mx-auto px-4 md:px-8 pb-20">
         <!-- 도구막대: 분류 → 태그 → 맨 아래 검색(목록 바로 위). 입력하면 바로 아래 목록이 바뀌는 게 보이게. -->
-        <div class="sticky top-0 z-20 -mx-4 md:-mx-8 mb-3 px-4 md:px-8 py-3 space-y-2 bg-surface-1/95 backdrop-blur border-b border-surface-3">
+        <div class="sticky top-0 z-20 -mx-4 md:-mx-8 mb-1 px-4 md:px-8 py-3 space-y-2 bg-surface-1/95 backdrop-blur border-b border-surface-3">
           <div class="flex items-start gap-2">
             <span class="${rowLabel}">${pick("분류", "Category")}</span>
             <div class="reports-chiprow flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto md:flex-wrap md:overflow-visible">${pills}</div>
@@ -915,7 +915,7 @@ function renderList(): void {
         ${selectionBar}
         ${loadingBar}
         <div class="${_reloading ? "opacity-50 transition-opacity" : "transition-opacity"}">
-        ${_loadError ? error : items.length ? `<div class="flex flex-col border-t border-surface-3">${cards}</div>${loadMore}` : empty}
+        ${_loadError ? error : items.length ? `<div class="flex flex-col">${cards}</div>${loadMore}` : empty}
         </div>
       </div>
     </div>`;
