@@ -819,12 +819,12 @@ function renderList(): void {
   const cats = Object.keys(counts).sort((a, b) => (a === DEFAULT_CAT ? -1 : b === DEFAULT_CAT ? 1 : a.localeCompare(b, "ko")));
 
   const pillCls = (active: boolean) =>
-    `reports-pill inline-flex h-7 shrink-0 whitespace-nowrap items-center gap-1.5 px-2.5 rounded-full text-[12px] font-medium border transition-colors ${active
+    `reports-pill inline-flex h-8 shrink-0 whitespace-nowrap items-center gap-1.5 px-2.5 rounded-full text-[12px] font-medium border transition-colors ${active
       ? "text-slate-100 font-semibold border-slate-100/70 bg-transparent"
       : "text-slate-400 border-surface-3 bg-transparent hover:text-slate-100"}`;
   // 태그도 분류와 같은 모양의 알약 — 색으로 나누지 않고 # 로 구분한다.
   const tagPillCls = (active: boolean) =>
-    `reports-pill inline-flex h-7 shrink-0 whitespace-nowrap items-center px-2.5 rounded-full text-[12px] font-medium border transition-colors ${active
+    `reports-pill inline-flex h-8 shrink-0 whitespace-nowrap items-center px-2.5 rounded-full text-[12px] font-medium border transition-colors ${active
       ? "text-slate-100 font-semibold border-slate-100/70 bg-transparent"
       : "text-slate-400 border-surface-3 bg-transparent hover:text-slate-100"}`;
   const pills =
@@ -888,13 +888,13 @@ function renderList(): void {
 
   // 목록 상단 = 한 덩어리 도구막대. 검색·선택이 첫 줄, 분류·태그는 같은 칸 안에서 같은 모양으로 정렬한다.
   // 폭은 창을 따라 넓어지되(목록은 넓게 읽어도 된다) 아주 넓은 창에서 줄이 끝없이 늘지 않게 상한만 둔다.
-  const rowLabel = "w-8 shrink-0 pt-1 text-[12px] font-semibold text-slate-500";
-  const editBtn = "shrink-0 inline-flex h-7 items-center gap-1 px-2 rounded-md text-[12px] font-medium text-slate-500 hover:bg-surface-0 hover:text-slate-200";
+  const rowLabel = "w-8 shrink-0 leading-8 text-[12px] font-medium text-slate-500";
+  const editBtn = "shrink-0 inline-flex h-8 items-center gap-1 px-2 rounded-md text-[12px] font-medium text-slate-500 hover:bg-surface-0 hover:text-slate-100 transition-colors";
   _root.innerHTML = `
     <div data-reports-list-scroll class="h-full overflow-y-auto">
-      <div class="w-full max-w-[1400px] mx-auto px-4 md:px-8 py-5 pb-20">
+      <div class="w-full max-w-[1400px] mx-auto px-4 md:px-8 pb-20">
         <!-- 도구막대: 분류 → 태그 → 맨 아래 검색(목록 바로 위). 입력하면 바로 아래 목록이 바뀌는 게 보이게. -->
-        <div class="mb-3 space-y-2">
+        <div class="sticky top-0 z-20 -mx-4 md:-mx-8 mb-3 px-4 md:px-8 py-3 space-y-2 bg-surface-1/95 backdrop-blur border-b border-surface-3">
           <div class="flex items-start gap-2">
             <span class="${rowLabel}">${pick("분류", "Category")}</span>
             <div class="reports-chiprow flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto md:flex-wrap md:overflow-visible">${pills}</div>
@@ -905,11 +905,11 @@ function renderList(): void {
             <div class="reports-chiprow flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto md:flex-wrap md:overflow-visible">${tagPills || `<span class="text-xs text-slate-600">${pick("등록된 태그 없음", "No tags yet")}</span>`}</div>
             <button id="reports-manage-tags" class="${editBtn}">✎ ${pick("편집", "Edit")}</button>
           </div>
-          <div class="flex items-center gap-2 pt-1">
+          <div class="flex items-center gap-2">
             <div class="relative flex-1"><svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-              <input id="reports-q" type="search" placeholder="${pick("제목·작성자·요약 검색", "Search title · author · summary")}" value="${escape(_query)}" class="h-10 w-full rounded-lg border border-surface-3/60 bg-surface-2 pl-9 pr-3 text-sm text-slate-200 outline-none focus:border-accent-green/40 placeholder:text-slate-500" />
+              <input id="reports-q" type="search" placeholder="${pick("제목·작성자·요약 검색", "Search title · author · summary")}" value="${escape(_query)}" class="h-8 w-full rounded-lg border border-surface-3/60 bg-surface-2 pl-9 pr-3 text-sm text-slate-200 outline-none focus:border-accent-green/40 placeholder:text-slate-500" />
             </div>
-            <button id="reports-selection-mode" class="h-10 shrink-0 px-4 rounded-lg border border-surface-3 text-[13px] font-semibold text-slate-300 hover:text-slate-100 hover:bg-surface-2">${_selectionMode ? pick("선택 해제", "Deselect") : pick("선택", "Select")}</button>
+            <button id="reports-selection-mode" class="h-8 shrink-0 px-3 rounded-lg border border-surface-3 bg-surface-1 text-[13px] font-medium text-slate-300 hover:text-slate-100 hover:border-slate-500/40">${_selectionMode ? pick("선택 해제", "Deselect") : pick("선택", "Select")}</button>
           </div>
         </div>
         ${selectionBar}
