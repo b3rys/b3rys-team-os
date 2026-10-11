@@ -397,7 +397,8 @@ test("계획 파일이 계획이 아니면 null — 검증을 통과로 치지 �
   const ok: Plan = { blocked: null, actions: { build: true, restart: false }, changed: { server: [], web: ["a"] }, target: SHA.target, warnings: [] };
   expect(parsePlanJson(JSON.stringify(ok))).toEqual(ok);
   for (const bad of ["", "not json", "{}", JSON.stringify({ ...ok, target: "abc" }),
-    JSON.stringify({ ...ok, actions: { build: 1, restart: 0 } }), JSON.stringify({ ...ok, changed: { web: [] } })]) {
+    JSON.stringify({ ...ok, actions: { build: 1, restart: 0 } }), JSON.stringify({ ...ok, changed: { web: [] } }),
+    JSON.stringify({ ...ok, warnings: undefined }), JSON.stringify({ ...ok, warnings: [1] })]) {
     expect(parsePlanJson(bad)).toBeNull();
   }
 });
@@ -490,6 +491,16 @@ describe("CLI — 배포 스크립트가 실제로 부르는 모드", () => {
       expect(b.stdout).toBe("");
       expect((await runAsync(["--flags", "--from", ok.file + ".missing"])).status).toBe(1);
     } finally { ok.cleanup(); blocked.cleanup(); }
+  });
+
+  test("--flags --from: 저장한 계획의 경고는 표준에러로, 표준출력은 한 줄 그대로", async () => {
+    const w = planFile({ ...noop, warnings: ["정본 브랜치가 아니다"], target: head });
+    try {
+      const r = await runAsync(["--flags", "--from", w.file]);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe("build=0 restart=0\n");
+      expect(r.stderr).toContain("⚠ 정본 브랜치가 아니다");
+    } finally { w.cleanup(); }
   });
 
   test("--flags: 표준출력은 판단 한 줄뿐이고 형식 검사를 통과한다", async () => {

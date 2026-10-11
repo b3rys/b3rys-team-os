@@ -274,7 +274,7 @@ export function parsePlanJson(text: string): Plan | null {
   if (!p || typeof p !== "object" || typeof p.target !== "string" || !/^[0-9a-f]{40}$/.test(p.target) ||
     !(p.blocked === null || typeof p.blocked === "string") ||
     !p.actions || typeof p.actions.build !== "boolean" || typeof p.actions.restart !== "boolean" ||
-    !p.changed || !isList(p.changed.server) || !isList(p.changed.web)) return null;
+    !p.changed || !isList(p.changed.server) || !isList(p.changed.web) || !isList(p.warnings)) return null;
   return p as Plan;
 }
 
@@ -374,6 +374,8 @@ if (import.meta.main) {
     const file = arg("--from", "");
     const plan = file ? parsePlanJson(await Bun.file(file).text().catch(() => "")) : null;
     if (!plan) { console.error(`✗ 계획 파일을 읽지 못했다: ${file || "(없음)"}`); process.exit(1); }
+    // 경고는 저장한 계획에만 남아 있다 — 여기서 다시 보여 주지 않으면 실행자가 못 본다.
+    for (const w of plan.warnings) console.error(`⚠ ${w}`);
     if (plan.blocked) { console.error(`★멈춤★ — ${plan.blocked}`); process.exit(2); }
     console.log(formatFlagsLine(plan));
     process.exit(0);
