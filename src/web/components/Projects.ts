@@ -19,7 +19,7 @@ import { renderMermaidFigures, type MermaidLike } from "../../shared/mermaidFigu
 import { renderIcon } from "../icons";
 import { apiBase } from "../ws";
 
-export type ProjectDocKey = "readme" | "design" | "features" | "todo";
+export type ProjectDocKey = "readme" | "project" | "design" | "features" | "todo";
 export interface ProjectSummary {
   id: string;
   name: string;
@@ -53,8 +53,10 @@ interface Fixture {
   docs: Record<ProjectDocKey, ProjectDoc>;
 }
 
-const DOC_KEYS: ProjectDocKey[] = ["readme", "design", "features", "todo"];
-const DOC_LABEL: Record<ProjectDocKey, string> = { readme: "README", design: "DESIGN", features: "FEATURES", todo: "TODO" };
+const DOC_KEYS: ProjectDocKey[] = ["readme", "project", "design", "features", "todo"];
+/** 등록하지 않아도 되는 문서 — 서버 목록에 없으면 버튼을 그리지 않는다(비활성 버튼도 아님). */
+const OPTIONAL_DOC_KEYS: ProjectDocKey[] = ["project"];
+const DOC_LABEL: Record<ProjectDocKey, string> = { readme: "README", project: "PROJECT", design: "DESIGN", features: "FEATURES", todo: "TODO" };
 
 // 컴포넌트 로컬 상태 (대시보드는 store.mainView, 여기 list↔doc 은 자체 상태 + URL 쿼리)
 let _root: HTMLElement | null = null;
@@ -335,7 +337,8 @@ function currentTasks(p: ProjectSummary): string[] {
 function renderList(): void {
   if (!_root) return;
   const rows = _projects.map((p) => {
-    const docs = DOC_KEYS.map((k) => p.docs.find((d) => d.key === k) ?? { key: k, path: "", exists: false });
+    const docs = DOC_KEYS.filter((k) => !OPTIONAL_DOC_KEYS.includes(k) || p.docs.some((d) => d.key === k))
+      .map((k) => p.docs.find((d) => d.key === k) ?? { key: k, path: "", exists: false });
     const chips = docs.map((d) => chipHtml(p, d)).join("");
     const tasks = currentTasks(p);
     const taskHtml = tasks.length
@@ -518,7 +521,7 @@ async function renderDoc(): Promise<void> {
   const repo = project?.repo ?? "";
   const gh = repo ? `<a id="projects-open-github" href="${escape(blobUrl({ repo, sha: doc.sha }, doc.path))}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-[12px] font-semibold text-slate-300 hover:text-accent-greenSoft whitespace-nowrap" title="${pick("GitHub 에서 이 파일 보기", "View this file on GitHub")}">${renderIcon("github", { size: 13 })}<span>GitHub</span></a>` : "";
   // 문서 전환 칩 — 목록 카드와 같은 모양, 현재 문서는 채운 모양. 없는 문서는 비활성.
-  const docChips = DOC_KEYS.map((k) => {
+  const docChips = DOC_KEYS.filter((k) => !OPTIONAL_DOC_KEYS.includes(k) || project?.docs.some((x) => x.key === k)).map((k) => {
     const d = project?.docs.find((x) => x.key === k);
     const base = "projects-doc-chip inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wide border";
     if (d && !d.exists) return `<span class="${base} text-slate-600 border-surface-3/60 bg-transparent cursor-not-allowed" aria-disabled="true">${DOC_LABEL[k]}</span>`;

@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { createProjectRoutes } from "./projects";
-import { GitHubDocs, type ProjectRegistration } from "../lib/githubDocs";
+import { GitHubDocs, validateProjects, type ProjectRegistration } from "../lib/githubDocs";
 import { createHostGate } from "../lib/hostGate";
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
@@ -170,5 +170,85 @@ describe("새창 페이지 /doc/:key/page", () => {
     const { app } = setup();
     expect((await app.request("http://localhost/team/api/projects/nope/doc/readme/page")).status).toBe(404);
     expect((await app.request("http://localhost/team/api/projects/sample/doc/secret/page")).status).toBe(404);
+  });
+});
+
+describe("PROJECT.md — 선택 문서 키", () => {
+  function setupWith(projects: ProjectRegistration[]) {
+    const dir = mkdtempSync(join(tmpdir(), "projects-optional-"));
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE task (id TEXT, title TEXT, lane TEXT, updated_at TEXT)");
+    const fetched: string[] = [];
+    const source = new GitHubDocs({ cacheDir: dir, useToken: false, fetch: (async (url: any) => {
+      fetched.push(String(url));
+      if (String(url).includes("/branches/")) return Response.json({ commit: { sha: "b".repeat(40) } });
+      if (String(url).endsWith("/PROJECT.md")) return new Response("# Project\n\nWhy this exists.\n");
+      return new Response("# Doc\n\nBody.\n");
+    }) as typeof fetch });
+    const app = new Hono();
+    app.route("/team/api", createProjectRoutes({ db, projects, source }));
+    cleanups.push(() => { db.close(); rmSync(dir, { recursive: true, force: true }); });
+    return { app, fetched };
+  }
+  const withProject: ProjectRegistration = { ...p, id: "withdoc", docs: { ...p.docs, project: "PROJECT.md" } };
+
+  test("등록 검증: project 는 없어도 통과, 있으면 다른 문서와 같은 경로 규칙", () => {
+    expect(validateProjects([p])).toEqual([p]);
+    expect(validateProjects([withProject])).toEqual([withProject]);
+    for (const bad of ["", "/abs.md", "../PROJECT.md", "a/./b.md", "x?.md"]) {
+      expect(() => validateProjects([{ ...p, docs: { ...p.docs, project: bad } }])).toThrow("invalid_project_registry");
+    }
+    // 필수 문서는 여전히 필수다
+    const { todo: _todo, ...noTodo } = p.docs;
+    expect(() => validateProjects([{ ...p, docs: noTodo }])).toThrow("invalid_project_registry");
+  });
+
+  test("등록한 프로젝트: 목록 순서 README → PROJECT → DESIGN → FEATURES → TODO, 새창 페이지에 PROJECT 칩", async () => {
+    const { app, fetched } = setupWith([withProject]);
+    const { projects } = await (await app.request("/team/api/projects")).json();
+    expect(projects[0].docs.map((d: any) => d.key)).toEqual(["readme", "project", "design", "features", "todo"]);
+    expect(projects[0].docs.find((d: any) => d.key === "project")).toEqual({ key: "project", path: "PROJECT.md", exists: true });
+    expect(fetched.some((u) => u.endsWith("/PROJECT.md"))).toBe(true);
+    const doc = await (await app.request("/team/api/projects/withdoc/doc/project")).json();
+    expect(doc.md).toContain("Why this exists.");
+    const html = await (await app.request("/team/api/projects/withdoc/doc/readme/page")).text();
+    expect(html).toContain('href="/team/api/projects/withdoc/doc/project/page">PROJECT</a>');
+    expect(html.indexOf(">README<")).toBeLessThan(html.indexOf(">PROJECT<"));
+    expect(html.indexOf(">PROJECT<")).toBeLessThan(html.indexOf(">DESIGN<"));
+  });
+
+  // GitHub 가 안 될 때 디스크 캐시로 버틴다. 예전 캐시에는 project 키가 없다 — 그건 받아들이되,
+  // ★필수 문서가 빠진 캐시까지 받아들이면★ 목록은 '있음' 인데 열면 404 가 된다.
+  async function staleAfterEditingCache(edit: (docs: Record<string, unknown>) => void) {
+    const dir = mkdtempSync(join(tmpdir(), "projects-cache-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const ok = new GitHubDocs({ cacheDir: dir, useToken: false, fetch: (async (url: any) =>
+      String(url).includes("/branches/") ? Response.json({ commit: { sha: "c".repeat(40) } }) : new Response("# Doc\n\nBody.\n")) as typeof fetch });
+    await ok.get(withProject);
+    const file = join(dir, readdirSync(dir).find((f) => f.startsWith("snapshot-"))!);
+    const snap = JSON.parse(readFileSync(file, "utf8"));
+    edit(snap.docs);
+    writeFileSync(file, JSON.stringify(snap));
+    const down = new GitHubDocs({ cacheDir: dir, useToken: false, fetch: (async (_url: any) => new Response("down", { status: 503 })) as typeof fetch });
+    return down.get(withProject);
+  }
+  test("디스크 캐시: project 만 빠진 예전 캐시는 복구한다(project=null, stale)", async () => {
+    const snap = await staleAfterEditingCache((docs) => { delete docs.project; });
+    expect(snap.stale).toBe(true);
+    expect(snap.docs.project).toBeNull();
+    expect(snap.docs.todo?.md).toContain("Body.");
+  });
+  test("디스크 캐시: 필수 문서(todo)가 빠진 캐시는 받아들이지 않는다", async () => {
+    await expect(staleAfterEditingCache((docs) => { delete docs.todo; })).rejects.toThrow();
+  });
+
+  test("등록하지 않은 프로젝트: GitHub 에 묻지 않고, 목록·새창 페이지에 PROJECT 가 아예 없다(비활성 칩도 아님)", async () => {
+    const { app, fetched } = setupWith([p]);
+    const { projects } = await (await app.request("/team/api/projects")).json();
+    expect(projects[0].docs.map((d: any) => d.key)).toEqual(["readme", "design", "features", "todo"]);
+    expect(fetched.some((u) => u.endsWith("/PROJECT.md"))).toBe(false);
+    expect((await app.request("/team/api/projects/sample/doc/project")).status).toBe(404);
+    const html = await (await app.request("/team/api/projects/sample/doc/readme/page")).text();
+    expect(html).not.toContain("PROJECT");
   });
 });
