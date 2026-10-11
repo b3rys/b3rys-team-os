@@ -220,7 +220,8 @@ function injectProseStyle(): void {
 .reports-prose hr{border:0;border-top:1px solid rgb(var(--border));margin:1.6em 0}
 .reports-prose table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.92em}
 .reports-prose th,.reports-prose td{border:1px solid rgb(var(--border));padding:7px 11px;text-align:left}
-.reports-prose th{background:rgb(var(--surface-1));color:rgb(var(--slate-50));font-weight:600}`;
+.reports-prose th{background:rgb(var(--surface-1));color:rgb(var(--slate-50));font-weight:600}
+.reports-chiprow{scrollbar-width:none}.reports-chiprow::-webkit-scrollbar{display:none}`;
   document.head.appendChild(st);
 }
 
@@ -772,7 +773,7 @@ function starButton(r: Report, placement: "card" | "detail"): string {
   const title = active ? pick("중요 표시 해제", "Unmark important") : pick("중요 표시", "Mark important");
   const base = placement === "card"
     ? "reports-star inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent transition-colors"
-    : "reports-star-detail inline-flex h-9 w-9 items-center justify-center rounded-md border cursor-pointer transition-colors";
+    : "reports-star-detail inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-surface-1 cursor-pointer transition-colors";
   const tone = active
     ? `text-txt-amber hover:bg-surface-0 ${placement === "detail" ? "border-surface-3" : ""}`
     : `text-slate-500 hover:bg-surface-0 hover:text-txt-amber ${placement === "detail" ? "border-surface-3" : ""}`;
@@ -818,12 +819,12 @@ function renderList(): void {
   const cats = Object.keys(counts).sort((a, b) => (a === DEFAULT_CAT ? -1 : b === DEFAULT_CAT ? 1 : a.localeCompare(b, "ko")));
 
   const pillCls = (active: boolean) =>
-    `reports-pill inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[12px] font-medium border transition-colors ${active
+    `reports-pill inline-flex h-8 shrink-0 whitespace-nowrap items-center gap-1.5 px-2.5 rounded-full text-[12px] font-medium border transition-colors ${active
       ? "text-slate-100 font-semibold border-slate-100/70 bg-transparent"
       : "text-slate-400 border-surface-3 bg-transparent hover:text-slate-100"}`;
   // 태그도 분류와 같은 모양의 알약 — 색으로 나누지 않고 # 로 구분한다.
   const tagPillCls = (active: boolean) =>
-    `reports-pill inline-flex items-center px-2 py-0.5 rounded-full text-[12px] font-medium border transition-colors ${active
+    `reports-pill inline-flex h-8 shrink-0 whitespace-nowrap items-center px-2.5 rounded-full text-[12px] font-medium border transition-colors ${active
       ? "text-slate-100 font-semibold border-slate-100/70 bg-transparent"
       : "text-slate-400 border-surface-3 bg-transparent hover:text-slate-100"}`;
   const pills =
@@ -842,9 +843,17 @@ function renderList(): void {
     const selected = _selectedReportIds.has(r.id);
     return `
       <div class="reports-card group relative w-full text-left border-b border-surface-3 ${selected ? "bg-accent-green/[0.06]" : ""} px-2 py-3.5 hover:bg-surface-0/70 transition-colors overflow-hidden" data-id="${escape(r.id)}" data-category="${escape(catOf(r))}" role="button" tabindex="0">
-        <div class="flex items-start gap-2">
-          ${_selectionMode ? `<button class="reports-select mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 ${selected ? "border-accent-green bg-accent-green/20 text-accent-green" : "border-surface-3 text-transparent"}" data-id="${escape(r.id)}" aria-label="${pick("보고서 선택", "Select report")}" aria-pressed="${selected}"><span class="text-[11px] leading-none">✓</span></button>` : ""}
-          <div class="min-w-0 flex-1 text-[15px] font-semibold text-slate-100 leading-snug">${escape(r.title)}</div>
+        <div class="flex items-start gap-2 2xl:items-center 2xl:gap-4">
+          ${_selectionMode ? `<button class="reports-select mt-0.5 2xl:mt-0 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 ${selected ? "border-accent-green bg-accent-green/20 text-accent-green" : "border-surface-3 text-transparent"}" data-id="${escape(r.id)}" aria-label="${pick("보고서 선택", "Select report")}" aria-pressed="${selected}"><span class="text-[11px] leading-none">✓</span></button>` : ""}
+          <div class="min-w-0 flex-1">
+            <div class="text-[15px] font-semibold text-slate-100 leading-snug 2xl:truncate">${escape(r.title)}</div>
+            ${r.summary ? `<div class="text-[13px] text-slate-400 leading-relaxed mt-1 line-clamp-1">${escape(r.summary)}</div>` : ""}
+            <div class="flex items-center gap-2 flex-wrap text-xs text-slate-500 mt-1 2xl:hidden"><span class="text-accent-greenSoft font-medium">${escape(r.author || "—")}</span><span>·</span><span class="tabular-nums">${fmtDate(r.created_at)}</span>${(r.tags ?? []).map((t) => tagBadge(t, true)).join("")}${badges}</div>
+            ${(r.tags ?? []).length ? `<div class="hidden 2xl:flex items-center gap-1.5 mt-1.5">${(r.tags ?? []).map((t) => tagBadge(t, true)).join("")}</div>` : ""}
+          </div>
+          <div class="hidden 2xl:block w-20 shrink-0 truncate text-[13px] text-accent-greenSoft font-medium">${escape(r.author || "—")}</div>
+          <div class="hidden 2xl:block w-32 shrink-0 text-[13px] tabular-nums text-slate-500">${fmtDate(r.created_at)}</div>
+          <div class="hidden 2xl:flex w-24 shrink-0 items-center gap-1">${badges}</div>
           <div class="flex shrink-0 items-center gap-1">
             ${starButton(r, "card")}
             <button class="reports-delete inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-surface-0 hover:text-txt-red" data-id="${escape(r.id)}" data-title="${escape(r.title)}" title="${pick("보고서 삭제", "Delete report")}" aria-label="${pick("보고서 삭제", "Delete report")}">
@@ -852,8 +861,6 @@ function renderList(): void {
             </button>
           </div>
         </div>
-        ${r.summary ? `<div class="text-[13px] text-slate-400 leading-relaxed mt-1.5 line-clamp-1">${escape(r.summary)}</div>` : ""}
-        <div class="flex items-center gap-2 flex-wrap text-xs text-slate-500 mt-1"><span class="text-accent-greenSoft font-medium">${escape(r.author || "—")}</span><span>·</span><span class="tabular-nums">${fmtDate(r.created_at)}</span>${(r.tags ?? []).map((t) => tagBadge(t, true)).join("")}${badges}</div>
       </div>`;
   }).join("");
 
@@ -879,29 +886,36 @@ function renderList(): void {
     <span class="flex gap-1.5"><button id="reports-move-selected" class="px-2.5 py-1 rounded-md border border-surface-3 bg-surface-2 text-slate-300 text-[11px] disabled:opacity-40"${_selectedReportIds.size ? "" : " disabled"}>${pick("분류로 이동 ▾", "Move to category ▾")}</button><button id="reports-cancel-selection" class="px-2.5 py-1 rounded-md text-slate-500 text-[11px]">${pick("취소", "Cancel")}</button></span>
   </div>` : "";
 
+  // 목록 상단 = 한 덩어리 도구막대. 검색·선택이 첫 줄, 분류·태그는 같은 칸 안에서 같은 모양으로 정렬한다.
+  // 폭은 창을 따라 넓어지되(목록은 넓게 읽어도 된다) 아주 넓은 창에서 줄이 끝없이 늘지 않게 상한만 둔다.
+  const rowLabel = "w-8 shrink-0 leading-8 text-[12px] font-medium text-slate-500";
+  const editBtn = "shrink-0 inline-flex h-8 items-center gap-1 px-2 rounded-md text-[12px] font-medium text-slate-500 hover:bg-surface-0 hover:text-slate-100 transition-colors";
   _root.innerHTML = `
     <div data-reports-list-scroll class="h-full overflow-y-auto">
-      <div class="max-w-3xl mx-auto px-4 md:px-6 py-5 pb-20">
-        <div class="flex items-center gap-2 flex-wrap mb-3">
-          <span class="w-7 shrink-0 text-[11px] font-semibold text-slate-500">${pick("분류", "Category")}</span>
-          <div class="flex flex-1 items-center gap-1.5 flex-wrap">${pills}</div>
-          <button id="reports-manage-categories" class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-slate-500 hover:text-slate-300">✎ ${pick("편집", "Edit")}</button>
-        </div>
-        <div class="flex items-center gap-2 flex-wrap mb-3">
-          <span class="w-7 shrink-0 text-[11px] font-semibold text-slate-500">${pick("태그", "Tags")}</span>
-          <div class="flex flex-1 items-center gap-1.5 flex-wrap">${tagPills || `<span class="text-xs text-slate-600">${pick("등록된 태그 없음", "No tags yet")}</span>`}</div>
-          <button id="reports-manage-tags" class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-slate-500 hover:text-slate-300">✎ ${pick("편집", "Edit")}</button>
-        </div>
-        <div class="flex gap-2 mb-2">
-          <div class="relative flex-1"><svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-            <input id="reports-q" type="search" placeholder="${pick("제목·작성자·요약 검색", "Search title · author · summary")}" value="${escape(_query)}" class="w-full bg-surface-3 border rounded-lg text-sm text-slate-200 pl-9 pr-3 py-2.5 outline-none focus:border-accent-green/40 placeholder:text-slate-600" style="border-color:var(--border-strong)" />
+      <div class="w-full max-w-[1400px] mx-auto px-4 md:px-8 pb-20">
+        <!-- 도구막대: 분류 → 태그 → 맨 아래 검색(목록 바로 위). 입력하면 바로 아래 목록이 바뀌는 게 보이게. -->
+        <div class="sticky top-0 z-20 -mx-4 md:-mx-8 mb-1 px-4 md:px-8 py-3 space-y-2 bg-surface-1/95 backdrop-blur border-b border-surface-3">
+          <div class="flex items-start gap-2">
+            <span class="${rowLabel}">${pick("분류", "Category")}</span>
+            <div class="reports-chiprow flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto md:flex-wrap md:overflow-visible">${pills}</div>
+            <button id="reports-manage-categories" class="${editBtn}">✎ ${pick("편집", "Edit")}</button>
           </div>
-          <button id="reports-selection-mode" class="shrink-0 px-3 py-2 rounded-lg text-[12px] font-semibold border bg-surface-3 text-slate-300" style="border-color:var(--border-strong)">${_selectionMode ? pick("선택 해제", "Deselect") : pick("선택", "Select")}</button>
+          <div class="flex items-start gap-2">
+            <span class="${rowLabel}">${pick("태그", "Tags")}</span>
+            <div class="reports-chiprow flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto md:flex-wrap md:overflow-visible">${tagPills || `<span class="text-xs text-slate-600">${pick("등록된 태그 없음", "No tags yet")}</span>`}</div>
+            <button id="reports-manage-tags" class="${editBtn}">✎ ${pick("편집", "Edit")}</button>
+          </div>
+          <div class="flex items-center gap-2">
+            <div class="relative flex-1"><svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+              <input id="reports-q" type="search" placeholder="${pick("제목·작성자·요약 검색", "Search title · author · summary")}" value="${escape(_query)}" class="h-8 w-full rounded-lg border border-surface-3/60 bg-surface-2 pl-9 pr-3 text-sm text-slate-200 outline-none focus:border-accent-green/40 placeholder:text-slate-500" />
+            </div>
+            <button id="reports-selection-mode" class="h-8 shrink-0 px-3 rounded-lg border border-surface-3 bg-surface-1 text-[13px] font-medium text-slate-300 hover:text-slate-100 hover:border-slate-500/40">${_selectionMode ? pick("선택 해제", "Deselect") : pick("선택", "Select")}</button>
+          </div>
         </div>
         ${selectionBar}
         ${loadingBar}
         <div class="${_reloading ? "opacity-50 transition-opacity" : "transition-opacity"}">
-        ${_loadError ? error : items.length ? `<div class="flex flex-col border-t border-surface-3">${cards}</div>${loadMore}` : empty}
+        ${_loadError ? error : items.length ? `<div class="flex flex-col">${cards}</div>${loadMore}` : empty}
         </div>
       </div>
     </div>`;
@@ -1064,11 +1078,35 @@ function renderList(): void {
   });
 }
 
+// 상세 상단의 형식 토글(HTML·MD) — 작은 세그먼트. 켜진 쪽만 면을 채운다.
+function detailTabCls(active: boolean): string {
+  return `reports-tab h-7 px-2.5 rounded-md text-[12px] font-semibold uppercase tracking-wide transition-colors ${active ? "bg-accent-green/12 text-txt-green" : "text-slate-400 hover:text-slate-100"}`;
+}
+function detailTagsHtml(report: Report): string {
+  return `${(report.tags ?? []).map((t) => tagBadge(t)).join("")}<button id="reports-edit-tags" class="inline-flex h-6 items-center px-2 rounded-md text-[12px] font-medium text-slate-400 hover:bg-surface-0 hover:text-slate-100 transition-colors">＋ ${pick("태그 편집", "Edit tags")}</button>`;
+}
+
+// 상세의 ⋯ 메뉴(<details>)는 바깥을 누르거나 Esc 를 누르면 닫는다. 문서에 한 번만 건다(다시 그릴 때마다 쌓이지 않게).
+let _moreMenuCloserDoc: Document | null = null;
+export function bindMoreMenuCloser(): void {
+  if (_moreMenuCloserDoc === document) return;
+  _moreMenuCloserDoc = document;
+  const closeAll = (keep?: Node | null) => {
+    document.querySelectorAll<HTMLDetailsElement>("details.reports-more[open]").forEach((d) => {
+      if (!keep || !d.contains(keep)) d.open = false;
+    });
+  };
+  document.addEventListener("click", (e) => closeAll(e.target as Node | null));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAll(); });
+  // 보고서 미리보기(iframe) 안을 누르면 클릭이 이 문서로 오지 않는다 — 대신 창이 포커스를 잃으므로 그때 닫는다.
+  window.addEventListener("blur", () => closeAll());
+}
+
 // ── 렌더: 상세 ────────────────────────────────────────────────────
 async function renderDetail(): Promise<void> {
   if (!_root || !_curId) return;
   const id = _curId;
-  _root.innerHTML = `<div class="h-full overflow-y-auto"><div class="max-w-3xl mx-auto px-4 md:px-6 py-5"><div class="text-slate-500 py-16 text-center">${pick("불러오는 중…", "Loading…")}</div></div></div>`;
+  _root.innerHTML = `<div class="h-full overflow-y-auto"><div class="w-full max-w-6xl mx-auto px-4 md:px-8 py-5"><div class="text-slate-500 py-16 text-center">${pick("불러오는 중…", "Loading…")}</div></div></div>`;
 
   let meta: Report | null;
   try {
@@ -1079,7 +1117,7 @@ async function renderDetail(): Promise<void> {
   }
   if (!_root) return;
   if (!meta) {
-    _root.innerHTML = `<div class="h-full overflow-y-auto"><div class="max-w-3xl mx-auto px-4 md:px-6 py-5"><button id="reports-back" class="text-slate-400 hover:text-accent-green text-sm py-2">${pick("← 목록으로", "← Back to list")}</button><div class="text-center text-txt-red py-16"><div class="font-medium">${pick("보고서를 찾을 수 없습니다", "Report not found")}</div><div class="text-xs text-slate-500 mt-1">id: ${escape(id)}</div></div></div></div>`;
+    _root.innerHTML = `<div class="h-full overflow-y-auto"><div class="w-full max-w-6xl mx-auto px-4 md:px-8 py-5"><button id="reports-back" class="text-slate-400 hover:text-accent-green text-sm py-2">${pick("← 목록으로", "← Back to list")}</button><div class="text-center text-txt-red py-16"><div class="font-medium">${pick("보고서를 찾을 수 없습니다", "Report not found")}</div><div class="text-xs text-slate-500 mt-1">id: ${escape(id)}</div></div></div></div>`;
     _root.querySelector("#reports-back")?.addEventListener("click", goList);
     return;
   }
@@ -1089,39 +1127,51 @@ async function renderDetail(): Promise<void> {
   const activeType = preferredFormType(forms);
   const author = meta.author || pick("담당자", "Assignee");
   const tabs = forms.map((t) =>
-    `<button class="reports-tab px-3.5 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wide border transition-colors ${t === activeType ? "text-accent-green border-accent-green/35 bg-accent-green/10" : "text-slate-400 border-surface-3 bg-surface-2 hover:text-slate-200"}" data-type="${escape(t)}">${escape(t)}</button>`
+    `<button class="${detailTabCls(t === activeType)}" data-type="${escape(t)}">${escape(t)}</button>`
   ).join("");
+  const category = catOf(meta);
+  // 상단 버튼은 모두 같은 높이·같은 테두리. 색은 상태(켜진 형식)에만 쓰고, 삭제는 평소엔 중립 → 올렸을 때만 위험색.
+  const act = "inline-flex h-8 shrink-0 items-center gap-1.5 px-3 rounded-lg border border-surface-3 bg-surface-1 text-[13px] font-medium text-slate-300 hover:text-slate-100 hover:border-slate-500/40 cursor-pointer transition-colors";
+  const metaBtn = "inline-flex h-6 items-center gap-1 px-2 rounded-md text-[12px] font-medium text-slate-400 hover:bg-surface-0 hover:text-slate-100 transition-colors";
 
   _root.innerHTML = `
     <div data-reports-detail-scroll class="h-full overflow-y-auto">
-      <div class="max-w-3xl mx-auto px-4 md:px-6 pb-20">
-        <!-- 상단 sticky 헤더: 스크롤해도 돌아가기·제목·폼토글 항상 노출 -->
-        <div class="sticky top-0 z-20 -mx-4 md:-mx-6 px-4 md:px-6 bg-surface-1/95 backdrop-blur border-b border-surface-3">
-          <div class="flex items-center gap-3 py-2.5">
-            <button id="reports-back" title="${pick("보고서 목록으로", "Back to report list")}" class="inline-flex items-center gap-1.5 shrink-0 text-txt-green text-sm font-semibold px-3 py-1.5 rounded-lg border border-accent-green/45 bg-accent-green/12 hover:bg-accent-green/20 hover:border-accent-green/70 transition-colors"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><rect x="3" y="5" width="6" height="6" rx="1"/><path d="m3 17 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></svg>${pick("목록", "List")}</button>
-            <div class="text-[15px] font-semibold text-slate-100 truncate flex-1" title="${escape(meta.title)}">${escape(meta.title)}</div>
-          </div>
-          <div class="flex items-center gap-2 flex-wrap pb-2.5">
-            ${forms.length ? `<div class="flex gap-1.5 flex-wrap">${tabs}</div>
-            <a id="reports-open" target="_blank" rel="noopener" title="${pick("새 탭에서 크게 보기 — 보고서를 브라우저 새 창으로 엽니다", "Open larger in a new tab — opens the report in a new browser window")}" class="ml-auto inline-flex items-center gap-1.5 text-[13px] font-semibold px-3.5 py-2 rounded-lg border border-surface-3 text-slate-200 bg-surface-2 hover:text-slate-100 hover:border-accent-green/45 hover:bg-surface-0 cursor-pointer transition-colors"><svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>${pick("새창보기", "New window")}</a>
-            <a id="reports-dl" class="inline-flex items-center gap-1.5 text-[13px] font-semibold px-3.5 py-2 rounded-lg border border-accent-green/35 text-accent-green bg-accent-green/10 hover:bg-accent-green/20 cursor-pointer transition-colors"><svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 21h16"/></svg>${pick("다운로드", "Download")}</a>` : `<span class="ml-auto"></span>`}
-            ${starButton(meta, "detail")}
-            <button id="reports-delete-detail" class="inline-flex items-center gap-1.5 text-[13px] font-semibold px-3.5 py-2 rounded-lg border border-red-400/25 text-txt-red bg-red-400/10 hover:bg-red-400/15 cursor-pointer transition-colors"><svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>${pick("삭제", "Delete")}</button>
+      <div class="w-full max-w-[1400px] mx-auto px-4 md:px-8 pb-20">
+        <!-- 상단 sticky 헤더: ← · 제목 + 메타 한 줄 · 오른쪽 같은 크기 아이콘 묶음(삭제는 ⋯ 메뉴 안) -->
+        <div class="sticky top-0 z-20 -mx-4 md:-mx-8 px-4 md:px-8 bg-surface-1/95 backdrop-blur border-b border-surface-3">
+          <div class="flex flex-col gap-2 py-3 md:flex-row md:items-start md:gap-4">
+            <div class="flex min-w-0 flex-1 items-start gap-3">
+              <button id="reports-back" title="${pick("보고서 목록으로", "Back to report list")}" class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-surface-3 bg-surface-1 text-slate-400 hover:text-slate-100 hover:border-slate-500/40 cursor-pointer transition-colors"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg><span class="sr-only">${pick("목록", "List")}</span></button>
+              <div class="min-w-0 flex-1">
+                <div class="text-[17px] font-semibold text-slate-100 leading-8 truncate" title="${escape(meta.title)}">${escape(meta.title)}</div>
+                <div class="flex items-center gap-x-2 gap-y-1 flex-wrap text-[12.5px] text-slate-500">
+                  ${category ? `<span class="inline-flex h-5 items-center px-1.5 rounded text-[11px] font-semibold border text-txt-green border-accent-green/30 bg-accent-green/10">${escape(category)}</span>` : ""}
+                  <span class="text-accent-greenSoft font-medium">${escape(author)}</span><span>·</span><span class="tabular-nums">${fmtDate(meta.created_at)}</span>
+                  <span id="reports-detail-tags" class="inline-flex items-center gap-1.5 flex-wrap">${detailTagsHtml(meta)}</span>
+                  <button id="reports-reqtoggle" class="${metaBtn.replace("text-slate-400", "text-accent-greenSoft")}">${pick("✉ 요청하기", "✉ Request")}</button>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5 pl-11 md:pl-0">
+              ${forms.length ? `<div class="inline-flex h-8 items-center gap-0.5 rounded-lg border border-surface-3 bg-surface-1 p-0.5">${tabs}</div>
+              <a id="reports-open" target="_blank" rel="noopener" title="${pick("새 탭에서 크게 보기 — 보고서를 브라우저 새 창으로 엽니다", "Open larger in a new tab — opens the report in a new browser window")}" class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-surface-3 bg-surface-1 text-slate-400 hover:text-slate-100 hover:border-slate-500/40 cursor-pointer transition-colors"><svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg><span class="sr-only">${pick("새창보기", "New window")}</span></a>
+              <a id="reports-dl" title="${pick("다운로드", "Download")}" class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-surface-3 bg-surface-1 text-slate-400 hover:text-slate-100 hover:border-slate-500/40 cursor-pointer transition-colors"><svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 21h16"/></svg><span class="sr-only">${pick("다운로드", "Download")}</span></a>` : ""}
+              ${starButton(meta, "detail")}
+              <details class="reports-more relative">
+                <summary class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-surface-3 bg-surface-1 text-slate-400 hover:text-slate-100 hover:border-slate-500/40 cursor-pointer transition-colors list-none [&::-webkit-details-marker]:hidden" title="${pick("더보기", "More")}"><svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></summary>
+                <div class="absolute right-0 z-30 mt-1 min-w-[8rem] rounded-lg border border-surface-3 bg-surface-1 p-1 shadow-lg">
+                  <button id="reports-delete-detail" class="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-txt-red hover:bg-red-400/10"><svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>${pick("삭제", "Delete")}</button>
+                </div>
+              </details>
+            </div>
           </div>
         </div>
 
         <div class="pt-4">
-          <span class="inline-block mb-2 px-2 py-0.5 rounded text-[11px] font-semibold border text-txt-green border-accent-green/30 bg-accent-green/10">${escape(catOf(meta))}</span>
-          <div class="flex items-center gap-2 flex-wrap text-[13px] text-slate-500"><span class="text-accent-greenSoft font-medium">${escape(author)}</span><span>·</span><span>${fmtDate(meta.created_at)}</span></div>
-          ${meta.summary ? `<div class="text-sm text-slate-400 leading-relaxed mt-3 pl-3 border-l-2 border-surface-3">${escape(meta.summary)}</div>` : ""}
-          <div id="reports-detail-tags" class="flex items-center gap-2 flex-wrap mt-3">
-            ${(meta.tags ?? []).map((t) => tagBadge(t)).join("")}
-            <button id="reports-edit-tags" class="px-2.5 py-1 rounded-full text-[11px] font-semibold border border-surface-3 text-slate-400 hover:text-slate-200">＋ ${pick("태그 편집", "Edit tags")}</button>
-          </div>
+          ${meta.summary ? `<div class="max-w-[75ch] text-sm text-slate-400 leading-relaxed pl-3 border-l-2 border-surface-3">${escape(meta.summary)}</div>` : ""}
 
-          <div class="reports-reqbox mt-5">
-            <button id="reports-reqtoggle" class="inline-flex items-center gap-2 text-[13px] font-semibold px-4 py-2 rounded-lg border border-accent-green/35 text-accent-green bg-accent-green/10 hover:bg-accent-green/20 transition-colors">${pick("✉ 요청하기", "✉ Request")}</button>
-            <div id="reports-reqform" class="hidden mt-3 bg-surface-2 border border-surface-3 rounded-xl p-4">
+          <div class="reports-reqbox">
+            <div id="reports-reqform" class="hidden mt-3 max-w-3xl bg-surface-2 border border-surface-3 rounded-xl p-4">
               <div class="text-[13px] text-slate-500 mb-2">${pick("담당자:", "Assignee:")} <b class="text-accent-greenSoft">${escape(author)}</b> <span class="text-slate-600">${pick("(보고서 작성자 기본)", "(defaults to report author)")}</span></div>
               <textarea id="reports-reqtext" placeholder="${pick("요청 내용을 입력하세요 — 예: 3장 수치 최신화 부탁드려요", "Enter your request — e.g. please refresh the figures in section 3")}"
                 class="w-full min-h-[88px] resize-y bg-surface-0 border border-surface-3 rounded-lg text-sm text-slate-200 px-3 py-2.5 outline-none focus:border-accent-green/40 placeholder:text-slate-600 leading-relaxed"></textarea>
@@ -1132,12 +1182,13 @@ async function renderDetail(): Promise<void> {
             </div>
           </div>
 
-          <div id="reports-viewer" class="mt-5 bg-surface-2 border border-surface-3 rounded-xl overflow-hidden"></div>
+          <div id="reports-viewer" class="mt-4 bg-surface-2 border border-surface-3 rounded-xl overflow-hidden"></div>
         </div>
       </div>
     </div>`;
 
   _root.querySelector("#reports-back")?.addEventListener("click", goList);
+  bindMoreMenuCloser();
   const detailScroller = _root.querySelector<HTMLElement>("[data-reports-detail-scroll]");
   if (detailScroller && _detailScrollTop) detailScroller.scrollTop = _detailScrollTop;
   _root.querySelector<HTMLButtonElement>(".reports-star-detail")?.addEventListener("click", async () => {
@@ -1158,8 +1209,7 @@ async function renderDetail(): Promise<void> {
   const renderDetailTags = (report: Report) => {
     const tagRow = _root?.querySelector<HTMLElement>("#reports-detail-tags");
     if (!tagRow) return;
-    tagRow.innerHTML = `${(report.tags ?? []).map((t) => tagBadge(t)).join("")}
-            <button id="reports-edit-tags" class="px-2.5 py-1 rounded-full text-[11px] font-semibold border border-surface-3 text-slate-400 hover:text-slate-200">＋ ${pick("태그 편집", "Edit tags")}</button>`;
+    tagRow.innerHTML = detailTagsHtml(report);
     tagRow.querySelector<HTMLButtonElement>("#reports-edit-tags")?.addEventListener("click", handleEditTags);
   };
   const handleEditTags = async () => {
@@ -1175,6 +1225,7 @@ async function renderDetail(): Promise<void> {
   _root.querySelector<HTMLButtonElement>("#reports-edit-tags")?.addEventListener("click", handleEditTags);
   _root.querySelector<HTMLButtonElement>("#reports-delete-detail")?.addEventListener("click", async () => {
     const btn = _root?.querySelector<HTMLButtonElement>("#reports-delete-detail");
+    btn?.closest("details")?.removeAttribute("open");
     if (!await showConfirm({ message: pick(`보고서 "${meta.title}"을(를) 목록에서 삭제할까요?\n\n첨부 파일은 디스크에 남고, 대시보드 등록 정보만 삭제됩니다.`, `Delete report "${meta.title}" from the list?\n\nThe attached files stay on disk; only the dashboard registration is removed.`), danger: true })) return;
     if (btn) btn.disabled = true;
     try {
@@ -1233,7 +1284,7 @@ async function renderDetail(): Promise<void> {
     if (!viewer) return;
     _root?.querySelectorAll<HTMLButtonElement>(".reports-tab").forEach((el) => {
       const active = el.dataset.type === type;
-      el.className = `reports-tab px-3.5 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wide border transition-colors ${active ? "text-accent-green border-accent-green/35 bg-accent-green/10" : "text-slate-400 border-surface-3 bg-surface-2 hover:text-slate-200"}`;
+      el.className = detailTabCls(active);
     });
     // 새창보기 — 현재 form 타입을 새 탭에서 전체화면으로(좁은 대시보드 뷰 대신).
     const open = _root?.querySelector<HTMLAnchorElement>("#reports-open");
@@ -1273,7 +1324,7 @@ async function renderDetail(): Promise<void> {
         const r = await fetch(fileUrl(id, type));
         if (!r.ok) throw new Error("HTTP " + r.status);
         const txt = await r.text();
-        viewer.innerHTML = `<div class="reports-prose p-5 md:p-8">${mdToHtml(txt)}</div>`;
+        viewer.innerHTML = `<div class="reports-prose mx-auto max-w-[78ch] p-5 md:p-8">${mdToHtml(txt)}</div>`;
       } catch (e) {
         viewer.innerHTML = `<div class="reports-prose p-5 md:p-8 text-txt-red">${pick(`불러오기 실패: ${escape((e as Error).message)}`, `Failed to load: ${escape((e as Error).message)}`)}</div>`;
       }
@@ -1311,7 +1362,7 @@ export function renderReports(root: HTMLElement): void {
     _curId = hashId;
     _curType = null;
   }
-  root.innerHTML = `<div class="h-full overflow-y-auto"><div class="max-w-3xl mx-auto px-4 md:px-6 py-5"><div class="text-slate-500 py-16 text-center">${pick("보고서 목록 불러오는 중…", "Loading report list…")}</div></div></div>`;
+  root.innerHTML = `<div class="h-full overflow-y-auto"><div class="w-full max-w-6xl mx-auto px-4 md:px-8 py-5"><div class="text-slate-500 py-16 text-center">${pick("보고서 목록 불러오는 중…", "Loading report list…")}</div></div></div>`;
   void ensureLoaded().then(() => {
     if (!_root) return;
     if (_view === "detail" && _curId) void renderDetail();
