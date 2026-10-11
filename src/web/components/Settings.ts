@@ -238,7 +238,7 @@ async function refreshMembers(): Promise<void> {
 function card(title: string, eyebrow: string, body: string): string {
   return `
     <div class="rounded-xl border border-surface-3 bg-surface-2/60 p-5">
-      <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-txt-green">${escape(eyebrow)}</div>
+      <div class="mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-txt-green">${escape(eyebrow)}</div>
       <div class="mb-4 text-base font-semibold text-slate-100">${escape(title)}</div>
       ${body}
     </div>`;
@@ -298,17 +298,17 @@ function slackChannelsHtml(): string {
     <div class="space-y-3">
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
         <div class="rounded-lg border border-surface-3 bg-surface-0/60 p-3">
-          <div class="text-[10px] uppercase tracking-wide text-slate-500">Telegram</div>
+          <div class="text-[11px] uppercase tracking-wide text-slate-500">Telegram</div>
           <div class="text-sm font-semibold text-accent-greenSoft mt-1">Primary</div>
           <div class="text-[11px] text-slate-500 mt-1 leading-snug">${pick("팀방 멘션·visible reply 기본 채널", "Default channel for team-room mentions and visible replies")}</div>
         </div>
         <div class="rounded-lg border border-surface-3 bg-surface-0/60 p-3">
-          <div class="text-[10px] uppercase tracking-wide text-slate-500">Slack</div>
+          <div class="text-[11px] uppercase tracking-wide text-slate-500">Slack</div>
           <div class="text-sm font-semibold text-slate-300 mt-1">Supported option</div>
           <div class="text-[11px] text-slate-500 mt-1 leading-snug">${pick("봇→봇 멘션과 thread reply 지원", "Supports bot-to-bot mentions and thread replies")}</div>
         </div>
         <div class="rounded-lg border border-surface-3 bg-surface-0/60 p-3">
-          <div class="text-[10px] uppercase tracking-wide text-slate-500">${pick("폴링 · 보조", "Polling · fallback")}</div>
+          <div class="text-[11px] uppercase tracking-wide text-slate-500">${pick("폴링 · 보조", "Polling · fallback")}</div>
           <div class="text-sm font-semibold ${_slack.enabled ? "text-accent-greenSoft" : "text-slate-400"} mt-1">${_slack.enabled ? "On" : "Off"}</div>
           <div class="text-[11px] text-slate-500 mt-1 leading-snug">${escape(_slack.channels.join(", ") || pick("channel 미설정", "channel not set"))} · ${Math.round(_slack.poll_interval_ms / 1000)}s · ${pick("누락 보조용", "fallback for misses")}</div>
         </div>
@@ -340,7 +340,7 @@ function capabilityPanelHtml(): string {
   for (const c of _capabilities) { const k = c.category || pick("기타", "Other"); (byCat.get(k) ?? byCat.set(k, []).get(k)!).push(c); }
   const groups = [...byCat.entries()].map(([cat, items]) => `
     <div>
-      <div class="text-[10px] font-semibold uppercase tracking-wide text-txt-green mb-1">${escape(cat)}</div>
+      <div class="text-[11px] font-semibold uppercase tracking-wide text-txt-green mb-1">${escape(cat)}</div>
       <div class="flex flex-wrap gap-1.5">
         ${items.map((c) => `<span class="text-[11px] px-2 py-0.5 rounded border border-surface-3 bg-surface-0 text-slate-300" title="${escape(c.desc)}">${escape(c.label)}</span>`).join("")}
       </div>
@@ -383,7 +383,7 @@ function stepDot(state: string): string {
   if (state === "running") return `<span class="inline-flex h-5 w-5 items-center justify-center rounded-full border-2 border-accent-green/40 border-t-accent-green animate-spin"></span>`;
   if (state === "failed") return `<span class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-status-blocked/20 text-status-blocked text-xs">✕</span>`;
   if (state === "blocked") return `<span class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/20 text-txt-amber text-xs">⏸</span>`;
-  return `<span class="inline-flex h-5 w-5 items-center justify-center rounded-full border border-surface-3 text-slate-600 text-[10px]">○</span>`;
+  return `<span class="inline-flex h-5 w-5 items-center justify-center rounded-full border border-surface-3 text-slate-600 text-[11px]">○</span>`;
 }
 // 셀프서비스 프로비저닝 패널 — awaiting_input.fields 를 제네릭 렌더(secret=password).
 // 토큰 등 시크릿: 화면 표시 X, 전송 후 즉시 clear, 컴포넌트 상태에 보관 X.
@@ -475,7 +475,7 @@ function otStepperHtml(): string {
           ? `<div class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 mt-2">
                <div class="text-[12px] font-semibold text-txt-amber">⏸ ${pick("런타임 인증이 필요합니다 — 활성화 보류", "Runtime authentication required — activation on hold")}</div>
                <div class="text-[11px] text-txt-amber leading-relaxed mt-1">${escape(preflightHint)}</div>
-               <div class="text-[10px] text-slate-500 mt-1">${pick("터미널에서 로그인하면 자동으로 확인되어 활성화됩니다(또는 아래 '다시 확인').", "Log in via the terminal and it's checked automatically and activated (or use 'Recheck' below).")}</div>
+               <div class="text-[11px] text-slate-500 mt-1">${pick("터미널에서 로그인하면 자동으로 확인되어 활성화됩니다(또는 아래 '다시 확인').", "Log in via the terminal and it's checked automatically and activated (or use 'Recheck' below).")}</div>
              </div>
              <button id="ot-preflight-recheck" class="${btnGhost} mt-2"${_prechecking ? " disabled" : ""}>${_prechecking ? `⏳ ${pick("확인 중…", "Checking…")}` : `🔄 ${pick("다시 확인", "Recheck")}`}</button>
              <div id="ot-preflight-result" class="mt-2 text-[12px] space-y-0.5">${_precheckMsg}</div>`
@@ -497,7 +497,7 @@ function otStepperHtml(): string {
       <div class="flex items-center gap-2 mb-3">
         <span class="inline-flex w-6 justify-center">${renderAgentIcon(m.icon || agentIconName(m.id), m.icon_color, 18)}</span>
         <div class="text-[13px] font-semibold">${header}</div>
-        <span class="ml-auto text-[10px] text-slate-500 uppercase tracking-wide">${escape(m.id)} · ${escape(runtimeLabel(m.runtime))}</span>
+        <span class="ml-auto text-[11px] text-slate-500 uppercase tracking-wide">${escape(m.id)} · ${escape(runtimeLabel(m.runtime))}</span>
       </div>
       <div class="border-t border-surface-3 pt-2">${rows}</div>
       ${footer}
@@ -554,7 +554,7 @@ function acceptanceVerifyHtml(): string {
       return `<div class="flex items-start gap-2 py-0.5 text-[12px] ${cls}"><span class="shrink-0">${icon}</span><span class="flex-1 min-w-0">${escape(c.label)}${c.detail ? ` <span class="text-slate-500">— ${escape(c.detail)}</span>` : ""}</span></div>`;
     }).join("");
     if (!lines) return ""; // 이 섹션에 아직 드러난 줄 없으면 헤더도 숨김(진행감)
-    return `<div class="mt-2"><div class="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-0.5">${escape(sec.label)}</div>${lines}</div>`;
+    return `<div class="mt-2"><div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-0.5">${escape(sec.label)}</div>${lines}</div>`;
   }).join("");
   const gate = !allRevealed
     ? `<div class="text-[12px] text-slate-400 mt-2.5">⏳ ${pick("검증 중…", "Verifying…")} (${v.revealed}/${total})</div>`
@@ -644,13 +644,13 @@ function systemOpHtml(): string {
   const group = s?.capture_group_id ?? "";
   const configured = tokenSet && routerOn;
   const badge = configured
-    ? `<span class="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded border border-accent-green/30 text-accent-greenSoft bg-accent-green/10">${pick("설정됨", "Configured")}</span>`
-    : `<span class="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded border border-txt-amber/40 text-txt-amber bg-txt-amber/10">${pick("설정 필요", "Setup needed")}</span>`;
+    ? `<span class="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded border border-accent-green/30 text-accent-greenSoft bg-accent-green/10">${pick("설정됨", "Configured")}</span>`
+    : `<span class="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded border border-txt-amber/40 text-txt-amber bg-txt-amber/10">${pick("설정 필요", "Setup needed")}</span>`;
   // 기본 접힘 — 헤더(요약)만 보이고 클릭하면 폼 펼침.
   const header = `
     <button id="sysop-toggle" class="w-full flex items-center gap-3 text-left">
       <div class="flex-1 min-w-0">
-        <div class="text-base font-semibold text-slate-100">${pick("시스템 OP", "System OP")} <span class="text-[10px] uppercase tracking-[0.18em] text-txt-green ml-1.5">${pick("기본 협업 floor", "base collab floor")}</span></div>
+        <div class="text-base font-semibold text-slate-100">${pick("시스템 OP", "System OP")} <span class="text-[11px] uppercase tracking-[0.18em] text-txt-green ml-1.5">${pick("기본 협업 floor", "base collab floor")}</span></div>
         <div class="text-[12px] text-slate-500 mt-0.5 truncate">${configured ? pick("팀방에서 agent 가 응답합니다 (capture·라우터 연결됨).", "Agents respond in the team room (capture·router connected).") : pick("팀방 협업을 켜려면 설정하세요 · 1:1·handoff 는 설정 없이도 동작.", "Configure to enable team-room collab · 1:1·handoff works without setup.")}</div>
       </div>
       ${badge}
@@ -821,8 +821,8 @@ function render(): void {
           <div class="text-sm font-semibold text-slate-100">${escape(m.display_name)} <span class="text-slate-500 font-normal">· ${escape(m.id)}</span></div>
           <div class="text-[12px] text-slate-400 truncate">${escape(m.role)}</div>
         </div>
-        ${slackBadge ? `<span class="shrink-0 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded border ${slackBadge.cls}">Slack ${escape(slackBadge.label)}</span>` : ""}
-        <span class="shrink-0 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded border border-surface-3 text-slate-400">${escape(runtimeLabel(m.runtime))}</span>
+        ${slackBadge ? `<span class="shrink-0 text-[11px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded border ${slackBadge.cls}">Slack ${escape(slackBadge.label)}</span>` : ""}
+        <span class="shrink-0 text-[11px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded border border-surface-3 text-slate-400">${escape(runtimeLabel(m.runtime))}</span>
         <span class="shrink-0 text-slate-600 text-lg leading-none">›</span>
       </button>`;
   }).join("");

@@ -694,7 +694,7 @@ export function coreSnippets(): string {
     <div class="rounded-xl border border-surface-3 bg-surface-0 p-4">
       <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div class="text-sm font-semibold text-slate-100">${escape(title)}</div>
-        <span class="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-txt-green">${escape(tag)}</span>
+        <span class="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] text-txt-green">${escape(tag)}</span>
       </div>
       ${codeBlock(code)}
       <div class="mt-2 text-xs leading-6 text-slate-400">${what}</div>

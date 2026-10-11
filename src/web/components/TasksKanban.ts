@@ -309,10 +309,10 @@ export function renderTasksKanban(root: HTMLElement): void {
     const descBlock = expanded
       ? `<textarea data-desc="${t.id}" rows="6" placeholder="${escape(DESC_TEMPLATE)}"
            class="w-full mt-2 bg-surface-0 border border-surface-3 rounded px-2 py-1 text-[11px] text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-accent-green resize-y">${escape(t.description ?? "")}</textarea>
-         <div class="text-[9px] text-slate-600 mt-0.5">${pick("상세는 자동 저장 (포커스 벗어날 때)", "Details auto-save (on blur)")}</div>`
+         <div class="text-[11px] text-slate-600 mt-0.5">${pick("상세는 자동 저장 (포커스 벗어날 때)", "Details auto-save (on blur)")}</div>`
       : "";
     const staleBadge = isTaskStale(t)
-      ? `<span class="inline-flex items-center rounded-full bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">${pick("14일+ 미갱신", "Inactive 14+ days")}</span>`
+      ? `<span class="inline-flex items-center rounded-full bg-amber-400/10 px-2 py-0.5 text-[11px] font-semibold text-amber-300">${pick("14일+ 미갱신", "Inactive 14+ days")}</span>`
       : "";
     const holdAction = held
       ? `<button data-unhold="${t.id}" class="rounded-md border border-accent-green/30 px-2 py-1 text-[11px] font-semibold text-accent-green hover:bg-accent-green/10">${pick("보드로 복귀", "Return to board")}</button>`
@@ -320,7 +320,7 @@ export function renderTasksKanban(root: HTMLElement): void {
         ? ""
         : `<button data-hold="${t.id}" class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent text-slate-500 transition-colors hover:border-surface-2 hover:bg-surface-2 hover:text-slate-200" title="${pick("보류함으로 이동", "Move to Hold")}" aria-label="${pick("보류함으로 이동", "Move to Hold")}">${pauseIcon()}</button>`;
     const holdMeta = held
-      ? `<div class="mt-2 text-[10px] text-slate-500">${escape(t.hold_reason ?? pick("사유 없음", "No reason"))}${t.review_at ? ` · ${pick("재검토", "Review")} ${escape(t.review_at)}` : ""}</div>`
+      ? `<div class="mt-2 text-[11px] text-slate-500">${escape(t.hold_reason ?? pick("사유 없음", "No reason"))}${t.review_at ? ` · ${pick("재검토", "Review")} ${escape(t.review_at)}` : ""}</div>`
       : "";
     return `
       <div class="relative rounded-[14px] bg-surface-3 border border-surface-3 p-4 shadow-[0_1px_2px_rgba(0,0,0,.05)] hover:shadow-[0_4px_16px_rgba(0,0,0,.08)] transition-shadow group">

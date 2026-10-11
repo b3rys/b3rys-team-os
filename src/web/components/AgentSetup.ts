@@ -31,7 +31,7 @@ export function page(active: DocSection, agents: Agent[] = [], statuses: Map<str
   void statuses;
   const sharedHeader = `
     <header class="rounded-xl border border-surface-3 bg-gradient-to-br from-surface-1 to-surface-2 p-5">
-      <div class="mb-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-txt-green">B3RYS TEAM OPERATING SYSTEM</div>
+      <div class="mb-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-txt-green">B3RYS TEAM OPERATING SYSTEM</div>
       <h1 class="text-2xl font-semibold tracking-normal text-slate-50">${pick("b3os는 여러 AI 팀원이 한 팀처럼 일하게 하는 운영 대시보드입니다.", "b3os is the operating dashboard that lets several AI teammates work as one team.")}</h1>
       <p class="mt-3 max-w-4xl text-sm leading-6 text-slate-300">
         ${pick(

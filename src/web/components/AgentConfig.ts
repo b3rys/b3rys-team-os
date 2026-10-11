@@ -164,7 +164,7 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
           <div id="cfg-icon-picker" class="hidden mt-2 max-w-md">
             <div id="cfg-icon-choices" class="flex flex-wrap gap-1.5"></div>
             <div class="mt-2 pt-2 border-t border-surface-3/60">
-              <div class="text-[10px] text-slate-500 mb-1">${pick("색 (팀원 구분용 · 선택)", "Color (to distinguish members · optional)")}</div>
+              <div class="text-[11px] text-slate-500 mb-1">${pick("색 (팀원 구분용 · 선택)", "Color (to distinguish members · optional)")}</div>
               <div id="cfg-color-picker" class="flex flex-wrap gap-1.5 items-center"></div>
             </div>
           </div>
@@ -242,7 +242,7 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
         ${LIVE_ONLY_OPS ? `
         <details class="mt-8 pt-5 border-t border-txt-amber/30 group">
           <summary class="flex items-center gap-1.5 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden text-xs font-semibold uppercase tracking-widest text-txt-amber/80 hover:text-txt-amber">
-            <span class="text-txt-amber/70 inline-block text-[10px] leading-none transition-transform acc-chevron">▶</span>${pick("런타임 교체", "Swap runtime")}
+            <span class="text-txt-amber/70 inline-block text-[11px] leading-none transition-transform acc-chevron">▶</span>${pick("런타임 교체", "Swap runtime")}
           </summary>
           <div class="mt-3">
             <div class="text-[12px] text-slate-400 mb-2">
@@ -271,7 +271,7 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
 
         <details class="mt-8 pt-5 border-t border-surface-3 group">
           <summary class="flex items-center gap-1.5 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden text-xs font-semibold uppercase tracking-widest text-slate-500 hover:text-slate-300">
-            <span class="text-slate-500 inline-block text-[10px] leading-none transition-transform acc-chevron">▶</span>${pick("봇 토큰 변경", "Change bot token")}
+            <span class="text-slate-500 inline-block text-[11px] leading-none transition-transform acc-chevron">▶</span>${pick("봇 토큰 변경", "Change bot token")}
           </summary>
           <div class="mt-3">
             <div class="text-[12px] text-slate-400 mb-2">${pick("봇이 죽었거나 탈퇴한 계정이면 새 토큰으로 바꿉니다(다시 영입할 필요 없이). 서버가 확인하고 새 토큰으로 다시 연결합니다.", "If the bot is dead or a withdrawn account, swap in a new token (no need to re-recruit). The server checks it and reconnects with the new token.")}</div>
@@ -286,7 +286,7 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
 
         <details class="mt-8 pt-5 border-t border-status-blocked/30 group">
           <summary class="flex items-center gap-1.5 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden text-xs font-semibold uppercase tracking-widest text-status-blocked/80 hover:text-status-blocked">
-            <span class="text-status-blocked/70 inline-block text-[10px] leading-none transition-transform acc-chevron">▶</span>${pick("위험 구역 · 퇴사", "Danger zone · Offboard")}
+            <span class="text-status-blocked/70 inline-block text-[11px] leading-none transition-transform acc-chevron">▶</span>${pick("위험 구역 · 퇴사", "Danger zone · Offboard")}
           </summary>
           <div class="mt-3">
             <div class="text-[12px] text-slate-400 mb-2">${pick(`팀원 목록에서 제거합니다. 진행하려면 이름 <b class="text-slate-200">${escape(agent.display_name)}</b> 을(를) 정확히 입력하세요.`, `Removes them from the team. To proceed, type the exact name <b class="text-slate-200">${escape(agent.display_name)}</b>.`)}</div>

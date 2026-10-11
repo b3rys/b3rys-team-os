@@ -3,7 +3,9 @@
 @tailwind utilities;
 
 /* ─────────────────────────────────────────────────────────────
-   b3rys 디자인 토큰 (리디자인 Phase 1)
+   b3rys 디자인 토큰 — 색은 이 파일의 두 블록(다크 :root · 라이트 @media)에만 둔다.
+   b3rys 사이트들과 같은 값: 라이트 = 따뜻한 흰 바탕 + 중립 회색 글자 + 초록 강조 하나,
+   다크 = 깊은 녹색 바탕. 화면 코드에는 색 값을 직접 쓰지 않고 이 토큰을 쓴다.
    다크 = :root 기본값 · 라이트 = prefers-color-scheme 자동 오버라이드.
    tailwind 색(surface/slate/accent/status·border-surface-3)이 이 변수를 백킹.
    ───────────────────────────────────────────────────────────── */
@@ -12,30 +14,31 @@
   /* 표면 — 깊은 배경 → 카드 */
   /* ⚠ 투명도(/12 /40 등) 쓰는 색은 'R G B' 채널 포맷 — Tailwind는 var(hex)엔 opacity 수식어를 못 만든다.
      tailwind.config에서 rgb(var(--x) / <alpha-value>)로 감싼다. solid 전용(border/soft-text/on/btn/txt)은 hex 유지. */
-  --surface-0: 13 15 18;
-  --surface-1: 20 22 25;
-  --surface-2: 23 25 29;   /* body */
-  --surface-3: 33 36 42;   /* 카드 bg */
-  --border:    43 47 54;  /* 헤어라인(border-surface-3) — border-surface-3/50 등 opacity 쓰여 채널화 */
+  --surface-0: 22 35 27;   /* 선택 행 */
+  --surface-1: 18 29 23;   /* 사이드·보조 면 */
+  --surface-2: 15 24 19;   /* body */
+  --surface-3: 19 31 24;   /* 카드 bg */
+  --border:    36 51 42;
+  --border-strong: #3a4b3f;  /* 헤어라인(border-surface-3) — border-surface-3/50 등 opacity 쓰여 채널화 */
   /* 텍스트 위계 — 다크: 밝음 */
-  --slate-50:  246 247 249;
-  --slate-100: 240 242 244;   /* 본문 강조 */
-  --slate-200: 218 220 225;
-  --slate-300: 188 191 198;
-  --slate-400: 157 161 169;   /* 보조 */
-  --slate-500: 144 151 160;   /* 흐림(가장 많이 쓰임) */
-  --slate-600: 117 123 133;
-  --slate-700: 94 99 109;
-  --slate-900: 58 62 69;
-  --slate-950: 42 45 51;
-  /* 액센트 */
-  --accent:      61 220 132;
-  --accent-hover: 47 191 111;
-  --accent-soft: #16271d;        /* solid 전용(소프트 채움) */
-  --accent-soft-text: #6fd9a0;   /* solid 전용(소프트 텍스트/아이콘) */
-  --on-accent: #04140a;          /* solid 전용(버튼 위 글자) */
-  --accent-btn: #3ddc84;         /* solid 전용(버튼 배경) */
-  --accent-btn-hover: #2fbf6f;
+  --slate-50:  243 246 244;
+  --slate-100: 231 235 232;   /* 본문 강조 */
+  --slate-200: 212 218 214;
+  --slate-300: 190 198 193;
+  --slate-400: 166 175 170;   /* 보조 */
+  --slate-500: 150 159 154;   /* 흐림(가장 많이 쓰임) */
+  --slate-600: 133 142 137;
+  --slate-700: 106 115 110;
+  --slate-900: 58 70 63;
+  --slate-950: 40 52 45;
+  /* 액센트 — 초록 하나 */
+  --accent:      152 227 152;
+  --accent-hover: 125 207 125;
+  --accent-soft: #17301f;        /* solid 전용(소프트 채움) */
+  --accent-soft-text: #98e398;   /* solid 전용(소프트 텍스트/아이콘) */
+  --on-accent: #0f1813;          /* solid 전용(버튼 위 글자) */
+  --accent-btn: #98e398;         /* solid 전용(버튼 배경) */
+  --accent-btn-hover: #b4ecb4;
   /* 상태 */
   --status-running: 53 224 139;
   --status-idle:    227 169 60;
@@ -55,35 +58,36 @@
   /* 스크롤바(반투명, 얇고 연하게) */
   --scrollbar-thumb:       rgba(255,255,255,.15);
   --scrollbar-thumb-hover: rgba(255,255,255,.27);
-  --float-shadow: 0 1px 2px rgba(0,0,0,.22), 0 10px 28px rgba(0,0,0,.16);
+  --float-shadow: 0 0 0 1px rgba(0,0,0,.2), 0 8px 20px rgba(0,0,0,.28);   /* 떠 있는 메뉴·대화상자에만 */
 }
 
 @media (prefers-color-scheme: light) {
   :root {
-    --surface-0: 236 238 241;
-    --surface-1: 243 244 246;
-    --surface-2: 247 248 250;   /* body */
-    --surface-3: 255 255 255;   /* 카드 = 흰색 */
-    --border:    231 232 236;  /* 옅은 헤어라인 — border-surface-3/50 등 opacity 쓰여 채널화 */
+    --surface-0: 243 243 239;   /* 선택 행 #f3f3ef */
+    --surface-1: 248 248 245;   /* 사이드·보조 면 #f8f8f5 */
+    --surface-2: 253 253 251;   /* body #fdfdfb */
+    --surface-3: 255 255 255;   /* 카드 #ffffff */
+    --border:    235 235 232;   /* 선 #ebebe8 */
+    --border-strong: #d5d4d0;  /* 옅은 헤어라인 — border-surface-3/50 등 opacity 쓰여 채널화 */
     /* 텍스트 — 라이트: 어둡게(반전) */
-    --slate-50:  20 21 26;
-    --slate-100: 28 29 34;   /* 본문 강조 */
-    --slate-200: 51 53 60;
-    --slate-300: 74 77 85;
-    --slate-400: 80 83 91;    /* 보조 — 흰 배경서 또렷(GD: 상세설명 가독) */
-    --slate-500: 92 95 103;   /* 흐림(최다) ≥6:1 */
-    --slate-600: 109 112 121; /* ≥4.5:1 */
-    --slate-700: 130 133 142; /* very-muted */
-    --slate-900: 182 185 191; /* subtle */
-    --slate-950: 208 210 215;
-    --accent:      31 157 90;
-    --accent-hover: 23 128 73;
-    --accent-soft: #e6f5ec;        /* solid 전용 */
-    --accent-soft-text: #198a52;   /* solid 전용(흰 배경 위 가독) */
+    --slate-50:  20 27 24;
+    --slate-100: 28 36 32;    /* 글자 #1c2420 */
+    --slate-200: 45 54 49;
+    --slate-300: 66 75 70;
+    --slate-400: 89 98 93;    /* 보조 글자 #59625d */
+    --slate-500: 89 98 93;    /* 흐림(최다) — 읽어야 하는 메타라 보조 글자와 같은 대비 유지 */
+    --slate-600: 110 118 113;
+    --slate-700: 134 141 137; /* 흐린 글자 #868d89 */
+    --slate-900: 190 193 190;
+    --slate-950: 213 212 208;
+    --accent:      46 107 63;  /* 초록 #2e6b3f */
+    --accent-hover: 36 88 51;
+    --accent-soft: #eef4ef;        /* solid 전용 */
+    --accent-soft-text: #2e6b3f;   /* solid 전용(흰 배경 위 가독) */
     --on-accent: #ffffff;          /* solid 전용 */
-    --accent-btn: #178049;         /* solid 전용(깊은초록 버튼 → 흰글씨 4.98:1) */
-    --accent-btn-hover: #126c3d;
-    --status-running: 31 157 90;
+    --accent-btn: #2e6b3f;         /* solid 전용(흰 글씨 6.6:1) */
+    --accent-btn-hover: #245833;
+    --status-running: 46 107 63;
     --status-idle:    185 130 26;
     --status-blocked: 212 73 63;
     --status-offline: 138 143 153;
@@ -93,7 +97,7 @@
     /* 스크롤바(라이트: 어두운 반투명, 얇게 — 진한 다크바 제거) */
     --scrollbar-thumb:       rgba(20,22,28,.20);
     --scrollbar-thumb-hover: rgba(20,22,28,.32);
-    --float-shadow: 0 1px 2px rgba(20,22,28,.05), 0 8px 24px rgba(20,22,28,.08);
+    --float-shadow: 0 0 0 1px rgba(28,36,32,.04), 0 6px 16px rgba(28,36,32,.07);
   }
 }
 
@@ -112,7 +116,7 @@
     }
   }
   body {
-    font-family: "Inter", system-ui, -apple-system, sans-serif;
+    font-family: "Pretendard Variable", Pretendard, "Inter", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
   }
 }
 
@@ -120,39 +124,37 @@
   .status-dot {
     @apply inline-block w-2 h-2 rounded-full;
   }
+  /* 상태 점 — 색만으로 구분, 빛 번짐(glow) 없음 */
   .status-dot.running {
-    background: #22c55e;
-    box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+    background: rgb(var(--status-running));
     animation: pulse 2s ease-in-out infinite;
   }
   .status-dot.idle {
-    background: #fbbf24;
+    background: rgb(var(--status-idle));
   }
   .status-dot.idle.openclaw {
-    background: #94a3b8;
+    background: rgb(var(--status-offline));
   }
   .status-dot.blocked {
-    background: #94a3b8;
+    background: rgb(var(--status-offline));
   }
   .status-dot.offline {
-    background: #64748b;
+    background: rgb(var(--slate-700));
   }
   .health-dot {
     @apply inline-block w-2 h-2 rounded-full;
   }
   .health-dot.ok {
-    background: #22c55e;
-    box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+    background: rgb(var(--status-running));
   }
   .health-dot.warn {
-    background: #fbbf24;
+    background: rgb(var(--status-idle));
   }
   .health-dot.pending {
-    background: #94a3b8;
+    background: rgb(var(--status-offline));
   }
   .health-dot.danger {
-    background: #ef4444;
-    box-shadow: 0 0 6px rgba(239, 68, 68, 0.45);
+    background: rgb(var(--status-blocked));
   }
 }
 
@@ -186,8 +188,19 @@
 .float-panel {
   background: rgb(var(--surface-3));
   border: 1px solid rgb(var(--border));
-  border-radius: 16px;
-  box-shadow: var(--float-shadow);
+  border-radius: 12px;
+}
+/* 데스크톱: 세 칸을 띄우지 않고 맞붙여 선 하나로 나눈다(심플 — 그림자·둥근 모서리 없음).
+   양옆 칸은 보조 면, 가운데는 카드 면. */
+@media (min-width: 768px) {
+  .float-panel {
+    border: 0;
+    border-radius: 0;
+  }
+  #agent-sidebar-wrap > .float-panel,
+  #activity-panel-wrap > .float-panel {
+    background: rgb(var(--surface-1));
+  }
 }
 
 /* ----- Responsive layout: single source of truth via CSS media queries ----- */
@@ -273,11 +286,21 @@
     background: rgb(var(--accent) / 0.12);
   }
   .resize-handle {
-    flex: 0 0 6px;
+    flex: 0 0 1px;
     align-self: stretch;
     cursor: col-resize;
     position: relative;
-    background: transparent;
+    background: rgb(var(--border));
+  }
+  /* 보이는 선은 1px, 잡는 영역은 양옆 3px씩 넓힌다. */
+  .resize-handle::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -3px;
+    right: -3px;
+    z-index: 5;
   }
   /* 패널 사이 핸들 — 기본은 '선' 없이 투명(둥둥이 패널끼리 인접 느낌). 드래그 영역은 유지,
      hover/drag 시에만 초록 가이드. (GD 2026-06-21 R3: TEAM↔가운데 세로선 제거) */
@@ -286,8 +309,8 @@
     position: absolute;
     top: 0;
     bottom: 0;
-    left: 2px;
-    width: 2px;
+    left: -1px;
+    width: 3px;
     border-radius: 2px;
     background: transparent;
     transition: background 0.12s;
@@ -504,7 +527,8 @@
    28px를 더 주다가 네이티브 인셋과 '이중'이 되어 위 gap+바닥 잘림, 또는 인셋이 빠진 페이지에선
    nav가 신호등에 가려지는 fragility가 있었다. 클리어런스 책임을 네이티브 한 곳으로 모았다.
    data-b3rys-native는 셸이 WKUserScript로 주입하므로 일반 웹 대시보드엔 영향 0. */
-html[data-b3rys-native] .metric-bar {
+html[data-b3rys-native] .metric-bar,
+html[data-b3rys-native] .product-bar {
   padding-top: 0;
 }
 
@@ -524,7 +548,7 @@ html[data-b3rys-native] .metric-bar {
     overflow-x: auto;
     scrollbar-width: none;
     touch-action: pan-x; /* 바 배경 = 가로 스크롤만 (탭 모호성 제거) */
-    padding-top: calc(0.4rem + env(safe-area-inset-top));
+    padding-top: 0.4rem;
     padding-bottom: 0.4rem;
     padding-left: max(0.75rem, env(safe-area-inset-left));
     padding-right: max(0.75rem, env(safe-area-inset-right));
@@ -534,8 +558,16 @@ html[data-b3rys-native] .metric-bar {
     flex-wrap: nowrap;
     flex-shrink: 0;
   }
+  /* 맨 위 제품 줄이 노치/상태바 아래로 내려오는 책임을 진다(메뉴 줄은 그 아래). */
+  .product-bar {
+    height: auto;
+    min-height: 2.5rem;
+    padding-top: env(safe-area-inset-top);
+    padding-left: max(0.75rem, env(safe-area-inset-left));
+    padding-right: max(0.75rem, env(safe-area-inset-right));
+  }
   /* 오른쪽 상태 클러스터(CPU·RAM·Load·Ollama·alerts)는 모바일에서 숨긴다 — 항목 줄어 스크롤 짧고 슬림. */
-  .metric-bar > div:last-child {
+  .product-bar > .product-status {
     display: none;
   }
   /* ~40px touch targets + ★버튼 터치는 즉시 탭(touch-action:manipulation) — 바의 pan-x보다 우선해서
@@ -554,7 +586,7 @@ html[data-b3rys-native] .metric-bar {
     position: fixed;
     left: max(0.75rem, env(safe-area-inset-left));
     right: auto;
-    top: calc(0.4rem + env(safe-area-inset-top) + 2.6rem);
+    top: calc(env(safe-area-inset-top) + 2.5rem + 0.4rem + 2.6rem);
   }
   /* Bottom mobile tab bar clears the home indicator. */
   #mobile-tabs {
@@ -599,7 +631,7 @@ html[data-b3rys-native] .metric-bar {
   border-radius: 18px;
   padding: 36px 32px 30px;
   text-align: center;
-  box-shadow: 0 24px 60px rgb(0 0 0 / 0.30);
+  box-shadow: var(--float-shadow);
 }
 .onb-mark { color: rgb(var(--accent)); display: inline-flex; margin-bottom: 14px; }
 .onb-title { margin: 0 0 8px; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: rgb(var(--slate-100)); }
@@ -648,7 +680,7 @@ html[data-b3rys-native] .metric-bar {
   font-size: 12px;
   font-weight: 700;
   line-height: 1;
-  box-shadow: 0 4px 14px rgb(0 0 0 / 0.28);
+  box-shadow: none;
   cursor: pointer;
   transition: background .15s ease, transform .15s ease;
 }

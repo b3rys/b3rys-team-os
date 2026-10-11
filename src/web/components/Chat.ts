@@ -113,7 +113,7 @@ export function renderChat(root: HTMLElement): void {
       const meta = mine ? pick("나", "Me") : escape(nameOf(m.from_agent_id));
       return `
         <div class="flex flex-col ${align} gap-0.5">
-          <div class="text-[10px] text-slate-500 px-1">${meta} · ${hhmm(m.created_at)}</div>
+          <div class="text-[11px] text-slate-500 px-1">${meta} · ${hhmm(m.created_at)}</div>
           <div class="max-w-[78%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap [&_a]:underline [&_a]:underline-offset-2 ${bubble}">${mdInlineToHtml(m.body)}</div>
         </div>`;
     }).join("");

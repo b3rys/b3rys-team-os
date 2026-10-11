@@ -131,10 +131,10 @@ export function renderThreadView(root: HTMLElement): void {
         const name = fromAgent?.display_name ?? m.from_agent_id;
         const time = safeRelative(m.created_at);
         const hopBadge = m.hop_count >= 3
-          ? `<span class="text-[10px] text-status-idle ml-1">↻${m.hop_count}</span>`
+          ? `<span class="text-[11px] text-status-idle ml-1">↻${m.hop_count}</span>`
           : "";
         const expiredBadge = m.delivery_status === "expired"
-          ? `<span class="text-[10px] text-status-blocked ml-1">${pick("만료", "Expired")}</span>`
+          ? `<span class="text-[11px] text-status-blocked ml-1">${pick("만료", "Expired")}</span>`
           : "";
         return `
           <div class="flex gap-3 border-l-4 ${borderClass} pl-3 py-1">
@@ -142,8 +142,8 @@ export function renderThreadView(root: HTMLElement): void {
             <div class="flex-1 min-w-0">
               <div class="flex items-baseline gap-2 mb-0.5">
                 <span class="text-sm font-semibold">${escape(name)}</span>
-                <span class="text-[10px] text-slate-500">→ ${escape(m.to_agent_id)}</span>
-                <span class="text-[10px] text-slate-500">${time}</span>
+                <span class="text-[11px] text-slate-500">→ ${escape(m.to_agent_id)}</span>
+                <span class="text-[11px] text-slate-500">${time}</span>
                 ${hopBadge}${expiredBadge}
               </div>
               <div class="text-sm text-slate-200 whitespace-pre-wrap [&_a]:underline [&_a]:underline-offset-2">${mdInlineToHtml(m.body)}</div>

@@ -74,9 +74,9 @@ function alertItemHtml(a: AlertEvent): string {
     <div class="px-3 py-2 border-b border-surface-3 last:border-0 hover:bg-surface-3">
       <div class="flex items-baseline justify-between gap-2">
         <span class="text-xs font-semibold text-status-blocked">${escape(label)}</span>
-        <span class="text-[10px] text-slate-500 font-mono">${t}</span>
+        <span class="text-[11px] text-slate-500 font-mono">${t}</span>
       </div>
-      <div class="text-[10px] text-slate-400 mt-0.5">${escape(a.actor)}${target}</div>
+      <div class="text-[11px] text-slate-400 mt-0.5">${escape(a.actor)}${target}</div>
     </div>
   `;
 }
@@ -131,7 +131,7 @@ export function renderMetricsBar(root: HTMLElement): void {
             href="${MAC_APP_DOWNLOAD_URL}"
             target="_blank"
             rel="noopener noreferrer"
-            class="hidden md:inline-flex items-center gap-1 text-[10px] md:text-[11px] font-medium text-slate-500 hover:text-accent-greenSoft whitespace-nowrap"
+            class="hidden md:inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-accent-greenSoft whitespace-nowrap"
             title="${pick("b3os.app 내려받기 (GitHub Releases) — 현재 로컬 b3os를 Mac 앱으로 열기", "Get b3os.app (GitHub Releases) — open this local b3os in a Mac app")}">
             ${renderIcon("download", { size: 11, className: "shrink-0 opacity-70" })}<span>b3os.app</span>
          </a>`
@@ -139,10 +139,10 @@ export function renderMetricsBar(root: HTMLElement): void {
 
     const dropdown =
       alertsOpen
-        ? `<div id="alerts-dropdown" class="absolute right-3 top-12 md:top-14 z-50 w-80 max-h-96 overflow-y-auto bg-surface-2 border border-surface-3 rounded-md shadow-xl">
+        ? `<div id="alerts-dropdown" class="absolute right-3 top-10 z-50 w-80 max-h-96 overflow-y-auto bg-surface-2 border border-surface-3 rounded-md shadow-xl">
              <div class="px-3 py-2 border-b border-surface-3 flex items-center justify-between">
                <span class="text-xs font-semibold uppercase tracking-widest text-slate-400">${pick("최근 알림 (6h)", "Recent alerts (6h)")}</span>
-               <span class="text-[10px] text-slate-500">${alertCount}${pick("건", "")}</span>
+               <span class="text-[11px] text-slate-500">${alertCount}${pick("건", "")}</span>
              </div>
              ${alertCount === 0
                ? `<div class="px-3 py-6 text-xs text-slate-500 text-center">${pick("알림 없음 ✓", "No alerts ✓")}</div>`
@@ -155,12 +155,43 @@ export function renderMetricsBar(root: HTMLElement): void {
       <div class="relative">
         <!-- ★바에 overflow-hidden 을 걸면 안 된다★ — Tasks/Inbox/OS 드롭다운이 absolute 로 바 아래에
              펼쳐지므로 통째로 잘린다 (GD 2026-07-14 실사용 발견). 넘침 클립은 ★우측 지표 클러스터에서만★ 한다. -->
-        <div class="metric-bar h-12 md:h-14 px-3 md:px-4 flex items-center justify-between bg-surface-2 border-b border-surface-3 shrink-0 gap-2">
-          <div class="flex items-center gap-2 shrink-0">
-            <span class="relative inline-flex shrink-0 text-accent-greenSoft" title="${pick("b3os — b3rys 팀 운영 OS", "b3os — b3rys team ops OS")}">${renderIcon("b3rys", { size: 19 })}<span style="${dotStyle};box-shadow:0 0 0 2px rgb(var(--surface-2))" class="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full"></span></span>
-            <span data-team-brand title="${pick("홈 — Tasks 칸반으로", "Home — to the Tasks kanban")}" class="font-semibold text-sm md:text-base text-slate-100 cursor-pointer hover:text-accent-greenSoft transition-colors">${escape(getTeamName() || "b3rys")}</span>
-            <span class="hidden sm:inline-flex items-center rounded px-1 py-px text-[9px] md:text-[10px] font-semibold uppercase tracking-[0.12em]" style="color:rgb(var(--accent)/.9);background:rgb(var(--accent)/.10);box-shadow:inset 0 0 0 1px rgb(var(--accent)/.25)" title="${pick("b3rys 팀 운영 OS", "b3rys team ops OS")}">b3os</span>
-            <span class="text-slate-500 text-[10px] md:text-xs whitespace-nowrap">${agents.length} agents</span>
+        <!-- 1줄: 제품 탭 줄 — 로고·팀 이름·제품 탭(지금은 b3os 하나 + 다음 제품이 붙을 빈 자리)·오른쪽 상태 -->
+        <div class="product-bar h-10 px-3 md:px-4 flex items-center justify-between bg-surface-2 border-b border-surface-3 shrink-0 gap-3">
+          <div class="flex items-center gap-2 shrink-0 h-full">
+            <span class="relative inline-flex shrink-0 text-accent-greenSoft" title="${pick("b3os — b3rys 팀 운영 OS", "b3os — b3rys team ops OS")}">${renderIcon("b3rys", { size: 18 })}<span style="${dotStyle};box-shadow:0 0 0 2px rgb(var(--surface-2))" class="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full"></span></span>
+            <span data-team-brand title="${pick("홈 — Tasks 칸반으로", "Home — to the Tasks kanban")}" class="font-semibold text-sm md:text-[15px] text-slate-100 cursor-pointer hover:text-accent-greenSoft transition-colors">${escape(getTeamName() || "b3rys")}</span>
+            <nav class="product-tabs hidden sm:flex items-stretch h-full ml-3 gap-1" aria-label="${pick("제품", "Products")}">
+              <span data-product-tab="b3os" aria-current="page" class="inline-flex items-center px-2 text-[11px] md:text-xs font-semibold uppercase tracking-[0.12em] text-slate-100 border-b-2 border-current" title="${pick("b3rys 팀 운영 OS", "b3rys team ops OS")}">b3os</span>
+              <span data-product-slot aria-hidden="true" class="self-center w-12 h-5 rounded border border-dashed" style="border-color:var(--border-strong)"></span>
+            </nav>
+          </div>
+          <div class="product-status flex items-center justify-end gap-2 md:gap-3 text-[11px] min-w-0 shrink overflow-hidden">
+            <span class="hidden lg:inline-flex items-center gap-1 font-mono tabular-nums text-slate-500 whitespace-nowrap" title="${pick("실시간 CPU 사용률", "Live CPU usage")}">
+              <span class="h-1 w-1 rounded-full bg-accent-greenSoft/70"></span>
+              <span>CPU</span><span class="text-slate-300">${cpu}</span>
+            </span>
+            <span class="hidden xl:inline-flex items-center gap-1 font-mono tabular-nums text-slate-500 whitespace-nowrap" title="${pick("실시간 메모리 사용량", "Live memory usage")}">
+              <span class="h-1 w-1 rounded-full bg-accent-greenSoft/70"></span>
+              <span>MEM</span><span class="text-slate-300">${mem}</span>
+            </span>
+            <span class="hidden 2xl:inline text-slate-400 whitespace-nowrap">Load <span class="text-slate-200">${load}</span></span>
+            <span class="hidden lg:inline text-slate-400 whitespace-nowrap">Ollama <span class="text-slate-200">${ollama}</span></span>
+            ${maxGauge}
+            ${macAppDownload}
+            ${alertBadge}
+            <button id="global-monitoring-tab"
+              class="inline-flex h-7 w-7 items-center justify-center rounded-md ${store.getState().mainView === "monitoring" ? "bg-surface-0 text-slate-100" : "text-slate-400 hover:bg-surface-3 hover:text-slate-200"} shrink-0"
+              title="${pick("Monitoring — 봇 상태·DM저장·ingress health", "Monitoring — bot liveness·DM storage·ingress health")}"
+              aria-label="${pick("모니터링", "Monitoring")}">
+              ${renderIcon("monitor", { size: 15 })}
+            </button>
+            <button id="locale-flag" class="px-1.5 py-0.5 rounded-md text-[11px] md:text-[12px] font-semibold tracking-wide leading-none hover:bg-surface-3 shrink-0" title="${getLocale() === "en" ? "Language: EN → KO (click)" : "언어: KO → EN (클릭)"}"><span class="${getLocale() === "ko" ? "text-accent-greenSoft" : "text-slate-500"}">KO</span><span class="text-slate-600">/</span><span class="${getLocale() === "en" ? "text-accent-greenSoft" : "text-slate-500"}">EN</span></button>
+          </div>
+        </div>
+        <!-- 2줄: 지금 제품(b3os)의 메뉴 -->
+        <div class="metric-bar h-10 px-3 md:px-4 flex items-center bg-surface-2 border-b border-surface-3 shrink-0 gap-2">
+          <div class="flex items-center gap-1 shrink-0">
+            <span class="text-slate-500 text-[11px] md:text-xs whitespace-nowrap mr-1">${agents.length} agents</span>
             <div class="relative ml-1" data-navmenu="tasks">
               <button id="global-tasks-menu"
                 class="${navBtnClass(store.getState().mainView === "tasks" || store.getState().mainView === "jobs" || store.getState().mainView === "projects")}"
@@ -222,30 +253,7 @@ export function renderMetricsBar(root: HTMLElement): void {
               ${navIcon("settings", "Settings")}
             </button>
           </div>
-          <div class="flex items-center justify-end gap-2 md:gap-3 text-[10px] md:text-[11px] min-w-0 shrink overflow-hidden">
-            <span class="hidden lg:inline-flex items-center gap-1 font-mono tabular-nums text-slate-500 whitespace-nowrap" title="${pick("실시간 CPU 사용률", "Live CPU usage")}">
-              <span class="h-1 w-1 rounded-full bg-accent-greenSoft/70 animate-pulse"></span>
-              <span>CPU</span><span class="text-slate-300">${cpu}</span>
-            </span>
-            <span class="hidden xl:inline-flex items-center gap-1 font-mono tabular-nums text-slate-500 whitespace-nowrap" title="${pick("실시간 메모리 사용량", "Live memory usage")}">
-              <span class="h-1 w-1 rounded-full bg-accent-greenSoft/70 animate-pulse"></span>
-              <span>MEM</span><span class="text-slate-300">${mem}</span>
-            </span>
-            <span class="hidden 2xl:inline text-slate-400 whitespace-nowrap">Load <span class="text-slate-200">${load}</span></span>
-            <span class="hidden lg:inline text-slate-400 whitespace-nowrap">Ollama <span class="text-slate-200">${ollama}</span></span>
-            ${maxGauge}
-            ${macAppDownload}
-            ${alertBadge}
-            <button id="global-monitoring-tab"
-              class="inline-flex h-7 w-7 items-center justify-center rounded-md ${store.getState().mainView === "monitoring" ? "bg-surface-0 text-slate-100" : "text-slate-400 hover:bg-surface-3 hover:text-slate-200"} shrink-0"
-              title="${pick("Monitoring — 봇 상태·DM저장·ingress health", "Monitoring — bot liveness·DM storage·ingress health")}"
-              aria-label="${pick("모니터링", "Monitoring")}">
-              ${renderIcon("monitor", { size: 15 })}
-            </button>
-            <button id="locale-flag" class="px-1.5 py-0.5 rounded-md text-[11px] md:text-[12px] font-semibold tracking-wide leading-none hover:bg-surface-3 shrink-0" title="${getLocale() === "en" ? "Language: EN → KO (click)" : "언어: KO → EN (클릭)"}"><span class="${getLocale() === "ko" ? "text-accent-greenSoft" : "text-slate-500"}">KO</span><span class="text-slate-600">/</span><span class="${getLocale() === "en" ? "text-accent-greenSoft" : "text-slate-500"}">EN</span></button>
-          </div>
         </div>
-        <div class="pointer-events-none absolute inset-x-0 bottom-0 h-px" style="background:linear-gradient(90deg, rgb(var(--accent)/.6), rgb(var(--accent)/.15) 28%, transparent 55%)"></div>
         ${dropdown}
       </div>
     `;

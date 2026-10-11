@@ -224,16 +224,9 @@ function injectProseStyle(): void {
   document.head.appendChild(st);
 }
 
-// category별 배지 색 (미지정 타입은 기본)
-const BADGE_CLASS: Record<string, string> = {
-  md: "text-txt-green border-accent-green/30 bg-accent-green/10",
-  html: "text-txt-blue border-blue-400/25 bg-blue-400/10",
-  pdf: "text-txt-red border-red-400/25 bg-red-400/10",
-  pptx: "text-txt-amber border-amber-400/25 bg-amber-400/10",
-  audio: "text-txt-violet border-purple-400/25 bg-purple-400/10",
-};
-function badgeClass(t: string): string {
-  return BADGE_CLASS[t] || "text-slate-400 border-surface-3 bg-surface-0";
+// 형식 배지(HTML·MD·PDF…) — 심플 원칙: 색 채움 없이 같은 모양의 얇은 테두리 하나. 형식은 글자로 구분한다.
+function badgeClass(_t: string): string {
+  return "text-slate-500 border-surface-3 bg-transparent hover:text-slate-100";
 }
 
 async function fetchJson(path: string): Promise<unknown> {
@@ -434,7 +427,7 @@ export function tagPillsHtml(
   // ★두 번 다 마크업 시험은 통과했다.★ "자리를 차지하나" 는 잴 수 있어도 "실제로 누를 수 있나" 는
   // 마크업만 봐서는 못 잰다. hover 로만 나타나는 조작은 그 간극이 구조적으로 크므로 쓰지 않는다.
   return tags.map((t) =>
-    `<button class="${pillCls(selected.has(t.id))} reports-tag-pill" data-tag-id="${escape(t.id)}" data-tag-name="${escape(t.name)}">#${escape(t.name)}<span class="ml-1 text-txt-amber/60">${t.report_count ?? 0}</span></button>`
+    `<button class="${pillCls(selected.has(t.id))} reports-tag-pill" data-tag-id="${escape(t.id)}" data-tag-name="${escape(t.name)}">#${escape(t.name)}<span class="ml-1 text-slate-500">${t.report_count ?? 0}</span></button>`
   ).join("");
 }
 
@@ -692,7 +685,7 @@ function folderIcon(): string {
 
 function tagBadge(tag: ReportTag, interactive = false): string {
   const tagName = interactive ? "button" : "span";
-  return `<${tagName} class="${interactive ? "reports-tag-filter " : ""}inline-flex px-1.5 py-0.5 rounded text-[11px] font-medium border border-txt-amber/40 text-txt-amber" data-tag-id="${escape(tag.id)}">#${escape(tag.name)}</${tagName}>`;
+  return `<${tagName} class="${interactive ? "reports-tag-filter " : ""}inline-flex px-1.5 py-0.5 rounded text-[11px] font-medium border border-surface-3 text-slate-500" data-tag-id="${escape(tag.id)}">#${escape(tag.name)}</${tagName}>`;
 }
 function fileUrl(id: string, type: string): string {
   return `${REPORTS_BASE}/file/${encodeURIComponent(id)}/${encodeURIComponent(type)}`;
@@ -778,11 +771,11 @@ function starButton(r: Report, placement: "card" | "detail"): string {
   const active = isImportant(r);
   const title = active ? pick("중요 표시 해제", "Unmark important") : pick("중요 표시", "Mark important");
   const base = placement === "card"
-    ? "reports-star inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border bg-surface-1/70 transition-colors"
-    : "reports-star-detail inline-flex h-9 w-9 items-center justify-center rounded-lg border cursor-pointer transition-colors";
+    ? "reports-star inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent transition-colors"
+    : "reports-star-detail inline-flex h-9 w-9 items-center justify-center rounded-md border cursor-pointer transition-colors";
   const tone = active
-    ? "border-amber-400/40 text-txt-amber bg-amber-400/12 hover:bg-amber-400/18"
-    : "border-surface-3 text-slate-400/80 bg-surface-1/70 hover:border-amber-400/40 hover:bg-amber-400/10 hover:text-txt-amber";
+    ? `text-txt-amber hover:bg-surface-0 ${placement === "detail" ? "border-surface-3" : ""}`
+    : `text-slate-500 hover:bg-surface-0 hover:text-txt-amber ${placement === "detail" ? "border-surface-3" : ""}`;
   return `<button class="${base} ${tone}" data-id="${escape(r.id)}" data-important="${active ? "1" : "0"}" title="${title}" aria-label="${title}">${starIcon(active)}</button>`;
 }
 
@@ -825,16 +818,17 @@ function renderList(): void {
   const cats = Object.keys(counts).sort((a, b) => (a === DEFAULT_CAT ? -1 : b === DEFAULT_CAT ? 1 : a.localeCompare(b, "ko")));
 
   const pillCls = (active: boolean) =>
-    `reports-pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${active
-      ? "text-accent-green border-accent-green/35 bg-accent-green/10"
-      : "text-slate-300 border-surface-3 bg-surface-2 hover:text-slate-100"}`;
+    `reports-pill inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[12px] font-medium border transition-colors ${active
+      ? "text-slate-100 font-semibold border-slate-100/70 bg-transparent"
+      : "text-slate-400 border-surface-3 bg-transparent hover:text-slate-100"}`;
+  // 태그도 분류와 같은 모양의 알약 — 색으로 나누지 않고 # 로 구분한다.
   const tagPillCls = (active: boolean) =>
-    `reports-pill inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border transition-colors ${active
-      ? "text-amber-900 border-amber-500 bg-amber-200"
-      : "text-txt-amber border-amber-300 bg-transparent hover:border-amber-500"}`;
+    `reports-pill inline-flex items-center px-2 py-0.5 rounded-full text-[12px] font-medium border transition-colors ${active
+      ? "text-slate-100 font-semibold border-slate-100/70 bg-transparent"
+      : "text-slate-400 border-surface-3 bg-transparent hover:text-slate-100"}`;
   const pills =
     `<button class="${pillCls(_cat === ALL_FILTER)}" data-cat="${ALL_FILTER}">${pick("전체", "All")}<span class="ml-1.5 text-[11px] text-slate-500" data-reports-all-count>${allCount}</span></button>` +
-    `<button class="${pillCls(_cat === IMPORTANT_FILTER)}" data-cat="${IMPORTANT_FILTER}" title="${pick("중요 표시만 보기", "Show important only")}" aria-label="${pick("중요 표시만 보기", "Show important only")}"><span class="text-rose-300">${starIcon(true)}</span><span class="text-[11px] text-slate-500" data-reports-important-count>${_importantCount}</span></button>` +
+    `<button class="${pillCls(_cat === IMPORTANT_FILTER)}" data-cat="${IMPORTANT_FILTER}" title="${pick("중요 표시만 보기", "Show important only")}" aria-label="${pick("중요 표시만 보기", "Show important only")}"><span class="text-txt-amber">${starIcon(true)}</span><span class="text-[11px] text-slate-500" data-reports-important-count>${_importantCount}</span></button>` +
     cats.map((c) => `<button class="${pillCls(_cat === c)}" data-cat="${escape(c)}">${folderIcon()}${escape(c)}<span class="ml-1.5 text-[11px] text-slate-500" data-reports-category-count="${escape(c)}">${counts[c]}</span></button>`).join("");
   const tagPills = tagPillsHtml(_tags, _selectedTagIds, tagPillCls);
 
@@ -843,24 +837,23 @@ function renderList(): void {
   const cards = items.map((r) => {
     const badges = (r.forms || []).map((t) => {
       const ft = formType(t);
-      return `<button class="reports-form-badge px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide border ${badgeClass(ft)} hover:brightness-110" data-id="${escape(r.id)}" data-type="${escape(ft)}" title="${pick(`${escape(ft)} 형식으로 열기`, `Open as ${escape(ft)}`)}">${escape(ft)}</button>`;
+      return `<button class="reports-form-badge px-1.5 py-px rounded text-[11px] font-medium uppercase tracking-wide border ${badgeClass(ft)}" data-id="${escape(r.id)}" data-type="${escape(ft)}" title="${pick(`${escape(ft)} 형식으로 열기`, `Open as ${escape(ft)}`)}">${escape(ft)}</button>`;
     }).join("");
     const selected = _selectedReportIds.has(r.id);
     return `
-      <div class="reports-card group relative w-full text-left rounded-xl border ${selected ? "border-accent-green/50 bg-accent-green/[0.05]" : "border-surface-3 bg-surface-2"} px-4 py-3 hover:bg-surface-3/60 transition-colors overflow-hidden" data-id="${escape(r.id)}" data-category="${escape(catOf(r))}" role="button" tabindex="0">
-        <span class="absolute left-0 top-0 bottom-0 w-[3px] bg-accent-green opacity-0 group-hover:opacity-100 transition-opacity"></span>
+      <div class="reports-card group relative w-full text-left border-b border-surface-3 ${selected ? "bg-accent-green/[0.06]" : ""} px-2 py-3.5 hover:bg-surface-0/70 transition-colors overflow-hidden" data-id="${escape(r.id)}" data-category="${escape(catOf(r))}" role="button" tabindex="0">
         <div class="flex items-start gap-2">
-          ${_selectionMode ? `<button class="reports-select mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 ${selected ? "border-accent-green bg-accent-green/20 text-accent-green" : "border-surface-3 text-transparent"}" data-id="${escape(r.id)}" aria-label="${pick("보고서 선택", "Select report")}" aria-pressed="${selected}"><span class="text-[10px] leading-none">✓</span></button>` : ""}
+          ${_selectionMode ? `<button class="reports-select mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 ${selected ? "border-accent-green bg-accent-green/20 text-accent-green" : "border-surface-3 text-transparent"}" data-id="${escape(r.id)}" aria-label="${pick("보고서 선택", "Select report")}" aria-pressed="${selected}"><span class="text-[11px] leading-none">✓</span></button>` : ""}
           <div class="min-w-0 flex-1 text-[15px] font-semibold text-slate-100 leading-snug">${escape(r.title)}</div>
           <div class="flex shrink-0 items-center gap-1">
             ${starButton(r, "card")}
-            <button class="reports-delete inline-flex h-7 w-7 items-center justify-center rounded-lg border border-surface-3 bg-surface-1/70 text-slate-500 transition-colors hover:border-red-400/40 hover:bg-red-400/10 hover:text-txt-red" data-id="${escape(r.id)}" data-title="${escape(r.title)}" title="${pick("보고서 삭제", "Delete report")}" aria-label="${pick("보고서 삭제", "Delete report")}">
+            <button class="reports-delete inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-surface-0 hover:text-txt-red" data-id="${escape(r.id)}" data-title="${escape(r.title)}" title="${pick("보고서 삭제", "Delete report")}" aria-label="${pick("보고서 삭제", "Delete report")}">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>
             </button>
           </div>
         </div>
         ${r.summary ? `<div class="text-[13px] text-slate-400 leading-relaxed mt-1.5 line-clamp-1">${escape(r.summary)}</div>` : ""}
-        <div class="flex items-center gap-2 flex-wrap text-xs text-slate-500 mt-1"><span class="text-accent-greenSoft font-medium">${escape(r.author || "—")}</span><span>·</span><span>${fmtDate(r.created_at)}</span>${(r.tags ?? []).map((t) => tagBadge(t, true)).join("")}${badges}</div>
+        <div class="flex items-center gap-2 flex-wrap text-xs text-slate-500 mt-1"><span class="text-accent-greenSoft font-medium">${escape(r.author || "—")}</span><span>·</span><span class="tabular-nums">${fmtDate(r.created_at)}</span>${(r.tags ?? []).map((t) => tagBadge(t, true)).join("")}${badges}</div>
       </div>`;
   }).join("");
 
@@ -892,23 +885,23 @@ function renderList(): void {
         <div class="flex items-center gap-2 flex-wrap mb-3">
           <span class="w-7 shrink-0 text-[11px] font-semibold text-slate-500">${pick("분류", "Category")}</span>
           <div class="flex flex-1 items-center gap-1.5 flex-wrap">${pills}</div>
-          <button id="reports-manage-categories" class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-slate-500 border border-dashed border-surface-3 hover:text-slate-300">✎ ${pick("편집", "Edit")}</button>
+          <button id="reports-manage-categories" class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-slate-500 hover:text-slate-300">✎ ${pick("편집", "Edit")}</button>
         </div>
         <div class="flex items-center gap-2 flex-wrap mb-3">
           <span class="w-7 shrink-0 text-[11px] font-semibold text-slate-500">${pick("태그", "Tags")}</span>
           <div class="flex flex-1 items-center gap-1.5 flex-wrap">${tagPills || `<span class="text-xs text-slate-600">${pick("등록된 태그 없음", "No tags yet")}</span>`}</div>
-          <button id="reports-manage-tags" class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-slate-500 border border-dashed border-surface-3 hover:text-slate-300">✎ ${pick("편집", "Edit")}</button>
+          <button id="reports-manage-tags" class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-slate-500 hover:text-slate-300">✎ ${pick("편집", "Edit")}</button>
         </div>
         <div class="flex gap-2 mb-2">
           <div class="relative flex-1"><svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-            <input id="reports-q" type="search" placeholder="${pick("제목·작성자·요약 검색", "Search title · author · summary")}" value="${escape(_query)}" class="w-full bg-surface-2 border border-surface-3 rounded-xl text-sm text-slate-200 pl-9 pr-3 py-2.5 outline-none focus:border-accent-green/40 placeholder:text-slate-600" />
+            <input id="reports-q" type="search" placeholder="${pick("제목·작성자·요약 검색", "Search title · author · summary")}" value="${escape(_query)}" class="w-full bg-surface-3 border rounded-lg text-sm text-slate-200 pl-9 pr-3 py-2.5 outline-none focus:border-accent-green/40 placeholder:text-slate-600" style="border-color:var(--border-strong)" />
           </div>
-          <button id="reports-selection-mode" class="shrink-0 px-3 py-2 rounded-lg text-[12px] font-semibold border border-surface-3 bg-surface-2 text-slate-400">${_selectionMode ? pick("선택 해제", "Deselect") : pick("선택", "Select")}</button>
+          <button id="reports-selection-mode" class="shrink-0 px-3 py-2 rounded-lg text-[12px] font-semibold border bg-surface-3 text-slate-300" style="border-color:var(--border-strong)">${_selectionMode ? pick("선택 해제", "Deselect") : pick("선택", "Select")}</button>
         </div>
         ${selectionBar}
         ${loadingBar}
         <div class="${_reloading ? "opacity-50 transition-opacity" : "transition-opacity"}">
-        ${_loadError ? error : items.length ? `<div class="flex flex-col gap-2.5">${cards}</div>${loadMore}` : empty}
+        ${_loadError ? error : items.length ? `<div class="flex flex-col border-t border-surface-3">${cards}</div>${loadMore}` : empty}
         </div>
       </div>
     </div>`;
@@ -1118,7 +1111,7 @@ async function renderDetail(): Promise<void> {
         </div>
 
         <div class="pt-4">
-          <span class="inline-block mb-2 px-2 py-0.5 rounded text-[10px] font-semibold border text-txt-green border-accent-green/30 bg-accent-green/10">${escape(catOf(meta))}</span>
+          <span class="inline-block mb-2 px-2 py-0.5 rounded text-[11px] font-semibold border text-txt-green border-accent-green/30 bg-accent-green/10">${escape(catOf(meta))}</span>
           <div class="flex items-center gap-2 flex-wrap text-[13px] text-slate-500"><span class="text-accent-greenSoft font-medium">${escape(author)}</span><span>·</span><span>${fmtDate(meta.created_at)}</span></div>
           ${meta.summary ? `<div class="text-sm text-slate-400 leading-relaxed mt-3 pl-3 border-l-2 border-surface-3">${escape(meta.summary)}</div>` : ""}
           <div id="reports-detail-tags" class="flex items-center gap-2 flex-wrap mt-3">

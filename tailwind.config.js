@@ -73,7 +73,16 @@ export default {
       },
       fontFamily: {
         mono: ["JetBrains Mono", "Menlo", "Courier New", "monospace"],
-        sans: ["-apple-system", "BlinkMacSystemFont", "SF Pro Text", "Inter", "system-ui", "sans-serif"],
+        sans: ["Pretendard Variable", "Pretendard", "-apple-system", "BlinkMacSystemFont", "Apple SD Gothic Neo", "Inter", "system-ui", "sans-serif"],
+      },
+      // 심플 원칙: 면에는 그림자를 두지 않고(선으로 구분), 떠 있는 메뉴·대화상자에만 얕은 그림자 하나.
+      boxShadow: {
+        sm: "none",
+        DEFAULT: "none",
+        md: "none",
+        lg: "var(--float-shadow)",
+        xl: "var(--float-shadow)",
+        "2xl": "var(--float-shadow)",
       },
       // var(rgb채널) 색에는 '스케일에 있는' opacity만 유틸이 생성된다(비표준 /12·/14·/35 등은 누락).
       // 디자인서 쓰는 비표준 alpha 값을 스케일에 명시 추가 → bg-accent-green/12, bg-status-running/14 등 생성 보장.

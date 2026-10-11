@@ -296,7 +296,7 @@ function cardStaleBadge(p: ProposalRow): string {
   if (!ACTIVE_STATUSES.includes(p.status)) return "";
   const hrs = hoursSince(p.updated_at);
   if (hrs <= (STALE_HOURS[p.status] ?? 12)) return "";
-  return `<span class="rounded border border-status-idle/40 bg-status-idle/14 px-1.5 py-0.5 text-[10px] font-semibold text-txt-amber">${pick(`정체 ${escape(elapsedLabel(hrs))}`, `Stalled ${escape(elapsedLabel(hrs))}`)}</span>`;
+  return `<span class="rounded border border-status-idle/40 bg-status-idle/14 px-1.5 py-0.5 text-[11px] font-semibold text-txt-amber">${pick(`정체 ${escape(elapsedLabel(hrs))}`, `Stalled ${escape(elapsedLabel(hrs))}`)}</span>`;
 }
 
 function proposalCard(p: ProposalRow, selectedId: string | null): string {

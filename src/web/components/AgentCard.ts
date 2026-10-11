@@ -235,7 +235,7 @@ function cardHtml(a: Agent, st: Status | null, stats: AgentStats | null, selecte
   const ctxBar =
     typeof ctx === "number"
       ? `<div class="mt-1.5 agent-card-ctxbar" title="${pick(`이 agent 세션의 문맥창 사용률입니다. Claude 계정 사용량과는 별도입니다. ${ctx}%`, `This agent session's context-window usage. Separate from your Claude account usage. ${ctx}%`)}">
-           <div class="flex items-center gap-1.5 text-[10px] text-slate-500">
+           <div class="flex items-center gap-1.5 text-[11px] text-slate-500">
              <span>${pick("문맥", "Context")}</span>
              <div class="flex-1 h-1 bg-surface-0 rounded overflow-hidden">
                <div style="width:${ctx}%;background:${ctxBarColor(ctx)}" class="h-full"></div>
@@ -258,7 +258,7 @@ function cardHtml(a: Agent, st: Status | null, stats: AgentStats | null, selecte
       <span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${stateColor(state)}" title="${stateMeta.title}"></span>
       <span class="text-slate-400 truncate">${last}</span>
       ${typeof ctx === "number" ? `<span class="font-mono text-accent-greenSoft shrink-0">ctx ${ctx}%</span>` : ""}
-      ${pending > 0 ? `<span class="px-1.5 rounded text-[10px] font-medium shrink-0" style="background:#f59e0b22;color:#f59e0b">${pick(`대기 ${pending}`, `Pending ${pending}`)}</span>` : ""}
+      ${pending > 0 ? `<span class="px-1.5 rounded text-[11px] font-medium shrink-0" style="background:#f59e0b22;color:#f59e0b">${pick(`대기 ${pending}`, `Pending ${pending}`)}</span>` : ""}
     </div>`;
   return `
     <button data-agent-id="${a.id}"
@@ -270,13 +270,13 @@ function cardHtml(a: Agent, st: Status | null, stats: AgentStats | null, selecte
           <div class="flex items-center justify-between gap-2">
             <div class="flex items-center gap-1.5 min-w-0">
               <span class="text-sm font-semibold ${off ? "text-slate-400" : "text-slate-100"} truncate">${a.display_name}</span>
-              ${off ? `<span class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-status-blocked text-white">🔴 ${pick("중지", "Stopped")}</span>` : ""}
-              <span class="shrink-0 text-[10px] ${off ? "text-status-blocked" : "text-slate-500"} uppercase tracking-wider" title="${a.runtime} · ${healthDisplay.title}">${runtimeBadge} · ${healthDisplay.label}</span>
+              ${off ? `<span class="shrink-0 text-[11px] font-bold px-1.5 py-0.5 rounded bg-status-blocked text-white">🔴 ${pick("중지", "Stopped")}</span>` : ""}
+              <span class="shrink-0 text-[11px] ${off ? "text-status-blocked" : "text-slate-500"} uppercase tracking-wider" title="${a.runtime} · ${healthDisplay.title}">${runtimeBadge} · ${healthDisplay.label}</span>
             </div>
             <span class="health-dot ${healthDisplay.level}" title="${healthDisplay.title}" ${off ? 'style="background:#ef4444"' : ""}></span>
           </div>
           <div class="text-xs text-slate-400 truncate mt-0.5 agent-card-role">${a.role}</div>
-          <div class="mt-1 text-[10px] text-slate-500 agent-card-lastline" title="${stateMeta.title}">${pick("최근 활동 시간", "Recent activity")} · ${last}</div>
+          <div class="mt-1 text-[11px] text-slate-500 agent-card-lastline" title="${stateMeta.title}">${pick("최근 활동 시간", "Recent activity")} · ${last}</div>
           ${ctxBar}
           ${statsStrip}
           ${mobileMeta}
@@ -349,7 +349,7 @@ function renderStatsStrip(s: AgentStats): string {
       ? pick(`평균 응답 (24h): ${latency} · 샘플 ${s.reply_samples_24h}`, `Avg reply (24h): ${latency} · ${s.reply_samples_24h} samples`)
       : pick("응답 샘플 없음 (24h)", "No reply samples (24h)");
   return `
-    <div class="mt-1.5 flex items-center gap-2 text-[10px] text-slate-500 font-mono agent-card-stats" title="${pick("24h ↓in ↑out · 7d ↓in ↑out · 평균 응답", "24h ↓in ↑out · 7d ↓in ↑out · avg reply")}">
+    <div class="mt-1.5 flex items-center gap-2 text-[11px] text-slate-500 font-mono agent-card-stats" title="${pick("24h ↓in ↑out · 7d ↓in ↑out · 평균 응답", "24h ↓in ↑out · 7d ↓in ↑out · avg reply")}">
       <span title="${pick(`24h: 받음 ${s.in_24h} / 보냄 ${s.out_24h}`, `24h: received ${s.in_24h} / sent ${s.out_24h}`)}">24h <span class="text-status-info">↓${s.in_24h}</span> <span class="text-accent-greenSoft">↑${s.out_24h}</span></span>
       <span class="text-slate-700">·</span>
       <span title="${pick(`7d: 받음 ${s.in_7d} / 보냄 ${s.out_7d}`, `7d: received ${s.in_7d} / sent ${s.out_7d}`)}">7d <span class="text-status-info">↓${s.in_7d}</span> <span class="text-accent-greenSoft">↑${s.out_7d}</span></span>

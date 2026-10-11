@@ -10,7 +10,7 @@ const TABS: Array<{ id: MobilePane; label: string; icon: string }> = [
 export function renderMobileTabBar(root: HTMLElement): void {
   const update = () => {
     const { mobilePane, threads } = store.getState();
-    const threadCount = threads.length > 0 ? `<span class="ml-1 text-[10px] text-slate-400">${threads.length}</span>` : "";
+    const threadCount = threads.length > 0 ? `<span class="ml-1 text-[11px] text-slate-400">${threads.length}</span>` : "";
     root.innerHTML = `
       <div class="h-14 border-t border-surface-3 bg-surface-1 flex shrink-0">
         ${TABS.map((t) => {
@@ -20,7 +20,7 @@ export function renderMobileTabBar(root: HTMLElement): void {
             <button data-pane="${t.id}"
               class="flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors ${active ? "text-accent-green border-t-2 border-accent-green -mt-0.5" : "text-slate-400 hover:text-slate-200"}">
               <span>${renderIcon(t.icon, { size: 20 })}</span>
-              <span class="text-[10px] font-semibold">${t.label}${badge}</span>
+              <span class="text-[11px] font-semibold">${t.label}${badge}</span>
             </button>
           `;
         }).join("")}

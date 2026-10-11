@@ -36,7 +36,7 @@ function row(e: AuditEvent): string {
   const reason = reasonLabel(d.close_reason);
   const time = escape(formatKST(e.at, { seconds: true }) + " KST");
   const flag = e.suspicious_close
-    ? `<span class="px-1.5 py-0.5 rounded text-[10.5px] font-semibold bg-status-idle/15 text-status-idle border border-status-idle/40">${pick("⚠ 의심 close", "⚠ Suspicious close")}</span>`
+    ? `<span class="px-1.5 py-0.5 rounded text-[11px] font-semibold bg-status-idle/15 text-status-idle border border-status-idle/40">${pick("⚠ 의심 close", "⚠ Suspicious close")}</span>`
     : "";
   // 의심 close = 따뜻한 amber 틴트 + 좌측 3px 바(프로토 03_audit). 정상 행은 좌측바 자리만 투명 확보(정렬).
   const rowBg = e.suspicious_close

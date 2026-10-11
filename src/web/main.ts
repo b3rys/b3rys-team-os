@@ -75,7 +75,7 @@ function bootstrap() {
   app.innerHTML = `
     <div id="metrics-bar"></div>
     <div id="health-banner"></div>
-    <div id="panes" class="relative flex-1 flex min-h-0 overflow-hidden bg-surface-2 gap-1 px-3 pb-3 pt-1.5">
+    <div id="panes" class="relative flex-1 flex min-h-0 overflow-hidden bg-surface-2 gap-1 px-3 pb-3 pt-1.5 md:gap-0 md:p-0">
       <button id="sidebar-panel-toggle" class="panel-toggle sidebar-panel-toggle" type="button" title="팀원 패널 접기/펼치기" aria-label="팀원 패널 접기/펼치기"></button>
       <button id="thread-panel-toggle" class="panel-toggle thread-panel-toggle" type="button" title="THREADS 패널 접기/펼치기" aria-label="THREADS 패널 접기/펼치기"></button>
       <div id="agent-sidebar-wrap" class="flex md:contents"></div>
