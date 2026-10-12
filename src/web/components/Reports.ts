@@ -1316,7 +1316,7 @@ async function renderDetail(): Promise<void> {
       };
     }
     if (type === "html") {
-      viewer.innerHTML = `<iframe class="w-full border-0 block bg-surface-1 min-h-[70vh]" sandbox="allow-same-origin allow-popups" src="${fileUrl(id, type)}"></iframe>`;
+      viewer.innerHTML = `<iframe class="w-full border-0 block bg-surface-1" style="min-height:calc(70vh / var(--dashboard-scale, 1))" sandbox="allow-same-origin allow-popups" src="${fileUrl(id, type)}"></iframe>`;
       const frame = viewer.querySelector<HTMLIFrameElement>("iframe");
       if (frame) toneDownHtmlFrame(frame);
       return;

@@ -1,3 +1,4 @@
+import { layoutPixels } from "../lib/dashboardScale";
 import { store, type Agent, type Status, type AgentStats, type AgentHealth } from "../store";
 import { loadInitialLog } from "../ws";
 import { formatDistanceToNow } from "date-fns";
@@ -62,7 +63,7 @@ export function renderAgentSidebar(root: HTMLElement): void {
         const from = before.get(card);
         if (!from) continue;
         const to = card.getBoundingClientRect();
-        const dy = from.top - to.top;
+        const dy = layoutPixels(from.top - to.top);
         if (Math.abs(dy) < 1) continue;
         card.animate?.(
           [
