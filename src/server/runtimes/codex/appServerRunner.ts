@@ -142,12 +142,12 @@ export async function runViaAppServer(
     registerActiveTurn(opts.agentId, client);
     const r = await client.runTurn(opts.prompt, {  // 그림은 아래 4번째 인자로 간다
       // ★지금 무엇을 하는 중인지 보이게 한다.★ 창이 없는 런타임이라 이벤트로 직접 쓴다.
-      onActivity: (line, itemId) => {
+      onActivity: (line, itemId, item) => {
         // 두 수신처가 서로를 막지 않는다 — 대시보드 쓰기가 실패해도 채널 표시는 살고, 반대도 같다.
         if (db) {
           try { setActivityLine(db, opts.agentId, line); } catch { /* 표시가 턴을 막지 않는다 */ }
         }
-        try { opts.onActivity?.(line, itemId); } catch { /* 채널 표시가 턴을 막지 않는다 */ }
+        try { opts.onActivity?.(line, itemId, item); } catch { /* 채널 표시가 턴을 막지 않는다 */ }
       },
       onDelta: (text) => {
         try { opts.onDelta?.(text); } catch { /* Presentation does not interrupt the turn. */ }

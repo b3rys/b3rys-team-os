@@ -67,7 +67,7 @@ export async function runClaudeCogsTurn(opts: CodexTurnOptions): Promise<CodexTu
           if(e.delta?.type === "thinking_delta") opts.onStatus?.("생각 중");
           if(e.delta?.type === "input_json_delta" && toolName === "WebSearch") {
             toolInput+=e.delta.partial_json ?? "";
-            try{const query=JSON.parse(toolInput).query;if(typeof query === "string") opts.onActivity?.(`웹 검색: ${query}`);}catch{/* incomplete JSON */}
+            try{const query=JSON.parse(toolInput).query;if(typeof query === "string") opts.onActivity?.(`웹 검색: ${query}`, undefined, {type:"webSearch",query});}catch{/* incomplete JSON */}
           }
         }
         if(event.type === "assistant" && !sawPartial) {

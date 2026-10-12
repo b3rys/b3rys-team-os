@@ -45,7 +45,7 @@ export interface RunTurnHandlers {
   onApproval?: (req: ApprovalRequest) => Promise<ReviewDecision> | ReviewDecision;
   /** ★지금 무엇을 하는 중인가★ — 사람이 진행 상황을 보게 한다(tmux 팀원의 화면 긁기와 같은 자리). */
   /** itemId 를 함께 준다 — 같은 항목이 나중에 구체화되면 그 줄을 ★교체★ 할 수 있다. */
-  onActivity?: (line: string, itemId?: string) => void;
+  onActivity?: (line: string, itemId?: string, item?: unknown) => void;
   /** ★지금 어느 단계인가★ — 맨 윗줄에서 교체된다. 쌓이지 않는다. */
   onStatus?: (line: string) => void;
   /** 임의 서버 알림 관찰(로깅/디버그). */
@@ -627,7 +627,7 @@ export class CodexAppServerClient {
         const status = statusLineOf(params?.item);
         if (status) { this.activeHandlers?.onStatus?.(status); break; }
         const line = activityLineOf(params?.item);
-        if (line) this.activeHandlers?.onActivity?.(line, itemIdOf(params?.item));
+        if (line) this.activeHandlers?.onActivity?.(line, itemIdOf(params?.item), params?.item);
         break;
       }
       case "item/completed": {
@@ -639,7 +639,7 @@ export class CodexAppServerClient {
           if (status) this.activeHandlers?.onStatus?.(status);
           else {
             const line = activityLineOf(params?.item);
-            if (line) this.activeHandlers?.onActivity?.(line, itemIdOf(params?.item));
+            if (line) this.activeHandlers?.onActivity?.(line, itemIdOf(params?.item), params?.item);
           }
         }
         if (params?.item?.type === "agentMessage" && typeof params.item.text === "string") {
