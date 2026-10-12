@@ -336,7 +336,7 @@ export function projectEntry(p: ProjectSummary): { track: string | null; key: Pr
 function renderList(): void {
   if (!_root) return;
   const rows = _projects.map(p => `<article tabindex="-1" class="projects-row projects-card" data-id="${escape(p.id)}">
-    <button type="button" class="projects-card-head" data-open-project="${escape(p.id)}"${projectEntry(p) ? "" : ` disabled title="${pick("읽을 수 있는 첫 트랙 문서가 없습니다", "No available first-track document")}"`}><span class="projects-card-name">${escape(p.name)}</span><span class="projects-card-intro">${escape(p.intro)}</span></button>
+    <h1 class="projects-card-heading"><button type="button" class="projects-card-head" data-open-project="${escape(p.id)}"${projectEntry(p) ? "" : ` disabled title="${pick("읽을 수 있는 첫 트랙 문서가 없습니다", "No available first-track document")}"`}><span class="projects-card-name">${escape(p.name)}</span><span class="projects-card-intro">${escape(p.intro)}</span></button></h1>
     ${(p.tracks ?? [p]).map(t => trackHtml(p,t)).join("")}</article>`).join("");
   _root.innerHTML = `<div data-projects-list-scroll class="h-full overflow-y-auto overflow-x-hidden"><div class="${browseListClass}">
     <div class="projects-list-head"><span class="text-[15px] font-semibold text-slate-100">${pick("Projects · 프로젝트", "Projects")}</span><span class="text-[12px] text-slate-500">${_projects.length}</span>
