@@ -86,3 +86,59 @@ describe("GitHub project snapshots", () => {
     for (const input of [[project, project], [{ ...project, repo: "https://evil.test" }], [{ ...project, docs: { ...project.docs, todo: "../private.md" } }], [{ ...project, excludeSections: "킵" }], [{ ...project, excludeSections: [""] }]]) expect(() => validateProjects(input)).toThrow("invalid_project_registry");
   });
 });
+
+describe("registry and shared document cache regression", () => {
+  test("legacy registration requires a nonempty kanbanPrefix; tracks may omit it", () => {
+    const { kanbanPrefix: _, ...withoutPrefix } = project;
+    for (const candidate of [withoutPrefix, { ...project, kanbanPrefix: "" }, { ...project, kanbanPrefix: null }, { ...project, kanbanPrefix: 42 }]) {
+      expect(() => validateProjects([candidate])).toThrow("invalid_project_registry");
+    }
+    expect(validateProjects([project])[0]!.kanbanPrefix).toBe("[sample]");
+    expect(validateProjects([{ id: "sample", name: "Sample", tracks: [{ name: "Mobile", repo: "your-org/sample-mobile", docs: project.docs }] }])[0]!.tracks).toHaveLength(1);
+  });
+  test("same repo/SHA/path cache rebuilds links for each project and track, including restart/stale", async () => {
+    const cacheDir = mkdtempSync(join(tmpdir(), "projects-link-cache-")); dirs.push(cacheDir);
+    const requests: string[] = [];
+    let offline = false;
+    const fetcher = (async input => {
+      const url = String(input); requests.push(url);
+      if (offline) return new Response("", { status: 503 });
+      if (url.includes("/branches/")) return Response.json({ commit: { sha: "a".repeat(40) } });
+      return new Response("# Shared source\n\n[Design](DESIGN.md)");
+    }) as typeof fetch;
+    const registrations = [
+      { ...project, id: "first", repo: "your-org/shared" },
+      { ...project, id: "second", repo: "your-org/shared" },
+      { ...project, id: "second", repo: "your-org/shared", trackId: "desktop" },
+      { ...project, id: "second", repo: "your-org/shared", trackId: "mobile" },
+    ];
+    const source = new GitHubDocs({ cacheDir, fetch: fetcher, useToken: false });
+    for (const p of registrations) {
+      const doc = (await source.get(p)).docs.readme!;
+      expect(doc.md).toBe("# Shared source\n\n[Design](DESIGN.md)");
+      expect(doc.html).toContain(`id=${p.id}&amp;doc=design${p.trackId ? `&amp;track=${p.trackId}` : ""}`);
+      if (!p.trackId) expect(doc.html).not.toContain("track=");
+    }
+    // Four registrations share four immutable source files; only branch checks repeat.
+    expect(requests.filter(u => !u.includes("/branches/")).length).toBe(4);
+    offline = true;
+    const restarted = new GitHubDocs({ cacheDir, fetch: fetcher, useToken: false });
+    for (const p of registrations) {
+      const snapshot = await restarted.get(p);
+      expect(snapshot.stale).toBe(true);
+      expect(snapshot.docs.readme!.html).toContain(`id=${p.id}&amp;doc=design${p.trackId ? `&amp;track=${p.trackId}` : ""}`);
+    }
+  });
+  test("identical document paths in different repos never reuse another repository's source", async () => {
+    const cacheDir = mkdtempSync(join(tmpdir(), "projects-repo-cache-")); dirs.push(cacheDir);
+    const source = new GitHubDocs({ cacheDir, useToken: false, fetch: (async input => {
+      const url = String(input);
+      if (url.includes("/branches/")) return Response.json({ commit: { sha: "b".repeat(40) } });
+      return new Response(url.includes("your-org/mobile/") ? "# Mobile content" : "# Desktop content");
+    }) as typeof fetch });
+    const desktop = await source.get({ ...project, repo: "your-org/desktop", trackId: "desktop" });
+    const mobile = await source.get({ ...project, repo: "your-org/mobile", trackId: "mobile" });
+    expect(desktop.docs.readme!.md).toBe("# Desktop content");
+    expect(mobile.docs.readme!.md).toBe("# Mobile content");
+  });
+});

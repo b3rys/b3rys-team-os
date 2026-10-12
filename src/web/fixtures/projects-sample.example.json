@@ -1,0 +1,158 @@
+{
+  "summary": {
+    "id": "sample",
+    "name": "Sample",
+    "repo": "your-org/sample",
+    "branch": "main",
+    "sha": "0123456789abcdef0123456789abcdef01234567",
+    "intro": "예시 프로젝트 — 할 일을 마크다운 파일로 적는 작은 앱. 실제 등록은 설치본의 projects.json 에 둔다.",
+    "docs": [
+      {
+        "key": "readme",
+        "path": "README.md",
+        "exists": true
+      },
+      {
+        "key": "design",
+        "path": "DESIGN.md",
+        "exists": true
+      },
+      {
+        "key": "features",
+        "path": "FEATURES.md",
+        "exists": true
+      },
+      {
+        "key": "todo",
+        "path": "TODO.md",
+        "exists": true
+      }
+    ],
+    "todo": {
+      "doing": 3,
+      "plan": 5,
+      "done": 40,
+      "doingTitles": [
+        "과제 01 — 단축키 정리",
+        "과제 02 — 줄번호 겹침",
+        "과제 03 — 설정 화면"
+      ]
+    },
+    "excludeSections": [
+      "킵",
+      "선택 대기",
+      "답 대기",
+      "승인 대기"
+    ],
+    "kanban": [
+      {
+        "id": "task-sample-a",
+        "title": "[sample] 과제 A — 구조 리뷰",
+        "lane": "doing",
+        "updatedAt": "2026-01-04T01:20:00.000Z"
+      }
+    ],
+    "fetchedAt": "2026-01-05T00:00:00.000Z"
+  },
+  "docs": {
+    "readme": {
+      "id": "sample",
+      "key": "readme",
+      "sha": "0123456789abcdef0123456789abcdef01234567",
+      "path": "README.md",
+      "html": "<h1 id=\"sample\">Sample</h1>\n<p>예시 프로젝트 — 할 일을 마크다운 파일로 적는 작은 앱. 실제 등록은 설치본의 projects.json 에 둔다.</p>\n<ul><li>플랫폼: 예시</li><li>bundle id: <code>com.example.sample</code></li></ul>",
+      "md": "# Sample\n\n예시 프로젝트 — 할 일을 마크다운 파일로 적는 작은 앱. 실제 등록은 설치본의 projects.json 에 둔다.\n\n- 플랫폼: 예시\n- bundle id: `com.example.sample`\n",
+      "title": "Sample",
+      "toc": [
+        {
+          "level": 1,
+          "text": "Sample",
+          "anchor": "sample"
+        }
+      ]
+    },
+    "design": {
+      "id": "sample",
+      "key": "design",
+      "sha": "0123456789abcdef0123456789abcdef01234567",
+      "path": "DESIGN.md",
+      "html": "<h1 id=\"sample-설계\">Sample 설계</h1>\n<h2 id=\"1-무엇을-만드나\">1. 무엇을 만드나</h2>\n<p>할 일을 <code>.md</code> 파일로 적는 예시 앱.</p>\n<h2 id=\"2-시스템-구조\">2. 시스템 구조</h2>\n<p>화면과 저장소 두 겹이다.</p>\n<figure class=\"project-diagram\"><figcaption class=\"mermaid-pending\">다이어그램 렌더 예정</figcaption><pre class=\"mermaid-src\"><code>flowchart TB\n  subgraph UI[&quot;화면&quot;]\n    LV[&quot;ListView&lt;br/&gt;목록&quot;]\n    EV[&quot;EditorView&lt;br/&gt;편집&quot;]\n  end\n  subgraph Core[&quot;Core&quot;]\n    ST[&quot;Store&lt;br/&gt;폴더 ↔ 항목&quot;]\n  end\n  FS[(&quot;항목 폴더&quot;)]\n  LV --&gt; ST\n  EV --&gt; ST\n  ST --&gt; FS</code></pre></figure>\n<p>의존은 아래로만 흐른다.</p>\n<h2 id=\"3-주요-클래스\">3. 주요 클래스</h2>\n<ul><li><code>Store</code> — 목록 · 선택 · 저장</li><li><code>Editor</code> — 입력 처리</li></ul>",
+      "md": "# Sample 설계\n\n## 1. 무엇을 만드나\n\n할 일을 `.md` 파일로 적는 예시 앱.\n\n## 2. 시스템 구조\n\n화면과 저장소 두 겹이다.\n\n```mermaid\nflowchart TB\n  subgraph UI[\"화면\"]\n    LV[\"ListView<br/>목록\"]\n    EV[\"EditorView<br/>편집\"]\n  end\n  subgraph Core[\"Core\"]\n    ST[\"Store<br/>폴더 ↔ 항목\"]\n  end\n  FS[(\"항목 폴더\")]\n  LV --> ST\n  EV --> ST\n  ST --> FS\n```\n\n의존은 아래로만 흐른다.\n\n## 3. 주요 클래스\n\n- `Store` — 목록 · 선택 · 저장\n- `Editor` — 입력 처리\n",
+      "title": "Sample 설계",
+      "toc": [
+        {
+          "level": 1,
+          "text": "Sample 설계",
+          "anchor": "sample-설계"
+        },
+        {
+          "level": 2,
+          "text": "1. 무엇을 만드나",
+          "anchor": "1-무엇을-만드나"
+        },
+        {
+          "level": 2,
+          "text": "2. 시스템 구조",
+          "anchor": "2-시스템-구조"
+        },
+        {
+          "level": 2,
+          "text": "3. 주요 클래스",
+          "anchor": "3-주요-클래스"
+        }
+      ]
+    },
+    "features": {
+      "id": "sample",
+      "key": "features",
+      "sha": "0123456789abcdef0123456789abcdef01234567",
+      "path": "FEATURES.md",
+      "html": "<h1 id=\"sample-기능-목록\">Sample 기능 목록</h1>\n<h2 id=\"1-편집\">1. 편집</h2>\n<ul class=\"task-list\"><li class=\"task is-done\"><input type=\"checkbox\" tabindex=\"-1\" checked aria-label=\"완료\"><span class=\"task-text\">항목 쓰기</span></li><li class=\"task is-done\"><input type=\"checkbox\" tabindex=\"-1\" checked aria-label=\"완료\"><span class=\"task-text\">자동 저장</span></li></ul>",
+      "md": "# Sample 기능 목록\n\n## 1. 편집\n\n- [x] 항목 쓰기\n- [x] 자동 저장\n",
+      "title": "Sample 기능 목록",
+      "toc": [
+        {
+          "level": 1,
+          "text": "Sample 기능 목록",
+          "anchor": "sample-기능-목록"
+        },
+        {
+          "level": 2,
+          "text": "1. 편집",
+          "anchor": "1-편집"
+        }
+      ]
+    },
+    "todo": {
+      "id": "sample",
+      "key": "todo",
+      "sha": "0123456789abcdef0123456789abcdef01234567",
+      "path": "TODO.md",
+      "html": "<h1 id=\"sample--작업-트래커\">sample — 작업 트래커</h1>\n<p><code>[x]</code> 완료 · <code>[~]</code> 진행중 · <code>[ ]</code> 미착수</p>\n<h2 id=\"1단계--기본\">1단계 — 기본</h2>\n<ul class=\"task-list\"><li class=\"task is-done\"><input type=\"checkbox\" tabindex=\"-1\" checked aria-label=\"완료\"><span class=\"task-text\">목록 화면</span></li><li class=\"task is-done\"><input type=\"checkbox\" tabindex=\"-1\" checked aria-label=\"완료\"><span class=\"task-text\">편집 화면</span></li><li class=\"task is-done\"><input type=\"checkbox\" tabindex=\"-1\" checked aria-label=\"완료\"><span class=\"task-text\">자동 저장</span></li><li class=\"task is-done\"><input type=\"checkbox\" tabindex=\"-1\" checked aria-label=\"완료\"><span class=\"task-text\">검색</span></li><li class=\"task is-done\"><input type=\"checkbox\" tabindex=\"-1\" checked aria-label=\"완료\"><span class=\"task-text\">정렬</span></li><li class=\"task is-todo\"><input type=\"checkbox\" tabindex=\"-1\" aria-label=\"계획\"><span class=\"task-text\">폴더 만들기</span></li><li class=\"task is-todo\"><input type=\"checkbox\" tabindex=\"-1\" aria-label=\"계획\"><span class=\"task-text\">이름 바꾸기</span></li><li class=\"task is-todo\"><input type=\"checkbox\" tabindex=\"-1\" aria-label=\"계획\"><span class=\"task-text\">복제</span></li><li class=\"task is-todo\"><input type=\"checkbox\" tabindex=\"-1\" aria-label=\"계획\"><span class=\"task-text\">삭제</span></li><li class=\"task is-todo\"><input type=\"checkbox\" tabindex=\"-1\" aria-label=\"계획\"><span class=\"task-text\">테스트 보강</span></li></ul>\n<h2 id=\"2026-01-04--진행-중\">2026-01-04 — 진행 중</h2>\n<ul class=\"task-list\"><li class=\"task is-doing\"><input type=\"checkbox\" tabindex=\"-1\" aria-label=\"진행중\"><span class=\"task-text\"><span class=\"task-doing\">진행중</span> 과제 01 — 단축키 정리</span></li><li class=\"task is-doing\"><input type=\"checkbox\" tabindex=\"-1\" aria-label=\"진행중\"><span class=\"task-text\"><span class=\"task-doing\">진행중</span> 과제 02 — 줄번호 겹침</span></li><li class=\"task is-doing\"><input type=\"checkbox\" tabindex=\"-1\" aria-label=\"진행중\"><span class=\"task-text\"><span class=\"task-doing\">진행중</span> 과제 03 — 설정 화면</span></li></ul>\n<h2 id=\"-보류--킵\">📌 보류 — ★킵★</h2>\n<ul class=\"task-list\"><li class=\"task is-todo\"><input type=\"checkbox\" tabindex=\"-1\" aria-label=\"계획\"><span class=\"task-text\">나중에 볼 것 (킵 — plan 에 안 센다)</span></li></ul>",
+      "md": "# sample — 작업 트래커\n\n`[x]` 완료 · `[~]` 진행중 · `[ ]` 미착수\n\n## 1단계 — 기본\n\n- [x] 목록 화면\n- [x] 편집 화면\n- [x] 자동 저장\n- [x] 검색\n- [x] 정렬\n- [ ] 폴더 만들기\n- [ ] 이름 바꾸기\n- [ ] 복제\n- [ ] 삭제\n- [ ] 테스트 보강\n\n## 2026-01-04 — 진행 중\n\n- [~] 과제 01 — 단축키 정리\n- [~] 과제 02 — 줄번호 겹침\n- [~] 과제 03 — 설정 화면\n\n## 📌 보류 — ★킵★\n\n- [ ] 나중에 볼 것 (킵 — plan 에 안 센다)\n",
+      "title": "sample — 작업 트래커",
+      "toc": [
+        {
+          "level": 1,
+          "text": "sample — 작업 트래커",
+          "anchor": "sample--작업-트래커"
+        },
+        {
+          "level": 2,
+          "text": "1단계 — 기본",
+          "anchor": "1단계--기본"
+        },
+        {
+          "level": 2,
+          "text": "2026-01-04 — 진행 중",
+          "anchor": "2026-01-04--진행-중"
+        },
+        {
+          "level": 2,
+          "text": "📌 보류 — ★킵★",
+          "anchor": "-보류--킵"
+        }
+      ]
+    }
+  }
+}

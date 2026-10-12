@@ -1,8 +1,8 @@
 import { posix } from "node:path";
 
-export const RENDERER_VERSION = "projects-1";
+export const RENDERER_VERSION = "projects-2";
 export interface RenderContext {
-  id: string; repo: string; sha: string; path: string; docs: Record<string, string>;
+  id: string; trackId?: string; repo: string; sha: string; path: string; docs: Record<string, string>;
 }
 export interface RenderedProjectDoc {
   html: string; title: string; toc: { level: number; text: string; anchor: string }[]; needs: string[];
@@ -27,7 +27,7 @@ export function projectDocUrl(target: string, ctx: RenderContext, image = false)
   const hash = match[3] ?? "";
   if (!image) {
     const key = Object.entries(ctx.docs).find(([, p]) => posix.normalize(p) === path)?.[0];
-    if (key) return `?view=projects&id=${encodeURIComponent(ctx.id)}&doc=${encodeURIComponent(key)}${hash}`;
+    if (key) return `?view=projects&id=${encodeURIComponent(ctx.id)}&doc=${encodeURIComponent(key)}${ctx.trackId !== undefined ? `&track=${encodeURIComponent(ctx.trackId)}` : ""}${hash}`;
   }
   const base = image ? "https://raw.githubusercontent.com" : "https://github.com";
   return `${base}/${ctx.repo}/${image ? "" : "blob/"}${ctx.sha}/${encodePath(path)}${match[2] ?? ""}${hash}`;
