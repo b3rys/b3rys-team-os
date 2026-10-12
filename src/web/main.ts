@@ -1,4 +1,5 @@
 import "./styles.css";
+import { initDashboardScale, layoutPixels } from "./lib/dashboardScale";
 import { connectWs, loadInitialLog, loadInitialMetric, loadThreads, loadAllAgentStats, loadAlerts, loadClaudeUsage, loadBusFlow, loadTeamOs, loadBusMembers } from "./ws";
 import { store, type DocSection, type MainView } from "./store";
 import { renderMetricsBar } from "./components/MetricsBar";
@@ -53,6 +54,7 @@ function viewTabClass(active: boolean): string {
 }
 
 function bootstrap() {
+  initDashboardScale();
   const app = document.getElementById("app")!;
   // deep-link: /team?view=reports (top-level /reports redirect 등) → 해당 탭으로 부팅
   const _bootParams = new URLSearchParams(location.search);
@@ -516,7 +518,7 @@ function setupResizers() {
       handle.classList.add("dragging");
       document.body.style.userSelect = "none";
       document.body.style.cursor = "col-resize";
-      const widthAt = (clientX: number) => (key === "sidebar" ? clientX - row.left : row.right - clientX);
+      const widthAt = (clientX: number) => layoutPixels(key === "sidebar" ? clientX - row.left : row.right - clientX);
       const onMove = (ev: MouseEvent) => apply(key, widthAt(ev.clientX));
       const onUp = (ev: MouseEvent) => {
         const w = apply(key, widthAt(ev.clientX));

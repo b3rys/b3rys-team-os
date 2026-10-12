@@ -1,5 +1,6 @@
 // ProposalsView — SLG proposal board backed by /api/proposals.
 
+import { layoutPixels } from "../lib/dashboardScale";
 import { formatKST } from "../../shared/timeKST";
 import { pick } from "../i18n";
 import { apiBase } from "../ws";
@@ -735,7 +736,7 @@ export function renderProposalsView(root: HTMLElement): void {
       resizeHandle.classList.add("dragging");
       document.body.style.userSelect = "none";
       document.body.style.cursor = "col-resize";
-      const widthAt = (clientX: number) => clampDetailWidth(row.right - clientX);
+      const widthAt = (clientX: number) => clampDetailWidth(layoutPixels(row.right - clientX));
       const apply = (px: number) => {
         detailWidth = clampDetailWidth(px);
         split.style.gridTemplateColumns = `minmax(0, 1fr) 6px ${detailWidth}px`;

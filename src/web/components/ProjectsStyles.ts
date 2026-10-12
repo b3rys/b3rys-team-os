@@ -1,6 +1,9 @@
 /** Projects uses the Reports surfaces, text colours, and list spacing. */
 export const projectsCss = `
-.projects-list-head{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:10px;padding:16px 0;background:rgb(var(--surface-1) / .96);border-bottom:1px solid rgb(var(--border))}
+.projects-list-head{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:10px;padding:12px 0;background:rgb(var(--surface-2) / .96);border-bottom:1px solid rgb(var(--border))}
+.projects-refresh{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border:1px solid rgb(var(--border));border-radius:6px;background:rgb(var(--surface-2));color:rgb(var(--slate-400));transition:background .15s,color .15s}
+.projects-refresh:hover{background:rgb(var(--surface-0));color:rgb(var(--slate-100))}
+.projects-refresh:focus-visible{outline:2px solid rgb(var(--accent));outline-offset:2px}
 .projects-card{margin:18px 0;border:1px solid rgb(var(--border));border-radius:12px;background:rgb(var(--surface-2));overflow:hidden;outline:none}
 .projects-highlight{border-color:rgb(var(--accent) / .6);box-shadow:0 0 0 2px rgb(var(--accent) / .12)}
 .projects-card-head{padding:18px 20px 14px}
@@ -22,7 +25,7 @@ export const projectsCss = `
 .projects-more summary::-webkit-details-marker{display:none}
 .projects-more[open] summary{margin-bottom:4px}
 .projects-doc-scroll{container-type:inline-size;container-name:project-document}
-.projects-doc-shell{container-type:inline-size;container-name:project-document;max-width:1400px;margin:0 auto;padding:0 24px 80px;min-width:0}
+.projects-doc-shell{container-type:inline-size;container-name:project-document;max-width:none;margin:0 auto;padding:0 24px 80px;min-width:0}
 .projects-doc-head{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:16px;padding:10px 0;min-height:45px;background:rgb(var(--surface-1) / .97);border-bottom:1px solid rgb(var(--border));backdrop-filter:blur(8px)}
 .projects-back{font-size:12px;color:rgb(var(--slate-400));white-space:nowrap}
 .projects-back:hover{color:var(--accent-soft-text)}
@@ -34,15 +37,13 @@ export const projectsCss = `
 .projects-doc-chip.is-active{color:var(--accent-soft-text);border-bottom-color:rgb(var(--accent))}
 .projects-doc-chip[aria-disabled]{opacity:.45}
 .projects-tools{display:flex;align-items:center;gap:10px;margin-left:auto;flex-shrink:0}
-.projects-font{font-size:11px;color:rgb(var(--slate-400));padding:3px 1px}
-.projects-font:hover{color:rgb(var(--slate-100))}
 .projects-modes{display:flex;gap:2px;background:rgb(var(--surface-0));padding:2px;border-radius:4px}
 .projects-mode{font-size:10px;color:rgb(var(--slate-500));padding:2px 5px;border-radius:3px}
 .projects-mode.is-active{color:rgb(var(--slate-100));background:rgb(var(--surface-3))}
 #projects-open-window{color:rgb(var(--slate-400));padding:3px}
-.projects-doc-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:24px;padding-top:24px;align-items:start;max-width:760px;margin:0 auto}
-.projects-doc-layout.has-toc{grid-template-columns:210px minmax(0,760px);max-width:994px}
-.projects-toc-wrap{position:sticky;top:var(--projects-head,60px);align-self:start;min-width:0;max-height:calc(100vh - var(--projects-head,60px) - 24px);overflow-y:auto}
+.projects-doc-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:24px;padding-top:24px;align-items:start;font-size:14.5px;max-width:76em;margin:0}
+.projects-doc-layout.has-toc{grid-template-columns:210px minmax(0,1fr);max-width:calc(234px + 76em)}
+.projects-toc-wrap{position:sticky;top:var(--projects-head,60px);align-self:start;min-width:0;max-height:calc(100vh / var(--dashboard-scale,1) - var(--projects-head,60px) - 24px);overflow-y:auto}
 #projects-toc{padding:0 4px 8px;min-width:0}
 #projects-toc.hidden{display:block}
 .projects-toc-title{font-size:10px;font-weight:600;color:rgb(var(--slate-500));margin:0 0 9px 20px}
@@ -50,8 +51,9 @@ export const projectsCss = `
 .projects-toc{font-size:12px;line-height:1.3}
 .projects-toc-head{padding:3px 6px}
 .projects-toc-children a{font-size:12px;padding:3px 6px}
-.projects-reading{padding:26px 30px;border:1px solid rgb(var(--border));border-radius:10px;background:rgb(var(--surface-2));max-width:760px;margin:0 auto}
+.projects-reading{padding:26px 30px;border:1px solid rgb(var(--border));border-radius:10px;background:rgb(var(--surface-2));width:100%;max-width:100%;margin:0}
 .projects-prose{line-height:1.7}
+.projects-raw{font-size:12.5px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
 .projects-prose ul,.projects-prose ol{padding-left:1.3em;margin:.6em 0}
 .projects-prose ul{list-style-type:disc}
 .projects-prose ol{list-style-type:decimal}
@@ -64,7 +66,7 @@ export const projectsCss = `
  .projects-doc-head{flex-wrap:wrap;gap:8px 12px;padding:8px 0}
  .projects-breadcrumb{flex:1;max-width:none}
  .projects-doc-tabs{order:4;flex-basis:100%;height:26px;gap:16px}
- .projects-doc-layout.has-toc{grid-template-columns:minmax(0,1fr);max-width:760px;gap:14px}
+ .projects-doc-layout,.projects-doc-layout.has-toc{grid-template-columns:minmax(0,1fr);max-width:760px;margin:0 auto;gap:14px}
  .projects-toc-wrap{position:static;max-height:none;overflow:visible;border-bottom:1px solid rgb(var(--border));padding-bottom:10px}
  #projects-toc-toggle{display:block;font-size:12px;color:rgb(var(--slate-400));padding:0 0 2px}
  #projects-toc.hidden{display:none}

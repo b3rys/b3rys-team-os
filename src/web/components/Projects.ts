@@ -11,6 +11,7 @@ import { browseListClass, browseTabClass } from "./BrowseStyles";
 //   (사용자가 문서 안에서 직접 펼친 패널은 그 세션에선 다시 접지 않는다) — lib/panels.ts.
 // 개발 폴백: `?fixture=1` 일 때만, API 가 404 면 fixtures/projects-sample.example.json 을 쓴다.
 
+import { dashboardScaleFactor, layoutPixels } from "../lib/dashboardScale";
 import { projectsCss } from "./ProjectsStyles";
 import { pick } from "../i18n";
 import { mdInlineToHtml } from "../lib/mdInline";
@@ -88,44 +89,6 @@ let _panelsTouched = new Set<Panel>();
 const _keepOpen = new Set<Panel>();
 let _panelUnsub: (() => void) | null = null;
 let _visible = true; // main.ts 가 Projects 탭을 보이는 중인가
-
-// 글자 크기 — 문서 화면에서만 조절하고 변경한 비율을 잠깐 표시한다.
-export const ZOOM_STEPS = [90, 100, 110, 125] as const;
-const ZOOM_KEY = "bill-dash-projects-zoom";
-let _zoom = 100;
-let _keysBound = false;
-let _zoomBadgeTimer: ReturnType<typeof setTimeout> | null = null;
-function loadZoom(): void { try { const v = Number(window.localStorage.getItem(ZOOM_KEY)); if ((ZOOM_STEPS as readonly number[]).includes(v)) _zoom = v; } catch { /* 저장 없음 */ } }
-function applyZoom(show: boolean): void {
-  _root?.style.setProperty("--projects-zoom", String(_zoom / 100));
-  try { window.localStorage.setItem(ZOOM_KEY, String(_zoom)); } catch { /* 표시만 */ }
-  if (!show) return;
-  let badge = document.getElementById("projects-zoom-badge");
-  if (!badge) { badge = document.createElement("div"); badge.id = "projects-zoom-badge"; document.body.appendChild(badge); }
-  badge.textContent = `${_zoom}%`;
-  badge.classList.remove("out");
-  if (_zoomBadgeTimer) clearTimeout(_zoomBadgeTimer);
-  _zoomBadgeTimer = setTimeout(() => { badge?.classList.add("out"); _zoomBadgeTimer = setTimeout(() => badge?.remove(), 300); }, 900);
-}
-/** ⌘=(+) 크게 · ⌘− 작게 · ⌘0 100%. 문서 화면이 보일 때만 잡고, 그때만 브라우저 기본 확대를 막는다. */
-export function handleZoomKey(e: KeyboardEvent): boolean {
-  if (_view !== "doc" || !_visible || !(e.metaKey || e.ctrlKey) || e.altKey) return false;
-  const k = e.key;
-  const i = (ZOOM_STEPS as readonly number[]).indexOf(_zoom);
-  let next = _zoom;
-  if (k === "=" || k === "+") next = ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, i + 1)]!;
-  else if (k === "-" || k === "_") next = ZOOM_STEPS[Math.max(0, i - 1)]!;
-  else if (k === "0") next = 100;
-  else return false;
-  e.preventDefault();
-  _zoom = next; applyZoom(true);
-  return true;
-}
-export function currentZoom(): number { return _zoom; }
-function bindZoomKeys(): void {
-  if (_keysBound) return; _keysBound = true;
-  document.addEventListener("keydown", (e) => { handleZoomKey(e); });
-}
 
 function watchPanels(): void {
   if (_panelUnsub) return;
@@ -310,12 +273,7 @@ function injectStyle(): void {
   if (document.getElementById("projects-prose-style")) return;
   const st = document.createElement("style");
   st.id = "projects-prose-style";
-  st.textContent = proseCss(HEAD_OFFSET) + projectsCss + `
-.projects-prose{font-size:calc(14.5px * var(--projects-zoom, 1))}
-.projects-raw{font-size:calc(12.5px * var(--projects-zoom, 1))}
-.projects-todo-status{zoom:var(--projects-zoom, 1)}
-#projects-zoom-badge{position:fixed;top:56px;left:50%;transform:translateX(-50%);z-index:80;padding:4px 12px;border-radius:8px;background:rgb(var(--surface-0) / .82);color:rgb(var(--slate-50));font-size:12px;font-weight:600;letter-spacing:.02em;pointer-events:none;transition:opacity .25s;box-shadow:0 4px 14px rgba(0,0,0,.25)}
-#projects-zoom-badge.out{opacity:0}`;
+  st.textContent = proseCss(HEAD_OFFSET) + projectsCss;
   document.head.appendChild(st);
 }
 
@@ -375,7 +333,7 @@ function renderList(): void {
     ${(p.tracks ?? [p]).map(t => trackHtml(p,t)).join("")}</article>`).join("");
   _root.innerHTML = `<div data-projects-list-scroll class="h-full overflow-y-auto overflow-x-hidden"><div class="${browseListClass}">
     <div class="projects-list-head"><span class="text-[15px] font-semibold text-slate-100">${pick("Projects · 프로젝트", "Projects")}</span><span class="text-[12px] text-slate-500">${_projects.length}</span>
-      <button id="projects-retry" class="ml-auto text-[12px] text-slate-400">${_loadError ? pick("다시 시도", "Retry") : pick("새로 고침", "Refresh")}</button></div>
+      <button id="projects-retry" type="button" class="projects-refresh ml-auto" title="${_loadError ? pick("다시 시도", "Retry") : pick("새로 고침", "Refresh")}" aria-label="${_loadError ? pick("다시 시도", "Retry") : pick("새로 고침", "Refresh")}">${renderIcon("refresh-cw", { size: 15 })}</button></div>
     ${_loadError ? `<div class="projects-error py-4 text-[13px] text-txt-red">${pick("프로젝트 목록을 불러오지 못했습니다", "Failed to load projects")} · ${escape(_loadError)}</div>` : ""}
     ${rows || (_loadError ? "" : `<div class="py-16 text-center text-slate-500">${pick("등록된 프로젝트가 없습니다", "No projects registered")}</div>`)}</div></div>`;
   const scroll = _root.querySelector<HTMLElement>("[data-projects-list-scroll]");
@@ -548,7 +506,7 @@ async function renderDoc(): Promise<void> {
           ${backBtn}
           <div class="projects-breadcrumb" title="${escape(parent?.name ?? id)} / ${escape(project?.name ?? "")} / ${escape(doc.path)}">${escape(parent?.name ?? id)}${parent?.tracks ? ` / ${escape(project?.name ?? _curTrack)}` : ""} <span>/ ${escape(doc.path)}</span>${stale}</div>
           <div class="projects-doc-tabs" role="group" aria-label="${pick("문서 전환", "Switch document")}">${docChips}</div>
-          <div class="projects-tools"><button class="projects-font" data-zoom="-1" aria-label="${pick("글자 작게", "Decrease font size")}">가−</button><button class="projects-font" data-zoom="1" aria-label="${pick("글자 크게", "Increase font size")}">가+</button>
+          <div class="projects-tools">
           <div class="projects-modes" role="group" aria-label="HTML | MD">${modeBtn("html")}${modeBtn("md")}</div>
           ${gh}<a id="projects-open-window" href="${escape(pageUrl(id, key, _mode))}" target="_blank" rel="noopener" aria-label="${pick("새창", "Open in new window")}" title="${pick("새창", "Open in new window")}">${renderIcon("external-link", { size: 14 })}</a></div>
           ${isTodo && _mode === "html" ? `<div class="projects-status-tabs">${todoTabBtn("status", pick("현재 상태", "Status"))}${todoTabBtn("all", pick("전체", "All"))}</div>` : ""}
@@ -560,11 +518,6 @@ async function renderDoc(): Promise<void> {
         </div>
       </div>
     </div>`;
-  _root.querySelectorAll<HTMLButtonElement>("[data-zoom]").forEach(b => b.addEventListener("click", () => {
-    const i = (ZOOM_STEPS as readonly number[]).indexOf(_zoom);
-    _zoom = ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, i + Number(b.dataset.zoom)))]!;
-    applyZoom(true);
-  }));
 
   _root.querySelector("#projects-back")?.addEventListener("click", () => showListCard(id));
   _root.querySelectorAll<HTMLButtonElement>("[data-doc-chip]").forEach((b) => b.addEventListener("click", () => { void openDoc(id, b.dataset.docChip as ProjectDocKey); }));
@@ -640,7 +593,7 @@ function paintToc(secs: DocSection[]): void {
   const on = toc.querySelector<HTMLElement>('.projects-toc-children a[aria-current="true"]') ?? toc.querySelector<HTMLElement>('.projects-toc-head[aria-current="true"]');
   if (on && typeof on.getBoundingClientRect === "function" && toc.scrollHeight > toc.clientHeight) {
     const r = on.getBoundingClientRect(); const t = toc.getBoundingClientRect();
-    if (r.top < t.top || r.bottom > t.bottom) toc.scrollTop += r.top - t.top - t.height / 3;
+    if (r.top < t.top || r.bottom > t.bottom) toc.scrollTop += layoutPixels(r.top - t.top - t.height / 3);
   }
 }
 
@@ -694,7 +647,7 @@ function watchScroll(viewer: HTMLElement, secs: DocSection[]): void {
     _scrollRaf = requestAnimationFrame(() => {
       _scrollRaf = 0;
       if (Date.now() < _scrollLock) return;
-      const top = scroller.getBoundingClientRect().top + _headOffset + 8; // 헤딩이 sticky 헤더 아래(scroll-margin-top) 에 닿으면 그 헤딩
+      const top = scroller.getBoundingClientRect().top + (_headOffset + 8) * dashboardScaleFactor(); // 헤딩이 sticky 헤더 아래(scroll-margin-top) 에 닿으면 그 헤딩
       let last: HTMLElement | null = null;
       for (const h of headings) { if (h.getBoundingClientRect().top <= top) last = h; else break; }
       // A short final section cannot reach the toolbar; retain its selection at the end.
@@ -746,7 +699,7 @@ export function resetProjectsState(): void {
   _view = "list"; _curId = null; _curKey = null; _curDoc = null;
   _mode = "html"; _todoTab = "status"; _curSec = null; _curHead = null; _tocOpen = new Set(); _tocMobileOpen = false; _doneOpen = false;
   _rawCache = new Map();
-  _panelsBefore = null; _panelsTouched = new Set(); _keepOpen.clear(); _visible = true; _scrollLock = 0; _zoom = 100;
+  _panelsBefore = null; _panelsTouched = new Set(); _keepOpen.clear(); _visible = true; _scrollLock = 0;
   _headOffset = HEAD_OFFSET; _headObserver?.disconnect(); _headObserver = null;
   if (_panelUnsub) { _panelUnsub(); _panelUnsub = null; }
 }
@@ -754,7 +707,7 @@ export function resetProjectsState(): void {
 export function renderProjects(root: HTMLElement): void {
   _root = root;
   injectStyle();
-  loadZoom(); applyZoom(false); bindZoomKeys();
+
   const { id, doc, sec, track } = readUrlState();
   _curTrack = track;
   if (id && !doc) { _view = "list"; _curId = id; }

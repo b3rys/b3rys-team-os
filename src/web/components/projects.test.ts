@@ -566,7 +566,7 @@ describe("문서 헤더 — 문서 전환 탭 · 새창 · 글자 크기", () =>
     expect(win.getAttribute("target")).toBe("_blank");
   });
 
-  test("메타 줄에 프로젝트 이름·파일·크기 버튼이 있고, sticky 헤더 높이를 재서 --projects-head 로 반영한다", async () => {
+  test("메타 줄에 프로젝트 이름·파일이 있고, sticky 헤더 높이를 재서 --projects-head 로 반영한다", async () => {
     const root = await mount();
     openSummary(root);
     root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
@@ -659,33 +659,7 @@ describe("문서 헤더 — 문서 전환 탭 · 새창 · 글자 크기", () =>
     expect(a.getAttribute("target")).toBe("_blank");
   });
 
-  test("⌘= / ⌘− / ⌘0 — 문서 화면에서만 90/100/110/125 를 오가고 % 배지를 띄운다 · 목록에서는 무시", async () => {
-    const { handleZoomKey, currentZoom, setProjectsVisible } = await import("./Projects");
-    const root = await mount();
-    const key = (k: string) => { const e = new window.KeyboardEvent("keydown", { key: k, metaKey: true, cancelable: true }); const handled = handleZoomKey(e as unknown as KeyboardEvent); return { handled, prevented: e.defaultPrevented }; };
-    expect(key("=").handled).toBe(false);      // 목록 화면 — 브라우저 확대에 맡긴다
-    openSummary(root);
-    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
-    await tick();
-    expect(key("=")).toEqual({ handled: true, prevented: true });
-    expect(currentZoom()).toBe(110);
-    expect(root.style.getPropertyValue("--projects-zoom")).toBe("1.1");
-    expect(document.getElementById("projects-zoom-badge")?.textContent).toBe("110%");
-    key("="); expect(currentZoom()).toBe(125);
-    key("="); expect(currentZoom()).toBe(125);  // 상한
-    key("-"); key("-"); key("-"); expect(currentZoom()).toBe(90);
-    key("-"); expect(currentZoom()).toBe(90);   // 하한
-    key("0"); expect(currentZoom()).toBe(100);
-    expect(window.localStorage.getItem("bill-dash-projects-zoom")).toBe("100");
-    setProjectsVisible(false);                  // 다른 탭 — 브라우저 확대를 가로채지 않는다
-    expect(key("=")).toEqual({ handled: false, prevented: false });
-    expect(currentZoom()).toBe(100);
-    setProjectsVisible(true);
-    expect(key("=").handled).toBe(true);
-    expect(currentZoom()).toBe(110);
-    key("0");
-    document.getElementById("projects-zoom-badge")?.remove();
-  });
+
 });
 
 describe("Projects multi-track overview", () => {
@@ -760,24 +734,11 @@ describe("Projects multi-track overview", () => {
     expect(taskLabel("🛠️ **단축키** [문서](https://example.com) 정리")).toBe("단축키 문서 정리");
     expect(taskLabel(long)).toBe(long);
   });
-  test("가−/가+ 버튼은 저장 실패 때도 크기를 바꾸고 문서 외 단축키는 잡지 않는다", async () => {
-    window.localStorage.clear();
+  test("문서 전용 배율 버튼은 없고 대시보드 배율을 따른다", async () => {
     const root = await mount();
     root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="readme"]')!.click();
     await tick();
-    const { currentZoom, handleZoomKey } = await import("./Projects");
-    const storage = window.localStorage;
-    const savedSet = storage.setItem;
-    storage.setItem = () => { throw new Error("blocked"); };
-    try {
-      root.querySelector<HTMLButtonElement>('[data-zoom="1"]')!.click();
-      expect(currentZoom()).toBe(110);
-      root.querySelector<HTMLButtonElement>('[data-zoom="-1"]')!.click();
-      expect(currentZoom()).toBe(100);
-    } finally { storage.setItem = savedSet; }
-    root.querySelector<HTMLButtonElement>("#projects-back")!.click();
-    const event = new window.KeyboardEvent("keydown", { key: "=", metaKey: true, cancelable: true });
-    expect(handleZoomKey(event as unknown as KeyboardEvent)).toBe(false);
-    expect(event.defaultPrevented).toBe(false);
+    expect(root.querySelector("[data-zoom]")).toBeNull();
   });
+
 });
