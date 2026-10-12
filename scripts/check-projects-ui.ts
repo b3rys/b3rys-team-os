@@ -14,7 +14,7 @@ db.exec("CREATE TABLE task (id TEXT, title TEXT, lane TEXT, updated_at TEXT)");
 const docs = { readme: "README.md", design: "DESIGN.md", features: "FEATURES.md", todo: "TODO.md" };
 const tracks = [
   { id: "desktop", name: "Desktop · Server", repo: "your-org/sample", docs },
-  { id: "mobile", name: "Mobile", repo: "your-org/sample-mobile", docs },
+  { id: "mobile", name: "Mobile", repo: "your-org/sample-mobile", docs: { readme: "README.md", project: "PROJECT.md", todo: "TODO.md" } },
 ];
 const projects = validateProjects([
   { id: "sample", name: "Sample workspace", tracks },

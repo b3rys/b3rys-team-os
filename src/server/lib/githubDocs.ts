@@ -11,7 +11,6 @@ export const OPTIONAL_DOC_KEYS: readonly DocKey[] = ["project"];
 export const isOptionalDocKey = (key: DocKey) => OPTIONAL_DOC_KEYS.includes(key);
 /** 이 프로젝트에 등록된 문서 키(순서 유지). */
 export const registeredDocKeys = (p: ProjectRegistration) => DOC_KEYS.filter(k => p.docs[k] !== undefined);
-type RequiredDocKey = Exclude<DocKey, "project">;
 export interface ProjectTrack {
   id?: string; name: string; repo: string; branch?: string;
   docs: ProjectRegistration["docs"]; tokenEnv?: string;
@@ -22,7 +21,7 @@ export interface ProjectRegistration {
   /** Resolved source identity, used in links and cache separation. */
   trackId?: string;
   id: string; name: string; repo: string; branch: string;
-  docs: Record<RequiredDocKey, string> & Partial<Record<"project", string>>; kanbanPrefix: string;
+  docs: Partial<Record<DocKey, string>>; kanbanPrefix: string;
   /** TODO.md headings containing any of these hide their `[ ]` items from plan (default: ["킵"]). */
   excludeSections?: string[];
   /** Name of the env var holding this project's read-only GitHub token (default: GITHUB_TOKEN). The value never lives in the registry. */
@@ -40,13 +39,14 @@ export class ProjectSourceError extends Error {
 export const sourceFailureReason = (status: number) =>
   status === 401 || status === 403 || status === 404 ? "github_auth_or_not_found" : "github_unavailable";
 const validId = (value: unknown) => typeof value === "string" && /^[a-z0-9][a-z0-9_-]*$/.test(value);
-function validSource(p: any): boolean {
+function validSource(p: any, requireLegacyDocs = true): boolean {
   return typeof p.repo === "string" && /^[\w.-]+\/[\w.-]+$/.test(p.repo) &&
     typeof p.branch === "string" && !!p.branch &&
     (p.kanbanPrefix === undefined || (typeof p.kanbanPrefix === "string" && !!p.kanbanPrefix)) && !!p.docs &&
+    DOC_KEYS.some(key => p.docs[key] !== undefined) &&
     (p.excludeSections === undefined || (Array.isArray(p.excludeSections) && p.excludeSections.every((x: unknown) => typeof x === "string" && !!x))) &&
     (p.tokenEnv === undefined || (typeof p.tokenEnv === "string" && /^[A-Z][A-Z0-9_]*$/.test(p.tokenEnv))) &&
-    DOC_KEYS.every(key => p.docs[key] === undefined && isOptionalDocKey(key) ||
+    DOC_KEYS.every(key => p.docs[key] === undefined && (!requireLegacyDocs || isOptionalDocKey(key)) ||
       typeof p.docs[key] === "string" && !!p.docs[key] && !p.docs[key].startsWith("/") &&
       !/[\\\u0000-\u001f?#]/.test(p.docs[key]) && !p.docs[key].split("/").some((x: string) => x === ".." || x === "."));
 }
@@ -71,7 +71,7 @@ export function validateProjects(input: unknown): ProjectRegistration[] {
       for (const [i, t] of p.tracks.entries()) {
         const id = t?.id ?? String(i);
         if (!t || !validId(id) || ids.has(id) || typeof t.name !== "string" || !t.name.trim() ||
-          !validSource({ ...t, branch: t.branch ?? p.branch ?? "main", tokenEnv: t.tokenEnv ?? p.tokenEnv, excludeSections: t.excludeSections ?? p.excludeSections })) throw new Error("invalid_project_registry");
+          !validSource({ ...t, branch: t.branch ?? p.branch ?? "main", tokenEnv: t.tokenEnv ?? p.tokenEnv, excludeSections: t.excludeSections ?? p.excludeSections }, false)) throw new Error("invalid_project_registry");
         ids.add(id);
       }
       const first = p.tracks[0];

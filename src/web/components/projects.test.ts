@@ -688,11 +688,11 @@ describe("Projects multi-track overview", () => {
     { ...fixture.summary, id: "desktop", name: "Desktop", todo: { doing: 1, plan: 2, done: 3, doingTitles: ["Desktop work"] }, kanban: [] },
     { ...fixture.summary, id: "mobile", name: "Mobile", repo: "your-org/sample-mobile", todo: { doing: 1, plan: 1, done: 0, doingTitles: ["Mobile work"] }, kanban: [] },
   ];
-  async function withTracks(broken: boolean, action: (root: HTMLElement) => Promise<void>): Promise<void> {
+  async function withTracks(broken: boolean, action: (root: HTMLElement) => Promise<void>, sparse = false): Promise<void> {
     const saved = globalThis.fetch;
     globalThis.fetch = (async input => {
       const url = String(input);
-      if (!url.includes("/doc/")) return Response.json({ projects: [{ ...fixture.summary, tracks: broken ? [tracks[0], { id: "mobile", name: "Mobile", repo: "your-org/sample-mobile", error: "github_auth_or_not_found", key: "branch" }] : tracks }] });
+      if (!url.includes("/doc/")) return Response.json({ projects: [{ ...fixture.summary, tracks: broken ? [tracks[0], { id: "mobile", name: "Mobile", repo: "your-org/sample-mobile", error: "github_auth_or_not_found", key: "branch" }] : sparse ? [tracks[0], { ...tracks[1], docs: tracks[1]!.docs.filter(d => d.key === "readme" || d.key === "todo") }] : tracks }] });
       return saved(input);
     }) as typeof fetch;
     try { await action(await mount()); } finally { globalThis.fetch = saved; }
@@ -717,6 +717,14 @@ describe("Projects multi-track overview", () => {
       expect(root.querySelectorAll('[data-track="desktop"] button.projects-chip')).toHaveLength(4);
       expect(root.querySelectorAll('[data-track="mobile"] button.projects-chip')).toHaveLength(0);
     });
+  });
+  test("sparse track overview and document tabs omit unregistered documents", async () => {
+    await withTracks(false, async root => {
+      openSummary(root);
+      expect(root.querySelectorAll('[data-track="mobile"] button.projects-chip')).toHaveLength(2);
+      root.querySelector<HTMLButtonElement>('[data-track="mobile"] button[data-doc="readme"]')!.click(); await tick();
+      expect([...root.querySelectorAll(".projects-doc-chip")].map(d => d.textContent?.trim())).toEqual(["README", "TODO"]);
+    }, true);
   });
   test("mobile document, raw mode and new-window links retain track selection", async () => {
     await withTracks(false, async root => {

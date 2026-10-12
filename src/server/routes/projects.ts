@@ -59,7 +59,16 @@ export function createProjectRoutes(deps: ProjectDeps) {
           key: r.reason instanceof ProjectSourceError ? r.reason.key : "project" });
     const ok = tracks.filter((t): t is Extract<typeof t, { todo: unknown }> => "todo" in t);
     if (!ok.length) throw (settled[0] as PromiseRejectedResult).reason;
-    return { ...ok[0]!, id: p.id, name: p.name, tracks,
+    // Top-level source identity belongs to the first registered track, even when it fails.
+    // A healthy secondary track must not supply a SHA/docs paired with the primary repo.
+    const first = sources[0]!;
+    const primaryResult = settled[0]!;
+    const primary = primaryResult.status === "fulfilled" ? primaryResult.value : {
+      repo: first.repo, branch: first.branch, sha: "", intro: "",
+      docs: registeredDocKeys(first).map(key => ({ key, path: first.docs[key], exists: false })),
+      excludeSections: excludeSections(first),
+    };
+    return { ...primary, id: p.id, name: p.name, tracks,
       todo: { doing: ok.reduce((n, t) => n + t.todo.doing, 0), plan: ok.reduce((n, t) => n + t.todo.plan, 0),
         done: ok.reduce((n, t) => n + t.todo.done, 0), doingTitles: ok.flatMap(t => t.todo.doingTitles) },
       kanban: [], fetchedAt: ok.map(t => t.fetchedAt).sort().at(-1)!, stale: ok.some(t => t.stale),

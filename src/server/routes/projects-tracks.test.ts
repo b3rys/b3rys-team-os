@@ -13,7 +13,7 @@ const registry = [{ id: "sample", name: "Sample", tokenEnv: "GITHUB_TOKEN_SAMPLE
 ] }];
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const fn of cleanup.splice(0)) fn(); });
-function setup(failedRepo?: string, status = 401) {
+function setup(failedRepo?: string, status = 401, registrations: unknown = registry) {
   const dir = mkdtempSync(join(tmpdir(), "projects-tracks-"));
   const db = new Database(":memory:");
   db.exec("CREATE TABLE task (id TEXT, title TEXT, lane TEXT, updated_at TEXT)");
@@ -27,7 +27,7 @@ function setup(failedRepo?: string, status = 401) {
     if (u.includes("/branches/")) return Response.json({ commit: { sha: (mobile ? "b" : "a").repeat(40) } });
     return new Response(`# ${mobile ? "Mobile" : "Desktop"}\n\nSample introduction.\n\n[Design](DESIGN.md)\n- [~] ${mobile ? "Mobile task" : "Desktop task"}\n- [ ] Next\n- [x] Shipped`);
   }) as typeof fetch });
-  return { app: createProjectRoutes({ db, projects: validateProjects(registry), source }), calls };
+  return { app: createProjectRoutes({ db, projects: validateProjects(registrations), source }), calls };
 }
 describe("Projects tracks", () => {
   test("tracks-only registry resolves defaults and keeps explicit tokens separate", () => {
@@ -104,4 +104,39 @@ test("track tokens inherit or override without entering response/cache data", as
   }
   expect(used.length).toBe(10);
   expect(used.every(Boolean)).toBe(true);
+});
+
+test("first-track failure preserves top-level repository identity without borrowing another track's snapshot", async () => {
+  const { app } = setup("your-org/sample/", 401);
+  for (const path of ["/projects", "/projects/sample"]) {
+    const body = await (await app.request(path)).json();
+    const p = body.projects?.[0] ?? body;
+    expect(p.repo).toBe("your-org/sample");
+    expect(p.branch).toBe("main");
+    expect(p.sha).toBe("");
+    expect(p.intro).toBe("");
+    expect(p.docs.every((d: any) => !d.exists)).toBe(true);
+    expect(p.tracks[0].error).toBe("github_auth_or_not_found");
+    expect(p.tracks[1].repo).toBe("your-org/sample-mobile");
+    expect(p.tracks[1].sha).toBe("b".repeat(40));
+    expect(p.todo.doing).toBe(1);
+  }
+});
+
+
+test("tracks register only present documents; legacy required docs remain enforced", async () => {
+  const sparseDocs = { readme: "README.md", project: "PROJECT.md", todo: "TODO.md" };
+  const registrations = [{ ...registry[0], tracks: [registry[0]!.tracks[0], { ...registry[0]!.tracks[1], docs: sparseDocs }] }];
+  const { app, calls } = setup(undefined, 401, registrations);
+  const p = (await (await app.request("/projects/sample")).json());
+  expect(p.tracks[1].docs.map((d: any) => d.key)).toEqual(["readme", "project", "todo"]);
+  expect(p.tracks[1].todo.doingTitles).toEqual(["Mobile task"]);
+  expect(calls.filter(u => u.includes("sample-mobile") && /\/(DESIGN|FEATURES)\.md$/.test(u))).toEqual([]);
+  expect((await app.request("/projects/sample/doc/design?track=mobile")).status).toBe(404);
+  const page = await (await app.request("/projects/sample/doc/readme/page?track=mobile")).text();
+  expect(page).toContain("/doc/project/page?track=mobile");
+  expect(page).not.toContain("/doc/design/page");
+  expect(page).not.toContain("/doc/features/page");
+  expect(() => validateProjects([{ id: "single", name: "Single", repo: "your-org/single", branch: "main", docs: sparseDocs, kanbanPrefix: "[single]" }])).toThrow("invalid_project_registry");
+  expect(() => validateProjects([{ ...registry[0], tracks: [{ ...registry[0]!.tracks[0], docs: {} }] }])).toThrow("invalid_project_registry");
 });

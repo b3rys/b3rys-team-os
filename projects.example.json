@@ -36,8 +36,7 @@
         "repo": "your-org/sample-mobile",
         "docs": {
           "readme": "README.md",
-          "design": "DESIGN.md",
-          "features": "FEATURES.md",
+          "project": "PROJECT.md",
           "todo": "TODO.md"
         }
       }
