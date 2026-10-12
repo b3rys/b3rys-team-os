@@ -4,8 +4,10 @@ const filename = (path: string): string => safeText(path.replace(/\\/g, "/").spl
 
 function safeText(text: string): string {
   return clip(text
+    // Header values may include a scheme plus short credentials or multiple Digest parameters.
+    .replace(/\b(?:proxy-)?authorization\s*[:=]\s*[^\r\n]+/gi, "[redacted]")
+    .replace(/\b(?:basic|bearer|digest|negotiate|ntlm|oauth|hoba|mutual|scram-sha-256|scram-sha-1|aws4-hmac-sha256)\s+[^\r\n]+/gi, "[redacted]")
     .replace(/\b(?:[A-Za-z_][\w]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s]+))/g, "[redacted]")
-    .replace(/\b(?:authorization\s*[:=]?\s*)?bearer\s+\S+/gi, "[redacted]")
     .replace(/(?:["'](?:token|secret|password|api[-_ ]?key|authorization)["']|\b(?:token|secret|password|api[-_ ]?key|authorization))\s*[:=]?\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,}]+)/gi, "[redacted]")
     .replace(/\$\{[^}]*\}|\$[A-Za-z_]\w*/g, "[env]")
     .replace(/https?:\/\/[^\s]+/g, (url) => { try { return new URL(url ?? "").hostname; } catch { return "[url]"; } })

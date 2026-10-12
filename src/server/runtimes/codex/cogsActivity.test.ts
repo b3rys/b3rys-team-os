@@ -67,3 +67,28 @@ test("quoted credential keys hide the complete value before activity is clipped"
   expect(cogsActivityLine({ type: "webSearch", query: JSON.stringify({ api_key: "fixture_value", topic: "docs" }) }))
     .toBe('🌐 search {[redacted],"topic":"docs"}');
 });
+
+
+test("authentication schemes hide short credentials regardless of token length", () => {
+  const basic = btoa("u:p");
+  const queries = [
+    `Authorization: Basic ${basic}`,
+    `authorization: basic ${basic}`,
+    `Proxy-Authorization: Basic ${basic}`,
+    `Authorization: Custom ${basic}`,
+    `Basic ${basic}`,
+    'Bearer abc',
+    'Negotiate abc',
+    'NTLM abc',
+    'Digest username="u", response="abc"',
+    JSON.stringify({ authorization: `Basic ${basic}` }),
+  ];
+  for (const query of queries) {
+    const line = cogsActivityLine({ type: "webSearch", query });
+    expect(line).toContain("[redacted]");
+    expect(line).not.toContain(basic);
+    expect(line).not.toContain("abc");
+  }
+  expect(cogsActivityLine({ type: "webSearch", query: `Authorization: Basic ${basic}` }))
+    .toBe("🌐 search [redacted]");
+});
