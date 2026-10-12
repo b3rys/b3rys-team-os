@@ -38,7 +38,7 @@ export function parseProjectTodo(md: string, excludeSections: readonly string[] 
     doing: items.filter(x => x.state === "doing").length,
     plan: items.filter(x => x.state === "plan").length,
     done: items.filter(x => x.state === "done").length,
-    doingTitles: items.filter(x => x.state === "doing").map(x => [...x.title].slice(0, 60).join("")),
+    doingTitles: items.filter(x => x.state === "doing").map(x => x.title),
     items,
     excludeSections: [...excludeSections],
   };

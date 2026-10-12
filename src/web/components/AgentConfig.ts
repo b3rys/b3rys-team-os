@@ -1,3 +1,4 @@
+import { layoutPixels } from "../lib/dashboardScale";
 // AgentConfig — per-agent settings panel.
 // Shows the agents.json registry entry (read-only) + the persona_file content (editable).
 // Persona edits PUT to /api/agents/:id/persona which writes ONLY the registered persona path;
@@ -72,7 +73,7 @@ function revealExpandedSection(section: HTMLElement): void {
       }
       const sectionRect = section.getBoundingClientRect();
       const scrollerRect = scroller.getBoundingClientRect();
-      const bottomOverflow = sectionRect.bottom - scrollerRect.bottom + 20;
+      const bottomOverflow = layoutPixels(sectionRect.bottom - scrollerRect.bottom) + 20;
       if (bottomOverflow > 0) {
         scroller.scrollBy({ top: bottomOverflow, behavior: "smooth" });
       }

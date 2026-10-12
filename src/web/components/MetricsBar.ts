@@ -1,3 +1,4 @@
+import { layoutPixels, onDashboardScaleChange } from "../lib/dashboardScale";
 import { store, type AlertEvent } from "../store";
 import { getTeamName } from "./Settings";
 import { renderIcon } from "../icons";
@@ -270,7 +271,7 @@ export function renderMetricsBar(root: HTMLElement): void {
       const bottom = root.querySelector<HTMLElement>(".metric-bar")?.getBoundingClientRect().bottom;
       if (bottom !== undefined) {
         root.querySelectorAll<HTMLElement>("#tasks-menu-dropdown, #inbox-menu-dropdown, #doc-menu-dropdown")
-          .forEach((el) => { el.style.top = `${bottom}px`; });
+          .forEach((el) => { el.style.top = `${layoutPixels(bottom)}px`; });
       }
     }
 
@@ -484,6 +485,7 @@ export function renderMetricsBar(root: HTMLElement): void {
   };
   update();
   store.subscribe(update);
+  onDashboardScaleChange(update);
 
   // Close dropdown when clicking outside.
   document.addEventListener("click", (e) => {

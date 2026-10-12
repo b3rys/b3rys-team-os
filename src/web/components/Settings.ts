@@ -1,6 +1,7 @@
 // Settings — 팀 셀프 커스터마이즈 탭 (심플 코어: 팀 정체성 + 팀원).
 // API(전부 /team/api 하위): GET/PUT /settings · GET/PUT /mission · GET/POST /members · DELETE /members/:id.
 // 봇·tmux·slack 실제 연결은 b3os-team-member-lifecycle 스킬로 별도 — 여기선 레지스트리 엔트리만.
+import { DASHBOARD_SCALE_STEPS, dashboardScale, setDashboardScale, onDashboardScaleChange } from "../lib/dashboardScale";
 import { stoppedIds, keptIds } from "./stopAllSummary";
 import { apiBase } from "../ws";
 import { store } from "../store";
@@ -78,6 +79,10 @@ const OT_STEP_DEFS: { key: string; label: string }[] = [
 ];
 
 let _root: HTMLElement | null = null;
+onDashboardScaleChange(value => {
+  const select = _root?.querySelector<HTMLSelectElement>("#set-dashboard-scale");
+  if (select) select.value = String(value);
+});
 let _settings: TeamSettings = { team_name: "", lead_id: "", tagline: "", owner_name: "", owner_chat_id: "", locale: "ko", dm_capture: true };
 // 첫 세팅 락: 팀명+팀장ID 통과해야 팀원 영입. GET /settings가 setup_complete/lead_actor_id 반환.
 let _setupComplete = false;
@@ -846,6 +851,7 @@ function render(): void {
     <div data-scroll class="h-full overflow-y-auto">
       <div class="max-w-3xl mx-auto px-4 md:px-6 py-5 pb-20 space-y-5">
         <div class="text-sm text-slate-500">${pick("팀 이름·팀장·팀원을 직접 관리합니다. 처음엔 핵심만 — 자세한 운영 설정은 점차 추가됩니다.", "Manage your team name·lead·members directly. Just the essentials at first — detailed operational settings are added over time.")}</div>
+        ${card(pick("화면 크기", "Display size"), "display", `<label class="flex items-center justify-between gap-4 text-[13px] text-slate-300" for="set-dashboard-scale"><span>${pick("전체 대시보드 배율", "Dashboard scale")}</span><select id="set-dashboard-scale" class="h-8 px-3 rounded-md border border-surface-3 bg-surface-2 text-slate-100">${DASHBOARD_SCALE_STEPS.map(value => `<option value="${value}"${value === dashboardScale() ? " selected" : ""}>${value}%</option>`).join("")}</select></label><p class="mt-2 text-[12px] text-slate-500">${pick("⌘= 크게 · ⌘− 작게 · ⌘0 기본 크기. 이 기기에 기억합니다.", "⌘= larger · ⌘− smaller · ⌘0 reset. Remembered on this device.")}</p>`)}
         ${identity}
         ${slackChannelsHtml()}
         ${systemOpHtml()}
@@ -860,6 +866,7 @@ function render(): void {
 
 function wire(): void {
   if (!_root) return;
+  _root.querySelector<HTMLSelectElement>("#set-dashboard-scale")?.addEventListener("change", event => setDashboardScale(Number((event.currentTarget as HTMLSelectElement).value)));
   wireSystemOp(); // 시스템 OP 패널 핸들러(P0)
   // 언어 토글은 우상단 헤더 깃발(MetricsBar #locale-flag)로 이전 — 여기선 제거.
   // 저장 + 필수 필드 검증(팀 이름·팀장 ID·팀장 이름)

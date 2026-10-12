@@ -718,3 +718,11 @@ select.dash-select {
   background-size: 0.75rem;
   padding-right: 2rem;
 }
+
+/* Scale the root so body-mounted dialogs share the same coordinate system.
+   Viewport units do not shrink with CSS zoom; compensate the dashboard shell height. */
+:root { --dashboard-scale: 1; zoom: var(--dashboard-scale); }
+body.h-screen, #app.h-screen { height: calc(100vh / var(--dashboard-scale)); }
+@supports (height: 100dvh) {
+  body.h-screen, #app.h-screen { height: calc(100dvh / var(--dashboard-scale)); }
+}

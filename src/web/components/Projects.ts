@@ -1,6 +1,6 @@
-import { browseListClass, browseRowClass, browseDetailClass, browseTabClass } from "./BrowseStyles";
+import { browseListClass, browseTabClass } from "./BrowseStyles";
 // Projects — 프로젝트 목록·문서 열람 탭 (계약 docs/PROJECTS_TAB.md §4).
-// Reports와 목록·상세 스타일을 공유한다. 원본은 GitHub md, 여기서는 ★읽기만★ 한다.
+// Reports와 색 토큰·목록 여백을 공유한다. 원본은 GitHub md, 여기서는 ★읽기만★ 한다.
 //   GET  <base>/api/projects                 → { projects: [ProjectSummary] }
 //   GET  <base>/api/projects/:id/doc/:key    → ProjectDoc (html 은 서버가 정제한 것 — 그대로 innerHTML)
 //   GET  <base>/api/projects/:id/doc/:key/raw → text/markdown (MD 토글)
@@ -11,6 +11,8 @@ import { browseListClass, browseRowClass, browseDetailClass, browseTabClass } fr
 //   (사용자가 문서 안에서 직접 펼친 패널은 그 세션에선 다시 접지 않는다) — lib/panels.ts.
 // 개발 폴백: `?fixture=1` 일 때만, API 가 404 면 fixtures/projects-sample.example.json 을 쓴다.
 
+import { dashboardScaleFactor, layoutPixels } from "../lib/dashboardScale";
+import { projectsCss } from "./ProjectsStyles";
 import { pick } from "../i18n";
 import { mdInlineToHtml } from "../lib/mdInline";
 import { applyPanelCollapsed, isPanelCollapsed, onPanelChange, PANEL_IDS, type Panel } from "../lib/panels";
@@ -64,7 +66,7 @@ let _root: HTMLElement | null = null;
 let _projects: ProjectSummary[] = [];
 let _loaded = false;
 let _loadError: string | null = null;
-let _view: "list" | "detail" | "doc" = "list";
+let _view: "list" | "doc" = "list";
 let _curId: string | null = null;
 let _curTrack: string | null = null;
 let _listScrollTop = 0;
@@ -87,44 +89,6 @@ let _panelsTouched = new Set<Panel>();
 const _keepOpen = new Set<Panel>();
 let _panelUnsub: (() => void) | null = null;
 let _visible = true; // main.ts 가 Projects 탭을 보이는 중인가
-
-// 글자 크기 — 문서 화면에서만, ⌘= / ⌘− / ⌘0. 크롬처럼 바꿀 때 상단에 % 를 잠깐 띄운다(팀장 2026-09-18).
-export const ZOOM_STEPS = [90, 100, 110, 125] as const;
-const ZOOM_KEY = "bill-dash-projects-zoom";
-let _zoom = 100;
-let _keysBound = false;
-let _zoomBadgeTimer: ReturnType<typeof setTimeout> | null = null;
-function loadZoom(): void { try { const v = Number(window.localStorage.getItem(ZOOM_KEY)); if ((ZOOM_STEPS as readonly number[]).includes(v)) _zoom = v; } catch { /* 저장 없음 */ } }
-function applyZoom(show: boolean): void {
-  _root?.style.setProperty("--projects-zoom", String(_zoom / 100));
-  try { window.localStorage.setItem(ZOOM_KEY, String(_zoom)); } catch { /* 표시만 */ }
-  if (!show) return;
-  let badge = document.getElementById("projects-zoom-badge");
-  if (!badge) { badge = document.createElement("div"); badge.id = "projects-zoom-badge"; document.body.appendChild(badge); }
-  badge.textContent = `${_zoom}%`;
-  badge.classList.remove("out");
-  if (_zoomBadgeTimer) clearTimeout(_zoomBadgeTimer);
-  _zoomBadgeTimer = setTimeout(() => { badge?.classList.add("out"); _zoomBadgeTimer = setTimeout(() => badge?.remove(), 300); }, 900);
-}
-/** ⌘=(+) 크게 · ⌘− 작게 · ⌘0 100%. 문서 화면이 보일 때만 잡고, 그때만 브라우저 기본 확대를 막는다. */
-export function handleZoomKey(e: KeyboardEvent): boolean {
-  if (_view !== "doc" || !_visible || !(e.metaKey || e.ctrlKey) || e.altKey) return false;
-  const k = e.key;
-  const i = (ZOOM_STEPS as readonly number[]).indexOf(_zoom);
-  let next = _zoom;
-  if (k === "=" || k === "+") next = ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, i + 1)]!;
-  else if (k === "-" || k === "_") next = ZOOM_STEPS[Math.max(0, i - 1)]!;
-  else if (k === "0") next = 100;
-  else return false;
-  e.preventDefault();
-  _zoom = next; applyZoom(true);
-  return true;
-}
-export function currentZoom(): number { return _zoom; }
-function bindZoomKeys(): void {
-  if (_keysBound) return; _keysBound = true;
-  document.addEventListener("keydown", (e) => { handleZoomKey(e); });
-}
 
 function watchPanels(): void {
   if (_panelUnsub) return;
@@ -309,12 +273,7 @@ function injectStyle(): void {
   if (document.getElementById("projects-prose-style")) return;
   const st = document.createElement("style");
   st.id = "projects-prose-style";
-  st.textContent = proseCss(HEAD_OFFSET) + `
-.projects-prose{font-size:calc(14.5px * var(--projects-zoom, 1))}
-.projects-raw{font-size:calc(12.5px * var(--projects-zoom, 1))}
-.projects-todo-status{zoom:var(--projects-zoom, 1)}
-#projects-zoom-badge{position:fixed;top:56px;left:50%;transform:translateX(-50%);z-index:80;padding:4px 12px;border-radius:8px;background:rgb(var(--surface-0) / .82);color:rgb(var(--slate-50));font-size:12px;font-weight:600;letter-spacing:.02em;pointer-events:none;transition:opacity .25s;box-shadow:0 4px 14px rgba(0,0,0,.25)}
-#projects-zoom-badge.out{opacity:0}`;
+  st.textContent = proseCss(HEAD_OFFSET) + projectsCss;
   document.head.appendChild(st);
 }
 
@@ -333,7 +292,7 @@ function chipHtml(p: ProjectSummary, d: ProjectSummary["docs"][number]): string 
   if (!d.exists) {
     return `<span class="${base} text-slate-600 border-surface-3/60 bg-transparent cursor-not-allowed" data-doc="${d.key}" data-disabled="1" aria-disabled="true" title="${pick(`${d.path} 없음`, `${d.path} missing`)}">${DOC_LABEL[d.key]}</span>`;
   }
-  return `<button class="${base} text-txt-green border-accent-green/30 bg-accent-green/10 hover:brightness-110" data-id="${escape(p.id)}" data-doc="${d.key}" title="${pick(`${d.path} 보기`, `Open ${d.path}`)}">${DOC_LABEL[d.key]}</button>`;
+  return `<button class="${base}" data-id="${escape(p.id)}" data-doc="${d.key}" title="${pick(`${d.path} 보기`, `Open ${d.path}`)}">${DOC_LABEL[d.key]}</button>`;
 }
 
 function currentTasks(p: ProjectSummary): string[] {
@@ -345,57 +304,51 @@ function currentTasks(p: ProjectSummary): string[] {
 function countsHtml(p: ProjectSummary): string {
   return `<span class="projects-counts inline-flex items-center gap-2 text-[12px] whitespace-nowrap"><span class="text-txt-amber">${pick("진행", "Doing")} <span data-count="doing">${p.todo?.doing ?? 0}</span></span><span class="text-txt-blue">${pick("계획", "Plan")} <span data-count="plan">${p.todo?.plan ?? 0}</span></span><span class="text-txt-green">${pick("완료", "Done")} <span data-count="done">${p.todo?.done ?? 0}</span></span></span>`;
 }
+export function taskLabel(title: string): string {
+  return title.replace(/^\s*(?:[\p{Extended_Pictographic}\uFE0F\u200D★✦✓✔]+\s*)+/u, "")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/[*`]/g, "").replace(/\s+/g, " ").trim();
+}
+function trackHtml(p: ProjectSummary, t: ProjectTrackSummary): string {
+  const track = p.tracks ? t.id : "";
+  if ("error" in t) return `<section class="projects-track" data-track="${escape(track)}"><strong>${escape(t.name)}</strong><p class="text-txt-amber text-[12px]">${pick("트랙을 불러오지 못했습니다", "Track unavailable")} · ${escape(t.error)}</p></section>`;
+  const tasks = [...new Set(currentTasks(t).map(taskLabel).filter(Boolean))];
+  const total = t.todo.doing + t.todo.plan + t.todo.done;
+  const percent = total ? Math.round(t.todo.done / total * 100) : 0;
+  const task = (title: string) => `<li class="projects-task" title="${escape(title)}">${escape(title)}</li>`;
+  return `<section class="projects-track" data-track="${escape(track)}">
+    <div class="projects-track-line">${(p.tracks?.length ?? 1) > 1 ? `<h2 class="projects-track-name">${escape(t.name)}</h2>` : ""}${countsHtml(t)}
+      <div class="projects-progress" role="progressbar" aria-label="${escape(t.name)} ${pick("완료", "Done")}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><span style="width:${percent}%"></span></div>
+      <div class="projects-docs">${t.docs.map(d => chipHtml({ ...t, id: p.id }, d).replace('data-id=', `data-track="${escape(track)}" data-id=`)).join("")}</div>
+      <a class="projects-github" href="${escape(githubUrl(t))}" target="_blank" rel="noopener">GitHub</a>
+      <time class="projects-updated" data-fetched-at="${escape(t.fetchedAt)}" datetime="${escape(t.fetchedAt)}">${relTime(t.fetchedAt)}${t.stale ? " · stale" : ""}</time>
+    </div>
+    <div class="projects-now"><span>${pick("지금 과제", "Now")}</span><div class="min-w-0"><ul class="projects-tasks">${tasks.slice(0,3).map(task).join("") || `<li class="text-slate-500">${pick("진행중인 과제 없음", "No task in progress")}</li>`}</ul>
+      ${tasks.length > 3 ? `<details class="projects-more"><summary>+${tasks.length - 3} ${pick("펼침", "more")}</summary><ul class="projects-tasks">${tasks.slice(3).map(task).join("")}</ul></details>` : ""}</div></div>
+  </section>`;
+}
 function renderList(): void {
   if (!_root) return;
-  const rows = _projects.map(p => `<button type="button" class="projects-row ${browseRowClass}" data-id="${escape(p.id)}">
-    <span class="flex flex-wrap items-center gap-x-4 gap-y-1 min-w-0">
-      <span class="min-w-0 flex-1 basis-40"><span class="block text-[15px] font-semibold text-slate-100 truncate">${escape(p.name)}</span>
-      <span class="text-[13px] text-slate-400 leading-relaxed mt-1 line-clamp-1">${escape(p.intro)}</span></span>
-      ${countsHtml(p)}<span class="text-[12px] tabular-nums text-slate-500" data-fetched-at="${escape(p.fetchedAt)}">${relTime(p.fetchedAt)}</span>
-      ${p.stale ? '<span class="text-[11px] text-txt-amber">stale</span>' : ""}
-      ${p.tracks?.some(t => "error" in t) ? `<span class="text-[11px] text-txt-amber">${pick("일부 트랙 조회 실패", "Some tracks unavailable")}</span>` : ""}
-    </span></button>`).join("");
+  const rows = _projects.map(p => `<article tabindex="-1" class="projects-row projects-card${p.id === _curId ? " projects-highlight" : ""}" data-id="${escape(p.id)}">
+    <header class="projects-card-head"><h1>${escape(p.name)}</h1><p>${escape(p.intro)}</p></header>
+    ${(p.tracks ?? [p]).map(t => trackHtml(p,t)).join("")}</article>`).join("");
   _root.innerHTML = `<div data-projects-list-scroll class="h-full overflow-y-auto overflow-x-hidden"><div class="${browseListClass}">
-    <div class="sticky top-0 z-20 -mx-4 md:-mx-8 px-4 md:px-8 py-3 bg-surface-1/95 backdrop-blur border-b border-surface-3 flex items-center gap-2">
-      <span class="text-[15px] font-semibold text-slate-100">${pick("Projects · 프로젝트", "Projects")}</span><span class="text-[12px] text-slate-500">${_projects.length}</span>
-      <button id="projects-retry" class="ml-auto h-8 px-3 rounded-lg border border-surface-3 text-[12px] text-slate-300">${_loadError ? pick("다시 시도", "Retry") : pick("새로 고침", "Refresh")}</button></div>
+    <div class="projects-list-head"><span class="text-[15px] font-semibold text-slate-100">${pick("Projects · 프로젝트", "Projects")}</span><span class="text-[12px] text-slate-500">${_projects.length}</span>
+      <button id="projects-retry" type="button" class="projects-refresh ml-auto" title="${_loadError ? pick("다시 시도", "Retry") : pick("새로 고침", "Refresh")}" aria-label="${_loadError ? pick("다시 시도", "Retry") : pick("새로 고침", "Refresh")}">${renderIcon("refresh-cw", { size: 15 })}</button></div>
     ${_loadError ? `<div class="projects-error py-4 text-[13px] text-txt-red">${pick("프로젝트 목록을 불러오지 못했습니다", "Failed to load projects")} · ${escape(_loadError)}</div>` : ""}
     ${rows || (_loadError ? "" : `<div class="py-16 text-center text-slate-500">${pick("등록된 프로젝트가 없습니다", "No projects registered")}</div>`)}</div></div>`;
   const scroll = _root.querySelector<HTMLElement>("[data-projects-list-scroll]");
   if (scroll) scroll.scrollTop = _listScrollTop;
+  const card = Array.from(_root.querySelectorAll<HTMLElement>(".projects-card")).find(el => el.dataset.id === _curId);
+  card?.scrollIntoView?.({ block: "center" });
   _root.querySelector("#projects-retry")?.addEventListener("click", () => { void reload(); });
-  _root.querySelectorAll<HTMLButtonElement>(".projects-row").forEach(btn => btn.addEventListener("click", () => {
-    _listScrollTop = scroll?.scrollTop ?? 0; openDetail(btn.dataset.id!);
-  }));
-}
-function openDetail(id: string): void {
-  leaveDocPanels(); _view = "detail"; _curId = id; _curKey = null; _curDoc = null; _curTrack = null;
-  writeUrlState(id, null); renderDetail();
-}
-function renderDetail(): void {
-  if (!_root || !_curId) return;
-  const p = _projects.find(p => p.id === _curId);
-  if (!p) { goList(); return; }
-  const tracks = p.tracks ?? [p];
-  const sections = tracks.map(t => {
-    const track = p.tracks ? t.id : "";
-    if ("error" in t) return `<section class="projects-track border-b border-surface-3 py-5" data-track="${escape(track)}"><h2 class="text-[15px] font-semibold text-slate-100">${escape(t.name)}</h2><p class="text-[13px] text-txt-amber mt-2">${pick("트랙을 불러오지 못했습니다", "Track unavailable")} · ${escape(t.error)}</p></section>`;
-    return `<section class="projects-track border-b border-surface-3 py-5 min-w-0" data-track="${escape(track)}">
-      <div class="flex items-center gap-3 flex-wrap"><h2 class="text-[15px] font-semibold text-slate-100">${escape(t.name)}</h2>${countsHtml(t)}
-      <a class="projects-github text-[12px] text-slate-400 hover:text-slate-100" href="${escape(githubUrl(t))}" target="_blank" rel="noopener">GitHub</a>
-      <a class="projects-window text-[12px] text-slate-400 hover:text-slate-100" href="${escape(pageUrl(p.id, "readme", "html", track || null))}" target="_blank" rel="noopener">${pick("새창", "Window")}</a>
-      <span class="text-[12px] text-slate-500">${relTime(t.fetchedAt)} ${t.stale ? "· stale" : ""}</span></div>
-      <div class="flex items-center gap-1.5 flex-wrap mt-3">${t.docs.map(d => chipHtml({ ...t, id: p.id }, d).replace('data-id=', `data-track="${escape(track)}" data-id=`)).join("")}</div>
-      <div class="mt-4 text-[12px] font-medium text-slate-500">${pick("지금 과제", "Now")}</div>
-      <ul class="projects-tasks mt-2 space-y-1">${currentTasks(t).map(title => `<li class="text-[13px] text-slate-300 break-words">${mdInlineToHtml(title)}</li>`).join("") || `<li class="text-[13px] text-slate-500">${pick("진행중인 과제 없음", "No task in progress")}</li>`}</ul></section>`;
-  }).join("");
-  _root.innerHTML = `<div data-projects-detail-scroll class="h-full overflow-y-auto overflow-x-hidden"><div class="${browseDetailClass}">
-    <button id="projects-back" class="text-[13px] font-medium text-slate-300 hover:text-slate-100">← ${pick("목록", "List")}</button>
-    <h1 class="text-xl font-semibold text-slate-100 mt-4 break-words">${escape(p.name)}</h1><p class="text-[13px] text-slate-400 mt-2 break-words">${escape(p.intro)}</p>${sections}</div></div>`;
-  _root.querySelector("#projects-back")?.addEventListener("click", goList);
   _root.querySelectorAll<HTMLButtonElement>("button.projects-chip").forEach(btn => btn.addEventListener("click", () => {
-    _curTrack = btn.dataset.track || null; void openDoc(p.id, btn.dataset.doc as ProjectDocKey);
+    _listScrollTop = scroll?.scrollTop ?? 0;
+    _curTrack = btn.dataset.track || null; void openDoc(btn.dataset.id!, btn.dataset.doc as ProjectDocKey);
   }));
+}
+function showListCard(id: string): void {
+  leaveDocPanels(); _view = "list"; _curId = id; _curKey = null; _curDoc = null; _curTrack = null;
+  writeUrlState(id, null); renderList();
 }
 
 async function reload(): Promise<void> {
@@ -504,9 +457,9 @@ async function renderDoc(): Promise<void> {
   const selected = parent?.tracks?.find(t => t.id === _curTrack);
   const project = selected && !("error" in selected) ? selected : parent;
   const track = _curTrack;
-  const backBtn = `<button id="projects-back" title="${pick("프로젝트 상세로", "Back to project details")}" class="inline-flex items-center gap-1.5 shrink-0 text-txt-green text-sm font-semibold px-3 py-1.5 rounded-lg border border-accent-green/45 bg-accent-green/12 hover:bg-accent-green/20 hover:border-accent-green/70 transition-colors">← ${pick("상세", "Details")}</button>`;
+  const backBtn = `<button id="projects-back" title="${pick("프로젝트 목록으로", "Back to project list")}" class="projects-back">← ${pick("목록", "List")}</button>`;
   _root.innerHTML = `<div class="h-full overflow-y-auto"><div class="w-full px-4 md:px-6 py-5">${backBtn}<div class="text-slate-500 py-16 text-center">${pick("문서 불러오는 중…", "Loading document…")}</div></div></div>`;
-  _root.querySelector("#projects-back")?.addEventListener("click", () => openDetail(id));
+  _root.querySelector("#projects-back")?.addEventListener("click", () => showListCard(id));
 
   let doc: ProjectDoc;
   try {
@@ -514,7 +467,7 @@ async function renderDoc(): Promise<void> {
   } catch (e) {
     if (!_root || _curId !== id || _curKey !== key || _curTrack !== track) return;
     _root.innerHTML = `<div class="h-full overflow-y-auto"><div class="w-full px-4 md:px-6 py-5">${backBtn}<div class="projects-error text-center text-txt-red py-16"><div class="font-medium">${pick("문서를 불러오지 못했습니다", "Failed to load document")}</div><div class="text-xs text-slate-500 mt-1">${escape(id)}/${escape(key)} · ${escape((e as Error).message)}</div></div></div></div>`;
-    _root.querySelector("#projects-back")?.addEventListener("click", () => openDetail(id));
+    _root.querySelector("#projects-back")?.addEventListener("click", () => showListCard(id));
     return;
   }
   if (!_root || _curId !== id || _curKey !== key || _curTrack !== track) return;
@@ -522,17 +475,17 @@ async function renderDoc(): Promise<void> {
   enterDocPanels();
 
   const repo = project?.repo ?? "";
-  const gh = repo ? `<a id="projects-open-github" href="${escape(blobUrl({ repo, sha: doc.sha }, doc.path))}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-[12px] font-semibold text-slate-300 hover:text-accent-greenSoft whitespace-nowrap" title="${pick("GitHub 에서 이 파일 보기", "View this file on GitHub")}">${renderIcon("github", { size: 13 })}<span>GitHub</span></a>` : "";
-  // 문서 전환 칩 — 목록 카드와 같은 모양, 현재 문서는 채운 모양. 없는 문서는 비활성.
+  const gh = repo ? `<a id="projects-open-github" href="${escape(blobUrl({ repo, sha: doc.sha }, doc.path))}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-[12px] font-semibold text-slate-300 hover:text-accent-greenSoft whitespace-nowrap" aria-label="GitHub" title="${pick("GitHub 에서 이 파일 보기", "View this file on GitHub")}">${renderIcon("github", { size: 13 })}</a>` : "";
+  // 문서 전환은 밑줄 탭으로, 등록된 문서만 표시한다.
   const docChips = DOC_KEYS.filter((k) => !project || project.docs.some((x) => x.key === k)).map((k) => {
     const d = project?.docs.find((x) => x.key === k);
-    const base = `projects-doc-chip ${browseTabClass(k === key)}`;
+    const base = `projects-doc-chip${k === key ? " is-active" : ""}`;
     if (d && !d.exists) return `<span class="${base} text-slate-600 border-surface-3/60 bg-transparent cursor-not-allowed" aria-disabled="true">${DOC_LABEL[k]}</span>`;
     return k === key
-      ? `<span class="${base} text-slate-50 border-accent-green/70 bg-accent-green/25" aria-current="page">${DOC_LABEL[k]}</span>`
-      : `<button class="${base} text-txt-green border-accent-green/30 bg-accent-green/10 hover:brightness-110" type="button" data-doc-chip="${k}">${DOC_LABEL[k]}</button>`;
+      ? `<span class="${base}" aria-current="page">${DOC_LABEL[k]}</span>`
+      : `<button class="${base}" type="button" data-doc-chip="${k}">${DOC_LABEL[k]}</button>`;
   }).join("");
-  const modeBtn = (m: "html" | "md") => `<button class="projects-mode ${browseTabClass(_mode === m)}" data-mode="${m}" aria-pressed="${_mode === m}">${m.toUpperCase()}</button>`;
+  const modeBtn = (m: "html" | "md") => `<button class="projects-mode${_mode === m ? " is-active" : ""}" data-mode="${m}" aria-pressed="${_mode === m}">${m.toUpperCase()}</button>`;
   const isTodo = key === "todo";
   const todoTabBtn = (t: "status" | "all", label: string) => `<button class="projects-todo-tab px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors ${_todoTab === t ? "text-slate-100 bg-surface-0 border-surface-3" : "text-slate-400 border-transparent hover:text-slate-200"}" data-todo-tab="${t}" aria-pressed="${_todoTab === t}">${label}</button>`;
   const stale = doc.stale ? `<span class="px-1.5 py-0.5 rounded text-[11px] font-semibold border text-txt-amber border-amber-400/25 bg-amber-400/10">stale</span>` : "";
@@ -547,35 +500,26 @@ async function renderDoc(): Promise<void> {
   }
 
   _root.innerHTML = `
-    <div data-projects-doc-scroll class="h-full overflow-y-auto overflow-x-hidden">
-      <div class="${browseListClass} min-w-0">
-        <div data-projects-doc-head class="sticky top-0 z-20 -mx-4 md:-mx-6 px-4 md:px-6 bg-surface-1/95 backdrop-blur border-b border-surface-3">
-          <div class="flex items-center gap-3 py-2 min-w-0 flex-wrap">
-            ${backBtn}
-            <div class="min-w-0 flex items-baseline gap-2 flex-wrap">
-              <span class="text-[15px] font-semibold text-slate-100 truncate" title="${escape(doc.title)}">${escape(doc.title)}</span>
-              <span class="text-[11px] text-slate-500 leading-snug break-all">${escape(project?.name ?? id)} · ${escape(doc.path)} · <span class="font-mono">${escape(doc.sha.slice(0, 7))}</span> ${stale}</span>
-              ${gh}
-            </div>
-            <span class="ml-auto"></span>
-            <div class="flex items-center gap-1 flex-wrap" role="group" aria-label="${pick("문서 전환", "Switch document")}">${docChips}</div>
-            ${showToc ? `<button id="projects-toc-toggle" type="button" class="md:hidden inline-flex items-center gap-1 text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-surface-3 text-slate-300 bg-surface-2" aria-expanded="${_tocMobileOpen}">${pick("목차", "Contents")}</button>` : ""}
-            <a id="projects-open-window" href="${escape(pageUrl(id, key, _mode))}" target="_blank" rel="noopener" title="${pick("새창에서 보기 (현재 모드로)", "Open in a new window (current mode)")}" class="inline-flex items-center justify-center w-8 h-7 rounded-lg border border-surface-3 text-slate-300 bg-surface-2 hover:text-slate-100 hover:border-accent-green/40">${renderIcon("external-link", { size: 14 })}</a>
-            <div class="flex shrink-0" role="group" aria-label="HTML | MD">${modeBtn("html")}${modeBtn("md")}</div>
-          </div>
-          ${isTodo && _mode === "html" ? `<div class="flex items-center gap-2 pb-2"><div class="flex gap-1 rounded-lg border border-surface-3 bg-surface-2 p-0.5">${todoTabBtn("status", pick("현재 상태", "Status"))}${todoTabBtn("all", pick("전체", "All"))}</div></div>` : ""}
+    <div data-projects-doc-scroll class="projects-doc-scroll h-full overflow-y-auto overflow-x-hidden">
+      <div class="projects-doc-shell">
+        <div data-projects-doc-head class="projects-doc-head">
+          ${backBtn}
+          <div class="projects-breadcrumb" title="${escape(parent?.name ?? id)} / ${escape(project?.name ?? "")} / ${escape(doc.path)}">${escape(parent?.name ?? id)}${parent?.tracks ? ` / ${escape(project?.name ?? _curTrack)}` : ""} <span>/ ${escape(doc.path)}</span>${stale}</div>
+          <div class="projects-doc-tabs" role="group" aria-label="${pick("문서 전환", "Switch document")}">${docChips}</div>
+          <div class="projects-tools">
+          <div class="projects-modes" role="group" aria-label="HTML | MD">${modeBtn("html")}${modeBtn("md")}</div>
+          ${gh}<a id="projects-open-window" href="${escape(pageUrl(id, key, _mode))}" target="_blank" rel="noopener" aria-label="${pick("새창", "Open in new window")}" title="${pick("새창", "Open in new window")}">${renderIcon("external-link", { size: 14 })}</a></div>
+          ${isTodo && _mode === "html" ? `<div class="projects-status-tabs">${todoTabBtn("status", pick("현재 상태", "Status"))}${todoTabBtn("all", pick("전체", "All"))}</div>` : ""}
         </div>
-        <div class="pt-4 min-w-0 ${showToc ? "grid grid-cols-1 md:grid-cols-[240px_minmax(0,1fr)] gap-5" : ""}">
-          ${showToc && cur ? `<aside id="projects-toc" class="${_tocMobileOpen ? "block" : "hidden"} md:block md:sticky md:top-24 md:self-start md:max-h-[calc(100vh-8rem)] md:overflow-y-auto rounded-xl border border-surface-3 bg-surface-2 px-2 py-2.5 min-w-0">
-            <div class="text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-1 px-2">${pick("목차", "Contents")}</div>
-            ${tocTreeHtml(secs, cur)}
-          </aside>` : ""}
+        <div class="projects-doc-layout${showToc ? " has-toc" : ""}">
+          ${showToc && cur ? `<div class="projects-toc-wrap"><button id="projects-toc-toggle" type="button" aria-expanded="${_tocMobileOpen}" aria-controls="projects-toc">${pick("목차", "Contents")} ${_tocMobileOpen ? "▴" : "▾"}</button>
+          <aside id="projects-toc" class="${_tocMobileOpen ? "" : "hidden"}"><div class="projects-toc-title">${pick("목차", "Contents")}</div>${tocTreeHtml(secs, cur)}</aside></div>` : ""}
           <div id="projects-viewer" class="min-w-0"></div>
         </div>
       </div>
     </div>`;
 
-  _root.querySelector("#projects-back")?.addEventListener("click", () => openDetail(id));
+  _root.querySelector("#projects-back")?.addEventListener("click", () => showListCard(id));
   _root.querySelectorAll<HTMLButtonElement>("[data-doc-chip]").forEach((b) => b.addEventListener("click", () => { void openDoc(id, b.dataset.docChip as ProjectDocKey); }));
   _root.querySelector<HTMLButtonElement>("#projects-toc-toggle")?.addEventListener("click", () => setMobileToc(!_tocMobileOpen));
   _root.querySelectorAll<HTMLButtonElement>(".projects-mode").forEach((b) => b.addEventListener("click", () => {
@@ -589,6 +533,8 @@ async function renderDoc(): Promise<void> {
     _todoTab = t; void renderDoc();
   }));
 
+  measureHeadOffset();
+  observeHead();
   const viewer = _root.querySelector<HTMLDivElement>("#projects-viewer");
   if (!viewer) return;
   if (_mode === "md") {
@@ -596,7 +542,7 @@ async function renderDoc(): Promise<void> {
     try {
       const raw = await loadRaw(id, key);
       if (_mode !== "md" || _curKey !== key || _curTrack !== track) return;
-      viewer.innerHTML = `<pre class="projects-raw rounded-xl border border-surface-3 bg-surface-2 p-4 md:p-6 overflow-x-auto">${escape(raw)}</pre>`;
+      viewer.innerHTML = `<pre class="projects-raw projects-reading overflow-x-auto">${escape(raw)}</pre>`;
     } catch (e) {
       viewer.innerHTML = `<div class="rounded-xl border border-surface-3 bg-surface-2 p-4 md:p-6 text-txt-red">${pick("원문 불러오기 실패", "Failed to load source")}: ${escape((e as Error).message)}</div>`;
     }
@@ -610,12 +556,10 @@ async function renderDoc(): Promise<void> {
   // 본문은 전체 문서 한 번에. 트리(절 헤딩·소제목) 클릭 → 그 헤딩으로 스크롤 + 현재 절 갱신(&sec=). 스크롤 → 현재 절·헤딩 추적.
   if (!cur) return;
   writeUrlState(id, key, secs.length > 1 ? _curSec : null);
-  viewer.innerHTML = `<article class="projects-prose rounded-xl border border-surface-3 bg-surface-2 p-5 md:p-8" data-sec="${escape(_curSec ?? "")}">${doc.html}</article>`;
+  viewer.innerHTML = `<article class="projects-prose projects-reading" data-sec="${escape(_curSec ?? "")}">${doc.html}</article>`;
   decorateMermaid(viewer);
   if (_curSec && secs.length > 1 && cur && secs[0] !== cur) scrollToAnchor(viewer, cur.anchor, false);
   bindTocTree(viewer, secs);
-  measureHeadOffset();
-  observeHead();
   watchScroll(viewer, secs);
 }
 
@@ -649,7 +593,7 @@ function paintToc(secs: DocSection[]): void {
   const on = toc.querySelector<HTMLElement>('.projects-toc-children a[aria-current="true"]') ?? toc.querySelector<HTMLElement>('.projects-toc-head[aria-current="true"]');
   if (on && typeof on.getBoundingClientRect === "function" && toc.scrollHeight > toc.clientHeight) {
     const r = on.getBoundingClientRect(); const t = toc.getBoundingClientRect();
-    if (r.top < t.top || r.bottom > t.bottom) toc.scrollTop += r.top - t.top - t.height / 3;
+    if (r.top < t.top || r.bottom > t.bottom) toc.scrollTop += layoutPixels(r.top - t.top - t.height / 3);
   }
 }
 
@@ -669,8 +613,8 @@ function bindTocTree(viewer: HTMLElement, secs: DocSection[]): void {
     const a = b.dataset.sec ?? "";
     _scrollLock = Date.now() + 900; // 부드러운 스크롤 동안 스크롤 추적이 되돌리지 않게
     setCurrent(secs, a, null);
-    scrollToAnchor(viewer, a);
     closeMobile();
+    scrollToAnchor(viewer, a);
   }));
   toc.querySelectorAll<HTMLButtonElement>(".projects-toc-caret[data-toggle]").forEach((b) => b.addEventListener("click", () => {
     const a = b.dataset.toggle ?? "";
@@ -685,8 +629,8 @@ function bindTocTree(viewer: HTMLElement, secs: DocSection[]): void {
     const anchor = a.dataset.anchor ?? "";
     _scrollLock = Date.now() + 900;
     setCurrent(secs, sectionOf(secs, anchor)?.anchor ?? _curSec, anchor);
-    scrollToAnchor(viewer, anchor);
     closeMobile();
+    scrollToAnchor(viewer, anchor);
   }));
 }
 
@@ -703,9 +647,11 @@ function watchScroll(viewer: HTMLElement, secs: DocSection[]): void {
     _scrollRaf = requestAnimationFrame(() => {
       _scrollRaf = 0;
       if (Date.now() < _scrollLock) return;
-      const top = scroller.getBoundingClientRect().top + _headOffset + 8; // 헤딩이 sticky 헤더 아래(scroll-margin-top) 에 닿으면 그 헤딩
+      const top = scroller.getBoundingClientRect().top + (_headOffset + 8) * dashboardScaleFactor(); // 헤딩이 sticky 헤더 아래(scroll-margin-top) 에 닿으면 그 헤딩
       let last: HTMLElement | null = null;
       for (const h of headings) { if (h.getBoundingClientRect().top <= top) last = h; else break; }
+      // A short final section cannot reach the toolbar; retain its selection at the end.
+      if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 8) last = headings.at(-1) ?? last;
       const anchor = last?.id ?? "";
       const sec = anchor ? sectionOf(secs, anchor) : secs[0]!;
       const head = sec && anchor !== sec.anchor ? anchor : null;
@@ -753,7 +699,7 @@ export function resetProjectsState(): void {
   _view = "list"; _curId = null; _curKey = null; _curDoc = null;
   _mode = "html"; _todoTab = "status"; _curSec = null; _curHead = null; _tocOpen = new Set(); _tocMobileOpen = false; _doneOpen = false;
   _rawCache = new Map();
-  _panelsBefore = null; _panelsTouched = new Set(); _keepOpen.clear(); _visible = true; _scrollLock = 0; _zoom = 100;
+  _panelsBefore = null; _panelsTouched = new Set(); _keepOpen.clear(); _visible = true; _scrollLock = 0;
   _headOffset = HEAD_OFFSET; _headObserver?.disconnect(); _headObserver = null;
   if (_panelUnsub) { _panelUnsub(); _panelUnsub = null; }
 }
@@ -761,16 +707,15 @@ export function resetProjectsState(): void {
 export function renderProjects(root: HTMLElement): void {
   _root = root;
   injectStyle();
-  loadZoom(); applyZoom(false); bindZoomKeys();
+
   const { id, doc, sec, track } = readUrlState();
   _curTrack = track;
-  if (id && !doc) { _view = "detail"; _curId = id; }
+  if (id && !doc) { _view = "list"; _curId = id; }
   if (id && doc) { _view = "doc"; _curId = id; _curKey = doc; _curDoc = null; _curSec = sec; }
   root.innerHTML = `<div class="h-full overflow-y-auto"><div class="max-w-3xl mx-auto px-4 md:px-6 py-5"><div class="text-slate-500 py-16 text-center">${pick("프로젝트 목록 불러오는 중…", "Loading projects…")}</div></div></div>`;
   void ensureLoaded().then(() => {
     if (!_root) return;
     if (_view === "doc" && _curId && _curKey) void renderDoc();
-    else if (_view === "detail") renderDetail();
     else renderList();
   });
 }
