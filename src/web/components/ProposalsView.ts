@@ -267,7 +267,7 @@ function actionModalHtml(modal: ProposalModalState | null, submitting: boolean, 
     : "border-status-blocked/40 bg-status-blocked/16 text-txt-red hover:bg-status-blocked/26";
   return `
     <div data-proposal-action-modal class="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/55 px-4 py-6 sm:items-center">
-      <form data-proposal-action-form class="w-full max-w-md max-h-[calc(100dvh-3rem)] overflow-y-auto rounded-md border border-surface-3 bg-surface-1 p-4 shadow-2xl">
+      <form data-proposal-action-form style="max-height:calc(100dvh / var(--dashboard-scale, 1) - 3rem)" class="w-full max-w-md overflow-y-auto rounded-md border border-surface-3 bg-surface-1 p-4 shadow-2xl">
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
             <h3 class="text-base font-semibold text-slate-100">${escape(title)}</h3>

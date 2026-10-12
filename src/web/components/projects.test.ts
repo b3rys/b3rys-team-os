@@ -742,3 +742,23 @@ describe("Projects multi-track overview", () => {
   });
 
 });
+
+ test("TOC automatic scroll converts viewport displacement at 150%", async () => {
+    const { setDashboardScale } = await import("../lib/dashboardScale");
+    const root = await mount();
+    setDashboardScale(150);
+    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
+    await tick();
+    const toc = root.querySelector<HTMLElement>("#projects-toc")!;
+    const target = root.querySelector<HTMLButtonElement>('.projects-toc-head[data-sec="2-시스템-구조"]')!;
+    Object.defineProperty(toc, "clientHeight", { value: 60 });
+    Object.defineProperty(toc, "scrollHeight", { value: 400 });
+    toc.getBoundingClientRect = () => ({ top: 100, bottom: 190, height: 90 } as DOMRect);
+    target.getBoundingClientRect = () => ({ top: 280, bottom: 310, height: 30 } as DOMRect);
+    toc.scrollTop = 0;
+    try {
+      target.click();
+      expect(target.getAttribute("aria-current")).toBe("true");
+      expect(toc.scrollTop).toBe(100);
+    } finally { setDashboardScale(100); }
+  });

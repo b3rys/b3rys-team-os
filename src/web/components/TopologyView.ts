@@ -288,7 +288,7 @@ export function renderTopology(root: HTMLElement): void {
       <text x="${cx + 120}" y="${(yTop + yBus) / 2}" font-size="8" fill="#475569">↓ capture · ⇡ mirror</text>`;
 
     return `
-      <svg viewBox="0 0 ${W} ${H}" width="100%" style="max-height:64vh" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="0 0 ${W} ${H}" width="100%" style="max-height:calc(64vh / var(--dashboard-scale, 1))" preserveAspectRatio="xMidYMid meet">
         <defs>
           <marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#64748b"/></marker>
           <marker id="arrow-active" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#06b6d4"/></marker>

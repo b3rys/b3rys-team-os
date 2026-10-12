@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
+import { setDashboardScale } from "../lib/dashboardScale";
 import { renderAgentSidebar } from "./AgentCard";
 import { store, type Agent } from "../store";
 
@@ -127,3 +128,38 @@ describe("AgentCard drag reorder", () => {
     expect(dot).toBeTruthy();
   });
 });
+
+ test("reorder animation uses layout pixels at 150%", () => {
+    const win = installDom();
+    localStorage.clear();
+    store.getState().setAgents([agent("a", "A"), agent("b", "B"), agent("c", "C")]);
+    setDashboardScale(150);
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    renderAgentSidebar(root);
+    const frames = new Map<string, Keyframe[]>();
+    const cards = Array.from(root.querySelectorAll<HTMLElement>("[data-agent-id]"));
+    for (const card of cards) {
+      card.getBoundingClientRect = () => {
+        const position = Array.from(root.querySelectorAll("[data-agent-id]")).indexOf(card);
+        return { top: position * 150, bottom: position * 150 + 150, height: 150 } as DOMRect;
+      };
+      card.animate = ((keyframes: Keyframe[]) => {
+        frames.set(card.dataset.agentId!, keyframes);
+        return {} as Animation;
+      }) as HTMLElement["animate"];
+    }
+    const originalElementFromPoint = document.elementFromPoint.bind(document);
+    document.elementFromPoint = () => cards[2]!;
+    try {
+      root.querySelector<HTMLElement>("[data-agent-drag-handle='a']")!.dispatchEvent(pointer(win, "pointerdown", { button: 0, pointerId: 9, clientX: 1, clientY: 1 }));
+      window.dispatchEvent(pointer(win, "pointermove", { pointerId: 9, clientX: 50, clientY: 200 }));
+      expect(frames.get("a")?.[0]?.transform).toBe("translateY(-200px)");
+      expect(frames.get("b")?.[0]?.transform).toBe("translateY(100px)");
+      expect(frames.get("c")?.[0]?.transform).toBe("translateY(100px)");
+      window.dispatchEvent(pointer(win, "pointerup", { pointerId: 9, clientX: 50, clientY: 200 }));
+    } finally {
+      document.elementFromPoint = originalElementFromPoint;
+      setDashboardScale(100);
+    }
+  });
