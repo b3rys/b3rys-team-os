@@ -1,3 +1,4 @@
+import { browseListClass, browseRowClass, browseDetailClass, browseTabClass } from "./BrowseStyles";
 // Reports — 팀 보고서 목록·열람 대시보드 탭.
 // reports.html 로직 포팅(목록·검색·category 필터·상세 md↔html·다운로드·요청하기).
 // API는 origin 루트 /reports/* 를 절대경로로 직접 fetch (대시보드 BASE=/team 과 무관).
@@ -844,7 +845,7 @@ function renderList(): void {
     }).join("");
     const selected = _selectedReportIds.has(r.id);
     return `
-      <div class="reports-card group relative w-full text-left border-b border-surface-3 ${selected ? "bg-accent-green/[0.06]" : ""} px-2 py-3.5 hover:bg-surface-0/70 transition-colors overflow-hidden" data-id="${escape(r.id)}" data-category="${escape(catOf(r))}" role="button" tabindex="0">
+      <div class="reports-card ${browseRowClass} ${selected ? "bg-accent-green/[0.06]" : ""}" data-id="${escape(r.id)}" data-category="${escape(catOf(r))}" role="button" tabindex="0">
         <div class="flex items-start gap-2 2xl:items-center 2xl:gap-4">
           ${_selectionMode ? `<button class="reports-select mt-0.5 2xl:mt-0 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 ${selected ? "border-accent-green bg-accent-green/20 text-accent-green" : "border-surface-3 text-transparent"}" data-id="${escape(r.id)}" aria-label="${pick("보고서 선택", "Select report")}" aria-pressed="${selected}"><span class="text-[11px] leading-none">✓</span></button>` : ""}
           <div class="min-w-0 flex-1">
@@ -894,7 +895,7 @@ function renderList(): void {
   const editBtn = "shrink-0 inline-flex h-8 items-center gap-1 px-2 rounded-md text-[12px] font-medium text-slate-500 hover:bg-surface-0 hover:text-slate-100 transition-colors";
   _root.innerHTML = `
     <div data-reports-list-scroll class="h-full overflow-y-auto">
-      <div class="w-full max-w-[1400px] mx-auto px-4 md:px-8 pb-20">
+      <div class="${browseListClass}">
         <!-- 도구막대: 분류 → 태그 → 맨 아래 검색(목록 바로 위). 입력하면 바로 아래 목록이 바뀌는 게 보이게. -->
         <div class="sticky top-0 z-20 -mx-4 md:-mx-8 mb-1 px-4 md:px-8 py-3 space-y-2 bg-surface-1/95 backdrop-blur border-b border-surface-3">
           <div class="flex items-start gap-2">
@@ -1082,7 +1083,7 @@ function renderList(): void {
 
 // 상세 상단의 형식 토글(HTML·MD) — 작은 세그먼트. 켜진 쪽만 면을 채운다.
 function detailTabCls(active: boolean): string {
-  return `reports-tab h-7 px-2.5 rounded-md text-[12px] font-semibold uppercase tracking-wide transition-colors ${active ? "bg-accent-green/12 text-txt-green" : "text-slate-400 hover:text-slate-100"}`;
+  return `reports-tab ${browseTabClass(active)}`;
 }
 function detailTagsHtml(report: Report): string {
   return `${(report.tags ?? []).map((t) => tagBadge(t)).join("")}<button id="reports-edit-tags" class="inline-flex h-6 items-center px-2 rounded-md text-[12px] font-medium text-slate-400 hover:bg-surface-0 hover:text-slate-100 transition-colors">＋ ${pick("태그 편집", "Edit tags")}</button>`;
@@ -1108,7 +1109,7 @@ export function bindMoreMenuCloser(): void {
 async function renderDetail(): Promise<void> {
   if (!_root || !_curId) return;
   const id = _curId;
-  _root.innerHTML = `<div class="h-full overflow-y-auto"><div class="w-full max-w-6xl mx-auto px-4 md:px-8 py-5"><div class="text-slate-500 py-16 text-center">${pick("불러오는 중…", "Loading…")}</div></div></div>`;
+  _root.innerHTML = `<div class="h-full overflow-y-auto"><div class="${browseDetailClass}"><div class="text-slate-500 py-16 text-center">${pick("불러오는 중…", "Loading…")}</div></div></div>`;
 
   let meta: Report | null;
   try {
@@ -1119,7 +1120,7 @@ async function renderDetail(): Promise<void> {
   }
   if (!_root) return;
   if (!meta) {
-    _root.innerHTML = `<div class="h-full overflow-y-auto"><div class="w-full max-w-6xl mx-auto px-4 md:px-8 py-5"><button id="reports-back" class="text-slate-400 hover:text-accent-green text-sm py-2">${pick("← 목록으로", "← Back to list")}</button><div class="text-center text-txt-red py-16"><div class="font-medium">${pick("보고서를 찾을 수 없습니다", "Report not found")}</div><div class="text-xs text-slate-500 mt-1">id: ${escape(id)}</div></div></div></div>`;
+    _root.innerHTML = `<div class="h-full overflow-y-auto"><div class="${browseDetailClass}"><button id="reports-back" class="text-slate-400 hover:text-accent-green text-sm py-2">${pick("← 목록으로", "← Back to list")}</button><div class="text-center text-txt-red py-16"><div class="font-medium">${pick("보고서를 찾을 수 없습니다", "Report not found")}</div><div class="text-xs text-slate-500 mt-1">id: ${escape(id)}</div></div></div></div>`;
     _root.querySelector("#reports-back")?.addEventListener("click", goList);
     return;
   }
@@ -1138,7 +1139,7 @@ async function renderDetail(): Promise<void> {
 
   _root.innerHTML = `
     <div data-reports-detail-scroll class="h-full overflow-y-auto">
-      <div class="w-full max-w-[1400px] mx-auto px-4 md:px-8 pb-20">
+      <div class="${browseListClass}">
         <!-- 상단 sticky 헤더: ← · 제목 + 메타 한 줄 · 오른쪽 같은 크기 아이콘 묶음(삭제는 ⋯ 메뉴 안) -->
         <div class="sticky top-0 z-20 -mx-4 md:-mx-8 px-4 md:px-8 bg-surface-1/95 backdrop-blur border-b border-surface-3">
           <div class="flex flex-col gap-2 py-3 md:flex-row md:items-start md:gap-4">
@@ -1364,7 +1365,7 @@ export function renderReports(root: HTMLElement): void {
     _curId = hashId;
     _curType = null;
   }
-  root.innerHTML = `<div class="h-full overflow-y-auto"><div class="w-full max-w-6xl mx-auto px-4 md:px-8 py-5"><div class="text-slate-500 py-16 text-center">${pick("보고서 목록 불러오는 중…", "Loading report list…")}</div></div></div>`;
+  root.innerHTML = `<div class="h-full overflow-y-auto"><div class="${browseDetailClass}"><div class="text-slate-500 py-16 text-center">${pick("보고서 목록 불러오는 중…", "Loading report list…")}</div></div></div>`;
   void ensureLoaded().then(() => {
     if (!_root) return;
     if (_view === "detail" && _curId) void renderDetail();

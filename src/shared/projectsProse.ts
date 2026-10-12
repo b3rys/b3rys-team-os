@@ -79,7 +79,7 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
  * html 은 서버가 정제한 것이고, md 는 이스케이프해 <pre> 로. 스크립트는 넣지 않는다(CSP default-src 'none').
  */
 export function standaloneDocPage(opts: {
-  projectId: string; projectName: string; title: string; path: string; sha: string;
+  projectId: string; trackId?: string; projectName: string; title: string; path: string; sha: string;
   key: string; mode: "html" | "md"; html: string; md: string;
   exists: Record<string, boolean>; basePath: string; githubUrl: string | null;
   /** 문서에 mermaid 펜스가 있을 때만 — nonce 는 요청마다 새로. html 모드에서만 쓴다. */
@@ -90,7 +90,7 @@ export function standaloneDocPage(opts: {
   const scripts = nonce
     ? `\n<script nonce="${esc(nonce)}" src="${esc(`${basePath}/api/projects/vendor/mermaid.min.js`)}"></script>\n<script nonce="${esc(nonce)}">${MERMAID_INLINE_JS}</script>`
     : "";
-  const pageUrl = (k: string, m: "html" | "md") => `${basePath}/api/projects/${encodeURIComponent(projectId)}/doc/${k}/page${m === "md" ? "?mode=md" : ""}`;
+  const pageUrl = (k: string, m: "html" | "md") => `${basePath}/api/projects/${encodeURIComponent(projectId)}/doc/${k}/page${m === "md" || opts.trackId !== undefined ? `?${new URLSearchParams({ ...(m === "md" ? { mode: "md" } : {}), ...(opts.trackId !== undefined ? { track: opts.trackId } : {}) })}` : ""}`;
   // exists 에 키가 없으면 그 프로젝트에 등록되지 않은 선택 문서 — 칩을 그리지 않는다.
   const chips = DOC_KEYS_ORDER.filter((k) => k in opts.exists).map((k) => opts.exists[k]
     ? `<a class="chip${k === key ? " on" : ""}" href="${esc(pageUrl(k, mode))}">${DOC_LABELS[k]}</a>`

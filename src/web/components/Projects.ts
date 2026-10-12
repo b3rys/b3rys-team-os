@@ -1,5 +1,6 @@
+import { browseListClass, browseRowClass, browseDetailClass, browseTabClass } from "./BrowseStyles";
 // Projects — 프로젝트 목록·문서 열람 탭 (계약 docs/PROJECTS_TAB.md §4).
-// Reports 와 같은 자리·같은 밀도. 원본은 GitHub md, 여기서는 ★읽기만★ 한다.
+// Reports와 목록·상세 스타일을 공유한다. 원본은 GitHub md, 여기서는 ★읽기만★ 한다.
 //   GET  <base>/api/projects                 → { projects: [ProjectSummary] }
 //   GET  <base>/api/projects/:id/doc/:key    → ProjectDoc (html 은 서버가 정제한 것 — 그대로 innerHTML)
 //   GET  <base>/api/projects/:id/doc/:key/raw → text/markdown (MD 토글)
@@ -21,6 +22,7 @@ import { apiBase } from "../ws";
 
 export type ProjectDocKey = "readme" | "project" | "design" | "features" | "todo";
 export interface ProjectSummary {
+  tracks?: ProjectTrackSummary[];
   id: string;
   name: string;
   repo: string;
@@ -35,6 +37,7 @@ export interface ProjectSummary {
   fetchedAt: string;
   stale?: boolean;
 }
+export type ProjectTrackSummary = Omit<ProjectSummary, "tracks"> | { id: string; name: string; repo: string; error: string; key: string };
 export interface ProjectDoc {
   id: string;
   key: ProjectDocKey;
@@ -63,8 +66,10 @@ let _root: HTMLElement | null = null;
 let _projects: ProjectSummary[] = [];
 let _loaded = false;
 let _loadError: string | null = null;
-let _view: "list" | "doc" = "list";
+let _view: "list" | "detail" | "doc" = "list";
 let _curId: string | null = null;
+let _curTrack: string | null = null;
+let _listScrollTop = 0;
 let _curKey: ProjectDocKey | null = null;
 let _curDoc: ProjectDoc | null = null;
 let _mode: "html" | "md" = "html";
@@ -220,14 +225,14 @@ async function loadProjects(): Promise<void> {
 }
 
 async function loadDoc(id: string, key: ProjectDocKey): Promise<ProjectDoc> {
-  const { status, body, missing } = await fetchJson(`/${encodeURIComponent(id)}/doc/${key}`);
+  const { status, body, missing } = await fetchJson(`/${encodeURIComponent(id)}/doc/${key}${trackQuery()}`);
   if (missing && fixtureMode()) {
     // fixture 는 프로젝트 하나 — 목록에 실린 첫 항목(= fixture summary) 의 id 만 받는다.
     const fx = await loadFixture();
     if (id !== (_projects[0]?.id ?? fx.summary.id)) throw new Error(`HTTP ${status}`);
     const d = fx.docs[key];
     if (!d) throw new Error("fixture has no " + key);
-    _rawCache.set(`${id}/${key}`, d.md);
+    _rawCache.set(`${id}/${_curTrack ?? ""}/${key}`, d.md);
     return d;
   }
   if (status >= 400 || missing) throw new Error(`HTTP ${status}${(body as { error?: string })?.error ? ` — ${(body as { error: string }).error}` : ""}`);
@@ -235,10 +240,10 @@ async function loadDoc(id: string, key: ProjectDocKey): Promise<ProjectDoc> {
 }
 
 async function loadRaw(id: string, key: ProjectDocKey): Promise<string> {
-  const cacheKey = `${id}/${key}`;
+  const cacheKey = `${id}/${_curTrack ?? ""}/${key}`;
   const hit = _rawCache.get(cacheKey);
   if (hit != null) return hit;
-  const r = await fetch(`${apiBase()}/api/projects/${encodeURIComponent(id)}/doc/${key}/raw`);
+  const r = await fetch(`${apiBase()}/api/projects/${encodeURIComponent(id)}/doc/${key}/raw${trackQuery()}`);
   if (!r.ok) throw new Error("HTTP " + r.status);
   const txt = await r.text();
   _rawCache.set(cacheKey, txt);
@@ -246,17 +251,18 @@ async function loadRaw(id: string, key: ProjectDocKey): Promise<string> {
 }
 
 // ── URL 상태 (?view=projects&id=…&doc=…) ──
-function readUrlState(): { id: string | null; doc: ProjectDocKey | null; sec: string | null } {
+function readUrlState(): { id: string | null; doc: ProjectDocKey | null; sec: string | null; track: string | null } {
   const p = new URLSearchParams(window.location.search);
   const id = p.get("id");
   const doc = p.get("doc");
-  return { id, doc: doc && (DOC_KEYS as string[]).includes(doc) ? (doc as ProjectDocKey) : null, sec: p.get("sec") || null };
+  return { id, doc: doc && (DOC_KEYS as string[]).includes(doc) ? (doc as ProjectDocKey) : null, sec: p.get("sec") || null, track: p.get("track") };
 }
 function writeUrlState(id: string | null, doc: ProjectDocKey | null, sec: string | null = null): void {
   const url = new URL(window.location.href);
   if (id) url.searchParams.set("id", id); else url.searchParams.delete("id");
   if (doc) url.searchParams.set("doc", doc); else url.searchParams.delete("doc");
   if (id && doc && sec) url.searchParams.set("sec", sec); else url.searchParams.delete("sec");
+  if (id && _curTrack !== null) url.searchParams.set("track", _curTrack); else url.searchParams.delete("track");
   const next = `${url.pathname}${url.search}${url.hash}`;
   if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== next) window.history.replaceState(null, "", next);
 }
@@ -317,11 +323,15 @@ function injectStyle(): void {
 // ── 목록 ──
 function githubUrl(p: ProjectSummary): string { return `https://github.com/${p.repo}`; }
 /** 새창 페이지 — 서버가 만드는 독립 HTML(문서 전환 바 포함). mode=md 면 원문. */
-function pageUrl(id: string, key: ProjectDocKey, mode: "html" | "md"): string { return `${apiBase()}/api/projects/${encodeURIComponent(id)}/doc/${key}/page${mode === "md" ? "?mode=md" : ""}`; }
+function trackQuery(track = _curTrack, mode?: "html" | "md"): string {
+  const q = new URLSearchParams(); if (track !== null) q.set("track", track); if (mode === "md") q.set("mode", "md");
+  return q.size ? `?${q}` : "";
+}
+function pageUrl(id: string, key: ProjectDocKey, mode: "html" | "md", track = _curTrack): string { return `${apiBase()}/api/projects/${encodeURIComponent(id)}/doc/${key}/page${trackQuery(track, mode)}`; }
 function blobUrl(p: { repo: string; sha: string }, path: string): string { return `https://github.com/${p.repo}/blob/${p.sha}/${path}`; }
 
 function chipHtml(p: ProjectSummary, d: ProjectSummary["docs"][number]): string {
-  const base = "projects-chip inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wide border";
+  const base = `projects-chip ${browseTabClass(false)} border border-surface-3`;
   if (!d.exists) {
     return `<span class="${base} text-slate-600 border-surface-3/60 bg-transparent cursor-not-allowed" data-doc="${d.key}" data-disabled="1" aria-disabled="true" title="${pick(`${d.path} 없음`, `${d.path} missing`)}">${DOC_LABEL[d.key]}</span>`;
   }
@@ -329,73 +339,65 @@ function chipHtml(p: ProjectSummary, d: ProjectSummary["docs"][number]): string 
 }
 
 function currentTasks(p: ProjectSummary): string[] {
-  const fromTodo = (p.todo?.doingTitles ?? []).slice(0, 3);
+  const fromTodo = p.todo?.doingTitles ?? [];
   const fromKanban = (p.kanban ?? []).filter((k) => k.lane === "doing").map((k) => k.title);
   return [...fromTodo, ...fromKanban];
 }
 
+function countsHtml(p: ProjectSummary): string {
+  return `<span class="projects-counts inline-flex items-center gap-2 text-[12px] whitespace-nowrap"><span class="text-txt-amber">${pick("진행", "Doing")} <span data-count="doing">${p.todo?.doing ?? 0}</span></span><span class="text-txt-blue">${pick("계획", "Plan")} <span data-count="plan">${p.todo?.plan ?? 0}</span></span><span class="text-txt-green">${pick("완료", "Done")} <span data-count="done">${p.todo?.done ?? 0}</span></span></span>`;
+}
 function renderList(): void {
   if (!_root) return;
-  const rows = _projects.map((p) => {
-    const docs = DOC_KEYS.filter((k) => !OPTIONAL_DOC_KEYS.includes(k) || p.docs.some((d) => d.key === k))
-      .map((k) => p.docs.find((d) => d.key === k) ?? { key: k, path: "", exists: false });
-    const chips = docs.map((d) => chipHtml(p, d)).join("");
-    const tasks = currentTasks(p);
-    const taskHtml = tasks.length
-      ? `<ul class="projects-tasks mt-2 space-y-0.5">${tasks.map((t) => `<li class="text-[13px] text-slate-300 leading-snug flex gap-1.5 min-w-0"><span class="text-accent-greenSoft shrink-0">▸</span><span class="min-w-0 break-words">${mdInlineToHtml(t)}</span></li>`).join("")}</ul>`
-      : `<div class="mt-2 text-[12px] text-slate-500">${pick("진행중인 과제 없음", "No task in progress")}</div>`;
-    const stale = p.stale ? `<span class="px-1.5 py-0.5 rounded text-[11px] font-semibold border text-txt-amber border-amber-400/25 bg-amber-400/10" title="${pick("GitHub 조회 실패 — 캐시본", "GitHub fetch failed — cached copy")}">stale</span>` : "";
-    return `
-      <div class="projects-row group relative w-full text-left rounded-xl border border-surface-3 bg-surface-2 px-4 py-3 hover:bg-surface-3/60 transition-colors overflow-hidden" data-id="${escape(p.id)}">
-        <span class="absolute left-0 top-0 bottom-0 w-[3px] bg-accent-green opacity-0 group-hover:opacity-100 transition-opacity"></span>
-        <div class="flex items-start gap-2 flex-wrap">
-          <div class="min-w-0 flex-1 text-[15px] font-semibold text-slate-100 leading-snug">${escape(p.name)}<span class="ml-2 text-[11px] font-normal text-slate-500 font-mono">${escape(p.id)}</span></div>
-          <a class="projects-window shrink-0 inline-flex items-center gap-1 text-[12px] font-semibold text-slate-300 hover:text-accent-greenSoft mr-3" href="${escape(pageUrl(p.id, "readme", "html"))}" target="_blank" rel="noopener" title="${pick("새창에서 보기 — 문서를 돌려가며 볼 수 있다", "Open in a new window")}">${renderIcon("external-link", { size: 13 })}<span>${pick("새창", "Window")}</span></a>
-          <a class="projects-github shrink-0 inline-flex items-center gap-1 text-[12px] font-semibold text-slate-300 hover:text-accent-greenSoft" href="${escape(githubUrl(p))}" target="_blank" rel="noopener" title="${escape(p.repo)} · ${escape(p.branch)}">
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>GitHub</a>
-        </div>
-        ${p.intro ? `<div class="text-[13px] text-slate-400 leading-relaxed mt-1.5 line-clamp-2">${escape(p.intro)}</div>` : ""}
-        <div class="flex items-center gap-1.5 flex-wrap mt-2">${chips}</div>
-        <div class="projects-counts flex items-center gap-1.5 flex-wrap text-[12px] mt-2">
-          <span class="text-txt-amber font-semibold">${pick("진행중", "Doing")} <span data-count="doing">${p.todo?.doing ?? 0}</span></span><span class="text-slate-600">·</span>
-          <span class="text-txt-blue font-semibold">${pick("계획", "Plan")} <span data-count="plan">${p.todo?.plan ?? 0}</span></span><span class="text-slate-600">·</span>
-          <span class="text-txt-green font-semibold">${pick("완료", "Done")} <span data-count="done">${p.todo?.done ?? 0}</span></span>
-          ${stale}
-        </div>
-        <div class="mt-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">${pick("지금 과제", "Now")}</div>
-        ${taskHtml}
-        <div class="flex items-center gap-2 flex-wrap text-[11px] text-slate-500 mt-2"><span class="font-mono">${escape(p.sha.slice(0, 7))}</span><span>·</span><span data-fetched-at="${escape(p.fetchedAt)}">${relTime(p.fetchedAt)}</span></div>
-      </div>`;
+  const rows = _projects.map(p => `<button type="button" class="projects-row ${browseRowClass}" data-id="${escape(p.id)}">
+    <span class="flex flex-wrap items-center gap-x-4 gap-y-1 min-w-0">
+      <span class="min-w-0 flex-1 basis-40"><span class="block text-[15px] font-semibold text-slate-100 truncate">${escape(p.name)}</span>
+      <span class="text-[13px] text-slate-400 leading-relaxed mt-1 line-clamp-1">${escape(p.intro)}</span></span>
+      ${countsHtml(p)}<span class="text-[12px] tabular-nums text-slate-500" data-fetched-at="${escape(p.fetchedAt)}">${relTime(p.fetchedAt)}</span>
+      ${p.stale ? '<span class="text-[11px] text-txt-amber">stale</span>' : ""}
+      ${p.tracks?.some(t => "error" in t) ? `<span class="text-[11px] text-txt-amber">${pick("일부 트랙 조회 실패", "Some tracks unavailable")}</span>` : ""}
+    </span></button>`).join("");
+  _root.innerHTML = `<div data-projects-list-scroll class="h-full overflow-y-auto overflow-x-hidden"><div class="${browseListClass}">
+    <div class="sticky top-0 z-20 -mx-4 md:-mx-8 px-4 md:px-8 py-3 bg-surface-1/95 backdrop-blur border-b border-surface-3 flex items-center gap-2">
+      <span class="text-[15px] font-semibold text-slate-100">${pick("Projects · 프로젝트", "Projects")}</span><span class="text-[12px] text-slate-500">${_projects.length}</span>
+      <button id="projects-retry" class="ml-auto h-8 px-3 rounded-lg border border-surface-3 text-[12px] text-slate-300">${_loadError ? pick("다시 시도", "Retry") : pick("새로 고침", "Refresh")}</button></div>
+    ${_loadError ? `<div class="projects-error py-4 text-[13px] text-txt-red">${pick("프로젝트 목록을 불러오지 못했습니다", "Failed to load projects")} · ${escape(_loadError)}</div>` : ""}
+    ${rows || (_loadError ? "" : `<div class="py-16 text-center text-slate-500">${pick("등록된 프로젝트가 없습니다", "No projects registered")}</div>`)}</div></div>`;
+  const scroll = _root.querySelector<HTMLElement>("[data-projects-list-scroll]");
+  if (scroll) scroll.scrollTop = _listScrollTop;
+  _root.querySelector("#projects-retry")?.addEventListener("click", () => { void reload(); });
+  _root.querySelectorAll<HTMLButtonElement>(".projects-row").forEach(btn => btn.addEventListener("click", () => {
+    _listScrollTop = scroll?.scrollTop ?? 0; openDetail(btn.dataset.id!);
+  }));
+}
+function openDetail(id: string): void {
+  leaveDocPanels(); _view = "detail"; _curId = id; _curKey = null; _curDoc = null; _curTrack = null;
+  writeUrlState(id, null); renderDetail();
+}
+function renderDetail(): void {
+  if (!_root || !_curId) return;
+  const p = _projects.find(p => p.id === _curId);
+  if (!p) { goList(); return; }
+  const tracks = p.tracks ?? [p];
+  const sections = tracks.map(t => {
+    const track = p.tracks ? t.id : "";
+    if ("error" in t) return `<section class="projects-track border-b border-surface-3 py-5" data-track="${escape(track)}"><h2 class="text-[15px] font-semibold text-slate-100">${escape(t.name)}</h2><p class="text-[13px] text-txt-amber mt-2">${pick("트랙을 불러오지 못했습니다", "Track unavailable")} · ${escape(t.error)}</p></section>`;
+    return `<section class="projects-track border-b border-surface-3 py-5 min-w-0" data-track="${escape(track)}">
+      <div class="flex items-center gap-3 flex-wrap"><h2 class="text-[15px] font-semibold text-slate-100">${escape(t.name)}</h2>${countsHtml(t)}
+      <a class="projects-github text-[12px] text-slate-400 hover:text-slate-100" href="${escape(githubUrl(t))}" target="_blank" rel="noopener">GitHub</a>
+      <a class="projects-window text-[12px] text-slate-400 hover:text-slate-100" href="${escape(pageUrl(p.id, "readme", "html", track || null))}" target="_blank" rel="noopener">${pick("새창", "Window")}</a>
+      <span class="text-[12px] text-slate-500">${relTime(t.fetchedAt)} ${t.stale ? "· stale" : ""}</span></div>
+      <div class="flex items-center gap-1.5 flex-wrap mt-3">${t.docs.map(d => chipHtml({ ...t, id: p.id }, d).replace('data-id=', `data-track="${escape(track)}" data-id=`)).join("")}</div>
+      <div class="mt-4 text-[12px] font-medium text-slate-500">${pick("지금 과제", "Now")}</div>
+      <ul class="projects-tasks mt-2 space-y-1">${currentTasks(t).map(title => `<li class="text-[13px] text-slate-300 break-words">${mdInlineToHtml(title)}</li>`).join("") || `<li class="text-[13px] text-slate-500">${pick("진행중인 과제 없음", "No task in progress")}</li>`}</ul></section>`;
   }).join("");
-
-  const empty = !_loaded
-    ? `<div class="text-center text-slate-500 py-16"><div class="text-slate-300 font-medium mb-1">${pick("불러오는 중…", "Loading…")}</div></div>`
-    : `<div class="text-center text-slate-500 py-16"><div class="text-slate-300 font-medium mb-1">${pick("등록된 프로젝트가 없습니다", "No projects registered")}</div><div class="text-xs">projects.json</div></div>`;
-  const error = `<div class="projects-error text-center text-txt-red py-16">
-    <div class="font-semibold mb-1">${pick("프로젝트 목록을 불러오지 못했습니다", "Failed to load projects")}</div>
-    <div class="text-xs text-slate-500 mb-4">${escape(_loadError || "unknown error")}</div>
-    <button id="projects-retry" class="px-3 py-1.5 rounded-lg border border-surface-3 bg-surface-2 text-sm text-slate-200 hover:bg-surface-3">${pick("다시 시도", "Retry")}</button>
-  </div>`;
-
-  _root.innerHTML = `
-    <div data-projects-list-scroll class="h-full overflow-y-auto overflow-x-hidden">
-      <div class="max-w-3xl mx-auto px-4 md:px-6 py-5 pb-20 min-w-0">
-        <div class="flex items-center gap-2 flex-wrap mb-3">
-          <div class="text-xs font-semibold uppercase tracking-widest text-slate-500">${pick("Projects · 프로젝트", "Projects")}</div>
-          <span class="text-[11px] text-slate-500">${_projects.length}</span>
-          <span class="ml-auto text-[11px] text-slate-500">${pick("원본은 GitHub md — 여기서는 읽기만", "Source is GitHub md — read-only here")}</span>
-        </div>
-        ${_loadError && !_projects.length ? error : (rows ? `<div class="space-y-2">${rows}</div>` : empty)}
-      </div>
-    </div>`;
-
-  _root.querySelector<HTMLButtonElement>("#projects-retry")?.addEventListener("click", () => { void reload(); });
-  _root.querySelectorAll<HTMLButtonElement>("button.projects-chip").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void openDoc(btn.dataset.id!, btn.dataset.doc as ProjectDocKey);
-    });
-  });
+  _root.innerHTML = `<div data-projects-detail-scroll class="h-full overflow-y-auto overflow-x-hidden"><div class="${browseDetailClass}">
+    <button id="projects-back" class="text-[13px] font-medium text-slate-300 hover:text-slate-100">← ${pick("목록", "List")}</button>
+    <h1 class="text-xl font-semibold text-slate-100 mt-4 break-words">${escape(p.name)}</h1><p class="text-[13px] text-slate-400 mt-2 break-words">${escape(p.intro)}</p>${sections}</div></div>`;
+  _root.querySelector("#projects-back")?.addEventListener("click", goList);
+  _root.querySelectorAll<HTMLButtonElement>("button.projects-chip").forEach(btn => btn.addEventListener("click", () => {
+    _curTrack = btn.dataset.track || null; void openDoc(p.id, btn.dataset.doc as ProjectDocKey);
+  }));
 }
 
 async function reload(): Promise<void> {
@@ -500,21 +502,24 @@ function todoStatusHtml(p: ProjectSummary | null, doc: ProjectDoc): string {
 async function renderDoc(): Promise<void> {
   if (!_root || !_curId || !_curKey) return;
   const id = _curId; const key = _curKey;
-  const project = _projects.find((p) => p.id === id) ?? null;
-  const backBtn = `<button id="projects-back" title="${pick("프로젝트 목록으로", "Back to project list")}" class="inline-flex items-center gap-1.5 shrink-0 text-txt-green text-sm font-semibold px-3 py-1.5 rounded-lg border border-accent-green/45 bg-accent-green/12 hover:bg-accent-green/20 hover:border-accent-green/70 transition-colors">← ${pick("목록", "List")}</button>`;
+  const parent = _projects.find((p) => p.id === id) ?? null;
+  const selected = parent?.tracks?.find(t => t.id === _curTrack);
+  const project = selected && !("error" in selected) ? selected : parent;
+  const track = _curTrack;
+  const backBtn = `<button id="projects-back" title="${pick("프로젝트 상세로", "Back to project details")}" class="inline-flex items-center gap-1.5 shrink-0 text-txt-green text-sm font-semibold px-3 py-1.5 rounded-lg border border-accent-green/45 bg-accent-green/12 hover:bg-accent-green/20 hover:border-accent-green/70 transition-colors">← ${pick("상세", "Details")}</button>`;
   _root.innerHTML = `<div class="h-full overflow-y-auto"><div class="w-full px-4 md:px-6 py-5">${backBtn}<div class="text-slate-500 py-16 text-center">${pick("문서 불러오는 중…", "Loading document…")}</div></div></div>`;
-  _root.querySelector("#projects-back")?.addEventListener("click", goList);
+  _root.querySelector("#projects-back")?.addEventListener("click", () => openDetail(id));
 
   let doc: ProjectDoc;
   try {
     doc = _curDoc && _curDoc.id === id && _curDoc.key === key ? _curDoc : await loadDoc(id, key);
   } catch (e) {
-    if (!_root || _curId !== id || _curKey !== key) return;
+    if (!_root || _curId !== id || _curKey !== key || _curTrack !== track) return;
     _root.innerHTML = `<div class="h-full overflow-y-auto"><div class="w-full px-4 md:px-6 py-5">${backBtn}<div class="projects-error text-center text-txt-red py-16"><div class="font-medium">${pick("문서를 불러오지 못했습니다", "Failed to load document")}</div><div class="text-xs text-slate-500 mt-1">${escape(id)}/${escape(key)} · ${escape((e as Error).message)}</div></div></div></div>`;
-    _root.querySelector("#projects-back")?.addEventListener("click", goList);
+    _root.querySelector("#projects-back")?.addEventListener("click", () => openDetail(id));
     return;
   }
-  if (!_root || _curId !== id || _curKey !== key) return;
+  if (!_root || _curId !== id || _curKey !== key || _curTrack !== track) return;
   _curDoc = doc;
   enterDocPanels();
 
@@ -523,13 +528,13 @@ async function renderDoc(): Promise<void> {
   // 문서 전환 칩 — 목록 카드와 같은 모양, 현재 문서는 채운 모양. 없는 문서는 비활성.
   const docChips = DOC_KEYS.filter((k) => !OPTIONAL_DOC_KEYS.includes(k) || project?.docs.some((x) => x.key === k)).map((k) => {
     const d = project?.docs.find((x) => x.key === k);
-    const base = "projects-doc-chip inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wide border";
+    const base = `projects-doc-chip ${browseTabClass(k === key)}`;
     if (d && !d.exists) return `<span class="${base} text-slate-600 border-surface-3/60 bg-transparent cursor-not-allowed" aria-disabled="true">${DOC_LABEL[k]}</span>`;
     return k === key
       ? `<span class="${base} text-slate-50 border-accent-green/70 bg-accent-green/25" aria-current="page">${DOC_LABEL[k]}</span>`
       : `<button class="${base} text-txt-green border-accent-green/30 bg-accent-green/10 hover:brightness-110" type="button" data-doc-chip="${k}">${DOC_LABEL[k]}</button>`;
   }).join("");
-  const modeBtn = (m: "html" | "md") => `<button class="projects-mode px-3 py-1 text-xs font-semibold uppercase tracking-wide border transition-colors ${m === "html" ? "rounded-l-lg" : "rounded-r-lg -ml-px"} ${_mode === m ? "text-accent-green border-accent-green/35 bg-accent-green/10" : "text-slate-400 border-surface-3 bg-surface-2 hover:text-slate-200"}" data-mode="${m}" aria-pressed="${_mode === m}">${m.toUpperCase()}</button>`;
+  const modeBtn = (m: "html" | "md") => `<button class="projects-mode ${browseTabClass(_mode === m)}" data-mode="${m}" aria-pressed="${_mode === m}">${m.toUpperCase()}</button>`;
   const isTodo = key === "todo";
   const todoTabBtn = (t: "status" | "all", label: string) => `<button class="projects-todo-tab px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors ${_todoTab === t ? "text-slate-100 bg-surface-0 border-surface-3" : "text-slate-400 border-transparent hover:text-slate-200"}" data-todo-tab="${t}" aria-pressed="${_todoTab === t}">${label}</button>`;
   const stale = doc.stale ? `<span class="px-1.5 py-0.5 rounded text-[11px] font-semibold border text-txt-amber border-amber-400/25 bg-amber-400/10">stale</span>` : "";
@@ -545,13 +550,13 @@ async function renderDoc(): Promise<void> {
 
   _root.innerHTML = `
     <div data-projects-doc-scroll class="h-full overflow-y-auto overflow-x-hidden">
-      <div class="w-full px-4 md:px-6 pb-20 min-w-0">
+      <div class="${browseListClass} min-w-0">
         <div data-projects-doc-head class="sticky top-0 z-20 -mx-4 md:-mx-6 px-4 md:px-6 bg-surface-1/95 backdrop-blur border-b border-surface-3">
           <div class="flex items-center gap-3 py-2 min-w-0 flex-wrap">
             ${backBtn}
             <div class="min-w-0 flex items-baseline gap-2 flex-wrap">
               <span class="text-[15px] font-semibold text-slate-100 truncate" title="${escape(doc.title)}">${escape(doc.title)}</span>
-              <span class="text-[11px] text-slate-500 leading-snug whitespace-nowrap">${escape(project?.name ?? id)} · ${escape(doc.path)} · <span class="font-mono">${escape(doc.sha.slice(0, 7))}</span> ${stale}</span>
+              <span class="text-[11px] text-slate-500 leading-snug break-all">${escape(project?.name ?? id)} · ${escape(doc.path)} · <span class="font-mono">${escape(doc.sha.slice(0, 7))}</span> ${stale}</span>
               ${gh}
             </div>
             <span class="ml-auto"></span>
@@ -572,7 +577,7 @@ async function renderDoc(): Promise<void> {
       </div>
     </div>`;
 
-  _root.querySelector("#projects-back")?.addEventListener("click", goList);
+  _root.querySelector("#projects-back")?.addEventListener("click", () => openDetail(id));
   _root.querySelectorAll<HTMLButtonElement>("[data-doc-chip]").forEach((b) => b.addEventListener("click", () => { void openDoc(id, b.dataset.docChip as ProjectDocKey); }));
   _root.querySelector<HTMLButtonElement>("#projects-toc-toggle")?.addEventListener("click", () => setMobileToc(!_tocMobileOpen));
   _root.querySelectorAll<HTMLButtonElement>(".projects-mode").forEach((b) => b.addEventListener("click", () => {
@@ -592,7 +597,7 @@ async function renderDoc(): Promise<void> {
     viewer.innerHTML = `<div class="rounded-xl border border-surface-3 bg-surface-2 p-4 md:p-6 text-slate-500">${pick("원문 불러오는 중…", "Loading source…")}</div>`;
     try {
       const raw = await loadRaw(id, key);
-      if (_mode !== "md" || _curKey !== key) return;
+      if (_mode !== "md" || _curKey !== key || _curTrack !== track) return;
       viewer.innerHTML = `<pre class="projects-raw rounded-xl border border-surface-3 bg-surface-2 p-4 md:p-6 overflow-x-auto">${escape(raw)}</pre>`;
     } catch (e) {
       viewer.innerHTML = `<div class="rounded-xl border border-surface-3 bg-surface-2 p-4 md:p-6 text-txt-red">${pick("원문 불러오기 실패", "Failed to load source")}: ${escape((e as Error).message)}</div>`;
@@ -730,7 +735,7 @@ async function openDoc(id: string, key: ProjectDocKey): Promise<void> {
 
 function goList(): void {
   _view = "list";
-  _curId = null;
+  _curId = null; _curTrack = null;
   _curKey = null;
   _curDoc = null;
   leaveDocPanels();
@@ -746,6 +751,7 @@ async function ensureLoaded(): Promise<void> {
 /** 테스트·재마운트용 — 모듈 상태 초기화. */
 export function resetProjectsState(): void {
   _root = null; _projects = []; _loaded = false; _loadError = null;
+  _curTrack = null; _listScrollTop = 0;
   _view = "list"; _curId = null; _curKey = null; _curDoc = null;
   _mode = "html"; _todoTab = "status"; _curSec = null; _curHead = null; _tocOpen = new Set(); _tocMobileOpen = false; _doneOpen = false;
   _rawCache = new Map();
@@ -758,12 +764,15 @@ export function renderProjects(root: HTMLElement): void {
   _root = root;
   injectStyle();
   loadZoom(); applyZoom(false); bindZoomKeys();
-  const { id, doc, sec } = readUrlState();
+  const { id, doc, sec, track } = readUrlState();
+  _curTrack = track;
+  if (id && !doc) { _view = "detail"; _curId = id; }
   if (id && doc) { _view = "doc"; _curId = id; _curKey = doc; _curDoc = null; _curSec = sec; }
   root.innerHTML = `<div class="h-full overflow-y-auto"><div class="max-w-3xl mx-auto px-4 md:px-6 py-5"><div class="text-slate-500 py-16 text-center">${pick("프로젝트 목록 불러오는 중…", "Loading projects…")}</div></div></div>`;
   void ensureLoaded().then(() => {
     if (!_root) return;
     if (_view === "doc" && _curId && _curKey) void renderDoc();
+    else if (_view === "detail") renderDetail();
     else renderList();
   });
 }

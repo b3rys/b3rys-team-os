@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { Database } from "bun:sqlite";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DOC_KEYS, GitHubDocs, registeredDocKeys, ProjectSourceError, validateProjects, type ProjectRegistration, type DocKey } from "../lib/githubDocs";
+import { DOC_KEYS, GitHubDocs, registeredDocKeys, ProjectSourceError, validateProjects, projectSources, type ProjectRegistration, type DocKey } from "../lib/githubDocs";
 import { projectIntro } from "../lib/projectDocRender";
 import { standaloneCsp, standaloneDocPage } from "../../shared/projectsProse";
 import { DEFAULT_EXCLUDE_SECTIONS, parseProjectTodo } from "../lib/projectTodo";
@@ -36,11 +36,11 @@ export function createProjectRoutes(deps: ProjectDeps) {
   app.use("*", async (c, next) => { await next(); if (!c.req.path.endsWith("/projects/vendor/mermaid.min.js")) c.header("Cache-Control", "no-store"); });
   app.onError((err, c) => c.json({ error: err instanceof ProjectSourceError ? err.reason : "projects_unavailable", key: err instanceof ProjectSourceError ? err.key : "project" }, 502));
   const excludeSections = (p: ProjectRegistration) => p.excludeSections ?? [...DEFAULT_EXCLUDE_SECTIONS];
-  async function summary(p: ProjectRegistration) {
-    const snapshot = await source.get(p);
+  async function sourceSummary(p: ProjectRegistration, force = false) {
+    const snapshot = await source.get(p, force);
     const { items: _items, excludeSections: _ex, ...todo } = parseProjectTodo(snapshot.docs.todo?.md ?? "", excludeSections(p));
-    const kanban = deps.db.prepare(`SELECT id, title, lane, updated_at AS updatedAt FROM task
-      WHERE substr(title, 1, length(?)) = ? AND lane IN ('plan', 'doing') ORDER BY updated_at DESC, id`).all(p.kanbanPrefix, p.kanbanPrefix);
+    const kanban = p.kanbanPrefix ? deps.db.prepare(`SELECT id, title, lane, updated_at AS updatedAt FROM task
+      WHERE substr(title, 1, length(?)) = ? AND lane IN ('plan', 'doing') ORDER BY updated_at DESC, id`).all(p.kanbanPrefix, p.kanbanPrefix) : [];
     return {
       id: p.id, name: p.name, repo: p.repo, branch: p.branch, sha: snapshot.sha,
       intro: projectIntro(snapshot.docs.readme?.md ?? ""),
@@ -48,11 +48,36 @@ export function createProjectRoutes(deps: ProjectDeps) {
       todo, excludeSections: excludeSections(p), kanban, fetchedAt: snapshot.fetchedAt, stale: snapshot.stale,
     };
   }
+  async function summary(p: ProjectRegistration, force = false) {
+    if (!p.tracks) return sourceSummary(p, force);
+    const sources = projectSources(p);
+    const settled = await Promise.allSettled(sources.map(t => sourceSummary(t, force)));
+    const tracks = settled.map((r, i) => r.status === "fulfilled"
+      ? { ...r.value, id: sources[i]!.trackId! }
+      : { id: sources[i]!.trackId!, name: sources[i]!.name, repo: sources[i]!.repo,
+          error: r.reason instanceof ProjectSourceError ? r.reason.reason : "projects_unavailable",
+          key: r.reason instanceof ProjectSourceError ? r.reason.key : "project" });
+    const ok = tracks.filter((t): t is Extract<typeof t, { todo: unknown }> => "todo" in t);
+    if (!ok.length) throw (settled[0] as PromiseRejectedResult).reason;
+    return { ...ok[0]!, id: p.id, name: p.name, tracks,
+      todo: { doing: ok.reduce((n, t) => n + t.todo.doing, 0), plan: ok.reduce((n, t) => n + t.todo.plan, 0),
+        done: ok.reduce((n, t) => n + t.todo.done, 0), doingTitles: ok.flatMap(t => t.todo.doingTitles) },
+      kanban: [], fetchedAt: ok.map(t => t.fetchedAt).sort().at(-1)!, stale: ok.some(t => t.stale),
+    };
+  }
+  function requestedSource(c: Context): ProjectRegistration | undefined {
+    const p = projects.find(p => p.id === c.req.param("id"));
+    if (!p) return undefined;
+    const track = c.req.query("track");
+    if (!p.tracks) return track === undefined ? p : undefined;
+    const sources = projectSources(p);
+    return track === undefined ? sources[0] : sources.find(t => t.trackId === track);
+  }
   // 프로젝트마다 따로 읽는다 — 한 프로젝트의 토큰·저장소 문제(캐시도 없을 때)가 목록 전체를 502 로 만들지 않게(#511).
   //   일부만 실패: 200 + 성공한 것만 projects, 실패한 것은 failed[{id,error,key}] (토큰·응답 본문은 담지 않는다).
   //   전부 실패: 예전처럼 첫 오류를 던져 502 {error,key} — 화면은 빈 목록 대신 오류+다시 시도.
   app.get("/projects", async c => {
-    const settled = await Promise.allSettled(projects.map(summary));
+    const settled = await Promise.allSettled(projects.map(p => summary(p)));
     const ok = settled.flatMap(r => r.status === "fulfilled" ? [r.value] : []);
     const failed = settled.flatMap((r, i) => r.status === "rejected" ? [{ id: projects[i]!.id,
       error: r.reason instanceof ProjectSourceError ? r.reason.reason : "projects_unavailable",
@@ -65,7 +90,7 @@ export function createProjectRoutes(deps: ProjectDeps) {
     return p ? c.json(await summary(p)) : c.json({ error: "project_not_found", key: c.req.param("id") }, 404);
   });
   const document = async (c: Context, raw: boolean) => {
-    const p = projects.find(p => p.id === c.req.param("id"));
+    const p = requestedSource(c);
     const key = c.req.param("key") as DocKey;
     if (!p || !DOC_KEYS.includes(key)) return c.json({ error: "document_not_found", key }, 404);
     const snapshot = await source.get(p);
@@ -96,7 +121,7 @@ export function createProjectRoutes(deps: ProjectDeps) {
     } });
   });
   app.get("/projects/:id/doc/:key/page", async c => {
-    const p = projects.find(p => p.id === c.req.param("id"));
+    const p = requestedSource(c);
     const key = c.req.param("key") as DocKey;
     if (!p || !DOC_KEYS.includes(key)) return c.json({ error: "document_not_found", key }, 404);
     const snapshot = await source.get(p);
@@ -113,7 +138,7 @@ export function createProjectRoutes(deps: ProjectDeps) {
     c.header("Content-Security-Policy", `${standaloneCsp(mermaidNonce)}; frame-ancestors 'none'`);
     c.header("X-Project-Sha", snapshot.sha);
     return c.body(standaloneDocPage({
-      projectId: p.id, projectName: p.name, title: doc.title, path: doc.path, sha: snapshot.sha, key, mode,
+      projectId: p.id, trackId: p.trackId, projectName: p.name, title: doc.title, path: doc.path, sha: snapshot.sha, key, mode,
       html: doc.html, md: doc.md, exists, basePath, githubUrl: `https://github.com/${p.repo}/blob/${snapshot.sha}/${doc.path}`,
       mermaidNonce,
     }));
@@ -123,8 +148,8 @@ export function createProjectRoutes(deps: ProjectDeps) {
     if (!actor.ok) return c.json({ error: actor.error }, (actor.status ?? 403) as 401 | 403 | 503);
     const p = projects.find(p => p.id === c.req.param("id"));
     if (!p) return c.json({ error: "project_not_found", key: c.req.param("id") }, 404);
-    const snapshot = await source.get(p, true);
-    return c.json({ sha: snapshot.sha, stale: snapshot.stale });
+    const result = await summary(p, true);
+    return c.json({ sha: result.sha, stale: result.stale, ...("tracks" in result ? { tracks: result.tracks } : {}) });
   });
   return app;
 }
