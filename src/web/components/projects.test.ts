@@ -101,8 +101,8 @@ async function mount(): Promise<HTMLElement> {
   return root;
 }
 
-/** Exercise the same list → overview transition as a user before opening a document. */
-function openSummary(root: HTMLElement): void { root.querySelector<HTMLButtonElement>(".projects-row")?.click(); }
+/** Cards expose documents directly; retained for existing document-flow tests. */
+function openSummary(_root: HTMLElement): void {}
 
 describe("Projects 목록", () => {
   test("fixture 로 목록 1줄 — 칩 4개 · 건수 · 지금 과제 · GitHub 링크 새 탭", async () => {
@@ -110,7 +110,9 @@ describe("Projects 목록", () => {
     const rows = root.querySelectorAll(".projects-row");
     expect(rows).toHaveLength(1);
     expect(rows[0]!.getAttribute("data-id")).toBe("sample");
-    expect(root.querySelectorAll(".projects-tasks")).toHaveLength(0);
+    expect(root.querySelectorAll(".projects-now > div > ul > li")).toHaveLength(3);
+    expect(root.querySelector(".projects-more summary")?.textContent).toContain("+1");
+    expect(root.querySelector(".projects-more")?.hasAttribute("open")).toBe(false);
     openSummary(root);
     expect(root.querySelectorAll(".projects-chip")).toHaveLength(4);
     expect(root.querySelectorAll("button.projects-chip")).toHaveLength(4); // 4문서 모두 exists=true → 전부 버튼
@@ -119,11 +121,12 @@ describe("Projects 목록", () => {
     expect(root.querySelector('[data-count="done"]')?.textContent).toBe("40");
     // 지금 과제 = doingTitles 3 + 칸반 doing 1
     expect(root.querySelectorAll(".projects-tasks li")).toHaveLength(4);
-    expect(root.querySelector(".projects-tasks")?.textContent).toContain("[sample] 과제 A");
+    expect(root.querySelector(".projects-more .projects-tasks")?.textContent).toContain("[sample] 과제 A");
     const gh = root.querySelector<HTMLAnchorElement>("a.projects-github")!;
     expect(gh.getAttribute("href")).toBe("https://github.com/your-org/sample");
     expect(gh.getAttribute("target")).toBe("_blank");
     expect(root.textContent).toContain(fixture.summary.intro);
+    expect(root.querySelector(".projects-track-name")).toBeNull();
   });
 
   test("exists=false 문서 칩은 비활성(버튼이 아니다)", async () => {
@@ -150,7 +153,7 @@ describe("Projects 목록", () => {
 });
 
 describe("Projects 문서 화면", () => {
-  test("DESIGN 칩 → 왼쪽 목차 트리(절 3: h1 하나뿐이라 h2 가 절) · 현재 절만 펼침·강조 · 본문은 전체 문서 · 절 탭 없음 · GitHub blob 링크 · sha 7자 · URL deep-link", async () => {
+  test("DESIGN 칩 → 왼쪽 목차 트리(절 3: h1 하나뿐이라 h2 가 절) · 현재 절만 펼침·강조 · 본문은 전체 문서 · 절 탭 없음 · GitHub blob 링크 · URL deep-link", async () => {
     const root = await mount();
     openSummary(root);
     root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
@@ -175,12 +178,11 @@ describe("Projects 문서 화면", () => {
     expect(root.querySelectorAll("#projects-viewer .mermaid-pending")).toHaveLength(0);
     expect(fakeMermaid.calls.map((c) => c.src.trim().split("\n")[0])).toEqual(["flowchart TB"]);
     expect(fakeMermaid.initialized?.securityLevel).toBe("strict");
-    // 트리 칸은 데스크톱 240px 열, 모바일은 접힘(목차 버튼)
-    expect(toc.parentElement?.className).toContain("md:grid-cols-[240px_minmax(0,1fr)]");
+    // Responsive geometry is exercised in a browser; this checks the toggle structure.
+    expect(toc.parentElement?.className).toContain("projects-toc-wrap");
     expect(toc.className).toContain("hidden");
     expect(root.querySelector("#projects-toc-toggle")?.getAttribute("aria-expanded")).toBe("false");
-    const sha7 = fixture.summary.sha.slice(0, 7);
-    expect(root.textContent).toContain(sha7);
+    expect(root.querySelector("#projects-open-github")?.getAttribute("href")).toContain(fixture.summary.sha);
     expect(root.querySelector<HTMLAnchorElement>("#projects-open-github")!.getAttribute("href"))
       .toBe(`https://github.com/your-org/sample/blob/${fixture.summary.sha}/DESIGN.md`);
     const p = new URLSearchParams(window.location.search);
@@ -292,7 +294,7 @@ describe("Projects 문서 화면", () => {
     expect(root.querySelectorAll(".projects-toc-sec")).toHaveLength(3);
   });
 
-  test("문서 → 상세 → 목록, URL 에서 id·doc 제거", async () => {
+  test("문서 → 목록의 원래 카드 강조, URL 에서 doc 제거", async () => {
     const root = await mount();
     openSummary(root);
     root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="readme"]')!.click();
@@ -301,10 +303,11 @@ describe("Projects 문서 화면", () => {
     await tick();
     expect(root.querySelectorAll(".projects-track")).toHaveLength(1);
     expect(new URLSearchParams(window.location.search).get("doc")).toBeNull();
-    root.querySelector<HTMLButtonElement>("#projects-back")!.click();
+    expect(root.querySelector("#projects-back")).toBeNull();
     expect(root.querySelectorAll(".projects-row")).toHaveLength(1);
+    expect(root.querySelector(".projects-highlight")?.getAttribute("data-id")).toBe("sample");
     const p = new URLSearchParams(window.location.search);
-    expect(p.get("id")).toBeNull();
+    expect(p.get("id")).toBe("sample");
     expect(p.get("doc")).toBeNull();
   });
 
@@ -544,14 +547,14 @@ describe("splitSections — 순수 함수", () => {
   });
 });
 
-describe("문서 헤더 — 한 줄 · 문서 전환 칩 · 새창 · 글자 크기 (팀장 2026-09-18)", () => {
-  test("헤더 첫 줄에 GitHub(아이콘+글자)·문서 칩·새창·HTML/MD 가 있고, 현재 문서 칩은 선택 모양", async () => {
+describe("문서 헤더 — 문서 전환 탭 · 새창 · 글자 크기", () => {
+  test("헤더 첫 줄에 GitHub 아이콘·문서 칩·새창·HTML/MD 가 있고, 현재 문서 칩은 선택 모양", async () => {
     const root = await mount();
     openSummary(root);
     root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
     await tick();
     const gh = root.querySelector<HTMLAnchorElement>("#projects-open-github")!;
-    expect(gh.textContent).toContain("GitHub");
+    expect(gh.getAttribute("aria-label")).toBe("GitHub");
     expect(gh.querySelector("svg")).not.toBeNull();
     const chips = [...root.querySelectorAll(".projects-doc-chip")].map((c) => c.textContent?.trim());
     expect(chips).toEqual(["README", "DESIGN", "FEATURES", "TODO"]);
@@ -563,14 +566,14 @@ describe("문서 헤더 — 한 줄 · 문서 전환 칩 · 새창 · 글자 크
     expect(win.getAttribute("target")).toBe("_blank");
   });
 
-  test("메타 줄에 프로젝트 이름·파일·sha 가 있고, sticky 헤더 높이를 재서 --projects-head 로 반영한다", async () => {
+  test("메타 줄에 프로젝트 이름·파일·크기 버튼이 있고, sticky 헤더 높이를 재서 --projects-head 로 반영한다", async () => {
     const root = await mount();
     openSummary(root);
     root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click();
     await tick();
     const head = root.querySelector<HTMLElement>("[data-projects-doc-head]")!;
     expect(head).not.toBeNull();
-    expect(head.textContent).toContain("Sample · DESIGN.md");
+    expect(head.textContent).toContain("Sample / DESIGN.md");
     const { measureHeadOffset } = await import("./Projects");
     // happy-dom 은 레이아웃이 없어 0 → 기본값 유지, 변수도 안 박는다
     expect(measureHeadOffset()).toBe(72);
@@ -646,10 +649,12 @@ describe("문서 헤더 — 한 줄 · 문서 전환 칩 · 새창 · 글자 크
     expect(fig2.querySelector("pre.mermaid-src")).not.toBeNull();
   });
 
-  test("프로젝트 상세의 새창 링크(README·HTML 로 시작)", async () => {
+  test("목록에서 바로 문서 진입 후 새창 링크(README·HTML 로 시작)", async () => {
     const root = await mount();
     openSummary(root);
-    const a = root.querySelector<HTMLAnchorElement>(".projects-window")!;
+    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="readme"]')!.click();
+    await tick();
+    const a = root.querySelector<HTMLAnchorElement>("#projects-open-window")!;
     expect(a.getAttribute("href")).toContain("/api/projects/sample/doc/readme/page");
     expect(a.getAttribute("target")).toBe("_blank");
   });
@@ -697,11 +702,11 @@ describe("Projects multi-track overview", () => {
     }) as typeof fetch;
     try { await action(await mount()); } finally { globalThis.fetch = saved; }
   }
-  test("compact list hides task/doc content; overview separates track counts and tasks", async () => {
+  test("list cards separate track counts, tasks and direct document buttons", async () => {
     await withTracks(false, async root => {
       expect(root.querySelectorAll(".projects-row")).toHaveLength(1);
-      expect(root.querySelectorAll(".projects-chip")).toHaveLength(0);
-      expect(root.querySelectorAll(".projects-tasks")).toHaveLength(0);
+      expect(root.querySelectorAll(".projects-chip")).toHaveLength(8);
+      expect(root.querySelectorAll(".projects-tasks")).toHaveLength(2);
       openSummary(root);
       expect(root.querySelectorAll(".projects-track")).toHaveLength(2);
       expect(root.querySelector('[data-track="desktop"] [data-count="done"]')?.textContent).toBe("3");
@@ -711,7 +716,7 @@ describe("Projects multi-track overview", () => {
   });
   test("failed track retains its name and error while healthy documents remain clickable", async () => {
     await withTracks(true, async root => {
-      expect(root.textContent).toContain("일부 트랙 조회 실패");
+      expect(root.textContent).toContain("트랙을 불러오지 못했습니다");
       openSummary(root);
       expect(root.querySelector('[data-track="mobile"]')?.textContent).toContain("github_auth_or_not_found");
       expect(root.querySelectorAll('[data-track="desktop"] button.projects-chip')).toHaveLength(4);
@@ -738,5 +743,41 @@ describe("Projects multi-track overview", () => {
       expect(fetchLog.some(u => u.endsWith("/doc/design/raw?track=mobile"))).toBe(true);
       expect(root.querySelector("#projects-open-window")?.getAttribute("href")).toContain("track=mobile&mode=md");
     });
+  });
+});
+
+ describe("Projects 카드·글자 크기 회귀", () => {
+  test("기존 상세 URL은 문서 없이 해당 목록 카드를 강조한다", async () => {
+    window.history.replaceState(null, "", "/team?view=projects&id=sample");
+    const root = await mount();
+    expect(root.querySelector(".projects-highlight")?.getAttribute("data-id")).toBe("sample");
+    expect(root.querySelector("#projects-viewer")).toBeNull();
+    expect(root.querySelectorAll("button.projects-chip")).toHaveLength(4);
+  });
+  test("과제 접두 이모지·마크다운 제거, 긴 문장은 임의로 자르지 않는다", async () => {
+    const { taskLabel } = await import("./Projects");
+    const long = "긴 과제 설명 ".repeat(30).trim();
+    expect(taskLabel("🛠️ **단축키** [문서](https://example.com) 정리")).toBe("단축키 문서 정리");
+    expect(taskLabel(long)).toBe(long);
+  });
+  test("가−/가+ 버튼은 저장 실패 때도 크기를 바꾸고 문서 외 단축키는 잡지 않는다", async () => {
+    window.localStorage.clear();
+    const root = await mount();
+    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="readme"]')!.click();
+    await tick();
+    const { currentZoom, handleZoomKey } = await import("./Projects");
+    const storage = window.localStorage;
+    const savedSet = storage.setItem;
+    storage.setItem = () => { throw new Error("blocked"); };
+    try {
+      root.querySelector<HTMLButtonElement>('[data-zoom="1"]')!.click();
+      expect(currentZoom()).toBe(110);
+      root.querySelector<HTMLButtonElement>('[data-zoom="-1"]')!.click();
+      expect(currentZoom()).toBe(100);
+    } finally { storage.setItem = savedSet; }
+    root.querySelector<HTMLButtonElement>("#projects-back")!.click();
+    const event = new window.KeyboardEvent("keydown", { key: "=", metaKey: true, cancelable: true });
+    expect(handleZoomKey(event as unknown as KeyboardEvent)).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
   });
 });

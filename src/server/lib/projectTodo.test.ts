@@ -17,8 +17,8 @@ describe("project TODO current state", () => {
     expect(parseProjectTodo(sectioned, []).plan).toBe(5);
     expect(parseProjectTodo(sectioned, ["대기"]).plan).toBe(3);
   });
-  test("fence of another type does not end the example; titles are bounded", () => {
-    expect(parseProjectTodo("~~~md\n```\n- [ ] no\n~~~\n- [~] " + "가".repeat(90)).doingTitles).toEqual(["가".repeat(60)]);
+  test("fence of another type does not end the example; full titles are preserved for visual ellipsis", () => {
+    expect(parseProjectTodo("~~~md\n```\n- [ ] no\n~~~\n- [~] " + "가".repeat(90)).doingTitles).toEqual(["가".repeat(90)]);
     expect(parseProjectTodo("~~~md\n```\n- [ ] no\n~~~").plan).toBe(0);
   });
 });
