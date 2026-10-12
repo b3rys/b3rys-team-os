@@ -283,7 +283,10 @@ describe("projects.json — 설치본마다 따로(git 추적 안 함)", () => {
   });
   test("예시 파일은 유효한 등록이고, 저장소에는 projects.json 이 없다", () => {
     const repo = new URL("../../../", import.meta.url);
-    expect(validateProjects(JSON.parse(readFileSync(new URL("projects.example.json", repo), "utf8")))).toHaveLength(1);
+    const examples = validateProjects(JSON.parse(readFileSync(new URL("projects.example.json", repo), "utf8")));
+    expect(examples).toHaveLength(2);
+    expect(examples[0]!.tracks).toBeUndefined();
+    expect(examples[1]!.tracks).toHaveLength(2);
     const ignore = readFileSync(new URL(".gitignore", repo), "utf8").split("\n").map(l => l.trim());
     expect(ignore).toContain("projects.json");
     const tracked = Bun.spawnSync(["git", "ls-files", "--error-unmatch", "projects.json"], { cwd: repo.pathname });

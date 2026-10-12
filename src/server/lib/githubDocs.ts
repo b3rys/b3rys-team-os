@@ -11,10 +11,17 @@ export const OPTIONAL_DOC_KEYS: readonly DocKey[] = ["project"];
 export const isOptionalDocKey = (key: DocKey) => OPTIONAL_DOC_KEYS.includes(key);
 /** 이 프로젝트에 등록된 문서 키(순서 유지). */
 export const registeredDocKeys = (p: ProjectRegistration) => DOC_KEYS.filter(k => p.docs[k] !== undefined);
-type RequiredDocKey = Exclude<DocKey, "project">;
+export interface ProjectTrack {
+  id?: string; name: string; repo: string; branch?: string;
+  docs: ProjectRegistration["docs"]; tokenEnv?: string;
+  kanbanPrefix?: string; excludeSections?: string[];
+}
 export interface ProjectRegistration {
+  tracks?: ProjectTrack[];
+  /** Resolved source identity, used in links and cache separation. */
+  trackId?: string;
   id: string; name: string; repo: string; branch: string;
-  docs: Record<RequiredDocKey, string> & Partial<Record<"project", string>>; kanbanPrefix: string;
+  docs: Partial<Record<DocKey, string>>; kanbanPrefix: string;
   /** TODO.md headings containing any of these hide their `[ ]` items from plan (default: ["킵"]). */
   excludeSections?: string[];
   /** Name of the env var holding this project's read-only GitHub token (default: GITHUB_TOKEN). The value never lives in the registry. */
@@ -31,23 +38,48 @@ export class ProjectSourceError extends Error {
 /** 401/403/404 mean the token or the repo/branch is wrong; anything else (5xx, network) is transient. */
 export const sourceFailureReason = (status: number) =>
   status === 401 || status === 403 || status === 404 ? "github_auth_or_not_found" : "github_unavailable";
+const validId = (value: unknown) => typeof value === "string" && /^[a-z0-9][a-z0-9_-]*$/.test(value);
+function validSource(p: any, requireLegacyDocs = true): boolean {
+  return typeof p.repo === "string" && /^[\w.-]+\/[\w.-]+$/.test(p.repo) &&
+    typeof p.branch === "string" && !!p.branch &&
+    (p.kanbanPrefix === undefined || (typeof p.kanbanPrefix === "string" && !!p.kanbanPrefix)) && !!p.docs &&
+    DOC_KEYS.some(key => p.docs[key] !== undefined) &&
+    (p.excludeSections === undefined || (Array.isArray(p.excludeSections) && p.excludeSections.every((x: unknown) => typeof x === "string" && !!x))) &&
+    (p.tokenEnv === undefined || (typeof p.tokenEnv === "string" && /^[A-Z][A-Z0-9_]*$/.test(p.tokenEnv))) &&
+    DOC_KEYS.every(key => p.docs[key] === undefined && (!requireLegacyDocs || isOptionalDocKey(key)) ||
+      typeof p.docs[key] === "string" && !!p.docs[key] && !p.docs[key].startsWith("/") &&
+      !/[\\\u0000-\u001f?#]/.test(p.docs[key]) && !p.docs[key].split("/").some((x: string) => x === ".." || x === "."));
+}
+/** Resolve tracks independently; kanban is opt-in per track to avoid cross-repository tasks. */
+export function projectSources(p: ProjectRegistration): ProjectRegistration[] {
+  if (!p.tracks) return [p];
+  return p.tracks.map((t, i) => ({
+    id: p.id, name: t.name, repo: t.repo, branch: t.branch ?? p.branch ?? "main", docs: t.docs,
+    tokenEnv: t.tokenEnv ?? p.tokenEnv, excludeSections: t.excludeSections ?? p.excludeSections,
+    kanbanPrefix: t.kanbanPrefix ?? "", trackId: t.id ?? String(i),
+  }));
+}
 export function validateProjects(input: unknown): ProjectRegistration[] {
   if (!Array.isArray(input)) throw new Error("invalid_project_registry");
   const seen = new Set<string>();
-  for (const p of input) {
-    if (!p || typeof p.id !== "string" || !/^[a-z0-9][a-z0-9_-]*$/.test(p.id) || seen.has(p.id) || typeof p.name !== "string" ||
-      !/^[\w.-]+\/[\w.-]+$/.test(p.repo) || typeof p.branch !== "string" || !p.branch ||
-      typeof p.kanbanPrefix !== "string" || !p.kanbanPrefix || !p.docs ||
-      (p.excludeSections !== undefined && (!Array.isArray(p.excludeSections) || p.excludeSections.some((x: unknown) => typeof x !== "string" || !x))) ||
-      (p.tokenEnv !== undefined && (typeof p.tokenEnv !== "string" || !/^[A-Z][A-Z0-9_]*$/.test(p.tokenEnv))) ||
-      DOC_KEYS.some(key => (p.docs[key] === undefined && isOptionalDocKey(key)) ? false :
-        typeof p.docs[key] !== "string" || !p.docs[key] || p.docs[key].startsWith("/") ||
-        /[\\\u0000-\u001f?#]/.test(p.docs[key]) || p.docs[key].split("/").some((x: string) => x === ".." || x === "."))) {
-      throw new Error("invalid_project_registry");
-    }
+  return input.map(p => {
+    if (!p || !validId(p.id) || seen.has(p.id) || typeof p.name !== "string" || !p.name.trim()) throw new Error("invalid_project_registry");
     seen.add(p.id);
-  }
-  return input;
+    if (p.tracks !== undefined) {
+      if (!Array.isArray(p.tracks) || !p.tracks.length) throw new Error("invalid_project_registry");
+      const ids = new Set<string>();
+      for (const [i, t] of p.tracks.entries()) {
+        const id = t?.id ?? String(i);
+        if (!t || !validId(id) || ids.has(id) || typeof t.name !== "string" || !t.name.trim() ||
+          !validSource({ ...t, branch: t.branch ?? p.branch ?? "main", tokenEnv: t.tokenEnv ?? p.tokenEnv, excludeSections: t.excludeSections ?? p.excludeSections }, false)) throw new Error("invalid_project_registry");
+        ids.add(id);
+      }
+      const first = p.tracks[0];
+      return { ...p, repo: p.repo ?? first.repo, docs: p.docs ?? first.docs, branch: p.branch ?? "main", kanbanPrefix: p.kanbanPrefix ?? "" };
+    }
+    if (!validSource(p) || !p.kanbanPrefix) throw new Error("invalid_project_registry");
+    return p;
+  });
 }
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const pathEncode = (s: string) => s.split("/").map(encodeURIComponent).join("/");
@@ -62,7 +94,7 @@ export class GitHubDocs {
     this.fetcher = opts.fetch ?? fetch;
     this.now = opts.now ?? Date.now;
   }
-  private registryKey(p: ProjectRegistration) { return hash([p.id, p.repo, p.branch, p.docs, RENDERER_VERSION]); }
+  private registryKey(p: ProjectRegistration) { return hash([p.id, p.repo, p.branch, p.docs, p.trackId, p.tokenEnv, RENDERER_VERSION]); }
   private docKey(p: ProjectRegistration, sha: string, key: DocKey) { return hash([p.repo, sha, p.docs[key], RENDERER_VERSION]); }
   /** 등록되지 않은 선택 문서는 캐시에 키가 없어도 된다 — 없으면 null 로 채운다(예전 캐시 호환). */
   private normalizeDocs(docs: Record<string, unknown>) {

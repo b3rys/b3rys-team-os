@@ -4,8 +4,42 @@
     "name": "Example",
     "repo": "your-org/your-repo",
     "branch": "main",
-    "docs": { "readme": "README.md", "design": "DESIGN.md", "features": "FEATURES.md", "todo": "TODO.md" },
+    "docs": {
+      "readme": "README.md",
+      "design": "DESIGN.md",
+      "features": "FEATURES.md",
+      "todo": "TODO.md"
+    },
     "kanbanPrefix": "[example]",
     "tokenEnv": "GITHUB_TOKEN_EXAMPLE"
+  },
+  {
+    "id": "sample",
+    "name": "Sample workspace",
+    "tokenEnv": "GITHUB_TOKEN_SAMPLE",
+    "tracks": [
+      {
+        "id": "desktop",
+        "name": "Desktop · Server",
+        "repo": "your-org/sample",
+        "docs": {
+          "readme": "README.md",
+          "design": "DESIGN.md",
+          "features": "FEATURES.md",
+          "todo": "TODO.md"
+        },
+        "kanbanPrefix": "[sample]"
+      },
+      {
+        "id": "mobile",
+        "name": "Mobile",
+        "repo": "your-org/sample-mobile",
+        "docs": {
+          "readme": "README.md",
+          "project": "PROJECT.md",
+          "todo": "TODO.md"
+        }
+      }
+    ]
   }
 ]
