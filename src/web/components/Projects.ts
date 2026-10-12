@@ -491,7 +491,7 @@ async function renderDoc(): Promise<void> {
 
   const repo = project?.repo ?? "";
   const gh = repo ? `<a id="projects-open-github" href="${escape(blobUrl({ repo, sha: doc.sha }, doc.path))}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-[12px] font-semibold text-slate-300 hover:text-accent-greenSoft whitespace-nowrap" aria-label="GitHub" title="${pick("GitHub 에서 이 파일 보기", "View this file on GitHub")}">${renderIcon("github", { size: 16 })}</a>` : "";
-  // 문서 전환은 밑줄 탭으로, 등록된 문서만 표시한다.
+  // 문서 전환은 네모 칩으로, 등록된 문서만 표시한다.
   const docChips = DOC_KEYS.filter((k) => !project || project.docs.some((x) => x.key === k)).map((k) => {
     const d = project?.docs.find((x) => x.key === k);
     const base = `projects-doc-chip${k === key ? " is-active" : ""}`;
