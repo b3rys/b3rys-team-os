@@ -5,6 +5,7 @@ export const projectsCss = `
 .projects-refresh:hover{background:rgb(var(--surface-0));color:rgb(var(--slate-100))}
 .projects-refresh:focus-visible{outline:2px solid rgb(var(--accent));outline-offset:2px}
 .projects-card{margin:18px 0;border:1px solid var(--border-strong);border-radius:12px;background:rgb(var(--surface-2));overflow:hidden;outline:none}
+.projects-card-heading{margin:0;font:inherit}
 .projects-card-head{display:block;width:100%;text-align:left;padding:18px 20px 14px;cursor:pointer;transition:background .15s}
 .projects-card-head:hover:not(:disabled){background:rgb(var(--surface-0) / .65)}
 .projects-card-head:focus-visible{outline:2px solid rgb(var(--slate-400));outline-offset:-3px}
