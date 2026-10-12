@@ -60,6 +60,8 @@ export interface AgentRecord {
   // codex 런타임: 멤버별 실행 권한. 없으면 보수적 기본값(read-only, network 기본값)을 쓴다.
   codex_sandbox?: CodexSandboxMode | null;
   codex_network_access?: boolean | null;
+  /** Server-file-only Claude app tool scope. Missing/unknown values use folder. */
+  cogs_tool_scope?: "folder" | "full";
 }
 
 export interface AgentStatus {
