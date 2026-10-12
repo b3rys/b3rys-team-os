@@ -326,10 +326,17 @@ function trackHtml(p: ProjectSummary, t: ProjectTrackSummary): string {
       ${tasks.length > 3 ? `<details class="projects-more"><summary>+${tasks.length - 3} ${pick("펼침", "more")}</summary><ul class="projects-tasks">${tasks.slice(3).map(task).join("")}</ul></details>` : ""}</div></div>
   </section>`;
 }
+/** The card opens the first track, preferring its available PROJECT document. */
+export function projectEntry(p: ProjectSummary): { track: string | null; key: ProjectDocKey } | null {
+  const first = p.tracks?.[0] ?? p;
+  if ("error" in first) return null;
+  const key = (["project", "readme"] as ProjectDocKey[]).find(key => first.docs.some(doc => doc.key === key && doc.exists));
+  return key ? { track: p.tracks ? first.id : null, key } : null;
+}
 function renderList(): void {
   if (!_root) return;
-  const rows = _projects.map(p => `<article tabindex="-1" class="projects-row projects-card${p.id === _curId ? " projects-highlight" : ""}" data-id="${escape(p.id)}">
-    <header class="projects-card-head"><h1>${escape(p.name)}</h1><p>${escape(p.intro)}</p></header>
+  const rows = _projects.map(p => `<article tabindex="-1" class="projects-row projects-card" data-id="${escape(p.id)}">
+    <button type="button" class="projects-card-head" data-open-project="${escape(p.id)}"${projectEntry(p) ? "" : ` disabled title="${pick("읽을 수 있는 첫 트랙 문서가 없습니다", "No available first-track document")}"`}><span class="projects-card-name">${escape(p.name)}</span><span class="projects-card-intro">${escape(p.intro)}</span></button>
     ${(p.tracks ?? [p]).map(t => trackHtml(p,t)).join("")}</article>`).join("");
   _root.innerHTML = `<div data-projects-list-scroll class="h-full overflow-y-auto overflow-x-hidden"><div class="${browseListClass}">
     <div class="projects-list-head"><span class="text-[15px] font-semibold text-slate-100">${pick("Projects · 프로젝트", "Projects")}</span><span class="text-[12px] text-slate-500">${_projects.length}</span>
@@ -340,6 +347,14 @@ function renderList(): void {
   if (scroll) scroll.scrollTop = _listScrollTop;
   const card = Array.from(_root.querySelectorAll<HTMLElement>(".projects-card")).find(el => el.dataset.id === _curId);
   card?.scrollIntoView?.({ block: "center" });
+  _root.querySelectorAll<HTMLButtonElement>("[data-open-project]").forEach(button => button.addEventListener("click", () => {
+    const project = _projects.find(project => project.id === button.dataset.openProject);
+    const entry = project && projectEntry(project);
+    if (!project || !entry) return;
+    _listScrollTop = scroll?.scrollTop ?? 0;
+    _curTrack = entry.track;
+    void openDoc(project.id, entry.key);
+  }));
   _root.querySelector("#projects-retry")?.addEventListener("click", () => { void reload(); });
   _root.querySelectorAll<HTMLButtonElement>("button.projects-chip").forEach(btn => btn.addEventListener("click", () => {
     _listScrollTop = scroll?.scrollTop ?? 0;
@@ -382,10 +397,10 @@ function tocTreeHtml(secs: DocSection[], cur: DocSection): string {
       ? `<button class="projects-toc-caret" type="button" data-toggle="${escape(s.anchor)}" aria-expanded="${open}" aria-label="${pick("소제목 접기/펼치기", "Toggle subheadings")}">▶</button>`
       : `<span class="projects-toc-caret" aria-hidden="true"></span>`;
     const kids = s.children.length
-      ? `<div class="projects-toc-children">${s.children.map((t) => `<a href="#${escape(t.anchor)}" data-level="${t.level}" data-anchor="${escape(t.anchor)}" title="${escape(t.text)}" aria-current="${t.anchor === _curHead}"><span class="projects-toc-label">${escape(tocLabel(t.text))}</span></a>`).join("")}</div>`
+      ? `<div class="projects-toc-children">${s.children.map((t) => `<a href="#${escape(t.anchor)}" data-level="${t.level}" data-anchor="${escape(t.anchor)}" aria-label="${escape(t.text)}" aria-current="${t.anchor === _curHead}"><span class="projects-toc-label">${escape(tocLabel(t.text))}</span></a>`).join("")}</div>`
       : "";
     return `<div class="projects-toc-sec" data-sec="${escape(s.anchor)}" data-open="${open}">
-      <div class="projects-toc-row">${caret}<button class="projects-toc-head" type="button" data-sec="${escape(s.anchor)}" title="${escape(s.label)}" aria-current="${s === cur}"><span class="projects-toc-label">${escape(tocLabel(s.label))}</span></button></div>
+      <div class="projects-toc-row">${caret}<button class="projects-toc-head" type="button" data-sec="${escape(s.anchor)}" aria-label="${escape(s.label)}" aria-current="${s === cur}"><span class="projects-toc-label">${escape(tocLabel(s.label))}</span></button></div>
       ${kids}</div>`;
   }).join("");
   return `<nav class="projects-toc" aria-label="${pick("목차", "Contents")}">${rows}</nav>`;
@@ -457,7 +472,7 @@ async function renderDoc(): Promise<void> {
   const selected = parent?.tracks?.find(t => t.id === _curTrack);
   const project = selected && !("error" in selected) ? selected : parent;
   const track = _curTrack;
-  const backBtn = `<button id="projects-back" title="${pick("프로젝트 목록으로", "Back to project list")}" class="projects-back">← ${pick("목록", "List")}</button>`;
+  const backBtn = `<button id="projects-back" title="${pick("프로젝트 목록으로", "Back to project list")}" class="projects-back">${renderIcon("arrow-left", { size: 16 })}<span>${pick("목록", "List")}</span></button>`;
   _root.innerHTML = `<div class="h-full overflow-y-auto"><div class="w-full px-4 md:px-6 py-5">${backBtn}<div class="text-slate-500 py-16 text-center">${pick("문서 불러오는 중…", "Loading document…")}</div></div></div>`;
   _root.querySelector("#projects-back")?.addEventListener("click", () => showListCard(id));
 
@@ -475,7 +490,7 @@ async function renderDoc(): Promise<void> {
   enterDocPanels();
 
   const repo = project?.repo ?? "";
-  const gh = repo ? `<a id="projects-open-github" href="${escape(blobUrl({ repo, sha: doc.sha }, doc.path))}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-[12px] font-semibold text-slate-300 hover:text-accent-greenSoft whitespace-nowrap" aria-label="GitHub" title="${pick("GitHub 에서 이 파일 보기", "View this file on GitHub")}">${renderIcon("github", { size: 13 })}</a>` : "";
+  const gh = repo ? `<a id="projects-open-github" href="${escape(blobUrl({ repo, sha: doc.sha }, doc.path))}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-[12px] font-semibold text-slate-300 hover:text-accent-greenSoft whitespace-nowrap" aria-label="GitHub" title="${pick("GitHub 에서 이 파일 보기", "View this file on GitHub")}">${renderIcon("github", { size: 16 })}</a>` : "";
   // 문서 전환은 밑줄 탭으로, 등록된 문서만 표시한다.
   const docChips = DOC_KEYS.filter((k) => !project || project.docs.some((x) => x.key === k)).map((k) => {
     const d = project?.docs.find((x) => x.key === k);
@@ -508,7 +523,7 @@ async function renderDoc(): Promise<void> {
           <div class="projects-doc-tabs" role="group" aria-label="${pick("문서 전환", "Switch document")}">${docChips}</div>
           <div class="projects-tools">
           <div class="projects-modes" role="group" aria-label="HTML | MD">${modeBtn("html")}${modeBtn("md")}</div>
-          ${gh}<a id="projects-open-window" href="${escape(pageUrl(id, key, _mode))}" target="_blank" rel="noopener" aria-label="${pick("새창", "Open in new window")}" title="${pick("새창", "Open in new window")}">${renderIcon("external-link", { size: 14 })}</a></div>
+          ${gh}<a id="projects-open-window" href="${escape(pageUrl(id, key, _mode))}" target="_blank" rel="noopener" aria-label="${pick("새창", "Open in new window")}" title="${pick("새창", "Open in new window")}">${renderIcon("external-link", { size: 16 })}</a></div>
           ${isTodo && _mode === "html" ? `<div class="projects-status-tabs">${todoTabBtn("status", pick("현재 상태", "Status"))}${todoTabBtn("all", pick("전체", "All"))}</div>` : ""}
         </div>
         <div class="projects-doc-layout${showToc ? " has-toc" : ""}">

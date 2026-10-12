@@ -294,7 +294,7 @@ describe("Projects 문서 화면", () => {
     expect(root.querySelectorAll(".projects-toc-sec")).toHaveLength(3);
   });
 
-  test("문서 → 목록의 원래 카드 강조, URL 에서 doc 제거", async () => {
+  test("문서 → 목록의 원래 카드로 이동, URL 에서 doc 제거", async () => {
     const root = await mount();
     openSummary(root);
     root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="readme"]')!.click();
@@ -305,7 +305,8 @@ describe("Projects 문서 화면", () => {
     expect(new URLSearchParams(window.location.search).get("doc")).toBeNull();
     expect(root.querySelector("#projects-back")).toBeNull();
     expect(root.querySelectorAll(".projects-row")).toHaveLength(1);
-    expect(root.querySelector(".projects-highlight")?.getAttribute("data-id")).toBe("sample");
+    expect(root.querySelector(".projects-row")?.getAttribute("data-id")).toBe("sample");
+    expect(root.querySelector(".projects-highlight")).toBeNull();
     const p = new URLSearchParams(window.location.search);
     expect(p.get("id")).toBe("sample");
     expect(p.get("doc")).toBeNull();
@@ -598,7 +599,7 @@ describe("문서 헤더 — 문서 전환 탭 · 새창 · 글자 크기", () =>
     expect(root.querySelector<HTMLAnchorElement>("#projects-open-window")!.getAttribute("href")).toContain("/doc/features/page?mode=md");
   });
 
-  test("목차 글자는 이모지·장식 기호를 뺀다(tocLabel) — 본문 제목·title 은 원문 그대로", async () => {
+  test("목차 글자는 이모지·장식 기호를 뺀다(tocLabel) — 본문 제목·접근성 이름은 원문 그대로", async () => {
     const { tocLabel } = await import("./Projects");
     expect(tocLabel("🔄 실사용 피드백 (2026-01-01)")).toBe("실사용 피드백 (2026-01-01)");
     expect(tocLabel("📌 예시 절 — ★나중에 손본다★")).toBe("예시 절 — 나중에 손본다");
@@ -610,7 +611,7 @@ describe("문서 헤더 — 문서 전환 탭 · 새창 · 글자 크기", () =>
     expect(tocLabel("완료: ✅")).toBe("완료");           // 뒤 콜론
     expect(tocLabel("👍🏽 굿")).toBe("굿");              // 피부색 수식자까지
     expect(tocLabel("🎉")).toBe("🎉"); // 전부 기호면 원문 유지
-    // DOM: 목차 글자는 정리본, title 은 원문
+    // DOM: 목차 글자는 정리본, 접근성 이름은 원문
     const root = await mount();
     openSummary(root);
     root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="todo"]')!.click();
@@ -618,10 +619,10 @@ describe("문서 헤더 — 문서 전환 탭 · 새창 · 글자 크기", () =>
     root.querySelector<HTMLButtonElement>('button[data-todo-tab="all"]')?.click();
     await tick();
     const heads = [...root.querySelectorAll<HTMLButtonElement>(".projects-toc-head")];
-    const decorated = heads.find((b) => /\p{Extended_Pictographic}/u.test(b.title));
+    const decorated = heads.find((b) => /\p{Extended_Pictographic}/u.test(b.getAttribute("aria-label") ?? ""));
     expect(decorated).toBeDefined();
-    expect(decorated!.textContent?.trim()).toBe(tocLabel(decorated!.title));
-    expect(decorated!.textContent?.trim()).not.toBe(decorated!.title);
+    expect(decorated!.textContent?.trim()).toBe(tocLabel(decorated!.getAttribute("aria-label")!));
+    expect(decorated!.textContent?.trim()).not.toBe(decorated!.getAttribute("aria-label"));
     expect(decorated!.querySelector(".projects-toc-label")).not.toBeNull();
   });
 
@@ -721,12 +722,20 @@ describe("Projects multi-track overview", () => {
 });
 
  describe("Projects 카드·글자 크기 회귀", () => {
-  test("기존 상세 URL은 문서 없이 해당 목록 카드를 강조한다", async () => {
+  test("기존 상세 URL은 문서 없이 해당 목록 카드로 이동한다", async () => {
     window.history.replaceState(null, "", "/team?view=projects&id=sample");
-    const root = await mount();
-    expect(root.querySelector(".projects-highlight")?.getAttribute("data-id")).toBe("sample");
-    expect(root.querySelector("#projects-viewer")).toBeNull();
-    expect(root.querySelectorAll("button.projects-chip")).toHaveLength(4);
+    const prototype = window.HTMLElement.prototype;
+    const originalScroll = prototype.scrollIntoView;
+    const scrolled: string[] = [];
+    prototype.scrollIntoView = function (this: HTMLElement) { if (this.classList.contains("projects-card")) scrolled.push(this.dataset.id!); };
+    try {
+      const root = await mount();
+      expect(scrolled).toEqual(["sample"]);
+      expect(root.querySelector(".projects-row")?.getAttribute("data-id")).toBe("sample");
+      expect(root.querySelector(".projects-highlight")).toBeNull();
+      expect(root.querySelector("#projects-viewer")).toBeNull();
+      expect(root.querySelectorAll("button.projects-chip")).toHaveLength(4);
+    } finally { prototype.scrollIntoView = originalScroll; }
   });
   test("과제 접두 이모지·마크다운 제거, 긴 문장은 임의로 자르지 않는다", async () => {
     const { taskLabel } = await import("./Projects");
@@ -762,3 +771,48 @@ describe("Projects multi-track overview", () => {
       expect(toc.scrollTop).toBe(100);
     } finally { setDashboardScale(100); }
   });
+
+describe("Projects card entry", () => {
+  test("the entire card heading opens README when PROJECT is absent", async () => {
+    const root = await mount();
+    const header = root.querySelector<HTMLButtonElement>(".projects-card-head")!;
+    expect(header.textContent).toContain(fixture.summary.name);
+    expect(header.textContent).toContain(fixture.summary.intro);
+    header.click(); await tick();
+    expect(root.querySelector("#projects-viewer article")).not.toBeNull();
+    expect(new URLSearchParams(window.location.search).get("doc")).toBe("readme");
+  });
+  test("card entry prefers PROJECT in the first track and preserves track selection", async () => {
+    const saved = globalThis.fetch;
+    const parent = { ...fixture.summary, tracks: [
+      { ...fixture.summary, id: "desktop", name: "Desktop", docs: [...fixture.summary.docs, { key: "project", path: "PROJECT.md", exists: true }] },
+      { ...fixture.summary, id: "mobile", name: "Mobile" },
+    ] };
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/api/projects")) return Response.json({ projects: [parent] });
+      return saved(input, init);
+    }) as typeof fetch;
+    docOverride = { project: { ...fixture.docs.readme, key: "project", path: "PROJECT.md" } };
+    try {
+      const root = await mount();
+      root.querySelector<HTMLButtonElement>(".projects-card-head")!.click(); await tick();
+      const params = new URLSearchParams(window.location.search);
+      expect(params.get("doc")).toBe("project");
+      expect(params.get("track")).toBe("desktop");
+      expect(root.querySelector("#projects-viewer article")).not.toBeNull();
+    } finally { globalThis.fetch = saved; }
+  });
+  test("unavailable PROJECT falls back to README; an unavailable first track has no card entry", async () => {
+    const { projectEntry } = await import("./Projects");
+    const summary = fixture.summary as unknown as import("./Projects").ProjectSummary;
+    expect(projectEntry({ ...summary, docs: [...summary.docs, { key: "project", path: "PROJECT.md", exists: false }] })).toEqual({ track: null, key: "readme" });
+    expect(projectEntry({ ...summary, tracks: [{ id: "desktop", name: "Desktop", repo: "your-org/sample", error: "unavailable", key: "desktop" }] })).toBeNull();
+  });
+  test("TOC labels retain accessible names without native title tooltips", async () => {
+    const root = await mount();
+    root.querySelector<HTMLButtonElement>('button.projects-chip[data-doc="design"]')!.click(); await tick();
+    expect(root.querySelectorAll("#projects-toc [title]")).toHaveLength(0);
+    expect(root.querySelector('.projects-toc-head')?.getAttribute("aria-label")).toBe("1. 무엇을 만드나");
+    expect(root.querySelector("#projects-back svg")).not.toBeNull();
+  });
+});
