@@ -776,6 +776,7 @@ describe("Projects card entry", () => {
   test("the entire card heading opens README when PROJECT is absent", async () => {
     const root = await mount();
     const header = root.querySelector<HTMLButtonElement>(".projects-card-head")!;
+    expect(header.parentElement?.tagName).toBe("H1");
     expect(header.textContent).toContain(fixture.summary.name);
     expect(header.textContent).toContain(fixture.summary.intro);
     header.click(); await tick();
