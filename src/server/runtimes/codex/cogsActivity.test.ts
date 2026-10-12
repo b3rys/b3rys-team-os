@@ -46,3 +46,24 @@ test("app-server start/completion notifications pass structured targets to the f
   await result;
   expect(targets).toEqual(["🌐 search", "🌐 search completed query"]);
 });
+
+
+test("quoted credential keys hide the complete value before activity is clipped", () => {
+  const queries = [
+    JSON.stringify({ api_key: "fixture_value" }),
+    JSON.stringify({ token: 'fixture_value with "quotes", commas and spaces' }),
+    JSON.stringify({ authorization: "Bearer fixture_value" }),
+    '{ "password" : "fixture_value" }',
+    "{'secret':'fixture_value with spaces'}",
+    '"api-key"="fixture_value"',
+  ];
+  for (const query of queries) {
+    const line = cogsActivityLine({ type: "webSearch", query });
+    expect(line).toContain("[redacted]");
+    expect(line).not.toContain("fixture_value");
+    expect(line).not.toContain("quotes");
+    expect(line).not.toContain("commas");
+  }
+  expect(cogsActivityLine({ type: "webSearch", query: JSON.stringify({ api_key: "fixture_value", topic: "docs" }) }))
+    .toBe('🌐 search {[redacted],"topic":"docs"}');
+});

@@ -6,7 +6,7 @@ function safeText(text: string): string {
   return clip(text
     .replace(/\b(?:[A-Za-z_][\w]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s]+))/g, "[redacted]")
     .replace(/\b(?:authorization\s*[:=]?\s*)?bearer\s+\S+/gi, "[redacted]")
-    .replace(/\b(?:token|secret|password|api[-_ ]?key|authorization)\s*[:=]?\s*(?:"[^"]*"|'[^']*'|\S+)/gi, "[redacted]")
+    .replace(/(?:["'](?:token|secret|password|api[-_ ]?key|authorization)["']|\b(?:token|secret|password|api[-_ ]?key|authorization))\s*[:=]?\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,}]+)/gi, "[redacted]")
     .replace(/\$\{[^}]*\}|\$[A-Za-z_]\w*/g, "[env]")
     .replace(/https?:\/\/[^\s]+/g, (url) => { try { return new URL(url ?? "").hostname; } catch { return "[url]"; } })
     .replace(/(?:[A-Za-z]:[\\/]|~?\/)[^\s]+/g, "[path]")
