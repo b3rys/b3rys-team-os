@@ -82,7 +82,7 @@ export class GitHubDocs {
   private async request(url: string, key: string, tokenEnv = "GITHUB_TOKEN"): Promise<Response> {
     const headers: Record<string, string> = { Accept: "application/vnd.github+json", "User-Agent": "b3os-projects" };
     // Credentials are read only here and never included in cached data or errors. Which env var holds the
-    // token is per project (`tokenEnv`), so one .env can carry GITHUB_TOKEN_STENO, GITHUB_TOKEN_LEDGER, …
+    // token is per project (`tokenEnv`), so one .env can carry GITHUB_TOKEN_SAMPLE, GITHUB_TOKEN_OTHER, …
     const token = this.opts.useToken !== false ? process.env[tokenEnv] : undefined;
     if (token) headers.Authorization = `Bearer ${token}`;
     try {

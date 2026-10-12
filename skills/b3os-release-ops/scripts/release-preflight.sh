@@ -157,8 +157,10 @@ try:
   print(v.get("value","") if isinstance(v,dict) else (v or ""))
 except Exception: pass' || true)"
     # 명단·목록을 못 읽은 경우는 린트가 스스로 '검사 못 함' 으로 찍는다(빈 파일 = 읽기 실패).
+    # projects.json 은 설치본마다 따로 둔다(git 추적 안 함) — 있을 때만 넘긴다. 라이브 목록은 늘 넘긴다.
+    LOCAL_PROJECTS=(); [ -f projects.json ] && LOCAL_PROJECTS=(--projects projects.json)
     git diff "$BASE"...HEAD | bun "$LINT_TS" --agents "$LINT_TMP/agents.json" \
-      --projects projects.json --projects "$LINT_TMP/projects.json" \
+      ${LOCAL_PROJECTS[@]+"${LOCAL_PROJECTS[@]}"} --projects "$LINT_TMP/projects.json" \
       --owner-name "$OWNER_NAME" --allow "$LINT_ALLOW" || warn "public content lint failed to run (검사 못 함)"
     rm -rf "$LINT_TMP"
     trap - EXIT

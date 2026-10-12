@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { createProjectRoutes } from "./projects";
+import { createProjectRoutes, loadProjectRegistry } from "./projects";
 import { GitHubDocs, validateProjects, type ProjectRegistration } from "../lib/githubDocs";
 import { createHostGate } from "../lib/hostGate";
 const cleanups: (() => void)[] = [];
@@ -250,5 +250,43 @@ describe("PROJECT.md — 선택 문서 키", () => {
     expect((await app.request("/team/api/projects/sample/doc/project")).status).toBe(404);
     const html = await (await app.request("/team/api/projects/sample/doc/readme/page")).text();
     expect(html).not.toContain("PROJECT");
+  });
+});
+
+describe("projects.json — 설치본마다 따로(git 추적 안 함)", () => {
+  test("파일이 없으면 빈 목록 200 — 다른 팀의 등록이 따라오지 않는다", async () => {
+    const root = mkdtempSync(join(tmpdir(), "projects-root-"));
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+    const db = new Database(":memory:");
+    cleanups.push(() => db.close());
+    const app = new Hono(); app.route("/team/api", createProjectRoutes({ db, root }));
+    const res = await app.request("/team/api/projects");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ projects: [] });
+  });
+  test("파일이 있으면 그대로 읽는다", () => {
+    const root = mkdtempSync(join(tmpdir(), "projects-root-"));
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+    writeFileSync(join(root, "projects.json"), JSON.stringify([p]));
+    expect(loadProjectRegistry(root)).toEqual([p]);
+  });
+  test.each([["깨진 JSON", "{ not json"], ["모양이 틀림", JSON.stringify([{ id: "Bad Id" }])]])("%s 이어도 서버가 서고 빈 목록 200", async (_name, body) => {
+    const root = mkdtempSync(join(tmpdir(), "projects-root-"));
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+    writeFileSync(join(root, "projects.json"), body);
+    const db = new Database(":memory:");
+    cleanups.push(() => db.close());
+    const app = new Hono(); app.route("/team/api", createProjectRoutes({ db, root }));
+    const res = await app.request("/team/api/projects");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ projects: [] });
+  });
+  test("예시 파일은 유효한 등록이고, 저장소에는 projects.json 이 없다", () => {
+    const repo = new URL("../../../", import.meta.url);
+    expect(validateProjects(JSON.parse(readFileSync(new URL("projects.example.json", repo), "utf8")))).toHaveLength(1);
+    const ignore = readFileSync(new URL(".gitignore", repo), "utf8").split("\n").map(l => l.trim());
+    expect(ignore).toContain("projects.json");
+    const tracked = Bun.spawnSync(["git", "ls-files", "--error-unmatch", "projects.json"], { cwd: repo.pathname });
+    expect(tracked.exitCode).not.toBe(0);
   });
 });

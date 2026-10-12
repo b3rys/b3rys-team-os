@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import { fileURLToPath } from "node:url";
 import type { Database } from "bun:sqlite";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DOC_KEYS, GitHubDocs, registeredDocKeys, ProjectSourceError, validateProjects, type ProjectRegistration, type DocKey } from "../lib/githubDocs";
 import { projectIntro } from "../lib/projectDocRender";
@@ -15,9 +15,21 @@ interface ProjectDeps {
   projects?: ProjectRegistration[];
   source?: GitHubDocs;
 }
+/** projects.json = 이 설치본의 프로젝트 등록(각 머신 고유, git 추적 안 함 — agents.json 과 같다).
+ *  없으면 빈 목록. 깨졌거나 모양이 틀려도 서버를 세우지 않는다 — 로그를 남기고 빈 목록. */
+export function loadProjectRegistry(root: string): ProjectRegistration[] {
+  const file = join(root, "projects.json");
+  if (!existsSync(file)) return [];
+  try {
+    return validateProjects(JSON.parse(readFileSync(file, "utf8")));
+  } catch (err) {
+    console.error(`[projects] projects.json 을 읽지 못해 빈 목록으로 둡니다: ${err instanceof Error ? err.message : String(err)}`);
+    return [];
+  }
+}
 export function createProjectRoutes(deps: ProjectDeps) {
   const root = deps.root ?? process.env.TEAM_COLLAB_ROOT ?? fileURLToPath(new URL("../../../", import.meta.url));
-  const projects = validateProjects(deps.projects ?? JSON.parse(readFileSync(join(root, "projects.json"), "utf8")));
+  const projects = deps.projects ? validateProjects(deps.projects) : loadProjectRegistry(root);
   const source = deps.source ?? new GitHubDocs({ cacheDir: join(root, "var/projects-cache") });
   const app = new Hono();
   // 문서 응답은 no-store. mermaid 번들(불변 파일)만 예외 — 새창마다 5MB 를 다시 받지 않게.

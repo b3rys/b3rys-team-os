@@ -3,12 +3,12 @@
 //   GET  <base>/api/projects                 → { projects: [ProjectSummary] }
 //   GET  <base>/api/projects/:id/doc/:key    → ProjectDoc (html 은 서버가 정제한 것 — 그대로 innerHTML)
 //   GET  <base>/api/projects/:id/doc/:key/raw → text/markdown (MD 토글)
-// URL 상태: /team?view=projects[&id=steno&doc=design[&sec=<anchor>]] — 목록 ↔ 문서 ↔ 절 deep-link.
+// URL 상태: /team?view=projects[&id=sample&doc=design[&sec=<anchor>]] — 목록 ↔ 문서 ↔ 절 deep-link.
 // 문서 화면: 왼쪽 목차 트리(절마다 접기/펼치기, 현재 절만 펼침) + 본문은 ★전체 문서★ 한 번에(스크롤 이동).
 //   절 판정(현재 절·트리 재료)은 lib/projectSections.ts 의 splitSections. 스크롤 위치 → 현재 절 → &sec= 갱신.
 // 문서 화면에 들어가면 대시보드 좌우 패널(팀원·THREADS)을 접고, 목록·다른 탭으로 나가면 들어오기 전 상태로 되돌린다
 //   (사용자가 문서 안에서 직접 펼친 패널은 그 세션에선 다시 접지 않는다) — lib/panels.ts.
-// 개발 폴백: `?fixture=1` 일 때만, API 가 404 면 fixtures/projects-steno.example.json 을 쓴다.
+// 개발 폴백: `?fixture=1` 일 때만, API 가 404 면 fixtures/projects-sample.example.json 을 쓴다.
 
 import { pick } from "../i18n";
 import { mdInlineToHtml } from "../lib/mdInline";
@@ -183,7 +183,7 @@ function fixtureMode(): boolean {
   return new URLSearchParams(window.location.search).get("fixture") === "1";
 }
 async function loadFixture(): Promise<Fixture> {
-  const mod = await import("../fixtures/projects-steno.example.json");
+  const mod = await import("../fixtures/projects-sample.example.json");
   return (mod.default ?? mod) as unknown as Fixture;
 }
 

@@ -1,6 +1,6 @@
 # Projects 탭 — 계약 (착수 기준)
 
-팀장 지시: 보고서와 동급의 Projects 탭. 프로젝트 목록에 주요 정보(GitHub · DESIGN · FEATURES · TODO · 지금 과제)를 보이고, 링크를 누르면 GitHub 의 md 를 보기 좋은 HTML 로(기본 HTML, MD 토글). 별도 링크로도 제공. 첫 대상 = steno.
+팀장 지시: 보고서와 동급의 Projects 탭. 프로젝트 목록에 주요 정보(GitHub · DESIGN · FEATURES · TODO · 지금 과제)를 보이고, 링크를 누르면 GitHub 의 md 를 보기 좋은 HTML 로(기본 HTML, MD 토글). 별도 링크로도 제공. 첫 대상 = sample.
 
 원칙: 원본은 GitHub md. 서버는 등록정보만 갖고 렌더는 파생본(캐시). 같은 사실을 두 곳에 다른 값으로 적지 않는다.
 
@@ -9,7 +9,7 @@
 ```
 GitHub 저장소 (원본)                        team.db (원본)                    Projects 탭 (뷰)
  ├ README.md   무엇인가 · 소개              task 카드                          ├ 목록 줄: 이름·소개·문서 칩·건수·지금 과제
- ├ DESIGN.md   구조 (다이어그램)             ├ title "[steno] 핵심코드 리뷰…"      ├ 문서 화면: md → HTML (MD 토글)
+ ├ DESIGN.md   구조 (다이어그램)             ├ title "[sample] 핵심코드 리뷰…"      ├ 문서 화면: md → HTML (MD 토글)
  ├ FEATURES.md 지금 되는 것 (사용자 관점)     ├ lane plan|doing|done            └ 현재 상태: TODO [~]/[ ]/[x] + 칸반 plan/doing
  └ TODO.md     할 일·상태 (작업 관점)         └ description 다음 액션
         ▲                                        ▲
@@ -17,23 +17,25 @@ GitHub 저장소 (원본)                        team.db (원본)               
         └──────────── 같은 사실을 두 곳에 다른 값으로 적지 않는다 ────────────┘
 ```
 
-- **프로젝트** = 저장소 하나 + 등록정보(`projects.json` 한 줄). 정체성은 `id`.
+- **프로젝트** = 저장소 하나 + 등록정보(설치본의 `projects.json` 한 줄). 정체성은 `id`.
 - **원본 md** = 저장소의 네 문서. Projects 탭은 ★읽기만★ 한다 — 고치는 곳은 GitHub(PR). 렌더·캐시는 파생본.
 - **칸반 카드** = 그 프로젝트의 "지금 하는 큰 과제". TODO 항목 하나하나가 카드가 아니다. 연결은 카드 제목의 접두 `[<id>]` (`kanbanPrefix`) — 추가 필드 없이 지금 쓰는 관습 그대로.
 - **상태 두 축**: TODO.md 의 `[~]/[ ]/[x]` 는 항목 상태(세밀), 칸반 lane 은 과제 상태(굵음). 탭은 둘을 나란히 보여 주고 합치지 않는다.
 - **흐름**: 팀장 지시 → TODO.md 항목(정본) → 큰 과제면 칸반 카드 → 구현 → TODO `[x]` + 카드 done → 기능이 바뀌었으면 FEATURES 갱신(작업 근거는 TODO 에 남긴다). 정본은 `b3os-sf` 스킬.
 
-## 1. 등록정보 — `projects.json` (저장소 루트, git 추적)
+## 1. 등록정보 — `projects.json` (저장소 루트, ★설치본마다 따로 · git 추적 안 함★)
+
+`agents.json` 과 같다 — 각 머신 고유 상태라 저장소에 올리지 않는다(공개 repo 에 다른 팀의 비공개 저장소 이름이 나가면 안 된다). 파일이 없으면 빈 목록이고 탭에 "등록된 프로젝트가 없습니다" 가 뜬다. 형식은 `projects.example.json` 을 복사해 쓴다.
 
 ```json
 [
   {
-    "id": "steno",
-    "name": "Steno",
-    "repo": "b3rys/steno",
+    "id": "sample",
+    "name": "Sample",
+    "repo": "your-org/sample",
     "branch": "main",
     "docs": { "readme": "README.md", "design": "DESIGN.md", "features": "FEATURES.md", "todo": "TODO.md" },
-    "kanbanPrefix": "[steno]",
+    "kanbanPrefix": "[sample]",
     "excludeSections": ["킵", "선택 대기", "답 대기", "승인 대기"]
   }
 ]
@@ -73,9 +75,9 @@ type ProjectSummary = {
 
 - Markdown → HTML: 기존 `skills/b3os-report/scripts/render.mjs` 를 옮겨 쓰지 말고 ★서버 모듈로 재작성★(zero-dep 유지: 헤딩·표·목록·인용·코드펜스·링크·이미지·체크박스·취소선).
 - ```mermaid 블록 → 서버에서 SVG 로 변환해 인라인 (`@mermaid-js/mermaid-cli` 는 크롬 의존이라 ★쓰지 않는다★ — 우선 `beautiful-mermaid` 류 zero-dep 렌더러가 있으면 그것, 없으면 ★1차: `<pre class="mermaid-src">` 로 코드 그대로 + "다이어그램 렌더 예정" 배지★ 하고 `needs` 에 적는다. 보고서 iframe 의 실행 권한은 풀지 않는다).
-- 상대 링크·이미지: `[x](docs/y.md)` → 같은 프로젝트 문서면 `?view=projects&id=steno&doc=…`, 아니면 GitHub blob URL.
+- 상대 링크·이미지: `[x](docs/y.md)` → 같은 프로젝트 문서면 `?view=projects&id=sample&doc=…`, 아니면 GitHub blob URL.
 - 원문 HTML 은 정제(script·on* 제거).
-- TODO 파싱 규칙(`b3os-sf` TODO.md 모양): 줄 시작 `- [~]` doing · `- [ ]` plan · `- [x]` done. ★제외 절★(헤더 줄에 등록정보 `excludeSections` 의 문자열이 들어가는 절 — 기본 `킵`; steno 는 `킵`·`선택 대기`·`답 대기`·`승인 대기`)의 `[ ]` 는 plan 에서 뺀다 — 착수 예정으로 오인하지 않게. 하위 헤더까지 이어지고 형제 헤더에서 풀린다. `doingTitles` = `[~]` 줄의 첫 60자. "이번 주 완료" 는 안 센다(완료일 필드 없음).
+- TODO 파싱 규칙(`b3os-sf` TODO.md 모양): 줄 시작 `- [~]` doing · `- [ ]` plan · `- [x]` done. ★제외 절★(헤더 줄에 등록정보 `excludeSections` 의 문자열이 들어가는 절 — 기본 `킵`; sample 는 `킵`·`선택 대기`·`답 대기`·`승인 대기`)의 `[ ]` 는 plan 에서 뺀다 — 착수 예정으로 오인하지 않게. 하위 헤더까지 이어지고 형제 헤더에서 풀린다. `doingTitles` = `[~]` 줄의 첫 60자. "이번 주 완료" 는 안 센다(완료일 필드 없음).
 
 ## 4. 화면 (`src/web/components/Projects.ts`, Reports 와 같은 자리·같은 스타일)
 
@@ -95,7 +97,7 @@ type ProjectSummary = {
 
 ## 6. 수용 기준 (검증자가 잰다)
 
-1. `GET /api/projects` 에 steno 1건, 4문서 exists, todo 건수가 TODO.md 를 직접 센 값과 같다, kanban 에 `[steno]` 카드.
+1. `GET /api/projects` 에 sample 1건, 4문서 exists, todo 건수가 TODO.md 를 직접 센 값과 같다, kanban 에 `[sample]` 카드.
 2. DESIGN 문서 HTML 에 헤딩 toc 와 mermaid 6개가 (SVG 또는 코드+배지로) 모두 자리한다 — 빠진 것 0.
 3. TODO "현재 상태" 에 킵 절 항목이 plan 으로 안 센다.
 4. sha 갱신: 브랜치 sha 가 바뀌면 60초 안에 새 렌더, 그 전엔 캐시.
@@ -106,11 +108,11 @@ type ProjectSummary = {
 
 ### §6 측정 결과 (검증자) · `a2c5a671`
 
-격리 서버 `TEAM_HTTP_PORT=7899` + team.db 사본, 원본 md 는 `b3rys/steno` 를 replay(sha `6d2cce35`)·실조회(sha `c5b9a01`) 둘로 읽었다.
+격리 서버 `TEAM_HTTP_PORT=7899` + team.db 사본, 원본 md 는 `your-org/sample` 를 replay(sha `6d2cce35`)·실조회(sha `c5b9a01`) 둘로 읽었다.
 
 | # | 어떻게 쟀나 | 값 | 판정 |
 | --- | --- | --- | --- |
-| 1 | replay 로 `GET /team/api/projects` · TODO.md 를 별도 파서로 직접 셈 · team.db 사본 `select` | steno 1건 · 4문서 exists · todo 30/50/153 = 직접 센 값 · kanban 3건 = DB `[steno]` plan·doing 3건 | 통과 |
+| 1 | replay 로 `GET /team/api/projects` · TODO.md 를 별도 파서로 직접 셈 · team.db 사본 `select` | sample 1건 · 4문서 exists · todo 30/50/153 = 직접 센 값 · kanban 3건 = DB `[sample]` plan·doing 3건 | 통과 |
 | 2 | DESIGN md 헤딩 수 vs `toc` · ```mermaid 수 vs `<figure class="project-diagram">` · 원문에 `<script>`·`onerror` 주입 후 렌더 | 헤딩 29=29 · mermaid 6=6(figure·mermaid-src·배지 각 6) · script 0 onerror 0 | 통과 |
 | 3 | `/doc/todo` 의 `current.items` 를 section 별로 셈 | 킵·선택 대기·답 대기·승인 대기 절의 plan 0건 (제외 12건) | 통과 |
 | 4 | `githubDocs.test.ts` TTL 케이스 + 뮤턴트(60_000→600_000) | 59,999ms 캐시·60,000ms 재조회 통과 · 뮤턴트 2 fail | 통과 |

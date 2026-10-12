@@ -1,0 +1,11 @@
+[
+  {
+    "id": "example",
+    "name": "Example",
+    "repo": "your-org/your-repo",
+    "branch": "main",
+    "docs": { "readme": "README.md", "design": "DESIGN.md", "features": "FEATURES.md", "todo": "TODO.md" },
+    "kanbanPrefix": "[example]",
+    "tokenEnv": "GITHUB_TOKEN_EXAMPLE"
+  }
+]

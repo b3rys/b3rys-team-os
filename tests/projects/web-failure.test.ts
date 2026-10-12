@@ -5,7 +5,7 @@
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
-import fixture from "../../src/web/fixtures/projects-steno.example.json";
+import fixture from "../../src/web/fixtures/projects-sample.example.json";
 
 const installed: string[] = []; const saved: Record<string, unknown> = {};
 let previousFetch: typeof fetch;

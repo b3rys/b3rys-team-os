@@ -5,7 +5,7 @@
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
-import fixture from "../fixtures/projects-steno.example.json";
+import fixture from "../fixtures/projects-sample.example.json";
 
 // 가짜 mermaid — 진짜(5MB)는 테스트에서 안 받는다. render 가 준 svg 를 figure 에 넣는 절차만 잰다.
 const fakeMermaid = {
@@ -56,7 +56,7 @@ beforeAll(() => {
     if (!m) return new Response("not found", { status: 404 });
     const [, id, key, raw] = m;
     if (!id) return json({ projects: [fixture.summary] });
-    if (id !== "steno") return json({ error: "unknown project", key: id }, 404);
+    if (id !== "sample") return json({ error: "unknown project", key: id }, 404);
     if (!key) return json(fixture.summary);
     const doc = (docOverride?.[key] as { md: string } | undefined) ?? (fixture.docs as Record<string, { md: string }>)[key];
     if (!doc) return json({ error: "unknown doc", key }, 404);
@@ -106,7 +106,7 @@ describe("Projects 목록", () => {
     const root = await mount();
     const rows = root.querySelectorAll(".projects-row");
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.getAttribute("data-id")).toBe("steno");
+    expect(rows[0]!.getAttribute("data-id")).toBe("sample");
     expect(root.querySelectorAll(".projects-chip")).toHaveLength(4);
     expect(root.querySelectorAll("button.projects-chip")).toHaveLength(4); // 4문서 모두 exists=true → 전부 버튼
     expect(root.querySelector('[data-count="doing"]')?.textContent).toBe("3");
@@ -114,9 +114,9 @@ describe("Projects 목록", () => {
     expect(root.querySelector('[data-count="done"]')?.textContent).toBe("40");
     // 지금 과제 = doingTitles 3 + 칸반 doing 1
     expect(root.querySelectorAll(".projects-tasks li")).toHaveLength(4);
-    expect(root.querySelector(".projects-tasks")?.textContent).toContain("[steno] 과제 A");
+    expect(root.querySelector(".projects-tasks")?.textContent).toContain("[sample] 과제 A");
     const gh = root.querySelector<HTMLAnchorElement>("a.projects-github")!;
-    expect(gh.getAttribute("href")).toBe("https://github.com/b3rys/steno");
+    expect(gh.getAttribute("href")).toBe("https://github.com/your-org/sample");
     expect(gh.getAttribute("target")).toBe("_blank");
     expect(root.textContent).toContain(fixture.summary.intro);
   });
@@ -175,10 +175,10 @@ describe("Projects 문서 화면", () => {
     const sha7 = fixture.summary.sha.slice(0, 7);
     expect(root.textContent).toContain(sha7);
     expect(root.querySelector<HTMLAnchorElement>("#projects-open-github")!.getAttribute("href"))
-      .toBe(`https://github.com/b3rys/steno/blob/${fixture.summary.sha}/DESIGN.md`);
+      .toBe(`https://github.com/your-org/sample/blob/${fixture.summary.sha}/DESIGN.md`);
     const p = new URLSearchParams(window.location.search);
     expect(p.get("view")).toBe("projects");
-    expect(p.get("id")).toBe("steno");
+    expect(p.get("id")).toBe("sample");
     expect(p.get("doc")).toBe("design");
     expect(p.get("sec")).toBe("1-무엇을-만드나");
   });
@@ -252,13 +252,13 @@ describe("Projects 문서 화면", () => {
   });
 
   test("deep-link &sec=3-주요-클래스 로 부팅하면 그 절이 현재 · 모르는 sec 은 첫 절", async () => {
-    window.history.replaceState(null, "", "/team?view=projects&id=steno&doc=design&sec=3-주요-클래스");
+    window.history.replaceState(null, "", "/team?view=projects&id=sample&doc=design&sec=3-주요-클래스");
     let root = await mount();
     expect(root.querySelector('.projects-toc-head[aria-current="true"]')?.getAttribute("data-sec")).toBe("3-주요-클래스");
     expect(root.querySelector("#projects-viewer article")?.getAttribute("data-sec")).toBe("3-주요-클래스");
     expect(root.querySelectorAll("#projects-viewer h2")).toHaveLength(3);
     document.body.innerHTML = "";
-    window.history.replaceState(null, "", "/team?view=projects&id=steno&doc=design&sec=없는-절");
+    window.history.replaceState(null, "", "/team?view=projects&id=sample&doc=design&sec=없는-절");
     root = await mount();
     expect(root.querySelector('.projects-toc-head[aria-current="true"]')?.getAttribute("data-sec")).toBe("1-무엇을-만드나");
     expect(new URLSearchParams(window.location.search).get("sec")).toBe("1-무엇을-만드나");
@@ -270,7 +270,7 @@ describe("Projects 문서 화면", () => {
     await tick();
     root.querySelector<HTMLButtonElement>('.projects-mode[data-mode="md"]')!.click();
     await tick();
-    expect(fetchLog.some((u) => u.endsWith("/api/projects/steno/doc/design/raw"))).toBe(true);
+    expect(fetchLog.some((u) => u.endsWith("/api/projects/sample/doc/design/raw"))).toBe(true);
     const pre = root.querySelector("#projects-viewer pre.projects-raw")!;
     expect(pre).not.toBeNull();
     expect(pre.textContent).toContain("```mermaid");
@@ -293,8 +293,8 @@ describe("Projects 문서 화면", () => {
     expect(p.get("doc")).toBeNull();
   });
 
-  test("deep-link ?id=steno&doc=design 로 부팅하면 바로 문서 화면", async () => {
-    window.history.replaceState(null, "", "/team?view=projects&id=steno&doc=design");
+  test("deep-link ?id=sample&doc=design 로 부팅하면 바로 문서 화면", async () => {
+    window.history.replaceState(null, "", "/team?view=projects&id=sample&doc=design");
     const root = await mount();
     expect(root.querySelectorAll(".projects-row")).toHaveLength(0);
     expect(root.querySelectorAll(".projects-toc-sec")).toHaveLength(3);
@@ -462,7 +462,7 @@ describe("서버 404 폴백", () => {
     expect(root.querySelectorAll("#projects-viewer figure.project-diagram .project-diagram-svg svg[data-fake]")).toHaveLength(1); // fixture 의 mermaid 도 (가짜로) 렌더
     root.querySelector<HTMLButtonElement>('.projects-mode[data-mode="md"]')!.click();
     await tick();
-    expect(root.querySelector("#projects-viewer pre.projects-raw")?.textContent).toContain("# Steno 설계");
+    expect(root.querySelector("#projects-viewer pre.projects-raw")?.textContent).toContain("# Sample 설계");
   });
 });
 
@@ -535,7 +535,7 @@ describe("문서 헤더 — 한 줄 · 문서 전환 칩 · 새창 · 글자 크
     expect(root.querySelector('.projects-doc-chip[aria-current="page"]')?.textContent?.trim()).toBe("DESIGN");
     expect(root.querySelectorAll("button[data-doc-chip]")).toHaveLength(3);
     const win = root.querySelector<HTMLAnchorElement>("#projects-open-window")!;
-    expect(win.getAttribute("href")).toContain("/api/projects/steno/doc/design/page");
+    expect(win.getAttribute("href")).toContain("/api/projects/sample/doc/design/page");
     expect(win.getAttribute("href")).not.toContain("mode=md");
     expect(win.getAttribute("target")).toBe("_blank");
   });
@@ -546,7 +546,7 @@ describe("문서 헤더 — 한 줄 · 문서 전환 칩 · 새창 · 글자 크
     await tick();
     const head = root.querySelector<HTMLElement>("[data-projects-doc-head]")!;
     expect(head).not.toBeNull();
-    expect(head.textContent).toContain("Steno · DESIGN.md");
+    expect(head.textContent).toContain("Sample · DESIGN.md");
     const { measureHeadOffset } = await import("./Projects");
     // happy-dom 은 레이아웃이 없어 0 → 기본값 유지, 변수도 안 박는다
     expect(measureHeadOffset()).toBe(72);
@@ -621,7 +621,7 @@ describe("문서 헤더 — 한 줄 · 문서 전환 칩 · 새창 · 글자 크
   test("목록 카드에도 새창 링크(README·HTML 로 시작)", async () => {
     const root = await mount();
     const a = root.querySelector<HTMLAnchorElement>(".projects-window")!;
-    expect(a.getAttribute("href")).toContain("/api/projects/steno/doc/readme/page");
+    expect(a.getAttribute("href")).toContain("/api/projects/sample/doc/readme/page");
     expect(a.getAttribute("target")).toBe("_blank");
   });
 
