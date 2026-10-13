@@ -224,6 +224,8 @@ try {
     writeFileSync(compMd, "# 컴포넌트\n\n<b3-test-only class=\"ix\">\n  <div class=\"ix-title\">정적</div>\n  <p class=\"ix-note\">안내</p>\n</b3-test-only>\n\n```\n<b3-not-used>\n```\n", "utf8");
     const compDir = join(here, "../assets/components");
     const testComp = join(compDir, "b3-test-only.js");
+    const testComp2 = join(compDir, "b3-test-only-x.js");
+    writeFileSync(testComp2, "/* 이름이 더 긴 태그 */", "utf8");
     writeFileSync(testComp, "customElements.get('b3-test-only')||customElements.define('b3-test-only',class extends HTMLElement{}); // </script>", "utf8");
     try {
       execFileSync(process.execPath, [join(here, "render.mjs"), compMd, compOut], { stdio: "pipe" });
@@ -236,10 +238,22 @@ try {
       const plainOut = join(tmp, "plain.html");
       execFileSync(process.execPath, [join(here, "render.mjs"), md, plainOut], { stdio: "pipe" });
       assert.doesNotMatch(readFileSync(plainOut, "utf8"), /\.ix-note/, "컴포넌트를 안 쓰면 컴포넌트 CSS 도 안 들어간다");
+      // 빈 줄 없이 문단 바로 다음 줄에 와도 컴포넌트로 통과한다(이스케이프되지 않는다).
+      writeFileSync(compMd, "# x\n\n앞 문단입니다.\n<b3-test-only class=\"ix\">\n  <p>안</p>\n</b3-test-only>\n", "utf8");
+      execFileSync(process.execPath, [join(here, "render.mjs"), compMd, compOut], { stdio: "pipe" });
+      let h2 = readFileSync(compOut, "utf8");
+      assert.match(h2, /<b3-test-only class="ix">/);
+      assert.doesNotMatch(h2, /&lt;b3-test-only/);
+      // 속성값 안의 "<태그>" 글자와 이름이 더 긴 태그는 depth 로 세지 않는다 — 닫힌 뒤의 ## 은 헤딩이어야 한다.
+      writeFileSync(compMd, "# x\n\n<b3-test-only class=\"ix\" aria-label=\"<b3-test-only> 예\">\n  <span data-x='<b3-test-only>'></span><b3-test-only-x></b3-test-only-x>\n</b3-test-only>\n\n## 뒤 제목\n", "utf8");
+      execFileSync(process.execPath, [join(here, "render.mjs"), compMd, compOut], { stdio: "pipe" });
+      h2 = readFileSync(compOut, "utf8");
+      assert.match(h2, /<h2[^>]*>뒤 제목<\/h2>/, "닫힌 컴포넌트 뒤의 헤딩이 원문 블록에 삼켜졌다");
       writeFileSync(compMd, "# x\n\n<b3-missing-one class=\"ix\">\n</b3-missing-one>\n", "utf8");
       assert.throws(() => execFileSync(process.execPath, [join(here, "render.mjs"), compMd, compOut], { stdio: "pipe" }));
     } finally {
       rmSync(testComp, { force: true });
+      rmSync(testComp2, { force: true });
     }
   }
 

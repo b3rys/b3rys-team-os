@@ -59,16 +59,18 @@ while (i < lines.length) {
   // SVG / figure / div 원문 블록 통과. 같은 태그가 중첩돼도 실제 depth가 0이 될 때까지 읽는다.
   if (/^<(svg|figure|div|b3-[a-z0-9-]+)\b/i.test(t)) {
     const tag = t.match(/^<([\w-]+)/)[1];
-    const open = new RegExp(`<${tag}\\b`, "gi");
-    const close = new RegExp(`</${tag}>`, "gi");
-    const selfClosing = new RegExp(`<${tag}\\b[^>]*\\/>`, "gi");
+    // 태그 이름은 정확히 끝나야 한다(<b3-a 가 <b3-a-b 를 세지 않게). 속성값 안의 "<태그>" 글자는 세지 않는다.
+    const open = new RegExp(`<${tag}(?=[\\s/>]|$)`, "gi");
+    const close = new RegExp(`</${tag}\\s*>`, "gi");
+    const selfClosing = new RegExp(`<${tag}(?=[\\s/>])[^>]*\\/>`, "gi");
     const buf = [];
     let depth = 0;
     do {
       const raw = lines[i];
-      const opens = (raw.match(open) || []).length;
-      const closes = (raw.match(close) || []).length;
-      const selfClosed = (raw.match(selfClosing) || []).length;
+      const bare = raw.replace(/=\s*("[^"]*"|'[^']*')/g, '=""');
+      const opens = (bare.match(open) || []).length;
+      const closes = (bare.match(close) || []).length;
+      const selfClosed = (bare.match(selfClosing) || []).length;
       depth += opens - closes - selfClosed;
       buf.push(raw); i++;
     } while (i < lines.length && depth > 0);
@@ -115,7 +117,7 @@ while (i < lines.length) {
   }
   // 단락 (연속 비-빈 줄 묶기)
   const para = [inline(t)]; i++;
-  while (i < lines.length && lines[i].trim() !== "" && !/^(#{1,4}\s|[-*]\s|\d+\.\s|>|```|<svg|<div|<figure|---+$|\|)/.test(lines[i].trim())) {
+  while (i < lines.length && lines[i].trim() !== "" && !/^(#{1,4}\s|[-*]\s|\d+\.\s|>|```|<svg|<div|<figure|<b3-|---+$|\|)/.test(lines[i].trim())) {
     para.push(inline(lines[i].trim())); i++;
   }
   out.push(`<p>${para.join("<br>")}</p>`);

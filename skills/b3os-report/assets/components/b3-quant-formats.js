@@ -118,6 +118,12 @@
 
   function el(tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
 
+  // 입력 검사 — 숫자 배열·배율만 받는다. 어긋나면 정적 내용을 그대로 둔다(값이 innerHTML 로 들어가기 때문).
+  function nums(a, lo, hi, minLen, maxLen) {
+    return Array.isArray(a) && a.length >= minLen && a.length <= maxLen &&
+      a.every(function (v) { return typeof v === 'number' && isFinite(v) && v >= lo && v <= hi; });
+  }
+  function pos(v, hi) { return typeof v === 'number' && isFinite(v) && v > 0 && v <= hi; }
   customElements.define(TAG, class extends HTMLElement {
     connectedCallback() {
       if (this._ready) return;
@@ -125,6 +131,7 @@
       if (!json) return;
       var data;
       try { data = JSON.parse(json.textContent); } catch (e) { return; }
+      if (!data || !(nums(data.x, -1e6, 1e6, 1, 8) && nums(data.w, -1e6, 1e6, 1, 8) && data.x.length === data.w.length && nums(data.fp4, 0, 1e6, 2, 16) && pos(data.fp4Scale, 100))) return;
       this._ready = true;
       addStyle();
       var self = this, x = data.x, w = data.w;
