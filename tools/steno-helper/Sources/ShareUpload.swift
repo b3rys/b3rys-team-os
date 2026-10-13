@@ -28,18 +28,22 @@ func removeUnchanged(_ dir: Int32, _ name: String, _ info: stat, _ data: Data) -
 
 // Publish a fully written 0600 file without replacing any existing name.
 func publishNew(_ dir: Int32, _ name: String, _ data: Data) -> String? {
-    let temp = ".upload-\(UUID().uuidString)"
-    guard uploadWriteAtomically(dir, temp, data) else { return nil }
-    defer { _ = unlinkat(dir, temp, 0) }
+    var published: String?
     let ns = name as NSString
-    for number in 1...10_000 {
-        let candidate = number == 1 ? name : "\(ns.deletingPathExtension) \(number).\(ns.pathExtension)"
-        if linkat(dir, temp, dir, candidate, 0) == 0 { return candidate }
-        guard errno == EEXIST else { return nil }
-        var info = stat()
-        if fstatat(dir, candidate, &info, AT_SYMLINK_NOFOLLOW) != 0 || (info.st_mode & S_IFMT) != S_IFREG { return nil }
+    let ok = withStenoPart(dir, data) { temp in
+        for number in 1...10_000 {
+            let candidate = number == 1 ? name : "\(ns.deletingPathExtension) \(number).\(ns.pathExtension)"
+            if renameatx_np(dir, temp, dir, candidate, UInt32(RENAME_EXCL)) == 0 {
+                published = candidate
+                return true
+            }
+            guard errno == EEXIST else { return false }
+            var info = stat()
+            if fstatat(dir, candidate, &info, AT_SYMLINK_NOFOLLOW) != 0 || (info.st_mode & S_IFMT) != S_IFREG { return false }
+        }
+        return false
     }
-    return nil
+    return ok ? published : nil
 }
 
 func runShareUpload(sourcePath: String, libraryPath: String) -> Int32 {
@@ -55,6 +59,7 @@ func runShareUpload(sourcePath: String, libraryPath: String) -> Int32 {
     let destination = openat(library, "팀 공유", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
     guard destination >= 0 else { uploadLog("팀 공유 폴더 열기 실패"); return 1 }
     defer { close(destination) }
+    guard cleanupStenoParts(destination) else { return 1 }
     guard hasTeamMarker(directory: destination, path: destinationPath) else {
         uploadLog("Steno 팀 공유 표시가 없어 건너뜀"); return 0
     }

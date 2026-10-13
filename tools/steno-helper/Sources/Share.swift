@@ -72,22 +72,10 @@ private func sha256(_ data: Data) -> String {
 }
 
 // 임시 이름으로 쓴 뒤 rename 한다. 대상 이름이 링크여도 링크 자체만 바뀐다.
-private func writeAtomically(_ dir: Int32, _ name: String, _ data: Data) -> Bool {
-    let temp = ".tmp-\(getpid())-\(UInt32.random(in: 0...UInt32.max))"
-    let fd = openat(dir, temp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-    guard fd >= 0 else { return false }
-    let ok = data.withUnsafeBytes { raw -> Bool in
-        var offset = 0
-        while offset < data.count {
-            let n = write(fd, raw.baseAddress!.advanced(by: offset), data.count - offset)
-            guard n > 0 else { return false }
-            offset += n
-        }
-        return true
-    } && fsync(fd) == 0
-    close(fd)
-    guard ok, renameat(dir, temp, dir, name) == 0 else { _ = unlinkat(dir, temp, 0); return false }
-    return true
+private func writeAtomically(_ dir: Int32, _ name: String, _ data: Data, exclusive: Bool = false) -> Bool {
+    return withStenoPart(dir, data) { temp in
+        exclusive ? renameatx_np(dir, temp, dir, name, UInt32(RENAME_EXCL)) == 0 : renameat(dir, temp, dir, name) == 0
+    }
 }
 
 // 목록을 끝까지 읽지 못하면 nil. 부분 목록으로 "빠진 노트"를 판단하면 사본을 잘못 지운다.
@@ -101,7 +89,7 @@ private func listNames(_ dir: Int32) -> [String]? {
         let name = withUnsafePointer(to: &entry.pointee.d_name) {
             $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXNAMLEN) + 1) { String(cString: $0) }
         }
-        names.append(name)
+        if !isStenoPart(name) { names.append(name) }
     }
 }
 
@@ -132,10 +120,12 @@ func runShare(sourcePath: String, destinationPath: String) -> Int32 {
     let destDir = open(destinationPath, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
     guard destDir >= 0 else { log("팀 폴더 열기 실패(링크이거나 없음)"); return 1 }
     defer { close(destDir) }
+    guard cleanupStenoParts(destDir) else { return 1 }
 
     let basesDir = childDirectory(destDir, ".bases")
     guard basesDir >= 0 else { log("기준 본문 폴더를 열지 못함"); return 1 }
     defer { close(basesDir) }
+    guard cleanupStenoParts(basesDir) else { return 1 }
 
     var accepted: [String: String] = [:]
     var receiptInfo = stat()
@@ -181,7 +171,9 @@ func runShare(sourcePath: String, destinationPath: String) -> Int32 {
             manifest[key] = ["base": base, "source": sourceHash, "file": name]
             log("사본을 읽지 못해 건드리지 않음: \(name)")
         case .absent:
-            if !writeAtomically(destDir, name, source) { log("사본 쓰기 실패: \(name)"); failed = true; continue }
+            var existing = stat()
+            let replacingLink = fstatat(destDir, name, &existing, AT_SYMLINK_NOFOLLOW) == 0 && (existing.st_mode & S_IFMT) == S_IFLNK
+            if !writeAtomically(destDir, name, source, exclusive: !replacingLink) { log("사본 쓰기 실패: \(name)"); failed = true; continue }
             manifest[key] = ["base": sourceHash, "source": sourceHash, "file": name]
             consumeAccepted = true
         case .hash(let copyHash) where copyHash == base || copyHash == sourceHash:
