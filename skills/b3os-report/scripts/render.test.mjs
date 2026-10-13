@@ -249,6 +249,13 @@ try {
       execFileSync(process.execPath, [join(here, "render.mjs"), compMd, compOut], { stdio: "pipe" });
       h2 = readFileSync(compOut, "utf8");
       assert.match(h2, /<h2[^>]*>뒤 제목<\/h2>/, "닫힌 컴포넌트 뒤의 헤딩이 원문 블록에 삼켜졌다");
+      // 줄을 넘는 속성값 안의 "<태그>" 도 세지 않는다.
+      writeFileSync(compMd, "# x\n\n<b3-test-only class=\"ix\" data-note=\"설명 a > b\n<b3-test-only>\n설명\">fallback</b3-test-only>\n\n## 뒤 제목 2\n", "utf8");
+      execFileSync(process.execPath, [join(here, "render.mjs"), compMd, compOut], { stdio: "pipe" });
+      assert.match(readFileSync(compOut, "utf8"), /<h2[^>]*>뒤 제목 2<\/h2>/, "여러 줄 속성 안의 태그 글자를 여는 태그로 셌다");
+      // 닫히지 않은 컴포넌트는 조용히 문서 끝까지 삼키지 않고 렌더를 실패시킨다.
+      writeFileSync(compMd, "# x\n\n<b3-test-only class=\"ix\">\n  <p>안</p>\n\n## 뒤\n", "utf8");
+      assert.throws(() => execFileSync(process.execPath, [join(here, "render.mjs"), compMd, compOut], { stdio: "pipe" }));
       writeFileSync(compMd, "# x\n\n<b3-missing-one class=\"ix\">\n</b3-missing-one>\n", "utf8");
       assert.throws(() => execFileSync(process.execPath, [join(here, "render.mjs"), compMd, compOut], { stdio: "pipe" }));
     } finally {

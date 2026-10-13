@@ -59,21 +59,43 @@ while (i < lines.length) {
   // SVG / figure / div 원문 블록 통과. 같은 태그가 중첩돼도 실제 depth가 0이 될 때까지 읽는다.
   if (/^<(svg|figure|div|b3-[a-z0-9-]+)\b/i.test(t)) {
     const tag = t.match(/^<([\w-]+)/)[1];
-    // 태그 이름은 정확히 끝나야 한다(<b3-a 가 <b3-a-b 를 세지 않게). 속성값 안의 "<태그>" 글자는 세지 않는다.
-    const open = new RegExp(`<${tag}(?=[\\s/>]|$)`, "gi");
-    const close = new RegExp(`</${tag}\\s*>`, "gi");
-    const selfClosing = new RegExp(`<${tag}(?=[\\s/>])[^>]*\\/>`, "gi");
+    // 같은 이름의 여는·닫는 태그를 세어 depth 가 0 이 되는 줄까지 읽는다.
+    // 글자 단위로 훑으며 태그 안의 따옴표 상태를 줄을 넘어 유지한다 — 속성값 안의 "<태그>" 글자는 세지 않고,
+    // 이름이 더 긴 태그(<b3-a-b)도 <b3-a 로 세지 않는다.
+    const lower = tag.toLowerCase();
+    const isName = (ch) => ch !== undefined && /[\w-]/.test(ch);
     const buf = [];
-    let depth = 0;
+    let depth = 0, inTag = false, quote = "", kind = 0, prev = "";
     do {
       const raw = lines[i];
-      const bare = raw.replace(/=\s*("[^"]*"|'[^']*')/g, '=""');
-      const opens = (bare.match(open) || []).length;
-      const closes = (bare.match(close) || []).length;
-      const selfClosed = (bare.match(selfClosing) || []).length;
-      depth += opens - closes - selfClosed;
+      for (let k = 0; k < raw.length; k++) {
+        const ch = raw[k];
+        if (inTag) {
+          if (quote) { if (ch === quote) quote = ""; }
+          else if (ch === '"' || ch === "'") quote = ch;
+          else if (ch === ">") {
+            if (kind === 1 && prev !== "/") depth++;
+            else if (kind === -1) depth--;
+            inTag = false; kind = 0;
+          }
+          if (ch !== " " && ch !== "\t") prev = ch;
+          continue;
+        }
+        if (ch !== "<") continue;
+        const close = raw[k + 1] === "/";
+        const at = k + (close ? 2 : 1);
+        if (raw.slice(at, at + lower.length).toLowerCase() === lower && !isName(raw[at + lower.length])) {
+          inTag = true; kind = close ? -1 : 1; prev = ""; k = at + lower.length - 1;
+        } else if (/[a-zA-Z!\/]/.test(raw[k + 1] || "")) {
+          inTag = true; kind = 0; prev = "";   // 다른 태그 — 그 안의 따옴표도 건너뛴다
+        }
+      }
       buf.push(raw); i++;
-    } while (i < lines.length && depth > 0);
+    } while (i < lines.length && (depth > 0 || inTag));
+    if (/^b3-/i.test(tag) && (depth > 0 || inTag)) {
+      console.error(`✖ <${tag}> 블록이 닫히지 않았습니다 — </${tag}> 를 찾지 못했습니다(따옴표가 닫히지 않은 속성도 이렇게 보입니다).`);
+      process.exit(1);
+    }
     out.push(buf.join("\n")); continue;
   }
   // 코드펜스
