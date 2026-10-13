@@ -1396,7 +1396,7 @@ test("cogs search → write → search reaches app requests after reply starts, 
   });
   expect(result.turnOk).toBe(true);
   const activities = requests.filter((r, i) => r.cogs_activity && r.cogs_response_state !== "complete" && r.cogs_activity !== requests[i-1]?.cogs_activity);
-  expect(activities.map(r => r.cogs_activity)).toEqual(["🌐 search first query", "📝 write note.md", "🌐 search second query"]);
+  expect(activities.map(r => r.cogs_activity)).toEqual(["검색 · first query", "새로 쓰기 · note.md", "검색 · second query"]);
   expect(activities[0]?.cogs_response_state).toBe("activity");
   expect(activities.slice(1).every(r => r.text === "partial answer" && r.cogs_response_state === "streaming")).toBe(true);
   expect(requests.at(-1)?.cogs_response_state).toBe("complete");
