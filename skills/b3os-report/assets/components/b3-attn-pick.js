@@ -252,7 +252,9 @@
       } else if (step === 1) {
         t = topic(L[i]) + ' 볼 수 있는 ' + (i + 1) + '자리 중 ' + q(L[top]) + (top === i ? '(자기)' : '') + '에 가장 많이(' + w3(r.W[top]) + '), ' + q(L[low]) + '에 가장 적게(' + w3(r.W[low]) + ') 기댄다.' + laterTxt;
       } else {
-        t = '섞어 온 값 ' + vec(r.mix) + ' 에서 가장 큰 몫은 ' + q(L[top]) + '의 V ' + vec(r.V[top]) + ' × ' + w3(r.W[top]) + ' = ' + vec(r.C[top]) + ' 이다.';
+        // 비율이 가장 큰 자리를 말한다(벡터 크기로 '가장 큰 몫'을 고르지 않는다). 공동 최댓값이면 '중 하나'.
+        var tie = r.W.slice(0, i + 1).filter(function (w) { return w === r.W[top]; }).length > 1;
+        t = '섞어 온 값 ' + vec(r.mix) + ' 에서 비율이 가장 큰 자리' + (tie ? ' 중 하나' : '') + '인 ' + q(L[top]) + '의 기여는 V ' + vec(r.V[top]) + ' × ' + w3(r.W[top]) + ' = ' + vec(r.C[top]) + ' 이다.';
       }
       this.read.textContent = t;
     }
