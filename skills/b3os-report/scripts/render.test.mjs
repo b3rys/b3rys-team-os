@@ -217,7 +217,33 @@ try {
     }
   }
 
-  console.log("PASS b3os-report dark/light theme + nested raw block passthrough + CSS-only tabs");
+  // 인터랙티브 컴포넌트 — 쓴 컴포넌트만 들어가고, 코드펜스 속 태그는 안 센다. 없는 컴포넌트는 렌더 실패.
+  {
+    const compMd = join(tmp, "comp.md");
+    const compOut = join(tmp, "comp.html");
+    writeFileSync(compMd, "# 컴포넌트\n\n<b3-test-only class=\"ix\">\n  <div class=\"ix-title\">정적</div>\n  <p class=\"ix-note\">안내</p>\n</b3-test-only>\n\n```\n<b3-not-used>\n```\n", "utf8");
+    const compDir = join(here, "../assets/components");
+    const testComp = join(compDir, "b3-test-only.js");
+    writeFileSync(testComp, "customElements.get('b3-test-only')||customElements.define('b3-test-only',class extends HTMLElement{}); // </script>", "utf8");
+    try {
+      execFileSync(process.execPath, [join(here, "render.mjs"), compMd, compOut], { stdio: "pipe" });
+      const ch = readFileSync(compOut, "utf8");
+      assert.match(ch, /<b3-test-only class="ix">/);
+      assert.match(ch, /\/\* b3-test-only \*\//);
+      assert.match(ch, /\.ix-note\{display:none/);
+      assert.doesNotMatch(ch, /b3-not-used \*\//);
+      assert.equal((ch.match(/<\/script>/g) || []).length, 2, "컴포넌트 JS 안의 </script> 는 이스케이프돼야 한다");
+      const plainOut = join(tmp, "plain.html");
+      execFileSync(process.execPath, [join(here, "render.mjs"), md, plainOut], { stdio: "pipe" });
+      assert.doesNotMatch(readFileSync(plainOut, "utf8"), /\.ix-note/, "컴포넌트를 안 쓰면 컴포넌트 CSS 도 안 들어간다");
+      writeFileSync(compMd, "# x\n\n<b3-missing-one class=\"ix\">\n</b3-missing-one>\n", "utf8");
+      assert.throws(() => execFileSync(process.execPath, [join(here, "render.mjs"), compMd, compOut], { stdio: "pipe" }));
+    } finally {
+      rmSync(testComp, { force: true });
+    }
+  }
+
+  console.log("PASS b3os-report dark/light theme + nested raw block passthrough + CSS-only tabs + interactive components");
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }

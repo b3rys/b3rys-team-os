@@ -3,7 +3,8 @@
 // 사용: node render.mjs <input.md> [output.html] [--title "제목"]
 // 지원: # ## ### 헤딩 / **굵게** *기울임* `코드` / 표 / -·* 목록 / 1. 순서목록 /
 //       > 인용 / --- 구분선 / [텍스트](url) / 코드펜스 ``` / <svg>…</svg> 원문 통과 /
-//       <div id="x" data-tab="라벨"></div> 탭 구분 (2개 이상일 때만 탭이 생긴다).
+//       <div id="x" data-tab="라벨"></div> 탭 구분 (2개 이상일 때만 탭이 생긴다) /
+//       <b3-이름>…</b3-이름> 인터랙티브 컴포넌트 (assets/components/b3-이름.js 를 자동으로 넣는다).
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve, basename } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,8 +57,8 @@ while (i < lines.length) {
     i++; continue;
   }
   // SVG / figure / div 원문 블록 통과. 같은 태그가 중첩돼도 실제 depth가 0이 될 때까지 읽는다.
-  if (/^<(svg|figure|div)\b/i.test(t)) {
-    const tag = t.match(/^<(\w+)/)[1];
+  if (/^<(svg|figure|div|b3-[a-z0-9-]+)\b/i.test(t)) {
+    const tag = t.match(/^<([\w-]+)/)[1];
     const open = new RegExp(`<${tag}\\b`, "gi");
     const close = new RegExp(`</${tag}>`, "gi");
     const selfClosing = new RegExp(`<${tag}\\b[^>]*\\/>`, "gi");
@@ -213,6 +214,23 @@ ${tabs.map((tb) => `.wrap:not(.js-tabs):has(#panel-${tb.id}:target) [href="#pane
 }
 
 const css = readFileSync(resolve(__dir, "../assets/theme.css"), "utf8");
+
+// ★인터랙티브 컴포넌트★ — 본문에 <b3-이름> 태그가 있으면 assets/components/b3-이름.js 를 그 보고서에만 넣는다.
+//   쓰지 않은 컴포넌트는 안 들어간다(보고서가 자체완결로 남고 크기도 안 는다).
+//   포털 뷰어 iframe 은 스크립트가 막혀 있다(위 탭 주석) — 그래서 태그 안에 정적 그림을 먼저 두고,
+//   스크립트가 돌 때만 컴포넌트가 그 자리를 조작 화면으로 바꾼다. 규약: references/interactive-components.md
+const compDir = resolve(__dir, "../assets/components");
+const usedComponents = [...new Set([...bodyHtml.matchAll(/<(b3-[a-z0-9-]+)[\s>]/g)].map((m) => m[1]))].sort();
+let componentsCss = "", componentsJs = "";
+if (usedComponents.length) {
+  componentsCss = readFileSync(resolve(compDir, "components.css"), "utf8");
+  for (const name of usedComponents) {
+    let src;
+    try { src = readFileSync(resolve(compDir, `${name}.js`), "utf8"); }
+    catch { console.error(`✖ 컴포넌트 파일이 없습니다: assets/components/${name}.js (본문의 <${name}> 태그)`); process.exit(1); }
+    componentsJs += `\n/* ${name} */\n${src.replace(/<\/script/gi, "<\\/script")}`;
+  }
+}
 const docTitle = title || (lines.find((l) => /^#\s+/.test(l)) || "# 보고서").replace(/^#\s+/, "").trim();
 const html = `<!doctype html>
 <html lang="ko" data-theme="dark"><head>
@@ -220,7 +238,7 @@ const html = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${esc(docTitle)}</title>
 <style>
-${css}${tabsCss}
+${css}${tabsCss}${componentsCss}
 </style>
 </head><body><div class="report-shell">
   <div class="report-toolbar">
@@ -239,7 +257,7 @@ ${bodyHtml}
   try{var saved=localStorage.getItem('b3os-report-theme'); if(saved==='light') setTheme('light');}catch(e){}
   d.onclick=function(){setTheme('dark')}; l.onclick=function(){setTheme('light')};
 })();${tabsJs}
-</script></body></html>
+</script>${componentsJs ? `\n<script>${componentsJs}\n</script>` : ""}</body></html>
 `;
 writeFileSync(outPath, html);
 console.log(`✅ rendered: ${basename(inPath)} → ${outPath} (${(html.length / 1024).toFixed(1)}KB)`);

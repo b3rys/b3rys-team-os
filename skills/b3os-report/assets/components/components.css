@@ -1,0 +1,23 @@
+
+/* ── 인터랙티브 컴포넌트 공통 (assets/components) — 본문에 <b3-*> 가 있을 때만 들어간다 ── */
+.ix{display:block;margin:18px 0 22px;padding:14px 14px 12px;border:1px solid var(--line);border-radius:14px;background:var(--card);box-shadow:var(--surface-shadow-soft);max-width:100%;overflow:hidden}
+.ix-title{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-weight:700;font-size:15px;color:var(--ink)}
+.ix-title::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px var(--glow);flex:none}
+.ix-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:8px 0}
+.ix-label{font-size:13px;color:var(--mut);min-width:0}
+.ix-value{font-family:var(--mono);font-size:14px;color:var(--ink);font-variant-numeric:tabular-nums}
+.ix-strong{color:var(--green);font-weight:700}
+.ix-warn{color:var(--orange);font-weight:700}
+.ix-bad{color:var(--red);font-weight:700}
+.ix input[type=range]{flex:1 1 180px;min-width:140px;height:32px;accent-color:var(--green);margin:0}
+.ix-btn{appearance:none;border:1px solid var(--line-strong);background:var(--card-2);color:var(--ink);border-radius:10px;padding:8px 12px;min-height:36px;font:inherit;font-size:14px;cursor:pointer;touch-action:manipulation}
+.ix-btn[aria-pressed="true"],.ix-btn.is-on{border-color:var(--green);color:var(--green);background:var(--glow)}
+.ix-btn:focus-visible,.ix input:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.ix-seg{display:flex;flex-wrap:wrap;gap:6px}
+.ix svg{display:block;width:100%;height:auto;max-width:100%}
+.ix-caption{margin:8px 0 0;font-size:13px;line-height:1.55;color:var(--mut)}
+.ix table{width:100%;font-size:13px}
+/* 스크립트가 안 도는 곳(포털 미리보기 iframe)에서는 정적 그림과 안내만 보인다. 정의되면(:defined) 안내를 숨긴다. */
+.ix-note{display:none;margin:8px 0 0;font-size:12.5px;color:var(--subtle)}
+:not(:defined) > .ix-note,.ix:not(:defined) .ix-note{display:block}
+@media (prefers-reduced-motion:reduce){.ix *{transition:none!important;animation:none!important}}
