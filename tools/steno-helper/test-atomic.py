@@ -36,6 +36,7 @@ with tempfile.TemporaryDirectory() as temp:
     (upload / 'uploaded.md').write_text('uploaded')
     result = subprocess.run([binary, '--cycle', str(home)], env=env, capture_output=True, timeout=10)
     assert result.returncode == 0, result.stderr
+    assert '앱 기록'.encode() not in result.stderr, result.stderr
     for directory in destinations:
         assert not (directory / '.stale.steno-part').exists()
         assert (directory / '.link.steno-part').is_symlink()
@@ -45,6 +46,14 @@ with tempfile.TemporaryDirectory() as temp:
     assert (team / 'uploaded.md').read_text() == 'uploaded'
     assert (shared / 'uploaded.md').read_text() == 'uploaded'
     assert not (shared / '.ignored.steno-part').exists()
+    checks += 1
+
+    # Missing record in an existing parent is also a normal, silent fallback.
+    record_parent = home / 'Library/Application Support/Steno'
+    record_parent.mkdir()
+    result = subprocess.run([binary, '--resolve', str(home)], env=env, capture_output=True, timeout=10)
+    assert result.returncode == 0 and result.stdout.strip() == str(library).encode(), result
+    assert '앱 기록'.encode() not in result.stderr, result.stderr
     checks += 1
 
     # Limit writes to 1 KiB: the first write is partial, the next fails with EFBIG.

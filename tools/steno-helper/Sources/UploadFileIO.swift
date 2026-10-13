@@ -24,9 +24,11 @@ func uploadReadRegular(_ dir: Int32, _ name: String) -> Data? {
         let n = read(fd, &buffer, buffer.count)
         if n == 0 { break }
         guard n > 0 else { return nil }
+        watchdogProgress()
         data.append(buffer, count: n)
         guard data.count <= maxBytes else { return nil }
     }
+    watchdogProgress()
     return data
 }
 

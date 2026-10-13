@@ -24,12 +24,14 @@
 
 받은 파일·팀 공유 올리기·팀 공유 복사는 매 주기 `Sources/Library.swift`의 `resolveLibrary` 결과 하나를 함께 쓴다. 라이브러리 결정 순서는 다음과 같다.
 
-1. `~/Library/Application Support/Steno/library-location.json`: Steno 앱이 라이브러리를 정하거나 옮길 때 원자적으로 쓰는 JSON 기록(`Sources/Steno/Core/LibraryLocationRecord.swift`). `{"path": "<절대경로>", "bookmark": "<base64>"}`에서 `path`만 읽고 `bookmark`는 무시한다.
+1. `~/Library/Application Support/Steno/library-location.json`: Steno 앱이 시작할 때와 라이브러리를 고르거나 옮길 때 원자적으로 쓰는 JSON 기록(`Sources/Steno/Core/LibraryLocationRecord.swift`). `{"path": "<절대경로>", "bookmark": "<base64>"}`에서 `path`만 읽고 `bookmark`는 무시한다.
 2. 기록이 없거나 무효면 `STENO_LIBRARY` 환경 변수. 사용자가 설치 때 명시한 경우에만 plist에 기록한다.
 3. `~/Library/Mobile Documents/iCloud~com~b3rys~steno/Documents`: 앱 컨테이너 `iCloud.com.b3rys.steno`의 Documents이며, 앱 화면에서는 “iCloud Drive › Steno”로 보인다.
 4. `~/Documents/Steno`.
 
-경로는 1024바이트 이하 절대 경로이며 줄바꿈·NUL이 없어야 한다. 실제 디렉터리여야 하며 경로 자체와 상위 구성요소가 심링크 또는 비정규 경로이면 거절한다. 앱 기록도 상위 구성요소의 링크를 금지하고, 현재 사용자 소유의 일반 파일·단일 링크·64KB 이하인지 확인한다. JSON 파싱 실패나 문자열 `path` 누락도 무효다. 후보가 사라졌거나 무효면 이유를 한 줄 기록하고 다음 후보로 넘어간다. 모든 후보가 무효면 파일을 옮기지 않고 실패한다. 폴더 이름 `받은 파일`과 `팀 공유`는 고정이다.
+Steno 앱은 `STENO_LIBRARY`로 띄운 경우에는 이 기록을 쓰지 않는다. 기록이 없으면 `STENO_LIBRARY` → iCloud 기본값 순으로 정한다.
+
+경로는 1024바이트 이하 절대 경로이며 줄바꿈·NUL이 없어야 한다. 실제 디렉터리여야 하며 경로 자체와 상위 구성요소가 심링크 또는 비정규 경로이면 거절한다. 앱 기록도 상위 구성요소의 링크를 금지하고, 현재 사용자 소유의 일반 파일·단일 링크·64KB 이하인지 확인한다. JSON 파싱 실패나 문자열 `path` 누락도 무효다. 앱 기록이 없으면 조용히 다음 후보로 넘어간다. 그 밖에 후보가 사라졌거나 무효면 이유를 한 줄 기록하고 다음 후보로 넘어간다. 모든 후보가 무효면 파일을 옮기지 않고 실패한다. 폴더 이름 `받은 파일`과 `팀 공유`는 고정이다.
 
 Mobile Documents는 macOS 개인정보 보호(TCC)로 접근이 막힐 수 있다. EPERM/EACCES도 무효 후보로 처리하며 “권한 없음 — 시스템 설정 › 개인정보 › 파일 및 폴더에서 steno-helper 허용 필요”를 기록한다.
 

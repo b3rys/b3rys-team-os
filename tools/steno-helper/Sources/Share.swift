@@ -38,9 +38,11 @@ private func readRegular(_ dir: Int32, _ name: String) -> Data? {
         let n = read(fd, &buffer, buffer.count)
         if n == 0 { break }
         guard n > 0 else { return nil }
+        watchdogProgress()
         data.append(buffer, count: n)
         guard data.count <= maxBytes else { return nil }
     }
+    watchdogProgress()
     return data
 }
 
@@ -197,6 +199,7 @@ func runShare(sourcePath: String, destinationPath: String) -> Int32 {
             accepted[key] = nil
         } else if let lastReturn { manifest[key]?["lastReturn"] = lastReturn }
         if let downloadRequested { manifest[key]?["downloadRequested"] = downloadRequested }
+        watchdogProgress()
     }
     for key in manifest.keys where !seen.contains(key) {
         let file = manifest[key]?["file"] ?? key

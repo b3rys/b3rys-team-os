@@ -80,6 +80,7 @@ func runShareUpload(sourcePath: String, libraryPath: String) -> Int32 {
         guard removeUnchanged(source, name, info, data) else {
             uploadLog("업로드 뒤 보낼 칸이 바뀌어 유지: \(name)"); failed = true; continue
         }
+        watchdogProgress()
         uploadLog("새 파일 올림: \(output)")
     }
     return failed ? 1 : 0

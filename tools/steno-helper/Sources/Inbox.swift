@@ -51,6 +51,7 @@ private func copyFile(sourceDir: Int32, destinationDir: Int32, name: String) -> 
         let count = read(source, &buffer, buffer.count)
         if count == 0 { break }
         guard count > 0 else { fail("원본 읽기 실패: \(name)"); return false }
+        watchdogProgress()
         total += off_t(count)
         guard total <= maxBytes else { fail("복사 중 크기 초과: \(name)"); return false }
         var offset = 0
@@ -58,6 +59,7 @@ private func copyFile(sourceDir: Int32, destinationDir: Int32, name: String) -> 
             let written = buffer.withUnsafeBytes { write(output, $0.baseAddress!.advanced(by: offset), count - offset) }
             guard written > 0 else { fail("대상 쓰기 실패: \(name)"); return false }
             offset += written
+            watchdogProgress()
         }
     }
     guard fsync(output) == 0 else { fail("대상 동기화 실패: \(name)"); return false }
@@ -85,6 +87,7 @@ private func copyFile(sourceDir: Int32, destinationDir: Int32, name: String) -> 
         }
         fail("복사 후 원본 삭제 실패: \(name)"); return false
     }
+    watchdogProgress()
     return true
 }
 

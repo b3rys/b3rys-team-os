@@ -36,9 +36,12 @@ func withStenoPart(_ dir: Int32, _ data: Data, publish: (String) -> Bool) -> Boo
             let n = write(fd, raw.baseAddress!.advanced(by: offset), data.count - offset)
             guard n > 0 else { return false }
             offset += n
+            watchdogProgress()
         }
         return true
     }
     guard ok, fsync(fd) == 0 else { return false }
-    return publish(temp)
+    guard publish(temp) else { return false }
+    watchdogProgress()
+    return true
 }

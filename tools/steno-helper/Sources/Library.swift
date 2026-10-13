@@ -8,13 +8,13 @@ private func libraryLog(_ message: String) {
 private func libraryLocationRecord(home: String) -> String? {
     let parent = canonicalDirectory(home + "/Library/Application Support/Steno")
     guard parent >= 0 else {
-        libraryAccessFailure("앱 기록", "부모 폴더를 안전하게 열 수 없음", errno)
+        if errno != ENOENT { libraryAccessFailure("앱 기록", "부모 폴더를 안전하게 열 수 없음", errno) }
         return nil
     }
     defer { close(parent) }
     let fd = openat(parent, "library-location.json", O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
     guard fd >= 0 else {
-        libraryAccessFailure("앱 기록", "링크 또는 읽기 실패", errno)
+        if errno != ENOENT { libraryAccessFailure("앱 기록", "링크 또는 읽기 실패", errno) }
         return nil
     }
     defer { close(fd) }
@@ -37,6 +37,7 @@ private func libraryLocationRecord(home: String) -> String? {
             libraryAccessFailure("앱 기록", "읽기 실패 또는 64KB 초과", count < 0 ? errno : EFBIG)
             return nil
         }
+        watchdogProgress()
         data.append(buffer, count: count)
     }
     guard let record = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -45,6 +46,7 @@ private func libraryLocationRecord(home: String) -> String? {
         return nil
     }
     // bookmark는 앱 전용 보안 범위 정보이므로 사용하지 않는다.
+    watchdogProgress()
     return path
 }
 
