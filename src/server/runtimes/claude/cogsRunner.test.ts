@@ -25,7 +25,7 @@ print(json.dumps({'type':'result','result':'완료','is_error':False,'session_id
  process.env.CLAUDE_BIN=binary;process.env.TELEGRAM_BOT_TOKEN="fixture-token";process.env.TELEGRAM_STATE_DIR=workspace;process.env.CODEX_BOT_TOKEN="fixture-app-token";
  try {
   const activities:string[]=[];const deltas:string[]=[];const result=await runClaudeCogsTurn({agentId:"testmate",cwd:workspace,codexHome:home,prompt:"question",model:"sonnet",onActivity:(_line,_id,item)=>activities.push(cogsActivityLine(item)),onDelta:text=>deltas.push(text)});
-  expect(activities).toEqual(["🌐 search fixture search"]);expect(result.ok).toBe(true);expect(deltas).toEqual(["첫 글자"]);expect(result.reply).toBe("완료");
+  expect(activities).toEqual(["검색 · fixture search"]);expect(result.ok).toBe(true);expect(deltas).toEqual(["첫 글자"]);expect(result.reply).toBe("완료");
   const observed=JSON.parse(readFileSync(capture,"utf-8"));
   expect(observed.pgid).toBe(observed.parent_pgid);
   expect(observed.telegram_keys).toEqual([]);expect(observed.bot_key).toBe(false);expect(observed.cwd).toBe(realpathSync(workspace));expect(observed.project_settings).toBe(true);
