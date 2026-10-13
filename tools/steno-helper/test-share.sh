@@ -156,4 +156,150 @@ CHECK
 ok
 chmod 600 "$SRC/Cloud.md"
 
+# 라이브러리 결정과 세 작업을 임시 HOME에서 함께 시험한다.
+python3 - "$BIN" "$TMP" <<'CHECK'
+import json, os, pathlib, subprocess, sys
+bin, tmp = sys.argv[1:]
+home = pathlib.Path(tmp) / 'resolve-home'
+support = home / 'Library/Application Support/b3os'
+support.mkdir(parents=True)
+record_dir = home / 'Library/Application Support/Steno'
+record_dir.mkdir()
+path_file = record_dir / 'library-location.json'
+def record(path):
+    path_file.write_text(json.dumps({'path': str(path), 'bookmark': 'ignored'}))
+default = home / 'Documents/Steno'
+icloud = home / 'Library/Mobile Documents/iCloud~com~b3rys~steno/Documents'
+env_library = pathlib.Path(tmp) / 'env-library'
+moved = pathlib.Path(tmp) / '옮긴 라이브러리'
+next_library = pathlib.Path(tmp) / '다시 옮긴 라이브러리'
+for library in (default, icloud, env_library, moved, next_library):
+    (library / '받은 파일').mkdir(parents=True)
+    (library / '팀 공유').mkdir()
+    (library / '팀 공유/.steno-folder').write_text('team')
+for name in ('steno-outbox', 'steno-share-outbox', 'steno-shared'):
+    (support / name).mkdir()
+env = dict(os.environ)
+env.pop('STENO_LIBRARY', None)
+env['HOME'] = str(home)
+checks = 0
+
+def run(mode, value=None):
+    e = dict(env)
+    if value is not None:
+        e['STENO_LIBRARY'] = value
+    return subprocess.run([bin, mode, str(home)], env=e, capture_output=True, text=True, timeout=10)
+
+def resolve(expected, value=None, rejected=False):
+    global checks
+    result = run('--resolve', value)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.rstrip('\n') == str(expected), result
+    if rejected:
+        assert '거절:' in result.stderr, result
+    checks += 1
+
+def cycle(library, tag, value=None):
+    global checks
+    (support / 'steno-outbox' / (tag + '-in.md')).write_text('inbox')
+    (support / 'steno-share-outbox' / (tag + '-up.md')).write_text('upload')
+    result = run('--cycle', value)
+    assert result.returncode == 0, result.stderr
+    assert (library / '받은 파일' / (tag + '-in.md')).read_text() == 'inbox'
+    assert (library / '팀 공유' / (tag + '-up.md')).read_text() == 'upload'
+    assert (support / 'steno-shared' / (tag + '-up.md')).read_text() == 'upload'
+    assert not (support / 'steno-outbox' / (tag + '-in.md')).exists()
+    assert not (support / 'steno-share-outbox' / (tag + '-up.md')).exists()
+    checks += 1
+
+# 예전 b3os 파일은 사용하지 않는다.
+(support / 'steno-library-path').write_text(str(env_library))
+record(moved)
+resolve(moved, str(env_library))
+cycle(moved, 'moved', str(env_library))
+assert not (default / '받은 파일/moved-in.md').exists()
+assert not (env_library / '팀 공유/moved-up.md').exists()
+record(next_library)
+cycle(next_library, 'next', str(env_library))
+path_file.unlink()
+resolve(env_library, str(env_library))
+cycle(env_library, 'env', str(env_library))
+resolve(icloud)
+cycle(icloud, 'icloud')
+resolve(icloud, str(home / 'removed-library'), rejected=True)
+cycle(icloud, 'removed-env', str(home / 'removed-library'))
+
+link = pathlib.Path(tmp) / 'linked-library'
+link.symlink_to(moved, target_is_directory=True)
+parent_link = pathlib.Path(tmp) / 'linked-parent'
+parent_link.symlink_to(moved.parent, target_is_directory=True)
+regular = pathlib.Path(tmp) / 'not-directory'
+regular.write_text('x')
+invalid = ['relative/path', str(link), str(parent_link / moved.name),
+           str(home / 'missing'), str(regular), '/' + 'x' * 1024,
+           str(moved) + '\nextra', str(moved) + '\x00ignored', str(moved) + '\r', '']
+for value in invalid:
+    record(value)
+    resolve(env_library, str(env_library), rejected=True)
+    resolve(icloud, 'relative-env', rejected=True)
+for bad_json in ('{broken', '{}', '{"path": 123}'):
+    path_file.write_text(bad_json)
+    resolve(env_library, str(env_library), rejected=True)
+path_file.write_bytes(b'\xff')
+resolve(env_library, str(env_library), rejected=True)
+record(moved)
+path_file.chmod(0)
+try:
+    resolve(env_library, str(env_library), rejected=True)
+    assert '권한 없음 — 시스템 설정 › 개인정보 › 파일 및 폴더에서 steno-helper 허용 필요' in run('--resolve', str(env_library)).stderr
+finally:
+    path_file.chmod(0o600)
+path_file.write_bytes(b'x' * 65537)
+resolve(env_library, str(env_library), rejected=True)
+cycle(env_library, 'invalid-file', str(env_library))
+path_file.unlink()
+for value in invalid:
+    if '\x00' not in value:
+        resolve(icloud, value, rejected=True)
+
+other_file = pathlib.Path(tmp) / 'path-target'
+other_file.write_text(json.dumps({'path': str(moved)}))
+path_file.symlink_to(other_file)
+resolve(env_library, str(env_library), rejected=True)
+path_file.unlink()
+path_file.mkdir()
+resolve(env_library, str(env_library), rejected=True)
+path_file.rmdir()
+os.mkfifo(path_file)
+resolve(env_library, str(env_library), rejected=True)
+path_file.unlink()
+os.link(other_file, path_file)
+resolve(env_library, str(env_library), rejected=True)
+path_file.unlink()
+record_dir.rename(record_dir.with_name('Steno-real'))
+record_dir.symlink_to(record_dir.with_name('Steno-real'), target_is_directory=True)
+resolve(icloud, rejected=True)
+record_dir.unlink()
+record_dir.with_name('Steno-real').rename(record_dir)
+# 접근 거부도 다음 후보로 넘어가고 권한 안내를 남긴다.
+mobile = home / 'Library/Mobile Documents'
+mobile.chmod(0)
+try:
+    resolve(default, rejected=True)
+    result = run('--resolve')
+    assert '권한 없음 — 시스템 설정 › 개인정보 › 파일 및 폴더에서 steno-helper 허용 필요' in result.stderr
+finally:
+    mobile.chmod(0o700)
+icloud.rename(icloud.with_name('Documents-old'))
+resolve(default)
+cycle(default, 'default')
+default.rename(default.with_name('Steno-old'))
+(support / 'steno-outbox/keep.md').write_text('keep')
+result = run('--cycle')
+assert result.returncode == 1 and '문서 기본값 거절:' in result.stderr
+assert (support / 'steno-outbox/keep.md').read_text() == 'keep'
+checks += 1
+print(f'PASS: {checks} 라이브러리 경로 checks')
+CHECK
+
 echo "PASS: $pass 팀 공유 checks"

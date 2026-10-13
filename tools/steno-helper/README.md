@@ -5,7 +5,7 @@
 문서 폴더 권한을 가진 macOS 프로그램은 이것 하나다. 한 번 돌 때 세 일을 차례로 한다.
 
 ```text
-1. 받은 파일 넣기  ~/Library/Application Support/b3os/steno-outbox  →  ~/Documents/Steno/받은 파일
+1. 받은 파일 넣기  ~/Library/Application Support/b3os/steno-outbox  →  <라이브러리>/받은 파일
 2. 팀 공유 올리기  ~/Library/Application Support/b3os/steno-share-outbox → <라이브러리>/팀 공유
 3. 팀 공유 복사    <라이브러리>/팀 공유  →  ~/Library/Application Support/b3os/steno-shared   (라이브러리는 읽기만)
 ```
@@ -16,13 +16,22 @@
 
 `steno-send.sh --to-received` 가 권한 없는 outbox 에 둔 Steno 지원 텍스트 파일, 그림, zip 을 `받은 파일` 로 옮긴다.
 - zip 은 풀지 않는다.
-- 두 경로는 소스에 고정돼 있어 실행 인자나 환경으로 바꿀 수 없다.
+- outbox 와 `받은 파일` 폴더 이름은 고정이다. 실행 인자로 경로를 바꿀 수 없으며, 라이브러리는 아래 앱 기록·환경 변수 규칙으로 정한다.
 - 파일 하나의 상한은 20MB 다. 폴더와 링크는 받지 않는다.
 - 대상 파일은 실행 비트 없이 `0600` 으로 만들고, 같은 이름이 있으면 덮지 않고 " 2" 를 붙인다.
 
 ## 3. 팀 공유 복사 (Sources/Share.swift)
 
-라이브러리는 Steno 앱과 같은 규칙으로 정한다: `STENO_LIBRARY` → `~/Documents/Steno`. 폴더 이름 `팀 공유` 는 고정이다.
+받은 파일·팀 공유 올리기·팀 공유 복사는 매 주기 `Sources/Library.swift`의 `resolveLibrary` 결과 하나를 함께 쓴다. 라이브러리 결정 순서는 다음과 같다.
+
+1. `~/Library/Application Support/Steno/library-location.json`: Steno 앱이 라이브러리를 정하거나 옮길 때 원자적으로 쓰는 JSON 기록(`Sources/Steno/Core/LibraryLocationRecord.swift`). `{"path": "<절대경로>", "bookmark": "<base64>"}`에서 `path`만 읽고 `bookmark`는 무시한다.
+2. 기록이 없거나 무효면 `STENO_LIBRARY` 환경 변수. 사용자가 설치 때 명시한 경우에만 plist에 기록한다.
+3. `~/Library/Mobile Documents/iCloud~com~b3rys~steno/Documents`: 앱 컨테이너 `iCloud.com.b3rys.steno`의 Documents이며, 앱 화면에서는 “iCloud Drive › Steno”로 보인다.
+4. `~/Documents/Steno`.
+
+경로는 1024바이트 이하 절대 경로이며 줄바꿈·NUL이 없어야 한다. 실제 디렉터리여야 하며 경로 자체와 상위 구성요소가 심링크 또는 비정규 경로이면 거절한다. 앱 기록도 상위 구성요소의 링크를 금지하고, 현재 사용자 소유의 일반 파일·단일 링크·64KB 이하인지 확인한다. JSON 파싱 실패나 문자열 `path` 누락도 무효다. 후보가 사라졌거나 무효면 이유를 한 줄 기록하고 다음 후보로 넘어간다. 모든 후보가 무효면 파일을 옮기지 않고 실패한다. 폴더 이름 `받은 파일`과 `팀 공유`는 고정이다.
+
+Mobile Documents는 macOS 개인정보 보호(TCC)로 접근이 막힐 수 있다. EPERM/EACCES도 무효 후보로 처리하며 “권한 없음 — 시스템 설정 › 개인정보 › 파일 및 폴더에서 steno-helper 허용 필요”를 기록한다.
 
 - `팀 공유` 이름과 `.steno-folder` 내용 `team`이 맞아야 복사한다. 내용 양끝 공백·줄바꿈은 무시하며, iCloud 자리표시 파일도 표시가 있는 것으로 본다. 받은 파일 넣기 동작은 바꾸지 않는다.
 - `팀 공유` 바로 아래 파일만 복사한다. 하위 폴더, 숨김 파일, `.steno` 사이드카, 링크, 20MB 초과, 이름에 secret·credential·token·password 가 든 파일은 건너뛴다.
@@ -60,9 +69,11 @@ skills/b3os-team-inbox/scripts/steno-send.sh attachment.zip --to-received
 ## 설치
 
 ```bash
-tools/steno-helper/install.sh        # 라이브러리를 옮겨 썼다면 STENO_LIBRARY=/경로 를 앞에 붙인다
+tools/steno-helper/install.sh        # 선택 사항: STENO_LIBRARY=/경로 를 명시하면 앱 기록 다음 후보로 저장한다
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.b3os.steno-helper.plist
 ```
+
+STENO_LIBRARY를 명시하지 않으면 plist에 그 키를 넣지 않는다. 기본 경로를 고정하지 않아 앱의 라이브러리 위치 변경을 다음 주기에 따라간다.
 
 설치 스크립트는 키체인에 유효한 `Developer ID Application: GUE DON JUNG (7NTC94U74E)` 서명 신원이 있으면 이를 사용하고, 없으면 임시(ad-hoc) 서명을 사용한다. 식별자는 두 경우 모두 `com.b3os.steno-helper`로 고정한다.
 
@@ -92,6 +103,6 @@ rm -f ~/Library/LaunchAgents/com.b3os.steno-inbox-writer.plist ~/Library/LaunchA
 tools/steno-helper/test.sh
 ```
 
-한 번 빌드해서 받은 파일 시험(`test-inbox.sh`)과 팀 공유 시험(`test-share.sh`)을 둘 다 돌린다. 임시 폴더에서 실제 요청 스크립트와 도우미를 실행한다. 사용자 라이브러리는 쓰지 않는다.
+한 번 빌드해서 받은 파일 시험(`test-inbox.sh`)과 팀 공유 시험(`test-share.sh`)을 둘 다 돌린다. 임시 폴더에서 실제 요청 스크립트와 도우미를 실행한다. 사용자 라이브러리는 쓰지 않는다. 기존 팀 공유 시험에서 앱 JSON 기록 우선·다음 주기 이동 반영·사라진 환경 변수 폴더의 iCloud 대체·문서 기본값·깨진 JSON·상대 경로·심링크·접근 거부를 검사하고, 각 라이브러리로 받은 파일·팀 공유 올리기·복사가 함께 동작하는지 확인한다.
 
 되돌리기 시험은 원본 불변, 수정 사본 하나, 이름 충돌, 입력 검증과 요청 정리를 확인한다.
