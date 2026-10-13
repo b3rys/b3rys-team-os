@@ -106,7 +106,7 @@ Other common smells → refactor:
 - **Duplicated code** → extract a function/module (one place to change).
 - **Long function / large class doing several jobs** (SRP violation) → extract, split by reason-to-change.
 - **Conditional sprawl** (type switch repeated) → polymorphism / lookup map / strategy.
-- **State × input sprawl** (`if (stateA && key===X) … else if (stateB && …)`, the same state judged in several files) → one state-judging function + a state table + small action functions. See "상태 × 입력이 많으면 상태표로" below. Signal: a fix that breaks something elsewhere ("the smell starts when a fix produces another bug" — lead, 2026-10-13).
+- **State × input sprawl** (`if (stateA && key===X) … else if (stateB && …)`, the same state judged in several files) → one state-judging function + a state table + small action functions. See "상태 × 입력이 많으면 상태표로" below. Signal: a fix that breaks something elsewhere.
 - **Feature envy** (a function leaning on another module's data) → move it to where the data lives.
 - **Primitive/loose params threaded everywhere** → introduce a small type/object as the contract.
 
@@ -278,7 +278,7 @@ const send = (n: Notification): string => senders[n.type](n.to);
 
 lookup map(위 예)이 "타입 하나 → 할 일"이라면, 상태표는 "상태 × 입력 → 할 일"이다. 편집기 키 처리(목록·인용·표), 화면 모드, 동기화 상태처럼 조합이 많은 곳에 쓴다.
 
-Before (2026-10-13 Steno 목록 편집 — 두 번 고쳤는데 더 나빠짐):
+Before (편집기 목록 처리 — 같은 판단이 네 곳에 흩어짐):
 ```js
 // 같은 판단("이 줄이 몇 단계인가")을 네 곳이 따로 한다
 // list-editing.js   : 원문 공백 수로 단계 계산 → Enter/Backspace
@@ -287,7 +287,7 @@ Before (2026-10-13 Steno 목록 편집 — 두 번 고쳤는데 더 나빠짐):
 // markdown-keys.js  : 우리 Enter 가 false 면 CodeMirror 기본 목록 이어쓰기로
 if (isEmptyItem(line)) { ... } else if (afterExit && typed === '-') { ... } else if (...) { ... }
 ```
-After (같은 날 인용 규칙을 이렇게 설계):
+After (인용 규칙):
 ```js
 // ① 판정 — 상태는 한 함수만 정한다 (화면·키·vim 이 모두 이것을 부른다)
 function quoteState(lines, row, col) { /* 'emptyQuote' | 'quoteEnd' | 'quoteStartBelowQuote' | 'quoteStartFirst' | null */ }
@@ -305,7 +305,7 @@ return ACTIONS[action](lines, row, col);
 ```
 **Why:** 상태 × 입력 조합이 표 한 곳에 보여 빠진 칸이 드러나고, 새 입력은 표에 한 칸 더하는 것으로 끝난다.
 
-> ⚠️ **상태표는 만능이 아니다.** 판정이 여러 곳이면 표가 맞아도 결과가 틀리고, 표 밖에 if 하나가 붙으면 흩어진 코드로 돌아가며, 갈래가 둘뿐이면 표가 더 읽기 어렵다. 표는 아래 6가지와 **함께** 쓸 때만 효과가 난다.
+> ⚠️ **상태표는 만능이 아니다.** 판정이 여러 곳이면 표가 맞아도 결과가 틀리고, 표 밖에 if 하나가 붙으면 흩어진 코드로 돌아간다. 표는 아래 6가지와 **함께** 쓸 때만 효과가 난다.
 
 **표만으로는 좋아지지 않는다 — 함께 지킬 것:**
 1. **판정 함수는 하나.** 판정이 여러 곳이면 표가 맞아도 엉뚱한 칸을 찾는다(위 Before 의 진짜 원인).
@@ -314,8 +314,6 @@ return ACTIONS[action](lines, row, col);
 4. **"어떻게"는 보통 함수로.** 번호 다시 매기기처럼 복잡한 동작은 실행 함수 안에서 잘 쓰고 그 함수만 따로 시험한다. 표는 "언제 무엇을"만.
 5. **칸마다 시험 한 줄 + 실제 사용 순서 하나.** 칸 시험은 표를, 사람이 실제로 친 키 순서(녹화 그대로) 시험은 칸 사이 이음새를 지킨다.
 6. **갈래가 둘뿐이고 늘 일이 없으면 if 가 더 읽기 쉽다.** 표로 옮길 신호: 같은 판단이 두 곳 이상 · 고쳤더니 다른 곳이 깨짐 · 상태 조합을 사람이 머리로 기억하고 있음.
-
-전체 설명·실행 결과: Steno 팀 공유 "AI 팀 앱 개발 가이드" 4-3장.
 
 ### 공유 가변 상태를 인터페이스 경계로 분리해 ripple 끊기
 
