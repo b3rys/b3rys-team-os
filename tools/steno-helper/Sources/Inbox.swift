@@ -40,28 +40,10 @@ private func copyFile(sourceDir: Int32, destinationDir: Int32, name: String) -> 
         fail("원본 조건 거절: \(name)"); return false
     }
 
-    var output: Int32 = -1
-    var outputName = ""
-    for n in 1...10_000 {
-        let candidate = collisionName(name, n)
-        output = openat(destinationDir, candidate, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        if output >= 0 { outputName = candidate; break }
-        if errno != EEXIST { fail("대상 생성 실패: \(candidate)"); return false }
-        var existing = stat()
-        if fstatat(destinationDir, candidate, &existing, AT_SYMLINK_NOFOLLOW) == 0,
-           (existing.st_mode & S_IFMT) == S_IFLNK { fail("대상 심볼릭 링크 거절: \(candidate)"); return false }
-    }
-    guard output >= 0 else { fail("파일 이름 충돌 한도 초과: \(name)"); return false }
-    var keepOutput = false
-    defer {
-        var outputStat = stat(); _ = fstat(output, &outputStat); close(output)
-        if !keepOutput {
-            var pathStat = stat()
-            if fstatat(destinationDir, outputName, &pathStat, AT_SYMLINK_NOFOLLOW) == 0, sameObject(outputStat, pathStat) {
-                _ = unlinkat(destinationDir, outputName, 0)
-            }
-        }
-    }
+    let temp = stenoPartName()
+    let output = openat(destinationDir, temp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+    guard output >= 0 else { fail("임시 파일 생성 실패: \(name)"); return false }
+    defer { close(output); _ = unlinkat(destinationDir, temp, 0) }
 
     var buffer = [UInt8](repeating: 0, count: 64 * 1024)
     var total: off_t = 0
@@ -69,20 +51,43 @@ private func copyFile(sourceDir: Int32, destinationDir: Int32, name: String) -> 
         let count = read(source, &buffer, buffer.count)
         if count == 0 { break }
         guard count > 0 else { fail("원본 읽기 실패: \(name)"); return false }
+        watchdogProgress()
         total += off_t(count)
         guard total <= maxBytes else { fail("복사 중 크기 초과: \(name)"); return false }
         var offset = 0
         while offset < count {
             let written = buffer.withUnsafeBytes { write(output, $0.baseAddress!.advanced(by: offset), count - offset) }
-            guard written > 0 else { fail("대상 쓰기 실패: \(outputName)"); return false }
+            guard written > 0 else { fail("대상 쓰기 실패: \(name)"); return false }
             offset += written
+            watchdogProgress()
         }
     }
-    guard fsync(output) == 0 else { fail("대상 동기화 실패: \(outputName)"); return false }
+    guard fsync(output) == 0 else { fail("대상 동기화 실패: \(name)"); return false }
     var currentStat = stat()
-    guard fstatat(sourceDir, name, &currentStat, AT_SYMLINK_NOFOLLOW) == 0, sameObject(sourceStat, currentStat),
-          unlinkat(sourceDir, name, 0) == 0 else { fail("복사 후 원본이 바뀌어 결과를 취소함: \(name)"); return false }
-    keepOutput = true
+    guard fstatat(sourceDir, name, &currentStat, AT_SYMLINK_NOFOLLOW) == 0, sameObject(sourceStat, currentStat) else {
+        fail("복사 후 원본이 바뀌어 결과를 취소함: \(name)"); return false
+    }
+    var outputName: String?
+    for n in 1...10_000 {
+        let candidate = collisionName(name, n)
+        if renameatx_np(destinationDir, temp, destinationDir, candidate, UInt32(RENAME_EXCL)) == 0 {
+            outputName = candidate; break
+        }
+        guard errno == EEXIST else { fail("대상 생성 실패: \(candidate)"); return false }
+        var existing = stat()
+        if fstatat(destinationDir, candidate, &existing, AT_SYMLINK_NOFOLLOW) == 0,
+           (existing.st_mode & S_IFMT) == S_IFLNK { fail("대상 심볼릭 링크 거절: \(candidate)"); return false }
+    }
+    guard let outputName else { fail("파일 이름 충돌 한도 초과: \(name)"); return false }
+    guard unlinkat(sourceDir, name, 0) == 0 else {
+        var outputStat = stat(), pathStat = stat()
+        if fstat(output, &outputStat) == 0,
+           fstatat(destinationDir, outputName, &pathStat, AT_SYMLINK_NOFOLLOW) == 0, sameObject(outputStat, pathStat) {
+            _ = unlinkat(destinationDir, outputName, 0)
+        }
+        fail("복사 후 원본 삭제 실패: \(name)"); return false
+    }
+    watchdogProgress()
     return true
 }
 
@@ -96,6 +101,7 @@ func runInbox(sourcePath: String, destinationPath: String) -> Int32 {
     let destinationDir = open(destinationPath, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
     guard destinationDir >= 0 else { fail("받은 파일 폴더 열기 실패"); return 1 }
     defer { close(destinationDir) }
+    guard cleanupStenoParts(destinationDir) else { return 1 }
     guard let directory = fdopendir(dup(sourceDir)) else { fail("outbox 읽기 실패"); return 1 }
     defer { closedir(directory) }
     var rejected = false
@@ -103,7 +109,7 @@ func runInbox(sourcePath: String, destinationPath: String) -> Int32 {
         let name = withUnsafePointer(to: &entry.pointee.d_name) {
             $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXNAMLEN) + 1) { String(cString: $0) }
         }
-        if name == "." || name == ".." { continue }
+        if isStenoPart(name) || name == "." || name == ".." { continue }
         guard validName(name) else { fail("파일 이름/확장자 거절: \(name)"); rejected = true; continue }
         if !copyFile(sourceDir: sourceDir, destinationDir: destinationDir, name: name) { rejected = true }
     }

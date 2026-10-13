@@ -58,7 +58,7 @@ with tempfile.TemporaryDirectory() as tmp:
     home = Path(tmp)
     for name, body in [('baseline', code), ('mutant', code.replace('(info.st_flags & UInt32(SF_DATALESS)) == 0', 'true')), ('marker-mutant', code.replace('        return true\n    }\n    return [', '        return false\n    }\n    return ['))]:
         source, binary = home / (name + '.swift'), home / name
-        source.write_text(prefix + body + suffix)
+        source.write_text(prefix + (root / 'Sources/Watchdog.swift').read_text() + body + suffix)
         subprocess.run(['swiftc', str(source), '-o', str(binary)], check=True, capture_output=True)
         fixture = home / (name + '-files'); fixture.mkdir()
         result = subprocess.run([str(binary), str(fixture)], capture_output=True, text=True)

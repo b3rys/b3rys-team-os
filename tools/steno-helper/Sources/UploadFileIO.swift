@@ -24,9 +24,11 @@ func uploadReadRegular(_ dir: Int32, _ name: String) -> Data? {
         let n = read(fd, &buffer, buffer.count)
         if n == 0 { break }
         guard n > 0 else { return nil }
+        watchdogProgress()
         data.append(buffer, count: n)
         guard data.count <= maxBytes else { return nil }
     }
+    watchdogProgress()
     return data
 }
 
@@ -36,21 +38,9 @@ func uploadSHA256(_ data: Data) -> String {
 
 // 임시 이름으로 쓴 뒤 rename 한다. 대상 이름이 링크여도 링크 자체만 바뀐다.
 func uploadWriteAtomically(_ dir: Int32, _ name: String, _ data: Data, beforeRename: () -> Bool = { true }) -> Bool {
-    let temp = ".tmp-\(getpid())-\(UInt32.random(in: 0...UInt32.max))"
-    let fd = openat(dir, temp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-    guard fd >= 0 else { return false }
-    let ok = data.withUnsafeBytes { raw -> Bool in
-        var offset = 0
-        while offset < data.count {
-            let n = write(fd, raw.baseAddress!.advanced(by: offset), data.count - offset)
-            guard n > 0 else { return false }
-            offset += n
-        }
-        return true
-    } && fsync(fd) == 0
-    close(fd)
-    guard ok, beforeRename(), renameat(dir, temp, dir, name) == 0 else { _ = unlinkat(dir, temp, 0); return false }
-    return true
+    return withStenoPart(dir, data) { temp in
+        beforeRename() && renameat(dir, temp, dir, name) == 0
+    }
 }
 
 // 목록을 끝까지 읽지 못하면 nil. 부분 목록으로 "빠진 노트"를 판단하면 사본을 잘못 지운다.
@@ -64,6 +54,6 @@ func uploadListNames(_ dir: Int32) -> [String]? {
         let name = withUnsafePointer(to: &entry.pointee.d_name) {
             $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXNAMLEN) + 1) { String(cString: $0) }
         }
-        names.append(name)
+        if !isStenoPart(name) { names.append(name) }
     }
 }

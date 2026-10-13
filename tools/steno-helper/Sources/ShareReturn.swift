@@ -42,5 +42,6 @@ func consumeReturn(source: Int32, requestName: String, destination: Int32) -> Bo
     FileHandle.standardError.write(Data("steno-helper 팀 공유 반환: \(request.file) 사본=\(output)\n".utf8))
     guard removeUnchanged(source, requestName, requestInfo, raw), removeUnchanged(source, payload, payloadInfo, data) else { return false }
     if let baseInfo, let baseline, !removeUnchanged(source, baseName, baseInfo, baseline) { return false }
+    watchdogProgress()
     return true
 }

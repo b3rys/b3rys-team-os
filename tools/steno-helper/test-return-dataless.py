@@ -9,7 +9,8 @@ import uuid
 
 root = Path(__file__).resolve().parent
 with tempfile.TemporaryDirectory() as tmp:
-    home = Path(tmp)
+    # macOS /var is a symlink; match the helper's canonical-directory rule.
+    home = Path(tmp).resolve()
     for mutant in [False, True]:
         build = home / ('mutant' if mutant else 'baseline'); build.mkdir()
         for source in (root / 'Sources').glob('*.swift'):

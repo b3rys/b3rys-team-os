@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 // Steno 도우미 — 문서 폴더 권한을 가진 프로그램은 이것 하나다. 한 번 돌 때 세 일을 차례로 한다.
@@ -7,8 +8,18 @@ import Foundation
 // 하나가 실패해도 다른 하나는 돈다. 종료 코드는 하나라도 실패하면 1.
 
 #if STENO_HELPER_TESTING
+let env = ProcessInfo.processInfo.environment
+if let value = env["STENO_HELPER_TEST_ALARM"], let seconds = UInt32(value), seconds > 0 { startWatchdog(seconds) }
 let args = CommandLine.arguments
 if args.count == 3, args[1] == "--validate-name" { exit(validName(args[2]) ? 0 : 1) }
+if args.count == 3, args[1] == "--cycle" {
+    exit(runCycle(home: args[2], env: env))
+}
+if args.count == 3, args[1] == "--resolve" {
+    guard let library = resolveLibrary(home: args[2], env: ProcessInfo.processInfo.environment) else { exit(1) }
+    print(library)
+    exit(0)
+}
 guard args.count == 4 else { exit(64) }
 switch args[1] {
 case "--inbox": exit(runInbox(sourcePath: args[2], destinationPath: args[3]))
@@ -17,14 +28,7 @@ case "--share": exit(runShare(sourcePath: args[2], destinationPath: args[3]))
 default: exit(64)
 }
 #else
-let home = NSHomeDirectory()
-let support = home + "/Library/Application Support/b3os"
-// 받은 파일 경로는 예전처럼 소스에 고정한다(실행 인자·환경으로 바꿀 수 없다).
-let inbox = runInbox(sourcePath: support + "/steno-outbox", destinationPath: home + "/Documents/Steno/받은 파일")
-// 팀 공유는 Steno 앱과 같은 규칙으로 라이브러리를 정한다: STENO_LIBRARY → ~/Documents/Steno.
-let env = ProcessInfo.processInfo.environment["STENO_LIBRARY"] ?? ""
-let library = env.hasPrefix("/") ? env : home + "/Documents/Steno"
-let upload = runShareUpload(sourcePath: support + "/steno-share-outbox", libraryPath: library)
-let share = runShare(sourcePath: library + "/팀 공유", destinationPath: support + "/steno-shared")
-exit(inbox == 0 && upload == 0 && share == 0 ? 0 : 1)
+// 한 주기가 멈추면 launchd 는 같은 작업을 다시 띄우지 않는다. 20초 동안 진척이 없으면 기록하고 끝내서 다음 주기가 돌게 한다.
+startWatchdog(20)
+exit(runCycle(home: NSHomeDirectory(), env: ProcessInfo.processInfo.environment))
 #endif
