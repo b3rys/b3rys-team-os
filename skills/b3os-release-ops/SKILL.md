@@ -124,7 +124,7 @@ scripts/release-cut.sh --publish --approved --plan /path/to/plan.json
 
 기본 모드는 dry-run이다. PR 제목은 Features/Fixes/Documentation/Maintenance로 묶고 구현 scope를 제거한다. 기존 public-content-lint와 public-lint-allow의 공개 낱말 목록을 적용하며 내부 이름·경로·회고를 포함한 제목은 공개용 일반 문구로 대체한다. 설치본의 명단·프로젝트·설정을 읽지 못하면 초안 생성은 실패한다. 자동 검사만으로 모든 내부 정보가 제거되지는 않으므로 사람이 노트를 확인한다.
 
-prepare는 검토한 main tip에서 `release/vX.Y.Z` 브랜치에 package.json 버전 커밋을 만든다. 설정된 팀 계정으로 PR을 열고 작성자를 확인하며, main·태그·Release에는 쓰지 않는다. `--submitted-by`는 설치본 명단에 등록된 실행자 ID다. 생성된 PR의 리뷰·검사·머지 승인은 기존 절차를 따른다. 격리 worktree에서 실행하고, 같은 브랜치가 이미 존재하면 덮어쓰지 않는다.
+prepare는 검토한 main tip으로 자체 임시 worktree를 만들고, 그 안의 `release/vX.Y.Z` 브랜치에 package.json 버전 커밋을 만든다. 성공·실패 모두 임시 worktree를 정리하며 호출 트리의 HEAD·브랜치·package.json을 변경하지 않는다. 설정된 팀 계정으로 PR을 열고 작성자를 확인하며, main·태그·Release에는 쓰지 않는다. `--submitted-by`는 설치본 명단에 등록된 실행자 ID다. 생성된 PR의 리뷰·검사·머지 승인은 기존 절차를 따른다. 같은 브랜치가 이미 존재하면 덮어쓰지 않는다. push·PR 생성 후 실패한 경우 만들어진 브랜치나 PR은 남을 수 있으므로 상태를 확인한다. 임시 worktree 제거가 실패하면 오류로 알리고 자동으로 라이브 트리를 정리하지 않는다.
 
 publish는 버전 PR이 main에 머지되고 package.json 버전이 계산된 버전과 같을 때만 진행한다. 머지 뒤 새 dry-run으로 plan·노트·PR 목록·main SHA를 다시 고정하고 확인한다. 기존 release-preflight의 post-merge 검사 후 설정의 noreply 이메일로 검토 main tip의 annotated tag만 push하고 `gh release create --verify-tag`를 실행한다. main 커밋·push·자동 머지는 없다. 원격 태그 push 이후 Release 생성이 실패하면 태그가 이미 존재할 수 있으므로 상태를 확인하고 승인 범위 안에서 기존 태그로 게시를 재개한다. 태그를 이동하거나 자동 삭제하지 않는다.
 

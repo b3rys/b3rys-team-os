@@ -3,7 +3,8 @@ import { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, readFileSync, rmSy
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-test("publish uses the reviewed plan, release PR, noreply commit/tag and tag-only push with protected main in an isolated remote", async () => {
+for (const failAt of [null, "push", "pr"] as const) {
+test(`prepare preserves caller and removes worktree (${failAt ?? "success and publish"})`, async () => {
   const temp = mkdtempSync(join(tmpdir(), "release-publish-fixture-"));
   const root = join(temp, "repo"), remote = join(temp, "remote.git"), bin = join(temp, "bin");
   mkdirSync(root); mkdirSync(bin);
@@ -35,11 +36,11 @@ test("publish uses the reviewed plan, release PR, noreply commit/tag and tag-onl
     git("add", "feature.txt"); git("commit", "-qm", "feat: view");
     const oid = git("rev-parse", "HEAD");
     git("init", "--bare", "-q", remote); git("remote", "add", "origin", remote); git("push", "-q", "--tags", "origin", "main");
-    writeFileSync(join(remote, "hooks/update"), '#!/bin/bash\ntest "$1" != refs/heads/main\n', { mode: 0o755 });
+    writeFileSync(join(remote, "hooks/update"), '#!/bin/bash\ntest "$1" != refs/heads/main && test "$FIXTURE_FAIL" != push\n', { mode: 0o755 });
     const prs = join(temp, "prs.json"), log = join(temp, "operations.log");
     writeFileSync(prs, JSON.stringify([{ number: 1, title: "feat: dashboard view", labels: [], mergeCommit: { oid } }]));
-    writeFileSync(join(bin, "gh"), '#!/bin/bash\nset -eu\ncase "$1 $2" in\n  "pr list") cat "$FIXTURE_PRS";;\n  "auth token") printf "fixture-token";;\n  "pr create") printf "release-pr\\n" >> "$FIXTURE_LOG"; printf "https://example.invalid/pull/1";;\n  "pr view") printf "fixture-team";;\n  "release create") printf "release:%s\\n" "$3" >> "$FIXTURE_LOG";;\n  *) exit 2;;\nesac\n', { mode: 0o755 });
-    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, B3OS_SETTINGS_URL: `http://127.0.0.1:${server.port}/team/api/settings`, FIXTURE_PRS: prs, FIXTURE_LOG: log };
+    writeFileSync(join(bin, "gh"), '#!/bin/bash\nset -eu\ncase "$1 $2" in\n  "pr list") cat "$FIXTURE_PRS";;\n  "auth token") printf "fixture-token";;\n  "pr create") if [ "$FIXTURE_FAIL" = pr ]; then exit 9; fi; printf "release-pr\\n" >> "$FIXTURE_LOG"; printf "https://example.invalid/pull/1";;\n  "pr view") printf "fixture-team";;\n  "release create") printf "release:%s\\n" "$3" >> "$FIXTURE_LOG";;\n  *) exit 2;;\nesac\n', { mode: 0o755 });
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, B3OS_SETTINGS_URL: `http://127.0.0.1:${server.port}/team/api/settings`, FIXTURE_PRS: prs, FIXTURE_LOG: log, FIXTURE_FAIL: failAt ?? "" };
     const cli = async (...args: string[]) => {
       const child = Bun.spawn(["bash", "scripts/release-cut.sh", ...args], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
       const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
@@ -51,11 +52,21 @@ test("publish uses the reviewed plan, release PR, noreply commit/tag and tag-onl
     expect(git("rev-parse", "HEAD")).toBe(oid);
     await expect(cli("--publish", "--approved", "--plan", join(out, "plan.json"))).rejects.toThrow("release PR first");
     expect(git("ls-remote", "origin", "refs/heads/main")).toStartWith(oid);
+    const callerSnapshot = () => ({ head: git("rev-parse", "HEAD"), branch: git("branch", "--show-current"), package: readFileSync(join(root, "package.json"), "utf8"), status: git("status", "--porcelain"), worktrees: git("worktree", "list", "--porcelain") });
+    const before = callerSnapshot();
+    if (failAt) {
+      await expect(cli("--prepare", "--submitted-by", "tester", "--plan", join(out, "plan.json"))).rejects.toThrow(failAt === "push" ? "git push failed" : "gh pr failed");
+      expect(callerSnapshot()).toEqual(before);
+      expect(git("ls-remote", "origin", "refs/heads/main")).toStartWith(oid);
+      expect(git("ls-remote", "origin", "refs/tags/v0.7.0")).toBe("");
+      return;
+    }
     await cli("--prepare", "--submitted-by", "tester", "--plan", join(out, "plan.json"));
-    expect(git("log", "-1", "--format=%an%n%cn")).toBe("tester\ntester");
+    expect(callerSnapshot()).toEqual(before);
+    expect(git("log", "-1", "--format=%an%n%cn", "release/v0.7.0")).toBe("tester\ntester");
     expect(git("ls-remote", "origin", "refs/heads/main")).toStartWith(oid);
     expect(git("ls-remote", "origin", "refs/tags/v0.7.0")).toBe("");
-    const prepared = git("rev-parse", "HEAD");
+    const prepared = git("rev-parse", "release/v0.7.0");
     // Simulate an approved PR merge without weakening the remote update hook.
     git("switch", "main"); git("merge", "--ff-only", "release/v0.7.0");
     git("--git-dir=" + remote, "update-ref", "refs/heads/main", prepared, oid);
@@ -74,3 +85,4 @@ test("publish uses the reviewed plan, release PR, noreply commit/tag and tag-onl
     expect(readFileSync(log, "utf8")).toBe("preflight\npreflight\nrelease-pr\npreflight\nrelease:v0.7.0\n");
   } finally { server.stop(true); rmSync(temp, { recursive: true, force: true }); }
 }, 15000);
+}

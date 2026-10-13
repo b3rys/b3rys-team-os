@@ -1,10 +1,10 @@
-import { mkdtempSync, readFileSync, writeFileSync, realpathSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, realpathSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join, dirname } from "node:path";
 import { nextVersion, publicNotesDraft, checkPublicNotes, type ReleasePR, type PublicContext } from "./release-plan";
 
-function run(args: string[], env: Record<string, string | undefined> = process.env): string {
-  const r = Bun.spawnSync(args, { stdout: "pipe", stderr: "pipe", env });
+function run(args: string[], env: Record<string, string | undefined> = process.env, cwd = process.cwd()): string {
+  const r = Bun.spawnSync(args, { stdout: "pipe", stderr: "pipe", env, cwd });
   if (r.exitCode) throw new Error(`${args.slice(0, 2).join(" ")} failed: ${r.stderr.toString().trim()}`);
   return r.stdout.toString().trim();
 }
@@ -108,19 +108,32 @@ if (prepare) {
   const token = run(["gh", "auth", "token", "--user", account]);
   if (!token) throw new Error("Team authentication unavailable");
   const branch = `release/${tag}`;
-  run(["git", "switch", "-c", branch, tip]);
-  pkg.version = version;
-  writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
-  run(["git", "add", "--", "package.json"]);
-  run([...identity, "commit", "-m", `chore(release): ${tag}`], { ...identityEnv, GIT_AUTHOR_NAME: submitter, GIT_COMMITTER_NAME: submitter });
-  if (run(["git", "log", "-1", "--format=%ae%n%ce"]) !== `${email}\n${email}`) throw new Error("Release commit identity mismatch; stop before push");
-  run(["git", "push", "-u", "origin", `HEAD:refs/heads/${branch}`]);
-  const prDir = mkdtempSync(join(tmpdir(), "release-pr-"));
-  const bodyFile = join(prDir, "body.md");
-  writeFileSync(bodyFile, `## Release version\n\nUpdate package.json to ${version}. No release tag or publication is performed by this PR. After review and merge, regenerate and review release notes at the new main tip before publication.\n\nSubmitted-by: ${submitter}\n`);
-  const url = run(["gh", "pr", "create", "--base", "main", "--head", branch, "--title", `chore(release): ${tag}`, "--body-file", bodyFile], { ...process.env, GH_TOKEN: token });
-  const author = run(["gh", "pr", "view", url, "--json", "author", "--jq", ".author.login"], { ...process.env, GH_TOKEN: token });
-  if (author !== account) throw new Error("Release PR author mismatch; stop and reconcile the PR account");
+  const prDir = mkdtempSync(join(tmpdir(), "release-prepare-"));
+  const worktree = join(prDir, "worktree");
+  let added = false;
+  let url: string;
+  try {
+    run(["git", "worktree", "add", "--detach", worktree, tip]);
+    added = true;
+    const workRun = (args: string[], env: Record<string, string | undefined> = process.env) => run(args, env, worktree);
+    workRun(["git", "switch", "-c", branch, tip]);
+    const preparedPkgPath = join(worktree, "package.json");
+    const preparedPkg = JSON.parse(readFileSync(preparedPkgPath, "utf8"));
+    preparedPkg.version = version;
+    writeFileSync(preparedPkgPath, JSON.stringify(preparedPkg, null, 2) + "\n");
+    workRun(["git", "add", "--", "package.json"]);
+    workRun([...identity, "commit", "-m", `chore(release): ${tag}`], { ...identityEnv, GIT_AUTHOR_NAME: submitter, GIT_COMMITTER_NAME: submitter });
+    if (workRun(["git", "log", "-1", "--format=%ae%n%ce"]) !== `${email}\n${email}`) throw new Error("Release commit identity mismatch; stop before push");
+    workRun(["git", "push", "-u", "origin", `HEAD:refs/heads/${branch}`]);
+    const bodyFile = join(prDir, "body.md");
+    writeFileSync(bodyFile, `## Release version\n\nUpdate package.json to ${version}. No release tag or publication is performed by this PR. After review and merge, regenerate and review release notes at the new main tip before publication.\n\nSubmitted-by: ${submitter}\n`);
+    url = workRun(["gh", "pr", "create", "--base", "main", "--head", branch, "--title", `chore(release): ${tag}`, "--body-file", bodyFile], { ...process.env, GH_TOKEN: token });
+    const author = workRun(["gh", "pr", "view", url, "--json", "author", "--jq", ".author.login"], { ...process.env, GH_TOKEN: token });
+    if (author !== account) throw new Error("Release PR author mismatch; stop and reconcile the PR account");
+  } finally {
+    if (added) run(["git", "worktree", "remove", "--force", worktree]);
+    rmSync(prDir, { recursive: true, force: true });
+  }
   console.log(`Release PR: ${url}\nNo main push, tag or Release. Await review and approved merge, then regenerate dry-run.`);
   process.exit(0);
 }
