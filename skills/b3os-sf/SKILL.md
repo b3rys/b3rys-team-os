@@ -37,6 +37,8 @@ SF는 결과물 품질·과제 수행 시간·과제 수행 토큰량을 함께 
 
 AI 팀이 기능을 만들 때 지키는 11개 코딩 원칙과 점검법: [`references/ai-team-coding-guidelines.md`](references/ai-team-coding-guidelines.md)
 
+상태 × 입력 조합이 많은 기능(편집기 키 처리, 화면 모드, 동기화 상태)은 처음부터 "판정 함수 하나 + 상태표 + 작은 실행 함수"로 짠다. 고쳤더니 다른 곳이 깨지면 증상을 더 막지 말고 같은 판단을 하는 곳이 몇 군데인지부터 센다. 상태표는 만능이 아니다 — 판정 함수 하나·표 밖 if 금지·칸마다 시험과 함께 써야 효과가 난다. 방법·장단점: `b3os-ai-code-safety` 의 "상태 × 입력이 많으면 상태표로".
+
 구조 정리(리팩터링)는 신호가 보일 때 앱 전체 지도로 재고, 위험 순으로 옮기고, 래칫으로 지킨다. 구현 첫날부터 지킬 구조 규칙은 시작 단계에 둔다. 상세: [`references/structure-refactor.md`](references/structure-refactor.md) · [`references/start.md`](references/start.md#구현-첫날부터-지킬-구조-규칙)
 
 ### 3. 출시
