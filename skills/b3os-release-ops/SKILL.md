@@ -98,7 +98,35 @@ bun run service restart                               # 상시가동 미등록�
 - branch protection 재확인.
 - 전/후 SHA와 복구 명령 보고.
 
-## 기계적 가드
+## 버전 올리기
+
+버전은 semver(`major.minor.patch`)로 관리한다. 직전 `vX.Y.Z` 태그 이후 원격 main에 실제로 포함된 머지 PR을 기준으로 계산한다.
+
+- `feat`/`feature`/`기능` 제목 접두사 또는 같은 분류 라벨이 하나라도 있으면 minor를 올리고 patch를 0으로 만든다. 예: `0.6.1` → `0.7.0`.
+- fix·docs·chore 등 나머지만 있으면 patch를 올린다. 예: `0.6.1` → `0.6.2`.
+- 머지 PR 0건이면 파일·커밋·태그·Release 없이 종료한다. main에 직접 들어간 커밋은 PR 목록에 포함되지 않는다.
+- breaking change의 major 승격은 자동 판정하지 않는다. 별도 검토 후 릴리스 정책을 결정한다.
+
+하루 1회 사람이 다음 순서로 실행한다. 이 문서는 자동 게시나 예약 실행을 등록하지 않는다.
+
+```bash
+scripts/release-cut.sh --dry-run
+# 출력한 notes 파일과 plan.json을 검토한다. 출력은 저장소 밖의 새 임시 디렉터리다.
+# 노트를 고쳤으면 새 plan으로 다시 고정하고 최종 출력물을 검토한다:
+scripts/release-cut.sh --dry-run --notes-file /path/to/reviewed.md
+# 사람이 게시를 승인한 뒤, 검토 당시 origin/main과 일치하는 clean main에서만:
+scripts/release-cut.sh --publish --approved --plan /path/to/plan.json
+```
+
+기본 모드는 dry-run이다. PR 제목은 Features/Fixes/Documentation/Maintenance로 묶고 구현 scope를 제거한다. 기존 public-content-lint와 public-lint-allow의 공개 낱말 목록을 적용하며 내부 이름·경로·회고를 포함한 제목은 공개용 일반 문구로 대체한다. 설치본의 명단·프로젝트·설정을 읽지 못하면 초안 생성은 실패한다. 자동 검사만으로 모든 내부 정보가 제거되지는 않으므로 사람이 노트를 확인한다.
+
+publish는 검토한 plan·노트·PR 목록·main SHA가 현재 값과 일치할 때만 진행한다. 기존 release-preflight의 post-merge 검사 후 설정의 noreply 이메일로 package.json 버전 커밋과 annotated tag를 만들고 main·태그를 atomic push한 뒤 `gh release create --verify-tag`를 실행한다. 브랜치 보호를 우회하지 않는다. 보호 규칙이 push를 거부하면 중단하며 로컬 커밋·태그는 남는다. 원격 push 이후 Release 생성이 실패하면 원격 커밋·태그가 이미 존재할 수 있으므로 상태를 확인하고 승인 범위 안에서 기존 태그로 게시를 재개한다. 태그를 이동하거나 자동 삭제하지 않는다.
+
+대시보드 하단 버전과 SHA는 `/api/version`이 반환하는 **서버 시작 시점**의 package.json과 Git HEAD다. 머지·파일 변경만으로 표시가 바뀌지 않으며 재시작이 필요하다. 배포·재시작 승인은 게시 승인과 별개다.
+
+시험: `bun test scripts/release-plan.test.ts scripts/release-cut.test.ts scripts/release-publish.test.ts src/server/routes/version.test.ts src/web/components/RunningVersion.test.ts`.
+
+## 기계적 가드 (명령)
 
 `release-preflight.sh`:
 

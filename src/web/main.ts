@@ -29,6 +29,7 @@ import { renderMobileTabBar } from "./components/MobileTabBar";
 import { renderOnboarding } from "./components/Onboarding";
 import { renderUpdateCheck } from "./components/UpdateCheck";
 import { renderLiveBadge } from "./components/LiveBadge";
+import { renderRunningVersion } from "./components/RunningVersion";
 import { renderIcon } from "./icons";
 import { initPanels, isPanelCollapsed, onPanelChange, PANEL_IDS, togglePanel, type Panel } from "./lib/panels";
 
@@ -90,6 +91,7 @@ function bootstrap() {
       <div id="activity-panel-wrap" class="flex md:contents"></div>
     </div>
     <div id="mobile-tabs"></div>
+    <footer id="running-version" class="shrink-0 px-3 py-1 text-center text-xs text-slate-500" aria-label="Running server version"></footer>
   `;
 
   // Sidebar
@@ -121,6 +123,7 @@ function bootstrap() {
   renderOnboarding(app);
   renderUpdateCheck(app);
   renderLiveBadge(app);
+  void renderRunningVersion(document.getElementById("running-version")!);
   setupResizers();
   setupPanelToggles();
 
