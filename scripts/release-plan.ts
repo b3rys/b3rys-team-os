@@ -17,10 +17,11 @@ export function nextVersion(previous: string, prs: ReleasePR[]): string | null {
   return prs.some(p => group(p) === "Features")
     ? `${major}.${Number(minor) + 1}.0` : `${major}.${minor}.${Number(patch) + 1}`;
 }
-export function publicNotes(version: string, prs: ReleasePR[], context: PublicContext): string {
+export function publicNotesDraft(version: string, prs: ReleasePR[], context: PublicContext): { notes: string; replaced: number } {
   const matchers = buildMatchers({ ...context, agents: context.agents.flatMap(a => [a, { display_name: a.id }]) });
   const sections = ["Features", "Fixes", "Documentation", "Maintenance"] as const;
   const lines = [`# v${version}`, ""];
+  let replaced = 0;
   for (const section of sections) {
     const items = prs.filter(p => group(p) === section);
     if (!items.length) continue;
@@ -30,14 +31,21 @@ export function publicNotes(version: string, prs: ReleasePR[], context: PublicCo
       let title = pr.title.replace(/^[a-z]+(?:\([^)]*\))?!?:\s*/i, "").replace(/[\r\n\t]/g, " ");
       const diff = `--- a/notes.md\n+++ b/notes.md\n@@ -0,0 +1 @@\n+${title}`;
       const unsafe = lintDiff(diff, matchers).length || /[`\\/]|\b[\w-]+\.(?:md|json|sh|ts|py)\b|\b(?:SHARED|MEMORY|TEAM-OS)\b|회고|반성|팀장|내가|우리가|놓친|이었|하던|되던|않던|죽던|남던|사례|재측정|실측|리뷰.*(?:지적|피드백)|쓰던|놓치|talk notes|lead.as.source|adoption verdict|direct.?to.?gd|\bnever\b|op 방|승인.*우회|꺼진 권한|게이트 밖/i.test(title) || /\b[A-Z][A-Z_]{2,}\b/.test(title);
-      if (unsafe) title = `${section === "Features" ? "Feature update" : section === "Fixes" ? "Reliability improvement" : section === "Documentation" ? "Documentation update" : "Maintenance update"}`;
+      if (unsafe) {
+        replaced++;
+        title = `${section === "Features" ? "Feature update" : section === "Fixes" ? "Reliability improvement" : section === "Documentation" ? "Documentation update" : "Maintenance update"}`;
+      }
       // Neutralize Markdown links/images/HTML from untrusted PR titles.
       title = title.replace(/[<>\[\]*_!#]/g, "");
       lines.push(`- ${title} (#${pr.number})`);
     }
     lines.push("");
   }
-  return lines.join("\n");
+  return { notes: lines.join("\n"), replaced };
+}
+
+export function publicNotes(version: string, prs: ReleasePR[], context: PublicContext): string {
+  return publicNotesDraft(version, prs, context).notes;
 }
 
 export function checkPublicNotes(notes: string, version: string, context: PublicContext): void {

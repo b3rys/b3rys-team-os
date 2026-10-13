@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, writeFileSync, realpathSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join, dirname } from "node:path";
-import { nextVersion, publicNotes, checkPublicNotes, type ReleasePR, type PublicContext } from "./release-plan";
+import { nextVersion, publicNotesDraft, checkPublicNotes, type ReleasePR, type PublicContext } from "./release-plan";
 
 function run(args: string[], env: Record<string, string | undefined> = process.env): string {
   const r = Bun.spawnSync(args, { stdout: "pipe", stderr: "pipe", env });
@@ -9,8 +9,8 @@ function run(args: string[], env: Record<string, string | undefined> = process.e
   return r.stdout.toString().trim();
 }
 const argv = process.argv.slice(2);
-const allowed = new Set(["--dry-run", "--publish", "--approved", "--out", "--prs-file", "--previous", "--context-file", "--plan", "--notes-file", "--help"]);
-const values = new Set(["--out", "--prs-file", "--previous", "--context-file", "--plan", "--notes-file"]);
+const allowed = new Set(["--dry-run", "--prepare", "--publish", "--approved", "--out", "--prs-file", "--previous", "--context-file", "--plan", "--notes-file", "--submitted-by", "--help"]);
+const values = new Set(["--out", "--prs-file", "--previous", "--context-file", "--plan", "--notes-file", "--submitted-by"]);
 const opts = new Map<string, string>();
 for (let i = 0; i < argv.length; i++) {
   const key = argv[i]!;
@@ -20,12 +20,14 @@ for (let i = 0; i < argv.length; i++) {
   opts.set(key, value);
 }
 if (opts.has("--help")) {
-  console.log("release-cut.sh [--dry-run] [--out NEW_DIR] [--notes-file REVIEWED_MD]\nrelease-cut.sh --publish --approved --plan PLAN_JSON\nOffline: --prs-file JSON --previous vX.Y.Z --context-file JSON");
+  console.log("release-cut.sh [--dry-run] [--out NEW_DIR] [--notes-file REVIEWED_MD]\nrelease-cut.sh --prepare --submitted-by MEMBER_ID --plan PLAN_JSON\nAfter release PR merge and fresh dry-run: --publish --approved --plan PLAN_JSON\nOffline: --prs-file JSON --previous vX.Y.Z --context-file JSON");
   process.exit(0);
 }
 const publish = opts.has("--publish");
+const prepare = opts.has("--prepare");
+if (prepare && (publish || opts.has("--dry-run") || !opts.has("--plan"))) throw new Error("Prepare requires --prepare --plan PLAN_JSON only");
 if (publish && (opts.has("--dry-run") || !opts.has("--approved") || !opts.has("--plan"))) throw new Error("Publish requires human approval: --publish --approved --plan PLAN_JSON");
-if (publish && ["--prs-file", "--previous", "--context-file", "--out", "--notes-file"].some(k => opts.has(k))) throw new Error("Fixture/preview options are not allowed for publish");
+if ((publish || prepare) && ["--prs-file", "--previous", "--context-file", "--out", "--notes-file"].some(k => opts.has(k))) throw new Error("Fixture/preview options are not allowed for prepare/publish");
 const root = realpathSync(run(["git", "rev-parse", "--show-toplevel"]));
 const settingsUrl = process.env.B3OS_SETTINGS_URL ?? "http://127.0.0.1:7878/team/api/settings";
 async function json(url: string): Promise<any> {
@@ -58,8 +60,8 @@ if (!Array.isArray(prs) || prs.some(p => !Number.isSafeInteger(p.number) || p.nu
 const version = nextVersion(previous, prs);
 if (!version) { console.log("No merged PRs since previous tag; no files or release created."); process.exit(0); }
 const publicContext = await context();
-const generatedNotes = publicNotes(version, prs, publicContext);
-if (!publish) {
+const { notes: generatedNotes, replaced } = publicNotesDraft(version, prs, publicContext);
+if (!publish && !prepare) {
   const reviewedNotes = opts.has("--notes-file") ? readFileSync(opts.get("--notes-file")!, "utf8") : generatedNotes;
   checkPublicNotes(reviewedNotes, version, publicContext);
   const out = opts.get("--out") ? resolve(opts.get("--out")!) : mkdtempSync(join(tmpdir(), "b3os-release-"));
@@ -73,8 +75,8 @@ if (!publish) {
   if (realpathSync(out) === root || realpathSync(out).startsWith(root + "/")) throw new Error("Release output must be outside repository");
   const notesFile = join(out, `v${version}.md`);
   writeFileSync(notesFile, reviewedNotes);
-  writeFileSync(join(out, "plan.json"), JSON.stringify({ previous, version, tip, prs: prs.map(p => p.number), notesFile, notes: reviewedNotes, generatedNotes, fixture }, null, 2));
-  console.log(`next=v${version} prs=${prs.length}\nnotes=${notesFile}\nplan=${join(out, "plan.json")}\nDry-run only; no commit, tag, push or release.`);
+  writeFileSync(join(out, "plan.json"), JSON.stringify({ previous, version, tip, prs: prs.map(p => p.number), replaced, notesFile, notes: reviewedNotes, generatedNotes, fixture }, null, 2));
+  console.log(`next=v${version} prs=${prs.length} replaced=${replaced}/${prs.length}\nnotes=${notesFile}\nplan=${join(out, "plan.json")}\nDry-run only; no commit, tag, push or release.`);
   process.exit(0);
 }
 const plan = JSON.parse(readFileSync(opts.get("--plan")!, "utf8"));
@@ -82,7 +84,8 @@ if (plan.fixture || plan.tip !== tip || plan.previous !== previous || plan.versi
 const notes = readFileSync(plan.notesFile, "utf8");
 if (notes !== plan.notes || plan.generatedNotes !== generatedNotes) throw new Error("Notes changed; regenerate and review the exact publish draft");
 checkPublicNotes(notes, version, publicContext);
-if (run(["git", "branch", "--show-current"]) !== "main" || run(["git", "rev-parse", "HEAD"]) !== tip) throw new Error("Publish requires main at the reviewed origin/main tip");
+if (run(["git", "status", "--porcelain"])) throw new Error("Prepare/publish requires a clean worktree");
+if (run(["git", "rev-parse", "HEAD"]) !== tip || (publish && run(["git", "branch", "--show-current"]) !== "main")) throw new Error("Use a clean worktree at reviewed origin/main; publish requires main");
 run(["bash", "skills/b3os-release-ops/scripts/release-preflight.sh", "--mode", "post-merge"]);
 if (run(["git", "rev-parse", "origin/main"]) !== tip) throw new Error("Remote main changed during preflight");
 const settingsRaw = await json(settingsUrl);
@@ -93,17 +96,38 @@ const tag = `v${version}`;
 if (Bun.spawnSync(["git", "rev-parse", "--verify", `refs/tags/${tag}`]).exitCode === 0) throw new Error("Tag already exists; never move release tags");
 const pkgPath = join(root, "package.json");
 const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
-if (pkg.version !== previous.replace(/^v/, "")) throw new Error("package.json and previous tag versions differ; reconcile before publishing");
-pkg.version = version;
-writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
-run(["git", "add", "--", "package.json"]);
 const identity = ["git", "-c", "user.name=Release", "-c", `user.email=${email}`];
 const identityEnv = { ...process.env, GIT_AUTHOR_NAME: "Release", GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: "Release", GIT_COMMITTER_EMAIL: email };
-run([...identity, "commit", "-m", `chore(release): ${tag}`], identityEnv);
-if (run(["git", "log", "-1", "--format=%ae%n%ce"]) !== `${email}\n${email}`) throw new Error("Release commit identity mismatch; stop before tag/push");
+if (prepare) {
+  const submitter = opts.get("--submitted-by");
+  if (!submitter || !/^[a-z][a-z0-9-]*$/.test(submitter) || !publicContext.agents.some(a => a.id === submitter)) throw new Error("Prepare requires --submitted-by with a registered member ID");
+  if (pkg.version === version) { console.log("Version already prepared on main; regenerate dry-run and request publication approval."); process.exit(0); }
+  if (pkg.version !== previous.replace(/^v/, "")) throw new Error("package.json and previous tag versions differ; reconcile first");
+  const account = settings.github_team_account;
+  if (typeof account !== "string" || !account || account === settings.github_approver_account) throw new Error("Distinct team/approver accounts are required for the release PR");
+  const token = run(["gh", "auth", "token", "--user", account]);
+  if (!token) throw new Error("Team authentication unavailable");
+  const branch = `release/${tag}`;
+  run(["git", "switch", "-c", branch, tip]);
+  pkg.version = version;
+  writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+  run(["git", "add", "--", "package.json"]);
+  run([...identity, "commit", "-m", `chore(release): ${tag}`], { ...identityEnv, GIT_AUTHOR_NAME: submitter, GIT_COMMITTER_NAME: submitter });
+  if (run(["git", "log", "-1", "--format=%ae%n%ce"]) !== `${email}\n${email}`) throw new Error("Release commit identity mismatch; stop before push");
+  run(["git", "push", "-u", "origin", `HEAD:refs/heads/${branch}`]);
+  const prDir = mkdtempSync(join(tmpdir(), "release-pr-"));
+  const bodyFile = join(prDir, "body.md");
+  writeFileSync(bodyFile, `## Release version\n\nUpdate package.json to ${version}. No release tag or publication is performed by this PR. After review and merge, regenerate and review release notes at the new main tip before publication.\n\nSubmitted-by: ${submitter}\n`);
+  const url = run(["gh", "pr", "create", "--base", "main", "--head", branch, "--title", `chore(release): ${tag}`, "--body-file", bodyFile], { ...process.env, GH_TOKEN: token });
+  const author = run(["gh", "pr", "view", url, "--json", "author", "--jq", ".author.login"], { ...process.env, GH_TOKEN: token });
+  if (author !== account) throw new Error("Release PR author mismatch; stop and reconcile the PR account");
+  console.log(`Release PR: ${url}\nNo main push, tag or Release. Await review and approved merge, then regenerate dry-run.`);
+  process.exit(0);
+}
+if (pkg.version !== version) throw new Error("Version bump must be merged through a release PR first: run --prepare, review/merge, then regenerate dry-run");
 run([...identity, "tag", "-a", tag, "-m", `Release ${tag}`], identityEnv);
 if (run(["git", "for-each-ref", "--format=%(taggeremail)", `refs/tags/${tag}`]) !== `<${email}>`) throw new Error("Tag identity mismatch; stop before push");
-// Atomic push preserves branch protection and prevents a remote tag-only release.
-run(["git", "push", "--atomic", "origin", "HEAD:refs/heads/main", `refs/tags/${tag}`]);
+// Tag the reviewed main commit; publication never writes the protected branch.
+run(["git", "push", "origin", `refs/tags/${tag}`]);
 run(["gh", "release", "create", tag, "--verify-tag", "--title", tag, "--notes-file", plan.notesFile]);
 console.log(`Published ${tag}. Deployment/restart is a separate approved operation.`);

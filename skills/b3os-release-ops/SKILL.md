@@ -114,15 +114,23 @@ scripts/release-cut.sh --dry-run
 # 출력한 notes 파일과 plan.json을 검토한다. 출력은 저장소 밖의 새 임시 디렉터리다.
 # 노트를 고쳤으면 새 plan으로 다시 고정하고 최종 출력물을 검토한다:
 scripts/release-cut.sh --dry-run --notes-file /path/to/reviewed.md
-# 사람이 게시를 승인한 뒤, 검토 당시 origin/main과 일치하는 clean main에서만:
+# clean 격리 worktree에서 버전 PR을 만들고, 기존 리뷰·승인 절차로 머지한다:
+scripts/release-cut.sh --prepare --submitted-by <member-id> --plan /path/to/plan.json
+# 머지 뒤 최신 clean main에서 다시 dry-run하고 최종 노트를 검토한다:
+scripts/release-cut.sh --dry-run
+# 사람이 게시를 승인한 뒤, 새 plan과 일치하는 clean main에서만:
 scripts/release-cut.sh --publish --approved --plan /path/to/plan.json
 ```
 
 기본 모드는 dry-run이다. PR 제목은 Features/Fixes/Documentation/Maintenance로 묶고 구현 scope를 제거한다. 기존 public-content-lint와 public-lint-allow의 공개 낱말 목록을 적용하며 내부 이름·경로·회고를 포함한 제목은 공개용 일반 문구로 대체한다. 설치본의 명단·프로젝트·설정을 읽지 못하면 초안 생성은 실패한다. 자동 검사만으로 모든 내부 정보가 제거되지는 않으므로 사람이 노트를 확인한다.
 
-publish는 검토한 plan·노트·PR 목록·main SHA가 현재 값과 일치할 때만 진행한다. 기존 release-preflight의 post-merge 검사 후 설정의 noreply 이메일로 package.json 버전 커밋과 annotated tag를 만들고 main·태그를 atomic push한 뒤 `gh release create --verify-tag`를 실행한다. 브랜치 보호를 우회하지 않는다. 보호 규칙이 push를 거부하면 중단하며 로컬 커밋·태그는 남는다. 원격 push 이후 Release 생성이 실패하면 원격 커밋·태그가 이미 존재할 수 있으므로 상태를 확인하고 승인 범위 안에서 기존 태그로 게시를 재개한다. 태그를 이동하거나 자동 삭제하지 않는다.
+prepare는 검토한 main tip에서 `release/vX.Y.Z` 브랜치에 package.json 버전 커밋을 만든다. 설정된 팀 계정으로 PR을 열고 작성자를 확인하며, main·태그·Release에는 쓰지 않는다. `--submitted-by`는 설치본 명단에 등록된 실행자 ID다. 생성된 PR의 리뷰·검사·머지 승인은 기존 절차를 따른다. 격리 worktree에서 실행하고, 같은 브랜치가 이미 존재하면 덮어쓰지 않는다.
 
-대시보드 하단 버전과 SHA는 `/api/version`이 반환하는 **서버 시작 시점**의 package.json과 Git HEAD다. 머지·파일 변경만으로 표시가 바뀌지 않으며 재시작이 필요하다. 배포·재시작 승인은 게시 승인과 별개다.
+publish는 버전 PR이 main에 머지되고 package.json 버전이 계산된 버전과 같을 때만 진행한다. 머지 뒤 새 dry-run으로 plan·노트·PR 목록·main SHA를 다시 고정하고 확인한다. 기존 release-preflight의 post-merge 검사 후 설정의 noreply 이메일로 검토 main tip의 annotated tag만 push하고 `gh release create --verify-tag`를 실행한다. main 커밋·push·자동 머지는 없다. 원격 태그 push 이후 Release 생성이 실패하면 태그가 이미 존재할 수 있으므로 상태를 확인하고 승인 범위 안에서 기존 태그로 게시를 재개한다. 태그를 이동하거나 자동 삭제하지 않는다.
+
+dry-run은 공개용 일반 문구로 치환한 제목 수를 `replaced=N/전체PR수`로 출력하고 plan에 저장한다. 치환이 많으면 `--notes-file`로 사용자에게 의미 있는 공개 노트를 작성·고정하고 확인한다.
+
+대시보드 하단 버전·이후 커밋 수·SHA는 `/api/version`이 **서버 시작 시점**의 `git describe --tags --match 'v[0-9]*' --long`과 Git HEAD에서 읽는다. 예: `v0.7.0 +12 · abc1234`. 유효한 릴리스 태그를 찾을 수 없을 때만 package.json 버전을 사용한다. 머지·태그·파일 변경만으로 이미 실행 중인 서버의 표시가 바뀌지 않으며 재시작이 필요하다. 배포·재시작 승인은 게시 승인과 별개다.
 
 시험: `bun test scripts/release-plan.test.ts scripts/release-cut.test.ts scripts/release-publish.test.ts src/server/routes/version.test.ts src/web/components/RunningVersion.test.ts`.
 
