@@ -98,7 +98,8 @@ describe("발신 — b3chat 은 순수 텍스트 한 번, 텔레그램은 Markdo
     expect(id).toBe(9);
     expect(calls.length).toBe(1);
     expect(calls[0]!.url).toBe("http://127.0.0.1:8741/botT/sendMessage");
-    expect(calls[0]!.body).toEqual({ chat_id: 2, text: "a.b (c)" });
+    expect(calls[0]!.body).toMatchObject({ chat_id: 2, text: "a.b (c)" });
+    expect(String(calls[0]!.body.cogs_idempotency_key)).toMatch(/^codex:/);
   });
 
   test("b3chat editMessageText: parse_mode 없이 한 번", async () => {

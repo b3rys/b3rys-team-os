@@ -61,3 +61,33 @@ export function cogsActivityLine(item: unknown): string {
   if (type === "mcpToolCall") return activityLine("도구", safeText(String(it.name ?? "").split("__").pop() ?? ""));
   return "도구";
 }
+
+/** Activity codes describe observed tools; receipt/status notes have no tool code. */
+export function cogsActivityCode(item: unknown): string | undefined {
+  const it = (item ?? {}) as Record<string, any>;
+  if (it.type === "webSearch" || it.type === "web_search") {
+    return it.action?.type === "openPage" || it.action?.url || it.url ? "fetch_web" : "search";
+  }
+  if (it.type === "fileChange" || it.changes || it.fileChanges) {
+    const paths = (it.changes ?? []).map((c: any) => c.path ?? "").concat(Object.keys(it.fileChanges ?? {}));
+    if (paths.length && paths.every((p: string) => /\.(md|txt|rst|adoc)$/i.test(p))) return "writing";
+    if (paths.some((p: string) => /\.(swift|go|py|js|jsx|ts|tsx|rs|java|c|h|cpp|html|css|sh)$/i.test(p))) return "code_edit";
+    return "edit_files";
+  }
+  const command = it.command ?? it.cmd;
+  if (command) {
+    const line = commandLine(Array.isArray(command) ? command.join(" ") : String(command));
+    if (line.startsWith("읽기")) return "read_files";
+    return /\b(test|pytest|vitest|jest)\b/.test(line) ? "run_tests" : "run_command";
+  }
+  if (it.type === "mcpToolCall") {
+    const name = String(it.name ?? it.tool ?? "");
+    if (/update_plan|create_plan/.test(name)) return "plan";
+    if (/apply_patch|edit_file/.test(name)) return "code_edit";
+    if (/web|browse|fetch/.test(name)) return "fetch_web";
+    if (/test/.test(name)) return "run_tests";
+    if (/write/.test(name)) return "writing";
+    return "run_command";
+  }
+  return undefined;
+}

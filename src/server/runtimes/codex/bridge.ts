@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { preserveAnswer } from "./answerText";
 import { modelLine } from "../../lib/b3chatModels";
 /**
  * codex runtime — 채널 I/O 브리지 (M2).
@@ -35,7 +37,7 @@ import type { PermissionContext } from "../../lib/permissionGate";
 import { codexRuntimePreflight, codexConfiguredGrants } from "./permissions";
 import { appendLine, renderBubble, fits, EDIT_MIN_INTERVAL_MS, type ProgressLine } from "./progressLines";
 
-import { cogsActivityLine } from "./cogsActivity";
+import { cogsActivityCode, cogsActivityLine } from "./cogsActivity";
 
 export interface BridgeDeps {
   /** 이 팀원의 채널(시험 주입). 없으면 런처가 넣은 env(CODEX_CHANNEL_KIND·TELEGRAM_API_BASE)에서 읽는다. */
@@ -43,9 +45,9 @@ export interface BridgeDeps {
   /** codex 한 턴 구동(기본 runCodexTurn — 테스트 mock). */
   runTurn?: (opts: CodexTurnOptions) => Promise<CodexTurnResult>;
   /** 텔레그램 발신 → 보낸 message_id 반환(작업중 메시지 교체용). */
-  sendMessage?: (chatId: number, text: string, response?: { state: string; replyTo?: number; activity?: string }) => Promise<number | null>;
+  sendMessage?: (chatId: number, text: string, response?: { state: string; replyTo?: number; activity?: string; activityCode?: string; idempotencyKey?: string }) => Promise<number | null>;
   /** 텔레그램 메시지 편집(작업중 → 답). */
-  editMessage?: (chatId: number, messageId: number, text: string, responseState?: string, activity?: string) => Promise<boolean>;
+  editMessage?: (chatId: number, messageId: number, text: string, responseState?: string, activity?: string, activityCode?: string) => Promise<boolean>;
   /** 텔레그램 리액션(👀 ack). */
   reactMessage?: (chatId: number, messageId: number, emoji: string) => Promise<boolean>;
   /** 팀원 정체성 격리 루트(CODEX_HOME). */
@@ -145,6 +147,8 @@ export interface IncomingRouteDeps {
   enqueue: (run: () => Promise<void>) => void;
   runTurnFor: () => Promise<void>;
   react?: () => void;
+  receive?: () => Promise<number | null>;
+  onSteered?: (receipt: Promise<number | null>) => Promise<void>;
 }
 
 export type IncomingRoute = "steered" | "newTurn";
@@ -154,6 +158,7 @@ export async function routeIncoming(
   text: string,
   d: IncomingRouteDeps,
 ): Promise<IncomingRoute> {
+  const receipt = d.receive?.(); // Start before steer or the serial queue can block.
   if (d.isRunning(chatId)) {
     d.react?.();
     // ★던져도 말을 잃지 않는다★ — 연결이 끊기면 steer 는 성공/실패가 아니라 예외로 끝난다.
@@ -164,6 +169,7 @@ export async function routeIncoming(
     });
     if (injected) {
       d.note(`받음: ${text}`);
+      if (receipt) await d.onSteered?.(receipt);
       return "steered";
     }
     // ★번호가 아직 없어 못 넣었다 — 여기서 멈추면 그 말은 아무 데도 안 간다.★
@@ -652,6 +658,7 @@ export async function handleMessage(
    *   b3chat 은 방 id 가 양수라 "음수 = 그룹" 이 안 맞는다. 안 넘기면 예전 판정(chatId<0).
    */
   isGroup?: boolean,
+  receipt?: Promise<number | null>,
 ): Promise<{ ok: boolean; turnOk: boolean; reply: string; detail: string }> {
   // ★브리지도 app-server 로 간다.★
   //   전에는 브리지만 옛 exec 경로였다 — 그래서 ★사람이 직접 말 거는 길에만★ 그때까지의 개선
@@ -741,7 +748,7 @@ export async function handleMessage(
 
   // ② "작업 중…" 동적 메시지(codex 턴이 수초~수분이라 진행 표시) — message_id 확보해 나중에 교체.
   const isCogs = channel.kind === "b3chat";
-  const workingMsgId = await send(chatId, isCogs ? "받았어요" : workingText, isCogs ? { state: "waiting", replyTo: messageId } : undefined);
+  const workingMsgId = receipt ? await receipt : await send(chatId, isCogs ? "받았어요" : workingText, isCogs ? { state: "waiting", replyTo: messageId } : undefined);
 
   // ③ 두뇌 호출(채팅별 thread resume로 맥락 유지)
   //   ★인메모리 지도가 비어 있으면 저장된 것을 본다★ — 그 지도는 재시작마다 비고,
@@ -791,7 +798,7 @@ export async function handleMessage(
   );
   if (preflight) {
     const errText = toMarkdownV2("⚠️ 권한 게이트가 이 Codex 런타임 실행을 막았습니다. 설정 승인이 필요합니다.");
-    if (workingMsgId !== null) await edit(chatId, workingMsgId, errText);
+    if (workingMsgId !== null) await edit(chatId, workingMsgId, errText, isCogs ? "complete" : undefined);
     else await send(chatId, errText, isCogs ? { state: "complete", replyTo: messageId } : undefined);
     return { ok: false, turnOk: false, reply: "", detail: `permission_${preflight.tier}:${preflight.rule}` };
   }
@@ -800,13 +807,14 @@ export async function handleMessage(
   //   자르기·넘김 기준은 hermes 실구현 값을 쓴다. 편집 간격만 2초다(제품 결정: 2026-08-18 · progressLines.ts 주석).
   let bubbleId = workingMsgId;          // 지금 고쳐 쓰는 메시지
   let lines: ProgressLine[] = [];       // 그 메시지에 담긴 줄
-  let lastEditAt = isCogs ? Date.now() : 0;                   // 마지막 편집 시각
+  let lastEditAt = 0;                   // 마지막 편집 시각
   let editTimer: ReturnType<typeof setTimeout> | null = null;
   let editing = false;                  // 편집 진행 중이면 다음 것을 겹쳐 치지 않는다
   let dirty = false;                    // 아직 화면에 안 나간 줄이 있나
   let inFlightEdit: Promise<void> | null = null; // 지금 날아가 있는 편집(답을 쓰기 전에 기다린다)
 
   let cogsActivity = "";
+  let activityCode: string | undefined;
   let cogsBody = "";
   let cogsState = "waiting";
   const flush = async (): Promise<void> => {
@@ -823,10 +831,10 @@ export async function handleMessage(
     const responseState = isCogs ? cogsState : undefined;
     const activity = isCogs ? cogsActivity : undefined;
     const work = (async () => {
-      const ok = await edit(chatId, bubbleId as number, text, responseState, activity);
+      const ok = await edit(chatId, bubbleId as number, text, responseState, activity, activityCode);
       if (!ok) {
         // ★편집이 안 되면 그 버블은 그대로 두고 새 버블을 연다.★ 이미 보낸 줄을 지우지 않는다.
-        const fresh = await send(chatId, text, isCogs ? { state: responseState!, replyTo: messageId, activity } : undefined);
+        const fresh = await send(chatId, text, isCogs ? { state: responseState!, replyTo: messageId, activity, activityCode } : undefined);
         if (fresh !== null) bubbleId = fresh;
         else bubbleId = null; // 보내기까지 막히면 진행 표시를 포기한다(턴은 계속 간다)
       }
@@ -845,6 +853,7 @@ export async function handleMessage(
 
   const schedule = (): void => {
     if (editTimer !== null || bubbleId === null) return;
+    if (isCogs && lastEditAt === 0) { void flush(); return; }
     const wait = Math.max(0, (isCogs ? 400 : EDIT_MIN_INTERVAL_MS) - (Date.now() - lastEditAt));
     editTimer = setTimeout(() => {
       editTimer = null;
@@ -856,7 +865,7 @@ export async function handleMessage(
   let headLine = isCogs ? "받았어요" : workingText;
   const onStatus = (line: string): void => {
     if (bubbleId === null || line === headLine || (isCogs && (cogsBody || cogsState === "activity"))) return;
-    if (isCogs) cogsState = line.includes("생각") ? "thinking" : "waiting";
+    if (isCogs) return; // Keep receipt/waiting until an actual tool or answer arrives.
     headLine = line;
     dirty = true;
     schedule();
@@ -865,6 +874,9 @@ export async function handleMessage(
   const onActivity = (line: string, itemId?: string, item?: unknown): void => {
     if (bubbleId === null) return;
     if (isCogs) {
+      const code = cogsActivityCode(item);
+      if (!code) return;
+      activityCode = code;
       cogsActivity = cogsActivityLine(item);
       headLine = cogsActivity;
       cogsState = cogsBody ? "streaming" : "activity";
@@ -968,7 +980,7 @@ export async function handleMessage(
     }
     const notice = "⚠️ 일시적으로 응답을 만들지 못했어요. 잠시 후 다시 시도해 주세요.";
     const suffix = "\n\n" + notice;
-    const partial = isCogs ? (cogsBody || result.reply) : "";
+    const partial = isCogs ? preserveAnswer(cogsBody, result.reply) : "";
     const errText = toMarkdownV2(partial ? Array.from(partial).slice(0,4096-Array.from(suffix).length).join("") + suffix : notice);
     // ★마지막 버블에 쓴다★ — 넘김이 일어났으면 첫 버블에 쓸 경우 오류가 진행 줄 위로 올라간다.
     if (bubbleId !== null) await edit(chatId, bubbleId, errText, isCogs ? "complete" : undefined);
@@ -994,6 +1006,7 @@ export async function handleMessage(
   //   ★모델이 쓴 Markdown 을 텔레그램 표기로 옮긴다★ — 원문 그대로 보내면 별표·백틱이 글자로 보인다.
   //   길이는 ★변환 뒤 UTF-16 기준★ 으로 나눈다. 이스케이프가 붙으면서 늘어나기 때문에
   //   원문이 한도 이하여도 변환 후 넘을 수 있다.
+  if (isCogs) reply = preserveAnswer(cogsBody, reply);
   const parts = splitForTelegram(toMarkdownV2(reply));
   let delivered = false;
   const first = parts[0] as string;
@@ -1004,7 +1017,7 @@ export async function handleMessage(
   }
   // 남은 조각은 이어서 보낸다 — 자르지 않는다.
   for (const rest of parts.slice(1)) {
-    const id = await send(chatId, rest);
+    const id = await send(chatId, rest, isCogs ? { state: "complete", replyTo: messageId } : undefined);
     if (id === null) { delivered = false; break; }
   }
   // ★`ok` 와 `turnOk` 는 다른 질문에 답한다★ (리뷰 지적 — 한 이름에 두 뜻이 들어 있었다).
@@ -1031,7 +1044,26 @@ const PLAIN_ONLY = channelFromEnv().kind === "b3chat";
  * 주입 없이는 시험에서 한 번도 실행되지 않는다. 정말 필요한 순간에 처음 돌면 거기서 또 틀려도
  * 알 방법이 없고, 그 결과가 ★답이 통째로 사라짐★ — 이 코드가 막으려던 바로 그 상황이다.
  */
-export function tgSend(token: string, fetchFn: typeof fetch = fetch, opts: { apiBase?: string; plainOnly?: boolean } = {}): NonNullable<BridgeDeps["sendMessage"]> {
+/** Receipt send is bounded even if a supplied transport never settles. Retries reuse one key. */
+export async function sendCogsReceipt(
+  chatId: number, messageId: number | undefined, send: NonNullable<BridgeDeps["sendMessage"]>, timeoutMs = 6000,
+): Promise<number | null> {
+  const idempotencyKey = `codex:receipt:${chatId}:${messageId ?? randomUUID()}`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const id = await Promise.race([
+        send(chatId, "받았어요", { state: "waiting", replyTo: messageId, idempotencyKey }),
+        new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), timeoutMs); }),
+      ]);
+      if (id !== null) return id;
+    } catch { /* Keep receipt failure out of the turn queue. */ }
+    finally { clearTimeout(timer); }
+  }
+  return null;
+}
+
+export function tgSend(token: string, fetchFn: typeof fetch = fetch, opts: { apiBase?: string; plainOnly?: boolean; timeoutMs?: number } = {}): NonNullable<BridgeDeps["sendMessage"]> {
   const apiBase = opts.apiBase ?? TG_API;
   const plainOnly = opts.plainOnly ?? PLAIN_ONLY;
   let lastReason = "";
@@ -1040,6 +1072,7 @@ export function tgSend(token: string, fetchFn: typeof fetch = fetch, opts: { api
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: plainOnly ? AbortSignal.timeout(opts.timeoutMs ?? 2500) : undefined,
     });
     const j = (await res.json()) as { ok?: boolean; result?: { message_id?: number }; description?: string; error_code?: number; parameters?: { retry_after?: number } };
     if (j.ok && j.result?.message_id != null) return j.result.message_id;
@@ -1049,9 +1082,20 @@ export function tgSend(token: string, fetchFn: typeof fetch = fetch, opts: { api
   return async (chatId, text, response) => {
     try {
       if (plainOnly) {
-        const id = await post({ chat_id: chatId, text: toPlain(text), ...(response ? { cogs_response_state: response.state, reply_to_message_id: response.replyTo, ...(response.activity !== undefined ? { cogs_activity: response.activity } : {}) } : {}) });
-        if (id === null) console.warn(`[codex-bridge] ★전송 실패 — 이 답은 안 나간다★: ${lastReason}`);
-        return id;
+        const body = { chat_id: chatId, text: toPlain(text),
+          cogs_idempotency_key: response?.idempotencyKey ?? `codex:${chatId}:${randomUUID()}`,
+          ...(response ? { cogs_response_state: response.state, reply_to_message_id: response.replyTo,
+            ...(response.activity !== undefined ? { cogs_activity: response.activity } : {}),
+            ...(response.activityCode ? { cogs_activity_code: response.activityCode } : {}) } : {}) };
+        // A retry reuses the intent key even when the first response was lost after storage.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const id = await post(body);
+            if (id !== null) return id;
+          } catch { /* Retry the same send intent once. */ }
+        }
+        console.warn(`[codex-bridge] 전송 실패: ${lastReason}`);
+        return null;
       }
       const id = await post({ chat_id: chatId, text, parse_mode: "MarkdownV2" });
       if (id !== null) return id;
@@ -1105,17 +1149,17 @@ export function tgEdit(token: string, fetchFn: typeof fetch = fetch, opts: { api
     const j = (await res.json()) as { ok?: boolean; description?: string; error_code?: number; parameters?: { retry_after?: number } };
     return j.ok === true ? { ok: true, reason: "" } : { ok: false, reason: tgFailureReason(j) };
   };
-  return async (chatId, messageId, text, responseState, activity) => {
+  return async (chatId, messageId, text, responseState, activity, activityCode) => {
     try {
       if (plainOnly) {
-        const only = await post({ chat_id: chatId, message_id: messageId, text: toPlain(text), ...(responseState ? { cogs_response_state: responseState, cogs_activity: activity ?? "" } : {}) });
+        const only = await post({ chat_id: chatId, message_id: messageId, text: toPlain(text), ...(responseState ? { cogs_response_state: responseState, cogs_activity: activity ?? "", ...(activityCode ? { cogs_activity_code: activityCode } : {}) } : {}) });
         if (!only.ok) console.warn(`[codex-bridge] ★편집 실패 → 새 버블로 갈라진다★: ${only.reason}`);
         return only.ok;
       }
       const first = await post({ chat_id: chatId, message_id: messageId, text, parse_mode: "MarkdownV2" });
       if (first.ok) return true;
       console.warn(`[codex-bridge] 1차 편집 실패(MarkdownV2) → 순수 텍스트로 재전송: ${first.reason}`);
-      const second = await post({ chat_id: chatId, message_id: messageId, text: toPlain(text), ...(responseState ? { cogs_response_state: responseState, cogs_activity: activity ?? "" } : {}) });
+      const second = await post({ chat_id: chatId, message_id: messageId, text: toPlain(text), ...(responseState ? { cogs_response_state: responseState, cogs_activity: activity ?? "", ...(activityCode ? { cogs_activity_code: activityCode } : {}) } : {}) });
       // ★둘 다 막히면 여기서 새 버블이 열린다★ — 화면이 갈라지는 그 순간이라 반드시 남긴다.
       if (!second.ok) console.warn(`[codex-bridge] ★2차 편집도 실패 → 새 버블로 갈라진다★: ${second.reason}`);
       return second.ok;
@@ -1367,6 +1411,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
   const liveWorkspaceRoot = workdir ?? process.env.CODEX_WORKDIR ?? "";
   const live: BridgeDeps = {
     ...deps,
+    channel: deps.channel ?? channelFromEnv(),
     workdir,
     codexHome,
     sandbox: liveSandbox,
@@ -1521,7 +1566,13 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         //   turn/steer 는 turnId 를 요구하므로 ★막 시작해 번호가 아직 없으면 실패★ 한다. 그때는 아래로 내려가
         //   지금처럼 새 턴이 된다 — 실패를 조용히 삼키지 않는다.
         // ★루프는 여기서도 기다리지 않는다★ — 기다리면 승인 버튼이 다시 막힌다.
+        let receipt: Promise<number | null> | undefined;
         void routeIncoming(chatId, text, {
+          receive: live.channel?.kind === "b3chat" ? () => (receipt = sendCogsReceipt(chatId, messageId, live.sendMessage!)) : undefined,
+          onSteered: async p => {
+            const id = await p;
+            if (id !== null) await live.editMessage?.(chatId, id, "진행 중 작업에 전달했어요", "complete");
+          },
           isRunning: isTurnRunningFor,
           // ★도중에 붙인 그림도 그 작업 안으로 넣는다.★ 여기서 내려받아도 폴 루프는 안 막힌다 —
           //   위에서 routeIncoming 을 기다리지 않기 때문이다(await 를 붙이면 승인 버튼이 다시 막힌다).
@@ -1538,7 +1589,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
           runTurnFor: async () => {
             const r = await handleMessage(chatId, text, messageId, live, hasMedia && msg
               ? () => downloadDmAttachmentsSafe(token, msg)
-              : undefined, "poll", isGroupChat(msg?.chat));
+              : undefined, "poll", isGroupChat(msg?.chat), receipt);
             console.log(`[codex-bridge] → ${r.detail}: ${r.reply.slice(0, 60)}`);
           },
           react: () => { if (messageId !== undefined) void live.reactMessage?.(chatId, messageId, "👀"); },
