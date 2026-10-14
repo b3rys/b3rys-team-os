@@ -3,7 +3,7 @@
 #   공개 repo(코드)엔 없는 팀 고유 상태만 묶는다: ①트리 gitignored(.env·agents.json·team.db·var·slack-tokens·rules상태)
 #   ②멤버 워크스페이스 persona/MEMORY ③~/.claude/channels(페어링) ④~/.hermes/profiles 의 auth(대용량 state/캐시 제외) ⑤launchd.
 #   ★재생성 가능한 대용량(hermes state.db·snapshots·audio_cache·backups·node_modules)은 제외★ → 스냅샷 슬림.
-#   → gzip tarball → iCloud Documents/b3os-live/ (암호화 없음) + GFS 로테이션(7일/4주/3개월).
+#   → gzip tarball → iCloud Documents/b3os-live/ (암호화 없음) + GFS 로테이션(기본 7일/4주/3개월, env 로 조정).
 # 사용: bash scripts/snapshot-team.sh   (env: B3OS_LIVE_DIR · B3OS_SNAPSHOT_DEST)
 set -euo pipefail
 
@@ -143,25 +143,31 @@ tar -czf "$OUT" -C "$(dirname "$STAGE")" "b3os-snapshot-$STAMP"
 rm -rf "$(dirname "$STAGE")"
 say "  ✓ $(du -h "$OUT"|cut -f1)"
 
-# GFS 로테이션 — 최근 7개 · 주 4개 · 월 3개 (하루 한 번 돌면 '7일' 과 같다)
+# GFS 로테이션 — 기본 최근 7개 · 주 4개 · 월 3개 (하루 한 번 돌면 '7일' 과 같다)
+#   개수는 env 로 바꾼다: B3OS_SNAPSHOT_KEEP_DAILY · _WEEKLY · _MONTHLY (주·월은 0 이면 쓰지 않는다).
+#   하루 10GB 안팎이면 기본값은 100GB 넘게 쌓인다 — 디스크가 작은 기기는 주·월을 0 으로.
 # ★bash 3.2 에서도 돌아야 한다★ — macOS 기본 셸이 3.2 이고, launchd 는 최소 PATH 라
 #   `env bash` 가 그쪽으로 잡힌다. mapfile·declare -A(bash 4)를 쓰면 그 자리에서 깨진다.
 cd "$DEST"
 ALL="$(ls -1 b3os-snapshot-*.tar.gz 2>/dev/null | sort -r || true)"
 KEEP=""
 keep(){ case " $KEEP " in *" $1 "*) ;; *) KEEP="$KEEP $1" ;; esac; }
-i=0; for f in $ALL; do [ $i -lt 7 ] && keep "$f"; i=$((i+1)); done
+KD="${B3OS_SNAPSHOT_KEEP_DAILY:-7}"; KW="${B3OS_SNAPSHOT_KEEP_WEEKLY:-4}"; KM="${B3OS_SNAPSHOT_KEEP_MONTHLY:-3}"
+case "$KD$KW$KM" in ''|*[!0-9]*) warn "  보관 개수가 숫자가 아니다($KD/$KW/$KM) — 기본값 7/4/3"; KD=7; KW=4; KM=3 ;; esac
+# 방금 뜬 것까지 지우는 일이 없게 최근 개수는 1 이상.
+[ "$KD" -ge 1 ] || KD=1
+i=0; for f in $ALL; do [ $i -lt "$KD" ] && keep "$f"; i=$((i+1)); done
 seen=""; n=0
-for f in $ALL; do
+[ "$KW" -gt 0 ] && for f in $ALL; do
   d="$(echo "$f" | grep -oE '[0-9]{8}' | head -1 || true)"; [ -z "$d" ] && continue
   k="w$(date -j -f '%Y%m%d' "$d" '+%G-W%V' 2>/dev/null || echo "$d")"
-  case " $seen " in *" $k "*) ;; *) seen="$seen $k"; keep "$f"; n=$((n+1)); [ $n -ge 4 ] && break ;; esac
+  case " $seen " in *" $k "*) ;; *) seen="$seen $k"; keep "$f"; n=$((n+1)); [ $n -ge "$KW" ] && break ;; esac
 done
 seen=""; n=0
-for f in $ALL; do
+[ "$KM" -gt 0 ] && for f in $ALL; do
   d="$(echo "$f" | grep -oE '[0-9]{8}' | head -1 || true)"; [ -z "$d" ] && continue
   k="m$(echo "$d" | cut -c1-6)"
-  case " $seen " in *" $k "*) ;; *) seen="$seen $k"; keep "$f"; n=$((n+1)); [ $n -ge 3 ] && break ;; esac
+  case " $seen " in *" $k "*) ;; *) seen="$seen $k"; keep "$f"; n=$((n+1)); [ $n -ge "$KM" ] && break ;; esac
 done
 for f in $ALL; do
   case " $KEEP " in *" $f "*) ;; *) rm -f "$f"; warn "  삭제(로테이션): $f" ;; esac
