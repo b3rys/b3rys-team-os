@@ -18,8 +18,12 @@ their removal. Other reactions wait in memory for the next input in the same
 conversation. These deferred entries do not survive a bridge restart.
 A running turn receives reaction instructions directly, without a receipt bubble
 or the normal message instruction to reply. If steer fails, the serial queue
-starts a turn instead. Deferred reactions are removed after successful steer;
-failed steer preserves them for the queued turn.
+starts a turn instead. Both new turns and steer reserve individual deferred entries before sending.
+A successful delivery commits that reservation; a failed delivery restores only
+the reserved entries in original order. Concurrent arrivals remain available.
+The bridge captures the active client and turn ID before attachment/queue delays
+and checks the original conversation and captured turn again at actual send.
+A changed destination returns false and queues the input in its original room.
 
 Master OK additions carry `승인=예`; other OKs and removals carry `승인=아니오`.
 The input instructs the model to act on one approved proposal, ask which proposal
@@ -55,3 +59,12 @@ Fault injection: force every reaction to wake (five focused tests fail), or
 force ordinary human OK to carry approval (one focused test fails). Restore the
 source before the normal verification run. Rollback is a revert of this PR's
 commit; there is no database migration.
+
+## Delivery boundary regressions
+
+`reactionInput.boundary.test.ts` covers delayed steer after a room change, a later
+turn on the same client in the same room, replacement clients, delayed ordinary
+input with attachments, concurrent new-turn/steer claims, independent arrivals,
+rollback ordering/idempotence and new-turn failure. The baseline boundary suite
+has nine passing tests. Removing the send-time room check fails one test;
+disabling reservation fails three tests. Restoring both fixes passes all nine.

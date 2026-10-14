@@ -44,7 +44,9 @@ export function reactionInputs(r: ReactionUpdate, target: string, master: boolea
 
 /** Each bridge has one inbox. Deferred reactions stay in their original conversation. */
 export function createReactionInbox() {
-  const pending = new Map<number, string[]>();
+  type Entry = { id: number; text: string };
+  const pending = new Map<number, Entry[]>();
+  let nextEntryId = 0;
   const steering = new Map<number, Promise<void>>();
   let lastUpdateId = -1;
   return {
@@ -56,29 +58,45 @@ export function createReactionInbox() {
       const inputs = reactionInputs(r, r.cogs_message_text, r.cogs_reactor_is_master);
       const wake = inputs.filter(x => x.wake).map(x => x.text);
       const quiet = inputs.filter(x => !x.wake).map(x => x.text);
-      if (quiet.length) pending.set(r.chat.id, [...(pending.get(r.chat.id) ?? []), ...quiet]);
+      if (quiet.length) pending.set(r.chat.id, [...(pending.get(r.chat.id) ?? []), ...quiet.map(text => ({ id: ++nextEntryId, text }))]);
       return wake.length ? `${REACTION_INSTRUCTIONS}\n${wake.join('\n')}` : null;
     },
     preview(chatId: number, text: string): string {
       const rows = pending.get(chatId);
       if (!rows?.length) return text;
-      return `${REACTION_INSTRUCTIONS}\n${rows.join('\n')}\n\n${text}`;
+      return `${REACTION_INSTRUCTIONS}\n${rows.map(row => row.text).join('\n')}\n\n${text}`;
+    },
+    claim(chatId: number, text: string) {
+      const rows = pending.get(chatId) ?? [];
+      pending.delete(chatId); // Reserved entries cannot be consumed by another input.
+      let settled = false;
+      return {
+        text: rows.length ? `${REACTION_INSTRUCTIONS}\n${rows.map(row => row.text).join('\n')}\n\n${text}` : text,
+        commit() { settled = true; },
+        rollback() {
+          if (settled) return;
+          settled = true;
+          if (rows.length) pending.set(chatId, [...rows, ...(pending.get(chatId) ?? [])].sort((a, b) => a.id - b.id));
+        },
+      };
     },
     prepend(chatId: number, text: string): string {
-      const body = this.preview(chatId, text);
-      pending.delete(chatId);
-      return body;
+      const claim = this.claim(chatId, text);
+      claim.commit();
+      return claim.text;
     },
     async steer(chatId: number, text: string, send: (body: string) => Promise<boolean>): Promise<boolean> {
       // Only one steer may claim a conversation's deferred prefix at a time.
       const task = (steering.get(chatId) ?? Promise.resolve()).then(async () => {
-        const rows = pending.get(chatId);
-        const sent = await send(this.preview(chatId, text));
-        if (sent && rows) {
-          const remaining = (pending.get(chatId) ?? []).slice(rows.length);
-          if (remaining.length) pending.set(chatId, remaining); else pending.delete(chatId);
+        const claim = this.claim(chatId, text);
+        try {
+          const sent = await send(claim.text);
+          if (sent) claim.commit(); else claim.rollback();
+          return sent;
+        } catch (error) {
+          claim.rollback();
+          throw error;
         }
-        return sent;
       });
       const settled = task.then(() => {}, () => {});
       steering.set(chatId, settled);

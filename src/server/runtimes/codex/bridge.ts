@@ -25,7 +25,7 @@ import { startBridgeWindow, groupTurnCall } from "./bridgeWindow";
 import { makeChatSessionStore, NOOP_DM_SESSION_STORE, type DmSessionStore } from "./dmSessionStore";
 import { toMarkdownV2, splitForTelegram, toPlain } from "./telegramMarkdown";
 import { assertChannelUsable, channelFromEnv, isGroupChat, type MemberChannel } from "../../lib/memberChannel";
-import { steerActiveTurn } from "./activeTurns";
+import { captureActiveTurnSteer } from "./activeTurns";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -152,6 +152,7 @@ export interface IncomingRouteDeps {
   receive?: () => Promise<number | null>;
   onSteered?: (receipt: Promise<number | null>) => Promise<void>;
   steerText?: (text: string) => string;
+  captureSteer?: () => ((text: string) => Promise<boolean>) | null;
 }
 
 export type IncomingRoute = "steered" | "newTurn";
@@ -166,7 +167,8 @@ export async function routeIncoming(
     d.react?.();
     // ★던져도 말을 잃지 않는다★ — 연결이 끊기면 steer 는 성공/실패가 아니라 예외로 끝난다.
     //   그때 그냥 올려보내면 이 말은 새 작업으로도 안 가고 사라진다.
-    const injected = await d.steer((d.steerText ?? buildDmSteerText)(text)).catch((e) => {
+    const steer = d.captureSteer ? d.captureSteer() : d.steer;
+    const injected = steer && await steer((d.steerText ?? buildDmSteerText)(text)).catch((e) => {
       console.warn(`[codex-bridge] 전달 중 오류 → 새 작업으로: ${String(e)}`);
       return false;
     });
@@ -179,6 +181,22 @@ export async function routeIncoming(
   }
   d.enqueue(d.runTurnFor);
   return "newTurn";
+}
+
+/** Capture the destination before delays, then recheck the conversation at actual send. */
+export function captureConversationSteer(chatId: number, d: {
+  isRunning: (chatId: number) => boolean;
+  captureSend: () => ((text: string, imagePaths?: readonly string[]) => Promise<boolean>) | null;
+  inbox: ReactionInbox;
+  fetchAttachments?: (() => Promise<DmAttachments>) | null;
+}): ((text: string) => Promise<boolean>) | null {
+  const send = d.captureSend();
+  if (!send) return null;
+  return text => steerWithAttachments(text, {
+    fetchAttachments: d.fetchAttachments ?? null,
+    steer: (body, images) => d.inbox.steer(chatId, body,
+      text => d.isRunning(chatId) ? send(text, images) : Promise.resolve(false)),
+  });
 }
 
 /** Reactions use the existing serial queue/steer path without a receipt bubble. */
@@ -194,7 +212,11 @@ export async function routeReactionUpdate(
     runTurnFor: () => d.runTurn(input),
     receive: undefined, onSteered: undefined, react: undefined,
     steerText: text => text,
-    steer: text => d.inbox.steer(reaction.chat.id, text, d.route.steer),
+    captureSteer: () => captureConversationSteer(reaction.chat.id, {
+      isRunning: d.route.isRunning,
+      captureSend: () => d.route.captureSteer ? d.route.captureSteer() : d.route.steer,
+      inbox: d.inbox,
+    }),
   });
 }
 
@@ -788,7 +810,8 @@ export async function handleMessage(
     prior = sessions.get(chatId);
     if (prior !== undefined) chatThreads.set(chatId, prior); // 다음 턴부터는 메모리에서 바로
   }
-  text = deps.reactionInbox?.prepend(chatId, text) ?? text;
+  const reactionClaim = deps.reactionInbox?.claim(chatId, text);
+  text = reactionClaim?.text ?? text;
   const toolAwareText = scheduleRequest
     ? scheduleToolPrompt({
         text,
@@ -826,6 +849,7 @@ export async function handleMessage(
     deps.permissionContext,
   );
   if (preflight) {
+    reactionClaim?.rollback();
     const errText = toMarkdownV2("⚠️ 권한 게이트가 이 Codex 런타임 실행을 막았습니다. 설정 승인이 필요합니다.");
     if (workingMsgId !== null) await edit(chatId, workingMsgId, errText, isCogs ? "complete" : undefined);
     else await send(chatId, errText, isCogs ? { state: "complete", replyTo: messageId } : undefined);
@@ -971,7 +995,9 @@ export async function handleMessage(
       networkAccess: deps.networkAccess,
       writableRoots: deps.workdir ? [deps.workdir] : [],
     });
+    if (result.ok) reactionClaim?.commit(); else reactionClaim?.rollback();
   } catch (error) {
+    reactionClaim?.rollback();
     if (!isCogs) throw error;
     result = {ok:false,reply:"",sessionId:prior,detail:"turn_exception",elapsedMs:0};
   } finally {
@@ -1589,7 +1615,8 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
             channel: live.channel!, allowFrom, ownBotId, inbox: live.reactionInbox!,
             route: {
               isRunning: isTurnRunningFor,
-              steer: text => steerActiveTurn(liveAgentId, text),
+              captureSteer: () => captureActiveTurnSteer(liveAgentId),
+              steer: async () => false,
               note: () => {},
               enqueue: run => turns.enqueue(run),
             },
@@ -1641,10 +1668,13 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
           isRunning: isTurnRunningFor,
           // ★도중에 붙인 그림도 그 작업 안으로 넣는다.★ 여기서 내려받아도 폴 루프는 안 막힌다 —
           //   위에서 routeIncoming 을 기다리지 않기 때문이다(await 를 붙이면 승인 버튼이 다시 막힌다).
-          steer: (t) => steerWithAttachments(t, {
+          captureSteer: () => captureConversationSteer(chatId, {
+            isRunning: isTurnRunningFor,
+            captureSend: () => captureActiveTurnSteer(liveAgentId),
+            inbox: live.reactionInbox!,
             fetchAttachments: hasMedia && msg ? () => downloadDmAttachmentsSafe(token, msg) : null,
-            steer: (body, imagePaths) => live.reactionInbox!.steer(chatId, body, text => steerActiveTurn(liveAgentId, text, imagePaths)),
           }),
+          steer: async () => false,
           note: (line) => {
             // 턴이 방금 끝났으면 통로가 닫혀 있다 — 그때는 남기지 않는다.
             //   ★닫힌 뒤에 남기면 답을 쓴 자리에 진행 줄이 덮인다.★ 유실이 아니라 안전 쪽이다.
