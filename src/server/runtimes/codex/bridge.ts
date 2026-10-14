@@ -1,3 +1,4 @@
+import { createReactionInbox, type ReactionInbox, type ReactionUpdate } from "../../lib/reactionInput";
 import { randomUUID } from "node:crypto";
 import { preserveAnswer } from "./answerText";
 import { modelLine } from "../../lib/b3chatModels";
@@ -5,7 +6,7 @@ import { modelLine } from "../../lib/b3chatModels";
  * codex runtime — 채널 I/O 브리지 (M2).
  *
  * 역할(claude의 per-agent 텔레그램 봇 브리지 대응): codex 팀원의 봇으로 들어온 메시지를
- *   ① 접수 즉시 👀 리액션(TEAM-OS §4) → ② "작업 중…" 동적 메시지(codex 턴이 느리니 진행 표시)
+ *   ① 텔레그램 접수 👀 / cogs 서버 읽음 표시 → ② "작업 중…" 동적 메시지(codex 턴이 느리니 진행 표시)
  *   → ③ runCodexTurn(두뇌) → ④ 작업중 메시지를 답으로 교체(editMessageText)
  * 채널 발신·리액션·진행표시는 *브리지가* 책임지고, 두뇌(codex)는 답 텍스트만 생성한다.
  *
@@ -24,7 +25,7 @@ import { startBridgeWindow, groupTurnCall } from "./bridgeWindow";
 import { makeChatSessionStore, NOOP_DM_SESSION_STORE, type DmSessionStore } from "./dmSessionStore";
 import { toMarkdownV2, splitForTelegram, toPlain } from "./telegramMarkdown";
 import { assertChannelUsable, channelFromEnv, isGroupChat, type MemberChannel } from "../../lib/memberChannel";
-import { steerActiveTurn } from "./activeTurns";
+import { captureActiveTurnSteer } from "./activeTurns";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -42,6 +43,7 @@ import { cogsActivityCode, cogsActivityLine } from "./cogsActivity";
 export interface BridgeDeps {
   /** 이 팀원의 채널(시험 주입). 없으면 런처가 넣은 env(CODEX_CHANNEL_KIND·TELEGRAM_API_BASE)에서 읽는다. */
   channel?: MemberChannel;
+  reactionInbox?: ReactionInbox;
   /** codex 한 턴 구동(기본 runCodexTurn — 테스트 mock). */
   runTurn?: (opts: CodexTurnOptions) => Promise<CodexTurnResult>;
   /** 텔레그램 발신 → 보낸 message_id 반환(작업중 메시지 교체용). */
@@ -149,6 +151,8 @@ export interface IncomingRouteDeps {
   react?: () => void;
   receive?: () => Promise<number | null>;
   onSteered?: (receipt: Promise<number | null>) => Promise<void>;
+  steerText?: (text: string) => string;
+  captureSteer?: () => ((text: string) => Promise<boolean>) | null;
 }
 
 export type IncomingRoute = "steered" | "newTurn";
@@ -163,7 +167,8 @@ export async function routeIncoming(
     d.react?.();
     // ★던져도 말을 잃지 않는다★ — 연결이 끊기면 steer 는 성공/실패가 아니라 예외로 끝난다.
     //   그때 그냥 올려보내면 이 말은 새 작업으로도 안 가고 사라진다.
-    const injected = await d.steer(buildDmSteerText(text)).catch((e) => {
+    const steer = d.captureSteer ? d.captureSteer() : d.steer;
+    const injected = steer && await steer((d.steerText ?? buildDmSteerText)(text)).catch((e) => {
       console.warn(`[codex-bridge] 전달 중 오류 → 새 작업으로: ${String(e)}`);
       return false;
     });
@@ -176,6 +181,47 @@ export async function routeIncoming(
   }
   d.enqueue(d.runTurnFor);
   return "newTurn";
+}
+
+/** Capture the destination before delays, then recheck the conversation at actual send. */
+export function captureConversationSteer(chatId: number, d: {
+  isRunning: (chatId: number) => boolean;
+  captureSend: () => ((text: string, imagePaths?: readonly string[]) => Promise<boolean>) | null;
+  inbox: ReactionInbox;
+  fetchAttachments?: (() => Promise<DmAttachments>) | null;
+}): ((text: string) => Promise<boolean>) | null {
+  const send = d.captureSend();
+  if (!send) return null;
+  return text => steerWithAttachments(text, {
+    fetchAttachments: d.fetchAttachments ?? null,
+    steer: (body, images) => d.inbox.steer(chatId, body,
+      text => d.isRunning(chatId) ? send(text, images) : Promise.resolve(false)),
+  });
+}
+
+/** Reactions use the existing serial queue/steer path without a receipt bubble. */
+export async function routeReactionUpdate(
+  updateId: number, reaction: ReactionUpdate,
+  d: { channel: MemberChannel; allowFrom: Set<number>; ownBotId?: number; inbox: ReactionInbox; route: Omit<IncomingRouteDeps, "runTurnFor">; runTurn: (input: string) => Promise<void> },
+): Promise<IncomingRoute | null> {
+  if (d.channel.kind !== "b3chat" || !isAllowedChat(d.allowFrom, reaction.chat.id)) return null;
+  const input = d.inbox.accept(updateId, reaction, d.ownBotId);
+  if (!input) return null;
+  return routeIncoming(reaction.chat.id, input, {
+    ...d.route,
+    runTurnFor: () => d.runTurn(input),
+    receive: undefined, onSteered: undefined, react: undefined,
+    steerText: text => text,
+    captureSteer: () => captureConversationSteer(reaction.chat.id, {
+      isRunning: d.route.isRunning,
+      captureSend: () => d.route.captureSteer ? d.route.captureSteer() : d.route.steer,
+      inbox: d.inbox,
+    }),
+  });
+}
+
+export function bridgeUpdatesUrl(apiBase: string, token: string, offset: number): string {
+  return `${apiBase}/bot${token}/getUpdates?timeout=30&offset=${offset}&allowed_updates=["message","callback_query","message_reaction"]`;
 }
 
 /** 시험·진단용 — 지금 그 대화의 턴이 도는 중인가. */
@@ -718,8 +764,8 @@ export async function handleMessage(
     }
   }
 
-  // ① 접수 즉시 👀 (TEAM-OS §4 visible ack)
-  if (messageId !== undefined) void react(chatId, messageId, "👀");
+  // Telegram keeps its receipt reaction; cogs uses server-managed read receipts.
+  if (!isCogs && messageId !== undefined) void react(chatId, messageId, "👀");
 
   const scheduleRequest = isOneShotScheduleRequest(text);
 
@@ -764,6 +810,8 @@ export async function handleMessage(
     prior = sessions.get(chatId);
     if (prior !== undefined) chatThreads.set(chatId, prior); // 다음 턴부터는 메모리에서 바로
   }
+  const reactionClaim = deps.reactionInbox?.claim(chatId, text);
+  text = reactionClaim?.text ?? text;
   const toolAwareText = scheduleRequest
     ? scheduleToolPrompt({
         text,
@@ -801,6 +849,7 @@ export async function handleMessage(
     deps.permissionContext,
   );
   if (preflight) {
+    reactionClaim?.rollback();
     const errText = toMarkdownV2("⚠️ 권한 게이트가 이 Codex 런타임 실행을 막았습니다. 설정 승인이 필요합니다.");
     if (workingMsgId !== null) await edit(chatId, workingMsgId, errText, isCogs ? "complete" : undefined);
     else await send(chatId, errText, isCogs ? { state: "complete", replyTo: messageId } : undefined);
@@ -946,7 +995,9 @@ export async function handleMessage(
       networkAccess: deps.networkAccess,
       writableRoots: deps.workdir ? [deps.workdir] : [],
     });
+    if (result.ok) reactionClaim?.commit(); else reactionClaim?.rollback();
   } catch (error) {
+    reactionClaim?.rollback();
     if (!isCogs) throw error;
     result = {ok:false,reply:"",sessionId:prior,detail:"turn_exception",elapsedMs:0};
   } finally {
@@ -1219,6 +1270,7 @@ interface TgUpdate {
     photo?: DmMessageMedia["photo"];
     document?: DmMessageMedia["document"];
   };
+  message_reaction?: ReactionUpdate;
   callback_query?: TgCallbackQuery;
 }
 
@@ -1442,12 +1494,14 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     // ★agentId 를 실어 보낸다★ — 안 실으면 handleMessage 가 같은 식을 다시 계산해,
     //   runBridge({agentId}) 로 부를 때 두 값이 갈린다. 그러면 steer 가 등록 안 된 id 를 찾아 늘 실패한다.
     agentId: liveAgentId,
+    reactionInbox: deps.reactionInbox ?? createReactionInbox(),
     dmSessions: deps.dmSessions ?? makeChatSessionStore(liveAgentId, defaultTeamDbPath()),
     sendMessage: deps.sendMessage ?? tgSend(token),
     editMessage: deps.editMessage ?? tgEdit(token),
     reactMessage: deps.reactMessage ?? tgReact(token),
   };
   let offset = 0;
+  let ownBotId: number | undefined;
   let readyMarked = false;
   const pidFile = process.env.CODEX_BRIDGE_PID_FILE ?? "";
   console.log(`[codex-bridge] 시작(long-poll). workdir=${workdir ?? "(none)"}`);
@@ -1457,7 +1511,8 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
   //   검증이라 '폴링 진입=ready'로 안전. getMe 실패 시엔 아래 getUpdates-후-marker 폴백이 그대로 커버.
   try {
     const me = await fetch(`${TG_API}/bot${token}/getMe`);
-    const mj = (await me.json()) as { ok?: boolean };
+    const mj = (await me.json()) as { ok?: boolean; result?: { id?: number } };
+    if (mj.ok === true && typeof mj.result?.id === "number") ownBotId = mj.result.id;
     if (mj.ok === true && !readyMarked) {
       readyMarked = writeBridgeReadyMarker(pidFile);
       if (readyMarked) console.log(`[codex-bridge] ready marker(getMe): ${pidFile}`);
@@ -1502,7 +1557,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         return;
       }
       const tgMsgId = r.origTgMessageId ? Number(r.origTgMessageId) : undefined;
-      if (tgMsgId !== undefined && Number.isFinite(tgMsgId)) {
+      if (live.channel?.kind !== "b3chat" && tgMsgId !== undefined && Number.isFinite(tgMsgId)) {
         void live.reactMessage?.(chatId, tgMsgId, "👀");
       }
       turns.enqueue(() => runGroupTurn({ deps: live, agentId: liveAgentId, repoRoot: REPO_ROOT, chatId, tgMsgId, req: r }));
@@ -1538,14 +1593,37 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
 
   for (;;) {
     try {
-      const res = await fetch(`${TG_API}/bot${token}/getUpdates?timeout=30&offset=${offset}&allowed_updates=["message","callback_query"]`);
+      // A temporary getMe failure must not permanently disable author verification.
+      if (live.channel?.kind === "b3chat" && ownBotId === undefined) {
+        const me = await fetch(`${TG_API}/bot${token}/getMe`);
+        const identity = await me.json() as { ok?: boolean; result?: { id?: number } };
+        if (identity.ok !== true || typeof identity.result?.id !== "number") throw new Error("reaction author identity unavailable");
+        ownBotId = identity.result.id;
+      }
+      const res = await fetch(bridgeUpdatesUrl(TG_API, token, offset));
       const j = (await res.json()) as { ok?: boolean; result?: TgUpdate[] };
       if (j.ok === true && !readyMarked) {
         readyMarked = writeBridgeReadyMarker(pidFile);
         if (readyMarked) console.log(`[codex-bridge] ready marker: ${pidFile}`);
       }
       for (const u of j.result ?? []) {
+        if (u.update_id < offset) continue;
         offset = u.update_id + 1;
+        if (u.message_reaction) {
+          const reaction = u.message_reaction;
+          void routeReactionUpdate(u.update_id, reaction, {
+            channel: live.channel!, allowFrom, ownBotId, inbox: live.reactionInbox!,
+            route: {
+              isRunning: isTurnRunningFor,
+              captureSteer: () => captureActiveTurnSteer(liveAgentId),
+              steer: async () => false,
+              note: () => {},
+              enqueue: run => turns.enqueue(run),
+            },
+            runTurn: async input => { await handleMessage(reaction.chat.id, input, undefined, live, undefined, "poll", isGroupChat(reaction.chat)); },
+          }).catch(e => console.error("[codex-bridge] reaction route failed:", String(e)));
+          continue;
+        }
         // ★승인 버튼은 이 방에서 처리한다.★ 요청은 서버가 이 봇으로 띄우고, 누르는 것은 여기서 받는다
         //   (getUpdates 는 봇당 한 프로세스만 가능하므로 폴링을 하는 브리지가 콜백도 맡는다).
         // ★콜백 예외가 폴 루프를 죽이면 안 된다★ — 죽으면 그 뒤 메시지도 안 받는다.
@@ -1590,10 +1668,13 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
           isRunning: isTurnRunningFor,
           // ★도중에 붙인 그림도 그 작업 안으로 넣는다.★ 여기서 내려받아도 폴 루프는 안 막힌다 —
           //   위에서 routeIncoming 을 기다리지 않기 때문이다(await 를 붙이면 승인 버튼이 다시 막힌다).
-          steer: (t) => steerWithAttachments(t, {
+          captureSteer: () => captureConversationSteer(chatId, {
+            isRunning: isTurnRunningFor,
+            captureSend: () => captureActiveTurnSteer(liveAgentId),
+            inbox: live.reactionInbox!,
             fetchAttachments: hasMedia && msg ? () => downloadDmAttachmentsSafe(token, msg) : null,
-            steer: (body, imagePaths) => steerActiveTurn(liveAgentId, body, imagePaths),
           }),
+          steer: async () => false,
           note: (line) => {
             // 턴이 방금 끝났으면 통로가 닫혀 있다 — 그때는 남기지 않는다.
             //   ★닫힌 뒤에 남기면 답을 쓴 자리에 진행 줄이 덮인다.★ 유실이 아니라 안전 쪽이다.
@@ -1606,7 +1687,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
               : undefined, "poll", isGroupChat(msg?.chat), receipt);
             console.log(`[codex-bridge] → ${r.detail}: ${r.reply.slice(0, 60)}`);
           },
-          react: () => { if (messageId !== undefined) void live.reactMessage?.(chatId, messageId, "👀"); },
+          react: () => { if (live.channel?.kind !== "b3chat" && messageId !== undefined) void live.reactMessage?.(chatId, messageId, "👀"); },
         }).then((route) => {
           console.log(`[codex-bridge] ↳ ${route === "steered" ? "진행 중 작업에 전달" : "새 작업으로"}: ${text.slice(0, 40)}`);
         });

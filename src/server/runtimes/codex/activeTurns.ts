@@ -51,3 +51,17 @@ export async function steerActiveTurn(
 export function activeTurnAgents(): string[] {
   return [...active.keys()];
 }
+
+/** Pin the registered client and turn ID before any attachment or queue delay. */
+export function captureActiveTurnSteer(agentId: string): ((text: string, imagePaths?: readonly string[]) => Promise<boolean>) | null {
+  const turn = active.get(agentId);
+  const turnId = turn?.currentTurnId;
+  if (!turn || !turnId) return null;
+  return async (text, imagePaths) => {
+    if (active.get(agentId) !== turn || turn.currentTurnId !== turnId) return false;
+    try {
+      await turn.steer(text, imagePaths);
+      return true;
+    } catch { return false; }
+  };
+}
