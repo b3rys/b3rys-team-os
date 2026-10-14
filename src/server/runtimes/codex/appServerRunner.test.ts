@@ -65,3 +65,18 @@ test("partial assistant text is forwarded to the channel before completion", asy
   const result=await runViaAppServer({agentId:"probe",prompt:"p",onDelta:text=>texts.push(text)},undefined,client);
   expect(result.reply).toBe("first second");
 });
+
+test("ordered assistant snapshots are forwarded without converting them to suffixes", async () => {
+  const texts: string[] = [];
+  const client = () => ({
+    currentThreadId: "snapshot-thread", async start() {}, async startThread() { return "snapshot-thread"; },
+    async runTurn(_prompt: string, handlers: { onAnswerText?: (text: string) => void }) {
+      handlers.onAnswerText?.("앞\n\n뒤");
+      handlers.onAnswerText?.("앞 보완\n\n뒤");
+      return { status: "completed", finalText: "앞 보완\n\n뒤", turnId: "snapshot-turn", detail: "" };
+    }, close() {},
+  }) as unknown as import("./appServerClient").CodexAppServerClient;
+  const result = await runViaAppServer({ agentId: "probe", prompt: "p", onAnswerText: text => texts.push(text) }, undefined, client);
+  expect(texts).toEqual(["앞\n\n뒤", "앞 보완\n\n뒤"]);
+  expect(result.reply).toBe("앞 보완\n\n뒤");
+});

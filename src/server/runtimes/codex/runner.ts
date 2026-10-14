@@ -57,6 +57,8 @@ export interface CodexTurnOptions {
   onStatus?: (line: string) => void;
   /** Partial assistant text; reasoning text is never forwarded. */
   onDelta?: (text: string) => void;
+  /** Full ordered assistant text for transports that support replacing the current body. */
+  onAnswerText?: (text: string) => void;
   /**
    * ★사람이 붙인 그림의 로컬 경로.★ 본문에 경로를 적어주는 것과 다르다 —
    * 적어주면 codex 는 파일을 ★바이트로 읽을 뿐★ 이고, 입력 아이템으로 넣어야 ★본다.★

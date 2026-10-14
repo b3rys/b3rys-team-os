@@ -9,6 +9,7 @@
  *
  * ★이 모듈은 순수 프로토콜 클라이언트다 — 팀 버스·텔레그램 배선은 상위(adapter)가 한다.★
  */
+import { TurnAnswerText } from "./answerText";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   classifyServerRequest, isApprovalKind, toInternalDecision, encodeApproval, failSafeNonApproval,
@@ -39,6 +40,8 @@ export type ReviewDecision = "approved" | "approved_for_session" | "denied" | "a
 export interface RunTurnHandlers {
   /** 스트리밍 델타(부분 응답 텍스트). */
   onDelta?: (text: string) => void;
+  /** Full ordered assistant text, including completions of earlier items. */
+  onAnswerText?: (text: string) => void;
   /** 턴 시작 알림(turnId 확보 — interrupt에 필요). */
   onTurnStarted?: (turnId: string) => void;
   /** 승인요청 → decision 반환(비동기). 미지정 시 기본 denied(fail-closed). */
@@ -373,8 +376,7 @@ export class CodexAppServerClient {
     if (!this.threadId) throw new Error("startThread first");
     this.activeHandlers = handlers;
     this.currentTurnId = null;
-    this.lastFinal = "";
-    this.deltaBuf = ""; // ★턴 경계 버퍼 리셋(이전 턴 텍스트 누출 방지)★
+    this.answer.reset(); // ★턴 경계 버퍼 리셋(이전 턴 텍스트 누출 방지)★
     this.approvalWaits = 0; // ★턴 시작 시 승인 대기 ref-count 리셋(이전 턴 누수 방지)★
     // ★S2: 이전 턴의 파일변경 관측을 버린다 — 이전 턴 내용이 이번 턴 승인에 붙으면 사람이 승인한 것과
     //   실행되는 것이 갈린다. (조회 시 turnId 대조가 한 겹 더 막지만, 여기서 먼저 비운다.)★
@@ -393,7 +395,7 @@ export class CodexAppServerClient {
         const quietSec = Math.round((Date.now() - this.lastActivityAtMs) / 1000);
         // ★무엇을 재서 끊었는지 사유에 남긴다★ — 안 남기면 '오래 걸려서 끊겼다' 로 읽힌다(실제와 다르다).
         const why = `idle ${quietSec}s (진행신호 ${this.turnActivityCount}건 뒤 무응답)`;
-        finish({ finalText: this.lastFinal || this.deltaBuf, status: "timeout", turnId: this.currentTurnId, detail: [why, this.rateLimitTail, this.stderrTail ? `stderr: ${this.stderrTail.slice(-400)}` : ""].filter(Boolean).join(" | ") });
+        finish({ finalText: this.answer.text(), status: "timeout", turnId: this.currentTurnId, detail: [why, this.rateLimitTail, this.stderrTail ? `stderr: ${this.stderrTail.slice(-400)}` : ""].filter(Boolean).join(" | ") });
       }, this.turnTimeoutMs);
       this.turnTimer = this.armTurnTimer();
       this.turnResolve = finish;
@@ -435,13 +437,15 @@ export class CodexAppServerClient {
   /** 진행 중 턴을 새 지시로 전환(중간 steer). expectedTurnId 필수(실측). */
   async steer(text: string, imagePaths?: readonly string[]): Promise<void> {
     if (!this.threadId || !this.currentTurnId) throw new Error("no active turn to steer");
-    await this.notify("turn/steer", {
+    const expectedTurnId = this.currentTurnId;
+    const result = await this.request("turn/steer", {
       threadId: this.threadId,
-      expectedTurnId: this.currentTurnId,
+      expectedTurnId,
       // ★중간에 보낸 그림도 봐야 한다★ — 턴 시작과 같은 모양이다. 안 실으면 사람이 도중에 붙인
       //   화면 사진이 글자만 남고 사라진다(그게 이 결함의 원래 모습이었다).
       input: buildTurnInput(text, imagePaths),
-    });
+    }, 10_000);
+    if (result?.turnId !== expectedTurnId) throw new Error("steer response turnId mismatch");
   }
 
   /** 진행 중 턴을 완전 중단(interrupt). */
@@ -467,21 +471,29 @@ export class CodexAppServerClient {
     this.proc.stdin.write(JSON.stringify(obj) + "\n");
   }
   /** 요청(응답 기대). */
-  private request(method: string, params: unknown): Promise<any> {
+  private request(method: string, params: unknown, timeoutMs?: number): Promise<any> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, method });
-      this.send({ id, method, params });
+      const timer = timeoutMs ? setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`${method}: response timeout`));
+      }, timeoutMs) : undefined;
+      this.pending.set(id, {
+        resolve: v => { clearTimeout(timer); resolve(v); },
+        reject: e => { clearTimeout(timer); reject(e); }, method,
+      });
+      try { this.send({ id, method, params }); }
+      catch (e) { this.pending.delete(id); clearTimeout(timer); reject(e); }
     });
   }
-  /** 알림성 호출(turn/start·steer·interrupt): 결과는 notification 스트림으로 오지만, ★에러 응답은 턴 실패로 승격★(견고성 #1). */
+  /** 알림성 호출(turn/start·interrupt): 결과는 notification 스트림으로 오지만, ★에러 응답은 턴 실패로 승격★(견고성 #1). */
   private notify(method: string, params: unknown): Promise<void> {
     const id = this.nextId++;
     // ★견고성 #1 픽스: turn/start의 JSON-RPC 에러 응답(rate limit 등)을 noop으로 버리지 않고 활성 턴을 즉시 실패 종료.★
     this.pending.set(id, {
       resolve: () => {},
       reject: (e: any) => {
-        if (method === "turn/start" || method === "turn/steer") {
+        if (method === "turn/start") {
           this.failActiveTurn("failed", `${method}_error: ${e instanceof Error ? e.message.slice(0, 300) : String(e).slice(0, 300)}`);
         }
       },
@@ -500,9 +512,8 @@ export class CodexAppServerClient {
     if (!r) return;
     this.turnResolve = null;
     this.activeHandlers = null;
-    const text = this.lastFinal || this.deltaBuf; // 부분 델타도 보존(타임아웃 경로와 일관)
-    this.lastFinal = "";
-    this.deltaBuf = "";
+    const text = this.answer.text(); // 부분 델타도 보존(타임아웃 경로와 일관)
+    this.answer.reset();
     r({ finalText: text, status, turnId: this.currentTurnId, detail: `${detail}${this.rateLimitTail ? ` | ${this.rateLimitTail}` : ""}${this.stderrTail ? ` | stderr: ${this.stderrTail.slice(-400)}` : ""}` });
   }
   private respond(id: number | string, result: unknown): void {
@@ -620,10 +631,15 @@ export class CodexAppServerClient {
       }
       case "item/agentMessage/delta": {
         const t = params?.delta ?? params?.text ?? "";
-        if (t) { this.deltaBuf += String(t); this.activeHandlers?.onDelta?.(String(t)); } // ★#4: delta 누적(완결텍스트 빈 경우 폴백)★
+        if (t) {
+          const before = this.answer.text();
+          this.answer.delta(String(t), params?.itemId, params?.phase);
+          this.publishAnswer(before);
+        } // ★#4: delta 누적(완결텍스트 빈 경우 폴백)★
         break;
       }
       case "item/started": {
+        if (params?.item?.type === "agentMessage") this.answer.observe(itemIdOf(params.item), params.item.phase);
         const status = statusLineOf(params?.item);
         if (status) { this.activeHandlers?.onStatus?.(status); break; }
         const line = activityLineOf(params?.item);
@@ -643,7 +659,9 @@ export class CodexAppServerClient {
           }
         }
         if (params?.item?.type === "agentMessage" && typeof params.item.text === "string") {
-          this.lastFinal = params.item.text;
+          const before = this.answer.text();
+          this.answer.complete(params.item.text, itemIdOf(params.item), params.item.phase);
+          this.publishAnswer(before);
         }
         break;
       }
@@ -653,16 +671,20 @@ export class CodexAppServerClient {
         this.turnResolve = null;
         this.activeHandlers = null;
         // ★#4 폴백: item/completed 텍스트가 비면 누적 delta 사용(멀쩡한 답을 실패로 오판 방지).★
-        const finalText = this.lastFinal || this.deltaBuf;
+        const finalText = this.answer.text();
         resolve?.({ finalText, status, turnId: this.currentTurnId });
-        this.lastFinal = "";
-        this.deltaBuf = "";
+        this.answer.reset();
         break;
       }
     }
   }
-  private lastFinal = "";
-  private deltaBuf = "";
+  private publishAnswer(before: string): void {
+    const text = this.answer.text();
+    if (text === before) return;
+    if (this.activeHandlers?.onAnswerText) this.activeHandlers.onAnswerText(text);
+    else if (text.startsWith(before)) this.activeHandlers?.onDelta?.(text.slice(before.length));
+  }
+  private answer = new TurnAnswerText();
   private stderrTail = "";
   private rateLimitTail = "";
   private approvalWaits = 0; // 동시 승인 대기 ref-count(Phase1 ③) — 0일 때만 턴 타이머 재개.

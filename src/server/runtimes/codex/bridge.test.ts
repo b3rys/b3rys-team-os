@@ -1343,16 +1343,17 @@ describe("cogs partial replies",()=>{
     expect(o.model).toBe("gpt-6-luna");
     o.onDelta?.("first");o.onDelta?.(" second");
     await Bun.sleep(450);
-    expect(edits.length).toBe(1);expect(edits[0]?.state).toBe("streaming");
+    expect(edits.length).toBe(2);expect(edits[0]?.state).toBe("streaming");
     o.onActivity?.("late tool signal");
     o.onDelta?.(" third");await Bun.sleep(450);
     return ok("final", "cogs-session");
    },
   });
   expect(result.turnOk).toBe(true);expect(edits.at(-1)?.state).toBe("complete");
-  expect(edits.at(-1)?.text).toBe("final");
+  expect(edits.at(-1)?.text).toBe("first second third\n\nfinal");
   expect(edits.every(e=>!e.text.includes("late tool signal"))).toBe(true);
-  expect(edits[0]?.at).toBeGreaterThanOrEqual(300);
+  expect(edits[0]?.at).toBeLessThan(300);
+  expect(edits[1]!.at-edits[0]!.at).toBeGreaterThanOrEqual(300);
  });
 });
 
@@ -1401,5 +1402,5 @@ test("cogs search → write → search reaches app requests after reply starts, 
   expect(activities.slice(1).every(r => r.text === "partial answer" && r.cogs_response_state === "streaming")).toBe(true);
   expect(requests.at(-1)?.cogs_response_state).toBe("complete");
   expect(requests.at(-1)?.cogs_activity).toBe("");
-  expect(requests.at(-1)?.text).toBe("final answer");
+  expect(requests.at(-1)?.text).toBe("partial answer\n\nfinal answer");
 });
