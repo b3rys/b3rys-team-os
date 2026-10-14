@@ -46,12 +46,12 @@ bun run typecheck
 
 The focused tests cover author routing, heart deferral, cancellation, bot/hop
 filtering, update dedupe, master approval, running-turn steer without a receipt,
-steer failure, arrivals during steer, Unicode previews, poll subscription and
+steer failure, arrivals during steer, concurrent steer claims, Unicode previews, poll subscription and
 Cogs receipt removal. Network, model execution and live service processes are
 replaced by test dependencies; live UI behavior and semantic model compliance
 require post-deployment checks.
 
-Fault injection: force every reaction to wake (four focused tests fail), or
+Fault injection: force every reaction to wake (five focused tests fail), or
 force ordinary human OK to carry approval (one focused test fails). Restore the
 source before the normal verification run. Rollback is a revert of this PR's
 commit; there is no database migration.

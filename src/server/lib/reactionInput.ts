@@ -45,6 +45,7 @@ export function reactionInputs(r: ReactionUpdate, target: string, master: boolea
 /** Each bridge has one inbox. Deferred reactions stay in their original conversation. */
 export function createReactionInbox() {
   const pending = new Map<number, string[]>();
+  const steering = new Map<number, Promise<void>>();
   let lastUpdateId = -1;
   return {
     accept(updateId: number, r: ReactionUpdate, ownBotId: number | undefined): string | null {
@@ -69,13 +70,20 @@ export function createReactionInbox() {
       return body;
     },
     async steer(chatId: number, text: string, send: (body: string) => Promise<boolean>): Promise<boolean> {
-      const rows = pending.get(chatId);
-      const sent = await send(this.preview(chatId, text));
-      if (sent && rows) {
-        const remaining = (pending.get(chatId) ?? []).slice(rows.length);
-        if (remaining.length) pending.set(chatId, remaining); else pending.delete(chatId);
-      }
-      return sent;
+      // Only one steer may claim a conversation's deferred prefix at a time.
+      const task = (steering.get(chatId) ?? Promise.resolve()).then(async () => {
+        const rows = pending.get(chatId);
+        const sent = await send(this.preview(chatId, text));
+        if (sent && rows) {
+          const remaining = (pending.get(chatId) ?? []).slice(rows.length);
+          if (remaining.length) pending.set(chatId, remaining); else pending.delete(chatId);
+        }
+        return sent;
+      });
+      const settled = task.then(() => {}, () => {});
+      steering.set(chatId, settled);
+      void settled.then(() => { if (steering.get(chatId) === settled) steering.delete(chatId); });
+      return task;
     },
   };
 }

@@ -72,6 +72,12 @@ describe('human reaction delivery',()=>{
   await h.inbox.steer(2,'hello',async()=>{h.inbox.accept(2,reaction('👍'),7);return true});
   const next=h.inbox.prepend(2,'next');expect(next).toContain('<반응:좋아요');expect(next).not.toContain('<반응:고마워요');
  });
+ test('concurrent steer inputs consume the quiet prefix exactly once',async()=>{
+  const h=harness();h.inbox.accept(1,reaction('❤️'),7);const sent:string[]=[];
+  const send=async(text:string)=>{sent.push(text);await Promise.resolve();return true};
+  await Promise.all([h.inbox.steer(2,'one',send),h.inbox.steer(2,'two',send)]);
+  expect(sent).toHaveLength(2);expect(sent[0]).toContain('<반응:고마워요');expect(sent[1]).toBe('two');
+ });
  test('Unicode preview is 60 code points and quoted fields preserve raw emoji',()=>{
   const row=reactionInputs(reaction('👌',{user:{id:2,is_bot:false,first_name:'A"\nB'}}),'😀'.repeat(61),false)[0]!.text;
   expect(row).toContain('😀'.repeat(60));expect(row).not.toContain('😀'.repeat(61));expect(row).toContain('A\\"\\nB');
