@@ -685,6 +685,7 @@ export async function handleMessage(
   //   그룹을 capture→bus 로 넘기는 길이 아직 없다(텔레그램 capture 는 텔레그램 그룹만 본다).
   //   막으면 그 팀원은 그룹에서 영영 말을 못 듣는다.
   const channel = deps.channel ?? channelFromEnv();
+  const isCogs = channel.kind === "b3chat";
   const group = isGroup ?? chatId < 0;
   if (ingress === "poll" && group && channel.kind !== "b3chat" && messageId !== undefined) {
     const shadowOn = process.env.CODEX_GROUP_NATIVE_DENY_SHADOW === "true";
@@ -726,16 +727,20 @@ export async function handleMessage(
   // explicitly enabled, fail fast instead of letting Codex sleep inside the current
   // turn and block the polling loop.
   if (scheduleRequest && !scheduleToolEnabled(deps)) {
-    const sent = await send(chatId, SCHEDULE_UNSUPPORTED_TEXT);
+    const receiptId = receipt ? await receipt : null;
+    let delivered = receiptId !== null && await edit(chatId, receiptId, toMarkdownV2(SCHEDULE_UNSUPPORTED_TEXT), "complete");
+    if (!delivered) {
+      delivered = await send(chatId, SCHEDULE_UNSUPPORTED_TEXT, isCogs ? { state: "complete", replyTo: messageId } : undefined) !== null;
+    }
     return {
-      ok: sent !== null,
+      ok: delivered,
       // ★bridge window 경로에서는 실패다★: 여기서는 안내 문구를 ★발신으로★ 전하는데,
       //   그 경로는 발신을 뗐다 — 그러면 ★답 0건 · 경고 없음 · 성공 기록★ 이 되어
       //   사람도 기록도 "잘 됐다" 로 읽는다. 아무것도 전달되지 않았으므로 turnOk 는 거짓이다.
       //   1:1 은 실제로 보내므로 `ok` 로 판정되어 영향이 없다.
       turnOk: false,
       reply: SCHEDULE_UNSUPPORTED_TEXT,
-      detail: sent !== null ? "schedule_unsupported" : "send_failed",
+      detail: delivered ? "schedule_unsupported" : "send_failed",
     };
   }
 
@@ -747,7 +752,6 @@ export async function handleMessage(
   //   즉 "예약해달라"는 판단은 codex(LLM)가 하고, 브릿지는 등록 실행만 한다.
 
   // ② "작업 중…" 동적 메시지(codex 턴이 수초~수분이라 진행 표시) — message_id 확보해 나중에 교체.
-  const isCogs = channel.kind === "b3chat";
   const workingMsgId = receipt ? await receipt : await send(chatId, isCogs ? "받았어요" : workingText, isCogs ? { state: "waiting", replyTo: messageId } : undefined);
 
   // ③ 두뇌 호출(채팅별 thread resume로 맥락 유지)
@@ -909,6 +913,15 @@ export async function handleMessage(
     schedule();
   } : undefined;
 
+  const onAnswerText = isCogs ? (text: string): void => {
+    if (bubbleId === null || !text) return;
+    // An earlier item can finish after a later item's delta; publish the full ordered text.
+    cogsBody = Array.from(text).slice(0, 4096).join("");
+    cogsState = "streaming";
+    dirty = true;
+    schedule();
+  } : undefined;
+
   runningTurnChatId = chatId;
   // 밖(폴 루프)에서 진행 줄에 한 줄 얹을 수 있게 연다. 항목 id 를 매번 새로 주어 줄이 쌓이게 한다.
   let noteSeq = 0;
@@ -923,6 +936,7 @@ export async function handleMessage(
       onActivity,
       onStatus,
       onDelta,
+      onAnswerText,
       model: isCogs ? configuredCogsModel(deps.codexHome ?? codexBridgePaths(selfAgentId).codexHome) : undefined,
 
       resumeSessionId: prior,

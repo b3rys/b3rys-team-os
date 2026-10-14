@@ -152,6 +152,9 @@ export async function runViaAppServer(
       onDelta: (text) => {
         try { opts.onDelta?.(text); } catch { /* Presentation does not interrupt the turn. */ }
       },
+      onAnswerText: opts.onAnswerText ? (text) => {
+        try { opts.onAnswerText?.(text); } catch { /* Presentation does not interrupt the turn. */ }
+      } : undefined,
       onStatus: (line) => {
         try { opts.onStatus?.(line); } catch { /* 채널 표시가 턴을 막지 않는다 */ }
       },

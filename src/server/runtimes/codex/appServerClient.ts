@@ -40,6 +40,8 @@ export type ReviewDecision = "approved" | "approved_for_session" | "denied" | "a
 export interface RunTurnHandlers {
   /** 스트리밍 델타(부분 응답 텍스트). */
   onDelta?: (text: string) => void;
+  /** Full ordered assistant text, including completions of earlier items. */
+  onAnswerText?: (text: string) => void;
   /** 턴 시작 알림(turnId 확보 — interrupt에 필요). */
   onTurnStarted?: (turnId: string) => void;
   /** 승인요청 → decision 반환(비동기). 미지정 시 기본 denied(fail-closed). */
@@ -632,7 +634,7 @@ export class CodexAppServerClient {
         if (t) {
           const before = this.answer.text();
           this.answer.delta(String(t), params?.itemId, params?.phase);
-          this.activeHandlers?.onDelta?.(this.answer.text().slice(before.length));
+          this.publishAnswer(before);
         } // ★#4: delta 누적(완결텍스트 빈 경우 폴백)★
         break;
       }
@@ -659,8 +661,7 @@ export class CodexAppServerClient {
         if (params?.item?.type === "agentMessage" && typeof params.item.text === "string") {
           const before = this.answer.text();
           this.answer.complete(params.item.text, itemIdOf(params.item), params.item.phase);
-          const suffix = this.answer.text().slice(before.length);
-          if (suffix) this.activeHandlers?.onDelta?.(suffix);
+          this.publishAnswer(before);
         }
         break;
       }
@@ -676,6 +677,12 @@ export class CodexAppServerClient {
         break;
       }
     }
+  }
+  private publishAnswer(before: string): void {
+    const text = this.answer.text();
+    if (text === before) return;
+    if (this.activeHandlers?.onAnswerText) this.activeHandlers.onAnswerText(text);
+    else if (text.startsWith(before)) this.activeHandlers?.onDelta?.(text.slice(before.length));
   }
   private answer = new TurnAnswerText();
   private stderrTail = "";

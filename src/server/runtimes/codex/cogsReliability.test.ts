@@ -163,3 +163,45 @@ test("cogs reliability: activity code is carried in send and edit requests", asy
   expect(cogsActivityCode({ type: "webSearch", action: { type: "openPage" } })).toBe("fetch_web");
   expect(cogsActivityCode({ type: "mcpToolCall", name: "update_plan" })).toBe("plan");
 });
+
+test("cogs reliability: unsupported schedule completes the existing receipt without another send", async () => {
+  const sends: any[] = [], edits: any[] = [];
+  const deps = fixture({
+    scheduleToolEnabled: false,
+    sendMessage: async (_chat, text, meta) => { sends.push({ text, ...meta }); return 77; },
+    editMessage: async (_chat, id, text, state) => { edits.push({ id, text, state }); return true; },
+    runTurn: async () => { throw new Error("unsupported schedule must not run the model"); },
+  });
+  const receipt = sendCogsReceipt(1, 9, deps.sendMessage!);
+  const result = await handleMessage(1, "5분 뒤에 나한테 메시지를 보내줘", 9, deps, undefined, "poll", false, receipt);
+  expect(result.detail).toBe("schedule_unsupported");
+  expect(sends).toHaveLength(1);
+  expect(edits).toHaveLength(1);
+  expect(edits[0]).toMatchObject({ id: 77, state: "complete" });
+  expect(edits[0].text).toContain("예약");
+});
+
+test("cogs reliability: interleaved item completion renders ordered text through complete", async () => {
+  const { c, notify } = client();
+  const edits: any[] = [];
+  await handleMessage(1, "question", 9, fixture({
+    sendMessage: async () => 77,
+    editMessage: async (_chat, _id, text, state) => { edits.push({ text, state }); return true; },
+    runTurn: async o => {
+      const p = c.runTurn("question", {
+        onDelta: o.onDelta,
+        onAnswerText: o.onAnswerText,
+      });
+      notify("item/agentMessage/delta", { itemId: "a", delta: "앞" });
+      notify("item/agentMessage/delta", { itemId: "b", delta: "뒤" });
+      notify("item/completed", { item: { id: "a", type: "agentMessage", phase: "commentary", text: "앞 보완" } });
+      await Bun.sleep(450);
+      notify("item/completed", { item: { id: "b", type: "agentMessage", phase: "final_answer", text: "뒤 완료" } });
+      notify("turn/completed", { turn: { status: "completed" } });
+      const r = await p;
+      return { ok: true, reply: r.finalText, detail: "ok", elapsedMs: 0 };
+    },
+  }));
+  expect(edits.find(e => e.text === "앞 보완\n\n뒤" && e.state === "streaming")).toBeDefined();
+  expect(edits.at(-1)).toMatchObject({ text: "앞 보완\n\n뒤 완료", state: "complete" });
+});
