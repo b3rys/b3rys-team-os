@@ -30,8 +30,19 @@ function commandInfo(command: string): { executable: string; target: string; rea
     const path = words.find(word => !word.startsWith("-"));
     return { executable, reading, target: path && /^[\w./\\-]+$/.test(path) ? filename(path) : "" };
   }
-  const subcommand = /^(?:status|diff|log|test|run|build|check|install)$/.test(words[0] ?? "") ? ` ${words[0]}` : "";
-  return { executable, reading, target: `${executable}${subcommand}` };
+  // Only known executable/subcommand pairs may cross the app boundary.
+  const allowed: Record<string, readonly string[]> = {
+    git: ["status", "diff", "log"],
+    bun: ["test", "run", "build", "install"],
+    npm: ["test", "run", "install"],
+    pnpm: ["test", "run", "build", "install"],
+    yarn: ["test", "run", "build", "install"],
+    go: ["test", "build", "install"],
+    cargo: ["test", "run", "build", "check", "install"],
+    swift: ["test", "run", "build"],
+  };
+  const subcommand = Object.hasOwn(allowed, executable) && allowed[executable]?.includes(words[0] ?? "") ? ` ${words[0]}` : "";
+  return { executable, reading, target: clip(`${executable}${subcommand}`) };
 }
 
 /** Only sanitized tool data crosses the app boundary; apps own every label. */

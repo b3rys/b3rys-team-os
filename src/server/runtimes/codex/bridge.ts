@@ -668,7 +668,7 @@ export async function handleMessage(
     ...deps,
     sendMessage: (chat, text, response) => deps.sendMessage?.(chat, text,
       context.ref ? { ...response, state: response?.state ?? "complete", reactionRef: context.ref } : response) ?? Promise.resolve(null),
-    editMessage: (chat, id, text, state, activity, code) => deps.editMessage?.(chat, id, text, state, activity, code, context.ref) ?? Promise.resolve(false),
+    editMessage: (chat, id, text, state, activity, code, ref, args, errorCode) => deps.editMessage?.(chat, id, text, state, activity, code, context.ref ?? ref, args, errorCode) ?? Promise.resolve(false),
   };
   try {
     return await handleMessageTurn(chatId, text, messageId, wrapped, fetchAttachments, ingress, isGroup, receipt, reactionRef !== undefined);
