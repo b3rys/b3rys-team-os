@@ -11,7 +11,7 @@
 | 작업 | Anthropic 후보 | OpenAI 후보 | effort |
 |---|---|---|---|
 | 단순 수집·정형 처리 | Sonnet 5.5 | GPT-6.1 Sol (`gpt-6.1-sol`) | low |
-| 일반 개발·테스트·리뷰 | Sonnet 5.5 | GPT-6.1 Sol (`gpt-6.1-sol`) | high |
+| 일반 개발·테스트·리뷰 | Sonnet 5.5 | GPT-6.1 Sol (`gpt-6.1-sol`) | medium |
 | 일반 문서·요약 | Sonnet 5.5 | GPT-6.1 Sol (`gpt-6.1-sol`) | medium |
 | 복잡·고위험 판단·검증 | Opus 5.5 | GPT-6 Astra (`gpt-6-astra`) | high |
 
