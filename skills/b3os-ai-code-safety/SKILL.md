@@ -19,6 +19,7 @@ Two throughlines:
 - **Data flow / source of truth first.** Map read → transform → write, and name the single source of truth for each piece of state. Confirm you read the live source, not a synced mirror that drops fields. (Example: reading a synced copy that lacks a field compiles and passes unit tests, but the output is wrong.)
 - **SOLID as coupling design, not class patterns.** (SOLID = five object-oriented design principles; here we use them as a low-coupling lens, not a class-pattern checklist.) Dependencies point **inward** — domain/use-case logic does not depend on framework/ORM/HTTP/infra (**DIP**, dependency inversion: depend on an abstraction, not a concrete infra type). One reason to change per module (**SRP**, single responsibility). Depend on the small slice you actually use (**ISP**, interface segregation: small interfaces). Add an abstraction only when a real extension axis exists (skip speculative **OCP**, open/closed).
 - **Module boundaries hide volatile decisions.** A module's public contract is a schema/interface/event/API; its private choices (storage, format, algorithm) stay hidden and swappable. One owner per concern — no two modules writing the same mutable state.
+- **서버는 상태를, 앱은 말을 (server sends state, client renders words).** 서버·브리지·봇 런타임은 사용자에게 보일 문장을 만들지 않는다 — **상태 코드(enum)·데이터만** 보내고, 문장·아이콘·애니메이션은 앱이 코드→문구 표로 그린다. 그래야 문구·디자인을 바꿀 때 앱만 고친다(서버 재배포 없음, 언어 추가도 앱 문구 파일만). 그리고 **대화는 사람과 LLM 만 한다** — 브리지는 그대로 넘기는 다리라서, "받았어요"·"전달했어요" 같은 고정 문구를 채팅 메시지로 올리지 않는다(상태는 메시지의 상태 필드로). 예외는 원칙을 지키는 방식으로만: 앱이 꺼져 있을 때의 푸시는 문장 대신 **문구 키(APNs `loc-key`/`loc-args`)**, 앱 없이 서버가 직접 띄우는 웹 페이지는 코드에 박지 않고 **문구 파일**로, 로그·개발자용 오류 문장은 사용자 화면에 내보내지 않는 한 그대로.
 - **Start simple; restructure when a change starts causing side effects — not up front.** The criterion is not size: it is whether one class or function has taken on so many jobs that changing one breaks another. With few features, don't layer in advance. Watch these, cheapest first:
   - **Cross-area direct writes** (primary): count how many areas write the same shared field. A guard test fails if the count goes up; the target is one entry point per field.
   - **A mutant in one area fails another area's tests** (primary): that is a side-effect coupling point — split there.
@@ -43,6 +44,7 @@ Two throughlines:
 
 ## Phase 3 — Review
 
+- **사용자에게 보일 문자열 검사.** 서버·브리지 diff 에서 응답 JSON·푸시·`sendMessage`/`editMessage` 본문으로 나가는 사람 말(한국어·영어 문장)을 찾는다 — 있으면 상태 코드로 바꾸라고 must-fix. 고정 문구가 채팅 메시지로 남는 경로(자리표시 메시지를 문구로 바꿔 끝내는 것 포함)도 must-fix.
 - Non-trivial AI-generated/modified code passes an **adversarial harness OR a team member** before merge/deploy — no solo merge. Minimum adversarial dimensions: **SQL injection + `EXPLAIN` query plan**, **scope/privacy** (does a query return rows the caller wasn't a party to?), **fail-safe** (missing DB / 0 rows / empty input degrade gracefully). The reviewer checks the **actual rendered field/behavior**, not just that it compiles.
 
 ## Phase 4 — Test
@@ -388,6 +390,7 @@ export const remainingForFreeShip = (total: number): number =>
 - "Let's make interfaces for everything" without a real volatility boundary. · "We used a transaction, so it's safe."
 - Refactor + feature change in one commit. · Refactoring without pinning behavior first.
 - Adding another branch to a growing switch instead of a map/strategy.
+- 서버가 화면 문장을 만들어 보내기 — 문구 하나 바꾸려고 서버를 고치고 배포하게 된다. · 브리지가 "전달했어요" 같은 고정 문구를 대화에 끼워 넣기 — 아무도 하지 않은 말이 대화가 된다.
 
 ## Source Anchors
 
