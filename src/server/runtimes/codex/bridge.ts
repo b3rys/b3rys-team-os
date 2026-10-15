@@ -1,4 +1,4 @@
-import { createReactionInbox, type ReactionInbox, type ReactionUpdate } from "../../lib/reactionInput";
+import { createReactionInbox, reactionInputs, type ReactionInbox, type ReactionUpdate, type ReactionRef } from "../../lib/reactionInput";
 import { randomUUID } from "node:crypto";
 import { preserveAnswer } from "./answerText";
 import { modelLine } from "../../lib/b3chatModels";
@@ -47,9 +47,9 @@ export interface BridgeDeps {
   /** codex 한 턴 구동(기본 runCodexTurn — 테스트 mock). */
   runTurn?: (opts: CodexTurnOptions) => Promise<CodexTurnResult>;
   /** 텔레그램 발신 → 보낸 message_id 반환(작업중 메시지 교체용). */
-  sendMessage?: (chatId: number, text: string, response?: { state: string; replyTo?: number; activity?: string; activityCode?: string; idempotencyKey?: string }) => Promise<number | null>;
+  sendMessage?: (chatId: number, text: string, response?: { state: string; replyTo?: number; activity?: string; activityCode?: string; idempotencyKey?: string; reactionRef?: ReactionRef }) => Promise<number | null>;
   /** 텔레그램 메시지 편집(작업중 → 답). */
-  editMessage?: (chatId: number, messageId: number, text: string, responseState?: string, activity?: string, activityCode?: string) => Promise<boolean>;
+  editMessage?: (chatId: number, messageId: number, text: string, responseState?: string, activity?: string, activityCode?: string, reactionRef?: ReactionRef) => Promise<boolean>;
   /** 텔레그램 리액션(👀 ack). */
   reactMessage?: (chatId: number, messageId: number, emoji: string) => Promise<boolean>;
   /** 팀원 정체성 격리 루트(CODEX_HOME). */
@@ -202,21 +202,31 @@ export function captureConversationSteer(chatId: number, d: {
 /** Reactions use the existing serial queue/steer path without a receipt bubble. */
 export async function routeReactionUpdate(
   updateId: number, reaction: ReactionUpdate,
-  d: { channel: MemberChannel; allowFrom: Set<number>; ownBotId?: number; inbox: ReactionInbox; route: Omit<IncomingRouteDeps, "runTurnFor">; runTurn: (input: string) => Promise<void> },
+  d: { channel: MemberChannel; allowFrom: Set<number>; ownBotId?: number; inbox: ReactionInbox; route: Omit<IncomingRouteDeps, "runTurnFor">; runTurn: (input: string, reactionRef?: ReactionRef) => Promise<void> },
 ): Promise<IncomingRoute | null> {
   if (d.channel.kind !== "b3chat" || !isAllowedChat(d.allowFrom, reaction.chat.id)) return null;
   const input = d.inbox.accept(updateId, reaction, d.ownBotId);
   if (!input) return null;
+  const ref = reactionInputs(reaction, reaction.cogs_message_text!, reaction.cogs_reactor_is_master!)
+    .filter(row => row.wake).at(-1)?.ref;
   return routeIncoming(reaction.chat.id, input, {
     ...d.route,
-    runTurnFor: () => d.runTurn(input),
+    runTurnFor: () => d.runTurn(input, ref),
     receive: undefined, onSteered: undefined, react: undefined,
     steerText: text => text,
-    captureSteer: () => captureConversationSteer(reaction.chat.id, {
-      isRunning: d.route.isRunning,
-      captureSend: () => d.route.captureSteer ? d.route.captureSteer() : d.route.steer,
-      inbox: d.inbox,
-    }),
+    captureSteer: () => {
+      const response = d.inbox.captureResponse(reaction.chat.id);
+      const steer = captureConversationSteer(reaction.chat.id, {
+        isRunning: d.route.isRunning,
+        captureSend: () => d.route.captureSteer ? d.route.captureSteer() : d.route.steer,
+        inbox: d.inbox,
+      });
+      return steer ? async text => {
+        const sent = await steer(text);
+        if (sent && response) response.ref = ref;
+        return sent;
+      } : null;
+    },
   });
 }
 
@@ -681,7 +691,30 @@ async function deliverGroupReply(a: {
  * 흐름: 👀 리액션 → "작업 중…" 게시 → codex 턴 → 작업중 메시지를 답으로 교체(편집 실패 시 신규 발신).
  */
 
+// A response context belongs to one running turn; queued turns capture their own
+// initial reaction, and successful steers can update only the captured context.
 export async function handleMessage(
+  chatId: number, text: string, messageId: number | undefined, deps: BridgeDeps = {},
+  fetchAttachments?: () => Promise<DmAttachments>, ingress: "poll" | "window" = "poll",
+  isGroup?: boolean, receipt?: Promise<number | null>, reactionRef?: ReactionRef,
+): Promise<{ ok: boolean; turnOk: boolean; reply: string; detail: string }> {
+  if ((deps.channel ?? channelFromEnv()).kind !== "b3chat") {
+    return handleMessageTurn(chatId, text, messageId, deps, fetchAttachments, ingress, isGroup, receipt);
+  }
+  const lease = deps.reactionInbox?.beginResponse(chatId, reactionRef);
+  const context = lease?.context ?? { ref: reactionRef };
+  const wrapped: BridgeDeps = {
+    ...deps,
+    sendMessage: (chat, text, response) => deps.sendMessage?.(chat, text,
+      context.ref ? { ...response, state: response?.state ?? "complete", reactionRef: context.ref } : response) ?? Promise.resolve(null),
+    editMessage: (chat, id, text, state, activity, code) => deps.editMessage?.(chat, id, text, state, activity, code, context.ref) ?? Promise.resolve(false),
+  };
+  try {
+    return await handleMessageTurn(chatId, text, messageId, wrapped, fetchAttachments, ingress, isGroup, receipt, reactionRef !== undefined);
+  } finally { lease?.close(); }
+}
+
+async function handleMessageTurn(
   chatId: number,
   text: string,
   messageId: number | undefined,
@@ -705,6 +738,7 @@ export async function handleMessage(
    */
   isGroup?: boolean,
   receipt?: Promise<number | null>,
+  reactionOnly = false,
 ): Promise<{ ok: boolean; turnOk: boolean; reply: string; detail: string }> {
   // ★브리지도 app-server 로 간다.★
   //   전에는 브리지만 옛 exec 경로였다 — 그래서 ★사람이 직접 말 거는 길에만★ 그때까지의 개선
@@ -798,7 +832,7 @@ export async function handleMessage(
   //   즉 "예약해달라"는 판단은 codex(LLM)가 하고, 브릿지는 등록 실행만 한다.
 
   // ② "작업 중…" 동적 메시지(codex 턴이 수초~수분이라 진행 표시) — message_id 확보해 나중에 교체.
-  const workingMsgId = receipt ? await receipt : await send(chatId, isCogs ? "받았어요" : workingText, isCogs ? { state: "waiting", replyTo: messageId } : undefined);
+  const workingMsgId = reactionOnly ? null : receipt ? await receipt : await send(chatId, isCogs ? "받았어요" : workingText, isCogs ? { state: "waiting", replyTo: messageId } : undefined);
 
   // ③ 두뇌 호출(채팅별 thread resume로 맥락 유지)
   //   ★인메모리 지도가 비어 있으면 저장된 것을 본다★ — 그 지도는 재시작마다 비고,
@@ -824,7 +858,7 @@ export async function handleMessage(
   //   판정은 ★영속 마커★(재시작에도 남음) — 인메모리 prior(세션 resume용)와 분리해, 이미 합류한 팀원이
   // 재시작 후 재소개하지 않게 한다. prior는 아래 resumeSessionId 로만 쓴다.
   const greetAgentId = selfAgentId;
-  const greetedBefore = hasGreetedFirstContact(greetAgentId);
+  const greetedBefore = reactionOnly || hasGreetedFirstContact(greetAgentId);
   const promptText = greetedBefore
     ? toolAwareText
     : `[이번이 이 대화의 첫 응답입니다. 먼저 짧게 인사하고, OT(팀 미션·규칙·역할·팀 스킬)를 받아 팀에 합류했음을 한 줄로 밝힌 뒤 본론에 답하세요.]\n\n${toolAwareText}`;
@@ -955,7 +989,7 @@ export async function handleMessage(
   };
 
   const onDelta = isCogs ? (text: string): void => {
-    if (bubbleId === null || !text) return;
+    if (!text || (bubbleId === null && !reactionOnly)) return;
     cogsBody = Array.from(cogsBody + text).slice(0, 4096).join("");
     cogsState = "streaming";
     dirty = true;
@@ -963,7 +997,7 @@ export async function handleMessage(
   } : undefined;
 
   const onAnswerText = isCogs ? (text: string): void => {
-    if (bubbleId === null || !text) return;
+    if (!text || (bubbleId === null && !reactionOnly)) return;
     // An earlier item can finish after a later item's delta; publish the full ordered text.
     cogsBody = Array.from(text).slice(0, 4096).join("");
     cogsState = "streaming";
@@ -1028,7 +1062,10 @@ export async function handleMessage(
     sessions.save(chatId, result.sessionId); // 재시작 넘어 기억한다
   }
 
-  if (!result.ok || !result.reply) {
+  if (reactionOnly && result.ok && !result.reply.trim() && !cogsBody) {
+    return { ok: true, turnOk: true, reply: "", detail: "reaction_silent" };
+  }
+  if (!result.ok || (!result.reply && !(reactionOnly && cogsBody))) {
     // ★턴이 실패한 것과 세션이 죽은 것은 다르다.★ (2026-08-19 실측 — 팀장님 관측)
     //   전에는 실패하면 무조건 지웠다. 그런데 ★appserver_timeout 은 세션이 멀쩡한데 턴만 오래 걸린 것★ 이라,
     //   지우고 나면 ★바로 직전에 한 얘기까지 통째로 잊는다.★ 실제로 그렇게 보였다:
@@ -1149,6 +1186,7 @@ export function tgSend(token: string, fetchFn: typeof fetch = fetch, opts: { api
       if (plainOnly) {
         const body = { chat_id: chatId, text: toPlain(text),
           cogs_idempotency_key: response?.idempotencyKey ?? `codex:${chatId}:${randomUUID()}`,
+          ...(response?.reactionRef ? { cogs_reaction_ref: response.reactionRef } : {}),
           ...(response ? { cogs_response_state: response.state, reply_to_message_id: response.replyTo,
             ...(response.activity !== undefined ? { cogs_activity: response.activity } : {}),
             ...(response.activityCode ? { cogs_activity_code: response.activityCode } : {}) } : {}) };
@@ -1214,10 +1252,10 @@ export function tgEdit(token: string, fetchFn: typeof fetch = fetch, opts: { api
     const j = (await res.json()) as { ok?: boolean; description?: string; error_code?: number; parameters?: { retry_after?: number } };
     return j.ok === true ? { ok: true, reason: "" } : { ok: false, reason: tgFailureReason(j) };
   };
-  return async (chatId, messageId, text, responseState, activity, activityCode) => {
+  return async (chatId, messageId, text, responseState, activity, activityCode, reactionRef) => {
     try {
       if (plainOnly) {
-        const only = await post({ chat_id: chatId, message_id: messageId, text: toPlain(text), ...(responseState ? { cogs_response_state: responseState, cogs_activity: activity ?? "", ...(activityCode ? { cogs_activity_code: activityCode } : {}) } : {}) });
+        const only = await post({ chat_id: chatId, message_id: messageId, text: toPlain(text), ...(reactionRef ? { cogs_reaction_ref: reactionRef } : {}), ...(responseState ? { cogs_response_state: responseState, cogs_activity: activity ?? "", ...(activityCode ? { cogs_activity_code: activityCode } : {}) } : {}) });
         if (!only.ok) console.warn(`[codex-bridge] ★편집 실패 → 새 버블로 갈라진다★: ${only.reason}`);
         return only.ok;
       }
@@ -1620,7 +1658,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
               note: () => {},
               enqueue: run => turns.enqueue(run),
             },
-            runTurn: async input => { await handleMessage(reaction.chat.id, input, undefined, live, undefined, "poll", isGroupChat(reaction.chat)); },
+            runTurn: async (input, ref) => { await handleMessage(reaction.chat.id, input, undefined, live, undefined, "poll", isGroupChat(reaction.chat), undefined, ref); },
           }).catch(e => console.error("[codex-bridge] reaction route failed:", String(e)));
           continue;
         }
