@@ -24,7 +24,7 @@ function fixture(extra:BridgeDeps={}){
 }
 function router(deps:BridgeDeps,running=false){
  const queued:Array<()=>Promise<void>>=[];
- return {queued,route:{isRunning:()=>running,steer:async()=>true,note:()=>{},enqueue:(run:()=>Promise<void>)=>queued.push(run)},runTurn:async(input:string,ref?:ReactionRef)=>{await handleMessage(2,input,undefined,deps,undefined,"poll",false,undefined,ref);}};
+ return {queued,route:{isRunning:()=>running,steer:async()=>true,enqueue:(run:()=>Promise<void>)=>queued.push(run)},runTurn:async(input:string,ref?:ReactionRef)=>{await handleMessage(2,input,undefined,deps,undefined,"poll",false,undefined,ref);}};
 }
 
 test("reaction wake sends numeric reference without automatic reply_to or receipt",async()=>{

@@ -32,7 +32,7 @@ test("serialized steer must revalidate running conversation before sending",asyn
  let release!:(x:boolean)=>void;let started!:()=>void;const entered=new Promise<void>(v=>started=v);
  const queued:Array<()=>Promise<void>>=[];
  const deps={channel:parseMemberChannel({kind:"b3chat",api_base:"http://127.0.0.1:1",owner_chat:"2"}),allowFrom:new Set([2]),ownBotId:7,inbox,
- route:{isRunning:(chat:number)=>current===chat,note:()=>{},enqueue:(f:()=>Promise<void>)=>queued.push(f),steer:async(body:string)=>{received.push({chat:current,body});if(++calls===1){started();return await new Promise<boolean>(v=>release=v)}return true}},runTurn:async()=>{}};
+ route:{isRunning:(chat:number)=>current===chat,enqueue:(f:()=>Promise<void>)=>queued.push(f),steer:async(body:string)=>{received.push({chat:current,body});if(++calls===1){started();return await new Promise<boolean>(v=>release=v)}return true}},runTurn:async()=>{}};
  const first=routeReactionUpdate(1,r("👌"),deps);await entered;
  const second=routeReactionUpdate(2,r("🤔"),deps);
  current=3;release(true);await Promise.all([first,second]);
@@ -67,7 +67,7 @@ test('ordinary input delayed by attachments falls back in original room when act
  const call=routeIncoming(2,'ordinary message',{
   isRunning:c=>c===current,
   captureSteer:()=>captureConversationSteer(2,{isRunning:c=>c===current,inbox,captureSend:()=>captureActiveTurnSteer('attachments'),fetchAttachments:async()=>{started();await new Promise<void>(v=>release=v);return {files:[],failed:[],imagePaths:[]}}}),
-  steer:async()=>false,note:()=>{},enqueue:run=>queued.push(run),runTurnFor:async()=>{ran=true},
+  steer:async()=>false,enqueue:run=>queued.push(run),runTurnFor:async()=>{ran=true},
  });
  await entered;current=3;registerActiveTurn('attachments',other);release();
  expect(await call).toBe('newTurn');expect(received).toEqual([]);expect(queued).toHaveLength(1);
@@ -98,7 +98,7 @@ test('queued reaction cannot retarget a later turn in the same room',async()=>{
  let calls=0;const client={currentTurnId:'original',steer:async(body:string)=>{received.push(body);if(++calls===1){started();await new Promise<void>(v=>release=v)}}};
  registerActiveTurn('same-room',client);
  const deps={channel:parseMemberChannel({kind:'b3chat',api_base:'http://127.0.0.1:1'}),allowFrom:new Set([2]),ownBotId:7,inbox,
-  route:{isRunning:()=>true,captureSteer:()=>captureActiveTurnSteer('same-room'),steer:async()=>false,note:()=>{},enqueue:(run:()=>Promise<void>)=>queued.push(run)},runTurn:async()=>{}};
+  route:{isRunning:()=>true,captureSteer:()=>captureActiveTurnSteer('same-room'),steer:async()=>false,enqueue:(run:()=>Promise<void>)=>queued.push(run)},runTurn:async()=>{}};
  try {
   const first=routeReactionUpdate(1,r('👌'),deps);await entered;
   const second=routeReactionUpdate(2,r('🤔'),deps);client.currentTurnId='later';release();

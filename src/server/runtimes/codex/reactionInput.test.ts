@@ -14,7 +14,7 @@ function harness(running=false, ownBotId=7) {
  const queued: Array<()=>Promise<void>>=[]; const steered:string[]=[]; const turns:string[]=[]; let receipts=0;
  const inbox=createReactionInbox();
  const deps={channel,allowFrom:new Set([2]),ownBotId,inbox,
-  route:{isRunning:()=>running,steer:async (text:string)=>{steered.push(text);return true},note:()=>{},enqueue:(run:()=>Promise<void>)=>queued.push(run),receive:async()=>{receipts++;return 1},react:()=>{receipts++}},
+  route:{isRunning:()=>running,steer:async (text:string)=>{steered.push(text);return true},enqueue:(run:()=>Promise<void>)=>queued.push(run),receive:async()=>{receipts++;return 1}},
   runTurn:async(text:string)=>{turns.push(inbox.prepend(2,text))},
  };
  return {deps,inbox,queued,steered,turns,receipts:()=>receipts};

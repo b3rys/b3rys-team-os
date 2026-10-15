@@ -93,13 +93,6 @@ export interface BridgeDeps {
 let runningTurnChatId: number | null = null;
 
 /**
- * 도는 턴의 진행 줄에 한 줄 얹는 통로.
- * ★밀어 넣었다는 것을 사람이 봐야 한다★ — 안 보이면 들어갔는지 모른 채 같은 말을 다시 하게 된다.
- * 턴이 도는 동안에만 채워져 있다.
- */
-let noteIntoRunningTurn: ((line: string) => void) | null = null;
-
-/**
  * 진행 중 작업에 밀어 넣을 문구.
  * 버스 쪽(buildSteerText)과 같은 모양으로 둔다 — 받는 쪽(codex)이 같은 형식을 이미 읽고 있다.
  * ★"반영해서 계속하라 · 답할 때 이 말에도 답하라" 를 명시★ 하지 않으면 조용히 무시될 수 있다.
@@ -134,23 +127,13 @@ export function buildDmSteerText(body: string): string {
   ].join("\n");
 }
 
-/**
- * ★들어온 말을 어디로 보낼지 정하고 실행한다.★
- *
- * 폴 루프 안에 두면 시험이 못 닿는다 — 실제로 그래서 두 계약이 ★지워도 초록★ 이었다:
- *   ① 밀어 넣기가 실패하면 새 작업으로 되돌린다(조용히 삼키지 않는다)
- *   ② 밀어 넣었으면 진행 줄에 남긴다(안 보이면 들어갔는지 모른 채 같은 말을 다시 한다)
- * 둘 다 이 기능이 존재하는 이유라, ★지켜지는지 시험이 봐야 한다.★
- */
+/** Steer accepted inputs silently; start a receipt only for a new queued turn. */
 export interface IncomingRouteDeps {
   isRunning: (chatId: number) => boolean;
   steer: (text: string) => Promise<boolean>;
-  note: (line: string) => void;
   enqueue: (run: () => Promise<void>) => void;
   runTurnFor: () => Promise<void>;
-  react?: () => void;
   receive?: () => Promise<number | null>;
-  onSteered?: (receipt: Promise<number | null>) => Promise<void>;
   steerText?: (text: string) => string;
   captureSteer?: () => ((text: string) => Promise<boolean>) | null;
 }
@@ -162,9 +145,7 @@ export async function routeIncoming(
   text: string,
   d: IncomingRouteDeps,
 ): Promise<IncomingRoute> {
-  const receipt = d.receive?.(); // Start before steer or the serial queue can block.
   if (d.isRunning(chatId)) {
-    d.react?.();
     // ★던져도 말을 잃지 않는다★ — 연결이 끊기면 steer 는 성공/실패가 아니라 예외로 끝난다.
     //   그때 그냥 올려보내면 이 말은 새 작업으로도 안 가고 사라진다.
     const steer = d.captureSteer ? d.captureSteer() : d.steer;
@@ -173,12 +154,12 @@ export async function routeIncoming(
       return false;
     });
     if (injected) {
-      d.note(`받음: ${text}`);
-      if (receipt) await d.onSteered?.(receipt);
       return "steered";
     }
     // ★번호가 아직 없어 못 넣었다 — 여기서 멈추면 그 말은 아무 데도 안 간다.★
   }
+  // Start immediately after routing, before a blocked serial queue can delay the receipt.
+  d.receive?.();
   d.enqueue(d.runTurnFor);
   return "newTurn";
 }
@@ -212,7 +193,7 @@ export async function routeReactionUpdate(
   return routeIncoming(reaction.chat.id, input, {
     ...d.route,
     runTurnFor: () => d.runTurn(input, ref),
-    receive: undefined, onSteered: undefined, react: undefined,
+    receive: undefined,
     steerText: text => text,
     captureSteer: () => {
       const response = d.inbox.captureResponse(reaction.chat.id);
@@ -1006,9 +987,6 @@ async function handleMessageTurn(
   } : undefined;
 
   runningTurnChatId = chatId;
-  // 밖(폴 루프)에서 진행 줄에 한 줄 얹을 수 있게 연다. 항목 id 를 매번 새로 주어 줄이 쌓이게 한다.
-  let noteSeq = 0;
-  noteIntoRunningTurn = (line: string) => onActivity(line, `note-${++noteSeq}`);
   let result: CodexTurnResult;
   try {
     result = await runTurn({
@@ -1047,7 +1025,6 @@ async function handleMessageTurn(
     // ★던지고 나가도 반드시 지운다.★ 안 지우면 그 대화는 영영 "도는 중" 으로 남아
     //   이후 모든 말이 끼어들기로 가고, 끼어들 턴이 없어 아무 데도 안 간다.
     runningTurnChatId = null;
-    noteIntoRunningTurn = null;
   }
 
   // ★예약된 편집이 답을 덮어쓰지 못하게 먼저 끈다.★ 끄지 않으면 답을 쓴 뒤 진행 줄이 다시 올라온다.
@@ -1656,7 +1633,6 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
               isRunning: isTurnRunningFor,
               captureSteer: () => captureActiveTurnSteer(liveAgentId),
               steer: async () => false,
-              note: () => {},
               enqueue: run => turns.enqueue(run),
             },
             runTurn: async (input, ref) => { await handleMessage(reaction.chat.id, input, undefined, live, undefined, "poll", isGroupChat(reaction.chat), undefined, ref); },
@@ -1700,10 +1676,6 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         let receipt: Promise<number | null> | undefined;
         void routeIncoming(chatId, text, {
           receive: live.channel?.kind === "b3chat" ? () => (receipt = sendCogsReceipt(chatId, messageId, live.sendMessage!)) : undefined,
-          onSteered: async p => {
-            const id = await p;
-            if (id !== null) await live.editMessage?.(chatId, id, "진행 중 작업에 전달했어요", "complete");
-          },
           isRunning: isTurnRunningFor,
           // ★도중에 붙인 그림도 그 작업 안으로 넣는다.★ 여기서 내려받아도 폴 루프는 안 막힌다 —
           //   위에서 routeIncoming 을 기다리지 않기 때문이다(await 를 붙이면 승인 버튼이 다시 막힌다).
@@ -1714,11 +1686,6 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
             fetchAttachments: hasMedia && msg ? () => downloadDmAttachmentsSafe(token, msg) : null,
           }),
           steer: async () => false,
-          note: (line) => {
-            // 턴이 방금 끝났으면 통로가 닫혀 있다 — 그때는 남기지 않는다.
-            //   ★닫힌 뒤에 남기면 답을 쓴 자리에 진행 줄이 덮인다.★ 유실이 아니라 안전 쪽이다.
-            noteIntoRunningTurn?.(line);
-          },
           enqueue: (run) => turns.enqueue(run),
           runTurnFor: async () => {
             const r = await handleMessage(chatId, text, messageId, live, hasMedia && msg
@@ -1726,7 +1693,6 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
               : undefined, "poll", isGroupChat(msg?.chat), receipt);
             console.log(`[codex-bridge] → ${r.detail}: ${r.reply.slice(0, 60)}`);
           },
-          react: () => { if (live.channel?.kind !== "b3chat" && messageId !== undefined) void live.reactMessage?.(chatId, messageId, "👀"); },
         }).then((route) => {
           console.log(`[codex-bridge] ↳ ${route === "steered" ? "진행 중 작업에 전달" : "새 작업으로"}: ${text.slice(0, 40)}`);
         });
