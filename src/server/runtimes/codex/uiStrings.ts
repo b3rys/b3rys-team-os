@@ -1,11 +1,18 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
-/** Text is only rendered at channels without an application localization layer. */
+/** Render only where the transport has no code-to-label application layer. */
 export function uiText(key: string, args: Record<string, unknown> = {}, locale = process.env.B3OS_UI_LOCALE ?? "ko"): string {
-  const load = (language: string): Record<string, string> => {
-    try { return JSON.parse(readFileSync(new URL(`./locales/${language}.json`, import.meta.url), "utf8")); }
-    catch { return {}; }
+  const read = (source: URL | string): Record<string, string> => {
+    try {
+      const catalog = JSON.parse(readFileSync(source, "utf8"));
+      return Object.fromEntries(Object.entries(catalog).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== ""));
+    } catch { return {}; }
   };
+  const load = (language: string): Record<string, string> => ({
+    ...read(new URL(`./locales/${language}.json`, import.meta.url)),
+    ...(process.env.B3OS_UI_LOCALES_DIR ? read(join(process.env.B3OS_UI_LOCALES_DIR, `${language}.json`)) : {}),
+  });
   const fallback = load("ko");
   const selected = locale === "en" ? load("en") : fallback;
   const template = selected[key] || fallback[key] || key;

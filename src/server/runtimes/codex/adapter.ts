@@ -1,3 +1,4 @@
+import { uiText } from "./uiStrings";
 /**
  * codex runtime — WakeAdapter.
  *
@@ -395,7 +396,7 @@ function postFailureNotice(
     //   예전엔 from=<팀원>, source="agent" 로 넣어서 ★"그 팀원이 그렇게 말했다" 로 보였다.★
     //   ★그 팀원은 아무 말도 안 했다 — 턴이 죽은 것이다.★ 서버가 그의 입을 빌리면 안 된다.
     const why = reason ? ` (${reason.slice(0, 120)})` : "";
-    const body = `⚠️ ${agent.display_name ?? agent.id} 의 응답이 실패했습니다${why}. 잠시 후 다시 시도해 주세요.`;
+    const body = uiText("codex_turn_failed",{agent:agent.display_name??agent.id,reason:why});
     // dedupe 는 ★받는 곳에 따라 기준이 다르다★ — 두 계약이 서로 다른 것을 막는다.
     // · 팀 리드 방(broadcast) = ★도배 방지★ 가 목적 → 본문 기준 60초 창(기존 계약 유지)
     //   · 팀원 1:1 = ★같은 실패를 두 번 안 알리기★ 가 목적 → ★message_id 기준★

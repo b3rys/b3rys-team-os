@@ -182,11 +182,11 @@ describe("승인 요청 — b3chat 은 글자로 남긴다", () => {
     expect(await sendApprovalToMemberRoom("bee", "prm_abc", req, { token: "T", fetchFn, channel: B3CHAT })).toBe(true);
     expect(calls.length).toBe(1);
     expect(calls[0]!.url).toBe("http://127.0.0.1:8741/botT/sendMessage");
-    const b = calls[0]!.body as { chat_id: string; text: string; parse_mode?: string; reply_markup?: unknown };
+    const b = calls[0]!.body;
     expect(b.chat_id).toBe("2");
     expect(b.parse_mode).toBeUndefined();
-    expect(b.text.startsWith("승인 필요:")).toBe(true);
-    expect(b.text).toContain("prm_abc");
+    expect(b.text).toBe("");expect(b.cogs_activity_code).toBe("approval_required");
+    expect(b.cogs_activity_args).toMatchObject({request_id:"prm_abc",operation_code:"run_command",detail:"ls"});
     expect(b.text).not.toContain("<code>");
     expect(b.reply_markup).toBeDefined();
   });
@@ -196,7 +196,7 @@ describe("승인 요청 — b3chat 은 글자로 남긴다", () => {
     expect(await sendApprovalToMemberRoom("bee", "prm_abc", req, { token: "T", fetchFn, channel: B3CHAT })).toBe(true);
     expect(calls.length).toBe(2);
     expect(calls[1]!.body.reply_markup).toBeUndefined();
-    expect(String(calls[1]!.body.text)).toStartWith("승인 필요:");
+    expect(calls[1]!.body.text).toBe("");expect(calls[1]!.body.cogs_activity_code).toBe("approval_required");
   });
 
   test("둘 다 실패 → false (호출부가 감사 기록을 남긴다)", async () => {

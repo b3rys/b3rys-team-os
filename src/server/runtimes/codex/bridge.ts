@@ -831,8 +831,8 @@ async function handleMessageTurn(
   if (preflight) {
     reactionClaim?.rollback();
     const errText = isCogs ? "" : toMarkdownV2(uiText("permission_denied"));
-    if (workingMsgId !== null) await edit(chatId, workingMsgId, errText, isCogs ? "error" : undefined, undefined, undefined, undefined, undefined, "permission_denied");
-    else await send(chatId, errText, isCogs ? { state: "error", errorCode: "permission_denied", replyTo: messageId } : undefined);
+    if (workingMsgId !== null) await edit(chatId, workingMsgId, errText, isCogs ? "error" : undefined, undefined, undefined, undefined, undefined, "permission_required");
+    else await send(chatId, errText, isCogs ? { state: "error", errorCode: "permission_required", replyTo: messageId } : undefined);
     return { ok: false, turnOk: false, reply: "", detail: `permission_${preflight.tier}:${preflight.rule}` };
   }
   // ★진행 표시★ — codex 가 도구를 시작할 때마다 오는 줄을 모아 "작업 중…" 메시지를 고쳐 쓴다.
@@ -1025,7 +1025,7 @@ async function handleMessageTurn(
       console.warn(`[codex-bridge] 턴 실패했지만 세션은 유지한다(thread 살아 있음): ${result.detail ?? "사유 없음"}`);
     }
     const partial = isCogs ? preserveAnswer(cogsBody, result.reply) : "";
-    const errorCode = /timeout/.test(result.detail ?? "") ? "response_timeout" : /rate.limit/.test(result.detail ?? "") ? "rate_limited" : "response_failed";
+    const errorCode = /timeout/.test(result.detail ?? "") ? "timeout" : /rate.limit/.test(result.detail ?? "") ? "rate_limited" : "response_failed";
     const errText = isCogs ? toMarkdownV2(partial) : toMarkdownV2(uiText("turn_failed"));
     if (bubbleId !== null) await edit(chatId, bubbleId, errText, isCogs ? "error" : undefined, undefined, undefined, undefined, undefined, errorCode);
     else await send(chatId, errText, isCogs ? { state: "error", errorCode, replyTo: messageId } : undefined);
@@ -1313,14 +1313,14 @@ export async function handleApprovalCallback(
   token: string,
   cb: TgCallbackQuery,
   allowFrom: Set<number>,
-  deps: { dbPath?: string; fetchFn?: typeof fetch } = {},
+  deps: { dbPath?: string; fetchFn?: typeof fetch; plainOnly?: boolean } = {},
 ): Promise<"decided" | "ignored" | "stale" | "unauthorized"> {
   const doFetch = deps.fetchFn ?? fetch;
   const answer = (code: string, alert = false, args: Record<string, unknown> = {}) =>
     doFetch(`${TG_API}/bot${token}/answerCallbackQuery`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ callback_query_id: cb.id, ...(PLAIN_ONLY ? { text_code: code, text_args: args } : { text: uiText(code, args) }), show_alert: alert }),
+      body: JSON.stringify({ callback_query_id: cb.id, ...((deps.plainOnly ?? PLAIN_ONLY) ? { text_code: code, text_args: args } : { text: uiText(code, args) }), show_alert: alert }),
     }).catch(() => undefined);
 
   const m = /^(pg1|pgs|pga|pgd):((?:apr|prm)_[a-f0-9]+)$/.exec(cb.data ?? "");

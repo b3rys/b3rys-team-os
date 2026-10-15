@@ -34,5 +34,13 @@
   "tool": "도구",
   "reasoning": "🧠 생각하는 중…",
   "answering": "✍️ 대답하는 중…",
-  "codex_turn_failed": "⚠️ {agent} 의 응답이 실패했습니다{reason}. 잠시 후 다시 시도해 주세요."
+  "codex_turn_failed": "⚠️ {agent} 의 응답이 실패했습니다{reason}. 잠시 후 다시 시도해 주세요.",
+  "activity_count": "{label} · 파일 {count}개",
+  "reasoning_summary": "🧠 {summary}",
+  "approval_root_title": "폴더 전체 쓰기 권한을 허용할까요?",
+  "approval_grant_root": "이 세션 동안 폴더 하위 전체 쓰기: {root}",
+  "operation_grant_root": "⚠ 세션 동안 아래 폴더 하위 전체에 쓰기 허용 요청 · ",
+  "operation_unparsed": "내용 해석 실패 — 원문 확인 필요 · ",
+  "operation_file_count": "파일 {count}개",
+  "operation_more_files": " …외 {count}개"
 }

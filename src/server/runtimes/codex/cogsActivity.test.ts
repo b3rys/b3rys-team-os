@@ -3,7 +3,7 @@ import { cogsActivityLine } from "./cogsActivity";
 
 test("hook-style tool kind and compact target", () => {
   expect(cogsActivityLine({ command: "cat /tmp/work/bridge.ts" })).toBe("읽기 · bridge.ts");
-  expect(cogsActivityLine({ command: ["bun", "test", "src/a.test.ts"] })).toBe("실행 · bun test");
+  expect(cogsActivityLine({ command: ["bun", "test", "src/a.test.ts"] })).toBe("테스트 · bun test");
   expect(cogsActivityLine({ changes: [{ path: "/tmp/work/note.md", kind: { type: "add" } }] })).toBe("새로 쓰기 · note.md");
   expect(cogsActivityLine({ fileChanges: { "/tmp/work/a.ts": {} } })).toBe("수정 · a.ts");
   expect(cogsActivityLine({ type: "webSearch", action: { queries: ["codex config"] } })).toBe("검색 · codex config");
@@ -12,17 +12,17 @@ test("hook-style tool kind and compact target", () => {
 
 test("Korean activity targets cover multiple files, tools and empty targets", () => {
   expect(cogsActivityLine({ changes: [{ path: "a.ts" }, { path: "b.ts" }, { path: "c.ts" }] })).toBe("수정 · 파일 3개");
-  expect(cogsActivityLine({ type: "mcpToolCall", name: "mcp__fixture__lookup" })).toBe("도구 · lookup");
+  expect(cogsActivityLine({ type: "mcpToolCall", name: "mcp__fixture__lookup" })).toBe("실행");
   expect(cogsActivityLine({ type: "web_search", queries: ["판교", "오늘 날씨"] })).toBe("검색 · 판교 · 오늘 날씨");
   expect(cogsActivityLine({ type: "webSearch", query: "" })).toBe("검색");
   expect(cogsActivityLine({ type: "webSearch", queries: [] })).toBe("검색");
   expect(cogsActivityLine({ type: "webSearch", action: { type: "openPage", url: "" } })).toBe("페이지 열기");
-  expect(cogsActivityLine({ command: "" })).toBe("실행");
+  expect(cogsActivityLine({ command: "" })).toBe("도구");
   expect(cogsActivityLine({ command: [] })).toBe("실행");
   expect(cogsActivityLine({ command: "cat" })).toBe("읽기");
-  expect(cogsActivityLine({ changes: [{ kind: { type: "add" } }] })).toBe("새로 쓰기");
+  expect(cogsActivityLine({ changes: [{ kind: { type: "add" } }] })).toBe("수정");
   expect(cogsActivityLine({ changes: [{}] })).toBe("수정");
-  expect(cogsActivityLine({ type: "mcpToolCall" })).toBe("도구");
+  expect(cogsActivityLine({ type: "mcpToolCall" })).toBe("실행");
   expect(cogsActivityLine(null)).toBe("도구");
 });
 
@@ -41,7 +41,7 @@ test("command arguments, assignments, credentials and full paths are withheld", 
     const line = cogsActivityLine(input);
     expect(!line.includes("fixture_value") && !line.includes("/tmp/private") && !line.includes("PRIVATE_ENV") && !line.includes("ABCDEFGHIJKLMNOPQRSTUVWXYZ123456")).toBe(true);
   }
-  expect(cogsActivityLine({ command: 'API_KEY=fixture_value bun test' })).toBe("실행 · bun test");
+  expect(cogsActivityLine({ command: 'API_KEY=fixture_value bun test' })).toBe("테스트 · bun test");
 });
 
 test("app-server start/completion notifications pass structured targets to the formatter", async () => {

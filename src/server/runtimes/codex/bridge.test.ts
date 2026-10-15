@@ -260,24 +260,21 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     expect(calls.edits.some((e) => e.text.includes("권한 게이트"))).toBe(false);
   });
 
-  test("one-shot 예약 요청은 두뇌 턴으로 넘기지 않고 즉시 안내한다", async () => {
-    const { deps, calls } = spies(() => {
-      throw new Error("runTurn must not be called for one-shot schedule requests");
-    });
-    deps.scheduleToolEnabled = false; // env 격리(Codex F3): ambient CODEX_SCHEDULE_TOOL_ENABLED=true 여도 결정적.
-    const r = await handleMessage(123, "5분 뒤에 나한테 메시지를 보내줘", 55, deps);
-    expect(r.ok).toBe(true);
-    expect(r.detail).toBe("schedule_unsupported");
-    expect(calls.reacts).toEqual([{ mid: 55, emoji: "👀" }]);
-    expect(calls.sends).toEqual([SCHEDULE_UNSUPPORTED_TEXT]);
-    expect(calls.prompts.length).toBe(0);
-    expect(calls.edits.length).toBe(0);
+  test("unavailable scheduler is described by the model without a fixed bridge reply",async()=>{
+    const {deps,calls}=spies(()=>ok("예약 도구를 사용할 수 없습니다"));
+    deps.scheduleToolEnabled=false;
+    const result=await handleMessage(123,"5분 뒤에 알려줘",55,deps);
+    expect(result.turnOk).toBe(true);
+    expect(calls.prompts).toHaveLength(1);
+    expect(calls.prompts[0]?.prompt).toContain("schedule_reminder unavailable");
+    expect(calls.edits.at(-1)?.text).toBe("예약 도구를 사용할 수 없습니다");
+    expect(calls.sends).toEqual([DEFAULT_WORKING_TEXT]);
   });
 
   test("schedule tool enabled: LLM이 진짜 예약이라 판단해 SCHEDULE_MARKER를 내면 그때 등록한다", async () => {
     // 예약 등록은 ★LLM 판단★으로만 — 키워드 매치는 도구 안내(scheduleToolPrompt) 주입 힌트일 뿐, LLM이 marker를 내야 등록.
     let registered = false;
-    const { deps, calls } = spies(() =>
+    const { deps, calls } = spies((prompt) => prompt.startsWith("[schedule_reminder tool result]") ? ok("등록했습니다: sched_host", "sess-1") :
       ok(`알겠습니다, 예약할게요.\n${SCHEDULE_MARKER} {"body":"5분 뒤 메시지","delay_seconds":300,"title":"reminder","direct_to_gd":true}`, "sess-1"),
     );
     const r = await handleMessage(123, "5분 뒤에 나한테 메시지를 보내줘", 55, {
@@ -293,7 +290,8 @@ describe("codex bridge (M2) — 채널 I/O", () => {
       },
     });
     expect(r.ok).toBe(true);
-    expect(calls.prompts.length).toBe(1); // ★LLM 턴이 실제로 실행됨(판단)★ — 옛 direct-register(턴 0)와 반대
+    expect(calls.prompts.length).toBe(2); // Intent decision followed by a model explanation of tool result.
+    expect(calls.prompts[1]?.prompt).toContain("sched_host");
     expect(calls.prompts[0]?.prompt).toContain("schedule_reminder"); // 도구 안내 주입 확인
     expect(registered).toBe(true); // LLM이 marker를 냈으므로 등록
     expect(r.reply).toContain("sched_host");
@@ -1237,13 +1235,11 @@ describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 �
 // 예약 요청인데 예약 도구가 꺼져 있으면 LLM 앞에서 조기 반환하며 안내 문구를 ★보낸다.★
 // 그런데 bridge window 경로는 그 발신을 뗐다 — 그러면 ★답 0건 · 경고 없음 · 성공 기록★ 이 되어
 // 사람도 기록도 "잘 됐다" 로 읽는다. 아무것도 전달되지 않았으므로 실패로 보여야 한다.
-test("★예약 미지원 안내는 창구에서 실패로 보인다★ — 답 0건인데 성공으로 적히면 안 된다", async () => {
-  const { deps } = spies(() => ok("답"));
-  // 예약 도구가 꺼진 상태(기본값)에서 예약형 문장을 넣는다.
-  const r = await handleMessage(-123, "10분 뒤에 알려줘", 55, deps, undefined, "window");
-  expect(r.detail).toContain("schedule");
-  // ★turnOk 가 거짓이어야 bridge window 경로가 경고를 띄운다★
-  expect(r.turnOk).toBe(false);
+test("unavailable scheduler window reply is returned from the model", async()=>{
+ const {deps,calls}=spies(()=>ok("도구가 연결되지 않았습니다."));deps.scheduleToolEnabled=false;
+ const result=await handleMessage(-123,"10분 뒤 알려줘",55,deps,undefined,"window");
+ expect(result.turnOk).toBe(true);expect(result.reply).toBe("도구가 연결되지 않았습니다.");
+ expect(calls.prompts[0]?.prompt).toContain("schedule_reminder unavailable");
 });
 
 // ── ★진짜 운반 경로를 통과시킨다★ ──
@@ -1337,7 +1333,7 @@ describe("cogs partial replies",()=>{
   const result=await handleMessage(91,"question",5,{
    agentId:"cogsprobe",codexHome:home,workdir:home,sandbox:"read-only",
    channel:{kind:"b3chat",apiBase:"http://127.0.0.1:8741",allowFrom:["91"],ownerChat:"91"},
-   sendMessage:async(_chat,text,response)=>{expect(text).toBe("받았어요");expect(response).toEqual({state:"waiting",replyTo:5});return 6;},
+   sendMessage:async(_chat,text,response)=>{expect(text).toBe("");expect(response).toEqual({state:"waiting",replyTo:5});return 6;},
    editMessage:async(_chat,_id,text,state)=>{edits.push({text,state,at:Date.now()-start});return true;},
    runTurn:async o=>{
     expect(o.model).toBe("gpt-6-luna");
@@ -1359,15 +1355,15 @@ describe("cogs partial replies",()=>{
 
 test("cogs turn failure preserves streamed text and ends response state",async()=>{
  const home=mkdtempSync(join(tmpdir(),"cogs-failure-home-"));
- const edits:{text:string;state?:string}[]=[];
+ const edits:{text:string;state?:string;errorCode?:string}[]=[];
  const result=await handleMessage(92,"question",5,{
   agentId:"failureprobe",codexHome:home,workdir:home,sandbox:"read-only",
   channel:{kind:"b3chat",apiBase:"http://127.0.0.1:8741",allowFrom:["92"],ownerChat:"92"},
-  sendMessage:async()=>6,editMessage:async(_chat,_id,text,state)=>{edits.push({text,state});return true;},
+  sendMessage:async()=>6,editMessage:async(_chat,_id,text,state,_activity,_code,_ref,_args,errorCode)=>{edits.push({text,state,errorCode});return true;},
   runTurn:async options=>{options.onDelta?.("부분 본문");return {ok:false,reply:"",detail:"timeout",elapsedMs:0};},
  });
- expect(result.turnOk).toBe(false);expect(edits.at(-1)?.state).toBe("complete");
- expect(edits.at(-1)?.text).toContain("부분 본문");expect(edits.at(-1)?.text).toContain("응답을");
+ expect(result.turnOk).toBe(false);expect(edits.at(-1)?.state).toBe("error");
+ expect(edits.at(-1)?.text).toBe("부분 본문");expect(edits.at(-1)?.errorCode).toBe("timeout");
 });
 
 test("cogs search → write → search reaches app requests after reply starts, with separate activity", async () => {
@@ -1396,11 +1392,11 @@ test("cogs search → write → search reaches app requests after reply starts, 
     },
   });
   expect(result.turnOk).toBe(true);
-  const activities = requests.filter((r, i) => r.cogs_activity && r.cogs_response_state !== "complete" && r.cogs_activity !== requests[i-1]?.cogs_activity);
-  expect(activities.map(r => r.cogs_activity)).toEqual(["검색 · first query", "새로 쓰기 · note.md", "검색 · second query"]);
+  const activities = requests.filter((r, i) => r.cogs_activity_code && r.cogs_response_state !== "complete" && (r.cogs_activity_code !== requests[i-1]?.cogs_activity_code || JSON.stringify(r.cogs_activity_args)!==JSON.stringify(requests[i-1]?.cogs_activity_args)));
+  expect(activities.map(r => [r.cogs_activity_code,r.cogs_activity_args])).toEqual([["search",{target:"first query"}],["writing",{target:"note.md"}],["search",{target:"second query"}]]);
   expect(activities[0]?.cogs_response_state).toBe("activity");
   expect(activities.slice(1).every(r => r.text === "partial answer" && r.cogs_response_state === "streaming")).toBe(true);
   expect(requests.at(-1)?.cogs_response_state).toBe("complete");
-  expect(requests.at(-1)?.cogs_activity).toBe("");
+  expect(requests.every(r=>!("cogs_activity" in r))).toBe(true);
   expect(requests.at(-1)?.text).toBe("partial answer\n\nfinal answer");
 });

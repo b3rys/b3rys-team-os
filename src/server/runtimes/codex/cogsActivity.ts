@@ -1,9 +1,9 @@
 import { uiText } from "./uiStrings";
 /** Compact tool targets for cogs; command arguments and tool output never leave this formatter. */
 const clip = (text: string, max = 45): string => Array.from(text).slice(0, max).join("");
-const filename = (path: string): string => safeText(path.replace(/\\/g, "/").split("/").pop() ?? "");
+export const filename = (path: string): string => safeText(path.replace(/\\/g, "/").split("/").pop() ?? "");
 
-function safeText(text: string): string {
+export function safeText(text: string): string {
   return clip(text
     // Header values may include a scheme plus short credentials or multiple Digest parameters.
     .replace(/\b(?:proxy-)?authorization\s*[:=]\s*[^\r\n]+/gi, "[redacted]")
@@ -58,10 +58,10 @@ export function cogsActivityArgs(item: unknown): CogsActivityArgs {
     if (action.type === "openPage" || (!action.type && url)) {
       try { return { target: clip(new URL(url ?? "").hostname) }; } catch { return {}; }
     }
-    const query = action.pattern ?? it.pattern ?? action.queries ?? action.query ?? it.queries ?? it.query ?? "";
+    const query = [action.pattern,it.pattern,action.queries,action.query,it.queries,it.query].find(value => Array.isArray(value) ? value.length>0 : typeof value==="string" && value!=="") ?? "";
     return { target: safeText(Array.isArray(query) ? query.join(" · ") : String(query)) };
   }
-  if (it.type === "mcpToolCall") return { target: safeText(String(it.name ?? "").split("__").pop() ?? "") };
+  if (it.type === "mcpToolCall") return {};
   return {};
 }
 
@@ -70,7 +70,7 @@ export function cogsActivityLine(item: unknown): string {
   const code = cogsActivityCode(item) ?? "tool";
   const args = cogsActivityArgs(item);
   const label = uiText(code, args);
-  return args.target ? `${label} · ${args.target}` : label;
+  return args.target ? `${label} · ${args.target}` : args.count !== undefined ? uiText("activity_count",{label,count:args.count}) : label;
 }
 
 /** Activity codes describe observed tools; receipt/status notes have no tool code. */
