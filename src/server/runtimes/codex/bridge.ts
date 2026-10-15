@@ -936,7 +936,7 @@ async function handleMessageTurn(
   };
 
   const onDelta = isCogs ? (text: string): void => {
-    if (!text || (bubbleId === null && !reactionOnly)) return;
+    if (!text || (bubbleId === null && !reactionOnly) || scheduleRequest && scheduleToolEnabled(deps)) return;
     cogsBody = Array.from(cogsBody + text).slice(0, 4096).join("");
     cogsState = "streaming";
     dirty = true;
@@ -944,7 +944,7 @@ async function handleMessageTurn(
   } : undefined;
 
   const onAnswerText = isCogs ? (text: string): void => {
-    if (!text || (bubbleId === null && !reactionOnly)) return;
+    if (!text || (bubbleId === null && !reactionOnly) || scheduleRequest && scheduleToolEnabled(deps)) return;
     // An earlier item can finish after a later item's delta; publish the full ordered text.
     cogsBody = Array.from(text).slice(0, 4096).join("");
     cogsState = "streaming";
@@ -1037,18 +1037,36 @@ async function handleMessageTurn(
   if (scheduleRequest && scheduleToolEnabled(deps)) {
     const marker = extractScheduleMarker(result.reply);
     if (marker) {
-      const hostResult = await registerReminder(marker, {
-        agentId: selfAgentId,
-        teamBaseUrl: deps.teamBaseUrl ?? process.env.TEAM_BASE_URL ?? "http://127.0.0.1:7878/team",
-      });
-      const summary = await runTurn({
-        prompt: `[schedule_reminder tool result]\n${hostResult}\nDescribe this result to the user. Do not call the scheduler again.`,
-        agentId: selfAgentId, resumeSessionId: result.sessionId, codexHome: deps.codexHome,
-        cwd: deps.workdir, sandbox: deps.sandbox, networkAccess: deps.networkAccess,
-      });
-      if (summary.sessionId) { chatThreads.set(chatId, summary.sessionId); sessions.save(chatId, summary.sessionId); }
+      let hostResult: string;
+      try {
+        hostResult = await registerReminder(marker, {
+          agentId: selfAgentId,
+          teamBaseUrl: deps.teamBaseUrl ?? process.env.TEAM_BASE_URL ?? "http://127.0.0.1:7878/team",
+        });
+      } catch {
+        hostResult = JSON.stringify({ code: "schedule_failed", error_code: "schedule_failed" });
+      }
+      let summary: CodexTurnResult;
+      try {
+        summary = await runTurn({
+          prompt: `[schedule_reminder tool result]\n${hostResult}\nDescribe this result to the user. Do not call the scheduler again.`,
+          agentId: selfAgentId, resumeSessionId: result.sessionId, codexHome: deps.codexHome,
+          cwd: deps.workdir, sandbox: deps.sandbox, networkAccess: deps.networkAccess,
+        });
+      } catch {
+        summary = { ok: false, reply: "", detail: "schedule_summary_exception", elapsedMs: 0 };
+      }
+      if (summary.sessionId) {
+        chatThreads.set(chatId, summary.sessionId);
+        sessions.save(chatId, summary.sessionId);
+      }
       if (!summary.ok || !summary.reply.trim() || extractScheduleMarker(summary.reply)) {
-        if (bubbleId !== null) await edit(chatId, bubbleId, "", isCogs ? "error" : undefined, undefined, undefined, undefined, undefined, "response_failed");
+        const notice = isCogs ? "" : toMarkdownV2(uiText("turn_failed"));
+        if (bubbleId !== null) {
+          await edit(chatId, bubbleId, notice, isCogs ? "error" : undefined, undefined, undefined, undefined, undefined, "response_failed");
+        } else {
+          await send(chatId, notice, isCogs ? { state: "error", errorCode: "response_failed", replyTo: messageId } : undefined);
+        }
         return { ok: false, turnOk: false, reply: "", detail: "schedule_summary_failed" };
       }
       reply = summary.reply;
