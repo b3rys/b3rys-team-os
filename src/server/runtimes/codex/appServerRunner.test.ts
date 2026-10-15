@@ -80,3 +80,12 @@ test("ordered assistant snapshots are forwarded without converting them to suffi
   expect(texts).toEqual(["앞\n\n뒤", "앞 보완\n\n뒤"]);
   expect(result.reply).toBe("앞 보완\n\n뒤");
 });
+
+
+test("empty completion requires explicit opt-in and never accepts a failed turn",async()=>{
+ for(const [allowEmptyReply,status,want] of [[undefined,"completed",false],[true,"completed",true],[true,"error",false],[true,"timeout",false]] as const){
+  const client=()=>({currentThreadId:"empty-thread",async start(){},async startThread(){return "empty-thread";},async runTurn(){return {status,finalText:"",turnId:"empty-turn",detail:""};},close(){}}) as unknown as import("./appServerClient").CodexAppServerClient;
+  const result=await runViaAppServer({agentId:"probe",prompt:"p",allowEmptyReply},undefined,client);
+  expect(result.ok).toBe(want);expect(result.reply).toBe("");
+ }
+});

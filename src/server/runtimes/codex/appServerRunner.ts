@@ -194,7 +194,7 @@ export async function runViaAppServer(
     //   프로세스에 새 턴이 들어가면 서로 간섭한다. 재사용의 이득보다 ★턴 하나를 통째로 잃는★ 손해가 크다.
     //   완료된 턴만 프로세스를 남긴다(그 경우에만 서브가 안전하게 남는다).
     if (pooled && r.status !== "completed") dropClient(opts.agentId);
-    const ok = r.status === "completed" && r.finalText.trim().length > 0;
+    const ok = r.status === "completed" && (r.finalText.trim().length > 0 || opts.allowEmptyReply === true);
     // ★#8 픽스: 실패면 detail에 실제 사유(에러 notification/stderr tail) 반영 — rate-limit 진단 가능.★
     const detail = codexTurnDetail(r.status, r.finalText, r.detail);
     return {

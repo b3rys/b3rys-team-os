@@ -1013,6 +1013,7 @@ async function handleMessageTurn(
   try {
     result = await runTurn({
       prompt: promptWithMedia,
+      ...(reactionOnly ? { allowEmptyReply: true } : {}),
       // ★그림은 본문이 아니라 입력으로 간다★ — 경로를 적어주면 codex 는 바이트로 읽을 뿐 보지 못한다.
       imagePaths: attachments?.imagePaths,
       agentId: selfAgentId, // ★필수★ — 승인 요청의 주인이 된다

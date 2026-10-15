@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createReactionInbox, REACTION_INSTRUCTIONS, type ReactionUpdate, type ReactionRef } from "../../lib/reactionInput";
 import { handleMessage, resetChatThreads, routeReactionUpdate, tgSend, tgEdit, type BridgeDeps } from "./bridge";
+import { runViaAppServer } from "./appServerRunner";
 import { DEFAULT_CHANNEL } from "../../lib/memberChannel";
 
 const channel = { kind: "b3chat" as const, apiBase: "http://fixture.invalid", allowFrom: ["2"], ownerChat: "2" };
@@ -107,4 +108,13 @@ test("delayed steer metadata belongs to captured turn, never its replacement",as
  await entered;old.close();const replacement=inbox.beginResponse(2,{message_id:140,emoji:"👌"});release();await routed;
  expect(old.context.ref).toEqual({message_id:130,emoji:"🤔"});expect(replacement.context.ref).toEqual({message_id:140,emoji:"👌"});
  old.close();expect(inbox.captureResponse(2)).toBe(replacement.context);replacement.close();
+});
+
+
+test("reaction silence works through the actual app-server result mapping",async()=>{
+ const client=()=>({currentThreadId:"silent-thread",async start(){},async startThread(){return "silent-thread";},async runTurn(){return {status:"completed",finalText:"",turnId:"silent-turn",detail:""};},close(){}}) as unknown as import("./appServerClient").CodexAppServerClient;
+ const {wire,deps}=fixture({runTurn:opts=>runViaAppServer(opts,undefined,client)});
+ expect((await handleMessage(2,"OK",undefined,deps,undefined,"poll",false,undefined,{message_id:130,emoji:"👌"})).detail).toBe("reaction_silent");
+ expect(wire).toHaveLength(0);
+ expect((await handleMessage(2,"ordinary",23,deps)).turnOk).toBe(false);
 });

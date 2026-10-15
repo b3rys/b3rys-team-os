@@ -37,6 +37,8 @@ export interface CodexTurnOptions {
   codexHome?: string;
   /** 보낼 프롬프트(채널 메시지 + 팀 컨텍스트). */
   prompt: string;
+  /** A completed reaction turn may intentionally have no reply; errors still fail. */
+  allowEmptyReply?: boolean;
   /** 멀티턴 맥락 유지: 이전 턴 sessionId 주면 resume. */
   resumeSessionId?: string;
   /** 샌드박스(기본 read-only). */
