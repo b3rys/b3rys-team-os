@@ -44,7 +44,11 @@ Two throughlines:
 
 ## Phase 3 — Review
 
-- **사용자에게 보일 문자열 검사.** 서버·브리지 diff 에서 응답 JSON·푸시·`sendMessage`/`editMessage` 본문으로 나가는 사람 말(한국어·영어 문장)을 찾는다 — 있으면 상태 코드로 바꾸라고 must-fix. 고정 문구가 채팅 메시지로 남는 경로(자리표시 메시지를 문구로 바꿔 끝내는 것 포함)도 must-fix.
+- **사용자에게 보일 문자열 검사 — 세 종류를 나눠 본다.**
+  - *상태 응답* (진행·오류·처리 결과): 서버·브리지가 문장을 넣으면 must-fix → 상태 코드·데이터로 바꾸고 문장은 앱이 만든다.
+  - *대화 전달* (사람·LLM 이 쓴 본문을 `sendMessage`/`editMessage` 로 넘기기): 정상. 단 사람·LLM 이 쓰지 않은 고정 문구를 대화 메시지로 만들거나 남기는 경로(자리표시 메시지를 문구로 바꿔 끝내는 것 포함)는 must-fix.
+  - *서버가 직접 보여 주는 문구* (앱 없는 웹 페이지·API 오류 응답의 사람용 문구·푸시): 문구 파일·문구 키에서 읽으면 정상, 코드에 문장이 박혀 있으면 must-fix.
+  - 앱 코드도 같은 기준: 화면 문장이 문구 파일(예: String Catalog)을 거치지 않고 코드 리터럴로 들어가면 must-fix(목업·디버그 데이터는 제외).
 - Non-trivial AI-generated/modified code passes an **adversarial harness OR a team member** before merge/deploy — no solo merge. Minimum adversarial dimensions: **SQL injection + `EXPLAIN` query plan**, **scope/privacy** (does a query return rows the caller wasn't a party to?), **fail-safe** (missing DB / 0 rows / empty input degrade gracefully). The reviewer checks the **actual rendered field/behavior**, not just that it compiles.
 
 ## Phase 4 — Test
