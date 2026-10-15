@@ -61,7 +61,6 @@ test("cogs reliability: rejected steer queues its message and original turn comp
   const routed = routeIncoming(1, "next message", {
     isRunning: () => true,
     steer: async text => { try { await c.steer(text); return true; } catch { return false; } },
-    note: () => { throw new Error("rejected steer cannot be noted as accepted"); },
     enqueue: () => { queued++; }, runTurnFor: async () => {},
   });
   response({ id: wire.at(-1).id, error: { code: -32000, message: "turn no longer steerable" } });
@@ -88,7 +87,7 @@ test("cogs reliability: receipt precedes blocked serial queue and its id is reus
   const done = new Promise<void>(r => { finished = r; });
   await routeIncoming(1, "message", {
     receive: () => (receipt = sendCogsReceipt(1, 9, deps.sendMessage!)),
-    isRunning: () => false, steer: async () => false, note: () => {}, enqueue: run => queue.enqueue(run),
+    isRunning: () => false, steer: async () => false, enqueue: run => queue.enqueue(run),
     runTurnFor: async () => { await handleMessage(1, "message", 9, deps, undefined, "poll", false, receipt); finished(); },
   });
   expect(sends).toHaveLength(1);
@@ -98,6 +97,56 @@ test("cogs reliability: receipt precedes blocked serial queue and its id is reus
   expect(sends).toHaveLength(1);
   expect(edits.at(-1)).toMatchObject({ id: 77, text: "앞 답\n\n뒤 답", state: "complete" });
 });
+
+test("cogs reliability: pending and accepted steer create no receipt or replacement bubble", async () => {
+  const sends: any[] = [], edits: any[] = [];
+  let accept!: (accepted: boolean) => void;
+  let queued = 0;
+  const deps = fixture({
+    sendMessage: async (_chat, text, metadata) => { sends.push({ text, ...metadata }); return 77; },
+    editMessage: async (_chat, id, text, state) => { edits.push({ id, text, state }); return true; },
+  });
+  const routed = routeIncoming(1, "추가 지시", {
+    receive: () => sendCogsReceipt(1, 9, deps.sendMessage!),
+    isRunning: () => true,
+    steer: text => { expect(text).toContain("추가 지시"); return new Promise(resolve => { accept = resolve; }); },
+    enqueue: () => { queued++; }, runTurnFor: async () => {},
+  });
+  expect(sends).toHaveLength(0);
+  accept(true);
+  expect(await routed).toBe("steered");
+  expect(sends).toHaveLength(0);
+  expect(edits).toHaveLength(0);
+  expect(queued).toBe(0);
+});
+
+for (const failure of ["rejected", "throws", "no active turn"] as const) {
+  test(`cogs reliability: ${failure} steer starts waiting before enqueue and reuses it for the answer`, async () => {
+    const sends: any[] = [], edits: any[] = [];
+    let run!: () => Promise<void>;
+    const deps = fixture({
+      sendMessage: async (_chat, text, metadata) => { sends.push({ text, ...metadata }); return 77; },
+      editMessage: async (_chat, id, text, state) => { edits.push({ id, text, state }); return true; },
+      runTurn: async () => ({ ok: true, reply: "실제 답변", elapsedMs: 0, detail: "ok" }),
+    });
+    let receipt: Promise<number | null> | undefined;
+    expect(await routeIncoming(1, "추가 지시", {
+      receive: () => (receipt = sendCogsReceipt(1, 9, deps.sendMessage!)),
+      isRunning: () => true,
+      captureSteer: failure === "no active turn" ? () => null : undefined,
+      steer: async () => { if (failure === "throws") throw new Error("fixture steer failure"); return false; },
+      enqueue: next => {
+        expect(sends).toEqual([{ text: "받았어요", state: "waiting", replyTo: 9, idempotencyKey: "codex:receipt:1:9" }]);
+        run = next;
+      },
+      runTurnFor: async () => { await handleMessage(1, "추가 지시", 9, deps, undefined, "poll", false, receipt); },
+    })).toBe("newTurn");
+    expect(edits).toHaveLength(0);
+    await run();
+    expect(sends).toHaveLength(1);
+    expect(edits.at(-1)).toMatchObject({ id: 77, text: "실제 답변", state: "complete" });
+  });
+}
 
 test("cogs reliability: first actual tool update is immediate, no tool keeps receipt/waiting", async () => {
   let firstEditAt = 0;
