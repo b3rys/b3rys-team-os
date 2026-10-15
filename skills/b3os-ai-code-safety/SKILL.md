@@ -19,7 +19,7 @@ Two throughlines:
 - **Data flow / source of truth first.** Map read → transform → write, and name the single source of truth for each piece of state. Confirm you read the live source, not a synced mirror that drops fields. (Example: reading a synced copy that lacks a field compiles and passes unit tests, but the output is wrong.)
 - **SOLID as coupling design, not class patterns.** (SOLID = five object-oriented design principles; here we use them as a low-coupling lens, not a class-pattern checklist.) Dependencies point **inward** — domain/use-case logic does not depend on framework/ORM/HTTP/infra (**DIP**, dependency inversion: depend on an abstraction, not a concrete infra type). One reason to change per module (**SRP**, single responsibility). Depend on the small slice you actually use (**ISP**, interface segregation: small interfaces). Add an abstraction only when a real extension axis exists (skip speculative **OCP**, open/closed).
 - **Module boundaries hide volatile decisions.** A module's public contract is a schema/interface/event/API; its private choices (storage, format, algorithm) stay hidden and swappable. One owner per concern — no two modules writing the same mutable state.
-- **서버는 상태를, 앱은 말을 (server sends state, client renders words).** 서버·브리지·봇 런타임은 사용자에게 보일 문장을 만들지 않는다 — **상태 코드(enum)·데이터만** 보내고, 문장·아이콘·애니메이션은 앱이 코드→문구 표로 그린다. 그래야 문구·디자인을 바꿀 때 앱만 고친다(서버 재배포 없음, 언어 추가도 앱 문구 파일만). 그리고 **대화는 사람과 LLM 만 한다** — 브리지는 그대로 넘기는 다리라서, "받았어요"·"전달했어요" 같은 고정 문구를 채팅 메시지로 올리지 않는다(상태는 메시지의 상태 필드로). **사람이 읽는 문장은 어디에 있든 코드에 박지 않는다** — 앱이든 서버든 **문구 파일(설정)**로 빼서, 영어로 바꾸거나 고칠 때 코드를 수정하지 않는다. 앱이 꺼져 있을 때의 푸시는 문장 대신 **문구 키(APNs `loc-key`/`loc-args`)**, 앱 없이 서버가 직접 띄우는 웹 페이지·API 오류 응답의 사람용 문구도 서버 쪽 문구 파일에서 읽는다. 로그는 개발자가 검색하는 기록이라 코드에 둬도 되지만, 사용자 화면에 나가는 순간 문구 파일 대상이다.
+- **서버·클라이언트 역할 분리.** 서버는 상태(코드)와 데이터를 주고, 클라이언트는 그것을 문장·아이콘·UI 로 보여 준다. 서버가 화면에 보일 문장을 만들면 문구 하나 바꿀 때마다 서버를 고치게 된다. **사람이 읽는 문장은 코드에 넣지 않고 문구 파일(설정)로 분리한다** — 그래야 문구를 고치거나 다른 언어를 추가할 때 코드를 수정하지 않고, 화면을 언어마다 따로 만들지 않는다. 100% 원칙은 아니다 — 디버깅 로그처럼 개발자만 보는 문장 등 필요한 경우는 코드에 둘 수 있다.
 - **Start simple; restructure when a change starts causing side effects — not up front.** The criterion is not size: it is whether one class or function has taken on so many jobs that changing one breaks another. With few features, don't layer in advance. Watch these, cheapest first:
   - **Cross-area direct writes** (primary): count how many areas write the same shared field. A guard test fails if the count goes up; the target is one entry point per field.
   - **A mutant in one area fails another area's tests** (primary): that is a side-effect coupling point — split there.
@@ -44,11 +44,7 @@ Two throughlines:
 
 ## Phase 3 — Review
 
-- **사용자에게 보일 문자열 검사 — 세 종류를 나눠 본다.**
-  - *상태 응답* (진행·오류·처리 결과): 서버·브리지가 문장을 넣으면 must-fix → 상태 코드·데이터로 바꾸고 문장은 앱이 만든다.
-  - *대화 전달* (사람·LLM 이 쓴 본문을 `sendMessage`/`editMessage` 로 넘기기): 정상. 단 사람·LLM 이 쓰지 않은 고정 문구를 대화 메시지로 만들거나 남기는 경로(자리표시 메시지를 문구로 바꿔 끝내는 것 포함)는 must-fix.
-  - *서버가 직접 보여 주는 문구* (앱 없는 웹 페이지·API 오류 응답의 사람용 문구·푸시): 문구 파일·문구 키에서 읽으면 정상, 코드에 문장이 박혀 있으면 must-fix.
-  - 앱 코드도 같은 기준: 화면 문장이 문구 파일(예: String Catalog)을 거치지 않고 코드 리터럴로 들어가면 must-fix(목업·디버그 데이터는 제외).
+- **역할·문구 검사.** 서버 응답에 화면용 문장이 들어 있거나(상태 코드·데이터로 바꿀 것), 사용자에게 보이는 문장이 문구 파일을 거치지 않고 코드에 직접 들어 있으면 must-fix. 개발자만 보는 문장은 대상이 아니다.
 - Non-trivial AI-generated/modified code passes an **adversarial harness OR a team member** before merge/deploy — no solo merge. Minimum adversarial dimensions: **SQL injection + `EXPLAIN` query plan**, **scope/privacy** (does a query return rows the caller wasn't a party to?), **fail-safe** (missing DB / 0 rows / empty input degrade gracefully). The reviewer checks the **actual rendered field/behavior**, not just that it compiles.
 
 ## Phase 4 — Test
@@ -394,7 +390,7 @@ export const remainingForFreeShip = (total: number): number =>
 - "Let's make interfaces for everything" without a real volatility boundary. · "We used a transaction, so it's safe."
 - Refactor + feature change in one commit. · Refactoring without pinning behavior first.
 - Adding another branch to a growing switch instead of a map/strategy.
-- 서버가 화면 문장을 만들어 보내기 — 문구 하나 바꾸려고 서버를 고치고 배포하게 된다. · 브리지가 "전달했어요" 같은 고정 문구를 대화에 끼워 넣기 — 아무도 하지 않은 말이 대화가 된다.
+- 서버가 화면 문장을 만들어 보내기 — 문구 하나 바꾸려고 서버를 고치고 배포하게 된다. · 언어마다 화면을 한 벌씩 복사하기 — 고칠 때마다 여러 벌을 고친다.
 
 ## Source Anchors
 
