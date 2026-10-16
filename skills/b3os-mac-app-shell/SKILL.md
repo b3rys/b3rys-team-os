@@ -66,7 +66,7 @@ description: 웹 대시보드/웹앱을 Apple 네이티브 셸(.app)로 빠르�
 
 - [`references/viewport-and-gotchas.md`](references/viewport-and-gotchas.md) — **WebView 창 채움 버그(위 벌어짐/아래 잘림) 회귀주의**. NonIntrinsicWebView + autoresizing pin 3종세트. 제거 금지.
 - [`references/build-sign-notarize.md`](references/build-sign-notarize.md) — 패키징 스크립트, ad-hoc vs Developer ID, notarization, 미서명 테스트 배포.
-- [`references/iphone-dev-test.md`](references/iphone-dev-test.md) — **아이폰 개발·시험 정본**(cogs-ios + Steno, 2026-10-16). 공용 맥 시뮬레이터, iOS 26 기준, TestFlight 내보내기·올리기, iCloud 같은 폴더 쓰기.
+- [`references/iphone-dev-test.md`](references/iphone-dev-test.md) — **아이폰 개발·시험 정본**. 공용 맥 시뮬레이터, iOS 26 기준, TestFlight 내보내기·올리기, iCloud 같은 폴더 쓰기.
 
 ## 근거 / evidence
 
