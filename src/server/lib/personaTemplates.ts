@@ -310,6 +310,8 @@ export const SECTION_CLAUDE_COMMS = [
   "- 도구 호출 태그 앞에는 어떤 글자도 두지 않는다. 0열의 `<` 로 시작한다. 앞에 글자가 붙으면 실행되지 않고 마크업이 채팅에 그대로 샌다. 설명은 태그 위 문단에 쓴다.",
 ].join("\n");
 
+// Tier2는 롤백된 경로이며 현재 비활성이다. 코드가 남아 있어도 현행 발신 방식으로 취급하지 않는다.
+// 재도입에는 별도 제품 결정이 필요하며, 승인 후 게이트 등록과 전송 훅 재등록을 함께 수행해야 한다.
 // Tier2 마커 문법은 tg-outbound.py의 MARKER와 일치해야 한다. 같은 헤더를 사용해 일반 소통 지시와 멱등 교체한다.
 export const SECTION_CLAUDE_COMMS_TIER2 = [
   "## Communication note (Claude runtime)",
