@@ -42,3 +42,8 @@ jobs:
       #   같은 수트가 macOS fresh clone 에서는 1759 pass / 0 fail 이다(PR#102 이후).
       #   ★즉 '환경 결합' 이 한 겹 더 있었다★ — fresh clone 은 통과해도 리눅스는 아니다.
       #   그 7건을 격리한 뒤 별건 PR 로 추가한다. 그때까지 넣으면 상시 빨간불이 된다.
+
+      - name: 채팅 고정 문구 검사
+        run: |
+          bun test scripts/check-chat-literals.test.ts
+          bun scripts/check-chat-literals.ts
