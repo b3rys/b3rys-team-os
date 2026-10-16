@@ -23,6 +23,7 @@ trigger: record a team lesson
 - 사소한 후보를 많이 올리는 것보다 실제 팀 행동을 바꾸는 후보만 남긴다. 팀원은 자기 입장에서 작은 불편도 올릴 수 있으므로 learning-loop PM과 공동 리뷰어가 과감히 줄인다.
 - `SHARED.md`는 학습 로그, `TEAM-OS.md`는 팀 공통 규칙, `skills/b3rys-*`는 반복 절차, 팀원별 `CLAUDE.md`/`AGENTS.md`/`IDENTITY.md`/`MEMORY.md`는 개인 런타임·정체성·기억의 반영처다.
 - 정책 변경, 보안, 외부전송, 공개 가능성, 팀원 persona(정체성) 변경은 {{OWNER}} 승인 없이 반영하지 않는다.
+- **같은 지적이 두 번 나오면 글이 아니라 장치로 막는다.** 팀장·리뷰어가 같은 교정을 두 번 하면, 그 실수를 못 하게 만드는 가장 높은 단계를 고른다: 구조(주인 하나·한 가지 방법만 남기기) → 타입 → 고칠 방법을 오류 메시지로 말하는 린트·CI 검사 → 시험 → 마지막에만 문서·스킬 문장. 새 검사는 실제로 있었던 과거 실수에서 실패하는지 먼저 확인한다. 프로젝트마다 "규칙 ↔ 그 규칙을 강제하는 것" 표를 두고, 강제하는 것이 '문서'뿐인 규칙은 빚으로 세어 줄여 간다. (출처: pstack `correct`·`encode-lessons-in-structure`, cursor/plugins, MIT, 2026-10-17 도입·재작성)
 - 매주 산출물은 짧아야 한다. 월간으로는 개선이 실제 측정되어야 한다.
 - 금요일 10:00 KST에는 learning-loop PM(`learning_loop_pm` 보유자, 없으면 `coordinator` fallback)이 {{OWNER}}에게 정리된 결과를 보낸다. 보고는 learning-loop PM과 공동 리뷰어가 줄인 간결한 작업목록이어야 하며, 단순 회고가 아니라 다음 실행으로 이어져야 한다.
 - learning-loop PM은 {{OWNER}}가 매번 시키지 않아도 이 프로젝트를 계속 진행한다. learning-loop 자체의 품질, 측정 지표, 서브주제 운영 방식, 자동화 수준을 Tasks 칸반에서 PM 과제로 관리한다.

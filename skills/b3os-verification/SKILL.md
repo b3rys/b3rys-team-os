@@ -30,6 +30,13 @@ Passing the runner is evidence for review and approval (TEAM-OS §4), not a subs
 2. **The feature ↔ verification table is the single source.** One feature = one row. Each row has: source files (for change-scoped runs) · headless tests · app check (family + steps) · performance gate with baseline · the mutant and whether it is proven caught · last result (date, sha, verdict) · gaps · **access** (UI path, shortcut, probe anchor ids — so any agent can map a vague report or a screenshot to a feature and drive it).
 3. **Budget first.** One fix = 10 minutes; tests and verification included = 30 minutes. If a check would blow the budget, say so early and change the method (split, parallelize, move it headless). Do not drop the spec to fit the time.
 
+## 1a. Per PR — fix the finish line first, run only what changed
+
+- **Finish conditions are written when the PR opens, not discovered in review.** The PR body lists the checks that prove it: which tests (unit, the changed feature's app tests from the table), which captures or device checks, and what result passes. The author and the reviewer agree on the list in the first round. Later rounds add a required check only for a defect found or a risk the list missed, and say which one. "Done" is that list passing on the exact head that merges.
+- **Per PR, run what the change reaches; run everything once before release.** The feature table maps changed files to checks (`b3os-sf` → dev-mode-operations, "검사 4단계"). The default per PR is the changed features' checks, not the full suite. The table's escalations still apply: a shared file pulls in the features that use it, a file missing from the table widens to its whole module, and a root config, a large refactor, or a change whose reach the table cannot judge runs the full suite. The full suite also runs once on the release candidate. When one feature keeps escalating to related checks, that is a structure signal to act on — separately from running the checks it needs now.
+- **Say how far each claim got.** Every "verified" or "safe" names its level: ① asserted ② pointed at a real `file:line` ③ walked the failure path and it does not reach ④ ran real code (a test or script that fails loudly if wrong) ⑤ reproduced in the running app. Find the one fact a change is safe because of and take it to ④ or ⑤; report anything below ④ as unproven. For someone else's run, say which: a pass claim in the PR text alone is ①; an execution record checked for the same head, scope, and result (command, log, or result bundle) is "④ by the author, record checked"; a rerun by the reviewer is "④ independent". Ask for a rerun when it answers a defect, a missed risk, or doubt about the record.
+- **Two fixes on one premise failed → test the premise.** When two fixes that share an assumption fail the same check (a flaky test patched twice, a layout nudged twice), write the shared assumption as one sentence and run an observation that would differ if it were false, before a third fix.
+
 ## 2. Five ratchets — verification that only gets stronger
 
 Each moves in one direction only.
@@ -132,3 +139,7 @@ Solo work and prototypes: speed first — the left column only. A long-lived pro
 4. **Environment** — note switch 50 ms vs 33 ms target; ~half was 3,400 accumulated probe-settings entries. Reset once per run + write only on change → 31 ms.
 5. **New feature** — notice delay 1 s: one row, a test (none at 0.5 s, shown at 1.5 s), a mutant (5 s → test fails).
 6. **By size** — solo script: example 1 only. Long-lived app: §1–7.
+
+## Sources
+
+§1a adapts pstack (cursor/plugins `pstack`, MIT, by Lauren Tan): "state the finish condition up front" and `create-verification-skill` (guide 06), `blast-radius` (levels of proof), principle `attack-the-premise`. Adopted 2026-10-17; rewritten, not copied.
