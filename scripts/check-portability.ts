@@ -4,6 +4,9 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 
 export type Finding = { file: string; line: number; rule: string };
+export const FILE_ALLOWLIST = [
+  { pattern: /(?:\.(?:test|spec)\.[jt]sx?$|\/(?:test|tests|__tests__|fixtures|testdata)\/)/, reason: "Synthetic test paths are not production configuration." },
+];
 export const EXCEPTIONS = [
   { pattern: "src/**/{test,tests,__tests__,fixtures,testdata}/** and *.test/spec.ts(x)", reason: "Synthetic paths in test input do not configure production machines." },
   { pattern: "Shell comments, quoted documentation and quoted heredocs", reason: "These are literal text, not Bash commands or expansions." },
@@ -48,7 +51,7 @@ export function scanShell(file: string, source: string, offset = 0): Finding[] {
 
 export function scanPortability(file: string, source: string): Finding[] {
   if (file.startsWith("src/") && /\.[cm]?[jt]sx?$/.test(file)) {
-    if (/(?:\.(?:test|spec)\.[jt]sx?$|\/(?:test|tests|__tests__|fixtures|testdata)\/)/.test(file)) return [];
+    if (FILE_ALLOWLIST.some(entry => entry.pattern.test(file))) return [];
     const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
     const findings: Finding[] = [];
     function visit(node: ts.Node) {
