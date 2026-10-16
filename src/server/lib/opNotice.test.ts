@@ -1,10 +1,4 @@
-// opNotice — team op 상황 알림의 계약 테스트.
-//
-// 지키는 것 (2026-07-30 사고에서 나온 요구):
-//   ① 부팅 오탐을 내지 않는다 — 짧게 미충족했다 회복하면 아무 알림도 안 나간다(jane: 34초).
-//   ② 지속되면 반드시 1회 알린다 — 그리고 반복 스팸하지 않는다(lisa: 28분).
-//   ③ 알림은 고장난 본인에게 가지 않는다 — 그 멤버가 못 듣는 상태가 사고 본체다(블랙홀 금지).
-//   ④ coordinator 가 고장이면 다른 멤버로 폴백한다.
+// 일시적인 부팅 누락은 알리지 않고 지속 상태·회복 전이만 한 번 알린다. 고장난 멤버 본인은 수신자에서 제외한다.
 import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
@@ -29,10 +23,7 @@ const TEAM = [
 ];
 
 describe("pickOpNoticeRecipient — 알림은 살아있는 사람에게", () => {
-  // ★이 단정을 지우지 마라★ (리사 리뷰 B1, 2026-07-30): 한 번 삭제했다가 사고가 났다.
-  //   R4 가중치를 넣을 때 런타임 다양성(+2)이 coordinator(+1)를 이기게 되어 기본 라우팅이
-  //   coordinator → clo 로 ★뒤집혔는데★, 마침 이 단정을 같이 지워서 무보고로 통과했다.
-  //   'claude 봇 poller 사망' 이 이 알림의 가장 흔한 시나리오이므로 기본 라우팅이 곧 본선이다.
+  // 기본 수신자는 coordinator다. 런타임 다양성 가중치가 이 우선순위를 뒤집으면 안 된다.
   test("★기본은 coordinator 로 간다★ — 전원 건강 + 같은 런타임 상황의 불변식", () => {
     expect(pickOpNoticeRecipient(TEAM, "jane")).toBe("lisa");
   });
@@ -46,7 +37,7 @@ describe("pickOpNoticeRecipient — 알림은 살아있는 사람에게", () => 
   test("실팀 구성 라우팅 표 전체 (팀장님 결정: 단순 규칙)", () => {
     const pick = (affected: string) => pickOpNoticeRecipient(TEAM, affected);
     expect(pick("jane")).toBe("lisa");   // coordinator 기본
-    expect(pick("lisa")).toBe("jane");   // ★coordinator 부재 시 등록 순서 첫 멤버★
+    expect(pick("lisa")).toBe("jane");   // coordinator 부재 시 등록 순서 첫 멤버
     expect(pick("clo")).toBe("lisa");    // coordinator
     expect(pick("herm")).toBe("lisa");   // coordinator
   });
@@ -63,11 +54,7 @@ describe("pickOpNoticeRecipient — 알림은 살아있는 사람에게", () => 
     expect(pickOpNoticeRecipient([agent("jane")], "jane")).toBeNull();
   });
 
-  // ★팀장님 결정(2026-07-30)을 못으로 박는다★
-  //   lisa 가 죽으면 jane 으로 간다 — 런타임 다양성으로 clo·herm 을 선호하지 않는다.
-  //   알려진 트레이드오프: lisa·jane 이 동시에 죽으면 죽은 jane 에게 가서 아무도 못 읽는다.
-  // 팀장님이 그 경우를 직접 처리하겠다고 명시했으므로 ★이건 의도된 동작이다★.
-  // '버그' 로 보고 점수제(다른 런타임 선호)를 되살리지 마라 — 팀장님 승인이 필요하다.
+  // coordinator 우선 정책은 동시 장애도 고려해 수신자의 런타임 종류로 바꾸지 않는다. coordinator도 죽으면 알림을 읽지 못할 수 있다.
   test("★lisa 가 죽으면 jane 으로 간다★ (팀장님 결정 — 다른 런타임 선호 금지)", () => {
     expect(pickOpNoticeRecipient(TEAM, "lisa")).toBe("jane");
   });
@@ -79,10 +66,7 @@ describe("pickOpNoticeRecipient — 알림은 살아있는 사람에게", () => 
   });
 });
 
-// ★R3 — 고쳐진 그 결함 자체에 붙는 테스트★
-// 원 사고의 본체는 '감지는 했는데 message 테이블에 안 넣었다' 다. emitOpNotice 를 실제로 호출해
-// 행이 들어갔는지 보지 않으면, 이 함수를 통째로 no-op 으로 만들어도 테스트가 전부 초록이다
-// — 사고가 그대로 재현되는데. (리사 리뷰 R3, 2026-07-30)
+// emitOpNotice를 직접 호출해 message 행 삽입을 검사해야 알림 함수가 no-op이 되는 결함을 잡을 수 있다.
 describe("emitOpNotice — message 테이블에 실제로 적재되는가", () => {
   const setup = (): Database => {
     const db = new Database(":memory:");
@@ -107,7 +91,7 @@ describe("emitOpNotice — message 테이블에 실제로 적재되는가", () =
     expect(row).toBeTruthy();
     expect(row.to_agent_id).toBe("lisa");
     expect(row.from_agent_id).toBe("system");
-    expect(row.source).toBe("system"); // ★op 메시지는 정직하게 system 발신★ (agent 사칭 금지)
+    expect(row.source).toBe("system"); // op 메시지는 정직하게 system 발신 (agent 사칭 금지)
     expect(String(row.body)).toContain("jane down");
     expect(row.priority).toBe("high"); // 기본 high
   });

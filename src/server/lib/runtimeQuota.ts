@@ -1,14 +1,4 @@
-// 런타임 한도(quota) 소진 상태 — 팀원별로 기록해 대시보드 health 와 발신자 안내에 쓴다.
-//
-// 왜 따로 두나: 대시보드 health 는 멤버의 마지막 로그 줄(agent_status.last_log_line)만 본다.
-// hermes·openclaw 멤버는 한도 소진 문구가 그 줄에 오지 않고 wake 실패 결과에만 남는다.
-// 그래서 같은 계정의 한도가 바닥나도 codex 브리지 멤버만 '한도' 로 뜨고 나머지는 '응답 없음' 만기만 쌓였다.
-//
-// 기록 경로 두 가지:
-//   · wake 실패 문구가 한도 소진이면(hermes 등) — isQuotaExhaustedDetail
-//   · openclaw 가 응답 창 안에 답하지 않으면 — `openclaw models status` 의 "usage … % left" 줄을 한 번 본다.
-//     cooldown 줄은 판정에 쓰지 않는다: 한도가 풀린 뒤에도 남는 경우가 있다. 0% 일 때만 한도로 본다.
-// 해제: 그 멤버의 다음 wake 성공, 또는 유효 시각(reset_at) 경과.
+// 마지막 로그 줄에 없는 한도 오류도 wake 실패에 남을 수 있어 별도로 기록한다. cooldown은 회복 뒤에도 남을 수 있으므로 잔여 0%만 소진으로 판정한다.
 import type { Database } from "bun:sqlite";
 
 /**

@@ -29,20 +29,16 @@ afterEach(() => {
 /** external_message 봉투에서 인용부호로 감싼 속성값을 뽑는다 (source·kind·from·thread·msg·in_reply_to). */
 const envAttr = (p: string, name: string): string | null =>
   p.match(new RegExp('<external_message[^>]*\\b' + name + '="([^"]*)"'))?.[1] ?? null;
-/** hop_count 는 openclaw/claude 봉투와 동일하게 ★따옴표 없이★ 렌더된다. */
+/** hop_count 는 openclaw/claude 봉투와 동일하게 따옴표 없이 렌더된다. */
 const envHop = (p: string): string | null =>
   p.match(/<external_message[^>]*\bhop_count=(\d+)/)?.[1] ?? null;
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ★2026-07-15 kind 전환★: 봉투가 답 주소 명령("답: send.sh …")을 찍어주던 걸 없애고,
-//   ★봉투 kind★ 를 실어 팀원(AGENTS.md 룰 9039834)이 답 주소를 정하게 통일했다.
-//   서버는 사실(kind)만 싣고, 주소 계산은 하지 않는다.
-// ═══════════════════════════════════════════════════════════════════════════════
+// 답 주소는 호출부가 준 kind와 AGENTS.md의 매핑으로 결정한다. 봉투가 별도로 주소를 계산하면 계약이 갈릴 수 있다.
 describe("buildPrompt — 봉투 kind 노출 + source=bus (2026-07-15)", () => {
   const base = {
     agent: { id: "hermes", display_name: "Hermes" } as AgentRecord,
     threadId: "biS95LYk",
-    messageId: "MSGab12cd34", // ★nanoid(12)★ — safe 여야 in_reply_to 가 실린다 (짧으면 생략)
+    messageId: "MSGab12cd34", // nanoid(12) — safe 여야 in_reply_to 가 실린다 (짧으면 생략)
     body: "이 코드 어떻게 생각해?",
     fromLabel: "codex",
     replyRoute: { kind: "teammate" as const, to: "codex" },
@@ -68,7 +64,7 @@ describe("buildPrompt — 봉투 kind 노출 + source=bus (2026-07-15)", () => {
     }
   });
 
-  // ★핵심 회귀 방어★: 서버가 답 주소 명령을 다시 찍기 시작하면(룰과 봉투가 둘 다 주소를 정함) 갈라진다.
+  // 핵심 회귀 방어: 서버가 답 주소 명령을 다시 찍기 시작하면(룰과 봉투가 둘 다 주소를 정함) 갈라진다.
   test("★서버가 '답: send.sh …' 명령을 더 이상 찍지 않는다★ — 주소는 kind 로 팀원(룰)이 정한다", () => {
     for (const route of [
       { kind: "teammate" as const, to: "codex" },
@@ -107,8 +103,6 @@ describe("buildPrompt — direct_to_gd 자가발송 금지 지시", () => {
     replyRoute: { kind: "teammate" as const, to: "codex" },
     locale: "ko" as const,
   };
-  // 2026-07-10 GD 결정: directReportNote 제거. 이중발송 진짜 원인=어댑터 double-post(별도 fix, direct_to_gd시
-  //   요청자 버스 insert 스킵)였고 hermes 자가발송이 아니었음(필요성 테스트=노트 없이도 자가발송0). 전제 오진이라 제거.
   test("directReport=true → 자가발송 금지 노트 없음(2026-07-10 제거, 어댑터 fix로 대체)", () => {
     const p = buildPrompt({ ...base, directReport: true });
     expect(p).not.toContain("발신 도구를 직접 호출하지 마세요");
@@ -122,45 +116,25 @@ describe("buildPrompt — direct_to_gd 자가발송 금지 지시", () => {
     expect(buildPrompt(base)).not.toContain("b3rys 팀의");
     expect(buildPrompt({ ...base, locale: "en" })).not.toContain("on the b3rys team");
   });
-  /**
-   * ★[B] 전환 — surfaceNote 가 정반대가 됐다.★
-   *
-   * ═══ 예전 계약 [A] ═══
-   *   surfaceNote = "브릿지가 당신의 최종 답변을 ★버스/그룹에 전달★합니다 — 발신 도구로 다시 보내지 마세요."
-   *   즉 ★턴 본문 = 발행물★ 이었다. 그래서 hermes 는 ★뭘 쓰든 나갔다.★
-   *
-   * ═══ 왜 뒤집혔나 ═══
-   *   ★"아무 말도 안 하기" 가 불가능했다★ → 룰대로 침묵을 택해도 그 문장이 그대로 발송됐다 →
-   *   `[NO_REPLY]` 라는 우회 토큰이 생겼고 → 가드를 발행 지점마다 달았고 → ★하나를 놓쳤고★ →
-   * ★"GD CSO HERMES : [NO_REPLY]" 가 팀장 단톡방에 문자 그대로 찍혔다★ (2026-07-13 라이브).
-   *
-   * ═══ 지금 계약 [B] ═══
-   *   ★턴 본문은 hermes 의 메모다. 아무 데도 안 간다.★ 말하려면 ★자기 손으로 보낸다.★
-   */
+  // 턴 본문은 자동 게시되지 않으므로 발신 도구를 직접 실행해야 한다. 침묵에는 별도 토큰이 필요 없다.
   test("★surface 문구가 뒤집혔다★: '브릿지가 전달' 이 사라지고 ★자가발신 지시★ 가 들어왔다", () => {
     const p = buildPrompt(base);
-    // ① [A] 문구는 ★사라졌다★ — 되살아나면 침묵이 다시 불가능해진다
+    // ① [A] 문구는 사라졌다 — 되살아나면 침묵이 다시 불가능해진다
     expect(p).not.toContain("버스/그룹에 전달");
     expect(p).not.toContain("브릿지가 최종 답변");
-    // ② [B] 불변식이 ★명시★ 된다
+    // ② [B] 불변식이 명시 된다
     expect(p).toContain("★말하려면 직접 보내세요. 안 보내면 아무 말도 안 한 것입니다.★");
-    expect(p).toContain("당신의 메모"); // 턴 본문 = 메모 (왜 보내야 하는지의 '이유')
-    // ③ ★주소 메뉴를 주지 않는다★
-    //    예전엔 "· 팀원에게 → … · 단톡방에 → … · 팀장께 직보 → …" 라고 ★선택지 3개★ 를 줬다.
-    //    ★hermes:★ "그 선택지가 붙어 있으면 상위 지시의 '팀장께' 가 routing intent 처럼 보입니다."
-    //    답 주소는 ★이미 정해져 있다★ (호출부가 안다) → 이제 봉투 kind 로만 표현한다.
+    expect(p).toContain("당신의 메모"); // 답 주소 선택지를 제시하면 이미 결정된 경로를 모델이 다시 고를 수 있어 kind만 제공한다.
     expect(p).not.toContain("· 팀원에게 →");
     expect(p).not.toContain("· 단톡방에 →");
     expect(p).not.toContain("· 팀장께 직보 →");
-    expect(envAttr(p, "kind")).toBe("teammate"); // ★route 가 준 사실은 봉투 kind 로만 표현★
+    expect(envAttr(p, "kind")).toBe("teammate"); // route 가 준 사실은 봉투 kind 로만 표현
     // ④ 침묵 = 그냥 안 보내기 (우회 토큰 불필요)
     expect(p).toContain("★할 말이 없으면 그냥 안 보내면 됩니다★");
     expect(p).not.toContain("[NO_REPLY]");
   });
 
   test("★팀장 직보는 ★route★ 가 정한다 — 봉투 kind 로 표현되고 명령은 안 찍는다★", () => {
-    // 예전엔 프롬프트가 세 경로를 ★메뉴★ 로 줬고, hermes 가 골랐다(그리고 틀렸다).
-    // 이제 호출부가 사실을 준다: direct_to_gd 위임이면 봉투 kind=direct_to_gd, 아니면 kind=teammate.
     const direct = buildPrompt({ ...base, replyRoute: { kind: "direct_to_gd" } });
     expect(envAttr(direct, "kind")).toBe("direct_to_gd");
     expect(direct).not.toContain("답:"); // 서버가 주소 명령을 찍지 않는다
@@ -168,14 +142,13 @@ describe("buildPrompt — direct_to_gd 자가발송 금지 지시", () => {
     expect(direct).not.toContain("[NO_REPLY]");
 
     const toTeammate = buildPrompt(base); // 팀원에게 답하는 턴
-    expect(envAttr(toTeammate, "kind")).toBe("teammate"); // ★고를 여지를 주지 않는다 — 사실 하나★
+    expect(envAttr(toTeammate, "kind")).toBe("teammate"); // 고를 여지를 주지 않는다 — 사실 하나
   });
 
   test("★답은 여전히 1회 terminal★ — 그러나 봉투는 '보내지 마세요/함수호출 문구' 를 더 이상 싣지 않는다", () => {
     const p = buildPrompt(base);
-    // ★[A] 잔재★: "브릿지가 보내니 너는 다시 보내지 마라" = 이중발송 가드였다 → 사라졌다.
     expect(p).not.toContain("다시 보내지 마세요");
-    // ★함수호출/수집 계약은 이제 AGENTS.md(룰) 소유★ — 봉투에서 빠졌다(중복 계약 방지).
+    // 함수호출/수집 계약은 이제 AGENTS.md(룰) 소유 — 봉투에서 빠졌다(중복 계약 방지).
     expect(p).not.toContain("요청 1개 → 답 1개 → 끝");
     expect(p).not.toContain("팀버스 = 함수 호출");
     // [B] 불변식은 봉투에 남는다: 말하려면 직접 보낸다
@@ -183,12 +156,7 @@ describe("buildPrompt — direct_to_gd 자가발송 금지 지시", () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ★수집(collection) 계약은 봉투에서 빠지고 AGENTS.md(룰 9039834)로 이관됐다★ (2026-07-15)
-//   예전엔 봉투가 "각 팀원에게 한 번씩 … / 다 모이면 종합 1개: send.sh --to …" 를 직접 렌더했다.
-//   그 계약은 ★룰에 더 강하게 있으므로★(AGENTS.md) 봉투에서 제거한다 — 계약이 두 군데면 갈라진다.
-//   ★없는 기능(--collect·"서버가 모아준다")을 시키지 않는다★ 는 여전히 봉투에서 지킨다.
-// ═══════════════════════════════════════════════════════════════════════════════
+// 수집 절차는 AGENTS.md가 정한다. 봉투가 지원하지 않는 번들·--collect 기능을 안내하면 안 된다.
 describe("buildPrompt — 수집 계약은 봉투에서 빠졌다 (룰 이관)", () => {
   const base = {
     agent: { id: "hermes", display_name: "Hermes" } as AgentRecord,
@@ -211,7 +179,7 @@ describe("buildPrompt — 수집 계약은 봉투에서 빠졌다 (룰 이관)",
     }
   });
 
-  // ★없는 기능을 시키지 않는다★ — 이 불변식은 봉투에서 계속 지킨다 (collectRemoved.test.ts 와 대칭)
+  // 없는 기능을 시키지 않는다 — 이 불변식은 봉투에서 계속 지킨다 (collectRemoved.test.ts 와 대칭)
   test("★'--collect'·'서버가 모아준다' 같은 없는 기능을 여전히 약속하지 않는다★", () => {
     for (const locale of ["ko", "en"] as const) {
       const p = buildPrompt({ ...base, locale });
@@ -227,12 +195,7 @@ describe("buildPrompt — 수집 계약은 봉투에서 빠졌다 (룰 이관)",
   });
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ★보안(codex 리뷰)★: threadId 는 서버생성 보장이 아니다(envelope 는 길이만 검사) → 외부가 백틱·
-//   따옴표·개행·공백·선행하이픈이 든 thread_id 를 POST 가능. 그 값을 모델이 복사·실행할 argv 에
-//   보간하면 command/prompt injection. 브릿지 allowlist 로 unsafe 면 리터럴을 아예 안 넣는다.
-//   ★이 describe 는 절대 약화하지 않는다★ — kind 전환 후에도 그대로 통과해야 한다.
-// ═══════════════════════════════════════════════════════════════════════════════
+// threadId는 외부 입력이다. 셸 인자에 복사될 수 있으므로 안전하지 않은 값은 프롬프트 전체에서 제외한다.
 describe("thread id injection 방어 (allowlist)", () => {
   const base = {
     agent: { id: "hermes", display_name: "Hermes" } as AgentRecord,
@@ -251,7 +214,7 @@ describe("thread id injection 방어 (allowlist)", () => {
     ["선행하이픈(argv 옵션 주입)", "--NQw-Op"],
     ["$(...)", "a$(id)b"],
   ] as const;
-  // ★핵심 assertion★: prompt ★전체★에 원문이 없어야 한다. 태그 속성(thread="...")으로도 새면 안 된다.
+  // 핵심 assertion: prompt 전체에 원문이 없어야 한다. 태그 속성(thread="...")으로도 새면 안 된다.
   for (const [label, tid] of unsafe) {
     test(`unsafe thread(${label}) → 프롬프트 ★전체★ 어디에도 원문 부재 (ko/en)`, () => {
       for (const locale of ["ko", "en"] as const) {
@@ -270,11 +233,7 @@ describe("thread id injection 방어 (allowlist)", () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ★답 주소는 호출부가 준다 (추측 금지)★ — 이제 봉투 kind 로 표현된다.
-//   예전엔 꼬리말이 "팀장께 답하라" 라 hermes 가 1:1 질문에도 방에 답했다(30일 87건).
-//   ★hermes 잘못이 아니라 우리가 그렇게 시킨 것이다.★ 이제 호출부가 kind 를 넘기고 봉투가 싣는다.
-// ═══════════════════════════════════════════════════════════════════════════════
+// fromLabel은 수신 주소가 아니므로 답 경로를 추측하지 않고 호출부의 kind를 사용한다.
 describe("buildPrompt — ★답 주소는 호출부가 준다 → 봉투 kind★", () => {
   const base = {
     agent: { id: "hermes", display_name: "Hermes" } as AgentRecord,
@@ -311,7 +270,7 @@ describe("buildPrompt — ★답 주소는 호출부가 준다 → 봉투 kind�
   test("★슬랙 → kind=slack (슬랙 유저 id 를 --to 에 지어넣지 않는다)★", () => {
     const p = buildPrompt({ ...base, threadId: "slack-1", fromLabel: "U01ABCDEF", replyRoute: { kind: "slack" } });
     expect(envAttr(p, "kind")).toBe("slack");
-    // from= 속성에 슬랙 유저가 보이는 건 맞다(누가 보냈는지). ★send.sh --to 명령 자체가 봉투에 없다★
+    // from= 속성에 슬랙 유저가 보이는 건 맞다(누가 보냈는지). send.sh --to 명령 자체가 봉투에 없다
     expect(p).not.toContain("--to U01ABCDEF");
     expect(p).not.toContain("send.sh");
   });
@@ -366,8 +325,6 @@ describe("reactTelegramAsHermes", () => {
   });
 });
 
-// ★hermes 텍스트 전송이 Bot API sendMessage 직접인지★ (2026-07-15, CLI spawn 제거)
-//   뮤테이션 증명: 이 경로를 다시 CLI spawn 으로 되돌리면 fetch 가 안 불려 capturedUrl 이 비어 red.
 describe("postTelegramAsHermes", () => {
   test("calls Telegram sendMessage with the Hermes bot token (no CLI spawn)", async () => {
     process.env.HERMES_TELEGRAM_BOT_TOKEN = "test-token";
@@ -410,13 +367,7 @@ describe("postTelegramAsHermes", () => {
 });
 
 describe("buildPrompt — ★주동사는 '실행해서 보내라' 다★ (2026-08-03 실측)", () => {
-  // hermes 런타임 팀원(Qwen3-Next-80B)이 버스로 깨어나도 조용히 아무 말도 안 했다. 턴은 정상 완료였고, 답을
-  // ★stdout 에 쓰고 끝냈다★ — 서버는 설계상 그걸 버린다. 옛 주동사가 "간결하게 ★답하고★" 여서
-  // 이 모델이 그걸 그대로 실행했기 때문이다(claude 는 뒤의 "말하려면 보내라" 노트와 합쳐 읽는다).
-  //
-  // ★실측 4조합★: 팀원 규칙만 강화 ❌ / "답을 보내세요" ❌(명령을 글로 출력) /
-  //   "실행해서 보내세요" ❌ / ★팀원 규칙 + 이 동사 함께 ✅★(api_calls=2, 버스 도착)
-  // 그래서 이 문장은 ★"실행"을 요구★ 해야 하고, 명령의 형태는 팀원 규칙이 준다.
+  // stdout의 명령 텍스트는 발신이 아니다. 팀원 규칙의 명령 형식과 주입문의 실행 지시를 함께 요구한다.
   const base2 = {
     agent: { id: "member-b", display_name: "Member B" } as AgentRecord,
     threadId: "biS95LYk",
@@ -431,7 +382,7 @@ describe("buildPrompt — ★주동사는 '실행해서 보내라' 다★ (2026-
     const p = buildPrompt({ ...base2, locale: "ko" as const });
     expect(p).toContain("발신 도구를 실제로 실행해서");
     expect(p).toContain("발신 명령을 글로 적는 것은 발신이 아닙니다");
-    // ★회귀가드★: 옛 주동사로 되돌아가면 이 계열 모델이 다시 조용히 침묵한다.
+    // 회귀가드: 옛 주동사로 되돌아가면 이 계열 모델이 다시 조용히 침묵한다.
     expect(p).not.toContain("간결하게 답하고");
   });
 
@@ -452,16 +403,16 @@ describe("buildPrompt — ★주동사는 '실행해서 보내라' 다★ (2026-
 
   test("★정의 문장이 trailer 안에 있다★ — 방아쇠만 남기면 실패한다(변형B 0/5)", () => {
     // D(중간을 원문 "답하고" 로 되돌리고 맨 끝 방아쇠만) → 0/5, api_calls=1. 정의가 없으면 이 모델은
-    // ★명령을 글로 쓰는 것을 발신으로 여긴다.★ 그래서 이 문장은 "중복" 이 아니라 필수다.
+    // 명령을 글로 쓰는 것을 발신으로 여긴다. 그래서 이 문장은 "중복" 이 아니라 필수다.
     const p = buildPrompt({ ...base2, locale: "ko" as const });
     expect(p).toContain("발신 명령을 글로 적는 것은 발신이 아닙니다");
     expect(p).not.toContain("간결하게 답하고"); // 옛 주동사로 되돌아가면 D 와 같아진다
   });
 
   test("★방아쇠가 trailer 맨 마지막에 온다★ (2026-08-03 A/B: 정의만으로는 0/5)", () => {
-    // 실측: 명령형이 중간에 있으면 이 모델은 ★도구를 아예 호출하지 않는다★(api_calls=1, 5/5 —
+    // 실측: 명령형이 중간에 있으면 이 모델은 도구를 아예 호출하지 않는다(api_calls=1, 5/5 —
     // 명령을 완벽히 조립해서 글로만 출력). 맨 끝으로 옮기면 15/15 전부 호출한다.
-    // 그래서 "문구가 있다" 로는 부족하고 ★끝에 있다★ 를 잠근다.
+    // 그래서 "문구가 있다" 로는 부족하고 끝에 있다 를 잠근다.
     for (const locale of ["ko", "en"] as const) {
       const p = buildPrompt({ ...base2, locale }).trimEnd();
       const tail = locale === "ko" ? "전달되지 않습니다.★" : "reaches no one.★";
@@ -470,8 +421,6 @@ describe("buildPrompt — ★주동사는 '실행해서 보내라' 다★ (2026-
   });
 
   test("★침묵 허용 문구는 보존된다★ — 지우지 않고 순서만 바꿨다", () => {
-    // `[NO_REPLY]` 가 문자로 찍히던 사고 뒤에 일부러 넣은 설계다. 삭제 변형(4/10)과 보존 변형(2/5)의
-    // 도구 호출률이 같아서 지울 이유가 없었다 — 이 단정이 "효율화" 로 지워지는 것을 막는다.
     expect(buildPrompt({ ...base2, locale: "ko" as const })).toContain("할 말이 없으면 그냥 안 보내면 됩니다");
   });
 });

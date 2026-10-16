@@ -1,6 +1,6 @@
 /**
- * 관문은 ★전부 막고 예외를 뚫는★ 방향이라, 잘못 걸면 크게 막힌다.
- * 그래서 "막히나" 뿐 아니라 ★"막히면 안 되는 것이 안 막히나"★ 를 같은 무게로 단정한다.
+ * 관문은 전부 막고 예외를 뚫는 방향이라, 잘못 걸면 크게 막힌다.
+ * 그래서 "막히나" 뿐 아니라 "막히면 안 되는 것이 안 막히나" 를 같은 무게로 단정한다.
  */
 import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
@@ -34,7 +34,7 @@ describe("신뢰하지 않는 주소 — 막는다", () => {
   test("★관문을 안 타던 쓰기가 이제 다 막힌다★ — 칸반·영입·퇴사 (2026-07-30 실측 구멍)", async () => {
     const app = appWith(false);
     for (const [path, method] of [
-      ["/team/api/tasks/abc", "PATCH"],      // 칸반 — 전에는 404(통과)였다
+      ["/team/api/tasks/abc", "PATCH"],      // 없는 task 요청도 신뢰 관문을 우회하면 안 된다.
       ["/team/api/members", "POST"],          // 영입
       ["/team/api/members/x", "DELETE"],      // 퇴사
     ] as const) {
@@ -51,7 +51,7 @@ describe("신뢰하지 않는 주소 — 막는다", () => {
   test("★사람이 보는 화면은 조각내지 않고 한 장으로 말한다★", async () => {
     const r = await appWith(false).fetch(req("/team"));
     expect(r.status).toBe(403);
-    // ★text/plain 이면 브라우저가 소스를 그대로 보여준다 — 안내 페이지가 무의미해진다.★
+    // text/plain 이면 브라우저가 소스를 그대로 보여준다 — 안내 페이지가 무의미해진다.
     //   프레임워크 기본값에 기대면 환경에 따라 달라진다(실측: src/web 테스트와 같이 돌면 text/plain).
     expect(r.headers.get("content-type")).toContain("text/html");
     const html = await r.text();
@@ -60,12 +60,10 @@ describe("신뢰하지 않는 주소 — 막는다", () => {
     expect(html).toContain("studio.b3rys.com");
     expect(html).toContain("팀원에게 이대로 물어보세요");
     expect(html).toContain("TEAM_TRUSTED_DASHBOARD_HOSTS");
-    // ★등록이 무엇을 뜻하는지 같이 말해야 한다★
-    //   "등록하면 열린다" 만 알려주면, 인터넷에 그냥 열린 주소를 등록하게 된다.
-    //   그날 실제로 그런 주소가 있었고, 쓰기를 막던 유일한 장치가 이 검사였다.
+    // 신뢰 도메인 등록은 앞단 인증을 전제로 한다. 인증 없이 공개된 도메인을 등록하면 접근 제한이 풀린다.
     expect(html).toContain("팀리드 권한");
     expect(html).toContain("로그인 관문");
-    // ★등록해도 안 열리는 조건도 같이★ (hermes 교차검증) — 이 문단만 읽는 사람은
+    // 등록해도 안 열리는 조건도 같이 (hermes 교차검증) — 이 문단만 읽는 사람은
     //   "등록 + 재시작 = 열린다" 로 읽는다. TEAM_BIND 가 루프백이 아니면 무시된다.
     expect(html).toContain("TEAM_BIND");
   });
@@ -112,7 +110,7 @@ describe("막히면 안 되는 것 — 안 막힌다", () => {
 });
 
 describe("관문은 ★한 곳★ 이고, 그 아래 붙는 것은 전부 덮인다", () => {
-  // ★이게 이 설계의 전부다.★ 실제 index.ts 와 같은 모양으로 조립해서, 하위 앱을 mount 해도
+  // 이게 이 설계의 전부다. 실제 index.ts 와 같은 모양으로 조립해서, 하위 앱을 mount 해도
   //   부모에 건 관문이 덮는지 확인한다. 앞서는 app·reports 두 곳에 각각 걸었는데(덧대기),
   //   붙일 곳이 늘 때마다 또 붙여야 하는 모양이라 한 곳으로 합쳤다.
   function rootLike() {
@@ -124,8 +122,8 @@ describe("관문은 ★한 곳★ 이고, 그 아래 붙는 것은 전부 덮인
     portal.get("/", (c) => c.text("portal"));
 
     const root = new Hono();
-    root.get("/health", (c) => c.json({ ok: true }));               // ★관문 위★ — 유일한 예외
-    root.use("*", createHostGate({ isTrusted: () => false }));      // ★관문★
+    root.get("/health", (c) => c.json({ ok: true }));               // 관문 위 — 유일한 예외
+    root.use("*", createHostGate({ isTrusted: () => false }));      // 관문
     root.route("/team", dash);                                      // 아래는 전부 덮인다
     root.route("/reports", portal);
     return root;

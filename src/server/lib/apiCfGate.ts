@@ -1,20 +1,4 @@
-/**
- * /api 원격 게이트 — Cloudflare Access 증명서(JWT)로 원격 호출을 검증한다.
- *
- * 왜 필요한가: /team/api 는 지금까지 CF 엣지 로그인(302)만이 방어였고, 서버는 Host=dev.b3rys.com 을
- * 신뢰 대시보드로 보고 lead 로 취급했다(opAuth). 원격 앱(Steno)이 서비스 토큰으로 붙으려면
- * ① CF 가 붙여준 증명서를 서버가 직접 검증하고 ② 그 서비스 토큰이 우리 매핑표에 있어야 한다 —
- * /team/mcp 가 이미 하는 방식(mcpAuth)을 /api 에도 그대로 적용한다.
- *
- * 로컬 호출은 검사하지 않는다: Host 가 loopback 이고 CF 프록시 헤더(cf-ray·cf-connecting-ip)가 없으면 로컬이다.
- * 터널을 지나온 요청은 TCP 로는 127.0.0.1 에서 오지만 Host 가 공개 도메인이고 CF 헤더가 붙는다 — 그래서
- * 소켓 주소가 아니라 이 둘로 가른다. (로컬 호출자가 Host 를 꾸며도 로컬은 원래 신뢰 범위다.)
- *
- * 설정(env):
- *   B3OS_API_CF_AUD          허용 Access 앱 AUD, 쉼표 구분. ★비어 있으면 게이트 off★(현행 유지 — 엣지만 방어).
- *   B3OS_MCP_CF_TEAM_DOMAIN  팀 도메인(mcpAuth 와 공유).
- *   B3OS_MCP_PRINCIPALS      서비스 토큰 subject → agent 매핑(mcpAuth 와 공유). 사람 로그인은 매핑 없이 통과.
- */
+// 원격 호출은 Cloudflare JWT와 서비스 토큰 매핑을 함께 검증한다. 터널도 loopback에서 접속하므로 로컬 판정은 Host와 CF 프록시 헤더를 사용한다.
 import type { Context, MiddlewareHandler } from "hono";
 import type { JWTPayload } from "jose";
 import { CF_JWT_HEADER, parsePrincipalMap, subjectFromPayload, verifyCfAccessJwt } from "../mcp/mcpAuth";

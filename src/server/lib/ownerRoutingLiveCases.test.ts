@@ -1,16 +1,4 @@
-/**
- * Owner routing — GD 라이브 테스트 케이스 회귀 스위트 (2026-06-05).
- *
- * GD 가 텔레그램에서 직접 친 케이스들을 결정론 회귀 테스트로 고정한다.
- * owner 룰: @멘션 > 답장(원문작성자) > sticky(이전 owner 유지) > 기본.
- * topic_shift/closure 자동감지는 2026-06-05 제거됨 — owner 는 GD 명시행동(@멘션/답장) 전엔 안 바뀜.
- *
- * 이 7개는 전부 결정론(멘션/답장/sticky)이라 regex 라우터와 hybrid 라우터가 동일 결과를 내야 한다.
- * (hybrid 는 이 신호들에서 LLM 을 타지 않고 early-return → 비결정 exaone 의존 없음)
- *
- * case 6(받은 팀원이 GD 에게 직접 응답 = direct_to_gd 플래그)은 라우팅 결정이 아니라
- * Bill 의 플래그 부착 + 수신자 bridge 동작이라 directReplyFlag.test.ts 에서 별도 검증.
- */
+// 명시 멘션·답장·직전 owner 신호는 결정론적이므로 regex와 hybrid 라우터의 결과가 같아야 한다.
 import { describe, expect, test } from "bun:test";
 import type { AgentRecord } from "../types";
 import { routeTeamMessage, routeTeamMessageHybrid, type RouterContext } from "./teamRouter";

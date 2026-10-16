@@ -4,16 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-/**
- * ★claude 의 @import 는 맨 줄에 홀로 있어야 확장된다.★ (2026-08-19 실측)
- *
- * 전에는 "역할·persona 는 `@SOUL.md` 참조" 처럼 ★문장 안 백틱★ 에 넣어뒀다.
- * 백틱은 코드 표기라 확장되지 않는다 — 그래서 ★모든 claude 팀원의 persona 가 한 번도 로드된 적이 없다.★
- * 그런데 그 문장은 "자동 inline 로드" 라고 ★단언★ 하고 있었다.
- *
- * 실측(같은 CLAUDE.md 안에 두 형태를 넣고 표식을 물었다):
- *   `@BACKTICK.md` → ★"모름"★     ·     @BARE.md → ★표식을 맞힘★
- */
+// claude의 @import는 맨 줄에 홀로 있어야 확장된다. 문장 안 백틱은 코드 표기여서 파일을 로드하지 않는다.
 function ws(): string {
   const d = mkdtempSync(join(tmpdir(), "soulimp-"));
   writeFileSync(join(d, "SOUL.md"), "성격 본문");

@@ -1,13 +1,4 @@
-/**
- * ★미디어 폴더는 실행 위치(cwd)에 기대면 안 된다.★
- *
- * 라이브에서 난 일: dex 브리지는 launchd 가 ★작업 디렉토리 없이★ 띄운다 → `process.cwd()` 가 `/` 다.
- * 옛 기본값 `join(process.cwd(), "..", "team-media")` 는 그때 ★`/team-media`★ 로 풀렸고,
- * 루트는 읽기전용이라 팀장님이 보낸 사진이 전부 `EROFS: mkdir /team-media` 로 실패했다.
- * ★서버는 plist 에 WorkingDirectory 가 있어 멀쩡했다★ — 그래서 시험도 라이브 그룹 경로도 이 결함을 못 봤다.
- *
- * ★이 시험은 cwd 를 실제로 `/` 로 바꿔놓고 잰다★ — 그게 이 결함이 사는 유일한 조건이다.
- */
+// WorkingDirectory 없는 launchd 프로세스의 cwd는 /일 수 있다. 그 상태에서도 읽기전용 루트 대신 올바른 미디어 경로를 쓰는지 검사한다.
 import { describe, expect, test, afterEach } from "bun:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

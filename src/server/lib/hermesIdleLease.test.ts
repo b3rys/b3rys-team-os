@@ -1,13 +1,4 @@
-/**
- * ★턴 상한이 재는 것을 '일한 시간' 에서 '조용한 시간' 으로 바꾸고, 예약(lease)을 생존신호로 갱신한다.★
- *
- * ★고치는 결함 두 개 — 서로 반대 방향이다★
- *  ① 지금까지: 출력이 계속 나오는 ★멀쩡한 턴도★ 상한에서 죽었다(실측 12건이 90초에).
- *  ② 그렇다고 상한만 없애면: 매달린 자식은 출력이 없어 ★예약도 안 밀리고★ → 예약 만료 →
- *     `recoverStaleClaims` 가 행을 `pending` 으로 되돌림 → ★같은 메시지가 다시 디스패치★ → ★중복 실행.★
- *
- * 그래서 ★둘을 한 세트로★ 시험한다 — 하나만 있으면 다른 하나가 깨진다.
- */
+// 출력이 있으면 lease를 갱신하되 무응답 자식은 종료해야 한다. 한쪽만 보장하면 정상 턴 중단 또는 lease 회수 뒤 중복 실행이 생긴다.
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { EventEmitter } from "node:events";
@@ -31,9 +22,9 @@ function setupDb(): Database {
   db.run(`INSERT INTO message_recipient (message_id, agent_id) VALUES ('m1','hermes')`);
   return db;
 }
-/** 예약을 ★과거 시각★ 으로 되돌린다 — "턴이 예약보다 오래 걸린" 상태를 실제로 만든다.
+/** 예약을 과거 시각 으로 되돌린다 — "턴이 예약보다 오래 걸린" 상태를 실제로 만든다.
  *  (markDispatching 에 음수 초를 넘기면 `'+-5 seconds'` 가 되어 SQLite 가 NULL 을 준다 — 그러면
- *   회수 조건 `lease_until < now` 가 성립하지 않아 ★시험이 조용히 통과해버린다.★) */
+ *   회수 조건 `lease_until < now` 가 성립하지 않아 시험이 조용히 통과해버린다.) */
 function expireLease(db: Database, id = "m1"): void {
   db.run(`UPDATE message_recipient SET lease_until = datetime('now','-5 seconds') WHERE message_id = ?`, [id]);
 }
@@ -83,7 +74,7 @@ const hermes: AgentRecord = {
   persona_file: "", moderator_eligible: true, avatar_emoji: "", hermes_profile: undefined,
 };
 
-/** 진짜 hermes 를 띄우지 않고 ★출력만 흉내내는★ 가짜 자식. */
+/** 진짜 hermes 를 띄우지 않고 출력만 흉내내는 가짜 자식. */
 function fakeProc() {
   const proc = new EventEmitter() as EventEmitter & {
     stdout: EventEmitter; stderr: EventEmitter;

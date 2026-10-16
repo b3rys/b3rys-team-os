@@ -1,23 +1,4 @@
-/**
- * teamRouter — barrel (re-export).
- *
- * The implementation was split (2026-06-06, strangler refactor) into modules under
- * ./teamRouter/ — mention / gate / legacy / defaultIntake / ownerDecision (+ shared
- * types & helpers). This file stays as the stable entry point so every existing
- * `import { … } from ".../lib/teamRouter"` keeps working unchanged.
- *
- * Module map (Devon guidance: keep mention regexes together, isolate legacy):
- *   _shared       — RouterContext, RouteDecision, RouteIntent, LlmRouteDecision,
- *                   OLLAMA_URL/ROUTER_MODEL, buildRosterText, classifyIntent
- *                   (default_step owner = coordinator capability via lib/capabilities.coordinatorId)
- *   mention       — aliasesFor, hasTelegramMention, hasRestrictedMention, escapeRegex,
- *                   stripExampleRegions, detectExplicitTargets, detectAddressedNamesLoose
- *                   (+ dead code retained: hasAddressedAlias, filterLiveWakeTargets)
- *   gate          — isConfidentOwner, shouldSuppress, leadingAddressee  (ownerGate)
- *   legacy        — hasTopicShift, isClosure  (topic_shift/closure — NOT in current routing path)
- *   defaultIntake — routeDefaultIntakeLLM  (b3rys owner-inference LLM)
- *   ownerDecision — routeTeamMessage (sync fallback), routeTeamMessageLLM, routeTeamMessageHybrid
- */
+// 하위 모듈을 공통 진입점으로 재수출한다. 기존 import 경로를 유지하기 위한 파일이다.
 export * from "./teamRouter/_shared";
 export * from "./teamRouter/mention";
 export * from "./teamRouter/gate";

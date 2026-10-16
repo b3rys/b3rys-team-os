@@ -69,14 +69,14 @@ function isAgentCodexSandbox(value: unknown): value is AgentRecord["codex_sandbo
 // 기본값)는 agent id 문자열만 받고 AgentRecord 배열을 받지 못한다(공개 시그니처 보존 — 기존
 // 테스트가 string id 로 호출). 이런 경우만 여기서 agents.json 을 lazy 로드(mtime 캐시)해 capability
 // 를 조회한다. 인메모리 agents 배열을 받는 호출부는 그 배열을 직접 쓰고 ambient 를 쓰지 않는다.
-// ★경로는 호출 시점에 읽는다(모듈 로드 시점 const 가 아니다).★ const 로 두면
+// 경로는 호출 시점에 읽는다(모듈 로드 시점 const 가 아니다). const 로 두면
 //   TEAM_AGENT_REGISTRY override 가 "이 모듈이 처음 import 되기 전에 env 를 세웠는가"라는
 //   import 순서에 좌우된다 — 한 프로세스에서 여러 테스트 파일이 도는 bun test 에선 사실상
 //   제어 불가라, 파일 단독 실행은 통과하고 전체 실행은 깨진다. 함수로 읽으면 순서와 무관하다.
 function ambientRegistryPath(): string {
   return process.env.TEAM_AGENT_REGISTRY ?? join(import.meta.dir, "../../../agents.json");
 }
-// 캐시 키에 ★경로까지★ 넣는다 — 경로가 바뀌었는데 mtime 만 비교하면 옛 로스터를 돌려준다.
+// 캐시 키에 경로까지 넣는다 — 경로가 바뀌었는데 mtime 만 비교하면 옛 로스터를 돌려준다.
 let _ambientCache: { path: string; mtimeMs: number; agents: AgentRecord[] } | null = null;
 
 export function ambientAgents(): AgentRecord[] {
@@ -88,7 +88,7 @@ export function ambientAgents(): AgentRecord[] {
     _ambientCache = { path, mtimeMs, agents };
     return agents;
   } catch {
-    // 파일 없음(공개 clone 첫 부팅 등) → ★같은 경로★ 캐시가 있으면 그것, 없으면 빈 로스터.
+    // 파일 없음(공개 clone 첫 부팅 등) → 같은 경로 캐시가 있으면 그것, 없으면 빈 로스터.
     return _ambientCache?.path === path ? _ambientCache.agents : [];
   }
 }
@@ -121,10 +121,7 @@ export function syncRegistry(db: Database, registryPath: string, repoRoot?: stri
   for (const a of agents) upsertAgent(db, a);
   deleteAgentsNotIn(db, agents.map((a) => a.id));
   appendAudit(db, "system", "registry_synced", null, { count: agents.length });
-  // load-time coordinator 검증 — 정확히 1명이 아니면 경고 + audit(공개 사용자 agents.json 오타/누락 가시화).
-  // ★단, 팀원 0명(새 설치)은 오타·누락이 아니라 정상 초기 상태★ — 그런데도 경고를 찍으면 새 사용자가
-  //   보는 첫 기동 로그 맨 첫 줄이 경고라 "설치가 깨졌나"로 읽힌다(2026-07-25 공개 클린설치 리허설).
-  //   → 0명은 안내 문구로 낮추고, agents 가 있는데 coordinator 가 0/2+ 인 진짜 오류만 경고 + audit.
+  // 새 설치의 빈 명부는 정상이다. 멤버가 있는데 coordinator가 없거나 여러 명인 구성에만 경고와 audit를 남긴다.
   const cc = validateCoordinators(agents);
   if (!cc.ok && agents.length === 0) {
     console.log("[registry] 팀원 0명 — 첫 팀원을 영입하면 coordinator 가 자동 지정됩니다.");

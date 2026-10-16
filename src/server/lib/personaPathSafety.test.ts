@@ -1,14 +1,4 @@
-/**
- * ★팀원 룰 파일에 '렌더를 돌린 자리' 가 박히는 것을 잡는다.★
- *
- * ═══ 이건 가정이 아니라 라이브에서 터진 일이다 ═══
- * `REPO_ROOT` 가 `resolve(import.meta.dir, "../../..")` 뿐이라서, ★워크트리에서 렌더하면 워크트리 경로가 박혔다.★
- * 실측(2026-08-01): devon·ames·codex 의 AGENTS.md 가 전부 `~/Development/.worktrees/fu-150/...` 를 가리키고
- * 있었고, 그 트리의 TEAM-OS 는 라이브와 내용이 달랐다 — ★세 팀원이 다른 룰을 읽고 있었다.★
- * 게다가 같은 셋은 `{{TEAM}}`·`{{OWNER}}` 치환도 안 돼서 ★팀 이름과 팀장 이름이 안 적혀 있었다.★
- *
- * 그래서 검사 대상은 "코드가 맞나" 가 아니라 ★렌더 산출물에 그 흔적이 있나★ 다.
- */
+// 워크트리에서 렌더해도 팀원 파일은 정본 저장소를 가리켜야 한다. 실행 위치가 산출물 경로에 섞이는지 검사한다.
 import { describe, expect, it } from "bun:test";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { buildAgentsMd, buildPersona, REPO_ROOT } from "./personaTemplates";
@@ -47,7 +37,7 @@ describe("★렌더 산출물에 워크트리 경로·미치환 플레이스홀�
 
     it(`${runtime}: 경로 기준(b3os=)을 선언한 뒤에만 상대경로를 쓴다`, () => {
       const out = render(runtime);
-      // 기준 선언이 없으면 `b3os/...` 는 어디 기준인지 알 수 없는 문자열이 된다(lui 2026-08-01 지적).
+      // 기준 선언이 없으면 b3os/... 상대경로를 어디에서 해석할지 알 수 없다.
       if (out.includes("`b3os/")) {
         expect(out, "★상대경로를 쓰면서 기준(b3os=)을 선언하지 않았다★").toContain("**Paths**: `b3os` = `");
       }
@@ -63,7 +53,7 @@ describe("★스킬 목록은 디렉터리에서 생성된다 — 손으로 나�
       )
     : [];
 
-  // ★계약: trigger: 를 선언한 스킬만 나간다★. 선언 안 한 것이 새어나가면 그것도 결함이다.
+  // 계약: trigger: 를 선언한 스킬만 나간다. 선언 안 한 것이 새어나가면 그것도 결함이다.
   const declared = skillNames.filter((n) =>
     /^trigger:/m.test(readFileSync(`${REPO_ROOT}/skills/${n}/SKILL.md`, "utf8").slice(0, 4000)));
   const undeclared = skillNames.filter((n) => !declared.includes(n));

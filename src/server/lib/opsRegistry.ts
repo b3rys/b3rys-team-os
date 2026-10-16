@@ -1,12 +1,4 @@
-// opsRegistry — 잡/기능을 한 레지스트리로 모아 *조건부 on/off* 관리(P1 설계: Bill+Codex+Steve).
-//
-// 설계 핵심(Codex 리뷰):
-//   - 각 항목 = 공통 envelope(메타) + desired_enabled(사용자 토글) + conditions(선언형 predicate).
-//   - predicate는 함수명 저장 X → type+params 로 저장(UI·audit 가 설명 가능).
-//   - 4상태 분리: eligible(조건 충족) / desired(사용자 토글) / effective(실제 활성) / reason_codes(왜).
-//   - agent capability registry 와는 *분리*(여긴 ops 기능/잡). predicate engine 만 공유, team 조건은 agent registry read-only 참조.
-//   - 스케줄러는 effective_enabled=true 인 job 만 돌린다(P1 후속 단계).
-//   - ★자동 enable ≠ 실행 허가: 조건 충족=켜질 자격. 위험기능(외부전송/배포/삭제) 첫 실행은 별도 approval(여기 밖).
+// 조건 충족은 활성화 자격이며 실행 허가와 다르다. 외부전송·배포·삭제의 첫 실행 승인은 이 레지스트리 밖에서 처리한다.
 import type { Database } from "bun:sqlite";
 
 // ── 조건 predicate (선언형, type+params) ───────────────────────────

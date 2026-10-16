@@ -1,14 +1,4 @@
-/**
- * activation — claude_channel poller 헬스게이트(waitForClaudePoller) 단위 테스트.
- *
- * 대상: 봇이 tmux로 떠도 텔레그램 플러그인 MCP(poller)가 실제 기동해 bot.pid를 써야 '진짜 대화됨'.
- *   bot.pid 미출현 = 죽은 봇('귀머거리')이 '합류 완료'로 거짓표시되던 근본. 이 게이트로 activateMember가
- *   poller 확인 실패 시 ok:false(step "poller")로 실패시킨다(d383175).
- *
- * ⚠️ 격리(2026-07-01 Steve 인시던트 방지): 실 HOME/~/.claude·라이브 봇을 절대 건드리지 않는다.
- *   waitForClaudePoller에 opts.homeDir=temp dir + 짧은 intervalMs를 주입해 tmp 경로만 검사한다.
- *   process.env.HOME은 읽지도 쓰지도 않는다(opts.homeDir override가 우선).
- */
+// tmux 세션만으로 poller 기동을 보장할 수 없어 bot.pid를 확인한다. homeDir는 임시 경로를 주입해 라이브 봇을 보호한다.
 import { describe, expect, test, beforeAll, beforeEach, afterEach } from "bun:test";
 import { ensureRenderedTeamOs } from "./testSupport";
 import { Database } from "bun:sqlite";
@@ -628,7 +618,7 @@ describe("activation: swapRuntime", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.code).toBe("activate_failed");
-    // ★핵심: 토큰 없으면 teardown 전에 중단 → 구 런타임 무손상(self-lock 아웃티지 방지 하네스 fix)★
+    // 토큰이 없으면 teardown 전에 중단해야 기존 런타임을 보존할 수 있다.
     expect(teardownCalled).toBe(false);
     const precheck = result.steps.find((s) => s.step === "token-precheck");
     expect(precheck?.ok).toBe(false);
@@ -646,13 +636,13 @@ describe("activation: swapRuntime", () => {
     let teardownCalled = false;
     const result = await swapRuntime(db, { id: "nova", targetRuntime: "codex", registryPath }, {
       checkRuntimeAuth: authOk,
-      // ★실 teardown 의미 재현 — 구 런타임 토큰파일 삭제★. 캡처가 teardown보다 먼저여야 활성화가 토큰을 받는다.
+      // 실 teardown 의미 재현 — 구 런타임 토큰파일 삭제. 캡처가 teardown보다 먼저여야 활성화가 토큰을 받는다.
       teardownRuntime: async () => { teardownCalled = true; require("node:fs").rmSync(tokenFile, { force: true }); return { ok: true, detail: "deleted-token(test)" }; },
       activateMember: async (_db: any, args: any): Promise<ActivateResult> => { capturedToken = args?.bot_token; return { ok: true, steps: [{ step: "runtime", ok: true, detail: "mock" }] }; },
     });
     expect(result.ok).toBe(true);
     expect(teardownCalled).toBe(true);        // teardown이 실제로 토큰파일을 지웠음
-    expect(capturedToken).toBe(FAKE_TOKEN);   // ★그럼에도 활성화가 토큰 수신 = teardown 전에 캡처됐다는 증명(dead-code 아님)★
+    expect(capturedToken).toBe(FAKE_TOKEN);   // 그럼에도 활성화가 토큰 수신 = teardown 전에 캡처됐다는 증명(dead-code 아님)
   });
 });
 
@@ -687,15 +677,7 @@ describe("activation: swap 후 persona 정합성의 근거 — buildPersona/buil
   });
 });
 
-// ── ★첫 claude 멤버 활성화는 '실패' 가 아니라 '거의 완료 — 마지막 한 단계'★ (2026-07-25 맥스튜디오 실기) ──
-//
-// 실기 증상: 첫 claude 멤버(lisa)가 봇 정상 기동·토큰 OK·poller OK 인데도
-//   'error: claude 필수설정 누락 — 재활성화/설정 복구 필요' + OT '활성화 실패 — 재시도 필요' 로 떴다.
-//   실제 남은 일은 팀장이 그 봇에게 DM 을 한 번 보내는 것뿐이라 ★재시도로는 절대 안 풀린다★
-//   (DM 한 통 보내니 재시도 없이 통과, 두 번째 멤버는 첫 멤버 것을 시드받아 DM 없이 통과).
-//
-// activateMember 전체는 tmux·launchd 를 건드려 유닛에서 못 돌리므로, 판정부(classifyEssentials)를
-// 순수 함수로 분리해 규칙을 고정한다. ★관용은 페어링 대기일 때, allowFrom 에만★ 적용돼야 한다.
+// 첫 claude 멤버의 페어링 대기는 DM 1회가 필요하다. allowFrom 관용이 다른 필수설정 누락까지 숨기면 안 된다.
 describe("classifyEssentials — 페어링 대기 관용 경계", () => {
   const CLAUDE_OPTS = { tolerate: ["poller:"], tolerateWhenPairing: ["allowFrom:"] };
 
@@ -770,15 +752,7 @@ describe("classifyEssentials — 페어링 대기 관용 경계", () => {
   });
 });
 
-// ── ★M5a 갭 차단★: 판정부만 고정하면 '그 함수를 어떤 옵션으로 부르는가' 는 무방비다 ──
-//
-// Bill 교차검증(2026-07-25): claude 호출부에서 tolerateWhenPairing 옵션 하나만 지우면
-//   essentials 가 하드실패로 돌아가 '필수설정 누락 — 재활성화/설정 복구 필요' 라는 ★이 PR 이 고친
-//   원래 버그가 그대로 부활★ 하는데도 1631개 테스트가 전부 통과했다. 순수함수(classifyEssentials)는
-//   잘 고정돼 있었지만 호출부 opts 는 인라인 리터럴이라 어떤 테스트도 보지 않았기 때문이다.
-//
-// 그래서 호출부 opts 를 공유 상수(CLAUDE_ESSENTIAL_TOLERANCE)로 빼고 ★그 상수를 통과시켜★ 검증한다.
-// 라우트 레벨로는 못 잡는다 — 라우트 테스트는 activateMember 를 주입 모킹해서 activation.ts 를 안 태운다.
+// 판정부뿐 아니라 실제 호출부의 관용 옵션도 검증한다. 라우트 테스트는 activateMember를 모킹하므로 이 배선을 검사하지 못한다.
 describe("CLAUDE_ESSENTIAL_TOLERANCE — claude 활성화 호출부의 관용 정책", () => {
   const PAIRING_WAITING = {
     ok: false,
@@ -814,7 +788,7 @@ describe("CLAUDE_ESSENTIAL_TOLERANCE — claude 활성화 호출부의 관용 �
     }
   });
 
-  // 위 세 건은 '상수의 내용' 을 고정한다. 이 건은 ★claude 분기가 실제로 그 상수를 쓰는지★ 를 고정한다 —
+  // 위 세 건은 '상수의 내용' 을 고정한다. 이 건은 claude 분기가 실제로 그 상수를 쓰는지 를 고정한다 —
   // 상수를 놔둔 채 호출부만 인라인 리터럴로 되돌리는 변형까지 막는 소스 레벨 가드.
   test("claude 분기가 인라인 리터럴이 아니라 이 상수를 넘긴다(정적 가드)", () => {
     const src = readFileSync(new URL("./activation.ts", import.meta.url), "utf-8");

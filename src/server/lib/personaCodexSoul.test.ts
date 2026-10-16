@@ -5,14 +5,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-/**
- * ★codex 는 SOUL.md 를 안 읽는다 — 실측이다(2026-08-19).★
- *
- * 임시 작업폴더에 AGENTS.md·SOUL.md 를 두고 각각 다른 표식을 심어 물었더니,
- * ★도구를 한 번도 안 쓰고★ AGENTS.md 표식은 맞히고 SOUL.md 표식은 "모름" 이었다.
- * 그런데 렌더러는 "이 런타임이 SOUL.md 를 함께 로드" 라고 ★단언★ 하고 있었다 —
- * 그래서 dex 는 역할도 말투도 없이 돌았다.
- */
+// codex는 SOUL.md를 자동 로드하지 않으므로 페르소나 본문을 AGENTS.md에 포함해야 한다.
 function ws(soul?: string): string {
   const d = mkdtempSync(join(tmpdir(), "persona-"));
   if (soul !== undefined) writeFileSync(join(d, "SOUL.md"), soul);
@@ -67,12 +60,7 @@ describe("★비어 있을 때야말로 비었다고 말한다★ (리뷰 지적
   });
 
   test("★runtime 조건이 실제로 지킨다★ — soul_text 가 와도 codex 가 아니면 본문을 안 싣는다(두 벌 방지)", () => {
-    // ★두 번째 겹을 직접 부른다★ — 호출부(writeMemberPersona)가 codex 에만 넘겨서 도달 불가라
-    //   이 조건을 지워도 아무도 모르는 상태였다(리뷰 지적).
-    //
-    // ★런타임 고르기가 중요하다.★ 처음엔 claude_channel 로 불렀는데, personaPointer 의 ★첫 줄★ 이
-    //   claude 를 먼저 걸러 return 한다 — 그래서 codex 조건에 ★도달조차 못 했고★, 조건을 지워도 초록이었다.
-    //   ★시험이 주장하는 것을 재고 있지 않았다.★ openclaw 는 앞 분기를 안 타고 여기까지 내려온다.
+    // claude는 앞 분기에서 반환하므로 codex 전용 조건의 반대 경로는 openclaw로 검사해야 도달한다.
     for (const runtime of ["openclaw", "hermes_agent"]) {
       const out = buildAgentsMd({
         id: "x", display_name: "X", role: "r", runtime, soul_text: "성격 본문",

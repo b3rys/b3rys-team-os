@@ -1,13 +1,4 @@
-// 팀원 모델 전환 — 런타임별로 "지금 무엇을 쓰나 · 새 모델이 실제로 되나 · 바꾸고 확인하고 안 되면 되돌린다".
-//
-// 왜: 새 프론티어 모델이 나올 때마다 런타임(hermes · codex · openclaw)별로 설정 파일 위치·모양·재시작 방법·
-// 확인 방법이 달라 사람이 손으로 했다. 이 모듈이 그 절차를 한 곳에 둔다.
-//
-// 원칙
-//   · 기본은 미리보기(dry-run). 실제로 바꾸는 것은 apply 에 yes=true 를 줄 때만.
-//   · 한 팀원씩: 백업 → 설정 한 줄 → 그 팀원만 재시작 → 실제 응답 모델 확인 → 실패하면 백업 복원 + 재시작.
-//   · "목록에 있다" 와 "쓸 수 있다" 를 가른다. check 는 실제 호출(hermes·codex) 또는 런타임 자신의 판정(openclaw)을 본다.
-//   · 인증·한도 실패는 "지원 안 됨" 이 아니라 "확인 불가" 로 보고한다.
+// 설정 위치·재시작·확인이 런타임마다 달라 한 절차로 관리한다. 기본은 미리보기이며 실제 변경은 백업 후 한 멤버씩 수행하고 실패 시 복원한다.
 import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdtempSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, homedir } from "node:os";
@@ -320,7 +311,7 @@ export async function applyMember(member: Member, target: { model: string; effor
       steps.push({ member: member.id, action: "rollback", ok: false, detail: `${why} → 복원 실패: ${(e as Error).message} — 백업 ${backup} 를 손으로` });
     }
   };
-  // ★쓴 뒤의 모든 경로는 '성공 확인' 또는 '복원' 둘 중 하나로 끝난다★ — 예외도 복원으로.
+  // 쓴 뒤의 모든 경로는 '성공 확인' 또는 '복원' 둘 중 하나로 끝난다 — 예외도 복원으로.
   try {
     const restart = await kick();
     steps.push({ member: member.id, action: "restart", ok: restart.code === 0, detail: member.serviceLabel });
@@ -371,7 +362,7 @@ export async function applyAll(members: Member[], target: { model: string; effor
       steps.push({ member: "openclaw", action: "rollback", ok: false, detail: `${why} → 복원 실패: ${(e as Error).message} — 백업 ${ocBackup} 를 손으로` });
     }
   };
-  // ★백업 뒤의 모든 경로는 '반영 확인' 또는 '복원' 으로 끝난다★ — config set 도중·재시작 도중 예외도 복원으로.
+  // 백업 뒤의 모든 경로는 '반영 확인' 또는 '복원' 으로 끝난다 — config set 도중·재시작 도중 예외도 복원으로.
   try {
     const changed: Member[] = [];
     for (const m of oc) {

@@ -9,12 +9,7 @@ export interface EssentialCheckResult {
   ok: boolean;
   missing: string[];
   canAutoFix: boolean;
-  /** ★설계상 예정된 '사람 1회 조작 대기' 상태★ — 결함이 아니다.
-   *  claude_channel 첫 멤버는 allowFrom 을 복사해올 참조봇이 없어 access.json 이
-   *  `dmPolicy:"pairing", allowFrom:[]` 로 시드된다(launcher.seedClaudeAccess). 남은 일은
-   *  팀장이 그 봇에게 DM 을 한 번 보내는 것뿐이므로, 활성화를 '실패' 로 표시해선 안 된다.
-   *  (2026-07-25 맥스튜디오 실기 클린테스트: 첫 멤버가 '활성화 실패 — 재시도 필요' 로 떴는데
-   *   DM 한 통으로 재시도 없이 통과했다. 두 번째 멤버는 첫 멤버 것을 시드받아 DM 없이 통과.) */
+  // 첫 claude 멤버는 참조봇이 없어 pairing 정책과 빈 allowFrom으로 시작한다. DM 1회로 해소되므로 활성화 실패와 구분한다.
   pendingPairing?: boolean;
 }
 
@@ -80,8 +75,8 @@ function hasJsonArrayKey(path: string, key: string, deps: Required<Pick<RuntimeE
   return Array.isArray(value) && value.length > 0;
 }
 
-/** claude access.json 이 ★첫 멤버 페어링 대기★ 상태인가 — 파일이 정상 존재하고 dmPolicy 가 "pairing"
- *  이며 allowFrom 이 ★빈 배열★ 인 경우만. 파일 부재·손상·다른 정책은 진짜 설정 누락이라 false. */
+/** claude access.json 이 첫 멤버 페어링 대기 상태인가 — 파일이 정상 존재하고 dmPolicy 가 "pairing"
+ *  이며 allowFrom 이 빈 배열 인 경우만. 파일 부재·손상·다른 정책은 진짜 설정 누락이라 false. */
 function isClaudePairingPending(path: string, deps: Required<Pick<RuntimeEssentialDeps, "exists" | "readText">>): boolean {
   if (!deps.exists(path)) return false;
   const obj = parseJson(deps.readText(path));
@@ -116,7 +111,7 @@ function openclawConfig(home: string, deps: Required<Pick<RuntimeEssentialDeps, 
 }
 
 // openclaw 소유자 allowlist 는 버전에 따라 위치가 다르다 — 정본(2026.7.x)은 `commands.ownerAllowFrom`,
-// 구 스키마는 `channels.telegram.ownerAllowFrom`. 둘 중 ★값이 있는 쪽★을 채택한다(빈 배열은 미설정으로 취급).
+// 구 스키마는 `channels.telegram.ownerAllowFrom`. 둘 중 값이 있는 쪽을 채택한다(빈 배열은 미설정으로 취급).
 function openclawOwnerAllowFrom(cfg: any): unknown[] | null {
   for (const candidate of [cfg?.channels?.telegram?.ownerAllowFrom, cfg?.commands?.ownerAllowFrom]) {
     if (Array.isArray(candidate) && candidate.length > 0) return candidate;

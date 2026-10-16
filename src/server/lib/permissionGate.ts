@@ -9,22 +9,22 @@ export type PermissionTier = "allow" | "ask" | "deny";
 export type PermissionAgent = Pick<AgentRecord, "id" | "workspace_path">;
 export type PermissionDecision = "allow" | "deny" | "approval_required";
 /**
- * ★codex 런타임은 이 경로로 요청을 만들지 않는다★ — 실행 모드가 approvalPolicy "never" 라
+ * codex 런타임은 이 경로로 요청을 만들지 않는다 — 실행 모드가 approvalPolicy "never" 라
  * codex 가 승인 요청 자체를 보내지 않는다(appServerRunner.ts). 그 팀원이 유일한 codex 멤버다.
  *
- * 그래서 승인 대기 목록이 계속 비어 있는 것은 ★"위험한 실행이 없었다" 가 아니라
- * "이 런타임에서 요청이 생기지 않는다" 다.★ 두 상태가 같은 화면(빈 목록)으로 보인다.
+ * 그래서 승인 대기 목록이 계속 비어 있는 것은 "위험한 실행이 없었다" 가 아니라
+ * "이 런타임에서 요청이 생기지 않는다" 다. 두 상태가 같은 화면(빈 목록)으로 보인다.
  * 여기 코드는 지우지 않는다 — 정책을 "on-request" 로 되돌리면 그대로 다시 쓰인다.
  */
 export type PermissionRequestStatus = "pending" | "allowed_once" | "allowed_always" | "denied" | "expired";
 /**
  * `allow_session` = 이 세션 동안만 허용.
  *
- * ★status 로는 allow_once 와 구분되지 않는다.★ status 는 CHECK 로 값이 고정돼 있고 그 표는
+ * status 로는 allow_once 와 구분되지 않는다. status 는 CHECK 로 값이 고정돼 있고 그 표는
  * 공개 코드가 모든 설치본에 만든다 — 값을 늘리려면 남의 DB 까지 재작성해야 해서 하지 않는다.
  * 대신 `decision_scope` 칸에 사람이 고른 범위를 그대로 적는다. 결정을 읽을 때는 두 칸을 같이 본다.
  *
- * ★grant 는 만들지 않는다.★ 세션 범위를 실제로 지키는 것은 런타임이고(codex 의 acceptForSession),
+ * grant 는 만들지 않는다. 세션 범위를 실제로 지키는 것은 런타임이고(codex 의 acceptForSession),
  * 우리 표는 사람이 무엇을 골랐는지를 적는 자리다.
  */
 export type PermissionDecisionInput = "allow_once" | "allow_session" | "allow_always" | "deny";
@@ -136,26 +136,7 @@ export function grantKey(agentId: string, scope: string): string {
   return `perm.grant.${agentId}.${scope}`;
 }
 
-/**
- * ★이 층은 현재 운영 경로에서 호출되지 않는다 (2026-08-18 전수 확인).★
- *
- * 진입점: 없음. `safeCheckPermission` 은 `runtimes/codex/permissions.ts` 가 import 만 하고 부르지 않았고,
- * 그 import 는 이 커밋에서 제거했다. `checkPermission`·`hardDeny` 는 이 파일 안에서만 서로를 부른다.
- * 시험은 21건이 남아 있다 — ★이 층이 무엇을 막는지에 대한 유일한 기록이라 함께 보존한다.★
- *
- * 이 층이 꺼져 있는 동안 다음 방어가 ★작동하지 않는다★:
- *   · `tier-d.secret-read-plus-egress` — 비밀 읽기 + 외부 전송 조합 하드 거부
- *   · `tier-d.security-config`         — 인증·크리덴셜 설정 접근 제한
- *   · `tier-d.outside-workspace-write` — 작업폴더 밖 쓰기 하드 거부
- *   · tier-a — workspace-write · 네트워크 송신 · MCP · 비밀 메타데이터 읽기를 ask 로
- *
- * ★지우지 않는 이유★: 삭제하면 위 규칙이 코드에서 사라져, 다시 조일 때 처음부터 재발견해야 한다.
- * 그리고 `tier-d.danger-full-access` 는 "승인 버튼으로 danger 를 줄 수 없다" 는 규칙이지
- * "설정·프로토콜로도 못 연다" 가 아니다 — 실행 모드를 codex 프로토콜로 지정하는 경로와는 다른 층이다.
- *
- * 다시 이으려면 런타임 실행 직전 경로에서 이 함수를 부르고, `evaluatePermission` 이 deny 를 낼 수 있게
- * 해야 한다(아래 주석 참조). 그 전까지 이 파일의 규칙은 ★기록이지 방어가 아니다.★
- */
+// 이 정책 층은 운영 경로에서 호출되지 않아 실제 방어가 아니다. 실행 모드를 여는 프로토콜 설정과 승인창의 danger 권한 부여 제한은 별개다.
 export function safeCheckPermission(
   agent: PermissionAgent,
   action: PermissionAction,
@@ -273,22 +254,9 @@ export function scopeKeyForOperation(op: PermissionOperation): string {
   return createHash("sha256").update(normalized).digest("hex");
 }
 
+// tierDReasons는 위험 사유 표시용이다. 실행 경계는 codex 설정으로, 그 밖의 요청은 사람의 승인으로 판정한다.
 /**
- * ★우리가 판정하지 않는다 — 사람이 판정한다.★
- *
- * 전에는 여기서 Tier-D 목록(sudo·rm -rf·dd 등 정규식 9개)에 걸리면 ★팝업조차 안 만들고 deny★ 했다.
- * 그 목록은 ★우리 코드에 하드코딩★ 되어 있어 사람이 열어볼 수도, 팀원별로 다르게 줄 수도 없었다.
- *
- * ★다른 팀원과 비교하면 이것만 달랐다★ (2026-08-13 실측 — 우리 코드의 차단목록 참조 파일 수):
- *   claude 0 · hermes 0 · openclaw 0 · b3osNative 0 · ★codex 6★
- * 다른 팀원은 그 도구 자체 설정(클로드 settings.json · 헤르메스 자체 기능)을 쓰거나 아예 없다.
- * codex 도 같은 원칙으로 간다 — ★경계는 codex 설정이 정하고, 그 밖은 사람이 승인창에서 정한다.★
- *
- * `tierDReasons` 는 지우지 않는다 — 팝업 본문에 "왜 위험한지" 를 적는 ★표시용★ 으로는 값이 있다.
- * 판정에서만 뺀다.
- */
-/**
- * ★반환은 allow · approval_required 둘뿐이다 — deny 를 내지 않는다.★
+ * 반환은 allow · approval_required 둘뿐이다 — deny 를 내지 않는다.
  * 그래서 `requestPermission` 의 deny 분기(감사 기록 + tier_d_denied)는 현재 도달 불가다.
  * 그 분기를 지우지 않는 이유: 여기에 deny 를 다시 넣는 순간 그 분기가 주 경로가 되는데,
  * 지워져 있으면 감사 기록 없이 살아난다. 도달 불가는 시험으로 고정해 두었다 —
@@ -342,13 +310,13 @@ export function requestPermission(db: Database, op: PermissionOperation): { deci
     JSON.stringify(op.provenance ?? {}),
   );
   const request = getPermissionRequest(db, id)!;
-  // ★팀원 요청은 op 방 대기열에 넣지 않는다.★
+  // 팀원 요청은 op 방 대기열에 넣지 않는다.
   //   "팀원들이 승인을 받을 때는 각자방에 떠야지. op방에 뜨는 건 시스템 알림종류야."
   //   op 대기열(approval_request)에 들어가면 op 방 승인 목록에 렌더된다 — 그게 팀원 승인이
   //   팀 리드 방으로 올라가던 경로였다. 팀원 것은 그 팀원 방으로 간다
   //   (codex 런타임: appServerPopup.sendApprovalToMemberRoom → 브리지가 버튼 처리).
   //   agent_id 가 없는 것 = 특정 팀원의 일이 아닌 시스템 작업 → op 방이 맞다.
-  //   ★감사기록은 어느 쪽이든 남긴다★ — 아래 enqueue 만 건너뛴다(기록까지 빠지면 팀원 요청은 흔적이 없다).
+  //   감사기록은 어느 쪽이든 남긴다 — 아래 enqueue 만 건너뛴다(기록까지 빠지면 팀원 요청은 흔적이 없다).
   if (belongsToMemberRoom(op)) {
     appendPermissionAudit(db, { request_id: id, scope_key, op, target, decision: "requested", approver: null, provenance: op.provenance ?? {} });
     return { decision: "approval_required", reasons: [], request };
@@ -370,14 +338,7 @@ export function requestPermission(db: Database, op: PermissionOperation): { deci
   return { decision: "approval_required", reasons: [], request };
 }
 
-/**
- * ★이 승인이 어디에 뜨는가 — 판정은 여기 한 곳뿐이다.★ (리뷰 지적)
- *
- *
- * 같은 판단이 두 곳에 있으면 ★한쪽만 고치고 '완료' 가 된다★ — 그러면 행이 두 방에 뜨거나
- * 아무 데도 안 뜬다. 그리고 조용하다 — 이 모양으로 3건이 관측됐다.
- * requestPermission 과 telegramCapture 가 ★둘 다 이 함수를 부른다.★
- */
+// requestPermission과 telegramCapture가 같은 표시 위치 판정을 사용해야 승인이 중복되거나 누락되지 않는다.
 export function belongsToMemberRoom(row: { agent_id: string | null } | { agent_id?: string | null }): boolean {
   return Boolean(row.agent_id);
 }
@@ -413,17 +374,14 @@ export function decidePermissionRequest(
     egress_url: stringOrUndefined(payload.egress_url),
     text: stringOrUndefined(payload.text),
   };
-  // ★사람이 누른 것을 우리가 뒤집지 않는다.★
-  //   전에는 Tier-D 목록에 걸리면 ★사람이 허용을 눌러도 거부★ 했다("Tier D cannot be approved").
-  //   그 목록은 우리 코드에 하드코딩돼 있어 사람이 볼 수도, 고칠 수도 없었다.
-  //   위험 사유는 ★팝업 본문에 적어 사람이 보고 판단★ 하게 한다 — 대신 정하지 않는다.
+  // 위험 사유는 표시용이므로 사용자가 승인한 결정을 다시 거부하지 않는다.
   const tierD = tierDReasons(op);
   if (tierD.length) {
-    // 판정은 안 하되 ★무엇이 걸렸는지는 남긴다★ — 나중에 "왜 그때 허용했나" 를 볼 수 있어야 한다.
+    // 판정은 안 하되 무엇이 걸렸는지는 남긴다 — 나중에 "왜 그때 허용했나" 를 볼 수 있어야 한다.
     appendPermissionAudit(db, { request_id: id, scope_key: row.scope_key, op, target: row.target, decision: `risk_noted:${decision}`, approver: opts.approver, provenance: { ...(opts.provenance ?? {}), reasons: tierD } });
   }
 
-  // 세션은 ★지속되는 허가를 남기지 않는다★ — 그 점에서 allowed_once 와 같다. 무엇을 골랐는지는
+  // 세션은 지속되는 허가를 남기지 않는다 — 그 점에서 allowed_once 와 같다. 무엇을 골랐는지는
   // decision_scope 가 말한다. 거절은 범위가 없으므로 null 이다.
   const status: PermissionRequestStatus =
     decision === "allow_always" ? "allowed_always" : decision === "deny" ? "denied" : "allowed_once";
@@ -439,16 +397,7 @@ export function decidePermissionRequest(
   ).run(status, scope, opts.approver, JSON.stringify(opts.provenance ?? {}), id).changes;
   if (changed !== 1) return { ok: false, error: "permission request changed concurrently" };
 
-  // ★'항상 허용' 에 기한을 둔다 — 무기한이 아니다.★ (2026-08-13)
-  //
-  //   전에는 `expires_at = NULL`(무기한) 이었다. 그 행이 있으면 `evaluatePermission` 이 grant 조회에서
-  //   곧장 allow 를 돌려줘 ★팝업조차 안 뜬다.★ Tier-D 판정을 걷어낸 뒤에는 ★위험 명령도 이 경로에 도달한다★
-  //   — 탭 한 번이 ★영구 자동승인★ 이 된다. (하네스 2개가 독립적으로 같은 지점을 지목했다.
-  //   예전에는 Tier-D 가 grant 조회 ★앞줄★ 에서 막아 이 상태가 도달 불가였다.)
-  //
-  //   이 표에는 ★취소 경로가 코드에 없다★(`DELETE FROM permission_grant` 0건). 무기한 + 취소불가는
-  //   되돌릴 수 없는 조합이다. 기한을 두면 ★가만히 둬도 스스로 닫힌다.★
-  //   codex 자신도 세션 단위로만 기억한다(`acceptForSession`) — 우리만 영구를 들고 있을 이유가 없다.
+  // grant가 있으면 승인창 없이 허용되므로 기한을 둔다. 취소 경로가 없어도 만료 후에는 자동승인이 종료되어야 한다.
   const GRANT_TTL_HOURS = 24;
   if (decision === "allow_always") {
     db.prepare(

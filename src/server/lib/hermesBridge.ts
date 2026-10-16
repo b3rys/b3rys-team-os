@@ -21,30 +21,13 @@ export interface HermesTurnOptions {
   messageId: string;
   body: string;
   fromLabel: string;
-  /**
-   * ★답이 어디로 가야 하는지 — 부르는 쪽이 ★안다★. 주입문이 추측하면 안 된다.★
-   *
-   * 예전엔 주입문 꼬리가 무조건 "★팀장께★ 답하라" 였다. 그런데 이 주입문은 ★4가지 상황★ 에 쓰인다:
-   *   버스 1:1(스티브가 물음) / 단톡방(팀장이 부름) / 팀장 직보 / 슬랙 — ★정답이 전부 다르다.★
-   * "팀장께" 는 그중 하나만 맞고 나머지 셋에서 틀렸다. 그래서 hermes 는 1:1 질문에도 방에 대고 답했다
-   * (30일 87건). ★hermes 잘못이 아니라 우리가 그렇게 시킨 것이다.★
-   *
-   * fromLabel 로 추론하는 것도 안 된다 — 단톡방 호출부는 fromLabel 에 ★"팀장 (그룹 라우터)"★ 라는
-   * ★사람이 읽는 fromLabel★ 를 넣는다(팀원 id 가 아니다). 슬랙은 ★슬랙 유저 id★ 를 넣는다.
-   * fromLabel 로 주소를 지어내면 `send.sh --to 팀장 (그룹 라우터)` 같은 헛것이 나온다. (codex 리뷰)
-   *
-   * → ★호출부가 사실을 넘긴다. 주입문은 그걸 그대로 말한다.★
-   *
-   * ★필수(옵셔널 아님)★: 선택 필드로 두면 호출부가 ★조용히 빠뜨릴 수 있다★ — tsc 도 통과하고
-   * 테스트도 안 잡히고, 답 주소만 슬그머니 "팀원에게" 로 되돌아간다(= 단톡방 답이 다시 깨진다).
-   * 필수로 두면 ★배선을 빠뜨리는 순간 컴파일이 안 된다.★ 검사가 아니라 ★구조로★ 막는다.
-   */
+  // fromLabel은 표시용 이름이므로 답 주소로 사용할 수 없다. 호출부가 replyRoute를 반드시 제공해야 배선 누락을 컴파일 시점에 잡는다.
   replyRoute:
     | { kind: "teammate"; to: string } // 버스 1:1 — 물어본 팀원에게 (--to <id>)
     | { kind: "group" } // 단톡방 — 방에 (--to broadcast)
     | { kind: "direct_to_gd" } // 팀장 직보 (--direct-to-gd)
     | { kind: "slack" } // 슬랙 — 같은 thread 로 버스 send, 슬랙 릴레이가 전달
-    | { kind: "notice" }; // ★시스템 알림(카드·마감·전달실패) — 답할 곳이 없다.★ 알림이지 요청이 아니다.
+    | { kind: "notice" }; // 시스템 알림(카드·마감·전달실패) — 답할 곳이 없다. 알림이지 요청이 아니다.
   /** 로케일(ko 기본 · en 토글). owner_name 치환과 직교. */
   locale?: Locale;
   teamContext?: string;
@@ -54,12 +37,12 @@ export interface HermesTurnOptions {
   /** anti-pingpong hop 체인: 받은 메시지의 hop_count. 봉투에 hop_count = (hopCount ?? 0)+1 로 실어 openclaw/claude 봉투와 대칭. */
   hopCount?: number;
   /**
-   * ★이 턴이 아직 살아 있다는 신호.★ hermes 자식이 stdout/stderr 를 흘릴 때마다 불린다.
+   * 이 턴이 아직 살아 있다는 신호. hermes 자식이 stdout/stderr 를 흘릴 때마다 불린다.
    *
-   * 부르는 쪽(버스)이 이걸로 ★예약(lease)을 연장★ 한다 — 그래야 ★일하는 중인 턴이 죽은 것으로
-   * 오인돼 같은 메시지가 다시 디스패치되는 일★ 이 없다. (`extendLease` 주석에 경위)
-   * ★버스 밖 호출부(단톡방·슬랙)는 안 넘겨도 된다★ — 그쪽은 lease 가 없다.
-   * ★던지지 마라★ — 여기서 난 예외는 아래에서 삼킨다(갱신 실패가 턴을 죽이면 안 된다).
+   * 부르는 쪽(버스)이 이걸로 예약(lease)을 연장 한다 — 그래야 일하는 중인 턴이 죽은 것으로
+   * 오인돼 같은 메시지가 다시 디스패치되는 일 이 없다. (`extendLease` 주석에 경위)
+   * 버스 밖 호출부(단톡방·슬랙)는 안 넘겨도 된다 — 그쪽은 lease 가 없다.
+   * 던지지 마라 — 여기서 난 예외는 아래에서 삼킨다(갱신 실패가 턴을 죽이면 안 된다).
    */
   onAlive?: () => void;
 }
@@ -119,134 +102,30 @@ function hermesTelegramBotToken(agent: AgentRecord): string | null {
 export function buildPrompt(opts: HermesTurnOptions): string {
   const locale = opts.locale;
   const owner = pick(locale, "팀장", "the team lead");
-  // Hermes 전용 함수호출 강제: hermes 런타임이 공유 persona 룰만으론 맞장구 루프를
-  //   못 끊어서 bridge 프롬프트에 최상단 강제. 팀버스=call/return, 답은 1회 terminal.
-  // --thread 는 ★들어온 thread(opts.threadId)를 그대로★ 박아 넣는다 (2026-07-12 라이브 회귀):
-  //   '<공통thread>' 같은 placeholder 를 주면 hermes 가 ★새 thread 를 지어내서★ fan-out 한다(실측:
-  //   위임 thread 대신 'lunch-recs-...' 자작). collection 자체는 형성되지만 위임 thread 와 끊겨서
-  //   followup(expect_report_by) 의 thread 바인딩(hasSubstantiveReport 의 json_extract thread_id)이
-  // 빗나가 ★재-wake → GD 중복보고★ 위험. 실제 id 를 문자열로 주면 모델이 복사만 하면 되어 결정론적.
-  //
-  // ★보안(codex 리뷰 2026-07-12)★: threadId 는 '서버 생성'이 아니다. envelopeInboundSchema 는 길이
-  //   4~32 만 보고 문자셋을 안 본다(envelopeSchema.ts) → 외부가 백틱·따옴표·개행·공백이 든 thread_id 를
-  //   POST 할 수 있고, ensureThread 가 그대로 PK 로 만든다. 그 값을 ★모델이 복사해 실행할 argv★
-  //   (`send.sh --thread <값>`) 자리에 보간하면 command/prompt injection 이 된다.
-  //   → 공용 스키마를 조이는 안은 ★기각★: 라이브 thread 1464개 중 33개가 '-' 로 시작하는 nanoid
-  //     (`--NQw-Op` 등)라 charset 앵커에 걸려 버스가 깨진다(회귀). 대신 ★브릿지 로컬 allowlist★ 로
-  //     안전한 id 일 때만 보간하고, 아니면 리터럴을 아예 넣지 않는다(= unsafe 값이 프롬프트에 도달 0).
-  //     '-' 로 시작하는 id 도 거부한다 — `--thread --NQw-Op` 는 옵션으로 파싱되는 argv 주입이라
-  //     metachar 가 없어도 위험하다. 폴백 경로에선 아래 external_message 의 thread 속성을 쓰게 안내.
+  // thread를 새로 만들면 원 요청과 답의 추적이 끊긴다. 외부 입력이 셸 인자로 복사될 수 있어 안전한 ID만 명령에 넣는다.
   const SAFE_THREAD_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/;
   const threadIsSafe = SAFE_THREAD_RE.test(opts.threadId);
-  // 답은 "보낸 사람" 에게 간다. 팀장께가 아니다.
-  //   ★이 줄이 hermes 가 방에 대고 답하던 진짜 원인이었다.★
-  //   예전엔 `${owner}께 답하고` 였다 — ★소유자에게 답하라★ 는 뜻이다. 그런데 이건 ★팀버스 메시지★ 다 —
-  //   보낸 사람이 팀원인데도 소유자에게 답하라고 시켰다. 그래서 hermes 는 방(broadcast)에 대고 썼다.
-  //   ★hermes 잘못이 아니다. 우리가 그렇게 시켰다.★
-  //   그 증상을 서버가 DB 계층에서 몰래 고쳐줬고(messages.ts:63 broadcast→directed 보정),
-  //   ★그 반창고가 오늘 유출을 낳았다★ (DB엔 1:1 로 적히는데 릴레이는 방에 띄움).
-  //   openclaw 는 이미 "발신자에게 응답/ack 를 보내세요" 로 맞게 되어 있다 — ★hermes 만 남아 있었다.★
-  //   (owner 는 승인 게이트에만 쓴다: 큰 변경은 팀장 확인이 필요하다 — 그건 발신자와 무관하다.)
-  // ★답 주소는 ★호출부가 준 사실★ 을 그대로 말한다. fromLabel 로 추측하지 않는다.★
-  //   unsafe 한 id/thread 는 명령으로 만들지 않는다 — hermes 가 그대로 셸 argv 로 복사할 수 있다
-  //   (기존 보안 테스트가 이걸 고정한다. 처음에 raw 로 박았다가 그 테스트에 잡혔다).
-  // ★폴백 없음★ (codex 리뷰): 타입은 필수라 해놓고 `?? { teammate }` 폴백을 두면 ★말과 코드가 다르다★.
-  //   폴백이 있으면 배선을 빠뜨려도 조용히 "팀원에게" 로 돌아간다 = 구조로 막겠다는 취지가 무너진다.
+  // 표시용 발신자 이름으로 주소를 추측하지 않는다. replyRoute 폴백은 호출부 배선 누락을 숨기므로 두지 않는다.
   const route = opts.replyRoute;
-  // ★답 주소는 이제 봉투 kind 로 팀원(룰)이 정한다.★ (2026-07-15 kind 전환)
-  //   예전엔 여기서 route.kind 를 switch 해 "답: send.sh --to …" 명령을 직접 렌더했다. 그 명령을
-  //   ★봉투의 kind 속성★ 으로 대체한다 — 팀원은 AGENTS.md 의 kind→주소 매핑(9039834)으로 정한다.
-  //   서버가 답 주소를 계산해 주는 대신 사실(kind)만 싣는다.
-  //   in_reply_to 는 ★safe 할 때만★ 싣는다 — messageId 도 외부가 POST 할 수 있어(envelope 는 길이만
-  //   검사) unsafe 하면 모델이 그대로 argv 로 복사할 경로가 생긴다. thread 와 같은 allowlist 를 쓴다.
+  // 메시지 ID도 외부 입력이므로 셸 인자에 복사해도 안전할 때만 in_reply_to에 싣는다.
   const msgIsSafe = SAFE_THREAD_RE.test(opts.messageId);
 
   const context = opts.teamContext
     ? `${teamContextLabel(locale)}\n${opts.teamContext}\n\n`
     : "";
-  // (2026-07-10 제거, 제품 결정): directReportNote(자가발송 금지 문구)는 hermes 자가발송을 막으려 넣었으나,
-  //   이중발송의 진짜 원인은 hermes 자가발송이 아니라 어댑터 double-post(makeHermesAdapter insertMessage+surface)
-  //   였고 그건 direct_to_gd시 요청자 버스 insert 스킵으로 수정됨. 노트 필요성 라이브 테스트=노트 없이도 자가발송0.
-  //   전제(자가발송)가 오진이라 제거. (재발 시 어댑터 skip은 유지되니 재추가 용이.) surfaceNote 는 유지.
   const directReportNote = "";
-  // 표면 문구: direct_to_gd 면 브릿지가 owner DM 으로 전달하므로 '그룹 표시' 문구를 넣지 않는다
-  // (directReportNote 의 'DM·그룹금지'와 상충 방지). 일반 턴은 그룹 표시 안내 유지.
-  // ★[B] — 말하려면 보내라.★
-  //   예전엔 "브릿지가 당신의 최종 답변을 전달합니다 — 발신 도구로 다시 보내지 마세요" 였다.
-  //   ★그래서 hermes 는 뭘 쓰든 나갔고, 침묵이 불가능했고, [NO_REPLY] 라는 우회로가 생겼고,
-  //     그 토큰이 팀장 단톡방에 그대로 찍혔다.★ (2026-07-13 라이브)
-  //   ★이제 서버는 대신 말하지 않는다. 턴 본문은 메모다.★
-  // ★주소 메뉴를 주지 않는다.★
-  //   예전엔 여기서 "· 팀원에게 → … · 단톡방에 → … · 팀장께 직보 → …" 라고 ★선택지 3개★ 를 줬다.
-  //   그런데 답 주소는 ★이미 정해져 있다★ (호출부가 안다). 메뉴를 주면 모델이 ★고른다★ —
-  //   ★hermes 본인 증언★: "그 선택지가 붙어 있으면 상위 지시의 '팀장께' 가 routing intent 처럼 보입니다."
-  //   → 메뉴 삭제. ★주소는 아래 trailer 에서 딱 하나만 말한다.★
-  //   여기 남는 건 ★[B] 불변식★ 하나뿐이다: 보낸 것만 말한 것이다.
+  // 턴 본문은 자동 전달되지 않는다. 답 주소 선택지를 중복 안내하면 모델이 경로를 다시 고를 수 있어 kind로만 전달한다.
   const surfaceNote = pick(locale,
     "★말하려면 직접 보내세요. 안 보내면 아무 말도 안 한 것입니다.★ 여기 쓰는 글은 ★당신의 메모★ 일 뿐 아무 데도 안 갑니다 — 서버가 대신 게시하지 않습니다. ★할 말이 없으면 그냥 안 보내면 됩니다★(특별한 토큰 같은 것 필요 없음).",
     "**To speak, you must send. If you do not send, you have said nothing.** What you write here is **your own scratchpad** — it goes nowhere; the server does not post it for you. **If you have nothing to say, simply do not send** (no special token needed).");
-  // ★from=system 이면 그게 무슨 뜻인지 ★말해준다.
-  //   봉투엔 from="system" 이라고만 써 있었다 → ★팀원이 이름을 보고 추측해야 했다.★
-  //   ★요청과 알림이 똑같이 생겼으니 똑같이 답했다★ → --to system → ★30일 40건 증발.★
-  //   ★사실을 그대로 말한다.★ 그러면 답 주소("--to bill")도 ★말이 된다★ — 왜 bill 인지 알게 된다.
+  // system은 사람이 아니므로 응답 대상이 아님을 설명한다. 통지는 about이 있을 때만 해당 팀원에게 답할 수 있다.
   const sysNote =
     opts.fromLabel === "system"
       ? pick(locale,
           "★이건 서버가 보낸 시스템 메시지입니다★ (사람이 보낸 게 아닙니다). ",
           "**This is a system message from the server** (not from a person). ")
       : "";
-  // ★지시문의 ★주동사★ 가 "답하라" 가 아니라 "보내라" 여야 한다.★ (2026-08-03 실측)
-  //
-  // ═══ 무슨 일이 있었나 ═══
-  // hermes 런타임 팀원(Qwen3-Next-80B)이 버스로 깨어나도 ★조용히 아무 말도 안 했다★ — 에러 0, row 는
-  // wake_dispatched 에서 멈춤. 턴은 정상 실행·완료됐다(usage completed:true). 문제는 ★답을 stdout 에
-  // 쓰고 끝낸 것★ 이고, 서버는 설계상 그걸 버린다([B] 아래 참조).
-  //
-  // 예전 문장은 주동사가 "간결하게 ★답하고★" 였고, "말하려면 보내라" 는 뒤의 surfaceNote 에 있었다.
-  // ★claude 팀원은 둘을 합쳐 "send.sh 로 답한다" 로 읽는다. Qwen 은 주동사를 그대로 실행한다.★
-  // ★실측 4조합★ (hermes 런타임 팀원/Qwen3-Next-80B, 2026-08-03. 발신 성공 = 버스 도착 + usage api_calls=2):
-  //   ① 팀원 규칙만 강화 + 옛 동사("답하고")            → ❌ 텍스트만
-  //   ② 동사만 "답을 보내세요"                          → ❌ ★명령을 글로 출력★ 하고 끝(api_calls=1)
-  //   ③ 동사만 "실행해서 보내세요"                      → ❌ 여전히 명령을 글로 출력(api_calls=1)
-  //   ④ ★팀원 규칙(리터럴 명령 템플릿) + 이 동사 함께★  → ✅ 실행·도착(api_calls=2). ★재실측 3/3★
-  // ★동사는 "발신 도구" 에 걸어야 한다★ — 처음엔 "답을 실제로 실행해서 보내세요" 였는데 실행의
-  // 목적어가 답처럼 읽혔다(팀장 지적). 뜻이 바뀌지 않게 "발신 도구를 실제로 실행해서 간결한 답을
-  // 보내세요" 로 고치고 ①(음성 대조)·④(3회) 를 다시 실측했다 — 결과 동일하다.
-  // 알려진 한계: 드물게 도구 루프가 헤매다 hermes 의 컨텍스트 압축 상한에 걸려 실패한다(4회 중 1회,
-  // "max compression attempts (3) reached"). 그때는 조용한 무응답으로 보인다 — 문구와 무관한 별개 현상.
-  // → ★어느 한쪽만으로는 안 된다.★ 이 문장은 "실행" 을 요구하고, 실행할 ★명령의 형태★ 는 팀원
-  //   규칙(AGENTS.md)이 준다. 그래서 여기서 도구 이름·주소를 렌더하지 않아도 성립한다.
-  // (팀원 페르소나 파일 최상단에 같은 규칙을 박아봤지만 ★듣지 않았다★ — 로드는 되는데 주입문의
-  //  주동사를 못 이긴다. 그래서 고칠 자리는 여기다.)
-  //
-  // ★2026-07-15 계약을 그대로 지킨다★ — 그때 뺀 것은 서버가 답 주소를 계산해 `send.sh --to <주소>` 를
-  // 렌더하던 것이고, 테스트가 ★"봉투에 send.sh 문자열이 아예 없다"★ 로 그걸 잠가놨다
-  // (hermesBridge.test.ts 의 not.toContain("send.sh") 3곳). 그래서 여기서는 ★도구 이름도 명령도 쓰지
-  // 않는다★ — "보내라" 는 동사와 "안 보내면 전달되지 않는다" 는 사실만 말한다. 보내는 방법·주소는
-  // 여전히 팀원 규칙(AGENTS.md)이 정한다. ★바꾼 것은 동사 하나뿐이다.★
-  // ★두 문장이 서로 다른 일을 한다 — 중복이 아니라 역할 분담이다.★ (2026-08-03 A/B 실측)
-  //
-  //   · 위(trailer 안) 문장 = ★무엇이 "발신" 인지 정의★ 한다.
-  //       "발신 명령을 글로 적는 것은 발신이 아닙니다 / 여기 쓰는 글은 아무에게도 전달되지 않습니다"
-  //   · 아래(맨 끝) 문장 = ★지금 실행하라는 방아쇠★.
-  //
-  // ★실측 3변형 (hermes 런타임 팀원/Qwen3-Next-80B, 각 5회 이상)★ — 성공 = 버스 도착 + api_calls≥2
-  //   A 정의만(강한 명령형이 중간에만)        → 발신 0/5 · api_calls=1 · ★도구 호출 0★
-  //   B 방아쇠만(중간은 원문 "답하고", 끝 1회) → 발신 0/5 · api_calls=1 · ★도구 호출 0★
-  //   C 정의 + 방아쇠(현재 구현)              → 도구 호출 ★5/5★ · 발신 2/5
-  //
-  // ★B 가 핵심이다★ — "맨 끝으로 옮기기만 하면 된다" 는 안은 ★A 와 똑같이 실패한다.★ 정의가 없으면
-  // 이 모델은 ★명령을 글로 쓰는 것을 발신이라고 여긴다★(B 의 출력이 매번 `send.sh --to … --hop 1`
-  // 텍스트였다). 반대로 방아쇠가 없으면(A) 정의는 알지만 실행하지 않는다. ★둘 중 하나만 빼면 0/5 다.★
-  // 그래서 아래 문장을 "중복" 으로 보고 지우면 증상이 조용히 돌아온다.
-  //
-  // ★꼬리(surfaceNote)도 지우지 않았다★ — "할 말이 없으면 안 보내면 됩니다" 는 `[NO_REPLY]` 가 문자로
-  // 찍히던 사고 뒤에 일부러 넣은 설계다. 지운 변형(4/10)과 보존한 변형(2/5)의 도구 호출률이 똑같이
-  // 100% 라 삭제할 이유가 없었다.
-  //
-  // 2026-07-15 계약(도구 이름·주소를 봉투에 렌더하지 않는다)은 그대로 지킨다 — 여기서도 `send.sh` 나
-  // `--to` 를 쓰지 않는다. 남은 실패는 전부 `Context length exceeded` 이고 그건 컨텍스트 창 문제로
-  // 별건이다(카드 GQJsfbJUttNsZM4vDns53 — 바닥 17,428 토큰이 hermes 자체 몫이다).
+  // 명령을 글로 출력하는 것과 도구 실행을 구분해야 한다. 발신 정의와 마지막 실행 지시가 함께 필요하며, 주소·명령 형식은 팀원 규칙이 정한다.
   const closingImperative = pick(locale,
     "\n\n★할 말이 있다면 지금 발신 도구를 실행해서 보내세요 — 글로만 쓰면 아무에게도 전달되지 않습니다.★",
     "\n\n★If you have something to say, run your send tool now — writing it here alone reaches no one.★");
@@ -258,12 +137,7 @@ export function buildPrompt(opts: HermesTurnOptions): string {
   return (
     directReportNote +
     context +
-    // unsafe thread 는 태그 속성에서도 ★redact★ 한다 — 원문이 프롬프트 어디에도 남으면 모델이 그걸
-    //   shell argv 로 복사할 경로가 살아있다(codex 적발). 라우팅은 서버(opts.threadId)가 하므로
-    //   모델에게 실제 값을 보일 필요가 없다.
-    // ★source="bus" 통일 + kind 노출★ (2026-07-15): 답 주소는 봉투 kind 로 팀원(룰)이 정한다.
-    //   in_reply_to(safe 할 때만)·hop_count 는 openclaw(openclawBridge.ts:536)·claude(tmuxInject.ts:243)
-    //   봉투와 대칭 — hermes 의 유일 pingpong 방어선. hop_count 는 두 봉투와 동일하게 ★따옴표 없이★ 렌더.
+    // 안전하지 않은 thread는 태그에서도 숨겨 셸 인자로 복사될 경로를 차단한다. hop_count는 다른 런타임 봉투와 같이 숫자로 렌더한다.
     '<external_message source="bus" kind="' + route.kind + '" from="' + opts.fromLabel +
     '" thread="' + (threadIsSafe ? opts.threadId : "(redacted)") + '" msg="' + opts.messageId + '"' +
     (msgIsSafe ? ' in_reply_to="' + opts.messageId + '"' : "") +
@@ -275,27 +149,15 @@ export function buildPrompt(opts: HermesTurnOptions): string {
   );
 }
 
-/**
- * ★hermes 턴 상한.★ (2026-07-14 — 90초는 턱없이 부족했다)
- *
- * ★실측★: 팀장이 "이번주 미국 주식 예상해봐" · "서귀포 날씨 조사해서 보고해" 를 시켰다.
- *   → ★웹 검색 + 교차확인 + 종합★ 을 90초 안에 끝낼 수 없다 → `hermes_timeout` → ★무응답.★
- *   팀장 화면엔 ★"헤르메스 응답 실패"★ 만 떴다.
- * ★재시도는 여전히 안 한다★ (턴 도중 이미 팬아웃을 보낸다 → 재시도 = 중복 위임).
- *   ★그러니 상한이 곧 '한 번의 기회' 다 — 짧으면 그 기회를 우리가 뺏는 것이다.★
- * openclaw 는 이미 600초를 쓴다(OPENCLAW_GATEWAY_TIMEOUT_MS). ★hermes 만 90초로 굶고 있었다.★
- * ★2026-07-16: 300→600★ — Mac 가격 리서치가 8.5분 걸려 300s 로도 부족(잘려서 '실패' 오탐 + 종합 누락).
- *   openclaw 와 동일한 600s 로 맞춘다. ★lease/grace 는 wakeDispatcher 가 이 값에서 자동 파생★ 하므로
- * 여기 하나만 바꾸면 사다리(turnCap<lease<grace)가 따라온다 — 빼먹을 일 없음.
- */
-/** 생존신호를 부르는 ★최소 간격★ — 출력 청크마다 DB 를 쓰지 않기 위한 것. lease(660s)보다 훨씬 짧아야 한다. */
+// 리서치·교차확인 턴을 허용하려고 600초를 사용한다. 재시도는 이미 전송된 위임을 중복시킬 수 있고 lease/grace는 이 값에서 파생된다.
+/** 생존신호를 부르는 최소 간격 — 출력 청크마다 DB 를 쓰지 않기 위한 것. lease(660s)보다 훨씬 짧아야 한다. */
 const ALIVE_NOTIFY_MIN_INTERVAL_MS = 30_000;
-/** SIGTERM 뒤 ★이만큼 기다렸다 SIGKILL★ 로 승격한다. 정리할 틈은 주되 무한정 기다리지 않는다. */
+/** SIGTERM 뒤 이만큼 기다렸다 SIGKILL 로 승격한다. 정리할 틈은 주되 무한정 기다리지 않는다. */
 const KILL_ESCALATION_MS = 5_000;
 
 /**
- * ★시험용 spawn 주입★ — `openclawBridge.__setOpenclawBridgeTestDeps` 와 같은 관례다.
- * ★왜 필요한가★: 이 파일에서 제일 위험한 것은 ★무응답 시계★ 다(잘못되면 일하는 턴이 죽거나,
+ * 시험용 spawn 주입 — `openclawBridge.__setOpenclawBridgeTestDeps` 와 같은 관례다.
+ * 왜 필요한가: 이 파일에서 제일 위험한 것은 무응답 시계 다(잘못되면 일하는 턴이 죽거나,
  * 매달린 턴이 안 죽어 중복 실행이 난다). 실제 hermes 를 띄우지 않고 그 시계만 재려면 이 이음매가 있어야 한다.
  */
 type SpawnFn = typeof spawn;
@@ -343,18 +205,9 @@ function runHermesProcess(opts: HermesTurnOptions, resumeId: string | null): Pro
   const cmd = hermesCommand(opts.agent);
   const prompt = buildPrompt(opts);
   const runtimeCwd = runtimeCwdForAgent(opts.agent);
-  // ★턴 상한은 ★한 곳★ 에서만 정한다.★
-  //   예전엔 호출부마다 따로 넘겨서 ★슬랙만 이 기본값(150s)이 그대로 적용★됐다 — 버스·단톡방은
-  //   HERMES_TURN_TIMEOUT_MS(300s)를 명시했는데 슬랙(routes/slack.ts)은 안 넘겨서 ★절반★ 이었다.
-  //   아무도 그렇게 정한 적 없다. 기본값을 그 상수로 통일하면 호출부가 안 넘겨도 전부 같은 상한이 된다.
-  // (60s 는 가벼운 답엔 충분하나 수집·리서치·종합형 team-turn 은 초과 → dead_letter. 라이브
-  //    테스트서 "맛집 정리" 위임이 60s×3 타임아웃 후 dead_letter 였다.)
+  // 호출 경로마다 턴 상한이 달라지지 않도록 공통 상수를 기본값으로 사용한다.
   const timeoutMs = opts.timeoutMs ?? HERMES_TURN_TIMEOUT_MS;
-  // (2026-07-10 롤백: directReport -t 화이트리스트 패치 제거 — hermes 이중발송의 진짜 원인은 어댑터
-  //  double-post[wakeDispatcher makeHermesAdapter]였고 그건 direct_to_gd 시 요청자 버스 insertMessage
-  //  스킵으로 수정됨. -t 는 hermes 도구를 막았지만 어댑터 post 는 못 막아 효과 0 + 도구 불필요 제한 → 제거.)
-  // ★이 턴이 실패였는지 hermes 에게 ★구조적으로★ 묻는다.★ (문장 매칭이 아니다 — 아래 readTurnFailure 참조)
-  //   `--usage-file` 은 실행 후 JSON 을 쓴다. ★실패해도 쓴다.★ 실패 분기 24개가 전부 completed:false 다.
+  // 실패해도 기록되는 usage-file의 구조화 신호로 턴 실패를 판정한다.
   const usagePath = join(tmpdir(), `hermes-usage-${opts.agent.id}-${opts.messageId}-${process.pid}.json`);
   const args = ["-z", prompt, "--usage-file", usagePath];
   if (resumeId) args.push("--resume", resumeId);
@@ -363,18 +216,7 @@ function runHermesProcess(opts: HermesTurnOptions, resumeId: string | null): Pro
       resolve({ kind: "failed", error, sessionNotFound });
     const proc = spawnForBridge(cmd, args, {
       cwd: runtimeCwd,
-      // ★팀원의 정체를 ★명시적으로★ 알려준다 — 추측하게 두지 않는다.★ (2026-07-13 실측 사고)
-      //
-      // ═══ 무슨 일이 있었나 ═══
-      // hermes 는 자기 프로필의 ★구버전 스킬 사본★ 을 쓴다 (~/.hermes/profiles/*/skills/claude-imports/).
-      // 그 옛 `_me.sh` 는 발신자를 ★tmux 세션 이름★ 에서 뽑는다 → 서버 프로세스가 보는 세션이
-      // `claude-bill` 이라 → ★hermes 의 모든 발신이 'bill' 로 나갔다.★
-      //   · 팬아웃이 ★bill 발신★ 으로 기록 → 기여자들이 ★hermes 가 아니라 bill 에게★ 답함
-      //   · hermes 는 ★자기 질문의 답을 깨우기로 못 받았다★ (스레드를 읽어서 겨우 종합했다)
-      //   · 감사·추적이 통째로 틀어진다 — ★발신자 위장★
-      // ★hermes·ames·forin 세 프로필 전부 그랬다.★
-      //
-      // ★추측하게 두면 틀린 답을 조용히 준다.★ 그래서 서버가 직접 말해준다.
+      // 서버의 tmux 세션은 다른 팀원의 것일 수 있으므로 자식 프로세스에 실제 발신자 ID를 명시한다.
       env: {
         ...process.env,
         GD_AGENT_ID: opts.agent.id,          // 나는 누구인가 (스크립트가 tmux 세션으로 추측하지 않게)
@@ -385,21 +227,14 @@ function runHermesProcess(opts: HermesTurnOptions, resumeId: string | null): Pro
     });
     let stdout = "";
     let stderr = "";
-    // ★이 상한이 재는 것은 '일한 시간' 이 아니라 '조용한 시간' 이다.★
-    //   전에는 턴 시작에 한 번 걸고 끝이라, ★출력이 계속 나오는 멀쩡한 턴도★ 상한에서 죽었다
-    //   (실측: 12건이 90초에 죽었다. 그 90초는 상수가 아니라 호출부 하드코딩이었다 — 아무도 정한 적 없는 값이다).
-    //   ★살아 있으면 안 끊고, 진짜 조용할 때만 끊는다.★
-    //
-    // ★그래도 '안 끊기'로 갈 수는 없다★ — 자식이 매달리면 출력이 없고, 출력이 없으면 예약(lease)도 안 밀린다.
-    //   그럼 예약이 만료돼 ★같은 메시지가 다시 디스패치된다★(중복 실행). 그때 옛 자식은 살아 있다.
-    //   그래서 ★무응답일 때는 확실히 끝낸다★ — 이게 turn cap 을 대신하는 유일한 조치다.
+    // 출력 중인 턴을 끊지 않도록 무출력 시간만 제한한다. 무응답 자식은 lease 만료 뒤 중복 실행되지 않게 종료한다.
     let finished = false;
     let idleTimer: ReturnType<typeof setTimeout>;
     let killEscalation: ReturnType<typeof setTimeout> | undefined;
     const onIdle = (): void => {
       finished = true;
-      // ★SIGTERM 만으로는 종료가 보장되지 않는다★ — 무시하거나 syscall 에 걸려 있으면 그대로 산다.
-      //   유예를 주고 ★SIGKILL 로 승격★ 한다. (승격이 없으면 위 '중복 실행 방지' 가 보장이 아니라 희망이 된다)
+      // SIGTERM 만으로는 종료가 보장되지 않는다 — 무시하거나 syscall 에 걸려 있으면 그대로 산다.
+      //   유예를 주고 SIGKILL 로 승격 한다. (승격이 없으면 위 '중복 실행 방지' 가 보장이 아니라 희망이 된다)
       proc.kill();
       killEscalation = setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* 이미 죽음 */ } }, KILL_ESCALATION_MS);
       killEscalation.unref?.();
@@ -416,22 +251,22 @@ function runHermesProcess(opts: HermesTurnOptions, resumeId: string | null): Pro
       clearTimeout(idleTimer);
       if (killEscalation) clearTimeout(killEscalation);
     };
-    // ★생존신호 — 출력이 흐르면 부르는 쪽에 알린다(예약 연장).★
-    //   ★매 청크마다 DB 를 쓰지 않는다★ — 한 턴에 수백 번 올 수 있다. 최소 간격만 두고 흘린다.
+    // 생존신호 — 출력이 흐르면 부르는 쪽에 알린다(예약 연장).
+    //   매 청크마다 DB 를 쓰지 않는다 — 한 턴에 수백 번 올 수 있다. 최소 간격만 두고 흘린다.
     let lastAliveAt = 0;
     const noteAlive = (): void => {
-      // ★턴이 끝난 뒤에 온 신호는 흘리지 않는다.★ onIdle 이 reject 한 뒤에도 SIGKILL 승격까지 리스너가
-      //   붙어 있어서, 그 사이 자식이 마지막 출력을 흘리면 ★부르는 쪽이 이미 지운 키를 되살린다★(누수).
+      // 턴이 끝난 뒤에 온 신호는 흘리지 않는다. onIdle 이 reject 한 뒤에도 SIGKILL 승격까지 리스너가
+      //   붙어 있어서, 그 사이 자식이 마지막 출력을 흘리면 부르는 쪽이 이미 지운 키를 되살린다(누수).
       //   무응답으로 죽은 턴이라 직전 신호가 오래돼 아래 최소간격 게이트도 그냥 통과한다.
       if (finished) return;
       if (!opts.onAlive) return;
       const now = Date.now();
       if (now - lastAliveAt < ALIVE_NOTIFY_MIN_INTERVAL_MS) return;
       lastAliveAt = now;
-      // ★갱신 실패가 턴을 죽이지 않는다★ — 이건 보조 장치지 턴의 일부가 아니다.
+      // 갱신 실패가 턴을 죽이지 않는다 — 이건 보조 장치지 턴의 일부가 아니다.
       try { opts.onAlive(); } catch { /* 무시 */ }
     };
-    // ★시계 밀기는 매 청크마다★(공짜) · ★생존신호는 최소 간격으로★(DB 쓰기라 아낀다) — 둘은 다른 일이다.
+    // 시계 밀기는 매 청크마다(공짜) · 생존신호는 최소 간격으로(DB 쓰기라 아낀다) — 둘은 다른 일이다.
     proc.stdout.on("data", (c) => { stdout += c.toString(); bumpIdle(); noteAlive(); });
     proc.stderr.on("data", (c) => { stderr += c.toString(); bumpIdle(); noteAlive(); });
     proc.on("error", (e) => {
@@ -440,20 +275,20 @@ function runHermesProcess(opts: HermesTurnOptions, resumeId: string | null): Pro
     });
     proc.on("close", (code) => {
       clearIdle();
-      // ★실패한 턴은 답변이 아니다.★ hermes 는 턴을 못 끝내도 ★exit 0 으로★ 실패 문장을 stdout 에 찍는다
+      // 실패한 턴은 답변이 아니다. hermes 는 턴을 못 끝내도 exit 0 으로 실패 문장을 stdout 에 찍는다
       //   ("Codex response remained incomplete…", "API call failed after 3 retries: HTTP 429…").
-      //   그대로 발행하면 ★런타임 에러가 그 팀원의 말로 버스에 배달된다★ (실측: 전자 7건, 후자 3건 —
-      //   그중 1건은 ★broadcast 로 팀 전체에★).
-      // ★1차 = 구조화 신호(usage-file).★ 실패 분기 24개를 한 번에 덮는다. 2차 = 알려진 문장(그물).
-      //   ★reject 로 넘긴다 — 이 콜백 안에서 throw 하면 Promise 가 안 죽고 uncaught 로 샌다.★
+      //   그대로 발행하면 런타임 에러가 그 팀원의 말로 버스에 배달된다 (실측: 전자 7건, 후자 3건 —
+      //   그중 1건은 broadcast 로 팀 전체에).
+      // 1차 = 구조화 신호(usage-file). 실패 분기 24개를 한 번에 덮는다. 2차 = 알려진 문장(그물).
+      //   reject 로 넘긴다 — 이 콜백 안에서 throw 하면 Promise 가 안 죽고 uncaught 로 샌다.
       const report = readTurnReport(usagePath); // (읽고 지운다)
       const failure = report.failure;
       if (code === 0) {
         const out = stdout.trim();
         if (failure || isRuntimeFailureOutput(out)) {
           const why = failure?.reason ?? out.slice(0, 120);
-          // ★억제한 본문을 audit 에 남긴다★ — 대부분은 에러 문장이지만, max_iterations 소진 턴이면
-          //   ★진짜 내용★ 일 수 있다. 조용히 사라지게 두지 않는다(감사 로그에서 복구 가능).
+          // 억제한 본문을 audit 에 남긴다 — 대부분은 에러 문장이지만, max_iterations 소진 턴이면
+          //   진짜 내용 일 수 있다. 조용히 사라지게 두지 않는다(감사 로그에서 복구 가능).
           appendAuditFile("hermes_bridge", "turn_failed_output_suppressed", opts.messageId, {
             agent_id: opts.agent.id,
             thread_id: opts.threadId,
@@ -475,11 +310,7 @@ function runHermesProcess(opts: HermesTurnOptions, resumeId: string | null): Pro
   });
 }
 
-// ★hermes 텍스트 전송 = Bot API sendMessage 직접★ (2026-07-15, 요구사항)
-//   예전엔 `hermes send` CLI 를 spawn 했다 → cold 기동이 15초 타임아웃을 넘기면 error 없이 false
-//   (2026-07-15 라이브: gd-report hermes 1건 유실, "unknown"). 리액션(reactTelegramAsHermes)은 이미
-//   같은 토큰으로 Bot API 직접이라 robust 했다 — 전송만 CLI 라 fragile 했다. codex(postTelegramAsOpenclaw)
-//   와 동일하게 자기 봇 토큰으로 sendMessage 직접 호출한다. spawn·타임아웃 fragility 제거.
+// CLI 콜드 기동에 전송이 지연되지 않도록 멤버 봇 토큰으로 Bot API를 직접 호출한다.
 export async function postTelegramAsHermes(agent: AgentRecord, chatId: string, text: string): Promise<boolean> {
   const token = hermesTelegramBotToken(agent);
   if (!token) return false;

@@ -1,10 +1,4 @@
-/**
- * ★시각은 한 번 틀리면 전부 틀린다.★
- *
- * ★DB 는 UTC. JS 의 `new Date("2026-07-13 01:27:41")` 은 그걸 ★로컬★ 로 읽는다 → KST 에서 ★정확히 9시간 거짓말★.★
- * 실측: 대기 시간을 audit 에 남기는데 ★실제 62초를 "9시간"★ 이라고 찍었다.
- * ★룰에 그 함정이 적혀 있는데 거기 빠졌다.★ → 손으로 파싱하지 못하게 하고, 이 함수만 쓴다.
- */
+// DB의 시간대 없는 문자열은 UTC다. 맨 new Date에 전달하면 로컬 시각으로 읽히므로 UTC 파싱을 검사한다.
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -14,10 +8,10 @@ import { timeAgo, parseDbUtc } from "./timeAgo";
 const utc = (isoZ: string) => isoZ.replace("T", " ").replace("Z", "").replace(/\.\d+$/, "");
 
 describe("★UTC 를 로컬로 오독하지 않는다★ (이게 틀리면 9시간 거짓말)", () => {
-  // ★주의: `bun test` 는 TZ=UTC 로 돈다 → ★이 환경에서는 그 함정이 재현되지 않는다.★
-  //   (라이브는 KST(+0900). `bun -e` 로 재보면 DB 형식을 그냥 파싱했을 때 ★정확히 -9시간★ 나온다)
-  //   ★그래서 "환경에 의존하는 비교" 로 테스트하면 안 된다 — 초록인데 라이브에서 틀린다.★
-  //   → ★불변식 자체★ 를 못박는다: 우리는 ★반드시 UTC 로 해석한다.★
+  // 주의: `bun test` 는 TZ=UTC 로 돈다 → 이 환경에서는 그 함정이 재현되지 않는다.
+  //   (라이브는 KST(+0900). `bun -e` 로 재보면 DB 형식을 그냥 파싱했을 때 정확히 -9시간 나온다)
+  //   그래서 "환경에 의존하는 비교" 로 테스트하면 안 된다 — 초록인데 라이브에서 틀린다.
+  //   → 불변식 자체 를 못박는다: 우리는 반드시 UTC 로 해석한다.
   it("★DB 형식을 언제나 UTC 로 해석한다★ (TZ 무관 — 이 단언은 어느 머신에서도 같다)", () => {
     expect(parseDbUtc("2026-07-13 01:27:41")).toBe(Date.UTC(2026, 6, 13, 1, 27, 41));
     expect(parseDbUtc("2026-01-01 00:00:00")).toBe(Date.UTC(2026, 0, 1, 0, 0, 0));
@@ -27,27 +21,16 @@ describe("★UTC 를 로컬로 오독하지 않는다★ (이게 틀리면 9시�
     const correct = parseDbUtc("2026-07-13 01:27:41");
     const naiveOnKst = Date.UTC(2026, 6, 13, 1, 27, 41) - 9 * 3600_000;  // 로컬(+9) 로 읽었을 때
     expect(correct).not.toBe(naiveOnKst);
-    expect(correct - naiveOnKst).toBe(9 * 3600_000);   // ★정확히 9시간★
+    expect(correct - naiveOnKst).toBe(9 * 3600_000);   // 정확히 9시간
   });
 
   it("★실측 재현: 62초를 '9시간' 이라 하지 않는다★", () => {
     const now = Date.parse("2026-07-13T01:28:43Z");
-    expect(timeAgo("2026-07-13 01:27:41", now)).toBe("1분 전");   // 62초 → 1분. ★9시간이 아니다★
+    expect(timeAgo("2026-07-13 01:27:41", now)).toBe("1분 전");   // 62초 → 1분. 9시간이 아니다
   });
 });
 
-/**
- * ★라이브에서 시각이 전부 "?" 로 나왔다.★ (2026-07-13 — 유닛은 초록이었다)
- *
- * ★원인★: 팀원에게 가는 문맥은 ★원본 DB 행이 아니라 envelope 객체★ 다.
- *   rowToEnvelope(_shared.ts:59) 가 created_at 을 ★이미 KST 오프셋 ISO 로 바꿔서★ 준다:
- *     원본 DB   "2026-07-13 14:56:06"        (시간대 표시 없음 = UTC)
- *     envelope  "2026-07-13T23:56:06+09:00"  (오프셋 명시)
- *   ★내 함수는 ①만 보고 만들어서 ②에 또 "Z" 를 붙였다★ → "…+09:00Z" → 파싱 불가 → "?"
- *
- * ★유닛 테스트가 초록이었던 이유: 라이브 형식을 안 먹여봤다.★
- * ★그래서 이 테스트는 ★두 형식 모두★ 를 먹인다. 실제로 흘러다니는 것을 먹여야 테스트다.★
- */
+// 문맥에는 원본 DB 시각과 오프셋이 붙은 envelope 시각이 모두 들어온다. 이미 시간대가 있는 값에 Z를 추가하면 파싱이 깨진다.
 describe("★라이브 형식 — envelope 은 이미 오프셋이 붙어 있다★", () => {
   const SAME_MOMENT = Date.parse("2026-07-13T14:56:06Z");
   const NOW = SAME_MOMENT + 5 * 60_000;
@@ -93,7 +76,7 @@ describe("★계약: 시각을 손으로 파싱하지 않는다★", () => {
   it("★wakeDispatcher 는 정본 함수만 쓴다★ — 직접 Date.parse/new Date 로 DB 시각을 읽으면 또 9시간 틀린다", () => {
     const SRC = readFileSync(join(import.meta.dir, "../bus/wakeDispatcher.ts"), "utf8");
     expect(SRC).toMatch(/import { timeAgo(, toDbUtc)? } from "..\/lib\/timeAgo";/);
-    // 문맥 라인에 시각을 붙이는 건 ★timeAgo 하나뿐★
+    // 문맥 라인에 시각을 붙이는 건 timeAgo 하나뿐
     expect(SRC).toContain("${timeAgo(m.created_at)}");
     expect(SRC).not.toMatch(/new Date\(m\.created_at\)/);
   });

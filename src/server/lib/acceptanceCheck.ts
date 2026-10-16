@@ -40,7 +40,7 @@ export interface AcceptanceDeps {
   teamOsSnapshot?: (db: Database) => Pick<TeamOsSnapshot, "scheduled">;
 }
 
-// 누출/포터빌리티 탐지는 ★포맷 기반★(토큰 shape · 절대경로)만 쓴다. 특정 팀의 실값(chat_id·봇핸들·
+// 누출/포터빌리티 탐지는 포맷 기반(토큰 shape · 절대경로)만 쓴다. 특정 팀의 실값(chat_id·봇핸들·
 // 사용자명)을 소스에 리터럴로 박지 않는다 — 공개 repo 가 정본이므로 어느 팀의 값도 하드코딩되면 안 되고,
 // 각 팀 고유값은 자기 머신의 gitignore(.env·team.db·agents.json)에만 존재한다. 절대경로(/Users/<사용자>/)
 // 탐지가 머신특화 하드코딩(주 포터빌리티 이슈)을 계속 잡고, SECRET_RE 가 토큰 shape 를 잡는다. (public=source)
@@ -60,11 +60,7 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// 팀 고유 실값(운영자 ★자기★ 값)을 settings 에서 읽어 렌더 멤버파일 누출을 동적으로 탐지한다.
-// ★소스에 리터럴로 박지 않는다★(public=source) — 각 팀은 자기 값만 config 에 두고, 가드는 그걸 읽어
-// escape 후 숫자경계 exact-match 한다. 미설정 값은 skip(공개 이식성 보존). 대상은 렌더 파일에 있으면
-// 안 되는 ★숫자 id★(owner_chat_id·capture_group_id)만 — owner_name 은 persona 가 정당히 포함하므로
-// 제외(false-positive 방지). (Codex 적대리뷰 반영: 포맷+경로만으로는 chat_id/group_id 누출 미탐지)
+// 숫자 ID는 포맷 검사만으로 누출을 찾을 수 없어 설정값과 대조한다. owner_name은 페르소나에 포함될 수 있어 제외한다.
 function buildInternalIdRe(db: Database): RegExp | null {
   const digits: string[] = [];
   const push = (v: string | null | undefined) => {
@@ -84,8 +80,7 @@ function item(status: AcceptanceStatus, label: string, detail: string, fix?: str
 }
 
 function defaultMembersRoot(): string {
-  // 해석 우선순위 = personaTemplates.resolveMembersRoot 와 동일(2026-07-12 퍼블릭-안전 기본 뒤집기):
-  //   B3RYS_MEMBERS_ROOT(명시) > B3RYS_HOME/members > ~/b3os/members(퍼블릭-안전 기본).
+  // 멤버 루트는 personaTemplates.resolveMembersRoot와 같은 우선순위로 해석한다.
   if (process.env.B3RYS_MEMBERS_ROOT) return process.env.B3RYS_MEMBERS_ROOT;
   if (process.env.B3RYS_HOME) return join(process.env.B3RYS_HOME, "members");
   return join(process.env.HOME ?? "", "b3os", "members");
@@ -99,11 +94,7 @@ function loadAgents(registryPath: string): AgentRecord[] {
   }
 }
 
-/** ★'로드 성공, 0건' 과 '로드 실패' 를 반드시 구분한다★ — loadAgents 의 catch→[] 를 그대로 '팀원 0명'
- *  으로 쓰면 손상된 agents.json(파싱 오류·권한 오류·배열 아님)에서 인수체크가 "새 설치입니다, 이상
- *  없습니다" 라고 ★적극적 거짓 주장★ 을 한다(Bill 적대검증 2026-07-25: team.db 에 팀원 12명이 살아있는데
- *  ok=true). 로드 실패는 fail 로 노출하고, freshInstall 신호에서도 제외한다.
- *  파일 없음(ENOENT)은 loadRegistry 가 정상적으로 [] 를 주므로 실패가 아니다 — 공개 clone 첫 부팅. */
+// 레지스트리 손상을 새 설치로 오인하지 않도록 로드 실패는 fail로 노출한다. ENOENT는 빈 레지스트리로 허용한다.
 interface RegistryLoad {
   ok: boolean;
   agents: AgentRecord[];
@@ -119,10 +110,7 @@ function loadAgentsChecked(registryPath: string): RegistryLoad {
   }
 }
 
-/** team.db 로스터 인원. ★조회 실패는 null — 0 으로 삼키지 않는다★.
- *  0 은 freshInstall 신호의 한 축이라, 실패를 0 으로 반환하면 방금 고친 major A 와 똑같은
- *  '실패를 정상 초기상태로 오판' 패턴이 여기서 되살아난다(Bill 후속지적 2026-07-25 minor 2).
- *  null = "모른다" → freshInstall 은 성립하지 않고, 로드 체크가 fail 로 노출한다. */
+// 조회 실패는 null로 반환한다. 0으로 처리하면 DB 장애를 새 설치로 오인한다.
 function dbAgentCount(db: Database): number | null {
   try {
     return (db.query("SELECT COUNT(*) AS n FROM agent").get() as { n: number } | null)?.n ?? null;
@@ -144,17 +132,11 @@ function settingsStep(db: Database, registry: RegistryLoad, dbAgents: number | n
   const ownerName = getSetting(db, "owner_name");
   const systemOp = captureConfigStatus(db);
 
-  // ★freshInstall = 레지스트리 ★로드 성공★ + 레지스트리 0건 + team.db 로스터 0명★.
-  //   세 조건을 모두 요구하는 이유(Bill 적대검증):
-  //     · 로드 실패(파싱·권한·배열아님)를 0명으로 세면 손상된 라이브에서 "새 설치입니다" 라고 거짓말한다.
-  //     · 파일만 사라진 경우는 loadRegistry 가 정상적으로 [] 를 주지만, team.db 에 팀원이 남아 있으면
-  //       그건 새 설치가 아니라 ★레지스트리 유실★ 이다(대시보드는 DB 기준으로 팀원을 계속 보여준다).
-  //     · team.db 로스터 조회 자체가 실패하면(dbAgents === null) "0명" 이 아니라 "모른다" 다 —
-  //       모르는 상태를 새 설치로 단정하지 않는다(Bill 후속지적 minor 2, 같은 삼킴 패턴).
+  // 레지스트리 로드 성공과 양쪽 명부의 0명을 모두 요구한다. 파일 유실이나 DB 조회 실패는 새 설치가 아니다.
   const freshInstall = registry.ok && registry.agents.length === 0 && dbAgents === 0;
   const dbRoster = dbAgents === null ? "조회 실패" : `${dbAgents}명`;
 
-  // ★agents.json 로드 자체를 먼저 노출한다★ — 손상·권한 오류는 조용히 넘기지 않고 fail.
+  // agents.json 로드 자체를 먼저 노출한다 — 손상·권한 오류는 조용히 넘기지 않고 fail.
   if (!registry.ok) {
     items.push(
       item(
@@ -186,10 +168,7 @@ function settingsStep(db: Database, registry: RegistryLoad, dbAgents: number | n
     items.push(item("pass", "agents.json 로드", `성공 — 팀원 ${registry.agents.length}명`));
   }
 
-  // ★새 설치(팀원 0명)의 '팀 이름 미설정'은 결함이 아니라 정상 출발점★ — 방금 install.sh 를 돌린
-  //   사람은 당연히 팀 이름을 안 정했다. 이걸 fail 로 찍으면 첫 인수체크가 빨간불로 떠서 "설치가
-  //   잘못됐나"로 읽힌다(2026-07-25 공개 클린설치 리허설). → 초기 상태는 info + 다음 할 일 안내로,
-  //   팀이 구성된 뒤(팀원 1명 이상)에도 비어 있으면 그건 진짜 누락이라 fail 유지.
+  // 새 설치의 팀 이름 미설정은 정상 초기 상태이므로 info로 안내한다. 팀원이 있으면 누락으로 판정한다.
   items.push(
     teamName
       ? item("pass", "팀 이름", teamName)
@@ -203,9 +182,7 @@ function settingsStep(db: Database, registry: RegistryLoad, dbAgents: number | n
         : item("fail", "팀 이름", "미설정"),
   );
   items.push(ownerName ? item("pass", "팀장 이름", ownerName) : item("info", "팀장 이름", "미설정({{OWNER}} 유지)"));
-  // ★capture 봇·라우터는 그룹(팀방) 협업 전용 = 선택★ — 1:1 DM 영입엔 불필요하다.
-  //   fail 로 두면 정상적인 1:1 영입도 무조건 "검증 실패"로 떠서 사용자가 막힌 걸로 오해한다
-  //   (같은 그룹 기능인 바로 아래 '팀 그룹 chat_id' 는 이미 info). → info 로 낮추고 fix 안내를 단다. (PR#1 5c0a564)
+  // capture 봇과 라우터는 그룹 협업용 선택 기능이므로, 1:1 영입을 실패 처리하지 않는다.
   items.push(
     systemOp.has_capture_token
       ? item("pass", "capture 봇 토큰", "설정됨")
@@ -441,9 +418,7 @@ export function plistFirstProgramArgument(xml: string): string | null {
   return m?.[1]?.trim() ?? null;
 }
 
-/** ★런처 사본 drift 가드★ — claude 멤버의 LaunchAgent plist 가 정본 vendored 런처를 가리키는지 검사한다.
- *  사본이 여러 벌이면 "한 곳만 고치고 나머지는 옛 동작" 사고가 난다(2026-07-25 실측: 모델 하드코딩 fix 때
- *  멤버별로 개인 스킬 사본·구 repo 사본·정본 3곳으로 갈려 있었다). 사람이 기억하는 대신 여기서 잡는다. */
+// 런처 사본마다 동작이 갈리지 않도록 LaunchAgent가 정본 런처를 참조하는지 검사한다.
 function claudeLauncherChecks(deps: AcceptanceDeps): AcceptanceItem[] {
   const agents = loadAgents(deps.registryPath).filter((a) => a.runtime === "claude_channel");
   if (agents.length === 0) return [];

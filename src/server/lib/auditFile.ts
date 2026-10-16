@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_LOG_DIR = join(__dirname, "../../../logs");
 
-// 로그 디렉토리는 call-time에 해석 — B3OS_AUDIT_LOG_DIR env로 오버라이드 가능(★테스트 격리용★:
+// 로그 디렉토리는 call-time에 해석 — B3OS_AUDIT_LOG_DIR env로 오버라이드 가능(테스트 격리용:
 // 라이브 logs/ 오염 방지. 팀 하드레슨 — bun test가 실 FS 건드리면 안 됨). 기본 동작은 불변.
 function resolveLogDir(): string {
   const dir = process.env.B3OS_AUDIT_LOG_DIR || DEFAULT_LOG_DIR;

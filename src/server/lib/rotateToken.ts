@@ -47,7 +47,7 @@ function writeEnvKey(file: string, key: string, value: string, mode = 0o600): vo
     while (out.length && out[out.length - 1] === "") out.pop();
     out.push(`${key}=${value}`);
   }
-  // atomic(temp+rename) — truncate-in-place 빈 창에 poller가 읽으면 토큰로드 실패로 죽음(하네스 근본원인).
+  // 제자리 truncate 중 poller가 빈 파일을 읽지 않도록 temp+rename으로 원자 교체한다.
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, out.join("\n") + (out[out.length - 1] === "" ? "" : "\n"), { mode });
   try { chmodSync(tmp, mode); } catch { /* best-effort */ }
@@ -67,7 +67,7 @@ function envFileStore(file: string, key: string): TokenStore {
 }
 
 /** openclaw.json 의 그 account 에 설정된 tokenFile 경로(~확장)를 반환. 인라인 토큰(botToken)·미정의·빈 계정·미존재면 null.
- *  ★파일 존재 여부는 안 본다★ — '설정상 파일기반인가'만(파일 실종된 Lui 도 tokenFile 정의돼 있으면 경로 반환 → 생성 허용).
+ *  파일 존재 여부는 안 본다 — '설정상 파일기반인가'만(파일 실종된 Lui 도 tokenFile 정의돼 있으면 경로 반환 → 생성 허용).
  *  cfgPath 파라미터 = 테스트 주입용(기본=라이브 openclaw.json). malformed/미존재/파싱실패는 catch→null(deny-safe). */
 export function openclawConfiguredTokenFile(account: string, cfgPath: string = `${HOME}/.openclaw/openclaw.json`): string | null {
   try {
@@ -91,20 +91,18 @@ export function resolveTokenStore(runtime: string, id: string, agent: AgentRecor
     // openclaw 파일기반 계정(devon/lui/forin 등) = ~/.openclaw/credentials/telegram-<account>-token.txt. account=openclaw_agent_id ?? id.
     //   ⚠ openclaw는 게이트웨이 공유라 재시작 시 openclaw 팀원 전체가 잠깐 재시작됨(warning으로 알림). codex/brief는 토큰이 인라인(openclaw.json)이라 파일 없음 → 미지원(fail-safe).
     const account = agent.openclaw_agent_id ?? id;
-    // account(openclaw_agent_id)도 path에 들어가니 id와 동일하게 형식 검증(방어적 — 하네스 LOW).
+    // account도 파일 경로에 들어가므로 ID와 같은 형식 검증으로 경로 이탈을 막는다.
     if (!/^[a-z0-9_-]+$/i.test(account)) return { unsupported: `openclaw account 형식이 올바르지 않아요 — 변경 미지원(기존 유지).` };
-    // ★파일기반 계정만 rotate 허용★: openclaw.json 에 tokenFile 이 정의된 계정(lui·devon 등)만.
-    //   ★파일이 실종돼도(Lui 토큰파일 사라진 케이스) 거부하지 않는다★ — '죽은 봇→새 토큰' 취지대로 새 토큰으로 파일 생성
+    // 파일기반 계정만 rotate 허용: openclaw.json 에 tokenFile 이 정의된 계정(lui·devon 등)만.
+    //   파일이 실종돼도(Lui 토큰파일 사라진 케이스) 거부하지 않는다 — '죽은 봇→새 토큰' 취지대로 새 토큰으로 파일 생성
     //   (plainFileStore.write = mkdir+atomic create; read 는 파일 없으면 null → 백업할 것 없음, fail-safe).
     //   tokenFile 미정의(인라인 토큰 codex/brief, 빈 계정)면 파일 생성이 인라인 config 와 충돌하므로 여전히 거부.
-    //   저장 경로는 config 값(임의경로 traversal 위험)이 아니라 ★검증된 account 로 고정패턴★을 쓴다(원래와 동일 경로).
+    //   저장 경로는 config 값(임의경로 traversal 위험)이 아니라 검증된 account 로 고정패턴을 쓴다(원래와 동일 경로).
     const configTokenFile = openclawConfiguredTokenFile(account);
     if (!configTokenFile) {
       return { unsupported: `openclaw '${id}'의 봇 토큰이 파일기반이 아니라 openclaw.json 인라인/미정의예요 — 대시보드 변경 미지원(기존 유지). openclaw 설정에서 직접 변경하세요.` };
     }
-    // ★저장은 검증된 account 로 고정패턴(traversal 방지)★. 단 config 의 tokenFile 이 이 표준경로와 다르면
-    //   rotate 는 표준경로에 쓰고 게이트웨이(openclawBridge)는 config 경로를 읽어 ★성공응답+실제 미반영(silent no-op)★ 이 된다(하네스 지적).
-    //   → 일치할 때만 허용하고, 비표준 tokenFile 은 거부(직접 변경 안내)해 신뢰(성공=실제 교체)를 보존한다.
+    // 저장 경로와 게이트웨이가 읽는 tokenFile이 다르면 성공 응답 뒤에도 토큰이 적용되지 않는다. 표준경로가 일치할 때만 허용한다.
     const file = `${HOME}/.openclaw/credentials/telegram-${account}-token.txt`;
     if (configTokenFile !== file) {
       return { unsupported: `openclaw '${id}'의 tokenFile 이 표준 경로가 아니에요(${configTokenFile}) — 대시보드 변경 미지원(silent 미반영 방지). openclaw 설정에서 직접 변경하세요.` };

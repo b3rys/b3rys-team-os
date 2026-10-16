@@ -1,17 +1,6 @@
 import { readMemberChannel, type MemberChannel } from "./memberChannel";
 import { claudeCogsPaths, writeClaudeCogsFiles } from "../runtimes/claude/cogsLauncher";
-// 팀원 onoff 서킷브레이커 — 서버 executor 가 런타임별로 에이전트를 정지/기동(터미널 0).
-// 비상 시 GD 가 팀방 /onoff 탭으로 폭주 팀원을 즉시 끈다(2026-06-11 forin 자율-폭주 인시던트 대응).
-//
-// 보안: self-mod 실행 → APPROVAL_EXECUTION_ENABLED=1(팀장 터미널-직접 무장) + GD 인증 탭에서만 호출.
-//
-// ★ 핵심 설계 (인시던트 교훈):
-//   - openclaw off = 계정 enabled=false + 게이트웨이 'restart'(stop 아님). 게이트웨이는 떠 있어
-//     auto-heal 이 안 건드린다(auto-heal 은 게이트웨이 PID만 보지 개별 에이전트는 안 봄). 'gateway stop'
-//     했더니 auto-heal 이 게이트웨이를 되살려 forin 이 부활한 게 인시던트의 2차 원인.
-//   - claude off = 봇 LaunchAgent bootout. 단 auto-heal(bot-liveness-monitor)이 죽은 봇을 team-os up 으로
-//     되살리므로, **var/agent-off.txt(의도적 off 명단)** 를 같이 기록하고 monitor 가 이를 존중(skip)해야 한다.
-//   - hermes off = 프로필 게이트웨이 stop.
+// 의도적 정지는 auto-heal이 되살리지 않도록 off-list에 기록한다. openclaw는 계정을 비활성화하고 게이트웨이는 재시작한다.
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
@@ -58,7 +47,7 @@ function markOff(id: string, off: boolean): void {
   writeFileSync(f, [...ids].join("\n") + (ids.size ? "\n" : ""), "utf-8");
 }
 
-/** 퇴사/재영입 시 off-list에서 제거 — 안 지우면 재영입 agent가 게이트웨이는 떠도 버스에서 suppress됨(deleted≠off, 하네스 #1 systemic breaker. openclaw/hermes 재영입 실패 근본). */
+// 재영입된 멤버가 버스에서 계속 차단되지 않도록 의도적 정지 목록에서도 제거한다.
 export function clearAgentOff(id: string): void {
   markOff(id, false);
 }
@@ -102,13 +91,13 @@ async function setClaude(id: string, enabled: boolean): Promise<ControlResult> {
     if (r.code !== 0) { const k = await run(["launchctl", "kickstart", "-k", `gui/${uid}/${label}`]); return { ok: k.code === 0, detail: k.code === 0 ? `claude ${id} 기동` : `기동 실패: ${k.out.slice(-150)}` }; }
     return { ok: true, detail: `claude ${id} 기동` };
   }
-  // detached tmux 봇 종료(claude-<id>) — bootout(KeepAlive=false 잡 언로드)만으론 실행 중 tmux 세션이 안 죽어 고아가 됨(하네스 #4). 인라인(순환 import 회피).
+  // LaunchAgent bootout만으로 detached tmux 세션은 종료되지 않는다. 순환 import를 피하려고 여기서 직접 종료한다.
   try { await run(["tmux", "kill-session", "-t", `claude-${id}`]); } catch { /* best-effort */ }
   const r = await run(["launchctl", "bootout", `gui/${uid}/${label}`]);
   return { ok: r.code === 0, detail: r.code === 0 ? `claude ${id} 정지(봇 tmux kill + LaunchAgent bootout)` : `정지 실패: ${r.out.slice(-150)}` };
 }
 
-/** hermes 게이트웨이 LaunchAgent 라벨. ★기동·정지가 반드시 같은 값을 써야 한다★ —
+/** hermes 게이트웨이 LaunchAgent 라벨. 기동·정지가 반드시 같은 값을 써야 한다 —
  *  정지만 bootout 하고 기동이 다른 라벨을 보면 되살아나지 않는다. 그래서 한 곳에서 도출한다.
  *  gateway_service 가 있으면 그것이 정본(프로필명과 라벨이 다른 설치본 대응). */
 export function hermesLaunchdLabel(agent: { gateway_service?: string | null } | undefined, profile: string): string {
@@ -124,13 +113,7 @@ async function setHermes(id: string, enabled: boolean): Promise<ControlResult> {
   const uid = process.getuid?.() ?? 0;
   const label = hermesLaunchdLabel(agent, profile);
   if (enabled) {
-    // ★정지가 bootout 한 LaunchAgent 를 되돌린다★ — 이게 없어서 기동/정지가 비대칭이었다.
-    //   'hermes gateway start' 는 게이트웨이 프로세스를 띄우지만 ★launchd 관리 밖★ 이라
-    //   ①KeepAlive 보호 없음 ②재부팅 후 안 올라옴 ③상태 판정이 라벨을 보므로 계속 offline 이다.
-    //   (2026-07-26 맥스튜디오 실측: 비상정지 뒤 대시보드 '기동' 으로 hermes 를 살릴 수 없었다.
-    //    응답은 ok 인데 launchctl list 에 라벨이 없었다 — 즉 ok 가 복구를 뜻하지 않았다.)
-    //   ★start 와 bootstrap 을 같이 부르면 안 된다★ — 게이트웨이가 2개 떠서 텔레그램 폴링이
-    //   충돌한다(같은 날 수동 복구 중 실제로 재현). plist 가 있으면 bootstrap 으로 일원화한다.
+    // plist가 있으면 bootstrap만 사용한다. gateway start를 함께 호출하면 중복 게이트웨이가 텔레그램 폴링을 충돌시킨다.
     const plist = `${HOME}/Library/LaunchAgents/${label}.plist`;
     if (existsSync(plist)) {
       const b = await run(["launchctl", "bootstrap", `gui/${uid}`, plist]);
@@ -197,16 +180,7 @@ export async function setAgentEnabled(agentId: string, runtime: string, enabled:
 //   런타임별: claude=restart-agent.sh --resume(컨텍스트 유지+새 CLAUDE.md) / openclaw·hermes=게이트웨이 in-place kickstart.
 const OPENCLAW_LABEL = "ai.openclaw.gateway";
 
-/**
- * ★재시작 뒤 텔레그램 poller 가 실제로 붙었는지 확인하고, 안 붙었으면 자동 복구한다.★
- *
- * 이게 없어서 ★재시작 후 안 붙으면 아무도 안 고쳤다★(2026-07-27 GD 지적). 프로세스는 살아 있고
- * 대시보드도 정상으로 보이는데 메시지만 안 들어온다 — 오류가 없으니 사람이 눈치챌 때까지 방치된다.
- * 영입(activation)에는 같은 복구가 이미 있었다. ★한쪽에만 있는 안전장치는 없는 것과 같다.★
- *
- * 복구에 실패해도 ★재시작 자체는 성공★ 으로 보고한다(프로세스는 떴다). 대신 detail 에 미기동을
- * 명시해 사람이 볼 수 있게 한다 — 조용히 성공이라고 말하지 않는 것이 이 수정의 핵심이다.
- */
+// 프로세스 생존은 poller 연결을 보장하지 않는다. 복구 실패는 재시작 성공과 구분해 detail에 노출한다.
 async function withPollerRecovery(agentId: string, baseDetail: string): Promise<ControlResult> {
   const raw = process.env.TEAMOS_RESTART_POLLER_WAIT_MS;
   const waitMs = raw !== undefined && Number.isFinite(Number(raw)) ? Number(raw) : 30000;
@@ -231,10 +205,7 @@ export async function restartAgent(agentId: string, runtime: string, fresh = fal
       const flag = fresh ? "--fresh" : "--resume";
       const mode = fresh ? "--fresh · 새 세션(컨텍스트 비움)+새 CLAUDE.md" : "--resume · 새 CLAUDE.md 로드+컨텍스트 유지";
 
-      // ★공개 클론에서 조용히 실패하던 지점★ — 공개 릴리즈는 /scripts/ 를 제외하는데(make-public-release.sh)
-      // 여기서 scripts/restart-agent.sh 를 호출했다. 주력 런타임(claude_channel)의 "멤버 재시작" 버튼이
-      // 공개 설치본에서 늘 실패했다는 뜻이다. → 스크립트가 있으면 쓰고(내부: recall 주입 등 부가기능 포함),
-      // 없으면 repo 안에 vendoring 된 기동 스크립트로 직접 재시작한다(공개 설치본에서도 실제로 동작).
+      // 공개 설치에는 scripts/restart-agent.sh가 없을 수 있어 저장소 안의 기동 스크립트로 폴백한다.
       const opsScript = `${REPO_ROOT}/scripts/restart-agent.sh`;
       if (existsSync(opsScript)) {
         const r = await run(["bash", opsScript, agentId, flag]);
@@ -242,20 +213,14 @@ export async function restartAgent(agentId: string, runtime: string, fresh = fal
         return withPollerRecovery(agentId, `claude ${agentId} 재시작(${mode})`);
       }
 
-      // vendoring 경로(공개 설치본): repo 내 기동 스크립트로 재기동.
-      // ★기동 수단을 먼저 확인하고 나서 죽인다★ — 순서가 뒤집히면(먼저 kill → 기동 스크립트 없음)
-      // 멀쩡히 돌던 멤버를 죽여놓고 못 살린다. '재시작 실패'보다 나쁜 '멤버 영구 다운'이 된다.
-      // 되살릴 수 없으면 아무것도 건드리지 않는다. (Bill 리뷰 blocker, 2026-07-12)
+      // 복구 스크립트가 없으면 종료 뒤 되살릴 수 없으므로 기동 수단을 먼저 확인한다.
       const starter = `${REPO_ROOT}/src/server/runtimes/claude/start-telegram-channel.sh`;
       if (!existsSync(starter)) {
         return { ok: false, detail: `재시작 불가 — 기동 스크립트가 없습니다(세션은 그대로 둡니다): ${starter}` };
       }
       // 기동 수단이 확보된 뒤에야 기존 세션을 정리한다. start-telegram-channel.sh 는 --resume 지원(없으면 새 세션).
       try { await run(["tmux", "kill-session", "-t", `claude-${agentId}`]); } catch { /* 없으면 그만 */ }
-      // ★--force 를 항상 실어 보낸다★ — 위 kill 이 실패/경합하면(세션은 살아있고 poller 만 죽은 상태가 바로 그 케이스)
-      //   기동 스크립트의 idempotent 가드가 'Session already running' 으로 no-op 이 되어 ★재시작이 조용히 안 된다★.
-      //   2026-07-30 실측: launchctl kickstart 로 스크립트를 다시 돌렸더니 정확히 이 no-op 에 걸려 리사가 계속 죽어 있었다.
-      //   --force 는 스크립트 안에서 kill 후 기동을 보장하므로 kill 성공 여부와 무관하게 복구가 성립한다(멱등).
+      // kill 실패·경합 시에도 재기동하도록 --force를 전달한다. 없으면 기존 세션 감지가 poller 복구를 no-op으로 끝낼 수 있다.
       const args = fresh ? [agentId, "--force"] : [agentId, "--resume", "--force"];
       const r = await run(["bash", starter, ...args]);
       if (r.code !== 0) return { ok: false, detail: `재시작 실패: ${r.out.slice(-150)}` };
@@ -274,10 +239,7 @@ export async function restartAgent(agentId: string, runtime: string, fresh = fal
       return { ok: r.code === 0, detail: r.code === 0 ? `hermes ${agentId} 재시작(게이트웨이 in-place: ${label})` : `재시작 실패: ${r.out.slice(-150)}` };
     }
     if (runtime === "codex") {
-      // codex 두뇌는 매 wake마다 cwd AGENTS.md 를 새로 읽는다(stateless) — 브리지 프로세스만 kickstart 하면 된다.
-      // ★단 "페르소나 갱신은 자동" 이 아니다★ — codex 는 SOUL.md 를 안 읽고, 렌더가 AGENTS.md 에 박아둔
-      //   본문을 읽는다. SOUL.md 만 고치면 재렌더 전까지 옛 페르소나로 돈다. 그래서 대시보드 재시작
-      //   엔드포인트가 restartAgent 전에 refreshLoadingFiles 로 되맞춘다(routes/settings.ts, 2026-08-20).
+      // codex는 매 wake마다 AGENTS.md를 읽지만 SOUL.md는 자동 로드하지 않는다. 재시작 전 로딩파일을 재렌더해야 변경된 페르소나가 반영된다.
       const label = codexBridgeLaunchdLabel(agentId);
       const r = await run(["launchctl", "kickstart", "-k", `gui/${uid}/${label}`]);
       return { ok: r.code === 0, detail: r.code === 0 ? `codex ${agentId} 브리지 재기동(다음 턴부터 현재 AGENTS.md 로 돈다)` : `브리지 재기동 실패(미기동이었을 수 있음): ${r.out.slice(-120)}` };
@@ -293,16 +255,11 @@ export async function restartAgent(agentId: string, runtime: string, fresh = fal
  * collab 서버·b3rys-dev 같은 인프라는 건드리지 않는다.
  */
 type ControlMember = { id: string; runtime: string; capabilities?: string[] };
-/** 코디네이터인가. ★`stop_all` 제외 + 맨 마지막 재시작★ 두 가지가 이 하나에 걸려 있다.
- *
- *  ★예전에는 `recovery` 라는 별도 능력이었다.★ 둘로 나눠서 얻는 게 없었고(팀장이 코디를 다시
- *  임명하면 된다), ★나뉘어 있는 동안 화면이 "코디네이터 유지" 라고 말하면서 실제로는 recovery 를
- *  거르는 어긋남★ 이 있었다. 더 나쁜 것은 ★새로 설치한 팀에는 `recovery` 보유자가 아예 없어서★
- *  (`LEAD_CAPABILITIES` 는 `coordinator`·`full_context` 만 준다) ★코디가 보호받지 못했다는 점★ 이다. */
+// 코디네이터는 전체 정지에서 제외하고 마지막에 재시작해 복구 담당을 유지한다.
 const isCoordinator = (m: ControlMember): boolean => (m.capabilities ?? []).includes(COORDINATOR_CAPABILITY);
 
-/** 재시작 순서를 가른다 — ★코디는 맨 마지막.★ 이 대화 세션이 잠깐 끊기므로 끝으로 미룬다.
- *  ★순서가 뒤집히면 복구할 사람이 먼저 죽는다.★ 그래서 순서를 ★따로 잴 수 있게★ 함수로 뺀다. */
+/** 재시작 순서를 가른다 — 코디는 맨 마지막. 이 대화 세션이 잠깐 끊기므로 끝으로 미룬다.
+ *  순서가 뒤집히면 복구할 사람이 먼저 죽는다. 그래서 순서를 따로 잴 수 있게 함수로 뺀다. */
 export function partitionForRestart<T extends ControlMember>(members: readonly T[]): { others: T[]; coordinators: T[] } {
   const others: T[] = [];
   const coordinators: T[] = [];
@@ -325,9 +282,6 @@ export async function restartAll(members: ControlMember[]): Promise<Array<{ id: 
     }
     const r = await restartAgent(m.id, m.runtime);
     out.push({ id: m.id, ok: r.ok, detail: r.detail });
-    // stagger/mutex 없음(2026-07-25): 버전락 경합은 red herring 이었다(NON-FATAL, MCP 스폰 미차단). 재시작은
-    //   플러그인 캐시가 이미 warm 이라 세션 install 이 순삭 → MCP 가 30s 핸드셰이크 안에 붙는다. 콜드 install 대비는
-    //   start-telegram-channel.sh 의 pre-warm 이 담당. 별도 부팅 직렬화 불필요.
   }
   // 코디는 맨 마지막(--resume 이라 이 대화 컨텍스트 유지하고 ~15s 후 복귀).
   for (const m of coordinators) {
@@ -342,9 +296,7 @@ export async function restartAll(members: ControlMember[]): Promise<Array<{ id: 
  * 폭주·이상 시 GD 가 대시보드 빨강 버튼(더블컨펌)으로 즉시 호출. openclaw 는 각 계정 disable +
  * 게이트웨이 restart(stop 아님 → auto-heal 무관)라 멤버 수만큼 게이트웨이가 깜빡일 수 있다(비상이라 허용).
  */
-/** 정지 결과 한 줄. `kept` = 정지 대상에서 ★일부러 제외★ 된 멤버(복구 코디).
- *  ★화면이 이름으로 다시 추측하지 않게 서버가 표시한다.★ 예전에는 UI 가 `id !== "bill"` 로 걸렀는데,
- *  그러면 코디네이터가 바뀌거나 ★그런 이름이 아예 없는 설치(공개)★ 에서 틀린다. */
+// kept는 복구 담당으로 남겨 둔 멤버다. UI가 특정 ID로 제외 대상을 추측하지 않도록 서버가 표시한다.
 export type StopResult = { id: string; ok: boolean; detail: string; kept?: boolean };
 
 export async function stopAll(members: ControlMember[]): Promise<StopResult[]> {

@@ -1,22 +1,4 @@
-/**
- * ★없는 기능을 시키지 마라.★ (2026-07-13)
- *
- * ═══ 무슨 일이 있었나 ═══
- * 서버 수집 오케스트레이션(gdCollect.ts)과 `--collect` 플래그는 삭제됐다. ★그런데 지시문이 남았다.★
- *   · `hermesBridge.buildPrompt` → "모든 fan-out 에 `--collect` 를 붙여라. 서버가 답을 모아 종합 자료를 한 번에 넘겨준다"
- *   · `skills/b3os-team-inbox/SKILL.md` → 같은 지시 + 옵션 목록에 `--collect`
- * 그래서 라이브에서 hermes 가 이렇게 말했다:
- *   ★"서버 집계 번들이 오면 최종 종합 1개만 보고하겠습니다"★  ← ★영원히 안 오는 걸 기다린다★
- *
- * 게다가 `send.sh` 의 인자 파서는 모르는 옵션에 ★`unknown arg` + exit 1★ 로 죽는다:
- *   *) echo "unknown arg: $1" >&2; exit 1 ;;
- * → ★지시대로 따르면 팬아웃 자체가 실패한다.★ (같은 병으로 `--thread=X` 등호 형식도 죽는다 — ames 로그 7/08)
- *
- * ★교훈: 기능을 지웠으면 그걸 시키던 지시문도 같이 지워야 한다.★ 코드만 지우면 팀원은
- * 존재하지 않는 것을 기다리거나, 실패하는 명령을 실행한다. ★tsc 도 유닛도 이걸 못 잡는다.★
- *
- * 이 테스트는 ★문을 손으로 세지 않는다★ — 팀원이 실제로 읽는 출처를 스캔해서 스스로 찾는다.
- */
+// 수집 번들과 --collect는 지원하지 않는다. 지시문에 남으면 수집자가 존재하지 않는 결과를 기다리거나 명령 실행에 실패한다.
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -24,14 +6,14 @@ import { buildPrompt } from "./hermesBridge";
 
 const ROOT = join(import.meta.dir, "../../..");
 
-/** 팀원이 ★실제로 읽는★ 지시 출처. 새 출처가 생기면 여기 추가한다. */
+/** 팀원이 실제로 읽는 지시 출처. 새 출처가 생기면 여기 추가한다. */
 const INSTRUCTION_SOURCES = [
   "skills/b3os-team-inbox/SKILL.md",
   "src/server/lib/personaTemplates.ts",
   "src/server/lib/hermesBridge.ts",
 ];
 
-/** `--collect` 를 ★쓰라고 시키는★ 문장인가. (제거를 ★설명하는★ 문장은 통과 — 그건 지시가 아니다) */
+/** `--collect` 를 쓰라고 시키는 문장인가. (제거를 설명하는 문장은 통과 — 그건 지시가 아니다) */
 function instructsCollect(line: string): boolean {
   if (!line.includes("--collect")) return false;
   const explains =
@@ -68,9 +50,7 @@ describe("★수집 잔재 — 없는 기능을 시키지 않는다★", () => {
       locale: "ko",
     });
     expect(p).not.toContain("--collect");
-    expect(p).not.toContain("서버가 모아"); // ★없는 기능을 약속하지 않는다★
-    // ★2026-07-15 kind 전환★: 수집 절차(팬아웃/종합) 문구는 봉투에서 빠지고 AGENTS.md(룰)로 이관됐다.
-    //   봉투는 kind=teammate 만 싣고, 팀원이 룰로 수집 주소(각 팀원 / 종합=위임자)를 정한다.
+    expect(p).not.toContain("서버가 모아"); // 수집 절차와 주소는 AGENTS.md가 정한다. 봉투에는 kind만 싣고 존재하지 않는 수집 기능을 안내하지 않는다.
     expect(p).not.toContain("다 모이면 종합 1개"); // 봉투에서 제거됨 (룰이 소유)
     expect(p).not.toContain("send.sh"); // 봉투는 어떤 send.sh 명령도 찍지 않는다
   });

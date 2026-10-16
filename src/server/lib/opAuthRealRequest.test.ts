@@ -1,23 +1,4 @@
-/**
- * 신뢰 호스트 판정 — ★진짜 서버에 진짜 요청을 보내서★ 잰다. (2026-07-30)
- *
- * ■ 왜 이 파일이 따로 있나
- * `opAuth.test.ts` 는 `new Request(...)` 를 손으로 만들어 검사한다. 그게 이 기능을 ★한 번도
- * 동작한 적 없는 채로 통과시켰다.★ 그 테스트가 만든 요청은 이런 모양이었다:
- *
- *     new Request("http://127.0.0.1:7878/team/api/tags", { headers: { host: "dev.b3rys.com" } })
- *                  └─ url 은 루프백 ─┘                              └─ Host 는 도메인 ─┘
- *
- * ★실제 서버는 이런 요청을 만들지 않는다.★ Host 헤더가 곧 url 의 authority 가 되기 때문이다.
- * 그래서 `isLoopbackHost(urlHost) && isTrustedDashboardHost(hostHeader)` 라는 판정이
- * ★서로 배타적인 두 조건★ 이라는 걸 아무도 못 봤다 — 손으로 만든 요청에서는 둘이 독립이었으니까.
- * hermes 3회전 교차검증도 못 봤다. 셋 다 같은 가짜 모양을 봤다.
- *
- * ■ 그래서 여기서는 검사 대상을 우리가 만들지 않는다
- * `Bun.serve` 를 띄우고 `fetch` 로 진짜 요청을 보낸다. 우리가 정하는 건 Host 헤더 하나뿐이고,
- * 나머지(url·authority·정규화·파싱 실패)는 ★런타임이 정한다.★ 우리가 상상하지 못한 모양이 나오면
- * 그게 그대로 검사 대상이 된다 — 실제로 아래 malformed 케이스가 그렇게 나왔다.
- */
+// Bun은 Host로 URL authority를 만들므로 수동 Request와 다를 수 있다. 실제 서버에 요청해 호스트 판정과 파싱 실패를 검사한다.
 import { afterEach, describe, expect, test } from "bun:test";
 import { trustedActorFromRequest } from "./opAuth";
 
@@ -62,7 +43,7 @@ async function shapeOf(host: string): Promise<{ urlHost: string | null; hostHead
 
 describe("★요청의 실제 모양★ — 이 사실을 몰라서 기능이 죽어 있었다", () => {
   test("url 의 authority 는 ★Host 헤더에서 나온다★ — 둘은 독립된 두 신호가 아니다", async () => {
-    // 이게 이 사고의 뿌리다. 둘을 AND 로 걸면 도메인 요청은 앞 조건에서 항상 떨어진다.
+    // 도메인 Host와 loopback URL host를 동시에 요구하면 실제 도메인 요청은 통과할 수 없다.
     expect(await shapeOf("dev.b3rys.com")).toEqual({ urlHost: "dev.b3rys.com", hostHeader: "dev.b3rys.com" });
     // 실제 포트와 달라도 Host 가 이긴다 — url 을 "서버에 닿았다는 증거" 로 쓸 수 없는 이유다.
     expect((await shapeOf("127.0.0.1:9999")).urlHost).toBe("127.0.0.1:9999");
@@ -116,7 +97,7 @@ describe("신뢰 호스트 판정 — 진짜 요청으로", () => {
 
   test("★형식이 깨진 Host 를 loopback 으로 봐주지 않는다★ (codex·hermes 지적)", async () => {
     // `[::1]junk` 는 닫는 괄호 뒤에 쓰레기가 붙어 있다. 괄호 안만 잘라 읽으면 `::1` 이 되어
-    // ★등록 없이 통과★ 한다 — 신뢰를 주는 쪽으로 관대한 파서다. 실제 서버는 이 Host 를 그대로 넘긴다.
+    // 등록 없이 통과 한다 — 신뢰를 주는 쪽으로 관대한 파서다. 실제 서버는 이 Host 를 그대로 넘긴다.
     expect(await ask("[::1]junk")).toMatchObject({ ok: false, error: "dashboard_host_not_trusted" });
     expect(await ask("[::1]"), "제대로 된 IPv6 loopback 은 통과해야 한다").toMatchObject({ ok: true });
   });

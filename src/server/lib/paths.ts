@@ -1,14 +1,4 @@
-// 중앙 경로 모듈 — 하드코딩된 `/Users/you/...` 절대경로를 HOME 기준으로 이관해
-// 공개 빌드가 임의 머신에서 동작하게 한다(포터빌리티).
-//
-// 원칙:
-//   - process.env 는 여기서 한 번만 읽는다(단일 출처).
-//   - REPO_ROOT / MEMBERS_ROOT 는 personaTemplates 와 동일 파생을 재사용(divergence 방지).
-//     personaTemplates: REPO_ROOT = TEAM_COLLAB_ROOT ?? resolve(<이 소스 dir>/../../..)
-//                       MEMBERS_ROOT = B3RYS_HOME ? $B3RYS_HOME/members : $HOME/Development
-// - GD 머신(HOME=/Users/you)에선 모든 값이 기존 하드코딩과 동일하게 해석된다(무중단).
-//
-// dependency-light: node:path 와 타입 전용 import 만.
+// 경로는 환경변수와 HOME에서 파생해 머신별 절대경로에 의존하지 않게 한다. personaTemplates와 같은 루트 해석을 재사용한다.
 
 import { join } from "node:path";
 import type { AgentRecord } from "../types";
@@ -65,12 +55,12 @@ export function runtimeCwdForAgent(agent: Pick<AgentRecord, "id" | "workspace_pa
 }
 
 // ─── 자식 프로세스 PATH 보강 ──────────────────────────────────────────────
-// ★launchd 로 뜬 서버의 PATH 는 제한적★ 이라, bare name 으로 도구를 부르는 코드가 그대로 실패한다.
+// launchd 로 뜬 서버의 PATH 는 제한적 이라, bare name 으로 도구를 부르는 코드가 그대로 실패한다.
 // openclaw 실행파일 자체는 openclawBridge.resolveOpenclawBin() 이 절대경로로 풀지만,
-// ★approvals 가 spawn 하는 쉘 스크립트(activate-openclaw-agent.sh) 안의 bare name 은 그걸로 안 풀린다.★
+// approvals 가 spawn 하는 쉘 스크립트(activate-openclaw-agent.sh) 안의 bare name 은 그걸로 안 풀린다.
 // spawn 하는 쪽에서 PATH 를 씌우면 자식이 실행하는 스크립트 내부까지 한 번에 커버된다.
-// agentControl·activation 이 각자 PATH 문자열을 손으로 적고 있어 ★/usr/local/bin 이 빠지는 식으로
-// 조용히 어긋나 있었다★ — 목록을 여기 하나로 모은다.
+// agentControl·activation 이 각자 PATH 문자열을 손으로 적고 있어 /usr/local/bin 이 빠지는 식으로
+// 조용히 어긋나 있었다 — 목록을 여기 하나로 모은다.
 export const RUNTIME_BIN_DIRS = [
   LOCAL_BIN,              // npm -g · hermes 프로필
   `${HOME}/.bun/bin`,     // bun 공식 인스톨러

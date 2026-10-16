@@ -1,32 +1,17 @@
-/**
- * ★@all 은 정식 팀원에게만 가고, 주입문은 소유권을 단정하지 않는다.★
- *
- * ═══ 실제로 터진 일 ═══
- * ① `broadcastTargets` 가 `BUS_DISPATCH_AGENTS` env(손으로 유지하는 두 번째 명단)를 읽었다.
- *    env 7명 vs 정식팀원 8명 → ★lui·ames 가 @all 에서 통째로 빠졌다.★
- *    `message_recipient` 에 두 사람 행이 ★아예 없었다★ (안 읽은 게 아니라 안 갔다).
- * ② 그룹 주입문이 수신자 ★전원에게★ "그룹 라우터가 당신에게 배정했습니다" 라고 말했다.
- *    → 깨어난 사람 전원이 자기가 owner 라고 읽고 답했다. ★sticky·@mention 규칙이 무력화됐다.★
- *    실측: 25분에 방 broadcast 28건(서로 "확인했습니다" 를 주고받는 연쇄).
- *
- * ★demis 지적 반영★: "지금 명단으로 테스트를 짜면 그 테스트도 같이 통과해버린다."
- * → 그래서 이 테스트는 ★이름을 하드코딩하지 않고★, 새 정식 팀원을 넣었을 때 따라오는지로 잰다.
- */
+// 대상은 정식 명부를 따라야 하며 wake 자체가 소유권을 뜻하지 않는다. 새 팀원을 추가해도 대상을 누락하지 않는지 검사한다.
 import { describe, expect, it, test } from "bun:test";
 import { buildTmuxInjectionPrompt } from "../tmuxInject";
 import { broadcastAudience, hasBroadcastAllMarker, routeTeamMessage } from "./ownerDecision";
 import { broadcastRecipientIds } from "../agentMembership";
 
-// ★소스가 아니라 실제 렌더 결과를 잰다★ — 소스를 grep 하면 '뺐다' 고 적은 주석까지 걸린다(내가 그랬다).
+// 소스 주석이 아닌 실제 렌더 결과에서 소유권 단정을 검사한다.
 const INJECT = buildTmuxInjectionPrompt({
   session: "claude-t", fromLabel: "bill", locale: "ko",
   threadId: "tg--2000000000001", messageId: "m1", inReplyTo: "p1", hopCount: 1,
   body: "hi", source: "telegram", kind: "group", agentId: "t",
 } as never);
 
-// ★소스 텍스트가 아니라 동작을 잰다.★ 예전 판은 `broadcastTargets` 의 본문을 grep 했는데,
-// 규칙을 공용 함수로 모으자 ★동작이 그대로인데도 시험이 깨졌다.★ 문구를 재고 있었기 때문이다.
-// 지금은 라우터를 실제로 호출하고, 기대값은 같은 명부에서 규칙으로 다시 계산해 비교한다.
+// 소스 문구에 의존하면 함수 추출만으로 실패할 수 있어 라우터 결과를 명부 기반 기대값과 비교한다.
 const roster = (extra: Array<Record<string, unknown>> = []) =>
   [
     { id: "m1", display_name: "M1", team_official_member: true },
@@ -42,7 +27,7 @@ describe("★@all 대상은 agents.json 의 정식 팀원 하나만 본다★", 
   it("두 번째 명단(BUS_DISPATCH_AGENTS env)이 있어도 ★결과가 안 바뀐다★", () => {
     const before = atAll(roster());
     const prev = process.env.BUS_DISPATCH_AGENTS;
-    process.env.BUS_DISPATCH_AGENTS = "m1"; // 예전엔 이 값이 대상을 m1 하나로 좁혔다
+    process.env.BUS_DISPATCH_AGENTS = "m1"; // wake allowlist와 broadcast 수신 명부는 별개다.
     try {
       expect(atAll(roster()), "★env 가 다시 대상을 좁힌다★ — 명단이 둘이 되면 후입 팀원이 또 빠진다.")
         .toEqual(before);
@@ -71,15 +56,15 @@ describe("★@all 대상은 agents.json 의 정식 팀원 하나만 본다★", 
   });
 
   it("★팀원 방 발언이 0명이어도 팀장님 메시지의 sticky 경로는 그대로 동작한다★", () => {
-    // 두 사다리는 ★별개★ 다. 이번 변경은 팀원 방 발언(전달 대상)만 건드리고,
+    // 두 사다리는 별개 다. 이번 변경은 팀원 방 발언(전달 대상)만 건드리고,
     // 팀장님 메시지의 owner 판정(@이름 > 답장 > sticky > coordinator)은 손대지 않는다.
-    // ★설계 논의 중 이 둘을 섞은 적이 있다★ — 다음 사람도 헷갈리니 시험이 막는다.
+    // 설계 논의 중 이 둘을 섞은 적이 있다 — 다음 사람도 헷갈리니 시험이 막는다.
     const agents = roster();
 
     // 팀원 방 발언 → 전달 0명.
-    // ★source 를 반드시 넘긴다.★ optional 이라 빼면 어떤 입력이든 통과해서
-    // ★이 단언이 아무것도 안 지키게 된다.★ 그리고 마커까지 붙여서
-    // "멘션이 없어서 0명" 이 아니라 ★"팀원이라서 0명"★ 을 재게 한다.
+    // source 를 반드시 넘긴다. optional 이라 빼면 어떤 입력이든 통과해서
+    // 이 단언이 아무것도 안 지키게 된다. 그리고 마커까지 붙여서
+    // "멘션이 없어서 0명" 이 아니라 "팀원이라서 0명" 을 재게 한다.
     expect(broadcastAudience("네 확인했습니다", "agent").kind).not.toBe("all_hands");
     expect(broadcastAudience("@all 다들 확인", "agent").kind).not.toBe("all_hands");
     // 반대 축이 같이 죽지 않았는지 — 팀장님 것은 그대로여야 한다
@@ -92,8 +77,7 @@ describe("★@all 대상은 agents.json 의 정식 팀원 하나만 본다★", 
   });
 
   it("★wake allowlist 를 켜도 @all 대상이 안 바뀐다★ — 관심사가 다르다", () => {
-    // 예전 판은 소스를 grep 해서 `busDispatchAllowlist` 문자열이 없는지 봤다. ★문구를 재고 있었다.★
-    // 지금은 그 allowlist 를 실제로 좁혀놓고 ★결과가 바뀌는지★ 로 잰다.
+    // wake allowlist를 좁혀도 정식 명부 기반의 broadcast 수신 대상은 달라지면 안 된다.
     const before = atAll(roster());
     const prev = process.env.BUS_DISPATCH_AGENTS;
     process.env.BUS_DISPATCH_AGENTS = "m1"; // wake allowlist 를 한 명으로 좁힌다
@@ -129,15 +113,7 @@ describe("★그룹 주입문은 소유권을 단정하지 않는다 — sticky 
   });
 });
 
-/**
- * ★마커 판정 자체를 직접 고정한다 — codex 검수 요청(2026-08-01).★
- *
- * 라우팅(broadcastAudience)과 깨움(wakeDispatcher)이 ★서로 다른 판정★ 을 쓰고 있었다.
- * 라우팅은 stripQuotedForRouting 을 거쳤고, 깨움은 인라인 정규식으로 본문을 날것으로 봤다.
- * → ★인용·예시 안의 @all 이 깨움만 발동시켰다.★ 두 곳을 hasBroadcastAllMarker 로 모았다.
- *
- * 아래는 "무엇이 마커냐" 를 한 곳에 박아둔 것이다. 이게 흔들리면 두 경로가 같이 흔들린다.
- */
+// 라우팅과 깨움이 같은 전체 호출 판정을 써야 인용·예시의 @all이 한쪽만 발동시키지 않는다.
 describe("hasBroadcastAllMarker — 무엇이 마커이고 무엇이 아닌가", () => {
   test("맨 본문의 @all·@b3rys·@group 은 마커다", () => {
     expect(hasBroadcastAllMarker("@all 다들 확인")).toBe(true);
@@ -154,7 +130,7 @@ describe("hasBroadcastAllMarker — 무엇이 마커이고 무엇이 아닌가",
   });
 
   test("★인용줄(> @all)은 여전히 마커다★ — stripQuotedForRouting 이 제거 대상으로 안 잡는다", () => {
-    // 직관과 어긋나지만 ★기존 동작이고 라우팅도 같게 판정한다.★
+    // 직관과 어긋나지만 기존 동작이고 라우팅도 같게 판정한다.
     // 바꾸려면 두 경로가 같이 움직이므로 여기부터 고쳐라.
     expect(hasBroadcastAllMarker("> @all 원문입니다\n네 확인했습니다")).toBe(true);
   });

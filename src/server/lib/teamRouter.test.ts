@@ -127,8 +127,7 @@ describe("team router", () => {
     expect(decision.reason).toBe("active_assignee_followup");
   });
 
-  // 2026-06-05: topic_shift/closure 자동감지 제거. 주제전환 문구가 있어도 owner(sticky)는
-  // 명시적 @멘션/답장 전까진 유지된다. 자동 추정으로 codex 로 넘기지 않는다.
+  // 직전 owner는 명시 멘션·답장 전까지 유지한다. 주제전환 문구만으로 담당을 바꾸지 않는다.
   test("topic shift phrase no longer reassigns — sticky persists", () => {
     const decision = routeTeamMessage("오케이 이건 됐고 팀 대시보드 업무 리뷰하자", agents, {
       activeAssigneeId: "steve",
@@ -170,7 +169,6 @@ describe("team router", () => {
     const followup = routeTeamMessage("버블버블 게임이야", agents, { activeAssigneeId: "steve" });
     expect(followup.targetAgentIds).toEqual(["steve"]);
 
-    // 2026-06-05: topic_shift 제거 → 주제전환 문구로도 owner 안 바뀜. sticky=steve 유지.
     const reset = routeTeamMessage("오케이 이건 됐고 팀 대시보드 업무 리뷰하자", agents, {
       activeAssigneeId: "steve",
     });
@@ -311,7 +309,6 @@ describe("owner inference fallback", () => {
   });
 });
 
-// ─── Bug A fix: @all/@b3rys/@group broadcast marker ──────────────────────────
 describe("broadcast marker (@all / @b3rys / @group)", () => {
   const ALL_IDS = agents.map((a) => a.id);
 
@@ -362,9 +359,7 @@ describe("broadcast marker (@all / @b3rys / @group)", () => {
   });
 });
 
-// ─── Bug B fix: recipient rows limited to router decision targets ─────────────
-// These are unit-level checks on detectExplicitTargets to confirm single vs multi
-// results that telegramCapture uses to decide type/to_agent_id/explicit_recipients.
+// 명시 멘션 결과의 단일·복수 구분은 캡처 경로의 recipient 계산에 사용되므로 함께 검사한다.
 describe("recipient scope (explicit targets count)", () => {
   test("single @mention → 1 target (dm)", () => {
     const t = detectExplicitTargets("@빌 텔레그램 봐줘", agents);
@@ -463,10 +458,6 @@ describe("nicknames registry (agents.json 자동 로드)", () => {
   });
 });
 
-// ─── owner-gate regression: 2026-06-02 GD 라이브 검증 세트 (T1~T6) ───────────────
-// 그룹 owner-gate(A안) 도입의 근거가 된, GD가 팀방에서 직접 보낸 검증 문장들.
-// 게이트는 라우터 결정을 "강제"만 하므로, 이 세트가 green = 게이트가 차단/통과할 정답 기준.
-// 주요 라우터/캡처/게이트 수정 배포 전 이 세트를 반드시 돌린다.
 describe("owner-gate regression (2026-06-02 GD 검증 세트)", () => {
   test("T1: @빌 단독 → bill (explicit_mention)", () => {
     const d = routeTeamMessage("@빌 라우터 health 한 줄로", agents);
@@ -558,11 +549,7 @@ describe("example-separator @멘션 억제 (—- 아래는 예시)", () => {
   });
 });
 
-// ─── owner-gate suppress 규칙 (커뮤니케이션 룰 spec — 이 블록만 봐도 누가 응답/👀 하는지 보임) ───
-// gate(owner-gate/react 훅)는 라우터 reason이 "확실 owner"이고 자기가 targets 에 없으면 응답·👀 차단.
-//   확실 owner reason = explicit_mention · reply_author · active_assignee_followup(sticky).
-//   추측성(default_intake/default_step)·broadcast_marker·라우터 에러 = fail-open(통과, 👀 유지).
-// 배경: v1은 explicit_mention 만 막아 무-@멘션 sticky non-owner(#2066)를 못 막던 갭 → confident owner 로 확장.
+// 확실 owner가 있으면 대상 밖 멤버의 응답·리액션을 억제한다. 추측성 담당·전체 호출·라우터 오류는 통과시킨다.
 describe("owner-gate suppress 규칙 — shouldSuppress 단일 출처 (커뮤니케이션 룰 spec)", () => {
   // 훅(owner-gate/react)은 thin-client로 이 함수 결과만 obey. 이 블록만 봐도 "누가 응답·👀 하나"가 보인다.
   // 억제(suppress) = 확실 owner(explicit_mention·reply_author·active_assignee_followup)가 있는데 내가 그 owner가 아님.

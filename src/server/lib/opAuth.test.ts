@@ -30,17 +30,7 @@ describe("op auth shared token", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 대시보드 신원 — ★주소창만 달라도 결과가 갈렸다★ (2026-07-30 실측)
-//   대시보드는 인증 헤더를 하나도 안 보내므로 loopback 예외 하나에만 의존한다. 그래서 도메인·앱으로
-//   들어오면 태그·보고서·제안 쓰기가 전부 403 이었다(이름은 2026-07-30 에 dashboard_host_not_trusted 로 정정).
-//   ★여기에 테스트가 없어서 코드 리뷰·CI 로 잡히지 않았다★ — 그래서 양방향을 못박는다.
-// ─────────────────────────────────────────────────────────────────────────────
-// ★새 게이트 검사는 여기 말고 opAuthRealRequest.test.ts 에 쓴다.★
-//   아래 요청들은 손으로 만든 것이라 `url 은 루프백 + Host 는 도메인` 같은 ★실제 서버가 만들 수 없는
-//   모양★ 을 만든다. 그 모양이 신뢰 호스트 등록 기능을 한 번도 동작하지 않은 채 통과시켰다(2026-07-30).
-//   여기 남은 것은 헤더 조합·에러 이름 같은 순수 판정용이고, "요청이 어떻게 생겼나" 가 결과를 가르는
-//   검사는 진짜 서버를 띄우는 쪽에 둔다.
+// Host와 URL 관계가 중요한 검사는 실제 서버를 쓰는 opAuthRealRequest.test.ts에 둔다. 수동 Request는 서버가 만들지 않는 조합도 허용한다.
 describe("대시보드 loopback 예외 + 등록한 주소", () => {
   const req = (host: string) =>
     new Request("http://127.0.0.1:7878/team/api/tags", { method: "POST", headers: { host } });
@@ -57,7 +47,7 @@ describe("대시보드 loopback 예외 + 등록한 주소", () => {
     expect(trustedActorFromRequest(req("dev.b3rys.com"), { loopbackDashboardActor: "gd" })).toMatchObject({
       ok: false,
       status: 403,
-      // ★이름이 실패 이유를 가리켜야 한다★ — 앞서는 헤더 검사의 실패값(x_actor_id_required)이
+      // 이름이 실패 이유를 가리켜야 한다 — 앞서는 헤더 검사의 실패값(x_actor_id_required)이
       //   그대로 돌아왔다. 대시보드는 그 헤더를 아예 안 쓰는데도.
       error: "dashboard_host_not_trusted",
     });

@@ -65,7 +65,7 @@ describe("renderServerPlist", () => {
     expect(xml).toContain("<key>KeepAlive</key><true/>");
   });
 
-  // ★회귀 가드: 설정값을 plist 에 구우면 사용자의 .env 를 덮어쓰고 값이 고정된다(.env 를 고쳐도 반영 안 됨).
+  // 회귀 가드: 설정값을 plist 에 구우면 사용자의 .env 를 덮어쓰고 값이 고정된다(.env 를 고쳐도 반영 안 됨).
   //   설정 원천은 .env(WorkingDirectory 에서 bun 이 자동 로드) — plist 는 설정을 갖지 않는다.
   test("설정값(포트/바인드/베이스패스)을 plist 에 굽지 않는다 — .env 가 원천", () => {
     const xml = renderServerPlist();

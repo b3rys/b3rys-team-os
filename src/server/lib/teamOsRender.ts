@@ -7,7 +7,7 @@
 import { readFileSync, writeFileSync, renameSync, lstatSync, unlinkSync, symlinkSync, readlinkSync, existsSync } from "node:fs";
 import { REPO_ROOT, MEMBERS_ROOT } from "./personaTemplates";
 
-const RULES_DIR = `${REPO_ROOT}/rules`; // 포터블: repo 루트 기준(GD 2026-06-27 — 하드코딩 제거)
+const RULES_DIR = `${REPO_ROOT}/rules`; // 클론 위치가 달라도 같은 저장소의 규칙을 읽도록 루트에서 파생한다.
 const TEMPLATE = `${RULES_DIR}/TEAM-OS.template.md`;
 const LIVE = `${RULES_DIR}/TEAM-OS.md`; // 런타임이 읽는 렌더본
 // claude 에이전트 workspace 심링크가 가리킬 표준 타깃 = 렌더본 절대경로.
@@ -24,8 +24,8 @@ export function renderTeamOs(ownerName: string | null | undefined): { ok: boolea
     if (owner) text = text.split("{{OWNER}}").join(owner);
     // skip-if-unchanged: 렌더 결과가 기존 LIVE 와 동일하면 재작성 생략.
     if (existsSync(LIVE) && readFileSync(LIVE, "utf-8") === text) return { ok: true, owner };
-    // ★원자적 쓰기: 임시파일 → rename★ (infra-safety ② "상태 파일은 임시파일 작성 → 원자적 mv").
-    //   이 파일은 ★전 런타임이 읽는 정본★ 이라, 쓰는 도중을 다른 프로세스가 읽으면 ★반쪽짜리 룰★ 을
+    // 원자적 쓰기: 임시파일 → rename (infra-safety ② "상태 파일은 임시파일 작성 → 원자적 mv").
+    //   이 파일은 전 런타임이 읽는 정본 이라, 쓰는 도중을 다른 프로세스가 읽으면 반쪽짜리 룰 을
     //   읽게 된다(writeFileSync 는 원자적이지 않다 — truncate 후 기록이라 그 사이에 창이 있다).
     //   서버 부팅·설정 저장·테스트가 동시에 렌더를 부를 수 있으므로 rename 으로 갈아끼운다
     //   (같은 파일시스템이라 rename 은 원자적: 읽는 쪽은 옛 내용 아니면 새 내용, 그 중간은 없다).

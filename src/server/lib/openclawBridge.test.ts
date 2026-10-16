@@ -51,14 +51,7 @@ afterEach(() => {
   delete process.env.OPENCLAW_TURN_FAIL_GRACE_MS;
 });
 
-/**
- * ★2026-07-27 라이브 회귀★ — 서버가 launchd 로 뜨면 PATH 에 npm global prefix(`~/.local/bin`)가
- * 없다. openclaw 가 멀쩡히 설치돼 있는데도 spawn 이 `Executable not found in $PATH` 로 죽었고,
- * openclaw 런타임 팀원에게 가는 ★모든 directed 버스 메시지의 wake 가 조용히 실패★했다
- * (message row 는 저장되므로 발신자에겐 "보냈다"로 보인다 — 그래서 몇 시간 안 들켰다).
- *
- * 실 FS 를 건드리지 않도록 후보 목록·실행가능 판정을 주입해서 고정한다(b3os-infra-safety ④).
- */
+// launchd의 PATH에는 npm 전역 설치 경로가 없을 수 있다. 후보와 실행가능 판정을 주입해 실제 설치 상태에 의존하지 않고 검사한다.
 describe("resolveOpenclawBin — PATH 만 믿지 않는다", () => {
   const never = () => false;
   const always = () => true;
@@ -97,25 +90,7 @@ describe("resolveOpenclawBin — PATH 만 믿지 않는다", () => {
 });
 
 describe("injectOpenclawTelegramTurn visible reply bridge", () => {
-  /**
-   * ★[B] — 브릿지는 턴 본문을 ★게시하지 않는다.
-   *
-   * ═══ 예전 계약 [A] (이 테스트가 지키던 것) ═══
-   *   브릿지가 세션을 만들고 → 주입하고 → preview 로 ★게이트웨이가 뱉은 최종 텍스트를 긁어★ →
-   *   ★그 팀원의 봇으로 단톡방에 대신 게시★했다 (sendMessage, reply_parameters 로 원본에 답글).
-   *   즉 ★턴 본문 = 발행물★. codex 는 ★뭘 쓰든 나갔다.★
-   *
-   * ═══ 왜 뒤집혔나 ═══
-   *   ★침묵이 불가능했다★ → `[NO_REPLY]` 우회 토큰 → 발행 지점마다 가드 → ★하나 놓침★ →
-   * ★"GD Step Codex: [NO_REPLY]" 가 팀장 단톡방에 문자 그대로 찍혔다★ (2026-07-13 라이브).
-   *   그리고 수신자를 서버가 ★추측★ 했다 → 종합이 엉뚱한 사람에게 갔다.
-   *
-   * ═══ 지금 계약 [B] ═══
-   *   브릿지는 ★나머지 전부★ 를 그대로 한다 (세션 생성 · 👀 리액션 · 주입 · preview 로 턴 완료 확인 · true 반환).
-   *   ★단 하나, 턴 본문을 텔레그램에 게시하지 않는다.★ 말하려면 codex 가 자기 손으로 envelope API 로 보낸다.
-   *   ★플랫폼 공지(턴 실패·지연)는 여전히 게시된다★ — 그건 팀원의 말이 아니라 ★시스템의 말★ 이기 때문이다
-   *   (아래 failure/delay notice 테스트가 그걸 고정한다).
-   */
+  // 브리지는 세션·리액션·턴 완료 확인을 처리하되 턴 본문은 게시하지 않는다. 시스템의 실패·지연 공지는 별도 발송 경로다.
   test("★세션 생성·리액션·주입·preview 는 그대로 — 그러나 턴 본문은 게시하지 않는다★ ([B] 자동게시 제거)", async () => {
     process.env.CODEX_TELEGRAM_BOT_TOKEN = "test-token";
     const openclawCalls: string[][] = [];
@@ -146,19 +121,18 @@ describe("injectOpenclawTelegramTurn visible reply bridge", () => {
             : { ok: true };
 
         if (method === "sessions.send") {
-          // ★[A] 문구 = 사라졌다★ — "너는 보내지 마라, 브릿지가 대신 보낸다" 는 이제 codex 를 벙어리로 만든다
+          // [A] 문구 = 사라졌다 — "너는 보내지 마라, 브릿지가 대신 보낸다" 는 이제 codex 를 벙어리로 만든다
           expect(params.message).not.toContain("직접 message 도구를 호출하지 마세요");
           expect(params.message).not.toContain("브릿지가 최종 답변을 원본 Telegram 메시지의 reply 로 전송합니다");
-          // ★[B] 불변식 + 배송처★ — 룰이 '어디로' 를 말 안 하면 LLM 은 턴 본문에 쓰고, 그건 아무 데도 안 간다
+          // [B] 불변식 + 배송처 — 룰이 '어디로' 를 말 안 하면 LLM 은 턴 본문에 쓰고, 그건 아무 데도 안 간다
           expect(params.message).toContain("★말하려면 직접 보내세요. 안 보내면 아무 말도 안 한 것입니다.★");
           expect(params.message).toContain("당신의 메모일 뿐, 아무 데도 안 갑니다");
           expect(params.message).toContain("할 말이 없으면 그냥 안 보내면 됩니다"); // 침묵 = 안 보내기 (토큰 없음)
           expect(params.message).not.toContain("[NO_REPLY]");
-          // 배송처 = 이 방의 thread id. 팀원이 알 수 없는 ★사실★ 이므로 주입문이 준다.
-          // 보내는 ★법★(send.sh --to broadcast --thread) 은 룰(AGENTS.md)이 말한다 — 주입문은 반복하지 않는다.
+          // 배송처 = 이 방의 thread id. 팀원이 알 수 없는 사실 이므로 주입문이 준다.
+          // 보내는 법(send.sh --to broadcast --thread) 은 룰(AGENTS.md)이 말한다 — 주입문은 반복하지 않는다.
           expect(params.message).toContain('thread="tg--1009999999999"');
-          // ★두 번째 입구 금지★ — 예전 주입문은 envelope API(POST /team/api/inbox)를 안내해
-          //   룰의 send.sh 와 입구가 둘이 됐다. 입구가 둘이면 언젠가 한쪽으로 샌다 → 회귀 가드.
+          // 발신 경로를 중복 안내하면 호출 방법이 갈릴 수 있어 봉투에서 별도 API 입구를 안내하지 않는다.
           expect(params.message).not.toContain("api/inbox");
           expect(params.message).not.toContain("envelope API");
           // 첨부는 그대로 (자동게시 제거와 무관)
@@ -200,7 +174,7 @@ describe("injectOpenclawTelegramTurn visible reply bridge", () => {
       }),
     ).resolves.toBe(true);
 
-    // ★브릿지의 나머지 일은 전부 그대로다★ — 세션 생성 → 주입 → preview(턴 완료 확인)
+    // 브릿지의 나머지 일은 전부 그대로다 — 세션 생성 → 주입 → preview(턴 완료 확인)
     expect(openclawCalls.map((args) => args[0])).toEqual([
       "sessions.create",
       "sessions.send",
@@ -208,13 +182,13 @@ describe("injectOpenclawTelegramTurn visible reply bridge", () => {
     ]);
     expect(events).toEqual([
       "openclaw:sessions.create",
-      "telegram:reaction",   // 👀 = "받았다" 신호. 이건 팀원의 ★말★ 이 아니라 수신 확인이라 유지.
+      "telegram:reaction",   // 👀 = "받았다" 신호. 이건 팀원의 말 이 아니라 수신 확인이라 유지.
       "openclaw:sessions.send",
       "openclaw:sessions.preview",
     ]);
 
-    // ★★핵심: 텔레그램 호출은 리액션 ★하나뿐★ 이다.★★
-    //   preview 가 "Codex sticky reply" 를 읽어냈지만 ★서버는 그걸 게시하지 않는다★ — 그건 codex 의 메모다.
+    // 핵심: 텔레그램 호출은 리액션 하나뿐 이다.
+    //   preview 가 "Codex sticky reply" 를 읽어냈지만 서버는 그걸 게시하지 않는다 — 그건 codex 의 메모다.
     //   말하려면 codex 가 직접 POST /team/api/inbox (to=broadcast) 로 보낸다 → routes/inbox.ts 가 릴레이한다.
     expect(telegramCalls).toEqual([
       {
@@ -226,7 +200,7 @@ describe("injectOpenclawTelegramTurn visible reply bridge", () => {
         },
       },
     ]);
-    // 회귀 가드(명시): 턴 본문이 sendMessage 로 새어나가면 ★[NO_REPLY] 사고가 그대로 재현된다★
+    // 턴 본문은 sendMessage로 자동 게시되면 안 된다.
     expect(
       telegramCalls.filter((c) => c.url.includes("/sendMessage")),
       "★서버가 codex 의 턴 본문을 대신 게시했다★ — [A] 회귀. 침묵이 다시 불가능해지고 우회 토큰이 팀장방에 찍힌다.",
@@ -371,7 +345,7 @@ describe("injectOpenclawTelegramTurn visible reply bridge", () => {
     expect(notice?.reply_parameters?.message_id).toBe(2111);
   });
 
-  // B (2026-06-13): 확정된 죽은 턴(session status=failed, 본문 없음)은 침묵하지 않고 visible notice 를 띄운다.
+  // terminal-failed이며 본문이 없는 턴은 단순 지연과 구분해 실패 공지를 제공한다.
   test("posts a visible failure notice when the turn dies (session status=failed, no assistant text)", async () => {
     process.env.CODEX_TELEGRAM_BOT_TOKEN = "test-token";
     process.env.OPENCLAW_TURN_FAIL_GRACE_MS = "0"; // 테스트 즉시 terminal-failed 인정

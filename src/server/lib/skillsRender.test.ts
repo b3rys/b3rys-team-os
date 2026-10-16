@@ -12,7 +12,7 @@ describe("rules/SKILLS.md 렌더", () => {
     expect(md.startsWith("# SKILLS")).toBe(true);
     expect(md).toContain(buildSkillTable());
     expect(md).toContain("손으로 고치지 않는다");
-    // 겹쳐 쓰기 규칙은 Core Rules 에서 뺐다(팀장 09-18) — 목록 파일이 대신 품는다. 순서까지 고정(codex 리뷰 #435).
+    // 여러 스킬의 적용 순서도 실행 규칙이므로 목록 파일에서 순서까지 확인한다.
     expect(md).toContain("여러 trigger 가 맞으면 전부 적용한다");
     expect(md).toMatch(/`b3os-infra-safety`[^\n]*→[^\n]*`b3os-github-workflow`/);
   });

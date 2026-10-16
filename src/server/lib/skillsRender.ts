@@ -1,7 +1,4 @@
-// rules/SKILLS.md 렌더 — trigger→스킬 목록을 규칙 파일 밖으로 뺀다.
-//   왜: 목록이 CLAUDE.md·AGENTS.md 본문에 박혀 있으면 스킬 하나 추가가 12명 규칙 파일 재생성이 된다(팀장 2026-09-18).
-//   claude 는 CLAUDE.md 의 `@SKILLS.md`(워크스페이스의 복사본 — ensureSkillsCopy) 로 인라인, 나머지 런타임은 세션 시작 때 경로로 읽는다.
-//   TEAM-OS.md 와 같은 방식: 소스는 skills/*/SKILL.md 의 trigger 줄, 산출물은 rules/SKILLS.md(gitignore).
+// 스킬 목록을 규칙 파일에 복제하면 목록 변경마다 전원 재렌더가 필요하다. trigger를 정본으로 SKILLS.md를 별도 렌더한다.
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";

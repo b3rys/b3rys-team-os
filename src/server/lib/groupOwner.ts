@@ -1,13 +1,4 @@
-// 팀방 현재 owner(들) 저장소. (구 groupSticky — 2026-06-05 GD 요청으로 이름 명확화: "sticky"가
-// 헷갈려서 setGroupOwner 로. 실제 동작은 "이 그룹의 현재 owner 를 기록".)
-//
-// capture 워커가 매 GD 메시지 라우팅 직후 setGroupOwner(결정된 owner) 를 호출하고,
-// /api/route(owner-gate 훅) 와 라우터가 getGroupOwner/getGroupOwners 로 읽어 무-@멘션 메시지에
-// "직전 owner" 판정을 적용한다.
-//
-// 영속화(2026-06-05): in-memory 가 1차, DB(group_owner 행)는 재시작 복원용 백업. write-through +
-// 시작 시 1회 load. DB 실패는 무시(라이브 동작 안 깨짐). 저장 시점은 그대로(setGroupOwner 한 곳) —
-// blast radius = 이 파일 + index.ts init 한 줄.
+// 그룹 owner는 명시 멘션·답장이 없는 메시지의 직전 담당 판정에 쓰인다. 메모리를 우선 사용하고 DB는 재시작 복원용으로 유지한다.
 
 import type { Database } from "bun:sqlite";
 

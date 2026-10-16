@@ -17,52 +17,19 @@ import { routeDefaultIntakeLLM } from "./defaultIntake";
 // @all/@b3rys/@group — broadcast-all marker. Checked before explicit_mention.
 const BROADCAST_MARKER_RE = /@(all|b3rys|group)\b/i;
 
-/**
- * ★전체 호출 마커가 본문에 있나★ — 이 정규식은 여기 하나뿐이다.
- *
- * 예전엔 같은 리터럴이 `wakeDispatcher` 에도 박혀 있었다. ★한쪽만 고치면 수신행은 0인데
- * 깨우기는 하거나 그 반대가 된다★ — 같은 질문에 답이 둘이 되는 그 형태다.
- */
+// 라우팅 수신행과 wake가 갈리지 않도록 전체 호출 마커 판정을 공유한다.
 export function hasBroadcastAllMarker(text: string): boolean {
   return BROADCAST_MARKER_RE.test(stripQuotedForRouting(text));
 }
 
-/**
- * ★@all 대상 = 정식 팀원(agents.json 의 team_official_member) — 그것 하나만 본다.★
- *
- * 예전엔 `BUS_DISPATCH_AGENTS` env 를 읽었다. 그 env 는 ★손으로 유지하는 두 번째 명단★ 이고,
- * 정본(agents.json)과 갈렸다 — 실측: env 7명 vs 정식팀원 8명이라 ★lui·ames 가 @all 에서 통째로 빠졌다.★
- * `message_recipient` 에 두 사람 행이 아예 없었다(안 읽은 게 아니라 안 갔다).
- *
- * ★명단을 하나로 만드는 게 고침의 핵심이다.★ env 나 보강파일을 "같이 읽게" 하면 명단이 둘로 남아
- * 다음 영입 때 또 갈린다. wake allowlist(`busDispatchAllowlist`)는 별개 관심사라 건드리지 않는다.
- *
- * ★판정은 `broadcastRecipientIds` 하나가 한다★ — 팀원 broadcast 팬아웃도 같은 함수를 쓴다.
- * 여기서 조건을 다시 쓰면 같은 질문에 답이 둘이 되고, 그게 이 결함의 원인이었다.
- */
+// 수동 allowlist는 정식 명부와 갈릴 수 있어 broadcastRecipientIds 하나로 대상을 계산한다. wake allowlist와는 별개다.
 function broadcastTargets(agents: AgentRecord[]): string[] {
   return broadcastRecipientIds(agents);
 }
 
-/**
- * ★방 발언이 팀원 inbox 로 전달될 대상★ — 본문의 멘션으로 정한다.
- *
- * 방 게시와 팀원 전달이 `broadcast` 한 단어에 묶여 있어서 ★어디에 말하든 전원이 깨어났다.★
- * 갈라야 할 축은 "몇 명" 이 아니라 ★"애초에 전달이 필요한 발송인가"★ 다.
- *
- * 실측(오늘 방 발언 81건): ★멘션 없음 51건 → 답 달린 것 0건★ · 멘션 있음 30건 → 답 27건.
- * ★멘션 없는 발언에 답이 달린 사례가 하나도 없다★ — 이 축으로 잘라도 끊기는 대화가 없다.
- * (그 51건은 대부분 팀장님께 드리는 답이었다. 오늘은 게이트 테스트라 평소보다 부풀어 있다.)
- *
- * ★멘션 판정은 `detectExplicitTargets` 하나만 쓴다★ — 한글 별칭·조사·인용 제외를 이미 안다.
- * 여기서 정규식을 새로 쓰면 그게 ★두 번째 판정★ 이 되고, 그게 이 결함의 원인이었다.
- */
+// 방 게시와 팀원 wake는 별개다. 멘션 대상을 공통 detectExplicitTargets로 계산해야 대상 판정이 갈리지 않는다.
 export function broadcastAudience(text: string, source?: string): { kind: "all_hands" | "none" } {
-  // ★@all 은 팀장님 전용이다.★
-  //   팀원이 본문에 @all 을 써도 마커로 치지 않는다 — ★방에 말하는 것 자체는 그대로다.★
-  //   실측: 그날 팀원이 쓴 @all 중 전체공지 목적은 ★검증용 1건뿐★ 이고 나머지는 전부
-  //   ★"@all 이라는 단어를 문장 안에서 언급"★ 한 것이었다(예: "결함은 그중 하나(@all)에만").
-  //   ★언급만 해도 8명이 깨어났다.★ 인용해 답하는 경우도 같은 문제의 부분집합이다.
+  // 팀원의 @all 언급이 전원 wake로 확대되지 않도록 전체 호출 마커는 팀장 발언에서만 인정한다.
   if (source !== "user") return { kind: "none" };
   return { kind: hasBroadcastAllMarker(text) ? "all_hands" : "none" };
 }
@@ -103,8 +70,7 @@ export function routeTeamMessage(
     };
   }
 
-  // 2026-06-05: topic_shift/closure 자동감지 제거. sticky 는 명시적 @멘션/답장으로
-  // owner 가 바뀌기 전엔 항상 유지된다 — 자동 주제전환 추정으로 owner 를 버리지 않는다.
+  // 주제전환을 추측해 담당을 버리지 않도록 명시 멘션·답장 전까지 직전 owner를 유지한다.
   if (activeAssigneeIds.length > 0) {
     return {
       targetAgentIds: activeAssigneeIds,
@@ -131,21 +97,10 @@ function validActiveAssignees(context: RouterContext, agents: AgentRecord[]): st
   return [...new Set(ids)].filter((id) => validIds.has(id));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LLM router (EXAONE via Ollama) — PRIMARY engine per the team lead's "all-LLM, no regex"
-// decision (2026-05-23). The regex routeTeamMessage above is kept as a fast,
-// deterministic FALLBACK (used when Ollama is unavailable) + its tests document
-// the expected behavior. The LLM engine additionally classifies discussion vs
-// execution intent (논의=multi / 구현=single owner) — GD pattern.
-// ─────────────────────────────────────────────────────────────────────────────
 
-// NOTE (2026-06-20): routerSystemPrompt 는 데이터화(routing_domains) 시도했으나 EXAONE(2.4b, temp=0)이
-// 프롬프트 텍스트/순서/예시에 민감해 기존 green 테스트 3개(explicit name·finance·sticky)를 깨뜨려 behavior
-// 보존 실패 → 원문 유지. routeTeamMessageLLM 는 라이브 미연결(standalone) 함수라 영향 범위도 작다. 이 프롬프트
-// 속 실명은 public export pipeline 의 ownerDecision 치환 + SKIN 단계가 처리. (LIVE 경로인 defaultIntakePrompt 는
-// coordinator 기반으로 데이터화 완료 — 동작 보존 확인.)
+// 이 모델은 프롬프트 문구·순서·예시에 민감하므로 데이터화나 재배열 시 라우팅 회귀 검증이 필요하다.
 function routerSystemPrompt(agents: AgentRecord[]): string {
-  const coord = coordinatorId(agents) ?? "코디네이터"; // 기본 조율 담당 = capability 기반(agents.json), 특정 이름 하드코딩 금지(GD 2026-07-02)
+  const coord = coordinatorId(agents) ?? "코디네이터"; // 조율 담당은 특정 ID가 아니라 capability에서 찾는다.
   return `너는 팀 채팅방 메시지 라우터다. 사용자(팀장)의 새 메시지를 보고 누가 응답할지 정한다.
 
 팀원과 담당 영역:
@@ -275,8 +230,6 @@ export async function routeTeamMessageHybrid(
   // 인용/예시(코드펜스·"—-" 구분선 아래)의 멘션은 트리거 제외. 라이브 멘션 판정에만 적용.
   const liveText = stripQuotedForRouting(text);
 
-  // 2026-06-05: topic_shift/closure 자동감지 제거. owner 는 @멘션 > 답장 > sticky > 기본
-  // 으로만 결정한다. 종료·주제전환을 자동 추정해 owner 를 비우거나 codex 로 넘기지 않는다.
 
   // 0.5) @all/@b3rys/@group → broadcast all enabled agents. Checked BEFORE explicit_mention.
   if (hasBroadcastAllMarker(text)) {
@@ -291,16 +244,10 @@ export async function routeTeamMessageHybrid(
     };
   }
 
-  // 1) 명시 @멘션 — @멘션은 어떤 상황에서도 우선. detectExplicitTargets 는
-  // 순수 @멘션/@별칭만 잡고(과거참조 tail drop·REQUEST_MARKER 필터 없음) 무조건 깨운다.
-  // 직접 호출 "@데미스 @스티브 이거 보여. 어제 모했어" 가 tail 의 '어제'(과거참조)+요청마커 부재로
-  // detectAddressedNamesLoose/filterLiveWakeTargets 에서 둘 다 누락되던 버그 fix.
-  // (bare 이름(@ 없음)은 detectExplicitTargets 가 안 잡으므로 over-summon 은 여전히 방지됨.)
+  // 명시 멘션은 요청 마커·과거참조 필터와 무관하게 우선한다. 필터를 적용하면 실제 직접 호출을 놓칠 수 있다.
   const wakeTargets = detectExplicitTargets(liveText, agents);
   if (wakeTargets.length > 0) {
-    // 2026-06-05: @멘션은 컴 룰의 최상위. 잡힌 전원에게 라우팅하고 끝낸다.
-    // 위임/중계/보고/작업 판단은 멘션 받은 에이전트(LLM)가 내용을 읽고 한다 — 라우터는 'owner 가 누구냐'만.
-    // (이전 analyzeDelegation 좁히기는 "@빌 @코덱스 각자 일"을 위임으로 오판하는 등 버그만 양산해 제거.)
+    // 라우터는 owner만 정한다. 멘션된 전원에게 전달하고 위임·작업 판단은 수신자에게 맡긴다.
     return {
       targetAgentIds: wakeTargets,
       reason: "explicit_mention",
@@ -346,9 +293,7 @@ export async function routeTeamMessageHybrid(
   const intake = await routeDefaultIntakeLLM(text, agents, opts).catch(() => null);
   if (intake?.outcome === "route") return { ...intake, shouldResetThread: false };
 
-  // 4) 오너가 애매하면(멘션·답장·sticky 모두 없음) codex 로 자동 배정하지 않는다.
-  // 룰 = @멘션 > 답장 > sticky > **오너 애매하면 GD 문의**. → ask_gd(아무도 안 깨움 + GD 에게 누가 볼지 질문).
-  //    이전엔 하드코딩 default_step 으로 보내, 재시작으로 sticky 가 비면 특정 agent 가 엉뚱한 메시지를 잡던 문제 fix.
+  // 명시 멘션·답장·직전 owner가 없으면 담당을 추측하지 않고 팀장에게 묻는다.
   return {
     targetAgentIds: [],
     reason: "ask_gd",

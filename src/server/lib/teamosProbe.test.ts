@@ -44,11 +44,7 @@ describe("teamOsSnapshot scheduled_job rows", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 죽은 잡을 초록불로 보여주던 판정 (2026-07-30 사고)
-//   실패로 정지한 잡이 "next=9시간 전" 이라고 적힌 채 running=true 로 떴다. 화면이 고장을 정상이라 말했다.
-//   ★시각을 인자로 받아 고정한다★ — "지금"에 의존하면 이 판정을 검증할 수 없다.
-// ─────────────────────────────────────────────────────────────────────────────
+// 시각 판정은 현재 시각에 의존하면 불안정하므로 now를 주입해 고정한다.
 describe("judgeScheduledJob — 초록불을 줄지 판정", () => {
   const NOW = Date.parse("2026-07-30T01:00:00Z"); // 10:00 KST
   const at = (iso: string) => ({ enabled: 1, status: "pending" as string | null, next_run_at: iso });
@@ -60,7 +56,6 @@ describe("judgeScheduledJob — 초록불을 줄지 판정", () => {
   });
 
   test("★실패로 정지한 잡은 초록불이 아니다★ (사고 회귀)", () => {
-    // 사고 그대로의 행: 실패 상태인데 next_run_at 은 9시간 전에 멈춰 있다.
     const v = judgeScheduledJob({ enabled: 1, status: "failed", next_run_at: "2026-07-29 15:30:00" }, NOW);
     expect(v.running).toBe(false);
     expect(v.problem).toBe("failed");
@@ -123,8 +118,7 @@ describe("teamOsSnapshot 이 문제를 화면 데이터에 실어 보낸다", ()
   });
 });
 
-// steve 리뷰의 블로커성 지적: A(실패 시 재예약)가 들어오면 ★방금 실패한 잡이 화면상 초록불★ 이 된다.
-//   연속 3회를 채워야 빨개지는데 일간 잡은 그게 3일이다. 이 화면이 고치려던 문제를 작게 다시 만드는 것.
+// 실패 직후 재예약된 잡은 미래 실행 시각이 있어도 정상으로 보이면 안 된다. 일간 잡의 연속 실패 확정까지는 며칠이 걸릴 수 있다.
 describe("judgeScheduledJob — 재시도 대기와 실행 중을 구분한다", () => {
   const NOW = Date.parse("2026-07-30T01:00:00Z"); // 10:00 KST
 
@@ -172,10 +166,7 @@ describe("judgeScheduledJob — 재시도 대기와 실행 중을 구분한다",
   });
 });
 
-// ★배포 4분 만에 나온 거짓 경보★ (2026-07-30 실측)
-//   2주 전에 꺼둔 sched_b3os_native_nightly 가 "22195분 밀림" 으로 떴다. 꺼진 잡의 next_run_at 은
-//   끈 시점에 멈춰 있어서 ★끄면 끌수록 더 빨갛게★ 된다.
-//   원래 시험이 왜 못 잡았나: 꺼진 잡 사례를 ★미래 시각★ 으로 썼다. 실제 모양은 '꺼짐 + 과거 시각' 이다.
+// 꺼진 잡은 next_run_at이 과거에 멈출 수 있다. '비활성+과거 시각'도 밀림으로 오인하지 않는지 검사한다.
 describe("judgeScheduledJob — 꺼둔 잡은 고장이 아니다", () => {
   const NOW = Date.parse("2026-07-30T01:00:00Z");
 

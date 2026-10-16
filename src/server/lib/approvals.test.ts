@@ -33,17 +33,14 @@ afterEach(() => {
 });
 
 test("액션 레지스트리는 미리 정의된 안전 셋만", () => {
-  // 레지스트리(정의)에는 남아 있다 — 실행 대상이 없다고 ★키를 지우지 않는다★.
+  // 레지스트리(정의)에는 남아 있다 — 실행 대상이 없다고 키를 지우지 않는다.
   expect(Object.keys(ACTIONS)).toContain("activate_openclaw");
   expect(Object.keys(ACTIONS)).toContain("restart_openclaw_gateway");
   // high danger 표시
   expect(ACTIONS.activate_openclaw!.danger).toBe("high");
 });
 
-// ★"눌러도 실패하는 버튼을 보여주지 않는다"★ — 실행 파일이 없으면 제시에서 빠지고,
-//   파일이 생기면 ★자동으로 다시 제시된다★(호출 시점 검사라 재시작 불필요).
-//   ★합성 액션으로 검증한다★: 특정 액션(과거엔 deploy_public)에 묶으면 그 액션이 은퇴할 때
-//   같이 죽는다 — 검증하려는 건 액션이 아니라 requiresFiles ★계약★ 이다.
+// 합성 액션으로 requiresFiles 계약을 검증해 특정 액션의 존속 여부에 테스트가 의존하지 않게 한다.
 test("실행 대상이 없으면 제시에서 빠지고, 생기면 자동으로 돌아온다", () => {
   const KEY = "__test_reversible__";
   const root = mkdtempSync(join(tmpdir(), "b3os-approv-"));
@@ -64,7 +61,7 @@ test("실행 대상이 없으면 제시에서 빠지고, 생기면 자동으로 
     const db = freshDb();
     expect(() => enqueueApproval(db, { action_key: KEY })).toThrow(/action_unavailable/);
 
-    // (3) ★파일이 생기면 저절로 풀린다★ — 이게 '지우지 않고 숨기기'를 고른 이유다
+    // (3) 파일이 생기면 저절로 풀린다 — 이게 '지우지 않고 숨기기'를 고른 이유다
     mkdirSync(join(root, "scripts"), { recursive: true });
     writeFileSync(target, "#!/usr/bin/env bash\nexit 0\n");
     expect(listActions().map((a) => a.key)).toContain(KEY);

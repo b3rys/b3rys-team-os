@@ -188,10 +188,7 @@ describe("runtime essentials strategy registry", () => {
     expect(calls).toBe(3);
   });
 
-  // ── ★첫 claude 멤버의 DM 페어링 대기는 결함이 아니라 설계상 정상 경로★ (2026-07-25 맥스튜디오 실기) ──
-  //   allowFrom 은 '기존 claude 멤버의 것을 복사' 하는 방식이라 첫 멤버는 복사해올 데가 없다. 그래서
-  //   seedClaudeAccess 가 dmPolicy:"pairing" + allowFrom:[] 로 시드한다 = 사람이 DM 1회만 하면 끝난다.
-  //   이 상태와 ★진짜 설정 누락★(파일 부재·손상·다른 정책)을 구분하는 신호가 pendingPairing 이다.
+  // 첫 claude 멤버는 allowFrom을 복사할 참조봇이 없어 페어링 대기가 정상이다. 파일 부재·손상과는 pendingPairing으로 구분한다.
   describe("claude access.json — 페어링 대기 vs 진짜 누락", () => {
     const claudeCase = async (access: string | null) => {
       const { home, repo } = tmpRoot();

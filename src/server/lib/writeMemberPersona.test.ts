@@ -1,13 +1,4 @@
-// ★모델: persona 값이 사는 곳은 SOUL.md 단 하나.★ agents.json 의 purpose 필드는 제거됨.
-//   · writeMemberPersona = ★룰 렌더러★ (CLAUDE.md/AGENTS.md). SOUL.md 는 읽지도 쓰지도 않는다.
-//   · savePersonaFile   = ★persona 저장의 유일한 지점★ (대시보드 저장·영입이 호출).
-// "그걸 어디다 붙이던 그건 분리된 트랜잭션이잖아" — GD
-//
-// ═══ 왜 이렇게 됐나 (2026-07-17 실측) ═══
-//   옛 구조는 purpose(agents.json)=정본, SOUL=렌더 출력이었다. 렌더마다 SOUL 을 purpose 로 덮었다.
-// 결과: 12명 중 7명이 어긋났고 — GD 가 손질한 5명은 ★렌더 한 번에 되돌아갈 위치★,
-//   lui·forin 은 purpose 가 비어 찍힌 24자 껍데기가 굳어 ★페르소나가 실제로 없었다.★
-//   ★렌더는 플래그 토글로도 돈다.★ → 소스를 하나(SOUL)로 두면 이 문제가 아예 생기지 않는다.
+// 페르소나 저장과 규칙 렌더는 별도 작업이다. SOUL.md는 savePersonaFile만 저장하고 로딩파일 렌더가 덮어쓰면 안 된다.
 import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, existsSync, writeFileSync, lstatSync, readlinkSync, mkdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
@@ -30,7 +21,7 @@ describe("writeMemberPersona — 룰 렌더러(SOUL 은 안 건드린다)", () =
   test("★렌더는 SOUL.md 를 만들지 않는다★ — persona 저장은 렌더의 일이 아니다", () => {
     const ws = mk();
     const r = writeMemberPersona(args(ws));
-    expect(existsSync(join(ws, "SOUL.md"))).toBe(false);   // ★껍데기조차 안 만든다★
+    expect(existsSync(join(ws, "SOUL.md"))).toBe(false);   // 껍데기조차 안 만든다
     expect(r.written).not.toContain(join(ws, "SOUL.md"));
     expect(existsSync(join(ws, "AGENTS.md"))).toBe(true);  // 로딩파일(룰)은 렌더
   });
@@ -42,7 +33,7 @@ describe("writeMemberPersona — 룰 렌더러(SOUL 은 안 건드린다)", () =
     writeMemberPersona(args(ws));
     writeMemberPersona(args(ws, { role: "역할이 바뀜" }));   // 토글/재렌더 반복
     writeMemberPersona(args(ws, { runtime: "openclaw" }));
-    expect(readFileSync(join(ws, "SOUL.md"), "utf-8")).toBe(사용자가쓴것);  // ★불변★
+    expect(readFileSync(join(ws, "SOUL.md"), "utf-8")).toBe(사용자가쓴것);  // 불변
     expect(existsSync(join(ws, "SOUL.md.bak"))).toBe(false);               // 덮은 적이 없으니 .bak 도 없다
   });
 
@@ -52,7 +43,7 @@ describe("writeMemberPersona — 룰 렌더러(SOUL 은 안 건드린다)", () =
     writeMemberPersona(args(ws));
     const agents = readFileSync(join(ws, "AGENTS.md"), "utf-8");
     expect(agents).toContain("You are **Lui** (lui) — AI.");
-    expect(agents).not.toContain(CUSTOM);               // ★custom 을 로딩파일에 주입하지 않는다 — 참조만★
+    expect(agents).not.toContain(CUSTOM);               // custom 을 로딩파일에 주입하지 않는다 — 참조만
     expect(agents).toContain("## Role & Persona");
     expect(agents).toContain("SOUL.md");               // 직접 경로
     expect(agents).not.toContain("@SOUL.md");          // openclaw는 @ 미지원
@@ -65,7 +56,7 @@ describe("writeMemberPersona — 룰 렌더러(SOUL 은 안 건드린다)", () =
     writeMemberPersona(args(ws, { id: "bill", display_name: "Bill", role: "dev", runtime: "claude_channel" }));
     const claude = readFileSync(join(ws, "CLAUDE.md"), "utf-8");
     expect(claude).toContain("@SOUL.md");              // 참조(로드는 Claude Code 가)
-    expect(claude).not.toContain(CUSTOM);              // ★본문에 주입 안 함★
+    expect(claude).not.toContain(CUSTOM);              // 본문에 주입 안 함
     expect(claude).toContain("You are **Bill** (bill) — dev.");
     expect(claude).toMatch(/Core Rules|핵심 룰/);
   });
@@ -74,7 +65,7 @@ describe("writeMemberPersona — 룰 렌더러(SOUL 은 안 건드린다)", () =
     const ws = mk();
     writeMemberPersona(args(ws, { display_name: "이름하나" }));
     const 첫렌더 = readFileSync(join(ws, "AGENTS.md"), "utf-8");
-    writeMemberPersona(args(ws, { display_name: "이름둘" }));  // ★렌더 출력이 바뀜★ → 백업+덮기
+    writeMemberPersona(args(ws, { display_name: "이름둘" }));  // 렌더 출력이 바뀜 → 백업+덮기
     expect(existsSync(join(ws, "AGENTS.md.bak"))).toBe(true);
     expect(readFileSync(join(ws, "AGENTS.md.bak"), "utf-8")).toBe(첫렌더);  // .bak = 덮기 직전 내용
   });
@@ -83,7 +74,7 @@ describe("writeMemberPersona — 룰 렌더러(SOUL 은 안 건드린다)", () =
     const ws = mk();
     const r1 = writeMemberPersona(args(ws));
     expect(r1.written).toContain(join(ws, "AGENTS.md"));   // 첫 렌더 = write
-    const r2 = writeMemberPersona(args(ws));               // ★동일 내용★
+    const r2 = writeMemberPersona(args(ws));               // 동일 내용
     expect(r2.written).not.toContain(join(ws, "AGENTS.md")); // 스킵 = write 안 함
     expect(r2.backedUp).not.toContain(join(ws, "AGENTS.md"));
     expect(existsSync(join(ws, "AGENTS.md.bak"))).toBe(false); // .bak 미생성
@@ -129,33 +120,23 @@ describe("writeMemberPersona — 기타", () => {
     savePersonaFile(join(ws, "SOUL.md"), CUSTOM);
     writeMemberPersona({ id: "lui", display_name: "Lui", role: "AI", runtime: "openclaw", workspace_path: ws, persona_file: join(ws, "SOUL.md") });
     expect(readFileSync(join(ws, "SOUL.md"), "utf-8").trim()).toBe(CUSTOM);   // SOUL 은 저장 경로가 쓴 그대로
-    // ★IDENTITY.md 는 그대로 유지(안 건드림), .bak 도 안 생김★
+    // IDENTITY.md 는 그대로 유지(안 건드림), .bak 도 안 생김
     expect(readFileSync(join(ws, "IDENTITY.md"), "utf-8")).toContain("건드리면 안 됨");
     expect(existsSync(join(ws, "IDENTITY.md.bak"))).toBe(false);
   });
 
-  /**
-   * ★옛 테스트 교체★ — 원래 이 자리엔 "purpose 없으면 SOUL.md 최소 스캐폴드" 가 있었다.
-   *   그 스캐폴드(`# Role\n\n{role}\n\n# Persona\n\n`)가 ★lui·forin 의 페르소나를 삼킨 그 껍데기★ 다.
-   *   이제 렌더는 SOUL 을 아예 안 만든다 — '자동 persona 생성 안 함' 의도가 더 강해졌다.
-   */
+  // 페르소나가 없으면 SOUL 껍데기도 생성하지 않아야 사용자 소유 파일을 렌더가 만들지 않는다.
   test("렌더는 SOUL.md 를 만들지 않는다 (자동 persona 생성 안 함 — 껍데기조차)", () => {
     const ws = mk();
     writeMemberPersona({ id: "lui", display_name: "Lui", role: "AI 리서치", runtime: "openclaw", workspace_path: ws, persona_file: join(ws, "SOUL.md") });
-    expect(existsSync(join(ws, "SOUL.md"))).toBe(false);   // ★껍데기도 안 만든다★
+    expect(existsSync(join(ws, "SOUL.md"))).toBe(false);   // 껍데기도 안 만든다
     const agents = readFileSync(join(ws, "AGENTS.md"), "utf-8");
     expect(agents).toContain("You are **Lui** (lui) — AI 리서치."); // registry 정체성은 로딩파일에 존재
     expect(agents).toContain("SOUL.md");                   // 참조는 그대로(대상 없으면 조용히 증발)
   });
 });
 
-/**
- * ★TEAM-OS.md 심링크 — 영입 때부터★
- *
- * 루이가 잡은 실측: 11명 중 ★6명에게 TEAM-OS.md 가 아예 없었다★ (steve·hermes·codex·ames·devon·dex).
- *   심링크 코드가 ★런타임 스왑 경로에만★ 있어서, 스왑을 겪은 5명만 갖고 있었다.
- *   → ★팀 룰 정본을 절반이 못 읽고 있었다.★ 그 상태로 "룰대로 해라" 고 시키고 있었던 것이다.
- */
+// 영입·저장·스왑의 공통 쓰기 경로에서 심링크를 보장해야 모든 팀원이 규칙 정본에 접근할 수 있다.
 describe("★TEAM-OS.md 심링크 — persona 를 쓰면 항상 걸린다★", () => {
   const mk = () => mkdtempSync(join(tmpdir(), "wmp-link-"));
   const base = (ws: string, runtime: string) => ({
@@ -194,13 +175,13 @@ describe("★TEAM-OS.md 심링크 — persona 를 쓰면 항상 걸린다★", (
     symlinkSync(join(ws, "없는파일.md"), link);
     expect(existsSync(link)).toBe(false);                  // 깨져 있다
     writeMemberPersona(base(ws, "claude_channel"));
-    expect(existsSync(link)).toBe(true);                   // ★살아났다★
+    expect(existsSync(link)).toBe(true);                   // 살아났다
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
   });
 });
 
 /**
- * ★SKILLS.md 복사본 — persona 를 쓰면 항상 맞춰진다★
+ * SKILLS.md 복사본 — persona 를 쓰면 항상 맞춰진다
  * Claude Code 는 작업 폴더 밖 파일을 @import 하지 않는다. rules/SKILLS.md 로 가는 심링크는 폴더 밖이라 `@SKILLS.md` 가
  * 빈다. 그래서 워크스페이스에 표식 달린 실파일(복사본)을 둔다. 여기서는 파일 종류와 내용이 원본과 같은지를 잰다.
  */
@@ -241,7 +222,7 @@ describe("★SKILLS.md 복사본 — persona 를 쓰면 항상 맞춰진다★",
     expect(readFileSync(file, "utf-8")).toBe("손으로 쓴 목록");
   });
 
-  // ★실제 rules/SKILLS.md 로 심링크를 걸지 않는다★ — 워크트리에서도 SKILLS_MD_PATH 는 라이브 파일이다.
+  // 실제 rules/SKILLS.md 로 심링크를 걸지 않는다 — 워크트리에서도 SKILLS_MD_PATH 는 라이브 파일이다.
   //   코드가 심링크를 따라 쓰면 bun test 가 라이브 파일을 덮는다. 원본을 가리키는 옛 심링크 교체는
   //   skillsRender.test.ts 에서 임시 원본으로 잰다. 여기서는 tmp 대상만 쓴다.
   test("★깨진 옛 심링크는 복사본으로 바뀐다★", () => {
