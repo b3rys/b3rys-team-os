@@ -42,6 +42,18 @@ lockf -k -t 1200 /Users/Shared/steno-locks/machine.lock <무거운 명령>
 
 예를 들어 macOS 공유 폴더는 `/Users/Shared/steno-locks`, 그룹은 `steno-locks`, 권한은 `2775`로 둘 수 있으며 실행 계정은 모두 그 그룹의 멤버여야 한다. 폴더·그룹은 관리자가 한 번 설정하며, Steno 예시에서는 `scripts/ci-runner-setup.sh`가 맡는다. 이 스크립트를 실행하기 전에는 공유 폴더가 없다. 현재 Steno의 `scripts/lock-lib.sh`처럼 `ship`·`after`·`ci` 역할별 잠금 파일을 직접 만들고 지우는 구현은 기계 전체 잠금과 다른 상태이므로, 여러 프로젝트가 공유할 때는 하나의 `machine.lock`으로 옮겨야 한다. Linux에서 가능한 검사는 GitHub의 Linux 검사로 보내 공유 macOS 기계의 부하를 줄인다.
 
+### 공용 맥에서 시뮬레이터 함께 쓰기
+
+아이폰 시뮬레이터 시험은 CPU·메모리를 크게 쓰므로 공용 맥에서는 아래 흐름을 지킨다(상세 증상·원인은 b3os-mac-app-shell [`references/iphone-dev-test.md`](../../b3os-mac-app-shell/references/iphone-dev-test.md) 1·8장이 정본).
+
+1. 시뮬레이터 시험·빌드는 위 `machine.lock` 안에서만 돌린다.
+2. 잠금 **대기 제한**(`lockf -t`)과 **실행 제한**(예: `perl -e 'alarm N; exec @ARGV'`)을 따로 건다. 하나의 타이머로 걸면 대기만 하다 잘린다.
+3. 시험 전 자기 기기를 `shutdown → boot → bootstatus -b` 로 새로 켜고, 끝나면 `shutdown` 한다(지우지 않는다). 다른 팀원의 기기는 주인 확인 없이 건드리지 않는다.
+4. 느리면 `xcrun simctl list devices booted` 개수와 `uptime` 부하부터 본다(켜진 채 남은 기기가 많으면 부하 평균이 수백까지 오른다).
+5. 실제 로그인 시험 뒤에는 잠금 안에서 기기를 다시 켠 상태(`shutdown → boot → bootstatus <udid> -b`)로 앱 삭제·`simctl keychain <udid> reset` 을 해 공용 시뮬레이터 키체인을 비운다(꺼진 기기에서는 둘 다 실패한다).
+6. 결과 묶음은 매번 새 경로(`-resultBundlePath …-$(date +%s).xcresult`).
+7. 디스크는 1시간마다 용량을 확인·알림한다. 지우기는 보고 후 결정한다(자동 삭제 범위는 확정되면 갱신).
+
 ## 대기 시간 겹치기
 
 앱 검사나 공증처럼 기계·외부 서비스의 완료를 기다리는 동안에는 문서 정리, 요구사항 대조표 작성, 헤드리스 시험 등 독립 작업을 겹쳐 돌린다. 예: 앱 공증이 끝나기를 기다리는 동안 요구사항 대조표를 쓴다. 서로 의존하지 않는 일을 순차로 기다리지 않는다.
