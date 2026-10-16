@@ -40,6 +40,9 @@ jobs:
           bun test scripts/check-comment-attribution.test.ts scripts/check-comment-attribution-diff.test.ts
           bun scripts/check-comment-attribution.ts --diff "$ATTRIBUTION_BASE" "$ATTRIBUTION_HEAD"
 
+      - name: 이식성 검사
+        run: bun test scripts/check-portability.test.ts && bun scripts/check-portability.ts
+
       - name: 타입체크
         run: bunx tsc --noEmit
 

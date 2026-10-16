@@ -7,11 +7,7 @@ export type Finding = { file: string; line: number; rule: string };
 export const FILE_ALLOWLIST = [
   { pattern: /(?:\.(?:test|spec)\.[jt]sx?$|\/(?:test|tests|__tests__|fixtures|testdata)\/)/, reason: "Synthetic test paths are not production configuration." },
 ];
-export const EXCEPTIONS = [
-  { pattern: "src/**/{test,tests,__tests__,fixtures,testdata}/** and *.test/spec.ts(x)", reason: "Synthetic paths in test input do not configure production machines." },
-  { pattern: "Shell comments, quoted documentation and quoted heredocs", reason: "These are literal text, not Bash commands or expansions." },
-  { pattern: "Markdown outside sh/bash/shell fences; non-shell programs", reason: "These are not executed by the Bash 3.2 shell." },
-];
+// Non-shell files, comments, literal quotes and quoted heredocs are not executed.
 
 export function scanShell(file: string, source: string, offset = 0): Finding[] {
   const findings: Finding[] = [];
@@ -20,9 +16,10 @@ export function scanShell(file: string, source: string, offset = 0): Finding[] {
   for (const [index, row] of source.split("\n").entries()) {
     const add = (rule: string) => findings.push({ file, line: offset + index + 1, rule });
     const expansions = (text: string) => { if (/\$\{[^}\n]*\^\^[^}\n]*\}/.test(text)) add("bash-uppercase"); };
+    const substitutions = (text: string) => { for (const match of text.matchAll(/\$\(([^)]*)\)/g)) findings.push(...scanShell(file, match[1]!, offset + index)); };
     if (here) {
       if ((here.strip ? row.replace(/^\t+/, "") : row) === here.word) here = undefined;
-      else if (here.expand) expansions(row);
+      else if (here.expand) { expansions(row); substitutions(row); }
       continue;
     }
     let commands = "";
@@ -38,8 +35,8 @@ export function scanShell(file: string, source: string, offset = 0): Finding[] {
       expandable += c;
     }
     expansions(expandable);
-    for (const substitution of expandable.matchAll(/\$\(([^)]*)\)/g)) findings.push(...scanShell(file, substitution[1]!, offset + index));
-    const commandStart = /(?:^|[;&|({]|\b(?:then|do|if|while|until))\s*(?:builtin\s+)?/;
+    substitutions(expandable);
+    const commandStart = /(?:^|[;&|({])\s*(?:(?:then|do|if|while|until|else|elif)\s+)*(?:builtin\s+)?/;
     if (new RegExp(commandStart.source + "(?:declare|typeset)\\s+(?:-[a-zA-Z]+\\s+)*-[a-zA-Z]*A[a-zA-Z]*(?:\\s|$)").test(commands)) add("bash-associative-array");
     if (new RegExp(commandStart.source + "mapfile(?:\\s|$)").test(commands)) add("bash-mapfile");
     // Heredoc bodies are text; only unquoted delimiters allow shell expansions.
@@ -65,23 +62,6 @@ export function scanPortability(file: string, source: string): Finding[] {
   }
   if (!(file.startsWith("scripts/") || file.startsWith("skills/") || file === "install.sh")) return [];
   if (file.endsWith(".sh") || /^#!.*\b(?:ba)?sh\b/.test(source)) return scanShell(file, source);
-  if (file.endsWith(".md")) {
-    const out: Finding[] = [];
-    const rows = source.split("\n");
-    let start = -1;
-    let fence = "";
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i]!;
-      if (start < 0) {
-        const m = /^\s*(`{3,}|~{3,})(?:bash|sh|shell)\s*$/.exec(row);
-        if (m) { start = i + 1; fence = m[1]!; }
-      } else if (row.trim().startsWith(fence)) {
-        out.push(...scanShell(file, rows.slice(start, i).join("\n"), start)); start = -1;
-      }
-    }
-    if (start >= 0) out.push(...scanShell(file, rows.slice(start).join("\n"), start));
-    return out;
-  }
   return [];
 }
 

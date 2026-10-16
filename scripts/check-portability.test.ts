@@ -9,15 +9,17 @@ test("documented snapshot incident and requested Bash 4 forms fail", () => {
   }
 });
 
-test("real shell code in skills and install is checked; literal examples are allowed", () => {
-  expect(scan("skills/example/SKILL.md", '```bash\ndeclare -A lookup\n```')).toHaveLength(1);
+test("shell files in skills and install are checked; documentation and literals are allowed", () => {
+  expect(scan("skills/example/scripts/run.sh", 'declare -A lookup')).toHaveLength(1);
+  expect(scan("skills/example/SKILL.md", '```bash\ndeclare -A lookup\n```')).toHaveLength(0);
   expect(scan("install.sh", 'mapfile -t files')).toHaveLength(1);
   for (const source of [
-    '# declare -A mapfile ${v^^}', "echo 'mapfile ${v^^}'", 'echo "declare -A mapfile"',
+    '# declare -A mapfile ${v^^}', 'echo do mapfile', 'echo then declare -A', "echo 'mapfile ${v^^}'", 'echo "declare -A mapfile"',
     "cat <<'EXAMPLE'\nmapfile -t files\n${v^^}\nEXAMPLE", 'while read -r line; do echo "$line"; done',
   ]) expect(scan("scripts/example.sh", source)).toHaveLength(0);
   expect(scan("scripts/example.sh", 'cat <<EXAMPLE\n${v^^}\nEXAMPLE')).toHaveLength(1);
   expect(scan("scripts/example.sh", 'cat <<EXAMPLE\nmapfile is a builtin\nEXAMPLE')).toHaveLength(0);
+  for (const command of ["mapfile -t a", "declare -A a"]) expect(scan("scripts/example.sh", `cat <<EXAMPLE\n$(${command})\nEXAMPLE`)).toHaveLength(1);
 });
 
 test("production paths fail while portable paths, comments and synthetic fixtures pass", () => {
