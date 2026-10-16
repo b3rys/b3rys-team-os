@@ -1,6 +1,6 @@
 ---
 name: b3os-mac-app-shell
-description: 웹 대시보드/웹앱을 Apple 네이티브 셸(.app)로 빠르게 래핑하는 팀 스킬. mac-iphone-shell 골격(SwiftUI multi-platform + WKWebView 라이브러리 + HostApp 패턴)을 참조해 URL 구성형 Mac/iPhone 앱을 만들고 .app으로 패키징한다. "이 웹대시보드를 맥앱으로 만들어줘", "b3os.app 같은 셸 앱", "사내 웹툴 네이티브 래핑"일 때 사용. 검증된 함정(특히 WebView 창 채움/viewport)을 피하는 레시피 포함. 주 사용자·업데이트 책임자: agent A·developer.
+description: 웹 대시보드/웹앱을 Apple 네이티브 셸(.app)로 빠르게 래핑하는 팀 스킬. mac-iphone-shell 골격(SwiftUI multi-platform + WKWebView 라이브러리 + HostApp 패턴)을 참조해 URL 구성형 Mac/iPhone 앱을 만들고 .app으로 패키징한다. "이 웹대시보드를 맥앱으로 만들어줘", "b3os.app 같은 셸 앱", "사내 웹툴 네이티브 래핑"일 때, 그리고 아이폰 앱 개발·시뮬레이터 시험·TestFlight 배포를 할 때 사용(아이폰 개발·시험 정본 references/iphone-dev-test.md). 검증된 함정(특히 WebView 창 채움/viewport)을 피하는 레시피 포함. 주 사용자·업데이트 책임자: agent A·developer.
 ---
 
 # b3os-mac-app-shell
@@ -18,6 +18,7 @@ description: 웹 대시보드/웹앱을 Apple 네이티브 셸(.app)로 빠르�
 - 이미 있는 웹 대시보드/웹툴을 **설치 가능한 Mac 앱(.app)** 으로 내보내고 싶을 때 (예: b3os 대시보드 → `b3os.app`)
 - "맥앱으로 래핑한 티 안 나게, 라이트/다크 seamless, 창이 네이티브처럼" 요구
 - iPhone 동반 앱(같은 골격, read-only/동일 셸)도 필요할 때
+- **아이폰 앱을 개발·시험·TestFlight 배포할 때(골격을 쓰지 않는 네이티브 앱 포함)** → [`references/iphone-dev-test.md`](references/iphone-dev-test.md) 를 먼저 읽는다. 공용 맥 시뮬레이터·기기/OS 기준·빌드·속도·접근성·다국어·검증 습관·디스크·TestFlight·iCloud 에서 실제로 겪은 증상 → 원인 → 해결.
 - ❌ 쓰지 않는 경우: 네이티브 UI가 본질인 앱(웹뷰가 아니라 SwiftUI 화면이 주). 그건 골격 없이 일반 SwiftUI로.
 
 ## 전제 · 요구사항 (이게 없으면 이 스킬은 못 쓴다)
@@ -65,6 +66,7 @@ description: 웹 대시보드/웹앱을 Apple 네이티브 셸(.app)로 빠르�
 
 - [`references/viewport-and-gotchas.md`](references/viewport-and-gotchas.md) — **WebView 창 채움 버그(위 벌어짐/아래 잘림) 회귀주의**. NonIntrinsicWebView + autoresizing pin 3종세트. 제거 금지.
 - [`references/build-sign-notarize.md`](references/build-sign-notarize.md) — 패키징 스크립트, ad-hoc vs Developer ID, notarization, 미서명 테스트 배포.
+- [`references/iphone-dev-test.md`](references/iphone-dev-test.md) — **아이폰 개발·시험 정본**(cogs-ios + Steno, 2026-10-16). 공용 맥 시뮬레이터, iOS 26 기준, TestFlight 내보내기·올리기, iCloud 같은 폴더 쓰기.
 
 ## 근거 / evidence
 
