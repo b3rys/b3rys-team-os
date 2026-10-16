@@ -71,6 +71,7 @@ import { configureLeadActorDb, leadActorId, trustedActorFromRequest } from "./li
 import { createHostGate } from "./lib/hostGate";
 import { DEFAULT_MEDIA_DIR, contentTypeForMediaFile, resolveMediaPath } from "./lib/mediaStore";
 import { captureServerIdentity, deploymentIdentity } from "./lib/deployIdentity";
+import { assertMemberWriteBootAllowed } from "./lib/worktreeBootGuard";
 import type { WsEvent } from "./types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -83,6 +84,7 @@ const REGISTRY_PATH = process.env.TEAM_AGENT_REGISTRY ?? join(__dirname, "../../
 const OPENCLAW_URL = process.env.OPENCLAW_GATEWAY_URL ?? "http://127.0.0.1:18789";
 const DIST_WEB = join(__dirname, "../../dist/web");
 const REPO_ROOT_FOR_IDENTITY = join(__dirname, "../..");
+assertMemberWriteBootAllowed(REPO_ROOT_FOR_IDENTITY);
 /**
  * ★서버 층 신원은 기동 시 한 번 굳힌다.★ 이 값은 재시작해야 바뀌는 값이라(코드를 메모리에 올린 시점)
  * 요청마다 다시 읽으면 오히려 거짓말이 된다 — 트리가 먼저 앞서 나가도 ★돌고 있는 코드는 그대로다.★

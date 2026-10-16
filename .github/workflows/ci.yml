@@ -57,3 +57,6 @@ jobs:
         run: |
           bun test scripts/check-chat-literals.test.ts
           bun scripts/check-chat-literals.ts
+
+      - name: 워크트리 부팅 보호 검사
+        run: bun test src/server/lib/worktreeBootGuard.test.ts src/server/lib/deployIdentity.test.ts
