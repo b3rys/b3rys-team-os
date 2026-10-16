@@ -50,7 +50,7 @@ lockf -k -t 1200 /Users/Shared/steno-locks/machine.lock <무거운 명령>
 2. 잠금 **대기 제한**(`lockf -t`)과 **실행 제한**(예: `perl -e 'alarm N; exec @ARGV'`)을 따로 건다. 하나의 타이머로 걸면 대기만 하다 잘린다.
 3. 시험 전 자기 기기를 `shutdown → boot → bootstatus -b` 로 새로 켜고, 끝나면 `shutdown` 한다(지우지 않는다). 다른 팀원의 기기는 주인 확인 없이 건드리지 않는다.
 4. 느리면 `xcrun simctl list devices booted` 개수와 `uptime` 부하부터 본다(켜진 채 남은 기기가 많으면 부하 평균이 수백까지 오른다).
-5. 실제 로그인 시험 뒤에는 잠금 안에서 앱 삭제·`simctl keychain <udid> reset` 으로 공용 시뮬레이터 키체인을 비운다.
+5. 실제 로그인 시험 뒤에는 잠금 안에서 기기를 다시 켠 상태(`shutdown → boot → bootstatus <udid> -b`)로 앱 삭제·`simctl keychain <udid> reset` 을 해 공용 시뮬레이터 키체인을 비운다(꺼진 기기에서는 둘 다 실패한다).
 6. 결과 묶음은 매번 새 경로(`-resultBundlePath …-$(date +%s).xcresult`).
 7. 디스크는 1시간마다 용량을 확인·알림한다. 지우기는 보고 후 결정한다(자동 삭제 범위는 확정되면 갱신).
 

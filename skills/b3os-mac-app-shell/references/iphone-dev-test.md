@@ -10,7 +10,7 @@
 |---|---|---|---|
 | 1-1 | UI 시험이 무더기로 실패 | 두 작업이 같은 시간에 `xcodebuild test` 를 돌려 시뮬레이터·CPU 를 나눠 씀 | 무거운 명령은 전부 기계 전체 잠금(`lockf -k -t <초> <공용 잠금 파일> <명령>`) 안에서. 정본: b3os-sf `references/dev-mode-operations.md` |
 | 1-2 | 전체 UI 시험이 몇 배로 느려지고 타이밍 시험이 흔들림 | 다 쓴 시뮬레이터 여러 대가 켜진 채 남아 부하 평균이 수백까지 오름 | 안 쓰는 기기는 `xcrun simctl shutdown`(지우지 않음, 다른 팀원의 기기는 주인 확인). 느리면 `xcrun simctl list devices booted` 개수·`uptime` 부터 |
-| 1-3 | 다른 작업의 시험이 "로그인 화면" 전제를 못 맞춰 실패 | 실서버(로컬 시험 서버) 로그인 시험이 남긴 토큰이 공용 시뮬레이터 키체인에 남음 | 실제 로그인 시험 뒤 잠금 안에서 `shutdown → simctl uninstall <udid> <bundle id> → simctl keychain <udid> reset → boot`. 목업 시험은 키체인을 쓰지 않게 |
+| 1-3 | 다른 작업의 시험이 "로그인 화면" 전제를 못 맞춰 실패 | 실서버(로컬 시험 서버) 로그인 시험이 남긴 토큰이 공용 시뮬레이터 키체인에 남음 | 실제 로그인 시험 뒤 잠금 안에서 `shutdown → boot → bootstatus <udid> -b → simctl uninstall <udid> <bundle id> → simctl keychain <udid> reset`(uninstall·keychain reset 은 기기가 켜진 상태에서만 된다. 꺼진 상태면 SimError 405). 목업 시험은 키체인을 쓰지 않게 |
 | 1-4 | 시험이 잠금을 기다리다 실행도 못 하고 잘림 | 대기 시간과 실행 시간 제한을 한 타이머로 걸었음 | 잠금 대기 제한(`lockf -t`)과 실행 제한(`perl -e 'alarm N; exec @ARGV'`)을 따로. |
 | 1-5 | 시험 시작 때 "AX loaded" 시간 초과 | 오래 켜 둔 시뮬레이터 상태 | 시험 전에 `shutdown → boot → bootstatus -b` |
 | 1-6 | 결과 묶음(.xcresult) 경로 충돌로 실패 | 같은 경로 재사용 | `-resultBundlePath …-$(date +%s).xcresult` |
