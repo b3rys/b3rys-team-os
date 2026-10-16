@@ -1,8 +1,9 @@
+import { uiText } from "./uiStrings";
 /** Compact tool targets for cogs; command arguments and tool output never leave this formatter. */
 const clip = (text: string, max = 45): string => Array.from(text).slice(0, max).join("");
-const filename = (path: string): string => safeText(path.replace(/\\/g, "/").split("/").pop() ?? "");
+export const filename = (path: string): string => safeText(path.replace(/\\/g, "/").split("/").pop() ?? "");
 
-function safeText(text: string): string {
+export function safeText(text: string): string {
   return clip(text
     // Header values may include a scheme plus short credentials or multiple Digest parameters.
     .replace(/\b(?:proxy-)?authorization\s*[:=]\s*[^\r\n]+/gi, "[redacted]")
@@ -16,50 +17,60 @@ function safeText(text: string): string {
     .replace(/[\r\n\t\x00-\x1f]/g, " "));
 }
 
-const activityLine = (verb: string, target = ""): string => target ? `${verb} · ${target}` : verb;
+export type CogsActivityArgs = { target?: string; count?: number };
 
-function commandLine(command: string): string {
-  // Only the executable and known subcommands are safe to display; arbitrary arguments can be secrets.
+function commandInfo(command: string): { executable: string; target: string; reading: boolean } {
   const words = command.trim().match(/(?:[^\s"'\\]|\\.|"[^"]*"|'[^']*')+/g) ?? [];
   while (words[0] === "env" || /^[A-Za-z_]\w*=/.test(words[0] ?? "")) words.shift();
-  const executable = words.shift() ?? "";
-  if (!/^(?:[\w./\\-]+)$/.test(executable)) return "실행";
-  const name = filename(executable);
-  if (["cat", "head", "tail", "less"].includes(name)) {
-    const target = words.find(word => !word.startsWith("-"));
-    return activityLine("읽기", target && /^[\w./\\-]+$/.test(target) ? filename(target) : "");
+  const raw = words.shift() ?? "";
+  if (!/^(?:[\w./\\-]+)$/.test(raw)) return { executable: "", target: "", reading: false };
+  const executable = filename(raw);
+  const reading = ["cat", "head", "tail", "less"].includes(executable);
+  if (reading) {
+    const path = words.find(word => !word.startsWith("-"));
+    return { executable, reading, target: path && /^[\w./\\-]+$/.test(path) ? filename(path) : "" };
   }
-  const subcommand = /^(?:status|diff|log|test|run|build|check|install)$/.test(words[0] ?? "") ? ` ${words[0]}` : "";
-  return activityLine("실행", `${name}${subcommand}`);
+  // Only known executable/subcommand pairs may cross the app boundary.
+  const allowed: Record<string, readonly string[]> = {
+    git: ["status", "diff", "log"],
+    bun: ["test", "run", "build", "install"],
+    npm: ["test", "run", "install"],
+    pnpm: ["test", "run", "build", "install"],
+    yarn: ["test", "run", "build", "install"],
+    go: ["test", "build", "install"],
+    cargo: ["test", "run", "build", "check", "install"],
+    swift: ["test", "run", "build"],
+  };
+  const subcommand = Object.hasOwn(allowed, executable) && allowed[executable]?.includes(words[0] ?? "") ? ` ${words[0]}` : "";
+  return { executable, reading, target: clip(`${executable}${subcommand}`) };
 }
 
-export function cogsActivityLine(item: unknown): string {
-  const it = (item ?? {}) as {
-    type?: string; command?: string | string[]; cmd?: string | string[];
-    changes?: { path?: string; kind?: { type?: string } }[];
-    fileChanges?: Record<string, unknown>; name?: string;
-    action?: { type?: string; url?: string; pattern?: string; queries?: string[]; query?: string };
-    url?: string; pattern?: string; queries?: string[]; query?: string;
-  };
-  const type = it.type;
+/** Only sanitized tool data crosses the app boundary; apps own every label. */
+export function cogsActivityArgs(item: unknown): CogsActivityArgs {
+  const it = (item ?? {}) as Record<string, any>;
   const command = it.command ?? it.cmd;
-  if (typeof command === "string" || Array.isArray(command)) return commandLine(Array.isArray(command) ? command.join(" ") : command);
-  const changes: NonNullable<typeof it.changes> = Array.isArray(it.changes) ? it.changes : Object.keys(it.fileChanges ?? {}).map(path => ({ path }));
-  if (changes.length) {
-    const verb = changes[0]?.kind?.type === "add" ? "새로 쓰기" : "수정";
-    return activityLine(verb, changes.length === 1 ? filename(String(changes[0]?.path ?? "")) : `파일 ${changes.length}개`);
-  }
-  if (type === "webSearch" || type === "web_search") {
+  if (command) return { target: commandInfo(Array.isArray(command) ? command.join(" ") : String(command)).target };
+  const changes = Array.isArray(it.changes) ? it.changes : Object.keys(it.fileChanges ?? {}).map(path => ({ path }));
+  if (changes.length) return changes.length === 1 ? { target: filename(String(changes[0]?.path ?? "")) } : { count: changes.length };
+  if (it.type === "webSearch" || it.type === "web_search") {
     const action = it.action ?? {};
     const url = action.url ?? it.url;
     if (action.type === "openPage" || (!action.type && url)) {
-      try { return activityLine("페이지 열기", clip(new URL(url ?? "").hostname)); } catch { return "페이지 열기"; }
+      try { return { target: clip(new URL(url ?? "").hostname) }; } catch { return {}; }
     }
-    const query = action.pattern ?? it.pattern ?? action.queries ?? action.query ?? it.queries ?? it.query ?? "";
-    return activityLine("검색", safeText(Array.isArray(query) ? query.join(" · ") : String(query)));
+    const query = [action.pattern,it.pattern,action.queries,action.query,it.queries,it.query].find(value => Array.isArray(value) ? value.length>0 : typeof value==="string" && value!=="") ?? "";
+    return { target: safeText(Array.isArray(query) ? query.join(" · ") : String(query)) };
   }
-  if (type === "mcpToolCall") return activityLine("도구", safeText(String(it.name ?? "").split("__").pop() ?? ""));
-  return "도구";
+  if (it.type === "mcpToolCall") return {};
+  return {};
+}
+
+/** For Telegram only, which has no application code-to-label renderer. */
+export function cogsActivityLine(item: unknown): string {
+  const code = cogsActivityCode(item) ?? "tool";
+  const args = cogsActivityArgs(item);
+  const label = uiText(code, args);
+  return args.target ? `${label} · ${args.target}` : args.count !== undefined ? uiText("activity_count",{label,count:args.count}) : label;
 }
 
 /** Activity codes describe observed tools; receipt/status notes have no tool code. */
@@ -76,9 +87,9 @@ export function cogsActivityCode(item: unknown): string | undefined {
   }
   const command = it.command ?? it.cmd;
   if (command) {
-    const line = commandLine(Array.isArray(command) ? command.join(" ") : String(command));
-    if (line.startsWith("읽기")) return "read_files";
-    return /\b(test|pytest|vitest|jest)\b/.test(line) ? "run_tests" : "run_command";
+    const info = commandInfo(Array.isArray(command) ? command.join(" ") : String(command));
+    if (info.reading) return "read_files";
+    return /\b(test|pytest|vitest|jest)\b/.test(info.target) ? "run_tests" : "run_command";
   }
   if (it.type === "mcpToolCall") {
     const name = String(it.name ?? it.tool ?? "");

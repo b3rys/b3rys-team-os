@@ -91,7 +91,7 @@ test("cogs reliability: receipt precedes blocked serial queue and its id is reus
     runTurnFor: async () => { await handleMessage(1, "message", 9, deps, undefined, "poll", false, receipt); finished(); },
   });
   expect(sends).toHaveLength(1);
-  expect(sends[0]).toMatchObject({ text: "받았어요", state: "waiting", replyTo: 9 });
+  expect(sends[0]).toMatchObject({ text: "", state: "waiting", replyTo: 9 });
   expect(edits).toHaveLength(0);
   release(); await done;
   expect(sends).toHaveLength(1);
@@ -136,7 +136,7 @@ for (const failure of ["rejected", "throws", "no active turn"] as const) {
       captureSteer: failure === "no active turn" ? () => null : undefined,
       steer: async () => { if (failure === "throws") throw new Error("fixture steer failure"); return false; },
       enqueue: next => {
-        expect(sends).toEqual([{ text: "받았어요", state: "waiting", replyTo: 9, idempotencyKey: "codex:receipt:1:9" }]);
+        expect(sends).toEqual([{ text: "", state: "waiting", replyTo: 9, idempotencyKey: "codex:receipt:1:9" }]);
         run = next;
       },
       runTurnFor: async () => { await handleMessage(1, "추가 지시", 9, deps, undefined, "poll", false, receipt); },
@@ -219,11 +219,11 @@ test("cogs reliability: unsupported schedule completes the existing receipt with
     scheduleToolEnabled: false,
     sendMessage: async (_chat, text, meta) => { sends.push({ text, ...meta }); return 77; },
     editMessage: async (_chat, id, text, state) => { edits.push({ id, text, state }); return true; },
-    runTurn: async () => { throw new Error("unsupported schedule must not run the model"); },
+    runTurn: async options => {expect(options.prompt).toContain("schedule_reminder unavailable");return {ok:true,reply:"예약 도구가 없습니다.",detail:"ok",elapsedMs:1};},
   });
   const receipt = sendCogsReceipt(1, 9, deps.sendMessage!);
   const result = await handleMessage(1, "5분 뒤에 나한테 메시지를 보내줘", 9, deps, undefined, "poll", false, receipt);
-  expect(result.detail).toBe("schedule_unsupported");
+  expect(result.turnOk).toBe(true);
   expect(sends).toHaveLength(1);
   expect(edits).toHaveLength(1);
   expect(edits[0]).toMatchObject({ id: 77, state: "complete" });

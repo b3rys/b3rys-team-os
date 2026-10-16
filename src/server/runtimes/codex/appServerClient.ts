@@ -9,6 +9,8 @@
  *
  * ★이 모듈은 순수 프로토콜 클라이언트다 — 팀 버스·텔레그램 배선은 상위(adapter)가 한다.★
  */
+import { uiText } from "./uiStrings";
+import { cogsActivityLine } from "./cogsActivity";
 import { TurnAnswerText } from "./answerText";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import {
@@ -120,9 +122,9 @@ export function statusLineOf(item: unknown): string | null {
     // 요약이 실려 오면 무엇을 생각하는 중인지까지 보여준다.
     const sum = typeof it.summary === "string" ? it.summary : typeof it.text === "string" ? it.text : "";
     const head = sum.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
-    return head ? `🧠 ${head.length > 60 ? head.slice(0, 59) + "…" : head}` : "🧠 생각하는 중…";
+    return head ? uiText("reasoning_summary",{summary:head.length > 60 ? head.slice(0,59)+"…":head}) : uiText("reasoning");
   }
-  if (type === "agentMessage") return "✍️ 대답하는 중…";
+  if (type === "agentMessage") return uiText("answering");
   return null;
 }
 
@@ -136,67 +138,9 @@ export function itemIdOf(item: unknown): string | undefined {
 const NOISE_ITEM_TYPES = new Set(["userMessage", "user_message", "userMessageDelta"]);
 
 export function activityLineOf(item: unknown): string | null {
-  const it = (item ?? {}) as Record<string, unknown>;
-  const type = typeof it.type === "string" ? it.type : "";
-  const clip = (s: string) => (s.length > 80 ? `${s.slice(0, 80)}…` : s);
-
-  const cmd = it.command ?? (it as { cmd?: unknown }).cmd;
-  const cmdText = typeof cmd === "string" ? cmd : Array.isArray(cmd) ? cmd.join(" ") : null;
-  if (cmdText) return clip(`실행: ${cmdText}`);
-
-  // ★실측(0.147.0): 파일 변경은 changes 배열로 온다★ — [{ path, kind:{type:"add"|…}, diff }].
-  //   예전 코드는 fileChanges 라는 객체를 찾아서 못 만났고, 그 결과 화면에 ★내부 이름 fileChange 가 그대로★ 떴다.
-  const changeList = Array.isArray(it.changes) ? (it.changes as Record<string, unknown>[]) : null;
-  if (changeList && changeList.length > 0) {
-    const verb = (k: unknown): string => {
-      const t = (k as { type?: unknown } | null)?.type;
-      return t === "add" ? "생성" : t === "delete" ? "삭제" : "수정";
-    };
-    if (changeList.length === 1) {
-      const c = changeList[0]!;
-      const path = typeof c.path === "string" ? c.path.split("/").pop() ?? String(c.path) : "파일";
-      return clip(`파일 ${verb(c.kind)}: ${path}`);
-    }
-    return clip(`파일 ${changeList.length}개 ${verb(changeList[0]!.kind)}`);
-  }
-  const legacy = it.fileChanges;
-  if (legacy && typeof legacy === "object") {
-    const files = Object.keys(legacy as Record<string, unknown>);
-    return clip(files.length === 1 ? `파일 수정: ${files[0]}` : `파일 ${files.length}개 수정`);
-  }
-  if (type === "webSearch" || type === "web_search") {
-    // ★codex 는 queries(복수) 를 쓴다★ — 단수 query 만 보면 검색어가 비어 "웹 검색" 만 뜬다
-    //   (0.147.0 바이너리의 WebSearchAction: queries · open_page(url) · find_in_page(pattern)).
-    //   중첩된 action 안에 실릴 수도 있어 양쪽을 본다.
-    const act = (it.action ?? {}) as Record<string, unknown>;
-    // 실측(0.147.0): 시작 시점엔 전부 비어 있고, 완료 시점에 action.queries(복수) 또는
-    //   action.query(단수) 또는 최상위 query 중 하나가 채워진다. openPage 면 action.url 이다.
-    const pick = (v: unknown): string =>
-      Array.isArray(v) ? v.filter((x) => typeof x === "string").join(" · ")
-      : typeof v === "string" ? v
-      : "";
-    // ★무엇을 했는지는 action.type 이 말한다 — 그걸 먼저 본다.★
-    //   실측: openPage 인데도 최상위 query 에 ★URL 이 들어온다.★ 검색어 먼저 보면 "웹 검색: https://…" 가 된다.
-    const kind = typeof act.type === "string" ? act.type : "";
-    const url = typeof act.url === "string" ? act.url : typeof it.url === "string" ? it.url : "";
-    if (kind === "openPage" || (!kind && url)) return url ? clip(`웹 열기: ${url}`) : "웹 열기";
-    const pattern = typeof act.pattern === "string" ? act.pattern : typeof it.pattern === "string" ? it.pattern : "";
-    if (kind === "findInPage" || (!kind && pattern)) return pattern ? clip(`페이지에서 찾기: ${pattern}`) : "페이지에서 찾기";
-    const q = pick(act.queries) || pick(act.query) || pick(it.queries) || pick(it.query);
-    if (q) return clip(`웹 검색: ${q}`);
-    return "웹 검색";
-  }
-  // ★상태 줄은 쌓지 않고 맨 위에서 교체된다★(제품 결정: 2026-08-18) — statusLineOf 가 돌려준다.
-  //   여기서는 null 을 내서 ★작업 줄로 쌓이지 않게★ 한다. 매 턴 여러 번 오는 것들이다.
-  if (type === "reasoning" || type === "agentMessage") return null;
-  if (type === "mcpToolCall") {
-    const n = typeof it.name === "string" ? it.name : "도구";
-    return clip(`도구 호출: ${n}`);
-  }
-  // ★사람에게 뜻이 없는 내부 항목은 줄을 만들지 않는다.★ 예전엔 마지막 줄에서 type 을 그대로 찍어
-  //   화면에 `userMessage` 같은 내부 이름이 올라왔다(2026-08-18 라이브 확인).
-  if (NOISE_ITEM_TYPES.has(type)) return null;
-  return type ? clip(type) : null;
+ const type=(item as {type?:unknown}|null)?.type;
+ if (typeof type!=="string" || NOISE_ITEM_TYPES.has(type) || type==="reasoning" || type==="agentMessage") return null;
+ return cogsActivityLine(item);
 }
 
 /**

@@ -11,6 +11,8 @@
  *   아무도 부르지 않던 그 함수는 삭제됐다. ★주석만 남으면 없는 방어선을 있다고 읽는다.★
  *   fail-closed(에러/무응답→denied)는 그대로다.
  */
+import { uiText } from "./uiStrings";
+import { cogsActivityArgs, filename } from "./cogsActivity";
 import { createHash, randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { requestPermission, getPermissionRequest, tierDReasons, type PermissionOperation } from "../../lib/permissionGate";
@@ -371,11 +373,11 @@ export function buildOperationFromApproval(req: ApprovalRequest, agentId: string
 
 /** ★팝업에서 '이건 파일 몇 개가 아니다' 를 사람이 놓치지 않게 하는 머리말.★ 문구가 두 곳에서 같아야
  *  하므로 상수로 둔다(구세대·신세대 경로 모두 같은 위험을 같은 말로 알린다). */
-const GRANT_ROOT_WARNING = "⚠ 세션 동안 아래 폴더 하위 전체에 쓰기 허용 요청 · ";
+const GRANT_ROOT_WARNING = uiText("operation_grant_root",{},"ko");
 
 /** ★해석 실패 팝업의 첫 말.★ 팝업 앞줄(`… · approval_unparsed`)은 공용 코드가 만들어 여기서 못 바꾼다 —
  *  그래서 뒷줄이 사람에게 상황을 말한다. ★상수라서 열쇠 구분력에 영향이 없다.★ */
-const UNPARSED_NOTICE = "내용 해석 실패 — 원문 확인 필요 · ";
+const UNPARSED_NOTICE = uiText("operation_unparsed",{},"ko");
 
 /** grantRoot 를 꺼낸다. 빈 문자열·공백뿐이면 없는 것으로 본다.
  *  ★벤더 설명: "the agent is asking the user to allow writes under this root for the remainder of the
@@ -536,13 +538,13 @@ function fitEntries(display: string[], budget: number): string {
     const piece = display[i]!;
     const cost = piece.length + (out.length ? 2 : 0);
     const rest = display.length - i;
-    const tail = rest > 1 ? ` …외 ${rest}개`.length : 0;
+    const tail = rest > 1 ? uiText("operation_more_files",{count:rest},"ko").length : 0;
     if (used + cost + tail > budget) {
-      if (out.length > 0) return `${out.join(", ")} …외 ${rest}개`;
+      if (out.length > 0) return `${out.join(", ")}${uiText("operation_more_files",{count:rest},"ko")}`;
       // ★첫 항목 하나도 안 들어간다 → 그 항목 자체를 예산에 맞춰 자르고 잘렸음을 표시한다.★
       const room = Math.max(0, budget - (rest > 1 ? tail : 1));
       const cut = `${cutCodePoints(piece, Math.max(0, room - 1))}…`;
-      return rest > 1 ? `${cut} …외 ${rest}개` : cut;
+      return rest > 1 ? `${cut}${uiText("operation_more_files",{count:rest},"ko")}` : cut;
     }
     out.push(piece);
     used += cost;
@@ -614,7 +616,7 @@ function writeOperation(
   //   뒤로 보내도 안전한 이유: 아래에서 operation hash 길이만큼 예산을 ★먼저 떼어놓고★ 파일 목록을 채우므로
   //   240자 절단선 안에 operation hash 가 반드시 남는다(그게 P2 재발 방지의 조건이다).
   const head = grantRoot ? `${GRANT_ROOT_WARNING}${grantRootDisplay(grantRoot)} · ` : "";
-  const prefix = `${head}파일 ${entries.length}개 · `;
+  const prefix = `${head}${uiText("operation_file_count",{count:entries.length},"ko")} · `;
   const suffix = ` #${setDigest}`;
   const scale = sorted
     .map((c) => {
@@ -629,7 +631,7 @@ function writeOperation(
     action: "write",
     // ★화면 = 앞 240자★ 이므로 예산을 그 기준으로 잡고, 열쇠용 전체는 500자까지 남긴다.
     path: `${prefix}${fitEntries(display, Math.max(0, VISIBLE_BUDGET - prefix.length - suffix.length))}${suffix}`.slice(0, 500),
-    text: `${grantRoot ? `${GRANT_ROOT_WARNING}${grantRoot.slice(0, 200)} · ` : ""}파일 ${entries.length}개: ${scale}`.slice(0, 500),
+    text: `${grantRoot ? `${GRANT_ROOT_WARNING}${grantRoot.slice(0, 200)} · ` : ""}${uiText("operation_file_count",{count:entries.length},"ko")}: ${scale}`.slice(0, 500),
     requested_by: agentId,
     provenance: {
       ...provenance,
@@ -902,8 +904,8 @@ export async function sendApprovalToMemberRoom(
   const { title, detail } = approvalSummary(req);
   // ★위험 사유를 카드에 적는다.★ 우리가 대신 막지 않기로 했으면 ★판단 근거는 줘야 한다.★
   //   이 줄이 없으면 `sudo rm -rf /` 와 `ls` 가 폰에서 생김새가 같다.
-  const riskLine = risks.length ? `\n\n⚠️ 위험 표시: ${escapeHtml(risks.join(" · "))}` : "";
-  const text = (detail ? `🔐 ${title}\n\n<code>${escapeHtml(detail)}</code>` : `🔐 ${title}`) + riskLine;
+  const riskLine = risks.length ? `\n\n${escapeHtml(uiText("approval_risk",{risks:risks.join(" · ")}))}` : "";
+  const text = (detail ? `${uiText("approval_card",{title})}\n\n<code>${escapeHtml(detail)}</code>` : uiText("approval_card",{title})) + riskLine;
   const doFetch = deps.fetchFn ?? fetch;
   try {
     const res = await doFetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -922,15 +924,15 @@ export async function sendApprovalToMemberRoom(
         //   끝나면 함께 사라진다 — codex 자신이 위험한 것을 기억하는 단위가 이것이다(acceptForSession).
         reply_markup: { inline_keyboard: [risks.length
           ? [
-              { text: "한번 허용", callback_data: `pg1:${requestId}` },
-              { text: "이 세션", callback_data: `pgs:${requestId}` },
-              { text: "거절", callback_data: `pgd:${requestId}` },
+              { text: uiText("approval_allow_once"), callback_data: `pg1:${requestId}` },
+              { text: uiText("approval_allow_session"), callback_data: `pgs:${requestId}` },
+              { text: uiText("approval_deny"), callback_data: `pgd:${requestId}` },
             ]
           : [
-              { text: "한번 허용", callback_data: `pg1:${requestId}` },
-              { text: "이 세션", callback_data: `pgs:${requestId}` },
-              { text: "항상 허용", callback_data: `pga:${requestId}` },
-              { text: "거절", callback_data: `pgd:${requestId}` },
+              { text: uiText("approval_allow_once"), callback_data: `pg1:${requestId}` },
+              { text: uiText("approval_allow_session"), callback_data: `pgs:${requestId}` },
+              { text: uiText("approval_allow_always"), callback_data: `pga:${requestId}` },
+              { text: uiText("approval_deny"), callback_data: `pgd:${requestId}` },
             ]] },
       }),
     });
@@ -951,16 +953,24 @@ async function sendApprovalPlain(
   apiBase: string, token: string, chatId: string, agentId: string, requestId: string,
   req: ApprovalRequest, risks: string[], doFetch: typeof fetch,
 ): Promise<boolean> {
-  const { title, detail } = approvalSummary(req);
-  const text = [
-    `승인 필요: ${title}`,
-    detail ?? "",
-    risks.length ? `위험 표시: ${risks.join(" · ")}` : "",
-    `버튼이 안 보이면 이 채널에서는 아직 승인할 수 없다 — 시간이 지나면 실행되지 않고 끝난다 (요청 ${requestId})`,
-  ].filter(Boolean).join("\n\n");
-  const buttons = risks.length
-    ? [{ text: "한번 허용", callback_data: `pg1:${requestId}` }, { text: "이 세션", callback_data: `pgs:${requestId}` }, { text: "거절", callback_data: `pgd:${requestId}` }]
-    : [{ text: "한번 허용", callback_data: `pg1:${requestId}` }, { text: "이 세션", callback_data: `pgs:${requestId}` }, { text: "항상 허용", callback_data: `pga:${requestId}` }, { text: "거절", callback_data: `pgd:${requestId}` }];
+  const params=(req.params??{}) as Record<string,unknown>;
+  const operationCode=params.command ? "run_command" : params.fileChanges || params.changes || req.observedItem?.changes.length ? "edit_files" : params.reason ? "request_permission" : "approval_required";
+  const observed=req.observedItem?.changes;
+  const target=cogsActivityArgs(observed?.length ? {changes:observed} : params);
+  const args: Record<string,string|number>={request_id:requestId, operation_code:operationCode};
+  if (target.target) args.detail=target.target;
+  if (target.count!==undefined) args.detail=String(target.count);
+  if (risks.length) args.risks=risks.join(",");
+  const root=grantRootOf(params);
+  if(root) args.grant_root=grantRootDisplay(root);
+  // Approval metadata follows the server's 512-byte scalar-object limit.
+  if(Buffer.byteLength(JSON.stringify(args))>512)delete args.detail;
+  if(Buffer.byteLength(JSON.stringify(args))>512){console.warn(`[codex-approval] metadata exceeds limit request=${requestId}`);return false;}
+  const button=(text_code:string,action:string)=>({text_code,callback_data:`${action}:${requestId}`});
+  const buttons=risks.length
+   ? [button("approval_allow_once","pg1"),button("approval_allow_session","pgs"),button("approval_deny","pgd")]
+   : [button("approval_allow_once","pg1"),button("approval_allow_session","pgs"),button("approval_allow_always","pga"),button("approval_deny","pgd")];
+  const payload={chat_id:chatId,text:"",cogs_response_state:"activity",cogs_activity_code:"approval_required",cogs_activity_args:args};
   const post = async (body: Record<string, unknown>): Promise<{ ok: boolean; reason: string }> => {
     try {
       const res = await doFetch(`${apiBase}/bot${token}/sendMessage`, {
@@ -972,10 +982,10 @@ async function sendApprovalPlain(
       return res.ok && j.ok === true ? { ok: true, reason: "" } : { ok: false, reason: `code=${j.error_code ?? res.status} ${j.description ?? ""}`.trim() };
     } catch (e) { return { ok: false, reason: e instanceof Error ? e.message : String(e) }; }
   };
-  const first = await post({ chat_id: chatId, text, reply_markup: { inline_keyboard: [buttons] } });
+  const first = await post({ ...payload, reply_markup: { inline_keyboard: [buttons] } });
   if (first.ok) return true;
   console.warn(`[codex-approval] b3chat 승인 버튼 전송 실패 → 글자만 재전송: agent=${agentId} request=${requestId} ${first.reason}`);
-  const second = await post({ chat_id: chatId, text });
+  const second = await post(payload);
   if (!second.ok) console.warn(`[codex-approval] ★b3chat 승인 요청 전송 실패 — 대화에 안 남았다★ agent=${agentId} request=${requestId} ${second.reason}`);
   return second.ok;
 }
@@ -985,19 +995,24 @@ async function sendApprovalPlain(
  * 폰에서 한눈에 읽혀야 한다. 긴 것은 자른다(안 자르면 버튼이 화면 밖으로 밀린다).
  */
 export function approvalSummary(req: ApprovalRequest): { title: string; detail?: string } {
+ const summary=approvalSummaryBase(req);
+ const root=grantRootOf(req.params as Record<string,any>);
+ return root ? {title:uiText("approval_root_title"),detail:[uiText("approval_grant_root",{root:grantRootDisplay(root)}),summary.detail].filter(Boolean).join("\n")} : summary;
+}
+function approvalSummaryBase(req: ApprovalRequest): {title:string;detail?:string} {
   const p = (req.params ?? {}) as Record<string, unknown>;
   const cmd = p.command;
   const cmdText = typeof cmd === "string" ? cmd : Array.isArray(cmd) ? cmd.join(" ") : null;
-  if (cmdText) return { title: "명령을 실행할까요?", detail: clip(cmdText) };
+  if (cmdText) return { title: uiText("approval_command"), detail: clip(cmdText) };
 
   const changes = p.fileChanges;
   if (changes && typeof changes === "object") {
     const files = Object.keys(changes as Record<string, unknown>);
     const head = files.slice(0, 3).join("\n");
-    return { title: `파일 ${files.length}개를 고칠까요?`, detail: clip(files.length > 3 ? `${head}\n…외 ${files.length - 3}개` : head) };
+    return { title: uiText("approval_files",{count:files.length}), detail: clip(files.length > 3 ? `${head}\n${uiText("approval_more_files",{count:files.length-3})}` : head) };
   }
-  if (typeof p.reason === "string") return { title: "권한을 요청합니다", detail: clip(p.reason) };
-  return { title: "승인이 필요합니다", detail: req.method };
+  if (typeof p.reason === "string") return { title: uiText("approval_permission"), detail: clip(p.reason) };
+  return { title: uiText("approval_required"), detail: req.method };
 }
 
 function clip(s: string, max = 300): string {
