@@ -46,7 +46,7 @@ const SHA_RE = /^[0-9a-f]{40}$/;
  * (처음엔 워크트리를 null 로 뒀는데, 워크트리에서 빌드하면 표식이 ★모름★ 이 됐다. 값을 알 수 있는데
  *  모른다고 말하는 건 이 파일이 없애려는 바로 그 상태다.)
  */
-function gitDirs(repoRoot: string): { headDir: string; commonDir: string } | null {
+export function gitDirs(repoRoot: string): { headDir: string; commonDir: string } | null {
   const dotGit = join(repoRoot, ".git");
   if (!existsSync(dotGit)) return null;
   if (statSync(dotGit).isDirectory()) return { headDir: dotGit, commonDir: dotGit };
