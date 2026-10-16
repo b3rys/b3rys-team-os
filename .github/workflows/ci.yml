@@ -18,6 +18,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -29,6 +31,14 @@ jobs:
       # lockfile 을 그대로 쓴다 — CI 가 로컬과 다른 의존성으로 초록이 되면 의미가 없다.
       - name: 의존성 설치
         run: bun install --frozen-lockfile
+
+      - name: 추가된 주석 검사
+        env:
+          ATTRIBUTION_BASE: ${{ github.event.pull_request.base.sha || github.sha }}
+          ATTRIBUTION_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          bun test scripts/check-comment-attribution.test.ts scripts/check-comment-attribution-diff.test.ts
+          bun scripts/check-comment-attribution.ts --diff "$ATTRIBUTION_BASE" "$ATTRIBUTION_HEAD"
 
       - name: 타입체크
         run: bunx tsc --noEmit
