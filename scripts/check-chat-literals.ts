@@ -19,36 +19,34 @@ export function scanChatLiterals(file: string, source: string): Finding[] {
   host.getSourceFile = name => name === file ? sf : undefined;
   const program = ts.createProgram([file], { noResolve: true, noLib: true }, host);
   const checker = program.getTypeChecker();
+  const writes = new Map<ts.Symbol, ts.Expression[]>();
+  function collectWrites(node: ts.Node) {
+    if (ts.isBinaryExpression(node) && [ts.SyntaxKind.EqualsToken, ts.SyntaxKind.PlusEqualsToken].includes(node.operatorToken.kind) && ts.isIdentifier(node.left)) {
+      const symbol = checker.getSymbolAtLocation(node.left);
+      if (symbol) writes.set(symbol, [...(writes.get(symbol) ?? []), node.right]);
+    }
+    ts.forEachChild(node, collectWrites);
+  }
+  collectWrites(sf);
   function fingerprint(node: ts.Node, seen = new Set<ts.Node>()): string[] {
     if (seen.has(node)) return [];
     seen.add(node);
     if (ts.isStringLiteralLike(node)) return node.text.trim() ? [node.text] : [];
+    if (ts.isTemplateExpression(node)) return [node.head.text, ...node.templateSpans.flatMap(s => [...fingerprint(s.expression, seen), s.literal.text])].filter(s => s.trim());
     if (ts.isIdentifier(node)) {
       const symbol = ts.isShorthandPropertyAssignment(node.parent) ? checker.getShorthandAssignmentValueSymbol(node.parent) : checker.getSymbolAtLocation(node);
-      return (symbol?.declarations ?? []).flatMap(d => ts.isVariableDeclaration(d) && d.initializer ? fingerprint(d.initializer, seen) : []);
+      if (!symbol) return [];
+      const initial = (symbol.declarations ?? []).flatMap(d => ts.isVariableDeclaration(d) && d.initializer ? fingerprint(d.initializer, seen) : []);
+      return [...initial, ...(writes.get(symbol) ?? []).flatMap(e => fingerprint(e, seen))];
     }
     if (ts.isConditionalExpression(node)) return [...fingerprint(node.whenTrue, seen), ...fingerprint(node.whenFalse, seen)];
-    if (ts.isCallExpression(node)) return node.arguments.flatMap(a => fingerprint(a, seen));
+    if (ts.isCallExpression(node)) return [...(ts.isPropertyAccessExpression(node.expression) ? fingerprint(node.expression.expression, seen) : []), ...node.arguments.flatMap(a => fingerprint(a, seen))];
+    if (ts.isPropertyAccessExpression(node)) return fingerprint(node.expression, seen);
     const parts: string[] = [];
     ts.forEachChild(node, child => { parts.push(...fingerprint(child, seen)); });
     return parts;
   }
-  function literal(node: ts.Node, seen = new Set<ts.Node>()): boolean {
-    if (seen.has(node)) return false;
-    seen.add(node);
-    if (ts.isStringLiteralLike(node)) return node.text.trim().length > 0;
-    if (ts.isTemplateExpression(node)) return Boolean(node.head.text.trim() || node.templateSpans.some(s => s.literal.text.trim() || literal(s.expression, seen)));
-    if (ts.isIdentifier(node)) {
-      const symbol = ts.isShorthandPropertyAssignment(node.parent) ? checker.getShorthandAssignmentValueSymbol(node.parent) : checker.getSymbolAtLocation(node);
-      const decls = symbol?.declarations ?? [];
-      return decls.some(d => ts.isVariableDeclaration(d) && d.initializer && literal(d.initializer, seen));
-    }
-    if (ts.isConditionalExpression(node)) return literal(node.whenTrue, seen) || literal(node.whenFalse, seen);
-    if (ts.isBinaryExpression(node) && [ts.SyntaxKind.PlusToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(node.operatorToken.kind)) return literal(node.left, seen) || literal(node.right, seen);
-    if (ts.isCallExpression(node)) return node.arguments.some(a => literal(a, seen));
-    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isNonNullExpression(node)) return literal(node.expression, seen);
-    return false;
-  }
+  const literal = (node: ts.Node) => fingerprint(node).length > 0;
   const found: Finding[] = [];
   const offsets = new Set<number>();
   function report(node: ts.Node) {
