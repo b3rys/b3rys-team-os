@@ -20,6 +20,7 @@
  *       (시험 입력값 "@빌 이거 해줘" 같은 것은 지우면 시험이 죽는다).
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
 /**
@@ -271,10 +272,52 @@ function walk(dir: string, acc: string[] = []): string[] {
  */
 export const DEFAULT_ROOTS = ["src", "scripts"] as const;
 
+export const GUIDANCE = "회고·사람 발언·날짜 서술: 사실과 인과만 남기세요";
+
+/** Added line numbers on the new side of a zero-context git diff. */
+export function addedLineNumbers(diff: string): Set<number> {
+  const added = new Set<number>();
+  let line = 0;
+  let inHunk = false;
+  for (const row of diff.split("\n")) {
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(row);
+    if (hunk) { line = Number(hunk[1]); inHunk = true; continue; }
+    if (!inHunk) continue;
+    if (row.startsWith("+")) { added.add(line++); }
+    else if (row.startsWith(" ")) line++;
+  }
+  return added;
+}
+
+export function scanAddedComments(base: string, head = "HEAD", cwd = process.cwd()): Finding[] {
+  const git = (args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" });
+  const commit = (ref: string) => git(["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`]).trim();
+  const headCommit = commit(head);
+  const mergeBase = git(["merge-base", commit(base), headCommit]).trim();
+  const entries = git(["diff", "--name-status", "-z", "--find-renames", "--diff-filter=AMR", mergeBase, headCommit, "--", ...DEFAULT_ROOTS]).split("\0");
+  const files: { file: string; paths: string[] }[] = [];
+  for (let i = 0; i < entries.length && entries[i];) {
+    const status = entries[i++]!;
+    const oldPath = entries[i++]!;
+    const file = status.startsWith("R") ? entries[i++]! : oldPath;
+    if (file.endsWith(".ts")) files.push({ file, paths: status.startsWith("R") ? [oldPath, file] : [file] });
+  }
+  return files.flatMap(({ file, paths }) => {
+    const added = addedLineNumbers(git(["diff", "--no-ext-diff", "--no-color", "--find-renames", "--unified=0", mergeBase, headCommit, "--", ...paths]));
+    return scanText(file, git(["show", `${headCommit}:${file}`])).filter(f => added.has(f.line));
+  });
+}
+
 if (import.meta.main) {
-  const roots = process.argv[2] ? [process.argv[2]] : DEFAULT_ROOTS.filter((d) => existsSync(d));
-  const findings = roots.flatMap((root) => walk(root)).flatMap((f) => scanText(f, readFileSync(f, "utf8")));
-  for (const f of findings) console.log(`${f.file}:${f.line}  ${f.text.slice(0, 120)}`);
-  console.log(`\n사람 귀속으로 걸린 주석: ${findings.length}건`);
+  let findings: Finding[];
+  if (process.argv[2] === "--diff") {
+    if (!process.argv[3]) throw new Error("Usage: --diff <base> [head]");
+    findings = scanAddedComments(process.argv[3], process.argv[4]);
+  } else {
+    const roots = process.argv[2] ? [process.argv[2]] : DEFAULT_ROOTS.filter((d) => existsSync(d));
+    findings = roots.flatMap((root) => walk(root)).flatMap((f) => scanText(f, readFileSync(f, "utf8")));
+  }
+  for (const f of findings) console.error(`${f.file}:${f.line}: ${GUIDANCE}`);
+  console.log(`사람 귀속으로 걸린 주석: ${findings.length}건`);
   process.exit(findings.length ? 3 : 0);
 }
