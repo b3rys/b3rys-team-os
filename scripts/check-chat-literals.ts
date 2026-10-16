@@ -41,7 +41,7 @@ export function scanChatLiterals(file: string, source: string): Finding[] {
     }
     if (ts.isConditionalExpression(node)) return [...fingerprint(node.whenTrue, seen), ...fingerprint(node.whenFalse, seen)];
     if (ts.isCallExpression(node)) return [...(ts.isPropertyAccessExpression(node.expression) ? fingerprint(node.expression.expression, seen) : []), ...node.arguments.flatMap(a => fingerprint(a, seen))];
-    if (ts.isPropertyAccessExpression(node)) return [];
+    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) return [];
     const parts: string[] = [];
     ts.forEachChild(node, child => { parts.push(...fingerprint(child, seen)); });
     return parts;
@@ -66,7 +66,7 @@ export function scanChatLiterals(file: string, source: string): Finding[] {
       const callee = node.expression.getText(sf);
       if (/^(?:console|logger|log)\./.test(callee)) return;
       const name = callee.split(".").at(-1);
-      const index = ["send", "sendMessage", "buildOpenclawTelegramSendMessageBody"].includes(name ?? "") ? 1 : ["edit", "editMessage", "editMessageText", "sendAsAgentBot", "postTelegramAsHermes", "postTelegramAsOpenclaw"].includes(name ?? "") ? 2 : -1;
+      const index = name === "sendViaTeamOp" ? 0 : ["send", "sendMessage", "buildOpenclawTelegramSendMessageBody"].includes(name ?? "") ? 1 : ["edit", "editMessage", "editMessageText", "sendAsAgentBot", "postTelegramAsHermes", "postTelegramAsOpenclaw"].includes(name ?? "") ? 2 : -1;
       if (index >= 0 && node.arguments[index] && literal(node.arguments[index]!)) report(node.arguments[index]!);
     }
     if (ts.isObjectLiteralExpression(node)) {
