@@ -60,3 +60,18 @@ test("new fixed chunks behind template aliases and later assignments fail", () =
   const before = scanChatLiterals(file, 'const text = `old ${value}`; send(id, text)');
   expect(newFindings(scanChatLiterals(file, 'const text = `new ${value}`; send(id, text)'), {[before[0]!.key]: 1})).toHaveLength(1);
 });
+
+
+test("payload writes and delivery wrappers reject literals; model output ignores its prompt", () => {
+  for (const source of [
+    'function post(body) { body.text = "fixed"; fetch(url, {body: JSON.stringify(body)}); }',
+    'body["text"] = "fixed";', 'sendAsAgentBot(agent, chatId, "fixed")',
+    'let text = answer; text ||= "fixed"; send(id, text)',
+  ]) expect(scanChatLiterals(file, source)).toHaveLength(1);
+  expect(scanChatLiterals(file, 'const answer = await runTurn({prompt: "system prompt"}); send(id, answer.reply)')).toHaveLength(0);
+  const source = readFileSync(file, "utf8");
+  const before = 'const post = async (body: Record<string, unknown>): Promise<number | null> => {';
+  expect(source.includes(before)).toBe(true);
+  const baseline = JSON.parse(readFileSync("scripts/chat-literals-baseline.json", "utf8")).counts;
+  expect(newFindings(scanChatLiterals(file, source.replace(before, before + '\nbody.text = "받았어요";')), baseline).length).toBeGreaterThan(0);
+});

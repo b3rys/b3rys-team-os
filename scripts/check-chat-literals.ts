@@ -21,7 +21,7 @@ export function scanChatLiterals(file: string, source: string): Finding[] {
   const checker = program.getTypeChecker();
   const writes = new Map<ts.Symbol, ts.Expression[]>();
   function collectWrites(node: ts.Node) {
-    if (ts.isBinaryExpression(node) && [ts.SyntaxKind.EqualsToken, ts.SyntaxKind.PlusEqualsToken].includes(node.operatorToken.kind) && ts.isIdentifier(node.left)) {
+    if (ts.isBinaryExpression(node) && [ts.SyntaxKind.EqualsToken, ts.SyntaxKind.PlusEqualsToken, ts.SyntaxKind.BarBarEqualsToken, ts.SyntaxKind.QuestionQuestionEqualsToken].includes(node.operatorToken.kind) && ts.isIdentifier(node.left)) {
       const symbol = checker.getSymbolAtLocation(node.left);
       if (symbol) writes.set(symbol, [...(writes.get(symbol) ?? []), node.right]);
     }
@@ -41,7 +41,7 @@ export function scanChatLiterals(file: string, source: string): Finding[] {
     }
     if (ts.isConditionalExpression(node)) return [...fingerprint(node.whenTrue, seen), ...fingerprint(node.whenFalse, seen)];
     if (ts.isCallExpression(node)) return [...(ts.isPropertyAccessExpression(node.expression) ? fingerprint(node.expression.expression, seen) : []), ...node.arguments.flatMap(a => fingerprint(a, seen))];
-    if (ts.isPropertyAccessExpression(node)) return fingerprint(node.expression, seen);
+    if (ts.isPropertyAccessExpression(node)) return [];
     const parts: string[] = [];
     ts.forEachChild(node, child => { parts.push(...fingerprint(child, seen)); });
     return parts;
@@ -57,11 +57,16 @@ export function scanChatLiterals(file: string, source: string): Finding[] {
     found.push({ file, line, key: `${file}:${node.getText(sf).replace(/\s+/g, " ")}:${JSON.stringify(fingerprint(node))}` });
   }
   function visit(node: ts.Node) {
+    if (ts.isBinaryExpression(node) && [ts.SyntaxKind.EqualsToken, ts.SyntaxKind.PlusEqualsToken, ts.SyntaxKind.BarBarEqualsToken, ts.SyntaxKind.QuestionQuestionEqualsToken].includes(node.operatorToken.kind)) {
+      const left = node.left;
+      const property = ts.isPropertyAccessExpression(left) ? left.name.text : ts.isElementAccessExpression(left) && ts.isStringLiteralLike(left.argumentExpression) ? left.argumentExpression.text : undefined;
+      if (property === "text" && literal(node.right)) report(node.right);
+    }
     if (ts.isCallExpression(node)) {
       const callee = node.expression.getText(sf);
       if (/^(?:console|logger|log)\./.test(callee)) return;
       const name = callee.split(".").at(-1);
-      const index = ["send", "sendMessage"].includes(name ?? "") ? 1 : ["edit", "editMessage", "editMessageText"].includes(name ?? "") ? 2 : -1;
+      const index = ["send", "sendMessage", "buildOpenclawTelegramSendMessageBody"].includes(name ?? "") ? 1 : ["edit", "editMessage", "editMessageText", "sendAsAgentBot", "postTelegramAsHermes", "postTelegramAsOpenclaw"].includes(name ?? "") ? 2 : -1;
       if (index >= 0 && node.arguments[index] && literal(node.arguments[index]!)) report(node.arguments[index]!);
     }
     if (ts.isObjectLiteralExpression(node)) {
