@@ -223,17 +223,14 @@ export function hasSubstantiveReport(
 ): boolean {
   const candidates = db
     .prepare(
-      `SELECT body FROM message AS report
+      `SELECT body FROM message
        WHERE from_agent_id = ?
          AND created_at > ?
          AND (thread_id = ? OR (? IS NULL AND json_extract(meta_json, '$.reply_mode') = 'direct_to_gd'))
          AND (to_agent_id = ? OR to_agent_id IN ('user', 'broadcast', 'gd')
               OR json_extract(meta_json, '$.reply_mode') = 'direct_to_gd'
-              OR to_agent_id = (SELECT from_agent_id FROM message WHERE id = ?)
-              OR to_agent_id = (
-                SELECT request.from_agent_id FROM message AS request
-                 WHERE request.id = report.in_reply_to AND request.to_agent_id = ?
-                   AND request.thread_id = report.thread_id))
+              OR to_agent_id = (SELECT from_agent_id FROM message
+                                WHERE id = ? AND to_agent_id = ?))
        ORDER BY created_at ASC`,
     )
     .all(row.recipient_agent_id, row.created_at, row.thread_id, row.thread_id, row.target_agent_id,

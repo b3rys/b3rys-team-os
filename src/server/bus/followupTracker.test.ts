@@ -462,3 +462,12 @@ describe("보고 대상 일치", () => {
   }
  });
 });
+
+test("원 요청 ID로 확정되는 요청자에게 보고하면 직보가 아니어도 억제한다", () => {
+ const db=freshDb();
+ insertMsg(db,{id:"srcmsg",from:"bill",to:"luna",thread:"bound",body:"팀장께 보고할 결과를 주세요",created:"1999-12-31 23:59:59"});
+ insertDueFollowup(db,{id:"bound",recipient:"luna",target:"team_lead",thread:"bound"});
+ insertMsg(db,{id:"report",from:"luna",to:"bill",thread:"bound",body:"검증 완료. 4건 통과했습니다.",created:"2000-01-01 00:00:01"});
+ expect(checkPendingFollowups(db).fulfilled).toEqual(["bound"]);
+ db.close();
+});
