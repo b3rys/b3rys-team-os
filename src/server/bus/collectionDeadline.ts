@@ -116,6 +116,7 @@ export function hasReportedSince(
         WHERE thread_id = ? AND from_agent_id = ? AND created_at > ?
           AND (to_agent_id IS NULL
                OR to_agent_id IN ('user','broadcast','gd')
+               OR json_extract(meta_json, '$.reply_mode') = 'direct_to_gd'
                OR to_agent_id NOT IN (${targets.map(() => "?").join(",")}))`,
     )
     .get(thread_id, collector, since, ...targets) as { n: number }).n;
@@ -166,6 +167,7 @@ export function findStalledCollections(db: Database, agents: AgentRecord[]): Sta
                   json_extract(meta_json,'$.individual') AS individual
              FROM message
             WHERE thread_id = ? AND from_agent_id = ? AND source='agent'
+              AND COALESCE(json_extract(meta_json, '$.reply_mode'), '') != 'direct_to_gd'
               AND to_agent_id IS NOT NULL AND to_agent_id NOT IN ('broadcast','user','system')
               AND to_agent_id <> ? AND created_at > datetime('now','-90 minutes')
             ORDER BY created_at`,

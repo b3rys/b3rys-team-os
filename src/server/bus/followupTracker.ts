@@ -217,22 +217,24 @@ interface PendingFollowupRow {
  * and whose body classifies as substantive/explicit_done (NOT ack-only) per classifyReplySignal.
  * ack-only replies ("알았습니다"/"네"/👀) do NOT count as a report.
  */
-function hasSubstantiveReport(db: Database, row: PendingFollowupRow): boolean {
+export function hasSubstantiveReport(
+  db: Database,
+  row: Pick<PendingFollowupRow, "recipient_agent_id" | "target_agent_id" | "thread_id" | "created_at" | "source_message_id">,
+): boolean {
   const candidates = db
     .prepare(
       `SELECT body FROM message
        WHERE from_agent_id = ?
          AND created_at > ?
-         AND (
-           (thread_id IS NOT NULL AND thread_id = ?)
-           -- ★thread 가 있는 follow-up 은 direct_to_gd meta 단독으로 fulfil 되지 않는다★ (hermes 리뷰 2026-07-18:
-           --   thB 의 direct_to_gd 보고가 thA 의 row 를 잘못 fulfil → 미배달 보고가 조용히 '완료' 처리 = 보고 유실.
-           --   자가등록으로 멤버당 다중 thread row 가 흔해져 실결함. thread-NULL row 만 meta 단독 fulfil 허용.)
-           OR (? IS NULL AND meta_json IS NOT NULL AND meta_json LIKE '%"reply_mode":"direct_to_gd"%')
-         )
+         AND (thread_id = ? OR (? IS NULL AND json_extract(meta_json, '$.reply_mode') = 'direct_to_gd'))
+         AND (to_agent_id = ? OR to_agent_id IN ('user', 'broadcast', 'gd')
+              OR json_extract(meta_json, '$.reply_mode') = 'direct_to_gd'
+              OR to_agent_id = (SELECT from_agent_id FROM message
+                                WHERE id = ? AND to_agent_id = ?))
        ORDER BY created_at ASC`,
     )
-    .all(row.recipient_agent_id, row.created_at, row.thread_id, row.thread_id) as Array<{ body: string }>;
+    .all(row.recipient_agent_id, row.created_at, row.thread_id, row.thread_id, row.target_agent_id,
+      row.source_message_id, row.recipient_agent_id) as Array<{ body: string }>;
   for (const c of candidates) {
     const signal = classifyReplySignal(c.body ?? "");
     if (signal === "substantive" || signal === "explicit_done") return true;

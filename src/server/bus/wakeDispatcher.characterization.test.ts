@@ -1,3 +1,5 @@
+import { emitOpNotice } from "../lib/opNotice";
+import { notifySenderOfBlock } from "./wakeDispatcher";
 /**
  * Characterization tests for wakeDispatcher.dispatchRow — Stage ③, locks in CURRENT behavior
  * before the planned ④ split (dispatchRow → claim → plan → invoke → record).
@@ -539,7 +541,7 @@ describe("dispatchRow — sender no_wake (send.sh --no-wake)", () => {
     expect(claude.calls).toBe(1);
   });
 
-  test("사람·시스템 발신(source≠agent)은 no_wake 가 있어도 깨운다", async () => {
+  test("사람 발신은 no_wake 가 있어도 깨운다", async () => {
     const row = pendingRowFor(db, "bill", { from_agent_id: "user", source: "user", body: "이거 해줘", meta: { no_wake: true } });
     const claude = spyAdapter(() => ({ ok: true }));
     await dispatch(db, row, { claude: claude.adapter });
@@ -552,4 +554,30 @@ describe("dispatchRow — sender no_wake (send.sh --no-wake)", () => {
     await dispatch(db, row, { claude: claude.adapter });
     expect(claude.calls).toBe(1);
   });
+});
+
+test("시스템 정보 알림은 저장 후 읽지 않은 상태를 유지하며 깨우지 않는다", async () => {
+ const row = pendingRowFor(db,"bill",{from_agent_id:"system",source:"system",body:"[team op] status",meta:{no_wake:true}});
+ const spy=spyAdapter(() => ({ok:true}));
+ await dispatch(db,row,{claude:spy.adapter});
+ expect(spy.calls).toBe(0);
+ expect(rcpt(db,row.message_id,"bill")?.last_error).toBe("sender_no_wake");
+ expect(db.query("SELECT read_at FROM message_recipient WHERE message_id=? AND agent_id='bill'").get(row.message_id)).toEqual({read_at:null});
+});
+
+test("team op·전달차단은 실제 저장하되 adapter를 호출하지 않고 일반 시스템 요청은 깨운다", async () => {
+ const opId=emitOpNotice(db,{to:"bill",body:"[team op] down",threadKey:"op-test"})!;
+ const blocked=pendingRowFor(db,"bill",{body:"검토해 주세요"});
+ notifySenderOfBlock(db,blocked,agentsOf(db),"test-block");
+ const notice=db.query("SELECT id FROM message WHERE dedupe_key=?").get(`block-notice:${blocked.message_id}:bill`) as {id:string};
+ expect(notice).toBeTruthy();
+ const spy=spyAdapter(() => ({ok:true}));
+ for (const row of [rowOf(db,opId,"bill"),rowOf(db,notice.id,"steve")]) {
+  await dispatch(db,row,{claude:spy.adapter});
+  expect(rcpt(db,row.message_id,row.agent_id)?.last_error).toBe("sender_no_wake");
+ }
+ expect(spy.calls).toBe(0);
+ const ordinary=pendingRowFor(db,"bill",{from_agent_id:"system",source:"system",body:"실행이 필요한 일반 요청"});
+ await dispatch(db,ordinary,{claude:spy.adapter});
+ expect(spy.calls).toBe(1);
 });

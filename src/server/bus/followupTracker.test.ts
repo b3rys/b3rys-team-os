@@ -441,3 +441,33 @@ describe("createSelfFollowup (응답가드 자가등록, GD 2026-07-18)", () => 
     expect(second.rewoken.length).toBe(0); // 1회성 — fired=1 재발화 없음
   });
 });
+
+describe("보고 대상 일치", () => {
+ test("같은 thread의 다른 팀원에게 보낸 질문은 보고를 대신하지 않는다", () => {
+  const db = freshDb();
+  insertDueFollowup(db, { id: "scope", recipient: "luna", target: "gd", thread: "scope" });
+  insertMsg(db, { id:"question", from:"luna", to:"hermy", thread:"scope", body:"다음 검증 결과를 확인해 주세요.", created:"2000-01-01 00:00:01" });
+  expect(checkPendingFollowups(db).rewoken).toEqual(["scope"]);
+  db.close();
+ });
+ test("요청자에게 보고했으면 억제하고 다른 thread의 직보는 억제하지 않는다", () => {
+  for (const same of [true, false]) {
+   const db = freshDb();
+   insertDueFollowup(db, {id:"scope", recipient:"luna", target:"gd", thread:"scope"});
+   insertMsg(db, {id:"report", from:"luna", to:"gd", thread:same ? "scope" : "other", body:"검증을 완료했습니다. 결과는 4건 통과입니다.", created:"2000-01-01 00:00:01", meta:JSON.stringify({reply_mode:"direct_to_gd"})});
+   const result=checkPendingFollowups(db);
+   expect(result.fulfilled).toEqual(same ? ["scope"] : []);
+   expect(result.rewoken).toEqual(same ? [] : ["scope"]);
+   db.close();
+  }
+ });
+});
+
+test("원 요청 ID로 확정되는 요청자에게 보고하면 직보가 아니어도 억제한다", () => {
+ const db=freshDb();
+ insertMsg(db,{id:"srcmsg",from:"bill",to:"luna",thread:"bound",body:"팀장께 보고할 결과를 주세요",created:"1999-12-31 23:59:59"});
+ insertDueFollowup(db,{id:"bound",recipient:"luna",target:"team_lead",thread:"bound"});
+ insertMsg(db,{id:"report",from:"luna",to:"bill",thread:"bound",body:"검증 완료. 4건 통과했습니다.",created:"2000-01-01 00:00:01"});
+ expect(checkPendingFollowups(db).fulfilled).toEqual(["bound"]);
+ db.close();
+});

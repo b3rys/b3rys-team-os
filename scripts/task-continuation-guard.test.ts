@@ -7,7 +7,7 @@
  * 기준이라 ★성실히 갱신하는 blocked 카드일수록 더 자주 핑을 받는★ 역유인까지 있었다.
  */
 import { describe, expect, test } from "bun:test";
-import { isBlockedCard, stalledDoingCards, guardBody, parseUtc, toUtcIso } from "./task-continuation-guard";
+import { dueCards, isBlockedCard, stalledDoingCards, guardBody, parseUtc, toUtcIso } from "./task-continuation-guard";
 
 const NOW = Date.parse("2026-07-26T00:00:00Z");
 const STALL = 60 * 60 * 1000; // 60분
@@ -121,5 +121,21 @@ describe("parseUtc — 시간대 표시자", () => {
     expect(parseUtc("", 12345)).toBe(12345);
     expect(parseUtc(null, 12345)).toBe(12345);
     expect(parseUtc("not-a-date", 12345)).toBe(12345);
+  });
+});
+
+describe("진행 갱신 뒤 한 주기 유예", () => {
+  test("처음 멈춘 카드는 보내고, 같은 미변경 카드는 다시 보내지 않는다", () => {
+    const t = card();
+    expect(dueCards([t], {})).toEqual([t]);
+    expect(dueCards([t], { c1: new Date(NOW).toISOString() })).toEqual([]);
+  });
+  test("마지막 알림 뒤 갱신됐으면 이번에는 억제하고 다음 주기에 재판단한다", () => {
+    const state: Parameters<typeof dueCards>[1] = { c1: new Date(NOW - 4 * STALL).toISOString() };
+    const t = card();
+    expect(dueCards([t], state)).toEqual([]);
+    const restored = JSON.parse(JSON.stringify(state));
+    expect(dueCards([t], restored)).toEqual([t]);
+    expect(dueCards([card({ updated_at: agoIso(STALL) })], restored)).toEqual([]);
   });
 });

@@ -1,3 +1,4 @@
+import { hasSubstantiveReport, TEAM_LEAD_TARGET } from "../bus/followupTracker";
 import type { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
@@ -1222,11 +1223,21 @@ export async function runDueSchedulerJobsOnce(
         const emittedMessageId = db.transaction((j: ScheduledJobRow) => {
           // 배너의 "실제" 시각은 completeScheduledJob 이 기록하는 시각과 같아야 한다 —
           // 여기서 새로 new Date() 를 부르면 봉투와 run 기록이 서로 다른 시각을 말한다.
+          // expect-report uses its existing title as the work-thread identity; other reminders always emit.
+          const reportThread = j.title.startsWith("expect-report ") && j.title.length < 200
+            ? j.title.slice("expect-report ".length) : null;
+          if (reportThread && hasSubstantiveReport(db, {
+            recipient_agent_id: j.target_agent_id!, target_agent_id: TEAM_LEAD_TARGET,
+            thread_id: reportThread, source_message_id: "", created_at: j.created_at,
+          })) {
+            skipScheduledJob(db, j, "report_already_sent", { now });
+            return undefined;
+          }
           const id = emitScheduledJob(db, j, now);
           completeScheduledJob(db, j, { emittedMessageId: id, now });
           return id;
         })(claimed);
-        results.push({ jobId: job.id, status: "succeeded", emittedMessageId });
+        results.push({ jobId: job.id, status: emittedMessageId ? "succeeded" : "skipped", emittedMessageId });
       } else {
         const outcome = db.transaction((j: ScheduledJobRow) => {
           const emitted = emitCapabilityWorkloop(db, j, payload, now);

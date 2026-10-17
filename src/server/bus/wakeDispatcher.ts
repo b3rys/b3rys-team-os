@@ -1106,9 +1106,8 @@ function buildDispatchPlan(
 
   // 보낸 쪽이 "깨우지 마라"(send.sh --no-wake → meta.no_wake)를 단 팀원 메시지는 inbox-only.
   // 받는 팀원은 다음에 일로 깨어날 때 이 스레드 이력·inbox 에서 본다. 깨우기 한 번 = 받는 쪽 대화
-  // 전체 재독이라 접수·진행 알림 같은 정보성 메시지가 큰 비용이었다. 사람·시스템 발신과 broadcast 는
-  // 이 표시가 있어도 늘 깨운다.
-  if (row.source === "agent" && row.to_agent_id !== "broadcast" && senderAskedNoWake(row.meta_json)) {
+  // 전체 재독 비용을 줄인다. 명시한 시스템 알림도 적용하며 사람 발신과 broadcast는 제외한다.
+  if ((row.source === "agent" || row.source === "system") && row.to_agent_id !== "broadcast" && senderAskedNoWake(row.meta_json)) {
     db.prepare(
       `UPDATE message_recipient
        SET delivery_state = 'completed',
@@ -1458,6 +1457,7 @@ export function notifySenderOfBlock(
       priority: "high",
       // ★in_reply_to 를 넣지 않는다★ — 넣으면 parent_message_id 가 생겨 체인에 얹힌다
       dedupe_key: dedupeKey,
+      meta: { no_wake: true },
     } as Parameters<typeof insertMessage>[1]);
 
     appendAudit(db, "bus_dispatcher", "block_notified_sender", row.message_id, {

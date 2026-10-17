@@ -49,7 +49,7 @@ export function emitOpNotice(
       // reply_to 를 비워두지 않는다 — notifyCardOwner 주석의 교훈: 받는 쪽이 'system 에게 답해라'
       //   로 읽으면 --to system = 블랙홀이 된다. op 알림은 답장 대상이 아니라 행동 지시 이므로
       // 수신자가 팀장님께 직보하도록 본문에서 명시한다.
-      meta: { op_notice: true },
+      meta: { op_notice: true, no_wake: true },
       hop_count: 0,
       priority: opts.priority ?? "high",
       thread_id,
