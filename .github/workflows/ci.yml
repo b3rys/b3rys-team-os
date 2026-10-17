@@ -50,6 +50,9 @@ jobs:
           src/server/lib/opNotice.test.ts src/server/scheduler/core.test.ts
           src/server/bus/wakeDispatcher.characterization.test.ts src/server/bus/blockNotice.test.ts
 
+      - name: Slack 답장 게시 및 실패 반환 검사
+        run: bun test src/server/routes/slackReply.test.ts src/server/lib/relayMention.test.ts src/server/lib/tmuxInject.test.ts
+
       - name: 타입체크
         run: bunx tsc --noEmit
 

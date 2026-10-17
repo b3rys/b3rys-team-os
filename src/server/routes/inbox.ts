@@ -201,7 +201,19 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       env = { ...env, explicit_recipients: allHandsEligibleRecipients };
     }
 
-    const slackMetaForGate = findSlackMetaForThread(deps.db, env.thread_id ?? "");
+    // 답 대상 원글의 Slack 주소가 명시된 경우 버스 thread보다 우선한다.
+    const parentMetaRow = env.in_reply_to ? deps.db
+      .prepare("SELECT meta_json FROM message WHERE id = ?")
+      .get(env.in_reply_to) as { meta_json: string | null } | undefined : undefined;
+    let parentSlack: ReturnType<typeof findSlackMetaForThread> = null;
+    try {
+      const slack = JSON.parse(parentMetaRow?.meta_json ?? "null")?.slack;
+      if (typeof slack?.channel === "string" && slack.channel &&
+          typeof slack?.thread_ts === "string" && slack.thread_ts) {
+        parentSlack = slack;
+      }
+    } catch { /* 잘못된 원글 meta는 기존 thread 조회로 처리한다. */ }
+    const slackMetaForGate = parentSlack ?? findSlackMetaForThread(deps.db, env.thread_id ?? "");
     if (env.source === "agent" && env.to_agent_id === "broadcast" && !slackMetaForGate) {
       // ★예외는 없다.★ coordinator 도 마찬가지다.
       //   그래서 여기서 ★명부·capability 를 보지 않는다★ — 보는 순간 그게 유일한 구멍이 된다.
@@ -326,15 +338,14 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
 
 
 
-    // Phase 2b: if this is an agent → user reply on a Slack-originated thread,
-    // auto-post to the Slack thread using the agent's bot token (fire-and-forget).
-    // ★이 스레드가 슬랙 스레드인가★ — 아래 텔레그램 릴레이에서도 쓴다(한 스레드의 방은 ★하나★ 다).
-    const slackThread = findSlackMetaForThread(deps.db, stored.thread_id);
+    // Slack 게시 완료를 확인한 뒤 성공을 반환한다. 같은 답을 Telegram으로도 보내지 않는다.
+    const slackThread = slackMetaForGate ?? findSlackMetaForThread(deps.db, stored.thread_id);
     if (env.source === "agent" && env.from_agent_id !== "user" && env.from_agent_id !== "system") {
       const slackMeta = slackThread;
       if (slackMeta) {
-        const creds = loadAgentCreds(env.from_agent_id);
-        if (creds) {
+        try {
+          const creds = loadAgentCreds(env.from_agent_id);
+          if (!creds) throw new Error("slack_credentials_missing");
           // ★슬랙 멘션은 여기서 붙인다★ (2026-07-30) — 발신 스크립트가 본문에 미리 넣으면
           // `<@U…>` 가 ★텔레그램 그룹방에도 그대로 찍힌다★(실측: 팀장님이 단체방에서 발견).
           //   슬랙 문법은 슬랙에서만 뜻이 있고, 다른 채널에는 의미 없는 문자열이다.
@@ -346,7 +357,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
           const rawMentions = (env as { meta?: { slack_mentions?: unknown } }).meta?.slack_mentions;
           // 개수 상한: 멘션 하나가 알림 하나다. 상한이 없으면 한 메시지로 워크스페이스 전체를 울릴 수 있다.
           const MAX_MENTIONS = 10;
-          const prefix = (Array.isArray(rawMentions) ? rawMentions : [])
+          const prefix = [slackMeta.slack_user_id, ...(Array.isArray(rawMentions) ? rawMentions : [])]
             .filter((m): m is string => typeof m === "string" && /^[UW][A-Z0-9]+$/.test(m))
             .filter((id, i, arr) => arr.indexOf(id) === i)    // 같은 사람을 두 번 부르지 않는다
             .filter((id) => !env.body.includes(`<@${id}>`))   // 본문에 이미 있으면 중복 안 붙인다
@@ -355,22 +366,29 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
             .join(" ");
           // 멘션은 ★자기 줄에★ — 같은 줄이면 본문이 ``` 로 시작할 때 여는 펜스가 줄 맨 앞이 아니게 된다.
           const slackText = prefix ? `${prefix}\n${env.body}` : env.body;
-          void getChannel("slack")
+          const posted = await getChannel("slack")
             .send({
               botToken: creds.bot_token,
               target: slackMeta.channel,
               text: slackText,
               threadRef: slackMeta.thread_ts,
-            })
-            .then((r) => {
-              appendAudit(deps.db, env.from_agent_id, r.ok ? "slack_relay_sent" : "slack_relay_failed", stored.id, {
-                ok: r.ok,
-                ts: r.ts,
-                error: r.error,
-              });
             });
-        } else {
-          appendAudit(deps.db, env.from_agent_id, "slack_relay_skipped_no_creds", stored.id, null);
+          if (!posted.ok || !posted.ts) throw new Error(posted.error ?? "slack_post_missing_ts");
+          stored.meta = { ...stored.meta, slack_ts: posted.ts };
+          deps.db.prepare("UPDATE message SET meta_json = ? WHERE id = ?")
+            .run(JSON.stringify(stored.meta), stored.id);
+          appendAudit(deps.db, env.from_agent_id, "slack_relay_sent", stored.id, {
+            ok: true, ts: posted.ts, channel: slackMeta.channel, thread_ts: slackMeta.thread_ts,
+            mentions: prefix,
+          });
+          return c.json({ ok: true, message: stored, posted: true }, 201);
+        } catch (e) {
+          const error = e instanceof Error ? e.message : String(e);
+          appendAudit(deps.db, env.from_agent_id, "slack_relay_failed", stored.id, {
+            ok: false, error, channel: slackMeta.channel, thread_ts: slackMeta.thread_ts,
+          });
+          return c.json({ ok: false, message: stored, posted: false,
+            error: "slack_relay_failed", detail: error }, 502);
         }
       }
     }

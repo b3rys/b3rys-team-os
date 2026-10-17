@@ -349,7 +349,7 @@ export function findRouteByTgMessageId(
 export function findSlackMetaForThread(
   db: Database,
   thread_id: string,
-): { channel: string; thread_ts: string } | null {
+): { channel: string; thread_ts: string; slack_user_id?: string } | null {
   const rows = db
     .prepare(
       `SELECT meta_json FROM message WHERE thread_id = ? AND meta_json IS NOT NULL ORDER BY created_at ASC`,
@@ -357,10 +357,10 @@ export function findSlackMetaForThread(
     .all(thread_id) as Array<{ meta_json: string }>;
   for (const r of rows) {
     try {
-      const meta = JSON.parse(r.meta_json) as { slack?: { channel?: string; thread_ts?: string } };
+      const meta = JSON.parse(r.meta_json) as { slack?: { channel?: string; thread_ts?: string; slack_user_id?: string } };
       const ch = meta?.slack?.channel;
       const ts = meta?.slack?.thread_ts;
-      if (ch && ts) return { channel: ch, thread_ts: ts };
+      if (ch && ts) return { channel: ch, thread_ts: ts, slack_user_id: meta.slack?.slack_user_id };
     } catch {
       // ignore parse errors
     }

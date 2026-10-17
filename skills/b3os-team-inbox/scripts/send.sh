@@ -318,7 +318,10 @@ import sys, json
 d = json.load(sys.stdin)
 if d.get('ok'):
     m = d['message']
-    print(f'접수됨 {m[\"id\"]} thread={m[\"thread_id\"]} (hop={m[\"hop_count\"]}) — 배달 확인 전', file=sys.stderr)
+    if d.get('posted') and m.get('meta', {}).get('slack_ts'):
+        print('✓ Slack 게시 완료 (' + m['id'] + ') ts=' + m['meta']['slack_ts'], file=sys.stderr)
+    else:
+        print(f'접수됨 {m[\"id\"]} thread={m[\"thread_id\"]} (hop={m[\"hop_count\"]}) — 배달 확인 전', file=sys.stderr)
     print(f'  확인: inbox.sh --delivery {m[\"id\"]}   (버스 밖 발송) · send.sh --confirm  (버스 안 수신)', file=sys.stderr)
     print(m['id'])
 else:
@@ -343,7 +346,11 @@ printf '%s\n' "$MSG_ID"
 #   알 수 없는 것을 아는 척하면 사람이 곧 경고를 무시하게 되고, 그게 이 기능을 무력화한다.
 #   → ★모르는 것은 흉내내지 않는다.★ 슬랙으로 릴레이되는 실제 경로(--to broadcast)에서 멘션이 없으면
 #     그냥 안내한다. 거짓 경보도 놓침도 사라지고, 조회 실패 시 침묵하는 문제도 같이 없어진다.
-if [ -z "$MENTIONS" ] && [ "$TO" = "broadcast" ]; then
+SLACK_POSTED=$(printf '%s' "$RESP" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+print("yes" if d.get("posted") and d.get("message", {}).get("meta", {}).get("slack_ts") else "no")')
+if [ -z "$MENTIONS" ] && [ "$TO" = "broadcast" ] && [ "$SLACK_POSTED" != "yes" ]; then
   case "$BODY" in
     *"<@"*) : ;;   # 본문에 직접 넣었다 — 알릴 것 없음
     *)
@@ -353,6 +360,7 @@ if [ -z "$MENTIONS" ] && [ "$TO" = "broadcast" ]; then
   esac
 fi
 
+[ "$SLACK_POSTED" = "yes" ] && exit 0
 [ -z "$CONFIRM" ] && exit 0
 
 # ─── --confirm: 판정이 날 때까지 기다렸다 사실을 말한다 ────────────────────

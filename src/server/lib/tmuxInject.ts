@@ -174,6 +174,12 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
         `A message arrived in this group room. This room's thread is thread="${opts.threadId}".` +
         hopInstruction +
         ` If ambiguous, ask ${owner}.`)
+    : opts.kind === "slack"
+    ? pick(locale,
+        `Slack 원글에 답하려면 --to broadcast --thread ${opts.threadId} --in-reply-to ${opts.messageId} 로 보내세요. ` +
+        `원글 작성자는 자동 멘션되며, Slack 게시 실패는 전송 실패로 반환됩니다.` + hopInstruction,
+        `To reply to the Slack message, use --to broadcast --thread ${opts.threadId} --in-reply-to ${opts.messageId}. ` +
+        `The original author is mentioned automatically; a Slack posting failure is returned as a send failure.` + hopInstruction)
     : pick(locale,
         `처리할 작업이면 이 thread에 응답하세요 ` +
         `(thread=${opts.threadId}, in-reply-to=${opts.inReplyTo ?? opts.messageId}).` +
