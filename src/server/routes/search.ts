@@ -304,10 +304,7 @@ export function createSearchRoutes(deps: SearchRouteDeps): Hono {
     });
   });
 
-  // POST /api/search/reindex/all?confirm=local-search-maintenance
-  // Maintenance path for frequently changing docs/rules/tasks:
-  // rebuild lexical chunks/FTS from current sources. Vector refresh is kept out
-  // of HTTP request handling because CPU embedding can exceed request timeouts.
+  // 일반 조회와 분리한 유지보수 경로에서 어휘 색인을 다시 만든다. CPU 임베딩은 요청 제한시간을 넘길 수 있어 여기서 실행하지 않는다.
   r.post("/search/reindex/all", (c) => {
     if (c.req.query("confirm") !== "local-search-maintenance") {
       return c.json({ ok: false, error: "confirmation required" }, 400);

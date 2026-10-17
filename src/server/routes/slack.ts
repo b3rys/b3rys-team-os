@@ -140,9 +140,7 @@ export async function handleAppMention(
   deps: { db: Database; broadcast: (e: WsEvent) => void; agents: AgentRecord[] },
   ev: SlackEvent,
 ): Promise<void> {
-  // Author of this event (slack user id) — present for humans AND bots (chat.postMessage sets `user`).
-  // We no longer drop all bot-authored events (that blocked bot→bot mentions / cross-agent collab).
-  // Echo/self-trigger is prevented below by excluding the author from the target set.
+  // 봇 작성 이벤트도 협업 멘션 대상이다. 작성자를 수신 대상에서 제외해 자기 발신 재주입을 막는다.
   const authorUserId = ev.user;
   const text = ev.text ?? "";
   if (!ev.channel) return;
@@ -150,12 +148,7 @@ export async function handleAppMention(
   const cleanBody = cleanSlackText(text);
   if (!cleanBody) return;
 
-  // ALL mentioned bot user ids (not just first) → resolve to known agents.
-  // Why: a single Slack message like "@A @B @C" should trigger all three agents.
-  // Slack normally sends one app_mention webhook per bot subscribed, but if some
-  // bots aren't subscribed (e.g., user forgot Save Changes), this fan-out from
-  // any one webhook still covers the rest. Cross-webhook duplicates collapse via
-  // dedupe (60s window on from→to→body hash).
+  // 한 webhook에서 모든 알려진 멘션 대상을 처리해 일부 봇의 구독 누락을 보완한다. 여러 webhook의 중복은 60초 지문으로 제거한다.
   const mentionedIds = allMentionedUsers(text);
   const targetAgents = mentionedIds
     .map((uid) => deps.agents.find((a) => a.slack_bot_user_id === uid))
@@ -251,7 +244,7 @@ async function processMentionForAgent(opts: {
       dedupeWindowSec: 60,
       broadcast: deps.broadcast,
       onInserted: (stored) => {
-        // audit를 broadcast 전에 (기존 insert→audit→broadcast 순서 보존 — Steve·Codex 리뷰 ②)
+        // 감사 기록은 삽입 후·방송 전에 남긴다.
         appendAudit(deps.db, "slack:user", "slack_mention_received", stored.id, {
           target: targetAgent.id,
           channel: slackChannel,
@@ -276,11 +269,10 @@ async function processMentionForAgent(opts: {
       messageId: stored.id,
       body: cleanBody,
       source: "slack",
-      kind: "slack", // ★봉투 kind★ (2026-07-15) — 슬랙 경로는 항상 slack(팀원은 broadcast 로 답, 슬랙 릴레이가 전달). openclaw slack 봉투 kind="slack" 와 대칭
+      kind: "slack", // 슬랙 봉투 kind는 slack이다. 팀원은 broadcast로 답하고 릴레이가 원래 채널에 전달한다.
       agentId: targetAgent.id,
     });
-    // ★injectPrompt 는 {ok:boolean} ★객체★ 다 — truthy 검사하면 {ok:false} 도 참이라
-    //   ★"tmux_inject_failed" 가 영원히 도달 불가능★ 이었다 (하네스 리뷰 2026-07-14).
+    // injectPrompt는 객체를 반환하므로 객체의 참 여부가 아니라 ok를 검사해야 실패를 감지할 수 있다.
     appendAudit(deps.db, "system", injected.ok ? "tmux_inject_ok" : "tmux_inject_failed", stored.id, {
       session: targetAgent.tmux_session,
       maybePartial: injected.maybePartial ?? false,
@@ -296,11 +288,7 @@ async function processMentionForAgent(opts: {
       body: cleanBody,
     })
       .then(async (reply) => {
-        // ★[B] — 서버는 팀원 대신 말하지 않는다.★
-        //   예전엔 여기서 턴 본문을 ★버스에 insert + 슬랙 스레드에 게시★ 했다.
-        //   ★말하려면 팀원이 직접 보낸다★ → POST /team/api/inbox → routes/inbox.ts 가
-        //   ★슬랙 스레드로 릴레이한다★ (findSlackMetaForThread — ★그 릴레이는 원래부터 있었다★).
-        //   그래서 여기서 뗄 수 있다. 턴 본문은 그 팀원의 메모다.
+        // 턴 본문은 자동 게시하지 않는다. 팀원이 POST /team/api/inbox로 보낸 메시지만 슬랙 스레드에 릴레이한다.
         appendAuditFile(targetAgent.id, "turn_completed_no_autopost", stored.id, {
           thread_id, surface: "slack", chars: reply.length,
         });
@@ -314,14 +302,12 @@ async function processMentionForAgent(opts: {
         appendAuditFile("system", "openclaw_inject_failed", stored.id, detail);
       });
   } else if (targetAgent.runtime === "hermes_agent") {
-    // hermes_agent — 게이트웨이가 Telegram 직결이라 slack.ts에 분기가 없어 @멘션이 무응답이던 버그.
+    // Hermes 게이트웨이는 Telegram 직결이므로 Slack 멘션은 별도 팀 턴 경로로 전달한다.
     // runHermesTeamTurn(headless hermes CLI one-shot)으로 응답 생성 → slack thread로 relay. (openclaw 분기와 동일 패턴.)
     void runHermesTeamTurn({
       agent: targetAgent,
       fromLabel: ev.user ?? "slack",
-      // ★슬랙 유저 id 는 팀원 id 가 아니다.★ (codex 리뷰 2026-07-14)
-      //   주입문이 fromLabel 로 주소를 지어내면 `send.sh --to U01ABC…` = ★존재하지 않는 주소★ 가 된다.
-      //   슬랙 답은 이 thread 로 버스에 보내면 아래 릴레이가 원래 채널로 전달한다.
+      // Slack 유저 ID는 팀원 주소가 아니므로 답장 수신자로 만들지 않는다. 이 스레드로 보낸 버스 답장을 원래 채널에 릴레이한다.
       replyRoute: { kind: "slack" },
       locale: getLocale(deps.db),
       threadId: thread_id,
@@ -329,11 +315,7 @@ async function processMentionForAgent(opts: {
       body: cleanBody,
     })
       .then(async (reply) => {
-        // ★[B] — 서버는 팀원 대신 말하지 않는다.★
-        //   예전엔 여기서 턴 본문을 ★버스에 insert + 슬랙 스레드에 게시★ 했다.
-        //   ★말하려면 팀원이 직접 보낸다★ → POST /team/api/inbox → routes/inbox.ts 가
-        //   ★슬랙 스레드로 릴레이한다★ (findSlackMetaForThread — ★그 릴레이는 원래부터 있었다★).
-        //   그래서 여기서 뗄 수 있다. 턴 본문은 그 팀원의 메모다.
+        // 턴 본문은 자동 게시하지 않는다. 팀원이 POST /team/api/inbox로 보낸 메시지만 슬랙 스레드에 릴레이한다.
         appendAuditFile(targetAgent.id, "turn_completed_no_autopost", stored.id, {
           thread_id, surface: "slack", chars: reply.length,
         });

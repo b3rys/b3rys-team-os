@@ -12,15 +12,10 @@ interface RouterRouteDeps {
   db: Database;
 }
 
-// injection(실제 봇 깨우기) 킬스위치 — 이제 *라이브 읽기* isRouterEnabled(deps.db). 기본 OFF — shadow(결정만).
-// (P0) UI(Settings▸시스템OP) 토글로 즉시 on/off. store(setting router_enabled) 우선, 없으면 env(ROUTER_ENABLED) fallback.
+// 실제 봇 깨우기는 isRouterEnabled(deps.db)를 매번 읽어 판단한다. 기본은 OFF로 결정만 반환한다.
+// UI(Settings▸시스템OP) 토글로 즉시 on/off. store(setting router_enabled) 우선, 없으면 env(ROUTER_ENABLED) fallback.
 
-/**
- * 라우터 서비스 라우트 — 라이브 통합 Stage 1.
- * POST /api/route { text, activeAssigneeId?, replyToAgentId? } → who-answers 결정 + audit 로깅.
- * 현재 shadow: 결정만 반환하고 봇을 깨우지 않는다(INJECTION_ENABLED=false).
- * 캡처 브리지(텔레그램 그룹→여기)와 injection 레이어는 GD 승인 후 단계 연결.
- */
+/** 라우터는 답할 대상을 계산하고 감사 기록을 남긴다. 주입 비활성 경로는 판단만 반환하며 실제 깨움을 연결하려면 별도 승인이 필요하다. */
 export function createRouterRoutes(deps: RouterRouteDeps): Hono {
   const r = new Hono();
 
@@ -80,8 +75,7 @@ export function createRouterRoutes(deps: RouterRouteDeps): Hono {
     // capture race 대비 짧은 재조회(최대 ~0.5s). 못 찾으면 위 text/sticky 판단으로 폴백.
     let effReason: string = decision.reason;
     let effTargets: string[] = decision.targetAgentIds;
-    // authoritySource = suppress 판단에 실제 쓰인 권위 출처(capture 저장 결정 vs 즉석 text 판단).
-    //   shadow audit 3자비교(team-comm 3a, Codex F2)에서 authority_reason/targets 로 기록됨.
+    // authoritySource는 실제 suppress 판단에 사용한 출처이며 감사 로그의 authority 필드와 일치해야 한다.
     let authoritySource: "capture_meta" | "computed" = "computed";
     if (self && tgMessageId) {
       let route = findRouteByTgMessageId(deps.db, tgMessageId);
@@ -104,7 +98,7 @@ export function createRouterRoutes(deps: RouterRouteDeps): Hono {
       ...decision,
       confidentOwner,
       suppress,
-      // team-comm 3a (Codex F2): suppress 판단에 실제 쓰인 effective 값 — bridge audit 이 authority_* 로 기록.
+      // 실제 suppress 판단에 사용한 effective 값을 브리지 감사 로그에 기록한다.
       effectiveReason: effReason,
       effectiveTargets: effTargets,
       authoritySource,

@@ -1,10 +1,5 @@
-// P4 — op(시스템) 메시지 명시 HTTP 계약.
-// 기존엔 op 메시지가 insertMessage(from:'system') 내부호출 + 외부 스크립트의 source:'agent'(bill 사칭)로
-// 흩어져 있었다. 이 엔드포인트가 정직한 source:'system' 계약 단일 진입점을 준다.
-//
-// 안전 기본값(safe-by-default): OP_MESSAGE_TOKEN 미설정 시 비활성(503) → Cloudflare 터널로 노출돼도
-// 무인증 주입 표면 0. 토큰 설정 시 X-Op-Token 일치 필수. (공개 노출 전 CSRF/Origin/bind 가드는 별도
-// 릴리즈 게이트 — P4 후속, 보고서 §7.)
+// 시스템 메시지는 source=system으로 저장한다. OP_MESSAGE_TOKEN이 없으면 503으로 비활성화하고 있으면 X-Op-Token을 확인한다.
+// 공개 노출에는 별도의 CSRF·Origin·bind 가드 검토가 필요하다.
 import { Hono } from "hono";
 import { timingSafeEqual } from "node:crypto";
 import type { Database } from "bun:sqlite";
@@ -23,9 +18,7 @@ const systemMessageSchema = z.object({
   type: z.enum(["system", "dm", "broadcast"]).default("system"),
   priority: z.enum(["low", "normal", "high"]).default("normal"),
 });
-// 주: source='system' 메시지는 wake dispatcher가 배제(dispatch.ts: source IN ('agent','user'))하므로
-// 깨우기(push wake) 대상이 아니다 — 기존 op-message 패턴(tasks.ts notifyCardOwner)과 동일하게
-// inbox 적재만 한다(수신자는 폴링/broadcast로 인지). 그래서 dispatch 필드를 두지 않는다(no-op 방지).
+// source=system은 디스패처의 깨움 대상이 아니므로 수신함에만 적재한다. 이 엔드포인트는 dispatch 옵션을 받지 않는다.
 
 // 상수시간 토큰 비교 (slack.ts:52·approvals argon2 선례와 일관). 길이 다르면 즉시 false.
 function tokenMatches(provided: string | undefined, expected: string): boolean {

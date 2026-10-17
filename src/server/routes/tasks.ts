@@ -31,11 +31,7 @@ function actorLabel(actor: string): string {
   return actor === "unknown" ? "대시보드(작성자 미상 — 팀장일 가능성)" : actor;
 }
 
-// Card-change notification (2026-06-14, GD): on delete or owner-reassign, wake the affected
-// card owner over the bus so they learn immediately ("your card was deleted by X") and can
-// confirm with GD — instead of silently discovering it gone (the dbak incident). Scope per
-// GD = delete + reassign only (not general edits). Self-actions (actor === owner) skipped.
-// Uses the same insertMessage path as POST /inbox, so the wake dispatcher delivers it.
+// 삭제·재배정은 영향받는 기존 담당자에게 버스 알림을 보낸다. 일반 편집과 본인 작업은 제외한다.
 function notifyCardOwner(
   db: Database,
   opts: { to: string | null | undefined; actor: string; body: string },
@@ -60,10 +56,7 @@ function notifyCardOwner(
       type: "dm",
       body: opts.body,
       source: "system",
-      // ★알림이 "누구 일인지" 를 실어 보낸다★ — 담당자의 답/완료보고는 ★배정한 사람★ 에게 간다.
-      //   예전엔 이게 없어서 디스패처가 "보낸 사람(system)에게 답해라" 라고 했고 → ★--to system = 블랙홀★.
-      //   실측(30일) 40건이 그렇게 사라졌다: "처리 완료: 카드 2건 갱신했습니다" …
-      //   ★본인은 보고했다, 아무도 못 받았다.★ (하네스 D1)
+      // system은 답장을 받을 수 없으므로 카드 알림의 reply_to에 배정자를 기록한다.
       meta: { reply_to: opts.actor },
       hop_count: 0,
       priority: "normal",
@@ -75,11 +68,7 @@ function notifyCardOwner(
   }
 }
 
-/**
- * Tasks kanban routes (busviz-v2). Independent of the bus — own table/routes,
- * no dispatcher hot-path interaction. Task JSON shape matches the frontend mock:
- *   { id, title, column: 'plan'|'doing'|'done', owner, description, sort_order, created_at, updated_at }
- */
+/** 칸반은 독립 task 테이블과 라우트를 사용하며 JSON에는 lane·담당자·설명·정렬·시각을 포함한다. */
 export function createTaskRoutes(deps: TaskRouteDeps): Hono {
   const r = new Hono();
 
@@ -258,7 +247,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): Hono {
       });
     }
 
-    // ④ [측정 W1] lane 전이 loop_event emit — ★best-effort(측정 실패가 카드 업데이트 절대 안 깸)★.
+    // ④ [측정 W1] lane 전이 loop_event emit — best-effort(측정 실패가 카드 업데이트 절대 안 깸).
     //   →done = task.closed · done→(plan/doing) = closure.corrected(사후 재오픈) · plan↔doing 이동은 이 슬라이스 미발행(최소).
     if (before && before.column !== task.column) {
       const emitActor = c.req.query("actor") || c.req.header("x-actor") || "system";
@@ -288,11 +277,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): Hono {
     return c.json({ ok: true, task });
   });
 
-  // DELETE /api/tasks/:id
-  // Audited (2026-06-14): card deletions previously left no trace, so a recurring
-  // disappearance of non-done cards (dbak plan cards) could not be attributed. We now
-  // snapshot the full card before deleting and record actor + request fingerprint
-  // (user-agent/referer) so the next deletion is caught red-handed and recoverable.
+  // 삭제 전 카드 전체 스냅샷과 작성자·요청 경로를 감사 기록에 남겨 원인 확인과 복구가 가능하게 한다.
   r.delete("/tasks/:id", (c) => {
     const id = c.req.param("id");
     const snapshot = getTask(deps.db, id); // capture BEFORE delete for attribution + recovery

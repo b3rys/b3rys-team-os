@@ -70,8 +70,7 @@ function findForm(forms: PortalForm[], type: string): PortalForm | undefined {
 export function createReportsApp(deps: PortalDeps): Hono {
   const r = new Hono();
 
-  // 2026-06-07 GD: top-level /reports 대신 대시보드 nav 'Reports' 탭으로 일원화.
-  // top-level 접근은 대시보드로 redirect (API·파일서빙은 아래 그대로 유지 — 대시보드 탭이 사용).
+  // 리포트 열람은 대시보드 Reports 탭으로 통일한다. top-level은 리다이렉트하고 API·파일 서빙은 유지한다.
   r.get("/", (c) => c.redirect("/team?view=reports"));
 
   r.get("/api/list", (c) => {
@@ -193,9 +192,7 @@ export function createReportsApp(deps: PortalDeps): Hono {
     return rep ? c.json(rep) : c.json({ error: "not found" }, 404);
   });
 
-  // 본문 파일 서빙: /reports/file/:id/:name
-  //  - :name 이 form type('html'/'md'…)이면 해당 form 파일
-  //  - 아니면 reports/<id>/<name> 번들 파일(예: ml-bible 챕터 — index 의 상대링크가 여기로 해석됨)
+  // name이 형식 이름이면 해당 파일을, 아니면 보고서 번들 파일을 제공해 문서의 상대링크를 해석한다.
   r.get("/file/:id/:name", (c) => {
     const id = c.req.param("id");
     const name = c.req.param("name");
@@ -284,9 +281,7 @@ export function createReportsApp(deps: PortalDeps): Hono {
     const assignee = String(body?.assignee ?? rep.author ?? "").trim();
     if (!assignee) return c.json({ error: "no assignee (보고서에 author 없음 — assignee 지정 필요)" }, 400);
     const requester = auth.actor.actor;
-    // 유지보수자 도메인 하드코딩 금지 — telegramCapture(mediaUrlBase)와 동일하게 env 미설정 시 빈 문자열 →
-    // 상대경로(`/reports#/r/…`)로 우아하게 강등한다(신선 설치서 your-team.example.com 누출 방지). 대시보드 브라우저
-    // 컨텍스트에선 상대경로가 그대로 해석된다. 라이브 풀 URL 을 원하면 TEAM_PUBLIC_BASE_URL 을 설정.
+    // TEAM_PUBLIC_BASE_URL이 없으면 상대경로를 사용해 유지보수자 도메인이 새 설치본에 노출되지 않게 한다.
     const publicBase = (process.env.TEAM_PUBLIC_BASE_URL ?? process.env.TEAM_BASE_URL ?? "").replace(/\/$/, "");
     const link = `${publicBase}/reports#/r/${id}`;
     const msg = `[보고서 요청 · ${requester}] "${rep.title}"\n${link}\n\n요청: ${text}\n\n→ 처리 후 팀장께 보고해주세요.`;

@@ -34,7 +34,7 @@ interface InboxRouteDeps {
   db: Database;
   broadcast: (e: WsEvent) => void;
   registeredAgentIds: () => Set<string>;
-  /** ★[B] 릴레이용★ — 팀원 본인의 봇으로 텔레그램에 게시하려면 AgentRecord(토큰)가 필요하다. */
+  /** [B] 릴레이용 — 팀원 본인의 봇으로 텔레그램에 게시하려면 AgentRecord(토큰)가 필요하다. */
   agents?: () => AgentRecord[];
   /** direct_to_gd 릴레이 직전 발신자 텔레그램 수신 판정. 기본 = 런타임 essentials 의 poller 항목. 시험 주입용. */
   receiverDown?: (agent: AgentRecord) => boolean | Promise<boolean>;
@@ -71,13 +71,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     if (!reserved.has(env.to_agent_id) && !known.has(env.to_agent_id)) {
       return c.json({ error: "unknown_to_agent", id: env.to_agent_id }, 400);
     }
-    // ★★받을 수 없는 주소를 '정상' 이라고 받아주지 않는다.★★ (하네스 D1 — 실측 40건 증발)
-    //   `system`·`moderator` 는 ★사람이 아니다★ — 수신자 행이 안 생긴다 → ★아무도 못 받는다.★
-    //   그런데 reserved 목록에 있다는 이유로 위 검사를 ★건너뛰어 201 ok★ 가 나갔다.
-    //   ★라이브 재현★: 서버가 hermes 에게 `--to bill` 이라고 정확히 말했는데도 hermes 는 습관대로
-    //   `--to system` 을 썼고 ★서버가 받아줬다.★ → ★룰만 고치면 모델은 옛 습관으로 쓴다. 문이 막아야 한다.★
-    //   ★거절만 하지 않는다★ — next 로 ★어디로 보내야 하는지★ 를 준다(막다른 길을 만들지 않는다).
-    //   broadcast(방)·user(팀장 경로)는 막지 않는다.
+    // system·moderator에는 수신자 행이 생기지 않으므로 거절하고 올바른 답장 주소를 안내한다. 방과 팀장 경로는 허용한다.
     if (env.source === "agent" && (env.to_agent_id === "system" || env.to_agent_id === "moderator")) {
       appendAudit(deps.db, env.from_agent_id, "send_to_nonperson_blocked", null, { to: env.to_agent_id });
       return c.json(
@@ -90,11 +84,11 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         400,
       );
     }
-    // ★프로토콜 에러 — 오용을 그 자리에서 잡아 고치게 한다.★
+    // 프로토콜 에러 — 오용을 그 자리에서 잡아 고치게 한다.
     //   send.sh 는 서버가 ok:false 로 돌려주면 그 detail 을 발신자에게 그대로 보여준다(전 런타임 공통).
     {
       const replyMode = (env as { meta?: { reply_mode?: string } }).meta?.reply_mode;
-      // ① 자기 자신에게 보고 (codex→codex 2026-07-15) — direct_to_gd 여도 막는다. 자기 전송은 어디에도 안 간다.
+      // 자기 전송은 실제 수신자가 없으므로 direct_to_gd여도 거절한다.
       if (env.from_agent_id === env.to_agent_id) {
         appendAudit(deps.db, env.from_agent_id, "protocol_self_report", null, { to: env.to_agent_id });
         return c.json({
@@ -104,8 +98,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
             `→ 종합/보고는 요청자에게 \`--to <요청자>\`, 또는 GD께 \`--direct-to-gd\` 로 보내세요.`,
         }, 400);
       }
-      // ② 위임에 direct_to_gd (hermes 2026-07-15) — direct_to_gd 보고는 받은 요청에 '답' 하므로 in_reply_to 를 단다.
-      //    in_reply_to 없이 direct_to_gd 면 = 새 위임에 잘못 붙였거나 보고 형식이 틀린 것. → 잡아서 고치게 한다.
+      // direct_to_gd는 받은 요청에 대한 보고이므로 in_reply_to가 필요하다. 연결 없는 위임·잘못된 보고는 거절한다.
       if (replyMode === "direct_to_gd" && !env.in_reply_to) {
         appendAudit(deps.db, env.from_agent_id, "protocol_direct_to_gd_on_delegation", null, { to: env.to_agent_id });
         return c.json({
@@ -125,11 +118,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       return c.json({ error: "ttl_exceeded", max_hops: maxHop, your_hop: env.hop_count }, 400);
     }
 
-    // v1.1 anti-pingpong server-side hop correction (issue 1 server-side booster):
-    // If this is an agent reply (source='agent') with in_reply_to set, look up the parent
-    // message's hop_count and correct ours to parent+1. Defends against agents that forget
-    // to increment (LLM hallucination / skill version skew). Does not override if the
-    // agent-supplied value is already >= parent+1.
+    // 답장의 hop_count는 부모+1 이상이어야 하므로 누락된 증가분을 서버에서 보정한다. 더 큰 발신 값은 유지한다.
     if (env.source === "agent" && env.in_reply_to) {
       const parentRow = deps.db
         .prepare(`SELECT hop_count FROM message WHERE id = ?`)
@@ -141,9 +130,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         }
       }
     }
-    // Reply threading (2026-05-27 GD): no explicit thread_id + in_reply_to set → inherit the
-    // parent message's thread so replies stay in the same conversation. Prevents orphaned new
-    // threads (a reply was landing in a fresh thread and the recipient couldn't find it).
+    // thread_id가 없는 답장은 부모 스레드를 이어받아 같은 대화의 이력이 갈라지지 않게 한다.
     if (!env.thread_id && env.in_reply_to) {
       const parentThread = deps.db
         .prepare(`SELECT thread_id FROM message WHERE id = ?`)
@@ -152,25 +139,8 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     }
     let allHandsEligibleRecipients: string[] | null = null;
 
-    // ★팀원 broadcast 게이트★
-    //
-    // 왜: `--to broadcast` 는 ★누구나 아무 때나★ 칠 수 있었고 검사도 기록도 없었다.
-    //   실측(70분): 팀원 broadcast ★47건 → wake 517회★. 1건이 11명을 깨우고, 깨어난 사람이 또 쏜다.
-    // ★팀장님 @all 은 7명인데 팀원 혼잣말이 11명을 깨웠다★ — 구조가 뒤집혀 있었다.
-    //   룰에는 이미 "결과는 TERMINAL, 확인 답장 금지" 가 있었지만 지켜지지 않았다(내가 47건 중 5건).
-    //   → 판단을 9명에게 맡기지 않고 ★coordinator 한 곳으로 모은다.★
-    //
-    // 무엇: 전원 수신행+wake를 요청하는 단일 키 `all_hands`가 있으면
-    //   ★source 값과 무관하게★ 사유 + 정식·활성 명부 자격을 본다. source는 인바운드 값이라
-    //   신뢰 경계로 쓸 수 없고, 생략 시 agent가 기본값이라 게이트 조건으로도 의미가 없다.
-    //   현재 /api/inbox에는 서버가 인증한 호출자 신원이 없다. 따라서 from_agent_id 명부 검사는
-    //   등록되지 않았거나 비활성인 claimed sender를 막지만, 정식 팀원 id 사칭까지 막는 인증은 아니다.
-    //   coordinator 전용은 아니다. 팀원용 명시 공지 옵션이며, 사유가 남아 사후 판정이 가능하다.
-    // 팀장님(source=user)의 @all 은 이 게이트를 타지 않는다 — 라우터가 따로 판정한다.
-    // ★슬랙은 제외한다★ (2026-08-01 devon 실측 — 배포 직후 슬랙 답신이 막혔다).
-    //   슬랙 스레드에 답하는 유일한 경로가 `--to broadcast` 다(룰: kind="slack" → --to broadcast).
-    //   게이트의 목적은 ★단톡방 연쇄★ 를 끊는 것이지 슬랙 응답을 막는 것이 아니다.
-    //   ★내가 고치려던 것과 무관한 경로를 같이 잘랐다★ — 범위를 좁힌다.
+    // all_hands는 발신 source와 무관하게 사유와 정식·활성 명부 자격을 검사한다. 이는 발신자 인증을 대신하지 않는다.
+    // 슬랙 답장은 broadcast가 유일한 릴레이 경로이므로 제외하며, 팀장 @all은 별도 라우터에서 판정한다.
     if (env.to_agent_id === "broadcast" && env.all_hands) {
       const roster = deps.agents?.() ?? ambientAgents();
       const sender = roster.find((agent) => agent.id === env.from_agent_id);
@@ -215,20 +185,12 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     } catch { /* 잘못된 원글 meta는 기존 thread 조회로 처리한다. */ }
     const slackMetaForGate = parentSlack ?? findSlackMetaForThread(deps.db, env.thread_id ?? "");
     if (env.source === "agent" && env.to_agent_id === "broadcast" && !slackMetaForGate) {
-      // ★예외는 없다.★ coordinator 도 마찬가지다.
-      //   그래서 여기서 ★명부·capability 를 보지 않는다★ — 보는 순간 그게 유일한 구멍이 된다.
-      //   (예전엔 `rosterKnown`·`isCoordinator`·`reason` 을 계산했는데, 게이트를 뺄 때
-      //    조건만 지우고 변수가 남아 있었다. 예외 개념이 사라졌으니 계산도 지운다.)
-      // ★broadcast 에 대한 답을 broadcast 로 하지 않는다★ — 연쇄의 직접 고리다.
-      //   실측: 오늘 47건 중 18건이 이 형태였다. coordinator 라도 막는다(연쇄는 발신자를 안 가린다).
+      // 팀원 broadcast에 broadcast로 답하는 것은 발신자의 역량·역할과 무관하게 차단해 연쇄를 끊는다.
       if (env.in_reply_to) {
         const parent = deps.db
           .prepare(`SELECT to_agent_id, source, from_agent_id FROM message WHERE id = ?`)
           .get(env.in_reply_to) as { to_agent_id?: string; source?: string; from_agent_id?: string } | undefined;
-        // ★팀장님 @all 에는 방에서 답할 수 있어야 한다★ (2026-08-01 실측 — 배포 후 아무도 방에 답을 못 했다).
-        // 팀 리드의 @all 호출에 ★전원이 막혀서 방이 조용해졌다.★
-        // 막으려던 건 ★팀원끼리의 연쇄★ 지 팀장님 호출에 대한 답이 아니다.
-        // 그래서 부모가 팀장님(source=user)이면 통과, ★팀원 broadcast(source=agent)면 차단.★
+        // 부모가 팀장(source=user)이면 방 답장을 허용한다. 팀원 broadcast에 대한 답장만 연쇄 차단 대상이다.
         const parentIsLeadCall = parent?.source === "user";
         if (parent?.to_agent_id === "broadcast" && !parentIsLeadCall) {
           return c.json({
@@ -237,14 +199,9 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
           }, 403);
         }
       }
-      // ★coordinator 요구는 뺐다 (2026-08-01 실측)★ — 넣었더니 ★방이 통째로 조용해졌다.★
-      // 에 아무도 방에 답하지 못했다(전원 1:1 로 우회).
-      //   내가 막으려던 것은 ★연쇄★ 지 방에서 말하는 것 자체가 아니었다. 과녁을 잘못 잡았다.
-      //   → 남기는 규칙은 ★하나뿐★: broadcast 에 broadcast 로 답하지 않는다(위 검사). 그게 고리다.
     }
 
-    // Phase 2a: dedupe(60s) + ensureThread + insertMessage + (audit) + broadcast → 공통 acceptInbound (P2)
-    // audit는 onInserted(insert직후·broadcast직전)에 둬 기존 insert→audit→broadcast 순서 보존(Steve·Codex 리뷰 ②).
+    // 감사 기록은 삽입 직후·방송 직전에 남겨 insert→audit→broadcast 순서를 유지한다.
     const accepted = acceptInbound(deps.db, env, {
       dedupeWindowSec: 60,
       broadcast: deps.broadcast,
@@ -272,18 +229,8 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
           appendAudit(deps.db, env.from_agent_id, "agent_broadcast_all_hands", stored.id, allHandsDetail);
           appendAuditFile(env.from_agent_id, "agent_broadcast_all_hands", stored.id, allHandsDetail);
         }
-        // ★배달 기록 (ingress) — 에이전트가 ★자기 발신 도구로★ 보낸 것도 남긴다.★ (2026-07-13)
-        //
-        // ★왜 필요한가★: 서버가 대신 발송하는 런타임(게이트웨이 hermes·openclaw)만 배달 기록이 남았다.
-        //   ★claude(tmux) 처럼 자기가 보내는 런타임은 report_delivered 가 ★0건★ 이다★ (실측: bill = 0).
-        //   → ★게이트웨이와 상시세션(tmux)을 ★같은 자로 잴 수 없다.★★ A/B 비교가 불가능하다.
-        //   그리고 ★상시세션으로 전환하면 모든 런타임이 이 상태가 된다★ → ★관측이 통째로 사라진다.★
-        //
-        // ★불변식(팀장·Bill 확정): "어떤 경로로 보내든 무엇을 누구에게 보냈나는 반드시 서버에 남는다."★
-        //   send.sh 는 POST /inbox 를 지난다 → ★여기가 그 불변식이 실제로 지켜지는 지점이다.★
-        //
-        // ★사람/시스템 발신은 제외★ — 이건 '에이전트가 내보낸 것' 의 기록이다.
-        // 어댑터가 직접 insert 하는 경로(게이트웨이 답변)는 ★여기를 안 지난다★ → ★이중 기록 없음.★
+        // 발신 도구를 통해 보내는 에이전트의 전달 기록도 남겨 런타임 간 관측 기준을 맞춘다.
+        // 직접 삽입하는 어댑터는 이 경로를 지나지 않아 이중 기록되지 않는다.
         if (env.source === "agent") {
           recordReportDelivery(deps.db, {
             actor: env.from_agent_id,
@@ -302,11 +249,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     }
     const stored = accepted.stored;
 
-    // Pending follow-up tracker (requester-flagged, deterministic — 2026-07-10): if the sender
-    // flagged this as a team-lead-destined report (meta.reply_mode='direct_to_gd') WITH
-    // meta.expect_report_by AND the recipient is a one-shot runtime (openclaw/hermes — resolved from
-    // the agent registry), record a follow-up so a missing report gets re-woken once. Member↔member
-    // requests (no direct_to_gd) and non-one-shot recipients (claude/codex/unknown) never create a row.
+    // direct_to_gd·expect_report_by가 있고 수신자가 단발 런타임이면 미보고 1회 재알림을 등록한다. 일반 팀원 요청과 상시 세션은 제외한다.
     {
       const meta = (env as { meta?: { expect_report_by?: unknown; reply_mode?: unknown } }).meta;
       const expectReportBy = meta?.expect_report_by;
@@ -346,14 +289,8 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         try {
           const creds = loadAgentCreds(env.from_agent_id);
           if (!creds) throw new Error("slack_credentials_missing");
-          // ★슬랙 멘션은 여기서 붙인다★ (2026-07-30) — 발신 스크립트가 본문에 미리 넣으면
-          // `<@U…>` 가 ★텔레그램 그룹방에도 그대로 찍힌다★(실측: 팀장님이 단체방에서 발견).
-          //   슬랙 문법은 슬랙에서만 뜻이 있고, 다른 채널에는 의미 없는 문자열이다.
-          //   즉 ★채널마다 다른 것은 채널로 나갈 때 붙여야★ 한다. 저장되는 본문은 채널 중립으로 둔다.
-          //   meta.slack_mentions = ["U…", …] (send.sh --mention 이 이름을 ID 로 풀어 넣는다)
-          // ★meta 는 발신자가 채우는 값이다 — 배열이라고 믿지 않는다★ (codex 교차검증).
-          //   `slack_mentions: "U123"` 이나 `{}` 가 오면 `.filter is not a function` 으로 ★POST 가 500★ 난다.
-          //   메시지는 이미 저장된 뒤라 ★"보냈는데 서버가 터진" 상태★ 가 된다. 배열이 아니면 조용히 무시한다.
+          // 슬랙 멘션은 채널 발송 직전에 붙여 저장 본문을 채널 중립으로 둔다.
+          // slack_mentions는 외부 입력이므로 배열 여부를 확인해 저장 후 예외가 나는 것을 막는다.
           const rawMentions = (env as { meta?: { slack_mentions?: unknown } }).meta?.slack_mentions;
           // 개수 상한: 멘션 하나가 알림 하나다. 상한이 없으면 한 메시지로 워크스페이스 전체를 울릴 수 있다.
           const MAX_MENTIONS = 10;
@@ -364,7 +301,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
             .slice(0, MAX_MENTIONS)
             .map((id) => `<@${id}>`)
             .join(" ");
-          // 멘션은 ★자기 줄에★ — 같은 줄이면 본문이 ``` 로 시작할 때 여는 펜스가 줄 맨 앞이 아니게 된다.
+          // 멘션은 자기 줄에 — 같은 줄이면 본문이 ``` 로 시작할 때 여는 펜스가 줄 맨 앞이 아니게 된다.
           const slackText = prefix ? `${prefix}\n${env.body}` : env.body;
           const posted = await getChannel("slack")
             .send({
@@ -393,43 +330,26 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       }
     }
 
-    // ★[B] — 팀원이 방·팀장께 ★직접★ 말하는 통로.★
-    //
-    // ═══ 이게 없어서 모든 게 꼬였다 ═══
-    //   지금까지 팀원이 단톡방에서 말하는 ★유일한 길★ 은 ★서버가 턴 본문을 대신 게시하는 것★ 이었다.
-    //   그래서 ★"말 안 하기" 가 불가능★ 해졌고 → `[NO_REPLY]` 라는 우회로가 생겼고 → 발행 지점마다 가드가
-    //   붙었고 → 가드 하나를 놓치자 ★팀장 단톡방에 `[NO_REPLY]` 가 그대로 찍혔다.★ (2026-07-13 라이브)
-    //   ★없는 능력을 우회로로 때운 것이 근본이었다.★ (오늘 하루 종일 나온 그 패턴)
-    //   ★슬랙엔 이미 같은 릴레이가 있다(바로 위 블록). 텔레그램에만 없어서 반쪽이었다.★
-    //
-    // ═══ 새 불변식 ═══  ★"보낸 것만 말한 것이다."★
-    //   · 방에 말하기   → `--to broadcast` (텔레그램 그룹 thread 에서) → ★여기서 단톡방에 게시★
-    //   · 팀장께 보고   → `--direct-to-gd`                            → ★여기서 팀장 DM 에 게시★
-    //   · 팀원에게      → `--to <id>`  = 버스. ★방엔 안 나간다 — 그게 맞다★ (팀원끼리는 함수호출)
-    //   턴에 뭘 쓰든 그건 ★본인 메모★ 다. 안 보내면 아무 말도 안 한 것이다. → 침묵에 토큰이 필요없다.
+    // broadcast는 설정된 방에, direct_to_gd는 팀장 DM에 게시한다. 팀원 directed 메시지는 버스에서만 전달한다.
+    // 턴 본문은 자동 게시하지 않으며, 채널 발송은 이 명시적 전송 경로를 사용한다.
     if (env.source === "agent" && env.from_agent_id !== "user" && env.from_agent_id !== "system") {
       const agent = deps.agents?.().find((a) => a.id === env.from_agent_id);
       if (agent) {
         const mode = (env as { meta?: { reply_mode?: string } }).meta?.reply_mode;
-        // ★설정을 두 군데서 읽으면 언젠가 갈린다 (하네스 리뷰 2026-07-14).★
-        //   캡처봇은 getCaptureGroupId() — ★파일(var/capture-group-id.txt) 먼저, env 는 폴백★ — 을 쓰는데
-        // 여기만 ★env 만★ 읽었다. 팀장님이 대시보드에서 그룹을 바꾸면 파일만 바뀐다
-        //   → ★캡처는 새 그룹을 읽고, 릴레이는 조용히 꺼진다★ (groupId="" → dest=null → DB 에만 남고 방엔 안 뜸).
-        //   에러도 경고도 없다. → ★같은 함수를 쓴다.★
+        // 캡처와 릴레이는 getCaptureGroupId를 공유해야 대시보드에서 바꾼 그룹 파일을 함께 읽는다. 파일이 env보다 우선이다.
         const groupId = getCaptureGroupId() ?? "";
         let dest: { chatId: string; kind: "telegram_group" | "telegram_dm" } | null = null;
-        // ★기본은 stored.body 다★ ("저장된 것 = 보낸 것"). MCP 늦은 답만 원 질문을 앞에 덧붙인다 —
+        // 기본은 stored.body 다 ("저장된 것 = 보낸 것"). MCP 늦은 답만 원 질문을 앞에 덧붙인다 —
         //   번호만으로는 사람이 "무슨 질문의 답인지" 를 못 알아본다.
         let relayText: string | null = null;
         if (mode === "direct_to_gd") {
-          // ★위임에 direct_to_gd 오마킹은 여기 오기 전에 거부된다★ (프로토콜 에러, 위 조기검증 —
-          //   direct_to_gd + in_reply_to 없음 → 400). 그래서 여기 오는 direct_to_gd 는 ★정상 보고★(in_reply_to 있음)뿐.
+          // 위임에 direct_to_gd 오마킹은 여기 오기 전에 거부된다 (프로토콜 에러, 위 조기검증 —
+          //   direct_to_gd + in_reply_to 없음 → 400). 그래서 여기 오는 direct_to_gd 는 정상 보고(in_reply_to 있음)뿐.
           const dm = ownerDmChatId(deps.db);
           if (dm) {
             dest = { chatId: dm, kind: "telegram_dm" };
-            // 발신자 봇으로 게시되므로, 발신자 수신이 죽어 있으면 이 대화의 답은 아무에게도 안 간다.
-            //   본문(stored.body)은 그대로 두고 게시 텍스트 끝에만 시스템 줄을 붙인다. 판정 실패는 경고 없음으로 둔다.
-            // 텔레그램 채널 발신자만 — 다른 채널(b3chat 등)은 텔레그램 poller 가 없어 '끊김' 으로 오판된다.
+            // 텔레그램 발신 봇의 수신이 중단되면 답장을 못 받으므로 게시 텍스트에만 경고를 붙인다.
+            // 저장 본문은 보존하고 판정 실패는 경고 없이 처리한다. 다른 채널은 텔레그램 poller 검사에서 제외한다.
             const down = isTelegramChannel(agent) && await Promise.resolve()
               .then(() => (deps.receiverDown ?? isTelegramReceiverDown)(agent))
               .catch(() => false);
@@ -439,32 +359,12 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
               appendAuditFile(env.from_agent_id, "direct_to_gd_receiver_down_note", stored.id, { reply_to: replyTo?.id ?? null });
             }
           }
-          // ★★슬랙 스레드의 답을 텔레그램 단톡방에 게시하지 않는다★★ (codex 리뷰 — ★내가 오늘 만든 유출★)
-          //   아침까지는 텔레그램 릴레이가 `thread_id.startsWith("tg-")` 조건이라 슬랙 스레드가 ★자동 제외★ 됐다.
-          // 내가 그 조건을 없애면서(맞는 방향이었다) ★슬랙 답이 팀장님 텔레그램 방으로도 새게 됐다.★
-          //   ★한 스레드의 방은 하나다.★ 슬랙 스레드의 방은 슬랙이다 — 위에서 이미 슬랙으로 보냈다.
-          //   (이건 이름 앞글자 추론이 아니다: findSlackMetaForThread 는 ★DB 조회★ = 사실이다.)
-          // ★★env 가 아니라 stored 를 본다★★ (codex 리뷰 2026-07-14 — 배포 블로커였다)
-          //   insertMessage 는 ★잘못 온 broadcast 답변을 원 요청자에게 directed 로 보정★ 한다
-          //   (messages.ts:63-71 — hermes 가 수집 질문에 `--to broadcast` 로 답하는 습관이 있어서).
-          //   그런데 여기서 원본 env 를 보면: ★DB 엔 비공개(directed)로 저장되는데 단톡방엔 게시★ 된다.
-          // = 수집 답변(팀원끼리 주고받는 사적 내용)이 ★팀장님 방으로 유출★ 된다.
-          //   ★저장된 것과 보낸 것이 달라지면 안 된다.★ stored 가 유일한 진실이다.
+          // 슬랙 스레드는 이미 슬랙으로 릴레이했으므로 텔레그램에 중복 게시하지 않는다.
+          // 게시 대상은 요청 원본이 아니라 저장된 수신자·스레드를 기준으로 판단해 버스와 채널의 전달 범위를 맞춘다.
         } else if (stored.to_agent_id === "broadcast" && !slackThread) {
-          // ★broadcast 는 "방에 말한다" 는 뜻이다. 뜻이 하나다.★
-          //
-          //   예전엔 여기에 `&& stored.thread_id.startsWith("tg-")` 가 있었다. 근거는
-          //   "안 그러면 팀원끼리 쓰는 브로드캐스트가 전부 팀장 방으로 쏟아진다" 였다.
-          //   ★실측으로 반증됐다★ (14일): 그룹 게시 102건 vs ★조용히 사라진 것 36건(26%)★.
-          //   그 36건은 스팸이 아니라 ★팀원이 팀에 하려던 말★ 이었다(대부분 hermes 의 카드 답변).
-          //   ★본인은 "말했다" 고 믿고, 아무도 못 들었다.★ 하루 2.5건 — 쏟아진 적이 없다.
-          //
-          //   ★이게 오늘 하루 종일 쫓던 그 병이다★: 룰은 "--to broadcast 로 방에 말해라" 라고 하는데
-          //   코드는 스레드 이름을 보고 조용히 버린 뒤 ★201 ok:true★ 를 돌려줬다(아래 fall-through).
-          //   룰 어디에도 "tg- 로 시작해야 한다" 는 말이 없다. ★코드가 혼자 만든 개념이었다.★
-          //   → ★그 개념을 지운다.★ 팀원끼리 조용히 말하는 건 이미 `--to <id>`(버스) 가 한다.
+          // broadcast는 스레드 이름과 무관하게 설정된 그룹으로 게시한다. 이름 접두사로 제한하면 저장 성공에도 채널 전달이 누락된다.
           if (!groupId) {
-            // 그룹이 설정 안 됐으면 ★조용히 성공이라고 하지 않는다.★ 그게 36건을 삼킨 방식이다.
+            // 그룹이 설정 안 됐으면 조용히 성공이라고 하지 않는다. 그게 36건을 삼킨 방식이다.
             appendAuditFile(env.from_agent_id, "telegram_relay_failed", stored.id, {
               kind: "telegram_group",
               error: "capture_group_not_configured",
@@ -476,17 +376,11 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
           }
           dest = { chatId: groupId, kind: "telegram_group" };
         } else {
-          // ★MCP 로 물은 질문에 늦게 온 답★ — 호출은 이미 끝났으니 팀 리드의 평소 채널로 민다.
-          //   판정은 mcpAsk.lateAnswerPush 한 곳에서만 한다(여기서 조건을 다시 쓰면 언젠가 갈린다):
-          //     · 번호(in_reply_to)가 없으면 아니다 — 여기서도 추측하지 않는다
-          //     · 원 질문의 meta.reply_route 가 'mcp' 여야 한다 — 평범한 팀 대화는 해당 없음
-          //     · 물어본 그 사람이 답한 것이어야 한다
-          //     · ★기다리는 호출이 있으면 밀지 않는다★ — 그쪽 화면에 뜨므로 두 번 가면 안 된다
+          // MCP 호출 종료 후 도착한 답만 mcpAsk.lateAnswerPush에서 판정해 평소 채널로 보낸다.
+          // 원 질문의 MCP 경로·지정 응답자를 확인하며, 대기 호출이 있으면 중복 push하지 않는다.
           const late = lateAnswerPush(deps.db, stored);
           if (late && "skipped" in late) {
-            // ★리드가 아닌 사람이 물은 질문의 늦은 답은 팀 리드에게 보내지 않는다★ (리뷰 P1 2회차, bill).
-            //   미는 곳이 리드 DM 하나뿐이라 보내면 ★물어본 사람은 못 받고 리드가 남의 대화를 받는다.★
-            //   fail-closed 로 두되 ★기록은 남긴다★ — 회수(b3os_fetch_answer)는 여전히 가능하다.
+            // 리드가 아닌 요청자의 늦은 답을 리드 DM에 보내지 않는다. 감사 기록을 남기며 b3os_fetch_answer로 회수할 수 있다.
             appendAuditFile(env.from_agent_id, "mcp_late_answer_skipped", stored.id, {
               request_id: late.requestId,
               asker: late.asker,
@@ -498,7 +392,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
               dest = { chatId: dm, kind: "telegram_dm" };
               relayText = late.text;
             } else {
-              // ★조용히 삼키지 않는다★ — DM 이 설정 안 됐으면 답이 어디에도 안 뜬다(회수는 여전히 가능).
+              // 조용히 삼키지 않는다 — DM 이 설정 안 됐으면 답이 어디에도 안 뜬다(회수는 여전히 가능).
               appendAuditFile(env.from_agent_id, "mcp_late_answer_undeliverable", stored.id, {
                 request_id: late.requestId,
                 error: "owner_dm_not_configured",
@@ -508,30 +402,13 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         }
         if (dest) {
           const d = dest;
-          // ★DB 에는 고쳐진 본문이 들어갔는데, 텔레그램엔 ★원본★ 을 보내고 있었다.★ (2026-07-14 실측)
-          //   acceptInbound 가 리터럴 "\n" 을 진짜 개행으로 펴서 ★저장★ 한다 — 그런데 여기서는
-          //   ★고치기 전 변수(env.body)★ 를 그대로 발송했다 → ★팀장 화면에만 "\n" 이 문자로 찍혔다.★
-          //   ★DB 는 깨끗한데 사람이 보는 화면만 깨진다 — 그래서 로그만 봐선 안 잡힌다.★
-          //   → ★저장된 본문(stored.body)을 보낸다.★ "보낸 것 = 저장된 것" 이 유일한 진실이다.
-          // ★★"보냈다" 를 팀원에게 거짓으로 말하지 않는다 (하네스 리뷰 2026-07-14) ★★
-          //
-          //   예전엔 이 send 를 ★void★ 로 던지고 아래에서 바로 201 을 돌려줬다.
-          //   → send.sh 는 "✓ sent" 를 찍는다. ★그런데 텔레그램 게시는 아직 시작도 안 했다.★
-          //   → 게시가 실패해도 팀원은 ★성공★ 을 받고 떠난다. 아무도 모른다.
-          //   실제로 오늘 3건 실패했다(lui 2 · steve 1) — 발신자는 몰랐다.
-          //
-          //   ★오늘 하루가 전부 이 병이었다★: openclaw 가 "started" 라고 하고 턴을 안 돌리고,
-          //   서버가 "sent" 라고 하고 안 보내고. ★성공 응답을 확인 없이 믿었다.★
-          //   → ★기다린다.★ 게시 결과를 팀원에게 그대로 돌려준다. (0.2~1초 느려질 뿐이다)
-          //
-          // ★재시도는 하지 않는다★: 실패 → 팀원이 다시 send.sh → 또 실패 → 무한루프.
-          // 룰은 "실패하면 재시도하지 말고 팀장님께 1:1 DM 으로 알려라" 다. 1:1 은 서버를 안 거친다.
+          // 개행 정규화가 반영된 stored.body를 보내고 게시 결과를 기다려 저장 성공과 채널 전달 성공을 구분한다.
+          // 실패는 응답에 알리며 자동 재시도하지 않는다. 발신자는 반복 전송 대신 팀장에게 별도 DM으로 알린다.
           const r = await getChannel("telegram").send({ agent, target: d.chatId, text: relayText ?? stored.body });
           appendAuditFile(env.from_agent_id, r.ok ? "telegram_relay_sent" : "telegram_relay_failed", stored.id, {
             target: d.chatId,
             kind: d.kind,
-            // ★실패 이유를 버리지 않는다★ — 오늘 실패한 3건이 ★왜★ 실패했는지 알 수가 없었다.
-            //   (telegramBotSend 는 토큰이 안 섞이게 에러 문자열을 만든다 — 그대로 실어도 안전하다)
+            // 실패 사유를 응답에 포함해야 게시 실패의 원인을 확인할 수 있다. telegramBotSend는 토큰을 제외한 오류 문자열을 반환한다.
             error: r.ok ? null : (r.error ?? "unknown"),
           });
           recordReportDelivery(deps.db, {
@@ -540,12 +417,12 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
             recipient: d.kind === "telegram_dm" ? "gd" : d.chatId,
             threadId: stored.thread_id,
             refId: stored.id,
-            body: stored.body,   // ★기록도 실제로 보낸 것과 같아야 한다★
+            body: stored.body,   // 기록도 실제로 보낸 것과 같아야 한다
             ok: r.ok,
             error: r.ok ? null : (r.error ?? "telegram_send_failed"),
           });
           if (!r.ok) {
-            // ★DB 에는 남기고(기록은 사실이다), 팀원에게는 '게시 실패' 를 알린다.★
+            // DB 에는 남기고(기록은 사실이다), 팀원에게는 '게시 실패' 를 알린다.
             return c.json(
               { ok: false, message: stored, posted: false, error: r.error ?? "telegram_send_failed", next: "재시도 금지. 단톡방 게시가 실패했습니다 — 팀장님께 1:1 DM 으로 알리세요." },
               502,
@@ -559,9 +436,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     return c.json({ ok: true, message: stored }, 201);
   });
 
-  // ★응답가드 자가등록★ — 턴기반 팀원이 "긴 작업, 팀장 보고 잊지 않기" 를 스스로 건다.
-  // 기존 pending_followup 파이프라인(60s 워커·1회성·보고감지·GC) 재사용 — 등록 진입점만 신설.
-  // 게이트 탈락은 422 + reason 으로 ★명시적으로★ 거절한다 (조용한 no-op = 어제 유형의 침묵 실패).
+  // 자가등록도 기존 pending_followup의 1회성 재알림·보고 감지·정리를 사용한다. 게이트 탈락은 422와 reason으로 알린다.
   r.post("/followup/self", async (c) => {
     const body = await c.req.json().catch(() => null);
     const agentId = typeof body?.agent_id === "string" ? body.agent_id.trim() : "";
@@ -658,27 +533,14 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       )
       .get(id) as Record<string, unknown> | undefined;
     if (!m) return c.json({ error: "not_found", id }, 404);
-    // ★수신자별 배달 상태를 함께 준다★ (2026-07-30) — send.sh --confirm 의 판정 근거.
-    //   POST /api/inbox 는 행 삽입만 하고 ok 를 주므로 그 시점엔 배달 여부를 알 수 없다(차단 판정은
-    //   dispatcher 가 비동기로 한다). 보낸 사람이 사실을 확인할 경로가 없어서 미배달이 '성공' 으로
-    //   보였다 — 실측으로 메시지가 그렇게 사라졌다.
-    //   ★delivery_state 를 준다. delivery_status·recipient_state 는 주지 않는다★ — 그 둘은 미배달에도
-    //   각각 delivered·acknowledged 로 박혀 있어(같은 행에서 실측) 판정 근거로 쓰면 거짓말을 되풀이한다.
-    //   last_error 를 같이 주는 이유: 차단 사유가 거기에만 있다(예: pingpong_limit_exceeded:messages=8).
+    // 비동기 디스패처의 실제 배달 판정은 수신자별 delivery_state와 last_error로 확인한다. delivery_status·recipient_state는 미배달에도 성공처럼 기록될 수 있다.
     const recipients = deps.db
       .prepare(
         `SELECT agent_id, delivery_state, last_error, retry_count
          FROM message_recipient WHERE message_id = ? ORDER BY agent_id`,
       )
       .all(id) as Array<Record<string, unknown>>;
-    // recipients 는 ★항상 배열★ 이다. 빈 배열은 '수신자가 0명' 이라는 사실이며 '모름' 이 아니다 —
-    //   호출부가 그 둘을 구분할 수 있어야 수신자 미연결 사고를 '아직 안 왔음' 으로 흘리지 않는다.
-    // ★외부 채널(telegram DM·팀방) 로 나간 결과도 함께 준다.★
-    //   recipients 는 ★버스 안★ 수신자만 다룬다. `--direct-to-gd` 처럼 목적지가 버스 밖이면 그 구간이
-    //   recipients 에 안 나타나서, 보낸 쪽에서 보면 ★기록이 아예 없는 것처럼 보인다.★ 실제로는
-    //   recordReportDelivery 가 audit_event 에 남겨두고 있다(전송 결과를 await 한 뒤에 기록하므로
-    //   '보내려 했다' 가 아니라 '채널이 받았다' 를 뜻한다). 조회 경로가 없어서 안 보였을 뿐이다.
-    //   ★ok 는 '발송 성공' 까지다 — 수신자가 읽었는지는 어떤 채널도 알려주지 않는다.★
+    // 빈 recipients는 수신자 0명을 뜻한다. 버스 밖 전달은 채널 수락 후 기록된 감사 결과를 함께 제공하되, 읽음 여부까지 보장하지 않는다.
     const deliveries = deps.db
       .prepare(
         `SELECT actor, action, detail_json, at

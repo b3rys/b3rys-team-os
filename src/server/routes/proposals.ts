@@ -1,6 +1,4 @@
-// Team Self-Loop Governance — Proposal 시스템 HTTP 라우트 (Phase 1, 2026-06-12).
-//   루프 파이프라인: draft → peer_review(단일 review) → gd_report → accepted/rejected.
-//   가드는 db/proposal.ts에 강제(품질 하한선·전이 상태기계·decision_log·반대리뷰 플래그).
+// 제안의 HTTP 경로는 draft→peer_review→gd_report→accepted/rejected로 이어진다. 품질·전이·기록 가드는 DB 계층에서 강제한다.
 import { Hono, type Context } from "hono";
 import type { Database } from "bun:sqlite";
 import { getCaptureToken } from "../lib/captureConfig";
@@ -47,13 +45,7 @@ function isCoordinatorOrLead(actor: string, agents: AgentRecord[]): boolean {
   return actor === leadActorId() || actor === coordinatorId(agents);
 }
 
-// ── 리뷰 라우팅: 하드코딩 팀원 id 대신 팀 크기 + capability(역량)로 도출 ──────────────
-// (2026-07-01 GD: 공개 팀에서도 유령배정 없이 동작하게 심플화. 하드코딩 codex/bill 제거.)
-//   리뷰 후보 = interactive 팀원(비대화 non_interactive 제외 · 제안자 제외 · blocked 제외).
-//   팀 크기(= 후보 수)로 draft 이후 경로 결정:
-//     0명(1인 팀)   → draft → gd_report 직행
-//     1명+(2+인 팀) → draft → peer_review(그중 1명) → gd_report
-//   수정요청(revise)은 팀 크기에 맞는 첫 리뷰 단계로 재인입.
+// 제안자와 비대화 팀원을 제외한 실제 후보가 없으면 팀장 보고로, 있으면 peer_review로 진입한다. 수정요청은 첫 리뷰 단계로 돌아간다.
 
 interface ProposalRow {
   id: string;
@@ -67,8 +59,7 @@ function proposalStatus(db: Database, proposalId: string): string | null {
   return row?.status ?? null;
 }
 
-// gd_report 보고/알림용 리뷰 현황 — 누가 어떤 verdict로 검토했는지. 리뷰 없으면 '무응답 자동 승격' 명시.
-//
+// 보고 요약에 리뷰 verdict를 포함하고, 리뷰가 없는 자동 승격도 명시한다.
 function formatReviewSummaryRow(r: { reviewer_agent: string; verdict: string | null; is_adversarial: number }): string {
   const verdict = r.verdict ? `(${r.verdict})` : "";
   const role = r.is_adversarial ? "[의무 반대리뷰]" : "";
@@ -111,13 +102,7 @@ function firstAvailableAgent(db: Database, candidates: string[], fallback: strin
   return candidates.find((id) => existingAgent(db, id)) ?? fallback;
 }
 
-// interactive 팀원(비대화 non_interactive · team_official_member:false · 제안자 제외) 중 리뷰 후보 id 목록.
-//
-// ★지금 무엇을 하고 있는지는 안 본다★.
-//   예전에는 `agent_status.state != 'blocked'` 로 걸렀는데, 그 값은 ★일하는 중에도 뜬다.★
-//   `health.ts` 가 같은 값을 "정상 활동중에도 떠서 노이즈" 라고 적어두고 위험 판정에서 빼는데,
-//   배정만 그걸 자격으로 읽어서 ★바쁜 사람이 후보에서 사라졌다.★ 상세는 `db/proposal.ts` 의
-//   `eligiblePeerReviewerCapacity` 주석 참고. 누구에게 갈지는 아래 배정부의 ★부하 분산★ 이 정한다.
+// blocked 상태는 정상 작업 중에도 발생하므로 리뷰 자격에서 제외하지 않는다. 실제 배정 부하는 배정부에서 분산한다.
 export function otherReviewers(db: Database, proposer: string, agents: AgentRecord[]): string[] {
   const nonInteractive = new Set(agentsWith(agents, "non_interactive").map((a) => a.id));
   const registry = new Map(agents.map((a) => [a.id, a]));
@@ -163,17 +148,14 @@ function isTestProposalFixture(p: { title?: string | null; source?: string | nul
 const REVIEW_CRITERIA =
   `1) 정말 팀에 필요한가?\n2) 팀 전체의 공통 이슈인가?\n3) 팀원 개인 수준의 learning인가?`;
 
-// 팀장 보고/조율 owner = coordinator(PM 역량) 우선 → 제안자 → 첫 후보 순 폴백(하드코딩 id 없음).
-// exclude 는 ★꼬리 폴백에만★ 건다. 앞의 두 층은 역할로 정해진 자리라 그대로 둔다 —
-// 조율자가 리뷰에 무응답이었더라도 "누구에게 맡길지·접을지" 를 정하는 역할은 여전히 그 사람이다.
-// 꼬리는 다르다. otherReviewers 는 방금 무응답한 리뷰어를 걸러내지 않아서,
-// 조율자도 제안자도 없으면 카드가 그 사람에게 되돌아간다 — 이 재배정이 없앤 상태 그대로다.
+// 조정자·제안자는 역할상 조율 책임이 있어 무응답 제외 대상이 아니다.
+// 그 밖의 폴백 후보에서는 무응답자를 제외해 같은 카드가 되돌아가지 않게 한다.
 export function coordinatorOwner(db: Database, agents: AgentRecord[], proposer: string, exclude?: string): string {
   const coord = coordinatorId(agents);
   if (coord && existingAgent(db, coord)) return coord;
   if (existingAgent(db, proposer)) return proposer;
   // 남은 후보가 없으면 exclude 를 그대로 돌려준다. 여기까지 왔다는 건 제안자가 DB 에 없다는 뜻이라,
-  // 제안자를 넣으면 ★존재하지 않는 사람★ 이 담당이 된다 — 무응답이어도 실재하는 사람이 낫다.
+  // 제안자를 넣으면 존재하지 않는 사람이 담당이 된다 — 무응답이어도 실재하는 사람이 낫다.
   return otherReviewers(db, proposer, agents).find((id) => id !== exclude) ?? exclude ?? proposer;
 }
 
@@ -324,11 +306,7 @@ function createLinkedFollowup(
     ).run(task.id);
   }
   const threadId = `prop-${p.id.replace(/^prop_/, "").slice(0, 12)}-${statusKey.replace(/[^a-z0-9]+/g, "").slice(0, 8)}`;
-  // ★발신자는 예약 id 여야 한다★ — antiPingpong 의 unknown_sender 검사는 발신자가
-  // RESERVED_SENDER_IDS 이거나 명부에 있는 팀원일 때만 통과시킨다. "codex" 는 런타임 이름이지
-  // 팀원 id 가 아니라서, codex 런타임 멤버가 없는 팀에서는 이 알림이 전부 dispatch_blocked
-  // (unknown_sender:codex) 로 막혔다 — message 행은 남고 수신자는 안 깨워지므로 조용히 사라진다.
-  // 서버가 스스로 보내는 알림이라 "system" 이 맞다(다른 자동 알림도 이미 이 id 를 쓴다).
+  // 서버 알림은 예약 발신자 system을 사용해야 특정 런타임 이름의 팀원이 없는 설치에서도 unknown_sender로 막히지 않는다.
   const { thread_id } = ensureThread(db, {
     thread_id: threadId,
     from_agent_id: "system",
@@ -506,9 +484,7 @@ function ensureProposalFollowup(db: Database, proposalId: string, status: string
     return { owner: followups.map((f) => f.owner).join(","), taskId: followups[0]?.taskId, messageId: followups[0]?.messageId };
   }
   if (status === "revise_requested") {
-    // revise_requested 진입 시 proposer + coordinator 둘 다 알림.
-    // 적대검토 F1/F3: owner를 comma-join 하지 않는다(owner="a,b"는 agent 조회 실패→500+롤백·카드 미아).
-    // → createLinkedFollowup을 각각 1회씩 호출. proposer===coordinator면 dedup(1건만).
+    // owner에 여러 ID를 합치면 명부 조회가 실패하므로 후속 과제를 각각 만든다. 제안자와 조정자가 같으면 한 번만 만든다.
     const spec = followupSpec(db, p, status as ProposalStatus, agents);
     const reviseStage = firstReviewStage(otherTeamMembers(db, p.proposer_agent, agents).length);
     const proposerFollowup = createLinkedFollowup(db, p, "revise_requested", spec.owner, spec.title, spec.description, spec.body);
@@ -631,9 +607,7 @@ function resetGdReportNoticeClaimsForRevision(db: Database, proposalId: string):
   return cleared;
 }
 
-// gd_report 도달 시 팀장 1:1/op surface에 '결정 요청' 알림 — 상태 도달당 1회(멱등), fire-and-forget.
-//
-// owner_chat_id 또는 capture token 미설정(테스트/퍼블릭 미구성)이면 조용히 skip. 커밋 후 라우트에서 호출(트랜잭션 밖).
+// 결정 요청은 상태 도달당 한 번, 트랜잭션 커밋 후 발송한다. 팀장 수신 설정·토큰이 없으면 건너뛴다.
 async function notifyGdReportReached(db: Database, proposalId: string, _agents: AgentRecord[]): Promise<void> {
   const chatId = ownerChatId(db);
   if (!chatId) return;
@@ -712,11 +686,7 @@ function notifyGdReportReachedSafely(db: Database, proposalId: string, agents: A
   });
 }
 
-// 시간 기반 안전망 — 정체(updated_at 임계 초과) 제안을 시스템이 스스로 진행시킨다.
-//
-//   draft/revise_requested 정체 → 첫 리뷰 단계로 자동 제출(이미 멈춘 제안도 구제).
-//   peer/pm 무응답 → 1차 재배정(다른 후보 wake) → 2차 리뷰 skip degraded 진행.
-//     단 reject/revise verdict 가 있으면 사람 판단이 필요하므로 자동 진행하지 않는다(codex 교차검토 반영).
+// 정체된 초안은 첫 리뷰 단계로 제출하고 무응답 리뷰는 재배정한다. 리뷰를 확보하지 못하면 현재 단계에 blocked로 남기며, reject/revise는 자동 진행하지 않는다.
 export function sweepStaleProposals(
   db: Database, agents: AgentRecord[],
   opts: { staleMinutes?: number; limit?: number } = {},
@@ -739,8 +709,7 @@ export function sweepStaleProposals(
   };
   for (const row of rows) {
     if (isTestProposalFixture(row)) continue;
-    // 제안 단위 트랜잭션 + try/catch(F1): 부분 실패 시 전이·카드·wake 전부 롤백 → 다음 tick 깨끗한 재시도.
-    // 한 제안의 실패가 tick 전체를 멈추지 않게 격리한다. 팀장 push 는 커밋 후(밖)에서.
+    // 제안별 트랜잭션으로 전이·카드·wake를 함께 롤백해 다음 tick에 재시도한다. 한 제안의 실패는 격리하고 팀장 push는 커밋 후 보낸다.
     let gdReached = false;
     try {
       db.transaction(() => {
@@ -764,12 +733,7 @@ export function sweepStaleProposals(
           out.reassigned.push(row.id);
           return;
         }
-        // 2차: 여전히 무응답이어도 리뷰 게이트는 건너뛰지 않는다.
-        // 팀장 결정 화면에 무검토 제안을 올리는 대신 현재 단계에서 blocked로 남긴다.
-        //
-        // 그리고 카드를 coordinator 에게 넘긴다. blocked 표시만 하고 소유자를 그대로 두면
-        // 그 소유자는 이미 두 번 무응답한 사람이고, 아무도 이 제안을 풀어줄 책임을 지지 않는다.
-        // 막아두는 것과 멈춰두는 것은 다르다 — 막은 뒤에는 누군가 다음 행동을 해야 한다.
+        // 리뷰를 확보하지 못하면 무검토 승격하지 않고 blocked로 남긴다. 다음 행동의 책임은 무응답 리뷰어 대신 조정자에게 넘긴다.
         const blockKey = `sweeper_blocked:${row.id}:${row.status}:${round}`;
         if (claimAutomationAction(db, blockKey, row.id, "sweeper_blocked")) {
           const stalled = (db.prepare(
@@ -926,7 +890,7 @@ export function createProposalRoutes(deps: ProposalRouteDeps): Hono {
     if (!auth.ok || !auth.actor) return authError(c, auth);
     const body = (await c.req.json().catch(() => ({}))) as { to?: string; actor?: string; reason?: string; comment?: string; emergency_override?: boolean };
     if (!body.to) return c.json({ error: "to 필수" }, 400);
-    // SYSTEM_ACTOR 는 in-process 자동화(sweeper·이벤트 승격) 전용 — HTTP 로 사칭하면 draft 가로채기/감사 위장(교차검토 F2). 차단.
+    // SYSTEM_ACTOR는 프로세스 내부 자동화 전용이다. HTTP 사용을 막아 초안 가로채기와 감사 기록 위장을 차단한다.
     if (auth.actor.actor === SYSTEM_ACTOR) {
       return c.json({ error: "system actor는 HTTP 전이에 사용할 수 없습니다(자동화 전용)" }, 403);
     }
@@ -934,10 +898,7 @@ export function createProposalRoutes(deps: ProposalRouteDeps): Hono {
     try {
       const runTransition = deps.db.transaction(() => {
         const fromStatus = proposalStatus(deps.db, proposalId);
-        // 팀장 최종 결정(gd_report→승인/반려)에는 실행 지시 코멘트가 필수.
-        // 지시 판정은 오직 body.comment 만 본다 — 대시보드가 빈 입력에 버튼 라벨("승인")을 채우거나
-        // reason fallback 으로 라벨이 새도 우회 못하게(교차검토 후 실측 버그 fix). 이 지시가 제안자에게
-        // 전달되어 '팀장께 먼저 컨펌 메시지를 보내는' 진입 트리거가 된다.
+        // 최종 승인·반려에는 body.comment의 실행 지시가 필요하다. 버튼 라벨이나 reason 폴백으로 이를 대신하면 안 된다.
         const directive = typeof body.comment === "string" ? body.comment.trim() : "";
         if (fromStatus === "gd_report" && ["accepted", "rejected", "revise_requested"].includes(body.to!) && !directive) {
           return { ok: false as const, error: "팀장 결정에는 실행 지시 코멘트가 필수입니다(빈 결정 불가)" };
@@ -972,7 +933,7 @@ export function createProposalRoutes(deps: ProposalRouteDeps): Hono {
       });
       const out = runTransition();
       if (!out.ok) return c.json({ error: out.error }, 409);
-      // 수동 전이(coordinator fallback 등)로 gd_report 도달 시에도 팀장 push(F2). round 멱등이라 자동 경로와 중복 안 됨.
+      // 수동 전이(coordinator fallback 등)로 gd_report 도달 시에도 팀장 push. round 멱등이라 자동 경로와 중복 안 됨.
       if (body.to === "gd_report") notifyGdReportReachedSafely(deps.db, proposalId, deps.agents?.() ?? ambientAgents(), "transition");
       return c.json({ ok: true, followup: out.followup, notices: out.notices });
     } catch (e) {
@@ -1010,10 +971,7 @@ export function createProposalRoutes(deps: ProposalRouteDeps): Hono {
           required_changes: body.required_changes as string | undefined,
         });
         if (!res.ok) return { ok: false as const, error: res.error };
-        // 리뷰 등록 = 승격 트리거. 현재 단계에서 가드(반대 peer 리뷰 / PM 리뷰) 충족 시 자동 전이 + 다음 배정.
-        // 가드 미충족(예: approve만)이면 advanced=false로 머무르고, sweeper가 나중에 처리(degraded).
-        // peer/pm verdict=reject 는 그 자리서 최종 반려(rejected) + 제안자·팀장 노티.
-        // concern/revise/approve 는 진행성 판정이라 그냥 다음 단계로만 흐르고 노티 안 함(중간은 팀원끼리).
+        // 리뷰 가드를 충족하면 다음 단계로 전이한다. reject는 최종 반려 알림을 보내고 그 밖의 중간 verdict는 팀원 간 검토로 처리한다.
         const status = proposalStatus(deps.db, proposalId);
         const verdict = String(body.verdict ?? "");
         let auto: { advanced: boolean; followup?: ReturnType<typeof ensureProposalFollowup> } = { advanced: false };

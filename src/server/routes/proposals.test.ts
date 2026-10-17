@@ -1,8 +1,4 @@
-/**
- * proposals 라우트 — 거버넌스 상태기계 integration test.
- * 표면: dashboard Proposal 탭의 정본 게이트(팀 정책 + 팀스킬 후보 공통). createProposalRoutes + in-memory DB + app.request.
- * 핀: 품질 하한선(evidence·expected_value) / 상태기계 / Guard A(반대리뷰 의무) / Guard B(최종승인 GD 전용).
- */
+/** 제안 라우트의 품질 하한선·상태 전이·반대 리뷰·팀장 최종승인 가드를 메모리 DB와 HTTP 요청으로 검증한다. */
 import { beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
@@ -92,7 +88,7 @@ describe("proposals — 품질 하한선 (생성 게이트)", () => {
   });
   test("non-string 필드(숫자/객체)는 .trim TypeError(500) 없이 안전 처리 (실라이브 가드)", async () => {
     const { app } = setup();
-    // 옛 코드: p.x?.trim()가 숫자/객체에서 .trim is not a function → 500(서버 크래시).
+    // 숫자·객체는 trim 호출 전에 거절해야 잘못된 입력에 500을 반환하지 않는다.
     // 가드(String(x??"").trim()) 후엔 코어션돼 크래시 없음 — 비어있지 않으면 정상 생성(201).
     expect((await create(app, { evidence_refs: 123 })).status).toBe(201);
     expect((await create(app, { title: 123 })).status).toBe(201);
@@ -288,10 +284,7 @@ describe("proposals — 상태기계 + Guard", () => {
       from_agent_id: string; to_agent_id: string; body: string;
     };
     expect(msg.from_agent_id).toBe("system");
-    // ★발신자 id 만 고정해서는 부족하다★ — 이 알림이 실제로 수신자를 깨우려면 발신자가
-    // antiPingpong 의 unknown_sender 검사를 통과해야 한다. 이전 값 "codex" 는 이 테스트의
-    // seed 에 codex 가 팀원으로 들어 있어서 통과했을 뿐이고, codex 런타임 멤버가 없는 팀에서는
-    // 전부 dispatch_blocked 로 막혔다. 그래서 ★게이트 자체를 태워★ 회귀를 잡는다.
+    // 서버 알림은 예약 발신자여야 명부에 특정 런타임 팀원이 없는 설치에서도 unknown_sender로 차단되지 않는다.
     expect(checkPingpong(db, {
       message_id: followup!.messageId!, agent_id: peer, delivery_state: "pending", retry_count: 0, last_error: null,
       from_agent_id: msg.from_agent_id, to_agent_id: peer, body: msg.body, source: "agent", created_by: null,
@@ -431,13 +424,13 @@ describe("proposals — 상태기계 + Guard", () => {
       title: "[skill] eligible peer reviewer",
     })).json()) as { id: string };
 
-    // 생성=peer 진입. demis/devon blocked · lui 제안자 → 후보 = bill/codex/steve/gd 중 랜덤 1
+    // peer 진입 시 제안자를 제외한 적격 후보 한 명에게 배정한다.
     const peerTasks = db.prepare(
       "SELECT owner FROM proposal_followup_task WHERE proposal_id = ? AND status LIKE 'peer_review:%' ORDER BY owner",
     ).all(id) as { owner: string }[];
     expect(peerTasks).toHaveLength(1);
     expect(["bill", "codex", "steve", "gd"]).toContain(peerTasks[0]!.owner);
-    // 제안자 lui 는 리뷰 불가, gd는 팀원이라면 리뷰 가능
+    // 제안자의 자기 검토는 금지한다. 리드도 팀원 자격이 있으면 검토할 수 있다.
     expect((await review(app, id, { reviewer_agent: "lui", verdict: "concern", is_adversarial: true })).status).toBe(400);
     expect((await review(app, id, { reviewer_agent: "gd", verdict: "concern", is_adversarial: true })).status).toBe(201);
     expect(statusOf(db, id)).toBe("gd_report");
@@ -565,9 +558,7 @@ describe("proposals — 상태기계 + Guard", () => {
     }
   });
 
-  // 팀장 결정 단계는 승인/반려 2택. gd_report→revise_requested 경로 자체를 없앴다.
-  //   따라서 "팀장이 수정요청으로 gd_report를 떠난다"는 시나리오는 더 이상 존재하지 않는다.
-  //   이 테스트는 그 자리를 지키되, 검증 대상을 새 불변식으로 바꾼다: 거부되고, 알림 claim 은 유지된다.
+  // 최종 결정 단계는 승인·반려만 허용한다. 수정요청을 거절해도 기존 보고 알림 claim은 유지해야 한다.
   test("팀장 결정 단계에서 수정요청은 거부되고(409), 팀장보고 알림 claim 은 리셋되지 않는다", async () => {
     const originalFetch = globalThis.fetch;
     const calls: Array<{ body: { chat_id?: string; text?: string } }> = [];
@@ -966,9 +957,7 @@ describe("proposals — 상태기계 + Guard", () => {
   });
 });
 
-// ── GD 심플 모델: 팀 크기별 라우팅 (2026-07-01) ──────────────────────────
-// 하드코딩 codex/bill 제거 검증 — 팀 크기 + capability 도출, 공개 팀(임의 멤버)에서도 유령배정 없이 동작.
-// 요구사항 시나리오: 1/2/3+명 흐름 · 중간 드랍 · 최종 승인/리젝/수정요청 재인입.
+// 팀 규모·역량으로 배정을 도출해 임의 명부에서도 실제 후보에게 배정하고 무검토 승격을 차단한다.
 function agentRec(id: string, capabilities: string[] = []): AgentRecord {
   return { id, display_name: id, role: "role", runtime: "claude_channel", capabilities } as AgentRecord;
 }
@@ -1042,11 +1031,7 @@ describe("proposals — GD 심플 모델 (팀 크기별 라우팅)", () => {
     expect(statusOf(db, id)).toBe("accepted");
   });
 
-  // ★blocked 는 배정 자격이 아니다★.
-  //   예전에는 이 상황에서 후보가 0이 되어 아무에게도 안 갔다. 그런데 `blocked` 는 `health.ts` 가
-  //   ★"정상 활동중에도 떠서 노이즈"★ 라고 적어둔 값이라, 실제로는 ★일하는 사람이 빠지는★ 필터였다.
-  //   라이브 실측: claude 런타임 5명이 작업 중 blocked 였고 배정은 idle 로 보이는 쪽에 쏠렸다.
-  //   ★두 축을 같이 잰다★ — 배정이 되는가(새 동작) · 그래도 무검토 직행은 막히는가(원래 안전 속성).
+  // blocked는 정상 작업 중에도 표시되므로 배정 자격에서 제외하지 않는다. 배정 가능 여부와 무검토 승격 금지를 함께 검증한다.
   test("★blocked 인 팀원도 후보에 남아 실제로 배정된다★ — 그래도 무검토 gd_report 직행은 막는다", async () => {
     const { app, db } = setupTeam(["alice", "bob", "carol"], { coordinator: "bob" });
     db.prepare("INSERT INTO agent_status (agent_id, state) VALUES (?, 'blocked')").run("bob");
@@ -1055,35 +1040,27 @@ describe("proposals — GD 심플 모델 (팀 크기별 라우팅)", () => {
     const id = await createBy(app, "alice");
     expect(statusOf(db, id)).toBe("peer_review");
 
-    // ★owner 로 재면 안 된다★ — 후보가 0일 때 만들어지는 'blocked 안내' 도 조정자(bob)가 owner 라
-    //   둘이 구분되지 않는다(이 시험을 처음 그렇게 썼다가 뮤턴트가 살아남아서 알았다).
-    //   ★가르는 것은 status★ — 실제 배정은 `peer_review:*`, 후보 없음 안내는 `review_route_decision`.
+    // owner는 후보 없음 안내에도 같을 수 있으므로 status로 실제 리뷰 배정과 review_route_decision을 구분한다.
     const rows = db.prepare(
       "SELECT owner, status FROM proposal_followup_task WHERE proposal_id = ?",
     ).all(id) as { owner: string; status: string }[];
-    expect(rows.some((r) => r.status.startsWith("peer_review:"))).toBe(true); // ★실제로 배정됐다★
+    expect(rows.some((r) => r.status.startsWith("peer_review:"))).toBe(true); // 실제로 배정됐다
     expect(rows.some((r) => r.status === "review_route_decision")).toBe(false); // 후보 없음 경로가 아니다
     for (const r of rows) expect(["bob", "carol"]).toContain(r.owner);
 
-    // ★원래 안전 속성은 그대로★ — 리뷰 없이 팀장 보고로 못 넘어간다.
+    // 원래 안전 속성은 그대로 — 리뷰 없이 팀장 보고로 못 넘어간다.
     expect((await transition(app, id, "gd_report", "alice")).status).toBe(409);
   });
 
-  // ★배정만으로는 반쪽이다 — 낸 리뷰가 접수돼야 끝난다.★
-  //   위 시험은 blocked 인 팀원에게 ★배정이 가는 것★ 까지만 잰다. 그런데 배정과 등록은 다른 관문이라,
-  //   배정만 열어두면 ★명단에는 있는데 답안지는 안 받는★ 상태가 된다(등록 쪽에 같은 state 검사가 남아 있었다).
-  //   그 구멍은 여기까지 이어서 재야만 드러난다 — 그래서 배정된 사람이 ★실제로 등록에 성공하는지★ 를 잰다.
-  //
-  // ★막히면 저절로 풀리지도 않는다★ — 재배정(`peerReviewOwners`)은 "이미 배정된 적 있는 사람" 만 빼고
-  //   state 는 안 보므로, 남은 후보도 blocked 면 같은 곳으로 다시 간다. 사람이 손대기 전엔 진행이 멈춘다.
+  // 배정과 리뷰 등록은 별도 관문이므로 blocked 팀원에게 배정된 리뷰가 실제 등록되는지 이어서 확인한다.
   test("★blocked 인 팀원이 배정받은 리뷰를 실제로 등록할 수 있다★", async () => {
     const { app, db } = setupTeam(["alice", "bob", "carol"], { coordinator: "bob" });
     db.prepare("INSERT INTO agent_status (agent_id, state) VALUES (?, 'blocked')").run("bob");
     db.prepare("INSERT INTO agent_status (agent_id, state) VALUES (?, 'blocked')").run("carol");
 
     const id = await createBy(app, "alice");
-    // ★배정된 당사자로 낸다★ — 등록은 배정받은 사람만 할 수 있어서(미배정은 403),
-    //   아무나 넣으면 blocked 가 아니라 미배정 때문에 막혀 ★엉뚱한 축을 재게 된다.★
+    // 배정된 당사자로 낸다 — 등록은 배정받은 사람만 할 수 있어서(미배정은 403),
+    //   아무나 넣으면 blocked 가 아니라 미배정 때문에 막혀 엉뚱한 축을 재게 된다.
     const assigned = db.prepare(
       "SELECT owner FROM proposal_followup_task WHERE proposal_id = ? AND status LIKE 'peer_review:%' AND closed_at IS NULL",
     ).get(id) as { owner: string };
@@ -1091,31 +1068,27 @@ describe("proposals — GD 심플 모델 (팀 크기별 라우팅)", () => {
 
     expect((await peerReview(app, id, assigned.owner)).status).toBe(201);
 
-    // ★행이 실제로 들어갔는지까지 본다★ — 201 만 보면 응답만 맞고 저장이 빠진 경우를 놓친다.
+    // 행이 실제로 들어갔는지까지 본다 — 201 만 보면 응답만 맞고 저장이 빠진 경우를 놓친다.
     const stored = db.prepare(
       "SELECT COUNT(*) AS c FROM proposal_review WHERE proposal_id = ? AND reviewer_agent = ?",
     ).get(id, assigned.owner) as { c: number };
     expect(stored.c).toBe(1);
   });
 
-  // ★legacy pm_review 경로도 같이 막힌다★ (코덱스 리뷰 2026-08-08).
-  //   `eligiblePeerReviewerCapacity` 는 `requiredPmReviewCount` 가 읽는다:
-  //     예전 — 제안자 외 전원 blocked → 후보 0 → 필요 리뷰 ★0건★ → ★무검토로 gd_report 통과★
-  //     지금 — 상태를 안 보므로 후보가 있고 → ★1건 필요★ → 409
-  //   위 시험(peer 배정)만으로는 이 축이 안 잡힌다. 그래서 따로 둔다.
+  // legacy pm_review도 실제 후보가 있으면 필요한 리뷰 수가 0이 되어 무검토로 통과하면 안 된다.
   test("★제안자 외 전원이 blocked 여도 PM review 1건 없이는 gd_report 불가★", async () => {
     const { app, db } = setupTeam(["alice", "bob", "carol"], { coordinator: "bob" });
     db.prepare("INSERT INTO agent_status (agent_id, state) VALUES (?, 'blocked')").run("bob");
     db.prepare("INSERT INTO agent_status (agent_id, state) VALUES (?, 'blocked')").run("carol");
 
-    // ★검증된 생성 경로를 쓴다★ — createProposalRow 직삽입은 이 팀에서 unknown_proposal 이 됐다
+    // 검증된 생성 경로를 쓴다 — createProposalRow 직삽입은 이 팀에서 unknown_proposal 이 됐다
     //   (그 상태로도 409 라서 시험이 통과했다. 409 를 받았다고 원하는 가드를 탄 게 아니다).
     const id = await createBy(app, "alice");
     db.prepare("UPDATE proposal SET status = 'pm_review' WHERE id = ?").run(id);
 
     const r = await transition(app, id, "gd_report", "alice");
     expect(r.status).toBe(409);
-    expect(await r.text()).toContain("PM review"); // ★그 가드가 맞는지 이유까지 본다★
+    expect(await r.text()).toContain("PM review"); // 그 가드가 맞는지 이유까지 본다
   });
 
   test("LEAD_ACTOR_ID 설정은 리뷰 후보 계산에 관여하지 않는다", async () => {

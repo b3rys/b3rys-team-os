@@ -21,9 +21,7 @@ const reminderSchema = z
     thread_id: z.string().min(4).max(32).optional(),
     title: z.string().min(1).max(200).optional(),
     direct_to_gd: z.boolean().default(false),
-    // Opt out of the misfire grace: deliver however late. Only matters when the grace is
-    // enabled (off by default) — with it on, a reminder whose slot passed while the machine
-    // was off is dropped and never comes back.
+    // 기기가 꺼진 사이 예정 시각이 지나도 리마인더를 전달하도록 misfire 유예를 적용하지 않는다.
     misfire_policy: z.enum(["coalesce", "skip", "catch_up_once"]).optional(),
   })
   .refine((v) => Boolean(v.run_at) !== Boolean(v.delay_seconds), {

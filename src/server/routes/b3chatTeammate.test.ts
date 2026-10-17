@@ -54,7 +54,7 @@ function setup(opts: { activate?: () => Response | Promise<Response>; greetedAft
     greeted: () => ++greetPolls > (opts.greetedAfter ?? 1),
     greetingWaitMs: 200, pollMs: 2, activateTimeoutMs: 100,
     onJobSettled: (id) => settled[id]?.(),
-    // ★실제 확인·정리는 절대 부르지 않는다★ — 실제 홈·launchd·프로세스에 닿는다.
+    // 실제 확인·정리는 절대 부르지 않는다 — 실제 홈·launchd·프로세스에 닿는다.
     inspectResidue: (id) => {
       const inList = JSON.parse(readFileSync(registryPath, "utf-8")).some((m: { id: string }) => m.id === id);
       return [...(inList ? (["registry"] as Residue[]) : []), ...residue];

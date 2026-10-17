@@ -50,7 +50,7 @@ describe("CI 결과 표시 — ★모르는 것을 정상으로 보여주지 않
     mode = "err"; t += 6 * 60_000;             // 캐시 만료 후 실패
     const j = await (await app.request("/ci-status")).json() as any;
     expect(j.ok).toBe(false);
-    expect(j.runs.length).toBe(0);             // ★직전 성공 결과를 재사용하지 않는다★
+    expect(j.runs.length).toBe(0);             // 직전 성공 결과를 재사용하지 않는다
   });
 
   test("성공은 캐시한다 — 한도 60/시간이라 매번 부르면 안 된다", async () => {
@@ -62,15 +62,12 @@ describe("CI 결과 표시 — ★모르는 것을 정상으로 보여주지 않
     expect(j.cached).toBe(true);
   });
 
-  // ★이 테스트는 뒤집혔다 (Codex 반려, 2026-07-29)★
-  //   예전엔 "이상한 응답 → 빈 목록" 을 옳다고 봤다. ★틀렸다.★
-  //   빈 목록은 화면에 ★"실행 0건 = 정상"★ 으로 보이고, ★진짜 0건과 구분이 안 된다.★
-  //   상류가 깨진 것은 ★모르는 상태★ 지 정상이 아니다 — 이 파일의 존재 이유가 그것이다.
+  // 잘못된 상류 응답을 빈 목록으로 바꾸면 실제 실행 0건과 구분할 수 없으므로 오류를 표시한다.
   test("★상류 응답이 우리가 아는 모양이 아니면 '확인 불가' 다 — 빈 목록으로 삼키지 않는다★", () => {
     expect(() => normalizeRuns(null)).toThrow();
     expect(() => normalizeRuns({})).toThrow();
     expect(() => normalizeRuns({ workflow_runs: "nope" })).toThrow();
-    // 배열이면 항목이 비어 있어도 정상 — ★진짜 0건은 0건이다★
+    // 배열이면 항목이 비어 있어도 정상 — 진짜 0건은 0건이다
     expect(normalizeRuns({ workflow_runs: [] })).toEqual([]);
     expect(normalizeRuns({ workflow_runs: [{}] })[0]?.name).toBe("");
   });
@@ -83,8 +80,7 @@ describe("CI 결과 표시 — ★모르는 것을 정상으로 보여주지 않
   });
 });
 
-// ★한도(rate limit) 를 지키는가 — 토큰 없는 GitHub API 는 IP 당 60 req/hr★
-// 캐시만으로는 못 막는 두 구멍을 고정한다(Codex 반려, 2026-07-29).
+// 미인증 GitHub API의 IP당 60회/시간 한도는 캐시만으로 지킬 수 없어 동시 요청과 소진 후 요청도 검증한다.
 describe("한도 보호 — ★캐시가 못 막는 두 경로★", () => {
   test("★동시 요청 10개 → 실제 호출 1회★ (캐시는 '응답 후' 라 동시엔 무력하다)", async () => {
     let calls = 0;
@@ -99,7 +95,7 @@ describe("한도 보호 — ★캐시가 못 막는 두 경로★", () => {
     await Promise.resolve();
     release(null);
     const res = await all;
-    expect(calls).toBe(1);                       // ★10 이 아니라 1★
+    expect(calls).toBe(1);                       // 10 이 아니라 1
     for (const r of res) expect(((await r.json()) as any).ok).toBe(true);
   });
 
@@ -116,13 +112,13 @@ describe("한도 보호 — ★캐시가 못 막는 두 경로★", () => {
     });
     const first = await (await app.request("/ci-status")).json() as any;
     expect(first.ok).toBe(false);
-    expect(first.retry_after).toBe(new Date(resetMs).toISOString());  // ★언제 풀리는지 밝힌다★
+    expect(first.retry_after).toBe(new Date(resetMs).toISOString());  // 언제 풀리는지 밝힌다
     expect(calls).toBe(1);
 
-    // 리셋 전 — 캐시가 만료돼도(6분 뒤) ★추가 호출 0★
+    // 리셋 전 — 캐시가 만료돼도(6분 뒤) 추가 호출 0
     t += 6 * 60_000;
     for (let i = 0; i < 5; i++) await app.request("/ci-status");
-    expect(calls).toBe(1);                       // ★여전히 1★
+    expect(calls).toBe(1);                       // 여전히 1
 
     // 리셋 후 — 다시 한 번만 시도한다
     t = resetMs + 1;
@@ -140,14 +136,12 @@ describe("한도 보호 — ★캐시가 못 막는 두 경로★", () => {
       .toBe(1000 + 60_000);
     // retry-after 없으면 x-ratelimit-reset(초 단위 epoch)
     expect(parseRateLimit(429, h({ "x-ratelimit-reset": "500" }), 1000)).toBe(500_000);
-    // 리셋이 과거면 신뢰하지 않고 기본 백오프로 — ★즉시 재시도로 떨어지지 않는다★
+    // 리셋이 과거면 신뢰하지 않고 기본 백오프로 — 즉시 재시도로 떨어지지 않는다
     expect(parseRateLimit(429, h({ "x-ratelimit-reset": "1" }), 10_000_000)).toBeGreaterThan(10_000_000);
   });
 });
 
-// ★화면이 '모르는 것' 을 '정상' 으로 그리지 않는지 — 렌더 함수 자체를 검증한다★
-// 서버가 ok:false 를 줘도 화면이 조용히 비어 보이면 사용자는 "문제 없구나" 로 읽는다.
-// 이 PR 의 목적이 정확히 그 착각을 없애는 것이라 렌더까지 테스트로 고정한다.
+// 서버의 ok:false가 렌더링에서도 확인 불가로 표시되어야 잘못된 정상 표시를 막을 수 있다.
 import { ciBlockHtml } from "../../web/components/TeamOS";
 
 describe("ciBlockHtml — 실패가 초록으로 보이지 않는다", () => {
@@ -155,7 +149,7 @@ describe("ciBlockHtml — 실패가 초록으로 보이지 않는다", () => {
     const h = ciBlockHtml({ ok: false, reason: "github 403", runs: [], fetched_at: null });
     expect(h).toContain("확인 불가");
     expect(h).toContain("github 403");
-    expect(h).toContain("정상' 이 아닙니다");   // ★모르는 것 ≠ 정상★ 을 문장으로 말한다
+    expect(h).toContain("정상' 이 아닙니다");   // 모르는 것 ≠ 정상 을 문장으로 말한다
   });
 
   test("아직 안 불러왔으면 '불러오는 중' — 빈 화면이 아니다", () => {
@@ -178,7 +172,6 @@ describe("ciBlockHtml — 실패가 초록으로 보이지 않는다", () => {
   });
 });
 
-// ─── 어느 저장소의 CI 인가 (2026-07-30, hermes 교차검증에서 출발) ────────────────
 describe("저장소 해석 — 우리 저장소를 박아두지 않는다", () => {
   test("★git origin 에서 owner/repo 를 읽는다★ — 형태가 여러 가지다", () => {
     const cases: Array<[string, string | null]> = [
@@ -191,13 +184,12 @@ describe("저장소 해석 — 우리 저장소를 박아두지 않는다", () =
       ["git@GitHub.com:acme/widgets.git", "acme/widgets"],   // 호스트는 대소문자 무관
       ["https://github.com./acme/widgets", "acme/widgets"],  // 트레일링 점은 같은 호스트
       ["https://github.com/acme/my.repo-1.git", "acme/my.repo-1"],
-      // ★GitHub 이 아니면 null★ — 추측하지 않는다
+      // GitHub 이 아니면 null — 추측하지 않는다
       ["git@gitlab.com:acme/widgets.git", null],
       ["https://bitbucket.org/acme/widgets.git", null],
       ["/some/local/path", null],
       ["", null],
-      // ★부분일치로 뚫리던 것들(hermes 교차검증 2026-07-30 · 전부 통과했었다)★
-      //   호스트를 문자열 안에서 "찾으면" 접두·접미·경로가 다 뚫린다.
+      // GitHub 호스트는 파싱 후 정확히 비교해야 접두·접미·경로의 부분일치로 잘못 허용하지 않는다.
       ["git@notgithub.com:acme/widgets.git", null],
       ["https://notgithub.com/acme/widgets.git", null],
       ["https://xgithub.com/acme/widgets.git", null],
@@ -209,12 +201,12 @@ describe("저장소 해석 — 우리 저장소를 박아두지 않는다", () =
       // 이름 규칙 밖
       ["https://github.com/-bad/widgets", null],
       ["https://github.com/acme/..", null],
-      // ★query·fragment 는 버리지 않고 거절한다★ (hermes 3회전) — 버리면 없던 주소를 지어내는 것이고,
+      // query·fragment 는 버리지 않고 거절한다 (hermes 3회전) — 버리면 없던 주소를 지어내는 것이고,
       //   scp 형식(git@github.com:acme/widgets?x=1 → null)과 규칙이 갈렸다.
       ["https://github.com/acme/widgets.git?x=1", null],
       ["https://github.com/acme/widgets#frag", null],
       ["git@github.com:acme/widgets?x=1", null],
-      // ★빈 조각도 실패★ — filter 로 지우면 acme//widgets 가 정상 주소가 된다
+      // 빈 조각도 실패 — filter 로 지우면 acme//widgets 가 정상 주소가 된다
       ["https://github.com/acme//widgets", null],
       ["https://github.com/acme/widgets//", null],
       ["https://github.com//widgets", null],
@@ -235,9 +227,7 @@ describe("저장소 해석 — 우리 저장소를 박아두지 않는다", () =
       expect(resolveCiRepo("/nonexistent")).toBe("acme/widgets");
       process.env.TEAM_CI_REPO = "acme/my.repo-1";
       expect(resolveCiRepo("/nonexistent")).toBe("acme/my.repo-1");
-      // ★이 값은 그대로 요청 URL 의 path 가 된다★ — 넓히면 의도와 다른 요청이 나간다.
-      //   아래는 전부 통과했었다(hermes 교차검증 2026-07-30):
-      //     https://api.github.com/repos/★owner/repo?x=1★/actions/runs?per_page=10
+      // 설정값은 요청 URL의 path에 들어가므로 query·fragment가 섞인 저장소 이름을 거절한다.
       for (const bad of [
         "이건-owner/repo-모양이-아니다/셋",
         "owner/repo?x=1",
@@ -264,7 +254,7 @@ describe("저장소 해석 — 우리 저장소를 박아두지 않는다", () =
     try {
       process.env.TEAM_CI_REPO = "";
       // fetchRuns 는 주입하지 않는다(실제 경로). ciRepo 만 "못 찾음" 으로 고정한다 —
-      // ★주변 git 설정에 테스트 결과가 달라지면 안 된다★(워크트리·클론에서 다르게 나왔다).
+      // 주변 git 설정에 테스트 결과가 달라지면 안 된다(워크트리·클론에서 다르게 나왔다).
       const origFetch = globalThis.fetch;
       globalThis.fetch = (async () => { calls += 1; throw new Error("★불렀다★"); }) as unknown as typeof fetch;
       try {
@@ -274,7 +264,7 @@ describe("저장소 해석 — 우리 저장소를 박아두지 않는다", () =
         expect(body.ok).toBe(false);
         expect(body.runs).toEqual([]);
         expect(body.reason).toContain("TEAM_CI_REPO");
-        expect(calls).toBe(0); // ★네트워크 0회★
+        expect(calls).toBe(0); // 네트워크 0회
       } finally {
         globalThis.fetch = origFetch;
       }
@@ -285,10 +275,7 @@ describe("저장소 해석 — 우리 저장소를 박아두지 않는다", () =
   });
 });
 
-// ★2층 방어를 둘 다 검증한다.★ 관문(핸들러)만 지우면 defaultFetch 안의 재확인이 잡아내서
-//   결과가 같다 — 즉 관문 하나만 지우는 뮤턴트는 ★살아남는다(2026-07-30 실측).★
-//   그건 방어가 겹쳐 있다는 뜻이고 나쁘지 않다. 다만 "관문이 검증됐다" 고 말할 수는 없으므로,
-//   ★둘 다 지웠을 때 실제로 GitHub 을 치는지★ 를 여기서 못 박는다.
+// 핸들러와 defaultFetch가 모두 검증하므로 한쪽 검사만 제거해도 다른 쪽이 차단한다. 두 검사 제거 대조도 확인한다.
 describe("미설정 방어는 2층이다", () => {
   test("★어느 층이든 남아 있으면 네트워크가 안 나간다★ — 같은 응답, 호출 0회", async () => {
     const prev = process.env.TEAM_CI_REPO;
@@ -313,10 +300,7 @@ describe("미설정 방어는 2층이다", () => {
   });
 });
 
-// ─── 화면이 부르는 주소가 실제로 이 라우트에 닿나 (2026-07-30) ──────────────────
-// ★상수를 상수와 비교하는 것으로는 부족하다.★ 화면이 `${apiBase()}/ci-status` 로 불러
-//   SPA 의 index.html 을 받고 있었고(라이브 실측), 서버·파싱·표시 테스트는 전부 통과했다.
-//   그래서 여기서는 ★index.ts 와 같은 방식으로 mount 한 뒤 그 주소로 실제 요청★ 을 보낸다.
+// 화면이 쓰는 주소를 index.ts와 같은 방식으로 mount해 요청해야 SPA HTML로 잘못 응답하는 경로를 잡는다.
 describe("화면이 쓰는 주소가 라우트에 닿는다", () => {
   test("★CI_URL 로 요청하면 이 라우트가 응답한다★ — index.ts 와 같은 mount 구성", async () => {
     const api = new Hono();
