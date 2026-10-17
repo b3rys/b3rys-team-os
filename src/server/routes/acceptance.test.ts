@@ -301,7 +301,7 @@ describe("acceptance-check routes", () => {
   test("ports check-portability blockers into item failures", async () => {
     const { app, dir, novaWs } = setup();
     try {
-      // 절대경로 하드코딩 = 포터빌리티 블로커(다른 머신서 안 됨). 팀고유 실값 탐지는 제거됨(public=source)이라 포맷/경로 기반으로 검증.
+      // 공개 소스의 경로 검사는 다른 머신에서도 재현되도록 절대경로 형식을 기준으로 한다.
       writeFileSync(join(novaWs, "SOUL.md"), "hardcoded path: /Users/someone/project/config\n", "utf-8");
       const body = (await (await app.request("/members/nova/acceptance-check")).json()) as any;
       const portability = body.sections.find((section: any) => section.key === "portability");
@@ -312,7 +312,7 @@ describe("acceptance-check routes", () => {
     }
   });
 
-  // ── public=source: 팀고유 실값(chat_id·group_id)은 소스에 박지 않고 settings 에서 읽어 동적 탐지 (Codex 리뷰) ──
+  // 팀 설정에 저장된 chat_id·group_id를 읽어 소스에 박힌 실값을 탐지한다.
   test("config 기반 내부ID 탐지 — 설정된 owner_chat_id 가 렌더 파일에 있으면 internal-id BLOCKER", async () => {
     const { app, db, dir, novaWs } = setup();
     try {
@@ -413,7 +413,6 @@ describe("acceptance-check routes", () => {
     }
   });
 
-  // ── 클린 설치 첫 경험: 정상 초기 상태를 fail 로 찍지 않는다 (2026-07-25 공개 리허설) ──
   const settingsCheck = (body: any, label: string) =>
     body.sections.find((section: any) => section.key === "settings").checks.find((c: any) => c.label === label);
 
@@ -439,13 +438,8 @@ describe("acceptance-check routes", () => {
     }
   });
 
-  // ── ★major A(Bill 적대검증 2026-07-25)★ 레지스트리 로드 실패를 '팀원 0명 = 새 설치' 로 삼키면
-  //    손상된 라이브에서 인수체크가 "새 설치입니다, 이상 없습니다" 라고 적극적 거짓 주장을 한다.
-  //    → 로드 실패는 fail 로 노출하고 freshInstall 신호에서 제외한다. 네 가지 손상 유형 전부 고정. ──
-  //
-  // ★assert 는 반드시 '원인 코드' 까지 본다★ — 'team.db 로스터 N명' 같은 ★두 분기 공통 문자열★ 만
-  //   보면 loadAgentsChecked 를 옛 catch→[] 로 되돌리는 mutation 이 안 잡힌다(로드실패 fail 대신
-  //   '유실 의심' fail 로 떨어져 문자열이 그대로 맞기 때문). Bill 후속지적 M2.
+  // 레지스트리 로드 실패는 새 설치와 구분해 fail로 노출한다.
+  // 공통 오류 문자열만으로는 유실 의심 분기와 구분되지 않으므로 원인 코드도 검증한다.
   const corruptions: Array<{ name: string; cause: string; corrupt: (registryPath: string) => void }> = [
     { name: "JSON 잘림", cause: "parse_error", corrupt: (p) => writeFileSync(p, '[{"id":"bill",', "utf-8") },
     { name: "배열 아닌 객체", cause: "load_error", corrupt: (p) => writeFileSync(p, '{"id":"bill"}', "utf-8") },
@@ -462,7 +456,7 @@ describe("acceptance-check routes", () => {
         expect(body.ok).toBe(false);
         const load = settingsCheck(body, "agents.json 로드");
         expect(load.status).toBe("fail");
-        // ★원인 코드★ — '로드 실패' 와 '유실 의심' 을 구분하는 유일한 신호.
+        // 원인 코드 — '로드 실패' 와 '유실 의심' 을 구분하는 유일한 신호.
         expect(load.detail).toContain(`실패(${cause})`);
         expect(load.detail).toContain("team.db 로스터 3명");
         // 팀 이름은 '새 설치의 정상 상태' 로 둘 수 없다 — 새 설치가 아니다.
@@ -473,8 +467,7 @@ describe("acceptance-check routes", () => {
       }
     });
 
-    // ★DB 로스터가 0명이어도 손상은 여전히 fail★ — dbAgents 가드는 '로스터>0' 만 덮으므로,
-    //   이 케이스가 없으면 로드실패를 삼키는 mutation 이 ok=true·fail=0 으로 부활한다(Bill M2 실측).
+    // DB 로스터가 비어 있어도 레지스트리 손상을 정상 새 설치로 처리하면 안 된다.
     test(`손상된 agents.json(${name}) + team.db 로스터 0명 → 여전히 로드 fail (거짓 '새 설치' 부활 방지)`, async () => {
       const { app, dir, root } = setupFreshInstall();
       try {

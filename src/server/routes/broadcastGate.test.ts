@@ -1,18 +1,5 @@
-/**
- * ★팀원 broadcast 게이트★
- *
- * ═══ 왜 생겼나 — 실측 ═══
- * `--to broadcast` 는 누구나 아무 때나 칠 수 있었고 검사도 기록도 없었다.
- * 70분간 팀원 broadcast ★47건 → wake 517회★. 1건이 11명을 깨우고, 깨어난 사람이 또 쏜다.
- * ★팀장님 @all 은 7명인데 팀원 혼잣말이 11명을 깨웠다★ — 구조가 뒤집혀 있었다.
- * 룰에는 "결과는 TERMINAL, 확인 답장 금지" 가 이미 있었지만 지켜지지 않았다(47건 중 5건이 내 것).
- *
- * ★그래서 룰이 아니라 게이트로 막는다.★ 판단을 9명에게 맡기지 않고 coordinator 한 곳으로 모은다.
- *
- * 계약 두 개:
- *  ① 팀원 전체공지 = 정식·활성 자격 + `all_hands` 사유가 있어야 한다
- *  ② broadcast 에 대한 답은 broadcast 로 못 한다 (coordinator 라도) — 연쇄의 직접 고리
- */
+/** 전체공지에는 정식·활성 발신 자격과 all_hands 사유가 필요하다.
+ * 팀원 broadcast에 broadcast로 답하는 경로는 연쇄 깨움을 막기 위해 거절한다. */
 import { describe, expect, it } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createInboxRoutes } from "./inbox";
@@ -57,9 +44,6 @@ const send = (h: ReturnType<typeof createInboxRoutes>, body: Record<string, unkn
     }),
   });
 
-// ★coordinator 요구는 뺐다 (2026-08-01)★ — 넣었더니 방이 통째로 조용해졌다.
-// 에 아무도 방에 답하지 못했다. 과녁은 ★연쇄★ 였지 발언 자체가 아니었다.
-//   그래서 그 계약을 검사하던 시험도 같이 지운다. 남는 계약은 아래 하나뿐이다.
 
 describe("★broadcast 에 대한 답은 broadcast 로 못 한다★ — 연쇄의 직접 고리", () => {
   it("부모가 broadcast 면 coordinator 라도 거부한다 (연쇄는 발신자를 안 가린다)", async () => {

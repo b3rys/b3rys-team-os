@@ -1,8 +1,4 @@
-// GET /api/inbox/messages/:id 가 수신자별 배달 상태를 준다 — send.sh --confirm 의 판정 근거.
-//
-// 왜 필요했나 (2026-07-30 실측): POST /api/inbox 는 행 삽입만 하고 ok 를 주고, 차단 판정은 그 뒤
-//   dispatcher 가 비동기로 한다. 보낸 사람이 사실을 확인할 경로가 ★없어서★ 미배달이 '성공' 으로
-//   보였다 — 리사의 정정 메시지가 그렇게 사라졌고 send.sh 는 '✓ sent' 를 찍었다.
+// POST 성공은 저장만 보장하고 차단은 비동기로 결정되므로, 실제 배달은 수신자별 상태 조회로 확인한다.
 import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
@@ -95,12 +91,10 @@ describe("GET /api/inbox/messages/:id — recipients", () => {
     expect(res.status).toBe(404);
   });
 
-  // ─── 사실 고정 (리사 요구 (b)) ───────────────────────────────────────────
-  // ★변이 테스트가 아니라 '사실 고정' 이다★ — 두 컬럼이 실제로 어긋난다는 것 자체를 못박는다.
-  //   나중에 누가 "delivery_status 로 충분한데?" 라고 할 때 이 단정이 근거가 된다.
+  // delivery_status와 recipient 상태가 어긋나는 조합을 검증해 저장 성공과 실제 배달을 구분한다.
   test("★같은 행에서 delivery_status='delivered' 인데 delivery_state='blocked' 다★ (실측 재현)", async () => {
     const { db, app } = setup();
-    // 2026-07-30 차단된 메시지 l5T94re0n3p- 의 실제 값 조합을 그대로 재현한다.
+    // 차단 상태에서도 두 요약 컬럼이 성공처럼 기록된 조합을 재현한다.
     seed(db, "m5", [
       { agent: "jane", state: "blocked", err: "blocked:pingpong_limit_exceeded:rounds=8,max=8",
         status: "delivered", rstate: "acknowledged" },
@@ -108,11 +102,11 @@ describe("GET /api/inbox/messages/:id — recipients", () => {
     const row = db.prepare(`SELECT delivery_status FROM message WHERE id='m5'`).get() as { delivery_status: string };
     const rec = db.prepare(`SELECT delivery_state, recipient_state FROM message_recipient WHERE message_id='m5'`)
       .get() as { delivery_state: string; recipient_state: string };
-    expect(row.delivery_status).toBe("delivered");        // ★거짓★
-    expect(rec.recipient_state).toBe("acknowledged");     // ★거짓★ (받은 적 없다)
+    expect(row.delivery_status).toBe("delivered");        // 거짓
+    expect(rec.recipient_state).toBe("acknowledged");     // 거짓 (받은 적 없다)
     expect(rec.delivery_state).toBe("blocked");           // ✅ 진실
 
-    // 그리고 API 는 ★진실만★ 노출한다 — 거짓 컬럼을 응답에 넣지 않는다.
+    // 그리고 API 는 진실만 노출한다 — 거짓 컬럼을 응답에 넣지 않는다.
     const body = (await get(app, "m5")) as { recipients: Array<Record<string, unknown>> };
     expect(body.recipients[0]!.delivery_state).toBe("blocked");
     expect(body.recipients[0]).not.toHaveProperty("delivery_status");

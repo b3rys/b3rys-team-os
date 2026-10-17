@@ -1,10 +1,4 @@
-// GET /api/inbox/messages/:id 가 ★버스 밖★ 으로 나간 결과(deliveries)도 준다.
-//
-// 왜 필요한가: recipients 는 ★버스 안★ 수신자만 다룬다. 목적지가 버스 밖인 메시지
-//   (`--direct-to-gd` → 팀장 텔레그램 DM)는 그 구간이 recipients 에 나타나지 않는다.
-//   그래서 보낸 쪽에서 보면 ★기록이 아예 없는 것처럼 보이고★, 멀쩡히 도착한 메시지를
-//   '도달 확인 불가' 로 판단하게 된다. 기록 자체는 recordReportDelivery 가 audit_event 에
-//   남겨두고 있다 — 없던 것은 기록이 아니라 ★조회 경로★ 다.
+// 버스 밖 전달은 recipients에 나타나지 않으므로 채널 수락 후 남긴 audit_event를 별도로 조회해 제공한다.
 import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
@@ -70,7 +64,7 @@ describe("GET /api/inbox/messages/:id — deliveries", () => {
     expect(body.deliveries[1]!.channel).toBe("telegram_dm");
     expect(body.deliveries[1]!.to).toBe("gd");
     expect(body.deliveries[1]!.ok).toBe(true);
-    // ★이게 이 변경의 핵심★ — recipients 만 보면 팀장 DM 구간을 알 수 없다.
+    // recipients만으로는 팀장 DM 전달 구간을 확인할 수 없다.
     expect(body.recipients).toHaveLength(0);
   });
 

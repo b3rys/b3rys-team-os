@@ -82,9 +82,7 @@ export function createProjectRoutes(deps: ProjectDeps) {
     const sources = projectSources(p);
     return track === undefined ? sources[0] : sources.find(t => t.trackId === track);
   }
-  // 프로젝트마다 따로 읽는다 — 한 프로젝트의 토큰·저장소 문제(캐시도 없을 때)가 목록 전체를 502 로 만들지 않게(#511).
-  //   일부만 실패: 200 + 성공한 것만 projects, 실패한 것은 failed[{id,error,key}] (토큰·응답 본문은 담지 않는다).
-  //   전부 실패: 예전처럼 첫 오류를 던져 502 {error,key} — 화면은 빈 목록 대신 오류+다시 시도.
+  // 프로젝트별 조회 실패를 격리해 일부 실패는 성공 목록과 failed로 반환한다. 전부 실패하면 첫 오류를 전파해 빈 목록으로 숨기지 않는다.
   app.get("/projects", async c => {
     const settled = await Promise.allSettled(projects.map(p => summary(p)));
     const ok = settled.flatMap(r => r.status === "fulfilled" ? [r.value] : []);
@@ -117,9 +115,7 @@ export function createProjectRoutes(deps: ProjectDeps) {
   };
   app.get("/projects/:id/doc/:key", c => document(c, false));
   app.get("/projects/:id/doc/:key/raw", c => document(c, true));
-  // 새창 페이지 — 그 창 안에서 같은 프로젝트의 문서를 돌려볼 수 있게 상단 바가 붙은 독립 HTML(팀장 2026-09-18).
-  //   ?mode=md 면 원문을 <pre> 로. 스크립트 0 · CSP default-src 'none'. 열람 규칙은 다른 문서 응답과 같다(/team 아래).
-  // mermaid 브라우저 번들 — 새창 페이지가 CSP script-src 'self' 로 이 경로만 허용한다. 파일은 node_modules 의 것을 그대로.
+  // 새 창의 mode=md는 스크립트 없는 원문 응답이다. HTML의 mermaid 번들은 CSP가 허용한 self 경로에서만 제공한다.
   const MERMAID_PATH = (() => { try { return fileURLToPath(import.meta.resolve("mermaid/dist/mermaid.min.js")); } catch { return null; } })();
   app.get("/projects/vendor/mermaid.min.js", c => {
     if (!MERMAID_PATH) return c.json({ error: "vendor_missing" }, 404);

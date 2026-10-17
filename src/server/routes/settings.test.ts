@@ -36,13 +36,7 @@ const AGENTS = [
   { id: "steve", display_name: "Steve", nicknames: ["steve"], role: "fullstack", runtime: "claude_channel", status_provider: "claude_tmux", avatar_emoji: "🧑‍💻", moderator_eligible: false },
 ];
 
-// ★런타임 인증 검사 기본 스텁 — 테스트가 실제 머신을 탐침하지 않게 한다.★
-//   publicRuntimeGate(settings.ts) 가 openclaw/hermes 영입 때 checkRuntimeAuth 를 부르는데,
-//   주입이 없으면 ★실 머신의 openclaw 바이너리·~/.hermes 프로필을 찾는다.★
-//   그래서 그 런타임이 깔린 기기에서만 통과하는 ★환경결합 테스트★ 가 됐다 —
-//   fresh clone(=CI·외부 기여자 조건)에서 10건이 400 으로 떨어졌다(2026-07-27 실측).
-//   archiveWorkspace=noop · skipRuntimeCleanup=true 와 같은 이유의 격리다: 테스트는 이 기기 상태를 읽지 않는다.
-//   ★미준비 상태를 검증하는 테스트는 각자 notReady 를 주입한다★ — 그쪽이 의도적으로 덮어쓴다.
+// 런타임 인증은 주입한 스텁으로 검사해 실제 설치·프로필에 의존하지 않는다. 미준비 조건을 검증할 때는 notReady를 주입한다.
 const readyAuth = async (runtime: string) => ({ runtime, loggedIn: true, detail: "테스트 스텁(준비됨)", fixHint: "" });
 
 function setup(agents: any[] = AGENTS, overrides: Partial<Parameters<typeof createSettingsApp>[0]> = {}) {
@@ -53,10 +47,7 @@ function setup(agents: any[] = AGENTS, overrides: Partial<Parameters<typeof crea
   const registryPath = join(dir, "agents.json");
   process.env.SLACK_TOKENS_DIR = join(dir, "slack-tokens");
   writeFileSync(teamOsPath, TEAM_OS, "utf-8");
-  // FIX1: fixture 멤버(steve/bill = 실 멤버 폴더명)의 workspace를 per-test temp로 고정.
-  //   미지정이면 swapRuntime/writeMemberPersona 가 memberPaths() 폴백으로 라이브 ~/Development/<id> 를
-  //   건드려 실 CLAUDE.md 를 삭제하던 근본버그(activation.ts:897 rmSync). temp 주입으로 원천차단 +
-  //   실제 파일연산은 temp 안에서 정상 동작(=삭제경로도 여전히 커버). 중앙가드(FIX2)와 이중방어.
+  // 픽스처 작업폴더를 tmp로 고정해야 memberPaths 폴백이 실제 멤버의 로딩파일을 수정·삭제하지 않는다.
   const isoAgents = agents.map((a: any) => ({
     ...a,
     workspace_path: a.workspace_path ?? join(dir, a.id),
@@ -65,13 +56,11 @@ function setup(agents: any[] = AGENTS, overrides: Partial<Parameters<typeof crea
   writeFileSync(registryPath, JSON.stringify(isoAgents, null, 2), "utf-8");
   syncRegistry(db, registryPath);
   // ⚠️ archiveWorkspace=noop 주입: 퇴사(DELETE) 테스트가 실제 ~/Development/<id>를 mv하지 않게 격리.
-  // (이게 빠지면 full suite 실행 시 라이브 멤버 워크스페이스가 진짜 archive로 날아감 — high-sev 회귀)
+  // 전체 시험에서도 실제 멤버 작업폴더가 이동되지 않도록 보관 함수를 주입한다.
   const app = createSettingsApp({ db, registryPath, teamOsPath, appendAudit, onRegistryChanged: () => syncRegistry(db, registryPath), archiveWorkspace: () => null, skipRuntimeCleanup: true, checkRuntimeAuth: readyAuth, ...overrides });
   return { app, teamOsPath, registryPath, dir, db };
 }
-/** 팀 세팅이 '완료'된 상태 — 영입(recruit)은 setupComplete() 를 통과해야 열린다.
- * ★필수 3필드 = team_name · lead_id · owner_name★ (2c0f363).
- *  owner_name 이 빠져 있어서 recruit 이 계속 막혔고, '영입 OT' 테스트 9건이 통째로 실패했다. */
+/** 영입 게이트를 통과하려면 team_name·lead_id·owner_name 세 필드를 모두 설정해야 한다. */
 function setupReady(agents: any[] = AGENTS, overrides: Partial<Parameters<typeof createSettingsApp>[0]> = {}) {
   const out = setup(agents, overrides);
   out.db
@@ -117,9 +106,7 @@ describe("Claude pairing backend contract", () => {
     delete process.env.CLAUDE_CHANNELS_DIR;
   });
 
-  /* 2026-07-26 리사 고착 재현. 승인이 이 라우트 밖에서 먼저 끝나면(스킬 [6] 이 안내하는 access.json
-   * 수동 편집·플러그인 promote-pending) pending 이 비어 409 만 반복되고 위저드를 닫을 길이 사라졌다.
-   * 승인이 이미 성립했으면 어느 경로였든 합류로 정합돼야 한다. */
+  /** 다른 경로에서 접근 승인이 완료되어 pending이 비었어도 실제 승인 상태를 확인해 합류로 정합해야 한다. */
   test("이미 승인된 상태면 pending 이 없어도 합류로 정합된다 (access.json 은 불변)", async () => {
     const { app, dir, db } = setup();
     const channels = join(dir, "claude-channels");
@@ -148,10 +135,7 @@ describe("Claude pairing backend contract", () => {
     delete process.env.CLAUDE_CHANNELS_DIR;
   });
 
-  /* 정합 조건을 '누군가 승인됨' 이 아니라 '★팀장이 실제로 닿을 수 있음★' 까지 좁힌다.
-   * 팀장 chat_id 는 setting(owner_chat_id)/env 같은 ★비순환★ 출처에서만 읽는다 — resolveOwnerDmId() 는
-   * 못 찾으면 access.json 의 allowFrom[0] 을 읽는 폴백이 있어서, 그걸로 allowFrom 을 검증하면
-   * 자기 자신을 확인하는 순환이 되어 무조건 통과한다. */
+  /** 팀장 chat_id는 setting·env에서만 읽는다. allowFrom 폴백으로 allowFrom을 검증하면 자기 값을 신뢰하는 순환이 된다. */
   test("★팀장 id 를 아는데 allowlist 에 없으면 합류로 만들지 않는다★ (남이 승인된 경우)", async () => {
     const oldEnv = process.env.GD_CHAT_ID; delete process.env.GD_CHAT_ID;
     const { app, dir, db } = setup();
@@ -185,12 +169,8 @@ describe("Claude pairing backend contract", () => {
     if (oldEnv === undefined) delete process.env.GD_CHAT_ID; else process.env.GD_CHAT_ID = oldEnv;
   });
 
-  /* 코덱스 리뷰: "모르면 조건을 뺀다" 는 ★강화한 척★ 이었다. owner_chat_id 는 부팅 시 1회만 자동
-   * persist 되고 Settings 입력도 선택이라, 정작 필요한 순간(첫 페어링·수동 promote 직후)에는 비어 있다.
-   * 그래서 팀장 id 를 모르면 정합하지 않고, 대신 ★무엇을 하면 열리는지★ 를 알려준다. */
-  /* ★persist 가 실패해도 조용히 넘기지 않는다★(코덱스 리뷰). 승인은 이미 access.json 에 기록됐으니
-   * 되돌릴 수 없다 — 대신 응답에 사실을 밝힌다. 안 그러면 나중에 정합이 owner_identity_unknown 으로
-   * 막혔을 때 ★왜 막혔는지 알 방법이 없다.★ 침묵을 고치는 PR 에서 침묵을 남길 뻔했다. */
+  /** 팀장 ID가 없으면 타인의 allowFrom으로 합류 처리하지 않는다. ID를 설정하면 복구할 수 있음을 응답에 안내한다. */
+  /** 승인 파일 기록 후 DB 저장이 실패하면 승인을 되돌릴 수 없으므로 성공 응답에 저장 실패를 명시해야 한다. */
   test("★신원 저장이 실패해도 승인은 유지하되 사실을 알린다★", async () => {
     const { app, dir, db } = setup();
     const channels = join(dir, "claude-channels");
@@ -210,10 +190,10 @@ describe("Claude pairing backend contract", () => {
     db.query("DROP TABLE setting").run();
 
     const res = await app.request("/ot/ot_pfail/claude-pair-approve", json({ code: "fff999" }));
-    expect(res.status).toBe(200);                       // ★승인은 유지된다★ — 되돌리면 안 된다
+    expect(res.status).toBe(200);                       // 승인은 유지된다 — 되돌리면 안 된다
     const b = await res.json() as any;
     expect(b.ok).toBe(true);
-    expect(b.owner_identity_persisted).toBe(false);     // ★사실을 숨기지 않는다★
+    expect(b.owner_identity_persisted).toBe(false);     // 사실을 숨기지 않는다
     expect(typeof b.warning).toBe("string");
     // 승인 자체는 파일에 기록됐다
     const stored = JSON.parse(readFileSync(join(accessDir, "access.json"), "utf-8"));
@@ -245,7 +225,7 @@ describe("Claude pairing backend contract", () => {
     if (oldEnv === undefined) delete process.env.GD_CHAT_ID; else process.env.GD_CHAT_ID = oldEnv;
   });
 
-  /* 위 fail-closed 가 막다른 길이 되지 않으려면 ★정상 승인이 owner_chat_id 를 채워야★ 한다.
+  /* 위 fail-closed 가 막다른 길이 되지 않으려면 정상 승인이 owner_chat_id 를 채워야 한다.
    * 정상 승인은 팀장 신원을 확인할 수 있는 유일한 지점이다(검증된 senderId). */
   test("★정상 승인은 owner_chat_id 를 채운다★ — 단 팀장이 직접 넣은 값은 덮지 않는다", async () => {
     const { app, dir, db } = setup();
@@ -266,8 +246,7 @@ describe("Claude pairing backend contract", () => {
     expect((await app.request("/ot/ot_persist/claude-pair-approve", json({ code: "abc123" }))).status).toBe(200);
     expect((db.query("SELECT value FROM setting WHERE key='owner_chat_id'").get() as any)?.value).toBe("1000000001");
 
-    // ★빈 행이 있어도 채워야 한다★ — INSERT…WHERE NOT EXISTS 로 쓰면 여기서 PK 충돌이 나고
-    //   catch 가 삼켜 값이 영영 안 채워진다(코덱스 리뷰). UPSERT 라야 통과한다.
+    // 기존 빈 행도 채워야 하므로 UPSERT를 쓴다. INSERT…WHERE NOT EXISTS는 빈 행에서 PK 충돌을 일으킨다.
     db.query("DELETE FROM setting WHERE key='owner_chat_id'").run();
     db.query("INSERT INTO setting (key, value) VALUES ('owner_chat_id','')").run();
     writeFileSync(join(accessDir, "access.json"), JSON.stringify({
@@ -374,7 +353,7 @@ describe("settings: 시스템 OP (P0 floor — capture/router)", () => {
   const SO_PIN = join(tmpdir(), "settings-systemop-pin.hash");
   const SO_GROUP = join(tmpdir(), "settings-systemop-group.txt");
   beforeEach(() => {
-    process.env.APPROVAL_EXECUTION_ENABLED = "1"; // 퇴사=execOn 게이트 → 실행 ON에서 검증(.env 의존 제거, GD 2026-07-01 하네스)
+    process.env.APPROVAL_EXECUTION_ENABLED = "1"; // 퇴사는 실행 승인 게이트가 열려야 하므로 env 대신 명시적으로 실행 ON을 주입해 검증한다.
     process.env.CAPTURE_TOKEN_FILE = SO_TOKEN;
     process.env.CAPTURE_GROUP_FILE = SO_GROUP;
     process.env.ADMIN_PIN_FILE = SO_PIN; // PIN 미설정 → graceful 허용
@@ -389,7 +368,7 @@ describe("settings: 시스템 OP (P0 floor — capture/router)", () => {
   test("GET 기본 상태 — 토큰 없음·router 기본 ON (setting·env 없으면 true, GD 0721)", async () => {
     const { app } = setup();
     const s = await (await app.request("/system-op")).json();
-    expect(s).toEqual({ has_capture_token: false, capture_group_id: null, router_enabled: true, mcp_enabled: true }); // ★MCP 기본 켜짐 — 끄는 스위치다★
+    expect(s).toEqual({ has_capture_token: false, capture_group_id: null, router_enabled: true, mcp_enabled: true }); // MCP 기본 켜짐 — 끄는 스위치다
   });
 
   test("PATCH router_enabled 토글 (PIN 없이 즉시 반영)", async () => {
@@ -461,10 +440,7 @@ describe("settings: 시스템 OP (P0 floor — capture/router)", () => {
   });
 });
 
-// ★GitHub 계정·승인자 ★쓰기★ 경로 (2026-07-29, 하네스가 잡은 차단 사유)★
-//   읽기만 열었더니 ★값을 넣을 방법이 아예 없었다★ — DB 에 행조차 없고 PUT 이 그 키를 안 받았다.
-//   그러면 머지 게이트가 ★항상 '설정 누락' 으로 실패★ 하고 탈출구는 --skip-approver-check 하나뿐이다.
-//   ★도달 가능한 상태가 '건너뛰기' 뿐인 게이트는 사람에게 건너뛰기를 훈련시킨다.★
+// 머지 게이트가 읽는 GitHub 계정·승인자 설정은 쓰기 경로에서도 저장할 수 있어야 한다.
 describe("settings: 머지 승인자 설정 쓰기", () => {
   test("★쓰고 다시 읽을 수 있다★ — 없으면 머지 게이트를 켤 방법이 없다", async () => {
     const { app } = setup();
@@ -482,7 +458,7 @@ describe("settings: 머지 승인자 설정 쓰기", () => {
 
   test("★쓰는 시점에 막는다★ — 안 그러면 '머지 때 알 수 없는 이유로 막힘' 이 된다", async () => {
     const { app } = setup();
-    // 판정기는 [a-z0-9._-] 로 매칭한다 → 한글·@ 는 ★영원히 불일치★ 한다
+    // 판정기는 [a-z0-9._-] 로 매칭한다 → 한글·@ 는 영원히 불일치 한다
     expect((await app.request("/settings", put({ merge_approvers_normal: "빌,steve" }))).status).toBe(400);
     expect((await app.request("/settings", put({ merge_approvers_normal: "@bill" }))).status).toBe(400);
     expect((await app.request("/settings", put({ github_approver_account: "not a name" }))).status).toBe(400);
@@ -492,7 +468,7 @@ describe("settings: 머지 승인자 설정 쓰기", () => {
   test("★거부되면 아무것도 안 바뀐다★ — 반쯤 바뀐 보안 설정이 제일 위험하다", async () => {
     const { app } = setup();
     await app.request("/settings", put({ github_team_account: "old-team", github_approver_account: "old-appr" }));
-    // 세 번째 키가 잘못됐다 — ★앞의 두 개도 저장되면 안 된다★ (ames 실측: 저장됐었다)
+    // 세 번째 키가 잘못되면 앞의 두 키도 저장되면 안 된다.
     const r = await app.request("/settings", put({
       github_team_account: "new-team", github_approver_account: "new-appr", merge_approvers_normal: "@invalid",
     }));
@@ -509,8 +485,7 @@ describe("settings: 머지 승인자 설정 쓰기", () => {
     expect((await app.request("/settings", put({ github_approver_account: null }))).status).toBe(400);
   });
 
-  // ★읽기만 구현돼 있던 키 (2026-07-30)★ — GET 은 값을 주는데 PUT 이 안 받아서, 보내면
-  //   ok:true 를 받고 저장이 안 됐다. 증상이 조용해서 호출자는 저장된 줄 알고 넘어간다.
+  // GET에 노출한 설정 키가 PUT에서도 실제로 저장되는지 확인한다.
   test("★github_team_commit_email 을 쓰고 다시 읽을 수 있다★ (읽기만 열려 있던 키)", async () => {
     const { app } = setup();
     const r = await app.request("/settings", put({ github_team_commit_email: "1234+bot@users.noreply.github.com" }));
@@ -529,9 +504,7 @@ describe("settings: 머지 승인자 설정 쓰기", () => {
   });
 });
 
-// ★모르는 키를 조용히 버리지 않는다 (2026-07-30)★
-//   핸들러가 아는 키만 골라 처리하고 나머지를 무시한 뒤 ok:true 를 돌려줬다. 그래서 오타·미구현 키·
-//   이름이 바뀐 키가 전부 ★성공으로 보였다.★ 실패는 고칠 수 있지만 조용한 성공은 고칠 기회가 없다.
+// 모르는 설정 키는 무시한 뒤 성공을 반환하지 않고 400으로 거절해야 오타·미구현 입력을 발견할 수 있다.
 describe("settings: 모르는 키는 400 으로 거절한다", () => {
   test("★오타 키가 성공으로 보이지 않는다★", async () => {
     const { app } = setup();
@@ -552,18 +525,8 @@ describe("settings: 모르는 키는 400 으로 거절한다", () => {
     expect(j.team_name).toBe("before");   // 모르는 키 때문에 거절 → 아는 키도 안 바뀐다
   });
 
-  // ★200 만 보면 이 PR 이 죽이려던 결함이 목록의 반대쪽에서 살아남는다★ (steve 교차검증)
-  //   WRITABLE_KEYS 와 핸들러 분기가 ★따로 관리★ 되므로 방향별 결과가 비대칭이다:
-  //     핸들러는 있는데 목록에 없다 → 400 (시끄럽게 실패, 이 PR 이 노린 것)
-  //     ★목록에는 있는데 핸들러가 없다 → 200 + 저장 안 됨★ (조용한 무시 — 고치려던 그 결함)
-  //   실측: WRITABLE_KEYS 에 키 한 줄만 추가(핸들러 없음)해도 ★기존 106개가 전부 통과★ 했다.
-  //   그래서 상태코드가 아니라 ★되읽어서 값이 실제로 반영됐는지★ 를 본다.
-  //   옛 검사는 11개 중 10개만 손으로 나열했고 ★lead_id 가 빠져 있었다★(이름은 '전부' 인데 아니었다).
-  // ★손으로 유지하는 목록을 하나로 줄인다★ (steve 리뷰)
-  //   전에는 SAMPLES 와 아래 대조용 배열이 ★같은 키를 두 벌★ 갖고 있었다. 새 키를 대조용에만 넣으면
-  //   커버리지 검사는 통과하고 저장 검사는 그 키를 아예 안 본다 — ★막으려던 구멍이 그대로 재개통★ 된다.
-  //   이제 대조는 Object.keys(SAMPLES) 에서 유도하므로 손으로 맞출 목록은 WRITABLE_KEYS ↔ SAMPLES 둘뿐이고,
-  //   커버리지 검사가 실제로 ★그 둘을★ 비교한다(자기 복사본이 아니라).
+  // 상태코드만으로는 쓰기 누락을 잡지 못하므로 값을 되읽고 검증한다.
+  // SAMPLES에서 검사 키를 유도하고 WRITABLE_KEYS와 비교해 새 키의 검증 누락을 막는다.
   const SAMPLES: Record<string, { send: unknown; expect: string }> = {
       team_name: { send: "팀이름", expect: "팀이름" },
       lead_id: { send: "leadslug", expect: "leadslug" },
@@ -589,9 +552,7 @@ describe("settings: 모르는 키는 400 으로 거절한다", () => {
   });
 
   test("★샘플 목록이 쓰기 가능한 키 전부를 덮는다★ — 키가 늘면 이 검사가 먼저 깨진다", async () => {
-    // 위 검사는 SAMPLES 를 순회한다. 새 키를 WRITABLE_KEYS 에만 넣고 SAMPLES 에 안 넣으면
-    // 위 검사는 ★그 키를 아예 안 보고 통과★ 한다 — 커버리지 구멍이 조용히 생긴다.
-    // 거절 응답의 hint 가 쓰기 가능 키 전체를 실어 보내므로 그걸로 목록을 얻어 대조한다.
+    // SAMPLES에 빠진 키는 순회 시험이 건너뛰므로 거절 응답의 전체 쓰기 가능 키와 비교해 누락을 찾는다.
     const { app } = setup();
     const r = await app.request("/settings", put({ __definitely_unknown__: "x" }));
     expect(r.status).toBe(400);
@@ -599,7 +560,7 @@ describe("settings: 모르는 키는 400 으로 거절한다", () => {
     const listed = (body.hint ?? "").split("쓰기 가능:")[1] ?? "";
     const writable = listed.split(",").map((s) => s.trim()).filter(Boolean);
     expect(writable.length, "hint 에서 쓰기 가능 키 목록을 못 읽었다").toBeGreaterThan(0);
-    // ★세 번째 목록을 만들지 않는다★ — 위 SAMPLES 에서 유도한다(steve 리뷰).
+    // 검사 키는 SAMPLES에서 유도해 검증 목록을 중복 관리하지 않는다.
     const sampled = Object.keys(SAMPLES);
     const missing = writable.filter((k) => !sampled.includes(k));
     expect(missing, `★위 저장 검사에 빠진 키가 있다: ${missing.join(", ")}★`).toEqual([]);
@@ -631,17 +592,14 @@ describe("settings: 팀명/태그라인", () => {
       owner_name: "",
       owner_chat_id: "",
       locale: "ko",
-      dm_capture: true, // 기본 on
-      // ★GitHub 계정·승인자 — 셸 절차(release-preflight --mode merge)가 읽는 값 (2026-07-29)★
-      //   ★기본이 빈 문자열인 게 핵심이다★ — 절차는 비면 진행하지 않는다.
-      //   기본값으로 때우면 팀장 개인 계정으로 나가고, 그게 이 절차가 막으려는 일이다.
+      dm_capture: true, // GitHub 계정·승인자 기본값은 비워 두어 설정 누락 시 개인 계정으로 진행하지 않게 한다.
       github_team_account: "",
       github_team_commit_email: "",
       github_approver_account: "",
       merge_approvers_normal: "",
     });
-    // ★필수 3필드 = team_name · lead_id · owner_name (2c0f363).★
-    //   2개만 채우면 아직 setup_complete=false 여야 한다 — 이 테스트는 옛 2필드 규칙을 기대해서 깨져 있었다.
+    // 필수 3필드 = team_name · lead_id · owner_name (2c0f363).
+    // 세 필드를 모두 채워야 setup_complete=true가 된다.
     const r = await app.request("/settings", put({ team_name: "로빈팀", lead_id: "lead", tagline: "우리만의 팀" }));
     expect(r.status).toBe(200);
     expect(await (await app.request("/settings")).json()).toEqual({
@@ -654,10 +612,7 @@ describe("settings: 팀명/태그라인", () => {
       owner_name: "",
       owner_chat_id: "",
       locale: "ko",
-      dm_capture: true, // 기본 on
-      // ★GitHub 계정·승인자 — 셸 절차(release-preflight --mode merge)가 읽는 값 (2026-07-29)★
-      //   ★기본이 빈 문자열인 게 핵심이다★ — 절차는 비면 진행하지 않는다.
-      //   기본값으로 때우면 팀장 개인 계정으로 나가고, 그게 이 절차가 막으려는 일이다.
+      dm_capture: true, // GitHub 계정·승인자 기본값은 비워 두어 설정 누락 시 개인 계정으로 진행하지 않게 한다.
       github_team_account: "",
       github_team_commit_email: "",
       github_approver_account: "",
@@ -745,8 +700,7 @@ describe("settings: 팀원 추가/퇴사", () => {
     const { app, registryPath, db } = setup();
     await app.request("/members", json({ id: "nova", display_name: "Nova", role: "design", runtime: "openclaw" }));
     const nova = JSON.parse(readFileSync(registryPath, "utf-8")).find((a: any) => a.id === "nova");
-    expect(nova.status_provider).toBe("openclaw_gateway"); // 'none' 이면 CHECK 위반 크래시
-    // ★ambient-safe(2026-07-12 Bill 갭): 하드코딩 대신 실제 해석된 MEMBERS_ROOT 기준★ — 라이브 .env(B3RYS_MEMBERS_ROOT)가 있어도 green.
+    expect(nova.status_provider).toBe("openclaw_gateway"); // status_provider의 none은 CHECK 위반이다. 작업폴더 기대값은 설정이 반영된 MEMBERS_ROOT를 기준으로 한다.
     expect(nova.workspace_path).toBe(join(MEMBERS_ROOT, "nova"));
     expect(() => syncRegistry(db, registryPath)).not.toThrow(); // reload 경로가 스키마 위반 없이 통과
   });
@@ -1008,9 +962,7 @@ describe("영입 OT / 능력 카탈로그", () => {
     expect(body.missing.owner_name).toBe(true);
   });
 
-  // ★'팀장ID' 가 뭔지 응답만 보고 알 수 있어야 한다★ (2026-07-25 맥스튜디오 실기).
-  //   전엔 placeholder 가 웹 UI 에만 있어서, API 응답만 본 사용자는 소스를 읽어야 알 수 있었다.
-  //   사용자가 코드를 읽어야 아는 건 결함이다 — 필드별 hint 를 응답에 싣는다.
+  // API 응답만으로 팀장 ID의 의미와 입력 방법을 알 수 있도록 필드별 hint를 반환한다.
   test("setup_incomplete 응답에 필드별 hint — lead_id 는 형식 규칙 + 예시까지", async () => {
     const { app } = setup();
     const r = await app.request("/members/recruit", json({ id: "lui", display_name: "Lui", role: "fullstack", runtime: "openclaw" }));
@@ -1243,9 +1195,7 @@ describe("영입 OT / 능력 카탈로그", () => {
     expect(joinStep.detail).toContain("subscription_needed");
     expect(body.ot.stage).toBe("join");
   });
-  // ── ★페어링 안내가 '더 먼저 풀어야 하는 차단'을 덮으면 안 된다★ (Bill 교차검증 2026-07-25) ──
-  //   DM 을 보낸다고 결제 문제가 풀리지 않는다. 페어링 안내를 앞에 두면 '따라 해도 절대 안 풀리는 안내' 라는
-  //   ★이 PR 이 없애려던 바로 그 패턴★ 이 다른 조합에서 재현된다. 순서: 구독차단 → 첫콜실패 → 페어링대기.
+  // 구독 차단·첫 호출 실패·페어링 대기 순으로 안내해야 DM으로 해결되지 않는 결제 문제를 가리지 않는다.
   const pairingActivate = async () => ({
     ok: true,
     needsPairing: true,
@@ -1302,8 +1252,7 @@ describe("영입 OT / 능력 카탈로그", () => {
     expect(joinStep.detail).toContain("거의 완료 — 마지막 한 단계");
     expect(joinStep.detail).toMatch(/@[a-z0-9_]+에게/i); // 봇 username 이 찍히고 조사 앞에 공백이 없다
     expect(joinStep.detail).not.toContain("<bot_username>");
-    // ★조사 앞 공백 검사는 사용자에게 나가는 문자열 ★전부★ 에 건다★ — joinStep.detail 만 보면
-    //   pairing_hint 가 ' 에게' 인 채로 남는다(Bill 지적: 절반만 고쳐졌다).
+    // 조사 앞 공백 검사는 joinStep.detail뿐 아니라 pairing_hint 등 사용자에게 나가는 모든 문자열에 적용한다.
     for (const text of [joinStep.detail, body.pairing_hint]) {
       expect(text).not.toContain(" 에게");
       expect(text).not.toContain(" 에서");
@@ -1444,14 +1393,8 @@ describe("settings: 전체 재적용 롤백 (6h .bak 복원)", () => {
   });
 });
 
-/* 2026-07-26 맥스튜디오 실측: Slack 연동 마법사가 ★빈 매니페스트★({"settings":{"socket_mode_enabled":true}})와
- * ★빈 scope★("—")를 그럴싸하게 그렸다. 원인은 이 엔드포인트가 TEAM_PUBLIC_BASE_URL 없으면 400 을 내고,
- * 클라이언트가 r.ok 를 안 보고 그 본문을 정상 데이터로 썼기 때문. 사용자가 그 매니페스트를 붙여넣으면
- * ★권한 0개짜리 Slack 앱★ 이 만들어진다 — 실패보다 나쁘다.
- * UI 는 "Socket Mode = 공개 URL 불필요" 라고 안내하는데 서버가 공개 URL 을 필수로 요구한 자기모순도 있었다. */
-// ★생산자에 대한 검증★ — 앞서 이 불변식은 손으로 쓴 픽스처(AgentSlack.test.ts)에만 있었고,
-// ★서버가 실제로 무엇을 내보내는지는 아무도 안 봤다.★ 그래서 #74 가 불법 매니페스트를 내보내는데도
-// 전 수트가 초록이었다(2026-07-27 Steve 리뷰). 규칙은 만드는 쪽에 걸어야 한다.
+/** Socket Mode에는 공개 URL이 필요 없으며 유효한 scope를 담은 매니페스트를 제공해야 한다. */
+// 수작업 픽스처만으로는 서버의 잘못된 매니페스트를 잡지 못하므로 서버 생산물을 직접 검증한다.
 describe("★서버가 내보내는 매니페스트는 어떤 경우에도 Slack 규격을 만족한다★", () => {
   // Slack: event_subscriptions 가 있으면 request_url 또는 socket_mode_enabled 중 하나가 필수.
   //   ("Event Subscription requires either Request URL or Socket Mode Enabled")
@@ -1486,15 +1429,11 @@ describe("slack reinstall-info", () => {
     }
   };
 
-  /* ★서버는 언제나 Socket 매니페스트를 낸다★.
-   * 예전엔 공개 URL 이 있으면 request_url + socket_mode_enabled:false 를 내보냈다. 화면에서는
-   * 클라이언트 socketManifest() 가 Socket 으로 바꿔줘 멀쩡해 보였지만, ★그건 화면을 거칠 때만★ 이다.
-   * 이 엔드포인트를 직접 받아가면 ★지원하지 않는 Event URL 앱을 만드는 매니페스트★ 가 그대로 나갔다.
-   * 그래서 ★공개 URL 유무와 무관하게 같은 Socket 매니페스트★ 가 나오는 것을 고정한다. */
+  /** 공개 URL 유무와 무관하게 Socket Mode 매니페스트를 반환한다. 직접 API를 쓰는 클라이언트도 지원하지 않는 Event URL로 유도하면 안 된다. */
   const expectSocketManifest = (b: any) => {
     expect(b.manifest?.settings?.socket_mode_enabled).toBe(true);
     expect(b.manifest?.settings?.event_subscriptions?.bot_events).toEqual(["app_mention"]);
-    // ★request_url 이 있으면 Event URL 앱이 만들어진다★ — 공개 URL 이 설정돼 있어도 넣지 않는다
+    // request_url 이 있으면 Event URL 앱이 만들어진다 — 공개 URL 이 설정돼 있어도 넣지 않는다
     expect(b.manifest?.settings?.event_subscriptions?.request_url).toBeUndefined();
   };
 
@@ -1504,7 +1443,7 @@ describe("slack reinstall-info", () => {
     expect(res.status).toBe(200);
     const b = await res.json() as any;
     expect(b.ok).toBe(true);
-    // ★scope 가 비면 권한 없는 앱이 만들어진다★ — 이게 이전 사고의 핵심이라 개수까지 고정한다
+    // scope가 비면 권한 없는 앱이 만들어지므로 필요한 개수도 검증한다.
     expect(b.needed_scopes).toEqual(["app_mentions:read", "chat:write", "groups:history", "channels:history"]);
     expect(b.manifest?.oauth_config?.scopes?.bot).toEqual(b.needed_scopes);
     expect(b.manifest?.display_information?.name).toBeTruthy();
@@ -1517,8 +1456,7 @@ describe("slack reinstall-info", () => {
     expectSocketManifest(b);
   }));
 
-  /* ★서버 산출물 → 클라이언트 변환★ 접합부. 양쪽을 따로만 검사하면, 서버가 모양을 바꿔도 클라이언트
-   * 테스트는 손으로 베낀 fixture 를 계속 통과시킨다(하네스 지적). 사용자가 붙여넣는 것은 이 합성 결과다. */
+  /** 사용자가 붙여넣는 매니페스트는 서버 생산물과 클라이언트 변환의 합성 결과이므로 접합부도 검증한다. */
   test("★사용자가 붙여넣는 최종 Socket JSON★ — 서버 응답을 그대로 변환해 확인한다", withBase(undefined, async () => {
     const { app } = setup();
     const b = await (await app.request("/members/bill/slack/reinstall-info")).json() as any;
@@ -1543,22 +1481,7 @@ describe("slack reinstall-info", () => {
   }));
 });
 
-// ────────────────────────────────────────────────────────────────────────────
-// ★영입 위저드가 페어링 코드 입력창을 못 띄우던 회귀 (2026-07-28 외부 사용자 신고)★
-//
-// 증상: 대시보드로 claude 팀원을 영입하면 마지막 '합류 확인' 에서 영원히 멈춘다.
-//   위저드는 "봇에게 DM 을 한 번 보내주세요" 라고 안내하고, 사용자가 DM 을 보내면
-//   봇이 6자리 코드를 답한다. ★그런데 그 코드를 넣을 입력창이 뜨지 않는다.★
-//
-// 원인: 입력창은 `awaiting_input.kind === "claude_pairing_code"` 일 때만 렌더된다
-//   (web/components/Settings.ts shouldShowClaudePairingPanel). 그 값을 만드는 곳은
-//   `GET /members/:id/pairing-status` 뿐인데 ★웹은 그 엔드포인트를 한 번도 부르지 않는다★.
-//   위저드가 폴링하는 `GET /ot/:ot_id` 는 steps_json 에 저장된 awaiting_input 만 돌려주고,
-//   그 값은 봇 토큰 단계에서만 채워지고 그 뒤로는 계속 null 이다.
-//   → 승인 라우트도·입력창도·검증 로직도 다 있는데 ★"지금 필요하다" 는 신호만 도달하지 않았다.★
-//
-// 클로드 코드로 영입하면 성공하던 이유: 동반자가 access.json 을 직접 편집해 승인해서
-//   이 입력창을 아예 거치지 않기 때문. ★대시보드만 쓰는 사용자는 통과할 방법이 없었다.★
+// 영입 위저드는 OT 조회 응답으로 페어링 입력창을 표시하므로 실제 pending 상태에서 입력 마커가 전달되어야 한다.
 describe("OT 조회가 claude 페어링 대기를 표면화한다", () => {
   const claudeOt = (db: any, dir: string, opts: { allowFrom?: string[]; joinState?: string; stored?: unknown } = {}) => {
     const channels = join(dir, "claude-channels");
@@ -1609,9 +1532,7 @@ describe("OT 조회가 claude 페어링 대기를 표면화한다", () => {
   });
 
   test("★활성화 전에는 안 띄운다 — 띄우면 활성화 버튼이 사라져 진행이 막힌다★", async () => {
-    // web/Settings.ts: needsActivate = provisionDone && bundlePending && … && !(awaiting?.fields?.length)
-    //   이 마커는 fields 가 있으므로, bundle 대기 중에 내보내면 ★활성화 버튼이 숨는다★.
-    //   페어링은 활성화 뒤에 생기는 단계라, 그러면 사용자는 활성화도 페어링도 못 하고 갇힌다.
+    // fields가 있는 마커는 활성화 버튼을 숨기므로 bundle 대기 중에는 내보내지 않는다. 페어링은 활성화 뒤 단계다.
     const { app, dir, db } = setup();
     const channels = join(dir, "claude-channels");
     process.env.CLAUDE_CHANNELS_DIR = channels;
@@ -1628,9 +1549,7 @@ describe("OT 조회가 claude 페어링 대기를 표면화한다", () => {
   });
 
   test("★join 이 blocked(구독/한도) 면 안 띄운다 — 더 급한 안내를 가리면 안 된다★", async () => {
-    // web footer 삼항은 pairing 분기가 needsSubscription 분기보다 ★앞★ 이다(Settings.ts:432 vs :436).
-    // subscription_needed 는 join.state="blocked" 로 온다 → 마커를 내면 앰버 경고와
-    // '🔄 해결 후 다시 활성화' 버튼이 ★통째로 가려진다★. 결제를 못 고치니 영영 못 푼다.
+    // subscription_needed는 blocked이므로 페어링 마커를 내면 더 급한 구독 해결 안내·버튼을 가린다.
     const { app, dir, db } = setup();
     const channels = join(dir, "claude-channels");
     process.env.CLAUDE_CHANNELS_DIR = channels;
@@ -1656,7 +1575,7 @@ describe("OT 조회가 claude 페어링 대기를 표면화한다", () => {
   });
 });
 
-// ★MCP 토글 — 공개 빌드에서는 존재 자체가 안 보인다★
+// MCP 토글 — 공개 빌드에서는 존재 자체가 안 보인다
 describe("system-op: MCP 창구 토글", () => {
   test("PATCH mcp_enabled 로 켜고 끈다", async () => {
     const { app } = setup();
@@ -1666,9 +1585,7 @@ describe("system-op: MCP 창구 토글", () => {
     expect(off.mcp_enabled).toBe(false);
   });
 
-  // ── ★공개 빌드 차단은 "소스에 조건식이 있다" 가 아니라 실제 응답으로 재야 한다★ (dex 리뷰 2026-08-07) ──
-  //   조건식이 남아 있어도 상수를 잘못 읽거나 응답이 새면 소스 검사는 초록불이다.
-  //   그래서 publicBuild 를 주입받게 고치고, ★같은 프로세스에서 양쪽 분기를 다 요청해 본다.★
+  // 공개 빌드 제한은 주입한 publicBuild 양쪽의 실제 HTTP 응답으로 확인한다. 소스 조건식 존재만으로는 응답 누락을 잡지 못한다.
 
   test("★공개 빌드 GET 응답에는 MCP 칸이 아예 없다★ — 그런 기능이 있다는 것도 안 보인다", async () => {
     const { app } = setup(AGENTS, { publicBuild: true });
@@ -1681,7 +1598,7 @@ describe("system-op: MCP 창구 토글", () => {
     const { app, db } = setup(AGENTS, { publicBuild: true });
     const r = await app.request("/system-op", patch({ mcp_enabled: false }));
     expect(r.status).toBe(200); // 다른 칸(router 등)까지 막지는 않는다 — MCP 만 무시한다
-    expect(isMcpEnabled(db)).toBe(true); // ★DB 가 안 바뀌었다★
+    expect(isMcpEnabled(db)).toBe(true); // DB 가 안 바뀌었다
     expect("mcp_enabled" in (await r.json())).toBe(false);
   });
 

@@ -1,12 +1,4 @@
-// approvals — GD 승인 큐 API. 권한 액션을 PIN 승인으로 처리(터미널 0). (2026-06-10 GD)
-//   GET  /approvals            대기/최근 승인 목록
-//   GET  /approvals/actions    미리 정의된 안전 액션 카탈로그
-//   POST /approvals            권한 액션 enqueue (관리/서버 내부용)
-//   POST /approvals/:id/approve {pin}  PIN 검증 → 승인(Stage1: 실행 OFF)
-//   POST /approvals/:id/reject         거절
-//   GET  /approvals/pin        PIN 설정 여부(값 X)
-//   POST /approvals/pin {pin}  admin PIN 설정/변경(첫 1회 또는 admin)
-// 보안: 액션은 ACTIONS 화이트리스트만, 승인엔 PIN, PIN 값/해시 노출 안 함.
+// 승인 큐는 허용된 액션과 PIN 검증을 사용한다. 실제 실행은 별도 실행 게이트가 켜진 경우에만 허용한다.
 import { Hono } from "hono";
 import type { Database } from "bun:sqlite";
 import {
@@ -28,10 +20,8 @@ import {
 } from "../lib/approvals";
 import { ensureThread, insertMessage } from "../db/inboxQueries";
 
-// 승인 v2: 에이전트(승인자 풀)가 merge 승인/거절 시 신청자에게 버스 통지(읽기전용).
-//   ★Devon 리뷰 #4: wake 안 나는 이유는 source:"system" 이다 — dispatcher pendingDispatch 가 source IN(agent,user)
-//   만 wake 큐에 올려서(inbox/dispatch.ts) system 은 세션 wake·답장 유발 안 함. (expected_response 는 insertMessage
-//   가 컬럼에 안 넣으므로 no-op 이라 제거.) unread inbox 항목만 남음 = 통지라 OK.
+// 에이전트 신청자의 승인·거절 결과는 source=system 버스 통지로 남긴다.
+// 디스패처는 agent·user만 깨우므로 이 통지는 세션을 깨우지 않고 수신함에만 남는다.
 function notifyRequesterBus(db: Database, requestedBy: string, text: string): void {
   try {
     if (!requestedBy || requestedBy === "system" || requestedBy.startsWith("telegram:")) return; // 에이전트 대상만
@@ -52,7 +42,7 @@ export function createApprovalsApp(deps: ApprovalsDeps): Hono {
   const { db } = deps;
   const app = new Hono();
 
-  // 제시되는 것 = 실행 가능한 것만. 제외된 건 ★숨기되 침묵하지 않는다★ — 이유를 함께 준다.
+  // 제시되는 것 = 실행 가능한 것만. 제외된 건 숨기되 침묵하지 않는다 — 이유를 함께 준다.
   app.get("/approvals/actions", (c) =>
     c.json({
       actions: listActions().map((a) => ({ key: a.key, label: a.label, description: a.description, danger: a.danger, paramHints: a.paramHints ?? [] })),
@@ -111,8 +101,7 @@ export function createApprovalsApp(deps: ApprovalsDeps): Hono {
   app.post("/approvals/pin", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const pin = String(body.pin ?? "");
-    // ★보안: 이미 PIN이 설정돼 있으면 *기존 PIN(current_pin) 검증* 후에만 변경 허용.
-    // (없으면 누구나 덮어써 가드 무력화 — 첫 설정만 무인증.)
+    // PIN 변경은 기존 PIN을 확인해야 임의 덮어쓰기로 승인 보호가 무력화되지 않는다. 첫 설정만 무인증이다.
     if (isPinSet()) {
       const current = String(body.current_pin ?? "");
       const v = await verifyPin(current);

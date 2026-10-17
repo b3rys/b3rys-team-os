@@ -128,8 +128,7 @@ describe("새창 페이지 /doc/:key/page", () => {
     expect(html.match(/<script/g)).toHaveLength(2);
     expect(html).toContain('<figure class="project-diagram">');
     const res2 = await app.request("http://localhost/team/api/projects/sample/doc/readme/page");
-    expect(res2.headers.get("content-security-policy")).not.toBe(csp); // nonce 는 요청마다 다르다
-    // mermaid 펜스가 없는 html 문서(DESIGN 픽스처)는 예전 그대로 — script-src 없음·<script> 0
+    expect(res2.headers.get("content-security-policy")).not.toBe(csp); // nonce는 요청마다 달라야 한다. mermaid가 없는 문서에는 스크립트나 script-src를 추가하지 않는다.
     const res3 = await app.request("http://localhost/team/api/projects/sample/doc/design/page");
     expect(res3.headers.get("content-security-policy")).toBe("default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
     const html3 = await res3.text();
@@ -217,8 +216,7 @@ describe("PROJECT.md — 선택 문서 키", () => {
     expect(html.indexOf(">PROJECT<")).toBeLessThan(html.indexOf(">DESIGN<"));
   });
 
-  // GitHub 가 안 될 때 디스크 캐시로 버틴다. 예전 캐시에는 project 키가 없다 — 그건 받아들이되,
-  // ★필수 문서가 빠진 캐시까지 받아들이면★ 목록은 '있음' 인데 열면 404 가 된다.
+  // project 키 없는 이전 캐시는 허용하되 필수 문서가 빠진 캐시는 거절해 목록에는 있고 열면 404인 상태를 막는다.
   async function staleAfterEditingCache(edit: (docs: Record<string, unknown>) => void) {
     const dir = mkdtempSync(join(tmpdir(), "projects-cache-"));
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));

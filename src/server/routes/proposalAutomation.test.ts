@@ -1,8 +1,4 @@
-/**
- * proposal 자동화 — 생성=즉시 진입 / 리뷰=자동 전이 / 원자·멱등 코어 테스트.
- * "담당자 자율성 배제 → 시스템 자동 승격". codex/gemini 교차검토 반영.
- * 핀: (B)생성 즉시 첫 리뷰단계 진입 · 리뷰 등록 시 자동 전이 · advanceProposalIfCurrent 멱등/원자 race 차단.
- */
+/** 생성 즉시 검토 진입·리뷰 후 자동 전이와 advanceProposalIfCurrent의 원자성·멱등성을 검증한다. */
 import { beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
@@ -271,8 +267,7 @@ describe("자동화 — 교차검토 결함 회귀 방어", () => {
 });
 
 describe("후보를 다 돌아도 리뷰가 없을 때", () => {
-  // 막아두는 것과 멈춰두는 것은 다르다. blocked 로 남기면 팀장 보고로는 안 가지만,
-  // 카드 소유자가 무응답한 리뷰어 그대로면 다음 행동을 할 사람이 없다.
+  // blocked 카드의 소유자를 무응답 리뷰어로 남기면 다음 행동을 할 사람이 없으므로 조정자에게 배정해야 한다.
   const ageProposal = (db: Database, id: string, minutes: number) =>
     db.prepare("UPDATE proposal SET updated_at = datetime('now', ?) WHERE id = ?").run(`-${minutes} minutes`, id);
 
@@ -373,7 +368,7 @@ describe("후보를 다 돌아도 리뷰가 없을 때", () => {
     }
     expect(blocked).toBe(true);
 
-    // 장부는 조율자로 바뀌는데 보드에는 아무것도 안 보인다. 남아야 설명이 된다.
+    // 후속 과제와 칸반 카드에 조정자가 함께 표시되어야 다음 행동의 담당자를 확인할 수 있다.
     const audit = db
       .prepare("SELECT COUNT(*) AS n FROM audit_event WHERE action = ? AND target = ?")
       .get("sweeper_blocked_card_missing", id) as { n: number };

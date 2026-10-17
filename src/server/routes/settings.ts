@@ -11,7 +11,7 @@ import { writeMemberPersona, savePersonaFile } from "../lib/writeMemberPersona";
 import { refreshLoadingFiles } from "../lib/refreshLoadingFiles";
 import { memberPaths, personaTargetsForRuntime, injectCoreRule, stripCoreRule, coreRuleFor, injectClaudeComms, stripClaudeComms, JOIN_FLAG_FILE, joinInstructions } from "../lib/personaTemplates";
 import { captureConfigStatus, setCaptureToken, setCaptureGroupId, setRouterEnabled, setMcpEnabled, getCaptureToken } from "../lib/captureConfig";
-// ★설정 키 이름은 approvals.ts 정본을 쓴다★ — 문자열을 여기 다시 적으면 그 순간 갈린다.
+// 설정 키 이름은 approvals.ts 정본을 쓴다 — 문자열을 여기 다시 적으면 그 순간 갈린다.
 import { MERGE_APPROVERS_SETTING_KEY } from "../lib/approvals";
 import { configureLeadActorDb, leadActorId, leadActorSource, trustedActorFromRequest } from "../lib/opAuth";
 
@@ -61,7 +61,7 @@ import { isHermesProfileProtected } from "../lib/hermesBaseProfile";
 import { latestCaptureNonBotSender, listDiscoveredGroups } from "../lib/telegramLeadDetection";
 import { activeOfficialMemberCount, isTeamOfficialMember, MAX_OFFICIAL_TEAM_MEMBERS } from "../lib/agentMembership";
 import { writeRegistrySafely, type RegistryWriteOptions } from "../lib/registrySafety";
-// persist 실패는 ★DB 밖★ 에 남겨야 한다 — 실패 원인이 DB 자체일 수 있다.
+// persist 실패는 DB 밖에 남겨야 한다. 실패 원인이 DB 자체일 수 있다.
 import { appendAuditFile } from "../lib/auditFile";
 
 export { MAX_OFFICIAL_TEAM_MEMBERS } from "../lib/agentMembership";
@@ -89,13 +89,13 @@ export interface SettingsDeps {
   // capture 워커 재init(새 토큰/그룹 즉시 적용 — 서버 재시작 불필요). 미주입 시 재시작 필요(needs_restart 유지).
   restartCapture?: () => void;
   // 퇴사 시 workspace 보관 함수(주입 가능). 기본=실제 archiveWorkspace(라이브 ~/Development/<id> mv).
-  // 테스트는 noop을 주입해 실제 워크스페이스를 건드리지 않게 한다(test 격리 — 라이브 멤버 mv 사고 방지).
+  // 시험은 noop을 주입해 실제 작업폴더 이동을 막는다.
   archiveWorkspace?: (id: string, runtime: string) => string | null;
-  // ★런타임 파일정리(removeClaudeBridgeFiles 등 실 HOME 경로 rm) 건너뜀 — 테스트가 실제 ~/.claude·~/.hermes·~/.openclaw를 지우지 않게(test 격리).
-  // 이게 없어서 `bun test`의 DELETE /members/steve 테스트가 실제 telegram-steve 폴더를 삭제하던 치명 버그. 테스트는 true 주입.
+  // 런타임 파일정리(removeClaudeBridgeFiles 등 실 HOME 경로 rm) 건너뜀 — 테스트가 실제 ~/.claude·~/.hermes·~/.openclaw를 지우지 않게(test 격리).
+  // 시험은 true를 주입해 실제 런타임 폴더 삭제를 차단한다.
   skipRuntimeCleanup?: boolean;
   checkRuntimeAuth?: typeof checkRuntimeAuth;
-  // ★공개 빌드 여부를 시험이 직접 정할 수 있게★ — 미주입이면 라이브와 같은 PUBLIC_BUILD(=B3OS_LIVE !== "1").
+  // 공개 빌드 여부를 시험이 직접 정할 수 있게 — 미주입이면 라이브와 같은 PUBLIC_BUILD(=B3OS_LIVE !== "1").
   publicBuild?: boolean;
   activateMember?: typeof activateMember;
   // 활성화 직후 실제 첫 모델 호출 검증. 테스트는 mock 주입으로 라이브 계정/외부 상태 의존을 끊는다.
@@ -120,9 +120,7 @@ function pickIcon(list: any[], requested: string): string {
 }
 const ID_RE = /^[a-z][a-z0-9_-]{1,31}$/;
 const LEAD_ID_RE = /^[a-z0-9_-]{1,40}$/;
-/** setup_incomplete 응답에 실어 보내는 필드별 안내 — ★단일 출처★.
- *  lead_id 문구는 lead_id_invalid 검증 응답의 hint 와 같은 규칙을 쓴다(두 곳이 갈라지지 않게).
- *  웹 UI placeholder 만 알고 API 응답은 모르던 갭을 닫는다(2026-07-25 맥스튜디오 실기). */
+/** setup_incomplete와 lead_id_invalid가 같은 입력 규칙을 안내하도록 필드별 hint를 한 곳에서 관리한다. */
 const LEAD_ID_RULE = "소문자/숫자/-/_, 1~40자";
 const SETUP_FIELD_HINTS: Record<string, string> = {
   team_name: "팀 이름 — 자유 텍스트, 예: b3rys",
@@ -164,19 +162,15 @@ function parseRuntimeCwd(value: unknown): { ok: true; value: string | null } | {
 // 전체 핵심룰 재적용 롤백 가능 시간(6시간). 지나면 롤백 버튼/엔드포인트가 거부.
 const ROLLBACK_WINDOW_MS = 6 * 60 * 60 * 1000;
 
-// 공개 빌드 여부 = ★런타임 플래그★(public=source: 한 트리, 스크럽 시점 소스플립 제거). 전체 핵심룰
-// 재적용/롤백·라이브전용 런타임(codex)·배포 메뉴 등 라이브 전용 기능은 PUBLIC_BUILD=true(공개)에서 비활성.
-// ★기본 = 공개 모드★ (fail-safe — 새 클론이 실수로 라이브 기능 노출 안 함).
-// ★공개는 "제한된 상태" 가 아니라 정식 운영 모드다★ — 팀을 실제로 운영하는 설치도 여기가 맞다.
-// `B3OS_LIVE=1` 은 ★b3os 자체를 개발·검증하는 인스턴스용★ 이다. "우리 팀은 진짜로 돌아가니까
-// 라이브이겠지" 로 읽으면 뒤집힌다 — 기준은 b3os 를 개발하는가다. (토글 목록 = docs/BUILD_MODES.md)
+// 공개 모드는 정식 운영 기본값이며 핵심룰 재적용·롤백 등 개발 전용 기능은 비활성이다.
+// B3OS_LIVE=1은 b3os 자체 개발·검증 인스턴스에만 사용한다(docs/BUILD_MODES.md).
 export const PUBLIC_BUILD = process.env.B3OS_LIVE !== "1";
 // codex·b3os_native = 라이브 검증 후 공개. 공개빌드(PUBLIC_BUILD=true)에선 영입·스왑에서 서버측 거부(UI 숨김의 방어 이중화).
 const LIVE_ONLY_RUNTIMES = new Set(["b3os_native", "codex"]);
 export const allowedRuntimes = (publicBuild = PUBLIC_BUILD) =>
   [...RUNTIMES].filter((runtime) => !publicBuild || !LIVE_ONLY_RUNTIMES.has(runtime));
 
-// 공개빌드에선 런타임 교체(swap-runtime)를 ★웹 UI에서만★ 숨긴다(AgentConfig LIVE_ONLY_OPS 게이트) — 서버 엔드포인트는 유지.
+// 공개빌드에선 런타임 교체(swap-runtime)를 웹 UI에서만 숨긴다(AgentConfig LIVE_ONLY_OPS 게이트) — 서버 엔드포인트는 유지.
 // codex/b3os_native target 은 여전히 publicRuntimeGate 가, 미준비 런타임은 runtime_not_ready 가 막는다(그 게이트만으로 충분).
 
 export const PUBLIC_RUNTIME_IDS = ["claude_channel", "hermes_agent", "openclaw"] as const;
@@ -192,10 +186,7 @@ export interface RuntimeOption {
   setup_ref: string | null;
 }
 
-// runtime-options 는 ★빌드모드 인지★다:
-//   - PUBLIC_BUILD=true(공개) → Claude(권장)+Hermes(BYO)+OpenClaw(BYO) 정확히 3종. codex/b3os_native 미노출.
-//   - PUBLIC_BUILD=false(내부) → 위 3종 + codex(내부 대시보드 영입·스왑 복원). readiness 게이팅은 양쪽 동일.
-//   b3os_native 는 서버 RUNTIMES(activation.ts) 밖이라(=영입 불가) 어느 모드에서도 옵션에 싣지 않는다.
+// 공개는 Claude·Hermes·OpenClaw, 개발 모드는 codex를 추가 노출하며 같은 readiness 검사를 쓴다. b3os_native는 서버 영입 대상이 아니므로 양쪽에서 숨긴다.
 export function publicRuntimeOptions(
   readiness: Record<string, RuntimeReadiness>,
   publicBuild = PUBLIC_BUILD,
@@ -219,9 +210,7 @@ export function publicRuntimeOptions(
   return options;
 }
 
-// 파일 쓰기 전 .bak 백업 (직전 1세대) — 사고 시 복구 경로 확보.
-// seen: 한 요청 내 같은 파일을 두 번 백업하지 않게(예: core-rule loop → comms loop이 같은 CLAUDE.md를
-//   다시 .bak로 덮어 진짜 원본을 잃던 버그 방지). 첫 백업만 원본으로 보존.
+// 같은 요청에서는 파일별 첫 .bak만 남겨야 뒤의 쓰기가 원래 복구본을 덮지 않는다.
 function backup(path: string, seen?: Set<string>) {
   if (seen?.has(path)) return;
   if (existsSync(path)) copyFileSync(path, path + ".bak");
@@ -250,9 +239,7 @@ const CAPABILITIES = [
   { key: "rt_codex", label: "Codex 런타임", desc: "codex(OpenAI Codex CLI)", category: "runtime" },
 ];
 
-// 공개빌드(PUBLIC_BUILD=true)에선 라이브전용 런타임(codex·b3os_native)의 능력카탈로그 항목(rt_*)을
-// 표시 표면에서도 숨긴다 — 영입/스왑은 이미 서버측 거부(runtime_not_public)로 막지만, /capabilities·OT번들
-// 같은 ★표시★ 경로가 무필터면 "보이는데 못 고르는" 모순 + 비공개 런타임 노출이 된다.
+// 공개에서는 영입·스왑 거부와 함께 카탈로그에서도 개발 전용 런타임을 숨겨 선택 불가능한 옵션을 노출하지 않는다.
 const VISIBLE_CAPABILITIES = CAPABILITIES.filter(
   (cap) =>
     !(PUBLIC_BUILD && cap.category === "runtime" && cap.key.startsWith("rt_") && LIVE_ONLY_RUNTIMES.has(cap.key.slice(3))),
@@ -324,8 +311,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
   const doArchiveWorkspace = deps.archiveWorkspace ?? archiveWorkspace; // 주입 없으면 실제 함수(라이브). 테스트는 noop 주입.
   const skipRuntimeCleanup = deps.skipRuntimeCleanup ?? false; // 테스트=true → 실 HOME(~/.claude 등) 파일 rm 건너뜀(라이브 봇 데이터 삭제 방지).
   const doCheckRuntimeAuth = deps.checkRuntimeAuth ?? checkRuntimeAuth;
-  // ★공개 빌드 판정을 주입받는다★ (dex 리뷰): 모듈 상수를 그대로 읽으면 한 프로세스에서 한쪽 분기밖에
-  //   못 잰다 — 그래서 "소스에 조건식이 있다" 만 확인하는 시험이 됐고, 그건 동작을 증명하지 않는다.
+  // 공개 빌드 판정을 주입받아 한 프로세스에서 양쪽 응답을 검증한다. 모듈 상수만 읽으면 한쪽 분기만 실행된다.
   const publicBuild = deps.publicBuild ?? PUBLIC_BUILD;
   const runtimeReadiness = async (runtime: string) => runtimeReadinessFromAuth(await doCheckRuntimeAuth(runtime));
   const publicRuntimeGate = async (runtime: string) => {
@@ -342,11 +328,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
   const app = new Hono();
   // Option B: 라이브 rules 에서만 템플릿 편집 + {{OWNER}} 렌더를 쓴다. 테스트(임시 경로)는
   // teamOsPath(=TEAM-OS.md) 그대로 읽고 렌더는 skip(실파일 부작용 방지).
-  const isLiveRules = teamOsPath === LIVE_TEAM_OS_PATH; // 포터블: repo명 무관, 렌더본 경로와 정확 일치(공개 repo명 b3rys-team-os 대응)
-  // 편집 대상: 라이브 rules면 템플릿({{OWNER}} 보존). 단 공개 릴리스는 TEAM-OS.template.md 를
-  // 제외하고 내용을 TEAM-OS.md 로만 복사하므로(make-public-release.sh), 템플릿 파일이 없으면
-  // teamOsPath(=TEAM-OS.md)로 폴백한다. 폴백 없으면 신규 공개설치서 GET/PUT /mission 이 없는
-  // 템플릿을 readFileSync → 500 read_failed.
+  const isLiveRules = teamOsPath === LIVE_TEAM_OS_PATH; // 렌더본 경로와 일치하는 팀 규칙을 편집하며 템플릿의 OWNER 자리표시자는 보존한다. 템플릿이 없는 설치는 TEAM-OS.md를 사용한다.
   const teamOsEditPath = isLiveRules && existsSync(TEAM_OS_TEMPLATE_PATH) ? TEAM_OS_TEMPLATE_PATH : teamOsPath;
   const renderOwner = () => {
     if (!isLiveRules) return;
@@ -363,7 +345,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
   // 셋업 완료 = 필수 3개 모두 채워짐(팀 이름·팀장 ID·팀장 이름) 스킬/API 경로도 이 게이트로 필수 강제.
   const setupComplete = () => Boolean(getSetting(db, "team_name")?.trim() && getSetting(db, "lead_id")?.trim() && getSetting(db, "owner_name")?.trim());
 
-  // ── 팀 정체성: 팀명·태그라인 ──────────────────────────────────────
+  //  팀 정체성: 팀명·태그라인
   app.get("/settings", (c) => {
     return c.json({
       team_name: getSetting(db, "team_name") ?? "",
@@ -382,21 +364,14 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       // dm_capture: 팀원↔팀장 1:1 DM 을 dm_message 로 적재할지. 팀원 세션 기록을 읽는 기능이라 끌 수 있어야 한다.
       //   끄면 대시보드 DM 통계와 bus-recall 의 1:1 조회만 비고, 버스·위임·발신은 전부 그대로 돈다(크리티컬 아님).
       dm_capture: getSetting(db, "dm_capture") !== "off",
-      // ★GitHub 계정·승인자 — 셸 절차가 읽어야 하는 값들 (2026-07-29 요구사항)★
-      //   이 값들은 DB 에 ★있었는데 조회할 길이 없었다.★ 그래서 b3os-github-workflow 스킬에는
-      //   "설정에서 조회한다" 고만 적혀 있고 ★조회 명령이 없었다.★
-      //   ★따를 방법이 안 적혀 있으면 안 따라진다★ — 실제로 그 단계가 건너뛰어져
-      //   PR 을 승인 계정으로 만들어 머지가 막혔다(#119).
-      //
-      //   ★비밀이 아니다★: GitHub 사용자명과 noreply 이메일은 모든 PR·커밋에 이미 공개로 찍힌다.
-      //   ★토큰류는 여기 넣지 않는다.★
+      // GitHub 계정·승인자·커밋 이메일은 셸 절차가 조회해야 한다. 공개 신원 값만 제공하며 토큰은 포함하지 않는다.
       github_team_account: getSetting(db, "github_team_account") ?? "",
       github_team_commit_email: getSetting(db, "github_team_commit_email") ?? "",
-      // 승인용 계정 — ★작성 계정과 달라야 리뷰 요건이 성립한다.★
+      // 승인용 계정 — 작성 계정과 달라야 리뷰 요건이 성립한다.
       //   비어 있으면 절차가 멈춘다(기본값으로 때우면 팀장 개인 계정으로 나간다).
       github_approver_account: getSetting(db, "github_approver_account") ?? "",
-      // 머지 승인자(사람) 명부 — ★판정 정본은 approvals.ts★. 여기서는 셸이 읽을 수 있게 값만 내보낸다.
-      //   ★두 번째 명부를 만들지 않기 위해서다★ — 셸이 자기 목록을 하드코딩하면 그게 갈린다.
+      // 머지 승인자(사람) 명부 — 판정 정본은 approvals.ts. 여기서는 셸이 읽을 수 있게 값만 내보낸다.
+      //   두 번째 명부를 만들지 않기 위해서다 — 셸이 자기 목록을 하드코딩하면 그게 갈린다.
       merge_approvers_normal: getSetting(db, MERGE_APPROVERS_SETTING_KEY) ?? "",
     });
   });
@@ -408,13 +383,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     } catch {
       return c.json({ error: "invalid_json" }, 400);
     }
-    // ★모르는 키를 조용히 버리지 않는다★ (2026-07-30)
-    //   이 핸들러는 아는 키만 골라 처리하고 나머지는 ★무시한 뒤 ok:true 를 돌려줬다.★ 그래서
-    //   ① 오타(`github_team_email`) ② 아직 구현 안 된 키 ③ 이름이 바뀐 키 가 전부 ★성공으로 보였다.★
-    //   실측: 읽기만 구현돼 있던 키를 PUT 했더니 ok:true 를 받고 저장이 안 됐다. 호출자는 저장된 줄 알고
-    //   넘어가고, 문제는 한참 뒤 다른 증상으로 나타난다.
-    //   ★쓰기 가능한 키를 여기 한 곳에 적고, 그 밖의 키는 400 으로 거절한다.★ 새 키를 추가하는 사람이
-    //   이 목록에 넣는 것을 잊으면 ★조용히 무시되는 대신 즉시 실패한다★ — 실패는 고칠 수 있다.
+    // 쓰기 가능 키는 한 목록으로 관리하고 나머지는 400으로 거절해 저장되지 않은 입력에 성공을 반환하지 않는다.
     const WRITABLE_KEYS = new Set<string>([
       "team_name", "lead_id", "tagline", "owner_name", "owner_chat_id", "locale", "dm_capture",
       "github_team_account", "github_team_commit_email", "github_approver_account",
@@ -445,20 +414,9 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       setSetting(db, "lead_id", v);
       out.lead_id = v;
     }
-    // ★GitHub 계정·승인자 — 쓰기 경로 (2026-07-29)★
-    //   ★이 블록의 3키에 한해★ 전부 검증한 뒤 한 번에 쓴다 (ames 실측): 키마다 검증→저장을 하면
-    //   ★세 번째에서 400 이 나도 앞의 두 개는 이미 저장돼 있다.★ 보안성 설정이 ★반쯤 바뀐 상태★ 로 남는다.
-    //
-    //   ★★엔드포인트 전체가 원자적이라는 뜻이 아니다★★ (steve 지적) — team_name·lead_id·tagline 등
-    //   ★다른 키들은 여전히 즉시 저장★ 된다. 그래서 team_name 과 잘못된 github 키를 한 요청에 같이 보내면
-    //   ★team_name 은 저장되고 400 이 난다.★ 이 PR 범위 밖이라 안 고쳤다 — ★다음 사람이 '여기는 원자적' 으로
-    //   읽고 다른 키까지 그렇다고 믿지 않도록 한정해서 적는다.★
-    //   ★타입도 본다★: String() 강제 변환이라 숫자 123 이나 배열 ["bill"] 도 200 으로 저장됐다.
+    // GitHub 설정 세 키만 모두 검증한 후 한 번에 쓴다. 다른 설정 키는 즉시 저장되므로 엔드포인트 전체가 원자적이지는 않다.
     {
-      // ★github_team_commit_email 을 추가한다 (2026-07-30)★ — 이 키는 ★읽기만★ 구현돼 있었다.
-      //   GET 은 값을 돌려주는데 PUT 핸들러에 없어서, 보내면 ok:true 를 받고 ★저장되지 않았다.★
-      //   증상이 조용하다: 호출자는 성공 응답을 받고 저장된 줄 안다. 다음 커밋에서야 이메일이
-      //   설정되지 않은 채 나간다 — 그때는 원인이 여기라는 걸 알기 어렵다.
+      // 커밋 이메일도 쓰기 가능한 GitHub 설정으로 검증한다. 읽기 응답만으로 저장 성공을 보장할 수 없다.
       const keys = [
         "github_team_account",
         "github_team_commit_email",
@@ -474,17 +432,15 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
           return c.json({ error: `${key}: 문자열이어야 합니다` }, 400);
         if (key === MERGE_APPROVERS_SETTING_KEY) {
           const pool = raw.split(/[\s,]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
-          // ★쓰는 시점에 검증한다★ — 안 하면 머지 시점에 '알 수 없는 이유로 막힘' 이 된다.
-          //   판정기가 [a-z0-9._-] 로 매칭하므로 그 밖의 값(한글·@)은 ★영원히 불일치★ 한다.
+          // 쓰는 시점에 검증한다 — 안 하면 머지 시점에 '알 수 없는 이유로 막힘' 이 된다.
+          //   판정기가 [a-z0-9._-] 로 매칭하므로 그 밖의 값(한글·@)은 영원히 불일치 한다.
           const bad = pool.filter((x) => !/^[a-z0-9._-]+$/.test(x));
           if (bad.length)
             return c.json({ error: `${key}: 사용할 수 없는 이름 — ${bad.join(", ")} (영숫자·. _ - 만)` }, 400);
           staged.push([key, pool.join(",")]);
         } else if (key === "github_team_commit_email") {
           const v = raw.trim();
-          // 이메일 형식만 본다(빈 문자열은 '해제'). GitHub 는 noreply 형식도 받으므로 넓게 허용한다.
-          //   ★형식 검증을 여기서 하는 이유★: 잘못된 값은 커밋 시점에야 드러나고, 그때는
-          //   "push 가 거부됐다" 로만 보여 원인이 이 설정이라는 걸 찾기 어렵다.
+          // 잘못된 커밋 설정을 쓰는 시점에 거절하되 noreply 이메일과 해제용 빈 문자열은 허용한다.
           if (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))
             return c.json({ error: `${key}: 이메일 형식이 아닙니다` }, 400);
           staged.push([key, v]);
@@ -536,7 +492,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ok: true, ...out, setup_complete: setupComplete(), lead_actor_id: leadActorId(db), lead_actor_source: leadActorSource(db) });
   });
 
-  // ── Mission: TEAM-OS §1 읽기/쓰기 ────────────────────────────────
+  //  Mission: TEAM-OS §1 읽기/쓰기
   app.get("/mission", (c) => {
     try {
       const text = readFileSync(teamOsEditPath, "utf-8"); // 편집 대상=템플릿({{OWNER}} 보존)
@@ -580,7 +536,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ok: true });
   });
 
-  // ── 팀원: 목록·추가·퇴사 (agents.json) ───────────────────────────
+  //  팀원: 목록·추가·퇴사 (agents.json)
   function readAgents(): any[] {
     // agents.json 은 런타임 상태(untracked) — 없으면 빈 로스터(공개 clone 첫 부팅/셋업 전). writeAgents 가 곧 생성.
     let raw: string;
@@ -658,10 +614,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     });
   });
 
-  // ★영입 게이트(팀명·팀장ID·팀장이름)는 ★UI 전용★ 이다 — 이 엔드포인트는 그 셋을 보지 않는다.★
-  //   (2026-07-17 실측: setup_complete=false 여도 이 POST 는 200 으로 통과한다)
-  //   화면의 setupComplete() 배너는 ★UX 안내지 보안 경계가 아니다.★ 로컬 대시보드라 그대로 두지만,
-  //   ★"게이트가 있으니 안전" 으로 읽지 말 것.★ 서버 강제가 필요해지면 여기에 조건을 넣어야 한다.
+  // 이 영입 엔드포인트는 팀명·팀장 ID·이름을 검사하지 않는다. 화면의 setupComplete 안내는 서버의 보안 경계가 아니다.
   app.post("/members", async (c) => {
     let body: { id?: unknown; display_name?: unknown; role?: unknown; runtime?: unknown; avatar_emoji?: unknown; icon?: unknown };
     try {
@@ -687,7 +640,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       return c.json({ error: "read_failed", detail: e instanceof Error ? e.message : String(e) }, 500);
     }
     if (list.some((a) => a.id === id)) {
-      // OT 중단으로 ot_id 를 잃었을 때 재개할 수 있도록, 진행 중인 OT id 를 409 에 실어준다(#6 재개경로).
+      // OT 중단으로 ot_id 를 잃었을 때 재개할 수 있도록, 진행 중인 OT id 를 409 에 실어준다.
       const existingOt = db.query("SELECT id FROM ot WHERE member_id = ? ORDER BY updated_at DESC LIMIT 1").get(id) as any;
       return c.json({ error: "id_exists", id, ot_id: existingOt?.id ?? null, hint: existingOt?.id ? "이미 등록된 팀원 — 재영입 대신 이 ot_id 로 진행 중인 OT 를 이어가세요." : undefined }, 409);
     }
@@ -796,21 +749,15 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     if (typeof body.confirm_name !== "string" || body.confirm_name.trim() !== target.display_name)
       return c.json({ error: "confirm_name_mismatch", hint: `정확히 "${target.display_name}" 입력 필요` }, 400);
     if (list.length <= 1) return c.json({ error: "cannot_remove_last_member" }, 400);
-    // ★설정된 base hermes 프로필 멤버 퇴사 차단 — 공유 auth 소스+clone 원본 보존.
+    // 설정된 base hermes 프로필 멤버 퇴사 차단 — 공유 auth 소스+clone 원본 보존.
     if (target.runtime === "hermes_agent" && isHermesProfileProtected((target as any).hermes_profile ?? id))
       return c.json({ error: "cannot_offboard_base_hermes_profile", hint: `${HERMES_BASE_PROFILE}는 모든 hermes 멤버가 공유하는 base 프로필(auth 소스)입니다. 이 멤버는 퇴사 대상이 아닙니다 — 필요 시 인프라 재구성으로 별도 처리하세요.` }, 400);
-    // ⚠ 레지스트리 제거(writeAgents)는 런타임 cleanup 이후로 미룬다 — setAgentEnabled→setHermes가 ambientAgents()로 프로필을 조회하므로 먼저 지우면 profile≠id일 때 오프로필을 stop한다.
-    // 4-branch 런타임 teardown(codex/claude_channel/hermes_agent/openclaw) = teardownRuntime()로 추출(activation.ts,
-    // Phase1 리팩터) — swap-runtime(신규 엔드포인트)과 이 함수를 공유한다. 동작은 원본과 동일(각 분기·가드·retry 그대로).
+    // teardownRuntime은 ambientAgents로 프로필을 조회하므로 레지스트리는 런타임 정리 후 제거해야 다른 프로필을 멈추지 않는다.
     await teardownRuntime(id, target.runtime, target, { skip: skipRuntimeCleanup });
-    // 이제 레지스트리에서 제거 커밋 — 위 런타임 cleanup(setHermes의 프로필 조회 포함)이 끝난 뒤라야 안전(Codex #4).
+    // 프로필 조회를 포함한 런타임 정리가 끝난 뒤 레지스트리 제거를 커밋한다.
     try {
       const remaining = list.filter((a) => a.id !== id);
-      // ★sole coordinator 삭제 시 재할당 — coordinator 를 가진 멤버를 지우면 팀에 0명이 되어 라우팅 fallback 이
-      //   죽는다(coordinatorId 경고 + 미배정 메시지 유실). 잔여 멤버 중 coordinator 가 없으면 첫 멤버에게 부여
-      // (withInitialLeadCapabilities 는 첫 영입에만 주고 삭제엔 재할당 없던 갭 — GD 맥북 클린테스트 2026-07-03).
-      // ★승계도 첫 영입과 같은 '팀 리드' 능력 묶음을 쓴다(withLeadCapabilities 단일 출처).★
-      //   coordinator 만 넘기면 새 리드가 팀 맥락(full_context)을 못 봐서 첫 영입 리드와 권한이 달라진다.
+      // 마지막 조정자가 퇴사하면 남은 첫 멤버에게 팀 리드 역량 묶음을 승계한다. coordinator만 넘기면 full_context가 빠져 팀 맥락을 보지 못한다.
       if (remaining.length > 0 && !remaining.some((a) => hasCapability(a, "coordinator"))) {
         const heir = remaining[0];
         heir.capabilities = withLeadCapabilities(heir.capabilities);
@@ -820,10 +767,10 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     } catch (e) {
       return c.json({ error: "write_failed", detail: e instanceof Error ? e.message : String(e) }, 500);
     }
-    // ★off-list + bus-wake allowlist 정리(deleted≠off) — 안 지우면 재영입 agent가 게이트웨이는 떠도 버스 suppress+ghost wake(하네스 #1·#2 systemic breaker, openclaw/hermes 재영입 실패 근본).
+    // 퇴사 시 off-list와 bus-wake allowlist도 정리해야 재영입된 팀원의 버스 억제·잔여 깨움을 막을 수 있다.
     try { clearAgentOff(id); } catch { /* best-effort */ }
     try { removeBusWake(id); } catch { /* best-effort */ }
-    // 프로비저닝 토큰(var/secrets/<id>.bot-token) 정리 — 퇴사 후 살아있는 봇 credential 잔존 방지(전 런타임 공통, 하네스 LOW).
+    // 퇴사 후 봇 자격 증명이 남지 않도록 모든 런타임의 프로비저닝 토큰을 정리한다.
     if (/^[a-z0-9_-]+$/i.test(id)) {
       try { const tp = join(dirname(registryPath), "var", "secrets", `${id}.bot-token`); if (existsSync(tp)) rmSync(tp); } catch { /* best-effort */ }
     }
@@ -839,10 +786,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ok: true, removed: { id, display_name: target.display_name, archived: archivedTo, slack_revoked: slackRevoked } });
   });
 
-  // 런타임 스왑(claude_channel ↔ codex ↔ openclaw ↔ hermes_agent) — offboard(delete+recruit)와 달리
-  // MEMORY.md·memory/*.md·TODO.md·워크스페이스를 그대로 둔 채 런타임만 교체한다(swapRuntime, activation.ts).
-  // exec 게이트(APPROVAL_EXECUTION_ENABLED)는 swapRuntime 내부 STEP0에서 레지스트리 변경 전에 거부한다
-  // (teardown-then-stuck-halfway 방지 — TEAM-OS §4 self-mod 게이트와 동일 원칙).
+  // 런타임 스왑은 작업폴더·메모리를 보존하며 실행 승인 게이트를 레지스트리 변경 전에 검사해 정리 후 중단된 상태를 막는다.
   app.post("/members/:id/swap-runtime", async (c) => {
     // 공개빌드에선 런타임 교체를 웹 UI에서만 숨긴다 — 서버 엔드포인트는 유지. codex target·미준비는 아래 publicRuntimeGate 가 막는다.
     const id = c.req.param("id");
@@ -854,7 +798,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     const runtimeGate = await publicRuntimeGate(targetRuntime);
     if (runtimeGate) return c.json({ ok: false, ...runtimeGate }, 400);
 
-    // ★파괴적 작업(런타임 죽였다 다시 살림) — offboard처럼 팀원 이름 정확 입력을 요구해 오발 방지.
+    // 파괴적 작업(런타임 죽였다 다시 살림) — offboard처럼 팀원 이름 정확 입력을 요구해 오발 방지.
     const swapTarget = readAgents().find((a: any) => a.id === id);
     if (!swapTarget) return c.json({ ok: false, error: "unknown_member", code: "unknown_member" }, 404);
     if (typeof body.confirm_name !== "string" || body.confirm_name.trim() !== swapTarget.display_name)
@@ -882,10 +826,10 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json(result, status);
   });
 
-  // ── 능력 카탈로그 (?role=&runtime= 는 향후 per-member 맞춤용 예약) ──
+  //  능력 카탈로그 (?role=&runtime= 는 향후 per-member 맞춤용 예약)
   app.get("/capabilities", (c) => c.json(VISIBLE_CAPABILITIES));
 
-  // ── Slack: Telegram과 같은 지원 채널로 쓰기 위한 상태/설정 API ────────
+  //  Slack: Telegram과 같은 지원 채널로 쓰기 위한 상태/설정 API
   app.get("/slack/status", (c) => {
     let list: any[];
     try { list = readAgents(); } catch (e) { return c.json({ error: "read_failed", detail: e instanceof Error ? e.message : String(e) }, 500); }
@@ -909,9 +853,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     });
   });
 
-  // 라이브 헬스 — /slack/status는 '파일 존재' 기반이라 죽은 앱(account_inactive)도 ready로 뜬다.
-  // 여기서 토큰별 auth.test를 병렬 실행해 '진짜' 상태를 준다. 마법사가 '재설치 필요' 배지에 사용.
-  // effective: ready(토큰 유효) / token_invalid(토큰은 있는데 죽음=재설치 필요) / not_connected / partial.
+  // 파일 존재만으로는 폐기된 Slack 토큰을 알 수 없으므로 auth.test 결과로 재연결 필요 여부를 판단한다.
   app.get("/slack/health", async (c) => {
     let list: any[];
     try { list = readAgents(); } catch (e) { return c.json({ error: "read_failed", detail: e instanceof Error ? e.message : String(e) }, 500); }
@@ -1074,7 +1016,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     }
   });
 
-  // ── Slack 연동 마법사 백엔드 (test-post / reinstall-info / revoke) ──────
+  //  Slack 연동 마법사 백엔드 (test-post / reinstall-info / revoke)
   // 채널에 실제 게시해 봇 멤버십+권한을 검증. 마법사 "연결 확인" 단계.
   app.post("/members/:id/slack/test-post", async (c) => {
     const id = c.req.param("id");
@@ -1112,12 +1054,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     try { agent = readAgents().find((a) => a.id === id) ?? null; } catch { /* ignore */ }
     if (!agent) return c.json({ ok: false, error: "unknown_member", id }, 404);
     const creds = loadAgentCreds(id);
-    // ★공개 URL 이 없어도 매니페스트를 준다★ — 마법사가 권하는 Socket Mode 는 공개 URL 이 필요 없다.
-    //   예전엔 여기서 400 을 냈는데, 클라이언트가 그 400 을 정상 응답으로 받아 ★빈 매니페스트를
-    //   그럴싸하게 그렸다★ (실측: {"settings":{"socket_mode_enabled":true}} · 필요 scope "—").
-    //   사용자가 그걸 붙여넣으면 ★권한 0개짜리 Slack 앱이 조용히 만들어진다.★ 실패가 아니라
-    //   '망가진 걸 만들어 주는' 형태라 더 나쁘다. UI 가 "Socket Mode = 공개 URL 불필요" 라고
-    //   안내하면서 서버는 공개 URL 을 필수로 요구하던 ★자기모순★ 도 여기서 없앤다.
+    // Socket Mode는 공개 URL이 필요 없으므로 URL 미설정도 유효한 매니페스트를 반환해야 한다.
     const publicBase = (process.env.TEAM_PUBLIC_BASE_URL ?? "").replace(/\/$/, "");
     const eventUrl = publicBase ? `${publicBase}/team/api/slack/events` : null;
     const channel = (process.env.TEAM_SLACK_POLL_CHANNELS ?? "").split(",")[0]!.trim();
@@ -1141,11 +1078,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
         display_information: { name: appName },
         features: { bot_user: { display_name: agent.slack_app_name || `gd_${id}`, always_online: true } },
         oauth_config: { scopes: { bot: scopes } },
-        // ★슬랙 정본은 Socket Mode 다 — Event URL(request_url) 방식은 지원하지 않는다★.
-        //   예전엔 공개 URL 이 있으면 request_url + socket_mode_enabled:false 를 내보냈다. 화면에서는
-        //   클라이언트 socketManifest() 가 Socket 으로 바꿔줘서 멀쩡해 보였지만, ★그건 화면을 거칠 때만★ 이다.
-        //   이 엔드포인트를 직접 받아가면 ★지원하지 않는 Event URL 앱을 만드는 매니페스트★ 가 그대로 나갔다.
-        //   서버가 처음부터 옳은 것을 낸다. 클라이언트 변환은 이제 안전망일 뿐이다.
+        // 지원 방식은 Socket Mode이며 Event URL은 지원하지 않는다. 클라이언트 변환을 거치지 않아도 올바른 매니페스트여야 한다.
         settings: {
           event_subscriptions: { bot_events: ["app_mention"] },  // request_url 없음 — Socket 에는 필요없다
           org_deploy_enabled: false,
@@ -1176,7 +1109,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ok: true, removed_token: removed, member: slackMemberStatus(target) });
   });
 
-  // ── 영입(recruit) = 등록 + OT(오리엔테이션) 시작 ─────────────────
+  //  영입(recruit) = 등록 + OT(오리엔테이션) 시작
   app.post("/members/recruit", async (c) => {
     let body: { id?: unknown; display_name?: unknown; role?: unknown; runtime?: unknown; nicknames?: unknown; persona?: unknown; icon?: unknown };
     try { body = await c.req.json(); } catch { return c.json({ error: "invalid_json" }, 400); }
@@ -1190,9 +1123,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
           lead_id: !getSetting(db, "lead_id")?.trim(),
           owner_name: !getSetting(db, "owner_name")?.trim(),
         },
-        // ★필드별 hint 를 응답에 실어 보낸다★ — 특히 '팀장ID' 는 이름만으로 뭘 넣는지 알 수 없다.
-        //   전엔 placeholder 가 웹 UI 에만 있어서, API 응답만 본 사용자는 ★소스를 읽어야★ 알 수 있었다
-        //   (2026-07-25 맥스튜디오 실기). 사용자가 코드를 읽어야 아는 건 결함이다.
+        // 팀장 ID의 입력 방법은 웹 placeholder뿐 아니라 API의 필드별 hint에도 포함한다.
         hints: SETUP_FIELD_HINTS,
       }, 400);
     }
@@ -1209,7 +1140,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     let list: any[];
     try { list = readAgents(); } catch (e) { return c.json({ error: "read_failed", detail: e instanceof Error ? e.message : String(e) }, 500); }
     if (list.some((a) => a.id === id)) {
-      // OT 중단으로 ot_id 를 잃었을 때 재개할 수 있도록, 진행 중인 OT id 를 409 에 실어준다(#6 재개경로).
+      // OT 중단으로 ot_id 를 잃었을 때 재개할 수 있도록, 진행 중인 OT id 를 409 에 실어준다.
       const existingOt = db.query("SELECT id FROM ot WHERE member_id = ? ORDER BY updated_at DESC LIMIT 1").get(id) as any;
       return c.json({ error: "id_exists", id, ot_id: existingOt?.id ?? null, hint: existingOt?.id ? "이미 등록된 팀원 — 재영입 대신 이 ot_id 로 진행 중인 OT 를 이어가세요." : undefined }, 409);
     }
@@ -1231,9 +1162,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     const persona = typeof body.persona === "string" ? body.persona : "";
     const id_ot = otId();
     const steps = initOtSteps();
-    // DB and registry cannot share a native transaction. Stage the DB row first,
-    // then publish the registry entry; compensate the DB row if the atomic file
-    // replacement fails so callers never observe a member without a resumable OT.
+    // DB와 레지스트리 파일은 트랜잭션을 공유하지 못한다. DB 행을 먼저 준비하고 파일 교체 실패 시 보상 삭제해 재개 가능한 OT 없는 멤버를 남기지 않는다.
     try {
       db.transaction(() => {
         db.query("INSERT INTO ot (id, member_id, stage, steps_json, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))")
@@ -1248,20 +1177,17 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     // 이미 존재하면 덮어쓰지 않음(수동 작성 보호). 실패해도 영입은 진행(best-effort).
     let persona_written = false;
     try {
-      // ★룰 렌더와 persona 저장은 분리★: writeMemberPersona=룰(CLAUDE/AGENTS.md), SOUL 은 안 건드림.
-      writeMemberPersona({ id, display_name, role, runtime, workspace_path: _paths.workspace_path, persona_file: _paths.persona_file, owner_name: getSetting(db, "owner_name") ?? undefined, team_name: getSetting(db, "team_name") ?? undefined, team_collect_enabled: false /* 수집 오케스트레이션 제거 (2026-07-13) — collector 가 직접 모아 직접 보고한다 */ });
+      // 룰 렌더와 persona 저장은 분리: writeMemberPersona=룰(CLAUDE/AGENTS.md), SOUL 은 안 건드림.
+      writeMemberPersona({ id, display_name, role, runtime, workspace_path: _paths.workspace_path, persona_file: _paths.persona_file, owner_name: getSetting(db, "owner_name") ?? undefined, team_name: getSetting(db, "team_name") ?? undefined, team_collect_enabled: false  });
       if (persona && persona.trim()) {
         savePersonaFile(_paths.persona_file, persona);   // persona 값 = SOUL.md 에만
         persona_written = true;
       }
-      // ★합류 플래그 = 마커이자 지시서.★ 영입 때만 심는다 → 재시작·재활성화는 반복 안 함.
-      //   페르소나(sectionFirstContact)는 "이 파일이 있으면 읽고 따르고 지워라" 한 줄만 싣고,
-      //   ★절차 본문은 여기 있다★ — 평생 한 번 쓰는 430자를 매 턴 페르소나로 나르지 않으려고
-      // ★규칙이 필요한 순간에만 존재하게★ 옮겼다. 이 파일 내용을 읽는 코드는 없다(쓰기 전용).
+      // 합류 마커는 영입 때만 만들어 재시작·재활성화에 절차가 반복되지 않게 한다. 한 번만 필요한 본문은 상시 페르소나 대신 마커 파일에 둔다.
       try {
         writeFileSync(join(_paths.workspace_path, JOIN_FLAG_FILE), joinInstructions(display_name, role));
       } catch { /* best-effort */ }
-      // claude_channel: workspace 에 TEAM-OS.md 심링크 생성(Steve 패턴). 2026-09-19 부터 CLAUDE.md 는 @import 하지 않고 이 경로를 "필요할 때 읽는" 용도로 쓴다.
+      // claude_channel 작업폴더의 TEAM-OS.md 심링크는 자동 import가 아니라 필요할 때 읽는 경로다.
       if (runtime === "claude_channel") {
         const link = join(_paths.workspace_path, "TEAM-OS.md");
         if (!existsSync(link)) {
@@ -1282,9 +1208,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     });
   });
 
-  // 페르소나 핵심룰 재적용 — 기존 팀원 페르소나의 "## ⭐ 핵심 룰"만 현재 템플릿(멈춤장치·통신·conti)으로 교체.
-  // 정체·능력 등 커스텀은 보존. 직접 파일 덮어쓰기는 self-mod(차단)이므로 서버가 GD 인증 탭에 실행(터미널 0).
-  // forin 폭주 후 전 팀원에 '빌처럼' norms 주입하는 경로.
+  // 핵심룰 재적용은 정체·능력 등 사용자 수정을 보존하며 핵심룰 구역만 갱신한다. 파일 변경은 팀장 인증 대시보드 경로에서 수행한다.
   app.post("/members/:id/regenerate-persona", (c) => {
     if (PUBLIC_BUILD) return c.json({ error: "live_only", hint: "핵심룰 재적용은 라이브 전용입니다." }, 404);
     const id = c.req.param("id");
@@ -1304,7 +1228,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       try {
         if (!existsSync(f)) { skipped.push(`${f}(없음)`); continue; }
         const cur = readFileSync(f, "utf-8");
-        const next = op === "inject" ? injectCoreRule(cur, coreRuleFor(id, owner, team, false /* 수집 오케스트레이션 제거 (2026-07-13) — collector 가 직접 모아 직접 보고한다 */, runtime)) : stripCoreRule(cur);
+        const next = op === "inject" ? injectCoreRule(cur, coreRuleFor(id, owner, team, false , runtime)) : stripCoreRule(cur);
         if (next === cur) { skipped.push(`${f}(변경없음)`); continue; }
         backup(f, backedUp);
         writeFileSync(f, next, "utf-8");
@@ -1327,14 +1251,9 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ok: updated.length > 0, updated, skipped, runtime });
   });
 
-  // 페르소나 프로필 편집 (role + persona) — 대시보드가 "파일 통짜 편집" 대신 구조화 필드만 저장.
-  // 소스=agents.json(role·purpose) → 런타임별 로딩파일 자동 재생성(백업먼저):
-  //   claude=CLAUDE.md(+SOUL.md) · codex/openclaw/hermes=AGENTS.md+SOUL.md.
-  // 룰=템플릿(영문) / 능력(purpose)=사용자 입력 verbatim. divergence·codex gap·유실 근본해결.
+  // 프로필의 role은 agents.json, persona는 SOUL.md를 정본으로 저장하고 런타임 로딩파일을 다시 만든다. 사용자 입력은 원문을 보존한다.
   app.post("/members/:id/profile", async (c) => {
-    // 프로필(역할·persona) 편집은 ★공개 빌드에서도 허용★ — 사용자가 자기 팀원 페르소나를 대시보드에서
-    // 편집하는 건 정상 기능이다(agents.json role + SOUL.md persona + 로딩파일 재생성뿐, 위험 op 아님).
-    // (구 live_only 게이트 제거 — 공개 사용자가 persona 저장 시 "실패: live_only" 나던 버그. 맥북테스트.)
+    // 공개 설치도 자기 팀원 프로필을 편집할 수 있다. 역할·SOUL.md 저장과 로딩파일 재생성은 개발 전용 기능이 아니다.
     const id = c.req.param("id");
     if (!/^[a-z0-9_-]+$/i.test(id)) return c.json({ error: "invalid_id" }, 400); // path traversal 방지
     const body = (await c.req.json().catch(() => ({}))) as { role?: unknown; persona?: unknown };
@@ -1344,9 +1263,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     const list = readAgents();
     const agent = list.find((a) => a.id === id);
     if (!agent) return c.json({ error: "unknown_member", id }, 404);
-    // ① agents.json 갱신 — ★role 등 나머지 필드만.★ persona 는 여기 저장하지 않는다.
-    // ★"persona 값은 그냥 soul.md 에만 저장해. 대시보드 나머지 필드는 agents.json이 원본이면 되고"★
-    //   purpose 필드는 제거됐다 — 두 곳에 두니 반드시 어긋났고(12명 중 7명), 어긋나면 렌더가 옛값으로 덮었다.
+    // persona는 SOUL.md에만 저장하고 나머지 프로필 필드는 agents.json에 저장해 중복 원본이 서로 덮어쓰지 않게 한다.
     if (role !== undefined) agent.role = role;
     try { writeAgents(list); } catch (e) { return c.json({ error: "registry_write_failed", detail: e instanceof Error ? e.message : String(e) }, 500); }
     // ② 런타임별 로딩파일 재생성 (백업먼저). 룰=템플릿(영문).
@@ -1355,18 +1272,18 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     const team = getSetting(db, "team_name") ?? undefined;
     const fb = memberPaths(id, runtime);
     const ws = (agent.workspace_path as string) || fb.workspace_path;
-    // ★persona 저장 = SOUL.md 에만.★ 렌더러는 SOUL 을 안 건드리므로 여기가 유일한 저장 지점이다.
+    // persona 저장 = SOUL.md 에만. 렌더러는 SOUL 을 안 건드리므로 여기가 유일한 저장 지점이다.
     const soulPath = (agent.persona_file as string) || fb.persona_file;
     if (persona !== undefined) {
       try { savePersonaFile(soulPath, persona); }
       catch (e) { return c.json({ error: "persona_write_failed", detail: e instanceof Error ? e.message : String(e) }, 500); }
     }
-    // ★persona 쓰기는 단일 canonical writeMemberPersona 하나만 통과.
+    // persona 쓰기는 단일 canonical writeMemberPersona 하나만 통과.
     //   custom(purpose) verbatim 보존 + backup-first + 룰만 최신 + 런타임별 파일. 기존 put/buildPersona/buildPersonaFromCustom 분기 divergence 제거.
     let written: string[] = [];
     const failed: string[] = [];
     try {
-      const wr = writeMemberPersona({ id, display_name: agent.display_name, role: agent.role, runtime, signature: agent.signature as string | undefined, bot_username: agent.telegram_bot_username, workspace_path: ws, persona_file: (agent.persona_file as string) || fb.persona_file, owner_name: owner, team_name: team, team_collect_enabled: false /* 수집 오케스트레이션 제거 (2026-07-13) — collector 가 직접 모아 직접 보고한다 */ });
+      const wr = writeMemberPersona({ id, display_name: agent.display_name, role: agent.role, runtime, signature: agent.signature as string | undefined, bot_username: agent.telegram_bot_username, workspace_path: ws, persona_file: (agent.persona_file as string) || fb.persona_file, owner_name: owner, team_name: team, team_collect_enabled: false  });
       written = wr.written;
     } catch (e) { failed.push((e as Error).message); }
     appendAudit(db, "user", "persona_profile_edited", id, { role_changed: role !== undefined, persona_changed: persona !== undefined, written: written.length, runtime });
@@ -1381,13 +1298,8 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     if (!agent) return c.json({ ok: false, error: "unknown_member", id }, 404);
     const body = await c.req.json().catch(() => ({}));
     const fresh = (body as any)?.fresh === true;
-    // ★재시작 전에 로딩파일을 SOUL.md 기준으로 되맞춘다★ (2026-08-20 GD 지시:
-    //   "대시보드나 직접 SOUL 파일 바꾸면 반영이 되어야지. 필요하면 리스타트 하고")
-    //   대시보드 편집은 저장 직후 렌더를 타지만, ★에디터로 SOUL.md 를 직접 고친 경우는 아무도 렌더를 안 탄다.★
-    //   특히 codex 런타임은 SOUL.md 를 읽지 않고 렌더가 AGENTS.md 에 박아둔 본문을 읽어서,
-    //   원본만 고치면 ★재시작해도 옛 페르소나로 돈다★(claude·hermes 는 파일을 직접 읽어 재시작이면 반영됨).
-    //   부팅 때 도는 되맞추기와 ★같은 함수·같은 인자★ 다 — 팀원 1명으로 좁힌 것뿐. skip-if-unchanged 라
-    //   내용이 같으면 쓰지도 백업하지도 않는다. 실패해도 재시작은 진행한다(best-effort, 사유는 detail 에).
+    // codex는 SOUL.md 대신 렌더된 AGENTS.md를 읽으므로 재시작 전에 원본과 맞춘다.
+    // 변경이 없으면 쓰지 않으며 렌더 실패는 detail에 남기고 재시작은 계속한다.
     let refreshNote = "";
     try {
       const teamNameForRefresh = (db.query("SELECT value FROM setting WHERE key = 'team_name'").get() as { value: string } | null)?.value ?? undefined;
@@ -1399,8 +1311,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
         team_collect_enabled: false,
       }]);
       if (r.updated.length > 0) refreshNote = " · 로딩파일 갱신됨(SOUL 반영)";
-      // ★absent 를 안 읽으면 "파일이 없어서 못 했다" 가 "바꿀 게 없었다" 로 기록된다★ (빌 리뷰).
-      //   이 PR 이 고치려는 병이 바로 그것이라 여기서 같은 실수를 하면 안 된다.
+      // absent도 읽어야 파일이 없는 실패와 변경할 내용이 없는 상태를 구분할 수 있다.
       else if (r.absent.length > 0) refreshNote = " · 로딩파일이 없어 되맞추지 않음(영입 절차의 몫)";
       for (const s of r.skipped) refreshNote = ` · 로딩파일 갱신 실패(계속): ${s.reason.slice(0, 80)}`;
     } catch (e) {
@@ -1412,22 +1323,20 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ok: res.ok, detail: `${res.detail}${refreshNote}`, fresh });
   });
 
-  // 봇 토큰 변경 (대시보드 self-service — 죽은/withdrawn 봇 교체., 터미널·에이전트에 토큰 전달 없이).
-  //   흐름: id검증 → codex 런타임 확인 → execOn 게이트 → 형식검증 → getMe(살아있는 봇) → placeCodexToken(0600) → 브릿지 파일 보장 → 재시작.
-  //   보안(하네스 검증): ①credential+재시작이라 activation과 동일하게 execOn 게이트(승인 OFF면 토큰 안 씀) ②런타임별 파일저장(codex=var/secrets, claude/hermes=.env, openclaw=파일기반 계정만 credentials/telegram-<id>-token.txt) ③토큰 값은 파일로만(응답/로그=username만).
+  // 토큰 교체·재시작은 실행 승인 게이트를 통과한 뒤 getMe 검증과 런타임별 파일 저장으로 처리한다. 토큰은 0600 파일에만 쓰고 응답·로그에는 username만 노출한다.
   app.post("/members/:id/rotate-token", async (c) => {
     const id = c.req.param("id");
     if (!/^[a-z0-9_-]+$/i.test(id)) return c.json({ ok: false, error: "invalid_id" }, 400); // path traversal 방지(방어적)
     let agent: any = null;
     try { agent = readAgents().find((a) => a.id === id) ?? null; } catch { /* ignore */ }
     if (!agent) return c.json({ ok: false, error: "unknown_member", id }, 404);
-    // execOn 게이트 — credential 쓰기+서비스 재시작=민감 self-mod. activation과 동일 게이트(하네스 HIGH 반영). 승인 OFF면 차단.
+    // 토큰 쓰기와 서비스 재시작은 activation과 같은 실행 승인 게이트를 통과해야 한다.
     if (process.env.APPROVAL_EXECUTION_ENABLED !== "1") {
       return c.json({ ok: false, error: "execution_off", hint: "실행이 꺼져 있어요(APPROVAL_EXECUTION_ENABLED≠1). 봇 토큰 변경은 credential+재시작이라 실행 ON(인증 탭)에서만 가능합니다." }, 403);
     }
     const body = await c.req.json().catch(() => ({}));
     const token = typeof (body as any)?.bot_token === "string" ? (body as any).bot_token : "";
-    // 런타임별 격리 핸들러 + fail-safe(검증→백업→쓰기→재시작→실패 시 기존 복원). codex/claude/hermes + openclaw ★파일기반(tokenFile 정의) 계정★ 지원(인라인 botToken·미정의는 거부, 공유 게이트웨이 재시작 warning). 토큰값 노출 없음.
+    // 런타임별 격리 핸들러 + fail-safe(검증→백업→쓰기→재시작→실패 시 기존 복원). codex/claude/hermes + openclaw 파일기반(tokenFile 정의) 계정 지원(인라인 botToken·미정의는 거부, 공유 게이트웨이 재시작 warning). 토큰값 노출 없음.
     const res = await rotateBotToken(restartAgent, agent.runtime ?? "", id, agent, token);
     appendAudit(db, "user", res.ok ? "member_token_rotated" : "member_token_rotate_failed", id, { runtime: agent.runtime, bot_username: res.bot_username, error: res.error }); // 토큰값 절대 X
     const status = res.ok ? 200
@@ -1437,7 +1346,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ok: res.ok, bot_username: res.bot_username, error: res.error, detail: res.detail, warning: res.warning }, status);
   });
 
-  // 전체 재시작 (대시보드 — Settings에서 한 번에). ★코디네이터★·정지팀원 제외, ★코디네이터 맨 마지막★.
+  // 전체 재시작 (대시보드 — Settings에서 한 번에). 코디네이터·정지팀원 제외, 코디네이터 맨 마지막.
   app.post("/members/restart-all", async (c) => {
     let list: any[] = [];
     try { list = readAgents(); } catch (e) { return c.json({ ok: false, error: "read_failed", detail: e instanceof Error ? e.message : String(e) }, 500); }
@@ -1447,13 +1356,13 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ok: true, results });
   });
 
-  // 비상 전체 정지 (대시보드 빨강 버튼·더블컨펌). ★코디네이터★ 제외 전원 정지.
+  // 비상 전체 정지 (대시보드 빨강 버튼·더블컨펌). 코디네이터 제외 전원 정지.
   app.post("/members/stop-all", async (c) => {
     let list: any[] = [];
     try { list = readAgents(); } catch (e) { return c.json({ ok: false, error: "read_failed", detail: e instanceof Error ? e.message : String(e) }, 500); }
     const members = list.filter((a) => ["openclaw", "claude_channel", "hermes_agent", "codex"].includes(a.runtime)).map((a) => ({ id: a.id, runtime: a.runtime, capabilities: a.capabilities ?? [] }));
     const results = await stopAll(members);
-    // ★코디네이터는 정지 대상에서 빠진다★ — 감사 수치가 그걸 반영해야 한다(예전엔 별도 `recovery` 능력이었다).
+    // 조정자는 정지 대상에서 제외되므로 감사 건수에서도 제외한다.
     const keptIds = new Set(list.filter((a) => hasCapability(a, COORDINATOR_CAPABILITY)).map((a) => a.id));
     appendAudit(db, "user", "stop_all_emergency", "team", { stopped: results.filter((r) => r.ok && !keptIds.has(r.id)).length });
     return c.json({ ok: true, results });
@@ -1599,31 +1508,11 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ot_id: null });
   });
 
-  // ★영입 위저드에 페어링 코드 입력 마커를 표면화한다 (2026-07-28 외부 사용자 신고 수정).★
-  //   증상: 대시보드로 claude 팀원을 영입하면 '합류 확인' 에서 영원히 멈춘다. 위저드는 "봇에게 DM 을
-  //   한 번 보내주세요" 라고 안내하고, 사용자가 DM 을 보내면 봇이 6자리 코드를 답한다.
-  //   ★그런데 그 코드를 넣을 입력창이 뜨지 않았다.★
-  //   입력창(web/Settings.ts shouldShowClaudePairingPanel)은 `awaiting_input.kind==="claude_pairing_code"`
-  //   일 때만 렌더되는데, 그 값을 만드는 곳이 `GET /members/:id/pairing-status` 뿐이고
-  //   ★웹은 그 엔드포인트를 한 번도 부르지 않았다.★ 위저드가 폴링하는 이 라우트는 steps_json 에
-  //   저장된 값만 돌려주고, 그 값은 봇 토큰 단계에서만 채워진 뒤 계속 null 이었다.
-  //   → 승인 라우트도·입력창도·검증 로직도 다 있는데 ★"지금 필요하다"는 신호만 도달하지 않았다.★
-  //   (클로드 코드로 영입하면 동반자가 access.json 을 직접 편집해 승인해서 이 화면을 안 거친다.
-  //    그래서 그 경로만 성공했고, ★대시보드만 쓰는 사용자는 통과할 방법이 없었다.★)
-  //
-  //   저장된 마커가 우선이다 — 봇 토큰 대기와 같은 칸을 쓰므로 앞 단계를 덮어쓰면 안 된다.
+  // OT 폴링 응답에 claude_pairing_code 마커를 포함해야 페어링 입력창이 표시된다. 저장된 이전 단계의 마커는 덮어쓰지 않는다.
   function claudePairingAwaitingInput(memberId: string, steps: Array<{ key: string; state: string }>) {
-    // ★활성화(bundle) 전에는 절대 내지 않는다 — 안 그러면 활성화 버튼이 사라져 진행이 막힌다.★
-    //   web/Settings.ts 는 `needsActivate = provisionDone && bundlePending && … && !(awaiting?.fields?.length)`
-    //   로 활성화 버튼을 그린다. 이 마커는 fields 가 있으므로, bundle 대기 중에 내보내면 ★버튼이 숨는다★ —
-    //   페어링은 활성화 뒤에 생기는 단계라 사용자는 활성화도 페어링도 못 하고 갇힌다(원래 버그보다 나쁘다).
+    // 페어링은 활성화 뒤 단계다. bundle 대기 중에 fields를 포함하면 활성화 버튼이 숨겨지므로 마커를 내지 않는다.
     if (steps.find((s) => s.key === "bundle")?.state !== "done") return null;
-    // ★join 이 'pending' 일 때만 낸다 — 'blocked' 를 포함하면 더 급한 안내를 덮는다.★
-    //   web/Settings.ts 의 footer 삼항은 pairing 분기가 ★needsSubscription 분기보다 앞★ 이다(:432 vs :436).
-    //   subscription_needed 는 join.state="blocked" 로 오는데(:1774), 이때 마커를 내면
-    //   앰버 경고와 '🔄 해결 후 다시 활성화' 버튼이 ★통째로 가려진다★ — 결제를 못 고치니 영영 못 푼다.
-    //   서버는 이미 ①구독 ②첫 모델호출 ③페어링 순서로 안내하도록 만들어져 있고(:1765~ 주석),
-    //   페어링은 그 문구에 ★병기★ 된다. 마커까지 앞세우면 그 설계를 UI 에서 뒤집는 셈이다.
+    // 페어링 마커는 pending일 때만 표시한다. blocked까지 포함하면 선행 구독·호출 실패의 해결 안내와 버튼이 가려진다.
     const joinStep = steps.find((s) => s.key === "join");
     if (joinStep?.state !== "pending") return null; // done(끝남)·blocked(더 급한 게 있음) 둘 다 제외
     let agent: any;
@@ -1640,7 +1529,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     };
   }
 
-  // ── OT 상태 조회 (Steve 스테퍼가 ~1.5s 폴링) ─────────────────────
+  // OT 상태 조회: 위저드가 약 1.5초 간격으로 폴링한다.
   app.get("/ot/:ot_id", (c) => {
     const ot_id = c.req.param("ot_id");
     const row = db.query("SELECT id, member_id, steps_json, error FROM ot WHERE id = ?").get(ot_id) as any;
@@ -1653,7 +1542,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ot_id: row.id, member_id: row.member_id, stage, steps, awaiting_input: awaitingInput, done: stage === "joined" || stage === "failed", joined: stage === "joined", error: row.error ?? undefined });
   });
 
-  // ── OT 단계 진행 (프로비저닝/합류 완료 시 갱신) ──────────────────
+  //  OT 단계 진행 (프로비저닝/합류 완료 시 갱신)
   app.post("/ot/:ot_id/advance", async (c) => {
     const ot_id = c.req.param("ot_id");
     let body: { key?: unknown; state?: unknown; detail?: unknown; error?: unknown };
@@ -1677,9 +1566,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ok: true, ot_id, stage, steps });
   });
 
-  // ── 영입 취소(cancel) = recruit 역연산: 진행 중(미합류) OT를 롤백 ──────
-  //   레지스트리 entry + OT 레코드 + agent 상태행 + 자동생성 workspace/persona 를 정리한다.
-  //   합류 완료(joined)는 취소 불가 → 정식 퇴사(DELETE /members)로. 사용자 작성 파일은 보호('빈' workspace만 삭제).
+  // 합류 전 영입 취소는 자동 생성한 명부·OT·상태·빈 작업폴더를 되돌린다. 사용자 파일은 보호하고 합류 완료 후에는 정식 퇴사를 사용한다.
   app.post("/ot/:ot_id/cancel", async (c) => {
     const ot_id = c.req.param("ot_id");
     const row = db.query("SELECT id, member_id, steps_json FROM ot WHERE id = ?").get(ot_id) as any;
@@ -1709,12 +1596,11 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     // OT 레코드 + agent 상태행 삭제.
     db.query("DELETE FROM ot WHERE id = ?").run(ot_id);
     try { db.query("DELETE FROM agent WHERE id = ?").run(member_id); } catch { /* 없으면 무시 */ }
-    // ★자동생성 workspace/persona 정리 — DELETE(퇴사)와 동일하게 주입가능한 doArchiveWorkspace 경유(삭제 아닌 archive→.archived, 복구가능).
-    // ★Steve-safety: 기존 직접 rmSync(persona)는 skipRuntimeCleanup 게이트 밖+주입 미경유라, cancel 테스트가 fixture id(steve/bill)로 라이브 ~/Development/<id>/CLAUDE.md 삭제하던 인시던트 재현형태(하네스 적대검증 FAIL). 주입 archiveWorkspace는 테스트서 noop → 라이브 데이터 절대 안 건드림.
+    // 자동생성 작업폴더·persona는 주입 가능한 doArchiveWorkspace로 보관해 복구 가능하게 정리한다.
+    // 시험은 noop을 주입해야 실제 멤버의 로딩파일을 수정·삭제하지 않는다.
     let workspace_archived: string | null = null;
     try { workspace_archived = doArchiveWorkspace(member_id, runtime); } catch { /* best-effort: 정리 실패해도 레지스트리/OT 롤백은 완료 */ }
-    // ★recruit 역연산 완결(하네스 MEDIUM) — cancel이 프로비저닝 토큰·부분 활성화된 브릿지·off/bus-wake를 orphan으로 남기던 갭.
-    // provision만 된 경우=var/secrets 토큰 orphan / activate 실패한 경우=브릿지(토큰·plist·home)+off-list orphan.
+    // 영입 취소는 프로비저닝 토큰·부분 활성화된 브리지·off/bus-wake 상태까지 정리해야 재영입을 막는 잔여 상태가 남지 않는다.
     if (/^[a-z0-9_-]+$/i.test(member_id)) {
       try { const tp = join(dirname(registryPath), "var", "secrets", `${member_id}.bot-token`); if (existsSync(tp)) rmSync(tp); } catch { /* best-effort */ }
     }
@@ -1722,14 +1608,14 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       const HHc = process.env.HOME ?? "";
       try { if (runtime === "codex") { await setAgentEnabled(member_id, "codex", false).catch(() => {}); removeCodexBridgeFiles(member_id, { removeToken: true, removeHome: true }); } } catch { /* best-effort */ }
       try { if (runtime === "claude_channel") { await setAgentEnabled(member_id, "claude_channel", false).catch(() => {}); removeClaudeBridgeFiles(member_id, { removeToken: true }); } } catch { /* best-effort */ }
-      // ★openclaw/hermes cleanup — 퇴사(DELETE)와 동일 미러(하네스: cancel이 openclaw agent dir·hermes 프로필 orphan→재영입 실패·페어링 상속). base-hermes 가드+슬러그로 공유자원/Steve-class 차단.
+      // OpenClaw 에이전트 디렉터리·Hermes 프로필도 퇴사와 같은 경로로 정리한다. base-hermes와 slug 가드는 공유 자원을 보호한다.
       if (runtime === "openclaw" && /^[a-z0-9_-]+$/i.test(member_id)) {
         try { await setAgentEnabled(member_id, "openclaw", false).catch(() => {}); } catch { /* best-effort */ }
         try { const ot = `${HHc}/.openclaw/credentials/telegram-${member_id}-token.txt`; if (existsSync(ot)) rmSync(ot); } catch { /* best-effort */ }
         try { const af = `${HHc}/.openclaw/credentials/telegram-${member_id}-allowFrom.json`; if (existsSync(af)) rmSync(af); } catch { /* best-effort */ }
         try { const ad = `${HHc}/.openclaw/agents/${member_id}`; if (existsSync(ad)) rmSync(ad, { recursive: true }); } catch { /* best-effort */ }
       }
-      if (runtime === "hermes_agent" && !isHermesProfileProtected(hermes_profile)) { // ★base 프로필 보존(공유 auth 소스)
+      if (runtime === "hermes_agent" && !isHermesProfileProtected(hermes_profile)) { // base 프로필 보존(공유 auth 소스)
         const prof = hermes_profile;
         try { await setAgentEnabled(member_id, "hermes_agent", false).catch(() => {}); } catch { /* best-effort */ }
         if (/^[a-z0-9_-]+$/i.test(prof)) { try { const hp = `${HHc}/Library/LaunchAgents/ai.hermes.gateway-${prof}.plist`; if (existsSync(hp)) rmSync(hp); } catch { /* best-effort */ } }
@@ -1743,7 +1629,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ok: true, cancelled: { ot_id, member_id, display_name }, removed_from_registry, workspace_archived });
   });
 
-  // ── 셀프서비스 프로비저닝: 봇 토큰 받아 안전저장 + 단계 진행 (no-Bill 경로 핵심) ──
+  // 셀프서비스 프로비저닝: 봇 토큰을 안전하게 저장하고 단계를 진행한다.
   app.post("/ot/:ot_id/provision", async (c) => {
     const ot_id = c.req.param("ot_id");
     let body: Record<string, unknown>;
@@ -1755,9 +1641,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     }
     const row = db.query("SELECT id, member_id, steps_json FROM ot WHERE id = ?").get(ot_id) as any;
     if (!row) return c.json({ error: "unknown_ot", ot_id }, 404);
-    // 형식만으로는 '살아있는 봇'인지 알 수 없다 — getMe로 즉시 검증한다(없는 OT는 위에서 이미 404, 네트워크 호출 아낌).
-    //   (오타/폐기 토큰이 '봇 토큰 연결됨 ✓'으로 통과한 뒤, 실패가 activate 의 28s poller 타임아웃에서 '재활성화 필요'로만
-    // 드러나 토큰을 의심할 단서가 0이던 갭 — rotate 규칙과 같이 ★검증 실패면 저장 전에 멈춘다★.)
+    // 토큰 형식만으로 유효성을 알 수 없으므로 저장 전에 getMe로 검증한다. 잘못된 토큰이 활성화 타임아웃으로 뒤늦게 드러나는 것을 막는다.
     const live = await doValidateBotToken(token);
     if (!live.ok) {
       return c.json(
@@ -1780,9 +1664,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     } catch {
       return c.json({ error: "store_failed", hint: "토큰 저장에 실패했어요. 잠시 후 다시 시도해 주세요." }, 500);
     }
-    // ★getMe 로 검증된 봇 username 을 레지스트리에 영속화★ — 안내 문구가 '@<bot_username>' 같은
-    //   미치환 플레이스홀더로 나가지 않게 하는 단일 출처다(2026-07-25 실기: 사용자는 어느 봇에 DM 할지
-    //   알 수 없었다). 공개값이라 노출 안전(토큰은 파일로만). best-effort — 실패해도 영입은 계속.
+    // getMe로 확인한 공개 봇 username을 명부에 저장해 DM 안내가 미치환 placeholder로 나가지 않게 한다. 저장 실패는 영입을 막지 않는다.
     try {
       const list = readAgents();
       const target = list.find((a: any) => a.id === row.member_id);
@@ -1793,9 +1675,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     } catch { /* best-effort — 안내 문구가 username 없이 나갈 뿐 */ }
     // 단계 진행: provision done, bundle done(자료 준비). join 은 런타임 기동 후 첫 ack 시.
     const steps = Array.isArray(parsed.steps) ? parsed.steps : initOtSteps();
-    const pv = steps.find((s: any) => s.key === "provision"); if (pv) { pv.state = "done"; pv.detail = `봇 토큰 연결됨 (@${live.username})`; } // getMe로 검증된 실제 봇 username — 긍정 증거(공개값이라 노출 안전)
-    // preflight: provision done 직후 런타임 oauth 로그인 사전점검. 미로그인이면 'blocked'+fixHint 로 활성화 차단 안내.
-    //   (구버전 OT엔 preflight 단계가 없을 수 있어 find 실패 시 조용히 skip — 기존 동작 안 깨짐.)
+    const pv = steps.find((s: any) => s.key === "provision"); if (pv) { pv.state = "done"; pv.detail = `봇 토큰 연결됨 (@${live.username})`; } // 검증된 봇 username을 사용하고 활성화 전 런타임 로그인을 점검한다. preflight 단계가 없는 이전 OT는 건너뛴다.
     const pf = steps.find((s: any) => s.key === "preflight");
     if (pf) {
       try {
@@ -1819,7 +1699,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     return c.json({ ok: true, ot: { ot_id, member_id: row.member_id, stage, steps, awaiting_input: null, done: stage === "joined" || stage === "failed", joined: stage === "joined" } });
   });
 
-  // ── 대시보드-실행-활성화: 서버가 런타임을 활성화(터미널 0) ──
+  //  대시보드-실행-활성화: 서버가 런타임을 활성화(터미널 0)
   //   provision(토큰 저장) 후 호출. 런타임 생성 + AGENTS.md(팀지식) + bus-wake. 단계별 결과 반환(스무스·에러처리).
   app.post("/ot/:ot_id/activate", async (c) => {
     const ot_id = c.req.param("ot_id");
@@ -1864,14 +1744,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
         if (t && !t.hermes_profile) { t.hermes_profile = agent.id; writeAgents(list); }
       } catch { /* best-effort */ }
     }
-    // claude_channel 활성화 성공 → tmux_session(claude-<id>) 레지스트리 기록. 봇 세션은 claude-<id> 관례로
-    //   뜨지만 recruit는 이 필드를 null로 남긴다. statusProbe(null이면 즉시 offline 판정)·wakeDispatcher(null이면
-    //   no_tmux_session_for 로 버스 주입 실패) 둘 다 이 필드를 보므로, activate가 안 채우면 봇이 살아있어도
-    // 빨강+라우팅 불통이 된다. hermes_profile 패턴과 동형.
-    // ★게이트는 result.ok 가 아니라 "runtime 스텝 성공"으로 한다(Bill 하네스검증 #7): 첫 claude 멤버는 activate 가
-    //   access.json 을 pairing(빈 allowFrom)으로 시드 → essentials 단계 실패 → result.ok=false 가 되지만, 봇 tmux
-    //   세션은 이미 결정적 이름 claude-<id> 로 떠 있다(사람이 DM 페어링을 아직 안 한 정상 대기일 뿐). result.ok 로
-    //   게이팅하면 첫 멤버가 이 블록을 통째로 놓쳐 봇이 살아 응답해도 대시보드 offline + 라우팅 불통이 된다.
+    // tmux_session은 상태 확인과 버스 주입에 필요하다. 페어링 대기 때문에 전체 결과가 실패여도 런타임 단계가 성공했으면 세션 이름을 기록한다.
     const claudeRuntimeUp = agent.runtime === "claude_channel" && result.steps.some((s) => s.step === "runtime" && s.ok);
     if (claudeRuntimeUp) {
       try {
@@ -1887,8 +1760,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     const pf = steps.find((s: any) => s.key === "preflight"); if (pf) { pf.state = "done"; pf.detail = "런타임 인증 확인됨"; }
     const bd = steps.find((s: any) => s.key === "bundle");
     if (bd) { bd.state = result.ok ? "done" : "pending"; bd.detail = result.ok ? "런타임 활성화 + 팀지식 주입 완료" : "활성화 실패 — 재시도 필요"; }
-    // ★첫 claude 멤버 DM 페어링 안내(2026-07-25 맥스튜디오 실기)★ — 봇 username 은 provision 의 getMe 로
-    //   레지스트리에 저장돼 있다. 없으면 '봇' 으로만 안내한다(플레이스홀더를 그대로 내보내지 않는다).
+    // 첫 Claude 멤버는 DM 페어링이 필요하다. 검증한 봇 username이 없으면 placeholder 대신 일반 봇 안내를 사용한다.
     const botMention = agent.telegram_bot_username ? `@${agent.telegram_bot_username}` : "봇";
     const jn = steps.find((s: any) => s.key === "join");
     if (jn) {
@@ -1905,11 +1777,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
           detail: firstCall.subscriptionNeeded ? "subscription_needed: 구독/한도 확인 필요" : firstCall.detail,
         });
       }
-      // ★분기 순서 = 사용자가 먼저 해결해야 하는 것 순★ (Bill 교차검증 2026-07-25).
-      //   페어링 안내를 앞에 두면 '페어링 대기 + 구독/한도 실패' 조합에서 결제 문제를 덮어버린다 —
-      //   DM 을 보낸다고 결제가 풀리지 않으니, 이 PR 이 없애려던 바로 그 패턴('따라 해도 안 풀리는 안내')이
-      //   다른 조합에서 재현된다. 그래서 ①확정 차단(구독/한도) ②첫 모델호출 실패 ③페어링 대기 순으로 본다.
-      //   페어링은 감추지 않고 ★병기★ 한다 — 둘 다 사실이고, 둘 다 해야 끝난다.
+      // 선행 해결 순서인 구독·한도 차단, 첫 호출 실패, 페어링 대기로 안내한다. 페어링도 병기하되 결제 문제를 가리지 않는다.
       const pairingNote = result.needsPairing
         ? ` (첫 연결 페어링도 남아 있습니다: Telegram에서 ${botMention}에게 DM을 한 번 보내주세요.)`
         : "";
@@ -1918,9 +1786,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
         jn.state = "blocked";
         jn.detail = "subscription_needed: 구독 또는 사용 한도 때문에 첫 모델 호출이 실패했습니다. 결제/구독 상태를 확인한 뒤 다시 활성화하세요." + pairingNote;
       } else if (result.needsPairing && result.ok && !firstCallFailed) {
-        // ★실패가 아니라 '거의 완료 — 마지막 한 단계'★. 첫 claude 멤버는 allowFrom 을 복사해올 참조봇이
-        //   없어 DM 페어링 1회가 필요하다(두 번째 멤버부터는 첫 멤버 것을 시드받아 자동 통과). 재시도로는
-        //   안 풀리는 상태라 '재시도 필요' 로 안내하면 사용자를 헛돌게 만든다.
+        // 첫 Claude 멤버는 참조 봇이 없어 DM 페어링이 한 번 필요하다. 재시도만으로 해결되지 않으므로 마지막 입력 단계로 안내한다.
         jn.state = "pending";
         jn.detail = `거의 완료 — 마지막 한 단계: Telegram에서 ${botMention}에게 DM을 한 번 보내주세요(첫 연결 페어링). 승인하면 바로 연결됩니다. 다음 팀원부터는 이 단계가 없습니다.`;
       } else if (result.ok && noPairingRuntime && (!firstCallRuntime || firstCall?.ok)) {
@@ -1948,9 +1814,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     }, result.ok || subscriptionNeeded ? 200 : result.code === "member_limit" ? 409 : 502);
   });
 
-  // ── preflight 재확인: GD가 터미널에서 codex login / claude 로그인한 직후 즉시 재점검 ──
-  //   GET /ot/:ot_id 폴링은 저장된 steps만 반환(재점검 안 함)하므로, blocked 상태 회복은 이 엔드포인트로만 가능.
-  //   credential 값은 보지 않고 존재·status만 본다(checkRuntimeAuth). 통과 시 preflight=done → 활성화 버튼 노출.
+  // OT 폴링은 저장된 값만 읽으므로 로그인 후 preflight 재점검으로 blocked를 해제한다. 자격 증명 값은 읽지 않고 준비 상태만 확인한다.
   app.post("/ot/:ot_id/preflight-recheck", async (c) => {
     const ot_id = c.req.param("ot_id");
     const row = db.query("SELECT id, member_id, steps_json FROM ot WHERE id = ?").get(ot_id) as any;
@@ -1990,8 +1854,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     const r = await approveOpenclawPairing(agent.id);
     appendAudit(db, "user", r.ok ? "ot_pair_approved" : "ot_pair_approve_failed", row.member_id, { ot_id, reason: r.reason });
     if (r.ok) {
-      // 접근 승인 성공 = openclaw 멤버가 GD와 양방향 가능 → 합류 완료 처리. 패널이 "합류 완료"로 전환되고
-      // 접근 승인 버튼이 사라진다(중복 클릭·"요청 없음" 혼란 제거). GD 피드백 2026-06-11.
+      // 접근 승인으로 팀장과 양방향 통신이 가능해지면 합류를 완료해 승인 버튼을 닫는다.
       try {
         const orow = db.query("SELECT steps_json FROM ot WHERE id = ?").get(ot_id) as any;
         let parsed: any = {}; try { parsed = JSON.parse(orow?.steps_json ?? "{}"); } catch { /* */ }
@@ -2040,25 +1903,13 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     try { state = readClaudePairing(agent.id); } catch { return c.json({ error: "claude_access_invalid" }, 500); }
     const pending = codeWellFormed ? state.access.pending?.[code] : undefined;
     const pendingFresh = !!pending && Number(pending.expiresAt ?? Infinity) > Date.now();
-    // ★승인 판정 기준 = "내가 승인을 수행했는가" 가 아니라 "실제로 승인돼 있는가"★
-    //   이 라우트는 원래 승인을 수행한 부수효과로만 join 스텝을 닫았다. 그래서 승인이 다른 경로로
-    //   먼저 끝나면(우리 스킬 [6] 이 안내하는 access.json 수동 편집·플러그인 promote-pending) pending 이
-    //   비어 409 만 반복되고 위저드를 닫을 방법이 사라진다 — 실제로 고착 사례 발생(2026-07-26 리사).
-    //   승인이 이미 성립한 상태면 어느 경로였든 합류로 정합시킨다. access.json 은 건드리지 않는다.
+    // 승인이 다른 경로에서 끝나 pending이 없어도 실제 승인 상태를 확인해 합류로 정합한다. 이 경로는 access.json을 수정하지 않는다.
     if (!pendingFresh) {
       const allowFrom = Array.isArray(state.access.allowFrom) ? state.access.allowFrom.map(String).filter(Boolean) : [];
-      // ★팀장 chat_id 는 '비순환' 출처에서만 얻는다★ — resolveOwnerDmId() 는 못 찾으면 access.json 의
-      //   allowFrom[0] 을 읽는 폴백이 있어서, 그걸로 allowFrom 을 검증하면 ★자기 자신을 확인하는 순환★ 이
-      //   되어 무조건 통과한다. 검증이 검증처럼 보이기만 하는 게 이번 사고의 뿌리라 같은 형태를 만들지 않는다.
+      // 팀장 ID는 setting·env에서만 얻는다. allowFrom의 첫 항목을 신원으로 다시 사용하면 자기 값을 검증하는 순환이 된다.
       const ownerRow = db.query("SELECT value FROM setting WHERE key = 'owner_chat_id'").get() as { value?: string } | undefined;
       const ownerChatId = (ownerRow?.value ?? "").trim() || (process.env.GD_CHAT_ID ?? "").trim();
-      // ★팀장 id 를 모르면 정합하지 않는다(fail-closed)★ — 코덱스 리뷰 반영.
-      //   처음엔 "모르면 조건을 뺀다" 로 했는데, 그게 ★강화한 척★ 이었다: owner_chat_id 는 서버 부팅
-      //   시 1회만 자동 persist 되고 Settings 입력도 선택이라, ★정작 필요한 순간(첫 페어링·수동 promote
-      //   직후)에는 비어 있다.★ 그 상태에서 조건을 빼면 타인 allowFrom 1건으로도 합류가 된다.
-      //   여기서 막아도 ★막다른 길이 아니다★ — 아래 정상 승인 경로가 owner_chat_id 를 채우고,
-      //   이미 어긋난 설치본은 Settings 에서 한 번 넣으면 이 경로가 열린다. 원래 버그(닫을 방법 자체가
-      //   없음)와 다르다: ★복구 행동이 명시된 거부★ 다.
+      // 팀장 ID가 없으면 타인의 allowFrom만으로 합류하지 않도록 정합을 거절한다. 정상 승인 또는 Settings 입력으로 신원을 채우면 복구할 수 있다.
       if (ownerChatId === "") {
         return c.json({
           error: "owner_identity_unknown",
@@ -2076,12 +1927,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     }
     const senderId = String(pending!.senderId ?? "").trim();
     if (!/^\d+$/.test(senderId)) return c.json({ error: "pairing_request_invalid" }, 409);
-    // ★정상 승인 = 팀장 신원을 확인할 수 있는 유일한 지점★ — 여기서 owner_chat_id 를 채워둔다(코덱스 리뷰).
-    //   부팅 시 1회 자동 persist 에만 기대면 첫 페어링 직후에는 비어 있어 위 정합 경로가 항상 막힌다.
-    //   ★기존 값은 덮지 않는다★ — 팀장이 Settings 에 직접 넣은 값이 정본이고, 나중 페어링이 그걸
-    //   조용히 바꾸면 신뢰 기준이 흔들린다.
-    //   ★승인이 실제로 기록된 뒤에 채운다★(코덱스 리뷰) — access.json 쓰기가 실패하면 승인은 없던 일인데
-    //   owner_chat_id 만 남으면 안 된다. 그래서 아래 원자적 교체가 성공한 다음에 persist 한다.
+    // 승인 파일 교체가 성공한 뒤에만 비어 있는 owner_chat_id를 채운다. 직접 설정한 기존 값은 신원 정본이므로 덮어쓰지 않는다.
     state.access.allowFrom = [...new Set([...(Array.isArray(state.access.allowFrom) ? state.access.allowFrom.map(String) : []), senderId])];
     state.access.dmPolicy = "allowlist";
     delete state.access.pending[code];
@@ -2095,16 +1941,8 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       try { if (existsSync(tmp)) rmSync(tmp); } catch { /* ignore */ }
       return c.json({ error: "claude_access_write_failed", detail: e instanceof Error ? e.message : String(e) }, 500);
     }
-    // ★승인이 파일에 기록된 뒤에 팀장 chat_id 를 채운다★ — 위 원자적 교체가 성공한 다음이다.
-    //   먼저 채우면 access.json 쓰기가 실패했을 때 ★승인은 없는데 신원만 남는다.★
-    //   ★UPSERT 여야 한다★: INSERT…WHERE NOT EXISTS 로 쓰면 ★행은 있는데 값만 빈 경우★
-    //   (Settings 가 빈 값을 저장할 수 있다) NOT EXISTS 가 참이 되어 INSERT → PK 충돌 →
-    //   catch 가 삼켜서 ★값이 영영 안 채워진다.★ 조용히 실패하는 자리라 특히 나쁘다.
-    //   3케이스 동작: 행 없음→채움 · 빈 행→채움 · ★값 있음→보존★(팀장이 직접 넣은 값이 정본).
-    //   ★실패하면 조용히 넘기지 않는다★(코덱스 리뷰) — 여기서 삼키면 나중에 정합 경로가
-    //   owner_identity_unknown 으로 막혔을 때 ★왜 막혔는지 알 방법이 없다.★ 승인은 이미 파일에
-    //   기록됐으므로 되돌릴 수 없고(500 부적절), 대신 ★사실을 남기고 응답에 밝힌다.★
-    //   기록은 DB 밖(auditFile)에 한다 — 실패 원인이 DB 자체일 수 있다.
+    // 승인 후 UPSERT로 없거나 빈 팀장 ID만 채우고 기존 값은 보존한다.
+    // DB 실패는 이미 기록된 승인을 되돌리지 않고 응답·DB 밖 감사 로그에 밝혀 복구 원인을 남긴다.
     let ownerIdentityPersisted = true;
     try {
       db.query(
@@ -2122,7 +1960,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     appendAudit(db, "user", "ot_claude_pair_approved", row.member_id, { ot_id });
     return c.json({
       ok: true, pairing_required: false, pending: false, awaiting_input: null,
-      // ★승인은 됐지만 신원 저장은 실패했다는 사실을 숨기지 않는다★ — 나중에 정합이 막힐 때 단서가 된다.
+      // 승인은 됐지만 신원 저장은 실패했다는 사실을 숨기지 않는다 — 나중에 정합이 막힐 때 단서가 된다.
       owner_identity_persisted: ownerIdentityPersisted,
       ...(ownerIdentityPersisted ? {} : {
         warning: "승인은 완료됐지만 팀장 chat_id 저장에 실패했습니다. Settings 에서 직접 설정하지 않으면 이후 합류 정합이 막힐 수 있습니다.",
@@ -2130,9 +1968,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     });
   });
 
-  // ── OT 번들: 신규 영입이 합류 시 받는 패키지(무엇이 다운로드되나) ──
-  // 팀 스킬 목록 — skills/*/SKILL.md frontmatter(name·description) 스캔. OT 번들에 포함(신규 팀원이 어떤 스킬이 있는지 발견).
-  // 실제 설치/복사는 안 함 — 스킬은 repo-local skills 공유 경로라 런타임 무관하게 그대로 실행.
+  // OT 번들은 SKILL.md의 이름·설명을 제공해 팀원이 공유 스킬을 찾게 한다. 저장소 공유 경로를 사용하므로 별도 설치·복사는 하지 않는다.
   function listTeamSkills(): Array<{ name: string; description: string }> {
     try {
       const skillsDir = join(dirname(registryPath), "skills");
@@ -2178,13 +2014,10 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     });
   });
 
-  // ── 시스템 OP (P0 기본 협업 floor) — capture 봇 토큰·라우터·그룹을 UI로 설정 ──
-  // 토큰=0600 파일(write-only, UI엔 has_capture_token 만 노출) / router=라이브 토글(즉시) / 토큰·그룹=재시작 시 적용.
-  // graceful PIN: PIN 설정돼 있으면 검증 필수(앱레벨 잠금, 자가호스터 보안), 없으면 dashboard-trusted(기본 floor UX 안 막음).
-  const CAPTURE_TOKEN_RE = /^\d+:[A-Za-z0-9_-]{30,120}$/; // 하네스 LOW-1: 길이 상한(DoS 방지)
-  const CAPTURE_GROUP_RE = /^-?\d{1,20}$/; // telegram chat_id(음수 supergroup 포함). 하네스 LOW-1: group 검증
-  // ★공개 빌드에서는 MCP 칸을 아예 안 내려보낸다★.
-  //   UI 는 이 값이 boolean 일 때만 토글을 그린다 — 없으면 그런 기능이 있다는 것도 안 보인다.
+  // 캡처 토큰은 0600 파일에만 저장하고 UI에는 존재 여부만 반환한다. PIN이 있으면 검증하며 미설정은 신뢰된 로컬 대시보드 정책을 따른다.
+  const CAPTURE_TOKEN_RE = /^\d+:[A-Za-z0-9_-]{30,120}$/; // 요청 길이를 제한해 과도한 입력으로 인한 자원 소모를 막는다.
+  const CAPTURE_GROUP_RE = /^-?\d{1,20}$/; // 음수 supergroup ID도 허용한다.
+  // 공개 빌드는 MCP 필드를 생략해야 해당 개발 전용 토글이 표시되지 않는다.
   const stripMcpForPublic = (st: ReturnType<typeof captureConfigStatus>) => {
     if (!publicBuild) return st;
     const { mcp_enabled: _omit, ...rest } = st;
@@ -2199,7 +2032,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     const token = typeof body.capture_bot_token === "string" ? body.capture_bot_token.trim() : undefined;
     const group = typeof body.capture_group_id === "string" ? body.capture_group_id.trim() : undefined;
     const router = typeof body.router_enabled === "boolean" ? body.router_enabled : undefined;
-    // ★공개 빌드에서는 켤 수 없다★ — UI 를 숨기는 것만으로는 부족하다(요청은 직접 보낼 수 있다).
+    // 공개 빌드에서는 켤 수 없다 — UI 를 숨기는 것만으로는 부족하다(요청은 직접 보낼 수 있다).
     const mcpOn = !publicBuild && typeof body.mcp_enabled === "boolean" ? body.mcp_enabled : undefined;
     if (token !== undefined && token !== "" && !CAPTURE_TOKEN_RE.test(token)) {
       return c.json({ ok: false, error: "capture_bot_token_invalid", hint: "봇 토큰 형식: 숫자:영숫자30~120 (BotFather)" }, 400);
@@ -2211,23 +2044,22 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     if (token) { setCaptureToken(token); changedTokenOrGroup = true; }
     if (group !== undefined) {
       setCaptureGroupId(group); changedTokenOrGroup = true; // 파일기반(captureConfig)
-      // ★기존 claude 멤버 access.json 에 그룹 비파괴 시드(팀방 나중 셋업 갭, Bill #9): 활성 claude 멤버만 대상.
+      // 활성 Claude 멤버의 access.json에 기존 값을 보존하며 새 그룹을 추가한다.
       if (group) { try { seedGroupIntoClaudeMembers(group, readAgents().filter((a: any) => a.runtime === "claude_channel").map((a: any) => a.id)); } catch { /* best-effort seed */ } }
     }
     if (router !== undefined) setRouterEnabled(db, router); // 라이브 — 재시작 불요
-    if (mcpOn !== undefined) setMcpEnabled(db, mcpOn); // 라이브 — 다음 요청부터 즉시 적용
-    // ★토큰/그룹 변경을 서버 재시작 없이 즉시 적용★: capture 워커를 재init 한다(새 토큰으로 텔레그램 재연결).
-    //   restartCapture 미주입(테스트 등)이면 종전대로 needs_restart=true 로 안내. 재init 은 best-effort(실패해도 저장은 유지).
+    if (mcpOn !== undefined) setMcpEnabled(db, mcpOn); // 다음 요청부터 즉시 적용
+    // 캡처 토큰·그룹 변경은 워커를 다시 초기화해 적용한다. 재초기화가 없거나 실패하면 저장은 유지하고 재시작 필요를 안내한다.
     let applied = false;
     if (changedTokenOrGroup && deps.restartCapture) {
       try { deps.restartCapture(); applied = true; } catch { /* best-effort — 실패 시 needs_restart 로 폴백 */ }
     }
-    appendAudit(db, "user", "system_op_updated", "system", { token_set: !!token, group_set: group !== undefined, router_enabled: router, mcp_enabled: mcpOn, applied }); // ★토큰 값은 audit에 안 넣음
+    appendAudit(db, "user", "system_op_updated", "system", { token_set: !!token, group_set: group !== undefined, router_enabled: router, mcp_enabled: mcpOn, applied }); // 토큰 값은 audit에 안 넣음
     const needsRestart = changedTokenOrGroup && !applied;
     return c.json({ ok: true, ...stripMcpForPublic(captureConfigStatus(db)), needs_restart: needsRestart, note: !changedTokenOrGroup ? "적용됨" : applied ? "적용됨(즉시 반영 — 재시작 불필요)" : "토큰/그룹 변경은 서버 재시작 시 적용(라우터는 즉시)" });
   });
 
-  // 저장된 토큰이 텔레그램에서 유효한지 확인(getMe). ★응답엔 bot_username 만, 토큰 값 노출 안 함.
+  // 저장된 토큰이 텔레그램에서 유효한지 확인(getMe). 응답엔 bot_username 만, 토큰 값 노출 안 함.
   app.post("/system-op/check", async (c) => {
     const tok = getCaptureToken();
     if (!tok) return c.json({ ok: false, error: "no_token" }, 400);
@@ -2241,9 +2073,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     }
   });
 
-  // 캡처 worker가 이미 받은 최근 non-bot 발신자 id를 팀장 텔레그램 id로 저장한다.
-  // 안전: 여기서 getUpdates를 직접 호출하지 않는다. CAPTURE_BOT_TOKEN은 worker long-poll과 토큰당 단일 poller라 경합한다.
-  // 토큰은 captureConfig 경로(getCaptureToken)로만 읽고, 응답/audit에는 숫자 id와 bot_username만 둔다.
+  // 토큰당 하나의 long-poller만 허용되므로 getUpdates를 추가 호출하지 않고 캡처 워커가 받은 발신자를 사용한다. 응답·감사에는 토큰을 제외한다.
   app.post("/system-op/detect-lead-id", async (c) => {
     const tok = getCaptureToken();
     if (!tok) return c.json({ ok: false, error: "no_token" }, 400);
@@ -2274,7 +2104,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       let applied = false;
       if (only) {
         setCaptureGroupId(only.id);
-        // ★기존 claude 멤버 access.json 에 그룹 비파괴 시드(팀방 나중 셋업 갭, Bill #9): 활성 claude 멤버만 대상.
+        // 활성 Claude 멤버의 access.json에 기존 값을 보존하며 새 그룹을 추가한다.
         try { seedGroupIntoClaudeMembers(only.id, readAgents().filter((a: any) => a.runtime === "claude_channel").map((a: any) => a.id)); } catch { /* best-effort seed */ }
         if (deps.restartCapture) { try { deps.restartCapture(); applied = true; } catch { /* best-effort */ } }
       }

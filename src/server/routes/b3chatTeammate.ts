@@ -1,15 +1,6 @@
 import { claudeCogsPaths } from "../runtimes/claude/cogsLauncher";
-/**
- * b3chat 앱 [팀원 추가] — b3chat 서버가 같은 맥의 b3os 에 새 AI 팀원을 만들어 달라고 부르는 길.
- *
- * 흐름: b3chat 이 봇 계정·1:1 방을 만든 뒤 POST /members/b3chat {id, display_name, role, runtime, api_base, room_id, bot_token}
- *   → 202 {job_id} 즉시 → 뒤에서 recruit → channel·시험 팀원 표시·토큰·모델 → activate → (준비됨) → 첫 인사 한 턴.
- *   b3chat 은 GET /members/b3chat/:job_id 로 상태를 읽어 앱에 옮긴다.
- *
- * 사람 손을 거치지 않는다 — 토큰은 이 요청 본문으로만 오고 0600 파일로만 남는다(응답·로그·감사 기록에 안 싣는다).
- * 오류는 안정된 code 만 돌려준다(내부 문장은 넘기지 않는다 — 쉬운 말은 b3chat 이 code 로 만든다).
- * 실패하면 기존 퇴사 API 로 되돌린다(보관 외 부수효과 없음 확인: 런타임 정리·명단·버스·토큰·작업폴더 보관·OT·감사 기록뿐).
- */
+/** 토큰은 요청으로 받아 0600 파일에만 저장하고, 오류는 안정된 code만 반환한다.
+ * 영입 실패는 기존 퇴사 API로 런타임·명단·파일을 정리해 되돌린다. */
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { getConnInfo } from "hono/bun";
@@ -104,7 +95,7 @@ export function residueOf(id: string, probe: ResidueProbe, workspace = memberPat
   return out;
 }
 
-/** ps 의 env 열에서 CODEX_HOME=<home> 인 프로세스만 — 값은 이 함수 밖으로 내보내지 않는다. macOS ps 는 대시 없는 axeww 여야 env 가 붙는다(-axeww 는 안 붙는다, 실측). */
+/** macOS의 ps axeww로 CODEX_HOME이 일치하는 프로세스만 찾는다. -axeww로는 env 열을 얻을 수 없다. */
 export function pidsWithCodexHome(psOutput: string, codexHome: string): number[] {
   const pids: number[] = [];
   for (const line of psOutput.split("\n")) {
@@ -224,7 +215,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
   const fail = (c: Context, status: 400 | 403 | 404 | 409 | 500, code: JobCode | "forbidden" | "bad_request" | "not_found", stage: string, retryable = false) =>
     c.json({ ok: false, code, retryable, stage }, status);
 
-  // ── 인증: 같은 기계 직접 + 공유 비밀. 둘 다 아니면 무엇이 틀렸는지도 말하지 않는다. ──
+  //  인증: 같은 기계 직접 + 공유 비밀. 둘 다 아니면 무엇이 틀렸는지도 말하지 않는다.
   const guard = async (c: Context, next: () => Promise<void>) => {
     if (!isDirectLocal(remote(c), c.req.raw.headers) || !linkSecretMatches(c.req.header(LINK_HEADER), readLinkKey(keyPath))) {
       return fail(c, 403, "forbidden", "auth");
@@ -280,8 +271,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
       || !/^[1-9]\d*$/.test(roomId) || channel.error || !TOKEN_RE.test(token)) {
       return fail(c, 400, "bad_request", "input");
     }
-    // ★같은 요청의 재전송이면 같은 작업을 돌려준다(응답 유실 대비 — 멱등).★
-    //   같음 = 같은 id + 같은 토큰·방·주소(지문). 실패로 끝난 작업은 되돌림이 끝났으니 새 작업으로 다시 한다.
+    // 응답 유실에 대비해 같은 id와 지문의 진행 중 요청을 재사용한다. 되돌림이 끝난 실패 작업은 새로 시작한다.
     const fp = requestFingerprint(token, roomId, channel.apiBase + (body.runtime === "claude_channel" ? "\nclaude_channel" : ""));
     const prev = db.query("SELECT * FROM b3chat_teammate_job WHERE member_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(id) as JobRow | null;
     if (prev && prev.state !== "failed" && prev.state !== "removed") {
@@ -321,9 +311,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
   app.get("/members/b3chat/:job_id", (c) =>
     jobView(c, db.query("SELECT * FROM b3chat_teammate_job WHERE id = ?").get(c.req.param("job_id")) as JobRow | null));
 
-  // ── 지우기 — b3chat 앱 [팀원 지우기]. 이 경로로 만든 팀원만(작업 기록이 있는 팀원만) 지운다. ──
-  //   202 removing 즉시 → 뒤에서 기존 퇴사 API(런타임 끄기·종료 확인·파일·명단) → removed | remove_failed.
-  //   상태는 GET /members/b3chat/member/:member_id 로 읽는다. 같은 요청을 다시 보내도 퇴사는 한 번만 돈다.
+  // 작업 기록이 있는 팀원만 지울 수 있다. removing을 즉시 반환하고 실제 정리 결과는 상태 조회로 확인한다.
   const removing = new Set<string>();
   app.delete("/members/b3chat/member/:member_id", (c) => {
     const id = c.req.param("member_id");
@@ -352,8 +340,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     }
     const ws = (db.query("SELECT workspace FROM b3chat_teammate_job WHERE id = ?").get(jobId) as { workspace: string | null } | null)?.workspace
       ?? memberPaths(id, "codex").workspace_path;
-    // 1) 명단에 있으면 기존 퇴사 API(명단·OT·슬랙·작업폴더 보관·감사까지 한 경로). ★200 이어도 정리 완료의 증거가 아니다★ —
-    //    그 API 는 종료 미확인·파일 삭제 오류에도 200 을 준다. 그래서 아래 2) 에서 남은 것을 직접 센다.
+    // 퇴사 API의 200은 종료·파일 정리 완료를 보장하지 않으므로 잔여 항목을 직접 센다.
     if (target) {
       const r = await settings.request(`/members/${id}`, {
         method: "DELETE", headers: { "content-type": "application/json" },
@@ -374,7 +361,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
   async function runJob(j: { jobId: string; id: string; displayName: string; role: string; roomId: string; token: string; apiBase: string; runtime: string }): Promise<void> {
     const { jobId, id } = j;
     let recruited = false;
-    // ★failed 는 되돌림이 끝난 뒤에 적는다★ — b3chat 이 failed 를 보고 봇을 끄는 순간 b3os 쪽 등록도 이미 없어야 한다.
+    // failed 는 되돌림이 끝난 뒤에 적는다 — b3chat 이 failed 를 보고 봇을 끄는 순간 b3os 쪽 등록도 이미 없어야 한다.
     const failJob = async (stage: string, code: JobCode, retryable: boolean) => {
       let cleanup: string | null = null;
       if (recruited) {
@@ -451,8 +438,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     if (act.ok !== true) return failJob("activate", "start_failed", true);
     setJob(jobId, { state: "ready", stage: "ready" });
 
-    // 5) 첫 인사 — 준비됨과 따로 기록한다(인사 실패 ≠ 기동 실패).
-    //    ★새 팀원 브리지 창구로 넣는다★ — 브리지·세션·봇이 다 살아야 방에 뜬다. 그게 "돌고 있다" 의 증거다.
+    // 첫 인사 성공은 기동 성공과 별도로 확인한다. 브리지 창구에 넣어야 실제 봇·세션 경로를 검증할 수 있다.
     setJob(jobId, { greeting: "requested" });
     const req: BridgeWindowRequest = {
       agentId: id, groupId: j.roomId, threadId: `b3c-greeting-${id}`, messageId: `greet-${jobId}`,

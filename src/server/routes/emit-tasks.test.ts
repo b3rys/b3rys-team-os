@@ -1,5 +1,5 @@
 // 측정 W1 emit 슬라이스 — tasks lane 전이 → loop_event emit → projection → recompute (end-to-end).
-// ★로그 격리(팀 하드레슨): appendAuditFile이 라이브 logs/ 안 건드리게 temp dir로.★
+// 로그 격리(팀 하드레슨): appendAuditFile이 라이브 logs/ 안 건드리게 temp dir로.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -10,7 +10,7 @@ import { createTaskRoutes } from "./tasks";
 import { EVENT, LOOP_EVENT_SCHEMA, projectAuditRow, type AuditRow } from "../metrics/loopEvent";
 import { verifiedClosure } from "../metrics/recompute";
 
-/** 전역 격리(preload)가 세팅한 값 — afterAll 에서 ★지우지 말고 되돌린다.★ */
+/** 전역 격리(preload)가 세팅한 값 — afterAll 에서 지우지 말고 되돌린다. */
 const PREV_AUDIT_DIR = process.env.B3OS_AUDIT_LOG_DIR;
 
 let TMP: string;
@@ -19,12 +19,7 @@ beforeAll(() => {
   process.env.B3OS_AUDIT_LOG_DIR = TMP;
 });
 afterAll(() => {
-  // ★지우면 안 된다 — 되돌려야 한다.★ (2026-07-14)
-  //   전역 preload(src/test/test-isolation.ts)가 B3OS_AUDIT_LOG_DIR 을 temp 로 세팅해 ★모든★ 테스트를
-  //   라이브 logs/ 에서 격리한다. 여기서 delete 하면 ★그 격리가 통째로 풀리고★, 같은 프로세스에서
-  //   ★뒤에 도는 모든 테스트가 라이브 감사로그에 쓴다.★
-  //   실측: 라이브 로그에 테스트 이벤트 ★1619건★ (actor='nova', thread='t1' — 존재하지 않는 팀원/스레드).
-  //   ★계기판이 첫날부터 가짜 데이터로 못 쓰게 됐다.★ (팀 하드레슨: bun test 는 라이브를 안 건드린다)
+  // 전역 preload의 감사 로그 격리 env는 삭제하지 말고 복원한다. 삭제하면 뒤의 시험이 실제 로그에 기록된다.
   if (PREV_AUDIT_DIR === undefined) delete process.env.B3OS_AUDIT_LOG_DIR;
   else process.env.B3OS_AUDIT_LOG_DIR = PREV_AUDIT_DIR;
   try { rmSync(TMP, { recursive: true, force: true }); } catch { /* best-effort */ }
@@ -106,11 +101,11 @@ describe("tasks lane emit (측정 W1 ④)", () => {
     const { app, db } = setup();
     const created = (await (await app.request("/tasks", { method: "POST", body: JSON.stringify({ title: "z", column: "doing" }), headers: { "content-type": "application/json" } })).json()) as { task: { id: string } };
     const id = created.task.id;
-    // ★emit 실제 실패 주입★: audit_event 테이블을 없애 emitLoopEvent(appendAudit INSERT)가 throw하게.
+    // emit 실제 실패 주입: audit_event 테이블을 없애 emitLoopEvent(appendAudit INSERT)가 throw하게.
     //   updateTask(카드 커밋)은 task 테이블이라 영향 없음 → emitLoopEventSafe가 삼키고 PATCH는 정상.
     db.exec("DROP TABLE audit_event");
     const r = await app.request(`/tasks/${id}`, patch({ column: "done" }));
-    expect(r.status).toBe(200); // ★계측 실패해도 라이브 기능 안 깨짐★
+    expect(r.status).toBe(200); // 계측 실패해도 라이브 기능 안 깨짐
     const body = (await r.json()) as { ok: boolean; task: { column: string } };
     expect(body.ok).toBe(true);
     expect(body.task.column).toBe("done"); // 카드는 실제로 done 커밋됨

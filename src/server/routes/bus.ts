@@ -13,30 +13,7 @@ interface BusRouteDeps {
   db: Database;
 }
 
-/**
- * Team Bus operational routes.
- *
- * GET /api/bus/status — delivery_state counts + recent dead_letter/blocked list (10 items).
- *   For use during shadow → allowlist → full enable progression. No auth required (internal
- *   network only — same as all other /api/ routes).
- *
- * Example response:
- *   {
- *     "dispatch_enabled": false,
- *     "allowlist": ["bill", "codex"],   // null if not set (= all agents)
- *     "counts": {
- *       "pending": 3, "dispatching": 0, "wake_dispatched": 1,
- *       "deferred": 1, "blocked": 0, "dead_letter": 2,
- *       "completed": 47, "agent_ack": 12
- *     },
- *     "recent_terminal_bad": [
- *       { "message_id": "...", "agent_id": "bill", "delivery_state": "dead_letter",
- *         "last_error": "tmux_inject_returned_false", "deferred_count": null,
- *         "updated_at": "2026-05-27T09:12:34+09:00" },
- *       ...
- *     ]
- *   }
- */
+/** 버스 상태는 수신자별 배달 건수와 최근 실패 목록을 읽기 전용으로 제공한다. */
 export function createBusRoutes(deps: BusRouteDeps): Hono {
   const r = new Hono();
 
@@ -49,35 +26,25 @@ export function createBusRoutes(deps: BusRouteDeps): Hono {
     });
   });
 
-  // GET /api/bus/flow?limit=40 — recent messages + per-recipient delivery_state,
-  // newest first. Powers the dashboard real-time bus flow view.
+  // 최근 메시지와 수신자별 배달 상태를 최신순으로 반환한다.
   r.get("/bus/flow", (c) => {
     const limit = Math.min(parseInt(c.req.query("limit") ?? "40", 10) || 40, 100);
     return c.json({ messages: busFlowRecent(deps.db, limit) });
   });
 
-  // GET /api/bus/members — read-only per-member delivery-state snapshot.
-  // Powers the busviz-v1 topology view: one node per registered agent (zero-filled),
-  // with resolvable_pending and in-flight age for the frontend's stuck/zombie hinting.
+  // 미배정 멤버도 0건으로 포함해야 토폴로지 화면에서 누락과 실제 적체를 구분할 수 있다.
   r.get("/bus/members", (c) => {
     return c.json(busMemberStatus(deps.db));
   });
 
-  // GET /api/audit?action=&limit= — read-only audit feed (SLG cycle1 B, Audit screen).
-  // Same read path/auth as /bus/flow (internal network). `action` is bound as a parameter
-  // inside auditRecent (no string-built SQL); `limit` is clamped to [1,500] there.
-  // Powers the Audit standard-interface screen — recipient_state_change history with
-  // suspicious-close (ack_only/reply_observed) flagged.
+  // 감사 로그의 action은 SQL 매개변수로 바인딩하고 limit은 1~500으로 제한한다.
   r.get("/audit", (c) => {
     const action = c.req.query("action");
     const limit = parseInt(c.req.query("limit") ?? "100", 10) || 100;
     return c.json({ events: auditRecent(deps.db, { action, limit }) });
   });
 
-  // POST /api/bus/members/:agentId/pending/resolve — safe backlog resolution.
-  // Body: { action: "expire" | "complete", dry_run?: boolean }
-  // Guarded: only pending/deferred rows older than the grace window, batch-capped,
-  // never touches in-flight (dispatching/wake_dispatched). wakeDispatcher untouched.
+  // 적체 정리는 유예시간이 지난 pending/deferred만 제한된 건수로 처리하며 진행 중 배달은 건드리지 않는다.
   r.post("/bus/members/:agentId/pending/resolve", async (c) => {
     const agentId = c.req.param("agentId");
     let body: { action?: string; dry_run?: boolean };

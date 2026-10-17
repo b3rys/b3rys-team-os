@@ -1,14 +1,5 @@
-// 팀원 → 팀장 편집기(Steno) 파일 우편함.
-//
-//   POST /api/notes  {from_agent_id, name?, format: "md"|"html", content}  → 201 {id, name}
-//   GET  /api/notes?after=<id>&limit=<n>  → {notes: [{id, from_agent_id, name, format, content, created_at}]} (id 오름차순)
-//
-// 팀원이 쓴 보고서(md·html)를 팀장 맥북 Steno 의 "받은 파일/" 폴더로 보내는 전용 통로다.
-// /api/inbox 는 팀장 DM 과 섞이고 본문 길이 제한이 있어 따로 둔다.
-//   · 쌓기만 한다 — 덮어쓰기·삭제 없음. 받는 쪽은 마지막으로 받은 id 를 after 로 넘겨 이어 받는다.
-//   · 원격 요청은 /api 전체에 걸린 Cloudflare Access 관문(apiCfGate)을 그대로 지난다.
-//   · from_agent_id 는 팀 명단에 있는 id 여야 한다.
-//   · name 은 받는 쪽이 파일 이름으로 쓰므로 서버에서 경로 문자를 걷어낸다.
+// Steno 파일 우편함은 DM 길이 제한과 분리해 보고서를 쌓기만 하며, after ID로 이어 받는다.
+// 원격은 API 인증 관문을 거치고, 발신자 명부와 수신 파일명을 검증한다.
 import { Hono } from "hono";
 import type { Database } from "bun:sqlite";
 
@@ -41,14 +32,7 @@ export function notesMaxBytes(env: Record<string, string | undefined> = process.
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_MAX_BYTES;
 }
 
-/**
- * 받는 쪽이 그대로 파일 이름으로 써도 안전한 이름으로 만든다.
- *   · 경로 부분은 버리고 마지막 조각만(`../../x.md` → `x.md`, `a\b.md` → `b.md`)
- *   · 제어 문자와 `: * ? " < > |` 는 `_`
- *   · 앞의 점·공백 제거(숨김 파일·`..` 방지), 길이 상한
- *   · 확장자가 형식과 다르면 형식 확장자를 붙인다
- * 남는 게 없으면 null — 받는 쪽이 기본 이름을 정한다.
- */
+/** 경로·제어문자·숨김 접두사를 제거하고 형식 확장자를 붙인다. 유효한 이름이 남지 않으면 수신자가 기본 이름을 정하도록 null을 반환한다. */
 export function safeNoteName(raw: unknown, format: NoteFormat): string | null {
   if (typeof raw !== "string") return null;
   const base = raw.split(/[/\\]/).pop() ?? "";

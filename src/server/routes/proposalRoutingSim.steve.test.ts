@@ -1,9 +1,4 @@
-/**
- * [Steve 독립 sim 재검증] proposal PM 라우팅 capability 도출 — 공개 팀 유령배정 0 실증.
- * Bill 기능수정(하드코딩 codex/bill 제거) 교차검증용. 적대적 엣지케이스 중심.
- * 핵심 단언: 어떤 follow-up owner 도 codex/bill(유령) 이 아니고, 전부 실제 주입 팀원이다.
- * 임시 파일 — 검증 후 삭제.
- */
+/** 리뷰 후속 과제는 하드코딩된 팀원 대신 실제 주입된 명부의 적격 후보에게 배정되어야 한다. */
 import { beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
@@ -76,7 +71,7 @@ describe("[Steve sim] 공개 팀 proposal 라우팅 — 유령배정 0 (적대�
     expect(statusOf(db, id)).toBe("gd_report");
     expect((await transition(app, id, "accepted", "gd")).status).toBe(200);
     expect(statusOf(db, id)).toBe("accepted");
-    // ★유령배정 전수감사: 모든 follow-up owner ∈ 팀, 유령 0
+    // 유령배정 전수감사: 모든 follow-up owner ∈ 팀, 유령 0
     const owners = allOwners(db, id);
     expect(owners.length).toBeGreaterThan(0);
     for (const o of owners) {
@@ -126,7 +121,7 @@ describe("[Steve sim] 공개 팀 proposal 라우팅 — 유령배정 0 (적대�
   });
 
   test("S6b: team_official_member:false 비정식 팀원은 리뷰어 후보에서 배제", async () => {
-    // Forin 같은 coach/콘텐츠 멤버는 team op wake allowlist 밖일 수 있어 proposal 리뷰 후보가 되면 stuck된다.
+    // 깨움 대상이 아닌 팀원은 리뷰 후보에서 제외해야 배정 후 검토가 멈추지 않는다.
     const { app, db } = setupTeam([["alice"], ["bob"], ["coach", [], false], ["dave", ["coordinator"]]]);
     const id = await createBy(app, "alice");
     expect(statusOf(db, id)).toBe("peer_review"); // peer 직행(coach team_official_member:false 제외)

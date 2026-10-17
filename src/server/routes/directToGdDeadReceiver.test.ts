@@ -1,6 +1,4 @@
-// direct_to_gd 릴레이 — 발신자 텔레그램 수신이 죽어 있으면 게시 본문 끝에 시스템 줄 한 줄.
-//   발신자 봇으로 게시되므로 수신이 죽은 팀원의 대화에 팀장이 답하면 아무도 받지 못한다.
-//   정상 발신자의 게시 텍스트는 byte 단위로 그대로여야 한다(회귀).
+// 발신자 봇의 수신이 중단되면 팀장 답장을 받을 수 없으므로 직보 본문에 시스템 안내를 덧붙인다. 정상 본문은 변경하지 않는다.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
