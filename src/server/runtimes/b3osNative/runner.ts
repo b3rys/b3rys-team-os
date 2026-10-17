@@ -1,12 +1,4 @@
-/**
- * b3os-native runtime — LLM 호출 ("두뇌"를 부르는 곳).
- *
- * 이 파일이 하는 일: 페르소나(system) + 대화(prompt)를 받아 LLM API를 한 번 호출하고 답 텍스트를 돌려준다.
- * M1 범위: Claude(Anthropic) 1개 · 텍스트 답변만 · 도구(tool) 없음 · 최종답 1회.
- *
- * 왜 LlmCaller를 따로 두나: 테스트에서 진짜 API를 부르지 않고 가짜 함수를 끼워 넣기 위해(주입).
- * 실제 호출 = callClaude. 확장(OpenAI 등)은 M2에서 LlmCaller 구현을 하나 더 추가하면 끝(소켓에 두뇌 갈아끼우기).
- */
+/** LlmCaller를 주입해 시험이 실제 API를 호출하지 않게 한다. 모델 호출은 답 텍스트를 반환하고 게시 책임은 어댑터에 둔다. */
 
 /** M2a: user/assistant 역할 배열 메시지. self(target)=assistant, 타인=user. */
 export interface ChatMessage {
@@ -30,7 +22,7 @@ export const DEFAULT_PROVIDER = "anthropic";
 export const DEFAULT_MODEL = "claude-sonnet-4-6";
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
-// 행 소켓 방지(하네스 발견 LOW-1): fetch에 타임아웃 — 안 그러면 promise가 영영 안 풀려 in-flight 잠금이 샌다.
+// fetch에 제한시간을 두어 응답 없는 연결이 in-flight 잠금을 계속 점유하지 않게 한다.
 const CALL_TIMEOUT_MS = 120_000;
 
 /** agent.model_provider/model_id가 비어있으면 기본값으로 채운다. */
@@ -88,10 +80,8 @@ export const callClaude: LlmCaller = async (turn) => {
   return text;
 };
 
-// ── M2b 스파이크: OpenAI 호환 두뇌 (소켓에 두뇌 갈아끼우기) ──────────────────
-// 하나의 caller로 OpenAI · GLM · 로컬 Gemma(Ollama /v1)를 다 부른다. OpenAI 호환
-// /v1/chat/completions 규약: messages 배열(system·user 역할) + choices[].message.content.
-// 키는 env에서만(B3OS_NATIVE_OPENAI_API_KEY, 로컬 Ollama는 불요 — 없으면 Authorization 생략).
+// OpenAI 호환 호출은 /v1/chat/completions 규약을 사용하고 키는 env에서만 읽는다.
+// 로컬 Ollama는 키가 필요 없으므로 키가 없으면 Authorization을 보내지 않는다.
 export const DEFAULT_OPENAI_COMPAT_BASE_URL = "http://localhost:11434/v1";
 export const DEFAULT_OPENAI_COMPAT_MODEL = "gemma3:27b-it-qat";
 /** 플래그 + provider 게이트. 플래그 off거나 provider 불일치면 신규 경로 미사용(기존 동작 불변). */
@@ -152,9 +142,7 @@ export function resolveCaller(provider: string): LlmCaller {
   return callClaude;
 }
 
-// ── M2c: 팀원별 두뇌 라우팅 + 1단계 fallback ──────────────────────────────────
-// 팀원마다 자기 두뇌(provider/model)로 라우팅하고, 주모델이 "재시도 가능"하게 다운되면
-// 대체 caller로 1회만 넘어간다. ★기본 off(회귀 0): 플래그 없으면 체인 길이 1 = 기존 동작 그대로.★
+// 재시도 가능한 primary 실패에만 대체 모델을 한 번 시도한다. 기본은 OFF로 단일 호출을 유지한다.
 export const FALLBACK_FLAG = "B3OS_NATIVE_FALLBACK";
 
 /** caller 참조로 provider 라벨을 붙인다(audit via_caller용). */
@@ -185,7 +173,7 @@ export function resolveCallerChain(provider: string, explicit?: LlmCaller): Call
 }
 
 /**
- * 에러가 fallback 시도할 가치가 있나(재시도 가능). ★비재시도(즉시 중단)★: api key 없음, 인증/클라이언트 4xx.
+ * 에러가 fallback 시도할 가치가 있나(재시도 가능). 비재시도(즉시 중단): api key 없음, 인증/클라이언트 4xx.
  * 재시도 가능: 408/429(타임아웃·rate-limit), 5xx(서버), empty, abort/네트워크(status 없음=일시적).
  */
 export function isRetryableError(e: unknown): boolean {
@@ -210,7 +198,7 @@ export interface ChainResult {
 /**
  * 체인을 순차 시도. 성공 시 즉시 반환(어느 caller가 답했는지 라벨). 재시도 가능 에러 + 다음 caller 있으면
  * onFallback 훅 호출 후 대체 시도. 비재시도 에러거나 마지막 caller면 throw(→ 호출측 실패 처리).
- * ★순차 await라 한 caller만 성공 처리(at-most-once 유지) — 병렬 아님.★
+ * 순차 await라 한 caller만 성공 처리(at-most-once 유지) — 병렬 아님.
  */
 export async function runCallerChain(
   chain: CallerLink[],

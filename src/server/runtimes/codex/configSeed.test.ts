@@ -81,8 +81,7 @@ describe("codex config 시드 — 능력은 상속, 정책·신뢰·정체성은
     expect(seed(HOST, "/tmp/my workspace")).toContain('[projects."/tmp/my workspace"]');
   });
 
-  // ★합성 입력만으로는 오늘 같은 것이 안 보인다★ — 실제 호스트 설정으로 한 번 돌린다.
-  //   이 기계에 파일이 없으면(다른 개발자·CI) 조용히 건너뛴다. 있으면 불변식을 잰다.
+  // 실제 호스트 설정이 있으면 동일한 불변식을 확인한다. 파일 없는 개발 환경·CI는 이 항목을 건너뛴다.
   test("실제 호스트 설정을 입력으로 — 정책·신뢰·정체성이 하나도 새지 않는다", () => {
     const hostPath = join(homedir(), ".codex", "config.toml");
     if (!existsSync(hostPath)) return; // 환경에 없으면 이 시험은 할 말이 없다
@@ -135,7 +134,7 @@ describe("TOML 편집 도우미", () => {
     const out = removeLinesReferencing(src, "/h/.codex");
     expect(out).not.toContain("A =");        // 그 경로 자체
     expect(out).not.toContain("D =");        // 하위 경로
-    expect(out).toContain('B = "/h/.codex-agents/newbie"'); // ★다른 폴더다★
+    expect(out).toContain('B = "/h/.codex-agents/newbie"'); // 다른 폴더다
     expect(out).toContain('C = "/h/.codexfoo"');            // 이름만 비슷한 것
   });
 
@@ -145,7 +144,7 @@ describe("TOML 편집 도우미", () => {
     const src = 'sandbox_mode = "x"\n\n[profiles.dev]\nsandbox_mode = "y"\n';
     const out = removeTopLevelKey(src, "sandbox_mode");
     expect(out).not.toContain('sandbox_mode = "x"');
-    expect(out).toContain('sandbox_mode = "y"'); // ★남는다 — 알고 있는 경계다★
+    expect(out).toContain('sandbox_mode = "y"'); // 남는다 — 알고 있는 경계다
   });
 
   test("빈 needle 로는 아무것도 안 지운다 — 실수로 전체가 날아가면 안 된다", () => {

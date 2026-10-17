@@ -1,7 +1,4 @@
-// ★진행 중 턴에 말을 끼워 넣는다★
-//
-// 실측 2026-08-12: dex 가 74초 작업 중일 때 보낸 메시지가 ★20번 연기되다 blocked★ 로 끝났다.
-// 턴도 답도 없었고, recipient_state 는 'acknowledged/activity_assumed' — ★활동 중이라는 이유로 봤다고 처리★ 됐다.
+// 활성 턴에 새 메시지를 전달해야 단순 연기 한도 초과로 사라지지 않는다. 활동 중이라는 이유만으로 새 요청을 읽은 것으로 처리하지 않는다.
 import { describe, test, expect } from "bun:test";
 import { registerActiveTurn, unregisterActiveTurn, steerActiveTurn, activeTurnAgents } from "./activeTurns";
 import { buildSteerText } from "./adapter";

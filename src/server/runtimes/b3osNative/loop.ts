@@ -1,15 +1,5 @@
-/**
- * b3os-native M3a — 경계된(bounded) 에이전트 루프.
- *
- * 흐름: LLM 호출 → 답에서 도구요청 마커 파싱 → 있으면 도구 실행(읽기전용·스코프) → 관찰(untrusted)을
- * messages 에 append → 다음 스텝. 마커 없거나 maxSteps 도달 시 그 텍스트가 최종답.
- *
- * ★불변식:★
- *  - H3 runAgentLoop 는 finalText 만 반환(게시 책임은 호출측 runTurn 하나 — at-most-once). 중간 관찰 미게시.
- *  - maxSteps ≤ 4(과도 루프 차단). H5 canonical args 반복(비진전) 조기마감.
- *  - G1 최종 텍스트에서 TOOL_CALL 마커 제거(stripToolMarkers) — 게시에 마커 잔존 0.
- *  - H8 도구/검증 실패는 throw 아니라 관찰로 되먹임.
- */
+/** 루프는 finalText만 반환해 중간 관찰을 게시하지 않는다. 최대 4단계와 같은 인자 반복 차단으로 무진전 호출을 제한한다.
+ * 도구 마커는 최종답에서 제거하며, 도구·검증 실패는 예외 대신 신뢰하지 않는 관찰 데이터로 되먹인다. */
 import type { ChatMessage } from "./runner";
 import { parseToolCall, validateToolCall, runTool, stripToolMarkers, type ToolName } from "./tools";
 import type { Database } from "bun:sqlite";

@@ -5,14 +5,7 @@ import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-/**
- * ★턴이 실패한 것과 세션이 죽은 것은 다르다.★ (팀장님 관측 2026-08-19)
- *
- * 전에는 턴이 실패하면 저장된 세션을 ★무조건 지웠다.★ 그런데 `appserver_timeout` 은
- * 세션이 멀쩡한데 ★턴만 오래 걸린 것★ 이다. 지우고 나면 바로 직전에 한 얘기까지 통째로 잊는다:
- *   "방금 니가 보낸 메시지에 있는 말이야??? 왜 본인이 방금 말한걸 기억을 못하지?"
- * 게다가 그 sessionId 를 ★저장한 직후★ 지우고 있었다.
- */
+/** 턴 실패만으로 세션을 지우면 timeout 뒤 직전 맥락도 잃으므로 resume 가능한 ID는 유지해야 한다. */
 let prev: string | undefined;
 beforeEach(() => {
   prev = process.env.B3OS_FIRST_CONTACT_DIR;

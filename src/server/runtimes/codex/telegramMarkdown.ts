@@ -1,23 +1,5 @@
-/**
- * 모델이 쓴 Markdown 을 텔레그램 MarkdownV2 로 옮긴다.
- *
- * 지금 dex 답은 ★원문 그대로★ 나간다. 그래서 굵게 표시의 별표와 코드 백틱이 글자로 보인다.
- *
- * ★원문 Markdown 에 parse_mode 만 붙이면 안 된다.★ MarkdownV2 는 예약문자를 전부 이스케이프해야 하고
- * ★하나만 빠져도 메시지 전체가 400 으로 안 나간다.★ 예약문자를 일괄 치환하는 것도 안 된다 —
- * 코드블록 안까지 망가진다.
- *
- * 그래서 hermes 실구현 순서를 그대로 따른다(아메스 확인, 소스 d7c24f264):
- *   ① 코드(펜스·인라인)와 링크를 먼저 자리표시자로 ★보호★
- *   ② 제목·굵게를 MarkdownV2 표현으로 ★변환★
- *   ③ 남은 예약문자를 ★이스케이프★
- *   ④ 보호했던 것을 되돌린다(코드 안에서는 백슬래시와 백틱만 이스케이프)
- *
- * 보내는 쪽은 실패하면 ★표시를 걷어낸 순수 텍스트로 한 번 더★ 시도한다(호출자 책임).
- * 그 폴백이 없으면 이스케이프 한 곳이 어긋났을 때 답이 통째로 사라진다.
- *
- * 지원 범위를 넘는 것(표 등)은 ★글자 그대로★ 남긴다 — 깨뜨리느니 그대로 두는 편이 낫다.
- */
+/** MarkdownV2는 예약문자 하나로 메시지 전체가 거절될 수 있어 코드·링크를 먼저 보호하고 제목·굵게 변환 후 나머지를 이스케이프한다. 코드 안은 백슬래시·백틱만 처리한다.
+ * 미지원 표 등은 원문으로 남기고 발신자는 실패 시 평문으로 한 번 폴백해 표시 오류로 답 전체가 사라지지 않게 한다. */
 
 /** 텔레그램 한 메시지 한도(UTF-16 code unit). 글자 수가 아니다. */
 export const TG_LIMIT_UNITS = 4096;
@@ -82,11 +64,7 @@ export function unitsOf(s: string): number {
   return s.length;
 }
 
-/**
- * 한도에 맞춰 ★자르지 않고 나눈다.★
- * 줄 경계를 우선하고, 코드 펜스 안에서 끊기면 앞 조각을 닫고 다음 조각에서 다시 연다.
- * (닫힘 줄에 조각 번호를 붙이면 parse 가 거부된다 — hermes 사고 a. 번호는 붙이지 않는다.)
- */
+/** 한도를 넘으면 줄 경계로 나누고 코드 펜스는 앞 조각에서 닫고 다음 조각에서 다시 연다. 닫힘 줄에 조각 번호를 붙이면 Markdown 파싱이 거절되므로 붙이지 않는다. */
 export function splitForTelegram(text: string, limit: number = TG_LIMIT_UNITS): string[] {
   if (unitsOf(text) <= limit) return [text];
   const fence = "```";
@@ -101,8 +79,8 @@ export function splitForTelegram(text: string, limit: number = TG_LIMIT_UNITS): 
   };
 
   for (const rawLine of text.split("\n")) {
-    // ★줄 하나가 한도보다 길면 줄 경계로는 못 나눈다.★ 그때만 글자 단위로 쪼갠다 —
-    //   단, `\.` 같은 ★이스케이프 쌍 사이를 끊으면★ 남은 백슬래시가 다음 글자를 먹어 parse 가 깨진다.
+    // 줄 하나가 한도보다 길면 줄 경계로는 못 나눈다. 그때만 글자 단위로 쪼갠다 —
+    //   단, `\.` 같은 이스케이프 쌍 사이를 끊으면 남은 백슬래시가 다음 글자를 먹어 parse 가 깨진다.
     for (const line of hardSplit(rawLine, limit - fence.length - 1)) {
     const addition = cur === "" ? line : "\n" + line;
     // 닫는 펜스 자리를 남겨 둔다 — 닫고 나서 한도를 넘으면 안 된다
@@ -117,7 +95,7 @@ export function splitForTelegram(text: string, limit: number = TG_LIMIT_UNITS): 
 
 /**
  * 줄 하나가 한도를 넘을 때만 쓰는 글자 단위 분할.
- * ★이스케이프 쌍(백슬래시+예약문자) 사이를 끊지 않는다★ — 끊으면 남은 백슬래시가
+ * 이스케이프 쌍(백슬래시+예약문자) 사이를 끊지 않는다 — 끊으면 남은 백슬래시가
  * 다음 글자를 먹어 조각 전체가 parse 거부된다.
  */
 export function hardSplit(line: string, limit: number): string[] {

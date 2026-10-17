@@ -50,7 +50,7 @@ describe("1:1 — 작업 중에 온 말을 어디로 보내나", () => {
 
   test("★밀어 넣기가 실패하면 새 작업으로 되돌린다★ — 그 자리에서 멈추면 말이 사라진다", async () => {
     // 번호가 아직 없는 찰나(막 시작한 턴)에 말이 오면 steer 가 false 를 준다.
-    // ★여기서 return 하면 그 말은 아무 데도 안 간다 — 사람은 무시당했다고 느낀다.★
+    // 여기서 return 하면 그 말은 아무 데도 안 간다 — 사람은 무시당했다고 느낀다.
     const { deps, calls } = harness({ running: true, steerResult: false });
     const route = await routeIncoming(7066867819, "로그인 안되면 알려줘", deps);
     expect(route, "실패했으면 새 작업이어야 한다").toBe("newTurn");

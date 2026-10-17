@@ -1,14 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { buildTurnInput } from "./appServerClient";
 
-/**
- * ★codex 에 보낼 입력 아이템 조립.★
- *
- * 여기서 틀리면 ★그림이 조용히 빠진 채★ 글자만 간다 — 사람은 보냈는데 "안 보인다" 는 답을 받는다.
- * 모양은 실측으로 고정했다(CLI 0.147.0 app-server):
- *   · localImage 는 ★path 를 요구★ 한다 — imageUrl 로 주면 `missing field \`path\`` 로 거부
- *   · 글자가 든 그림을 태워 codex 가 그 글자를 읽었고, 같은 질문을 그림 없이 주면 "안보임" 이 나왔다
- */
+/** localImage는 CLI 0.147.0의 path 필드를 사용한다. imageUrl은 거절되므로 실제 입력 조립을 검증해 첨부가 조용히 빠지지 않게 한다. */
 describe("턴 입력 조립", () => {
   test("★그림이 글자보다 앞선다★ — 뒤에 두면 '이 그림' 이 앞 문장을 못 가리킨다", () => {
     const input = buildTurnInput("이거 뭐야", ["/m/a.jpg"]);

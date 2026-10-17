@@ -1,25 +1,8 @@
-/**
- * 승인 경로 시험 — 요청이 만들어지고 · 그 팀원 방으로 가고 · 사람이 누른 결정이 codex 로 돌아오는 길.
- *
- * appServerRunner(요청 생성·목적지) · appServerPopup(카드 렌더·만료·목적지 판정) ·
- * appServerClient(자식 env) 를 함께 잰다. 세 모듈이 한 경로를 이루므로 한 파일에서 본다.
- *
- * 판정 계층(appServerApproval)의 시험은 그 모듈과 함께 삭제됐다 — 경로에서 빠진 지 오래고
- * 실호출이 0곳이었다.
- *
- * ★이 파일의 승인 팝업 시험들은 지금 라이브에서 도달하지 않는다★ — 실행 모드가
- * approvalPolicy "never" 라 codex 가 승인 요청을 보내지 않는다(appServerRunner.ts).
- * 여기서 지키는 것은 "on-request" 로 되돌렸을 때의 계약이다. ★통과가 그 경로가 돈다는
- * 뜻이 아니다.★ 실제로 넘기는 값을 재는 시험은 이 파일 위쪽(실행 모드)에 있다.
- */
+/** 요청 생성·팝업 목적지·결정 반환·자식 설정을 연결해 검증한다.
+ * 현재 never 실행 모드에서는 팝업 경로에 도달하지 않으며 이 시험은 on-request 복원 시 계약을 지킨다. 시험 통과를 운영 중 호출 증거로 보지 않는다. */
 import { test, expect } from "bun:test";
 
-// ── ★codex 설정이 정하게 한다★ ──
-//
-// startThread 에 sandbox·approvalPolicy 를 넘기면 ★CODEX_HOME 의 config.toml 을 덮어쓴다.★
-// runtimeWorkspaceRoots 는 ★experimentalApi capability 를 요구해서 turn 이 시작도 못 했다★ (실측 2/2).
-//
-// ★소스에 그 줄이 없는지가 아니라 startThread 가 실제로 무엇을 받는지를 잰다.★
+// startThread에 전달하는 sandbox·approvalPolicy는 CODEX_HOME 설정을 덮어쓴다. runtimeWorkspaceRoots는 experimentalApi가 필요하므로 실제 전달 인자로 배선을 검증한다.
 
 import { runViaAppServer } from "./appServerRunner";
 
@@ -47,7 +30,7 @@ test("★실행 모드를 프로토콜로 명시한다★ — 안 넘기면 read
 
 // 이 시험은 전에 정반대를 못박고 있었다("on-request 여야 한다 — never 면 승인 릴레이가 죽는다").
 // 요구사항이 바뀌었다: 이 런타임을 다른 팀원과 동일하게 둔다. 승인 릴레이가 죽는 것은
-// 부작용이 아니라 ★의도한 결과★ 다. 값과 함께 이유도 바꿔 적는다.
+// 부작용이 아니라 의도한 결과 다. 값과 함께 이유도 바꿔 적는다.
 test("approvalPolicy 는 never 다 — 다른 팀원과 같은 값이고, 사람이 실행을 승인하는 단계가 없다", async () => {
   const a = await startArgs({ cwd: "/tmp/ws" });
   expect(a.approvalPolicy).toBe("never");
@@ -71,16 +54,7 @@ test("★대조군 — 넘겨야 하는 것은 그대로 간다★ (cwd · model
   expect({ cwd: a.cwd, model: a.model, resume: a.resumeThreadId }).toEqual({ cwd: "/tmp/ws", model: "gpt-x", resume: "th_prev" });
 });
 
-// ── ★승인 판정은 우리가 하지 않는다★ ──
-//
-// 전에는 여기서 다시 판정하고 ask 면 ★op 방★ 에 팝업을 띄웠다. 두 가지가 동시에 망가졌다:
-//   ① 팀원 승인이 op 방에 떴다 — op 방은 시스템 알림 자리다.
-//      실측: permission_request 를 만든 팀원은 codex 런타임뿐(dex 5 · codex 4). 다른 팀원 0건.
-//   ② 아무도 안 누르면 턴이 안 끝나 ★팀원이 답을 못 했다.★
-// hermes·openclaw 는 b3os 에 승인 배선이 아예 없다. 경계는 각자 런타임 설정이 친다.
-//
-// ★이 시험은 runViaAppServer 가 승인 요청을 받았을 때 실제로 무엇을 하는지 잰다★
-// (팝업을 안 만든다 · 사람을 안 기다린다 · fail-closed 로 거절한다).
+// Codex 승인 요청을 받았을 때 실제 러너의 팝업 생성·대기·거절 동작을 검사한다. 다른 런타임처럼 실행 경계는 자체 설정이 정한다.
 
 import { Database as ApprDb } from "bun:sqlite";
 import { migrate as apprMigrate } from "../../db/migrate";
@@ -88,7 +62,7 @@ import { runViaAppServer as runApprServer } from "./appServerRunner";
 
 /**
  * codex 가 승인 요청을 올리는 상황을 흉내내는 클라이언트.
- * ★돌려받은 결정을 seen 에 적어둔다★ — 안 적으면 결정값을 무엇으로 바꿔도 시험이 통과한다(뮤턴트 생존).
+ * 돌려받은 결정을 seen 에 적어둔다 — 안 적으면 결정값을 무엇으로 바꿔도 시험이 통과한다(뮤턴트 생존).
  */
 function approvalRaisingClient(seen: string[] = []) {
   return () =>
@@ -108,17 +82,9 @@ function approvalRaisingClient(seen: string[] = []) {
     }) as unknown as import("./appServerClient").CodexAppServerClient;
 }
 
+/** Codex 요청에 별도 사람 승인 대기를 추가하지 않는다. 공용 방 팝업이 처리되지 않아 턴이 멈추지 않도록 실제 거절 경로를 검증한다. */
 /**
- * ★codex 가 승인을 물어와도 우리는 사람을 부르지 않는다.★
- *
- * 전에는 여기서 permission_request 를 만들고 사람이 누를 때까지 폴링했다(TTL 1시간). 그 결과:
- * ① 그 팝업이 ★op 방★ 에 떴다 — op 방은 시스템 알림 자리다.
- *   ② 아무도 안 누르면 턴이 안 끝나 ★팀원이 답을 못 했다.★
- * hermes·openclaw 는 b3os 에 승인 배선이 아예 없다. codex 도 같은 모양으로 맞췄다.
- * 경계는 config.toml 의 permission 프로파일이 친다(launcher.renderLockedDownCodexConfig).
- */
-/**
- * ★결정을 기다리지 않는다★ — 팝업은 사람이 누를 때까지 폴링한다(기본 TTL 1시간).
+ * 결정을 기다리지 않는다 — 팝업은 사람이 누를 때까지 폴링한다(기본 TTL 1시간).
  * 행이 생기는 즉시 읽고 거절로 마감해 턴을 풀어준다. (그냥 await 하면 시험이 타임아웃까지 매달린다.)
  */
 const popupOf = async (agentId: string) => {
@@ -138,7 +104,7 @@ const popupOf = async (agentId: string) => {
 };
 
 test("★codex 가 물으면 승인 요청을 만든다★ — 무조건 거절하면 옮겨온 게 아니라 기능을 뺀 것이다", async () => {
-  // ★아래는 지금 도달하지 않는 경로다★ — 실행 모드가 approvalPolicy "never" 라 codex 가
+  // 아래는 지금 도달하지 않는 경로다 — 실행 모드가 approvalPolicy "never" 라 codex 가
   // 승인 요청을 보내지 않는다. 이 시험들은 "on-request" 로 되돌렸을 때의 계약을 지킨다.
   // 통과한다는 것이 그 경로가 라이브에서 돈다는 뜻은 아니다.
   expect((await popupOf("dex")).agentId).toBe("dex");
@@ -154,12 +120,7 @@ test("사람이 누른 결정이 codex 에게 그대로 간다", async () => {
   expect((await popupOf("dex")).decisions).toEqual(["denied"]); // 위에서 거절로 마감했다
 }, 20000);
 
-// ── ★자식 app-server 가 그 팀원의 설정을 읽는가★ (2026-08-12) ──
-//
-// 안 넘기면 자식이 ★호스트 ~/.codex★ 를 읽는다. 그러면 그 팀원 config 의 승인정책도 권한 프로파일도
-// ★하나도 안 걸린다.★ 라이브에서 실제로 그랬고, 나는 그걸 보고 "app-server 가 설정을 무시한다" 고
-// ★잘못 결론냈다★ — 무시한 게 아니라 다른 파일을 읽고 있었다.
-// exec 경로(runner.ts)는 원래 CODEX_HOME 을 넘긴다. app-server 경로만 빠져 있었다.
+// 자식에 팀원 CODEX_HOME을 전달해야 호스트 설정 대신 해당 팀원의 승인정책·권한 프로파일이 적용된다.
 
 import { appServerSpawnEnv } from "./appServerClient";
 import { defaultAppServerClientFactory } from "./appServerRunner";
@@ -179,7 +140,7 @@ test("★기본 팩토리가 그 턴 주인의 codexHome 을 실어 준다★ �
   expect(c.codexHome).toBe("/x/dex");
 });
 
-// ── ★팝업이 그 팀원 방으로 간다★ ──
+//  팝업이 그 팀원 방으로 간다
 
 import { sendApprovalToMemberRoom, approvalSummary } from "./appServerPopup";
 
@@ -197,20 +158,17 @@ test("★그 팀원 봇으로, 버튼 3개를 붙여 보낸다★", async () => 
   );
   expect(ok).toBe(true);
   expect(calls).toHaveLength(1);
-  expect(calls[0]!.url).toContain("/botTKN/sendMessage"); // ★그 팀원 봇★ — 다른 봇이면 남의 방에 뜬다
+  expect(calls[0]!.url).toContain("/botTKN/sendMessage"); // 그 팀원 봇 — 다른 봇이면 남의 방에 뜬다
   expect(calls[0]!.body.chat_id).toBe("555");
   const kb = (calls[0]!.body.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard.flat();
-  // ★계약이 바뀌었다(2026-08-18) — '이 세션'(pgs) 이 추가됐다.★
-  //   배선(allow_session · decision_scope='session' · acceptForSession)은 원래 끝까지 있었고
-  //   사람이 누를 자리만 없었다. 그래서 카드에서 세션 범위를 고를 수 없었다.
+  // 이 세션 선택은 allow_session·decision_scope=session·acceptForSession까지 이어져야 한다.
   expect(kb.map((b) => b.callback_data)).toEqual([
     "pg1:prm_abc123", "pgs:prm_abc123", "pga:prm_abc123", "pgd:prm_abc123",
   ]);
 });
 
 test("★위험 표시가 카드에 실린다 — 우리가 안 막으면 사람이 판단할 근거는 줘야 한다★", async () => {
-  // 우리 차단목록을 걷어낸 뒤, 위험 명령도 카드로 올라온다.
-  // ★그 카드가 위험을 말하지 않으면 `sudo rm -rf /` 와 `ls` 가 폰에서 생김새가 같다.★ (리뷰 지적)
+  // 위험 명령과 일반 명령이 같은 카드로 보이지 않도록 위험 표시를 검증한다.
   const calls: { body: Record<string, unknown> }[] = [];
   const fetchFn = (async (_u: string, init: { body: string }) => {
     calls.push({ body: JSON.parse(init.body) });
@@ -227,8 +185,8 @@ test("★위험 표시가 카드에 실린다 — 우리가 안 막으면 사람
   expect(text).toContain("sudo");
   expect(text).toContain("rm_rf");
 
-  // ★위험 건에는 '항상 허용' 을 주지 않는다★ — 막는 게 아니라 ★무인 반복★ 을 막는 것이다.
-  //   ★'이 세션'(pgs) 은 위험 건에도 준다★ — 지속되는 허가를 남기지 않고 codex 세션과 함께 사라진다.
+  // 위험 건에는 '항상 허용' 을 주지 않는다 — 막는 게 아니라 무인 반복 을 막는 것이다.
+  //   '이 세션'(pgs) 은 위험 건에도 준다 — 지속되는 허가를 남기지 않고 codex 세션과 함께 사라진다.
   //   그래서 무인 반복이 생기지 않는다. codex 자신이 위험한 것을 기억하는 단위도 이것이다.
   const kb = (calls[0]!.body.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard.flat();
   expect(kb.map((b) => b.callback_data)).toEqual(["pg1:prm_risk", "pgs:prm_risk", "pgd:prm_risk"]);
@@ -266,7 +224,7 @@ test("팝업 문구는 무엇을 하려는지 + 대상으로 갈라진다", () =
   expect(f.title).toBe("파일 2개를 고칠까요?");
 });
 
-// ── ★무응답 만료(5분)★ ──
+//  무응답 만료(5분)
 
 import { pollDecision, expirePermissionRequest } from "./appServerPopup";
 import { requestPermission as expReq, getPermissionRequest as expGet } from "../../lib/permissionGate";
@@ -276,7 +234,7 @@ test("★만료되면 행도 닫힌다★ — pending 으로 남으면 한참 �
   const id = expReq(db, { agent: { id: "dex", workspace_path: "/tmp/ws" }, agent_id: "dex", runtime: "codex", action: "shell", command: "echo hi", cwd: "/tmp/ws" } as never).request!.id;
   const decision = await pollDecision(db, id, 20, 5); // 20ms 만료
   expect(decision).toBe("denied");
-  expect(expGet(db, id)?.status).toBe("expired"); // ★행이 닫혀야 나중 탭이 '만료' 로 답한다★
+  expect(expGet(db, id)?.status).toBe("expired"); // 행이 닫혀야 나중 탭이 '만료' 로 답한다
   db.close();
 });
 
@@ -289,16 +247,10 @@ test("이미 결정된 요청은 만료가 덮어쓰지 않는다", () => {
   db.close();
 });
 
-// ── ★목적지는 인가 목록이 아니다★ (리뷰 지적) ──
-//
-// allowFrom = "누가 이 봇에 말 걸 수 있나" 인가 목록이고 [팀리드 DM, 팀 그룹] 순서다.
-// 그걸 목적지로 쓰면 ★팀 리드 DM 이 비었을 때 첫 항목이 팀 그룹★ 이 되어
-// ★보안 질문이 단체방에 뜬다.★ 목적지는 팀 리드 DM 이고, 모르면 보내지 않는다.
+// allowFrom은 인가 목록이라 DM이 없으면 그룹이 첫 항목일 수 있다. 보안 질문은 오너 DM으로만 보내고 모르면 발송하지 않는다.
 
 test("★인가 목록이 아니라 팀 리드 DM 으로 간다★ — 두 값을 다르게 놓고 가른다", async () => {
-  // ★이 기계에서는 allowFrom[0] 과 팀 리드 DM 이 우연히 같다.★ 그래서 기대값을 피험 함수에서
-  // 뽑으면 옛 버그 코드(allowFrom[0])로 되돌려도 초록이다 — 실제로 그랬다(리뷰 지적).
-  // 두 값을 ★서로 다르게★ 놓아야 어느 쪽을 쓰는지 갈린다.
+  // 인가 목록과 오너 DM을 다른 값으로 두어 목적지 선택 오류를 구분한다. 실제 기기의 우연히 같은 값으로는 잘못된 구현도 통과한다.
   const sent: Record<string, unknown>[] = [];
   const fetchFn = (async (_u: string, init: { body: string }) => { sent.push(JSON.parse(init.body)); return { ok: true } as Response; }) as unknown as typeof fetch;
   const OWNER_DM = "111111111"; // 팀 리드 DM (정답)
@@ -317,11 +269,11 @@ test("★목적지를 모르면 보내지 않는다★ (fail-closed) — 아무 
   expect(sent).toHaveLength(0);
 });
 test("★재시작해도 만료가 유효하다★ — 만료가 대기 프로세스 메모리에만 있으면 행이 영원히 pending", async () => {
-  // 리뷰 지적: 서버가 대기 중 재시작하면 아무도 그 행을 안 닫는다. 행이 스스로 말해야 한다.
+  // 재시작 후 대기 행의 처리 여부를 알 수 있도록 행 자체에 상태를 기록해야 한다.
   const db = new ApprDb(":memory:"); apprMigrate(db);
   const id = expReq(db, { agent: { id: "dex", workspace_path: "/tmp/ws" }, agent_id: "dex", runtime: "codex", action: "shell", command: "echo hi", cwd: "/tmp/ws" } as never).request!.id;
   db.run("update permission_request set expires_at = datetime('now','-1 second') where id=?", [id]);
-  // ttl 을 길게 줘도(=이 프로세스는 아직 안 기다렸다) ★행의 만료가 이긴다★
+  // ttl 을 길게 줘도(=이 프로세스는 아직 안 기다렸다) 행의 만료가 이긴다
   const decision = await pollDecision(db, id, 60_000, 5);
   expect(decision).toBe("denied");
   expect(expGet(db, id)?.status).toBe("expired");
@@ -337,12 +289,7 @@ test("대조군 — 만료 전이면 계속 기다린다(아무거나 만료로 
   db.close();
 });
 
-// ── ★시험이 진짜 텔레그램으로 나가면 안 된다★ (2026-08-12 사고) ──
-//
-// requestApprovalPopup 을 지나는 시험이 deps 없이 sendApprovalToMemberRoom 을 부르면
-// ★실제 토큰·실제 방★ 으로 나간다. 실제로 나갔다 — 팀 리드 방에 'echo hi' 'src/x.ts' 같은
-// ★시험 픽스처가 승인창으로★ 떴고, 시험을 돌릴 때마다 반복됐다.
-// 라이브 DB 에는 흔적이 없었다(시험은 :memory: 를 쓴다) — ★전송만 진짜였다.★
+// 메모리 DB 격리만으로 외부 발신은 막히지 않는다. deps 없는 시험도 실제 토큰·방으로 승인 팝업을 보내지 않아야 한다.
 
 test("★시험 중에는 실제 전송을 하지 않는다★ — 픽스처가 팀 리드 방에 뜨면 안 된다", async () => {
   // fetchFn 을 안 주면 = 진짜로 보내려는 것. 시험 중에는 무조건 막는다.

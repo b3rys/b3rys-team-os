@@ -1,13 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { tgFailureReason, tgEdit } from "./bridge";
 
-/**
- * ★텔레그램이 왜 거절했는지를 남긴다.★
- *
- * 라이브에서 한 턴에 20번 넘게 편집이 막히는데 ★이유를 몰랐다★ —
- * 로그에 "재전송했다" 만 있었기 때문이다. rate limit · 글자 모양 · 내용 그대로,
- * 셋이 로그에서 같은 모양이면 ★고쳐도 고쳐졌는지 모른다.★
- */
+/** 전송 거절의 한도·문자 형식·내용 동일 사유를 로그로 구분해야 원인과 수정 효과를 확인할 수 있다. */
 describe("거절 사유 만들기", () => {
   test("★rate limit 이면 retry_after 가 보인다★ — 이게 있으면 한 번에 갈린다", () => {
     const r = tgFailureReason({ error_code: 429, description: "Too Many Requests", parameters: { retry_after: 7 } });

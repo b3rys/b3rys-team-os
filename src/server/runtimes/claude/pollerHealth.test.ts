@@ -1,9 +1,4 @@
-/* ★재시작에는 자동복구가 없었다★ (2026-07-27 GD 지적, "매우 중요한 기능").
- * 영입(activation)에는 poller 확인 + auto-reconnect 가 있었는데 재시작(agentControl)에는 ★아예 없었다★ —
- * 기동 스크립트만 돌리고 붙었는지 확인조차 안 했다. 그래서 재시작 후 안 붙으면 아무도 안 고쳤고,
- * 팀원은 ★프로세스는 살아 있는데 메시지만 안 들어오는★ 상태로 방치됐다(오류도 안 남).
- *
- * 여기서는 ensureClaudePollerUp 의 계약을 고정한다. tmux·HOME 을 건드리지 않도록 wait/reconnect 를 주입한다. */
+/** 영입·재시작 후 실제 poller 연결 확인과 자동 복구를 검증한다. wait·reconnect를 주입해 실제 tmux·홈 경로를 건드리지 않는다. */
 import { describe, expect, test } from "bun:test";
 import { ensureClaudePollerUp } from "./pollerHealth";
 
@@ -31,7 +26,7 @@ describe("ensureClaudePollerUp — 재시작 뒤 poller 자동복구", () => {
     const r = await ensureClaudePollerUp("bill", { waitMs: 100, wait: s.wait, reconnect: s.reconnect });
     expect(r.ok).toBe(true);
     expect(r.recovered).toBe(false);
-    expect(s.calls.reconnect).toBe(0);      // ★중요★ — 정상 세션에 명령을 던지면 그게 사고다
+    expect(s.calls.reconnect).toBe(0);      // 정상 poller에는 reconnect 명령을 보내 상태를 방해하지 않는다.
     expect(r.detail).toContain("기동 확인");
   });
 
@@ -57,7 +52,7 @@ describe("ensureClaudePollerUp — 재시작 뒤 poller 자동복구", () => {
     expect(r.ok).toBe(false);
     expect(r.attempts).toBe(2);                 // 기본 한도에서 멈춘다
     expect(s.calls.reconnect).toBe(2);
-    // ★조용히 성공이라고 말하지 않는다★ — 오늘 하루 계속 나온 '있는데 작동 안 하는' 형태를 막는 부분
+    // 복구 뒤 실제 연결을 확인해야 명령 접수를 성공으로 오인하지 않는다.
     expect(r.detail).toContain("미기동");
   });
 

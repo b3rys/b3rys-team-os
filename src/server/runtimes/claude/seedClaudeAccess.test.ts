@@ -1,5 +1,5 @@
 // seedClaudeAccess — 재활성화 시 승인된 DM allowlist 보존 + 첫 멤버 pairing 시드 회귀 검증.
-// ★실 FS 격리: 각 케이스를 임시 HOME의 별도 Bun 프로세스에서 실행해 라이브 ~/.claude를 절대 건드리지 않는다.
+// 실 FS 격리: 각 케이스를 임시 HOME의 별도 Bun 프로세스에서 실행해 라이브 ~/.claude를 절대 건드리지 않는다.
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

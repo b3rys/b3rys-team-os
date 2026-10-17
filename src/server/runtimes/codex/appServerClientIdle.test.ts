@@ -1,14 +1,4 @@
-/**
- * ★턴 상한이 재는 것은 '일한 시간' 이 아니라 '조용한 시간' 이다.★ (2026-08-20)
- *
- * 라이브에서 벌어진 것: dex 가 보고서를 만드는 동안 진행 신호가 ★137번★ 찍혔는데도 5분에 잘렸다
- * (`codex_turn_failed:appserver_timeout` 3건, 전부 보고서 작업). 타이머를 턴 시작에 한 번 걸고
- * ★진행 이벤트로 다시 걸지 않았기 때문★ 이다. 그래서 오래 걸리는 일은 ★매번★ 잘렸다.
- *
- * 팀장님 지시: "작업을 하는데 왜 시간으로 컷을 하지?" · 빌 경고: 승인 대기 중에는 타이머를
- * 일부러 꺼두므로(ref-count) ★진행 신호로 무조건 재무장하면 Ames 가 잡았던 조기 재개 사고가 돌아온다.★
- * 그 상황을 세 번째 시험이 지킨다.
- */
+/** 턴 시간 제한은 전체 작업 시간이 아닌 무응답 시간을 잰다. 진행 신호는 연장하되 승인 대기 중 타이머를 다시 켜지 않는지 함께 검증한다. */
 import { describe, expect, test } from "bun:test";
 import { CodexAppServerClient } from "./appServerClient";
 
@@ -49,7 +39,7 @@ describe("무응답 상한(idle) — 일하는 턴은 안 끊는다", () => {
     expect(Date.now() - started, "조용한 턴은 상한 근처에서 끊긴다").toBeLessThan(1000);
   });
 
-  // ★이 대기 상태는 지금 라이브에서 안 생긴다★ — 실행 정책이 "never" 라 승인 팝업이 없다.
+  // 이 대기 상태는 지금 라이브에서 안 생긴다 — 실행 정책이 "never" 라 승인 팝업이 없다.
   //   여기서 지키는 것은 타이머 계약이고, "on-request" 로 되돌리면 그대로 다시 쓰인다.
   test("★승인 팝업 대기 중에는 진행 신호가 와도 시계를 켜지 않는다★ (빌 경고 · Ames 조기재개 회귀)", async () => {
     const { c, calls } = makeClient();
@@ -72,12 +62,12 @@ describe("무응답 상한(idle) — 일하는 턴은 안 끊는다", () => {
     const started = Date.now();
     let resolvedAt = 0;
     const p = c.runTurn("계정 알림만 오는 멈춘 턴", {}, 200).then((r) => { resolvedAt = Date.now(); return r; });
-    // ★상한(200ms)보다 오래★ 계정 알림만 계속 보낸다 — 이걸 진행으로 세면 그 동안 안 끊긴다
+    // 상한(200ms)보다 오래 계정 알림만 계속 보낸다 — 이걸 진행으로 세면 그 동안 안 끊긴다
     for (let i = 0; i < 8; i++) { await sleep(120); (c as any).handleNotification("account/rateLimits/updated", {}); }
     const r = await p;
     expect(r.status).toBe("timeout");
     expect(calls.interrupts).toBe(1);
-    // ★언제 끊겼는지를 잰다★ — 총 경과가 아니라. 총 경과로 재면 두 동작이 같은 값을 낸다(이 시험이 그래서 한 번 헛돌았다)
+    // 언제 끊겼는지를 잰다 — 총 경과가 아니라. 총 경과로 재면 두 동작이 같은 값을 낸다(이 시험이 그래서 한 번 헛돌았다)
     expect(
       resolvedAt - started,
       "★계정 알림이 시계를 되돌렸다 — 멈춘 턴이 알림 도는 동안 영영 안 끊긴다★",

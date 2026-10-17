@@ -61,11 +61,7 @@ describe("CodexTurnEnvelopeBuilder", () => {
 
 });
 
-// ── ★답은 자동으로 전달되지 않는다★ (실측 2026-08-12) ──
-//
-// 턴은 성공했는데 dex 가 send.sh 를 안 불러서 ★팀에는 아무것도 도착하지 않았다.★
-// 일은 다 하고(파일 읽고 정리하고) 마지막 한 걸음을 안 했다.
-// 서버는 어떤 런타임에서도 답을 대신 게시하지 않는다(turn_completed_no_autopost).
+// 서버는 턴 결과를 대신 게시하지 않으므로 명시적 발신이 있어야 최종답이 팀에 전달된다.
 
 test("★봉투가 '보내야 말한 것' 을 명시하고 실제 명령을 준다★", () => {
   const { db, agent, row } = setup();
@@ -79,9 +75,9 @@ test("★봉투가 '보내야 말한 것' 을 명시하고 실제 명령을 준�
 
   const prompt = b.toPrompt(env);
   expect(prompt).toContain("delivered only by running"); // 안 보내면 전달 안 된다는 걸 말해야 한다
-  // ★중간 메모로 끝내면 안 된다★ — 착수 확인만 보내고 결과를 안 보낸 실측 사례가 있다
+  // 중간 메모로 끝내면 안 된다 — 착수 확인만 보내고 결과를 안 보낸 실측 사례가 있다
   expect(prompt).toContain("Interim notes do not count");
-  // ★같은 명령이 두 번 나오면 안 된다★ — JSON 에도 넣으면 중복이다(리뷰 지적)
+  // JSON과 지침에 같은 발신 명령을 중복하지 않는다.
   expect(prompt.split("send.sh").length - 1).toBe(1);
 });
 

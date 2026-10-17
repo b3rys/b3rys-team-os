@@ -1,10 +1,10 @@
 /**
- * pollDecision 은 status 와 decision_scope 를 ★같이★ 읽는다.
+ * pollDecision 은 status 와 decision_scope 를 같이 읽는다.
  *
  * '이 세션' 은 지속되는 허가를 남기지 않으므로 status 가 allowed_once 와 같다(permissionGate.ts).
  * 둘을 가르는 것은 decision_scope 뿐이라, status 만 읽으면 사람이 세션을 골라도 런타임에는
  * '한번' 이 간다. 아래 시험은 그 경계를 양쪽에서 잰다 — 세션이 세션으로 가는가, 그리고
- * ★세션이 아닌 것이 세션으로 새지 않는가.★
+ * 세션이 아닌 것이 세션으로 새지 않는가.
  */
 import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
@@ -57,7 +57,7 @@ test("대조군 — '한번' 은 한번이다", async () => {
 test("★옛 행의 decision_scope 는 NULL 이다 — 그걸 session 으로 읽지 않는다★", async () => {
   const db = migrated();
   const id = "req_legacy_row";
-  // #325 이전에 결정된 행: status 만 있고 범위 칸이 비어 있다.
+  // 범위가 없는 이전 결정 행은 세션 허용으로 확대하지 않는다.
   db.prepare(
     `INSERT INTO permission_request (id, scope_key, runtime, agent_id, action, target, status, decision_scope)
      VALUES (?, 'scope:legacy', 'codex', 'dex', 'shell', '/tmp/x', 'allowed_once', NULL)`,

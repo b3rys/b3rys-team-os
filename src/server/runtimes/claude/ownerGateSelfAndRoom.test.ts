@@ -1,13 +1,4 @@
-/**
- * owner-gate 의 ★자기 id★ 와 ★1:1/그룹 판정★ 을 고정한다.
- *
- * 시나리오는 ★루이 교차검증(PR #236)★ 이 만든 계측기에서 왔다. 원본은 당시 동작을 그대로
- * 적어둔 characterization 이었고(=지금 이렇다), 여기서는 ★고쳐진 계약★ 으로 뒤집어 적었다.
- * ★원본 그대로 두면 고침이 실패로 잡힌다.★
- *
- * 이 축이 왜 중요한가 — 자기 id 를 틀리면 게이트가 ★꺼지는 게 아니라 반대로 돈다.★
- * 진행표시 훅은 폴백이 틀리면 알림이 엉뚱한 방에 가서 ★보이지만★, 이 훅은 ★조용히★ 반대로 판정한다.
- */
+/** 자기 신원을 잘못 구하면 게이트가 반대로 판정해 자기 요청을 차단할 수 있으므로 신원과 1:1·그룹 구분을 함께 검증한다. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -70,7 +61,7 @@ async function runHook(chatId: string, text: string, routeUrl: string, env: Reco
   return stdout;
 }
 
-// ── 축1: _self_id() 폴백 ─────────────────────────────────────────────────────
+//  축1: _self_id() 폴백
 describe("자기 id — 모르면 남의 id 로 판정하지 않는다", () => {
   test("★정상 경로: telegram-<id> 면 자기 id 를 맞게 보낸다★", async () => {
     const { url, seen } = await realisticRouter(["demis"]);
@@ -85,14 +76,14 @@ describe("자기 id — 모르면 남의 id 로 판정하지 않는다", () => {
   });
 
   test("★자기 앞으로 온 글에서 자기가 막히지 않는다★ (@데미스 → 데미스 세션 통과)", async () => {
-    // 예전: self 가 'bill' 로 폴백 → "not bill" 사유로 ★자기 지시에 자기가 막혔다.★
+    // 자기 ID를 다른 멤버로 폴백해 자기 지시를 차단하지 않는지 확인한다.
     const { url } = await realisticRouter(["demis"]);
     const out = await runHook(GROUP, "@데미스 이거 해줘", url, {});
     expect(out).not.toContain('"block"');
   });
 
   test("★id 를 실어주면 남의 글에서 제대로 막힌다★ (@빌 → 데미스 세션 block)", async () => {
-    // 런처가 OWNER_GATE_SELF 를 싣는 상태. 이게 게이트가 ★일하는★ 모습이다.
+    // 런처가 OWNER_GATE_SELF 를 싣는 상태. 이게 게이트가 일하는 모습이다.
     const { url } = await realisticRouter(["bill"]);
     const out = await runHook(GROUP, "@빌 이거 해줘", url, { OWNER_GATE_SELF: "demis" });
     expect(out).toContain('"block"');
@@ -106,17 +97,17 @@ describe("자기 id — 모르면 남의 id 로 판정하지 않는다", () => {
   });
 });
 
-// ── 축3: 1:1 및 다른 방 ──────────────────────────────────────────────────────
+//  축3: 1:1 및 다른 방
 describe("1:1/그룹 판정 — chat_id 부호로 가른다(reply-guard 와 같은 정의)", () => {
   test("1:1(양수 chat_id) 은 suppress 라우터에도 통과 — 요구사항 충족", async () => {
     const { url, seen } = await realisticRouter(["bill"]);
     const out = await runHook(DM, "@빌 이거 해줘", url, { TELEGRAM_STATE_DIR: "/x/channels/telegram-demis" });
     expect(out).not.toContain('"block"');
-    expect(seen).toEqual([]);                   // ★라우터에 묻지도 않는다★ — 서버가 죽어도 1:1 은 산다
+    expect(seen).toEqual([]);                   // 라우터에 묻지도 않는다 — 서버가 죽어도 1:1 은 산다
   });
 
   test("★두 번째 단톡방(음수)도 게이트가 걸린다★ — 방이 둘 이상인 설치에 구멍이 없어야 한다", async () => {
-    // 예전 기준은 "설정된 GROUP_ID 와 다른가" 라 ★두 번째 방이 1:1 처럼 통과★ 했다(라우터 호출 0회).
+    // 설정 그룹과 다르다는 이유만으로 두 번째 그룹을 1:1로 허용하지 않는다.
     const { url, seen } = await realisticRouter(["bill"]);
     const out = await runHook(OTHER_GROUP, "@빌 이거 해줘", url, { TELEGRAM_STATE_DIR: "/x/channels/telegram-demis" });
     expect(seen).toEqual(["demis"]);   // 라우터에 실제로 묻는다
@@ -124,7 +115,7 @@ describe("1:1/그룹 판정 — chat_id 부호로 가른다(reply-guard 와 같�
   });
 });
 
-// ── 축2·축4: 설치 멱등성과 기존 배선 ────────────────────────────────────────
+//  축2·축4: 설치 멱등성과 기존 배선
 function member(existing: string | null): { root: string; membersRoot: string; repoRoot: string; settings: string } {
   const base = mkdtempSync(join(tmpdir(), "b3os-inst-"));
   dirs.push(base);
@@ -170,9 +161,7 @@ describe("축2·축4 — 설치가 기존 배선을 건드리는가 / 반복하�
   });
 
   test("★안 깔린 멤버에도 부팅 때 깔린다★ — 기존 설치본이 이 PR 의 대상이다", () => {
-    // ★기대값을 뒤집었다.★ 예전에는 "새로 깔지 않는다" 를 고정하고 있었는데, 그러면
-    // ★배선이 하나도 없는 기존 설치본에서 전원 건너뛰어 효과가 0★ 이 된다(배포 후 5명 실측).
-    // owner-gate 는 progress·reply-guard 와 목적이 반대다 — ★없는 곳에 넣는 게 존재 이유★ 다.
+    // owner-gate는 배선이 없는 기존 설치에도 추가해야 보호가 적용된다. 기존 설치만 수리하는 훅과 구분한다.
     const m = member(LIVE_SHAPE);
     ensureOwnerGateHook("m1", { membersRoot: m.membersRoot, repoRoot: m.repoRoot });
     const s = JSON.parse(readFileSync(m.settings, "utf-8"));
@@ -181,13 +170,13 @@ describe("축2·축4 — 설치가 기존 배선을 건드리는가 / 반복하�
     expect(s.hooks.PreToolUse.length).toBe(1);
   });
 
-  // ★현재 동작을 그대로 적어둔 것이다(고침 아님).★ 별건 카드로 뺀 항목 — 여기서 고치면 범위가 커진다.
+  // 현재 동작을 그대로 적어둔 것이다(고침 아님). 별건 카드로 뺀 항목 — 여기서 고치면 범위가 커진다.
   test("[알려진 결함] settings.json 이 깨져 있으면 기존 배선이 통째로 날아간다", () => {
     const m = member('{"hooks": {"Stop": [{"hooks":');   // 잘린 JSON (쓰기 중 중단 등)
     installOwnerGateHook("m1", { membersRoot: m.membersRoot, repoRoot: m.repoRoot });
     const s = JSON.parse(readFileSync(m.settings, "utf-8"));
     expect(s.hooks.UserPromptSubmit.length).toBe(1);
-    expect(s.hooks.Stop).toBeUndefined();        // ★Stop·PreToolUse·PreCompact 소멸★
+    expect(s.hooks.Stop).toBeUndefined();        // Stop·PreToolUse·PreCompact 소멸
     expect(s.hooks.PreToolUse).toBeUndefined();
   });
 

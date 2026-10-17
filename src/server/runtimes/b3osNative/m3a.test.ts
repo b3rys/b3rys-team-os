@@ -18,7 +18,7 @@ afterEach(() => {
   delete process.env[AGENT_LOOP_FLAG];
 });
 
-// ── 유닛: parseToolCall (H1 마커 마지막1줄·fenced 무시) ──
+//  유닛: parseToolCall (H1 마커 마지막1줄·fenced 무시)
 describe("parseToolCall (H1)", () => {
   test("유효 마커 파싱", () => {
     const p = parseToolCall('생각...\nTOOL_CALL: {"tool":"search_messages","args":{"query":"측정지표"}}');
@@ -39,7 +39,7 @@ describe("parseToolCall (H1)", () => {
   });
 });
 
-// ── 유닛: validateToolCall (G2 스키마 검증) ──
+//  유닛: validateToolCall (G2 스키마 검증)
 describe("validateToolCall (G2)", () => {
   test("정상 search_messages", () => {
     expect(validateToolCall({ tool: "search_messages", args: { query: "x" } })).toEqual({ tool: "search_messages", args: { query: "x" } });
@@ -70,7 +70,7 @@ describe("validateToolCall (G2)", () => {
   });
 });
 
-// ── 유닛: stripToolMarkers (G1) ──
+//  유닛: stripToolMarkers (G1)
 describe("stripToolMarkers (G1)", () => {
   test("최종 텍스트에서 TOOL_CALL 라인 제거", () => {
     const out = stripToolMarkers('최종 답입니다.\nTOOL_CALL: {"tool":"search_messages","args":{"query":"x"}}');
@@ -79,7 +79,7 @@ describe("stripToolMarkers (G1)", () => {
   });
 });
 
-// ── 유닛: accessibleThreads (G3 스코프) ──
+//  유닛: accessibleThreads (G3 스코프)
 function scopeDb(): Database {
   const db = new Database(":memory:");
   migrate(db);
@@ -98,7 +98,7 @@ describe("accessibleThreads (G3)", () => {
     const acc = accessibleThreadIds(db, "nova");
     expect(acc.has("t1")).toBe(true);
     expect(acc.has("t3")).toBe(true);
-    expect(acc.has("t2")).toBe(false); // ★타 에이전트 private DM 누출 차단★
+    expect(acc.has("t2")).toBe(false); // 타 에이전트 private DM 누출 차단
     expect(canAccessThread(db, "nova", "t2")).toBe(false);
     expect(canAccessThread(db, "nova", "t1")).toBe(true);
   });
@@ -120,11 +120,11 @@ describe("accessibleThreads (G3)", () => {
     rebuildSearchIndex(db, { docsDir: "/no", reportsDir: "/no", rulesDir: "/no", registryPath: "/no" });
     const r = runTool(db, "nova", "search_messages", { query: "ZZKEY" });
     expect(r.observation).toContain("공개내용"); // ta(접근가능) 결과는 나옴
-    expect(r.observation).not.toContain("남의비밀"); // ★tb(타인 private) 미노출★
+    expect(r.observation).not.toContain("남의비밀"); // tb(타인 private) 미노출
   });
 });
 
-// ── 유닛: list_tasks (읽기전용 칸반 — 팀공유라 G3 스코프 비해당) ──
+//  유닛: list_tasks (읽기전용 칸반 — 팀공유라 G3 스코프 비해당)
 describe("list_tasks (read-only 칸반)", () => {
   test("runTool list_tasks: lane 필터 + owner 표기 (스코프 무관)", () => {
     const db = new Database(":memory:");
@@ -153,7 +153,7 @@ describe("list_tasks (read-only 칸반)", () => {
   });
 });
 
-// ── 통합: runTurn (루프·게이트) ──
+//  통합: runTurn (루프·게이트)
 function setupDb(): Database {
   const db = new Database(":memory:");
   migrate(db);
@@ -212,7 +212,7 @@ describe("runTurn M3a 루프 통합", () => {
     const caller = scriptedCaller(['TOOL_CALL: {"tool":"search_messages","args":{"query":"측정지표"}}', "검색 결과 반영한 최종답입니다."]);
     await runTurn(db, () => [agentRec()], agentRec(), row, "", caller);
     const sent = novaMessages(db, row.message_id);
-    expect(sent.length).toBe(1); // ★at-most-once: 최종답만 1회, 중간 관찰 미게시★
+    expect(sent.length).toBe(1); // at-most-once: 최종답만 1회, 중간 관찰 미게시
     expect(sent[0]!.body).toBe("검색 결과 반영한 최종답입니다.");
     const d = auditDetail(db);
     expect(d.loop_steps).toBe(2);
@@ -229,7 +229,7 @@ describe("runTurn M3a 루프 통합", () => {
     await runTurn(db, () => [agentRec()], agentRec(), row, "", caller);
     const sent = novaMessages(db, row.message_id);
     expect(sent.length).toBe(1);
-    expect(sent[0]!.body).not.toContain("TOOL_CALL"); // ★G1: 마커 잔존 0★
+    expect(sent[0]!.body).not.toContain("TOOL_CALL"); // G1: 마커 잔존 0
     expect(auditDetail(db).loop_steps).toBe(4); // maxSteps
   });
 
@@ -255,7 +255,7 @@ describe("runTurn M3a 루프 통합", () => {
     const sent = novaMessages(db, row.message_id);
     expect(sent.length).toBe(1);
     const d = auditDetail(db);
-    expect(d.tools_used).toEqual(["search_messages"]); // ★1회만(반복 실행 안 함)★
+    expect(d.tools_used).toEqual(["search_messages"]); // 1회만(반복 실행 안 함)
     expect((d.loop_steps as number)).toBeLessThanOrEqual(2); // 조기마감(maxSteps 안 감)
   });
 });

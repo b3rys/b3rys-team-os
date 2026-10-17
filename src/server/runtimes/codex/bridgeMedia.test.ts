@@ -6,13 +6,7 @@ import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-/**
- * ★배선 — 첨부가 턴까지 실려 가는가.★
- *
- * 단위 시험(dmMedia.test)은 "무엇을 받고 무엇을 적나" 를 본다. 여기서 보는 것은 다른 사실이다:
- * ★내려받은 그림이 codex 입력으로 실제로 넘어가는가.★ 둘은 같지 않다 —
- * 어제(#346) 함수는 맞는데 그 함수를 부르는 분기가 한 번도 안 돌았던 일이 있었다.
- */
+/** 첨부 수집 함수만 아니라 호출 배선까지 이어 검사해야 내려받은 그림이 실제 모델 입력에 전달되는지 확인할 수 있다. */
 let prev: string | undefined;
 beforeEach(() => {
   prev = process.env.B3OS_FIRST_CONTACT_DIR;

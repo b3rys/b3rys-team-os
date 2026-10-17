@@ -5,12 +5,7 @@ import {
 } from "./dmMedia";
 import type { StoredMedia } from "../../lib/mediaStore";
 
-/**
- * ★1:1 로 온 첨부를 dex 가 실제로 보는가.★
- *
- * 원래 결함: 브리지가 받는 항목이 글자 하나뿐이라 ★사진만 보낸 메시지는 통째로 버려졌다.★
- * 사진에 달린 설명(caption)도 안 왔다.
- */
+/** 사진만 있는 DM과 caption도 처리해야 첨부를 보낸 메시지가 본문 없음으로 누락되지 않는다. */
 const saved = (o: Partial<StoredMedia>): StoredMedia => ({
   media_id: "tg_x", kind: "photo", file_id: "f", file_path: "/m/tg_x.jpg", url_path: "/media/tg_x.jpg", ...o,
 } as StoredMedia);
@@ -189,8 +184,7 @@ describe("★안전 내려받기 — 어떤 식으로 실패해도 결과를 돌
   });
 
   test("★건별 처리 바깥에서 터져도 던지지 않는다★ — 이 분기가 없으면 중간 개입이 통째로 죽는다", async () => {
-    // 텔레그램이 보낸 모양이 예상과 다르면 목록을 만드는 단계에서 터진다(건별 try 밖이다).
-    // 전에는 중간 개입 쪽이 이걸 .catch(() => null) 로 삼켜 ★첨부가 조용히 사라졌다.★
+    // 첨부 목록 생성은 건별 try 밖에서도 실패할 수 있으므로 전체 예외도 같은 실패 결과로 돌려 조용히 누락하지 않는다.
     const a = await downloadDmAttachmentsSafe("tok", { photo: {} as never });
     expect(a.failed, "던지지 않고 실패로 담아야 한다").toHaveLength(1);
     expect(a.failed[0]!.kind).toBe("attachment");
@@ -227,12 +221,7 @@ describe("★인용 답장 — 무엇에 대한 말인지 함께 보낸다★ (�
   });
 });
 
-/**
- * ★인용한 원문이 사진이면 그 사진도 함께 가야 한다.★ (2026-08-21 실측)
- *
- * 라이브: 팀장님이 사진에 답장해 "이거 설명해줘" 라고 물으니 dex 가 ★"텍스트는 보입니다"★ 라고 답했다 —
- * 정작 봐야 할 그림이 안 갔다. 인용은 ★원문 글자만★ 싣고 있었다.
- */
+/** 사진에 대한 인용 답장은 reply_to_message의 사진도 모델로 전달해야 무엇을 가리키는지 알 수 있다. */
 describe("인용한 원문의 첨부", () => {
   const photoMsg = {
     photo: [{ file_id: "q1", file_unique_id: "qu1", file_size: 100, width: 10, height: 10 }],
@@ -273,13 +262,7 @@ test("★인용이 순환해도 죽지 않는다★ — 한 겹에서 끊는 것
   expect(refs.length, "★두 겹까지만 — 무한 재귀면 여기서 죽는다★").toBe(2);
 });
 
-/**
- * ★모으는 코드를 고쳐도 그 앞의 문이 닫혀 있으면 아무 일도 안 난다.★ (2026-08-21 실측)
- *
- * `dmMediaRefs` 가 인용 첨부를 모으게 고쳤는데 라이브에서 그림이 여전히 안 갔다.
- * 부르는 쪽이 `hasMedia` 로 ★내려받기를 걸지 말지★ 정하는데, 그 값이 ★내가 보낸 첨부만★ 보고 있었다.
- * 본문에는 "첨부 포함" 이 찍히는데 파일은 안 받아지는 상태였다.
- */
+/** 인용 첨부를 모으는 함수뿐 아니라 hasMedia 판단도 확인해야 내려받기 분기가 실제로 실행된다. */
 describe("hasMedia — 인용한 첨부도 센다", () => {
   const photo = [{ file_id: "p", file_unique_id: "pu", file_size: 1, width: 1, height: 1 }];
 
@@ -294,11 +277,7 @@ describe("hasMedia — 인용한 첨부도 센다", () => {
   });
 });
 
-/**
- * ★문과 수집을 따로 재면 그 사이가 끊겨도 둘 다 통과한다.★ (빌 지적 — #367 에서 실제로 그랬다)
- * 그래서 ★한 줄로 잇는다★: 인용 사진이 붙은 메시지를 넣어 ★내려받기가 그림 경로를 돌려주는지★ 를 잰다.
- * 이것이 "그림이 모델에 갈 준비가 됐다" 는 단위 증거다.
- */
+/** 판정과 수집을 이어 실제 로컬 이미지 경로까지 검증해야 둘 사이가 끊겨도 각각 통과하는 누락을 잡는다. */
 test("★인용 사진 → 내려받기가 그림 경로를 돌려준다★ (문·수집·판정을 한 줄로 잇는다)", async () => {
   const msg = { text: "이거 설명해줘", reply_to_message: { photo: [{ file_id: "q9", file_unique_id: "qu9", file_size: 9, width: 9, height: 9 }] } };
   const decided = decideDmMessage(msg as never);

@@ -1,12 +1,4 @@
-/**
- * owner-gate 훅 — ★서버가 죽어도 사용자를 먹통으로 만들지 않는다★ 가 제일 중요한 축이다.
- *
- * 소스 머리말은 "라우터 에러·타임아웃은 fail-open" 이라고 적고 있다. ★적힌 것과 도는 것은 다르다★ —
- * 그래서 여기서는 ★진짜 죽은 포트★ 와 ★진짜 멈춘 소켓★ 에 붙여 훅을 실행하고 exit 출력으로 잰다.
- * 여기서 fail-closed 면 퍼블릭 사용자 전원이 먹통이 된다.
- *
- * 게이트가 ★실제로 막는지★ 도 같이 잰다 — 막지 않으면 깔 이유가 없다.
- */
+/** 죽은 포트·응답 없는 소켓에서 실제 훅을 실행해 라우터 장애가 사용자 입력을 막지 않는지 확인한다. 정상 응답에서는 담당자 게이트가 실제 차단하는지도 확인한다. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
@@ -29,12 +21,7 @@ afterEach(() => {
   dirs = []; servers = [];
 });
 
-/** 훅을 실행한다. 반환: block 이면 true.
- *
- *  ★반드시 비동기로 돌린다★ — `execFileSync` 는 이벤트 루프를 막아서 같은 프로세스에 띄운
- *  가짜 라우터가 ★응답을 못 한다.★ 그러면 모든 케이스가 타임아웃으로 흘러 "항상 통과" 로 보이고,
- *  ★막는 축을 재는 테스트가 조용히 무의미해진다.★ (실제로 그렇게 한 번 통과할 뻔했다.)
- */
+/** 훅은 비동기로 실행해야 같은 프로세스의 가짜 라우터가 응답할 수 있다. 동기 실행이면 모든 시험이 타임아웃으로 흘러 실제 차단을 검증하지 못한다. */
 async function gateBlocks(chatId: string, text: string, routeUrl: string, env: Record<string, string> = {}): Promise<boolean> {
   const prompt = `<channel source="plugin:telegram:telegram" chat_id="${chatId}" message_id="8199">${text}</channel>`;
   const child = execFileAsync("python3", [HOOK], {

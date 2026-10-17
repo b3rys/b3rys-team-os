@@ -1,20 +1,12 @@
-// claude_channel 텔레그램 poller 헬스 + 자동복구.
-//
-// ★왜 별도 모듈인가★ — 이 로직이 필요한 곳이 둘인데(영입=activation, 재시작=agentControl),
-//   기존 위치(activation.ts / launcher.ts)는 서로·agentControl 과 이미 얽혀 있어 어느 방향으로 import 해도
-//   순환이 생긴다. 의존이 없는 자리로 내려 양쪽이 함께 쓴다(fs/process/tmux 만 씀).
-//
-// ★이게 왜 중요한가★ — poller 가 안 붙으면 팀원은 ★조용히 귀머거리★ 가 된다. 프로세스는 살아 있고
-//   대시보드도 정상으로 보이는데 메시지만 안 들어온다. 오류도 안 난다. 사람이 눈치챌 때까지 방치된다.
+// 영입과 재시작이 같은 poller 복구를 쓰되 런처·제어 모듈 간 순환 의존을 만들지 않도록 별도 모듈에 둔다.
+// 프로세스가 살아 있어도 poller가 없으면 메시지를 못 받으므로 연결을 별도로 확인한다.
 import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
 const SAFE_ID = /^[a-z0-9_-]+$/i;
 
-/** claude 텔레그램 채널 poller 기동 대기 — 플러그인 MCP(server.ts)가 토큰 확인 통과 후에만 bot.pid를 쓴다.
- *  bot.pid 출현 = poller 실제 폴링 시작 = '진짜 대화됨'. 미출현 = 죽은 봇(귀머거리). timeoutMs 안에 확인. 슬러그 가드.
- *  opts = 테스트 격리용(실 HOME/~/.claude·라이브 봇 미접촉): homeDir로 base 경로를 tmp로 돌리고 intervalMs로 짧은 폴 간격.
- *  production은 opts 없이 호출 → HOME + 1500ms 그대로(동작 불변). */
+/** 플러그인은 토큰 확인 후 bot.pid를 쓰므로 이를 poller 기동 신호로 확인한다.
+ * 시험은 homeDir·intervalMs를 주입해 실제 홈·봇을 건드리지 않으며 운영 기본 확인 간격은 1500ms다. */
 export async function waitForClaudePoller(
   id: string,
   timeoutMs: number,
@@ -50,11 +42,8 @@ export async function waitForClaudePoller(
   return markerAlive();
 }
 
-/** ★auto-reconnect★: CC fresh 세션 부팅서 telegram MCP 가 부팅 MCP "열거"에서 빠지는 경우
- *  (실패 세션 로그 `Starting connection` 0건 = 타임아웃 아니라 스폰 자체 없음)를 런타임에 복구한다.
- *  슬래시 명령 `/mcp reconnect plugin:telegram:telegram` 을 세션에 주입하면 재열거돼 즉시 붙는다(실측).
- *  메뉴 네비가 아니라 슬래시 명령이라 커서 위치/항목 순서에 무관 = 로버스트.
- *  b3os 가 tmux 세션을 소유하므로 사용자가 tmux 에 들어갈 필요 없다. 세션이 없으면(스폰 실패) false. */
+/** MCP 열거에서 Telegram이 빠졌을 때 /mcp reconnect plugin:telegram:telegram을 주입해 연결한다.
+ * 메뉴 위치와 무관한 명령을 사용하며 세션이 없으면 false를 반환한다. */
 export function reconnectClaudeTelegram(id: string): boolean {
   if (!SAFE_ID.test(id)) throw new Error(`unsafe agent id: ${id}`);
   try {
@@ -75,13 +64,7 @@ export interface PollerUpResult {
   detail: string;
 }
 
-/**
- * poller 가 붙을 때까지 기다리고, 안 붙으면 `/mcp reconnect` 를 주입해 되살린다.
- *
- * ★영입에는 있었지만 재시작에는 없던 것★(2026-07-27 GD 지적) — 재시작 경로는 기동 스크립트만 돌리고
- *   붙었는지 확인조차 안 했다. 그래서 ★재시작 후 안 붙으면 아무도 복구하지 않았다.★ 팀원은 조용히
- *   귀머거리가 되고, 팀장이 눈치챌 때까지 방치된다. 같은 복구를 양쪽에서 쓰게 여기로 모은다.
- */
+/** poller를 기다린 뒤 미연결이면 MCP reconnect로 복구한다. 영입과 재시작 모두 이 경로를 공유해 프로세스만 살아 있는 상태를 방치하지 않는다. */
 export async function ensureClaudePollerUp(
   id: string,
   opts?: {

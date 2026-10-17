@@ -33,26 +33,17 @@ describe("approvalOperationHash — 지문의 결정성·충돌저항(권한 결
   });
 });
 
-/**
- * ★알려진 갭을 코드로 못 박는다 (2026-07-28).★
- *
- * 아래 테스트들은 ★현재 동작(=갭이 존재함)을 단언한다★. 말로만 남긴 갭은 사라지므로,
- * 후속 작업(전체 canonical operation을 grant scope에 결합 + 실행 직전 재해시 + 파일 내용 해시)에서
- * 이 갭이 실제로 닫히면 ★이 테스트들이 실패한다★. 그 실패가 후속 작업의 ★완료 판정★이다.
- * 실패하면 테스트를 '갭이 닫혔다'는 단언으로 뒤집어 쓰면 된다.
- *
- * ★이 갭이 닫히기 전에는 B3OS_CODEX_APPSERVER를 켜지 않는다 — release blocker.★
- */
+/** 승인 해시·grant 범위·내용 비교의 한계를 검증한다. 미해결 차단 조건이 남으면 B3OS_CODEX_APPSERVER를 활성화하지 않는다. */
 describe("알려진 갭 (후속 작업에서 닫히면 이 테스트가 실패해야 한다)", () => {
   test("★갭1 닫힘(S5)★: 240자 prefix가 같아도 전체가 다르면 다른 grant scope 다", () => {
     // permissionGate.targetForOperation 은 여전히 앞 240자만 쓴다(공용 코드는 안 건드렸다).
-    // 대신 우리가 만드는 op.command ★앞에 전체 명령의 operation hash★ 을 넣어 절단선 안에 살아남게 했다.
+    // 대신 우리가 만드는 op.command 앞에 전체 명령의 operation hash 을 넣어 절단선 안에 살아남게 했다.
     const prefix = "y".repeat(240);
     const safe = buildOperationFromApproval(cmd([prefix + "SAFE"]), "demis");
     const evil = buildOperationFromApproval(cmd([prefix + "EVIL"]), "demis");
 
     expect(safe.provenance!.operation_hash).not.toBe(evil.provenance!.operation_hash);
-    // ★예전에는 이 둘이 같았다 — 안전한 명령에 준 '항상 허용' 이 위험한 명령에 재사용됐다.★
+    // 서로 다른 명령에 같은 지속 허용을 재사용하지 않는다.
     expect(scopeKeyForOperation(safe)).not.toBe(scopeKeyForOperation(evil));
   });
 
@@ -63,10 +54,7 @@ describe("알려진 갭 (후속 작업에서 닫히면 이 테스트가 실패�
   });
 
   test("★2000자 너머의 위험 문자열도 스캔된다★ — 화면 밖 + 스캔 밖 을 만들지 않는다", () => {
-    // ★이 시험은 300자로 짜면 안 된다.★ 300자짜리는 예전 판(command 를 2000자에서 자르던 판)에서도
-    // 초록이라, ★닫히지 않은 구멍을 닫혔다고 보이게 한다.★ (실측:
-    //  2100자 패딩 뒤 `; sudo id` → tierDReasons 탐지 0, 같은 패턴이 400자면 탐지됨.)
-    // 사람이 보는 건 앞 240자뿐이므로, 스캔까지 못 보면 ★평범해 보이는 팝업이 sudo 를 통과시킨다.★
+    // 짧은 패딩으로는 스캔 절단 뒤의 위험 명령 누락을 재현할 수 없으므로 2100자 뒤에 명령을 둔다. 표시 상한 밖까지 검사해야 한다.
     const danger = "echo " + "w".repeat(2100) + " ; sudo id";
     const op = buildOperationFromApproval(cmd([danger]), "demis");
     // 사람이 보는 줄(=열쇠)은 240자로 자르되 —
@@ -77,18 +65,7 @@ describe("알려진 갭 (후속 작업에서 닫히면 이 테스트가 실패�
 
 });
 
-/**
- * ★갭2 는 닫혔다 (S4, 2026-07-31).★ operation hash basis 에 ★내용 해시★ 를 넣었다.
- *
- * ■ ★옛 테스트가 틀린 모양을 쓰고 있었다★
- * 예전 갭2 테스트는 `fileChanges: { "a.ts": { diff: "..." } }` 로 갭을 보였다.
- * 그런데 ★벤더 스키마에 `diff` 라는 필드는 없다★ (0.144.6 실측:
- * AddFileChange{content} · DeleteFileChange{content} · UpdateFileChange{unified_diff, move_path}).
- * 즉 ★실제로는 올 수 없는 입력으로 갭을 증명하고 있었다.★ 그래서 S4 를 구현한 뒤에도
- * 그 테스트는 ★초록 그대로였다★ — "갭이 닫히면 빨강이 된다" 는 완료 신호가 작동하지 않았다.
- * ★모양을 지어내면 시험은 통과하고 실물에서 틀린다.★
- * → 실제 모양으로 다시 쓰고, 이제 ★갭이 닫혔다는 단언★ 으로 뒤집는다.
- */
+/** 내용 해시 시험은 벤더의 실제 필드인 add·delete의 content와 update의 unified_diff·move_path를 사용한다. 존재하지 않는 diff 필드로는 실제 변경 구분을 검증할 수 없다. */
 describe("갭2 닫힘 — 같은 파일이라도 내용이 다르면 지문이 다르다 (S4)", () => {
   const oldGen = (fileChanges: unknown): ApprovalRequest => ({
     method: "applyPatchApproval",
@@ -124,7 +101,7 @@ describe("갭2 닫힘 — 같은 파일이라도 내용이 다르면 지문이 �
   });
 
   test("★신세대도 종류가 지문에 들어간다★ — 같은 파일·같은 내용이라도 add 와 update 는 다르다", () => {
-    // ★뮤턴트가 살아남아 추가했다(M3).★ 앞 시험은 구세대만 봐서, 신세대 kind 를 상수로 바꿔도 초록이었다.
+    // 뮤턴트가 살아남아 추가했다(M3). 앞 시험은 구세대만 봐서, 신세대 kind 를 상수로 바꿔도 초록이었다.
     const req = (kind: string): ApprovalRequest => ({
       method: "item/fileChange/requestApproval",
       params: { itemId: "i1", turnId: "t1" },
@@ -134,8 +111,8 @@ describe("갭2 닫힘 — 같은 파일이라도 내용이 다르면 지문이 �
   });
 
   test("★종류와 필드가 어긋나면 내용을 안 읽는다★ — 엉뚱한 값을 지문에 넣지 않는다", () => {
-    // ★뮤턴트가 살아남아 추가했다(M4).★ 앞 시험은 kind 가 달라서 통과했고, ★필드 선택 자체는 재지 않았다.★
-    // update 인데 content 만 있는 payload 는 ★내용을 모르는 것★ 으로 본다(S3 에서 표시 쪽에 한 정정과 같다).
+    // 뮤턴트가 살아남아 추가했다(M4). 앞 시험은 kind 가 달라서 통과했고, 필드 선택 자체는 재지 않았다.
+    // update 인데 content 만 있는 payload 는 내용을 모르는 것 으로 본다(S3 에서 표시 쪽에 한 정정과 같다).
     // 그러므로 content 가 A 든 B 든 operation hash 가 같아야 한다 — 다르면 없는 내용을 읽고 있다는 뜻이다.
     const a = oldGen({ "a.ts": { type: "update", content: "AAA" } });
     const b = oldGen({ "a.ts": { type: "update", content: "BBB" } });
@@ -143,7 +120,7 @@ describe("갭2 닫힘 — 같은 파일이라도 내용이 다르면 지문이 �
   });
 
   test("★빈 파일도 '아는 내용' 이다★ — 빈 파일 생성과 빈 파일 삭제는 다른 작업이다", () => {
-    // ★P1 · 재현 확인.★ 길이로 "내용을 얻었나" 를 재면 ★정상적인 빈 파일 작업이 '모름' 과 합쳐진다.★
+    // P1 · 재현 확인. 길이로 "내용을 얻었나" 를 재면 정상적인 빈 파일 작업이 '모름' 과 합쳐진다.
     // basis.files 에는 kind 가 없어서 그 둘을 갈라줄 다른 재료도 없었다 → 같은 operation hash 가 됐다.
     const addEmpty = oldGen({ "a.ts": { type: "add", content: "" } });
     const delEmpty = oldGen({ "a.ts": { type: "delete", content: "" } });
@@ -157,8 +134,7 @@ describe("갭2 닫힘 — 같은 파일이라도 내용이 다르면 지문이 �
   });
 
   test("모르는 종류에서 필드 우선순위를 고정한다 — 먼저 선언된 쪽을 믿는다", () => {
-    // 비차단 항목: type 없음 + unified_diff:"" + content:"X" 에서 ★빈 diff 가 X 를 가린다.★
-    // 그게 의도인지 사고인지 코드만 봐선 모르므로 ★계약으로 못박는다★ — 종류를 모를 때는 unified_diff 를 먼저 본다.
+    // 종류를 모르면 unified_diff를 우선하므로 빈 diff가 content보다 앞서는 현재 계약도 검증한다.
     const a = oldGen({ "a.ts": { unified_diff: "", content: "X" } });
     const b = oldGen({ "a.ts": { unified_diff: "", content: "Y" } });
     expect(approvalOperationHash(a)).toBe(approvalOperationHash(b)); // content 는 안 본다

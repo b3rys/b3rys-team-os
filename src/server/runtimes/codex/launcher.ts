@@ -1,12 +1,5 @@
-/**
- * codex runtime — per-member 텔레그램 브리지 런처 (M4).
- *
- * codex 두뇌(버스 어댑터)는 in-process지만, 멤버 *자기 봇*으로 직접 텔레그램 I/O(👀+작업중+답)하려면
- * bridge.ts(runBridge)를 per-member 프로세스로 띄워야 한다. claude의 텔레그램 봇 LaunchAgent 패턴을 미러.
- *
- * 보안: 토큰은 파일로만(0600), wrapper가 파일→env(CODEX_BOT_TOKEN)로 주입 — plist·stdout·로그에 평문 안 둔다.
- * 라이브 launchctl 조작은 호출자(agentControl/activation)가 execOn() 게이트 뒤에서만 실행.
- */
+/** 멤버별 봇 I/O는 별도 브리지 프로세스로 실행한다. 토큰은 0600 파일에서 env로 주입하고 plist·로그에 넣지 않는다.
+ * 실제 launchctl 조작은 호출자의 execOn 게이트 뒤에서만 실행한다. */
 import { writeFileSync, mkdirSync, chmodSync, existsSync, rmSync, lstatSync, readlinkSync, symlinkSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { REPO_ROOT, MEMBERS_ROOT } from "../../lib/personaTemplates";
@@ -169,10 +162,10 @@ export function renderBridgePlist(p: CodexBridgePaths): string {
     `  <key>Label</key><string>${p.label}</string>`,
     "  <key>ProgramArguments</key>",
     `  <array><string>/bin/bash</string><string>${p.wrapper}</string></array>`,
-    // ★작업 디렉토리를 명시한다★ — 없으면 launchd 가 cwd `/` 로 띄운다.
+    // 작업 디렉토리를 명시한다 — 없으면 launchd 가 cwd `/` 로 띄운다.
     //   그러면 cwd 기준 상대경로가 전부 루트로 풀린다(실측: 사진 저장이 `/team-media` 로 가서
     //   `EROFS: read-only file system` 로 1:1 사진 첨부가 전부 실패했다).
-    //   ★서버 plist 는 이미 이 키가 있어서 멀쩡했다★ — 브리지만 빠져 있었다. 같은 모양으로 맞춘다.
+    //   서버 plist 는 이미 이 키가 있어서 멀쩡했다 — 브리지만 빠져 있었다. 같은 모양으로 맞춘다.
     `  <key>WorkingDirectory</key><string>${REPO_ROOT}</string>`,
     "  <key>RunAtLoad</key><true/>",
     "  <key>KeepAlive</key><true/>",
@@ -183,37 +176,10 @@ export function renderBridgePlist(p: CodexBridgePaths): string {
   ].join("\n");
 }
 
-/**
- * per-agent 최소 config. 호스트 `~/.codex/config.toml` 의 trust/MCP/plugin 을 상속하지 않기 위한
- * ★빈 껍데기★ 다. **실행 정책(샌드박스·승인)은 여기 쓰지 않는다.**
- *
- * ★실행 정책은 이 파일이 아니라 thread/start 인자로 간다★ — appServerRunner 가 턴마다
- * approvalPolicy·sandbox 를 codex 프로토콜로 명시한다. 여기에 다시 쓰면 두 곳이 갈린다.
- * 우리 코드가 두 번째로 판정하지도 않는다. ★지금 실행 정책은 "never" 라 codex 가 묻지 않는다★
- * (appServerRunner.ts) — 옮길 물음이 없다. "on-request" 로 되돌리면 그 물음을 채널로 옮긴다.
- *
- * 뺀 것: `sandbox_mode` · `approval_policy` · `network_access` · `writable_roots`.
- *
- * ■ 왜 이게 문제였나 — ★12명 중 dex 만 잠겨 있었다★ (실측 2026-08-14)
- *   같은 세 경로 쓰기를 네 런타임에 시켰다.
- *     hermes · openclaw · claude  → /tmp · 타 프로젝트 · 홈 ★전부 성공★, 승인창 없음
- *     dex                        → 타 프로젝트·홈 ★거절★
- *   그리고 openclaw 의 codex-home 에는 위 네 항목이 ★0건★ 인데 dex 것에만 ★4건★ 있었다.
- *   codex 의 한계가 아니라 ★이 함수가 만든 차이★ 였다.
- *
- * ■ ★주의 — 여기서 뺐다고 열리는 게 아니다★
- *   빈 CODEX_HOME 으로 실측하면 codex 0.147.0 기본은 ★read-only + on-request 로 잠긴다.★
- *   실제 실행 모드는 `appServerRunner` 가 ★codex 정식 프로토콜(thread/start·turn/start)로 명시★ 한다.
- *   openclaw 도 같은 방식이다(설정 파일이 아니라 프로토콜로 넘긴다).
- *
- * 경계가 다시 필요해지면 ★codex 설정·프로토콜로★ 넣는다. 우리 판정층을 다시 만들지 않는다.
- */
+/** config에는 실행 정책을 중복하지 않는다. thread/start·turn/start가 한 곳에서 정하며 생략 시 CLI 0.147.0 기본은 readOnly·on-request로 잠긴다.
+ * 현재 never는 사람 승인 경로를 만들지 않는다. 복원하려면 on-request로 바꾸고, 실행 경계가 필요하면 Codex 설정·프로토콜을 사용하며 별도 판정층을 재도입하지 않는다. */
 export function renderMinimalCodexConfig(_p: Pick<CodexBridgePaths, "workdir">): string {
-  // ★제품 결정(2026-08-18): 호스트 설정을 상속한다.★ 상세는 configSeed.ts.
-  //   상속하는 것은 ★능력★ 이다 — 플러그인·MCP·모델. 그것이 없으면 새 팀원이 기존 팀원보다
-  //   좁아서 같은 과제를 맡길 수 없다.
-  //   ★정책·신뢰·정체성은 상속하지 않는다★ — 실행 모드는 프로토콜 한 곳에서, 신뢰는 그 팀원의
-  //   작업 폴더만, 호스트 CODEX_HOME 을 가리키는 줄은 격리를 깨므로 걷어낸다.
+  // 기능은 상속해 새 팀원의 플러그인·MCP·모델을 기존 팀원과 맞춘다. 정책은 프로토콜, 신뢰는 자기 작업폴더만 사용하며 호스트 CODEX_HOME 참조는 격리를 깨므로 제거한다.
   return renderSeededCodexConfig(readHostCodexConfig(), { workdir: _p.workdir, hostCodexHome: `${HOME}/.codex` });
 }
 
@@ -228,28 +194,18 @@ export function readHostCodexConfig(): string | null {
   }
 }
 
-/**
- * CODEX_HOME 디렉토리 보장 + locked-down config + 호스트 codex 인증 seed(타깃에 없을 때만).
- * codex exec 는 CODEX_HOME 이 존재하지 않으면 즉시 exit 1("path does not exist") →
- * 브리지가 응답 생성 실패로 처리(영입 ack 무한대기, Codi 2026-06-29 인시던트).
- * 활성화 시 home 을 만들어 두면 재발 없음.
- * 정체성 모델: 기본은 호스트(~/.codex) ChatGPT 인증만 공유(빠른 활성화·테스트).
- * 설정 모델: ★호스트 config 를 상속하고 팀원별 값만 덮어쓴다★(2026-08-18 제품 결정 — configSeed.ts).
- * 팀원별 독립 정체성이 필요하면 이후 per-agent `codex login` 으로 교체(seed 는 타깃에 없을 때만 하므로 덮어쓰지 않음).
- */
+/** CODEX_HOME이 없으면 CLI가 즉시 종료하므로 활성화 때 생성한다. 호스트 기능 설정은 상속하고 팀원별 값으로 덮어쓴다.
+ * 기본은 호스트 인증을 공유하되 대상 인증이 이미 있으면 보존한다. 별도 계정은 팀원별 login으로 교체할 수 있다. */
 export function ensureCodexHome(p: CodexBridgePaths): void {
   mkdirSync(p.codexHome, { recursive: true });
   const hostHome = `${HOME}/.codex`;
-  // config.toml: ★없을 때만★ 시드한다(이미 있는 팀원 설정을 덮지 않는다). 내용은 호스트 상속 + 팀원별 덮어쓰기.
+  // config.toml: 없을 때만 시드한다(이미 있는 팀원 설정을 덮지 않는다). 내용은 호스트 상속 + 팀원별 덮어쓰기.
   {
     const dst = join(p.codexHome, "config.toml");
     if (!existsSync(dst)) writeFileSync(dst, renderMinimalCodexConfig(p), "utf-8");
   }
-  // auth.json: **라이브 ~/.codex/auth.json 로 심링크**(복사 아님) — openclaw/hermes 와 동일 메커니즘.
-  // (하네스+실증: codex ChatGPT 인증은 single-use rotating refresh 토큰. 복사본은 호스트 rotation
-  //    뒤 stale→"refresh token already used"(codi 인시던트). openclaw acpx/codex-home/auth.json 은 심링크라
-  //    항상 라이브를 읽어 idle 후에도 정상 — 그 패턴을 codi 에도 적용. refresh 도 라이브에 in-place → 사본 race 근절.)
-  //   per-agent 독립 로그인이 필요하면(멀티 계정) 이 심링크를 실파일 login 으로 교체(향후, 계정 하나면 불필요).
+  // ChatGPT refresh 토큰은 단일 사용·회전하므로 인증을 복사하면 호스트 갱신 뒤 사본이 만료된다. 실시간 auth.json 심링크로 같은 갱신본을 사용한다.
+  // 독립 계정이 필요하면 심링크 대신 팀원별 실제 login 파일로 교체한다.
   {
     const dst = join(p.codexHome, "auth.json");
     const src = join(hostHome, "auth.json");
@@ -267,7 +223,7 @@ export function ensureCodexHome(p: CodexBridgePaths): void {
 /** wrapper+plist 파일 생성(파일 쓰기만 — launchctl 로드는 호출자가 게이트 뒤에서). idempotent. */
 export function writeCodexBridgeFiles(id: string): CodexBridgePaths {
   const p = codexBridgePaths(id, readMemberChannel(id));
-  // ★채널 설정이 틀리면 파일을 쓰기 전에 멈춘다★ — 옛 wrapper 를 덮어 반쯤 바뀐 상태를 만들지 않는다.
+  // 채널 설정이 틀리면 파일을 쓰기 전에 멈춘다 — 옛 wrapper 를 덮어 반쯤 바뀐 상태를 만들지 않는다.
   assertChannelUsable(p.channel, `codex ${id}`);
   ensureCodexHome(p); // CODEX_HOME 없으면 codex exec 즉사 → 활성화 시 보장
   mkdirSync(dirname(p.wrapper), { recursive: true });

@@ -5,8 +5,8 @@ import { join, dirname } from "node:path";
 import { consumeGroupReply, ensureOutboxDir, groupReplyPath, outboxDir, MAX_REPLY_BYTES } from "./groupOutbox";
 
 const dir = () => mkdtempSync(join(tmpdir(), "outbox-"));
-// 파일 자체의 판정을 재는 시험들은 ★부모 검사를 통과시킨 뒤★ 그 다음 칸을 본다.
-// (부모 검사 자체는 아래 전용 describe 에서 ★진짜 outbox 배치★ 로 잰다 — 여기서 겸하면
+// 파일 자체의 판정을 재는 시험들은 부모 검사를 통과시킨 뒤 그 다음 칸을 본다.
+// (부모 검사 자체는 아래 전용 describe 에서 진짜 outbox 배치 로 잰다 — 여기서 겸하면
 //  자기 자신과 비교하는 모양이 되어 둘 다 못 재게 된다.)
 const at = (f: string) => realpathSync(dirname(f));
 
@@ -57,7 +57,7 @@ describe("consumeGroupReply — 한 번 읽고 반드시 지운다", () => {
     const link = join(d, "r.txt");
     symlinkSync(secret, link);
     expect(consumeGroupReply(link, at(link))).toEqual({ kind: "rejected", reason: "not_regular_file" });
-    // ★링크만 지우고 원본은 안 건드린다★
+    // 링크만 지우고 원본은 안 건드린다
     expect(existsSync(secret)).toBe(true);
   });
 
@@ -67,13 +67,13 @@ describe("consumeGroupReply — 한 번 읽고 반드시 지운다", () => {
     const link = join(d, "r.txt");
     symlinkSync(join(d, "secret.txt"), link);
     const r = consumeGroupReply(link, at(link));
-    // ★"파일이 없다"(none) 와 섞이면 안 된다★ — 없는 것과 막은 것은 다른 사건이다
+    // "파일이 없다"(none) 와 섞이면 안 된다 — 없는 것과 막은 것은 다른 사건이다
     expect(r.kind).toBe("rejected");
     expect(JSON.stringify(r)).not.toContain("비밀");
   });
 
   test("★검사한 것과 읽은 것이 같은 객체다★ — 열린 fd 로만 재고 읽는다", () => {
-    // O_NOFOLLOW 로 한 번 열고 fstat 으로 ★그 fd★ 를 재므로, 검사와 읽기 사이에
+    // O_NOFOLLOW 로 한 번 열고 fstat 으로 그 fd 를 재므로, 검사와 읽기 사이에
     // 경로를 바꿔칠 창이 없다. 그 경로를 아는 것은 답을 쓰는 팀원 자신이다.
     const d = dir();
     const f = join(d, "r.txt");
@@ -125,8 +125,8 @@ describe("★부모 디렉터리가 바꿔치기되면 거절한다★ — O_NOF
     const r = consumeGroupReply(p, outboxDir(root, "dex"));
     expect(r).toEqual({ kind: "rejected", reason: "dir_moved" });
     expect(JSON.stringify(r)).not.toContain("비밀");
-    // ★거절만으로는 부족하다★ — 지우면서 거절하면 반환값은 같은데 남의 파일이 사라진다.
-    //   반환값만 보는 시험은 그 차이를 못 본다. ★막았다는 것은 원본이 그대로라는 뜻이다.★
+    // 거절만으로는 부족하다 — 지우면서 거절하면 반환값은 같은데 남의 파일이 사라진다.
+    //   반환값만 보는 시험은 그 차이를 못 본다. 막았다는 것은 원본이 그대로라는 뜻이다.
     expect(existsSync(join(elsewhere, "x.txt"))).toBe(true);
   });
 
@@ -140,7 +140,7 @@ describe("★부모 디렉터리가 바꿔치기되면 거절한다★ — O_NOF
 });
 
 test("★열기 실패 사유를 가른다★ — 전부 '답 안 함' 이면 고장이 조용히 통과한다", () => {
-  // outbox 디렉터리가 한 번 틀어지면 ★모든 턴이 "답 안 함" 으로 보인다★ —
+  // outbox 디렉터리가 한 번 틀어지면 모든 턴이 "답 안 함" 으로 보인다 —
   // 사람은 "덱스가 답을 안 하네" 로 읽는다. 이 PR 이 없애려는 그 모양이다.
   const root = dir();
   const d = outboxDir(root, "dex");

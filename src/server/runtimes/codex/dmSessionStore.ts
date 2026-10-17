@@ -1,27 +1,11 @@
-/**
- * 1:1 대화의 codex 세션을 ★재시작 넘어★ 기억한다.
- *
- * 왜 필요한가(실측 2026-08-18): 브리지는 대화→세션 지도를 ★메모리에만★ 들고 있었다
- * (`chatThreads` Map). 그래서 브리지가 재시작될 때마다 그 지도가 비고, 다음 턴은
- * `resumeSessionId` 없이 시작한다 = ★사람 쪽에서는 앞 대화를 잊은 것으로 보인다.★
- *
- * 저장 자리는 이미 있었다 — `codex_session_map`. 다만 전 52행이 전부 `surface=team_bus` 였고
- * 브리지는 그 표를 ★한 번도 참조하지 않았다★(브리지 파일 내 참조 0건).
- * 버스로 온 일은 맥락이 이어지고 사람이 직접 건 대화는 안 이어지던 것이 그 차이다.
- *
- * 여기서는 그 표에 `surface="telegram_dm"` 으로 같이 적는다. 버스 쪽 행과 섞이지 않는다.
- */
+/** 대화→세션 지도를 영속 저장해 브리지 재시작 뒤에도 앞 대화를 resume한다. DM은 telegram_dm surface로 기록해 버스 행과 구분한다. */
 import { Database } from "bun:sqlite";
 import { CodexSessionStore } from "./state";
 
 /** 이 표에서 1:1 대화가 쓰는 surface. 버스(team_bus)와 갈라 둔다. */
 export const DM_SURFACE = "telegram_dm";
 
-/**
- * ★그룹방이 쓰는 surface.★ 1:1 과 갈라 둔다 — chatId 가 달라서 섞어도 충돌은 안 나지만
- *   ★섞으면 이름이 거짓말이 된다★(리뷰 지적). 6.8 을 재는 판별자(`created_at` 보존)도
- *   두 대화가 한 이름에 섞이면 못 쓰게 된다.
- */
+/** 그룹은 DM과 별도 surface를 사용해야 대화 종류와 세션 생성 시각을 구분할 수 있다. */
 export const GROUP_SURFACE = "telegram_group";
 
 export interface DmSessionStore {
@@ -42,7 +26,7 @@ export const NOOP_DM_SESSION_STORE: DmSessionStore = {
 
 /**
  * team.db 를 여는 실제 구현.
- * ★DB 문제가 대화를 막지 않는다★ — 읽기 실패는 '지난 세션 없음', 쓰기 실패는 조용히 넘긴다.
+ * DB 문제가 대화를 막지 않는다 — 읽기 실패는 '지난 세션 없음', 쓰기 실패는 조용히 넘긴다.
  * 맥락이 끊기는 것은 불편이지만, 답을 못 하는 것은 고장이다.
  */
 export function makeDmSessionStore(agentId: string, dbPath: string, surface: string = DM_SURFACE): DmSessionStore {
@@ -88,12 +72,7 @@ export function makeDmSessionStore(agentId: string, dbPath: string, surface: str
   };
 }
 
-/**
- * ★대화 종류에 따라 surface 를 고르는 저장소.★ 텔레그램 그룹 chat id 는 ★음수★ 다.
- *
- * 한 저장소로 두 surface 를 쓰면 그룹 행이 `telegram_dm` 으로 적혀 ★이름이 거짓말★ 이 된다.
- * 그렇다고 파일을 하나 더 만들면 같은 코드가 두 벌이 된다 — ★surface 만 갈라 끼운다.★
- */
+/** 대화 종류에 따라 surface를 주입해 저장 로직을 중복하지 않고 그룹을 DM으로 잘못 기록하지 않는다. */
 export function makeChatSessionStore(agentId: string, dbPath: string): DmSessionStore {
   const dm = makeDmSessionStore(agentId, dbPath, DM_SURFACE);
   const group = makeDmSessionStore(agentId, dbPath, GROUP_SURFACE);

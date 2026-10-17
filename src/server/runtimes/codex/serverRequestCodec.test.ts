@@ -72,7 +72,7 @@ describe("encodeApproval — method별 결정값 codec", () => {
       .toEqual({ kind: "result", result: { permissions: { fs: true }, scope: "turn", strictAutoReview: false } });
     expect(encodeApproval("approval_permissions", "session", { permissions: { fs: true } }))
       .toEqual({ kind: "result", result: { permissions: { fs: true }, scope: "session", strictAutoReview: false } });
-    // ★거절 시 요청 permissions echo 금지(= 승인돼버림) 회귀 가드★
+    // 거절 시 요청 permissions echo 금지(= 승인돼버림) 회귀 가드
     const declined = encodeApproval("approval_permissions", "decline", { permissions: { fs: true } });
     expect((declined as any).result.permissions).toEqual({});
   });

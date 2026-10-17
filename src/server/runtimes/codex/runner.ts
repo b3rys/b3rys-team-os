@@ -1,16 +1,5 @@
-/**
- * codex runtime — "두뇌" 호출 (OpenAI Codex CLI `codex exec` 직접 구동).
- *
- * 이 파일이 하는 일: 에이전트 워크스페이스(cwd)에서 `codex exec`를 헤드리스로 한 번 돌려 답 텍스트를 받는다.
- * 페르소나는 cwd 의 AGENTS.md 가 자동로드됨(claude의 CLAUDE.md처럼) — 그래서 룰로딩 블록이 그대로 두뇌 컨텍스트가 된다.
- *
- * 출처: codex-channel-poc(2026-06-27 GD 검증)에서 이식. 검증된 gotcha 반영:
- *   - stdin 'ignore'로 즉시 EOF(안 그러면 codex가 stdin 대기 → hang).
- *   - 최종답은 -o lastMsgFile 로 받음(JSONL 파싱 없이 견고).
- *   - sessionId = JSONL 첫 이벤트 thread_id(멀티턴 resume 키).
- *   - 신규턴은 `exec -s <sandbox>`, 재개턴은 `exec resume <id>`(-s 금지 gotcha) + config override로 sandbox 강제.
- *   - read-only sandbox 기본. 멤버별 설정이 있을 때만 workspace-write/network_access를 열어 blast radius를 줄인다.
- */
+/** exec 경로는 stdin을 즉시 EOF로 닫아 입력 대기를 막고 최종답은 출력 파일로 받는다. sessionId는 첫 thread 이벤트에서 얻는다.
+ * 신규 실행의 -s는 resume에서 사용할 수 없어 config override로 sandbox를 강제한다. 기본 readOnly이며 명시된 멤버 설정만 쓰기·네트워크를 연다. */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -18,18 +7,11 @@ import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import type { CodexSandboxMode } from "../../types";
 
-// 아키텍처/OS 무관(하네스): env 미설정 시 bare 이름 → PATH lookup(OPENCLAW_BIN 패턴과 동일). Apple-Silicon 고정경로 하드코딩은 Intel/Linux서 spawn 실패.
+// 바이너리 env 미설정은 PATH 조회를 사용해야 특정 CPU·OS의 고정 경로 때문에 spawn이 실패하지 않는다.
 export const CODEX_BIN = process.env.CODEX_BIN ?? "codex";
 
 export interface CodexTurnOptions {
-  /** ★이 턴이 '누구' 인가. 필수다.★ 팀원 스크립트(_me.sh)가 tmux 세션으로 ★추측하지 않게★ 명시적으로 넘긴다.
-   *  (2026-07-13: hermes 가 구버전 _me.sh 의 tmux 폴백 때문에 ★전 발신이 'bill' 로 위장★됐다)
-   *
-   *  ★선택 인자로 두지 않는다★ (리뷰 지적): 이 값은 승인 요청의 주인으로도 쓰인다.
-   *  기본값을 두면 새 호출부가 빠뜨렸을 때 ★조용히 남의 신원으로 찍힌다★ — 실제로 그랬다
-   *  (appServerRunner 가 "codex" 를 박아둬서 dex 요청 4건이 codex 앞으로 기록됐다).
-   *  필수로 두면 빠뜨리는 순간 ★컴파일이 막는다.★ 런타임 예외보다 이르다 —
-   *  승인 경로는 자주 안 도는 길이라 예외는 한참 뒤에야 드러난다. */
+  /** 팀원 ID는 승인 요청의 주인이므로 필수로 넘겨 tmux·기본값으로 다른 신원을 추측하지 않게 한다. 호출 누락은 컴파일에서 차단한다. */
   agentId: string;
   /** 작업 디렉토리 = 페르소나(AGENTS.md) + 스킬 접근 루트. codex가 cwd의 AGENTS.md를 자동로드. */
   cwd?: string;
@@ -61,12 +43,7 @@ export interface CodexTurnOptions {
   onDelta?: (text: string) => void;
   /** Full ordered assistant text for transports that support replacing the current body. */
   onAnswerText?: (text: string) => void;
-  /**
-   * ★사람이 붙인 그림의 로컬 경로.★ 본문에 경로를 적어주는 것과 다르다 —
-   * 적어주면 codex 는 파일을 ★바이트로 읽을 뿐★ 이고, 입력 아이템으로 넣어야 ★본다.★
-   * 실측(CLI 0.147.0): 글자가 든 그림을 태워 codex 가 그 글자를 읽어냈고,
-   * 같은 질문을 그림 없이 주면 "안보임" 이 나왔다.
-   */
+  /** 이미지는 본문에 경로만 적으면 바이트 파일로만 읽힐 수 있으므로 별도 입력 아이템으로 제공한다. CLI 0.147.0에서 이미지 해석을 확인한 경로다. */
   imagePaths?: readonly string[];
 }
 
@@ -126,9 +103,7 @@ export function buildCodexArgs(opts: CodexTurnOptions, lastMsgFile: string, sand
   if (opts.model) common.push("-m", opts.model);
   const cfg = configArgs(opts, sandbox);
 
-  // ★보안(하네스 BLOCKER fix 2026-06-28): prompt 앞에 "--"로 옵션 파싱 종료.
-  // 없으면 "-"로 시작하는 채팅 메시지(예: --dangerously-bypass-approvals-and-sandbox)가
-  // codex의 flag로 해석돼 read-only 샌드박스 탈출=호스트 RCE. "--" 뒤는 무조건 PROMPT.
+  // prompt 앞 --로 옵션 해석을 끝내야 -로 시작하는 채팅이 CLI 플래그로 해석돼 샌드박스를 우회하지 않는다.
   return opts.resumeSessionId
     ? [
         "exec",
@@ -155,20 +130,14 @@ export function redactPromptArg(args: string[]): string[] {
 /**
  * Codex 한 턴 실행(헤드리스). 답 텍스트 + sessionId 반환. 발신은 호출자(어댑터) 책임.
  */
-/**
- * ★DEPRECATED — 새 경로에서 쓰지 마라.★
- *
- * `codex exec` 는 한 번 부르고 죽는다. 그래서 ★중간 개입도, 서브에이전트 생존도, 승인창도 없다.★
- * app-server 가 안 되면 이쪽으로 떨어뜨리고 싶어지는데 — **그게 기능 퇴보다.**
- *
- * 남겨두는 이유는 하나 — 아직 이 함수를 부르는 옛 시험·도구가 있다. 제품 경로에서는 쓰지 않는다.
- */
+/** DEPRECATED: 제품 경로·app-server 폴백에 사용하지 않는다. 일회성 exec는 steer·서브에이전트 생존·승인창 기능을 제공하지 않는다.
+ * 기존 시험·도구 호출 호환을 위해서만 남긴다. */
 export async function runCodexTurn(opts: CodexTurnOptions): Promise<CodexTurnResult> {
   const started = Date.now();
   const sandbox = opts.sandbox ?? "read-only";
-  // ★기본값을 두지 않는다★ — 240초는 ★라이브에서 도달하지 않는 죽은 값★ 이었다.
+  // 기본값을 두지 않는다 — 240초는 라이브에서 도달하지 않는 죽은 값 이었다.
   //   이 함수는 DEPRECATED 고, 유일한 제품 호출부(`runtimeSubscription.ts`)는 자기 상한을 명시로 넘긴다.
-  //   그런데 숫자가 남아 있으면 ★"우리 정책이 240초" 로 읽힌다.★ 조용히 기본값을 주는 대신 크게 실패한다.
+  //   그런데 숫자가 남아 있으면 "우리 정책이 240초" 로 읽힌다. 조용히 기본값을 주는 대신 크게 실패한다.
   const timeoutMs = opts.timeoutMs;
   if (timeoutMs == null) {
     throw new Error("runCodexTurn: timeoutMs 를 명시하세요 (DEPRECATED 경로 — 기본값을 두지 않습니다)");
@@ -181,7 +150,7 @@ export async function runCodexTurn(opts: CodexTurnOptions): Promise<CodexTurnRes
   const args = buildCodexArgs(opts, lastMsgFile, sandbox);
 
   const env = { ...process.env };
-  // ★정체를 명시한다 — 추측하게 두면 틀린 답을 조용히 준다.★ (hermes 위장 사고, 2026-07-13)
+  // 팀원 신원을 명시해 실행 환경에서 다른 발신자를 추측하지 않게 한다.
   if (opts.agentId) env.GD_AGENT_ID = opts.agentId;
   if (!env.TEAM_DB_PATH) {
     env.TEAM_DB_PATH = join(dirname(fileURLToPath(import.meta.url)), "../../../../team.db");

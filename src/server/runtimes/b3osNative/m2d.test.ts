@@ -12,7 +12,7 @@ import { OPENAI_COMPAT_FLAG } from "./runner";
 import type { AgentRecord } from "../../types";
 import type { PendingDispatchRow } from "../../bus/types";
 
-/** 전역 격리(preload)가 세팅한 값 — afterAll 에서 ★지우지 말고 되돌린다.★ */
+/** 전역 격리(preload)가 세팅한 값 — afterAll 에서 지우지 말고 되돌린다. */
 const PREV_AUDIT_DIR = process.env.B3OS_AUDIT_LOG_DIR;
 
 const REAL_PERSONA = __dirname + "/preflight.ts"; // 존재하는 실제 파일(persona 존재 검사용)
@@ -25,20 +25,14 @@ function agent(p: Partial<AgentRecord> = {}): AgentRecord {
   } as unknown as AgentRecord;
 }
 
-// ★테스트 격리(Bill 리뷰 #2): 통합테스트가 appendAuditFile로 라이브 logs/를 오염하지 않게
-//   audit 로그 디렉토리를 temp로 리다이렉트. (팀 하드레슨 — bun test는 실 FS 안 건드림.)
+// 감사 로그 경로를 tmp로 격리해 통합 시험이 실제 로그를 오염시키지 않게 한다.
 let TMP_LOG_DIR: string;
 beforeAll(() => {
   TMP_LOG_DIR = mkdtempSync(join(tmpdir(), "b3os-m2d-audit-"));
   process.env.B3OS_AUDIT_LOG_DIR = TMP_LOG_DIR;
 });
 afterAll(() => {
-  // ★지우면 안 된다 — 되돌려야 한다.★ (2026-07-14)
-  //   전역 preload(src/test/test-isolation.ts)가 B3OS_AUDIT_LOG_DIR 을 temp 로 세팅해 ★모든★ 테스트를
-  //   라이브 logs/ 에서 격리한다. 여기서 delete 하면 ★그 격리가 통째로 풀리고★, 같은 프로세스에서
-  //   ★뒤에 도는 모든 테스트가 라이브 감사로그에 쓴다.★
-  //   실측: 라이브 로그에 테스트 이벤트 ★1619건★ (actor='nova', thread='t1' — 존재하지 않는 팀원/스레드).
-  //   ★계기판이 첫날부터 가짜 데이터로 못 쓰게 됐다.★ (팀 하드레슨: bun test 는 라이브를 안 건드린다)
+  // preload가 설정한 감사 로그 env를 삭제하면 뒤의 시험이 실제 로그에 기록하므로 원래 값으로 복원한다.
   if (PREV_AUDIT_DIR === undefined) delete process.env.B3OS_AUDIT_LOG_DIR;
   else process.env.B3OS_AUDIT_LOG_DIR = PREV_AUDIT_DIR;
   try { rmSync(TMP_LOG_DIR, { recursive: true, force: true }); } catch { /* best-effort */ }
@@ -65,7 +59,7 @@ describe("checkB3osNativePreflight (배정 전 검사)", () => {
   test("persona 못 읽음 → 이슈 탐지되나 runnable(loadSystem이 이름·역할로 fallback)", () => {
     const r = checkB3osNativePreflight(agent({ persona_file: "/no/such/persona.md" }), { ANTHROPIC_API_KEY: "x" });
     expect(r.issues).toContain("persona_file_unreadable");
-    expect(isB3osNativeRunnable(r)).toBe(true); // persona는 fallback되므로 blocking 아님(#3)
+    expect(isB3osNativeRunnable(r)).toBe(true); // persona는 이름·역할로 대체할 수 있으므로 실행을 막지 않는다.
   });
 
   test("runtime 불일치 → 탐지", () => {

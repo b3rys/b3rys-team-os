@@ -1,15 +1,5 @@
-/**
- * ★1:1 대화로 온 첨부를 dex 가 실제로 보게 한다.★
- *
- * 무엇이 문제였나 — 브리지가 받는 항목이 ★글자 하나뿐★ 이었다(TgUpdate.message.text).
- * 그래서 사진만 보낸 메시지는 통째로 버려지고, 사진에 달린 설명(caption)도 안 왔다.
- * 팀장님 관측: "dex 한테 이미지 첨부하면 못 읽는다" · "다른 팀원은 다 되는데".
- * 다른 팀원(그룹방 capture 경로)은 이미 내려받아 저장하고 있었다 — ★1:1 만 안 이어져 있었다.★
- *
- * 사진은 버려지지 않는다: 텔레그램은 ★사진 한 장을 여러 크기로★ 보낸다(photo[] = 같은 그림의 썸네일·
- * 중간·원본). 그중 가장 큰 것을 고르는 것은 ★장수를 고르는 게 아니라 화질을 고르는 것★ 이다.
- * 여러 장을 보내면 텔레그램이 ★한 장씩 따로★ 보내므로 각 메시지가 각자 처리된다.
- */
+/** 사진만 보낸 DM과 caption도 수신한다. Telegram photo 배열은 같은 사진의 해상도별 변형이므로 가장 큰 하나를 고르는 것은 장수 제한이 아니다.
+ * 여러 장은 메시지별로 전달되어 각각 처리한다. */
 import { storeTelegramMedia, type StoredMedia, type TelegramMediaRef } from "../../lib/mediaStore";
 import { TELEGRAM_API_BASE, channelFromEnv } from "../../lib/memberChannel";
 
@@ -32,7 +22,7 @@ export interface DmMessageMedia {
 }
 
 /**
- * 같은 그림의 여러 크기 중 ★가장 큰 것★ 을 고른다.
+ * 같은 그림의 여러 크기 중 가장 큰 것 을 고른다.
  * file_size 가 없는 변형이 섞여 있어 넓이로 보조 판정한다(둘 다 없으면 0 — 맨 뒤로 간다).
  */
 export function largestPhotoVariant(
@@ -71,14 +61,8 @@ export function dmMediaRefs(msg: DmMessageMedia, depth = 1): TelegramMediaRef[] 
       file_size: doc.file_size,
     });
   }
-  // ★인용한 원문의 첨부도 함께 싣는다.★
-  //   사람이 사진에 답장하면 텔레그램은 새로 친 글자만 보내고, 그 사진은 `reply_to_message` 에 있다.
-  //   전에는 ★원문 텍스트만★ 실어서, 팀장님이 사진에 "이거 설명해줘" 라고 답하면 dex 는
-  //   ★"텍스트는 보입니다"★ 라고 답했다 — 정작 봐야 할 그림이 안 갔다(실측).
-  //   같은 파일을 다시 인용해도 저장소가 file_unique_id 로 같은 경로를 돌려주므로 중복 비용은 없다.
-  //   ★깊이를 코드가 제한한다★ — 텔레그램은 인용의 인용을 안 주지만 그건 ★남의 API 의 사정★ 이다.
-  //   우리 코드는 캐스팅으로 읽으므로 타입이 재귀를 못 막는다. 틀리면 대가가 ★스택 오버플로 =
-  //   1:1 경로 전체 정지★ 라, 한 겹으로 잘라 둔다(빌 리뷰).
+  // 인용한 사진은 reply_to_message에 있으므로 함께 수집한다. 같은 파일은 file_unique_id로 재사용한다.
+  // 벤더가 중첩 인용을 주지 않더라도 캐스팅된 입력의 재귀를 타입이 막지 못하므로 한 겹으로 제한해 스택 초과를 방지한다.
   const quoted = depth > 0 ? (msg as { reply_to_message?: DmMessageMedia }).reply_to_message : undefined;
   if (quoted) refs.push(...dmMediaRefs(quoted, depth - 1));
   return refs;
@@ -92,20 +76,15 @@ export function isImageMedia(m: Pick<StoredMedia, "kind" | "mime_type" | "file_n
 }
 
 export interface DmAttachments {
-  /** codex 에 ★입력 아이템★ 으로 넣을 그림 경로. 본문에 경로만 적는 것과 다르다 — 이래야 본다. */
+  /** codex 에 입력 아이템 으로 넣을 그림 경로. 본문에 경로만 적는 것과 다르다 — 이래야 본다. */
   imagePaths: string[];
   /** 그림이 아닌 첨부(pdf·zip 등) — 본문에 경로를 적어 필요하면 열게 한다. */
   files: StoredMedia[];
-  /** 내려받기에 실패한 것. ★조용히 지우지 않는다★ — 사람이 보낸 것이 사라지면 안 된다. */
+  /** 내려받기에 실패한 것. 조용히 지우지 않는다 — 사람이 보낸 것이 사라지면 안 된다. */
   failed: Array<{ kind: string; reason: string }>;
 }
 
-/**
- * 첨부를 내려받아 로컬 경로로 만든다.
- *
- * ★한 건이 실패해도 나머지는 간다.★ 그리고 실패는 남긴다 — 사람은 보냈는데 아무 말이 없으면
- * 봤는지 못 봤는지 알 수 없다(그게 이 결함의 원래 모습이었다).
- */
+/** 첨부 한 건의 실패가 다른 첨부를 막지 않도록 격리하며, 실패를 기록해 사람이 보낸 자료가 조용히 사라지지 않게 한다. */
 export async function downloadDmAttachments(
   token: string,
   msg: DmMessageMedia,
@@ -131,14 +110,7 @@ export async function downloadDmAttachments(
   return out;
 }
 
-/**
- * ★내려받기를 시도하되, 어떤 식으로 실패해도 결과를 돌려준다.★
- *
- * 두 경로(새 턴 · 중간 개입)가 ★같은 방어★ 를 쓰게 하려고 여기 둔다.
- * 전에는 중간 개입 쪽만 `.catch(() => null)` 이라 ★첨부가 조용히 사라졌다★ —
- * 사람은 보냈는데 못 봤다는 사실조차 안 남는다. 이 파일이 고치려는 결함과 같은 모양이다.
- * ★문을 두 개 만들었으면 그 둘도 같아야 한다.★
- */
+/** 새 턴과 중간 개입의 첨부 실패 표현을 공유한다. 예외도 결과로 변환해야 전송한 첨부가 말없이 사라지지 않는다. */
 export async function attachmentsOrFailure(load: () => Promise<DmAttachments>): Promise<DmAttachments> {
   try {
     return await load();
@@ -147,7 +119,7 @@ export async function attachmentsOrFailure(load: () => Promise<DmAttachments>): 
   }
 }
 
-/** 내려받기 + 위 방어. 두 경로가 ★이 한 정의★ 를 쓴다. */
+/** 내려받기 + 위 방어. 두 경로가 이 한 정의 를 쓴다. */
 export function downloadDmAttachmentsSafe(
   token: string,
   msg: DmMessageMedia,
@@ -156,12 +128,7 @@ export function downloadDmAttachmentsSafe(
   return attachmentsOrFailure(() => downloadDmAttachments(token, msg, opts));
 }
 
-/**
- * 첨부 사실을 본문에 덧붙인다.
- *
- * 그림은 ★입력 아이템으로 따로 들어가지만★ 본문에도 한 줄 적는다 — 안 적으면 사람이 설명 없이
- * 그림만 보냈을 때 codex 가 무엇을 해달라는 건지 모른다. 문서는 경로가 유일한 통로다.
- */
+/** 이미지는 별도 입력 아이템이지만 설명 없는 첨부의 의도를 알리도록 본문에도 표시한다. 문서는 경로가 모델에 전달되는 유일한 통로다. */
 export function attachmentNote(a: DmAttachments): string {
   const lines: string[] = [];
   if (a.imagePaths.length) {
@@ -182,17 +149,11 @@ export function attachmentNote(a: DmAttachments): string {
 
 /**
  * 첨부만 있고 글이 없을 때 쓸 본문.
- * ★빈 문자열로 두면 안 된다★ — codex 는 할 말이 없는 턴으로 받아 아무것도 안 한다.
+ * 빈 문자열로 두면 안 된다 — codex 는 할 말이 없는 턴으로 받아 아무것도 안 한다.
  */
 export const MEDIA_ONLY_PROMPT = "(설명 없이 첨부만 보냈다. 첨부를 보고 무엇인지 짧게 말하고, 필요한 것을 물어라.)";
 
-/**
- * ★이 메시지를 처리할 것인가, 그리고 codex 에 무슨 말을 줄 것인가.★
- *
- * 이 판단이 원래 폴 루프 안에 `if (!text) continue` 한 줄로 있었다. 그래서
- * ★사진만 보낸 메시지가 통째로 버려졌다★ — 로그에도 안 남아 무시당한 것처럼 보였다.
- * 판단을 밖으로 빼서 시험이 지키게 한다(같은 실수를 오늘 steer 쪽에서도 했다).
- */
+/** 본문이 없어도 첨부가 있으면 처리한다. 순수 함수로 분리해 폴 루프에서 사진 메시지를 건너뛰지 않는지 검증한다. */
 export function decideDmMessage(msg: {
   text?: string;
   caption?: string;
@@ -204,28 +165,21 @@ export function decideDmMessage(msg: {
   document?: DmMessageMedia["document"];
 } | undefined): { handle: boolean; text: string; hasMedia: boolean } {
   const body = dmBodyText(msg?.text, msg?.caption);
-  // ★인용한 원문의 첨부도 "첨부 있음" 으로 센다.★
+  // 인용한 원문의 첨부도 "첨부 있음" 으로 센다.
   //   `dmMediaRefs` 가 인용 첨부를 모으게 고쳤는데도 라이브에서 그림이 안 갔다 — 부르는 쪽이
-  //   ★이 값으로 내려받기를 걸지 말지 정하기 때문★ 이다(`bridge.ts` 의 `fetchAttachments`).
-  //   즉 ★모으는 코드는 고쳤는데 그 앞의 문이 닫혀 있었다.★ 본문에는 "첨부 포함" 이 찍히는데
+  //   이 값으로 내려받기를 걸지 말지 정하기 때문 이다(`bridge.ts` 의 `fetchAttachments`).
+  //   즉 모으는 코드는 고쳤는데 그 앞의 문이 닫혀 있었다. 본문에는 "첨부 포함" 이 찍히는데
   //   파일은 안 받아지는 상태가 그것이다(실측).
   const quoted = msg?.reply_to_message;
   const hasMedia = Boolean(
     msg?.photo?.length || msg?.document || quoted?.photo?.length || quoted?.document,
   );
   if (!body && !hasMedia) return { handle: false, text: "", hasMedia };
-  // ★인용한 앞 메시지를 함께 싣는다★ — 안 실으면 "이게 모야?" 가 무엇에 대한 말인지 알 수 없다.
+  // 인용한 앞 메시지를 함께 싣는다 — 안 실으면 "이게 모야?" 가 무엇에 대한 말인지 알 수 없다.
   return { handle: true, text: withQuotedContext(body ?? MEDIA_ONLY_PROMPT, msg?.reply_to_message), hasMedia };
 }
 
-/**
- * ★인용 답장의 원문을 본문에 붙인다.★
- *
- * 사람이 앞 메시지를 집어서 답하면 텔레그램은 ★새로 친 글자만★ 보낸다.
- * 무엇을 집었는지는 `reply_to_message` 에 따로 온다 — 그걸 안 실으면 dex 는
- * "이게 모야?" 같은 말을 ★무엇에 대한 말인지 모른 채★ 받는다(실측: 팀장님이 dex 자기 답을 인용해
- * 되물었는데 dex 는 그 연결고리를 못 봤다). 그룹방 경로는 이미 같은 형태로 싣고 있다.
- */
+/** 인용 원문은 새 text에 포함되지 않고 reply_to_message에 있으므로 본문에 함께 실어 지시 대상의 맥락을 보존한다. */
 export function withQuotedContext(
   body: string,
   quoted: {
@@ -234,7 +188,7 @@ export function withQuotedContext(
   } | undefined,
 ): string {
   const q = (quoted?.text ?? quoted?.caption ?? "").trim();
-  // ★원문이 사진뿐이어도 인용은 실린다★ — 글자가 없다고 "인용 없음" 으로 처리하면
+  // 원문이 사진뿐이어도 인용은 실린다 — 글자가 없다고 "인용 없음" 으로 처리하면
   //   그 그림이 무엇의 인용인지 사라진다(그림 자체는 dmMediaRefs 가 함께 싣는다).
   const hasMedia = Boolean(quoted?.photo?.length || quoted?.document);
   if (!q && !hasMedia) return body;

@@ -1,18 +1,5 @@
-/**
- * ★브리지의 로컬 bridge window.★ 서버(telegramCapture)가 그룹 턴을 이 bridge window 로 넣는다.
- *
- * 왜 브리지인가 — 다른 런타임과 같은 모양이다. openclaw·hermes 도 서버가 턴을 도는 게 아니라
- * ★런타임을 소유한 프로세스★ 를 부른다(`OPENCLAW_GATEWAY_URL`). codex 에서 그 자리는 브리지다.
- * 서버가 따로 돌리면 `clientPool` 이 ★모듈 전역(프로세스마다 따로)★ 이라 같은 팀원에 app-server
- * 자식이 둘 뜨고, 같은 세션 행을 동시에 resume 한다(`serialTurnQueue` 주석의 그 사고).
- *
- * ★이 bridge window는 자기 폴링을 안 지나는 새 입구다★ — 브리지의 중복 방지(update_id offset)가 여기엔
- * 없다. 그래서 ★messageId 를 멱등키로 여기서 직접 막는다★. 막지 않으면 같은 요청이
- * 두 번 들어올 때 큐가 ★겹치지 않게 하지만 두 번 돌린다★ = dex 가 두 번 답한다.
- *
- * ★202 는 "접수" 지 "답했다" 가 아니다.★ 턴 결과와 배달은 이 응답에 실리지 않는다 —
- * 답은 팀원이 `send.sh` 로 직접 보낸다(서버는 팀원 대신 말하지 않는다).
- */
+/** 팀원 소유 브리지에서 그룹 턴을 받아야 프로세스별 clientPool이 중복 app-server와 동시 resume를 만들지 않는다.
+ * 폴링 offset이 없는 입구이므로 messageId로 멱등 처리한다. 직렬 큐만으로는 중복 실행을 막지 못하며 202는 답이 아닌 접수다. */
 import { createServer, type Server } from "node:http";
 import { timingSafeEqual, randomBytes } from "node:crypto";
 import { writeFileSync, renameSync, rmSync, readFileSync } from "node:fs";
@@ -35,7 +22,7 @@ export interface BridgeWindowRequest {
   kind?: "greeting";
 }
 
-/** bridge window 파일에 적히는 것. ★토큰은 이 파일 밖으로 나가지 않는다★ — 로그·audit·에러에 안 싣는다. */
+/** bridge window 파일에 적히는 것. 토큰은 이 파일 밖으로 나가지 않는다 — 로그·audit·에러에 안 싣는다. */
 export interface BridgeWindowFile {
   port: number;
   token: string;
@@ -50,7 +37,7 @@ export const WINDOW_BODY_LIMIT_BYTES = 256 * 1024;
 export const WINDOW_DEDUPE_TTL_MS = 10 * 60 * 1000;
 
 /**
- * ★파일 경로는 pid 파일 옆이다★ — 브리지가 이미 그 자리에 자기 표식을 쓴다.
+ * 파일 경로는 pid 파일 옆이다 — 브리지가 이미 그 자리에 자기 표식을 쓴다.
  * `CODEX_BRIDGE_PID_FILE` 이 없으면 bridge window 를 열 자리가 없다는 뜻이라 null 을 준다.
  */
 export function windowFilePathFor(pidFile: string | undefined, agentId: string): string | null {
@@ -59,7 +46,7 @@ export function windowFilePathFor(pidFile: string | undefined, agentId: string):
 }
 
 /**
- * ★임시파일 → rename 으로 원자 교체.★ 반쯤 쓰인 파일을 서버가 읽는 일이 없어야 한다.
+ * 임시파일 → rename 으로 원자 교체. 반쯤 쓰인 파일을 서버가 읽는 일이 없어야 한다.
  * 권한은 0600 — 같은 기계의 다른 사용자가 토큰을 읽으면 안 된다.
  */
 export function writeWindowFile(path: string, data: BridgeWindowFile): void {
@@ -68,10 +55,7 @@ export function writeWindowFile(path: string, data: BridgeWindowFile): void {
   renameSync(tmp, path);
 }
 
-/**
- * bridge window 파일을 읽는다. ★부르는 쪽은 매 호출 전에 다시 읽는다★ — 브리지가 재시작하면 포트가
- * 바뀌는데 캐시하고 있으면 ★조용히 안 간다★(리뷰 지적).
- */
+/** 브리지 재시작 때 포트가 바뀌므로 호출마다 window 파일을 다시 읽는다. 캐시하면 종료된 포트로 보내 전달이 누락된다. */
 export function readWindowFile(path: string): BridgeWindowFile | null {
   try {
     const raw = JSON.parse(readFileSync(path, "utf8")) as Partial<BridgeWindowFile>;
@@ -98,8 +82,8 @@ export function tokensMatch(a: string, b: string): boolean {
 }
 
 /**
- * ★요청을 받을지 판정한다.★ 순수 함수라 서버 없이 잴 수 있다.
- * 거절 사유를 문자열로 돌려준다 — ★토큰 값은 절대 담지 않는다.★
+ * 요청을 받을지 판정한다. 순수 함수라 서버 없이 잴 수 있다.
+ * 거절 사유를 문자열로 돌려준다 — 토큰 값은 절대 담지 않는다.
  */
 export function decideWindowRequest(
   req: Partial<BridgeWindowRequest> | null,
@@ -120,14 +104,14 @@ export function decideWindowRequest(
       return { accept: false, status: 400, reason: `missing_${k}` };
     }
   }
-  // ★남의 신원으로 도는 것을 막는다★ — 이 bridge window는 자기 팀원 것만 받는다.
+  // 남의 신원으로 도는 것을 막는다 — 이 bridge window는 자기 팀원 것만 받는다.
   if (req.agentId !== opts.selfAgentId) return { accept: false, status: 403, reason: "agent_mismatch" };
   if (req.kind !== undefined && req.kind !== "greeting") return { accept: false, status: 400, reason: "bad_kind" };
   return { accept: true };
 }
 
 /**
- * ★messageId 로 중복을 막는다.★ 진행중과 최근 완료를 같이 본다 —
+ * messageId 로 중복을 막는다. 진행중과 최근 완료를 같이 본다 —
  * 끝난 직후 다시 오는 재시도도 같은 턴을 두 번 돌리면 안 된다.
  */
 export class WindowDedupe {
@@ -150,7 +134,7 @@ export class WindowDedupe {
 export interface BridgeWindowDeps {
   agentId: string;
   pidFile: string | undefined;
-  /** 턴을 큐에 넣는다. ★기다리지 않는다★ — bridge window 는 접수(202)까지만 책임진다. */
+  /** 턴을 큐에 넣는다. 기다리지 않는다 — bridge window 는 접수(202)까지만 책임진다. */
   enqueue: (req: BridgeWindowRequest) => void;
   log?: (line: string) => void;
   now?: () => number;
@@ -162,7 +146,7 @@ export interface BridgeWindowHandle {
 }
 
 /**
- * bridge window 를 연다. ★127.0.0.1 에만 붙는다★ — 밖에서 이 bridge window에 닿을 수 없어야 한다.
+ * bridge window 를 연다. 127.0.0.1 에만 붙는다 — 밖에서 이 bridge window에 닿을 수 없어야 한다.
  * 열지 못하면 null 을 준다(bridge window 없이도 1:1 은 그대로 돈다 — bridge window 실패가 브리지를 죽이지 않는다).
  */
 export async function startBridgeWindow(deps: BridgeWindowDeps): Promise<BridgeWindowHandle | null> {
@@ -204,19 +188,19 @@ export async function startBridgeWindow(deps: BridgeWindowDeps): Promise<BridgeW
         byteLength: raw.length,
       });
       if (!verdict.accept) {
-        // ★거절 사유는 남기되 토큰은 안 남긴다.★
+        // 거절 사유는 남기되 토큰은 안 남긴다.
         deps.log?.(`[codex-bridge] 창구 거절: ${verdict.reason}`);
         return reject(verdict.status, verdict.reason);
       }
       const body = parsed as BridgeWindowRequest;
       if (!dedupe.admit(body.messageId, now())) {
-        // 이미 받은 것 — ★큐에 두 번 넣지 않는다.★ 200 으로 "이미 접수" 를 알린다.
+        // 이미 받은 것 — 큐에 두 번 넣지 않는다. 200 으로 "이미 접수" 를 알린다.
         deps.log?.(`[codex-bridge] 창구 중복 무시: msg=${body.messageId}`);
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({ ok: true, duplicate: true }));
       }
       deps.enqueue(body);
-      // ★202 = 큐에 넣었다.★ 턴이 끝났다는 뜻도, 답이 갔다는 뜻도 아니다.
+      // 202 = 큐에 넣었다. 턴이 끝났다는 뜻도, 답이 갔다는 뜻도 아니다.
       res.writeHead(202, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true, queued: true }));
     })().catch(() => {
@@ -241,8 +225,8 @@ export async function startBridgeWindow(deps: BridgeWindowDeps): Promise<BridgeW
     return null;
   }
 
-  // ★파일을 못 쓰면 bridge window 를 연 채로 두지 않는다★.
-  //   파일이 없으면 부르는 쪽이 이 포트를 알 수 없으니 ★아무도 못 부르는 리스너★ 가 남는다.
+  // 파일을 못 쓰면 bridge window 를 연 채로 두지 않는다.
+  //   파일이 없으면 부르는 쪽이 이 포트를 알 수 없으니 아무도 못 부르는 리스너 가 남는다.
   //   그런 리스너는 프로세스를 붙잡고 있어 종료도 방해한다. 열었으면 닫고 실패로 돌려준다.
   try {
     writeWindowFile(filePath, { port, token, pid: process.pid, agentId: deps.agentId });
@@ -261,7 +245,7 @@ export async function startBridgeWindow(deps: BridgeWindowDeps): Promise<BridgeW
     port,
     close: () => {
       try {
-        // ★자기 것만 지운다★ — 다른 인스턴스가 이미 덮어썼으면 그건 그쪽 파일이다.
+        // 자기 것만 지운다 — 다른 인스턴스가 이미 덮어썼으면 그건 그쪽 파일이다.
         const cur = readWindowFile(filePath);
         if (cur && cur.pid === process.pid) rmSync(filePath, { force: true });
       } catch {
@@ -276,17 +260,7 @@ export async function startBridgeWindow(deps: BridgeWindowDeps): Promise<BridgeW
   };
 }
 
-/**
- * ★그룹 턴 한 건에 필요한 것을 한 번에 만든다.★
- *
- * 서버는 팀원 대신 말하지 않는다(hermes 와 같은 계약). 그래서 두 가지가 ★항상 같이★ 가야 한다:
- * · 발신을 뗀 deps — 브리지가 텔레그램으로 직접 쏘지 않는다
- * · 답을 보내는 명령이 박힌 본문 — 팀원이 직접 `send.sh` 를 불러야 버스에 남는다
- *
- * ★한쪽만 있는 상태를 만들 수 없게 이 함수 하나만 내보낸다★.
- *   발신만 떼면 ★턴은 돌고 답은 아무 데도 안 간다.★ 본문만 넣으면 ★두 번 답한다.★
- *   시험으로 묶는 것은 약하다 — 새 호출부가 생기면 시험은 통과하면서 한쪽이 빠진다.
- */
+/** 그룹 턴은 자동 발신을 끈 deps와 명시적 답 파일 작성 지침을 함께 만든다. 한쪽만 적용하면 답이 누락되거나 두 번 발신된다. */
 export function groupTurnCall<T extends { sendMessage?: unknown; editMessage?: unknown }>(
   deps: T,
   input: { body: string; threadId: string; messageId: string; replyPath: string },
@@ -295,27 +269,15 @@ export function groupTurnCall<T extends { sendMessage?: unknown; editMessage?: u
 }
 
 /**
- * ★발신을 떼어낸 deps.★ `groupTurnCall` 안에서만 쓴다 — 밖으로 내보내지 않는다.
- * ★리액션은 떼지 않는다★ — "그 팀원이 받았다" 는 사람이 보는 신호이고 발신과 다른 값이다.
+ * 발신을 떼어낸 deps. `groupTurnCall` 안에서만 쓴다 — 밖으로 내보내지 않는다.
+ * 리액션은 떼지 않는다 — "그 팀원이 받았다" 는 사람이 보는 신호이고 발신과 다른 값이다.
  */
 function noAutopostDeps<T extends { sendMessage?: unknown; editMessage?: unknown }>(deps: T): T {
   return { ...deps, sendMessage: async () => null, editMessage: async () => false };
 }
 
-/**
- * ★그룹 턴의 본문 — 답을 ★어디에 쓸지★ 함께 준다.★ `groupTurnCall` 안에서만 쓴다.
- *
- * ★셸 명령을 시키지 않는다 — 답이 명령 문자열에 안 들어가게 하려는 것이다.★
- *   들어가면 heredoc·따옴표·백틱·종료자가 해석돼 본문이 훼손되거나 명령이 깨진다.
- *   파일에 쓰게 하면 그 부류가 통째로 사라진다.
- *
- * ★승인은 지금 이 판단의 근거가 아니다★ — 실행 정책이 "never" 라 셸을 태워도 팝업이 안 생긴다
- *   (appServerRunner.ts). 과거 "on-request" 였을 때는 셸 실행마다 팝업이 오너 DM 으로 갔고
- *   아무도 안 누르면 300초 뒤 만료되며 턴이 끝났다(실측). 그때가 이 설계를 만든 계기였지만
- *   ★지금 유지하는 이유는 인용이지 승인이 아니다.★ 판단 경위는 `groupOutbox.ts` 머리말에 있다.
- *
- * ★경로는 이 턴 전용이다★ — 고정 경로면 이번 턴이 안 썼을 때 ★직전 답이 다시 나간다.★
- */
+/** 답 본문은 셸 명령에 넣지 않고 파일로 쓰게 해 따옴표·백틱·heredoc 종료자가 해석되지 않게 한다.
+ * 현재 never는 셸에도 승인창이 없으므로 이 선택의 근거는 승인 회피가 아니라 본문 인용의 보존이다. */
 function groupTurnBody(input: {
   body: string;
   threadId: string;

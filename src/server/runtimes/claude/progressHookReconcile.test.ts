@@ -1,12 +1,4 @@
-/**
- * progress 훅 배선을 ★낡은 채로 두지 않는다.★
- *
- * 예전 구현은 settings.json 에 `telegram-progress.py` 가 있으면 통째로 skip 했다. 그래서
- * 훅 ★파일★ 은 새것으로 덮이는데 ★커맨드★ 는 옛것이 남았다 — 그 상태로 `B3OS_ROOT` 가 안 실려
- * owner-skip 이 fail-open 으로 돌았다. 파일만 고치고 배선을 안 고치면 같은 일이 반복된다.
- *
- * ★실 FS 격리★: mkdtemp 임시 dir 만 만진다(roots 이음매로 주입). 실 멤버 폴더는 안 건드린다.
- */
+/** 파일과 커맨드를 함께 갱신해야 B3OS_ROOT 같은 필수 env가 빠진 배선을 남기지 않는다. roots를 tmp로 주입해 실제 멤버 폴더를 보호한다. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -59,7 +51,7 @@ describe("progress 훅 배선 reconcile", () => {
     installProgressHook(ID, { membersRoot, repoRoot });
 
     const cmds = commandsIn(settingsPath);
-    // ★3 → 4.★ react(UserPromptSubmit)가 멤버 스코프로 들어오면서 하나 늘었다(의도된 계약 변경).
+    // 3 → 4. react(UserPromptSubmit)가 멤버 스코프로 들어오면서 하나 늘었다(의도된 계약 변경).
     expect(cmds).toHaveLength(4);
     expect(cmds.filter((c) => c.endsWith(" react"))).toHaveLength(1);
     for (const c of cmds) expect(c).toContain(`B3OS_ROOT="${repoRoot}"`);
@@ -99,7 +91,7 @@ describe("progress 훅 배선 reconcile", () => {
 });
 
 describe("reply-guard 훅 파일 수리", () => {
-  /** reply-guard 는 커맨드가 `python3 "<경로>"` 뿐이라 ★배선은 안 낡고 파일만 낡는다.★ */
+  /** reply-guard 는 커맨드가 `python3 "<경로>"` 뿐이라 배선은 안 낡고 파일만 낡는다. */
   function setupGuard(settings?: unknown): { membersRoot: string; repoRoot: string; hookPath: string } {
     const base = mkdtempSync(join(tmpdir(), "b3os-guard-repair-"));
     dirs.push(base);
@@ -154,9 +146,9 @@ describe("owner-gate 훅 설치·수리", () => {
       .flatMap((e) => e.hooks.map((h) => h.command));
     expect(cmds).toHaveLength(1);
     expect(cmds[0]).toContain("telegram-owner-gate.py");
-    // ★B3OS_ROOT 가 실려야 한다★ — 없으면 깔려도 게이트가 무력화된다.
+    // B3OS_ROOT 가 실려야 한다 — 없으면 깔려도 게이트가 무력화된다.
     expect(cmds[0]).toContain(`B3OS_ROOT="${repoRoot}"`);
-    // ★자기 id 도 실려야 한다★ — 없으면 훅이 추측하고, 틀리면 게이트가 반대로 돈다.
+    // 자기 id 도 실려야 한다 — 없으면 훅이 추측하고, 틀리면 게이트가 반대로 돈다.
     expect(cmds[0]).toContain(`OWNER_GATE_SELF="${ID}"`);
     expect(readFileSync(hookPath, "utf-8")).toBe("# NEW\n");
   });
@@ -182,7 +174,7 @@ describe("owner-gate 훅 설치·수리", () => {
   });
 
   test("★ensure 는 안 깔린 멤버에도 새로 깐다★ — 이게 progress·reply-guard 와 반대인 지점이다", () => {
-    // "이미 배선된 멤버만" 으로 두면 ★아무도 없으니 전원 건너뛰어 효과가 0★ 이 된다(실측으로 확인됨).
+    // "이미 배선된 멤버만" 으로 두면 아무도 없으니 전원 건너뛰어 효과가 0 이 된다(실측으로 확인됨).
     const { membersRoot, repoRoot, settingsPath, hookPath } = setupGate({ hooks: {} });
     ensureOwnerGateHook(ID, { membersRoot, repoRoot });
     expect(readFileSync(settingsPath, "utf-8")).toContain("telegram-owner-gate.py");
@@ -217,7 +209,7 @@ describe("react 배선을 멤버 스코프로", () => {
     const react = upsCommands(settingsPath).filter((c) => c.includes("telegram-progress.py"));
     expect(react).toHaveLength(1);
     expect(react[0]).toMatch(/telegram-progress\.py" react$/);
-    // ★self 가 실려야 한다★ — react 는 owner 판정을 한다. 유추가 틀리면 남의 이름으로 판정한다.
+    // self 가 실려야 한다 — react 는 owner 판정을 한다. 유추가 틀리면 남의 이름으로 판정한다.
     expect(react[0]).toContain(`OWNER_GATE_SELF="${ID}"`);
     expect(react[0]).toContain(`B3OS_ROOT="${repoRoot}"`);
   });

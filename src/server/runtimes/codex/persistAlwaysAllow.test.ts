@@ -1,7 +1,4 @@
-// ★'항상 허용' 은 codex 설정 파일에 쓴다★
-//
-// 전에는 우리 DB(permission_grant)에 넣었다 — 영구·내용무관·★취소 경로가 코드에 없었다.★
-// 설정 파일이면 사람이 열어서 지울 수 있다. 되돌리는 방법이 파일 편집이다.
+// 지속 허용은 사람이 열어 보고 취소할 수 있는 Codex 설정 파일로 기록한다. 복원은 해당 설정 항목 편집으로 한다.
 import { describe, test, expect } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,7 +18,7 @@ test("★허용한 경로가 설정에 남는다★ — 다음부터 안 묻는�
   const r = addWritableRoot(p, "/data/proj/file.txt");
   expect(r.changed).toBe(true);
   expect(r.root).toBe("/data/proj"); // 파일이 아니라 그 폴더를 연다
-  expect(roots(readFileSync(p, "utf-8"))).toEqual(["/w", "/data/proj"]); // ★기존 것을 지우지 않는다★
+  expect(roots(readFileSync(p, "utf-8"))).toEqual(["/w", "/data/proj"]); // 기존 것을 지우지 않는다
 });
 
 test("두 번 눌러도 중복으로 쌓이지 않는다", () => {
@@ -38,7 +35,7 @@ test("writable_roots 가 없던 설정에도 붙는다", () => {
   const text = readFileSync(p, "utf-8");
   expect(roots(text)).toEqual(["/data"]);
   expect(text).toContain("[sandbox_workspace_write]");
-  expect(text).toContain('sandbox_mode = "workspace-write"'); // ★기존 설정을 날리지 않는다★
+  expect(text).toContain('sandbox_mode = "workspace-write"'); // 기존 설정을 날리지 않는다
 });
 
 test("공백·특수문자 경로도 그대로 살아난다", () => {

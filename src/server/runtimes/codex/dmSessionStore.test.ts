@@ -27,7 +27,7 @@ describe("1:1 세션 기억 — 재시작 연속성", () => {
     const before = makeDmSessionStore("dex", dbPath);
     before.save(7066867819, "sess-abc");
 
-    // ★재시작★ — 새 프로세스가 뜬 상황(인메모리 지도는 비어 있다)
+    // 재시작 — 새 프로세스가 뜬 상황(인메모리 지도는 비어 있다)
     const after = makeDmSessionStore("dex", dbPath);
     expect(after.get(7066867819)).toBe("sess-abc");
   });
@@ -92,10 +92,7 @@ describe("1:1 세션 기억 — 재시작 연속성", () => {
   });
 });
 
-// ── ★그룹과 1:1 은 다른 surface 로 적힌다★ (2026-08-24) ──
-//
-// 섞어도 chatId 가 달라 충돌은 안 나지만 ★이름이 거짓말★ 이 된다. 6.8 을 재는 판별자
-// (`created_at` 보존)도 두 대화가 한 이름에 섞이면 못 쓰게 된다.
+// 그룹과 DM은 surface를 구분해 대화 종류와 세션 생성 시각의 판정이 섞이지 않게 한다.
 import { makeChatSessionStore, GROUP_SURFACE } from "./dmSessionStore";
 
 describe("makeChatSessionStore — chatId 부호로 surface 를 고른다", () => {
