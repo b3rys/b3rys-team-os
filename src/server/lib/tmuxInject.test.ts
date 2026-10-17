@@ -312,3 +312,18 @@ describe("Korean runtime loading templates", () => {
     }
   });
 });
+
+
+test("Slack reply instructions specify the current message and automatic mention", () => {
+  for (const locale of ["ko", "en"] as const) {
+    const prompt = buildTmuxInjectionPrompt({
+      session: "test", fromLabel: "slack-author", threadId: "slack-thread",
+      messageId: "current-slack-message", inReplyTo: "older-message", hopCount: 1,
+      body: "question", source: "slack", kind: "slack", agentId: "demo", locale,
+    });
+    expect(prompt).toContain("--to broadcast --thread slack-thread --in-reply-to current-slack-message");
+    expect(prompt).not.toContain("in_reply_to=older-message");
+    expect(prompt).toContain("in_reply_to=current-slack-message");
+    expect(prompt).toContain(locale === "ko" ? "자동 멘션" : "mentioned automatically");
+  }
+});

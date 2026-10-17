@@ -151,8 +151,8 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
   const owner = pick(locale, "팀장", "the team lead");
   const hopInstruction = opts.hopCount !== undefined
     ? pick(locale,
-        ` 버스 응답에는 in_reply_to=${opts.inReplyTo ?? opts.messageId}, hop_count=${currentHop} 필수(루프방지).`,
-        ` Bus replies MUST include in_reply_to=${opts.inReplyTo ?? opts.messageId}, hop_count=${currentHop} (loop prevention).`)
+        ` 버스 응답에는 in_reply_to=${opts.kind === "slack" ? opts.messageId : opts.inReplyTo ?? opts.messageId}, hop_count=${currentHop} 필수(루프방지).`,
+        ` Bus replies MUST include in_reply_to=${opts.kind === "slack" ? opts.messageId : opts.inReplyTo ?? opts.messageId}, hop_count=${currentHop} (loop prevention).`)
     : "";
 
   const replyInstruction = opts.directReport
@@ -174,6 +174,12 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
         `A message arrived in this group room. This room's thread is thread="${opts.threadId}".` +
         hopInstruction +
         ` If ambiguous, ask ${owner}.`)
+    : opts.kind === "slack"
+    ? pick(locale,
+        `Slack 원글에 답하려면 --to broadcast --thread ${opts.threadId} --in-reply-to ${opts.messageId} 로 보내세요. ` +
+        `원글 작성자는 자동 멘션되며, Slack 게시 실패는 전송 실패로 반환됩니다.` + hopInstruction,
+        `To reply to the Slack message, use --to broadcast --thread ${opts.threadId} --in-reply-to ${opts.messageId}. ` +
+        `The original author is mentioned automatically; a Slack posting failure is returned as a send failure.` + hopInstruction)
     : pick(locale,
         `처리할 작업이면 이 thread에 응답하세요 ` +
         `(thread=${opts.threadId}, in-reply-to=${opts.inReplyTo ?? opts.messageId}).` +
