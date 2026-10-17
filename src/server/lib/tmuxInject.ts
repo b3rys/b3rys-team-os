@@ -151,8 +151,8 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
   const owner = pick(locale, "팀장", "the team lead");
   const hopInstruction = opts.hopCount !== undefined
     ? pick(locale,
-        ` 버스 응답에는 in_reply_to=${opts.inReplyTo ?? opts.messageId}, hop_count=${currentHop} 필수(루프방지).`,
-        ` Bus replies MUST include in_reply_to=${opts.inReplyTo ?? opts.messageId}, hop_count=${currentHop} (loop prevention).`)
+        ` 버스 응답에는 in_reply_to=${opts.kind === "slack" ? opts.messageId : opts.inReplyTo ?? opts.messageId}, hop_count=${currentHop} 필수(루프방지).`,
+        ` Bus replies MUST include in_reply_to=${opts.kind === "slack" ? opts.messageId : opts.inReplyTo ?? opts.messageId}, hop_count=${currentHop} (loop prevention).`)
     : "";
 
   const replyInstruction = opts.directReport
