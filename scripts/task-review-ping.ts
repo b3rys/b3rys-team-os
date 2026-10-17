@@ -3,10 +3,10 @@
 // 실행중(doing)/계획(plan) 과제가 있는 오너에게만 버스 directed 메시지를 보내 칸반 점검을 유도한다.
 // 기본모드 continuation guard: 실행중 과제는 다음 액션/재개 시각/fallback/stop_rule을 description에 남긴다.
 // 실제 정리할 항목이 없으면 수정·보고하지 않는다(강제 X).
-// 텔레그램 발신이 아니라 버스 wake(에이전트 깨우기) — 토큰 불필요. 스케줄: launchd com.you.team-task-review, 매일 05:00 KST.
+// 예약 작업 task-review-ping이 평일 06:00에 실행하며, 한국 공휴일에는 건너뛴다.
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
+import { join, dirname } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
 const REGISTRY_PATH = process.env.TEAM_AGENT_REGISTRY ?? join(ROOT, "agents.json");
@@ -26,6 +26,7 @@ interface Task {
   column: "plan" | "doing" | "done";
   description: string | null;
   held_at?: string | null;
+  updated_at?: string;
 }
 
 interface Agent {
@@ -40,6 +41,23 @@ export function activeReviewOwners(tasks: Task[], reviewOwners: string[]): strin
       .filter((t) => !t.held_at && t.column !== "done" && t.owner && allowed.has(t.owner))
       .map((t) => t.owner!),
   )];
+}
+
+export interface ReviewState {
+  fingerprint: string;
+  unchanged: boolean;
+  lastSentAt: number;
+}
+
+export function reviewDecision(tasks: Task[], previous: ReviewState | undefined, now: number): {
+  send: boolean; next: ReviewState;
+} {
+  const fingerprint = JSON.stringify(tasks.map((t) => [t.id, t.column, t.updated_at ?? null]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
+  const unchanged = previous?.fingerprint === fingerprint;
+  const weekly = !previous || now - previous.lastSentAt >= 7 * 24 * 3600_000;
+  // Unknown update timestamps cannot establish that the cards stayed unchanged.
+  const send = tasks.some((t) => !t.updated_at) || !unchanged || !previous?.unchanged || weekly;
+  return { send, next: { fingerprint, unchanged, lastSentAt: previous?.lastSentAt ?? 0 } };
 }
 
 export function reviewBody(owner: string, g: { doing: Task[]; plan: Task[] }): string {
@@ -117,10 +135,26 @@ async function main(): Promise<void> {
 
   // active(plan/doing) 카드가 있는 owner만 핑한다. 신규/빈 칸반은 정상 no-op이다.
   // owner 없는 카드는 누구에게도 핑하지 않는다. blocked badge는 lane이 plan/doing이면 active다.
+  const statePath = join(ROOT, "var", "task-review-ping-state.json");
+  let state: Record<string, ReviewState> = {};
+  try {
+    const parsed = JSON.parse(readFileSync(statePath, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid review state");
+    state = parsed;
+  }
+  catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") console.error("review state read fallback:", String(e));
+  }
+  const now = Date.now();
   let sent = 0;
   const activeOwners = activeReviewOwners(tasks, reviewOwners);
   for (const owner of activeOwners) {
     const g = byOwner.get(owner)!;
+    const decision = reviewDecision([...g.doing, ...g.plan], state[owner], now);
+    if (!decision.send) {
+      if (!process.env.DRY_RUN) state[owner] = decision.next;
+      continue;
+    }
     const body = reviewBody(owner, g);
     if (process.env.DRY_RUN) {
       console.log(`[DRY] → ${owner} (doing ${g.doing.length}, plan ${g.plan.length}): ${body.replace(/\n/g, " ").slice(0, 90)}…`);
@@ -143,11 +177,20 @@ async function main(): Promise<void> {
     });
     const j = (await r.json()) as { ok?: boolean };
     if (j.ok) {
+      state[owner] = { ...decision.next, lastSentAt: now };
       sent++;
       console.log(`✓ review ping → ${owner} (doing ${g.doing.length}, plan ${g.plan.length})`);
     } else {
       console.error(`✗ ping failed → ${owner}: ${JSON.stringify(j)}`);
     }
+  }
+  if (!process.env.DRY_RUN) {
+    const active = new Set(activeOwners);
+    state = Object.fromEntries(Object.entries(state).filter(([owner]) => active.has(owner)));
+    mkdirSync(dirname(statePath), { recursive: true });
+    const tmp = `${statePath}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(state, null, 2));
+    renameSync(tmp, statePath);
   }
   console.log(`done: ${sent}/${activeOwners.length} active owners pinged (${reviewOwners.length - activeOwners.length} inactive skipped)`);
 }

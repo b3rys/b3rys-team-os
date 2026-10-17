@@ -43,6 +43,13 @@ jobs:
       - name: 이식성 검사
         run: bun test scripts/check-portability.test.ts && bun scripts/check-portability.ts
 
+      - name: 알림 억제 규칙 검사
+        run: >-
+          bun test scripts/task-continuation-guard.test.ts scripts/task-review-ping.test.ts
+          src/server/bus/followupTracker.test.ts src/server/bus/collectionDeadline.test.ts
+          src/server/lib/opNotice.test.ts src/server/scheduler/core.test.ts
+          src/server/bus/wakeDispatcher.characterization.test.ts src/server/bus/blockNotice.test.ts
+
       - name: 타입체크
         run: bunx tsc --noEmit
 

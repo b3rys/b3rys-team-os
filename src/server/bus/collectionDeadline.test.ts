@@ -678,3 +678,16 @@ it("★44자 경계에 이모지가 걸려도 반쪽 문자가 안 남는다★"
   expect(lone).toHaveLength(0);
   expect(t).toContain("😀");                           // 이모지는 통째로 살아남는다
 });
+
+it("수집자가 기여자 주소로 direct_to_gd 보고했어도 수집 마감 알림은 억제한다", () => {
+ const d=db0();
+ msg(d,"report-scope","bill","steve",22);
+ msg(d,"report-scope","steve","demis",20);
+ msg(d,"report-scope","steve","hermes",20);
+ expect(findStalledCollections(d,AGENTS)).toHaveLength(1);
+ msg(d,"other-thread","steve","demis",18,"direct_to_gd");
+ expect(findStalledCollections(d,AGENTS)).toHaveLength(1);
+ msg(d,"report-scope","steve","demis",18,"direct_to_gd");
+ expect(findStalledCollections(d,AGENTS)).toHaveLength(0);
+ d.close();
+});

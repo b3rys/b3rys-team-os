@@ -1,3 +1,4 @@
+import { insertMessage } from "../db/inbox/messages";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1072,4 +1073,26 @@ describe("늦은 깨움은 봉투에 사실로 실린다", () => {
     // 원래 목적은 그대로 남아 있어야 한다(문장을 지우다 과제까지 지우지 않았는지)
     expect(body).toContain("POST /team/api/proposals");
   });
+});
+
+describe("expect-report 발신 직전 보고 확인", () => {
+ for (const route of ["none","requester","direct","other-thread","old","ack","contributor"] as const) {
+  test(`${route}: 같은 작업의 실제 보고만 리마인더를 억제한다`, async () => {
+   const d=db();
+   d.run("INSERT INTO thread(id,title,kind,participants_json,opened_by) VALUES('work','w','dm','[]','bill'),('other','o','dm','[]','bill')");
+   const request = insertMessage(d,{thread_id:"work",from_agent_id:"bill",to_agent_id:"dex",type:"dm",body:"보고해 주세요",source:"agent",hop_count:0,priority:"normal"});
+   d.run("UPDATE message SET created_at='2000-01-01 00:00:00'");
+   const job=scheduleReminder(d,{targetAgentId:"dex",createdBy:"dex",runAt:new Date("2000-01-01T00:10:00Z"),title:"expect-report work",body:"보고했으면 아무것도 하지 않는다."});
+   d.run("UPDATE scheduled_job SET created_at='2000-01-01 00:00:01' WHERE id=?",[job.id]);
+   if(route!=="none") {
+    const m=insertMessage(d,{thread_id:route==="other-thread"?"other":"work",from_agent_id:"dex",to_agent_id:route==="contributor"?"steve":"bill",type:"dm",body:route==="ack"?"네":"검증 완료. 4건 통과했습니다.",source:"agent",hop_count:0,priority:"normal",in_reply_to:route==="contributor"?undefined:request.id,...(route==="direct"?{meta:{reply_mode:"direct_to_gd"}}:{})});
+    d.run("UPDATE message SET created_at=? WHERE id=?",[route==="old"?"2000-01-01 00:00:00":"2000-01-01 00:00:02",m.id]);
+   }
+   const result=await runDueSchedulerJobsOnce(d,{now:new Date("2000-01-01T00:10:00Z")});
+   const suppressed=route==="requester"||route==="direct";
+   expect(result[0]?.status).toBe(suppressed?"skipped":"succeeded");
+   expect((d.query("SELECT count(*) AS n FROM message WHERE from_agent_id='system'").get() as {n:number}).n).toBe(suppressed?0:1);
+   d.close();
+  });
+ }
 });

@@ -42,7 +42,7 @@ interface Agent {
   team_official_member?: boolean;
 }
 
-type State = Record<string, string>; // cardId -> 마지막 핑 ISO(UTC)
+type State = Record<string, string | { notifiedAt: string; observedUpdatedAt: string }>;
 
 // 저장소 관행은 "2026-07-24 13:31:36" (UTC, 표시자 없음) 이다.
 //
@@ -97,16 +97,19 @@ export function stalledDoingCards(tasks: Task[], owners: Set<string>, nowMs: num
   });
 }
 
-// 재핑 정책 = ★에피소드당 1회★. 방치 카드를 주기마다 영구 나그하지 않는다 — continuation-guard 는 "카드가 막
-// 조용해진 순간"만 잡고, 상시 리마인드는 일일 task-review-ping 이 담당(중복 나그 방지). 핑 대상:
-//   ① 이번 실행서 처음 stall 로 관측된 카드(state 에 없음), 또는
-//   ② 마지막 핑 이후 owner 가 손댔다가(updated_at 갱신) 다시 stall 된 카드(새 에피소드).
-// 손 안 댄 방치 카드는 최초 1회만 핑하고 조용해진다(updated_at ≤ 마지막 핑시각).
+// A changed card skips one observation cycle before it can start another stalled episode.
+// String entries from older state files remain valid last-notification timestamps.
 export function dueCards(stalled: Task[], state: State): Task[] {
   return stalled.filter((t) => {
-    const last = state[t.id] ? Date.parse(state[t.id]) : 0;
-    if (!last) return true;                     // 이번 실행서 처음 stall 로 관측된 카드
-    return parseUtc(t.updated_at, 0) > last;    // 마지막 핑 이후 손댔다 다시 stall = 새 에피소드(파싱실패=0=재핑 안 함)
+    const entry = state[t.id];
+    const last = entry ? Date.parse(typeof entry === "string" ? entry : entry.notifiedAt) : 0;
+    if (!last) return true;
+    if (parseUtc(t.updated_at, 0) <= last) return false;
+    if (typeof entry === "string" || entry.observedUpdatedAt !== t.updated_at) {
+      state[t.id] = { notifiedAt: new Date(last).toISOString(), observedUpdatedAt: t.updated_at };
+      return false;
+    }
+    return true;
   });
 }
 
@@ -152,7 +155,7 @@ function loadState(): State {
   return {};
 }
 
-// 현재 멈춘 카드 id 만 남겨 상태파일이 무한히 커지지 않게 정리한다(done/삭제된 카드 엔트리 제거).
+// Keep doing-card history across recent updates; drop completed, held, or removed cards.
 function saveState(state: State, liveIds: Set<string>): void {
   const pruned: State = {};
   for (const [id, ts] of Object.entries(state)) if (liveIds.has(id)) pruned[id] = ts;
@@ -218,7 +221,7 @@ async function main(): Promise<void> {
     sent++;
   }
 
-  if (!process.env.DRY_RUN) saveState(state, new Set(stalled.map((t) => t.id)));
+  if (!process.env.DRY_RUN) saveState(state, new Set(tasks.filter((t) => t.column === "doing" && !t.held_at).map((t) => t.id)));
   console.log(
     `done: ${sent} owner(s) pinged · stalled=${stalled.length} due=${due.length} ` +
       `(stall>${STALL_MIN}m, 에피소드당 1회)`,
