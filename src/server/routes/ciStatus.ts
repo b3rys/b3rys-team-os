@@ -1,4 +1,5 @@
 // 대시보드는 파일·DB를 바꾸는 테스트를 실행하지 않고 공개 저장소의 CI 결과만 읽는다.
+// 공개 CI는 인증 없이 읽을 수 있으므로 서버에 토큰을 두어 유출 경로를 늘리지 않는다.
 // 미인증 API 한도는 5분 캐시·진행 중 요청 공유·리셋 전 요청 차단으로 지키며, 조회 실패는 ok:false로 반환한다.
 import { Hono } from "hono";
 import { readFileSync } from "node:fs";
