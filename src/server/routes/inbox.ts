@@ -342,7 +342,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     const slackThread = slackMetaForGate ?? findSlackMetaForThread(deps.db, stored.thread_id);
     if (env.source === "agent" && env.from_agent_id !== "user" && env.from_agent_id !== "system") {
       const slackMeta = slackThread;
-      if (slackMeta) {
+      if (slackMeta && stored.to_agent_id === "broadcast" && env.meta?.reply_mode !== "direct_to_gd") {
         try {
           const creds = loadAgentCreds(env.from_agent_id);
           if (!creds) throw new Error("slack_credentials_missing");

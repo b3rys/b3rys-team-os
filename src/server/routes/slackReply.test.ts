@@ -10,6 +10,6 @@ test("Slack reply route and send.sh integration", async () => {
     new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited,
   ]);
   expect(code, `${out}\n${err}`).toBe(0);
-  expect(err).toContain("14 pass");
+  expect(err).toContain("16 pass");
   expect(err).toContain("0 fail");
 });

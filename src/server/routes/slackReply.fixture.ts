@@ -18,9 +18,12 @@ let release: (() => void) | undefined;
 const originalSlack = channelRegistry.get("slack")!;
 const originalTelegram = channelRegistry.get("telegram")!;
 let oldTokens: string | undefined;
+let oldAudit: string | undefined;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "slack-reply-"));
+  oldAudit = process.env.B3OS_AUDIT_LOG_DIR;
+  process.env.B3OS_AUDIT_LOG_DIR = join(dir, "audit");
   oldTokens = process.env.SLACK_TOKENS_DIR;
   process.env.SLACK_TOKENS_DIR = dir;
   writeFileSync(join(dir, "bill.env"), "SLACK_BOT_TOKEN=mock-only\n");
@@ -47,6 +50,8 @@ afterEach(() => {
   channelRegistry.set("telegram", originalTelegram);
   if (oldTokens === undefined) delete process.env.SLACK_TOKENS_DIR;
   else process.env.SLACK_TOKENS_DIR = oldTokens;
+  if (oldAudit === undefined) delete process.env.B3OS_AUDIT_LOG_DIR;
+  else process.env.B3OS_AUDIT_LOG_DIR = oldAudit;
   db.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -184,3 +189,25 @@ for (const ok of [true, false]) {
     } finally { server.stop(true); }
   });
 }
+
+
+test("explicit direct_to_gd report keeps its DM destination", async () => {
+  db.run("INSERT INTO setting (key, value) VALUES ('owner_chat_id', 'mock-owner-dm')");
+  const telegram: SendRequest[] = [];
+  channelRegistry.set("telegram", { ...originalTelegram, async send(req) {
+    telegram.push(req);
+    return { ok: true };
+  }});
+  const res = await post(reply(parent(), { meta: { reply_mode: "direct_to_gd" } }));
+  expect(res.status).toBe(201);
+  expect(sent).toHaveLength(0);
+  expect(telegram).toHaveLength(1);
+  expect(telegram[0]?.target).toBe("mock-owner-dm");
+});
+
+
+test("private bus reply referencing Slack is not publicly posted", async () => {
+  const res = await post(reply(parent(), { to_agent_id: "user", thread_id: "private-bus" }));
+  expect(res.status).toBe(201);
+  expect(sent).toHaveLength(0);
+});
