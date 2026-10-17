@@ -1,7 +1,4 @@
-// 모니터링 탭 데이터소스 — 새 probe 0, 기존 소스만.
-//   ① bot-liveness 상태: durable repo-local log 파싱(runs·마지막실행·정상여부·결과문구)
-//   ② dm_message health: team.db 집계(dm-monitor.sh 로직 이식)
-// ★방어적(Bill 요청): 로그 파일 없거나 형식 바뀌어도 크래시 X — 전부 try/catch + 안전 기본값.★
+// 모니터링 로그는 없거나 형식이 바뀔 수 있어 읽기 실패 시 화면 전체를 중단하지 않고 안전한 기본값을 반환한다.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -22,11 +19,7 @@ export interface LivenessStatus {
   logMtime: string | null; // 로그 파일 mtime(ISO)
 }
 
-// ★스크립트가 내는 status 값은 전부 여기 있어야 한다★
-//   허용목록에 없으면 아래 한국어 휴리스틱으로 떨어진다. 그건 판정이 아니라 추측이다.
-//   실제로 `reset`·`skipped` 가 목록 밖이라 계속 그렇게 돌고 있었고, `issues-unreported` 는
-//   하이픈이 단어경계라 `issues` 로 ★우연히★ 맞았다 — `issuesUnreported` 였으면 조용히 샜다.
-//   scripts/bot-liveness-monitor.sh 의 finish_status 값과 이 목록은 테스트로 묶여 있다.
+// 허용목록 밖 상태는 휴리스틱으로 판정되므로 스크립트의 finish_status 값을 빠짐없이 포함해야 한다.
 const STATUS_HEALTHY = ["ok", "healthy", "healed", "healed-unreported"] as const;
 const STATUS_UNHEALTHY = ["issues", "issues-unreported", "failed", "error", "down", "unhealthy"] as const;
 // 판정하지 않는 상태 — "정상"도 "이상"도 아니다. 부팅 유예처럼 검사 자체를 건너뛴 경우다.

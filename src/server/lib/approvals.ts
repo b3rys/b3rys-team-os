@@ -1,12 +1,4 @@
-// 승인 큐 — GD 승인이 필요한 권한 액션을 모아 PIN 승인으로 실행(터미널 0). (2026-06-10 GD)
-//
-// 보안 모델:
-//  - 액션은 **미리 정의된 안전 셋(ACTIONS)만**. 임의 명령 enqueue/실행 불가.
-//  - 승인에는 **6자리 admin PIN**(해시 저장, rate-limit)이 필요 → 채널 인젝션이 PIN을 모르면 승인 불가.
-//  - **실행(executeApproval)은 1단계에서 OFF**. APPROVAL_EXECUTION_ENABLED=1 일 때만 켜짐(2단계).
-//    실행 = 신뢰 경계가 "터미널 직접"→"PIN 인증 서버 실행"으로 이동하는 부분이라 명시 opt-in.
-//
-// blast radius: 이 파일 + routes/approvals.ts + telegramCapture /menu. message/agent 테이블 무관.
+// 액션은 ACTIONS에 정의된 집합으로 제한한다. PIN 승인과 별도로 APPROVAL_EXECUTION_ENABLED=1이 있어야 서버가 실행한다.
 
 import type { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
@@ -27,13 +19,13 @@ export interface ApprovalAction {
   run?: { cmd: string[]; env?: (params: Record<string, string>) => Record<string, string> };
   /** 필요한 파라미터 힌트(검증·UI용). */
   paramHints?: string[];
-  /** true 면 전역 실행 OFF 여도 승인 탭 시 즉시 실행(액션별 opt-in). ★저위험만★.
+  /** true 면 전역 실행 OFF 여도 승인 탭 시 즉시 실행(액션별 opt-in). 저위험만.
    *  고위험 액션은 false 유지 — 탭=승인만, 실행은 별도(least privilege). 현재 이걸 켠 액션은 없다. */
   autoExec?: boolean;
-  /** ★실행에 반드시 있어야 하는 파일★(repo 루트 상대경로 또는 절대경로).
-   *  하나라도 없으면 이 액션은 큐에 ★제시되지 않고 enqueue 도 거부★된다 — "눌러도 실패하는 버튼"을
+  /** 실행에 반드시 있어야 하는 파일(repo 루트 상대경로 또는 절대경로).
+   *  하나라도 없으면 이 액션은 큐에 제시되지 않고 enqueue 도 거부된다 — "눌러도 실패하는 버튼"을
    *  계속 보여주지 않기 위해서다. 액션 정의(키) 자체는 남긴다: 지우면 되살릴 때 설계를 다시
-   *  해야 하지만, 제시 차단은 ★파일이 생기면 저절로 풀린다★(호출 시점 검사).
+   *  해야 하지만, 제시 차단은 파일이 생기면 저절로 풀린다(호출 시점 검사).
    *  cmd 문자열을 파싱하지 않고 여기 명시하는 이유 = 쉘 문자열 파싱은 조용히 틀리기 때문. */
   requiresFiles?: string[];
 }
@@ -43,7 +35,7 @@ function approvalsRepoRoot(): string {
   return process.env.TEAM_COLLAB_DIR ?? join(process.env.HOME ?? "", "Development/b3rys-team-os");
 }
 
-/** 없는 필수 파일 목록(빈 배열 = 실행 가능). ★호출 시점★ 에 본다 — 파일이 생기면 즉시 반영된다. */
+/** 없는 필수 파일 목록(빈 배열 = 실행 가능). 호출 시점 에 본다 — 파일이 생기면 즉시 반영된다. */
 export function missingRequirements(action: ApprovalAction): string[] {
   const root = approvalsRepoRoot();
   return (action.requiresFiles ?? []).filter((p) => !existsSync(isAbsolute(p) ? p : join(root, p)));
@@ -99,12 +91,12 @@ export const ACTIONS: Record<string, ApprovalAction> = {
   },
 };
 
-/** ★실행 가능한 액션만★ 반환 — 승인 큐·메뉴·API 가 이걸 쓴다(눌러도 실패하는 걸 안 보여준다). */
+/** 실행 가능한 액션만 반환 — 승인 큐·메뉴·API 가 이걸 쓴다(눌러도 실패하는 걸 안 보여준다). */
 export function listActions(): ApprovalAction[] {
   return Object.values(ACTIONS).filter(isActionAvailable);
 }
 
-/** 필수 파일이 없어 ★지금은 제시되지 않는★ 액션 + 그 이유. 진단·안내용(숨기되 침묵하지는 않는다). */
+/** 필수 파일이 없어 지금은 제시되지 않는 액션 + 그 이유. 진단·안내용(숨기되 침묵하지는 않는다). */
 export function listUnavailableActions(): Array<{ action: ApprovalAction; missing: string[] }> {
   return Object.values(ACTIONS)
     .map((action) => ({ action, missing: missingRequirements(action) }))
@@ -123,7 +115,7 @@ export type ApprovalStatus =
   | "failed"
   | "rejected"
   | "expired"
-  | "deferred"; // 승인 시스템 v2(GD 2026-07-08): 10분 미승인 자동 보류
+  | "deferred"; // 미승인 요청은 계속 활성 대기로 남지 않도록 자동 보류한다.
 
 export interface ApprovalRow {
   id: string;
@@ -152,7 +144,7 @@ export function enqueueApproval(
 ): ApprovalRow {
   const action = ACTIONS[input.action_key];
   if (!action) throw new Error(`unknown action_key: ${input.action_key}`);
-  // ★UI 만 숨기면 API 로 그대로 들어온다★ — 큐 적재 단계에서 막는다(주석이 아니라 코드 가드).
+  // UI 만 숨기면 API 로 그대로 들어온다 — 큐 적재 단계에서 막는다(주석이 아니라 코드 가드).
   const missing = missingRequirements(action);
   if (missing.length > 0) {
     throw new Error(`action_unavailable: ${action.key} — 실행 대상 없음: ${missing.join(", ")}`);
@@ -195,7 +187,7 @@ export function setApprovalStatus(
 // 승인 시스템 v2 tier 인가. normal(문구·코드) 승인자 풀 = author 아닌 풀 1인.
 // core(위험·보안·삭제·배포)는 GD(lead) 탭만. GD 는 상위권한이라 normal 도 승인 가능(단 self-approve 금지).
 // 에이전트 승인은 CLI/버스 경로(텔레그램 탭 아님). 소문자 id 비교.
-// ★풀은 하드코딩 아니라 설정(setting)으로 언제든 변경.
+// 풀은 하드코딩 아니라 설정(setting)으로 언제든 변경.
 export const DEFAULT_NORMAL_TIER_APPROVERS = ["bill", "steve", "codex", "hermes"] as const;
 export const MERGE_APPROVERS_SETTING_KEY = "merge_approvers_normal";
 export type ApprovalTier = "normal" | "core";
@@ -211,12 +203,7 @@ export function getNormalApprovers(db: Database): string[] {
   return pool.length ? pool : DEFAULT_NORMAL_TIER_APPROVERS.map((s) => s); // 빈 설정=기본(락아웃 방지)
 }
 
-/**
- * 이 승인 시도가 tier 규칙상 인가되는가? 순수 함수(부작용 없음) — 상위 인가(allowlist·탭 위조불가)는
- * 호출부가 이미 확인했다고 가정하고, 여기선 tier↔승인자 자격 + self-approve 금지만 판정.
- * 풀은 주입받는다(getNormalApprovers 결과) — 순수·테스트가능·config-driven.
- * Bill 제약①(author≠approver, 모든 tier) ⑧(core=lead-only) 준수.
- */
+// 호출부의 인증을 전제로 tier별 승인자 자격과 자기 승인 금지만 검사한다. core는 lead만 승인할 수 있다.
 export function canApproveTier(opts: {
   tier: ApprovalTier;
   approver: string; // 승인 시도자 id (agent 소문자 id, 또는 lead)
@@ -239,7 +226,7 @@ export function canApproveTier(opts: {
 
 /**
  * 승인 시스템 v2: maxAgeMinutes(기본 10분) 이상 pending 인 승인을 '보류(deferred)' 로
- * 전이하고 대상 행을 반환한다(호출부가 신청자에게 알림). ★행 id 로 개별 전이 — 'WHERE status=pending'
+ * 전이하고 대상 행을 반환한다(호출부가 신청자에게 알림). 행 id 로 개별 전이 — 'WHERE status=pending'
  * 일괄 UPDATE 금지(Bill 제약⑨: bulk 는 남의 pending 오염). 순수 db 로직이라 sender 비의존 → 테스트 용이.
  */
 export function deferStaleApprovals(db: Database, maxAgeMinutes = 10): ApprovalRow[] {
@@ -306,7 +293,7 @@ export function isPinSet(): boolean {
 export async function setPin(pin: string): Promise<{ ok: boolean; error?: string }> {
   if (!PIN_RE.test(pin)) return { ok: false, error: "PIN은 6자리 숫자" };
   const hash = await Bun.password.hash(pin, "argon2id");
-  // 하네스/Codex 리뷰: temp+rename 원자적 교체 — isPinSet()가 size 0 보는 창 제거(TOCTOU 가드).
+  // isPinSet이 비어 있는 파일을 관측하지 않도록 temp+rename으로 원자 교체한다.
   const { chmodSync, renameSync, mkdirSync } = await import("node:fs");
   const { dirname } = await import("node:path");
   mkdirSync(dirname(pinPath()), { recursive: true, mode: 0o700 });
@@ -385,10 +372,7 @@ export async function approveAndMaybeExecute(
   return finalizeApproval(db, id, "pin");
 }
 
-/**
- * 신뢰된 탭 승인(텔레그램 인라인 버튼). 인증 = 호출부에서 확인한 GD 텔레그램 id(=tapper).
- * PIN 없이 실행 — GD의 검증된 탭 자체가 인가(채널 텍스트보다 강함: callback_query 는 위조 불가). 2026-06-10 GD.
- */
+// 호출부에서 검증한 텔레그램 tapper를 승인자로 사용한다. 채널 본문 대신 인증된 callback을 신뢰한다.
 export async function approveByTrustedTap(
   db: Database,
   id: string,
@@ -409,8 +393,7 @@ async function finalizeApproval(
   id: string,
   by: string,
 ): Promise<{ ok: boolean; status: ApprovalStatus; error?: string; executed: boolean; output?: string }> {
-  // ★실제 승인자(by)를 result 에 보존★ — merge commit 트레일러/감사 기록이 요청자가 아닌 진짜 승인자를
-  //   가리키게. (Codex 리뷰 2026-07-08: 미보존 시 wrapper 가 requested_by 로 fallback → "Approved-by: 요청자" 거짓기록)
+  // 감사 기록과 merge trailer가 요청자를 승인자로 오인하지 않도록 실제 승인자 by를 결과에 보존한다.
   const prevRes = (() => { try { const r = getApproval(db, id)?.result; return r ? JSON.parse(r) as Record<string, unknown> : {}; } catch { return {}; } })();
   setApprovalStatus(db, id, "approved", JSON.stringify({ ...prevRes, approver: by }));
   appendAuditFile("approvals", "approved", id, { by });
@@ -438,9 +421,7 @@ export async function executeApproval(db: Database, id: string): Promise<{ ok: b
   }
   setApprovalStatus(db, id, "executing");
   const params = (() => { try { return JSON.parse(row.params_json) as Record<string, string>; } catch { return {}; } })();
-  // ★PATH 를 런타임 설치 자리로 보강★ (2026-07-27): 이 실행부는 bare name 커맨드
-  //   ("openclaw gateway restart")와 bare name 을 쓰는 쉘 스크립트(activate-openclaw-agent.sh)를 둘 다 spawn 한다.
-  //   launchd 서버의 제한 PATH 를 그대로 물려주면 그 맥에서 승인 액션·openclaw 영입이 통째로 실패한다(맥스튜디오 실측).
+  // launchd의 제한된 PATH는 자식 쉘의 bare name 명령을 찾지 못할 수 있어 런타임 설치 경로를 보강한다.
   const env = { ...withRuntimePath(process.env), ...(action.run.env ? action.run.env(params) : {}) };
   appendAuditFile("approvals", "execute_start", id, { action_key: action.key });
   try {

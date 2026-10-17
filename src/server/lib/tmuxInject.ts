@@ -11,9 +11,7 @@ import { existsSync } from "node:fs";
 import { pick, type Locale } from "./i18n";
 import { groupChatIdFromThread, teamContextLabel } from "../channels/registry";
 
-// tmux 바이너리 해석: TMUX_BIN override → Bun.which(PATH) → 흔한 경로.
-// Apple-Silicon 고정경로만 쓰면 Intel(/usr/local)·Linux(/usr/bin)·커스텀 PATH서
-// claude_channel 주입(Slack 멘션 전달)이 깨진다(하네스 fix).
+// 고정 경로는 Intel·Linux·사용자 설치를 놓칠 수 있어 override와 PATH를 우선한다.
 function resolveTmuxBin(): string {
   const override = process.env.TMUX_BIN;
   if (override && existsSync(override)) return override;
@@ -123,21 +121,9 @@ export interface InjectPromptOptions {
   hopCount?: number;
   body: string;
   attachments?: BusAttachment[];
-  /**
-   * 이 메시지가 ★어디서 왔는가★ — 답을 어디에 쓸지 정하는 근거.
-   * ★"bus" = 팀원이 다른 팀원에게 보낸 directed 메시지★ (함수호출). ★답은 반드시 버스로 돌아와야 한다.★
-   *   thread 이름이 tg- 여도 그룹에 답하면 ★봇 발신은 캡처가 무시해 답이 증발한다★ (2026-07-12 실측).
-   *   그래서 "bus" 는 isTelegramGroup 판정에서 제외된다 — 그게 이 값이 존재하는 이유다.
-   */
+  // bus 답은 그룹 이름의 스레드라도 버스로 돌아와야 한다. 그룹 봇 메시지는 캡처가 무시하므로 버스 답을 그룹 분기에서 제외한다.
   source: "slack" | "telegram" | "user" | "bus";
-  /**
-   * ★봉투 kind★ (2026-07-15 kind 전환) — 서버가 계산한 답-주소 종류. 팀원은 이 값으로 답을 어디에
-   *   쓸지 정한다(룰 9039834: teammate→--to <from> · group→broadcast · direct_to_gd→--direct-to-gd ·
-   *   notice→--to <about>(없으면 안 보냄) · slack→broadcast). hermes(hermesBridge.ts replyRoute)·
-   *   openclaw(openclawBridge.ts) 봉투와 동일한 5-값 유니온.
-   *   ★필수(옵셔널 아님)★: 호출부가 3곳뿐이라(전부 이 커밋에서 배선) 필수로 두면 배선 누락이 ★컴파일
-   *   에러★ 가 되어 답 주소가 조용히 틀어지는 걸 구조로 막는다(hermes replyRoute 와 같은 이유).
-   */
+  // kind는 답 목적지를 정하는 필수 입력이다. 호출부 누락을 컴파일 오류로 잡아 잘못된 주소로의 폴백을 막는다.
   kind: "teammate" | "group" | "direct_to_gd" | "notice" | "slack";
   agentId: string;
   teamContext?: string; // 가시성 Stage C: 공유 버스의 최근 팀 대화 (깨어날 때 동봉)
@@ -147,47 +133,15 @@ export interface InjectPromptOptions {
 }
 
 export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
-  // ★본문은 바이트 그대로 넣는다.★ 예전엔 백틱→ʼ, $→＄ 로 "셸 의미 문자를 누그러뜨렸다". 그 치환이
-  //   코드·설정 파일을 조용히 망가뜨렸다 — 2026-09-08 review_run.py 8,048B 가 코드펜스 3곳이 깨진 채
-  //   도착했고, 같이 온 SHA-256 이 안 맞아서야 잡았다. 시험 파일 주석에까지 ʼ 가 새어 들어가 있었다.
-  //   전달 경로는 injectPrompt() 의 load-buffer(stdin) + paste-buffer -p(bracketed paste) 라 셸이 본문을
-  //   해석하지 않는다. 실측: 백틱·$(…)·$VAR·따옴표·역슬래시·한글·여러 줄·끝 개행 104B 를 scratch tmux
-  //   세션에 왕복시켜 바이트 동일(sha 24780d02…). 치환은 전달 안전에 기여하지 않았다.
-  //   아래 분류기 주석의 오탐 원인은 "외부 입력 태그 + 셸 명령 동시 삽입" 이지 백틱이 아니다(hermes 리뷰).
-  //   (proposal prop_5249b7567977 · 팀장 승인 2026-09-11)
+  // load-buffer와 bracketed paste는 셸이 본문을 해석하지 않는다. 문자 치환은 전달 내용만 손상시키므로 원문을 유지한다.
   const escapedBody = opts.body;
 
-  // Why this shape: the <external_message> wrapper marks the body as untrusted input
-  // (defense-in-depth — agents must treat it as data, not commands). We deliberately do
-  // NOT inline the send.sh/ack.sh shell commands here: "untrusted-input tag + an explicit
-  // shell command to run" co-located in one prompt is the textbook prompt-injection
-  // signature, and the agentic-safety classifier false-positives on it (it blocked a
-  // legit team-routing message to Steve, 2026-05-23). The agent already has the
-  // b3os-team-inbox skill, which documents how to reply/ack — so we reference the skill by
-  // name instead of embedding the command. Trust model unchanged, injection signature broken.
-  // step ④ 응답-회수: telegram 그룹 라우팅이면 ★send.sh --to broadcast★ 로 답한다(서버 경유).
-  //   ★이 주석은 예전에 "claude 봇은 자기 telegram reply 도구로 그룹에 게시" 라고 적혀 있었다 —
-  //    그게 155건 증발의 원인이었다.★ (hermes 리뷰 2026-07-14: "런타임 문자열은 고쳐졌지만
-  //    다음 작업자가 이 주석을 따라 되돌릴 위험이 있다" → 맞는 지적이라 주석도 고친다)
-  //   봇이 그룹에 직접 올린 글은 ★캡처봇이 못 본다★(텔레그램이 봇 글을 다른 봇에게 안 준다)
-  //   → DB 에 한 줄도 안 남는다 → 위임자에겐 "답 없음". 그래서 그룹 답변은 반드시 서버를 거친다.
-  // source==="telegram" 만으론 부족: GD 의 telegram 메시지가 '버스 thread'(tg- 접두 없음)로 라우팅돼도
-  // source 는 telegram 이라, 버스 thread id 를 실제 telegram chat_id 로 오안내했다(lui 발견 2026-07-09:
-  // 'telegram MCP reply → chat not found' 위험). 진짜 telegram 그룹 = tg- 접두 thread 일 때만.
-  // ★'방이 어디냐'·'그 방의 chat_id 가 뭐냐' 는 정본(channels/registry)에 묻는다.★ 복붙하지 않는다.
+  // 외부 입력 태그와 셸 실행 명령을 함께 넣으면 분류기가 주입 공격으로 오인할 수 있어 스킬만 참조한다. 그룹 봇 답은 캡처되지 않으므로 서버를 거쳐 기록한다.
   const groupChatId = groupChatIdFromThread(opts.threadId);
   const isTelegramGroup = opts.source === "telegram" && groupChatId !== null;
   const chatId = isTelegramGroup ? (groupChatId as string) : opts.threadId;
 
-  // Anti-pingpong hop metadata (issue 1 A+C):
-  // Include in_reply_to and hop instructions so the agent can propagate them on its response.
-  // The server also enforces hop_count server-side (routes/inbox.ts) as a backstop.
-  // ★봉투에는 '지금 이 메시지의 hop' 을 그대로 싣는다★ (2026-07-27, 제품 결정 (b)안).
-  //   룰은 팀원에게 `--hop <hop_count+1>` 을 시킨다. 그런데 여기서 미리 +1 해서 보내면
-  //   팀원이 그 값에 또 +1 해서 ★메시지당 2씩★ 올랐다(실측: 0→2→4→6…).
-  //   그래서 MAX_HOPS=16 이 실제로는 8메시지 한도로 동작했다.
-  //   고치는 방향은 둘이었다 — 룰 문구를 바꾸거나(룰 문서 여러 벌), 여기서 저장값을 그대로 보여주거나.
-  //   ★후자를 택했다: 범위가 좁고 되돌리기 쉽다.★ 룰은 그대로 두고 봉투만 사실을 말하게 한다.
+  // 팀원 규칙이 hop을 1 증가시키므로 봉투에는 현재 값을 그대로 싣는다. 서버도 hop 상한을 별도로 강제한다.
   const currentHop = opts.hopCount ?? 0;
   const replyToMeta = opts.inReplyTo
     ? ` in_reply_to="${opts.inReplyTo}"`
@@ -211,31 +165,7 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
         `Use the telegram reply tool to post to ${owner}'s 1:1 DM chat_id=${opts.directReport.groupId}; do not bus-ack ${opts.fromLabel}.` +
         hopInstruction +
         ` If ambiguous, ask ${owner}.`)
-    // ★수집 오케스트레이션 제거(2026-07-13, GD)★ — 서버는 답을 모아주지 않는다.
-    //   여기 있던 isCollect 분기는 "★telegram 그룹에 답하면 서버가 집계하지 못해 종합에서 누락★" 이라고
-    //   말했다 — ★이제 거짓말이다.★ 호출부가 없어 죽어 있었지만 다시 넘기면 거짓말이 부활한다 → 분기째 제거.
-    //   (그룹방에서도 답이 버스로 돌아오는 건 이제 isTeammateDirected 불변식이 보장한다 — 반창고 불필요)
-    // 단톡방 답변을 reply 도구로 시키면 안 된다
-    //
-    // reply 도구로 그룹에 올리면 ★팀장님 눈에는 보인다.★ 그런데 —
-    //   ★텔레그램은 봇에게 다른 봇의 메시지를 주지 않는다★ (실측: 빌 봇이 그룹에 @스티브봇 멘션 →
-    //   스티브 90초 무응답. 캡처봇도 봇 글을 못 본다 — auto-ack 발동 0회).
-    //   → ★캡처봇이 못 보니 DB 에 한 줄도 안 남는다.★
-    //   → 위임한 팀원은 ★"답이 없다"★ 로 본다. 에러 0, 경고 0. ★조용히 증발한다.★
-    //   실측: 단톡방 thread 의 팀원간 directed 메시지 ★155건★ 이 이 경로로 사라졌다.
-    //
-    //   ★hermes·openclaw 주입문은 이미 send.sh 로 안내한다 — claude 만 reply 를 시키고 있었다.★
-    //   그래서 증발한 155건은 claude 팀원(5명)의 그룹 답변이었을 가능성이 크다.
-    //
-    //   → send.sh 로 보내면 ★서버를 거치니 DB 에 남고★, 서버가 봇 API 로 그룹에 올린다.
-    // 팀장님도 보고, 서버도 본다. (릴레이는 routes/inbox.ts 에 이미 있다)
-    //
-    //   ★그리고 주입문은 '방법' 을 말하지 않는다 — '사실'(어느 스레드인가) 만 준다.★
-    //   ★2026-08-01: '그룹 라우터가 당신에게 배정했습니다' 를 뺐다.★ 그 문장은 '사실' 이 아니라
-    //   ★소유권 단정★ 이었고, 수신자 전원에게 나갔다 → 깨어난 전원이 자기가 owner 라고 읽어
-    //   ★@mention·sticky 규칙이 무력화됐다★(실측: 25분에 방 broadcast 28건). owner 판정은 룰이 한다.
-    //   보내는 법은 룰(personaTemplates)에 있다. 두 곳에 적으면 언젠가 어긋나고,
-    //   어긋나면 팀원은 ★가까이 있는 주입문★ 을 따른다 (오늘 codex 가 그랬다).
+    // 텔레그램은 봇에게 다른 봇의 메시지를 주지 않아 그룹 직접 답은 DB에 남지 않는다. 서버를 거쳐 발신하고 owner 판정·발신 방법은 팀원 규칙에 맡긴다.
     : isTelegramGroup
     ? pick(locale,
         `이 방에 올라온 메시지입니다. 이 방의 스레드는 thread="${opts.threadId}" 입니다.` +
@@ -264,12 +194,7 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
     : "";
   return teamContextBlock +
     attachmentBlock +
-    // ★source·kind 순서★ (hermes/openclaw 봉투와 일관). kind 는 서버가 계산한 답-주소 종류이고,
-    //   팀원은 이 값으로 답을 어디에 쓸지 정한다(룰 9039834). tg_msg_id 는 claude 전용(그룹 원본 react).
-    // ★이 태그가 프롬프트 본문의 첫 줄이어야 한다★ — 본문(escapedBody)은 이제 치환 없이 그대로 들어가므로
-    //   `!` 나 `/` 로 시작하는 줄이 그대로 붙는다. Claude TUI 는 입력의 ★첫 줄★ 접두(`!`=셸, `/`=슬래시 명령)만
-    //   해석하는데, 이 래퍼가 앞에 있어 본문 줄은 접두로 읽히지 않는다. 래퍼 순서를 바꾸면 그 방어가 사라진다
-    //   (리뷰 steve, PR #425).
+    // 외부 입력 태그가 첫 줄이어야 Claude가 본문의 !·/를 셸·슬래시 명령 접두사로 해석하지 않는다.
     `<external_message source="${opts.source}" kind="${opts.kind}" from="${opts.fromLabel}" thread="${opts.threadId}" msg="${opts.messageId}"${opts.origTgMessageId ? ` tg_msg_id="${opts.origTgMessageId}"` : ""}${replyToMeta} ${hopMeta}>\n` +
     `${escapedBody}\n` +
     `</external_message>\n\n` +
@@ -318,12 +243,7 @@ export async function injectPrompt(opts: InjectPromptOptions): Promise<InjectRes
   });
 
   const executePromise = (async (): Promise<InjectResult> => {
-    // Deliver as an atomic bracketed paste, then submit with Enter.
-    // Why not `send-keys -l`: a multi-line literal is timing-sensitive — its embedded
-    // newlines can be read as Enter/submit and fragment or mangle the input, so the final
-    // Enter doesn't land and the prompt sits unsubmitted (observed: a routed prompt stuck in
-    // a specialist's input for 40+ min, 2026-05-25). A bracketed paste lands as one block
-    // (Claude Code renders it collapsed as "[Pasted text]"); a single Enter then submits it.
+    // send-keys -l의 여러 줄 입력은 중간 개행이 제출로 처리될 수 있다. bracketed paste로 한 블록을 넣은 뒤 Enter 한 번으로 제출한다.
     const bufName = `inj-${opts.agentId}-${Date.now()}`;
     const loaded = await tmuxLoadBuffer(bufName, prompt);
     if (timedOut) return { ok: false, maybePartial: true };

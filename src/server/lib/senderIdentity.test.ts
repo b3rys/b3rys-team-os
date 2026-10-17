@@ -1,18 +1,4 @@
-// ★신원은 '주장' 이 아니라 '사실' 이다★
-//
-// ★무슨 일이 있었나★
-//   룰 템플릿이 모델에게 ★"네가 누구인지 적어라"★ 고 시켰다:
-//       "send.sh ★--from <you>★ --to <them> --body …"
-//   그리고 스킬 문서가 그 자리에 ★codex★ 를 채워서 예시로 보여줬다 (7/12 커밋):
-//       "send.sh --from ★codex★ --to steve …"
-//   → ★devon 이 <you> 자리에 codex 를 넣었다.★ 7/12 24회 · 7/13 30회 · 7/14 14회 (그 전엔 0)
-//   → 서버는 발신자를 ★검증하지 않는다★ (등록된 id 인지만 봄)
-//   → ★devon 이 codex 이름으로 말했고, 아무도 몰랐다.★
-// steve 가 devon 에게 위임한 일에 codex 이름으로 답이 왔고, GD 는 "codex 가 남의 메시지를 봤다" 고 봤다.
-//      팀 전체가 ★누가 무슨 말을 했는지 모르는 상태★ 가 됐다 (감사로그 provenance 오염).
-//
-// ★그런데 _me.sh 는 이미 정확히 안다★ — 워크스페이스 경로에서 신원을 유도한다 (devon 폴더 → devon).
-//   ★시스템이 아는 사실을, 룰이 모델에게 다시 묻고, 모델이 틀렸다.★ (오늘 하루 종일 잡은 그 패턴)
+// 발신자는 모델의 자기 신고가 아니라 워크스페이스 등에서 해석한다. --from 예시는 다른 팀원 ID의 복사를 유도할 수 있어 금지한다.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -47,7 +33,7 @@ describe("발신자 신원 — ★모델에게 묻지 않는다★", () => {
   });
 
   test("★스크립트 사용법·문서 어디에도 --from 을 ★권하지★ 않는다★", () => {
-    // ★오늘 사고가 정확히 '예시를 보고 베낀' 것이었다.★ 코드만 막고 문서를 남기면 같은 실수를 반복한다.
+    // 문서에 신원 추측 예시가 남으면 잘못된 발신을 유도할 수 있어 코드와 문서를 함께 검사한다.
     for (const f of [
       "skills/b3os-team-inbox/scripts/send.sh",
       "skills/b3os-team-inbox/scripts/reply.sh",
@@ -57,7 +43,7 @@ describe("발신자 신원 — ★모델에게 묻지 않는다★", () => {
     }
     const skill = read("skills/b3os-team-inbox/SKILL.md");
     for (const name of ["--from codex", "--from bill", "--from hermes", "--from <you>", "--from <id>"]) {
-      expect(skill).not.toContain(name); // ★구체적 이름을 예시로 박으면 그대로 베낀다★
+      expect(skill).not.toContain(name); // 구체적 이름을 예시로 박으면 그대로 베낀다
     }
   });
 

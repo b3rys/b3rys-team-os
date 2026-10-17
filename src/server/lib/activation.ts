@@ -44,8 +44,7 @@ import { writeRegistrySafely } from "./registrySafety";
 
 const HOME = process.env.HOME ?? "";
 
-// runtime 화이트리스트 + status_provider 매핑 — settings.ts(영입/PATCH)와 swapRuntime 양쪽이
-// 이 단일 정본을 쓴다(전엔 settings.ts에만 있어 activation.ts가 별도 복제할 위험 swap 설계).
+// 영입·설정 변경·스왑이 같은 런타임 화이트리스트와 status_provider 매핑을 사용해야 한다.
 export const RUNTIMES = new Set(["claude_channel", "openclaw", "hermes_agent", "codex"]);
 // runtime → status_provider (agent 테이블 CHECK 제약과 일치해야 함; 안 그러면 reload 시 크래시)
 export const STATUS_BY_RUNTIME: Record<string, string> = {
@@ -55,11 +54,7 @@ export const STATUS_BY_RUNTIME: Record<string, string> = {
   codex: "codex_cli",
 };
 
-/**
- * 경로 삭제(rm) 재시도 헬퍼 — hermes 프로필 dir 등 게이트웨이 bootout 직후 잠깐 파일잠금(EBUSY류)이 걸릴 수
- * 있는 경로에 사용. (Phase1 리팩터: 원래 routes/settings.ts에 있었으나 teardownRuntime이 여기서 쓰므로 이관.
- * settings.ts는 기존 import 경로(`./settings`)가 깨지지 않게 재export한다.)
- */
+// 게이트웨이 bootout 직후 프로필 경로에 일시적인 EBUSY 잠금이 남을 수 있어 삭제를 재시도한다.
 export async function removePathWithRetries(
   path: string,
   options: Parameters<typeof rmSync>[1],
@@ -139,7 +134,7 @@ export async function teardownRuntime(
   // codex teardown: 브리지 정지(bootout) + plist/wrapper/토큰/CODEX_HOME 정리 — 고아 프로세스·잔존 시크릿 방지(best-effort).
   if (runtime === "codex" || (runtime === "claude_channel" && (opts.appChannel ?? readMemberChannel(id).kind === "b3chat"))) {
     const cogsClaude = runtime === "claude_channel";
-    // ★끄기 전에 브리지·자식(codex app-server) pid 를 잡고, 끈 뒤 사라질 때까지 기다렸다 지운다.★
+    // 끄기 전에 브리지·자식(codex app-server) pid 를 잡고, 끈 뒤 사라질 때까지 기다렸다 지운다.
     //   바로 지우면 꺼지던 프로세스가 CODEX_HOME 잠금 폴더를 다시 만든다(실측).
     let pids: number[] = [];
     try { pids = opts.codexBridgePids ? opts.codexBridgePids(id) : cogsClaude ? (()=>{const pid=readBridgePid(claudeCogsPaths(id).pidFile,id);return pid ? [pid,...descendantPids(pid)] : [];})() : liveCodexBridgePids(id); } catch { pids = []; }
@@ -155,7 +150,7 @@ export async function teardownRuntime(
     return { ok: true, detail: "claude_channel teardown 완료(best-effort)" };
   }
   // hermes_agent teardown: 게이트웨이 stop + 프로필별 LaunchAgent plist + credential 토큰 + 프로필 dir 정리.
-  //   ★CRITICAL 가드: 설정된 base 프로필은 모든 hermes 멤버의 auth.json 심링크 소스+clone 원본이라
+  //   CRITICAL 가드: 설정된 base 프로필은 모든 hermes 멤버의 auth.json 심링크 소스+clone 원본이라
   //   절대 정지/삭제하지 않는다(공유 인프라 보존, 멤버 레지스트리/per-id 토큰만 정리) — offboard 원본 로직 그대로.
   if (runtime === "hermes_agent") {
     const prof = agent?.hermes_profile ?? id;
@@ -208,8 +203,7 @@ export interface ActivateResult {
   code?: "member_limit";
   /** claude_channel: 세션·설정은 정상이나 telegram MCP poller 만 미기동(첫 부팅 핸드셰이크 실패) — recruit 는 degraded 완결, /mcp reconnect 로 poller 복구 필요. */
   needsReconnect?: boolean;
-  /** claude_channel 첫 멤버: 봇·토큰·채널 전부 정상이고 ★사람이 DM 1회★ 만 남은 상태.
-   *  실패가 아니라 '거의 완료 — 마지막 한 단계'다(2026-07-25 맥스튜디오 실기 클린테스트). */
+  // 첫 claude 멤버의 페어링 대기는 DM 1회로 해소되므로 활성화 실패와 구분한다.
   needsPairing?: boolean;
 }
 
@@ -233,20 +227,13 @@ export interface EssentialTolerance {
   tolerateWhenPairing?: string[];
 }
 
-/** ★claude_channel 활성화의 관용 정책 — 호출부와 테스트의 단일 출처★.
- *  인라인 리터럴로 두면 ★호출부에서 옵션 하나만 지워도 어떤 테스트도 안 깨지는★ 갭이 생긴다
- *  (Bill 교차검증 2026-07-25 M5a: tolerateWhenPairing 만 제거하면 essentials 가 하드실패로 돌아가
- *   '필수설정 누락 — 재활성화 필요' 라는 원래 버그가 부활하는데 1631 테스트가 전부 통과했다).
- *  판정부(classifyEssentials)만 고정하는 걸로는 부족하다 — ★그 함수를 어떤 옵션으로 부르는지★ 가
- *  이 PR 의 계약이므로, 옵션 자체를 여기 한 곳에 두고 테스트가 이 상수를 통과시켜 검증한다.
- *    · tolerate         : poller 미기동은 auto-reconnect 가 복구를 시도하므로 하드실패로 치지 않는다.
- *    · tolerateWhenPairing: 첫 claude 멤버의 설계상 DM 페어링 대기일 때만 allowFrom 누락을 관용한다. */
+// 호출부와 테스트가 같은 관용 옵션을 사용해야 한다. poller는 자동복구를 허용하고, allowFrom은 페어링 대기일 때만 허용한다.
 export const CLAUDE_ESSENTIAL_TOLERANCE: EssentialTolerance = {
   tolerate: ["poller:"],
   tolerateWhenPairing: ["allowFrom:"],
 };
 
-/** essentials 결과를 ★실패 / degraded / 페어링 대기★ 로 분류한다(순수 — 파일시스템·프로세스 접근 없음).
+/** essentials 결과를 실패 / degraded / 페어링 대기 로 분류한다(순수 — 파일시스템·프로세스 접근 없음).
  *  pushEssentialStep 이 스텝을 push 하기 전에 쓰는 판정부를 분리한 것 = 활성화 전체를 돌리지 않고
  *  분류 규칙만 테스트로 고정할 수 있다(활성화는 tmux·launchd 를 건드려 유닛에서 못 돌린다). */
 export function classifyEssentials(
@@ -258,11 +245,7 @@ export function classifyEssentials(
   const hardMissing = essentials.missing.filter((m) => !tolerate.some((t) => m.startsWith(t)));
   const degraded = !essentials.ok && hardMissing.length === 0;
   const ok = essentials.ok || degraded;
-  // ★페어링 대기 = 관용 후 남은 하드 누락이 0 일 때만★ — 토큰·채널이 같이 빠지면 degraded 가 false 라
-  //   그대로 실패로 떨어진다(경계는 degraded 가 지킨다).
-  //   초안엔 여기에 `missing.every(allowFrom|poller)` 절이 더 있었지만, degraded 가 이미 '하드 누락 0' 을
-  //   뜻해서 claude 호출부에선 항상 참인 ★도달 불가한 중복★ 이었다 — Bill 교차검증에서 그 절만 지워도
-  //   어떤 테스트도 안 깨진다는 게 드러나 제거했다(내가 그 절이 잡힌다고 보고한 건 부정확했다).
+  // 페어링 대기는 관용 후 하드 누락이 없을 때만 성립한다. 토큰·채널 누락은 실패로 남긴다.
   const pairingOnly = pendingPairing && degraded;
   const degradedDetail = pairingOnly
     ? "필수설정 확인(토큰·채널) — DM 페어링 대기(첫 claude 멤버: 사람이 봇에게 DM 1회)"
@@ -284,30 +267,13 @@ async function pushEssentialStep(
   opts?: EssentialTolerance,
 ): Promise<{ ok: boolean; pendingPairing: boolean }> {
   const essentials = await checkEssentialSettings(agent as any);
-  // ★degraded tolerate(2026-07-25 하네스 §4 fix)★: poller(bot.pid) 미기동은 poller 스텝이 이미 needs_reconnect 로
-  //   표면화하고 auto-reconnect 가 복구를 시도하므로, 그것만 빠졌으면 essentials 를 하드실패로 치지 않는다.
-  //   그렇지 않으면 :620 이 recall·bus-wake·degraded 반환을 통째로 스킵해 746f6b3 의 degraded 완결이 무효가 된다.
-  //   tolerate 에 없는 진짜 필수설정(token·allowFrom·채널)이 하나라도 빠지면 종전대로 하드실패.
-  //
-  // ★tolerateWhenPairing(2026-07-25 맥스튜디오 실기)★: allowFrom 누락이 ★첫 claude 멤버의 설계상 pairing 대기★
-  //   (access.json 이 dmPolicy:"pairing" + allowFrom:[] 로 정상 시드된 상태)일 때만 추가로 관용한다.
-  //   그렇지 않으면 봇이 정상 기동했는데도 '활성화 실패 — 재시도 필요' 로 떠서, 사용자가 재시도해도 절대
-  //   해결되지 않는다(실제 해법은 재시도가 아니라 봇에게 DM 1회). access.json 부재·손상은 pendingPairing 이
-  //   false 라 종전대로 하드실패 — 진짜 누락을 관용하지 않는다.
+  // poller 누락은 자동복구 대상으로, allowFrom 누락은 정상 페어링 대기일 때만 관용한다. 그 밖의 필수설정 누락은 실패다.
   const verdict = classifyEssentials(essentials, opts);
   steps.push({ step: "essentials", ok: verdict.ok, detail: verdict.detail });
   return { ok: verdict.ok, pendingPairing: verdict.pendingPairing };
 }
 
-/**
- * ★팀 리드가 갖는 능력 묶음★ — '팀 리드'라는 역할이 곧 이 둘이다.
- *   - coordinator  : 기본 owner(라우팅 fallback). 팀에 0명이면 미배정 메시지가 유실된다.
- * - full_context : 팀방 대화 맥락 수신. 팀 리드는 팀원들의 메시지 맥락을 본다.
- *
- * 따로 관리하면 한쪽만 붙는 갭이 생긴다(실제로 그랬다 — 첫 영입 멤버는 coordinator 만 받아서
- * 팀 리드인데도 팀 맥락을 못 봤다. full_context 는 부여하는 코드가 아예 없어 손으로 agents.json 을
- * 고치지 않는 한 아무도 못 받았다.). 그래서 한 묶음·단일 출처로 둔다.
- */
+// 팀 리드는 미배정 메시지 수신(coordinator)과 팀 맥락 수신(full_context)이 모두 필요하므로 한 묶음으로 부여한다.
 export const LEAD_CAPABILITIES = [COORDINATOR_CAPABILITY, "full_context"] as const;
 
 /** 기존 능력에 팀 리드 능력을 더한다(중복 없이). 첫 영입·승계가 같은 규칙을 쓰게 하는 단일 출처. */
@@ -331,7 +297,7 @@ export function withInitialLeadCapabilities<T extends Record<string, unknown>>(
 
 /** 런타임 활성화 스크립트 경로 + 토큰 파일 경로(스크립트가 기대하는 위치). */
 function runtimeScript(id: string, runtime: string, runtimeCwd?: string): { script: string; tokenFile: string; env: Record<string, string> } | null {
-  // ★WS=MEMBERS_ROOT/id 명시 주입 — 스크립트 default(WS=~/Development/id)는 퍼블릭 모드(MEMBERS_ROOT=$B3RYS_HOME/members)서 persona/AGENTS.md 위치와 어긋남(claude WORKDIR과 같은 계열, 하네스 HIGH). 스크립트가 WS env 이미 존중.
+  // 스크립트 기본 WS는 공개 설치의 MEMBERS_ROOT와 다를 수 있어 워크스페이스를 명시 주입한다.
   const ws = `${MEMBERS_ROOT}/${id}`;
   if (runtime === "openclaw") {
     return {
@@ -373,7 +339,7 @@ function placeToken(tokenFile: string, token: string): void {
   chmodSync(tokenFile, 0o600);
 }
 
-// claude poller 대기·자동복구는 ★runtimes/claude/pollerHealth.ts★ 가 정본이다(재시작 경로와 공유).
+// claude poller 대기·자동복구는 runtimes/claude/pollerHealth.ts 가 정본이다(재시작 경로와 공유).
 // 기존 import 경로를 깨지 않도록 여기서 재-export 한다.
 export { waitForClaudePoller } from "../runtimes/claude/pollerHealth";
 
@@ -490,7 +456,7 @@ function addBusWake(id: string): boolean {
   }
 }
 
-/** 퇴사 시 bus-wake allowlist에서 제거(addBusWake 역) — 안 지우면 offboard된 id가 wake 대상에 잔존(ghost wake). 하네스 #2. */
+// 퇴사한 ID가 wake 대상에 남지 않도록 allowlist에서도 제거한다.
 export function removeBusWake(id: string): void {
   const f = process.env.TEAMOS_BUS_WAKE_EXTRA_FILE ?? `${process.cwd()}/var/bus-wake-extra.txt`; // 테스트 격리(실 운영파일 미변경)
   try {
@@ -509,7 +475,7 @@ export function removeBusWake(id: string): void {
 export function archiveWorkspace(id: string, runtime: string): string | null {
   const { workspace_path } = memberPaths(id, runtime);
   if (!existsSync(workspace_path)) return null;
-  assertNotLiveMemberFsUnderTest(workspace_path, `archiveWorkspace(${id})`); // FIX2(GD 2026-07-08): 테스트가 라이브 워크스페이스 mv 못 하게 차단
+  assertNotLiveMemberFsUnderTest(workspace_path, `archiveWorkspace(${id})`); // 테스트가 라이브 워크스페이스를 이동하지 못하도록 차단한다.
   const archiveRoot = `${MEMBERS_ROOT}/.archived`;
   mkdirSync(archiveRoot, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
@@ -530,10 +496,10 @@ export function archiveWorkspace(id: string, runtime: string): string | null {
  */
 export function reapplyTier2Hook(id: string): "shadow" | "live" | "none" {
   if (isTier2Outbound(id)) {
-    // ★MED 승격(shadow→live): 기존 훅(shadow의 dryRun 포함) 먼저 제거 후 재설치.★ installOutboundHook 멱등
+    // MED 승격(shadow→live): 기존 훅(shadow의 dryRun 포함) 먼저 제거 후 재설치. installOutboundHook 멱등
     // 가드가 파일명만 봐서 dryRun 프리픽스를 안 벗기므로, uninstall→reinstall 해야 dryRun→live로 실제 전환.
     uninstallOutboundHook(id);
-    installOutboundHook(id, { dryRun: false }); // ★HIGH: 명시적 live 전송({dryRun:false} 필수 — 기본 dryRun이라 누락 시 침묵)★
+    installOutboundHook(id, { dryRun: false }); // HIGH: 명시적 live 전송({dryRun:false} 필수 — 기본 dryRun이라 누락 시 침묵)
     uninstallReplyGuardHook(id);
     uninstallRecoveryHook(id);
     return "live";
@@ -562,7 +528,7 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       steps: [{ step: "member-limit", ok: false, detail: `활성 공식 팀원은 최대 ${MAX_OFFICIAL_TEAM_MEMBERS}명입니다.` }],
     };
   }
-  // ★재영입 belt-and-suspenders: off-list에서 제거 — openclaw/hermes는 setAgentEnabled(true) 경로를 안 타서, 이거 없으면 재영입해도 stale off로 버스 suppress(하네스 #1).
+  // openclaw·hermes는 setAgentEnabled(true)를 거치지 않으므로 재영입 시 off-list를 별도로 해제한다.
   try { clearAgentOff(id); } catch { /* best-effort */ }
   const paths = memberPaths(id, runtime);
   const configured = activationAgents.find((a: any) => a.id === id);
@@ -575,28 +541,22 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
 
   // 1) workspace + persona
   try {
-    // 가드를 mkdir ★앞★ 에 둔다 — writeMemberPersona 안쪽 가드에만 맡기면 그 전에 빈 워크스페이스가
-    // 이미 만들어진다. 실측(2026-07-27): 테스트가 실 팀원 루트에 빈 폴더 26개를 남긴 경로가 여기다.
+    // writeMemberPersona 내부 가드보다 먼저 mkdir가 실행되므로 디렉터리 생성 전에도 라이브 경로를 차단한다.
     assertNotLiveMemberFsUnderTest(paths.workspace_path, `recruit(${id})`);
     mkdirSync(paths.workspace_path, { recursive: true });
-    // ★룰(로딩파일) 렌더와 persona 저장은 분리된 트랜잭션이다★.
+    // 룰(로딩파일) 렌더와 persona 저장은 분리된 트랜잭션이다.
     //   writeMemberPersona = 룰 렌더러(CLAUDE.md/AGENTS.md). SOUL.md 는 건드리지 않는다.
     //   persona 값은 savePersonaFile 로 SOUL.md 에만 저장한다 — 저장 지점은 거기 하나뿐이다.
-    const wr = writeMemberPersona({ id, display_name, role, runtime, bot_username, owner_name, team_name, workspace_path: paths.workspace_path, persona_file: paths.persona_file, team_collect_enabled: false /* 수집 오케스트레이션 제거 (2026-07-13) — collector 가 직접 모아 직접 보고한다 */ });
+    const wr = writeMemberPersona({ id, display_name, role, runtime, bot_username, owner_name, team_name, workspace_path: paths.workspace_path, persona_file: paths.persona_file, team_collect_enabled: false  });
     const written = [...wr.written];
     if (persona && persona.trim()) { savePersonaFile(paths.persona_file, persona); written.push(paths.persona_file); }
-    // ★persona 가 없으면 SOUL 을 만들지 않는다★ — 빈 껍데기(`# Role\n\ndev\n\n# Persona`)를 찍으면
-    //   그게 굳어 페르소나가 없는 채로 남는다(2026-07-17 lui·forin 실측). 없으면 나중에 채우면 된다.
+    // 빈 SOUL을 생성하면 페르소나 없는 파일이 고정되므로, persona가 있을 때만 저장한다.
     steps.push({ step: "workspace+persona", ok: true, detail: written.join(", ") });
   } catch (e) {
     steps.push({ step: "workspace+persona", ok: false, detail: (e as Error).message });
     return { ok: false, steps, error: "workspace/persona 작성 실패" };
   }
 
-  // 2) [삭제됨 — 하네스 CRITICAL fix 2026-07-05] 옛날엔 여기서 AGENTS.md를 buildAgentsMd로 재작성했으나,
-  //   step1의 writeMemberPersona가 이미 비-claude 로딩파일(=AGENTS.md)을 ★custom-aware(custom 있으면 verbatim, 없으면 buildAgentsMd)★로
-  //   backup-first 하며 쓴다. 여기서 다시 쓰면 custom purpose가 default로 클로버돼 유실(=Lui 스왑 버그 재현) → 제거.
-  //   단일통로: persona/AGENTS.md 쓰기는 writeMemberPersona 한 곳만.
 
   // 2.5) 런타임 인증 preflight(안전망) — claude/codex oauth 로그인 안 돼 있으면 spawn 전에 중단.
   //   claude는 미로그인 시 tmux headless 프롬프트에 갇히고, codex는 exit 1로 실패하므로 사전 차단.
@@ -650,34 +610,16 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
     let pairingPending = false; // 첫 claude 멤버의 DM 페어링 대기 여부(essentials 에서 판정, 반환에 실어 라우트가 안내)
     try {
       placeClaudeToken(id, bot_token);   // ~/.claude/channels/telegram-<id>/.env (봇이 여기서 토큰 읽음)
-      writeClaudeBridgeFiles(id);        // LaunchAgent plist 생성(setClaude bootstrap 대상)
-      // reply-guard(reply 도구 미사용 감지 block)는 tier2 live(마커모드=reply 도구 안 씀)엔 미설치 — 안 그러면 매턴 block(Bill 하네스).
-      //   shadow는 persona normal(reply 도구 유지)이라 reply-guard 유효 → 설치. live만 skip.
+      writeClaudeBridgeFiles(id);        // Tier2 live는 reply 도구를 쓰지 않으므로 reply-guard를 설치하면 매 턴 차단된다. shadow는 일반 reply를 유지해 guard를 설치한다.
       if (!isTier2Outbound(id)) installReplyGuardHook(id);
       installOwnerGateHook(id);   // 그룹 owner 게이트(UserPromptSubmit) — 공개 설치·새 팀에도 깔리게   // 워크스페이스 .claude/settings.json 에 reply-guard Stop 훅(send-drift 안전망)
-      installProgressHook(id);   // "작업 중 ⏳" 진행표시 훅(PreToolUse/Stop/PreCompact) — 공개 사용자·신규 멤버도 받게(글로벌 배선 대체). tier2 무관.
-      // ★recovery 훅은 삭제됨 — 훅이 팀원 '대신' 보내는 [A] 패턴이라 제거.★
-      //   이미 설치된 멤버에서도 걷어낸다(재활성화 때 self-heal). 안 보냈으면 안 보낸 것이고,
-      //   그 사실을 팀원에게 되돌려 주는 것(reply-guard)까지가 시스템의 몫이다.
+      installProgressHook(id);   // 진행표시 훅은 Tier2와 무관하다. 팀원 대신 발송하는 recovery 훅은 재활성화 시에도 남기지 않는다.
       uninstallRecoveryHook(id);
-      // ★Tier2(2026-07-06, Bill 하네스 HIGH#2 수정): flag 켜진 멤버는 tg-outbound 훅도 실제 설치★
-      //   (전엔 미호출 → 마커모드인데 훅 없어 답 유실). live=실전송 / shadow=dryRun(persona normal·로그만).
-      // ★live는 반드시 {dryRun:false} 명시 (Bill 하네스 Phase1 HIGH): DRYRUN 기본true라 생략하면
-      //   live인데 dryRun→reply-guard/recovery만 걷히고 실전송0=멤버 침묵=답 유실. '말 유실 방지'가 유실 낼 뻔.
+      // dryRun 기본값은 true이므로 live 모드는 false를 명시해야 실제 전송된다.
       if (isTier2Outbound(id)) installOutboundHook(id, { dryRun: false }); // Phase1 live 실전송
       else if (isTier2Shadow(id)) installOutboundHook(id, { dryRun: true }); // Phase0 shadow: 훅 로그만(무영향)
-      seedClaudeTrust(id);               // ~/.claude.json projects 시드 → 신규 workspace trust 프롬프트 hang 방지(하네스 #2)
-      seedClaudeAccess(id);              // access.json 시드 — 재활성화 시 승인 allowFrom 보존, 미승인/첫 멤버만 pairing 기본값(하네스 #1)
-      // ★단일 클린 스폰★ (2026-07-25, 2번째+ 팀원 영입 실패 근본 fix — claude --debug 로 확정):
-      //   봇이 tmux로 떠도 텔레그램 플러그인 MCP(server.ts)가 기동해 bot.pid를 써야 '진짜 대화됨'.
-      //   MCP 스폰 실패의 근본 = 플러그인 start(`bun install --no-summary && bun server.ts`)의 ★콜드 install★ +
-      //   ★동시 claude 세션들의 버전락 경합(`Lock already held for versions/…`)★이 CC의 MCP 연결 타임아웃을 초과
-      //   → MCP failed → server.ts 미기동 → bot.pid 없음('귀머거리'). scope·싱글톤 아님(warm에서 /mcp Reconnect 시 즉시 붙음).
-      //   ★버전락은 claude "부팅 순간"만 잡는다 — running 세션엔 무관.★ 그래서 예전의 kill+respawn 재시도(철회)는
-      //   매 시도마다 부팅을 재유발해 ★스스로 버전락 경합을 늘려★ 역효과였다. 대신:
-      //     ① 세션 스폰 전 플러그인 node_modules pre-warm(start-telegram-channel.sh) → 세션의 bun install 순삭(0.03s).
-      //     ② 여기선 ★한 번만 깨끗이 스폰★(재스폰 안 함 = 자기경합 없음)하고 poller 를 기다린다.
-      // ★fresh 가드(하네스 HIGH)★: 죽은 봇의 옛 tmux 세션·stale bot.pid 가 남으면 게이트 거짓통과 → 스폰 전 1회 kill + bot.pid 제거.
+      seedClaudeTrust(id);               // 신규 워크스페이스의 trust 프롬프트 대기를 방지한다.
+      seedClaudeAccess(id);              // 승인된 allowFrom은 보존한다. stale 세션·bot.pid가 poller 검사를 거짓 통과시키지 않도록 스폰 전에 정리한다.
       killClaudeTmux(id);
       try { rmSync(claudeBridgePaths(id).botPid, { force: true }); } catch { /* best-effort stale marker cleanup */ }
       appendAuditFile("activation", "runtime_start", id, { runtime });
@@ -685,30 +627,18 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       appendAuditFile("activation", res.ok ? "runtime_done" : "runtime_failed", id, { runtime });
       steps.push({ step: "runtime", ok: res.ok, detail: res.ok ? "claude 봇 tmux 기동(LaunchAgent)" : res.detail });
       if (!res.ok) return { ok: false, steps, error: "claude 봇 기동 실패" };
-      // poller 게이트: bot.pid 출현 = MCP(poller) 실기동.
-      //   ★근본(2026-07-25 하네스 4-way + 실측 확정)★: CC fresh 세션 부팅서 telegram MCP 가 부팅 MCP "열거"에서 빠지는
-      //   케이스가 있다 — 실패 세션 MCP 로그에 `Starting connection` 이 0건(타임아웃 아니라 스폰 시도 자체가 없음).
-      //   살아있는 형제 claude 세션이 공유 `~/.claude.json`·플러그인 캐시를 쓰는 중 fresh 부팅하면 열거가 telegram 을 놓친다
-      //   (2번째+ 멤버가 "첫 봇으로 형제 옆에서 부팅"하는 게 유일한 결정적 차이 — 1번째는 형제 없이 혼자 부팅해 깨끗이 열거).
-      //   이건 CC 내부라 직접 못 고치지만, 런타임에 `/mcp reconnect` 하면 (조용해진 상태서) 재열거돼 즉시 붙는다 = 스모킹건.
-      //   pre-warm·버전락·30s 게이트 늘리기는 "타임아웃"을 겨냥한 헛수고였다(Starting connection 0건이 반증).
+      // 프로세스 기동만으로 telegram MCP 연결을 보장할 수 없어 bot.pid로 poller를 확인한다. 미기동 시 reconnect로 복구한다.
       const rawWait = process.env.TEAMOS_POLLER_WAIT_MS;
       const pollerWaitMs = rawWait !== undefined && Number.isFinite(Number(rawWait)) ? Number(rawWait) : 30000;
-      // ★영입과 재시작이 같은 복구를 쓴다★(pollerHealth) — 한쪽에만 있는 안전장치는 없는 것과 같다.
+      // 영입과 재시작이 같은 복구를 쓴다(pollerHealth) — 한쪽에만 있는 안전장치는 없는 것과 같다.
       const pollerRes = await ensureClaudePollerUp(id, { waitMs: pollerWaitMs });
       const pollerOk = pollerRes.ok;
       steps.push({ step: "poller", ok: pollerOk, detail: pollerRes.detail });
-      // ★early-return 제거 + degraded 완결(2026-07-25)★: poller 실패해도 essentials 를 tolerate(poller:) 로 통과시켜
-      //   아래 recall·bus-wake·degraded 반환까지 진행한다(그렇지 않으면 :620 essentials 하드실패가 746f6b3 의 degraded 를 무효화).
-      //   token·allowFrom·채널 등 진짜 필수설정이 빠지면 종전대로 하드실패.
-      //   ★tolerateWhenPairing(2026-07-25 맥스튜디오 실기)★: 첫 claude 멤버는 allowFrom 을 복사해올 참조봇이
-      //   없어 access.json 이 pairing 대기로 시드된다 = 설계상 정상. 그걸 하드실패로 치면 봇이 살아 있는데도
-      //   '활성화 실패 — 재시도 필요' 로 떠서, 재시도로는 절대 안 풀린다(해법은 봇에게 DM 1회).
+      // poller 누락은 후속 초기화까지 진행한 뒤 needs_reconnect로 노출한다. 첫 멤버의 정상 페어링 대기 외의 필수설정 누락은 실패다.
       const essentialsResult = await pushEssentialStep(steps, { id, runtime }, CLAUDE_ESSENTIAL_TOLERANCE);
       if (!essentialsResult.ok) return { ok: false, steps, error: "claude 필수설정 누락 — 재활성화/설정 복구 필요" };
       pairingPending = essentialsResult.pendingPairing;
-      // recall 주입: 활성화=새 claude 세션(맥락 빔)이니 --fresh 재시작과 동일하게 직전 대화 digest 주입.
-      // 런타임 스왑/영입이 곧 '첫 로딩'이라 여기가 GD가 원한 '첫 로딩 시 주입' 지점. fire-forget best-effort(세션 준비는 스크립트 sleep이 대기, 실패해도 활성화 정상).
+      // 새 claude 세션은 이전 맥락이 없으므로 직전 대화 digest를 주입한다. 주입 실패가 활성화를 막지는 않는다.
       try { Bun.spawn(["bash", `${process.cwd()}/scripts/inject-recall.sh`, id], { stdout: "ignore", stderr: "ignore" }); } catch { /* best-effort */ }
       steps.push({ step: "recall", ok: true, detail: "recall 복구블록 주입 스케줄(활성화 첫 로딩)" });
     } catch (e) {
@@ -717,8 +647,7 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
     }
     const wakeOkCl = addBusWake(id);
     steps.push({ step: "bus-wake", ok: wakeOkCl, detail: wakeOkCl ? "allowlist 추가" : "추가 실패" });
-    // ★degraded 완결(2026-07-25)★: poller 실패는 하드 실패로 치지 않는다(recruit 는 완결, poller 만 needs_reconnect).
-    //   ok 는 poller 를 제외한 스텝들로 판정 → runtime·essentials·bus-wake 가 되면 라우트가 OT 를 완결한다. needsReconnect 로 poller 상태 노출.
+    // poller 상태는 needsReconnect로 별도 노출하므로 활성화 성공 여부는 나머지 필수 스텝으로 판정한다.
     const pollerFailed = steps.some((s) => s.step === "poller" && !s.ok);
     return {
       ok: steps.filter((s) => s.step !== "poller").every((s) => s.ok),
@@ -749,10 +678,7 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
         const gatewayOk = await waitForHermesGateway(id, gatewayWaitMs);
         steps.push({ step: "gateway", ok: gatewayOk, detail: gatewayOk ? "hermes gateway running 확인" : "hermes gateway 기동 실패(status에서 대상 profile PID 확인 안 됨 — generic/per-profile supervisor 충돌 가능, 재활성화 필요)" });
         if (!gatewayOk) return { ok: false, steps, error: "hermes gateway 기동 실패 — 대상 profile PID를 확인하지 못했습니다(재활성화하세요)" };
-        // ★팀 스킬 = 정본 심링크★. 활성화 스크립트는 기존 프로필을 ★통째로 복제★ 하므로
-        //   스킬도 사본으로 따라간다 → 정본을 고쳐도 사본은 안 따라온다(실측: --from 차단이 정본에만 들어가
-        //   3개 프로필이 뚫려 있었고, 사본엔 bus-recall.sh 가 아예 없어 룰이 시키는 명령을 실행할 수 없었다).
-        //   심링크면 정본 한 번 고칠 때 전원이 즉시 따라온다. 사본은 만들지 않는다.
+        // 프로필 복제는 낡은 스킬 사본도 복제하므로 정본 심링크로 연결해 명령과 안전 가드 변경이 함께 적용되게 한다.
         const skill = linkHermesTeamSkill(id);
         steps.push({ step: "skills", ok: skill.linked, detail: skill.detail });
         if (!skill.linked) return { ok: false, steps, error: `팀 버스 스킬 링크 실패 — ${skill.detail} (스킬 없이는 팀원이 메시지를 보낼 수 없습니다)` };
@@ -874,7 +800,7 @@ async function rollbackSwap(db: Database, ctx: RollbackCtx): Promise<{ steps: Sw
         id: ctx.id, display_name: ctx.target.display_name, role: ctx.target.role,
         runtime: ctx.oldRuntime, bot_username: ctx.target.telegram_bot_username,
         runtime_cwd: ctx.target.runtime_cwd ?? null,
-        bot_token: token, // ★persona 미전달: SOUL.md 는 STEP1 백업에서 복원된다(아래 copyFileSync). purpose 는 제거됨(cfe8bf7)
+        bot_token: token, // persona 미전달: SOUL.md 는 STEP1 백업에서 복원된다(아래 copyFileSync). purpose 는 제거됨(cfe8bf7)
         registryPath: ctx.registryPath,
       });
       steps.push({ step: "rollback-self-heal", ok: heal.ok, detail: heal.ok ? "옛 런타임 재활성화 성공" : (heal.error || "옛 런타임 재활성화 실패 — 수동 복구 필요") });
@@ -931,7 +857,7 @@ export async function swapRuntime(db: Database, input: SwapInput, deps: SwapDeps
     return { ok: false, steps, error: "이미 해당 런타임입니다(no-op)", code: "no_op" };
   }
 
-  // STEP0(c) — 화이트리스트 검증. ★checkRuntimeAuth 호출보다 반드시 먼저 — checkRuntimeAuth는 미정의
+  // STEP0(c) — 화이트리스트 검증. checkRuntimeAuth 호출보다 반드시 먼저 — checkRuntimeAuth는 미정의
   //   런타임 문자열을 loggedIn:true 로 fail-open 통과시킨다(runtimeAuth.ts KNOWN_RUNTIMES 밖). 여기서
   //   막지 않으면 오타·미지원 런타임이 무점검으로 teardown까지 진행해버릴 수 있다.
   if (!RUNTIMES.has(targetRuntime)) {
@@ -961,8 +887,7 @@ export async function swapRuntime(db: Database, input: SwapInput, deps: SwapDeps
     };
   }
 
-  // STEP0(d) — preflight. 미설치/미로그인이면 여기서 중단 — 아직 아무것도 안 바꿨다(가장 안전한 상태,
-  //   구 런타임은 그대로 살아있어 다운타임 0).
+  // 미설치·미로그인은 teardown 전에 차단해 구 런타임을 보존한다.
   const auth = await doCheckRuntimeAuth(targetRuntime);
   if (!auth.loggedIn) {
     steps.push({ step: "preflight", ok: false, detail: auth.fixHint || auth.detail });
@@ -976,9 +901,7 @@ export async function swapRuntime(db: Database, input: SwapInput, deps: SwapDeps
   // 새 런타임의 persona 파일명은 personaTargetsForRuntime() 단일 정본을 쓴다(CLAUDE/SOUL 하드코딩 분산 방지).
   const fbOld = memberPaths(id, oldRuntime);
   const wsPath: string = (target.workspace_path as string) || fbOld.workspace_path;
-  // FIX2: STEP1 스냅샷/STEP4 rmSync 전에 라이브 트리 차단. 테스트가 workspace_path 없는
-  //   fixture id(steve/bill)로 스왑하면 wsPath 가 ~/Development/<id> 로 폴백 → 실 CLAUDE.md 삭제하던 근본버그.
-  //   prod 무동작; test에서 라이브 경로면 여기서 throw(아무 것도 mutate 하기 전).
+  // 경로 폴백이 라이브 멤버를 가리킬 수 있어 스냅샷·삭제 전에 테스트 경로를 차단한다. 운영에서는 이 테스트 가드를 적용하지 않는다.
   assertNotLiveMemberFsUnderTest(wsPath, `swapRuntime(${id})`);
   const oldPersonaFile: string = (target.persona_file as string) || fbOld.persona_file;
   const oldTargets = personaTargetsForRuntime(oldRuntime, wsPath, oldPersonaFile);
@@ -987,7 +910,7 @@ export async function swapRuntime(db: Database, input: SwapInput, deps: SwapDeps
   const oldPaths = { workspace_path: wsPath, persona_file: oldPersonaFile };
 
   // STEP1 — 스냅샷(rollback 자산). persona 파일(SOUL.md) + loading file(CLAUDE/AGENTS.md) + AGENTS.md(있으면)를 .swap-bak/<ts>/ 로 백업.
-  //   ★MEMORY.md·memory/*.md·TODO.md·README.md·reports/·.git 은 여기서 절대 손대지 않는다 — 워크스페이스
+  //   MEMORY.md·memory/*.md·TODO.md·README.md·reports/·.git 은 여기서 절대 손대지 않는다 — 워크스페이스
   //   dir 자체가 런타임 무관이고 이 함수가 archiveWorkspace를 안 부르는 한 자동 보존된다.
   const bakDir = `${wsPath}/.swap-bak/${Date.now()}`;
   const oldAgentsMdPath = `${wsPath}/AGENTS.md`;
@@ -1015,11 +938,11 @@ export async function swapRuntime(db: Database, input: SwapInput, deps: SwapDeps
     steps.push({ step: "snapshot", ok: false, detail: (e as Error).message }); // best-effort — 백업 실패해도 스왑은 계속(치명 아님)
   }
 
-  // STEP1.5 — ★활성화 토큰 사전 확보★.
-  //   STEP2 teardown 이 구 런타임 토큰 저장소(파일)를 삭제하므로, 반드시 ★teardown 전에★ 메모리로 확보한다.
+  // STEP1.5 — 활성화 토큰 사전 확보.
+  //   STEP2 teardown 이 구 런타임 토큰 저장소(파일)를 삭제하므로, 반드시 teardown 전에 메모리로 확보한다.
   //   우선순위 ①명시 bot_token ②var/secrets/<id>.bot-token ③구 런타임 토큰 저장소(자동 소싱).
   //   ③ = 대시보드 '봇 토큰 변경'→'런타임 교체'가 팀원 수동개입 없이 그 자체로 완결되게(공개판엔 대신할 팀원 없음).
-  //   셋 다 없으면 ★아무것도 바꾸기 전에 즉시 실패★ — teardown 스킵 → 구 런타임 무손상(self-lock 아웃티지 방지).
+  //   셋 다 없으면 아무것도 바꾸기 전에 즉시 실패 — teardown 스킵 → 구 런타임 무손상(self-lock 아웃티지 방지).
   let tokenForActivate: string | undefined = bot_token;
   if (!tokenForActivate) {
     const tp = `${dirname(registryPath)}/var/secrets/${id}.bot-token`;
@@ -1036,8 +959,7 @@ export async function swapRuntime(db: Database, input: SwapInput, deps: SwapDeps
     appendAuditFile("swap", "swap_token_missing", id, { from: oldRuntime, to: targetRuntime });
     return { ok: false, steps, error: "봇 토큰 없음 — 교체 중단(구 런타임 그대로 유지)", code: "activate_failed" };
   }
-  // 형식 검증(cheap·무네트워크) — 명백히 malformed면 teardown 전에 차단(구 런타임 유지). getMe 생존검증은
-  //   activate 하류의 poller 헬스게이트에 위임(자동소싱 토큰은 방금까지 살아있던 구 런타임 것이라 dead일 확률 낮음).
+  // 잘못된 토큰 형식은 teardown 전에 차단한다. getMe 생존검증은 활성화의 poller 헬스게이트에 맡긴다.
   if (!/^\d{6,}:[A-Za-z0-9_-]{30,}$/.test(tokenForActivate)) {
     steps.push({ step: "token-precheck", ok: false, detail: "봇 토큰 형식이 올바르지 않아요 — 교체 중단(구 런타임 유지). 대시보드 '봇 토큰 변경'으로 새 토큰을 넣어 주세요." });
     appendAuditFile("swap", "swap_token_invalid", id, { from: oldRuntime, to: targetRuntime });
@@ -1066,29 +988,13 @@ export async function swapRuntime(db: Database, input: SwapInput, deps: SwapDeps
     return { ok: false, steps, error: "레지스트리 갱신 실패 — teardown은 이미 진행됐을 수 있습니다(수동 확인 필요)", code: "registry_write_failed" };
   }
 
-  // STEP4 — loading 파일 전환(orphan 정리) + claude↔비claude TEAM-OS.md 심링크/AGENTS.md 처리.
-  //   persona_file 은 런타임 무관 SOUL.md 이고, 런타임별 로딩파일(CLAUDE.md/AGENTS.md)만 전환된다.
-  //   ※ 핵심룰/comms 재주입(coreRuleTargets/injectCoreRule 등, regenerate-persona 로직) 재실행은 의도적으로
-  //   생략했다 — buildPersona/buildAgentsMd(personaTemplates.ts)가 런타임별로 이미 정확하게 만든다(claude=
-  //   core+comms 포함 CLAUDE.md / openclaw·hermes·codex=core만 있고 comms 없는 AGENTS.md, SOUL.md는
-  //   정체성 전용으로 core·comms 둘 다 없음 — buildPersona 소스 직접 확인). STEP5의 fresh activateMember
-  // 호출은 ★loading file 만★ 재생성한다 — ★SOUL.md 는 재생성하지 않는다★.
+  // 런타임별 빌더가 핵심룰·소통 지시를 포함하므로 재주입하지 않는다. 로딩파일만 전환·재생성하며 SOUL.md는 보존한다.
   try {
-    // ★SOUL.md 는 절대 지우지 않는다 — 경로가 바뀌면 ★옮긴다★.★
-    //
-    //   옛 코드: rmSync(oldPersonaFile, { force: true })  ← ★삭제★
-    //   그때는 STEP5 의 writeMemberPersona 가 purpose 로 SOUL 을 ★재생성★ 했으므로 삭제가 성립했다.
-    //   ★지금은 성립하지 않는다★: purpose 필드는 제거됐고(cfe8bf7) 렌더러는 SOUL 을 만들지 않는다.
-    //   → 지우면 ★재생성해 줄 사람이 없다 = 페르소나 영구 소멸.★ force:true 라 .bak 조차 안 남는다.
-    //   (steve 리뷰 2026-07-17: "삭제 후 재생성 = 이름만 바꾼 덮어쓰기" — 그 재생성마저 이제 없다)
-    //
-    //   ※ 현재 이 가지는 발화하지 않는다(persona_file 은 런타임 무관 SOUL.md 라 old === new).
-    //     죽은 가지지만 방치하지 않는다 — 경로 규칙이 한 번 바뀌면 그날 조용히 지운다.
-    //     이 rmSync 는 전과가 있다: 스왑 테스트가 실 id 로 라이브 파일을 지운 적이 있다(가드 a2becec).
+    // 렌더러는 SOUL.md를 재생성하지 않으므로 경로 변경 시 내용을 이동해야 한다. 삭제하면 페르소나를 복구할 수 없다.
     if (existsSync(oldPersonaFile) && oldPersonaFile !== newPersonaFile) {
       mkdirSync(dirname(newPersonaFile), { recursive: true });
       if (existsSync(newPersonaFile)) copyFileSync(newPersonaFile, `${newPersonaFile}.bak`); // 목적지가 있으면 백업 먼저
-      renameSync(oldPersonaFile, newPersonaFile);   // ★내용을 새 경로로 옮긴다 (삭제 아님)★
+      renameSync(oldPersonaFile, newPersonaFile);   // 내용을 새 경로로 옮긴다 (삭제 아님)
     }
     if (oldTargets.loadingFile !== oldTargets.personaFile && oldTargets.loadingFile !== newTargets.loadingFile && existsSync(oldTargets.loadingFile)) {
       rmSync(oldTargets.loadingFile, { force: true });
@@ -1098,8 +1004,7 @@ export async function swapRuntime(db: Database, input: SwapInput, deps: SwapDeps
       try { if (existsSync(link)) rmSync(link, { force: true }); } catch { /* best-effort */ }
     }
     if (targetRuntime === "claude_channel" && oldRuntime !== "claude_channel") {
-      // 비claude→claude: 옛 AGENTS.md(로딩파일) orphan 제거 + 워크스페이스 TEAM-OS.md 심링크 생성(2026-09-19 부터 @import 는 없고, 규칙 파일이 "필요할 때 읽는" 경로로 쓴다)
-      //   (recruit 경로 L924-930과 동일 패턴 — activateMember의 step1은 claude_channel엔 심링크를 안 만든다).
+      // activateMember는 claude_channel의 TEAM-OS 심링크를 만들지 않으므로 런타임 전환 경로에서 생성한다.
       try { if (existsSync(oldAgentsMdPath)) rmSync(oldAgentsMdPath, { force: true }); } catch { /* best-effort */ }
       const link = `${wsPath}/TEAM-OS.md`;
       try { if (!existsSync(link)) symlinkSync(LIVE_TEAM_OS_PATH, link); } catch { /* best-effort */ }
@@ -1117,7 +1022,7 @@ export async function swapRuntime(db: Database, input: SwapInput, deps: SwapDeps
     runtime: targetRuntime,
     bot_username: target.telegram_bot_username,
     runtime_cwd: updatedEntry.runtime_cwd ?? null,
-    // ★persona 를 전달하지 않는다 — SOUL.md 는 이미 제자리에 있다(위에서 경로가 바뀌면 옮겼다).★
+    // persona 를 전달하지 않는다 — SOUL.md 는 이미 제자리에 있다(위에서 경로가 바뀌면 옮겼다).
     //   purpose 필드는 제거됐고(cfe8bf7) persona 값의 유일한 집은 SOUL.md 다.
     //   전달하면 savePersonaFile 이 같은 내용을 다시 써서 무의미한 .bak 만 남는다.
     //   (옛 주석: "persona:undefined 면 default 로 덮여 custom 유실" — 그 덮어쓰기 자체가 사라져서 무효)

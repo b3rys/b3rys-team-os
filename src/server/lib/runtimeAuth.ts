@@ -14,16 +14,10 @@ import { openclawCliCandidates } from "./openclawBridge";
 // codex 풀패스(iTerm alias 깨짐 회피) — reference_codex_binary_path.
 const CODEX_BIN = "/opt/homebrew/bin/codex";
 
-/** openclaw 자체 auth store 존재 확인 — 전역 openclaw.json auth.profiles 또는
- *  ~/.openclaw/agents/<agent>/agent/auth-profiles.json 중 하나라도 있으면 인증된 것.
- * ~/.codex/auth.json에 의존하면 공개 openclaw 사용자를 오차단하므로 별도 판정.
- * 값은 절대 읽지 않고 파일 존재만 확인. (하네스 fix) */
+// openclaw는 자체 인증 저장소를 쓰므로 codex 인증 파일에 의존하지 않는다. 전역·per-agent 경로의 존재만 확인한다.
 function openclawAuthExists(): boolean {
   try {
-    // (신규 레이아웃 · openclaw ~v2026.6.11+) 전역 `~/.openclaw/openclaw.json` 의 `auth.profiles` 에 인증 저장.
-    //   `openclaw configure` 로 구독 로그인하면 per-agent auth-profiles.json 이 안 생기고 여기에만 저장돼,
-    // per-agent 만 보던 기존 탐지가 '로그인했는데 미로그인'으로 오차단했다(BUG8 버전드리프트).
-    //   값은 안 읽고 profiles 키 존재만 확인. 실측: 이 머신(v2026.6.10)은 두 레이아웃 공존 → additive 로 둘 다 인정(라이브 무영향).
+    // 구독 로그인은 전역 auth.profiles에만 저장될 수 있어 per-agent와 전역 레이아웃을 모두 인정한다. 비밀값은 읽지 않고 키 존재만 본다.
     try {
       const gj = `${OPENCLAW_ROOT}/openclaw.json`;
       if (existsSync(gj)) {
@@ -44,11 +38,7 @@ function openclawAuthExists(): boolean {
   } catch { return false; }
 }
 
-/** hermes 자체 auth 존재 확인 — activate-hermes-agent.sh 는 seed 를 ~/.hermes/profiles/<name>/auth.json 에서
- *  뽑는다(글로벌 ~/.hermes/auth.json 이 아님). 그래서 preflight 도 동일하게 판정해야 divergence(프로필만
- *  있는 사용자 오차단 / 글로벌만 보고 통과 후 스크립트 exit 1)를 막는다.
- *  loggedIn = profiles 하위 임의 프로필의 auth.json 하나라도 존재 OR 글로벌 ~/.hermes/auth.json 존재.
- * 값은 절대 읽지 않고 파일 존재만 확인(openclawAuthExists 패턴 재사용). (하네스 fix) */
+// 점검과 활성화가 같은 프로필·글로벌 인증 후보를 사용해야 한쪽만 통과하는 불일치를 막는다. 비밀값은 읽지 않는다.
 function hermesAuthExists(): boolean {
   if (existsSync(`${HOME}/.hermes/auth.json`)) return true;
   try {
@@ -104,18 +94,13 @@ const OPENCLAW_FIX_HINT = `openclaw 인증을 완료하세요(전역 auth.profil
 const CLAUDE_FIX_HINT = "이 서버가 실행되는 컴퓨터의 터미널에서 `claude` 를 한 번 실행해 oauth 로그인 후 다시 활성화하세요";
 const CLAUDE_MISSING_HINT = "Claude Code CLI가 설치되지 않았습니다. 이 서버 컴퓨터에서 `npm install -g @anthropic-ai/claude-code` 로 설치하고 `claude` 를 실행해 로그인한 뒤 다시 활성화하세요";
 
-/** 바이너리 존재 확인 — Bun.which(PATH) ∪ 흔한 경로. launchd 제한 PATH서도 잡히게 고정경로 병행. 미설치 vs 미로그인 구분용(하네스 HIGH). */
+// 설치와 로그인을 구분하려고 바이너리를 먼저 찾는다. launchd의 제한 PATH를 보완하도록 표준 설치 경로도 탐색한다.
 function binaryExists(cmd: string, ...paths: string[]): boolean {
   try { if (typeof Bun !== "undefined" && Bun.which(cmd)) return true; } catch { /* Bun.which 실패 무시 */ }
   return paths.some((p) => { try { return existsSync(p); } catch { return false; } });
 }
 
-/**
- * 사전점검이 실행해 볼 codex — ★CODEX_BIN 이 있으면 그것이 먼저다.★
- * 브리지 wrapper 는 CODEX_BIN 을 그대로 export 해 그 파일로 돈다(launcher codexBinLine). 점검이 PATH 를 먼저 보면
- * 실제로 돌 파일이 아니라 PATH 의 다른 설치본을 재게 된다 — 그 설치본이 macOS 격리로 안 뜨면 멀쩡한 영입이 막힌다.
- * CODEX_BIN 이 없거나 그 경로에 파일이 없으면 예전 순서(PATH → 흔한 경로).
- */
+// 점검과 실행이 같은 codex 설치를 보도록 CODEX_BIN을 우선한다. 해당 파일이 없으면 PATH와 표준 설치 경로를 탐색한다.
 export function resolveCodexBin(env: Record<string, string | undefined> = process.env): string | null {
   const explicit = env.CODEX_BIN;
   if (explicit) { try { if (existsSync(explicit)) return explicit; } catch { /* 아래로 */ } }
@@ -152,13 +137,11 @@ const CODEX_UNRUNNABLE_HINT = "codex 바이너리가 설치돼 있지만 실행�
 /** claude_channel: 바이너리 존재(미설치 구분) → ~/.claude.json 'oauthAccount' 키(로그인 여부). 값은 안 봄. */
 function checkClaudeAuth(): RuntimeAuthResult {
   const base: RuntimeAuthResult = { runtime: "claude_channel", loggedIn: false, detail: "", fixHint: CLAUDE_FIX_HINT };
-  // ① 바이너리 부재 = 미설치(미로그인과 구분). codex처럼 명확히 안내(하네스: claude는 미설치를 "로그인하세요"로 오안내하던 갭).
+  // 설치 누락을 로그인 누락으로 안내하지 않도록 바이너리를 먼저 확인한다.
   if (!binaryExists("claude", `${HOME}/.claude/local/claude`, "/opt/homebrew/bin/claude", `${HOME}/.bun/bin/claude`, `${HOME}/.local/bin/claude`)) {
     return { ...base, loggedIn: false, detail: "Claude Code CLI 미설치(바이너리 없음)", fixHint: CLAUDE_MISSING_HINT };
   }
-  // ①-b 인프라 의존성: claude_channel 은 tmux 세션에 프롬프트를 주입하고(Slack/텔레그램 멘션 전달)
-  //     bun 으로 실행된다. tmux 는 macOS 기본 미탑재 → 없으면 주입이 조용히 실패하고 28s poller
-  // 타임아웃(오해 유발)으로만 나타난다. 여기서 미리 명확히 안내(하네스 fix).
+  // claude_channel은 tmux 주입과 bun 실행에 의존한다. tmux는 macOS 기본 도구가 아니므로 활성화 전에 설치를 확인한다.
   if (!binaryExists("tmux", process.env.TMUX_BIN ?? "/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux")) {
     return { ...base, loggedIn: false, detail: "tmux 미설치(claude_channel 주입에 필요)", fixHint: "tmux가 필요합니다: 이 서버 컴퓨터 터미널에서 `brew install tmux`(또는 OS 패키지 매니저)로 설치 후 다시 활성화하세요. Homebrew 자체가 없으면 https://brew.sh 로 먼저 설치하거나, repo 폴더에서 `bash install.sh` 를 다시 실행하면 tmux 까지 자동 준비됩니다" };
   }
@@ -181,19 +164,17 @@ function checkClaudeAuth(): RuntimeAuthResult {
 
 const HERMES_FIX_HINT = `이 서버가 실행되는 컴퓨터 터미널에서 hermes 인증(oauth)을 완료한 뒤 다시 활성화하세요. \`hermes setup\` 또는 \`hermes auth\` 실행 후 재확인하세요. ${RUNTIME_SETUP_DOC}#hermes-agent`;
 const HERMES_MISSING_HINT = `hermes CLI가 설치되지 않았습니다. 이 서버 컴퓨터에서 \`curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash\` 로 설치하고 \`hermes setup\` 또는 \`hermes auth\` 로 인증한 뒤 다시 활성화하세요. ${RUNTIME_SETUP_DOC}#hermes-agent`;
-/** hermes_agent: 바이너리 존재(미설치 구분) → 자체 auth(~/.hermes/auth.json). codex와 별개 백엔드라 ~/.codex 프록시 판정 금지(하네스). 값 미열람. */
+// Hermes는 codex와 인증 백엔드가 다르므로 자체 인증 경로만 확인한다. 비밀값은 읽지 않는다.
 function checkHermesAuth(): RuntimeAuthResult {
   const base: RuntimeAuthResult = { runtime: "hermes_agent", loggedIn: false, detail: "", fixHint: HERMES_FIX_HINT };
   if (!binaryExists("hermes", `${HOME}/.local/bin/hermes`, "/opt/homebrew/bin/hermes")) {
     return { ...base, loggedIn: false, detail: "hermes CLI 미설치(바이너리 없음)", fixHint: HERMES_MISSING_HINT };
   }
-  // activate-hermes-agent.sh 는 프로필 seed 파생/plist 생성/토큰 주입에 python3 를 쓴다(steps 2/3/5) → 미설치면
-  // 활성화가 조용히 실패. openclaw 분기와 동일하게 사전 차단(하네스 fix).
+  // 활성화 스크립트가 프로필·plist·토큰 처리에 python3를 사용하므로 실행 전에 의존성을 확인한다.
   if (!binaryExists("python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3")) {
     return { ...base, loggedIn: false, detail: "python3 미설치(hermes 런타임은 python3 필요)", fixHint: `openclaw/hermes 런타임은 python3 가 필요합니다. 이 서버 컴퓨터에 python3 설치 후 다시 활성화하세요. ${RUNTIME_SETUP_DOC}` };
   }
-  // 인증 판정: activate 스크립트가 seed 를 ~/.hermes/profiles/*/auth.json 에서 뽑으므로 동일하게 판정한다
-  // (프로필만 있는 사용자 오차단 / 글로벌만 보고 통과 후 exit 1 하는 divergence 제거, 하네스 fix).
+  // 글로벌 인증만 보면 프로필 전용 사용자를 오차단할 수 있어 활성화 스크립트와 같은 seed 출처를 확인한다.
   const loggedIn = hermesAuthExists();
   return { ...base, loggedIn, detail: loggedIn ? "hermes 인증 확인됨(~/.hermes/profiles/*/auth.json 또는 ~/.hermes/auth.json)" : "hermes 미인증(~/.hermes/profiles/*/auth.json·~/.hermes/auth.json 없음)" };
 }
@@ -201,13 +182,9 @@ function checkHermesAuth(): RuntimeAuthResult {
 /** codex/openclaw: ChatGPT oauth 백엔드 공유(~/.codex/auth.json — openclaw는 심링크). 존재만 본다. */
 async function checkCodexAuth(runtime: string): Promise<RuntimeAuthResult> {
   const base: RuntimeAuthResult = { runtime, loggedIn: false, detail: "", fixHint: CODEX_FIX_HINT };
-  // ① 바이너리 부재 감지 — 런타임별 CLI를 확인(openclaw는 codex가 아니라 openclaw 바이너리. 하네스: openclaw 미설치를 "brew reinstall codex"로 오안내하던 갭). 미설치 vs 미로그인 구분.
+  // openclaw 미설치를 다른 런타임 설치 안내로 오인하지 않도록 자체 CLI를 확인한다.
   if (runtime === "openclaw") {
-    // ★점검과 실행이 같은 해석을 쓴다★ — 이게 어긋나서 "설치됨(초록)인데 깨우기는 실패" 가 났다.
-    //   ★후보 목록만 맞추면 부족하다★ (2026-07-27 Codex 리뷰 적발): 실행부 resolveOpenclawBin() 은
-    //   OPENCLAW_BIN 을 ★최우선★ 으로 존중하는데, 점검이 후보 목록만 보면 비표준 prefix 에 설치하고
-    //   OPENCLAW_BIN 을 지정한 ★정상 지원 환경★ 을 "CLI 미설치" 로 오차단한다. 이번엔 방향만 반대일 뿐
-    //   같은 부류의 어긋남이다. 그래서 실행부가 고른 값 자체를 후보 맨 앞에 넣는다.
+    // 점검이 실행부와 다른 설치를 보지 않도록 resolveOpenclawBin의 선택값을 후보 맨 앞에 둔다.
     if (!binaryExists("openclaw", ...openclawCliCandidates())) {
       return { ...base, loggedIn: false, detail: "openclaw CLI 미설치(바이너리 없음)", fixHint: `openclaw CLI가 설치되지 않았습니다. 이 서버 컴퓨터에서 \`npm install -g openclaw@latest\` 로 설치하고 \`openclaw onboard --install-daemon\` 으로 인증/게이트웨이 준비 후 다시 활성화하세요. ${RUNTIME_SETUP_DOC}#openclaw` };
     }
@@ -215,9 +192,7 @@ async function checkCodexAuth(runtime: string): Promise<RuntimeAuthResult> {
     if (!binaryExists("python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3")) {
       return { ...base, loggedIn: false, detail: "python3 미설치(openclaw 런타임은 python3 필요)", fixHint: `openclaw/hermes 런타임은 python3 가 필요합니다. 이 서버 컴퓨터에 python3 설치 후 다시 활성화하세요. ${RUNTIME_SETUP_DOC}` };
     }
-    // ② openclaw 로그인 여부 = 전역 openclaw.json auth.profiles 또는 per-agent auth-profiles.json 존재.
-    // ~/.codex/auth.json 은 GD 머신 심링크라 공개 openclaw 사용자엔 없음 → 그걸로 판정하면 오차단.
-    // openclaw 는 codex login 을 안 거치고 자체 인증하므로 openclaw 소스로만 판정(하네스 fix).
+    // openclaw는 자체 인증을 쓰므로 다른 런타임의 인증 파일로 로그인 여부를 판정하지 않는다.
     const loggedIn = openclawAuthExists();
     return {
       ...base,
@@ -229,12 +204,10 @@ async function checkCodexAuth(runtime: string): Promise<RuntimeAuthResult> {
     };
   }
   if (!binaryExists("codex", process.env.CODEX_BIN ?? CODEX_BIN, "/opt/homebrew/bin/codex", "/usr/local/bin/codex", `${HOME}/.local/bin/codex`)) {
-    // 아키텍처/OS 무관 감지(하네스 HIGH): Bun.which(PATH) ∪ Apple-Silicon(/opt/homebrew) ∪ Intel(/usr/local) ∪ ~/.local. 고정경로 하나로 판정하면 Intel/Linux서 정상 codex를 '미설치'로 오판→활성화 차단.
+    // 고정 설치 경로만 보면 Intel·Linux·사용자 경로를 놓치므로 PATH와 플랫폼별 표준 후보를 함께 검사한다.
     return { ...base, loggedIn: false, detail: "codex CLI 미설치(바이너리 없음 — brew install codex 필요)", fixHint: CODEX_MISSING_HINT };
   }
-  // ①-b 바이너리 실행 검증(BUG6) — 존재하지만 실행 불가(macOS XProtect 격리·OpenAI 인증서 폐기)면
-  //   preflight를 통과한 뒤 first-model-call에서 불투명한 exit_null로만 실패해 원인 진단이 안 된다. `codex --version`을
-  //   실제 실행해 실행가능·미격리를 확인하고, 실패 시 원인 명확한 fixHint를 준다.
+  // 파일이 있어도 macOS 격리·인증서 폐기로 실행이 차단될 수 있어 --version을 실제 실행한다.
   {
     const cbin = resolveCodexBin();
     const run = cbin ? binaryRunnable(cbin) : { ok: false, reason: "경로 해석 실패" };

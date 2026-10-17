@@ -22,7 +22,7 @@ function logWith(resultLine: string): string {
 }
 
 describe("bot-liveness status ↔ 파서 결합", () => {
-  // ★이 테스트가 이 PR 의 핵심★
+  // 이 테스트가 이 PR 의 핵심
   //   스크립트에 새 status 를 추가하고 파서를 안 고치면 여기서 실패한다. 안 그러면 그 값은
   //   한국어 휴리스틱으로 떨어져 "추측"으로 판정되고, 아무도 그 사실을 모른다.
   test("스크립트가 내는 모든 status 를 파서가 알고 있다", () => {

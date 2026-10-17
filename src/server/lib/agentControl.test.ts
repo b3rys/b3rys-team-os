@@ -1,9 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { claudeTelegramLaunchdLabel, hermesLaunchdLabel } from "./agentControl";
 
-/* 2026-07-26 맥스튜디오 실측: 비상정지 뒤 대시보드 '기동' 으로 hermes 가 안 살아났다. 정지는 LaunchAgent 를
- * bootout 하는데 기동은 게이트웨이만 띄우고 bootstrap 을 안 해서다. 그 비대칭을 고치면서, 두 경로가 ★같은
- * 라벨★ 을 보도록 한 곳으로 모았다(예전엔 정지가 프로필 기반 문자열을 직접 만들어 gateway_service 를 무시했다). */
+// 기동과 정지가 같은 LaunchAgent 라벨을 사용해야 bootout한 서비스를 복구할 수 있다.
 describe("hermesLaunchdLabel", () => {
   test("gateway_service 가 없으면 프로필 기반으로 도출한다", () => {
     expect(hermesLaunchdLabel(undefined, "herm")).toBe("ai.hermes.gateway-herm");

@@ -84,31 +84,16 @@ export function trustedActorFromRequest(
   if (actor && isLoopbackDashboardRequest(request) && ACTOR_RE.test(actor)) {
     return { ok: true, actor: { actor, source: "loopback_dashboard" } };
   }
-  // ★여기서 실패한 이유는 "헤더가 없다" 가 아니라 "이 주소를 못 믿는다" 다.★
+  // 여기서 실패한 이유는 "헤더가 없다" 가 아니라 "이 주소를 못 믿는다" 다.
   //   앞서는 위에서 만들어둔 `fromHeaders`(= x_actor_id_required)를 그대로 돌려줬다. 그런데
-  //   그 값을 만든 함수는 ★주소를 한 번도 안 본다★ — 헤더만 본다. 그래서 화면에도 로그에도
-  //   ★대시보드가 쓰지도 않는 헤더 이름★ 이 남았고, 원인을 찾는 사람을 엉뚱한 데로 보냈다.
+  //   그 값을 만든 함수는 주소를 한 번도 안 본다 — 헤더만 본다. 그래서 화면에도 로그에도
+  //   대시보드가 쓰지도 않는 헤더 이름 이 남았고, 원인을 찾는 사람을 엉뚱한 데로 보냈다.
   //   이름은 `not_local_dashboard` 가 아니라 `dashboard_host_not_trusted` 다(steve) —
-  //   이 검사는 loopback ★또는 등록된 주소★ 면 통과하므로, 로컬만 조건인 것처럼 읽히면 안 된다.
+  //   이 검사는 loopback 또는 등록된 주소 면 통과하므로, 로컬만 조건인 것처럼 읽히면 안 된다.
   return { ok: false, error: "dashboard_host_not_trusted", status: 403 };
 }
 
-/**
- * 이 주소로 들어온 대시보드도 loopback 과 같게 믿는다 — ★기본값 없음(=현행 동작 그대로)★.
- *
- * 왜 필요했나 (2026-07-30 실측): 대시보드는 신원을 얻는 경로가 loopback 예외 하나뿐이다
- * (PIN UI 는 2026-06-28 에 제거됐고, 프론트는 어떤 인증 헤더도 보내지 않는다). 그래서 같은 사람이
- * 같은 맥에서 같은 버튼을 눌러도 ★주소창이 127.0.0.1 이면 되고 도메인이면 403★ 이었다.
- * 터널이 요청을 127.0.0.1 로 넘겨주지만 Host 헤더에는 도메인 이름이 남아 서버가 구분할 근거가 없다.
- * 이 때문에 태그 3개가 아니라 ★쓰기 9군데★ 가 앱·도메인에서 전부 막혀 있었다.
- *
- * ★무엇을 믿는 것인지 분명히 한다★: 이건 '신원' 이 아니라 ★'어느 문으로 들어왔나' 를 믿는 것★ 이다.
- * 그 문 앞에 로그인 관문(예: Cloudflare Access)이 있다는 전제에서만 성립한다. 관문이 꺼지면 그 주소를
- * 아는 누구나 lead 권한을 얻고, 감사 로그의 actor 도 전원 같은 이름으로 뭉개진다.
- * 그래서 ①기본값을 비워 공개 설치본의 동작을 바꾸지 않고 ②TEAM_BIND 가 loopback 이어야 한다는
- * 기존 전제를 유지해 오리진이 직접 노출된 상태에서는 켜지지 않게 한다.
- * (근본 해결은 '앱만 붙일 수 있는 키' — 도메인이 아니라 앱을 믿는 방식. 팀장님 방향, 별건 설계.)
- */
+// 신뢰 도메인은 앞단 로그인 관문을 전제로 lead 권한을 부여한다. 오리진 직접 노출을 막기 위해 loopback 바인딩을 요구하며 기본 신뢰 도메인은 없다.
 function trustedDashboardHosts(): Set<string> {
   return new Set(
     (process.env.TEAM_TRUSTED_DASHBOARD_HOSTS ?? "")
@@ -118,17 +103,7 @@ function trustedDashboardHosts(): Set<string> {
   );
 }
 
-/**
- * loopback 이거나, 운영자가 등록한 대시보드 주소인가.
- *
- * 등록 형식 두 가지 — 정확한 이름(`dev.b3rys.com`) 또는 ★하위 주소 전체(`*.b3rys.com`)★.
- * 와일드카드는 팀장님 지시(2026-07-30)다: 소유한 도메인의 하위 주소를 새로 열 때마다 설정을 고치지
- * 않아도 되게. 대가는 ★그 도메인 아래 새로 생기는 주소가 자동으로 신뢰된다★ 는 것이다.
- *
- * ★접미사 오매치를 막는다★ — `*.b3rys.com` 은 `evilb3rys.com` 이나 `b3rys.com.attacker.net` 에
- * 걸리면 안 된다. 그래서 단순 endsWith 가 아니라 ★점 경계★ 로 본다. 그리고 와일드카드는 ★하위 주소만★
- * 이므로 맨 도메인(`b3rys.com`)은 따로 적어야 통과한다(의도를 흐리지 않는다).
- */
+// 와일드카드는 점 경계의 하위 도메인만 신뢰한다. 맨 도메인은 별도 등록해야 하며 새 하위 주소도 자동 신뢰됨에 유의한다.
 function isTrustedDashboardHost(value: string, trusted: Set<string>): boolean {
   const host = value.trim().toLowerCase();
   if (isLoopbackHost(host)) return true;
@@ -152,8 +127,7 @@ export function __resetAuthWarningsForTest(): void {
 function isLoopbackDashboardRequest(request: Request): boolean {
   const bind = process.env.TEAM_BIND ?? "127.0.0.1";
   if (!isLoopbackHost(bind)) {
-    // ★등록했는데 안 켜지면 사람은 "설정이 안 먹네" 로 읽고 원인을 못 찾는다★ (bill 리뷰).
-    //   조용히 거부하지 않고 왜 안 켜지는지 한 번 말한다. 오늘 우리가 반복해서 만난 실패 모양이다.
+    // 설정이 무시된 원인을 알 수 있도록 loopback 바인딩 조건 불충족을 한 번 경고한다.
     if (!warnedBindNotLoopback && trustedDashboardHosts().size > 0) {
       warnedBindNotLoopback = true;
       console.warn(
@@ -163,22 +137,7 @@ function isLoopbackDashboardRequest(request: Request): boolean {
     }
     return false;
   }
-  // ★앞서 여기에 "url 의 host 도 loopback 이어야 한다" 는 조건이 하나 더 있었다.★
-  //   의도는 "요청이 진짜 이 서버 소켓에 닿았나" 였는데, ★그 둘은 같은 값이다.★
-  //   Bun 은 `request.url` 의 authority 를 ★Host 헤더로 만든다★ (2026-07-30 실측 — 최소 서버로 확인):
-  //     Host: dev.b3rys.com → req.url = http://dev.b3rys.com/x
-  //     Host: 127.0.0.1     → req.url = http://127.0.0.1:7999/x
-  //   그래서 두 조건이 ★서로 배타적★ 이었다 — 도메인으로 오면 앞이 거짓, 루프백으로 오면 뒤가 무의미.
-  //   ★즉 등록 기능은 켜질 수가 없었다.★ 문서·안내 페이지·팀 안내가 전부 안 되는 방법을 말하고 있었다.
-  //
-  //   "진짜 이 서버에 닿았나" 는 위의 TEAM_BIND 검사가 이미 답한다 — 루프백 바인딩이면 소켓 자체가
-  //   로컬에서만 연결을 받는다. 중복이었고, 그 중복이 기능을 죽였다. 그래서 뺀다.
-  //
-  //   ★Host 헤더가 없으면 url 에서 읽는다. 둘 다 없으면 통과시키지 않는다.★
-  //   앞선 판에서 `!hostHeader || …` 로 뒀다가 ★없으면 무조건 통과★ 가 됐다 —
-  //   손으로 만든 Request 는 Host 헤더가 안 붙어서, `http://example.com/…` 요청이 통과했다
-  //   (proposals 테스트가 잡았다). 실제 서버에서는 Host 가 늘 있으므로 평소 동작은 같지만,
-  //   "없으면 믿는다" 는 방향이 틀렸다 — 모르면 안 믿는 쪽이다.
+  // Bun은 Host로 request.url의 authority를 만들므로 URL host와 Host를 독립 신호로 취급하지 않는다. 둘 다 해석할 수 없으면 거부한다.
   const trusted = trustedDashboardHosts();
   let host = request.headers.get("host") ?? "";
   if (!host) {
@@ -191,15 +150,7 @@ function isLoopbackDashboardRequest(request: Request): boolean {
   return !!host && isTrustedDashboardHost(hostHeaderName(host), trusted);
 }
 
-/**
- * Host 헤더에서 ★이름만★ 뽑는다(포트 제거). IPv6 는 `[::1]:7878` 처럼 대괄호로 온다.
- *
- * ★형식이 깨지면 이름을 지어내지 않고 빈 값을 돌려준다.★ (codex·hermes 지적 2026-07-30)
- * 앞선 판은 대괄호 안만 잘라 읽어서 `[::1]junk` → `::1` 이 됐고, ★등록 없이 통과★ 했다 —
- * 신뢰를 주는 쪽으로 관대한 파서였다. 실제 서버는 이 Host 를 그대로 넘긴다(막지 않는다).
- * 그리고 그때 `req.url` 은 ★파싱 자체가 실패★ 하므로 url 쪽으로 되돌아가 확인할 수도 없다.
- * 판정이 애매하면 믿지 않는 쪽으로 간다.
- */
+// 깨진 Host를 잘라서 신뢰 호스트로 복구하지 않는다. [::1]junk 같은 입력은 빈 값으로 반환한다.
 function hostHeaderName(value: string): string {
   const v = value.trim();
   if (v.startsWith("[")) {

@@ -1,17 +1,4 @@
-// b3os 서버(팀 버스/대시보드) LaunchAgent 등록 — ★전적으로 선택(opt-in)★.
-//   기본은 등록하지 않는다. 등록 없이도 b3os는 완전히 동작한다(`bun run start`).
-//   등록하면 얻는 것: 재부팅 자동복구 · 터미널/앱을 닫아도 서버 생존 · 맥앱의 [서버 재시작] 버튼 활성화.
-//
-//   왜 필요했나: 멤버 봇(runtimes/{claude,codex}/launcher.ts)은 이미 LaunchAgent로 등록되는데,
-//   정작 그들을 관리하는 서버만 등록 수단이 없었다(비대칭). uninstall.sh는 이미 서버 plist 제거를
-// 약속하고 있었지만 등록하는 쪽이 없었다. 이 모듈이 그 구멍을 메운다.
-//
-//   설계 규칙:
-//   - 라벨은 teamosLaunchdPrefix()(= com.$USER, TEAMOS_LAUNCHD_PREFIX 로 override) — 특정 조직/사용자 하드코딩 금지.
-//   - bun 경로는 process.execPath(현재 실행 중인 bun) — /opt/homebrew 하드코딩 금지.
-//   - 루트는 REPO_ROOT — 클론 위치에 무관.
-//   - 포트/바인드/베이스패스는 현재 프로세스 env를 승계(등록 시점의 설정 그대로 재현).
-//   - macOS 전용. 그 외 플랫폼에서는 supported=false 로 알려주고 아무것도 하지 않는다(Windows 미지원).
+// 서버 LaunchAgent는 선택 기능이다. 라벨·실행 경로는 사용자와 현재 실행파일에서 파생해 설치 위치나 특정 머신에 의존하지 않게 한다.
 import { writeFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -44,9 +31,9 @@ function guiDomain(): string {
   return `gui/${process.getuid?.() ?? ""}`;
 }
 
-/** launchd 가 서버에 넘길 env — ★최소한만★.
+/** launchd 가 서버에 넘길 env — 최소한만.
  *
- *  ★TEAM_HTTP_PORT / TEAM_BIND / BASE_PATH 같은 설정값은 절대 여기에 굽지 않는다.★
+ *  TEAM_HTTP_PORT / TEAM_BIND / BASE_PATH 같은 설정값은 절대 여기에 굽지 않는다.
  *  b3os 의 설정 원천은 `.env` 이고(bun 이 cwd 에서 자동 로드, WorkingDirectory=REPO_ROOT),
  *  plist 에 명시한 env 는 .env 보다 우선하므로 값을 구워넣으면
  *  (a) 사용자가 .env 에 적은 포트를 무시하고 (b) 나중에 .env 를 고쳐도 반영되지 않는다(값 고정).
@@ -68,7 +55,7 @@ function xmlEscape(s: string): string {
 
 export function renderServerPlist(): string {
   const { label } = serverServicePaths();
-  // ★현재 실행 중인 bun 을 그대로 쓴다 — 경로 하드코딩 금지(사용자마다 bun 위치가 다르다).
+  // 현재 실행 중인 bun 을 그대로 쓴다 — 경로 하드코딩 금지(사용자마다 bun 위치가 다르다).
   const bun = process.execPath;
   const entry = `${REPO_ROOT}/src/server/index.ts`;
   const env = serviceEnv();
@@ -106,7 +93,7 @@ export function isInstalled(): boolean {
   return existsSync(serverServicePaths().plist);
 }
 
-/** launchd 에 실제로 로드돼 있는가. ★없는 라벨에 kickstart 하지 않기 위한 선행 확인.★ */
+/** launchd 에 실제로 로드돼 있는가. 없는 라벨에 kickstart 하지 않기 위한 선행 확인. */
 export function isLoaded(): boolean {
   if (!isSupportedPlatform()) return false;
   const { label } = serverServicePaths();
@@ -170,7 +157,7 @@ export function uninstall(): ServiceResult {
   return { ok: true, message: `해제 완료 — 이제 서버는 \`bun run start\` 로 직접 띄우면 됩니다 (${label})`, status: status() };
 }
 
-/** 재시작(kickstart). ★등록되지 않았으면 시도하지 않는다 — 없는 라벨에 kickstart 금지.★ */
+/** 재시작(kickstart). 등록되지 않았으면 시도하지 않는다 — 없는 라벨에 kickstart 금지. */
 export function restart(): ServiceResult {
   const st = status();
   if (!st.supported) {

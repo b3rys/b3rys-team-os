@@ -1,15 +1,4 @@
-/**
- * uninstall.sh — LaunchAgent 정지 안전성 (행위 테스트)
- *
- * ★왜 정적 검사가 아니라 실행 테스트인가★
- *   이 결함은 "코드에 무엇이 쓰여 있나" 가 아니라 "실제로 무엇을 호출하나" 의 문제다.
- *   launchd 라벨은 gui/$UID 사용자 전역 네임스페이스라 HOME 격리가 닿지 않는다. 그래서
- *   HOME 을 임시 디렉터리로 바꾼 테스트에서도 ★같은 라벨의 라이브 서비스가 그대로 bootout★ 됐다.
- *   실측(수정 전): 격리 fixture 로 uninstall 을 돌리자 com.<USER>.team-collab 과
- *   com.<USER>.team-os-boot 가 bootout 됐다 = 라이브 b3os 정지.
- *
- * 실제 launchctl 은 부르지 않는다 — PATH 앞에 shim 을 놓고 호출만 기록한다.
- */
+// launchd 라벨은 사용자 전역이어서 HOME 격리만으로 라이브 서비스를 보호하지 못한다. 실제 launchctl 대신 PATH shim으로 호출만 기록한다.
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
@@ -42,7 +31,7 @@ function makeFixture(opts: { profile: string; plists: boolean }): Fixture {
   chmodSync(join(shims, "tmux"), 0o755);
 
   copyFileSync(UNINSTALL, join(repo, "uninstall.sh"));
-  // ★base 프로필 탐지기도 같이 넣는다★ — uninstall.sh 는 이 스크립트로 hermes 공유 auth 원본을
+  // base 프로필 탐지기도 같이 넣는다 — uninstall.sh 는 이 스크립트로 hermes 공유 auth 원본을
   //   찾는다. 없으면 "탐지 불가 = 상태 모호" 로 보고 teardown 전체를 건너뛴다(그 가드의 의도).
   //   fixture 가 repo 사본이라 이 파일을 빠뜨리면 무엇을 검증하든 항상 "아무것도 안 함" 이 된다.
   const detRel = join("src", "server", "runtimes", "hermes", "detect-base-profile.sh");
@@ -54,7 +43,7 @@ function makeFixture(opts: { profile: string; plists: boolean }): Fixture {
   );
 
   if (opts.plists) {
-    // ★plist 경로는 uninstall.sh 의 SELF 와 정확히 같은 방식으로 구해야 한다★
+    // plist 경로는 uninstall.sh 의 SELF 와 정확히 같은 방식으로 구해야 한다
     //   SELF = "$(cd "$(dirname "$0")" && pwd)". macOS 는 /var → /private/var 심링크가 있어
     //   node 의 realpathSync 와 bash 의 cd+pwd 가 다른 문자열을 낼 수 있고, 그러면
     //   plist_is_self 가 영원히 불일치해 테스트가 거짓 FAIL 을 낸다. 그래서 bash 에게 직접 묻는다.
@@ -74,8 +63,8 @@ function makeFixture(opts: { profile: string; plists: boolean }): Fixture {
       `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict>\n<key>Label</key><string>ai.hermes.gateway-${opts.profile}</string>\n</dict></plist>\n`,
     );
     mkdirSync(join(home, ".hermes", "profiles", opts.profile), { recursive: true });
-    // ★base 프로필을 auth.json 과 함께 만든다★ — 이게 없으면 hermes 선검사가 "auth 원본을
-    //   못 찾음 = 상태 모호" 로 판정해 teardown ★전체★ 를 건너뛴다(그게 그 가드의 의도다).
+    // base 프로필을 auth.json 과 함께 만든다 — 이게 없으면 hermes 선검사가 "auth 원본을
+    //   못 찾음 = 상태 모호" 로 판정해 teardown 전체 를 건너뛴다(그게 그 가드의 의도다).
     //   그러면 서버·부팅 LaunchAgent 도 안 내려서, 여기서 검증하려는 "정당한 uninstall 은
     //   그대로 동작한다" 를 확인할 수 없다. 즉 이건 fixture 전제조건이지 우회가 아니다.
     const base = join(home, ".hermes", "profiles", "b3os");

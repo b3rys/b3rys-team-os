@@ -4,18 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { canSendAsBot } from "./telegramBotSend";
 
-/**
- * ★런타임마다 봇 토큰을 두는 자리가 다르다★ — 2026-07-29 Demis S7 이 잡은 라이브 결함.
- *
- * codex 팀원(dex)은 토큰이 <repo>/var/secrets/<id>.bot-token 에 있는데
- * botTokenFor 는 claude 규약(~/.claude/channels/telegram-<id>/.env)만 봤다.
- * → canSendAsBot=false → hermes CLI 폴백 → ★dex 는 hermes 가 아니라 실패★
- * → ★dex 의 팀장 보고가 도달하지 않았다.★ 파일 머리말이 2026-07-14 에 예고한 그 패턴이다.
- *
- * ※ 이 테스트는 ★실제 홈 디렉토리를 읽지 않고, env 도 안 건드린다★ — 루트를 인자로 준다.
- *  — claude 경로가 없는 상태를 전제로
- *   codex 경로만 검증한다(테스트가 이 기계 상태를 타면 안 된다).
- */
+// codex와 claude는 토큰 저장 위치가 다르다. 임시 루트를 주입하고 claude 경로 없이 codex 토큰만으로 전송 가능한지 검사한다.
 describe("botTokenFor — 런타임별 토큰 경로", () => {
   let repo: string;
 

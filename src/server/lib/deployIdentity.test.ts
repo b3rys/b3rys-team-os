@@ -1,4 +1,4 @@
-// 라이브 신원 읽기 — ★모르면 null 이어야 한다★ · ★화면 표식은 재시작 없이 바뀌어야 한다★
+// 라이브 신원 읽기 — 모르면 null 이어야 한다 · 화면 표식은 재시작 없이 바뀌어야 한다
 import { describe, test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -47,21 +47,21 @@ test("★워크트리(.git 이 파일)에서도 읽는다★ — HEAD 는 gitdir
   writeFileSync(join(wtGit, "HEAD"), "ref: refs/heads/feat\n");
   writeFileSync(join(wtGit, "commondir"), "../..\n");
   writeFileSync(join(root, ".git"), `gitdir: ${wtGit}\n`);
-  expect(readHeadCommit(root)).toBe(SHA); // ★공용 디렉토리까지 따라가지 않으면 null 이 나온다★
+  expect(readHeadCommit(root)).toBe(SHA); // 공용 디렉토리까지 따라가지 않으면 null 이 나온다
   rmSync(root, { recursive: true, force: true });
   rmSync(common, { recursive: true, force: true });
 });
 
 test("★gitdir 이 상대경로여도 repoRoot 기준으로 푼다★ — 프로세스 cwd 에 맡기지 않는다", () => {
   // worktree 는 절대경로를 쓰지만 서브모듈 등은 상대경로를 쓴다.
-  // cwd 기준으로 풀면 ★멀쩡한 배치를 cwd 가 다르다는 이유로 null 로 오판한다.★
+  // cwd 기준으로 풀면 멀쩡한 배치를 cwd 가 다르다는 이유로 null 로 오판한다.
   const root = fresh();
   mkdirSync(join(root, "nested", ".gitstore"), { recursive: true });
   writeFileSync(join(root, "nested", ".gitstore", "HEAD"), SHA + "\n");
   mkdirSync(join(root, "nested", "wt"), { recursive: true });
   writeFileSync(join(root, "nested", "wt", ".git"), "gitdir: ../.gitstore\n");
   const prevCwd = process.cwd();
-  process.chdir("/"); // ★cwd 를 일부러 엉뚱한 데로★ — 여기 기준으로 풀면 못 찾는다
+  process.chdir("/"); // cwd 를 일부러 엉뚱한 데로 — 여기 기준으로 풀면 못 찾는다
   try {
     expect(readHeadCommit(join(root, "nested", "wt"))).toBe(SHA);
   } finally {
@@ -107,14 +107,11 @@ test("빌드 표식을 읽는다", () => {
   rmSync(dist, { recursive: true, force: true });
 });
 
-// ★이 시험의 이름을 한 번 고쳤다★ — 처음엔 "그리고 캐시하지 않는다" 라고 적었는데,
-//   ★그 주장을 깨는 뮤턴트를 못 만들었다★: 없음을 캐시해도 캐시 키가 mtime 이라 다음 호출에서
-//   어차피 다시 읽힌다. ★검사하지 않는 것을 이름이 주장하고 있었다.★ 실제로 검사하는 것만 남긴다.
 test("★표식이 없다가 나중에 생기면 보인다★ (빌드 전 → 빌드 후)", () => {
   resetWebBuildCache();
   const dist = fresh();
   expect(readWebBuild(dist)).toEqual({ commit: null, at: null });
-  // 이제 빌드가 표식을 남긴다 — ★재시작 없이★ 새 값이 보여야 한다
+  // 이제 빌드가 표식을 남긴다 — 재시작 없이 새 값이 보여야 한다
   writeFileSync(join(dist, BUILD_MANIFEST), JSON.stringify({ commit: SHA, built_at: "2026-08-07T01:00:00Z" }));
   expect(readWebBuild(dist).commit).toBe(SHA);
   rmSync(dist, { recursive: true, force: true });
@@ -140,7 +137,7 @@ test("★빌드가 새 값을 쓰면 재시작 없이 반영된다★ — 화면
   // mtime 이 같은 초에 걸려 캐시가 살아남지 않도록 명시적으로 밀어준다(캐시 키는 mtime 이다)
   const future = new Date(Date.now() + 5000);
   utimesSync(file, future, future);
-  expect(readWebBuild(dist).commit).toBe(SHA); // ★기동 시 캐시했다면 옛 값이 나온다★
+  expect(readWebBuild(dist).commit).toBe(SHA); // 기동 시 캐시했다면 옛 값이 나온다
   rmSync(dist, { recursive: true, force: true });
 });
 

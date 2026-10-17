@@ -47,17 +47,7 @@ test("runtime-split: buildAgentsMd가 Skill Workshop(openclaw 전용)을 hermes�
   expect(buildAgentsMd({ ...claudeInput, runtime: "hermes_agent" }).includes(MARKER)).toBe(false);
 });
 
-/**
- * ★팀원이 실제로 읽는 파일에 판별 축이 살아 있어야 한다.★
- *
- * 정본(TEAM-OS 템플릿) 쪽만 검사하면 ★여기 문장을 지워도 초록★ 이다 — 리뷰에서 실증됐다
- * (판별 축을 지운 뮤턴트로 60 pass / 0 fail 재현). 정본과 산출물은 다른 파일이고,
- * 팀원 런타임이 읽는 것은 ★산출물★ 이다.
- *
- * 2026-08-17 실측: 기준이 예시 나열뿐이라 한 런타임이 ★우리 저장소 PR 리뷰★ 를 외부 전송으로 읽고
- * 하루에 여러 번 멈춰 섰다. 예시를 더하는 방식은 다음 사례에서 또 멈춘다 — 그래서 축을 박았다:
- * ★누가 받는가★ 이고, 기록이 공개로 보이는지가 아니다.
- */
+// 런타임이 읽는 것은 템플릿이 아니라 렌더 산출물이므로 외부전송 판별 기준이 산출물에도 있는지 검사한다.
 describe("핵심룰 — '외부 전송' 판별 축", () => {
   const approvalBullet = (md: string): string =>
     md.split("\n").find((l) => l.includes("외부 발송")) ?? "";
@@ -78,7 +68,7 @@ describe("핵심룰 — '외부 전송' 판별 축", () => {
 
   /**
    * 정본(TEAM-OS 템플릿) 쪽도 같은 축을 요구한다.
-   * ★읽는 파일은 `TEAM-OS.template.md`(git 추적) 다★ — `TEAM-OS.md` 는 gitignore 된 렌더
+   * 읽는 파일은 `TEAM-OS.template.md`(git 추적) 다 — `TEAM-OS.md` 는 gitignore 된 렌더
    * 산출물이라 워크트리·새 클론·CI 에 없다. 산출물을 읽는 검사는 환경에 따라 안 돈다.
    */
   test("정본 템플릿에도 판별 축이 있다 — 산출물만 고치면 다음 렌더에 되돌아간다", () => {
@@ -145,9 +135,7 @@ describe("한국어 설명·보고 — 산출물에 다섯 줄이 다 있나", (
     return i < 0 ? "" : md.slice(i, md.indexOf("\n\n", i));
   };
 
-  // 2026-09-08 교체. 옛 "메시지 작성 원칙" 1~4 + "문장 작성 기준" 1~3(1,112자)을
-  // 이 다섯 줄(269자)로 줄이고, 상세 규칙·사례·검토 기준은 b3os-how-to-explain 으로 옮겼다.
-  // ★줄 앞머리만 고정하면 뒷문장을 지운 변이가 살아남는다★ — 다섯 줄을 통째로 고정한다.
+  // 줄 앞머리만 고정하면 뒷문장을 삭제해도 통과하므로 규칙 다섯 줄을 통째로 비교한다.
   const BULLETS = [
     "- 질문의 답을 먼저 쓰고, 이해에 필요한 맥락만 덧붙인다.",
     "- 낯선 용어·파일·필드는 무엇이며 왜 필요한지 설명한다. 지어낸 별명·비유로 대신하지 않는다.",
@@ -167,10 +155,7 @@ describe("한국어 설명·보고 — 산출물에 다섯 줄이 다 있나", (
       // 스킬 이름이 빠지면 상세 규칙으로 가는 유일한 통로가 끊긴다. 아래 전문 대조에
       // 흡수되지만, 그 경우 실패 메시지가 "블록이 다르다" 로만 나와서 따로 잰다.
       expect(block, "★스킬 이름이 빠졌다★").toContain("b3os-how-to-explain");
-      // ★toContain 은 지운 것만 잡고 붙인 것을 못 잡는다.★ 리뷰에서 실제로 세 변이가
-      // 살아남았다 — 줄 끝에 "단, 급하면 생략해도 된다." 를 덧붙이기 / 제목과 첫 줄
-      // 사이에 다른 줄 끼우기 / 줄 순서 바꾸기. 앞 둘은 규칙의 뜻을 뒤집는다.
-      // 그래서 부분 포함이 아니라 블록 전문을 그대로 대조한다.
+      // 부분 포함 검사는 규칙을 뒤집는 추가 문장·끼워넣기·순서 변경을 잡지 못하므로 블록 전문을 비교한다.
       expect(block, "★블록이 그대로가 아니다 — 붙임·끼움·순서 바뀜 포함★").toBe(
         ["**한국어 설명·보고**", ...BULLETS].join("\n"),
       );
@@ -184,8 +169,7 @@ describe("한국어 설명·보고 — 산출물에 다섯 줄이 다 있나", (
 // 스킬 목록은 각 SKILL.md 의 frontmatter trigger 에서 생성된다. 이 줄이 12명에게
 // 스킬 존재를 알리는 유일한 통로라, 위 블록이 이름을 불러도 목록에 없으면 못 찾는다.
 describe("스킬 목록 — 규칙 파일이 아니라 rules/SKILLS.md 에 있다", () => {
-  // 목록이 규칙 파일 본문에 있으면 스킬 하나 추가가 12명 규칙 파일 재생성이 된다(팀장 2026-09-18).
-  // 규칙 파일은 가리키기만 하고(claude=@SKILLS.md · 그 외=경로), 목록 자체는 SKILLS.md 렌더본에 있다.
+  // 스킬 목록을 규칙 파일에 복제하면 목록 변경마다 전원 재렌더가 필요하다. 목록은 SKILLS.md 한 곳에 둔다.
   test("SKILLS.md 렌더본에 b3os-how-to-explain 이 있고 표 헤더가 있다", () => {
     const md = buildSkillsMd();
     expect(md).toContain("**Skills — pick by trigger**");
@@ -436,9 +420,7 @@ test("extractCustomPersona: 룰섹션 제거 + 커스텀 보존(부분매칭 오
   expect(re).not.toContain("## Global rules");
 });
 
-// ★MEMBERS_ROOT 기본-뒤집기 로직 결정론 검증 (2026-07-12 퍼블릭-안전 기본, Bill 갭 후속).★
-//   MEMBERS_ROOT 상수는 import 시점 1회 해석이라 ambient env 에 묶인다 → 우선순위 로직은 resolveMembersRoot()
-//   (호출 시점 env 읽기)로 env 를 명시 토글해 검증한다. save/restore 로 다른 테스트 오염 0.
+// MEMBERS_ROOT는 import 시점 상수이므로 호출 시점에 환경변수를 읽는 resolveMembersRoot로 우선순위를 검사한다.
 test("resolveMembersRoot — env 우선순위: B3RYS_MEMBERS_ROOT > B3RYS_HOME/members > ~/b3os/members(기본)", () => {
   const save = {
     mr: process.env.B3RYS_MEMBERS_ROOT,
@@ -457,7 +439,6 @@ test("resolveMembersRoot — env 우선순위: B3RYS_MEMBERS_ROOT > B3RYS_HOME/m
     delete process.env.B3RYS_MEMBERS_ROOT;
     expect(resolveMembersRoot()).toBe("/home/tester/b3os/members");
 
-    // ③ 둘 다 없으면 ★퍼블릭-안전 기본★ ~/b3os/members (예전 ~/Development 아님)
     delete process.env.B3RYS_HOME;
     expect(resolveMembersRoot()).toBe("/home/tester/b3os/members");
     expect(resolveMembersRoot()).not.toBe("/home/tester/Development"); // 기본이 owner-관례로 회귀하지 않음
@@ -469,13 +450,7 @@ test("resolveMembersRoot — env 우선순위: B3RYS_MEMBERS_ROOT > B3RYS_HOME/m
   }
 });
 
-// ─── live-fs 가드가 ★그 머신의 실 팀원 자리★ 를 지키는지 (2026-07-27 맥스튜디오 인시던트 회귀) ───
-//   사고: 가드가 `~/Development` 하나만 보고 있어서, 기본값이 퍼블릭-안전(`~/b3os/members`)으로 바뀐 뒤
-//   ★신규·공개 유저의 실 팀원이 통째로 가드 밖★ 이었다. 맥스튜디오 실 팀원(jane/lisa/clo)이 그 자리에
-//   살아 테스트가 정체성 파일을 덮어썼다. 두 루트 모두 지키는지 못박는다.
-// ★HOME 이 없으면 가드는 설계상 무동작★ (보호 대상이 전부 HOME 기준이라 지킬 것이 없다).
-//   그 환경(HOME 없는 컨테이너/CI)에서 이 테스트들을 그냥 돌리면 ★수트가 통째로 빨간불★ 이 된다 —
-//   결함이 아니라 전제 불성립이므로 명시적으로 건너뛴다. 조용히 통과시키지는 않는다.
+// 라이브 가드는 레거시·공개 설치의 멤버 루트를 모두 보호해야 한다. HOME이 없으면 보호 대상도 없으므로 해당 검사를 건너뛴다.
 const HAS_HOME = Boolean(process.env.HOME);
 const guardTest = HAS_HOME ? test : test.skip;
 
@@ -483,13 +458,13 @@ guardTest("live-fs 가드 — 레거시(~/Development)와 퍼블릭 기본(~/b3o
   const home = process.env.HOME ?? "";
   expect(process.env.NODE_ENV).toBe("test");        // 가드는 test 에서만 — 전제 확인
 
-  // ① 퍼블릭-안전 기본값 = 공개 유저의 실 팀원 자리. ★이게 뚫려 있던 구멍이다.★
+  // ① 퍼블릭-안전 기본값 = 공개 유저의 실 팀원 자리. 이게 뚫려 있던 구멍이다.
   expect(() => assertNotLiveMemberFsUnderTest(`${home}/b3os/members/jane`, "t")).toThrow(/live-fs-guard/);
   // ② OWNER 레거시 레이아웃
   expect(() => assertNotLiveMemberFsUnderTest(`${home}/Development/steve`, "t")).toThrow(/live-fs-guard/);
   // ③ 루트 자기 자신도 (rm -rf <root> 류 차단)
   expect(() => assertNotLiveMemberFsUnderTest(`${home}/b3os/members`, "t")).toThrow(/live-fs-guard/);
-  // ④ 에러는 ★어느 루트에 걸렸는지★ 알려줘야 고칠 수 있다
+  // ④ 에러는 어느 루트에 걸렸는지 알려줘야 고칠 수 있다
   expect(() => assertNotLiveMemberFsUnderTest(`${home}/b3os/members/jane`, "t")).toThrow(/보호루트/);
 });
 
@@ -511,13 +486,10 @@ test("live-fs 가드 — 명시 opt-in(B3RYS_TEST_ALLOW_LIVE_FS=1)이면 통과"
   }
 });
 
-// ★배선 테스트★ — 가드 함수가 옳아도 writer 가 부르지 않으면 소용없다. 실제 writer 를 태워 확인한다.
-//   (savePersonaFile 은 SOUL.md 를 쓰는 유일한 통로인데 2026-07-27 까지 가드가 없었다.)
+// 가드 함수만 검사하면 writer의 호출 누락을 잡지 못하므로 실제 writer도 실행한다.
 guardTest("live-fs 가드 배선 — savePersonaFile 이 실 팀원 경로를 거부한다(파일 안 만듦)", () => {
   const home = process.env.HOME ?? "";
-  // ★경로를 실행마다 고유하게★ — 고정 이름이면 이전 실행이 남긴 흔적에 판정이 흔들린다
-  //   (실제로 겪음: 가드를 되돌린 뮤테이션 실행이 폴더를 만들자 이후 정상 실행까지 실패).
-  //   테스트가 머신의 과거 상태를 타면 그 테스트는 못 믿는다.
+  // 고정 경로는 이전 실행 흔적이 판정에 영향을 주므로 실행마다 고유 경로를 사용한다.
   const target = `${home}/b3os/members/__guard_probe_${process.pid}_${Date.now()}__/SOUL.md`;
   expect(existsSync(dirname(target))).toBe(false);   // 전제: 아직 없다
   expect(() => savePersonaFile(target, "should never be written")).toThrow(/live-fs-guard/);
@@ -525,11 +497,10 @@ guardTest("live-fs 가드 배선 — savePersonaFile 이 실 팀원 경로를 �
   expect(existsSync(dirname(target))).toBe(false);   // 빈 폴더조차 남기지 않는다
 });
 
-// ★격리가 실제로 걸렸는지★ — preload 회귀 감지. ambient B3RYS_HOME/B3RYS_MEMBERS_ROOT 가 새어들어오면
+// 격리가 실제로 걸렸는지 — preload 회귀 감지. ambient B3RYS_HOME/B3RYS_MEMBERS_ROOT 가 새어들어오면
 //   MEMBERS_ROOT 가 실 경로가 되고, 그 순간 가드가 정당한 테스트 쓰기를 막는다(Codex 재현 케이스).
 test("preload 격리 — MEMBERS_ROOT 는 항상 temp (ambient env 가 새어들지 않는다)", () => {
-  // ★opt-in 모드는 예외★ — B3OS_TEST_MEMBERS_ROOT 로 특정 루트를 겨냥한 실행은 temp 가 아닐 수 있다.
-  //   그 경우까지 "항상 temp" 를 요구하면 테스트가 opt-in 자체를 거짓 실패로 만든다(Codex 재리뷰).
+  // B3OS_TEST_MEMBERS_ROOT는 명시적인 격리 루트여서 임시 디렉터리 바깥일 수도 있다.
   if (process.env.B3OS_TEST_MEMBERS_ROOT) {
     expect(MEMBERS_ROOT).toBe(process.env.B3OS_TEST_MEMBERS_ROOT);
     expect(() => assertNotLiveMemberFsUnderTest(`${MEMBERS_ROOT}/anyone`, "t")).not.toThrow();
@@ -543,7 +514,7 @@ test("preload 격리 — MEMBERS_ROOT 는 항상 temp (ambient env 가 새어들
   expect(() => assertNotLiveMemberFsUnderTest(`${MEMBERS_ROOT}/anyone`, "t")).not.toThrow();
 });
 
-// ★경계 없는 prefix 비교 회귀★ (Codex 지적) — 이름이 겹치는 형제 폴더까지 막으면 오탐이다.
+// 접두사가 같은 형제 폴더까지 막지 않도록 경로 경계를 확인한다.
 test("live-fs 가드 — 이름만 겹치는 형제 경로는 막지 않는다", () => {
   const home = process.env.HOME ?? "";
   expect(() => assertNotLiveMemberFsUnderTest(`${home}/b3os/members-evil/jane`, "t")).not.toThrow();
@@ -556,9 +527,7 @@ guardTest("live-fs 가드 — 상대경로/.. 로 우회되지 않는다", () =>
   expect(() => assertNotLiveMemberFsUnderTest(`${home}/b3os/members/../members/jane`, "t")).toThrow(/live-fs-guard/);
 });
 
-// ★opt-in override 실검증 (subprocess)★ — MEMBERS_ROOT 는 import 시점 상수라, 같은 프로세스 안에서는
-//   "다른 루트로 뜬 상태" 를 만들 수 없다. 그래서 별도 프로세스를 띄워 실제로 확인한다(Codex 재리뷰 요청).
-//   확인할 것 두 가지: ①지정한 non-temp 루트는 통과한다 ②그래도 실 팀원 루트는 여전히 막힌다.
+// MEMBERS_ROOT는 import 시점 상수이므로 다른 루트의 초기화는 하위 프로세스로 검사한다. 명시 루트 허용과 라이브 루트 보호를 함께 확인한다.
 guardTest("opt-in override — 지정 루트는 통과하되 실 팀원 루트 보호는 그대로", () => {
   const optRoot = "/workspace/isolated-optin";           // non-temp. 존재하지 않아도 가드 판정엔 무관
   const mod = join(import.meta.dir, "personaTemplates.ts");
@@ -583,11 +552,11 @@ guardTest("opt-in override — 지정 루트는 통과하되 실 팀원 루트 �
   expect(out.exitCode, `stderr: ${out.stderr.toString().slice(0, 400)}`).toBe(0);
   const r = JSON.parse(stdout.split("\n").pop() ?? "{}");
   expect(r.optIn).toBe("pass");            // 지정 루트엔 쓸 수 있어야 opt-in 이 의미가 있다
-  expect(r.legacy).toBe("blocked");        // ★override 로도 실 팀원 보호는 안 풀린다★
+  expect(r.legacy).toBe("blocked");        // override 로도 실 팀원 보호는 안 풀린다
   expect(r.publicDefault).toBe("blocked");
 });
 
-// override 가 ★실 팀원 루트를 가리켜도★ 보호가 풀리면 안 된다 (이 변수로 우회 금지).
+// override 가 실 팀원 루트를 가리켜도 보호가 풀리면 안 된다 (이 변수로 우회 금지).
 guardTest("opt-in override — 실 팀원 루트를 가리키면 무시하고 계속 막는다", () => {
   const home = process.env.HOME ?? "";
   const real = `${home}/b3os/members`;

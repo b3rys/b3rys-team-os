@@ -149,7 +149,6 @@ describe("loadRegistry", () => {
       writeFileSync(registryPath, JSON.stringify(original));
       syncRegistry(db, registryPath);
 
-      // 사고 입력을 직접 재현: 파일만 [], DB roster는 유지.
       writeFileSync(registryPath, "[]\n");
       const recovered = syncRegistry(db, registryPath, dir);
 
@@ -205,7 +204,6 @@ describe("loadRegistry", () => {
     }
   });
 
-  // ── 클린 설치 첫 기동: 팀원 0명은 정상 초기 상태라 경고를 찍지 않는다 (2026-07-25 공개 리허설) ──
   test("syncRegistry 는 팀원 0명(새 설치)에 coordinator 경고를 찍지 않는다", () => {
     const dir = mkdtempSync(join(tmpdir(), "team-registry-fresh-install-"));
     const warn = spyOn(console, "warn").mockImplementation(() => {});

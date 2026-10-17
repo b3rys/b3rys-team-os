@@ -1,14 +1,4 @@
-// ★드리프트 가드★ — bin/team-os 의 셸 poller 판정이 정본(runtimeEssentials.ts)과 같은 답을 내나.
-//
-// 왜 두 곳에 같은 판정이 있나:
-//   team-os 는 ★서버가 죽었을 때★ 쓰는 복구 도구다. 서버 API 를 부를 수 없으니 셸로 다시 짤 수밖에
-//   없다. 그래서 드리프트가 ★구조적으로★ 남는다 — 한쪽만 고치면 헬스 도구가 조용히 갈라진다.
-//   조용히 갈라진 헬스 도구는 없는 것보다 나쁘다(정상이라고 거짓말하므로).
-//   이 테스트가 두 판정을 같은 케이스 표에 태워 답이 같은지 못박는다. (리사 요구 #3, 2026-07-30)
-//
-// 실제 사고: 2026-07-30 리사 세션은 살아있는데 poller 가 죽어 28분 무응답. 정본은 그 상태를
-//   unhealthy 로 판정했지만(runtime_essentials_missing 기록됨) team-os 는 tmux 세션만 보고
-//   healthy 라고 했다. 도구가 정본보다 느슨했다.
+// team-os는 서버 장애 시에도 동작해야 하므로 셸 판정이 필요하다. 서버 판정과 갈리지 않도록 같은 사례로 결과를 비교한다.
 import { describe, test, expect } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -57,10 +47,10 @@ function makeHome(content: string | null): string {
 const REPO_ROOT = join(import.meta.dir, "../../..");
 
 /** 셸 판정 — team-os 의 poller_healthy 를 함수만 로드해서 부른다(서브커맨드 실행 없음).
- *  ★TEAM_OS_REPO 를 반드시 준다★: source 하면 $0 이 스크립트 경로가 아니라 셸의 $0 이라서
- *  team-os 의 저장소 자동탐색이 실패하고 ★함수를 정의하기 전에 exit 1★ 한다. 그러면 이 함수가
- *  항상 false 를 리턴해서 "unhealthy" 로 보인다 — 즉 ★판정을 안 부르고도 unhealthy 케이스가
- *  전부 통과한다.★ 실제로 그렇게 짰다가 9건이 거짓 통과했고, healthy 케이스 3건만 빨개져서
+ *  TEAM_OS_REPO 를 반드시 준다: source 하면 $0 이 스크립트 경로가 아니라 셸의 $0 이라서
+ *  team-os 의 저장소 자동탐색이 실패하고 함수를 정의하기 전에 exit 1 한다. 그러면 이 함수가
+ *  항상 false 를 리턴해서 "unhealthy" 로 보인다 — 즉 판정을 안 부르고도 unhealthy 케이스가
+ *  전부 통과한다. 실제로 그렇게 짰다가 9건이 거짓 통과했고, healthy 케이스 3건만 빨개져서
  *  겨우 알았다. 그래서 아래 loadsOk() 로 로딩 자체를 따로 단정한다. */
 function shellVerdict(home: string): boolean {
   const r = spawnSync(
@@ -82,8 +72,8 @@ function loadsOk(home: string): boolean {
 }
 
 /** 정본 판정 — claude_channel 분기의 poller 항목만 본다.
- *  ★deps 는 registry 로 주입한다★ — checkEssentialSettings 의 2번째 인자는 deps 가 아니라 registry 다.
- *  거기에 {home} 을 넘기면 registry["claude_channel"] 이 undefined 라서 ★조용히 okResult()★ 가 나온다
+ *  deps 는 registry 로 주입한다 — checkEssentialSettings 의 2번째 인자는 deps 가 아니라 registry 다.
+ *  거기에 {home} 을 넘기면 registry["claude_channel"] 이 undefined 라서 조용히 okResult() 가 나온다
  *  (= 전부 healthy). 실제로 그렇게 짰다가 12건 전부 통과해버렸다 — 판정을 안 부르고 초록이 된 것이다. */
 async function canonicalVerdict(home: string): Promise<boolean> {
   const agent = { id: NAME, runtime: "claude_channel" } as unknown as AgentRecord;
@@ -93,7 +83,7 @@ async function canonicalVerdict(home: string): Promise<boolean> {
 }
 
 describe("poller 판정 — 셸(team-os)과 정본(runtimeEssentials)이 갈라지지 않는다", () => {
-  // ★이 단정을 먼저 둔다★ — 셸 로딩이 깨지면 아래 unhealthy 케이스들이 전부 거짓 통과한다.
+  // 이 단정을 먼저 둔다 — 셸 로딩이 깨지면 아래 unhealthy 케이스들이 전부 거짓 통과한다.
   test("셸 판정 함수가 실제로 로드된다 (크래시가 unhealthy 로 위장하지 못하게)", () => {
     const home = makeHome(null);
     try {
@@ -112,7 +102,7 @@ describe("poller 판정 — 셸(team-os)과 정본(runtimeEssentials)이 갈라�
         // ① 기대값과 맞나
         expect(shell).toBe(c.expectHealthy);
         expect(canon).toBe(c.expectHealthy);
-        // ② ★서로 같나★ — 이게 드리프트 가드의 본체다
+        // ② 서로 같나 — 이게 드리프트 가드의 본체다
         expect(shell).toBe(canon);
       } finally {
         rmSync(home, { recursive: true, force: true });

@@ -8,7 +8,7 @@
  *   · allow_from — 말을 받을 방 id 목록(발신자 게이트). b3chat 은 1:1 방도 chat.id = 방 id 다(사용자 id 가 아니다)
  *   · owner_chat — 팀장에게 먼저 보낼 때(승인 요청)의 방 id. 인가 목록(allow_from)을 목적지로 쓰지 않는다
  *
- * ★channel 이 없는 팀원은 지금과 똑같다★ — kind=telegram, api_base=https://api.telegram.org,
+ * channel 이 없는 팀원은 지금과 똑같다 — kind=telegram, api_base=https://api.telegram.org,
  * allow_from·owner_chat 은 null(= 기존 팀 공통 시드·팀장 DM 해석을 그대로 쓴다).
  */
 import { readFileSync } from "node:fs";
@@ -29,7 +29,7 @@ export interface MemberChannel {
   ownerChat: string | null;
   /**
    * 설정이 틀려 이 채널로 띄우면 안 된다(fail-closed). 지금은 b3chat 인데 api_base 가 없거나 형식 밖일 때.
-   * ★텔레그램 주소로 떨어뜨리지 않는다★ — 그러면 b3chat 봇 토큰이 api.telegram.org 로 나간다.
+   * 텔레그램 주소로 떨어뜨리지 않는다 — 그러면 b3chat 봇 토큰이 api.telegram.org 로 나간다.
    */
   error?: string;
 }
@@ -68,7 +68,7 @@ export function parseMemberChannel(raw: unknown): MemberChannel {
   const ownerChat = ID_RE.test(owner) ? owner : null;
   // https 만 받는다(같은 기계 시험용 http://127.0.0.1·localhost 는 허용).
   if (validApiBase(base)) return { kind, apiBase: base, allowFrom, ownerChat };
-  // ★b3chat 은 텔레그램 주소로 떨어뜨리지 않는다(fail-closed).★ 텔레그램은 비었거나 틀리면 기본 주소 — 지금과 같다.
+  // b3chat 은 텔레그램 주소로 떨어뜨리지 않는다(fail-closed). 텔레그램은 비었거나 틀리면 기본 주소 — 지금과 같다.
   if (kind === "b3chat") return { kind, apiBase: "", allowFrom, ownerChat, error: B3CHAT_API_BASE_INVALID };
   return { kind, apiBase: TELEGRAM_API_BASE, allowFrom, ownerChat };
 }
@@ -101,8 +101,7 @@ export function channelFromEnv(env: Record<string, string | undefined> = process
   return { kind, apiBase: base || TELEGRAM_API_BASE, allowFrom: null, ownerChat };
 }
 
-/** 받은 메시지의 chat 이 그룹인가. 텔레그램 type 은 private/group/supergroup/channel — ★private 가 아니면 그룹★.
- *  type 이 없으면(옛 기록) 예전 판정(음수 id)을 그대로 쓴다. */
+// type 없는 기록은 음수 chat ID로 그룹을 구분한다. type이 있으면 Telegram의 private 여부를 우선한다.
 export function isGroupChat(chat: { type?: unknown; id?: unknown } | null | undefined): boolean {
   if (!chat) return false;
   if (typeof chat.type === "string" && chat.type !== "") return chat.type !== "private";

@@ -1,25 +1,6 @@
 import type { AgentRecord } from "../types";
 
-/**
- * Capability registry helpers (b3os 퍼블릭화 — behavior-preserving capability model).
- *
- * 코드에서 하드코딩된 agent-id 비교(`agent.id === "codex"`/`"bill"`)를 없애고,
- * agents.json 의 `capabilities: string[]` 플래그 조회로 대체한다.
- * public 코드 == live 코드(데이터만 다름) → 자유 양방향 머지.
- *
- * 정의된 capability (의미 = 코드 동작):
- * - coordinator        : default_step owner(미배정/모호 메시지 기본 담당 — sync fallback·PM 조율)
- * - ambiguous_owner    : 오너가 애매/무-확신일 때 owner-inference(defaultIntake)가 보내는 담당.
- * = "누가 볼지 애매하면 이 사람이 받아서 GD 께 문의한다".
- *                        미설정 시 coordinator 로 폴백(기존 동작 보존). coordinator(PM/조율)와 분리 가능.
- * - restricted_mention : bare alias 무시, 명시 @멘션에만 응답
- * - native_routing     : openclaw 네이티브 self-poll 경로
- * - full_context       : 팀 전체 컨텍스트 수신
- *   (coordinator 는 ★stop_all 제외 + 맨 마지막 재시작★ 도 겸한다 — 예전 `recovery` 능력을 흡수했다.
- *    둘로 나눠서 얻는 게 없었고, 나뉜 동안 ★새 설치에는 recovery 보유자가 없어 코디가 보호받지 못했다.★)
- * - non_interactive    : cron 비대화(persona 재생성 등 스킵)
- * - learning_loop_pm   : 주간 learning-loop PM 및 금요일 10:00 보고 주체
- */
+// 능력은 agents.json의 플래그로 조회한다. 특정 팀원 ID에 동작을 묶으면 다른 설치본에서 같은 역할을 재현할 수 없다.
 export function hasCapability(agent: AgentRecord, cap: string): boolean {
   return Array.isArray(agent.capabilities) && agent.capabilities.includes(cap);
 }
@@ -36,17 +17,8 @@ function warnOnce(msg: string): void {
   console.warn(msg);
 }
 
-/**
- * coordinator capability 를 가진 agent 의 id (= default_step owner. 이전 DEFAULT_STEP_AGENT_ID="codex").
- *
- * 안전망(스티브+하네스 리뷰 2026-06-20): coordinator 가 0개면 라우팅 fallback 들이 [] 를 반환해 메시지가
- * 어디에도 안 가고 silent-drop 되던 구멍이 있었다(하드코딩 "codex" 시절엔 없던 구멍 — 공개 사용자가
- * agents.json 편집 중 coordinator 누락/오타 시 라우팅 death). 그래서:
- *  - 정확히 1개  → 그 id (happy-path, 기존과 100% 동일).
- *  - 2개 이상    → 첫 매치 + warnOnce(구성 경고).
- *  - 0개         → 첫 에이전트로 fallback + warnOnce(절대 drop 하지 않음). 에이전트도 없으면 undefined.
- */
-/** 능력 이름 정본. ★문자열을 여기저기 적지 않는다★ — 오타가 조용히 게이트를 끈다. */
+// coordinator가 없으면 첫 멤버로 폴백해 미배정 메시지 유실을 막는다. 여러 명이면 첫 매치를 쓰고 구성 경고를 남긴다.
+/** 능력 이름 정본. 문자열을 여기저기 적지 않는다 — 오타가 조용히 게이트를 끈다. */
 export const COORDINATOR_CAPABILITY = "coordinator";
 
 export function coordinatorId(agents: AgentRecord[]): string | undefined {

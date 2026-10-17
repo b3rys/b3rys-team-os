@@ -87,8 +87,6 @@ export function hasRestrictedMention(text: string, agent: AgentRecord): boolean 
   return new RegExp("(^|[\\s,.:;!?])(" + parts.join("|") + ")", "i").test(text);
 }
 
-// NOTE (2026-06-06 split): dead code — no caller in the current routing path. Preserved as-is
-// (strangler: behavior-neutral move, no deletion). Candidate for a follow-up cleanup card.
 function hasAddressedAlias(text: string, alias: string): boolean {
   if (alias.startsWith("@")) return new RegExp("(^|\\s)" + escapeRegex(alias) + "\\b", "i").test(text);
 
@@ -118,13 +116,7 @@ function hasAddressedAlias(text: string, alias: string): boolean {
 }
 void hasAddressedAlias; // dead code retained (see note above)
 
-/**
- * GD 개인 컨벤션(2026-06-02, config로 분리 — 외부 공개 시 미설정이면 코어는 깨끗):
- * env ROUTER_EXAMPLE_SEPARATOR="on" 일 때만, 예시/인용 영역의 @멘션을 호출에서 제외한다.
- *  - ''' ... ''' 펜스 안 (닫는 ''' 없으면 그 뒤 끝까지)
- *  - "—-" 류 구분선(2+ 대시/엠대시 단독 라인) 아래 끝까지
- * 영역 밖 @멘션은 그대로 호출. 미설정(공개 기본)이면 원문 그대로 — false-drop 없음.
- */
+// 예시·인용 영역의 멘션 제외는 ROUTER_EXAMPLE_SEPARATOR=on일 때만 적용한다. 미설정 설치에서는 원문을 유지한다.
 export function stripExampleRegions(text: string): string {
   if (process.env.ROUTER_EXAMPLE_SEPARATOR !== "on") return text;
   let t = text.replace(/'''[\s\S]*?'''/g, " ");
@@ -153,8 +145,7 @@ export function detectExplicitTargets(text: string, agents: AgentRecord[]): stri
 // 과거/상태/산출물 참조("코덱스가 전에 말한", "데미스가 만든", "Demis 가 일어났네") 는 호출이 아니므로 제외.
 const NAME_REFERENCE_TAIL = /^(이|가|은|는|의)?\s{0,4}(전에|이전에|아까|말한|얘기한|설정한|답변한|보낸|만든|작성한|일어났|깨어났|응답한)/;
 
-// HYBRID 전용 명시 호출 감지: 기존 별칭 앞에 @가 붙은 경우만 호출로 간주.
-// GD 결정(2026-05-24): 평문 이름은 언급/컨텍스트일 수 있으므로 wake 신호가 아니다.
+// 평문 이름은 단순 언급일 수 있어 HYBRID 호출은 @가 붙은 별칭만 인정한다.
 export function detectAddressedNamesLoose(text: string, agents: AgentRecord[]): string[] {
   const targets: string[] = [];
   for (const agent of agents) {
@@ -186,14 +177,10 @@ export function detectAddressedNamesLoose(text: string, agents: AgentRecord[]): 
 // 요청/지시/질문 신호 — 이게 없으면 이름이 있어도 '호출'이 아니라 '나열·서술'일 수 있음.
 // over-summon 방지용: "대상은 빌/코덱스/스티브/데미스/드박이겠지" 같은 나열에서 다 깨우지 않게.
 const REQUEST_MARKER = /(의견|생각|어때|어떻|줘|해줘|봐줘|답해|답변|확인|만들|고쳐|구현|배포|세팅|설정|알려|보고|전달|리뷰|체크|들려|봐봐|해봐|부탁|질문|시켜|하라|할까|볼까|\?)/;
-// NOTE (2026-06-06 split): SCOPE_MARKER + filterLiveWakeTargets are dead code (scope guard removed
-// 2026-05-25; no current caller). Preserved as-is for behavior-neutral move. Cleanup card candidate.
 const SCOPE_MARKER = /(대상|범위|적용\s*대상|self[-\s]?learning|셀프\s*러닝|health|status|상태\s*관리|정책|규칙|예시|케이스)/i;
 void SCOPE_MARKER;
 
 function filterLiveWakeTargets(text: string, agents: AgentRecord[], targets: string[]): string[] {
-  // scope-list 가드 제거 (2026-05-25, 제품 결정): @멘션 필수(detectAddressedNamesLoose) + 아래 REQUEST_MARKER
-  // 체크로 이미 커버됨 — 요청 없으면 안 깬다. scope단어 가드는 "정책/규칙" 든 진짜 호출을 오판해 redundant+해로움.
   return targets.filter((id) => {
     const agent = agents.find((a) => a.id === id);
     if (!agent) return false;
@@ -201,12 +188,7 @@ function filterLiveWakeTargets(text: string, agents: AgentRecord[], targets: str
     // Direct bot mention is an explicit wake, even for specialist agents.
     if (hasTelegramMention(text, agent)) return true;
 
-    // Specialist agents wake when explicitly @-addressed with an action/question.
-    // targets here came from detectAddressedNamesLoose (requires "@" prefix + drops past-refs),
-    // so any id is already an explicit @-mention.
-    // Fix 2026-05-25: 여러 명 명시 @멘션("@드박 @데미스 @스티브 들려?")시 lead 한 명만 깨우던 버그 →
-    //   lead 제한 제거. lead 무관하게 @멘션+요청이면 깨운다.
-    //   (delegation 은 analyzeDelegation 후처리로 narrow / bare 이름·scope-list 는 위에서 이미 차단)
+    // 대상은 명시 멘션에서 도출된다. 요청·질문이 있으면 lead 여부와 무관하게 깨운다.
     return REQUEST_MARKER.test(text);
   });
 }

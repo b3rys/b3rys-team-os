@@ -1,9 +1,4 @@
-// 팀원 지시문의 스킬 경로가 ★절대경로★ 인지 — 2026-07-27 발신자 감지 사고 회귀.
-//
-// 사고: AGENTS.md 가 workspace-relative `skills/b3os-team-inbox/scripts/send.sh` 를 시켰는데
-// ★팀원 워크스페이스엔 skills/ 가 없다.★ 그래서 모델이 공용 team-os 폴더로 cd 한 뒤 실행했고,
-// 거기서는 _me.sh 가 "현재 폴더 ↔ workspace_path" 매칭으로 신원을 못 찾아 ★발신자 해석이 실패★했다.
-// 모델은 문서대로 한 것이다 — ★문서가 존재하지 않는 경로를 가리킨 게 원인.★
+// 팀원 워크스페이스에는 skills 폴더가 없을 수 있어 절대경로가 필요하다. 실행 폴더를 바꾸면 발신자 감지도 실패할 수 있다.
 import { test, expect } from "bun:test";
 import { buildAgentsMd, buildPersona, REPO_ROOT } from "./personaTemplates";
 
@@ -16,7 +11,6 @@ const claude = buildPersona({ id: "steve", display_name: "Steve", role: "dev", r
 
 test("★send.sh 호출을 절대경로로 안내한다★ (워크스페이스 상대경로 금지)", () => {
   expect(agents).toContain(`${ROOT}/skills/b3os-team-inbox/scripts/send.sh`);
-  // ★상대경로 지시가 남아 있으면 안 된다★ — 그게 이번 사고의 원인이다.
   expect(agents).not.toContain("use `skills/b3os-team-inbox/scripts/send.sh");
 });
 
@@ -33,7 +27,7 @@ test("★머신 고정 경로를 박지 않는다★ — REPO_ROOT 파생이라 
   for (const [name, md] of [["AGENTS", agents], ["CLAUDE", claude]] as const) {
     // HOME 밑이면 `~/` 로 나와야 한다. 사용자명이 그대로 박히면 다른 머신에서 무의미하다.
     if (HOME) expect(md, name).not.toContain(`${HOME}/`);
-    // 렌더 실패로 치환이 안 된 흔적(리터럴 ${...})이 남으면 안 된다 — 실제로 한 번 밟았다.
+    // 렌더가 완료되지 않으면 리터럴 ${...} 경로가 남아 실행할 수 없으므로 치환 누락을 검사한다.
     expect(md, name).not.toContain("${tilde(");
     expect(md, name).not.toContain("${REPO_ROOT}");
   }

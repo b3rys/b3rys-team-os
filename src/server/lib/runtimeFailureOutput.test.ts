@@ -1,15 +1,4 @@
-/**
- * ★실측 근거★ (team.db, 2026-07-13)
- *   11:43:48  hermes → bill       종합 결과입니다. - devon: 김치찌개 …            ← ★정상 종합★
- *   11:44:20  hermes → bill       Codex response remained incomplete after 3 … ← ★실패가 답변으로★
- *   11:44:46  hermes → bill       (또)
- *   07-07     hermes → broadcast  API call failed after 3 retries: HTTP 429 …  ← ★팀 전체에★
- *
- * ★1차 fix 는 적대 리뷰에서 반증됐다★ — 문장 정규식은 실패 분기 24개 중 1개만 잡고, 재시도는
- * hermes 턴이 비멱등(턴 도중 send.sh 로 이미 팬아웃)이라 ★중복 위임★ 을 낳는다. 그래서:
- *   1차 판정 = ★구조화 신호★ (usage-file 의 completed:false) — 24개 분기를 한 번에
- *   실패 정책 = ★expire_no_retry★ (openclaw 와 같은 이유)
- */
+// Hermes는 실패도 exit 0으로 끝낼 수 있어 usage-file의 completed:false로 판정한다. 재시도는 이미 전송된 위임을 중복시킬 수 있다.
 import { describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,8 +13,8 @@ function usageFile(obj: unknown): string {
 
 describe("★1차 — 구조화 신호(usage-file)가 실패를 판정한다★", () => {
   it("★completed:false 면 실패★ — 실패 분기 24개가 전부 이 값이다 (문장이 뭐든 상관없다)", () => {
-    // 실제 incomplete 분기: {completed:false, partial:true, error:"…"} — ★failed 키가 없다★
-    // ★usage-file 은 error·partial 키를 안 쓴다★ (completed/failed/failure 만) — 그래서 사유는 폴백 문구다.
+    // 실제 incomplete 분기: {completed:false, partial:true, error:"…"} — failed 키가 없다
+    // usage-file 은 error·partial 키를 안 쓴다 (completed/failed/failure 만) — 그래서 사유는 폴백 문구다.
     const f = readTurnFailure(usageFile({ completed: false }));
     expect(f).not.toBeNull();
     expect(f?.reason).toContain("completed=false");

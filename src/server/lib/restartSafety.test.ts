@@ -1,10 +1,4 @@
-// ★불변식: 되살릴 수 없으면 죽이지 마라.★
-//
-// restartAgent(claude_channel) 의 공개-설치본 폴백은 tmux 세션을 죽이고 기동 스크립트로 다시 띄운다.
-// 순서가 뒤집히면(먼저 kill → 그제서야 기동 스크립트 없음을 발견) 멀쩡히 돌던 멤버를 죽여놓고 못 살린다.
-// = '재시작이 실패한다'(원래 버그)보다 나쁜 '멤버 영구 다운'. Bill 리뷰 blocker(2026-07-12).
-//
-// 소스 순서를 직접 검증한다(실제 tmux 를 죽이지 않고 회귀를 고정하는 가장 확실한 방법).
+// 기동 스크립트를 확인하기 전에 tmux를 종료하면 복구할 수 없으므로 실행 순서를 검사한다. 실제 라이브 tmux는 종료하지 않는다.
 import { describe, test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -44,7 +38,7 @@ describe("restartAgent(claude_channel) — 되살릴 수 없으면 죽이지 않
     // 되살릴 수단이 없을 때: 즉시 실패 반환만 하고,
     expect(guardBody).toContain("return");
     expect(guardBody).toContain("ok: false");
-    // ★그 안에서 세션을 죽이면 안 된다★(죽여놓고 못 살리는 경로가 생긴다).
+    // 그 안에서 세션을 죽이면 안 된다(죽여놓고 못 살리는 경로가 생긴다).
     expect(guardBody).not.toContain("kill-session");
   });
 

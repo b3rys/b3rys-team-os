@@ -34,10 +34,7 @@ export interface LlmRouteDecision extends RouteDecision {
   intent: RouteIntent;
   domain: string;
   via: "llm" | "regex_fallback";
-  /**
-   * 여러 단계(fan-out + 보고 회수) 위임이면 true. GD 지침(2026-05-24): 자동 실행하지 말고
-   * 수신 에이전트가 GD 에게 계획을 재확인(컨펌)한 뒤 진행. 라우터는 신호만 올린다.
-   */
+  // 다단계 위임은 수신자가 실행 전에 계획을 확인해야 한다. 라우터는 실행하지 않고 신호만 제공한다.
   needsGdConfirm?: boolean;
   /**
    * 결정 종류:
