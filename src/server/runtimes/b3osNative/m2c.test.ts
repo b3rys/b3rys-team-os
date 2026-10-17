@@ -117,7 +117,7 @@ describe("runCallerChain (fallback 로직)", () => {
   });
 });
 
-// ── runTurn 통합: audit via_caller/fallback_used + 회귀(주입 caller=길이1) ──
+//  runTurn 통합: audit via_caller/fallback_used + 회귀(주입 caller=길이1)
 function setupDb(): Database {
   const db = new Database(":memory:");
   migrate(db);

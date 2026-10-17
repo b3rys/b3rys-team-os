@@ -4,21 +4,8 @@ import { scopeKeyForOperation, targetForOperation } from "../../lib/permissionGa
 import type { ApprovalRequest } from "./appServerClient";
 import type { ObservedItem } from "./appServerItemIndex";
 
-/**
- * ★S3(#106) — 사람이 볼 수 있게.★
- *
- * ★이 단계가 왜 필요했는지 (실측으로 발견):★
- * S2 는 `update a.ts(+1/-2)` 같은 사람용 요약을 `op.text` 에 잘 만들어 뒀다. 그런데
- * ★팝업은 text 를 보여주지 않는다.★ telegramCapture 가 렌더하는 두 줄은
- *   `${runtime}/${agent_id} · ${action}` / `${target}`
- * 이고, `targetForOperation` 의 우선순위는 ★command > path > egress_url > text★ 다.
- * → write 승인에서는 ★path 가 화면이고 text 는 아무도 못 본다.★
- * 그래서 S2 의 완료 판정("파일명+규모가 포함된다")은 ★text 기준으로는 참, 화면 기준으로는 거짓★ 이었다.
- *
- * ★그래서 S3 의 대상은 path 다★ — 한 문자열이 ①열쇠 ②사람이 읽는 유일한 줄 두 일을 한다.
- * 규모(+n/-n)는 ★열쇠에 넣을 수 없다★(내용이 바뀔 때마다 열쇠가 달라져 '항상 허용' 이 영원히 안 붙는다).
- * 규모를 화면에 띄우려면 렌더러(codex 폴더 밖)를 고쳐야 한다 — ★렌더러 변경 결정 대기.★
- */
+/** 쓰기 승인의 화면은 text보다 우선하는 path를 보여주며 path는 scope 재료이기도 하다.
+ * 내용 규모를 path에 넣으면 수정마다 지속 허용이 달라지므로 text에만 남긴다. 규모 표시는 별도 렌더러 변경 결정이 필요하다. */
 
 const observed = (
   changes: Array<{ path: string; kind: string; movePath?: string | null; diff?: string }>,
@@ -40,7 +27,7 @@ describe("S3 — 화면이 곧 열쇠라는 계약", () => {
   test("★화면에 나오는 줄은 text 가 아니라 path 다★ — 이 우선순위가 바뀌면 S3 전체 전제가 무너진다", () => {
     const op = buildOperationFromApproval(fileReq(observed([{ path: "src/a.ts", kind: "update" }])), "dex");
     expect(op.text).toContain("(+1/-1)");        // 규모는 text 에 있다
-    expect(screenLine(op)).toBe(op.path ?? "");  // ★그런데 화면은 path 다★
+    expect(screenLine(op)).toBe(op.path ?? "");  // 그런데 화면은 path 다
     expect(screenLine(op)).not.toContain("(+");  // → 규모는 화면에 안 나온다(렌더러 변경 대기)
   });
 
@@ -60,7 +47,7 @@ describe("S3 — 잘려도 열쇠가 갈린다 (지문을 뒤로 옮긴 근거)"
     const b = buildOperationFromApproval(fileReq(many("-bravo")), "dex");
     // 화면에 보이는 부분은 같다 — 사람 눈으로는 구별이 안 된다.
     expect(screenLine(a).slice(0, 100)).toBe(screenLine(b).slice(0, 100));
-    // ★그래도 열쇠는 갈린다★ — 파일집합 전체의 operation hash 가 절단선 안에 남기 때문이다.
+    // 그래도 열쇠는 갈린다 — 파일집합 전체의 operation hash 가 절단선 안에 남기 때문이다.
     expect(scopeKeyForOperation(a)).not.toBe(scopeKeyForOperation(b));
   });
 
@@ -75,12 +62,12 @@ describe("S3 — 잘려도 열쇠가 갈린다 (지문을 뒤로 옮긴 근거)"
     const one = buildOperationFromApproval(fileReq(observed([{ path: "src/a.ts", kind: "update", diff: "@@ -1 +1 @@\n-a\n+b\n" }])), "dex");
     const two = buildOperationFromApproval(fileReq(observed([{ path: "src/a.ts", kind: "update", diff: "@@ -1,9 +1,9 @@\n-x\n+y\n-z\n+w\n" }])), "dex");
     expect(one.text).not.toBe(two.text);                          // 규모는 다르다
-    expect(scopeKeyForOperation(one)).toBe(scopeKeyForOperation(two)); // ★열쇠는 같다★
+    expect(scopeKeyForOperation(one)).toBe(scopeKeyForOperation(two)); // 열쇠는 같다
   });
 });
 
 describe("S3 — 구세대도 같은 것을 보여준다", () => {
-  /** ★벤더 스키마 0.144.6 실측 모양★ — 짐작이 아니라 generate-json-schema 출력에서 읽었다.
+  /** 벤더 스키마 0.144.6 실측 모양 — 짐작이 아니라 generate-json-schema 출력에서 읽었다.
    *    add    `{ type:"add",    content }`      delete `{ type:"delete", content }`
    *    update `{ type:"update", unified_diff, move_path? }` */
   const oldGen = (fileChanges: Record<string, unknown>): ApprovalRequest => ({
@@ -138,25 +125,19 @@ describe("S3 — 폴더 전체 요청은 경고가 먼저 보인다", () => {
   });
 
   test("★표시에 안 보이는 부분만 다른 두 루트도 열쇠가 갈린다★ — 지문이 루트 전문을 담는 이유", () => {
-    // ★이 시험은 뮤턴트가 살아남아서 추가했다(2026-07-30).★ 앞 시험은 두 루트의 ★뒤★ 가 달라서
-    //   표시 문자열만으로도 열쇠가 갈렸다 — 즉 operation hash 를 지워도 초록이었다. ★기계가 아니라 입력이 문제였다.★
-    //   여기서는 ★뒤 71자가 완전히 같고 앞만 다른★ 두 루트를 쓴다. 표시로는 구별이 불가능하므로
-    //   operation hash 가 grantRoot 전문을 담지 않으면 ★서로 다른 폴더 승인이 같은 열쇠★ 가 된다(P2 그 사고).
+    // 표시가 같은 뒤 71자를 가진 서로 다른 루트로 검사해야 grantRoot 전문 해시가 빠진 충돌을 잡는다.
     const tail = "/" + "x".repeat(300);
     const a = root(`/alpha${tail}`);
     const b = root(`/bravo${tail}`);
-    // ★사람이 읽는 부분(operation hash 앞까지)이 글자 하나까지 같다★ — 눈으로는 구별할 방법이 없다.
+    // 사람이 읽는 부분(operation hash 앞까지)이 글자 하나까지 같다 — 눈으로는 구별할 방법이 없다.
     const readable = (s: string) => s.replace(/ #[0-9a-f]{12}$/, "");
     expect(readable(screenLine(a))).toBe(readable(screenLine(b)));
-    // → 즉 ★이 두 요청을 가르는 것은 operation hash뿐이다★. 그래서 operation hash 가 루트 전문을 담아야 한다.
-    expect(scopeKeyForOperation(a)).not.toBe(scopeKeyForOperation(b)); // ★그래도 열쇠는 갈려야 한다★
+    // → 즉 이 두 요청을 가르는 것은 operation hash뿐이다. 그래서 operation hash 가 루트 전문을 담아야 한다.
+    expect(scopeKeyForOperation(a)).not.toBe(scopeKeyForOperation(b)); // 그래도 열쇠는 갈려야 한다
   });
 
   test("★grantRoot 로 보이는 낯선 키가 있으면 해석 실패로 보낸다★ — 벤더 개명이 조용히 경고를 지우지 못하게", () => {
-    // ★후속 가드(2026-07-30).★ 리뷰 중 payload 를 `grant_root` 로 잘못 만들어 돌려보니
-    //   ★경고가 화면에서 사라지고 서로 다른 폴더 요청이 같은 열쇠★ 가 됐다. 0.144.6 에서는 도달 불가
-    //   (바이너리 문자열로 직접 확인: grantRoot 3건 / grant_root 0건). 그러나 ★벤더가 이름을
-    //   바꾸면 에러 없이★ 폴더 전체 권한이 평범한 파일 쓰기로 보인다 — 그래서 모르면 묻는다.
+    // grantRoot와 유사한 미지원 키를 무시하면 폴더 전체 권한이 일반 파일 쓰기로 보일 수 있으므로 해석 실패로 처리한다. 0.144.6 필드는 grantRoot다.
     for (const key of ["grant_root", "GrantRoot", "grantroot", "grant-root"]) {
       const op = buildOperationFromApproval(
         fileReq(observed([{ path: "src/a.ts", kind: "update" }]), { [key]: "/some/root" }),
@@ -179,14 +160,7 @@ describe("S3 — 폴더 전체 요청은 경고가 먼저 보인다", () => {
   });
 });
 
-/**
- * ★리뷰(2026-07-30)가 잡은 반례 — 전부 재현 확인 후 수정.★
- *
- * 앞의 시험 39건이 전부 초록인데 아래 여섯 가지가 깨져 있었다. ★시험이 주장하는 것을
- * 재고 있지 않았다★ — 뮤턴트가 살아남는 것과 같은 형태다(입력이 메커니즘을 안 건드린다).
- * 두 번째 시험은 ★"열쇠는 operation hash 가 갈라준다" 가 성립하는 자리★ 인데,
- * operation hash의 재료가 모호하면 성립하지 않는다 — ★재료가 유일해야 그 문장이 참이다.★
- */
+/** 표시가 아니라 구조화된 해시 재료가 요청을 구분해야 한다. 표시가 같은 입력·이어붙이면 충돌하는 입력도 검증한다. */
 describe("S3 — 리뷰 반례 (회귀 가드)", () => {
   const one = (path: string, kind = "update", movePath: string | null = null, diff?: string) =>
     buildOperationFromApproval(fileReq(observed([{ path, kind, movePath, diff }])), "dex");
@@ -201,7 +175,7 @@ describe("S3 — 리뷰 반례 (회귀 가드)", () => {
     expect(targetForOperation(a).length).toBeLessThanOrEqual(240);
     expect(targetForOperation(a)).toMatch(/#[0-9a-f]{12}$/);           // 지문 생존
     expect(targetForOperation(a)).toContain("…");                      // 잘렸음을 말한다
-    expect(scopeKeyForOperation(a)).not.toBe(scopeKeyForOperation(b)); // ★앞 240자가 같아도 갈린다★
+    expect(scopeKeyForOperation(a)).not.toBe(scopeKeyForOperation(b)); // 앞 240자가 같아도 갈린다
   });
 
   test("★이름에 '>' 가 든 파일과 '이동' 이 같은 열쇠가 되지 않는다★ — 지문 재료가 구조화 tuple 이라서", () => {
@@ -220,9 +194,7 @@ describe("S3 — 리뷰 반례 (회귀 가드)", () => {
   });
 
   test("★같은 요청의 두 쓰기가 한 개로 합쳐지지 않는다★ — 합치면 하나가 화면에서 사라진다", () => {
-    // ★뮤턴트로 찾은 자리(2026-07-30).★ operation hash ·중복제거 재료가 이어붙인 문자열이면
-    //   `a>b` 새 파일과 `a`→`b` 이동이 ★같은 항목★ 이 되어 화면이 "파일 1개 · add a>b" 로 나온다 —
-    //   ★이동 쓰기가 통째로 안 보이는 채로 승인된다.★ 개수까지 거짓이 되므로 사람이 알아챌 수도 없다.
+    // a>b 파일 생성과 a→b 이동은 문자열 이어붙이기로 충돌하므로 구조화된 재료로 구분해야 변경 개수·종류를 숨기지 않는다.
     const op = buildOperationFromApproval(
       fileReq({
         itemId: "i1", turnId: "t1", threadId: "th1",
@@ -239,9 +211,7 @@ describe("S3 — 리뷰 반례 (회귀 가드)", () => {
   });
 
   test("★이모지가 반 토막 나지 않는다★ — 짝 없는 서로게이트가 문자열 어디에도 없다", () => {
-    // ★검사 함수가 틀리기 쉬운 자리다(2026-07-30).★ ★끝 글자만★ 보면 잘린 조각이 ★중간★ 에 남아 안 걸리고,
-    //   ★정상 쌍에서 i 를 2 칸 건너뛰지 않으면★ 뒷 짝을 고아로 오판한다.
-    //   ★재는 도구가 틀리면 초록도 빨강도 뜻이 없다.★ pad=208 에서 수정 전 코드가 깨지는 것을 확인했다.
+    // 서로게이트 검사는 끝뿐 아니라 중간의 고아 조각도 찾고 정상 쌍은 함께 건너뛰어야 잘림 검증 자체가 오판하지 않는다.
     const loneSurrogateAt = (s: string): number => {
       for (let i = 0; i < s.length; i++) {
         const c = s.charCodeAt(i);
@@ -268,14 +238,13 @@ describe("S3 — 리뷰 반례 (회귀 가드)", () => {
   });
 
   test("★종류와 필드가 어긋난 payload 에서 규모를 지어내지 않는다★ — 재료를 종류에 맞춰 고른다", () => {
-    // ★2회전 반례(2026-07-30).★ 앞선 판은 type 과 무관하게 unified_diff 를 먼저 집었고,
-    //   세는 쪽은 kind 로 판정하므로 ★짝이 어긋나면 규모를 지어냈다★ — 셋 다 실측 재현했다.
+    // 규모를 세는 kind와 내용을 고르는 필드가 일치해야 다른 종류의 필드에서 변경량을 지어내지 않는다.
     const t = (fileChanges: unknown) => buildOperationFromApproval(oldGen(fileChanges), "dex").text ?? "";
-    // update 인데 content 만 있다 → 예전엔 (+0/-0) = "아무것도 안 바뀐다" 는 거짓말
+    // update에 content만 있으면 규모는 알 수 없다.
     expect(t({ "x.txt": { type: "update", content: "hello\n" } })).toBe("파일 1개: update x.txt");
-    // add 인데 unified_diff 만 있다 → 예전엔 (+3/-0) = 없는 내용에서 규모를 만들었다
+    // add에 unified_diff만 있으면 규모는 알 수 없다.
     expect(t({ "x.txt": { type: "add", unified_diff: "@@ -1 +1 @@\n-a\n+b\n" } })).toBe("파일 1개: add x.txt");
-    // 둘 다 있으면 ★종류에 맞는 필드★ 를 쓴다 — content 1줄이 정답이고 예전엔 +3 이었다
+    // add는 unified_diff가 함께 있어도 content를 기준으로 센다.
     expect(t({ "x.txt": { type: "add", content: "one\n", unified_diff: "@@ -1 +1 @@\n-a\n+b\n" } }))
       .toBe("파일 1개: add x.txt(+1/-0)");
   });
@@ -295,7 +264,7 @@ describe("S3 — 해석 실패 화면", () => {
       "dex",
     );
     expect(op.action).toBe("approval_unparsed"); // 앞줄은 공용 코드가 만든다 — 여기서 못 바꾼다
-    expect(screenLine(op).startsWith("내용 해석 실패")).toBe(true); // ★뒷줄이 설명한다★
+    expect(screenLine(op).startsWith("내용 해석 실패")).toBe(true); // 뒷줄이 설명한다
     expect(screenLine(op)).toContain("패치를 적용해도 될까요");
     expect(screenLine(op)).toMatch(/#[0-9a-f]{16}/); // payload 지문은 유지(요청마다 다른 열쇠)
   });

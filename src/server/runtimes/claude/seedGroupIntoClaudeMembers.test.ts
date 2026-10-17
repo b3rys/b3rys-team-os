@@ -1,5 +1,4 @@
-// seedGroupIntoClaudeMembers — 팀방 나중 셋업 갭(#9) 수정 검증.
-// ★실 FS 격리: 실제 ~/.claude/channels 가 아니라 mkdtemp 임시 dir(channelsDir 인자)만 만진다.
+// 그룹 추가 시험은 channelsDir을 tmp로 주입해 실제 채널 설정을 수정하지 않는다.
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

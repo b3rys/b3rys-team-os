@@ -47,9 +47,9 @@ describe("codex launcher (M4) — 순수 렌더러", () => {
   });
 
   /**
-   * ★작업 디렉토리가 없으면 launchd 는 cwd `/` 로 띄운다.★ 그러면 cwd 기준 상대경로가 전부 루트로 풀린다 —
+   * 작업 디렉토리가 없으면 launchd 는 cwd `/` 로 띄운다. 그러면 cwd 기준 상대경로가 전부 루트로 풀린다 —
    * 실측: 사진 저장 폴더가 `/team-media` 가 되어 1:1 사진 첨부가 `EROFS` 로 전부 실패했다.
-   * ★서버 plist 에는 이 키가 원래 있었다★(그래서 서버 경로만 멀쩡했다). 브리지도 같은 모양이어야 한다.
+   * 서버 plist 에는 이 키가 원래 있었다(그래서 서버 경로만 멀쩡했다). 브리지도 같은 모양이어야 한다.
    */
   test("★plist 에 WorkingDirectory 가 있다★ — 없으면 cwd 가 / 라 상대경로가 루트로 풀린다", () => {
     const p = codexBridgePaths("cody");
@@ -66,7 +66,7 @@ describe("codex launcher (M4) — 순수 렌더러", () => {
     expect(sh).toContain(`TOKEN_FILE="${p.tokenFile}"`); // 토큰 경로
     expect(sh).toContain(`export CODEX_BOT_TOKEN="$(cat "$TOKEN_FILE")"`); // 파일서 env로(변수 경유)
     expect(sh).toContain(`export CODEX_WORKDIR="${p.workdir}"`);
-    expect(sh).toContain(`export CODEX_ALLOW_FROM="${p.allowFrom}"`); // ★발신자 게이트 시드 배선(P0) — 이게 있어야 게이트가 라이브에서 켜짐
+    expect(sh).toContain(`export CODEX_ALLOW_FROM="${p.allowFrom}"`); // 발신자 게이트 시드 배선(P0) — 이게 있어야 게이트가 라이브에서 켜짐
     expect(sh).toContain("export B3OS_REPO_ROOT=");
     expect(sh).toContain("export TEAM_BASE_URL=");
     expect(sh).toContain("export CODEX_SCHEDULE_TOOL_ENABLED=");
@@ -109,21 +109,17 @@ describe("codex launcher (M4) — 순수 렌더러", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  // ★계약이 바뀌었다(2026-08-18 제품 결정) — 호스트 설정을 ★상속한다★.★
-  //   예전 계약: 호스트의 trust/MCP/plugins 를 절대 물려주지 않는다.
-  //   왜 바꿨나: 새로 영입한 팀원이 이미 있던 팀원보다 기능이 좁아 같은 과제를 맡길 수 없었다.
-  //   상속 결과는 호스트 파일 유무에 따라 갈리므로 configSeed.test.ts 에서 고정 입력으로 잰다.
-  //   여기서는 ★호스트가 있든 없든 항상 성립해야 하는 것★ 만 잰다.
+  // 같은 과제를 맡길 수 있도록 호스트의 기능 설정을 상속한다. 호스트 파일 유무에 따른 결과는 configSeed의 고정 입력으로 검증하고 여기서는 공통 조건을 확인한다.
 
   test("★우리 실행 정책을 config 에 쓰지 않는다★ — dex 만 잠겨 있던 원인(2026-08-14)", () => {
     const cfg = renderMinimalCodexConfig({ workdir: "/tmp/cody workspace" });
     // 실측: 12명 중 dex 만 타 프로젝트·홈 쓰기가 거절됐다. openclaw 의 codex-home 에는
     // 아래 네 항목이 0건인데 dex 것에만 4건 있었다 — codex 한계가 아니라 이 함수가 만든 차이였다.
-    // ★상속으로 바뀐 뒤에도 이 계약은 그대로다★ — 호스트에 정책이 있어도 걷어내고 물려준다.
+    // 상속으로 바뀐 뒤에도 이 계약은 그대로다 — 호스트에 정책이 있어도 걷어내고 물려준다.
     expect(cfg).not.toContain("sandbox_mode");
     expect(cfg).not.toContain("approval_policy");
     expect(cfg).not.toContain("[sandbox_workspace_write]");
-    expect(cfg).not.toContain("[permissions."); // 프로파일을 다시 넣으면 승인이 죽는다(2026-08-12 실측)
+    expect(cfg).not.toContain("[permissions."); // 실행 모드는 프로토콜에서 정하므로 설정 프로파일을 중복 시드하지 않는다.
   });
 
   test("ensureCodexHome: 파일이 없으면 시드한다(내용은 호스트 상속 − 정책)", () => {
@@ -133,7 +129,7 @@ describe("codex launcher (M4) — 순수 렌더러", () => {
     const cfgPath = join(tmp, "config.toml");
     expect(existsSync(cfgPath)).toBe(true);
     const cfg = readFileSync(cfgPath, "utf-8");
-    // ★정책은 어느 경우에도 안 들어간다★ — 호스트에 있어도 걷어낸다.
+    // 정책은 어느 경우에도 안 들어간다 — 호스트에 있어도 걷어낸다.
     expect(cfg).not.toContain("sandbox_mode");
     expect(cfg).not.toContain("approval_policy");
     // 능력(플러그인·MCP)은 호스트에 있으면 물려받는다 — 그 판정은 configSeed.test.ts 에서

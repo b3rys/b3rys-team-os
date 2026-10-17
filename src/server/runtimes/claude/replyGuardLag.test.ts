@@ -1,7 +1,7 @@
 /**
  * reply-guard 의 기록 지연 대응 — 훅이 돌 때 transcript 에 이번 턴 reply 줄이 아직 없을 수 있다.
  * 표식(PostToolUse --mark)이 먼저, transcript 가 다음, 표식 배선 전에만 잠깐 다시 읽는다.
- * ★훅을 실제로 실행해서 잰다★ (replyGuardScope.test.ts 와 같은 방식).
+ * 훅을 실제로 실행해서 잰다 (replyGuardScope.test.ts 와 같은 방식).
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync, spawn } from "node:child_process";

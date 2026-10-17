@@ -149,7 +149,7 @@ describe("멱등 — 같은 messageId 는 한 번만", () => {
   });
 });
 
-// ── 실제로 bridge window 를 열어 본다 (127.0.0.1 · 토큰 · 멱등) ──
+//  실제로 bridge window 를 열어 본다 (127.0.0.1 · 토큰 · 멱등)
 import { startBridgeWindow } from "./bridgeWindow";
 
 describe("startBridgeWindow — 실제 왕복", () => {
@@ -232,13 +232,7 @@ describe("startBridgeWindow — 실제 왕복", () => {
 });
 
 
-// ── ★서버는 팀원 대신 말하지 않는다★ (hermes 와 같은 계약) ──
-//
-// bridge window 경로가 텔레그램으로 직접 쏘면 방에는 뜨지만 ★버스에는 아무 기록이 없다.★
-// 같은 방에서 claude 팀원 답은 남고 dex 것만 0건이었다(대조군 실측). 그래서 턴 본문은
-// 메모로 두고, 방에 말하려면 팀원이 직접 `send.sh --to broadcast` 를 불러야 한다.
-//
-// ★한 함수만 내보낸다★ — 발신 떼기와 명령 넣기는 한 쌍이라, 한쪽만 있는 상태를 못 만들게 한다.
+// 그룹 턴은 자동 채널 발신을 끄고 명시적 버스 발신 지침을 함께 넣어 기록 없는 답·중복답을 막는다. 두 설정을 한 함수로 묶는다.
 import { groupTurnCall } from "./bridgeWindow";
 
 describe("groupTurnCall — 발신을 떼고, ★답을 쓸 자리★ 를 함께 준다", () => {
@@ -292,9 +286,7 @@ describe("groupTurnCall — 발신을 떼고, ★답을 쓸 자리★ 를 함께
   });
 
   test("★답이 명령 문자열에 안 들어간다★ — 적대 입력이 해석될 자리가 아예 없다", () => {
-    // 이전 설계에서는 답이 heredoc 안에 들어가 따옴표·백틱·종료자 사고가 났고,
-    // ★승인 operation hash 가 매 턴 달라져 '항상 허용' 이 원리적으로 안 걸렸다.★
-    // 지금은 답이 프롬프트 밖(파일)이라 그 부류가 통째로 사라진다.
+    // 답을 명령 대신 턴별 파일에 써야 따옴표·백틱·heredoc 종료자 해석으로 본문이 훼손되지 않는다.
     const b = call({ body: "홑따옴표 ' 백틱 ` $(id) $HOME" }).body;
     expect(b).not.toContain("bash");
     expect(b).not.toContain("zsh");

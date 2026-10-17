@@ -243,7 +243,7 @@ describe("브리지 시작 — 채널 설정 오류면 폴링하지 않는다", 
     const prevFetch = globalThis.fetch;
     const urls: string[] = [];
     process.env.CODEX_BOT_TOKEN = "T";
-    // ★가드가 깨져도 시험이 멈추지 않게★ — 가짜 fetch 는 영영 답하지 않고(폴 루프가 돌지 못한다), 1초만 기다린다.
+    // 가드가 깨져도 시험이 멈추지 않게 — 가짜 fetch 는 영영 답하지 않고(폴 루프가 돌지 못한다), 1초만 기다린다.
     globalThis.fetch = ((u: string) => { urls.push(String(u)); return new Promise<Response>(() => {}); }) as unknown as typeof fetch;
     try {
       const done = await Promise.race([

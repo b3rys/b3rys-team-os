@@ -1,14 +1,5 @@
-/**
- * reply-guard 는 ★1:1 텔레그램 DM 만★ 지킨다. 단톡방에는 관여하지 않는다.
- *
- * 단톡방은 답하는 방법이 다르다 — `send.sh --to broadcast` 다. 가드가 "reply 로 보내라" 고 막으면
- * 시키는 대로 한 봇이 ★자기 글을 방에 올리고 캡처가 못 봐서 기록이 0건★ 이 된다.
- *
- * ★1:1 방어가 죽는 것이 단톡방 오탐보다 훨씬 나쁘다★ — 퍼블릭 사용자는 주로 1:1 을 쓴다.
- * 그래서 2번 케이스(1:1 + 미전송 → 여전히 막힘)가 이 파일의 핵심이다.
- *
- * ★훅을 실제로 실행해서 잰다★ — 소스 문자열이 아니라 exit 출력으로 판정한다.
- */
+/** reply-guard는 1:1 DM만 보호한다. 그룹은 send.sh broadcast로 답하므로 reply 도구를 요구하면 올바른 발신까지 차단한다.
+ * 실제 훅 실행의 exit 출력으로 그룹 허용과 1:1 미전송 차단을 함께 확인한다. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

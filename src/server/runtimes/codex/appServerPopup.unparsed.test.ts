@@ -3,33 +3,10 @@ import { buildOperationFromApproval, approvalOperationHash } from "./appServerPo
 import { scopeKeyForOperation, targetForOperation } from "../../lib/permissionGate";
 import type { ApprovalRequest } from "./appServerClient";
 
-/**
- * ★S0(#106) — 해석하지 못한 승인 payload 가 넓은 scope key를 만들지 않는다★
- *
- * 배경: 승인 요청 payload 는 두 세대다(2026-07-28 벤더 스키마 실측, codex-cli 0.144.6).
- *   구세대 execCommandApproval   → command 가 ★배열★
- *   신세대 item/commandExecution/requestApproval → command 가 ★문자열★
- *   신세대 item/fileChange/requestApproval       → ★fileChanges 필드 자체가 없다★
- * buildOperationFromApproval 은 Array.isArray(p.command) / p.fileChanges 로만 분기하므로
- * ★신세대는 전부 마지막 분기로 떨어진다.★
- *
- * 예전 마지막 분기는 action=req.method, text=reason 이었다. reason 이 없으면 target 이 action 으로
- * 떨어져 ★target = method 이름★ 이 된다 → 그 method 로 오는 ★모든 요청이 같은 scope_key★.
- * 즉 한 번 allowed_always 를 주면 이후 내용이 전혀 다른 요청도 팝업 없이 통과한다.
- *
- * 원칙(2026-07-28): ★애매하면 통과가 아니라 ask 다.★
- * 아래 테스트들이 그 원칙을 코드에 고정한다.
- *
- * ★2026-07-29 S1 이후 — 이 파일의 fixture 를 바꿨다(보장은 그대로다).★
- *   S1 이 신세대 ★명령★ 승인(item/commandExecution/requestApproval)을 실제로 해석하게 되면서,
- *   그 payload 는 더 이상 '해석 실패' 가 아니다. 그래서 원래 쓰던 신세대 명령 fixture 로는
- *   ★이 파일이 주장하는 것(해석 실패 경로)을 더 이상 검사하지 못한다.★
- *   → fixture 를 ★지금도 해석되지 않는 method★(item/tool/requestUserInput)로 바꿨다.
- *   ★테스트를 약하게 만든 게 아니라, 검사 대상이 옮겨간 것을 따라간 것이다.★
- *   (신세대 명령이 제대로 해석되는지는 appServerPopup.s1.test.ts 가 따로 고정한다.)
- */
+/** 해석할 수 없는 요청은 전체 payload 해시로 scope를 구분해 다른 작업에 지속 허용을 재사용하지 않는다.
+ * 현재도 해석 실패인 method를 fixture로 써야 명령 해석 시험과 혼동하지 않는다. */
 describe("S0 — 해석 실패 payload 의 권한 열쇠", () => {
-  // ★해석되지 않는 승인 요청★ — 사람 입력을 요구하는 종류라 command/fileChanges 가 없다.
+  // 해석되지 않는 승인 요청 — 사람 입력을 요구하는 종류라 command/fileChanges 가 없다.
   //   (신세대 '명령' 승인은 S1 이 해석하므로 더 이상 이 경로를 타지 않는다 — 위 주석 참조)
   const unparsed = (note: string): ApprovalRequest => ({
     method: "item/tool/requestUserInput",
@@ -40,7 +17,7 @@ describe("S0 — 해석 실패 payload 의 권한 열쇠", () => {
     const a = buildOperationFromApproval(unparsed("A"), "dex");
     const b = buildOperationFromApproval(unparsed("B"), "dex");
 
-    // 이 단언이 S0 의 본체다. 수정 전에는 같은 method 면 내용과 무관하게 ★열쇠가 같았다★.
+    // 같은 method라도 payload가 다른 작업은 같은 scope로 합쳐지지 않아야 한다.
     expect(scopeKeyForOperation(a)).not.toBe(scopeKeyForOperation(b));
   });
 
@@ -70,11 +47,8 @@ describe("S0 — 해석 실패 payload 의 권한 열쇠", () => {
   });
 
   test("★'__proto__' 키만 다른 payload 도 갈린다★ — 해석 실패 경로의 우회 통로였다", () => {
-    // (2026-07-29) 리뷰에서 잡힌 실제 충돌. 일반 객체에 acc["__proto__"]=... 로 대입하면
-    // ★프로토타입이 바뀔 뿐 own property 가 되지 않아 JSON.stringify 에서 통째로 사라진다.★
-    // → "__proto__" 값만 다른 두 payload 가 ★같은 operation hash ·같은 열쇠★ 였다(재현: 둘 다 #5353b5b6…).
-    // JSON-RPC payload 에 이 키가 오는 것은 유효하므로 ★해석 실패 경로에서 우회 통로★ 가 된다.
-    // JSON.parse 로 만들어야 실제 수신 경로와 같다(리터럴로 쓰면 파서가 프로토타입으로 처리한다).
+    // __proto__를 일반 객체 대입으로 정렬하면 own property가 아니어서 JSON에서 사라지고 다른 payload가 충돌한다.
+    // 실제 수신과 같은 JSON.parse 입력으로 이 키도 해시에 남는지 확인한다.
     const a = { method: "item/tool/requestUserInput", params: JSON.parse('{"x":1,"__proto__":{"a":1}}') } as ApprovalRequest;
     const b = { method: "item/tool/requestUserInput", params: JSON.parse('{"x":1,"__proto__":{"a":2}}') } as ApprovalRequest;
     expect(scopeKeyForOperation(buildOperationFromApproval(a, "dex")))
@@ -93,8 +67,8 @@ describe("S0 — 해석 실패 payload 의 권한 열쇠", () => {
 
   test("★approvalOperationHash 로는 못 가른다★ — 왜 payload 전체 지문이 필요한지의 근거", () => {
     // 이 fixture(item/tool/requestUserInput)는 command 도 fileChanges 도 reason 도 없어
-    // basis 가 {method, null, null, null} 로 ★내용과 무관하게 같아진다★.
-    // ★즉 기존 operation hash 를 그대로 썼다면 위 첫 테스트가 통과하지 못한다.★
+    // basis 가 {method, null, null, null} 로 내용과 무관하게 같아진다.
+    // 즉 기존 operation hash 를 그대로 썼다면 위 첫 테스트가 통과하지 못한다.
     // ※ 신세대 '명령' 은 S1 에서 operation hash basis 에 포함되도록 고쳤다 — appServerPopup.s1.test.ts 참조.
     expect(approvalOperationHash(unparsed("rm -rf /tmp/x")))
       .toBe(approvalOperationHash(unparsed("cat ~/.ssh/id_rsa")));
@@ -113,7 +87,7 @@ describe("S0 — 해석 실패 payload 의 권한 열쇠", () => {
     const oldGen: ApprovalRequest = { method: "execCommandApproval", params: { command: ["rm", "-rf", "/tmp/x"], cwd: "/tmp" } };
     const op = buildOperationFromApproval(oldGen, "dex");
     expect(op.action).toBe("shell");
-    // ★S5: 본문은 그대로, 앞에 전체 operation hash.★ 해석 실패 경로(S0 operation hash 열쇠)로 새지 않는 것이 이 가드의 요지다.
+    // S5: 본문은 그대로, 앞에 전체 operation hash. 해석 실패 경로(S0 operation hash 열쇠)로 새지 않는 것이 이 가드의 요지다.
     expect(op.command).toMatch(/^rm -rf \/tmp\/x #[0-9a-f]{64}$/);
     expect(targetForOperation(op)).toContain("rm -rf /tmp/x");
   });

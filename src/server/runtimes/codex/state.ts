@@ -53,14 +53,8 @@ export class CodexSessionStore {
   }): void {
     this.db
       .prepare(
-        // ★created_at 은 '이 세션 id 가 언제 처음 저장됐나' 다.★
-        //   같은 id 로 계속 이어지면 그대로 두고, id 가 바뀌면(=새 대화가 시작되면) 다시 찍는다.
-        //   그래야 기록만으로 갈린다 — created_at < updated_at 이면 ★그 사이에 이어받은 것★,
-        //   둘이 같으면 이번에 처음 만든 것이다. 없으면 매번 바깥에서 기준점을 재야 한다.
-        //
-        //   ★같은 세션일 때 NULL 을 채우지 않는다.★ 채우면 그 순간 created_at == updated_at 이 되어
-        //   ★이어받은 것을 '처음 만든 세션' 으로 읽게 만든다.★ 모르는 것은 NULL 로 남겨 모른다고 말한다 —
-        //   지어낸 값은 판정 불가보다 나쁘다. 마이그레이션 이전 행은 세션이 바뀔 때 아래 ELSE 가 채운다.
+        // 같은 세션의 created_at은 보존하고 ID가 바뀔 때만 다시 기록해 updated_at과의 관계로 resume를 구분한다.
+        // 이전 행의 NULL을 같은 세션에서 채우면 resume를 신규로 오인하므로 미상으로 남기고 다음 새 세션에서 채운다.
         `INSERT INTO codex_session_map
            (agent_id, surface, conversation_key, codex_session_id, last_message_id, last_task_id, updated_at, created_at)
          VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
@@ -181,12 +175,8 @@ export interface CodexApprovalCorrelationRow {
   decided_at: string | null;
 }
 
-/**
- * codex app-server 승인 팝업 ↔ server-request 상관키 + CAS 상태(Phase1 ③).
- * 팝업(permission_request.id)과 실제 승인 요청을 1:1로 묶고, 상태전이를 CAS(원자적 UPDATE ... WHERE state=)로만 해
- * 중복 버튼(exactly-once)·TTL 늦은승인·서버재시작 orphan·요청 불일치(operation_hash 대조)를 안전 처리한다.
- * ★operation_hash는 승인 전 캡처값이라 실행 직전 변경 검출이 아니고, 권한 grant scope에도 들어가지 않는다(알려진 갭).★
- */
+/** 팝업과 실제 server-request를 상관키·CAS로 묶어 중복·지연·재시작·다른 요청의 결정을 차단한다.
+ * operation_hash는 승인 전 캡처값이라 실행 직전 변경 검출이 아니며 권한 grant scope에도 결합되지 않는다. */
 export class CodexApprovalCorrelationStore {
   constructor(private readonly db: Database) {}
 
@@ -223,7 +213,7 @@ export class CodexApprovalCorrelationStore {
   }
 
   /**
-   * delivery: decided→delivered. ★operation_hash 일치(요청 대조) + process_instance 일치(재시작 재결합 금지)일 때만★ 성공.
+   * delivery: decided→delivered. operation_hash 일치(요청 대조) + process_instance 일치(재시작 재결합 금지)일 때만 성공.
    * true면 codex에 승인 전달 허용. false면 거부(불일치/orphan/재시작/이미처리).
    */
   markDelivered(requestId: string, operationHash: string, processInstance: string): boolean {

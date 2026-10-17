@@ -1,24 +1,5 @@
-/**
- * codex 어댑터 characterization 테스트 — in-memory sqlite, 진짜 codex CLI 호출 X(mock 주입).
- *
- * ═══ 예전 계약 [A] — 이 파일이 지키던 것 ═══
- * 어댑터가 codex CLI 의 stdout 을 받아 ★서버가 버스에 "codex 가 말했다" 로 insert★ 했다.
- * 수신자도 서버가 ★추측★ 했다(turnReplyTarget: 에이전트 요청 → directed / user 요청 → broadcast).
- * 그래서 핀이 ①at-most-once ③directed/broadcast ⑥dedupe(같은 답 두 번 → 1개) 였다.
- *
- * ═══ 왜 사라졌나 ═══
- * ★서버가 대신 말하니 침묵이 불가능했다★ → `[NO_REPLY]` 우회 토큰 → 가드 누락 →
- * ★그 토큰이 팀장 단톡방에 그대로 찍혔다★ (라이브). 수집 종합도 ★나를 깨운 기여자★ 에게 오배송됐다(3/7).
- * ★dex 가 쓴 "[NO_REPLY]" 가 버스에 그대로 실린 것도 수트에서 실측됐다.★
- *
- * ═══ 지금 계약 [B] ═══
- * ★턴 본문은 dex 의 메모다. 어댑터는 그것을 게시하지 않는다★ (audit `turn_completed_no_autopost` 만 남긴다).
- * 말하려면 dex 가 직접 `send.sh` → POST /team/api/inbox 로 보낸다 (능력은 이미 있다 — 수트에서 팬아웃 실측).
- * ★플랫폼 공지(턴 실패)는 여전히 나간다 — 단, from="system" 이다. 팀원을 사칭하지 않는다.★
- *
- * 유지되는 핀: ★②in-flight 잠금 · ⑤lease-safe · 에러 무음 아님 · session 지속 · 권한 preflight ·
- *   RunArtifact(started/succeeded/timed_out) · 실패통지 dedupe · hop 승계★
- */
+/** 턴 본문은 자동 게시하지 않고 명시적 발신만 버스에 전달한다. 실패 공지는 팀원을 사칭하지 않도록 system으로 보낸다.
+ * 실제 CLI 대신 mock과 메모리 DB로 잠금·lease·세션·실패 아티팩트·통지 중복 방지·hop 승계를 검증한다. */
 import { describe, expect, test, beforeEach, beforeAll, afterAll } from "bun:test";
 import { Database } from "bun:sqlite";
 import { tmpdir } from "node:os";
@@ -34,7 +15,7 @@ import { grantKey } from "../../lib/permissionGate";
 import { CodexInflightStore, CodexRunArtifactStore, CodexSessionStore } from "./state";
 import { CodexTurnEnvelopeBuilder } from "./envelope";
 
-/** 전역 격리(preload)가 세팅한 값 — afterAll 에서 ★지우지 말고 되돌린다.★ */
+/** 전역 격리(preload)가 세팅한 값 — afterAll 에서 지우지 말고 되돌린다. */
 const PREV_AUDIT_DIR = process.env.B3OS_AUDIT_LOG_DIR;
 
 // 테스트 격리: isAgentOff가 라이브 var/agent-off.txt 대신 temp를 읽게(라이브 오염·의존 차단).
@@ -43,20 +24,15 @@ process.env.TEAMOS_AGENT_OFF_FILE = OFF_FILE;
 beforeEach(() => { try { rmSync(OFF_FILE); } catch { /* 없으면 무시 → isAgentOff=false */ } });
 beforeEach(() => clearRuntimeBlock("cody"));
 
-// ★audit 격리★ — appendAuditFile 이 라이브 logs/ 를 건드리면 안 된다(팀 하드레슨: 테스트는 실 FS 격리).
-//   [B] 의 "게시하지 않았다" 는 ★audit 으로만 관측된다★ → 이 파일이 audit 을 읽어야 한다.
+// audit 격리 — appendAuditFile 이 라이브 logs/ 를 건드리면 안 된다(팀 하드레슨: 테스트는 실 FS 격리).
+//   [B] 의 "게시하지 않았다" 는 audit 으로만 관측된다 → 이 파일이 audit 을 읽어야 한다.
 let TMP_LOG_DIR: string;
 beforeAll(() => {
   TMP_LOG_DIR = mkdtempSync(join(tmpdir(), "codex-adapter-audit-"));
   process.env.B3OS_AUDIT_LOG_DIR = TMP_LOG_DIR;
 });
 afterAll(() => {
-  // ★지우면 안 된다 — 되돌려야 한다.★ (2026-07-14)
-  //   전역 preload(src/test/test-isolation.ts)가 B3OS_AUDIT_LOG_DIR 을 temp 로 세팅해 ★모든★ 테스트를
-  //   라이브 logs/ 에서 격리한다. 여기서 delete 하면 ★그 격리가 통째로 풀리고★, 같은 프로세스에서
-  //   ★뒤에 도는 모든 테스트가 라이브 감사로그에 쓴다.★
-  //   실측: 라이브 로그에 테스트 이벤트 ★1619건★ (actor='nova', thread='t1' — 존재하지 않는 팀원/스레드).
-  //   ★계기판이 첫날부터 가짜 데이터로 못 쓰게 됐다.★ (팀 하드레슨: bun test 는 라이브를 안 건드린다)
+  // preload가 설정한 감사 로그 env를 삭제하면 뒤의 시험이 실제 로그에 기록하므로 원래 값으로 복원한다.
   if (PREV_AUDIT_DIR === undefined) delete process.env.B3OS_AUDIT_LOG_DIR;
   else process.env.B3OS_AUDIT_LOG_DIR = PREV_AUDIT_DIR;
   try { rmSync(TMP_LOG_DIR, { recursive: true, force: true }); } catch { /* best-effort */ }
@@ -106,7 +82,7 @@ const row = (over: Partial<PendingDispatchRow> = {}): PendingDispatchRow => ({
 
 const repliesFrom = (db: Database, from: string) =>
   db.prepare(`SELECT * FROM message WHERE from_agent_id=? ORDER BY created_at DESC`).all(from) as Record<string, unknown>[];
-/** 버스에 들어간 ★모든★ 메시지 — "서버가 아무것도 게시하지 않았다" 를 증명할 때 쓴다. */
+/** 버스에 들어간 모든 메시지 — "서버가 아무것도 게시하지 않았다" 를 증명할 때 쓴다. */
 const allMessages = (db: Database) =>
   db.prepare(`SELECT * FROM message ORDER BY created_at DESC`).all() as Record<string, unknown>[];
 const artifacts = (db: Database, status?: string) =>
@@ -118,17 +94,13 @@ const sessions = (db: Database) =>
 const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 describe("codex adapter — 핵심 정확성", () => {
-  /**
-   * ★[A] → [B] 전환의 심장.★ 예전 ①at-most-once 는 "서버가 답을 ★정확히 1회★ 게시한다" 였다.
-   * ★이제 0회다.★ 턴 본문은 dex 의 메모다 — 말하려면 dex 가 자기 손으로 보낸다.
-   *
-   */
+  /** 턴 본문은 자동 게시하지 않는다. 팀원은 명시적 발신 경로로 말해야 침묵과 내부 메모를 채널에 노출하지 않는다. */
   test("★성공 턴 → 서버가 게시하지 않는다 (메시지 0개) + audit turn_completed_no_autopost★", async () => {
     const db = setup();
     const fake: CodexCaller = async () => okResult("네, 도와드릴게요!");
     await runTurn(db, agentsOf(db), codyOf(db), row({ message_id: "no-autopost-1" }), "팀컨텍스트", fake);
 
-    // ★서버는 dex 를 대신해 한 마디도 하지 않았다★ — 버스 전체에 메시지가 없다(그 팀원 명의든 아니든)
+    // 서버는 dex 를 대신해 한 마디도 하지 않았다 — 버스 전체에 메시지가 없다(그 팀원 명의든 아니든)
     expect(
       allMessages(db),
       "★서버가 codex 의 턴 본문을 대신 버스에 게시했다★ — [A] 회귀.\n" +
@@ -136,7 +108,7 @@ describe("codex adapter — 핵심 정확성", () => {
     ).toEqual([]);
     expect(repliesFrom(db, "cody")).toEqual([]);
 
-    // ★대신 audit 에 "턴은 끝났고, 게시하지 않았다" 를 남긴다★ — 이게 [B] 의 유일한 관측점이다
+    // 대신 audit 에 "턴은 끝났고, 게시하지 않았다" 를 남긴다 — 이게 [B] 의 유일한 관측점이다
     const audit = auditLines("turn_completed_no_autopost").filter((l) => l.target === "no-autopost-1");
     expect(audit.length).toBe(1);
     expect(audit[0]?.actor).toBe("cody");
@@ -146,9 +118,9 @@ describe("codex adapter — 핵심 정확성", () => {
   });
 
   test("★user 요청이어도 자동 broadcast 하지 않는다★ — 수신자 '추측' 이 오배송의 근원이었다", () => {
-    // ★[A]★: 서버가 수신자를 추측했다(에이전트 요청 → directed / user 요청 → broadcast).
-    //   수집에선 ★나를 깨운 사람★ 이 기여자라 ★종합이 그 기여자에게 갔다★ (실측 7회 중 3회 오배송).
-    // ★[B]★: 서버는 추측하지 않는다. ★보낼 사람이 수신자를 안다.★
+    // [A]: 서버가 수신자를 추측했다(에이전트 요청 → directed / user 요청 → broadcast).
+    //   수집에선 나를 깨운 사람 이 기여자라 종합이 그 기여자에게 갔다 (실측 7회 중 3회 오배송).
+    // [B]: 서버는 추측하지 않는다. 보낼 사람이 수신자를 안다.
     const db = setup();
     const fake: CodexCaller = async () => okResult("공개 답변");
     return runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "user" }), "", fake).then(() => {
@@ -176,8 +148,8 @@ describe("codex adapter — 핵심 정확성", () => {
     expect(getRuntimeBlock("cody")).toBe(null);
   });
 
-  // ★유지★ — lease-safe 는 [B] 와 무관하게 그대로 필요하다(claim-tick 블록 방지).
-  //   달라진 것: "턴이 끝났다" 의 증거가 ★게시된 메시지★ 에서 ★succeeded artifact★ 로 바뀌었다.
+  // 유지 — lease-safe 는 [B] 와 무관하게 그대로 필요하다(claim-tick 블록 방지).
+  //   달라진 것: "턴이 끝났다" 의 증거가 게시된 메시지 에서 succeeded artifact 로 바뀌었다.
   test("⑤lease-safe: wake 즉시 codex_dispatched + 턴 비동기 완료(artifact 로 관측)", async () => {
     const db = setup();
     const fake: CodexCaller = async () => okResult("비동기 답");
@@ -187,13 +159,13 @@ describe("codex adapter — 핵심 정확성", () => {
     expect(r.detail).toBe("codex_dispatched"); // 즉시 반환(턴은 detach)
     await sleep(20);
     expect(artifacts(db, "succeeded").length).toBe(1); // 턴은 뒤에서 완주했다
-    expect(allMessages(db)).toEqual([]);               // ★그래도 게시는 0★ ([B])
+    expect(allMessages(db)).toEqual([]);               // 그래도 게시는 0 ([B])
   });
 
-  // ★유지·강화★ — in-flight 잠금은 [B] 에서 ★더 중요해졌다.★
+  // 유지·강화 — in-flight 잠금은 [B] 에서 더 중요해졌다.
   //   [A] 시절엔 "두 턴이 돌아도 dedupe 가 게시를 1개로 막아준다" 는 뒤늦은 안전망이 있었다.
-  //   ★[B] 엔 그 안전망이 없다★ (게시 자체를 안 하니 dedupe 할 것도 없다) → ★두 번째 턴이 시작되면
-  //   dex 가 자기 손으로 ★두 번 보낸다★.★ 그래서 잠금은 "게시 1회" 가 아니라 ★"턴 1회"★ 를 지켜야 한다.
+  //   [B] 엔 그 안전망이 없다 (게시 자체를 안 하니 dedupe 할 것도 없다) → 두 번째 턴이 시작되면
+  //   dex 가 자기 손으로 두 번 보낸다. 그래서 잠금은 "게시 1회" 가 아니라 "턴 1회" 를 지켜야 한다.
   test("②in-flight 잠금: 처리 중 재-wake → deferred + ★두 번째 턴이 시작되지 않는다★", async () => {
     const db = setup();
     let release!: (r: CodexTurnResult) => void;
@@ -219,8 +191,7 @@ describe("codex adapter — 핵심 정확성", () => {
   });
 
   test("②-b in-flight 잠금은 ★agent 단위★: 같은 dex에 '다른 메시지'가 처리 중 와도 두 번째 턴이 안 뜬다 (동시성 회귀 가드)", async () => {
-    // Ames 교차검증(2026-07-24)이 짚은 버그: 잠금 키가 message_id별이면 같은 agent에 다른 메시지가
-    // 오면 동시 턴 2개가 떠 세션 resume/응답이 꼬인다. per-agent 키로 고쳤고 이 테스트가 회귀를 막는다.
+    // 같은 팀원의 다른 메시지도 병렬 resume하면 세션·답이 섞이므로 메시지가 아닌 팀원 단위 잠금을 검증한다.
     const db = setup();
     let release!: (r: CodexTurnResult) => void;
     let calls = 0;
@@ -228,7 +199,7 @@ describe("codex adapter — 핵심 정확성", () => {
     const adapter = makeCodexAdapter(db, agentsOf(db), { callCodex: blocking });
     const r1 = await adapter.wake("cody", row({ message_id: "cc1" }), "");
     expect(r1.detail).toBe("codex_dispatched");
-    // ★다른 message_id★ 로 같은 agent 재-wake — per-message 키였다면 여기서 동시 턴이 떴다.
+    // 다른 message_id 로 같은 agent 재-wake — per-message 키였다면 여기서 동시 턴이 떴다.
     const r2 = await adapter.wake("cody", row({ message_id: "cc2" }), "");
     expect(r2.deferred, "다른 메시지라도 같은 agent 처리 중이면 defer돼야 한다").toBe(true);
     expect(r2.detail).toBe("codex_in_flight");
@@ -258,36 +229,24 @@ describe("codex adapter — 핵심 정확성", () => {
     expect(r.ok).toBe(false);
   });
 
-  /**
-   * ★예전 ⑥dedupe 는 ★대상을 잃었다★.★
-   * [A]: 서버가 답을 게시하니 ★같은 답이 두 번 실릴 위험★ 이 있었다 → dedupe_key 로 1개로 접었다.
-   * [B]: ★서버가 게시를 안 하니 접을 것이 없다.★ ★그러나 테스트를 지우지 않는다★ — 지우면
-   *   "두 번 돌려도 게시 0" 이라는 ★[B] 의 핵심 불변식이 무방비★ 가 된다. 그래서 [B] 등가물로 바꾼다.
-   *   (dedupe 기계 자체는 ★죽지 않았다★ — 아래 '실패통지 dedupe' 로 여전히 살아있다.)
-   */
+  /** 같은 답으로 두 번 실행해도 자동 게시가 0회인지 확인한다. 실패 공지는 별도로 중복을 막아야 한다. */
   test("★같은 턴 두 번 → 여전히 게시 0★ (dedupe 할 게 없다 — 애초에 아무것도 안 실린다)", async () => {
     const db = setup();
     const fake: CodexCaller = async () => okResult("동일한 답");
     await runTurn(db, agentsOf(db), codyOf(db), row(), "", fake);
     await runTurn(db, agentsOf(db), codyOf(db), row(), "", fake);
     expect(allMessages(db)).toEqual([]);
-    // 턴은 ★두 번 다 정상 완주★ 했다 — 예전엔 두 번째가 'deduped' 로 접혔다(게시가 있었으니까).
     expect(artifacts(db, "succeeded").length).toBe(2);
     expect(artifacts(db, "deduped").length).toBe(0);
   });
 
-  /**
-   * ★플랫폼 공지는 살아있다 — 단, 팀원을 사칭하지 않는다.★ (2026-07-13, [B] 전환 중 발견)
-   * ★[A]★: from=<팀원>, source="agent" → ★"그 팀원이 그렇게 말했다" 로 보였다.★
-   *   ★그 팀원은 아무 말도 안 했다 — 턴이 죽은 것이다.★ 서버가 그의 입을 빌리면 안 된다.
-   * ★[B]★: from="system", source="system" (만료 통지·마감 알림이 이미 그런 것과 같은 원칙).
-   */
+  /** 턴 실패는 팀원 발언이 아니므로 from·source를 system으로 기록한다. */
   test("★실패통지: user 요청 + codex 실패 → 가시 통지 1회, 단 from=system (팀원 사칭 금지)★", async () => {
     const db = setup();
     const fail: CodexCaller = async () => ({ ok: false, reply: "", detail: "boom", elapsedMs: 1 });
     await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "user" }), "", fail);
 
-    // ★그 팀원 명의로는 한 마디도 안 나간다★ — 턴이 죽었는데 그가 말한 것처럼 보이면 거짓이다
+    // 그 팀원 명의로는 한 마디도 안 나간다 — 턴이 죽었는데 그가 말한 것처럼 보이면 거짓이다
     expect(repliesFrom(db, "cody")).toEqual([]);
 
     const notices = repliesFrom(db, "system");
@@ -307,10 +266,7 @@ describe("codex adapter — 핵심 정확성", () => {
   });
 
   test("★팀원 요청 + 실패 → 요청자에게 통지한다. 단 체인 밖 모양으로★ (봇↔봇 루프 방지)", async () => {
-    // ★계약이 바뀌었다★ — 전에는 '통지 안 함' 이었다. 그 가드가 막던 것은 "알리는 것" 이 아니라
-    //   ★"체인에 얹혀서 알리는 것"★ 이었다(in_reply_to + hop_count+1 → hop 한도 소모 → [전달 차단] 유발).
-    //   ★안 알리면 팀원이 시킨 일이 죽어도 아무도 모른다★ — 2026-08-13 실측: dex 위임 4건이 승인창 만료로
-    //   죽었는데 요청자 통지 0건이었고, 요청자는 "dex 가 실행을 안 한다" 로 오진했다.
+    // 팀원 요청 실패도 요청자에게 알리되 부모 없는 hop 0 통지로 보내 원래 체인의 hop 소모와 재차 전달 차단을 피한다.
     const db = setup();
     const fail: CodexCaller = async () => ({ ok: false, reply: "", detail: "boom", elapsedMs: 1 });
     await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "bill" }), "", fail);
@@ -332,7 +288,7 @@ describe("codex adapter — 핵심 정확성", () => {
     await runTurn(db, agentsOf(db), codyOf(db), same, "", fail);
     await runTurn(db, agentsOf(db), codyOf(db), same, "", fail);
     expect(repliesFrom(db, "system").length, "같은 message_id = 1건").toBe(1);
-    // ★본문 기준 60초 창이었다면 여기서 묻혔다★ — 서로 다른 위임의 실패는 각각 보여야 한다.
+    // 본문 기준 60초 창이었다면 여기서 묻혔다 — 서로 다른 위임의 실패는 각각 보여야 한다.
     await runTurn(db, agentsOf(db), codyOf(db), row({ from_agent_id: "bill", message_id: "other-msg" }), "", fail);
     expect(repliesFrom(db, "system").length, "다른 message_id = 추가 통지").toBe(2);
   });
@@ -393,18 +349,13 @@ describe("codex adapter — 핵심 정확성", () => {
     expect(seen[0]?.sandbox).toBe("workspace-write");
     expect(seen[0]?.networkAccess).toBe(true);
     expect(seen[0]?.writableRoots).toEqual(["/tmp"]);
-    // ★프롬프트에는 샌드박스를 싣지 않는다★ — codex 설정이 정하는 값이라 여기 또 쓰면 한쪽이 낡는다.
+    // 프롬프트에는 샌드박스를 싣지 않는다 — codex 설정이 정하는 값이라 여기 또 쓰면 한쪽이 낡는다.
     //   실제로 낡아 있었다: 봉투가 "read-only" 를 싣는 동안 codex 는 workspace-write 로 돌았다.
     expect(seen[0]?.prompt).not.toContain('"sandbox"');
     expect(seen[0]?.prompt).not.toContain('"networkAccess"');
   });
 
-  // ★계약이 바뀌었다★ (다른 런타임과의 일관성).
-  //   예전 이름: "permission preflight blocks workspace-write before spawning codex when no grant exists" —
-  //   grant 가 없으면 ★codex 를 띄우기도 전에★ 우리가 턴을 죽이고 실패 아티팩트·런타임 블록을 남겼다.
-  //   우리 코드로 차단목록을 얹은 런타임이 codex 뿐이라(claude·hermes·openclaw·b3osNative 0건) 판정을 뺐다.
-  //   경계는 codex 설정이 정한다. ★그 밖을 사람이 정하는 단계는 지금 없다★ —
-  //   실행 정책이 "never" 라 codex 가 승인창을 띄우지 않는다(appServerRunner.ts).
+  // 경계는 Codex 설정이 정하고 런타임 자체 차단목록은 사용하지 않는다. 실행 정책 never는 승인창을 띄우지 않으므로 별도 사람 승인 단계가 없다.
   test("★grant 가 없어도 workspace-write 턴은 그대로 실행된다★ — 턴 앞 우리 판정을 뺐다", async () => {
     const db = setup();
     const agent = { ...codyOf(db), codex_sandbox: "workspace-write" as const };
@@ -414,16 +365,16 @@ describe("codex adapter — 핵심 정확성", () => {
       return okResult("실행된다");
     };
 
-    // ★permissionContext(설정-grant)를 일부러 안 넘긴다★ — 예전엔 바로 이것 때문에 막혔다.
+    // 설정 grant 없이도 Codex 설정의 실행 경계를 사용해야 한다.
     await runTurn(db, agentsOf(db), agent, row(), "", fake);
 
-    expect(called, "★턴 앞 차단이 되살아났다★ — codex 가 스폰되지 않았다").toBe(true); // 예전 false
-    expect(getRuntimeBlock("cody")).toBe(null); // 예전: "tier-a.workspace-write" 블록이 걸렸다
-    expect(artifacts(db, "failed")).toEqual([]); // 예전: permission_ask 실패 아티팩트가 남았다
+    expect(called, "★턴 앞 차단이 되살아났다★ — codex 가 스폰되지 않았다").toBe(true); // 별도 사전 차단 없이 실행한다.
+    expect(getRuntimeBlock("cody")).toBe(null); // 런타임 차단 상태를 만들지 않는다.
+    expect(artifacts(db, "failed")).toEqual([]); // 사전 권한 실패로 기록하지 않는다.
     expect(artifacts(db, "succeeded").length).toBe(1); // 턴은 정상 완주한다
 
-    // ★우리가 만들던 sandbox 승인요청은 더 이상 생기지 않는다★
-    //   — 턴 시작 전 우리 몫이 아니다. ★지금은 승인 자체가 안 생긴다★ — 실행 정책이 "never" 라
+    // 우리가 만들던 sandbox 승인요청은 더 이상 생기지 않는다
+    //   — 턴 시작 전 우리 몫이 아니다. 지금은 승인 자체가 안 생긴다 — 실행 정책이 "never" 라
     //   codex 가 승인창을 올리지 않는다(appServerRunner.ts).
     expect(db.query("SELECT action, status, requested_by FROM permission_request").all()).toEqual([]);
     expect(db.query("SELECT action_key, status FROM approval_request").all()).toEqual([]);
@@ -469,9 +420,9 @@ describe("codex adapter — 핵심 정확성", () => {
     expect(sessions(db)[0]?.codex_session_id).toBe("good-session");
   });
 
-  // ★유지★ — RunArtifact 는 [B] 에서 ★유일한 턴 관측 수단★ 이라 더 중요해졌다.
+  // 유지 — RunArtifact 는 [B] 에서 유일한 턴 관측 수단 이라 더 중요해졌다.
   //   달라진 것 둘: ①두 번째 성공이 'deduped' 가 아니라 'succeeded' 다(게시가 없으니 접힐 일이 없다)
-  //                ②succeeded 의 reply_message_id 가 ★null★ 이다 — ★게시한 메시지가 없기 때문★.
+  //                ②succeeded 의 reply_message_id 가 null 이다 — 게시한 메시지가 없기 때문.
   test("RunArtifact: started/succeeded/timed_out 을 구조화해서 남긴다 (게시 없어도 턴은 보인다)", async () => {
     const db = setup();
     const ok: CodexCaller = async () => ({ ok: true, reply: "동일", detail: "ok", elapsedMs: 7, sessionId: "sess" });
@@ -482,18 +433,18 @@ describe("codex adapter — 핵심 정확성", () => {
 
     expect(artifacts(db, "started").length).toBe(3);
     expect(artifacts(db, "succeeded").length).toBe(2);   // [A] 에선 1 + deduped 1 이었다
-    expect(artifacts(db, "deduped").length).toBe(0);     // ★게시를 안 하므로 dedupe 상태가 생길 수 없다★
+    expect(artifacts(db, "deduped").length).toBe(0);     // 게시를 안 하므로 dedupe 상태가 생길 수 없다
     expect(artifacts(db, "timed_out").length).toBe(1);   // 실패 분류(timeout)는 그대로 유지
     expect(artifacts(db, "timed_out")[0]?.detail).toContain("timeout");
-    // ★[A] 회귀 가드★: 여기에 message id 가 박히면 = 서버가 그 팀원 이름으로 뭔가 게시했다는 뜻이다
+    // [A] 회귀 가드: 여기에 message id 가 박히면 = 서버가 그 팀원 이름으로 뭔가 게시했다는 뜻이다
     for (const a of artifacts(db, "succeeded")) {
       expect(
         a.reply_message_id,
         "★succeeded artifact 에 reply_message_id 가 있다 = 서버가 턴 본문을 게시했다★ ([A] 회귀)",
       ).toBeNull();
     }
-    // ★[A] 계약은 "서버가 ★팀원 이름으로★ 게시하지 않는다" 다★ — "아무것도 안 들어간다" 가 아니다.
-    //   m3 실패에는 이제 요청자(bill)에게 가는 ★system 통지 1건★ 이 들어간다(실패가 보여야 하므로).
+    // [A] 계약은 "서버가 팀원 이름으로 게시하지 않는다" 다 — "아무것도 안 들어간다" 가 아니다.
+    //   m3 실패에는 이제 요청자(bill)에게 가는 system 통지 1건 이 들어간다(실패가 보여야 하므로).
     //   그 통지는 from="system" 이라 팀원을 사칭하지 않는다 = [A] 회귀가 아니다.
     expect(repliesFrom(db, "cody").length, "★팀원 이름으로 게시된 것은 0건★ ([A] 회귀 가드)").toBe(0);
     const msgs = allMessages(db);
@@ -510,13 +461,7 @@ describe("codex adapter — 핵심 정확성", () => {
     expect(count.n).toBe(0);
   });
 
-  /**
-   * ★hop 승계 — 무한 봇↔봇 루프의 마지막 방어선. [B] 에서도 유지된다.★
-   * ★[A]★: 어댑터가 게시하던 ★답★ 이 hop 메타(max_hop)를 이어받아, acceptance smoke 가 답 뒤에 멈출 수 있었다.
-   * ★[B]★: ★그 답이 없다★ (dex 가 직접 보내면 그 발신에 hop 이 실린다 — routes/inbox.ts 소관).
-   *   서버가 여전히 ★자기 이름으로★ 내보내는 건 ★실패 공지★ 뿐이다 → ★hop 승계는 거기서 지켜져야 한다.★
-   *   (공지가 hop 을 리셋하면 공지 → 재-wake → 또 공지 로 도는 문이 열린다)
-   */
+  /** 방으로 나가는 실패 공지는 원 메시지의 hop을 승계해야 통지·재깨움 반복에서 루프 차단선이 유지된다. */
   test("★실패 공지가 hop 을 승계한다★ (hop_count+1 · in_reply_to) — 루프 차단선 유지", async () => {
     const db = setup();
     const fail: CodexCaller = async () => ({ ok: false, reply: "", detail: "boom", elapsedMs: 1 });
@@ -537,17 +482,8 @@ describe("codex adapter — 핵심 정확성", () => {
   });
 });
 
-/**
- * ★답이 이미 나갔는데 "실패했다" 고 알리지 않는다.★ (2026-08-20 실측 → 이 시험이 그 자리를 지킨다)
- *
- * 라이브에서 벌어진 것: dex 가 턴 안에서 팀버스 도구로 직접 답을 보냈다 → app-server 가 돌려준
- * ★최종 텍스트는 비어 있었다★ → 어댑터가 실패로 읽고 요청자에게 "Dex 의 응답이 실패했습니다" 를 보냈다.
- * ★요청자는 답을 받아 놓고 실패 통지를 함께 받았다★ (답 03:32:22 · 통지 03:32:24, 재발송 아님 — started 1건).
- * 그 상태로 두면 사람이 ★같은 일을 두 번★ 시킨다.
- *
- * ★대조군을 같이 둔다★ — 세 번째 시험이 "답이 없으면 통지는 여전히 간다" 를 잰다.
- * 하나만 두면 "통지를 아예 껐다" 와 구별되지 않는다.
- */
+/** 최종 텍스트가 비어도 직접 발신한 답이 있으면 실패 통지를 보내지 않는다.
+ * 답이 없는 대조군에서는 통지가 유지되는지 확인해 통지 전체 비활성화를 구분한다. */
 describe("빈 최종텍스트 + 팀원이 직접 답한 턴", () => {
   /** 턴 도중 팀원이 send.sh 로 직접 답한 상황 — 그리고 런타임에는 빈 본문이 남는다. */
   const replyOnBusThenEmpty = (db: Database): CodexCaller => async () => {
@@ -582,9 +518,7 @@ describe("빈 최종텍스트 + 팀원이 직접 답한 턴", () => {
   test("★답이 아니라 남에게 질문을 뿌린 것이면 통지는 간다★ (수집 fan-out 을 '답' 으로 읽으면 요청자가 영영 기다린다)", async () => {
     const db = setup();
     const fanoutThenEmpty: CodexCaller = async () => {
-      // 규칙상 수집 fan-out 은 ★같은 스레드★ 로 나간다 — 요청자(user)가 아니라 팀원에게 간다
-      // ★실제 fan-out 은 in_reply_to 를 달고 나간다★ — 우리 규칙이 그렇게 시킨다.
-      //   안 달면 이 시험은 ★오른쪽 갈래만★ 재고, 정작 새는 왼쪽 갈래를 못 본다(빌 재리뷰).
+      // fan-out도 원 요청의 in_reply_to를 사용하므로 같은 스레드에서 팀원에게 보낸 질문이 요청자의 답으로 잘못 집계되지 않는지 확인한다.
       db.prepare(
         `INSERT INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, hop_count, in_reply_to, created_at)
          VALUES ('fanout-1','t1','cody','bill','dm','빌, 이것 좀 봐줘','agent',1,'fanout-turn', datetime('now'))`,

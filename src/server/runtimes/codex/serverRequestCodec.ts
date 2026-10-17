@@ -1,16 +1,5 @@
-/**
- * codex app-server 0.144.6 ServerRequest 분류 + 응답 codec (Phase1 ②).
- *
- * 배경: appServerClient가 ★모든★ server→client 요청에 `{decision}`을 보내던 것을 고친다.
- * generate-json-schema(0.144.6) 기준 ServerRequest는 11종이고, 그 중 승인성은 4종뿐,
- * 나머지 6종(+unknown)은 각기 다른 result 또는 JSON-RPC error가 필요하다.
- * 잘못된 result를 보내면 Codex 쪽 pending callback이 오류/폴백에 의존하거나 hang한다.
- *
- * 근거(Ames 교차검증·schema PASS 2026-07-24):
- *   research/codex-appserver-0.144.6-server-request-codec.md (ames repo). 각 payload는 0.144.6 Response schema로 검증됨.
- *
- * ★이 모듈은 순수 함수다 — I/O·상태 없음(테스트 용이). appServerClient가 이걸 써서 respond/respondError 한다.★
- */
+/** CLI 0.144.6 ServerRequest는 승인 요청 4종 외에도 각 method별 result·JSON-RPC error가 필요하다. 모두 decision으로 응답하면 callback이 멈출 수 있다.
+ * 분류·인코딩은 순수 함수로 두어 I/O 없이 벤더 응답 스키마를 검증한다. */
 
 /** 승인 콜백의 내부 공통 결정(런타임 무관). wire codec에서 신규/legacy로 분리 인코딩. */
 export type InternalDecision = "once" | "session" | "decline" | "cancel";

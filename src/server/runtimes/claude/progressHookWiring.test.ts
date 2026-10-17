@@ -1,11 +1,4 @@
-/**
- * 배포된 훅이 b3os `.env`(TEAM_GROUP_ID)를 찾을 수 있어야 한다 — 못 찾으면 owner-skip 이
- * fail-open 이 되어 ★그룹방에서 전원이 반응한다.★
- *
- * ★훅은 저장소 밖에서 돈다★ — 런처가 `<멤버>/.claude/hooks/` 로 복사한다. 그래서 이 테스트는
- * 파일을 ★실제로 그 모양으로 복사한 뒤 거기서★ 실행한다. 저장소 안에서 재면 통과만 하고
- * 배포된 자리의 고장을 못 본다 — 그게 이 결함이 안 잡힌 이유다.
- */
+/** 훅을 실제 멤버 폴더와 같은 위치에 복사해 실행해야 저장소 밖에서도 그룹 설정을 찾는지 검증할 수 있다. 설정을 못 찾으면 담당자 억제가 풀린다. */
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, rmSync, readFileSync } from "node:fs";

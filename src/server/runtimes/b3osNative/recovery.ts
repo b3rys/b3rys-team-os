@@ -1,18 +1,5 @@
-/**
- * b3os-native runtime — M1.5: 재시작 턴 복구 (CRITICAL-2 해결).
- *
- * 문제: adapter.ts의 inFlight는 in-memory + 턴은 detach(void runTurn). 서버가 b3os_native 턴 도중
- *   재시작하면 그 턴은 사라지고, 전송층(delivery_state)은 lease-safe-async라 이미 wake_dispatched/
- *   completed로 넘어가 기존 recoverStaleClaims('dispatching'→pending)가 못 잡는다 → 메시지 유실.
- *
- * 해결(격리 마커 — 공유 디스패처 상태기계 무수정, blast radius 최소):
- *   - 턴 START에 b3os_native_inflight 마커 기록(markInflight).
- *   - 턴이 어떻게든 "정상 종료"하면(성공/dup/에러) finally에서 마커 삭제(clearInflight).
- *   - 오직 프로세스 크래시(finally 미실행)만 마커가 남는다.
- *   - 부팅 시 recoverB3osNativeInflight: 오래된(>STALE_SEC, 라이브 턴 오회수 방지) 마커를 찾아
- *     ①답이 이미 게시됐으면 마커만 삭제(멱등 — dup 60s 윈도우 너머도 안전) ②아니면 원 메시지의
- *     delivery_state를 'pending'으로 리셋해 기존 디스패처가 재wake하게 한다. dedup이 이중게시 방어.
- */
+/** 분리 실행은 배달 lease보다 오래 살아 재시작 때 기존 dispatching 복구에서 누락되므로 턴 시작·종료를 영속 마커로 기록한다.
+ * 오래된 마커만 회수해 실행 중 턴을 보호하고, 답이 있으면 마커만 지우며 없으면 pending으로 되돌려 중복 게시 없이 재실행한다. */
 import type { Database } from "bun:sqlite";
 
 /** 라이브 턴(LLM 타임아웃 120s, runner CALL_TIMEOUT_MS) + 여유. 이보다 오래된 마커만 "크래시"로 간주. */

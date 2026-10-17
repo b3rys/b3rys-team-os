@@ -1,10 +1,4 @@
-/**
- * 브리지 프로세스가 정말 끝났는지 — 퇴사 정리가 "끄고 바로 지우기" 로 경합하지 않게.
- *
- * 실측(앱 [팀원 추가] 실연): bootout 직후 파일을 지우면 아직 꺼지던 브리지(또는 그 자식 codex app-server)가
- * CODEX_HOME 아래 잠금 폴더를 다시 만들었다. 그래서 끄기 전에 브리지와 그 자식들의 pid 를 잡아 두고,
- * 끈 뒤 그들이 다 사라질 때까지(상한 있게) 기다린 다음에 지운다.
- */
+/** bootout 직후에도 브리지·자식이 CODEX_HOME 잠금 파일을 다시 만들 수 있으므로 종료 전 PID를 수집하고 제한시간 안에 모두 사라진 뒤 파일을 정리한다. */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { pidAlive } from "../../lib/codexBridgeClient";

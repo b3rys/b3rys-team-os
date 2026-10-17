@@ -82,7 +82,7 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     expect(r.detail).toBe("delivered");
   });
 
-  // ─── 영입인사 = 영속 마커로 1회만 ───
+  //  영입인사 = 영속 마커로 1회만
   test("이미 합류한 팀원(마커 존재) → 세션 비어도 영입인사 prepend 안 함", async () => {
     const dir = process.env.B3OS_FIRST_CONTACT_DIR!;
     writeFileSync(join(dir, "devon.done"), "greeted\n"); // devon = 여태 한 번이라도 인사함
@@ -113,7 +113,6 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     expect(calls.edits[0]?.text).toContain("응답을 만들지 못했어요");
   });
 
-  // ─── owner-gate shadow/enforcement (team-comm 3a, Codex 적대리뷰 대상) ───
   describe("owner-gate shadow/enforcement", () => {
     const PREV_S = process.env.CODEX_GROUP_NATIVE_DENY_SHADOW;
     const PREV_E = process.env.CODEX_GROUP_NATIVE_DENY;
@@ -123,7 +122,7 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     });
     const gate = (suppress: boolean) => { let n = 0; const fn = async () => { n++; return { suppress, reason: "explicit_mention", targets: ["bill"] }; }; return { fn, calls: () => n }; };
 
-    // ★차단은 '폴링 입구' 의 것이다★ — 그 입구엔 오너 판정이 없어 남을 부른 메시지에도 답했다.
+    // 차단은 '폴링 입구' 의 것이다 — 그 입구엔 오너 판정이 없어 남을 부른 메시지에도 답했다.
     //   bridge window로 들어온 것은 서버(capture)가 오너를 정한 뒤 넣은 것이라 그 차단을 지나지 않는다.
     test("★창구 입구는 차단을 지나지 않는다★ — 미설정(차단 켜짐)이어도 그룹 턴이 돈다", async () => {
       delete process.env.CODEX_GROUP_NATIVE_DENY_SHADOW; delete process.env.CODEX_GROUP_NATIVE_DENY;
@@ -238,10 +237,7 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     expect(calls.prompts[0]?.writableRoots).toEqual(["/tmp/cody"]);
   });
 
-  // ★계약이 바뀌었다★ (다른 런타임과의 일관성).
-  //   예전 이름: "permission preflight blocks workspace-write before Codex turn" —
-  //   grant 없이 workspace-write 면 브리지가 턴을 안 돌리고 "⚠️ 권한 게이트가 …막았습니다" 로 답했다.
-  //   우리 코드로 차단목록을 얹은 런타임이 codex 뿐이라 판정을 뺐다. 경계는 codex 설정이 정한다.
+  // 턴 시작의 자체 차단목록 대신 Codex 설정이 실행 경계를 정한다.
   test("★grant 없이도 workspace-write 턴은 그대로 돈다★ — 브리지 앞 우리 판정을 뺐다", async () => {
     const { deps, calls } = spies(() => ok("답입니다"));
     const r = await handleMessage(123, "파일 써줘", 55, {
@@ -249,11 +245,10 @@ describe("codex bridge (M2) — 채널 I/O", () => {
       agentId: "cody",
       workdir: "/tmp/cody",
       sandbox: "workspace-write",
-      // ★permissionContext(설정-grant)를 일부러 안 준다★ — 예전엔 이것 때문에 매 턴 막혔다.
-      //   바로 위 시험(grant 를 주는 경우)과 이제 ★결과가 같아야 한다★ = 통과 여부가 grant 에 안 달렸다.
+      // 설정 grant를 주지 않아도 같은 실행 결과여야 통과 여부가 별도 사전 판정에 달리지 않는다.
     });
-    expect(r.ok).toBe(true);        // 예전 false
-    expect(r.detail).toBe("delivered"); // 예전 permission_ask:tier-a.workspace-write
+    expect(r.ok).toBe(true);        // 실행 경계는 Codex 설정을 따른다.
+    expect(r.detail).toBe("delivered"); // 발신까지 완료된다.
     expect(calls.prompts.length, "★브리지 앞 차단이 되살아났다★ — 두뇌 턴이 안 돌았다").toBe(1);
     expect(calls.prompts[0]?.sandbox).toBe("workspace-write"); // 샌드박스 값은 그대로 codex 로 간다
     expect(calls.edits[0]?.text).toBe("답입니다");
@@ -272,7 +267,7 @@ describe("codex bridge (M2) — 채널 I/O", () => {
   });
 
   test("schedule tool enabled: LLM이 진짜 예약이라 판단해 SCHEDULE_MARKER를 내면 그때 등록한다", async () => {
-    // 예약 등록은 ★LLM 판단★으로만 — 키워드 매치는 도구 안내(scheduleToolPrompt) 주입 힌트일 뿐, LLM이 marker를 내야 등록.
+    // 예약 등록은 LLM 판단으로만 — 키워드 매치는 도구 안내(scheduleToolPrompt) 주입 힌트일 뿐, LLM이 marker를 내야 등록.
     let registered = false;
     const { deps, calls } = spies((prompt) => prompt.startsWith("[schedule_reminder tool result]") ? ok("등록했습니다: sched_host", "sess-1") :
       ok(`알겠습니다, 예약할게요.\n${SCHEDULE_MARKER} {"body":"5분 뒤 메시지","delay_seconds":300,"title":"reminder","direct_to_gd":true}`, "sess-1"),
@@ -298,7 +293,7 @@ describe("codex bridge (M2) — 채널 I/O", () => {
   });
 
   test("★GD 버그 회귀★: 예약처럼 보여도 LLM이 예약 아니라 판단(marker 없음)하면 등록하지 않는다", async () => {
-    // 2026-07-05 실버그: "3분뒤 메시지가 안왔네"(불평/질문)가 키워드 매치로 자동 예약됨. 이제 LLM이 판단 → marker 없으면 등록 0.
+    // 시간·행동 키워드가 있어도 불평·질문은 자동 예약하지 않는다. LLM의 예약 마커가 없으면 등록하지 않는다.
     let registered = false;
     const { deps, calls } = spies(() => ok("아까 3분 전에 보낸 메시지가 도착 안 한 것 같네요 — 확인해볼게요.", "sess-1"));
     const r = await handleMessage(123, "3분뒤 메시지가 안왔네", 55, {
@@ -313,7 +308,7 @@ describe("codex bridge (M2) — 채널 I/O", () => {
     });
     expect(r.ok).toBe(true);
     expect(calls.prompts.length).toBe(1); // LLM 턴 실행됨(판단함)
-    expect(registered).toBe(false); // ★marker 없음 → 불평/질문 자동예약 방지★
+    expect(registered).toBe(false); // marker 없음 → 불평/질문 자동예약 방지
     expect(r.reply).not.toContain("예약 등록");
   });
 
@@ -412,12 +407,7 @@ describe("발신자 게이트(allowlist) — parseAllowFrom + 통과 판정", ()
   });
 });
 
-// ── ★승인 버튼은 그 팀원 방에서 처리한다★ ──
-//
-// 서버가 이 봇으로 승인창을 띄우고, 누르는 것은 브리지가 받는다
-// (getUpdates 는 봇당 한 프로세스만 가능하므로 폴링하는 쪽이 콜백을 맡는다).
-// ★누른 뒤 answerCallbackQuery 를 반드시 보내야 한다★ — 안 보내면 텔레그램이 계속 '로딩중' 을 돌린다
-// (실제로 그 증상이 났다: "눌러도 로딩중 뜨고 반응도 없어").
+// 콜백은 봇당 단일 getUpdates를 맡은 브리지가 처리한다. answerCallbackQuery를 반환해야 사용자 화면의 로딩 표시가 끝난다.
 
 import { createSerialTurnQueue } from "./serialTurnQueue";
 import { handleApprovalCallback } from "./bridge";
@@ -451,7 +441,7 @@ test("★누르면 결정이 기록되고 답을 보낸다★ — 답이 없으�
   const calls: string[] = [];
   const out = await handleApprovalCallback("T", { id: "c1", data: `pg1:${id}`, from: { id: OWNER }, message: { message_id: 1, chat: { id: OWNER } } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch(calls) });
   expect(out).toBe("decided");
-  expect(calls).toContain("T/answerCallbackQuery"); // ★이게 없으면 로딩중이 안 멈춘다★
+  expect(calls).toContain("T/answerCallbackQuery"); // 이게 없으면 로딩중이 안 멈춘다
   const db = new CbDb(dbPath);
   expect(cbGet(db, id)?.status).toBe("allowed_once");
   db.close();
@@ -489,12 +479,7 @@ test("승인과 무관한 콜백은 건드리지 않는다", async () => {
   expect(await handleApprovalCallback("T", { id: "c6", data: "mcp:on", from: { id: OWNER } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch([]) })).toBe("ignored");
 });
 
-// ── ★team.db 경로는 환경변수에 기대지 않는다★ (2026-08-12) ──
-//
-// 승인 버튼이 죽은 진짜 원인이었다: `B3OS_REPO_ROOT ?? "."` 로 잡았는데 ★브리지에는 그 변수가 없다★
-// (실측: 브리지 프로세스 env 에 CODEX_WORKDIR 만 있고 B3OS_REPO_ROOT 없음).
-// 그래서 cwd(팀원 작업폴더)의 team.db 를 찾아 "unable to open database file" 로 매번 던졌고,
-// ★답을 못 보내서 사람 화면엔 로딩중만 돌았다.★
+// 브리지에는 저장소 env가 없을 수 있으므로 team.db를 cwd가 아닌 모듈 위치의 저장소 루트에서 찾는다. 잘못된 DB 경로면 승인 버튼 처리도 실패한다.
 
 import { defaultTeamDbPath } from "./bridge";
 import { existsSync as pathExists } from "node:fs";
@@ -504,16 +489,12 @@ test("★cwd·환경변수와 무관하게 저장소의 team.db 를 가리킨다
   const before = process.cwd();
   const saved = process.env.B3OS_REPO_ROOT;
   try {
-    delete process.env.B3OS_REPO_ROOT; // ★없는 게 실제 브리지 환경이다★
+    delete process.env.B3OS_REPO_ROOT; // 없는 게 실제 브리지 환경이다
     process.chdir("/tmp");             // 팀원 작업폴더에서 도는 상황을 흉내
     const p = defaultTeamDbPath();
     expect(isAbsolute(p)).toBe(true);
     expect(p.endsWith("/team.db")).toBe(true);
-    expect(p.startsWith("/tmp/")).toBe(false); // cwd 를 따라가면 안 된다
-    // ★가리키는 폴더가 실제 저장소 루트여야 한다.★
-    //   전에는 team.db 자체의 존재를 봤는데, 그 파일은 ★git 이 추적하지 않는다★ —
-    //   worktree·새 클론·CI 에는 없어서 시험이 브랜치와 무관하게 빨간불이 났다(2026-08-18 실측).
-    //   추적되는 파일로 같은 것을 잰다: 경로가 엉뚱하면 여기서 걸린다.
+    expect(p.startsWith("/tmp/")).toBe(false); // 저장소 경로는 git 추적 파일로 검증한다. team.db는 새 클론·worktree·CI에 없으므로 존재 여부를 기대하면 경로가 맞아도 실패한다.
     expect(pathExists(joinPath(dirname(p), "package.json"))).toBe(true);
   } finally {
     process.chdir(before);
@@ -521,14 +502,11 @@ test("★cwd·환경변수와 무관하게 저장소의 team.db 를 가리킨다
   }
 });
 
-// ★브리지도 app-server 로 간다★
-//
-// 전에는 브리지만 옛 exec 경로였다 — ★사람이 직접 말 거는 길★ 에만 그때까지의 개선이
-// 하나도 안 붙어 있었다(중간 개입·상주·서브에이전트 생존·승인창은 전부 버스 경로에만).
+// 직접 대화도 app-server 경로를 사용해 steer·프로세스 상주·서브에이전트 생존이 버스 경로와 일치해야 한다.
 import { defaultBridgeCaller } from "./bridge";
 
 test("★app-server 하나뿐이다★ — 플래그로 갈라두면 한쪽만 좋아지고 다른 쪽은 조용히 뒤처진다", () => {
-  // 폴백은 ★말은 통하지만 기능이 사라진 상태★ 이고, 조용해서 아무도 모른다.
+  // 폴백은 말은 통하지만 기능이 사라진 상태 이고, 조용해서 아무도 모른다.
   const saved = process.env.B3OS_CODEX_APPSERVER;
   try {
     delete process.env.B3OS_CODEX_APPSERVER; // 플래그가 없어도 app-server 로 간다
@@ -538,10 +516,10 @@ test("★app-server 하나뿐이다★ — 플래그로 갈라두면 한쪽만 �
   }
 });
 
-// ── ★진행 표시 배선★ ──
+//  진행 표시 배선
 //
 // 순수 로직(줄 접기·길이·넘김)은 progressLines.test.ts 가 잰다.
-// 여기서 재는 것은 ★배선★ 이다 — 브리지가 진행 이벤트를 실제로 받는가, 그 줄이 어느 메시지에
+// 여기서 재는 것은 배선 이다 — 브리지가 진행 이벤트를 실제로 받는가, 그 줄이 어느 메시지에
 // 쓰이는가, 답이 어디로 가는가. 실제로 끊겨 있던 곳이 로직이 아니라 이 배선이었다.
 describe("codex bridge — 진행 표시", () => {
   beforeEach(() => resetChatThreads());
@@ -590,13 +568,7 @@ describe("codex bridge — 진행 표시", () => {
     expect(calls.edits.filter((e) => e.text.includes("🛠️")).length).toBe(0);
   });
 
-  /**
-   * ★진행 버블도 MarkdownV2 로 나간다 — 그러면 이스케이프해서 보내야 한다.★
-   *
-   * 라이브: 버블 텍스트가 ★순수 텍스트 그대로★ parse_mode=MarkdownV2 로 나갔다. 그래서 `-`·`.` 이 있는 줄마다
-   * 텔레그램이 400 을 냈고(`dex.log` ★156건★), 매번 평문으로 재전송해 ★같은 편집을 두 번씩★ 했다.
-   * 화면은 멀쩡했지만 호출이 2배였고 로그가 그 실패로 덮였다. ★최종 답은 이미 변환을 타고 있었다 — 버블만 빠졌다.★
-   */
+  /** 진행 버블도 MarkdownV2 변환을 해야 예약문자 때문에 편집이 거절되고 매번 평문 재전송하는 중복 호출을 막는다. */
   test("★진행 줄의 예약문자를 이스케이프해서 보낸다★ (안 하면 매번 400 → 재전송으로 호출 2배)", async () => {
     const { deps, calls } = spiesWithActivity(["a-b 파일 확인", "설정.값 갱신"]);
     await handleMessage(15, "해줘", 1, deps);
@@ -617,7 +589,7 @@ describe("codex bridge — 진행 표시", () => {
   /**
    * 경합을 실제로 만드는 mock.
    *   · lines: [지연ms, 문구] — 그 시각에 진행 줄을 흘린다
-   *   · editDelays: 편집 호출별 지연(부족하면 0). ★첫 편집만 느리게★ 해야 답과 순서가 뒤집힌다
+   *   · editDelays: 편집 호출별 지연(부족하면 0). 첫 편집만 느리게 해야 답과 순서가 뒤집힌다
    *   · turnMs: 턴이 끝나는 시각
    */
   function spiesRace(opts: {
@@ -650,12 +622,12 @@ describe("codex bridge — 진행 표시", () => {
     return { deps, calls };
   }
 
-  // ★첫 편집은 즉시 나간다★(lastEditAt 초기값 0) — 이후만 EDIT_MIN_INTERVAL_MS 간격으로 묶인다.
-  //   그래서 경합을 만들려면 ★첫 편집을 길게★ 잡아야 한다. 아래 두 시험의 시간 값은 그 실측에서 나왔다.
+  // 첫 편집은 즉시 나간다(lastEditAt 초기값 0) — 이후만 EDIT_MIN_INTERVAL_MS 간격으로 묶인다.
+  //   그래서 경합을 만들려면 첫 편집을 길게 잡아야 한다. 아래 두 시험의 시간 값은 그 실측에서 나왔다.
 
   test("★편집 중에 들어온 마지막 줄도 화면에 나간다★ — 재예약이 없으면 그 줄은 영영 안 보인다", async () => {
     // 첫 줄 t=0 → 편집 즉시 시작, 3000ms 걸린다.
-    // 둘째 줄 t=100 → 예약된 flush 가 t≈1500 에 뜨는데 ★그때 편집이 아직 돈다★ → 조용히 되돌아간다.
+    // 둘째 줄 t=100 → 예약된 flush 가 t≈1500 에 뜨는데 그때 편집이 아직 돈다 → 조용히 되돌아간다.
     // 타이머는 이미 소진됐고 뒤에 줄이 더 없으므로, 재예약이 없으면 둘째 줄은 화면에 못 간다.
     const { deps, calls } = spiesRace({
       lines: [[0, "첫 명령"], [100, "둘째 명령"]],
@@ -671,7 +643,7 @@ describe("codex bridge — 진행 표시", () => {
 
   test("★날아간 편집이 답을 덮지 않는다★ — 마지막 편집은 언제나 답이다", async () => {
     // 진행 편집이 t≈0 에 시작해 2000ms 걸리는데 턴은 t=500 에 끝난다
-    // = 답을 쓰려는 순간 ★진행 편집이 아직 날아가 있다.★ 기다리지 않으면 답이 먼저 찍히고
+    // = 답을 쓰려는 순간 진행 편집이 아직 날아가 있다. 기다리지 않으면 답이 먼저 찍히고
     //   늦게 끝난 진행 줄이 그 위를 덮는다.
     const { deps, calls } = spiesRace({
       lines: [[0, "느린 명령"]],
@@ -685,19 +657,7 @@ describe("codex bridge — 진행 표시", () => {
   });
 });
 
-// ── ★턴이 도는 도중에 눌러도 처리되는가★ ──
-//
-// 이것이 #334 가 고친 것의 핵심이다. 예전에는 폴링 루프가 턴을 인라인으로 기다려서
-// 버튼 입력을 제때 가져오지 못했고, 승인 요청은 codex 로 전달되지 못한 채 만료됐다
-// (실측: 2026-08-13 11:35 ~ 08-18 11:18 구간 8건 전부 expired · 그중 6건이 300~302초.
-//  사람이 누른 기록은 6건 있었으나 codex 로 전달된 건은 0건 — state != 'delivered' 기준).
-//
-// ★라이브 증거★: 고친 뒤 prm_93e07c50a14b4eb989 이 생성 7초 만에 delivered 됐다
-// (2026-08-18 12:29 · approver=GD). 그 구간 이후 첫 전달이다.
-//
-// ★여기서 재는 것★: 턴이 아직 도는 중에 콜백이 들어오면 그 자리에서 처리되고 DB 가 실제로 바뀐다.
-// ★여기서 재지 않는 것★: 폴링 루프가 그 콜백을 실제로 가져오는지. 루프는 무한 루프라 단위 시험으로
-//   돌릴 수 없다 — 그 부분은 라이브 로그로 확인했다(턴의 답이 나가기 전에 다음 메시지가 수신됨).
+// 턴 도중 콜백을 처리해 DB 결정이 갱신되는지 검증한다. 폴링 루프 자체의 수신 여부까지 이 단위 시험이 증명하지는 않는다.
 test("★턴이 도는 도중에 눌러도 그 자리에서 처리된다★ — 이게 안 되면 승인은 300초 뒤 만료된다", async () => {
   const { dbPath, id } = pendingRequest();
   const turns = createSerialTurnQueue();
@@ -708,7 +668,7 @@ test("★턴이 도는 도중에 눌러도 그 자리에서 처리된다★ — 
     turnFinished = true;
   });
 
-  // ★턴이 끝나기 전에★ 버튼이 눌린 상황.
+  // 턴이 끝나기 전에 버튼이 눌린 상황.
   const out = await handleApprovalCallback(
     "T",
     { id: "cb-mid", data: `pg1:${id}`, from: { id: OWNER }, message: { message_id: 7, chat: { id: OWNER } } },
@@ -723,7 +683,7 @@ test("★턴이 도는 도중에 눌러도 그 자리에서 처리된다★ — 
   const db = new CbDb(dbPath);
   const row = db.prepare("SELECT status FROM permission_request WHERE id = ?").get(id) as { status: string };
   db.close();
-  expect(row.status).not.toBe("pending"); // ★턴이 도는 동안 실제로 결정됐다★
+  expect(row.status).not.toBe("pending"); // 턴이 도는 동안 실제로 결정됐다
 
   await turns.drain();
   expect(turnFinished).toBe(true);
@@ -746,9 +706,9 @@ test("★대조군 — 대기열이 콜백 처리를 늦추지 않는다★ (턴
   await turns.drain();
 });
 
-// ── ★재시작 넘어 맥락이 이어지는가 (배선)★ ──
+//  재시작 넘어 맥락이 이어지는가 (배선)
 //
-// 순수 저장 로직은 dmSessionStore.test.ts 가 잰다. 여기서는 ★브리지가 그것을 실제로 쓰는지★ 를 잰다 —
+// 순수 저장 로직은 dmSessionStore.test.ts 가 잰다. 여기서는 브리지가 그것을 실제로 쓰는지 를 잰다 —
 // 실제로 끊겨 있던 곳이 저장소가 아니라 배선이었다(브리지가 codex_session_map 을 참조하지 않았다).
 describe("codex bridge — 1:1 세션 재시작 연속성", () => {
   beforeEach(() => resetChatThreads());
@@ -817,10 +777,10 @@ describe("codex bridge — 1:1 세션 재시작 연속성", () => {
   });
 });
 
-// ── ★'이 세션' 버튼★ ──
+//  '이 세션' 버튼
 //
 // 배선은 원래 끝까지 있었다 — permissionGate 의 allow_session · decision_scope='session' ·
-// serverRequestCodec 의 acceptForSession 까지. ★없던 것은 사람이 누를 자리뿐이었다.★
+// serverRequestCodec 의 acceptForSession 까지. 없던 것은 사람이 누를 자리뿐이었다.
 describe("codex bridge — 이 세션 승인", () => {
   test("★'이 세션' 을 누르면 세션 범위로 기록된다★ — 한번 허용과 구분돼야 codex 가 세션 동안 기억한다", async () => {
     const { dbPath, id } = pendingRequest();
@@ -869,9 +829,9 @@ describe("codex bridge — 이 세션 승인", () => {
   });
 });
 
-// ── ★답 포맷 배선★ ──
+//  답 포맷 배선
 //
-// 변환 규칙 자체는 telegramMarkdown.test.ts 가 잰다. 여기서는 ★브리지가 그것을 실제로 쓰는지★ 를 잰다.
+// 변환 규칙 자체는 telegramMarkdown.test.ts 가 잰다. 여기서는 브리지가 그것을 실제로 쓰는지 를 잰다.
 describe("codex bridge — 답 포맷", () => {
   beforeEach(() => resetChatThreads());
 
@@ -922,10 +882,10 @@ describe("codex bridge — 답 포맷", () => {
   });
 });
 
-// ── ★폴백 분기 — 실패했을 때만 도는 길★ ──
+//  폴백 분기 — 실패했을 때만 도는 길
 //
 // 이 분기가 이 변경의 안전장치인데, 주입 없이는 단위에서도 라이브에서도 실행되지 않는다.
-// ★함수가 검증된 것과 그 함수를 부르는 분기가 검증된 것은 다르다★ — toPlain 은 시험돼 있었지만
+// 함수가 검증된 것과 그 함수를 부르는 분기가 검증된 것은 다르다 — toPlain 은 시험돼 있었지만
 // 그것을 부르는 이 길은 한 번도 안 돌았다. 여기서 그 길을 직접 밟는다.
 describe("텔레그램 전송 — MarkdownV2 거부 시 폴백", () => {
   /** 첫 호출은 실패, 그 뒤는 성공하는 가짜 텔레그램. */
@@ -983,7 +943,7 @@ describe("텔레그램 전송 — MarkdownV2 거부 시 폴백", () => {
   });
 });
 
-// ── ★상태는 한 자리, 작업은 그 아래★ ──
+//  상태는 한 자리, 작업은 그 아래
 describe("codex bridge — 상태 머리글", () => {
   beforeEach(() => resetChatThreads());
 
@@ -1030,11 +990,7 @@ describe("codex bridge — 상태 머리글", () => {
   });
 });
 
-// ── ★도는 중인 작업에 말을 밀어 넣는다★ ──
-//
-// 실측(2026-08-19): 팀 리드가 작업 중에 보낸 메시지 4건이 ★전부 로그에 들어와 있는데 답이 없었다.★
-// 받기는 하지만 새 턴으로 줄을 세우니, 하던 일이 끝날 때까지 아무 반응이 없어 ★못 듣는 것처럼 보인다.★
-// 버스로 온 일에는 이 배선이 있었고(7군데) 1:1 에는 ★0군데★ 였다.
+// 진행 중 대화의 메시지는 새 턴 대기열이 아니라 turn/steer로 전달해야 앞 작업이 끝날 때까지 입력이 지연되지 않는다.
 describe("codex bridge — 진행 중 작업에 끼어들기", () => {
   beforeEach(() => resetChatThreads());
 
@@ -1092,10 +1048,10 @@ describe("codex bridge — 진행 중 작업에 끼어들기", () => {
   });
 });
 
-// ── ★조립된 값을 잰다★ — 부품 시험은 다 통과하는데 조립하면 뒤집혀 있었다 ──
+//  조립된 값을 잰다 — 부품 시험은 다 통과하는데 조립하면 뒤집혀 있었다
 //
-// 경고는 `res.ok` 를 읽는 자리에 있었는데, bridge window 경로는 발신을 일부러 떼서 `ok` 가 ★항상 false★ 다.
-// 그래서 ★정상 성공에도 경고가 떴다.★ 부품(문자열·발신 0회)만 재는 시험은 이걸 못 잡는다.
+// 경고는 `res.ok` 를 읽는 자리에 있었는데, bridge window 경로는 발신을 일부러 떼서 `ok` 가 항상 false 다.
+// 그래서 정상 성공에도 경고가 떴다. 부품(문자열·발신 0회)만 재는 시험은 이걸 못 잡는다.
 import { runGroupTurn } from "./bridge";
 import { groupReplyPath, ensureOutboxDir } from "./groupOutbox";
 
@@ -1115,7 +1071,7 @@ describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 �
         reactMessage: async (_c: number, _m: number, e: string) => { reacts.push(e); return true; },
       },
       agentId: "dex",
-      // ★진짜로 만들 수 있는 자리를 준다★ — 준비 실패면 턴을 안 돌리므로 /repo 로는 아무것도 안 돈다
+      // 진짜로 만들 수 있는 자리를 준다 — 준비 실패면 턴을 안 돌리므로 /repo 로는 아무것도 안 돈다
       repoRoot: tmpRoot,
       chatId: -100,
       tgMsgId: 42,
@@ -1136,12 +1092,12 @@ describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 �
   test("★답 파일이 있으면 브리지가 운반한다★ — 팀원은 셸을 안 탄다", async () => {
     const { reacts, audits, delivered, ctx } = make(okTurn);
     await runGroupTurn(ctx);
-    // ★누가 보내는지를 브리지가 넘긴다★ — 안 넘기면 스크립트가 디렉터리·tmux 로 추측한다
+    // 누가 보내는지를 브리지가 넘긴다 — 안 넘기면 스크립트가 디렉터리·tmux 로 추측한다
     expect(delivered).toEqual([{ text: "네 들립니다", threadId: "tg--100", messageId: "tg-1", agentId: "dex" }]);
     expect(audits[0]?.replied).toBe(true);
     expect(audits[0]?.delivered).toBe(true);
     expect(audits[0]?.chars).toBe("네 들립니다".length);
-    // ★send_failed 는 이 경로의 기대값이다★ — 실패 사유로 적으면 전부 거짓값이 된다
+    // send_failed 는 이 경로의 기대값이다 — 실패 사유로 적으면 전부 거짓값이 된다
     expect(audits[0]?.detail).toBe("turn_ok");
     expect(reacts).toEqual([]);
   });
@@ -1153,7 +1109,7 @@ describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 �
     expect(audits[0]?.turn_ok).toBe(true);
     expect(audits[0]?.replied).toBe(false);
     expect(audits[0]?.detail).toBe("no_reply:none");
-    // ★경고를 붙이지 않는다★ — 오너가 아니어서 안 답한 것도 정상이다
+    // 경고를 붙이지 않는다 — 오너가 아니어서 안 답한 것도 정상이다
     expect(reacts).toEqual([]);
   });
 
@@ -1162,7 +1118,7 @@ describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 �
     await runGroupTurn(ctx);
     expect(audits[0]?.replied).toBe(true);
     expect(audits[0]?.delivered).toBe(false);
-    // ★사유를 버리지 않는다★ — 버리면 다음 실패도 넉 자로만 남아 같은 조사를 반복한다
+    // 사유를 버리지 않는다 — 버리면 다음 실패도 넉 자로만 남아 같은 조사를 반복한다
     expect(String(audits[0]?.detail)).toContain("deliver_failed:");
     expect(String(audits[0]?.detail)).toContain("발신자 해석 실패");
     expect(reacts).toEqual(["⚠️"]);
@@ -1188,7 +1144,7 @@ describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 �
   });
 
   test("★턴이 던져도 같은 모양으로 보인다 — 그리고 자리를 비운다★", async () => {
-    // 안 비우면 ★다음 턴이 이번 답을 자기 답으로 읽는다★ (조용한 실패가 아니라 그럴듯하게 틀린 쪽)
+    // 안 비우면 다음 턴이 이번 답을 자기 답으로 읽는다 (조용한 실패가 아니라 그럴듯하게 틀린 쪽)
     const { reacts, audits, consumed, ctx } = make(async () => { throw new Error("boom"); });
     await runGroupTurn(ctx);
     expect(reacts).toEqual(["⚠️"]);
@@ -1202,7 +1158,7 @@ describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 �
     const { ctx } = make(async (_c: number, body: string) => { seen = body; return okTurn(); });
     await runGroupTurn(ctx);
     expect(seen).toContain(join(tmpRoot, "var", "codex-bridge", "outbox", "dex", "fixed.txt"));
-    // ★셸을 시키지 않는다★ — exec 이 곧 승인 팝업이고 팝업은 턴을 죽였다
+    // 셸을 시키지 않는다 — exec 이 곧 승인 팝업이고 팝업은 턴을 죽였다
     expect(seen).not.toContain("send.sh");
     expect(seen).not.toContain("mktemp");
   });
@@ -1230,11 +1186,7 @@ describe("runGroupTurn — ★턴 성공·답 함·운반됨은 서로 다른 �
   });
 });
 
-// ── ★안내 문구를 '발신' 으로 전하는 경로는 bridge window 에서 실패다★ (리뷰 지적) ──
-//
-// 예약 요청인데 예약 도구가 꺼져 있으면 LLM 앞에서 조기 반환하며 안내 문구를 ★보낸다.★
-// 그런데 bridge window 경로는 그 발신을 뗐다 — 그러면 ★답 0건 · 경고 없음 · 성공 기록★ 이 되어
-// 사람도 기록도 "잘 됐다" 로 읽는다. 아무것도 전달되지 않았으므로 실패로 보여야 한다.
+// bridge window는 직접 발신을 끄므로 조기 반환 안내도 전달되지 않는다. 안내를 만들었다는 이유만으로 전달 성공을 기록하지 않는다.
 test("unavailable scheduler window reply is returned from the model", async()=>{
  const {deps,calls}=spies(()=>ok("도구가 연결되지 않았습니다."));deps.scheduleToolEnabled=false;
  const result=await handleMessage(-123,"10분 뒤 알려줘",55,deps,undefined,"window");
@@ -1242,10 +1194,10 @@ test("unavailable scheduler window reply is returned from the model", async()=>{
  expect(calls.prompts[0]?.prompt).toContain("schedule_reminder unavailable");
 });
 
-// ── ★진짜 운반 경로를 통과시킨다★ ──
+//  진짜 운반 경로를 통과시킨다
 //
-// 주입된 스텁만 재면 ★스텁이 받은 값★ 을 잴 뿐이고, 실제 함수에서 from_agent_id 줄을 지워도
-// 전부 초록이다. 서버 입구를 세워 ★실제로 POST 되는 것★ 을 본다.
+// 주입된 스텁만 재면 스텁이 받은 값 을 잴 뿐이고, 실제 함수에서 from_agent_id 줄을 지워도
+// 전부 초록이다. 서버 입구를 세워 실제로 POST 되는 것 을 본다.
 describe("deliverGroupReply — 실제로 서버 입구에 넣는다", () => {
   type Ctx = Parameters<typeof runGroupTurn>[0];
   const root2 = mkdtempSync(join(tmpdir(), "dlv-"));
@@ -1288,7 +1240,7 @@ describe("deliverGroupReply — 실제로 서버 입구에 넣는다", () => {
       audit: (_a: string, _t: string, d: Record<string, unknown>) => { audits.push(d); },
       run: async () => ({ ok: false, turnOk: true, reply: "", detail: "send_failed" }),
       replyPath,
-      // ★deliver 를 안 넘긴다★ — 진짜 함수를 태운다
+      // deliver 를 안 넘긴다 — 진짜 함수를 태운다
     } as unknown as Ctx;
   }
 

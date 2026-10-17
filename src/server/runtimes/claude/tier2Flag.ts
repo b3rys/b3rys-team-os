@@ -1,8 +1,5 @@
-// Tier2 아웃바운드 롤아웃 게이트 — ★live와 shadow 분리★(Bill 하네스 HIGH#2).
-//   live   = persona 마커모드(‹‹‹b3os-send›››) + 훅 live 전송 (Phase1)
-//   shadow = persona normal(reply 도구 유지) + 훅 dryRun 로그만 (Phase0, 라이브 무영향)
-// 파일(공백/콤마 구분) ∪ env. mtime 캐시라 파일 한 줄로 멤버 on/off(재시작 불요).
-// wakeDispatcher의 busWakeExtraFile/busDispatchAllowlist 패턴 미러.
+// Tier2 live는 마커 persona·실전송, shadow는 기존 reply persona·dryRun 로그로 분리해 관찰이 실제 발신을 바꾸지 않게 한다.
+// 파일과 env의 합집합을 사용하고 mtime 캐시로 재시작 없이 멤버별 토글을 반영한다.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { REPO_ROOT } from "../../lib/personaTemplates";
 
@@ -38,7 +35,7 @@ export function isTier2Outbound(id: string): boolean {
 }
 
 /**
- * ★Phase0 shadow 멤버★ — persona는 normal(reply 도구 그대로) 유지하고 tg-outbound 훅만 dryRun으로 설치해
+ * Phase0 shadow 멤버 — persona는 normal(reply 도구 그대로) 유지하고 tg-outbound 훅만 dryRun으로 설치해
  * '무엇을 보낼지' 로그만 찍음(실전송 X = 라이브 무영향). live와 별개 파일이라 겹치지 않는다.
  * var/tier2-shadow-agents.txt ∪ env TIER2_SHADOW_AGENTS.
  */

@@ -1,13 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { CodexAppServerClient, resumeFailureLine } from "./appServerClient";
 
-/**
- * ★이어받기 실패가 보이는가.★
- *
- * 이 로그는 ★시험이 없으면 지워도 아무도 모른다.★ 그런데 이게 없으면
- * "이어받았다" 와 "실패해서 새로 시작했다" 가 기록에서 같은 모양이라,
- * 사람이 "왜 앞 얘기를 잊었냐" 고 물어도 답할 수 없다(2026-08-19 실측 — 그 상황이 실제로 났다).
- */
+/** resume 실패를 별도 로그로 남겨 새 세션 시작과 정상 이어받기를 기록만으로 구분할 수 있어야 한다. */
 describe("실패 사유 한 줄", () => {
   test("★어느 대화였는지와 왜 실패했는지가 둘 다 들어간다★", () => {
     const line = resumeFailureLine("01a01826-aaaa", new Error("already has an active writer"));
@@ -29,7 +23,7 @@ describe("★실패하면 실제로 그 줄이 나오고, 새 대화로 떨어�
     const lines: string[] = [];
     const c = new CodexAppServerClient({ warn: (l) => lines.push(l) });
     const calls: string[] = [];
-    // ★프로세스를 띄우지 않고 분기만 밟는다★ — 이 분기가 도는지가 재려는 것이다.
+    // 프로세스를 띄우지 않고 분기만 밟는다 — 이 분기가 도는지가 재려는 것이다.
     (c as unknown as { request: (m: string, p: unknown) => Promise<unknown> }).request = async (method) => {
       calls.push(method);
       if (method === "thread/resume") {

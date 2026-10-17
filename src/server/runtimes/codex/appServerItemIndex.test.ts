@@ -1,12 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { CodexTurnItemIndex } from "./appServerItemIndex";
 
-/**
- * ★S2a — turn 단위 알림 색인★
- *
- * 이 색인이 틀리면 ★사람이 승인한 것과 실제로 실행되는 것이 달라진다.★ 그래서 시험의 초점은
- * '잘 찾는다' 가 아니라 ★'엉뚱한 것을 찾아주지 않는다'★ 다.
- */
+/** 색인은 다른 항목·턴의 내용을 승인에 붙이지 않아야 사람이 본 변경과 실행할 변경이 일치한다. */
 const patch = (itemId: string, turnId: string, changes: unknown) => ({
   method: "item/fileChange/patchUpdated",
   params: { itemId, turnId, threadId: "th1", changes },

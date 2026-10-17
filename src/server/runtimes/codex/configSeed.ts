@@ -1,31 +1,5 @@
-/**
- * 새 codex 팀원의 CODEX_HOME/config.toml 을 만든다.
- *
- * ★제품 결정(2026-08-18): 호스트 설정을 상속한다.★
- * 이전에는 최소 config 만 렌더하고 호스트 설정 복사를 금지했다. 그 결과 새로 영입한 팀원은
- * 플러그인·MCP 없이 떠서, 파일이 먼저 있어 시딩이 건너뛴 팀원(dex)보다 ★기능이 좁았다.★
- * 팀원마다 할 수 있는 일이 다르면 같은 과제를 맡길 수 없다.
- *
- * ★상속하는 것은 능력, 걷어내는 것은 정책·신뢰·정체성.★
- *   물려준다: 모델 · 플러그인 · MCP 서버 정의 · 마켓플레이스 · 기능 토글
- *
- *   ① 정책 — `sandbox_mode` · `approval_policy` · `[sandbox_workspace_write]`
- *      실행 모드는 `appServerRunner` 가 codex 프로토콜로 명시하는 ★한 곳★ 에서만 정해진다.
- *      설정 파일에도 적으면 두 곳이 갈리는데 어느 쪽이 이기는지는 아직 측정되지 않았다
- *      (docs/RUNTIME_ACCEPTANCE.md 판정 규칙 0). 한 곳으로 두면 그 질문 자체가 생기지 않는다.
- *
- *   ② 신뢰 — `[projects."<경로>"]` 전부
- *      ★trust 는 능력이 아니라 권한이다.★ 호스트 설정에는 홈·다른 팀원 폴더·스크래치까지
- *      신뢰 표시가 쌓여 있다(이 기계 실측 12개). 그대로 물려주면 새 팀원마다 그 권한을 들고 뜬다.
- *      대신 ★그 팀원의 작업 폴더 하나만★ 새로 써 넣는다.
- *
- *   ③ 정체성 — 값이 ★호스트 CODEX_HOME 을 가리키는 줄★ (예: `CODEX_HOME` ·
- *      `NODE_REPL_TRUSTED_CODE_PATHS`). `codexHome` 은 팀원별 정체성 격리 장치인데,
- *      그 안에 호스트 경로를 심어 배포하면 새 팀원의 MCP 가 호스트 설정·인증을 본다.
- *
- * ★이어붙이지 않고 지운다.★ TOML 은 같은 키가 두 번 나오면 파싱 자체가 실패한다 —
- * 덮어쓰기를 append 로 구현하면 설정 파일이 통째로 깨진다.
- */
+/** 모델·플러그인·MCP·기능은 상속해 새 팀원의 기능이 좁아지지 않게 하되 정책·신뢰·정체성은 제거한다. 실행 정책은 프로토콜 한 곳에서만 정하며 설정 우선순위는 미측정이다.
+ * 호스트 projects 신뢰는 권한이므로 팀원 작업폴더 하나만 새로 쓰고, 호스트 CODEX_HOME을 가리키는 값은 설정·인증 격리를 깨므로 제거한다. TOML 중복 키는 파싱 실패하므로 append 대신 제거 후 기록한다. */
 
 /** ① 정책 — 걷어내는 최상위 키. */
 export const POLICY_KEYS = ["sandbox_mode", "approval_policy"] as const;
@@ -75,11 +49,11 @@ export function removeTablesWithPrefix(toml: string, prefix: string): string {
 
 /**
  * 값이 특정 경로를 가리키는 줄을 지운다(정체성 누출 차단).
- * 키 이름이 아니라 ★값★ 으로 판정한다 — CODEX_HOME 만 막으면 같은 값을 다른 이름으로 실은 줄이 남는다.
+ * 키 이름이 아니라 값 으로 판정한다 — CODEX_HOME 만 막으면 같은 값을 다른 이름으로 실은 줄이 남는다.
  */
 export function removeLinesReferencing(toml: string, needle: string): string {
   if (needle === "") return toml;
-  // ★경계까지 보고 비교한다.★ 단순 포함으로 재면 needle 이 `~/.codex` 일 때
+  // 경계까지 보고 비교한다. 단순 포함으로 재면 needle 이 `~/.codex` 일 때
   //   `~/.codex-agents/<팀원>` 을 가리키는 줄까지 같이 걸린다 — 그건 그 팀원 자신의 폴더다.
   const hit = (line: string): boolean => {
     let from = 0;

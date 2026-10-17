@@ -1,6 +1,4 @@
-// b3os_native 어댑터 characterization 테스트 (M1 핵심 정확성 핀).
-// in-memory sqlite, 라이브 무관. 가짜 LlmCaller 주입(진짜 API 호출 X).
-// 핀: ①at-most-once 최종답 1회 ②in-flight 잠금(중복 launch X) ③directed/broadcast ④에러 무음 아님 ⑤lease-safe(즉시 반환).
+// 실제 API 대신 LlmCaller를 주입하고 메모리 DB로 최종답 1회·중복 턴 차단·수신자 선택·실패 통지를 검증한다.
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../../db/migrate";
@@ -130,7 +128,6 @@ describe("b3os_native adapter (M1) — 핵심 정확성", () => {
     expect(r.ok).toBe(false);
   });
 
-  // ── 하네스 발견 반영: buildPrompt 라벨/중복, at-most-once 실제화, 실패통지 ──
 
   test("buildPrompt: 과거 대화 역할 라벨(나/상대) + 들어온 메시지 끝에 1회만(history서 필터)", async () => {
     const db = setup();

@@ -1,5 +1,5 @@
 // claude 런타임 GD 1:1 DM 파서 — 세션.jsonl에서 GD와의 1:1만 엄격 추출해 dm_message로 sync.
-// ★엄격필터★(POC 검증): <channel source="plugin:telegram" chat_id=GD>(inbound) + reply tool_use(outbound)만.
+// 엄격필터(POC 검증): <channel source="plugin:telegram" chat_id=GD>(inbound) + reply tool_use(outbound)만.
 //   <external_message>(팀/버스)·bash·thinking·그룹은 제외 — 안 하면 버스 메시지가 섞임(POC 567→498).
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, fstatSync, openSync, readdirSync, readSync, statSync } from "node:fs";
@@ -33,12 +33,7 @@ export function readTail(fp: string, tailBytes: number = TAIL_BYTES): string {
   }
 }
 
-/**
- * Claude Code 세션 저장소 루트. 기본 `~/.claude/projects` — ★운영 동작 불변★.
- * env override 는 ★테스트 격리용★ (2026-07-27): 이 경로를 하드코딩해 두니 세션 픽스처를 만드는
- * 테스트가 팀장 실제 세션 저장소에 폴더를 쌓았다(이 맥에 5,157개 누적). 파괴적이진 않지만
- * 사용자 디렉터리를 오염시킨다. 호출 시점에 읽는다 — preload 가 세팅한 값이 반영되게.
- */
+/** 세션 저장소 env는 호출 시점에 읽어 preload의 시험 격리가 적용되게 한다. 기본은 ~/.claude/projects이며 시험 데이터는 tmp로 돌린다. */
 export function claudeProjectsDir(): string {
   return process.env.B3OS_CLAUDE_PROJECTS_DIR || `${homedir()}/.claude/projects`;
 }
@@ -80,14 +75,8 @@ function textOf(content: unknown): string {
  *   (reply 도구는 호출 시점에 sent id를 모르므로 outbound는 ts+본문 해시로 안정 dedupe).
  * created_at: 이벤트 timestamp(UTC). KST는 렌더 시 +9h.
  */
-/** 채널 태그 원문에서 팀장 1:1 inbound 를 뽑는다(엄격필터). 아니면 null.
- *  ★두 경로가 이 한 함수를 공유한다★ — 일반 턴(user 이벤트)과 인터럽트(queue-operation)가
- *  같은 필터를 쓰게 해서, 한쪽만 고치는 회귀를 원천 차단한다.
- *
- *  ★버스/팀 메시지 배제는 '앵커'로 한다(적대 리뷰 2026-07-14).★ 예전엔 본문 어디든 "<external_message"
- *  가 있으면 버렸다 — 그래서 ★팀장이 룰 스니펫을 붙여넣기만 해도 그 DM 이 통째로 유실됐다.★
- *  ("이 <external_message> 태그 파싱 어떻게 해?" → 기록 안 됨). 실제로 팀장은 룰·포맷을 자주 붙여넣는다.
- *  진짜 버스 메시지는 ★<external_message 로 시작★ 하므로, 시작 위치로만 판정한다. */
+/** 일반 user 이벤트와 queue-operation이 같은 1:1 필터를 사용한다.
+ * 버스 태그는 시작 위치에서만 제외해야 태그 예시를 본문에 붙인 정상 DM이 유실되지 않는다. */
 function inboundFromChannelText(text: string, gdChat: string): { mid: string; body: string } | null {
   const head = text.trimStart();
   if (!head.startsWith("<channel")) return null; // 버스 주입·팀 메시지는 <channel 로 시작하지 않는다
@@ -124,11 +113,7 @@ export function parseClaudeGdDms(memberId: string, workspacePath: string, ownerC
       const msg = ev.message ?? {};
       const role = msg.role ?? ev.type;
 
-      // ★INBOUND ②: 팀원이 ★일하는 중에★ 팀장이 보낸 메시지(인터럽트) 발견.★
-      //   클로드 런타임은 이걸 user 이벤트가 아니라 {type:"queue-operation", operation:"enqueue",
-      //   content:"<channel …>"} 로 적는다. role==="user" 만 보던 옛 코드는 ★통째로 놓쳤다.★
-      //   실측(이 세션): "잠시만"·"오케이 고 하고 풀테스트" 가 dm_message 에 하나도 안 남았다.
-      //   하필 인터럽트가 ★"빌 응답??" 같은 재촉★ 이라, 제일 중요한 메시지가 기록에서 빠지고 있었다.
+      // 작업 중 받은 인터럽트는 user 이벤트가 아니라 queue-operation/enqueue로 저장되므로 이 경로도 DM으로 추출한다.
       if (ev.type === "queue-operation" && ev.operation === "enqueue" && typeof ev.content === "string") {
         const hit = inboundFromChannelText(ev.content, GD_CHAT);
         if (hit) {

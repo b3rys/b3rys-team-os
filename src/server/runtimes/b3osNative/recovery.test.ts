@@ -111,9 +111,7 @@ describe("b3os_native M1.5 recovery", () => {
     expect(inflightMarkerCount(db)).toBe(1); // 마커 유지(아직 진행중)
   });
 
-  // ★Bill HIGH-1/HIGH-2 회귀: 헤드라인 케이스(source='user' 크래시 → 부팅 복구). 실제 startWakeDispatcher
-  //  부팅 시퀀스(런타임-aware user-cleanup → b3os recovery staleSec=0)를 충실히 재현. b3os user행이 살아남고,
-  //  대조로 비-b3os user-pending은 여전히 만료되는지 확인(가드 과대적용 아님).
+  // 부팅 순서대로 사용자 행 정리와 native 복구를 실행해 native 행은 복구되고 다른 런타임의 사용자 pending만 만료되는지 확인한다.
   test("(f) [헤드라인] source='user' b3os 크래시 → 부팅 시퀀스 후 'pending' 유지(만료 아님)", () => {
     const db = setup();
     // 비-b3os(claude) 에이전트 대조군
@@ -151,7 +149,7 @@ describe("b3os_native M1.5 recovery", () => {
     const n = recoverB3osNativeInflight(db, 0);
 
     expect(n).toBe(1); // b3os user 크래시 행 재wake
-    expect(deliveryState(db, um.id)).toBe("pending"); // ★헤드라인: 만료 안 되고 pending으로 복구
+    expect(deliveryState(db, um.id)).toBe("pending"); // 헤드라인: 만료 안 되고 pending으로 복구
     expect(
       (db.prepare(`SELECT delivery_state FROM message_recipient WHERE message_id=? AND agent_id='bill'`).get(cm.id) as { delivery_state: string }).delivery_state,
     ).toBe("expired"); // 대조군: 비-b3os user는 정상 만료(가드 과대적용 아님)

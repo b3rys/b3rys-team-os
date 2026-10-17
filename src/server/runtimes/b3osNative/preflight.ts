@@ -1,10 +1,4 @@
-/**
- * b3os_native M2d — 배정 preflight 체크.
- *
- * b3osNative 팀원을 ★실제 배정하기 전★에 준비상태를 검사한다. 라이브 배정 전
- * "이 팀원이 진짜 돌 준비가 됐나"를 코드로 확인 — persona·model·runtime·API키 존재.
- * ★API 키는 "존재 여부"만 본다(값은 절대 안 읽음 — 보안).★
- */
+/** 배정 전에 persona·model·runtime과 API 키 존재를 검사한다. 키는 존재 여부만 확인해 값이 노출되지 않게 한다. */
 import { readFileSync } from "node:fs";
 import type { AgentRecord } from "../../types";
 import { pickModel, OPENAI_COMPAT_PROVIDERS } from "./runner";
@@ -14,10 +8,7 @@ export interface PreflightResult {
   issues: string[]; // 실패/경고 사유 코드. 비어있으면 ready.
 }
 
-/**
- * 배정 전 검사. issues가 비면 ready. env 주입 가능(테스트).
- * 로컬 Ollama(localhost base url)는 API 키 불요로 처리.
- */
+/** issues가 비면 배정 준비가 된 상태다. 로컬 Ollama는 API 키가 필요 없으므로 키 없음으로 차단하지 않는다. */
 export function checkB3osNativePreflight(
   agent: AgentRecord,
   env: Record<string, string | undefined> = process.env,
@@ -56,11 +47,7 @@ export function checkB3osNativePreflight(
   return { ok: issues.length === 0, issues };
 }
 
-/**
- * blocking(키 없음·runtime 불일치)만 없으면 "돌 수는 있음". ★persona는 blocking 아님★ —
- * loadSystem이 persona 없거나 못읽으면 이름·역할로 fallback하므로 실행은 됨(Bill 리뷰 #3: 의미 일관).
- * persona 이슈는 issues에 경고로 남되 runnable 판정엔 안 넣는다.
- */
+/** persona가 없거나 읽히지 않아도 이름·역할로 대체해 실행할 수 있으므로 경고로만 남긴다. 키 없음·runtime 불일치만 실행을 막는다. */
 export function isB3osNativeRunnable(result: PreflightResult): boolean {
   const blocking = result.issues.filter(
     (i) => i.startsWith("runtime_not") || i.includes("api_key_missing"),
