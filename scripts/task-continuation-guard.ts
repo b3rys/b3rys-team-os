@@ -51,10 +51,11 @@ interface NotificationState {
 }
 type State = Record<string, string | NotificationState>;
 const MAX_INTERVAL_MS = 24 * 3600_000;
+const MAX_RESUME_DELAY_MS = 7 * 24 * 3600_000;
 
 // 재개 시각은 ISO 날짜·시간 한 줄로 읽는다. 시간대 생략 시 실행 기계의 로컬 시각이다.
 export function resumeAt(description: string | null): number {
-  const value = description?.match(/^\s*재개 시각:\s*([^\r\n]+)$/m)?.[1]?.trim();
+  const value = description?.match(/^[ \t]*재개 시각:[ \t]*([^\r\n]+)\r?$/m)?.[1]?.trim();
   if (!value || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/i.test(value)) return NaN;
   const day = Date.parse(`${value.slice(0, 10)}T00:00:00Z`);
   if (!Number.isFinite(day) || new Date(day).toISOString().slice(0, 10) !== value.slice(0, 10)) return NaN;
@@ -117,9 +118,12 @@ export function isBlockedCard(t: Task): boolean {
 export function stalledDoingCards(tasks: Task[], owners: Set<string>, nowMs: number, stallMs: number): Task[] {
   return tasks.filter((t) => {
     if (t.held_at || t.column !== "doing" || t.owner == null || !owners.has(t.owner)) return false;
-    if (resumeAt(t.description) > nowMs) return false;
+    const updatedAt = parseUtc(t.updated_at, nowMs);
+    // 실행할 때마다 유예가 연장되지 않도록 카드 갱신 시각에 7일 상한을 고정한다.
+    const resumeUntil = Math.min(resumeAt(t.description), updatedAt + MAX_RESUME_DELAY_MS);
+    if (resumeUntil > nowMs) return false;
     const threshold = isBlockedCard(t) ? stallMs * BLOCKED_STALL_MULTIPLIER : stallMs;
-    return nowMs - parseUtc(t.updated_at, nowMs) >= threshold;
+    return nowMs - updatedAt >= threshold;
   });
 }
 
@@ -150,7 +154,7 @@ export function guardBody(owner: string, cards: Task[], stallMin: number): strin
     `각 카드의 실제 상태를 확인해 주세요 — 끝났으면 done 으로, 막혔으면 blocked 표시 + 다음 액션/재개 시각/fallback 을 description 에 남기고, ` +
     `계속 진행 중이면 다음 액션만 갱신하면 됩니다. 실제로 진행할 게 없는 카드는 plan 으로 내리거나 폐기하세요. ` +
     `정리할 게 없으면 억지로 수정·보고하지 마세요.\n` +
-    `description 에 아래 형식으로 한 줄 적으면 그 시각까지 알리지 않습니다.\n재개 시각: 2026-10-20T09:00:00+09:00\n` +
+    `description 에 아래 형식으로 한 줄 적으면 그 시각까지 알리지 않습니다(카드 갱신 후 최대 7일).\n재개 시각: 2026-10-20T09:00:00+09:00\n` +
     `(blocked 카드는 훨씬 뜸하게 확인하며, 재알림 간격은 2배씩 늘어 최대 24시간입니다.)`
   );
 }

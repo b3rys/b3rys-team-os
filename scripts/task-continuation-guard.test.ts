@@ -158,6 +158,23 @@ describe("재개 시각", () => {
       expect(stalledDoingCards([t], OWNERS, NOW, STALL)).toEqual([t]);
     }
   });
+  test("빈 재개 시각 다음 줄의 날짜는 LF·CRLF 모두 값으로 읽지 않는다", () => {
+    for (const newline of ["\n", "\r\n"]) {
+      const t = card({ description: `재개 시각: \t${newline}2099-01-01T09:00:00+09:00` });
+      expect(stalledDoingCards([t], OWNERS, NOW, STALL)).toEqual([t]);
+    }
+    const t = card({ description: " \t재개 시각:\t2099-01-01T09:00:00+09:00\r\n다음 액션: 검증" });
+    expect(stalledDoingCards([t], OWNERS, NOW, STALL)).toEqual([]);
+  });
+  test("먼 미래의 재개 시각도 카드 갱신 후 7일이 지나면 알림 대상이다", () => {
+    const week = 7 * 24 * STALL;
+    const t = card({ updated_at: new Date(NOW).toISOString(), description: "재개 시각: 2099-01-01T09:00:00+09:00" });
+    for (const elapsed of [STALL, week / 2, week - 1]) {
+      expect(stalledDoingCards([t], OWNERS, NOW + elapsed, STALL)).toEqual([]);
+    }
+    expect(stalledDoingCards([t], OWNERS, NOW + week, STALL)).toEqual([t]);
+    expect(stalledDoingCards([t], OWNERS, NOW + week + STALL, STALL)).toEqual([t]);
+  });
   test("안내문에 시간대가 명시된 한 줄 형식이 있다", () => {
     expect(guardBody("someone", [card()], 60)).toContain("재개 시각: 2026-10-20T09:00:00+09:00");
   });
