@@ -3,7 +3,7 @@
 //   - task-review-ping(평일 06:00)의 30분 버전. 리뷰핑은 "평일 한 번 전체 점검", 이 가드는 "카드가 조용해지면 바로 nudge".
 //   - 텔레그램 발신이 아니라 버스 wake(에이전트 깨우기) — 토큰 불필요.
 //   - ★에피소드당 1회★: 한 번 핑한 카드는 owner 가 손댔다가(updated_at 갱신) 다시 stall 되기 전엔 재핑하지 않는다.
-//     방치 카드를 30분마다 영구 나그하지 않기 위함(상시 리마인드는 일일 review-ping 이 담당). var/ 상태파일로 마지막 핑시각 추적.
+//     재핑 간격은 알림마다 2배씩 늘리며 24시간이 상한이다. lane/담당 변경 시 초기화한다.
 //   - 실제로 멈춘 카드가 없으면 no-op(아무도 안 깨움). 신규/빈 칸반은 정상 no-op.
 // 스케줄: scheduled_job `sched_task_continuation_guard` (cron */30, execKey task-continuation-guard). launchd 아님 → OS 무관.
 
@@ -42,7 +42,44 @@ interface Agent {
   team_official_member?: boolean;
 }
 
-type State = Record<string, string | { notifiedAt: string; observedUpdatedAt: string }>;
+interface NotificationState {
+  notifiedAt: string;
+  observedUpdatedAt: string;
+  owner?: string | null;
+  column?: Task["column"];
+  notificationCount?: number;
+}
+type State = Record<string, string | NotificationState>;
+const MAX_INTERVAL_MS = 24 * 3600_000;
+const MAX_RESUME_DELAY_MS = 7 * 24 * 3600_000;
+
+// 재개 시각은 ISO 날짜·시간 한 줄로 읽는다. 시간대 생략 시 실행 기계의 로컬 시각이다.
+export function resumeAt(description: string | null): number {
+  const value = description?.match(/^[ \t]*재개 시각:[ \t]*([^\r\n]+)\r?$/m)?.[1]?.trim();
+  if (!value || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/i.test(value)) return NaN;
+  const day = Date.parse(`${value.slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(day) || new Date(day).toISOString().slice(0, 10) !== value.slice(0, 10)) return NaN;
+  return Date.parse(value.replace(" ", "T"));
+}
+
+// stall 여부와 무관하게 관측한 lane/담당 변경은 이전 알림 이력을 지운다.
+export function reconcileState(tasks: Task[], state: State): void {
+  for (const t of tasks) {
+    const entry = state[t.id];
+    if (t.column !== "doing" || (entry && typeof entry !== "string" &&
+        ((entry.owner !== undefined && entry.owner !== t.owner) ||
+         (entry.column !== undefined && entry.column !== t.column)))) delete state[t.id];
+  }
+}
+
+export function recordNotification(t: Task, state: State, nowMs: number): void {
+  const entry = state[t.id];
+  const count = typeof entry === "object" ? entry.notificationCount ?? 1 : entry ? 1 : 0;
+  state[t.id] = {
+    notifiedAt: new Date(nowMs).toISOString(), observedUpdatedAt: t.updated_at,
+    owner: t.owner, column: t.column, notificationCount: Math.min(count + 1, 32),
+  };
+}
 
 // 저장소 관행은 "2026-07-24 13:31:36" (UTC, 표시자 없음) 이다.
 //
@@ -67,18 +104,7 @@ export function parseUtc(s: string | null | undefined, nowMs: number): number {
   return Number.isNaN(t) ? nowMs : t;
 }
 
-// ★가드가 시킨 표시를 가드가 읽어야 한다★
-//   guardBody() 는 "막혔으면 blocked 표시 + 다음 액션/재개 시각/fallback 을 description 에 남기라" 고
-//   시킨다. 그런데 판정부는 column/owner/updated_at 만 봤다 — description 을 아예 읽지 않았다.
-//   시킨 대로 해도 판정에 반영되는 경로가 없으니, 그 안내는 지킬 수 없는 약속이었다.
-//
-//   게다가 재핑이 에피소드 기준(dueCards)이라 유인이 거꾸로 섰다:
-//     · 성실히 상태를 갱신하는 blocked 카드 → 갱신할 때마다 새 에피소드 → 60분 뒤 또 핑(영구 나그)
-//     · 손 놓고 방치한 카드            → 최초 1회만 핑하고 조용
-//   "방치 카드 영구 나그" 를 막으려던 장치가, 방치가 아니라 ★관리 중인 카드★ 에서 재현됐다.
-//
-//   그래서 blocked 로 표시된 카드에는 훨씬 긴 임계를 준다. ★면제가 아니라 완화★ 다 —
-//   완전히 빼면 "blocked" 라고 적어두고 잊은 카드가 영원히 안 걸린다.
+// blocked 카드는 기본 멈춤 임계를 6배로 늘리되 알림 대상에서 제외하지 않는다.
 const BLOCKED_STALL_MULTIPLIER = 6;
 
 // description 에 남긴 '막힘' 표시를 인정한다. 한국어/영어 둘 다 실제로 쓰인다.
@@ -92,24 +118,32 @@ export function isBlockedCard(t: Task): boolean {
 export function stalledDoingCards(tasks: Task[], owners: Set<string>, nowMs: number, stallMs: number): Task[] {
   return tasks.filter((t) => {
     if (t.held_at || t.column !== "doing" || t.owner == null || !owners.has(t.owner)) return false;
+    const updatedAt = parseUtc(t.updated_at, nowMs);
+    // 실행할 때마다 유예가 연장되지 않도록 카드 갱신 시각에 7일 상한을 고정한다.
+    const resumeUntil = Math.min(resumeAt(t.description), updatedAt + MAX_RESUME_DELAY_MS);
+    if (resumeUntil > nowMs) return false;
     const threshold = isBlockedCard(t) ? stallMs * BLOCKED_STALL_MULTIPLIER : stallMs;
-    return nowMs - parseUtc(t.updated_at, nowMs) >= threshold;
+    return nowMs - updatedAt >= threshold;
   });
 }
 
 // A changed card skips one observation cycle before it can start another stalled episode.
 // String entries from older state files remain valid last-notification timestamps.
-export function dueCards(stalled: Task[], state: State): Task[] {
+export function dueCards(stalled: Task[], state: State, nowMs = Date.now(), stallMs = STALL_MIN * 60_000): Task[] {
+  reconcileState(stalled, state);
   return stalled.filter((t) => {
     const entry = state[t.id];
     const last = entry ? Date.parse(typeof entry === "string" ? entry : entry.notifiedAt) : 0;
-    if (!last) return true;
+    if (!entry || !last) return true;
     if (parseUtc(t.updated_at, 0) <= last) return false;
     if (typeof entry === "string" || entry.observedUpdatedAt !== t.updated_at) {
-      state[t.id] = { notifiedAt: new Date(last).toISOString(), observedUpdatedAt: t.updated_at };
+      state[t.id] = { ...(typeof entry === "object" ? entry : {}), notifiedAt: new Date(last).toISOString(), observedUpdatedAt: t.updated_at, owner: t.owner, column: t.column };
       return false;
     }
-    return true;
+    const count = entry.notificationCount ?? 1;
+    const base = stallMs * (isBlockedCard(t) ? BLOCKED_STALL_MULTIPLIER : 1);
+    const interval = Math.min(MAX_INTERVAL_MS, base * 2 ** Math.min(count, 32));
+    return nowMs - last >= interval;
   });
 }
 
@@ -120,7 +154,8 @@ export function guardBody(owner: string, cards: Task[], stallMin: number): strin
     `각 카드의 실제 상태를 확인해 주세요 — 끝났으면 done 으로, 막혔으면 blocked 표시 + 다음 액션/재개 시각/fallback 을 description 에 남기고, ` +
     `계속 진행 중이면 다음 액션만 갱신하면 됩니다. 실제로 진행할 게 없는 카드는 plan 으로 내리거나 폐기하세요. ` +
     `정리할 게 없으면 억지로 수정·보고하지 마세요.\n` +
-    `(description 에 blocked 표시가 있으면 이 가드는 훨씬 뜸하게 확인합니다 — 표시해 두면 관리 중인 카드가 계속 알림을 받지 않습니다.)`
+    `description 에 아래 형식으로 한 줄 적으면 그 시각까지 알리지 않습니다(카드 갱신 후 최대 7일).\n재개 시각: 2026-10-20T09:00:00+09:00\n` +
+    `(blocked 카드는 훨씬 뜸하게 확인하며, 재알림 간격은 2배씩 늘어 최대 24시간입니다.)`
   );
 }
 
@@ -178,7 +213,8 @@ async function main(): Promise<void> {
   const owners = new Set(await loadOwners(tasks));
   const stalled = stalledDoingCards(tasks, owners, nowMs, stallMs);
   const state = loadState();
-  const due = dueCards(stalled, state);
+  reconcileState(tasks, state);
+  const due = dueCards(stalled, state, nowMs, stallMs);
 
   // owner 별로 due 카드 묶기
   const byOwner = new Map<string, Task[]>();
@@ -189,7 +225,6 @@ async function main(): Promise<void> {
   }
 
   let sent = 0;
-  const nowIso = new Date(nowMs).toISOString();
   for (const [owner, cards] of byOwner) {
     const body = guardBody(owner, cards, STALL_MIN);
     if (process.env.DRY_RUN) {
@@ -217,14 +252,14 @@ async function main(): Promise<void> {
       console.log(`✓ continuation guard → ${owner} (${cards.length} stalled)`);
     }
     // 핑한 카드만 cooldown 기록 갱신(DRY_RUN 은 상태 안 건드림)
-    if (!process.env.DRY_RUN) for (const c of cards) state[c.id] = nowIso;
+    if (!process.env.DRY_RUN) for (const c of cards) recordNotification(c, state, nowMs);
     sent++;
   }
 
   if (!process.env.DRY_RUN) saveState(state, new Set(tasks.filter((t) => t.column === "doing" && !t.held_at).map((t) => t.id)));
   console.log(
     `done: ${sent} owner(s) pinged · stalled=${stalled.length} due=${due.length} ` +
-      `(stall>${STALL_MIN}m, 에피소드당 1회)`,
+      `(stall>${STALL_MIN}m, 재알림 간격 최대 24h)`,
   );
 }
 
