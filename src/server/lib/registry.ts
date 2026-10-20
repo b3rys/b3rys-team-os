@@ -24,6 +24,7 @@ export function loadRegistry(path: string): AgentRecord[] {
     id: String(a.id),
     display_name: String(a.display_name),
     nicknames: Array.isArray(a.nicknames) ? a.nicknames.map(String).filter(Boolean) : undefined,
+    cogs_inbox: a.cogs_inbox,
     role: String(a.role),
     capabilities: Array.isArray(a.capabilities) ? a.capabilities.map(String).filter(Boolean) : [],
     enabled: a.enabled !== false,

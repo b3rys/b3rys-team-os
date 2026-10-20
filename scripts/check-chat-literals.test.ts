@@ -77,3 +77,10 @@ test("payload writes and delivery wrappers reject literals; model output ignores
   const baseline = JSON.parse(readFileSync("scripts/chat-literals-baseline.json", "utf8")).counts;
   expect(newFindings(scanChatLiterals(file, source.replace(before, before + '\nbody.text = "받았어요";')), baseline).length).toBeGreaterThan(0);
 });
+
+test("fixture files are test inputs; similarly named production files remain checked", () => {
+  const source = 'expect(sent).toEqual({chat_id: "72", text: "expected reply"})';
+  expect(scanChatLiterals("src/server/workers/cogsPoll.fixture.ts", source)).toHaveLength(0);
+  expect(scanChatLiterals("src/server/workers/fixture.ts", source)).toHaveLength(1);
+  expect(scanChatLiterals("src/server/workers/cogsPoll.ts", source)).toHaveLength(1);
+});

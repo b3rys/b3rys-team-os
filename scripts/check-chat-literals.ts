@@ -12,7 +12,7 @@ export const ALLOWLIST: Record<string, string> = {
 };
 
 export function scanChatLiterals(file: string, source: string): Finding[] {
-  if (/(?:\.(?:test|spec)\.[cm]?[jt]sx?$|\/(?:test|tests|__tests__)\/)/.test(file)) return [];
+  if (/(?:\.(?:test|spec|fixture)\.[cm]?[jt]sx?$|\/(?:test|tests|__tests__)\/)/.test(file)) return [];
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   // Resolve identifiers by lexical scope, including declarations later in the same scope.
   const host = ts.createCompilerHost({ noResolve: true });

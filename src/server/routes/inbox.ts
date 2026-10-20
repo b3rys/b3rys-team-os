@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { CogsDeliveryUnknown, sendCogsReply } from "../lib/cogsRelay";
 import { Hono } from "hono";
 import type { Database } from "bun:sqlite";
 import { z } from "zod";
@@ -11,8 +13,10 @@ import {
   getThread,
   listThreads,
   findSlackMetaForThread,
+  findCogsMetaForThread,
   agentActivity,
   acceptInbound,
+  normalizeEscapedNewlines,
 } from "../db/inboxQueries";
 import { coordinatorId } from "../lib/capabilities";
 import { appendAudit } from "../db/queries";
@@ -183,8 +187,12 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         parentSlack = slack;
       }
     } catch { /* 잘못된 원글 meta는 기존 thread 조회로 처리한다. */ }
+    const cogsMetaForGate = parentSlack ? null : findCogsMetaForThread(deps.db, env.thread_id ?? "", env.in_reply_to);
+    if (cogsMetaForGate && env.source === "agent" && (env.meta?.reply_mode === "direct_to_gd" || env.all_hands)) {
+      return c.json({ ok: false, error: "cogs_reply_mode_invalid", detail: "cogs → --to broadcast" }, 400);
+    }
     const slackMetaForGate = parentSlack ?? findSlackMetaForThread(deps.db, env.thread_id ?? "");
-    if (env.source === "agent" && env.to_agent_id === "broadcast" && !slackMetaForGate) {
+    if (env.source === "agent" && env.to_agent_id === "broadcast" && !slackMetaForGate && !cogsMetaForGate) {
       // 팀원 broadcast에 broadcast로 답하는 것은 발신자의 역량·역할과 무관하게 차단해 연쇄를 끊는다.
       if (env.in_reply_to) {
         const parent = deps.db
@@ -199,6 +207,24 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
           }, 403);
         }
       }
+    }
+
+    // cogs idempotency is scoped to the original room/message, never caller-supplied keys.
+    if (cogsMetaForGate && env.source === "agent" && env.to_agent_id === "broadcast") {
+      const key = "cogs-reply:" + createHash("sha256").update(JSON.stringify([
+        env.from_agent_id, cogsMetaForGate.agent_id, cogsMetaForGate.chat_id,
+        cogsMetaForGate.message_id, normalizeEscapedNewlines(env.body),
+      ])).digest("hex");
+      const prior = deps.db.query(`SELECT id, meta_json FROM message WHERE dedupe_key = ?
+        AND (json_extract(meta_json, '$.cogs_delivery.state') IN ('pending','unknown')
+          OR created_at > datetime('now', '-60 seconds')) ORDER BY rowid DESC LIMIT 1`)
+        .get(key) as { id: string; meta_json: string } | null;
+      if (prior) {
+        const state = JSON.parse(prior.meta_json).cogs_delivery?.state;
+        return c.json({ ok: false, posted: state === "sent", existing_message_id: prior.id,
+          error: state === "unknown" ? "cogs_delivery_unknown" : state === "pending" ? "cogs_delivery_pending" : "duplicate" }, 409);
+      }
+      env = { ...env, dedupe_key: key, meta: { ...env.meta, cogs_delivery: { state: "pending" } } };
     }
 
     // 감사 기록은 삽입 직후·방송 직전에 남겨 insert→audit→broadcast 순서를 유지한다.
@@ -280,6 +306,31 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     }
 
 
+
+    // cogs threads never fall through to Telegram, including malformed reply modes.
+    if (cogsMetaForGate && env.source === "agent" && stored.to_agent_id === "broadcast") {
+      const setDelivery = (state: "sent" | "failed" | "unknown") => {
+        stored.meta = { ...stored.meta, cogs_delivery: { state } };
+        deps.db.query("UPDATE message SET meta_json = ?, dedupe_key = CASE WHEN ? = 'failed' THEN NULL ELSE dedupe_key END WHERE id = ?")
+          .run(JSON.stringify(stored.meta), state, stored.id);
+      };
+      // Until success is durably recorded, a lost acknowledgement must not permit a resend.
+      let acknowledged = false;
+      try {
+        const agent = (deps.agents?.() ?? ambientAgents()).find((a) => a.id === env.from_agent_id);
+        await sendCogsReply(agent, cogsMetaForGate, stored.body);
+        acknowledged = true;
+        setDelivery("sent");
+        appendAudit(deps.db, env.from_agent_id, "cogs_relay_sent", stored.id, { chat_id: cogsMetaForGate.chat_id });
+        return c.json({ ok: true, message: stored, posted: true, channel: "cogs" }, 201);
+      } catch (error) {
+        const unknown = acknowledged || error instanceof CogsDeliveryUnknown;
+        setDelivery(unknown ? "unknown" : "failed");
+        appendAudit(deps.db, env.from_agent_id, "cogs_relay_failed", stored.id, { chat_id: cogsMetaForGate.chat_id, state: unknown ? "unknown" : "failed" });
+        return c.json({ ok: false, message: stored, posted: false,
+          error: unknown ? "cogs_delivery_unknown" : "cogs_relay_failed" }, 502);
+      }
+    }
 
     // Slack 게시 완료를 확인한 뒤 성공을 반환한다. 같은 답을 Telegram으로도 보내지 않는다.
     const slackThread = slackMetaForGate ?? findSlackMetaForThread(deps.db, stored.thread_id);
