@@ -1338,7 +1338,9 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     allowedIds: approvalAllowedIds,
     transcribe: (fileId) => {
       const prompt = deps.agents().flatMap((a) => a.nicknames ?? [a.display_name]).join(", ") + ", 모두, 여러분.";
-      return deps.transcribeVoice ? deps.transcribeVoice(fileId, prompt) : transcribeTelegramVoice(TOKEN!, fileId, prompt);
+      return deps.transcribeVoice ? deps.transcribeVoice(fileId, prompt) : transcribeTelegramVoice(TOKEN!, fileId, prompt, {
+        onDiagnostic: event => console.log(`[voice] engine=${event.engine} elapsed_ms=${event.elapsedMs} stage=${event.stage} ok=${event.ok}`),
+      });
     },
     handle: (text, msg) => handle(text, msg.reply_to_message?.text,
       replyAuthorAgentId(msg.reply_to_message?.from?.username, deps.agents()),

@@ -18,7 +18,7 @@ export async function transcribeTelegramVoice(
   token: string,
   fileId: string,
   prompt: string,
-  opts: { fetch?: typeof fetch; transcribe?: (path: string, dir: string, prompt: string) => Promise<string>; timeoutMs?: number } = {},
+  opts: { fetch?: typeof fetch; transcribe?: (path: string, dir: string, prompt: string) => Promise<string>; timeoutMs?: number; onDiagnostic?: (event: VoiceDiagnostic) => void } = {},
 ): Promise<string> {
   let dir: string | undefined;
   const abort = new AbortController();
@@ -39,7 +39,12 @@ export async function transcribeTelegramVoice(
     await Bun.write(path, await response.arrayBuffer());
     // The download deadline ends before the separately bounded local process starts.
     clearTimeout(timer);
-    const text = (await (opts.transcribe ?? transcribeLocalVoice)(path, dir, prompt)).trim();
+    const transcribe = opts.transcribe ?? ((path: string, dir: string, prompt: string) =>
+      transcribeLocalVoice(path, dir, prompt, {
+        onDiagnostic: opts.onDiagnostic,
+        warn: opts.onDiagnostic ? () => {} : undefined,
+      }));
+    const text = (await transcribe(path, dir, prompt)).trim();
     if (!text) throw new Error();
     return text;
   } catch (error) {
@@ -150,48 +155,68 @@ export async function assertAudibleVoice(path: string): Promise<void> {
   }
 }
 
+export type VoiceDiagnostic = { engine: "mlx" | "cpu"; elapsedMs: number; stage: "audio" | "process" | "result" | "cleanup" | "success"; ok: boolean };
+
 /** Prefer offline MLX; retain CPU Whisper once if the accelerated engine is unavailable. */
 export async function transcribeLocalVoice(path: string, dir: string, prompt: string, opts: {
   timeoutMs?: number;
   run?: (argv: string[], timeoutMs?: number) => Promise<void>;
   checkAudio?: (path: string) => Promise<void>;
+  warn?: (message: string) => void;
+  onDiagnostic?: (event: VoiceDiagnostic) => void;
 } = {}): Promise<string> {
-  await (opts.checkAudio ?? assertAudibleVoice)(path);
-  const run = opts.run ?? runVoiceProcess;
-  const home = process.env.HOME ?? "";
-  const root = process.env.B3OS_STT_HOME ?? join(home, ".local/share/b3os-stt");
-  const output = join(dir, "voice-mlx.txt");
-  // A fresh output prevents a failed engine from returning an earlier result.
-  await rm(output, { force: true });
-  let mlxStage: "process" | "result" = "process";
+  const start = performance.now();
+  let engine: VoiceDiagnostic["engine"] = "mlx", stage: VoiceDiagnostic["stage"] = "audio";
   try {
+    await (opts.checkAudio ?? assertAudibleVoice)(path);
+    stage = "process";
+    const run = opts.run ?? runVoiceProcess;
+    const home = process.env.HOME ?? "";
+    const root = process.env.B3OS_STT_HOME ?? join(home, ".local/share/b3os-stt");
+    const output = join(dir, "voice-mlx.txt");
+    // A fresh output prevents a failed engine from returning an earlier result.
+    await rm(output, { force: true });
+    let mlxStage: "process" | "result" = "process";
+    try {
+      await run([
+        join(root, ".venv/bin/python"), join(root, "transcribe.py"),
+        path, join(root, "model"), output, prompt.slice(0, 1000),
+      ], opts.timeoutMs ?? 30_000);
+      mlxStage = "result";
+      const text = (await readFile(output, "utf8")).trim();
+      if (!text) throw new Error("local voice result empty");
+      stage = "success";
+      return text;
+    } catch (error) {
+      stage = mlxStage;
+      // Never launch a second engine while the first process group might still exist.
+      if (error instanceof VoiceProcessUnreapedError) { stage = "cleanup"; throw error; }
+      // Constant diagnostic only: never include argv, prompts, paths or raw errors.
+      (opts.warn ?? console.warn)(mlxStage === "process"
+        ? "[voice] MLX process failed or timed out; retrying CPU Whisper"
+        : "[voice] MLX result missing or empty; retrying CPU Whisper");
+    }
+    engine = "cpu"; stage = "process";
+    const model = join(home, ".cache/whisper/large-v3-turbo.pt");
+    if (!await Bun.file(model).exists()) throw new Error("local voice model missing");
+    await rm(join(dir, "voice.txt"), { force: true });
     await run([
-      join(root, ".venv/bin/python"), join(root, "transcribe.py"),
-      path, join(root, "model"), output, prompt.slice(0, 1000),
-    ], opts.timeoutMs ?? 30_000);
-    mlxStage = "result";
-    const text = (await readFile(output, "utf8")).trim();
+      "/opt/homebrew/bin/whisper", path, "--model", model,
+      "--language", "ko", "--device", "cpu", "--fp16", "False", "--threads", "4",
+      "--initial_prompt", prompt.slice(0, 1000), "--output_format", "txt", "--output_dir", dir,
+    ], opts.timeoutMs ?? 120_000);
+    stage = "result";
+    const text = (await readFile(join(dir, "voice.txt"), "utf8")).trim();
     if (!text) throw new Error("local voice result empty");
+    stage = "success";
     return text;
   } catch (error) {
-    // Never launch a second engine while the first process group might still exist.
-    if (error instanceof VoiceProcessUnreapedError) throw error;
-    // Constant diagnostic only: never include argv, prompts, paths or raw errors.
-    console.warn(mlxStage === "process"
-      ? "[voice] MLX process failed or timed out; retrying CPU Whisper"
-      : "[voice] MLX result missing or empty; retrying CPU Whisper");
+    if (error instanceof VoiceProcessUnreapedError) stage = "cleanup";
+    throw error;
+  } finally {
+    // Diagnostic consumers cannot change transcription or expose raw engine errors.
+    try { opts.onDiagnostic?.({engine, stage, elapsedMs: Math.round(performance.now() - start), ok: stage === "success"}); } catch {}
   }
-  const model = join(home, ".cache/whisper/large-v3-turbo.pt");
-  if (!await Bun.file(model).exists()) throw new Error("local voice model missing");
-  await rm(join(dir, "voice.txt"), { force: true });
-  await run([
-    "/opt/homebrew/bin/whisper", path, "--model", model,
-    "--language", "ko", "--device", "cpu", "--fp16", "False", "--threads", "4",
-    "--initial_prompt", prompt.slice(0, 1000), "--output_format", "txt", "--output_dir", dir,
-  ], opts.timeoutMs ?? 120_000);
-  const text = (await readFile(join(dir, "voice.txt"), "utf8")).trim();
-  if (!text) throw new Error("local voice result empty");
-  return text;
 }
 
 /** One queue covers download + transcription + handling, preserving voice arrival order. */

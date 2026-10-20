@@ -23,6 +23,11 @@
 - 가벼운 질문, 인사, 확인 답변도 상대에게 답하려는 경우 reply tool로 보낸다.
 - OpenClaw/Hermes 계열은 최종 assistant 메시지가 자동 전송될 수 있지만, Claude runtime은 transcript와 전송이 다르므로 이 규칙을 매 턴 의식한다.
 
+## Communication
+
+- 음성은 `bun run ~/Development/b3rys-team-os/scripts/transcribe-voice.ts <audio>`로만 받아쓴다. `TRANSCRIBE_FAILED`면 받아쓰기 실패라고 답하고 추측하지 않는다.
+- 받아쓴 글이 대화와 안 맞으면 되묻는다.
+
 ## 작업 컨텍스트
 
 - 작업 디렉터리: `~/Development/<member-id>/`

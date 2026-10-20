@@ -75,3 +75,29 @@ TypeScript typecheck와 shell syntax 검사 통과. 실제 Telegram 그룹 수�
 되돌리기: PR commit을 revert하면 기존 CPU CLI를 사용한다. fallback용 기존 CPU 모델은 보존한다. 전용 venv와 MLX 모델은 서비스와 분리되어 있으며 즉시 삭제할 필요가 없다.
 
 업스트림: [MLX Whisper 구현과 API](https://github.com/ml-explore/mlx-examples/tree/main/whisper).
+
+
+## Local voice CLI and incoming-file retention
+
+`bun run scripts/transcribe-voice.ts <audio>` reuses `transcribeLocalVoice` (offline MLX, then CPU Whisper once). Each call copies its input to a newly created private directory under the OS temp directory, with a `voice.*` basename for CPU output compatibility. The directory is removed after success or failure. Success prints only the trimmed transcript with exit 0. Missing files, silence, empty results and engine failures print only `TRANSCRIBE_FAILED` to stderr with exit 1. No earlier transcript is used. The CLAUDE bootstrap template contains the CLI and failure/clarification instructions; existing member CLAUDE files are not regenerated.
+
+The capture worker emits one final local-transcription diagnostic, e.g. `[voice] engine=mlx elapsed_ms=3332 stage=success ok=true`. Fields are enums/numbers/booleans only: engine `mlx|cpu`, elapsed time in ms including preflight/fallback, stage `audio|process|result|cleanup|success`, and success. Transcript, input path, roster prompt and raw engine errors are excluded. This starts after media download; Telegram download errors do not have a local engine diagnostic. Library callers without a diagnostic callback retain their existing fallback warnings.
+
+`bun run scripts/cleanup-telegram-inbox.ts` defaults to a seven-day dry-run and outputs a JSON candidate list. `--days N` changes retention; `--root <path>` may select one discovered allowlisted directory only. `--apply` unlinks expired regular files, leaving directories and symlinks untouched. Empty/root HOME or root arguments and invalid retention values are rejected. Age uses filesystem mtime, strictly older than the cutoff, so an exactly seven-day-old file is retained. No registry, bot state, credentials or database is read by the script.
+
+Runtime path survey (paths only, no user audio copied):
+
+| Runtime | Observed/recognized incoming directories | Retention scope |
+|---|---|---|
+| Claude Channel | `~/.claude/channels/telegram-{bill,dbak,demis,lui,steve}/inbox`; discovery accepts `telegram-<id>/inbox` | Included when directories are real and under the selected HOME |
+| OpenClaw | `~/.openclaw/media/inbound`; `~/.openclaw-<profile>/media/inbound` also recognized | Included; the observed shared directory serves multiple agents |
+| Hermes | `~/.hermes/audio_cache`, `~/.hermes/profiles/{ames,forin}/cache/audio`; gateway source `platforms/base.py` supports `cache/audio` and legacy `audio_cache`, likewise images | Excluded: these are shared runtime media caches, not verified as Telegram-only inboxes; Hermes owns its cache cleanup (`gateway/run.py`) |
+| b3os capture / Codex bridge | `team-media` (or `TEAM_MEDIA_DIR`) from `src/server/lib/mediaStore.ts` | Excluded: message/database attachments reference this store; deleting files by age alone would break stored attachments |
+
+Scheduler proposal only: one b3os durable recurring inbox job owned by dex, `0 3 * * *`, timezone `Asia/Seoul`, holidayPolicy `run`. Its task body runs `bun run scripts/cleanup-telegram-inbox.ts --days 7 --dry-run` once and reports candidates/errors. Keep dry-run as the default, and expire the evaluation after seven runs. Actual deletion needs explicit approval after reviewing candidates; this change registers no job, changes no scheduler exec allowlist and deletes no live inbox files. Runtime-specific retention outside the table's included scope is a separate decision.
+
+Verification: `bun test scripts/transcribe-voice.test.ts scripts/cleanup-telegram-inbox.test.ts src/server/lib/telegramVoice.test.ts src/server/workers/telegramCapture.voice.test.ts` (29 tests). `bun run scripts/check-voice-cli-mutants.ts` catches leaked temp directories, acceptance of an empty transcript, and deletion at exactly seven days. All filesystem mutation tests use a temporary HOME; existing voice process cleanup tests use only their own process groups.
+
+Local real-engine acceptance used temporary Yuna speech and synthetic silence: speech exit 0, stderr empty (3332 ms); silence exit 1 (37 ms); absent file exit 1 (17 ms); missing MLX and CPU model exit 1 (35 ms). All failure stderr was exactly `TRANSCRIBE_FAILED`; all four left zero temp entries. The spoken “빌, 확인해 주세요” was transcribed as “필 확인해주세요.”, demonstrating that successful decoding does not guarantee name accuracy. The prompt is empty for the CLI; users must clarify a transcript that does not fit the conversation. No personal voice recordings are committed. CPU fallback is covered with injected engine runners; this acceptance did not run the real CPU model.
+
+Unverified: installed member template rollout, live capture diagnostic delivery, remote Telegram, live inbox deletion and scheduler execution. Rollback is reverting the code/template commits; no live state migration is needed.

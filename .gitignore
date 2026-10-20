@@ -145,3 +145,8 @@ src/web/public/*.app.zip
 skills/b3os-how-to-explain/references/real-cases.md
 # 포팅 전 원본 스크립트 — 맥북 절대경로에 묶여 있어 이 기계에서 안 돈다.
 skills/b3os-how-to-explain/scripts/original/
+
+# Voice CLI and its local verification/retention entry points.
+!/scripts/transcribe-voice.ts
+!/scripts/cleanup-telegram-inbox.ts
+!/scripts/check-voice-cli-mutants.ts
