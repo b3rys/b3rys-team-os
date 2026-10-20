@@ -1002,6 +1002,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     }
     const roster = deps.agents();
     const decision = await routeTeamMessageHybrid(text, roster, {
+      source: "user",
       activeAssigneeIds,
       replyToAgentId,
     });

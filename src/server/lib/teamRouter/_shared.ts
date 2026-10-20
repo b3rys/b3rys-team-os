@@ -1,6 +1,8 @@
 import type { AgentRecord } from "../../types";
 
 export interface RouterContext {
+  /** 평문 이름 호출은 source=user 에만 적용한다. */
+  source?: string;
   activeAssigneeId?: string | null;
   activeAssigneeIds?: string[] | null;
   activeThreadId?: string | null;

@@ -145,6 +145,36 @@ export function detectExplicitTargets(text: string, agents: AgentRecord[]): stri
 // 과거/상태/산출물 참조("코덱스가 전에 말한", "데미스가 만든", "Demis 가 일어났네") 는 호출이 아니므로 제외.
 const NAME_REFERENCE_TAIL = /^(이|가|은|는|의)?\s{0,4}(전에|이전에|아까|말한|얘기한|설정한|답변한|보낸|만든|작성한|일어났|깨어났|응답한)/;
 
+// 평문 호출은 발신자가 확인된 사람 메시지의 선두에서만 해석한다.
+export function hasLeadingAllAddress(text: string): boolean {
+  return /^(모두|다들|전체|얘들아)(?=[,.\s]|$)/.test(text.trimStart());
+}
+
+export function detectLeadingNameTargets(text: string, agents: AgentRecord[]): string[] {
+  const aliases = agents.flatMap((agent) =>
+    [...new Set([...(agent.nicknames ?? []), agent.id, agent.display_name])]
+      .filter((alias) => alias && !alias.startsWith("@"))
+      .map((alias) => ({ alias, id: agent.id })),
+  ).sort((a, b) => b.alias.length - a.alias.length);
+  const targets = new Set<string>();
+  let rest = text.trimStart();
+  while (rest) {
+    const matches = aliases.filter(({ alias }) => {
+      if (!rest.toLowerCase().startsWith(alias.toLowerCase())) return false;
+      const tail = rest.slice(alias.length);
+      if (NAME_REFERENCE_TAIL.test(tail)) return false;
+      return /^(?:(?:아|야|님)(?=[,.\s]|$)|(?=[,.\s]|$))/.test(tail);
+    });
+    const first = matches[0];
+    if (!first) break;
+    const length = first.alias.length;
+    for (const match of matches.filter((m) => m.alias.length === length)) targets.add(match.id);
+    rest = rest.slice(length).replace(/^(아|야|님)(?=[,.\s]|$)/, "");
+    rest = rest.replace(/^[,.\s]+/, "");
+  }
+  return [...targets];
+}
+
 // 평문 이름은 단순 언급일 수 있어 HYBRID 호출은 @가 붙은 별칭만 인정한다.
 export function detectAddressedNamesLoose(text: string, agents: AgentRecord[]): string[] {
   const targets: string[] = [];
