@@ -106,4 +106,12 @@ if HOME="$SEND_HOME" "$HERE/../../skills/b3os-team-inbox/scripts/steno-send.sh" 
 fi
 test -z "$(ls -A "$TMP/send-outside")"
 pass=$((pass + 1))
+# 확인 뒤 바꿔치기 경쟁(리뷰 #575): 내려간 뒤 폴더를 밖으로 가는 링크로 바꿔도 밖에 쓰지 않는다.
+RACE_BOX="$SEND_HOME/Library/Application Support/b3os/steno-outbox"
+rm -rf "$RACE_BOX/경쟁" "$TMP/race-outside" "$TMP/race-moved"; mkdir -p "$TMP/race-outside" "$RACE_BOX/경쟁"
+HOME="$SEND_HOME" STENO_SEND_TEST_AFTER_DESCEND="mv '$RACE_BOX/경쟁' '$TMP/race-moved' && ln -s '$TMP/race-outside' '$RACE_BOX/경쟁'" \
+  "$HERE/../../skills/b3os-team-inbox/scripts/steno-send.sh" "$TMP/send.png" --to-received --folder "경쟁" >/dev/null 2>&1 || true
+test -z "$(ls -A "$TMP/race-outside")" && test -f "$TMP/race-moved/send.png"   # 바꿔치기가 실제로 일어났고 파일은 처음 연 진짜 폴더로 갔다
+pass=$((pass + 1))
+rm -f "$RACE_BOX/경쟁"
 echo "PASS: $pass 받은 파일 checks"

@@ -66,30 +66,51 @@ cp "$FILE" "$TMP"
 chmod 600 "$TMP"
 
 [ ! -L "$OUTBOX" ] || { echo "✖ outbox 가 링크다: $OUTBOX" >&2; exit 1; }
-DIR="$OUTBOX"
 if [ -n "$FOLDER" ]; then
-  # 한 단계씩 내려가며 링크가 아닌지 본다 — mkdir -p 는 중간 링크를 따라가 outbox 밖에 쓸 수 있다.
-  IFS=/ read -r -a PARTS <<< "$FOLDER"
-  for part in "${PARTS[@]}"; do
-    DIR="$DIR/$part"
-    [ ! -L "$DIR" ] || { echo "✖ 폴더가 링크다: $DIR" >&2; exit 1; }
-    [ -d "$DIR" ] || mkdir "$DIR" || { echo "✖ 폴더를 만들 수 없다: $DIR" >&2; exit 1; }
-    [ ! -L "$DIR" ] && [ -d "$DIR" ] || { echo "✖ 폴더가 링크다: $DIR" >&2; exit 1; }
-    chmod 700 "$DIR"
+  # 하위 폴더: 경로 문자열로 확인한 뒤 옮기면 그 사이 폴더를 링크로 바꿔치기할 수 있다(리뷰 #575).
+  # outbox 폴더 fd 에서 한 단계씩 O_NOFOLLOW 로 내려가 그 fd 에 바로 놓는다 — 경로를 다시 풀지 않는다.
+  # 이름이 겹치면 " 2" … 를 붙인다(link 는 있는 이름을 덮지 않는다).
+  SHOWN="$(/usr/bin/python3 -I - "$OUTBOX" "$(basename "$TMP")" "$FOLDER" "$NAME" <<'PYEOF'
+import errno, os, sys
+outbox, temp, folder, name = sys.argv[1:]
+flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+root = os.open(outbox, flags)
+current = os.dup(root)
+for part in folder.split("/"):
+    try:
+        os.mkdir(part, 0o700, dir_fd=current)
+    except FileExistsError:
+        pass
+    child = os.open(part, flags, dir_fd=current)  # 링크면 ELOOP/ENOTDIR 로 실패
+    os.close(current); current = child
+hook = os.environ.get("STENO_SEND_TEST_AFTER_DESCEND")
+if hook:
+    os.system(hook)  # 시험 전용: 내려간 뒤 폴더를 바꿔치기해 본다
+stem, dot, ext = name.rpartition(".")
+for n in range(1, 10001):
+    candidate = name if n == 1 else f"{stem} {n}.{ext}"
+    try:
+        os.link(temp, candidate, src_dir_fd=root, dst_dir_fd=current, follow_symlinks=False)
+    except FileExistsError:
+        continue
+    os.unlink(temp, dir_fd=root)
+    print(f"{folder}/{candidate}")
+    sys.exit(0)
+sys.exit(1)
+PYEOF
+)" || { echo "✖ 하위 폴더에 넣지 못했다(링크·권한): $FOLDER" >&2; exit 1; }
+else
+  DEST="$OUTBOX/$NAME"
+  n=2
+  while :; do
+    mv -n "$TMP" "$DEST" 2>/dev/null || true
+    [ ! -e "$TMP" ] && break
+    stem="${NAME%.*}"; ext="${NAME##*.}"
+    DEST="$OUTBOX/$stem $n.$ext"
+    n=$((n + 1))
   done
-  REAL_OUTBOX="$(cd "$OUTBOX" && pwd -P)"; REAL_DIR="$(cd "$DIR" && pwd -P)"
-  [ "$REAL_DIR" = "$REAL_OUTBOX/$FOLDER" ] || { echo "✖ 폴더가 outbox 밖을 가리킨다: $FOLDER" >&2; exit 1; }
+  SHOWN="$(basename "$DEST")"
 fi
-DEST="$DIR/$NAME"
-n=2
-while :; do
-  mv -n "$TMP" "$DEST" 2>/dev/null || true
-  [ ! -e "$TMP" ] && break
-  stem="${NAME%.*}"; ext="${NAME##*.}"
-  DEST="$DIR/$stem $n.$ext"
-  n=$((n + 1))
-done
 trap - EXIT
-SHOWN="$(basename "$DEST")"; [ -z "$FOLDER" ] || SHOWN="$FOLDER/$SHOWN"
 echo "$SHOWN"
 echo "✓ Steno outbox에 넣음 — $SHOWN" >&2
