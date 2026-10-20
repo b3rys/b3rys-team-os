@@ -98,4 +98,12 @@ for folder in ../x .숨김 a/b/c a//b /a my-token; do
   fi
   pass=$((pass + 1))
 done
+# 중간 폴더가 링크면 outbox 밖에 쓰지 않는다(코덱스 재현 #575).
+mkdir -p "$TMP/send-outside"; rm -rf "$SEND_HOME/Library/Application Support/b3os/steno-outbox/링크"
+ln -s "$TMP/send-outside" "$SEND_HOME/Library/Application Support/b3os/steno-outbox/링크"
+if HOME="$SEND_HOME" "$HERE/../../skills/b3os-team-inbox/scripts/steno-send.sh" "$TMP/send.png" --to-received --folder "링크/안" >/dev/null 2>&1; then
+  echo "FAIL: steno-send followed linked folder" >&2; exit 1
+fi
+test -z "$(ls -A "$TMP/send-outside")"
+pass=$((pass + 1))
 echo "PASS: $pass 받은 파일 checks"

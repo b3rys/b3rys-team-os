@@ -65,8 +65,21 @@ trap 'rm -f "$TMP"' EXIT
 cp "$FILE" "$TMP"
 chmod 600 "$TMP"
 
+[ ! -L "$OUTBOX" ] || { echo "✖ outbox 가 링크다: $OUTBOX" >&2; exit 1; }
 DIR="$OUTBOX"
-if [ -n "$FOLDER" ]; then DIR="$OUTBOX/$FOLDER"; mkdir -p "$DIR"; chmod 700 "$DIR"; fi
+if [ -n "$FOLDER" ]; then
+  # 한 단계씩 내려가며 링크가 아닌지 본다 — mkdir -p 는 중간 링크를 따라가 outbox 밖에 쓸 수 있다.
+  IFS=/ read -r -a PARTS <<< "$FOLDER"
+  for part in "${PARTS[@]}"; do
+    DIR="$DIR/$part"
+    [ ! -L "$DIR" ] || { echo "✖ 폴더가 링크다: $DIR" >&2; exit 1; }
+    [ -d "$DIR" ] || mkdir "$DIR" || { echo "✖ 폴더를 만들 수 없다: $DIR" >&2; exit 1; }
+    [ ! -L "$DIR" ] && [ -d "$DIR" ] || { echo "✖ 폴더가 링크다: $DIR" >&2; exit 1; }
+    chmod 700 "$DIR"
+  done
+  REAL_OUTBOX="$(cd "$OUTBOX" && pwd -P)"; REAL_DIR="$(cd "$DIR" && pwd -P)"
+  [ "$REAL_DIR" = "$REAL_OUTBOX/$FOLDER" ] || { echo "✖ 폴더가 outbox 밖을 가리킨다: $FOLDER" >&2; exit 1; }
+fi
 DEST="$DIR/$NAME"
 n=2
 while :; do

@@ -62,14 +62,21 @@ def main():
     if not member or len(member) > 24 or any(c in member for c in "/\\:") or member.startswith(".") \
             or any(ord(c) < 32 or ord(c) == 127 for c in member):
         die("팀원 이름이 올바르지 않음(24자 이하, / \\ : 제어 문자·점 시작 금지)")
-    path = os.path.join(SHARED, name)
-    if os.path.islink(path) or os.path.islink(os.path.dirname(path)) or not os.path.isfile(path):
-        die(f"팀 폴더에 그 파일이 없음: {name}")
+    parts = name.split("/")
     # 도우미를 먼저 돌리고 그 뒤에 사본을 읽는다. 먼저 읽으면 도우미가 사본·기준을 새 원본으로
     # 바꾼 뒤에도 옛 내용을 새 기준 해시와 함께 보내 원본을 옛 판으로 되돌릴 수 있다.
     refresh_manifest()
     import stat
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    # 팀 폴더에서 한 단계씩 O_NOFOLLOW 로 내려간다 — 중간 폴더가 링크면 공유 폴더 밖 파일을 읽게 된다.
+    try:
+        directory = os.open(SHARED, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        for part in parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            os.close(directory); directory = child
+        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        os.close(directory)
+    except OSError:
+        die(f"팀 폴더에 그 파일이 없음(또는 링크): {name}")
     with os.fdopen(fd, "rb") as f:
         info = os.fstat(f.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 20 * 1024 * 1024:
