@@ -1,3 +1,4 @@
+import { reasoningSummaryOf } from "./reasoningSummary";
 import { createReactionInbox, reactionInputs, type ReactionInbox, type ReactionUpdate, type ReactionRef } from "../../lib/reactionInput";
 import { randomUUID } from "node:crypto";
 import { preserveAnswer } from "./answerText";
@@ -807,10 +808,7 @@ async function handleMessageTurn(
   const onStatus = (line: string, item?: unknown): void => {
     if (bubbleId === null) return;
     if (isCogs) {
-      const it = (item ?? {}) as { type?: string; summary?: unknown; text?: unknown };
-      if (it.type !== "reasoning") return;
-      const summary = typeof it.summary === "string" ? it.summary : typeof it.text === "string" ? it.text : "";
-      const head = summary.split("\n").map(l => l.trim()).find(Boolean) ?? "";
+      const head = reasoningSummaryOf(item);
       const target = Array.from(head).slice(0, 60).join("");
       if (!target || target === lastReasoningSummary) return;
       lastReasoningSummary = target;

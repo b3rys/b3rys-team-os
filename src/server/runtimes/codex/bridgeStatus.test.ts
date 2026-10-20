@@ -57,26 +57,26 @@ async function turn(script: (emit: Emit, requests: Request[]) => Promise<void>, 
   return requests;
 }
 const updates = (requests: Request[]) => requests.filter(r => r.message_id === 6 && r.cogs_response_state !== "complete");
-const reasoning = (summary?: string) => ({ id: "r1", type: "reasoning", ...(summary === undefined ? {} : { summary }) });
+const reasoning = (summary: string | string[] = []) => ({ id: "r1", type: "reasoning", summary, content: [] });
 
 test("cogs reasoning sends changed first lines as thinking args, suppresses duplicates and empty summaries", async () => {
   const requests = await turn(async (emit, requests) => {
     emit("item/started", reasoning());
-    emit("item/completed", reasoning("\n  \n"));
+    emit("item/completed", reasoning(["", "\n  \n"]));
     await Bun.sleep(30);
     expect(updates(requests)).toHaveLength(0);
-    emit("item/started", reasoning("\n 첫 요약 \n두 번째 줄"));
+    emit("item/started", reasoning(["", "\n 첫 요약 \n두 번째 줄", "다음 원소"]));
     await Bun.sleep(450);
     expect(updates(requests)).toHaveLength(1);
-    emit("item/completed", reasoning("첫 요약\n다른 두 번째 줄"));
+    emit("item/completed", reasoning(["첫 요약", "다른 두 번째 줄"]));
     await Bun.sleep(450);
     expect(updates(requests)).toHaveLength(1);
     emit("item/started", { id: "s", type: "webSearch", query: "query" });
     await Bun.sleep(450);
-    emit("item/completed", reasoning("첫 요약"));
+    emit("item/completed", reasoning(["첫 요약"]));
     await Bun.sleep(450);
     expect(updates(requests)).toHaveLength(2);
-    emit("item/completed", reasoning("😀".repeat(65)));
+    emit("item/completed", reasoning(["😀".repeat(65)]));
     await Bun.sleep(450);
   });
   const stages = updates(requests).filter((r, i, all) => i === 0 ||
@@ -130,18 +130,27 @@ test("cogs reasoning after a tool and answer preserves streaming text", async ()
     await Bun.sleep(450);
     emit("item/completed", { id: "a", type: "agentMessage", text: "앞 답" });
     await Bun.sleep(450);
-    emit("item/completed", reasoning("후속 요약"));
+    emit("item/completed", reasoning(["후속 요약"]));
     await Bun.sleep(450);
     expect(updates(requests).at(-1)).toMatchObject({ text: "앞 답", cogs_response_state: "streaming", cogs_activity_code: "thinking", cogs_activity_args: { target: "후속 요약" } });
   });
 });
 
-test("Telegram still receives rendered status headers without cogs thinking metadata", async () => {
+test("Telegram receives protocol array summary headers without cogs thinking metadata", async () => {
   const requests = await turn(async (emit, requests) => {
-    emit("item/started", reasoning("첫 요약"));
+    emit("item/started", reasoning(["첫 요약"]));
     await Bun.sleep(30);
     expect(requests.some(r => String(r.text).includes("첫 요약"))).toBe(true);
-    emit("item/completed", reasoning("둘째 요약"));
+    emit("item/completed", reasoning(["둘째 요약"]));
   }, true);
   expect(requests.every(r => !r.cogs_activity_code)).toBe(true);
+});
+
+
+test("cogs retains legacy string reasoning summary support", async () => {
+  const requests = await turn(async emit => {
+    emit("item/completed", reasoning("기존 문자열 요약\n둘째 줄"));
+  });
+  expect(updates(requests).find(r => r.cogs_activity_code === "thinking")?.cogs_activity_args)
+    .toEqual({ target: "기존 문자열 요약" });
 });

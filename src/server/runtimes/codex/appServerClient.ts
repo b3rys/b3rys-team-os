@@ -1,3 +1,4 @@
+import { reasoningSummaryOf } from "./reasoningSummary";
 /** 자식 app-server와 줄 단위 JSON-RPC로 통신해 진행 중 steer·interrupt와 승인 요청을 처리한다.
  * 팀 버스·텔레그램 연결은 상위 어댑터가 담당하므로 이 모듈에는 섞지 않는다. */
 import { uiText } from "./uiStrings";
@@ -87,8 +88,7 @@ export function statusLineOf(item: unknown): string | null {
   const type = typeof it.type === "string" ? it.type : "";
   if (type === "reasoning") {
     // 요약이 실려 오면 무엇을 생각하는 중인지까지 보여준다.
-    const sum = typeof it.summary === "string" ? it.summary : typeof it.text === "string" ? it.text : "";
-    const head = sum.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
+    const head = reasoningSummaryOf(item);
     return head ? uiText("reasoning_summary",{summary:head.length > 60 ? head.slice(0,59)+"…":head}) : uiText("reasoning");
   }
   if (type === "agentMessage") return uiText("answering");
