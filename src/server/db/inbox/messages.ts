@@ -368,6 +368,18 @@ export function findSlackMetaForThread(
   return null;
 }
 
+/** Only trusted ingress messages supply a cogs reply address. */
+export function findCogsMetaForThread(db: Database, thread: string, messageId?: string | null): import("../../lib/cogsRelay").CogsMeta | null {
+  const rows = db.query("SELECT meta_json FROM message WHERE (thread_id = ? OR id = ?) AND source = 'user' ORDER BY (id = ?) DESC, created_at ASC").all(thread, messageId ?? "", messageId ?? "") as Array<{ meta_json: string | null }>;
+  for (const row of rows) {
+    try {
+      const meta = JSON.parse(row.meta_json ?? "null")?.cogs;
+      if (typeof meta?.agent_id === "string" && typeof meta.chat_id === "string" && /^-?\d+$/.test(meta.chat_id) && Number.isSafeInteger(meta.message_id)) return meta;
+    } catch { /* skip malformed metadata */ }
+  }
+  return null;
+}
+
 export function getThread(db: Database, thread_id: string): {
   thread: ThreadRow;
   messages: EnvelopeStored[];

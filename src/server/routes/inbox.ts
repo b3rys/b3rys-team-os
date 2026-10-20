@@ -1,3 +1,4 @@
+import { sendCogsReply } from "../lib/cogsRelay";
 import { Hono } from "hono";
 import type { Database } from "bun:sqlite";
 import { z } from "zod";
@@ -11,6 +12,7 @@ import {
   getThread,
   listThreads,
   findSlackMetaForThread,
+  findCogsMetaForThread,
   agentActivity,
   acceptInbound,
 } from "../db/inboxQueries";
@@ -183,8 +185,12 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         parentSlack = slack;
       }
     } catch { /* 잘못된 원글 meta는 기존 thread 조회로 처리한다. */ }
+    const cogsMetaForGate = parentSlack ? null : findCogsMetaForThread(deps.db, env.thread_id ?? "", env.in_reply_to);
+    if (cogsMetaForGate && env.source === "agent" && (env.meta?.reply_mode === "direct_to_gd" || env.all_hands)) {
+      return c.json({ ok: false, error: "cogs_reply_mode_invalid", detail: "cogs → --to broadcast" }, 400);
+    }
     const slackMetaForGate = parentSlack ?? findSlackMetaForThread(deps.db, env.thread_id ?? "");
-    if (env.source === "agent" && env.to_agent_id === "broadcast" && !slackMetaForGate) {
+    if (env.source === "agent" && env.to_agent_id === "broadcast" && !slackMetaForGate && !cogsMetaForGate) {
       // 팀원 broadcast에 broadcast로 답하는 것은 발신자의 역량·역할과 무관하게 차단해 연쇄를 끊는다.
       if (env.in_reply_to) {
         const parent = deps.db
@@ -280,6 +286,19 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     }
 
 
+
+    // cogs threads never fall through to Telegram, including malformed reply modes.
+    if (cogsMetaForGate && env.source === "agent" && stored.to_agent_id === "broadcast") {
+      try {
+        const agent = (deps.agents?.() ?? ambientAgents()).find((a) => a.id === env.from_agent_id);
+        await sendCogsReply(agent, cogsMetaForGate, stored.body);
+        appendAudit(deps.db, env.from_agent_id, "cogs_relay_sent", stored.id, { chat_id: cogsMetaForGate.chat_id });
+        return c.json({ ok: true, message: stored, posted: true, channel: "cogs" }, 201);
+      } catch {
+        appendAudit(deps.db, env.from_agent_id, "cogs_relay_failed", stored.id, { chat_id: cogsMetaForGate.chat_id });
+        return c.json({ ok: false, message: stored, posted: false, error: "cogs_relay_failed" }, 502);
+      }
+    }
 
     // Slack 게시 완료를 확인한 뒤 성공을 반환한다. 같은 답을 Telegram으로도 보내지 않는다.
     const slackThread = slackMetaForGate ?? findSlackMetaForThread(deps.db, stored.thread_id);

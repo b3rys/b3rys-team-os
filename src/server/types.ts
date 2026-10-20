@@ -10,6 +10,8 @@ export interface AgentRecord {
   nicknames?: string[];
   /** 봇이 붙는 메신저 서버(lib/memberChannel). 없으면 텔레그램 — kind·api_base·allow_from·owner_chat. */
   channel?: { kind?: string; api_base?: string; allow_from?: Array<string | number>; owner_chat?: string | number };
+  /** Additional cogs inbox; the primary channel remains unchanged. allow_from contains room IDs. */
+  cogs_inbox?: { api_base: string; token_file: string; allow_from: Array<string | number> };
   role: string;
   /**
    * 동작 capability 플래그 (additive — 없으면 빈 배열). 코드의 하드코딩 agent-id 비교를 대체.

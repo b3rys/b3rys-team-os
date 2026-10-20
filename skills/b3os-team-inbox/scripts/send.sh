@@ -318,7 +318,9 @@ import sys, json
 d = json.load(sys.stdin)
 if d.get('ok'):
     m = d['message']
-    if d.get('posted') and m.get('meta', {}).get('slack_ts'):
+    if d.get('posted') and d.get('channel') == 'cogs':
+        print('✓ cogs 게시 완료 (' + m['id'] + ')', file=sys.stderr)
+    elif d.get('posted') and m.get('meta', {}).get('slack_ts'):
         print('✓ Slack 게시 완료 (' + m['id'] + ') ts=' + m['meta']['slack_ts'], file=sys.stderr)
     else:
         print(f'접수됨 {m[\"id\"]} thread={m[\"thread_id\"]} (hop={m[\"hop_count\"]}) — 배달 확인 전', file=sys.stderr)
@@ -333,6 +335,10 @@ else:
 #   위 명령치환이 id 를 ★내부 변수로만★ 받고 stdout 에는 아무것도 안 나갔다. 실측: MSGID=$(send.sh …)
 #   가 빈 문자열이 됐다. 문서가 약속한 것을 코드가 지키지 않으면 그 문서를 믿은 쪽이 조용히 깨진다.
 printf '%s\n' "$MSG_ID"
+
+# cogs delivery is already confirmed by sendMessage; there are no bus recipients to await.
+COGS_POSTED=$(echo "$RESP" | python3 -c 'import sys,json; d=json.load(sys.stdin); print("yes" if d.get("posted") and d.get("channel") == "cogs" else "no")')
+[ "$COGS_POSTED" = "yes" ] && exit 0
 
 # ★멘션이 없으면 알려준다★ — 실패로 만들지는 않는다.
 #   "슬랙에 정리해서 올려줘" 처럼 받는 사람이 없는 게시는 멘션이 없는 게 맞다(slack-post 와 같은 판단).
