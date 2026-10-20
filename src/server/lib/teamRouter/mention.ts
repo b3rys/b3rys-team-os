@@ -156,20 +156,26 @@ export function detectLeadingNameTargets(text: string, agents: AgentRecord[]): s
       .filter((alias) => alias && !alias.startsWith("@"))
       .map((alias) => ({ alias, id: agent.id })),
   ).sort((a, b) => b.alias.length - a.alias.length);
+  // off는 기존 main의 조사·과거 참조 판정을 보존한다. 미설정은 새 조사 규칙을 사용한다.
+  const particlesEnabled = process.env.ROUTER_LEADING_NAME_PARTICLES !== "off";
+  const ending = particlesEnabled
+    ? /^(?:(?:님|씨)(?:도|는|은|가|이)?|아|야|도|는|은|가|이)?(?=[,.\s]|$)/
+    : /^(?:아|야|님)?(?=[,.\s]|$)/;
   const targets = new Set<string>();
   let rest = text.trimStart();
   while (rest) {
     const matches = aliases.filter(({ alias }) => {
       if (!rest.toLowerCase().startsWith(alias.toLowerCase())) return false;
       const tail = rest.slice(alias.length);
-      if (NAME_REFERENCE_TAIL.test(tail)) return false;
-      return /^(?:(?:아|야|님)(?=[,.\s]|$)|(?=[,.\s]|$))/.test(tail);
+      if (!particlesEnabled && NAME_REFERENCE_TAIL.test(tail)) return false;
+      // 연결·대상 조사는 허용 목록에 없으므로 해당 이름을 추가하기 전에 중단한다.
+      return ending.test(tail);
     });
     const first = matches[0];
     if (!first) break;
     const length = first.alias.length;
     for (const match of matches.filter((m) => m.alias.length === length)) targets.add(match.id);
-    rest = rest.slice(length).replace(/^(아|야|님)(?=[,.\s]|$)/, "");
+    rest = rest.slice(length).replace(ending, "");
     rest = rest.replace(/^[,.\s]+/, "");
   }
   return [...targets];
