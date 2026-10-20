@@ -523,15 +523,21 @@ def tg_edit(token, chat_id, mid, text):
         except Exception:
             pass
         return
-    # 기본: detached curl — 훅 즉시 리턴, 툴 지연 0
+    # Detached curl reads secrets from stdin, never process arguments.
+    # An anonymous file avoids blocking on pipe capacity for long messages.
     try:
-        subprocess.Popen(
-            ["curl", "-s", "--max-time", "5", url,
-             "--data-urlencode", f"chat_id={chat_id}",
-             "--data-urlencode", f"message_id={mid}",
-             "--data-urlencode", f"text={text}"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            start_new_session=True)
+        import tempfile, urllib.parse
+        payload = urllib.parse.urlencode({
+            "chat_id": chat_id, "message_id": mid, "text": text,
+        })
+        config = f"url = {json.dumps(url)}\ndata = {json.dumps(payload)}\n"
+        with tempfile.TemporaryFile() as stdin:
+            stdin.write(config.encode())
+            stdin.seek(0)
+            subprocess.Popen(
+                ["curl", "-q", "-s", "--max-time", "5", "--config", "-"],
+                stdin=stdin, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True)
     except Exception:
         pass
 
