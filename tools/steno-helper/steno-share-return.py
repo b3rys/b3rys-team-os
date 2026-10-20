@@ -45,19 +45,25 @@ def refresh_manifest():
     return False
 
 
+def valid_relative(name):
+    # 팀 공유 바로 아래 "이름" 또는 하위 폴더 두 단계 "폴더/폴더/이름"까지(도우미 maxFolderDepth 와 같다).
+    parts = name.split("/")
+    return 1 <= len(parts) <= 3 and all(p and p not in (".", "..") and not p.startswith(".") and "\0" not in p for p in parts)
+
+
 def main():
     argv = sys.argv[1:]
     if len(argv) != 3 or argv[1] != "--as":
-        die("사용법: steno-share-return.py <파일 이름> --as <팀원 이름>")
+        die("사용법: steno-share-return.py <파일 이름 | 폴더/파일 이름> --as <팀원 이름>")
     name, member = argv[0], argv[2].strip()
-    if not name or "/" in name or name.startswith(".") or "\0" in name:
-        die("파일 이름이 올바르지 않음")
+    if not valid_relative(name):
+        die("파일 이름이 올바르지 않음(이름 또는 폴더/이름)")
     # 팀원 이름은 새 노트 이름에 들어간다. 경로 조각·제어 문자·긴 이름을 막는다.
     if not member or len(member) > 24 or any(c in member for c in "/\\:") or member.startswith(".") \
             or any(ord(c) < 32 or ord(c) == 127 for c in member):
         die("팀원 이름이 올바르지 않음(24자 이하, / \\ : 제어 문자·점 시작 금지)")
     path = os.path.join(SHARED, name)
-    if os.path.islink(path) or not os.path.isfile(path):
+    if os.path.islink(path) or os.path.islink(os.path.dirname(path)) or not os.path.isfile(path):
         die(f"팀 폴더에 그 파일이 없음: {name}")
     # 도우미를 먼저 돌리고 그 뒤에 사본을 읽는다. 먼저 읽으면 도우미가 사본·기준을 새 원본으로
     # 바꾼 뒤에도 옛 내용을 새 기준 해시와 함께 보내 원본을 옛 판으로 되돌릴 수 있다.
@@ -91,7 +97,7 @@ def main():
         print("사본에 고친 것이 없음, 할 일 없음")
         return
 
-    if not file or "/" in file or file.startswith(".") or "\0" in file:
+    if not file or not valid_relative(file):
         die("manifest 의 파일 이름이 올바르지 않음")
     if len(data) > 20 * 1024 * 1024:
         die("20MB 초과는 보낼 수 없음")

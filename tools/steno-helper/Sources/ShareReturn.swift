@@ -25,7 +25,11 @@ func consumeReturn(source: Int32, requestName: String, destination: Int32) -> Bo
     guard UUID(uuidString: id) != nil, let requestInfo = regularSingleLink(source, requestName),
           let raw = uploadReadRegular(source, requestName),
           let request = try? JSONDecoder().decode(ShareReturnRequest.self, from: raw),
-          !request.file.hasPrefix("."), validName(request.file), memberValid(request.member) else { return false }
+          memberValid(request.member) else { return false }
+    // 팀 공유 하위 폴더의 노트면 file 이 "폴더/이름" 이다. 수정 사본은 원본과 같은 폴더에 만든다.
+    let parts = request.file.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+    guard let leaf = parts.last, !leaf.hasPrefix("."), validName(leaf),
+          let folders = folderComponents(parts.dropLast().joined(separator: "/")) else { return false }
     let payload = ".return-" + id + ".data"
     guard let payloadInfo = regularSingleLink(source, payload), let data = uploadReadRegular(source, payload),
           uploadSHA256(data) == request.sha256, String(data: data, encoding: .utf8) != nil else { return false }
@@ -36,9 +40,12 @@ func consumeReturn(source: Int32, requestName: String, destination: Int32) -> Bo
               uploadSHA256(value) == request.base else { return false }
         baseline = value; baseInfo = info
     }
-    let ns = request.file as NSString
+    let ns = leaf as NSString
     let name = "\(ns.deletingPathExtension) (\(request.member) 수정).\(ns.pathExtension)"
-    guard let output = publishNew(destination, name, data) else { return false }
+    let target = openSubdirectory(destination, folders, create: true)
+    guard target >= 0 else { return false }
+    defer { close(target) }
+    guard let output = publishNew(target, name, data) else { return false }
     FileHandle.standardError.write(Data("steno-helper 팀 공유 반환: \(request.file) 사본=\(output)\n".utf8))
     guard removeUnchanged(source, requestName, requestInfo, raw), removeUnchanged(source, payload, payloadInfo, data) else { return false }
     if let baseInfo, let baseline, !removeUnchanged(source, baseName, baseInfo, baseline) { return false }

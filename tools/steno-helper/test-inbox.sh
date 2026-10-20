@@ -59,6 +59,19 @@ printf safe > "$TMP/outbox/심볼릭.md"
 expect_reject "$TMP/outbox" "$TMP/inbox" "destination filename symlink"
 test "$(cat "$TMP/secret")" = secret && test ! -e "$TMP/inbox/심볼릭 3.md"
 
+rm -f "$TMP/outbox/심볼릭.md" "$TMP/inbox/심볼릭 2.md"
+# 하위 폴더: outbox/A/B/x.md → 받은 파일/A/B/x.md, 비운 outbox 폴더는 지운다.
+mkdir -p "$TMP/outbox/보고서/초안"; printf r1 > "$TMP/outbox/보고서/x.md"; printf r2 > "$TMP/outbox/보고서/초안/y.md"
+"$BIN" --inbox "$TMP/outbox" "$TMP/inbox"
+test "$(cat "$TMP/inbox/보고서/x.md")" = r1 && test "$(cat "$TMP/inbox/보고서/초안/y.md")" = r2 && test ! -e "$TMP/outbox/보고서"
+pass=$((pass + 1))
+mkdir -p "$TMP/outbox/a/b/c"; printf deep > "$TMP/outbox/a/b/c/z.md"
+expect_reject "$TMP/outbox" "$TMP/inbox" "third level folder"; test ! -e "$TMP/inbox/a/b/c"; rm -rf "$TMP/outbox/a" "$TMP/inbox/a"
+mkdir -p "$TMP/outbox/client-secret"; printf x > "$TMP/outbox/client-secret/x.md"
+expect_reject "$TMP/outbox" "$TMP/inbox" "sensitive folder"; test ! -e "$TMP/inbox/client-secret"; rm -rf "$TMP/outbox/client-secret"
+mkdir -p "$TMP/elsewhere"; ln -s "$TMP/elsewhere" "$TMP/inbox/링크폴더"; mkdir "$TMP/outbox/링크폴더"; printf x > "$TMP/outbox/링크폴더/x.md"
+expect_reject "$TMP/outbox" "$TMP/inbox" "destination folder symlink"; test ! -e "$TMP/elsewhere/x.md"; rm -rf "$TMP/outbox/링크폴더" "$TMP/inbox/링크폴더"
+
 SEND_HOME="$TMP/send-home"; mkdir -p "$SEND_HOME"
 printf image > "$TMP/send.png"
 HOME="$SEND_HOME" "$HERE/../../skills/b3os-team-inbox/scripts/steno-send.sh" "$TMP/send.png" --to-received >/dev/null
@@ -76,4 +89,13 @@ for name in .env client-secret.txt db-CREDENTIAL.md api_token.json; do
   pass=$((pass + 1))
 done
 
+HOME="$SEND_HOME" "$HERE/../../skills/b3os-team-inbox/scripts/steno-send.sh" "$TMP/send.png" --to-received --folder "발표/초안" >/dev/null
+test -f "$SEND_HOME/Library/Application Support/b3os/steno-outbox/발표/초안/send.png"
+pass=$((pass + 1))
+for folder in ../x .숨김 a/b/c a//b /a my-token; do
+  if HOME="$SEND_HOME" "$HERE/../../skills/b3os-team-inbox/scripts/steno-send.sh" "$TMP/send.png" --folder "$folder" >/dev/null 2>&1; then
+    echo "FAIL: steno-send folder $folder" >&2; exit 1
+  fi
+  pass=$((pass + 1))
+done
 echo "PASS: $pass 받은 파일 checks"

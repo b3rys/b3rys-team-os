@@ -36,7 +36,7 @@ Steno 앱은 `STENO_LIBRARY`로 띄운 경우에는 이 기록을 쓰지 않는�
 Mobile Documents는 macOS 개인정보 보호(TCC)로 접근이 막힐 수 있다. EPERM/EACCES도 무효 후보로 처리하며 “권한 없음 — 시스템 설정 › 개인정보 › 파일 및 폴더에서 steno-helper 허용 필요”를 기록한다.
 
 - `팀 공유` 이름과 `.steno-folder` 내용 `team`이 맞아야 복사한다. 내용 양끝 공백·줄바꿈은 무시하며, iCloud 자리표시 파일도 표시가 있는 것으로 본다. 받은 파일 넣기 동작은 바꾸지 않는다.
-- `팀 공유` 바로 아래 파일만 복사한다. 하위 폴더, 숨김 파일, `.steno` 사이드카, 링크, 20MB 초과, 이름에 secret·credential·token·password 가 든 파일은 건너뛴다.
+- `팀 공유` 아래 파일을 하위 폴더 두 단계(`팀 공유/A/B`, 앱 라이브러리 폴더 깊이 3 과 같다)까지 같은 폴더 구조로 복사한다. 더 깊은 폴더, 숨김 파일·폴더, `.steno` 사이드카, 링크(파일·폴더), 20MB 초과, 이름에 secret·credential·token·password 가 든 파일·폴더는 건너뛴다. 하위 폴더 목록을 하나라도 끝까지 못 읽으면 그 주기는 아무것도 지우지 않는다. 사본을 지워 빈 하위 폴더는 정리한다.
 - 라이브러리 쪽에는 아무것도 쓰거나 지우지 않는다.
 - 못 읽은 원본에는 iCloud 내려받기를 한 번 요청하고 다음 주기에 다시 읽는다. 요청 여부는 manifest에 남겨 반복 요청하지 않는다.
 - `steno-shared/.manifest.json` 에 파일마다 해시 두 개를 적는다. `base` 는 사본을 만들 때의 원본 해시, `source` 는 마지막으로 본 원본 해시다. 원본을 못 읽으면 `source` 를 `unreadable` 로 적는다.
@@ -49,6 +49,7 @@ Mobile Documents는 macOS 개인정보 보호(TCC)로 접근이 막힐 수 있�
 
 ```bash
 tools/steno-helper/steno-share-return.py AAA.md --as 빌
+tools/steno-helper/steno-share-return.py 발표/AAA.md --as 빌   # 하위 폴더의 노트 — 수정 사본도 같은 폴더에 만든다
 ```
 
 1. 도우미를 한 번 돌려(`launchctl kickstart`) manifest 를 새로 받은 뒤 사본을 읽는다. 사본이 기준 판 그대로면 아무것도 보내지 않는다.
@@ -64,7 +65,11 @@ tools/steno-helper/steno-share-return.py AAA.md --as 빌
 ```bash
 skills/b3os-team-inbox/scripts/steno-send.sh report.md
 skills/b3os-team-inbox/scripts/steno-send.sh attachment.zip --to-received
+skills/b3os-team-inbox/scripts/steno-send.sh report.html --folder "발표"          # 팀 공유/발표/report.html
+skills/b3os-team-inbox/scripts/steno-send.sh report.html --to-received --folder "발표/초안"
 ```
+
+`--folder` 는 `A` 또는 `A/B`(두 단계까지)다. 없는 폴더는 도우미가 만든다. 점으로 시작하는 이름, 비밀값이 들어갈 수 있는 이름, 세 단계 이상은 보내는 쪽과 도우미 양쪽에서 거절한다.
 
 기본 대상은 팀 공유 보낼 칸이다. 도우미는 이름과 표시(`.steno-folder`의 내용 `team`)가 맞는 팀 공유 폴더에만 넣는다. 받은 파일과 같은 크기·링크·권한 제한을 적용하고, 같은 이름이면 ` 2`를 붙여 기존 파일을 보존한다.
 
