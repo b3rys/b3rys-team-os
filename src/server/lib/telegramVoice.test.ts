@@ -283,3 +283,43 @@ for (const mode of ["EPERM", "no-close"] as const) {
 test("stopped voice notice explains recovery and the voice/text delivery scope", () => {
   expect(VOICE_STOPPED_NOTICE).toBe("음성 받아쓰기를 멈췄어요. 받아쓰기 프로세스를 정리하지 못했고, 자동으로 다시 켜지지 않아요. 운영 담당자에게 남은 프로세스를 정리한 뒤 음성 수신 기능(capture worker) 또는 b3os를 재시작해 달라고 요청해 주세요. 그동안 음성 메시지는 전달되지 않고, 글 메시지는 계속 전달돼요.");
 });
+
+for (const mode of ["transient", "persistent"] as const) {
+ test(`post-close ${mode} EPERM: only confirmed ESRCH permits CPU fallback and next voice`, async()=>{
+  const {mkdtemp,rm}=await import("node:fs/promises");
+  const root=await mkdtemp("/tmp/voice-eperm-test-");
+  const oldHome=process.env.HOME;process.env.HOME=root;
+  const fake=fakeVoiceChild();const signals:(NodeJS.Signals|0)[]=[];
+  const notices:string[]=[];let probes=0;let confirmed=false;let engines=0;let jobs=0;let routed=0;
+  try{
+   await Bun.write(`${root}/.cache/whisper/large-v3-turbo.pt`,"fixture");
+   const ingress=createVoiceIngress({allowedIds:()=>["7"],notify:async(_,notice)=>{notices.push(notice);},handle:async()=>{routed++;},transcribe:async()=>{
+    jobs++;
+    if (jobs > 1) { expect(confirmed).toBe(true); return "빌 확인"; }
+    return transcribeLocalVoice(`${root}/voice.ogg`,root,"빌",{checkAudio:async()=>{},run:async()=>{
+     engines++;
+     if(engines===1)return runVoiceProcess(["fixture"],5,undefined,{
+      spawn:()=>fake.child,cleanupMs:500,pollMs:2,
+      signal:(_,sig)=>{
+       signals.push(sig);
+       if(sig==="SIGKILL"){setTimeout(()=>fake.close(1),1);return;}
+       probes++;
+       if(mode==="transient" && probes===3){confirmed=true;throw Object.assign(new Error(),{code:"ESRCH"});}
+       throw Object.assign(new Error(),{code:"EPERM"});
+      },
+     });
+     expect(confirmed).toBe(true);
+     await Bun.write(`${root}/voice.txt`,"빌 확인");
+    }});
+   }});
+   await Promise.all([ingress(msg),ingress(msg)]);
+   expect(signals.filter(s=>s==="SIGKILL")).toHaveLength(1);
+   expect(probes).toBeGreaterThanOrEqual(3);
+   if(mode==="transient"){
+    expect(confirmed).toBe(true);expect(jobs).toBe(2);expect(engines).toBe(2);expect(routed).toBe(2);expect(notices).toEqual([]);
+   }else{
+    expect(confirmed).toBe(false);expect(jobs).toBe(1);expect(engines).toBe(1);expect(routed).toBe(0);expect(notices).toEqual([VOICE_STOPPED_NOTICE,VOICE_STOPPED_NOTICE]);
+   }
+  }finally{if(oldHome===undefined)delete process.env.HOME;else process.env.HOME=oldHome;await rm(root,{recursive:true,force:true});}
+ });
+}

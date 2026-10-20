@@ -103,13 +103,14 @@ export async function runVoiceProcess(
         try { signal(-child.pid, 0); }
         catch (error) {
           if ((error as NodeJS.ErrnoException).code === "ESRCH") gone = true;
-          else { finish(new VoiceProcessUnreapedError()); return; }
+          else if ((error as NodeJS.ErrnoException).code !== "EPERM") { finish(new VoiceProcessUnreapedError()); return; }
         }
       }
       if (gone || !child.pid) {
         finish(code !== 0 || timedOut ? new Error("local voice process failed") : undefined);
       } else {
-        // A reaped leader grants no right to signal this PGID again. Probe only; fail closed.
+        // macOS can briefly return EPERM while the killed group disappears.
+        // A reaped leader grants no right to send SIGKILL again; probe until ESRCH or deadline.
         probeTimer = setTimeout(() => probe(code), runtime.pollMs ?? 10);
       }
     };
@@ -162,17 +163,23 @@ export async function transcribeLocalVoice(path: string, dir: string, prompt: st
   const output = join(dir, "voice-mlx.txt");
   // A fresh output prevents a failed engine from returning an earlier result.
   await rm(output, { force: true });
+  let mlxStage: "process" | "result" = "process";
   try {
     await run([
       join(root, ".venv/bin/python"), join(root, "transcribe.py"),
       path, join(root, "model"), output, prompt.slice(0, 1000),
     ], opts.timeoutMs ?? 30_000);
+    mlxStage = "result";
     const text = (await readFile(output, "utf8")).trim();
     if (!text) throw new Error("local voice result empty");
     return text;
   } catch (error) {
     // Never launch a second engine while the first process group might still exist.
     if (error instanceof VoiceProcessUnreapedError) throw error;
+    // Constant diagnostic only: never include argv, prompts, paths or raw errors.
+    console.warn(mlxStage === "process"
+      ? "[voice] MLX process failed or timed out; retrying CPU Whisper"
+      : "[voice] MLX result missing or empty; retrying CPU Whisper");
   }
   const model = join(home, ".cache/whisper/large-v3-turbo.pt");
   if (!await Bun.file(model).exists()) throw new Error("local voice model missing");

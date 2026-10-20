@@ -61,12 +61,14 @@ prompt가 이름을 보존하는 효과를 관측했다. prompt 없는 bill 샘�
 | 기능 / 소스 | 검증 | 결과 / mutation |
 |---|---|---|
 | 엔진 선택·fallback·결과 정리 (`telegramVoice.ts`) | `telegramVoice.test.ts` | MLX 우선·실패/빈/누락 결과 fallback·양쪽 실패·정리 미확인 시 fallback 금지 |
-| 프로세스·큐·토큰·라우터 | `telegramVoice.test.ts`, `telegramCapture.voice.test.ts`, `teamRouter.test.ts` | baseline 79 pass, 변경 뒤 86 pass. 실제 Python→ffmpeg 종료 시험 포함 |
+| 프로세스·큐·토큰·라우터 | `telegramVoice.test.ts`, `telegramCapture.voice.test.ts`, `teamRouter.test.ts` | baseline 79 pass, 변경 뒤 88 pass. 실제 Python→ffmpeg 종료 시험 포함 |
 | 오프라인 adapter·prompt·빈 결과 | `python3 -m unittest discover -s scripts/stt -p 'test_*.py' -v` | 3 pass. MLX stub으로 네트워크 차단 환경값과 인자·출력 계약 검증 |
 | 설치 및 실제 MLX | `bash scripts/stt/install.sh`, Yuna/실제 음성 probe | 오프라인 모델 디코딩 성공, 실측 시 CPU fallback 없음 |
-| 회귀 검사의 검출력 | 정리 미확인 fallback 허용 / stale output 삭제 제거 / timeout 120초로 원복 | 각각 1 / 1 / 8 fail, 복원 후 86 pass |
+| 회귀 검사의 검출력 | 정리 미확인 fallback 허용 / stale output 삭제 제거 / timeout 120초로 원복 | 각각 1 / 1 / 8 fail, 복원 후 관련 검사 통과 |
 
-실제 프로세스 종료 회귀 시험은 반복 검증 중 1회 실패(85 pass/1 fail)했고, 동일 코드 즉시 재실행은 86 pass였다. 다음 큐에서 grandchild PID 소멸을 확인하는 assertion이며 원인은 확정하지 않았다. 최초 변경 후와 baseline 실행은 통과했다. 실패 기록도 보존했다.
+실제 프로세스 종료 회귀 시험은 최초 반복 검증 중 1회 실패(85 pass/1 fail)했다. macOS에서는 그룹 SIGKILL 뒤 부모 close 직후 signal 0이 일시적으로 EPERM을 반환할 수 있었다. close 뒤 EPERM은 기존 5초 기한 안에서 signal 0으로만 재확인하며, ESRCH 뒤에만 fallback/다음 큐를 진행한다. 지속 EPERM·기한 만료·SIGKILL 실패는 큐 중단을 유지한다. 일시 EPERM→ESRCH와 지속 EPERM 회귀 시험을 추가했고, fix 원복 mutation이 이를 검출한다. 실제 Python→ffmpeg 500ms timeout도 실행했다. 원본 실패 로그와 과부하 환경 재실행 기록도 보존했다.
+
+MLX 실패 진단은 원문 오류·argv·prompt·경로를 포함하지 않는 고정 문구다. 프로세스 실패/시간 초과와 결과 누락/빈 결과를 구분해 CPU 전환 직전에 한 줄 남긴다.
 
 TypeScript typecheck와 shell syntax 검사 통과. 실제 Telegram 그룹 수신·DM 발송·팀원 runtime 주입, 라이브 프로세스의 MLX 실행, 긴 음성, 부하별 지연, 일반 잡음·작은 목소리 오거부율은 검증하지 않았다. 전체 suite·서비스 재시작·머지·배포를 실행하지 않았다.
 
