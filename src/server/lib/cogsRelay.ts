@@ -35,16 +35,31 @@ export function cogsToken(config: CogsInbox): string {
   } catch { throw new Error("cogs_token_unavailable"); }
 }
 
+/** The request may have posted even though its acknowledgement was lost. */
+export class CogsDeliveryUnknown extends Error {
+  constructor() { super("cogs_delivery_unknown"); }
+}
+
 export async function cogsCall(config: CogsInbox, token: string, method: string, body: unknown, signal?: AbortSignal): Promise<any> {
+  let res: Response;
+  let data: { ok?: boolean; result?: unknown };
   try {
-    const res = await fetch(`${config.api_base}/bot${encodeURIComponent(token)}/${method}`, {
+    res = await fetch(`${config.api_base}/bot${encodeURIComponent(token)}/${method}`, {
       method: "POST", redirect: "error", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(8000)]) : AbortSignal.timeout(8000),
     });
-    const data = await res.json() as { ok?: boolean; result?: unknown };
-    if (!res.ok || data.ok !== true) throw 0;
-    return data.result;
-  } catch { throw new Error("cogs_api_failed"); }
+    data = await res.json() as typeof data;
+  } catch {
+    if (method === "sendMessage") throw new CogsDeliveryUnknown();
+    throw new Error("cogs_api_failed");
+  }
+  // Only an explicit rejection proves that retrying cannot duplicate a post.
+  if (data?.ok === false) throw new Error("cogs_api_failed");
+  if (!res.ok || data?.ok !== true) {
+    if (method === "sendMessage") throw new CogsDeliveryUnknown();
+    throw new Error("cogs_api_failed");
+  }
+  return data.result;
 }
 
 export async function sendCogsReply(agent: AgentRecord | undefined, meta: CogsMeta, text: string): Promise<void> {
@@ -52,5 +67,5 @@ export async function sendCogsReply(agent: AgentRecord | undefined, meta: CogsMe
   const config = cogsInbox(agent);
   if (!config || !config.allow_from.includes(meta.chat_id)) throw new Error("cogs_reply_not_allowed");
   const result = await cogsCall(config, cogsToken(config), "sendMessage", { chat_id: meta.chat_id, text, reply_to_message_id: meta.message_id });
-  if (!Number.isSafeInteger(result?.message_id)) throw new Error("cogs_post_missing_id");
+  if (!Number.isSafeInteger(result?.message_id)) throw new CogsDeliveryUnknown();
 }

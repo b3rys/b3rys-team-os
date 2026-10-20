@@ -15,6 +15,8 @@ import type { AgentRecord } from "../types";
 let dir: string, db: Database, server: ReturnType<typeof Bun.serve>, agents: AgentRecord[];
 let updates: any[], calls: { method: string; body: any }[], injected: InjectPromptOptions[];
 let events: unknown[];
+let sendMode: "normal" | "malformed" | "hold";
+let releaseSend: (() => void) | undefined;
 let fail: boolean, injectOk: boolean, stop: (() => void) | undefined;
 let oldEnv: Record<string, string | undefined>;
 const TOKEN = "fixture-cogs-secret-no-production-value";
@@ -28,7 +30,7 @@ beforeEach(() => {
   process.env.TEAMOS_AGENT_OFF_FILE = join(dir, "off.txt");
   process.env.TEAM_COLLAB_ROOT = dir;
   writeFileSync(join(dir, "token"), TOKEN, { mode: 0o600 });
-  updates = []; calls = []; injected = []; events = []; fail = false; injectOk = true;
+  updates = []; calls = []; injected = []; events = []; fail = false; injectOk = true; sendMode = "normal"; releaseSend = undefined;
   server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
     const method = new URL(req.url).pathname.split("/").at(-1)!;
     const body = await req.json();
@@ -37,6 +39,8 @@ beforeEach(() => {
     if (Object.values(body as object).some((v) => v !== null && typeof v === "object")) return Response.json({ ok: false }, { status: 400 });
     if (fail) return Response.json({ ok: false, description: `${TOKEN} ${req.url}` }, { status: 500 });
     if (method === "getUpdates") return Response.json({ ok: true, result: updates.filter((u) => u.update_id >= (body as any).offset) });
+    if (sendMode === "malformed") return new Response("lost acknowledgement");
+    if (sendMode === "hold") await new Promise<void>((resolve) => { releaseSend = resolve; });
     return Response.json({ ok: true, result: { message_id: 99 } });
   }});
   agents = [{ id: "lisa", display_name: "Lisa", runtime: "claude_channel", tmux_session: "claude-lisa",
@@ -48,6 +52,7 @@ beforeEach(() => {
     VALUES ('lisa','Lisa','dev','claude_channel','claude_tmux','/tmp','p.md')`);
 });
 afterEach(() => {
+  releaseSend?.();
   stop?.(); stop = undefined; server.stop(true); db.close();
   for (const key of KEYS) { if (oldEnv[key] === undefined) delete process.env[key]; else process.env[key] = oldEnv[key]; }
   rmSync(dir, { recursive: true, force: true });
@@ -202,4 +207,55 @@ test("cogs replies cannot fan out as an all-hands team broadcast", async () => {
   updates = [update()]; await poller().pollOnce();
   expect((await reply({ all_hands: "whole team" })).status).toBe(400);
   expect(calls.filter((c) => c.method === "sendMessage")).toHaveLength(0);
+});
+
+test("identical answers to different private rooms both post", async () => {
+  updates = [update(10, 71), update(11, 72)]; await poller().pollOnce();
+  expect((await reply({ in_reply_to: injected[0]!.messageId, thread_id: injected[0]!.threadId })).status).toBe(201);
+  expect((await reply({ in_reply_to: injected[1]!.messageId, thread_id: injected[1]!.threadId })).status).toBe(201);
+  expect(calls.filter((c) => c.method === "sendMessage").map((c) => c.body.chat_id)).toEqual(["71", "72"]);
+});
+test("an explicit failed post retries immediately after service recovery", async () => {
+  updates = [update()]; await poller().pollOnce(); fail = true;
+  const first = await reply(); expect(first.status).toBe(502);
+  const failed = await first.json(); expect(failed.message.meta.cogs_delivery.state).toBe("failed");
+  fail = false;
+  const retry = await reply(); expect(retry.status).toBe(201);
+  expect((await retry.json()).message.meta.cogs_delivery.state).toBe("sent");
+  expect(calls.filter((c) => c.method === "sendMessage")).toHaveLength(2);
+});
+test("identical answers to distinct original messages in the same room both post", async () => {
+  updates = [update(10, 71), update(11, 71)]; await poller().pollOnce();
+  expect((await reply({ in_reply_to: injected[0]!.messageId })).status).toBe(201);
+  expect((await reply({ in_reply_to: injected[1]!.messageId })).status).toBe(201);
+  expect(calls.filter((c) => c.method === "sendMessage").map((c) => c.body.reply_to_message_id)).toEqual([110, 111]);
+});
+test("a confirmed reply is not posted twice even with a different caller dedupe key", async () => {
+  updates = [update()]; await poller().pollOnce();
+  expect((await reply()).status).toBe(201);
+  expect((await reply({ dedupe_key: "bypass-attempt" })).status).toBe(409);
+  expect(calls.filter((c) => c.method === "sendMessage")).toHaveLength(1);
+});
+test("a lost acknowledgement blocks identical retries beyond the 60-second window", async () => {
+  updates = [update()]; await poller().pollOnce(); sendMode = "malformed";
+  const first = await reply(); expect(first.status).toBe(502);
+  const body = await first.json(); expect(body.error).toBe("cogs_delivery_unknown");
+  expect(body.message.meta.cogs_delivery.state).toBe("unknown");
+  db.query("UPDATE message SET created_at = datetime('now', '-120 seconds') WHERE id = ?").run(body.message.id);
+  sendMode = "normal";
+  const retry = await reply(); expect(retry.status).toBe(409);
+  expect((await retry.json()).error).toBe("cogs_delivery_unknown");
+  expect(calls.filter((c) => c.method === "sendMessage")).toHaveLength(1);
+});
+test("a concurrent retry is blocked while the first post awaits its acknowledgement", async () => {
+  updates = [update()]; await poller().pollOnce(); sendMode = "hold";
+  const first = reply();
+  for (let i = 0; i < 100 && !releaseSend; i++) await Bun.sleep(5);
+  try {
+    expect(releaseSend).toBeDefined();
+    const second = await reply(); expect(second.status).toBe(409);
+    expect((await second.json()).error).toBe("cogs_delivery_pending");
+  } finally { releaseSend?.(); }
+  expect((await first).status).toBe(201);
+  expect(calls.filter((c) => c.method === "sendMessage")).toHaveLength(1);
 });
