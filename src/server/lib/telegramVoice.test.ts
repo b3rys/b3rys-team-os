@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import { existsSync } from "node:fs";
-import { createVoiceIngress, transcribeTelegramVoice, transcribeLocalVoice, VOICE_FAILURE_NOTICE, voiceDeliveryText } from "./telegramVoice";
+import { createVoiceIngress, transcribeTelegramVoice, transcribeLocalVoice, runVoiceProcess, assertAudibleVoice, VOICE_FAILURE_NOTICE, voiceDeliveryText } from "./telegramVoice";
 import { routeTeamMessageHybrid } from "./teamRouter";
 import type { AgentRecord } from "../types";
 const agents = [{id:"bill",display_name:"Bill",nicknames:["빌"]}, {id:"dex",display_name:"Dex",nicknames:["덱스"]}] as AgentRecord[];
@@ -64,24 +64,93 @@ test("download timeout aborts the request without returning sensitive errors", a
 });
 
 
-test("local Whisper argv has only cached model/local audio, timeout kills process", async () => {
+test("local Whisper argv has only cached model/local audio", async () => {
  const {mkdtemp,rm}=await import("node:fs/promises");
  const root=await mkdtemp("/tmp/voice-process-test-");
- let killed=false; let argv:string[]=[];
+ let argv:string[]=[];
  try {
   await Bun.write(`${root}/.cache/whisper/large-v3-turbo.pt`, "fixture");
   const oldHome=process.env.HOME;
   process.env.HOME=root;
   try {
-   await expect(transcribeLocalVoice(`${root}/voice.ogg`,root,"빌",{timeoutMs:10,spawn:args=>{
-    argv=args;let done!:(code:number)=>void;
-    const exited=new Promise<number>(r=>{done=r;});
-    return {exited,kill:()=>{killed=true;done(137);}};
+   await expect(transcribeLocalVoice(`${root}/voice.ogg`,root,"빌",{checkAudio:async()=>{},timeoutMs:10,run:async args=>{
+    argv=args;
+    throw new Error("local voice process failed");
    }})).rejects.toThrow("local voice process failed");
   } finally { if(oldHome===undefined)delete process.env.HOME;else process.env.HOME=oldHome; }
-  expect(killed).toBe(true);
   expect(argv[1]).toBe(`${root}/voice.ogg`);
   expect(argv).toContain(`${root}/.cache/whisper/large-v3-turbo.pt`);
   expect(argv.join(" ")).not.toMatch(/https?:|getFile|botSECRET/);
  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+
+test("timeout reaps an actual Python parent and its ffmpeg decoder before the next queued voice", async () => {
+  const { mkdtemp, rm, readFile } = await import("node:fs/promises");
+  const root = await mkdtemp("/tmp/voice-process-tree-");
+  const pidPath = `${root}/pids.json`;
+  const python = Bun.which("python3");
+  expect(python).not.toBeNull();
+  const script = `import subprocess,os,json,sys
+child=subprocess.Popen(["/opt/homebrew/bin/ffmpeg","-v","error","-re","-f","lavfi","-i","anullsrc","-f","null","-"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+with open(sys.argv[1],"w") as f: json.dump([os.getpid(),child.pid],f)
+child.wait()
+`;
+  const alive = (pid: number) => {
+    try { process.kill(pid, 0); return true; }
+    catch (e) { if ((e as NodeJS.ErrnoException).code === "ESRCH") return false; throw e; }
+  };
+  let pids: number[] = [];
+  let nextRan = false;
+  let notices = 0;
+  try {
+    const ingress = createVoiceIngress({
+      allowedIds: () => ["7"],
+      transcribe: async id => {
+        if (id === "slow") {
+          await runVoiceProcess([python!, "-c", script, pidPath], 500);
+          throw new Error("timeout was not enforced");
+        }
+        pids = JSON.parse(await readFile(pidPath, "utf8"));
+        expect(pids).toHaveLength(2);
+        expect(pids.map(alive)).toEqual([false, false]);
+        nextRan = true;
+        return "빌 확인";
+      },
+      handle: async () => {},
+      notify: async () => { notices++; },
+    });
+    await Promise.all(["slow", "next"].map(file_id => ingress({ ...msg, voice: { file_id } })));
+    expect(nextRan).toBe(true);
+    expect(notices).toBe(1);
+  } finally {
+    // A failing mutant must also clean up the fixture it leaves alive.
+    if (!pids.length && existsSync(pidPath)) pids = JSON.parse(await readFile(pidPath, "utf8"));
+    for (const pid of pids) { try { process.kill(pid, "SIGKILL"); } catch {} }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("actual Opus silence fails with sender DM and no routed message", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const dir = await mkdtemp("/tmp/voice-silence-");
+  const path = `${dir}/silence.ogg`;
+  try {
+    await runVoiceProcess(["/opt/homebrew/bin/ffmpeg", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-t", "3", "-c:a", "libopus", path]);
+    await expect(assertAudibleVoice(path)).rejects.toThrow("local voice audio is silent");
+    const notices: string[] = [];
+    let routed = false;
+    const ingress = createVoiceIngress({
+      allowedIds: () => ["7"],
+      transcribe: async () => transcribeLocalVoice(path, dir, "빌, 모두", {
+        run: async () => { await Bun.write(`${dir}/voice.txt`, "감사합니다."); },
+      }),
+      handle: async () => { routed = true; },
+      notify: async (_, notice) => { notices.push(notice); },
+    });
+    await ingress(msg);
+    expect(routed).toBe(false);
+    expect(notices).toEqual([VOICE_FAILURE_NOTICE]);
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });

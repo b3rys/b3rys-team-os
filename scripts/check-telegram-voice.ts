@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { strict as assert } from "node:assert";
 import { transcribeTelegramVoice } from "../src/server/lib/telegramVoice";
+import { detectExplicitTargets, detectLeadingNameTargets, hasLeadingAllAddress } from "../src/server/lib/teamRouter/mention";
 import { routeTeamMessageHybrid } from "../src/server/lib/teamRouter";
 import type { AgentRecord } from "../src/server/types";
 
@@ -19,7 +20,7 @@ async function run(argv: string[]) {
   assert.equal(await child.exited, 0, argv[0]);
 }
 try {
-  for (const [name, spoken, expected, reason] of [
+  if (!process.argv.includes("--negative")) for (const [name, spoken, expected, reason] of [
     ["bill", "빌, 이거 확인해줘", ["bill"], "explicit_mention"],
     ["all", "모두, 회의하자", ["bill", "steve", "dex"], "broadcast_marker"],
   ] as const) {
@@ -39,6 +40,38 @@ try {
     assert.equal(decision.reason, reason);
     console.log(JSON.stringify({ name, durationSeconds: 10, text, seconds, targets: decision.targetAgentIds, reason }));
   }
+  if (process.argv.includes("--negative")) for (const [name, spoken] of [
+    ["building", "빌딩 앞에서 보자"], ["marble", "모두의 마블 하자"],
+    ["year", "올해 계획 얘기하자"], ["silence", ""],
+  ]) {
+    const audio = join(dir, `${name}.ogg`);
+    if (spoken) {
+      const source = join(dir, `${name}.aiff`);
+      await run(["say", "-v", "Yuna", spoken, "-o", source]);
+      await run(["ffmpeg", "-v", "error", "-y", "-i", source, "-c:a", "libopus", audio]);
+    } else {
+      await run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-t", "3", "-c:a", "libopus", audio]);
+    }
+    let requests = 0;
+    const request = (async () => ++requests === 1
+      ? Response.json({ ok: true, result: { file_path: "voice/probe.oga" } })
+      : new Response(await Bun.file(audio).arrayBuffer())) as unknown as typeof fetch;
+    const start = performance.now();
+    let text = "";
+    let failed = false;
+    try { text = await transcribeTelegramVoice("test-only", "fixture", prompt, { fetch: request }); }
+    catch { failed = true; }
+    if (!spoken) assert.equal(failed, true, "silence must fail before routing");
+    else {
+      assert.equal(failed, false);
+      assert.deepEqual(detectLeadingNameTargets(text, agents), []);
+      assert.deepEqual(detectExplicitTargets(text, agents), []);
+      assert.equal(hasLeadingAllAddress(text), false);
+    }
+    console.log(JSON.stringify({ name, spoken, text, failed, seconds: (performance.now() - start) / 1000,
+      leadingTargets: detectLeadingNameTargets(text, agents), all: hasLeadingAllAddress(text) }));
+  }
+
 } finally {
   await rm(dir, { recursive: true, force: true });
 }
