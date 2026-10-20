@@ -175,12 +175,12 @@ def main():
         with urllib.request.urlopen(req, timeout=3) as r:
             decision = json.loads(r.read().decode())
     except Exception as e:
-        _log(f"route error → fail-open: {e}")
+        _log(f"route error → fail-open: {type(e).__name__}")
         allow()  # 라우터 에러/타임아웃 → fail-open
 
-    _log(f"text={text[:40]!r} reason={decision.get('reason')} targets={decision.get('targetAgentIds')} self={SELF_ID} suppress={decision.get('suppress')}")
+    _log(f"route decision suppress={bool(decision.get('suppress'))}")
     if decision.get("suppress"):
-        block(f"owner-gate: server suppress (reason={decision.get('reason')}, targets={decision.get('targetAgentIds')}, not {SELF_ID})")
+        block("owner-gate: server suppress")
 
     allow()  # suppress 아니면 통과(fail-open 포함)
 
