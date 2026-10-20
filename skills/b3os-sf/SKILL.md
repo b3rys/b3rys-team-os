@@ -47,6 +47,8 @@ AI 팀이 기능을 만들 때 지키는 11개 코딩 원칙과 점검법: [`ref
 
 검사·리뷰를 통과한 산출물만 내보내고, 요구사항별로 자동 시험·앱 화면·못 본 것을 나눠 보고한다. 채널별 형식과 빌드 전달 절차를 따른다. 상세: [`references/release.md`](references/release.md)
 
+바깥 사용자에게 처음 여는 오픈(베타·알파)은 단계 체크리스트를 TODO.md 로 옮겨 하나씩 닫는다 — 기준선·초대·릴리즈 노트·사용 통계(익명 설치 ID)·대시보드 접근·개인정보 안내·피드백·오픈 전 검수. 상세: [`references/launch-and-stats.md`](references/launch-and-stats.md)
+
 출고는 모드(dev·hotfix·fix·full)를 먼저 정한다. 전체 시험(full)은 필요성을 말하고 팀장 승인을 받은 뒤에만 돈다. 모드별로 도는 시험·시간 상한·승인자: `b3os-verification` §1b.
 
 ### 4. 운영
