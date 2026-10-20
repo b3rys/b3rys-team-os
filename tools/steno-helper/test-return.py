@@ -135,4 +135,19 @@ with tempfile.TemporaryDirectory() as tmp:
         result = subprocess.run([sys.executable, producer, 'noop.md', '--as', bad], env=env, capture_output=True)
         check(result.returncode != 0, 'bad member rejected ' + bad)
 
+    # 하위 폴더의 노트: 수정 사본은 원본과 같은 폴더에 만든다.
+    (team / '발표').mkdir(); (shared / '발표').mkdir()
+    request('발표/sub.md'); upload()
+    check((team / '발표' / 'sub (빌 수정).md').read_bytes() == b'edited', 'subfolder return copy next to original')
+    # 중간 폴더가 링크면 공유 폴더 밖 파일을 읽지 않는다(코덱스 재현 #575).
+    outside = home / 'outside'; (outside / '안').mkdir(parents=True); (outside / '안' / 'secret.md').write_bytes(b'outside secret')
+    (shared / '링크').symlink_to(outside, target_is_directory=True)
+    (shared / '.manifest.json').write_text(json.dumps({'링크/안/secret.md': {'file': '링크/안/secret.md', 'base': h(b'x'), 'source': h(b'y')}}))
+    result = subprocess.run([sys.executable, producer, '링크/안/secret.md', '--as', '빌'], env=env, capture_output=True)
+    check(result.returncode != 0, 'linked grandparent folder rejected')
+    check(not list(out.iterdir()), 'linked parent queues nothing')
+    for bad in ['../x.md', '.숨김/x.md', 'a/b/c/d.md', 'a//b.md']:
+        result = subprocess.run([sys.executable, producer, bad, '--as', '빌'], env=env, capture_output=True)
+        check(result.returncode != 0, 'bad relative name rejected ' + bad)
+
 print(f'PASS: {checks} helper return checks')

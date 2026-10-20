@@ -18,8 +18,8 @@ with tempfile.TemporaryDirectory() as tmp:
             body = source.read_text()
             if source.name == 'UploadFileIO.swift': body = body.replace('fstatat(', 'testFstatat(')
             if mutant and source.name == 'ShareReturn.swift':
-                assert '    let ns = request.file as NSString' in body
-                body = body.replace('    let ns = request.file as NSString', '    _ = uploadReadRegular(destination, request.file)\n    let ns = request.file as NSString')
+                assert '    let ns = leaf as NSString' in body
+                body = body.replace('    let ns = leaf as NSString', '    _ = uploadReadRegular(destination, request.file)\n    let ns = leaf as NSString')
             (build / source.name).write_text(body)
         (build / 'main.swift').write_text('''import Darwin
 import Foundation

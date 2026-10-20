@@ -64,24 +64,29 @@ func runShareUpload(sourcePath: String, libraryPath: String) -> Int32 {
         uploadLog("Steno 팀 공유 표시가 없어 건너뜀"); return 0
     }
     guard let names = uploadListNames(source) else { return 1 }
-    var failed = false
-    for name in names where name != "." && name != ".." {
-        if name.hasPrefix(".return-") && name.hasSuffix(".json") {
-            if !consumeReturn(source: source, requestName: name, destination: destination) { failed = true }
-            continue
+    // 보낼 칸의 하위 폴더(steno-send.sh --folder)는 팀 공유 아래 같은 이름 폴더로 올린다. 없으면 만든다.
+    let ok = walkOutbox(source, [], names, handle: { dir, name, folders in
+        if folders.isEmpty && name.hasPrefix(".return-") && name.hasSuffix(".json") {
+            return consumeReturn(source: dir, requestName: name, destination: destination)
         }
         // A producer publishes data first, metadata last. Never upload a partial request.
-        if name.hasPrefix(".return-") && (name.hasSuffix(".data") || name.hasSuffix(".base") || name.hasSuffix(".tmp") || name.hasSuffix(".pending")) || name.hasPrefix(".steno-send.") { continue }
+        if name.hasPrefix(".return-") && (name.hasSuffix(".data") || name.hasSuffix(".base") || name.hasSuffix(".tmp") || name.hasSuffix(".pending")) || name.hasPrefix(".steno-send.") { return true }
+        let shown = (folders + [name]).joined(separator: "/")
         guard !name.hasPrefix("."), validName(name),
-              let info = regularSingleLink(source, name), let data = uploadReadRegular(source, name), !data.isEmpty else {
-            uploadLog("이름·링크·폴더·크기 조건 거절: \(name)"); failed = true; continue
+              let info = regularSingleLink(dir, name), let data = uploadReadRegular(dir, name), !data.isEmpty else {
+            uploadLog("이름·링크·폴더·크기 조건 거절: \(shown)"); return false
         }
-        guard let output = publishNew(destination, name, data) else { failed = true; continue }
-        guard removeUnchanged(source, name, info, data) else {
-            uploadLog("업로드 뒤 보낼 칸이 바뀌어 유지: \(name)"); failed = true; continue
+        let target = openSubdirectory(destination, folders, create: true)
+        guard target >= 0 else { uploadLog("팀 공유 하위 폴더 열기 실패: \(folders.joined(separator: "/"))"); return false }
+        defer { close(target) }
+        guard let output = publishNew(target, name, data) else { return false }
+        guard removeUnchanged(dir, name, info, data) else {
+            uploadLog("업로드 뒤 보낼 칸이 바뀌어 유지: \(shown)"); return false
         }
         watchdogProgress()
-        uploadLog("새 파일 올림: \(output)")
-    }
+        uploadLog("새 파일 올림: \((folders + [output]).joined(separator: "/"))")
+        return true
+    }, list: uploadListNames)
+    let failed = !ok
     return failed ? 1 : 0
 }

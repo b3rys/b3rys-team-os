@@ -2,7 +2,7 @@ import CryptoKit
 import Darwin
 import Foundation
 
-// Steno "팀 공유" 폴더 바로 아래 노트를 팀 폴더로 한 방향 복사한다.
+// Steno "팀 공유" 폴더 아래 노트(하위 폴더 두 단계)를 팀 폴더로 한 방향 복사한다. 폴더 구조는 그대로 둔다.
 // 원본 폴더에는 아무것도 쓰거나 지우지 않는다. 팀 폴더의 사본을 팀원이 고친 경우 덮지 않는다.
 
 private let maxBytes = 20 * 1_048_576
@@ -12,7 +12,6 @@ private let allowedExtensions: Set<String> = [
     "py", "rb", "go", "rs", "swift", "sh", "sql", "js", "ts", "tsx", "html", "htm", "css",
     "xml", "svg", "png", "jpg", "jpeg", "gif", "webp", "heic",
 ]
-private let sensitiveWords = ["secret", "credential", "token", "password"]
 
 private func log(_ message: String) {
     FileHandle.standardError.write(Data(("steno-helper 팀 공유: \(message)\n").utf8))
@@ -20,8 +19,7 @@ private func log(_ message: String) {
 
 func shareable(_ name: String) -> Bool {
     guard !name.isEmpty, !name.hasPrefix("."), !name.contains("/"), !name.contains("\0") else { return false }
-    let lower = name.lowercased()
-    guard !sensitiveWords.contains(where: { lower.contains($0) }) else { return false }
+    guard !sensitiveName(name) else { return false }
     return allowedExtensions.contains((name as NSString).pathExtension.lowercased())
 }
 
@@ -143,9 +141,25 @@ func runShare(sourcePath: String, destinationPath: String) -> Int32 {
     guard let listed = listNames(sourceDir) else { log("팀 공유 목록 읽기 실패, 이번 주기는 건너뜀"); return 1 }
     var seen = Set<String>()
     var failed = false
-    for name in listed where shareable(name) {
-        // manifest 키는 NFC 로 맞추고, 디스크 이름은 "file" 칸에 그대로 둔다(다른 맥에서 NFD 로 올 수 있다).
-        let key = name.precomposedStringWithCanonicalMapping
+    // 하위 폴더 목록을 하나라도 끝까지 못 읽으면 그 주기는 아무것도 지우지 않는다.
+    var listedAll = true
+    func syncFolder(_ sourceDir: Int32, _ destDir: Int32, _ prefix: [String], _ listed: [String]) {
+    for name in listed where !name.hasPrefix(".") && isDirectoryEntry(sourceDir, name) {
+        guard validFolderName(name), prefix.count < maxFolderDepth else { continue }
+        let childSource = openat(sourceDir, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard childSource >= 0 else { listedAll = false; log("하위 폴더 열기 실패: \((prefix + [name]).joined(separator: "/"))"); continue }
+        defer { close(childSource) }
+        let childDest = childDirectory(destDir, name)
+        guard childDest >= 0 else { failed = true; log("팀 폴더 하위 폴더 만들기 실패: \((prefix + [name]).joined(separator: "/"))"); continue }
+        defer { close(childDest) }
+        guard let childNames = listNames(childSource) else { listedAll = false; continue }
+        syncFolder(childSource, childDest, prefix + [name], childNames)
+    }
+    for diskName in listed where shareable(diskName) {
+        let name = diskName
+        let relative = (prefix + [diskName]).joined(separator: "/")
+        // manifest 키는 NFC 로 맞추고, 디스크 이름(폴더 포함 상대 경로)은 "file" 칸에 그대로 둔다(다른 맥에서 NFD 로 올 수 있다).
+        let key = relative.precomposedStringWithCanonicalMapping
         // 목록에 있으면 "있는 노트"다. 못 읽어도 사본을 지우지 않는다.
         seen.insert(key)
         let lastReturn = manifest[key]?["lastReturn"]
@@ -157,12 +171,12 @@ func runShare(sourcePath: String, destinationPath: String) -> Int32 {
             if manifest[key]?["downloadRequested"] != "1" {
                 var info = stat()
                 if fstatat(sourceDir, name, &info, AT_SYMLINK_NOFOLLOW) == 0, (info.st_mode & S_IFMT) == S_IFREG {
-                    requestSourceDownload(URL(fileURLWithPath: sourcePath).appendingPathComponent(name))
+                    requestSourceDownload(URL(fileURLWithPath: sourcePath).appendingPathComponent(relative))
                 }
             }
-            manifest[key] = ["base": base, "source": "unreadable", "file": name, "downloadRequested": "1"]
+            manifest[key] = ["base": base, "source": "unreadable", "file": relative, "downloadRequested": "1"]
             if let lastReturn { manifest[key]?["lastReturn"] = lastReturn }
-            log("이번엔 못 읽어 건너뜀(링크·폴더·크기·iCloud 미다운로드): \(name)")
+            log("이번엔 못 읽어 건너뜀(링크·폴더·크기·iCloud 미다운로드): \(relative)")
             continue
         }
         let sourceHash = sha256(source)
@@ -170,28 +184,28 @@ func runShare(sourcePath: String, destinationPath: String) -> Int32 {
         var consumeAccepted = false
         switch copyState(destDir, name) {
         case .unreadable:
-            manifest[key] = ["base": base, "source": sourceHash, "file": name]
-            log("사본을 읽지 못해 건드리지 않음: \(name)")
+            manifest[key] = ["base": base, "source": sourceHash, "file": relative]
+            log("사본을 읽지 못해 건드리지 않음: \(relative)")
         case .absent:
             var existing = stat()
             let replacingLink = fstatat(destDir, name, &existing, AT_SYMLINK_NOFOLLOW) == 0 && (existing.st_mode & S_IFMT) == S_IFLNK
-            if !writeAtomically(destDir, name, source, exclusive: !replacingLink) { log("사본 쓰기 실패: \(name)"); failed = true; continue }
-            manifest[key] = ["base": sourceHash, "source": sourceHash, "file": name]
+            if !writeAtomically(destDir, name, source, exclusive: !replacingLink) { log("사본 쓰기 실패: \(relative)"); failed = true; continue }
+            manifest[key] = ["base": sourceHash, "source": sourceHash, "file": relative]
             consumeAccepted = true
         case .hash(let copyHash) where copyHash == base || copyHash == sourceHash:
             // 팀원이 안 고쳤거나 이미 원본과 같다 → 원본으로 맞춘다.
-            if copyHash != sourceHash, !writeAtomically(destDir, name, source) { log("사본 쓰기 실패: \(name)"); failed = true; continue }
-            manifest[key] = ["base": sourceHash, "source": sourceHash, "file": name]
+            if copyHash != sourceHash, !writeAtomically(destDir, name, source) { log("사본 쓰기 실패: \(relative)"); failed = true; continue }
+            manifest[key] = ["base": sourceHash, "source": sourceHash, "file": relative]
             consumeAccepted = true
         case .hash:
             consumeAccepted = true
             // 팀원이 고친 사본이 아직 되돌아가지 않았다 → 덮지 않고 지금 원본 해시만 적는다.
-            manifest[key] = ["base": base, "source": sourceHash, "file": name]
-            if base != sourceHash { log("원본과 사본이 둘 다 바뀜, 사본 유지: \(name)") }
+            manifest[key] = ["base": base, "source": sourceHash, "file": relative]
+            if base != sourceHash { log("원본과 사본이 둘 다 바뀜, 사본 유지: \(relative)") }
         }
         if manifest[key]?["base"] == sourceHash {
             guard uploadWriteAtomically(basesDir, sourceHash + ".data", source) else {
-                log("합치기 기준 본문 보관 실패: \(name)"); failed = true; continue
+                log("합치기 기준 본문 보관 실패: \(relative)"); failed = true; continue
             }
         }
         if consumeAccepted, let acceptedHash {
@@ -201,14 +215,34 @@ func runShare(sourcePath: String, destinationPath: String) -> Int32 {
         if let downloadRequested { manifest[key]?["downloadRequested"] = downloadRequested }
         watchdogProgress()
     }
-    for key in manifest.keys where !seen.contains(key) {
+    }
+    syncFolder(sourceDir, destDir, [], listed)
+    for key in manifest.keys where listedAll && !seen.contains(key) {
         let file = manifest[key]?["file"] ?? key
-        switch copyState(destDir, file) {
+        let parts = file.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard let leaf = parts.last, let folders = folderComponents(parts.dropLast().joined(separator: "/")) else {
+            log("manifest 경로 거절, 남김: \(file)"); continue
+        }
+        let parent = openSubdirectory(destDir, folders, create: false)
+        guard parent >= 0 else {
+            if errno == ENOENT { manifest[key] = nil } else { log("사본 폴더 열기 실패, 남김: \(file)") }
+            continue
+        }
+        defer { close(parent) }
+        switch copyState(parent, leaf) {
         case .absent:
             manifest[key] = nil
         case .hash(let copyHash) where copyHash == manifest[key]?["base"]:
-            _ = unlinkat(destDir, file, 0)
+            _ = unlinkat(parent, leaf, 0)
             manifest[key] = nil
+            // 비게 된 사본 하위 폴더는 정리한다(비어 있지 않으면 rmdir 이 실패해 남는다).
+            for depth in stride(from: folders.count, to: 0, by: -1) {
+                let above = openSubdirectory(destDir, Array(folders.prefix(depth - 1)), create: false)
+                guard above >= 0 else { break }
+                let removed = unlinkat(above, folders[depth - 1], AT_REMOVEDIR) == 0
+                close(above)
+                if !removed { break }
+            }
         default:
             log("팀 공유에서 빠졌지만 고친(또는 못 읽은) 사본이라 남김: \(file)")
         }
