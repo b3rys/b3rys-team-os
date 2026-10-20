@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { createVersionRoutes } from "./routes/version";
 import { createBunWebSocket } from "hono/bun";
 import type { ServerWebSocket } from "bun";
 import { existsSync, readFileSync, statSync, copyFileSync, unlinkSync } from "node:fs";
@@ -311,6 +312,8 @@ api.use("*", async (c, next) => {
 });
 
 
+
+api.route("/", createVersionRoutes(REPO_ROOT_FOR_IDENTITY));
 
 api.get("/agents", (c) => {
   const all = listAgents(db);
