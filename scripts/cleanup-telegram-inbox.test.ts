@@ -24,3 +24,19 @@ test("7-day cutoff, dry-run, allowlist, symlink ancestors and children, and empt
   for(const value of ["","/"])await expect(inboxRoots(value)).rejects.toThrow();
  } finally {await rm(home,{recursive:true,force:true});}
 });
+
+test("CLI honors temporary HOME, defaults to dry-run and rejects an empty root without printing private errors",async()=>{
+ const home=await realpath(await mkdtemp(join(tmpdir(),"inbox-cli-")));
+ try {
+  const inbox=join(home,".claude/channels/telegram-test/inbox");await mkdir(inbox,{recursive:true});
+  const old=join(inbox,"old");await writeFile(old,"KEEP");await utimes(old,1,1);
+  const script=new URL("./cleanup-telegram-inbox.ts",import.meta.url).pathname;
+  for(const args of [[],["--root",""]]){
+   const p=Bun.spawn([process.execPath,script,...args],{env:{...process.env,HOME:home},stdout:"pipe",stderr:"pipe"});
+   const [out,err,code]=await Promise.all([new Response(p.stdout).text(),new Response(p.stderr).text(),p.exited]);
+   if(args.length)expect([code,out,err]).toEqual([1,"","CLEANUP_FAILED\n"]);
+   else {expect(code).toBe(0);expect(err).toBe("");expect(JSON.parse(out)).toMatchObject({mode:"dry-run",roots:[inbox],files:[{path:old,action:"would-delete"}]});}
+   expect(await readFile(old,"utf8")).toBe("KEEP");
+  }
+ }finally{await rm(home,{recursive:true,force:true});}
+});
