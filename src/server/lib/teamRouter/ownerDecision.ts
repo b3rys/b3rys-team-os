@@ -11,7 +11,7 @@ import {
 } from "./_shared";
 import { coordinatorId } from "../capabilities";
 import { broadcastRecipientIds } from "../agentMembership";
-import { detectExplicitTargets, stripQuotedForRouting } from "./mention";
+import { detectExplicitTargets, detectLeadingNameTargets, hasLeadingAllAddress, stripQuotedForRouting } from "./mention";
 import { routeDefaultIntakeLLM } from "./defaultIntake";
 
 // @all/@b3rys/@group — broadcast-all marker. Checked before explicit_mention.
@@ -31,7 +31,7 @@ function broadcastTargets(agents: AgentRecord[]): string[] {
 export function broadcastAudience(text: string, source?: string): { kind: "all_hands" | "none" } {
   // 팀원의 @all 언급이 전원 wake로 확대되지 않도록 전체 호출 마커는 팀장 발언에서만 인정한다.
   if (source !== "user") return { kind: "none" };
-  return { kind: hasBroadcastAllMarker(text) ? "all_hands" : "none" };
+  return { kind: (hasBroadcastAllMarker(text) || hasLeadingAllAddress(stripQuotedForRouting(text))) ? "all_hands" : "none" };
 }
 
 export function routeTeamMessage(
@@ -44,7 +44,7 @@ export function routeTeamMessage(
   // 라이브 멘션 판정에만 적용 — 원문 text 는 다른 용도 위해 보존.
   const liveText = stripQuotedForRouting(text);
   // 0) @all/@b3rys/@group → broadcast all enabled agents. Checked BEFORE explicit_mention.
-  if (hasBroadcastAllMarker(text)) {
+  if (hasBroadcastAllMarker(text) || broadcastAudience(text, context.source).kind === "all_hands") {
     return {
       targetAgentIds: broadcastTargets(agents),
       reason: "broadcast_marker",
@@ -52,7 +52,10 @@ export function routeTeamMessage(
     };
   }
 
-  const explicit = detectExplicitTargets(liveText, agents);
+  const explicit = [...new Set([
+    ...detectExplicitTargets(liveText, agents),
+    ...(context.source === "user" ? detectLeadingNameTargets(liveText, agents) : []),
+  ])];
   if (explicit.length > 0) {
     return {
       targetAgentIds: explicit,
@@ -232,7 +235,7 @@ export async function routeTeamMessageHybrid(
 
 
   // 0.5) @all/@b3rys/@group → broadcast all enabled agents. Checked BEFORE explicit_mention.
-  if (hasBroadcastAllMarker(text)) {
+  if (hasBroadcastAllMarker(text) || broadcastAudience(text, context.source).kind === "all_hands") {
     return {
       targetAgentIds: broadcastTargets(agents),
       reason: "broadcast_marker",
@@ -245,7 +248,10 @@ export async function routeTeamMessageHybrid(
   }
 
   // 명시 멘션은 요청 마커·과거참조 필터와 무관하게 우선한다. 필터를 적용하면 실제 직접 호출을 놓칠 수 있다.
-  const wakeTargets = detectExplicitTargets(liveText, agents);
+  const wakeTargets = [...new Set([
+    ...detectExplicitTargets(liveText, agents),
+    ...(context.source === "user" ? detectLeadingNameTargets(liveText, agents) : []),
+  ])];
   if (wakeTargets.length > 0) {
     // 라우터는 owner만 정한다. 멘션된 전원에게 전달하고 위임·작업 판단은 수신자에게 맡긴다.
     return {

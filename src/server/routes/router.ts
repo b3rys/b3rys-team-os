@@ -28,6 +28,7 @@ export function createRouterRoutes(deps: RouterRouteDeps): Hono {
     }
     const b = body as {
       text?: unknown;
+      source?: unknown;
       activeAssigneeId?: unknown;
       activeAssigneeIds?: unknown;
       replyToAgentId?: unknown;
@@ -44,6 +45,7 @@ export function createRouterRoutes(deps: RouterRouteDeps): Hono {
     // activeAssigneeId 미지정 시 그룹 sticky(직전 담당자)를 적용 — owner-gate 훅이 text만 보내도
     // 무-@멘션 메시지에 sticky 기준 owner 판정이 되게 한다(sticky=codex면 reason=active_assignee_followup).
     const context = {
+      source: typeof b.source === "string" ? b.source : undefined,
       activeAssigneeId:
         typeof b.activeAssigneeId === "string" ? b.activeAssigneeId : (getGroupOwner() ?? undefined),
       activeAssigneeIds: Array.isArray(b.activeAssigneeIds)
