@@ -37,7 +37,7 @@ export interface RunTurnHandlers {
   /** itemId 를 함께 준다 — 같은 항목이 나중에 구체화되면 그 줄을 교체 할 수 있다. */
   onActivity?: (line: string, itemId?: string, item?: unknown) => void;
   /** 지금 어느 단계인가 — 맨 윗줄에서 교체된다. 쌓이지 않는다. */
-  onStatus?: (line: string) => void;
+  onStatus?: (line: string, item?: unknown) => void;
   /** 임의 서버 알림 관찰(로깅/디버그). */
   onNotify?: (method: string, params: unknown) => void;
 }
@@ -492,7 +492,7 @@ export class CodexAppServerClient {
       case "item/started": {
         if (params?.item?.type === "agentMessage") this.answer.observe(itemIdOf(params.item), params.item.phase);
         const status = statusLineOf(params?.item);
-        if (status) { this.activeHandlers?.onStatus?.(status); break; }
+        if (status) { this.activeHandlers?.onStatus?.(status, params?.item); break; }
         const line = activityLineOf(params?.item);
         if (line) this.activeHandlers?.onActivity?.(line, itemIdOf(params?.item), params?.item);
         break;
@@ -503,7 +503,7 @@ export class CodexAppServerClient {
         //   같은 itemId 를 주어 호출자가 그 줄을 구체적인 것으로 바꾸게 한다.
         {
           const status = statusLineOf(params?.item);
-          if (status) this.activeHandlers?.onStatus?.(status);
+          if (status) this.activeHandlers?.onStatus?.(status, params?.item);
           else {
             const line = activityLineOf(params?.item);
             if (line) this.activeHandlers?.onActivity?.(line, itemIdOf(params?.item), params?.item);
