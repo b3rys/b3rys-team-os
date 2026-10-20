@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import { existsSync } from "node:fs";
-import { createVoiceIngress, transcribeTelegramVoice, transcribeLocalVoice, runVoiceProcess, assertAudibleVoice, VOICE_FAILURE_NOTICE, voiceDeliveryText } from "./telegramVoice";
+import { createVoiceIngress, transcribeTelegramVoice, transcribeLocalVoice, runVoiceProcess, assertAudibleVoice, VOICE_STOPPED_NOTICE, VOICE_FAILURE_NOTICE, voiceDeliveryText } from "./telegramVoice";
 import { routeTeamMessageHybrid } from "./teamRouter";
 import type { AgentRecord } from "../types";
 const agents = [{id:"bill",display_name:"Bill",nicknames:["빌"]}, {id:"dex",display_name:"Dex",nicknames:["덱스"]}] as AgentRecord[];
@@ -103,12 +103,23 @@ child.wait()
   let pids: number[] = [];
   let nextRan = false;
   let notices = 0;
+  const { spawn } = await import("node:child_process");
+  const fixture = spawn(python!, ["-c", script, pidPath], { detached: true, stdio: "ignore" });
+  let fixtureClosed = false;
+  fixture.once("close", () => { fixtureClosed = true; });
   try {
+    const readyDeadline = Date.now() + 10_000;
+    while (!pids.length && Date.now() < readyDeadline) {
+      try { pids = JSON.parse(await readFile(pidPath, "utf8")); } catch {}
+      if (!pids.length) await Bun.sleep(10);
+    }
+    expect(pids).toHaveLength(2);
+    expect(pids.map(alive)).toEqual([true, true]);
     const ingress = createVoiceIngress({
       allowedIds: () => ["7"],
       transcribe: async id => {
         if (id === "slow") {
-          await runVoiceProcess([python!, "-c", script, pidPath], 500);
+          await runVoiceProcess([python!, "-c", script, pidPath], 500, undefined, { spawn: () => fixture });
           throw new Error("timeout was not enforced");
         }
         pids = JSON.parse(await readFile(pidPath, "utf8"));
@@ -124,12 +135,11 @@ child.wait()
     expect(nextRan).toBe(true);
     expect(notices).toBe(1);
   } finally {
-    // A failing mutant must also clean up the fixture it leaves alive.
-    if (!pids.length && existsSync(pidPath)) pids = JSON.parse(await readFile(pidPath, "utf8"));
-    for (const pid of pids) { try { process.kill(pid, "SIGKILL"); } catch {} }
+    // Retain signal ownership only until this test's direct child is reaped.
+    if (!fixtureClosed && fixture.pid) { try { process.kill(-fixture.pid, "SIGKILL"); } catch {} }
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 
 test("actual Opus silence fails with sender DM and no routed message", async () => {
@@ -154,3 +164,84 @@ test("actual Opus silence fails with sender DM and no routed message", async () 
     expect(notices).toEqual([VOICE_FAILURE_NOTICE]);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+
+function fakeVoiceChild() {
+  const callbacks: Record<string, (...args: any[]) => void> = {};
+  const child = { pid: 424242, stderr: null, once: (name: string, fn: (...args: any[]) => void) => { callbacks[name] = fn; return child; } };
+  return { child: child as unknown as import("node:child_process").ChildProcess, close: (code = 0) => callbacks.close?.(code) };
+}
+
+test("normal close retires the leader; ESRCH is terminal even if its PGID could be reused", async () => {
+  const fake = fakeVoiceChild();
+  const signals: unknown[] = [];
+  const task = runVoiceProcess(["fixture"], 10, undefined, {
+    spawn: () => fake.child,
+    signal: (pid, signal) => {
+      signals.push([pid, signal]);
+      throw Object.assign(new Error("no such group"), { code: "ESRCH" });
+    }, cleanupMs: 20,
+  });
+  fake.close();
+  await task;
+  await Bun.sleep(30);
+  expect(signals).toEqual([[-424242, 0]]);
+});
+
+test("ESRCH while timing out is terminal: close/finalization never signals the PGID again", async () => {
+  const fake = fakeVoiceChild();
+  const signals: unknown[] = [];
+  await expect(runVoiceProcess(["fixture"], 5, undefined, {
+    spawn: () => fake.child,
+    signal: (pid, signal) => {
+      signals.push([pid, signal]);
+      setTimeout(() => fake.close(1), 1);
+      throw Object.assign(new Error("no such group"), { code: "ESRCH" });
+    }, cleanupMs: 20,
+  })).rejects.toThrow("local voice process failed");
+  await Bun.sleep(30);
+  expect(signals).toEqual([[-424242, "SIGKILL"]]);
+});
+
+for (const mode of ["EPERM", "no-close"] as const) {
+  test(`unconfirmed cleanup (${mode}) has a bound, stops queued voices and notifies only the sender`, async () => {
+    const fake = fakeVoiceChild();
+    const signals: unknown[] = [];
+    const notices: string[] = [];
+    let attempts = 0;
+    let routed = false;
+    const ingress = createVoiceIngress({
+      allowedIds: () => ["7"],
+      transcribe: async () => {
+        attempts++;
+        let requests = 0;
+        return transcribeTelegramVoice("SENTINEL_SECRET", "fixture", "", {
+          fetch: (async () => ++requests === 1
+            ? Response.json({ ok: true, result: { file_path: "voice/fixture.oga" } })
+            : new Response("fixture")) as unknown as typeof fetch,
+          transcribe: async () => {
+            await runVoiceProcess(["fixture"], 5, undefined, {
+              spawn: () => fake.child,
+              signal: (pid, signal) => {
+                signals.push([pid, signal]);
+                if (mode === "EPERM") throw Object.assign(new Error("secret error"), { code: "EPERM" });
+              }, cleanupMs: 20,
+            });
+            return "빌 확인";
+          },
+        });
+      },
+      handle: async () => { routed = true; },
+      notify: async (_, notice) => { notices.push(notice); },
+    });
+    const start = performance.now();
+    await Promise.all([ingress(msg), ingress(msg)]);
+    expect(performance.now() - start).toBeLessThan(500);
+    expect(attempts).toBe(1);
+    expect(routed).toBe(false);
+    expect(notices).toEqual([VOICE_STOPPED_NOTICE, VOICE_STOPPED_NOTICE]);
+    fake.close();
+    await Bun.sleep(30);
+    expect(signals).toEqual([[-424242, "SIGKILL"]]);
+  });
+}

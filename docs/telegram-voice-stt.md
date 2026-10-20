@@ -34,7 +34,7 @@
 | all/올/여러분 선두 전원 호출 (`mention.ts`) | `leadingName.test.ts` 및 관련 router 검사 | 대소문자 무시, 올해/allow/alliance/여러분의 제외 | 새 별칭을 제거하면 1 fail |
 | 실제 로컬 Whisper → 라우팅 | `scripts/check-telegram-voice.ts` | 위 두 받아쓰기·대상·사유 assertion 통과 | 합성 음성·시험 명부, 실제 그룹 인입 미검증 |
 
-기존 main 범위: 6개 파일 167 pass / 0 fail. 변경 뒤 관련 범위: 8개 파일 176 pass / 0 fail. TypeScript `bun run typecheck` 통과. 전체 suite·라이브 서버 실행·배포·재시작은 하지 않았다.
+기존 main 범위: 6개 파일 167 pass / 0 fail. 변경 뒤 관련 범위: 8개 파일 180 pass / 0 fail. TypeScript `bun run typecheck` 통과. 전체 suite·라이브 서버 실행·배포·재시작은 하지 않았다.
 
 되돌리기: 해당 PR commit을 revert한다. runtime 설정·DB schema 변경은 없다.
 
@@ -55,3 +55,14 @@
 무음 검사가 없을 때 3초 무음을 Whisper가 “감사합니다.”로 인식했다(13.97초). 그래서 Whisper 실행 전에 ffmpeg volumedetect로 최대 음량을 검사하고 -80 dB 이하의 디지털 무음에 가까운 입력을 실패 처리한다. 이 무음 검사를 생략하면 실제 Opus 무음→시스템 DM 회귀 시험이 실패한다. 일반 잡음이나 모든 작은 소리의 무발화 판별을 보장하는 검사는 아니다.
 
 위 세 문장은 새 호출을 만들지 않는다는 검사다. 답장이나 기존 owner가 있으면 원래 규칙에 따라 해당 팀원에게 전달될 수 있다. 음성에만 별도의 owner 예외를 만들지는 않는다. 무음은 owner와 관계없이 handle에 들어가지 않는다.
+
+
+## 프로세스 수명과 큐 중단
+
+그룹에 SIGKILL을 보낼 권한은 직접 실행한 부모가 아직 회수되지 않은 동안에만 유지한다. close가 오면 timer를 취소하고 해당 PGID에는 더 이상 종료 신호를 보내지 않는다. ESRCH를 관측하면 종료를 최종 상태로 저장해 추가 탐색·신호도 중단한다. close 뒤에는 signal 0으로 소멸 여부만 검사하며, 재사용된 그룹으로 보이더라도 종료하지 않고 정리 실패로 처리한다.
+
+timeout부터 close 대기를 포함한 정리 기한은 5초다. EPERM 등으로 종료 신호가 실패하면 즉시, close가 오지 않으면 기한 만료 시 `VoiceProcessUnreapedError`로 실패한다. 이 오류는 다운로드의 고정 오류 변환을 통과해 음성 큐를 중단시킨다. 이미 대기 중이거나 이후에 들어오는 음성도 실행하지 않고 발신자 DM에 관리자 확인이 필요하다는 시스템 알림만 보낸다. 같은 capture 인스턴스는 자동 재개하지 않는다.
+
+검사: 정상 close→ESRCH 뒤 재신호 없음, timeout→ESRCH 뒤 재신호 없음, EPERM·close 미수신의 제한 시간 내 종료 및 다음 음성 미실행을 주입 시험으로 확인했다. 실제 Python→ffmpeg 시험은 두 PID가 살아 있음을 먼저 확인한 뒤 500ms timeout을 적용한다. 종료 뒤 재신호하는 mutation과 close 대기 기한을 제거한 mutation 모두 실패한다.
+
+-80dB 검사는 작은 실제 목소리의 오거부율을 실측하지 않았다. 합성 Yuna 음성·디지털 무음 검사 외의 실제 녹음 정확도와 오거부율은 미검증이다.

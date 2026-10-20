@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,7 +42,8 @@ export async function transcribeTelegramVoice(
     const text = (await (opts.transcribe ?? transcribeLocalVoice)(path, dir, prompt)).trim();
     if (!text) throw new Error();
     return text;
-  } catch {
+  } catch (error) {
+    if (error instanceof VoiceProcessUnreapedError) throw error;
     throw new Error("voice transcription failed");
   } finally {
     clearTimeout(timer);
@@ -50,49 +51,89 @@ export async function transcribeTelegramVoice(
   }
 }
 
-/** Each job owns a process group, including Whisper's ffmpeg subprocesses. */
+/** Cleanup could not be proved; this capture worker must not start another voice job. */
+export class VoiceProcessUnreapedError extends Error {
+  constructor() { super("local voice process cleanup unconfirmed"); }
+}
+export const VOICE_STOPPED_NOTICE = "음성 처리를 멈췄어요 — 프로세스 종료를 확인할 수 없어 관리자 확인이 필요해요";
+
+type VoiceProcessRuntime = {
+  spawn?: (argv: string[], captureStderr: boolean) => Pick<ChildProcess, "pid" | "once" | "stderr">;
+  signal?: (pid: number, signal: NodeJS.Signals | 0) => void;
+  cleanupMs?: number;
+  pollMs?: number;
+};
+
+/** Signal a job's group only while its unreaped leader is still owned. */
 export async function runVoiceProcess(
   argv: string[], timeoutMs = 120_000, onStderr?: (text: string) => void,
+  runtime: VoiceProcessRuntime = {},
 ): Promise<void> {
-  const child = spawn(argv[0]!, argv.slice(1), {
+  const child = runtime.spawn ? runtime.spawn(argv, !!onStderr) : spawn(argv[0]!, argv.slice(1), {
     detached: true, stdio: ["ignore", "ignore", onStderr ? "pipe" : "ignore"],
   });
   if (onStderr) child.stderr?.on("data", chunk => onStderr(String(chunk)));
-  const killGroup = () => {
-    if (!child.pid) return;
-    try { process.kill(-child.pid, "SIGKILL"); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
-  };
-  let timedOut = false;
-  let killError: unknown;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    try { killGroup(); } catch (error) { killError = error; }
-  }, timeoutMs);
-  try {
-    const code = await new Promise<number | null>((resolve, reject) => {
-      child.once("error", reject);
-      child.once("close", resolve);
-    });
-    // Also clean up a decoder left behind by a failed parent before releasing the queue.
-    killGroup();
-    if (child.pid) {
-      const deadline = Date.now() + 5_000;
-      while (true) {
-        try { process.kill(-child.pid, 0); }
+  const signal = runtime.signal ?? ((pid, sig) => { process.kill(pid, sig); });
+  const cleanupMs = runtime.cleanupMs ?? 5_000;
+  return new Promise<void>((resolve, reject) => {
+    let closed = false;
+    let gone = false;
+    let settled = false;
+    let timedOut = false;
+    let cleanupStarted = false;
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    let probeTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      clearTimeout(deadlineTimer);
+      clearTimeout(probeTimer);
+      if (error) reject(error); else resolve();
+    };
+    const startCleanupDeadline = () => {
+      if (cleanupStarted) return;
+      cleanupStarted = true;
+      // This limit includes waiting for close, even if SIGKILL fails or close never arrives.
+      deadlineTimer = setTimeout(() => finish(new VoiceProcessUnreapedError()), cleanupMs);
+    };
+    const probe = (code: number | null) => {
+      if (settled) return;
+      if (!gone && child.pid) {
+        try { signal(-child.pid, 0); }
         catch (error) {
-          if ((error as NodeJS.ErrnoException).code === "ESRCH") break;
-          throw error;
+          if ((error as NodeJS.ErrnoException).code === "ESRCH") gone = true;
+          else { finish(new VoiceProcessUnreapedError()); return; }
         }
-        if (Date.now() >= deadline) throw new Error("local voice process cleanup failed");
-        await new Promise(resolve => setTimeout(resolve, 10));
       }
-    }
-    if (killError || code !== 0 || timedOut) throw new Error("local voice process failed");
-  } finally {
-    clearTimeout(timer);
-    killGroup();
-  }
+      if (gone || !child.pid) {
+        finish(code !== 0 || timedOut ? new Error("local voice process failed") : undefined);
+      } else {
+        // A reaped leader grants no right to signal this PGID again. Probe only; fail closed.
+        probeTimer = setTimeout(() => probe(code), runtime.pollMs ?? 10);
+      }
+    };
+    const timeoutTimer = setTimeout(() => {
+      if (settled || closed || gone) return;
+      timedOut = true;
+      startCleanupDeadline();
+      if (child.pid) {
+        try { signal(-child.pid, "SIGKILL"); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ESRCH") gone = true;
+          else finish(new VoiceProcessUnreapedError());
+        }
+      }
+    }, timeoutMs);
+    child.once("error", () => finish(new Error("local voice process failed")));
+    child.once("close", code => {
+      closed = true;
+      clearTimeout(timeoutTimer);
+      if (settled) return;
+      startCleanupDeadline();
+      probe(code);
+    });
+  });
 }
 
 /** Reject near-digital silence before Whisper can hallucinate speech from the roster prompt. */
@@ -134,19 +175,22 @@ export function createVoiceIngress<T extends VoiceMessage = VoiceMessage>(deps: 
   notify: (senderId: string, notice: string) => Promise<void>;
 }) {
   let tail = Promise.resolve();
+  let blocked = false;
   return (msg: T): Promise<boolean> => {
     const ref = msg.voice ?? msg.audio;
     if (!ref || msg.text?.trim() || msg.caption?.trim() || msg.from?.is_bot) return Promise.resolve(false);
     const sender = String(msg.from?.id ?? "");
     if (!sender || !deps.allowedIds().includes(sender)) return Promise.resolve(false);
     const job = tail.then(async () => {
+      if (blocked) { await deps.notify(sender, VOICE_STOPPED_NOTICE); return true; }
       let text: string;
       try {
         text = (await deps.transcribe(ref.file_id)).trim();
         if (!text) throw new Error();
-      } catch {
+      } catch (error) {
+        if (error instanceof VoiceProcessUnreapedError) blocked = true;
         // Direct system notification only; never feed it back into the team routing handler.
-        await deps.notify(sender, VOICE_FAILURE_NOTICE);
+        await deps.notify(sender, blocked ? VOICE_STOPPED_NOTICE : VOICE_FAILURE_NOTICE);
         return true;
       }
       await deps.handle(text, msg);
