@@ -1,68 +1,77 @@
-# Telegram 그룹 음성 받아쓰기 검증
+# Telegram 음성 받아쓰기: MLX 설치 및 검증
 
-승인 allowlist에 있는 사람의 그룹 voice/audio 중 text/caption이 없는 메시지만 로컬 Whisper로 받아쓴다. 받아쓴 글은 기존 `handle()`에 전달한다. 라우팅에는 원문을 쓰고 수신 본문에만 `🎤 음성(받아씀):` 표시를 붙인다. 전원 호출은 기존 확인창을 거친다.
+Apple Silicon macOS에서는 mlx-whisper 0.4.3과 `mlx-community/whisper-large-v3-turbo`를 사용한다. 엔진 시작·실행·결과 읽기가 실패하면 기존 openai-whisper CPU CLI로 한 번 재시도한다. 정상적인 실패는 발신자 DM으로 알리고 큐를 계속한다. 프로세스 정리가 확인되지 않으면 fallback을 실행하지 않고 기존 음성 큐 중단 규칙을 적용한다.
 
-다운로드는 30초, ffmpeg 무음 검사는 30초, Whisper는 120초 제한이다. 각 실행은 별도 process group으로 만들며 시간 초과 시 Python과 ffmpeg를 함께 종료한다. 부모 close와 process group 소멸을 확인한 뒤 큐를 진행한다. 다운로드·받아쓰기 실패와 빈 결과는 발신자의 Telegram DM으로 재전송 요청을 보낸다. 이 알림은 팀 메시지 DB와 라우터에 입력하지 않는다. 동시 음성은 순서대로 처리하며, 현재 capture poll loop도 처리가 끝날 때까지 기다린다. 따라서 처리 중에는 같은 폴러의 후속 메시지와 확인 버튼 처리도 지연될 수 있다.
+## 설치·오프라인 실행
 
-토큰이 포함된 URL은 fetch 내부에서만 사용한다. 다운로드 예외는 고정 오류로 바꾸며 프로세스 argv에는 로컬 경로와 팀원 별칭만 넣는다. 임시 음성·txt는 성공·실패 뒤 삭제한다. Whisper executable은 `/opt/homebrew/bin/whisper`, 모델은 `~/.cache/whisper/large-v3-turbo.pt`, 언어는 ko, CPU 4 threads다. 모델이 없으면 다운로드하지 않고 실패한다. 별도 서버나 외부 STT API는 사용하지 않는다.
+```sh
+bash scripts/stt/install.sh
+```
 
-## 실제 음성 시험
+필수: Apple Silicon macOS, uv, `/opt/homebrew/bin/ffmpeg`, Yuna 음성. Python 3.12 전용 venv와 모델을 `~/.local/share/b3os-stt`에 설치한다. 설치 경로를 바꿀 때는 설치 단계와 서비스 환경에 동일한 `B3OS_STT_HOME` 절대경로를 지정한다. dev/stage 검증은 별도 경로를 지정하고 prod는 기본 경로를 사용한다. 설치 스크립트는 서비스 설정 변경이나 재시작을 하지 않는다.
 
-재현: `bun scripts/check-telegram-voice.ts` (macOS Yuna·ffmpeg·로컬 Whisper 필요).
+Python 의존성 36개 버전을 `scripts/stt/requirements.txt`에 고정했다. 모델 revision은 `a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb`이며 설치 단계에서 config와 가중치를 미리 다운로드한다. 이어 Yuna 음성의 실제 디코딩을 `HF_HUB_OFFLINE=1`로 검증한다. 런타임 adapter도 import 전에 해당 환경값을 강제하며, 로컬 config/가중치가 없으면 실패한다. 운영 경로는 worktree나 세션 임시 폴더를 참조하지 않는다.
 
-`say -v Yuna`로 만든 두 문장을 ffmpeg의 apad와 `-t 10 -c:a libopus`로 각각 10초 Ogg/Opus로 변환한다. 실제 발화는 약 1.5초이며 나머지는 무음이다. Telegram 다운로드는 로컬 파일 응답으로 대체하고, 실제 Whisper와 기존 라우터를 실행한다. 로컬 결과 파일은 시험 종료 시 삭제된다.
+fallback은 기존 `/opt/homebrew/bin/whisper`와 `~/.cache/whisper/large-v3-turbo.pt`를 사용한다(ko, CPU 4 threads). 설치 스크립트는 fallback을 새로 설치하지 않는다. CPU 모델이 없으면 다운로드 없이 실패 DM으로 끝난다. 가속 엔진 장애 때 처리 지연을 감수하고 음성 전달 기회를 한 번 더 제공하기 위해 fallback을 선택했다.
 
-| 발화 | 받아쓴 결과 | 라우팅 대상 | 사유 | 전체 처리 시간 |
-|---|---|---|---|---|
-| 빌, 이거 확인해줘 | 빌, 이거 확인해줘. | bill | explicit_mention | 17.30초 |
-| 모두, 회의하자 | 모두 회의하자. | bill, steve, dex (시험 명부) | broadcast_marker | 13.80초 |
+다운로드 30초·ffmpeg 무음 검사 30초·MLX 30초·CPU fallback 120초를 각각 적용한다. 이번 1.76~17.02초 실제 음성의 MLX 최대값은 prompt 사용 5.84초, 미사용 6.72초였다. 30초는 이 최대값의 약 4.5배 여유를 주면서 기존 엔진의 120초 대기를 줄인다. CPU는 별도 120초를 유지하므로 MLX timeout 뒤 전체 작업이 30초 이내 끝나는 것은 아니다. 더 긴 녹음과 부하별 상한은 측정하지 않았다.
 
-같은 파일의 앞선 개별 CLI 실행은 각각 13.73초, 12.85초였다. 별칭 참고 문구가 없었던 첫 시험은 “빌”을 “필”로 인식했다. 현재 코드는 명부의 별칭과 전원 호칭을 Whisper initial_prompt에 제공한다. 일반 음성의 이름 인식 정확도는 이 합성 음성 2건으로 보장할 수 없다.
+process group 생성·SIGKILL·close/그룹 소멸 확인·정리 기한 5초·큐 중단과 토큰 비노출 경계는 유지한다. 디지털 무음에 가까운 입력(max_volume ≤ -80dB)은 엔진 시작 전에 실패 처리한다. 임시 음성·결과는 작업 뒤 삭제한다.
 
-## 지연과 상주 프로세스 판단
+## Yuna 합성 음성 및 prompt 비교
 
-15초를 넘는 실행이 있어 모델 재사용도 측정했다. 같은 Python 프로세스에서 모델을 한 번만 읽었을 때 로딩 1.94초, 음성별 추론 9.41초·9.96초, 프로세스 최대 RSS 약 4.78 GiB였다(macOS, CPU 4 threads). 이 값은 동일 시점의 부하를 통제한 비교 실험은 아니다.
+재현: `bun scripts/check-telegram-voice.ts`, `--negative`, `--no-prompt`를 필요에 따라 조합한다. 3명 시험 명부의 prompt는 `빌, 스티브, 덱스, 모두, 여러분.`이다. positive는 실제 발화 약 1.5초에 무음을 덧붙인 10초 Ogg/Opus, 반대 문장은 원래 발화 길이, 무음은 3초다. Telegram 요청은 로컬 응답으로 대체하고 실제 엔진과 라우터를 실행한다. 측정은 매번 새 Python 프로세스이며 모델은 OS 파일 캐시를 사용할 수 있다.
 
-이번 변경은 CLI를 유지한다. 모델 재사용으로 로딩·Python 시작 비용을 줄일 수 있지만 추론 자체에도 약 10초가 걸리며, 상주하면 수 GiB의 메모리와 프로세스 종료·복구 관리가 추가된다. 음성 빈도가 높거나 15초 이하 응답이 필수라면 모델 재사용 worker와 idle 종료를 추가하는 것이 대안이다. 현재 구현은 15초 이하를 보장하지 않는다.
-
-## 검증 표
-
-| 기능 / 소스 | 실행한 검사 | 기준 / 결과 | mutation / 한계 |
+| 입력 | prompt 있음: 결과 / 시간 | prompt 없음: 결과 / 시간 | 확인 |
 |---|---|---|---|
-| 승인 사람 voice/audio, 큐, 실패 알림, 파일 정리, 토큰 보호 (`telegramVoice.ts`) | `telegramVoice.test.ts` | 성공/빈 결과/다운로드 실패/타임아웃/봇·비승인 무시/argv/삭제 통과 | 오류 보호를 토큰 문자열 throw로 바꾸면 2 fail |
-| 기존 라우팅·수신 본문·owner·전원 확인창 (`telegramCapture.ts`) | `telegramCapture.voice.test.ts`, 기존 capture 검사 | 실제 capture loop + 메모리 DB + mock Telegram; 시스템 알림은 DM만, 팀 DB에 없음 | 음성 인입을 생략하면 1 fail; 실제 봇 발송과 팀원 runtime 주입 미검증 |
-| all/올/여러분 선두 전원 호출 (`mention.ts`) | `leadingName.test.ts` 및 관련 router 검사 | 대소문자 무시, 올해/allow/alliance/여러분의 제외 | 새 별칭을 제거하면 1 fail |
-| 실제 로컬 Whisper → 라우팅 | `scripts/check-telegram-voice.ts` | 위 두 받아쓰기·대상·사유 assertion 통과 | 합성 음성·시험 명부, 실제 그룹 인입 미검증 |
+| 빌, 이거 확인해줘 | 빌, 이거 확인해줘. / 2.18초 | 이거 확인해 줘 / 2.12초 | prompt 있을 때 명시 bill 호출 보존 |
+| 모두, 회의하자 | 모두 회의하자. / 1.31초 | 모두 회의하자 / 1.48초 | 모두 전원 호출 |
+| 빌딩 앞에서 보자 | 빌딩 앞에서 보자. / 1.37초 | 빌딩 앞에서 보자 / 1.31초 | 새 호출 없음 |
+| 모두의 마블 하자 | 모두의 마블 하자. / 1.45초 | 모두의 마블 하자 / 1.54초 | 새 호출 없음 |
+| 올해 계획 얘기하자 | 올해 계획 얘기하자. / 1.39초 | 올해 계획 얘기하자 / 1.41초 | 새 호출 없음 |
+| 무음 | 엔진 전 차단 / 0.022초 | 엔진 전 차단 / 0.024초 | 실패 DM, handle 미진입 |
 
-기존 main 범위: 6개 파일 167 pass / 0 fail. 변경 뒤 관련 범위: 8개 파일 180 pass / 0 fail. TypeScript `bun run typecheck` 통과. 전체 suite·라이브 서버 실행·배포·재시작은 하지 않았다.
+prompt가 이름을 보존하는 효과를 관측했다. prompt 없는 bill 샘플은 이름이 빠졌고 명시 호출 대신 default 경로로 갔다(시험 명부에서는 우연히 bill이 선택됨). 반대 사례의 ‘새 호출 없음’은 새 명시 호칭을 만들지 않는다는 뜻이다. 기존 owner/답장 전달 규칙은 유지한다.
 
-되돌리기: 해당 PR commit을 revert한다. runtime 설정·DB schema 변경은 없다.
+## 실제 녹음 6개
 
+복사한 원본 파일은 실측 후 삭제하며 저장소에는 포함하지 않는다. 번호만 기록한다. 재현 도구 `bun scripts/stt/benchmark.ts <local-audio...> [--no-prompt]`는 로컬 파일을 사용하고 MLX 단독 성공(= CPU fallback 0회)을 assertion으로 확인한다. 표는 위 시험 명부 prompt 사용, ffmpeg 검사와 결과 읽기 포함 시간이다. 인식 결과는 정답 전사가 아니다.
 
-## 프로세스 종료 및 오호출 반대 사례
+| 번호 | MLX 시간 | 받아쓴 결과 |
+|---|---:|---|
+| 01 | 5.84초 | 우와... |
+| 02 | 2.69초 | 전체 영상은 책갈피와 A창의 중심이 아니고 기존 스티브 기능에다가 지금 댓글창이 없어지고 책갈피와 A창이 바뀌었잖아. 그걸 넣으라는 얘기야. |
+| 03 | 2.66초 | 아, 그 빌, 내가 아까 시킨 음성으로 액 명령, 실만 지정하는 것도 됐나? |
+| 04 | 2.20초 | 그리고 콕스의 요구사항에다가 이 음성 채팅을 지금 텔레그램은 음성을 저장하고 또 응답을 하나 둘인데 이걸 더 빠른 방법으로 음성 컴을 하는 것을 기본 사항으로 넣어줘. 일단 초기에 킵해나. |
+| 05 | 1.45초 | 어, 그... 비스레이오에스 재시작하고, 비스레이오에스 텔레그램도 음성 좀 적용해줘. |
+| 06 | 1.51초 | 지금 단톡방에서 해볼게. |
 
-`runVoiceProcess`는 `detached: true`로 작업별 process group을 만들고 음수 PID에 SIGKILL을 보낸다. 실제 Python 부모가 실제 ffmpeg(anullsrc 실시간 디코딩)를 실행하는 회귀 시험에서 500ms timeout 후 두 PID가 모두 사라진 것을 다음 큐 작업 안에서 확인했다. 부모만 kill하는 mutation은 이 시험에서 실패했다.
+같은 녹음의 CPU fallback 비교(같은 prompt, 새 프로세스; ffmpeg 사전 검사 제외):
 
-`bun scripts/check-telegram-voice.ts --negative`로 아래 반대 사례를 재현한다. 문장 세 개는 Yuna 원래 발화 길이로 Ogg/Opus로 만들었고, 무음은 16kHz mono 3초 Ogg/Opus다. positive 시험과 같은 별칭 prompt를 사용한다.
+| 번호 | 길이 | CPU 시간 | CPU 결과 |
+|---|---:|---:|---|
+| 01 | 2.46초 | 89.63초 | 오. |
+| 02 | 14.02초 | 16.79초 | 전체 영상은 책갈피와 A창의 중심이 아니고 기존 스티브 기능에다가 지금 댓글창이 없어지고 책갈피와 A창이 바뀌었잖아. 그걸 넣으라는 얘기야, 그렇지? |
+| 06 | 1.76초 | 14.06초 | 지금 단톡방에서 해볼게. |
 
-| 입력 | 받아쓴 결과 / 처리 | 새 선두 이름·명시 @멘션·전원 호출 | 시간 |
-|---|---|---|---|
-| 빌딩 앞에서 보자 | 빌딩 앞에서 보자. | 없음 | 15.76초 |
-| 모두의 마블 하자 | 모두의 마블 하자. | 없음 | 12.46초 |
-| 올해 계획 얘기하자 | 올해 계획 얘기하자. | 없음 | 17.41초 |
-| 무음 3초 | 무음 검사 실패 → 실패 DM, handle 미진입 | 없음 | 0.068초 |
+짧은 01번(2.46초)의 원래 발화는 ‘어’인데 prompt 사용 시 ‘우와...’, 미사용 시 ‘어’(6.72초)로 인식했다. 이름 hint는 모든 음성의 정확도를 높이지 않는다. 02번도 prompt 유무에 따라 문장·고유명사 인식이 달랐다. 이 소수 표본으로 일반 음성 정확도나 오거부율을 보장하지 않는다.
 
-무음 검사가 없을 때 3초 무음을 Whisper가 “감사합니다.”로 인식했다(13.97초). 그래서 Whisper 실행 전에 ffmpeg volumedetect로 최대 음량을 검사하고 -80 dB 이하의 디지털 무음에 가까운 입력을 실패 처리한다. 이 무음 검사를 생략하면 실제 Opus 무음→시스템 DM 회귀 시험이 실패한다. 일반 잡음이나 모든 작은 소리의 무발화 판별을 보장하는 검사는 아니다.
+## 자동 검증과 한계
 
-위 세 문장은 새 호출을 만들지 않는다는 검사다. 답장이나 기존 owner가 있으면 원래 규칙에 따라 해당 팀원에게 전달될 수 있다. 음성에만 별도의 owner 예외를 만들지는 않는다. 무음은 owner와 관계없이 handle에 들어가지 않는다.
+| 기능 / 소스 | 검증 | 결과 / mutation |
+|---|---|---|
+| 엔진 선택·fallback·결과 정리 (`telegramVoice.ts`) | `telegramVoice.test.ts` | MLX 우선·실패/빈/누락 결과 fallback·양쪽 실패·정리 미확인 시 fallback 금지 |
+| 프로세스·큐·토큰·라우터 | `telegramVoice.test.ts`, `telegramCapture.voice.test.ts`, `teamRouter.test.ts` | baseline 79 pass, 변경 뒤 88 pass. 실제 Python→ffmpeg 종료 시험 포함 |
+| 오프라인 adapter·prompt·빈 결과 | `python3 -m unittest discover -s scripts/stt -p 'test_*.py' -v` | 3 pass. MLX stub으로 네트워크 차단 환경값과 인자·출력 계약 검증 |
+| 설치 및 실제 MLX | `bash scripts/stt/install.sh`, Yuna/실제 음성 probe | 오프라인 모델 디코딩 성공, 실측 시 CPU fallback 없음 |
+| 회귀 검사의 검출력 | 정리 미확인 fallback 허용 / stale output 삭제 제거 / timeout 120초로 원복 | 각각 1 / 1 / 8 fail, 복원 후 관련 검사 통과 |
 
+실제 프로세스 종료 회귀 시험은 최초 반복 검증 중 1회 실패(85 pass/1 fail)했다. macOS에서는 그룹 SIGKILL 뒤 부모 close 직후 signal 0이 일시적으로 EPERM을 반환할 수 있었다. close 뒤 EPERM은 기존 5초 기한 안에서 signal 0으로만 재확인하며, ESRCH 뒤에만 fallback/다음 큐를 진행한다. 지속 EPERM·기한 만료·SIGKILL 실패는 큐 중단을 유지한다. 일시 EPERM→ESRCH와 지속 EPERM 회귀 시험을 추가했고, fix 원복 mutation이 이를 검출한다. 실제 Python→ffmpeg 500ms timeout도 실행했다. 원본 실패 로그와 과부하 환경 재실행 기록도 보존했다.
 
-## 프로세스 수명과 큐 중단
+MLX 실패 진단은 원문 오류·argv·prompt·경로를 포함하지 않는 고정 문구다. 프로세스 실패/시간 초과와 결과 누락/빈 결과를 구분해 CPU 전환 직전에 한 줄 남긴다.
 
-그룹에 SIGKILL을 보낼 권한은 직접 실행한 부모가 아직 회수되지 않은 동안에만 유지한다. close가 오면 timer를 취소하고 해당 PGID에는 더 이상 종료 신호를 보내지 않는다. ESRCH를 관측하면 종료를 최종 상태로 저장해 추가 탐색·신호도 중단한다. close 뒤에는 signal 0으로 소멸 여부만 검사하며, 재사용된 그룹으로 보이더라도 종료하지 않고 정리 실패로 처리한다.
+TypeScript typecheck와 shell syntax 검사 통과. 실제 Telegram 그룹 수신·DM 발송·팀원 runtime 주입, 라이브 프로세스의 MLX 실행, 긴 음성, 부하별 지연, 일반 잡음·작은 목소리 오거부율은 검증하지 않았다. 전체 suite·서비스 재시작·머지·배포를 실행하지 않았다.
 
-timeout부터 close 대기를 포함한 정리 기한은 5초다. EPERM 등으로 종료 신호가 실패하면 즉시, close가 오지 않으면 기한 만료 시 `VoiceProcessUnreapedError`로 실패한다. 이 오류는 다운로드의 고정 오류 변환을 통과해 음성 큐를 중단시킨다. 이미 대기 중이거나 이후에 들어오는 음성도 실행하지 않고 발신자 DM에 관리자 확인이 필요하다는 시스템 알림만 보낸다. 같은 capture 인스턴스는 자동 재개하지 않는다.
+되돌리기: PR commit을 revert하면 기존 CPU CLI를 사용한다. fallback용 기존 CPU 모델은 보존한다. 전용 venv와 MLX 모델은 서비스와 분리되어 있으며 즉시 삭제할 필요가 없다.
 
-검사: 정상 close→ESRCH 뒤 재신호 없음, timeout→ESRCH 뒤 재신호 없음, EPERM·close 미수신의 제한 시간 내 종료 및 다음 음성 미실행을 주입 시험으로 확인했다. 실제 Python→ffmpeg 시험은 두 PID가 살아 있음을 먼저 확인한 뒤 500ms timeout을 적용한다. 종료 뒤 재신호하는 mutation과 close 대기 기한을 제거한 mutation 모두 실패한다.
-
--80dB 검사는 작은 실제 목소리의 오거부율을 실측하지 않았다. 합성 Yuna 음성·디지털 무음 검사 외의 실제 녹음 정확도와 오거부율은 미검증이다.
+업스트림: [MLX Whisper 구현과 API](https://github.com/ml-explore/mlx-examples/tree/main/whisper).
