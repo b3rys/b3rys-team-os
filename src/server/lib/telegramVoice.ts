@@ -55,7 +55,7 @@ export async function transcribeTelegramVoice(
 export class VoiceProcessUnreapedError extends Error {
   constructor() { super("local voice process cleanup unconfirmed"); }
 }
-export const VOICE_STOPPED_NOTICE = "음성 처리를 멈췄어요 — 프로세스 종료를 확인할 수 없어 관리자 확인이 필요해요";
+export const VOICE_STOPPED_NOTICE = "음성 받아쓰기를 멈췄어요. 받아쓰기 프로세스를 정리하지 못했고, 자동으로 다시 켜지지 않아요. 운영 담당자에게 남은 프로세스를 정리한 뒤 음성 수신 기능(capture worker) 또는 b3os를 재시작해 달라고 요청해 주세요. 그동안 음성 메시지는 전달되지 않고, 글 메시지는 계속 전달돼요.";
 
 type VoiceProcessRuntime = {
   spawn?: (argv: string[], captureStderr: boolean) => Pick<ChildProcess, "pid" | "once" | "stderr">;

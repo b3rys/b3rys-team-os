@@ -245,3 +245,8 @@ for (const mode of ["EPERM", "no-close"] as const) {
     expect(signals).toEqual([[-424242, "SIGKILL"]]);
   });
 }
+
+
+test("stopped voice notice explains recovery and the voice/text delivery scope", () => {
+  expect(VOICE_STOPPED_NOTICE).toBe("음성 받아쓰기를 멈췄어요. 받아쓰기 프로세스를 정리하지 못했고, 자동으로 다시 켜지지 않아요. 운영 담당자에게 남은 프로세스를 정리한 뒤 음성 수신 기능(capture worker) 또는 b3os를 재시작해 달라고 요청해 주세요. 그동안 음성 메시지는 전달되지 않고, 글 메시지는 계속 전달돼요.");
+});
