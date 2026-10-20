@@ -47,11 +47,12 @@ test("★톤 지시가 렌더본에 항상 있다★ — SOUL.md 는 선택 파�
     buildPersona({ ...M, runtime: "claude_channel" }),
     buildAgentsMd({ ...M, runtime: "openclaw" }),
     buildAgentsMd({ ...M, runtime: "hermes_agent" }),
+    buildAgentsMd({ ...M, runtime: "codex" }),
   ]) {
     expect(doc).toMatch(/친근하되 기술적으로 정확/);
     expect(doc).toMatch(/짧고 명확하게/);
-    // 용어 풀이 — 이건 어디에도 중복이 없다.
-    expect(doc).toMatch(/풀어 쓴다/);
+    // 전문용어는 번역하지 않고 원문 뒤에 설명을 붙인다.
+    expect(doc).toMatch(/옮기지 않는다/);
   }
 });
 });
