@@ -53,7 +53,7 @@ describe("선두 이름 호출", () => {
     }
   });
   test("선두 전원 호칭은 게시와 wake가 같은 정식 활성 명부를 사용", async () => {
-    for (const word of ["모두", "다들", "전체", "얘들아"]) {
+    for (const word of ["모두", "다들", "전체", "얘들아", "all", "ALL", "All", "올", "여러분"]) {
       for (const suffix of ["", ", 확인", ". 확인", " 확인"]) {
         const text = word + suffix;
         expect(broadcastAudience(text, "user").kind).toBe("all_hands");
@@ -64,7 +64,7 @@ describe("선두 이름 호출", () => {
         }
       }
     }
-    for (const text of ["이거 모두 확인", "전체적으로 확인", "모두가 말한 거", "```모두 확인```", "예시\n---\n모두 확인"]) {
+    for (const text of ["올해 회의", "allow 확인", "alliance", "여러분의 의견", "이거 모두 확인", "전체적으로 확인", "모두가 말한 거", "```모두 확인```", "예시\n---\n모두 확인"]) {
       expect(broadcastAudience(text, "user").kind).toBe("none");
     }
   });

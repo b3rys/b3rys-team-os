@@ -147,7 +147,7 @@ const NAME_REFERENCE_TAIL = /^(이|가|은|는|의)?\s{0,4}(전에|이전에|아
 
 // 평문 호출은 발신자가 확인된 사람 메시지의 선두에서만 해석한다.
 export function hasLeadingAllAddress(text: string): boolean {
-  return /^(모두|다들|전체|얘들아)(?=[,.\s]|$)/.test(text.trimStart());
+  return /^(모두|다들|전체|얘들아|all|올|여러분)(?=[,.\s]|$)/i.test(text.trimStart());
 }
 
 export function detectLeadingNameTargets(text: string, agents: AgentRecord[]): string[] {
