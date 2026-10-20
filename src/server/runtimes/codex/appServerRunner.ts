@@ -92,8 +92,8 @@ export async function runViaAppServer(
       onAnswerText: opts.onAnswerText ? (text) => {
         try { opts.onAnswerText?.(text); } catch { /* Presentation does not interrupt the turn. */ }
       } : undefined,
-      onStatus: (line) => {
-        try { opts.onStatus?.(line); } catch { /* 채널 표시가 턴을 막지 않는다 */ }
+      onStatus: (line, item) => {
+        try { opts.onStatus?.(line, item); } catch { /* 채널 표시가 턴을 막지 않는다 */ }
       },
       // 지금 이 콜백은 안 불린다 — 위에서 approvalPolicy 를 "never" 로 넘기므로 codex 가
       //   승인 요청을 보내지 않는다. 아래 코드와 appServerPopup 시험들은 도달하지 않는 상태 다.

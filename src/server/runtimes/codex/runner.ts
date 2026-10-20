@@ -38,7 +38,7 @@ export interface CodexTurnOptions {
    *  없으면 러너까지 온 이벤트가 호출자에게 도달하지 않는다. */
   onActivity?: (line: string, itemId?: string, item?: unknown) => void;
   /** 지금 어느 단계인가 — 맨 윗줄에서 교체된다(쌓이지 않는다). */
-  onStatus?: (line: string) => void;
+  onStatus?: (line: string, item?: unknown) => void;
   /** Partial assistant text; reasoning text is never forwarded. */
   onDelta?: (text: string) => void;
   /** Full ordered assistant text for transports that support replacing the current body. */

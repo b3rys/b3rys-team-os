@@ -45,3 +45,13 @@ describe("localized runtime activity keeps sanitized targets",()=>{
   }finally{db.close();}
  });
 });
+
+
+test("reasoning protocol arrays use the first nonempty line, retaining legacy string and text support", () => {
+  expect(statusLineOf({ type: "reasoning", summary: ["", "  \n 첫 요약 \n둘째 줄", "다음 원소"], content: [] })).toBe("🧠 첫 요약");
+  for (const summary of [[], ["", "  ", "\n"]]) {
+    expect(statusLineOf({ type: "reasoning", summary, content: [] })).toBe("🧠 생각하는 중…");
+  }
+  expect(statusLineOf({ type: "reasoning", summary: "첫 요약\n둘째 줄" })).toBe("🧠 첫 요약");
+  expect(statusLineOf({ type: "reasoning", text: "첫 요약\n둘째 줄" })).toBe("🧠 첫 요약");
+});

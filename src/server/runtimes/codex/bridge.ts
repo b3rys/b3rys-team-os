@@ -1,3 +1,4 @@
+import { reasoningSummaryOf } from "./reasoningSummary";
 import { createReactionInbox, reactionInputs, type ReactionInbox, type ReactionUpdate, type ReactionRef } from "../../lib/reactionInput";
 import { randomUUID } from "node:crypto";
 import { preserveAnswer } from "./answerText";
@@ -803,9 +804,22 @@ async function handleMessageTurn(
 
   // 상태는 한 자리에서 교체된다 — 쌓지 않는다. 실제 작업만 아래에 쌓인다.
   let headLine = isCogs ? "" : workingText;
-  const onStatus = (line: string): void => {
-    if (bubbleId === null || line === headLine || (isCogs && (cogsBody || cogsState === "activity"))) return;
-    if (isCogs) return; // Keep receipt/waiting until an actual tool or answer arrives.
+  let lastReasoningSummary = "";
+  const onStatus = (line: string, item?: unknown): void => {
+    if (bubbleId === null) return;
+    if (isCogs) {
+      const head = reasoningSummaryOf(item);
+      const target = Array.from(head).slice(0, 60).join("");
+      if (!target || target === lastReasoningSummary) return;
+      lastReasoningSummary = target;
+      activityCode = "thinking";
+      activityArgs = { target };
+      cogsState = cogsBody ? "streaming" : "activity";
+      dirty = true;
+      schedule();
+      return;
+    }
+    if (line === headLine) return;
     headLine = renderRuntimeEvent(line);
     dirty = true;
     schedule();

@@ -1,3 +1,4 @@
+import { reasoningSummaryOf } from "./reasoningSummary";
 /** 자식 app-server와 줄 단위 JSON-RPC로 통신해 진행 중 steer·interrupt와 승인 요청을 처리한다.
  * 팀 버스·텔레그램 연결은 상위 어댑터가 담당하므로 이 모듈에는 섞지 않는다. */
 import { uiText } from "./uiStrings";
@@ -37,7 +38,7 @@ export interface RunTurnHandlers {
   /** itemId 를 함께 준다 — 같은 항목이 나중에 구체화되면 그 줄을 교체 할 수 있다. */
   onActivity?: (line: string, itemId?: string, item?: unknown) => void;
   /** 지금 어느 단계인가 — 맨 윗줄에서 교체된다. 쌓이지 않는다. */
-  onStatus?: (line: string) => void;
+  onStatus?: (line: string, item?: unknown) => void;
   /** 임의 서버 알림 관찰(로깅/디버그). */
   onNotify?: (method: string, params: unknown) => void;
 }
@@ -87,8 +88,7 @@ export function statusLineOf(item: unknown): string | null {
   const type = typeof it.type === "string" ? it.type : "";
   if (type === "reasoning") {
     // 요약이 실려 오면 무엇을 생각하는 중인지까지 보여준다.
-    const sum = typeof it.summary === "string" ? it.summary : typeof it.text === "string" ? it.text : "";
-    const head = sum.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
+    const head = reasoningSummaryOf(item);
     return head ? uiText("reasoning_summary",{summary:head.length > 60 ? head.slice(0,59)+"…":head}) : uiText("reasoning");
   }
   if (type === "agentMessage") return uiText("answering");
@@ -492,7 +492,7 @@ export class CodexAppServerClient {
       case "item/started": {
         if (params?.item?.type === "agentMessage") this.answer.observe(itemIdOf(params.item), params.item.phase);
         const status = statusLineOf(params?.item);
-        if (status) { this.activeHandlers?.onStatus?.(status); break; }
+        if (status) { this.activeHandlers?.onStatus?.(status, params?.item); break; }
         const line = activityLineOf(params?.item);
         if (line) this.activeHandlers?.onActivity?.(line, itemIdOf(params?.item), params?.item);
         break;
@@ -503,7 +503,7 @@ export class CodexAppServerClient {
         //   같은 itemId 를 주어 호출자가 그 줄을 구체적인 것으로 바꾸게 한다.
         {
           const status = statusLineOf(params?.item);
-          if (status) this.activeHandlers?.onStatus?.(status);
+          if (status) this.activeHandlers?.onStatus?.(status, params?.item);
           else {
             const line = activityLineOf(params?.item);
             if (line) this.activeHandlers?.onActivity?.(line, itemIdOf(params?.item), params?.item);
