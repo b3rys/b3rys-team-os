@@ -14,7 +14,7 @@ const agents = [
   { id: "steve", display_name: "Steve", nicknames: ["스티브"] },
   { id: "dex", display_name: "Dex", nicknames: ["덱스"] },
 ] as AgentRecord[];
-const prompt = agents.flatMap(a => a.nicknames ?? [a.display_name]).join(", ") + ", 모두, 여러분.";
+const prompt = process.argv.includes("--no-prompt") ? "" : agents.flatMap(a => a.nicknames ?? [a.display_name]).join(", ") + ", 모두, 여러분.";
 async function run(argv: string[]) {
   const child = Bun.spawn(argv, { stdout: "ignore", stderr: "inherit" });
   assert.equal(await child.exited, 0, argv[0]);
@@ -36,9 +36,11 @@ try {
     const text = await transcribeTelegramVoice("test-only", "fixture", prompt, { fetch: request });
     const seconds = (performance.now() - start) / 1000;
     const decision = await routeTeamMessageHybrid(text, agents, { source: "user" });
-    assert.deepEqual(decision.targetAgentIds, [...expected]);
-    assert.equal(decision.reason, reason);
-    console.log(JSON.stringify({ name, durationSeconds: 10, text, seconds, targets: decision.targetAgentIds, reason }));
+    if (prompt) {
+      assert.deepEqual(decision.targetAgentIds, [...expected]);
+      assert.equal(decision.reason, reason);
+    }
+    console.log(JSON.stringify({ name, durationSeconds: 10, text, seconds, targets: decision.targetAgentIds, reason: decision.reason, prompt: !!prompt }));
   }
   if (process.argv.includes("--negative")) for (const [name, spoken] of [
     ["building", "빌딩 앞에서 보자"], ["marble", "모두의 마블 하자"],

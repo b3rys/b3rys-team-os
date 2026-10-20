@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import { existsSync } from "node:fs";
-import { createVoiceIngress, transcribeTelegramVoice, transcribeLocalVoice, runVoiceProcess, assertAudibleVoice, VOICE_STOPPED_NOTICE, VOICE_FAILURE_NOTICE, voiceDeliveryText } from "./telegramVoice";
+import { createVoiceIngress, transcribeTelegramVoice, transcribeLocalVoice, runVoiceProcess, assertAudibleVoice, VoiceProcessUnreapedError, VOICE_STOPPED_NOTICE, VOICE_FAILURE_NOTICE, voiceDeliveryText } from "./telegramVoice";
 import { routeTeamMessageHybrid } from "./teamRouter";
 import type { AgentRecord } from "../types";
 const agents = [{id:"bill",display_name:"Bill",nicknames:["빌"]}, {id:"dex",display_name:"Dex",nicknames:["덱스"]}] as AgentRecord[];
@@ -64,26 +64,59 @@ test("download timeout aborts the request without returning sensitive errors", a
 });
 
 
-test("local Whisper argv has only cached model/local audio", async () => {
+test("MLX is preferred with bounded offline adapter and no CPU fallback on success", async () => {
  const {mkdtemp,rm}=await import("node:fs/promises");
- const root=await mkdtemp("/tmp/voice-process-test-");
- let argv:string[]=[];
+ const root=await mkdtemp("/tmp/voice-mlx-test-");
+ const oldRoot=process.env.B3OS_STT_HOME;
+ process.env.B3OS_STT_HOME=`${root}/engine`;
+ const calls:{argv:string[];timeout?:number}[]=[];
  try {
-  await Bun.write(`${root}/.cache/whisper/large-v3-turbo.pt`, "fixture");
-  const oldHome=process.env.HOME;
-  process.env.HOME=root;
-  try {
-   await expect(transcribeLocalVoice(`${root}/voice.ogg`,root,"빌",{checkAudio:async()=>{},timeoutMs:10,run:async args=>{
-    argv=args;
-    throw new Error("local voice process failed");
-   }})).rejects.toThrow("local voice process failed");
-  } finally { if(oldHome===undefined)delete process.env.HOME;else process.env.HOME=oldHome; }
-  expect(argv[1]).toBe(`${root}/voice.ogg`);
-  expect(argv).toContain(`${root}/.cache/whisper/large-v3-turbo.pt`);
-  expect(argv.join(" ")).not.toMatch(/https?:|getFile|botSECRET/);
- }finally{await rm(root,{recursive:true,force:true});}
+  const text=await transcribeLocalVoice(`${root}/voice.ogg`,root,"빌".repeat(1100),{
+   checkAudio:async()=>{},run:async(argv,timeout)=>{
+    calls.push({argv,timeout}); await Bun.write(`${root}/voice-mlx.txt`,"빌, 확인");
+   },
+  });
+  expect(text).toBe("빌, 확인"); expect(calls).toHaveLength(1);
+  expect(calls[0]!.timeout).toBe(30_000);
+  expect(calls[0]!.argv).toEqual([`${root}/engine/.venv/bin/python`,`${root}/engine/transcribe.py`,`${root}/voice.ogg`,`${root}/engine/model`,`${root}/voice-mlx.txt`,"빌".repeat(1000)]);
+ }finally{if(oldRoot===undefined)delete process.env.B3OS_STT_HOME;else process.env.B3OS_STT_HOME=oldRoot;await rm(root,{recursive:true,force:true});}
 });
 
+for(const mode of ["missing", "failed", "no-output", "empty", "timeout", "unreaped", "both-failed"]){
+ test(`MLX ${mode}: CPU fallback only after confirmed cleanup`, async()=>{
+  const {mkdtemp,rm}=await import("node:fs/promises");
+  const root=await mkdtemp("/tmp/voice-fallback-test-");
+  const oldHome=process.env.HOME;
+  process.env.HOME=root;
+  const calls:{argv:string[];timeout?:number}[]=[];
+  try{
+   await Bun.write(`${root}/.cache/whisper/large-v3-turbo.pt`,"fixture");
+   await Bun.write(`${root}/voice-mlx.txt`,"stale result");
+   await Bun.write(`${root}/voice.txt`,"stale fallback");
+   const job=transcribeLocalVoice(`${root}/voice.ogg`,root,"빌",{checkAudio:async()=>{},run:async(argv,timeout)=>{
+    calls.push({argv,timeout});
+    if(calls.length===1){
+     if(mode==="unreaped")throw new VoiceProcessUnreapedError();
+     if(mode==="empty"){await Bun.write(`${root}/voice-mlx.txt`," ");return;}
+     if(mode==="no-output")return;
+     throw new Error(mode);
+    }
+    if(mode==="both-failed")throw new Error("fallback failed");
+    await Bun.write(`${root}/voice.txt`,"빌, 확인");
+   }});
+   if(mode==="unreaped")await expect(job).rejects.toBeInstanceOf(VoiceProcessUnreapedError);
+   else if(mode==="both-failed")await expect(job).rejects.toThrow("fallback failed");
+   else expect(await job).toBe("빌, 확인");
+   expect(calls).toHaveLength(mode==="unreaped"?1:2);
+   expect(calls[0]!.timeout).toBe(30_000);
+   if(calls[1]){
+    expect(calls[1].timeout).toBe(120_000);
+    expect(calls[1].argv[0]).toBe("/opt/homebrew/bin/whisper");
+    expect(calls[1].argv).toContain(`${root}/.cache/whisper/large-v3-turbo.pt`);
+   }
+  }finally{if(oldHome===undefined)delete process.env.HOME;else process.env.HOME=oldHome;await rm(root,{recursive:true,force:true});}
+ });
+}
 
 test("timeout reaps an actual Python parent and its ffmpeg decoder before the next queued voice", async () => {
   const { mkdtemp, rm, readFile } = await import("node:fs/promises");

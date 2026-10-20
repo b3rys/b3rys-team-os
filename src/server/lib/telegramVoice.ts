@@ -149,22 +149,42 @@ export async function assertAudibleVoice(path: string): Promise<void> {
   }
 }
 
-/** Only local file paths reach argv. A cached model path prevents implicit network downloads. */
+/** Prefer offline MLX; retain CPU Whisper once if the accelerated engine is unavailable. */
 export async function transcribeLocalVoice(path: string, dir: string, prompt: string, opts: {
   timeoutMs?: number;
   run?: (argv: string[], timeoutMs?: number) => Promise<void>;
   checkAudio?: (path: string) => Promise<void>;
 } = {}): Promise<string> {
   await (opts.checkAudio ?? assertAudibleVoice)(path);
-  const model = join(process.env.HOME ?? "", ".cache/whisper/large-v3-turbo.pt");
+  const run = opts.run ?? runVoiceProcess;
+  const home = process.env.HOME ?? "";
+  const root = process.env.B3OS_STT_HOME ?? join(home, ".local/share/b3os-stt");
+  const output = join(dir, "voice-mlx.txt");
+  // A fresh output prevents a failed engine from returning an earlier result.
+  await rm(output, { force: true });
+  try {
+    await run([
+      join(root, ".venv/bin/python"), join(root, "transcribe.py"),
+      path, join(root, "model"), output, prompt.slice(0, 1000),
+    ], opts.timeoutMs ?? 30_000);
+    const text = (await readFile(output, "utf8")).trim();
+    if (!text) throw new Error("local voice result empty");
+    return text;
+  } catch (error) {
+    // Never launch a second engine while the first process group might still exist.
+    if (error instanceof VoiceProcessUnreapedError) throw error;
+  }
+  const model = join(home, ".cache/whisper/large-v3-turbo.pt");
   if (!await Bun.file(model).exists()) throw new Error("local voice model missing");
-  const argv = [
+  await rm(join(dir, "voice.txt"), { force: true });
+  await run([
     "/opt/homebrew/bin/whisper", path, "--model", model,
     "--language", "ko", "--device", "cpu", "--fp16", "False", "--threads", "4",
     "--initial_prompt", prompt.slice(0, 1000), "--output_format", "txt", "--output_dir", dir,
-  ];
-  await (opts.run ?? runVoiceProcess)(argv, opts.timeoutMs);
-  return await readFile(join(dir, "voice.txt"), "utf8");
+  ], opts.timeoutMs ?? 120_000);
+  const text = (await readFile(join(dir, "voice.txt"), "utf8")).trim();
+  if (!text) throw new Error("local voice result empty");
+  return text;
 }
 
 /** One queue covers download + transcription + handling, preserving voice arrival order. */
