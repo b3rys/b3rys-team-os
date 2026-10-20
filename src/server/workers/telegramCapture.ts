@@ -1,3 +1,4 @@
+import { createVoiceIngress, transcribeTelegramVoice, voiceDeliveryText, type VoiceMessage } from "../lib/telegramVoice";
 import type { AgentRecord, WsEvent } from "../types";
 import type { Database } from "bun:sqlite";
 import { routeTeamMessageHybrid } from "../lib/teamRouter";
@@ -74,7 +75,7 @@ let GROUP_ID = getCaptureGroupId() ?? "";
 const CAPTURE_CTX_MSGS = 5;
 const CAPTURE_CTX_HOURS = 6;
 const CAPTURE_CTX_MSG_CHARS = 200;
-const OFFSET_PATH = process.env.CAPTURE_OFFSET_PATH ?? `${process.cwd()}/logs/telegram-capture-offset.txt`;
+const captureOffsetPath = () => process.env.CAPTURE_OFFSET_PATH ?? `${process.cwd()}/logs/telegram-capture-offset.txt`;
 /** 단톡방 인입 경로의 주입 문맥(최대 10건/6h) — 현재 메시지 적재 전 = 직전 맥락.
  *
  *  ★줄은 `renderContextLine` 한 곳에서 만든다★ — 예전에는 여기서 따로 `[이름] 본문` 을 찍었다.
@@ -109,6 +110,8 @@ interface CaptureDeps {
   broadcast?: (e: WsEvent) => void;
   /** Tests inject both visibility branches; production defaults to the build flag. */
   publicBuild?: boolean;
+  /** Local STT seam for isolated capture tests. */
+  transcribeVoice?: (fileId: string, prompt: string) => Promise<string>;
 }
 
 type OnoffButton = { text: string; callback_data: string };
@@ -139,7 +142,7 @@ export function applyMcpOnoff(
 
 interface TgUpdate {
   update_id: number;
-  message?: {
+  message?: VoiceMessage & {
     text?: string;
     caption?: string;
     message_id?: number;
@@ -173,7 +176,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function readStoredOffset(): Promise<number | undefined> {
   try {
-    const raw = (await Bun.file(OFFSET_PATH).text()).trim();
+    const raw = (await Bun.file(captureOffsetPath()).text()).trim();
     const parsed = Number(raw);
     return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
   } catch {
@@ -183,7 +186,7 @@ async function readStoredOffset(): Promise<number | undefined> {
 
 async function storeOffset(nextOffset: number): Promise<void> {
   try {
-    await Bun.write(OFFSET_PATH, `${nextOffset}\n`);
+    await Bun.write(captureOffsetPath(), `${nextOffset}\n`);
   } catch (e) {
     console.error("[capture] offset persist failed:", (e as Error).message);
   }
@@ -524,7 +527,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       });
       return await r.json().catch(() => ({}));
-    } catch (e) { console.error(`[capture] tg ${method} failed:`, (e as Error).message); return {}; }
+    } catch (e) { console.error(`[capture] tg ${method} failed`); return {}; }
   }
   async function sendViaTeamOp(text: string, replyTo?: string, chatId: string = GROUP_ID): Promise<void> {
     await tg("sendMessage", { chat_id: chatId, text, ...(replyTo ? { reply_to_message_id: Number(replyTo) } : {}) });
@@ -990,6 +993,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     replyToAgentId?: string,
     origTgMessageId?: string,
     media: StoredMedia[] = [],
+    isVoice = false,
   ): Promise<void> {
     const originDuplicate = findExistingTelegramOriginMessage(deps.db, GROUP_ID, origTgMessageId);
     if (originDuplicate) {
@@ -1006,7 +1010,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
       activeAssigneeIds,
       replyToAgentId,
     });
-    const deliveryBody = withReplyContext(text, replyText);
+    const deliveryBody = withReplyContext(isVoice ? voiceDeliveryText(text) : text, replyText);
     const threadId = `tg-${GROUP_ID}`;
     // 가시성 Stage C: 깨우기 전 공유 버스의 최근 팀 맥락(최대 10건/6h)을 모은다 — 현재 메시지 적재 전 = 직전 맥락.
     let teamContext = "";
@@ -1330,6 +1334,17 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     await tg("setMyCommands", { commands, scope: { type: "all_private_chats" } });
     if (GROUP_ID) await tg("setMyCommands", { commands, scope: { type: "chat", chat_id: Number(GROUP_ID) } });
   }
+  const voiceIngress = createVoiceIngress<NonNullable<TgUpdate["message"]>>({
+    allowedIds: approvalAllowedIds,
+    transcribe: (fileId) => {
+      const prompt = deps.agents().flatMap((a) => a.nicknames ?? [a.display_name]).join(", ") + ", 모두, 여러분.";
+      return deps.transcribeVoice ? deps.transcribeVoice(fileId, prompt) : transcribeTelegramVoice(TOKEN!, fileId, prompt);
+    },
+    handle: (text, msg) => handle(text, msg.reply_to_message?.text,
+      replyAuthorAgentId(msg.reply_to_message?.from?.username, deps.agents()),
+      msg.message_id != null ? String(msg.message_id) : undefined, [], true),
+    notify: async (sender, notice) => { await sendViaTeamOp(notice, undefined, sender); },
+  });
   async function loop(): Promise<void> {
     offset = (await readStoredOffset()) ?? await primeOffsetFromTelegram();
     await registerCommands();
@@ -1372,6 +1387,11 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
             continue; // 봇 발신은 ingest/injection 하지 않음 — 루프 방지
           }
           rememberCaptureNonBotSender(deps.db, msg.from);
+          if (isGroupMsg && (msg.voice || msg.audio) && !msg.text?.trim() && !msg.caption?.trim()) {
+            await voiceIngress(msg);
+            await storeOffset(offset);
+            continue;
+          }
           const media = await captureMedia(msg, msgId);
           const text = msg.text ?? msg.caption ?? (media.length ? "[media]" : "");
           if (!text) { await storeOffset(offset); continue; }
