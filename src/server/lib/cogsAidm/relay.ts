@@ -193,10 +193,15 @@ async function completeRow(deps: CogsAidmDeps, row: OutboxRow): Promise<"wait" |
     : null;
   let reportId: number | null = null;
   try { const v = JSON.parse(answerMeta ?? "null")?.cogs_delivery?.message_id; reportId = Number.isSafeInteger(v) ? v : null; } catch { reportId = null; }
+  const answerBy = row.bus_message_id
+    ? (db.prepare("SELECT from_agent_id FROM message WHERE id = ?").get(row.bus_message_id) as { from_agent_id: string } | undefined)?.from_agent_id
+    : undefined;
   for (const w of openWorks(db, row.thread_id)) {
     if (w.last_seq === null || w.chat_id === null || w.work_id === null) { saveWork(db, { ...w, state: "completed" }); continue; }
     const [x, y] = w.pair_key.split("|");
-    const id = deps.identityOf(x!) ?? deps.identityOf(y!);
+    // 답을 쓴 담당이 짝에 있으면 그 토큰(서버가 report 발신자를 호출자와 맞춘다), 없으면 짝 참여자.
+    const caller = answerBy && (answerBy === x || answerBy === y) ? answerBy : x!;
+    const id = deps.identityOf(caller) ?? deps.identityOf(caller === x ? y! : x!);
     if (!id) { saveWork(db, { ...w, state: "completed" }); continue; }
     await deps.api.complete(id, { chat_id: w.chat_id, work_id: w.work_id, last_bus_seq: w.last_seq, report_message_id: reportId });
     saveWork(db, { ...w, state: "completed" });

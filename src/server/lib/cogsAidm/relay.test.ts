@@ -42,7 +42,7 @@ function setup(opts: { failSend?: (n: number) => Error | null } = {}) {
       if (!seen.has(a.client_msg_id)) { seen.set(a.client_msg_id, 100 + seen.size); calls.push(`send ${i.token} w${a.work_id} seq${a.bus_seq}${a.no_wake ? " nowake" : ""} ${a.text}`); }
       return seen.get(a.client_msg_id)!;
     },
-    complete: async (i, a) => { calls.push(`complete w${a.work_id} last${a.last_bus_seq}${a.report_message_id ? ` report${a.report_message_id}` : ""}`); },
+    complete: async (i, a) => { calls.push(`complete ${i.token} w${a.work_id} last${a.last_bus_seq}${a.report_message_id ? ` report${a.report_message_id}` : ""}`); },
   };
   const deps = { db, api, identityOf: (a: string) => ids[a] ?? null, roster: () => new Set(["lisa", "jane", "clo", "dex", "herm"]), log: () => {} };
   const thread = (tid = "T1") => {
@@ -111,7 +111,7 @@ describe("종료", () => {
     const s = setup();
     s.thread(); s.say("lisa", "jane", "1"); s.answer();
     reconcileThread(s.deps, "T1"); await drain(s.deps);
-    expect(s.calls.slice(-2)).toEqual(["send t-lisa w1 seq1 1", "complete w1 last1 report555"]);
+    expect(s.calls.slice(-2)).toEqual(["send t-lisa w1 seq1 1", "complete t-lisa w1 last1 report555"]);
     s.say("jane", "lisa", "늦은 메시지");
     reconcileThread(s.deps, "T1"); await drain(s.deps);
     expect(s.calls.slice(-2)).toEqual(["start dm-t-jane-1 T1:jane|lisa:g2 origin=16/77", "send t-jane w2 seq3 늦은 메시지"]);
@@ -133,7 +133,7 @@ describe("종료", () => {
     s.thread(); s.say("lisa", "jane", "훅 빠짐"); s.answer();
     // 훅 없이 곧바로 대조(재시작 상황)
     reconcileAll(s.deps); await drain(s.deps);
-    expect(s.calls.slice(-2)).toEqual(["send t-lisa w1 seq1 훅 빠짐", "complete w1 last1 report555"]);
+    expect(s.calls.slice(-2)).toEqual(["send t-lisa w1 seq1 훅 빠짐", "complete t-lisa w1 last1 report555"]);
   });
   test("앞 메시지가 아직 안 갔으면 종료는 기다린다", async () => {
     const s = setup({ failSend: (n) => (n === 1 ? new Error("cogs_api_failed") : null) });
@@ -142,7 +142,17 @@ describe("종료", () => {
     await drain(s.deps);
     expect(s.calls.filter((c) => c.startsWith("complete"))).toEqual([]);
     await drain(s.deps);
-    expect(s.calls.slice(-2)).toEqual(["send t-lisa w1 seq1 1", "complete w1 last1 report555"]);
+    expect(s.calls.slice(-2)).toEqual(["send t-lisa w1 seq1 1", "complete t-lisa w1 last1 report555"]);
+  });
+});
+
+describe("종료 호출자", () => {
+  test("짝에 담당이 없으면(B↔C) 짝 참여자로, 담당이 있으면 담당 토큰으로", async () => {
+    const s = setup();
+    s.thread(); s.say("jane", "clo", "B→C"); s.say("lisa", "jane", "A→B"); s.answer();
+    reconcileThread(s.deps, "T1"); await drain(s.deps);
+    const completes = s.calls.filter((c) => c.startsWith("complete")).sort();
+    expect(completes).toEqual(["complete t-clo w1 last1 report555", "complete t-lisa w2 last2 report555"]);
   });
 });
 

@@ -27,7 +27,9 @@ export const httpCogsAidmApi: CogsAidmApi = {
     return id;
   },
   async send(i, a) {
-    const r = await cogsCall(inbox(i), i.token, "sendMessage", a);
+    // no_wake 는 서버 계약에 없는 칸이라 보내지 않는다(표시 구분은 서버 provenance 로).
+    const { no_wake: _noWake, ...body } = a;
+    const r = await cogsCall(inbox(i), i.token, "sendMessage", body);
     if (!Number.isSafeInteger(r?.message_id)) throw new Error("cogs_bad_response");
     return r.message_id;
   },
