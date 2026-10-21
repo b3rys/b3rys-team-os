@@ -2,6 +2,9 @@ import { handleCogsApprovalCallback } from "../../lib/cogsPermissions/bridgeCall
 import { createBridgeCogsApprovals } from "../../lib/cogsPermissions/waiters";
 import { readPolicy } from "../../lib/cogsPermissions/policy";
 import { resolveCogsCodexRun, type CogsCodexRun } from "./cogsRunPolicy";
+import { createCogsCodexApprover } from "./cogsApprover";
+import { currentCogsStamp } from "../../lib/cogsPermissions/service";
+import { sendApprovalCard } from "../../lib/cogsPermissions/card";
 import { openDb } from "../../db/migrate";
 import { reasoningSummaryOf } from "./reasoningSummary";
 import { createReactionInbox, reactionInputs, type ReactionInbox, type ReactionUpdate, type ReactionRef } from "../../lib/reactionInput";
@@ -1414,9 +1417,25 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     editMessage: deps.editMessage ?? tgEdit(token),
     reactMessage: deps.reactMessage ?? tgReact(token),
   };
+  // cogs 승인 대기 — DB 가 진실, 서버 신호·카드 누름·만료 타이머는 다시 보는 계기.
+  const cogsApprovals = live.channel?.kind === "b3chat"
+    ? createBridgeCogsApprovals({ agentId: liveAgentId, openDb: () => openDb(defaultTeamDbPath()) })
+    : null;
   // cogs 채널만 정책을 본다. 턴마다 원본을 다시 읽어 축소가 다음 턴에 바로 적용된다(풀은 도장이 바뀌면 다시 띄운다).
   if (live.channel?.kind === "b3chat" && !live.cogsRunFor) {
     const registryPath = process.env.TEAM_AGENT_REGISTRY?.trim() || DEFAULT_AGENT_REGISTRY;
+    // 정책 팀원의 승인 요청 → 주인 1:1 방 카드 → 결정 → 응답 하나.
+    if (cogsApprovals && !live.onCogsApproval) {
+      const roomId = live.channel.ownerChat ?? null;
+      const approver = createCogsCodexApprover({
+        agentId: liveAgentId, roomId, processGen: cogsApprovals.processGen, cwd: workdir,
+        openDb: () => openDb(defaultTeamDbPath()),
+        currentStamp: () => currentCogsStamp(registryPath, liveAgentId),
+        waiters: cogsApprovals.waiters,
+        sendCard: (input) => sendApprovalCard(TG_API, token, roomId ?? "", input, fetch, { agentId: liveAgentId }),
+      });
+      live.onCogsApproval = approver.approve;
+    }
     live.cogsRunFor = () => {
       const list = JSON.parse(readFileSync(registryPath, "utf-8")) as Array<{ id?: string; cogs_permissions?: unknown }>;
       const entry = list.find((a) => a?.id === liveAgentId);
@@ -1448,10 +1467,6 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
   });
 
   // 서버가 담당자를 정한 그룹 턴도 같은 대기열에 넣어 1:1과 겹치지 않게 한다. 수신 리액션은 해당 팀원 봇으로 붙여 누가 받았는지 드러낸다.
-  // cogs 승인 대기 — DB 가 진실, 서버 신호·카드 누름·만료 타이머는 다시 보는 계기. 실행 경로 연결은 아직 없다.
-  const cogsApprovals = live.channel?.kind === "b3chat"
-    ? createBridgeCogsApprovals({ agentId: liveAgentId, openDb: () => openDb(defaultTeamDbPath()) })
-    : null;
   const windowHandle = await startBridgeWindow({
     agentId: liveAgentId,
     pidFile,

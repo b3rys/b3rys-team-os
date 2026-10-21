@@ -1,6 +1,6 @@
 /** 승인 요청은 기존 permissionGate와 채널 팝업을 통해 결정으로 매핑한다. 오류·무응답은 거절하며 Tier-D는 팝업 생성 전에 requestPermission에서 거절한다.
  * 한 번·세션·지속 허용의 구분을 보존하고 삭제된 별도 판정기를 현재 방어선으로 간주하지 않는다. */
-import { sendApprovalCard } from "../../lib/cogsPermissions/card";
+import { sendApprovalCard, type ApprovalCardInput } from "../../lib/cogsPermissions/card";
 import { uiText } from "./uiStrings";
 import { cogsActivityArgs, filename } from "./cogsActivity";
 import { createHash, randomUUID } from "node:crypto";
@@ -617,6 +617,13 @@ async function sendApprovalPlain(
   apiBase: string, token: string, chatId: string, agentId: string, requestId: string,
   req: ApprovalRequest, risks: string[], doFetch: typeof fetch,
 ): Promise<boolean> {
+  // 카드 모양·512바이트 한도·버튼 재시도는 공통 카드 전송이 맡는다(cogs 클로드 승인과 같은 길).
+  const r = await sendApprovalCard(apiBase, token, chatId, cogsCardInputFor(req, requestId, risks, !risks.length), doFetch, { agentId });
+  return r.ok;
+}
+
+/** 코덱스 승인 요청 → cogs 카드 입력(무엇을·대상·폴더 전체 요청 표시). 팝업 경로와 cogs 정책 경로가 같이 쓴다. */
+export function cogsCardInputFor(req: ApprovalRequest, requestId: string, risks: string[], allowAlways: boolean): ApprovalCardInput {
   const params=(req.params??{}) as Record<string,unknown>;
   const operationCode=params.command ? "run_command" : params.fileChanges || params.changes || req.observedItem?.changes.length ? "edit_files" : params.reason ? "request_permission" : "approval_required";
   const observed=req.observedItem?.changes;
@@ -625,11 +632,7 @@ async function sendApprovalPlain(
   if (target.target) detail=target.target;
   if (target.count!==undefined) detail=String(target.count);
   const root=grantRootOf(params);
-  // 카드 모양·512바이트 한도·버튼 재시도는 공통 카드 전송이 맡는다(cogs 클로드 승인과 같은 길).
-  const r = await sendApprovalCard(apiBase, token, chatId, {
-    requestId, operationCode, detail, grantRoot: root ? grantRootDisplay(root) : undefined, risks, allowAlways: !risks.length,
-  }, doFetch, { agentId });
-  return r.ok;
+  return { requestId, operationCode, detail, grantRoot: root ? grantRootDisplay(root) : undefined, risks, allowAlways };
 }
 
 /**

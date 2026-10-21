@@ -22,6 +22,8 @@ export interface CogsDecisionWaiters {
   wait(requestId: string): Promise<CogsWaitOutcome>;
   /** 다시 본다. requestId 가 없으면 대기 전부. */
   poke(requestId?: string): void;
+  /** 그 대기 하나를 닫는다(부른 쪽이 더 기다릴 이유가 없을 때 — 예: 카드 전송 실패). */
+  cancel(requestId: string, reason: string): void;
   /** 대기 수(시험·상태 표시용). */
   size(): number;
   /** 남은 대기를 모두 닫고 타이머를 치운다. */
@@ -125,6 +127,7 @@ export function createCogsDecisionWaiters(deps: CogsDecisionWaitersDeps): CogsDe
       if (requestId !== undefined) return check(requestId);
       for (const id of [...entries.keys()]) check(id);
     },
+    cancel: (requestId, reason) => finish(requestId, { kind: "closed", reason }),
     size: () => entries.size,
     close(reason = "bridge_closed") {
       for (const id of [...entries.keys()]) finish(id, { kind: "closed", reason });
