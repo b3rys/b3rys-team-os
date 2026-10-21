@@ -1,5 +1,7 @@
 import { handleCogsApprovalCallback } from "../../lib/cogsPermissions/bridgeCallback";
 import { createBridgeCogsApprovals } from "../../lib/cogsPermissions/waiters";
+import { readPolicy } from "../../lib/cogsPermissions/policy";
+import { resolveCogsCodexRun, type CogsCodexRun } from "./cogsRunPolicy";
 import { openDb } from "../../db/migrate";
 import { reasoningSummaryOf } from "./reasoningSummary";
 import { createReactionInbox, reactionInputs, type ReactionInbox, type ReactionUpdate, type ReactionRef } from "../../lib/reactionInput";
@@ -73,6 +75,18 @@ export interface BridgeDeps {
   registerScheduleReminder?: (req: ScheduleMarkerRequest, ctx: ScheduleMarkerContext) => Promise<string>;
   /** 1:1 대화 세션을 재시작 넘어 기억한다. 미지정이면 기억하지 않는다(시험 기본값). */
   dmSessions?: DmSessionStore;
+  /** cogs 채널 브리지만: 턴마다 정책 원본을 다시 읽어 실행 설정을 정한다. 없으면 지금 동작 그대로. */
+  cogsRunFor?: () => CogsCodexRun;
+  /** cogs 정책 팀원의 승인 요청 처리(카드). */
+  onCogsApproval?: CodexTurnOptions["onCogsApproval"];
+}
+
+/** 모든 턴 진입점(1:1·그룹·인사·리액션·일정 요약)이 같은 cogs 실행 설정을 싣는다. */
+function cogsTurnOpts(deps: BridgeDeps): Pick<CodexTurnOptions, "cogsRun" | "onCogsApproval"> {
+  if (!deps.cogsRunFor) return {};
+  let run: CogsCodexRun;
+  try { run = deps.cogsRunFor(); } catch (e) { run = { mode: "blocked", reason: `policy_read_failed: ${e instanceof Error ? e.message : e}` }; }
+  return { cogsRun: run, ...(deps.onCogsApproval ? { onCogsApproval: deps.onCogsApproval } : {}) };
 }
 
 /** 팀원 단위 activeTurns만으로는 대화를 구분할 수 없어 진행 중 chat도 보존한다. 같은 대화만 steer해야 다른 대화의 입력이 섞이지 않는다. */
@@ -896,6 +910,7 @@ async function handleMessageTurn(
       sandbox: deps.sandbox,
       networkAccess: deps.networkAccess,
       writableRoots: deps.workdir ? [deps.workdir] : [],
+      ...cogsTurnOpts(deps),
     });
     if (result.ok) reactionClaim?.commit(); else reactionClaim?.rollback();
   } catch (error) {
@@ -968,6 +983,7 @@ async function handleMessageTurn(
           prompt: `[schedule_reminder tool result]\n${hostResult}\nDescribe this result to the user. Do not call the scheduler again.`,
           agentId: selfAgentId, resumeSessionId: result.sessionId, codexHome: deps.codexHome,
           cwd: deps.workdir, sandbox: deps.sandbox, networkAccess: deps.networkAccess,
+          ...cogsTurnOpts(deps),
         });
       } catch {
         summary = { ok: false, reply: "", detail: "schedule_summary_exception", elapsedMs: 0 };
@@ -1398,6 +1414,16 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     editMessage: deps.editMessage ?? tgEdit(token),
     reactMessage: deps.reactMessage ?? tgReact(token),
   };
+  // cogs 채널만 정책을 본다. 턴마다 원본을 다시 읽어 축소가 다음 턴에 바로 적용된다(풀은 도장이 바뀌면 다시 띄운다).
+  if (live.channel?.kind === "b3chat" && !live.cogsRunFor) {
+    const registryPath = process.env.TEAM_AGENT_REGISTRY?.trim() || DEFAULT_AGENT_REGISTRY;
+    live.cogsRunFor = () => {
+      const list = JSON.parse(readFileSync(registryPath, "utf-8")) as Array<{ id?: string; cogs_permissions?: unknown }>;
+      const entry = list.find((a) => a?.id === liveAgentId);
+      if (!entry) return { mode: "blocked", reason: "agent_not_found" };
+      return resolveCogsCodexRun(readPolicy(entry.cogs_permissions, "codex"), workdir);
+    };
+  }
   let offset = 0;
   let ownBotId: number | undefined;
   let readyMarked = false;

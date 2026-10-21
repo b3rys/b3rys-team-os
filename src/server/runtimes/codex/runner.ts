@@ -29,6 +29,13 @@ export interface CodexTurnOptions {
   networkAccess?: boolean;
   /** workspace-write일 때 코드로 강제할 쓰기 가능 루트. 미지정 시 cwd 1개, cwd도 없으면 빈 allowlist. */
   writableRoots?: string[];
+  /**
+   * cogs 팀원 정책으로 정한 실행 설정. cogs 채널 브리지만 채운다 — 없으면 지금 동작 그대로.
+   * app-server 경로만 읽는다(exec 경로는 cogs 에서 쓰지 않는다).
+   */
+  cogsRun?: import("./cogsRunPolicy").CogsCodexRun;
+  /** cogs 정책 팀원의 승인 요청 처리(카드). 없으면 거절 — 텔레그램 팝업으로 넘기지 않는다. */
+  onCogsApproval?: (req: import("./appServerClient").ApprovalRequest) => Promise<import("./appServerClient").ReviewDecision>;
   /** 모델 오버라이드(미지정 시 codex 기본). */
   model?: string;
   /** 하드 타임아웃(ms). 초과 시 kill(턴 원자성). */
@@ -134,6 +141,10 @@ export function redactPromptArg(args: string[]): string[] {
  * 기존 시험·도구 호출 호환을 위해서만 남긴다. */
 export async function runCodexTurn(opts: CodexTurnOptions): Promise<CodexTurnResult> {
   const started = Date.now();
+  // cogs 정책은 app-server 경로만 집행한다. exec 로 오면 정책 없이 돌게 되므로 막는다.
+  if (opts.cogsRun && opts.cogsRun.mode !== "legacy") {
+    return { ok: false, reply: "", detail: "cogs_policy_requires_app_server", elapsedMs: 0 };
+  }
   const sandbox = opts.sandbox ?? "read-only";
   // 기본값을 두지 않는다 — 240초는 라이브에서 도달하지 않는 죽은 값 이었다.
   //   이 함수는 DEPRECATED 고, 유일한 제품 호출부(`runtimeSubscription.ts`)는 자기 상한을 명시로 넘긴다.
