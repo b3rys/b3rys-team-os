@@ -35,6 +35,8 @@ export interface CogsDecisionWaitersDeps {
   now?: () => number;
   /** 만료 시각 뒤 여유. 시계 차이로 결정 직전에 닫지 않게. */
   expirySlackMs?: number;
+  /** 읽기 오류 뒤 다시 볼 간격(시험용). */
+  errorRetryMs?: number;
   events?: CogsPermissionEvents;
   report?: (msg: string) => void;
 }
@@ -42,11 +44,20 @@ export interface CogsDecisionWaitersDeps {
 interface Entry {
   resolve: (o: CogsWaitOutcome) => void;
   timer: ReturnType<typeof setTimeout> | null;
+  /** 한 번이라도 읽은 만료 시각. 읽기 오류가 이 기한을 늘리지 못한다. */
+  deadlineMs: number | null;
+  /** 연속 읽기 오류 수. */
+  errors: number;
 }
+
+/** 읽기 오류 재시도 간격·상한. 상한을 넘거나 기한이 지나면 닫는다(허용으로 바꾸지 않는다). */
+export const WAIT_ERROR_RETRY_MS = 1_000;
+export const WAIT_ERROR_LIMIT = 5;
 
 export function createCogsDecisionWaiters(deps: CogsDecisionWaitersDeps): CogsDecisionWaiters {
   const now = deps.now ?? Date.now;
   const slack = deps.expirySlackMs ?? 250;
+  const retryMs = deps.errorRetryMs ?? WAIT_ERROR_RETRY_MS;
   const entries = new Map<string, Entry>();
   const report = deps.report ?? ((m: string) => console.warn(m));
 
@@ -63,7 +74,7 @@ export function createCogsDecisionWaiters(deps: CogsDecisionWaitersDeps): CogsDe
     const e = entries.get(id);
     if (!e) return;
     let outcome: CogsWaitOutcome | null = null;
-    let expiresAt = 0;
+    let failed = false;
     let db: Database | null = null;
     try {
       db = deps.openDb();
@@ -77,17 +88,25 @@ export function createCogsDecisionWaiters(deps: CogsDecisionWaitersDeps): CogsDe
       else if (row.status === "allowed_once") outcome = { kind: "allowed", status: "allowed_once" };
       // '항상' 은 원본 저장까지 끝나야 넘긴다. 저장 전이면 계속 기다린다(저장 실패는 무효화로 닫힌다).
       else if (row.status === "allowed_always" && b.always_persisted === 1) outcome = { kind: "allowed", status: "allowed_always" };
-      expiresAt = b?.expires_at_ms ?? 0;
+      if (b) e.deadlineMs = b.expires_at_ms;
+      e.errors = 0;
     } catch (err) {
-      // 읽기 실패는 허용으로 바꾸지 않는다. 타이머가 다시 본다.
+      // 읽기 실패는 허용으로 바꾸지 않는다. 기한·횟수 안에서만 다시 본다.
       report(`[cogs-permissions] 대기 확인 실패 ${id}: ${err instanceof Error ? err.message : err}`);
-      expiresAt = now() + 1_000;
+      failed = true;
+      e.errors++;
     } finally {
       try { db?.close(); } catch { /* best-effort */ }
     }
     if (outcome) return finish(id, outcome);
+    if (failed && (e.errors >= WAIT_ERROR_LIMIT || (e.deadlineMs !== null && now() >= e.deadlineMs + slack))) {
+      return finish(id, { kind: "closed", reason: "db_unavailable" });
+    }
     if (e.timer) clearTimeout(e.timer);
-    e.timer = setTimeout(() => check(id), Math.max(0, expiresAt - now()) + slack);
+    const nextAt = failed
+      ? Math.min(now() + retryMs, e.deadlineMs !== null ? e.deadlineMs + slack : Infinity)
+      : (e.deadlineMs ?? now()) + slack;
+    e.timer = setTimeout(() => check(id), Math.max(0, nextAt - now()));
   };
 
   return {
@@ -97,7 +116,7 @@ export function createCogsDecisionWaiters(deps: CogsDecisionWaitersDeps): CogsDe
         // 같은 요청을 두 번 기다리지 않는다 — 먼저 기다린 쪽만 결과를 받는다(인계가 두 번 일어나지 않게).
         return Promise.resolve({ kind: "closed", reason: "duplicate_wait" });
       }
-      const p = new Promise<CogsWaitOutcome>((resolve) => entries.set(requestId, { resolve, timer: null }));
+      const p = new Promise<CogsWaitOutcome>((resolve) => entries.set(requestId, { resolve, timer: null, deadlineMs: null, errors: 0 }));
       // 등록 뒤에 읽는다 — '읽기와 등록 사이 결정' 을 놓치지 않는다.
       check(requestId);
       return p;

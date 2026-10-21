@@ -182,6 +182,44 @@ describe("서버 → 브리지 전달(별도 프로세스)", () => {
     expect(getPermissionRequest(e.db, other)!.status).toBe("pending");
   });
 
+  test("서버 재시작 — 하나뿐인 요청이 꺼져 있던 사이 거절돼도 대기가 회복된다", async () => {
+    const e = env();
+    const id = e.make();
+    const b = await bridge(e, "g1", [id]);
+    e.press(id, "pgd");
+    expect(await pokeBridgesWithOpenApprovals(e.db, { send: e.send })).toBe(1);
+    await b.until(() => b.outcome(id) !== undefined);
+    expect(b.outcome(id)).toEqual({ kind: "denied" });
+  });
+
+  test("서버 재시작 — 하나뿐인 요청이 꺼져 있던 사이 무효화돼도 대기가 회복된다", async () => {
+    const e = env();
+    const id = e.make();
+    const b = await bridge(e, "g1", [id]);
+    invalidateCogsApprovals(e.db, { agentId: "flo", reason: "policy_narrowed" });
+    expect(await pokeBridgesWithOpenApprovals(e.db, { send: e.send })).toBe(1);
+    await b.until(() => b.outcome(id) !== undefined);
+    expect(b.outcome(id)).toEqual({ kind: "closed", reason: "policy_narrowed" });
+  });
+
+  test("받은 뒤 응답(ACK)을 잃으면 다시 보낸다 — 신호가 두 번 가도 결과는 하나", async () => {
+    const e = env();
+    const id = e.make();
+    const b = await bridge(e, "g1", [id]);
+    e.press(id, "pgd");
+    let calls = 0;
+    const lossy = (async (url: string, init: RequestInit) => {
+      const res = await fetch(url, init);
+      calls++;
+      if (calls === 1) throw new Error("socket hang up"); // 브리지는 받았는데 응답이 안 돌아온 것
+      return res;
+    }) as unknown as typeof fetch;
+    const r = await callCodexBridgeControl({ agentId: "flo", kind: "cogs_permission", eventId: "ack", requestId: id }, { pidFile: e.pidFile, fetchImpl: lossy, retryDelaysMs: [0, 20, 50] });
+    expect(r).toEqual({ ok: true, attempts: 2 });
+    await b.until(() => b.controls() === 2);
+    expect(b.lines.filter((x) => x.id === id)).toEqual([{ id, outcome: { kind: "denied" } }]);
+  });
+
   test("보내는 중 브리지가 없다가 생기면 재시도가 새 창을 다시 읽어 닿는다", async () => {
     const e = env();
     const id = e.make();

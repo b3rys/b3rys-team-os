@@ -130,6 +130,39 @@ describe("승인 대기 — DB 가 진실, 신호는 다시 보는 계기", () =
   });
 });
 
+describe("읽기 오류 — 허용도 무한 대기도 아니다", () => {
+  test("한 번 읽은 뒤 오류가 계속되면 원래 만료 기한에 닫고 정리한다", async () => {
+    const s = setup({ ttlMs: 60 });
+    const id = s.make();
+    let reads = 0;
+    let fail = false;
+    const w = createCogsDecisionWaiters({ agentId: "flo", openDb: () => { reads++; if (fail) throw new Error("locked"); return openDb(s.dbPath); }, expirySlackMs: 5, errorRetryMs: 300, report: () => {} });
+    const p = w.wait(id);
+    fail = true;
+    w.poke(id);
+    const t0 = Date.now();
+    expect(await p).toEqual({ kind: "closed", reason: "db_unavailable" });
+    // 오류 상한(5회 × 300ms)이 아니라 원래 기한(60ms)에 닫혀야 한다.
+    expect(Date.now() - t0).toBeLessThan(400);
+    expect(w.size()).toBe(0);
+    // 등록 1(성공) + poke 1(실패) + 기한 1(실패→닫힘). 기한이 지난 뒤 오류를 연달아 다시 읽지 않는다.
+    expect(reads).toBe(3);
+    const after = reads;
+    await new Promise((r) => setTimeout(r, 100));
+    expect(reads).toBe(after); // 타이머도 정리됐다
+  });
+
+  test("처음부터 읽기가 안 되면 오류 상한에서 닫는다", async () => {
+    const s = setup({ ttlMs: 60_000 });
+    const id = s.make();
+    let reads = 0;
+    const w = createCogsDecisionWaiters({ agentId: "flo", openDb: () => { reads++; throw new Error("locked"); }, errorRetryMs: 10, report: () => {} });
+    expect(await w.wait(id)).toEqual({ kind: "closed", reason: "db_unavailable" });
+    expect(reads).toBe(5);
+    expect(w.size()).toBe(0);
+  });
+});
+
 describe("브리지 재시작 — 예전 세대 정리", () => {
   test("예전 세대의 대기·허용 미인계와 세션 허용은 닫고, 지금 세대는 남긴다", () => {
     const s = setup();

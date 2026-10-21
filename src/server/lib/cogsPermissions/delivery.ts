@@ -36,12 +36,15 @@ export function subscribeBridgeDelivery(events: CogsPermissionEvents, deps: Brid
   });
 }
 
-/** 서버 재시작 — 아직 열린 승인이 있는 팀원 브리지마다 "전부 다시 봐" 를 보낸다. 서버가 죽어 있던 사이 신호를 놓쳤을 수 있다. */
-export async function pokeBridgesWithOpenApprovals(db: Database, deps: BridgeDeliveryDeps): Promise<number> {
+/**
+ * 서버 재시작 — 아직 대기자가 있을 수 있는 팀원 브리지마다 "전부 다시 봐" 를 보낸다. 서버가 죽어 있던 사이 신호를 놓쳤을 수 있다.
+ * 대상은 상태가 아니라 기한으로 정한다: 거절·무효화로 끝난 요청도 브리지 쪽 대기는 아직 남아 있을 수 있다.
+ * 브리지 대기는 만료 시각에 스스로 닫히므로, 만료 전 결합이 있는 팀원이면 충분하다.
+ */
+export async function pokeBridgesWithOpenApprovals(db: Database, deps: BridgeDeliveryDeps & { nowMs?: number }): Promise<number> {
   const agents = db.prepare(
-    `SELECT DISTINCT b.agent_id AS agent_id FROM cogs_permission_binding b JOIN permission_request r ON r.id = b.request_id
-      WHERE b.invalidation_reason IS NULL AND b.handed_off_at_ms IS NULL AND r.status IN ('pending','allowed_once','allowed_always')`,
-  ).all() as Array<{ agent_id: string }>;
+    `SELECT DISTINCT agent_id FROM cogs_permission_binding WHERE handed_off_at_ms IS NULL AND expires_at_ms > ?`,
+  ).all(deps.nowMs ?? Date.now()) as Array<{ agent_id: string }>;
   const results = await Promise.all(agents.map((a) => deps.send({ agentId: a.agent_id, kind: "cogs_permission", eventId: newEventId() })));
   return results.filter((r) => r.ok).length;
 }
