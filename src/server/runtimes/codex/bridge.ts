@@ -1296,6 +1296,22 @@ export async function handleApprovalCallback(
   }
 }
 
+/**
+ * 승인 버튼 누름을 채널에 맞는 처리로 보낸다.
+ * cogs(b3chat) 방은 사람(봇 주인)으로 인가한다 — 방 id 허용 목록과 섞지 않는다. 텔레그램은 기존 handleApprovalCallback 그대로.
+ */
+export async function dispatchApprovalCallback(
+  token: string,
+  cb: TgCallbackQuery,
+  ctx: { channelKind: string | undefined; allowFrom: Set<number>; apiBase: string; agentId: string; registryPath: string; dbPath: string },
+  handlers: { cogs: typeof handleCogsApprovalCallback; telegram: typeof handleApprovalCallback } = { cogs: handleCogsApprovalCallback, telegram: handleApprovalCallback },
+): Promise<string> {
+  if (ctx.channelKind === "b3chat") {
+    return handlers.cogs(token, cb, { apiBase: ctx.apiBase, agentId: ctx.agentId, registryPath: ctx.registryPath, dbPath: ctx.dbPath });
+  }
+  return handlers.telegram(token, cb, ctx.allowFrom);
+}
+
 /** 첫 getUpdates 성공 후 ready marker를 원자적으로 쓴다. marker 존재 = 브리지가 실제 Telegram polling에 진입. */
 export function writeBridgeReadyMarker(pidFile: string, pid = process.pid, agentId = process.env.CODEX_AGENT_ID ?? ""): boolean {
   if (!pidFile) return false;
@@ -1491,16 +1507,11 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         // 콜백 예외가 폴 루프를 죽이면 안 된다 — 죽으면 그 뒤 메시지도 안 받는다.
         if (u.callback_query) {
           try {
-            // cogs 방은 사람(봇 주인)으로 인가한다 — 방 id 허용 목록과 섞지 않는다. 텔레그램은 기존 그대로.
-            if (live.channel?.kind === "b3chat") {
-              await handleCogsApprovalCallback(token, u.callback_query, {
-                apiBase: TG_API, agentId: liveAgentId,
-                registryPath: process.env.TEAM_AGENT_REGISTRY?.trim() || DEFAULT_AGENT_REGISTRY,
-                dbPath: defaultTeamDbPath(),
-              });
-            } else {
-              await handleApprovalCallback(token, u.callback_query, allowFrom);
-            }
+            await dispatchApprovalCallback(token, u.callback_query, {
+              channelKind: live.channel?.kind, allowFrom, apiBase: TG_API, agentId: liveAgentId,
+              registryPath: process.env.TEAM_AGENT_REGISTRY?.trim() || DEFAULT_AGENT_REGISTRY,
+              dbPath: defaultTeamDbPath(),
+            });
           }
           catch (e) { console.error(`[codex-bridge] 승인 콜백 처리 실패: ${e instanceof Error ? e.message : e}`); }
           continue;
