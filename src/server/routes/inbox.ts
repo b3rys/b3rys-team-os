@@ -46,6 +46,17 @@ interface InboxRouteDeps {
   onCogsThreadActivity?: (threadId: string) => void;
 }
 
+/** 그 메시지가 이 thread 의 cogs 인입(원글)이고, 답하는 팀원 자신의 봇·이 방으로 들어온 것인가. 팀원 메시지·다른 방 원글은 아니다. */
+function isCogsOriginInThread(db: Database, messageId: string | undefined | null, threadId: string | undefined, agentId: string, chatId: string | undefined): boolean {
+  if (!messageId || !threadId || !chatId) return false;
+  const row = db.prepare("SELECT thread_id, source, meta_json FROM message WHERE id = ?").get(messageId) as { thread_id: string; source: string; meta_json: string | null } | undefined;
+  if (!row || row.thread_id !== threadId || row.source !== "user") return false;
+  try {
+    const cogs = JSON.parse(row.meta_json ?? "null")?.cogs;
+    return cogs?.agent_id === agentId && String(cogs?.chat_id) === String(chatId);
+  } catch { return false; }
+}
+
 /** 팀장 DM chat id (setting). 없으면 --direct-to-gd 릴레이 불가. */
 function ownerDmChatId(db: Database): string | undefined {
   const row = db.prepare("SELECT value FROM setting WHERE key='owner_chat_id'").get() as { value?: string } | undefined;
@@ -190,8 +201,17 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       }
     } catch { /* 잘못된 원글 meta는 기존 thread 조회로 처리한다. */ }
     const cogsMetaForGate = parentSlack ? null : findCogsMetaForThread(deps.db, env.thread_id ?? "", env.in_reply_to);
-    if (cogsMetaForGate && env.source === "agent" && (env.meta?.reply_mode === "direct_to_gd" || env.all_hands)) {
+    // cogs thread 는 원글이 Slack 을 가리켜도 cogs thread 다 — thread 메타를 원글과 따로 읽는다.
+    const threadCogs = findCogsMetaForThread(deps.db, env.thread_id ?? "");
+    if ((cogsMetaForGate || threadCogs) && env.source === "agent"
+        && (env.meta?.reply_mode === "direct_to_gd" || env.all_hands || env.to_agent_id === "user")) {
       return c.json({ ok: false, error: "cogs_reply_mode_invalid", detail: "cogs → --to broadcast" }, 400);
+    }
+    // 단체방 답은 어느 말에 대한 답인지가 분명해야 한다 — 같은 thread 의 cogs 원글을 --in-reply-to 로 가리킬 때만.
+    //   (1:1 방처럼 thread 첫 원글로 대신 답하면 단체방에서는 엉뚱한 말에 답이 달린다. 원글이 다른 방·Slack 이어도 같은 검사.)
+    if ((cogsMetaForGate?.chat_type === "group" || threadCogs?.chat_type === "group") && env.source === "agent" && env.to_agent_id === "broadcast"
+        && !isCogsOriginInThread(deps.db, env.in_reply_to, env.thread_id, env.from_agent_id, threadCogs?.chat_id ?? cogsMetaForGate?.chat_id)) {
+      return c.json({ ok: false, error: "cogs_reply_needs_in_reply_to", detail: "단체방 답은 --in-reply-to <그 방 원글 id>" }, 400);
     }
     const slackMetaForGate = parentSlack ?? findSlackMetaForThread(deps.db, env.thread_id ?? "");
     if (env.source === "agent" && env.to_agent_id === "broadcast" && !slackMetaForGate && !cogsMetaForGate) {
