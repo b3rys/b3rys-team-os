@@ -23,7 +23,7 @@ function setup(remote = "127.0.0.1", proof: any = binding) {
     writeFileSync(keyPath, KEY);
     let calls = 0;
     let beforeProof: () => void = () => { };
-    const app = createB3chatRoomLinkRoutes({ registryPath, linkKeyPath: keyPath, remoteAddress: () => remote, fetch: (async (_url: any, init: any) => { calls++; beforeProof(); const result = proof === binding ? { ...binding, room_id: JSON.parse(init.body).chat_id } : proof; return Response.json({ ok: true, result }); }) as typeof fetch });
+    const app = createB3chatRoomLinkRoutes({ registryPath, resolveAllowFrom: () => "10", linkKeyPath: keyPath, remoteAddress: () => remote, fetch: (async (_url: any, init: any) => { calls++; beforeProof(); const result = proof === binding ? { ...binding, room_id: JSON.parse(init.body).chat_id } : proof; return Response.json({ ok: true, result }); }) as typeof fetch });
     const request = (body: any = binding, headers: Record<string, string> = { "x-b3chat-link": KEY }) => app.request("/members/b3chat/member/mate/rooms", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
     return { request, registryPath, original, write, read: () => JSON.parse(readFileSync(registryPath, "utf8")), calls: () => calls, setBefore: (fn: () => void) => { beforeProof = fn; } };
 }
@@ -109,5 +109,25 @@ test("credential rotation during verification requires fresh proof before enroll
             expect(s.calls()).toBe(2);
             expect(s.read()[0].channel.allow_from).toEqual(["10", "22"]);
         }
+    }
+});
+
+// A member can keep using their DM after connecting the first group room.
+test("first room link preserves omitted launcher seed without restoring revoked rooms", async () => {
+    for (const policy of [undefined, [], ["11"]]) {
+        const s = setup();
+        const member = structuredClone(s.original[0]);
+        if (policy === undefined) delete member.channel.allow_from;
+        else member.channel.allow_from = policy;
+        s.write([member]);
+        const channel = parseMemberChannel(member.channel);
+        const seed = new Set([10]);
+        const before = policy === undefined ? [10] : policy.map(Number);
+        expect([...currentCogsAllowlist(channel, seed, "mate", s.registryPath)]).toEqual(before);
+        expect((await s.request()).status).toBe(200);
+        expect(s.read()[0].channel.allow_from).toEqual([...before.map(String), "22"]);
+        expect([...currentCogsAllowlist(channel, seed, "mate", s.registryPath)]).toEqual([...before, 22]);
+        expect((await s.request()).status).toBe(200);
+        expect(s.read()[0].channel.allow_from).toEqual([...before.map(String), "22"]);
     }
 });

@@ -7,6 +7,7 @@ import { linkGuard } from "../lib/b3chatLink";
 import { parseMemberChannel } from "../lib/memberChannel";
 import { withRegistryLock } from "../lib/registryLock";
 import { writeRegistrySafely } from "../lib/registrySafety";
+import { resolveCodexAllowFrom } from "../runtimes/codex/launcher";
 import { defaultRemoteAddress } from "./b3chatTeammate";
 interface Binding {
     room_id: number;
@@ -20,6 +21,7 @@ interface Deps {
     remoteAddress?: (c: Context) => string | null;
     onRegistryChanged?: () => void;
     fetch?: typeof fetch;
+    resolveAllowFrom?: () => string;
 }
 function positive(v: unknown): v is number { return Number.isSafeInteger(v) && (v as number) > 0; }
 export function createB3chatRoomLinkRoutes(d: Deps): Hono {
@@ -69,7 +71,9 @@ export function createB3chatRoomLinkRoutes(d: Deps): Hono {
                 if (readFileSync(tokenPath, "utf8").trim() !== token)
                     return "changed";
                 const current = parseMemberChannel(member.channel);
-                const allow = current.allowFrom ?? [];
+                // Materialize the launcher fallback only when no explicit policy exists.
+                // Explicit [] and later revocations must never re-add seed rooms.
+                const allow = current.allowFrom ?? (d.resolveAllowFrom ?? resolveCodexAllowFrom)().split(",").map(v => v.trim()).filter(Boolean);
                 if (!allow.includes(String(b.room_id))) {
                     member.channel = { ...member.channel, allow_from: [...allow, String(b.room_id)] };
                     writeRegistrySafely(d.registryPath, list);

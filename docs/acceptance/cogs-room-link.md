@@ -22,11 +22,12 @@ channel bridge. Claude group response support is outside this change.
 | Authenticated enrollment | `routes/b3chatRoomLinks.ts` | Missing key, remote caller, forwarded caller rejected without mutation | Remove route link guard |
 | Trusted membership/owner proof | same | All four binding fields individually mismatched | Ignore owner mismatch |
 | Idempotent preservation | same | Duplicate enrollment, concurrent distinct rooms, unrelated registry edit, channel replacement | Replace instead of extend existing allowlist |
+| First enrollment preserves fallback | `routes/b3chatRoomLinks.ts` | Omitted list: seed `[10]` → first link → `[10,22]`; explicit `[]` / `[11]` never restores seed; repeated link stays idempotent | Drop fallback on write; merge fallback into explicit policies (both assertion failures) |
 | Live allowlist reread | `runtimes/codex/cogsAllowlist.ts`, `bridge.ts` | Observe enrollment/removal without restart; missing member denied; Telegram unchanged | Always return startup seed |
 
 Paths are relative to `src/server/`. New tests are in `routes/b3chatRoomLinks.test.ts`.
 
-- **44 tests passed, 0 failed, 134 assertions** across four related test files.
+- **45 tests passed, 0 failed, 152 assertions** across four related test files.
 - `bun run typecheck`: **PASS**.
 - Four mutants: assertion failures in every case; normal sources restored; final
   baseline rerun passed. No compile error was counted as a caught mutant.
@@ -44,6 +45,9 @@ Tests create temporary registries and simulated bot credentials; no live registr
 model turn, production credential, or service restart is involved.
 
 ## Regression checks
+
+- First enrollment resolves the same fallback as `codexBridgePaths` via `resolveCodexAllowFrom`, only if `allow_from` is omitted. The reader does not merge seed into explicit lists.
+- First-enrollment regression: both drop-seed and restore-revoked mutants failed the saved-list assertion; sources restored. Related route/member-channel/teammate tests: 75 passed, 0 failed, 271 assertions.
 
 - Omitted list keeps seed `[10]`; explicit `[]` yields no allowed rooms.
 - Replacing bot identity 42 with 99 during verification returns 503 without enrollment.
