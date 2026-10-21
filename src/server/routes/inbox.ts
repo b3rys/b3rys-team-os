@@ -42,6 +42,8 @@ interface InboxRouteDeps {
   agents?: () => AgentRecord[];
   /** direct_to_gd 릴레이 직전 발신자 텔레그램 수신 판정. 기본 = 런타임 essentials 의 poller 항목. 시험 주입용. */
   receiverDown?: (agent: AgentRecord) => boolean | Promise<boolean>;
+  /** cogs 팀원끼리 대화 중계를 깨운다(그 thread 대조·전송). 없으면 아무 일도 없다 — 버스 동작과 무관한 부가 기능. */
+  onCogsThreadActivity?: (threadId: string) => void;
 }
 
 /** 팀장 DM chat id (setting). 없으면 --direct-to-gd 릴레이 불가. */
@@ -232,6 +234,8 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       dedupeWindowSec: 60,
       broadcast: deps.broadcast,
       onInserted: (stored) => {
+        // 팀원끼리 대화 중계(부가): 저장 직후 빠른 길. 실패·누락은 주기 대조가 채운다.
+        try { deps.onCogsThreadActivity?.(stored.thread_id); } catch { /* 버스 저장을 막지 않는다 */ }
         const auditDetail = { thread_id: stored.thread_id, to: env.to_agent_id, type: env.type };
         appendAudit(deps.db, env.from_agent_id, "message_sent", stored.id, auditDetail);
         appendAuditFile(env.from_agent_id, "message_sent", stored.id, auditDetail);
@@ -309,8 +313,8 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
 
     // cogs threads never fall through to Telegram, including malformed reply modes.
     if (cogsMetaForGate && env.source === "agent" && stored.to_agent_id === "broadcast") {
-      const setDelivery = (state: "sent" | "failed" | "unknown") => {
-        stored.meta = { ...stored.meta, cogs_delivery: { state } };
+      const setDelivery = (state: "sent" | "failed" | "unknown", messageId?: number) => {
+        stored.meta = { ...stored.meta, cogs_delivery: messageId !== undefined ? { state, message_id: messageId } : { state } };
         deps.db.query("UPDATE message SET meta_json = ?, dedupe_key = CASE WHEN ? = 'failed' THEN NULL ELSE dedupe_key END WHERE id = ?")
           .run(JSON.stringify(stored.meta), state, stored.id);
       };
@@ -318,9 +322,11 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       let acknowledged = false;
       try {
         const agent = (deps.agents?.() ?? ambientAgents()).find((a) => a.id === env.from_agent_id);
-        await sendCogsReply(agent, cogsMetaForGate, stored.body);
+        const postedId = await sendCogsReply(agent, cogsMetaForGate, stored.body);
         acknowledged = true;
-        setDelivery("sent");
+        setDelivery("sent", postedId);
+        // 팀원끼리 대화 중계: 원래 담당의 답이 방에 올라갔다 = 종료 사건. 대조·전송을 깨운다(실패해도 답은 이미 갔다).
+        try { deps.onCogsThreadActivity?.(stored.thread_id); } catch { /* 부가 기능 */ }
         appendAudit(deps.db, env.from_agent_id, "cogs_relay_sent", stored.id, { chat_id: cogsMetaForGate.chat_id });
         return c.json({ ok: true, message: stored, posted: true, channel: "cogs" }, 201);
       } catch (error) {

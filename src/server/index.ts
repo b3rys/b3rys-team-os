@@ -1,4 +1,7 @@
 import { createB3chatRoomLinkRoutes } from "./routes/b3chatRoomLinks";
+import { migrateCogsAidm } from "./lib/cogsAidm/store";
+import { startCogsAidmRelay } from "./lib/cogsAidm/relay";
+import { cogsIdentityOf, httpCogsAidmApi } from "./lib/cogsAidm/api";
 import { Hono } from "hono";
 import { createBunWebSocket } from "hono/bun";
 import type { ServerWebSocket } from "bun";
@@ -467,11 +470,23 @@ api.put("/agents/:id/persona", async (c) => {
   return c.json({ ok: true, path: agent.persona_file, bytes: Buffer.byteLength(body.content, "utf-8") });
 });
 
+// cogs 팀원끼리 대화 → AI DM 중계. cogs 서버의 AI DM 2단계가 운영에 반영된 뒤 COGS_AIDM_RELAY=1 로 켠다(기본 꺼짐).
+//   꺼져 있어도 표는 만든다 — 켜면 48시간 창 안의 대화를 대조로 따라잡는다.
+migrateCogsAidm(db);
+const cogsAidmRelay = process.env.COGS_AIDM_RELAY === "1"
+  ? startCogsAidmRelay({
+      db, api: httpCogsAidmApi,
+      identityOf: (id) => cogsIdentityOf(agents.find((a) => a.id === id)),
+      roster: () => new Set(agents.map((a) => a.id)),
+      log: (line) => console.log(line),
+    })
+  : null;
 const inboxApi = createInboxRoutes({
   db,
   broadcast,
   registeredAgentIds: () => new Set(agents.map((a) => a.id)),
   agents: () => agents,   // ★[B] 텔레그램 릴레이용★ — 팀원이 직접 방/팀장께 말하려면 봇 토큰이 필요하다
+  ...(cogsAidmRelay ? { onCogsThreadActivity: (threadId: string) => cogsAidmRelay.kick(threadId) } : {}),
 });
 api.route("/", inboxApi);
 
