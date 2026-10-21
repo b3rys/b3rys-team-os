@@ -62,10 +62,12 @@ export async function cogsCall(config: CogsInbox, token: string, method: string,
   return data.result;
 }
 
-export async function sendCogsReply(agent: AgentRecord | undefined, meta: CogsMeta, text: string): Promise<void> {
+/** 올라간 cogs 메시지 번호를 돌려준다(팀원끼리 대화 종료 보고에 쓴다). */
+export async function sendCogsReply(agent: AgentRecord | undefined, meta: CogsMeta, text: string): Promise<number> {
   if (!agent || agent.id !== meta.agent_id) throw new Error("cogs_reply_agent_mismatch");
   const config = cogsInbox(agent);
   if (!config || !config.allow_from.includes(meta.chat_id)) throw new Error("cogs_reply_not_allowed");
   const result = await cogsCall(config, cogsToken(config), "sendMessage", { chat_id: meta.chat_id, text, reply_to_message_id: meta.message_id });
   if (!Number.isSafeInteger(result?.message_id)) throw new CogsDeliveryUnknown();
+  return result.message_id;
 }
