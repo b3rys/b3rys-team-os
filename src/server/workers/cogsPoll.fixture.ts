@@ -327,3 +327,20 @@ test("group: a Slack original from another thread cannot redirect a group-thread
   expect((await res.json()).error).toBe("cogs_reply_needs_in_reply_to");
   expect(calls.filter((c) => c.method === "sendMessage")).toHaveLength(0);
 });
+for (const [label, extra] of [
+  ["direct_to_gd", { to_agent_id: "user", meta: { reply_mode: "direct_to_gd" } }],
+  ["to user", { to_agent_id: "user" }],
+  ["all-hands", { all_hands: "whole team" }],
+] as const) {
+  for (const kind of ["group", "private"] as const) {
+    test(`${kind}: a Slack original from another thread cannot turn a cogs-thread answer into ${label}`, async () => {
+      updates = [kind === "group" ? groupUpdate(50) : update(50, 71)]; await poller().pollOnce();
+      db.run(`INSERT OR IGNORE INTO thread (id, title, kind, participants_json, opened_by, last_message_at) VALUES ('slack-t2','s','dm','[]','user',datetime('now'))`);
+      db.run(`INSERT OR IGNORE INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, meta_json) VALUES ('slackmsg2','slack-t2','user','lisa','dm','슬랙','user','{"slack":{"channel":"CFAKE","thread_ts":"1.1"}}')`);
+      const res = await reply({ thread_id: injected[0]!.threadId, in_reply_to: "slackmsg2", ...extra });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("cogs_reply_mode_invalid");
+      expect(calls.filter((c) => c.method === "sendMessage")).toHaveLength(0);
+    });
+  }
+}
