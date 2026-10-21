@@ -8,7 +8,7 @@ import type { Database } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { LINK_HEADER, isDirectLocal, linkSecretMatches, readLinkKey } from "../lib/b3chatLink";
+import { linkGuard } from "../lib/b3chatLink";
 import { parseMemberChannel } from "../lib/memberChannel";
 import { validateBotToken } from "../lib/rotateToken";
 import { writeRegistrySafely } from "../lib/registrySafety";
@@ -158,7 +158,7 @@ function requestFingerprint(token: string, roomId: string, apiBase: string): str
   return createHash("sha256").update(`${token}\n${roomId}\n${apiBase}`).digest("hex");
 }
 
-function defaultRemoteAddress(c: Context): string | null {
+export function defaultRemoteAddress(c: Context): string | null {
   try { return getConnInfo(c).remote.address ?? null; } catch { return null; }
 }
 
@@ -216,12 +216,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     c.json({ ok: false, code, retryable, stage }, status);
 
   //  인증: 같은 기계 직접 + 공유 비밀. 둘 다 아니면 무엇이 틀렸는지도 말하지 않는다.
-  const guard = async (c: Context, next: () => Promise<void>) => {
-    if (!isDirectLocal(remote(c), c.req.raw.headers) || !linkSecretMatches(c.req.header(LINK_HEADER), readLinkKey(keyPath))) {
-      return fail(c, 403, "forbidden", "auth");
-    }
-    await next();
-  };
+  const guard = linkGuard({ keyPath, remote });
   app.use("/members/b3chat", guard);
   app.use("/members/b3chat/*", guard);
 
