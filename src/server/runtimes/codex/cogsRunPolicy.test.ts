@@ -120,6 +120,13 @@ describe("풀 — 권한이 바뀌면 예전 app-server 를 다시 쓰지 않는
     expect(b.reused).toBe(false);
     expect(a.client.closed).toBe(1);
   });
+  test("정책이 막힘이 되면 예전 권한으로 띄운 app-server 를 닫고, 다음 턴은 새로 띄운다", async () => {
+    const old = acquireClient("flo", mk, "cogs:1");
+    const r = await runViaAppServer({ prompt: "p", agentId: "flo", cogsRun: { mode: "blocked", reason: "schema_version" } } as never);
+    expect(r).toMatchObject({ ok: false, detail: "cogs_policy_blocked: schema_version" });
+    expect(old.client.closed).toBe(1);
+    expect(acquireClient("flo", mk, "cogs:1").reused).toBe(false);
+  });
   test("열쇠 없는 기존 호출은 지금처럼 재사용", () => {
     const a = acquireClient("dex", mk);
     expect(acquireClient("dex", mk).reused).toBe(true);

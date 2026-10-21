@@ -55,7 +55,9 @@ export async function runViaAppServer(
 ): Promise<CodexTurnResult> {
   const startedAt = nowMs();
   // cogs 정책이 깨졌거나 못 읽으면 넓혀서 돌지 않는다 — app-server 를 띄우지도 않는다.
+  //   예전 권한으로 띄워 둔 app-server(살아 있는 서브 작업 포함)도 닫는다. 남기면 그 권한으로 계속 돈다.
   if (opts.cogsRun?.mode === "blocked") {
+    dropClient(opts.agentId);
     return { ok: false, reply: "", detail: `cogs_policy_blocked: ${opts.cogsRun.reason}`.slice(0, 200), elapsedMs: 0 };
   }
   const run = runModeFor(opts);
