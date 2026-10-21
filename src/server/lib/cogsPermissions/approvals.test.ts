@@ -120,11 +120,19 @@ describe("세션 허용", () => {
   test("넓히기만 한 정책 변경 → 새 revision 으로 옮겨 계속 유효, 축소 → 폐기", () => {
     const { db, id } = setup();
     pressCogsApproval(db, press(id, { action: "pgs" }));
-    invalidateCogsApprovals(db, { agentId: "flo", reason: "policy_changed", newRevision: 4 });
+    invalidateCogsApprovals(db, { agentId: "flo", reason: "policy_changed", newRevision: 4, oldRevision: 3 });
     const q = { agentId: "flo", sessionId: "s1", processGen: "g1", op };
     expect(hasCogsSessionGrant(db, { ...q, currentRevision: 4 })).toBe(true);
     invalidateCogsApprovals(db, { agentId: "flo", reason: "policy_narrowed", newRevision: 5 });
     expect(hasCogsSessionGrant(db, { ...q, currentRevision: 5 })).toBe(false);
+  });
+  test("넓히기여도 바로 직전 revision 이 아닌(더 오래된) 세션 허용은 옮기지 않고 폐기", () => {
+    const { db, id } = setup();
+    pressCogsApproval(db, press(id, { action: "pgs" })); // revision 3 에 묶임
+    invalidateCogsApprovals(db, { agentId: "flo", reason: "policy_changed", newRevision: 5, oldRevision: 4 });
+    const q = { agentId: "flo", sessionId: "s1", processGen: "g1", op };
+    expect(hasCogsSessionGrant(db, { ...q, currentRevision: 5 })).toBe(false);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM cogs_permission_session_grant").get()).toEqual({ n: 0 });
   });
 });
 

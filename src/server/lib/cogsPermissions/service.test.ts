@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrate } from "../../db/migrate";
 import { getPermissionRequest } from "../permissionGate";
-import { createCogsApproval } from "./approvals";
+import { createCogsApproval, handOffCogsApproval, hasCogsSessionGrant, pressCogsApproval } from "./approvals";
 import { createCogsPermissionEvents, type CogsPermissionEvent } from "./events";
 import { createCogsPolicyService, currentCogsRevision } from "./service";
 
@@ -138,5 +138,41 @@ describe("reconcile — 원본 저장 뒤 정리 전에 죽은 경우", () => {
     expect(svc.reconcile()).toBe(1);
     expect(getPermissionRequest(db, old)!.status).toBe("expired");
     expect(getPermissionRequest(db, cur)!.status).toBe("pending");
+  });
+});
+
+describe("축소 저장 직후 중단 → 재시작 → 넓히기", () => {
+  test("축소 전 세션 허용이 되살아나지 않는다", () => {
+    const { svc, db, registryPath } = setup();
+    svc.update("flo", 0, { mode: "auto", allow: ["Read", "WebFetch"] }); // revision 1
+    const op = { runtime: "claude", agent_id: "flo", action: "run_command", command: "git status" };
+    const { request } = createCogsApproval(db, { op, roomId: "42", policyRevision: 1, sessionId: "s", processGen: "g", ttlMs: 60_000, nowMs: Date.now() });
+    pressCogsApproval(db, { requestId: request.id, action: "pgs", actorUserId: 7, ownerUserId: 7, roomId: 42, bridgeAgentId: "flo", currentRevision: 1, nowMs: Date.now() });
+    expect(handOffCogsApproval(db, { requestId: request.id, agentId: "flo", sessionId: "s", processGen: "g", currentRevision: 1, nowMs: Date.now() })).toBe(true);
+    const q = { agentId: "flo", sessionId: "s", processGen: "g", op };
+    expect(hasCogsSessionGrant(db, { ...q, currentRevision: 1 })).toBe(true);
+    // 축소된 revision 2 를 원본에만 쓰고 DB 정리 전에 서버가 죽었다
+    const list = JSON.parse(readFileSync(registryPath, "utf-8"));
+    list[0].cogs_permissions = { runtime: "claude", schema_version: 1, revision: 2, mode: "auto", allow: ["Read"] };
+    writeFileSync(registryPath, JSON.stringify(list));
+    // 재시작 정리: 세션 허용만 남은 팀원도 대상이다
+    svc.reconcile();
+    expect(db.prepare("SELECT COUNT(*) AS n FROM cogs_permission_session_grant").get()).toEqual({ n: 0 });
+    // 나중에 다른 규칙을 더해 넓힌다(revision 3)
+    expect(svc.update("flo", 2, { mode: "auto", allow: ["Read", "Grep"] })).toMatchObject({ ok: true, policy: { revision: 3 } });
+    expect(hasCogsSessionGrant(db, { ...q, currentRevision: 3 })).toBe(false);
+  });
+  test("재시작 정리가 없었더라도 넓히기는 직전 revision 의 허용만 옮긴다", () => {
+    const { svc, db, registryPath } = setup();
+    svc.update("flo", 0, { mode: "auto", allow: ["Read", "WebFetch"] });
+    const op = { runtime: "claude", agent_id: "flo", action: "run_command", command: "git status" };
+    const { request } = createCogsApproval(db, { op, roomId: "42", policyRevision: 1, sessionId: "s", processGen: "g", ttlMs: 60_000, nowMs: Date.now() });
+    pressCogsApproval(db, { requestId: request.id, action: "pgs", actorUserId: 7, ownerUserId: 7, roomId: 42, bridgeAgentId: "flo", currentRevision: 1, nowMs: Date.now() });
+    handOffCogsApproval(db, { requestId: request.id, agentId: "flo", sessionId: "s", processGen: "g", currentRevision: 1, nowMs: Date.now() });
+    const list = JSON.parse(readFileSync(registryPath, "utf-8"));
+    list[0].cogs_permissions = { runtime: "claude", schema_version: 1, revision: 2, mode: "auto", allow: ["Read"] };
+    writeFileSync(registryPath, JSON.stringify(list));
+    svc.update("flo", 2, { mode: "auto", allow: ["Read", "Grep"] });
+    expect(hasCogsSessionGrant(db, { agentId: "flo", sessionId: "s", processGen: "g", op, currentRevision: 3 })).toBe(false);
   });
 });

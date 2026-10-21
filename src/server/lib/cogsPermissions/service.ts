@@ -139,7 +139,7 @@ export function createCogsPolicyService(deps: CogsPolicyServiceDeps) {
     if (!r.ok) return r;
     const narrowed = isNarrowing(before, r.policy);
     const invalidated = invalidateCogsApprovals(db, {
-      agentId: memberId, reason: narrowed ? "policy_narrowed" : "policy_changed", newRevision: r.policy.revision, events,
+      agentId: memberId, reason: narrowed ? "policy_narrowed" : "policy_changed", newRevision: r.policy.revision, oldRevision: revisionOf(before), events,
       ...(exceptRequestId !== undefined ? { exceptRequestId } : {}),
     });
     events?.emit({
@@ -182,9 +182,11 @@ export function createCogsPolicyService(deps: CogsPolicyServiceDeps) {
    * (원본 저장 뒤 무효화 전에 죽은 경우).
    */
   function reconcile(): number {
+    // 미인계 승인이 있는 팀원과 세션 허용만 남은 팀원(이미 인계한 요청에서 생긴 것) 모두.
     const agents = db.prepare(
-      `SELECT DISTINCT b.agent_id AS agent_id FROM cogs_permission_binding b JOIN permission_request r ON r.id = b.request_id
-        WHERE b.invalidation_reason IS NULL AND b.handed_off_at_ms IS NULL AND r.status IN ('pending','allowed_once','allowed_always')`,
+      `SELECT b.agent_id AS agent_id FROM cogs_permission_binding b JOIN permission_request r ON r.id = b.request_id
+        WHERE b.invalidation_reason IS NULL AND b.handed_off_at_ms IS NULL AND r.status IN ('pending','allowed_once','allowed_always')
+       UNION SELECT agent_id FROM cogs_permission_session_grant`,
     ).all() as Array<{ agent_id: string }>;
     let n = 0;
     for (const { agent_id } of agents) {

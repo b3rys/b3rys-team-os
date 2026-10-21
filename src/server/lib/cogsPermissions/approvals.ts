@@ -190,6 +190,8 @@ export function invalidateCogsApprovals(
   db: Database,
   input: {
     agentId: string; reason: InvalidationReason; sessionId?: string; newRevision?: number; events?: CogsPermissionEvents;
+    /** 바로 직전 정책 revision. 넓히기일 때 이 revision 의 세션 허용만 새 revision 으로 옮긴다(더 오래된 것은 폐기). */
+    oldRevision?: number;
     /** 이 revision 에 묶인 것은 남긴다(재시작 정리용 — 원본과 다른 것만 지운다). */
     keepRevision?: number;
     /** '항상 허용' 을 일으킨 그 요청 — 새 revision 에 다시 묶이므로 무효화하지 않는다. */
@@ -214,8 +216,12 @@ export function invalidateCogsApprovals(
   }
   const sessionFilter = input.sessionId !== undefined ? " AND session_id = ?" : "";
   const args = input.sessionId !== undefined ? [input.agentId, input.sessionId] : [input.agentId];
-  if (input.reason === "policy_changed" && input.newRevision !== undefined) {
-    db.prepare(`UPDATE cogs_permission_session_grant SET policy_revision = ? WHERE agent_id = ?${sessionFilter}`).run(input.newRevision, ...args);
+  if (input.reason === "policy_changed" && input.newRevision !== undefined && input.oldRevision !== undefined) {
+    // 바로 직전 revision 에 묶인 것만 옮긴다. 그보다 오래된 것(중간에 축소가 있었을 수 있다)은 되살리지 않는다.
+    db.prepare(`UPDATE cogs_permission_session_grant SET policy_revision = ? WHERE agent_id = ? AND policy_revision = ?${sessionFilter}`)
+      .run(input.newRevision, input.agentId, input.oldRevision, ...args.slice(1));
+    db.prepare(`DELETE FROM cogs_permission_session_grant WHERE agent_id = ? AND policy_revision <> ?${sessionFilter}`)
+      .run(input.agentId, input.newRevision, ...args.slice(1));
   } else {
     db.prepare(`DELETE FROM cogs_permission_session_grant WHERE agent_id = ?${sessionFilter}`).run(...args);
   }
