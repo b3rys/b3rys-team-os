@@ -1432,7 +1432,10 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         openDb: () => openDb(defaultTeamDbPath()),
         currentStamp: () => currentCogsStamp(registryPath, liveAgentId),
         waiters: cogsApprovals.waiters,
-        sendCard: (input) => sendApprovalCard(TG_API, token, roomId ?? "", input, fetch, { agentId: liveAgentId }),
+        // 요청마다 기한을 건다 — 끝나지 않는 전송이 승인 대기를 붙잡지 않게.
+        sendCard: (input) => sendApprovalCard(TG_API, token, roomId ?? "", input,
+          ((url: string, init?: RequestInit) => fetch(url, { ...init, signal: AbortSignal.timeout(10_000) })) as typeof fetch,
+          { agentId: liveAgentId }),
       });
       live.onCogsApproval = approver.approve;
     }

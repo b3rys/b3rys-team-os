@@ -19,6 +19,8 @@ import type { ApprovalRequest, ReviewDecision } from "./appServerClient";
 
 /** 코덱스 app-server 가 사람 응답을 기다리는 시간보다 짧게 — 늦은 허용이 끊긴 요청에 가지 않게. */
 export const COGS_APPROVAL_TTL_MS = 240_000;
+/** 카드 전송을 기다리는 상한. 넘으면 실패로 보고 거절한다. */
+export const CARD_SEND_TIMEOUT_MS = 15_000;
 
 export interface CogsApproverDeps {
   agentId: string;
@@ -33,6 +35,7 @@ export interface CogsApproverDeps {
   sendCard: (input: ApprovalCardInput) => Promise<CardSendResult>;
   now?: () => number;
   ttlMs?: number;
+  cardTimeoutMs?: number;
   log?: (line: string) => void;
 }
 
@@ -57,9 +60,12 @@ export function createCogsCodexApprover(deps: CogsApproverDeps): {
     const stamp = deps.currentStamp();
     if (!stamp) return done("denied_no_policy", "denied");
     const p = (req.params ?? {}) as Record<string, unknown>;
-    // 세션 = 코덱스 대화(thread). 세션 허용은 이 대화·이 프로세스 세대·이 도장에서만 다시 쓴다.
-    const sessionId = typeof p.threadId === "string" && p.threadId ? p.threadId : "no_thread";
-    const op = { ...buildOperationFromApproval(req, deps.agentId, deps.cwd), agent_id: deps.agentId };
+    // 실제 실행 폴더는 요청에 실린 값이 우선이다 — 같은 명령이라도 폴더가 다르면 다른 일이다.
+    const cwd = typeof p.cwd === "string" && p.cwd ? p.cwd : deps.cwd ?? "";
+    // 세션 = 코덱스 대화(thread) + 실행 폴더. 세션 허용은 이 대화·이 폴더·이 프로세스 세대·이 도장에서만 다시 쓴다.
+    const thread = typeof p.threadId === "string" && p.threadId ? p.threadId : "no_thread";
+    const sessionId = `${thread}\u0000${cwd}`;
+    const op = { ...buildOperationFromApproval(req, deps.agentId, cwd || undefined), agent_id: deps.agentId };
     const risks = tierDReasons(op);
 
     let requestId: string;
@@ -83,7 +89,17 @@ export function createCogsCodexApprover(deps: CogsApproverDeps): {
 
     // 등록 먼저 — 카드가 가고 바로 눌려도 놓치지 않는다(대기는 등록 뒤 DB 를 한 번 읽는다).
     const waiting = deps.waiters.wait(requestId);
-    const sent = await deps.sendCard(cogsCardInputFor(req, requestId, risks, false)).catch(() => ({ ok: false } as CardSendResult));
+    // 전송은 기한 안에서만 기다린다. 그사이 만료·취소로 대기가 먼저 끝나면 전송 완료를 기다리지 않고 닫는다
+    //   (승인 중에는 턴 타이머가 멈춰 있어, 여기서 붙잡히면 턴 전체가 붙잡힌다).
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const raced = await Promise.race([
+      deps.sendCard(cogsCardInputFor(req, requestId, risks, false)).then((r) => ({ sent: r }), () => ({ sent: { ok: false } as CardSendResult })),
+      waiting.then((o) => ({ early: o })),
+      new Promise<{ sent: CardSendResult }>((r) => { timer = setTimeout(() => r({ sent: { ok: false } }), deps.cardTimeoutMs ?? CARD_SEND_TIMEOUT_MS); }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if ("early" in raced) return done("denied", "denied");
+    const sent = raced.sent;
     if (!sent.ok) {
       log(`[cogs-approval] 카드 전송 실패 → 거절 agent=${deps.agentId} request=${requestId}`);
       deps.waiters.cancel(requestId, "card_failed");

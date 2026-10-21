@@ -17,11 +17,11 @@ import type { ApprovalRequest } from "./appServerClient";
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
-const cmd = (command: string, threadId = "th1"): ApprovalRequest => ({
-  method: "item/commandExecution/requestApproval", params: { command, threadId, turnId: "t1", itemId: "i1" }, serverRequestId: "7",
+const cmd = (command: string, threadId = "th1", cwd?: string): ApprovalRequest => ({
+  method: "item/commandExecution/requestApproval", params: { command, threadId, turnId: "t1", itemId: "i1", ...(cwd ? { cwd } : {}) }, serverRequestId: "7",
 });
 
-function setup(o: { stamp?: string | null; room?: string | null; cardOk?: boolean; ttlMs?: number } = {}) {
+function setup(o: { stamp?: string | null; room?: string | null; cardOk?: boolean; ttlMs?: number; cardHangs?: boolean; cardTimeoutMs?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "cogs-appr-"));
   dirs.push(dir);
   const dbPath = join(dir, "team.db");
@@ -34,8 +34,10 @@ function setup(o: { stamp?: string | null; room?: string | null; cardOk?: boolea
   const approver = createCogsCodexApprover({
     agentId: "flo", roomId: o.room === undefined ? "42" : o.room, processGen: "g1", cwd: "/w",
     openDb: () => openDb(dbPath), currentStamp: () => stamp, waiters, ttlMs: o.ttlMs ?? 30_000, log: () => {},
+    ...(o.cardTimeoutMs ? { cardTimeoutMs: o.cardTimeoutMs } : {}),
     sendCard: async (input) => {
       cards.push(input);
+      if (o.cardHangs) return new Promise(() => {});
       if (o.cardOk === false) return { ok: false };
       queueMicrotask(() => { for (const f of onCard.splice(0)) f(input); });
       return { ok: true, messageId: 900 + cards.length };
@@ -89,6 +91,22 @@ describe("거절 쪽으로 닫히는 경우", () => {
   });
 });
 
+describe("카드 전송이 끝나지 않아도 턴을 붙잡지 않는다", () => {
+  test("전송 중 만료되면 전송을 기다리지 않고 거절", async () => {
+    const s = setup({ cardHangs: true, ttlMs: 40 });
+    const t0 = Date.now();
+    expect(await s.approver.approve(cmd("ls"))).toBe("denied");
+    expect(Date.now() - t0).toBeLessThan(1_000);
+    expect(s.waiters.size()).toBe(0);
+  });
+  test("전송 기한을 넘기면 실패로 보고 거절, 대기 정리", async () => {
+    const s = setup({ cardHangs: true, ttlMs: 30_000, cardTimeoutMs: 50 });
+    expect(await s.approver.approve(cmd("ls"))).toBe("denied");
+    expect(s.approver.lastOutcome()).toBe("card_failed");
+    expect(s.waiters.size()).toBe(0);
+  });
+});
+
 describe("허용", () => {
   test("이번만 → 허용 한 번, 인계 기록, '항상' 버튼 없음", async () => {
     const s = setup();
@@ -122,6 +140,17 @@ describe("허용", () => {
     expect(s.cards.length).toBe(2);
   });
 
+  test("세션 허용은 실행 폴더가 다르면 다시 묻는다(같은 명령이라도)", async () => {
+    const s = setup();
+    s.pressOnCard("pgs");
+    expect(await s.approver.approve(cmd("./deploy.sh", "th1", "/w/staging"))).toBe("approved");
+    s.pressOnCard("pgd");
+    expect(await s.approver.approve(cmd("./deploy.sh", "th1", "/w/production"))).toBe("denied");
+    expect(s.cards.length).toBe(2);
+    expect(await s.approver.approve(cmd("./deploy.sh", "th1", "/w/staging"))).toBe("approved");
+    expect(s.approver.lastOutcome()).toBe("session_grant");
+  });
+
   test("세션 허용도 정책이 바뀌면 다시 묻는다", async () => {
     const s = setup();
     s.pressOnCard("pgs");
@@ -151,6 +180,6 @@ describe("허용", () => {
     const id = s.cards[0]!.requestId;
     // 이미 인계한 요청을 다시 넘기려 해도 실패한다.
     const { handOffCogsApproval } = await import("../../lib/cogsPermissions/approvals");
-    expect(handOffCogsApproval(s.db, { requestId: id, agentId: "flo", sessionId: "th1", processGen: "g1", currentStamp: "1:aaaa", nowMs: Date.now() })).toBe(false);
+    expect(handOffCogsApproval(s.db, { requestId: id, agentId: "flo", sessionId: getBinding(s.db, id)!.session_id, processGen: "g1", currentStamp: "1:aaaa", nowMs: Date.now() })).toBe(false);
   });
 });
