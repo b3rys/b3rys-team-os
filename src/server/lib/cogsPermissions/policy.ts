@@ -5,6 +5,7 @@
  * 런타임이 실제로 집행할 수 있다고 확인된 칸만 둔다 — 못 막는 것을 막는 것처럼 보이면 안 된다.
  * (코덱스 '폴더 밖 읽기'·'명령 끄기'는 집행 시험 전이라 칸이 없다.)
  */
+import { createHash } from "node:crypto";
 import { isAbsolute, normalize } from "node:path";
 
 export const POLICY_SCHEMA_VERSION = 1;
@@ -141,4 +142,20 @@ export function isNarrowing(before: PolicyState, after: CogsPolicy): boolean {
       || b.writable_roots.some((root) => !after.writable_roots.includes(root));
   }
   return true;
+}
+
+/**
+ * 정책 도장 = revision + 내용 해시. 승인은 이 도장에 묶인다 —
+ * revision 을 그대로 두고 내용만 바꾸거나(손편집) revision 이 거꾸로 가도 도장이 달라져 옛 카드가 통과하지 못한다.
+ */
+export function policyStamp(policy: CogsPolicy): string {
+  return `${policy.revision}:${createHash("sha256").update(canonicalJson(policy)).digest("hex").slice(0, 32)}`;
+}
+
+function canonicalJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
+  if (v && typeof v === "object") {
+    return `{${Object.keys(v as Record<string, unknown>).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson((v as Record<string, unknown>)[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(v);
 }

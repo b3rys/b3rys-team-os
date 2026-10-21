@@ -8,7 +8,7 @@
 import { openDb } from "../../db/migrate";
 import { ensureCogsPermissionTables, pressCogsApproval, type CardAction, type PressResult } from "./approvals";
 import { clearApprovalCardButtons } from "./card";
-import { createCogsPolicyService, currentCogsRevision } from "./service";
+import { createCogsPolicyService, currentCogsStamp } from "./service";
 
 export interface CogsCallbackQuery {
   id: string;
@@ -53,7 +53,7 @@ export async function handleCogsApprovalCallback(token: string, cb: CogsCallback
       ownerUserId: cb.cogs_bot_owner_id,
       roomId: cb.message?.chat.id,
       bridgeAgentId: deps.agentId,
-      currentRevision: currentCogsRevision(deps.registryPath, deps.agentId),
+      currentStamp: currentCogsStamp(deps.registryPath, deps.agentId),
       nowMs: (deps.nowMs ?? Date.now)(),
       persistAlways: (rule, row) => svc.addAlways(deps.agentId, rule, row.id),
     });

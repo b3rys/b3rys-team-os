@@ -6,6 +6,7 @@ import { migrate, openDb } from "../../db/migrate";
 import { getPermissionRequest } from "../permissionGate";
 import { createCogsApproval } from "./approvals";
 import { handleCogsApprovalCallback, type CogsCallbackQuery } from "./bridgeCallback";
+import { currentCogsStamp } from "./service";
 
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
@@ -24,7 +25,7 @@ function setup(alwaysRule: string | null = "Bash(git push:*)") {
   migrate(db);
   const { request } = createCogsApproval(db, {
     op: { runtime: "claude", agent_id: "flo", action: "run_command", command: "git push" },
-    roomId: "42", policyRevision: 1, sessionId: "s", processGen: "g", ttlMs: 300_000, nowMs: Date.now(), alwaysRule,
+    roomId: "42", policyStamp: currentCogsStamp(registryPath, "flo")!, sessionId: "s", processGen: "g", ttlMs: 300_000, nowMs: Date.now(), alwaysRule,
   });
   db.close();
   const calls: Array<{ method: string; body: any }> = [];
@@ -87,4 +88,13 @@ describe("cogs 카드 누름", () => {
     expect(await handleCogsApprovalCallback("T", cb(s.id, { data: "menu:open" }), s.deps)).toBe("ignored");
     expect(s.calls).toEqual([]);
   });
+});
+
+test("revision 은 그대로 두고 내용만 바꾸면(손편집) 옛 카드는 만료", async () => {
+  const s = setup();
+  const list = JSON.parse(readFileSync(s.registryPath, "utf-8"));
+  list[0].cogs_permissions.allow = ["WebFetch"]; // revision 1 그대로
+  writeFileSync(s.registryPath, JSON.stringify(list));
+  expect(await handleCogsApprovalCallback("T", cb(s.id), s.deps)).toBe("expired");
+  expect(s.status()).toBe("expired");
 });
