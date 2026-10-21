@@ -54,11 +54,18 @@ export async function runViaAppServer(
   makeClient: AppServerClientFactory = defaultAppServerClientFactory,
 ): Promise<CodexTurnResult> {
   const startedAt = nowMs();
+  // cogs 정책이 깨졌거나 못 읽으면 넓혀서 돌지 않는다 — app-server 를 띄우지도 않는다.
+  //   예전 권한으로 띄워 둔 app-server(살아 있는 서브 작업 포함)도 닫는다. 남기면 그 권한으로 계속 돈다.
+  if (opts.cogsRun?.mode === "blocked") {
+    dropClient(opts.agentId);
+    return { ok: false, reply: "", detail: `cogs_policy_blocked: ${opts.cogsRun.reason}`.slice(0, 200), elapsedMs: 0 };
+  }
+  const run = runModeFor(opts);
   // 턴 뒤에도 서브에이전트가 살아 결과를 반환할 수 있도록 운영 클라이언트를 풀에 보존한다.
   // 주입한 시험 클라이언트는 다음 시험으로 상태가 새지 않도록 풀에 넣지 않는다.
   const pooled = makeClient === defaultAppServerClientFactory;
   const { client, reused } = pooled
-    ? acquireClient(opts.agentId, () => makeClient(opts))
+    ? acquireClient(opts.agentId, () => makeClient(opts), run.poolKey)
     : { client: makeClient(opts), reused: false };
   // 팀원 ID는 로그·아티팩트·세션·승인 주인을 구분하므로 필수다. 기본 ID로 다른 실재 팀원의 기록을 만들지 않게 컴파일에서 누락을 막는다.
   try {
@@ -69,9 +76,11 @@ export async function runViaAppServer(
       cwd: opts.cwd,
       model: opts.model,
       resumeThreadId: opts.resumeSessionId, // resume ID로 멀티턴 맥락을 이어간다.
-      approvalPolicy: "never",
-      sandbox: "danger-full-access",
+      approvalPolicy: run.approvalPolicy,
+      sandbox: run.sandbox,
       approvalsReviewer: "user",
+      ...(run.writableRoots ? { writableRoots: run.writableRoots } : {}),
+      ...(run.networkAccess !== undefined ? { networkAccess: run.networkAccess } : {}),
     });
     const threadId = client.currentThreadId;
     // 진행 중 턴에 끼어들 수 있게 등록 — 이게 없으면 턴 도는 동안 온 메시지가 연기되다 사라진다
@@ -100,6 +109,11 @@ export async function runViaAppServer(
       //   그 시험들이 계속 통과하는 것은 이 경로가 돈다는 뜻이 아니다.
       //   지우지 않는 이유: 되돌리기가 approvalPolicy 한 값이면 끝나야 한다.
       onApproval: async (req) => {
+        // cogs 정책 팀원은 cogs 카드로만 묻는다. 처리기가 없거나 실패하면 거절(텔레그램 팝업·never 로 넘기지 않는다).
+        if (opts.cogsRun?.mode === "enforced") {
+          if (!opts.onCogsApproval) return "denied";
+          try { return await opts.onCogsApproval(req); } catch { return "denied"; }
+        }
         // Codex의 질문을 받으면 이 턴 주인의 방으로 전달하고 사람 결정을 반환한다. 자체 판정층·공용 op 방·고정 팀원 목적지를 사용하지 않는다.
         return db
           ? await requestApprovalPopup(db, req, opts.agentId, opts.cwd)
@@ -142,6 +156,26 @@ export async function runViaAppServer(
     // 풀에 있는 것은 닫지 않는다. 이 프로세스 안에서 서브에이전트가 아직 돌고 있을 수 있다.
     //   죽은 프로세스는 다음 턴에 acquireClient 가 알아서 새로 만든다.
   }
+}
+
+/**
+ * 이번 턴의 실행 모드. cogs 정책이 적용된 팀원만 정책값을 쓰고, 나머지는 지금 그대로(never + danger-full-access).
+ * poolKey 가 다르면 예전 app-server 를 다시 쓰지 않는다.
+ */
+export function runModeFor(opts: Pick<CodexTurnOptions, "cogsRun">): {
+  approvalPolicy: string; sandbox: string; writableRoots?: string[]; networkAccess?: boolean; poolKey?: string;
+} {
+  const c = opts.cogsRun;
+  if (c?.mode === "enforced") {
+    return {
+      approvalPolicy: c.approvalPolicy,
+      sandbox: c.sandbox,
+      ...(c.sandbox === "workspace-write" ? { writableRoots: c.writableRoots } : {}),
+      ...(c.networkAccess !== undefined ? { networkAccess: c.networkAccess } : {}),
+      poolKey: `cogs:${c.stamp}`,
+    };
+  }
+  return { approvalPolicy: "never", sandbox: "danger-full-access" };
 }
 
 function nowMs(): number {

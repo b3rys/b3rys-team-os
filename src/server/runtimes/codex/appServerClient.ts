@@ -58,6 +58,13 @@ export interface ThreadStartOptions {
   /** 승인 주체. openclaw 는 "user" 를 명시한다. */
   approvalsReviewer?: string;
   runtimeWorkspaceRoots?: string[];
+  /**
+   * workspace-write 일 때 turn/start 의 sandboxPolicy 에 싣는 쓰기 루트·인터넷.
+   * thread/start 의 sandbox 는 문자열만 받으므로 범위는 매 턴 sandboxPolicy 로 보낸다(턴마다 같은 값을 다시 싣는다).
+   * runtimeWorkspaceRoots 와 다른 값이다 — 그것은 experimentalApi 이고 쓰기 허용 목록이 아니다.
+   */
+  writableRoots?: string[];
+  networkAccess?: boolean;
   /** resume으로 이전 대화를 이어가되 실패하면 새 thread에서 진행한다. */
   resumeThreadId?: string;
 }
@@ -70,6 +77,19 @@ export function sandboxModeToTurnPolicyType(mode: string): string {
     case "danger-full-access": return "dangerFullAccess";
     default: return mode; // 모르는 값은 그대로 — codex 가 거부하면 그게 답이다
   }
+}
+
+export type TurnSandboxPolicy = { type: string; writableRoots?: string[]; networkAccess?: boolean };
+
+/** turn/start sandboxPolicy. 범위 칸은 workspace-write 에서만, 그리고 부른 쪽이 준 것만 싣는다(안 주면 지금과 같은 모양). */
+export function turnSandboxPolicy(opts: Pick<ThreadStartOptions, "sandbox" | "writableRoots" | "networkAccess">): TurnSandboxPolicy {
+  const type = sandboxModeToTurnPolicyType(opts.sandbox ?? "");
+  if (opts.sandbox !== "workspace-write") return { type };
+  return {
+    type,
+    ...(opts.writableRoots ? { writableRoots: [...opts.writableRoots] } : {}),
+    ...(opts.networkAccess !== undefined ? { networkAccess: opts.networkAccess } : {}),
+  };
 }
 
 interface Pending { resolve: (v: any) => void; reject: (e: any) => void; method: string; }
@@ -141,7 +161,7 @@ export class CodexAppServerClient {
   private pending = new Map<number, Pending>();
   private threadId: string | null = null;
   /** thread 설정의 암묵적 승계를 가정하지 않고 turn/start에도 실행 모드를 명시해 두 요청의 경계를 맞춘다. */
-  private turnPolicy: { approvalPolicy?: string; sandboxPolicy?: { type: string }; approvalsReviewer?: string } = {};
+  private turnPolicy: { approvalPolicy?: string; sandboxPolicy?: TurnSandboxPolicy; approvalsReviewer?: string } = {};
   /** 공개 — 진행 중 턴에 끼어들려면(steer) 밖에서 turnId 유무를 볼 수 있어야 한다. 쓰기는 내부에서만. */
   currentTurnId: string | null = null;
   private activeHandlers: RunTurnHandlers | null = null;
@@ -202,7 +222,7 @@ export class CodexAppServerClient {
     // turn/start 에 다시 실을 값 — sandbox 는 문자열(thread)이 아니라 객체(turn) 라 모양이 다르다.
     this.turnPolicy = {
       ...(opts.approvalPolicy ? { approvalPolicy: opts.approvalPolicy } : {}),
-      ...(opts.sandbox ? { sandboxPolicy: { type: sandboxModeToTurnPolicyType(opts.sandbox) } } : {}),
+      ...(opts.sandbox ? { sandboxPolicy: turnSandboxPolicy(opts) } : {}),
       ...(opts.approvalsReviewer ? { approvalsReviewer: opts.approvalsReviewer } : {}),
     };
     // resume 실패는 새 thread로 폴백해 맥락을 복구하지 못해도 요청 처리를 진행한다.

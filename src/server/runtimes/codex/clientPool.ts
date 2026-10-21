@@ -9,17 +9,21 @@ export interface PoolableClient {
 }
 
 const pool = new Map<string, PoolableClient>();
+/** 그 클라이언트를 띄운 실행 권한 열쇠(cogs 정책 도장). 다르면 다시 쓰지 않는다 — 예전 권한의 app-server·서브 작업이 다음 턴에 남지 않게. */
+const keys = new Map<string, string | undefined>();
 
 /**
  * 그 팀원의 살아있는 클라이언트를 준다. 없거나 죽었으면 새로 만든다.
  * 죽은 것을 그대로 돌려주면 그 턴이 통째로 실패한다 — 프로세스는 크래시·재시작으로 언제든 죽는다.
  */
-export function acquireClient<T extends PoolableClient>(agentId: string, create: () => T): { client: T; reused: boolean } {
+export function acquireClient<T extends PoolableClient>(agentId: string, create: () => T, policyKey?: string): { client: T; reused: boolean } {
   const existing = pool.get(agentId) as T | undefined;
-  if (existing && !existing.isClosed) return { client: existing, reused: true };
-  if (existing) pool.delete(agentId); // 죽은 것 치운다
+  if (existing && !existing.isClosed && keys.get(agentId) === policyKey) return { client: existing, reused: true };
+  if (existing && !existing.isClosed) dropClient(agentId); // 권한이 바뀌었다 — 닫는다(살아 있는 서브 작업도 같이 끝난다)
+  else if (existing) pool.delete(agentId); // 죽은 것 치운다
   const client = create();
   pool.set(agentId, client);
+  keys.set(agentId, policyKey);
   return { client, reused: false };
 }
 
@@ -27,6 +31,7 @@ export function acquireClient<T extends PoolableClient>(agentId: string, create:
 export function dropClient(agentId: string): void {
   const c = pool.get(agentId);
   pool.delete(agentId);
+  keys.delete(agentId);
   try { c?.close(); } catch { /* 정리 실패가 상위를 막지 않는다 */ }
 }
 

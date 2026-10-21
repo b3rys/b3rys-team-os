@@ -1,5 +1,12 @@
 import { currentCogsAllowlist } from "./cogsAllowlist";
 import { handleCogsApprovalCallback } from "../../lib/cogsPermissions/bridgeCallback";
+import { createBridgeCogsApprovals } from "../../lib/cogsPermissions/waiters";
+import { readPolicy } from "../../lib/cogsPermissions/policy";
+import { resolveCogsCodexRun, type CogsCodexRun } from "./cogsRunPolicy";
+import { createCogsCodexApprover } from "./cogsApprover";
+import { currentCogsStamp } from "../../lib/cogsPermissions/service";
+import { sendApprovalCard } from "../../lib/cogsPermissions/card";
+import { openDb } from "../../db/migrate";
 import { reasoningSummaryOf } from "./reasoningSummary";
 import { createReactionInbox, reactionInputs, type ReactionInbox, type ReactionUpdate, type ReactionRef } from "../../lib/reactionInput";
 import { randomUUID } from "node:crypto";
@@ -72,6 +79,18 @@ export interface BridgeDeps {
   registerScheduleReminder?: (req: ScheduleMarkerRequest, ctx: ScheduleMarkerContext) => Promise<string>;
   /** 1:1 대화 세션을 재시작 넘어 기억한다. 미지정이면 기억하지 않는다(시험 기본값). */
   dmSessions?: DmSessionStore;
+  /** cogs 채널 브리지만: 턴마다 정책 원본을 다시 읽어 실행 설정을 정한다. 없으면 지금 동작 그대로. */
+  cogsRunFor?: () => CogsCodexRun;
+  /** cogs 정책 팀원의 승인 요청 처리(카드). */
+  onCogsApproval?: CodexTurnOptions["onCogsApproval"];
+}
+
+/** 모든 턴 진입점(1:1·그룹·인사·리액션·일정 요약)이 같은 cogs 실행 설정을 싣는다. */
+function cogsTurnOpts(deps: BridgeDeps): Pick<CodexTurnOptions, "cogsRun" | "onCogsApproval"> {
+  if (!deps.cogsRunFor) return {};
+  let run: CogsCodexRun;
+  try { run = deps.cogsRunFor(); } catch (e) { run = { mode: "blocked", reason: `policy_read_failed: ${e instanceof Error ? e.message : e}` }; }
+  return { cogsRun: run, ...(deps.onCogsApproval ? { onCogsApproval: deps.onCogsApproval } : {}) };
 }
 
 /** 팀원 단위 activeTurns만으로는 대화를 구분할 수 없어 진행 중 chat도 보존한다. 같은 대화만 steer해야 다른 대화의 입력이 섞이지 않는다. */
@@ -895,6 +914,7 @@ async function handleMessageTurn(
       sandbox: deps.sandbox,
       networkAccess: deps.networkAccess,
       writableRoots: deps.workdir ? [deps.workdir] : [],
+      ...cogsTurnOpts(deps),
     });
     if (result.ok) reactionClaim?.commit(); else reactionClaim?.rollback();
   } catch (error) {
@@ -967,6 +987,7 @@ async function handleMessageTurn(
           prompt: `[schedule_reminder tool result]\n${hostResult}\nDescribe this result to the user. Do not call the scheduler again.`,
           agentId: selfAgentId, resumeSessionId: result.sessionId, codexHome: deps.codexHome,
           cwd: deps.workdir, sandbox: deps.sandbox, networkAccess: deps.networkAccess,
+          ...cogsTurnOpts(deps),
         });
       } catch {
         summary = { ok: false, reply: "", detail: "schedule_summary_exception", elapsedMs: 0 };
@@ -1397,6 +1418,35 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     editMessage: deps.editMessage ?? tgEdit(token),
     reactMessage: deps.reactMessage ?? tgReact(token),
   };
+  // cogs 승인 대기 — DB 가 진실, 서버 신호·카드 누름·만료 타이머는 다시 보는 계기.
+  const cogsApprovals = live.channel?.kind === "b3chat"
+    ? createBridgeCogsApprovals({ agentId: liveAgentId, openDb: () => openDb(defaultTeamDbPath()) })
+    : null;
+  // cogs 채널만 정책을 본다. 턴마다 원본을 다시 읽어 축소가 다음 턴에 바로 적용된다(풀은 도장이 바뀌면 다시 띄운다).
+  if (live.channel?.kind === "b3chat" && !live.cogsRunFor) {
+    const registryPath = process.env.TEAM_AGENT_REGISTRY?.trim() || DEFAULT_AGENT_REGISTRY;
+    // 정책 팀원의 승인 요청 → 주인 1:1 방 카드 → 결정 → 응답 하나.
+    if (cogsApprovals && !live.onCogsApproval) {
+      const roomId = live.channel.ownerChat ?? null;
+      const approver = createCogsCodexApprover({
+        agentId: liveAgentId, roomId, processGen: cogsApprovals.processGen, cwd: workdir,
+        openDb: () => openDb(defaultTeamDbPath()),
+        currentStamp: () => currentCogsStamp(registryPath, liveAgentId),
+        waiters: cogsApprovals.waiters,
+        // 요청마다 기한을 건다 — 끝나지 않는 전송이 승인 대기를 붙잡지 않게.
+        sendCard: (input) => sendApprovalCard(TG_API, token, roomId ?? "", input,
+          ((url: string, init?: RequestInit) => fetch(url, { ...init, signal: AbortSignal.timeout(10_000) })) as typeof fetch,
+          { agentId: liveAgentId }),
+      });
+      live.onCogsApproval = approver.approve;
+    }
+    live.cogsRunFor = () => {
+      const list = JSON.parse(readFileSync(registryPath, "utf-8")) as Array<{ id?: string; cogs_permissions?: unknown }>;
+      const entry = list.find((a) => a?.id === liveAgentId);
+      if (!entry) return { mode: "blocked", reason: "agent_not_found" };
+      return resolveCogsCodexRun(readPolicy(entry.cogs_permissions, "codex"), workdir);
+    };
+  }
   let offset = 0;
   let ownBotId: number | undefined;
   let readyMarked = false;
@@ -1425,6 +1475,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     agentId: liveAgentId,
     pidFile,
     log: (line) => console.log(line),
+    ...(cogsApprovals ? { onControl: cogsApprovals.onControl } : {}),
     enqueue: (r) => {
       const chatId = Number(r.groupId);
       if (!Number.isFinite(chatId)) {
@@ -1461,6 +1512,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
       const left = turns.pendingCount();
       if (left > 0) console.log(`[codex-bridge] 종료 — ★큐에 남은 턴 ${left}건은 돌지 않는다★`);
       try {
+        cogsApprovals?.close();
         windowHandle.close();
       } catch {
         /* 정리 실패가 종료를 막지 않는다 */
@@ -1514,6 +1566,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
               registryPath: process.env.TEAM_AGENT_REGISTRY?.trim() || DEFAULT_AGENT_REGISTRY,
               dbPath: defaultTeamDbPath(),
             });
+            cogsApprovals?.afterCallback();
           }
           catch (e) { console.error(`[codex-bridge] 승인 콜백 처리 실패: ${e instanceof Error ? e.message : e}`); }
           continue;

@@ -70,6 +70,9 @@ import { ensureLinkKey, linkKeyPath } from "./lib/b3chatLink";
 import { createB3chatTeammateRoutes } from "./routes/b3chatTeammate";
 import { createB3chatPermissionRoutes } from "./routes/b3chatPermissions";
 import { createCogsPermissionEvents } from "./lib/cogsPermissions/events";
+import { pokeBridgesWithOpenApprovals, subscribeBridgeDelivery } from "./lib/cogsPermissions/delivery";
+import { callCodexBridgeControl } from "./lib/codexBridgeClient";
+import { claudeCogsPaths } from "./runtimes/claude/cogsLauncher";
 import { subscribeCardAdapter } from "./lib/cogsPermissions/cardAdapter";
 import { createCogsPolicyService } from "./lib/cogsPermissions/service";
 import { readMemberChannel } from "./lib/memberChannel";
@@ -537,11 +540,20 @@ subscribeCardAdapter(cogsPermissionEvents, {
   apiBaseOf: (id) => { try { const ch = readMemberChannel(id, REGISTRY_PATH); return ch.kind === "b3chat" && !ch.error ? ch.apiBase : null; } catch { return null; } },
   tokenFileOf: (id) => codexBridgePaths(id).tokenFile,
 });
+// 서버에서 일어난 무효화·정책 변경을 그 팀원 브리지에 알린다(브리지는 DB 를 다시 읽는다). window 파일은 보낼 때마다 다시 읽는다.
+const cogsBridgeControl = { send: (req: Parameters<typeof callCodexBridgeControl>[0]) => {
+  let runtime: string | undefined;
+  try { runtime = (JSON.parse(readFileSync(REGISTRY_PATH, "utf-8")) as Array<{ id?: string; runtime?: string }>).find((a) => a?.id === req.agentId)?.runtime; } catch { runtime = undefined; }
+  return callCodexBridgeControl(req, { pidFile: (runtime === "claude_channel" ? claudeCogsPaths(req.agentId) : codexBridgePaths(req.agentId)).pidFile });
+} };
+subscribeBridgeDelivery(cogsPermissionEvents, cogsBridgeControl);
 api.route("/", createB3chatPermissionRoutes({ db, registryPath: REGISTRY_PATH, events: cogsPermissionEvents, onRegistryChanged: reloadRegistryFromDisk }));
 try {
   const n = createCogsPolicyService({ registryPath: REGISTRY_PATH, db, events: cogsPermissionEvents }).reconcile();
   if (n) console.log(`[cogs-permissions] 시작 정리: 정책 revision 이 바뀐 승인 ${n}건 무효화`);
 } catch (e) { console.error("[cogs-permissions] 시작 정리 실패:", (e as Error).message); }
+// 서버가 꺼져 있던 사이 놓친 신호 — 열린 승인이 있는 브리지마다 한 번 다시 보게 한다.
+void pokeBridgesWithOpenApprovals(db, cogsBridgeControl).catch((e) => console.error("[cogs-permissions] 시작 신호 실패:", (e as Error).message));
 
 const acceptanceApi = createAcceptanceRoutes({
   db,
