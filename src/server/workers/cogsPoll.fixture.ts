@@ -318,3 +318,12 @@ test("group: another member cannot answer this member's group original", async (
   expect((await res.json()).error).toBe("cogs_reply_needs_in_reply_to");
   expect(calls.filter((c) => c.method === "sendMessage")).toHaveLength(0);
 });
+test("group: a Slack original from another thread cannot redirect a group-thread reply", async () => {
+  updates = [groupUpdate(44)]; await poller().pollOnce();
+  db.run(`INSERT INTO thread (id, title, kind, participants_json, opened_by, last_message_at) VALUES ('slack-t','s','dm','[]','user',datetime('now'))`);
+  db.run(`INSERT INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, meta_json) VALUES ('slackmsg','slack-t','user','lisa','dm','슬랙','user','{"slack":{"channel":"CFAKE","thread_ts":"1.1"}}')`);
+  const res = await reply({ thread_id: injected[0]!.threadId, in_reply_to: "slackmsg" });
+  expect(res.status).toBe(400);
+  expect((await res.json()).error).toBe("cogs_reply_needs_in_reply_to");
+  expect(calls.filter((c) => c.method === "sendMessage")).toHaveLength(0);
+});
