@@ -116,6 +116,7 @@ export function createCogsPolicyService(deps: CogsPolicyServiceDeps) {
     memberId: string,
     expectedRevision: number | null,
     build: (state: PolicyState, member: CogsMember, currentRevision: number) => { ok: true; policy: CogsPolicy } | { ok: false; code: "unsupported_field" | "bad_policy" | "invalid_policy" },
+    exceptRequestId?: string,
   ): UpdateResult {
     if (!ID_RE.test(memberId)) return { ok: false, code: "not_found" };
     let before: PolicyState = { state: "absent" };
@@ -139,6 +140,7 @@ export function createCogsPolicyService(deps: CogsPolicyServiceDeps) {
     const narrowed = isNarrowing(before, r.policy);
     const invalidated = invalidateCogsApprovals(db, {
       agentId: memberId, reason: narrowed ? "policy_narrowed" : "policy_changed", newRevision: r.policy.revision, events,
+      ...(exceptRequestId !== undefined ? { exceptRequestId } : {}),
     });
     events?.emit({
       type: "policy_changed", change_id: randomUUID(), agent_id: memberId,
@@ -158,7 +160,7 @@ export function createCogsPolicyService(deps: CogsPolicyServiceDeps) {
    * '항상 허용' — 지금 정책에 규칙 하나를 더한다. 정책이 정상일 때만(없음·깨짐이면 승인하지 않는다).
    * 클로드는 allow 규칙, 코덱스는 쓰기 경로. 이미 있으면 revision 만 올리지 않고 그대로 돌려준다.
    */
-  function addAlways(memberId: string, rule: string): { ok: true; revision: number } | { ok: false } {
+  function addAlways(memberId: string, rule: string, requestId?: string): { ok: true; revision: number } | { ok: false } {
     const cur = read(memberId);
     if (!cur.ok || cur.policy.state !== "valid") return { ok: false };
     const p = cur.policy.policy;
@@ -171,7 +173,7 @@ export function createCogsPolicyService(deps: CogsPolicyServiceDeps) {
         ? { mode: q.mode, allow: [...q.allow, rule] }
         : { full: q.full, network: q.network, writable_roots: [...q.writable_roots, rule] };
       return nextPolicy(body, m.runtime, current);
-    });
+    }, requestId);
     return r.ok ? { ok: true, revision: r.policy.revision } : { ok: false };
   }
 

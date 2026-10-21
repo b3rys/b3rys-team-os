@@ -109,6 +109,7 @@ export interface PressInput {
   currentRevision: number | null;
   nowMs: number;
   /** '항상 허용' — 원본 정책에 규칙을 넣고 새 revision 을 돌려준다. 실패하면 승인하지 않는다. */
+  /** 원본 쓰기 때 이 요청(row.id)만은 무효화에서 빼야 한다 — 바로 뒤에 새 revision 으로 다시 묶는다. */
   persistAlways?: (rule: string, row: PermissionRequestRow) => { ok: true; revision: number } | { ok: false };
   events?: CogsPermissionEvents;
 }
@@ -191,6 +192,8 @@ export function invalidateCogsApprovals(
     agentId: string; reason: InvalidationReason; sessionId?: string; newRevision?: number; events?: CogsPermissionEvents;
     /** 이 revision 에 묶인 것은 남긴다(재시작 정리용 — 원본과 다른 것만 지운다). */
     keepRevision?: number;
+    /** '항상 허용' 을 일으킨 그 요청 — 새 revision 에 다시 묶이므로 무효화하지 않는다. */
+    exceptRequestId?: string;
   },
 ): number {
   const rows = db.prepare(
@@ -202,6 +205,7 @@ export function invalidateCogsApprovals(
   let n = 0;
   for (const b of rows) {
     if (input.keepRevision !== undefined && b.policy_revision === input.keepRevision) continue;
+    if (input.exceptRequestId !== undefined && b.request_id === input.exceptRequestId) continue;
     if (invalidateOne(db, b, b.status, input.reason, input.events)) n++;
   }
   if (input.keepRevision !== undefined) {
