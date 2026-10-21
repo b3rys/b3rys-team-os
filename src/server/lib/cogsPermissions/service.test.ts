@@ -108,24 +108,54 @@ describe("addAlways — '항상 허용'", () => {
     const { svc, file, registryPath } = setup();
     svc.update("flo", 0, { mode: "auto", allow: [] });
     svc.update("dex", 0, { full: false, network: true, writable_roots: [] });
-    expect(svc.addAlways("flo", "Bash(git push:*)")).toEqual({ ok: true, stamp: currentCogsStamp(registryPath, "flo")! });
+    const r1 = svc.addAlways("flo", "Bash(git push:*)", "prm_a", currentCogsStamp(registryPath, "flo")!);
+    expect(r1).toEqual({ ok: true, stamp: currentCogsStamp(registryPath, "flo")! });
     expect(currentCogsStamp(registryPath, "flo")!.startsWith("2:")).toBe(true);
-    expect(svc.addAlways("dex", "/Users/x/proj/out.txt")).toEqual({ ok: true, stamp: currentCogsStamp(registryPath, "dex")! });
+    expect(svc.addAlways("dex", "/Users/x/proj/out.txt", "prm_b", currentCogsStamp(registryPath, "dex")!)).toMatchObject({ ok: true });
     const f = file();
     expect(f.find((a) => a.id === "flo").cogs_permissions.allow).toEqual(["Bash(git push:*)"]);
     expect(f.find((a) => a.id === "dex").cogs_permissions.writable_roots).toEqual(["/Users/x/proj/out.txt"]);
   });
   test("이미 있으면 규칙을 겹쳐 넣지 않는다", () => {
-    const { svc, file } = setup();
+    const { svc, file, registryPath } = setup();
     svc.update("flo", 0, { mode: "auto", allow: ["Read"] });
-    expect(svc.addAlways("flo", "Read")).toMatchObject({ ok: true });
+    expect(svc.addAlways("flo", "Read", "prm_a", currentCogsStamp(registryPath, "flo")!)).toMatchObject({ ok: true });
     expect(file().find((a) => a.id === "flo").cogs_permissions.allow).toEqual(["Read"]);
   });
   test("정책이 없거나 깨졌으면, 또는 규칙이 틀리면 실패", () => {
-    const { svc } = setup();
-    expect(svc.addAlways("flo", "Read")).toEqual({ ok: false });
+    const { svc, registryPath } = setup();
+    expect(svc.addAlways("flo", "Read", "prm_a", "1:x")).toEqual({ ok: false });
     svc.update("dex", 0, { full: false, network: true, writable_roots: [] });
-    expect(svc.addAlways("dex", "relative")).toEqual({ ok: false });
+    expect(svc.addAlways("dex", "relative", "prm_b", currentCogsStamp(registryPath, "dex")!)).toEqual({ ok: false });
+  });
+  test("결정 당시 도장과 원본이 다르면 쓰지 않는다", () => {
+    const { svc, file, registryPath } = setup();
+    svc.update("flo", 0, { mode: "auto", allow: ["Read", "WebFetch"] });
+    const decided = currentCogsStamp(registryPath, "flo")!;
+    svc.update("flo", 1, { mode: "auto", allow: ["Read"] });
+    expect(svc.addAlways("flo", "Bash(git push:*)", "prm_a", decided)).toEqual({ ok: false });
+    expect(file().find((a) => a.id === "flo").cogs_permissions).toMatchObject({ revision: 2, allow: ["Read"] });
+  });
+});
+
+describe("항상 허용: 결정 뒤·원본 저장 전에 다른 쪽이 축소", () => {
+  test("지운 권한이 원본에 다시 생기지 않고, 그 요청은 닫힌다", () => {
+    const { svc, db, registryPath, file } = setup();
+    svc.update("flo", 0, { mode: "auto", allow: ["Read", "WebFetch"] });
+    const stamp = currentCogsStamp(registryPath, "flo")!;
+    const { request } = createCogsApproval(db, { op: { runtime: "claude", agent_id: "flo", action: "x", command: "git push" }, roomId: "42", policyStamp: stamp, sessionId: "s", processGen: "g", ttlMs: 60_000, nowMs: Date.now(), alwaysRule: "Bash(git push:*)" });
+    const r = pressCogsApproval(db, {
+      requestId: request.id, action: "pga", actorUserId: 7, ownerUserId: 7, roomId: 42, bridgeAgentId: "flo", currentStamp: stamp, nowMs: Date.now(),
+      persistAlways: (rule, row, decided) => {
+        // CAS 는 이겼고, 저장 직전에 주인이 다른 화면에서 WebFetch 를 뺐다
+        expect(svc.update("flo", 1, { mode: "auto", allow: ["Read"] })).toMatchObject({ ok: true });
+        return svc.addAlways("flo", rule, row.id, decided);
+      },
+    });
+    expect(r).toEqual({ kind: "failed" });
+    expect(file().find((a) => a.id === "flo").cogs_permissions).toMatchObject({ revision: 2, allow: ["Read"] });
+    expect(getPermissionRequest(db, request.id)!.status).toBe("expired");
+    expect(handOffCogsApproval(db, { requestId: request.id, agentId: "flo", sessionId: "s", processGen: "g", currentStamp: currentCogsStamp(registryPath, "flo"), nowMs: Date.now() })).toBe(false);
   });
 });
 

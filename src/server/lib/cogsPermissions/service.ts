@@ -30,7 +30,7 @@ export type ReadResult =
 
 export type UpdateResult =
   | { ok: true; policy: CogsPolicy; narrowed: boolean; invalidated: number }
-  | { ok: false; code: "not_found" | "unsupported_runtime" | "registry_unreadable" | "revision_conflict" | "unsupported_field" | "bad_policy" | "write_failed" | "busy" | "invalid_policy" };
+  | { ok: false; code: "not_found" | "unsupported_runtime" | "registry_unreadable" | "revision_conflict" | "unsupported_field" | "bad_policy" | "write_failed" | "busy" | "invalid_policy" | "stale_policy" };
 
 export interface CogsPolicyServiceDeps {
   registryPath: string;
@@ -100,7 +100,7 @@ export function createCogsPolicyService(deps: CogsPolicyServiceDeps) {
   function write(
     memberId: string,
     expectedRevision: number | null,
-    build: (state: PolicyState, member: CogsMember, currentRevision: number) => { ok: true; policy: CogsPolicy } | { ok: false; code: "unsupported_field" | "bad_policy" | "invalid_policy" },
+    build: (state: PolicyState, member: CogsMember, currentRevision: number) => { ok: true; policy: CogsPolicy } | { ok: false; code: "unsupported_field" | "bad_policy" | "invalid_policy" | "stale_policy" },
     exceptRequestId?: string,
   ): UpdateResult {
     if (!ID_RE.test(memberId)) return { ok: false, code: "not_found" };
@@ -146,10 +146,13 @@ export function createCogsPolicyService(deps: CogsPolicyServiceDeps) {
    * '항상 허용' — 지금 정책에 규칙 하나를 더한다(잠금 안에서 그때의 원본에). 정책이 정상일 때만.
    * 클로드는 allow 규칙, 코덱스는 정확한 쓰기 경로. 부르는 쪽은 결정(CAS)에서 이긴 뒤에만 부른다.
    * requestId 는 그 결정의 요청 — 정책 변경 무효화에서 빼고, 부르는 쪽이 새 도장으로 다시 묶는다.
+   * decidedStamp 는 결정 당시 도장 — 잠금 안의 원본 도장과 다르면 실패(원본 쓰기 없음).
    */
-  function addAlways(memberId: string, rule: string, requestId?: string): { ok: true; stamp: string } | { ok: false } {
+  function addAlways(memberId: string, rule: string, requestId: string, decidedStamp: string): { ok: true; stamp: string } | { ok: false } {
     const r = write(memberId, null, (state, m, current) => {
       if (state.state !== "valid") return { ok: false, code: "invalid_policy" };
+      // 잠금 안에서 본 원본이 결정 당시 정책이 아니면(그사이 축소·변경) 쓰지 않는다 — 지운 권한을 되살리지 않게.
+      if (policyStamp(state.policy) !== decidedStamp) return { ok: false, code: "stale_policy" };
       const q = state.policy;
       const body = q.runtime === "claude"
         ? { mode: q.mode, allow: q.allow.includes(rule) ? q.allow : [...q.allow, rule] }

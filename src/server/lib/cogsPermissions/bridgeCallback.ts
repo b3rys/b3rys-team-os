@@ -55,7 +55,7 @@ export async function handleCogsApprovalCallback(token: string, cb: CogsCallback
       bridgeAgentId: deps.agentId,
       currentStamp: currentCogsStamp(deps.registryPath, deps.agentId),
       nowMs: (deps.nowMs ?? Date.now)(),
-      persistAlways: (rule, row) => svc.addAlways(deps.agentId, rule, row.id),
+      persistAlways: (rule, row, decidedStamp) => svc.addAlways(deps.agentId, rule, row.id, decidedStamp),
     });
   } finally {
     try { db.close(); } catch { /* best-effort */ }

@@ -114,8 +114,9 @@ export interface PressInput {
   /**
    * '항상 허용' — 결정이 이긴 뒤에만 부른다. 원본 정책에 규칙을 넣고 새 도장을 돌려준다.
    * 원본 쓰기 때 이 요청(row.id)은 무효화에서 빼야 한다 — 바로 뒤에 새 도장으로 다시 묶는다.
+   * decidedStamp = 결정 당시 정책 도장. 원본이 그사이 바뀌었으면(예: 축소) 쓰지 않고 실패해야 한다.
    */
-  persistAlways?: (rule: string, row: PermissionRequestRow) => { ok: true; stamp: string } | { ok: false };
+  persistAlways?: (rule: string, row: PermissionRequestRow, decidedStamp: string) => { ok: true; stamp: string } | { ok: false };
   events?: CogsPermissionEvents;
 }
 
@@ -163,7 +164,7 @@ export function pressCogsApproval(db: Database, input: PressInput): PressResult 
   if (decision === "allow_always") {
     // 이긴 결정만 원본에 남긴다. 저장 실패 → 그 요청을 닫는다(실행되지 않음).
     // 결정 뒤 저장 전에 죽으면 always_persisted=0 이라 실행에 넘기지 않고, 재시작 정리가 닫는다.
-    const saved = input.persistAlways!(binding.always_rule!, row);
+    const saved = input.persistAlways!(binding.always_rule!, row, binding.policy_stamp);
     if (!saved.ok) {
       invalidateOne(db, binding, "allowed_always", "always_persist_failed", input.events);
       return { kind: "failed" };
