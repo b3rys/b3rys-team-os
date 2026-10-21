@@ -79,3 +79,35 @@ test("running cogs bridge observes additions and revocations without restarting;
     expect(currentCogsAllowlist(channel, seed, "mate", s.registryPath).size).toBe(0);
     expect(currentCogsAllowlist(DEFAULT_CHANNEL, seed, "mate", s.registryPath)).toBe(seed);
 });
+
+test("omitted cogs allowlist preserves launcher seed, explicit empty list denies", () => {
+    const s = setup();
+    const member = structuredClone(s.original[0]);
+    delete member.channel.allow_from;
+    s.write([member]);
+    const channel = parseMemberChannel(member.channel);
+    const seed = new Set([10]);
+    expect(currentCogsAllowlist(channel, seed, "mate", s.registryPath)).toBe(seed);
+    member.channel.allow_from = [];
+    s.write([member]);
+    expect([...currentCogsAllowlist(channel, seed, "mate", s.registryPath)]).toEqual([]);
+});
+
+test("credential rotation during verification requires fresh proof before enrollment", async () => {
+    for (const replacement of ["99:test-only-replacement", "42:test-only-rotated-same-bot"]) {
+        const s = setup();
+        const tokenPath = join(s.registryPath, "..", "var/secrets/mate.bot-token");
+        s.setBefore(() => writeFileSync(tokenPath, replacement));
+        const response = await s.request();
+        expect(response.status).toBe(503);
+        expect(await response.json()).toMatchObject({ code: "binding_changed" });
+        expect(s.read()).toEqual(s.original);
+        // Even same-bot rotation must make a new verification request before storing.
+        if (replacement.startsWith("42:")) {
+            s.setBefore(() => {});
+            expect((await s.request()).status).toBe(200);
+            expect(s.calls()).toBe(2);
+            expect(s.read()[0].channel.allow_from).toEqual(["10", "22"]);
+        }
+    }
+});

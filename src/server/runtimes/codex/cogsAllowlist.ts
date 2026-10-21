@@ -7,5 +7,8 @@ export function currentCogsAllowlist(channel: MemberChannel, seed: Set<number>, 
     const current = readMemberChannel(agentId, registryPath);
     if (current.kind !== "b3chat" || current.error || current.apiBase !== channel.apiBase)
         return new Set();
-    return new Set((current.allowFrom ?? []).map(Number).filter(n => Number.isSafeInteger(n) && n > 0));
+    // Omitted lists retain the launcher fallback; an explicit [] revokes all rooms.
+    if (current.allowFrom === null)
+        return seed;
+    return new Set(current.allowFrom.map(Number).filter(n => Number.isSafeInteger(n) && n > 0));
 }

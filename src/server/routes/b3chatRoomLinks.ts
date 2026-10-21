@@ -43,7 +43,8 @@ export function createB3chatRoomLinkRoutes(d: Deps): Hono {
             const channel = parseMemberChannel(initial.channel);
             if (channel.kind !== "b3chat" || channel.error || initial.enabled === false)
                 return fail(403, "forbidden");
-            const token = readFileSync(join(dirname(d.registryPath), "var/secrets", `${id}.bot-token`), "utf8").trim();
+            const tokenPath = join(dirname(d.registryPath), "var/secrets", `${id}.bot-token`);
+            const token = readFileSync(tokenPath, "utf8").trim();
             if (!token || /\s/.test(token) || Number(token.split(":")[0]) !== b.user_id)
                 return fail(403, "forbidden");
             const response = await (d.fetch ?? fetch)(`${channel.apiBase}/bot${encodeURIComponent(token)}/getRoomLink`, { method: "POST", redirect: "error", headers: { "content-type": "application/json" }, body: JSON.stringify({ chat_id: b.room_id }), signal: AbortSignal.timeout(8000) });
@@ -62,6 +63,10 @@ export function createB3chatRoomLinkRoutes(d: Deps): Hono {
                 const member = list.find(a => a.id === id);
                 // An offboarding/channel replacement during verification invalidates proof.
                 if (!member || member.enabled === false || parseMemberChannel(member.channel).kind !== "b3chat" || parseMemberChannel(member.channel).apiBase !== channel.apiBase || parseMemberChannel(member.channel).ownerChat !== channel.ownerChat)
+                    return "changed";
+                // A rotated credential invalidates the proof even if the bot ID stayed the same.
+                // Return a retryable failure; the next request must obtain fresh cogs proof.
+                if (readFileSync(tokenPath, "utf8").trim() !== token)
                     return "changed";
                 const current = parseMemberChannel(member.channel);
                 const allow = current.allowFrom ?? [];
