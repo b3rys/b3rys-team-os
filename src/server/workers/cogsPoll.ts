@@ -16,6 +16,17 @@ interface Deps {
   intervalMs?: number;
 }
 
+/**
+ * 받을 방 종류. 1:1 은 방 자체가 그 사람이라 지금처럼 받는다.
+ * 단체방은 허용한 사람(팀장)의 말만 — 같은 방의 다른 사람 말을 팀장 지시로 올리지 않는다.
+ * 누가 받을지(멘션·답장·이름)는 cogs 서버가 그 봇에게 배달한 것으로 정해져 온다. AI DM 방 등 다른 종류는 받지 않는다.
+ */
+export function acceptsChat(config: { allow_senders: string[] }, chatType: unknown, senderId: unknown): boolean {
+  if (chatType === "private") return true;
+  if (chatType === "group") return senderId != null && config.allow_senders.includes(String(senderId));
+  return false;
+}
+
 /** One server owns polling. Offsets survive restart without storing bot tokens. */
 export function createCogsPoller(deps: Deps) {
   const abort = new AbortController();
@@ -44,20 +55,22 @@ export function createCogsPoller(deps: Deps) {
             if (abort.signal.aborted) return;
             if (!Number.isSafeInteger(update.update_id) || update.update_id < offset) continue;
             const m = update.message;
-            if (m && config.allow_from.includes(String(m.chat?.id)) && m.chat?.type === "private" &&
+            if (m && config.allow_from.includes(String(m.chat?.id)) && acceptsChat(config, m.chat?.type, m.from?.id) &&
                 !m.from?.is_bot && m.from?.id != null && typeof m.text === "string" && m.text.trim() && Number.isSafeInteger(m.message_id)) {
+              const group = m.chat.type === "group";
               const thread = `cogs-${createHash("sha256").update(`${agent.id}:${identity}:${m.chat.id}`).digest("hex").slice(0, 24)}`;
               const accepted = acceptInbound(deps.db, {
                 thread_id: thread, from_agent_id: "user", to_agent_id: agent.id, type: "dm", source: "user",
                 body: m.text, priority: "normal", hop_count: 0, dedupe_key: `cogs:${identity}:${update.update_id}`,
                 meta: { cogs: { agent_id: agent.id, chat_id: String(m.chat.id), message_id: m.message_id,
-                  from: { id: String(m.from.id), name: m.from.first_name } } },
+                  from: { id: String(m.from.id), name: m.from.first_name }, ...(group ? { chat_type: "group" } : {}) } },
               }, { dedupeWindowSec: 86400, broadcast: deps.broadcast });
               const messageId = accepted.ok ? accepted.stored.id : accepted.duplicate;
               const opts: InjectPromptOptions = {
                 session: agent.tmux_session!, agentId: agent.id, source: "cogs", kind: "cogs", locale: getLocale(deps.db),
                 fromLabel: `cogs:${m.from.id}`, threadId: thread, messageId,
-                body: `[cogs chat_id=${m.chat.id}, sender_id=${m.from.id}]\n${m.text}`, hopCount: 0,
+                // 단체방은 주인 판단(멘션 > 답장 원글 작성자)에 쓰도록 답장 대상 작성자를 같이 적는다.
+                body: `[cogs ${group ? "group " : ""}chat_id=${m.chat.id}, sender_id=${m.from.id}${group && m.reply_to_message?.from?.first_name ? `, reply_to=${String(m.reply_to_message.from.first_name).slice(0, 40)}` : ""}]\n${m.text}`, hopCount: 0,
               };
               const injected = await (deps.inject ?? injectPrompt)(opts);
               if (abort.signal.aborted) return;

@@ -6,7 +6,7 @@ import type { AgentRecord } from "../../types";
 import { cogsCall, cogsInbox, cogsToken } from "../cogsRelay";
 import type { CogsAidmApi, CogsIdentity } from "./relay";
 
-const inbox = (i: CogsIdentity) => ({ api_base: i.apiBase, token_file: "", allow_from: [] as string[] });
+const inbox = (i: CogsIdentity) => ({ api_base: i.apiBase });
 
 export const httpCogsAidmApi: CogsAidmApi = {
   async botId(i) {

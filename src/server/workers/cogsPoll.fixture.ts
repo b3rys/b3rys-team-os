@@ -44,7 +44,7 @@ beforeEach(() => {
     return Response.json({ ok: true, result: { message_id: 99 } });
   }});
   agents = [{ id: "lisa", display_name: "Lisa", runtime: "claude_channel", tmux_session: "claude-lisa",
-    cogs_inbox: { api_base: `http://127.0.0.1:${server.port}`, token_file: join(dir, "token"), allow_from: ["71", "72"] },
+    cogs_inbox: { api_base: `http://127.0.0.1:${server.port}`, token_file: join(dir, "token"), allow_from: ["71", "72", "90"], allow_senders: ["8"] },
   } as AgentRecord];
   writeFileSync(process.env.TEAM_AGENT_REGISTRY!, JSON.stringify(agents));
   db = new Database(join(dir, "team.db")); migrate(db);
@@ -94,6 +94,7 @@ test("clean injection failure retries without another message row", async () => 
   injectOk = true; await p.pollOnce(); expect(injected).toHaveLength(2); expect(rowCount()).toBe(1);
 });
 test("only allowed private human text reaches the session", async () => {
+  delete (agents[0]!.cogs_inbox as { allow_senders?: unknown }).allow_senders; // 단체방 허용 사람 없음
   const bot = update(11); bot.message.from.is_bot = true;
   const group = update(12); group.message.chat.type = "group";
   updates = [update(10, 999), bot, group, update(13, 71, " ")];
@@ -258,4 +259,62 @@ test("a concurrent retry is blocked while the first post awaits its acknowledgem
   } finally { releaseSend?.(); }
   expect((await first).status).toBe(201);
   expect(calls.filter((c) => c.method === "sendMessage")).toHaveLength(1);
+});
+
+// Real use: the lead talks to Lisa in a cogs group room (the Telegram team room replacement).
+function groupUpdate(id: number, chat = 90, sender = 8, text = "리사, 정리해줘", replyTo?: string) {
+  return { update_id: id, message: { message_id: id + 100, chat: { id: chat, type: "group" }, from: { id: sender, first_name: sender === 8 ? "GD" : "Guest", is_bot: false }, text,
+    ...(replyTo ? { reply_to_message: { message_id: 5, from: { id: 3, first_name: replyTo, is_bot: true } } } : {}) } };
+}
+test("group: the lead's message in an allowed group room is injected, marked as group", async () => {
+  updates = [groupUpdate(20, 90, 8, "리사, 정리해줘", "Jane")]; await poller().pollOnce();
+  expect(injected).toHaveLength(1);
+  expect(injected[0]!.body).toContain("[cogs group chat_id=90, sender_id=8, reply_to=Jane]");
+  expect(findCogsMetaForThread(db, injected[0]!.threadId)).toMatchObject({ chat_id: "90", message_id: 120, chat_type: "group" });
+});
+test("group: other people, unlisted rooms, AI DM rooms and bots are not injected", async () => {
+  const bot = groupUpdate(23); bot.message.from.is_bot = true;
+  const aidm = groupUpdate(24); (aidm.message.chat as { type: string }).type = "ai_dm";
+  updates = [groupUpdate(21, 90, 99), groupUpdate(22, 999, 8), bot, aidm];
+  await poller().pollOnce(); expect(injected).toHaveLength(0); expect(rowCount()).toBe(0);
+});
+test("group: without allow_senders the group is not accepted (private still works)", async () => {
+  delete (agents[0]!.cogs_inbox as { allow_senders?: unknown }).allow_senders;
+  updates = [groupUpdate(25), update(26, 71)]; await poller().pollOnce();
+  expect(injected.map((i) => i.body.split("]")[0])).toEqual(["[cogs chat_id=71, sender_id=8"]);
+});
+test("group: invalid allow_senders fails closed", async () => {
+  (agents[0]!.cogs_inbox as { allow_senders?: unknown }).allow_senders = ["GD"];
+  updates = [groupUpdate(27), update(28, 71)]; await poller().pollOnce();
+  expect(calls).toHaveLength(0);
+});
+test("group: a reply must name the group original; then it posts to that room and message", async () => {
+  updates = [groupUpdate(30), groupUpdate(31, 90, 8, "두 번째")]; await poller().pollOnce();
+  expect((await reply({ in_reply_to: undefined, thread_id: injected[0]!.threadId })).status).toBe(400);
+  const ok = await reply({ in_reply_to: injected[1]!.messageId, thread_id: injected[1]!.threadId });
+  expect(ok.status).toBe(201);
+  expect(calls.filter((c) => c.method === "sendMessage").map((c) => [c.body.chat_id, c.body.reply_to_message_id])).toEqual([["90", 131]]);
+});
+test("group: an in_reply_to from another room's thread is refused", async () => {
+  updates = [groupUpdate(32), update(33, 71)]; await poller().pollOnce();
+  const groupInj = injected.find((i) => i.body.includes("group"))!;
+  const privInj = injected.find((i) => !i.body.includes("group"))!;
+  expect((await reply({ thread_id: groupInj.threadId, in_reply_to: privInj.messageId })).status).toBe(400);
+  expect(calls.filter((c) => c.method === "sendMessage")).toHaveLength(0);
+});
+test("group: a message without from.id is refused; private is unaffected by allow_senders", async () => {
+  const noFrom = groupUpdate(40); delete (noFrom.message as { from?: unknown }).from;
+  (agents[0]!.cogs_inbox as { allow_senders?: unknown }).allow_senders = [];
+  updates = [noFrom, groupUpdate(41), update(42, 71)]; await poller().pollOnce();
+  expect(injected.map((i) => i.body.split("]")[0])).toEqual(["[cogs chat_id=71, sender_id=8"]);
+});
+test("group: another member cannot answer this member's group original", async () => {
+  updates = [groupUpdate(43)]; await poller().pollOnce();
+  agents.push({ ...agents[0]!, id: "other", tmux_session: "claude-other" });
+  const both = createInboxRoutes({ db, agents: () => agents, registeredAgentIds: () => new Set(["lisa", "other"]), broadcast: (event) => { events.push(event); } });
+  const res = await both.request("/inbox", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+    source: "agent", from_agent_id: "other", to_agent_id: "broadcast", body: "남의 방", in_reply_to: injected[0]!.messageId, thread_id: injected[0]!.threadId }) });
+  expect(res.status).toBe(400);
+  expect((await res.json()).error).toBe("cogs_reply_needs_in_reply_to");
+  expect(calls.filter((c) => c.method === "sendMessage")).toHaveLength(0);
 });

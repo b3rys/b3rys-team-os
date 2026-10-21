@@ -7,8 +7,16 @@ export interface CogsMeta {
   chat_id: string;
   message_id: number;
   from: { id: string; name?: string };
+  /** 단체방에서 온 말이면 "group". 없으면 1:1. */
+  chat_type?: "group";
 }
-export interface CogsInbox { api_base: string; token_file: string; allow_from: string[] }
+export interface CogsInbox {
+  api_base: string; token_file: string;
+  /** 말을 받을 방 id(1:1 방·단체방). */
+  allow_from: string[];
+  /** 단체방에서 말을 받을 사람(cogs user id, 보통 팀장). 비어 있으면 단체방은 받지 않는다 — 1:1 은 방 자체가 그 사람이다. */
+  allow_senders: string[];
+}
 
 /** Invalid configurations fail closed; error text never includes credentials or remote bodies. */
 export function cogsInbox(agent: AgentRecord): CogsInbox | null {
@@ -23,7 +31,10 @@ export function cogsInbox(agent: AgentRecord): CogsInbox | null {
     if (typeof raw.token_file !== "string" || !raw.token_file.startsWith("/") ||
         !Array.isArray(raw.allow_from) || !raw.allow_from.length ||
         !raw.allow_from.every((id) => /^-?\d+$/.test(String(id)))) throw 0;
-    return { api_base: url.href.replace(/\/+$/, ""), token_file: raw.token_file, allow_from: raw.allow_from.map(String) };
+    const senders = (raw as { allow_senders?: unknown }).allow_senders;
+    if (senders !== undefined && (!Array.isArray(senders) || !senders.every((id) => /^\d+$/.test(String(id))))) throw 0;
+    return { api_base: url.href.replace(/\/+$/, ""), token_file: raw.token_file, allow_from: raw.allow_from.map(String),
+      allow_senders: (senders as unknown[] | undefined ?? []).map(String) };
   } catch { throw new Error("cogs_inbox_invalid"); }
 }
 
@@ -40,7 +51,7 @@ export class CogsDeliveryUnknown extends Error {
   constructor() { super("cogs_delivery_unknown"); }
 }
 
-export async function cogsCall(config: CogsInbox, token: string, method: string, body: unknown, signal?: AbortSignal): Promise<any> {
+export async function cogsCall(config: Pick<CogsInbox, "api_base">, token: string, method: string, body: unknown, signal?: AbortSignal): Promise<any> {
   let res: Response;
   let data: { ok?: boolean; result?: unknown };
   try {
