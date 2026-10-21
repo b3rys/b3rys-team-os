@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -9,7 +9,7 @@ let outbox: string;
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "steno-send-"));
-  outbox = join(home, "Library/Application Support/b3os/steno-outbox");
+  outbox = join(home, "Library/Application Support/b3os/steno-share-outbox");
 });
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 
@@ -61,5 +61,63 @@ describe("steno-send.sh", () => {
     const big = join(home, "big.md");
     writeFileSync(big, Buffer.alloc(20 * 1_048_576 + 1));
     expect((await run([big])).code).toBe(1);
+  });
+});
+
+
+async function linkFile(value: unknown, binary = false) {
+  const file = join(home, "link.webloc");
+  const p = Bun.spawn(["/usr/bin/python3", "-I", "-c",
+    "import json,plistlib,sys; open(sys.argv[1],'wb').write(plistlib.dumps(json.loads(sys.argv[2]),fmt=plistlib.FMT_BINARY if sys.argv[3]=='1' else plistlib.FMT_XML))",
+    file, JSON.stringify(value), binary ? "1" : "0"], { stdout: "pipe", stderr: "pipe" });
+  expect(await p.exited).toBe(0);
+  return file;
+}
+
+describe("Steno link files", () => {
+  test.each([false, true])("XML/binary plist URL을 그대로 보낸다(binary=%s)", async binary => {
+    const file = await linkFile({ URL: "https://example.com/한글?q=a&b=2#part" }, binary);
+    const result = await run([file]);
+    expect(result.code).toBe(0);
+    expect(readFileSync(join(outbox, "link.webloc"))).toEqual(readFileSync(file));
+    expect(statSync(join(outbox, "link.webloc")).mode & 0o777).toBe(0o600);
+  });
+  test("64KiB 경계와 URL 8192바이트 경계를 지킨다", async () => {
+    const prefix = "https://example.com/";
+    const file = await linkFile({ URL: prefix + "a".repeat(8192-prefix.length) });
+    expect((await run([file])).code).toBe(0);
+    await linkFile({ URL: prefix + "a".repeat(8193-prefix.length) });
+    expect((await run([file])).code).toBe(1);
+    await linkFile({ URL: prefix + "가".repeat(1000) }); // UTF-8 fits; normalized URL exceeds the limit.
+    expect((await run([file])).code).toBe(1);
+    await linkFile({ URL: prefix });
+    const xml = readFileSync(file);
+    writeFileSync(file, Buffer.concat([xml, Buffer.alloc(65536-xml.length, 32)]));
+    expect((await run([file])).code).toBe(0);
+    writeFileSync(file, Buffer.concat([readFileSync(file), Buffer.from(" ")]));
+    expect((await run([file])).code).toBe(1);
+  });
+  test.each([{}, { URL: 42 }, ["https://example.com"], { URL: "http://example.com" },
+    { URL: "https:///path" }, { URL: "https://user:password@example.com" },
+    { URL: "https://example.com/a b" }, { URL: "https://example.com/\npath" },
+    { URL: "https://example.com/\u0000" }, { URL: "https://example.com:bad" }])("잘못된 링크 %j를 거절한다", async value => {
+    const result = await run([await linkFile(value, true)]);
+    expect(result.code).toBe(1);
+    expect(readdirSync(outbox)).toEqual([]);
+  });
+  test("깨진 plist와 확장자 변경 우회를 거절한다", async () => {
+    const file = join(home, "broken.webloc");
+    writeFileSync(file, "<html>not a plist</html>");
+    expect((await run([file, "--name", "disguised.txt"])).code).toBe(1);
+    const text = join(home, "broken.txt");
+    writeFileSync(text, "not a plist");
+    expect((await run([text, "--name", "disguised.webloc"])).code).toBe(1);
+    expect(readdirSync(outbox)).toEqual([]);
+  });
+  test("받은 파일·하위 폴더와 대문자 확장자도 지원한다", async () => {
+    const file = await linkFile({ URL: "HTTPS://example.com" }, true);
+    const result = await run([file, "--to-received", "--folder", "Links", "--name", "Example.WEBLOC"]);
+    expect(result.code).toBe(0);
+    expect(readFileSync(join(home, "Library/Application Support/b3os/steno-outbox/Links/Example.WEBLOC"))).toEqual(readFileSync(file));
   });
 });
