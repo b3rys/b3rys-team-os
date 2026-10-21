@@ -1,3 +1,4 @@
+import { handleCogsApprovalCallback } from "../../lib/cogsPermissions/bridgeCallback";
 import { reasoningSummaryOf } from "./reasoningSummary";
 import { createReactionInbox, reactionInputs, type ReactionInbox, type ReactionUpdate, type ReactionRef } from "../../lib/reactionInput";
 import { randomUUID } from "node:crypto";
@@ -1182,6 +1183,8 @@ interface TgCallbackQuery {
   data?: string;
   from?: { id: number };
   message?: { message_id: number; chat: { id: number } };
+  /** cogs 서버만 채운다(봇 owner_id). */
+  cogs_bot_owner_id?: number;
 }
 
 /** exec 폴백은 steer·서브에이전트 생존 기능을 잃으므로 app-server 준비 실패를 그대로 실패로 드러낸다.
@@ -1291,6 +1294,22 @@ export async function handleApprovalCallback(
   } finally {
     try { db.close(); } catch { /* best-effort */ }
   }
+}
+
+/**
+ * 승인 버튼 누름을 채널에 맞는 처리로 보낸다.
+ * cogs(b3chat) 방은 사람(봇 주인)으로 인가한다 — 방 id 허용 목록과 섞지 않는다. 텔레그램은 기존 handleApprovalCallback 그대로.
+ */
+export async function dispatchApprovalCallback(
+  token: string,
+  cb: TgCallbackQuery,
+  ctx: { channelKind: string | undefined; allowFrom: Set<number>; apiBase: string; agentId: string; registryPath: string; dbPath: string },
+  handlers: { cogs: typeof handleCogsApprovalCallback; telegram: typeof handleApprovalCallback } = { cogs: handleCogsApprovalCallback, telegram: handleApprovalCallback },
+): Promise<string> {
+  if (ctx.channelKind === "b3chat") {
+    return handlers.cogs(token, cb, { apiBase: ctx.apiBase, agentId: ctx.agentId, registryPath: ctx.registryPath, dbPath: ctx.dbPath });
+  }
+  return handlers.telegram(token, cb, ctx.allowFrom);
 }
 
 /** 첫 getUpdates 성공 후 ready marker를 원자적으로 쓴다. marker 존재 = 브리지가 실제 Telegram polling에 진입. */
@@ -1487,7 +1506,13 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         //   (getUpdates 는 봇당 한 프로세스만 가능하므로 폴링을 하는 브리지가 콜백도 맡는다).
         // 콜백 예외가 폴 루프를 죽이면 안 된다 — 죽으면 그 뒤 메시지도 안 받는다.
         if (u.callback_query) {
-          try { await handleApprovalCallback(token, u.callback_query, allowFrom); }
+          try {
+            await dispatchApprovalCallback(token, u.callback_query, {
+              channelKind: live.channel?.kind, allowFrom, apiBase: TG_API, agentId: liveAgentId,
+              registryPath: process.env.TEAM_AGENT_REGISTRY?.trim() || DEFAULT_AGENT_REGISTRY,
+              dbPath: defaultTeamDbPath(),
+            });
+          }
           catch (e) { console.error(`[codex-bridge] 승인 콜백 처리 실패: ${e instanceof Error ? e.message : e}`); }
           continue;
         }

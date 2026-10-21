@@ -26,6 +26,7 @@ export function migrate(db: Database): void {
   migratePendingFollowup(db);
   migrateGdReportFlag(db);
   migrateTeamCollect(db);
+  migrateCogsPermissions(db);
   // 팀원 SVG 아이콘 컬럼(2026-06-08 GD): 기존 DB에 idempotent 추가.
   try {
     db.exec("ALTER TABLE agent ADD COLUMN icon TEXT");
@@ -1224,4 +1225,45 @@ export function directedRecipientRowBackfill(db: Database): void {
          WHERE mr.message_id = m.id AND mr.agent_id = m.to_agent_id
        )`,
   ).run();
+}
+
+/**
+ * cogs AI 팀원 승인 — permission_request 행에 붙는 결합·세션 허용 사본(추가형, 기존 표는 그대로).
+ *
+ * binding: 그 요청이 어느 팀원·방·정책 도장(revision:내용 해시)·런타임 세션·프로세스 세대에 묶였는지, 무효화 이유, 실행 인계 여부.
+ *   permission_request.status CHECK 를 늘리지 않는다 — 취소는 status=expired + invalidation_reason 으로 적는다.
+ * session_grant: '이 세션 허용' 사본. 전역 permission_grant(24시간)와 섞지 않는다.
+ * 브리지는 서버가 만든 DB 를 openDb 로만 연다 — 그래서 cogsPermissions/approvals 도 같은 함수를 부른다(멱등).
+ */
+export function migrateCogsPermissions(db: Database): void {
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS cogs_permission_binding (
+       request_id TEXT PRIMARY KEY REFERENCES permission_request(id) ON DELETE CASCADE,
+       agent_id TEXT NOT NULL,
+       room_id TEXT NOT NULL,
+       policy_stamp TEXT NOT NULL,
+       session_id TEXT NOT NULL,
+       process_gen TEXT NOT NULL,
+       expires_at_ms INTEGER NOT NULL,
+       always_rule TEXT,
+       card_message_id INTEGER,
+       invalidation_reason TEXT,
+       handed_off_at_ms INTEGER,
+       always_persisted INTEGER NOT NULL DEFAULT 0,
+       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+     )`,
+  );
+  db.exec("CREATE INDEX IF NOT EXISTS idx_cogs_permission_binding_agent ON cogs_permission_binding(agent_id, invalidation_reason, handed_off_at_ms)");
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS cogs_permission_session_grant (
+       agent_id TEXT NOT NULL,
+       session_id TEXT NOT NULL,
+       process_gen TEXT NOT NULL,
+       scope_key TEXT NOT NULL,
+       policy_stamp TEXT NOT NULL,
+       request_id TEXT NOT NULL,
+       created_at TEXT NOT NULL DEFAULT (datetime('now')),
+       PRIMARY KEY (agent_id, session_id, process_gen, scope_key)
+     )`,
+  );
 }

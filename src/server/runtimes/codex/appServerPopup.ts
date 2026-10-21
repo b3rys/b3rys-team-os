@@ -1,5 +1,6 @@
 /** 승인 요청은 기존 permissionGate와 채널 팝업을 통해 결정으로 매핑한다. 오류·무응답은 거절하며 Tier-D는 팝업 생성 전에 requestPermission에서 거절한다.
  * 한 번·세션·지속 허용의 구분을 보존하고 삭제된 별도 판정기를 현재 방어선으로 간주하지 않는다. */
+import { sendApprovalCard } from "../../lib/cogsPermissions/card";
 import { uiText } from "./uiStrings";
 import { cogsActivityArgs, filename } from "./cogsActivity";
 import { createHash, randomUUID } from "node:crypto";
@@ -620,37 +621,15 @@ async function sendApprovalPlain(
   const operationCode=params.command ? "run_command" : params.fileChanges || params.changes || req.observedItem?.changes.length ? "edit_files" : params.reason ? "request_permission" : "approval_required";
   const observed=req.observedItem?.changes;
   const target=cogsActivityArgs(observed?.length ? {changes:observed} : params);
-  const args: Record<string,string|number>={request_id:requestId, operation_code:operationCode};
-  if (target.target) args.detail=target.target;
-  if (target.count!==undefined) args.detail=String(target.count);
-  if (risks.length) args.risks=risks.join(",");
+  let detail: string | undefined;
+  if (target.target) detail=target.target;
+  if (target.count!==undefined) detail=String(target.count);
   const root=grantRootOf(params);
-  if(root) args.grant_root=grantRootDisplay(root);
-  // Approval metadata follows the server's 512-byte scalar-object limit.
-  if(Buffer.byteLength(JSON.stringify(args))>512)delete args.detail;
-  if(Buffer.byteLength(JSON.stringify(args))>512){console.warn(`[codex-approval] metadata exceeds limit request=${requestId}`);return false;}
-  const button=(text_code:string,action:string)=>({text_code,callback_data:`${action}:${requestId}`});
-  const buttons=risks.length
-   ? [button("approval_allow_once","pg1"),button("approval_allow_session","pgs"),button("approval_deny","pgd")]
-   : [button("approval_allow_once","pg1"),button("approval_allow_session","pgs"),button("approval_allow_always","pga"),button("approval_deny","pgd")];
-  const payload={chat_id:chatId,text:"",cogs_response_state:"activity",cogs_activity_code:"approval_required",cogs_activity_args:args};
-  const post = async (body: Record<string, unknown>): Promise<{ ok: boolean; reason: string }> => {
-    try {
-      const res = await doFetch(`${apiBase}/bot${token}/sendMessage`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error_code?: number; description?: string };
-      return res.ok && j.ok === true ? { ok: true, reason: "" } : { ok: false, reason: `code=${j.error_code ?? res.status} ${j.description ?? ""}`.trim() };
-    } catch (e) { return { ok: false, reason: e instanceof Error ? e.message : String(e) }; }
-  };
-  const first = await post({ ...payload, reply_markup: { inline_keyboard: [buttons] } });
-  if (first.ok) return true;
-  console.warn(`[codex-approval] b3chat 승인 버튼 전송 실패 → 글자만 재전송: agent=${agentId} request=${requestId} ${first.reason}`);
-  const second = await post(payload);
-  if (!second.ok) console.warn(`[codex-approval] ★b3chat 승인 요청 전송 실패 — 대화에 안 남았다★ agent=${agentId} request=${requestId} ${second.reason}`);
-  return second.ok;
+  // 카드 모양·512바이트 한도·버튼 재시도는 공통 카드 전송이 맡는다(cogs 클로드 승인과 같은 길).
+  const r = await sendApprovalCard(apiBase, token, chatId, {
+    requestId, operationCode, detail, grantRoot: root ? grantRootDisplay(root) : undefined, risks, allowAlways: !risks.length,
+  }, doFetch, { agentId });
+  return r.ok;
 }
 
 /**

@@ -10,10 +10,16 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { withRegistryLock } from "./registryLock";
 
 export interface RegistryWriteOptions {
   /** Explicit acknowledgement for replacing a non-empty registry with []. */
   forceEmpty?: boolean;
+  /**
+   * cogs 권한 정책 서비스만 true. 그 밖의 쓰기는 cogs_permissions 칸을 바꿀 수 없다 —
+   * 잠금 안에서 원본을 다시 읽어 각 팀원의 그 칸을 지금 값으로 유지한다(오래된 목록이 축소를 되돌리지 못하게).
+   */
+  cogsPolicyWriter?: boolean;
   /** Repository boundary used for symlink escape checks. */
   repoRoot?: string;
 }
@@ -79,10 +85,35 @@ export function consumeForcedEmptyRegistry(registryPath: string): boolean {
   }
 }
 
-/** Backup-first, atomic registry writer shared by Settings and activation flows. */
+/**
+ * Backup-first, atomic registry writer shared by Settings and activation flows.
+ * 모든 쓰기는 같은 파일 잠금(registryLock) 안에서 한다 — 서버와 브리지가 같은 파일을 쓴다.
+ */
 export function writeRegistrySafely(registryPath: string, list: unknown[], options: RegistryWriteOptions = {}): void {
   assertSafeRegistryTarget(registryPath, options.repoRoot);
+  const r = withRegistryLock(registryPath, () => writeLocked(registryPath, list, options));
+  if (r === "busy") throw new Error("registry_busy");
+}
+
+/** 정책 서비스가 아닌 쓰기: 원본에 있는 팀원의 cogs_permissions 는 원본 값을 쓴다. */
+function keepCogsPolicies(current: unknown[], list: unknown[]): unknown[] {
+  const live = new Map<string, unknown>();
+  for (const a of current) {
+    if (a && typeof a === "object" && "id" in a) live.set(String((a as { id: unknown }).id), (a as { cogs_permissions?: unknown }).cogs_permissions);
+  }
+  return list.map((a) => {
+    if (!a || typeof a !== "object" || !("id" in a)) return a;
+    const id = String((a as { id: unknown }).id);
+    if (!live.has(id)) return a;
+    const { cogs_permissions: _stale, ...rest } = a as Record<string, unknown>;
+    const now = live.get(id);
+    return now === undefined ? rest : { ...rest, cogs_permissions: now };
+  });
+}
+
+function writeLocked(registryPath: string, inputList: unknown[], options: RegistryWriteOptions): void {
   const current = currentRegistry(registryPath);
+  const list = options.cogsPolicyWriter ? inputList : keepCogsPolicies(current, inputList);
   const forcedEmptyTransition = current.length > 0 && list.length === 0 && options.forceEmpty === true;
 
   if (current.length > 0 && list.length === 0) {

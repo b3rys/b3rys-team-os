@@ -294,22 +294,8 @@ export function requestPermission(db: Database, op: PermissionOperation): { deci
   }
   if (evalResult.decision === "allow") return evalResult;
 
-  const id = `prm_${randomUUID().replace(/-/g, "").slice(0, 18)}`;
-  db.prepare(
-    `INSERT INTO permission_request(id, scope_key, runtime, agent_id, action, target, payload_json, status, requested_by, provenance_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-  ).run(
-    id,
-    scope_key,
-    op.runtime,
-    op.agent_id ?? null,
-    op.action,
-    target,
-    JSON.stringify({ command: op.command, path: op.path, egress_url: op.egress_url, text: op.text }),
-    op.requested_by ?? op.agent_id ?? op.runtime,
-    JSON.stringify(op.provenance ?? {}),
-  );
-  const request = getPermissionRequest(db, id)!;
+  const request = insertPendingPermissionRequest(db, op);
+  const id = request.id;
   // 팀원 요청은 op 방 대기열에 넣지 않는다.
   //   "팀원들이 승인을 받을 때는 각자방에 떠야지. op방에 뜨는 건 시스템 알림종류야."
   //   op 대기열(approval_request)에 들어가면 op 방 승인 목록에 렌더된다 — 그게 팀원 승인이
@@ -338,6 +324,74 @@ export function requestPermission(db: Database, op: PermissionOperation): { deci
   return { decision: "approval_required", reasons: [], request };
 }
 
+/**
+ * 요청 행 하나를 pending 으로 넣는다 — 전역 grant 조회도, op 대기열도, 감사 기록도 하지 않는다.
+ * requestPermission 은 이 위에 grant 조회·대기열·감사를 얹는다. cogs 승인(lib/cogsPermissions)은
+ * 전역 grant 를 거치면 안 되므로 이것만 쓴다.
+ */
+export function insertPendingPermissionRequest(db: Database, op: PermissionOperation): PermissionRequestRow {
+  const id = `prm_${randomUUID().replace(/-/g, "").slice(0, 18)}`;
+  db.prepare(
+    `INSERT INTO permission_request(id, scope_key, runtime, agent_id, action, target, payload_json, status, requested_by, provenance_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+  ).run(
+    id,
+    scopeKeyForOperation(op),
+    op.runtime,
+    op.agent_id ?? null,
+    op.action,
+    targetForOperation(op),
+    JSON.stringify({ command: op.command, path: op.path, egress_url: op.egress_url, text: op.text }),
+    op.requested_by ?? op.agent_id ?? op.runtime,
+    JSON.stringify(op.provenance ?? {}),
+  );
+  return getPermissionRequest(db, id)!;
+}
+
+/** 사람이 고른 결정 → 저장되는 status·범위. 세션은 지속 허가가 없으므로 status 로는 '한번' 과 같다. */
+export function decisionColumns(decision: PermissionDecisionInput): { status: PermissionRequestStatus; scope: PermissionDecisionScope | null } {
+  return {
+    status: decision === "allow_always" ? "allowed_always" : decision === "deny" ? "denied" : "allowed_once",
+    scope: decision === "allow_once" ? "once"
+      : decision === "allow_session" ? "session"
+      : decision === "allow_always" ? "always"
+      : null,
+  };
+}
+
+/** pending 인 행 한 건만 결정으로 바꾼다(CAS). 바뀐 행 수를 돌려준다 — 0 이면 누가 먼저 바꿨다. grant 는 만들지 않는다. */
+export function decidePendingRow(
+  db: Database,
+  id: string,
+  decision: PermissionDecisionInput,
+  opts: { approver: string; provenance?: Record<string, unknown> },
+): number {
+  const { status, scope } = decisionColumns(decision);
+  return db.prepare(
+    `UPDATE permission_request
+       SET status = ?, decision_scope = ?, decided_at = datetime('now'), approver = ?, provenance_json = ?
+     WHERE id = ? AND status = 'pending'`,
+  ).run(status, scope, opts.approver, JSON.stringify(opts.provenance ?? {}), id).changes;
+}
+
+/** 감사 표 기록 — 요청 행의 내용으로 적는다. */
+export function auditPermissionRow(db: Database, row: PermissionRequestRow, decision: string, approver: string | null, provenance: Record<string, unknown>): void {
+  appendPermissionAudit(db, { request_id: row.id, scope_key: row.scope_key, op: operationOfRow(row), target: row.target, decision, approver, provenance });
+}
+
+function operationOfRow(row: PermissionRequestRow): PermissionOperation {
+  const payload = safeParse(row.payload_json);
+  return {
+    runtime: row.runtime,
+    agent_id: row.agent_id,
+    action: row.action,
+    command: stringOrUndefined(payload.command),
+    path: stringOrUndefined(payload.path),
+    egress_url: stringOrUndefined(payload.egress_url),
+    text: stringOrUndefined(payload.text),
+  };
+}
+
 // requestPermission과 telegramCapture가 같은 표시 위치 판정을 사용해야 승인이 중복되거나 누락되지 않는다.
 export function belongsToMemberRoom(row: { agent_id: string | null } | { agent_id?: string | null }): boolean {
   return Boolean(row.agent_id);
@@ -364,16 +418,7 @@ export function decidePermissionRequest(
   if (!row) return { ok: false, error: "permission request not found" };
   if (row.status !== "pending") return { ok: false, status: row.status, error: `already handled (${row.status})` };
 
-  const payload = safeParse(row.payload_json);
-  const op: PermissionOperation = {
-    runtime: row.runtime,
-    agent_id: row.agent_id,
-    action: row.action,
-    command: stringOrUndefined(payload.command),
-    path: stringOrUndefined(payload.path),
-    egress_url: stringOrUndefined(payload.egress_url),
-    text: stringOrUndefined(payload.text),
-  };
+  const op = operationOfRow(row);
   // 위험 사유는 표시용이므로 사용자가 승인한 결정을 다시 거부하지 않는다.
   const tierD = tierDReasons(op);
   if (tierD.length) {
@@ -383,18 +428,8 @@ export function decidePermissionRequest(
 
   // 세션은 지속되는 허가를 남기지 않는다 — 그 점에서 allowed_once 와 같다. 무엇을 골랐는지는
   // decision_scope 가 말한다. 거절은 범위가 없으므로 null 이다.
-  const status: PermissionRequestStatus =
-    decision === "allow_always" ? "allowed_always" : decision === "deny" ? "denied" : "allowed_once";
-  const scope: PermissionDecisionScope | null =
-    decision === "allow_once" ? "once"
-    : decision === "allow_session" ? "session"
-    : decision === "allow_always" ? "always"
-    : null;
-  const changed = db.prepare(
-    `UPDATE permission_request
-       SET status = ?, decision_scope = ?, decided_at = datetime('now'), approver = ?, provenance_json = ?
-     WHERE id = ? AND status = 'pending'`,
-  ).run(status, scope, opts.approver, JSON.stringify(opts.provenance ?? {}), id).changes;
+  const { status } = decisionColumns(decision);
+  const changed = decidePendingRow(db, id, decision, opts);
   if (changed !== 1) return { ok: false, error: "permission request changed concurrently" };
 
   // grant가 있으면 승인창 없이 허용되므로 기한을 둔다. 취소 경로가 없어도 만료 후에는 자동승인이 종료되어야 한다.

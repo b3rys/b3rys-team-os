@@ -56,3 +56,16 @@ export function linkSecretMatches(given: string | null | undefined, key: string 
   const b = createHash("sha256").update(key).digest();
   return timingSafeEqual(a, b);
 }
+
+/**
+ * 연결 인증 미들웨어 — b3chat 이 부르는 경로(팀원 추가·모델·권한)가 같이 쓴다.
+ * 무엇이 틀렸는지 말하지 않는다. 사람(누가 눌렀나·주인인가)은 여기서 모른다 — 그건 cogs 서버가 확인해 실어 보낸다.
+ */
+export function linkGuard(opts: { keyPath: string; remote: (c: { req: { raw: Request } } & any) => string | null }) {
+  return async (c: any, next: () => Promise<void>) => {
+    if (!isDirectLocal(opts.remote(c), c.req.raw.headers) || !linkSecretMatches(c.req.header(LINK_HEADER), readLinkKey(opts.keyPath))) {
+      return c.json({ ok: false, code: "forbidden", retryable: false, stage: "auth" }, 403);
+    }
+    await next();
+  };
+}
