@@ -193,6 +193,26 @@ describe("중복·순서·복구", () => {
       { seq: 2, kind: "message", state: "sent", reason: null },
     ]);
   });
+  test("오래전에 시작한 thread 의 오늘 대화도 훅이 빠지면 주기 대조가 채운다", async () => {
+    const s = setup();
+    s.thread();
+    s.db.prepare("UPDATE message SET created_at = datetime('now', '-3 days') WHERE thread_id = 'T1'").run();
+    s.say("lisa", "jane", "오늘 대화"); // 훅 누락
+    expect(reconcileAll(s.deps)).toBe(1);
+    await drain(s.deps);
+    expect(s.calls.filter((c) => c.startsWith("send"))).toEqual(["send t-lisa w1 seq1 오늘 대화"]);
+  });
+  test("서버가 저장한 뒤 응답만 잃어도 재전송은 같은 메시지로 끝난다(cogs 에 한 번)", async () => {
+    const s = setup();
+    let lost = true;
+    const orig = s.deps.api.send;
+    s.deps.api.send = async (i, a) => { const id = await orig(i, a); if (lost) { lost = false; throw new CogsDeliveryUnknown(); } return id; };
+    s.thread(); s.say("lisa", "jane", "1");
+    reconcileThread(s.deps, "T1");
+    await drain(s.deps); await drain(s.deps);
+    expect(s.calls.filter((c) => c.startsWith("send"))).toEqual(["send t-lisa w1 seq1 1"]);
+    expect(s.rows()).toEqual([{ seq: 1, kind: "message", state: "sent", reason: "delivery_unknown" }]);
+  });
   test("48시간 창 밖 누락은 미전송으로 기록(유실이 아니라 명시)", () => {
     const s = setup();
     s.thread(); const m = s.say("lisa", "jane", "옛날");

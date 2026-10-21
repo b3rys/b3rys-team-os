@@ -108,12 +108,17 @@ export function reconcileThread(deps: CogsAidmDeps, threadId: string): number {
   })();
 }
 
-/** 창 안에서 cogs 인입으로 시작된 thread 전부 대조(주기·시작). */
+/**
+ * 주기·시작 대조. 후보는 "창 안에 팀원 메시지가 있는 thread" 다 — origin 이 언제 생겼는지와 무관하다
+ * (오래전에 시작한 thread 에서 오늘 오간 대화도 복구 대상). cogs origin 확인은 reconcileThread 가 한다.
+ */
 export function reconcileAll(deps: CogsAidmDeps): number {
   const now = (deps.now ?? Date.now)();
   const since = new Date(now - RECONCILE_WINDOW_MS).toISOString().replace("T", " ").slice(0, 19);
   const threads = deps.db.prepare(
-    `SELECT DISTINCT thread_id FROM message WHERE source = 'user' AND json_extract(meta_json, '$.cogs.chat_id') IS NOT NULL AND created_at >= ?`,
+    `SELECT DISTINCT m.thread_id AS thread_id FROM message m
+      WHERE m.source = 'agent' AND m.created_at >= ?
+        AND NOT EXISTS (SELECT 1 FROM cogs_aidm_outbox o WHERE o.dedupe_key = m.id OR o.dedupe_key = 'complete:' || m.id)`,
   ).all(since) as Array<{ thread_id: string }>;
   let n = 0;
   for (const t of threads) {
