@@ -21,7 +21,7 @@ const cmd = (command: string, threadId = "th1", cwd?: string): ApprovalRequest =
   method: "item/commandExecution/requestApproval", params: { command, threadId, turnId: "t1", itemId: "i1", ...(cwd ? { cwd } : {}) }, serverRequestId: "7",
 });
 
-function setup(o: { stamp?: string | null; room?: string | null; cardOk?: boolean; ttlMs?: number; cardHangs?: boolean; cardTimeoutMs?: number } = {}) {
+function setup(o: { stamp?: string | null; room?: string | null; cardOk?: boolean; ttlMs?: number; cardHangs?: boolean; cardTimeoutMs?: number; cardDelayMs?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "cogs-appr-"));
   dirs.push(dir);
   const dbPath = join(dir, "team.db");
@@ -38,6 +38,12 @@ function setup(o: { stamp?: string | null; room?: string | null; cardOk?: boolea
     sendCard: async (input) => {
       cards.push(input);
       if (o.cardHangs) return new Promise(() => {});
+      if (o.cardDelayMs) {
+        // 카드는 이미 보였고(주인이 누름) HTTP 응답만 늦다.
+        for (const f of onCard.splice(0)) f(input);
+        await new Promise((r) => setTimeout(r, o.cardDelayMs));
+        return { ok: true, messageId: 900 + cards.length };
+      }
       if (o.cardOk === false) return { ok: false };
       queueMicrotask(() => { for (const f of onCard.splice(0)) f(input); });
       return { ok: true, messageId: 900 + cards.length };
@@ -104,6 +110,22 @@ describe("카드 전송이 끝나지 않아도 턴을 붙잡지 않는다", () =
     expect(await s.approver.approve(cmd("ls"))).toBe("denied");
     expect(s.approver.lastOutcome()).toBe("card_failed");
     expect(s.waiters.size()).toBe(0);
+  });
+});
+
+describe("전송 응답보다 결정이 먼저 오면", () => {
+  for (const action of ["pg1", "pgs"] as const) {
+    test(`${action} 허용은 인계 검사를 거쳐 허용`, async () => {
+      const s = setup({ cardDelayMs: 50 });
+      s.pressOnCard(action);
+      expect(await s.approver.approve(cmd("ls"))).toBe("approved");
+      expect(getBinding(s.db, s.cards[0]!.requestId)!.handed_off_at_ms).not.toBeNull();
+    });
+  }
+  test("거절은 바로 거절", async () => {
+    const s = setup({ cardDelayMs: 50 });
+    s.pressOnCard("pgd");
+    expect(await s.approver.approve(cmd("ls"))).toBe("denied");
   });
 });
 

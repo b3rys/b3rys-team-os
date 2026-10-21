@@ -89,6 +89,18 @@ export function createCogsCodexApprover(deps: CogsApproverDeps): {
 
     // 등록 먼저 — 카드가 가고 바로 눌려도 놓치지 않는다(대기는 등록 뒤 DB 를 한 번 읽는다).
     const waiting = deps.waiters.wait(requestId);
+    /** 전송이 끝난 뒤: 실패면 대기를 닫고 null, 성공이면 카드 번호를 남기고 결정을 기다린다. */
+    const afterSend = async (sent: CardSendResult) => {
+      if (!sent.ok) {
+        log(`[cogs-approval] 카드 전송 실패 → 거절 agent=${deps.agentId} request=${requestId}`);
+        deps.waiters.cancel(requestId, "card_failed");
+        return null;
+      }
+      if (sent.messageId !== undefined) {
+        try { const d = deps.openDb(); try { recordCardMessage(d, requestId, sent.messageId); } finally { d.close(); } } catch { /* 표시 정리용 — 판정과 무관 */ }
+      }
+      return waiting;
+    };
     // 전송은 기한 안에서만 기다린다. 그사이 만료·취소로 대기가 먼저 끝나면 전송 완료를 기다리지 않고 닫는다
     //   (승인 중에는 턴 타이머가 멈춰 있어, 여기서 붙잡히면 턴 전체가 붙잡힌다).
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -98,18 +110,9 @@ export function createCogsCodexApprover(deps: CogsApproverDeps): {
       new Promise<{ sent: CardSendResult }>((r) => { timer = setTimeout(() => r({ sent: { ok: false } }), deps.cardTimeoutMs ?? CARD_SEND_TIMEOUT_MS); }),
     ]);
     if (timer) clearTimeout(timer);
-    if ("early" in raced) return done("denied", "denied");
-    const sent = raced.sent;
-    if (!sent.ok) {
-      log(`[cogs-approval] 카드 전송 실패 → 거절 agent=${deps.agentId} request=${requestId}`);
-      deps.waiters.cancel(requestId, "card_failed");
-      return done("card_failed", "denied");
-    }
-    if (sent.messageId !== undefined) {
-      try { const d = deps.openDb(); try { recordCardMessage(d, requestId, sent.messageId); } finally { d.close(); } } catch { /* 표시 정리용 — 판정과 무관 */ }
-    }
-
-    const outcome = await waiting;
+    // 전송 응답보다 결정이 먼저 왔으면 그 결정으로 간다(허용도 아래 인계 검사를 그대로 거친다).
+    const outcome = "early" in raced ? raced.early : await afterSend(raced.sent);
+    if (outcome === null) return done("card_failed", "denied");
     if (outcome.kind !== "allowed") return done("denied", "denied");
     // 넘기기 직전에 원본 도장·만료·세션·세대를 다시 본다. 이긴 인계만 실행된다(최대 한 번).
     try {
