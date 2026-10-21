@@ -1,3 +1,4 @@
+import { createB3chatRoomLinkRoutes } from "./routes/b3chatRoomLinks";
 import { Hono } from "hono";
 import { createBunWebSocket } from "hono/bun";
 import type { ServerWebSocket } from "bun";
@@ -529,6 +530,7 @@ api.route("/", settingsApi);
 // b3chat 앱 [팀원 추가] — 같은 맥의 b3chat 서버만 부른다(같은 기계 직접 + 공유 비밀 키).
 try { ensureLinkKey(linkKeyPath(REGISTRY_PATH)); } catch (e) { console.error("[b3chat-link] 키 파일 생성 실패:", (e as Error).message); }
 api.route("/", createB3chatTeammateRoutes({ db, settings: settingsApi, registryPath: REGISTRY_PATH, onRegistryChanged: reloadRegistryFromDisk }));
+api.route("/", createB3chatRoomLinkRoutes({ registryPath: REGISTRY_PATH, onRegistryChanged: reloadRegistryFromDisk }));
 // cogs AI 팀원 권한 — 정책 API·카드 버튼 걷기·시작 때 정리. 정책 원본은 agents.json cogs_permissions.
 const cogsPermissionEvents = createCogsPermissionEvents();
 subscribeCardAdapter(cogsPermissionEvents, {
