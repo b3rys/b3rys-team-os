@@ -1,3 +1,4 @@
+import { currentCogsAllowlist } from "./cogsAllowlist";
 import { handleCogsApprovalCallback } from "../../lib/cogsPermissions/bridgeCallback";
 import { reasoningSummaryOf } from "./reasoningSummary";
 import { createReactionInbox, reactionInputs, type ReactionInbox, type ReactionUpdate, type ReactionRef } from "../../lib/reactionInput";
@@ -1368,7 +1369,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
 	  // CODEX_ALLOW_FROM=comma-sep chat_id (오너 DM·팀그룹, 런처가 자동 시드). 그 외 발신자 무시+audit. 미설정 시 전체 차단.
 	  // 복구는 dashboard/launchd/env 경로에서 해야 한다. in-band DM 복구를 위해 전체 허용하지 않는다.
   // chat_id(1:1 DM=user.id) 기반 — DM 게이트 정확. 그룹(chat.id 음수)은 팀원 공유라 외부인 그룹편입 시 from.id 2차체크 필요(P2).
-  const allowFrom = parseAllowFrom(process.env.CODEX_ALLOW_FROM);
+  const seededAllowFrom = parseAllowFrom(process.env.CODEX_ALLOW_FROM);
   let warnedNoAllowlist = false;
   const liveSandbox = deps.sandbox ?? agentRuntime.sandbox;
   const liveNetwork = deps.networkAccess ?? agentRuntime.networkAccess;
@@ -1486,6 +1487,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         if (readyMarked) console.log(`[codex-bridge] ready marker: ${pidFile}`);
       }
       for (const u of j.result ?? []) {
+        const allowFrom = currentCogsAllowlist(live.channel!, seededAllowFrom, liveAgentId, process.env.TEAM_AGENT_REGISTRY);
         if (u.update_id < offset) continue;
         offset = u.update_id + 1;
         if (u.message_reaction) {
