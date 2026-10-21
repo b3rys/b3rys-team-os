@@ -1,4 +1,6 @@
 import { handleCogsApprovalCallback } from "../../lib/cogsPermissions/bridgeCallback";
+import { createBridgeCogsApprovals } from "../../lib/cogsPermissions/waiters";
+import { openDb } from "../../db/migrate";
 import { reasoningSummaryOf } from "./reasoningSummary";
 import { createReactionInbox, reactionInputs, type ReactionInbox, type ReactionUpdate, type ReactionRef } from "../../lib/reactionInput";
 import { randomUUID } from "node:crypto";
@@ -1420,10 +1422,15 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
   });
 
   // 서버가 담당자를 정한 그룹 턴도 같은 대기열에 넣어 1:1과 겹치지 않게 한다. 수신 리액션은 해당 팀원 봇으로 붙여 누가 받았는지 드러낸다.
+  // cogs 승인 대기 — DB 가 진실, 서버 신호·카드 누름·만료 타이머는 다시 보는 계기. 실행 경로 연결은 아직 없다.
+  const cogsApprovals = live.channel?.kind === "b3chat"
+    ? createBridgeCogsApprovals({ agentId: liveAgentId, openDb: () => openDb(defaultTeamDbPath()) })
+    : null;
   const windowHandle = await startBridgeWindow({
     agentId: liveAgentId,
     pidFile,
     log: (line) => console.log(line),
+    ...(cogsApprovals ? { onControl: cogsApprovals.onControl } : {}),
     enqueue: (r) => {
       const chatId = Number(r.groupId);
       if (!Number.isFinite(chatId)) {
@@ -1460,6 +1467,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
       const left = turns.pendingCount();
       if (left > 0) console.log(`[codex-bridge] 종료 — ★큐에 남은 턴 ${left}건은 돌지 않는다★`);
       try {
+        cogsApprovals?.close();
         windowHandle.close();
       } catch {
         /* 정리 실패가 종료를 막지 않는다 */
@@ -1512,6 +1520,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
               registryPath: process.env.TEAM_AGENT_REGISTRY?.trim() || DEFAULT_AGENT_REGISTRY,
               dbPath: defaultTeamDbPath(),
             });
+            cogsApprovals?.afterCallback();
           }
           catch (e) { console.error(`[codex-bridge] 승인 콜백 처리 실패: ${e instanceof Error ? e.message : e}`); }
           continue;

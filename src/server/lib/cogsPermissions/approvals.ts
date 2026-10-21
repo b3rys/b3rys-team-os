@@ -26,7 +26,7 @@ import {
 import type { CogsPermissionEvents } from "./events";
 
 export type CardAction = "pg1" | "pgs" | "pga" | "pgd";
-export type InvalidationReason = "timeout" | "policy_narrowed" | "policy_changed" | "session_end" | "always_persist_failed";
+export type InvalidationReason = "timeout" | "policy_narrowed" | "policy_changed" | "session_end" | "always_persist_failed" | "bridge_restart";
 
 export interface BindingRow {
   request_id: string;
@@ -207,14 +207,19 @@ export function invalidateCogsApprovals(
     keepStamp?: string;
     /** '항상 허용' 을 일으킨 그 요청 — 새 도장에 다시 묶이므로 무효화하지 않는다. */
     exceptRequestId?: string;
+    /** 브리지 재시작 — 이 세대가 아닌 것만(세션 허용 포함) 닫는다. sessionId 와 같이 쓰지 않는다. */
+    notProcessGen?: string;
   },
 ): number {
+  if (input.notProcessGen !== undefined && input.sessionId !== undefined) throw new Error("notProcessGen_with_sessionId");
+  const filter = input.sessionId !== undefined ? "AND b.session_id = ?" : input.notProcessGen !== undefined ? "AND b.process_gen <> ?" : "";
+  const filterArg = input.sessionId ?? input.notProcessGen;
   const rows = db.prepare(
     `SELECT b.*, r.status AS status FROM cogs_permission_binding b JOIN permission_request r ON r.id = b.request_id
       WHERE b.agent_id = ? AND b.invalidation_reason IS NULL AND b.handed_off_at_ms IS NULL
         AND r.status IN ('pending','allowed_once','allowed_always')
-        ${input.sessionId !== undefined ? "AND b.session_id = ?" : ""}`,
-  ).all(...(input.sessionId !== undefined ? [input.agentId, input.sessionId] : [input.agentId])) as Array<BindingRow & { status: PermissionRequestStatus }>;
+        ${filter}`,
+  ).all(...(filterArg !== undefined ? [input.agentId, filterArg] : [input.agentId])) as Array<BindingRow & { status: PermissionRequestStatus }>;
   let n = 0;
   for (const b of rows) {
     if (input.keepStamp !== undefined && b.policy_stamp === input.keepStamp) continue;
@@ -223,6 +228,10 @@ export function invalidateCogsApprovals(
   }
   if (input.keepStamp !== undefined) {
     db.prepare("DELETE FROM cogs_permission_session_grant WHERE agent_id = ? AND policy_stamp <> ?").run(input.agentId, input.keepStamp);
+    return n;
+  }
+  if (input.notProcessGen !== undefined) {
+    db.prepare("DELETE FROM cogs_permission_session_grant WHERE agent_id = ? AND process_gen <> ?").run(input.agentId, input.notProcessGen);
     return n;
   }
   const sessionFilter = input.sessionId !== undefined ? " AND session_id = ?" : "";

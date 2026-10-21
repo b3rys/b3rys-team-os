@@ -293,3 +293,43 @@ describe("groupTurnCall — 발신을 떼고, ★답을 쓸 자리★ 를 함께
     expect(b).not.toContain("-lc");
   });
 });
+
+describe("제어 신호 /control — 턴 큐를 거치지 않는다", () => {
+  async function openWith(onControl?: (r: unknown) => void) {
+    const dir = mkdtempSync(join(tmpdir(), "cbw-ctl-"));
+    const pidFile = join(dir, "dex.pid");
+    const turns: unknown[] = [];
+    const h = (await startBridgeWindow({ agentId: "dex", pidFile, enqueue: (r) => turns.push(r), ...(onControl ? { onControl } : {}) }))!;
+    const { readWindowFile, windowFilePathFor } = await import("./bridgeWindow");
+    const w = readWindowFile(windowFilePathFor(pidFile, "dex")!)!;
+    const post = (path: string, body: unknown) => fetch(`http://127.0.0.1:${w.port}${path}`, {
+      method: "POST", headers: { "content-type": "application/json", "x-b3os-token": w.token }, body: JSON.stringify(body),
+    });
+    return { h, turns, post };
+  }
+
+  test("받으면 바로 부르고 200, 턴 큐에는 안 넣는다", async () => {
+    const got: unknown[] = [];
+    const { h, turns, post } = await openWith((r) => got.push(r));
+    const res = await post("/control", { agentId: "dex", kind: "cogs_permission", eventId: "e1", requestId: "prm_ab12" });
+    expect(res.status).toBe(200);
+    expect(got).toEqual([{ agentId: "dex", kind: "cogs_permission", eventId: "e1", requestId: "prm_ab12" }]);
+    expect(turns).toEqual([]);
+    h.close();
+  });
+
+  test("onControl 이 없는 브리지(텔레그램)는 /control 이 없다", async () => {
+    const { h, turns, post } = await openWith();
+    expect((await post("/control", { agentId: "dex", kind: "cogs_permission", eventId: "e1" })).status).toBe(404);
+    expect(turns).toEqual([]);
+    h.close();
+  });
+
+  test("/turn 본문 모양으로 /control 을 부르면 거절(kind 구분)", async () => {
+    const got: unknown[] = [];
+    const { h, post } = await openWith((r) => got.push(r));
+    expect((await post("/control", { agentId: "dex", groupId: "1", threadId: "t", messageId: "m", body: "b", eventId: "e" })).status).toBe(400);
+    expect(got).toEqual([]);
+    h.close();
+  });
+});
