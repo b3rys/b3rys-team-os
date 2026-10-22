@@ -73,3 +73,22 @@
 
 - [ ] 첫날 숫자(다운로드·사용·설치·신고)를 팀장에게 한 번 보고한다.
 - [ ] 신고·피드백은 개발 순환(요청 → 만들기 → 검사 → 출고)으로 돌린다.
+
+## 10. 웹페이지 공개 전 보안·동작 점검
+
+제품 사이트·랜딩 페이지·Cloudflare Pages/Workers 정적 사이트, 남이 zip 으로 넘긴 페이지를 공개하기 전에 돈다. 항목마다 `확인:` 의 방법으로 닫고 결과를 보고에 적는다.
+
+- [ ] 사이트 CSP(`script-src`·`style-src` 'self' + nonce)와 맞는다: 인라인 `style="…"`, 인라인 이벤트 핸들러(`onclick=` 등), 외부 스크립트는 막힌다.
+  - 확인: `grep -nE 'style="|[[:space:]]on[a-z]+="|<script[^>]+src="https?:' *.html` 이 비어 있다. 실제 서버가 내보내는 주소(`file://` 아님)를 열어 콘솔의 CSP 위반이 0건이다.
+- [ ] 외부 CDN 에 기대지 않는다: Tailwind Play CDN(실행 시 JIT, 운영용 아님)·jsdelivr/Google 글꼴을 쓰지 않는다. CSS 는 로컬에서 빌드하고 글꼴은 같은 서버에서 준다.
+  - 확인: 브라우저 Network 탭에서 제3자 도메인 요청이 0건이다. `grep -nE 'https?://(cdn|fonts)\.' *.html *.css`
+- [ ] 개인 이메일·제3자 폼 엔드포인트(formsubmit 등)·추적 스크립트·API 키가 HTML·JS·설정에 없다.
+  - 확인: `grep -rnEi '@(gmail|naver|daum|outlook)\.|formsubmit|googletagmanager|gtag\(|api[_-]?key|secret|token' .` 와 시크릿 스캔(`b3os-infra-safety` ⑤)을 돌린다.
+- [ ] 다운로드·주요 링크가 실제로 된다: 다운로드 버튼은 진짜 파일을 준다. 새 탭(`target=_blank`)보다 같은 탭 다운로드를 쓴다. 메뉴·앵커 링크가 목적지에 닿고 약관·개인정보 링크가 열린다.
+  - 확인: `curl -sIL <다운로드 URL>` 이 200 이고 `content-type` 이 파일 형식과 맞다(dmg 는 `application/x-apple-diskimage`). 모든 `href` 를 `curl -s -o /dev/null -w '%{http_code}'` 로 돌려 200 만 남는다.
+- [ ] 캐시로 깨지지 않는다: 새 HTML 이 새 CSS 에 기대면 스타일시트 주소에 버전을 붙인다(`style.css?v=<해시>`). CSS 는 몇 시간 캐시되지만 HTML 은 바로 바뀐다. 인라인 SVG 에는 `width`·`height`·`fill`·`stroke` 속성을 직접 쓴다(CSS 가 없어도 크기가 정상이다).
+  - 확인: 배포 뒤 옛 버전을 캐시한 브라우저에서 새로고침 없이 연다. `grep -n '<svg' *.html` 의 각 줄에 `width=` 가 있다.
+- [ ] 화면을 눈으로 본다: 데스크톱·모바일 폭, 라이트·다크, 두 언어 사이트면 언어마다. JS 오류와 가로 스크롤이 없다.
+  - 확인: 폭 1280·390 에서 캡처하고 콘솔 오류 0건, `document.documentElement.scrollWidth <= innerWidth`. 이전 판과 나란히 비교한다.
+- [ ] 리뷰·승인·되돌리기: 저장소 밖 폴더로 올리는 페이지도 배포 전에 리뷰어(Codex)가 본다. 공개 배포는 (팀장) 승인 뒤에만 한다. 직전 버전(배포 ID 또는 직전 폴더)을 남겨 바로 되돌릴 수 있다.
+  - 확인: 리뷰 결과와 승인 문장을 보고에 붙인다. 직전 버전 ID 를 적고 롤백 명령이 열리는지 본다.
