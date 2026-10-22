@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 """Observe a local Telegram pane while a DM or bus message awaits a reply."""
 import argparse
-from datetime import datetime, timedelta
 import hashlib
 import json
 from pathlib import Path
-import re
 import sqlite3
 import sys
 import time
 
 
-def pending_message(db_path, agent, hooklog, session_start=0):
+def pending_message(db_path, agent, channel_dir, session_start=0):
     try:
         with sqlite3.connect(Path(db_path).resolve().as_uri() + '?mode=ro', uri=True, timeout=1) as db:
             row = db.execute('''SELECT m.id FROM message_recipient r
@@ -26,32 +24,16 @@ def pending_message(db_path, agent, hooklog, session_start=0):
                 return 'bus:' + row[0]
     except (sqlite3.Error, ValueError):
         pass
-    pending = ''
-    try:
-        log = Path(hooklog)
-        newer = datetime.fromtimestamp(log.stat().st_mtime)
-        current_lines = []
-        for line in reversed(log.read_text().splitlines()):
-            try:
-                clock = datetime.strptime(line[:8], '%H:%M:%S').time()
-            except ValueError:
-                continue
-            recorded = datetime.combine(newer.date(), clock)
-            if recorded > newer + timedelta(seconds=1):
-                recorded -= timedelta(days=1)
-            if recorded.timestamp() < session_start:
-                break
-            current_lines.append(line)
-            newer = recorded
-        for line in reversed(current_lines):
-            match = re.search(r' react send (?:\(injected\) )?chat=(\S+).*?msg=(\d+)', line)
-            if match:
-                pending = 'telegram:' + ':'.join(match.groups())
-            elif 'clear src=reply' in line:
-                pending = ''
-    except OSError:
-        pass
-    return pending
+    turns = []
+    for path in (Path(channel_dir) / 'turnch').glob('*.json'):
+        try:
+            turn = json.loads(path.read_text())
+            started = float(turn['ts'])
+            if session_start <= started <= time.time() and turn.get('chat_id') and turn.get('message_id'):
+                turns.append((started, 'telegram:' + str(turn['chat_id']) + ':' + str(turn['message_id'])))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return min(turns)[1] if turns else ''
 
 
 def observe(previous, pane, pending, session, now):
@@ -69,7 +51,7 @@ def observe(previous, pane, pending, session, now):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ('state', 'db', 'agent', 'hooklog', 'session'):
+    for name in ('state', 'db', 'agent', 'channel-dir', 'session'):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
@@ -81,7 +63,7 @@ def main():
     except (OSError, ValueError):
         previous = {}
     state, stalled = observe(previous, sys.stdin.read(),
-                             pending_message(args.db, args.agent, args.hooklog,
+                             pending_message(args.db, args.agent, args.channel_dir,
                                              float(args.session) if args.session.isdigit() else time.time()),
                              args.session, time.time())
     if not args.dry_run:

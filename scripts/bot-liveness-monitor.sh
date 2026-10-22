@@ -463,7 +463,7 @@ for bot in "${BOTS[@]}"; do
     continue
   fi
   stall_args=(--state "$LIVENESS_STATE_DIR/pane-$bot.json"
-    --db "${TEAM_DB_OVERRIDE:-$B3OS_ROOT/team.db}" --agent "$bot" --hooklog "$hooklog"
+    --db "${TEAM_DB_OVERRIDE:-$B3OS_ROOT/team.db}" --agent "$bot" --channel-dir "$chdir"
     --session "$(tmux display-message -p -t "$session" '#{session_created}' 2>/dev/null)")
   [ "$DRY_RUN" = "1" ] && stall_args+=(--dry-run)
   if [ "$(printf '%s' "$pane" | python3 "$SCRIPT_DIR/liveness-pane-stall.py" "${stall_args[@]}")" = stalled ]; then

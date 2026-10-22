@@ -1,8 +1,8 @@
 import importlib.util
 from pathlib import Path
 import sqlite3
-import os
 import time
+import json
 import tempfile
 import unittest
 
@@ -35,10 +35,12 @@ class PaneStallTest(unittest.TestCase):
     def test_pending_is_metadata_not_body(self):
         with tempfile.TemporaryDirectory() as tmp:
             dbpath = Path(tmp) / 'team.db'
-            hook = Path(tmp) / 'hook'
-            hook.write_text('12:00:00 react send (injected) chat=123 msg=9\n')
+            hook = Path(tmp) / 'channel'
+            (hook / 'turnch').mkdir(parents=True)
+            turn = hook / 'turnch' / 'active.json'
+            turn.write_text(json.dumps(dict(chat_id='123', message_id='9', ts=time.time())))
             self.assertEqual(stall.pending_message(dbpath, 'member', hook), 'telegram:123:9')
-            hook.write_text(hook.read_text() + '12:01:00 clear src=reply\n')
+            turn.unlink()
             self.assertEqual(stall.pending_message(dbpath, 'member', hook), '')
             with sqlite3.connect(dbpath) as db:
                 db.executescript('''CREATE TABLE message(id, created_at, delivery_status, expires_at);
@@ -55,15 +57,24 @@ class PaneStallTest(unittest.TestCase):
             self.assertEqual(stall.pending_message(dbpath, 'member', hook), '')
 
 
-    def test_reactions_before_current_session_are_not_pending(self):
+    def test_turns_before_current_session_are_not_pending(self):
         with tempfile.TemporaryDirectory() as tmp:
-            log = Path(tmp) / 'hook'
+            channel = Path(tmp)
+            (channel / 'turnch').mkdir()
+            turn = channel / 'turnch' / 'old.json'
             now = time.time()
-            log.write_text(time.strftime('%H:%M:%S', time.localtime(now - 7200)) + ' react send chat=123 msg=9\n'
-                           + time.strftime('%H:%M:%S', time.localtime(now)) + ' pre first-send mid=10\n')
-            self.assertEqual(stall.pending_message(Path(tmp) / 'missing.db', 'member', log, now - 60), '')
-            log.write_text(time.strftime('%H:%M:%S', time.localtime(now)) + ' react send chat=123 msg=10\n')
-            self.assertEqual(stall.pending_message(Path(tmp) / 'missing.db', 'member', log, now - 60), 'telegram:123:10')
+            turn.write_text(json.dumps(dict(chat_id='123', message_id='9', ts=now - 7200)))
+            self.assertEqual(stall.pending_message(channel / 'none.db', 'member', channel, now - 60), '')
+            turn.write_text(json.dumps(dict(chat_id='123', message_id='10', ts=now)))
+            self.assertEqual(stall.pending_message(channel / 'none.db', 'member', channel, now - 60), 'telegram:123:10')
+
+    def test_ambiguous_overnight_hook_log_is_not_pending_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            channel = Path(tmp)
+            (channel / 'progress').mkdir()
+            (channel / 'progress' / '_hooklog.txt').write_text(
+                '12:00:00 react send chat=123 msg=9\n13:00:00 react entry plen=0 tags=0 ext=0\n')
+            self.assertEqual(stall.pending_message(channel / 'none.db', 'member', channel, 0), '')
 
 
 if __name__ == '__main__':

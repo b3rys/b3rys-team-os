@@ -463,6 +463,13 @@ grep -q 'Claude 인증 만료' "$T/quoted-pane.txt" && { echo 'FAIL: quoted logi
 pass_if_clean '대화 본문에 인용한 로그인 오류는 알리지 않음'
 
 printf '12:00:00 react send chat=test msg=123\n' > "$HOOK_FIXTURE"
+mkdir -p "$HOME/.claude/channels/telegram-bill/turnch"
+python3 - "$HOME/.claude/channels/telegram-bill/turnch/current.json" <<'PYTURN'
+import json, sys, time
+from pathlib import Path
+Path(sys.argv[1]).write_text(json.dumps(dict(chat_id='test', message_id='123', ts=time.time())))
+PYTURN
+
 printf 'PreToolUse hook\n' > "$PANE_FIXTURE"
 bash "$SCRIPT"
 # Age the observation instead of waiting twenty minutes.
@@ -498,6 +505,7 @@ pass_if_clean '다른 문제가 추가되어도 기존 멈춤 알림을 반복�
 
 # Recovery clears the active episode, so the next occurrence is reportable.
 printf '12:01:00 clear src=reply\n' >> "$HOOK_FIXTURE"
+rm -f "$HOME/.claude/channels/telegram-bill/turnch/current.json"
 : > "$BOT_LIVENESS_LOG"
 bash "$SCRIPT" --dry-run > "$T/idle-pane.txt"
 grep -q '멈춤 의심' "$T/idle-pane.txt" && { echo 'FAIL: idle pane treated as stalled'; RC=1; }
