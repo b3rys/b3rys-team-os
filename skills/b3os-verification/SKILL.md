@@ -32,6 +32,7 @@ Passing the runner is evidence for review and approval (TEAM-OS §4), not a subs
 
 ## 1a. Per PR — fix the finish line first, run only what changed
 
+- **Scope line first.** Before any test or check, write one line: changed → will run → will not run. A small change (a menu position, a label) runs the checks it reaches — its unit tests and the affected UI check — and reuses the same head's existing records; do not restart a full release run for it. Do not start a release while the lead is still choosing the spec.
 - **Finish conditions are written when the PR opens, not discovered in review.** The PR body lists the checks that prove it: which tests (unit, the changed feature's app tests from the table), which captures or device checks, and what result passes. The author and the reviewer agree on the list in the first round. Later rounds add a required check only for a defect found or a risk the list missed, and say which one. "Done" is that list passing on the exact head that merges.
 - **Per PR, run what the change reaches; the full suite only with approval (§1b).** The feature table maps changed files to checks (`b3os-sf` → dev-mode-operations, "검사 4단계"). The default per PR is the changed features' checks, not the full suite. The table's escalations still apply: a shared file pulls in the features that use it, a file missing from the table widens to its whole module, and a root config, a large refactor, or a change whose reach the table cannot judge is a reason to ask for the full suite. The full suite runs only with the lead's approval (§1b). When one feature keeps escalating to related checks, that is a structure signal to act on — separately from running the checks it needs now.
 - **Say how far each claim got.** Every "verified" or "safe" names its level: ① asserted ② pointed at a real `file:line` ③ walked the failure path and it does not reach ④ ran real code (a test or script that fails loudly if wrong) ⑤ reproduced in the running app. Find the one fact a change is safe because of and take it to ④ or ⑤; report anything below ④ as unproven. For someone else's run, say which: a pass claim in the PR text alone is ①; an execution record checked for the same head, scope, and result (command, log, or result bundle) is "④ by the author, record checked"; a rerun by the reviewer is "④ independent". Ask for a rerun when it answers a defect, a missed risk, or doubt about the record.
@@ -64,7 +65,7 @@ Each moves in one direction only.
 |---|---|
 | ① One bug = one test | A bug fix ships with a repro test **and** a mutant (the fix reverted) on which that test fails. The same bug cannot come back silently. |
 | ② Twice = a check | A review comment or feedback that repeats twice becomes an executable check (test, lint, CI rule, script guard) — not a line in a doc. Same rule as ai-code-safety's enforcement layers (a comment made twice moves one layer up). |
-| ③ Baselines only tighten | Improve → re-pin. Regress → block. Never loosen silently. A baseline change records the value and the condition (load, build type). |
+| ③ Baselines only tighten | Improve → re-pin. Regress → block. Never loosen silently. A baseline change records the value and the condition (load, build type). Display values the lead tuned by hand are baselines too: pin them as a pixel/geometry baseline from the last release, never from the current test's expectation. |
 | ④ Wrong checks accumulate | Every check that was itself wrong becomes a triage rule (symptom → cause → action) or a known-flaky entry, so the runner classifies it next time. |
 | ⑤ Gap count only goes down | Per build, count rows without an app check, without mutant proof, and UNPROVEN (a mutant that passed). The count must not rise; the runner fails the run if it does. |
 
@@ -83,7 +84,7 @@ Decision logic goes headless; the app check covers only what is visible in the a
 | Speed: navigation | Median of N switches, clean settings | ≤ ⟨target⟩ ms at ⟨N⟩ items | Every build |
 | Speed: heavy documents | Headless benchmark | ≈ same as a document without the heavy content | When that code changes |
 | Design | Pixel diff against a baseline photo; contrast | 0 px over tolerance; contrast ≥ ⟨value⟩ | When UI changes |
-| Feel | Key → paint; dropped keys; composition | ≤ 16.7 ms; 0 dropped | Every build |
+| Feel | Key → paint on the 3 most-used actions (e.g. switch note, move cursor, type); burst of keys; composition | Judge outliers, not the mean (p90 / p99 / max), 0 dropped. The verdict comes from the project's table — metric, status (block / report / known), margin, per-condition rows (mode, size, first-key exceptions); probes read it. Example at 60 Hz: one frame 16.7 ms, two 33 ms (Steno burst-step uses p90 33 / max 50, release policy adds 25% speed margin) | Every release (required gate) |
 | Safety | Fault injection on open / edit / save | 0 duplicates, 0 lost input, user files untouched | When that code changes |
 | Coverage | Gap count in the feature table | Only goes down | Every build |
 
@@ -98,7 +99,7 @@ Hard-to-measure items get a **written criterion** in the same row, never an empt
 
 ## 5. When the check is wrong — triage
 
-Tests are often wrong. On FAIL, first decide: **check, environment, or product?** Every FAIL line gets a category and the evidence line; a runner applies these rules automatically and reruns once where the rule says so.
+Tests are often wrong. On FAIL, first decide: **check, environment, or product?** Compare the test's expected answer with the feature's spec doc first — an old rule may be the answer. Until the cause is confirmed, report "cause under check (check / environment / product undecided)" and report the observed user impact separately — real impact such as data loss is escalated at once, whatever the cause turns out to be. Every FAIL line gets a category and the evidence line; a runner applies these rules automatically and reruns once where the rule says so.
 
 | Symptom | Typical cause | Verdict · action |
 |---|---|---|
@@ -112,6 +113,8 @@ Tests are often wrong. On FAIL, first decide: **check, environment, or product?*
 | "Looks like X" from reading source | Unconfirmed diagnosis | Check · candidate only; confirm with a repro or an anchor/log trace |
 | Timing slightly over the line under load | First-sample outlier + high load | Timing · record load, rerun once; twice over = product |
 | Incremental state keeps a deleted structure | Real defect | Product · repro test + mutant (ratchet ①) |
+| The implementer says a failure "was already there" | Unverified claim | Check · run the same real-key pages on the previous release tag side by side; passed then, fails now = regression |
+| All gates pass, but the shipped app hangs at launch on a user machine | Gates launch a re-signed probe bundle and skip the real signed launch path (keychain, permissions, iCloud) | Process · when a release touches the launch path, launch the notarized original once before upload; keep a rollback ready |
 | A timing is sometimes ~1 s too long | The check waited on every animation in the window; an unrelated always-running one (an editor caret blink) was still going | Check · judge only the target pane; see the one-run rule below |
 | A chained family fails many phases at once, logs cut off, no crash report | Something outside killed the app (another test's cleanup) | Environment · teardown kills only its own processes; record fixed causes in a data table so the repeat-flake warning skips runs before the fix |
 | A file-watcher test misses a notice only in full runs | The OS event service lags under a flood of file changes | Environment · on a missed notice, probe the service: alive = real FAIL, silent = visible SKIPPED (never PASS) |
@@ -156,8 +159,7 @@ Solo work and prototypes: speed first — the left column only. A long-lived pro
 2. **Ratchet ②** — "source merged, bundle stale". A hash stamp; the release script refuses a mismatch.
 3. **Wrong check** — 30 synthetic events rejected as another window's. The probe sent windowless events; fixed probe → PASS. Now a triage rule.
 4. **Environment** — note switch 50 ms vs 33 ms target; ~half was 3,400 accumulated probe-settings entries. Reset once per run + write only on change → 31 ms.
-5. **New feature** — notice delay 1 s: one row, a test (none at 0.5 s, shown at 1.5 s), a mutant (5 s → test fails).
-6. **By size** — solo script: example 1 only. Long-lived app: §1–7.
+5. **New feature** — notice delay 1 s: one row, a test (none at 0.5 s, shown at 1.5 s), a mutant (5 s → test fails). **By size** — solo script: example 1 only; long-lived app: §1–7.
 
 ## Sources
 
