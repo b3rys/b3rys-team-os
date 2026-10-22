@@ -35,6 +35,8 @@ trigger: a confirmed execution/delegation task
                 아니라 PM 킥오프 기본 스텝. reminder 의존 금지.
 2. 팀 배정     owner · ETA · 검증자. handoff = 받는쪽 ack/거절/ETA 확인까지 추적
                (보냄 ≠ 수신확인). → b3os-team-inbox(reply.sh·thread.sh)
+               ETA 는 10분 조각으로 받는다. 30분을 넘으면 그대로 전하지 말고
+               쪼개거나 병렬로 다시 잡는다(b3os-sf 작업시간 산출방법).
 3. 실행 + 품질  작업모양 → 품질방법 선택(아래 표). 작업크기 게이팅:
                턴=솔로 / 주행=limited harness / 완전자율=full harness.
 4. 검증        완료기준(rubric) 대조 + 검증증거(테스트·빌드·실측). "됐다" 단정 금지.
