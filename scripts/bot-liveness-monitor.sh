@@ -883,13 +883,13 @@ echo "--- 끝 --- (sig=$SIG, last=$LAST_SIG)"
 if [ "$DRY_RUN" = "1" ]; then
   echo ""
   echo "[DRY-RUN] DM 전송 생략. 실제 실행 시 chat_id=${GD_CHAT_ID} 에 전송됨."
-  if [ -n "$ISSUES" ]; then finish_status issues; else finish_status healed; fi
+  if [ -n "$ACTIVE_ISSUES" ]; then finish_status issues; else finish_status healed; fi
   exit 0
 fi
 
 if [ "$SIG" = "$LAST_SIG" ] && [ -z "$ISSUES" ]; then
   echo "동일 이상치 — 중복알림 skip"
-  if [ -n "$ISSUES" ]; then finish_status issues; else finish_status healed; fi
+  if [ -n "$ACTIVE_ISSUES" ]; then finish_status issues; else finish_status healed; fi
   exit 0
 fi
 
@@ -910,7 +910,7 @@ fi
 if [ -z "$GD_CHAT_ID" ] && [ -z "$TOKEN" ]; then
   echo "알림 미설정 — 알림 대상(GD_CHAT_ID)도 발신 토큰($LIVENESS_ALERT_TOKEN_VARS)도 없습니다."
   echo "  감지 결과는 이 로그에 남습니다. 알림을 받으려면 둘 다 설정하세요."
-  if [ -n "$ISSUES" ]; then finish_status issues-unreported; else finish_status healed-unreported; fi
+  if [ -n "$ACTIVE_ISSUES" ]; then finish_status issues-unreported; else finish_status healed-unreported; fi
   exit 0
 fi
 if [ -z "$GD_CHAT_ID" ]; then
@@ -957,4 +957,4 @@ else
   exit 2
 fi
 
-if [ -n "$ISSUES" ]; then finish_status issues; else finish_status healed; fi
+if [ -n "$ACTIVE_ISSUES" ]; then finish_status issues; else finish_status healed; fi

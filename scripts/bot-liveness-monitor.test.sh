@@ -553,6 +553,11 @@ bash "$SCRIPT" --dry-run > "$T/dm-persistence.txt"
 grep -q 'reply 도구 nudge 주입' "$T/dm-persistence.txt" || { echo 'FAIL: 20-minute cadence lost existing DM persistence'; RC=1; }
 pass_if_clean '20분 주기에서도 기존 DM 연속 관찰 경로에 도달함'
 
+# Notification filtering must not turn a still-unhealthy run green during another recovery.
+TEAM_DB_OVERRIDE="$T/router.db" bash "$SCRIPT" --dry-run > "$T/active-health.txt"
+grep -q 'bot-liveness DONE status=issues$' "$T/active-health.txt" || { echo 'FAIL: ongoing issue reported healthy during unrelated heal'; RC=1; }
+pass_if_clean '중복 알림을 생략해도 지속 중인 장애는 unhealthy로 기록함'
+
 # App-only Claude members must not enter Telegram monitoring or auto-recovery.
 printf '%s\n' '[{"id":"testmate","runtime":"claude_channel","channel":{"kind":"b3chat"}}]' > "$T/agents.json"
 : > "$LAUNCHCTL_CALLS"
