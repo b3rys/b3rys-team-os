@@ -816,7 +816,9 @@ fi
 
 ACTIVE_ISSUES="$ISSUES"
 if [ -f "$ALERTS_FILE" ]; then
+  REPORTED_ISSUES=$(printf '%s' "$ACTIVE_ISSUES" | grep -Fx -f "$ALERTS_FILE" || true)
   ISSUES=$(printf '%s' "$ISSUES" | grep -Fvx -f "$ALERTS_FILE" || true)
+  if [ "$DRY_RUN" = "0" ]; then printf '%s' "$REPORTED_ISSUES" > "$ALERTS_FILE"; fi
 fi
 if [ -z "$ISSUES" ] && [ -z "$HEALED" ]; then
   echo "동일 이상치 — 중복알림 skip"

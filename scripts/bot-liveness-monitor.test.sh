@@ -531,6 +531,20 @@ TEAM_DB_OVERRIDE="$T/router.db" bash "$SCRIPT"
 [ "$(wc -l < "$CURL_CALLS" | tr -d ' ')" = 2 ] || { echo 'FAIL: recurring B suppressed while A persists'; RC=1; }
 pass_if_clean 'A 지속 중 B가 회복·재발해도 B 알림을 다시 보냄'
 
+# Recovery must retire A even if delivery of a simultaneous new B fails.
+export LIVENESS_STATE_DIR="$T/failure-state"
+mkdir -p "$LIVENESS_STATE_DIR"
+printf 'Login expired · Please run /login\n' > "$PANE_FIXTURE"
+bash "$SCRIPT"
+printf 'idle after recovery\n' > "$PANE_FIXTURE"
+TEAM_DB_OVERRIDE="$T/router.db" SEND_CODE=500 bash "$SCRIPT" || true
+printf 'Login expired · Please run /login\n' > "$PANE_FIXTURE"
+: > "$BOT_LIVENESS_LOG"
+TEAM_DB_OVERRIDE="$T/router.db" bash "$SCRIPT"
+grep -q 'Claude 인증 만료' "$BOT_LIVENESS_LOG" || { echo 'FAIL: A recurrence lost after B delivery failure'; RC=1; }
+grep -q 'TEAM OP 라우터 OFF' "$BOT_LIVENESS_LOG" || { echo 'FAIL: failed B was not retried'; RC=1; }
+pass_if_clean '새 문제 전송 실패 중 회복·재발한 기존 문제도 알림'
+
 # Existing DM persistence must still reach the second observation at the longer cadence.
 printf '%s react send chat=test msg=123\n' "$(date -v-25M '+%H:%M:%S')" > "$HOOK_FIXTURE"
 printf 'working with changing output\n' > "$PANE_FIXTURE"

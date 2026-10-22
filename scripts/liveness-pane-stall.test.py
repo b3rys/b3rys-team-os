@@ -42,13 +42,16 @@ class PaneStallTest(unittest.TestCase):
             self.assertEqual(stall.pending_message(dbpath, 'member', hook), '')
             with sqlite3.connect(dbpath) as db:
                 db.executescript('''CREATE TABLE message(id, created_at, delivery_status, expires_at);
-                    CREATE TABLE message_recipient(message_id, agent_id, recipient_state);
+                    CREATE TABLE message_recipient(message_id, agent_id, recipient_state, close_reason);
                     INSERT INTO message VALUES ('one', '2026-01-01', 'delivered', NULL);
-                    INSERT INTO message_recipient VALUES ('one', 'member', 'in_progress');''')
+                    INSERT INTO message_recipient VALUES ('one', 'member', 'in_progress', NULL);''')
             self.assertEqual(stall.pending_message(dbpath, 'member', hook), 'bus:one')
             self.assertEqual(stall.pending_message(dbpath, 'other', hook), '')
             with sqlite3.connect(dbpath) as db:
-                db.execute("UPDATE message_recipient SET recipient_state = 'completed'")
+                db.execute("UPDATE message_recipient SET recipient_state = 'acknowledged', close_reason = 'broadcast_fyi'")
+            self.assertEqual(stall.pending_message(dbpath, 'member', hook), '')
+            with sqlite3.connect(dbpath) as db:
+                db.execute("UPDATE message_recipient SET recipient_state = 'completed', close_reason = NULL")
             self.assertEqual(stall.pending_message(dbpath, 'member', hook), '')
 
 

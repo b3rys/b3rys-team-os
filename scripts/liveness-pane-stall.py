@@ -18,6 +18,7 @@ def pending_message(db_path, agent, hooklog, session_start=0):
                 JOIN message m ON m.id = r.message_id
                 WHERE r.agent_id = ?
                   AND r.recipient_state IN ('open', 'acknowledged', 'in_progress')
+                  AND COALESCE(r.close_reason, '') != 'broadcast_fyi'
                   AND m.delivery_status IN ('pending', 'delivered')
                   AND (m.expires_at IS NULL OR julianday(m.expires_at) > julianday('now'))
                 ORDER BY m.created_at, m.id LIMIT 1''', (agent,)).fetchone()
