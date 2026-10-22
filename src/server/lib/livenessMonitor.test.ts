@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -13,6 +13,9 @@ import {
 } from "./livenessMonitor";
 import { botLivenessLaunchdLabel } from "./agentControl";
 import { readLivenessStatus } from "./monitoringStatus";
+
+const fixtureDir = mkdtempSync(join(tmpdir(), "b3os-liveness-logs-"));
+afterAll(() => rmSync(fixtureDir, { recursive: true, force: true }));
 
 const savedLog = process.env.BOT_LIVENESS_LOG;
 const savedState = process.env.LIVENESS_STATE_DIR;
@@ -59,7 +62,7 @@ describe("bot liveness monitor shared defaults", () => {
     delete process.env.BOT_LIVENESS_LOG;
     delete process.env.LIVENESS_STATE_DIR;
     const xml = renderBotLivenessMonitorPlist();
-    expect(xml).toContain("<key>StartInterval</key><integer>600</integer>");
+    expect(xml).toContain("<key>StartInterval</key><integer>1200</integer>");
     expect(xml).toContain("<key>BOT_LIVENESS_LOG</key>");
     expect(xml).toContain(DEFAULT_BOT_LIVENESS_LOG);
     expect(xml).toContain("<key>LIVENESS_STATE_DIR</key>");
@@ -101,16 +104,16 @@ describe("bot liveness monitor shared defaults", () => {
     expect(renderBotLivenessMonitorPlist()).toContain("<key>GD_CHAT_ID</key><string>1234567890</string>");
   });
 
-  test("server parser can read an actual log written at the durable default path", () => {
+  test("server parser can read a durable log fixture without writing the production default", () => {
     delete process.env.BOT_LIVENESS_LOG;
-    mkdirSync(dirname(DEFAULT_BOT_LIVENESS_LOG), { recursive: true });
+    const log = join(fixtureDir, "healthy.log");
     writeFileSync(
-      DEFAULT_BOT_LIVENESS_LOG,
+      log,
       "2026-08-03 15:00:00 bot-liveness START (dry_run=0)\n이상 없음\n",
       "utf-8",
     );
 
-    const status = readLivenessStatus(DEFAULT_BOT_LIVENESS_LOG);
+    const status = readLivenessStatus(log);
     expect(status.available).toBe(true);
     expect(status.runs).toBeGreaterThanOrEqual(1);
     expect(status.lastRun).toBe("2026-08-03 15:00:00");
@@ -118,7 +121,7 @@ describe("bot liveness monitor shared defaults", () => {
   });
 
   test("server parser treats machine-readable DONE status=issues as unhealthy", () => {
-    const log = `${DEFAULT_BOT_LIVENESS_STATE_DIR}/issues-status.log`;
+    const log = join(fixtureDir, "issues-status.log");
     mkdirSync(dirname(log), { recursive: true });
     writeFileSync(
       log,
@@ -139,7 +142,7 @@ describe("bot liveness monitor shared defaults", () => {
   });
 
   test("server parser falls back past an unclassified DONE line for legacy logs", () => {
-    const log = `${DEFAULT_BOT_LIVENESS_STATE_DIR}/legacy-done.log`;
+    const log = join(fixtureDir, "legacy-done.log");
     mkdirSync(dirname(log), { recursive: true });
     writeFileSync(
       log,
@@ -163,7 +166,7 @@ describe("bot liveness monitor shared defaults", () => {
   });
 
   test("server parser default follows BOT_LIVENESS_LOG at call time", () => {
-    const override = `${DEFAULT_BOT_LIVENESS_STATE_DIR}/override.log`;
+    const override = join(fixtureDir, "override.log");
     mkdirSync(dirname(override), { recursive: true });
     writeFileSync(override, "2026-08-03 15:10:00 bot-liveness START (dry_run=0)\nOK\n", "utf-8");
     process.env.BOT_LIVENESS_LOG = override;

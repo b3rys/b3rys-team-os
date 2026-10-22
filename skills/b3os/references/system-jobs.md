@@ -44,14 +44,17 @@
 
 ## bot-liveness-monitor 승격 기준
 
-`bot-liveness-monitor` 는 10분 주기 `launchd` 잡이다. 서버와 스크립트의 기본 경로는 한 곳에서 맞춰야 한다.
+`bot-liveness-monitor` 는 20분 주기 `launchd` 잡이다. 서버와 스크립트의 기본 경로는 한 곳에서 맞춰야 한다.
 
 - 로그 기본값: `<b3os repo>/var/bot-liveness-monitor.log` (`BOT_LIVENESS_LOG` 로 override 가능). `/tmp` 는 재부팅에 지워지므로 기본값으로 쓰지 않는다.
 - 상태 디렉터리 기본값: `<b3os repo>/var/bot-liveness-monitor` (`LIVENESS_STATE_DIR` 로 override 가능).
 - LaunchAgent 라벨: `<TEAMOS_LAUNCHD_PREFIX 또는 com.$USER>.bot-liveness-monitor`. `com.gdmini.*` 같은 개인 라벨은 설치 시점 로컬 값이지 공개 기본값이 아니다.
-- plist 템플릿은 `src/server/lib/livenessMonitor.ts` 의 `renderBotLivenessMonitorPlist()` 가 정본이다. `StartInterval=600`, `scripts/bot-liveness-monitor.sh`, 위 로그/상태 env를 같은 값으로 넘긴다.
-- 감시 대상 bot 목록은 `agents.json` 의 `runtime=claude_channel` 이 정본이다. 고정 팀원 목록으로 조용히 폴백하면 새 팀원이 빠져 잘못된 모니터링이 된다.
+- plist 템플릿은 `src/server/lib/livenessMonitor.ts` 의 `renderBotLivenessMonitorPlist()` 가 정본이다. `StartInterval=1200`, `scripts/bot-liveness-monitor.sh`, 위 로그/상태 env를 같은 값으로 넘긴다.
+- 이 함수는 plist 내용을 반환하며 운영 코드에서 파일을 쓰거나 등록하지 않는다. 별도 설치·등록이 필요하다.
+- 감시 대상 bot 목록은 `agents.json` 의 `runtime=claude_channel` 이 정본이다. `channel.kind=b3chat`인 app 팀원과 다른 기계의 세션은 이 스크립트가 감시하지 않는다. 고정 팀원 목록으로 조용히 폴백하면 새 팀원이 빠져 잘못된 모니터링이 된다.
 - 알림 bot/chat, 토큰, heal/restart 명령 경로는 환경·설정 또는 repo-local 경로로 분리한다. 특정 팀장 chat id, `@gd452_team_op_bot`, `~/Development/<member>` 경로는 공개 템플릿 기본값에 넣지 않는다.
+
+미처리 bus 메시지 또는 현재 tmux 세션 시작 이후의 Telegram 턴 기록(`turnch/*.json`의 전체 시각)이 있고, 같은 메시지와 pane이 20분 이상 유지되면 멈춤 의심으로 알린다. 화면 변경·메시지 완료·세션 변경은 관찰 시간을 초기화한다. 로그인 만료와 멈춤 의심은 알림만 보내며 키 입력·재시작·자동 로그인·자가치유 위임을 하지 않는다. 전송에 성공한 이슈만 중복 억제하며 회복 후 재발하면 다시 알린다.
 
 원칙: 신뢰할 수 없는 입력이면 `unknown`/로그-only 로 닫고, 잘못된 모니터링으로 잘못된 복구를 실행하지 않는다.
 
