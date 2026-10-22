@@ -17,6 +17,7 @@ def pending_message(db_path, agent, channel_dir, session_start=0):
                 WHERE r.agent_id = ?
                   AND r.recipient_state IN ('open', 'acknowledged', 'in_progress')
                   AND COALESCE(r.close_reason, '') != 'broadcast_fyi'
+                  AND r.delivery_state NOT IN ('blocked', 'expired', 'dead_letter')
                   AND m.delivery_status IN ('pending', 'delivered')
                   AND (m.expires_at IS NULL OR julianday(m.expires_at) > julianday('now'))
                 ORDER BY m.created_at, m.id LIMIT 1''', (agent,)).fetchone()

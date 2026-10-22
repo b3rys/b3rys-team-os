@@ -44,11 +44,18 @@ class PaneStallTest(unittest.TestCase):
             self.assertEqual(stall.pending_message(dbpath, 'member', hook), '')
             with sqlite3.connect(dbpath) as db:
                 db.executescript('''CREATE TABLE message(id, created_at, delivery_status, expires_at);
-                    CREATE TABLE message_recipient(message_id, agent_id, recipient_state, close_reason);
+                    CREATE TABLE message_recipient(message_id, agent_id, recipient_state, close_reason, delivery_state);
                     INSERT INTO message VALUES ('one', '2026-01-01', 'delivered', NULL);
-                    INSERT INTO message_recipient VALUES ('one', 'member', 'in_progress', NULL);''')
+                    INSERT INTO message_recipient VALUES ('one', 'member', 'in_progress', NULL, 'wake_dispatched');''')
             self.assertEqual(stall.pending_message(dbpath, 'member', hook), 'bus:one')
             self.assertEqual(stall.pending_message(dbpath, 'other', hook), '')
+            for state in ('blocked', 'expired', 'dead_letter'):
+                with sqlite3.connect(dbpath) as db:
+                    db.execute('UPDATE message_recipient SET delivery_state = ?', (state,))
+                self.assertEqual(stall.pending_message(dbpath, 'member', hook), '')
+            with sqlite3.connect(dbpath) as db:
+                db.execute("UPDATE message_recipient SET delivery_state = 'completed'")
+            self.assertEqual(stall.pending_message(dbpath, 'member', hook), 'bus:one')
             with sqlite3.connect(dbpath) as db:
                 db.execute("UPDATE message_recipient SET recipient_state = 'acknowledged', close_reason = 'broadcast_fyi'")
             self.assertEqual(stall.pending_message(dbpath, 'member', hook), '')
