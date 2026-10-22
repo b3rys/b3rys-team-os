@@ -2,8 +2,8 @@
 # Bot liveness monitor — GD 2207 요청 (2026-06-03).
 # 배경: weekly-healthcheck 는 주 1회 + 세션 "존재"만 봐서, 주중 freeze 를 못 잡았다.
 #   2026-06-03 스티브가 1:1 리액션만 되고 응답 없던 건(설문 프롬프트 점거 + reply 도구 미호출)을
-#   미리 잡기 위해 10분 주기 경량 liveness 체크를 추가한다. 순수 shell — LLM 미호출(토큰 0).
-# Fired by ~/Library/LaunchAgents/<TEAMOS_LAUNCHD_PREFIX>.bot-liveness-monitor.plist (StartInterval=600s=10분)
+#   미리 잡기 위해 20분 주기 경량 liveness 체크를 추가한다. LLM 미호출.
+# Fired by ~/Library/LaunchAgents/<TEAMOS_LAUNCHD_PREFIX>.bot-liveness-monitor.plist (StartInterval=1200s=20분)
 #
 # 검사 항목 (claude_channel 봇: bill steve demis dbak):
 #   1) tmux 세션 존재 (claude-<bot>)
@@ -98,7 +98,7 @@ fi
 #   실측(2026-08-03): 부팅 13:47:38 → 이 감시기 시작 ★13:47:53(15초 뒤)★ → "demis·dbak·lui 세션 없음"
 #   으로 판정해 팀장님께 장애 DM 을 보냈다. 아무도 뜰 수 없는 시점의 판정이라 ★매 부팅마다 나는 오보★ 였다.
 #   게다가 감시기가 재시작 예산까지 써서 ★감시자가 기동자 노릇★ 을 했다(팀원 예약과 이중 기동 = 오늘 사고의 축).
-#   → 부팅 직후에는 판정·조치·알림을 전부 건너뛴다. 다음 주기(10분)면 유예가 풀려 정상 감시한다.
+#   → 부팅 직후에는 판정·조치·알림을 전부 건너뛴다. 다음 주기(20분)면 유예가 풀려 정상 감시한다.
 # ─── LaunchAgent 등록 판정 ─────────────────────────────────────────────────
 #   증상: 2026-08-03 13:47 재부팅에서 ~/Library/LaunchAgents 에 멀쩡히 있는 plist 중 ★일부만 로드됐다.★
 #         실림: claude-telegram-steve · 안 실림: team-collab(서버)·claude-telegram-{bill,demis,dbak,lui}·b3rys-dev 등.
@@ -194,8 +194,9 @@ GD_DM_CHAT="${GD_DM_CHAT:-$GD_CHAT_ID}"  # hooklog 상 owner 1:1 DM chat_id (#4 
 # 세션 노후화 알림 — ★기본 꺼짐(0)★. "매주 재시작한다"는 운영 습관이 있는 팀에서만 의미가 있다.
 #   그 습관이 없는 설치에서는 오래 붙어 있는 정상 세션에 계속 알림이 뜬다. 쓰는 팀은 일수를 지정한다.
 : "${UPTIME_STALE_DAYS:=0}"
-RECENT_SECS=1200      # #4 DM 무응답: react 가 최근 이 시간(20분) 이내일 때만 — stale/재시작 로그 false positive 제외
+RECENT_SECS=4200      # #4: 20분 간격 3회 관찰 + 스케줄 지연 10분 여유
 STATE_FILE="$LIVENESS_STATE_DIR/bot-liveness-monitor.state"      # 직전 이상치 signature (중복알림 방지)
+ALERTS_FILE="$LIVENESS_STATE_DIR/bot-liveness-monitor.alerts"
 PENDING_FILE="$LIVENESS_STATE_DIR/bot-liveness-monitor.pending"  # #4 지속성: 직전 run 의 pending DM msgid
 : "${ENV_FILE:=$B3OS_ROOT/.env}"   # 알림 봇 토큰을 읽는 곳. 설치 위치 기준이라야 다른 기기에서도 찾는다
 # 알림 발신 토큰 — ★전용 키 우선, 없으면 기존 키로 폴백★.
@@ -233,7 +234,7 @@ OFF_FILE="$TEAMOS_AGENT_OFF_FILE"
 
 # ─── reset 모드 ───────────────────────────────────────────────────────────
 if [ "$RESET" = "1" ]; then
-  rm -f "$STATE_FILE" "$PENDING_FILE"
+  rm -f "$STATE_FILE" "$PENDING_FILE" "$ALERTS_FILE" "$LIVENESS_STATE_DIR"/pane-*.json
   echo "state 삭제 — 다음 이상 발견 시 알림 가능"
   finish_status reset
   exit 0
@@ -262,7 +263,7 @@ NOW_EPOCH=$(date '+%s')
 #   여럿이 동시에 죽었다는 건 대개 ★공통 원인★(시스템 리소스·업데이트·네트워크)이라,
 #   전부 재시작해도 같은 이유로 또 죽고 그동안 부하만 키운다. 재시작은 컨텍스트를
 #   잃는 무거운 조치이므로 한 번에 하나씩 하고 결과를 보는 편이 낫다.
-#   초과분은 버리지 않는다 — 다음 점검(10분 뒤)에 그대로 다시 걸리고, 알림에 명시한다.
+#   초과분은 버리지 않는다 — 다음 점검(20분 뒤)에 그대로 다시 걸리고, 알림에 명시한다.
 #   ※ 모달 해제 같은 가역·무해한 조치는 이 예산과 무관하다(위 1.5 단계에서 항상 시도).
 RESTART_BUDGET="${LIVENESS_RESTART_BUDGET:-1}"
 RESTARTS_USED=0
@@ -455,6 +456,21 @@ for bot in "${BOTS[@]}"; do
   #        읽을 수 있으므로 폴러 상태와 무관하게 풀 수 있다. 키 주입은 가역·무해(Enter 1회)라
   #        재시작과 달리 thrash 가드를 걸 이유가 없다.
   pane=$(tmux capture-pane -p -t "$session" 2>/dev/null || echo "")
+  # Terminal status lines only: quoted conversation text is not an authentication error.
+  if printf '%s\n' "$pane" | grep -qiE '^[[:space:]│]*((⎿|✻)[[:space:]]*)?(Login expired[[:space:]]*[·—-][[:space:]]*Please run /login|Please run /login[[:space:].]*$|API Error: 401|401 The socket connection was closed)'; then
+    ISSUES="${ISSUES}· [$bot] Claude 인증 만료 — /login 필요, 수동 확인 (alert-only)
+"
+    continue
+  fi
+  stall_args=(--state "$LIVENESS_STATE_DIR/pane-$bot.json"
+    --db "${TEAM_DB_OVERRIDE:-$B3OS_ROOT/team.db}" --agent "$bot" --hooklog "$hooklog"
+    --session "$(tmux display-message -p -t "$session" '#{session_created}' 2>/dev/null)")
+  [ "$DRY_RUN" = "1" ] && stall_args+=(--dry-run)
+  if [ "$(printf '%s' "$pane" | python3 "$SCRIPT_DIR/liveness-pane-stall.py" "${stall_args[@]}")" = stalled ]; then
+    ISSUES="${ISSUES}· [$bot] 멈춤 의심 — 미처리 메시지가 있고 pane이 20분 이상 동일 (alert-only, 수동 확인)
+"
+    continue
+  fi
   _heal_before="$HEALED"
   attempt_heal "$session" "$bot"          # 매칭 시 복구(또는 dry-run 표시). 복구 후 $pane 갱신.
   attempt_feedback_heal "$session" "$bot"
@@ -467,11 +483,11 @@ for bot in "${BOTS[@]}"; do
   #    스팸만 나고 안 고쳐졌음(steve 사례, GD 2026-07-01 하네스). 근본=.env 빈/깨짐이면 재시작해도 또 죽으니 토큰 먼저 가드.
   pid=$(cat "$pidf" 2>/dev/null || echo "")
   if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
-    # 쿨다운: 직전에 재시작했는데 또 죽었으면(=토큰 유효하지만 다른 이유 or invalid 토큰) 무한 10분 thrash 방지 — 알림만.
+    # 쿨다운: 직전에 재시작했는데 또 죽었으면(=토큰 유효하지만 다른 이유 or invalid 토큰) 무한 20분 thrash 방지 — 알림만.
     hmark="$LIVENESS_STATE_DIR/bot-liveness-poller-heal-$bot.ts"
     if [ "$modal_cleared" = "1" ]; then
       # 방금 모달을 풀었다. 폴러가 못 뜬 원인이 그 모달이었을 가능성이 높으므로(사고 당시가 그랬다)
-      #   재시작하지 않고 다음 점검(10분)에 맡긴다. 재시작은 컨텍스트를 잃는 무거운 조치라
+      #   재시작하지 않고 다음 점검(20분)에 맡긴다. 재시작은 컨텍스트를 잃는 무거운 조치라
       #   원인이 이미 제거된 상태에서 먼저 쓸 이유가 없다.
       ISSUES="${ISSUES}· [$bot] 폴러 미가동 — 방금 blocking 모달을 해제했으므로 재시작 없이 다음 점검에서 재확인
 "
@@ -515,10 +531,6 @@ for bot in "${BOTS[@]}"; do
   pane=$(tmux capture-pane -p -t "$session" 2>/dev/null || echo "")
   if echo "$pane" | grep -qiE "You've hit your monthly spend limit|Usage credit balance|Wait for limit to reset"; then
     ISSUES="${ISSUES}· [$bot] Claude 사용량 한도/결제 옵션 프롬프트 대기 — 응답 루프 멈춤 (리셋 후 세션 확인 필요)
-"
-  fi
-  if echo "$pane" | grep -qiE "Please run /login|API Error: 401|Unauthorized|401 The socket connection was closed"; then
-    ISSUES="${ISSUES}· [$bot] Telegram reply 플러그인 인증 만료 — /login 필요, visible reply 전송 실패
 "
   fi
   if echo "$pane" | grep -qiE "Do you trust the files|Allow .* to run|permission to use"; then
@@ -674,7 +686,7 @@ check_gateway "$TEAMOS_LAUNCHD_PREFIX.b3rys-dev" "b3rys-dev" "b3rys-dev" "http:/
 #   hermes   : Primary provider rate-limited (429): ... quota exhausted (429); retry after <n>s
 # ★인증 실패와 사용량은 다르다★ — hermes 문구에 "Credentials are still valid" 가 붙는다.
 # alert-only(Type C). 재시작해도 안 풀리고 시간이 지나야 풀린다.
-QUOTA_WINDOW_MIN="${LIVENESS_QUOTA_WINDOW_MIN:-15}"   # 점검 주기(10분)보다 넓게 — 사이에 난 것을 놓치지 않는다
+QUOTA_WINDOW_MIN="${LIVENESS_QUOTA_WINDOW_MIN:-25}"   # 점검 주기(20분)보다 넓게 — 사이에 난 것을 놓치지 않는다
 check_provider_quota() {
   # ★한 건만 보고하면 과소보고다★ — 계정 하나가 막히면 여러 런타임·프로필이 동시에 걸린다.
   #   실측(2026-09-07): openclaw 와 hermes 두 프로필이 같은 시각대에 같이 걸렸다. 전부 줄로 낸다.
@@ -797,8 +809,19 @@ fi
 # ─── 이상도 복구도 없음 → state 리셋 후 조용히 종료 ────────────────────────
 if [ -z "$ISSUES" ] && [ -z "$HEALED" ]; then
   echo "이상 없음 — 전 봇 정상"
-  [ "$DRY_RUN" = "0" ] && rm -f "$STATE_FILE"
+  [ "$DRY_RUN" = "0" ] && rm -f "$STATE_FILE" "$ALERTS_FILE"
   finish_status ok
+  exit 0
+fi
+
+ACTIVE_ISSUES="$ISSUES"
+if [ -f "$ALERTS_FILE" ]; then
+  ISSUES=$(printf '%s' "$ISSUES" | grep -Fvx -f "$ALERTS_FILE" || true)
+fi
+if [ -z "$ISSUES" ] && [ -z "$HEALED" ]; then
+  echo "동일 이상치 — 중복알림 skip"
+  if [ "$DRY_RUN" = "0" ]; then printf '%s' "$ACTIVE_ISSUES" > "$ALERTS_FILE"; fi
+  finish_status issues
   exit 0
 fi
 
@@ -808,11 +831,11 @@ fi
 SIG=$(printf "%s" "$ISSUES$HEALED" | shasum | cut -d' ' -f1)
 LAST_SIG=$(cat "$STATE_FILE" 2>/dev/null || echo "")
 
-NOW=$(date '+%Y-%m-%d %H:%M KST')
+NOW=$(date '+%Y-%m-%d %H:%M %Z')
 MSG=""
 # 라우터 OFF 는 봇 문제가 아니라 ingress 킬스위치 → 재시작/자가치유(escalate) 대상에서 제외.
 NON_ROUTER_ISSUES=$(printf "%s" "$ISSUES" | grep -v "\[team-op\] TEAM OP 라우터 OFF" || true)
-ESCALATABLE_ISSUES=$(printf "%s" "$NON_ROUTER_ISSUES" | grep -v "Claude 피드백/종료 프롬프트" | grep -v "Telegram reply 플러그인 인증 만료" || true)
+ESCALATABLE_ISSUES=$(printf "%s" "$NON_ROUTER_ISSUES" | grep -v "Claude 피드백/종료 프롬프트" | grep -v "Telegram reply 플러그인 인증 만료" | grep -v "Claude 인증 만료" | grep -v "멈춤 의심" || true)
 if [ -n "$HEALED" ]; then
   MSG="🔧 [auto-heal] 자동복구 ($NOW)
 ${HEALED}"
@@ -836,10 +859,10 @@ ${ISSUES}"
     MSG="${MSG}조치: 해당 봇 재시작 (라이브 정본 스크립트 · 컨텍스트 유지)
   WORKDIR=<그 팀원의 작업 폴더> $B3OS_ROOT/src/server/runtimes/claude/start-telegram-channel.sh <bot> --resume --force
   ※ WORKDIR 를 빼면 남의 폴더에서 뜰 수 있습니다(자기 CLAUDE.md/TEAM-OS 미로드)."
-  elif printf "%s" "$NON_ROUTER_ISSUES" | grep -q "Telegram reply 플러그인 인증 만료"; then
+  elif printf "%s" "$NON_ROUTER_ISSUES" | grep -qE "Telegram reply 플러그인 인증 만료|Claude 인증 만료"; then
     MSG="${MSG}조치: 해당 Claude 세션에서 /login 재인증 필요. 자동 로그인/토큰 조작은 하지 않음. 재인증 후에도 실패하면 채널 재시작."
   elif [ -n "$NON_ROUTER_ISSUES" ]; then
-    MSG="${MSG}조치: 입력줄에 대기 문장이 있어 자동 조작하지 않음. 해당 팀원 응답/재시작은 PM이 판단."
+    MSG="${MSG}조치: 해당 팀원 화면과 미처리 메시지를 수동 확인. 자동 조작하지 않음."
   fi
   # 자가치유 에스컬레이션: GD 알림과 함께 빌을 깨워 안전조치 1회 시도(쿨다운·빌생존 가드 내부).
   # 단, Bill 본인이 이슈 대상이면 Bill에게 다시 요청하지 않는다. 자기 세션이 막힌 상태에
@@ -862,7 +885,7 @@ if [ "$DRY_RUN" = "1" ]; then
   exit 0
 fi
 
-if [ "$SIG" = "$LAST_SIG" ]; then
+if [ "$SIG" = "$LAST_SIG" ] && [ -z "$ISSUES" ]; then
   echo "동일 이상치 — 중복알림 skip"
   if [ -n "$ISSUES" ]; then finish_status issues; else finish_status healed; fi
   exit 0
@@ -922,6 +945,7 @@ echo "Telegram API: HTTP $HTTP_CODE"
 if [ "$HTTP_CODE" = "200" ]; then
   echo "DM 전송 완료"
   printf "%s" "$SIG" > "$STATE_FILE"
+  printf "%s" "$ACTIVE_ISSUES" > "$ALERTS_FILE"
   rm -f "$RESP_FILE"
 else
   echo "DM 전송 실패 — 응답:"

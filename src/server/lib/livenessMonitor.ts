@@ -77,7 +77,7 @@ export function renderBotLivenessMonitorPlist(): string {
     `  </array>`,
     `  <key>WorkingDirectory</key><string>${xmlEscape(REPO_ROOT)}</string>`,
     `  <key>RunAtLoad</key><true/>`,
-    `  <key>StartInterval</key><integer>600</integer>`,
+    `  <key>StartInterval</key><integer>1200</integer>`,
     `  <key>StandardOutPath</key><string>${xmlEscape(join(REPO_ROOT, "logs", "bot-liveness-monitor.launchd.out.log"))}</string>`,
     `  <key>StandardErrorPath</key><string>${xmlEscape(join(REPO_ROOT, "logs", "bot-liveness-monitor.launchd.err.log"))}</string>`,
     `  <key>EnvironmentVariables</key>`,
