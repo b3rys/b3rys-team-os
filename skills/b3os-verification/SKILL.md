@@ -32,7 +32,7 @@ Passing the runner is evidence for review and approval (TEAM-OS §4), not a subs
 
 ## 1a. Per PR — fix the finish line first, run only what changed
 
-- **Scope line first.** Before any test or check, write one line: changed → will run → will not run. A small change (a menu position, a label) reruns its unit tests only; do not restart a release run for it. Do not start a release while the lead is still choosing the spec.
+- **Scope line first.** Before any test or check, write one line: changed → will run → will not run. A small change (a menu position, a label) runs the checks it reaches — its unit tests and the affected UI check — and reuses the same head's existing records; do not restart a full release run for it. Do not start a release while the lead is still choosing the spec.
 - **Finish conditions are written when the PR opens, not discovered in review.** The PR body lists the checks that prove it: which tests (unit, the changed feature's app tests from the table), which captures or device checks, and what result passes. The author and the reviewer agree on the list in the first round. Later rounds add a required check only for a defect found or a risk the list missed, and say which one. "Done" is that list passing on the exact head that merges.
 - **Per PR, run what the change reaches; the full suite only with approval (§1b).** The feature table maps changed files to checks (`b3os-sf` → dev-mode-operations, "검사 4단계"). The default per PR is the changed features' checks, not the full suite. The table's escalations still apply: a shared file pulls in the features that use it, a file missing from the table widens to its whole module, and a root config, a large refactor, or a change whose reach the table cannot judge is a reason to ask for the full suite. The full suite runs only with the lead's approval (§1b). When one feature keeps escalating to related checks, that is a structure signal to act on — separately from running the checks it needs now.
 - **Say how far each claim got.** Every "verified" or "safe" names its level: ① asserted ② pointed at a real `file:line` ③ walked the failure path and it does not reach ④ ran real code (a test or script that fails loudly if wrong) ⑤ reproduced in the running app. Find the one fact a change is safe because of and take it to ④ or ⑤; report anything below ④ as unproven. For someone else's run, say which: a pass claim in the PR text alone is ①; an execution record checked for the same head, scope, and result (command, log, or result bundle) is "④ by the author, record checked"; a rerun by the reviewer is "④ independent". Ask for a rerun when it answers a defect, a missed risk, or doubt about the record.
@@ -84,7 +84,7 @@ Decision logic goes headless; the app check covers only what is visible in the a
 | Speed: navigation | Median of N switches, clean settings | ≤ ⟨target⟩ ms at ⟨N⟩ items | Every build |
 | Speed: heavy documents | Headless benchmark | ≈ same as a document without the heavy content | When that code changes |
 | Design | Pixel diff against a baseline photo; contrast | 0 px over tolerance; contrast ≥ ⟨value⟩ | When UI changes |
-| Feel | Key → paint on the 3 most-used actions (e.g. switch note, move cursor, type); burst of keys; composition | Judge outliers, not the mean: p90 ≤ 16.7 ms (one frame), p99 and max ≤ 33 ms; 0 dropped; lines live in one table file the probes read | Every release (required gate) |
+| Feel | Key → paint on the 3 most-used actions (e.g. switch note, move cursor, type); burst of keys; composition | Judge outliers, not the mean (p90 / p99 / max), 0 dropped. The verdict comes from the project's table — metric, status (block / report / known), margin, per-condition rows (mode, size, first-key exceptions); probes read it. Example at 60 Hz: one frame 16.7 ms, two 33 ms (Steno burst-step uses p90 33 / max 50, release policy adds 25% speed margin) | Every release (required gate) |
 | Safety | Fault injection on open / edit / save | 0 duplicates, 0 lost input, user files untouched | When that code changes |
 | Coverage | Gap count in the feature table | Only goes down | Every build |
 
@@ -99,7 +99,7 @@ Hard-to-measure items get a **written criterion** in the same row, never an empt
 
 ## 5. When the check is wrong — triage
 
-Tests are often wrong. On FAIL, first decide: **check, environment, or product?** Compare the test's expected answer with the feature's spec doc first — an old rule may be the answer. Until the verdict is "product", report "checking, likely the check" — never "critical". Every FAIL line gets a category and the evidence line; a runner applies these rules automatically and reruns once where the rule says so.
+Tests are often wrong. On FAIL, first decide: **check, environment, or product?** Compare the test's expected answer with the feature's spec doc first — an old rule may be the answer. Until the cause is confirmed, report "cause under check (check / environment / product undecided)" and report the observed user impact separately — real impact such as data loss is escalated at once, whatever the cause turns out to be. Every FAIL line gets a category and the evidence line; a runner applies these rules automatically and reruns once where the rule says so.
 
 | Symptom | Typical cause | Verdict · action |
 |---|---|---|

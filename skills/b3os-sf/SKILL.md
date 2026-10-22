@@ -9,7 +9,7 @@ trigger: run a project (many lead requests over time)
 
 ## 한 문단 답 — "b3os 는 어떻게 개발해요?"
 
-팀장이 방향과 손맛을 정하고 AI 팀원이 역할을 나눠 만든다. 요청은 원문 그대로 `TODO.md` 에 올리고, 바꾸기 비싼 결정만 먼저 설계한다. 일은 10분 단위로 쪼개 병렬로 돌리고, 만드는 AI 와 리뷰하는 AI 를 나눈다. 시험은 바뀐 곳 + 필수, 사용자가 실제로 쓰는 장면만. 품질 기준은 "사용자가 느끼는가"이고 손맛은 숫자로 잰다. 출고는 모드를 정해 20분 안에, 공증본만. 같은 지적이 두 번 나오면 장치로 막고, 배운 것은 메모리 → SHARED → 스킬로 올린다. 사례: Steno(09-01 → 10-22, 커밋 5,261 · 태그 161).
+팀장이 방향과 손맛을 정하고 AI 팀원이 역할을 나눠 만든다. 요청은 원문 그대로 `TODO.md` 에 올리고, 바꾸기 비싼 결정만 먼저 설계한다. 일은 10분 단위로 쪼개 병렬로 돌리고, 만드는 AI 와 리뷰하는 AI 를 나눈다. 시험은 바뀐 곳 + 필수만 돌리고, 출고 시험은 사용자가 실제로 쓰는 장면만 둔다(내부 정확성·안전·mutant 검사는 그대로). 손맛은 "사용자가 느끼는가"를 기준으로 프로젝트 표의 숫자로 잰다. 출고는 모드를 정해 dev·hotfix·fix 는 20분 안에(full 은 별도 승인), macOS 전달본은 공증본만. 같은 지적이 두 번 나오면 장치로 막고, 배운 것은 메모리 → SHARED → 스킬로 올린다. 사례: Steno.
 
 ## 목적
 
@@ -27,11 +27,11 @@ SF는 결과물 품질·과제 수행 시간·과제 수행 토큰량을 함께 
 |---|---|---|---|
 | 1 | 등록·환경 | 요구 원문 → `TODO.md`, 저장소 뼈대, 역할(만들기·판정·PM) | [`start.md`](references/start.md) · `b3os-github-workflow` |
 | 2 | 설계·첫 동작 | 바꾸기 비싼 결정만 설계, 다른 모델로 교차검증, 첫날 시험이 닿는 구조·부팅 검사 | [`start.md`](references/start.md#구현-첫날부터-지킬-구조-규칙) · `b3os-ai-code-safety` Phase 1 |
-| 3 | 구조 잡기 | 기능이 돌면 앱 전체를 재고 리팩토링, 래칫으로 지킨다 | [`structure-refactor.md`](references/structure-refactor.md) |
+| 3 | 구조 잡기 | 기능이 돌고 구조 신호가 보이면 앱 전체를 재고 리팩토링, 래칫으로 지킨다 | [`structure-refactor.md`](references/structure-refactor.md) |
 | 4 | 만들기·리뷰 | 요청마다 순환. 아키 리뷰 먼저, 리뷰는 보고만 | [`development.md`](references/development.md) · `b3os-harness-playbook` |
-| 5 | 시험·검증 | 바뀐 곳 + 필수, 사용자 장면만, 실패하면 시험부터 의심 | [`dev-mode-operations.md`](references/dev-mode-operations.md) · `b3os-verification` |
+| 5 | 시험·검증 | 바뀐 곳 + 필수, 출고 시험은 사용자 장면만, 실패하면 원인(시험·환경·제품)부터 가린다 | [`dev-mode-operations.md`](references/dev-mode-operations.md) · `b3os-verification` |
 | 6 | 손맛 | "사용자가 느끼는가". 키 지연을 표로 재고 원칙으로 판정 | [`feel.md`](references/feel.md) · `b3os-verification` §3 |
-| 7 | 공유 기계·출고 | 잠금 하나로 줄 세우기, 모드 출고 20분, 공증본만 | [`release.md`](references/release.md) · `b3os-verification` §1b·§6 · `b3os-release-ops` |
+| 7 | 공유 기계·출고 | 잠금 하나로 줄 세우기, dev·hotfix·fix 출고 20분(full 은 별도 승인), macOS 전달본은 공증본 | [`release.md`](references/release.md) · `b3os-verification` §1b·§6 · `b3os-release-ops` |
 | 8 | 운영·지식 | 장애는 복구 먼저, 두 번 지적 → 장치, 교훈은 정본·SHARED·스킬로 | [`operations.md`](references/operations.md) · [`knowledge-and-handoff.md`](references/knowledge-and-handoff.md) · `b3os-team-learning-loop` |
 
 ★ 팀장 확인: 첫 기능 목록 · 초기 설계 · 머지 승인 · 실사용 확인.
@@ -57,7 +57,7 @@ SF는 결과물 품질·과제 수행 시간·과제 수행 토큰량을 함께 
 
 ### 손맛 (6)
 
-디테일의 기준은 "사용자가 화면·손으로 느끼는가"다. 느끼면 끝까지 챙기고, 아니면(시험의 시험, 재현 안 되는 내부 경로) 멈추고 다음으로. 손맛은 정의 → 판정선 표 → 동작 원칙 → 출고 게이트 순으로 제품에 넣는다. 의도하지 않은 액션 금지, 커서는 사용자의 의도를 따른다, 잘되던 기능 회귀 금지. 상세: [`references/feel.md`](references/feel.md)
+디테일의 기준은 "사용자가 화면·손으로 느끼는가"다. 느끼면 끝까지 챙기고, 느끼지 않는 손맛 조정(재현 안 되는 내부 경로의 미세 튜닝)은 멈추고 다음으로. 이 기준은 손맛 조정과 출고 시험 범위에만 쓰고, 내부 정확성·안전·mutant 검증은 줄이지 않는다. 손맛은 정의 → 판정선 표 → 동작 원칙 → 출고 게이트 순으로 제품에 넣는다. 의도하지 않은 액션 금지, 커서는 사용자의 의도를 따른다, 잘되던 기능 회귀 금지. 상세: [`references/feel.md`](references/feel.md)
 
 ### 출시 (7)
 
