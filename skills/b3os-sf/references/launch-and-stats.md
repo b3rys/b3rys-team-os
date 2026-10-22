@@ -83,9 +83,9 @@
 - [ ] 외부 CDN 에 기대지 않는다: Tailwind Play CDN(실행 시 JIT, 운영용 아님)·jsdelivr/Google 글꼴을 쓰지 않는다. CSS 는 로컬에서 빌드하고 글꼴은 같은 서버에서 준다.
   - 확인: 브라우저 Network 탭에서 제3자 도메인 요청이 0건이다. `grep -nE 'https?://(cdn|fonts)\.' *.html *.css`
 - [ ] 개인 이메일·제3자 폼 엔드포인트(formsubmit 등)·추적 스크립트·API 키가 HTML·JS·설정에 없다.
-  - 확인: `grep -rnEi '@(gmail|naver|daum|outlook)\.|formsubmit|googletagmanager|gtag\(|api[_-]?key|secret|token' .` 와 시크릿 스캔(`b3os-infra-safety` ⑤)을 돌린다.
+  - 확인: `grep -rlEi '@(gmail|naver|daum|outlook)\.|formsubmit|googletagmanager|gtag\(|api[_-]?key|secret|token' .` 로 파일 이름만 뽑아 열어 본다(`-n`·`-o` 로 일치한 줄·값을 터미널에 찍지 않는다). 시크릿 스캔(`b3os-infra-safety` ⑤)은 값을 가려서(redact) 출력하고, 일치한 값을 로그에 남기지 않는다.
 - [ ] 다운로드·주요 링크가 실제로 된다: 다운로드 버튼은 진짜 파일을 준다. 새 탭(`target=_blank`)보다 같은 탭 다운로드를 쓴다. 메뉴·앵커 링크가 목적지에 닿고 약관·개인정보 링크가 열린다.
-  - 확인: `curl -sIL <다운로드 URL>` 이 200 이고 `content-type` 이 파일 형식과 맞다(dmg 는 `application/x-apple-diskimage`). 모든 `href` 를 `curl -s -o /dev/null -w '%{http_code}'` 로 돌려 200 만 남는다.
+  - 확인: `curl -sIL <다운로드 URL>` 이 200 이고 `content-type` 이 파일 형식과 맞다(dmg 는 `application/x-apple-diskimage`). 링크 종류별로 본다: http(s) 와 상대 경로는 페이지 기준 절대 주소로 바꿔 `curl -sIL -o /dev/null -w '%{http_code}' <URL>` 의 최종 응답(리다이렉트 뒤)이 200 이다. `#앵커` 는 브라우저 콘솔에서 `[...document.querySelectorAll('a[href^="#"]')].filter(a=>!document.querySelector(a.getAttribute('href'))).length` 가 0 이다. `mailto:`·`tel:` 은 주소 형식만 본다.
 - [ ] 캐시로 깨지지 않는다: 새 HTML 이 새 CSS 에 기대면 스타일시트 주소에 버전을 붙인다(`style.css?v=<해시>`). CSS 는 몇 시간 캐시되지만 HTML 은 바로 바뀐다. 인라인 SVG 에는 `width`·`height`·`fill`·`stroke` 속성을 직접 쓴다(CSS 가 없어도 크기가 정상이다).
   - 확인: 배포 뒤 옛 버전을 캐시한 브라우저에서 새로고침 없이 연다. `grep -n '<svg' *.html` 의 각 줄에 `width=` 가 있다.
 - [ ] 화면을 눈으로 본다: 데스크톱·모바일 폭, 라이트·다크, 두 언어 사이트면 언어마다. JS 오류와 가로 스크롤이 없다.
