@@ -6,13 +6,13 @@
 #   · Steno 폴더 목록 지원 확장자와 그림·zip만 받는다.
 #   · --name 을 안 주면 파일 이름 그대로 쓴다. 경로가 포함된 이름은 거절한다.
 #   · --folder 를 주면 팀 공유(또는 받은 파일) 아래 그 폴더에 넣는다. "A" 또는 "A/B"(두 단계까지, 앱 폴더 깊이와 같다). 없으면 도우미가 만든다.
-#   · 크기 상한은 20 MB다.
+#   · 크기 상한은 20 MB다(.webloc은 XML/binary plist 64KiB·HTTPS URL 8192바이트 이하).
 #   · 보낸 것은 덮어쓰거나 지울 수 없다. 고친 판은 새로 보낸다.
 # 성공하면 outbox 파일 이름을 stdout 에 찍고 0 으로 끝난다. 실패하면 이유를 stderr 에 찍고 1.
 set -uo pipefail
 OUTBOX="$HOME/Library/Application Support/b3os/steno-share-outbox"
 MAX_BYTES=20971520
-ALLOWED="md markdown txt text log csv tsv json yml yaml toml ini conf cfg properties env py rb go rs swift sh bash zsh sql js jsx mjs cjs ts tsx mts cts html htm css xml svg java kt kts scala cs c h cpp cc cxx hpp hh m png jpg jpeg gif webp heic zip"
+ALLOWED="md markdown txt text log csv tsv json yml yaml toml ini conf cfg properties env py rb go rs swift sh bash zsh sql js jsx mjs cjs ts tsx mts cts html htm css xml svg java kt kts scala cs c h cpp cc cxx hpp hh m png jpg jpeg gif webp heic zip webloc"
 
 FILE=""; NAME=""; FOLDER=""
 while [ $# -gt 0 ]; do
@@ -64,6 +64,33 @@ TMP="$(mktemp "$OUTBOX/.steno-send.XXXXXX")"
 trap 'rm -f "$TMP"' EXIT
 cp "$FILE" "$TMP"
 chmod 600 "$TMP"
+
+# Validate the staged bytes even when --name changes the source or destination extension.
+if [ "$SOURCE_EXT" = "webloc" ] || [ "$EXT" = "webloc" ]; then
+  /usr/bin/python3 -I - "$TMP" <<'PYLINK' || { echo "✖ 올바른 HTTPS .webloc 파일이 아니다(64KiB·URL 8192바이트 이하)" >&2; exit 1; }
+import plistlib, sys, unicodedata
+from urllib.parse import quote, urlsplit
+try:
+    with open(sys.argv[1], 'rb') as source:
+        data = source.read(65537)
+    if len(data) > 65536:
+        raise ValueError()
+    value = plistlib.loads(data)
+    url = value.get('URL') if isinstance(value, dict) else None
+    if not isinstance(url, str) or not url or len(url.encode('utf-8')) > 8192:
+        raise ValueError()
+    if any(c.isspace() or unicodedata.category(c) == 'Cc' for c in url):
+        raise ValueError()
+    parts = urlsplit(url)
+    if parts.scheme.lower() != 'https' or not parts.hostname or parts.username is not None or parts.password is not None:
+        raise ValueError()
+    parts.port  # Reject malformed ports as well as malformed IPv6 authority.
+    if len(quote(url, safe=":/?#[]@!$&'()*+,;=%").encode('utf-8')) > 8192:
+        raise ValueError()
+except Exception:
+    sys.exit(1)
+PYLINK
+fi
 
 [ ! -L "$OUTBOX" ] || { echo "✖ outbox 가 링크다: $OUTBOX" >&2; exit 1; }
 if [ -n "$FOLDER" ]; then
