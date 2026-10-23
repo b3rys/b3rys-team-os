@@ -2,7 +2,7 @@ import { pick } from "../../i18n";
 import { escape, section, sourceLinks } from "./ui-helpers";
 
 function table(headers: string[], rows: string[][]): string {
-  return `<div class="overflow-x-auto rounded-lg border border-surface-3" tabindex="0" role="region" aria-label="${escape(headers.join(" · "))}"><table class="w-full min-w-[640px] text-left text-xs leading-5"><thead class="bg-surface-2 text-slate-100"><tr>${headers.map(h => `<th scope="col" class="px-3 py-2 font-semibold">${escape(h)}</th>`).join("")}</tr></thead><tbody class="text-slate-300">${rows.map(row => `<tr class="border-t border-surface-3">${row.map((cell, i) => i === 0 ? `<th scope="row" class="px-3 py-3 align-top font-semibold text-slate-100">${escape(cell)}</th>` : `<td class="px-3 py-3 align-top">${escape(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+  return `<div class="overflow-x-auto rounded-lg border border-surface-3 xl:mx-auto xl:max-w-3xl" tabindex="0" role="region" aria-label="${escape(headers.join(" · "))}"><table class="w-full min-w-[640px] text-left text-xs leading-5"><thead class="bg-surface-2 text-slate-100"><tr>${headers.map(h => `<th scope="col" class="px-3 py-2 font-semibold">${escape(h)}</th>`).join("")}</tr></thead><tbody class="text-slate-300">${rows.map(row => `<tr class="border-t border-surface-3">${row.map((cell, i) => i === 0 ? `<th scope="row" class="px-3 py-3 align-top font-semibold text-slate-100">${escape(cell)}</th>` : `<td class="px-3 py-3 align-top">${escape(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
 
 function bullets(items: string[]): string {
@@ -12,7 +12,7 @@ function bullets(items: string[]): string {
 export function workflowDiagram(): string {
   const step = (text: string) => `<div class="rounded-lg border border-surface-3 bg-surface-2 p-3 text-sm font-semibold text-slate-100">${text}</div>`;
   const arrow = '<div class="py-1 text-center text-slate-400" aria-hidden="true">↓</div>';
-  return `<figure class="rounded-xl border border-dashed border-emerald-500/50 p-3 sm:p-5">
+  return `<figure class="rounded-xl border border-dashed border-emerald-500/50 p-3 sm:p-5 xl:mx-auto xl:max-w-3xl">
     <figcaption class="mb-3 text-sm font-semibold text-txt-green">${pick("SF — 프로젝트일 때 감싸는 틀", "SF — wraps BWF only for projects")}</figcaption>
     <div class="rounded-lg border border-surface-3 bg-surface-1 p-3 sm:p-4">
       <p class="mb-3 text-sm font-semibold text-slate-100">${pick("BWF — 요청 하나를 닫는 6단계", "BWF — six steps that close one request")}</p>
