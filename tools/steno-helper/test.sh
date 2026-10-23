@@ -10,4 +10,5 @@ swiftc -D STENO_HELPER_TESTING "$HERE"/Sources/*.swift -o "$STENO_HELPER_TEST_BI
 python3 "$HERE/test-dataless.py"
 python3 "$HERE/test-return-dataless.py"
 python3 "$HERE/test-atomic.py"
+python3 "$HERE/test-replace.py"
 python3 "$HERE/test-watchdog.py"

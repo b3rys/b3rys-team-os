@@ -29,7 +29,7 @@ send.sh --to <물어본 사람> --thread <온 thread> --in-reply-to <그 메시�
     본문에 그렇게 쓴다. 플래그는 그 팀원이 ★자기 답에★ 붙인다.
 - **메시지 읽음 처리** → `ack.sh`
 - **팀버스 맥락 조회** ("팀버스 그거 어떻게 됐어?", "GD가 코덱스한테 뭐 시켰어?") → `bus-recall.sh` (read-only, team.db 조회. 뒤지기 대신 요점 확인)
-- **지원 파일을 팀장 편집기(Steno)로 보내기** → `steno-send.sh <파일> [--name <이름>]` — Steno 지원 텍스트 파일·그림·zip(20MB 이하)을 전용 outbox에 넣으면 권한이 분리된 Steno 도우미(`steno-helper` LaunchAgent)가 팀장 Steno의 "받은 파일/"로 옮긴다. zip은 풀지 않으며, 쌓기만 하고 기존 파일을 덮어쓰거나 지우지 않는다.
+- **지원 파일을 팀장 편집기(Steno)로 보내기** → `steno-send.sh <파일> [--name <이름>]` — Steno 지원 텍스트 파일·그림·zip(20MB 이하)을 전용 outbox에 넣으면 권한이 분리된 Steno 도우미(`steno-helper` LaunchAgent)가 팀장 Steno의 "받은 파일/"로 옮긴다. zip은 풀지 않는다. 기본은 기존 파일을 보존하고 새 이름으로 쌓는다. `--replace`는 같은 대상·`--folder`·`--name`에 도우미가 보낸 기록이 있고 사용자가 고치지 않은 파일만 교체한다. 기록 없는 파일·사용자 편집은 거절하며, 이전 내용은 대상 폴더의 `.steno/helper-replaced/`에 보관한다. 설치 전 버전에는 이 옵션을 쓰지 않는다.
 
 서버: `http://127.0.0.1:7878/team/api/inbox` (loopback).
 

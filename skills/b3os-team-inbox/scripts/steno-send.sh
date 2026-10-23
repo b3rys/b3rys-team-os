@@ -1,22 +1,23 @@
 #!/bin/bash
 # Steno 지원 파일을 권한 분리된 로컬 outbox에 넣는다.
 #
-# Usage: steno-send.sh <file> [--name <받는 쪽 파일 이름>] [--folder <하위 폴더 이름>] [--to-received]
+# Usage: steno-send.sh <file> [--name <받는 쪽 파일 이름>] [--folder <하위 폴더 이름>] [--to-received] [--replace]
 #
 #   · Steno 폴더 목록 지원 확장자와 그림·zip만 받는다.
 #   · --name 을 안 주면 파일 이름 그대로 쓴다. 경로가 포함된 이름은 거절한다.
 #   · --folder 를 주면 팀 공유(또는 받은 파일) 아래 그 폴더에 넣는다. "A" 또는 "A/B"(두 단계까지, 앱 폴더 깊이와 같다). 없으면 도우미가 만든다.
 #   · 크기 상한은 20 MB다.
-#   · 보낸 것은 덮어쓰거나 지울 수 없다. 고친 판은 새로 보낸다.
+#   · --replace 는 도우미가 보낸 뒤 사용자가 고치지 않은 파일만 교체 요청한다.
 # 성공하면 outbox 파일 이름을 stdout 에 찍고 0 으로 끝난다. 실패하면 이유를 stderr 에 찍고 1.
 set -uo pipefail
 OUTBOX="$HOME/Library/Application Support/b3os/steno-share-outbox"
 MAX_BYTES=20971520
 ALLOWED="md markdown txt text log csv tsv json yml yaml toml ini conf cfg properties env py rb go rs swift sh bash zsh sql js jsx mjs cjs ts tsx mts cts html htm css xml svg java kt kts scala cs c h cpp cc cxx hpp hh m png jpg jpeg gif webp heic zip"
 
-FILE=""; NAME=""; FOLDER=""
+FILE=""; NAME=""; FOLDER=""; REPLACE=0
 while [ $# -gt 0 ]; do
   case "$1" in
+    --replace) REPLACE=1; shift ;;
     --to-received) OUTBOX="$HOME/Library/Application Support/b3os/steno-outbox"; shift ;;
     --folder) [ $# -ge 2 ] || { echo "✖ --folder 뒤에 이름이 없다" >&2; exit 1; }; FOLDER="$2"; shift 2 ;;
     --name) [ $# -ge 2 ] || { echo "✖ --name 뒤에 이름이 없다" >&2; exit 1; }; NAME="$2"; shift 2 ;;
@@ -39,7 +40,7 @@ esac
 case "$NAME" in ""|.|..|*/*) echo "✖ 파일 이름에 경로를 쓸 수 없다: $NAME" >&2; exit 1;; esac
 LOWER_NAME="$(printf '%s' "$NAME" | tr '[:upper:]' '[:lower:]')"
 case "$LOWER_NAME" in
-  .env|*secret*|*credential*|*token*)
+  .*|*secret*|*credential*|*token*|*password*)
     echo "✖ 비밀값이 들어갈 수 있는 파일 이름은 보낼 수 없다: $NAME" >&2
     exit 1
     ;;
@@ -66,7 +67,28 @@ cp "$FILE" "$TMP"
 chmod 600 "$TMP"
 
 [ ! -L "$OUTBOX" ] || { echo "✖ outbox 가 링크다: $OUTBOX" >&2; exit 1; }
-if [ -n "$FOLDER" ]; then
+if [ "$REPLACE" = 1 ]; then
+  # Metadata is published last; the helper ignores incomplete payloads.
+  /usr/bin/python3 -I - "$OUTBOX" "$(basename "$TMP")" "$FOLDER" "$NAME" <<'PYREPLACE'
+import hashlib, json, os, sys, uuid
+outbox, temp, folder, name = sys.argv[1:]
+root = os.open(outbox, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+prefix = '.steno-replace-' + str(uuid.uuid4())
+payload = prefix + '.data'
+os.rename(temp, payload, src_dir_fd=root, dst_dir_fd=root)
+fd = os.open(payload, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=root)
+with os.fdopen(fd, 'rb') as f:
+    digest = hashlib.sha256(f.read()).hexdigest()
+request = json.dumps({'file': '/'.join(filter(None, [folder, name])), 'sha256': digest}).encode()
+fd = os.open(prefix + '.pending', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=root)
+with os.fdopen(fd, 'wb') as f:
+    f.write(request); f.flush(); os.fsync(f.fileno())
+os.rename(prefix + '.pending', prefix + '.json', src_dir_fd=root, dst_dir_fd=root)
+os.close(root)
+PYREPLACE
+  [ $? -eq 0 ] || { echo "✖ 교체 요청을 넣지 못했다" >&2; exit 1; }
+  SHOWN="${FOLDER:+$FOLDER/}$NAME"
+elif [ -n "$FOLDER" ]; then
   # 하위 폴더: 경로 문자열로 확인한 뒤 옮기면 그 사이 폴더를 링크로 바꿔치기할 수 있다(리뷰 #575).
   # outbox 폴더 fd 에서 한 단계씩 O_NOFOLLOW 로 내려가 그 fd 에 바로 놓는다 — 경로를 다시 풀지 않는다.
   # 이름이 겹치면 " 2" … 를 붙인다(link 는 있는 이름을 덮지 않는다).
