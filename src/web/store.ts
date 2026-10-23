@@ -249,7 +249,7 @@ export interface TeamOsSnapshot {
 
 export type MainView = "log" | "thread" | "config" | "chat" | "doc" | "busflow" | "teamos" | "topology" | "tasks" | "jobs" | "monitoring" | "search" | "reports" | "projects" | "settings" | "inbox" | "audit" | "proposals";
 export type MobilePane = "agents" | "main" | "threads";
-export type DocSection = "policy" | "architecture" | "routing" | "learning" | "qa" | "search";
+export type DocSection = "workflow" | "policy" | "architecture" | "routing" | "learning" | "qa" | "search";
 
 export interface AppState {
   connected: boolean;
