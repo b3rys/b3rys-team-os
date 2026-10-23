@@ -26,6 +26,8 @@ import {
   approvalGateDiagram,
 } from "./agentSetup/diagrams";
 
+import { workflowPage } from "./agentSetup/workflow";
+
 export function page(active: DocSection, agents: Agent[] = [], statuses: Map<string, Status> = new Map()): string {
   void agents;
   void statuses;
@@ -50,6 +52,7 @@ export function page(active: DocSection, agents: Agent[] = [], statuses: Map<str
     </div>`;
 
   const pages: Record<DocSection, string> = {
+    workflow: workflowPage(),
     policy: `
       ${sharedHeader}
       ${section(pick("처음 보기", "Start here"), "overview", `

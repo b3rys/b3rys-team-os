@@ -170,6 +170,7 @@ export function messageExample(title: string, lines: string[]): string {
 export function miniNav(active: DocSection): string {
   const tabs: { id: DocSection; label: string }[] = [
     { id: "policy", label: pick("처음 보기", "Start here") },
+    { id: "workflow", label: pick("작업 플로우", "Workflow") },
     { id: "architecture", label: pick("구조", "Structure") },
     { id: "routing", label: pick("플로우", "Flow") },
     { id: "learning", label: pick("학습", "Learning") },
