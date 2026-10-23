@@ -42,6 +42,8 @@ curl -s -X PUT http://localhost:$PORT/team/api/settings \
 # 응답에 "setup_complete": true 면 영입 가능. (미션은 안 넣는다 — 기본값 유지.)
 ```
 
+Codex를 첫 팀원으로 선택하면 **팀장 Telegram chat_id**도 직접 물어 `owner_chat_id`로 저장한다. Codex는 Claude의 6자리 pairing 대신 이 값으로 발신자를 제한한다. 값이 비어 있으면 봇이 메시지를 받지 않으므로 활성화 전에 확인한다. 준비·로그인·확인 명령은 `runtime-setup.md#codex`를 따른다.
+
 ## Step B — 영입(recruit)
 
 > **팀원 상한:** 활성 공식 팀원은 최대 **15명**이다. `team_official_member:false`인 비공식/테스트 agent와 정지(off) 팀원은 계산에서 제외한다. 15명에 도달하면 UI와 API가 신규 영입을 차단하므로, 기존 팀원을 정지하거나 퇴사 처리한 뒤 다시 시도한다. 이미 15명을 넘은 기존 팀은 강제로 삭제하지 않고 신규 영입만 막는다.
@@ -92,9 +94,9 @@ curl -s -X POST http://localhost:$PORT/team/api/members/recruit \
 - `id`: 소문자/숫자/-/_, 2~32자, 영문자 시작 (예시일 뿐 — **사용자가 정한 값 사용**). 멘션 라우팅 키.
 - `nicknames`(선택): **`@`멘션 별칭** — 쉼표 구분 문자열(예: `"al,알렉스"`). **id·표시이름은 자동 포함**되니 그 외 추가로 불릴 이름만 넣는다(비우면 `[id, display_name]`). 셋업 후 변경은 `PATCH /members/<id>` 에 `{"nicknames":["al","알렉스"]}` **배열**로.
 - `runtime`: **기본 추천은 `claude_channel`**(기존 Claude 로그인 재사용, 추가 구독 불필요). 공개 표면에서는
-  `claude_channel`·`openclaw`·`hermes_agent`만 안내한다. `openclaw`·`hermes_agent`는 BYO 고급 런타임이라
+  `claude_channel`·`codex`(Codex (Beta))·`openclaw`·`hermes_agent`를 안내한다. `openclaw`·`hermes_agent`는 BYO 고급 런타임이라
   먼저 `runtime-setup.md`의 설치·인증 절차를 끝내야 한다.
-  준비되지 않은 BYO도 목록에서 숨기지 않고 disabled+사유+연동 안내로 보여준다. 이 세 가지 외 내부/coming-soon 런타임은 온보딩에 노출하지 않는다.
+  준비되지 않은 BYO도 목록에서 숨기지 않고 disabled+사유+연동 안내로 보여준다. `b3os_native`는 온보딩에 노출하지 않는다.
   런타임을 고른 뒤 **그 런타임만** 인증 preflight(CLI·로그인) 점검 — 구독을 미리 캐묻지 않는다.
 - `persona`(선택): 능력/강점 — 페르소나 파일에 주입.
 - 응답: `{ ok, ot_id, member, persona_file, persona_written }`. **이 `ot_id` 를 이후 단계에 쓴다.**
@@ -105,7 +107,7 @@ curl -s -X POST http://localhost:$PORT/team/api/members/recruit \
 
 ## Step C — 봇 만들고 토큰 받기 (★ 사람만)
 
-Claude가 사용자에게 안내한다. 이 BotFather 4단계는 `claude_channel`·`openclaw`·`hermes_agent` 모두 동일하다:
+Claude가 사용자에게 안내한다. 이 BotFather 4단계는 `claude_channel`·`codex`·`openclaw`·`hermes_agent` 모두 동일하다:
 ```
 텔레그램 앱에서 @BotFather 열고:
   ① /newbot

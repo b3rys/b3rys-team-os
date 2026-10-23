@@ -7,7 +7,7 @@ import { layoutPixels } from "../lib/dashboardScale";
 import { store, type Agent } from "../store";
 import { apiBase } from "../ws";
 import { setBtnBusy, LIVE_ONLY_OPS } from "./Settings";
-import { FALLBACK_RUNTIME_OPTIONS, fetchRuntimeOptions, runtimeLabel, type RuntimeOption } from "./runtimeOptions";
+import { FALLBACK_RUNTIME_OPTIONS, fetchRuntimeOptions, runtimeLabel, runtimeSetupHref, type RuntimeOption } from "./runtimeOptions";
 import { renderAgentSlack } from "./AgentSlack";
 import { renderIcon, agentIconName, downloadAgentIconJpg } from "../icons";
 import { AGENT_ICON_COLORS, renderAgentIcon, iconColorHex } from "../agentColors";
@@ -186,13 +186,13 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
           <div id="cfg-runtime-cwd-msg" class="text-[11px] text-slate-500 mt-1.5"></div>
         </div>` : "";
   // 런타임 교체 select 옵션 — 서버 화이트리스트(SWAP_TARGETS)와 교집합 + 현재 런타임 제외 + 공개빌드 b3os_native 숨김.
-  // 공개빌드에선 아래 '런타임 교체' 섹션 전체를 렌더하지 않는다(LIVE_ONLY_OPS=false) — 공개판은 UI에서만 swap 숨김. 서버 엔드포인트는 유지되며 codex target·미준비는 publicRuntimeGate/runtime_not_ready 가 막는다.
+  // 런타임 교체는 공개 베타에서도 제공하며 서버가 설치·인증을 다시 검사한다.
   const swapTargetOptions = runtimeOptions
     .filter((r) => SWAP_TARGETS.includes(r.runtime) && r.runtime !== agent.runtime)
     .map((r) => `<option value="${escape(r.runtime)}" ${r.disabled ? "disabled" : ""}>${escape(r.label)}${r.disabled ? pick(" · 연동 필요", " · Setup required") : ""}</option>`)
     .join("");
   const swapSetupHelp = runtimeOptions.filter((r) => r.tier === "advanced_byo" && r.disabled)
-    .map((r) => `<div class="text-[11px] text-txt-amber"><b>${escape(r.label)}</b>: ${escape(r.reason)} · <a class="underline" href="/team/runtime-setup?runtime=${encodeURIComponent(r.runtime)}" data-setup-ref="${escape(r.setup_ref ?? "")}">${pick("연동 안내", "Setup guide")}</a></div>`).join("");
+    .map((r) => `<div class="text-[11px] text-txt-amber"><b>${escape(r.label)}</b>: ${escape(r.reason)} · <a class="underline" href="${runtimeSetupHref(r.setup_ref)}" target="_blank" rel="noreferrer" data-setup-ref="${escape(r.setup_ref ?? "")}">${pick("연동 안내", "Setup guide")}</a></div>`).join("");
   root.innerHTML = `
     <div class="flex-1 flex flex-col min-h-0 overflow-y-auto">
       <div class="h-10 flex items-center justify-between px-4 border-b border-surface-3 shrink-0 bg-surface-1 sticky top-0 z-10">
@@ -240,7 +240,6 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
         <div id="cfg-save-status" class="text-[11px] text-slate-500 mt-1.5 empty:hidden"></div>
         <div class="text-[11px] text-slate-500 mt-1">${pick("재적용→재시작까지 여기서 바로.", "Re-apply through restart, right here.")} ${data.off ? pick("⚠ 현재 <b class=\"text-status-blocked\">정지</b> 상태.", "⚠ Currently <b class=\"text-status-blocked\">stopped</b>.") : ""}</div>
 
-        ${LIVE_ONLY_OPS ? `
         <details class="mt-8 pt-5 border-t border-txt-amber/30 group">
           <summary class="flex items-center gap-1.5 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden text-xs font-semibold uppercase tracking-widest text-txt-amber/80 hover:text-txt-amber">
             <span class="text-txt-amber/70 inline-block text-[11px] leading-none transition-transform acc-chevron">▶</span>${pick("런타임 교체", "Swap runtime")}
@@ -266,7 +265,6 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
             <div id="cfg-swap-steps" class="mt-2 space-y-0.5"></div>
           </div>
         </details>
-        ` : ""}
 
         <div id="cfg-slack"></div>
 
