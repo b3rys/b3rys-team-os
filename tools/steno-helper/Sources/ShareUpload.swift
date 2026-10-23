@@ -59,6 +59,8 @@ func runShareUpload(sourcePath: String, libraryPath: String) -> Int32 {
     let destination = openat(library, "팀 공유", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
     guard destination >= 0 else { uploadLog("팀 공유 폴더 열기 실패"); return 1 }
     defer { close(destination) }
+    guard flock(destination, LOCK_EX | LOCK_NB) == 0 else { return 1 }
+    defer { _ = flock(destination, LOCK_UN) }
     guard cleanupStenoParts(destination) else { return 1 }
     guard hasTeamMarker(directory: destination, path: destinationPath) else {
         uploadLog("Steno 팀 공유 표시가 없어 건너뜀"); return 0
@@ -66,6 +68,9 @@ func runShareUpload(sourcePath: String, libraryPath: String) -> Int32 {
     guard let names = uploadListNames(source) else { return 1 }
     // 보낼 칸의 하위 폴더(steno-send.sh --folder)는 팀 공유 아래 같은 이름 폴더로 올린다. 없으면 만든다.
     let ok = walkOutbox(source, [], names, handle: { dir, name, folders in
+        if folders.isEmpty, name.hasPrefix(".steno-replace-") {
+            return consumeReplacementEntry(source: dir, name: name, destination: destination)
+        }
         if folders.isEmpty && name.hasPrefix(".return-") && name.hasSuffix(".json") {
             return consumeReturn(source: dir, requestName: name, destination: destination)
         }
@@ -80,6 +85,7 @@ func runShareUpload(sourcePath: String, libraryPath: String) -> Int32 {
         guard target >= 0 else { uploadLog("팀 공유 하위 폴더 열기 실패: \(folders.joined(separator: "/"))"); return false }
         defer { close(target) }
         guard let output = publishNew(target, name, data) else { return false }
+        guard recordSent(target, output, data) else { uploadLog("보낸 기록 저장 실패: \(shown)"); return false }
         guard removeUnchanged(dir, name, info, data) else {
             uploadLog("업로드 뒤 보낼 칸이 바뀌어 유지: \(shown)"); return false
         }

@@ -1,4 +1,5 @@
 // 받은 파일 넣기: steno-send.sh 가 권한 없는 outbox 에 둔 파일을 Steno "받은 파일" 로 옮긴다.
+import CryptoKit
 import Darwin
 import Foundation
 
@@ -16,7 +17,7 @@ private func fail(_ message: String) {
 }
 
 func validName(_ name: String) -> Bool {
-    guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains("\0") else { return false }
+    guard !name.isEmpty, !name.hasPrefix("."), !sensitiveName(name), name != ".", name != "..", !name.contains("/"), !name.contains("\0") else { return false }
     return allowedExtensions.contains((name as NSString).pathExtension.lowercased())
 }
 
@@ -47,11 +48,13 @@ private func copyFile(sourceDir: Int32, destinationDir: Int32, name: String) -> 
 
     var buffer = [UInt8](repeating: 0, count: 64 * 1024)
     var total: off_t = 0
+    var digest = SHA256()
     while true {
         let count = read(source, &buffer, buffer.count)
         if count == 0 { break }
         guard count > 0 else { fail("원본 읽기 실패: \(name)"); return false }
         watchdogProgress()
+        digest.update(data: Data(buffer.prefix(count)))
         total += off_t(count)
         guard total <= maxBytes else { fail("복사 중 크기 초과: \(name)"); return false }
         var offset = 0
@@ -79,6 +82,9 @@ private func copyFile(sourceDir: Int32, destinationDir: Int32, name: String) -> 
            (existing.st_mode & S_IFMT) == S_IFLNK { fail("대상 심볼릭 링크 거절: \(candidate)"); return false }
     }
     guard let outputName else { fail("파일 이름 충돌 한도 초과: \(name)"); return false }
+    guard recordSentHash(destinationDir, outputName, digest.finalize().map { String(format: "%02x", $0) }.joined()) else {
+        fail("보낸 기록 저장 실패: \(outputName)"); return false
+    }
     guard unlinkat(sourceDir, name, 0) == 0 else {
         var outputStat = stat(), pathStat = stat()
         if fstat(output, &outputStat) == 0,
@@ -101,11 +107,16 @@ func runInbox(sourcePath: String, destinationPath: String) -> Int32 {
     let destinationDir = open(destinationPath, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
     guard destinationDir >= 0 else { fail("받은 파일 폴더 열기 실패"); return 1 }
     defer { close(destinationDir) }
+    guard flock(destinationDir, LOCK_EX | LOCK_NB) == 0 else { return 1 }
+    defer { _ = flock(destinationDir, LOCK_UN) }
     guard cleanupStenoParts(destinationDir) else { return 1 }
     guard let names = uploadListNames(sourceDir) else { fail("outbox 읽기 실패"); return 1 }
     // outbox 의 하위 폴더(steno-send.sh --folder)는 받은 파일 아래 같은 이름 폴더로 넣는다. 없으면 만든다.
     let ok = walkOutbox(sourceDir, [], names, handle: { dir, name, folders in
-        if isStenoPart(name) { return true }
+        if folders.isEmpty, name.hasPrefix(".steno-replace-") {
+            return consumeReplacementEntry(source: dir, name: name, destination: destinationDir)
+        }
+        if isStenoPart(name) || name.hasPrefix(".steno-send.") { return true }
         guard validName(name) else { fail("파일 이름/확장자 거절: \((folders + [name]).joined(separator: "/"))"); return false }
         let target = openSubdirectory(destinationDir, folders, create: true)
         guard target >= 0 else { fail("받은 파일 하위 폴더 열기 실패: \(folders.joined(separator: "/"))"); return false }
