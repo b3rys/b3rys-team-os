@@ -87,11 +87,11 @@ PM 의 핵심은 단계마다 상황을 파악해 팀장에게 보이게 알리�
 | 좁고 순차·한 맥락·개념 합성 | **솔로** | — |
 | 여러 실제 소스를 동시에(audit·여러 PR·마이그레이션·N 후보·여러 출처 리서치) | **harness(병렬)** | `b3os-harness-playbook` |
 | 결함이 치명적이거나 되돌리기 어려움 | **적대적 리뷰(반증)** | `b3os-harness-playbook` 7패턴 |
-| 중요한 설계·빌드 결정 | **multi-ai review** | `gd-multi-ai-review` |
+| 중요한 설계·빌드 결정 | **multi-ai review** | `gd-multi-ai-review` (팀장 개인 스킬 — 팀 스킬 폴더에 없음. 없으면 코덱스 등 다른 모델 리뷰로) |
 | 후보·판정 비교 | **judge panel** | `b3os-harness-playbook` 7패턴 |
 | 릴리즈·공개 전 | **출고 모드별 검증** | `b3os-verification` §1b · TEAM-OS §4 |
 
-판정 한 줄: **"조각마다 서로 다른 실제 소스를 읽나?" 그렇다 → harness, 아니다 → 솔로.**
+판정 두 줄: **"조각마다 서로 다른 실제 소스를 읽나?" 그렇다 → harness.** **"만든 agent 가 자기 작업을 검수하면 안 되나?" 그렇다 → harness(역할 분리 다단계, `b3os-harness-playbook`).** 둘 다 아니면 솔로.
 품질방법은 켜는 것보다 맞게 쓰는 것이 중요하다 — 완료기준 없이 judge panel·적대적 리뷰를 돌리면 형식만 돈다(1단계의 완료기준이 먼저).
 
 ---

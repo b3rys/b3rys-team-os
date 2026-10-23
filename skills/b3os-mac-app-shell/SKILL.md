@@ -1,6 +1,7 @@
 ---
 name: b3os-mac-app-shell
 description: 웹 대시보드/웹앱을 Apple 네이티브 셸(.app)로 빠르게 래핑하는 팀 스킬. mac-iphone-shell 골격(SwiftUI multi-platform + WKWebView 라이브러리 + HostApp 패턴)을 참조해 URL 구성형 Mac/iPhone 앱을 만들고 .app으로 패키징한다. "이 웹대시보드를 맥앱으로 만들어줘", "b3os.app 같은 셸 앱", "사내 웹툴 네이티브 래핑"일 때, 그리고 아이폰 앱 개발·시뮬레이터 시험·TestFlight 배포를 할 때 사용(아이폰 개발·시험 정본 references/iphone-dev-test.md). 검증된 함정(특히 WebView 창 채움/viewport)을 피하는 레시피 포함. 주 사용자·업데이트 책임자: agent A·developer.
+trigger: wrap a web app as a Mac/iPhone app · iPhone test · TestFlight
 ---
 
 # b3os-mac-app-shell
