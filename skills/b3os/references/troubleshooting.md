@@ -106,6 +106,13 @@ readlink ~/.claude/skills/b3os      # 심링크면 가리키는 clone 경로
 - **깨진 링크**(clone 이동/삭제) → `install-skill.sh` 다시 실행(깨진 링크 감지 후 재설치) 또는 `rm ~/.claude/skills/b3os` 후 `install.sh`.
 - **dirty/비-main pull 실패** → clone 에서 `git status`·`git stash` 확인 후 `git pull`. clone 을 옮겼으면 심링크가 깨지니 위 재설치.
 
+## 채널 에이전트가 응답이 없거나 텔레그램 답이 안 가요
+
+- **무응답** — 서버 문제를 의심하기 전에 `curl` 로 헬스(200=버스 정상)를 보고, `tmux capture-pane` 으로 세션 안 모달(fullscreen renderer 확인·세션 resume)을 본다. 모달은 Esc(renderer)·Enter(resume 기본)로 풀고 연쇄 팝업을 다시 확인한다. 내 세션은 건드리지 않는다. 진단 텍스트가 grep 오탐을 만들 수 있다. Claude Code UI 변경에 따라 낡을 수 있다.
+- **답이 안 가고 도구 호출 마크업이 채팅에 샌다** — 모델이 도구 호출을 직접 만들어야 하는 경로(claude_channel)에서만 생기고, 한 번 새면 자기 대화 기록의 깨진 패턴을 따라 반복한다(자기오염). 세션을 새로 시작하고 맥락은 요약형으로만 주입한다(원문형을 넣으면 재유입). 예방은 프로젝트 CLAUDE.md 의 "도구 호출 태그 앞에 글자를 두지 않는다" 규칙이다. 근본 방안(서버가 평문 답을 받아 전송하는 구조)은 큰 공사라 보류 중이며 인프라 담당과 조율한다.
+- **헤드리스 `claude -p` 가 본 세션의 수신을 밀어냄** — 내 세션 셸에서 `claude -p` 를 띄우면 `TELEGRAM_STATE_DIR` 를 물려받아 텔레그램 플러그인이 같이 떠 본 세션의 수신을 밀어낸다. `env -u TELEGRAM_STATE_DIR claude -p --strict-mcp-config --mcp-config <빈 설정> …` 로만 띄우고, 긴 출고는 nohup 으로 세션과 분리한다.
+- **Slack Socket Mode** — 소켓은 connected(hello)인데 이벤트가 0건이면 앱 설정의 Event Subscriptions 가 꺼져 있거나 `app_mention` 구독이 빠진 것이다(연결≠이벤트 수신). 서버 로그의 `← app_mention (socket 수신)` 유무로 확정한다.
+
 ## 그 밖에
 
 - **대시보드가 안 뜸(`/health` 무응답)** — 서버가 안 떠 있거나 포트 충돌. `bun run start` 로그 확인.

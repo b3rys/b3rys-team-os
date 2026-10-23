@@ -17,7 +17,7 @@
 | Routine merge | 문서, 테스트, 작은 UI 텍스트, 명백한 버그픽스 | 별도 브랜치, clean worktree | 관련 테스트/빌드, PR 리뷰 1명, 작성자 email noreply 확인, 브랜치 보호 확인 | PR 링크, 변경 파일, 검증, 미검증, 롤백 |
 | Live deploy | 공개 `main`을 라이브에 반영 | `main` green, 배포 창·오너 확인 | 반영 대상 commit 확인(dry-run), `bun install`, `bun run build`, 서버 재시작, `/team` 200, 인수테스트 | 배포 전/후 commit, 헬스체크, 롤백 commit |
 | Hotfix | 운영 장애·공개 버그 긴급 수정 | 장애 범위·롤백 기준·오너 명시 | 작은 diff, 가능한 최소 테스트, member review 1명 이상, 배포 후 인수테스트 | 원인, 영향, 수정, 롤백, 후속 과제 |
-| Force-push / history rewrite | 공개 기록 재작성, orphan snapshot, secret 제거 | GD 승인, 백업, freeze 공지 | 하네스 또는 2명 이상 리뷰, secret scan, branch protection/권한 확인, 복구 명령 준비 | 승인 근거, 전/후 SHA, 영향 범위, 복구 절차 |
+| Force-push / history rewrite | 공개 기록 재작성, orphan snapshot, secret 제거 | 팀장 승인, 백업, freeze 공지 | 하네스 또는 2명 이상 리뷰, secret scan, branch protection/권한 확인, 복구 명령 준비 | 승인 근거, 전/후 SHA, 영향 범위, 복구 절차 |
 
 ## 표준 PR → clean merge 흐름
 
@@ -32,11 +32,11 @@
    - `main`이 아닌 브랜치
    - `origin/main..HEAD` commit author·committer email이 GitHub noreply인지
    - `main` 브랜치 보호 설정을 GitHub API로 확인
-4. PR을 열고 Bill 또는 지정 리뷰어에게 리뷰를 요청한다.
+4. PR을 열고 승인 권한자(설정 merge_approvers_normal) 또는 지정 리뷰어에게 리뷰를 요청한다.
 5. merge 수행 계정의 GitHub commit email(커밋 이메일)을 먼저 비공개로 고정한다.
    - GitHub Settings → Emails → “Keep my email addresses private”를 켠다.
    - 웹/squash merge는 브랜치 commit이 all-noreply여도 merge commit author·committer를 머지 수행 계정 email로 찍을 수 있다.
-6. 리뷰 반영 뒤 squash/rebase 등으로 공개 기록을 정리한다. GD 명의가 필요한 공개 정본 merge는 `gd.on` noreply email로 재작성한다.
+6. 리뷰 반영 뒤 squash/rebase 등으로 공개 기록을 정리한다. 팀장 명의가 필요한 공개 정본 merge 는 그 명의의 GitHub noreply email 로 재작성한다.
    - rebase/amend/fast-forward merge도 committer email이 로컬 실명 email로 남을 수 있으므로 author와 committer를 모두 확인한다.
 7. branch protection(브랜치 보호)이 CI·리뷰·권한을 통과시키는 상태에서만 merge한다.
 8. merge 후 `git fetch origin main`을 실행하고 `skills/b3os-release-ops/scripts/release-preflight.sh --mode post-merge`로 `origin/main` tip의 author·committer email이 모두 noreply인지 검증한다.
@@ -126,7 +126,7 @@ bun run service restart                # 또는 bun run start 프로세스 재�
 
 ## Force-push / 공개 기록 재작성
 
-다음은 GD 승인 없이는 금지다.
+다음은 팀장 승인 없이는 금지다.
 
 - 공개 `main` force-push
 - orphan single-commit snapshot으로 공개 기록 교체
@@ -140,7 +140,7 @@ bun run service restart                # 또는 bun run start 프로세스 재�
 3. 공개 범위의 commit author·committer와 annotated tag tagger email이 모두 GitHub noreply인지 확인한다.
 4. 최소 2명 또는 하네스 리뷰가 전/후 diff와 복구 절차를 확인한다.
 5. branch protection이 재적용되어 있는지 확인한다.
-6. GD 승인 메시지, 전/후 SHA, 롤백 명령을 보고에 남긴다.
+6. 팀장 승인 메시지, 전/후 SHA, 롤백 명령을 보고에 남긴다.
 
 ## 봇 자율머지 정책
 
@@ -161,7 +161,7 @@ bun run service restart                # 또는 bun run start 프로세스 재�
 - force-push/history rewrite
 - 결제·외부 전송·삭제 등 되돌리기 어려운 side effect
 
-금지 범위는 GD 승인과 리뷰 게이트를 통과해야 한다. “테스트가 통과했다”는 승인 대체가 아니다.
+금지 범위는 팀장 승인과 리뷰 게이트를 통과해야 한다. “테스트가 통과했다”는 승인 대체가 아니다.
 
 ## 기계적 가드
 

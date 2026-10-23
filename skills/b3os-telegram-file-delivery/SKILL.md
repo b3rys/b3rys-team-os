@@ -22,6 +22,10 @@ Telegram으로 **파일을 그대로 보내야 할 때** 쓰는 스킬이다. �
 - bot token(봇 토큰), chat id(채팅방 ID), credential은 env/profile에서 읽고 stdout에 노출하지 않는다.
 - 성공 여부는 Telegram API 응답의 `ok`, `message_id`, 파일명만 보고한다. 토큰·전체 응답·chat id는 불필요하게 출력하지 않는다.
 
+## 받은 음성 메시지
+
+받은 음성 메시지는 정본 도구 `bun scripts/transcribe-voice.ts <받은 파일>` 로 그 파일 하나만 전사한다(실패하면 TRANSCRIBE_FAILED·exit 1). 폴더 와일드카드로 읽지 않는다 — 조용한 실패가 옛 받아쓰기를 새 답처럼 보이게 한다. 내용이 직전 대화와 안 맞으면 답하기 전에 의심한다.
+
 ## 필요한 값
 
 - `TELEGRAM_BOT_TOKEN`: 보낼 봇의 token (Hermes profile env, OpenClaw account env 등).
