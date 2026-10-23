@@ -87,7 +87,7 @@ If any answer is no, go solo.
 Default sizing:
 
 - turn mode: solo
-- drive mode: limited harness, usually 2-3 and capped by source splits
+- drive mode: limited harness, usually 6 or fewer (start at 2-3) and capped by source splits
 - full-autonomy: broader harness within machine/runtime caps
 
 The cap is a ceiling, not a target. Manual-spawn runtimes require `max_agents`, budget, stop rule, and return schema before fan-out. Ambiguous existing instructions must not run uncapped.
