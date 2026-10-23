@@ -67,9 +67,11 @@ export function resolveCogsClaudeRun(state: PolicyState, ctx: ClaudeRunContext):
 export function cliSupported(versionOutput: string): boolean {
   const m = /^(\d+)\.(\d+)\.(\d+)\s/.exec(versionOutput);
   if (!m) return false;
-  const v = [Number(m[1]), Number(m[2]), Number(m[3])];
-  for (let i = 0; i < 3; i++) if (v[i] !== COGS_CLAUDE_MIN_CLI[i]) return v[i] > COGS_CLAUDE_MIN_CLI[i];
-  return true;
+  const [major, minor, patch] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const [minMajor, minMinor, minPatch] = COGS_CLAUDE_MIN_CLI;
+  if (major !== minMajor) return major > minMajor;
+  if (minor !== minMinor) return minor > minMinor;
+  return patch >= minPatch;
 }
 
 const SECRET_READS = ["Read(~/.claude/**)", "Read(~/.secrets/**)", "Read(**/.env)", "Read(**/.env.*)"];
@@ -108,7 +110,7 @@ export function alwaysRuleFor(toolName: string, input: unknown, ctx: { workspace
     if (BASH_UNSAFE.test(raw) || /[^\S ]/.test(raw.trim())) return { rule: null, why: "compound_or_expansion" };
     const command = raw.trim().replace(/ +/g, " ");
     if (!command) return { rule: null, why: "no_command" };
-    const first = command.split(" ")[0];
+    const first = command.split(" ")[0] ?? "";
     if (!ALWAYS_COMMANDS.has(first)) return { rule: null, why: "not_allowlisted" };
     return bounded(`Bash(${command})`);
   }
