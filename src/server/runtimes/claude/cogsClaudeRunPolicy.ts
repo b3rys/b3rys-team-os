@@ -6,6 +6,9 @@
  *   CLI 가 실측한 버전보다 낮다 → blocked: 샌드박스·승인 동작을 확인하지 않은 CLI 로 돌지 않는다.
  *   valid   → auto 모드 + 승인 카드(--permission-prompts host) + OS 샌드박스.
  *
+ * auto 는 사람이 시킨 일은 묻지 않고 하고, 시키지 않은 위험한 일만 카드로 묻는다(sonnet·opus 실측). 그래서 보호 파일·
+ * 폴더 밖 쓰기 차단은 auto 가 아니라 샌드박스에 맡긴다. 실제 모드는 실행 시 init 이벤트로 확인한다(haiku 는 조용히 default).
+ *
  * 보장 범위(claude 2.1.287, macOS 샌드박스, 작업 폴더 안 실측): Write/Edit 도구와 Bash·스크립트가 보호 파일(SOUL.md·
  * CLAUDE.md·.claude·제어 경로)에 쓰지 못한다. deny 는 allow·[항상]·카드 허용보다 우선이고, 샌드박스 밖 실행 요청은
  * 카드 없이 거절된다(allowUnsandboxedCommands:false). 대가로 Bash 는 작업 폴더 밖에 쓰지 못한다.
