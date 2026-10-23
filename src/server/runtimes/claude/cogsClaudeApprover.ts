@@ -6,21 +6,24 @@
  * 응답 원칙:
  *   - 허용은 인계(handOffCogsApproval)가 이긴 경우에만, 원래 입력 그대로(updatedInput = 받은 input). 입력을 바꿔서
  *     허용하지 않는다 — 사람이 본 것과 실행되는 것이 같아야 한다.
- *   - 샌드박스 밖 실행 요청·너무 긴 명령·정책 못 읽음·방 없음·카드 실패·DB 오류·만료·무효화는 모두 거절.
+ *   - 카드에 대상(명령·경로·주소)을 자르지 않고 전부 보여 줄 수 없으면 묻지 않고 거절한다 — 사람이 본 것과
+ *     실행되는 것이 같아야 한다(잘린 꼬리에 다른 명령이 숨을 수 있다).
+ *   - 샌드박스 밖 실행 요청·정책 못 읽음·방 없음·카드 실패·DB 오류·만료·무효화는 모두 거절.
  */
 import type { Database } from "bun:sqlite";
 import { tierDReasons, type PermissionOperation } from "../../lib/permissionGate";
 import { createCogsApproval, handOffCogsApproval, hasCogsSessionGrant, recordCardMessage } from "../../lib/cogsPermissions/approvals";
 import type { CogsDecisionWaiters } from "../../lib/cogsPermissions/waiters";
-import type { ApprovalCardInput, CardSendResult } from "../../lib/cogsPermissions/card";
+import { approvalCardBody, type ApprovalCardInput, type CardSendResult } from "../../lib/cogsPermissions/card";
 import { alwaysRuleFor } from "./cogsClaudeRunPolicy";
 
 /** 팀장 결정(10/23): 답이 없으면 20분 뒤 거절. */
 export const COGS_CLAUDE_APPROVAL_TTL_MS = 20 * 60_000;
 export const CARD_SEND_TIMEOUT_MS = 15_000;
-/** 사람이 카드에서 다 읽을 수 있는 길이까지만 묻는다. 넘으면 묻지 않고 거절한다. */
+/** 작업 기록에 남기는 모르는 도구 입력의 상한(판정용, 카드에는 쓰지 않는다). */
 export const COMMAND_REVIEW_LIMIT = 2_000;
-const DETAIL_LIMIT = 200;
+/** 요청 번호 자리(prm_ + 18자). 번호를 만들기 전에 카드에 다 들어가는지 재는 데 쓴다. */
+const REQUEST_ID_PLACEHOLDER = `prm_${"x".repeat(18)}`;
 
 export interface ClaudePermissionRequest {
   tool_name: string;
@@ -53,7 +56,7 @@ export interface CogsClaudeApproverDeps {
 }
 
 export type CogsClaudeApproverOutcome =
-  | "denied_unsandboxed" | "denied_bad_request" | "denied_oversized" | "denied_no_room" | "denied_no_policy"
+  | "denied_unsandboxed" | "denied_bad_request" | "denied_unreviewable" | "denied_no_room" | "denied_no_policy"
   | "session_grant" | "card_failed" | "allowed" | "handoff_lost" | "denied" | "error";
 
 const deny = (message: string): ClaudePermissionAnswer => ({ behavior: "deny", message });
@@ -74,7 +77,6 @@ export function createCogsClaudeApprover(deps: CogsClaudeApproverDeps): {
     const input = req.input as Record<string, unknown>;
     // 샌드박스 밖 실행은 설정으로 이미 막혀 있다. 그래도 여기 오면 묻지 않고 거절한다(보호가 샌드박스에 걸려 있다).
     if (input.dangerouslyDisableSandbox === true) return done("denied_unsandboxed", deny("unsandboxed_not_allowed"));
-    if (typeof input.command === "string" && input.command.length > COMMAND_REVIEW_LIMIT) return done("denied_oversized", deny("command_too_long"));
     if (!deps.roomId) return done("denied_no_room", deny("no_approval_room"));
     const stamp = deps.currentStamp();
     if (!stamp) return done("denied_no_policy", deny("no_policy"));
@@ -83,6 +85,9 @@ export function createCogsClaudeApprover(deps: CogsClaudeApproverDeps): {
     const risks = tierDReasons(op);
     // 위험 표시가 있으면 [항상] 을 주지 않는다 — 매번 사람이 본다.
     const always = risks.length ? null : alwaysRuleFor(req.tool_name, input, { workspace: deps.workspace, controlPaths: deps.controlPaths }).rule;
+    if (!fitsOnCard(claudeCardInput(req.tool_name, input, REQUEST_ID_PLACEHOLDER, risks, always !== null))) {
+      return done("denied_unreviewable", deny("too_long_to_review"));
+    }
 
     let requestId: string;
     let db: Database | null = null;
@@ -158,14 +163,21 @@ export function claudeOperation(toolName: string, input: Record<string, unknown>
   return { ...base, action: "tool", text: `${toolName} ${safeJson(input)}`.slice(0, COMMAND_REVIEW_LIMIT) };
 }
 
-/** 카드 = 무엇을(operation_code) + 대상 한 줄(detail). 문구는 앱이 쓴다(서버·브리지는 코드만). */
+/** 카드 = 무엇을(operation_code) + 대상 전체(detail). 자르지 않는다. 문구는 앱이 쓴다(서버·브리지는 코드만). */
 export function claudeCardInput(toolName: string, input: Record<string, unknown>, requestId: string, risks: string[], allowAlways: boolean): ApprovalCardInput {
   const str = (v: unknown) => (typeof v === "string" ? v : undefined);
   const operationCode = toolName === "Bash" ? "run_command" : WRITE_TOOLS.has(toolName) ? "edit_files" : "request_permission";
-  const raw = toolName === "Bash" ? str(input.command)
+  const detail = toolName === "Bash" ? str(input.command)
     : str(input.file_path) ?? str(input.notebook_path) ?? str(input.url) ?? str(input.path) ?? str(input.pattern) ?? toolName;
-  const detail = raw === undefined ? undefined : raw.length > DETAIL_LIMIT ? `${raw.slice(0, DETAIL_LIMIT - 1)}…` : raw;
   return { requestId, operationCode, detail, risks, allowAlways };
+}
+
+/** 카드 본문이 대상 전체를 그대로 싣는가. 서버 한도로 detail 이 빠지거나 본문이 안 만들어지면 false. */
+export function fitsOnCard(card: ApprovalCardInput): boolean {
+  if (card.detail === undefined || card.detail === "") return false;
+  const body = approvalCardBody("0", card);
+  const args = body?.payload.cogs_activity_args as Record<string, unknown> | undefined;
+  return args?.detail === card.detail;
 }
 
 function safeJson(v: unknown): string {

@@ -10,7 +10,7 @@ import { migrate, openDb } from "../../db/migrate";
 import { getBinding, pressCogsApproval, type CardAction } from "../../lib/cogsPermissions/approvals";
 import { createCogsDecisionWaiters } from "../../lib/cogsPermissions/waiters";
 import type { ApprovalCardInput } from "../../lib/cogsPermissions/card";
-import { claudeCardInput, createCogsClaudeApprover, type ClaudePermissionRequest } from "./cogsClaudeApprover";
+import { claudeCardInput, createCogsClaudeApprover, fitsOnCard, type ClaudePermissionRequest } from "./cogsClaudeApprover";
 
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
@@ -64,10 +64,23 @@ describe("거절 쪽으로 닫히는 경우(카드 없이)", () => {
     }
     expect(s.cards).toEqual([]);
   });
-  test("너무 긴 명령은 카드에서 다 못 읽으므로 거절", async () => {
+  test("대상을 카드에 다 못 보이면 묻지 않고 거절(잘린 꼬리에 명령이 숨지 않게)", async () => {
     const s = setup();
-    expect(await s.approver.approve(bash("x".repeat(2001)))).toMatchObject({ behavior: "deny" });
-    expect(s.approver.lastOutcome()).toBe("denied_oversized");
+    const hidden = `git log ${"a".repeat(520)} ; rm -rf ./important`;
+    expect(await s.approver.approve(bash(hidden))).toMatchObject({ behavior: "deny", message: "too_long_to_review" });
+    expect(s.approver.lastOutcome()).toBe("denied_unreviewable");
+    expect(s.cards).toEqual([]);
+    expect(s.db.prepare("SELECT COUNT(*) AS n FROM permission_request").get()).toEqual({ n: 0 });
+  });
+  test("카드에 실린 대상은 실행될 명령과 글자까지 같다", async () => {
+    const s = setup();
+    s.pressOnCard("pg1");
+    // 앞서 200자에서 잘려 꼬리가 사라지던 길이(235자)도 이제 전부 실린다.
+    const command = `git log --oneline ${"b".repeat(190)} ; rm -rf ./important`;
+    const a = await s.approver.approve(bash(command));
+    expect(command.length).toBeGreaterThan(200);
+    expect(a).toMatchObject({ behavior: "allow", updatedInput: { command } });
+    expect(s.cards[0]?.detail).toBe(command);
   });
   test("정책 도장을 못 읽거나 방이 없으면 거절", async () => {
     expect(await setup({ stamp: null }).approver.approve(bash("ls"))).toMatchObject({ behavior: "deny" });
@@ -146,10 +159,18 @@ describe("[항상] 버튼과 규칙", () => {
 });
 
 describe("카드 입력", () => {
-  test("도구별 operation_code 와 대상, 긴 대상은 자른다", () => {
+  test("도구별 operation_code 와 대상 전체(자르지 않음)", () => {
     expect(claudeCardInput("Bash", { command: "ls -la" }, "r", [], true)).toMatchObject({ operationCode: "run_command", detail: "ls -la" });
     expect(claudeCardInput("Edit", { file_path: "/a/b.txt" }, "r", [], false)).toMatchObject({ operationCode: "edit_files", detail: "/a/b.txt" });
     expect(claudeCardInput("WebFetch", { url: "https://x.example" }, "r", [], false)).toMatchObject({ operationCode: "request_permission", detail: "https://x.example" });
-    expect(claudeCardInput("Bash", { command: "x".repeat(500) }, "r", [], false).detail).toHaveLength(200);
+    expect(claudeCardInput("Bash", { command: "x".repeat(500) }, "r", [], false).detail).toHaveLength(500);
+  });
+  test("다 실리는지: 한도 안은 true, 넘거나 대상이 없으면 false(여러 바이트 글자 포함)", () => {
+    const card = (detail: string | undefined) => ({ requestId: "prm_xxxxxxxxxxxxxxxxxx", operationCode: "run_command", detail, risks: [], allowAlways: false });
+    expect(fitsOnCard(card("git status"))).toBe(true);
+    expect(fitsOnCard(card("a".repeat(600)))).toBe(false);
+    expect(fitsOnCard(card("한".repeat(200)))).toBe(false);
+    expect(fitsOnCard(card(undefined))).toBe(false);
+    expect(fitsOnCard(card(""))).toBe(false);
   });
 });
