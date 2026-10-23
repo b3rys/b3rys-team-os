@@ -149,7 +149,7 @@ flowchart TB
 
 - Set the model for every role from the table above. Leaving it blank inherits the session model, so only leave it blank when inheriting is the choice, and say so. After the run, confirm the requested and the actual model ID in the run log.
 - Model names live only in `skills/b3os-harness-playbook/references/model-selection.md`; docs and skills use role names such as "top model + high reasoning".
-- A weekly frontier-model check runs on the scheduler. A change (new model, price, end of support) or a failed or unconfirmed check opens a "harness model review" task for the PM, which compares on real tasks, proposes one change and waits for the lead's approval. Changing a teammate's runtime model goes through `skills/b3os-model-rollout`.
+- A weekly frontier-model check runs on the scheduler. A change (new model, price, end of support) or a failed or unconfirmed check opens a "harness model review" task for the PM. A change triggers real-task comparison, one proposed change and lead approval. A failed or unconfirmed check instead triggers recovery or an owner, and a recheck before the next scheduled check; until then the last verified mapping stays. Changing a teammate's runtime model goes through `skills/b3os-model-rollout`.
 
 Details: `skills/b3os-bwf` · `skills/b3os-sf` · `skills/b3os-verification` · `skills/b3os-harness-playbook`.
 
