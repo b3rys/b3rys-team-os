@@ -88,7 +88,7 @@ Decision logic goes headless; the app check covers only what is visible in the a
 | Safety | Fault injection on open / edit / save | 0 duplicates, 0 lost input, user files untouched | When that code changes |
 | Coverage | Gap count in the feature table | Only goes down | Every build |
 
-**Large-volume speed tests reuse a fixed test set.** Before generating a big library or data set, check whether a prebuilt one exists and reuse it; build one once if not. Keep it in a fixed shared location with a short README and the script that made it, treat the original as read-only, and copy it to a temporary place for each run (the app under test writes into it). Regenerate only when it is broken or the scenario changes. Generating per run wastes time and tokens and makes runs incomparable.
+**Large-volume speed tests reuse a fixed test set.** Before generating a big library or data set, check whether a prebuilt one exists and reuse it; build one once if not. Look for it at the shared fixture path the project documents (and document one if there is none); keep a short README and the script that made it there. The original is a read-only archive kept apart from user data; each run copies it to a temporary folder and opens only that copy (the app under test writes into it), so the temp-folder rule below applies to the copy. Regenerate only when it is broken or the scenario changes. Generating per run wastes time and tokens and makes runs incomparable.
 
 Hard-to-measure items get a **written criterion** in the same row, never an empty cell.
 
