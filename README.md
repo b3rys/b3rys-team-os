@@ -161,6 +161,7 @@ bun run start        # → 브라우저에서 http://localhost:7878/team
 팀원을 **실제로 기동(활성화)**하려면 런타임 준비물이 필요합니다(활성화 화면이 빠진 단계를 명확한 에러로 안내합니다). **b3os 스킬**을 쓰면 아래 준비물 설치·플러그인·페어링을 Claude가 대신 처리합니다.
 
 - **Claude** (주력·권장): Claude Code CLI 로그인 + `tmux`·`bun`. 텔레그램 플러그인은 **user scope로 한 번만** 설치하면 그 머신의 모든 Claude 봇이 공유합니다(봇마다 반복할 필요 없음).
+- **Codex (Beta)** (`codex`): OpenAI Codex CLI + ChatGPT 로그인. 설치·확인 명령과 첫 팀원의 `owner_chat_id` 설정은 [Codex 준비 안내](skills/b3os/references/runtime-setup.md#codex)를 따릅니다. Claude 기본 권장은 유지합니다.
 - **OpenClaw / Hermes**: 해당 런타임 CLI + 인증된 에이전트/프로필 1개(auth 시드) + `python3`(활성화 시 설정 편집에 사용).
 - **플랫폼**: 활성화는 지금 **macOS 전용**(launchd). Linux는 대시보드만 되고 봇 활성화는 안 됩니다.
 - **활성화 스위치** `APPROVAL_EXECUTION_ENABLED=1`: `install.sh`가 *"이 장비에서 팀원 활성화를 허용할까요?"* 로 묻고 자동으로 설정합니다(본인 전용 맥에서만 `y`).

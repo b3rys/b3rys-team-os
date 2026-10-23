@@ -89,7 +89,7 @@ for i in $(seq 1 6); do curl -sf "http://localhost:$PORT/health" >/dev/null 2>&1
 
 **팀명·팀장ID·팀장이름 세 가지가 먼저 있어야 영입이 열린다**(없으면 recruit 가 `setup_incomplete` 400 — 하드 선행조건). "대시보드 가서 입력하세요"로 넘기지 말고 채팅에서 직접 묻는다.
 
-1. **팀명** (≤20자) 2. **팀장 ID** (`lead_id`, 영문 slug 1~40자) 3. **팀장 이름** (`owner_name`, ≤40자) 4. (선택) **팀장 텔레그램 chat_id** (`owner_chat_id`, 숫자 — BYO 런타임을 첫 팀원으로 쓸 때만. claude 는 불필요)
+1. **팀명** (≤20자) 2. **팀장 ID** (`lead_id`, 영문 slug 1~40자) 3. **팀장 이름** (`owner_name`, ≤40자) 4. (선택) **팀장 텔레그램 chat_id** (`owner_chat_id`, 숫자 — Codex 또는 BYO 런타임을 첫 팀원으로 쓸 때. claude 는 불필요)
 
 > ★예시는 제네릭 자리표시자(`acme`/`teamleader`/`Alex`)를 **그대로** 보여준다. 사용자의 실명·팀명을 예시로 쓰거나 이메일·대화 맥락에서 **유추해 넣지 마라.** 실제 값은 사용자가 직접 준 것만 쓴다. **미션은 묻지 않는다**(TEAM-OS 기본값).
 
@@ -105,7 +105,7 @@ curl -s -X PUT http://localhost:$PORT/team/api/settings -H 'content-type: applic
 
 > ★★이 단계에 들어오면 **먼저 `references/recruit.md` 를 펼쳐 읽고** 진행한다★★ — 물어볼 필드·질문 문구·복사용 폼·기본값이 거기 다 있다. "이름·역할" 몇 개만 묻고 넘어가지 말 것.
 
-**① 런타임 선택 모드** — `claude_channel`(권장·쉬움) / `openclaw`·`hermes_agent`(ChatGPT 구독 BYO 고급). 셋을 **항상 보여주되**, 설치+인증 readiness 가 안 되면 **disabled 상태와 `references/runtime-setup.md` CTA** 를 함께 보여준다(고르지 못하는 이유를 화면에서 알 수 있어야 한다). **이 세 가지 외 내부 런타임은 온보딩에 노출하지 않는다.** 목록·권장 이유·고른 순간의 preflight 명령 = `references/runtime-setup.md`.
+**① 런타임 선택 모드** — `claude_channel`(권장·쉬움) / `codex`(Codex (Beta), ChatGPT 로그인) / `openclaw`·`hermes_agent`(ChatGPT 구독 BYO 고급). 네 가지를 **항상 보여주되**, 설치+인증 readiness 가 안 되면 **disabled 상태와 `references/runtime-setup.md` CTA** 를 함께 보여준다(고르지 못하는 이유를 화면에서 알 수 있어야 한다). **`b3os_native`는 온보딩에 노출하지 않는다.** 목록·권장 이유·고른 순간의 preflight 명령 = `references/runtime-setup.md`.
 
 **② 사용자에게 먼저 다 묻는다** — **id**(영문 slug, ★display_name 과 별개이며 빠뜨리기 쉽다★) · **display_name** · **role** · **멘션명(별칭)** · **runtime+모델** · **persona**(선택).
 

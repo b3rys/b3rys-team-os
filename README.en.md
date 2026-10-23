@@ -70,6 +70,7 @@ A teammate is an AI agent with a name, role, and a **runtime** (the engine behin
 | runtime | difficulty | notes | pairing |
 |---|---|---|---|
 | **claude_channel** | easy | Local Claude Code session + tmux bot. Reuses your existing Claude login (no extra subscription). | Telegram plugin pairing (6-digit code → approve) |
+| **Codex (Beta)** (`codex`) | beta | OpenAI Codex CLI + ChatGPT login. [Setup](skills/b3os/references/runtime-setup.md#codex). | Set the lead’s Telegram `owner_chat_id` before activation |
 | **openclaw** | advanced | OpenClaw gateway/session (BYO). | dashboard **[Approve access]** (pair-approve) |
 | **hermes_agent** | advanced | Hermes profile gateway (BYO). | none — activation success = ready |
 

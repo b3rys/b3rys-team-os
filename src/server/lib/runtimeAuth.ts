@@ -87,7 +87,7 @@ function authResultToReadiness(result: RuntimeAuthResult): RuntimeReadiness {
 // (구: `codex login status`는 12s 지연/타임아웃 false-negative로 제거)
 const CODEX_FIX_HINT = "이 서버가 실행되는 컴퓨터의 터미널에서 `codex login` 으로 ChatGPT 로그인 후 다시 활성화하세요";
 // 바이너리 자체가 없을 때(homebrew cleanup/업데이트로 사라짐 등) — '미로그인'과 구분해 명확히 안내.
-const CODEX_MISSING_HINT = "codex CLI가 설치되지 않았습니다. 이 서버 컴퓨터 터미널에서 `brew install codex` 로 설치 후 다시 활성화하세요";
+const CODEX_MISSING_HINT = "codex CLI가 설치되지 않았습니다. 이 서버 컴퓨터 터미널에서 `brew install --cask codex` 로 설치하고 `codex login` 으로 ChatGPT 로그인 후 다시 확인하세요";
 // openclaw 는 자체 auth store(전역 auth.profiles 또는 per-agent auth-profiles.json)로 인증한다 — codex login 이 아님.
 const RUNTIME_SETUP_DOC = "절차: skills/b3os/references/runtime-setup.md";
 const OPENCLAW_FIX_HINT = `openclaw 인증을 완료하세요(전역 auth.profiles 또는 per-agent auth-profiles.json). 이 서버 컴퓨터에서 \`npm install -g openclaw@latest\` → \`openclaw onboard --install-daemon\` → \`openclaw doctor\` 완료 후 다시 활성화하세요. ${RUNTIME_SETUP_DOC}#openclaw`;
