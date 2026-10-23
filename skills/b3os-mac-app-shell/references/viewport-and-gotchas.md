@@ -39,3 +39,5 @@ console.log(document.documentElement.clientHeight, window.innerHeight);
 
 - WebView 창 채움/잘림은 **CSS 추측 말고 webview 실제 높이부터 측정**.
 - iOS/macOS 플랫폼 분기는 typealias로 — 한쪽만 고치면 다른 빌드가 깨진다(크로스리뷰로 잡힌 함정).
+- ad-hoc 서명 앱이 다른 서명이 쓴 키체인 항목을 읽으면 `kSecUseAuthenticationUIFail` 이어도 허락 창이 떠서 호출이 멈춘다. 무인 검사에 ad-hoc 대조군을 두지 않고, 키체인 읽기에는 짧은 한도(20초)를 걸어 넘기면 "막힘(창)"으로 판정한다. 같은 Developer ID 끼리(빌드 번호만 다름)는 창 없이 읽힌다.
+- WKWebView 는 앱이 WKUIDelegate 의 alert/confirm/prompt 패널 메서드를 구현해야 JS 다이얼로그를 보여 준다 — iOS 분기가 없으면 억제되어(`confirm()`→false 즉시) 확인이 필요한 버튼이 iOS 앱에서만 조용히 무동작한다(브라우저·맥 앱은 정상). 해결은 UIKit 분기를 구현하거나 웹 쪽을 인페이지 모달로 바꾸는 것이며(후자가 포터블), 검증은 실제 iOS 앱에서 한다(IME·화면 키보드가 모달을 가리는지 포함).

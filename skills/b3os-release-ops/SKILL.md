@@ -1,6 +1,6 @@
 ---
 name: b3os-release-ops
-description: b3os 공개 정본 배포·PR 머지·핫픽스·force-push 안전 게이트. 팀원이 공개 main, live deploy, clean merge, GD noreply 재작성, 인수테스트, 봇 자율머지 범위를 판단할 때 invoke한다. skills/b3os-release-ops/scripts/release-preflight.sh 로 clean worktree·noreply author/committer·post-merge tip·branch protection·live repo 확인을 기계적으로 점검한다.
+description: b3os 공개 정본 배포·PR 머지·핫픽스·force-push 안전 게이트. 팀원이 공개 main, live deploy, clean merge, 팀장 등 개인 명의 noreply 재작성, 인수(acceptance, 결과가 요구를 만족하는지 마지막에 확인하는 검사)테스트, 봇 자율머지 범위를 판단할 때 invoke한다. skills/b3os-release-ops/scripts/release-preflight.sh 로 clean worktree(같은 저장소를 다른 폴더에 체크아웃한 작업 폴더)·noreply author/committer·post-merge tip·branch protection·live repo 확인을 기계적으로 점검한다.
 trigger: deploy or cut a release
 ---
 
@@ -20,12 +20,14 @@ trigger: deploy or cut a release
 
 | 작업 | 봇 자율 가능? | 필수 게이트 |
 |---|---:|---|
-| 문서 오탈자, 링크, 포맷팅 | 가능 | clean worktree, preflight, 가능하면 리뷰 |
+| 문서 오탈자, 링크, 포맷팅 | 가능 | clean worktree, preflight, 승인 권한자의 리뷰 |
 | 테스트만 수정, 제품 동작 불변 | 제한적 가능 | 관련 테스트, preflight, 리뷰 1명 |
 | 코드 동작 변경 | 불가 | PR, CI/typecheck, member review, 필요 시 harness |
 | DB·권한·보안·시크릿 | 불가 | 팀장 승인, 리뷰, rollback, 감사 로그 |
-| live deploy/restart | 불가 | 팀장/운영 승인, dry-run, build, acceptance, rollback |
+| live deploy/restart | 불가 | 팀장 승인(TEAM-OS §4; 실행은 배포 오너), dry-run, build, acceptance, rollback |
 | branch protection/force-push | 불가 | 팀장 승인, 2명 또는 harness review, backup, audit |
+
+표의 "필수 게이트" 는 최소 조건이다. 머지 승인은 TEAM-OS §4 의 tier 규칙과 b3os-github-workflow ⑦ 을 따른다(일반 = 승인 권한자, 핵심 = 팀장). "봇 자율 가능"은 팀장에게 묻지 않고 진행해도 된다는 뜻이며 승인 리뷰 요건을 면제하지 않는다.
 
 ## 표준 실행 절차
 
@@ -47,7 +49,7 @@ bun run typecheck   # 코드 변경일 때
 
 ### 2. clean merge
 
-- 공개 기록에 남길 author가 GD라면 `gd.on` noreply email로 재작성한다.
+- 공개 기록에 남길 author 가 개인 명의면 그 사람의 GitHub noreply email 로 재작성한다.
 - merge 수행 계정은 GitHub Settings → Emails에서 “Keep my email addresses private”를 먼저 켠다. GitHub 웹/squash merge commit은 브랜치 commit이 all-noreply여도 머지 수행 계정의 author·committer email을 남길 수 있다.
 - rebase/amend/fast-forward merge도 committer email이 로컬 실명 email로 남을 수 있으므로 author와 committer를 모두 확인한다.
 - squash/rebase는 PR 범위 안에서만 한다.
@@ -68,7 +70,7 @@ bun install && bun run build
 bun run service restart                               # 상시가동 미등록이면 `bun run start` 재기동
 ```
 
-검증(`/team` 200)이 실패하면 `git reset --hard "$PREV"` → `bun install && bun run build` → 재시작으로 되돌린다. 전체 절차와 인수테스트 기준은 `docs/DEPLOY_MERGE_HOTFIX_WORKFLOW.md`의 “라이브 배포 흐름”이 정본이다.
+검증(`/team` 200)이 실패하면 `git reset --hard "$PREV"` → `bun install && bun run build` → 재시작으로 되돌린다. 롤백(직전 정상 버전으로 되돌리기)은 영향 제한이 먼저라 승인을 기다리지 않고 한 뒤 곧바로 팀장에게 보고한다. 롤백이 아닌 새 업로드·새 배포·재시작과 되돌릴 수 없는 복구(데이터 삭제·스키마 변경)는 승인 게이트를 따른다. 전체 절차와 인수테스트 기준은 `docs/DEPLOY_MERGE_HOTFIX_WORKFLOW.md`의 “라이브 배포 흐름”이 정본이다.
 
 ### 4. 배포 후 인수테스트
 
@@ -82,7 +84,7 @@ bun run service restart                               # 상시가동 미등록�
 1. 증상, 영향, 롤백 기준을 먼저 적는다.
 2. `hotfix/<topic>` 브랜치에서 최소 diff로 고친다.
 3. 관련 테스트와 실제 재현 경로를 확인한다.
-4. member review 1명 이상을 받는다. 공개 장애·보안·데이터 영향이면 harness까지 붙인다.
+4. member review(작성자가 아닌 팀원 1명의 리뷰, Reviewed-by. 머지 승인 Approved-by 와 별개) 1명 이상을 받는다. 공개 장애·보안·데이터 영향이면 harness까지 붙인다.
 5. merge 후 즉시 deploy + acceptance를 수행한다.
 6. 후속 정리는 별도 작업으로 분리한다.
 
@@ -118,21 +120,12 @@ skills/b3os-release-ops/scripts/release-preflight.sh --mode deploy --live-dir /p
 
 실패하면 머지/배포하지 말고 원인을 해결한다. `--skip-*` 옵션 사용은 보고에 남긴다.
 
-## 보고 템플릿
+시크릿 스캔에서 `sk-`·`xox`·`ghp_`·`AKIA`·`eyJ` 접두어 0건을 안전 신호로 읽지 않는다 — 봇 토큰(숫자:영문)·DB URL·비밀번호는 접두어가 없다. 추적되는 `.env*` 의 `KEY=` 줄은 실키로 간주하고 교체 대상으로 본다. `.gitignore` 가 `.env` 만 막으면 `.env.bak-*` 가 커밋되므로 `.env.bak*` 도 넣는다. 저장소를 공개로 바꾸기 전 필수: 히스토리 제거·키 교체·ignore 보강(승인 게이트).
 
-```text
-files changed:
-verified:
-unverified:
-rollback:
-verdict:
-```
+## 빌드·배포 구성
 
-배포면 추가:
+내부용 변형을 따로 빌드하지 않는다 — 환경 차이는 런타임 설정으로 푼다. 변형을 나누자는 요구가 오면 먼저 "배포·갱신 경로가 변형마다 있는가"를 묻고, 없으면 나누지 않는다(없는 변형은 조용히 낡는다). 어느 환경에 붙어 있는지는 화면에 항상 표시한다.
 
-```text
-source: origin/main <sha>
-live before: <sha>
-live after: <sha>
-acceptance:
-```
+## 보고 형식
+
+정본 문서 `docs/DEPLOY_MERGE_HOTFIX_WORKFLOW.md` 의 "표준 보고 형식"을 쓴다: files changed · verified · unverified · rollback · verdict, 배포면 source · live before · live after · acceptance.

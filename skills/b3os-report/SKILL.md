@@ -96,6 +96,9 @@ entry: scripts/publish.sh
 5. **포털 게시** — ★원본 md/html 은 `reports/` 밖(작업 폴더·임시 폴더)에 두고 publish.sh 가 복사하게 한다.★
    이미 `reports/<id>/` 안에 써 두면 자기 자신을 복사하다 `SameFileError` 로 죽는다(실측).
    `scripts/publish.sh --title "T" --author maintainer --summary "S" --md a.md --html a.html` → team-collab `reports/`에 복사 + 등록 → **<dashboard-url>/reports** 목록에 바로 뜬다. HTML이 있으면 포털 기본 form은 HTML이고, MD는 정본·다운로드용 보조 form으로 남는다.
+   - `/reports` 는 정식 보고서·결과물 전용이다. 임시 시안·목업은 올리지 않고 스크린샷 첨부로 보낸다. 실수로 올렸으면 즉시 등록을 삭제한다. 색·디자인은 값이 아니라 실제 렌더로 보여 준다.
+   - 외부 링크 요청에는 새 터널·Pages·DNS 를 만들기 전에 기존 게시 표면(/reports)을 쓴다. 다중 파일 번들은 단일 세그먼트 경로 제약 때문에 파일을 평탄화한다. 허브 앱 코드는 승인 없이 건드리지 않는다.
+   - 렌더러는 마크다운 안의 raw HTML `<img>` 를 escape 하고 상대경로 이미지를 해결하지 못한다. 게시 전에 이미지 블록을 자리표시 토큰으로 치환 → 렌더 → 렌더된 HTML 에서 토큰을 base64 data URI `<img>` 로 치환한다(단순 base64 치환은 escape 된 텍스트 안에 들어가 안 보인다). 원본 README 는 그대로 둔다.
 
 두 스크립트는 **이 저장소 안에** 있다. clone 루트에서 실행한다(`install.sh`는 `~/.claude/skills/b3os`만 연결하므로 `~/.claude/skills/b3os-report/…` 경로는 없다).
 

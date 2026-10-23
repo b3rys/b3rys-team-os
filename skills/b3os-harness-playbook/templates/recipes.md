@@ -71,7 +71,8 @@ return { scored: scored.filter(Boolean) }   // owner: 동일 rubric 비교 → �
 ---
 
 ## 공통 주의
+- 인증·시크릿이 얽힌 조사를 시킬 때는 프롬프트에 "인증 상태는 `login status` 류 명령이나 파일 존재·경로로만 판단하고 auth.json·.env·*secret*·*.key 의 내용은 cat·grep·출력하지 말 것" 한 줄을 넣는다(`templates/harness-task-card.md` 자격증명 줄).
 - **2층 harness**(팀원 여러 명 × 각 N)면 총 fan-out·총 비용을 owner/PM이 관리.
-- 큰 fan-out·full workflow는 실행 전 the team lead 고지 + stop_rule(⑤). 총 동시 subagents > 8 또는 팀원 2명 이상 동시 총 >= 10이면 the team lead 고지 + stop_rule + 예상 토큰을 먼저 남긴다.
-- cap은 목표가 아니라 천장이다. 기본 2~3으로 시작하고, limited는 보통 6 이하(필요시 8), full은 `min(16, logical CPU core - 2)` 머신캡(절대 상한 16, host override 가능)을 따른다.
+- 큰 fan-out·full workflow는 실행 전 팀장에게 알리고 stop_rule 을 둔다(⑥). 알림은 승인 대기가 아니다. 총 동시 subagents > 8 또는 팀원 2명 이상 동시 총 >= 10이면 팀장에게 알림 + stop_rule + 예상 토큰을 먼저 남긴다.
+- cap은 목표가 아니라 천장이다. 기본 2~3으로 시작하고, limited는 보통 6 이하(필요시 8), full 은 12(절대 16)다. 런타임의 동시 실행 캡(min(16, 코어−2), 초과분은 큐잉)은 별개다.
 - 커버리지 줄였으면 명시(no silent caps). 미검증 추측은 「추정」 표기.
