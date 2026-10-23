@@ -118,6 +118,41 @@ Tell Claude Code *"uninstall b3os"*, or run `bash uninstall.sh` in the repo. It 
 
 ---
 
+## 🗺️ How b3os teammates work
+
+Every task the lead confirms runs through **BWF** (b3os workflow), six steps: ① plan, done criteria and a kanban card → ② assign and acknowledge → ③ execute → ④ verify → ⑤ report → ⑥ learn. A software project whose requests keep piling up is run inside **SF** (Software Factory); each request in it is still closed with one BWF pass. The work in ③ and ④ is split into four **roles** — Find, Pick, Fix (build or fix) and Check. They are role names, not an order: a fix enters at Find; a new feature enters at Fix (build), and whatever the review (Find) turns up goes Pick → Fix → Check. The agent that built something never checks it. **Verification** is the method step ④ uses to prove a result with evidence (`skills/b3os-verification`).
+
+```mermaid
+flowchart TB
+    subgraph SF["SF — wraps BWF only for projects"]
+        direction TB
+        subgraph BWF["BWF — six steps that close one request"]
+            direction TB
+            s1["① plan · done criteria · card"] --> s2["② assign · acknowledge"]
+            s2 --> F
+            subgraph F["roles: Find · Pick · Fix · Check"]
+                direction LR
+                s3["③ execute"] --> s4["④ verify"]
+            end
+            F --> s5["⑤ report"]
+            s5 --> s6["⑥ learn"]
+        end
+    end
+```
+
+| Role in the harness | Role | Model + reasoning | Rule |
+|---|---|---|---|
+| Implementation | Fix | regular model + medium reasoning | change only what was picked, as small as possible |
+| Architecture review | Find | top model + high reasoning | read-only · once per release bundle and before design decisions · returns affected features, a check list and blockers |
+| Deep root-cause analysis | Find | top model + high reasoning | only for tangled bugs or incidents · report only |
+| App / test checks | Check | regular model + medium reasoning | run the checks and read the results · one app check per machine at a time |
+
+- Set the model for every role from the table above. Leaving it blank inherits the session model, so only leave it blank when inheriting is the choice, and say so. After the run, confirm the requested and the actual model ID in the run log.
+- Model names live only in `skills/b3os-harness-playbook/references/model-selection.md`; docs and skills use role names such as "top model + high reasoning".
+- A weekly frontier-model check runs on the scheduler. A change (new model, price, end of support) or a failed or unconfirmed check opens a "harness model review" task for the PM. A change triggers real-task comparison, one proposed change and lead approval. A failed or unconfirmed check instead triggers recovery or an owner, and a recheck before the next scheduled check; until then the last verified mapping stays. Changing a teammate's runtime model goes through `skills/b3os-model-rollout`.
+
+Details: `skills/b3os-bwf` · `skills/b3os-sf` · `skills/b3os-verification` · `skills/b3os-harness-playbook`.
+
 ## 🔒 Safety model
 
 - Bots only respond to approved senders (per-runtime sender gates; the first teammate is paired by a human).
