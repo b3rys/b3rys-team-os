@@ -47,9 +47,8 @@ export function resolveCogsClaudeRun(state: PolicyState, ctx: ClaudeRunContext):
   const p = state.policy;
   if (p.runtime !== "claude") return { mode: "blocked", reason: "runtime_mismatch" };
   if (!cliSupported(ctx.cliVersion)) return { mode: "blocked", reason: "cli_unsupported" };
-  if (!isAbsolute(ctx.workspace) || normalize(ctx.workspace) !== ctx.workspace || ctx.workspace === "/") {
-    return { mode: "blocked", reason: "workspace" };
-  }
+  if (!isRuleSafePath(ctx.workspace)) return { mode: "blocked", reason: "workspace" };
+  if (!ctx.controlPaths.every(isRuleSafePath)) return { mode: "blocked", reason: "control_path" };
   const root = ctx.workspace;
   const base = ["WebFetch", "WebSearch", ...["Read", "Glob", "Grep", "Write", "Edit"].map((tool) => `${tool}(/${root}/**)`)];
   return {
@@ -62,6 +61,15 @@ export function resolveCogsClaudeRun(state: PolicyState, ctx: ClaudeRunContext):
       permissions: { deny: protectedDeny(root, ctx.controlPaths) },
     },
   };
+}
+
+/**
+ * 권한 규칙에 그대로 넣어도 정확히 그 경로만 뜻하는가: 정규 절대 경로, 끝 `/` 없음, 루트 아님,
+ * 제어문자·규칙 메타문자(`* ? [ ] { } ( ) \`) 없음. 아니면 이스케이프하지 않고 막는다.
+ */
+export function isRuleSafePath(path: string): boolean {
+  return isAbsolute(path) && normalize(path) === path && path !== "/" && !path.endsWith("/")
+    && !/[\u0000-\u001f\u007f*?[\]{}()\\]/.test(path);
 }
 
 export function cliSupported(versionOutput: string): boolean {
@@ -107,7 +115,8 @@ export function alwaysRuleFor(toolName: string, input: unknown, ctx: { workspace
     if (args.dangerouslyDisableSandbox === true) return { rule: null, why: "unsandboxed" };
     const raw = typeof args.command === "string" ? args.command : "";
     // 원문으로 먼저 본다 — 공백을 접으면 줄바꿈(명령 둘)이 한 명령처럼 보인다.
-    if (BASH_UNSAFE.test(raw) || /[^\S ]/.test(raw.trim())) return { rule: null, why: "compound_or_expansion" };
+    // 원문 전체: 공백(0x20) 말고는 어떤 제어문자·공백 문자도 받지 않는다(앞뒤 포함).
+    if (BASH_UNSAFE.test(raw) || /[\u0000-\u001f\u007f]|[^\S ]/.test(raw)) return { rule: null, why: "compound_or_expansion" };
     const command = raw.trim().replace(/ +/g, " ");
     if (!command) return { rule: null, why: "no_command" };
     const first = command.split(" ")[0] ?? "";

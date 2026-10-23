@@ -30,8 +30,13 @@ describe("정책 → 실행 설정", () => {
     expect(cliSupported("3.0.0 (Claude Code)")).toBe(true);
     expect(cliSupported("2.0.999 (Claude Code)")).toBe(false);
   });
-  test("작업 폴더가 정규 절대 경로가 아니면 막음", () => {
-    for (const workspace of ["rel", "/a/../b", "/"]) {
+  test("제어 경로가 규칙에 안전한 정규 절대 경로가 아니면 막음", () => {
+    for (const bad of ["rel", "/a/*", "/a\nb", "/a/", "/a/(b)"]) {
+      expect(resolveCogsClaudeRun(claude(), { ...ctx, controlPaths: [...CONTROL, bad] })).toEqual({ mode: "blocked", reason: "control_path" });
+    }
+  });
+  test("작업 폴더가 규칙에 안전한 정규 절대 경로가 아니면 막음", () => {
+    for (const workspace of ["rel", "/a/../b", "/", "/Users/t/a*b", "/Users/t/a\nb", "/Users/t/a/", "/Users/t/a?b", "/Users/t/[x]", "/Users/t/a\\b"]) {
       expect(resolveCogsClaudeRun(claude(), { ...ctx, workspace })).toEqual({ mode: "blocked", reason: "workspace" });
     }
   });
@@ -79,7 +84,7 @@ describe("[항상] 규칙 = 실제 요청에서 최소 범위, 판별 못 하면
   });
   test("복합·파이프·리다이렉션·치환·글롭·따옴표는 숨김", () => {
     for (const command of ["git status && rm -rf x", "ls | sh", "cat a > b", "echo $(id)", "ls `id`", "ls *.md",
-      "git commit -m 'x'", "git log; id", "ls\nid", "git status &", "git\tstatus", "git status\t--short", "ls -la\u000bid"]) {
+      "git commit -m 'x'", "git log; id", "ls\nid", "git status &", "git\tstatus", "git status\t--short", "ls -la\u000bid", "git status\u0000id", "\tgit status", "git status\t", "git status\u007f", "git status\u00a0--short", "git log\u2028id"]) {
       expect(bash(command).rule).toBeNull();
     }
   });
@@ -103,6 +108,18 @@ describe("[항상] 규칙 = 실제 요청에서 최소 범위, 판별 못 하면
     expect(alwaysRuleFor("WebFetch", { url: "https://docs.example.com/a?b=1" }, where)).toEqual({ rule: "WebFetch(domain:docs.example.com)" });
     expect(alwaysRuleFor("WebFetch", { url: "file:///etc/passwd" }, where).rule).toBeNull();
     expect(alwaysRuleFor("Task", { prompt: "x" }, where)).toEqual({ rule: null, why: "unsupported_tool" });
+  });
+  test("규칙을 만들면 언제나 저장 가능한 모양이다(여러 입력)", () => {
+    const inputs: [string, Record<string, unknown>][] = [];
+    for (const c of ["git status", "git status\u0000id", "ls\u001bx", "git log -n 3", "swift build", "rg TODO src", "git\u00a0status"]) inputs.push(["Bash", { command: c }]);
+    for (const f of ["/Users/t/data/x.txt", "/Users/t/da\u0000ta", "/Users/t/da)ta", "/tmp/a b"]) inputs.push(["Write", { file_path: f }]);
+    for (const u of ["https://a.example.com/x", "https://xn--h32b13v.example/", "http://[::1]/"]) inputs.push(["WebFetch", { url: u }]);
+    for (const [tool, input] of inputs) {
+      const r = alwaysRuleFor(tool, input, where);
+      if (r.rule !== null) {
+        expect(readPolicy({ runtime: "claude", schema_version: 1, revision: 1, mode: "auto", allow: [r.rule] }, "claude").state).toBe("valid");
+      }
+    }
   });
   test("만든 규칙은 정책 스키마를 통과한다(저장 가능한 모양)", () => {
     for (const r of [bash("git status"), alwaysRuleFor("Write", { file_path: "/Users/t/data/out.txt" }, where),
