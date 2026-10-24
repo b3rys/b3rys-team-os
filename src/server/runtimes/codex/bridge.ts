@@ -1225,6 +1225,7 @@ export function defaultBridgeCaller(): (o: CodexTurnOptions) => Promise<CodexTur
 /** 브리지에 저장소 env가 없을 수 있으므로 team.db는 cwd 대신 모듈 위치에서 찾는다. 잘못된 DB는 승인 콜백 응답도 막는다. */
 /** 새 세션 인계 글. 팀 DB 를 잠깐 열어 읽고 닫는다 — 실패하면 빈 글(답은 그대로 간다). */
 function newSessionContextFor(agentId: string, workdir: string | undefined, conversation: string): string {
+  if (process.env.CODEX_NEW_SESSION_CONTEXT === "0") return ""; // 끄면 DB 도 열지 않는다
   let db: ReturnType<typeof openDb> | null = null;
   try {
     db = openDb(defaultTeamDbPath());

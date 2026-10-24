@@ -27,9 +27,10 @@ function tail(s: string, n: number): string {
   return t.length > n ? "…(앞부분 생략)\n" + t.slice(t.length - n) : t;
 }
 
+/** ★읽자마자 가린다★ — 자른 뒤에 가리면 잘린 비밀값 꼬리가 패턴에 안 걸려 남는다. */
 function readText(path: string): string {
   try {
-    return existsSync(path) && statSync(path).isFile() ? readFileSync(path, "utf-8") : "";
+    return existsSync(path) && statSync(path).isFile() ? redactSecrets(readFileSync(path, "utf-8")) : "";
   } catch {
     return "";
   }
@@ -73,7 +74,7 @@ export function otherThreadsSection(db: Database, agentId: string, currentConver
     for (const r of rows) {
       if (seen.has(r.thread_id)) continue;
       seen.add(r.thread_id);
-      const first = String(r.body ?? "").split("\n").find((l) => l.trim()) ?? "";
+      const first = redactSecrets(String(r.body ?? "")).split("\n").find((l) => l.trim()) ?? "";
       const one = first.length > LINE_CHARS ? first.slice(0, LINE_CHARS) + "…" : first;
       lines.push(`- [${r.thread_id}] (${r.created_at} UTC) ${one}`);
       if (lines.length >= OTHER_THREADS) break;

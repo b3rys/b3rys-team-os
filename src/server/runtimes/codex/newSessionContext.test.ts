@@ -88,3 +88,24 @@ describe("codex new-session context", () => {
     expect(otherThreadsSection(d, "dex", "t")).toBe("");
   });
 });
+
+describe("redact — 리뷰 #613 회귀", () => {
+  test("JSON·따옴표 형태 비밀값도 가린다", async () => {
+    const { redactSecrets } = await import("../../lib/redactSecrets");
+    const fake = "Zq9" + "w".repeat(20);
+    for (const s of [`{"api_key":"${fake}"}`, `{"password": "${fake}"}`, `api_key = ${fake}`, `'db_token':'${fake}'`]) {
+      expect(redactSecrets(s)).not.toContain(fake);
+    }
+  });
+
+  test("자르기 전에 가린다 — 끝 1,500자 경계에 걸린 비밀값 꼬리가 남지 않는다", () => {
+    const w = ws();
+    const fake = "Qx7" + "v".repeat(30);
+    const secretLine = `password = ${fake}`;
+    // 끝 1,500자가 값 중간에서 시작하도록 배치
+    const tailText = "z".repeat(1500 - 10);
+    writeFileSync(join(w, "MEMORY.md"), "앞\n" + secretLine + tailText);
+    const text = memorySection(w);
+    expect(text).not.toContain(fake.slice(-10));
+  });
+});

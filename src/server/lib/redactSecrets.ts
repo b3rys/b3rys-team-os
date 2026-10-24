@@ -8,6 +8,7 @@ export function redactSecrets(s: string): string {
     .replace(/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, "<redacted-slack>")
     .replace(/\bAKIA[0-9A-Z]{16}\b/g, "<redacted-aws>")
     .replace(/(-----BEGIN [A-Z ]*PRIVATE KEY-----)[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----)/g, "<redacted-pem>")
-    .replace(/((?:token|secret|password|api[_-]?key)\s*[=:]\s*)\S{8,}/gi, "$1<redacted>");
+    // key=value · key: value · "key": "value" · 'key':'value' 모두. 값은 따옴표·공백·쉼표·괄호 앞까지.
+    .replace(/(["']?\b(?:[a-z0-9_-]*(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|private[_-]?key|credential)[a-z0-9_-]*)["']?\s*[=:]\s*["']?)[^"'\s,;}\])]{6,}/gi, "$1<redacted>");
 }
 
