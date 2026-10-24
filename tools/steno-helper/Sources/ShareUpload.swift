@@ -64,13 +64,19 @@ func runShareUpload(sourcePath: String, libraryPath: String) -> Int32 {
         uploadLog("Steno 팀 공유 표시가 없어 건너뜀"); return 0
     }
     guard let names = uploadListNames(source) else { return 1 }
+    // 바꾸기·치우기 전 본문은 같은 지원 폴더의 팀 폴더(steno-shared)에 남긴다.
+    let backupPath = (sourcePath as NSString).deletingLastPathComponent + "/steno-shared"
     // 보낼 칸의 하위 폴더(steno-send.sh --folder)는 팀 공유 아래 같은 이름 폴더로 올린다. 없으면 만든다.
     let ok = walkOutbox(source, [], names, handle: { dir, name, folders in
         if folders.isEmpty && name.hasPrefix(".return-") && name.hasSuffix(".json") {
             return consumeReturn(source: dir, requestName: name, destination: destination)
         }
+        if folders.isEmpty && name.hasPrefix(".replace-") && name.hasSuffix(".json") {
+            return consumeReplace(source: dir, requestName: name, destination: destination, backupPath: backupPath)
+        }
         // A producer publishes data first, metadata last. Never upload a partial request.
         if name.hasPrefix(".return-") && (name.hasSuffix(".data") || name.hasSuffix(".base") || name.hasSuffix(".tmp") || name.hasSuffix(".pending")) || name.hasPrefix(".steno-send.") { return true }
+        if name.hasPrefix(".replace-") && (name.hasSuffix(".data") || name.hasSuffix(".tmp")) { return true }
         let shown = (folders + [name]).joined(separator: "/")
         guard !name.hasPrefix("."), validName(name),
               let info = regularSingleLink(dir, name), let data = uploadReadRegular(dir, name), !data.isEmpty else {
@@ -80,6 +86,10 @@ func runShareUpload(sourcePath: String, libraryPath: String) -> Int32 {
         guard target >= 0 else { uploadLog("팀 공유 하위 폴더 열기 실패: \(folders.joined(separator: "/"))"); return false }
         defer { close(target) }
         guard let output = publishNew(target, name, data) else { return false }
+        // 나중에 --replace/--remove 가 '도우미가 올린 파일'인지 확인할 수 있게 적어 둔다.
+        if !updateSentLedger(destination, { $0[ledgerKey((folders + [output]).joined(separator: "/"))] = uploadSHA256(data) }) {
+            uploadLog("올린 목록 기록 실패(이 파일은 나중에 바꾸기 불가): \((folders + [output]).joined(separator: "/"))")
+        }
         guard removeUnchanged(dir, name, info, data) else {
             uploadLog("업로드 뒤 보낼 칸이 바뀌어 유지: \(shown)"); return false
         }
