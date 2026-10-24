@@ -1,14 +1,17 @@
 import Darwin
 import Foundation
 
-// 팀원이 자기 폴더(팀 공유/<팀원>/…)에 올린 파일을 같은 자리에서 고쳐 다시 보내거나 치운다.
-// 팀 공유 바로 아래 파일과 다른 이름의 폴더는 건드리지 않는다.
+// 팀원이 팀 공유에 올린 파일을 같은 자리에서 고쳐 다시 보내거나 치운다.
 // ★도우미가 직접 올린 파일만★ 바꾼다: 올릴 때 팀 공유/.b3os-sent.json 에 적어 두고 그 목록에 있는 것만 받는다.
-//   그 파일은 문서 폴더 안이라 팀원 쪽(같은 사용자라도 문서 폴더 권한 없음)이 고칠 수 없다. 요청 안의 이름·경로는 믿지 않는다. 바꾸거나 치우기 전의 본문은
+//   그 파일은 문서 폴더 안이라 팀원 쪽(같은 사용자라도 문서 폴더 권한 없음)이 고칠 수 없다.
+//   그래서 사람이 Steno 에서 만든 노트는 절대 바뀌지 않는다.
+// ★팀원끼리는 구분하지 않는다★: 팀원은 모두 같은 macOS 사용자로 돌아 도우미가 요청자를 증명할 수 없다.
+//   (팀원 작업 폴더도 서로 쓸 수 있는 것과 같다.) 그래서 팀원이 올린 파일은 어느 팀원이든 바꿀 수 있다 — 이것이 정책이다.
+//   요청의 member 는 로그용이고 권한 판단에 쓰지 않는다. 바꾸거나 치우기 전의 본문은
 // 팀 폴더 steno-shared/.replaced/ 에 남겨 되살릴 수 있게 한다(라이브러리 밖이라 Steno 목록에는 안 보인다).
 private struct ShareReplaceRequest: Decodable {
     let file: String     // "<팀원>/이름" 또는 "<팀원>/폴더/이름"
-    let member: String   // 첫 폴더 이름과 같아야 한다
+    let member: String?  // 로그용(권한 판단에 안 씀)
     let sha256: String?  // 바꾸기: 새 본문 해시. 치우기면 없다
     let remove: Bool?
 }
@@ -19,15 +22,18 @@ private func replaceLog(_ message: String) {
 
 let sentLedgerName = ".b3os-sent.json"
 
-/// 도우미가 올린 파일 목록(팀 공유 기준 상대 경로 → 마지막으로 올린 본문 해시). 못 읽으면 빈 목록.
-func readSentLedger(_ destination: Int32) -> [String: String] {
+/// 도우미가 올린 파일 목록(팀 공유 기준 상대 경로 → 마지막으로 올린 본문 해시).
+/// 아직 없으면 빈 목록, ★있는데 못 읽거나 깨졌으면 nil★ — 둘을 섞으면 목록을 빈 것으로 덮어 이전 기록을 잃는다.
+func readSentLedger(_ destination: Int32) -> [String: String]? {
+    var info = stat()
+    if fstatat(destination, sentLedgerName, &info, AT_SYMLINK_NOFOLLOW) != 0 { return errno == ENOENT ? [:] : nil }
     guard let raw = uploadReadRegular(destination, sentLedgerName),
-          let map = try? JSONDecoder().decode([String: String].self, from: raw) else { return [:] }
+          let map = try? JSONDecoder().decode([String: String].self, from: raw) else { return nil }
     return map
 }
 
 func updateSentLedger(_ destination: Int32, _ change: (inout [String: String]) -> Void) -> Bool {
-    var map = readSentLedger(destination)
+    guard var map = readSentLedger(destination) else { return false }
     change(&map)
     let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
     guard let data = try? encoder.encode(map) else { return false }
@@ -64,13 +70,15 @@ func consumeReplace(source: Int32, requestName: String, destination: Int32, back
         return removeUnchanged(source, requestName, requestInfo, raw)
     }
     let parts = request.file.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
-    guard parts.count >= 2, let leaf = parts.last, !leaf.hasPrefix("."), validName(leaf),
-          let folders = folderComponents(parts.dropLast().joined(separator: "/")),
-          folders.first == request.member else {
-        return drop("팀원 자기 폴더 안의 파일만 바꿀 수 있어 거절")
+    guard let leaf = parts.last, !leaf.hasPrefix("."), validName(leaf),
+          let folders = folderComponents(parts.dropLast().joined(separator: "/")) else {
+        return drop("경로가 올바르지 않아 거절")
     }
     let key = ledgerKey(request.file)
-    guard readSentLedger(destination)[key] != nil else { return drop("도우미가 올린 파일이 아니라 거절") }
+    guard let ledger = readSentLedger(destination) else {
+        replaceLog("올린 목록을 지금 읽을 수 없어 다음에 다시: \(request.file)"); return false
+    }
+    guard ledger[key] != nil else { return drop("도우미가 올린 파일이 아니라 거절") }
     let remove = request.remove == true
     var newData: Data?, payloadInfo: stat?
     if !remove {

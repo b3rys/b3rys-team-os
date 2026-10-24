@@ -2,15 +2,16 @@
 # Steno 지원 파일을 권한 분리된 로컬 outbox에 넣는다.
 #
 # Usage: steno-send.sh <file> [--name <받는 쪽 파일 이름>] [--folder <하위 폴더 이름>] [--to-received]
-#        steno-send.sh <file> --folder <팀원>[/<폴더>] [--name <이름>] --replace   # 내 폴더의 그 파일을 새 내용으로 바꾼다
-#        steno-send.sh --remove <팀원>[/<폴더>]/<이름>                            # 내 폴더의 그 파일을 치운다
+#        steno-send.sh <file> [--folder <폴더>] [--name <이름>] --replace   # 팀원이 올린 그 파일을 새 내용으로 바꾼다
+#        steno-send.sh --remove [<폴더>/]<이름>                            # 팀원이 올린 그 파일을 치운다
 #
 #   · Steno 폴더 목록 지원 확장자와 그림·zip만 받는다.
 #   · --name 을 안 주면 파일 이름 그대로 쓴다. 경로가 포함된 이름은 거절한다.
 #   · --folder 를 주면 팀 공유(또는 받은 파일) 아래 그 폴더에 넣는다. "A" 또는 "A/B"(두 단계까지, 앱 폴더 깊이와 같다). 없으면 도우미가 만든다.
 #   · 크기 상한은 20 MB다.
 #   · 기본은 덮어쓰지 않는다(같은 이름이면 " 2" 를 붙인다).
-#   · --replace / --remove 는 팀 공유/<팀원>/ 폴더 안 파일만 된다(첫 폴더 이름 = 팀원). 사람이 고친 판이어도 바꾼다.
+#   · --replace / --remove 는 도우미가 올린 파일(팀원이 보낸 것)만 된다. 사람이 Steno 에서 만든 노트는 안 바뀐다.
+#     팀원끼리는 구분하지 않는다(같은 사용자라 증명 불가). 사람이 고친 판이어도 바꾼다. 내 것은 팀 공유/<내 이름>/ 에 두는 게 관례다.
 #     바뀌기 전 본문은 팀 폴더 steno-shared/.replaced/<해시>.data 에 남는다. 결과는 도우미 로그(b3os-steno-helper.log)에 찍힌다.
 # 성공하면 outbox 파일 이름을 stdout 에 찍고 0 으로 끝난다. 실패하면 이유를 stderr 에 찍고 1.
 set -uo pipefail
@@ -38,8 +39,8 @@ import hashlib, json, os, sys, uuid
 outbox, rel, data_path = sys.argv[1:]
 parts = rel.split("/")
 bad = lambda p: (not p) or p in (".", "..") or p.startswith(".") or "\0" in p or "\\" in p
-if not (2 <= len(parts) <= 3) or any(bad(p) for p in parts):
-    sys.exit("✖ 경로는 <팀원>/<이름> 또는 <팀원>/<폴더>/<이름> 이어야 한다: " + rel)
+if not (1 <= len(parts) <= 3) or any(bad(p) for p in parts):
+    sys.exit("✖ 경로는 <이름>, <폴더>/<이름>, <폴더>/<폴더>/<이름> 중 하나다: " + rel)
 low = rel.lower()
 if any(w in low for w in ("secret", "credential", "token", "password")) or parts[-1].lower() == ".env":
     sys.exit("✖ 비밀값이 들어갈 수 있는 이름은 쓸 수 없다: " + rel)
@@ -47,7 +48,8 @@ os.makedirs(outbox, mode=0o700, exist_ok=True)
 if os.path.islink(outbox) or os.path.realpath(outbox) != outbox:
     sys.exit("✖ outbox 가 링크다: " + outbox)
 ident = str(uuid.uuid4())
-meta = {"file": rel, "member": parts[0]}
+meta = {"file": rel}
+if os.environ.get("B3OS_AGENT_ID"): meta["member"] = os.environ["B3OS_AGENT_ID"][:24]  # 로그용
 values = []
 if data_path:
     with open(data_path, "rb") as f:
@@ -106,11 +108,11 @@ if [ -n "$FOLDER" ]; then
 fi
 
 if [ "$MODE" = replace ]; then
-  [ -n "$FOLDER" ] || { echo "✖ --replace 는 --folder <팀원> 이 필요하다(팀원 자기 폴더만 바꾼다)" >&2; exit 1; }
   [ "$OUTBOX" = "$HOME/Library/Application Support/b3os/steno-share-outbox" ] || { echo "✖ --replace 는 팀 공유에만 쓴다" >&2; exit 1; }
   umask 077
-  replace_request "$FOLDER/$NAME" "$FILE" || exit 1
-  echo "✓ 바꾸기 요청 — $FOLDER/$NAME (결과는 도우미 로그)" >&2
+  REL="${FOLDER:+$FOLDER/}$NAME"
+  replace_request "$REL" "$FILE" || exit 1
+  echo "✓ 바꾸기 요청 — $REL (결과는 도우미 로그)" >&2
   exit 0
 fi
 umask 077
