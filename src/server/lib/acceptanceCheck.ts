@@ -211,8 +211,9 @@ function coreRulesStep(teamOsPath: string): AcceptanceStep {
   }
   const content = readFileSync(teamOsPath, "utf-8");
   items.push(item("pass", "TEAM-OS.md", "존재"));
+  // 한국어 TEAM-OS 는 owner 를 "주인" 으로 적는다(주인 규칙: @멘션 > 답장 원글 작성자 > 직전 주인).
   items.push(
-    content.includes("owner") && (content.includes("@멘션") || content.includes("@mention"))
+    /owner|주인/.test(content) && (content.includes("@멘션") || content.includes("@mention"))
       ? item("pass", "owner 판정 규칙", "§2 있음")
       : item("fail", "owner 판정 규칙", "누락"),
   );
