@@ -1,0 +1,90 @@
+import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildNewSessionContext, memorySection, otherThreadsSection, withNewSessionContext } from "./newSessionContext";
+
+function db(): Database {
+  const d = new Database(":memory:");
+  d.exec(`CREATE TABLE message (id TEXT, thread_id TEXT, from_agent_id TEXT, body TEXT, created_at TEXT)`);
+  return d;
+}
+
+function ws(): string {
+  const w = mkdtempSync(join(tmpdir(), "codex-nsc-"));
+  mkdirSync(join(w, "memory"));
+  return w;
+}
+
+describe("codex new-session context", () => {
+  test("기억 파일: MEMORY.md + 최근 날짜 메모 2개, 오래된 것은 뺀다", () => {
+    const w = ws();
+    writeFileSync(join(w, "MEMORY.md"), "# MEMORY\n- 장기 교훈 A\n");
+    for (const d of ["2026-10-22", "2026-10-23", "2026-10-24"]) writeFileSync(join(w, "memory", `${d}.md`), `메모 ${d}`);
+    writeFileSync(join(w, "memory", "2026-09-01.md"), "옛 메모");
+    const old = new Date(Date.now() - 10 * 24 * 3600 * 1000);
+    utimesSync(join(w, "memory", "2026-09-01.md"), old, old);
+    writeFileSync(join(w, "memory", "notes.json"), "{}");
+    const text = memorySection(w);
+    expect(text).toContain("장기 교훈 A");
+    expect(text).toContain("메모 2026-10-24");
+    expect(text).toContain("메모 2026-10-23");
+    expect(text).not.toContain("메모 2026-10-22");
+    expect(text).not.toContain("옛 메모");
+    expect(text.indexOf("2026-10-23")).toBeLessThan(text.indexOf("2026-10-24"));
+  });
+
+  test("길면 끝부분(최근 기록)을 남긴다", () => {
+    const w = ws();
+    writeFileSync(join(w, "MEMORY.md"), "앞" + "x".repeat(5000) + "끝줄");
+    const text = memorySection(w);
+    expect(text).toContain("끝줄");
+    expect(text).toContain("앞부분 생략");
+    expect(text.length).toBeLessThan(1700);
+  });
+
+  test("다른 스레드: 내가 24시간 안에 보낸 글, 스레드마다 최신 1개, 지금 스레드·남의 글·옛 글 제외", () => {
+    const d = db();
+    const ins = d.prepare("INSERT INTO message VALUES (?,?,?,?,datetime('now', ?))");
+    ins.run("1", "t-a", "dex", "A 옛 글", "-2 hours");
+    ins.run("2", "t-a", "dex", "A 최신 글\n둘째 줄", "-1 hours");
+    ins.run("3", "t-cur", "dex", "지금 스레드", "-1 hours");
+    ins.run("4", "t-b", "bill", "남의 글", "-1 hours");
+    ins.run("5", "t-c", "dex", "어제 그제 글", "-30 hours");
+    const text = otherThreadsSection(d, "dex", "t-cur");
+    expect(text).toContain("[t-a]");
+    expect(text).toContain("A 최신 글");
+    expect(text).not.toContain("둘째 줄");
+    expect(text).not.toContain("A 옛 글");
+    expect(text).not.toContain("지금 스레드");
+    expect(text).not.toContain("남의 글");
+    expect(text).not.toContain("어제 그제");
+  });
+
+  test("붙일 것이 없으면 빈 글이고 프롬프트는 그대로", () => {
+    const w = mkdtempSync(join(tmpdir(), "codex-nsc-empty-"));
+    expect(buildNewSessionContext(db(), "dex", w, "t")).toBe("");
+    expect(withNewSessionContext("본문", "")).toBe("본문");
+  });
+
+  test("토큰 모양은 가리고, 끄면 붙이지 않는다", () => {
+    const w = ws();
+    writeFileSync(join(w, "MEMORY.md"), "bot123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA 를 쓰지 마");
+    const text = buildNewSessionContext(db(), "dex", w, "t");
+    expect(text).toContain("bot<redacted>");
+    expect(text).not.toContain("AAAAAAAAAAAAAAAA");
+    expect(withNewSessionContext("본문", text).endsWith("본문")).toBe(true);
+    process.env.CODEX_NEW_SESSION_CONTEXT = "0";
+    try {
+      expect(buildNewSessionContext(db(), "dex", w, "t")).toBe("");
+    } finally {
+      delete process.env.CODEX_NEW_SESSION_CONTEXT;
+    }
+  });
+
+  test("DB 를 못 읽어도 던지지 않는다", () => {
+    const d = new Database(":memory:");
+    expect(otherThreadsSection(d, "dex", "t")).toBe("");
+  });
+});
