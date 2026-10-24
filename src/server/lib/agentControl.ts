@@ -164,7 +164,7 @@ export async function setAgentEnabled(agentId: string, runtime: string, enabled:
   let res: ControlResult;
   try {
     if (runtime === "openclaw") res = await setOpenclaw(agentId, enabled);
-    else if (runtime === "claude_channel" && cogsTmuxAgent(agentId)) res = await controlCogsTmux(cogsTmuxAgent(agentId)!, enabled);
+    else if (runtime === "claude_channel" && cogsTmuxAgent(agentId)) res = await controlCogsTmux(cogsTmuxAgent(agentId)!, enabled, false, {allowDisabledStart:enabled});
     else if (runtime === "claude_channel") res = (channel ?? readMemberChannel(agentId)).kind === "b3chat" ? await setCodex(agentId, enabled, true,channel) : await setClaude(agentId, enabled);
     else if (runtime === "hermes_agent") res = await setHermes(agentId, enabled);
     else if (runtime === "codex") res = await setCodex(agentId, enabled);

@@ -1543,7 +1543,13 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         const allowFrom = currentCogsAllowlist(live.channel!, seededAllowFrom, liveAgentId, process.env.TEAM_AGENT_REGISTRY);
         if (u.update_id < offset) continue;
         offset = u.update_id + 1;
+        // Correlate cogs ingress without logging message bodies, URLs or credentials.
+        const logUpdate = (result: string) => {
+          if (live.channel?.kind === "b3chat") console.log(`[cogs-update] ${JSON.stringify({agent_id:liveAgentId,update_id:u.update_id,result})}`);
+        };
+        logUpdate("received");
         if (u.message_reaction) {
+          logUpdate("reaction_dispatched");
           const reaction = u.message_reaction;
           void routeReactionUpdate(u.update_id, reaction, {
             channel: live.channel!, allowFrom, ownBotId, inbox: live.reactionInbox!,
@@ -1568,8 +1574,9 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
               dbPath: defaultTeamDbPath(),
             });
             cogsApprovals?.afterCallback();
+            logUpdate("callback_processed");
           }
-          catch (e) { console.error(`[codex-bridge] 승인 콜백 처리 실패: ${e instanceof Error ? e.message : e}`); }
+          catch (e) { logUpdate("callback_failed"); console.error(`[codex-bridge] 승인 콜백 처리 실패: ${e instanceof Error ? e.message : e}`); }
           continue;
         }
         const msg = u.message;
@@ -1577,10 +1584,11 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         const messageId = msg?.message_id;
         // 사진은 text 없이 caption만 올 수 있으므로 본문 없음으로 메시지를 건너뛰지 않는다.
         const decided = decideDmMessage(msg);
-        if (chatId === undefined || !decided.handle) continue;
+        if (chatId === undefined || !decided.handle) { logUpdate("unsupported_message"); continue; }
         const { text, hasMedia } = decided;
 	        // 발신자 게이트(fail-closed): 허용 목록이 비어 있거나 미포함이면 무시한다.
 	        if (!isAllowedChat(allowFrom, chatId)) {
+            logUpdate("sender_not_allowed");
 	          if (allowFrom.size === 0 && !warnedNoAllowlist) {
 	          warnedNoAllowlist = true;
 	            console.warn("[codex-bridge] ⛔ CODEX_ALLOW_FROM 미설정 — fail-closed 로 모든 발신자를 차단합니다. 런처 시드 or 영입 시 오너 chat_id 확보 필요.");
@@ -1609,9 +1617,11 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
             const r = await handleMessage(chatId, text, messageId, live, hasMedia && msg
               ? () => downloadDmAttachmentsSafe(token, msg)
               : undefined, "poll", isGroupChat(msg?.chat), receipt);
+            logUpdate(r.ok ? "turn_complete" : "turn_failed");
             console.log(`[codex-bridge] → ${r.detail}: ${r.reply.slice(0, 60)}`);
           },
         }).then((route) => {
+          logUpdate(route);
           console.log(`[codex-bridge] ↳ ${route === "steered" ? "진행 중 작업에 전달" : "새 작업으로"}: ${text.slice(0, 40)}`);
         });
       }

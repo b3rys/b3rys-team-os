@@ -44,3 +44,18 @@ test("reply tool cannot choose another teammate's message or thread",()=>{
  expect(ownsCogsMessage(db,"testmate","t","m")).toBe(true);
  expect(ownsCogsMessage(db,"other","t","m")).toBe(false);expect(ownsCogsMessage(db,"testmate","other","m")).toBe(false);db.close();
 });
+
+test("off while bridge retirement awaits cancels recovery before launch",async()=>gates(async()=>{
+ let release!:()=>void;const gate=new Promise<boolean>(r=>release=()=>r(true));let launches=0;
+ const pending=controlCogsTmux(agent,true,true,{bridgePids:()=>[123],waitBridgeExit:()=>gate,alive:()=>false,run:(_cmd,args)=>{if(args[0]==="new-session")launches++;return {status:0};}});
+ writeFileSync(process.env.TEAMOS_AGENT_OFF_FILE!,`${agent.id}\n`);
+ release();expect((await pending).ok).toBe(false);expect(launches).toBe(0);
+ writeFileSync(process.env.TEAMOS_AGENT_OFF_FILE!,"");
+}));
+test("later stop cancels an earlier start waiting for bridge exit",async()=>gates(async()=>{
+ let release!:()=>void;const gate=new Promise<boolean>(r=>release=()=>r(true));let launches=0;
+ const run=(_cmd:string,args:string[])=>{if(args[0]==="new-session")launches++;return {status:0};};
+ const pending=controlCogsTmux(agent,true,true,{bridgePids:()=>[123],waitBridgeExit:()=>gate,alive:()=>false,run});
+ expect((await controlCogsTmux(agent,false,false,{bridgePids:()=>[],alive:()=>false,run})).ok).toBe(true);
+ release();expect((await pending).ok).toBe(false);expect(launches).toBe(0);
+}));

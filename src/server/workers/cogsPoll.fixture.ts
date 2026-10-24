@@ -77,6 +77,11 @@ function rowCount() { return (db.query("SELECT count(*) AS n FROM message").get(
 test("incoming message persists sender and room and injects kind cogs", async () => {
   updates = [update()]; const p = poller(); await p.pollOnce();
   expect(injected).toHaveLength(1);
+  const audit = db.query("SELECT action,detail_json FROM audit_event WHERE action LIKE 'cogs_%'").all() as {action:string;detail_json:string}[];
+  expect(audit.some(a=>a.action==="cogs_update_received" && JSON.parse(a.detail_json).update_id===10)).toBe(true);
+  expect(audit.some(a=>a.action==="cogs_inject_ok" && JSON.parse(a.detail_json).update_id===10)).toBe(true);
+  expect(JSON.stringify(audit)).not.toContain(TOKEN);
+  expect(JSON.stringify(audit)).not.toContain("질문입니다");
   expect(injected[0]!).toMatchObject({ session: "claude-lisa", source: "cogs", kind: "cogs", fromLabel: "cogs:8" });
   expect(injected[0]!.body).toContain("chat_id=71, sender_id=8");
   expect(findCogsMetaForThread(db, injected[0]!.threadId)).toEqual({ agent_id: "lisa", chat_id: "71", message_id: 110, from: { id: "8", name: "GD" } });
@@ -99,6 +104,7 @@ test("only allowed private human text reaches the session", async () => {
   const group = update(12); group.message.chat.type = "group";
   updates = [update(10, 999), bot, group, update(13, 71, " ")];
   await poller().pollOnce(); expect(injected).toHaveLength(0); expect(rowCount()).toBe(0);
+  expect(db.query("SELECT count(*) AS n FROM audit_event WHERE action='cogs_update_skipped'").get()).toEqual({n:4});
 });
 test("registry loads only the opt-in without changing primary channel loading", () => {
   agents[0]!.channel = { kind: "telegram" };

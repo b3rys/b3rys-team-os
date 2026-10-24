@@ -1,3 +1,4 @@
+import { isAgentOff } from "../../lib/agentControl";
 import { cogsToolPolicy, readCogsToolScope } from "./cogsToolPolicy";
 import { readBridgePid, descendantPids, waitForExit } from "../codex/bridgeProcess";
 import { pidAlive } from "../../lib/codexBridgeClient";
@@ -32,7 +33,9 @@ export function cogsTmuxCommand(agent: AgentRecord, resume = false): string {
     "--append-system-prompt",instruction];
   return `unset CLAUDECODE; export GD_AGENT_ID=${q(agent.id)}; export PATH=${q(`${process.env.HOME}/.local/bin:${process.env.HOME}/.bun/bin:/opt/homebrew/bin`)}:"$PATH"; ${resume ? `${args.map(q).join(" ")} --continue || ` : ""}exec ${args.map(q).join(" ")}`;
 }
+const controlGeneration = new Map<string, number>();
 export interface CogsTmuxControlDeps {
+  allowDisabledStart?: boolean;
   run?: (command: string, args: string[]) => {status: number | null};
   alive?: (session: string) => boolean;
   bridgePids?: (agent: AgentRecord) => number[];
@@ -40,6 +43,8 @@ export interface CogsTmuxControlDeps {
 }
 export async function controlCogsTmux(agent: AgentRecord, enabled: boolean, resume = false, deps: CogsTmuxControlDeps = {}): Promise<{ok:boolean;detail:string}> {
   if (process.env.APPROVAL_EXECUTION_ENABLED !== "1") return {ok:false,detail:"execution_disabled"};
+  const generation = (controlGeneration.get(agent.id) ?? 0) + 1;
+  controlGeneration.set(agent.id,generation);
   const session = agent.tmux_session;
   if (!session) return {ok:false,detail:"cogs_tmux_session_missing"};
   const run = deps.run ?? ((cmd, args) => spawnSync(cmd,args,{stdio:"ignore",timeout:5000}));
@@ -58,6 +63,9 @@ export async function controlCogsTmux(agent: AgentRecord, enabled: boolean, resu
     const r = run("tmux",["kill-session","-t",`=${session}`]);
     return {ok:r.status===0,detail:"cogs tmux stopped"};
   }
+  const current = cogsTmuxAgent(agent.id) ?? agent;
+  if (controlGeneration.get(agent.id) !== generation ||
+      (!deps.allowDisabledStart && (current.enabled === false || isAgentOff(agent.id)))) return {ok:false,detail:"cogs_tmux_start_cancelled"};
   if (!alive(session)) {
     const r = run("tmux",["new-session","-d","-s",session,"-c",agent.workspace_path,cogsTmuxCommand(agent,resume)]);
     if (r.status !== 0) return {ok:false,detail:"cogs_tmux_start_failed"};

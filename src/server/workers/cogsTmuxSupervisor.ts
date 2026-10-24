@@ -21,6 +21,7 @@ export function createCogsTmuxSupervisor(deps: {
     if (process.env.APPROVAL_EXECUTION_ENABLED !== "1" || (!alive && process.env.HEALTH_AUTOFIX_ENABLED !== "1")) return false;
     attempts.set(agent.id, now);
     const result = await (deps.control ?? controlCogsTmux)(agent, true, true);
+    if (isAgentOff(agent.id)) return false;
     if (result.ok) retired.add(agent.id);
     deps.onRecovery?.(agent, result.ok);
     return result.ok;

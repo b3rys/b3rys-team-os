@@ -88,13 +88,13 @@ export interface ResidueProbe {
 }
 
 /** 지운 뒤 남은 것을 종류별로 센다 — 하나라도 있으면 removed 가 아니다. */
-export function residueOf(id: string, probe: ResidueProbe, workspace = memberPaths(id, "codex").workspace_path, runtime = "codex"): Residue[] {
+export function residueOf(id: string, probe: ResidueProbe, workspace = memberPaths(id, "codex").workspace_path, runtime = "codex", session = `claude-${id}`): Residue[] {
   const p = runtime === "claude_channel" ? claudeCogsPaths(id) : codexBridgePaths(id);
   const out: Residue[] = [];
   const check = (kind: Residue, f: () => boolean) => {
     try { if (f()) out.push(kind); } catch { if (!out.includes("unverified")) out.push("unverified"); }
   };
-  if (runtime === "claude_channel" && probe.tmuxAlive) check("tmux",()=>probe.tmuxAlive!(`claude-${id}`));
+  if (runtime === "claude_channel" && probe.tmuxAlive) check("tmux",()=>probe.tmuxAlive!(session));
   check("registry", () => probe.registryHas(id));
   check("launchd", () => probe.launchdLoaded(p.label));
   check("process", () => probe.envPids(p.codexHome).length > 0);
@@ -197,6 +197,8 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
   try { db.run("ALTER TABLE b3chat_teammate_job ADD COLUMN token_hash TEXT"); } catch { /* 이미 있음 */ }
   try { db.run("ALTER TABLE b3chat_teammate_job ADD COLUMN workspace TEXT"); } catch { /* 이미 있음 */ }
   try { db.run("ALTER TABLE b3chat_teammate_job ADD COLUMN runtime TEXT NOT NULL DEFAULT 'codex'"); } catch { /* already migrated */ }
+  try { db.run("ALTER TABLE b3chat_teammate_job ADD COLUMN tmux_session TEXT"); } catch { /* already migrated */ }
+  const memberSession = (id:string):string => (db.query("SELECT tmux_session FROM b3chat_teammate_job WHERE member_id=? ORDER BY rowid DESC LIMIT 1").get(id) as {tmux_session:string|null}|null)?.tmux_session ?? `claude-${id}`;
   const memberRuntime = (id:string):string => (db.query("SELECT runtime FROM b3chat_teammate_job WHERE member_id=? ORDER BY rowid DESC LIMIT 1").get(id) as {runtime:string}|null)?.runtime ?? "codex";
   const keyPath = deps.linkKeyPath ?? join(dirname(registryPath), "var", "secrets", "b3chat-link.key");
   const remote = deps.remoteAddress ?? defaultRemoteAddress;
@@ -224,7 +226,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const activateTimeout = deps.activateTimeoutMs ?? ACTIVATE_TIMEOUT_MS;
   const prepareModel = deps.prepareModel ?? writeTeammateModel;
-  const inspectResidue = deps.inspectResidue ?? ((id: string, ws: string) => residueOf(id, realProbe(() => readList().map((a) => a?.id)), ws, memberRuntime(id)));
+  const inspectResidue = deps.inspectResidue ?? ((id: string, ws: string) => residueOf(id, realProbe(() => readList().map((a) => a?.id)), ws, memberRuntime(id), memberSession(id)));
   const cleanResidue = deps.cleanResidue ?? (async (id: string, left: Residue[], ws: string) => {
     // 명단에 남았으면 여기서 손대지 않는다 — 명단 제거는 퇴사 API 한 곳에서만(다음 재시도가 그 API 를 다시 부른다).
     if (left.includes("registry")) return;
@@ -232,7 +234,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     const home = (runtime === "claude_channel" ? claudeCogsPaths(id) : codexBridgePaths(id)).codexHome;
     const probe = realProbe(() => []);
     if (left.some((k) => k === "launchd" || k === "process" || k === "files" || k === "tmux")) {
-      await teardownRuntime(id, runtime, undefined, { appChannel:runtime === "claude_channel", codexBridgePids: () => probe.envPids(home) });
+      await teardownRuntime(id, runtime, undefined, { appChannel:runtime === "claude_channel", tmuxSession:memberSession(id), codexBridgePids: () => probe.envPids(home) });
     }
     if (left.includes("files")) { try { removeAgentCreds(id); } catch { /* 다시 세어 판정 */ } }
     if (left.includes("workdir")) archiveWorkspaceAt(id, ws);
@@ -290,7 +292,8 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     if (!["codex","claude_channel"].includes(member.runtime)) return result(400,"unsupported_runtime");
     if (process.env.APPROVAL_EXECUTION_ENABLED !== "1") return result(409,"execution_disabled");
     if (member.enabled === false || (deps.off ?? isAgentOff)(id)) return result(409,"member_off");
-    if (restarting.has(id)) return result(409,"teammate_busy",true);
+    const job = db.query("SELECT state FROM b3chat_teammate_job WHERE member_id=? ORDER BY rowid DESC LIMIT 1").get(id) as {state:string}|null;
+    if (restarting.has(id) || (job && job.state !== "ready")) return result(409,"teammate_busy",true);
     const now=(deps.now ?? Date.now)();
     if (now-(lastRestart.get(id) ?? -Infinity)<30_000) return result(429,"restart_rate_limited",true);
     lastRestart.set(id,now); restarting.add(id);
@@ -360,6 +363,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     const id = c.req.param("member_id");
     const row = db.query("SELECT * FROM b3chat_teammate_job WHERE member_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(id) as JobRow | null;
     if (!row) return fail(c, 404, "not_found", "remove");
+    if (restarting.has(id)) return fail(c,409,"teammate_busy","remove",true);
     if (row.state === "removed") return c.json({ ok: true, member_id: id, state: "removed" }, 200);
     if (removing.has(id)) return c.json({ ok: true, member_id: id, state: "removing" }, 202);
     // removing 인데 도는 작업이 없다 = 서버가 중간에 재시작됐다. 다시 시작한다(퇴사 API 는 이미 지운 팀원에 404 → removed).
@@ -378,8 +382,8 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     try { target = readList().find((a) => a?.id === id); } catch { return failed("registry_unreadable"); }
     // 명단을 지우기 전에 복구에 필요한 것(작업폴더 위치)을 작업 기록에 남긴다 — 명단이 사라진 뒤 재시도도 같은 곳을 센다.
     if (target) {
-      db.query("UPDATE b3chat_teammate_job SET workspace = ? WHERE id = ?")
-        .run(typeof target.workspace_path === "string" && target.workspace_path ? target.workspace_path : memberPaths(id, "codex").workspace_path, jobId);
+      db.query("UPDATE b3chat_teammate_job SET workspace = ?, tmux_session = ?, runtime = ? WHERE id = ?")
+        .run(typeof target.workspace_path === "string" && target.workspace_path ? target.workspace_path : memberPaths(id, "codex").workspace_path, typeof target.tmux_session === "string" ? target.tmux_session : `claude-${id}`, target.runtime ?? memberRuntime(id), jobId);
     }
     const ws = (db.query("SELECT workspace FROM b3chat_teammate_job WHERE id = ?").get(jobId) as { workspace: string | null } | null)?.workspace
       ?? memberPaths(id, "codex").workspace_path;

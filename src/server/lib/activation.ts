@@ -116,6 +116,7 @@ export interface TeardownDeps {
   appChannel?: boolean;
   removeClaudeCogsFiles?: typeof removeClaudeCogsFiles;
   isAlive?: (pid: number) => boolean;
+  tmuxSession?: string;
   stopCogsTmux?: (session: string) => Promise<boolean>;
 }
 
@@ -143,7 +144,7 @@ export async function teardownRuntime(
     try { pids = opts.codexBridgePids ? opts.codexBridgePids(id) : cogsClaude ? (()=>{const pid=readBridgePid(claudeCogsPaths(id).pidFile,id);return pid ? [pid,...descendantPids(pid)] : [];})() : liveCodexBridgePids(id); } catch { pids = []; }
     try { await doSetAgentEnabled(id, runtime, false, cogsClaude ? {...readMemberChannel(id),kind:"b3chat"} : undefined); } catch { /* best-effort */ }
     if (cogsClaude) {
-      const session = cogsTmuxAgent(id)?.tmux_session ?? `claude-${id}`;
+      const session = opts.tmuxSession ?? cogsTmuxAgent(id)?.tmux_session ?? `claude-${id}`;
       if (opts.stopCogsTmux) await opts.stopCogsTmux(session);
       else if (!opts.setAgentEnabled && process.env.APPROVAL_EXECUTION_ENABLED === "1") {
         try { spawnSync("tmux",["kill-session","-t",`=${session}`],{stdio:"ignore",timeout:5000}); } catch { /* Residue probe reports any surviving session. */ }
