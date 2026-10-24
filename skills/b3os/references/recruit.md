@@ -143,7 +143,7 @@ curl -s -X POST http://localhost:$PORT/team/api/ot/<ot_id>/activate
 - 미로그인이면 `runtime_auth_required` 400 + fixHint → 로그인 후 재시도.
 - claude_channel: 토큰을 채널 `.env`(`~/.claude/channels/telegram-<id>/.env`)에 배치 → LaunchAgent plist 생성
   → tmux 봇 기동 → **poller 헬스게이트**(봇이 `bot.pid` 를 써야 '진짜 대화됨', 기본 30s 대기, `TEAMOS_POLLER_WAIT_MS` 로 조정). `bot.pid`
-  미출현이면 `poller 미기동` = telegram MCP 가 CC 부팅 MCP 열거에서 빠진 것(형제 세션 옆 fresh 부팅 경합) → ★활성화가 자동으로 `/mcp reconnect` 를 최대 2회 주입해 복구한다(activation.ts auto-reconnect) — 대개 잠깐 기다리면 붙는다.★ 단, 활성화 응답의 `ok` 는 poller 를 빼고 판정하므로 `ok: true` 만 보고 끝내지 않는다 — 응답의 `needsReconnect: true` 면 poller 가 끝내 안 붙은 것이니 사용자에게 봇에게 DM 을 보내 보게 해서 실제 답이 오는지 확인한다. 플러그인 enable 은 런처가 `~/.claude/settings.json` 에 자동 기록하므로 수동 설치는 불필요(아래 참고).
+  미출현이면 `poller 미기동` = telegram MCP 가 CC 부팅 MCP 열거에서 빠진 것(형제 세션 옆 fresh 부팅 경합) → ★활성화가 자동으로 `/mcp reconnect` 를 최대 2회 주입해 복구한다(activation.ts auto-reconnect) — 대개 잠깐 기다리면 붙는다.★ 단, 활성화 응답의 `ok` 는 poller 를 빼고 판정하므로 `ok: true` 만 보고 끝내지 않는다 — 응답 `steps` 에서 `step: "poller"` 항목의 `ok`·`detail` 을 보고, `ok: false` 면 poller 가 끝내 안 붙은 것이니 사용자에게 봇에게 DM 을 보내 보게 해서 실제 답이 오는지 확인한다. 플러그인 enable 은 런처가 `~/.claude/settings.json` 에 자동 기록하므로 수동 설치는 불필요(아래 참고).
 - 성공하면 OT `bundle=done`. claude/hermes 는 첫 모델 호출 또는 게이트웨이 확인 시 `join=done`(합류 완료).
 
 ## Step F — telegram 플러그인 (claude 런타임 — ★자동, 수동 단계 없음★)
