@@ -43,6 +43,6 @@ export function writeClaudeCogsFilesAt(p:CodexBridgePaths,id:string): CodexBridg
 }
 export function removeClaudeCogsFiles(id: string): void {
   const p=claudeCogsPaths(id);
-  for (const file of [p.wrapper,p.plist,p.tokenFile,p.pidFile,p.pidFile.replace(/\.pid$/,".window.json"),p.log]) rmSync(file,{force:true});
+  for (const file of [p.wrapper,p.plist,p.tokenFile,p.pidFile,`${p.pidFile}.poll`,p.pidFile.replace(/\.pid$/,".window.json"),p.log]) rmSync(file,{force:true});
   rmSync(p.codexHome,{force:true,recursive:true});
 }

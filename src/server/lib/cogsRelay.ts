@@ -23,7 +23,7 @@ export function cogsInbox(agent: AgentRecord): CogsInbox | null {
   const raw = agent.cogs_inbox;
   if (raw == null || agent.enabled === false) return null;
   if (agent.runtime !== "claude_channel" || !agent.tmux_session) throw new Error("cogs_requires_claude_tmux");
-  if ((agent.channel ? memberChannel(agent) : readMemberChannel(agent.id)).kind === "b3chat") throw new Error("cogs_bridge_polling_conflict");
+  if (raw.transport !== "tmux" && (agent.channel ? memberChannel(agent) : readMemberChannel(agent.id)).kind === "b3chat") throw new Error("cogs_bridge_polling_conflict");
   try {
     const url = new URL(raw.api_base);
     if (url.username || url.password || url.search || url.hash ||
@@ -38,7 +38,7 @@ export function cogsInbox(agent: AgentRecord): CogsInbox | null {
   } catch { throw new Error("cogs_inbox_invalid"); }
 }
 
-export function cogsToken(config: CogsInbox): string {
+export function cogsToken(config: Pick<CogsInbox,"token_file">): string {
   try {
     const token = readFileSync(config.token_file, "utf8").trim();
     if (!token || /\s/.test(token)) throw 0;
@@ -78,7 +78,7 @@ export async function sendCogsReply(agent: AgentRecord | undefined, meta: CogsMe
   if (!agent || agent.id !== meta.agent_id) throw new Error("cogs_reply_agent_mismatch");
   const config = cogsInbox(agent);
   if (!config || !config.allow_from.includes(meta.chat_id)) throw new Error("cogs_reply_not_allowed");
-  const result = await cogsCall(config, cogsToken(config), "sendMessage", { chat_id: meta.chat_id, text, reply_to_message_id: meta.message_id });
+  const result = await cogsCall(config, cogsToken(config), "sendMessage", { chat_id: meta.chat_id, text, ...(meta.message_id > 0 ? {reply_to_message_id:meta.message_id} : {}) });
   if (!Number.isSafeInteger(result?.message_id)) throw new CogsDeliveryUnknown();
   return result.message_id;
 }

@@ -1,3 +1,4 @@
+import { cogsTmuxAgent, cogsTmuxAlive } from "../runtimes/claude/cogsTmux";
 import { readMemberChannel } from "./memberChannel";
 import { existsSync, readFileSync } from "node:fs";
 import type { AgentRecord } from "../types";
@@ -145,6 +146,13 @@ export function createRuntimeEssentialsRegistry(deps: RuntimeEssentialDeps = {})
   class ClaudeEssentials implements RuntimeEssentials {
     readonly runtime = "claude_channel";
     check(agent: Pick<AgentRecord, "id">): EssentialCheckResult {
+      const tmuxAgent = cogsTmuxAgent(agent.id);
+      if (tmuxAgent) {
+        const missing: string[] = [];
+        if (!hasNonEmptyFile(tmuxAgent.cogs_inbox!.token_file,d)) missing.push("token:cogs tmux");
+        if (!tmuxAgent.tmux_session || !cogsTmuxAlive(tmuxAgent.tmux_session)) missing.push("session:cogs tmux missing");
+        return result(missing,missing.length > 0);
+      }
       if (d.channelKind(agent.id) === "b3chat") {
         const base = `${d.repoRoot}/var/claude-cogs/${agent.id}`;
         const missing:string[]=[];
