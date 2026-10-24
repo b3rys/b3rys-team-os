@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { migrate } from "../db/migrate";
@@ -179,6 +179,21 @@ beforeEach(() => {
 });
 
 describe("acceptance-check routes", () => {
+  test("shipped TEAM-OS template passes the owner rule check", async () => {
+    // 한국어 템플릿은 owner 를 "주인" 으로 적는다. 배포되는 정본이 기본 룰 점검을 통과해야 한다.
+    const template = readFileSync(join(import.meta.dir, "../../../rules/TEAM-OS.template.md"), "utf-8");
+    const { app, dir, root } = setupFreshInstall();
+    try {
+      writeFileSync(join(root, "rules", "TEAM-OS.md"), template, "utf-8");
+      const body = (await (await app.request("/acceptance-check")).json()) as any;
+      const rules = body.sections.find((section: any) => section.key === "rules");
+      expect(rules.checks).toContainEqual({ label: "owner 판정 규칙", status: "pass", detail: "§2 있음" });
+      expect(rules.checks.filter((check: any) => check.status === "fail")).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("returns five staged checks including healthy infra for an onboarded member", async () => {
     const { app, dir } = setup();
     try {
