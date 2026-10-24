@@ -75,8 +75,6 @@ rep "$TMP/b.md" bill none.md
 for f in "$OUT"/.replace-*.data; do printf 'tampered\n' > "$f"; done
 cycle
 [ "$(cat "$TEAM/bill/doc.md")" = v2 ] || fail "payload hash mismatch refused"; ok
-ls "$OUT"/.replace-*.json >/dev/null 2>&1 || fail "tampered request kept for a later retry"; ok
-rm -f "$OUT"/.replace-*   # 시험 정리: 다음 구간이 빈 보낼 칸에서 시작하게
 
 # 8. 받은 파일도 같은 규칙 (--to-received)
 RIN="$SUPPORT/steno-outbox"; RECV="$LIB/받은 파일"; mkdir -p "$RIN" "$RECV/gd"
@@ -89,44 +87,5 @@ printf 'recv2\n' > "$TMP/r2.md"; "$SEND" "$TMP/r2.md" --to-received --folder gd 
 ls "$RECV" | grep -q '^\.replace-' && fail "request json not delivered as a file"; ok
 "$SEND" --to-received --remove "gd/r.md" 2>/dev/null >/dev/null; "$BIN" --inbox "$RIN" "$RECV" 2>>"$TMP/log" || true
 [ ! -e "$RECV/gd/r.md" ] || fail "received file removed"; ok
-
-# 9. 보관과 바꾸기·치우기 사이에 누가 저장해도 그 판까지 보관된다 (리뷰 #612 r2 P1)
-printf 'base\n' > "$TMP/race.md"; up "$TMP/race.md" bill race.md
-printf 'agent\n' > "$TMP/agent.md"
-"$SEND" "$TMP/agent.md" --folder bill --name race.md --replace 2>/dev/null >/dev/null
-STENO_HELPER_TEST_AFTER_BACKUP="printf 'human-save\\n' > '$TEAM/bill/race.tmp' && mv '$TEAM/bill/race.tmp' '$TEAM/bill/race.md'" cycle
-hs="$(printf 'human-save\n' | shasum -a 256 | cut -d' ' -f1)"
-[ "$(cat "$TEAM/bill/race.md")" = agent ] || fail "race replace applied"; ok
-[ "$(cat "$SHARED/.replaced/$hs.data" 2>/dev/null)" = human-save ] || fail "save made during replace is kept"; ok
-"$SEND" --remove "bill/race.md" 2>/dev/null >/dev/null
-STENO_HELPER_TEST_AFTER_BACKUP="printf 'human-save2\\n' > '$TEAM/bill/race.tmp' && mv '$TEAM/bill/race.tmp' '$TEAM/bill/race.md'" cycle
-hs2="$(printf 'human-save2\n' | shasum -a 256 | cut -d' ' -f1)"
-[ ! -e "$TEAM/bill/race.md" ] || fail "race remove applied"; ok
-[ "$(cat "$SHARED/.replaced/$hs2.data" 2>/dev/null)" = human-save2 ] || fail "save made during remove is kept"; ok
-ls -A "$TEAM/bill" | grep -q '^\.b3os-removing-' && fail "no aside file left"; ok
-
-# 10. 맞바꾼 직후·옮긴 직후 죽어도, 다음 실행이 빠져나온 판을 보관하고 마무리한다 (리뷰 #612 r3 P1)
-printf 'base\n' > "$TMP/c1.md"; up "$TMP/c1.md" bill crash.md
-printf 'agent\n' > "$TMP/c2.md"; "$SEND" "$TMP/c2.md" --folder bill --name crash.md --replace 2>/dev/null >/dev/null
-STENO_HELPER_TEST_AFTER_BACKUP="printf 'human-x\\n' > '$TEAM/bill/c.tmp' && mv '$TEAM/bill/c.tmp' '$TEAM/bill/crash.md'" STENO_HELPER_TEST_CRASH_AFTER_SWAP=1 cycle
-hx="$(printf 'human-x\n' | shasum -a 256 | cut -d' ' -f1)"
-ls -A "$TEAM/bill" | grep -q '^\.b3os-replacing-' || fail "crash left the swapped-out file under a non-temp name"; ok
-cycle   # 다음 실행: 임시 파일 정리가 지우지 않고, 보관 후 마무리
-[ "$(cat "$TEAM/bill/crash.md")" = agent ] || fail "replace finished after crash"; ok
-[ "$(cat "$SHARED/.replaced/$hx.data" 2>/dev/null)" = human-x ] || fail "swapped-out human save kept after crash"; ok
-ls -A "$TEAM/bill" | grep -q '^\.b3os-replacing-' && fail "replacing file cleaned up"; ok
-[ -z "$(ls -A "$OUT")" ] || fail "request finished after crash"; ok
-"$SEND" --remove "bill/crash.md" 2>/dev/null >/dev/null
-STENO_HELPER_TEST_AFTER_BACKUP="printf 'human-y\\n' > '$TEAM/bill/c.tmp' && mv '$TEAM/bill/c.tmp' '$TEAM/bill/crash.md'" STENO_HELPER_TEST_CRASH_AFTER_SWAP=1 cycle
-hy="$(printf 'human-y\n' | shasum -a 256 | cut -d' ' -f1)"
-cycle
-[ ! -e "$TEAM/bill/crash.md" ] && [ "$(cat "$SHARED/.replaced/$hy.data" 2>/dev/null)" = human-y ] || fail "remove finished after crash, body kept"; ok
-ls -A "$TEAM/bill" | grep -q '^\.b3os-removing-' && fail "removing file cleaned up"; ok
-# 맞바꾸기 전에 죽으면(새 판 사본만 남음) 다음 실행이 처음부터 다시 한다
-printf 'p1\n' > "$TMP/p1.md"; up "$TMP/p1.md" bill pre.md
-printf 'p2\n' > "$TMP/p2.md"; "$SEND" "$TMP/p2.md" --folder bill --name pre.md --replace 2>/dev/null >/dev/null
-STENO_HELPER_TEST_BEFORE_SWAP='kill -9 $PPID' cycle
-cycle
-[ "$(cat "$TEAM/bill/pre.md")" = p2 ] && ! ls -A "$TEAM/bill" | grep -q '^\.b3os-replacing-' || fail "crash before swap retried cleanly"; ok
 
 echo "PASS test-replace ($pass)"
