@@ -1,3 +1,4 @@
+import { createCogsTmuxSupervisor } from "./cogsTmuxSupervisor";
 import { createHash } from "node:crypto";
 import type { Database } from "bun:sqlite";
 import type { AgentRecord, WsEvent } from "../types";
@@ -14,6 +15,7 @@ interface Deps {
   broadcast: (event: WsEvent) => void;
   inject?: typeof injectPrompt;
   intervalMs?: number;
+  ensureSession?: (agent: AgentRecord) => Promise<boolean>;
 }
 
 /**
@@ -29,6 +31,9 @@ export function acceptsChat(config: { allow_senders: string[] }, chatType: unkno
 
 /** One server owns polling. Offsets survive restart without storing bot tokens. */
 export function createCogsPoller(deps: Deps) {
+  const ensureSession = deps.ensureSession ?? createCogsTmuxSupervisor({onRecovery:(agent,ok) => {
+    appendAudit(deps.db,"system", ok ? "cogs_tmux_recovered" : "cogs_tmux_recovery_failed",agent.id,{});
+  }});
   const abort = new AbortController();
   let busy = false;
   async function pollOnce(): Promise<void> {
@@ -43,6 +48,7 @@ export function createCogsPoller(deps: Deps) {
           const config = cogsInbox(agent);
           if (!config) continue;
           const token = cogsToken(config);
+          if (!(await ensureSession(agent))) continue;
           const identity = createHash("sha256").update(`${config.api_base}\n${token}`).digest("hex");
           if (bots.has(identity)) throw new Error("cogs_duplicate_bot");
           bots.add(identity);
@@ -51,6 +57,7 @@ export function createCogsPoller(deps: Deps) {
           let offset = Number(row?.value ?? 0);
           const updates = await cogsCall(config, token, "getUpdates", { offset, timeout: 0 }, abort.signal);
           if (!Array.isArray(updates)) throw new Error("cogs_updates_invalid");
+          deps.db.query("INSERT INTO setting(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(`cogs_poll_at:${agent.id}`,String(Date.now()));
           for (const update of updates) {
             if (abort.signal.aborted) return;
             if (!Number.isSafeInteger(update.update_id) || update.update_id < offset) continue;

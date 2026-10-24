@@ -1,3 +1,4 @@
+import { cogsTmuxAgent, controlCogsTmux } from "../runtimes/claude/cogsTmux";
 import { readMemberChannel, type MemberChannel } from "./memberChannel";
 import { claudeCogsPaths, writeClaudeCogsFiles } from "../runtimes/claude/cogsLauncher";
 // 의도적 정지는 auto-heal이 되살리지 않도록 off-list에 기록한다. openclaw는 계정을 비활성화하고 게이트웨이는 재시작한다.
@@ -163,6 +164,7 @@ export async function setAgentEnabled(agentId: string, runtime: string, enabled:
   let res: ControlResult;
   try {
     if (runtime === "openclaw") res = await setOpenclaw(agentId, enabled);
+    else if (runtime === "claude_channel" && cogsTmuxAgent(agentId)) res = await controlCogsTmux(cogsTmuxAgent(agentId)!, enabled);
     else if (runtime === "claude_channel") res = (channel ?? readMemberChannel(agentId)).kind === "b3chat" ? await setCodex(agentId, enabled, true,channel) : await setClaude(agentId, enabled);
     else if (runtime === "hermes_agent") res = await setHermes(agentId, enabled);
     else if (runtime === "codex") res = await setCodex(agentId, enabled);
@@ -196,6 +198,11 @@ export async function restartAgent(agentId: string, runtime: string, fresh = fal
   if (isAgentOff(agentId)) return { ok: false, detail: `${agentId} 는 정지(off) 상태 — 재시작 말고 🟢 기동을 쓰세요` };
   const uid = process.getuid?.() ?? 0;
   try {
+    if (runtime === "claude_channel" && cogsTmuxAgent(agentId)) {
+      const agent = cogsTmuxAgent(agentId)!;
+      const stopped = await controlCogsTmux(agent, false);
+      return stopped.ok ? controlCogsTmux(agent, true, !fresh) : stopped;
+    }
     if (runtime === "claude_channel" && readMemberChannel(agentId).kind === "b3chat") {
       const stopped = await setCodex(agentId, false, true);
       return stopped.ok ? await setCodex(agentId, true, true) : stopped;

@@ -506,3 +506,24 @@ describe("cogs model selection",()=>{
   expect(await (await req("opus")).json()).toMatchObject({model:"opus",restart_required:false,applies:"next_request"});
   expect(readFileSync(path,"utf-8")).toContain('value = "keep"');
  });
+
+describe("runtime restart endpoint",()=>{
+ test("authenticated app member only; execution/off/rate/concurrency gates",async()=>{
+  const s=setup();
+  writeFileSync(s.registryPath,JSON.stringify([{id:"testmate",runtime:"claude_channel",enabled:true,team_official_member:false,channel:{kind:"b3chat"}},{id:"official",runtime:"claude_channel",team_official_member:true,channel:{kind:"b3chat"}}]));
+  let now=1000,calls=0,off=false;let release!:()=>void;
+  const gate=new Promise<void>(r=>release=r);
+  const app=createB3chatTeammateRoutes({...s.deps,now:()=>now,off:()=>off,restart:async()=>{calls++;await gate;return {ok:true,detail:"test"};}});
+  const restart=(id="testmate",auth=true)=>app.request(`/members/b3chat/member/${id}/restart`,{method:"POST",headers:auth?{"x-b3chat-link":KEY}:{}});
+  const old=process.env.APPROVAL_EXECUTION_ENABLED;
+  try {
+   expect((await restart("testmate",false)).status).toBe(403);
+   expect((await restart("official")).status).toBe(404);
+   delete process.env.APPROVAL_EXECUTION_ENABLED;expect((await restart()).status).toBe(409);expect(calls).toBe(0);
+   process.env.APPROVAL_EXECUTION_ENABLED="1";off=true;expect((await restart()).status).toBe(409);expect(calls).toBe(0);off=false;
+   const pending=restart();await new Promise(r=>setTimeout(r,1));expect((await restart()).status).toBe(409);
+   release();expect((await pending).status).toBe(200);expect(calls).toBe(1);
+   expect((await restart()).status).toBe(429);now+=30001;expect((await restart()).status).toBe(200);expect(calls).toBe(2);
+  }finally {if(old===undefined)delete process.env.APPROVAL_EXECUTION_ENABLED;else process.env.APPROVAL_EXECUTION_ENABLED=old;}
+ });
+});

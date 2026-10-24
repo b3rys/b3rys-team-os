@@ -1534,6 +1534,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
       }
       const res = await fetch(bridgeUpdatesUrl(TG_API, token, offset));
       const j = (await res.json()) as { ok?: boolean; result?: TgUpdate[] };
+      if (j.ok === true && live.channel?.kind === "b3chat") writeBridgeReadyMarker(`${pidFile}.poll`);
       if (j.ok === true && !readyMarked) {
         readyMarked = writeBridgeReadyMarker(pidFile);
         if (readyMarked) console.log(`[codex-bridge] ready marker: ${pidFile}`);

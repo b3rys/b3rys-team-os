@@ -1,3 +1,7 @@
+import { restartAgent, isAgentOff } from "../lib/agentControl";
+import { acceptInbound } from "../db/inboxQueries";
+import { injectPrompt } from "../lib/tmuxInject";
+import { cogsTmuxAgent, cogsTmuxAlive } from "../runtimes/claude/cogsTmux";
 import { claudeCogsPaths } from "../runtimes/claude/cogsLauncher";
 /** 토큰은 요청으로 받아 0600 파일에만 저장하고, 오류는 안정된 code만 반환한다.
  * 영입 실패는 기존 퇴사 API로 런타임·명단·파일을 정리해 되돌린다. */
@@ -35,6 +39,9 @@ export type JobCode = "name_taken" | "ai_not_ready" | "bot_check_failed" | "star
 
 export interface B3chatTeammateDeps {
   db: Database;
+  restart?: typeof restartAgent;
+  off?: typeof isAgentOff;
+  now?: () => number;
   /** 같은 서버의 설정 앱 — recruit·activate·퇴사를 그 경로 그대로 부른다(로직을 두 벌 두지 않는다). */
   settings: Hono;
   registryPath: string;
@@ -68,7 +75,7 @@ interface JobRow {
 }
 
 /** unverified = 확인 명령이 실패해 있는지 없는지 모른다 — 없음으로 치지 않는다. */
-export type Residue = "registry" | "launchd" | "process" | "files" | "workdir" | "unverified";
+export type Residue = "registry" | "launchd" | "process" | "files" | "workdir" | "tmux" | "unverified";
 
 export interface ResidueProbe {
   registryHas: (id: string) => boolean;
@@ -77,6 +84,7 @@ export interface ResidueProbe {
   /** 그 팀원 CODEX_HOME 으로 도는 프로세스(브리지·app-server). 이름이 같은 남의 프로세스와 env 로 가른다. 확인 실패면 던진다. */
   envPids: (codexHome: string) => number[];
   exists: (path: string) => boolean;
+  tmuxAlive?: (session: string) => boolean;
 }
 
 /** 지운 뒤 남은 것을 종류별로 센다 — 하나라도 있으면 removed 가 아니다. */
@@ -86,10 +94,11 @@ export function residueOf(id: string, probe: ResidueProbe, workspace = memberPat
   const check = (kind: Residue, f: () => boolean) => {
     try { if (f()) out.push(kind); } catch { if (!out.includes("unverified")) out.push("unverified"); }
   };
+  if (runtime === "claude_channel" && probe.tmuxAlive) check("tmux",()=>probe.tmuxAlive!(`claude-${id}`));
   check("registry", () => probe.registryHas(id));
   check("launchd", () => probe.launchdLoaded(p.label));
   check("process", () => probe.envPids(p.codexHome).length > 0);
-  const files = [p.plist, p.wrapper, p.tokenFile, p.pidFile, join(dirname(p.pidFile), `${id}.window.json`), p.log, p.codexHome, slackTokenFile(id)];
+  const files = [p.plist, p.wrapper, p.tokenFile, p.pidFile, `${p.pidFile}.poll`, join(dirname(p.pidFile), `${id}.window.json`), p.log, p.codexHome, slackTokenFile(id)];
   check("files", () => files.some((f) => probe.exists(f)));
   check("workdir", () => probe.exists(workspace));
   return out;
@@ -120,6 +129,7 @@ export function realProbe(readIds: () => string[]): ResidueProbe {
     },
     envPids: (home) => pidsWithCodexHome(execFileSync("ps", ["axeww", "-o", "pid=,command="], { encoding: "utf-8", maxBuffer: 64 << 20 }), home),
     exists: existsSync,
+    tmuxAlive:(session) => cogsTmuxAlive(session),
   };
 }
 
@@ -191,8 +201,24 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
   const keyPath = deps.linkKeyPath ?? join(dirname(registryPath), "var", "secrets", "b3chat-link.key");
   const remote = deps.remoteAddress ?? defaultRemoteAddress;
   const validate = deps.validateToken ?? validateBotToken;
-  const callBridge = deps.callBridge ?? ((req: BridgeWindowRequest) => callCodexBridge(req, { pidFile: (readList().find(a=>a?.id === req.agentId)?.runtime === "claude_channel" ? claudeCogsPaths(req.agentId) : codexBridgePaths(req.agentId)).pidFile }));
-  const greeted = deps.greeted ?? hasGreetedFirstContact;
+  const greetings = new Map<string,string>();
+  const callBridge = deps.callBridge ?? (async (req: BridgeWindowRequest) => {
+    const agent = cogsTmuxAgent(req.agentId);
+    if (!agent) return callCodexBridge(req, {pidFile:(readList().find(a=>a?.id === req.agentId)?.runtime === "claude_channel" ? claudeCogsPaths(req.agentId) : codexBridgePaths(req.agentId)).pidFile});
+    const received = acceptInbound(db, {thread_id:req.threadId,from_agent_id:"system",to_agent_id:agent.id,
+      type:"dm",source:"system",body:req.body,priority:"normal",hop_count:0,dedupe_key:req.messageId,
+      meta:{cogs:{agent_id:agent.id,chat_id:req.groupId,message_id:0,from:{id:"system"}}}}, {dedupeWindowSec:86400});
+    const messageId = received.ok ? received.stored.id : received.duplicate;
+    greetings.set(agent.id,messageId);
+    const r = await injectPrompt({session:agent.tmux_session!,agentId:agent.id,source:"cogs",kind:"cogs",
+      fromLabel:"system",threadId:req.threadId,messageId,body:req.body.replace("도구는 쓰지 마세요.","cogs reply 도구로 전송하세요."),hopCount:0});
+    return {ok:r.ok} as CodexBridgeCallResult;
+  });
+  const greeted = deps.greeted ?? ((id:string) => {
+    const messageId = greetings.get(id);
+    if (!messageId) return hasGreetedFirstContact(id);
+    return !!db.query("SELECT 1 FROM message WHERE from_agent_id=? AND in_reply_to=? AND json_extract(meta_json,'$.cogs_delivery.state')='sent'").get(id,messageId);
+  });
   const greetingWait = deps.greetingWaitMs ?? 150_000;
   const pollMs = deps.pollMs ?? 2_000;
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -205,7 +231,7 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
     const runtime = memberRuntime(id);
     const home = (runtime === "claude_channel" ? claudeCogsPaths(id) : codexBridgePaths(id)).codexHome;
     const probe = realProbe(() => []);
-    if (left.some((k) => k === "launchd" || k === "process" || k === "files")) {
+    if (left.some((k) => k === "launchd" || k === "process" || k === "files" || k === "tmux")) {
       await teardownRuntime(id, runtime, undefined, { appChannel:runtime === "claude_channel", codexBridgePids: () => probe.envPids(home) });
     }
     if (left.includes("files")) { try { removeAgentCreds(id); } catch { /* 다시 세어 판정 */ } }
@@ -252,6 +278,28 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
   };
   app.get("/members/b3chat/member/:memberId/model",memberModel);
   app.put("/members/b3chat/member/:memberId/model",memberModel);
+
+  const restarting = new Set<string>();
+  const lastRestart = new Map<string,number>();
+  app.post("/members/b3chat/member/:memberId/restart",async(c) => {
+    const id=c.req.param("memberId");
+    const result=(status:200|400|404|409|429|503,code:string|null,retryable=false) => c.json({ok:status===200,member_id:id,state:status===200?"ready":"failed",code,retryable},status);
+    if (!ID_RE.test(id)) return result(404,"not_found");
+    const member=readList().find(a=>a.id===id);
+    if (!member || member.team_official_member !== false || member.channel?.kind !== "b3chat") return result(404,"not_found");
+    if (!["codex","claude_channel"].includes(member.runtime)) return result(400,"unsupported_runtime");
+    if (process.env.APPROVAL_EXECUTION_ENABLED !== "1") return result(409,"execution_disabled");
+    if (member.enabled === false || (deps.off ?? isAgentOff)(id)) return result(409,"member_off");
+    if (restarting.has(id)) return result(409,"teammate_busy",true);
+    const now=(deps.now ?? Date.now)();
+    if (now-(lastRestart.get(id) ?? -Infinity)<30_000) return result(429,"restart_rate_limited",true);
+    lastRestart.set(id,now); restarting.add(id);
+    try {
+      const r=await (deps.restart ?? restartAgent)(id,member.runtime);
+      return r.ok ? result(200,null) : result(503,"restart_failed",true);
+    } catch { return result(503,"restart_failed",true); }
+    finally { restarting.delete(id); }
+  });
 
   app.post("/members/b3chat", async (c) => {
     let body: Record<string, unknown>;
@@ -394,6 +442,10 @@ export function createB3chatTeammateRoutes(deps: B3chatTeammateDeps): Hono {
       if (!t) return failJob("channel", "internal", true);
       t.channel = { kind: "b3chat", api_base: j.apiBase, allow_from: [j.roomId], owner_chat: j.roomId };
       t.team_official_member = false;
+      if (j.runtime === "claude_channel") {
+        t.cogs_inbox = {transport:"tmux", api_base:j.apiBase,
+          token_file:join(dirname(registryPath), "var", "secrets", `${id}.bot-token`), allow_from:[j.roomId]};
+      }
       writeRegistrySafely(registryPath, list);
       deps.onRegistryChanged?.();
     } catch {
