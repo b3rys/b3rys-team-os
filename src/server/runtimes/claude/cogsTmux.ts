@@ -22,7 +22,8 @@ export function cogsTmuxCommand(agent: AgentRecord, resume = false): string {
   if (!agent.workspace_path || !agent.tmux_session) throw new Error("cogs_tmux_workspace_missing");
   let model = "sonnet";
   try { model = /^model\s*=\s*"([^"]+)"/m.exec(readFileSync(join(claudeCogsPaths(agent.id).codexHome,"config.toml"),"utf8"))?.[1] ?? model; } catch { /* newly provisioned member */ }
-  const instruction = "cogs messages arrive through tmux. Reply by calling mcp__cogs_reply__reply with thread_id, message_id and text from the envelope. Never call Telegram tools or messaging shell scripts.";
+  const persona=["SOUL.md","CLAUDE.md"].map(name=>{try{return readFileSync(join(agent.workspace_path,name),"utf8");}catch{return "";}}).join("\n");
+  const instruction = persona + "\n" + "cogs messages arrive through tmux. Reply by calling mcp__cogs_reply__reply with thread_id, message_id and text from the envelope. Never call Telegram tools or messaging shell scripts.";
   const policy = cogsToolPolicy(agent.workspace_path,readCogsToolScope(agent.id));
   const args = ["claude","--model",model,"--disable-slash-commands","--setting-sources","","--settings",JSON.stringify(policy.settings),
     "--strict-mcp-config","--mcp-config",JSON.stringify({mcpServers:{cogs_reply:{command:process.execPath,
