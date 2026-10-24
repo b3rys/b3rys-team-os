@@ -19,7 +19,11 @@ fail() { echo "FAIL: $1" >&2; exit 1; }
 cycle() { "$BIN" --upload "$OUT" "$LIB" 2>>"$TMP/log" || true; }
 hash() { shasum -a 256 "$1" | cut -d' ' -f1; }
 
-# 1. 자기 폴더 파일을 바꾼다 — 사람이 고친 판이어도 바꾸고, 이전 본문은 .replaced 에 남는다
+up() { "$SEND" "$1" --folder "$2" --name "$3" 2>/dev/null >/dev/null; cycle; }  # 보통 올리기(도우미가 목록에 적는다)
+
+# 1. 도우미가 올린 자기 폴더 파일을 바꾼다 — 사람이 고친 판이어도 바꾸고, 이전 본문은 .replaced 에 남는다
+printf 'v1\n' > "$TMP/v1.md"; up "$TMP/v1.md" bill doc.md
+grep -q '"bill/doc.md"' "$TEAM/.b3os-sent.json" || fail "upload recorded"; ok
 printf 'gd edited\n' > "$TEAM/bill/doc.md"
 old="$(hash "$TEAM/bill/doc.md")"
 printf 'v2\n' > "$TMP/new.md"
@@ -31,46 +35,74 @@ cycle
 [ ! -e "$TEAM/bill/doc 2.md" ] || fail "no numbered copy"; ok
 
 # 2. 하위 폴더도 된다
-printf 'a\n' > "$TEAM/bill/sub/x.md"; printf 'b\n' > "$TMP/b.md"
+printf 'a\n' > "$TMP/a.md"; up "$TMP/a.md" bill/sub x.md
+printf 'b\n' > "$TMP/b.md"
 "$SEND" "$TMP/b.md" --folder bill/sub --name x.md --replace 2>/dev/null >/dev/null
 cycle
 [ "$(cat "$TEAM/bill/sub/x.md")" = b ] || fail "replace in subfolder"; ok
 
-# 3. 팀 공유 바로 아래·남의 폴더 파일은 건드리지 않는다(요청은 남고 로그에 거절)
-printf 'root\n' > "$TEAM/root.md"; printf 'mine\n' > "$TEAM/gd/note.md"
-"$SEND" "$TMP/b.md" --folder bill --name doc.md --replace 2>/dev/null >/dev/null  # 정상 요청 하나 섞어 둔다
-python3 - "$OUT" <<'EOF'
+# 3. 도우미가 올리지 않은 파일(사람이 만든 노트)은 폴더·member 를 맞춰도 안 바뀐다 (리뷰 #612 P1 재현)
+printf 'root\n' > "$TEAM/root.md"; printf 'mine\n' > "$TEAM/gd/note.md"; printf 'hand\n' > "$TEAM/bill/hand.md"
+"$SEND" "$TMP/b.md" --folder gd --name note.md --replace 2>/dev/null >/dev/null
+python3 - "$OUT" <<'EOF2'
 import json, os, sys, uuid
 out = sys.argv[1]
 for meta in ({"file": "root.md", "member": "root.md", "remove": True},
-             {"file": "gd/note.md", "member": "bill", "remove": True}):
+             {"file": "gd/note.md", "member": "gd", "remove": True},
+             {"file": "gd/note.md", "member": "bill", "remove": True},
+             {"file": "bill/hand.md", "member": "bill", "remove": True}):
     with open(os.path.join(out, f".replace-{uuid.uuid4()}.json"), "w") as f: json.dump(meta, f)
-EOF
+EOF2
+"$SEND" "$TMP/new.md" --folder bill --name doc.md --replace 2>/dev/null >/dev/null  # 정상 요청 하나 섞어 둔다
 cycle
 [ "$(cat "$TEAM/root.md")" = root ] || fail "root file untouched"; ok
-[ "$(cat "$TEAM/gd/note.md")" = mine ] || fail "other folder untouched"; ok
-grep -q "자기 폴더 안의 파일만" "$TMP/log" || fail "rejection logged"; ok
+[ "$(cat "$TEAM/gd/note.md")" = mine ] || fail "human note in other folder untouched"; ok
+[ "$(cat "$TEAM/bill/hand.md")" = hand ] || fail "human note in own folder untouched"; ok
+grep -q "도우미가 올린 파일이 아니라" "$TMP/log" || fail "not-uploaded rejection logged"; ok
+grep -q "자기 폴더 안의 파일만" "$TMP/log" || fail "folder rejection logged"; ok
 [ -z "$(ls -A "$OUT")" ] || fail "rejected requests dropped"; ok
-[ "$(cat "$TEAM/bill/doc.md")" = b ] || fail "valid request still applied"; ok
+[ "$(cat "$TEAM/bill/doc.md")" = v2 ] || fail "valid request still applied"; ok
 "$SEND" --remove "root.md" 2>/dev/null && fail "sender refuses root path"; ok
+printf '{}' > "$OUT/.b3os-sent.json" 2>/dev/null; cycle   # outbox 쪽 가짜 목록은 쓰이지 않는다
+rm -f "$OUT/.b3os-sent.json"
 
-# 4. 치우기 — 파일은 사라지고 본문은 .replaced 에 남는다
-printf 'dup\n' > "$TEAM/bill/doc 2.md"; dup="$(hash "$TEAM/bill/doc 2.md")"
+# 4. 치우기 — 파일은 사라지고 본문은 .replaced 에 남고, 목록에서도 빠진다
+printf 'dup\n' > "$TMP/dup.md"; up "$TMP/dup.md" bill "doc 2.md"
+dup="$(hash "$TEAM/bill/doc 2.md")"
 "$SEND" --remove "bill/doc 2.md" 2>/dev/null >/dev/null
 cycle
 [ ! -e "$TEAM/bill/doc 2.md" ] || fail "removed"; ok
 [ "$(cat "$SHARED/.replaced/$dup.data")" = dup ] || fail "removed body kept"; ok
+grep -q '"bill/doc 2.md"' "$TEAM/.b3os-sent.json" && fail "ledger entry removed"; ok
 
-# 5. 없는 파일 바꾸기는 새로 만들지 않는다
+# 5. 미리 망가진 백업 파일이 있어도 진짜 본문으로 다시 쓴 뒤에만 치운다 (리뷰 #612 P1-2)
+printf 'keep\n' > "$TMP/keep.md"; up "$TMP/keep.md" bill keep.md
+k="$(hash "$TEAM/bill/keep.md")"; mkdir -p "$SHARED/.replaced"; printf corrupt > "$SHARED/.replaced/$k.data"
+"$SEND" --remove "bill/keep.md" 2>/dev/null >/dev/null
+cycle
+[ "$(cat "$SHARED/.replaced/$k.data")" = keep ] || fail "corrupt backup rewritten"; ok
+[ ! -e "$TEAM/bill/keep.md" ] || fail "removed after verified backup"; ok
+
+# 6. 폴더를 지금 못 열면(권한) 요청을 남긴다 (리뷰 #612 P2)
+printf 'p\n' > "$TMP/p.md"; up "$TMP/p.md" bill/sub p.md
+chmod 000 "$TEAM/bill/sub"
+"$SEND" --remove "bill/sub/p.md" 2>/dev/null >/dev/null
+cycle
+chmod 755 "$TEAM/bill/sub"
+[ -n "$(ls -A "$OUT")" ] || fail "request kept on EACCES"; ok
+cycle
+[ ! -e "$TEAM/bill/sub/p.md" ] || fail "applied after access restored"; ok
+
+# 7. 없는 파일 바꾸기는 새로 만들지 않는다
 "$SEND" "$TMP/b.md" --folder bill --name none.md --replace 2>/dev/null >/dev/null
 cycle
 [ ! -e "$TEAM/bill/none.md" ] || fail "missing target not created"; ok
 [ -z "$(ls -A "$OUT")" ] || fail "missing target request dropped"; ok
 
-# 6. 본문 해시가 요청과 다르면 바꾸지 않는다
-"$SEND" "$TMP/new.md" --folder bill --name doc.md --replace 2>/dev/null >/dev/null
+# 8. 본문 해시가 요청과 다르면 바꾸지 않는다
+"$SEND" "$TMP/b.md" --folder bill --name doc.md --replace 2>/dev/null >/dev/null
 for f in "$OUT"/.replace-*.data; do printf 'tampered\n' > "$f"; done
 cycle
-[ "$(cat "$TEAM/bill/doc.md")" = b ] || fail "hash mismatch refused"; ok
+[ "$(cat "$TEAM/bill/doc.md")" = v2 ] || fail "hash mismatch refused"; ok
 
 echo "PASS test-replace ($pass)"
