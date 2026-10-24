@@ -1,4 +1,5 @@
 import { currentCogsAllowlist } from "./cogsAllowlist";
+import { buildNewSessionContext, withNewSessionContext } from "./newSessionContext";
 import { handleCogsApprovalCallback } from "../../lib/cogsPermissions/bridgeCallback";
 import { createBridgeCogsApprovals } from "../../lib/cogsPermissions/waiters";
 import { readPolicy } from "../../lib/cogsPermissions/policy";
@@ -747,7 +748,11 @@ async function handleMessageTurn(
   // 새 턴·중간 개입은 attachmentsOrFailure 정의를 공유하되 주입 함수가 예외를 던지는 경우도 같은 실패 표현으로 처리한다.
   const attachments: DmAttachments | null = fetchAttachments ? await attachmentsOrFailure(fetchAttachments) : null;
   const note = attachments ? attachmentNote(attachments) : "";
-  const promptWithMedia = note ? `${promptText}\n\n${note}` : promptText;
+  const promptWithNote = note ? `${promptText}\n\n${note}` : promptText;
+  // 이 대화에 이을 세션이 없으면(새 대화·세션이 죽어 지워짐) 기억 파일·다른 대화 최근 일을 앞에 붙인다(newSessionContext.ts).
+  const promptWithMedia = prior === undefined && !reactionOnly
+    ? withNewSessionContext(promptWithNote, newSessionContextFor(selfAgentId, deps.workdir, String(chatId)))
+    : promptWithNote;
 
   const preflight = codexRuntimePreflight(
     {
@@ -1218,6 +1223,19 @@ export function defaultBridgeCaller(): (o: CodexTurnOptions) => Promise<CodexTur
 }
 
 /** 브리지에 저장소 env가 없을 수 있으므로 team.db는 cwd 대신 모듈 위치에서 찾는다. 잘못된 DB는 승인 콜백 응답도 막는다. */
+/** 새 세션 인계 글. 팀 DB 를 잠깐 열어 읽고 닫는다 — 실패하면 빈 글(답은 그대로 간다). */
+function newSessionContextFor(agentId: string, workdir: string | undefined, conversation: string): string {
+  let db: ReturnType<typeof openDb> | null = null;
+  try {
+    db = openDb(defaultTeamDbPath());
+    return buildNewSessionContext(db, agentId, workdir, conversation);
+  } catch {
+    return "";
+  } finally {
+    try { db?.close(); } catch { /* 닫기 실패는 무시 */ }
+  }
+}
+
 export function defaultTeamDbPath(): string {
   return process.env.B3OS_TEAM_DB ?? join(import.meta.dir, "..", "..", "..", "..", "team.db");
 }
