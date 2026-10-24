@@ -99,7 +99,7 @@ curl -s -X POST http://localhost:$PORT/team/api/members/recruit \
 - `persona`(선택): 능력/강점 — 페르소나 파일에 주입.
 - 응답: `{ ok, ot_id, member, persona_file, persona_written }`. **이 `ot_id` 를 이후 단계에 쓴다.**
   - `persona_file`은 persona를 실제 저장했을 때만 `SOUL.md` 경로이며, persona가 비어 파일이 없으면 `null`이다.
-  - 팀원 작업공간은 `$B3RYS_HOME/members/<팀원id>/` 에 생성된다(install.sh가 `B3RYS_HOME=$HOME/b3os` 세팅 → `~/b3os/members/<팀원id>/`. 페르소나 `SOUL.md` + 규칙 `CLAUDE.md`/`AGENTS.md` + `TEAM-OS.md` 심링크, **리포 밖 자체완결 루트**). B3RYS_HOME 미설정 시에만 `~/Development/<팀원id>` fallback(개발 머신).
+  - 팀원 작업공간은 `$B3RYS_HOME/members/<팀원id>/` 에 생성된다(install.sh가 `B3RYS_HOME=$HOME/b3os` 세팅 → `~/b3os/members/<팀원id>/`. 페르소나 `SOUL.md` + 규칙 `CLAUDE.md`/`AGENTS.md` + `TEAM-OS.md` 심링크, **리포 밖 자체완결 루트**). 루트 결정 순서: `B3RYS_MEMBERS_ROOT` → `$B3RYS_HOME/members` → `~/b3os/members`(personaTemplates.ts `resolveMembersRoot`).
 - 첫 영입 멤버는 자동으로 `coordinator` capability를 받는다(라우팅 안전망).
 - 중복 id = 409, 잘못된 runtime = 400.
 
@@ -130,6 +130,7 @@ curl -s -X POST http://localhost:$PORT/team/api/ot/<ot_id>/provision \
 ```
 - 서버가 토큰을 `var/secrets/<id>.bot-token` 에 **0600** 으로 저장(값은 로그/응답에 안 나옴).
 - 형식 검증: `<숫자6+>:<30자+>`. 안 맞으면 `bot_token_invalid` 400.
+- 저장 전에 텔레그램 `getMe` 로 토큰이 살아 있는지 확인한다. 죽은 토큰(오타·폐기·재발급)이면 `bot_token_dead` 400 → BotFather 토큰을 다시 받아 넣는다. 텔레그램 연결 자체가 실패하면 `getme_failed` 503 → 토큰은 그대로 두고 잠시 뒤 재시도.
 - provision 직후 **preflight**(런타임 oauth 로그인 점검)를 돌린다. 미로그인이면 `preflight: blocked` +
   fixHint(예: "터미널에서 `claude` 로그인") 이 온다 → 사용자에게 로그인 요청 후 Step E 재확인.
 
@@ -141,8 +142,8 @@ curl -s -X POST http://localhost:$PORT/team/api/ot/<ot_id>/activate
 - **`APPROVAL_EXECUTION_ENABLED=1` 필요.** 없으면 `runtime: 실행 OFF` 로 막힌다(활성화 스위치 안 켬).
 - 미로그인이면 `runtime_auth_required` 400 + fixHint → 로그인 후 재시도.
 - claude_channel: 토큰을 채널 `.env`(`~/.claude/channels/telegram-<id>/.env`)에 배치 → LaunchAgent plist 생성
-  → tmux 봇 기동 → **poller 헬스게이트**(봇이 `bot.pid` 를 써야 '진짜 대화됨', 기본 28s 대기). `bot.pid`
-  미출현이면 `poller 미기동` = telegram MCP 가 CC 부팅 MCP 열거에서 빠진 것(형제 세션 옆 fresh 부팅 경합) → ★활성화가 자동으로 `/mcp reconnect` 를 최대 2회 주입해 복구한다(activation.ts auto-reconnect) — 잠깐 기다리면 붙는다, 실패가 아니다.★ 플러그인 enable 은 런처가 `~/.claude/settings.json` 에 자동 기록하므로 수동 설치는 불필요(아래 참고).
+  → tmux 봇 기동 → **poller 헬스게이트**(봇이 `bot.pid` 를 써야 '진짜 대화됨', 기본 30s 대기, `TEAMOS_POLLER_WAIT_MS` 로 조정). `bot.pid`
+  미출현이면 `poller 미기동` = telegram MCP 가 CC 부팅 MCP 열거에서 빠진 것(형제 세션 옆 fresh 부팅 경합) → ★활성화가 자동으로 `/mcp reconnect` 를 최대 2회 주입해 복구한다(activation.ts auto-reconnect) — 대개 잠깐 기다리면 붙는다.★ 단, 활성화 응답의 `ok` 는 poller 를 빼고 판정하므로 `ok: true` 만 보고 끝내지 않는다 — 응답의 `needsReconnect: true` 면 poller 가 끝내 안 붙은 것이니 사용자에게 봇에게 DM 을 보내 보게 해서 실제 답이 오는지 확인한다. 플러그인 enable 은 런처가 `~/.claude/settings.json` 에 자동 기록하므로 수동 설치는 불필요(아래 참고).
 - 성공하면 OT `bundle=done`. claude/hermes 는 첫 모델 호출 또는 게이트웨이 확인 시 `join=done`(합류 완료).
 
 ## Step F — telegram 플러그인 (claude 런타임 — ★자동, 수동 단계 없음★)
