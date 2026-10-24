@@ -245,10 +245,11 @@ Slack은 **Socket Mode**로 붙습니다 — 공개 URL·웹훅 엔드포인트�
 
 [Steno](https://steno.b3rys.com) 를 쓰면 팀원이 Steno 라이브러리의 **팀 공유**·**받은 파일** 폴더에 파일을 넣고, 팀 공유 파일을 읽고, 같은 자리에서 고치거나 치울 수 있습니다. 라이브러리에 손대는 프로그램은 Steno 도우미(`steno-helper`) 하나입니다. b3os 기본 설치(`install.sh`)는 도우미를 깔지 않으니 따로 설치합니다.
 
-**라이브러리 위치** — 도우미는 매 주기 이 순서로 찾습니다(따로 설정할 것 없음).
+**라이브러리 위치** — 도우미는 매 주기 이 순서로 찾고, 후보가 없거나 쓸 수 없으면(무효·접근 불가) 다음 후보로 넘어갑니다. 보통은 따로 설정할 것이 없습니다.
 1. Steno 앱이 기록한 위치
-2. iCloud 의 Steno 폴더 — **기본**
-3. iCloud 를 안 쓰면 `~/Documents/Steno`
+2. 설치 때 `STENO_LIBRARY=/경로` 로 명시한 위치(명시한 경우에만)
+3. iCloud 의 Steno 폴더 — **기본**
+4. `~/Documents/Steno`
 
 **설치**
 
@@ -258,7 +259,7 @@ tools/steno-helper/install.sh
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.b3os.steno-helper.plist
 ```
 
-- 처음 라이브러리에 접근할 때 macOS 가 허용을 묻습니다(사람 손). iCloud 라이브러리면 iCloud Drive 파일 접근, `~/Documents/Steno` 면 문서 폴더 접근입니다. 창을 놓쳤으면 **시스템 설정 ▸ 개인정보 보호 및 보안 ▸ 파일 및 폴더** 에서 `steno-helper` 를 켭니다.
+- 처음 라이브러리에 접근할 때 macOS 가 허용을 묻습니다(사람 손). 쓰게 된 라이브러리가 iCloud 에 있으면 iCloud Drive 파일 접근, `~/Documents/Steno` 면 문서 폴더 접근입니다. 창을 놓쳤으면 **시스템 설정 ▸ 개인정보 보호 및 보안 ▸ 파일 및 폴더** 에서 `steno-helper` 를 켭니다.
 - 확인: `tail ~/Library/Logs/b3os-steno-helper.log` — 30초마다 한 번 돌고, 권한이 없으면 "권한 없음 — … steno-helper 허용 필요" 가 찍힙니다.
 
 **업데이트** — b3os 를 `git pull` 한 뒤 `tools/steno-helper/install.sh` 만 다시 돌립니다. 이미 등록돼 있으면 `launchctl bootstrap` 은 다시 하지 않습니다(다음 주기부터 새 도우미가 돕니다). 개발자 서명이 없는 맥은 임시 서명이라 다시 설치하면 허용을 또 물을 수 있습니다.
