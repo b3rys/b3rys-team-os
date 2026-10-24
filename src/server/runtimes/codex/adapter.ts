@@ -1,4 +1,5 @@
 import { uiText } from "./uiStrings";
+import { buildNewSessionContext, withNewSessionContext } from "./newSessionContext";
 /** Codex 턴은 팀원 작업폴더의 규칙·설정으로 실행하며 wake를 즉시 반환하고 팀원 단위로 직렬화한다.
  * 턴 본문은 자동 게시하지 않고 명시적 발신을 사용한다. 채널 전달은 별도 레이어가 담당한다. */
 import type { Database } from "bun:sqlite";
@@ -177,7 +178,13 @@ export async function runTurn(
       sandbox,
       networkAccess: agent.codex_network_access ?? undefined,
     });
-    const prompt = stores.envelopeBuilder.toPrompt(envelope);
+    // 이 스레드에 이을 세션이 없을 때만 기억 파일·다른 스레드 최근 일을 앞에 붙인다(newSessionContext.ts).
+    const prompt = priorSessionId
+      ? stores.envelopeBuilder.toPrompt(envelope)
+      : withNewSessionContext(
+          stores.envelopeBuilder.toPrompt(envelope),
+          buildNewSessionContext(db, targetAgentId, agent.workspace_path ?? undefined, conversationKey),
+        );
     stores.artifactStore.record({
       agentId: targetAgentId,
       messageId: row.message_id,
