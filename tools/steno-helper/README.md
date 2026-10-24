@@ -73,6 +73,19 @@ skills/b3os-team-inbox/scripts/steno-send.sh report.html --to-received --folder 
 
 기본 대상은 팀 공유 보낼 칸이다. 도우미는 이름과 표시(`.steno-folder`의 내용 `team`)가 맞는 팀 공유 폴더에만 넣는다. 받은 파일과 같은 크기·링크·권한 제한을 적용하고, 같은 이름이면 ` 2`를 붙여 기존 파일을 보존한다.
 
+## 내 폴더 파일 고쳐 보내기·치우기
+
+```bash
+skills/b3os-team-inbox/scripts/steno-send.sh report.md --folder bill --name report.md --replace   # 팀 공유/bill/report.md 를 새 내용으로
+skills/b3os-team-inbox/scripts/steno-send.sh --remove "bill/report 2.md"                          # 팀 공유/bill/report 2.md 를 치운다
+```
+
+- 팀 공유/<팀원>/ 아래 파일만 된다. 경로의 첫 폴더가 요청한 팀원 이름이다. 팀 공유 바로 아래 파일과 다른 폴더는 거절한다.
+- 사람이 고친 판이어도 바꾼다. 바꾸거나 치우기 전 본문은 팀 폴더 `steno-shared/.replaced/<sha256>.data` 에 남긴다. 남기지 못하면 바꾸지 않는다.
+- 새 본문은 임시 이름에 다 쓴 뒤 rename 으로 한 번에 바꾼다. 없는 파일은 새로 만들지 않는다.
+- 규칙 밖·대상 없음 요청은 로그만 남기고 치운다. 지금 못 읽는 파일(내려받기 전 등)은 요청을 남기고 다음 주기에 다시 본다.
+- 결과는 `~/Library/Logs/b3os-steno-helper.log` 의 `팀 공유 바꾸기:` 줄로 확인한다.
+
 ## 설치
 
 ```bash
