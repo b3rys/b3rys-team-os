@@ -11,10 +11,11 @@ export function redactSecrets(s: string): string {
     .replace(/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, "<redacted-slack>")
     .replace(/\bAKIA[0-9A-Z]{16}\b/g, "<redacted-aws>")
     .replace(/(-----BEGIN [A-Z ]*PRIVATE KEY-----)[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----)/g, "<redacted-pem>")
-    // 비밀 이름 뒤의 값: 따옴표 값은 닫는 따옴표까지 통째로(\" 같은 이스케이프 포함, 공백·쉼표가 있어도),
-    //   따옴표 없는 값은 공백·쉼표·괄호 앞까지. 길이와 상관없이 가린다.
-    .replace(new RegExp(`(${SECRET_KEY}\\s*[=:]\\s*)"(?:[^"\\\\]|\\\\.)*"`, "gi"), '$1"<redacted>"')
-    .replace(new RegExp(`(${SECRET_KEY}\\s*[=:]\\s*)'(?:[^'\\\\]|\\\\.)*'`, "gi"), "$1'<redacted>'")
-    .replace(new RegExp(`(${SECRET_KEY}\\s*[=:]\\s*)(?!["'<])[^"'\\s,;}\\])]+`, "gi"), "$1<redacted>");
+    // 비밀 이름 뒤의 값: 따옴표 값은 닫는 따옴표까지 통째로(\" 같은 이스케이프 포함, 공백·쉼표가 있어도).
+    //   닫는 따옴표가 없으면 그 줄 끝(또는 글 끝)까지. 따옴표 없는 값은 공백·쉼표·괄호 앞까지('<' 로 시작해도).
+    //   이미 가린 표시(<redacted…>)만 그대로 둔다. 길이와 상관없이 가린다.
+    .replace(new RegExp(`(${SECRET_KEY}\\s*[=:]\\s*)"(?:[^"\\\\\\n]|\\\\.)*"?`, "gi"), '$1"<redacted>"')
+    .replace(new RegExp(`(${SECRET_KEY}\\s*[=:]\\s*)'(?:[^'\\\\\\n]|\\\\.)*'?`, "gi"), "$1'<redacted>'")
+    .replace(new RegExp(`(${SECRET_KEY}\\s*[=:]\\s*)(?!["']|<redacted[a-z-]*>(?=[\\s,;}\\])]|$))[^"'\\s,;}\\])]+`, "gi"), "$1<redacted>");
 }
 

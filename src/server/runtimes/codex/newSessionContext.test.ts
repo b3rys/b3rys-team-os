@@ -110,13 +110,18 @@ describe("redact — 리뷰 #613 회귀", () => {
   });
 });
 
-describe("redact — 리뷰 #613 r2: 따옴표 안 공백·쉼표 값", () => {
+describe("redact — 리뷰 #613 r2·r3: 따옴표 안 공백·쉼표, 닫히지 않은 따옴표, '<' 로 시작하는 값", () => {
   const cases = [
     { input: `{"password":"correct horse battery staple"}`, leftovers: ["correct", "horse", "battery", "staple"] },
     { input: `{"password":"hello world"}`, leftovers: ["hello", "world"] },
     { input: `{"password":"SYNTHETIC_HEAD,TAIL_SYNTHETIC_ONLY"}`, leftovers: ["SYNTHETIC_HEAD", "TAIL_SYNTHETIC_ONLY"] },
     { input: `{'api_key': 'a b\\'c d'}`, leftovers: ["a b", "c d"] },
     { input: `{"db_token":"x\\"y z"}`, leftovers: ["y z"] },
+    // r3: 닫히지 않은 따옴표·'<' 로 시작하는 값·가린 표시 흉내
+    { input: `password="SYNTHETIC_HEAD tail`, leftovers: ["SYNTHETIC_HEAD", "tail"] },
+    { input: `api_key='SYNTHETIC_HEAD tail\n다음 줄`, leftovers: ["SYNTHETIC_HEAD", "tail"] },
+    { input: `password=<SYNTHETIC_HEAD>`, leftovers: ["SYNTHETIC_HEAD"] },
+    { input: `password=<redacted>SYNTHETIC_HEAD`, leftovers: ["SYNTHETIC_HEAD"] },
   ];
 
   test("가리기 함수", async () => {
@@ -126,6 +131,13 @@ describe("redact — 리뷰 #613 r2: 따옴표 안 공백·쉼표 값", () => {
       for (const l of c.leftovers) expect(out).not.toContain(l);
       expect(out).toContain("<redacted>");
     }
+  });
+
+  test("이미 가린 표시는 그대로, 닫히지 않은 따옴표는 그 줄 끝까지만", async () => {
+    const { redactSecrets } = await import("../../lib/redactSecrets");
+    expect(redactSecrets(`password=<redacted> 끝`)).toBe(`password=<redacted> 끝`);
+    expect(redactSecrets(redactSecrets(`{"password":"a b"}`))).toBe(`{"password":"<redacted>"}`);
+    expect(redactSecrets(`api_key='abc\n다음 줄`)).toBe(`api_key='<redacted>'\n다음 줄`);
   });
 
   test("클로드 인계 출력(render) 끝까지", async () => {
