@@ -64,6 +64,33 @@ func consumeReplace(source: Int32, requestName: String, destination: Int32, back
         replaceLog("폴더를 지금 열 수 없어 다음에 다시(errno \(errno)): \(request.file)"); return false
     }
     defer { close(target) }
+    func finish() -> Bool {
+        guard removeUnchanged(source, requestName, requestInfo, raw) else { replaceLog("요청 정리 실패: \(request.file)"); return false }
+        if let payloadInfo, let newData, !removeUnchanged(source, payload, payloadInfo, newData) { replaceLog("본문 정리 실패: \(request.file)"); return false }
+        watchdogProgress()
+        return true
+    }
+    // 바꾸는 도중의 파일은 .steno-part 와 다른 이름을 쓴다 — 주기 시작 때의 임시 파일 정리가 지우지 않게.
+    //   이 이름이 남아 있으면 지난 실행이 중간에 멈춘 것이다. 보관부터 하고 마무리한다.
+    let replacing = ".b3os-replacing-" + id + "-" + leaf
+    let removing = ".b3os-removing-" + id + "-" + leaf
+    if regularSingleLink(target, replacing) != nil, let left = uploadReadRegular(target, replacing) {
+        if left == newData {
+            _ = unlinkat(target, replacing, 0) // 맞바꾸기 전에 멈췄다: 새 판 사본일 뿐이라 지우고 처음부터
+        } else {
+            // 맞바꾼 뒤 멈췄다: 이건 그 자리에서 빠져나온 판이다. 대상은 이미 새 판.
+            guard keepPrevious(backupPath, left) else { replaceLog("지난 실행에서 빠져나온 판 보관 실패 — 남겨 둠: \(request.file)"); return false }
+            _ = unlinkat(target, replacing, 0)
+            replaceLog("지난 실행에서 빠져나온 판을 보관하고 마무리: \(request.file) (.replaced/\(uploadSHA256(left)).data)")
+            return finish()
+        }
+    }
+    if regularSingleLink(target, removing) != nil, let left = uploadReadRegular(target, removing) {
+        guard keepPrevious(backupPath, left) else { replaceLog("지난 실행에서 옮긴 판 보관 실패 — 남겨 둠: \(request.file)"); return false }
+        _ = unlinkat(target, removing, 0)
+        replaceLog("지난 실행에서 옮긴 판을 보관하고 치움: \(request.file)")
+        return finish()
+    }
     var targetInfo = stat()
     if fstatat(target, leaf, &targetInfo, AT_SYMLINK_NOFOLLOW) != 0 && errno == ENOENT { return drop("바꿀 파일 없음") }
     // 링크·내려받기 전(iCloud) 파일은 지금 못 읽을 뿐이라 요청을 남기고 다음 주기에 다시 본다.
@@ -82,35 +109,40 @@ func consumeReplace(source: Int32, requestName: String, destination: Int32, back
     // ★보관과 바꾸기 사이에 누가 저장해도 잃지 않게★: 이름을 맞바꾸거나(RENAME_SWAP) 옆으로 옮긴 뒤,
     //   실제로 빠져나온 본문을 다시 읽어 보관한다. 그 보관에 실패하면 원래 자리로 되돌린다.
     if let newData {
-        var ok = false
-        _ = withStenoPart(target, newData) { temp in
-            guard renameatx_np(target, temp, target, leaf, UInt32(RENAME_SWAP)) == 0 else { return false }
-            // 이제 temp 에는 방금 빠져나온 판이 있다
-            guard let swapped = uploadReadRegular(target, temp) else {
-                _ = renameatx_np(target, temp, target, leaf, UInt32(RENAME_SWAP)); return false
-            }
-            if swapped != current && !keepPrevious(backupPath, swapped) {
-                _ = renameatx_np(target, temp, target, leaf, UInt32(RENAME_SWAP)); return false
-            }
-            if swapped != current { replaceLog("보관 뒤 새로 저장된 판도 보관함: \(request.file) (.replaced/\(uploadSHA256(swapped)).data)") }
-            ok = true
-            return true // withStenoPart 가 temp(빠져나온 판, 이미 보관됨)를 지운다
+        // 새 본문을 replacing 이름에 다 써 둔 뒤(fsync) 대상과 맞바꾼다. 그 뒤 replacing 에는 빠져나온 판이 있다.
+        guard uploadWriteAtomically(target, replacing, newData) else { replaceLog("새 판 쓰기 실패: \(request.file)"); return false }
+        #if STENO_HELPER_TESTING
+        if let hook = ProcessInfo.processInfo.environment["STENO_HELPER_TEST_BEFORE_SWAP"] {
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh"); p.arguments = ["-c", hook]
+            try? p.run(); p.waitUntilExit()
         }
-        guard ok else { replaceLog("바꾸기 실패 — 그대로 둠: \(request.file)"); return false }
+        #endif
+        guard renameatx_np(target, replacing, target, leaf, UInt32(RENAME_SWAP)) == 0 else {
+            _ = unlinkat(target, replacing, 0); replaceLog("맞바꾸기 실패 — 그대로 둠: \(request.file)"); return false
+        }
+        #if STENO_HELPER_TESTING
+        if ProcessInfo.processInfo.environment["STENO_HELPER_TEST_CRASH_AFTER_SWAP"] == "1" { exit(9) }
+        #endif
+        guard let swapped = uploadReadRegular(target, replacing) else {
+            replaceLog("빠져나온 판을 지금 못 읽음 — 다음에 마무리: \(request.file)"); return false
+        }
+        if swapped != current && !keepPrevious(backupPath, swapped) {
+            replaceLog("빠져나온 판 보관 실패 — 남겨 두고 다음에 마무리: \(request.file)"); return false
+        }
+        if swapped != current { replaceLog("보관 뒤 새로 저장된 판도 보관함: \(request.file) (.replaced/\(uploadSHA256(swapped)).data)") }
+        _ = unlinkat(target, replacing, 0)
         replaceLog("고친 판으로 바꿈: \(request.file) (이전 본문 .replaced/\(uploadSHA256(current)).data)")
     } else {
-        let aside = ".b3os-removing-" + id + "-" + leaf
-        guard renameatx_np(target, leaf, target, aside, UInt32(RENAME_EXCL)) == 0 else { return false }
-        guard let moved = uploadReadRegular(target, aside),
+        guard renameatx_np(target, leaf, target, removing, UInt32(RENAME_EXCL)) == 0 else { return false }
+        #if STENO_HELPER_TESTING
+        if ProcessInfo.processInfo.environment["STENO_HELPER_TEST_CRASH_AFTER_SWAP"] == "1" { exit(9) }
+        #endif
+        guard let moved = uploadReadRegular(target, removing),
               moved == current || keepPrevious(backupPath, moved) else {
-            _ = renameatx_np(target, aside, target, leaf, UInt32(RENAME_EXCL))
-            replaceLog("치우기 전 보관 실패 — 되돌림: \(request.file)"); return false
+            replaceLog("치우기 전 보관 실패 — 옮긴 판을 남겨 두고 다음에 마무리: \(request.file)"); return false
         }
-        guard unlinkat(target, aside, 0) == 0 else { return false }
+        guard unlinkat(target, removing, 0) == 0 else { return false }
         replaceLog("치움: \(request.file) (본문 .replaced/\(uploadSHA256(moved)).data)")
     }
-    guard removeUnchanged(source, requestName, requestInfo, raw) else { return false }
-    if let payloadInfo, let newData, !removeUnchanged(source, payload, payloadInfo, newData) { return false }
-    watchdogProgress()
-    return true
+    return finish()
 }
