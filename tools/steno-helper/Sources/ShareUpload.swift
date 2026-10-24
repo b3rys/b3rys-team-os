@@ -86,10 +86,6 @@ func runShareUpload(sourcePath: String, libraryPath: String) -> Int32 {
         guard target >= 0 else { uploadLog("팀 공유 하위 폴더 열기 실패: \(folders.joined(separator: "/"))"); return false }
         defer { close(target) }
         guard let output = publishNew(target, name, data) else { return false }
-        // 나중에 --replace/--remove 가 '도우미가 올린 파일'인지 확인할 수 있게 적어 둔다.
-        if !updateSentLedger(destination, { $0[ledgerKey((folders + [output]).joined(separator: "/"))] = uploadSHA256(data) }) {
-            uploadLog("올린 목록 기록 실패(이 파일은 나중에 바꾸기 불가): \((folders + [output]).joined(separator: "/"))")
-        }
         guard removeUnchanged(dir, name, info, data) else {
             uploadLog("업로드 뒤 보낼 칸이 바뀌어 유지: \(shown)"); return false
         }

@@ -2,15 +2,16 @@
 # Steno 지원 파일을 권한 분리된 로컬 outbox에 넣는다.
 #
 # Usage: steno-send.sh <file> [--name <받는 쪽 파일 이름>] [--folder <하위 폴더 이름>] [--to-received]
-#        steno-send.sh <file> [--folder <폴더>] [--name <이름>] --replace   # 팀원이 올린 그 파일을 새 내용으로 바꾼다
-#        steno-send.sh --remove [<폴더>/]<이름>                            # 팀원이 올린 그 파일을 치운다
+#        steno-send.sh <file> [--folder <폴더>] [--name <이름>] [--to-received] --replace   # 그 자리의 파일을 새 내용으로 바꾼다
+#        steno-send.sh [--to-received] --remove [<폴더>/]<이름>                            # 그 자리의 파일을 치운다
 #
 #   · Steno 폴더 목록 지원 확장자와 그림·zip만 받는다.
 #   · --name 을 안 주면 파일 이름 그대로 쓴다. 경로가 포함된 이름은 거절한다.
 #   · --folder 를 주면 팀 공유(또는 받은 파일) 아래 그 폴더에 넣는다. "A" 또는 "A/B"(두 단계까지, 앱 폴더 깊이와 같다). 없으면 도우미가 만든다.
 #   · 크기 상한은 20 MB다.
 #   · 기본은 덮어쓰지 않는다(같은 이름이면 " 2" 를 붙인다).
-#   · --replace / --remove 는 도우미가 올린 파일(팀원이 보낸 것)만 된다. 사람이 Steno 에서 만든 노트는 안 바뀐다.
+#   · --replace / --remove 는 팀 공유(기본)·받은 파일(--to-received) 안이면 누가 만든 파일이든 된다(팀장 결정 10-24).
+#     사람 노트를 고칠 때는 내가 쓴 부분 앞뒤에 이름 표시를 넣는다(예: "✦빌 ▼" … "✦빌 ▲").
 #     팀원끼리는 구분하지 않는다(같은 사용자라 증명 불가). 사람이 고친 판이어도 바꾼다. 내 것은 팀 공유/<내 이름>/ 에 두는 게 관례다.
 #     바뀌기 전 본문은 팀 폴더 steno-shared/.replaced/<해시>.data 에 남는다. 결과는 도우미 로그(b3os-steno-helper.log)에 찍힌다.
 # 성공하면 outbox 파일 이름을 stdout 에 찍고 0 으로 끝난다. 실패하면 이유를 stderr 에 찍고 1.
@@ -33,7 +34,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 # 바꾸기·치우기 요청: 본문(.data)을 먼저, 요청(.json)을 마지막에 outbox 바로 아래에 둔다. 도우미가 다음 주기에 처리한다.
-replace_request() {  # $1=팀 공유 아래 경로  $2=본문 파일(치우기면 빈 값)
+replace_request() {  # $1=팀 공유(또는 받은 파일) 아래 경로  $2=본문 파일(치우기면 빈 값)
   /usr/bin/python3 -I - "$OUTBOX" "$1" "${2:-}" <<'PYEOF'
 import hashlib, json, os, sys, uuid
 outbox, rel, data_path = sys.argv[1:]
@@ -108,7 +109,6 @@ if [ -n "$FOLDER" ]; then
 fi
 
 if [ "$MODE" = replace ]; then
-  [ "$OUTBOX" = "$HOME/Library/Application Support/b3os/steno-share-outbox" ] || { echo "✖ --replace 는 팀 공유에만 쓴다" >&2; exit 1; }
   umask 077
   REL="${FOLDER:+$FOLDER/}$NAME"
   replace_request "$REL" "$FILE" || exit 1

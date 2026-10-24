@@ -1,46 +1,22 @@
 import Darwin
 import Foundation
 
-// 팀원이 팀 공유에 올린 파일을 같은 자리에서 고쳐 다시 보내거나 치운다.
-// ★도우미가 직접 올린 파일만★ 바꾼다: 올릴 때 팀 공유/.b3os-sent.json 에 적어 두고 그 목록에 있는 것만 받는다.
-//   그 파일은 문서 폴더 안이라 팀원 쪽(같은 사용자라도 문서 폴더 권한 없음)이 고칠 수 없다.
-//   그래서 사람이 Steno 에서 만든 노트는 절대 바뀌지 않는다.
-// ★팀원끼리는 구분하지 않는다★: 팀원은 모두 같은 macOS 사용자로 돌아 도우미가 요청자를 증명할 수 없다.
-//   (팀원 작업 폴더도 서로 쓸 수 있는 것과 같다.) 그래서 팀원이 올린 파일은 어느 팀원이든 바꿀 수 있다 — 이것이 정책이다.
-//   요청의 member 는 로그용이고 권한 판단에 쓰지 않는다. 바꾸거나 치우기 전의 본문은
-// 팀 폴더 steno-shared/.replaced/ 에 남겨 되살릴 수 있게 한다(라이브러리 밖이라 Steno 목록에는 안 보인다).
+// 팀 공유·받은 파일의 파일을 같은 자리에서 고쳐 다시 보내거나 치운다(steno-send.sh --replace / --remove).
+// ★팀 공유·받은 파일 안이면 누가 만들었든 바꾼다★ — 팀원이 올린 것도, 팀장이 Steno 에서 만든 노트도(팀장 결정 10-24).
+//   팀원은 모두 같은 macOS 사용자라 도우미가 요청자를 증명할 수 없으므로 요청자에 따른 보호는 두지 않는다.
+//   대신 바꾸거나 치우기 전 본문을 팀 폴더 steno-shared/.replaced/<sha256>.data 에 반드시 남긴다(되살릴 수 있게).
+//   그 두 폴더 밖(라이브러리의 다른 폴더)은 이 경로로 닿지 않는다. member 는 로그용이다.
+//   팀원이 사람 노트를 고칠 때는 자기가 쓴 부분 앞뒤에 이름 표시를 넣는다(관례, 도우미가 검사하지 않음).
 private struct ShareReplaceRequest: Decodable {
-    let file: String     // "<팀원>/이름" 또는 "<팀원>/폴더/이름"
+    let file: String     // 팀 공유 기준 "이름" · "폴더/이름" · "폴더/폴더/이름"
     let member: String?  // 로그용(권한 판단에 안 씀)
     let sha256: String?  // 바꾸기: 새 본문 해시. 치우기면 없다
     let remove: Bool?
 }
 
 private func replaceLog(_ message: String) {
-    FileHandle.standardError.write(Data("steno-helper 팀 공유 바꾸기: \(message)\n".utf8))
+    FileHandle.standardError.write(Data("steno-helper 바꾸기: \(message)\n".utf8))
 }
-
-let sentLedgerName = ".b3os-sent.json"
-
-/// 도우미가 올린 파일 목록(팀 공유 기준 상대 경로 → 마지막으로 올린 본문 해시).
-/// 아직 없으면 빈 목록, ★있는데 못 읽거나 깨졌으면 nil★ — 둘을 섞으면 목록을 빈 것으로 덮어 이전 기록을 잃는다.
-func readSentLedger(_ destination: Int32) -> [String: String]? {
-    var info = stat()
-    if fstatat(destination, sentLedgerName, &info, AT_SYMLINK_NOFOLLOW) != 0 { return errno == ENOENT ? [:] : nil }
-    guard let raw = uploadReadRegular(destination, sentLedgerName),
-          let map = try? JSONDecoder().decode([String: String].self, from: raw) else { return nil }
-    return map
-}
-
-func updateSentLedger(_ destination: Int32, _ change: (inout [String: String]) -> Void) -> Bool {
-    guard var map = readSentLedger(destination) else { return false }
-    change(&map)
-    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-    guard let data = try? encoder.encode(map) else { return false }
-    return uploadWriteAtomically(destination, sentLedgerName, data)
-}
-
-func ledgerKey(_ path: String) -> String { path.precomposedStringWithCanonicalMapping }
 
 /// 바꾸기 전 본문을 남긴다. 이미 같은 이름이 있으면 내용까지 맞는지 보고, 다르면 새로 쓴다. 실패하면 바꾸지 않는다.
 private func keepPrevious(_ backupPath: String, _ data: Data) -> Bool {
@@ -74,11 +50,6 @@ func consumeReplace(source: Int32, requestName: String, destination: Int32, back
           let folders = folderComponents(parts.dropLast().joined(separator: "/")) else {
         return drop("경로가 올바르지 않아 거절")
     }
-    let key = ledgerKey(request.file)
-    guard let ledger = readSentLedger(destination) else {
-        replaceLog("올린 목록을 지금 읽을 수 없어 다음에 다시: \(request.file)"); return false
-    }
-    guard ledger[key] != nil else { return drop("도우미가 올린 파일이 아니라 거절") }
     let remove = request.remove == true
     var newData: Data?, payloadInfo: stat?
     if !remove {
@@ -103,11 +74,9 @@ func consumeReplace(source: Int32, requestName: String, destination: Int32, back
     if let newData {
         // 새 본문을 임시 이름에 다 쓴 뒤 rename 으로 한 번에 바꾼다. 쓰다 죽어도 원본은 온전하다.
         guard uploadWriteAtomically(target, leaf, newData) else { return false }
-        _ = updateSentLedger(destination) { $0[key] = uploadSHA256(newData) }
         replaceLog("고친 판으로 바꿈: \(request.file) (이전 본문 .replaced/\(uploadSHA256(current)).data)")
     } else {
         guard unlinkat(target, leaf, 0) == 0 else { return false }
-        _ = updateSentLedger(destination) { $0.removeValue(forKey: key) }
         replaceLog("치움: \(request.file) (본문 .replaced/\(uploadSHA256(current)).data)")
     }
     guard removeUnchanged(source, requestName, requestInfo, raw) else { return false }

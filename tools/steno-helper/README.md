@@ -73,20 +73,20 @@ skills/b3os-team-inbox/scripts/steno-send.sh report.html --to-received --folder 
 
 기본 대상은 팀 공유 보낼 칸이다. 도우미는 이름과 표시(`.steno-folder`의 내용 `team`)가 맞는 팀 공유 폴더에만 넣는다. 받은 파일과 같은 크기·링크·권한 제한을 적용하고, 같은 이름이면 ` 2`를 붙여 기존 파일을 보존한다.
 
-## 올린 파일 고쳐 보내기·치우기
+## 같은 자리에서 고쳐 보내기·치우기
 
 ```bash
-skills/b3os-team-inbox/scripts/steno-send.sh report.md --folder bill --name report.md --replace   # 팀 공유/bill/report.md 를 새 내용으로
-skills/b3os-team-inbox/scripts/steno-send.sh --remove "bill/report 2.md"                          # 팀 공유/bill/report 2.md 를 치운다
+skills/b3os-team-inbox/scripts/steno-send.sh report.md --folder bill --name report.md --replace         # 팀 공유/bill/report.md 를 새 내용으로
+skills/b3os-team-inbox/scripts/steno-send.sh note.md --to-received --name note.md --replace             # 받은 파일/note.md 를 새 내용으로
+skills/b3os-team-inbox/scripts/steno-send.sh --remove "bill/report 2.md"                                # 팀 공유/bill/report 2.md 를 치운다
 ```
 
-- ★도우미가 올린 파일만★ 된다. 도우미는 올릴 때마다 `팀 공유/.b3os-sent.json`(문서 폴더 안, 팀원 쪽에서 못 고침)에 경로를 적고, 바꾸기·치우기는 이 목록에 있는 파일만 받는다. 사람이 Steno 에서 만든 노트는 안 바뀐다. 이 기능 전에 올린 파일도 목록에 없어 안 바뀐다. 목록을 못 읽으면 요청을 남기고, 새 업로드도 목록을 덮지 않는다.
-- ★팀원끼리는 구분하지 않는다★: 팀원은 같은 macOS 사용자로 돌아 도우미가 요청자를 증명할 수 없다. 팀원이 올린 파일은 어느 팀원이든 바꿀 수 있다(팀원 작업 폴더를 서로 쓸 수 있는 것과 같다). 내 것은 `팀 공유/<내 이름>/` 에 두는 게 관례다.
-- 사람이 고친 판이어도 바꾼다. 바꾸거나 치우기 전 본문은 팀 폴더 `steno-shared/.replaced/<sha256>.data` 에 남긴다. 남기지 못하면 바꾸지 않는다.
-- 새 본문은 임시 이름에 다 쓴 뒤 rename 으로 한 번에 바꾼다. 없는 파일은 새로 만들지 않는다.
-- 규칙 밖·대상 없음 요청은 로그만 남기고 치운다. 지금 못 읽는 파일(내려받기 전 등)·지금 못 여는 폴더(권한·입출력 오류)는 요청을 남기고 다음 주기에 다시 본다.
-- 같은 이름의 이전 본문 보관 파일이 이미 있으면 내용까지 맞는지 보고, 다르면 진짜 본문으로 다시 쓴 뒤에만 진행한다.
-- 결과는 `~/Library/Logs/b3os-steno-helper.log` 의 `팀 공유 바꾸기:` 줄로 확인한다.
+- 팀 공유·받은 파일 안이면 누가 만든 파일이든 바꾼다(팀장 결정 10-24). 팀원은 모두 같은 macOS 사용자라 도우미가 요청자를 구분하지 않는다.
+- 사람 노트를 고칠 때는 내가 쓴 부분 앞뒤에 보이는 이름 표시를 넣는다: `✦빌 ▼` … `✦빌 ▲`. 관례이고 도우미가 검사하지 않는다.
+- 바꾸거나 치우기 전 본문은 팀 폴더 `steno-shared/.replaced/<sha256>.data` 에 남긴다. 남기지 못하면 바꾸지 않는다. 같은 이름 보관본이 있으면 내용까지 맞는지 보고, 다르면 진짜 본문으로 다시 쓴 뒤 진행한다.
+- 새 본문은 임시 이름에 다 쓴 뒤 rename 으로 한 번에 바꾼다. 없는 파일은 새로 만들지 않는다. 본문 해시가 요청과 다르면 바꾸지 않는다.
+- 경로 오류·대상 없음 요청은 로그만 남기고 치운다. 지금 못 읽는 파일(내려받기 전)·못 여는 폴더(권한·입출력 오류)는 요청을 남기고 다음 주기에 다시 본다.
+- 결과는 `~/Library/Logs/b3os-steno-helper.log` 의 `바꾸기:` 줄로 확인한다.
 
 ## 설치
 
