@@ -70,14 +70,44 @@ func consumeReplace(source: Int32, requestName: String, destination: Int32, back
     guard regularSingleLink(target, leaf) != nil, let current = uploadReadRegular(target, leaf) else {
         replaceLog("지금 읽을 수 없어 다음에 다시: \(request.file)"); return false
     }
+    // 먼저 지금 본 판을 보관한다(실패하면 아무것도 안 바꾼다).
     guard keepPrevious(backupPath, current) else { replaceLog("이전 본문 보관 실패라 그대로 둠: \(request.file)"); return false }
+    #if STENO_HELPER_TESTING
+    // 시험 전용: 보관과 바꾸기 사이에 누가 저장하는 경합을 만든다
+    if let hook = ProcessInfo.processInfo.environment["STENO_HELPER_TEST_AFTER_BACKUP"] {
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh"); p.arguments = ["-c", hook]
+        try? p.run(); p.waitUntilExit()
+    }
+    #endif
+    // ★보관과 바꾸기 사이에 누가 저장해도 잃지 않게★: 이름을 맞바꾸거나(RENAME_SWAP) 옆으로 옮긴 뒤,
+    //   실제로 빠져나온 본문을 다시 읽어 보관한다. 그 보관에 실패하면 원래 자리로 되돌린다.
     if let newData {
-        // 새 본문을 임시 이름에 다 쓴 뒤 rename 으로 한 번에 바꾼다. 쓰다 죽어도 원본은 온전하다.
-        guard uploadWriteAtomically(target, leaf, newData) else { return false }
+        var ok = false
+        _ = withStenoPart(target, newData) { temp in
+            guard renameatx_np(target, temp, target, leaf, UInt32(RENAME_SWAP)) == 0 else { return false }
+            // 이제 temp 에는 방금 빠져나온 판이 있다
+            guard let swapped = uploadReadRegular(target, temp) else {
+                _ = renameatx_np(target, temp, target, leaf, UInt32(RENAME_SWAP)); return false
+            }
+            if swapped != current && !keepPrevious(backupPath, swapped) {
+                _ = renameatx_np(target, temp, target, leaf, UInt32(RENAME_SWAP)); return false
+            }
+            if swapped != current { replaceLog("보관 뒤 새로 저장된 판도 보관함: \(request.file) (.replaced/\(uploadSHA256(swapped)).data)") }
+            ok = true
+            return true // withStenoPart 가 temp(빠져나온 판, 이미 보관됨)를 지운다
+        }
+        guard ok else { replaceLog("바꾸기 실패 — 그대로 둠: \(request.file)"); return false }
         replaceLog("고친 판으로 바꿈: \(request.file) (이전 본문 .replaced/\(uploadSHA256(current)).data)")
     } else {
-        guard unlinkat(target, leaf, 0) == 0 else { return false }
-        replaceLog("치움: \(request.file) (본문 .replaced/\(uploadSHA256(current)).data)")
+        let aside = ".b3os-removing-" + id + "-" + leaf
+        guard renameatx_np(target, leaf, target, aside, UInt32(RENAME_EXCL)) == 0 else { return false }
+        guard let moved = uploadReadRegular(target, aside),
+              moved == current || keepPrevious(backupPath, moved) else {
+            _ = renameatx_np(target, aside, target, leaf, UInt32(RENAME_EXCL))
+            replaceLog("치우기 전 보관 실패 — 되돌림: \(request.file)"); return false
+        }
+        guard unlinkat(target, aside, 0) == 0 else { return false }
+        replaceLog("치움: \(request.file) (본문 .replaced/\(uploadSHA256(moved)).data)")
     }
     guard removeUnchanged(source, requestName, requestInfo, raw) else { return false }
     if let payloadInfo, let newData, !removeUnchanged(source, payload, payloadInfo, newData) { return false }

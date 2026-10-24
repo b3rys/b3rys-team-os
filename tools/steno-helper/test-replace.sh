@@ -88,4 +88,19 @@ ls "$RECV" | grep -q '^\.replace-' && fail "request json not delivered as a file
 "$SEND" --to-received --remove "gd/r.md" 2>/dev/null >/dev/null; "$BIN" --inbox "$RIN" "$RECV" 2>>"$TMP/log" || true
 [ ! -e "$RECV/gd/r.md" ] || fail "received file removed"; ok
 
+# 9. 보관과 바꾸기·치우기 사이에 누가 저장해도 그 판까지 보관된다 (리뷰 #612 r2 P1)
+printf 'base\n' > "$TMP/race.md"; up "$TMP/race.md" bill race.md
+printf 'agent\n' > "$TMP/agent.md"
+"$SEND" "$TMP/agent.md" --folder bill --name race.md --replace 2>/dev/null >/dev/null
+STENO_HELPER_TEST_AFTER_BACKUP="printf 'human-save\\n' > '$TEAM/bill/race.tmp' && mv '$TEAM/bill/race.tmp' '$TEAM/bill/race.md'" cycle
+hs="$(printf 'human-save\n' | shasum -a 256 | cut -d' ' -f1)"
+[ "$(cat "$TEAM/bill/race.md")" = agent ] || fail "race replace applied"; ok
+[ "$(cat "$SHARED/.replaced/$hs.data" 2>/dev/null)" = human-save ] || fail "save made during replace is kept"; ok
+"$SEND" --remove "bill/race.md" 2>/dev/null >/dev/null
+STENO_HELPER_TEST_AFTER_BACKUP="printf 'human-save2\\n' > '$TEAM/bill/race.tmp' && mv '$TEAM/bill/race.tmp' '$TEAM/bill/race.md'" cycle
+hs2="$(printf 'human-save2\n' | shasum -a 256 | cut -d' ' -f1)"
+[ ! -e "$TEAM/bill/race.md" ] || fail "race remove applied"; ok
+[ "$(cat "$SHARED/.replaced/$hs2.data" 2>/dev/null)" = human-save2 ] || fail "save made during remove is kept"; ok
+ls -A "$TEAM/bill" | grep -q '^\.b3os-removing-' && fail "no aside file left"; ok
+
 echo "PASS test-replace ($pass)"
