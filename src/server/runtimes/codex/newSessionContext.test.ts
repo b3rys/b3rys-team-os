@@ -109,3 +109,39 @@ describe("redact — 리뷰 #613 회귀", () => {
     expect(text).not.toContain(fake.slice(-10));
   });
 });
+
+describe("redact — 리뷰 #613 r2: 따옴표 안 공백·쉼표 값", () => {
+  const cases = [
+    { input: `{"password":"correct horse battery staple"}`, leftovers: ["correct", "horse", "battery", "staple"] },
+    { input: `{"password":"hello world"}`, leftovers: ["hello", "world"] },
+    { input: `{"password":"SYNTHETIC_HEAD,TAIL_SYNTHETIC_ONLY"}`, leftovers: ["SYNTHETIC_HEAD", "TAIL_SYNTHETIC_ONLY"] },
+    { input: `{'api_key': 'a b\\'c d'}`, leftovers: ["a b", "c d"] },
+    { input: `{"db_token":"x\\"y z"}`, leftovers: ["y z"] },
+  ];
+
+  test("가리기 함수", async () => {
+    const { redactSecrets } = await import("../../lib/redactSecrets");
+    for (const c of cases) {
+      const out = redactSecrets(c.input);
+      for (const l of c.leftovers) expect(out).not.toContain(l);
+      expect(out).toContain("<redacted>");
+    }
+  });
+
+  test("클로드 인계 출력(render) 끝까지", async () => {
+    const { render } = await import("../claude/session-handoff");
+    for (const c of cases) {
+      const out = render(c.input, [{ role: "사람/팀원", text: c.input }], 6000, "s.jsonl");
+      for (const l of c.leftovers) expect(out).not.toContain(l);
+    }
+  });
+
+  test("코덱스 인계 출력(MEMORY.md → buildNewSessionContext) 끝까지", () => {
+    for (const c of cases) {
+      const w = ws();
+      writeFileSync(join(w, "MEMORY.md"), `메모\n${c.input}\n끝`);
+      const out = buildNewSessionContext(db(), "dex", w, "t");
+      for (const l of c.leftovers) expect(out).not.toContain(l);
+    }
+  });
+});
