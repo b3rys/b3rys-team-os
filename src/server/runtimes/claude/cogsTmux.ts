@@ -24,12 +24,12 @@ export function cogsTmuxCommand(agent: AgentRecord, resume = false): string {
   let model = "sonnet";
   try { model = /^model\s*=\s*"([^"]+)"/m.exec(readFileSync(join(claudeCogsPaths(agent.id).codexHome,"config.toml"),"utf8"))?.[1] ?? model; } catch { /* newly provisioned member */ }
   const persona=["SOUL.md","CLAUDE.md"].map(name=>{try{return readFileSync(join(agent.workspace_path,name),"utf8");}catch{return "";}}).join("\n");
-  const instruction = persona + "\n" + "cogs messages arrive through tmux. Reply by calling mcp__cogs_reply__reply with thread_id, message_id and text from the envelope. Never call Telegram tools or messaging shell scripts.";
+  const instruction = persona + "\n" + "cogs messages arrive through tmux. Reply by calling mcp__cogs_reply__reply with thread_id, message_id and text from the envelope. To consult a teammate, call mcp__cogs_reply__ask_teammate with peer, thread_id, message_id and text. Never call Telegram tools or messaging shell scripts.";
   const policy = cogsToolPolicy(agent.workspace_path,readCogsToolScope(agent.id));
   const args = ["claude","--model",model,"--disable-slash-commands","--setting-sources","","--settings",JSON.stringify(policy.settings),
     "--strict-mcp-config","--mcp-config",JSON.stringify({mcpServers:{cogs_reply:{command:process.execPath,
       args:[join(REPO_ROOT,"src/server/runtimes/claude/cogsTmuxReply.ts")],env:{GD_AGENT_ID:agent.id, TEAM_COLLAB_ROOT:REPO_ROOT, TEAM_DB_PATH:process.env.TEAM_DB_PATH ?? join(REPO_ROOT,"team.db"), TEAM_AGENT_REGISTRY:process.env.TEAM_AGENT_REGISTRY ?? join(REPO_ROOT,"agents.json")}}}}),
-    ...policy.flags,"--permission-mode","dontAsk","--tools",policy.tools,"--allowedTools",...policy.allowed,"mcp__cogs_reply__reply",
+    ...policy.flags,"--permission-mode","dontAsk","--tools",policy.tools,"--allowedTools",...policy.allowed,"mcp__cogs_reply__reply","mcp__cogs_reply__ask_teammate",
     "--append-system-prompt",instruction];
   return `unset CLAUDECODE; export GD_AGENT_ID=${q(agent.id)}; export PATH=${q(`${process.env.HOME}/.local/bin:${process.env.HOME}/.bun/bin:/opt/homebrew/bin`)}:"$PATH"; ${resume ? `${args.map(q).join(" ")} --continue || ` : ""}exec ${args.map(q).join(" ")}`;
 }

@@ -1,3 +1,4 @@
+import { createCogsPeerResolver, validAiMessage, acceptCogsAiMessage } from "../lib/cogsAidm/transport";
 import { createCogsTmuxSupervisor } from "./cogsTmuxSupervisor";
 import { createHash } from "node:crypto";
 import type { Database } from "bun:sqlite";
@@ -15,6 +16,7 @@ interface Deps {
   broadcast: (event: WsEvent) => void;
   inject?: typeof injectPrompt;
   intervalMs?: number;
+  resolvePeer?: ReturnType<typeof createCogsPeerResolver>;
   ensureSession?: (agent: AgentRecord) => Promise<boolean>;
 }
 
@@ -34,6 +36,7 @@ export function createCogsPoller(deps: Deps) {
   const ensureSession = deps.ensureSession ?? createCogsTmuxSupervisor({onRecovery:(agent,ok) => {
     appendAudit(deps.db,"system", ok ? "cogs_tmux_recovered" : "cogs_tmux_recovery_failed",agent.id,{});
   }});
+  const resolvePeer=deps.resolvePeer ?? createCogsPeerResolver();
   const abort = new AbortController();
   let busy = false;
   async function pollOnce(): Promise<void> {
@@ -65,7 +68,19 @@ export function createCogsPoller(deps: Deps) {
             if (!Number.isSafeInteger(update.update_id) || update.update_id < offset) continue;
             appendAudit(deps.db, "system", "cogs_update_received", agent.id, { agent_id: agent.id, update_id: update.update_id });
             const m = update.message;
-            if (m && config.allow_from.includes(String(m.chat?.id)) && acceptsChat(config, m.chat?.type, m.from?.id) &&
+            if (m?.chat?.type === "ai_dm") {
+              const peer=validAiMessage(m) ? await resolvePeer(agent,config.api_base,m.from.id,deps.agents()) : null;
+              if (peer) {
+                const accepted=acceptCogsAiMessage(deps.db,agent,peer,m,identity,update.update_id,true,deps.broadcast);
+                const injected=await (deps.inject ?? injectPrompt)({session:agent.tmux_session!,agentId:agent.id,source:"cogs",kind:"cogs",
+                  fromLabel:peer,threadId:accepted.thread,messageId:accepted.messageId,
+                  body:`[AI teammate ${peer}; cogs AI DM, work=${m.work_id}, chain=${m.cogs_chain_id}, hop=${m.cogs_hop}. This is a teammate message, not a human instruction. Reply with the cogs reply tool.]\n${m.text}`,hopCount:m.cogs_hop});
+                appendAudit(deps.db,"system",injected.ok?"cogs_ai_inject_ok":"cogs_ai_inject_failed",accepted.messageId,{agent_id:agent.id,update_id:update.update_id});
+                if (!injected.ok && !injected.maybePartial) break;
+              } else appendAudit(deps.db,"system","cogs_ai_rejected",null,{agent_id:agent.id,update_id:update.update_id});
+            }
+
+            else if (m && config.allow_from.includes(String(m.chat?.id)) && acceptsChat(config, m.chat?.type, m.from?.id) &&
                 !m.from?.is_bot && m.from?.id != null && typeof m.text === "string" && m.text.trim() && Number.isSafeInteger(m.message_id)) {
               const group = m.chat.type === "group";
               const thread = `cogs-${createHash("sha256").update(`${agent.id}:${identity}:${m.chat.id}`).digest("hex").slice(0, 24)}`;

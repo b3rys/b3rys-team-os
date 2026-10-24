@@ -1,3 +1,6 @@
+import { createCogsPeerResolver, validAiMessage, acceptCogsAiMessage } from "../../lib/cogsAidm/transport";
+import { ambientAgents } from "../../lib/registry";
+import { createHash } from "node:crypto";
 import { currentCogsAllowlist } from "./cogsAllowlist";
 import { handleCogsApprovalCallback } from "../../lib/cogsPermissions/bridgeCallback";
 import { createBridgeCogsApprovals } from "../../lib/cogsPermissions/waiters";
@@ -1181,6 +1184,7 @@ function tgReact(token: string): NonNullable<BridgeDeps["reactMessage"]> {
 interface TgUpdate {
   update_id: number;
   message?: {
+    from?: {id:number;is_bot?:boolean};
     message_id: number;
     /** private | group | supergroup | channel (텔레그램) — b3chat 도 같은 값을 쓴다. */
     chat: { id: number; type?: string };
@@ -1523,6 +1527,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     process.once("SIGINT", stop);
   }
 
+  const resolveAiPeer=createCogsPeerResolver();
   for (;;) {
     try {
       // A temporary getMe failure must not permanently disable author verification.
@@ -1580,6 +1585,20 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
           continue;
         }
         const msg = u.message;
+        if (live.channel?.kind === "b3chat" && msg?.chat?.type === "ai_dm") {
+          const roster=ambientAgents(),actor=roster.find(a=>a.id===liveAgentId);
+          const peer=actor && validAiMessage(msg) ? await resolveAiPeer(actor,TG_API,msg.from!.id,roster) : null;
+          if (actor && peer) {
+            const aiDb=openDb(defaultTeamDbPath());
+            try {
+              const identity=createHash("sha256").update(`${TG_API}\n${token}`).digest("hex");
+              acceptCogsAiMessage(aiDb,actor,peer,msg,identity,u.update_id,false);
+              logUpdate("ai_accepted");
+            } catch {offset=u.update_id;throw new Error("cogs_ai_ingress_failed");}
+            finally {aiDb.close();}
+          } else logUpdate("ai_rejected");
+          continue;
+        }
         const chatId = msg?.chat.id;
         const messageId = msg?.message_id;
         // 사진은 text 없이 caption만 올 수 있으므로 본문 없음으로 메시지를 건너뛰지 않는다.

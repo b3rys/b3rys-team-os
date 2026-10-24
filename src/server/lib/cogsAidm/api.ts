@@ -2,6 +2,9 @@
  * cogs 봇 API(AI DM 2단계) HTTP 어댑터. 각 팀원은 자기 봇 토큰으로만 부른다 — 발신자는 서버가 토큰으로 정한다.
  * 메서드 이름·인자는 cogs 서버 계약(clo/aidm-work)과 맞춘다. sendMessage 응답 유실은 CogsDeliveryUnknown.
  */
+import { readMemberChannel } from "../memberChannel";
+import { claudeCogsPaths } from "../../runtimes/claude/cogsLauncher";
+import { codexBridgePaths } from "../../runtimes/codex/launcher";
 import type { AgentRecord } from "../../types";
 import { cogsCall, cogsInbox, cogsToken } from "../cogsRelay";
 import type { CogsAidmApi, CogsIdentity } from "./relay";
@@ -27,9 +30,8 @@ export const httpCogsAidmApi: CogsAidmApi = {
     return id;
   },
   async send(i, a) {
-    // no_wake 는 서버 계약에 없는 칸이라 보내지 않는다(표시 구분은 서버 provenance 로).
-    const { no_wake: _noWake, ...body } = a;
-    const r = await cogsCall(inbox(i), i.token, "sendMessage", body);
+    // Bus delivery already wakes the peer; its cogs copy must never wake again.
+    const r = await cogsCall(inbox(i), i.token, "sendMessage", {...a,no_wake:true});
     if (!Number.isSafeInteger(r?.message_id)) throw new Error("cogs_bad_response");
     return r.message_id;
   },
@@ -43,7 +45,11 @@ export function cogsIdentityOf(agent: AgentRecord | undefined): CogsIdentity | n
   if (!agent) return null;
   try {
     const cfg = cogsInbox(agent);
-    if (!cfg) return null;
-    return { apiBase: cfg.api_base, token: cogsToken(cfg) };
+    if (cfg) return { apiBase: cfg.api_base, token: cogsToken(cfg) };
+    if (agent.enabled === false || !["codex","claude_channel"].includes(agent.runtime)) return null;
+    const channel=readMemberChannel(agent.id);
+    if (channel.kind !== "b3chat") return null;
+    const p=agent.runtime === "codex" ? codexBridgePaths(agent.id) : claudeCogsPaths(agent.id);
+    return {apiBase:channel.apiBase,token:cogsToken({token_file:p.tokenFile})};
   } catch { return null; }
 }

@@ -1,3 +1,5 @@
+import { findCogsAiOrigin, sendCogsAiReply } from "../lib/cogsAidm/transport";
+import { cogsIdentityOf } from "../lib/cogsAidm/api";
 import { createHash } from "node:crypto";
 import { CogsDeliveryUnknown, sendCogsReply } from "../lib/cogsRelay";
 import { Hono } from "hono";
@@ -79,6 +81,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       return c.json({ error: "schema_validation", issues: parsed.error.issues }, 400);
     }
     let env: EnvelopeInbound & { explicit_recipients?: string[] } = parsed.data;
+    if (env.meta?.cogs_ai !== undefined) return c.json({error:"reserved_ingress_metadata"},400);
     // Validate agent ids against registry (except special values)
     const known = deps.registeredAgentIds();
     const reserved = RESERVED_AGENT_IDS; // 단일 출처(shared/envelopeSchema) — 가짜 입구도 같은 것을 쓴다
@@ -200,6 +203,9 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         parentSlack = slack;
       }
     } catch { /* 잘못된 원글 meta는 기존 thread 조회로 처리한다. */ }
+    const cogsAiOrigin=env.source === "agent" && env.in_reply_to ? findCogsAiOrigin(deps.db,env.from_agent_id,env.thread_id ?? "",env.in_reply_to) : null;
+    if (cogsAiOrigin && env.to_agent_id !== cogsAiOrigin.peer_agent_id) return c.json({error:"cogs_ai_reply_target_invalid"},400);
+    if (cogsAiOrigin) env={...env,meta:{...env.meta,no_wake:true}};
     const cogsMetaForGate = parentSlack ? null : findCogsMetaForThread(deps.db, env.thread_id ?? "", env.in_reply_to);
     // cogs thread 는 원글이 Slack 을 가리켜도 cogs thread 다 — thread 메타를 원글과 따로 읽는다.
     const threadCogs = findCogsMetaForThread(deps.db, env.thread_id ?? "");
@@ -330,6 +336,17 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     }
 
 
+
+    if (cogsAiOrigin) {
+      try {
+        const identity=cogsIdentityOf((deps.agents?.() ?? ambientAgents()).find(a=>a.id===env.from_agent_id));
+        if (!identity) throw new Error("cogs_ai_identity_missing");
+        const postedId=await sendCogsAiReply(identity,cogsAiOrigin,stored.body);
+        stored.meta={...stored.meta,cogs_delivery:{state:"sent",message_id:postedId}};
+        deps.db.query("UPDATE message SET meta_json=? WHERE id=?").run(JSON.stringify(stored.meta),stored.id);
+        return c.json({ok:true,message:stored,posted:true,channel:"cogs_ai"},201);
+      } catch { return c.json({ok:false,message:stored,posted:false,error:"cogs_ai_relay_failed"},502); }
+    }
 
     // cogs threads never fall through to Telegram, including malformed reply modes.
     if (cogsMetaForGate && env.source === "agent" && stored.to_agent_id === "broadcast") {
