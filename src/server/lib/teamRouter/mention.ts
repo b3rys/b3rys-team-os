@@ -168,8 +168,8 @@ export function detectLeadingNameTargets(text: string, agents: AgentRecord[]): s
   // off는 기존 main의 조사·과거 참조 판정을 보존한다. 미설정은 새 조사 규칙을 사용한다.
   const particlesEnabled = process.env.ROUTER_LEADING_NAME_PARTICLES !== "off";
   const ending = particlesEnabled
-    ? /^(?:(?:님|씨)(?:도|는|은|가|이)?|아|야|도|는|은|가|이)?(?=[,.\s]|$)/
-    : /^(?:아|야|님)?(?=[,.\s]|$)/;
+    ? /^(?:(?:님|씨)(?:도|는|은|가|이)?|아|야|도|는|은|가|이)?(?=[,.~!?…\s]|$)/
+    : /^(?:아|야|님)?(?=[,.~!?…\s]|$)/;
   const targets = new Set<string>();
   let rest = text.trimStart();
   while (rest) {
@@ -185,7 +185,7 @@ export function detectLeadingNameTargets(text: string, agents: AgentRecord[]): s
     const length = first.alias.length;
     for (const match of matches.filter((m) => m.alias.length === length)) targets.add(match.id);
     rest = rest.slice(length).replace(ending, "");
-    rest = rest.replace(/^[,.\s]+/, "");
+    rest = rest.replace(/^[,.~!?…\s]+/, "");
   }
   return [...targets];
 }
