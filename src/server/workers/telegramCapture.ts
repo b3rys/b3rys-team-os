@@ -29,6 +29,7 @@ import { pick, type Locale } from "../lib/i18n";
 import { rememberCaptureNonBotSender, rememberDiscoveredGroup } from "../lib/telegramLeadDetection";
 import { belongsToMemberRoom, decidePermissionRequest, getPermissionRequest, listPermissionRequests } from "../lib/permissionGate";
 import { activeOfficialMemberCount, isTeamOfficialMember, MAX_OFFICIAL_TEAM_MEMBERS } from "../lib/agentMembership";
+import { reserveWakeAll } from "../lib/wakeAllGuard";
 import { PUBLIC_BUILD } from "../routes/settings";
 
 // 승인 시스템 v2 — 신청자 알림 문구(순수·i18n). 승인/거절/보류 3종, 결정 승인자 명시 →
@@ -720,16 +721,18 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     decision: any; roster: any; deliveryBody: string; media: any;
     threadId: string; origTgMessageId?: string; teamContext: string; text: string;
   }>();
-  async function sendBroadcastConfirm(pid: string, text: string, targetCount: number, replyTo?: string): Promise<void> {
+  async function sendBroadcastConfirm(pid: string, text: string, targetCount: number, replyTo?: string, postedOnly = false): Promise<void> {
     const locale = getLocale(deps.db);
     const preview = text.length > 200 ? text.slice(0, 200) + "…" : text;
     await tg("sendMessage", {
       chat_id: GROUP_ID,
-      text: pick(locale, `⚠️ 전체(@all) 메시지예요 — 팀원 ${targetCount}명에게 보낼까요?\n\n"${preview}"`, `⚠️ This is an @all message — send to ${targetCount} member(s)?\n\n"${preview}"`),
+      text: postedOnly
+        ? pick(locale, `📨 /all 로 전원에게 게시했어요 (깨우지 않음). 나머지 팀원 ${targetCount}명을 깨울까요?\n\n"${preview}"`, `📨 Posted to everyone via /all (nobody woken). Wake the other ${targetCount} member(s)?`)
+        : pick(locale, `⚠️ 전체(@all) 메시지예요 — 팀원 ${targetCount}명에게 보낼까요?\n\n"${preview}"`, `⚠️ This is an @all message — send to ${targetCount} member(s)?\n\n"${preview}"`),
       ...(replyTo ? { reply_to_message_id: Number(replyTo) } : {}),
       reply_markup: { inline_keyboard: [[
-        { text: pick(locale, "✅ 전송", "✅ Send"), callback_data: `bcapv:${pid}` },
-        { text: pick(locale, "❌ 취소", "❌ Cancel"), callback_data: `bcrej:${pid}` },
+        { text: postedOnly ? pick(locale, "⏰ 전원 깨우기", "⏰ Wake everyone") : pick(locale, "✅ 전송", "✅ Send"), callback_data: `bcapv:${pid}` },
+        { text: postedOnly ? pick(locale, "❌ 닫기", "❌ Dismiss") : pick(locale, "❌ 취소", "❌ Cancel"), callback_data: `bcrej:${pid}` },
       ]] },
     });
   }
@@ -763,6 +766,14 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
         await tg("answerCallbackQuery", { callback_query_id: cb.id, text: pick(locale, "취소됨", "Cancelled") });
         if (mid) await tg("editMessageText", { chat_id: chatId, message_id: mid, text: pick(locale, "❌ 전체전송 취소됨", "❌ Broadcast cancelled") });
         appendAuditFile("capture", "broadcast_rejected", pid, { from: fromId });
+        return;
+      }
+      // 전원 깨우기 검사: 하루 횟수·5시간 사용률·주간 속도·자료 신선도. 하나라도 걸리면 깨우지 않는다(fail-closed).
+      const guard = reserveWakeAll(deps.db, new Date());
+      if (!guard.ok) {
+        await tg("answerCallbackQuery", { callback_query_id: cb.id, text: pick(locale, "깨우지 않았어요", "Not woken") });
+        if (mid) await tg("editMessageText", { chat_id: chatId, message_id: mid, text: `⛔ ${guard.reason}` });
+        appendAuditFile("capture", "broadcast_blocked", pid, { from: fromId, reason: guard.reason });
         return;
       }
       await tg("answerCallbackQuery", { callback_query_id: cb.id, text: pick(locale, "전송 중…", "Sending…") });
@@ -1026,9 +1037,12 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     //  - 다중/broadcast → type: "broadcast", to_agent_id: "broadcast", explicit_recipients: targets
     //    (0명이면 버스 감사 기록용 broadcast, recipient 행 없음)
     try {
-      const routeTargets = decision.outcome === "route" || decision.outcome === undefined
-        ? decision.targetAgentIds
-        : [];
+      // "/all"(postOnly)은 전원이 수신 행을 갖고, 깨우는 대상(targetAgentIds)은 따로 정해진다.
+      const routeTargets = decision.postOnly
+        ? decision.postOnly.audienceIds
+        : decision.outcome === "route" || decision.outcome === undefined
+          ? decision.targetAgentIds
+          : [];
       const isSingleTarget = routeTargets.length === 1;
       const msgType: "dm" | "broadcast" = isSingleTarget ? "dm" : "broadcast";
       const toAgentId: string = isSingleTarget ? (routeTargets[0] as string) : "broadcast";
@@ -1077,7 +1091,7 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     if (decision.outcome === "closure" || decision.shouldResetThread) activeAssigneeIds = [];
     // @all/전체멘션(broadcast_marker)은 '이번 메시지'만 전원 fan-out 하고, sticky(다음 무멘션 담당)는
     // 바꾸지 않는다 → 다음 무멘션은 @all 이전 owner 로 복귀. 일회성 전체 호출.
-    if (decision.outcome === "route" && decision.targetAgentIds.length > 0 && decision.reason !== "broadcast_marker") {
+    if (decision.outcome === "route" && decision.targetAgentIds.length > 0 && decision.reason !== "broadcast_marker" && !decision.postOnly) {
       activeAssigneeIds = [...new Set(decision.targetAgentIds)];
     }
     // owner-gate 훅(/api/route)이 무-@멘션 메시지에도 sticky 기준 owner 판정을 적용하도록 공유.
@@ -1103,10 +1117,22 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
     //  - openclaw agent 는 gateway session injection
     //  - 메시지에 그 봇 @username 이 있으면 plugin 이 이미 전달하므로 skip (이중전달 방지)
     //  - 봇 발신 메시지는 loop 위해 이미 상위에서 무시됨
-    if (isRouterEnabled(deps.db) && decision.outcome === "route" && decision.targetAgentIds.length > 0) {
+    if (isRouterEnabled(deps.db) && decision.postOnly) {
+      // "/all": 이름을 부른 사람만 평소처럼 깨우고, 나머지 전원은 팀장이 버튼을 눌러야 깨운다.
+      if (decision.targetAgentIds.length > 0) {
+        await runInjection(decision, roster, deliveryBody, media, threadId, origTgMessageId, teamContext, text);
+      }
+      const rest = decision.postOnly.audienceIds.filter((id) => !decision.targetAgentIds.includes(id));
+      if (rest.length > 0) {
+        const pid = `bcast-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+        pendingBroadcasts.set(pid, { decision: { ...decision, targetAgentIds: rest, reason: "broadcast_marker", postOnly: undefined }, roster, deliveryBody, media, threadId, origTgMessageId, teamContext, text });
+        appendAuditFile("capture", "broadcast_post_only", pid, { audience: decision.postOnly.audienceIds, woken: decision.targetAgentIds, text: text.slice(0, 120) });
+        await sendBroadcastConfirm(pid, text, rest.length, origTgMessageId, true);
+      }
+    } else if (isRouterEnabled(deps.db) && decision.outcome === "route" && decision.targetAgentIds.length > 0) {
       if (decision.reason === "broadcast_marker") {
         // @all 보류 — 주입하지 않고 GD 승인 버튼을 띄운다(오발송 방지).
-        const pid = `bcast-${Date.now()}`;
+        const pid = `bcast-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
         pendingBroadcasts.set(pid, { decision, roster, deliveryBody, media, threadId, origTgMessageId, teamContext, text });
         appendAuditFile("capture", "broadcast_held", pid, { targets: decision.targetAgentIds, text: text.slice(0, 120) });
         await sendBroadcastConfirm(pid, text, decision.targetAgentIds.length, origTgMessageId);

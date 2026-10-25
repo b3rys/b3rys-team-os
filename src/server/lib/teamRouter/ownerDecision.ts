@@ -11,7 +11,7 @@ import {
 } from "./_shared";
 import { coordinatorId } from "../capabilities";
 import { broadcastRecipientIds } from "../agentMembership";
-import { detectExplicitTargets, detectLeadingNameTargets, hasLeadingAllAddress, stripQuotedForRouting } from "./mention";
+import { detectExplicitTargets, detectLeadingNameTargets, hasLeadingAllAddress, parseSlashAll, stripQuotedForRouting } from "./mention";
 import { routeDefaultIntakeLLM } from "./defaultIntake";
 
 // @all/@b3rys/@group — broadcast-all marker. Checked before explicit_mention.
@@ -34,6 +34,23 @@ export function broadcastAudience(text: string, source?: string): { kind: "all_h
   return { kind: (hasBroadcastAllMarker(text) || hasLeadingAllAddress(stripQuotedForRouting(text))) ? "all_hands" : "none" };
 }
 
+// "/all" 은 게시 전용이다: 전원이 버스 수신자가 되고, 본문에서 이름을 부른 사람만 깨운다.
+// 팀원 발언은 인정하지 않는다. 호출자가 sticky 를 바꾸지 않도록 postOnly 로 표시한다.
+function slashAllDecision(text: string, agents: AgentRecord[], source?: string): RouteDecision | null {
+  if (source !== "user") return null;
+  const parsed = parseSlashAll(text);
+  if (!parsed) return null;
+  const audienceIds = broadcastTargets(agents);
+  const named = new Set([...detectExplicitTargets(parsed.body, agents), ...detectLeadingNameTargets(parsed.body, agents)]);
+  const targetAgentIds = audienceIds.filter((id) => named.has(id));
+  return {
+    targetAgentIds,
+    reason: targetAgentIds.length > 0 ? "explicit_mention" : "broadcast_post_only",
+    shouldResetThread: false,
+    postOnly: { audienceIds },
+  };
+}
+
 export function routeTeamMessage(
   text: string,
   agents: AgentRecord[],
@@ -43,6 +60,8 @@ export function routeTeamMessage(
   // 인용/예시(코드펜스·"—-" 구분선 아래)의 멘션은 트리거 대상에서 제외.
   // 라이브 멘션 판정에만 적용 — 원문 text 는 다른 용도 위해 보존.
   const liveText = stripQuotedForRouting(text);
+  const slashAll = slashAllDecision(text, agents, context.source);
+  if (slashAll) return slashAll;
   // 0) @all/@b3rys/@group → broadcast all enabled agents. Checked BEFORE explicit_mention.
   if (hasBroadcastAllMarker(text) || broadcastAudience(text, context.source).kind === "all_hands") {
     return {
@@ -233,6 +252,8 @@ export async function routeTeamMessageHybrid(
   // 인용/예시(코드펜스·"—-" 구분선 아래)의 멘션은 트리거 제외. 라이브 멘션 판정에만 적용.
   const liveText = stripQuotedForRouting(text);
 
+  const slashAll = slashAllDecision(text, agents, context.source);
+  if (slashAll) return { ...slashAll, intent, domain: "broadcast", via: "llm", outcome: "route" };
 
   // 0.5) @all/@b3rys/@group → broadcast all enabled agents. Checked BEFORE explicit_mention.
   if (hasBroadcastAllMarker(text) || broadcastAudience(text, context.source).kind === "all_hands") {

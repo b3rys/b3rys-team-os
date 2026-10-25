@@ -338,3 +338,21 @@ m6 디스패치 때 `countAutoRounds(parent=m5)`가 m5→…→m0을 걸어 에�
 - 룰/페르소나: `src/server/lib/personaTemplates.ts`, `TEAM-OS.md`, `rules/TEAM-OS.task-mgmt.md`
 
 > ★주의: 멤버 대상 협업 룰은 `personaTemplates.ts`에서 렌더된다(repo 루트 CLAUDE.md는 프로젝트 개발용). `scripts/inject-recall.sh`는 이 저장소에 없고 호출부가 실패를 무시하므로 자동 recall 주입은 현재 no-op이다(5-2 참조).
+
+## 전원 호출: `@all`과 `/all`
+
+팀장(source=user)의 발언에서만 인정한다. 인용·코드블록·구분선 아래는 무시한다.
+
+| 입력 | 버스 수신 | 깨움 |
+|---|---|---|
+| `/all`, `/all@봇이름`, `/all 본문` | 명부 전원 | 없음. 본문에서 `@이름`·첫머리 이름으로 부른 사람만 평소처럼 깨운다. sticky 담당은 바뀌지 않는다 |
+| `@all`·`@b3rys`·`@group`, 첫머리 `모두/다들/전체…` | 명부 전원 | 팀장이 "전송" 버튼을 눌러야 깨운다 |
+
+`/all` 뒤에는 "⏰ 전원 깨우기" 버튼이 붙는다. 버튼을 누르면(`@all` 계열의 "전송"도 같다) 서버가 아래를 검사하고, 하나라도 걸리면 깨우지 않고 그룹방에 이유 한 줄을 남긴다.
+
+- 하루 2회 이내(KST 자정 기준, DB `setting` 의 `wake_all_count:<날짜>` 로 센다. 재시작해도 이어진다).
+- `var/usage-limits.json`: `ts` 가 10분 이내, `five_hour.used_percentage` 가 숫자이고 70 미만.
+- 주간 속도: `seven_day.used_percentage` ÷ (주 시작 후 경과 일수) 가 15 이하. 주 시작 = `seven_day.resets_at` − 7일.
+- 파일 없음·파싱 실패·null·낡음은 차단한다.
+
+구현: `lib/wakeAllGuard.ts`(검사), `lib/teamRouter/ownerDecision.ts`·`mention.ts`(인식·라우팅), `workers/telegramCapture.ts`(게시·버튼·콜백).

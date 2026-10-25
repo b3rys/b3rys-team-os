@@ -150,6 +150,15 @@ export function hasLeadingAllAddress(text: string): boolean {
   return /^(모두|다들|전체|얘들아|all|올|여러분)(?=[,.\s]|$)/i.test(text.trimStart());
 }
 
+// "/all", "/all@봇이름", "/all 본문" — 팀장 발언 선두의 게시 전용 전체 명령. 인용·코드블록 안은 무시한다.
+// body = 명령어를 뗀 본문(이름 지명 판정용).
+export function parseSlashAll(text: string): { body: string } | null {
+  const live = stripQuotedForRouting(text).trimStart();
+  const m = /^\/all(?:@[A-Za-z0-9_]+)?(?=\s|$)/i.exec(live);
+  if (!m) return null;
+  return { body: live.slice(m[0].length).trim() };
+}
+
 export function detectLeadingNameTargets(text: string, agents: AgentRecord[]): string[] {
   const aliases = agents.flatMap((agent) =>
     [...new Set([...(agent.nicknames ?? []), agent.id, agent.display_name])]

@@ -20,8 +20,11 @@ export interface RouteDecision {
     | "default_intake"
     | "default_step"
     | "ask_gd"
-    | "broadcast_marker";
+    | "broadcast_marker"
+    | "broadcast_post_only";
   shouldResetThread: boolean;
+  /** "/all": 버스에는 audienceIds 전원이 수신자로 남고, targetAgentIds(본문에서 이름을 부른 사람)만 깨운다. */
+  postOnly?: { audienceIds: string[] };
 }
 
 // (removed) DEFAULT_STEP_AGENT_ID = "codex" — default_step owner 는 이제 coordinator capability 로
