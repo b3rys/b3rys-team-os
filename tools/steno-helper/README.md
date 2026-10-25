@@ -73,6 +73,22 @@ skills/b3os-team-inbox/scripts/steno-send.sh report.html --to-received --folder 
 
 기본 대상은 팀 공유 보낼 칸이다. 도우미는 이름과 표시(`.steno-folder`의 내용 `team`)가 맞는 팀 공유 폴더에만 넣는다. 받은 파일과 같은 크기·링크·권한 제한을 적용하고, 같은 이름이면 ` 2`를 붙여 기존 파일을 보존한다.
 
+## 같은 자리에서 고쳐 보내기·치우기
+
+```bash
+skills/b3os-team-inbox/scripts/steno-send.sh report.md --folder bill --name report.md --replace         # 팀 공유/bill/report.md 를 새 내용으로
+skills/b3os-team-inbox/scripts/steno-send.sh note.md --to-received --name note.md --replace             # 받은 파일/note.md 를 새 내용으로
+skills/b3os-team-inbox/scripts/steno-send.sh --remove "bill/report 2.md"                                # 팀 공유/bill/report 2.md 를 치운다
+```
+
+- 팀 공유·받은 파일 안이면 누가 만든 파일이든 바꾼다(팀장 결정 10-24). 팀원은 모두 같은 macOS 사용자라 도우미가 요청자를 구분하지 않는다.
+- 사람 노트를 고칠 때는 내가 쓴 부분 앞뒤에 보이는 이름 표시를 넣는다: `✦빌 ▼` … `✦빌 ▲`. 관례이고 도우미가 검사하지 않는다.
+- 바꾸거나 치우기 전 본문은 팀 폴더 `steno-shared/.replaced/<sha256>.data` 에 남긴다. 남기지 못하면 바꾸지 않는다. 같은 이름 보관본이 있으면 내용까지 맞는지 보고, 다르면 진짜 본문으로 다시 쓴 뒤 진행한다.
+- 새 본문은 임시 이름에 다 쓴 뒤 rename 으로 한 번에 바꾼다. 없는 파일은 새로 만들지 않는다. 본문 해시가 요청과 다르면 바꾸지 않는다.
+- 보관과 바꾸기 사이(보통 1초 안)에 누가 같은 파일을 저장하면 그 저장은 보관되지 않고 덮인다. 단순함을 위해 막지 않는다(팀장 결정 10-24).
+- 경로 오류·대상 없음 요청은 로그만 남기고 치운다. 지금 못 읽는 파일(내려받기 전)·못 여는 폴더(권한·입출력 오류)는 요청을 남기고 다음 주기에 다시 본다.
+- 결과는 `~/Library/Logs/b3os-steno-helper.log` 의 `바꾸기:` 줄로 확인한다.
+
 ## 설치
 
 ```bash
@@ -84,7 +100,7 @@ STENO_LIBRARY를 명시하지 않으면 plist에 그 키를 넣지 않는다. �
 
 설치 스크립트는 키체인에 유효한 `Developer ID Application: GUE DON JUNG (7NTC94U74E)` 서명 신원이 있으면 이를 사용하고, 없으면 임시(ad-hoc) 서명을 사용한다. 식별자는 두 경우 모두 `com.b3os.steno-helper`로 고정한다.
 
-도우미가 처음 문서 폴더에 접근할 때 뜨는 허락 창에서 허용한다(사람 손). 임시 서명에서 Developer ID 서명으로 전환할 때도 새 허용이 필요할 수 있다. 임시 서명은 재빌드하면 다시 허락해야 할 수 있다. Developer ID로 서명했는지는 `codesign -dv --verbose=4 ~/Library/"Application Support"/b3os/bin/steno-helper`의 `Authority`와 `TeamIdentifier`로 확인한다.
+도우미가 처음 라이브러리에 접근할 때 뜨는 허락 창에서 허용한다(사람 손). iCloud 라이브러리(기본)면 iCloud Drive 파일 접근, `~/Documents/Steno` 면 문서 폴더 접근이다. 임시 서명에서 Developer ID 서명으로 전환할 때도 새 허용이 필요할 수 있다. 임시 서명은 재빌드하면 다시 허락해야 할 수 있다. Developer ID로 서명했는지는 `codesign -dv --verbose=4 ~/Library/"Application Support"/b3os/bin/steno-helper`의 `Authority`와 `TeamIdentifier`로 확인한다.
 
 ### 예전 도우미 두 개에서 옮길 때
 
