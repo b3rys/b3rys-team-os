@@ -4,9 +4,10 @@ import { hasCapability } from "../capabilities";
 
 // ─── owner-gate suppress 판단: owner 로직의 단일 출처 ───
 // gate/react 훅은 thin-client로 이 결정만 따른다(자체 로직 없음). 룰 변경은 여기서만 → 서버 재시작으로 배포.
-const CONFIDENT_OWNER_REASONS = new Set(["explicit_mention", "reply_author", "active_assignee_followup"]);
+const CONFIDENT_OWNER_REASONS = new Set(["explicit_mention", "reply_author", "active_assignee_followup", "broadcast_post_only"]);
 
-/** "확실 owner" reason 인가 (default_intake/default_step/broadcast/ask_gd 등 추측·전체는 아님). */
+/** "확실 owner" reason 인가 (default_intake/default_step/broadcast_marker/ask_gd 등 추측·전체는 아님).
+ *  broadcast_post_only("/all", 이름 없음)는 게시 전용이라 아무도 owner 가 아니다 → 모든 봇이 억제된다. */
 export function isConfidentOwner(reason: string): boolean {
   return CONFIDENT_OWNER_REASONS.has(reason);
 }

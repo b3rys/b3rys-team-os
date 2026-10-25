@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentRecord } from "../../types";
-import { isConfidentOwner, routeTeamMessage, routeTeamMessageHybrid } from "../teamRouter";
+import { isConfidentOwner, routeTeamMessage, routeTeamMessageHybrid, shouldSuppress } from "../teamRouter";
 
 const mk = (id: string, name: string, nick: string, extra: Partial<AgentRecord> = {}) =>
   ({ id, display_name: name, nicknames: [nick], role: "r", capabilities: [], runtime: "claude_channel", enabled: true, ...extra }) as unknown as AgentRecord;
@@ -15,7 +15,9 @@ describe("/all recognition", () => {
       expect(d.reason).toBe("broadcast_post_only");
       expect(d.targetAgentIds).toEqual([]);
       expect(d.postOnly?.audienceIds).toEqual(ALL);
-      expect(isConfidentOwner(d.reason)).toBe(false);
+      expect(isConfidentOwner(d.reason)).toBe(true);
+      // 이름 없는 /all 은 owner 가 없다: 텔레그램이 어느 봇에 직접 넘겨도 게이트가 모두 억제한다.
+      for (const self of ["bill", "dex", "off"]) expect(shouldSuppress(d.reason, d.targetAgentIds, self)).toBe(true);
     });
   }
 
@@ -65,6 +67,18 @@ describe("/all with names", () => {
     const d = routeTeamMessage("/all @오프 확인", agents, user);
     expect(d.postOnly?.audienceIds).toEqual(ALL);
     expect(d.targetAgentIds).toEqual([]);
+  });
+});
+
+describe("/all owner gate", () => {
+  test('"/all @Bill" lets only Bill through', () => {
+    const d = routeTeamMessage("/all @빌 확인해줘", agents, user);
+    expect(shouldSuppress(d.reason, d.targetAgentIds, "bill")).toBe(false);
+    expect(shouldSuppress(d.reason, d.targetAgentIds, "dex")).toBe(true);
+  });
+  test("@all / 모두 (broadcast_marker) still suppresses nobody", () => {
+    expect(shouldSuppress("broadcast_marker", ["bill", "dex"], "dex")).toBe(false);
+    expect(isConfidentOwner("broadcast_marker")).toBe(false);
   });
 });
 
