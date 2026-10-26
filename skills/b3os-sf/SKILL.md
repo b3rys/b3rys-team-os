@@ -28,13 +28,13 @@ SF는 결과물 품질·과제 수행 시간·과제 수행 토큰량을 함께 
 | 1 | 등록·환경 | 요구 원문 → `TODO.md`, 저장소 뼈대, 역할(만들기·판정·PM) | [`start.md`](references/start.md) · `b3os-github-workflow` |
 | 2 | 설계·첫 동작 | 바꾸기 비싼 결정만 설계, 다른 모델로 교차검증, 첫날 시험이 닿는 구조·부팅 검사 | [`start.md`](references/start.md#구현-첫날부터-지킬-구조-규칙) · `b3os-ai-code-safety` Phase 1 |
 | 3 | 구조 잡기 | 기능이 돌고 구조 신호가 보이면 앱 전체를 재고 리팩토링, 래칫으로 지킨다 | [`structure-refactor.md`](references/structure-refactor.md) |
-| 4 | 만들기·리뷰 | 요청마다 순환. 아키 리뷰 먼저, 리뷰는 보고만 | [`development.md`](references/development.md) · `b3os-harness-playbook` |
+| 4 | 만들기·리뷰 | 요청 하나 = BWF, ③·④ 칸 = FPFC. 설계 판단 전 아키 리뷰, 리뷰는 보고만 | [`development.md`](references/development.md) · `b3os-harness-playbook` |
 | 5 | 시험·검증 | 바뀐 곳 + 필수, 출고 시험은 사용자 장면만, 실패하면 원인(시험·환경·제품)부터 가린다 | [`dev-mode-operations.md`](references/dev-mode-operations.md) · `b3os-verification` |
 | 6 | 손맛 | "사용자가 느끼는가". 키 지연을 표로 재고 원칙으로 판정 | [`feel.md`](references/feel.md) · `b3os-verification` §3 |
 | 7 | 공유 기계·출고 | 잠금 하나로 줄 세우기, dev·hotfix·fix 출고 20분(full 은 별도 승인), macOS 전달본은 공증본 | [`release.md`](references/release.md) · `b3os-verification` §1b·§6 · `b3os-release-ops` |
 | 8 | 운영·지식 | 장애는 복구 먼저, 두 번 지적 → 장치, 교훈은 정본·SHARED·스킬로 | [`operations.md`](references/operations.md) · [`knowledge-and-handoff.md`](references/knowledge-and-handoff.md) · `b3os-team-learning-loop` |
 
-★ 팀장 확인: 첫 기능 목록 · 초기 설계 · 머지 승인 · 실사용 확인.
+★ 팀장 확인 지점은 넷이다: 첫 기능 목록 · 초기 설계 · 머지 승인 · 실사용 확인. 그 밖의 승인(외부 발송 · 자기 수정 · 삭제 등)은 TEAM-OS §4 승인 게이트를 따른다.
 
 ### 시작 (1~2)
 
@@ -42,10 +42,10 @@ SF는 결과물 품질·과제 수행 시간·과제 수행 토큰량을 함께 
 
 ### 개발 (3~5)
 
-요청마다 `요청 → 만들기 → 검사 → 리뷰 → 머지 승인 → 내보내기 → 보고 → 배우기`를 돈다. 상세: [`references/development.md`](references/development.md)
+요청 하나 = BWF, ③·④ 칸 = FPFC(Find · Pick · Fix · Check — 역할 · 입구 · 끝 조건은 `b3os-bwf`). 별도의 요청 순환을 두지 않는다. 상세: [`references/development.md`](references/development.md)
 
-- **설계 판단은 아키 리뷰 먼저.** 리팩토링 여부·공통 규칙 자리·큰 수정 방향은 읽기 전용 아키 에이전트에게 먼저 묻고, 질문에 "꼭 필요한가 / 오버엔지니어링인가"를 넣는다. 추론 최고 단계는 리팩·심각한 버그에만.
-- **리뷰는 보고만, 고칠 것은 고른 뒤.** 리뷰·검사 에이전트는 읽기·재현만 한다. 결과를 깨짐 / 구조 / 개선으로 나누고, 실제로 깨지는 것과 팀장이 고른 개선만 가장 작은 수정으로 맡긴다.
+- **아키 리뷰 = 설계 판단 전 + 출고 묶음마다 1회.** 리팩토링 여부·공통 규칙 자리·큰 수정 방향을 정하기 전에 먼저 묻고, 출고 묶음마다 그 묶음의 diff 전체를 한 번 본다. 읽기 전용, 상위 모델 + 높은 추론. 질문에 "꼭 필요한가 / 오버엔지니어링인가"를 넣는다.
+- **Find 는 보고만, Pick 뒤에 Fix.** 리뷰·검사 agent 는 읽기·재현만 한다. 결과를 깨짐 / 구조 / 개선으로 나누고, 실제로 깨지는 것(PM 판단)과 팀장이 고른 개선만 가장 작은 수정으로 맡긴다.
 - **오류 수정은 그 오류만.** 개선은 별도 작업으로 하나씩, 직전 출고본과 나란히 비교한 뒤.
 - **구현은 구현 담당에게.** PM 이 외부 모델을 직접 띄워 대리 구현시키지 않는다(팀 버스 과제로). 담당이 밀리면 PM 도 나눠 직접 구현하되 먼저 이관을 알린다.
 
