@@ -11,6 +11,7 @@ import {
   runNightly,
   summaryLine,
   GAP_MS,
+  PENDING_WINDOW_H,
   type Deps,
   type Facts,
   type Member,
@@ -105,6 +106,13 @@ describe("countPending — 실제 스키마로 센다", () => {
     ins(db, "new", "a", { at: "2026-10-27 12:00:00" });
     expect(countPending(db, "a", NOWS)).toBe(2);
     expect(countPending(db, "a", NOWS, "2026-10-27 06:00:00")).toBe(1);
+  });
+  test("운영 기본 창은 2시간: 3시간 전 미읽음은 안 세고 1시간 전은 센다", () => {
+    expect(PENDING_WINDOW_H).toBe(2);
+    const db = mk();
+    ins(db, "3h", "a", { at: ago(180) });
+    ins(db, "1h", "a", { at: ago(60) });
+    expect(countPending(db, "a", NOWS, ago(PENDING_WINDOW_H * 60))).toBe(1);
   });
   test("방송(수신자 행)으로 온 읽지 않은 메시지도 센다", () => {
     const db = mk();
