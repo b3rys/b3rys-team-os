@@ -37,6 +37,13 @@ mk_ws(){
   echo 보고서    > "$w/reports/r.md"
   echo 덱        > "$w/decks/d.html"
   echo 로그      > "$w/run.log"
+  mkdir -p "$w/wt/a/Sources" "$w/artifacts/r1/video" "$w/artifacts/r1/shots" "$w/t.xcresult"
+  echo src       > "$w/wt/a/Sources/main.swift"
+  echo mov       > "$w/artifacts/r1/video/capture.mov"
+  echo mp4       > "$w/artifacts/r1/video/clip.mp4"
+  echo png       > "$w/artifacts/r1/shots/a.png"
+  echo res       > "$w/t.xcresult/Info.plist"
+  echo 데모      > "$w/demo.mov"
 }
 
 run_rsync(){  # $1=dest $2...=excludes
@@ -64,6 +71,34 @@ has out-member backups/old/a.txt       && bad "멤버: backups 가 담겼다(중
                                        || ok "멤버: backups 제외된다"
 has out-member run.log                 && bad "멤버: *.log 가 담겼다" || ok "멤버: *.log 제외된다"
 
+has out-member wt/a/Sources/main.swift   && ok "멤버: worktree 소스 담긴다"          || bad "멤버: worktree 소스가 빠졌다"
+has out-member t.xcresult/Info.plist     && bad "멤버: *.xcresult 가 담겼다"         || ok "멤버: *.xcresult 제외된다"
+has out-member artifacts/r1/video/capture.mov && bad "멤버: artifacts 영상(.mov)이 담겼다" || ok "멤버: artifacts 영상(.mov) 제외된다"
+has out-member artifacts/r1/video/clip.mp4    && bad "멤버: artifacts 영상(.mp4)이 담겼다" || ok "멤버: artifacts 영상(.mp4) 제외된다"
+has out-member artifacts/r1/shots/a.png  && ok "멤버: artifacts 캡처 이미지 담긴다"   || bad "멤버: artifacts 캡처 이미지가 빠졌다"
+has out-member demo.mov                  && ok "멤버: artifacts 밖 영상은 담긴다(작업물)" || bad "멤버: artifacts 밖 영상이 빠졌다"
+# ①-b 생성물 판별(EXF): .build 는 옆에 Package.swift 가 있을 때만, DerivedData 는 안에 Build/ 가 있을 때만 뺀다.
+#   판별 코드는 snapshot-team.sh 의 python 블록을 그대로 뽑아 쓴다.
+PYB="$(awk "/<<'PY'/{p=1;next} /^PY\$/{p=0} p" "$SRC")"
+if [ -n "$PYB" ]; then
+  W="$T/ws2"; rm -rf "$W"; mkdir -p "$W/wt/pkg/.build/debug" "$W/wt/pkg/Sources" "$W/wt/manual/.build" \
+    "$W/wt/xc/DerivedData/Build/Products" "$W/wt/manual/DerivedData"
+  echo pkg > "$W/wt/pkg/Package.swift"; echo bin > "$W/wt/pkg/.build/debug/app"; echo src > "$W/wt/pkg/Sources/a.swift"
+  echo 작업 > "$W/wt/manual/.build/source.swift"
+  echo bin > "$W/wt/xc/DerivedData/Build/Products/x"
+  echo 설계 > "$W/wt/manual/DerivedData/design.md"
+  python3 -c "$PYB" "$W" > "$T/exf.txt"
+  rm -rf "$T/out-exf"; mkdir -p "$T/out-exf"
+  rsync -a "${EX_MEMBER[@]}" --exclude-from="$T/exf.txt" "$W" "$T/out-exf/" 2>/dev/null
+  e(){ [ -e "$T/out-exf/ws2/$1" ]; }
+  e wt/pkg/.build/debug/app            && bad "EXF: SwiftPM .build 가 담겼다"            || ok "EXF: SwiftPM .build(Package.swift 옆) 제외된다"
+  e wt/pkg/Sources/a.swift             && ok "EXF: 같은 패키지 소스 담긴다"              || bad "EXF: 패키지 소스가 빠졌다"
+  e wt/manual/.build/source.swift      && ok "EXF: Package.swift 없는 .build 작업물 담긴다" || bad "EXF: 동명 .build 작업물이 빠졌다"
+  e wt/xc/DerivedData/Build/Products/x && bad "EXF: Xcode DerivedData 가 담겼다"         || ok "EXF: Xcode DerivedData(Build/ 있음) 제외된다"
+  e wt/manual/DerivedData/design.md    && ok "EXF: Build/ 없는 DerivedData 작업물 담긴다" || bad "EXF: 동명 DerivedData 작업물이 빠졌다"
+else
+  bad "snapshot-team.sh 에서 EXF python 블록을 못 찾았다"
+fi
 # ② 트리·hermes 구획: .git 은 계속 뺀다 (원격에 있고, 크다)
 run_rsync "$T/out-tree" "${EX_TREE[@]}"
 has out-tree .git/objects/deadbeef && bad "트리: .git 이 담겼다 — 원격에 있는 것을 중복 백업한다" \

@@ -38,7 +38,9 @@ EX_TREE=("${EX_COMMON[@]}" --exclude='models' --exclude='team-search-eval' --exc
 #   ★.git 도 담는다★ (GD 2026-08-03). 팀원 워크스페이스는 원격이 없을 수 있어서, .git 을 빼면
 #   "파일은 복구되는데 언제 왜 바꿨는지는 사라지는" 반쪽 스냅샷이 된다. 스냅샷은 그야말로 스냅샷이다.
 #   비용: 실측 4MB (등록 12명 중 git repo 는 bill·lui 둘뿐) — 405MB 묶음의 1%.
-EX_MEMBER=("${EX_BASE[@]}")
+# 시험 결과 묶음(*.xcresult)과 artifacts 안의 시험 영상(*.mov·*.mp4)은 다시 만들 수 있고 크다.
+#   .build·DerivedData 는 아래 EXF 가 생성물인지 판별해서 뺀다(동명 작업물은 담는다). 소스·문서·캡처 이미지는 담는다.
+EX_MEMBER=("${EX_BASE[@]}" --exclude='*.xcresult' --exclude='**/artifacts/**.mov' --exclude='**/artifacts/**.mp4')
 
 # hermes 프로필 — 대화state·홈·캐시·bin·모델·세션·미디어·스킬(repo서 옴)은 재생성 가능
 EX_HERMES=("${EX_COMMON[@]}" --exclude='state.db' --exclude='state.db-*' --exclude='state-snapshots'
