@@ -21,9 +21,9 @@ const API_INBOX = process.env.TEAM_INBOX_API ?? "http://127.0.0.1:7878/team/api/
 const NOTIFY_AGENT = process.env.NIGHTLY_FRESH_NOTIFY_AGENT ?? "jensen";
 
 export const IDLE_MIN = Number(process.env.NIGHTLY_FRESH_IDLE_MIN ?? "15");
-// 0 = 시각과 상관없이 읽지 않은 메시지 전부(승인된 설계, 기본). 양수 = 최근 N시간 안에 온 것만 센다.
+// 기본 2 = 최근 2시간 안에 온 읽지 않은 메시지만 센다(Martin 승인 2026-10-27). 0 = 시각과 상관없이 전부.
 //   read_at 은 inbox/ack 를 거쳐야 찍히므로 답은 했는데 표시가 안 남은 옛 메시지가 쌓여 있으면 그 팀원은 영영 skip 된다(실측: 2026-10-27 warren 69건·james 32건).
-export const PENDING_WINDOW_H = Number(process.env.NIGHTLY_FRESH_PENDING_WINDOW_H ?? "0");
+export const PENDING_WINDOW_H = Number(process.env.NIGHTLY_FRESH_PENDING_WINDOW_H ?? "2");
 export const GAP_MS = Number(process.env.NIGHTLY_FRESH_GAP_MS ?? "30000");
 export const ACTOR = "nightly-fresh";
 
