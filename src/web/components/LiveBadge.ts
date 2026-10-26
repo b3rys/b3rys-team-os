@@ -4,8 +4,6 @@
 // 색: #23895C + 하얀 글씨. 빌드 식별자 = 로드된 번들 해시(index-XXXX.js).
 
 const LIVE_HOSTS = new Set(["dev.b3rys.com"]);
-// b3os 제품 버전. package.json version과 맞춰 관리.
-export const APP_VERSION = "0.6.1";
 
 export function shouldShowLiveBadge(hostname: string): boolean {
   return LIVE_HOSTS.has(hostname);
@@ -28,7 +26,7 @@ export function renderLiveBadge(app: HTMLElement): void {
       "line-height:1;padding:4px 12px;display:flex;align-items:center;justify-content:center;gap:10px;letter-spacing:0.02em",
   );
   bar.innerHTML =
-    `<span>● LIVE · ${location.hostname} · v${APP_VERSION}</span>` +
+    `<span>● LIVE · ${location.hostname}</span>` +
     `<span style="opacity:0.78;font-family:ui-monospace,monospace">build ${buildTag()}</span>`;
   app.insertBefore(bar, app.firstChild);
 }
