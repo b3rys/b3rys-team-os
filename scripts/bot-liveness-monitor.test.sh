@@ -238,7 +238,7 @@ STATE="$T/b3os/var/bot-liveness-monitor/bot-liveness-monitor.state"
 
 # 세션 노후화 알림은 기본으로 꺼져 있고, 지정하면 동작한다.
 #   기본이 0 인데 검사를 돌면 age_days>=0 이 항상 참이라 ★모든 세션에 매번 알림★ 이 된다.
-: > "$BOT_LIVENESS_LOG"; rm -f "$STATE"
+: > "$BOT_LIVENESS_LOG"; rm -f "$STATE" "$T/b3os/var/bot-liveness-monitor/bot-liveness-monitor.alerts"
 printf '%s\n' "$$" > "$HOME/.claude/channels/telegram-bill/bot.pid"   # 봇 정상
 OLD_CREATED=$(( $(date +%s) - 3 * 86400 ))                            # 3일 된 세션
 SESSION_CREATED="$OLD_CREATED" bash "$SCRIPT" >"$T/uptime-off.txt" 2>&1
@@ -246,7 +246,7 @@ grep -q "노후화" "$BOT_LIVENESS_LOG" && {
   echo "FAIL: UPTIME_STALE_DAYS 기본값에서 노후화 알림이 나갔다" >&2
   RC=1
 }
-: > "$BOT_LIVENESS_LOG"; rm -f "$STATE"
+: > "$BOT_LIVENESS_LOG"; rm -f "$STATE" "$T/b3os/var/bot-liveness-monitor/bot-liveness-monitor.alerts"
 SESSION_CREATED="$OLD_CREATED" UPTIME_STALE_DAYS=1 bash "$SCRIPT" >"$T/uptime-on.txt" 2>&1
 grep -q "노후화" "$BOT_LIVENESS_LOG" || {
   echo "FAIL: UPTIME_STALE_DAYS 를 지정했는데 노후화 검사가 안 돈다 — 기본 꺼짐이 기능 제거가 됐다" >&2
@@ -257,14 +257,14 @@ pass_if_clean "세션 노후화 알림은 기본 꺼짐이고 지정하면 동�
 # 알림 토큰: 전용 키 우선, 없으면 기존 키로 폴백(쓰던 설치가 안 깨지게).
 #   ★"에러 문구가 없다" 로 판정하지 않는다★ — 조기 종료해도 문구는 안 나오므로 헛통과한다.
 #   실제로 발송까지 갔는지(curl 호출 여부)로 본다.
-: > "$BOT_LIVENESS_LOG"; rm -f "$STATE"; : > "$CURL_CALLS"
+: > "$BOT_LIVENESS_LOG"; rm -f "$STATE" "$T/b3os/var/bot-liveness-monitor/bot-liveness-monitor.alerts"; : > "$CURL_CALLS"
 printf 'LIVENESS_ALERT_BOT_TOKEN=dedicated\n' > "$T/b3os/.env"
 bash "$SCRIPT" >"$T/tok1.txt" 2>&1
 [ -s "$CURL_CALLS" ] || {
   echo "FAIL: 전용 토큰이 있는데 발송까지 가지 않았다" >&2
   RC=1
 }
-: > "$BOT_LIVENESS_LOG"; rm -f "$STATE"; : > "$CURL_CALLS"
+: > "$BOT_LIVENESS_LOG"; rm -f "$STATE" "$T/b3os/var/bot-liveness-monitor/bot-liveness-monitor.alerts"; : > "$CURL_CALLS"
 printf 'CAPTURE_BOT_TOKEN=legacy\n' > "$T/b3os/.env"     # 기존 설치 모양
 bash "$SCRIPT" >"$T/tok2.txt" 2>&1
 [ -s "$CURL_CALLS" ] || {
@@ -274,7 +274,7 @@ bash "$SCRIPT" >"$T/tok2.txt" 2>&1
 pass_if_clean "알림 토큰은 전용 키 우선 + 기존 키 폴백"
 
 # 알림을 아예 안 쓰는 설치를 오류로 끝내지 않는다.
-: > "$BOT_LIVENESS_LOG"; rm -f "$STATE"
+: > "$BOT_LIVENESS_LOG"; rm -f "$STATE" "$T/b3os/var/bot-liveness-monitor/bot-liveness-monitor.alerts"
 : > "$T/b3os/.env"
 GD_CHAT_ID="" GD_DM_CHAT="" bash "$SCRIPT" >"$T/noalert.txt" 2>&1
 rc_noalert=$?
@@ -293,7 +293,7 @@ grep -qE "status=(issues|healed)-unreported" "$BOT_LIVENESS_LOG" || {
 pass_if_clean "알림 미설정 설치는 오류가 아니라 미보고로 끝난다"
 
 # 반쪽 설정은 오류로 알린다 — 받으려던 팀이 조용히 못 받는 것을 막는다.
-: > "$BOT_LIVENESS_LOG"; rm -f "$STATE"
+: > "$BOT_LIVENESS_LOG"; rm -f "$STATE" "$T/b3os/var/bot-liveness-monitor/bot-liveness-monitor.alerts"
 printf 'CAPTURE_BOT_TOKEN=legacy\n' > "$T/b3os/.env"
 GD_CHAT_ID="" GD_DM_CHAT="" bash "$SCRIPT" >"$T/halfconf.txt" 2>&1
 grep -q "설정 실수" "$BOT_LIVENESS_LOG" || {
@@ -313,7 +313,7 @@ exit 0
 SH
 chmod +x "$T/bin/curl"
 export CURL_ARGV="$T/curl.argv"; : > "$CURL_ARGV"
-: > "$BOT_LIVENESS_LOG"; rm -f "$STATE"; : > "$CURL_CALLS"
+: > "$BOT_LIVENESS_LOG"; rm -f "$STATE" "$T/b3os/var/bot-liveness-monitor/bot-liveness-monitor.alerts"; : > "$CURL_CALLS"
 printf 'CAPTURE_BOT_TOKEN=tok-must-not-leak\n' > "$T/b3os/.env"
 bash "$SCRIPT" >"$T/argv.txt" 2>&1
 [ -s "$CURL_CALLS" ] || {
@@ -405,6 +405,166 @@ q_fixture_chat_quote
 OUT=$(q_run 15)
 [ -z "$OUT" ] || { echo "FAIL: 대화 본문 인용을 오류로 알렸다 — $OUT" >&2; RC=1; }
 pass_if_clean "대화 본문이 그 문구를 인용해도 알리지 않는다"
+
+# Local pane end-to-end checks use real state writes and mocked delivery only.
+cat > "$T/bin/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$1" in
+  has-session) exit 0 ;;
+  capture-pane) cat "$PANE_FIXTURE" ;;
+  display-message) echo 1234 ;;
+  list-sessions) echo claude-bill ;;
+  *) printf '%s\n' "$*" >> "$PANE_ACTIONS" ;;
+esac
+SH
+export PANE_FIXTURE="$T/pane.txt" PANE_ACTIONS="$T/pane-actions"
+: > "$PANE_ACTIONS"; : > "$RESTART_CALLS"
+mkdir -p "$HOME/.claude/channels/telegram-bill/progress"
+HOOK_FIXTURE="$HOME/.claude/channels/telegram-bill/progress/_hooklog.txt"
+printf '%s\n' "$$" > "$HOME/.claude/channels/telegram-bill/bot.pid"
+export LIVENESS_STATE_DIR="$T/pane-state"
+mkdir -p "$LIVENESS_STATE_DIR"
+export FAKE_PID="$$"
+cat > "$T/bin/launchctl" <<'SH'
+#!/usr/bin/env bash
+[ "$1" = print ] && exit 0
+if [ "$1" = list ]; then
+  for label in com.b3ostest.team-collab ai.openclaw.gateway ai.hermes.gateway-b3ryshermes com.b3ostest.b3rys-dev; do
+    printf '%s\t0\t%s\n' "$FAKE_PID" "$label"
+  done
+fi
+SH
+cat > "$T/bin/curl" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *--config*) printf 'curl\n' >> "$CURL_CALLS"; printf '%s' "${SEND_CODE:-200}" ;;
+esac
+SH
+chmod +x "$T/bin/tmux" "$T/bin/curl" "$T/bin/launchctl"
+
+printf 'Login expired · Please run /login\n' > "$PANE_FIXTURE"
+: > "$CURL_CALLS"; : > "$BOT_LIVENESS_LOG"
+bash "$SCRIPT"
+grep -q 'Claude 인증 만료' "$BOT_LIVENESS_LOG" || { echo 'FAIL: login expiration missed'; RC=1; }
+[ "$(wc -l < "$CURL_CALLS" | tr -d ' ')" = 1 ] || { echo 'FAIL: login alert not sent exactly once'; RC=1; }
+bash "$SCRIPT"
+[ "$(wc -l < "$CURL_CALLS" | tr -d ' ')" = 1 ] || { echo 'FAIL: repeated login alert'; RC=1; }
+# Unrelated issue changing must not cause another login-expiration alert.
+: > "$BOT_LIVENESS_LOG"
+bash "$SCRIPT" --dry-run > "$T/login-duplicate-dry.txt"
+grep -q '중복알림 skip' "$T/login-duplicate-dry.txt" || { echo 'FAIL: dry-run dedup'; RC=1; }
+pass_if_clean '로그인 만료는 한 번 알리고 반복 실행과 dry-run에서 중복 생략'
+
+# Quoted words in conversation text must not be recognized as a terminal error.
+printf '❯ 리뷰 문구: Login expired · Please run /login\n설명: API Error: 401 및 Unauthorized를 인용합니다\n' > "$PANE_FIXTURE"
+: > "$BOT_LIVENESS_LOG"
+bash "$SCRIPT" --dry-run > "$T/quoted-pane.txt"
+grep -q 'Claude 인증 만료' "$T/quoted-pane.txt" && { echo 'FAIL: quoted login phrase'; RC=1; }
+pass_if_clean '대화 본문에 인용한 로그인 오류는 알리지 않음'
+
+printf '12:00:00 react send chat=test msg=123\n' > "$HOOK_FIXTURE"
+mkdir -p "$HOME/.claude/channels/telegram-bill/turnch"
+python3 - "$HOME/.claude/channels/telegram-bill/turnch/current.json" <<'PYTURN'
+import json, sys, time
+from pathlib import Path
+Path(sys.argv[1]).write_text(json.dumps(dict(chat_id='test', message_id='123', ts=time.time())))
+PYTURN
+
+printf 'PreToolUse hook\n' > "$PANE_FIXTURE"
+bash "$SCRIPT"
+# Age the observation instead of waiting twenty minutes.
+python3 - "$LIVENESS_STATE_DIR/pane-bill.json" <<'PYAGE'
+import json, sys, time
+from pathlib import Path
+p = Path(sys.argv[1]); d = json.loads(p.read_text()); d['since'] = time.time() - 1201
+p.write_text(json.dumps(d))
+PYAGE
+: > "$CURL_CALLS"; : > "$BOT_LIVENESS_LOG"
+bash "$SCRIPT" --dry-run > "$T/stall-dry.txt"
+grep -q '멈춤 의심' "$T/stall-dry.txt" || { echo 'FAIL: hook stall missed in dry-run'; RC=1; }
+[ ! -s "$CURL_CALLS" ] || { echo 'FAIL: dry-run sent notification'; RC=1; }
+bash "$SCRIPT"
+bash "$SCRIPT"
+[ "$(wc -l < "$CURL_CALLS" | tr -d ' ')" = 1 ] || { echo 'FAIL: stalled pane duplicate or missing alert'; RC=1; }
+[ ! -s "$PANE_ACTIONS" ] && [ ! -s "$RESTART_CALLS" ] || { echo 'FAIL: login/stall caused tmux actions or restart'; RC=1; }
+pass_if_clean '훅 멈춤은 20분 후 한 번 알림, dry-run 발송·자동 조작 없음'
+
+# A newly appearing issue must not repeat older ongoing issues in the notification.
+# Keep the stall active but add a router-off issue in an isolated metadata DB.
+python3 - "$T/router.db" <<'PYDB'
+import sqlite3, sys
+with sqlite3.connect(sys.argv[1]) as db:
+    db.execute('CREATE TABLE setting(key TEXT, value TEXT)')
+    db.execute("INSERT INTO setting VALUES ('router_enabled', 'false')")
+PYDB
+: > "$BOT_LIVENESS_LOG"
+TEAM_DB_OVERRIDE="$T/router.db" bash "$SCRIPT"
+grep -q 'TEAM OP 라우터 OFF' "$BOT_LIVENESS_LOG" || { echo 'FAIL: new issue not delivered'; RC=1; }
+grep -q '멈춤 의심' "$BOT_LIVENESS_LOG" && { echo 'FAIL: ongoing stall repeated with unrelated issue'; RC=1; }
+pass_if_clean '다른 문제가 추가되어도 기존 멈춤 알림을 반복하지 않음'
+
+# Recovery clears the active episode, so the next occurrence is reportable.
+printf '12:01:00 clear src=reply\n' >> "$HOOK_FIXTURE"
+rm -f "$HOME/.claude/channels/telegram-bill/turnch/current.json"
+: > "$BOT_LIVENESS_LOG"
+bash "$SCRIPT" --dry-run > "$T/idle-pane.txt"
+grep -q '멈춤 의심' "$T/idle-pane.txt" && { echo 'FAIL: idle pane treated as stalled'; RC=1; }
+pass_if_clean '미처리 메시지가 없으면 같은 pane도 멈춤이 아님'
+
+# Clear the recovered episode, then ensure a failed send is retried and a new episode alerts.
+bash "$SCRIPT"
+printf 'Login expired · Please run /login\n' > "$PANE_FIXTURE"
+: > "$CURL_CALLS"
+SEND_CODE=500 bash "$SCRIPT" || true
+bash "$SCRIPT"
+bash "$SCRIPT"
+[ "$(wc -l < "$CURL_CALLS" | tr -d ' ')" = 2 ] || { echo 'FAIL: failed send was not retried or successful alert repeated'; RC=1; }
+pass_if_clean '회복 후 같은 문제가 재발하면 알림, 전송 실패는 재시도'
+
+# Recurring B must notify even while A stays active (old global signature must not suppress B).
+: > "$CURL_CALLS"
+TEAM_DB_OVERRIDE="$T/router.db" bash "$SCRIPT"
+python3 - "$T/router.db" <<'PYDB'
+import sqlite3, sys
+with sqlite3.connect(sys.argv[1]) as db:
+    db.execute("UPDATE setting SET value='true'")
+PYDB
+TEAM_DB_OVERRIDE="$T/router.db" bash "$SCRIPT"
+python3 - "$T/router.db" <<'PYDB'
+import sqlite3, sys
+with sqlite3.connect(sys.argv[1]) as db:
+    db.execute("UPDATE setting SET value='false'")
+PYDB
+TEAM_DB_OVERRIDE="$T/router.db" bash "$SCRIPT"
+[ "$(wc -l < "$CURL_CALLS" | tr -d ' ')" = 2 ] || { echo 'FAIL: recurring B suppressed while A persists'; RC=1; }
+pass_if_clean 'A 지속 중 B가 회복·재발해도 B 알림을 다시 보냄'
+
+# Recovery must retire A even if delivery of a simultaneous new B fails.
+export LIVENESS_STATE_DIR="$T/failure-state"
+mkdir -p "$LIVENESS_STATE_DIR"
+printf 'Login expired · Please run /login\n' > "$PANE_FIXTURE"
+bash "$SCRIPT"
+printf 'idle after recovery\n' > "$PANE_FIXTURE"
+TEAM_DB_OVERRIDE="$T/router.db" SEND_CODE=500 bash "$SCRIPT" || true
+printf 'Login expired · Please run /login\n' > "$PANE_FIXTURE"
+: > "$BOT_LIVENESS_LOG"
+TEAM_DB_OVERRIDE="$T/router.db" bash "$SCRIPT"
+grep -q 'Claude 인증 만료' "$BOT_LIVENESS_LOG" || { echo 'FAIL: A recurrence lost after B delivery failure'; RC=1; }
+grep -q 'TEAM OP 라우터 OFF' "$BOT_LIVENESS_LOG" || { echo 'FAIL: failed B was not retried'; RC=1; }
+pass_if_clean '새 문제 전송 실패 중 회복·재발한 기존 문제도 알림'
+
+# Existing DM persistence must still reach the second observation at the longer cadence.
+printf '%s react send chat=test msg=123\n' "$(date -v-25M '+%H:%M:%S')" > "$HOOK_FIXTURE"
+printf 'working with changing output\n' > "$PANE_FIXTURE"
+printf 'bill=123\n' > "$LIVENESS_STATE_DIR/bot-liveness-monitor.pending"
+bash "$SCRIPT" --dry-run > "$T/dm-persistence.txt"
+grep -q 'reply 도구 nudge 주입' "$T/dm-persistence.txt" || { echo 'FAIL: 20-minute cadence lost existing DM persistence'; RC=1; }
+pass_if_clean '20분 주기에서도 기존 DM 연속 관찰 경로에 도달함'
+
+# Notification filtering must not turn a still-unhealthy run green during another recovery.
+TEAM_DB_OVERRIDE="$T/router.db" bash "$SCRIPT" --dry-run > "$T/active-health.txt"
+grep -q 'bot-liveness DONE status=issues$' "$T/active-health.txt" || { echo 'FAIL: ongoing issue reported healthy during unrelated heal'; RC=1; }
+pass_if_clean '중복 알림을 생략해도 지속 중인 장애는 unhealthy로 기록함'
 
 # App-only Claude members must not enter Telegram monitoring or auto-recovery.
 printf '%s\n' '[{"id":"testmate","runtime":"claude_channel","channel":{"kind":"b3chat"}}]' > "$T/agents.json"
