@@ -75,18 +75,20 @@ Drive mode prevents unfinished work from disappearing. It is not permission to i
 
 Harness is a quality/execution method, not BWF itself.
 
-Use harness only when all are true:
+Two shapes:
 
-- work decomposes into independent pieces
-- each piece reads a different actual source
-- value exceeds coordination cost
-- N, budget, scope, and verification are defined
+1. **Role-split harness (default for important project code).** Feature work, bug fixes, and refactors in important projects (user-facing products such as Steno, cogs, b3os) separate implementation from independent review/verification — a different subagent or a different teammate checks the result. Sequential work still gets the independent review; "it cannot be parallelized" is not a reason to skip it.
+2. **Parallel fan-out (add only when all are true):**
+   - work decomposes into independent pieces
+   - each piece reads a different actual source
+   - value exceeds coordination cost
+   - N, budget, scope, and verification are defined
 
-If any answer is no, go solo.
+Simple mechanical edits (wording, formatting, a single config value) and light lookups are done directly without a harness.
 
 Default sizing:
 
-- turn mode: solo
+- turn mode: solo, except important project code (implementer + independent reviewer)
 - drive mode: limited harness, usually 2-3 and capped by source splits
 - full-autonomy: broader harness within machine/runtime caps
 

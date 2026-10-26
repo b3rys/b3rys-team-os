@@ -38,7 +38,7 @@ BWF(b3os workflow)는 b3rys 팀이 과제를 받아 끝까지 수행하는 기�
                거절·예상 시간 확인까지 추적한다(보냄 ≠ 받음). → b3os-team-inbox(reply.sh·thread.sh)
                예상 소요 시간은 아래 "예상 시간 잡는 법"대로 잡는다(PR 하나 = 기본 10분).
 3. 실행 + 품질  작업 모양에 맞는 품질방법을 고른다(아래 표). 작업 크기별:
-               턴=솔로 / 주행=limited harness / 완전자율=full harness
+               턴=솔로(중요 프로젝트 구현은 구현+독립 리뷰 역할 분리) / 주행=limited harness / 완전자율=full harness
                (규모 숫자는 b3os-harness-playbook).
 4. 검증        완료기준과 대조하고 증거(테스트·빌드·실측)로 입증한다. "됐다" 단정 금지.
                릴리즈 검증 범위는 b3os-verification §1b 출고 모드(dev·hotfix·fix·full)로
