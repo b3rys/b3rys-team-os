@@ -468,8 +468,10 @@ describe("b3os scheduler exec jobs", () => {
   test("the production allowlist only contains the vetted ops scripts (argv-only)", () => {
     // ★이 목록은 의도적으로 못박아 둔다★ — 여기 한 줄 추가 = ★서버 권한 코드실행 등록★ 이다.
     //   테스트가 깨지는 게 정상이고, 깨져야 사람이 한 번 더 본다. 목록을 늘렸으면 여기도 같이 고쳐라.
+    // (2026-10-27: nightly-fresh-restart 추가 — GD 승인(그룹방, Elon 경유))
     // (2026-07-17: task-continuation-guard 를 launchd 에서 이관하며 추가 — GD 승인)
     expect(Object.keys(EXEC_ALLOWLIST).sort()).toEqual([
+      "nightly-fresh-restart",
       "task-continuation-guard",
       "task-review-ping",
       "task-review-summary",

@@ -197,6 +197,13 @@ export const EXEC_ALLOWLIST: Readonly<Record<string, ExecSpec>> = Object.freeze(
       timeoutMs: 120_000,
       label: "30분마다 진행 지속 가드 (멈춘 doing 카드 → owner 핑, 이슈별 cooldown)",
     },
+    // 매일 03:00 KST: 쉬는 claude 팀원만 새 세션으로 재시작(scripts/nightly-fresh-restart.ts, 등록은 scripts/register-nightly-fresh.ts).
+    //   한 명당 재시작 ~15~45s + 사이 30s 간격 × 9명 ≈ 12분 안팎 → 25분 타임아웃.
+    "nightly-fresh-restart": {
+      command: ["bun", "run", "scripts/nightly-fresh-restart.ts", "--commit"],
+      timeoutMs: 1_500_000,
+      label: "매일 03:00 쉬는 팀원 새 세션 재시작",
+    },
   }),
 );
 
