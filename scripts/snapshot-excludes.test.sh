@@ -37,6 +37,15 @@ mk_ws(){
   echo 보고서    > "$w/reports/r.md"
   echo 덱        > "$w/decks/d.html"
   echo 로그      > "$w/run.log"
+  mkdir -p "$w/wt/a/.build/debug" "$w/wt/a/Sources" "$w/DerivedData/x" "$w/artifacts/r1/video" "$w/artifacts/r1/shots" "$w/t.xcresult"
+  echo bin       > "$w/wt/a/.build/debug/app"
+  echo src       > "$w/wt/a/Sources/main.swift"
+  echo dd        > "$w/DerivedData/x/y"
+  echo mov       > "$w/artifacts/r1/video/capture.mov"
+  echo mp4       > "$w/artifacts/r1/video/clip.mp4"
+  echo png       > "$w/artifacts/r1/shots/a.png"
+  echo res       > "$w/t.xcresult/Info.plist"
+  echo 데모      > "$w/demo.mov"
 }
 
 run_rsync(){  # $1=dest $2...=excludes
@@ -64,6 +73,14 @@ has out-member backups/old/a.txt       && bad "멤버: backups 가 담겼다(중
                                        || ok "멤버: backups 제외된다"
 has out-member run.log                 && bad "멤버: *.log 가 담겼다" || ok "멤버: *.log 제외된다"
 
+has out-member wt/a/Sources/main.swift   && ok "멤버: worktree 소스 담긴다"          || bad "멤버: worktree 소스가 빠졌다"
+has out-member wt/a/.build/debug/app     && bad "멤버: .build 가 담겼다(빌드 산출물)" || ok "멤버: .build 제외된다"
+has out-member DerivedData/x/y           && bad "멤버: DerivedData 가 담겼다"        || ok "멤버: DerivedData 제외된다"
+has out-member t.xcresult/Info.plist     && bad "멤버: *.xcresult 가 담겼다"         || ok "멤버: *.xcresult 제외된다"
+has out-member artifacts/r1/video/capture.mov && bad "멤버: artifacts 영상(.mov)이 담겼다" || ok "멤버: artifacts 영상(.mov) 제외된다"
+has out-member artifacts/r1/video/clip.mp4    && bad "멤버: artifacts 영상(.mp4)이 담겼다" || ok "멤버: artifacts 영상(.mp4) 제외된다"
+has out-member artifacts/r1/shots/a.png  && ok "멤버: artifacts 캡처 이미지 담긴다"   || bad "멤버: artifacts 캡처 이미지가 빠졌다"
+has out-member demo.mov                  && ok "멤버: artifacts 밖 영상은 담긴다(작업물)" || bad "멤버: artifacts 밖 영상이 빠졌다"
 # ② 트리·hermes 구획: .git 은 계속 뺀다 (원격에 있고, 크다)
 run_rsync "$T/out-tree" "${EX_TREE[@]}"
 has out-tree .git/objects/deadbeef && bad "트리: .git 이 담겼다 — 원격에 있는 것을 중복 백업한다" \
