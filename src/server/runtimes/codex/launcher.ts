@@ -250,7 +250,7 @@ export function removeCodexBridgeFiles(id: string, opts: { removeToken?: boolean
   const p = codexBridgePaths(id);
   // removeHome(전체 퇴사)면 브릿지 로그도 정리 — 재영입 시 stale 로그 혼선 방지.
   // removeHome 이면 ready 표시(pid)·창구 파일도 — 남기면 다음 영입의 "기동 확인" 이 옛 표시를 읽는다.
-  const runFiles = opts.removeHome ? [p.log, p.pidFile, join(dirname(p.pidFile), `${id}.window.json`)] : [];
+  const runFiles = opts.removeHome ? [p.log, p.pidFile, `${p.pidFile}.poll`, join(dirname(p.pidFile), `${id}.window.json`)] : [];
   for (const f of [p.plist, p.wrapper, ...(opts.removeToken ? [p.tokenFile] : []), ...runFiles]) {
     try { if (existsSync(f)) rmSync(f); } catch { /* best-effort */ }
   }

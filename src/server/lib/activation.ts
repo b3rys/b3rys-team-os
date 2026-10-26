@@ -1,3 +1,5 @@
+import { spawnSync } from "node:child_process";
+import { cogsTmuxAgent, controlCogsTmux } from "../runtimes/claude/cogsTmux";
 import { readMemberChannel } from "./memberChannel";
 import { claudeCogsPaths, writeClaudeCogsFiles, removeClaudeCogsFiles } from "../runtimes/claude/cogsLauncher";
 // 대시보드-실행-활성화: 영입 마지막 단계 = 서버가 런타임을 활성화한다.
@@ -114,6 +116,8 @@ export interface TeardownDeps {
   appChannel?: boolean;
   removeClaudeCogsFiles?: typeof removeClaudeCogsFiles;
   isAlive?: (pid: number) => boolean;
+  tmuxSession?: string;
+  stopCogsTmux?: (session: string) => Promise<boolean>;
 }
 
 export async function teardownRuntime(
@@ -139,6 +143,13 @@ export async function teardownRuntime(
     let pids: number[] = [];
     try { pids = opts.codexBridgePids ? opts.codexBridgePids(id) : cogsClaude ? (()=>{const pid=readBridgePid(claudeCogsPaths(id).pidFile,id);return pid ? [pid,...descendantPids(pid)] : [];})() : liveCodexBridgePids(id); } catch { pids = []; }
     try { await doSetAgentEnabled(id, runtime, false, cogsClaude ? {...readMemberChannel(id),kind:"b3chat"} : undefined); } catch { /* best-effort */ }
+    if (cogsClaude) {
+      const session = opts.tmuxSession ?? cogsTmuxAgent(id)?.tmux_session ?? `claude-${id}`;
+      if (opts.stopCogsTmux) await opts.stopCogsTmux(session);
+      else if (!opts.setAgentEnabled && process.env.APPROVAL_EXECUTION_ENABLED === "1") {
+        try { spawnSync("tmux",["kill-session","-t",`=${session}`],{stdio:"ignore",timeout:5000}); } catch { /* Residue probe reports any surviving session. */ }
+      }
+    }
     const exited = await waitForExit(pids, { timeoutMs: opts.codexExitWaitMs ?? 10_000, isAlive: opts.isAlive });
     try { cogsClaude ? (opts.removeClaudeCogsFiles ?? removeClaudeCogsFiles)(id) : doRemoveCodexBridgeFiles(id, { removeToken: true, removeHome: true }); } catch { /* best-effort */ }
     return { ok: true, detail: exited ? "codex teardown 완료(브리지 종료 확인)" : "codex teardown 완료(브리지 종료 미확인 — 상한 초과, 잔여 파일 확인 필요)" };
@@ -568,6 +579,14 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
     return { ok: false, steps, error: auth.fixHint || `${runtime} 런타임 인증 미완료` };
   }
   steps.push({ step: "preflight", ok: true, detail: auth.detail });
+
+  const tmuxAgent = runtime === "claude_channel" ? cogsTmuxAgent(id) : undefined;
+  if (tmuxAgent) {
+    placeCodexToken(id, bot_token);
+    const res = await controlCogsTmux(tmuxAgent, true);
+    steps.push({step:"runtime",ok:res.ok,detail:res.detail});
+    return {ok:res.ok,steps,...(res.ok ? {} : {error:res.detail})};
+  }
 
   // 3) 런타임 활성화(self-mod — 인가된 executor에서만)
   // codex: 텔레그램 브리지 = 토큰 배치 → wrapper/plist 생성 → LaunchAgent bootstrap.

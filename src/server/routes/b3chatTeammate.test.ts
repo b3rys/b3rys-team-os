@@ -506,3 +506,47 @@ describe("cogs model selection",()=>{
   expect(await (await req("opus")).json()).toMatchObject({model:"opus",restart_required:false,applies:"next_request"});
   expect(readFileSync(path,"utf-8")).toContain('value = "keep"');
  });
+
+describe("runtime restart endpoint",()=>{
+ test("authenticated app member only; execution/off/rate/concurrency gates",async()=>{
+  const s=setup();
+  writeFileSync(s.registryPath,JSON.stringify([{id:"testmate",runtime:"claude_channel",enabled:true,team_official_member:false,channel:{kind:"b3chat"}},{id:"official",runtime:"claude_channel",team_official_member:true,channel:{kind:"b3chat"}}]));
+  let now=1000,calls=0,off=false;let release!:()=>void;
+  const gate=new Promise<void>(r=>release=r);
+  const app=createB3chatTeammateRoutes({...s.deps,now:()=>now,off:()=>off,restart:async()=>{calls++;await gate;return {ok:true,detail:"test"};}});
+  const restart=(id="testmate",auth=true)=>app.request(`/members/b3chat/member/${id}/restart`,{method:"POST",headers:auth?{"x-b3chat-link":KEY}:{}});
+  const old=process.env.APPROVAL_EXECUTION_ENABLED;
+  try {
+   expect((await restart("testmate",false)).status).toBe(403);
+   expect((await restart("official")).status).toBe(404);
+   delete process.env.APPROVAL_EXECUTION_ENABLED;expect((await restart()).status).toBe(409);expect(calls).toBe(0);
+   process.env.APPROVAL_EXECUTION_ENABLED="1";off=true;expect((await restart()).status).toBe(409);expect(calls).toBe(0);off=false;
+   const pending=restart();await new Promise(r=>setTimeout(r,1));expect((await restart()).status).toBe(409);
+   release();expect((await pending).status).toBe(200);expect(calls).toBe(1);
+   expect((await restart()).status).toBe(429);now+=30001;expect((await restart()).status).toBe(200);expect(calls).toBe(2);
+  }finally {if(old===undefined)delete process.env.APPROVAL_EXECUTION_ENABLED;else process.env.APPROVAL_EXECUTION_ENABLED=old;}
+ });
+});
+
+test("removal and restart exclude one another in both directions",async()=>{
+ let releaseRemove!:()=>void;const removeGate=new Promise<void>(r=>releaseRemove=r);
+ const s=setup({removeGate}); const job=await s.waitJob(await s.post(BODY));
+ let releaseRestart!:()=>void;const restartGate=new Promise<void>(r=>releaseRestart=r);let calls=0;
+ const app=createB3chatTeammateRoutes({...s.deps,off:()=>false,restart:async()=>{calls++;await restartGate;return {ok:true,detail:"test"};}});
+ const req=(method:string,suffix="")=>app.request(`/members/b3chat/member/testmate${suffix}`,{method,headers:{"x-b3chat-link":KEY}});
+ const old=process.env.APPROVAL_EXECUTION_ENABLED;process.env.APPROVAL_EXECUTION_ENABLED="1";
+ try {
+  const pending=req("POST","/restart");await new Promise(r=>setTimeout(r,1));
+  expect((await req("DELETE")).status).toBe(409);
+  releaseRestart();expect((await pending).status).toBe(200);
+  const done=s.settle(job.job_id as string);
+  expect((await req("DELETE")).status).toBe(202);
+  expect((await req("POST","/restart")).status).toBe(409);expect(calls).toBe(1);
+  releaseRemove();await done;
+ }finally {releaseRestart();releaseRemove();if(old===undefined)delete process.env.APPROVAL_EXECUTION_ENABLED;else process.env.APPROVAL_EXECUTION_ENABLED=old;}
+});
+test("residue probe uses persisted custom tmux session",()=>{
+ const seen:string[]=[];
+ expect(residueOf("testmate",{registryHas:()=>false,launchdLoaded:()=>false,envPids:()=>[],exists:()=>false,tmuxAlive:s=>{seen.push(s);return s==="custom-cogs-session";}},"/tmp/testmate","claude_channel","custom-cogs-session")).toEqual(["tmux"]);
+ expect(seen).toEqual(["custom-cogs-session"]);
+});
