@@ -32,6 +32,7 @@ import {
 } from "../db/inboxQueries";
 import { appendAudit } from "../db/queries";
 import { insertMessage } from "../db/inboxQueries";
+import { openclawRewakeAfterMin, rewakeAfterOpenclawExpiry } from "./openclawRewake";
 import {
   clearQuotaBlocked,
   getQuotaBlock,
@@ -2231,6 +2232,16 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
     const c = recoverCodexInflight(db);
     if (c > 0) {
       console.log(`[bus_dispatcher] periodic codex recovery: re-dispatched ${c} stale turns`);
+    }
+    // openclaw 만기 뒤 조용한 팀원에게 [재개 확인] 한 번(기본 꺼짐 · OPENCLAW_REWAKE_AFTER_MIN).
+    const rewakeMin = openclawRewakeAfterMin();
+    if (rewakeMin > 0) {
+      try {
+        const r = rewakeAfterOpenclawExpiry(db, deps.agents(), rewakeMin);
+        if (r > 0) console.log(`[bus_dispatcher] openclaw rewake: sent ${r} resume checks`);
+      } catch (e) {
+        console.error("[bus_dispatcher] openclaw rewake error:", e instanceof Error ? e.message : String(e));
+      }
     }
   }, 60_000);
 
