@@ -52,7 +52,7 @@ EX_HERMES=("${EX_COMMON[@]}" --exclude='state.db' --exclude='state.db-*' --exclu
 say "■ 팀 핵심 상태 수집 ($STAMP)"
 # ① 트리 gitignored (team.db 는 핵심이라 통째)
 cd "$LIVE_DIR"
-for p in .env agents.json team.db var slack-tokens scripts rules/STATE.md rules/SHARED.md rules/TEAM-OS.md; do
+for p in .env agents.json team.db var slack-tokens scripts rules/STATE.md rules/STATE.local.md rules/SHARED.md rules/TEAM-OS.md; do
   [ -e "$p" ] && { mkdir -p "$STAGE/tree/$(dirname "$p")"; rsync -a "${EX_TREE[@]}" "$p" "$STAGE/tree/$(dirname "$p")/" 2>/dev/null || true; }
 done
 say "  ✓ 트리 (team.db $(du -h team.db 2>/dev/null|cut -f1))"

@@ -73,7 +73,7 @@ SECTION_CORE_RULE: deploy, merge, publish 전에는 검증한다. 중요한 외�
 - learning/proposal/compacting: `rules/TEAM-OS.learning.md`
 - workloop: `rules/TEAM-OS.workloop.md`
 - branch/worktree 격리: `rules/TEAM-OS.concurrent-work.md`
-- 현재 상태: `rules/STATE.md`
+- 현재 상태: `rules/STATE.local.md`
 - 팀 스킬: `docs/B3OS_SKILLS.md`
 
 DO-NOT-COMPACT: owner, safety, SECTION_CORE_RULE은 이 최소판에서도 삭제하지 않는다.

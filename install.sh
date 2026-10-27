@@ -191,6 +191,11 @@ if [ ! -f rules/SHARED.md ]; then
 else
   say "✅ rules/SHARED.md 이미 있음 — 유지(팀 기록이라 덮지 않습니다)."
 fi
+# 팀 현재 값도 같은 이유로 추적하지 않는 파일에 둔다. 이미 있으면 건드리지 않는다.
+if [ ! -f rules/STATE.local.md ] && [ -f rules/STATE.md ]; then
+  cp rules/STATE.md rules/STATE.local.md
+  say "✅ rules/STATE.local.md 생성 (템플릿 복사) — 팀 현재 값입니다. 공개 저장소로 나가지 않습니다."
+fi
 
 # 새 값을 확정한 뒤에만 기존 표기(export/공백/따옴표 포함)를 제거하고 원자적으로 교체한다.
 _env_mode=""
