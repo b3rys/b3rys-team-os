@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { loadAgentCreds, allMentionedUsers } from "../lib/slack";
 import { appendAudit } from "../db/queries";
 import { handleAppMention, type SlackEvent } from "../routes/slack";
+import type { SlackFile } from "../lib/slackFiles";
 import type { AgentRecord, WsEvent } from "../types";
 import { coordinatorId } from "../lib/capabilities";
 import { ambientAgents } from "../lib/registry";
@@ -28,6 +29,7 @@ interface SlackHistoryMessage {
   bot_id?: string;
   reply_count?: number;
   latest_reply?: string;
+  files?: SlackFile[];
 }
 
 const ENABLED = (process.env.TEAM_SLACK_POLL_ENABLED ?? "1") !== "0";
@@ -203,6 +205,7 @@ async function handleMessage(
     ts: msg.ts,
     thread_ts: msg.thread_ts,
     bot_id: msg.bot_id,
+    files: msg.files,
   };
   await handleAppMention({ db: deps.db, broadcast: deps.broadcast, agents }, ev);
 }

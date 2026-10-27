@@ -3,6 +3,7 @@
 //     - url_verification: returns the challenge token
 //     - event_callback (app_mention): converts to envelope + inserts via inbox
 //   POST /api/slack/post — admin helper to post a message to Slack as a given agent
+import { bodyWithSlackFiles, receivedSlackMessage, type SlackFile } from "../lib/slackFiles";
 import { Hono } from "hono";
 import type { Database } from "bun:sqlite";
 import { z } from "zod";
@@ -134,10 +135,11 @@ export interface SlackEvent {
   ts?: string;
   bot_id?: string;
   team?: string;
+  files?: SlackFile[];
 }
 
 export async function handleAppMention(
-  deps: { db: Database; broadcast: (e: WsEvent) => void; agents: AgentRecord[] },
+  deps: { db: Database; broadcast: (e: WsEvent) => void; agents: AgentRecord[]; fetchFn?: typeof fetch },
   ev: SlackEvent,
 ): Promise<void> {
   // 봇 작성 이벤트도 협업 멘션 대상이다. 작성자를 수신 대상에서 제외해 자기 발신 재주입을 막는다.
@@ -145,8 +147,9 @@ export async function handleAppMention(
   const text = ev.text ?? "";
   if (!ev.channel) return;
   const slackChannel = ev.channel;
-  const cleanBody = cleanSlackText(text);
-  if (!cleanBody) return;
+  const textBody = cleanSlackText(text);
+  const files = ev.files ?? [];
+  if (!textBody && files.length === 0) return;
 
   // 한 webhook에서 모든 알려진 멘션 대상을 처리해 일부 봇의 구독 누락을 보완한다. 여러 webhook의 중복은 60초 지문으로 제거한다.
   const mentionedIds = allMentionedUsers(text);
@@ -161,6 +164,13 @@ export async function handleAppMention(
     if (first) console.warn(`[slack] mention for unknown bot user ${first}`);
     return;
   }
+
+  // 첨부는 메시지당 한 번만 받아 본문 끝에 경로를 붙인다. 이미 받은 메시지(재전송·경로 중복)면 null.
+  const cleanBody = await bodyWithSlackFiles({
+    db: deps.db, textBody, files, channel: slackChannel, messageTs: ev.ts,
+    targetIds: targetAgents.map((a) => a.id), allIds: deps.agents.map((a) => a.id), fetchFn: deps.fetchFn,
+  });
+  if (cleanBody === null) return;
 
   // Map Slack thread to internal envelope thread — shared across all targets in this webhook.
   const slackThreadKey = `${slackChannel}:${ev.thread_ts ?? ev.ts}`;
@@ -198,23 +208,7 @@ async function processMentionForAgent(opts: {
 }): Promise<void> {
   const { deps, ev, slackChannel, cleanBody, thread_id, targetAgent } = opts;
 
-  const slackMessageTs = ev.ts;
-  if (slackMessageTs) {
-    const priorForSlackMessage = deps.db
-      .prepare(
-        `SELECT id FROM message
-         WHERE to_agent_id = ?
-           AND source = 'user'
-           AND (meta_json LIKE ? OR meta_json LIKE ?)
-         LIMIT 1`,
-      )
-      .get(
-        targetAgent.id,
-        `%"message_ts":"${slackMessageTs}"%`,
-        `%"thread_ts":"${slackMessageTs}"%`,
-      );
-    if (priorForSlackMessage) return;
-  }
+  if (ev.ts && receivedSlackMessage(deps.db, targetAgent.id, slackChannel, ev.ts)) return;
 
   // dedupe(60s) + insertMessage + broadcast → 공통 acceptInbound (P2 ChannelAdapter).
   // thread_id는 상단(handleAppMention)에서 ensure됨 → acceptInbound 내부 재호출은 idempotent reuse.
