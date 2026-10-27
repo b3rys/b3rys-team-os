@@ -358,3 +358,13 @@ test("malformed gap values are ignored without an audit row", async () => {
   await poller().pollOnce();
   expect(db.query("SELECT count(*) AS n FROM audit_event WHERE action='cogs_updates_lost'").get()).toEqual({ n: 0 });
 });
+test("a remote gap reason is never stored or logged as given", async () => {
+  const warned: string[] = []; const warn = console.warn; console.warn = (...a: unknown[]) => { warned.push(a.join(" ")); };
+  try {
+    updates = [{ update_id: 7, cogs_gap: { from_update_id: 1, to_update_id: 7, reason: `${TOKEN} 비밀 본문` } }];
+    await poller().pollOnce();
+  } finally { console.warn = warn; }
+  const row = db.query("SELECT detail_json AS d FROM audit_event WHERE action='cogs_updates_lost'").get() as { d: string };
+  expect(JSON.parse(row.d).reason).toBe("unknown");
+  expect(row.d.includes(TOKEN)).toBe(false); expect(warned.join("\n").includes(TOKEN)).toBe(false);
+});

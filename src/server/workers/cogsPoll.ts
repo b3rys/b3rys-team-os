@@ -27,13 +27,14 @@ export function acceptsChat(config: { allow_senders: string[] }, chatType: unkno
   return false;
 }
 
-/** cogs `cogs_gap` update 값(`from_update_id`·`to_update_id`·`reason`)만 받아들인다. 모양이 다르면 null. */
+/** cogs `cogs_gap` update 값(`from_update_id`·`to_update_id`·`reason`)만 받아들인다. 모양이 다르면 null. reason 은 `overflow`/`unknown` 둘뿐. */
 export function cogsGap(value: unknown): { from: number; to: number; reason: string } | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
   const from = v.from_update_id, to = v.to_update_id;
   if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || (from as number) > (to as number)) return null;
-  return { from: from as number, to: to as number, reason: typeof v.reason === "string" ? v.reason.slice(0, 40) : "unknown" };
+  // reason 은 원격 문자열이라 그대로 남기지 않는다(토큰·본문이 섞여도 audit·로그로 새지 않게). 아는 값만 고정 코드로.
+  return { from: from as number, to: to as number, reason: v.reason === "overflow" ? "overflow" : "unknown" };
 }
 
 /** One server owns polling. Offsets survive restart without storing bot tokens. */
