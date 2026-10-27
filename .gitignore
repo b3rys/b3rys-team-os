@@ -45,6 +45,7 @@ archiving/
 !/scripts/task-review-summary.ts
 !/scripts/task-continuation-guard.ts
 !/scripts/runtime-drift-check.sh
+!/scripts/snapshot-cloud-prune.py
 # 테스트 지도 생성기 — docs/TEST_CASES.md 가 본문에서 이 스크립트를 실행하라고 안내한다.
 #   ★문서가 가리키는 도구가 리포에 없으면 그 안내는 거짓말이 된다★ (이 문서가 고치려던 바로 그 문제).
 # ★공개 사용자가 부팅 후 안 뜰 때 쓰는 도구★ — README 가 이 파일을 가리킨다.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # restore-team.sh — snapshot-team.sh 로 뜬 스냅샷을 새 머신에 풀어 "우리 팀" 복원.
 #   전제: 이 repo(공개 코드)는 이미 clone/build 돼 있다. 스냅샷은 코드엔 없는 ★팀 고유 상태★만 복원한다.
-#   ①트리 gitignored(.env·agents.json·team.db·var·slack-tokens·rules상태) ②멤버 워크스페이스 ③~/.claude/channels ④~/.hermes/profiles auth ⑤launchd plist.
+#   ①트리 gitignored(.env·agents.json·team.db·var·slack-tokens·rules상태) ②멤버 워크스페이스 ③~/.claude/channels ④~/.hermes/profiles auth ⑤클로드 장기기억·openclaw/codex 설정·기억(덮어 넣기) ⑥launchd plist.
 #   ★안전★: 기존 파일은 덮기 전 .pre-restore-<STAMP> 로 백업. --dry-run 으로 미리 확인.
 # 사용: bash scripts/restore-team.sh <snapshot.tar.gz> [--dry-run]
 #   env override: B3OS_LIVE_DIR(복원 대상 repo, 기본 이 스크립트 repo)
@@ -27,6 +27,12 @@ say "■ 복원 소스: $(basename "$TARBALL")  → 대상 repo: $LIVE_DIR"
 [ "$DRY" = 1 ] && warn "■ DRY-RUN — 실제로 쓰지 않음. 아래는 복원 예정 항목:"
 
 # 덮기 전 백업 후 복사 (dry-run 이면 계획만 출력)
+merge(){ # $1=src 폴더(스냅샷 내) $2=dst 폴더 — 폴더를 바꾸지 않고 파일을 덮어 넣는다. 덮이는 파일은 .pre-restore-<시각>.
+  [ -d "$1" ] || return 0
+  if [ "$DRY" = 1 ]; then echo "    복원(파일 덮어 넣기): $2"; return 0; fi
+  mkdir -p "$2"
+  rsync -a --checksum --backup --suffix=".pre-restore-$STAMP" "${1%/}/" "$2/"
+}
 place(){ # $1=src(스냅샷 내) $2=dst(실제)
   [ -e "$1" ] || return 0
   if [ "$DRY" = 1 ]; then echo "    복원: $2 $([ -e "$2" ] && echo '(기존→.pre-restore-'"$STAMP"' 백업)')"; return 0; fi
@@ -41,16 +47,27 @@ if [ -d "$SNAP/tree" ]; then
   for r in STATE.md SHARED.md TEAM-OS.md; do place "$SNAP/tree/rules/$r" "$LIVE_DIR/rules/$r"; done
   say "  ✓ 트리 gitignored"
 fi
-# ② 멤버 워크스페이스
+# ② 멤버 워크스페이스 — 스냅샷에는 규칙·설정·기억 파일만 있다(코드·작업물은 GitHub).
+#   ★폴더를 통째로 바꾸지 않고 파일을 덮어 넣는다★ — 통째로 바꾸면 이미 받아 둔 코드가 옆으로 밀려난다.
+#   덮어쓰는 파일은 .pre-restore-<시각> 으로 남긴다.
 if [ -d "$SNAP/home/Development" ]; then
-  for d in "$SNAP/home/Development/"*/; do [ -d "$d" ] && place "$d" "$HOME/Development/$(basename "$d")"; done
-  say "  ✓ 멤버 워크스페이스"
+  for d in "$SNAP/home/Development/"*/; do
+    [ -d "$d" ] || continue
+    dst="$HOME/Development/$(basename "$d")"
+    if [ "$DRY" = 1 ]; then echo "    복원(파일 덮어 넣기): $dst"; continue; fi
+    merge "$d" "$dst"
+  done
+  say "  ✓ 멤버 워크스페이스(규칙·설정·기억 파일)"
 fi
 # ③ 페어링 ④ hermes auth
 place "$SNAP/home/.claude/channels" "$HOME/.claude/channels"
 place "$SNAP/home/.hermes/profiles" "$HOME/.hermes/profiles"
-say "  ✓ .claude/channels + .hermes/profiles"
-# ⑤ launchd plist (라벨의 user 부분은 새 머신 user 로 치환 필요 — 경고만)
+# ⑤ 클로드 장기기억 · openclaw/codex 설정·기억 — 스냅샷에는 일부 파일만 있어(대화·로그 제외) 덮어 넣는다.
+merge "$SNAP/home/.claude/projects" "$HOME/.claude/projects"
+merge "$SNAP/home/.openclaw" "$HOME/.openclaw"
+merge "$SNAP/home/.codex" "$HOME/.codex"
+say "  ✓ .claude/channels + .hermes/profiles + 장기기억·openclaw/codex 설정"
+# ⑥ launchd plist (라벨의 user 부분은 새 머신 user 로 치환 필요 — 경고만)
 if [ -d "$SNAP/launchd" ] && [ "$DRY" = 0 ]; then
   mkdir -p "$HOME/Library/LaunchAgents"
   for pl in "$SNAP/launchd/"*.plist; do [ -e "$pl" ] && cp "$pl" "$HOME/Library/LaunchAgents/"; done
