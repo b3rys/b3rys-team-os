@@ -112,3 +112,61 @@ describe("슬랙 첨부 파일 수신", () => {
     expect(sanitizeFileName("")).toBe("file");
   });
 });
+
+describe("슬랙 첨부 파일 수신 — 적대적 경우", () => {
+  const streamOf = (chunks: number, chunkSize: number, headers: Record<string, string> = {}) => {
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (pulled >= chunks) return c.close();
+        pulled++;
+        c.enqueue(new Uint8Array(chunkSize));
+      },
+    });
+    return { res: new Response(body, { status: 200, headers: { "content-type": "video/mp4", ...headers } }), pulled: () => pulled };
+  };
+
+  test("크기 신고 없이 상한을 넘는 스트림은 상한 근처에서 멈추고 파일을 남기지 않는다", async () => {
+    const root = mkdtempSync(join(tmpdir(), "slackfiles-"));
+    const s = streamOf(100, 1024);
+    const fetchFn = (async () => s.res) as unknown as typeof fetch;
+    const r = await downloadSlackFiles([{ name: "big.mp4", url_private_download: URL_OK }], ["t"], "k", { fetchFn, root, maxBytes: 4096 });
+    expect(r[0]!.ok).toBe(false);
+    expect(s.pulled()).toBeLessThan(10);
+    expect(readdirSync(join(root, "k"))).toHaveLength(0);
+  });
+
+  test("Content-Length 가 상한을 넘으면 본문을 읽지 않는다", async () => {
+    const root = mkdtempSync(join(tmpdir(), "slackfiles-"));
+    const s = streamOf(100, 1024, { "content-length": String(100 * 1024) });
+    const fetchFn = (async () => s.res) as unknown as typeof fetch;
+    const r = await downloadSlackFiles([{ name: "big.mp4", url_private_download: URL_OK }], ["t"], "k", { fetchFn, root, maxBytes: 4096 });
+    expect(r[0]!.ok).toBe(false);
+    expect(s.pulled()).toBeLessThanOrEqual(1);
+  });
+
+  test("저장 자리에 미리 놓인 링크를 따라가 밖의 파일을 덮어쓰지 않는다", async () => {
+    const { symlinkSync, writeFileSync: wf, mkdirSync: md } = await import("node:fs");
+    const root = mkdtempSync(join(tmpdir(), "slackfiles-"));
+    const outside = join(mkdtempSync(join(tmpdir(), "outside-")), "victim.txt");
+    wf(outside, "ORIGINAL");
+    md(join(root, "k"), { recursive: true });
+    symlinkSync(outside, join(root, "k", "1-clip.mov"));
+    const fetchFn = (async () => new Response("OVERWRITTEN", { status: 200, headers: { "content-type": "video/quicktime" } })) as unknown as typeof fetch;
+    const r = await downloadSlackFiles([{ name: "clip.mov", url_private_download: URL_OK }], ["t"], "k", { fetchFn, root });
+    expect(r[0]!.ok).toBe(false);
+    expect(readFileSync(outside, "utf-8")).toBe("ORIGINAL");
+  });
+
+  test("HTML 첨부라도 신고 크기와 다른 HTML 응답(로그인 페이지)은 성공으로 보지 않는다", async () => {
+    const root = mkdtempSync(join(tmpdir(), "slackfiles-"));
+    const fetchFn = (async () => new Response("<html>login</html>", { status: 200, headers: { "content-type": "text/html" } })) as unknown as typeof fetch;
+    const login = await downloadSlackFiles([{ name: "page.html", mimetype: "text/html", size: 5000, url_private_download: URL_OK }], ["t"], "k1", { fetchFn, root });
+    expect(login[0]!.ok).toBe(false);
+    expect(readdirSync(join(root, "k1"))).toHaveLength(0);
+    const nosize = await downloadSlackFiles([{ name: "page.html", mimetype: "text/html", url_private_download: URL_OK }], ["t"], "k2", { fetchFn, root });
+    expect(nosize[0]!.ok).toBe(false);
+    const real = await downloadSlackFiles([{ name: "page.html", mimetype: "text/html", size: 18, url_private_download: URL_OK }], ["t"], "k3", { fetchFn, root });
+    expect(real[0]!.ok).toBe(true);
+  });
+});

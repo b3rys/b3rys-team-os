@@ -66,3 +66,26 @@ test("첨부가 없으면 글 그대로이고 내려받지 않는다", async () 
   expect(await bodyWithSlackFiles({ db, textBody: "안녕", files: [], channel: "C1", messageTs: TS, targetIds: ["steve"], allIds: [], fetchFn })).toBe("안녕");
   expect(calls).toBe(0);
 });
+
+test("같은 메시지가 동시에 두 번 와도 한 번만 내려받는다", async () => {
+  const db = setup();
+  let calls = 0;
+  const fetchFn = (async () => { calls++; await new Promise((r) => setTimeout(r, 20)); return okVideo(); }) as unknown as typeof fetch;
+  const args = { db, textBody: "", files: [FILE], channel: "C9", messageTs: "1761555999.000001", targetIds: ["steve"], allIds: ["steve"], fetchFn };
+  const [a, b] = await Promise.all([bodyWithSlackFiles(args), bodyWithSlackFiles(args)]);
+  expect(calls).toBe(1);
+  expect(a).toBe(b);
+});
+
+test("답글만 받은 상태에서 원글(답글의 thread_ts)은 받은 것으로 보지 않는다", async () => {
+  const { receivedSlackMessage } = await import("./slackFiles");
+  const db = setup();
+  const { thread_id } = ensureThread(db, { from_agent_id: "user", to_agent_id: "steve", type: "dm", body: "r" });
+  acceptInbound(db, {
+    thread_id, from_agent_id: "user", to_agent_id: "steve", body: "r", type: "dm", source: "user", hop_count: 0, priority: "normal",
+    meta: { slack: { channel: "C1", thread_ts: "100.1", message_ts: "100.2" } },
+  }, { dedupeWindowSec: 60, broadcast: () => {} });
+  expect(receivedSlackMessage(db, "steve", "C1", "100.2")).toBe(true);
+  expect(receivedSlackMessage(db, "steve", "C1", "100.1")).toBe(false);
+  expect(receivedSlackMessage(db, "steve", "C2", "100.2")).toBe(false);
+});

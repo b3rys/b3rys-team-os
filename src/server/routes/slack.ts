@@ -208,7 +208,7 @@ async function processMentionForAgent(opts: {
 }): Promise<void> {
   const { deps, ev, slackChannel, cleanBody, thread_id, targetAgent } = opts;
 
-  if (ev.ts && receivedSlackMessage(deps.db, targetAgent.id, ev.ts)) return;
+  if (ev.ts && receivedSlackMessage(deps.db, targetAgent.id, slackChannel, ev.ts)) return;
 
   // dedupe(60s) + insertMessage + broadcast → 공통 acceptInbound (P2 ChannelAdapter).
   // thread_id는 상단(handleAppMention)에서 ensure됨 → acceptInbound 내부 재호출은 idempotent reuse.
