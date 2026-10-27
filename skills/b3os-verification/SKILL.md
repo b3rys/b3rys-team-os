@@ -126,7 +126,7 @@ Tests are often wrong. On FAIL, first decide: **check, environment, or product?*
 
 ## 6. Shared-resource rules (one app window)
 
-- **Hold a shared machine 10 minutes at most.** A shared machine, simulator, or app window is held for at most 10 minutes per turn. Work that needs longer is split, or the PM is told first; the PM sets the order and members follow it.
+- **Keep shared-machine turns short.** Hold a shared machine, simulator, or app window only for the step you are running, then release it. Work that holds it long is split, or the PM is told first; the PM sets the order and members follow it.
 - **The PM checks the method, not only progress.** Lock hold time, test scope, and order are the PM's to check. When a run is inefficient (a full suite during iteration, a repeated matrix, a lock held past its turn), the PM stops it and changes the plan.
 - **One app at a time.** Before an app check, the running-instance count must be 0. If another instance appears mid-run, stop and report its pid.
 - **No auto-start loops.** A "relaunch when it quits" wait loop cuts into someone else's turn. Checks run once and end; a rerun is decided by the triage rule, once.
