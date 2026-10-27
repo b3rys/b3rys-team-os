@@ -28,7 +28,7 @@
 ## 정본 경로
 
 - TEAM-OS 정본: `~/Development/b3rys-team-os/rules/TEAM-OS.md`
-- 현재 상태: `~/Development/b3rys-team-os/rules/STATE.md`
+- 현재 상태: `~/Development/b3rys-team-os/rules/STATE.local.md`
 - 팀 학습 로그: `~/Development/b3rys-team-os/rules/SHARED.md`
 - task/BWF/handoff/harness 상세: `~/Development/b3rys-team-os/rules/TEAM-OS.task-mgmt.md`
 - learning/proposal/compacting 상세: `~/Development/b3rys-team-os/rules/TEAM-OS.learning.md`

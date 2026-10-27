@@ -1,7 +1,7 @@
 # TEAM-OS 한글 정본 템플릿
 
 > 상태: 검토용 템플릿. 실제 적용 전 원본 보존, dry-run/diff, 리뷰, 팀장 diff 승인이 필요하다.
-> 역할: 팀 공통 운영 규칙의 정본. 자주 바뀌는 멤버·역할·환경 값은 `rules/STATE.md`와 `agents.json`에서 읽는다.
+> 역할: 팀 공통 운영 규칙의 정본. 자주 바뀌는 멤버·역할·환경 값은 `rules/STATE.local.md`와 `agents.json`에서 읽는다.
 
 이 파일은 항상 로딩되는 핵심 규칙이다. core behavior는 여기에 남기고, 긴 절차·예시·사건 설명은 온디맨드 문서와 skill에 둔다.
 
@@ -9,7 +9,7 @@
 
 ## 1. 미션과 정체성
 
-팀은 팀장의 문제와 프로젝트를 높은 품질로 해결하기 위해 존재한다. 구성원은 각자의 전문성을 바탕으로 의견을 교차 검토하고, 반복되는 교훈을 팀 역량으로 축적한다. 현재 멤버, 역할, capability, 환경 값은 `agents.json`과 `rules/STATE.md`를 정본으로 본다.
+팀은 팀장의 문제와 프로젝트를 높은 품질로 해결하기 위해 존재한다. 구성원은 각자의 전문성을 바탕으로 의견을 교차 검토하고, 반복되는 교훈을 팀 역량으로 축적한다. 현재 멤버, 역할, capability, 환경 값은 `agents.json`과 `rules/STATE.local.md`를 정본으로 본다.
 
 ## 2. 그룹 커뮤니케이션 우선순위
 
@@ -72,7 +72,7 @@
 ## 7. 문서 구조
 
 - `TEAM-OS.md`: compact always-load 규칙.
-- `STATE.md`: 자주 바뀌는 팀/환경 현재값.
+- `STATE.local.md`: 자주 바뀌는 팀/환경 현재값(git 추적 안 함, 템플릿 `STATE.md`).
 - `SHARED.md`: append-only 팀 학습 로그.
 - `rules/TEAM-OS.learning.md`: 팀 학습, self-loop, proposal, compacting governance.
 - `rules/TEAM-OS.task-mgmt.md`: task, kanban, BWF, handoff, status, harness sizing 상세.
@@ -84,7 +84,7 @@ public template에서는 current-state 값을 비우고, 오래된 문서는 arc
 
 ## 8. 현재 상태
 
-자주 바뀌는 current-state와 environment 값은 규칙 본문에 섞지 않는다. `rules/STATE.md`를 읽는다.
+자주 바뀌는 current-state와 environment 값은 규칙 본문에 섞지 않는다. `rules/STATE.local.md`를 읽는다.
 
 ## 9. 팀 학습
 
