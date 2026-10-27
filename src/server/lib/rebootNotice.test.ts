@@ -184,7 +184,7 @@ describe("groupPoster", () => {
   test("records a system broadcast and posts to the configured group with the coordinator bot", async () => {
     process.env.CAPTURE_GROUP_ID = "-1001";
     expect(await groupPoster(db, () => agents)("본문", "reboot-202610270300")).toBe(true);
-    expect(sent).toEqual([{ agent: agents[0], target: "-1001", text: "본문" }]);
+    expect(sent).toEqual([{ agent: agents[0], target: "-1001", text: "[b3os 시스템 알림]\n본문" }]);
     const row = db.prepare("SELECT from_agent_id, to_agent_id, type, source, thread_id FROM message").get() as Record<string, string>;
     expect(row).toEqual({ from_agent_id: "system", to_agent_id: "broadcast", type: "broadcast", source: "system", thread_id: "reboot-202610270300" });
   });

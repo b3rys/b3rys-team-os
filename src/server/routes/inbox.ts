@@ -31,6 +31,7 @@ import { MAX_HOPS_DEFAULT, RESERVED_AGENT_IDS } from "../../shared/envelopeSchem
 import { loadAgentCreds } from "../lib/slack";
 import { getCaptureGroupId } from "../lib/captureConfig";
 import { getChannel } from "../channels/registry";
+import { postToGroup } from "../lib/groupNotice";
 import type { WsEvent, AgentRecord } from "../types";
 import { appendDeadReceiverNote, buildDeadReceiverNote, isTelegramChannel, isTelegramReceiverDown, pickReplyRecipient } from "../lib/deadReceiverNote";
 
@@ -508,6 +509,21 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
           return c.json({ ok: true, message: stored, posted: true }, 201);
         }
       }
+    }
+
+    // 서버가 직접 보내는 시스템 알림(from=system, to=broadcast, meta.op_notice=true)만 그룹방에 중계한다.
+    // 위의 중계는 source=agent 만 처리하므로 system 발신은 기록만 되고 방에는 안 갔다. 다른 system 발신은 지금처럼 기록만 한다.
+    if (
+      env.source === "system" &&
+      env.from_agent_id === "system" &&
+      stored.to_agent_id === "broadcast" &&
+      (env.meta as { op_notice?: unknown } | undefined)?.op_notice === true
+    ) {
+      const r = await postToGroup(deps.agents?.() ?? [], stored.body);
+      appendAuditFile("system", r.ok ? "telegram_relay_sent" : "telegram_relay_failed", stored.id, { kind: "telegram_group", op_notice: true, error: r.ok ? null : (r.error ?? "unknown") });
+      return r.ok
+        ? c.json({ ok: true, message: stored, posted: true }, 201)
+        : c.json({ ok: false, message: stored, posted: false, error: r.error ?? "telegram_send_failed", next: "기록만 됨 — 그룹방에는 게시되지 않았습니다." }, 502);
     }
 
     return c.json({ ok: true, message: stored }, 201);

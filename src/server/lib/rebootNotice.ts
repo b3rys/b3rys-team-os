@@ -13,9 +13,7 @@ import { Database } from "bun:sqlite";
 import { closeSync, openSync, readSync } from "node:fs";
 import type { AgentRecord } from "../types";
 import { ensureThread, insertMessage } from "../db/inbox/messages";
-import { getChannel } from "../channels/registry";
-import { getCaptureGroupId } from "./captureConfig";
-import { pickOpNoticeRecipient } from "./opNotice";
+import { SYSTEM_HEAD, postToGroup } from "./groupNotice";
 
 export const KEY_LAST_BOOT = "last_boot_time";
 export const TOLERANCE_SEC = 30; // kern.boottime 은 읽을 때마다 1~2초 흔들릴 수 있다
@@ -71,8 +69,6 @@ export function extraStatusLine(path: string | undefined = process.env[EXTRA_STA
     return null;
   }
 }
-
-export const SYSTEM_HEAD = "[b3os 시스템 알림]";
 
 export function buildBody(prev: number | null, cur: number, extraLine: string | null): string {
   const lines = [
@@ -139,11 +135,8 @@ export function groupPoster(db: Database, agents: () => AgentRecord[]): (body: s
     } catch (e) {
       console.error("[reboot-notice] record failed:", (e as Error).message);
     }
-    const group = getCaptureGroupId();
-    const list = agents();
-    const sender = list.find((a) => a.id === pickOpNoticeRecipient(list, ""));
-    if (!group || !sender) return false;
-    const r = await getChannel("telegram").send({ agent: sender, target: group, text: body });
+    const r = await postToGroup(agents(), body);
+    if (!r.ok) console.error(`[reboot-notice] not posted: ${r.error}`);
     return r.ok;
   };
 }
