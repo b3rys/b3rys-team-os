@@ -94,14 +94,12 @@ export async function downloadSlackFiles(
         });
         if (r.status !== 200) { last = `HTTP ${r.status}`; await r.body?.cancel(); continue; }
         const ct = r.headers.get("content-type") ?? "";
-        // files:read 가 없으면 슬랙은 200 + 로그인 HTML 을 준다. 첨부가 HTML 이어도 신고 크기와 같을 때만 파일로 본다.
-        const htmlReply = ct.startsWith("text/html");
-        if (htmlReply && !((f.mimetype ?? "").startsWith("text/html") && typeof f.size === "number")) { last = "권한 없음(files:read)"; await r.body?.cancel(); continue; }
+        // files:read 가 없으면 슬랙은 200 + 로그인 HTML 을 준다. 실제 HTML 첨부와 구별할 근거가 없어 text/html 응답은 모두 거부한다.
+        if (ct.startsWith("text/html")) { last = "권한 없음(files:read) 또는 HTML 응답"; await r.body?.cancel(); continue; }
         const declared = Number(r.headers.get("content-length") ?? "");
         if (Number.isFinite(declared) && declared > max) { last = tooBig; await r.body?.cancel(); break; }
         const written = await streamToNewFile(r, join(dir, `${i + 1}-${name}`), max);
         if (!written.ok) { last = written.reason; if (written.reason === "tooBig") { last = tooBig; break; } continue; }
-        if (htmlReply && written.size !== f.size) { unlinkSync(written.path); last = "권한 없음(files:read)"; continue; }
         results.push({ ok: true, name, path: written.path, size: written.size, mimetype: f.mimetype ?? ct });
         done = true;
         break;

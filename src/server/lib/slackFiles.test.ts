@@ -54,7 +54,7 @@ describe("슬랙 첨부 파일 수신", () => {
     const root = mkdtempSync(join(tmpdir(), "slackfiles-"));
     const { fn } = fakeFetch(() => new Response("<html/>", { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }));
     const r = await downloadSlackFiles([{ name: "a.mp4", mimetype: "video/mp4", url_private_download: URL_OK }], ["t1"], "k", { fetchFn: fn, root });
-    expect(r[0]).toEqual({ ok: false, name: "a.mp4", reason: "권한 없음(files:read)" });
+    expect(r[0]).toEqual({ ok: false, name: "a.mp4", reason: "권한 없음(files:read) 또는 HTML 응답" });
     expect(readdirSync(join(root, "k"))).toHaveLength(0);
     expect(formatSlackFiles(r)).toContain("받지 못함: 권한 없음(files:read)");
   });
@@ -158,15 +158,12 @@ describe("슬랙 첨부 파일 수신 — 적대적 경우", () => {
     expect(readFileSync(outside, "utf-8")).toBe("ORIGINAL");
   });
 
-  test("HTML 첨부라도 신고 크기와 다른 HTML 응답(로그인 페이지)은 성공으로 보지 않는다", async () => {
+  test("text/html 응답은 첨부가 HTML 이고 크기가 같아도 성공으로 보지 않는다(로그인 페이지와 구별 불가)", async () => {
     const root = mkdtempSync(join(tmpdir(), "slackfiles-"));
-    const fetchFn = (async () => new Response("<html>login</html>", { status: 200, headers: { "content-type": "text/html" } })) as unknown as typeof fetch;
-    const login = await downloadSlackFiles([{ name: "page.html", mimetype: "text/html", size: 5000, url_private_download: URL_OK }], ["t"], "k1", { fetchFn, root });
-    expect(login[0]!.ok).toBe(false);
-    expect(readdirSync(join(root, "k1"))).toHaveLength(0);
-    const nosize = await downloadSlackFiles([{ name: "page.html", mimetype: "text/html", url_private_download: URL_OK }], ["t"], "k2", { fetchFn, root });
-    expect(nosize[0]!.ok).toBe(false);
-    const real = await downloadSlackFiles([{ name: "page.html", mimetype: "text/html", size: 18, url_private_download: URL_OK }], ["t"], "k3", { fetchFn, root });
-    expect(real[0]!.ok).toBe(true);
+    const login = "<html><body>Sign in to Slack</body></html>";
+    const fetchFn = (async () => new Response(login, { status: 200, headers: { "content-type": "text/html" } })) as unknown as typeof fetch;
+    const r = await downloadSlackFiles([{ name: "page.html", mimetype: "text/html", size: login.length, url_private_download: URL_OK }], ["t"], "k", { fetchFn, root });
+    expect(r[0]!.ok).toBe(false);
+    expect(readdirSync(join(root, "k"))).toHaveLength(0);
   });
 });
