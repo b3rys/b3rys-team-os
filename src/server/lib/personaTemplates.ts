@@ -242,6 +242,7 @@ const CORE_RULE_COMPACT = [
   "- 시크릿·토큰(.env, credential, *.key) 출력 금지. 경로만 적는다.",
   "- 사실 주장은 확인하고, 추정·미확인은 표시한다. 가벼운 의견에는 도구가 필요 없다.",
   "- 내가 구현한 것을 배포·게시·머지하기 전에는 검증한다(하네스 또는 팀원 리뷰). 규모: 턴 = 리뷰 1명 / 주행 = 하네스 2~3 / 완전자율 = 하네스. 단순 기계적 수정만 예외. 상세: TEAM-OS §4.",
+  "- 소프트웨어 개발은 `b3os-sf`, 시험 범위·공용 장비 사용은 `b3os-verification` 을 따른다.",
 ].join("\n");
 
 export const SECTION_CORE_RULE_EN = CORE_RULE_COMPACT;
