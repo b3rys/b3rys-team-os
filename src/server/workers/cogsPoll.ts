@@ -27,6 +27,15 @@ export function acceptsChat(config: { allow_senders: string[] }, chatType: unkno
   return false;
 }
 
+/** cogs `cogs_gap` update 값(`from_update_id`·`to_update_id`·`reason`)만 받아들인다. 모양이 다르면 null. */
+export function cogsGap(value: unknown): { from: number; to: number; reason: string } | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  const from = v.from_update_id, to = v.to_update_id;
+  if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || (from as number) > (to as number)) return null;
+  return { from: from as number, to: to as number, reason: typeof v.reason === "string" ? v.reason.slice(0, 40) : "unknown" };
+}
+
 /** One server owns polling. Offsets survive restart without storing bot tokens. */
 export function createCogsPoller(deps: Deps) {
   const abort = new AbortController();
@@ -54,6 +63,14 @@ export function createCogsPoller(deps: Deps) {
           for (const update of updates) {
             if (abort.signal.aborted) return;
             if (!Number.isSafeInteger(update.update_id) || update.update_id < offset) continue;
+            // cogs 는 봇 큐가 넘치면 오래된 update 를 지우고 그 범위를 cogs_gap 한 건으로 알린다. 다시 받을 수 없으니
+            //   유실 범위를 남겨 사람이 알 수 있게 하고, offset 은 그대로 넘긴다(같은 gap 을 다시 받지 않는다).
+            const gap = cogsGap(update.cogs_gap);
+            if (gap) {
+              const lost = gap.to - gap.from + 1;
+              appendAudit(deps.db, "system", "cogs_updates_lost", null, { agent_id: agent.id, from_update_id: gap.from, to_update_id: gap.to, lost, reason: gap.reason });
+              console.warn(`[cogsPoll] ${agent.id}: cogs 큐가 넘쳐 update ${gap.from}~${gap.to}(${lost}건)를 받지 못했습니다 (${gap.reason})`);
+            }
             const m = update.message;
             if (m && config.allow_from.includes(String(m.chat?.id)) && acceptsChat(config, m.chat?.type, m.from?.id) &&
                 !m.from?.is_bot && m.from?.id != null && typeof m.text === "string" && m.text.trim() && Number.isSafeInteger(m.message_id)) {
