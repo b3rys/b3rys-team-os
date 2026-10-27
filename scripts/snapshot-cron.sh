@@ -85,9 +85,10 @@ if mkdir -p "$CLOUD" 2>/dev/null && cp "$NEW" "$CLOUD/$(basename "$NEW")" 2>>"$L
   log "기기밖=ok ($(basename "$NEW"))"
   # iCloud 도 최근 N개만 둔다(기본 3). iCloud 파일은 맥미니 디스크에도 사본이 남아 쌓이면 둘 다 찬다.
   #   폴더 목록 조회가 응답이 없을 수 있어(위 주석) 60초 안에 끝나지 않으면 이번 정리는 건너뛴다.
+  #   조회·삭제·제한 시간이 한 프로세스 안에 있어, 시간이 지나 멈춘 뒤에 뒤늦게 지우는 일이 없다.
   CKEEP="${B3OS_SNAPSHOT_CLOUD_KEEP:-3}"
   case "$CKEEP" in ''|*[!0-9]*|0) CKEEP=3 ;; esac
-  if perl -e 'alarm 60; exec @ARGV' "$BASH" "$HERE/snapshot-cloud-prune.sh" "$CLOUD" "$CKEEP" >>"$LOG" 2>&1; then
+  if python3 "$HERE/snapshot-cloud-prune.py" "$CLOUD" "$CKEEP" 60 >>"$LOG" 2>&1; then
     log "기기밖 정리=ok (최근 ${CKEEP}개 유지)"
   else
     log "기기밖 정리=건너뜀 (60초 안에 끝나지 않았거나 실패)"

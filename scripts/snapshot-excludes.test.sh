@@ -92,6 +92,21 @@ run_rsync "$T/out-mutant" "${MUT[@]}"
 has out-mutant src/a.ts && ok "뮤턴트: 마지막 제외를 빼면 코드가 담긴다(검사 유효)" \
                         || bad "뮤턴트: 마지막 제외를 뺐는데도 코드가 빠졌다 — 검사가 무력하다"
 
+# ④ 기기밖(iCloud) 정리 — 폴더 바로 아래의 일반 파일 중 정확한 이름만, 최신 N개를 남기고 지운다.
+P="$T/cloud"; mkdir -p "$P/b3os-snapshot-00000000-000000.tar.gz" "$P/sub"
+echo x > "$P/b3os-snapshot-00000000-000000.tar.gz/unrelated.txt"; echo v > "$T/victim.txt"
+for n in 20261020 20261021 20261022 20261023; do echo s > "$P/b3os-snapshot-$n-035000.tar.gz"; done
+ln -s "$T/victim.txt" "$P/b3os-snapshot-20200101-000000.tar.gz"
+echo s > "$P/sub/b3os-snapshot-20190101-000000.tar.gz"; echo s > "$P/b3os-snapshot-20261024-035000.tar.gz.part"
+python3 scripts/snapshot-cloud-prune.py "$P" 3 >/dev/null
+[ -e "$P/b3os-snapshot-20261020-035000.tar.gz" ] && bad "기기밖: 오래된 스냅샷이 남았다" || ok "기기밖: 최신 3개 밖의 스냅샷 지운다"
+[ -e "$P/b3os-snapshot-20261021-035000.tar.gz" ] && ok "기기밖: 최신 3개 남는다" || bad "기기밖: 남길 스냅샷을 지웠다"
+[ -e "$P/b3os-snapshot-00000000-000000.tar.gz/unrelated.txt" ] && ok "기기밖: 같은 이름 폴더는 건드리지 않는다" || bad "기기밖: 같은 이름 폴더 안을 지웠다"
+[ -e "$T/victim.txt" ] && [ -L "$P/b3os-snapshot-20200101-000000.tar.gz" ] && ok "기기밖: 링크는 건드리지 않는다" || bad "기기밖: 링크(또는 대상)를 지웠다"
+[ -e "$P/sub/b3os-snapshot-20190101-000000.tar.gz" ] && [ -e "$P/b3os-snapshot-20261024-035000.tar.gz.part" ] \
+  && ok "기기밖: 하위 폴더·다른 이름은 건드리지 않는다" || bad "기기밖: 하위 폴더나 다른 이름을 지웠다"
+python3 scripts/snapshot-cloud-prune.py "$P" 0 2>/dev/null && bad "기기밖: 남길 개수 0 을 받았다" || ok "기기밖: 남길 개수 0 은 거부한다"
+
 echo
 if [ "$FAIL" -eq 0 ]; then echo "✅ 통과"; else echo "❌ 실패 ${FAIL}건"; fi
 exit "$FAIL"

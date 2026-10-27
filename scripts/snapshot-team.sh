@@ -36,10 +36,12 @@ EX_TREE=("${EX_COMMON[@]}" --exclude='models' --exclude='team-search-eval' --exc
 
 # 멤버 워크스페이스 — ★규칙·설정·기억만 담는다★ (팀장 10-27 "작업은 이미 깃헙에 있는데").
 #   코드·작업물·.git·시험 결과는 담지 않는다. 담는 것: 워크스페이스 맨 위의 *.md(CLAUDE.md·SOUL.md·AGENTS.md·
-#   MEMORY.md·TODO.md 등) · .claude/(설정, worktrees 제외) · memory/(일별 기억). 팀원을 다시 세울 때 코드로 못 만드는 것들이다.
+#   MEMORY.md·TODO.md 등) · .claude/(설정, worktrees 제외) · memory/(일별 기억) · .openclaw/·.hermes/(런타임 워크스페이스 상태, 수 KB).
+#   팀원을 다시 세울 때 코드로 못 만드는 것들이다.
 #   패턴은 rsync 전송 루트(/워크스페이스이름/) 기준이다. 마지막 --exclude='*' 가 나머지를 모두 뺀다.
 EX_MEMBER=("${EX_BASE[@]}" --exclude='/*/.claude/worktrees/'
-    --include='/*/' --include='/*/*.md' --include='/*/.claude/***' --include='/*/memory/***' --exclude='*')
+    --include='/*/' --include='/*/*.md' --include='/*/.claude/***' --include='/*/memory/***'
+    --include='/*/.openclaw/***' --include='/*/.hermes/***' --exclude='*')
 
 # hermes 프로필 — 대화state·홈·캐시·bin·모델·세션·미디어·스킬(repo서 옴)은 재생성 가능
 EX_HERMES=("${EX_COMMON[@]}" --exclude='state.db' --exclude='state.db-*' --exclude='state-snapshots'
@@ -108,7 +110,19 @@ if [ -d "$HOME/.codex" ]; then
     [ -f "$f" ] && cp "$f" "$STAGE/home/.codex/"
   done
 fi
-say "  ✓ openclaw·codex 인증 설정"
+# openclaw 팀원별 런타임 설정 — 에이전트마다 models.json · codex-home 의 config.toml·memories/·skills/ 만 담는다.
+#   같은 폴더의 sessions·logs·sqlite 는 대화·로그라 수 GB 이고 다시 생긴다.
+for a in "$HOME"/.openclaw/agents/*/agent; do
+  [ -d "$a" ] || continue
+  t="$STAGE/home/.openclaw/agents/$(basename "$(dirname "$a")")/agent"
+  rsync -a --include='/models.json' --include='/codex-home/' --include='/codex-home/config.toml' \
+    --include='/codex-home/memories/***' --include='/codex-home/skills/***' --exclude='*' "$a/" "$t/" 2>/dev/null || true
+done
+# ~/.codex 의 memories/·skills/ (설정·인증 파일은 위에서 담았다)
+for d in memories skills; do
+  [ -d "$HOME/.codex/$d" ] && { mkdir -p "$STAGE/home/.codex"; rsync -a "${EX_COMMON[@]}" "$HOME/.codex/$d" "$STAGE/home/.codex/" 2>/dev/null || true; }
+done
+say "  ✓ openclaw·codex 인증·설정·기억"
 # ⑤ launchd
 cp "$HOME/Library/LaunchAgents/com.$(id -un)."*.plist "$STAGE/launchd/" 2>/dev/null||true
 say "  ✓ launchd ($(ls "$STAGE/launchd/" 2>/dev/null|wc -l|tr -d ' ')개)"
