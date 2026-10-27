@@ -23,7 +23,7 @@ mkdir -p "$DEST" "$STAGE"/{tree,home/Development,home/.claude,home/.hermes,launc
 #   지우려던 패턴이 ★멤버 워크스페이스의 reports·decks(작업물)까지★ 걸어 백업에서 빼고 있었다.
 #   백업 도구가 조용히 작업물을 버리는 형태라, 구획별로 나눈다.
 
-# 어디서나 안전한 것 — 재생성물·임시물 (.git 제외는 여기 넣지 않는다 — 아래 EX_MEMBER 주석 참조)
+# 어디서나 안전한 것 — 재생성물·임시물 (.git 제외는 구획마다 정한다 — EX_COMMON)
 EX_BASE=(--exclude='node_modules' --exclude='backups' --exclude='migration-backups-*'
     --exclude='*.pre-*' --exclude='*.bak' --exclude='*.bak-*' --exclude='*.log' --exclude='.DS_Store'
     --exclude='dist' --exclude='.cache' --exclude='scratchpad' --exclude='outbox'
@@ -34,13 +34,12 @@ EX_COMMON=("${EX_BASE[@]}" --exclude='.git')
 # 트리(var) 대용량 재생성물 — 모델·검색eval·벡터인덱스
 EX_TREE=("${EX_COMMON[@]}" --exclude='models' --exclude='team-search-eval' --exclude='*.lancedb')
 
-# 멤버 워크스페이스 — ★작업물을 지우지 않는다.★
-#   ★.git 도 담는다★ (GD 2026-08-03). 팀원 워크스페이스는 원격이 없을 수 있어서, .git 을 빼면
-#   "파일은 복구되는데 언제 왜 바꿨는지는 사라지는" 반쪽 스냅샷이 된다. 스냅샷은 그야말로 스냅샷이다.
-#   비용: 실측 4MB (등록 12명 중 git repo 는 bill·lui 둘뿐) — 405MB 묶음의 1%.
-# 시험 결과 묶음(*.xcresult)과 artifacts 안의 시험 영상(*.mov·*.mp4)은 다시 만들 수 있고 크다.
-#   .build·DerivedData 는 아래 EXF 가 생성물인지 판별해서 뺀다(동명 작업물은 담는다). 소스·문서·캡처 이미지는 담는다.
-EX_MEMBER=("${EX_BASE[@]}" --exclude='*.xcresult' --exclude='**/artifacts/**.mov' --exclude='**/artifacts/**.mp4')
+# 멤버 워크스페이스 — ★규칙·설정·기억만 담는다★ (팀장 10-27 "작업은 이미 깃헙에 있는데").
+#   코드·작업물·.git·시험 결과는 담지 않는다. 담는 것: 워크스페이스 맨 위의 *.md(CLAUDE.md·SOUL.md·AGENTS.md·
+#   MEMORY.md·TODO.md 등) · .claude/(설정, worktrees 제외) · memory/(일별 기억). 팀원을 다시 세울 때 코드로 못 만드는 것들이다.
+#   패턴은 rsync 전송 루트(/워크스페이스이름/) 기준이다. 마지막 --exclude='*' 가 나머지를 모두 뺀다.
+EX_MEMBER=("${EX_BASE[@]}" --exclude='/*/.claude/worktrees/'
+    --include='/*/' --include='/*/*.md' --include='/*/.claude/***' --include='/*/memory/***' --exclude='*')
 
 # hermes 프로필 — 대화state·홈·캐시·bin·모델·세션·미디어·스킬(repo서 옴)은 재생성 가능
 EX_HERMES=("${EX_COMMON[@]}" --exclude='state.db' --exclude='state.db-*' --exclude='state-snapshots'
@@ -68,29 +67,7 @@ EXPECTED=0; COPIED=0
 while IFS= read -r ws; do
   [ -n "$ws" ] && EXPECTED=$((EXPECTED+1))
   [ -n "$ws" ] && [ -d "$ws" ] || continue
-  # 빌드 결과물만 뺀다 — 이름이 아니라 '빌드 도구가 만든 폴더'인지 확인한 경로만.
-  #   .build = 옆에 Package.swift 가 있는 SwiftPM 출력 · DerivedData = 안에 Build/ 가 있는 Xcode 출력.
-  #   작업 사본(wt 등)의 소스·미커밋 변경은 그대로 담는다. 경로는 rsync 전송 루트(워크스페이스 이름) 기준으로 고정한다.
-  EXF="$(dirname "$STAGE")/exclude-$(basename "$ws").txt"
-  python3 - "$ws" > "$EXF" <<'PY' || : > "$EXF"
-import os, sys
-ws = sys.argv[1]; base = os.path.basename(ws.rstrip('/'))
-for root, dirs, files in os.walk(ws):
-    for d in list(dirs):
-        p = os.path.join(root, d)
-        if os.path.islink(p): dirs.remove(d); continue
-        gen = (d == '.build' and os.path.isfile(os.path.join(root, 'Package.swift'))) or \
-              (d == 'DerivedData' and os.path.isdir(os.path.join(p, 'Build')))
-        if gen or d in ('node_modules', '.git'):
-            dirs.remove(d)
-            if gen:
-                rel = '/' + base + '/' + os.path.relpath(p, ws) + '/'
-                if '\n' in rel or '\r' in rel: continue  # 줄 단위 필터로 못 적는 경로는 빼지 않는다(담는 쪽이 안전)
-                # rsync 패턴 문자(* ? [ \\)를 이스케이프해 그 경로 하나에만 맞게 한다.
-                # 알려진 예외: 역슬래시만 있고 다른 패턴 문자가 없는 경로는 안 맞아 빌드 캐시가 담긴다(작업물 유실 없음).
-                print(''.join('\\' + c if c in '*?[\\' else c for c in rel))
-PY
-  rsync -a "${EX_MEMBER[@]}" --exclude-from="$EXF" "$ws" "$STAGE/home/Development/" 2>/dev/null || true
+  rsync -a "${EX_MEMBER[@]}" "$ws" "$STAGE/home/Development/" 2>/dev/null || true
   COPIED=$((COPIED+1))
 done <<EOF
 $MEMBERS
@@ -102,7 +79,7 @@ if [ "$COPIED" -lt "$EXPECTED" ]; then
   warn "  ⚠ 멤버 워크스페이스 $COPIED/$EXPECTED — 등록부에 있으나 디스크에 없는 것이 있다"
   warn "     확인: agents.json 의 workspace_path (없으면 ~/Development/<id> 로 본다)"
 fi
-say "  ✓ 멤버 워크스페이스 $COPIED/$EXPECTED (작업물 포함)"
+say "  ✓ 멤버 워크스페이스 $COPIED/$EXPECTED (규칙·설정·기억만)"
 
 # ③ 페어링 ④ hermes auth (대용량 state 제외)
 [ -d "$HOME/.claude/channels" ] && rsync -a "${EX_COMMON[@]}" "$HOME/.claude/channels" "$STAGE/home/.claude/" 2>/dev/null||true
@@ -137,7 +114,7 @@ cp "$HOME/Library/LaunchAgents/com.$(id -un)."*.plist "$STAGE/launchd/" 2>/dev/n
 say "  ✓ launchd ($(ls "$STAGE/launchd/" 2>/dev/null|wc -l|tr -d ' ')개)"
 
 { echo "b3os team snapshot $STAMP"; echo "source: $LIVE_DIR (public $(git -C "$LIVE_DIR" rev-parse --short HEAD 2>/dev/null))";
-  echo "restore: scripts/restore-team.sh <tarball>"; echo "제외: hermes state/캐시·backups·node_modules(재생성 가능)"; } > "$STAGE/MANIFEST.txt"
+  echo "restore: scripts/restore-team.sh <tarball>"; echo "제외: 팀원 코드·작업물·.git(GitHub 에 있음) · hermes state/캐시·backups·node_modules(재생성 가능)"; } > "$STAGE/MANIFEST.txt"
 
 OUT="$DEST/b3os-snapshot-$STAMP.tar.gz"
 say "■ 압축 → $(basename "$OUT")"

@@ -41,10 +41,18 @@ if [ -d "$SNAP/tree" ]; then
   for r in STATE.md SHARED.md TEAM-OS.md; do place "$SNAP/tree/rules/$r" "$LIVE_DIR/rules/$r"; done
   say "  ✓ 트리 gitignored"
 fi
-# ② 멤버 워크스페이스
+# ② 멤버 워크스페이스 — 스냅샷에는 규칙·설정·기억 파일만 있다(코드·작업물은 GitHub).
+#   ★폴더를 통째로 바꾸지 않고 파일을 덮어 넣는다★ — 통째로 바꾸면 이미 받아 둔 코드가 옆으로 밀려난다.
+#   덮어쓰는 파일은 .pre-restore-<시각> 으로 남긴다.
 if [ -d "$SNAP/home/Development" ]; then
-  for d in "$SNAP/home/Development/"*/; do [ -d "$d" ] && place "$d" "$HOME/Development/$(basename "$d")"; done
-  say "  ✓ 멤버 워크스페이스"
+  for d in "$SNAP/home/Development/"*/; do
+    [ -d "$d" ] || continue
+    dst="$HOME/Development/$(basename "$d")"
+    if [ "$DRY" = 1 ]; then echo "    복원(파일 덮어 넣기): $dst"; continue; fi
+    mkdir -p "$dst"
+    rsync -a --checksum --backup --suffix=".pre-restore-$STAMP" "$d" "$dst/"
+  done
+  say "  ✓ 멤버 워크스페이스(규칙·설정·기억 파일)"
 fi
 # ③ 페어링 ④ hermes auth
 place "$SNAP/home/.claude/channels" "$HOME/.claude/channels"
