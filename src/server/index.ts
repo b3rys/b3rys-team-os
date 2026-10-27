@@ -1,3 +1,4 @@
+import { checkReboot, groupPoster } from "./lib/rebootNotice";
 import { createB3chatRoomLinkRoutes } from "./routes/b3chatRoomLinks";
 import { migrateCogsAidm } from "./lib/cogsAidm/store";
 import { startCogsAidmRelay } from "./lib/cogsAidm/relay";
@@ -838,6 +839,11 @@ try {
 console.log(`[team-collab] listening http://${BIND}:${server.port}${BASE_PATH}`);
 console.log(`[team-collab] registry: ${REGISTRY_PATH} (${agents.length} agents)`);
 console.log(`[team-collab] db: ${DB_PATH}`);
+
+// Mac 재부팅 감지: 부팅 시각이 저장값과 다르면 그룹방에 한 번 알린다(서버만 재시작한 경우는 알리지 않음). 실패해도 서버에 영향 없음.
+void checkReboot(db, { post: groupPoster(db, () => agents) }).catch((e) =>
+  console.error("[reboot-notice] failed:", (e as Error).message),
+);
 
 const shutdown = () => {
   console.log("[team-collab] shutting down");
