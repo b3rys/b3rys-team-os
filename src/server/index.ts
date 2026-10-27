@@ -205,6 +205,18 @@ try {
   } catch (e) {
     console.warn("[teamos-render] SHARED.md 생성 실패(계속):", e instanceof Error ? e.message : e);
   }
+  // 팀 현재 값(중요 프로젝트 등)은 추적하지 않는 rules/STATE.local.md 에 둔다. rules/STATE.md 는 공개 템플릿 그대로다
+  //   (이름을 바꾸거나 지우면 git rename 감지가 팀 값을 추적 파일로 옮길 수 있다). ★이미 있으면 건드리지 않는다★.
+  try {
+    const statePath = join(RULES_DIR, "STATE.local.md");
+    const stateTemplate = join(RULES_DIR, "STATE.md");
+    if (!existsSync(statePath) && existsSync(stateTemplate)) {
+      copyFileSync(stateTemplate, statePath);
+      console.log("[teamos-render] rules/STATE.local.md 생성(템플릿 복사) — 팀 현재 값, 추적되지 않습니다");
+    }
+  } catch (e) {
+    console.warn("[teamos-render] STATE.local.md 생성 실패(계속):", e instanceof Error ? e.message : e);
+  }
   // ★이미 깔린 progress 훅 배선 수리 — 게이트 밖★ (공개·라이브 공통).
   //   위 백필은 `PUBLIC_BUILD` 뒤에 있어 라이브에서는 안 돈다. 그래서 ★이미 깔린 배선이 낡아도
   //   아무도 안 고쳤고★, 훅 커맨드가 옛것으로 남아 owner-skip 이 fail-open 으로 돌았다.

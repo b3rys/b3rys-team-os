@@ -44,7 +44,7 @@ place(){ # $1=src(스냅샷 내) $2=dst(실제)
 # ① 트리 gitignored (repo 안으로)
 if [ -d "$SNAP/tree" ]; then
   for p in .env agents.json team.db var slack-tokens; do place "$SNAP/tree/$p" "$LIVE_DIR/$p"; done
-  for r in STATE.md SHARED.md TEAM-OS.md; do place "$SNAP/tree/rules/$r" "$LIVE_DIR/rules/$r"; done
+  for r in STATE.md STATE.local.md SHARED.md TEAM-OS.md; do place "$SNAP/tree/rules/$r" "$LIVE_DIR/rules/$r"; done
   say "  ✓ 트리 gitignored"
 fi
 # ② 멤버 워크스페이스 — 스냅샷에는 규칙·설정·기억 파일만 있다(코드·작업물은 GitHub).

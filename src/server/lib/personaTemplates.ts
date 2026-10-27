@@ -414,7 +414,7 @@ export function ruleLoadingBlock(runtime: string, agentId?: string): string {
     "- 주인 규칙·직접 답장·인계 추적: TEAM-OS §2·§5.",
     "- 규칙 우선순위(런타임 안전 > TEAM-OS > 개인 설정): TEAM-OS §3.",
     "- 실행 순서·안전 게이트·리뷰/검증·배포/게시/머지 정책: TEAM-OS §4.",
-    "- 자주 바뀌는 현재 값(팀원·환경): TEAM-OS §8 → `rules/STATE.md`.",
+    "- 자주 바뀌는 현재 값(팀원·환경): TEAM-OS §8 → `rules/STATE.local.md`.",
     "- proposal·self-learning·컴팩팅 거버넌스: TEAM-OS §9 + `docs/TEAM_LOOP_WORKFLOW.md`.",
     "- 칸반·과제 소유·주행/완전자율·하네스 규모: TEAM-OS §10 + 해당 `b3os-*` 스킬.",
     "- `[작업루프: …]` 로 깨어났을 때 닫는 법: TEAM-OS §11 + `b3os-task-loop`.",
