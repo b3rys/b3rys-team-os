@@ -344,3 +344,27 @@ for (const [label, extra] of [
     });
   }
 }
+// cogs drops the oldest updates when a bot queue overflows and reports the range once as cogs_gap.
+test("overflow gap is recorded once with its range and the next message still arrives", async () => {
+  updates = [{ update_id: 100, cogs_gap: { from_update_id: 1, to_update_id: 100, reason: "overflow" } }, update(101)];
+  const p = poller(); await p.pollOnce(); await p.pollOnce();
+  const rows = db.query("SELECT detail_json AS d FROM audit_event WHERE action='cogs_updates_lost'").all() as { d: string }[];
+  expect(rows).toHaveLength(1);
+  expect(JSON.parse(rows[0]!.d)).toEqual({ agent_id: "lisa", from_update_id: 1, to_update_id: 100, lost: 100, reason: "overflow" });
+  expect(injected).toHaveLength(1); expect(rowCount()).toBe(1);
+});
+test("malformed gap values are ignored without an audit row", async () => {
+  updates = [{ update_id: 5, cogs_gap: { from_update_id: 9, to_update_id: 3 } }, { update_id: 6, cogs_gap: "x" }];
+  await poller().pollOnce();
+  expect(db.query("SELECT count(*) AS n FROM audit_event WHERE action='cogs_updates_lost'").get()).toEqual({ n: 0 });
+});
+test("a remote gap reason is never stored or logged as given", async () => {
+  const warned: string[] = []; const warn = console.warn; console.warn = (...a: unknown[]) => { warned.push(a.join(" ")); };
+  try {
+    updates = [{ update_id: 7, cogs_gap: { from_update_id: 1, to_update_id: 7, reason: `${TOKEN} 비밀 본문` } }];
+    await poller().pollOnce();
+  } finally { console.warn = warn; }
+  const row = db.query("SELECT detail_json AS d FROM audit_event WHERE action='cogs_updates_lost'").get() as { d: string };
+  expect(JSON.parse(row.d).reason).toBe("unknown");
+  expect(row.d.includes(TOKEN)).toBe(false); expect(warned.join("\n").includes(TOKEN)).toBe(false);
+});
