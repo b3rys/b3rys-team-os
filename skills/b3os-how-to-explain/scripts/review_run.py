@@ -22,7 +22,7 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 REFERENCES = SKILL_ROOT / 'references'
 
 # Settings. Override per machine without editing the file.
-MODEL = os.environ.get('B3OS_EXPLAIN_MODEL', 'gpt-6-astra')
+MODEL = os.environ.get('B3OS_EXPLAIN_MODEL', 'gpt-6.1-sol')
 REASONING_EFFORT = os.environ.get('B3OS_EXPLAIN_EFFORT', 'medium')
 
 
