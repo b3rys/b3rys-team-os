@@ -101,8 +101,22 @@ export async function cogsDownloadFile(config: Pick<CogsInbox, "api_base">, toke
   } catch { throw new Error("cogs_file_download_failed"); }
   if (!res.ok || !res.body) throw new Error("cogs_file_download_failed");
   if (Number(res.headers.get("content-length") ?? 0) > maxBytes) throw new Error("cogs_file_too_large");
-  const bytes = new Uint8Array(await res.arrayBuffer().catch(() => { throw new Error("cogs_file_download_failed"); }));
-  if (bytes.byteLength > maxBytes) throw new Error("cogs_file_too_large");
-  await Bun.write(dest, bytes);
-  return bytes.byteLength;
+  // 크기를 알리지 않거나 줄여 알린 응답도 있으니 읽는 중에 세고, 넘으면 그 자리에서 끊는다.
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) { await reader.cancel().catch(() => {}); throw new Error("cogs_file_too_large"); }
+      chunks.push(value);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message === "cogs_file_too_large") throw error;
+    throw new Error("cogs_file_download_failed");
+  }
+  await Bun.write(dest, new Blob(chunks as BlobPart[]));
+  return total;
 }

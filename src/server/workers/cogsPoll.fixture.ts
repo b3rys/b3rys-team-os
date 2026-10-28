@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrate } from "../db/migrate";
@@ -21,7 +22,8 @@ let fail: boolean, injectOk: boolean, stop: (() => void) | undefined;
 let oldEnv: Record<string, string | undefined>;
 const TOKEN = "fixture-cogs-secret-no-production-value";
 const KEYS = ["TEAM_AGENT_REGISTRY", "B3OS_AUDIT_LOG_DIR", "TEAMOS_AGENT_OFF_FILE", "TEAM_COLLAB_ROOT", "COGS_ATTACHMENT_DIR", "COGS_ATTACHMENT_MAX_BYTES"];
-let files: Record<string, Uint8Array>, filePath: (id: string) => string;
+let pulled = 0;
+let files: Record<string, Uint8Array>, filePath: (id: string) => string, streamed: Set<string>, reportedSize: Record<string, number>;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "cogs-relay-"));
@@ -32,7 +34,7 @@ beforeEach(() => {
   process.env.TEAM_COLLAB_ROOT = dir;
   process.env.COGS_ATTACHMENT_DIR = join(dir, "att");
   delete process.env.COGS_ATTACHMENT_MAX_BYTES;
-  files = {}; filePath = (id) => `files/${id}`;
+  files = {}; filePath = (id) => `files/${id}`; streamed = new Set(); reportedSize = {};
   writeFileSync(join(dir, "token"), TOKEN, { mode: 0o600 });
   updates = []; calls = []; injected = []; events = []; fail = false; injectOk = true; sendMode = "normal"; releaseSend = undefined;
   server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
@@ -41,6 +43,15 @@ beforeEach(() => {
       calls.push({ method: "file", body: pathname.split("/").at(-1) });
       if (!pathname.startsWith(`/file/bot${TOKEN}/files/`)) return new Response("no", { status: 401 });
       const data = files[pathname.split("/").at(-1)!];
+      const name = pathname.split("/").at(-1)!;
+      // 크기를 알리지 않는 응답(content-length 없음): 조금씩 흘려보낸다.
+      if (data && streamed.has(name)) {
+        let i = 0; pulled = 0;
+        return new Response(new ReadableStream({ async pull(c) {
+          if (i >= data.length) { c.close(); return; }
+          await Bun.sleep(1); pulled++; c.enqueue(data.slice(i, i + 1024)); i += 1024;
+        } }, { highWaterMark: 0 }));
+      }
       return data ? new Response(data as Uint8Array<ArrayBuffer>) : new Response(`${TOKEN} missing`, { status: 404 });
     }
     const method = pathname.split("/").at(-1)!;
@@ -52,7 +63,7 @@ beforeEach(() => {
     if (method === "getUpdates") return Response.json({ ok: true, result: updates.filter((u) => u.update_id >= (body as any).offset) });
     if (method === "getFile") {
       const id = (body as any).file_id as string;
-      return Response.json({ ok: true, result: { file_id: id, file_size: files[id]?.byteLength ?? 0, file_path: filePath(id) } });
+      return Response.json({ ok: true, result: { file_id: id, file_size: reportedSize[id] ?? files[id]?.byteLength ?? 0, file_path: filePath(id) } });
     }
     if (sendMode === "malformed") return new Response("lost acknowledgement");
     if (sendMode === "hold") await new Promise<void>((resolve) => { releaseSend = resolve; });
@@ -385,6 +396,9 @@ test("a remote gap reason is never stored or logged as given", async () => {
 });
 
 // cogs 로 보낸 사진·영상·파일 — 글이 없어도 넘기고, 받은 파일 경로를 본문에 적는다.
+function attPath(name: string, base = `http://127.0.0.1:${server.port}`) {
+  return join(dir, "att", "lisa", `${createHash("sha256").update(`${base}\n${TOKEN}`).digest("hex").slice(0, 12)}-${name}`);
+}
 function photoUpdate(id: number, caption = "") {
   const u: any = update(id); delete u.message.text;
   if (caption) u.message.caption = caption;
@@ -398,7 +412,7 @@ test("attachment-only message is injected with downloaded local paths", async ()
   updates = [photoUpdate(30)]; await poller().pollOnce();
   expect(injected).toHaveLength(1);
   const body = injected[0]!.body;
-  const p1 = join(dir, "att", "lisa", "30-1.png"), p2 = join(dir, "att", "lisa", "30-2.mov");
+  const p1 = attPath("30-1.png"), p2 = attPath("30-2.mov");
   expect(body).toContain(`[첨부 1/2: photo · image/png · 4 bytes → ${p1}]`);
   expect(body).toContain(`[첨부 2/2: document · video/quicktime · clip.mov · 3 bytes → ${p2}]`);
   expect([...readFileSync(p1)]).toEqual([137, 80, 78, 71]);
@@ -439,11 +453,32 @@ test("remote attachment names cannot break out of the attachment line", async ()
   updates = [u]; await poller().pollOnce();
   const body = injected[0]!.body;
   expect(body.split("\n").filter((l: string) => l.startsWith("[cogs"))).toHaveLength(1);
-  expect(body).toContain(join(dir, "att", "lisa", "35-2.mov"));
+  expect(body).toContain(attPath("35-2.mov"));
 });
 test("telegram-style photo without cogs_attachments is still received", async () => {
   files = { f_photo1: new Uint8Array([9]) };
   const u = photoUpdate(36); delete u.message.cogs_attachments;
   updates = [u]; await poller().pollOnce();
-  expect(injected[0]!.body).toContain(`[첨부 1/1: photo · 1 bytes → ${join(dir, "att", "lisa", "36-1.bin")}]`);
+  expect(injected[0]!.body).toContain(`[첨부 1/1: photo · 1 bytes → ${attPath("36-1.bin")}]`);
+});
+test("a response without a size is cut off as soon as it passes the limit", async () => {
+  process.env.COGS_ATTACHMENT_MAX_BYTES = "2048";
+  files = { f_photo1: new Uint8Array(64 * 1024).fill(7), f_clip2: new Uint8Array([1]) };
+  streamed.add("f_photo1"); reportedSize.f_photo1 = 1; // 작게 알리고 길이 없이 보낸다
+  updates = [photoUpdate(37)]; await poller().pollOnce();
+  expect(injected[0]!.body).toContain("[첨부 1/2: photo · image/png — 받지 못함 (cogs_file_too_large)]");
+  expect(existsSync(attPath("37-1.png"))).toBe(false);
+  expect(pulled).toBeLessThan(16); // 64조각 중 상한(2조각)을 넘는 즉시 끊는다
+
+});
+test("the same update number from another bot connection does not overwrite an earlier attachment", async () => {
+  files = { f_photo1: new Uint8Array([1]), f_clip2: new Uint8Array([2]) };
+  updates = [photoUpdate(40)]; await poller().pollOnce();
+  const other = `http://localhost:${server.port}`;
+  agents[0]!.cogs_inbox!.api_base = other;
+  files = { f_photo1: new Uint8Array([99]), f_clip2: new Uint8Array([98]) };
+  await poller().pollOnce();
+  expect(injected).toHaveLength(2);
+  expect([...readFileSync(attPath("40-1.png"))]).toEqual([1]);
+  expect([...readFileSync(attPath("40-1.png", other))]).toEqual([99]);
 });

@@ -82,9 +82,10 @@ const SAFE_DOWNLOAD_CODES = ["cogs_api_failed", "cogs_file_path_invalid", "cogs_
 
 /**
  * 첨부를 받아 로컬 경로를 본문 줄로 만든다. 받지 못한 첨부도 줄을 남긴다 — 조용히 사라지지 않게.
- * 파일 이름은 원래 이름을 쓰지 않고 update 번호로 짓는다(원격 문자열이 경로가 되지 않게).
+ * 파일 이름은 원래 이름을 쓰지 않고 봇 연결(identity) 앞 12자 + update 번호로 짓는다(원격 문자열이 경로가 되지 않게,
+ *   update 번호는 연결마다 따로 세므로 다른 연결의 같은 번호가 지난 첨부를 덮지 않게).
  */
-async function attachmentLines(deps: Deps, agentId: string, config: CogsInbox, token: string, updateId: number,
+async function attachmentLines(deps: Deps, agentId: string, config: CogsInbox, token: string, identity: string, updateId: number,
   atts: CogsAttachmentRef[], signal: AbortSignal): Promise<string[]> {
   const max = Number(process.env.COGS_ATTACHMENT_MAX_BYTES ?? 50 * 1024 * 1024);
   const lines: string[] = [];
@@ -93,7 +94,7 @@ async function attachmentLines(deps: Deps, agentId: string, config: CogsInbox, t
     try {
       const dir = attachmentDir(agentId);
       mkdirSync(dir, { recursive: true });
-      const dest = join(dir, `${updateId}-${i + 1}${attachmentExt(a)}`);
+      const dest = join(dir, `${identity.slice(0, 12)}-${updateId}-${i + 1}${attachmentExt(a)}`);
       const size = await cogsDownloadFile(config, token, a.file_id, dest, max, signal);
       lines.push(`${label} · ${size} bytes → ${dest}]`);
     } catch (error) {
@@ -147,7 +148,7 @@ export function createCogsPoller(deps: Deps) {
             const atts = m ? cogsAttachments(m) : [];
             if (m && config.allow_from.includes(String(m.chat?.id)) && acceptsChat(config, m.chat?.type, m.from?.id) &&
                 !m.from?.is_bot && m.from?.id != null && (text.trim() || atts.length) && Number.isSafeInteger(m.message_id)) {
-              const lines = atts.length ? await attachmentLines(deps, agent.id, config, token, update.update_id, atts, abort.signal) : [];
+              const lines = atts.length ? await attachmentLines(deps, agent.id, config, token, identity, update.update_id, atts, abort.signal) : [];
               if (abort.signal.aborted) return;
               const content = [text, ...lines].filter((l) => l.trim()).join("\n");
               const group = m.chat.type === "group";
