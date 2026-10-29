@@ -155,7 +155,7 @@ describe("항상 허용: 결정 뒤·원본 저장 전에 다른 쪽이 축소",
     expect(r).toEqual({ kind: "failed" });
     expect(file().find((a) => a.id === "flo").cogs_permissions).toMatchObject({ revision: 2, allow: ["Read"] });
     expect(getPermissionRequest(db, request.id)!.status).toBe("expired");
-    expect(handOffCogsApproval(db, { requestId: request.id, agentId: "flo", sessionId: "s", processGen: "g", currentStamp: currentCogsStamp(registryPath, "flo"), nowMs: Date.now() })).toBe(false);
+    expect(handOffCogsApproval(db, { currentOwnerUserId: 7, requestId: request.id, agentId: "flo", sessionId: "s", processGen: "g", currentStamp: currentCogsStamp(registryPath, "flo"), nowMs: Date.now() })).toBe(false);
   });
 });
 
@@ -180,7 +180,7 @@ describe("축소 저장 직후 중단 → 재시작 → 넓히기", () => {
     const { request } = createCogsApproval(db, { op, roomId: "42", policyStamp: currentCogsStamp(registryPath, "flo")!, sessionId: "s", processGen: "g", ttlMs: 60_000, nowMs: Date.now() });
     const s1 = currentCogsStamp(registryPath, "flo");
     pressCogsApproval(db, { requestId: request.id, action: "pgs", actorUserId: 7, ownerUserId: 7, roomId: 42, bridgeAgentId: "flo", currentStamp: s1, nowMs: Date.now() });
-    expect(handOffCogsApproval(db, { requestId: request.id, agentId: "flo", sessionId: "s", processGen: "g", currentStamp: s1, nowMs: Date.now() })).toBe(true);
+    expect(handOffCogsApproval(db, { executionOperation: op, currentOwnerUserId: 7, requestId: request.id, agentId: "flo", sessionId: "s", processGen: "g", currentStamp: s1, nowMs: Date.now() })).toBe(true);
     const q = { agentId: "flo", sessionId: "s", processGen: "g", op };
     expect(hasCogsSessionGrant(db, { ...q, currentStamp: s1 })).toBe(true);
     // 축소된 revision 2 를 원본에만 쓰고 DB 정리 전에 서버가 죽었다
@@ -201,7 +201,7 @@ describe("축소 저장 직후 중단 → 재시작 → 넓히기", () => {
     const { request } = createCogsApproval(db, { op, roomId: "42", policyStamp: currentCogsStamp(registryPath, "flo")!, sessionId: "s", processGen: "g", ttlMs: 60_000, nowMs: Date.now() });
     const s1 = currentCogsStamp(registryPath, "flo");
     pressCogsApproval(db, { requestId: request.id, action: "pgs", actorUserId: 7, ownerUserId: 7, roomId: 42, bridgeAgentId: "flo", currentStamp: s1, nowMs: Date.now() });
-    handOffCogsApproval(db, { requestId: request.id, agentId: "flo", sessionId: "s", processGen: "g", currentStamp: s1, nowMs: Date.now() });
+    handOffCogsApproval(db, { executionOperation: op, currentOwnerUserId: 7, requestId: request.id, agentId: "flo", sessionId: "s", processGen: "g", currentStamp: s1, nowMs: Date.now() });
     const list = JSON.parse(readFileSync(registryPath, "utf-8"));
     list[0].cogs_permissions = { runtime: "claude", schema_version: 1, revision: 2, mode: "auto", allow: ["Read"] };
     writeFileSync(registryPath, JSON.stringify(list));

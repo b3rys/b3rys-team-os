@@ -11,6 +11,7 @@
  * 판정에 쓰는 '지금 정책 도장'(revision:내용 해시)은 부르는 쪽이 원본(agents.json)에서 막 읽은 값이다 — 이벤트가 늦어도 옛 카드가 결정되지 않는다.
  */
 import type { Database } from "bun:sqlite";
+import { isDeepStrictEqual } from "node:util";
 import { migrateCogsPermissions } from "../../db/migrate";
 import {
   auditPermissionRow,
@@ -267,13 +268,24 @@ export function expireDueCogsApprovals(db: Database, nowMs: number, events?: Cog
  */
 export function handOffCogsApproval(
   db: Database,
-  input: { requestId: string; agentId: string; sessionId: string; processGen: string; currentStamp: string | null; nowMs: number; events?: CogsPermissionEvents; beforeClaim?: () => void },
+  input: { requestId: string; agentId: string; sessionId: string; processGen: string; currentStamp: string | null; nowMs: number; currentOwnerUserId?: string | number | null; executionOperation?: PermissionOperation; events?: CogsPermissionEvents; beforeClaim?: () => void },
 ): boolean {
   const b = getBinding(db, input.requestId);
   const row = getPermissionRequest(db, input.requestId);
   if (!b || !row || b.agent_id !== input.agentId || b.session_id !== input.sessionId || b.process_gen !== input.processGen) return false;
   if (!ALLOWED.includes(row.status) || b.invalidation_reason !== null || b.handed_off_at_ms !== null) return false;
   if (row.status === "allowed_always" && b.always_persisted !== 1) return false;
+  // Claude 인계는 최신 owner와 원래 요청의 전체 입력을 요구한다. Codex 계약은 별도다.
+  if (row.runtime === "claude") {
+    if (input.currentOwnerUserId == null || String(input.currentOwnerUserId) === ""
+      || row.approver !== String(input.currentOwnerUserId)) return false;
+    const op = input.executionOperation;
+    if (!op || op.runtime !== row.runtime || op.agent_id !== row.agent_id || op.action !== row.action) return false;
+    try {
+      const payload = JSON.parse(JSON.stringify({ command: op.command, path: op.path, egress_url: op.egress_url, text: op.text }));
+      if (!isDeepStrictEqual(payload, JSON.parse(row.payload_json))) return false;
+    } catch { return false; }
+  }
   if (input.nowMs >= b.expires_at_ms) { invalidateOne(db, b, row.status, "timeout", input.events); return false; }
   if (input.currentStamp === null || input.currentStamp !== b.policy_stamp) { invalidateOne(db, b, row.status, "policy_changed", input.events); return false; }
   input.beforeClaim?.();
