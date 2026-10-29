@@ -177,3 +177,17 @@ out({'type':'result','result':'답','is_error':False,'session_id':'s'})
   expect(items.map(cogsActivityArgs)).toEqual([{target:"README.md"},{},{target:"example.com"},{target:"a.ts"}]);
  } finally {if(prior===undefined)delete process.env.CLAUDE_BIN;else process.env.CLAUDE_BIN=prior;rmSync(root,{recursive:true,force:true});}
 });
+
+test("card mode enables only explicit MCP configuration and disables inherited hooks/plugins/commands",()=>{
+ const root=mkdtempSync(join(tmpdir(),"cogs-card-args-"));
+ try {
+  const args=claudeCogsArguments({agentId:"fixture",cwd:root,prompt:""},"",root,"folder","/fixture/gate.sock");
+  expect(args).not.toContain("--safe-mode");expect(args).not.toContain("--restricted");
+  expect(args).toContain("--disable-slash-commands");expect(args).toContain("--strict-mcp-config");
+  expect(args[args.indexOf("--setting-sources")+1]).toBe("");
+  expect(args[args.indexOf("--permission-mode")+1]).toBe("default");
+  expect(args[args.indexOf("--permission-prompt-tool")+1]).toBe("mcp__cogs_permission__ask");
+  const settings=JSON.parse(args[args.indexOf("--settings")+1]!);
+  expect(settings.disableAllHooks).toBe(true);expect(settings.enabledPlugins).toEqual({});expect(settings.autoMemoryEnabled).toBe(false);
+ } finally {rmSync(root,{recursive:true,force:true});}
+});

@@ -39,9 +39,9 @@ export function claudeCogsArguments(opts: CodexTurnOptions, system: string, work
   if (!(COGS_MODELS.claude as readonly string[]).includes(model)) throw new Error("unsupported_model");
   const policy = cogsToolPolicy(workspace, scope);
   return ["-p","--model",model,"--output-format","stream-json","--include-partial-messages","--verbose",
-    "--safe-mode","--setting-sources","","--settings",JSON.stringify(policy.settings),
+    ...(permissionSocket ? ["--disable-slash-commands"] : ["--safe-mode"]),"--setting-sources","","--settings",JSON.stringify(policy.settings),
     "--strict-mcp-config","--mcp-config",JSON.stringify({mcpServers:permissionSocket ? {cogs_permission:{command:process.execPath,args:[join(import.meta.dir,"cogsPermissionMcp.ts"),permissionSocket]}} : {}}),
-    ...policy.flags,"--permission-mode",permissionSocket ? "default" : "dontAsk",
+    ...(permissionSocket ? [] : policy.flags),"--permission-mode",permissionSocket ? "default" : "dontAsk",
     ...(permissionSocket ? ["--permission-prompt-tool","mcp__cogs_permission__ask"] : ["--permission-prompts","none"]),
     "--tools",policy.tools,"--allowedTools",...policy.allowed,"--append-system-prompt",system,
     ...(opts.resumeSessionId ? ["--resume",opts.resumeSessionId] : [])];

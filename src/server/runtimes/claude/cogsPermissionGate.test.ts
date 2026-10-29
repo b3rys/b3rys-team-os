@@ -12,7 +12,7 @@ test("protected -> checker -> card order, failures never create a card, one corr
   try {
     for (const mode of ["protected", "deny", "error", "allow", "card-deny"] as const) {
       const calls: string[] = [], rows: Record<string,unknown>[] = [];
-      const candidate = {tool_name:"Write",input:{file_path:join(mode === "protected" ? control : root,"note.txt"),content:"fixture"}};
+      const candidate = {tool_name:"Write",input:{file_path:join(mode === "protected" ? control : root,"note.txt"),content:"PRIVATE_FIXTURE_PAYLOAD"}};
       const result = await gateClaudePermission(candidate, {
         paths:{workspace,protectedPaths:[control]},
         checker: async () => { calls.push("checker"); if (mode === "error") throw new Error(); return JSON.stringify({verdict:mode === "deny" ? "deny" : "allow",reason:"fixture judgment"}); },
@@ -22,7 +22,7 @@ test("protected -> checker -> card order, failures never create a card, one corr
       expect(calls).toEqual(mode === "protected" ? [] : ["deny","error"].includes(mode) ? ["checker"] : ["checker","card"]);
       expect(result.behavior).toBe(mode === "allow" ? "allow" : "deny");
       expect(rows).toHaveLength(1);expect(rows[0]!.executionId).toBeTruthy();
-      expect(JSON.stringify(rows)).not.toContain("fixture");
+      expect(JSON.stringify(rows)).not.toContain("PRIVATE_FIXTURE_PAYLOAD");
     }
   } finally {rmSync(root,{recursive:true,force:true});}
 });

@@ -58,7 +58,7 @@ export const runCheckerCli: CheckerRunner = async (prompt, signal) => {
 };
 
 function masked(value: unknown, secretPath: boolean, key = ""): unknown {
-  if (/password|passwd|token|secret|credential|api[_-]?key|authorization|private[_-]?key/i.test(key)) return "<redacted>";
+  if (/password|passwd|token|secret|credential|api[_-]?key|access[_-]?key|authorization|private[_-]?key/i.test(key)) return "<redacted>";
   if (secretPath && /^(content|old_string|new_string|text)$/i.test(key)) return "<redacted-secret-file-content>";
   if (typeof value === "string") return redactSecrets(value);
   if (Array.isArray(value)) return value.map(item => masked(item, secretPath));

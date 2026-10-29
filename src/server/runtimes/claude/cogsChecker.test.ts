@@ -25,7 +25,7 @@ test("missing or invalid verdict/reason deny", async () => {
 });
 test("full nonsecret input is retained; structured secrets and secret file content masked", async () => {
   let received = "";
-  await checkCogsOperation({ ...input, secretPath: true, input: { content: "synthetic sensitive content", password: "synthetic password", nested: { token: "synthetic token" }, mode: "append" } }, async p => { received = p; return '{"verdict":"deny","reason":"unknown"}'; });
+  await checkCogsOperation({ ...input, secretPath: true, input: { content: "synthetic sensitive content", password: "synthetic password", access_key: "synthetic access", accessKey: "synthetic access camel", nested: { token: "synthetic token" }, mode: "append" } }, async p => { received = p; return '{"verdict":"deny","reason":"unknown"}'; });
   expect(received).not.toContain("synthetic"); expect(JSON.parse(received).input.mode).toBe("append");
   await checkCogsOperation(input, async p => { received = p; return '{"verdict":"allow","reason":"ok"}'; });
   expect(JSON.parse(received).input).toEqual(input.input);
