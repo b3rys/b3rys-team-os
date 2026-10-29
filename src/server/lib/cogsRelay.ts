@@ -83,6 +83,25 @@ export async function sendCogsReply(agent: AgentRecord | undefined, meta: CogsMe
   return result.message_id;
 }
 
+/** 팀원이 받은 cogs 메시지에 자기 봇으로 리액션을 붙인다. 빈 문자열이면 지운다. cogs 는 봇당 한 개만 두어 다시 부르면 바뀐다. */
+export async function setCogsReaction(agent: AgentRecord | undefined, meta: CogsMeta, emoji: string): Promise<void> {
+  if (!agent || agent.id !== meta.agent_id) throw new Error("cogs_reaction_agent_mismatch");
+  const config = cogsInbox(agent);
+  if (!config || !config.allow_from.includes(meta.chat_id)) throw new Error("cogs_reaction_not_allowed");
+  await cogsCall(config, cogsToken(config), "setMessageReaction", {
+    chat_id: meta.chat_id, message_id: meta.message_id,
+    // cogs 는 JSON 배열과 문자열 둘 다 받는다. 문자열로 보내 Telegram form 방식과도 같게 한다.
+    reaction: JSON.stringify(emoji ? [{ type: "emoji", emoji }] : []),
+  });
+}
+
+/** 이모지 하나(글자 묶음 1개)인가. 빈 값은 지우기라 따로 다룬다. 최종 판정은 cogs 서버가 한다. */
+export function isSingleEmoji(value: string): boolean {
+  if (!value || value.length > 32 || value.trim() !== value) return false;
+  const parts = [...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(value)];
+  return parts.length === 1 && /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3/u.test(value);
+}
+
 /** 첨부 하나를 받아 dest 에 쓴다. 실패는 고정 코드로만 던진다(원격 본문·주소·토큰을 오류에 싣지 않는다). */
 export async function cogsDownloadFile(config: Pick<CogsInbox, "api_base">, token: string, fileId: string, dest: string,
   maxBytes: number, signal?: AbortSignal): Promise<number> {

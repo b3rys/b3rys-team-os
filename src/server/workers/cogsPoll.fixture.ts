@@ -482,3 +482,82 @@ test("the same update number from another bot connection does not overwrite an e
   expect([...readFileSync(attPath("40-1.png"))]).toEqual([1]);
   expect([...readFileSync(attPath("40-1.png", other))]).toEqual([99]);
 });
+
+// 리액션: 팀원이 받은 cogs 메시지에 자기 봇으로 이모지를 붙인다.
+async function react(messageId: string, emoji: string, agentId = "lisa", routes = route()) {
+  return routes.request("/cogs/react", { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ agent_id: agentId, message_id: messageId, emoji }) });
+}
+function reactions() { return calls.filter((x) => x.method === "setMessageReaction").map((x) => ({ ...x.body, reaction: JSON.parse(x.body.reaction) })); }
+
+test("reaction goes to the original room and message with the member's bot", async () => {
+  updates = [update()]; await poller().pollOnce();
+  const res = await react(injected[0]!.messageId, "👍");
+  expect(res.status).toBe(200); expect(await res.json()).toEqual({ ok: true, cleared: false });
+  expect(reactions()).toEqual([{ chat_id: "71", message_id: 110, reaction: [{ type: "emoji", emoji: "👍" }] }]);
+  const audit = db.query("SELECT action FROM audit_event WHERE action LIKE 'cogs_reaction%'").all();
+  expect(audit).toEqual([{ action: "cogs_reaction_set" }]);
+});
+
+test("reacting again replaces the reaction instead of adding another", async () => {
+  updates = [update()]; await poller().pollOnce();
+  expect((await react(injected[0]!.messageId, "👍")).status).toBe(200);
+  expect((await react(injected[0]!.messageId, "🙏")).status).toBe(200);
+  // 매 호출은 이번 이모지 하나만 보낸다(앞의 것을 쌓지 않는다). cogs 는 봇 리액션을 이 목록으로 바꾼다.
+  expect(reactions().map((r) => r.reaction)).toEqual([[{ type: "emoji", emoji: "👍" }], [{ type: "emoji", emoji: "🙏" }]]);
+});
+
+test("an empty emoji clears the reaction", async () => {
+  updates = [update()]; await poller().pollOnce();
+  const res = await react(injected[0]!.messageId, "");
+  expect(res.status).toBe(200); expect(await res.json()).toEqual({ ok: true, cleared: true });
+  expect(reactions().at(-1)!.reaction).toEqual([]);
+});
+
+test("another member cannot react to this member's cogs message", async () => {
+  updates = [update()]; await poller().pollOnce();
+  agents.push({ ...agents[0]!, id: "other", tmux_session: "claude-other" } as AgentRecord);
+  const res = await react(injected[0]!.messageId, "👍", "other");
+  expect(res.status).toBe(403); expect(reactions()).toHaveLength(0);
+});
+
+test("a non-cogs message and invalid emoji make no API call", async () => {
+  updates = [update()]; await poller().pollOnce();
+  const sent = await reply(); expect(sent.status).toBe(201);
+  const answer = (await sent.json()).message.id as string;
+  expect((await react(answer, "👍")).status).toBe(404);
+  expect((await react("no-such-id", "👍")).status).toBe(404);
+  for (const bad of ["ok", "👍👍", " 👍", "a".repeat(40)]) expect((await react(injected[0]!.messageId, bad)).status).toBe(400);
+  for (const good of ["❤️", "👍🏽", "🇰🇷", "1️⃣", "👨‍👩‍👧"]) expect((await react(injected[0]!.messageId, good)).status).toBe(200);
+  expect(reactions()).toHaveLength(5);
+});
+
+test("a cogs rejection is a fixed error code without the token", async () => {
+  updates = [update()]; await poller().pollOnce(); fail = true;
+  const res = await react(injected[0]!.messageId, "👍");
+  const text = await res.text();
+  expect(res.status).toBe(502); expect(JSON.parse(text).error).toBe("cogs_api_failed"); expect(text.includes(TOKEN)).toBe(false);
+});
+
+test("the cogs injection tells the member how to react", async () => {
+  updates = [update()]; await poller().pollOnce();
+  const prompt = buildTmuxInjectionPrompt(injected[0]!);
+  expect(prompt).toContain(`react.sh --msg ${injected[0]!.messageId}`);
+});
+
+for (const ok of [true, false]) {
+  test(`react.sh ${ok ? "confirms the reaction" : "exits nonzero when cogs rejects it"}`, async () => {
+    updates = [update()]; await poller().pollOnce(); fail = !ok;
+    const routes = route();
+    const api = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (req) => routes.fetch(new Request(req.url.replace("/api/cogs/react", "/cogs/react"), req)) });
+    try {
+      const p = Bun.spawn(["bash", "skills/b3os-team-inbox/scripts/react.sh", "--msg", injected[0]!.messageId, "--emoji", "🙏"], {
+        cwd: join(import.meta.dir, "../../.."), env: { ...process.env, TEAM_DB_PATH: join(dir, "team.db"), GD_AGENT_ID: "lisa", TEAM_BASE: `http://127.0.0.1:${api.port}` }, stdout: "pipe", stderr: "pipe",
+      });
+      const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+      expect(code, `${out}\n${err}`).toBe(ok ? 0 : 1);
+      expect((out + err).includes(TOKEN)).toBe(false);
+      expect(err).toContain(ok ? "리액션 붙임" : "cogs_api_failed");
+    } finally { api.stop(true); }
+  });
+}

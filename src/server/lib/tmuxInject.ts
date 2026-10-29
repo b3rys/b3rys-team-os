@@ -176,8 +176,10 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
         ` If ambiguous, ask ${owner}.`)
     : opts.kind === "cogs"
     ? pick(locale,
-        `cogs 답장은 --to broadcast --thread ${opts.threadId} --in-reply-to ${opts.messageId} 로 보내세요. 원래 cogs 방으로만 게시하며 실패하면 전송 실패를 반환합니다.`,
-        `Reply via --to broadcast --thread ${opts.threadId} --in-reply-to ${opts.messageId}. Posts only to the original cogs room; posting failure returns a send failure.`)
+        `cogs 답장은 --to broadcast --thread ${opts.threadId} --in-reply-to ${opts.messageId} 로 보내세요. 원래 cogs 방으로만 게시하며 실패하면 전송 실패를 반환합니다. ` +
+        `리액션은 react.sh --msg ${opts.messageId} --emoji <이모지> 로 붙입니다 — 메시지에 맞게 고르고, 리액션으로 답을 대신하지 않습니다.`,
+        `Reply via --to broadcast --thread ${opts.threadId} --in-reply-to ${opts.messageId}. Posts only to the original cogs room; posting failure returns a send failure. ` +
+        `React with react.sh --msg ${opts.messageId} --emoji <emoji> — pick one that fits the message; a reaction does not replace a reply.`)
     : opts.kind === "slack"
     ? pick(locale,
         `Slack 원글에 답하려면 --to broadcast --thread ${opts.threadId} --in-reply-to ${opts.messageId} 로 보내세요. ` +
