@@ -9,7 +9,7 @@ let outbox: string;
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "steno-send-"));
-  outbox = join(home, "Library/Application Support/b3os/steno-outbox");
+  outbox = join(home, "Library/Application Support/b3os/steno-share-outbox");
 });
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 

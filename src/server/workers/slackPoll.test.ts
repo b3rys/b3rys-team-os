@@ -14,12 +14,12 @@ process.env.TEAM_SLACK_POLL_THREAD_MAX_PAGES = "5";
 const BILL_UID = "UBILL0001";
 const handled: { text?: string; ts?: string; thread_ts?: string }[] = [];
 
-const realSlackLib = await import("../lib/slack");
+const realSlackLib = { ...await import("../lib/slack") };
 mock.module("../lib/slack", () => ({
   ...realSlackLib,
   loadAgentCreds: () => ({ bot_token: "xoxb-test" }),
 }));
-const realSlackRoute = await import("../routes/slack");
+const realSlackRoute = { ...await import("../routes/slack") };
 mock.module("../routes/slack", () => ({
   ...realSlackRoute,
   handleAppMention: async (_deps: unknown, ev: { text?: string; ts?: string; thread_ts?: string }) => {
@@ -28,7 +28,7 @@ mock.module("../routes/slack", () => ({
 }));
 
 const audit: { action: string; detail: Record<string, unknown> }[] = [];
-const realQueries = await import("../db/queries");
+const realQueries = { ...await import("../db/queries") };
 mock.module("../db/queries", () => ({
   ...realQueries,
   appendAudit: (_db: unknown, _actor: string, action: string, _id: unknown, detail: Record<string, unknown>) => {
@@ -100,6 +100,10 @@ beforeAll(() => {
 });
 afterAll(() => {
   globalThis.fetch = realFetch;
+  // Module mocks affect later files in a shared bun test process, including audit writes.
+  mock.module("../lib/slack", () => realSlackLib);
+  mock.module("../routes/slack", () => realSlackRoute);
+  mock.module("../db/queries", () => realQueries);
 });
 
 const deps = {
