@@ -61,16 +61,21 @@ test("folder Write/Edit deny persona, configuration, and resolved persona aliase
  } finally {rmSync(dir,{recursive:true,force:true});}
 });
 
- test("folder runner preserves absolute protected-write denies while keeping Bash unavailable", () => {
+ test("folder runner requests credential approval while keeping Bash unavailable", () => {
   const dir = mkdtempSync(join(tmpdir(), "cogs-protected-writes-"));
   try {
    const args = claudeCogsArguments({ agentId: "fixture", cwd: dir, prompt: "" }, "", dir, "folder");
    const settings = JSON.parse(args[args.indexOf("--settings") + 1]);
    for (const path of ["//**/.env", "//**/.env.*", "//**/*.key", "//**/.ssh/**"]) {
-    for (const tool of ["Write", "Edit"]) expect(settings.permissions.deny).toContain(`${tool}(${path})`);
+    for (const tool of ["Read", "Write", "Edit"]) {
+     expect(settings.permissions.ask).toContain(`${tool}(${path})`);
+     expect(settings.permissions.deny).not.toContain(`${tool}(${path})`);
+    }
    }
    expect(args[args.indexOf("--tools") + 1].split(",")).not.toContain("Bash");
    expect(settings.permissions.deny).toContain("Bash");
+   expect(settings.permissions.deny.some((rule: string) => /env|secret|credential|ssh|key/.test(rule))).toBe(false);
+   expect(args[args.indexOf("--permission-mode") + 1]).toBe("dontAsk");
    expect(cogsToolPolicy(dir, "full").settings).not.toHaveProperty("permissions");
   } finally { rmSync(dir, { recursive: true, force: true }); }
  });

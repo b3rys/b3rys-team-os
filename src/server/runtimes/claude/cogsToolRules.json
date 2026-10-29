@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "workspaceControls": [
+    "SOUL.md",
+    "CLAUDE.md",
+    ".claude"
+  ],
+  "askPaths": [
+    "//**/.env",
+    "//**/.env.*",
+    "//**/*.key",
+    "//**/.ssh/**",
+    "//**/.aws/**",
+    "//**/*credential*",
+    "//**/*secret*",
+    "//**/*.pem",
+    "//**/.secrets/**",
+    "//**/.claude/**"
+  ],
+  "unavailableTools": [
+    "Bash"
+  ]
+}
