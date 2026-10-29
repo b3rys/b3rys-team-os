@@ -46,6 +46,11 @@ export function cogsToken(config: CogsInbox): string {
   } catch { throw new Error("cogs_token_unavailable"); }
 }
 
+/** cogs 가 요청을 명시적으로 거절했다(ok:false). 메시지는 기존과 같은 고정 코드, status 는 HTTP 상태. */
+export class CogsApiRejected extends Error {
+  constructor(readonly status: number) { super("cogs_api_failed"); }
+}
+
 /** The request may have posted even though its acknowledgement was lost. */
 export class CogsDeliveryUnknown extends Error {
   constructor() { super("cogs_delivery_unknown"); }
@@ -65,7 +70,7 @@ export async function cogsCall(config: Pick<CogsInbox, "api_base">, token: strin
     throw new Error("cogs_api_failed");
   }
   // Only an explicit rejection proves that retrying cannot duplicate a post.
-  if (data?.ok === false) throw new Error("cogs_api_failed");
+  if (data?.ok === false) throw new CogsApiRejected(res.status);
   if (!res.ok || data?.ok !== true) {
     if (method === "sendMessage") throw new CogsDeliveryUnknown();
     throw new Error("cogs_api_failed");
@@ -81,6 +86,40 @@ export async function sendCogsReply(agent: AgentRecord | undefined, meta: CogsMe
   const result = await cogsCall(config, cogsToken(config), "sendMessage", { chat_id: meta.chat_id, text, reply_to_message_id: meta.message_id });
   if (!Number.isSafeInteger(result?.message_id)) throw new CogsDeliveryUnknown();
   return result.message_id;
+}
+
+/**
+ * 팀원이 받은 cogs 메시지에 자기 봇으로 리액션을 붙이거나(emoji, 빈 문자열이면 지움) 글 답 없이 끝냄을 알린다(noReply).
+ * cogs 는 봇 리액션을 한 개만 두어 다시 부르면 바뀐다. noReply 는 declineResponse — 앱의 '입력 중'을 끈다.
+ * declined 는 기다리던 응답이 실제로 내려졌는지다(이미 답했거나 만료됐으면 cogs 가 409 → false).
+ */
+export async function setCogsReaction(agent: AgentRecord | undefined, meta: CogsMeta, emoji: string | null, noReply = false): Promise<{ declined: boolean }> {
+  if (!agent || agent.id !== meta.agent_id) throw new Error("cogs_reaction_agent_mismatch");
+  const config = cogsInbox(agent);
+  if (!config || !config.allow_from.includes(meta.chat_id)) throw new Error("cogs_reaction_not_allowed");
+  const token = cogsToken(config);
+  if (emoji !== null) {
+    await cogsCall(config, token, "setMessageReaction", {
+      chat_id: meta.chat_id, message_id: meta.message_id,
+      // cogs 는 JSON 배열과 문자열 둘 다 받는다. 문자열로 보내 Telegram form 방식과도 같게 한다.
+      reaction: JSON.stringify(emoji ? [{ type: "emoji", emoji }] : []),
+    });
+  }
+  if (!noReply) return { declined: false };
+  try {
+    await cogsCall(config, token, "declineResponse", { chat_id: meta.chat_id, message_id: meta.message_id });
+    return { declined: true };
+  } catch (error) {
+    if (error instanceof CogsApiRejected && error.status === 409) return { declined: false };
+    throw error;
+  }
+}
+
+/** 이모지 하나(글자 묶음 1개)인가. 빈 값은 지우기라 따로 다룬다. 최종 판정은 cogs 서버가 한다. */
+export function isSingleEmoji(value: string): boolean {
+  if (!value || value.length > 32 || value.trim() !== value) return false;
+  const parts = [...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(value)];
+  return parts.length === 1 && /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3/u.test(value);
 }
 
 /** 첨부 하나를 받아 dest 에 쓴다. 실패는 고정 코드로만 던진다(원격 본문·주소·토큰을 오류에 싣지 않는다). */

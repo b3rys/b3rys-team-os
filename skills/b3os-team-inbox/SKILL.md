@@ -28,6 +28,7 @@ send.sh --to <물어본 사람> --thread <온 thread> --in-reply-to <그 메시�
   · **팀원에게 "팀장께 보고해줘" 를 시키는 위임이면 이 플래그를 쓰지 않는다** — `--to <팀원>` 으로 보내고
     본문에 그렇게 쓴다. 플래그는 그 팀원이 ★자기 답에★ 붙인다.
 - **메시지 읽음 처리** → `ack.sh`
+- **받은 cogs 메시지에 리액션** → `react.sh`
 - **팀버스 맥락 조회** ("팀버스 그거 어떻게 됐어?", "GD가 코덱스한테 뭐 시켰어?") → `bus-recall.sh` (read-only, team.db 조회. 뒤지기 대신 요점 확인)
 - **지원 파일을 팀장 편집기(Steno)로 보내기** → `steno-send.sh <파일> [--name <이름>]` — Steno 지원 텍스트 파일·그림·zip(20MB 이하)을 전용 outbox에 넣으면 권한이 분리된 Steno 도우미(`steno-helper` LaunchAgent)가 팀장 Steno의 "받은 파일/"로 옮긴다. zip은 풀지 않는다. 기본은 쌓기만 한다(같은 이름이면 " 2"). ★이미 있는 파일을 고칠 때는 새로 보내지 말고 `--replace`★(팀 공유 기본, 받은 파일은 `--to-received`), 치울 때는 `--remove <경로>`. 바뀌기 전 판은 도우미가 `steno-shared/.replaced/` 에 남긴다. 팀장 노트를 고칠 때는 내가 쓴 부분 앞뒤에 `✦<내 이름> ▼` … `✦<내 이름> ▲` 를 넣는다.
 
@@ -167,6 +168,16 @@ skills/b3os-team-inbox/scripts/send.sh --to dbak \
 ```bash
 skills/b3os-team-inbox/scripts/ack.sh <message_id>
 ```
+
+### cogs 메시지에 리액션 (`react.sh`)
+```bash
+skills/b3os-team-inbox/scripts/react.sh --msg <받은 cogs 메시지의 버스 id> --emoji 👍
+skills/b3os-team-inbox/scripts/react.sh --msg <id> --emoji ""   # 지우기
+skills/b3os-team-inbox/scripts/react.sh --msg <id> --emoji 👍 --no-reply   # 리액션만 하고 글 답 없이 끝낼 때
+```
+- 내 봇으로, 내가 받은 cogs 메시지에만 붙는다. 이모지는 하나이고, 다시 부르면 바뀐다.
+- 메시지에 맞게 고른다(감사엔 🙏, 확인엔 👍 처럼). 리액션은 답을 대신하지 않는다 — 답할 일이면 답한다.
+- 글로 답하지 않고 끝낼 때는 `--no-reply` 를 붙인다. 안 붙이면 팀장 앱에 "입력 중"이 4분 남았다가 "응답 시간이 초과되었어요"가 뜬다. 이미 답했으면 붙여도 아무 일 없다.
 
 ### 팀버스 맥락 조회 (bus-recall)
 1:1 세션에서 "팀버스 맥락"이 필요할 때(1:1 방과 팀버스는 다른 세션). team.db(팀버스=message + GD 1:1=dm_message)를 read-only 로 조회해 요점만 본다 — SQL 직접 치지 말고 이걸 먼저.
