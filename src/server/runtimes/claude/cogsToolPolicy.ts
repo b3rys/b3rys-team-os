@@ -4,7 +4,7 @@ import { readCogsToolRules } from "./cogsToolRules";
 import { REPO_ROOT } from "../../lib/personaTemplates";
 
 export function cogsRegistryPath(): string {
-  return process.env.TEAM_AGENT_REGISTRY || join(REPO_ROOT, "agents.json");
+  return resolve(process.env.TEAM_AGENT_REGISTRY || join(REPO_ROOT, "agents.json"));
 }
 
 // Resolve aliases even before a registry/config file exists.

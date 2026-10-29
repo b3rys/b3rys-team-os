@@ -1,7 +1,8 @@
 import { test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
+import { cogsRegistryPath } from "./cogsToolPolicy";
 import { gateClaudePermission } from "./cogsPermissionGate";
 import { startPermissionHost } from "./cogsPermissionMcp";
 import { connect } from "node:net";
@@ -59,4 +60,32 @@ test("audit never stores checker-quoted content or raw paths", async () => {
     expect(rows[0]!.model).toBe("sonnet");
     expect(rows[0]!.promptVersion).toBe("cogs-write-check-v1");
   } finally {rmSync(workspace,{recursive:true,force:true});}
+});
+
+test("relative registry env preserves protected targets and ordinary outside approval", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "gate-relative-registry-")));
+  const workspace = join(root, "work"), registry = join(root, "agents.json");
+  mkdirSync(workspace);
+  const prior = process.env.TEAM_AGENT_REGISTRY;
+  process.env.TEAM_AGENT_REGISTRY = relative(process.cwd(), registry);
+  const protectedTargets = [".claude.json", ".claude", ".codex", ".openclaw"].map(p => join(root, p));
+  let checks = 0, cards = 0;
+  try {
+    const deps = {
+      paths: { workspace, protectedPaths: [cogsRegistryPath(), ...protectedTargets] },
+      checker: async () => { checks++; return '{"verdict":"allow","reason":"ordinary note"}'; },
+      card: async () => { cards++; return true; }, audit: () => {},
+    };
+    for (const path of [...protectedTargets, registry]) {
+      expect(await gateClaudePermission({tool_name:"Write",input:{file_path:path,content:"fixture"}}, deps))
+        .toEqual({behavior:"deny",message:"protected_path"});
+    }
+    expect(checks).toBe(0); expect(cards).toBe(0);
+    const input = {file_path:join(root,"ordinary.txt"),content:"ordinary note"};
+    expect(await gateClaudePermission({tool_name:"Write",input}, deps)).toEqual({behavior:"allow",updatedInput:input});
+    expect(checks).toBe(1); expect(cards).toBe(1);
+  } finally {
+    if (prior === undefined) delete process.env.TEAM_AGENT_REGISTRY; else process.env.TEAM_AGENT_REGISTRY = prior;
+    rmSync(root,{recursive:true,force:true});
+  }
 });
