@@ -5,6 +5,7 @@ import { createBridgeCogsApprovals } from "../../lib/cogsPermissions/waiters";
 import { readPolicy } from "../../lib/cogsPermissions/policy";
 import { resolveCogsCodexRun, type CogsCodexRun } from "./cogsRunPolicy";
 import { createCogsCodexApprover } from "./cogsApprover";
+import { createClaudeCardApprover } from "../claude/cogsCardApprover";
 import { currentCogsStamp } from "../../lib/cogsPermissions/service";
 import { sendApprovalCard } from "../../lib/cogsPermissions/card";
 import { openDb } from "../../db/migrate";
@@ -1212,6 +1213,7 @@ interface TgCallbackQuery {
   message?: { message_id: number; chat: { id: number } };
   /** cogs 서버만 채운다(봇 owner_id). */
   cogs_bot_owner_id?: number;
+  cogs_bot_owner_generation?: number;
 }
 
 /** exec 폴백은 steer·서브에이전트 생존 기능을 잃으므로 app-server 준비 실패를 그대로 실패로 드러낸다.
@@ -1447,17 +1449,19 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     // 정책 팀원의 승인 요청 → 주인 1:1 방 카드 → 결정 → 응답 하나.
     if (cogsApprovals && !live.onCogsApproval) {
       const roomId = live.channel.ownerChat ?? null;
-      const approver = createCogsCodexApprover({
+      const approvalDeps = {
         agentId: liveAgentId, roomId, processGen: cogsApprovals.processGen, cwd: workdir,
         openDb: () => openDb(defaultTeamDbPath()),
         currentStamp: () => currentCogsStamp(registryPath, liveAgentId),
         waiters: cogsApprovals.waiters,
         // 요청마다 기한을 건다 — 끝나지 않는 전송이 승인 대기를 붙잡지 않게.
-        sendCard: (input) => sendApprovalCard(TG_API, token, roomId ?? "", input,
+        sendCard: (input: import("../../lib/cogsPermissions/card").ApprovalCardInput) => sendApprovalCard(TG_API, token, roomId ?? "", input,
           ((url: string, init?: RequestInit) => fetch(url, { ...init, signal: AbortSignal.timeout(10_000) })) as typeof fetch,
           { agentId: liveAgentId }),
-      });
-      live.onCogsApproval = approver.approve;
+      };
+      const approver = createCogsCodexApprover(approvalDeps);
+      const claudeApprove = createClaudeCardApprover({...approvalDeps, apiBase: TG_API, token});
+      live.onCogsApproval = req => req.method === "claude/permission" ? claudeApprove(req) : approver.approve(req);
     }
     live.cogsRunFor = () => {
       const list = JSON.parse(readFileSync(registryPath, "utf-8")) as Array<{ id?: string; cogs_permissions?: unknown }>;

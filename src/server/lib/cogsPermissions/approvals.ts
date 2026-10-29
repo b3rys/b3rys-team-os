@@ -1,3 +1,4 @@
+import { decodeCogsOwner, sameCogsOwner, validCogsOwner, type CogsOwner } from "./owner";
 /**
  * cogs AI 팀원 승인 — 요청 결합·누름 판정·무효화·실행 인계.
  *
@@ -11,6 +12,7 @@
  * 판정에 쓰는 '지금 정책 도장'(revision:내용 해시)은 부르는 쪽이 원본(agents.json)에서 막 읽은 값이다 — 이벤트가 늦어도 옛 카드가 결정되지 않는다.
  */
 import type { Database } from "bun:sqlite";
+import { isDeepStrictEqual } from "node:util";
 import { migrateCogsPermissions } from "../../db/migrate";
 import {
   auditPermissionRow,
@@ -26,9 +28,10 @@ import {
 import type { CogsPermissionEvents } from "./events";
 
 export type CardAction = "pg1" | "pgs" | "pga" | "pgd";
-export type InvalidationReason = "timeout" | "policy_narrowed" | "policy_changed" | "session_end" | "always_persist_failed" | "bridge_restart";
+export type InvalidationReason = "timeout" | "policy_narrowed" | "policy_changed" | "session_end" | "always_persist_failed" | "bridge_restart" | "owner_changed" | "owner_unverified";
 
 export interface BindingRow {
+  owner_binding_json: string | null;
   request_id: string;
   agent_id: string;
   room_id: string;
@@ -62,6 +65,7 @@ export function getBinding(db: Database, requestId: string): BindingRow | undefi
 }
 
 export interface CreateApprovalInput {
+  owner?: CogsOwner;
   op: PermissionOperation & { agent_id: string };
   roomId: string;
   policyStamp: string;
@@ -75,13 +79,14 @@ export interface CreateApprovalInput {
 
 /** 요청 행 + 결합을 한 트랜잭션으로 만든다. */
 export function createCogsApproval(db: Database, input: CreateApprovalInput): { request: PermissionRequestRow; binding: BindingRow } {
+  if (input.op.runtime === "claude" && !validCogsOwner(input.owner)) throw new Error("cogs_owner_required");
   return db.transaction(() => {
     const request = insertPendingPermissionRequest(db, input.op);
     db.prepare(
-      `INSERT INTO cogs_permission_binding(request_id, agent_id, room_id, policy_stamp, session_id, process_gen, expires_at_ms, always_rule)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(request.id, input.op.agent_id, input.roomId, input.policyStamp, input.sessionId, input.processGen, input.nowMs + input.ttlMs, input.alwaysRule ?? null);
-    auditPermissionRow(db, request, "requested", null, { surface: "cogs", room_id: input.roomId, policy_stamp: input.policyStamp });
+      `INSERT INTO cogs_permission_binding(request_id, agent_id, room_id, policy_stamp, session_id, process_gen, expires_at_ms, always_rule, owner_binding_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(request.id, input.op.agent_id, input.roomId, input.policyStamp, input.sessionId, input.processGen, input.nowMs + input.ttlMs, input.alwaysRule ?? null, input.owner ? JSON.stringify(input.owner) : null);
+    auditPermissionRow(db, request, "requested", null, { surface: "cogs", room_id: input.roomId, policy_stamp: input.policyStamp, owner: input.owner ?? null });
     return { request, binding: getBinding(db, request.id)! };
   })();
 }
@@ -98,6 +103,8 @@ export type PressResult =
   | { kind: "failed" };
 
 export interface PressInput {
+  currentOwner?: CogsOwner | null;
+  callbackOwnerGeneration?: number;
   requestId: string;
   action: CardAction;
   /** 누른 사람(cogs 서버가 채운 callback from.id). */
@@ -132,6 +139,15 @@ export function pressCogsApproval(db: Database, input: PressInput): PressResult 
     return { kind: "forbidden" };
   }
   if (row.status !== "pending") return { kind: "processed", status: row.status };
+  if (row.runtime === "claude") {
+    const issued = decodeCogsOwner(binding.owner_binding_json);
+    if (!sameCogsOwner(issued, input.currentOwner)) {
+      invalidateOwnerBinding(db, binding.request_id, input.currentOwner, input.events);
+      return {kind: "expired"};
+    }
+    if (input.callbackOwnerGeneration !== issued!.generation
+      || String(input.ownerUserId) !== String(issued!.userId)) return {kind: "forbidden"};
+  }
   if (input.nowMs >= binding.expires_at_ms) {
     invalidateOne(db, binding, row.status, "timeout", input.events);
     return { kind: "expired" };
@@ -142,7 +158,7 @@ export function pressCogsApproval(db: Database, input: PressInput): PressResult 
   }
 
   const decision = ACTION_DECISION[input.action];
-  const provenance = { surface: "cogs_member_room", approver_user_id: String(input.actorUserId), room_id: binding.room_id, policy_stamp: binding.policy_stamp };
+  const provenance = { surface: "cogs_member_room", approver_user_id: String(input.actorUserId), room_id: binding.room_id, policy_stamp: binding.policy_stamp, owner: decodeCogsOwner(binding.owner_binding_json) };
   // 지속 규칙으로 못 적는 일은 '항상' 을 받지 않는다(버튼도 안 준다).
   if (decision === "allow_always" && (!binding.always_rule || !input.persistAlways)) return { kind: "failed" };
   // 결정이 먼저다(CAS). 취소·만료·다른 누름에 졌으면 원본에 아무것도 쓰지 않는다.
@@ -191,6 +207,21 @@ function invalidateOne(db: Database, binding: BindingRow, from: PermissionReques
     events?.emit({ type: "approval_invalidated", request_id: binding.request_id, agent_id: binding.agent_id, room_id: binding.room_id, card_message_id: binding.card_message_id, reason });
   }
   return changed === 1;
+}
+
+/** A failed snapshot only invalidates the issuance that was checked, not newer cards. */
+function invalidateOwnerBinding(db: Database, requestId: string, observed: CogsOwner | null | undefined, events?: CogsPermissionEvents): void {
+  db.transaction(() => {
+    const binding = getBinding(db, requestId);
+    const row = getPermissionRequest(db, requestId);
+    if (!binding || !row || row.runtime !== "claude") return;
+    db.prepare("DELETE FROM cogs_permission_session_grant WHERE request_id = ?").run(requestId);
+    // Preserve historical outcomes once execution has already been handed off.
+    if (binding.handed_off_at_ms === null && binding.invalidation_reason === null
+      && (row.status === "pending" || ALLOWED.includes(row.status))) {
+      invalidateOne(db, binding, row.status, observed == null ? "owner_unverified" : "owner_changed", events);
+    }
+  })();
 }
 
 /**
@@ -267,13 +298,29 @@ export function expireDueCogsApprovals(db: Database, nowMs: number, events?: Cog
  */
 export function handOffCogsApproval(
   db: Database,
-  input: { requestId: string; agentId: string; sessionId: string; processGen: string; currentStamp: string | null; nowMs: number; events?: CogsPermissionEvents; beforeClaim?: () => void },
+  input: { requestId: string; agentId: string; sessionId: string; processGen: string; currentStamp: string | null; nowMs: number; currentOwner?: CogsOwner | null; currentOwnerUserId?: string | number | null; executionOperation?: PermissionOperation; events?: CogsPermissionEvents; beforeClaim?: () => void },
 ): boolean {
   const b = getBinding(db, input.requestId);
   const row = getPermissionRequest(db, input.requestId);
   if (!b || !row || b.agent_id !== input.agentId || b.session_id !== input.sessionId || b.process_gen !== input.processGen) return false;
   if (!ALLOWED.includes(row.status) || b.invalidation_reason !== null || b.handed_off_at_ms !== null) return false;
   if (row.status === "allowed_always" && b.always_persisted !== 1) return false;
+  // Claude 인계는 최신 owner와 원래 요청의 전체 입력을 요구한다. Codex 계약은 별도다.
+  if (row.runtime === "claude") {
+    if (!sameCogsOwner(decodeCogsOwner(b.owner_binding_json), input.currentOwner)) {
+      invalidateOwnerBinding(db, b.request_id, input.currentOwner, input.events);
+      return false;
+    }
+    if (String(input.currentOwnerUserId) !== String(input.currentOwner!.userId)) return false;
+    if (input.currentOwnerUserId == null || String(input.currentOwnerUserId) === ""
+      || row.approver !== String(input.currentOwnerUserId)) return false;
+    const op = input.executionOperation;
+    if (!op || op.runtime !== row.runtime || op.agent_id !== row.agent_id || op.action !== row.action) return false;
+    try {
+      const payload = JSON.parse(JSON.stringify({ command: op.command, path: op.path, egress_url: op.egress_url, text: op.text }));
+      if (!isDeepStrictEqual(payload, JSON.parse(row.payload_json))) return false;
+    } catch { return false; }
+  }
   if (input.nowMs >= b.expires_at_ms) { invalidateOne(db, b, row.status, "timeout", input.events); return false; }
   if (input.currentStamp === null || input.currentStamp !== b.policy_stamp) { invalidateOne(db, b, row.status, "policy_changed", input.events); return false; }
   input.beforeClaim?.();
@@ -285,13 +332,20 @@ export function handOffCogsApproval(
 /** 세션 허용이 있나 — 같은 팀원·세션·프로세스 세대·작업 범위·지금 정책 도장일 때만. */
 export function hasCogsSessionGrant(
   db: Database,
-  input: { agentId: string; sessionId: string; processGen: string; op: PermissionOperation; currentStamp: string | null },
+  input: { agentId: string; sessionId: string; processGen: string; op: PermissionOperation; currentStamp: string | null; currentOwner?: CogsOwner | null },
 ): boolean {
   if (input.currentStamp === null) return false;
-  return Boolean(db.prepare(
-    `SELECT 1 FROM cogs_permission_session_grant
-      WHERE agent_id = ? AND session_id = ? AND process_gen = ? AND scope_key = ? AND policy_stamp = ?`,
-  ).get(input.agentId, input.sessionId, input.processGen, scopeKeyForOperation(input.op), input.currentStamp));
+  const grant = db.prepare(
+    `SELECT b.request_id, b.owner_binding_json FROM cogs_permission_session_grant s
+      JOIN cogs_permission_binding b ON b.request_id = s.request_id
+      WHERE s.agent_id = ? AND s.session_id = ? AND s.process_gen = ? AND s.scope_key = ? AND s.policy_stamp = ?`,
+  ).get(input.agentId, input.sessionId, input.processGen, scopeKeyForOperation(input.op), input.currentStamp) as {request_id: string; owner_binding_json: string | null} | null;
+  if (!grant) return false;
+  if (input.op.runtime === "claude" && !sameCogsOwner(decodeCogsOwner(grant.owner_binding_json), input.currentOwner)) {
+    invalidateOwnerBinding(db, grant.request_id, input.currentOwner);
+    return false;
+  }
+  return true;
 }
 
 /** 세션이 끝났다 — 그 세션의 대기·미인계 요청과 세션 허용을 정리한다. 원본의 '항상' 은 건드리지 않는다. */

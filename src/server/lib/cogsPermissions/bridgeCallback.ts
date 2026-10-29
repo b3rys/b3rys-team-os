@@ -5,8 +5,10 @@
  * (봇 토큰으로 받은 getUpdates). 앱이 보낸 값이나 callback_data 로 승인자·팀원을 정하지 않는다.
  * 메시지 수신 허용 목록(CODEX_ALLOW_FROM = 방 id)은 여기서 인가에 쓰지 않는다 — 방과 사람은 다른 값이다.
  */
+import { decodeCogsOwner, fetchCogsOwner } from "./owner";
+import { getPermissionRequest } from "../permissionGate";
 import { openDb } from "../../db/migrate";
-import { ensureCogsPermissionTables, pressCogsApproval, type CardAction, type PressResult } from "./approvals";
+import { ensureCogsPermissionTables, getBinding, pressCogsApproval, type CardAction, type PressResult } from "./approvals";
 import { clearApprovalCardButtons } from "./card";
 import { createCogsPolicyService, currentCogsStamp } from "./service";
 
@@ -17,6 +19,7 @@ export interface CogsCallbackQuery {
   message?: { message_id: number; chat: { id: number } };
   /** cogs 서버가 DB 의 봇 owner_id 로 채운다. 옛 서버에는 없다 → 아무도 결정하지 못한다. */
   cogs_bot_owner_id?: number;
+  cogs_bot_owner_generation?: number;
 }
 
 export interface CogsCallbackDeps {
@@ -46,7 +49,13 @@ export async function handleCogsApprovalCallback(token: string, cb: CogsCallback
   try {
     ensureCogsPermissionTables(db);
     const svc = createCogsPolicyService({ registryPath: deps.registryPath, db });
+    const row = getPermissionRequest(db, m[2]!);
+    const issued = decodeCogsOwner(getBinding(db, m[2]!)?.owner_binding_json);
+    const owner = row?.runtime === "claude" && issued
+      ? await fetchCogsOwner(deps.apiBase, token, issued, doFetch) : null;
     result = pressCogsApproval(db, {
+      currentOwner: owner,
+      callbackOwnerGeneration: cb.cogs_bot_owner_generation,
       requestId: m[2]!,
       action: m[1] as CardAction,
       actorUserId: cb.from?.id,

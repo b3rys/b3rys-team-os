@@ -1,3 +1,4 @@
+const ownerFixture = {instance: "http://cogs", botId: 12, userId: 7, generation: 1};
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,7 +24,7 @@ function setup(alwaysRule: string | null = "Bash(git push:*)") {
   }]));
   const db = openDb(dbPath);
   migrate(db);
-  const { request } = createCogsApproval(db, {
+  const { request } = createCogsApproval(db, { owner: ownerFixture,
     op: { runtime: "claude", agent_id: "flo", action: "run_command", command: "git push" },
     roomId: "42", policyStamp: currentCogsStamp(registryPath, "flo")!, sessionId: "s", processGen: "g", ttlMs: 300_000, nowMs: Date.now(), alwaysRule,
   });
@@ -31,7 +32,7 @@ function setup(alwaysRule: string | null = "Bash(git push:*)") {
   const calls: Array<{ method: string; body: any }> = [];
   const fetchFn = (async (url: string, init: RequestInit) => {
     calls.push({ method: String(url).split("/").pop()!, body: JSON.parse(String(init.body)) });
-    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    return new Response(JSON.stringify({ ok: true, result: {id: 12, owner_user_id: 7, owner_generation: 1} }), { status: 200 });
   }) as unknown as typeof fetch;
   const deps = { apiBase: "http://cogs", agentId: "flo", registryPath, dbPath, fetchFn };
   const status = () => { const d = openDb(dbPath); try { return getPermissionRequest(d, request.id)!.status; } finally { d.close(); } };
@@ -39,22 +40,22 @@ function setup(alwaysRule: string | null = "Bash(git push:*)") {
 }
 
 const cb = (id: string, over: Partial<CogsCallbackQuery> = {}): CogsCallbackQuery =>
-  ({ id: "cb1", data: `pg1:${id}`, from: { id: 7 }, message: { message_id: 99, chat: { id: 42 } }, cogs_bot_owner_id: 7, ...over });
+  ({ id: "cb1", data: `pg1:${id}`, from: { id: 7 }, message: { message_id: 99, chat: { id: 42 } }, cogs_bot_owner_id: 7, cogs_bot_owner_generation: 1, ...over });
 
 describe("cogs 카드 누름", () => {
   test("주인이 누르면 결정 + 답 + 버튼 걷기", async () => {
     const s = setup();
     expect(await handleCogsApprovalCallback("T", cb(s.id), s.deps)).toBe("decided");
     expect(s.status()).toBe("allowed_once");
-    expect(s.calls.map((c) => c.method)).toEqual(["answerCallbackQuery", "editMessageReplyMarkup"]);
-    expect(s.calls[0]!.body.text_code).toBe("callback_allow_once");
+    expect(s.calls.map((c) => c.method)).toEqual(["getMe", "answerCallbackQuery", "editMessageReplyMarkup"]);
+    expect(s.calls[1]!.body.text_code).toBe("callback_allow_once");
   });
   test("방 id 와 같은 사람 id 라도 주인이 아니면 거절 — 방 허용 목록으로 인가하지 않는다", async () => {
     const s = setup();
     expect(await handleCogsApprovalCallback("T", cb(s.id, { from: { id: 42 } }), s.deps)).toBe("forbidden");
     expect(s.status()).toBe("pending");
-    expect(s.calls.map((c) => c.method)).toEqual(["answerCallbackQuery"]); // 버튼은 남긴다
-    expect(s.calls[0]!.body).toMatchObject({ text_code: "callback_forbidden", show_alert: true });
+    expect(s.calls.map((c) => c.method)).toEqual(["getMe", "answerCallbackQuery"]); // 버튼은 남긴다
+    expect(s.calls[1]!.body).toMatchObject({ text_code: "callback_forbidden", show_alert: true });
   });
   test("옛 cogs 서버(주인 정보 없음) → 아무도 결정 못 함", async () => {
     const s = setup();
@@ -97,4 +98,26 @@ test("revision 은 그대로 두고 내용만 바꾸면(손편집) 옛 카드는
   writeFileSync(s.registryPath, JSON.stringify(list));
   expect(await handleCogsApprovalCallback("T", cb(s.id), s.deps)).toBe("expired");
   expect(s.status()).toBe("expired");
+});
+
+
+test("fresh getMe conflict invalidates an old callback instead of trusting its owner snapshot", async () => {
+  const s = setup();
+  const calls: unknown[] = [];
+  const fetchFn = (async (url: unknown, init: RequestInit) => {
+    if (String(url).endsWith("/getMe")) {
+      calls.push(JSON.parse(String(init.body)));
+      return new Response(JSON.stringify({ok:false,message_code:"bot_owner_generation_mismatch"}),{status:409});
+    }
+    return new Response(JSON.stringify({ok:true}));
+  }) as typeof fetch;
+  expect(await handleCogsApprovalCallback("T", cb(s.id), {...s.deps,fetchFn})).toBe("expired");
+  expect(calls).toEqual([{expected_owner_generation:1}]);
+  expect(s.status()).toBe("expired");
+});
+
+test("callback from a newer generation cannot rebind an old card", async () => {
+  const s=setup();
+  expect(await handleCogsApprovalCallback("T", cb(s.id,{cogs_bot_owner_generation:3}),s.deps)).toBe("forbidden");
+  expect(s.status()).toBe("pending");
 });

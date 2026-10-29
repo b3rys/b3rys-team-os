@@ -1,9 +1,10 @@
 import { readFileSync, realpathSync, existsSync } from "node:fs";
 import { join, resolve, dirname, basename, relative, isAbsolute } from "node:path";
+import { readCogsToolRules } from "./cogsToolRules";
 import { REPO_ROOT } from "../../lib/personaTemplates";
 
 export function cogsRegistryPath(): string {
-  return process.env.TEAM_AGENT_REGISTRY || join(REPO_ROOT, "agents.json");
+  return resolve(process.env.TEAM_AGENT_REGISTRY || join(REPO_ROOT, "agents.json"));
 }
 
 // Resolve aliases even before a registry/config file exists.
@@ -37,7 +38,7 @@ export function readCogsToolScope(agentId: string, registryPath = cogsRegistryPa
   } catch { return "folder"; }
 }
 
-// Folder Bash stays disabled until the OS boundary passes the acceptance probe.
+// Bash remains unavailable in PR1; its approval adapter is a separate change.
 export function cogsToolPolicy(workspace: string, scope: CogsToolScope) {
   const root = assertCogsWorkspace(workspace);
   const common = {disableAllHooks: true, enabledPlugins: {}, autoMemoryEnabled: false};
@@ -45,9 +46,14 @@ export function cogsToolPolicy(workspace: string, scope: CogsToolScope) {
     tools: "default", allowed: ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "WebFetch", "WebSearch"],
     settings: common, flags: [] as string[],
   };
-  const protectedPaths = [join(root,"SOUL.md"), join(root,"CLAUDE.md"), join(root,".claude")];
+  const rules = readCogsToolRules();
+  const protectedPaths = rules.workspaceControls.map(name => join(root, name));
   const protectedWrites = protectedPaths.flatMap(path => [path, canonicalPath(path), `${path}/**`, `${canonicalPath(path)}/**`])
     .flatMap(path => [`Write(/${path})`, `Edit(/${path})`]);
+  // Ask takes precedence over folder-wide allow. Without an approval adapter,
+  // the runner remains dontAsk and cannot silently execute these operations.
+  const credentialRequests = rules.askPaths.flatMap(path =>
+    ["Read", "Write", "Edit"].map(tool => `${tool}(${path})`));
   return {
     tools: "Read,Glob,Grep,WebFetch,Write,Edit,WebSearch",
     allowed: ["WebFetch", "WebSearch", `Read(/${root}/**)`, `Glob(/${root}/**)`, `Grep(/${root}/**)`, `Write(/${root}/**)`, `Edit(/${root}/**)`],
@@ -55,7 +61,8 @@ export function cogsToolPolicy(workspace: string, scope: CogsToolScope) {
     settings: {...common, permissions: {
       blockReadsOutsideWorkingDirectories: true,
       additionalDirectories: [],
-      deny: [...protectedWrites, "Bash", "Read(~/.claude/**)", "Read(~/.secrets/**)", "Read(**/.env)", "Read(**/.env.*)", "Edit(**/.env)", "Edit(**/.env.*)", "Write(**/.env)", "Write(**/.env.*)"],
+      deny: [...protectedWrites, ...rules.unavailableTools],
+      ask: credentialRequests,
     }},
   };
 }

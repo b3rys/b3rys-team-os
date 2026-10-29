@@ -1,3 +1,4 @@
+const ownerFixture = {instance: "http://cogs", botId: 12, userId: 7, generation: 1};
 /**
  * 서버 → 브리지 전달을 실제 별도 프로세스로 잰다. 한 프로세스 EventEmitter 로는 이 경계를 증명하지 못한다.
  * 부모 = 서버 역할(격리 DB 에 쓰고 bridge window 로 신호), 자식 = 가짜 브리지(waitersIpc.fixture.ts).
@@ -31,12 +32,12 @@ function env() {
   const pidFile = join(dir, "flo.pid");
   const db = openDb(dbPath);
   migrate(db);
-  const make = (o: { gen?: string; ttlMs?: number } = {}) => createCogsApproval(db, {
+  const make = (o: { gen?: string; ttlMs?: number } = {}) => createCogsApproval(db, { owner: ownerFixture,
     op: { runtime: "codex", agent_id: "flo", action: "run_command", command: "git push" },
     roomId: "42", policyStamp: STAMP, sessionId: "s", processGen: o.gen ?? "g1", ttlMs: o.ttlMs ?? 30_000, nowMs: Date.now(),
   }).request.id;
   const press = (id: string, action: "pg1" | "pgd") => pressCogsApproval(db, {
-    requestId: id, action, actorUserId: 7, ownerUserId: 7, roomId: "42", bridgeAgentId: "flo", currentStamp: STAMP, nowMs: Date.now(),
+    requestId: id, action, actorUserId: 7, ownerUserId: 7, currentOwner: ownerFixture, callbackOwnerGeneration: 1, roomId: "42", bridgeAgentId: "flo", currentStamp: STAMP, nowMs: Date.now(),
   });
   const sendLog: string[] = [];
   const send = async (req: Parameters<typeof callCodexBridgeControl>[0]) => {

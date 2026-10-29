@@ -1253,6 +1253,8 @@ export function migrateCogsPermissions(db: Database): void {
        created_at TEXT NOT NULL DEFAULT (datetime('now'))
      )`,
   );
+  // Legacy approvals remain unbound; never backfill from the current owner.
+  addColumnIfMissing(db, "cogs_permission_binding", "owner_binding_json", "TEXT");
   db.exec("CREATE INDEX IF NOT EXISTS idx_cogs_permission_binding_agent ON cogs_permission_binding(agent_id, invalidation_reason, handed_off_at_ms)");
   db.exec(
     `CREATE TABLE IF NOT EXISTS cogs_permission_session_grant (

@@ -1,3 +1,4 @@
+const ownerFixture = {instance: "http://cogs", botId: 12, userId: 7, generation: 1};
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../../db/migrate";
@@ -22,14 +23,14 @@ const op = { runtime: "claude", agent_id: "flo", action: "run_command", command:
 function setup(over: Partial<Parameters<typeof createCogsApproval>[1]> = {}) {
   const db = new Database(":memory:");
   migrate(db);
-  const { request } = createCogsApproval(db, {
+  const { request } = createCogsApproval(db, { owner: ownerFixture,
     op, roomId: "42", policyStamp: "3:a", sessionId: "s1", processGen: "g1", ttlMs: 300_000, nowMs: T0, alwaysRule: "Bash(git push:*)", ...over,
   });
   return { db, id: request.id };
 }
 
 const press = (id: string, over: Partial<PressInput> = {}): PressInput => ({
-  requestId: id, action: "pg1", actorUserId: 7, ownerUserId: 7, roomId: 42, bridgeAgentId: "flo", currentStamp: "3:a", nowMs: T0 + 1000, ...over,
+  requestId: id, action: "pg1", actorUserId: 7, ownerUserId: 7, currentOwner: ownerFixture, callbackOwnerGeneration: 1, roomId: 42, bridgeAgentId: "flo", currentStamp: "3:a", nowMs: T0 + 1000, ...over,
 });
 
 describe("pending + 누름", () => {
@@ -114,7 +115,7 @@ describe("항상 허용", () => {
     const { db, id } = setup();
     expect(() => pressCogsApproval(db, press(id, { action: "pga", persistAlways: () => { throw new Error("crash"); } }))).toThrow("crash");
     expect(getPermissionRequest(db, id)!.status).toBe("allowed_always");
-    expect(handOffCogsApproval(db, { requestId: id, agentId: "flo", sessionId: "s1", processGen: "g1", currentStamp: "3:a", nowMs: T0 + 2000 })).toBe(false);
+    expect(handOffCogsApproval(db, { executionOperation: op, currentOwnerUserId: 7, currentOwner: ownerFixture, requestId: id, agentId: "flo", sessionId: "s1", processGen: "g1", currentStamp: "3:a", nowMs: T0 + 2000 })).toBe(false);
     expect(closeUnpersistedAlways(db)).toBe(1);
     expect(getBinding(db, id)!.invalidation_reason).toBe("always_persist_failed");
   });
@@ -128,7 +129,7 @@ describe("세션 허용", () => {
   test("같은 세션·세대·범위·revision 에서만 유효", () => {
     const { db, id } = setup();
     pressCogsApproval(db, press(id, { action: "pgs" }));
-    const q = { agentId: "flo", sessionId: "s1", processGen: "g1", op, currentStamp: "3:a" };
+    const q = { currentOwner: ownerFixture, agentId: "flo", sessionId: "s1", processGen: "g1", op, currentStamp: "3:a" };
     expect(hasCogsSessionGrant(db, q)).toBe(true);
     expect(hasCogsSessionGrant(db, { ...q, sessionId: "s2" })).toBe(false);
     expect(hasCogsSessionGrant(db, { ...q, processGen: "g2" })).toBe(false);
@@ -139,13 +140,13 @@ describe("세션 허용", () => {
     const { db, id } = setup();
     pressCogsApproval(db, press(id, { action: "pgs" }));
     endCogsSession(db, "flo", "s1");
-    expect(hasCogsSessionGrant(db, { agentId: "flo", sessionId: "s1", processGen: "g1", op, currentStamp: "3:a" })).toBe(false);
+    expect(hasCogsSessionGrant(db, { currentOwner: ownerFixture, agentId: "flo", sessionId: "s1", processGen: "g1", op, currentStamp: "3:a" })).toBe(false);
   });
   test("넓히기만 한 정책 변경 → 새 revision 으로 옮겨 계속 유효, 축소 → 폐기", () => {
     const { db, id } = setup();
     pressCogsApproval(db, press(id, { action: "pgs" }));
     invalidateCogsApprovals(db, { agentId: "flo", reason: "policy_changed", newStamp: "4:a", oldStamp: "3:a" });
-    const q = { agentId: "flo", sessionId: "s1", processGen: "g1", op };
+    const q = { currentOwner: ownerFixture, agentId: "flo", sessionId: "s1", processGen: "g1", op };
     expect(hasCogsSessionGrant(db, { ...q, currentStamp: "4:a" })).toBe(true);
     invalidateCogsApprovals(db, { agentId: "flo", reason: "policy_narrowed", newStamp: "5:a" });
     expect(hasCogsSessionGrant(db, { ...q, currentStamp: "5:a" })).toBe(false);
@@ -154,7 +155,7 @@ describe("세션 허용", () => {
     const { db, id } = setup();
     pressCogsApproval(db, press(id, { action: "pgs" })); // revision 3 에 묶임
     invalidateCogsApprovals(db, { agentId: "flo", reason: "policy_changed", newStamp: "5:a", oldStamp: "4:a" });
-    const q = { agentId: "flo", sessionId: "s1", processGen: "g1", op };
+    const q = { currentOwner: ownerFixture, agentId: "flo", sessionId: "s1", processGen: "g1", op };
     expect(hasCogsSessionGrant(db, { ...q, currentStamp: "5:a" })).toBe(false);
     expect(db.prepare("SELECT COUNT(*) AS n FROM cogs_permission_session_grant").get()).toEqual({ n: 0 });
   });
@@ -175,12 +176,12 @@ describe("무효화 × 상태", () => {
     pressCogsApproval(db, press(id));
     invalidateCogsApprovals(db, { agentId: "flo", reason: "policy_narrowed" });
     expect(getPermissionRequest(db, id)!.status).toBe("expired");
-    expect(handOffCogsApproval(db, { requestId: id, agentId: "flo", sessionId: "s1", processGen: "g1", currentStamp: "3:a", nowMs: T0 + 2000 })).toBe(false);
+    expect(handOffCogsApproval(db, { executionOperation: op, currentOwnerUserId: 7, currentOwner: ownerFixture, requestId: id, agentId: "flo", sessionId: "s1", processGen: "g1", currentStamp: "3:a", nowMs: T0 + 2000 })).toBe(false);
   });
   test("인계 뒤 → 결정 이력 유지", () => {
     const { db, id } = setup();
     pressCogsApproval(db, press(id));
-    expect(handOffCogsApproval(db, { requestId: id, agentId: "flo", sessionId: "s1", processGen: "g1", currentStamp: "3:a", nowMs: T0 + 2000 })).toBe(true);
+    expect(handOffCogsApproval(db, { executionOperation: op, currentOwnerUserId: 7, currentOwner: ownerFixture, requestId: id, agentId: "flo", sessionId: "s1", processGen: "g1", currentStamp: "3:a", nowMs: T0 + 2000 })).toBe(true);
     expect(invalidateCogsApprovals(db, { agentId: "flo", reason: "policy_narrowed" })).toBe(0);
     expect(getPermissionRequest(db, id)!.status).toBe("allowed_once");
   });
@@ -193,7 +194,7 @@ describe("무효화 × 상태", () => {
   });
   test("다른 팀원·다른 세션은 건드리지 않는다", () => {
     const { db, id } = setup();
-    const other = createCogsApproval(db, { op: { ...op, agent_id: "mille" }, roomId: "43", policyStamp: "1:a", sessionId: "s9", processGen: "g1", ttlMs: 300_000, nowMs: T0 });
+    const other = createCogsApproval(db, { owner: ownerFixture, op: { ...op, agent_id: "mille" }, roomId: "43", policyStamp: "1:a", sessionId: "s9", processGen: "g1", ttlMs: 300_000, nowMs: T0 });
     endCogsSession(db, "flo", "s-other");
     expect(getPermissionRequest(db, id)!.status).toBe("pending");
     invalidateCogsApprovals(db, { agentId: "flo", reason: "policy_narrowed" });
@@ -209,13 +210,45 @@ describe("무효화 × 상태", () => {
 
 describe("실행 인계 — 딱 한 번, 직전에 다시 본다", () => {
   const ho = (id: string, over: Partial<Parameters<typeof handOffCogsApproval>[1]> = {}) =>
-    ({ requestId: id, agentId: "flo", sessionId: "s1", processGen: "g1", currentStamp: "3:a", nowMs: T0 + 2000, ...over });
+    ({ requestId: id, currentOwner: ownerFixture, agentId: "flo", sessionId: "s1", processGen: "g1", currentStamp: "3:a", nowMs: T0 + 2000, currentOwnerUserId: 7, executionOperation: op, ...over });
   test("읽은 뒤 쓰기 전에 다른 인계가 끼어들어도 한 번만 넘긴다", () => {
     const { db, id } = setup();
     pressCogsApproval(db, press(id));
     let inner: boolean | undefined;
     const outer = handOffCogsApproval(db, ho(id, { beforeClaim: () => { inner = handOffCogsApproval(db, ho(id)); } }));
     expect([outer, inner].filter(Boolean)).toHaveLength(1);
+  });
+  for (const owner of [undefined, null, "", 8, "8"]) {
+    test(`실행 직전 owner 없음·변경(${String(owner)})은 인계하지 않는다`, () => {
+      const { db, id } = setup();
+      pressCogsApproval(db, press(id));
+      expect(handOffCogsApproval(db, ho(id, { currentOwnerUserId: owner }))).toBe(false);
+      expect(getBinding(db, id)!.handed_off_at_ms).toBeNull();
+    });
+  }
+  test("현재 owner의 문자열 표현이 승인자와 같으면 1회 인계", () => {
+    const { db, id } = setup();
+    pressCogsApproval(db, press(id));
+    expect(handOffCogsApproval(db, ho(id, { currentOwnerUserId: "7" }))).toBe(true);
+    expect(handOffCogsApproval(db, ho(id))).toBe(false);
+  });
+  test("승인된 Write의 tool·경로·입력 변경은 모두 인계 0회", () => {
+    const original = { runtime: "claude", agent_id: "flo", action: "Write", path: "/fixture/target", text: JSON.stringify({ file_path: "/fixture/target", content: "approved" }) };
+    const { db, id } = setup({ op: original });
+    pressCogsApproval(db, press(id));
+    for (const changed of [undefined, { ...original, action: "Edit" }, { ...original, path: "/fixture/other" }, { ...original, text: JSON.stringify({ file_path: "/fixture/target", content: "changed" }) }]) {
+      expect(handOffCogsApproval(db, ho(id, { executionOperation: changed }))).toBe(false);
+      expect(getBinding(db, id)!.handed_off_at_ms).toBeNull();
+    }
+    expect(handOffCogsApproval(db, ho(id, { executionOperation: original }))).toBe(true);
+    expect(handOffCogsApproval(db, ho(id, { executionOperation: original }))).toBe(false);
+  });
+  test("승인 뒤 취소하면 인계 0회", () => {
+    const { db, id } = setup();
+    pressCogsApproval(db, press(id));
+    endCogsSession(db, "flo", "s1");
+    expect(handOffCogsApproval(db, ho(id))).toBe(false);
+    expect(getBinding(db, id)!.handed_off_at_ms).toBeNull();
   });
   test("두 번째 인계는 false", () => {
     const { db, id } = setup();

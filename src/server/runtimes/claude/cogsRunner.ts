@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { createInterface } from "node:readline";
 import type { CodexTurnOptions, CodexTurnResult } from "../codex/runner";
 import { assertCogsWorkspace, cogsToolPolicy, readCogsToolScope, type CogsToolScope } from "./cogsToolPolicy";
+import { startPermissionHost } from "./cogsPermissionMcp";
+import { gateClaudePermission } from "./cogsPermissionGate";
+import { REPO_ROOT } from "../../lib/personaTemplates";
+import { cogsRegistryPath } from "./cogsToolPolicy";
 import { COGS_MODELS } from "../../lib/b3chatModels";
 import { cogsActivityLine } from "../codex/cogsActivity";
 
@@ -28,18 +32,17 @@ export function claudeToolItem(name: string, input: unknown): unknown {
   }
 }
 
-export function claudeCogsEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(source).filter(([key])=>
-    !key.startsWith("TELEGRAM_") && !key.startsWith("CODEX_") && key !== "CLAUDECODE" && key !== "CLAUDE_CODE_SESSION_ID"));
-}
-export function claudeCogsArguments(opts: CodexTurnOptions, system: string, workspace = opts.cwd ?? process.cwd(), scope: CogsToolScope = readCogsToolScope(opts.agentId)): string[] {
+import { claudeCogsEnvironment } from "./cogsEnvironment";
+export { claudeCogsEnvironment } from "./cogsEnvironment";
+export function claudeCogsArguments(opts: CodexTurnOptions, system: string, workspace = opts.cwd ?? process.cwd(), scope: CogsToolScope = readCogsToolScope(opts.agentId), permissionSocket?: string): string[] {
   const model=opts.model ?? "sonnet";
   if (!(COGS_MODELS.claude as readonly string[]).includes(model)) throw new Error("unsupported_model");
   const policy = cogsToolPolicy(workspace, scope);
   return ["-p","--model",model,"--output-format","stream-json","--include-partial-messages","--verbose",
-    "--safe-mode","--setting-sources","","--settings",JSON.stringify(policy.settings),
-    "--strict-mcp-config","--mcp-config",JSON.stringify({mcpServers:{}}),
-    ...policy.flags,"--permission-mode","dontAsk","--permission-prompts","none",
+    ...(permissionSocket ? ["--disable-slash-commands"] : ["--safe-mode"]),"--setting-sources","","--settings",JSON.stringify(policy.settings),
+    "--strict-mcp-config","--mcp-config",JSON.stringify({mcpServers:permissionSocket ? {cogs_permission:{command:process.execPath,args:[join(import.meta.dir,"cogsPermissionMcp.ts"),permissionSocket]}} : {}}),
+    ...(permissionSocket ? [] : policy.flags),"--permission-mode",permissionSocket ? "default" : "dontAsk",
+    ...(permissionSocket ? ["--permission-prompt-tool","mcp__cogs_permission__ask"] : ["--permission-prompts","none"]),
     "--tools",policy.tools,"--allowedTools",...policy.allowed,"--append-system-prompt",system,
     ...(opts.resumeSessionId ? ["--resume",opts.resumeSessionId] : [])];
 }
@@ -53,6 +56,7 @@ export async function runClaudeCogsTurn(opts: CodexTurnOptions): Promise<CodexTu
   let toolName="", toolInput="", toolId="";
   // 한 도구 호출에 신호는 한 번. 부분 JSON 이 완성되는 순간·블록 끝·완성된 assistant 메시지 중 먼저 오는 쪽.
   const announced=new Set<string>();
+  let permissionHost: Awaited<ReturnType<typeof startPermissionHost>> | undefined;
   try {
     const scope = readCogsToolScope(opts.agentId);
     const workspace = assertCogsWorkspace(cwd);
@@ -64,10 +68,24 @@ export async function runClaudeCogsTurn(opts: CodexTurnOptions): Promise<CodexTu
         return {ok:false,reply:"",detail:"cogs_folder_cli_unsupported",elapsedMs:Date.now()-started};
       }
     }
+    if (scope === "folder" && opts.onCogsApproval) {
+      permissionHost = await startPermissionHost(candidate => gateClaudePermission(candidate, {
+        paths: { workspace, protectedPaths: [REPO_ROOT, join(import.meta.dir,"../../../.."), cogsRegistryPath(),
+          ...(opts.codexHome ? [opts.codexHome] : []),
+          ...(process.env.B3OS_TEAM_DB ? [process.env.B3OS_TEAM_DB, `${process.env.B3OS_TEAM_DB}-wal`, `${process.env.B3OS_TEAM_DB}-shm`] : []),
+          join(process.env.HOME ?? "/nonexistent", ".claude.json"),
+          join(process.env.HOME ?? "/nonexistent", ".claude"), join(process.env.HOME ?? "/nonexistent", ".openclaw"),
+          join(process.env.HOME ?? "/nonexistent", ".codex"), permissionHost!.dir] },
+        card: async (candidate, executionId, normalizedPath) => (await opts.onCogsApproval!({
+          method:"claude/permission", params:{candidate, executionId, normalizedPath}
+        })) === "approved",
+        audit: row => console.log(JSON.stringify({type:"cogs_permission_check", ...row})),
+      }));
+    }
     const persona=[`You are AI teammate ${opts.agentId}. Reply directly in Korean. Your workspace is ${workspace}.`,
       ...["SOUL.md","CLAUDE.md"].map(name=>{try{return readFileSync(join(opts.cwd ?? cwd,name),"utf-8");}catch{return "";}}),
       "This conversation is in the cogs app. Return your answer as assistant text; the bridge delivers it. Do not use Telegram plugins or messenger sending scripts."].join("\n");
-    const child=spawn(binary,claudeCogsArguments(opts,persona,workspace,scope),
+    const child=spawn(binary,claudeCogsArguments(opts,persona,workspace,scope,permissionHost?.path),
       // Keep the CLI in the bridge's process group for LaunchAgent teardown.
       {cwd:workspace,env:claudeCogsEnvironment(process.env),stdio:["pipe","pipe","ignore"],detached:false});
     const kill=()=>{try{child.kill("SIGTERM");}catch{/* already gone */}};
@@ -116,5 +134,5 @@ export async function runClaudeCogsTurn(opts: CodexTurnOptions): Promise<CodexTu
     }
     return {ok:!failure && !!text.trim(),reply:text,sessionId,detail,elapsedMs:Date.now()-started};
   } catch (error) {return {ok:false,reply:text,sessionId,detail:error instanceof Error && error.message === "cogs_workspace_contains_control_files" ? error.message : "runtime_failed",elapsedMs:Date.now()-started};}
-  finally {if(temporary)rmSync(cwd,{recursive:true,force:true});}
+  finally {permissionHost?.close();if(temporary)rmSync(cwd,{recursive:true,force:true});}
 }
