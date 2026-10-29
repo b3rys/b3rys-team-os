@@ -48,6 +48,9 @@ export function cogsToolPolicy(workspace: string, scope: CogsToolScope) {
   const protectedPaths = [join(root,"SOUL.md"), join(root,"CLAUDE.md"), join(root,".claude")];
   const protectedWrites = protectedPaths.flatMap(path => [path, canonicalPath(path), `${path}/**`, `${canonicalPath(path)}/**`])
     .flatMap(path => [`Write(/${path})`, `Edit(/${path})`]);
+  // Absolute globs also cover approval targets outside the workspace.
+  const protectedFileWrites = ["//**/.env", "//**/.env.*", "//**/*.key", "//**/.ssh/**"]
+    .flatMap(path => [`Write(${path})`, `Edit(${path})`]);
   return {
     tools: "Read,Glob,Grep,WebFetch,Write,Edit,WebSearch",
     allowed: ["WebFetch", "WebSearch", `Read(/${root}/**)`, `Glob(/${root}/**)`, `Grep(/${root}/**)`, `Write(/${root}/**)`, `Edit(/${root}/**)`],
@@ -55,7 +58,7 @@ export function cogsToolPolicy(workspace: string, scope: CogsToolScope) {
     settings: {...common, permissions: {
       blockReadsOutsideWorkingDirectories: true,
       additionalDirectories: [],
-      deny: [...protectedWrites, "Bash", "Read(~/.claude/**)", "Read(~/.secrets/**)", "Read(**/.env)", "Read(**/.env.*)", "Edit(**/.env)", "Edit(**/.env.*)", "Write(**/.env)", "Write(**/.env.*)"],
+      deny: [...protectedWrites, ...protectedFileWrites, "Bash", "Read(~/.claude/**)", "Read(~/.secrets/**)", "Read(**/.env)", "Read(**/.env.*)", "Edit(**/.env)", "Edit(**/.env.*)", "Write(**/.env)", "Write(**/.env.*)"],
     }},
   };
 }

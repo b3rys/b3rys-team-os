@@ -60,3 +60,17 @@ test("folder Write/Edit deny persona, configuration, and resolved persona aliase
   expect(deny.some(rule=>rule.endsWith("/.claude/**)")&&rule.startsWith("Write"))).toBe(true);
  } finally {rmSync(dir,{recursive:true,force:true});}
 });
+
+ test("folder runner preserves absolute protected-write denies while keeping Bash unavailable", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cogs-protected-writes-"));
+  try {
+   const args = claudeCogsArguments({ agentId: "fixture", cwd: dir, prompt: "" }, "", dir, "folder");
+   const settings = JSON.parse(args[args.indexOf("--settings") + 1]);
+   for (const path of ["//**/.env", "//**/.env.*", "//**/*.key", "//**/.ssh/**"]) {
+    for (const tool of ["Write", "Edit"]) expect(settings.permissions.deny).toContain(`${tool}(${path})`);
+   }
+   expect(args[args.indexOf("--tools") + 1].split(",")).not.toContain("Bash");
+   expect(settings.permissions.deny).toContain("Bash");
+   expect(cogsToolPolicy(dir, "full").settings).not.toHaveProperty("permissions");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+ });
