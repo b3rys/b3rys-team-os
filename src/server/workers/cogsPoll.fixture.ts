@@ -23,6 +23,7 @@ let oldEnv: Record<string, string | undefined>;
 const TOKEN = "fixture-cogs-secret-no-production-value";
 const KEYS = ["TEAM_AGENT_REGISTRY", "B3OS_AUDIT_LOG_DIR", "TEAMOS_AGENT_OFF_FILE", "TEAM_COLLAB_ROOT", "COGS_ATTACHMENT_DIR", "COGS_ATTACHMENT_MAX_BYTES"];
 let pulled = 0;
+let declineStatus = 200;
 let files: Record<string, Uint8Array>, filePath: (id: string) => string, streamed: Set<string>, reportedSize: Record<string, number>;
 
 beforeEach(() => {
@@ -36,6 +37,7 @@ beforeEach(() => {
   delete process.env.COGS_ATTACHMENT_MAX_BYTES;
   files = {}; filePath = (id) => `files/${id}`; streamed = new Set(); reportedSize = {};
   writeFileSync(join(dir, "token"), TOKEN, { mode: 0o600 });
+  declineStatus = 200;
   updates = []; calls = []; injected = []; events = []; fail = false; injectOk = true; sendMode = "normal"; releaseSend = undefined;
   server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
     const pathname = new URL(req.url).pathname;
@@ -65,6 +67,7 @@ beforeEach(() => {
       const id = (body as any).file_id as string;
       return Response.json({ ok: true, result: { file_id: id, file_size: reportedSize[id] ?? files[id]?.byteLength ?? 0, file_path: filePath(id) } });
     }
+    if (method === "declineResponse" && declineStatus !== 200) return Response.json({ ok: false, description: "response_not_expected" }, { status: declineStatus });
     if (sendMode === "malformed") return new Response("lost acknowledgement");
     if (sendMode === "hold") await new Promise<void>((resolve) => { releaseSend = resolve; });
     return Response.json({ ok: true, result: { message_id: 99 } });
@@ -484,9 +487,9 @@ test("the same update number from another bot connection does not overwrite an e
 });
 
 // 리액션: 팀원이 받은 cogs 메시지에 자기 봇으로 이모지를 붙인다.
-async function react(messageId: string, emoji: string, agentId = "lisa", routes = route()) {
+async function react(messageId: string, emoji: string | null, agentId = "lisa", routes = route(), extra: object = {}) {
   return routes.request("/cogs/react", { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ agent_id: agentId, message_id: messageId, emoji }) });
+    body: JSON.stringify({ agent_id: agentId, message_id: messageId, ...(emoji === null ? {} : { emoji }), ...extra }) });
 }
 function reactions() { return calls.filter((x) => x.method === "setMessageReaction").map((x) => ({ ...x.body, reaction: JSON.parse(x.body.reaction) })); }
 
@@ -561,3 +564,61 @@ for (const ok of [true, false]) {
     } finally { api.stop(true); }
   });
 }
+
+test("no_reply declines the waiting response after the reaction, on the same message", async () => {
+  updates = [update()]; await poller().pollOnce();
+  const res = await react(injected[0]!.messageId, "👍", "lisa", route(), { no_reply: true });
+  expect(res.status).toBe(200); expect(await res.json()).toEqual({ ok: true, cleared: false, declined: true });
+  expect(calls.filter((x) => x.method !== "getUpdates").map((x) => x.method)).toEqual(["setMessageReaction", "declineResponse"]);
+  expect(calls.at(-1)!.body).toEqual({ chat_id: "71", message_id: 110 });
+});
+
+test("no_reply alone declines without touching reactions; nothing waiting (409) is not an error", async () => {
+  updates = [update()]; await poller().pollOnce(); declineStatus = 409;
+  const res = await react(injected[0]!.messageId, null, "lisa", route(), { no_reply: true });
+  expect(res.status).toBe(200); expect(await res.json()).toEqual({ ok: true, cleared: false, declined: false });
+  expect(reactions()).toHaveLength(0);
+  declineStatus = 500;
+  expect((await react(injected[0]!.messageId, null, "lisa", route(), { no_reply: true })).status).toBe(502);
+  expect((await react(injected[0]!.messageId, null)).status).toBe(400);
+});
+
+test("react.sh --no-reply without an emoji declines", async () => {
+  updates = [update()]; await poller().pollOnce();
+  const routes = route();
+  const api = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (req) => routes.fetch(new Request(req.url.replace("/api/cogs/react", "/cogs/react"), req)) });
+  try {
+    const p = Bun.spawn(["bash", "skills/b3os-team-inbox/scripts/react.sh", "--msg", injected[0]!.messageId, "--no-reply"], {
+      cwd: join(import.meta.dir, "../../.."), env: { ...process.env, TEAM_DB_PATH: join(dir, "team.db"), GD_AGENT_ID: "lisa", TEAM_BASE: `http://127.0.0.1:${api.port}` }, stdout: "pipe", stderr: "pipe",
+    });
+    const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+    expect(code, `${out}\n${err}`).toBe(0); expect(err).toContain("답 없이 끝냄 알림"); expect(err).not.toContain("리액션");
+    expect(calls.at(-1)!.method).toBe("declineResponse");
+  } finally { api.stop(true); }
+});
+
+test("react.sh exits instead of looping when an option has no value; an explicit empty emoji still clears", async () => {
+  updates = [update()]; await poller().pollOnce();
+  const routes = route();
+  const api = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (req) => routes.fetch(new Request(req.url.replace("/api/cogs/react", "/cogs/react"), req)) });
+  const run = async (args: string[]) => {
+    const p = Bun.spawn(["bash", "skills/b3os-team-inbox/scripts/react.sh", ...args], {
+      cwd: join(import.meta.dir, "../../.."), env: { ...process.env, TEAM_DB_PATH: join(dir, "team.db"), GD_AGENT_ID: "lisa", TEAM_BASE: `http://127.0.0.1:${api.port}` }, stdout: "pipe", stderr: "pipe",
+    });
+    const timer = setTimeout(() => p.kill(), 3000);
+    const code = await p.exited; clearTimeout(timer); return code;
+  };
+  try {
+    expect(await run(["--msg"])).toBe(2);
+    expect(await run(["--msg", injected[0]!.messageId, "--emoji"])).toBe(2);
+    expect(await run(["--msg", injected[0]!.messageId, "--emoji", ""])).toBe(0);
+    expect(reactions().at(-1)!.reaction).toEqual([]);
+  } finally { api.stop(true); }
+});
+
+test("a JSON body that is not an object is a 400, not a server error", async () => {
+  for (const body of ["null", "[]", "\"x\""]) {
+    const res = await route().request("/cogs/react", { method: "POST", headers: { "content-type": "application/json" }, body });
+    expect(res.status).toBe(400);
+  }
+});

@@ -67,15 +67,20 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
   const r = new Hono();
 
   // POST /api/cogs/react — 팀원이 받은 cogs 메시지(버스 id)에 자기 봇으로 리액션. emoji "" = 지우기.
+  //   no_reply: true 면 글 답 없이 끝낸다고 cogs 에 알린다(declineResponse, 앱 '입력 중' 끔). emoji 없이 no_reply 만도 된다.
   //   그 메시지가 cogs 에서 이 팀원에게 온 원글일 때만 붙인다. 토큰은 서버 안에서만 쓴다.
+  //   agent_id 는 호출자가 밝힌 값이다(POST /inbox 의 from_agent_id 와 같다). 서버 인증이 아니므로 이 확인은
+  //   잘못 고른 메시지를 막는 것이지, 로컬 API 를 부를 수 있는 다른 팀원이 남의 이름을 대는 것까지 막지는 못한다.
   r.post("/cogs/react", async (c) => {
-    let raw: { agent_id?: unknown; message_id?: unknown; emoji?: unknown };
+    let raw: { agent_id?: unknown; message_id?: unknown; emoji?: unknown; no_reply?: unknown };
     try { raw = await c.req.json(); } catch { return c.json({ ok: false, error: "invalid_json" }, 400); }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return c.json({ ok: false, error: "invalid_json" }, 400);
     const agentId = typeof raw.agent_id === "string" ? raw.agent_id : "";
     const messageId = typeof raw.message_id === "string" ? raw.message_id : "";
     const emoji = typeof raw.emoji === "string" ? raw.emoji : null;
-    if (!agentId || !messageId || emoji === null) return c.json({ ok: false, error: "missing_fields" }, 400);
-    if (emoji !== "" && !isSingleEmoji(emoji)) return c.json({ ok: false, error: "emoji_invalid" }, 400);
+    const noReply = raw.no_reply === true;
+    if (!agentId || !messageId || (emoji === null && !noReply)) return c.json({ ok: false, error: "missing_fields" }, 400);
+    if (emoji !== null && emoji !== "" && !isSingleEmoji(emoji)) return c.json({ ok: false, error: "emoji_invalid" }, 400);
     const row = deps.db.prepare("SELECT to_agent_id, source, meta_json FROM message WHERE id = ?").get(messageId) as
       { to_agent_id: string; source: string; meta_json: string | null } | undefined;
     let meta: import("../lib/cogsRelay").CogsMeta | null = null;
@@ -86,9 +91,9 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     if (row.to_agent_id !== agentId || meta.agent_id !== agentId) return c.json({ ok: false, error: "cogs_reaction_agent_mismatch" }, 403);
     try {
       const agent = (deps.agents?.() ?? ambientAgents()).find((a) => a.id === agentId);
-      await setCogsReaction(agent, meta, emoji);
-      appendAudit(deps.db, agentId, "cogs_reaction_set", messageId, { chat_id: meta.chat_id, cleared: emoji === "" });
-      return c.json({ ok: true, cleared: emoji === "" });
+      const { declined } = await setCogsReaction(agent, meta, emoji, noReply);
+      appendAudit(deps.db, agentId, "cogs_reaction_set", messageId, { chat_id: meta.chat_id, cleared: emoji === "", no_reply: noReply, declined });
+      return c.json({ ok: true, cleared: emoji === "", ...(noReply ? { declined } : {}) });
     } catch (error) {
       const known = ["cogs_reaction_agent_mismatch", "cogs_reaction_not_allowed", "cogs_inbox_invalid", "cogs_requires_claude_tmux",
         "cogs_bridge_polling_conflict", "cogs_token_unavailable", "cogs_api_failed"];

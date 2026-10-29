@@ -173,9 +173,11 @@ skills/b3os-team-inbox/scripts/ack.sh <message_id>
 ```bash
 skills/b3os-team-inbox/scripts/react.sh --msg <받은 cogs 메시지의 버스 id> --emoji 👍
 skills/b3os-team-inbox/scripts/react.sh --msg <id> --emoji ""   # 지우기
+skills/b3os-team-inbox/scripts/react.sh --msg <id> --emoji 👍 --no-reply   # 리액션만 하고 글 답 없이 끝낼 때
 ```
 - 내 봇으로, 내가 받은 cogs 메시지에만 붙는다. 이모지는 하나이고, 다시 부르면 바뀐다.
 - 메시지에 맞게 고른다(감사엔 🙏, 확인엔 👍 처럼). 리액션은 답을 대신하지 않는다 — 답할 일이면 답한다.
+- 글로 답하지 않고 끝낼 때는 `--no-reply` 를 붙인다. 안 붙이면 팀장 앱에 "입력 중"이 4분 남았다가 "응답 시간이 초과되었어요"가 뜬다. 이미 답했으면 붙여도 아무 일 없다.
 
 ### 팀버스 맥락 조회 (bus-recall)
 1:1 세션에서 "팀버스 맥락"이 필요할 때(1:1 방과 팀버스는 다른 세션). team.db(팀버스=message + GD 1:1=dm_message)를 read-only 로 조회해 요점만 본다 — SQL 직접 치지 말고 이걸 먼저.
