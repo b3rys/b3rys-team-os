@@ -52,6 +52,9 @@ test("audit never stores checker-quoted content or raw paths", async () => {
       checker:async()=>JSON.stringify({verdict:"deny",reason:`Refuse ${content} at ${path}`}),
       card:async()=>{cards++;return true;}, audit:row=>rows.push(row),
     });
+    expect(result).toEqual({behavior:"deny",message:"checker_denied: 보안 검사에서 거절됐어요"});
+    expect(JSON.stringify(result)).not.toContain(content);
+    expect(JSON.stringify(result)).not.toContain(path);
     expect(result.behavior).toBe("deny");expect(cards).toBe(0);expect(rows).toHaveLength(1);
     expect(JSON.stringify(rows)).not.toContain(content);
     expect(JSON.stringify(rows)).not.toContain(path);
@@ -78,7 +81,7 @@ test("relative registry env preserves protected targets and ordinary outside app
     };
     for (const path of [...protectedTargets, registry]) {
       expect(await gateClaudePermission({tool_name:"Write",input:{file_path:path,content:"fixture"}}, deps))
-        .toEqual({behavior:"deny",message:"protected_path"});
+        .toEqual({behavior:"deny",message:"protected_path: 보호된 경로에는 쓸 수 없어요"});
     }
     expect(checks).toBe(0); expect(cards).toBe(0);
     const input = {file_path:join(root,"ordinary.txt"),content:"ordinary note"};

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { isAbsolute, normalize } from "node:path";
 import { createApprovalWithCogsOwner, handOffWithCogsOwner } from "../../lib/cogsPermissions/ownerHandoff";
 import { recordCardMessage } from "../../lib/cogsPermissions/approvals";
 import type { CogsApproverDeps } from "../codex/cogsApprover";
@@ -9,8 +11,16 @@ export function createClaudeCardApprover(deps: CogsApproverDeps & { apiBase: str
     try {
       const { executionId, normalizedPath, candidate } = req.params as any;
       if (req.method !== "claude/permission" || !deps.roomId || typeof executionId !== "string"
-        || typeof normalizedPath !== "string" || candidate?.tool_name !== "Write" || !candidate?.input) return "denied";
-      const op = { runtime: "claude", agent_id: deps.agentId, action: "Write", path: normalizedPath, text: JSON.stringify(candidate.input) };
+        || typeof normalizedPath !== "string" || !isAbsolute(normalizedPath) || normalize(normalizedPath) !== normalizedPath
+        || candidate?.tool_name !== "Write" || typeof candidate?.input?.content !== "string"
+        || typeof candidate?.input?.file_path !== "string") return "denied";
+      // This adapter is entered only after the gate checker allows the Write.
+      // Never persist the input, even temporarily: failed cards also retain request rows.
+      const operation = () => ({ runtime: "claude", agent_id: deps.agentId, action: "Write", path: normalizedPath,
+        text: JSON.stringify({tool:"Write", contentBytes:Buffer.byteLength(candidate.input.content, "utf8"),
+          inputDigest:createHash("sha256").update(JSON.stringify(candidate.input)).digest("hex"), checkerCode:"checker_allowed"}) });
+      const op = operation();
+      const contentBytes = Buffer.byteLength(candidate.input.content, "utf8");
       const sessionId = executionId; // PR1 never reuses a grant for another execution.
       const transport = { apiBase: deps.apiBase, token: deps.token, fetchFn: deps.fetchFn, currentStamp: deps.currentStamp };
       const db = deps.openDb();
@@ -23,7 +33,7 @@ export function createClaudeCardApprover(deps: CogsApproverDeps & { apiBase: str
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         const sent = await Promise.race([
-          deps.sendCard({ requestId, operationCode:"edit_files", detail:normalizedPath, risks:[], allowAlways:false }),
+          deps.sendCard({ requestId, operationCode:"edit_files", detail:`${normalizedPath} · ${contentBytes} bytes`, risks:[], allowAlways:false }),
           new Promise<{ok:false}>(resolve => { timer = setTimeout(() => resolve({ok:false}), 15_000); }),
         ]);
         if (!sent.ok) { deps.waiters.cancel(requestId, "card_failed"); return "denied"; }
@@ -34,7 +44,7 @@ export function createClaudeCardApprover(deps: CogsApproverDeps & { apiBase: str
       if ((await waiting).kind !== "allowed") return "denied";
       const handoffDb = deps.openDb();
       try {
-        return await handOffWithCogsOwner(handoffDb, {requestId,agentId:deps.agentId,sessionId,processGen:deps.processGen,executionOperation:op}, transport) ? "approved" : "denied";
+        return await handOffWithCogsOwner(handoffDb, {requestId,agentId:deps.agentId,sessionId,processGen:deps.processGen,executionOperation:operation()}, transport) ? "approved" : "denied";
       } finally { handoffDb.close(); }
     } catch { if (requestId) deps.waiters.cancel(requestId, "approval_error"); return "denied"; }
   };

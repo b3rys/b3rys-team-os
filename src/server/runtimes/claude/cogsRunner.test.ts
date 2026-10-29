@@ -221,7 +221,7 @@ print(json.dumps({"type":"result","result":"complete","is_error":False}))
  try {
   const result=await runClaudeCogsTurn({agentId:"fixture",cwd:root,prompt:"fixture",onCogsApproval:async()=>{cards++;return "approved";}});
   expect(result.ok).toBe(true);
-  expect(JSON.parse(readFileSync(capture,"utf-8"))).toEqual(targets.map(()=>({behavior:"deny",message:"protected_path"})));
+  expect(JSON.parse(readFileSync(capture,"utf-8"))).toEqual(targets.map(()=>({behavior:"deny",message:"protected_path: 보호된 경로에는 쓸 수 없어요"})));
   expect(cards).toBe(0);expect(existsSync(checker)).toBe(false);
  } finally {if(prior===undefined)delete process.env.CLAUDE_BIN;else process.env.CLAUDE_BIN=prior;rmSync(root,{recursive:true,force:true});}
 });
