@@ -82,3 +82,41 @@ export async function sendCogsReply(agent: AgentRecord | undefined, meta: CogsMe
   if (!Number.isSafeInteger(result?.message_id)) throw new CogsDeliveryUnknown();
   return result.message_id;
 }
+
+/** 첨부 하나를 받아 dest 에 쓴다. 실패는 고정 코드로만 던진다(원격 본문·주소·토큰을 오류에 싣지 않는다). */
+export async function cogsDownloadFile(config: Pick<CogsInbox, "api_base">, token: string, fileId: string, dest: string,
+  maxBytes: number, signal?: AbortSignal): Promise<number> {
+  const info = await cogsCall(config, token, "getFile", { file_id: fileId }, signal);
+  const path = info?.file_path;
+  // cogs 는 "files/<file_id>" 를 준다. 경로를 벗어나는 값은 받지 않는다.
+  if (typeof path !== "string" || !/^[A-Za-z0-9_\-./]+$/.test(path) || path.startsWith("/") || path.split("/").includes("..")) {
+    throw new Error("cogs_file_path_invalid");
+  }
+  if (Number.isSafeInteger(info?.file_size) && info.file_size > maxBytes) throw new Error("cogs_file_too_large");
+  let res: Response;
+  try {
+    res = await fetch(`${config.api_base}/file/bot${encodeURIComponent(token)}/${path}`, {
+      redirect: "error", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000),
+    });
+  } catch { throw new Error("cogs_file_download_failed"); }
+  if (!res.ok || !res.body) throw new Error("cogs_file_download_failed");
+  if (Number(res.headers.get("content-length") ?? 0) > maxBytes) throw new Error("cogs_file_too_large");
+  // 크기를 알리지 않거나 줄여 알린 응답도 있으니 읽는 중에 세고, 넘으면 그 자리에서 끊는다.
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) { await reader.cancel().catch(() => {}); throw new Error("cogs_file_too_large"); }
+      chunks.push(value);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message === "cogs_file_too_large") throw error;
+    throw new Error("cogs_file_download_failed");
+  }
+  await Bun.write(dest, new Blob(chunks as BlobPart[]));
+  return total;
+}
