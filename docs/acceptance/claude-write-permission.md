@@ -13,6 +13,7 @@ This PR covers Write requests reaching this adapter. It does not establish a com
 | Tool-free checker, 30-second deadline, fail-closed parsing | cogsChecker.ts, cogsCheckerPolicy.json | cogsChecker.test.ts | 7 tests passed; error-to-allow mutant detected |
 | Input redaction | cogsChecker.ts | structured secret fields, secret-file payload, access_key/accessKey regression | missing-access-key mutant detected |
 | Canonical target classification | cogsPathGate.ts | cogsPathGate.test.ts | 16 assertions passed, including symlink/.. and dangling links |
+| Audit privacy | cogsPermissionGate.ts | checker reason quotes synthetic content and raw path | regression failed before fix; fixed-code audit passes without either value |
 | Protected target → checker → card | cogsPermissionGate.ts | cogsPermissionGate.test.ts | failures create no card; one execution-correlated audit |
 | Owner-bound approval handoff | cogsCardApprover.ts | cogsCardApprover.test.ts, ownerBinding.test.ts | fresh owner succeeds; generation change denies |
 | Explicit MCP transport | cogsPermissionMcp.ts, cogsRunner.ts | gate IPC and runner tests; real CLI below | callback reached after CLI configuration correction |
@@ -41,3 +42,5 @@ Not validated here: live owner-card transport, live deployment, all environment 
 ## Rollback
 
 Revert this PR before deployment. No migration was applied to a live database by these checks. The owner-binding column introduced by this branch is nullable and intentionally does not backfill legacy approvals.
+
+Audit privacy follow-up: the new regression failed on the pre-fix gate (2 pass / 1 fail). After replacing checker prose in audit records with fixed reason codes, gate and checker checks passed 10 tests / 69 assertions; typecheck and diffcheck passed. Caller-facing denial remains separate from the audit record. This change does not constitute a new actual-CLI run.

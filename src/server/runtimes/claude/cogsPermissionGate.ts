@@ -1,4 +1,3 @@
-import { redactSecrets } from "../../lib/redactSecrets";
 import { createHash, randomUUID } from "node:crypto";
 import { checkCogsOperation, type CheckerRunner } from "./cogsChecker";
 import { classifyCogsPath, type PathContext } from "./cogsPathGate";
@@ -13,7 +12,8 @@ export interface GateDeps {
 }
 export async function gateClaudePermission(candidate: PermissionCandidate, deps: GateDeps): Promise<PermissionReply> {
   const executionId = randomUUID();
-  let reason = "invalid_request", verdict = "deny", model: string | undefined, promptVersion: string | undefined;
+  let reason: "invalid_request" | "path_unresolved" | "protected_path" | "checker_denied" | "owner_approved" | "approval_denied" | "permission_gate_error" = "invalid_request";
+  let verdict = "deny", model: string | undefined, promptVersion: string | undefined;
   let checkerVerdict: string | undefined;
   let pathHash: string | undefined, inputHash: string | undefined;
   try {
@@ -29,7 +29,7 @@ export async function gateClaudePermission(candidate: PermissionCandidate, deps:
     if (path.kind === "protected") { reason = "protected_path"; return { behavior: "deny", message: reason }; }
     const checked = await checkCogsOperation({ tool: candidate.tool_name, normalizedPath: path.path, input, secretPath: path.kind === "secret" }, deps.checker);
     ({ model, promptVersion } = checked); checkerVerdict = checked.verdict;
-    if (checked.verdict !== "allow") { reason = checked.reason; return { behavior: "deny", message: reason }; }
+    if (checked.verdict !== "allow") { reason = "checker_denied"; return { behavior: "deny", message: checked.reason }; }
     // The card binds the original full tool input and the normalized target separately.
     const allowed = await deps.card({ ...candidate, input }, executionId, path.path);
     reason = allowed ? "owner_approved" : "approval_denied";
@@ -38,9 +38,9 @@ export async function gateClaudePermission(candidate: PermissionCandidate, deps:
     return { behavior: "allow", updatedInput: JSON.parse(raw) };
   } catch { reason = "permission_gate_error"; return { behavior: "deny", message: reason }; }
   finally {
-    // No candidate content or raw path in the audit record.
+    // Audit reasons are fixed codes; checker prose may quote candidate content or paths.
     // An audit write error propagates; the transport then denies, never returns allow.
-    deps.audit({ executionId, tool: candidate.tool_name, inputHash, pathHash, verdict,
-      reason: redactSecrets(reason).slice(0, 300), checkerVerdict, model, promptVersion, at: new Date().toISOString() });
+    deps.audit({ executionId, tool: candidate?.tool_name === "Write" ? "Write" : "unsupported", inputHash, pathHash, verdict,
+      reason, checkerVerdict, model, promptVersion, at: new Date().toISOString() });
   }
 }
