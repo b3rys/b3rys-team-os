@@ -54,6 +54,16 @@ export const STATUS_BY_RUNTIME: Record<string, string> = {
   codex: "codex_cli",
 };
 
+/** Telegram 첫 팀원도 발신자 게이트를 채운 뒤에만 브리지를 시작한다. cogs는 자체 방 허용 목록을 쓴다. */
+export function codexOwnerGate(db: Database, channelKind: string, derive = resolveOwnerDmId): string | null {
+  if (channelKind !== "telegram") return null;
+  const saved = (db.query("SELECT value FROM setting WHERE key = 'owner_chat_id'").get() as { value?: string } | null)?.value?.trim();
+  const owner = saved || derive();
+  return owner && /^-?\d{1,20}$/.test(owner)
+    ? null
+    : "Settings에서 팀장의 Telegram 숫자 chat_id(owner_chat_id)를 저장한 뒤 다시 활성화하세요.";
+}
+
 // 게이트웨이 bootout 직후 프로필 경로에 일시적인 EBUSY 잠금이 남을 수 있어 삭제를 재시도한다.
 export async function removePathWithRetries(
   path: string,
@@ -528,6 +538,10 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       steps: [{ step: "member-limit", ok: false, detail: `활성 공식 팀원은 최대 ${MAX_OFFICIAL_TEAM_MEMBERS}명입니다.` }],
     };
   }
+  if (runtime === "codex") {
+    const missingOwner = codexOwnerGate(db, readMemberChannel(id, input.registryPath).kind);
+    if (missingOwner) return { ok: false, steps: [{ step: "owner-chat", ok: false, detail: missingOwner }], error: missingOwner };
+  }
   // openclaw·hermes는 setAgentEnabled(true)를 거치지 않으므로 재영입 시 off-list를 별도로 해제한다.
   try { clearAgentOff(id); } catch { /* best-effort */ }
   const paths = memberPaths(id, runtime);
@@ -577,6 +591,7 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       steps.push({ step: "runtime", ok: false, detail: "실행 OFF(APPROVAL_EXECUTION_ENABLED≠1) — codex 브리지 기동 건너뜀" });
       return { ok: false, steps, error: "런타임 활성화 권한 OFF(팀장 인가 필요)" };
     }
+    let activated = false;
     try {
       placeCodexToken(id, bot_token);
       const bridgePaths = cogsClaude ? writeClaudeCogsFiles(id,readMemberChannel(id,input.registryPath)) : writeCodexBridgeFiles(id);
@@ -592,13 +607,21 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
       steps.push({ step: "poller", ok: pollerOk, detail: pollerOk ? "codex 브리지 poller 기동 확인(getUpdates ready marker)" : "codex 브리지 poller 미기동(ready marker 없음 — 봇이 메시지를 못 받음, 재활성화 필요)" });
       if (!pollerOk) return { ok: false, steps, error: "codex 브리지 poller 미기동 — 봇이 메시지를 받지 못합니다(재활성화하세요)" };
       if (!(await pushEssentialStep(steps, { id, runtime })).ok) return { ok: false, steps, error: "codex 필수설정 누락 — 재활성화/설정 복구 필요" };
+      const wakeOk0 = addBusWake(id);
+      steps.push({ step: "bus-wake", ok: wakeOk0, detail: wakeOk0 ? "allowlist 추가" : "추가 실패" });
+      activated = steps.every((s) => s.ok);
+      return { ok: activated, steps };
     } catch (e) {
       steps.push({ step: "runtime", ok: false, detail: (e as Error).message });
       return { ok: false, steps, error: "codex 브리지 셋업 오류" };
+    } finally {
+      if (!activated) {
+        try {
+          const stopped = await setAgentEnabled(id, runtime, false, cogsClaude ? readMemberChannel(id, input.registryPath) : undefined);
+          steps.push({ step: "runtime-cleanup", ok: stopped.ok, detail: stopped.detail });
+        } catch { steps.push({ step: "runtime-cleanup", ok: false, detail: "실패한 브리지 정지 실패 — 서버에서 상태를 확인하세요." }); }
+      }
     }
-    const wakeOk0 = addBusWake(id);
-    steps.push({ step: "bus-wake", ok: wakeOk0, detail: wakeOk0 ? "allowlist 추가" : "추가 실패" });
-    return { ok: steps.every((s) => s.ok), steps };
   }
   // claude_channel: 토큰을 채널 .env 배치 + LaunchAgent plist 생성 → setClaude bootstrap(tmux 봇 기동).
   //

@@ -73,8 +73,9 @@ describe("codex config 시드 — 능력은 상속, 정책·신뢰·정체성은
   });
 
   test("★대조군 — 호스트 설정이 없으면 빈 설정으로 뜬다★ (상속할 것이 없어도 팀원은 떠야 한다)", () => {
-    expect(seed(null)).toBe(renderFallbackCodexConfig());
-    expect(seed("   \n ")).toBe(renderFallbackCodexConfig());
+    expect(seed(null)).toContain('[projects."/tmp/newbie"]');
+    expect(seed(null)).toContain('trust_level = "trusted"');
+    expect(seed("   \n ")).toBe(seed(null));
   });
 
   test("★공백 있는 경로도 안전하다★ — 따옴표 없이 넣으면 TOML 이 깨진다", () => {

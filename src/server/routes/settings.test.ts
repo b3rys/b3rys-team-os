@@ -1211,7 +1211,7 @@ describe("영입 OT / 능력 카탈로그", () => {
       subscriptionNeeded: true,
       detail: "429 insufficient_quota billing",
     });
-    const { app } = setupReady(AGENTS, { checkRuntimeAuth: authOk, activateMember: activateOk, firstModelCall, validateBotToken: okBotToken });
+    const { app } = setupReady(AGENTS, { checkRuntimeAuth: authOk, activateMember: activateOk, firstModelCall, validateBotToken: okBotToken, stopCodexBridge: async () => ({ ok: true, detail: "stopped" }) });
     const { ot_id } = await (await app.request("/members/recruit", json({ id: "cody", display_name: "Cody", role: "dev", runtime: "codex" }))).json();
     const token = "1234567:" + "A".repeat(35);
     expect((await app.request(`/ot/${ot_id}/provision`, json({ bot_token: token }))).status).toBe(200);
@@ -1225,8 +1225,39 @@ describe("영입 OT / 능력 카탈로그", () => {
     const joinStep = body.ot.steps.find((s: any) => s.key === "join");
     expect(joinStep.state).toBe("blocked");
     expect(joinStep.detail).toContain("subscription_needed");
-    expect(body.ot.stage).toBe("join");
+    expect(body.ot.stage).toBe("bundle");
   });
+  for (const outcome of ["failure", "exception", "success"] as const) {
+    test(`Codex first model ${outcome} stops the bridge and leaves activation retryable`, async () => {
+      const stopped: string[] = [];
+      const { app } = setupReady([], {
+        activateMember: async () => ({ ok: true, steps: [{ step: "runtime", ok: true, detail: "started" }] }),
+        firstModelCall: async () => {
+          if (outcome === "exception") throw new Error("fixture error");
+          return { runtime: "codex", ok: outcome === "success", subscriptionNeeded: false, detail: "fixture result" };
+        },
+        stopCodexBridge: async (id) => { stopped.push(id); return { ok: true, detail: "stopped" }; },
+        validateBotToken: okBotToken,
+      });
+      const created = await (await app.request("/members/recruit", json({ id: "probe", display_name: "Probe", role: "dev", runtime: "codex" }))).json();
+      await app.request(`/ot/${created.ot_id}/provision`, json({ bot_token: "1234567:" + "A".repeat(35) }));
+      const response = await app.request(`/ot/${created.ot_id}/activate`, json({}));
+      const body = await response.json();
+      if (outcome === "success") {
+        expect(response.status).toBe(200);
+        expect(body.ok).toBe(true);
+        expect(stopped).toEqual([]);
+        expect(body.ot.steps.find((s: any) => s.key === "join").state).toBe("done");
+      } else {
+        expect(response.status).toBe(502);
+        expect(body.ok).toBe(false);
+        expect(stopped).toEqual(["probe"]);
+        expect(body.ot.stage).toBe("bundle");
+        expect(body.ot.steps.find((s: any) => s.key === "join").state).toBe("blocked");
+        expect(body.steps).toContainEqual(expect.objectContaining({ step: "runtime-cleanup", ok: true }));
+      }
+    });
+  }
   // 구독 차단·첫 호출 실패·페어링 대기 순으로 안내해야 DM으로 해결되지 않는 결제 문제를 가리지 않는다.
   const pairingActivate = async () => ({
     ok: true,

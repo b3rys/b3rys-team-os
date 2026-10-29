@@ -12,9 +12,22 @@ import {
   waitForClaudePoller, waitForCodexPoller, waitForHermesGateway,
   activateMember, teardownRuntime, swapRuntime, RUNTIMES, STATUS_BY_RUNTIME,
   classifyEssentials, CLAUDE_ESSENTIAL_TOLERANCE, resolveActivationRuntimeCwd,
+  codexOwnerGate,
   type ActivateResult, type SwapDeps,
 } from "./activation";
 import { HERMES_BASE_PROFILE } from "./paths";
+
+test("Codex first Telegram member requires an owner before runtime startup; cogs keeps its own gate", () => {
+  const db = new Database(":memory:");
+  try {
+    db.run("CREATE TABLE setting (key TEXT PRIMARY KEY, value TEXT)");
+    expect(codexOwnerGate(db, "telegram", () => null)).toContain("owner_chat_id");
+    expect(codexOwnerGate(db, "b3chat", () => null)).toBeNull();
+    expect(codexOwnerGate(db, "telegram", () => "123456789")).toBeNull();
+    db.run("INSERT INTO setting VALUES ('owner_chat_id', '987654321')");
+    expect(codexOwnerGate(db, "telegram", () => { throw new Error("saved owner must win"); })).toBeNull();
+  } finally { db.close(); }
+});
 
 /** tmp HOME을 만들고, present=true면 ~/.claude/channels/telegram-<id>/bot.pid 를 미리 쓴다(실 HOME 미접촉). */
 function tmpHome(id: string, present: boolean): string {

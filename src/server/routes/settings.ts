@@ -100,6 +100,7 @@ export interface SettingsDeps {
   activateMember?: typeof activateMember;
   // 활성화 직후 실제 첫 모델 호출 검증. 테스트는 mock 주입으로 라이브 계정/외부 상태 의존을 끊는다.
   firstModelCall?: (input: { id: string; runtime: string; workspacePath?: string }) => Promise<FirstModelCallResult>;
+  stopCodexBridge?: (id: string) => Promise<{ ok: boolean; detail: string }>;
   // 텔레그램 API 호출 주입점. 테스트는 fake fetch를 넣어 실제 봇 토큰/getUpdates 의존을 끊는다.
   telegramFetch?: typeof fetch;
   // provision 봇 토큰 getMe 검증 주입점. 테스트는 stub 로 실 텔레그램 getMe 의존을 끊는다.
@@ -1769,12 +1770,25 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       const noPairingRuntime = firstCallRuntime || agent.runtime === "hermes_agent";
       let firstCall: FirstModelCallResult | null = null;
       if (result.ok && firstCallRuntime) {
-        firstCall = await firstModelCall({ id: agent.id, runtime: agent.runtime, workspacePath: agent.workspace_path });
+        try {
+          firstCall = await firstModelCall({ id: agent.id, runtime: agent.runtime, workspacePath: agent.workspace_path });
+        } catch {
+          firstCall = { runtime: agent.runtime, ok: false, subscriptionNeeded: false, detail: "첫 모델 호출 실행 실패 — 다시 활성화하세요." };
+        }
         result.steps.push({
           step: "first-model-call",
           ok: firstCall.ok,
           detail: firstCall.subscriptionNeeded ? "subscription_needed: 구독/한도 확인 필요" : firstCall.detail,
         });
+        if (!firstCall.ok && agent.runtime === "codex") {
+          result.ok = false;
+          result.error = "first_model_call_failed";
+          if (bd) { bd.state = "pending"; bd.detail = "첫 모델 호출 실패 — 다시 활성화하세요."; }
+          try {
+            const stopped = await (deps.stopCodexBridge ?? ((id) => setAgentEnabled(id, "codex", false)))(agent.id);
+            result.steps.push({ step: "runtime-cleanup", ok: stopped.ok, detail: stopped.detail });
+          } catch { result.steps.push({ step: "runtime-cleanup", ok: false, detail: "브리지 정지 실패 — 서버 상태를 확인하세요." }); }
+        }
       }
       // 선행 해결 순서인 구독·한도 차단, 첫 호출 실패, 페어링 대기로 안내한다. 페어링도 병기하되 결제 문제를 가리지 않는다.
       const pairingNote = result.needsPairing
@@ -1793,7 +1807,11 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
         jn.state = "done"; jn.detail = `활성화됨 (${rtLabel} 가동 + 첫 모델 호출 확인) — 합류. 이제 Telegram에서 ${botMention}에게 DM으로 인사해 보세요. 답이 오면 연동 성공입니다.`;
       } else {
         // 구독 무관 첫 모델호출 실패도 여기로 온다 — 페어링 안내로 가리지 않고, 페어링은 병기만 한다.
-        jn.detail = (result.ok ? "활성화됨 — 첫 모델 호출 확인/첫 응답(ack) 대기" : "활성화 대기") + pairingNote;
+        if (firstCallFailed && agent.runtime === "codex") jn.state = "blocked";
+        const cleanupOk = result.steps.find((s) => s.step === "runtime-cleanup")?.ok === true;
+        jn.detail = (firstCallFailed && agent.runtime === "codex"
+          ? cleanupOk ? "첫 모델 호출 실패 — 브리지를 정지했습니다. 다시 활성화하세요." : "첫 모델 호출 실패 — 브리지 정지 여부를 서버에서 확인한 뒤 다시 활성화하세요."
+          : result.ok ? "활성화됨 — 첫 모델 호출 확인/첫 응답(ack) 대기" : "활성화 대기") + pairingNote;
       }
     }
     parsed.steps = steps;

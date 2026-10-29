@@ -1,6 +1,6 @@
 // codex 런처(M4) 순수 렌더러 테스트 — fs/launchctl 부작용 없음. 보안핀: 토큰이 plist/wrapper 평문에 안 들어감.
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
@@ -82,17 +82,19 @@ describe("codex launcher (M4) — 순수 렌더러", () => {
     afterEach(() => { if (saved === undefined) delete process.env.CODEX_BIN; else process.env.CODEX_BIN = saved; });
 
     test("서버 env 에 있으면 wrapper 가 그대로 export 한다(exec bun 보다 앞)", () => {
-      process.env.CODEX_BIN = "/opt/codex-npm/bin/codex";
+      const bin = join(mkdtempSync(join(tmpdir(), "codex-wrapper-")), "codex");
+      writeFileSync(bin, "#!/bin/sh\nexit 0\n"); chmodSync(bin, 0o755);
+      process.env.CODEX_BIN = bin;
       const sh = renderLaunchWrapper(codexBridgePaths("cody"));
-      expect(sh).toContain(`export CODEX_BIN="/opt/codex-npm/bin/codex"`);
+      expect(sh).toContain(`export CODEX_BIN="${bin}"`);
       expect(sh.indexOf("export CODEX_BIN=")).toBeLessThan(sh.indexOf("exec bun"));
     });
 
-    test("★없거나 비었으면 줄 자체가 없다★ — 빈 값 export 는 브리지 spawn(\"\") 즉사", () => {
+    test("env 미지정 시에도 서버가 찾은 절대경로를 wrapper에 고정한다", () => {
       delete process.env.CODEX_BIN;
-      expect(renderLaunchWrapper(codexBridgePaths("cody"))).not.toContain("CODEX_BIN");
+      expect(renderLaunchWrapper(codexBridgePaths("cody"))).toMatch(/export CODEX_BIN="\//);
       process.env.CODEX_BIN = "   ";
-      expect(renderLaunchWrapper(codexBridgePaths("cody"))).not.toContain("CODEX_BIN");
+      expect(renderLaunchWrapper(codexBridgePaths("cody"))).toMatch(/export CODEX_BIN="\//);
     });
 
     test("셸 특수문자는 이스케이프된다", () => {

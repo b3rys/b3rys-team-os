@@ -6,13 +6,59 @@
 //   토큰/oauth 값을 detail/응답에 절대 넣지 않는다.
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { appendAuditFile } from "./auditFile";
 import { HOME, OPENCLAW_ROOT } from "./paths";
 import { openclawCliCandidates } from "./openclawBridge";
 
 // codex 풀패스(iTerm alias 깨짐 회피) — reference_codex_binary_path.
 const CODEX_BIN = "/opt/homebrew/bin/codex";
+// app-server의 현재 실행 모드·이미지 입력 계약을 검증한 최소 버전.
+export const MIN_CODEX_VERSION = "0.147.0";
+
+export function supportedCodexVersion(output: string): boolean {
+  const match = /^codex(?:-cli)?\s+(\d+)\.(\d+)\.(\d+)(?:\s|$)/m.exec(output.trim());
+  if (!match) return false;
+  const actual = match.slice(1).map(Number);
+  const minimum = MIN_CODEX_VERSION.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (actual[i]! !== minimum[i]!) return actual[i]! > minimum[i]!;
+  }
+  return true;
+}
+
+/** 출력은 상태 판정에만 쓰고 계정 정보는 응답·로그로 내보내지 않는다. */
+async function codexStatusCommand(bin: string, args: string[], timeoutMs: number): Promise<{ ok: boolean; output: string; timedOut?: boolean }> {
+  return new Promise((resolve) => {
+    let output = "";
+    let settled = false;
+    const proc = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const finish = (ok: boolean, timedOut = false) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ ok, output, timedOut });
+    };
+    const timer = setTimeout(() => { proc.kill("SIGKILL"); finish(false, true); }, timeoutMs);
+    proc.stdout.on("data", (d) => { output = (output + d.toString()).slice(-4096); });
+    proc.stderr.on("data", (d) => { output = (output + d.toString()).slice(-4096); });
+    proc.on("error", () => finish(false));
+    proc.on("close", (code) => finish(code === 0));
+  });
+}
+
+export async function checkCodexCliStatus(bin: string, loginTimeoutMs = 20_000): Promise<RuntimeAuthResult> {
+  const base = { runtime: "codex", loggedIn: false, fixHint: CODEX_FIX_HINT };
+  const version = await codexStatusCommand(bin, ["--version"], 5000);
+  if (!version.ok) return { ...base, detail: "codex 바이너리 실행 불가", fixHint: CODEX_UNRUNNABLE_HINT };
+  if (!supportedCodexVersion(version.output)) return {
+    ...base, detail: `codex 최소 버전 ${MIN_CODEX_VERSION} 필요`,
+    fixHint: `Codex CLI를 ${MIN_CODEX_VERSION} 이상으로 업데이트한 뒤 다시 확인하세요.`,
+  };
+  const status = await codexStatusCommand(bin, ["login", "status"], loginTimeoutMs);
+  if (status.timedOut) return { ...base, detail: "codex 로그인 상태 확인 시간 초과", fixHint: "서버 컴퓨터에서 codex login status를 확인한 뒤 다시 확인하세요." };
+  return { ...base, loggedIn: status.ok, detail: status.ok ? "Codex 로그인 상태 확인됨(login status)" : "Codex 미로그인(login status 실패)", fixHint: status.ok ? "" : CODEX_FIX_HINT };
+}
 
 // openclaw는 자체 인증 저장소를 쓰므로 codex 인증 파일에 의존하지 않는다. 전역·per-agent 경로의 존재만 확인한다.
 function openclawAuthExists(): boolean {
@@ -82,9 +128,7 @@ function authResultToReadiness(result: RuntimeAuthResult): RuntimeReadiness {
   };
 }
 
-// plain codex = ~/.codex/auth.json 존재로 빠르게 점검. openclaw는 자체 auth store(전역 auth.profiles 또는 per-agent auth-profiles.json)로
-// 별도 판정(공개 사용자엔 ~/.codex 심링크가 없음). hermes는 자체 auth라 checkHermesAuth로 분리.
-// (구: `codex login status`는 12s 지연/타임아웃 false-negative로 제거)
+// Codex는 CLI 상태 명령, OpenClaw와 Hermes는 각자의 인증 저장소로 점검한다.
 const CODEX_FIX_HINT = "이 서버가 실행되는 컴퓨터의 터미널에서 `codex login` 으로 ChatGPT 로그인 후 다시 활성화하세요";
 // 바이너리 자체가 없을 때(homebrew cleanup/업데이트로 사라짐 등) — '미로그인'과 구분해 명확히 안내.
 const CODEX_MISSING_HINT = "codex CLI가 설치되지 않았습니다. 이 서버 컴퓨터 터미널에서 `brew install --cask codex` 로 설치하고 `codex login` 으로 ChatGPT 로그인 후 다시 확인하세요";
@@ -112,24 +156,6 @@ function resolveBinPath(cmd: string, ...paths: string[]): string | null {
   try { const w = (typeof Bun !== "undefined" && Bun.which) ? Bun.which(cmd) : null; if (w) return w; } catch { /* ignore */ }
   for (const p of paths) { try { if (p && existsSync(p)) return p; } catch { /* ignore */ } }
   return null;
-}
-
-/** 바이너리가 '실제로 실행되는지' 검증 — `<bin> --version` 을 돌려 (존재+실행가능+미격리)를 확인.
- *  파일 존재만으론 부족: macOS XProtect 격리·코드서명 인증서 폐기 시 파일은 있어도 실행이 차단돼(SIGKILL/ENOENT),
- * 나중에 불투명한 first-model-call exit_null 만 남긴다(BUG6). 값/출력은 안 봄(stdio ignore). */
-function binaryRunnable(bin: string): { ok: boolean; reason: string } {
-  try {
-    const r = spawnSync(bin, ["--version"], { timeout: 5000, stdio: "ignore" });
-    if (r.error) {
-      const code = (r.error as NodeJS.ErrnoException).code;
-      return { ok: false, reason: code === "ENOENT" ? "실행파일 없음(ENOENT)" : (r.error as Error).message };
-    }
-    if (r.signal) return { ok: false, reason: `시그널 종료(${r.signal}) — XProtect 격리/인증서 폐기 가능` };
-    if (typeof r.status === "number" && r.status !== 0) return { ok: false, reason: `비정상 종료(exit ${r.status})` };
-    return { ok: true, reason: "" };
-  } catch (e) {
-    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
-  }
 }
 
 const CODEX_UNRUNNABLE_HINT = "codex 바이너리가 설치돼 있지만 실행되지 않습니다 — macOS XProtect 격리 또는 OpenAI 코드서명 인증서 폐기 가능성. 이 서버 컴퓨터 터미널에서 `codex --version` 으로 확인하고, 최신 서명본으로 재설치하세요: `brew install codex` (npm 옛 설치가 있으면 먼저 제거).";
@@ -179,7 +205,7 @@ function checkHermesAuth(): RuntimeAuthResult {
   return { ...base, loggedIn, detail: loggedIn ? "hermes 인증 확인됨(~/.hermes/profiles/*/auth.json 또는 ~/.hermes/auth.json)" : "hermes 미인증(~/.hermes/profiles/*/auth.json·~/.hermes/auth.json 없음)" };
 }
 
-/** codex/openclaw: ChatGPT oauth 백엔드 공유(~/.codex/auth.json — openclaw는 심링크). 존재만 본다. */
+/** Codex CLI 상태 명령과 OpenClaw 자체 인증 저장소를 각각 검사한다. */
 async function checkCodexAuth(runtime: string): Promise<RuntimeAuthResult> {
   const base: RuntimeAuthResult = { runtime, loggedIn: false, detail: "", fixHint: CODEX_FIX_HINT };
   // openclaw 미설치를 다른 런타임 설치 안내로 오인하지 않도록 자체 CLI를 확인한다.
@@ -207,27 +233,15 @@ async function checkCodexAuth(runtime: string): Promise<RuntimeAuthResult> {
     // 고정 설치 경로만 보면 Intel·Linux·사용자 경로를 놓치므로 PATH와 플랫폼별 표준 후보를 함께 검사한다.
     return { ...base, loggedIn: false, detail: "codex CLI 미설치(바이너리 없음 — brew install codex 필요)", fixHint: CODEX_MISSING_HINT };
   }
-  // 파일이 있어도 macOS 격리·인증서 폐기로 실행이 차단될 수 있어 --version을 실제 실행한다.
-  {
-    const cbin = resolveCodexBin();
-    const run = cbin ? binaryRunnable(cbin) : { ok: false, reason: "경로 해석 실패" };
-    if (!run.ok) {
-      return { ...base, loggedIn: false, detail: `codex 바이너리 실행 불가: ${run.reason}`, fixHint: CODEX_UNRUNNABLE_HINT };
-    }
-  }
-  // ② 로그인 여부 = ~/.codex/auth.json 존재(빠른 로컬 체크, 값 미열람). `codex login status`는 온라인검증이라 느리고(측정 12s+)
-  // preflight 타임아웃(8s)에 걸려 false '미로그인' → codex 계열 영입이 preflight서 막히던 근본버그.
-  //    plain codex 는 ~/.codex/auth.json 존재 체크가 유효. (openclaw는 위에서 자체 store 로, hermes는 checkHermesAuth로 분리.) 온라인 무응답은 exec 시점에서 처리.
-  const authFile = `${HOME}/.codex/auth.json`;
-  const loggedIn = existsSync(authFile);
-  return { ...base, loggedIn, detail: loggedIn ? "ChatGPT oauth 로그인 확인됨(auth.json)" : "ChatGPT oauth 미로그인(auth.json 없음 — 터미널서 codex login 후 재시도)" };
+  const bin = resolveCodexBin();
+  return bin ? checkCodexCliStatus(bin) : { ...base, detail: "codex CLI 실행파일 없음", fixHint: CODEX_MISSING_HINT };
 }
 
 // 인증 사전점검을 정의한 런타임 화이트리스트.
 // ⚠️ 신규 런타임(codi류 codex 파생 등)을 추가할 때는 반드시 여기에 등록하고,
 //    위 check*Auth 처럼 해당 런타임의 인증 체크 분기를 정의하라.
 //    화이트리스트 밖 런타임은 무점검 통과(fail-open)되며 audit/warn 경고만 남는다.
-const CODEX_FAMILY = new Set(["codex", "openclaw"]); // checkCodexAuth 로 분기(같은 바이너리군). 단 인증 소스는 다름: plain codex=~/.codex/auth.json, openclaw=전역 auth.profiles 또는 per-agent auth-profiles.json. hermes는 분리(checkHermesAuth).
+const CODEX_FAMILY = new Set(["codex", "openclaw"]);
 const KNOWN_RUNTIMES = new Set(["claude_channel", "hermes_agent", ...CODEX_FAMILY]);
 
 /**

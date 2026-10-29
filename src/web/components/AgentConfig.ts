@@ -33,8 +33,7 @@ interface ConfigResponse {
   off?: boolean;
 }
 
-// 런타임 교체 대상 화이트리스트. codex 는 내부 빌드에서만 /runtime-options 에 실려(공개판은 서버가 미노출),
-// 이 목록에 있어도 공개판 swap select 엔 나타나지 않는다(옵션 = 이 목록 ∩ runtime-options). readiness·disabled 사유는 /runtime-options 정본.
+// 서버가 준비 상태를 확인한 4개 런타임만 교체 대상으로 표시한다.
 const SWAP_TARGETS = ["claude_channel", "openclaw", "hermes_agent", "codex"];
 
 // 게이트웨이 런타임 재시작 시 다른 팀원도 잠깐 깜빡인다는 경고. 목록에 없는 런타임(claude_channel 등)은 경고 없음(기본).

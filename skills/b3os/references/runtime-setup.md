@@ -200,7 +200,9 @@ preflight가 통과하면 활성화 버튼이 열립니다. 합류 완료 후에
 
 ## Codex
 
-**Codex (Beta)**는 OpenAI Codex CLI를 팀원으로 연결합니다. Claude 기본 권장은 유지합니다. 아래 명령은 설치를 진행하는 AI가 실행하고, 사용자는 브라우저에서 본인 ChatGPT 계정으로 로그인합니다.
+**Codex (Beta)**는 OpenAI Codex CLI를 팀원으로 연결합니다. Claude 기본 권장은 유지합니다.
+
+**이 팀원은 이 맥의 파일·명령을 전부 쓸 수 있어요.** 실행 권한은 전체 권한(`never` + `danger-full-access`)이며 실행 중 승인창을 띄우지 않습니다. 아래 명령은 설치를 진행하는 AI가 실행하고, 사용자는 브라우저에서 본인 ChatGPT 계정으로 로그인합니다.
 
 ```bash
 brew install --cask codex
@@ -209,15 +211,15 @@ codex --version
 codex login status
 ```
 
-`codex login`에서 ChatGPT 로그인을 선택합니다. 로그인 확인 명령이 성공한 뒤 대시보드 영입 목록을 새로 열거나 OT의 **인증 다시 확인(preflight recheck)**을 실행합니다. 미설치·미로그인이면 선택이 disabled되고 API도 `runtime_not_ready`와 설치/로그인 방법을 반환합니다. 서버 preflight는 실행 파일의 `--version` 성공과 `~/.codex/auth.json` 존재를 검사하므로, 파일이 남아 있어도 만료된 인증·사용량 제한·모델 접근 권한은 실제 메시지 왕복으로 확인해야 합니다.
+`codex login`에서 ChatGPT 로그인을 선택합니다. 로그인 확인 명령이 성공한 뒤 대시보드 영입 목록을 새로 열거나 OT의 **인증 다시 확인(preflight recheck)**을 실행합니다. 미설치·미로그인이면 선택이 disabled되고 API도 `runtime_not_ready`와 설치/로그인 방법을 반환합니다. 서버 preflight는 Codex CLI **0.147.0 이상**과 `codex login status` 성공을 검사합니다. 상태 확인 시간 초과는 미로그인과 구분해 재확인을 안내합니다. 활성화 직후에는 실제 답장과 같은 `app-server` 경로로 첫 모델 호출을 확인하며, 실패하면 브리지를 정지하고 재활성화를 안내합니다. 사용량 제한·모델 접근 권한과 실제 Telegram 왕복은 별도로 확인합니다.
 
 공식 안내: [Codex CLI](https://learn.chatgpt.com/docs/codex/cli), [인증 명령](https://learn.chatgpt.com/docs/cli/reference).
 
 ### 새 맥에서 확인할 것
 
 - `install.sh`는 bun·tmux와 b3os를 준비하며 **Codex CLI 설치나 ChatGPT 로그인은 자동으로 하지 않습니다.** 위 준비를 선택한 시점에 진행합니다.
-- Codex를 첫 팀원으로 쓰면 팀장의 Telegram 숫자 chat_id를 직접 물어 Settings의 `owner_chat_id`에 저장합니다. 기존 Claude 팀원이 없는 새 맥에는 자동으로 가져올 값이 없으며, 비어 있으면 발신자 게이트가 메시지를 거부합니다. 봇에 첫 DM을 보낸 뒤에도 응답이 없으면 이 설정부터 확인합니다.
+- Codex를 첫 팀원으로 쓰면 팀장의 Telegram 숫자 chat_id를 직접 물어 Settings의 `owner_chat_id`에 저장합니다. 기존 Claude 팀원이 없는 새 맥에는 자동으로 가져올 값이 없으며, 비어 있고 기존 설정에서도 가져올 수 없으면 브리지를 시작하기 전에 활성화를 막고 설정 방법을 안내합니다.
 - provision이 봇 토큰을 `<repo>/var/secrets/<id>.bot-token`에 권한 `0600`으로 저장합니다. 값은 출력하지 않습니다.
-- 활성화가 `~/b3os/members/<id>/`, `~/.codex-agents/<id>/config.toml`, bridge wrapper와 LaunchAgent를 생성합니다. 호스트 설정이 없어도 기본 config가 생성됩니다. 인증은 호스트 `~/.codex/auth.json`을 참조하므로 같은 OS 계정으로 로그인해야 합니다.
-- bridge가 필요할 때 `codex app-server`를 시작하므로 별도 app-server 서비스·포트 설정은 필요 없습니다. 기본 Homebrew 경로(Apple Silicon·Intel)를 찾으며, 사용자 지정 경로라면 서버의 `CODEX_BIN`에 실행 파일의 절대경로를 지정합니다. 이 값은 활성화 wrapper에도 전달됩니다.
+- 활성화가 `~/b3os/members/<id>/`, `~/.codex-agents/<id>/config.toml`, bridge wrapper와 LaunchAgent를 생성합니다. 호스트 설정이 없어도 해당 팀원 작업 폴더의 trust 항목이 있는 config가 생성됩니다. 인증은 호스트 `~/.codex/auth.json`을 참조하므로 같은 OS 계정으로 로그인해야 합니다.
+- bridge가 필요할 때 `codex app-server`를 시작하므로 별도 app-server 서비스·포트 설정은 필요 없습니다. 기본 Homebrew 경로(Apple Silicon·Intel)를 찾으며, 사용자 지정 경로라면 서버의 `CODEX_BIN`에 실행 파일의 절대경로를 지정합니다. 서버가 찾은 실행파일의 절대경로는 항상 활성화 wrapper에 기록하며, npm/nvm 설치 경로도 PATH에 포함합니다. `TEAM_BASE_URL`을 따로 지정하지 않으면 `TEAM_HTTP_PORT`의 설치 포트를 사용합니다.
 - `APPROVAL_EXECUTION_ENABLED=1`은 기존 사람 승인 절차를 따릅니다. 활성화 후 봇에 DM을 보내 답을 받고 다시 한 번 답장해 메시지 왕복을 확인합니다. Codex에는 OpenClaw의 `pair-approve`를 쓰지 않습니다.
