@@ -337,6 +337,37 @@ export class CodexAppServerClient {
     return this.threadId;
   }
 
+  /** 전체 loaded thread를 확인해야 진행 중인 하위 작업을 끊지 않고 MCP 프로세스를 정리할 수 있다.
+   * 알 수 없는 상태·조회 실패·조회 중 새 thread 생성은 유휴로 판단하지 않는다. */
+  async isIdle(): Promise<boolean> {
+    if (this.closed || this.turnResolve) return false;
+    const deadline = Date.now() + 2000;
+    try {
+      const loaded = async (): Promise<string[] | null> => {
+        const ids: string[] = [];
+        let cursor: string | undefined;
+        for (let page = 0; page < 20; page++) {
+          if (Date.now() >= deadline) return null;
+          const r = await this.request("thread/loaded/list", { limit: 100, ...(cursor ? { cursor } : {}) }, deadline - Date.now());
+          if (!Array.isArray(r?.data) || r.data.some((id: unknown) => typeof id !== "string")) return null;
+          ids.push(...r.data);
+          if (r.nextCursor == null) return [...new Set(ids)].sort();
+          if (typeof r.nextCursor !== "string" || r.nextCursor === cursor) return null;
+          cursor = r.nextCursor;
+        }
+        return null;
+      };
+      const ids = await loaded();
+      if (!ids) return false;
+      if (Date.now() >= deadline) return false;
+      const states = await Promise.all(ids.map((threadId) =>
+        this.request("thread/read", { threadId, includeTurns: false }, Math.max(1, deadline - Date.now()))));
+      if (states.some((r) => r?.thread?.status?.type !== "idle")) return false;
+      const after = await loaded();
+      return !this.closed && !this.turnResolve && after !== null && JSON.stringify(ids) === JSON.stringify(after);
+    } catch { return false; }
+  }
+
   close(): void {
     this.closed = true;
     try { this.proc?.kill("SIGTERM"); } catch { /* noop */ }

@@ -7,7 +7,7 @@ import { CodexApprovalCorrelationStore } from "./state";
 import { setActivityLine } from "../../db/queries";
 import type { CodexCaller, CodexTurnResult, CodexTurnOptions } from "./runner";
 import { registerActiveTurn, unregisterActiveTurn } from "./activeTurns";
-import { acquireClient, dropClient } from "./clientPool";
+import { acquireClient, dropClient, releaseIdleClient } from "./clientPool";
 
 /** 무응답 상한 600초는 Codex stream_idle_timeout_ms 기본 300초보다 길게 두어 자체 처리를 먼저 기다린다. 전체 작업 상한은 아니며 기존 env override는 유지한다.
  * 5회 재시도의 최악 침묵 약 1500초까지 보장하지 않는다. 재시도 중 진행 알림 여부는 미측정이며 timeout detail의 진행신호 수로 확인해야 한다.
@@ -153,8 +153,8 @@ export async function runViaAppServer(
     if (db) { try { setActivityLine(db, opts.agentId, null); } catch { /* best-effort */ } }
     unregisterActiveTurn(opts.agentId, client);
     if (!pooled) client.close(); // 주입된 것은 우리가 만든 게 아니니 그 자리에서 닫는다
-    // 풀에 있는 것은 닫지 않는다. 이 프로세스 안에서 서브에이전트가 아직 돌고 있을 수 있다.
-    //   죽은 프로세스는 다음 턴에 acquireClient 가 알아서 새로 만든다.
+    // 진행 중인 하위 thread가 있으면 풀에 보존하고, 모두 유휴일 때 app-server와 MCP를 정리한다.
+    if (pooled) await releaseIdleClient(opts.agentId, client);
   }
 }
 
