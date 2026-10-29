@@ -11,14 +11,14 @@ This PR covers Write requests reaching this adapter. It does not establish a com
 | Feature | Source | Focused check | Result |
 |---|---|---|---|
 | Tool-free checker, 30-second deadline, fail-closed parsing | cogsChecker.ts, cogsCheckerPolicy.json | cogsChecker.test.ts | 7 tests passed; error-to-allow mutant detected |
-| Input redaction | cogsChecker.ts | structured secret fields, secret-file payload, access_key/accessKey regression | missing-access-key mutant detected |
+| Input redaction | cogsChecker.ts, redactSecrets.ts | structured secrets, secret-file payload, access keys, Authorization/Proxy-Authorization Bearer and Basic in ordinary content | access-key and header-redaction removal mutants detected |
 | Canonical target classification | cogsPathGate.ts | cogsPathGate.test.ts | 16 assertions passed, including symlink/.. and dangling links |
 | Audit privacy | cogsPermissionGate.ts | checker reason quotes synthetic content and raw path | regression failed before fix; fixed-code audit passes without either value |
 | Protected target → checker → card | cogsPermissionGate.ts | cogsPermissionGate.test.ts | failures create no card; one execution-correlated audit |
 | Owner-bound approval handoff | cogsCardApprover.ts | cogsCardApprover.test.ts, ownerBinding.test.ts | fresh owner succeeds; generation change denies |
 | Explicit MCP transport | cogsPermissionMcp.ts, cogsRunner.ts | gate IPC and runner tests; real CLI below | callback reached after CLI configuration correction |
 
-The card-enabled CLI uses explicit settings and strict MCP configuration, with inherited setting sources, hooks, plugins, memory and slash commands disabled. CLI safe/restricted mode disables the approval MCP itself; it therefore remains on the tool-free checker but is not used for the card-enabled execution CLI. This is a configuration distinction, not a claim of identical isolation.
+The card-enabled CLI uses explicit settings and strict MCP configuration, with inherited setting sources, hooks, plugins, memory and slash commands disabled. CLI safe/restricted mode disables the approval MCP itself; it therefore remains on the tool-free checker but is not used for the card-enabled execution CLI. This is a configuration distinction, not a claim of identical isolation. In an independent CLI 2.1.310 input-assembly probe, user and parent CLAUDE.md automatic loading was absent; the workspace CLAUDE.md was present because the runner reads it and supplies it via `--append-system-prompt`. This is not a claim that all CLAUDE.md files are blocked. Installed-plugin and managed-policy fixtures, and the minimum supported CLI version, were not measured by that probe.
 
 ## Actual CLI fixture results
 
@@ -44,3 +44,11 @@ Not validated here: live owner-card transport, live deployment, all environment 
 Revert this PR before deployment. No migration was applied to a live database by these checks. The owner-binding column introduced by this branch is nullable and intentionally does not backfill legacy approvals.
 
 Audit privacy follow-up: the new regression failed on the pre-fix gate (2 pass / 1 fail). After replacing checker prose in audit records with fixed reason codes, gate and checker checks passed 10 tests / 69 assertions; typecheck and diffcheck passed. Caller-facing denial remains separate from the audit record. This change does not constitute a new actual-CLI run.
+
+## Header and runtime-configuration follow-up
+
+Authorization and Proxy-Authorization Bearer/Basic credentials are masked in ordinary string content before the checker receives it. Regression cases cover case-insensitive header/scheme names, tab separators, CRLF content and JSON-quoted headers; original input remains unchanged for owner-bound execution. The header test failed before the fix (7 pass / 1 fail); removing the masking rule also failed (mutant exit 1).
+
+The first-layer protected paths retain all of `~/.claude`, `~/.codex` and `~/.openclaw`, and additionally include `~/.claude.json`, which can contain MCP configuration outside the directory. No media/downloads/tmp exception is introduced. The runner IPC fixture submits path names only and observes `protected_path` for these four targets, no checker call and no card call; it does not read or write those targets.
+
+Focused checker, runner, gate, path and shared-redaction consumer checks: 33 tests / 309 assertions passed. This follow-up is not a new actual-CLI or live-card run. To undo only this follow-up before deployment, revert its commit; no live data migration is involved.

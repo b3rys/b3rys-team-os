@@ -191,3 +191,37 @@ test("card mode enables only explicit MCP configuration and disables inherited h
   expect(settings.disableAllHooks).toBe(true);expect(settings.enabledPlugins).toEqual({});expect(settings.autoMemoryEnabled).toBe(false);
  } finally {rmSync(root,{recursive:true,force:true});}
 });
+
+test("card runner protects runtime homes and standalone claude.json before checker or card", async () => {
+ const root=mkdtempSync(join(tmpdir(),"cogs-protected-homes-"));
+ const binary=join(root,"fake-cli"),capture=join(root,"replies.json"),checker=join(root,"checker-called");
+ // Only submit path names to the gate; never read or write their contents.
+ const targets=[".claude.json", ".claude/settings.json", ".codex/config.toml", ".openclaw/openclaw.json"].map(p=>join(process.env.HOME ?? "/nonexistent",p));
+ writeFileSync(binary,`#!/usr/bin/env python3
+import json,socket,sys
+if "--version" in sys.argv: print("2.1.310 (Claude Code)"); sys.exit(0)
+args=sys.argv[1:]
+config=json.loads(args[args.index("--mcp-config")+1])
+if not config["mcpServers"]:
+ open(${JSON.stringify(checker)},"w").write("called")
+ print('{"verdict":"deny","reason":"fixture_checker"}')
+ sys.exit(0)
+path=config["mcpServers"]["cogs_permission"]["args"][-1]
+replies=[]
+for target in ${JSON.stringify(targets)}:
+ with socket.socket(socket.AF_UNIX) as client:
+  client.connect(path)
+  client.sendall((json.dumps({"tool_name":"Write","input":{"file_path":target,"content":"synthetic"}})+"\\n").encode())
+  replies.append(json.loads(client.makefile().readline()))
+json.dump(replies,open(${JSON.stringify(capture)},"w"))
+print(json.dumps({"type":"result","result":"complete","is_error":False}))
+`);chmodSync(binary,0o700);
+ const prior=process.env.CLAUDE_BIN;process.env.CLAUDE_BIN=binary;
+ let cards=0;
+ try {
+  const result=await runClaudeCogsTurn({agentId:"fixture",cwd:root,prompt:"fixture",onCogsApproval:async()=>{cards++;return "approved";}});
+  expect(result.ok).toBe(true);
+  expect(JSON.parse(readFileSync(capture,"utf-8"))).toEqual(targets.map(()=>({behavior:"deny",message:"protected_path"})));
+  expect(cards).toBe(0);expect(existsSync(checker)).toBe(false);
+ } finally {if(prior===undefined)delete process.env.CLAUDE_BIN;else process.env.CLAUDE_BIN=prior;rmSync(root,{recursive:true,force:true});}
+});

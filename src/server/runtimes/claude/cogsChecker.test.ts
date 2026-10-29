@@ -36,3 +36,22 @@ test("checker CLI has no tools, MCP servers, persisted session or workspace sett
     expect(args[args.indexOf(key) + 1]).toBe(value);
   expect(args).toContain("--safe-mode"); expect(args).toContain("--strict-mcp-config"); expect(args).toContain("--no-session-persistence");
 });
+
+test("Authorization header credentials in ordinary content never reach checker", async () => {
+  for (const header of ["Authorization", "Proxy-Authorization", "aUtHoRiZaTiOn"]) {
+    for (const scheme of ["Bearer", "Basic", "bEaReR"]) {
+      for (const content of [
+        `${header}: ${scheme} SYNTHETIC_HEADER_636+/==`,
+        `before\r\n${header}:\t${scheme} SYNTHETIC_HEADER_636+/==\r\nafter`,
+        JSON.stringify({ [header]: `${scheme} SYNTHETIC_HEADER_636+/==` }),
+      ]) {
+        let received = "";
+        const candidate = { ...input, input: { content } };
+        await checkCogsOperation(candidate, async p => { received = p; return '{"verdict":"allow","reason":"ok"}'; });
+        expect(received).not.toContain("SYNTHETIC_HEADER_636");
+        expect(JSON.parse(received).input.content).toContain("<redacted>");
+        expect(candidate.input.content).toBe(content);
+      }
+    }
+  }
+});

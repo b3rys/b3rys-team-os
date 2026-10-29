@@ -73,6 +73,7 @@ export async function runClaudeCogsTurn(opts: CodexTurnOptions): Promise<CodexTu
         paths: { workspace, protectedPaths: [REPO_ROOT, join(import.meta.dir,"../../../.."), cogsRegistryPath(),
           ...(opts.codexHome ? [opts.codexHome] : []),
           ...(process.env.B3OS_TEAM_DB ? [process.env.B3OS_TEAM_DB, `${process.env.B3OS_TEAM_DB}-wal`, `${process.env.B3OS_TEAM_DB}-shm`] : []),
+          join(process.env.HOME ?? "/nonexistent", ".claude.json"),
           join(process.env.HOME ?? "/nonexistent", ".claude"), join(process.env.HOME ?? "/nonexistent", ".openclaw"),
           join(process.env.HOME ?? "/nonexistent", ".codex"), permissionHost!.dir] },
         card: async (candidate, executionId, normalizedPath) => (await opts.onCogsApproval!({
