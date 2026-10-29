@@ -1212,6 +1212,7 @@ interface TgCallbackQuery {
   message?: { message_id: number; chat: { id: number } };
   /** cogs 서버만 채운다(봇 owner_id). */
   cogs_bot_owner_id?: number;
+  cogs_bot_owner_generation?: number;
 }
 
 /** exec 폴백은 steer·서브에이전트 생존 기능을 잃으므로 app-server 준비 실패를 그대로 실패로 드러낸다.

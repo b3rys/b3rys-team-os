@@ -1,3 +1,4 @@
+const ownerFixture = {instance: "http://cogs", botId: 12, userId: 7, generation: 1};
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -77,7 +78,7 @@ describe("update", () => {
   test("축소면 대기 카드를 무효화한다", () => {
     const { svc, db, got, registryPath } = setup();
     svc.update("flo", 0, { mode: "auto", allow: ["Read", "WebFetch"] });
-    const { request } = createCogsApproval(db, { op: { runtime: "claude", agent_id: "flo", action: "x", command: "ls" }, roomId: "42", policyStamp: currentCogsStamp(registryPath, "flo")!, sessionId: "s", processGen: "g", ttlMs: 1000, nowMs: Date.now() });
+    const { request } = createCogsApproval(db, { owner: ownerFixture, op: { runtime: "claude", agent_id: "flo", action: "x", command: "ls" }, roomId: "42", policyStamp: currentCogsStamp(registryPath, "flo")!, sessionId: "s", processGen: "g", ttlMs: 1000, nowMs: Date.now() });
     const r = svc.update("flo", 1, { mode: "auto", allow: ["Read"] });
     expect(r).toMatchObject({ ok: true, narrowed: true, invalidated: 1 });
     expect(getPermissionRequest(db, request.id)!.status).toBe("expired");
@@ -86,7 +87,7 @@ describe("update", () => {
   test("넓히기만 해도 옛 카드는 무효(다른 revision 의 카드는 결정하지 않는다)", () => {
     const { svc, db, registryPath } = setup();
     svc.update("flo", 0, { mode: "auto", allow: [] });
-    const { request } = createCogsApproval(db, { op: { runtime: "claude", agent_id: "flo", action: "x", command: "ls" }, roomId: "42", policyStamp: currentCogsStamp(registryPath, "flo")!, sessionId: "s", processGen: "g", ttlMs: 1000, nowMs: Date.now() });
+    const { request } = createCogsApproval(db, { owner: ownerFixture, op: { runtime: "claude", agent_id: "flo", action: "x", command: "ls" }, roomId: "42", policyStamp: currentCogsStamp(registryPath, "flo")!, sessionId: "s", processGen: "g", ttlMs: 1000, nowMs: Date.now() });
     expect(svc.update("flo", 1, { mode: "auto", allow: ["Read"] })).toMatchObject({ ok: true, narrowed: false, invalidated: 1 });
     expect(getPermissionRequest(db, request.id)!.status).toBe("expired");
   });
@@ -143,9 +144,9 @@ describe("항상 허용: 결정 뒤·원본 저장 전에 다른 쪽이 축소",
     const { svc, db, registryPath, file } = setup();
     svc.update("flo", 0, { mode: "auto", allow: ["Read", "WebFetch"] });
     const stamp = currentCogsStamp(registryPath, "flo")!;
-    const { request } = createCogsApproval(db, { op: { runtime: "claude", agent_id: "flo", action: "x", command: "git push" }, roomId: "42", policyStamp: stamp, sessionId: "s", processGen: "g", ttlMs: 60_000, nowMs: Date.now(), alwaysRule: "Bash(git push:*)" });
+    const { request } = createCogsApproval(db, { owner: ownerFixture, op: { runtime: "claude", agent_id: "flo", action: "x", command: "git push" }, roomId: "42", policyStamp: stamp, sessionId: "s", processGen: "g", ttlMs: 60_000, nowMs: Date.now(), alwaysRule: "Bash(git push:*)" });
     const r = pressCogsApproval(db, {
-      requestId: request.id, action: "pga", actorUserId: 7, ownerUserId: 7, roomId: 42, bridgeAgentId: "flo", currentStamp: stamp, nowMs: Date.now(),
+      requestId: request.id, action: "pga", actorUserId: 7, ownerUserId: 7, currentOwner: ownerFixture, callbackOwnerGeneration: 1, roomId: 42, bridgeAgentId: "flo", currentStamp: stamp, nowMs: Date.now(),
       persistAlways: (rule, row, decided) => {
         // CAS 는 이겼고, 저장 직전에 주인이 다른 화면에서 WebFetch 를 뺐다
         expect(svc.update("flo", 1, { mode: "auto", allow: ["Read"] })).toMatchObject({ ok: true });
@@ -155,7 +156,7 @@ describe("항상 허용: 결정 뒤·원본 저장 전에 다른 쪽이 축소",
     expect(r).toEqual({ kind: "failed" });
     expect(file().find((a) => a.id === "flo").cogs_permissions).toMatchObject({ revision: 2, allow: ["Read"] });
     expect(getPermissionRequest(db, request.id)!.status).toBe("expired");
-    expect(handOffCogsApproval(db, { currentOwnerUserId: 7, requestId: request.id, agentId: "flo", sessionId: "s", processGen: "g", currentStamp: currentCogsStamp(registryPath, "flo"), nowMs: Date.now() })).toBe(false);
+    expect(handOffCogsApproval(db, { currentOwnerUserId: 7, currentOwner: ownerFixture, requestId: request.id, agentId: "flo", sessionId: "s", processGen: "g", currentStamp: currentCogsStamp(registryPath, "flo"), nowMs: Date.now() })).toBe(false);
   });
 });
 
@@ -163,7 +164,7 @@ describe("reconcile — 원본 저장 뒤 정리 전에 죽은 경우", () => {
   test("원본과 다른 revision 에 묶인 미인계 승인만 정리", () => {
     const { svc, db, registryPath } = setup();
     svc.update("flo", 0, { mode: "auto", allow: [] });
-    const mk = (stamp: string) => createCogsApproval(db, { op: { runtime: "claude", agent_id: "flo", action: "x", command: `ls ${stamp}` }, roomId: "42", policyStamp: stamp, sessionId: "s", processGen: "g", ttlMs: 60_000, nowMs: Date.now() }).request.id;
+    const mk = (stamp: string) => createCogsApproval(db, { owner: ownerFixture, op: { runtime: "claude", agent_id: "flo", action: "x", command: `ls ${stamp}` }, roomId: "42", policyStamp: stamp, sessionId: "s", processGen: "g", ttlMs: 60_000, nowMs: Date.now() }).request.id;
     const old = mk("0:old");
     const cur = mk(currentCogsStamp(registryPath, "flo")!);
     expect(svc.reconcile()).toBe(1);
@@ -177,11 +178,11 @@ describe("축소 저장 직후 중단 → 재시작 → 넓히기", () => {
     const { svc, db, registryPath } = setup();
     svc.update("flo", 0, { mode: "auto", allow: ["Read", "WebFetch"] }); // revision 1
     const op = { runtime: "claude", agent_id: "flo", action: "run_command", command: "git status" };
-    const { request } = createCogsApproval(db, { op, roomId: "42", policyStamp: currentCogsStamp(registryPath, "flo")!, sessionId: "s", processGen: "g", ttlMs: 60_000, nowMs: Date.now() });
+    const { request } = createCogsApproval(db, { owner: ownerFixture, op, roomId: "42", policyStamp: currentCogsStamp(registryPath, "flo")!, sessionId: "s", processGen: "g", ttlMs: 60_000, nowMs: Date.now() });
     const s1 = currentCogsStamp(registryPath, "flo");
-    pressCogsApproval(db, { requestId: request.id, action: "pgs", actorUserId: 7, ownerUserId: 7, roomId: 42, bridgeAgentId: "flo", currentStamp: s1, nowMs: Date.now() });
-    expect(handOffCogsApproval(db, { executionOperation: op, currentOwnerUserId: 7, requestId: request.id, agentId: "flo", sessionId: "s", processGen: "g", currentStamp: s1, nowMs: Date.now() })).toBe(true);
-    const q = { agentId: "flo", sessionId: "s", processGen: "g", op };
+    pressCogsApproval(db, { requestId: request.id, action: "pgs", actorUserId: 7, ownerUserId: 7, currentOwner: ownerFixture, callbackOwnerGeneration: 1, roomId: 42, bridgeAgentId: "flo", currentStamp: s1, nowMs: Date.now() });
+    expect(handOffCogsApproval(db, { executionOperation: op, currentOwnerUserId: 7, currentOwner: ownerFixture, requestId: request.id, agentId: "flo", sessionId: "s", processGen: "g", currentStamp: s1, nowMs: Date.now() })).toBe(true);
+    const q = { currentOwner: ownerFixture, agentId: "flo", sessionId: "s", processGen: "g", op };
     expect(hasCogsSessionGrant(db, { ...q, currentStamp: s1 })).toBe(true);
     // 축소된 revision 2 를 원본에만 쓰고 DB 정리 전에 서버가 죽었다
     const list = JSON.parse(readFileSync(registryPath, "utf-8"));
@@ -198,15 +199,15 @@ describe("축소 저장 직후 중단 → 재시작 → 넓히기", () => {
     const { svc, db, registryPath } = setup();
     svc.update("flo", 0, { mode: "auto", allow: ["Read", "WebFetch"] });
     const op = { runtime: "claude", agent_id: "flo", action: "run_command", command: "git status" };
-    const { request } = createCogsApproval(db, { op, roomId: "42", policyStamp: currentCogsStamp(registryPath, "flo")!, sessionId: "s", processGen: "g", ttlMs: 60_000, nowMs: Date.now() });
+    const { request } = createCogsApproval(db, { owner: ownerFixture, op, roomId: "42", policyStamp: currentCogsStamp(registryPath, "flo")!, sessionId: "s", processGen: "g", ttlMs: 60_000, nowMs: Date.now() });
     const s1 = currentCogsStamp(registryPath, "flo");
-    pressCogsApproval(db, { requestId: request.id, action: "pgs", actorUserId: 7, ownerUserId: 7, roomId: 42, bridgeAgentId: "flo", currentStamp: s1, nowMs: Date.now() });
-    handOffCogsApproval(db, { executionOperation: op, currentOwnerUserId: 7, requestId: request.id, agentId: "flo", sessionId: "s", processGen: "g", currentStamp: s1, nowMs: Date.now() });
+    pressCogsApproval(db, { requestId: request.id, action: "pgs", actorUserId: 7, ownerUserId: 7, currentOwner: ownerFixture, callbackOwnerGeneration: 1, roomId: 42, bridgeAgentId: "flo", currentStamp: s1, nowMs: Date.now() });
+    handOffCogsApproval(db, { executionOperation: op, currentOwnerUserId: 7, currentOwner: ownerFixture, requestId: request.id, agentId: "flo", sessionId: "s", processGen: "g", currentStamp: s1, nowMs: Date.now() });
     const list = JSON.parse(readFileSync(registryPath, "utf-8"));
     list[0].cogs_permissions = { runtime: "claude", schema_version: 1, revision: 2, mode: "auto", allow: ["Read"] };
     writeFileSync(registryPath, JSON.stringify(list));
     svc.update("flo", 2, { mode: "auto", allow: ["Read", "Grep"] });
-    expect(hasCogsSessionGrant(db, { agentId: "flo", sessionId: "s", processGen: "g", op, currentStamp: currentCogsStamp(registryPath, "flo") })).toBe(false);
+    expect(hasCogsSessionGrant(db, { currentOwner: ownerFixture, agentId: "flo", sessionId: "s", processGen: "g", op, currentStamp: currentCogsStamp(registryPath, "flo") })).toBe(false);
   });
 });
 
@@ -247,8 +248,8 @@ test("재시작 정리: '항상 허용' 결정 뒤 규칙 저장 전에 멈춘 �
   const { svc, db, registryPath } = setup();
   svc.update("flo", 0, { mode: "auto", allow: [] });
   const stamp = currentCogsStamp(registryPath, "flo")!;
-  const { request } = createCogsApproval(db, { op: { runtime: "claude", agent_id: "flo", action: "x", command: "git push" }, roomId: "42", policyStamp: stamp, sessionId: "s", processGen: "g", ttlMs: 60_000, nowMs: Date.now(), alwaysRule: "Bash(git push:*)" });
-  expect(() => pressCogsApproval(db, { requestId: request.id, action: "pga", actorUserId: 7, ownerUserId: 7, roomId: 42, bridgeAgentId: "flo", currentStamp: stamp, nowMs: Date.now(), persistAlways: () => { throw new Error("crash"); } })).toThrow("crash");
+  const { request } = createCogsApproval(db, { owner: ownerFixture, op: { runtime: "claude", agent_id: "flo", action: "x", command: "git push" }, roomId: "42", policyStamp: stamp, sessionId: "s", processGen: "g", ttlMs: 60_000, nowMs: Date.now(), alwaysRule: "Bash(git push:*)" });
+  expect(() => pressCogsApproval(db, { requestId: request.id, action: "pga", actorUserId: 7, ownerUserId: 7, currentOwner: ownerFixture, callbackOwnerGeneration: 1, roomId: 42, bridgeAgentId: "flo", currentStamp: stamp, nowMs: Date.now(), persistAlways: () => { throw new Error("crash"); } })).toThrow("crash");
   expect(getPermissionRequest(db, request.id)!.status).toBe("allowed_always");
   expect(svc.reconcile()).toBeGreaterThanOrEqual(1);
   expect(getPermissionRequest(db, request.id)!.status).toBe("expired");

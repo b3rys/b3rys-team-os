@@ -1,3 +1,4 @@
+const ownerFixture = {instance: "http://cogs", botId: 12, userId: 7, generation: 1};
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,13 +19,13 @@ function setup(opts: { ttlMs?: number; gen?: string; agent?: string; alwaysRule?
   const dbPath = join(dir, "team.db");
   const db = openDb(dbPath);
   migrate(db);
-  const make = (o: { gen?: string; agent?: string; session?: string } = {}) => createCogsApproval(db, {
+  const make = (o: { gen?: string; agent?: string; session?: string } = {}) => createCogsApproval(db, { owner: ownerFixture,
     op: { runtime: "codex", agent_id: o.agent ?? opts.agent ?? "flo", action: "run_command", command: "git push" },
     roomId: "42", policyStamp: STAMP, sessionId: o.session ?? "s", processGen: o.gen ?? opts.gen ?? "g1",
     ttlMs: opts.ttlMs ?? 60_000, nowMs: Date.now(), alwaysRule: opts.alwaysRule ?? null,
   }).request.id;
   const press = (id: string, action: "pg1" | "pgd" | "pga" | "pgs", persistAlways?: () => { ok: true; stamp: string } | { ok: false }) => pressCogsApproval(db, {
-    requestId: id, action, actorUserId: 7, ownerUserId: 7, roomId: "42", bridgeAgentId: "flo", currentStamp: STAMP, nowMs: Date.now(),
+    requestId: id, action, actorUserId: 7, ownerUserId: 7, currentOwner: ownerFixture, callbackOwnerGeneration: 1, roomId: "42", bridgeAgentId: "flo", currentStamp: STAMP, nowMs: Date.now(),
     ...(persistAlways ? { persistAlways } : {}),
   });
   const waiters = createCogsDecisionWaiters({ agentId: "flo", openDb: () => openDb(dbPath), expirySlackMs: 5, report: () => {} });
