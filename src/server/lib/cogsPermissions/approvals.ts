@@ -28,7 +28,7 @@ import {
 import type { CogsPermissionEvents } from "./events";
 
 export type CardAction = "pg1" | "pgs" | "pga" | "pgd";
-export type InvalidationReason = "timeout" | "policy_narrowed" | "policy_changed" | "session_end" | "always_persist_failed" | "bridge_restart" | "owner_changed";
+export type InvalidationReason = "timeout" | "policy_narrowed" | "policy_changed" | "session_end" | "always_persist_failed" | "bridge_restart" | "owner_changed" | "owner_unverified";
 
 export interface BindingRow {
   owner_binding_json: string | null;
@@ -138,16 +138,16 @@ export function pressCogsApproval(db: Database, input: PressInput): PressResult 
     || input.actorUserId === undefined || String(input.actorUserId) !== String(input.ownerUserId)) {
     return { kind: "forbidden" };
   }
+  if (row.status !== "pending") return { kind: "processed", status: row.status };
   if (row.runtime === "claude") {
     const issued = decodeCogsOwner(binding.owner_binding_json);
     if (!sameCogsOwner(issued, input.currentOwner)) {
-      invalidateCogsApprovals(db, {agentId: binding.agent_id, reason: "owner_changed", events: input.events});
+      invalidateOwnerBinding(db, binding.request_id, input.currentOwner, input.events);
       return {kind: "expired"};
     }
     if (input.callbackOwnerGeneration !== issued!.generation
       || String(input.ownerUserId) !== String(issued!.userId)) return {kind: "forbidden"};
   }
-  if (row.status !== "pending") return { kind: "processed", status: row.status };
   if (input.nowMs >= binding.expires_at_ms) {
     invalidateOne(db, binding, row.status, "timeout", input.events);
     return { kind: "expired" };
@@ -207,6 +207,21 @@ function invalidateOne(db: Database, binding: BindingRow, from: PermissionReques
     events?.emit({ type: "approval_invalidated", request_id: binding.request_id, agent_id: binding.agent_id, room_id: binding.room_id, card_message_id: binding.card_message_id, reason });
   }
   return changed === 1;
+}
+
+/** A failed snapshot only invalidates the issuance that was checked, not newer cards. */
+function invalidateOwnerBinding(db: Database, requestId: string, observed: CogsOwner | null | undefined, events?: CogsPermissionEvents): void {
+  db.transaction(() => {
+    const binding = getBinding(db, requestId);
+    const row = getPermissionRequest(db, requestId);
+    if (!binding || !row || row.runtime !== "claude") return;
+    db.prepare("DELETE FROM cogs_permission_session_grant WHERE request_id = ?").run(requestId);
+    // Preserve historical outcomes once execution has already been handed off.
+    if (binding.handed_off_at_ms === null && binding.invalidation_reason === null
+      && (row.status === "pending" || ALLOWED.includes(row.status))) {
+      invalidateOne(db, binding, row.status, observed == null ? "owner_unverified" : "owner_changed", events);
+    }
+  })();
 }
 
 /**
@@ -293,7 +308,7 @@ export function handOffCogsApproval(
   // Claude 인계는 최신 owner와 원래 요청의 전체 입력을 요구한다. Codex 계약은 별도다.
   if (row.runtime === "claude") {
     if (!sameCogsOwner(decodeCogsOwner(b.owner_binding_json), input.currentOwner)) {
-      invalidateCogsApprovals(db, {agentId: b.agent_id, reason: "owner_changed", events: input.events});
+      invalidateOwnerBinding(db, b.request_id, input.currentOwner, input.events);
       return false;
     }
     if (String(input.currentOwnerUserId) !== String(input.currentOwner!.userId)) return false;
@@ -321,13 +336,13 @@ export function hasCogsSessionGrant(
 ): boolean {
   if (input.currentStamp === null) return false;
   const grant = db.prepare(
-    `SELECT b.owner_binding_json FROM cogs_permission_session_grant s
+    `SELECT b.request_id, b.owner_binding_json FROM cogs_permission_session_grant s
       JOIN cogs_permission_binding b ON b.request_id = s.request_id
       WHERE s.agent_id = ? AND s.session_id = ? AND s.process_gen = ? AND s.scope_key = ? AND s.policy_stamp = ?`,
-  ).get(input.agentId, input.sessionId, input.processGen, scopeKeyForOperation(input.op), input.currentStamp) as {owner_binding_json: string | null} | null;
+  ).get(input.agentId, input.sessionId, input.processGen, scopeKeyForOperation(input.op), input.currentStamp) as {request_id: string; owner_binding_json: string | null} | null;
   if (!grant) return false;
   if (input.op.runtime === "claude" && !sameCogsOwner(decodeCogsOwner(grant.owner_binding_json), input.currentOwner)) {
-    invalidateCogsApprovals(db, {agentId: input.agentId, reason: "owner_changed"});
+    invalidateOwnerBinding(db, grant.request_id, input.currentOwner);
     return false;
   }
   return true;

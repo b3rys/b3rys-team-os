@@ -82,3 +82,31 @@ test("issuance captures getMe rather than accepting caller supplied owner; faile
     } finally {s.db.close();}
   }
 });
+
+
+test("old owner failures preserve newer approvals, session grants and Codex requests", () => {
+  for (const boundary of ["press", "handoff", "grant"] as const) {
+    for (const currentOwner of [null, {...owner,generation:3}]) {
+      const s=setup(); try {
+        const newerOwner={...owner,generation:3};
+        const newer=createCogsApproval(s.db,{...s.input,owner:newerOwner,sessionId:"new-session"}).request;
+        const pending=createCogsApproval(s.db,{...s.input,owner:newerOwner,sessionId:"new-pending"}).request;
+        const codex=createCogsApproval(s.db,{...s.input,owner:undefined,op:{...op,runtime:"codex"}}).request;
+        expect(pressCogsApproval(s.db,{...s.press,requestId:newer.id,action:"pgs",currentOwner:newerOwner,callbackOwnerGeneration:3}).kind).toBe("decided");
+        if(boundary !== "press") pressCogsApproval(s.db,{...s.press,action:"pgs"});
+        const fail = () => {
+          if(boundary === "press") return pressCogsApproval(s.db,{...s.press,currentOwner});
+          if(boundary === "handoff") return handOffCogsApproval(s.db,{...s.handoff,currentOwner});
+          return hasCogsSessionGrant(s.db,{...s.handoff,op,currentOwner});
+        };
+        fail(); fail();
+        expect(getPermissionRequest(s.db,s.id)!.status).toBe("expired");
+        expect(getPermissionRequest(s.db,newer.id)!.status).toBe("allowed_once");
+        expect(getPermissionRequest(s.db,pending.id)!.status).toBe("pending");
+        expect(getPermissionRequest(s.db,codex.id)!.status).toBe("pending");
+        expect(hasCogsSessionGrant(s.db,{...s.handoff,sessionId:"new-session",op,currentOwner:newerOwner})).toBe(true);
+        expect(s.db.query("SELECT request_id FROM cogs_permission_session_grant").all()).toEqual([{request_id:newer.id}]);
+      } finally {s.db.close();}
+    }
+  }
+});
