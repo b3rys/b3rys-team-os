@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, isAbsolute } from "node:path";
 import policy from "./cogsCheckerPolicy.json";
-import { claudeCogsEnvironment } from "./cogsRunner";
+import { claudeCogsEnvironment } from "./cogsEnvironment";
 import { redactSecrets } from "../../lib/redactSecrets";
 
 export interface CheckerInput {
