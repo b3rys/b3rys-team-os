@@ -61,6 +61,7 @@ export function cogsActivityArgs(item: unknown): CogsActivityArgs {
     const query = [action.pattern,it.pattern,action.queries,action.query,it.queries,it.query].find(value => Array.isArray(value) ? value.length>0 : typeof value==="string" && value!=="") ?? "";
     return { target: safeText(Array.isArray(query) ? query.join(" · ") : String(query)) };
   }
+  if (it.type === "readFiles") return typeof it.path === "string" && it.path ? { target: filename(it.path) } : {};
   if (it.type === "mcpToolCall") return {};
   return {};
 }
@@ -79,6 +80,8 @@ export function cogsActivityCode(item: unknown): string | undefined {
   if (it.type === "webSearch" || it.type === "web_search") {
     return it.action?.type === "openPage" || it.action?.url || it.url ? "fetch_web" : "search";
   }
+  // Claude 의 Read·Glob·Grep(명령 없이 파일을 읽는 도구). 대상은 파일 이름만, 검색 패턴은 넘기지 않는다.
+  if (it.type === "readFiles") return "read_files";
   if (it.type === "fileChange" || it.changes || it.fileChanges) {
     const paths = (it.changes ?? []).map((c: any) => c.path ?? "").concat(Object.keys(it.fileChanges ?? {}));
     if (paths.length && paths.every((p: string) => /\.(md|txt|rst|adoc)$/i.test(p))) return "writing";
