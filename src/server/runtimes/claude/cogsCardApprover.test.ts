@@ -5,6 +5,7 @@ import {join} from "node:path";
 import {openDb,migrate} from "../../db/migrate";
 import {pressCogsApproval,getBinding} from "../../lib/cogsPermissions/approvals";
 import {createCogsDecisionWaiters} from "../../lib/cogsPermissions/waiters";
+import {createPermissionGateRoutes} from "../../routes/permissionGate";
 import {createClaudeCardApprover} from "./cogsCardApprover";
 
 test("Claude card binds input and owner generation, then claims once; changed owner denies",async()=>{
@@ -58,6 +59,16 @@ test("approval stores metadata only on allow, denial and card failure; digest re
   });
   try {
    const result=await approve({method:"claude/permission",params:{executionId:"e1",normalizedPath:"/fixture/.env",candidate:{tool_name:"Write",input}}});
+   // Exercise the actual list/detail serializers, not only direct DB reads.
+   const app=createPermissionGateRoutes({db});
+   for(const route of ["/permission-gate",`/permission-gate/${requestId}`]) {
+    const response=await app.request(route);
+    expect(response.status).toBe(200);
+    const body=await response.text();
+    expect(body).toContain(requestId);
+    expect(body).not.toContain(content);
+    expect(body).not.toContain(input.extra);
+   }
    expect(result).toBe(mode==="allow"?"approved":"denied");
    const rows=db.query("SELECT * FROM permission_request").all();expect(rows).toHaveLength(1);
    const payload=JSON.parse((rows[0] as {payload_json:string}).payload_json);
