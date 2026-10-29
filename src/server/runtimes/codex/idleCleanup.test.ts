@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { afterEach, expect, test } from "bun:test";
 import { CodexAppServerClient } from "./appServerClient";
 import { acquireClient, dropAllClients, dropClient, pooledAgents, releaseIdleClient } from "./clientPool";
@@ -100,4 +101,94 @@ test("The production caller releases an idle pooled process and retains a runnin
   const p = Bun.spawn([process.execPath, "-e", script], { stdout: "pipe", stderr: "pipe" });
   const [err, code] = await Promise.all([new Response(p.stderr).text(), p.exited]);
   expect(code, err).toBe(0);
+});
+
+test("A child followup during the last loaded/list invalidates idle even with identical IDs", async () => {
+  for (const method of ["turn/started", "thread/status/changed"]) {
+    const c = new CodexAppServerClient();
+    let lists = 0;
+    (c as any).request = async (m: string) => {
+      if (m === "thread/read") return { thread: { status: { type: "idle" } } };
+      if (++lists === 2) (c as any).handleNotification(method, { threadId: "child", status: { type: "active" }, turn: { id: "followup" } });
+      return { data: ["parent", "child"] };
+    };
+    acquireClient("probe", () => c);
+    await releaseIdleClient("probe", c);
+    expect(c.isClosed).toBe(false);
+    expect(pooledAgents()).toEqual(["probe"]);
+    dropClient("probe");
+  }
+});
+
+test("Failed close stays tracked, blocks replacement, warns, and retries successfully", async () => {
+  const originalWarn = console.warn;
+  const warnings: unknown[][] = [];
+  console.warn = (...args) => { warnings.push(args); };
+  let fail = true;
+  let closes = 0;
+  const c = { isClosed: false, close() { closes++; if (fail) throw new Error("fixture kill failure"); this.isClosed = true; } };
+  try {
+    acquireClient("probe", () => c);
+    expect(dropClient("probe")).toBe(false);
+    expect(pooledAgents()).toEqual(["probe"]);
+    expect(() => acquireClient("probe", () => { throw new Error("must not spawn"); })).toThrow("cleanup pending");
+    expect(warnings.length).toBeGreaterThan(0);
+    fail = false;
+    for (let i = 0; i < 30 && !c.isClosed; i++) await Bun.sleep(50);
+    expect(c.isClosed).toBe(true);
+    expect(closes).toBeGreaterThanOrEqual(3);
+    expect(pooledAgents()).toEqual([]);
+  } finally { fail = false; console.warn = originalWarn; }
+});
+
+test("Client preserves a process on kill false or exception and can close it on retry", () => {
+  for (const result of [false, "throw"]) {
+    const warnings: string[] = [];
+    const c = new CodexAppServerClient({ warn: (line) => warnings.push(line) });
+    let fail = true;
+    const proc = { exitCode: null, signalCode: null, kill() { if (fail) { if (result === "throw") throw new Error("fixture"); return false; } this.exitCode = 0 as any; return true; }, once() {} };
+    (c as any).proc = proc;
+    expect(() => c.close()).toThrow();
+    expect(c.isClosed).toBe(false);
+    expect((c as any).proc).toBe(proc);
+    expect(warnings.length).toBe(1);
+    fail = false;
+    c.close();
+    expect(c.isClosed).toBe(true);
+  }
+});
+
+test("A process ignoring TERM receives KILL; a failed KILL warns and retries", async () => {
+  const warnings: string[] = [];
+  const signals: string[] = [];
+  const c = new CodexAppServerClient({ warn: (line) => warnings.push(line) });
+  const proc = {
+    exitCode: null as number | null, signalCode: null,
+    kill(signal: string) {
+      signals.push(signal);
+      if (signals.length === 2) return false;
+      if (signal === "SIGKILL") this.exitCode = 0;
+      return true;
+    }, once() {},
+  };
+  (c as any).proc = proc;
+  c.close();
+  for (let i = 0; i < 55 && proc.exitCode === null; i++) await Bun.sleep(50);
+  expect(signals).toEqual(["SIGTERM", "SIGKILL", "SIGKILL"]);
+  expect(warnings).toHaveLength(1);
+  expect(proc.exitCode).toBe(0);
+});
+
+
+test("A real child ignoring TERM is forcibly reaped", async () => {
+  const proc = spawn(process.execPath, ["-e", "process.on('SIGTERM',()=>{});setInterval(()=>{},1000);console.log('ready')"], { stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    await new Promise<void>((resolve, reject) => { proc.stdout.once("data", () => resolve()); proc.once("error", reject); });
+    const exited = new Promise<string | null>((resolve) => proc.once("close", (_code, signal) => resolve(signal)));
+    const c = new CodexAppServerClient();
+    (c as any).proc = proc;
+    c.close();
+    expect(await exited).toBe("SIGKILL");
+    expect((c as any).proc).toBeNull();
+  } finally { if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL"); }
 });

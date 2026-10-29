@@ -170,6 +170,8 @@ export class CodexAppServerClient {
   private lastActivityAtMs = 0;
   private turnActivityCount = 0;
   private closed = false;
+  private activityGeneration = 0;
+  private terminationTimer?: ReturnType<typeof setTimeout>;
   /** 풀이 죽은 것을 돌려주지 않게 밖에서 상태를 볼 수 있어야 한다. */
   get isClosed(): boolean { return this.closed; }
 
@@ -207,7 +209,10 @@ export class CodexAppServerClient {
 
   private withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const t = setTimeout(() => { this.close(); reject(new Error(`${what}_timeout after ${ms}ms`)); }, ms);
+      const t = setTimeout(() => {
+        try { this.close(); } catch { /* close logs the failed termination; preserve the timeout result. */ }
+        reject(new Error(`${what}_timeout after ${ms}ms`));
+      }, ms);
       p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
     });
   }
@@ -341,6 +346,7 @@ export class CodexAppServerClient {
    * 알 수 없는 상태·조회 실패·조회 중 새 thread 생성은 유휴로 판단하지 않는다. */
   async isIdle(): Promise<boolean> {
     if (this.closed || this.turnResolve) return false;
+    const generation = this.activityGeneration;
     const deadline = Date.now() + 2000;
     try {
       const loaded = async (): Promise<string[] | null> => {
@@ -364,14 +370,38 @@ export class CodexAppServerClient {
         this.request("thread/read", { threadId, includeTurns: false }, Math.max(1, deadline - Date.now()))));
       if (states.some((r) => r?.thread?.status?.type !== "idle")) return false;
       const after = await loaded();
-      return !this.closed && !this.turnResolve && after !== null && JSON.stringify(ids) === JSON.stringify(after);
+      return generation === this.activityGeneration && !this.closed && !this.turnResolve && after !== null && JSON.stringify(ids) === JSON.stringify(after);
     } catch { return false; }
   }
 
   close(): void {
+    const proc = this.proc;
+    if (!proc || proc.exitCode !== null || proc.signalCode !== null) {
+      this.closed = true;
+      return;
+    }
+    // A failed signal must remain retryable and visible to the pool.
+    try {
+      if (!proc.kill("SIGTERM")) throw new Error("SIGTERM returned false");
+    } catch (error) {
+      this.warn("[codex] app-server termination failed; retained for retry");
+      throw error;
+    }
     this.closed = true;
-    try { this.proc?.kill("SIGTERM"); } catch { /* noop */ }
-    this.proc = null;
+    if (this.terminationTimer) clearTimeout(this.terminationTimer);
+    const force = () => {
+      if (proc.exitCode !== null || proc.signalCode !== null) return;
+      try {
+        if (!proc.kill("SIGKILL")) throw new Error("SIGKILL returned false");
+      } catch {
+        this.warn("[codex] app-server force termination failed; retrying");
+      }
+      this.terminationTimer = setTimeout(force, 1000);
+      this.terminationTimer.unref?.();
+    };
+    this.terminationTimer = setTimeout(force, 1000);
+    this.terminationTimer.unref?.();
+    proc.once("close", () => { clearTimeout(this.terminationTimer); if (this.proc === proc) this.proc = null; });
   }
 
   //  내부
@@ -506,6 +536,8 @@ export class CodexAppServerClient {
   }
 
   private handleNotification(method: string, params: any): void {
+    // Child followups can start without acquiring this pool entry again.
+    if (method === "turn/started" || method === "thread/status/changed" || isTurnProgress(method)) this.activityGeneration++;
     // 진행 신호마다 무응답 시계를 되돌려 일하는 턴을 자르지 않고 조용히 멈춘 턴만 종료한다.
     if (isTurnProgress(method)) this.noteTurnAlive();
     this.activeHandlers?.onNotify?.(method, params);
