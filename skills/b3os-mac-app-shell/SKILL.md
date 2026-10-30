@@ -8,7 +8,7 @@ trigger: wrap a web app as a Mac/iPhone app · iPhone test · TestFlight
 
 웹앱을 Apple 네이티브 셸(.app)로 래핑하는 팀 표준 레시피. **별도 골격 저장소를 참조**하며 코드를 복제하지 않는다 — 이 스킬은 "언제·어떻게·무엇을 조심"의 운영 지식이고, 실제 구현·빌드 스크립트는 골격에 있다.
 
-> ★선행 조건 — 골격 저장소는 이 저장소에 들어있지 않다.★
+> 선행 조건 — 골격 저장소는 이 저장소에 들어있지 않다.
 > 정본 골격은 **b3rys 내부 비공개 저장소 `mac-iphone-shell`**(SwiftUI multi-platform 라이브러리 + HostApp 패턴)이다. 접근 권한이 있는 팀원이 따로 clone해야 하고, 아래 절차와 references의 경로는 **본인이 clone한 위치**를 가리킨다(이 문서에서는 `$SHELL_SKELETON`으로 쓴다).
 > 접근 권한이 없으면 이 스킬의 빌드 절차는 실행할 수 없다 — "검증된 함정"·"검증 절차" 절의 운영 지식만 참고 자료로 쓴다.
 >
@@ -19,7 +19,7 @@ trigger: wrap a web app as a Mac/iPhone app · iPhone test · TestFlight
 - 이미 있는 웹 대시보드/웹툴을 **설치 가능한 Mac 앱(.app)** 으로 내보내고 싶을 때 (예: b3os 대시보드 → `b3os.app`)
 - "맥앱으로 래핑한 티 안 나게, 라이트/다크 seamless, 창이 네이티브처럼" 요구
 - iPhone 동반 앱(같은 골격, read-only/동일 셸)도 필요할 때
-- **아이폰 앱을 개발·시험·TestFlight 배포할 때(골격을 쓰지 않는 네이티브 앱 포함)** → [`references/iphone-dev-test.md`](references/iphone-dev-test.md) 를 먼저 읽는다. 공용 맥 시뮬레이터·기기/OS 기준·빌드·속도·접근성·다국어·검증 습관·디스크·TestFlight·iCloud 에서 실제로 겪은 증상 → 원인 → 해결.
+- **아이폰 앱을 개발·시험·TestFlight 배포할 때(골격을 쓰지 않는 네이티브 앱 포함)** → [`references/iphone-dev-test.md`](references/iphone-dev-test.md) 를 먼저 읽는다. 공용 맥 시뮬레이터·기기/OS 기준·빌드·속도·접근성·다국어·검증 습관·디스크·TestFlight·iCloud 의 증상 → 원인 → 해결.
 - ❌ 쓰지 않는 경우: 네이티브 UI가 본질인 앱(웹뷰가 아니라 SwiftUI 화면이 주). 그건 골격 없이 일반 SwiftUI로.
 
 ## 전제 · 요구사항 (이게 없으면 이 스킬은 못 쓴다)
@@ -76,7 +76,7 @@ trigger: wrap a web app as a Mac/iPhone app · iPhone test · TestFlight
 - 골격 저장소 — Steno, b3os.app 실사용 검증
 - 패턴 박제: 골격의 `docs/Architecture.md` "주요 결정" Q/A (커밋 `5f80a8e`)
 - viewport 근본해결: 골격의 `WebView.swift`·`AppShell.swift` (커밋 `c626beb`, `ac8ed27` — 측정 기반)
-- **레시피 재현 evidence**: 이 레시피(골격의 `package-macos-app.sh`)로 빌드한 `b3os.app` → `.build/b3os-latest.zip`(397KB, 2026-06-24 빌드), 실기 실행 확인 + `<dashboard-domain>` 배포본. 빌드 로그는 이 스킬의 [`references/build-evidence.md`](references/build-evidence.md).
+- **레시피 재현 evidence**: 이 레시피(골격의 `package-macos-app.sh`)로 빌드한 `b3os.app` → `.build/b3os-latest.zip`(397KB), 실기 실행 확인 + `<dashboard-domain>` 배포본. 빌드 로그는 이 스킬의 [`references/build-evidence.md`](references/build-evidence.md).
 
 ## 유지보수 — owner · 갱신 트리거
 

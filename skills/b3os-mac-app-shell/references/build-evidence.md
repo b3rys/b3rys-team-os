@@ -1,11 +1,11 @@
 # 레시피 재현 evidence (관측 > 해석)
 
 이 스킬의 레시피(골격 저장소 `mac-iphone-shell` + 그 안의 `package-macos-app.sh`)가 **실제로 동작하는 `.app`을 만든다**는 관측 증거.
-★골격은 b3rys 내부 비공개 저장소이며 이 저장소에 포함되어 있지 않다.★
+골격은 b3rys 내부 비공개 저장소이며 이 저장소에 포함되어 있지 않다.
 
 ## 실제 빌드 산출물 (이 레시피로 만든 것)
 
-- **`b3os.app`** — 골격 저장소의 `.build/b3os.app` (2026-06-24 빌드).
+- **`b3os.app`** — 골격 저장소의 `.build/b3os.app`.
   - 빌드 방법: `bash scripts/package-macos-app.sh` (= 이 스킬 §절차 7).
   - `APP_NAME=b3os.app`, `PRODUCT_NAME=B3rysMacApp`, webURL=`<dashboard-domain>/team`(테스트), ad-hoc 서명.
   - 배포본: `<dashboard-domain>/team/B3rys-unsigned-test.zip` (397KB).
@@ -13,7 +13,7 @@
 
 ## 재현 절차 (골격 저장소 접근 권한이 있는 팀원)
 
-★골격 `mac-iphone-shell`은 내부 비공개 저장소이며 이 저장소에 포함되어 있지 않다.★ 먼저 clone한 뒤, 그 위치를 `$SHELL_SKELETON`으로 두고 실행한다.
+골격 `mac-iphone-shell`은 내부 비공개 저장소이며 이 저장소에 포함되어 있지 않다. 먼저 clone한 뒤, 그 위치를 `$SHELL_SKELETON`으로 두고 실행한다.
 
 ```
 cd "$SHELL_SKELETON"                     # 골격을 clone 한 경로
@@ -24,7 +24,7 @@ bash scripts/package-macos-app.sh        # → .build/b3os.app
 ## 이 evidence가 증명하는 것
 
 - skeleton이 "존재"하는 게 아니라, 레시피를 따라 **실행되는 .app이 실제로 나오고 사람이 검증**했다(관측).
-- viewport 회귀주의(3종세트)가 추상이 아니라 이 빌드에서 실측으로 확인된 함정.
+- viewport 회귀주의(3종세트)는 이 빌드에서 확인되는 실제 함정이다.
 
 ## 한계 / 다음 관측
 

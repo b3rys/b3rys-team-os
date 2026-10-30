@@ -1,6 +1,6 @@
 # 트러블슈팅
 
-> **★ 변수 먼저** — 아래 명령의 `$B3OS`(clone 한 저장소 경로)와 `$PORT`(`.env` 의 `TEAM_HTTP_PORT`, 기본 7878)는 셸에서 먼저 잡는다. 새 셸이면 다시 실행:
+> ** 변수 먼저** — 아래 명령의 `$B3OS`(clone 한 저장소 경로)와 `$PORT`(`.env` 의 `TEAM_HTTP_PORT`, 기본 7878)는 셸에서 먼저 잡는다. 새 셸이면 다시 실행:
 > ```bash
 > B3OS=~/b3rys-team-os   # ← clone 위치로(기본 디렉토리명)
 > PORT=$(grep '^TEAM_HTTP_PORT=' "$B3OS/.env" 2>/dev/null | cut -d= -f2); PORT=${PORT:-7878}
@@ -10,19 +10,19 @@
 
 ## 0) 첫 팀원 1:1 DM 봇이 6자리 코드만 보내거나 응답이 없어요 (런타임별)
 
-★1:1 DM 은 라우터와 무관하다★ — 라우터 ON/OFF 는 여기서 원인이 아니다(라우터는 그룹 ingress 전용).
+1:1 DM 은 라우터와 무관하다 — 라우터 ON/OFF 는 여기서 원인이 아니다(라우터는 그룹 ingress 전용).
 
 > **런타임별로 페어링 방식이 다르다** — claude = 아래 1~4. **openclaw·hermes(BYO)** 는 페어링 게이트가 달라 → **5번** 을 본다.
 
 claude 순서:
 
-1. **6자리 페어링 코드 승인** — claude 첫 팀원 봇에 첫 메시지를 보내면 봇이 **6자리 코드**로 답한다. 승인(DM 허용) = ★Claude Code 가 `~/.claude/channels/telegram-<id>/access.json` 의 `allowFrom` 에 본인 DM chat_id 를 추가하고 `dmPolicy` 를 `allowlist` 로 바꾼다★(activate 안내 [F]와 동일, 항상 작동). **본인 DM chat_id 는** 봇에 DM 하면 그 `access.json` 의 `pending` 에 senderId 로 남으니 거기서 읽거나, 텔레그램 **@userinfobot** 으로 확인한다(6자리 코드 자체를 넣는 게 아니다). `setup-claude-telegram-bot` 스킬이 있으면 `promote-pending.sh <id> <code>` 도 가능. ★대시보드 [접근 승인]·`pair-approve` 는 **openclaw 전용** — claude 엔 `skipped:true` 거짓성공만 반환하니 쓰지 말 것.★ 승인 전 "코드만 옴/무응답"은 정상이니 라우터 문제로 오진하지 말 것.
+1. **6자리 페어링 코드 승인** — claude 첫 팀원 봇에 첫 메시지를 보내면 봇이 **6자리 코드**로 답한다. 승인(DM 허용) = Claude Code 가 `~/.claude/channels/telegram-<id>/access.json` 의 `allowFrom` 에 본인 DM chat_id 를 추가하고 `dmPolicy` 를 `allowlist` 로 바꾼다(activate 안내 [F]와 동일, 항상 작동). **본인 DM chat_id 는** 봇에 DM 하면 그 `access.json` 의 `pending` 에 senderId 로 남으니 거기서 읽거나, 텔레그램 **@userinfobot** 으로 확인한다(6자리 코드 자체를 넣는 게 아니다). `setup-claude-telegram-bot` 스킬이 있으면 `promote-pending.sh <id> <code>` 도 가능. 대시보드 [접근 승인]·`pair-approve` 는 **openclaw 전용** — claude 엔 `skipped:true` 거짓성공만 반환하니 쓰지 말 것. 승인 전 "코드만 옴/무응답"은 정상이니 라우터 문제로 오진하지 말 것.
 2. **telegram 플러그인 설치됐나?** (claude) — user scope 설치 확인(`tmux attach -t claude-<id>` → `/plugin`). 없으면 `setup-claude-telegram-bot` 스킬 또는 `recruit.md` Step F.
 3. **poller 살아있나?** — 첫 activate 는 플러그인 설치 전이라 poller 미기동(`bot.pid` 없음)이 정상일 수 있다 → 플러그인 설치 후 **재활성화**.
 4. **2번째+ 팀원인데 무응답** — 첫 팀원 allowlist 승계가 안 된 것 → 그 팀원 봇 DM 의 6자리 페어링도 승인.
-5. **openclaw·hermes(BYO) 첫 팀원인데 무응답** — 이들은 claude 의 6자리코드/access.json 방식이 ★아니다★:
+5. **openclaw·hermes(BYO) 첫 팀원인데 무응답** — 이들은 claude 의 6자리코드/access.json 방식이 아니다:
    - **openclaw**: 페어링 승인이 필요하다 → 대시보드 **[접근 승인]** 버튼(또는 `POST /team/api/ot/<ot_id>/pair-approve`; 상세는 `recruit.md` Step G). 승인 전 무응답은 정상. 승인했는데도 무응답이면 openclaw 게이트웨이 기동 여부 확인(`recruit.md` Step E activate 재실행).
-   - **hermes**(v0.18): ★DM 페어링 게이트가 있다★ — activate 가 팀장 chat_id(`owner_chat_id`)를 게이트웨이 allowlist(`TELEGRAM_ALLOWED_USERS`)에 시드해 팀장은 코드 없이 통과한다. **팀장인데 페어링 코드가 오면** = owner_chat_id 미확보(시드 skip) → `owner_chat_id` 설정을 채우고 activate 재실행. **무응답(코드도 안 옴)이면** 페어링이 아니라 activate/게이트웨이 기동을 의심(`recruit.md` Step E). 팀장 외 사용자는 `hermes pairing approve <platform> <code>` 로 승인.
+   - **hermes**(v0.18): DM 페어링 게이트가 있다 — activate 가 팀장 chat_id(`owner_chat_id`)를 게이트웨이 allowlist(`TELEGRAM_ALLOWED_USERS`)에 시드해 팀장은 코드 없이 통과한다. **팀장인데 페어링 코드가 오면** = owner_chat_id 미확보(시드 skip) → `owner_chat_id` 설정을 채우고 activate 재실행. **무응답(코드도 안 옴)이면** 페어링이 아니라 activate/게이트웨이 기동을 의심(`recruit.md` Step E). 팀장 외 사용자는 `hermes pairing approve <platform> <code>` 로 승인.
    - 공통: `pair-approve` 를 claude 에 쓰면 no-op(위 1번 참고) — 런타임을 먼저 확인하고 맞는 승인법을 쓴다.
 
 ## 1) 봇이 팀 대화방(그룹)에 들어왔는데 응답이 없어요
@@ -45,23 +45,23 @@ claude 순서:
    ```bash
    ls ~/.claude/channels/telegram-<id>/bot.pid   # 있으면 poller 폴링 중(= 진짜 대화됨)
    ```
-   죽어 있으면(bot.pid 없음) — telegram MCP 가 스폰됐다가 ★토큰을 못 찾아 즉시 종료★된 것이다(★타임아웃 아님★ — 로그상 ~100ms 만에
-   `Connection failed`). ★근본 원인(fresh clone 실측)★: telegram MCP(server.ts)는 봇 토큰을
+   죽어 있으면(bot.pid 없음) — telegram MCP 가 스폰됐다가 토큰을 못 찾아 즉시 종료된 것이다(타임아웃 아님 — 로그상 ~100ms 만에
+   `Connection failed`). 근본 원인(fresh clone 기준): telegram MCP(server.ts)는 봇 토큰을
    `TELEGRAM_STATE_DIR/.env` 에서 읽는데, `TELEGRAM_STATE_DIR`(멤버별 채널 dir) 는 세션 env 상속에만 의존한다(플러그인 `.mcp.json` 에
-   env 블록 없음). 이 상속이 되려면 ★telegram 플러그인이 user scope 로 enable★ 돼 있어야 한다 — 그래야 `--channels plugin:telegram@…`
+   env 블록 없음). 이 상속이 되려면 telegram 플러그인이 user scope 로 enable 돼 있어야 한다 — 그래야 `--channels plugin:telegram@…`
    가 CC 에서 "채널"로 붙고 CC 가 세션의 STATE_DIR 를 MCP 서브프로세스에 넘긴다. user scope enable 이 없으면(fresh clone) MCP 가
-   STATE_DIR 없이 떠 ★제너릭 `~/.claude/channels/telegram/.env` 로 폴백 → 토큰 못 찾음 → server.ts 즉시 종료★ = bot.pid 미기동.
-   (에러 로그: `Server stderr: telegram channel: TELEGRAM_BOT_TOKEN required`, `Connection failed after ~100ms`.) ★1·2번째 멤버 모두
-   대칭으로 실패한다 — "1번째만 된다"는 착시(먼저 복구됐을 뿐).★
-   ★확인★: `jq '.enabledPlugins' ~/.claude/settings.json` 에 `telegram@claude-plugins-official` 있나. 없으면 그게 원인.
-   ★MCP 실제 에러★: `~/Library/Caches/claude-cli-nodejs/<encoded-cwd>/mcp-logs-plugin-telegram-telegram/*.jsonl` 를
+   STATE_DIR 없이 떠 제너릭 `~/.claude/channels/telegram/.env` 로 폴백 → 토큰 못 찾음 → server.ts 즉시 종료 = bot.pid 미기동.
+   (에러 로그: `Server stderr: telegram channel: TELEGRAM_BOT_TOKEN required`, `Connection failed after ~100ms`.) 1·2번째 멤버 모두
+   대칭으로 실패한다 — "1번째만 된다"는 착시(먼저 복구됐을 뿐).
+   확인: `jq '.enabledPlugins' ~/.claude/settings.json` 에 `telegram@claude-plugins-official` 있나. 없으면 그게 원인.
+   MCP 실제 에러: `~/Library/Caches/claude-cli-nodejs/<encoded-cwd>/mcp-logs-plugin-telegram-telegram/*.jsonl` 를
    `jq -r '.timestamp+"  "+(.debug//.error//.info//"")'` 로 읽어 `Successfully connected` 인지 `TELEGRAM_BOT_TOKEN required` 인지 본다.
-   ★근본(5db5510 하네스 4-way 확정)★: telegram MCP 가 CC 부팅 MCP "열거"에서 빠진 것 — 실패 세션 로그에 `Starting connection`
+   근본(5db5510 하네스 4-way 확정): telegram MCP 가 CC 부팅 MCP "열거"에서 빠진 것 — 실패 세션 로그에 `Starting connection`
    이 0건(타임아웃 아니라 스폰 시도 자체가 없음). 살아있는 형제 claude 세션이 공유 상태를 쓰는 중 fresh 부팅하면 열거가 telegram
-   을 놓친다(2번째+ 멤버가 형제 옆에서 첫 봇으로 부팅하는 게 유일한 결정적 차이). ★fix = auto-reconnect★: activate 가 poller
+   을 놓친다(2번째+ 멤버가 형제 옆에서 첫 봇으로 부팅하는 게 유일한 결정적 차이). fix = auto-reconnect: activate 가 poller
    미기동 시 `/mcp reconnect plugin:telegram:telegram`(슬래시 명령, 메뉴네비 아님) 을 자동 최대 2회 주입해 복구한다 — 사용자·에이전트
    개입 불필요. 안 뜨면 세션에서 수동으로 `/mcp reconnect plugin:telegram:telegram`. ⛔ `claude plugin install` 은 돌리지 말 것
-   (공유 캐시 inode 스왑=형제 세션 파괴). ★오답이었던 것★: project/user scope·`MCP_TIMEOUT`·pre-warm·콜드 install·30초 타임아웃·trust
+   (공유 캐시 inode 스왑=형제 세션 파괴). 오답이었던 것: project/user scope·`MCP_TIMEOUT`·pre-warm·콜드 install·30초 타임아웃·trust
    프롬프트 전부. `✘ failed` 로그는 preflight 프로브가 남기는 red herring(정상 팀원에도 찍힘) — 진짜 판별은 `Starting connection` 유무.
 
 ## 2) 팀원 활성화(영입)가 실패해요
@@ -99,7 +99,7 @@ claude 순서:
 ```bash
 ls -ld ~/.claude/skills/b3os        # 심링크인지(→ clone/skills/b3os) 실디렉터리인지
 readlink ~/.claude/skills/b3os      # 심링크면 가리키는 clone 경로
-[ -f ~/.claude/skills/b3os/SKILL.md ] && echo "정상" || echo "★깨진 링크★(clone 이동/삭제 추정)"
+[ -f ~/.claude/skills/b3os/SKILL.md ] && echo "정상" || echo "깨진 링크(clone 이동/삭제 추정)"
 ```
 - **심링크 정상**(→ clone) → clone 에서 `git pull` + Claude Code `/reload-skills` 만 하면 최신. (심링크라 pull 이 곧 스킬 최신 = 이게 정상 설치.)
 - **실디렉터리(옛 curl 복사본)** → pull 로 자동 갱신 안 됨. `install.sh` 를 다시 돌리면 이 clone 에 심링크로 전환된다(기존 사본은 백업). 또는 수동: `cp -R <clone>/skills/b3os/. ~/.claude/skills/b3os/` + `/reload-skills`.

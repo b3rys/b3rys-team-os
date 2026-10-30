@@ -1,6 +1,6 @@
 # Team Learning Log (SHARED.md)
 
-> Status: template — 설치 시 `rules/SHARED.md` 로 복사됩니다. ★이 파일이 아니라 그쪽을 채우세요.★
+> Status: template — 설치 시 `rules/SHARED.md` 로 복사됩니다. 이 파일이 아니라 그쪽을 채우세요.
 > (`rules/SHARED.md` 는 .gitignore 되어 있어 공개 저장소로 나가지 않습니다 — 팀 기록입니다.)
 > Role: 팀이 일하며 얻은 교훈을 append-only 로 쌓는 곳. 운영 규칙은 `TEAM-OS.md` 를 본다.
 > 공개 릴리스에서는 비워둔 템플릿입니다 — 당신 팀의 교훈으로 채우세요.

@@ -1,6 +1,6 @@
 ---
 name: b3os-team-inbox
-description: the team lead AI Team 6 agent 가 message bus 와 대화하는 도구. inbox 조회, 메시지 전송, 읽음 표시. claude_channel runtime agent (maintainer/agent A/agent B/agent C) 가 자기 inbox 폴링하거나 응답할 때 사용. Slack 에서 멘션 받은 후 응답할 때, 다른 agent 와 thread 토론할 때, 사용자에게 보고할 때 모두 이 스킬로 envelope 보냄. ★슬랙에 글을 올리거나 슬랙에서 팀원을 부를 때도 이 스킬(slack-post.sh)을 쓴다 — 슬랙은 @멘션이 없으면 상대에게 도달하지 않는다.★
+description: the team lead AI Team 6 agent 가 message bus 와 대화하는 도구. inbox 조회, 메시지 전송, 읽음 표시. claude_channel runtime agent (maintainer/agent A/agent B/agent C) 가 자기 inbox 폴링하거나 응답할 때 사용. Slack 에서 멘션 받은 후 응답할 때, 다른 agent 와 thread 토론할 때, 사용자에게 보고할 때 모두 이 스킬로 envelope 보냄. 슬랙에 글을 올리거나 슬랙에서 팀원을 부를 때도 이 스킬(slack-post.sh)을 쓴다 — 슬랙은 @멘션이 없으면 상대에게 도달하지 않는다.
 trigger: message a teammate
 entry: scripts/send.sh · inbox.sh
 ---
@@ -13,24 +13,24 @@ the team lead AI Team message bus 의 클라이언트 도구.
 
 - **사용자가 Slack/Telegram 으로 thread_id 와 함께 메시지를 보내왔을 때** → `send.sh` 로 답
 
-**★답할 때는 `--in-reply-to <그 메시지 id>` 를 붙인다.★**
-그래야 서버가 "이 답이 ★어느 질문★ 에 대한 것인지" 를 안다. 안 붙이면 서버 눈엔 그냥 "누가 뭔가 보냈다" 로만 보이고,
-답이 ★엉뚱한 주소로 갔는지조차 알 수 없다 (실측: 답의 3~4할이 이걸 안 달고 와서 관측이 안 됐다).
+**답할 때는 `--in-reply-to <그 메시지 id>` 를 붙인다.**
+그래야 서버가 "이 답이 어느 질문 에 대한 것인지" 를 안다. 안 붙이면 서버 눈엔 그냥 "누가 뭔가 보냈다" 로만 보이고,
+답이 엉뚱한 주소로 갔는지조차 알 수 없다.
 ```bash
 send.sh --to <물어본 사람> --thread <온 thread> --in-reply-to <그 메시지 id> --body "..."
 ```
 - **inbox 확인** ("새 메시지 있나?") → `inbox.sh`
 - **다른 agent 와 토론 시작** → `send.sh --to <other_agent> --body "..."`
 - **팀장께 최종 보고** → `send.sh --to <요청자> --thread <온 thread> --in-reply-to <그 메시지 id> --direct-to-gd --body "..."`
-  ★`--direct-to-gd` 는 '★내가★ 하는 최종 보고' 전용이다★ — 서버가 이 봉투의 본문을 팀장 1:1 DM 에 게시한다.
+  `--direct-to-gd` 는 '내가 하는 최종 보고' 전용이다 — 서버가 이 봉투의 본문을 팀장 1:1 DM 에 게시한다.
   · **`--to` 와 `--in-reply-to` 가 둘 다 필요하다.** 보고는 '받은 요청에 대한 답' 이라서다.
     `--in-reply-to` 없이 붙이면 서버가 400(`protocol_direct_to_gd_on_delegation`)으로 거부한다.
   · **팀원에게 "팀장께 보고해줘" 를 시키는 위임이면 이 플래그를 쓰지 않는다** — `--to <팀원>` 으로 보내고
-    본문에 그렇게 쓴다. 플래그는 그 팀원이 ★자기 답에★ 붙인다.
+    본문에 그렇게 쓴다. 플래그는 그 팀원이 자기 답에 붙인다.
 - **메시지 읽음 처리** → `ack.sh`
 - **받은 cogs 메시지에 리액션** → `react.sh`
 - **팀버스 맥락 조회** ("팀버스 그거 어떻게 됐어?", "GD가 코덱스한테 뭐 시켰어?") → `bus-recall.sh` (read-only, team.db 조회. 뒤지기 대신 요점 확인)
-- **지원 파일을 팀장 편집기(Steno)로 보내기** → `steno-send.sh <파일> [--name <이름>]` — Steno 지원 텍스트 파일·그림·zip(20MB 이하)을 전용 outbox에 넣으면 권한이 분리된 Steno 도우미(`steno-helper` LaunchAgent)가 팀장 Steno의 "받은 파일/"로 옮긴다. zip은 풀지 않는다. 기본은 쌓기만 한다(같은 이름이면 " 2"). ★이미 있는 파일을 고칠 때는 새로 보내지 말고 `--replace`★(팀 공유 기본, 받은 파일은 `--to-received`), 치울 때는 `--remove <경로>`. 바뀌기 전 판은 도우미가 `steno-shared/.replaced/` 에 남긴다. 팀장 노트를 고칠 때는 내가 쓴 부분 앞뒤에 `✦<내 이름> ▼` … `✦<내 이름> ▲` 를 넣는다.
+- **지원 파일을 팀장 편집기(Steno)로 보내기** → `steno-send.sh <파일> [--name <이름>]` — Steno 지원 텍스트 파일·그림·zip(20MB 이하)을 전용 outbox에 넣으면 권한이 분리된 Steno 도우미(`steno-helper` LaunchAgent)가 팀장 Steno의 "받은 파일/"로 옮긴다. zip은 풀지 않는다. 기본은 쌓기만 한다(같은 이름이면 " 2"). 이미 있는 파일을 고칠 때는 새로 보내지 말고 `--replace`(팀 공유 기본, 받은 파일은 `--to-received`), 치울 때는 `--remove <경로>`. 바뀌기 전 판은 도우미가 `steno-shared/.replaced/` 에 남긴다. 팀장 노트를 고칠 때는 내가 쓴 부분 앞뒤에 `✦<내 이름> ▼` … `✦<내 이름> ▲` 를 넣는다.
 
 서버: `http://127.0.0.1:7878/team/api/inbox` (loopback).
 
@@ -70,7 +70,7 @@ skills/b3os-team-inbox/scripts/send.sh \
 ### 팀장께 최종 보고하기 — `--direct-to-gd`
 
 `--direct-to-gd` 는 **이 봉투의 본문이 팀장 1:1 DM 에 게시된다**는 뜻이다(서버가 `owner_chat_id` 로 보낸다).
-★내가 하는 최종 보고에 붙이는 플래그다.★
+내가 하는 최종 보고에 붙이는 플래그다.
 
 ```bash
 skills/b3os-team-inbox/scripts/send.sh \
@@ -81,16 +81,16 @@ skills/b3os-team-inbox/scripts/send.sh \
   --body "OpenClaw 중간 개입 테스트 결과: ..."
 ```
 
-- ★`--in-reply-to` 가 필수다★ — 보고는 '받은 요청에 대한 답' 이기 때문이다. 없으면 서버가
+- `--in-reply-to` 가 필수다 — 보고는 '받은 요청에 대한 답' 이기 때문이다. 없으면 서버가
   400 `protocol_direct_to_gd_on_delegation` 으로 거부한다. (그래야 "어느 요청에 대한 보고인지" 가 남는다)
-- ★`--to` 는 '원 요청 추적용 주소' 다★ — 이 보고가 **어느 요청에 대한 것인지**를 남기는 DB 주소이지,
-  동시 수신자가 아니다. ★본문이 배달되는 곳은 팀장 1:1 DM 한 곳뿐이다.★
+- `--to` 는 '원 요청 추적용 주소' 다 — 이 보고가 **어느 요청에 대한 것인지**를 남기는 DB 주소이지,
+  동시 수신자가 아니다. 본문이 배달되는 곳은 팀장 1:1 DM 한 곳뿐이다.
   요청자 행은 `completed` 로 삽입돼 **깨워지지 않는다**(`db/inbox/messages.ts:176~185`) — 이중 배달과
   '개별 보고 N 건이 한 사람에게 몰려 병합되는 것' 을 막기 위해서다.
   → **요청자도 내용을 봐야 하면 별도로 보낸다**(플래그 없이 `--to <요청자>`).
-- ★위임에는 붙이지 않는다★ — 팀원에게 "팀장께 보고해줘" 를 시키는 것이면 **플래그 없이** `--to <팀원>` 으로
+- 위임에는 붙이지 않는다 — 팀원에게 "팀장께 보고해줘" 를 시키는 것이면 **플래그 없이** `--to <팀원>` 으로
   보내고 본문에 그렇게 쓴다. 플래그는 그 팀원이 **자기 답에** 붙인다. (위임에 붙이면 위 400 에 걸린다)
-- ★fan-out(수집 요청)에는 절대 붙이지 않는다★ — N 명에게 붙이면 개별 보고가 N 개 나간다.
+- fan-out(수집 요청)에는 절대 붙이지 않는다 — N 명에게 붙이면 개별 보고가 N 개 나간다.
 - `--source-thread` 는 더 이상 필수가 아니다(호환용으로 받기만 하고 서버는 무시한다).
 
 ### 단톡방에 말하기 — `--to broadcast`
@@ -133,7 +133,7 @@ skills/b3os-team-inbox/scripts/send.sh \
 - 기여자의 답은 **도착할 때마다 하나씩** 수집자를 깨운다. (한 번에 묶여서 오지 않는다)
 - 깨어날 때마다 **그 시점의 스레드 전체가 문맥으로 주입된다** — 누가 답했고 내가 뭘 보냈는지 거기 다 있다.
 
-**thread 규칙(2026-07 정리 — b3os-task-loop와 동일)**
+**thread 규칙 (b3os-task-loop와 동일)**
 - **그룹방/팀장 visible 요청을 취합할 때**: fan-out은 새 private directed thread로 보낸다(`--thread` 생략). 답이 종합자에게 directed로 돌아와 자동 wake된다. 최종 종합만 원래 그룹/팀장 thread에 보고한다.
 - **이미 private directed thread에서 온 1:1 협업 요청**: 같은 `--thread`를 유지해도 된다.
 
@@ -193,7 +193,7 @@ skills/b3os-team-inbox/scripts/bus-recall.sh --me ames --with bill
 
 ## 슬랙에 글 올리기 (`slack-post.sh`)
 
-★슬랙 게시 경로는 이것 하나다.★ 코드를 뒤져 다른 경로를 만들지 않는다 — 특히 봇 토큰 파일을 직접 열지 않는다.
+슬랙 게시 경로는 이것 하나다. 코드를 뒤져 다른 경로를 만들지 않는다 — 특히 봇 토큰 파일을 직접 열지 않는다.
 
 ```bash
 skills/b3os-team-inbox/scripts/slack-post.sh --channel <C...> --text "..."
@@ -201,12 +201,12 @@ skills/b3os-team-inbox/scripts/slack-post.sh --channel <C...> --text "..." --thr
 ```
 
 - 신원은 워크스페이스에서 자동 판정된다(`_me.sh`) — `--as` 는 관리자용이다.
-- ★봇 토큰 파일을 직접 열지 마라.★ 이 스크립트가 서버를 거쳐 처리한다.
-- ★반드시 라이브 트리의 스크립트를 절대경로로 부른다.★ 워크트리(작업 사본)에서 부르면
+- 봇 토큰 파일을 직접 열지 마라. 이 스크립트가 서버를 거쳐 처리한다.
+- 반드시 라이브 트리의 스크립트를 절대경로로 부른다. 워크트리(작업 사본)에서 부르면
   그 사본의 `team.db` 를 보게 돼 신원 판별에 실패한다("agent id 해석 실패"). 실제로 이 문서를
   쓰면서 그 함정에 걸렸다 — 문서에 적고 안 돌려보면 그대로 남는다.
 
-### ★멘션이 없으면 상대에게 도달하지 않는다★
+### 멘션이 없으면 상대에게 도달하지 않는다
 
 서버는 슬랙에서 **`app_mention` 이벤트만** 받는다(`routes/slack.ts`). 즉:
 
@@ -226,7 +226,7 @@ curl -s http://127.0.0.1:7878/team/api/slack/status \
 
 - **"답장 불필요" 로 끊지 마라** — 상대가 읽었는지 알 수 없게 된다.
 - 대신 **한 줄 확인만 받고, 그 확인에 다시 답하지 않는다.** 체인은 그렇게 끊는다.
-- ★슬랙 경로에는 버스의 체인 한도가 걸리지 않는다★ — 인바운드가 `source="user"`·`hop_count=0`
+- 슬랙 경로에는 버스의 체인 한도가 걸리지 않는다 — 인바운드가 `source="user"`·`hop_count=0`
   으로 들어와 봇↔봇 검사(`source==="agent"` 조건)를 통과한다. 시스템이 안 막아주는 구간이라
   **사람 쪽 규율로 막아야 한다.**
 
@@ -245,16 +245,16 @@ curl -s http://127.0.0.1:7878/team/api/slack/status \
 
 ## 옵션
 
-- (`--from` 은 ★막혀 있다★ — 신원은 워크스페이스에서 자동으로 정해진다.)
+- (`--from` 은 막혀 있다 — 신원은 워크스페이스에서 자동으로 정해진다.)
 - `--to <id>` (필수)
 - `--body "..."` (필수)
 - `--thread <id>` (옵션, 기존 thread 에 이어가기)
 - `--in-reply-to <msg_id>` (옵션, 메시지 참조)
 - `--type dm|reply|status` (옵션, 기본 dm)
 - `--priority low|normal|high` (옵션, 기본 normal)
-- `--direct-to-gd` (옵션, ★이 본문을 팀장 1:1 DM 에 최종 보고★ — `--to <요청자>`·`--in-reply-to` 필수.
-  ★위임이 아니다★: 팀원에게 시키는 것이면 붙이지 않는다)
-- `--source-thread <tg-...|group_id>` (옵션·★사실상 폐기★ — 호환용으로 받기만 하고 서버는 무시한다)
+- `--direct-to-gd` (옵션, 이 본문을 팀장 1:1 DM 에 최종 보고 — `--to <요청자>`·`--in-reply-to` 필수.
+  위임이 아니다: 팀원에게 시키는 것이면 붙이지 않는다)
+- `--source-thread <tg-...|group_id>` (옵션·사실상 폐기 — 호환용으로 받기만 하고 서버는 무시한다)
 
 ## 응답가드 자가등록 (긴 작업 중 팀장 보고 잊지 않기)
 
@@ -266,7 +266,7 @@ skills/b3os-team-inbox/scripts/expect-report.sh --thread <t> --in 30m         # 
 skills/b3os-team-inbox/scripts/expect-report.sh --thread <t> --cancel         # 보고 마쳤으면 정리
 ```
 
-알림은 ★딱 한 번★ — 받으면 보고하거나 다시 걸면 된다.
+알림은 딱 한 번 — 받으면 보고하거나 다시 걸면 된다.
 
 - openclaw·hermes_agent: 서버가 기한 안의 보고(버스/`--direct-to-gd`)를 직접 확인한다. 보고가 보이면 알림을 내지 않는다.
 - claude·codex: 팀장 1:1 보고가 서버에 보이지 않아서, 대신 팀 스케줄러에 나를 깨우는 1회성 리마인더를 건다(응답 `"via":"scheduler_reminder"`). 깨어나면 보고했는지 스스로 보고 판단한다. 보고를 마쳤으면 `--cancel` 로 리마인더를 지운다. 같은 thread 로 다시 걸면 앞의 리마인더를 바꾼다.
