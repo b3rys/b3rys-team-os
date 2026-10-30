@@ -42,5 +42,8 @@
   "operation_grant_root": "⚠ 세션 동안 아래 폴더 하위 전체에 쓰기 허용 요청 · ",
   "operation_unparsed": "내용 해석 실패 — 원문 확인 필요 · ",
   "operation_file_count": "파일 {count}개",
-  "operation_more_files": " …외 {count}개"
+  "operation_more_files": " …외 {count}개",
+  "approval_read_path": "읽기",
+  "approval_write_path": "쓰기",
+  "approval_network": "네트워크 사용"
 }

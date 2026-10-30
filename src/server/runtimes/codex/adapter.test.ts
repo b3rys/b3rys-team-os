@@ -572,3 +572,20 @@ describe("빈 최종텍스트 + 팀원이 직접 답한 턴", () => {
     expect(String(notices[0]?.body)).toContain("응답이 실패했습니다");
   });
 });
+
+import { registerActiveTurn, unregisterActiveTurn } from "./activeTurns";
+test("Mode changes defer the next message instead of steering it into the old permissions",async()=>{
+ const db=setup();let mode:"full"|"folder"="full";let finish!:(r:CodexTurnResult)=>void;const seen:Array<string|undefined>=[];
+ const getAgents=()=>agentsOf(db)().map(a=>a.id==="cody"?{...a,codex_permission_mode:mode}:a);
+ const adapter=makeCodexAdapter(db,getAgents,{callCodex:opts=>{seen.push(opts.permissionMode);return new Promise(resolve=>{finish=resolve})}});
+ let steers=0;const active={currentTurnId:"old-turn",async steer(){steers++}};
+ try{
+  await adapter.wake("cody",row(),"");registerActiveTurn("cody",active);
+  mode="folder";
+  const deferred=await adapter.wake("cody",row({message_id:"m2"}),"");
+  expect(deferred.deferred).toBe(true);expect(deferred.detail).toBe("codex_permission_mode_changed");expect(steers).toBe(0);
+  finish(okResult("done"));await sleep(20);
+  await adapter.wake("cody",row({message_id:"m2"}),"");expect(seen).toEqual(["full","folder"]);
+  finish(okResult("done"));await sleep(20);
+ }finally{unregisterActiveTurn("cody",active)}
+});

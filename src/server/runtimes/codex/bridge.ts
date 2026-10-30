@@ -44,6 +44,7 @@ import { cogsActivityCode, cogsActivityArgs, cogsActivityLine } from "./cogsActi
 import { uiText, renderRuntimeEvent } from "./uiStrings";
 
 export interface BridgeDeps {
+  permissionModeFor?: () => import("../../../shared/codexPermissionMode").CodexPermissionMode;
   /** 이 팀원의 채널(시험 주입). 없으면 런처가 넣은 env(CODEX_CHANNEL_KIND·TELEGRAM_API_BASE)에서 읽는다. */
   channel?: MemberChannel;
   reactionInbox?: ReactionInbox;
@@ -88,15 +89,16 @@ export interface BridgeDeps {
 }
 
 /** 모든 턴 진입점(1:1·그룹·인사·리액션·일정 요약)이 같은 cogs 실행 설정을 싣는다. */
-function cogsTurnOpts(deps: BridgeDeps): Pick<CodexTurnOptions, "cogsRun" | "onCogsApproval"> {
-  if (!deps.cogsRunFor) return {};
+function cogsTurnOpts(deps: BridgeDeps): Pick<CodexTurnOptions, "cogsRun" | "onCogsApproval" | "permissionMode"> {
+  if (!deps.cogsRunFor) return { permissionMode: deps.permissionModeFor?.() };
   let run: CogsCodexRun;
   try { run = deps.cogsRunFor(); } catch (e) { run = { mode: "blocked", reason: `policy_read_failed: ${e instanceof Error ? e.message : e}` }; }
-  return { cogsRun: run, ...(deps.onCogsApproval ? { onCogsApproval: deps.onCogsApproval } : {}) };
+  return { cogsRun: run, ...(run.mode === "legacy" ? { permissionMode: deps.permissionModeFor?.() } : {}), ...(deps.onCogsApproval ? { onCogsApproval: deps.onCogsApproval } : {}) };
 }
 
 /** 팀원 단위 activeTurns만으로는 대화를 구분할 수 없어 진행 중 chat도 보존한다. 같은 대화만 steer해야 다른 대화의 입력이 섞이지 않는다. */
 let runningTurnChatId: number | null = null;
+let runningPermissionMode: string | null = null;
 
 /**
  * 진행 중 작업에 밀어 넣을 문구.
@@ -215,8 +217,8 @@ export function bridgeUpdatesUrl(apiBase: string, token: string, offset: number)
 }
 
 /** 시험·진단용 — 지금 그 대화의 턴이 도는 중인가. */
-export function isTurnRunningFor(chatId: number): boolean {
-  return runningTurnChatId === chatId;
+export function isTurnRunningFor(chatId: number, expectedMode?: string): boolean {
+  return runningTurnChatId === chatId && (expectedMode === undefined || runningPermissionMode === expectedMode);
 }
 
 // 채팅별 codex thread(resume sessionId) → 같은 대화 맥락 유지.
@@ -899,6 +901,8 @@ async function handleMessageTurn(
     schedule();
   } : undefined;
 
+  const executionOpts = cogsTurnOpts(deps);
+  runningPermissionMode = executionOpts.permissionMode ?? "full";
   runningTurnChatId = chatId;
   let result: CodexTurnResult;
   try {
@@ -920,7 +924,7 @@ async function handleMessageTurn(
       sandbox: deps.sandbox,
       networkAccess: deps.networkAccess,
       writableRoots: deps.workdir ? [deps.workdir] : [],
-      ...cogsTurnOpts(deps),
+      ...executionOpts,
     });
     if (result.ok) reactionClaim?.commit(); else reactionClaim?.rollback();
   } catch (error) {
@@ -939,6 +943,7 @@ async function handleMessageTurn(
     // 던지고 나가도 반드시 지운다. 안 지우면 그 대화는 영영 "도는 중" 으로 남아
     //   이후 모든 말이 끼어들기로 가고, 끼어들 턴이 없어 아무 데도 안 간다.
     runningTurnChatId = null;
+    runningPermissionMode = null;
   }
 
   // 예약된 편집이 답을 덮어쓰지 못하게 먼저 끈다. 끄지 않으면 답을 쓴 뒤 진행 줄이 다시 올라온다.
@@ -1217,7 +1222,7 @@ interface TgCallbackQuery {
 }
 
 /** exec 폴백은 steer·서브에이전트 생존 기능을 잃으므로 app-server 준비 실패를 그대로 실패로 드러낸다.
- * 현재 never 정책에서는 app-server도 승인창을 만들지 않으므로 승인창 유무를 두 경로의 차이로 보지 않는다. */
+ * folder 모드의 승인 요청도 app-server에서 받아 해당 팀원의 방으로 전달한다. */
 export function defaultBridgeCaller(): (o: CodexTurnOptions) => Promise<CodexTurnResult> {
   const { openDb } = require("../../db/migrate") as typeof import("../../db/migrate");
   const { makeAppServerCaller } = require("./appServerRunner") as typeof import("./appServerRunner");
@@ -1253,11 +1258,11 @@ export async function handleApprovalCallback(
   token: string,
   cb: TgCallbackQuery,
   allowFrom: Set<number>,
-  deps: { dbPath?: string; fetchFn?: typeof fetch; plainOnly?: boolean } = {},
+  deps: { dbPath?: string; fetchFn?: typeof fetch; plainOnly?: boolean; agentId?: string; apiBase?: string } = {},
 ): Promise<"decided" | "ignored" | "stale" | "unauthorized"> {
   const doFetch = deps.fetchFn ?? fetch;
   const answer = (code: string, alert = false, args: Record<string, unknown> = {}) =>
-    doFetch(`${TG_API}/bot${token}/answerCallbackQuery`, {
+    doFetch(`${deps.apiBase ?? TG_API}/bot${token}/answerCallbackQuery`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ callback_query_id: cb.id, ...((deps.plainOnly ?? PLAIN_ONLY) ? { text_code: code, text_args: args } : { text: uiText(code, args) }), show_alert: alert }),
@@ -1279,11 +1284,15 @@ export async function handleApprovalCallback(
   try {
     const id = m[2]!;
     const row = getPermissionRequest(db, id);
+    if (row && deps.agentId && row.agent_id !== deps.agentId) {
+      await answer("callback_forbidden", true);
+      return "unauthorized";
+    }
     // 이미 지난 요청은 지난 대로 알린다 — 눌렀는데 아무 반응이 없으면 사람은 다시 누른다.
     if (!row || row.status !== "pending") {
       await answer(row ? "callback_processed" : "callback_expired", false, row ? { status: row.status } : {});
       if (cb.message) {
-        await doFetch(`${TG_API}/bot${token}/editMessageReplyMarkup`, {
+        await doFetch(`${deps.apiBase ?? TG_API}/bot${token}/editMessageReplyMarkup`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ chat_id: cb.message.chat.id, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } }),
@@ -1327,7 +1336,7 @@ export async function handleApprovalCallback(
       `callback_${decision}`,
     );
     if (cb.message) {
-      await doFetch(`${TG_API}/bot${token}/editMessageReplyMarkup`, {
+      await doFetch(`${deps.apiBase ?? TG_API}/bot${token}/editMessageReplyMarkup`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ chat_id: cb.message.chat.id, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } }),
@@ -1352,7 +1361,7 @@ export async function dispatchApprovalCallback(
   if (ctx.channelKind === "b3chat") {
     return handlers.cogs(token, cb, { apiBase: ctx.apiBase, agentId: ctx.agentId, registryPath: ctx.registryPath, dbPath: ctx.dbPath });
   }
-  return handlers.telegram(token, cb, ctx.allowFrom);
+  return handlers.telegram(token, cb, ctx.allowFrom, { dbPath: ctx.dbPath, agentId: ctx.agentId, apiBase: ctx.apiBase });
 }
 
 /** 첫 getUpdates 성공 후 ready marker를 원자적으로 쓴다. marker 존재 = 브리지가 실제 Telegram polling에 진입. */
@@ -1433,6 +1442,11 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     // agentId 를 실어 보낸다 — 안 실으면 handleMessage 가 같은 식을 다시 계산해,
     //   runBridge({agentId}) 로 부를 때 두 값이 갈린다. 그러면 steer 가 등록 안 된 id 를 찾아 늘 실패한다.
     agentId: liveAgentId,
+    permissionModeFor: deps.permissionModeFor ?? (() => {
+      const entry = loadRegistry(process.env.TEAM_AGENT_REGISTRY?.trim() || DEFAULT_AGENT_REGISTRY).find((a) => a.id === liveAgentId);
+      if (!entry) throw new Error("codex_member_configuration_unavailable");
+      return entry.codex_permission_mode ?? "full";
+    }),
     reactionInbox: deps.reactionInbox ?? createReactionInbox(),
     dmSessions: deps.dmSessions ?? makeChatSessionStore(liveAgentId, defaultTeamDbPath()),
     sendMessage: deps.sendMessage ?? tgSend(token),
@@ -1570,7 +1584,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
           void routeReactionUpdate(u.update_id, reaction, {
             channel: live.channel!, allowFrom, ownBotId, inbox: live.reactionInbox!,
             route: {
-              isRunning: isTurnRunningFor,
+              isRunning: (chatId) => isTurnRunningFor(chatId, cogsTurnOpts(live).permissionMode ?? "full"),
               captureSteer: () => captureActiveTurnSteer(liveAgentId),
               steer: async () => false,
               enqueue: run => turns.enqueue(run),
@@ -1616,11 +1630,11 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         let receipt: Promise<number | null> | undefined;
         void routeIncoming(chatId, text, {
           receive: live.channel?.kind === "b3chat" ? () => (receipt = sendCogsReceipt(chatId, messageId, live.sendMessage!)) : undefined,
-          isRunning: isTurnRunningFor,
+          isRunning: (chatId) => isTurnRunningFor(chatId, cogsTurnOpts(live).permissionMode ?? "full"),
           // 도중에 붙인 그림도 그 작업 안으로 넣는다. 여기서 내려받아도 폴 루프는 안 막힌다 —
           //   위에서 routeIncoming 을 기다리지 않기 때문이다(await 를 붙이면 승인 버튼이 다시 막힌다).
           captureSteer: () => captureConversationSteer(chatId, {
-            isRunning: isTurnRunningFor,
+            isRunning: (chatId) => isTurnRunningFor(chatId, cogsTurnOpts(live).permissionMode ?? "full"),
             captureSend: () => captureActiveTurnSteer(liveAgentId),
             inbox: live.reactionInbox!,
             fetchAttachments: hasMedia && msg ? () => downloadDmAttachmentsSafe(token, msg) : null,

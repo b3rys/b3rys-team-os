@@ -17,6 +17,7 @@ export interface CodexTurnOptions {
   cwd?: string;
   /** 팀원별 정체성 격리(config/auth/session). 미지정 시 기본 ~/.codex. */
   codexHome?: string;
+  permissionMode?: import("../../../shared/codexPermissionMode").CodexPermissionMode;
   /** 보낼 프롬프트(채널 메시지 + 팀 컨텍스트). */
   prompt: string;
   /** A completed reaction turn may intentionally have no reply; errors still fail. */

@@ -42,5 +42,8 @@
   "operation_grant_root": "Write access under this entire folder for the session · ",
   "operation_unparsed": "Unparsed request; inspect original payload · ",
   "operation_file_count": "{count} files",
-  "operation_more_files": " …and {count} more"
+  "operation_more_files": " …and {count} more",
+  "approval_read_path": "Read",
+  "approval_write_path": "Write",
+  "approval_network": "Network access"
 }
