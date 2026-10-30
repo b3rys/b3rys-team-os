@@ -1,48 +1,111 @@
-/** 서브에이전트 결과는 턴 종료 후에도 돌아오므로 팀원별 app-server를 턴보다 오래 보존한다.
- * 팀원 단위 잠금이 같은 풀 항목의 동시 턴 사용을 막는 전제이며 이 잠금을 제거하면 클라이언트 공유를 재검토해야 한다. */
+/** Each member owns one usable app-server. Retirement transfers ownership to a
+ * separate cleanup set before any signal, so a dying process cannot accept a new turn. */
 import type { CodexAppServerClient } from "./appServerClient";
 
-/** 살아있는지 밖에서 물어볼 수 있는 최소 계약(시험에서 가짜를 세울 수 있게). */
+/** Quiet period before an idle query; override only for bounded acceptance tests. */
+export const IDLE_CLIENT_GRACE_MS = Number(process.env.B3OS_CODEX_IDLE_GRACE_MS ?? 15 * 60 * 1000);
 export interface PoolableClient {
+  readonly lastPoolActivityAt?: number;
+  notePoolActivity?(): void;
   readonly isClosed: boolean;
+  readonly isTerminated?: boolean;
   close(): void;
+  retireIfIdle?(commit: () => boolean): Promise<boolean>;
+}
+const pool = new Map<string, PoolableClient>();
+const keys = new Map<string, string | undefined>();
+const generations = new Map<string, number>();
+const cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const activityAt = new WeakMap<PoolableClient, number>();
+function noteActivity(client: PoolableClient): void { activityAt.set(client,Date.now()); client.notePoolActivity?.(); }
+const retired = new Map<PoolableClient, { accepted: boolean; timer?: ReturnType<typeof setTimeout> }>();
+
+function cancelCleanup(agentId: string): void {
+  clearTimeout(cleanupTimers.get(agentId));
+  cleanupTimers.delete(agentId);
 }
 
-const pool = new Map<string, PoolableClient>();
-/** 그 클라이언트를 띄운 실행 권한 열쇠(cogs 정책 도장). 다르면 다시 쓰지 않는다 — 예전 권한의 app-server·서브 작업이 다음 턴에 남지 않게. */
-const keys = new Map<string, string | undefined>();
+/** Failed signals stay owned here. Successful TERM is monitored until exit;
+ * the client escalates only its captured retired process, never a pool replacement. */
+function closeRetired(client: PoolableClient): void {
+  const state = retired.get(client);
+  if (!state) return;
+  clearTimeout(state.timer);
+  if (client.isTerminated ?? (state.accepted && client.isClosed)) { retired.delete(client); return; }
+  if (!state.accepted) {
+    try { client.close(); state.accepted = true; }
+    catch { console.warn("[codex] retired app-server termination failed; retained for retry"); }
+  }
+  if (client.isTerminated ?? (state.accepted && client.isClosed)) { retired.delete(client); return; }
+  state.timer = setTimeout(() => closeRetired(client), 1000);
+  state.timer.unref?.();
+}
 
-/**
- * 그 팀원의 살아있는 클라이언트를 준다. 없거나 죽었으면 새로 만든다.
- * 죽은 것을 그대로 돌려주면 그 턴이 통째로 실패한다 — 프로세스는 크래시·재시작으로 언제든 죽는다.
- */
+/** No await between checking ownership, removing the entry and recording retirement. */
+function retire(agentId: string, client: PoolableClient): void {
+  cancelCleanup(agentId);
+  pool.delete(agentId);
+  keys.delete(agentId);
+  generations.set(agentId, (generations.get(agentId) ?? 0) + 1);
+  retired.set(client, { accepted: false });
+}
+
 export function acquireClient<T extends PoolableClient>(agentId: string, create: () => T, policyKey?: string): { client: T; reused: boolean } {
+  cancelCleanup(agentId);
+  generations.set(agentId, (generations.get(agentId) ?? 0) + 1);
   const existing = pool.get(agentId) as T | undefined;
-  if (existing && !existing.isClosed && keys.get(agentId) === policyKey) return { client: existing, reused: true };
-  if (existing && !existing.isClosed) dropClient(agentId); // 권한이 바뀌었다 — 닫는다(살아 있는 서브 작업도 같이 끝난다)
-  else if (existing) pool.delete(agentId); // 죽은 것 치운다
+  if (existing && !existing.isClosed && keys.get(agentId) === policyKey) { noteActivity(existing); return { client: existing, reused: true }; }
+  if (existing) dropClient(agentId);
   const client = create();
+  if (client.isClosed) throw new Error("cannot pool a closed or retired app-server");
+  noteActivity(client);
   pool.set(agentId, client);
   keys.set(agentId, policyKey);
   return { client, reused: false };
 }
 
-/** 그 팀원 것을 닫고 치운다(턴 실패·재시작 정리용). 없으면 아무 일도 없다. */
+/** Explicit drop also retires first. Cleanup failure cannot make it usable again. */
 export function dropClient(agentId: string): void {
-  const c = pool.get(agentId);
-  pool.delete(agentId);
-  keys.delete(agentId);
-  try { c?.close(); } catch { /* 정리 실패가 상위를 막지 않는다 */ }
+  const client = pool.get(agentId);
+  cancelCleanup(agentId);
+  if (!client) return;
+  retire(agentId, client);
+  closeRetired(client);
 }
 
-/** 전부 정리(서버 종료). 남겨두면 좀비 프로세스가 쌓인다. */
+export async function releaseIdleClient(agentId: string, client: PoolableClient & { isIdle(): Promise<boolean> }, retryMs = 10_000, graceMs = IDLE_CLIENT_GRACE_MS): Promise<void> {
+  noteActivity(client);
+  const generation = generations.get(agentId);
+  const current = () => pool.get(agentId) === client && generations.get(agentId) === generation;
+  const quietEnough = () => Date.now() - Math.max(activityAt.get(client) ?? 0, client.lastPoolActivityAt ?? 0) >= graceMs;
+  const commit = () => { if (!current() || !quietEnough()) return false; retire(agentId, client); return true; };
+  const check = async () => {
+    if (!current()) return;
+    if (client.isClosed) { dropClient(agentId); return; }
+    const quietSince = Math.max(activityAt.get(client) ?? 0, client.lastPoolActivityAt ?? 0);
+    const remaining = graceMs - (Date.now() - quietSince);
+    if (remaining > 0) { schedule(remaining); return; }
+    let committed = false;
+    try {
+      // Production client checks notification activity immediately before commit.
+      committed = client.retireIfIdle ? await client.retireIfIdle(commit) : await client.isIdle() && commit();
+    } catch { /* Unknown status preserves the usable client. */ }
+    if (committed) { closeRetired(client); return; }
+    if (!current()) return;
+    schedule(retryMs);
+  };
+  const schedule = (delay: number) => {
+    cancelCleanup(agentId);
+    const timer = setTimeout(() => { cleanupTimers.delete(agentId); void check(); }, delay);
+    timer.unref?.(); cleanupTimers.set(agentId, timer);
+  };
+  await check();
+}
+
 export function dropAllClients(): void {
   for (const id of [...pool.keys()]) dropClient(id);
+  for (const client of [...retired.keys()]) closeRetired(client);
 }
-
-/** 지금 살아있는 팀원 목록(진단·시험용). */
-export function pooledAgents(): string[] {
-  return [...pool.keys()];
-}
-
+export function pooledAgents(): string[] { return [...pool.keys()]; }
+export function retiredClientCount(): number { return retired.size; }
 export type { CodexAppServerClient };
