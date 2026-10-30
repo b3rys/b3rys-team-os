@@ -327,6 +327,11 @@ if d.get('ok'):
     print(f'  확인: inbox.sh --delivery {m[\"id\"]}   (버스 밖 발송) · send.sh --confirm  (버스 안 수신)', file=sys.stderr)
     print(m['id'])
 else:
+    # 서버가 사유(detail)·다음 행동(next)을 주면 사람이 읽는 줄로 먼저 보여준다. 자동으로 다시 보내지 않는다.
+    if d.get('detail'):
+        print(d['detail'], file=sys.stderr)
+    if d.get('next'):
+        print(f'  → {d[\"next\"]}', file=sys.stderr)
     print(f'✗ 접수 실패: {json.dumps(d, ensure_ascii=False)}', file=sys.stderr)
     sys.exit(1)
 ")
