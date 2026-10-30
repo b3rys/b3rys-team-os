@@ -171,10 +171,11 @@ export class CodexAppServerClient {
   private turnActivityCount = 0;
   private closed = false;
   private activityGeneration = 0;
-  private idleTerminatedProc: ChildProcessWithoutNullStreams | null = null;
+  private retired = false;
   private terminationTimer?: ReturnType<typeof setTimeout>;
   /** 풀이 죽은 것을 돌려주지 않게 밖에서 상태를 볼 수 있어야 한다. */
-  get isClosed(): boolean { return this.closed; }
+  get isClosed(): boolean { return this.closed || this.retired; }
+  get isTerminated(): boolean { return !this.proc || this.proc.exitCode !== null || this.proc.signalCode !== null; }
 
   /** 팀원 CODEX_HOME을 넘기지 않으면 자식이 호스트 ~/.codex를 읽어 해당 팀원의 승인정책·권한 프로파일이 적용되지 않는다. */
   constructor(private readonly spawnOpts: { codexHome?: string; warn?: (line: string) => void } = {}) {}
@@ -189,6 +190,7 @@ export class CodexAppServerClient {
 
   /** app-server 스폰 + initialize 핸드셰이크. */
   async start(): Promise<void> {
+    if (this.retired) throw new Error("client retired");
     const bin = resolveCodexBin();
     if (!bin) throw new Error("codex CLI executable not found");
     const proc = spawn(bin, ["app-server"], {
@@ -346,7 +348,7 @@ export class CodexAppServerClient {
   /** 전체 loaded thread를 확인해야 진행 중인 하위 작업을 끊지 않고 MCP 프로세스를 정리할 수 있다.
    * 알 수 없는 상태·조회 실패·조회 중 새 thread 생성은 유휴로 판단하지 않는다. */
   async isIdle(): Promise<boolean> {
-    if (this.closed || this.turnResolve) return false;
+    if (this.closed || this.retired || this.turnResolve) return false;
     const generation = this.activityGeneration;
     const deadline = Date.now() + 2000;
     try {
@@ -375,28 +377,13 @@ export class CodexAppServerClient {
     } catch { return false; }
   }
 
-  /** Idle cleanup sends one signal per checked attempt. Unlike an explicit abort,
-   * neither retries nor escalation can outlive the idle/pool-generation guard. */
-  async terminateIfIdle(current: () => boolean): Promise<"closed" | "cancelled" | "retry"> {
-    const proc = this.proc;
-    if (!proc || proc.exitCode !== null || proc.signalCode !== null) return "closed";
+  /** The final status check is followed by synchronous pool retirement, never by
+   * a reusable process in a half-closed state. Signals belong to retirement cleanup. */
+  async retireIfIdle(commit: () => boolean): Promise<boolean> {
     const generation = this.activityGeneration;
-    if (!current() || !await this.isIdle() || !current() || generation !== this.activityGeneration || this.proc !== proc) return "cancelled";
-    const signal = this.idleTerminatedProc === proc ? "SIGKILL" : "SIGTERM";
-    try {
-      if (!proc.kill(signal)) throw new Error("signal returned false");
-      this.idleTerminatedProc = proc;
-    } catch {
-      this.warn("[codex] idle termination failed; retaining process for a fresh idle check");
-    }
-    if (proc.exitCode === null && proc.signalCode === null && typeof proc.once === "function") {
-      await new Promise<void>((resolve) => {
-        const done = () => { clearTimeout(timer); proc.removeListener("close", done); resolve(); };
-        const timer = setTimeout(done, 100);
-        proc.once("close", done);
-      });
-    }
-    return proc.exitCode !== null || proc.signalCode !== null ? "closed" : "retry";
+    if (this.retired || !await this.isIdle() || generation !== this.activityGeneration || !commit()) return false;
+    this.retired = true;
+    return true;
   }
 
   close(): void {
@@ -431,7 +418,7 @@ export class CodexAppServerClient {
 
   //  내부
   private send(obj: Record<string, unknown>): void {
-    if (this.closed || !this.proc) throw new Error("client closed");
+    if (this.closed || this.retired || !this.proc) throw new Error("client closed");
     this.proc.stdin.write(JSON.stringify(obj) + "\n");
   }
   /** 요청(응답 기대). */

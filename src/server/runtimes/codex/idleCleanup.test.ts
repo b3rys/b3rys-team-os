@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { afterEach, expect, test } from "bun:test";
 import { CodexAppServerClient } from "./appServerClient";
-import { acquireClient, dropAllClients, dropClient, pooledAgents, releaseIdleClient } from "./clientPool";
+import { acquireClient, dropAllClients, dropClient, pooledAgents, releaseIdleClient, retiredClientCount } from "./clientPool";
 
 afterEach(() => dropAllClients());
 
@@ -120,25 +120,21 @@ test("A child followup during the last loaded/list invalidates idle even with id
   }
 });
 
-test("Failed close stays tracked, blocks replacement, warns, and retries successfully", async () => {
-  const originalWarn = console.warn;
-  const warnings: unknown[][] = [];
-  console.warn = (...args) => { warnings.push(args); };
-  let fail = true;
-  let closes = 0;
-  const c = { isClosed: false, close() { closes++; if (fail) throw new Error("fixture kill failure"); this.isClosed = true; } };
+test("Failed termination stays retired and never targets a replacement", async () => {
+  const originalWarn = console.warn; const warnings: unknown[][]=[];
+  console.warn=(...args)=>{warnings.push(args)};
+  let fail=true;let closes=0;
+  const old={isClosed:false,close(){closes++;if(fail)throw new Error("fixture");this.isClosed=true}};
+  const fresh=poolClient(async()=>false);
   try {
-    acquireClient("probe", () => c);
-    expect(dropClient("probe")).toBe(false);
-    expect(pooledAgents()).toEqual(["probe"]);
-    expect(() => acquireClient("probe", () => { throw new Error("must not spawn"); })).toThrow("cleanup pending");
-    expect(warnings.length).toBeGreaterThan(0);
-    fail = false;
-    for (let i = 0; i < 30 && !c.isClosed; i++) await Bun.sleep(50);
-    expect(c.isClosed).toBe(true);
-    expect(closes).toBeGreaterThanOrEqual(3);
-    expect(pooledAgents()).toEqual([]);
-  } finally { fail = false; console.warn = originalWarn; }
+    acquireClient("probe",()=>old);dropClient("probe");
+    expect(pooledAgents()).toEqual([]);expect(retiredClientCount()).toBe(1);
+    expect(acquireClient("probe",()=>fresh).reused).toBe(false);
+    expect(warnings.length).toBeGreaterThan(0);fail=false;
+    for(let i=0;i<30&&!old.isClosed;i++)await Bun.sleep(50);
+    expect(old.isClosed).toBe(true);expect(closes).toBeGreaterThanOrEqual(2);
+    expect(fresh.closed).toBe(0);expect(pooledAgents()).toEqual(["probe"]);expect(retiredClientCount()).toBe(0);
+  }finally{fail=false;console.warn=originalWarn}
 });
 
 test("Client preserves a process on kill false or exception and can close it on retry", () => {
@@ -193,52 +189,79 @@ test("A real child ignoring TERM is forcibly reaped", async () => {
   } finally { if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL"); }
 });
 
-test("Failed idle TERM retries must recheck a child that becomes active", async () => {
-  const c = new CodexAppServerClient({ warn() {} });
-  let idle = true;
-  const signals:string[]=[];
-  (c as any).isIdle = async () => idle;
-  (c as any).proc = {exitCode:null,signalCode:null,kill(signal:string){signals.push(signal);return false;}};
-  acquireClient("probe",()=>c);
-  await releaseIdleClient("probe",c);
-  expect(signals).toEqual(["SIGTERM"]);
-  idle=false;
-  await Bun.sleep(1100);
-  expect(signals).toEqual(["SIGTERM"]);
-  expect(pooledAgents()).toEqual(["probe"]);
-  (c as any).proc=null;
-});
-
-test("Idle escalation rechecks activity; a new message cancels escalation entirely", async () => {
- for (const newMessage of [false,true]) {
-  const c=new CodexAppServerClient();let idle=true;const signals:string[]=[];
-  (c as any).isIdle=async()=>idle;
-  (c as any).proc={exitCode:null,signalCode:null,kill(signal:string){signals.push(signal);return true;}};
-  acquireClient("probe",()=>c);
-  await releaseIdleClient("probe",c);
-  expect(signals).toEqual(["SIGTERM"]);
-  if(newMessage) acquireClient("probe",()=>{throw new Error("reuse expected")});else idle=false;
-  await Bun.sleep(1100);
-  expect(signals).toEqual(["SIGTERM"]);
-  (c as any).proc=null;dropClient("probe");
- }
-});
-
-test("Idle escalation occurs only after a fresh successful query; in-query reuse cancels it", async () => {
-  const c=new CodexAppServerClient();const signals:string[]=[];let queries=0;
-  const proc={exitCode:null as number|null,signalCode:null,kill(signal:string){signals.push(signal);if(signal==="SIGKILL")this.exitCode=0;return true;}};
-  (c as any).proc=proc;(c as any).isIdle=async()=>{queries++;return true};
-  acquireClient("probe",()=>c);await releaseIdleClient("probe",c);
+test("A failed idle TERM stays retired even if activity changes; only the old process is retried",async()=>{
+  const c=new CodexAppServerClient({warn(){}});let queries=0;const signals:string[]=[];
+  (c as any).isIdle=async()=>{queries++;return true};
+  const proc={exitCode:null as number|null,signalCode:null,kill(signal:string){signals.push(signal);if(signals.length===1)return false;this.exitCode=0;return true},once(){}};
+  (c as any).proc=proc;acquireClient("probe",()=>c);await releaseIdleClient("probe",c);
+  expect(signals).toEqual(["SIGTERM"]);expect(pooledAgents()).toEqual([]);expect(c.isClosed).toBe(true);
+  (c as any).isIdle=async()=>{queries++;return false};
+  const fresh=acquireClient("probe",()=>poolClient(async()=>false)).client;
   for(let i=0;i<30&&proc.exitCode===null;i++)await Bun.sleep(50);
-  expect(signals).toEqual(["SIGTERM","SIGKILL"]);expect(queries).toBeGreaterThanOrEqual(4);
-  expect(pooledAgents()).toEqual([]);
-  const d=new CodexAppServerClient();const sent:string[]=[];let finish!:(idle:boolean)=>void;
-  (d as any).proc={exitCode:null,signalCode:null,kill(signal:string){sent.push(signal);return true}};
-  (d as any).isIdle=()=>new Promise<boolean>(resolve=>{finish=resolve});
-  acquireClient("probe",()=>d);
-  let reused=false;
-  const attempt=d.terminateIfIdle(()=>pooledAgents().includes("probe") && !reused);
-  acquireClient("probe",()=>d);reused=true;finish(true);
-  expect(await attempt).toBe("cancelled");expect(sent).toEqual([]);
-  (d as any).proc=null;
+  expect(queries).toBe(1);expect(signals).toEqual(["SIGTERM","SIGTERM"]);
+  expect(fresh.closed).toBe(0);expect(pooledAgents()).toEqual(["probe"]);
+});
+
+test("The entry is retired before the very first signal; acquisition inside kill gets a new client",async()=>{
+  const c=new CodexAppServerClient();(c as any).isIdle=async()=>true;
+  const fresh=poolClient(async()=>false);let reused:boolean|undefined;
+  (c as any).proc={exitCode:null,signalCode:null,kill(){reused=acquireClient("probe",()=>fresh).reused;this.exitCode=0;return true},once(){}};
+  acquireClient("probe",()=>c);await releaseIdleClient("probe",c);
+  expect(reused).toBe(false);expect(c.isClosed).toBe(true);expect(fresh.closed).toBe(0);
+  expect(acquireClient<ReturnType<typeof poolClient>>("probe",()=>{throw new Error("fresh client must stay pooled")}).client).toBe(fresh);
+});
+
+test("A final idle query cannot retire after another message acquired the client",async()=>{
+  const c=new CodexAppServerClient();let finish!:(idle:boolean)=>void;
+  (c as any).isIdle=()=>new Promise<boolean>(resolve=>{finish=resolve});
+  acquireClient("probe",()=>c);const cleanup=releaseIdleClient("probe",c);
+  expect(acquireClient("probe",()=>{throw new Error("reuse")}).reused).toBe(true);
+  finish(true);await cleanup;expect(c.isClosed).toBe(false);expect(pooledAgents()).toEqual(["probe"]);
+});
+
+test("A real JSON-RPC process retiring after TERM cannot receive the next turn",async()=>{
+  const script=`
+    const rl=require('node:readline').createInterface({input:process.stdin});
+    const send=x=>console.log(JSON.stringify(x));let lists=0;
+    process.on('SIGTERM',()=>setTimeout(()=>process.exit(0),300));
+    rl.on('line',line=>{const q=JSON.parse(line);const id=q.id;
+      if(q.method==='initialize')send({id,result:{}});
+      if(q.method==='thread/start')send({id,result:{thread:{id:'thread'}}});
+      if(q.method==='thread/loaded/list'){if(++lists===2&&process.env.CHILD_RESTART)send({method:process.env.CHILD_RESTART,params:{threadId:'child',status:{type:'active'},turn:{id:'child-followup'}}});send({id,result:{data:['thread','child']}})}
+      if(q.method==='thread/read')send({id,result:{thread:{status:{type:'idle'}}}});
+      if(q.method==='turn/start'){
+        send({id,result:{}});send({method:'turn/started',params:{turn:{id:'turn'}}});
+        setTimeout(()=>{send({method:'item/completed',params:{item:{id:'answer',type:'agentMessage',text:'fresh turn survived'}}});send({method:'turn/completed',params:{turn:{status:'completed'}}})},550);
+      }
+    });`;
+  const make=async(notify="")=>{
+    const client=new CodexAppServerClient();
+    const proc=spawn(process.execPath,['-e',script],{stdio:['pipe','pipe','pipe'],env:{...process.env,CHILD_RESTART:notify}});
+    (client as any).proc=proc;proc.stdout.on('data',d=>(client as any).onData(d.toString()));
+    proc.on('close',()=>{(client as any).closed=true;(client as any).failAll(new Error('fixture closed'))});
+    await (client as any).request('initialize',{},1000);
+    return {client,proc};
+  };
+  for(const method of ["turn/started","thread/status/changed"]){
+    const child=await make(method);
+    try{
+      acquireClient("child-probe",()=>child.client);await releaseIdleClient("child-probe",child.client);
+      expect(pooledAgents()).toContain("child-probe");expect(child.proc.killed).toBe(false);
+    }finally{dropClient("child-probe");child.proc.kill("SIGKILL")}
+  }
+  for(let i=0;i<30&&retiredClientCount();i++)await Bun.sleep(50);
+  const old=await make();let next:Awaited<ReturnType<typeof make>>|undefined;
+  try{
+    acquireClient('probe',()=>old.client);await releaseIdleClient('probe',old.client);
+    expect(pooledAgents()).toEqual([]);expect(old.proc.killed).toBe(true);
+    next=await make();const acquired=acquireClient('probe',()=>next!.client);
+    expect(acquired.reused).toBe(false);expect(next.proc.pid).not.toBe(old.proc.pid);
+    await acquired.client.startThread({});const result=await acquired.client.runTurn('fixture',{},2000);
+    expect(result.status).toBe('completed');expect(result.finalText).toBe('fresh turn survived');
+    expect(next.proc.exitCode).toBeNull();expect(next.proc.signalCode).toBeNull();
+    for(let i=0;i<30&&retiredClientCount();i++)await Bun.sleep(50);
+    expect(retiredClientCount()).toBe(0);
+  }finally{
+    dropAllClients();old.proc.kill('SIGKILL');next?.proc.kill('SIGKILL');
+  }
 });
