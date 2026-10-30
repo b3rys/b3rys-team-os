@@ -7,7 +7,7 @@ import { layoutPixels } from "../lib/dashboardScale";
 import { store, type Agent } from "../store";
 import { apiBase } from "../ws";
 import { setBtnBusy, LIVE_ONLY_OPS } from "./Settings";
-import { FALLBACK_RUNTIME_OPTIONS, fetchRuntimeOptions, runtimeLabel, type RuntimeOption } from "./runtimeOptions";
+import { FALLBACK_RUNTIME_OPTIONS, fetchRuntimeOptions, runtimeLabel, runtimeSetupHref, type RuntimeOption } from "./runtimeOptions";
 import { renderAgentSlack } from "./AgentSlack";
 import { renderIcon, agentIconName, downloadAgentIconJpg } from "../icons";
 import { AGENT_ICON_COLORS, renderAgentIcon, iconColorHex } from "../agentColors";
@@ -33,8 +33,7 @@ interface ConfigResponse {
   off?: boolean;
 }
 
-// 런타임 교체 대상 화이트리스트. codex 는 내부 빌드에서만 /runtime-options 에 실려(공개판은 서버가 미노출),
-// 이 목록에 있어도 공개판 swap select 엔 나타나지 않는다(옵션 = 이 목록 ∩ runtime-options). readiness·disabled 사유는 /runtime-options 정본.
+// 서버가 준비 상태를 확인한 4개 런타임만 교체 대상으로 표시한다.
 const SWAP_TARGETS = ["claude_channel", "openclaw", "hermes_agent", "codex"];
 
 // 게이트웨이 런타임 재시작 시 다른 팀원도 잠깐 깜빡인다는 경고. 목록에 없는 런타임(claude_channel 등)은 경고 없음(기본).
@@ -186,13 +185,13 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
           <div id="cfg-runtime-cwd-msg" class="text-[11px] text-slate-500 mt-1.5"></div>
         </div>` : "";
   // 런타임 교체 select 옵션 — 서버 화이트리스트(SWAP_TARGETS)와 교집합 + 현재 런타임 제외 + 공개빌드 b3os_native 숨김.
-  // 공개빌드에선 아래 '런타임 교체' 섹션 전체를 렌더하지 않는다(LIVE_ONLY_OPS=false) — 공개판은 UI에서만 swap 숨김. 서버 엔드포인트는 유지되며 codex target·미준비는 publicRuntimeGate/runtime_not_ready 가 막는다.
+  // 공개빌드에선 아래 '런타임 교체' 섹션 전체를 렌더하지 않는다(LIVE_ONLY_OPS=false) — 공개판은 UI에서만 swap 숨김. 서버 엔드포인트는 유지되며 미준비는 publicRuntimeGate/runtime_not_ready가 막는다.
   const swapTargetOptions = runtimeOptions
     .filter((r) => SWAP_TARGETS.includes(r.runtime) && r.runtime !== agent.runtime)
     .map((r) => `<option value="${escape(r.runtime)}" ${r.disabled ? "disabled" : ""}>${escape(r.label)}${r.disabled ? pick(" · 연동 필요", " · Setup required") : ""}</option>`)
     .join("");
   const swapSetupHelp = runtimeOptions.filter((r) => r.tier === "advanced_byo" && r.disabled)
-    .map((r) => `<div class="text-[11px] text-txt-amber"><b>${escape(r.label)}</b>: ${escape(r.reason)} · <a class="underline" href="/team/runtime-setup?runtime=${encodeURIComponent(r.runtime)}" data-setup-ref="${escape(r.setup_ref ?? "")}">${pick("연동 안내", "Setup guide")}</a></div>`).join("");
+    .map((r) => `<div class="text-[11px] text-txt-amber"><b>${escape(r.label)}</b>: ${escape(r.reason)} · <a class="underline" href="${runtimeSetupHref(r.setup_ref)}" target="_blank" rel="noreferrer" data-setup-ref="${escape(r.setup_ref ?? "")}">${pick("연동 안내", "Setup guide")}</a></div>`).join("");
   root.innerHTML = `
     <div class="flex-1 flex flex-col min-h-0 overflow-y-auto">
       <div class="h-10 flex items-center justify-between px-4 border-b border-surface-3 shrink-0 bg-surface-1 sticky top-0 z-10">
@@ -266,8 +265,8 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
             <div id="cfg-swap-steps" class="mt-2 space-y-0.5"></div>
           </div>
         </details>
-        ` : ""}
 
+        ` : ""}
         <div id="cfg-slack"></div>
 
         <details class="mt-8 pt-5 border-t border-surface-3 group">

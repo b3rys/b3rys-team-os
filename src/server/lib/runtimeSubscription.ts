@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { runCodexTurn } from "../runtimes/codex/runner";
+import { runViaAppServer } from "../runtimes/codex/appServerRunner";
+import { CodexAppServerClient } from "../runtimes/codex/appServerClient";
 import { codexBridgePaths } from "../runtimes/codex/launcher";
 import { codexRuntimePreflight } from "../runtimes/codex/permissions";
 
@@ -67,13 +68,13 @@ export async function verifyFirstModelCall(input: { id: string; runtime: string;
         detail: cleanDetail(`permission_${preflight.tier}:${preflight.rule}`),
       };
     }
-    const result = await runCodexTurn({
+    const result = await runViaAppServer({
       prompt: FIRST_MODEL_PROMPT,
       agentId: input.id, // 필수 — 승인 요청의 주인이 된다
       cwd: input.workspacePath ?? paths.workdir,
       codexHome: paths.codexHome,
       timeoutMs: FIRST_MODEL_TIMEOUT_MS,
-    });
+    }, undefined, (opts) => new CodexAppServerClient({ codexHome: opts.codexHome }));
     return {
       runtime: "codex",
       ok: result.ok,

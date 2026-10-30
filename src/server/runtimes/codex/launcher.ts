@@ -7,6 +7,7 @@ import { getCaptureGroupId } from "../../lib/captureConfig";
 import { DEFAULT_CHANNEL, assertChannelUsable, channelEnvLines, readMemberChannel, type MemberChannel } from "../../lib/memberChannel";
 import { renderSeededCodexConfig } from "./configSeed";
 import { Database } from "bun:sqlite";
+import { resolveCodexBin } from "../../lib/runtimeAuth";
 
 const HOME = process.env.HOME ?? "";
 
@@ -125,6 +126,8 @@ export function codexBinLine(bin: string | undefined): string[] {
 
 /** 런처 셸 본문(순수 — 테스트 가능). 토큰은 파일에서 env로(stdout 노출 X). */
 export function renderLaunchWrapper(p: CodexBridgePaths): string {
+  const bin = resolveCodexBin();
+  if (!bin) throw new Error("codex CLI 실행파일을 찾을 수 없습니다. Codex를 설치한 뒤 다시 활성화하세요.");
   return [
     "#!/bin/bash",
     `# codex bridge launcher — ${p.label}. 토큰은 파일→env(평문 노출 금지).`,
@@ -138,16 +141,15 @@ export function renderLaunchWrapper(p: CodexBridgePaths): string {
     `export CODEX_AGENT_ID="${p.label.replace(/^.*\.codex-bridge-/, "")}"`,
     `export CODEX_BRIDGE_PID_FILE="${p.pidFile}"`,
     `export B3OS_REPO_ROOT="${REPO_ROOT}"`,
-    `export TEAM_BASE_URL="${process.env.TEAM_BASE_URL ?? "http://127.0.0.1:7878/team"}"`,
+    `export TEAM_BASE_URL="${process.env.TEAM_BASE_URL ?? `http://127.0.0.1:${process.env.TEAM_HTTP_PORT ?? "7878"}/team`}"`,
     `export CODEX_SCHEDULE_TOOL_ENABLED="${process.env.CODEX_SCHEDULE_TOOL_ENABLED ?? "false"}"`,
-    // 서버가 쓰는 codex 실행 파일을 브리지도 쓴다. 값이 있을 때만 넣는다 — 빈 값을 export 하면
-    // runner·appServerClient 의 `CODEX_BIN ?? "codex"` 가 빈 문자열을 그대로 써서 spawn("") 으로 즉사한다.
-    ...codexBinLine(process.env.CODEX_BIN),
+    // 서버가 찾은 실행파일을 고정해 launchd의 제한된 PATH에서도 같은 설치를 사용한다.
+    ...codexBinLine(bin),
     // 봇 API 주소·채널 종류 — 채널 설정이 있는 팀원만. 없으면 줄이 없어 wrapper 가 지금과 같다.
     ...channelEnvLines(p.channel),
     // launchd 는 최소 PATH 로 wrapper 를 띄운다(plist 에 EnvironmentVariables 없음) → bun 설치경로를 명시해야 respawn-loop 안 남.
     // claude launcher(claude/launcher.ts) 와 동일 세트: ~/.bun/bin(공식 인스톨러) · ~/.local/bin · /opt/homebrew/bin(Apple Silicon) · /usr/local/bin(Intel homebrew).
-    `export PATH="${HOME}/.bun/bin:${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"`,
+    `export PATH="${HOME}/.bun/bin:${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:${dirname(bin).replace(/(["\\$`])/g, "\\$1")}:$PATH"`,
     `exec bun "${REPO_ROOT}/src/server/runtimes/codex/bridge.ts"`,
     "",
   ].join("\n");

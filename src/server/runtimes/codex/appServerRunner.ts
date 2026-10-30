@@ -119,7 +119,7 @@ export async function runViaAppServer(
           ? await requestApprovalPopup(db, req, opts.agentId, opts.cwd)
           : "denied"; // db 없는 caller 는 띄울 곳이 없다(테스트·도구 경로)
       },
-    }, TURN_TIMEOUT_MS, opts.imagePaths);
+    }, opts.timeoutMs ?? TURN_TIMEOUT_MS, opts.imagePaths);
     // Phase1 ③: 턴 종료 시 이 turn의 남은 pending/decided 팝업을 expire(cancel/interrupt/timeout 포함).
     //   늦게 도착한 승인은 finalizeApprovalDelivery의 CAS가 expired 상태를 보고 이미 거부하지만, 여기서 상태를
     //   확정 정리해 orphan 누적을 막는다. best-effort. (delivered/orphaned는 건드리지 않음.)

@@ -373,6 +373,7 @@ function recruitFormHtml(): string {
         <div class="md:col-span-2"><label class="${labelCls}">${pick("멘션 별칭", "Mention aliases")} <span class="text-slate-600">${pick("(선택 · 쉼표 구분 · @멘션 라우팅용. 비우면 id+이름 자동)", "(optional · comma-separated · for @mention routing. Empty = auto from id+name)")}</span></label><input id="rec-nicknames" class="${inputCls}" placeholder="${pick("예: Nova, nova, 노바", "e.g. Nova, nova")}" autocomplete="off" /></div>
         <div class="md:col-span-2"><label class="${labelCls}">${pick("페르소나", "Persona")} <span class="text-slate-600">${pick("(선택 · 성격·말투·전문성 한두 줄)", "(optional · a line or two on character, tone, expertise)")}</span></label><textarea id="rec-persona" class="${inputCls} min-h-[64px] resize-y leading-relaxed" placeholder="${pick("예: 차분하고 디테일에 강한 프로덕트 디자이너. 근거 먼저, 시안은 항상 2안.", "e.g. A calm, detail-oriented product designer. Evidence first, always two design options.")}"></textarea></div>
       </div>
+      <div id="rec-codex-permissions" hidden class="mt-3 text-[12px] text-txt-amber">${pick("Codex (Beta): 이 팀원은 이 맥의 파일·명령을 전부 쓸 수 있어요", "Codex (Beta): This member can access all files and run commands on this Mac.")}</div>
       ${capabilityPanelHtml()}
       <div class="flex items-center gap-3 mt-3">
         <button id="rec-submit" class="${btnPrimary}" ${atLimit ? "disabled" : ""}>${pick("영입 시작", "Start onboarding")}</button>
@@ -1117,6 +1118,13 @@ function wireOtZone(): void {
     recId?.addEventListener("blur", () => validateRecId(true));
     recId?.addEventListener("input", () => validateRecId(false)); // 다시 타이핑하면 빨강 해제 + 버튼 상태 갱신
   }
+  const recRuntime = _root.querySelector<HTMLSelectElement>("#rec-runtime");
+  const updateCodexNotice = () => {
+    const notice = _root?.querySelector<HTMLElement>("#rec-codex-permissions");
+    if (notice) notice.hidden = recRuntime?.value !== "codex";
+  };
+  recRuntime?.addEventListener("change", updateCodexNotice);
+  updateCodexNotice();
   // 영입 시작 → POST /members/recruit → OT 폴링
   _root.querySelector<HTMLButtonElement>("#rec-submit")?.addEventListener("click", async () => {
     const get = (id: string) => (_root!.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(id)?.value ?? "").trim();

@@ -9,8 +9,8 @@ import {
   classifyServerRequest, isApprovalKind, toInternalDecision, encodeApproval, failSafeNonApproval,
 } from "./serverRequestCodec";
 import { CodexTurnItemIndex, type ObservedItem } from "./appServerItemIndex";
+import { resolveCodexBin } from "../../lib/runtimeAuth";
 
-const CODEX_BIN = process.env.CODEX_BIN ?? "codex";
 const HANDSHAKE_TIMEOUT_MS = Number(process.env.B3OS_CODEX_APPSERVER_HANDSHAKE_MS ?? 45_000);
 
 /** 승인요청(ServerRequest) — 상위가 decision 을 돌려준다. 실행 모드가 approvalPolicy never 라 실사용에서는 오지 않는다. */
@@ -186,7 +186,9 @@ export class CodexAppServerClient {
 
   /** app-server 스폰 + initialize 핸드셰이크. */
   async start(): Promise<void> {
-    const proc = spawn(CODEX_BIN, ["app-server"], {
+    const bin = resolveCodexBin();
+    if (!bin) throw new Error("codex CLI executable not found");
+    const proc = spawn(bin, ["app-server"], {
       stdio: ["pipe", "pipe", "pipe"],
       env: appServerSpawnEnv(this.spawnOpts.codexHome),
     });

@@ -100,6 +100,7 @@ export interface SettingsDeps {
   activateMember?: typeof activateMember;
   // 활성화 직후 실제 첫 모델 호출 검증. 테스트는 mock 주입으로 라이브 계정/외부 상태 의존을 끊는다.
   firstModelCall?: (input: { id: string; runtime: string; workspacePath?: string }) => Promise<FirstModelCallResult>;
+  stopCodexBridge?: (id: string) => Promise<{ ok: boolean; detail: string }>;
   // 텔레그램 API 호출 주입점. 테스트는 fake fetch를 넣어 실제 봇 토큰/getUpdates 의존을 끊는다.
   telegramFetch?: typeof fetch;
   // provision 봇 토큰 getMe 검증 주입점. 테스트는 stub 로 실 텔레그램 getMe 의존을 끊는다.
@@ -165,17 +166,17 @@ const ROLLBACK_WINDOW_MS = 6 * 60 * 60 * 1000;
 // 공개 모드는 정식 운영 기본값이며 핵심룰 재적용·롤백 등 개발 전용 기능은 비활성이다.
 // B3OS_LIVE=1은 b3os 자체 개발·검증 인스턴스에만 사용한다(docs/BUILD_MODES.md).
 export const PUBLIC_BUILD = process.env.B3OS_LIVE !== "1";
-// codex·b3os_native = 라이브 검증 후 공개. 공개빌드(PUBLIC_BUILD=true)에선 영입·스왑에서 서버측 거부(UI 숨김의 방어 이중화).
-const LIVE_ONLY_RUNTIMES = new Set(["b3os_native", "codex"]);
+// b3os_native는 공개 온보딩에서 제공하지 않는다. Codex는 베타로 제공한다.
+const LIVE_ONLY_RUNTIMES = new Set(["b3os_native"]);
 export const allowedRuntimes = (publicBuild = PUBLIC_BUILD) =>
   [...RUNTIMES].filter((runtime) => !publicBuild || !LIVE_ONLY_RUNTIMES.has(runtime));
 
-// 공개빌드에선 런타임 교체(swap-runtime)를 웹 UI에서만 숨긴다(AgentConfig LIVE_ONLY_OPS 게이트) — 서버 엔드포인트는 유지.
-// codex/b3os_native target 은 여전히 publicRuntimeGate 가, 미준비 런타임은 runtime_not_ready 가 막는다(그 게이트만으로 충분).
+// 런타임 교체는 공개·개발 빌드에서 같은 준비 상태 게이트를 사용한다.
+// b3os_native는 publicRuntimeGate가, 미준비 런타임은 runtime_not_ready가 막는다.
 
-export const PUBLIC_RUNTIME_IDS = ["claude_channel", "hermes_agent", "openclaw"] as const;
-// runtime-options 에 실릴 수 있는 런타임 id — 공개 3종 + 내부 빌드에서만 노출되는 codex.
-export type RuntimeOptionId = (typeof PUBLIC_RUNTIME_IDS)[number] | "codex";
+export const PUBLIC_RUNTIME_IDS = ["claude_channel", "hermes_agent", "openclaw", "codex"] as const;
+// 공개·개발 빌드에서 동일한 런타임 목록을 제공한다.
+export type RuntimeOptionId = (typeof PUBLIC_RUNTIME_IDS)[number];
 export interface RuntimeOption {
   runtime: RuntimeOptionId;
   label: string;
@@ -186,10 +187,10 @@ export interface RuntimeOption {
   setup_ref: string | null;
 }
 
-// 공개는 Claude·Hermes·OpenClaw, 개발 모드는 codex를 추가 노출하며 같은 readiness 검사를 쓴다. b3os_native는 서버 영입 대상이 아니므로 양쪽에서 숨긴다.
+// Codex를 포함한 선택지는 설치·인증 readiness를 공유한다. b3os_native는 양쪽에서 숨긴다.
 export function publicRuntimeOptions(
   readiness: Record<string, RuntimeReadiness>,
-  publicBuild = PUBLIC_BUILD,
+  _publicBuild = PUBLIC_BUILD,
 ): RuntimeOption[] {
   const gated = (runtime: "hermes_agent" | "openclaw" | "codex", label: string, setupRef: string | null): RuntimeOption => {
     const state = readiness[runtime];
@@ -205,8 +206,7 @@ export function publicRuntimeOptions(
     gated("hermes_agent", "Hermes (BYO)", "skills/b3os/references/runtime-setup.md#hermes-agent"),
     gated("openclaw", "OpenClaw (BYO)", "skills/b3os/references/runtime-setup.md#openclaw"),
   ];
-  // 내부 빌드에서만 codex 복원 — 공개판 누출은 없다(runtime_not_public 서버거부의 UI측 짝). 설치+인증 미완료면 disabled+사유.
-  if (!publicBuild) options.push(gated("codex", "Codex", null));
+  options.push(gated("codex", "Codex (Beta)", "skills/b3os/references/runtime-setup.md#codex"));
   return options;
 }
 
@@ -315,7 +315,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
   const publicBuild = deps.publicBuild ?? PUBLIC_BUILD;
   const runtimeReadiness = async (runtime: string) => runtimeReadinessFromAuth(await doCheckRuntimeAuth(runtime));
   const publicRuntimeGate = async (runtime: string) => {
-    if (PUBLIC_BUILD && LIVE_ONLY_RUNTIMES.has(runtime)) return { error: "runtime_not_public", hint: "이 런타임은 공개 온보딩에서 제공하지 않습니다." };
+    if (publicBuild && LIVE_ONLY_RUNTIMES.has(runtime)) return { error: "runtime_not_public", hint: "이 런타임은 공개 온보딩에서 제공하지 않습니다." };
     if (!PUBLIC_RUNTIME_IDS.includes(runtime as (typeof PUBLIC_RUNTIME_IDS)[number])) return null;
     if (runtime === "claude_channel") return null;
     const state = await runtimeReadiness(runtime);
@@ -600,17 +600,17 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
   });
 
   app.get("/runtime-options", async (c) => {
-    // codex readiness 는 내부 빌드에서만 노출하므로 그 때만 점검한다(공개판은 codex CLI 없을 수 있음).
+    // 미설치 Codex도 사유·설치 안내와 함께 표시한다.
     const [hermes, openclaw, codex] = await Promise.all([
       runtimeReadiness("hermes_agent"),
       runtimeReadiness("openclaw"),
-      PUBLIC_BUILD ? Promise.resolve(undefined) : runtimeReadiness("codex"),
+      runtimeReadiness("codex"),
     ]);
     const readiness: Record<string, RuntimeReadiness> = { hermes_agent: hermes, openclaw };
     if (codex) readiness.codex = codex;
     return c.json({
-      public_build: PUBLIC_BUILD,
-      options: publicRuntimeOptions(readiness),
+      public_build: publicBuild,
+      options: publicRuntimeOptions(readiness, publicBuild),
     });
   });
 
@@ -788,7 +788,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
 
   // 런타임 스왑은 작업폴더·메모리를 보존하며 실행 승인 게이트를 레지스트리 변경 전에 검사해 정리 후 중단된 상태를 막는다.
   app.post("/members/:id/swap-runtime", async (c) => {
-    // 공개빌드에선 런타임 교체를 웹 UI에서만 숨긴다 — 서버 엔드포인트는 유지. codex target·미준비는 아래 publicRuntimeGate 가 막는다.
+    // b3os_native·미준비 런타임은 publicRuntimeGate가 차단한다.
     const id = c.req.param("id");
     let body: { target_runtime?: unknown; confirm_name?: unknown; bot_token?: unknown } = {};
     try { body = await c.req.json(); } catch { return c.json({ ok: false, error: "invalid_json" }, 400); }
@@ -1770,12 +1770,25 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       const noPairingRuntime = firstCallRuntime || agent.runtime === "hermes_agent";
       let firstCall: FirstModelCallResult | null = null;
       if (result.ok && firstCallRuntime) {
-        firstCall = await firstModelCall({ id: agent.id, runtime: agent.runtime, workspacePath: agent.workspace_path });
+        try {
+          firstCall = await firstModelCall({ id: agent.id, runtime: agent.runtime, workspacePath: agent.workspace_path });
+        } catch {
+          firstCall = { runtime: agent.runtime, ok: false, subscriptionNeeded: false, detail: "첫 모델 호출 실행 실패 — 다시 활성화하세요." };
+        }
         result.steps.push({
           step: "first-model-call",
           ok: firstCall.ok,
           detail: firstCall.subscriptionNeeded ? "subscription_needed: 구독/한도 확인 필요" : firstCall.detail,
         });
+        if (!firstCall.ok && agent.runtime === "codex") {
+          result.ok = false;
+          result.error = "first_model_call_failed";
+          if (bd) { bd.state = "pending"; bd.detail = "첫 모델 호출 실패 — 다시 활성화하세요."; }
+          try {
+            const stopped = await (deps.stopCodexBridge ?? ((id) => setAgentEnabled(id, "codex", false)))(agent.id);
+            result.steps.push({ step: "runtime-cleanup", ok: stopped.ok, detail: stopped.detail });
+          } catch { result.steps.push({ step: "runtime-cleanup", ok: false, detail: "브리지 정지 실패 — 서버 상태를 확인하세요." }); }
+        }
       }
       // 선행 해결 순서인 구독·한도 차단, 첫 호출 실패, 페어링 대기로 안내한다. 페어링도 병기하되 결제 문제를 가리지 않는다.
       const pairingNote = result.needsPairing
@@ -1794,7 +1807,11 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
         jn.state = "done"; jn.detail = `활성화됨 (${rtLabel} 가동 + 첫 모델 호출 확인) — 합류. 이제 Telegram에서 ${botMention}에게 DM으로 인사해 보세요. 답이 오면 연동 성공입니다.`;
       } else {
         // 구독 무관 첫 모델호출 실패도 여기로 온다 — 페어링 안내로 가리지 않고, 페어링은 병기만 한다.
-        jn.detail = (result.ok ? "활성화됨 — 첫 모델 호출 확인/첫 응답(ack) 대기" : "활성화 대기") + pairingNote;
+        if (firstCallFailed && agent.runtime === "codex") jn.state = "blocked";
+        const cleanupOk = result.steps.find((s) => s.step === "runtime-cleanup")?.ok === true;
+        jn.detail = (firstCallFailed && agent.runtime === "codex"
+          ? cleanupOk ? "첫 모델 호출 실패 — 브리지를 정지했습니다. 다시 활성화하세요." : "첫 모델 호출 실패 — 브리지 정지 여부를 서버에서 확인한 뒤 다시 활성화하세요."
+          : result.ok ? "활성화됨 — 첫 모델 호출 확인/첫 응답(ack) 대기" : "활성화 대기") + pairingNote;
       }
     }
     parsed.steps = steps;

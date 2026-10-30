@@ -94,8 +94,7 @@ export function renderSeededCodexConfig(
   hostConfig: string | null,
   opts: { workdir: string; hostCodexHome: string },
 ): string {
-  if (hostConfig === null || hostConfig.trim() === "") return renderFallbackCodexConfig();
-  let out = hostConfig;
+  let out = hostConfig?.trim() ? hostConfig : renderFallbackCodexConfig();
   for (const k of POLICY_KEYS) out = removeTopLevelKey(out, k);   // ① 정책
   for (const t of POLICY_TABLES) out = removeTable(out, t);
   out = removeTablesWithPrefix(out, TRUST_TABLE_PREFIX);           // ② 신뢰

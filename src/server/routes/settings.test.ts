@@ -289,21 +289,21 @@ describe("Claude pairing backend contract", () => {
 });
 
 test("공개 빌드 runtime_invalid allowed는 live-only 런타임을 노출하지 않는다", () => {
-  expect(allowedRuntimes(true)).toEqual(["claude_channel", "openclaw", "hermes_agent"]);
-  expect(allowedRuntimes(true)).not.toContain("codex");
+  expect(allowedRuntimes(true)).toEqual(["claude_channel", "openclaw", "hermes_agent", "codex"]);
+  expect(allowedRuntimes(true)).toContain("codex");
   expect(allowedRuntimes(true)).not.toContain("b3os_native");
 });
 
-test("runtime-options는 빌드모드 인지 — 공개=정확히 3종(codex 부재)·내부=codex 포함, 미준비 BYO는 disabled+setup_ref", async () => {
+test("runtime-options는 빌드모드 인지 — 공개·내부=Codex 베타 포함, 미준비 BYO는 disabled+setup_ref", async () => {
   const readiness = {
     hermes_agent: { runtime: "hermes_agent", installed: true, authenticated: false, ready: false, detail: "미인증", fixHint: "hermes auth" },
     openclaw: { runtime: "openclaw", installed: true, authenticated: true, ready: true, detail: "인증 확인", fixHint: "" },
     codex: { runtime: "codex", installed: true, authenticated: true, ready: true, detail: "codex 인증 확인", fixHint: "" },
   };
-  // 공개 빌드(publicBuild=true) → 정확히 3종, codex 없음.
+  // 공개 빌드에서도 Codex 베타를 표시한다.
   const publicOptions = publicRuntimeOptions(readiness, true);
-  expect(publicOptions.map((o) => o.runtime)).toEqual(["claude_channel", "hermes_agent", "openclaw"]);
-  expect(publicOptions.some((o) => o.runtime === ("codex" as any))).toBe(false);
+  expect(publicOptions.map((o) => o.runtime)).toEqual(["claude_channel", "hermes_agent", "openclaw", "codex"]);
+  expect(publicOptions.find((o) => o.runtime === "codex")).toMatchObject({ label: "Codex (Beta)", disabled: false, setup_ref: "skills/b3os/references/runtime-setup.md#codex" });
   expect(publicOptions.find((o) => o.runtime === "claude_channel")).toMatchObject({ recommended: true, disabled: false });
   expect(publicOptions.find((o) => o.runtime === "hermes_agent")).toMatchObject({ disabled: true, setup_ref: "skills/b3os/references/runtime-setup.md#hermes-agent" });
   expect(publicOptions.find((o) => o.runtime === "openclaw")).toMatchObject({ disabled: false });
@@ -313,7 +313,7 @@ test("runtime-options는 빌드모드 인지 — 공개=정확히 3종(codex 부
   expect(internalOptions.find((o) => o.runtime === "codex")).toMatchObject({ disabled: false, recommended: false });
   expect(internalOptions.some((o) => o.runtime === ("b3os_native" as any))).toBe(false);
   // 미준비 codex 는 내부에서도 disabled+사유로 남는다(숨김X).
-  const codexNotReady = publicRuntimeOptions({ ...readiness, codex: { runtime: "codex", installed: true, authenticated: false, ready: false, detail: "codex 미인증", fixHint: "codex login 하세요" } }, false);
+  const codexNotReady = publicRuntimeOptions({ ...readiness, codex: { runtime: "codex", installed: true, authenticated: false, ready: false, detail: "codex 미인증", fixHint: "codex login 하세요" } }, true);
   expect(codexNotReady.find((o) => o.runtime === "codex")).toMatchObject({ disabled: true, reason: "codex login 하세요" });
 
   // 엔드포인트 실측 — 소스 PUBLIC_BUILD=false(내부·테스트) 이므로 codex 포함 4종.
@@ -329,6 +329,38 @@ test("runtime-options는 빌드모드 인지 — 공개=정확히 3종(codex 부
   expect(body.options.find((o) => o.runtime === "hermes_agent")?.disabled).toBe(true);
   expect(body.options.find((o) => o.runtime === "codex")?.disabled).toBe(false);
 });
+
+test("공개 Codex는 준비된 경우 영입되고 native는 모든 진입점에서 거부된다", async () => {
+  const { app } = setupReady(AGENTS, { publicBuild: true });
+  const options = await (await app.request("/runtime-options")).json();
+  expect(options.public_build).toBe(true);
+  expect(options.options.find((o: any) => o.runtime === "codex")).toMatchObject({ label: "Codex (Beta)", disabled: false });
+  const recruited = await app.request("/members/recruit", json({ id: "beta", display_name: "Beta", role: "dev", runtime: "codex" }));
+  expect(recruited.status).toBe(200);
+  for (const path of ["/members", "/members/recruit", "/members/steve/swap-runtime"]) {
+    const response = await app.request(path, json({ id: "native", display_name: "Native", role: "dev", runtime: "b3os_native", target_runtime: "b3os_native", confirm_name: "Steve" }));
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(["runtime_not_public", "runtime_invalid"]).toContain(body.error);
+    expect(body.allowed ?? []).not.toContain("b3os_native");
+  }
+});
+
+for (const [detail, fixHint] of [["codex 미설치", "brew install --cask codex 후 codex login"], ["codex 미로그인", "codex login 으로 ChatGPT 로그인"]] as const) {
+  test(`공개 Codex ${detail}: 영입·recruit·swap이 상태 변경 전에 거부된다`, async () => {
+    const { app, db, registryPath } = setupReady(AGENTS, { publicBuild: true, checkRuntimeAuth: async (runtime) => ({ runtime, loggedIn: false, detail, fixHint }) });
+    const before = readFileSync(registryPath, "utf8");
+    for (const path of ["/members", "/members/recruit", "/members/steve/swap-runtime"]) {
+      const response = await app.request(path, json({ id: "beta", display_name: "Beta", role: "dev", runtime: "codex", target_runtime: "codex", confirm_name: "Steve" }));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: "runtime_not_ready", hint: fixHint, detail });
+    }
+    expect(readFileSync(registryPath, "utf8")).toBe(before);
+    expect(db.query("SELECT id FROM ot").all()).toEqual([]);
+    const options = await (await app.request("/runtime-options")).json();
+    expect(options.options.find((o: any) => o.runtime === "codex")).toMatchObject({ disabled: true, reason: fixHint });
+  });
+}
 
 test("미준비 BYO는 members/recruit/swap에서 같은 runtime_not_ready+fixHint로 거부된다", async () => {
   const notReady = async (runtime: string) => ({ runtime, loggedIn: false, detail: `${runtime} 미인증`, fixHint: `${runtime} setup` });
@@ -896,7 +928,7 @@ describe("settings: 런타임 스왑(POST /members/:id/swap-runtime) — HTTP �
     expect(authCalls).toBe(0);
   });
 
-  test("preflight 미로그인 → 400 preflight_blocked, 레지스트리 불변", async () => {
+  test("preflight 미로그인 → 400 runtime_not_ready, 레지스트리 불변", async () => {
     process.env.APPROVAL_EXECUTION_ENABLED = "1";
     const { app, registryPath } = setup(AGENTS, {
       checkRuntimeAuth: async (rt: string) => ({ runtime: rt, loggedIn: false, detail: "미로그인", fixHint: "codex login 하세요" }),
@@ -906,7 +938,7 @@ describe("settings: 런타임 스왑(POST /members/:id/swap-runtime) — HTTP �
     const r = await app.request("/members/steve/swap-runtime", json({ target_runtime: "codex", confirm_name: "Steve" }));
     expect(r.status).toBe(400);
     const body = await r.json();
-    expect(body.code).toBe("preflight_blocked");
+    expect(body.error).toBe("runtime_not_ready");
     expect(readFileSync(registryPath, "utf-8")).toBe(before);
   });
 
@@ -1179,7 +1211,7 @@ describe("영입 OT / 능력 카탈로그", () => {
       subscriptionNeeded: true,
       detail: "429 insufficient_quota billing",
     });
-    const { app } = setupReady(AGENTS, { checkRuntimeAuth: authOk, activateMember: activateOk, firstModelCall, validateBotToken: okBotToken });
+    const { app } = setupReady(AGENTS, { checkRuntimeAuth: authOk, activateMember: activateOk, firstModelCall, validateBotToken: okBotToken, stopCodexBridge: async () => ({ ok: true, detail: "stopped" }) });
     const { ot_id } = await (await app.request("/members/recruit", json({ id: "cody", display_name: "Cody", role: "dev", runtime: "codex" }))).json();
     const token = "1234567:" + "A".repeat(35);
     expect((await app.request(`/ot/${ot_id}/provision`, json({ bot_token: token }))).status).toBe(200);
@@ -1193,8 +1225,39 @@ describe("영입 OT / 능력 카탈로그", () => {
     const joinStep = body.ot.steps.find((s: any) => s.key === "join");
     expect(joinStep.state).toBe("blocked");
     expect(joinStep.detail).toContain("subscription_needed");
-    expect(body.ot.stage).toBe("join");
+    expect(body.ot.stage).toBe("bundle");
   });
+  for (const outcome of ["failure", "exception", "success"] as const) {
+    test(`Codex first model ${outcome} stops the bridge and leaves activation retryable`, async () => {
+      const stopped: string[] = [];
+      const { app } = setupReady([], {
+        activateMember: async () => ({ ok: true, steps: [{ step: "runtime", ok: true, detail: "started" }] }),
+        firstModelCall: async () => {
+          if (outcome === "exception") throw new Error("fixture error");
+          return { runtime: "codex", ok: outcome === "success", subscriptionNeeded: false, detail: "fixture result" };
+        },
+        stopCodexBridge: async (id) => { stopped.push(id); return { ok: true, detail: "stopped" }; },
+        validateBotToken: okBotToken,
+      });
+      const created = await (await app.request("/members/recruit", json({ id: "probe", display_name: "Probe", role: "dev", runtime: "codex" }))).json();
+      await app.request(`/ot/${created.ot_id}/provision`, json({ bot_token: "1234567:" + "A".repeat(35) }));
+      const response = await app.request(`/ot/${created.ot_id}/activate`, json({}));
+      const body = await response.json();
+      if (outcome === "success") {
+        expect(response.status).toBe(200);
+        expect(body.ok).toBe(true);
+        expect(stopped).toEqual([]);
+        expect(body.ot.steps.find((s: any) => s.key === "join").state).toBe("done");
+      } else {
+        expect(response.status).toBe(502);
+        expect(body.ok).toBe(false);
+        expect(stopped).toEqual(["probe"]);
+        expect(body.ot.stage).toBe("bundle");
+        expect(body.ot.steps.find((s: any) => s.key === "join").state).toBe("blocked");
+        expect(body.steps).toContainEqual(expect.objectContaining({ step: "runtime-cleanup", ok: true }));
+      }
+    });
+  }
   // 구독 차단·첫 호출 실패·페어링 대기 순으로 안내해야 DM으로 해결되지 않는 결제 문제를 가리지 않는다.
   const pairingActivate = async () => ({
     ok: true,

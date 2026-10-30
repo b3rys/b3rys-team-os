@@ -25,7 +25,7 @@ b3os는 **하나의 소스 트리**로 두 가지 실행 모드를 지원한다.
 
 | 기능 | 공개(기본) | 라이브(`B3OS_LIVE=1`) | 게이트 |
 |---|---|---|---|
-| **런타임 선택지** | Claude·OpenClaw·Hermes 3종 | + codex·b3os_native(내부 검증용) | `PUBLIC_BUILD` → `allowedRuntimes`/`VISIBLE_CAPABILITIES` (server) |
+| **런타임 선택지** | Claude·Hermes·OpenClaw·Codex (Beta) 4종 | 같은 4종 | `PUBLIC_BUILD` → `allowedRuntimes`/`VISIBLE_CAPABILITIES` (server) |
 | **전체 핵심룰 재적용/롤백 버튼** | 숨김 | 표시 | `LIVE_ONLY_OPS` (client UI) + 엔드포인트 `PUBLIC_BUILD` 가드 (server, 이중) |
 | **런타임 swap UI** | 숨김 | 표시 | `LIVE_ONLY_OPS` (client) + `publicRuntimeGate` (server) |
 | **배포(/deploy) 메뉴** | 없음 | 있음 | 라이브 전용 내부 배포 도구 |

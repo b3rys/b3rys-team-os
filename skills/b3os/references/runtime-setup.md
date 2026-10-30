@@ -1,10 +1,10 @@
-# 런타임 사전준비 — OpenClaw / Hermes
+# 런타임 사전준비 — Codex (Beta) / OpenClaw / Hermes
 
 `openclaw`와 `hermes_agent`는 b3os가 대신 설치·로그인해 주는 기본 경로가 아니라, 사용자가 이미 갖고 있는 런타임을 b3os 팀원으로 연결하는 BYO(Bring Your Own, 사용자가 준비해 오는) 고급 경로입니다.
 
-온보딩은 Claude를 기본 선택하고 Hermes/OpenClaw를 동등한 ChatGPT BYO 옵션으로 항상 표시합니다. readiness가 부족하면 옵션은 숨지 않고 disabled되며 이 문서로 연결됩니다. 이 세 가지 외 내부 런타임은 온보딩 대상이 아닙니다.
+온보딩은 Claude를 기본 선택하고 Hermes/OpenClaw를 동등한 ChatGPT BYO 옵션으로 항상 표시합니다. readiness가 부족하면 옵션은 숨지 않고 disabled되며 이 문서로 연결됩니다. Codex (Beta)도 설치·인증 상태와 함께 표시하며 `b3os_native`는 온보딩 대상이 아닙니다.
 
-**런타임은 구독으로 고릅니다:** **Claude 구독 → `claude_channel`**(기존 Claude 로그인 재사용), **ChatGPT 구독 → `hermes_agent` 또는 `openclaw`**(ChatGPT 구독을 OAuth로 재사용). Claude 구독자라면 `claude_channel`이 가장 짧습니다. ChatGPT 구독자거나 BYO 고급 런타임을 원하면 아래 준비를 마친 뒤 영입/런타임 교체의 preflight를 다시 확인하세요.
+**런타임은 구독으로 고릅니다:** **Claude 구독 → `claude_channel`**(기존 Claude 로그인 재사용), **ChatGPT 구독 → `codex`(Beta), `hermes_agent` 또는 `openclaw`**(ChatGPT 구독을 OAuth로 재사용). Claude 구독자라면 `claude_channel`이 가장 짧습니다. ChatGPT 구독자거나 BYO 고급 런타임을 원하면 아래 준비를 마친 뒤 영입/런타임 교체의 preflight를 다시 확인하세요.
 
 공통 원칙:
 - 명령은 b3os 서버가 실행되는 같은 컴퓨터에서 실행합니다.
@@ -19,6 +19,7 @@
 |---|---|---|---|---|
 | 1 | `claude_channel` | 로컬 Claude Code 세션 연결(tmux 봇). 기존 Claude 로그인 재사용 | 쉬움 | **AI 자동** (사람은 CLI 로그인만) |
 | 2 | `openclaw` | OpenClaw gateway/session | 고급 | **BYO** — CLI+게이트웨이+인증 에이전트 **미리 준비** |
+| 4 | `codex` | Codex (Beta), 로컬 OpenAI Codex CLI + ChatGPT 로그인 | 베타 | 선택 후 CLI 준비·사람이 로그인 |
 | 3 | `hermes_agent` | Hermes 프로필 게이트웨이 | 고급 | **BYO** — CLI+인증 프로필 **미리 준비** |
 
 - **첫 팀원은 `claude_channel` 권장.** AI가 설치·인증 안내까지 가장 안정적으로 몰아줄 수 있는 공개 기본 경로입니다. 모르겠다고 하면 이걸로 안내합니다.
@@ -195,3 +196,30 @@ curl -s -X POST http://localhost:${PORT:-7878}/team/api/ot/<ot_id>/preflight-rec
 preflight가 통과하면 활성화 버튼이 열립니다. 합류 완료 후에는 Telegram에서 새 팀원 봇(`@<bot_username>`)에게 DM으로 “안녕”처럼 짧게 인사해 보세요. 답이 오면 연동 성공입니다.
 
 런타임별로 첫 응답 조건이 다릅니다: **hermes**(v0.18) 는 ★DM 페어링 게이트가 있습니다★ — 단 b3os activate 가 팀장 chat_id(`owner_chat_id`)를 게이트웨이 allowlist(`TELEGRAM_ALLOWED_USERS`)에 자동 시드하므로 **팀장은 코드 없이 바로 답합니다**(팀장 chat_id 를 못 잡으면 팀장에게도 코드가 오니 `owner_chat_id` 를 채우고 재activate; 팀장 외 사용자는 `hermes pairing approve` 로 승인). **openclaw** 는 먼저 페어링 승인이 필요합니다 — 대시보드 **[접근 승인]** 버튼(또는 `POST /team/api/ot/<ot_id>/pair-approve`)으로 승인해야 그때부터 답합니다(승인 전 무응답은 정상). 무응답이 계속되면 `troubleshooting.md` §0 의 런타임별 항목을 봅니다.
+
+
+## Codex
+
+**Codex (Beta)**는 OpenAI Codex CLI를 팀원으로 연결합니다. Claude 기본 권장은 유지합니다.
+
+**이 팀원은 이 맥의 파일·명령을 전부 쓸 수 있어요.** 실행 권한은 전체 권한(`never` + `danger-full-access`)이며 실행 중 승인창을 띄우지 않습니다. 아래 명령은 설치를 진행하는 AI가 실행하고, 사용자는 브라우저에서 본인 ChatGPT 계정으로 로그인합니다.
+
+```bash
+brew install --cask codex
+codex login
+codex --version
+codex login status
+```
+
+`codex login`에서 ChatGPT 로그인을 선택합니다. 로그인 확인 명령이 성공한 뒤 대시보드 영입 목록을 새로 열거나 OT의 **인증 다시 확인(preflight recheck)**을 실행합니다. 미설치·미로그인이면 선택이 disabled되고 API도 `runtime_not_ready`와 설치/로그인 방법을 반환합니다. 서버 preflight는 Codex CLI **0.147.0 이상**과 `codex login status` 성공을 검사합니다. 상태 확인 시간 초과는 미로그인과 구분해 재확인을 안내합니다. 활성화 직후에는 실제 답장과 같은 `app-server` 경로로 첫 모델 호출을 확인하며, 실패하면 브리지를 정지하고 재활성화를 안내합니다. 사용량 제한·모델 접근 권한과 실제 Telegram 왕복은 별도로 확인합니다.
+
+공식 안내: [Codex CLI](https://learn.chatgpt.com/docs/codex/cli), [인증 명령](https://learn.chatgpt.com/docs/cli/reference).
+
+### 새 맥에서 확인할 것
+
+- `install.sh`는 bun·tmux와 b3os를 준비하며 **Codex CLI 설치나 ChatGPT 로그인은 자동으로 하지 않습니다.** 위 준비를 선택한 시점에 진행합니다.
+- Codex를 첫 팀원으로 쓰면 팀장의 Telegram 숫자 chat_id를 직접 물어 Settings의 `owner_chat_id`에 저장합니다. 기존 Claude 팀원이 없는 새 맥에는 자동으로 가져올 값이 없으며, 비어 있고 기존 설정에서도 가져올 수 없으면 브리지를 시작하기 전에 활성화를 막고 설정 방법을 안내합니다.
+- provision이 봇 토큰을 `<repo>/var/secrets/<id>.bot-token`에 권한 `0600`으로 저장합니다. 값은 출력하지 않습니다.
+- 활성화가 `~/b3os/members/<id>/`, `~/.codex-agents/<id>/config.toml`, bridge wrapper와 LaunchAgent를 생성합니다. 호스트 설정이 없어도 해당 팀원 작업 폴더의 trust 항목이 있는 config가 생성됩니다. 인증은 호스트 `~/.codex/auth.json`을 참조하므로 같은 OS 계정으로 로그인해야 합니다.
+- bridge가 필요할 때 `codex app-server`를 시작하므로 별도 app-server 서비스·포트 설정은 필요 없습니다. 기본 Homebrew 경로(Apple Silicon·Intel)를 찾으며, 사용자 지정 경로라면 서버의 `CODEX_BIN`에 실행 파일의 절대경로를 지정합니다. 서버가 찾은 실행파일의 절대경로는 항상 활성화 wrapper에 기록하며, npm/nvm 설치 경로도 PATH에 포함합니다. `TEAM_BASE_URL`을 따로 지정하지 않으면 `TEAM_HTTP_PORT`의 설치 포트를 사용합니다.
+- `APPROVAL_EXECUTION_ENABLED=1`은 기존 사람 승인 절차를 따릅니다. 활성화 후 봇에 DM을 보내 답을 받고 다시 한 번 답장해 메시지 왕복을 확인합니다. Codex에는 OpenClaw의 `pair-approve`를 쓰지 않습니다.
