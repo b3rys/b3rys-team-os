@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /** 파일변경 승인에는 내용이 없고 ID 조회 요청도 없으므로 먼저 받은 started·patchUpdated 알림을 기억해 짝짓는다.
  * 턴마다 비우고 조회 때도 turnId를 대조한다. 짝이 없거나 상한으로 버린 항목은 내용을 추정하지 않고 매번 묻는다. */
 
@@ -10,6 +11,9 @@ export interface ObservedFileChange {
   movePath: string | null;
   /** unified diff 원문(상한 절단). 사람 표시가 아니라 content digest·줄수 계산용. */
   diff: string;
+  /** Full source digest and presence survive display truncation. */
+  fullDiffDigest?: string;
+  contentKnown?: boolean;
 }
 
 /** 승인 요청보다 먼저 관측된 항목 하나. */
@@ -56,7 +60,7 @@ export class CodexTurnItemIndex {
     const normalized = normalizeChanges(changes);
     // 빈 변경목록은 기억하지 않는다 — 기억해두면 조회에 '성공' 하면서 내용이 없어,
     //   호출부가 '파일 0개 쓰기' 라는 내용 없는 승인 을 만들 수 있다. 없는 것으로 두면 ask 로 간다.
-    if (normalized.length === 0) return;
+    if (normalized.length === 0) { this.items.delete(itemId); return; }
     if (this.items.has(itemId)) this.items.delete(itemId); // 재삽입 = 최신으로 취급(순서도 갱신)
     this.items.set(itemId, {
       itemId,
@@ -96,6 +100,7 @@ export class CodexTurnItemIndex {
 function normalizeChanges(raw: unknown): ObservedFileChange[] {
   if (!Array.isArray(raw)) return [];
   const out: ObservedFileChange[] = [];
+  const contentKnown = raw.every((v: any) => v && typeof v === "object" && typeof v.path === "string" && v.path && typeof v.diff === "string" && ["add", "delete", "update"].includes(v.kind?.type));
   for (const c of raw) {
     if (!c || typeof c !== "object") continue;
     const rec = c as Record<string, any>;
@@ -108,6 +113,8 @@ function normalizeChanges(raw: unknown): ObservedFileChange[] {
       kind,
       movePath,
       diff: typeof rec.diff === "string" ? rec.diff.slice(0, MAX_DIFF_CHARS) : "",
+      fullDiffDigest: typeof rec.diff === "string" ? createHash("sha256").update(rec.diff).digest("hex") : undefined,
+      contentKnown,
     });
   }
   return out;

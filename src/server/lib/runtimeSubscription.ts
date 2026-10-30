@@ -52,7 +52,7 @@ async function runClaudeFirstModelCall(workdir?: string): Promise<FirstModelCall
   });
 }
 
-export async function verifyFirstModelCall(input: { id: string; runtime: string; workspacePath?: string }): Promise<FirstModelCallResult> {
+export async function verifyFirstModelCall(input: { id: string; runtime: string; workspacePath?: string; permissionMode?: import("../../shared/codexPermissionMode").CodexPermissionMode }): Promise<FirstModelCallResult> {
   if (input.runtime === "codex") {
     const paths = codexBridgePaths(input.id);
     const preflight = codexRuntimePreflight(
@@ -74,6 +74,7 @@ export async function verifyFirstModelCall(input: { id: string; runtime: string;
       cwd: input.workspacePath ?? paths.workdir,
       codexHome: paths.codexHome,
       timeoutMs: FIRST_MODEL_TIMEOUT_MS,
+      permissionMode: input.permissionMode,
     }, undefined, (opts) => new CodexAppServerClient({ codexHome: opts.codexHome }));
     return {
       runtime: "codex",

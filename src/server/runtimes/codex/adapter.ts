@@ -27,6 +27,7 @@ import { steerActiveTurn } from "./activeTurns";
 import { isTestRun } from "./appServerPopup";
 
 const inFlight = new Set<string>();
+const inFlightModes = new Map<string, string>();
 
 function codexSandboxFor(agent: AgentRecord): CodexSandboxMode {
   return agent.codex_sandbox ?? "read-only";
@@ -203,6 +204,7 @@ export async function runTurn(
       agentId: agent.id, // 정체 명시 — 팀원 스크립트가 tmux 세션으로 추측하지 않게
       cwd: agent.workspace_path ?? undefined,
       codexHome: codexHomeFor(agent),
+      permissionMode: agent.codex_permission_mode ?? undefined,
       prompt,
       sandbox,
       networkAccess: agent.codex_network_access ?? undefined,
@@ -277,6 +279,7 @@ export async function runTurn(
             agentId: targetAgentId,
             cwd: agent.workspace_path ?? undefined,
             codexHome: codexHomeFor(agent),
+            permissionMode: agent.codex_permission_mode ?? undefined,
             resumeSessionId: result.sessionId ?? priorSessionId ?? undefined,
           } as never);
         } catch { /* 재촉 실패가 원래 턴 결과를 바꾸지 않는다 */ }
@@ -409,6 +412,7 @@ export function makeCodexAdapter(
       // wake가 턴을 분리하므로 다른 메시지도 같은 팀원 세션을 동시에 resume할 수 있다. 팀원 단위 잠금으로 앞 턴 종료까지 연기해 답·맥락 혼선을 막는다.
       const key = targetAgentId;
       if (inFlight.has(key)) {
+        if (inFlightModes.get(key) !== (agent.codex_permission_mode ?? "full")) return { ok: true, deferred: true, detail: "codex_permission_mode_changed" };
         // 연기하기 전에 진행 중 턴에 끼워 넣어 본다.
         //   연기만 하면 20번 뒤 blocked 로 메시지가 사라진다 — 실측으로 확인했다.
         //   끼워 넣기에 성공하면 그 턴이 이어서 읽으므로 별도 턴이 필요 없다.
@@ -420,6 +424,7 @@ export function makeCodexAdapter(
         return { ok: true, deferred: true, detail: "codex_in_flight" };
       }
       inFlight.add(key);
+      inFlightModes.set(key, agent.codex_permission_mode ?? "full");
 
       // 관리자 설정을 팀원별 grant로 시드하되 명시적으로 주입한 permissionContext는 보존한다.
       // workspaceRoot가 없으면 해당 팀원의 작업폴더를 사용하며, 이 grant로도 hardDeny를 우회하지 않는다.
@@ -438,7 +443,7 @@ export function makeCodexAdapter(
           };
 
       // lease-safe: 턴 detach, wake는 즉시 반환(claim-tick 블록 방지).
-      void runTurn(db, agents, agent, row, teamContext, callCodex, turnStores, deps.nudgeOnUnsentReply ?? !isTestRun()).finally(() => inFlight.delete(key));
+      void runTurn(db, agents, agent, row, teamContext, callCodex, turnStores, deps.nudgeOnUnsentReply ?? !isTestRun()).finally(() => { inFlight.delete(key); inFlightModes.delete(key); });
       return { ok: true, detail: "codex_dispatched" };
     },
   };

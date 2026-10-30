@@ -202,6 +202,16 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
       <div class="p-4">
         <div class="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-2">${pick("레지스트리 (agents.json · icon만 변경 가능)", "Registry (agents.json · icon only)")}</div>
         <table class="w-full text-xs mb-6"><tbody>${rows}${iconRow}</tbody></table>
+        ${agent.runtime === "codex" ? `<div class="mt-6 mb-6 rounded-lg border border-surface-3 p-3">
+          <label for="cfg-codex-mode">${pick("Codex 권한", "Codex permissions")}</label>
+          <select id="cfg-codex-mode" class="dash-select ml-2">
+            <option value="full" ${(agent.codex_permission_mode ?? "full") === "full" ? "selected" : ""}>${pick("전체 권한", "Full access")}</option>
+            <option value="folder" ${agent.codex_permission_mode === "folder" ? "selected" : ""}>${pick("작업 폴더만", "Workspace only")}</option>
+          </select>
+          <p class="mt-2 text-[12px] text-txt-amber">${pick("전체 권한: 이 팀원은 이 맥의 파일·명령을 전부 쓸 수 있어요", "Full access: This member can access all files and run commands on this Mac.")}</p>
+          <p class="text-[12px] text-slate-400">${pick("작업 폴더만: 폴더 밖 쓰기는 텔레그램에서 허락을 받아요. 네트워크는 사용할 수 있어요.", "Workspace only: Writes outside the workspace ask for permission in Telegram. Network access is allowed.")}</p>
+          <p id="cfg-codex-mode-msg" class="mt-2 text-[12px]" aria-live="polite"></p>
+        </div>` : ""}
         ${runtimeCwdSection}
 
         <div class="flex items-center justify-between mb-2">
@@ -317,6 +327,28 @@ function renderInto(root: HTMLElement, data: ConfigResponse, reload: () => void,
   const resetBtn = root.querySelector<HTMLButtonElement>("#cfg-reset");
   const statusEl = root.querySelector<HTMLElement>("#cfg-save-status");
   const originalProfile = { role: agent.role ?? "", persona: customPersona };
+  const modeSelect = root.querySelector<HTMLSelectElement>("#cfg-codex-mode");
+  modeSelect?.addEventListener("change", async () => {
+    const previous = agent.codex_permission_mode ?? "full";
+    const mode = modeSelect.value as "full" | "folder";
+    const msg = root.querySelector<HTMLElement>("#cfg-codex-mode-msg")!;
+    modeSelect.disabled = true;
+    try {
+      const res = await fetch(`${apiBase()}/api/members/${encodeURIComponent(agent.id)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ codex_permission_mode: mode }),
+      });
+      const result = await res.json();
+      if (!res.ok || !result.ok) throw new Error(result.hint || result.error || `HTTP ${res.status}`);
+      agent.codex_permission_mode = mode;
+      const st = store.getState();
+      st.setAgents(st.agents.map((a) => a.id === agent.id ? { ...a, codex_permission_mode: mode } : a));
+      msg.textContent = pick("저장됨 — 다음 메시지부터 적용됩니다.", "Saved — applies from the next message.");
+    } catch (error) {
+      modeSelect.value = previous;
+      msg.textContent = pick("저장 실패: ", "Save failed: ") + (error as Error).message;
+    } finally { modeSelect.disabled = false; }
+  });
   const runtimeCwdInput = root.querySelector<HTMLInputElement>("#cfg-runtime-cwd");
   const runtimeCwdSave = root.querySelector<HTMLButtonElement>("#cfg-runtime-cwd-save");
   const runtimeCwdMsg = root.querySelector<HTMLElement>("#cfg-runtime-cwd-msg");

@@ -16,6 +16,7 @@ export interface Agent {
   telegram_bot_username: string | null;
   workspace_path: string;
   runtime_cwd?: string | null;
+  codex_permission_mode?: import("../shared/codexPermissionMode").CodexPermissionMode | null;
   persona_file: string;
   moderator_eligible: boolean;
   avatar_emoji: string;

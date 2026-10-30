@@ -6,6 +6,7 @@ import { upsertAgent, deleteAgentsNotIn, appendAudit, listAgents } from "../db/q
 import { validateCoordinators } from "./capabilities";
 import { isTeamOfficialMember } from "./agentMembership";
 import { consumeForcedEmptyRegistry, writeRegistrySafely } from "./registrySafety";
+import { codexPermissionMode } from "../../shared/codexPermissionMode";
 
 export function loadRegistry(path: string): AgentRecord[] {
   let raw: string;
@@ -57,6 +58,7 @@ export function loadRegistry(path: string): AgentRecord[] {
     gateway_service: a.gateway_service ?? null,
     codex_sandbox: isAgentCodexSandbox(a.codex_sandbox) ? a.codex_sandbox : null,
     codex_network_access: typeof a.codex_network_access === "boolean" ? a.codex_network_access : null,
+    ...(a.runtime === "codex" ? { codex_permission_mode: codexPermissionMode(a.codex_permission_mode) } : {}),
     };
   });
 }

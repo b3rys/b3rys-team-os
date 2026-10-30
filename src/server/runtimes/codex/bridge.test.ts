@@ -426,7 +426,8 @@ function pendingRequest(): { dbPath: string; id: string } {
   cbMigrate(db);
   const res = cbRequest(db, {
     agent: { id: "dex", workspace_path: "/tmp/ws" },
-    runtime: "codex", action: "shell", command: "echo hi", cwd: "/tmp/ws",
+    runtime: "codex", agent_id:"dex", action: "shell", command: "echo hi", cwd: "/tmp/ws",
+    provenance:{codex_approval:{allowed_decisions:["allow_once","allow_session","allow_always","deny"],telegram_delivery:{owner_id:String(OWNER),chat_id:String(OWNER),message_id:1}}},
   } as never);
   const id = res.request!.id;
   db.close();
@@ -449,7 +450,7 @@ test("★누르면 결정이 기록되고 답을 보낸다★ — 답이 없으�
 
 test("거절 버튼은 거절로 기록된다(세 버튼이 같은 결과면 버튼이 장식이다)", async () => {
   const { dbPath, id } = pendingRequest();
-  await handleApprovalCallback("T", { id: "c2", data: `pgd:${id}`, from: { id: OWNER } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch([]) });
+  await handleApprovalCallback("T", { id: "c2", data: `pgd:${id}`, from: { id: OWNER }, message:{message_id:1,chat:{id:OWNER}} }, new Set([OWNER]), { dbPath, fetchFn: spyFetch([]) });
   const db = new CbDb(dbPath);
   expect(cbGet(db, id)?.status).toBe("denied");
   db.close();
@@ -458,7 +459,7 @@ test("거절 버튼은 거절로 기록된다(세 버튼이 같은 결과면 버
 test("★이미 처리된 요청은 지난 대로 알린다★ — 무반응이면 사람은 다시 누른다", async () => {
   const { dbPath, id } = pendingRequest();
   const calls: string[] = [];
-  await handleApprovalCallback("T", { id: "c3", data: `pg1:${id}`, from: { id: OWNER } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch([]) });
+  await handleApprovalCallback("T", { id: "c3", data: `pg1:${id}`, from: { id: OWNER }, message:{message_id:1,chat:{id:OWNER}} }, new Set([OWNER]), { dbPath, fetchFn: spyFetch([]) });
   const out = await handleApprovalCallback("T", { id: "c4", data: `pg1:${id}`, from: { id: OWNER }, message: { message_id: 1, chat: { id: OWNER } } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch(calls) });
   expect(out).toBe("stale");
   expect(calls).toContain("T/answerCallbackQuery");
@@ -476,7 +477,7 @@ test("허용 목록 밖 발신자는 결정하지 못한다(fail-closed)", async
 
 test("승인과 무관한 콜백은 건드리지 않는다", async () => {
   const { dbPath } = pendingRequest();
-  expect(await handleApprovalCallback("T", { id: "c6", data: "mcp:on", from: { id: OWNER } }, new Set([OWNER]), { dbPath, fetchFn: spyFetch([]) })).toBe("ignored");
+  expect(await handleApprovalCallback("T", { id: "c6", data: "mcp:on", from: { id: OWNER }, message:{message_id:1,chat:{id:OWNER}} }, new Set([OWNER]), { dbPath, fetchFn: spyFetch([]) })).toBe("ignored");
 });
 
 // 브리지에는 저장소 env가 없을 수 있으므로 team.db를 cwd가 아닌 모듈 위치의 저장소 루트에서 찾는다. 잘못된 DB 경로면 승인 버튼 처리도 실패한다.
@@ -671,7 +672,7 @@ test("★턴이 도는 도중에 눌러도 그 자리에서 처리된다★ — 
   // 턴이 끝나기 전에 버튼이 눌린 상황.
   const out = await handleApprovalCallback(
     "T",
-    { id: "cb-mid", data: `pg1:${id}`, from: { id: OWNER }, message: { message_id: 7, chat: { id: OWNER } } },
+    { id: "cb-mid", data: `pg1:${id}`, from: { id: OWNER }, message: { message_id: 1, chat: { id: OWNER } } },
     new Set([OWNER]),
     { dbPath, fetchFn: spyFetch([]) },
   );
@@ -697,7 +698,7 @@ test("★대조군 — 대기열이 콜백 처리를 늦추지 않는다★ (턴
   const t0 = Date.now();
   await handleApprovalCallback(
     "T",
-    { id: "cb-fast", data: `pg1:${id}`, from: { id: OWNER } },
+    { id: "cb-fast", data: `pg1:${id}`, from: { id: OWNER }, message:{message_id:1,chat:{id:OWNER}} },
     new Set([OWNER]),
     { dbPath, fetchFn: spyFetch([]) },
   );
@@ -786,7 +787,7 @@ describe("codex bridge — 이 세션 승인", () => {
     const { dbPath, id } = pendingRequest();
     const out = await handleApprovalCallback(
       "T",
-      { id: "cs1", data: `pgs:${id}`, from: { id: OWNER }, message: { message_id: 3, chat: { id: OWNER } } },
+      { id: "cs1", data: `pgs:${id}`, from: { id: OWNER }, message: { message_id: 1, chat: { id: OWNER } } },
       new Set([OWNER]),
       { dbPath, fetchFn: spyFetch([]) },
     );
@@ -802,7 +803,7 @@ describe("codex bridge — 이 세션 승인", () => {
     const { dbPath, id } = pendingRequest();
     await handleApprovalCallback(
       "T",
-      { id: "cs2", data: `pg1:${id}`, from: { id: OWNER } },
+      { id: "cs2", data: `pg1:${id}`, from: { id: OWNER }, message:{message_id:1,chat:{id:OWNER}} },
       new Set([OWNER]),
       { dbPath, fetchFn: spyFetch([]) },
     );
@@ -817,7 +818,7 @@ describe("codex bridge — 이 세션 승인", () => {
     const calls: string[] = [];
     await handleApprovalCallback(
       "T",
-      { id: "cs3", data: `pgs:${id}`, from: { id: OWNER } },
+      { id: "cs3", data: `pgs:${id}`, from: { id: OWNER }, message:{message_id:1,chat:{id:OWNER}} },
       new Set([OWNER]),
       { dbPath, fetchFn: spyFetch(calls) },
     );

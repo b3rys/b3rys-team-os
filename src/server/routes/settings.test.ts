@@ -1680,3 +1680,35 @@ test("cogs tool scope cannot be changed through member API", async()=>{
  expect(accepted.status).toBe(200);
  expect(JSON.parse(readFileSync(registryPath,"utf8")).find((agent:any)=>agent.id==="steve").cogs_tool_scope).toBe("folder");
 });
+
+describe("Codex member permission mode",()=>{
+ test("Mode patch changes only its Codex member and not other runtime entries",async()=>{
+  const fixtures=[
+   {id:"claude-fixture",display_name:"Fixture",role:"test",runtime:"claude_channel",status_provider:"claude_tmux"},
+   {id:"openclaw-fixture",display_name:"Fixture",role:"test",runtime:"openclaw",status_provider:"openclaw_gateway"},
+   {id:"hermes-fixture",display_name:"Fixture",role:"test",runtime:"hermes_agent",status_provider:"hermes_gateway"},
+   {id:"codex-fixture",display_name:"Fixture",role:"test",runtime:"codex",status_provider:"codex_cli"},
+  ];
+  const {app,registryPath}=setup(fixtures);
+  const before=JSON.parse(readFileSync(registryPath,"utf8"));
+  for(const mode of ["folder","full"]){
+   const res=await app.request("http://localhost/members/codex-fixture",patch({codex_permission_mode:mode}));
+   expect(res.status).toBe(200);expect((await res.json()).codex_permission_mode).toBe(mode);
+   const after=JSON.parse(readFileSync(registryPath,"utf8"));
+   expect(after.slice(0,3)).toEqual(before.slice(0,3));
+   expect(after[3]).toEqual({...before[3],codex_permission_mode:mode});
+  }
+  const saved=readFileSync(registryPath,"utf8");
+  expect((await app.request("http://localhost/members/codex-fixture",patch({codex_permission_mode:"bad"}))).status).toBe(400);
+  expect((await app.request("http://localhost/members/claude-fixture",patch({codex_permission_mode:"folder"}))).status).toBe(400);
+  expect(readFileSync(registryPath,"utf8")).toBe(saved);
+ });
+ test("Recruitment saves folder selection and defaults new Codex to full",async()=>{
+  const {app,registryPath}=setupReady([]);
+  for(const [id,mode] of [["folder-fixture","folder"],["full-fixture",undefined]]){
+   const response=await app.request("http://localhost/members/recruit",json({id,display_name:"Fixture",role:"test",runtime:"codex",...(mode?{codex_permission_mode:mode}:{})}));
+   expect(response.status).toBe(200);
+   expect(JSON.parse(readFileSync(registryPath,"utf8")).find((a:any)=>a.id===id).codex_permission_mode).toBe(mode??"full");
+  }
+ });
+});

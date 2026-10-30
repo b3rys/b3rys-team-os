@@ -1,3 +1,4 @@
+import { codexPermissionMode } from "../../shared/codexPermissionMode";
 // settings — 팀 셀프 커스터마이즈 API (대시보드 Settings 탭).
 //   팀명/태그라인(setting 테이블) · Mission(TEAM-OS §1) · 팀원 추가/퇴사(agents.json).
 // 안전: 파일 쓰기 전 .bak 백업 + 0600 권한 유지 + 퇴사는 이름 정확 입력 가드 + audit.
@@ -99,7 +100,7 @@ export interface SettingsDeps {
   publicBuild?: boolean;
   activateMember?: typeof activateMember;
   // 활성화 직후 실제 첫 모델 호출 검증. 테스트는 mock 주입으로 라이브 계정/외부 상태 의존을 끊는다.
-  firstModelCall?: (input: { id: string; runtime: string; workspacePath?: string }) => Promise<FirstModelCallResult>;
+  firstModelCall?: (input: { id: string; runtime: string; workspacePath?: string; permissionMode?: import("../../shared/codexPermissionMode").CodexPermissionMode }) => Promise<FirstModelCallResult>;
   stopCodexBridge?: (id: string) => Promise<{ ok: boolean; detail: string }>;
   // 텔레그램 API 호출 주입점. 테스트는 fake fetch를 넣어 실제 봇 토큰/getUpdates 의존을 끊는다.
   telegramFetch?: typeof fetch;
@@ -616,7 +617,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
 
   // 이 영입 엔드포인트는 팀명·팀장 ID·이름을 검사하지 않는다. 화면의 setupComplete 안내는 서버의 보안 경계가 아니다.
   app.post("/members", async (c) => {
-    let body: { id?: unknown; display_name?: unknown; role?: unknown; runtime?: unknown; avatar_emoji?: unknown; icon?: unknown };
+    let body: { id?: unknown; display_name?: unknown; role?: unknown; runtime?: unknown; codex_permission_mode?: unknown; avatar_emoji?: unknown; icon?: unknown };
     try {
       body = await c.req.json();
     } catch {
@@ -630,6 +631,10 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     if (!display_name) return c.json({ error: "display_name_required" }, 400);
     if (!role) return c.json({ error: "role_required" }, 400);
     if (!RUNTIMES.has(runtime)) return c.json({ error: "runtime_invalid", allowed: allowedRuntimes() }, 400);
+    let permissionMode;
+    try { permissionMode = codexPermissionMode(body.codex_permission_mode); }
+    catch { return c.json({ error: "codex_permission_mode_invalid" }, 400); }
+    if (runtime !== "codex" && body.codex_permission_mode !== undefined) return c.json({ error: "codex_permission_mode_requires_codex" }, 400);
     const runtimeGate = await publicRuntimeGate(runtime);
     if (runtimeGate) return c.json(runtimeGate, 400);
 
@@ -656,6 +661,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       role,
       response_mode: "mention-only",
       runtime,
+      ...(runtime === "codex" ? { codex_permission_mode: permissionMode } : {}),
       status_provider: STATUS_BY_RUNTIME[runtime] ?? "claude_tmux",
       workspace_path: _paths.workspace_path,
       persona_file: _paths.persona_file,
@@ -675,7 +681,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
   // 아이콘/별칭/런타임 CWD 교체: 가벼운 agents.json 필드 업데이트.
   app.patch("/members/:id", async (c) => {
     const id = c.req.param("id");
-    let body: { icon?: unknown; icon_color?: unknown; nicknames?: unknown; runtime_cwd?: unknown };
+    let body: { icon?: unknown; icon_color?: unknown; nicknames?: unknown; runtime_cwd?: unknown; codex_permission_mode?: unknown };
     try {
       body = await c.req.json();
     } catch {
@@ -685,7 +691,8 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     const hasColor = body.icon_color !== undefined;
     const hasNicks = body.nicknames !== undefined;
     const hasRuntimeCwd = body.runtime_cwd !== undefined;
-    if (!hasIcon && !hasColor && !hasNicks && !hasRuntimeCwd) return c.json({ error: "no_change" }, 400);
+    const hasPermissionMode = body.codex_permission_mode !== undefined;
+    if (!hasIcon && !hasColor && !hasNicks && !hasRuntimeCwd && !hasPermissionMode) return c.json({ error: "no_change" }, 400);
 
     const icon = typeof body.icon === "string" ? body.icon.trim() : "";
     if (hasIcon && !ICON_RE.test(icon)) return c.json({ error: "icon_invalid" }, 400);
@@ -716,6 +723,11 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     }
     const target = list.find((a) => a.id === id);
     if (!target) return c.json({ error: "unknown_member", id }, 404);
+    if (hasPermissionMode) {
+      if (target.runtime !== "codex") return c.json({ error: "codex_permission_mode_requires_codex" }, 400);
+      try { target.codex_permission_mode = codexPermissionMode(body.codex_permission_mode); }
+      catch { return c.json({ error: "codex_permission_mode_invalid" }, 400); }
+    }
     if (hasIcon) target.icon = icon;
     if (hasColor) target.icon_color = iconColor;
     if (hasNicks) target.nicknames = nicknames.length ? nicknames : undefined;
@@ -725,8 +737,8 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     } catch (e) {
       return c.json({ error: "write_failed", detail: e instanceof Error ? e.message : String(e) }, 500);
     }
-    appendAudit(db, "user", "member_config_updated", id, { ...(hasIcon ? { icon } : {}), ...(hasColor ? { icon_color: iconColor } : {}), ...(hasNicks ? { nicknames } : {}), ...(runtimeCwd?.ok ? { runtime_cwd: runtimeCwd.value } : {}) });
-    return c.json({ ok: true, id, ...(hasIcon ? { icon } : {}), ...(hasColor ? { icon_color: iconColor } : {}), ...(hasNicks ? { nicknames } : {}), ...(runtimeCwd?.ok ? { runtime_cwd: runtimeCwd.value } : {}) });
+    appendAudit(db, "user", "member_config_updated", id, { ...(hasPermissionMode ? { codex_permission_mode: target.codex_permission_mode } : {}), ...(hasIcon ? { icon } : {}), ...(hasColor ? { icon_color: iconColor } : {}), ...(hasNicks ? { nicknames } : {}), ...(runtimeCwd?.ok ? { runtime_cwd: runtimeCwd.value } : {}) });
+    return c.json({ ok: true, id, ...(hasPermissionMode ? { codex_permission_mode: target.codex_permission_mode } : {}), ...(hasIcon ? { icon } : {}), ...(hasColor ? { icon_color: iconColor } : {}), ...(hasNicks ? { nicknames } : {}), ...(runtimeCwd?.ok ? { runtime_cwd: runtimeCwd.value } : {}) });
   });
 
   // 퇴사: confirm_name 이 display_name 과 정확히 일치해야 진행(오발 방지).
@@ -1111,7 +1123,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
 
   //  영입(recruit) = 등록 + OT(오리엔테이션) 시작
   app.post("/members/recruit", async (c) => {
-    let body: { id?: unknown; display_name?: unknown; role?: unknown; runtime?: unknown; nicknames?: unknown; persona?: unknown; icon?: unknown };
+    let body: { id?: unknown; display_name?: unknown; role?: unknown; runtime?: unknown; codex_permission_mode?: unknown; nicknames?: unknown; persona?: unknown; icon?: unknown };
     try { body = await c.req.json(); } catch { return c.json({ error: "invalid_json" }, 400); }
     if (!setupComplete()) {
       return c.json({
@@ -1135,6 +1147,10 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     if (!display_name) return c.json({ error: "display_name_required" }, 400);
     if (!role) return c.json({ error: "role_required" }, 400);
     if (!RUNTIMES.has(runtime)) return c.json({ error: "runtime_invalid", allowed: allowedRuntimes() }, 400);
+    let permissionMode;
+    try { permissionMode = codexPermissionMode(body.codex_permission_mode); }
+    catch { return c.json({ error: "codex_permission_mode_invalid" }, 400); }
+    if (runtime !== "codex" && body.codex_permission_mode !== undefined) return c.json({ error: "codex_permission_mode_requires_codex" }, 400);
     const runtimeGate = await publicRuntimeGate(runtime);
     if (runtimeGate) return c.json(runtimeGate, 400);
     let list: any[];
@@ -1155,6 +1171,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
     const entry = withInitialLeadCapabilities(list, {
       id, display_name, nicknames, role,
       response_mode: "mention-only", runtime,
+      ...(runtime === "codex" ? { codex_permission_mode: permissionMode } : {}),
       status_provider: STATUS_BY_RUNTIME[runtime] ?? "claude_tmux",
       workspace_path: _paths.workspace_path, persona_file: _paths.persona_file,
       avatar_emoji: "🤖", icon, moderator_eligible: false,
@@ -1771,7 +1788,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       let firstCall: FirstModelCallResult | null = null;
       if (result.ok && firstCallRuntime) {
         try {
-          firstCall = await firstModelCall({ id: agent.id, runtime: agent.runtime, workspacePath: agent.workspace_path });
+          firstCall = await firstModelCall({ id: agent.id, runtime: agent.runtime, workspacePath: agent.workspace_path, ...(agent.runtime === "codex" ? { permissionMode: agent.codex_permission_mode ?? "full" } : {}) });
         } catch {
           firstCall = { runtime: agent.runtime, ok: false, subscriptionNeeded: false, detail: "첫 모델 호출 실행 실패 — 다시 활성화하세요." };
         }

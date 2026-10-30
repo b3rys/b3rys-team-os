@@ -13,7 +13,7 @@ import { resolveCodexBin } from "../../lib/runtimeAuth";
 
 const HANDSHAKE_TIMEOUT_MS = Number(process.env.B3OS_CODEX_APPSERVER_HANDSHAKE_MS ?? 45_000);
 
-/** 승인요청(ServerRequest) — 상위가 decision 을 돌려준다. 실행 모드가 approvalPolicy never 라 실사용에서는 오지 않는다. */
+/** 승인요청(ServerRequest) — 상위가 decision 을 돌려준다. full 모드는 never, folder 모드는 on-request로 승인 요청을 받는다. */
 export interface ApprovalRequest {
   method: string; // execCommandApproval | applyPatchApproval | item/permissions/requestApproval | item/tool/requestUserInput ...
   params: Record<string, unknown>;
@@ -65,6 +65,8 @@ export interface ThreadStartOptions {
    */
   writableRoots?: string[];
   networkAccess?: boolean;
+  excludeTmpdirEnvVar?: boolean;
+  excludeSlashTmp?: boolean;
   /** resume으로 이전 대화를 이어가되 실패하면 새 thread에서 진행한다. */
   resumeThreadId?: string;
 }
@@ -79,16 +81,18 @@ export function sandboxModeToTurnPolicyType(mode: string): string {
   }
 }
 
-export type TurnSandboxPolicy = { type: string; writableRoots?: string[]; networkAccess?: boolean };
+export type TurnSandboxPolicy = { type: string; writableRoots?: string[]; networkAccess?: boolean; excludeTmpdirEnvVar?: boolean; excludeSlashTmp?: boolean };
 
 /** turn/start sandboxPolicy. 범위 칸은 workspace-write 에서만, 그리고 부른 쪽이 준 것만 싣는다(안 주면 지금과 같은 모양). */
-export function turnSandboxPolicy(opts: Pick<ThreadStartOptions, "sandbox" | "writableRoots" | "networkAccess">): TurnSandboxPolicy {
+export function turnSandboxPolicy(opts: Pick<ThreadStartOptions, "sandbox" | "writableRoots" | "networkAccess" | "excludeTmpdirEnvVar" | "excludeSlashTmp">): TurnSandboxPolicy {
   const type = sandboxModeToTurnPolicyType(opts.sandbox ?? "");
   if (opts.sandbox !== "workspace-write") return { type };
   return {
     type,
     ...(opts.writableRoots ? { writableRoots: [...opts.writableRoots] } : {}),
     ...(opts.networkAccess !== undefined ? { networkAccess: opts.networkAccess } : {}),
+    ...(opts.excludeTmpdirEnvVar !== undefined ? { excludeTmpdirEnvVar: opts.excludeTmpdirEnvVar } : {}),
+    ...(opts.excludeSlashTmp !== undefined ? { excludeSlashTmp: opts.excludeSlashTmp } : {}),
   };
 }
 
@@ -531,11 +535,11 @@ export class CodexAppServerClient {
       let decision: ReturnType<typeof toInternalDecision> = "decline"; // fail-closed 기본
       // S2: 이 승인이 가리키는 항목을 먼저 온 알림 에서 찾아 실어 준다(조회 요청이 없으므로 '기억' 으로).
       //   같은 turn·같은 itemId 일 때만 붙는다 — 어긋나면 undefined 라 상위가 매번 묻는 경로로 간다.
-      const observedItem = this.itemIndex.lookup(params?.itemId, params?.turnId) ?? undefined;
+      const itemLookup = () => this.itemIndex.lookup(params?.itemId, params?.turnId) ?? undefined;
       // M5.3: 승인 대기(팝업) 동안 턴 타이머 정지 → 사람이 폰으로 승인하는 시간이 turn timeout에 안 잡힘.
       this.pauseTurnTimer();
       try {
-        if (handler) decision = toInternalDecision(await handler({ method, params, serverRequestId: String(id), observedItem }));
+        if (handler) decision = toInternalDecision(await handler({ method, params, serverRequestId: String(id), get observedItem() { return itemLookup(); } }));
       } catch { decision = "decline"; }
       finally { this.resumeTurnTimer(); } // 결정 받으면 즉시 재개(예외에도 보장)
       const out = encodeApproval(kind, decision, params);

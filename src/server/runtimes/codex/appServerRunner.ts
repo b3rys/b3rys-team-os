@@ -8,6 +8,12 @@ import { setActivityLine } from "../../db/queries";
 import type { CodexCaller, CodexTurnResult, CodexTurnOptions } from "./runner";
 import { registerActiveTurn, unregisterActiveTurn } from "./activeTurns";
 import { acquireClient, dropClient, releaseIdleClient } from "./clientPool";
+import { codexPermissionMode } from "../../../shared/codexPermissionMode";
+import { resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { redactApprovalText } from "../../lib/redactSecrets";
+import { FolderSessionApprovals } from "./folderSessionApprovals";
+const folderSessions = new FolderSessionApprovals();
 
 /** 무응답 상한 600초는 Codex stream_idle_timeout_ms 기본 300초보다 길게 두어 자체 처리를 먼저 기다린다. 전체 작업 상한은 아니며 기존 env override는 유지한다.
  * 5회 재시도의 최악 침묵 약 1500초까지 보장하지 않는다. 재시도 중 진행 알림 여부는 미측정이며 timeout detail의 진행신호 수로 확인해야 한다.
@@ -15,8 +21,7 @@ import { acquireClient, dropClient, releaseIdleClient } from "./clientPool";
 const TURN_TIMEOUT_MS = Number(process.env.B3OS_CODEX_APPSERVER_TIMEOUT_MS ?? 600_000);
 
 /**
- * db 를 주입한 caller. db 는 승인이 아니라 턴 상관관계(orphan 정리) 용도로만 쓴다.
- * 옛 팝업 경로가 있던 자리 — 지금은 경계를 codex 설정이 정하므로 db 유무가 판정을 바꾸지 않는다.
+ * folder 모드의 승인 요청·결정을 DB에 기록하고 턴 상관관계로 중복·만료 결정을 차단한다.
  */
 export function makeAppServerCaller(db: Database): CodexCaller {
   // Phase1 ③: 부팅/모드 활성 시 1회 orphan sweep — 이전 프로세스의 pending/decided 팝업을 orphaned로
@@ -25,12 +30,12 @@ export function makeAppServerCaller(db: Database): CodexCaller {
   return (opts) => runViaAppServer(opts, db);
 }
 
-/** db 없는 기본 caller. 판정은 동일(codex 설정) — 턴 상관관계 정리만 안 한다. */
+/** DB 없는 caller는 승인 요청을 거절한다. full 모드는 승인 요청을 만들지 않는다. */
 export const runCodexTurnViaAppServer: CodexCaller = (opts) => runViaAppServer(opts);
 
 /** 최종 텍스트가 빈 완료는 성공과 다른 detail로 기록한다. 도구로 직접 발신하면 최종 텍스트가 비어도 답은 도착할 수 있어 실행 기록과 배달을 구분해야 한다. */
 export function codexTurnDetail(status: string, finalText: string, detail?: string): string {
-  const suffix = detail ? `: ${detail.slice(0, 300)}` : "";
+  const suffix = detail ? `: ${redactApprovalText(detail).slice(0, 300)}` : "";
   if (status === "completed") {
     // 완료 + 본문 있음 = 성공 / 완료 + 본문 없음 = 따로 이름을 가진 실패
     return finalText.trim().length > 0 ? "appserver_completed" : `appserver_completed_empty${suffix}`;
@@ -60,7 +65,13 @@ export async function runViaAppServer(
     dropClient(opts.agentId);
     return { ok: false, reply: "", detail: `cogs_policy_blocked: ${opts.cogsRun.reason}`.slice(0, 200), elapsedMs: 0 };
   }
-  const run = runModeFor(opts);
+  let run: ReturnType<typeof runModeFor>;
+  try { run = runModeFor(opts); }
+  catch {
+    dropClient(opts.agentId);
+    return { ok: false, reply: "", detail: "codex_permission_configuration_invalid", elapsedMs: nowMs() - startedAt };
+  }
+  if (opts.permissionMode !== "folder") folderSessions.clear(opts.agentId);
   // 턴 뒤에도 서브에이전트가 살아 결과를 반환할 수 있도록 운영 클라이언트를 풀에 보존한다.
   // 주입한 시험 클라이언트는 다음 시험으로 상태가 새지 않도록 풀에 넣지 않는다.
   const pooled = makeClient === defaultAppServerClientFactory;
@@ -81,6 +92,8 @@ export async function runViaAppServer(
       approvalsReviewer: "user",
       ...(run.writableRoots ? { writableRoots: run.writableRoots } : {}),
       ...(run.networkAccess !== undefined ? { networkAccess: run.networkAccess } : {}),
+      ...(run.excludeTmpdirEnvVar !== undefined ? { excludeTmpdirEnvVar: run.excludeTmpdirEnvVar } : {}),
+      ...(run.excludeSlashTmp !== undefined ? { excludeSlashTmp: run.excludeSlashTmp } : {}),
     });
     const threadId = client.currentThreadId;
     // 진행 중 턴에 끼어들 수 있게 등록 — 이게 없으면 턴 도는 동안 온 메시지가 연기되다 사라진다
@@ -104,10 +117,7 @@ export async function runViaAppServer(
       onStatus: (line, item) => {
         try { opts.onStatus?.(line, item); } catch { /* 채널 표시가 턴을 막지 않는다 */ }
       },
-      // 지금 이 콜백은 안 불린다 — 위에서 approvalPolicy 를 "never" 로 넘기므로 codex 가
-      //   승인 요청을 보내지 않는다. 아래 코드와 appServerPopup 시험들은 도달하지 않는 상태 다.
-      //   그 시험들이 계속 통과하는 것은 이 경로가 돈다는 뜻이 아니다.
-      //   지우지 않는 이유: 되돌리기가 approvalPolicy 한 값이면 끝나야 한다.
+      // full uses never; folder routes on-request approvals to the member room.
       onApproval: async (req) => {
         // cogs 정책 팀원은 cogs 카드로만 묻는다. 처리기가 없거나 실패하면 거절(텔레그램 팝업·never 로 넘기지 않는다).
         if (opts.cogsRun?.mode === "enforced") {
@@ -115,9 +125,11 @@ export async function runViaAppServer(
           try { return await opts.onCogsApproval(req); } catch { return "denied"; }
         }
         // Codex의 질문을 받으면 이 턴 주인의 방으로 전달하고 사람 결정을 반환한다. 자체 판정층·공용 op 방·고정 팀원 목적지를 사용하지 않는다.
-        return db
-          ? await requestApprovalPopup(db, req, opts.agentId, opts.cwd)
-          : "denied"; // db 없는 caller 는 띄울 곳이 없다(테스트·도구 경로)
+        if (!db) return "denied";
+        const folder = opts.permissionMode === "folder";
+        const decision = await requestApprovalPopup(db, req, opts.agentId, opts.cwd, undefined,
+          folder ? { allowAlways: false, failOnSendError: true, folderSessions } : {});
+        return decision;
       },
     }, opts.timeoutMs ?? TURN_TIMEOUT_MS, opts.imagePaths);
     // Phase1 ③: 턴 종료 시 이 turn의 남은 pending/decided 팝업을 expire(cancel/interrupt/timeout 포함).
@@ -130,7 +142,7 @@ export async function runViaAppServer(
     if (pooled && r.status !== "completed") dropClient(opts.agentId);
     const ok = r.status === "completed" && (r.finalText.trim().length > 0 || opts.allowEmptyReply === true);
     // 실패 detail에 실제 오류 알림·stderr tail을 포함해 원인을 진단한다.
-    const detail = codexTurnDetail(r.status, r.finalText, r.detail);
+    const detail = codexTurnDetail(r.status, r.finalText, opts.permissionMode === "folder" && r.detail ? `error digest:${createHash("sha256").update(r.detail).digest("hex")}` : r.detail);
     return {
       ok,
       reply: r.finalText,
@@ -145,7 +157,7 @@ export async function runViaAppServer(
     return {
       ok: false,
       reply: "",
-      detail: `appserver_error: ${e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200)}`,
+      detail: opts.permissionMode === "folder" ? `appserver_error: error digest:${createHash("sha256").update(e instanceof Error ? e.message : String(e)).digest("hex")}` : `appserver_error: ${redactApprovalText(e instanceof Error ? e.message : String(e)).slice(0, 200)}`,
       elapsedMs: nowMs() - startedAt,
     };
   } finally {
@@ -162,8 +174,9 @@ export async function runViaAppServer(
  * 이번 턴의 실행 모드. cogs 정책이 적용된 팀원만 정책값을 쓰고, 나머지는 지금 그대로(never + danger-full-access).
  * poolKey 가 다르면 예전 app-server 를 다시 쓰지 않는다.
  */
-export function runModeFor(opts: Pick<CodexTurnOptions, "cogsRun">): {
+export function runModeFor(opts: Pick<CodexTurnOptions, "cogsRun" | "permissionMode" | "cwd">): {
   approvalPolicy: string; sandbox: string; writableRoots?: string[]; networkAccess?: boolean; poolKey?: string;
+  excludeTmpdirEnvVar?: boolean; excludeSlashTmp?: boolean;
 } {
   const c = opts.cogsRun;
   if (c?.mode === "enforced") {
@@ -173,6 +186,14 @@ export function runModeFor(opts: Pick<CodexTurnOptions, "cogsRun">): {
       ...(c.sandbox === "workspace-write" ? { writableRoots: c.writableRoots } : {}),
       ...(c.networkAccess !== undefined ? { networkAccess: c.networkAccess } : {}),
       poolKey: `cogs:${c.stamp}`,
+    };
+  }
+  if (codexPermissionMode(opts.permissionMode) === "folder") {
+    if (!opts.cwd) throw new Error("folder_mode_requires_workspace");
+    const root = resolve(opts.cwd);
+    return {
+      approvalPolicy: "on-request", sandbox: "workspace-write", writableRoots: [root], networkAccess: true,
+      excludeTmpdirEnvVar: true, excludeSlashTmp: true, poolKey: `folder:${root}`,
     };
   }
   return { approvalPolicy: "never", sandbox: "danger-full-access" };

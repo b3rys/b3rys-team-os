@@ -5,19 +5,22 @@ import { uiText } from "./uiStrings";
 import { cogsActivityArgs, filename } from "./cogsActivity";
 import { createHash, randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { requestPermission, getPermissionRequest, tierDReasons, type PermissionOperation } from "../../lib/permissionGate";
+import { requestPermission, getPermissionRequest, decidePermissionRequest, tierDReasons, type PermissionOperation } from "../../lib/permissionGate";
 import type { ApprovalRequest, ReviewDecision } from "./appServerClient";
 import { CodexApprovalCorrelationStore } from "./state";
 import { appendAudit } from "../../db/queries";
 import { readFileSync } from "node:fs";
 import { codexBridgePaths, resolveOwnerDmId } from "./launcher";
 import { readMemberChannel, type MemberChannel } from "../../lib/memberChannel";
+import { redactApprovalText } from "../../lib/redactSecrets";
+import { folderOperationDigest, type FolderSessionApprovals } from "./folderSessionApprovals";
+export { redactApprovalText } from "../../lib/redactSecrets";
 
 /** Phase1 ③: 이 서버 프로세스 인스턴스 id — 재시작 감지용(옛 팝업을 새 프로세스가 새 turn에 재결합 금지). */
 export const PROCESS_INSTANCE = randomUUID();
 
 /** 승인 결정은 pending→decided→delivered CAS와 operation_hash·process_instance 대조가 모두 성공해야 전달한다. 거절은 만료 처리하고 단계 실패는 거절한다.
- * 이 비교는 다른 요청·프로세스의 결정 혼입을 막을 뿐, 승인 후 실행 직전의 내용 변경을 검출하지 않는다. */
+ * Folder 호출자는 전달 직전 전체 operation을 다시 계산한다. 공용 경로는 승인 전 캡처값만 비교한다. */
 export function finalizeApprovalDelivery(
   store: CodexApprovalCorrelationStore,
   requestId: string,
@@ -36,7 +39,7 @@ export function finalizeApprovalDelivery(
 }
 
 /** operation hash는 전체 명령·파일 종류/경로/이동·내용을 결합해 결정과 요청을 맞춘다. scope는 내용 변경마다 지속 허용이 풀리지 않도록 내용 해시를 제외한다.
- * 실행 직전 재계산은 하지 않는다. CLI 0.144.6(rust-v0.144.6/5d1fbf26)은 승인 중 같은 call_id의 갱신 경로가 없고 patchUpdated는 기본 OFF인 승인 전 스트리밍이며 steer도 다음 모델 요청 전에 적용된다.
+ * 공용 경로는 실행 직전 재계산을 하지 않는다. Folder 경로는 별도의 전체 digest를 다시 비교한다. CLI 0.144.6(rust-v0.144.6/5d1fbf26)은 승인 중 같은 call_id의 갱신 경로가 없고 patchUpdated는 기본 OFF인 승인 전 스트리밍이며 steer도 다음 모델 요청 전에 적용된다.
  * 벤더가 승인 중 갱신을 허용하면 재검토해야 한다. 수신 색인은 갱신 가능하며 patchUpdated는 실제 프로토콜 알림이다. 재확인은 내용 동의가 있는 finalize 직전이 후보이나, 결정 반환 후 벤더 내부 실행 구간은 관측할 수 없다. */
 export function approvalOperationHash(req: ApprovalRequest): string {
   const p = req.params as Record<string, any>;
@@ -55,6 +58,7 @@ export function approvalOperationHash(req: ApprovalRequest): string {
   //   (진행 중 승인의 상관키가 어긋난다). 구세대 params 에는 itemId·grantRoot 가 없다(스키마 실측).
   const itemId = typeof p.itemId === "string" && p.itemId ? p.itemId : null;
   if (itemId) basis.item_id = itemId;
+  if (p.permissions !== undefined) basis.permissions = p.permissions;
   const grantRoot = grantRootOf(p);
   if (grantRoot) basis.grant_root = grantRoot;
   // 같은 파일의 다른 변경을 구분하도록 내용 해시를 결합한다. 내용이 있을 때만 키를 추가해야 내용 없는 기존 요청의 상관키가 바뀌지 않는다.
@@ -170,8 +174,9 @@ function commandOperationFields(material: string, command: string): { command: s
   //  "kubectl delete ns prod " 뒤에 500자가 더 있어도 화면은 그냥 174자에서 끊긴다(실측).
   //  전문이 text 로 빠진 지금은 사람 눈에 닿는 경로가 이 한 줄뿐 이라 더 중요해졌다.
   //  S3 가 쓰기 경로에서 세운 규칙과도 같다 — 넘치면 몇 개가 잘렸는지 말한다.
-  const truncated = command.length > budget;
-  const visible = truncated ? `${cutCodePoints(command, Math.max(0, budget - 1))}…` : command;
+  const display = redactApprovalText(command);
+  const truncated = display.length > budget;
+  const visible = truncated ? `${cutCodePoints(display, Math.max(0, budget - 1))}…` : display;
   return { command: `${visible}${suffix}`, text: command };
 }
 
@@ -550,6 +555,10 @@ export async function sendApprovalToMemberRoom(
     risks?: string[];
     /** 이 팀원의 채널(시험 주입). 없으면 agents.json 의 channel. */
     channel?: MemberChannel;
+    allowAlways?: boolean;
+    ownerId?: string;
+    requireDelivery?: boolean;
+    onDelivered?: (delivery: {owner_id:string;chat_id:string;message_id:number}) => boolean;
   } = {},
 ): Promise<boolean> {
   const risks = deps.risks ?? [];
@@ -565,7 +574,9 @@ export async function sendApprovalToMemberRoom(
   // 목적지를 모르면 발송하지 않으며 해석기를 주입해 인가 목록과 DM이 다른 조건도 검증한다.
   const channel = deps.channel ?? readMemberChannel(agentId);
   const b3chat = channel.kind === "b3chat";
-  const chatId = deps.chatId ?? (b3chat ? channel.ownerChat : (deps.resolveDestination ?? resolveOwnerDmId)());
+  const ownerId = deps.ownerId ?? channel.ownerChat ?? (deps.resolveDestination ?? resolveOwnerDmId)();
+  const chatId = deps.chatId ?? (b3chat ? channel.ownerChat : ownerId);
+  if (deps.requireDelivery && (b3chat || !ownerId || !/^[1-9]\d*$/.test(ownerId))) return false;
   if (!token || !chatId) {
     if (b3chat && token) console.warn(`[codex-approval] ★b3chat owner_chat 이 없어 승인 요청을 못 띄운다★ agent=${agentId} request=${requestId}`);
     return false;
@@ -584,7 +595,7 @@ export async function sendApprovalToMemberRoom(
   const text = (detail ? `${uiText("approval_card",{title})}\n\n<code>${escapeHtml(detail)}</code>` : uiText("approval_card",{title})) + riskLine;
   const doFetch = deps.fetchFn ?? fetch;
   try {
-    const res = await doFetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const res = await doFetch(`${channel.apiBase}/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -593,7 +604,7 @@ export async function sendApprovalToMemberRoom(
         parse_mode: "HTML",
         // 버튼은 폰 공간을 줄이도록 한 줄에 배치한다. 위험 표시는 무인 반복을 허용하는 24시간 지속 grant를 막는다.
         // 한 번·세션 허용은 제공하되 세션 허용은 지속 grant를 남기지 않고 Codex 세션과 함께 끝난다.
-        reply_markup: { inline_keyboard: [risks.length
+        reply_markup: { inline_keyboard: [risks.length || deps.allowAlways === false
           ? [
               { text: uiText("approval_allow_once"), callback_data: `pg1:${requestId}` },
               { text: uiText("approval_allow_session"), callback_data: `pgs:${requestId}` },
@@ -607,7 +618,16 @@ export async function sendApprovalToMemberRoom(
             ]] },
       }),
     });
-    return res.ok;
+    if (!res.ok) return false;
+    if (deps.onDelivered) {
+      const body = await res.json() as {ok?:boolean;result?:{message_id?:number;chat?:{id?:number}}};
+      const messageId = body.result?.message_id;
+      const responseChat = body.result?.chat?.id;
+      if ((deps.requireDelivery || responseChat !== undefined) && String(responseChat) !== String(chatId)) return false;
+      if (body.ok !== true || !Number.isSafeInteger(messageId) || messageId! <= 0 || !ownerId) return false;
+      return deps.onDelivered({owner_id:ownerId,chat_id:String(chatId),message_id:messageId!});
+    }
+    return true;
   } catch { return false; }
 }
 
@@ -642,13 +662,32 @@ export function cogsCardInputFor(req: ApprovalRequest, requestId: string, risks:
 export function approvalSummary(req: ApprovalRequest): { title: string; detail?: string } {
  const summary=approvalSummaryBase(req);
  const root=grantRootOf(req.params as Record<string,any>);
- return root ? {title:uiText("approval_root_title"),detail:[uiText("approval_grant_root",{root:grantRootDisplay(root)}),summary.detail].filter(Boolean).join("\n")} : summary;
+ const result = root ? {title:uiText("approval_root_title"),detail:[uiText("approval_grant_root",{root}),summary.detail].filter(Boolean).join("\n")} : summary;
+ return { ...result, ...(result.detail ? { detail: redactApprovalText(result.detail) } : {}) };
 }
 function approvalSummaryBase(req: ApprovalRequest): {title:string;detail?:string} {
   const p = (req.params ?? {}) as Record<string, unknown>;
   const cmd = p.command;
   const cmdText = typeof cmd === "string" ? cmd : Array.isArray(cmd) ? cmd.join(" ") : null;
-  if (cmdText) return { title: uiText("approval_command"), detail: clip(cmdText) };
+  if (cmdText) return { title: uiText("approval_command"), detail: clip(redactApprovalText(cmdText), 2000) };
+
+  if (req.method === "item/permissions/requestApproval") {
+    const permissions = p.permissions as { fileSystem?: { read?: string[]; write?: string[]; entries?: unknown[] }; network?: { enabled?: boolean } } | undefined;
+    const fs = permissions?.fileSystem;
+    const paths = [...(fs?.read ?? []).map((path) => `${uiText("approval_read_path")}: ${path}`), ...(fs?.write ?? []).map((path) => `${uiText("approval_write_path")}: ${path}`)];
+    for (const raw of fs?.entries ?? []) {
+      const entry = raw as {access?: string; path?: {path?: string; pattern?: string; value?: unknown}};
+      const path = entry.path?.path ?? entry.path?.pattern;
+      const label = entry.access === "read" ? uiText("approval_read_path") : entry.access === "write" ? uiText("approval_write_path") : entry.access;
+      paths.push(path && label ? `${label}: ${path}` : JSON.stringify(raw));
+    }
+    if (permissions?.network?.enabled) paths.push(uiText("approval_network"));
+    return { title: uiText("approval_permission"), detail: clip([typeof p.reason === "string" ? p.reason : "", ...paths].filter(Boolean).join("\n"), 2000) };
+  }
+
+  if (req.observedItem?.changes.length) {
+    return { title: uiText("approval_files", { count: req.observedItem.changes.length }), detail: clip(req.observedItem.changes.map((c) => c.movePath ? `${c.path} → ${c.movePath}` : c.path).join("\n"), 2000) };
+  }
 
   const changes = p.fileChanges;
   if (changes && typeof changes === "object") {
@@ -672,9 +711,18 @@ function escapeHtml(s: string): string {
  * M5.3 진입점 — ask-tier 승인요청을 팝업으로 처리. onApproval에서 needsApproval일 때 호출.
  * 반환 전까지 codex 턴이 대기하므로, 상위(runner)는 이 대기 동안 turn timeout을 연기해야 한다(M5.3 배선).
  */
-export async function requestApprovalPopup(db: Database, req: ApprovalRequest, agentId: string, cwd?: string, ttlMs = POPUP_TTL_MS): Promise<ReviewDecision> {
+export async function requestApprovalPopup(db: Database, req: ApprovalRequest, agentId: string, cwd?: string, ttlMs = POPUP_TTL_MS, options: { allowAlways?: boolean; failOnSendError?: boolean; folderSessions?: FolderSessionApprovals; deliveryDeps?: Parameters<typeof sendApprovalToMemberRoom>[3] } = {}): Promise<ReviewDecision> {
   const store = new CodexApprovalCorrelationStore(db);
-  const opHash = approvalOperationHash(req);
+  const folder = options.allowAlways === false;
+  const opHash = folder ? folderOperationDigest(req) : approvalOperationHash(req);
+  if (!opHash) {
+    appendAudit(db, agentId, "codex_folder_content_unknown", req.method, {});
+    return "denied";
+  }
+  const requestIdentity = () => JSON.stringify([req.serverRequestId ?? null, req.params.threadId ?? null, req.params.turnId ?? null, req.params.itemId ?? null, req.params.callId ?? null]);
+  const initialIdentity = requestIdentity();
+  const deliveryMatches = () => folderOperationDigest(req) === opHash && requestIdentity() === initialIdentity;
+  const reuse = folder ? options.folderSessions?.get(agentId, req) : undefined;
 
   //  너무 긴 요청은 팝업을 만들지 않고 거절한다 — 사람이 읽고 판단할 수 있는 대상이 아니다.
   //  조용히 통과시키지도, 못 읽을 것을 사람에게 들이밀지도 않는다. 기록을 남겨 따로 검토 하게 한다.
@@ -699,6 +747,10 @@ export async function requestApprovalPopup(db: Database, req: ApprovalRequest, a
     //   우리가 대신 막지 않기로 했으면 사람이 판단할 근거를 줘야 그 전제가 성립한다.
     //   그 전까지 `sudo rm -rf /` 와 `ls` 가 폰에서 생김새가 같았다.
     risks = tierDReasons(op);
+    op.provenance = {...op.provenance,...(folder ? {operation_hash:opHash} : {}),codex_approval:{
+      allowed_decisions: options.allowAlways === false || risks.length ? ["allow_once","allow_session","deny"] : ["allow_once","allow_session","allow_always","deny"],
+      telegram_delivery: null,
+    }};
     const res = requestPermission(db, op); // 팝업 생성(telegramCapture가 렌더)
     // ※ Tier-D 로 여기서 deny 하던 "이중 안전" 은 없어졌다(우리가 판정하지 않는다).
     //   이 분기는 grant 조회 결과가 deny 일 때만 남아 있다. 위험 명령은 이제 카드로 올라간다.
@@ -728,13 +780,62 @@ export async function requestApprovalPopup(db: Database, req: ApprovalRequest, a
       .run(`+${Math.round(ttlMs / 1000)} seconds`, requestId);
   } catch { /* best-effort — 컬럼이 없어도 폴링 deadline 이 받쳐준다 */ }
 
+  // A remembered decision still gets its own row, correlation, CAS and delivery audit.
+  if (reuse) {
+    try {
+      const source = getPermissionRequest(db, reuse.requestId);
+      const sourcePolicy = JSON.parse(source?.provenance_json ?? "{}").codex_approval;
+      const sourceCorrelation = store.get(reuse.requestId);
+      if (sourceCorrelation?.state !== "delivered" || sourceCorrelation.operation_hash !== opHash || sourceCorrelation.process_instance !== PROCESS_INSTANCE ||
+          source?.status !== "allowed_once" || source.decision_scope !== "session" ||
+          JSON.stringify(sourcePolicy?.telegram_delivery) !== JSON.stringify(reuse.delivery)) throw new Error("invalid session source");
+      const row = getPermissionRequest(db, requestId)!;
+      const provenance = JSON.parse(row.provenance_json ?? "{}");
+      provenance.codex_approval = {...provenance.codex_approval, telegram_delivery: reuse.delivery, session_source_request: reuse.requestId};
+      db.prepare("UPDATE permission_request SET provenance_json=? WHERE id=? AND status='pending'").run(JSON.stringify(provenance), requestId);
+      if (!decidePermissionRequest(db, requestId, "allow_session", {approver:reuse.delivery.owner_id}).ok) throw new Error("session decision failed");
+      if (!deliveryMatches()) throw new Error("operation changed");
+      appendAudit(db, agentId, "codex_session_approval_reused", req.method, {request_id:requestId,source_request:reuse.requestId,operation_hash:opHash,telegram_delivery:reuse.delivery});
+      return finalizeApprovalDelivery(store, requestId, opHash, "approved");
+    } catch {
+      expirePermissionRequest(db, requestId);
+      return finalizeApprovalDelivery(store, requestId, opHash, "denied");
+    }
+  }
   // 그 팀원 방에 띄운다. 실패해도 요청 행은 남으므로 op 목록에서 여전히 보인다(조용히 사라지지 않는다).
-  const sent = await sendApprovalToMemberRoom(agentId, requestId, req, { risks });
+  const sent = await sendApprovalToMemberRoom(agentId, requestId, req, {
+    ...options.deliveryDeps, risks, allowAlways: options.allowAlways, requireDelivery: options.allowAlways === false,
+    onDelivered: delivery => {
+      const row = getPermissionRequest(db,requestId!);
+      if (!row || row.status !== "pending") return false;
+      const provenance = JSON.parse(row.provenance_json ?? "{}");
+      provenance.codex_approval = {...provenance.codex_approval,telegram_delivery:delivery};
+      return db.prepare("UPDATE permission_request SET provenance_json=? WHERE id=? AND status='pending'")
+        .run(JSON.stringify(provenance),requestId!).changes === 1;
+    },
+  });
   if (!sent) {
     try { appendAudit(db, agentId, "codex_approval_room_send_failed", req.method, { request_id: requestId }); } catch { /* best-effort */ }
+    if (options.failOnSendError) {
+      expirePermissionRequest(db, requestId);
+      return finalizeApprovalDelivery(store, requestId, opHash, "denied");
+    }
   }
   const decision = await pollDecision(db, requestId, ttlMs);
-  // 결정을 CAS로 마감(중복 버튼·요청 불일치·orphan 거부) 후 반환. 실행 직전 변경 검출은 아님 — 위 갭 주석 참조.
+  // Re-read the complete folder operation immediately before committing its delivery.
+  if (folder) {
+    if (!deliveryMatches()) {
+      appendAudit(db, agentId, "codex_folder_operation_changed", req.method, {request_id:requestId,operation_hash:opHash});
+      return finalizeApprovalDelivery(store, requestId, opHash, "denied");
+    }
+    const delivered = finalizeApprovalDelivery(store, requestId, opHash, decision === "approved_for_session" ? "approved" : decision);
+    if (delivered === "approved" && decision === "approved_for_session") {
+      const row = getPermissionRequest(db, requestId);
+      const delivery = JSON.parse(row?.provenance_json ?? "{}").codex_approval?.telegram_delivery;
+      if (delivery) options.folderSessions?.remember(agentId, req, {requestId, delivery});
+    }
+    return delivered;
+  }
   return finalizeApprovalDelivery(store, requestId, opHash, decision);
 }
 

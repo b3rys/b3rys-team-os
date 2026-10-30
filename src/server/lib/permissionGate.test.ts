@@ -98,7 +98,7 @@ describe("permissionGate — DB request/grant/audit", () => {
     expect(risky.reasons).toEqual([]); // 우리 차단 사유로 거절하지 않는다
     expect(risky.request).toBeDefined();
     expect(risky.request!.status).toBe("pending");
-    expect(risky.request!.target).toBe("rm -rf /tmp/x");
+    expect(risky.request!.target).toMatch(/^\[command digest:[a-f0-9]{64}\]$/);
 
     const decided = decidePermissionRequest(db, risky.request!.id, "allow_always", { approver: "GD", provenance: { surface: "telegram" } });
     expect(decided.ok).toBe(true);
