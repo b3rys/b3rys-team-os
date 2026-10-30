@@ -117,6 +117,7 @@ Other common smells → refactor:
 - **Long function / large class doing several jobs** (SRP violation) → extract, split by reason-to-change.
 - **Conditional sprawl** (type switch repeated) → polymorphism / lookup map / strategy.
 - **State × input sprawl** (`if (stateA && key===X) … else if (stateB && …)`, the same state judged in several files) → one state-judging function + a state table + small action functions. See "상태 × 입력이 많으면 상태표로" below. Signal: a fix that breaks something elsewhere.
+- **Code that relies on luck (timing instead of state)** — "retry up to N times", "try every 100 ms until it works", a fixed `sleep`/delay before acting, "re-read if the result looks wrong". It passes when timing is kind and fails when it isn't, and the retries keep running while the user does something else (stealing focus, overwriting a list). Suspect it hardest when **the same area keeps breaking and getting re-fixed**: each fix tunes a count or delay instead of naming what is not ready. Refactor → model the missing state explicitly: the producer signals "ready/settled" once and the consumer acts once on that signal; an in-between condition ("restored, not yet visible on disk") becomes a named state that rules follow, not a retry loop. If a proposed fix contains a retry count or a delay, stop and ask what signal is missing.
 - **Feature envy** (a function leaning on another module's data) → move it to where the data lives.
 - **Primitive/loose params threaded everywhere** → introduce a small type/object as the contract.
 
@@ -398,6 +399,7 @@ export const remainingForFreeShip = (total: number): number =>
 - "Let's make interfaces for everything" without a real volatility boundary. · "We used a transaction, so it's safe."
 - Refactor + feature change in one commit. · Refactoring without pinning behavior first. · A bug fix that also "improves" the shared input path.
 - Adding another branch to a growing switch instead of a map/strategy.
+- Fixing a timing bug by raising a retry count or a delay ("try 3 more times", "wait 0.5 s") — luck, not logic; name the missing ready/settled state instead.
 - 서버가 화면 문장을 만들어 보내기 — 문구 하나 바꾸려고 서버를 고치고 배포하게 된다. · 언어마다 화면을 한 벌씩 복사하기 — 고칠 때마다 여러 벌을 고친다.
 
 ## Source Anchors
