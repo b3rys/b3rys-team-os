@@ -1,7 +1,7 @@
 # 빌드 · 서명 · notarization
 
 > 정본 스크립트와 참조 문서(`scripts/package-macos-app.sh` · `docs/AppStoreReview.md` · `docs/UNSIGNED_APP_TEST_GUIDE.md`)는 모두
-> ★골격 저장소(`mac-iphone-shell`, b3rys 내부 비공개) 안에 있고 이 저장소에는 없다★. 아래 경로는 전부 그 저장소 기준이다.
+> 골격 저장소(`mac-iphone-shell`, b3rys 내부 비공개) 안에 있고 이 저장소에는 없다. 아래 경로는 전부 그 저장소 기준이다.
 > **전제**: macOS Sonoma 14+ / Xcode 16.2+ (`xcodebuild -version`). 배포는 Apple Developer 계정 필요.
 > **⚠ 이 파트의 risk = medium** (서명/notarization은 credential이 얽혀 가장 깨지기 쉽고, 잘못하면 secret 유출).
 

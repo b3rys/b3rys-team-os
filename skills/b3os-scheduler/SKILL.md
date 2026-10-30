@@ -64,12 +64,12 @@ createCronJob(db, {
 ```
 `createCronJob`이 cron식으로 첫 `next_run_at`을 계산해 저장. 이후 발화할 때마다 다음 슬롯 재계산(recurring).
 
-**스크립트 실행 잡(exec):** 에이전트를 깨우는 게 아니라 ops 스크립트를 스케줄에 돌린다(옛 per-job launchd 대체). 페이로드 `{ type:"exec", execKey }` — execKey는 ★반드시 `core.ts`의 `EXEC_ALLOWLIST`에 등록된 키★(명령은 코드에 정의, DB에서 임의 명령 못 옴). 워커가 argv 배열로 spawn(shell 없음=injection 0) + 잡별 타임아웃 + 출력 truncate + non-zero exit=failed. cron과 조합해 반복.
+**스크립트 실행 잡(exec):** 에이전트를 깨우는 게 아니라 ops 스크립트를 스케줄에 돌린다(옛 per-job launchd 대체). 페이로드 `{ type:"exec", execKey }` — execKey는 반드시 `core.ts`의 `EXEC_ALLOWLIST`에 등록된 키(명령은 코드에 정의, DB에서 임의 명령 못 옴). 워커가 argv 배열로 spawn(shell 없음=injection 0) + 잡별 타임아웃 + 출력 truncate + non-zero exit=failed. cron과 조합해 반복.
 ```ts
 createCronJob(db, { id:"sched_task_review_ping", title:"05:00 리뷰핑", cron:"0 5 * * *",
   createdBy:"system", payload: { type:"exec", execKey:"task-review-ping" } });
 ```
-새 ops 스크립트를 돌리려면 `EXEC_ALLOWLIST`에 `{ command:["bun","run","scripts/x.ts"], timeoutMs, label }` 항목 추가(코드 변경+리뷰). ★멱등성 주의: exec는 at-least-once(크래시 시 재실행 가능) — 비멱등 side effect는 자체 dedupe 없이 allowlist 금지.★
+새 ops 스크립트를 돌리려면 `EXEC_ALLOWLIST`에 `{ command:["bun","run","scripts/x.ts"], timeoutMs, label }` 항목 추가(코드 변경+리뷰). 멱등성 주의: exec는 at-least-once(크래시 시 재실행 가능) — 비멱등 side effect는 자체 dedupe 없이 allowlist 금지.
 
 **1회성 리마인드:** `scheduleReminder(db, { targetAgentId, body, runAt, createdBy, directToGd? })` — 턴에서 sleep 금지, 즉시 반환하고 워커가 나중에 발화.
 
@@ -80,7 +80,7 @@ createCronJob(db, { id:"sched_task_review_ping", title:"05:00 리뷰핑", cron:"
 ## 게이트 / 안전 (팀 규칙)
 - **라이브 발사**: 서버 워커가 `B3OS_SCHEDULER_ENABLED=true` + `B3OS_SCHEDULER_DRY_RUN=0`일 때만 실제 발화. 이 env 플립·라이브 team.db 잡 등록은 **공유 인프라 변경 → 팀장 승인 게이트**.
 - **launchd 이관**: per-job launchd를 스케줄러 잡으로 옮길 땐 ①새 잡 등록 ②발화 검증 ③그 다음 옛 launchd 제거(운영자) 순서. 순서 어기면 이중발화. launchd 제거=운영자 권한(팀장 터미널/운영 담당).
-- **검증**: 시간 코드는 유닛테스트(주입 now)만으로 부족 — 실제 벽시계로 라이브 스모크(별도 temp DB + 진짜 워커)까지 돌린다. 유닛테스트엔 ms 붙은 non-round 시각 포함(정각만 쓰면 조기발화 버그 놓침). 라이브 스모크는 일회용 스크립트로 직접 돌린다(기성 스크립트 없음): 별도 temp DB를 만들고 `TEAM_DB_PATH`로 지정한 뒤 `B3OS_SCHEDULER_ENABLED=true B3OS_SCHEDULER_DRY_RUN=0`으로 실제 워커를 띄워 발화를 관찰한다. ★라이브 `team.db`를 절대 대상으로 삼지 않는다.★
+- **검증**: 시간 코드는 유닛테스트(주입 now)만으로 부족 — 실제 벽시계로 라이브 스모크(별도 temp DB + 진짜 워커)까지 돌린다. 유닛테스트엔 ms 붙은 non-round 시각 포함(정각만 쓰면 조기발화 버그 놓침). 라이브 스모크는 일회용 스크립트로 직접 돌린다(기성 스크립트 없음): 별도 temp DB를 만들고 `TEAM_DB_PATH`로 지정한 뒤 `B3OS_SCHEDULER_ENABLED=true B3OS_SCHEDULER_DRY_RUN=0`으로 실제 워커를 띄워 발화를 관찰한다. 라이브 `team.db`를 절대 대상으로 삼지 않는다.
 - AI 코드면 `b3os-ai-code-safety` + 하네스 검토 후 머지.
 
 ## 한계 (명시)

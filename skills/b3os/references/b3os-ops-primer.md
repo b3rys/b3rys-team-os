@@ -239,7 +239,7 @@ cd "$HOME/b3rys-team-os" && bash uninstall.sh     # 팀원 전원 오프보드 �
 
 ```bash
 cd "$HOME/b3rys-team-os"
-cp team.db "team.db.bak-$(date +%Y%m%d-%H%M%S)"   # ★백업 먼저★ — 마이그레이션 실패 시 롤백 자산
+cp team.db "team.db.bak-$(date +%Y%m%d-%H%M%S)"   # 백업 먼저 — 마이그레이션 실패 시 롤백 자산
 git pull                    # 새 코드
 bun install                 # 새 의존성
 bun run build               # 대시보드(프론트) 재빌드

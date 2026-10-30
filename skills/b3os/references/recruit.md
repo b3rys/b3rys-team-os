@@ -3,7 +3,7 @@
 첫 팀원을 실제 대화 가능한 봇으로 붙이는 전 과정. 서버가 `http://localhost:$PORT` 에 떠 있고
 `.env` 에 `APPROVAL_EXECUTION_ENABLED=1`(활성화 승인)이 켜져 있어야 한다.
 
-> **★ 포트 ($PORT)** — 아래 모든 `localhost:$PORT` 는 `.env` 의 `TEAM_HTTP_PORT`(기본 **7878**)를 뜻한다. curl 을 실행하기 전에 한 셸에서 실포트를 한 번 잡고, 그 셸에서 이어 실행한다(새 셸이면 이 줄을 다시):
+> ** 포트 ($PORT)** — 아래 모든 `localhost:$PORT` 는 `.env` 의 `TEAM_HTTP_PORT`(기본 **7878**)를 뜻한다. curl 을 실행하기 전에 한 셸에서 실포트를 한 번 잡고, 그 셸에서 이어 실행한다(새 셸이면 이 줄을 다시):
 > ```bash
 > PORT=$(grep '^TEAM_HTTP_PORT=' "${B3OS:-$HOME/b3rys-team-os}/.env" 2>/dev/null | cut -d= -f2); PORT=${PORT:-7878}   # 커스텀 설치 위치면 B3OS 를 먼저 export
 > ```
@@ -31,7 +31,7 @@ recruit 시 register=done, 나머지 pending. 각 API 호출이 다음 단계를
 
 ## Step A — 팀 기본정보 (1회, 안 하면 recruit가 400)
 
-**채팅으로 물어본다** — "화면에서 넣으세요"로 미루지 않는다. 팀명·팀장ID·팀장이름 3개만 물어본다. ★미션은 물어보지 않는다★ — TEAM-OS.md §1 의 기본 미션을 그대로 쓴다(대시보드에도 미션 편집칸 없음).
+**채팅으로 물어본다** — "화면에서 넣으세요"로 미루지 않는다. 팀명·팀장ID·팀장이름 3개만 물어본다. 미션은 물어보지 않는다 — TEAM-OS.md §1 의 기본 미션을 그대로 쓴다(대시보드에도 미션 편집칸 없음).
 
 ```bash
 # 팀명 + 팀장ID + 팀장이름(owner_name = 사람 이름) — /settings API 한 번.
@@ -49,11 +49,11 @@ Codex를 첫 팀원으로 선택하면 **팀장 Telegram chat_id**도 직접 물
 > **팀원 상한:** 활성 공식 팀원은 최대 **15명**이다. `team_official_member:false`인 비공식/테스트 agent와 정지(off) 팀원은 계산에서 제외한다. 15명에 도달하면 UI와 API가 신규 영입을 차단하므로, 기존 팀원을 정지하거나 퇴사 처리한 뒤 다시 시도한다. 이미 15명을 넘은 기존 팀은 강제로 삭제하지 않고 신규 영입만 막는다.
 
 > **팀원 정보는 사용자에게 직접 물어본다.** id·표시이름·역할·**멘션 별칭**, 그리고 **`persona`(성격·말투·전문성 한두 줄 — 선택)** 를 사용자가 정하게 한다. **특정 이름을 기본값·선택지로 제시하지 않는다**(예: `1) bill 2) dev` 같은 메뉴 금지 — 헷갈림). 형식과 중립 예시만 안내한다.
-> 예: *"만들 팀원의 id를 정해주세요 — 영문 소문자 slug (예: `alex`, `sam`). 표시이름·역할도요. **`@`로 부를 멘션명(별칭)** 도 정해주세요 — ★안 정하면 id·표시이름으로 부를 수 있고, 짧게 더 부를 이름이 있으면 넣으면 됩니다★(쉼표로 여러 개, 나중에 대시보드 Settings에서 변경 가능). 그리고 **성격·말투·전문성 같은 persona**를 한두 줄로 정해줄래요? (선택 — 지금 비워도 되고, 나중에 대시보드 Settings에서 넣을 수 있어요.)"*
-> ★멘션명은 항상 물어본다(질문 생략 금지). 사용자가 안 정하면 자동으로 `[id, 표시이름]` 이 별칭으로 들어가니 "안 넣어도 부를 수 있다"고 안내하되, 물음 자체는 건너뛰지 않는다.★
-> ★persona를 주면 SOUL.md 로 저장되고, 비우면 SOUL.md 없이 진행된다(나중에 대시보드에서 추가 가능). 물어는 보되 강요하지 않는다.★
+> 예: *"만들 팀원의 id를 정해주세요 — 영문 소문자 slug (예: `alex`, `sam`). 표시이름·역할도요. **`@`로 부를 멘션명(별칭)** 도 정해주세요 — 안 정하면 id·표시이름으로 부를 수 있고, 짧게 더 부를 이름이 있으면 넣으면 됩니다(쉼표로 여러 개, 나중에 대시보드 Settings에서 변경 가능). 그리고 **성격·말투·전문성 같은 persona**를 한두 줄로 정해줄래요? (선택 — 지금 비워도 되고, 나중에 대시보드 Settings에서 넣을 수 있어요.)"*
+> 멘션명은 항상 물어본다(질문 생략 금지). 사용자가 안 정하면 자동으로 `[id, 표시이름]` 이 별칭으로 들어가니 "안 넣어도 부를 수 있다"고 안내하되, 물음 자체는 건너뛰지 않는다.
+> persona를 주면 SOUL.md 로 저장되고, 비우면 SOUL.md 없이 진행된다(나중에 대시보드에서 추가 가능). 물어는 보되 강요하지 않는다.
 
-> **★설명만 하지 말고, 아래처럼 '복사해서 값만 바꾸는' 예제 폼을 같이 보여준다★** (런타임은 위 §5-1 에서 이미 정했으니 여기선 멤버 필드만 — 사용자가 이걸 복사해 채워서 주면 그대로 recruit). 값은 그럴싸한 예시:
+> **설명만 하지 말고, 아래처럼 '복사해서 값만 바꾸는' 예제 폼을 같이 보여준다** (런타임은 위 §5-1 에서 이미 정했으니 여기선 멤버 필드만 — 사용자가 이걸 복사해 채워서 주면 그대로 recruit). 값은 그럴싸한 예시:
 > ```
 > • 팀원 ID: lisa
 > • 팀원 이름: Lisa
@@ -64,7 +64,7 @@ Codex를 첫 팀원으로 선택하면 **팀장 Telegram chat_id**도 직접 물
 > ```
 > (역할 예시는 사용자가 고른 런타임/성격에 맞춰 자연스럽게. 봇토큰은 사람이 BotFather에서 받아 넣는다 — Step C.)
 
-> **★한 명 먼저 성공한 뒤 — 여러 명 한꺼번에 (배치 영입 폼)★** — 첫 팀원이 응답까지 확인되면, "런타임까지 아시면 여러 명을 한 번에 만들 수 있어요"라고 안내하며 아래 배치 폼을 보여준다(팀원별로 채움). ★런타임은 구독으로 고른다: **Claude 구독 → `claude channel`**, **ChatGPT 구독 → `openclaw` 또는 `hermes`**(hermes·openclaw 는 ChatGPT 구독자용이 기본, claude 로 붙이는 용도가 아님).★
+> **한 명 먼저 성공한 뒤 — 여러 명 한꺼번에 (배치 영입 폼)** — 첫 팀원이 응답까지 확인되면, "런타임까지 아시면 여러 명을 한 번에 만들 수 있어요"라고 안내하며 아래 배치 폼을 보여준다(팀원별로 채움). 런타임은 구독으로 고른다: **Claude 구독 → `claude channel`**, **ChatGPT 구독 → `openclaw` 또는 `hermes`**(hermes·openclaw 는 ChatGPT 구독자용이 기본, claude 로 붙이는 용도가 아님).
 >
 > **예제 ① — Claude 구독자**
 > ```
@@ -82,8 +82,8 @@ Codex를 첫 팀원으로 선택하면 **팀장 Telegram chat_id**도 직접 물
 > • 런타임, 모델: openclaw, chatgpt   (또는 hermes, chatgpt)
 > • 봇토큰: 8123457890:AA-fake-example-교체필요   ← BotFather 값
 > ```
-> ★봇토큰 주의 — 토큰은 비밀번호 같은 값이라 대화 기록에 평문으로 남는다. ★예시는 가짜 형식이며, 실제 토큰을 채운 폼은 공유하지 말고 본인 CC 세션에서만 쓴다.★ 토큰은 파일(0600)로만 두고 화면에 다시 출력하지 않는다.
-> ★영입 순서 — 권장은 claude → hermes → openclaw (claude 페어링이 팀장 chat_id 를 자동으로 잡아주고, 그 값을 hermes 가 게이트 통과에 쓴다). 단 ★순서가 뒤집혀도 된다★: **openclaw 먼저** = pair-approve 라 무관. **hermes 먼저**(claude 없이) = owner_chat_id 가 아직 없으니, hermes activate 전에 팀장 chat_id 를 물어서 세팅(`PUT /settings {owner_chat_id}`)하거나, 안 되면 팀장이 코드 받고 `hermes pairing approve telegram <코드>` 로 승인 — 위 hermes 항목의 "먼저 영입 대비" 참고.★
+> 봇토큰 주의 — 토큰은 비밀번호 같은 값이라 대화 기록에 평문으로 남는다. 예시는 가짜 형식이며, 실제 토큰을 채운 폼은 공유하지 말고 본인 CC 세션에서만 쓴다. 토큰은 파일(0600)로만 두고 화면에 다시 출력하지 않는다.
+> 영입 순서 — 권장은 claude → hermes → openclaw (claude 페어링이 팀장 chat_id 를 자동으로 잡아주고, 그 값을 hermes 가 게이트 통과에 쓴다). 단 순서가 뒤집혀도 된다: **openclaw 먼저** = pair-approve 라 무관. **hermes 먼저**(claude 없이) = owner_chat_id 가 아직 없으니, hermes activate 전에 팀장 chat_id 를 물어서 세팅(`PUT /settings {owner_chat_id}`)하거나, 안 되면 팀장이 코드 받고 `hermes pairing approve telegram <코드>` 로 승인 — 위 hermes 항목의 "먼저 영입 대비" 참고.
 
 ```bash
 # 아래 값들은 형식 예시일 뿐 — 실제로는 사용자가 정한 id·이름·역할·별칭을 넣는다.
@@ -105,7 +105,7 @@ curl -s -X POST http://localhost:$PORT/team/api/members/recruit \
 - 첫 영입 멤버는 자동으로 `coordinator` capability를 받는다(라우팅 안전망).
 - 중복 id = 409, 잘못된 runtime = 400.
 
-## Step C — 봇 만들고 토큰 받기 (★ 사람만)
+## Step C — 봇 만들고 토큰 받기 ( 사람만)
 
 Claude가 사용자에게 안내한다. 이 BotFather 4단계는 `claude_channel`·`codex`·`openclaw`·`hermes_agent` 모두 동일하다:
 ```
@@ -145,23 +145,23 @@ curl -s -X POST http://localhost:$PORT/team/api/ot/<ot_id>/activate
 - 미로그인이면 `runtime_auth_required` 400 + fixHint → 로그인 후 재시도.
 - claude_channel: 토큰을 채널 `.env`(`~/.claude/channels/telegram-<id>/.env`)에 배치 → LaunchAgent plist 생성
   → tmux 봇 기동 → **poller 헬스게이트**(봇이 `bot.pid` 를 써야 '진짜 대화됨', 기본 30s 대기, `TEAMOS_POLLER_WAIT_MS` 로 조정). `bot.pid`
-  미출현이면 `poller 미기동` = telegram MCP 가 CC 부팅 MCP 열거에서 빠진 것(형제 세션 옆 fresh 부팅 경합) → ★활성화가 자동으로 `/mcp reconnect` 를 최대 2회 주입해 복구한다(activation.ts auto-reconnect) — 대개 잠깐 기다리면 붙는다.★ 단, 활성화 응답의 `ok` 는 poller 를 빼고 판정하므로 `ok: true` 만 보고 끝내지 않는다 — 응답 `steps` 에서 `step: "poller"` 항목의 `ok`·`detail` 을 보고, `ok: false` 면 poller 가 끝내 안 붙은 것이니 사용자에게 봇에게 DM 을 보내 보게 해서 실제 답이 오는지 확인한다. 플러그인 enable 은 런처가 `~/.claude/settings.json` 에 자동 기록하므로 수동 설치는 불필요(아래 참고).
+  미출현이면 `poller 미기동` = telegram MCP 가 CC 부팅 MCP 열거에서 빠진 것(형제 세션 옆 fresh 부팅 경합) → 활성화가 자동으로 `/mcp reconnect` 를 최대 2회 주입해 복구한다(activation.ts auto-reconnect) — 대개 잠깐 기다리면 붙는다. 단, 활성화 응답의 `ok` 는 poller 를 빼고 판정하므로 `ok: true` 만 보고 끝내지 않는다 — 응답 `steps` 에서 `step: "poller"` 항목의 `ok`·`detail` 을 보고, `ok: false` 면 poller 가 끝내 안 붙은 것이니 사용자에게 봇에게 DM 을 보내 보게 해서 실제 답이 오는지 확인한다. 플러그인 enable 은 런처가 `~/.claude/settings.json` 에 자동 기록하므로 수동 설치는 불필요(아래 참고).
 - 성공하면 OT `bundle=done`. claude/hermes 는 첫 모델 호출 또는 게이트웨이 확인 시 `join=done`(합류 완료).
 
-## Step F — telegram 플러그인 (claude 런타임 — ★자동, 수동 단계 없음★)
+## Step F — telegram 플러그인 (claude 런타임 — 자동, 수동 단계 없음)
 
 활성화(Step E) 런처가 telegram 플러그인 enable(`~/.claude/settings.json` 의 `enabledPlugins` 직접·원자적 기록, 머신당 1회)과 첫부팅 poller 복구(`/mcp reconnect` 자동 주입)를 **모두 처리**한다 — 사람·에이전트가 수동으로 깔 것이 없다.
 
-> ⛔ **`claude plugin install` / `/plugin install` 을 돌리지 말 것** — 그 명령은 공유 플러그인 캐시(`…/telegram/<ver>/`)를 temp 빌드 후 ★inode 째 스왑★해, 같은 캐시에서 실행 중인 다른 팀원 봇 세션의 cwd 를 unlink 시킨다(하네스 확인). enable 은 settings.json 키 기록이 전부라 install 은 불필요할뿐더러 해롭다. 재영입 에이전트가 "수동 설치"를 하려 하면 **하지 말고 그냥 재활성화만** 한다.
+> ⛔ **`claude plugin install` / `/plugin install` 을 돌리지 말 것** — 그 명령은 공유 플러그인 캐시(`…/telegram/<ver>/`)를 temp 빌드 후 inode 째 스왑해, 같은 캐시에서 실행 중인 다른 팀원 봇 세션의 cwd 를 unlink 시킨다(하네스 확인). enable 은 settings.json 키 기록이 전부라 install 은 불필요할뿐더러 해롭다. 재영입 에이전트가 "수동 설치"를 하려 하면 **하지 말고 그냥 재활성화만** 한다.
 
-## Step G — 페어링 / 접근 승인 (★ 사람, 런타임별)
+## Step G — 페어링 / 접근 승인 ( 사람, 런타임별)
 
 - **openclaw**: 새 에이전트가 "이 봇에 말할 수 있는 사람"을 모르면 팀장에게 페어링을 요구한다.
   사용자가 봇에 DM 1번 → 대시보드 **[접근 승인]** 또는
   `POST /team/api/ot/<ot_id>/pair-approve` → 서버가 pending 요청을 읽어 executor로 승인(터미널 0).
-- **claude_channel** (★openclaw 와 승인법이 다르다★): 봇 DM 접근은 access.json allowlist. 첫 claude 팀원 = 봇에 첫 메시지 → 6자리 코드 응답 → 승인. ★승인법(항상 작동): **Claude Code 가 `~/.claude/channels/telegram-<id>/access.json` 의 `allowFrom` 에 본인 DM chat_id 를 추가하고 `dmPolicy` 를 `allowlist` 로** 바꾼다★(activate 가 출력하는 [F] 안내와 동일). `setup-claude-telegram-bot` 스킬이 있으면 `promote-pending.sh <id> <code>` 도 가능. ★`pair-approve`/대시보드 [접근 승인] 은 openclaw 전용이라 claude 엔 no-op(`skipped:true` 거짓성공)★ — claude 에 쓰면 안 된다. 2번째부터의 claude 팀원은 첫 팀원의 `allowFrom` 을 **자동 승계**(seedClaudeAccess = 기존 claude 멤버 access.json 참조)해 페어링 불필요(첫 멤버는 참조할 게 없어 `dmPolicy:pairing` 시드 = 수동 승인이 정상).
-- **hermes**(v0.18): ★텔레그램 DM 페어링 게이트가 있다★ — 게이트웨이가 미승인 사용자에게 페어링 코드를 요구한다. b3os activate 가 ★팀장 chat_id(설정 `owner_chat_id`/도출)를 게이트웨이 allowlist(`TELEGRAM_ALLOWED_USERS`, plist EnvironmentVariables)에 동적 시드★하므로 **팀장은 코드 없이 바로 대화 가능**. (팀장 외 사용자는 `hermes pairing approve <platform> <code>` 네이티브 페어링 필요.) owner_chat_id 미확보 시 시드 skip → 팀장도 수동 pairing 필요.
-  > ★hermes 를 **먼저(claude 없이)** 영입할 때 대비 — owner_chat_id 가 아직 없을 수 있다(claude 페어링이 자동 채우는데 아직 안 함):★
+- **claude_channel** (openclaw 와 승인법이 다르다): 봇 DM 접근은 access.json allowlist. 첫 claude 팀원 = 봇에 첫 메시지 → 6자리 코드 응답 → 승인. 승인법(항상 작동): **Claude Code 가 `~/.claude/channels/telegram-<id>/access.json` 의 `allowFrom` 에 본인 DM chat_id 를 추가하고 `dmPolicy` 를 `allowlist` 로** 바꾼다(activate 가 출력하는 [F] 안내와 동일). `setup-claude-telegram-bot` 스킬이 있으면 `promote-pending.sh <id> <code>` 도 가능. `pair-approve`/대시보드 [접근 승인] 은 openclaw 전용이라 claude 엔 no-op(`skipped:true` 거짓성공) — claude 에 쓰면 안 된다. 2번째부터의 claude 팀원은 첫 팀원의 `allowFrom` 을 **자동 승계**(seedClaudeAccess = 기존 claude 멤버 access.json 참조)해 페어링 불필요(첫 멤버는 참조할 게 없어 `dmPolicy:pairing` 시드 = 수동 승인이 정상).
+- **hermes**(v0.18): 텔레그램 DM 페어링 게이트가 있다 — 게이트웨이가 미승인 사용자에게 페어링 코드를 요구한다. b3os activate 가 팀장 chat_id(설정 `owner_chat_id`/도출)를 게이트웨이 allowlist(`TELEGRAM_ALLOWED_USERS`, plist EnvironmentVariables)에 동적 시드하므로 **팀장은 코드 없이 바로 대화 가능**. (팀장 외 사용자는 `hermes pairing approve <platform> <code>` 네이티브 페어링 필요.) owner_chat_id 미확보 시 시드 skip → 팀장도 수동 pairing 필요.
+  > hermes 를 **먼저(claude 없이)** 영입할 때 대비 — owner_chat_id 가 아직 없을 수 있다(claude 페어링이 자동 채우는데 아직 안 함):
   > - **권장 ①**: hermes **activate 전에 팀장 텔레그램 chat_id 를 확보해 세팅**한다. 사용자에게 물어본다("팀장님 텔레그램 chat_id 알려주세요 — @userinfobot 에게 DM하면 숫자로 나옵니다") → `curl -s -X PUT http://localhost:$PORT/team/api/settings -H 'content-type: application/json' -d '{"owner_chat_id":"<숫자>"}'` → 그 뒤 activate 하면 시드돼서 팀장이 코드 없이 통과. (대시보드/영입 API로 activate 하면 서버가 설정한 owner_chat_id 를 activate 에 자동으로 넘긴다. 스크립트를 터미널에서 수동 실행할 땐 team.db 의 owner_chat_id 를 읽는 폴백도 있다.)
   > - **폴백 ②**: owner_chat_id 를 못 넣었으면 → 팀장이 hermes 봇 DM 에서 **페어링 코드**를 받는다 → 터미널에서 `hermes pairing approve telegram <코드>` 로 승인(네이티브). 이후 owner_chat_id 를 세팅해두면 재activate 시 자동.
   > - **openclaw 를 먼저** 영입하는 건 문제없다 — openclaw 는 owner_chat_id 가 아니라 **pair-approve**(대시보드 [접근 승인])가 게이트라 순서와 무관하다.
@@ -174,12 +174,12 @@ curl -s -X POST http://localhost:$PORT/team/api/ot/<ot_id>/activate
 >
 > 어느 쪽이든 **사람 몫**이며, Claude가 페어링 코드나 승인을 대신 만들거나 우회하지 않는다.
 
-## Step H — 검증 (첫 팀원 1:1 DM — ★라우터 무관★)
+## Step H — 검증 (첫 팀원 1:1 DM — 라우터 무관)
 
-새 팀원 봇 `@<bot_username>`에게 텔레그램 DM으로 "안녕"처럼 짧게 인사한다. ★1:1 DM 은 라우터 ON/OFF 와 무관하다★(라우터는 그룹 ingress 전용):
+새 팀원 봇 `@<bot_username>`에게 텔레그램 DM으로 "안녕"처럼 짧게 인사한다. 1:1 DM 은 라우터 ON/OFF 와 무관하다(라우터는 그룹 ingress 전용):
 - **claude_channel 첫 팀원**: 답 대신 **6자리 페어링 코드**가 오는 게 정상 — 사람이 승인(Step G 방식)하면 그때부터 대화된다(이게 완료 신호). 2번째 팀원부터는 첫 팀원 allowlist 승계로 페어링 없이 바로 답한다.
-- **openclaw 첫 팀원**: ★곧바로 답이 안 오는 게 정상★ — 먼저 **pair-approve**(Step G, 대시보드 [접근 승인])로 승인해야 한다. 승인 후 "안녕"에 답이 오면 완료.
-- **hermes 첫 팀원**(v0.18): ★페어링 게이트가 있다★ — activate 가 팀장 chat_id 를 게이트웨이 allowlist 에 시드하므로 팀장은 "안녕"에 ★바로 답이 온다 = 완료★. (팀장 chat_id 를 못 잡았으면 팀장에게도 페어링 코드가 오니, `owner_chat_id` 설정을 채우고 재activate.)
+- **openclaw 첫 팀원**: 곧바로 답이 안 오는 게 정상 — 먼저 **pair-approve**(Step G, 대시보드 [접근 승인])로 승인해야 한다. 승인 후 "안녕"에 답이 오면 완료.
+- **hermes 첫 팀원**(v0.18): 페어링 게이트가 있다 — activate 가 팀장 chat_id 를 게이트웨이 allowlist 에 시드하므로 팀장은 "안녕"에 바로 답이 온다 = 완료. (팀장 chat_id 를 못 잡았으면 팀장에게도 페어링 코드가 오니, `owner_chat_id` 설정을 채우고 재activate.)
 - 2번째+ 팀원(claude): 첫 팀원 allowlist 승계로 바로 답한다.
 - 그래도 안 오면 `troubleshooting.md` (완료 검증은 **봇 DM에 답/코드가 오는지**로 보고, `owner_chat_id` 로 보지 않는다).
 

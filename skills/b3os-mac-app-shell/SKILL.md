@@ -8,7 +8,7 @@ trigger: wrap a web app as a Mac/iPhone app · iPhone test · TestFlight
 
 웹앱을 Apple 네이티브 셸(.app)로 래핑하는 팀 표준 레시피. **별도 골격 저장소를 참조**하며 코드를 복제하지 않는다 — 이 스킬은 "언제·어떻게·무엇을 조심"의 운영 지식이고, 실제 구현·빌드 스크립트는 골격에 있다.
 
-> ★선행 조건 — 골격 저장소는 이 저장소에 들어있지 않다.★
+> 선행 조건 — 골격 저장소는 이 저장소에 들어있지 않다.
 > 정본 골격은 **b3rys 내부 비공개 저장소 `mac-iphone-shell`**(SwiftUI multi-platform 라이브러리 + HostApp 패턴)이다. 접근 권한이 있는 팀원이 따로 clone해야 하고, 아래 절차와 references의 경로는 **본인이 clone한 위치**를 가리킨다(이 문서에서는 `$SHELL_SKELETON`으로 쓴다).
 > 접근 권한이 없으면 이 스킬의 빌드 절차는 실행할 수 없다 — "검증된 함정"·"검증 절차" 절의 운영 지식만 참고 자료로 쓴다.
 >

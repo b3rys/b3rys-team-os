@@ -33,7 +33,7 @@ macOS 권장(팀원 활성화가 launchd 기반이라 현재 macOS 전용, Linux
 [4] 팀 기본정보 = 채팅으로 물어봄 (팀명·팀장ID·팀장이름)      ※ 안 하면 영입이 400
 [5] 첫 팀원 영입 (런타임 선택 → preflight → recruit)          ← 사람: 봇 토큰·페어링
 [6] 1:1 DM 확인 — 응답 오면 합류 완료
-[7] ★HANDOFF — "이제 팀원과 대화하세요"                        ← 여기서 이 스킬의 일은 끝
+[7] HANDOFF — "이제 팀원과 대화하세요"                        ← 여기서 이 스킬의 일은 끝
 [8] (선택) 팀원 더 추가 · 팀방(그룹) 협업 · 런타임 교체
 ```
 
@@ -66,7 +66,7 @@ cd "$B3OS" && bash install.sh
 
 `install.sh` = bun 확인/설치 → `bun install` → `bun run build` → `.env` 준비 → **활성화 스위치 프롬프트** → typecheck.
 
-> **★ 사람 승인 (활성화 스위치)** — *"이 장비에서 팀원(봇) 활성화를 허용할까요? [y/N]"* 은 `.env` 의
+> ** 사람 승인 (활성화 스위치)** — *"이 장비에서 팀원(봇) 활성화를 허용할까요? [y/N]"* 은 `.env` 의
 > `APPROVAL_EXECUTION_ENABLED=1` 을 켜서 **서버가 봇을 실제로 기동**하도록 인가하는 스위치다.
 > **본인 전용 맥일 때만 `y`.** 이 값을 사용자 대신 임의로 넣지 말고 사용자에게 묻는다.
 
@@ -74,15 +74,15 @@ cd "$B3OS" && bash install.sh
 
 ```bash
 cd "$B3OS"
-bun run start >/tmp/b3os-server.log 2>&1 &   # ★백그라운드로★ — 포그라운드면 이후 단계가 막힌다
+bun run start >/tmp/b3os-server.log 2>&1 &   # 백그라운드로 — 포그라운드면 이후 단계가 막힌다
 PORT=$(grep '^TEAM_HTTP_PORT=' "$B3OS/.env" 2>/dev/null | cut -d= -f2); PORT=${PORT:-7878}
 for i in $(seq 1 6); do curl -sf "http://localhost:$PORT/health" >/dev/null 2>&1 && { echo "✅ 서버 up ($PORT)"; break; }; sleep 2; done
 ```
 
 사용자에게 **http://localhost:$PORT/team** 을 열고 **Settings 탭**을 띄워두게 한다.
 
-> **★ bun PATH** — `command not found: bun` 이면 `export PATH="$HOME/.bun/bin:$PATH"` 또는 새 터미널.
-> **★ 포트** — `7878 이미 사용 중` 이면 `.env` 의 `TEAM_HTTP_PORT` 를 바꾸고, **이후 모든 URL 의 포트를 그 값으로** 안내한다.
+> ** bun PATH** — `command not found: bun` 이면 `export PATH="$HOME/.bun/bin:$PATH"` 또는 새 터미널.
+> ** 포트** — `7878 이미 사용 중` 이면 `.env` 의 `TEAM_HTTP_PORT` 를 바꾸고, **이후 모든 URL 의 포트를 그 값으로** 안내한다.
 > 안 뜨면 `tail -30 /tmp/b3os-server.log`.
 
 ## [4] 팀 기본정보 — 채팅으로 물어본다
@@ -91,7 +91,7 @@ for i in $(seq 1 6); do curl -sf "http://localhost:$PORT/health" >/dev/null 2>&1
 
 1. **팀명** (≤20자) 2. **팀장 ID** (`lead_id`, 영문 slug 1~40자) 3. **팀장 이름** (`owner_name`, ≤40자) 4. (선택) **팀장 텔레그램 chat_id** (`owner_chat_id`, 숫자 — Codex 또는 BYO 런타임을 첫 팀원으로 쓸 때. claude 는 불필요)
 
-> ★예시는 제네릭 자리표시자(`acme`/`teamleader`/`Alex`)를 **그대로** 보여준다. 사용자의 실명·팀명을 예시로 쓰거나 이메일·대화 맥락에서 **유추해 넣지 마라.** 실제 값은 사용자가 직접 준 것만 쓴다. **미션은 묻지 않는다**(TEAM-OS 기본값).
+> 예시는 제네릭 자리표시자(`acme`/`teamleader`/`Alex`)를 **그대로** 보여준다. 사용자의 실명·팀명을 예시로 쓰거나 이메일·대화 맥락에서 **유추해 넣지 마라.** 실제 값은 사용자가 직접 준 것만 쓴다. **미션은 묻지 않는다**(TEAM-OS 기본값).
 
 ```bash
 curl -s -X PUT http://localhost:$PORT/team/api/settings -H 'content-type: application/json' \
@@ -103,11 +103,11 @@ curl -s -X PUT http://localhost:$PORT/team/api/settings -H 'content-type: applic
 
 ## [5] 첫 팀원 영입
 
-> ★★이 단계에 들어오면 **먼저 `references/recruit.md` 를 펼쳐 읽고** 진행한다★★ — 물어볼 필드·질문 문구·복사용 폼·기본값이 거기 다 있다. "이름·역할" 몇 개만 묻고 넘어가지 말 것.
+> 이 단계에 들어오면 **먼저 `references/recruit.md` 를 펼쳐 읽고** 진행한다 — 물어볼 필드·질문 문구·복사용 폼·기본값이 거기 다 있다. "이름·역할" 몇 개만 묻고 넘어가지 말 것.
 
 **① 런타임 선택 모드** — `claude_channel`(권장·쉬움) / `codex`(Codex (Beta), ChatGPT 로그인) / `openclaw`·`hermes_agent`(ChatGPT 구독 BYO 고급). 네 가지를 **항상 보여주되**, 설치+인증 readiness 가 안 되면 **disabled 상태와 `references/runtime-setup.md` CTA** 를 함께 보여준다(고르지 못하는 이유를 화면에서 알 수 있어야 한다). **`b3os_native`는 온보딩에 노출하지 않는다.** 목록·권장 이유·고른 순간의 preflight 명령 = `references/runtime-setup.md`.
 
-**② 사용자에게 먼저 다 묻는다** — **id**(영문 slug, ★display_name 과 별개이며 빠뜨리기 쉽다★) · **display_name** · **role** · **멘션명(별칭)** · **runtime+모델** · **persona**(선택).
+**② 사용자에게 먼저 다 묻는다** — **id**(영문 slug, display_name 과 별개이며 빠뜨리기 쉽다) · **display_name** · **role** · **멘션명(별칭)** · **runtime+모델** · **persona**(선택).
 
 **③ API 순서**
 
@@ -119,7 +119,7 @@ POST /team/api/ot/<ot_id>/activate                 # 런타임 기동 (APPROVAL 
    ── 사람: 봇에 DM → 페어링 승인 (런타임별로 다름) ──
 ```
 
-> **★ 사람만 할 수 있는 것**: ①BotFather 봇 생성+토큰 ②봇에 첫 DM 보내고 페어링 승인. 토큰은 사용자가 Claude Code 에 입력하면 provision 으로 넘긴다. **받은 토큰을 화면에 다시 출력하지 않는다.**
+> ** 사람만 할 수 있는 것**: ①BotFather 봇 생성+토큰 ②봇에 첫 DM 보내고 페어링 승인. 토큰은 사용자가 Claude Code 에 입력하면 provision 으로 넘긴다. **받은 토큰을 화면에 다시 출력하지 않는다.**
 
 - 활성 공식 팀원은 최대 **15명**.
 - 팀원 작업공간 = `~/b3os/members/<팀원id>/` (repo 밖 자체완결 루트).
@@ -127,16 +127,16 @@ POST /team/api/ot/<ot_id>/activate                 # 런타임 기동 (APPROVAL 
 
 ## [6] 1:1 DM 확인 — 합류 완료
 
-★1:1 DM 은 라우터와 무관하다★(라우터는 그룹 ingress 전용). 폰에서 첫 팀원 봇에게 "안녕"을 보낸다.
+1:1 DM 은 라우터와 무관하다(라우터는 그룹 ingress 전용). 폰에서 첫 팀원 봇에게 "안녕"을 보낸다.
 
 - **응답(또는 6자리 페어링 코드)이 오면 합류 완료.** claude 첫 팀원은 코드가 오는 게 정상 — 승인하면 대화된다.
 - 대시보드 **Topology** 에서 팀원·런타임·채널이 초록인지 확인.
 - 무응답이면 → `references/troubleshooting.md` (라우터가 아니라 **페어링 승인/플러그인/poller** 문제다).
-- 런타임별 승인 방법·완료 판정 = `references/recruit.md` Step G·H. ★claude 에 `pair-approve` 를 쓰면 안 된다(openclaw 전용, 거짓성공)★
+- 런타임별 승인 방법·완료 판정 = `references/recruit.md` Step G·H. claude 에 `pair-approve` 를 쓰면 안 된다(openclaw 전용, 거짓성공)
 
 **첫 작업 시켜보기** — 응답을 확인했으면 "[팀원 이름], 간단한 거 하나 해줘"처럼 **실제로 일을 시켜보라고 권한다.** 대시보드 **Tasks 칸반**에 카드가 뜨는 걸 보면 팀의 가치가 바로 전달된다. 이 체험이 곧 handoff 의 시작이다.
 
-## [7] ★HANDOFF — 첫 팀원에게 넘긴다 (여기서 이 스킬의 일은 끝)
+## [7] HANDOFF — 첫 팀원에게 넘긴다 (여기서 이 스킬의 일은 끝)
 
 > 🎉 **첫 팀원 [이름]이 합류했어요! 이제부터는 팀원과 직접 대화하세요:**
 > - **`@[이름]` 멘션으로 작업 지시** (예: "@alex 이 코드 리뷰해줘")

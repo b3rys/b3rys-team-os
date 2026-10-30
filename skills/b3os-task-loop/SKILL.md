@@ -67,22 +67,22 @@ escalation_after:
 
 행동 규칙:
 
-0. ★착수하면 먼저 칸반 카드를 만든다★ — `task-new.sh --title "..." [--owner <id>] [--lane doing]`
+0. 착수하면 먼저 칸반 카드를 만든다 — `task-new.sh --title "..." [--owner <id>] [--lane doing]`
    (owner 생략 = 자기 자신). BWF 가 "착수 즉시 등록(필수)" 이라고 못박은 그 단계다.
    규칙만으로는 카드가 등록되지 않는다 — 이 스크립트로 한 줄에 만든다.
 1. 요청을 보낸다.
-2. ★위임에는 `--direct-to-gd` 를 붙이지 않는다★ — `--to <팀원>` 으로 보내고, 결과를 팀장이 바로 봐야 하면 **본문에** "결과는 팀장께 직접 보고해주세요" 라고 쓴다. 플래그는 **그 팀원이 자기 답에** 붙인다. (위임에 붙이면 서버가 400 `protocol_direct_to_gd_on_delegation` 으로 거부한다 — `routes/inbox.ts:100~110`)
+2. 위임에는 `--direct-to-gd` 를 붙이지 않는다 — `--to <팀원>` 으로 보내고, 결과를 팀장이 바로 봐야 하면 **본문에** "결과는 팀장께 직접 보고해주세요" 라고 쓴다. 플래그는 **그 팀원이 자기 답에** 붙인다. (위임에 붙이면 서버가 400 `protocol_direct_to_gd_on_delegation` 으로 거부한다 — `routes/inbox.ts:100~110`)
 3. `task-wait.sh`로 wait record를 남긴다.
 4. 답을 기다리는 동안 `next_safe_action`을 바로 수행한다.
 5. `recheck_at`이 지났으면 `task-check.sh`로 thread/status를 확인한다.
 6. 답이 없으면 `fallback`을 실행하거나 provisional status를 보고한다.
 7. 답이 오면 반영하고 `task-close.sh`로 닫는다.
 
-### ★delegated inquiry UX — 팀장 DM 노이즈 금지★
+### delegated inquiry UX — 팀장 DM 노이즈 금지
 팀원에게 물어보고 정리해오는 위임 작업(수집·종합)에서:
-- ★★수집 요청은 그룹 스레드를 물려받지 마라 — `--thread`를 붙이지 말고 새 private thread로 보내라★★(send.sh가 미지정 시 새 thread를 만든다). ★왜: openclaw/hermes는 tg- 그룹 스레드 위 요청에 응답하면 그 응답이 그룹으로 새서 종합자한테 안 돌아온다(directed 회수 안 됨→자동wake 안 됨→네가 폴링하게 됨).★ 새 private thread면 응답이 너에게 directed로 와서 자동 wake된다. 최종 종합만 원래 tg 그룹 스레드에 visible 보고(2-track). = ★GD가 지적한 "데본이 종합자에 안 모이고 그룹에 따로 감"의 근본 대응.★
-- ★버스는 directed 응답이 오면 요청자를 자동 wake한다(wakeDispatcher:816). 그러니 `sleep`/`inbox.sh` 반복/DB 직접조회/`/api` 폴링으로 수동으로 뒤지지 마라★ — 답이 오면 네 다음 턴에 이어진다. `task-check.sh`는 recheck_at 지났을 때만.
-- ★팀장에게 노출하는 건 딱 3가지뿐:★ ①dispatch 후 한 줄 ack("X·Y에게 물어보고 종합해 드리겠습니다") ②최종 종합 ③fallback 시 blocked/timeout 요약. terminal 카드·sleep·sqlite·grep·read_file·"조금 더 기다리겠습니다" 같은 ★내부 작업 로그를 팀장 DM에 흘리지 마라.★
+- 수집 요청은 그룹 스레드를 물려받지 마라 — `--thread`를 붙이지 말고 새 private thread로 보내라(send.sh가 미지정 시 새 thread를 만든다). 왜: openclaw/hermes는 tg- 그룹 스레드 위 요청에 응답하면 그 응답이 그룹으로 새서 종합자한테 안 돌아온다(directed 회수 안 됨→자동wake 안 됨→네가 폴링하게 됨). 새 private thread면 응답이 너에게 directed로 와서 자동 wake된다. 최종 종합만 원래 tg 그룹 스레드에 visible 보고(2-track). = GD가 지적한 "데본이 종합자에 안 모이고 그룹에 따로 감"의 근본 대응.
+- 버스는 directed 응답이 오면 요청자를 자동 wake한다(wakeDispatcher:816). 그러니 `sleep`/`inbox.sh` 반복/DB 직접조회/`/api` 폴링으로 수동으로 뒤지지 마라 — 답이 오면 네 다음 턴에 이어진다. `task-check.sh`는 recheck_at 지났을 때만.
+- 팀장에게 노출하는 건 딱 3가지뿐: ①dispatch 후 한 줄 ack("X·Y에게 물어보고 종합해 드리겠습니다") ②최종 종합 ③fallback 시 blocked/timeout 요약. terminal 카드·sleep·sqlite·grep·read_file·"조금 더 기다리겠습니다" 같은 내부 작업 로그를 팀장 DM에 흘리지 마라.
 - 즉 정답 흐름 = ack → (조용히 대기, 자동 wake) → 최종 정리만. 안 오면 짧게 "A는 응답, B는 미응답이라 A 기준 1차 정리".
 
 실패 패턴:
@@ -160,13 +160,13 @@ skills/b3os-task-loop/scripts/task-check.sh --thread M5bEuWyU --mark-check
 skills/b3os-task-loop/scripts/task-close.sh --thread M5bEuWyU --waiting-on steve --status completed --note "Steve approve 반영"
 ```
 
-팀장에게 직접 보여야 하는 보고를 위임할 때 — ★`--direct-to-gd` 를 붙이지 않는다★
+팀장에게 직접 보여야 하는 보고를 위임할 때 — `--direct-to-gd` 를 붙이지 않는다
 (붙이면 서버가 400 `protocol_direct_to_gd_on_delegation`. 플래그는 codex 가 **자기 답에** 붙인다):
 
 ```bash
 skills/b3os-team-inbox/scripts/send.sh \
   --to codex \
-  --body "OpenClaw 중간 개입 테스트 결과를 확인하고, ★결과는 팀장께 직접 보고★해주세요
+  --body "OpenClaw 중간 개입 테스트 결과를 확인하고, 결과는 팀장께 직접 보고해주세요
           (당신의 답에 --direct-to-gd 를 붙이면 됩니다)."
 
 skills/b3os-task-loop/scripts/task-wait.sh \

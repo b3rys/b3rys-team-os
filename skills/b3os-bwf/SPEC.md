@@ -82,7 +82,7 @@
 
 **3층 테스트:**
 1. **로딩 테스트(기계·결정적, CI 가능)**: 각 런타임이 BWF 발견/로드하는가. 봇에 "X 과제 워크플로우?" → BWF 스테이지 정확 응답(할루시네이션 아님). openclaw/hermes always-load·진입점 검증.
-2. **골든태스크 eval(행동·rubric 채점)** ★: 작업모양별 표준 과제 2~3개(작은수정/다파일 audit/리서치). 팀원에 1개 → 실행 trace를 rubric으로 채점. 채점 = **judge panel로 dogfood**(BWF가 BWF 평가). 통과 기준선.
+2. **골든태스크 eval(행동·rubric 채점)** : 작업모양별 표준 과제 2~3개(작은수정/다파일 audit/리서치). 팀원에 1개 → 실행 trace를 rubric으로 채점. 채점 = **judge panel로 dogfood**(BWF가 BWF 평가). 통과 기준선.
 3. **퍼블릭 self-test(GD 검수용)**: fresh clone + 3명 가정. README "BWF self-test" — 샘플 골든태스크 end-to-end → 각 단계 산출물(계획카드·완료기준·실행·검증증거·보고) 실제 생성 확인. 플립 후 새 repo 구조 동작까지.
 
 같은 rubric을 2층(우리 팀)·3층(퍼블릭) 재사용.

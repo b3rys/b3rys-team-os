@@ -8,8 +8,8 @@
 
 공통 원칙:
 - 명령은 b3os 서버가 실행되는 같은 컴퓨터에서 실행합니다.
-- **★인증은 "구독 모델"(OAuth 로그인)이 기본입니다 — API 키가 아닙니다.★** 이미 쓰는 구독(예: Claude·ChatGPT 등)을 OAuth 로그인으로 그대로 재사용합니다. 이게 첫 사용자에게 가장 매끄럽고(추가 키 발급 없음), b3os 가 `claude_channel` 을 권한 것과 같은 이유입니다. **API 키 방식은 사용자가 명시적으로 원할 때만 쓰는 예외 경로**입니다.
-- **★어떤 구독으로 붙일지 사용자에게 물어봅니다.★** 특정 provider 를 임의로 고르지 말고(예: 자동 발견된 환경변수 `*_API_KEY` 를 그대로 쓰지 않기), "어떤 구독을 쓰시겠어요?(Claude / ChatGPT / …)" 를 먼저 확인합니다. 환경에 `OPENAI_API_KEY` 같은 키가 이미 있어도, 사용자가 API 키를 원한다고 하지 않았으면 **구독(OAuth) 을 기본으로 안내**합니다.
+- **인증은 "구독 모델"(OAuth 로그인)이 기본입니다 — API 키가 아닙니다.** 이미 쓰는 구독(예: Claude·ChatGPT 등)을 OAuth 로그인으로 그대로 재사용합니다. 이게 첫 사용자에게 가장 매끄럽고(추가 키 발급 없음), b3os 가 `claude_channel` 을 권한 것과 같은 이유입니다. **API 키 방식은 사용자가 명시적으로 원할 때만 쓰는 예외 경로**입니다.
+- **어떤 구독으로 붙일지 사용자에게 물어봅니다.** 특정 provider 를 임의로 고르지 말고(예: 자동 발견된 환경변수 `*_API_KEY` 를 그대로 쓰지 않기), "어떤 구독을 쓰시겠어요?(Claude / ChatGPT / …)" 를 먼저 확인합니다. 환경에 `OPENAI_API_KEY` 같은 키가 이미 있어도, 사용자가 API 키를 원한다고 하지 않았으면 **구독(OAuth) 을 기본으로 안내**합니다.
 - 인증 파일·토큰 값은 화면에 출력하지 않습니다. 존재 여부와 `--version`/`doctor` 결과만 확인합니다.
 - Telegram 봇 토큰 발급은 `recruit.md` Step C의 BotFather 4단계와 동일합니다. 런타임이 달라도 BotFather 흐름은 바뀌지 않습니다.
 
@@ -81,7 +81,7 @@ openclaw doctor
 ```
 
 > - 브라우저 없는 헤드리스: `--auth-choice openai-device-code`(URL+코드 페어링).
-> - ★`--auth-choice codex` 금지★ — `@openclaw/codex` 플러그인 wizard 로 라우팅되어 게이트웨이가 crash 한다(`openSyncKeyedStore` 부재 = 플러그인↔호스트 API 계약 불일치). ChatGPT 구독 OAuth 는 `openai` / `openai-device-code` 를 쓴다.
+> - `--auth-choice codex` 금지 — `@openclaw/codex` 플러그인 wizard 로 라우팅되어 게이트웨이가 crash 한다(`openSyncKeyedStore` 부재 = 플러그인↔호스트 API 계약 불일치). ChatGPT 구독 OAuth 는 `openai` / `openai-device-code` 를 쓴다.
 > - 둘 다 ChatGPT 구독 OAuth 이며 **API 키가 아니다**(`OPENAI_API_KEY` 불필요). API 키로 붙이는 건 사용자가 명시적으로 원할 때만.
 > - **Node**: 25.9+ 허용. 위 openclaw/codex 플러그인 crash 는 플러그인↔호스트 API 문제이지 Node 버전 문제가 아니며 LTS 다운그레이드로 해결되지 않는다.
 
@@ -133,7 +133,7 @@ b3os preflight가 보는 조건:
 
 막히면:
 - `openclaw CLI 미설치` → `npm install -g openclaw@latest` 후 새 터미널에서 `openclaw --version`
-- `openclaw 미인증` → `openclaw onboard --auth-choice openai --install-daemon`(ChatGPT 구독 OAuth). ★`--auth-choice codex` 는 crash 하니 쓰지 않는다.★
+- `openclaw 미인증` → `openclaw onboard --auth-choice openai --install-daemon`(ChatGPT 구독 OAuth). `--auth-choice codex` 는 crash 하니 쓰지 않는다.
 - `python3 미설치` → macOS라면 Command Line Tools 또는 Homebrew Python 설치 후 재확인
 
 ## Hermes Agent
@@ -171,7 +171,7 @@ hermes auth add <provider> --type oauth      # 브라우저 열림 → 구독 �
 hermes auth list                             # 프로필 잡혔는지 확인(값은 안 보임)
 ```
 
-> **API 키 방식은 예외** — 사용자가 명시적으로 원할 때만 `hermes auth add <provider> --type api-key`. ★환경변수 `OPENAI_API_KEY` 등이 이미 있으면 hermes 가 `openai-api` 로 **자동 발견**해 auth.json 에 넣지만, 이건 API 키 방식이다.★ 사용자가 구독을 원하면 그 자동발견 항목을 쓰지 말고(`hermes auth remove` 로 정리), 위 OAuth 로 다시 붙인다.
+> **API 키 방식은 예외** — 사용자가 명시적으로 원할 때만 `hermes auth add <provider> --type api-key`. 환경변수 `OPENAI_API_KEY` 등이 이미 있으면 hermes 가 `openai-api` 로 **자동 발견**해 auth.json 에 넣지만, 이건 API 키 방식이다. 사용자가 구독을 원하면 그 자동발견 항목을 쓰지 말고(`hermes auth remove` 로 정리), 위 OAuth 로 다시 붙인다.
 
 세부 설정 마법사(모델·툴 등)는 `hermes setup`, 상태 점검은 `hermes doctor`.
 
@@ -195,7 +195,7 @@ curl -s -X POST http://localhost:${PORT:-7878}/team/api/ot/<ot_id>/preflight-rec
 
 preflight가 통과하면 활성화 버튼이 열립니다. 합류 완료 후에는 Telegram에서 새 팀원 봇(`@<bot_username>`)에게 DM으로 “안녕”처럼 짧게 인사해 보세요. 답이 오면 연동 성공입니다.
 
-런타임별로 첫 응답 조건이 다릅니다: **hermes**(v0.18) 는 ★DM 페어링 게이트가 있습니다★ — 단 b3os activate 가 팀장 chat_id(`owner_chat_id`)를 게이트웨이 allowlist(`TELEGRAM_ALLOWED_USERS`)에 자동 시드하므로 **팀장은 코드 없이 바로 답합니다**(팀장 chat_id 를 못 잡으면 팀장에게도 코드가 오니 `owner_chat_id` 를 채우고 재activate; 팀장 외 사용자는 `hermes pairing approve` 로 승인). **openclaw** 는 먼저 페어링 승인이 필요합니다 — 대시보드 **[접근 승인]** 버튼(또는 `POST /team/api/ot/<ot_id>/pair-approve`)으로 승인해야 그때부터 답합니다(승인 전 무응답은 정상). 무응답이 계속되면 `troubleshooting.md` §0 의 런타임별 항목을 봅니다.
+런타임별로 첫 응답 조건이 다릅니다: **hermes**(v0.18) 는 DM 페어링 게이트가 있습니다 — 단 b3os activate 가 팀장 chat_id(`owner_chat_id`)를 게이트웨이 allowlist(`TELEGRAM_ALLOWED_USERS`)에 자동 시드하므로 **팀장은 코드 없이 바로 답합니다**(팀장 chat_id 를 못 잡으면 팀장에게도 코드가 오니 `owner_chat_id` 를 채우고 재activate; 팀장 외 사용자는 `hermes pairing approve` 로 승인). **openclaw** 는 먼저 페어링 승인이 필요합니다 — 대시보드 **[접근 승인]** 버튼(또는 `POST /team/api/ot/<ot_id>/pair-approve`)으로 승인해야 그때부터 답합니다(승인 전 무응답은 정상). 무응답이 계속되면 `troubleshooting.md` §0 의 런타임별 항목을 봅니다.
 
 
 ## Codex

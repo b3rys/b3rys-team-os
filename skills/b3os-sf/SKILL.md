@@ -1,6 +1,6 @@
 ---
 name: b3os-sf
-description: "b3os SF(Software Factory) — 프로젝트 방법론. b3rys 팀원이 ★프로젝트★(단순 리서치·프로토가 아닌, 팀장 요구가 여러 번 쌓이는 일)를 맡았을 때 항상 하는 관리·보고 스킬. 팀장 지시를 빠짐없이 목록으로 잡고(TODO.md 정본), 칸반 카드와 맞추고, 채널별(텔레그램·슬랙·팀버스·저장소) 정해진 모양으로 보고한다. 'b3os 는 어떻게 개발해요?'에 답하는 8단계 정본. 사용 시점 — 팀장이 '목록으로 관리해', '정리해서 보내봐', '다 처리했어?' 라고 할 때, 프로젝트 킥오프·마일스톤·인계 때, 개발 방법론을 설명할 때."
+description: "b3os SF(Software Factory) — 프로젝트 방법론. b3rys 팀원이 프로젝트(단순 리서치·프로토가 아닌, 팀장 요구가 여러 번 쌓이는 일)를 맡았을 때 항상 하는 관리·보고 스킬. 팀장 지시를 빠짐없이 목록으로 잡고(TODO.md 정본), 칸반 카드와 맞추고, 채널별(텔레그램·슬랙·팀버스·저장소) 정해진 모양으로 보고한다. 'b3os 는 어떻게 개발해요?'에 답하는 8단계 정본. 사용 시점 — 팀장이 '목록으로 관리해', '정리해서 보내봐', '다 처리했어?' 라고 할 때, 프로젝트 킥오프·마일스톤·인계 때, 개발 방법론을 설명할 때."
 owner: steve
 trigger: run a project (many lead requests over time)
 ---
@@ -34,7 +34,7 @@ SF는 결과물 품질·과제 수행 시간·과제 수행 토큰량을 함께 
 | 7 | 공유 기계·출고 | 잠금 하나로 줄 세우기, dev·hotfix·fix 출고 20분(full 은 별도 승인), macOS 전달본은 공증본 | [`release.md`](references/release.md) · `b3os-verification` §1b·§6 · `b3os-release-ops` |
 | 8 | 운영·지식 | 장애는 복구 먼저, 두 번 지적 → 장치, 교훈은 정본·SHARED·스킬로 | [`operations.md`](references/operations.md) · [`knowledge-and-handoff.md`](references/knowledge-and-handoff.md) · `b3os-team-learning-loop` |
 
-★ 팀장 확인: 첫 기능 목록 · 초기 설계 · 머지 승인 · 실사용 확인.
+ 팀장 확인: 첫 기능 목록 · 초기 설계 · 머지 승인 · 실사용 확인.
 
 ### 시작 (1~2)
 
