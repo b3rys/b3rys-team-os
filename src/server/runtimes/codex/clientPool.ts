@@ -6,6 +6,7 @@ import type { CodexAppServerClient } from "./appServerClient";
 export interface PoolableClient {
   readonly isClosed: boolean;
   close(): void;
+  terminateIfIdle?(current: () => boolean): Promise<"closed" | "cancelled" | "retry">;
 }
 
 const pool = new Map<string, PoolableClient>();
@@ -66,15 +67,23 @@ export async function releaseIdleClient(
   retryMs = 10_000,
 ): Promise<void> {
   const generation = generations.get(agentId);
-  const current = () => pool.get(agentId) === client && generations.get(agentId) === generation && !client.isClosed;
+  const current = () => pool.get(agentId) === client && generations.get(agentId) === generation;
   const check = async () => {
     if (!current()) return;
+    if (client.isClosed) { dropClient(agentId); return; }
     let idle = false;
     try { idle = await client.isIdle(); } catch { /* 상태를 못 읽으면 진행 중일 수 있으므로 보존한다 */ }
     if (!current()) return;
-    if (idle) { dropClient(agentId); return; }
+    let nextCheckMs = retryMs;
+    if (idle) {
+      if (!client.terminateIfIdle) { dropClient(agentId); return; }
+      const result = await client.terminateIfIdle(current);
+      if (!current()) return;
+      if (result === "closed") { dropClient(agentId); return; }
+      if (result === "retry") nextCheckMs = 1000;
+    }
     cancelCleanup(agentId);
-    const timer = setTimeout(() => { cleanupTimers.delete(agentId); void check(); }, retryMs);
+    const timer = setTimeout(() => { cleanupTimers.delete(agentId); void check(); }, nextCheckMs);
     timer.unref?.();
     cleanupTimers.set(agentId, timer);
   };

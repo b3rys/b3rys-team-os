@@ -192,3 +192,53 @@ test("A real child ignoring TERM is forcibly reaped", async () => {
     expect((c as any).proc).toBeNull();
   } finally { if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL"); }
 });
+
+test("Failed idle TERM retries must recheck a child that becomes active", async () => {
+  const c = new CodexAppServerClient({ warn() {} });
+  let idle = true;
+  const signals:string[]=[];
+  (c as any).isIdle = async () => idle;
+  (c as any).proc = {exitCode:null,signalCode:null,kill(signal:string){signals.push(signal);return false;}};
+  acquireClient("probe",()=>c);
+  await releaseIdleClient("probe",c);
+  expect(signals).toEqual(["SIGTERM"]);
+  idle=false;
+  await Bun.sleep(1100);
+  expect(signals).toEqual(["SIGTERM"]);
+  expect(pooledAgents()).toEqual(["probe"]);
+  (c as any).proc=null;
+});
+
+test("Idle escalation rechecks activity; a new message cancels escalation entirely", async () => {
+ for (const newMessage of [false,true]) {
+  const c=new CodexAppServerClient();let idle=true;const signals:string[]=[];
+  (c as any).isIdle=async()=>idle;
+  (c as any).proc={exitCode:null,signalCode:null,kill(signal:string){signals.push(signal);return true;}};
+  acquireClient("probe",()=>c);
+  await releaseIdleClient("probe",c);
+  expect(signals).toEqual(["SIGTERM"]);
+  if(newMessage) acquireClient("probe",()=>{throw new Error("reuse expected")});else idle=false;
+  await Bun.sleep(1100);
+  expect(signals).toEqual(["SIGTERM"]);
+  (c as any).proc=null;dropClient("probe");
+ }
+});
+
+test("Idle escalation occurs only after a fresh successful query; in-query reuse cancels it", async () => {
+  const c=new CodexAppServerClient();const signals:string[]=[];let queries=0;
+  const proc={exitCode:null as number|null,signalCode:null,kill(signal:string){signals.push(signal);if(signal==="SIGKILL")this.exitCode=0;return true;}};
+  (c as any).proc=proc;(c as any).isIdle=async()=>{queries++;return true};
+  acquireClient("probe",()=>c);await releaseIdleClient("probe",c);
+  for(let i=0;i<30&&proc.exitCode===null;i++)await Bun.sleep(50);
+  expect(signals).toEqual(["SIGTERM","SIGKILL"]);expect(queries).toBeGreaterThanOrEqual(4);
+  expect(pooledAgents()).toEqual([]);
+  const d=new CodexAppServerClient();const sent:string[]=[];let finish!:(idle:boolean)=>void;
+  (d as any).proc={exitCode:null,signalCode:null,kill(signal:string){sent.push(signal);return true}};
+  (d as any).isIdle=()=>new Promise<boolean>(resolve=>{finish=resolve});
+  acquireClient("probe",()=>d);
+  let reused=false;
+  const attempt=d.terminateIfIdle(()=>pooledAgents().includes("probe") && !reused);
+  acquireClient("probe",()=>d);reused=true;finish(true);
+  expect(await attempt).toBe("cancelled");expect(sent).toEqual([]);
+  (d as any).proc=null;
+});

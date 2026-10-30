@@ -171,6 +171,7 @@ export class CodexAppServerClient {
   private turnActivityCount = 0;
   private closed = false;
   private activityGeneration = 0;
+  private idleTerminatedProc: ChildProcessWithoutNullStreams | null = null;
   private terminationTimer?: ReturnType<typeof setTimeout>;
   /** 풀이 죽은 것을 돌려주지 않게 밖에서 상태를 볼 수 있어야 한다. */
   get isClosed(): boolean { return this.closed; }
@@ -372,6 +373,30 @@ export class CodexAppServerClient {
       const after = await loaded();
       return generation === this.activityGeneration && !this.closed && !this.turnResolve && after !== null && JSON.stringify(ids) === JSON.stringify(after);
     } catch { return false; }
+  }
+
+  /** Idle cleanup sends one signal per checked attempt. Unlike an explicit abort,
+   * neither retries nor escalation can outlive the idle/pool-generation guard. */
+  async terminateIfIdle(current: () => boolean): Promise<"closed" | "cancelled" | "retry"> {
+    const proc = this.proc;
+    if (!proc || proc.exitCode !== null || proc.signalCode !== null) return "closed";
+    const generation = this.activityGeneration;
+    if (!current() || !await this.isIdle() || !current() || generation !== this.activityGeneration || this.proc !== proc) return "cancelled";
+    const signal = this.idleTerminatedProc === proc ? "SIGKILL" : "SIGTERM";
+    try {
+      if (!proc.kill(signal)) throw new Error("signal returned false");
+      this.idleTerminatedProc = proc;
+    } catch {
+      this.warn("[codex] idle termination failed; retaining process for a fresh idle check");
+    }
+    if (proc.exitCode === null && proc.signalCode === null && typeof proc.once === "function") {
+      await new Promise<void>((resolve) => {
+        const done = () => { clearTimeout(timer); proc.removeListener("close", done); resolve(); };
+        const timer = setTimeout(done, 100);
+        proc.once("close", done);
+      });
+    }
+    return proc.exitCode !== null || proc.signalCode !== null ? "closed" : "retry";
   }
 
   close(): void {
