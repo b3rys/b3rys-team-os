@@ -4,6 +4,7 @@ import type { AgentRecord } from "../types";
 import { migrate } from "../db/migrate";
 import {
   findExistingTelegramOriginMessage,
+  mentionDeliveredByPlugin,
   shouldUseNativeCodexOpenclawPath,
   telegramOriginDedupeKey,
   telegramOriginMeta,
@@ -60,6 +61,29 @@ describe("telegramCapture Codex injection gating", () => {
 
   test("does not assume native OpenClaw catches Korean-particle aliases", () => {
     expect(shouldUseNativeCodexOpenclawPath("오케이. @코덱스가 수행해.", codex)).toBe(false);
+  });
+});
+
+describe("telegramCapture @username mention delivery", () => {
+  const member = (runtime: AgentRecord["runtime"], username: string): AgentRecord =>
+    ({ ...codex, id: username, capabilities: [], runtime, telegram_bot_username: username });
+
+  test("plugin delivers @username mentions for plugin runtimes, so capture skips them", () => {
+    expect(mentionDeliveredByPlugin(member("claude_channel", "example_dev_bot"), "@Example_Dev_Bot 확인해줘")).toBe(true);
+    expect(mentionDeliveredByPlugin(member("openclaw", "example_devon_bot"), "@example_devon_bot 봐 줘")).toBe(true);
+  });
+
+  test("b3os codex runtime has no plugin path — capture must inject its @username mentions", () => {
+    expect(mentionDeliveredByPlugin(member("codex", "example_codex_member_bot"), "@example_codex_member_bot 확인해줘")).toBe(false);
+  });
+
+  test("native_routing members are injected by capture too", () => {
+    expect(mentionDeliveredByPlugin(codex, "@example_openclaw_bot 확인해줘")).toBe(false);
+  });
+
+  test("no @username in the text means nothing for the plugin to deliver", () => {
+    expect(mentionDeliveredByPlugin(member("claude_channel", "example_dev_bot"), "빌 확인해줘")).toBe(false);
+    expect(mentionDeliveredByPlugin(member("claude_channel", ""), "@ 확인해줘")).toBe(false);
   });
 });
 

@@ -223,6 +223,16 @@ export function shouldUseNativeCodexOpenclawPath(
   });
 }
 
+// 그룹에서 이 봇 @username 을 부른 메시지를 Telegram plugin 이 그 팀원에게 직접 전달하는가.
+// true 면 capture 는 주입하지 않는다(이중전달 방지). plugin 경로가 없는 팀원은 false — capture 가 주입해야 유실되지 않는다:
+//   native_routing(openclaw codex): plugin 그룹 처리 disabled.
+//   runtime=codex(b3os codex): 브리지 poll 이 그룹 메시지를 group_native_denied 로 버린다(runtimes/codex/bridge.ts).
+export function mentionDeliveredByPlugin(agent: AgentRecord, text: string): boolean {
+  if (hasCapability(agent, "native_routing") || agent.runtime === "codex") return false;
+  const uname = agent.telegram_bot_username?.replace(/^@/, "").toLowerCase();
+  return !!uname && text.toLowerCase().includes("@" + uname);
+}
+
 export function telegramOriginMeta(chatId: string, messageId?: string): Record<string, unknown> | undefined {
   if (!messageId) return undefined;
   return {
@@ -1146,10 +1156,8 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
         // @username 멘션은 Telegram plugin 이 해당 봇 세션에 직접 전달하므로 capture 가 skip(이중전달 방지).
         // 단 codex(openclaw)는 단일입구 전환으로 native(plugin) 그룹 처리를 disabled 했으므로 plugin 경로가 없다 →
         // codex 의 @example_openclaw_bot 멘션도 capture(bridge)가 직접 주입해야 orphan 되지 않는다.
-        const uname = agent.telegram_bot_username?.replace(/^@/, "").toLowerCase();
-        // native_routing agent(codex)는 plugin 그룹 처리가 disabled → @username 멘션도 capture 가 직접 주입.
-        // 그 외 agent 는 plugin 이 직접 전달하므로 capture skip(이중전달 방지).
-        if (!hasCapability(agent, "native_routing") && uname && text.toLowerCase().includes("@" + uname)) {
+        // plugin 이 전달하는 @username 멘션만 skip(이중전달 방지). 판정 = mentionDeliveredByPlugin.
+        if (mentionDeliveredByPlugin(agent, text)) {
           console.log(`[capture] inject skip ${id} (@username 멘션 — plugin 처리)`);
           appendAuditFile("capture", "injection_skip", id, { reason: "telegram_mention_plugin_path", text: text.slice(0, 120) });
           continue;
