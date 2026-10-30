@@ -17,7 +17,9 @@ import {
   agentActivity,
   acceptInbound,
   normalizeEscapedNewlines,
+  countAutoRounds,
 } from "../db/inboxQueries";
+import { MAX_AUTO_ROUNDS } from "../bus/antiPingpong";
 import { coordinatorId } from "../lib/capabilities";
 import { appendAudit } from "../db/queries";
 import { recordReportDelivery } from "../bus/deliveryRecord";
@@ -181,6 +183,30 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         const correctedHop = parentRow.hop_count + 1;
         if ((env.hop_count ?? 0) < correctedHop) {
           env = { ...env, hop_count: correctedHop };
+        }
+      }
+    }
+    // 왕복 상한은 배달 단계(checkPingpong)에서 막는데, 그때는 발신자가 이미 접수 응답을 받은 뒤라 막힌 줄 모른다.
+    // 팀원에게 직접 보내는 답장은 같은 셈(countAutoRounds·MAX_AUTO_ROUNDS)으로 저장 전에 거절해 바로 알린다.
+    // broadcast(슬랙·cogs·방)와 direct_to_gd 보고는 배달 경로가 달라 여기서 막지 않고, 배달 단계 검사가 그대로 남는다.
+    {
+      const replyMode = (env as { meta?: { reply_mode?: string } }).meta?.reply_mode;
+      const parentId = (env as { parent_message_id?: string | null }).parent_message_id ?? env.in_reply_to ?? null;
+      if (env.source === "agent" && parentId && known.has(env.to_agent_id) && replyMode !== "direct_to_gd") {
+        const rounds = countAutoRounds(deps.db, parentId);
+        if (rounds >= MAX_AUTO_ROUNDS) {
+          appendAudit(deps.db, env.from_agent_id, "send_rejected_pingpong", null, {
+            to: env.to_agent_id, in_reply_to: parentId, messages: rounds, max: MAX_AUTO_ROUNDS,
+          });
+          return c.json({
+            ok: false,
+            error: "pingpong_limit_exceeded",
+            messages: rounds,
+            max: MAX_AUTO_ROUNDS,
+            detail: `✖ 이 답장 체인에 팀원 메시지가 이미 ${rounds}건 쌓였습니다(상한 ${MAX_AUTO_ROUNDS}건, 한 왕복은 2건). ` +
+              `이대로 보내면 배달되지 않아 접수하지 않았습니다.`,
+            next: `--in-reply-to 를 빼고 새 --thread 로 다시 보내세요. 본문 첫 줄에 이어지는 스레드 이름을 적으면 받는 쪽이 맥락을 잇습니다.`,
+          }, 409);
         }
       }
     }
