@@ -77,7 +77,7 @@ curl -s -X PUT http://localhost:$PORT/team/api/settings -H 'content-type: applic
 
 먼저 `references/recruit.md` 를 펼쳐 읽고 진행한다(질문 문구·복사용 폼·기본값이 거기 있다).
 
-런타임은 네 가지를 항상 보여준다: `claude_channel`(권장·쉬움) / `codex`(Codex (Beta), ChatGPT 로그인) / `openclaw`·`hermes_agent`(ChatGPT 구독 BYO 고급). 설치+인증이 안 된 것은 숨기지 않고 disabled 와 `references/runtime-setup.md` 안내를 함께 보여준다. `b3os_native` 는 온보딩에 노출하지 않는다. 목록·권장 이유·preflight 명령 = `references/runtime-setup.md`.
+런타임 선택 모드 — 네 가지를 항상 보여준다: `claude_channel`(권장·쉬움) / `codex`(Codex (Beta), ChatGPT 로그인) / `openclaw`·`hermes_agent`(ChatGPT 구독 BYO 고급). 설치+인증이 안 된 것은 숨기지 않고 disabled 와 `references/runtime-setup.md` 안내를 함께 보여준다. `b3os_native` 는 온보딩에 노출하지 않는다. 목록·권장 이유·preflight 명령 = `references/runtime-setup.md`.
 
 사용자에게 먼저 묻는 것: id(영문 slug, display_name 과 별개) · display_name · role · 멘션명(별칭) · runtime+모델 · persona(선택).
 
