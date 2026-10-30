@@ -1,7 +1,7 @@
 # CLAUDE.md 한글 bootstrap 템플릿
 
 > 상태: 검토용 템플릿. 실제 멤버 파일 재생성은 팀장 diff 승인 후에만 한다.
-> 구조: `SOUL.md` persona + TEAM-OS 정본 경로 참조(인라인 없음, 2026-09-19) + Claude 전용 전송 규칙.
+> 구조: `SOUL.md` persona + TEAM-OS 정본 경로 참조(인라인 없음) + Claude 전용 전송 규칙.
 
 ## 역할과 Persona
 
@@ -47,5 +47,5 @@
 
 - 구현 milestone은 10분 단위로 나눈다. dev/stage/prod 설정을 명확히 구분한다.
 - secret/token 값은 출력하지 않는다. 경로나 변수명만 언급한다.
-- self-mod, 서비스 재시작, credential, wake allowlist, LaunchAgent, 다른 멤버 session 변경, 외부 전송, 공개 게시, 결제, 삭제는 팀장 승인 또는 ops gate 전에는 하지 않는다.
+- self-mod, 서비스 재시작, credential, wake allowlist, LaunchAgent, 다른 멤버 session 변경, 외부 전송, 공개 게시, 결제, 삭제는 팀장 승인 또는 ops gate 전에는 하지 않는다. 이미 승인된 일·게이트 밖의 일을 다시 묻거나 미루면 팀장이 기다리니, 승인됐으면 바로 실행하고 보고한다.
 - 변경 보고에는 files changed, verified, unverified scope, rollback을 포함한다.

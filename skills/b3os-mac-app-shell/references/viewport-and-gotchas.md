@@ -9,7 +9,7 @@
 **증상**: 맥앱 창에서 웹 콘텐츠 상단에 빈 공간이 벌어지고, 하단(예: 3패널의 맨 아래)이 창 밖으로 잘려 안 보인다. `100dvh`가 창 높이가 아니라 콘텐츠 높이로 잡힌다.
 
 **근본원인**: `WKWebView`가 웹 콘텐츠 전체 높이(예: 1132px)를 `intrinsicContentSize`로 노출 → `NSViewRepresentable` 컨테이너가 그 높이까지 부풀어 창(예: 650px)을 넘침 → 뷰포트가 창이 아닌 콘텐츠 크기가 됨.
-※ 추측 금지: in-app JS로 `webview=1132 vs window=618`을 측정해 근본원인을 확정한 사례다. CSS/safe-area부터 만지면 헛수고(실제로 3회 낭비).
+※ 추측 금지: in-app JS로 `webview=1132 vs window=618` 처럼 측정해 근본원인을 확정한다. CSS/safe-area부터 만지면 헛수고다.
 
 **해결 — 3개가 한 세트, 하나라도 빠지면 깨짐**:
 1. `NonIntrinsicWebView` — `intrinsicContentSize`를 `noIntrinsicMetric`으로 override해 부풀림 차단. `PlatformWebView` typealias로 iOS(`WKWebView`)/macOS(`NonIntrinsicWebView`) 분기(iOS 빌드 깨짐 방지).
@@ -35,7 +35,7 @@ console.log(document.documentElement.clientHeight, window.innerHeight);
 ```
 또는 네이티브에서 `webView.frame.height`(== 창 콘텐츠 높이)와 비교. **둘이 같으면 OK**. webview가 더 크면 viewport 부풀림 회귀 → 위 3종세트 점검. 화면 못 보는 세션은 `evaluateJavaScript`로 값을 `/tmp` 로그에 남겨 확인.
 
-## 교훈
+## 정리
 
 - WebView 창 채움/잘림은 **CSS 추측 말고 webview 실제 높이부터 측정**.
-- iOS/macOS 플랫폼 분기는 typealias로 — 한쪽만 고치면 다른 빌드가 깨진다(크로스리뷰로 잡힌 함정).
+- iOS/macOS 플랫폼 분기는 typealias로 — 한쪽만 고치면 다른 빌드가 깨진다.

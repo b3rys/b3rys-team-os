@@ -5,7 +5,7 @@
 
 ## 실제 빌드 산출물 (이 레시피로 만든 것)
 
-- **`b3os.app`** — 골격 저장소의 `.build/b3os.app` (2026-06-24 빌드).
+- **`b3os.app`** — 골격 저장소의 `.build/b3os.app`.
   - 빌드 방법: `bash scripts/package-macos-app.sh` (= 이 스킬 §절차 7).
   - `APP_NAME=b3os.app`, `PRODUCT_NAME=B3rysMacApp`, webURL=`<dashboard-domain>/team`(테스트), ad-hoc 서명.
   - 배포본: `<dashboard-domain>/team/B3rys-unsigned-test.zip` (397KB).
@@ -24,7 +24,7 @@ bash scripts/package-macos-app.sh        # → .build/b3os.app
 ## 이 evidence가 증명하는 것
 
 - skeleton이 "존재"하는 게 아니라, 레시피를 따라 **실행되는 .app이 실제로 나오고 사람이 검증**했다(관측).
-- viewport 회귀주의(3종세트)가 추상이 아니라 이 빌드에서 실측으로 확인된 함정.
+- viewport 회귀주의(3종세트)는 이 빌드에서 확인되는 실제 함정이다.
 
 ## 한계 / 다음 관측
 

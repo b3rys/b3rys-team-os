@@ -1,12 +1,11 @@
 # b3os-bwf — 설계 SPEC (internal)
 
-> Status: draft · Owner: Bill · 2026-06-22
-> 근거: GD 2026-06-22 발족(적대적리뷰 경험 → BWF 품질방법을 전 팀원 스킬로) + 팀 전원 리뷰 7/7 만장일치(thread bwf-skill-review-0622).
+> Status: draft · Owner: Bill
 > 이 문서는 설계 정본(내부). 산출물 = SKILL.md(상세) + TEAM-OS 핵심룰 thin 정의(always-load) + rubric + 테스트.
 
 ## 1. 목적 / 한 줄 정의
 
-**BWF(b3os workflow)는 harness가 아니라 b3rys 팀의 "기본 과제 수행 워크플로우"다.** (6/19 BWF=harness 오해 재발 방지 — 이 문장을 SKILL.md 첫 줄에 박는다.)
+**BWF(b3os workflow)는 harness가 아니라 b3rys 팀의 "기본 과제 수행 워크플로우"다.** (이 문장을 SKILL.md 첫 줄에 박는다.)
 
 지금 문제: 워크플로우 지식이 흩어져 있다 — project-loop(Codex 한정) / BWF(TEAM-OS 텍스트만) / 품질방법(harness 등). 팀원이 "이 일에 어떤 흐름을 써야 하지?"를 매번 추론한다. 퍼블릭 사용자는 더 모른다.
 
@@ -100,5 +99,5 @@
 
 - 적대적 리뷰(반증) 1회 — BWF를 BWF로 dogfood.
 - 핵심룰 변경부 = Bill+Codex 교차검토(런타임별 행동 차이).
-- 런타임 로딩 = 1층 테스트 실측(claude/openclaw/hermes).
+- 런타임 로딩 = 1층 테스트로 확인(claude/openclaw/hermes).
 - 공개 누출 grep(실명·경로).

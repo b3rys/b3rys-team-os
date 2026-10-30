@@ -15,7 +15,7 @@ the team lead AI Team message bus 의 클라이언트 도구.
 
 **답할 때는 `--in-reply-to <그 메시지 id>` 를 붙인다.**
 그래야 서버가 "이 답이 어느 질문 에 대한 것인지" 를 안다. 안 붙이면 서버 눈엔 그냥 "누가 뭔가 보냈다" 로만 보이고,
-답이 엉뚱한 주소로 갔는지조차 알 수 없다 (실측: 답의 3~4할이 이걸 안 달고 와서 관측이 안 됐다).
+답이 엉뚱한 주소로 갔는지조차 알 수 없다.
 ```bash
 send.sh --to <물어본 사람> --thread <온 thread> --in-reply-to <그 메시지 id> --body "..."
 ```
@@ -133,7 +133,7 @@ skills/b3os-team-inbox/scripts/send.sh \
 - 기여자의 답은 **도착할 때마다 하나씩** 수집자를 깨운다. (한 번에 묶여서 오지 않는다)
 - 깨어날 때마다 **그 시점의 스레드 전체가 문맥으로 주입된다** — 누가 답했고 내가 뭘 보냈는지 거기 다 있다.
 
-**thread 규칙(2026-07 정리 — b3os-task-loop와 동일)**
+**thread 규칙 (b3os-task-loop와 동일)**
 - **그룹방/팀장 visible 요청을 취합할 때**: fan-out은 새 private directed thread로 보낸다(`--thread` 생략). 답이 종합자에게 directed로 돌아와 자동 wake된다. 최종 종합만 원래 그룹/팀장 thread에 보고한다.
 - **이미 private directed thread에서 온 1:1 협업 요청**: 같은 `--thread`를 유지해도 된다.
 
