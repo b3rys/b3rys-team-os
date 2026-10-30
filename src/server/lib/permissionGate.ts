@@ -399,11 +399,21 @@ export function decidePendingRow(
   const original = safeParse(row.provenance_json ?? "{}");
   const provenance = {...original,...opts.provenance,...(original.codex_approval !== undefined ? {codex_approval:original.codex_approval} : {})};
   const { status, scope } = decisionColumns(decision);
-  return db.prepare(
+  const expirePending = db.prepare(
+    `UPDATE permission_request SET status='expired', decided_at=datetime('now')
+     WHERE id=? AND status='pending' AND expires_at IS NOT NULL
+       AND (julianday(expires_at) IS NULL OR julianday(expires_at) <= julianday('now'))`,
+  );
+  expirePending.run(id);
+  const changed = db.prepare(
     `UPDATE permission_request
        SET status = ?, decision_scope = ?, decided_at = datetime('now'), approver = ?, provenance_json = ?
-     WHERE id = ? AND status = 'pending'`,
+     WHERE id = ? AND status = 'pending'
+       AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))`,
   ).run(status, scope, row.runtime === "codex" ? redactApprovalText(opts.approver) : opts.approver, JSON.stringify(row.runtime === "codex" ? redactStoredValue(provenance) : provenance), id).changes;
+  // If expiry crossed between the two statements, settle the still-pending row as expired.
+  if (changed !== 1) expirePending.run(id);
+  return changed;
 }
 
 /** 감사 표 기록 — 요청 행의 내용으로 적는다. */
@@ -466,7 +476,10 @@ export function decidePermissionRequest(
   // decision_scope 가 말한다. 거절은 범위가 없으므로 null 이다.
   const { status } = decisionColumns(decision);
   const changed = decidePendingRow(db, id, decision, opts);
-  if (changed !== 1) return { ok: false, error: "permission request changed concurrently" };
+  if (changed !== 1) {
+    const current = getPermissionRequest(db, id);
+    return { ok: false, status: current?.status, error: current?.status === "expired" ? "permission request expired" : "permission request changed concurrently" };
+  }
 
   // grant가 있으면 승인창 없이 허용되므로 기한을 둔다. 취소 경로가 없어도 만료 후에는 자동승인이 종료되어야 한다.
   const GRANT_TTL_HOURS = 24;

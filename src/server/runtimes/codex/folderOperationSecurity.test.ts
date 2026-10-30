@@ -11,16 +11,16 @@ const command=(text="echo safe",amendment?:string[]):ApprovalRequest=>({method:"
 function fixture() {
  const db=openDb(":memory:"); migrate(db);
  db.prepare("INSERT INTO agent (id,display_name,role,runtime,status_provider,workspace_path,persona_file) VALUES ('fixture','Fixture','eng','codex','codex_cli','/workspace','SOUL.md')").run();
- const sessions=new FolderSessionApprovals(); let sent=0;
+ const sessions=new FolderSessionApprovals(); let sent=0; const cards:string[]=[];
  const options=(mutate?:()=>void,session=true)=>({allowAlways:false,failOnSendError:true,folderSessions:sessions,deliveryDeps:{
   token:"fixture",ownerId:"101",chatId:"101",channel:{kind:"telegram" as const,apiBase:"https://fixture.invalid",allowFrom:[],ownerChat:null},
   fetchFn:(async(_url:any,init:any)=>{
-   const card=JSON.parse(init.body); const id=card.reply_markup.inline_keyboard[0][0].callback_data.split(":")[1]; sent++;
+   const card=JSON.parse(init.body); cards.push(card.text); const id=card.reply_markup.inline_keyboard[0][0].callback_data.split(":")[1]; sent++;
    setTimeout(()=>{mutate?.();decidePermissionRequest(db,id,session?"allow_session":"allow_once",{approver:"101"})},1);
    return Response.json({ok:true,result:{message_id:sent,chat:{id:101}}});
   }) as unknown as typeof fetch,
  }});
- return {db,sessions,options,sent:()=>sent};
+ return {db,sessions,options,cards,sent:()=>sent};
 }
 
 test("Folder session approval is per digest; every reuse has correlation/CAS/delivery/audit and emits accept only",async()=>{
@@ -49,10 +49,10 @@ test("Folder session approval is per digest; every reuse has correlation/CAS/del
 });
 
 test("Folder denies changes while waiting, including amendments, and never remembers changed content",async()=>{
- for(const kind of ["command","amendment","unknown","file","identity"]){
+ for(const kind of ["command","amendment","unknown","file","identity","permissions"]){
   const f=fixture();try{
-   const req=kind==="file"?{method:"applyPatchApproval",params:{threadId:"thread",fileChanges:{"same.ts":{type:"update",unified_diff:"before"}}}} as ApprovalRequest:command("echo safe",["echo"]);
-   const mutate=()=>{if(kind==="file") (req.params.fileChanges as any)["same.ts"].unified_diff="after";else if(kind==="amendment")req.params.proposedExecpolicyAmendment=["different"];else if(kind==="identity")req.params.threadId="different-thread";else req.params.command=kind==="unknown"?null:"echo changed"};
+   const req=kind==="permissions"?{method:"item/permissions/requestApproval",params:{threadId:"thread",permissions:{fileSystem:{write:["/outside/one"]}}}} as ApprovalRequest:kind==="file"?{method:"applyPatchApproval",params:{threadId:"thread",fileChanges:{"same.ts":{type:"update",unified_diff:"before"}}}} as ApprovalRequest:command("echo safe",["echo"]);
+   const mutate=()=>{if(kind==="permissions")req.params.permissions={fileSystem:{write:["/outside/two"]}};else if(kind==="file") (req.params.fileChanges as any)["same.ts"].unified_diff="after";else if(kind==="amendment")req.params.proposedExecpolicyAmendment=["different"];else if(kind==="identity")req.params.threadId="different-thread";else req.params.command=kind==="unknown"?null:"echo changed"};
    expect(await requestApprovalPopup(f.db,req,"fixture",undefined,2500,f.options(mutate))).toBe("denied");
    expect(f.sessions.has("fixture",req)).toBe(false);
    expect(f.db.query("SELECT state FROM codex_approval_correlation").get()).toEqual({state:"expired"});
@@ -100,4 +100,33 @@ test("App-server approval getter observes a later patch update before the folder
  }};
  await client.handleServerRequest(7,"item/fileChange/requestApproval",{threadId:"thread",turnId:"turn",itemId:"item"});
  expect(replies).toEqual([{id:7,result:{decision:"decline"}}]); client.close();
+});
+
+test("Folder permissions show a card, grant only the requested profile, and reuse only the same digest",async()=>{
+ const f=fixture();try{
+  const permissions={fileSystem:{write:["/outside/one"]}};
+  const req:ApprovalRequest={method:"item/permissions/requestApproval",params:{threadId:"thread",turnId:"turn",itemId:"permissions",permissions,reason:"write requested file"}};
+  const decision=await requestApprovalPopup(f.db,req,"fixture",undefined,2500,f.options());
+  expect(decision).toBe("approved");expect(f.sent()).toBe(1);expect(f.cards[0]).toContain("/outside/one");
+  expect(encodeApproval("approval_permissions","once",req.params)).toEqual({kind:"result",result:{permissions,scope:"turn",strictAutoReview:false}});
+  expect(await requestApprovalPopup(f.db,{...req,params:{...req.params,turnId:"turn2"}},"fixture",undefined,2500,f.options())).toBe("approved");
+  expect(f.sent()).toBe(1);
+  const other={...req,params:{...req.params,permissions:{fileSystem:{write:["/outside/two"]}}}};
+  expect(f.sessions.has("fixture",other)).toBe(false);
+  expect(await requestApprovalPopup(f.db,other,"fixture",undefined,2500,f.options())).toBe("approved");expect(f.sent()).toBe(2);
+ }finally{f.db.close()}
+},10000);
+
+test("Expired pending owner clicks cannot become approved/delivered or create grants in any runtime",async()=>{
+ const f=fixture();try{
+  for(const runtime of ["codex","claude_channel","hermes_agent","openclaw"]){
+   for(const decision of ["allow_once","allow_session","allow_always"] as const){
+    const row=(await import("../../lib/permissionGate")).requestPermission(f.db,{runtime,agent_id:"fixture",action:"shell",command:`echo ${runtime} ${decision}`}).request!;
+    f.db.prepare("UPDATE permission_request SET expires_at=datetime('now','-1 second') WHERE id=?").run(row.id);
+    expect(decidePermissionRequest(f.db,row.id,decision,{approver:"101"}).ok).toBe(false);
+    expect(f.db.query("SELECT status,decision_scope FROM permission_request WHERE id=?").get(row.id)).toEqual({status:"expired",decision_scope:null});
+   }
+  }
+  expect(f.db.query("SELECT count(*) AS n FROM permission_grant").get()).toEqual({n:0});
+ }finally{f.db.close()}
 });

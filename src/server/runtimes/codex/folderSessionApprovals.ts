@@ -9,6 +9,9 @@ export function folderOperationDigest(req: ApprovalRequest): string | null {
     if (!(typeof p.command === "string" ? p.command.trim().length > 0 : Array.isArray(p.command) && p.command.length > 0 && p.command.every(v => typeof v === "string") && p.command.join(" ").trim().length > 0)) return null;
   } else if (req.method === "item/fileChange/requestApproval") {
     if (!req.observedItem?.changes.length || req.observedItem.changes.some(c => typeof c.diff !== "string" || c.contentKnown === false)) return null;
+  } else if (req.method === "item/permissions/requestApproval") {
+    // A permission profile is the operation itself; preserve every requested capability in the digest.
+    if (!p.permissions || typeof p.permissions !== "object" || Array.isArray(p.permissions) || !Object.keys(p.permissions).length) return null;
   } else if (req.method === "applyPatchApproval") {
     if (!p.fileChanges || typeof p.fileChanges !== "object" || Array.isArray(p.fileChanges)) return null;
     const changes = Object.values(p.fileChanges) as Record<string, unknown>[];

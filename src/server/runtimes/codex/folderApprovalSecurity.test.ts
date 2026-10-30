@@ -104,3 +104,20 @@ test("Opaque command content is never persisted or returned, including folder ru
  const result=await runViaAppServer({agentId:"fixture",prompt:"p",cwd:"/workspace",permissionMode:"folder"},undefined,()=>({async start(){throw new Error(`failed command echo '${opaque}'`)},close(){}}) as any);
  expect(result.detail).not.toContain(opaque);expect(result.detail).toContain("error digest:");
 });
+
+import { finalizeApprovalDelivery, pollDecision, PROCESS_INSTANCE } from "./appServerPopup";
+import { CodexApprovalCorrelationStore } from "./state";
+test("An expired pending owner callback stays expired through poll and delivery",async()=>{
+ const f=fixture();try{
+  f.db.prepare("INSERT INTO agent (id,display_name,role,runtime,status_provider,workspace_path,persona_file) VALUES ('fixture','Fixture','eng','codex','codex_cli','/workspace','SOUL.md')").run();
+  const store=new CodexApprovalCorrelationStore(f.db);
+  store.record({requestId:f.id,agentId:"fixture",operationHash:"expiry-test",processInstance:PROCESS_INSTANCE});
+  f.db.prepare("UPDATE permission_request SET expires_at=datetime('now','-1 second') WHERE id=?").run(f.id);
+  expect(await handleApprovalCallback("fake",callback(f.id),new Set([101]),{dbPath:f.dbPath,agentId:"fixture",fetchFn:fakeFetch})).not.toBe("decided");
+  expect(getPermissionRequest(f.db,f.id)?.status).toBe("expired");
+  const decision=await pollDecision(f.db,f.id,20,1);
+  expect(decision).toBe("denied");
+  expect(finalizeApprovalDelivery(store,f.id,"expiry-test",decision)).toBe("denied");
+  expect(store.get(f.id)?.state).toBe("expired");
+ }finally{f.db.close()}
+});
