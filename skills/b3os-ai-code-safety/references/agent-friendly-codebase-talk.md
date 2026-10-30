@@ -1,66 +1,38 @@
-# Agent-friendly codebase — full notes on the source talk, with our adoption verdict
+# Agent-friendly codebase — Cursor 엔지니어 발표 노트와 우리 판정
 
-Source: a video introducing a Cursor engineer's talk (YouTube `o_7vTaHOL28`). Watched through auto-translated captions, so wording is approximate. The talk describes one engineer merging about 1,000 PRs a month with agents, and the codebase ("Grokbot", built on an in-house agent-oriented app framework) that made it possible. Everything below is the talk's content; the **Verdict** column is ours.
+출처: Cursor 엔지니어 발표를 소개한 영상(YouTube `o_7vTaHOL28`, 자동 번역 자막이라 표현은 근사). 한 엔지니어가 에이전트로 월 약 1,000 PR 을 머지한 코드베이스("Grokbot")가 배경이다. 판정: Adopt = 그대로, Adapt = 우리 형태로, Later = 전제가 생기면, Skip = 지금은 안 함.
 
-Verdicts: **Adopt** = use as is · **Adapt** = use in our form · **Later** = useful once the prerequisite exists · **Skip** = not for us now (reason given).
+## 1. 신뢰는 순서대로
+- 에이전트는 한 에이전트의 출력을 신뢰하는 만큼만 늘린다. 신뢰 전에 100개를 돌리면 토큰만 탄다. (Adopt) 병렬 팀원은 검증이 자동화된 일에만, 그 밖에는 담당 1명 + 리뷰.
+- 순서: 검증 → 스킬 → 코드베이스 구조 → 리뷰 규칙을 lint/CI 로 → 확장. 건너뛰지 않는다. (Adopt)
+- 감독자가 어깨너머로 보면 팀이 감독자 속도로 움직인다. (Adapt) 사람이 스크린샷·오류를 중계하는 일은 없애되, 필수 리뷰·승인 게이트(TEAM-OS §4)는 유지한다.
 
-## 1. Trust comes in order
+## 2. 검증이 첫 능력
+- 에이전트가 앱을 직접 돌려(CDP, 시뮬레이터, CPU trace, heap snapshot) 확인한다. 사람이 복사해 주면 사람이 병목이다. (Adopt) 에이전트가 재현과 증거를 맡고 사람은 방향만 정한다.
+- 기능 지도: 모든 기능에 도달하는 방법(UI 경로, 단축키, 요소 이름)을 적은 파일. (Adopt) 기능 ↔ 검증 표의 "access" 열.
+- 지도를 소스에서 생성하는 플러그인 (Later), 들어오는 버그 리포트를 클라우드 에이전트가 자동 재현 (Later: 무인 runner 가 먼저). 로컬에서 먼저 보고 나중에 클라우드로. (Adopt)
 
-| Talk says | Verdict | Our form |
-|---|---|---|
-| Agents scale only as far as you trust one agent's output. Plot: number of agents vs. trust; you move right only after trust rises. Don't jump to 100 agents — you burn tokens. | Adopt | Parallel teammates only on work whose verification is automated; otherwise one owner + review. |
-| Order: verification → skills → codebase structure → move review rules into lint/CI → scale out. Don't skip steps. | Adopt | Same order in project setup; each step is a row in the feature ↔ verification table. |
-| A manager who doesn't trust the team watches over shoulders; the team then moves at the supervisor's speed. | Adapt | Remove the relay work (a human copying screenshots/errors, re-running checks by hand); keep the required review and approval gates (TEAM-OS §4). |
+## 3. 스킬과 eval
+- 스킬은 지시와 맥락을 담은 markdown. 실패 유형마다 스킬로 만든다. (Adopt)
+- 스킬 eval 은 스킬의 단위 테스트: 평가받는 줄 모르게 중립 이름의 서브에이전트로 돌리고, 다른 모델을 심사로 쓴다. (Adapt) 스킬 변경은 지난 실제 사례로 평가한 뒤 머지.
+- 10/10 까지 hill-climb 루프. (Adapt) 고정 기준과 중지 조건이 있을 때만.
 
-## 2. Verification is the first capability
+## 4. 코드베이스가 가장 강한 수단
+- 가드레일이 없는 vibe-coded 프로토타입은 에이전트가 가장 쉬운 길로 가서 아무도 모르는 코드에 갇힌다. (Adopt, 범위) 오래 가는 다중 에이전트 코드베이스에 적용하고 프로토타입·일회성에는 적용하지 않는다. 재작성은 별도 비용 근거가 필요하다(Adapt). 600+ PR 규모의 구조 이전은 수명이 긴 제품에서 ROI 가 분명할 때만(Later).
+- 에이전트의 다섯 습관(가까운 패턴 흉내, 열린 파일에 넣기, 컴파일되는 가장 짧은 길, 옛 함수 옆에 새 함수, 규칙보다 지시)은 설계 입력이다. 올바른 길이 가장 짧아야 하고, 금지 의존은 CI 가 import 를 막고, 새 기능은 공유 router switch 의 새 case 가 아니라 격리된 파일에 둔다. (Adopt: SKILL.md 표)
+- 기능 하나의 모든 것을 한 디렉터리에. (Adapt) 새 기능에만, 기존 큰 파일은 그 자체로 위반이 아니다.
+- 프레임워크 금지를 CI 로(예: React `useEffect`). (Adapt) 실제로 버그를 낸 패턴만, 실패 예시와 함께.
+- 주석 금지(에이전트 주석의 99% 가 이력). (Adapt) "왜" 주석은 두고 이력은 커밋/문서로. 이력형 주석 검사는 후보일 뿐 규칙이 아니다.
+- 강제 계층 다섯(구조, 의존 차단·정적 분석, 규칙 파일, 스킬, 버그봇 리뷰): 앞 둘만 강하다. (Adopt)
+- 엄격한 컴파일러는 "컴파일됨"을 더 믿게 한다. (Adapt) 스택을 고를 때 우선하되 스택 교체 사유는 아니다.
+- 리뷰가 같은 코멘트를 반복하면 냄새다: CI 실패로 바꾸거나 가능성을 없앤다. (Adopt)
+- PR 50~1,000 줄, 원자적 PR 은 이력이 풍부한 맥락이 되고 되돌리기 쉽다. (Adopt)
 
-| Talk says | Verdict | Our form |
-|---|---|---|
-| The agent must run the code itself: drive the app (Chrome DevTools Protocol for Electron/web, simulator utilities for iOS), take CPU traces and heap snapshots. "Don't read the code and judge — run it and check." | Adopt | App probes with anchors; CPU/timing traces; headless-first for logic. |
-| If a human copies screenshots/console errors to the agent, the human is the blocker. | Adopt | Agents own repro and evidence; the human only decides direction. |
-| An early "control the app" skill was the first skill built. | Adopt | Probe launch + anchors are shared tooling, not per-task scripts. |
-| **Feature map**: a file telling the agent how to reach every feature (UI path, keyboard shortcuts, element names/attributes for CDP). Vague reports or a lone screenshot with "?" can then be mapped to a feature. | Adopt | The "access" column in the feature ↔ verification table. |
-| A plugin skill generates the verification setup and the feature map for a codebase. | Later | After our runner and table stabilise, generate rows from the source. |
-| A cloud agent picks up every incoming bug report automatically, reproduces it on a desktop running the app, and reports, e.g. "reproduced, but already fixed on main — ship a new build". | Later | Needs a runner that works unattended and an app host that can take a key window; start with local repro-before-fix. |
-| Start local (watch the agent run the app yourself), then move to the cloud so the whole team benefits. | Adopt | Local first. |
+## 5. 비용
+- 토큰은 약한 에이전트도 일할 수 있게 코드베이스를 준비하는 데 쓰는 ROI 문제다. (Adapt) 수명이 긴 제품의 가드레일·검증에 쓰고 효과를 잰다.
+- 에이전트가 계속 틀리면 프롬프트를 다시 쓰기 전에 환경에 무엇이 없는지 본다. (Adopt)
 
-## 3. Skills and evals
-
-| Talk says | Verdict | Our form |
-|---|---|---|
-| A skill is markdown that encodes instructions and context; give the model high-quality tokens from the start. | Adopt | Team skills. |
-| Watch every tool call and thought; each failure mode you see becomes a skill ("stop hallucinating; search the code yourself"). Be an active driver, not a passive observer. | Adopt | Failures → skills / rules / checks (the ratchet). |
-| Keeping skills current: evals are unit tests for skills. An orchestrator creates sub-agents in separate directories with neutral names so they don't know they are being evaluated (they change behaviour if they know). | Adapt | Eval a skill change against real past cases before merging it; blind naming where practical. |
-| Run evals across several models; use a different model as a juror to score, reducing self-bias. | Adapt | Cross-model review (we already use external models for review). |
-| "Hill-climb" an eval with a loop command until it scores 10/10. | Adapt | Only with a fixed rubric and a stop condition, never open-ended. |
-| Maintaining skills is hard and needs taste and observation. | Adopt | — |
-
-## 4. The codebase is the strongest lever
-
-| Talk says | Verdict | Our form |
-|---|---|---|
-| "Never rewrite" is the conventional wisdom; the speaker argues it is worth considering. Big-tech monorepos are already built for the least capable engineer (frameworks, guard rails, credentials that stop an intern deleting production) — agents do well there for the same reason. | Adapt | Guard rails first; a rewrite needs its own cost case (not implied). |
-| Vibe-coded prototypes have no guard rails; agents take the easiest path and you get stuck in code nobody understands. A new codebase needs a strong foundation. | Adopt (scope) | Applies to long-lived, multi-agent codebases. **Not** to prototypes or small throwaway projects. |
-| The speaker spent heavily (600+ PRs of refactoring) moving Grokbot to a new architecture, and now barely reads the code; designers, PMs and GTM staff can add features without breaking it. | Later | Only where the ROI is clear (a product with a long life). |
-| Architecture doc, first line: an agent works from one command, a narrow space and neighbouring files, without the whole picture. Five typical behaviours: mimic the nearest pattern; put code in the open file; take the shortest path that compiles (`any`, reaching into another folder); add a new function next to the old one; follow the instruction even against the rules. | Adopt | The habit table in SKILL.md. |
-| Behaviour is a predictable input to design. Rules: the right path must be the shortest; one folder per feature with fixed file names and one pattern; forbidden dependencies break mechanically (CI blocks the import); new features go in isolated files, not a new case in a shared router switch. | Adopt | SKILL.md structural answers + a dependency check in CI. |
-| Everything for a feature lives in one directory ("80% of the work is already encapsulated there"). | Adapt | For new features; existing large files are not a violation by themselves. |
-| Framework-specific bans enforced in CI, e.g. React `useEffect` banned in their framework. | Adapt | Per-stack bans only for patterns we have seen cause bugs, each with a failing example. |
-| Code comments banned, because 99% of agent comments record history ("someone said never do X") instead of explaining code. | Adapt | We keep "why" comments; history goes to commits/docs, not code. A check for history-style comments is a candidate, not a rule. |
-| Five enforcement layers: codebase structure; blocked dependencies + static analysis (lint, compiler diagnostics); rule files; skills; bug-bot review. The first two are hard; the rest are soft and can be forgotten. Invest in the hard ones. | Adopt | Enforcement layers in SKILL.md. |
-| Language choice matters: a strict compiler (Rust's borrow checker) lets you trust "it compiled" more. | Adapt | Prefer strict typing/compile checks where we choose the stack; not a reason to switch stacks. |
-| If code review keeps making the same comment, treat it as a smell: turn it into a CI failure or remove the possibility. | Adopt | Ratchet: a comment made twice moves up a layer. |
-| PRs of 50–1,000 lines; atomic PRs make git history a rich context and changes easy to revert. | Adopt | Small atomic commits/PRs per change. |
-
-## 5. Cost
-
-| Talk says | Verdict | Our form |
-|---|---|---|
-| Asked about tokens: the speaker works at a lab with effectively unlimited tokens; others can get there without going broke. For a tech lead it is an ROI question: spend tokens preparing the codebase so even a weak agent can work, instead of hiring into a fragile original. | Adapt | Spend on guard rails and verification where the product lives long; measure the return. |
-| 1,000 PRs a month doesn't mean the agent got faster; it shows an environment where humans no longer sit in the middle. When the agent keeps making mistakes, look at what the environment lacks before rewriting the prompt. | Adopt | Fix the environment (checks, structure, map) before the prompt. |
-
-## When this does not apply
-
-- Prototypes, spikes, solo and short-lived projects put speed first: keep the structure-and-code basics (SKILL.md "Always" column) and skip the situational tooling (feature map, CI bans, evals, cloud repro, full runner).
-- A working area you are not changing: don't restructure it to match these notes.
-- Anything seen once: note it; turn it into a check only when it repeats.
+## 적용하지 않을 때
+- 프로토타입·spike·solo·단기 프로젝트는 속도 우선: 구조·코드 기본(SKILL.md 5절)만 쓰고 기능 지도·CI 금지·eval·클라우드 재현·전체 runner 는 건너뛴다.
+- 바꾸지 않는 영역은 이 노트에 맞춰 재구성하지 않는다.
+- 한 번 본 것은 기록하고, 반복될 때 검사로 만든다.

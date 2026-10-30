@@ -12,10 +12,10 @@ owner: maintainer (infra)
 skills/b3os-task-loop/SKILL.md
 ```
 
-기존 `b3os-workloop`의 원문은 보존되어 있습니다.
+기존 `b3os-workloop`의 핵심 절차는 여기로 옮겼습니다.
 
 ```text
-skills/b3os-task-loop/references/legacy-b3os-workloop.md
+skills/b3os-task-loop/references/scheduled-wake.md
 ```
 
 새 작업에서는 `b3os-task-loop`를 사용하세요.

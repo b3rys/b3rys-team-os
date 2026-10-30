@@ -45,24 +45,10 @@ claude 순서:
    ```bash
    ls ~/.claude/channels/telegram-<id>/bot.pid   # 있으면 poller 폴링 중(= 진짜 대화됨)
    ```
-   죽어 있으면(bot.pid 없음) — telegram MCP 가 스폰됐다가 토큰을 못 찾아 즉시 종료된 것이다(타임아웃 아님 — 로그상 ~100ms 만에
-   `Connection failed`). 근본 원인(fresh clone 기준): telegram MCP(server.ts)는 봇 토큰을
-   `TELEGRAM_STATE_DIR/.env` 에서 읽는데, `TELEGRAM_STATE_DIR`(멤버별 채널 dir) 는 세션 env 상속에만 의존한다(플러그인 `.mcp.json` 에
-   env 블록 없음). 이 상속이 되려면 telegram 플러그인이 user scope 로 enable 돼 있어야 한다 — 그래야 `--channels plugin:telegram@…`
-   가 CC 에서 "채널"로 붙고 CC 가 세션의 STATE_DIR 를 MCP 서브프로세스에 넘긴다. user scope enable 이 없으면(fresh clone) MCP 가
-   STATE_DIR 없이 떠 제너릭 `~/.claude/channels/telegram/.env` 로 폴백 → 토큰 못 찾음 → server.ts 즉시 종료 = bot.pid 미기동.
-   (에러 로그: `Server stderr: telegram channel: TELEGRAM_BOT_TOKEN required`, `Connection failed after ~100ms`.) 1·2번째 멤버 모두
-   대칭으로 실패한다 — "1번째만 된다"는 착시(먼저 복구됐을 뿐).
-   확인: `jq '.enabledPlugins' ~/.claude/settings.json` 에 `telegram@claude-plugins-official` 있나. 없으면 그게 원인.
-   MCP 실제 에러: `~/Library/Caches/claude-cli-nodejs/<encoded-cwd>/mcp-logs-plugin-telegram-telegram/*.jsonl` 를
-   `jq -r '.timestamp+"  "+(.debug//.error//.info//"")'` 로 읽어 `Successfully connected` 인지 `TELEGRAM_BOT_TOKEN required` 인지 본다.
-   근본(5db5510 하네스 4-way 확정): telegram MCP 가 CC 부팅 MCP "열거"에서 빠진 것 — 실패 세션 로그에 `Starting connection`
-   이 0건(타임아웃 아니라 스폰 시도 자체가 없음). 살아있는 형제 claude 세션이 공유 상태를 쓰는 중 fresh 부팅하면 열거가 telegram
-   을 놓친다(2번째+ 멤버가 형제 옆에서 첫 봇으로 부팅하는 게 유일한 결정적 차이). fix = auto-reconnect: activate 가 poller
-   미기동 시 `/mcp reconnect plugin:telegram:telegram`(슬래시 명령, 메뉴네비 아님) 을 자동 최대 2회 주입해 복구한다 — 사용자·에이전트
-   개입 불필요. 안 뜨면 세션에서 수동으로 `/mcp reconnect plugin:telegram:telegram`. ⛔ `claude plugin install` 은 돌리지 말 것
-   (공유 캐시 inode 스왑=형제 세션 파괴). 오답이었던 것: project/user scope·`MCP_TIMEOUT`·pre-warm·콜드 install·30초 타임아웃·trust
-   프롬프트 전부. `✘ failed` 로그는 preflight 프로브가 남기는 red herring(정상 팀원에도 찍힘) — 진짜 판별은 `Starting connection` 유무.
+   죽어 있으면(bot.pid 없음): telegram MCP 가 CC 부팅 MCP 열거에서 빠졌거나 봇 토큰을 못 찾아 즉시 종료된 것이다. activate 가 poller 미기동을 감지하면 `/mcp reconnect plugin:telegram:telegram` 을 최대 2회 자동 주입해 복구하니 대개 잠깐 기다리면 붙는다. 안 붙으면 세션에서 수동으로 같은 명령을 입력한다.
+   - 확인 1: `jq '.enabledPlugins' ~/.claude/settings.json` 에 `telegram@claude-plugins-official` 이 있는가. 없으면 user scope enable 이 빠져 `TELEGRAM_STATE_DIR` 상속이 안 되고 MCP 가 제너릭 `~/.claude/channels/telegram/.env` 로 폴백해 토큰을 못 찾는다(에러 로그 `TELEGRAM_BOT_TOKEN required`).
+   - 확인 2: `~/Library/Caches/claude-cli-nodejs/<encoded-cwd>/mcp-logs-plugin-telegram-telegram/*.jsonl` 를 `jq -r '.timestamp+"  "+(.debug//.error//.info//"")'` 로 읽어 `Successfully connected` 인지 본다. 실패 세션은 `Starting connection` 이 0건이다(스폰 시도 자체가 없음). `✘ failed` 로그는 preflight 프로브가 남기는 것이라 정상 팀원에도 찍힌다.
+   - `claude plugin install` 은 돌리지 않는다(공유 캐시 inode 스왑으로 형제 세션이 깨진다).
 
 ## 2) 팀원 활성화(영입)가 실패해요
 

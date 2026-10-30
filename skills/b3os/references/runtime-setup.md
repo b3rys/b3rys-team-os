@@ -1,17 +1,14 @@
 # 런타임 사전준비 — Codex (Beta) / OpenClaw / Hermes
 
-`openclaw`와 `hermes_agent`는 b3os가 대신 설치·로그인해 주는 기본 경로가 아니라, 사용자가 이미 갖고 있는 런타임을 b3os 팀원으로 연결하는 BYO(Bring Your Own, 사용자가 준비해 오는) 고급 경로입니다.
+`openclaw`와 `hermes_agent`는 b3os가 설치·로그인해 주는 기본 경로가 아니라, 사용자가 이미 가진 런타임을 팀원으로 연결하는 BYO(Bring Your Own) 고급 경로다. 온보딩은 Claude 를 기본 선택으로 두고 Hermes/OpenClaw/Codex (Beta)를 설치·인증 상태와 함께 항상 표시한다. readiness 가 부족하면 숨기지 않고 disabled 로 두고 이 문서로 연결한다. `b3os_native` 는 온보딩 대상이 아니다.
 
-온보딩은 Claude를 기본 선택하고 Hermes/OpenClaw를 동등한 ChatGPT BYO 옵션으로 항상 표시합니다. readiness가 부족하면 옵션은 숨지 않고 disabled되며 이 문서로 연결됩니다. Codex (Beta)도 설치·인증 상태와 함께 표시하며 `b3os_native`는 온보딩 대상이 아닙니다.
-
-**런타임은 구독으로 고릅니다:** **Claude 구독 → `claude_channel`**(기존 Claude 로그인 재사용), **ChatGPT 구독 → `codex`(Beta), `hermes_agent` 또는 `openclaw`**(ChatGPT 구독을 OAuth로 재사용). Claude 구독자라면 `claude_channel`이 가장 짧습니다. ChatGPT 구독자거나 BYO 고급 런타임을 원하면 아래 준비를 마친 뒤 영입/런타임 교체의 preflight를 다시 확인하세요.
+런타임은 구독으로 고른다: Claude 구독 → `claude_channel`(기존 Claude 로그인 재사용, 가장 짧다), ChatGPT 구독 → `codex`(Beta), `hermes_agent`, `openclaw`(ChatGPT 구독을 OAuth 로 재사용).
 
 공통 원칙:
-- 명령은 b3os 서버가 실행되는 같은 컴퓨터에서 실행합니다.
-- **인증은 "구독 모델"(OAuth 로그인)이 기본입니다 — API 키가 아닙니다.** 이미 쓰는 구독(예: Claude·ChatGPT 등)을 OAuth 로그인으로 그대로 재사용합니다. 이게 첫 사용자에게 가장 매끄럽고(추가 키 발급 없음), b3os 가 `claude_channel` 을 권한 것과 같은 이유입니다. **API 키 방식은 사용자가 명시적으로 원할 때만 쓰는 예외 경로**입니다.
-- **어떤 구독으로 붙일지 사용자에게 물어봅니다.** 특정 provider 를 임의로 고르지 말고(예: 자동 발견된 환경변수 `*_API_KEY` 를 그대로 쓰지 않기), "어떤 구독을 쓰시겠어요?(Claude / ChatGPT / …)" 를 먼저 확인합니다. 환경에 `OPENAI_API_KEY` 같은 키가 이미 있어도, 사용자가 API 키를 원한다고 하지 않았으면 **구독(OAuth) 을 기본으로 안내**합니다.
-- 인증 파일·토큰 값은 화면에 출력하지 않습니다. 존재 여부와 `--version`/`doctor` 결과만 확인합니다.
-- Telegram 봇 토큰 발급은 `recruit.md` Step C의 BotFather 4단계와 동일합니다. 런타임이 달라도 BotFather 흐름은 바뀌지 않습니다.
+- 명령은 b3os 서버가 실행되는 같은 컴퓨터에서 실행한다.
+- 인증은 구독(OAuth 로그인)이 기본이고 API 키는 사용자가 명시적으로 원할 때만 쓰는 예외다. 어떤 구독으로 붙일지 사용자에게 먼저 묻는다(Claude / ChatGPT / …). 환경에 `OPENAI_API_KEY` 같은 키가 있어도 자동 발견된 `*_API_KEY` 를 그대로 쓰지 않는다.
+- 인증 파일·토큰 값은 출력하지 않는다. 존재 여부와 `--version`/`doctor` 결과만 확인한다.
+- Telegram 봇 토큰 발급은 어느 런타임이든 `recruit.md` Step C 의 BotFather 4단계와 같다.
 
 ## 런타임 고르기 — 사용자에게 보여줄 목록
 
@@ -22,12 +19,10 @@
 | 4 | `codex` | Codex (Beta), 로컬 OpenAI Codex CLI + ChatGPT 로그인 | 베타 | 선택 후 CLI 준비·사람이 로그인 |
 | 3 | `hermes_agent` | Hermes 프로필 게이트웨이 | 고급 | **BYO** — CLI+인증 프로필 **미리 준비** |
 
-- **첫 팀원은 `claude_channel` 권장.** AI가 설치·인증 안내까지 가장 안정적으로 몰아줄 수 있는 공개 기본 경로입니다. 모르겠다고 하면 이걸로 안내합니다.
-- **`openclaw`·`hermes_agent` 는 BYO 고급 런타임** — CLI·게이트웨이·구독 인증·인증된 에이전트 1개가 **미리 갖춰져 있어야** 하며 b3os가 대신 설치하지 않습니다. 준비 안 됐으면 preflight에서 막히니, 아래 설치·인증 절차를 안내하거나 `claude_channel`로 되돌립니다.
-- UI에서는 준비되지 않은 BYO도 숨기지 않습니다. disabled 사유와 연동 CTA를 보여주고, 재확인 후 같은 옵션이 enabled 되는 흐름으로 안내합니다. 내부/coming-soon 항목은 만들지 않습니다.
-- **목록에 없는 런타임(예: 다른 AI 앱·CLI)을 요청하면** — 공개 지원 런타임은 이 3개뿐이라고 정직히 안내합니다(영입 API가 그 외 런타임은 400으로 거부). 목록에 없는 것을 선택지로 제시하지 말고 `claude_channel`로 안내합니다.
-
-> 💡 **어떤 런타임이든 '첫 영입'은 Claude Code 세션에서 진행하는 걸 권장합니다.** Claude Code는 preflight·준비물 설치·인증 안내·(고급 런타임은) API 영입까지 셸로 직접 몰아줄 수 있어(대시보드는 설치·인증을 못 함), openclaw·hermes 팀원도 Claude Code에서 영입하는 게 가장 매끄럽습니다.
+- 첫 팀원은 `claude_channel` 을 권장한다(AI 가 설치·인증 안내까지 가장 안정적으로 진행). 모르겠다고 하면 이걸로 안내한다.
+- `openclaw`·`hermes_agent` 는 CLI·게이트웨이·구독 인증·인증된 에이전트 1개가 미리 갖춰져 있어야 하고 b3os가 대신 설치하지 않는다. 준비 안 됐으면 preflight 에서 막히니 아래 절차를 안내하거나 `claude_channel` 로 되돌린다. UI 는 disabled 사유와 CTA 를 보여주고 재확인 후 enabled 된다.
+- 목록에 없는 런타임을 요청하면 공개 지원 런타임은 위 4개뿐이라고 안내하고(영입 API 가 그 외는 400), `claude_channel` 로 안내한다.
+- 어떤 런타임이든 첫 영입은 Claude Code 세션에서 하는 것이 가장 매끄럽다(preflight·설치·인증 안내·API 영입을 셸로 진행할 수 있고, 대시보드는 설치·인증을 못 한다).
 
 ## 고른 순간에만 하는 preflight
 
@@ -187,16 +182,13 @@ b3os preflight가 보는 조건:
 
 ## 다음 확인
 
-준비가 끝나면 대시보드 Settings의 OT 패널에서 `다시 확인`을 누르거나, API를 쓰는 경우 아래를 호출합니다.
+준비가 끝나면 대시보드 Settings OT 패널의 `다시 확인`을 누르거나 아래를 호출한다. 통과하면 활성화 버튼이 열린다.
 
 ```bash
 curl -s -X POST http://localhost:${PORT:-7878}/team/api/ot/<ot_id>/preflight-recheck   # 포트 바꿨으면 TEAM_HTTP_PORT 값
 ```
 
-preflight가 통과하면 활성화 버튼이 열립니다. 합류 완료 후에는 Telegram에서 새 팀원 봇(`@<bot_username>`)에게 DM으로 “안녕”처럼 짧게 인사해 보세요. 답이 오면 연동 성공입니다.
-
-런타임별로 첫 응답 조건이 다릅니다: **hermes**(v0.18) 는 DM 페어링 게이트가 있습니다 — 단 b3os activate 가 팀장 chat_id(`owner_chat_id`)를 게이트웨이 allowlist(`TELEGRAM_ALLOWED_USERS`)에 자동 시드하므로 **팀장은 코드 없이 바로 답합니다**(팀장 chat_id 를 못 잡으면 팀장에게도 코드가 오니 `owner_chat_id` 를 채우고 재activate; 팀장 외 사용자는 `hermes pairing approve` 로 승인). **openclaw** 는 먼저 페어링 승인이 필요합니다 — 대시보드 **[접근 승인]** 버튼(또는 `POST /team/api/ot/<ot_id>/pair-approve`)으로 승인해야 그때부터 답합니다(승인 전 무응답은 정상). 무응답이 계속되면 `troubleshooting.md` §0 의 런타임별 항목을 봅니다.
-
+합류 후 팀원 봇 `@<bot_username>` 에 "안녕"을 보내 답이 오면 연동 성공이다. 런타임별 첫 응답 조건(hermes 는 팀장 allowlist 시드, openclaw 는 pair-approve, 승인 전 무응답은 정상)은 `recruit.md` Step G·H, 무응답이 계속되면 `troubleshooting.md` §0.
 
 ## Codex
 
