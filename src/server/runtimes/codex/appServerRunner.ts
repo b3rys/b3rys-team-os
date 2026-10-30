@@ -10,8 +10,9 @@ import { registerActiveTurn, unregisterActiveTurn } from "./activeTurns";
 import { acquireClient, dropClient, releaseIdleClient } from "./clientPool";
 import { codexPermissionMode } from "../../../shared/codexPermissionMode";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { redactApprovalText } from "../../lib/redactSecrets";
 import { FolderSessionApprovals } from "./folderSessionApprovals";
-import { appendAudit } from "../../db/queries";
 const folderSessions = new FolderSessionApprovals();
 
 /** 무응답 상한 600초는 Codex stream_idle_timeout_ms 기본 300초보다 길게 두어 자체 처리를 먼저 기다린다. 전체 작업 상한은 아니며 기존 env override는 유지한다.
@@ -34,7 +35,7 @@ export const runCodexTurnViaAppServer: CodexCaller = (opts) => runViaAppServer(o
 
 /** 최종 텍스트가 빈 완료는 성공과 다른 detail로 기록한다. 도구로 직접 발신하면 최종 텍스트가 비어도 답은 도착할 수 있어 실행 기록과 배달을 구분해야 한다. */
 export function codexTurnDetail(status: string, finalText: string, detail?: string): string {
-  const suffix = detail ? `: ${detail.slice(0, 300)}` : "";
+  const suffix = detail ? `: ${redactApprovalText(detail).slice(0, 300)}` : "";
   if (status === "completed") {
     // 완료 + 본문 있음 = 성공 / 완료 + 본문 없음 = 따로 이름을 가진 실패
     return finalText.trim().length > 0 ? "appserver_completed" : `appserver_completed_empty${suffix}`;
@@ -126,13 +127,8 @@ export async function runViaAppServer(
         // Codex의 질문을 받으면 이 턴 주인의 방으로 전달하고 사람 결정을 반환한다. 자체 판정층·공용 op 방·고정 팀원 목적지를 사용하지 않는다.
         if (!db) return "denied";
         const folder = opts.permissionMode === "folder";
-        if (folder && folderSessions.has(opts.agentId, req)) {
-          appendAudit(db, opts.agentId, "codex_session_approval_reused", req.method, {});
-          return "approved";
-        }
         const decision = await requestApprovalPopup(db, req, opts.agentId, opts.cwd, undefined,
-          folder ? { allowAlways: false, failOnSendError: true } : {});
-        if (folder && decision === "approved_for_session" && folderSessions.remember(opts.agentId, req)) return "approved";
+          folder ? { allowAlways: false, failOnSendError: true, folderSessions } : {});
         return decision;
       },
     }, opts.timeoutMs ?? TURN_TIMEOUT_MS, opts.imagePaths);
@@ -146,7 +142,7 @@ export async function runViaAppServer(
     if (pooled && r.status !== "completed") dropClient(opts.agentId);
     const ok = r.status === "completed" && (r.finalText.trim().length > 0 || opts.allowEmptyReply === true);
     // 실패 detail에 실제 오류 알림·stderr tail을 포함해 원인을 진단한다.
-    const detail = codexTurnDetail(r.status, r.finalText, r.detail);
+    const detail = codexTurnDetail(r.status, r.finalText, opts.permissionMode === "folder" && r.detail ? `error digest:${createHash("sha256").update(r.detail).digest("hex")}` : r.detail);
     return {
       ok,
       reply: r.finalText,
@@ -161,7 +157,7 @@ export async function runViaAppServer(
     return {
       ok: false,
       reply: "",
-      detail: `appserver_error: ${e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200)}`,
+      detail: opts.permissionMode === "folder" ? `appserver_error: error digest:${createHash("sha256").update(e instanceof Error ? e.message : String(e)).digest("hex")}` : `appserver_error: ${redactApprovalText(e instanceof Error ? e.message : String(e)).slice(0, 200)}`,
       elapsedMs: nowMs() - startedAt,
     };
   } finally {

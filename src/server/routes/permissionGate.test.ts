@@ -28,7 +28,7 @@ describe("permission gate routes", () => {
     expect(json.reasons).toEqual([]); // 런타임 자체 차단 사유로 거절하지 않는다.
     // 요청 행이 실제로 생성되어야 사람이 승인할 수 있다.
     expect(json.request?.status).toBe("pending");
-    expect(json.request?.target).toBe("sudo launchctl list");
+    expect(json.request?.target).toMatch(/^\[command digest:[a-f0-9]{64}\]$/);
     expect(json.request?.action).toBe("shell");
 
     // 대조군 — 안전한 명령도 같은 202/pending 을 받는다.

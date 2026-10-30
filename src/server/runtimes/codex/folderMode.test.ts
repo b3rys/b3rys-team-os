@@ -61,7 +61,7 @@ test("Session fallback remembers only the same member/thread/request and never w
  const cache=new FolderSessionApprovals();
  const req={method:"item/commandExecution/requestApproval",params:{threadId:"one",turnId:"turn1",itemId:"item1",command:"echo ok > /outside/file",cwd:"/workspace",availableDecisions:["accept","cancel"]}};
  expect(cache.has("fixture",req)).toBe(false);
- expect(cache.remember("fixture",req)).toBe(true);
+ expect(cache.remember("fixture",req,{requestId:"prm_original",delivery:{owner_id:"101",chat_id:"101",message_id:7}})).toBe(true);
  expect(cache.has("fixture",{...req,params:{...req.params,turnId:"turn2",itemId:"item2"}})).toBe(true);
  expect(cache.has("other",req)).toBe(false);
  expect(cache.has("fixture",{...req,params:{...req.params,threadId:"two"}})).toBe(false);

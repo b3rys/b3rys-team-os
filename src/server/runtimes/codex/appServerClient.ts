@@ -535,11 +535,11 @@ export class CodexAppServerClient {
       let decision: ReturnType<typeof toInternalDecision> = "decline"; // fail-closed 기본
       // S2: 이 승인이 가리키는 항목을 먼저 온 알림 에서 찾아 실어 준다(조회 요청이 없으므로 '기억' 으로).
       //   같은 turn·같은 itemId 일 때만 붙는다 — 어긋나면 undefined 라 상위가 매번 묻는 경로로 간다.
-      const observedItem = this.itemIndex.lookup(params?.itemId, params?.turnId) ?? undefined;
+      const itemLookup = () => this.itemIndex.lookup(params?.itemId, params?.turnId) ?? undefined;
       // M5.3: 승인 대기(팝업) 동안 턴 타이머 정지 → 사람이 폰으로 승인하는 시간이 turn timeout에 안 잡힘.
       this.pauseTurnTimer();
       try {
-        if (handler) decision = toInternalDecision(await handler({ method, params, serverRequestId: String(id), observedItem }));
+        if (handler) decision = toInternalDecision(await handler({ method, params, serverRequestId: String(id), get observedItem() { return itemLookup(); } }));
       } catch { decision = "decline"; }
       finally { this.resumeTurnTimer(); } // 결정 받으면 즉시 재개(예외에도 보장)
       const out = encodeApproval(kind, decision, params);

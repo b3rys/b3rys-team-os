@@ -3,19 +3,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type { AgentRecord, CodexSandboxMode } from "../types";
 import { appendAuditFile } from "./auditFile";
+import { redactApprovalText, redactStoredValue } from "./redactSecrets";
 import { enqueueApproval } from "./approvals";
 
 export type PermissionTier = "allow" | "ask" | "deny";
 export type PermissionAgent = Pick<AgentRecord, "id" | "workspace_path">;
 export type PermissionDecision = "allow" | "deny" | "approval_required";
-/**
- * codex 런타임은 이 경로로 요청을 만들지 않는다 — 실행 모드가 approvalPolicy "never" 라
- * codex 가 승인 요청 자체를 보내지 않는다(appServerRunner.ts). 그 팀원이 유일한 codex 멤버다.
- *
- * 그래서 승인 대기 목록이 계속 비어 있는 것은 "위험한 실행이 없었다" 가 아니라
- * "이 런타임에서 요청이 생기지 않는다" 다. 두 상태가 같은 화면(빈 목록)으로 보인다.
- * 여기 코드는 지우지 않는다 — 정책을 "on-request" 로 되돌리면 그대로 다시 쓰인다.
- */
+/** Codex full uses never. Folder requests use this gate with a stored decision policy,
+ * owner/chat/message delivery binding, and redacted persistence. */
 export type PermissionRequestStatus = "pending" | "allowed_once" | "allowed_always" | "denied" | "expired";
 /**
  * `allow_session` = 이 세션 동안만 허용.
@@ -244,6 +239,12 @@ export function targetForOperation(op: PermissionOperation): string {
   return op.action.slice(0, 240);
 }
 
+function storedCodexTarget(op: PermissionOperation): string {
+  return targetForOperation({...op,command:op.command ? `[command digest:${createHash("sha256").update(op.command).digest("hex")}]` : undefined,
+    path:op.path ? redactApprovalText(op.path) : undefined,egress_url:op.egress_url ? redactApprovalText(op.egress_url) : undefined,
+    text:op.text ? `[request digest:${createHash("sha256").update(op.text).digest("hex")}]` : undefined});
+}
+
 export function scopeKeyForOperation(op: PermissionOperation): string {
   const normalized = JSON.stringify({
     runtime: op.runtime,
@@ -271,14 +272,15 @@ export function evaluatePermission(db: Database, op: PermissionOperation): { dec
        LIMIT 1`,
     )
     .get(scope_key) as PermissionGrantRow | undefined;
-  if (grant) return { decision: "allow", reasons: [], grant };
+  if (grant) return {decision:"allow",reasons:[],grant:grant.runtime === "codex" ? {...grant,target:grant.action === "shell" ? (/^\[command digest:[a-f0-9]{64}\]$/.test(grant.target) ? grant.target : `[command digest:${createHash("sha256").update(grant.target).digest("hex")}]`) : redactApprovalText(grant.target),
+    provenance_json:JSON.stringify(redactStoredValue(safeParse(grant.provenance_json ?? "{}")))} : grant};
   return { decision: "approval_required", reasons: [] };
 }
 
 export function requestPermission(db: Database, op: PermissionOperation): { decision: PermissionDecision; reasons: string[]; request?: PermissionRequestRow; grant?: PermissionGrantRow } {
   const evalResult = evaluatePermission(db, op);
   const scope_key = scopeKeyForOperation(op);
-  const target = targetForOperation(op);
+  const target = op.runtime === "codex" ? storedCodexTarget(op) : targetForOperation(op);
   if (evalResult.decision === "deny") {
     appendPermissionAudit(db, {
       request_id: null,
@@ -292,7 +294,10 @@ export function requestPermission(db: Database, op: PermissionOperation): { deci
     appendAuditFile("permission_gate", "tier_d_denied", scope_key, { runtime: op.runtime, agent_id: op.agent_id ?? null, action: op.action, reasons: evalResult.reasons });
     return evalResult;
   }
-  if (evalResult.decision === "allow") return evalResult;
+  const codexPolicy = op.runtime === "codex" ? op.provenance?.codex_approval as {allowed_decisions?: unknown} | undefined : undefined;
+  const allowedDecisions = codexPolicy && typeof codexPolicy === "object" ? codexPolicy.allowed_decisions : undefined;
+  const sessionOnly = codexPolicy !== undefined && (!Array.isArray(allowedDecisions) || !allowedDecisions.includes("allow_always"));
+  if (evalResult.decision === "allow" && !sessionOnly) return evalResult;
 
   const request = insertPendingPermissionRequest(db, op);
   const id = request.id;
@@ -340,10 +345,12 @@ export function insertPendingPermissionRequest(db: Database, op: PermissionOpera
     op.runtime,
     op.agent_id ?? null,
     op.action,
-    targetForOperation(op),
-    JSON.stringify({ command: op.command, path: op.path, egress_url: op.egress_url, text: op.text }),
-    op.requested_by ?? op.agent_id ?? op.runtime,
-    JSON.stringify(op.provenance ?? {}),
+    op.runtime === "codex" ? storedCodexTarget(op) : targetForOperation(op),
+    JSON.stringify(op.runtime === "codex" ? redactStoredValue({command:op.command === undefined ? undefined : `[command digest:${createHash("sha256").update(op.command).digest("hex")}]`,path:op.path,egress_url:op.egress_url,
+      text:op.text === undefined ? undefined : `[request digest:${createHash("sha256").update(op.text).digest("hex")}]`})
+      : { command: op.command, path: op.path, egress_url: op.egress_url, text: op.text }),
+    op.runtime === "codex" ? redactApprovalText(op.requested_by ?? op.agent_id ?? op.runtime) : op.requested_by ?? op.agent_id ?? op.runtime,
+    JSON.stringify(op.runtime === "codex" ? redactStoredValue({...op.provenance,codex_risk_reasons:tierDReasons(op)}) : op.provenance ?? {}),
   );
   return getPermissionRequest(db, id)!;
 }
@@ -359,6 +366,27 @@ export function decisionColumns(decision: PermissionDecisionInput): { status: Pe
   };
 }
 
+/** The stored request, rather than the button layout, defines its decision scope. */
+export function permissionDecisionAllowed(row: PermissionRequestRow, decision: PermissionDecisionInput): boolean {
+  if (row.runtime !== "codex") return true;
+  const policy = safeParse(row.provenance_json ?? "{}").codex_approval;
+  if (policy === undefined) return true;
+  const allowed = policy && typeof policy === "object" ? (policy as any).allowed_decisions : null;
+  return Array.isArray(allowed) && allowed.includes(decision);
+}
+function storedCodexRow(row: PermissionRequestRow): PermissionRequestRow {
+  if (row.runtime !== "codex") return row;
+  const payload = safeParse(row.payload_json);
+  for (const key of ["command","text"]) {
+    const value = payload[key];
+    if (typeof value === "string" && !/^\[(?:command|request) digest:[a-f0-9]{64}\]$/.test(value))
+      payload[key] = `[${key === "command" ? "command" : "request"} digest:${createHash("sha256").update(value).digest("hex")}]`;
+  }
+  const target = row.action === "shell" ? (typeof payload.command === "string" ? payload.command : `[command digest:${createHash("sha256").update(row.target ?? "").digest("hex")}]`) : redactApprovalText(row.target);
+  return {...row,target,payload_json:JSON.stringify(redactStoredValue(payload)),
+    provenance_json:JSON.stringify(redactStoredValue(safeParse(row.provenance_json ?? "{}")))};
+}
+
 /** pending 인 행 한 건만 결정으로 바꾼다(CAS). 바뀐 행 수를 돌려준다 — 0 이면 누가 먼저 바꿨다. grant 는 만들지 않는다. */
 export function decidePendingRow(
   db: Database,
@@ -366,12 +394,16 @@ export function decidePendingRow(
   decision: PermissionDecisionInput,
   opts: { approver: string; provenance?: Record<string, unknown> },
 ): number {
+  const row = getPermissionRequest(db,id);
+  if (!row || !permissionDecisionAllowed(row,decision)) return 0;
+  const original = safeParse(row.provenance_json ?? "{}");
+  const provenance = {...original,...opts.provenance,...(original.codex_approval !== undefined ? {codex_approval:original.codex_approval} : {})};
   const { status, scope } = decisionColumns(decision);
   return db.prepare(
     `UPDATE permission_request
        SET status = ?, decision_scope = ?, decided_at = datetime('now'), approver = ?, provenance_json = ?
      WHERE id = ? AND status = 'pending'`,
-  ).run(status, scope, opts.approver, JSON.stringify(opts.provenance ?? {}), id).changes;
+  ).run(status, scope, row.runtime === "codex" ? redactApprovalText(opts.approver) : opts.approver, JSON.stringify(row.runtime === "codex" ? redactStoredValue(provenance) : provenance), id).changes;
 }
 
 /** 감사 표 기록 — 요청 행의 내용으로 적는다. */
@@ -398,14 +430,15 @@ export function belongsToMemberRoom(row: { agent_id: string | null } | { agent_i
 }
 
 export function getPermissionRequest(db: Database, id: string): PermissionRequestRow | undefined {
-  return db.prepare("SELECT * FROM permission_request WHERE id = ?").get(id) as PermissionRequestRow | undefined;
+  const row = db.prepare("SELECT * FROM permission_request WHERE id = ?").get(id) as PermissionRequestRow | undefined;
+  return row ? storedCodexRow(row) : undefined;
 }
 
 export function listPermissionRequests(db: Database, status?: PermissionRequestStatus): PermissionRequestRow[] {
   const rows = status
     ? db.prepare("SELECT * FROM permission_request WHERE status = ? ORDER BY created_at DESC LIMIT 50").all(status)
     : db.prepare("SELECT * FROM permission_request ORDER BY created_at DESC LIMIT 50").all();
-  return rows as PermissionRequestRow[];
+  return (rows as PermissionRequestRow[]).map(storedCodexRow);
 }
 
 export function decidePermissionRequest(
@@ -418,9 +451,12 @@ export function decidePermissionRequest(
   if (!row) return { ok: false, error: "permission request not found" };
   if (row.status !== "pending") return { ok: false, status: row.status, error: `already handled (${row.status})` };
 
+  if (!permissionDecisionAllowed(row,decision)) return {ok:false,error:"permission decision not allowed"};
   const op = operationOfRow(row);
   // 위험 사유는 표시용이므로 사용자가 승인한 결정을 다시 거부하지 않는다.
-  const tierD = tierDReasons(op);
+  const recorded = safeParse(row.provenance_json ?? "{}").codex_risk_reasons;
+  const knownRisk = new Set([...OP_TIER_D_PATTERNS.map(pattern=>pattern.id),"secret_read_plus_egress"]);
+  const tierD = [...new Set([...tierDReasons(op),...(Array.isArray(recorded) ? recorded.filter((r):r is string=>typeof r === "string" && knownRisk.has(r)) : [])])];
   if (tierD.length) {
     // 판정은 안 하되 무엇이 걸렸는지는 남긴다 — 나중에 "왜 그때 허용했나" 를 볼 수 있어야 한다.
     appendPermissionAudit(db, { request_id: id, scope_key: row.scope_key, op, target: row.target, decision: `risk_noted:${decision}`, approver: opts.approver, provenance: { ...(opts.provenance ?? {}), reasons: tierD } });
@@ -446,11 +482,11 @@ export function decidePermissionRequest(
     ).run(
       `pgr_${randomUUID().replace(/-/g, "").slice(0, 18)}`,
       row.scope_key, row.runtime, row.agent_id, row.action, row.target,
-      opts.approver, JSON.stringify(opts.provenance ?? {}), GRANT_TTL_HOURS,
+      row.runtime === "codex" ? redactApprovalText(opts.approver) : opts.approver, JSON.stringify(row.runtime === "codex" ? redactStoredValue(opts.provenance ?? {}) : opts.provenance ?? {}), GRANT_TTL_HOURS,
     );
   }
   appendPermissionAudit(db, { request_id: id, scope_key: row.scope_key, op, target: row.target, decision, approver: opts.approver, provenance: opts.provenance ?? {} });
-  appendAuditFile("permission_gate", decision, id, { approver: opts.approver, scope_key: row.scope_key });
+  appendAuditFile("permission_gate", decision, id, { approver: row.runtime === "codex" ? redactApprovalText(opts.approver) : opts.approver, scope_key: row.scope_key });
   return { ok: true, status };
 }
 
@@ -461,7 +497,10 @@ function appendPermissionAudit(
   db.prepare(
     `INSERT INTO perm_request_audit(request_id, scope_key, runtime, agent_id, action, target, decision, approver, provenance_json)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(input.request_id, input.scope_key, input.op.runtime, input.op.agent_id ?? null, input.op.action, input.target, input.decision, input.approver, JSON.stringify(input.provenance));
+  ).run(input.request_id, input.scope_key, input.op.runtime, input.op.agent_id ?? null, input.op.action,
+    input.op.runtime === "codex" ? (input.op.action === "shell" ? (/^\[command digest:[a-f0-9]{64}\]$/.test(input.target) ? input.target : `[command digest:${createHash("sha256").update(input.target).digest("hex")}]`) : redactApprovalText(input.target)) : input.target, input.decision,
+    input.op.runtime === "codex" && input.approver ? redactApprovalText(input.approver) : input.approver,
+    JSON.stringify(input.op.runtime === "codex" ? redactStoredValue(input.provenance) : input.provenance));
 }
 
 function safeParse(s: string): Record<string, unknown> {

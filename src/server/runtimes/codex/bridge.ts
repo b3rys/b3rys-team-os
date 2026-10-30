@@ -1257,7 +1257,7 @@ export function defaultTeamDbPath(): string {
 export async function handleApprovalCallback(
   token: string,
   cb: TgCallbackQuery,
-  allowFrom: Set<number>,
+  _allowFrom: Set<number>,
   deps: { dbPath?: string; fetchFn?: typeof fetch; plainOnly?: boolean; agentId?: string; apiBase?: string } = {},
 ): Promise<"decided" | "ignored" | "stale" | "unauthorized"> {
   const doFetch = deps.fetchFn ?? fetch;
@@ -1273,13 +1273,13 @@ export async function handleApprovalCallback(
 
   // 발신자 게이트 — 메시지와 같은 규칙(fail-closed).
   const fromId = cb.from?.id;
-  if (fromId === undefined || !isAllowedChat(allowFrom, fromId)) {
+  if (fromId === undefined || !cb.message) {
     await answer("callback_forbidden", true);
     return "unauthorized";
   }
 
   const { openDb } = await import("../../db/migrate");
-  const { decidePermissionRequest, getPermissionRequest } = await import("../../lib/permissionGate");
+  const { decidePermissionRequest, getPermissionRequest, permissionDecisionAllowed } = await import("../../lib/permissionGate");
   const db = openDb(deps.dbPath ?? defaultTeamDbPath());
   try {
     const id = m[2]!;
@@ -1287,6 +1287,13 @@ export async function handleApprovalCallback(
     if (row && deps.agentId && row.agent_id !== deps.agentId) {
       await answer("callback_forbidden", true);
       return "unauthorized";
+    }
+    if (!row) { await answer("callback_expired"); return "stale"; }
+    let delivery: {owner_id?:unknown;chat_id?:unknown;message_id?:unknown} | undefined;
+    try { delivery = JSON.parse(row.provenance_json ?? "{}").codex_approval?.telegram_delivery; } catch { /* Missing binding is denied. */ }
+    if (!delivery || delivery.owner_id !== String(fromId) || !cb.message || delivery.chat_id !== String(cb.message.chat.id)
+      || !Number.isSafeInteger(delivery.message_id) || delivery.message_id !== cb.message.message_id) {
+      await answer("callback_forbidden",true); return "unauthorized";
     }
     // 이미 지난 요청은 지난 대로 알린다 — 눌렀는데 아무 반응이 없으면 사람은 다시 누른다.
     if (!row || row.status !== "pending") {
@@ -1305,6 +1312,10 @@ export async function handleApprovalCallback(
       : m[1] === "pgs" ? "allow_session"   // 이 세션 동안만 — 지속 허가를 남기지 않는다
       : m[1] === "pga" ? "allow_always"
       : "deny";
+
+    if (!permissionDecisionAllowed(row,decision)) {
+      await answer("callback_forbidden",true); return "unauthorized";
+    }
 
     // '항상 허용' 은 codex 설정 파일에 쓴다.
     //   우리 DB 에 영구 권한을 쌓지 않는다 — 그건 취소 경로가 없었다. 설정은 사람이 열어서 지울 수 있다.

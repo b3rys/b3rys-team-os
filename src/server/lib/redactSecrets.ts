@@ -21,3 +21,22 @@ export function redactSecrets(s: string): string {
     .replace(new RegExp(`(${SECRET_KEY}\\s*[=:]\\s*)(?!["']|<redacted[a-z-]*>(?=[\\s,;}\\])]|$))[^"'\\s,;}\\])]+`, "gi"), "$1<redacted>");
 }
 
+
+export function redactApprovalText(text: string): string {
+  return redactSecrets(text)
+    .replace(/(--[\w-]*(?:token|secret|password|passwd|api-key|access-key|private-key|authorization|bearer|credential)[\w-]*\s+)(?:"(?:[^"\\]|\\.)*(?:"|$)|'[^']*(?:'|$)|[^\s]+)/gi, "$1<redacted>")
+    .replace(/((?:--user|-u)\s+)(?:"[^"\n]*(?:"|$)|'[^'\n]*(?:'|$)|[^\s]+)/g, "$1<redacted>")
+    .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, "$1<redacted>@");
+}
+
+/** Walk JSON values before encoding so escaped command quotes cannot hide secret flags. */
+export function redactStoredValue(value: unknown): any {
+  if (typeof value === "string") {
+    if (/^\s*[\[{]/.test(value)) { try { return JSON.stringify(redactStoredValue(JSON.parse(value))); } catch { /* ordinary text */ } }
+    return redactApprovalText(value);
+  }
+  if (Array.isArray(value)) return value.map(redactStoredValue);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, entry]) =>
+    [key, /token|secret|password|passwd|api[_-]?key|access[_-]?key|private[_-]?key|credential/i.test(key) ? "<redacted>" : redactStoredValue(entry)]));
+  return value;
+}
