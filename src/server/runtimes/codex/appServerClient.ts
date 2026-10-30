@@ -172,6 +172,9 @@ export class CodexAppServerClient {
   private closed = false;
   private activityGeneration = 0;
   private retired = false;
+  private poolActivityAtMs = Date.now();
+  get lastPoolActivityAt(): number { return this.poolActivityAtMs; }
+  notePoolActivity(): void { this.poolActivityAtMs = Date.now(); }
   private terminationTimer?: ReturnType<typeof setTimeout>;
   /** 풀이 죽은 것을 돌려주지 않게 밖에서 상태를 볼 수 있어야 한다. */
   get isClosed(): boolean { return this.closed || this.retired; }
@@ -371,7 +374,7 @@ export class CodexAppServerClient {
       if (Date.now() >= deadline) return false;
       const states = await Promise.all(ids.map((threadId) =>
         this.request("thread/read", { threadId, includeTurns: false }, Math.max(1, deadline - Date.now()))));
-      if (states.some((r) => r?.thread?.status?.type !== "idle")) return false;
+      if (states.some((r) => r?.thread?.status?.type !== "idle")) { this.notePoolActivity(); return false; }
       const after = await loaded();
       return generation === this.activityGeneration && !this.closed && !this.turnResolve && after !== null && JSON.stringify(ids) === JSON.stringify(after);
     } catch { return false; }
@@ -518,6 +521,7 @@ export class CodexAppServerClient {
   private async handleServerRequest(id: number | string, method: string, params: Record<string, unknown>): Promise<void> {
     // Phase1 ②: 모든 요청에 {decision} 반환하던 것을 method별 분기로 교체(11종 중 승인 4종만 decision류).
     // 근거=serverRequestCodec(Ames 0.144.6 schema 검증). 잘못된 result는 Codex pending을 오류/폴백에 의존시키거나 hang.
+    this.notePoolActivity();
     const kind = classifyServerRequest(method);
     if (kind === "unknown") { this.respondError(id, -32601, `unknown server request: ${method}`); return; }
 
@@ -549,7 +553,7 @@ export class CodexAppServerClient {
 
   private handleNotification(method: string, params: any): void {
     // Child followups can start without acquiring this pool entry again.
-    if (method === "turn/started" || method === "thread/status/changed" || isTurnProgress(method)) this.activityGeneration++;
+    if (method.startsWith("thread/") || isTurnProgress(method)) { this.activityGeneration++; this.notePoolActivity(); }
     // 진행 신호마다 무응답 시계를 되돌려 일하는 턴을 자르지 않고 조용히 멈춘 턴만 종료한다.
     if (isTurnProgress(method)) this.noteTurnAlive();
     this.activeHandlers?.onNotify?.(method, params);

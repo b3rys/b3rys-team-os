@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { afterEach, expect, test } from "bun:test";
 import { CodexAppServerClient } from "./appServerClient";
-import { acquireClient, dropAllClients, dropClient, pooledAgents, releaseIdleClient, retiredClientCount } from "./clientPool";
+import { acquireClient, dropAllClients, dropClient, pooledAgents, releaseIdleClient, retiredClientCount, IDLE_CLIENT_GRACE_MS } from "./clientPool";
 
 afterEach(() => dropAllClients());
 
@@ -41,7 +41,7 @@ function poolClient(idle: () => Promise<boolean>) {
 
 test("An idle pooled client closes once and is removed", async () => {
   const { client } = acquireClient("probe", () => poolClient(async () => true));
-  await releaseIdleClient("probe", client);
+  await releaseIdleClient("probe", client, 10000, 0);
   expect(client.closed).toBe(1);
   expect(pooledAgents()).toEqual([]);
 });
@@ -49,7 +49,7 @@ test("An idle pooled client closes once and is removed", async () => {
 test("An active child is retained, then cleaned after becoming idle", async () => {
   let idle = false;
   const { client } = acquireClient("probe", () => poolClient(async () => idle));
-  await releaseIdleClient("probe", client, 10);
+  await releaseIdleClient("probe", client, 10, 0);
   expect(client.closed).toBe(0);
   idle = true;
   for (let i = 0; i < 20 && !client.closed; i++) await Bun.sleep(5);
@@ -59,7 +59,7 @@ test("An active child is retained, then cleaned after becoming idle", async () =
 test("A new turn acquired during the idle query invalidates the old cleanup result", async () => {
   let finish!: (value: boolean) => void;
   const { client } = acquireClient("probe", () => poolClient(() => new Promise((r) => { finish = r; })));
-  const cleanup = releaseIdleClient("probe", client);
+  const cleanup = releaseIdleClient("probe", client, 10000, 0);
   expect(acquireClient("probe", () => { throw new Error("must reuse"); }).reused).toBe(true);
   finish(true);
   await cleanup;
@@ -70,11 +70,11 @@ test("A new turn acquired during the idle query invalidates the old cleanup resu
 test("A new turn cancels a pending idle retry; failed-turn drop cancels it too", async () => {
   let checks = 0;
   const { client } = acquireClient("probe", () => poolClient(async () => { checks++; return false; }));
-  await releaseIdleClient("probe", client, 10);
+  await releaseIdleClient("probe", client, 10, 0);
   acquireClient("probe", () => client);
   await Bun.sleep(25);
   expect(checks).toBe(1);
-  await releaseIdleClient("probe", client, 10);
+  await releaseIdleClient("probe", client, 10, 0);
   dropClient("probe");
   await Bun.sleep(25);
   expect(checks).toBe(2);
@@ -98,7 +98,7 @@ test("The production caller releases an idle pooled process and retains a runnin
     if (!b.ok || !pooledAgents().includes('active-probe')) throw new Error('running child was lost');
     dropAllClients();
   `;
-  const p = Bun.spawn([process.execPath, "-e", script], { stdout: "pipe", stderr: "pipe" });
+  const p = Bun.spawn([process.execPath, "-e", script], { env: {...process.env,B3OS_CODEX_IDLE_GRACE_MS:"0"}, stdout: "pipe", stderr: "pipe" });
   const [err, code] = await Promise.all([new Response(p.stderr).text(), p.exited]);
   expect(code, err).toBe(0);
 });
@@ -113,7 +113,7 @@ test("A child followup during the last loaded/list invalidates idle even with id
       return { data: ["parent", "child"] };
     };
     acquireClient("probe", () => c);
-    await releaseIdleClient("probe", c);
+    await releaseIdleClient("probe", c, 10000, 0);
     expect(c.isClosed).toBe(false);
     expect(pooledAgents()).toEqual(["probe"]);
     dropClient("probe");
@@ -193,7 +193,7 @@ test("A failed idle TERM stays retired even if activity changes; only the old pr
   const c=new CodexAppServerClient({warn(){}});let queries=0;const signals:string[]=[];
   (c as any).isIdle=async()=>{queries++;return true};
   const proc={exitCode:null as number|null,signalCode:null,kill(signal:string){signals.push(signal);if(signals.length===1)return false;this.exitCode=0;return true},once(){}};
-  (c as any).proc=proc;acquireClient("probe",()=>c);await releaseIdleClient("probe",c);
+  (c as any).proc=proc;acquireClient("probe",()=>c);await releaseIdleClient("probe", c, 10000, 0);
   expect(signals).toEqual(["SIGTERM"]);expect(pooledAgents()).toEqual([]);expect(c.isClosed).toBe(true);
   (c as any).isIdle=async()=>{queries++;return false};
   const fresh=acquireClient("probe",()=>poolClient(async()=>false)).client;
@@ -206,7 +206,7 @@ test("The entry is retired before the very first signal; acquisition inside kill
   const c=new CodexAppServerClient();(c as any).isIdle=async()=>true;
   const fresh=poolClient(async()=>false);let reused:boolean|undefined;
   (c as any).proc={exitCode:null,signalCode:null,kill(){reused=acquireClient("probe",()=>fresh).reused;this.exitCode=0;return true},once(){}};
-  acquireClient("probe",()=>c);await releaseIdleClient("probe",c);
+  acquireClient("probe",()=>c);await releaseIdleClient("probe", c, 10000, 0);
   expect(reused).toBe(false);expect(c.isClosed).toBe(true);expect(fresh.closed).toBe(0);
   expect(acquireClient<ReturnType<typeof poolClient>>("probe",()=>{throw new Error("fresh client must stay pooled")}).client).toBe(fresh);
 });
@@ -214,7 +214,7 @@ test("The entry is retired before the very first signal; acquisition inside kill
 test("A final idle query cannot retire after another message acquired the client",async()=>{
   const c=new CodexAppServerClient();let finish!:(idle:boolean)=>void;
   (c as any).isIdle=()=>new Promise<boolean>(resolve=>{finish=resolve});
-  acquireClient("probe",()=>c);const cleanup=releaseIdleClient("probe",c);
+  acquireClient("probe",()=>c);const cleanup=releaseIdleClient("probe", c, 10000, 0);
   expect(acquireClient("probe",()=>{throw new Error("reuse")}).reused).toBe(true);
   finish(true);await cleanup;expect(c.isClosed).toBe(false);expect(pooledAgents()).toEqual(["probe"]);
 });
@@ -245,14 +245,14 @@ test("A real JSON-RPC process retiring after TERM cannot receive the next turn",
   for(const method of ["turn/started","thread/status/changed"]){
     const child=await make(method);
     try{
-      acquireClient("child-probe",()=>child.client);await releaseIdleClient("child-probe",child.client);
+      acquireClient("child-probe",()=>child.client);await releaseIdleClient("child-probe", child.client, 10000, 0);
       expect(pooledAgents()).toContain("child-probe");expect(child.proc.killed).toBe(false);
     }finally{dropClient("child-probe");child.proc.kill("SIGKILL")}
   }
   for(let i=0;i<30&&retiredClientCount();i++)await Bun.sleep(50);
   const old=await make();let next:Awaited<ReturnType<typeof make>>|undefined;
   try{
-    acquireClient('probe',()=>old.client);await releaseIdleClient('probe',old.client);
+    acquireClient('probe',()=>old.client);await releaseIdleClient('probe', old.client, 10000, 0);
     expect(pooledAgents()).toEqual([]);expect(old.proc.killed).toBe(true);
     next=await make();const acquired=acquireClient('probe',()=>next!.client);
     expect(acquired.reused).toBe(false);expect(next.proc.pid).not.toBe(old.proc.pid);
@@ -264,4 +264,42 @@ test("A real JSON-RPC process retiring after TERM cannot receive the next turn",
   }finally{
     dropAllClients();old.proc.kill('SIGKILL');next?.proc.kill('SIGKILL');
   }
+});
+
+
+test("Production grace defaults to fifteen minutes and preserves reuse without an idle query",async()=>{
+ expect(IDLE_CLIENT_GRACE_MS).toBe(15*60*1000);
+ let queries=0;const c=poolClient(async()=>{queries++;return true});
+ acquireClient("probe",()=>c);await releaseIdleClient("probe",c);
+ expect(queries).toBe(0);expect(c.closed).toBe(0);
+ expect(acquireClient("probe",()=>{throw new Error("must reuse during grace")}).reused).toBe(true);
+ expect(queries).toBe(0);
+});
+
+test("Short grace starts at turn end and an activity notification restarts the clock",async()=>{
+ const c=new CodexAppServerClient();let queries=0;
+ (c as any).isIdle=async()=>{queries++;return true};
+ acquireClient("probe",()=>c);await releaseIdleClient("probe",c,10,120);
+ expect(queries).toBe(0);
+ await Bun.sleep(70);(c as any).handleNotification("thread/status/changed",{threadId:"child",status:{type:"idle"}});
+ await Bun.sleep(75);expect(queries).toBe(0);expect(pooledAgents()).toEqual(["probe"]);
+ for(let i=0;i<30&&queries===0;i++)await Bun.sleep(10);
+ expect(queries).toBe(1);expect(pooledAgents()).toEqual([]);
+});
+
+test("A new message cancels the old timer, and its completed turn gets a fresh grace",async()=>{
+ let queries=0;const c=poolClient(async()=>{queries++;return true});
+ acquireClient("probe",()=>c);await releaseIdleClient("probe",c,10,120);
+ await Bun.sleep(65);acquireClient("probe",()=>c);await Bun.sleep(80);
+ expect(queries).toBe(0);expect(c.closed).toBe(0);
+ await releaseIdleClient("probe",c,10,120);await Bun.sleep(65);expect(queries).toBe(0);
+ for(let i=0;i<30&&!c.closed;i++)await Bun.sleep(10);
+ expect(c.closed).toBe(1);
+});
+
+test("Activity during the final query prevents retirement even if the query reports idle",async()=>{
+ const c=new CodexAppServerClient();let queries=0;
+ (c as any).isIdle=async()=>{queries++;c.notePoolActivity();return true};
+ acquireClient("probe",()=>c);await releaseIdleClient("probe",c,100,30);
+ await Bun.sleep(50);expect(queries).toBe(1);expect(pooledAgents()).toEqual(["probe"]);
 });
