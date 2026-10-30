@@ -11,10 +11,10 @@ description: "Deprecated compatibility stub. Use b3os-task-loop for Tasks 칸반
 skills/b3os-task-loop/SKILL.md
 ```
 
-기존 `b3os-task-mgmt`의 원문은 보존되어 있습니다.
+기존 `b3os-task-mgmt`의 핵심 절차는 여기로 옮겼습니다.
 
 ```text
-skills/b3os-task-loop/references/legacy-b3os-task-mgmt.md
+skills/b3os-task-loop/references/kanban-and-handoff.md
 ```
 
 새 작업에서는 `b3os-task-loop`를 사용하세요.
