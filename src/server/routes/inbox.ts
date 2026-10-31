@@ -1,6 +1,7 @@
+import { createCogsProgressRoutes } from "./cogsProgress";
 import { createHash } from "node:crypto";
-import { CogsDeliveryUnknown, isSingleEmoji, sendCogsReply, setCogsReaction } from "../lib/cogsRelay";
-import { stopCogsTyping } from "../lib/cogsTyping";
+import { CogsDeliveryUnknown, cogsReplyConfig, isSingleEmoji, sendCogsReply, setCogsReaction } from "../lib/cogsRelay";
+import { CogsProgressEditRetry, completeCogsProgress, stopCogsTyping } from "../lib/cogsTyping";
 import { Hono } from "hono";
 import type { Database } from "bun:sqlite";
 import { z } from "zod";
@@ -68,6 +69,7 @@ function ownerDmChatId(db: Database): string | undefined {
 
 export function createInboxRoutes(deps: InboxRouteDeps): Hono {
   const r = new Hono();
+  r.route("/", createCogsProgressRoutes(() => deps.agents?.() ?? ambientAgents()));
 
   // POST /api/cogs/react — 팀원이 받은 cogs 메시지(버스 id)에 자기 봇으로 리액션. emoji "" = 지우기.
   //   no_reply: true 면 글 답 없이 끝낸다고 cogs 에 알린다(declineResponse, 앱 '입력 중' 끔). emoji 없이 no_reply 만도 된다.
@@ -408,9 +410,9 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       let acknowledged = false;
       try {
         const agent = (deps.agents?.() ?? ambientAgents()).find((a) => a.id === env.from_agent_id);
-        // 답을 올리기 전에 그 방의 '입력 중'을 멈춘다 — 답 뒤에 늦은 typing 이 다시 뜨지 않게. 키는 답이 실제로 가는 방이다.
-        stopCogsTyping(cogsMetaForGate.agent_id, cogsMetaForGate.chat_id);
-        const postedId = await sendCogsReply(agent, cogsMetaForGate, stored.body);
+        cogsReplyConfig(agent, cogsMetaForGate);
+        const completedId = await completeCogsProgress(cogsMetaForGate.agent_id, cogsMetaForGate.chat_id, stored.body);
+        const postedId = completedId ?? await sendCogsReply(agent, cogsMetaForGate, stored.body);
         acknowledged = true;
         setDelivery("sent", postedId);
         // 팀원끼리 대화 중계: 원래 담당의 답이 방에 올라갔다 = 종료 사건. 대조·전송을 깨운다(실패해도 답은 이미 갔다).
@@ -418,6 +420,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         appendAudit(deps.db, env.from_agent_id, "cogs_relay_sent", stored.id, { chat_id: cogsMetaForGate.chat_id });
         return c.json({ ok: true, message: stored, posted: true, channel: "cogs" }, 201);
       } catch (error) {
+        if (!(error instanceof CogsProgressEditRetry)) stopCogsTyping(cogsMetaForGate.agent_id, cogsMetaForGate.chat_id);
         const unknown = acknowledged || error instanceof CogsDeliveryUnknown;
         setDelivery(unknown ? "unknown" : "failed");
         appendAudit(deps.db, env.from_agent_id, "cogs_relay_failed", stored.id, { chat_id: cogsMetaForGate.chat_id, state: unknown ? "unknown" : "failed" });

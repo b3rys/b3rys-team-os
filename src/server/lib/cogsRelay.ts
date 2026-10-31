@@ -78,11 +78,17 @@ export async function cogsCall(config: Pick<CogsInbox, "api_base">, token: strin
   return data.result;
 }
 
-/** 올라간 cogs 메시지 번호를 돌려준다(팀원끼리 대화 종료 보고에 쓴다). */
-export async function sendCogsReply(agent: AgentRecord | undefined, meta: CogsMeta, text: string): Promise<number> {
+/** Validate before either editing an existing response or sending a new one. */
+export function cogsReplyConfig(agent: AgentRecord | undefined, meta: CogsMeta): CogsInbox {
   if (!agent || agent.id !== meta.agent_id) throw new Error("cogs_reply_agent_mismatch");
   const config = cogsInbox(agent);
   if (!config || !config.allow_from.includes(meta.chat_id)) throw new Error("cogs_reply_not_allowed");
+  return config;
+}
+
+/** 올라간 cogs 메시지 번호를 돌려준다(팀원끼리 대화 종료 보고에 쓴다). */
+export async function sendCogsReply(agent: AgentRecord | undefined, meta: CogsMeta, text: string): Promise<number> {
+  const config = cogsReplyConfig(agent, meta);
   const result = await cogsCall(config, cogsToken(config), "sendMessage", { chat_id: meta.chat_id, text, reply_to_message_id: meta.message_id });
   if (!Number.isSafeInteger(result?.message_id)) throw new CogsDeliveryUnknown();
   return result.message_id;

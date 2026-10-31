@@ -172,7 +172,7 @@ export function createCogsPoller(deps: Deps) {
               if (abort.signal.aborted) return;
               appendAudit(deps.db, "system", injected.ok ? "cogs_inject_ok" : "cogs_inject_failed", messageId, { agent_id: agent.id, maybePartial: !!injected.maybePartial });
               // 넣었으면 답이 나갈 때까지 그 방에 '입력 중'을 보낸다(lib/cogsTyping). 못 넣었으면 일하는 중이 아니다.
-              if (injected.ok || injected.maybePartial) (deps.startTyping ?? startCogsTyping)(agent.id, String(m.chat.id), config, token);
+              if (injected.ok || injected.maybePartial) (deps.startTyping ?? startCogsTyping)(agent.id, String(m.chat.id), config, token, { replyToMessageId: m.message_id });
               if (!injected.ok && !injected.maybePartial) break; // retry the same update; no second DB insertion
             }
             offset = update.update_id + 1;

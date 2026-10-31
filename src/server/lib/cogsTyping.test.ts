@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { activeCogsTypingCount, startCogsTyping, stopCogsTyping } from "./cogsTyping";
+import { activeCogsTypingCount, isActive, startCogsTyping, stopCogsTyping } from "./cogsTyping";
 
 const config = { api_base: "http://127.0.0.1:1" };
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -58,4 +58,18 @@ test("a failing typing call is swallowed and the loop keeps going", async () => 
   await wait(50);
   expect(n).toBeGreaterThanOrEqual(2);
   expect(activeCogsTypingCount()).toBe(1);
+});
+
+
+test("progress activity is scoped to the exact member and room and ends at stop or cap", async () => {
+  const r = recorder();
+  startCogsTyping("a", "42", config, "tok", { capMs: 20, call: r.call });
+  expect(isActive("a", "42")).toBe(true);
+  expect(isActive("b", "42")).toBe(false);
+  expect(isActive("a", "43")).toBe(false);
+  stopCogsTyping("a", "42");
+  expect(isActive("a", "42")).toBe(false);
+  startCogsTyping("a", "42", config, "tok", { capMs: 20, call: r.call });
+  await wait(40);
+  expect(isActive("a", "42")).toBe(false);
 });

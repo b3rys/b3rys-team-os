@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrate } from "../db/migrate";
 import { createCogsPoller } from "./cogsPoll";
-import { cogsInbox } from "../lib/cogsRelay";
-import { activeCogsTypingCount, startCogsTyping, stopCogsTyping } from "../lib/cogsTyping";
+import { CogsApiRejected, CogsDeliveryUnknown, cogsInbox } from "../lib/cogsRelay";
+import { activeCogsTypingCount, startCogsTyping, stopCogsTyping, updateCogsProgress } from "../lib/cogsTyping";
 import { createInboxRoutes } from "../routes/inbox";
 import { buildTmuxInjectionPrompt, type InjectPromptOptions } from "../lib/tmuxInject";
 import { loadRegistry } from "../lib/registry";
@@ -25,7 +25,7 @@ const TOKEN = "fixture-cogs-secret-no-production-value";
 const KEYS = ["TEAM_AGENT_REGISTRY", "B3OS_AUDIT_LOG_DIR", "TEAMOS_AGENT_OFF_FILE", "TEAM_COLLAB_ROOT", "COGS_ATTACHMENT_DIR", "COGS_ATTACHMENT_MAX_BYTES"];
 let pulled = 0;
 let declineStatus = 200;
-let typing: { agentId: string; chatId: string }[];
+let typing: { agentId: string; chatId: string; replyToMessageId?: number }[];
 let files: Record<string, Uint8Array>, filePath: (id: string) => string, streamed: Set<string>, reportedSize: Record<string, number>;
 
 beforeEach(() => {
@@ -61,8 +61,8 @@ beforeEach(() => {
     const method = pathname.split("/").at(-1)!;
     const body = await req.json();
     calls.push({ method, body });
-    // Match cogs botValues: only scalar JSON parameters are accepted.
-    if (Object.values(body as object).some((v) => v !== null && typeof v === "object")) return Response.json({ ok: false }, { status: 400 });
+    // Match botValues: activity args are JSON; ordinary parameters remain scalar.
+    if (Object.entries(body as object).some(([k, v]) => k !== "cogs_activity_args" && v !== null && typeof v === "object")) return Response.json({ ok: false }, { status: 400 });
     if (fail) return Response.json({ ok: false, description: `${TOKEN} ${req.url}` }, { status: 500 });
     if (method === "getUpdates") return Response.json({ ok: true, result: updates.filter((u) => u.update_id >= (body as any).offset) });
     if (method === "getFile") {
@@ -93,7 +93,7 @@ function update(id = 10, chat = 71, text = "질문입니다") {
 }
 function poller() {
   const p = createCogsPoller({ db, agents: () => agents, broadcast: (event) => { events.push(event); }, inject: async (opts) => { injected.push(opts); return { ok: injectOk }; },
-    startTyping: (agentId, chatId) => { typing.push({ agentId, chatId }); } });
+    startTyping: (agentId, chatId, _config, _token, opts) => { typing.push({ agentId, chatId, replyToMessageId: opts?.replyToMessageId }); } });
   stop = p.stop; return p;
 }
 function route() { return createInboxRoutes({ db, agents: () => agents, registeredAgentIds: () => new Set(["lisa"]), broadcast: (event) => { events.push(event); } }); }
@@ -630,7 +630,7 @@ test("typing starts for the injected room, not when the injection failed", async
   updates = [update()]; const p = poller(); injectOk = false; await p.pollOnce();
   expect(typing).toHaveLength(0);
   injectOk = true; await p.pollOnce();
-  expect(typing).toEqual([{ agentId: "lisa", chatId: String(update().message.chat.id) }]);
+  expect(typing).toEqual([{ agentId: "lisa", chatId: String(update().message.chat.id), replyToMessageId: update().message.message_id }]);
 });
 
 test("the reply posted to cogs stops typing in that room; no_reply stops it too", async () => {
@@ -657,4 +657,85 @@ test("a reply that names the cogs message but another bus thread still stops typ
   const res = await reply({ thread_id: "some-other-thread" });
   expect(res.status).toBe(201); expect((await res.json()).posted).toBe(true);
   expect(activeCogsTypingCount()).toBe(0);
+});
+
+test("progress API uses one response and the actual inbox reply completes it without input in audit", async () => {
+  updates = [update()]; await poller().pollOnce();
+  startCogsTyping("lisa", "71", agents[0]!.cogs_inbox!, TOKEN, { intervalMs: 60000, replyToMessageId: update().message.message_id });
+  const progress = () => route().request("/cogs/progress", { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ agent: "lisa", chat_id: "71", session_id: "fixture", tool_name: "Read", tool_input: { file_path: "RAW_PROGRESS_PRIVATE_FIXTURE" } }) });
+  expect((await progress()).status).toBe(202);
+  await new Promise(r => setTimeout(r, 20));
+  expect((await reply()).status).toBe(201);
+  expect(calls.filter(c => c.method === "sendMessage")).toHaveLength(1);
+  expect(calls.find(c => c.method === "sendMessage")?.body.reply_to_message_id).toBe(update().message.message_id);
+  expect(calls.filter(c => c.method === "editMessageText").at(-1)?.body).toMatchObject({ message_id: 99, cogs_response_state: "complete" });
+  expect((await progress()).status).toBe(202);
+  for (const table of ["message", "audit_event"]) {
+    expect(JSON.stringify(db.query(`SELECT * FROM ${table}`).all())).not.toContain("RAW_PROGRESS_PRIVATE_FIXTURE");
+  }
+  expect(JSON.stringify(calls)).not.toContain("RAW_PROGRESS_PRIVATE_FIXTURE");
+});
+
+test("actual no_reply cancels the progress response and later progress is discarded", async () => {
+  updates = [update()]; await poller().pollOnce();
+  startCogsTyping("lisa", "71", agents[0]!.cogs_inbox!, TOKEN, { intervalMs: 60000, replyToMessageId: update().message.message_id });
+  await route().request("/cogs/progress", { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ agent: "lisa", chat_id: "71", session_id: "fixture", tool_name: "Bash" }) });
+  const res = await react(injected.at(-1)!.messageId, null, "lisa", route(), { no_reply: true });
+  expect(res.status).toBe(200);
+  // The loopback cancellation and decline requests are independent auxiliary calls.
+  await new Promise(r => setTimeout(r, 20));
+  expect(calls.some(c => c.method === "editMessageText" && c.body.message_id === 99 && c.body.cogs_response_state === "cancelled")).toBe(true);
+  expect(activeCogsTypingCount()).toBe(0);
+});
+
+
+for (const cancelRejected of [false, true]) {
+  test(`explicit completion rejection falls back to one intact reply (cancel rejection=${cancelRejected})`, async () => {
+    updates = [update()]; await poller().pollOnce();
+    const progressCall = (async (_config: unknown, _token: string, method: string, body: any) => {
+      calls.push({ method, body });
+      if (body.cogs_response_state === "complete" || (cancelRejected && body.cogs_response_state === "cancelled")) throw new CogsApiRejected(400);
+      return { message_id: 99 };
+    }) as any;
+    startCogsTyping("lisa", "71", agents[0]!.cogs_inbox!, TOKEN, { call: progressCall, replyToMessageId: 110 });
+    await updateCogsProgress("lisa", "71", "read_files");
+    const res = await reply();
+    expect(res.status).toBe(201);
+    expect(calls.filter(c => c.method === "sendMessage" && c.body.text !== "").map(c => c.body))
+      .toEqual([{ chat_id: "71", text: "답변입니다", reply_to_message_id: 110 }]);
+    expect(calls.some(c => c.body.cogs_response_state === "cancelled")).toBe(true);
+    expect(activeCogsTypingCount()).toBe(0);
+  });
+}
+
+test("invalid reply identity stops typing instead of waiting for the cap", async () => {
+  updates = [update()]; await poller().pollOnce();
+  startCogsTyping("lisa", "71", agents[0]!.cogs_inbox!, TOKEN, { call: (async () => true) as any });
+  agents[0]!.id = "other";
+  expect((await reply()).status).toBe(502);
+  expect(activeCogsTypingCount()).toBe(0);
+});
+
+test("lost complete edit ACK retries the same id through inbox without sending a duplicate answer", async () => {
+  updates = [update()]; await poller().pollOnce();
+  let attempts = 0;
+  const progressCall = (async (_config: unknown, _token: string, method: string, body: any) => {
+    calls.push({ method, body });
+    if (body.cogs_response_state === "complete") {
+      attempts++;
+      if (attempts === 1) throw new CogsDeliveryUnknown();
+      if (attempts === 2) throw new CogsApiRejected(429);
+    }
+    return { message_id: 99 };
+  }) as any;
+  startCogsTyping("lisa", "71", agents[0]!.cogs_inbox!, TOKEN, { call: progressCall, replyToMessageId: 110 });
+  await updateCogsProgress("lisa", "71", "read_files");
+  expect((await reply()).status).toBe(502);
+  expect((await reply()).status).toBe(502); // A later rejection cannot disprove the first write.
+  expect((await reply()).status).toBe(201);
+  expect(calls.filter(c => c.body.cogs_response_state === "complete").map(c => c.body.message_id)).toEqual([99, 99, 99]);
+  expect(calls.filter(c => c.method === "sendMessage" && c.body.text !== "")).toHaveLength(0);
+  expect(calls.some(c => c.body.cogs_response_state === "cancelled")).toBe(false);
 });
