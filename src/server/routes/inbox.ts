@@ -1,3 +1,4 @@
+import { createCogsProgressRoutes } from "./cogsProgress";
 import { createHash } from "node:crypto";
 import { CogsDeliveryUnknown, isSingleEmoji, sendCogsReply, setCogsReaction } from "../lib/cogsRelay";
 import { stopCogsTyping } from "../lib/cogsTyping";
@@ -68,6 +69,7 @@ function ownerDmChatId(db: Database): string | undefined {
 
 export function createInboxRoutes(deps: InboxRouteDeps): Hono {
   const r = new Hono();
+  r.route("/", createCogsProgressRoutes(() => deps.agents?.() ?? ambientAgents()));
 
   // POST /api/cogs/react — 팀원이 받은 cogs 메시지(버스 id)에 자기 봇으로 리액션. emoji "" = 지우기.
   //   no_reply: true 면 글 답 없이 끝낸다고 cogs 에 알린다(declineResponse, 앱 '입력 중' 끔). emoji 없이 no_reply 만도 된다.
@@ -408,8 +410,6 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       let acknowledged = false;
       try {
         const agent = (deps.agents?.() ?? ambientAgents()).find((a) => a.id === env.from_agent_id);
-        // 답을 올리기 전에 그 방의 '입력 중'을 멈춘다 — 답 뒤에 늦은 typing 이 다시 뜨지 않게. 키는 답이 실제로 가는 방이다.
-        stopCogsTyping(cogsMetaForGate.agent_id, cogsMetaForGate.chat_id);
         const postedId = await sendCogsReply(agent, cogsMetaForGate, stored.body);
         acknowledged = true;
         setDelivery("sent", postedId);

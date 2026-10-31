@@ -1,4 +1,4 @@
-import { cogsCall, type CogsInbox } from "./cogsRelay";
+import { CogsApiRejected, CogsDeliveryUnknown, cogsCall, type CogsInbox } from "./cogsRelay";
 
 /**
  * cogs 에서 받은 말을 팀원 세션에 넣은 뒤, 그 팀원이 답을 낼 때까지 그 방에 '입력 중'(sendChatAction typing)을 계속 보낸다.
@@ -16,7 +16,19 @@ export interface CogsTypingOptions {
 const DEFAULT_INTERVAL_MS = 4000;
 const DEFAULT_CAP_MS = 10 * 60 * 1000;
 
-const active = new Map<string, { interval: ReturnType<typeof setInterval>; cap: ReturnType<typeof setTimeout> }>();
+interface Processing {
+  interval: ReturnType<typeof setInterval>;
+  cap: ReturnType<typeof setTimeout>;
+  call: typeof cogsCall;
+  config: Pick<CogsInbox, "api_base">;
+  token: string;
+  accepting: boolean;
+  finishing?: boolean;
+  messageId?: number;
+  uncertainOpen?: boolean;
+  pending: Promise<unknown>;
+}
+const active = new Map<string, Processing>();
 
 function key(agentId: string, chatId: string): string {
   return `${agentId}\n${chatId}`;
@@ -25,6 +37,13 @@ function key(agentId: string, chatId: string): string {
 /** 같은 방에서 다시 부르면 상한 시계를 처음부터 다시 잰다(새 말이 왔다). */
 export function startCogsTyping(agentId: string, chatId: string, config: Pick<CogsInbox, "api_base">, token: string,
   opts: CogsTypingOptions = {}): void {
+  const previous = active.get(key(agentId, chatId));
+  if (previous?.accepting) {
+    clearTimeout(previous.cap);
+    previous.cap = setTimeout(() => stopCogsTyping(agentId, chatId), opts.capMs ?? DEFAULT_CAP_MS);
+    (previous.cap as { unref?: () => void }).unref?.();
+    return; // A new inbound message in this room retains its one response bubble.
+  }
   stopCogsTyping(agentId, chatId);
   const call = opts.call ?? cogsCall;
   const send = () => { call(config, token, "sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => { /* 보조 신호 */ }); };
@@ -33,7 +52,7 @@ export function startCogsTyping(agentId: string, chatId: string, config: Pick<Co
   const cap = setTimeout(() => stopCogsTyping(agentId, chatId), opts.capMs ?? DEFAULT_CAP_MS);
   (interval as { unref?: () => void }).unref?.();
   (cap as { unref?: () => void }).unref?.();
-  active.set(k, { interval, cap });
+  active.set(k, { interval, cap, call, config, token, accepting: true, pending: Promise.resolve() });
   send();
 }
 
@@ -44,9 +63,84 @@ export function stopCogsTyping(agentId: string, chatId: string): void {
   clearInterval(entry.interval);
   clearTimeout(entry.cap);
   active.delete(k);
+  entry.accepting = false;
+  // Wait for an already-sent opening request before cancelling its returned id.
+  void entry.pending.then(async () => {
+    if (entry.messageId !== undefined) {
+      await entry.call(entry.config, entry.token, "editMessageText", {
+        chat_id: chatId, message_id: entry.messageId, text: "", cogs_response_state: "cancelled",
+      });
+    }
+  }).catch(() => { /* Auxiliary cleanup never logs tool input or remote bodies. */ });
+}
+
+/** Only canonical activity codes, never tool arguments, reach the response message. */
+export async function updateCogsProgress(agentId: string, chatId: string, code: string): Promise<boolean> {
+  const entry = active.get(key(agentId, chatId));
+  if (!entry?.accepting || process.env.B3OS_COGS_PROGRESS === "0") return false;
+  const next = entry.pending.then(async () => {
+    if (!entry.accepting || entry.uncertainOpen) return false;
+    const body = { chat_id: chatId, text: "", cogs_response_state: "activity", cogs_activity_code: code, cogs_activity_args: {} };
+    if (entry.messageId !== undefined) {
+      await entry.call(entry.config, entry.token, "editMessageText", { ...body, message_id: entry.messageId });
+    } else {
+      try {
+        const result = await entry.call(entry.config, entry.token, "sendMessage", body);
+        if (!Number.isSafeInteger(result?.message_id)) throw new CogsDeliveryUnknown();
+        entry.messageId = result.message_id;
+      } catch (error) {
+        if (error instanceof CogsDeliveryUnknown) entry.uncertainOpen = true;
+        throw error;
+      }
+    }
+    return true;
+  });
+  entry.pending = next.catch(() => {});
+  return next;
+}
+
+/** Stop accepting tools synchronously, then replace the activity bubble with the first reply. */
+export async function completeCogsProgress(agentId: string, chatId: string, text: string): Promise<number | undefined> {
+  const k = key(agentId, chatId);
+  const entry = active.get(k);
+  if (!entry) return undefined;
+  if (entry.finishing) {
+    await entry.pending;
+    if (entry.messageId !== undefined) throw new CogsDeliveryUnknown();
+    return undefined; // Subsequent reply parts must become new messages.
+  }
+  entry.finishing = true;
+  entry.accepting = false;
+  clearInterval(entry.interval);
+  const next = entry.pending.then(async () => {
+    if (entry.messageId !== undefined) {
+      try {
+        await entry.call(entry.config, entry.token, "editMessageText", {
+          chat_id: chatId, message_id: entry.messageId, text, cogs_response_state: "complete",
+        });
+      } catch (error) {
+        // Editing a known id with identical text/state is idempotent, even after a lost ACK.
+        entry.finishing = false;
+        if (error instanceof CogsApiRejected) throw error;
+        throw new Error("cogs_progress_edit_failed");
+      }
+    }
+    clearTimeout(entry.cap);
+    if (active.get(k) === entry) active.delete(k);
+    const completedId = entry.messageId;
+    entry.messageId = undefined;
+    return completedId;
+  });
+  entry.pending = next.catch(() => {});
+  return next;
 }
 
 /** 시험용 — 지금 '입력 중'을 보내고 있는 방 수. */
 export function activeCogsTypingCount(): number {
   return active.size;
+}
+
+/** Progress is accepted only while this member is processing this room. */
+export function isActive(agentId: string, chatId: string): boolean {
+  return active.get(key(agentId, chatId))?.accepting === true;
 }
