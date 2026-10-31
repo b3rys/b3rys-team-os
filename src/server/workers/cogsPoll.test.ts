@@ -7,5 +7,5 @@ test("cogs relay with a fake API server and isolated registry/DB/token", async (
   });
   const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
   expect(code, `${out}\n${err}`).toBe(0);
-  expect(err).toContain("67 pass"); expect(err).toContain("0 fail");
+  expect(err).toContain("70 pass"); expect(err).toContain("0 fail");
 });

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { migrate } from "../db/migrate";
 import { createCogsPoller } from "./cogsPoll";
 import { cogsInbox } from "../lib/cogsRelay";
+import { activeCogsTypingCount, startCogsTyping, stopCogsTyping } from "../lib/cogsTyping";
 import { createInboxRoutes } from "../routes/inbox";
 import { buildTmuxInjectionPrompt, type InjectPromptOptions } from "../lib/tmuxInject";
 import { loadRegistry } from "../lib/registry";
@@ -24,6 +25,7 @@ const TOKEN = "fixture-cogs-secret-no-production-value";
 const KEYS = ["TEAM_AGENT_REGISTRY", "B3OS_AUDIT_LOG_DIR", "TEAMOS_AGENT_OFF_FILE", "TEAM_COLLAB_ROOT", "COGS_ATTACHMENT_DIR", "COGS_ATTACHMENT_MAX_BYTES"];
 let pulled = 0;
 let declineStatus = 200;
+let typing: { agentId: string; chatId: string }[];
 let files: Record<string, Uint8Array>, filePath: (id: string) => string, streamed: Set<string>, reportedSize: Record<string, number>;
 
 beforeEach(() => {
@@ -38,7 +40,7 @@ beforeEach(() => {
   files = {}; filePath = (id) => `files/${id}`; streamed = new Set(); reportedSize = {};
   writeFileSync(join(dir, "token"), TOKEN, { mode: 0o600 });
   declineStatus = 200;
-  updates = []; calls = []; injected = []; events = []; fail = false; injectOk = true; sendMode = "normal"; releaseSend = undefined;
+  updates = []; calls = []; injected = []; typing = []; events = []; fail = false; injectOk = true; sendMode = "normal"; releaseSend = undefined;
   server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
     const pathname = new URL(req.url).pathname;
     if (pathname.startsWith("/file/bot")) {
@@ -90,7 +92,8 @@ function update(id = 10, chat = 71, text = "질문입니다") {
   return { update_id: id, message: { message_id: id + 100, chat: { id: chat, type: "private" }, from: { id: 8, first_name: "GD", is_bot: false }, text } };
 }
 function poller() {
-  const p = createCogsPoller({ db, agents: () => agents, broadcast: (event) => { events.push(event); }, inject: async (opts) => { injected.push(opts); return { ok: injectOk }; } });
+  const p = createCogsPoller({ db, agents: () => agents, broadcast: (event) => { events.push(event); }, inject: async (opts) => { injected.push(opts); return { ok: injectOk }; },
+    startTyping: (agentId, chatId) => { typing.push({ agentId, chatId }); } });
   stop = p.stop; return p;
 }
 function route() { return createInboxRoutes({ db, agents: () => agents, registeredAgentIds: () => new Set(["lisa"]), broadcast: (event) => { events.push(event); } }); }
@@ -621,4 +624,37 @@ test("a JSON body that is not an object is a 400, not a server error", async () 
     const res = await route().request("/cogs/react", { method: "POST", headers: { "content-type": "application/json" }, body });
     expect(res.status).toBe(400);
   }
+});
+
+test("typing starts for the injected room, not when the injection failed", async () => {
+  updates = [update()]; const p = poller(); injectOk = false; await p.pollOnce();
+  expect(typing).toHaveLength(0);
+  injectOk = true; await p.pollOnce();
+  expect(typing).toEqual([{ agentId: "lisa", chatId: String(update().message.chat.id) }]);
+});
+
+test("the reply posted to cogs stops typing in that room; no_reply stops it too", async () => {
+  const noop = (async () => true) as any;
+  const base = { api_base: "http://127.0.0.1:1" };
+  updates = [update()]; await poller().pollOnce();
+  startCogsTyping("lisa", "71", base, "t", { intervalMs: 60_000, call: noop });
+  startCogsTyping("lisa", "72", base, "t", { intervalMs: 60_000, call: noop });
+  expect((await reply()).status).toBe(201);
+  expect(activeCogsTypingCount()).toBe(1);
+  stopCogsTyping("lisa", "72");
+
+  updates = [update(2)]; await poller().pollOnce();
+  startCogsTyping("lisa", "71", base, "t", { intervalMs: 60_000, call: noop });
+  const res = await react(injected.at(-1)!.messageId, null, "lisa", route(), { no_reply: true });
+  expect(res.status).toBe(200);
+  expect(activeCogsTypingCount()).toBe(0);
+});
+
+test("a reply that names the cogs message but another bus thread still stops typing in that room", async () => {
+  const noop = (async () => true) as any;
+  updates = [update()]; await poller().pollOnce();
+  startCogsTyping("lisa", "71", { api_base: "http://127.0.0.1:1" }, "t", { intervalMs: 60_000, call: noop });
+  const res = await reply({ thread_id: "some-other-thread" });
+  expect(res.status).toBe(201); expect((await res.json()).posted).toBe(true);
+  expect(activeCogsTypingCount()).toBe(0);
 });
