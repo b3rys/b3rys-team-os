@@ -10,16 +10,16 @@ function recorder() {
   return { calls, call };
 }
 
-afterEach(() => { stopCogsTyping("a", "t1"); stopCogsTyping("a", "t2"); stopCogsTyping("b", "t1"); });
+afterEach(() => { stopCogsTyping("a", "42"); stopCogsTyping("a", "43"); stopCogsTyping("b", "42"); });
 
 test("sends typing at once and then every interval until stopped", async () => {
   const r = recorder();
-  startCogsTyping("a", "t1", config, "tok", "42", { intervalMs: 20, capMs: 10_000, call: r.call });
+  startCogsTyping("a", "42", config, "tok", { intervalMs: 20, capMs: 10_000, call: r.call });
   expect(r.calls).toEqual([{ method: "sendChatAction", body: { chat_id: "42", action: "typing" } }]);
   await wait(70);
   const sent = r.calls.length;
   expect(sent).toBeGreaterThanOrEqual(3);
-  stopCogsTyping("a", "t1");
+  stopCogsTyping("a", "42");
   expect(activeCogsTypingCount()).toBe(0);
   await wait(50);
   expect(r.calls.length).toBe(sent);
@@ -27,7 +27,7 @@ test("sends typing at once and then every interval until stopped", async () => {
 
 test("stops by itself at the cap", async () => {
   const r = recorder();
-  startCogsTyping("a", "t1", config, "tok", "42", { intervalMs: 10, capMs: 35, call: r.call });
+  startCogsTyping("a", "42", config, "tok", { intervalMs: 10, capMs: 35, call: r.call });
   await wait(60);
   expect(activeCogsTypingCount()).toBe(0);
   const sent = r.calls.length;
@@ -35,26 +35,26 @@ test("stops by itself at the cap", async () => {
   expect(r.calls.length).toBe(sent);
 });
 
-test("a new message on the same thread restarts one loop, not two", async () => {
+test("a new message in the same room restarts one loop, not two", async () => {
   const r = recorder();
-  startCogsTyping("a", "t1", config, "tok", "42", { intervalMs: 1000, capMs: 10_000, call: r.call });
-  startCogsTyping("a", "t1", config, "tok", "42", { intervalMs: 1000, capMs: 10_000, call: r.call });
+  startCogsTyping("a", "42", config, "tok", { intervalMs: 1000, capMs: 10_000, call: r.call });
+  startCogsTyping("a", "42", config, "tok", { intervalMs: 1000, capMs: 10_000, call: r.call });
   expect(activeCogsTypingCount()).toBe(1);
 });
 
-test("threads and members are separate; stopping one leaves the others", () => {
+test("rooms and members are separate; stopping one leaves the others", () => {
   const r = recorder();
-  startCogsTyping("a", "t1", config, "tok", "1", { intervalMs: 1000, call: r.call });
-  startCogsTyping("a", "t2", config, "tok", "2", { intervalMs: 1000, call: r.call });
-  startCogsTyping("b", "t1", config, "tok", "3", { intervalMs: 1000, call: r.call });
-  stopCogsTyping("a", "t1");
+  startCogsTyping("a", "42", config, "tok", { intervalMs: 1000, call: r.call });
+  startCogsTyping("a", "43", config, "tok", { intervalMs: 1000, call: r.call });
+  startCogsTyping("b", "42", config, "tok", { intervalMs: 1000, call: r.call });
+  stopCogsTyping("a", "42");
   expect(activeCogsTypingCount()).toBe(2);
 });
 
 test("a failing typing call is swallowed and the loop keeps going", async () => {
   let n = 0;
   const call = (async () => { n++; throw new Error("cogs_api_failed"); }) as any;
-  startCogsTyping("a", "t1", config, "tok", "42", { intervalMs: 15, capMs: 10_000, call });
+  startCogsTyping("a", "42", config, "tok", { intervalMs: 15, capMs: 10_000, call });
   await wait(50);
   expect(n).toBeGreaterThanOrEqual(2);
   expect(activeCogsTypingCount()).toBe(1);

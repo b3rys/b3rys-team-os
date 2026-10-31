@@ -25,7 +25,7 @@ const TOKEN = "fixture-cogs-secret-no-production-value";
 const KEYS = ["TEAM_AGENT_REGISTRY", "B3OS_AUDIT_LOG_DIR", "TEAMOS_AGENT_OFF_FILE", "TEAM_COLLAB_ROOT", "COGS_ATTACHMENT_DIR", "COGS_ATTACHMENT_MAX_BYTES"];
 let pulled = 0;
 let declineStatus = 200;
-let typing: { agentId: string; threadId: string; chatId: string }[];
+let typing: { agentId: string; chatId: string }[];
 let files: Record<string, Uint8Array>, filePath: (id: string) => string, streamed: Set<string>, reportedSize: Record<string, number>;
 
 beforeEach(() => {
@@ -93,7 +93,7 @@ function update(id = 10, chat = 71, text = "질문입니다") {
 }
 function poller() {
   const p = createCogsPoller({ db, agents: () => agents, broadcast: (event) => { events.push(event); }, inject: async (opts) => { injected.push(opts); return { ok: injectOk }; },
-    startTyping: (agentId, threadId, _config, _token, chatId) => { typing.push({ agentId, threadId, chatId }); } });
+    startTyping: (agentId, chatId) => { typing.push({ agentId, chatId }); } });
   stop = p.stop; return p;
 }
 function route() { return createInboxRoutes({ db, agents: () => agents, registeredAgentIds: () => new Set(["lisa"]), broadcast: (event) => { events.push(event); } }); }
@@ -626,26 +626,35 @@ test("a JSON body that is not an object is a 400, not a server error", async () 
   }
 });
 
-test("typing starts for the injected thread, not when the injection failed", async () => {
+test("typing starts for the injected room, not when the injection failed", async () => {
   updates = [update()]; const p = poller(); injectOk = false; await p.pollOnce();
   expect(typing).toHaveLength(0);
   injectOk = true; await p.pollOnce();
-  expect(typing).toEqual([{ agentId: "lisa", threadId: injected.at(-1)!.threadId!, chatId: String(update().message.chat.id) }]);
+  expect(typing).toEqual([{ agentId: "lisa", chatId: String(update().message.chat.id) }]);
 });
 
-test("the reply posted to cogs stops typing on that thread; no_reply stops it too", async () => {
+test("the reply posted to cogs stops typing in that room; no_reply stops it too", async () => {
   const noop = (async () => true) as any;
+  const base = { api_base: "http://127.0.0.1:1" };
   updates = [update()]; await poller().pollOnce();
-  const thread = injected.at(-1)!.threadId!;
-  startCogsTyping("lisa", thread, { api_base: "http://127.0.0.1:1" }, "t", "71", { intervalMs: 60_000, call: noop });
-  startCogsTyping("lisa", "other-thread", { api_base: "http://127.0.0.1:1" }, "t", "71", { intervalMs: 60_000, call: noop });
+  startCogsTyping("lisa", "71", base, "t", { intervalMs: 60_000, call: noop });
+  startCogsTyping("lisa", "72", base, "t", { intervalMs: 60_000, call: noop });
   expect((await reply()).status).toBe(201);
   expect(activeCogsTypingCount()).toBe(1);
-  stopCogsTyping("lisa", "other-thread");
+  stopCogsTyping("lisa", "72");
 
   updates = [update(2)]; await poller().pollOnce();
-  startCogsTyping("lisa", injected.at(-1)!.threadId!, { api_base: "http://127.0.0.1:1" }, "t", "71", { intervalMs: 60_000, call: noop });
+  startCogsTyping("lisa", "71", base, "t", { intervalMs: 60_000, call: noop });
   const res = await react(injected.at(-1)!.messageId, null, "lisa", route(), { no_reply: true });
   expect(res.status).toBe(200);
+  expect(activeCogsTypingCount()).toBe(0);
+});
+
+test("a reply that names the cogs message but another bus thread still stops typing in that room", async () => {
+  const noop = (async () => true) as any;
+  updates = [update()]; await poller().pollOnce();
+  startCogsTyping("lisa", "71", { api_base: "http://127.0.0.1:1" }, "t", { intervalMs: 60_000, call: noop });
+  const res = await reply({ thread_id: "some-other-thread" });
+  expect(res.status).toBe(201); expect((await res.json()).posted).toBe(true);
   expect(activeCogsTypingCount()).toBe(0);
 });
