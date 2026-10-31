@@ -50,3 +50,8 @@ export function stopCogsTyping(agentId: string, chatId: string): void {
 export function activeCogsTypingCount(): number {
   return active.size;
 }
+
+/** Progress is accepted only while this member is processing this room. */
+export function isActive(agentId: string, chatId: string): boolean {
+  return active.has(key(agentId, chatId));
+}

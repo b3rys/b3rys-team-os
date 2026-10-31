@@ -146,10 +146,20 @@ def handle_react(state_dir, data):
     #   근거: 틀렸을 때 손해가 작은 쪽이다. DM 에 잘못 뜨면 당사자만 보지만 단톡방은 공개다.
     #   같은 종류가 여럿이면 마지막 것을 쓴다.
     # 방 정보가 아예 없으면(버스 깨움 등) ★지운다★ → handle_pre 는 기존 폴백으로 내려간다.
+    # cogs metadata belongs to the injected envelope, never a body-only marker.
+    cogs_chat = None
+    for attrs, body in re.findall(r"<external_message\b([^>]*)>(.*?)</external_message>", prompt, re.DOTALL):
+        if re.search(r'\bsource="cogs"', attrs):
+            match = re.match(r"\s*\[cogs (?:group )?chat_id=(-?\d+)(?:,|\])", body)
+            if match:
+                cogs_chat = match.group(1)
     turn_key = _pick_turn_key(tags, ext)
     _sid = data.get("session_id", "default")
     if turn_key:
         _save_turn_channel(state_dir, _sid, turn_key[0], turn_key[1])
+    elif cogs_chat:
+        _save_turn_channel(state_dir, _sid, cogs_chat, None, channel="cogs")
+        return
     else:
         _clear_turn_channel(state_dir, _sid)
 
@@ -194,8 +204,33 @@ def handle_react(state_dir, data):
     # 여기서 다시 저장하지 않는다. 저장을 토큰 뒤에 두면 토큰 없는 턴에 옛 방이 남는다.
 
 
+def _post_cogs_progress(chat_id, data):
+    if os.environ.get("B3OS_COGS_PROGRESS") == "0":
+        return
+    agent = os.environ.get("OWNER_GATE_SELF")
+    if not agent or not chat_id:
+        return
+    # Loopback only, no redirects/proxy, no response body or diagnostic logging.
+    import http.client
+    conn = http.client.HTTPConnection("127.0.0.1", 7878, timeout=0.8)
+    try:
+        body = json.dumps({"agent": agent, "session_id": data.get("session_id", "default"),
+                           "chat_id": chat_id, "tool_name": data.get("tool_name", ""),
+                           "tool_input": data.get("tool_input") or {}}).encode()
+        conn.request("POST", "/team/api/cogs/progress", body, {"Content-Type": "application/json"})
+        conn.getresponse()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+
 # ── PreToolUse ──────────────────────────────────────────────
 def handle_pre(state_dir, data):
+    turn = load_state(_turnch_path(state_dir, data.get("session_id", "default")))
+    if turn.get("channel") == "cogs":
+        _post_cogs_progress(turn.get("chat_id"), data)
+        return  # Never use Telegram tokens/transcript fallback for a cogs turn.
     tool = data.get("tool_name", "")
     # 최종 답변(텔레그램 reply) 직전 = 진행 메시지를 먼저 지우고 답이 나가게.
     # (gd 요청 순서: "작업 중" 삭제 → 답변. Stop 불발과 무관하게 신뢰성 확보.)
@@ -291,6 +326,8 @@ def _dbg(state_dir, msg):
 
 # ── PreCompact ──────────────────────────────────────────────
 def handle_compact(state_dir, data):
+    if load_state(_turnch_path(state_dir, data.get("session_id", "default"))).get("channel") == "cogs":
+        return
     chat_id = parse_chat(data.get("transcript_path", ""))
     if not chat_id:
         return
@@ -433,12 +470,12 @@ def _turnch_path(state_dir, sid):
     return os.path.join(state_dir, "turnch", sid + ".json")
 
 
-def _save_turn_channel(state_dir, sid, chat_id, message_id):
+def _save_turn_channel(state_dir, sid, chat_id, message_id, channel="telegram"):
     """현재 turn 을 시작시킨 메시지의 (chat_id, message_id) 기억 → progress 를 그 방에만 띄움."""
     try:
         os.makedirs(os.path.join(state_dir, "turnch"), exist_ok=True)
         with open(_turnch_path(state_dir, sid), "w") as f:
-            json.dump({"chat_id": chat_id, "message_id": message_id, "ts": time.time()}, f)
+            json.dump({"chat_id": chat_id, "message_id": message_id, "channel": channel, "ts": time.time()}, f)
     except Exception:
         pass
 
