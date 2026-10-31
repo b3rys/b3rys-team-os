@@ -25,7 +25,7 @@ const TOKEN = "fixture-cogs-secret-no-production-value";
 const KEYS = ["TEAM_AGENT_REGISTRY", "B3OS_AUDIT_LOG_DIR", "TEAMOS_AGENT_OFF_FILE", "TEAM_COLLAB_ROOT", "COGS_ATTACHMENT_DIR", "COGS_ATTACHMENT_MAX_BYTES"];
 let pulled = 0;
 let declineStatus = 200;
-let typing: { agentId: string; chatId: string }[];
+let typing: { agentId: string; chatId: string; replyToMessageId?: number }[];
 let files: Record<string, Uint8Array>, filePath: (id: string) => string, streamed: Set<string>, reportedSize: Record<string, number>;
 
 beforeEach(() => {
@@ -93,7 +93,7 @@ function update(id = 10, chat = 71, text = "질문입니다") {
 }
 function poller() {
   const p = createCogsPoller({ db, agents: () => agents, broadcast: (event) => { events.push(event); }, inject: async (opts) => { injected.push(opts); return { ok: injectOk }; },
-    startTyping: (agentId, chatId) => { typing.push({ agentId, chatId }); } });
+    startTyping: (agentId, chatId, _config, _token, opts) => { typing.push({ agentId, chatId, replyToMessageId: opts?.replyToMessageId }); } });
   stop = p.stop; return p;
 }
 function route() { return createInboxRoutes({ db, agents: () => agents, registeredAgentIds: () => new Set(["lisa"]), broadcast: (event) => { events.push(event); } }); }
@@ -630,7 +630,7 @@ test("typing starts for the injected room, not when the injection failed", async
   updates = [update()]; const p = poller(); injectOk = false; await p.pollOnce();
   expect(typing).toHaveLength(0);
   injectOk = true; await p.pollOnce();
-  expect(typing).toEqual([{ agentId: "lisa", chatId: String(update().message.chat.id) }]);
+  expect(typing).toEqual([{ agentId: "lisa", chatId: String(update().message.chat.id), replyToMessageId: update().message.message_id }]);
 });
 
 test("the reply posted to cogs stops typing in that room; no_reply stops it too", async () => {
@@ -661,12 +661,14 @@ test("a reply that names the cogs message but another bus thread still stops typ
 
 test("progress API uses one response and the actual inbox reply completes it without input in audit", async () => {
   updates = [update()]; await poller().pollOnce();
-  startCogsTyping("lisa", "71", agents[0]!.cogs_inbox!, TOKEN, { intervalMs: 60000 });
+  startCogsTyping("lisa", "71", agents[0]!.cogs_inbox!, TOKEN, { intervalMs: 60000, replyToMessageId: update().message.message_id });
   const progress = () => route().request("/cogs/progress", { method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ agent: "lisa", chat_id: "71", session_id: "fixture", tool_name: "Read", tool_input: { file_path: "RAW_PROGRESS_PRIVATE_FIXTURE" } }) });
-  expect((await progress()).status).toBe(200);
+  expect((await progress()).status).toBe(202);
+  await new Promise(r => setTimeout(r, 20));
   expect((await reply()).status).toBe(201);
   expect(calls.filter(c => c.method === "sendMessage")).toHaveLength(1);
+  expect(calls.find(c => c.method === "sendMessage")?.body.reply_to_message_id).toBe(update().message.message_id);
   expect(calls.filter(c => c.method === "editMessageText").at(-1)?.body).toMatchObject({ message_id: 99, cogs_response_state: "complete" });
   expect((await progress()).status).toBe(202);
   for (const table of ["message", "audit_event"]) {
@@ -677,7 +679,7 @@ test("progress API uses one response and the actual inbox reply completes it wit
 
 test("actual no_reply cancels the progress response and later progress is discarded", async () => {
   updates = [update()]; await poller().pollOnce();
-  startCogsTyping("lisa", "71", agents[0]!.cogs_inbox!, TOKEN, { intervalMs: 60000 });
+  startCogsTyping("lisa", "71", agents[0]!.cogs_inbox!, TOKEN, { intervalMs: 60000, replyToMessageId: update().message.message_id });
   await route().request("/cogs/progress", { method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ agent: "lisa", chat_id: "71", session_id: "fixture", tool_name: "Bash" }) });
   const res = await react(injected.at(-1)!.messageId, null, "lisa", route(), { no_reply: true });

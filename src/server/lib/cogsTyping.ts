@@ -11,6 +11,7 @@ export interface CogsTypingOptions {
   intervalMs?: number;
   capMs?: number;
   call?: typeof cogsCall;
+  replyToMessageId?: number;
 }
 
 const DEFAULT_INTERVAL_MS = 4000;
@@ -25,6 +26,8 @@ interface Processing {
   accepting: boolean;
   finishing?: boolean;
   messageId?: number;
+  replyToMessageId?: number;
+  lastCode?: string;
   uncertainOpen?: boolean;
   pending: Promise<unknown>;
 }
@@ -52,7 +55,7 @@ export function startCogsTyping(agentId: string, chatId: string, config: Pick<Co
   const cap = setTimeout(() => stopCogsTyping(agentId, chatId), opts.capMs ?? DEFAULT_CAP_MS);
   (interval as { unref?: () => void }).unref?.();
   (cap as { unref?: () => void }).unref?.();
-  active.set(k, { interval, cap, call, config, token, accepting: true, pending: Promise.resolve() });
+  active.set(k, { interval, cap, call, config, token, replyToMessageId: opts.replyToMessageId, accepting: true, pending: Promise.resolve() });
   send();
 }
 
@@ -80,12 +83,13 @@ export async function updateCogsProgress(agentId: string, chatId: string, code: 
   if (!entry?.accepting || process.env.B3OS_COGS_PROGRESS === "0") return false;
   const next = entry.pending.then(async () => {
     if (!entry.accepting || entry.uncertainOpen) return false;
+    if (entry.lastCode === code) return true;
     const body = { chat_id: chatId, text: "", cogs_response_state: "activity", cogs_activity_code: code, cogs_activity_args: {} };
     if (entry.messageId !== undefined) {
       await entry.call(entry.config, entry.token, "editMessageText", { ...body, message_id: entry.messageId });
     } else {
       try {
-        const result = await entry.call(entry.config, entry.token, "sendMessage", body);
+        const result = await entry.call(entry.config, entry.token, "sendMessage", { ...body, ...(entry.replyToMessageId !== undefined ? { reply_to_message_id: entry.replyToMessageId } : {}) });
         if (!Number.isSafeInteger(result?.message_id)) throw new CogsDeliveryUnknown();
         entry.messageId = result.message_id;
       } catch (error) {
@@ -93,6 +97,7 @@ export async function updateCogsProgress(agentId: string, chatId: string, code: 
         throw error;
       }
     }
+    entry.lastCode = code;
     return true;
   });
   entry.pending = next.catch(() => {});

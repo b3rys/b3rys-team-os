@@ -43,7 +43,8 @@ class CogsProgressTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         args = calls[0].args
         self.assertEqual(args[:2], ('POST', '/team/api/cogs/progress'))
-        self.assertEqual(json.loads(args[2]), {'agent': 'testmate', 'chat_id': '42', 'session_id': 'test-session', 'tool_name': 'Bash', 'tool_input': {'command': 'private fixture'}})
+        self.assertEqual(json.loads(args[2]), {'agent': 'testmate', 'chat_id': '42', 'session_id': 'test-session', 'tool_name': 'Bash'})
+        self.assertNotIn(b'private fixture', args[2])
         connect.return_value.close.assert_called_once()
 
     def test_quoted_telegram_tag_cannot_redirect_cogs_progress(self):

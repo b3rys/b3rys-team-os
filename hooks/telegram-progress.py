@@ -215,8 +215,7 @@ def _post_cogs_progress(chat_id, data):
     conn = http.client.HTTPConnection("127.0.0.1", 7878, timeout=0.8)
     try:
         body = json.dumps({"agent": agent, "session_id": data.get("session_id", "default"),
-                           "chat_id": chat_id, "tool_name": data.get("tool_name", ""),
-                           "tool_input": data.get("tool_input") or {}}).encode()
+                           "chat_id": chat_id, "tool_name": data.get("tool_name", "")}).encode()
         conn.request("POST", "/team/api/cogs/progress", body, {"Content-Type": "application/json"})
         conn.getresponse()
     except Exception:

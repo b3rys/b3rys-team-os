@@ -17,10 +17,14 @@ const call = (async (_c: unknown, _t: string, method: string, body: any) => {
 }) as any;
 const start = (capMs = 10000) => startCogsTyping("fixture", "42", config, "fixture", { call, capMs });
 const progressCalls = () => calls.filter(c => c.method !== "sendChatAction");
-const request = (extra = {}) => createCogsProgressRoutes(() => agents).request("/cogs/progress", {
+const request = async (extra = {}) => {
+const response = await createCogsProgressRoutes(() => agents).request("/cogs/progress", {
   method: "POST", headers: { "content-type": "application/json" },
   body: JSON.stringify({ agent: "fixture", session_id: "session", chat_id: "42", tool_name: "Read", tool_input: { file_path: "PRIVATE_INPUT_SENTINEL" }, ...extra }),
 });
+await wait(); // Let background fixture calls settle without waiting for the remote promise.
+return response;
+};
 
 beforeEach(() => {
   calls = []; opening = undefined;
@@ -147,3 +151,44 @@ test(`completion ${failure.constructor.name} can retry the same message without 
 });
 
 }
+
+
+test("a two-second cogs opening does not delay the progress route beyond 100ms", async () => {
+  let finished = false;
+  let finish!: () => void;
+  const completion = new Promise<void>(resolve => { finish = resolve; });
+  opening = async () => {
+    await wait(2000);
+    finished = true; finish();
+    return { message_id: 99 };
+  };
+  start();
+  const began = performance.now();
+  const response = await request();
+  const elapsed = performance.now() - began;
+  expect(response.status).toBe(202);
+  expect(await response.json()).toEqual({ ok: true, accepted: true });
+  expect(elapsed).toBeLessThan(100);
+  expect(finished).toBe(false);
+  console.log(`slow cogs route response: ${elapsed.toFixed(3)} ms`);
+  await completion;
+});
+
+test("Read Grep Read sends one activity; only a changed code edits the response", async () => {
+  start();
+  await Promise.all([request(), request({ tool_name: "Grep" }), request()]);
+  expect(progressCalls().map(c => c.method)).toEqual(["sendMessage"]);
+  await request({ tool_name: "Edit" });
+  expect(progressCalls().map(c => c.method)).toEqual(["sendMessage", "editMessageText"]);
+});
+
+test("the completed activity response keeps its original reply connection", async () => {
+  startCogsTyping("fixture", "42", config, "fixture", { call, replyToMessageId: 77 });
+  await request();
+  startCogsTyping("fixture", "42", config, "fixture", { call, replyToMessageId: 88 });
+  expect(await completeCogsProgress("fixture", "42", "answer")).toBe(99);
+  const [opened, completed] = progressCalls();
+  expect(opened?.body.reply_to_message_id).toBe(77);
+  expect(completed?.body).toMatchObject({ message_id: 99, text: "answer", cogs_response_state: "complete" });
+  expect(isActive("fixture", "42")).toBe(false);
+});

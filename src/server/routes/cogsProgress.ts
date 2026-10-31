@@ -17,7 +17,7 @@ export function progressCode(tool: string): string {
 export function createCogsProgressRoutes(agents: () => AgentRecord[]): Hono {
   const r = new Hono();
   r.post("/cogs/progress", async (c) => {
-    // No auditing/logging of this request: it contains private tool input.
+    // Never audit/log the request, including unknown fields from older callers.
     if (process.env.B3OS_COGS_PROGRESS === "0") return c.json({ ok: true, accepted: false }, 202);
     let raw: any;
     try { raw = await c.req.json(); } catch { return c.json({ ok: false, error: "invalid_json" }, 400); }
@@ -34,8 +34,8 @@ export function createCogsProgressRoutes(agents: () => AgentRecord[]): Hono {
       const agent = agents().find(a => a.id === id);
       const config = agent && cogsInbox(agent);
       if (!config || !config.allow_from.includes(chatId)) return c.json({ ok: true, accepted: false }, 202);
-      const accepted = await updateCogsProgress(id, chatId, progressCode(tool));
-      return c.json({ ok: true, accepted });
+      void updateCogsProgress(id, chatId, progressCode(tool)).catch(() => { /* Auxiliary signal. */ });
+      return c.json({ ok: true, accepted: true }, 202);
     } catch {
       // Neither parser details, remote errors nor raw tool data are reflected.
       return c.json({ ok: true, accepted: false }, 202);
