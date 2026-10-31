@@ -61,8 +61,8 @@ beforeEach(() => {
     const method = pathname.split("/").at(-1)!;
     const body = await req.json();
     calls.push({ method, body });
-    // Match cogs botValues: only scalar JSON parameters are accepted.
-    if (Object.values(body as object).some((v) => v !== null && typeof v === "object")) return Response.json({ ok: false }, { status: 400 });
+    // Match botValues: activity args are JSON; ordinary parameters remain scalar.
+    if (Object.entries(body as object).some(([k, v]) => k !== "cogs_activity_args" && v !== null && typeof v === "object")) return Response.json({ ok: false }, { status: 400 });
     if (fail) return Response.json({ ok: false, description: `${TOKEN} ${req.url}` }, { status: 500 });
     if (method === "getUpdates") return Response.json({ ok: true, result: updates.filter((u) => u.update_id >= (body as any).offset) });
     if (method === "getFile") {
@@ -656,5 +656,34 @@ test("a reply that names the cogs message but another bus thread still stops typ
   startCogsTyping("lisa", "71", { api_base: "http://127.0.0.1:1" }, "t", { intervalMs: 60_000, call: noop });
   const res = await reply({ thread_id: "some-other-thread" });
   expect(res.status).toBe(201); expect((await res.json()).posted).toBe(true);
+  expect(activeCogsTypingCount()).toBe(0);
+});
+
+test("progress API uses one response and the actual inbox reply completes it without input in audit", async () => {
+  updates = [update()]; await poller().pollOnce();
+  startCogsTyping("lisa", "71", agents[0]!.cogs_inbox!, TOKEN, { intervalMs: 60000 });
+  const progress = () => route().request("/cogs/progress", { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ agent: "lisa", chat_id: "71", session_id: "fixture", tool_name: "Read", tool_input: { file_path: "RAW_PROGRESS_PRIVATE_FIXTURE" } }) });
+  expect((await progress()).status).toBe(200);
+  expect((await reply()).status).toBe(201);
+  expect(calls.filter(c => c.method === "sendMessage")).toHaveLength(1);
+  expect(calls.filter(c => c.method === "editMessageText").at(-1)?.body).toMatchObject({ message_id: 99, cogs_response_state: "complete" });
+  expect((await progress()).status).toBe(202);
+  for (const table of ["message", "audit_event"]) {
+    expect(JSON.stringify(db.query(`SELECT * FROM ${table}`).all())).not.toContain("RAW_PROGRESS_PRIVATE_FIXTURE");
+  }
+  expect(JSON.stringify(calls)).not.toContain("RAW_PROGRESS_PRIVATE_FIXTURE");
+});
+
+test("actual no_reply cancels the progress response and later progress is discarded", async () => {
+  updates = [update()]; await poller().pollOnce();
+  startCogsTyping("lisa", "71", agents[0]!.cogs_inbox!, TOKEN, { intervalMs: 60000 });
+  await route().request("/cogs/progress", { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ agent: "lisa", chat_id: "71", session_id: "fixture", tool_name: "Bash" }) });
+  const res = await react(injected.at(-1)!.messageId, null, "lisa", route(), { no_reply: true });
+  expect(res.status).toBe(200);
+  // The loopback cancellation and decline requests are independent auxiliary calls.
+  await new Promise(r => setTimeout(r, 20));
+  expect(calls.some(c => c.method === "editMessageText" && c.body.message_id === 99 && c.body.cogs_response_state === "cancelled")).toBe(true);
   expect(activeCogsTypingCount()).toBe(0);
 });

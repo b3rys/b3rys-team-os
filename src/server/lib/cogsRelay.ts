@@ -1,3 +1,4 @@
+import { completeCogsProgress } from "./cogsTyping";
 import { readFileSync } from "node:fs";
 import type { AgentRecord } from "../types";
 import { memberChannel, readMemberChannel } from "./memberChannel";
@@ -83,6 +84,8 @@ export async function sendCogsReply(agent: AgentRecord | undefined, meta: CogsMe
   if (!agent || agent.id !== meta.agent_id) throw new Error("cogs_reply_agent_mismatch");
   const config = cogsInbox(agent);
   if (!config || !config.allow_from.includes(meta.chat_id)) throw new Error("cogs_reply_not_allowed");
+  const completedId = await completeCogsProgress(agent.id, meta.chat_id, text);
+  if (completedId !== undefined) return completedId;
   const result = await cogsCall(config, cogsToken(config), "sendMessage", { chat_id: meta.chat_id, text, reply_to_message_id: meta.message_id });
   if (!Number.isSafeInteger(result?.message_id)) throw new CogsDeliveryUnknown();
   return result.message_id;

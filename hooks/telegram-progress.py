@@ -155,11 +155,11 @@ def handle_react(state_dir, data):
                 cogs_chat = match.group(1)
     turn_key = _pick_turn_key(tags, ext)
     _sid = data.get("session_id", "default")
-    if turn_key:
-        _save_turn_channel(state_dir, _sid, turn_key[0], turn_key[1])
-    elif cogs_chat:
+    if cogs_chat:
         _save_turn_channel(state_dir, _sid, cogs_chat, None, channel="cogs")
         return
+    elif turn_key:
+        _save_turn_channel(state_dir, _sid, turn_key[0], turn_key[1])
     else:
         _clear_turn_channel(state_dir, _sid)
 
