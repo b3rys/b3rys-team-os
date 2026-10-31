@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { createCogsProgressRoutes, progressCode } from "./cogsProgress";
 import { completeCogsProgress, isActive, startCogsTyping, stopCogsTyping, updateCogsProgress } from "../lib/cogsTyping";
-import { CogsApiRejected, CogsDeliveryUnknown } from "../lib/cogsRelay";
+import { CogsDeliveryUnknown } from "../lib/cogsRelay";
 import type { AgentRecord } from "../types";
 
 const config = { api_base: "http://127.0.0.1:1" };
@@ -134,7 +134,7 @@ test("only tool kinds enter the shared activity code table", () => {
 });
 
 
-for (const failure of [new CogsApiRejected(429), new Error("transport lost")]) {
+for (const failure of [new Error("transport lost"), new CogsDeliveryUnknown()]) {
 test(`completion ${failure.constructor.name} can retry the same message without a new opening`, async () => {
   let reject = true;
   const rejecting = (async (c: any, t: string, method: string, body: any) => {
@@ -191,4 +191,10 @@ test("the completed activity response keeps its original reply connection", asyn
   expect(opened?.body.reply_to_message_id).toBe(77);
   expect(completed?.body).toMatchObject({ message_id: 99, text: "answer", cogs_response_state: "complete" });
   expect(isActive("fixture", "42")).toBe(false);
+});
+
+
+test("relay transport does not import the activity lifecycle", async () => {
+  const source = await Bun.file(new URL("../lib/cogsRelay.ts", import.meta.url)).text();
+  expect(source).not.toMatch(/(?:from\s*|import\s*\()\s*["']\.\/cogsTyping["']/);
 });

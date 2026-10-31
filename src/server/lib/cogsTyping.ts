@@ -29,6 +29,7 @@ interface Processing {
   replyToMessageId?: number;
   lastCode?: string;
   uncertainOpen?: boolean;
+  uncertainComplete?: boolean;
   pending: Promise<unknown>;
 }
 const active = new Map<string, Processing>();
@@ -104,6 +105,11 @@ export async function updateCogsProgress(agentId: string, chatId: string, code: 
   return next;
 }
 
+/** A known response id permits retrying the identical edit without a duplicate answer. */
+export class CogsProgressEditRetry extends Error {
+  constructor() { super("cogs_progress_edit_failed"); }
+}
+
 /** Stop accepting tools synchronously, then replace the activity bubble with the first reply. */
 export async function completeCogsProgress(agentId: string, chatId: string, text: string): Promise<number | undefined> {
   const k = key(agentId, chatId);
@@ -111,7 +117,7 @@ export async function completeCogsProgress(agentId: string, chatId: string, text
   if (!entry) return undefined;
   if (entry.finishing) {
     await entry.pending;
-    if (entry.messageId !== undefined) throw new CogsDeliveryUnknown();
+    if (entry.messageId !== undefined) throw new CogsProgressEditRetry();
     return undefined; // Subsequent reply parts must become new messages.
   }
   entry.finishing = true;
@@ -124,10 +130,19 @@ export async function completeCogsProgress(agentId: string, chatId: string, text
           chat_id: chatId, message_id: entry.messageId, text, cogs_response_state: "complete",
         });
       } catch (error) {
-        // Editing a known id with identical text/state is idempotent, even after a lost ACK.
-        entry.finishing = false;
-        if (error instanceof CogsApiRejected) throw error;
-        throw new Error("cogs_progress_edit_failed");
+        if (error instanceof CogsApiRejected && !entry.uncertainComplete) {
+          // The server explicitly rejected the answer edit: close the auxiliary bubble,
+          // then let the inbox send the real answer through the normal reply path.
+          await entry.call(entry.config, entry.token, "editMessageText", {
+            chat_id: chatId, message_id: entry.messageId, text: "", cogs_response_state: "cancelled",
+          }).catch(() => {});
+          entry.messageId = undefined;
+        } else {
+          // A lost edit ACK may already contain the answer. Retain its id for safe retry.
+          entry.uncertainComplete = true;
+          entry.finishing = false;
+          throw new CogsProgressEditRetry();
+        }
       }
     }
     clearTimeout(entry.cap);

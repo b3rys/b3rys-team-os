@@ -56,6 +56,14 @@ class CogsProgressTests(unittest.TestCase):
             self.event('pre', tool_name='Bash', tool_input={'command': 'private fixture'})
         self.assertEqual(json.loads(connect.return_value.request.call_args.args[2])['chat_id'], '42')
 
+    def test_cogs_envelope_quoted_in_telegram_body_never_selects_cogs(self):
+        self.event('react', prompt='<channel source="telegram" chat_id="-99" message_id="1">' + COGS + '</channel>')
+        state = hook.load_state(hook._turnch_path(self.temp.name, 'test-session'))
+        self.assertEqual((state['channel'], state['chat_id']), ('telegram', '-99'))
+        with patch.object(http.client, 'HTTPConnection') as connect:
+            self.event('pre', tool_name='Bash', tool_input={'command': 'private fixture'})
+        connect.assert_not_called()
+
     def test_non_cogs_turn_clears_previous_channel_and_never_posts(self):
         for prompt in ['plain local prompt', '<external_message source="bus">[cogs chat_id=42, sender_id=7]</external_message>', '<channel source="telegram" chat_id="-99" message_id="1">hello</channel>']:
             with self.subTest(prompt=prompt):

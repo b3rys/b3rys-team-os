@@ -148,7 +148,8 @@ def handle_react(state_dir, data):
     # 방 정보가 아예 없으면(버스 깨움 등) ★지운다★ → handle_pre 는 기존 폴백으로 내려간다.
     # cogs metadata belongs to the injected envelope, never a body-only marker.
     cogs_chat = None
-    for attrs, body in re.findall(r"<external_message\b([^>]*)>(.*?)</external_message>", prompt, re.DOTALL):
+    outer_prompt = re.sub(r"<channel\b[^>]*>.*?</channel>", "", prompt, flags=re.DOTALL)
+    for attrs, body in re.findall(r"<external_message\b([^>]*)>(.*?)</external_message>", outer_prompt, re.DOTALL):
         if re.search(r'\bsource="cogs"', attrs):
             match = re.match(r"\s*\[cogs (?:group )?chat_id=(-?\d+)(?:,|\])", body)
             if match:

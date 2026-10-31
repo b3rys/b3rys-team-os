@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrate } from "../db/migrate";
 import { createCogsPoller } from "./cogsPoll";
-import { cogsInbox } from "../lib/cogsRelay";
-import { activeCogsTypingCount, startCogsTyping, stopCogsTyping } from "../lib/cogsTyping";
+import { CogsApiRejected, CogsDeliveryUnknown, cogsInbox } from "../lib/cogsRelay";
+import { activeCogsTypingCount, startCogsTyping, stopCogsTyping, updateCogsProgress } from "../lib/cogsTyping";
 import { createInboxRoutes } from "../routes/inbox";
 import { buildTmuxInjectionPrompt, type InjectPromptOptions } from "../lib/tmuxInject";
 import { loadRegistry } from "../lib/registry";
@@ -688,4 +688,54 @@ test("actual no_reply cancels the progress response and later progress is discar
   await new Promise(r => setTimeout(r, 20));
   expect(calls.some(c => c.method === "editMessageText" && c.body.message_id === 99 && c.body.cogs_response_state === "cancelled")).toBe(true);
   expect(activeCogsTypingCount()).toBe(0);
+});
+
+
+for (const cancelRejected of [false, true]) {
+  test(`explicit completion rejection falls back to one intact reply (cancel rejection=${cancelRejected})`, async () => {
+    updates = [update()]; await poller().pollOnce();
+    const progressCall = (async (_config: unknown, _token: string, method: string, body: any) => {
+      calls.push({ method, body });
+      if (body.cogs_response_state === "complete" || (cancelRejected && body.cogs_response_state === "cancelled")) throw new CogsApiRejected(400);
+      return { message_id: 99 };
+    }) as any;
+    startCogsTyping("lisa", "71", agents[0]!.cogs_inbox!, TOKEN, { call: progressCall, replyToMessageId: 110 });
+    await updateCogsProgress("lisa", "71", "read_files");
+    const res = await reply();
+    expect(res.status).toBe(201);
+    expect(calls.filter(c => c.method === "sendMessage" && c.body.text !== "").map(c => c.body))
+      .toEqual([{ chat_id: "71", text: "답변입니다", reply_to_message_id: 110 }]);
+    expect(calls.some(c => c.body.cogs_response_state === "cancelled")).toBe(true);
+    expect(activeCogsTypingCount()).toBe(0);
+  });
+}
+
+test("invalid reply identity stops typing instead of waiting for the cap", async () => {
+  updates = [update()]; await poller().pollOnce();
+  startCogsTyping("lisa", "71", agents[0]!.cogs_inbox!, TOKEN, { call: (async () => true) as any });
+  agents[0]!.id = "other";
+  expect((await reply()).status).toBe(502);
+  expect(activeCogsTypingCount()).toBe(0);
+});
+
+test("lost complete edit ACK retries the same id through inbox without sending a duplicate answer", async () => {
+  updates = [update()]; await poller().pollOnce();
+  let attempts = 0;
+  const progressCall = (async (_config: unknown, _token: string, method: string, body: any) => {
+    calls.push({ method, body });
+    if (body.cogs_response_state === "complete") {
+      attempts++;
+      if (attempts === 1) throw new CogsDeliveryUnknown();
+      if (attempts === 2) throw new CogsApiRejected(429);
+    }
+    return { message_id: 99 };
+  }) as any;
+  startCogsTyping("lisa", "71", agents[0]!.cogs_inbox!, TOKEN, { call: progressCall, replyToMessageId: 110 });
+  await updateCogsProgress("lisa", "71", "read_files");
+  expect((await reply()).status).toBe(502);
+  expect((await reply()).status).toBe(502); // A later rejection cannot disprove the first write.
+  expect((await reply()).status).toBe(201);
+  expect(calls.filter(c => c.body.cogs_response_state === "complete").map(c => c.body.message_id)).toEqual([99, 99, 99]);
+  expect(calls.filter(c => c.method === "sendMessage" && c.body.text !== "")).toHaveLength(0);
+  expect(calls.some(c => c.body.cogs_response_state === "cancelled")).toBe(false);
 });
