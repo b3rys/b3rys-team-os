@@ -60,22 +60,51 @@ export function startCogsTyping(agentId: string, chatId: string, config: Pick<Co
   send();
 }
 
-export function stopCogsTyping(agentId: string, chatId: string): void {
+/** Ends the loop and stops accepting progress; the response message, if one was opened, is left as it is. */
+function detachCogsTyping(agentId: string, chatId: string): Processing | undefined {
   const k = key(agentId, chatId);
   const entry = active.get(k);
-  if (!entry) return;
+  if (!entry) return undefined;
   clearInterval(entry.interval);
   clearTimeout(entry.cap);
   active.delete(k);
   entry.accepting = false;
-  // Wait for an already-sent opening request before cancelling its returned id.
-  void entry.pending.then(async () => {
-    if (entry.messageId !== undefined) {
-      await entry.call(entry.config, entry.token, "editMessageText", {
-        chat_id: chatId, message_id: entry.messageId, text: "", cogs_response_state: "cancelled",
-      });
-    }
-  }).catch(() => { /* Auxiliary cleanup never logs tool input or remote bodies. */ });
+  return entry;
+}
+
+/** Marks an opened progress message cancelled, after the request that opened it has returned its id. */
+async function cancelOpenedProgress(entry: Processing, chatId: string): Promise<void> {
+  await entry.pending;
+  if (entry.messageId === undefined) return;
+  await entry.call(entry.config, entry.token, "editMessageText", {
+    chat_id: chatId, message_id: entry.messageId, text: "", cogs_response_state: "cancelled",
+  });
+}
+
+export function stopCogsTyping(agentId: string, chatId: string): void {
+  const entry = detachCogsTyping(agentId, chatId);
+  if (!entry) return;
+  void cancelOpenedProgress(entry, chatId).catch(() => { /* Auxiliary cleanup never logs tool input or remote bodies. */ });
+}
+
+/**
+ * Ending without a written answer (no_reply). The progress message is left open until the progress requests already
+ * sent have returned, so the decline still finds it waiting and removes it together with the request. Cancelling it
+ * first made the decline find nothing to remove (409) and left the cancelled message in the room. Only when the
+ * decline did not take it (or failed) is the message cancelled, as before.
+ */
+export async function endCogsTypingWithoutReply<T extends { declined: boolean }>(agentId: string, chatId: string,
+  decline: () => Promise<T>): Promise<T> {
+  const entry = detachCogsTyping(agentId, chatId);
+  if (entry) await entry.pending.catch(() => {});
+  let declined = false;
+  try {
+    const result = await decline();
+    declined = result.declined;
+    return result;
+  } finally {
+    if (entry && !declined) void cancelOpenedProgress(entry, chatId).catch(() => { /* Auxiliary cleanup never logs tool input or remote bodies. */ });
+  }
 }
 
 /** Only canonical activity codes, never tool arguments, reach the response message. */
