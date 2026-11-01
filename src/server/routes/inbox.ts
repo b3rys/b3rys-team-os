@@ -99,7 +99,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       // 글 답 없이 끝낸다 = 일이 끝났다. '입력 중'도 멈춘다. 열린 작업 줄은 decline 이 대기와 함께 지우게 두고,
       //   decline 이 지우지 못했을 때만 취소한다(endCogsTypingWithoutReply).
       const { declined } = noReply
-        ? await endCogsTypingWithoutReply(meta.agent_id, meta.chat_id, () => setCogsReaction(agent, meta, emoji, true))
+        ? await endCogsTypingWithoutReply(meta.agent_id, meta.chat_id, meta.message_id, () => setCogsReaction(agent, meta, emoji, true))
         : await setCogsReaction(agent, meta, emoji, false);
       appendAudit(deps.db, agentId, "cogs_reaction_set", messageId, { chat_id: meta.chat_id, cleared: emoji === "", no_reply: noReply, declined });
       return c.json({ ok: true, cleared: emoji === "", ...(noReply ? { declined } : {}) });

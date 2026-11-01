@@ -94,16 +94,19 @@ export function stopCogsTyping(agentId: string, chatId: string): void {
  * decline did not take it (or failed) is the message cancelled, as before.
  */
 export async function endCogsTypingWithoutReply<T extends { declined: boolean }>(agentId: string, chatId: string,
-  decline: () => Promise<T>): Promise<T> {
+  declinedMessageId: number, decline: () => Promise<T>): Promise<T> {
   const entry = detachCogsTyping(agentId, chatId);
   if (entry) await entry.pending.catch(() => {});
+  // The decline removes only a response replying to the declined message. A progress message kept from an earlier
+  // message in this room (a new inbound message retains it) is not taken by it and is cancelled as before.
+  const takenByDecline = entry?.replyToMessageId === declinedMessageId;
   let declined = false;
   try {
     const result = await decline();
     declined = result.declined;
     return result;
   } finally {
-    if (entry && !declined) void cancelOpenedProgress(entry, chatId).catch(() => { /* Auxiliary cleanup never logs tool input or remote bodies. */ });
+    if (entry && !(declined && takenByDecline)) void cancelOpenedProgress(entry, chatId).catch(() => { /* Auxiliary cleanup never logs tool input or remote bodies. */ });
   }
 }
 
