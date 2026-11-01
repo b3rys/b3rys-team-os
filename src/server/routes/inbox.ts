@@ -1,7 +1,7 @@
 import { createCogsProgressRoutes } from "./cogsProgress";
 import { createHash } from "node:crypto";
 import { CogsDeliveryUnknown, cogsReplyConfig, isSingleEmoji, sendCogsReply, setCogsReaction } from "../lib/cogsRelay";
-import { CogsProgressEditRetry, completeCogsProgress, stopCogsTyping } from "../lib/cogsTyping";
+import { CogsProgressEditRetry, completeCogsProgress, endCogsTypingWithoutReply, stopCogsTyping } from "../lib/cogsTyping";
 import { Hono } from "hono";
 import type { Database } from "bun:sqlite";
 import { z } from "zod";
@@ -96,9 +96,11 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     if (row.to_agent_id !== agentId || meta.agent_id !== agentId) return c.json({ ok: false, error: "cogs_reaction_agent_mismatch" }, 403);
     try {
       const agent = (deps.agents?.() ?? ambientAgents()).find((a) => a.id === agentId);
-      // 글 답 없이 끝낸다 = 일이 끝났다. '입력 중'도 멈춘다.
-      if (noReply) stopCogsTyping(meta.agent_id, meta.chat_id);
-      const { declined } = await setCogsReaction(agent, meta, emoji, noReply);
+      // 글 답 없이 끝낸다 = 일이 끝났다. '입력 중'도 멈춘다. 열린 작업 줄은 decline 이 대기와 함께 지우게 두고,
+      //   decline 이 지우지 못했을 때만 취소한다(endCogsTypingWithoutReply).
+      const { declined } = noReply
+        ? await endCogsTypingWithoutReply(meta.agent_id, meta.chat_id, meta.message_id, () => setCogsReaction(agent, meta, emoji, true))
+        : await setCogsReaction(agent, meta, emoji, false);
       appendAudit(deps.db, agentId, "cogs_reaction_set", messageId, { chat_id: meta.chat_id, cleared: emoji === "", no_reply: noReply, declined });
       return c.json({ ok: true, cleared: emoji === "", ...(noReply ? { declined } : {}) });
     } catch (error) {

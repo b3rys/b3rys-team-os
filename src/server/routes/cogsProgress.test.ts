@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { createCogsProgressRoutes, progressCode } from "./cogsProgress";
-import { completeCogsProgress, isActive, startCogsTyping, stopCogsTyping, updateCogsProgress } from "../lib/cogsTyping";
+import { completeCogsProgress, endCogsTypingWithoutReply, isActive, startCogsTyping, stopCogsTyping, updateCogsProgress } from "../lib/cogsTyping";
 import { CogsDeliveryUnknown } from "../lib/cogsRelay";
 import type { AgentRecord } from "../types";
 
@@ -15,7 +15,7 @@ const call = (async (_c: unknown, _t: string, method: string, body: any) => {
   if (method === "sendMessage") return opening ? opening() : { message_id: 99 };
   return true;
 }) as any;
-const start = (capMs = 10000) => startCogsTyping("fixture", "42", config, "fixture", { call, capMs });
+const start = (capMs = 10000, replyToMessageId?: number) => startCogsTyping("fixture", "42", config, "fixture", { call, capMs, replyToMessageId });
 const progressCalls = () => calls.filter(c => c.method !== "sendChatAction");
 const request = async (extra = {}) => {
 const response = await createCogsProgressRoutes(() => agents).request("/cogs/progress", {
@@ -89,6 +89,67 @@ test("no reply and expiry cancel the same empty response", async () => {
     expect(progressCalls().at(-1)).toEqual({ method: "editMessageText", body: { chat_id: "42", message_id: 99, text: "", cogs_response_state: "cancelled" } });
     expect(isActive("fixture", "42")).toBe(false);
   }
+});
+
+test("ending without a reply lets the decline remove the open response before anything cancels it", async () => {
+  start(10000, 77);
+  await request();
+  const order: string[] = [];
+  const result = await endCogsTypingWithoutReply("fixture", "42", 77, async () => {
+    order.push(...progressCalls().map(c => `${c.method}:${c.body.cogs_response_state ?? ""}`));
+    return { declined: true };
+  });
+  await wait();
+  expect(result).toEqual({ declined: true });
+  // At the decline the response was still the open activity, never cancelled; a taken decline leaves nothing to cancel.
+  expect(order).toEqual(["sendMessage:activity"]);
+  expect(progressCalls().map(c => c.method)).toEqual(["sendMessage"]);
+  expect(isActive("fixture", "42")).toBe(false);
+});
+
+test("ending without a reply waits for an in-flight opening, and cancels only what the decline did not take", async () => {
+  for (const outcome of ["refused", "failed"] as const) {
+    calls = [];
+    let release!: () => void;
+    opening = () => new Promise(r => { release = () => r({ message_id: 99 }); });
+    start(10000, 77);
+    await request();
+    let seenAtDecline: string[] = [];
+    const ending = endCogsTypingWithoutReply("fixture", "42", 77, async () => {
+      seenAtDecline = progressCalls().map(c => c.method);
+      if (outcome === "failed") throw new Error("decline_failed");
+      return { declined: false };
+    });
+    await wait();
+    expect(seenAtDecline).toEqual([]); // the decline waits for the opening to return
+    release();
+    if (outcome === "failed") await expect(ending).rejects.toThrow("decline_failed"); else await ending;
+    await wait();
+    expect(seenAtDecline).toEqual(["sendMessage"]);
+    expect(progressCalls().at(-1)).toEqual({ method: "editMessageText", body: { chat_id: "42", message_id: 99, text: "", cogs_response_state: "cancelled" } });
+    expect(isActive("fixture", "42")).toBe(false);
+  }
+});
+
+test("a taken decline of a newer message still cancels the progress kept from an earlier message", async () => {
+  start(10000, 77);
+  await request();
+  start(10000, 88); // a new message in the room retains the response that replies to 77
+  const result = await endCogsTypingWithoutReply("fixture", "42", 88, async () => ({ declined: true }));
+  await wait();
+  expect(result).toEqual({ declined: true });
+  // The decline of 88 removes only a response replying to 88; the one replying to 77 is cancelled as before.
+  expect(progressCalls().map(c => c.method)).toEqual(["sendMessage", "editMessageText"]);
+  expect(progressCalls()[0]!.body.reply_to_message_id).toBe(77);
+  expect(progressCalls().at(-1)).toEqual({ method: "editMessageText", body: { chat_id: "42", message_id: 99, text: "", cogs_response_state: "cancelled" } });
+  expect(isActive("fixture", "42")).toBe(false);
+});
+
+test("ending without a reply in a room with no progress only declines", async () => {
+  const result = await endCogsTypingWithoutReply("fixture", "42", 77, async () => ({ declined: false }));
+  await wait();
+  expect(result).toEqual({ declined: false });
+  expect(progressCalls()).toEqual([]);
 });
 
 test("a quick answer before the queued first tool never opens a progress message", async () => {
