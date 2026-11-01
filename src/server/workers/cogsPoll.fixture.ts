@@ -677,18 +677,24 @@ test("progress API uses one response and the actual inbox reply completes it wit
   expect(JSON.stringify(calls)).not.toContain("RAW_PROGRESS_PRIVATE_FIXTURE");
 });
 
-test("actual no_reply cancels the progress response and later progress is discarded", async () => {
-  updates = [update()]; await poller().pollOnce();
-  startCogsTyping("lisa", "71", agents[0]!.cogs_inbox!, TOKEN, { intervalMs: 60000, replyToMessageId: update().message.message_id });
-  await route().request("/cogs/progress", { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ agent: "lisa", chat_id: "71", session_id: "fixture", tool_name: "Bash" }) });
-  const res = await react(injected.at(-1)!.messageId, null, "lisa", route(), { no_reply: true });
-  expect(res.status).toBe(200);
-  // The loopback cancellation and decline requests are independent auxiliary calls.
-  await new Promise(r => setTimeout(r, 20));
-  expect(calls.some(c => c.method === "editMessageText" && c.body.message_id === 99 && c.body.cogs_response_state === "cancelled")).toBe(true);
-  expect(activeCogsTypingCount()).toBe(0);
-});
+for (const declineTaken of [true, false]) {
+  test(`actual no_reply lets the decline take the open progress response, cancelling it only when refused (taken=${declineTaken})`, async () => {
+    updates = [update()]; await poller().pollOnce();
+    if (!declineTaken) declineStatus = 409;
+    startCogsTyping("lisa", "71", agents[0]!.cogs_inbox!, TOKEN, { intervalMs: 60000, replyToMessageId: update().message.message_id });
+    await route().request("/cogs/progress", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: "lisa", chat_id: "71", session_id: "fixture", tool_name: "Bash" }) });
+    const res = await react(injected.at(-1)!.messageId, null, "lisa", route(), { no_reply: true });
+    expect(res.status).toBe(200);
+    expect((await res.json()).declined).toBe(declineTaken);
+    await new Promise(r => setTimeout(r, 20));
+    const methods = calls.filter(c => c.method !== "getUpdates" && c.method !== "sendChatAction").map(c => `${c.method}:${c.body.cogs_response_state ?? ""}`);
+    // The decline goes out while the response is still the open activity; only a refused decline is followed by a cancel.
+    expect(methods).toEqual(declineTaken ? ["sendMessage:activity", "declineResponse:"]
+      : ["sendMessage:activity", "declineResponse:", "editMessageText:cancelled"]);
+    expect(activeCogsTypingCount()).toBe(0);
+  });
+}
 
 
 for (const cancelRejected of [false, true]) {
