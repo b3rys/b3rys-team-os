@@ -14,6 +14,7 @@ import {
   EXEC_ALLOWLIST,
   execScheduledJob,
   ensureDailyTaskReviewJobs,
+  ensureTaskContinuationGuardJob,
   ensureWeeklySelfLearningJobs,
   fromSqliteDate,
   getScheduledJob,
@@ -145,6 +146,20 @@ describe("b3os scheduler core", () => {
     expect(fromSqliteDate(first[1]!.next_run_at).getTime()).toBe(kst(2026, 9, 7, 6, 20).getTime());
     expect(JSON.parse(first[0]!.payload_json)).toEqual({ type: "exec", execKey: "task-review-ping" });
     expect(JSON.parse(first[1]!.payload_json)).toEqual({ type: "exec", execKey: "task-review-summary" });
+  });
+
+  test("continuation guard is seeded once per install as a 30-minute exec job", () => {
+    const d = db();
+    const first = ensureTaskContinuationGuardJob(d, { from: kst(2026, 11, 1, 9, 10) });
+    const second = ensureTaskContinuationGuardJob(d, { from: kst(2026, 11, 1, 9, 10) });
+    expect(first.id).toBe("sched_task_continuation_guard");
+    expect(second.id).toBe(first.id);
+    expect(d.prepare(`SELECT count(*) AS n FROM scheduled_job WHERE id = ?`).get(first.id)).toEqual({ n: 1 });
+    expect(JSON.parse(first.schedule_expr!)).toMatchObject({ cron: "*/30 * * * *", holidayPolicy: "run" });
+    expect(JSON.parse(first.payload_json)).toEqual({ type: "exec", execKey: "task-continuation-guard" });
+    expect(EXEC_ALLOWLIST["task-continuation-guard"]).toBeDefined();
+    expect(first.enabled).toBe(1);
+    expect(fromSqliteDate(first.next_run_at).getTime()).toBe(kst(2026, 11, 1, 9, 30).getTime());
   });
 
   test("daily task review skips consecutive KR holidays and the following weekend", () => {

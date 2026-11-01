@@ -115,6 +115,7 @@ export const WEEKLY_SELF_LEARNING_BODY = [
 
 export const DAILY_TASK_REVIEW_PING_JOB_ID = "sched_task_review_ping";
 export const DAILY_TASK_REVIEW_SUMMARY_JOB_ID = "sched_task_review_summary";
+export const TASK_CONTINUATION_GUARD_JOB_ID = "sched_task_continuation_guard";
 const LEGACY_FIXED_OFFSET_TIMEZONES = new Set(["Asia/Seoul", "Asia/Kolkata", "UTC", "Etc/UTC"]);
 
 function isValidIanaTimezone(tz: string): boolean {
@@ -511,6 +512,21 @@ export function ensureDailyTaskReviewJobs(db: Database, opts: { from?: Date } = 
     from: opts.from,
     payload: { type: "exec", execKey: spec.execKey },
   }));
+}
+
+// 진행 지속 가드도 설치마다 기본으로 둔다 — 없으면 카드 '재개 시각' 이 지나도 아무도 owner 를 깨우지 않는다.
+// 멈춘 doing 카드가 없으면 no-op 이라 빈 칸반·새 설치에는 아무 일도 하지 않는다(scripts/task-continuation-guard.ts).
+export function ensureTaskContinuationGuardJob(db: Database, opts: { from?: Date } = {}): ScheduledJobRow {
+  return ensureCronJob(db, {
+    id: TASK_CONTINUATION_GUARD_JOB_ID,
+    title: "진행 지속 가드 (30분) — 멈춘 doing 카드를 owner 에게 핑",
+    cron: "*/30 * * * *",
+    timezone: currentDailyTaskReviewTimezone(),
+    holidayPolicy: "run",
+    createdBy: "system",
+    from: opts.from,
+    payload: { type: "exec", execKey: "task-continuation-guard" },
+  });
 }
 
 export function getScheduledJob(db: Database, id: string): ScheduledJobRow | null {
