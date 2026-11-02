@@ -6,6 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import type { CodexSandboxMode } from "../../types";
+import { teamDbPathForChild } from "../../lib/teamDbPath";
 
 // 바이너리 env 미설정은 PATH 조회를 사용해야 특정 CPU·OS의 고정 경로 때문에 spawn이 실패하지 않는다.
 export const CODEX_BIN = process.env.CODEX_BIN ?? "codex";
@@ -164,9 +165,7 @@ export async function runCodexTurn(opts: CodexTurnOptions): Promise<CodexTurnRes
   const env = { ...process.env };
   // 팀원 신원을 명시해 실행 환경에서 다른 발신자를 추측하지 않게 한다.
   if (opts.agentId) env.GD_AGENT_ID = opts.agentId;
-  if (!env.TEAM_DB_PATH) {
-    env.TEAM_DB_PATH = join(dirname(fileURLToPath(import.meta.url)), "../../../../team.db");
-  }
+  env.TEAM_DB_PATH = teamDbPathForChild(env.TEAM_DB_PATH) ?? join(dirname(fileURLToPath(import.meta.url)), "../../../../team.db");
   if (opts.codexHome) env.CODEX_HOME = opts.codexHome;
 
   return await new Promise<CodexTurnResult>((resolve) => {
