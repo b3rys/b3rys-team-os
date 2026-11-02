@@ -50,9 +50,9 @@ import { HERMES_TURN_TIMEOUT_MS } from "../lib/hermesBridge";
 
 // ★hermes lease/grace 사다리 (2026-07-16)★ — blocking-wake 런타임(openclaw·hermes)의 claim 은
 //   turn cap 보다 길어야 recoverStaleClaims 가 턴 도중 리셋하지 않는다(안 그러면 중복보고).
-describe("lease/grace ladder — blocking-wake 런타임은 turnCap < lease < grace", () => {
-  test("★hermes: turnCap < lease < grace 자동 성립 (중복 방지 불변식)", () => {
-    const cap = HERMES_TURN_TIMEOUT_MS; // 600s
+describe("lease/grace ladder — blocking-wake 런타임은 idleCap < lease < grace", () => {
+  test("★hermes: idleCap < lease < grace 자동 성립 (중복 방지 불변식)", () => {
+    const cap = HERMES_TURN_TIMEOUT_MS; // idle 600s
     const leaseMs = leaseSecForRuntime("hermes_agent") * 1000;
     const graceMs = inFlightGraceForRuntime("hermes_agent");
     expect(cap).toBeLessThan(leaseMs); // 사다리 1단
