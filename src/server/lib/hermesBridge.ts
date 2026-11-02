@@ -5,9 +5,9 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** 팀원 스크립트(_me.sh 등)가 team.db 를 찾도록 넘겨줄 경로. 서버와 같은 규칙으로 해석한다. */
-const DB_PATH_FOR_SCRIPTS =
-  process.env.TEAM_DB_PATH ?? join(dirname(fileURLToPath(import.meta.url)), "../../../team.db");
+const DB_PATH_FOR_SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), "../../../team.db");
 import { existsSync, readFileSync } from "node:fs";
+import { teamDbPathForChild } from "./teamDbPath";
 import type { AgentRecord } from "../types";
 import { pick, type Locale } from "./i18n";
 import { teamContextLabel } from "../channels/registry";
@@ -256,7 +256,7 @@ function runHermesProcess(opts: HermesTurnOptions, resumeId: string | null): Pro
       env: {
         ...process.env,
         GD_AGENT_ID: opts.agent.id,          // 나는 누구인가 (스크립트가 tmux 세션으로 추측하지 않게)
-        TEAM_DB_PATH: process.env.TEAM_DB_PATH ?? DB_PATH_FOR_SCRIPTS,
+        TEAM_DB_PATH: teamDbPathForChild(process.env.TEAM_DB_PATH, DB_PATH_FOR_SCRIPTS),
         TERMINAL_CWD: runtimeCwd,
         MESSAGING_CWD: runtimeCwd,
       },
