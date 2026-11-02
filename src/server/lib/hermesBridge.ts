@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 /** 팀원 스크립트(_me.sh 등)가 team.db 를 찾도록 넘겨줄 경로. 서버와 같은 규칙으로 해석한다. */
 const DB_PATH_FOR_SCRIPTS =
   process.env.TEAM_DB_PATH ?? join(dirname(fileURLToPath(import.meta.url)), "../../../team.db");
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import type { AgentRecord } from "../types";
 import { pick, type Locale } from "./i18n";
 import { teamContextLabel } from "../channels/registry";
@@ -37,7 +37,7 @@ export interface HermesTurnOptions {
   /** anti-pingpong hop 체인: 받은 메시지의 hop_count. 봉투에 hop_count = (hopCount ?? 0)+1 로 실어 openclaw/claude 봉투와 대칭. */
   hopCount?: number;
   /**
-   * 이 턴이 아직 살아 있다는 신호. hermes 자식이 stdout/stderr 를 흘릴 때마다 불린다.
+   * 이 턴이 아직 살아 있다는 신호. hermes 자식의 출력 또는 프로필 DB 활동이 진행되면 불린다.
    *
    * 부르는 쪽(버스)이 이걸로 예약(lease)을 연장 한다 — 그래야 일하는 중인 턴이 죽은 것으로
    * 오인돼 같은 메시지가 다시 디스패치되는 일 이 없다. (`extendLease` 주석에 경위)
@@ -149,8 +149,8 @@ export function buildPrompt(opts: HermesTurnOptions): string {
   );
 }
 
-// 리서치·교차확인 턴을 허용하려고 600초를 사용한다. 재시도는 이미 전송된 위임을 중복시킬 수 있고 lease/grace는 이 값에서 파생된다.
-/** 생존신호를 부르는 최소 간격 — 출력 청크마다 DB 를 쓰지 않기 위한 것. lease(660s)보다 훨씬 짧아야 한다. */
+// 무활동은 600초, 턴 절대 상한은 45분이다. lease/grace는 절대 상한에서 파생된다.
+/** 생존신호를 부르는 최소 간격 — 출력 청크마다 DB 를 쓰지 않기 위한 것. lease보다 훨씬 짧아야 한다. */
 const ALIVE_NOTIFY_MIN_INTERVAL_MS = 30_000;
 /** SIGTERM 뒤 이만큼 기다렸다 SIGKILL 로 승격한다. 정리할 틈은 주되 무한정 기다리지 않는다. */
 const KILL_ESCALATION_MS = 5_000;
@@ -162,10 +162,23 @@ const KILL_ESCALATION_MS = 5_000;
  */
 type SpawnFn = typeof spawn;
 let spawnForBridge: SpawnFn = spawn;
-export function __setHermesBridgeTestDeps(deps?: { spawn?: SpawnFn }): void {
+const realClock = { now: () => Date.now(), setTimeout, clearTimeout };
+let clock = realClock;
+const readMtime = (path: string): number | null => {
+  try { return statSync(path).mtimeMs; } catch { return null; }
+};
+let mtimeForBridge = readMtime;
+export function __setHermesBridgeTestDeps(deps?: {
+  spawn?: SpawnFn;
+  clock?: typeof realClock;
+  mtime?: typeof readMtime;
+}): void {
   spawnForBridge = deps?.spawn ?? spawn;
+  clock = deps?.clock ?? realClock;
+  mtimeForBridge = deps?.mtime ?? readMtime;
 }
 export const HERMES_TURN_TIMEOUT_MS = Number(process.env.HERMES_TURN_TIMEOUT_MS ?? 600_000);
+export const HERMES_TURN_MAX_MS = Number(process.env.HERMES_TURN_MAX_MS ?? 45 * 60_000);
 
 /**
  * 한 턴 = 한 `hermes -z` 프로세스. 프로세스는 턴이 끝나면 죽지만 대화는 hermes 세션에 남는다.
@@ -211,6 +224,12 @@ function runHermesProcess(opts: HermesTurnOptions, resumeId: string | null): Pro
   const usagePath = join(tmpdir(), `hermes-usage-${opts.agent.id}-${opts.messageId}-${process.pid}.json`);
   const args = ["-z", prompt, "--usage-file", usagePath];
   if (resumeId) args.push("--resume", resumeId);
+  const profileRoot = opts.agent.hermes_profile
+    ? join(HERMES_ROOT, "profiles", opts.agent.hermes_profile) : HERMES_ROOT;
+  const statePath = join(profileRoot, "state.db");
+  const activityMtime = (): number | null => mtimeForBridge(`${statePath}-wal`) ?? mtimeForBridge(statePath);
+  // 기동 전에 기준을 잡아 첫 poll 이전의 쓰기도 활동으로 센다.
+  let lastMtime = activityMtime();
   return new Promise((resolve) => {
     const failed = (error: Error, sessionNotFound = false): void =>
       resolve({ kind: "failed", error, sessionNotFound });
@@ -227,29 +246,37 @@ function runHermesProcess(opts: HermesTurnOptions, resumeId: string | null): Pro
     });
     let stdout = "";
     let stderr = "";
-    // 출력 중인 턴을 끊지 않도록 무출력 시간만 제한한다. 무응답 자식은 lease 만료 뒤 중복 실행되지 않게 종료한다.
+    // 출력 또는 프로필 DB 쓰기는 활동이다. 절대 상한은 활동으로 연장하지 않는다.
     let finished = false;
     let idleTimer: ReturnType<typeof setTimeout>;
+    let maxTimer: ReturnType<typeof setTimeout>;
+    let activityTimer: ReturnType<typeof setTimeout>;
     let killEscalation: ReturnType<typeof setTimeout> | undefined;
-    const onIdle = (): void => {
+    const clearTimers = (): void => {
+      clock.clearTimeout(idleTimer);
+      clock.clearTimeout(maxTimer);
+      clock.clearTimeout(activityTimer);
+    };
+    const onTimeout = (reason: string): void => {
+      if (finished) return;
       finished = true;
-      // SIGTERM 만으로는 종료가 보장되지 않는다 — 무시하거나 syscall 에 걸려 있으면 그대로 산다.
-      //   유예를 주고 SIGKILL 로 승격 한다. (승격이 없으면 위 '중복 실행 방지' 가 보장이 아니라 희망이 된다)
+      clearTimers();
       proc.kill();
-      killEscalation = setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* 이미 죽음 */ } }, KILL_ESCALATION_MS);
+      killEscalation = clock.setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* 이미 죽음 */ } }, KILL_ESCALATION_MS);
       killEscalation.unref?.();
-      failed(new Error(`hermes_timeout (idle ${Math.round(timeoutMs / 1000)}s)`));
+      failed(new Error(`hermes_timeout (${reason})`));
     };
     const bumpIdle = (): void => {
-      clearTimeout(idleTimer);
-      idleTimer = setTimeout(onIdle, timeoutMs);
+      if (finished) return;
+      clock.clearTimeout(idleTimer);
+      idleTimer = clock.setTimeout(() => onTimeout(`idle ${Math.round(timeoutMs / 1000)}s`), timeoutMs);
     };
-    idleTimer = setTimeout(onIdle, timeoutMs);
-    // 턴이 끝나면(error·close) 시계와 승격 예약을 함께 지운다 — 둘 중 하나만 지우면 승격이 뒤늦게 터진다.
+    bumpIdle();
+    maxTimer = clock.setTimeout(() => onTimeout(`max ${Math.round(HERMES_TURN_MAX_MS / 1000)}s`), HERMES_TURN_MAX_MS);
     const clearIdle = (): void => {
       finished = true;
-      clearTimeout(idleTimer);
-      if (killEscalation) clearTimeout(killEscalation);
+      clearTimers();
+      if (killEscalation) clock.clearTimeout(killEscalation);
     };
     // 생존신호 — 출력이 흐르면 부르는 쪽에 알린다(예약 연장).
     //   매 청크마다 DB 를 쓰지 않는다 — 한 턴에 수백 번 올 수 있다. 최소 간격만 두고 흘린다.
@@ -260,12 +287,25 @@ function runHermesProcess(opts: HermesTurnOptions, resumeId: string | null): Pro
       //   무응답으로 죽은 턴이라 직전 신호가 오래돼 아래 최소간격 게이트도 그냥 통과한다.
       if (finished) return;
       if (!opts.onAlive) return;
-      const now = Date.now();
+      const now = clock.now();
       if (now - lastAliveAt < ALIVE_NOTIFY_MIN_INTERVAL_MS) return;
       lastAliveAt = now;
       // 갱신 실패가 턴을 죽이지 않는다 — 이건 보조 장치지 턴의 일부가 아니다.
       try { opts.onAlive(); } catch { /* 무시 */ }
     };
+    const pollActivity = (): void => {
+      if (finished) return;
+      const current = activityMtime();
+      if (current !== null) {
+        if (lastMtime === null || current > lastMtime) {
+          bumpIdle();
+          noteAlive();
+        }
+        lastMtime = current;
+      }
+      activityTimer = clock.setTimeout(pollActivity, ALIVE_NOTIFY_MIN_INTERVAL_MS);
+    };
+    activityTimer = clock.setTimeout(pollActivity, ALIVE_NOTIFY_MIN_INTERVAL_MS);
     // 시계 밀기는 매 청크마다(공짜) · 생존신호는 최소 간격으로(DB 쓰기라 아낀다) — 둘은 다른 일이다.
     proc.stdout.on("data", (c) => { stdout += c.toString(); bumpIdle(); noteAlive(); });
     proc.stderr.on("data", (c) => { stderr += c.toString(); bumpIdle(); noteAlive(); });

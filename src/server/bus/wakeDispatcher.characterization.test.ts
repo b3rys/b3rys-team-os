@@ -23,7 +23,7 @@ import { describe, test, expect, beforeEach, afterAll, afterEach } from "bun:tes
 import { markQuotaBlocked } from "../lib/runtimeQuota";
 import { Database } from "bun:sqlite";
 import { migrate } from "../db/migrate";
-import { insertMessage } from "../db/inboxQueries";
+import { insertMessage, markDispatching, recoverStaleClaims, pendingDispatch } from "../db/inboxQueries";
 import { dispatchRow, resolveDirectToGd, isCollectOnlyFeedbackReply } from "./wakeDispatcher";
 import type { PendingDispatchRow, WakeAdapter, WakeResult } from "./types";
 
@@ -580,4 +580,40 @@ test("team op·전달차단은 실제 저장하되 adapter를 호출하지 않�
  const ordinary=pendingRowFor(db,"bill",{from_agent_id:"system",source:"system",body:"실행이 필요한 일반 요청"});
  await dispatch(db,ordinary,{claude:spy.adapter});
  expect(spy.calls).toBe(1);
+});
+
+
+describe("Hermes timeout after acknowledgement", () => {
+  for (const throws of [true, false]) {
+    test(`ack then timeout notifies requester once without redelivery (exception=${throws})`, async () => {
+      db.run("UPDATE agent SET runtime='hermes_agent' WHERE id='bill'");
+      const row = pendingRowFor(db, 'bill');
+      markDispatching(db, row.message_id, 'bill', 2760);
+      let calls = 0;
+      const adapter: WakeAdapter = { async wake() {
+        calls++;
+        insertMessage(db, { thread_id: 't1', from_agent_id: 'bill', to_agent_id: 'steve',
+          body: '확인 중입니다', source: 'agent', type: 'dm', in_reply_to: row.message_id, hop_count: 0, priority: 'normal' });
+        const state = db.query('SELECT recipient_state FROM message_recipient WHERE message_id=? AND agent_id=?')
+          .get(row.message_id, 'bill') as { recipient_state: string };
+        expect(state.recipient_state).not.toBe('open');
+        if (throws) throw new Error('hermes_timeout (idle 600s)');
+        return { ok: false, detail: 'hermes_timeout (max 2700s)' };
+      } };
+      await dispatch(db, row, { hermes: adapter });
+      const notices = () => db.query("SELECT body, to_agent_id FROM message WHERE dedupe_key=?")
+        .all(`expiry-notice:${row.message_id}:bill`) as { body: string; to_agent_id: string }[];
+      expect(notices()).toEqual([{ to_agent_id: 'steve',
+        body: `bill 의 턴이 시간 초과로 끊겨 결과가 전달되지 않았습니다 (msg ${row.message_id})` }]);
+      expect(rcpt(db, row.message_id, 'bill')?.delivery_state).toBe('expired');
+      expect(rcpt(db, row.message_id, 'bill')?.retry_count).toBe(0);
+      expect(rcpt(db, row.message_id, 'bill')?.last_error).toContain('answered_before_wake_result:');
+      expect(recoverStaleClaims(db)).toBe(0);
+      expect(pendingDispatch(db).filter(r => r.message_id === row.message_id)).toHaveLength(0);
+      expect(calls).toBe(1);
+      // 동일 실패 기록이 다시 들어와도 기존 expiry dedupe가 통지를 한 건으로 유지한다.
+      await dispatch(db, row, { hermes: adapter });
+      expect(notices()).toHaveLength(1);
+    });
+  }
 });

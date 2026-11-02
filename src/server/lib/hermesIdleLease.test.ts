@@ -93,7 +93,7 @@ afterEach(() => __setHermesBridgeTestDeps());
 describe("무응답 시계 — 재는 것은 '조용한 시간' 이다", () => {
   test("★출력이 계속 오면 상한을 훨씬 넘겨도 안 죽는다★ (라이브에서 12건이 죽은 그 상황)", async () => {
     const proc = fakeProc();
-    __setHermesBridgeTestDeps({ spawn: (() => proc) as never });
+    __setHermesBridgeTestDeps({ spawn: (() => proc) as never, mtime: () => null });
     const alive: number[] = [];
 
     const turn = runHermesTeamTurn({
@@ -114,7 +114,7 @@ describe("무응답 시계 — 재는 것은 '조용한 시간' 이다", () => {
 
   test("★대조군 — 아무 소식이 없으면 상한에서 끝낸다★ (상한을 없앤 게 아니다)", async () => {
     const proc = fakeProc();
-    __setHermesBridgeTestDeps({ spawn: (() => proc) as never });
+    __setHermesBridgeTestDeps({ spawn: (() => proc) as never, mtime: () => null });
 
     const started = Date.now();
     const r = await runHermesTeamTurn({
@@ -131,7 +131,7 @@ describe("무응답 시계 — 재는 것은 '조용한 시간' 이다", () => {
 
   test("★SIGTERM 을 무시하면 SIGKILL 로 승격한다★ — 안 그러면 '중복 실행 방지' 가 보장이 아니라 희망이다", async () => {
     const proc = fakeProc();
-    __setHermesBridgeTestDeps({ spawn: (() => proc) as never });
+    __setHermesBridgeTestDeps({ spawn: (() => proc) as never, mtime: () => null });
 
     void runHermesTeamTurn({
       agent: hermes, threadId: "t1", messageId: "m1", body: "일 시킴",
@@ -144,4 +144,91 @@ describe("무응답 시계 — 재는 것은 '조용한 시간' 이다", () => {
     await sleep(5200); // KILL_ESCALATION_MS = 5s
     expect(proc.signals, "★죽지 않으면 확실히 죽인다★").toEqual(["SIGTERM", "SIGKILL"]);
   }, 10_000);
+});
+
+// 가짜 시계로 600초/2700초를 진행한다. 실제 프로세스·프로필 DB는 사용하지 않는다.
+function fakeClock() {
+  let now = 100_000;
+  let seq = 0;
+  const timers = new Map<number, { at: number; fn: () => void }>();
+  const clock = {
+    now: () => now,
+    setTimeout: ((fn: () => void, ms: number) => {
+      const id = ++seq;
+      timers.set(id, { at: now + ms, fn });
+      return id;
+    }) as unknown as typeof setTimeout,
+    clearTimeout: ((id: number) => { timers.delete(id); }) as unknown as typeof clearTimeout,
+  };
+  return { clock, advance(ms: number) {
+    const end = now + ms;
+    while (true) {
+      const next = [...timers].sort((a, b) => a[1].at - b[1].at)[0];
+      if (!next || next[1].at > end) break;
+      now = next[1].at;
+      timers.delete(next[0]);
+      next[1].fn();
+    }
+    now = end;
+  }, pending: () => timers.size };
+}
+
+function activityTurn(walPresent = true) {
+  const timer = fakeClock();
+  const proc = fakeProc();
+  let mtime = 1;
+  let alive = 0;
+  const paths: string[] = [];
+  __setHermesBridgeTestDeps({ spawn: (() => proc) as never, clock: timer.clock,
+    mtime: (path) => {
+      paths.push(path);
+      return path.endsWith('-wal') && !walPresent ? null : mtime;
+    },
+  });
+  const turn = runHermesTeamTurn({ agent: { ...hermes, hermes_profile: 'timeout-fixture' },
+    threadId: 'activity-test', messageId: 'activity-message', body: 'work', fromLabel: 'bill',
+    replyRoute: { kind: 'teammate', to: 'bill' }, onAlive: () => { alive++; },
+  }).catch((e: Error) => e.message);
+  return { timer, proc, turn, paths, alive: () => alive, write: () => { mtime++; } };
+}
+
+describe('Hermes profile activity watchdog', () => {
+  for (const wal of [true, false]) {
+    test(`DB activity survives 600 seconds without output (WAL=${wal})`, async () => {
+      const t = activityTurn(wal);
+      for (let i = 0; i < 25; i++) { t.write(); t.timer.advance(30_000); }
+      expect(t.proc.signals).toEqual([]);
+      expect(t.alive()).toBe(25);
+      expect(t.paths.every(p => p.includes('/profiles/timeout-fixture/state.db'))).toBe(true);
+      if (!wal) expect(t.paths.some(p => p.endsWith('/state.db'))).toBe(true);
+      t.proc.stdout.emit('data', 'done');
+      t.proc.emit('close', 0);
+      expect(await t.turn).toBe('done');
+      expect(t.timer.pending()).toBe(0);
+    });
+  }
+  test('unchanged DB kills at exactly 600 seconds, then escalates; late output cannot restart clocks', async () => {
+    const t = activityTurn();
+    t.timer.advance(599_999);
+    expect(t.proc.signals).toEqual([]);
+    t.timer.advance(1);
+    expect(await t.turn).toBe('hermes_timeout (idle 600s)');
+    expect(t.proc.signals).toEqual(['SIGTERM']);
+    t.proc.stdout.emit('data', 'too late');
+    t.write();
+    t.timer.advance(5_000);
+    expect(t.proc.signals).toEqual(['SIGTERM', 'SIGKILL']);
+    expect(t.alive()).toBe(0);
+    expect(t.timer.pending()).toBe(0);
+  });
+  test('continuous DB activity still kills at the absolute 45 minute cap', async () => {
+    const t = activityTurn();
+    for (let i = 0; i < 89; i++) { t.write(); t.timer.advance(30_000); }
+    expect(t.proc.signals).toEqual([]);
+    t.write(); t.timer.advance(30_000);
+    expect(await t.turn).toBe('hermes_timeout (max 2700s)');
+    expect(t.proc.signals).toEqual(['SIGTERM']);
+    t.proc.emit('close', 0);
+    expect(t.timer.pending()).toBe(0);
+  });
 });

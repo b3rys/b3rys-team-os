@@ -57,7 +57,7 @@ function ownerDmChatId(db: Database): string | undefined {
   return row?.value || undefined;
 }
 import { injectOpenclawTelegramTurn, injectOpenclawDirectedTurn } from "../lib/openclawBridge";
-import { reactTelegramAsHermes, runHermesTeamTurn, HERMES_TURN_TIMEOUT_MS } from "../lib/hermesBridge";
+import { reactTelegramAsHermes, runHermesTeamTurn, HERMES_TURN_MAX_MS } from "../lib/hermesBridge";
 import { getChannel, lineOrigin, resolveThreadKind } from "../channels/registry";
 import { coordinatorId } from "../lib/capabilities";
 import { ambientAgents } from "../lib/registry";
@@ -148,11 +148,11 @@ const IN_FLIGHT_GRACE_MS = 120_000; // default inFlight eviction: lease 60 + buf
 const OPENCLAW_LEASE_MS = OPENCLAW_ADAPTER_TIMEOUT_MS + 60_000;
 const OPENCLAW_LEASE_SEC = Math.ceil(OPENCLAW_LEASE_MS / 1000);
 const OPENCLAW_IN_FLIGHT_GRACE_MS = OPENCLAW_LEASE_MS + 60_000;
-// ★hermes: openclaw 와 같은 사다리 — 자기 turn cap(HERMES_TURN_TIMEOUT_MS)에서 파생★ (2026-07-16, 하네스 2대 검증).
+// ★hermes: openclaw 와 같은 사다리 — 자기 turn cap(HERMES_TURN_MAX_MS)에서 파생★ (2026-07-16, 하네스 2대 검증).
 //   hermes 어댑터는 ★턴 전체(최대 cap)를 블록★ 한다 → lease/grace 가 cap 보다 길어야 recoverStaleClaims 가
 //   턴 도중 row 를 리셋하지 않는다(안 그러면 이중발사=중복보고). hermes 는 "턴 ≤90s" 라는 ★이제 거짓인 전제★
 //   때문에 60/120 빠른 레인에 방치돼 있었다(실제 cap 300s+). openclaw 가 이미 이 방식으로 해결한 그대로 미러.
-const HERMES_LEASE_MS = HERMES_TURN_TIMEOUT_MS + 60_000;
+const HERMES_LEASE_MS = HERMES_TURN_MAX_MS + 60_000;
 const HERMES_LEASE_SEC = Math.ceil(HERMES_LEASE_MS / 1000);
 const HERMES_IN_FLIGHT_GRACE_MS = HERMES_LEASE_MS + 60_000;
 const MAX_RETRIES = 3;
@@ -198,7 +198,7 @@ export function shouldReleaseInFlight(key: string, startedAt: number, graceMs: n
  * Per-runtime claim lease (seconds). ★Blocking-wake runtimes (openclaw, hermes) hold their claim
  * for the WHOLE turn, so their lease must outlive the turn cap★ — else recoverStaleClaims resets
  * the row mid-turn → double-dispatch (duplicate). Each derives lease/grace from its own turn cap
- * (openclaw from OPENCLAW_ADAPTER_TIMEOUT_MS, hermes from HERMES_TURN_TIMEOUT_MS). Non-blocking
+ * (openclaw from OPENCLAW_ADAPTER_TIMEOUT_MS, hermes from HERMES_TURN_MAX_MS). Non-blocking
  * runtimes (tmux/claude ~28s fast-return, codex/b3os_native detach immediately) keep the 60s default.
  */
 export function leaseSecForRuntime(runtime: string | undefined): number {
@@ -794,7 +794,7 @@ function makeHermesAdapter(db: Database, agents: () => AgentRecord[]): WakeAdapt
           hopCount: row.hop_count,
           locale: getLocale(db),
           teamContext,
-          // 턴 상한은 안 넘긴다 — runHermesTeamTurn 의 기본값(HERMES_TURN_TIMEOUT_MS)에 맡긴다.
+          // 턴 상한은 안 넘긴다 — runHermesTeamTurn 의 idle/절대 상한 기본값에 맡긴다.
           // ★상한은 한 곳(hermesBridge)에만 산다★. 호출부마다 넘기면 또 슬랙처럼 빠뜨린다.
         });
 
@@ -1514,12 +1514,17 @@ function notifyRequesterOfExpiry(
     const quotaNote = quota
       ? `${row.agent_id} 는 Codex/OpenAI 한도 상태로 확인됐습니다${quota.resetHint ? ` (리셋까지 ${quota.resetHint})` : ""}. `
       : "";
-    const body =
-      quotaNote +
+    const body = reason.startsWith("hermes_timeout")
+      ? `${row.agent_id} 의 턴이 시간 초과로 끊겨 결과가 전달되지 않았습니다 (msg ${row.message_id})`
+      : quotaNote +
       `[응답 대기] ${row.agent_id} 에게서 아직 응답이 없습니다 — 대기 시간 초과 (${reason}). ` +
       `${row.agent_id} 가 작업 중일 수 있습니다: ★다시 시키기 전에 그쪽 작업물(브랜치·PR·카드)을 먼저 확인하세요.★ ` +
       `이 요청은 자동 재시도되지 않습니다 — 확인 후 ${row.agent_id} 없이 마감하셔도 됩니다. ` +
       `(수집이면 ${row.agent_id} 를 '미응답' 으로 명시하고 나머지로 종합하세요)`;
+
+    // insertMessage는 dedupe_key를 저장만 하므로 알림 중복은 여기서 차단한다.
+    const dedupeKey = `expiry-notice:${row.message_id}:${row.agent_id}`;
+    if (db.prepare("SELECT 1 FROM message WHERE dedupe_key = ? LIMIT 1").get(dedupeKey)) return;
 
     const msg = insertMessage(db, {
       thread_id: row.thread_id,
@@ -1530,7 +1535,7 @@ function notifyRequesterOfExpiry(
       source: "system",           // ★그 팀원이 한 말이 아니다★
       hop_count: 0,               // 시스템 통지는 hop 체인 밖
       priority: "high",
-      dedupe_key: `expiry-notice:${row.message_id}:${row.agent_id}`,   // 같은 실패로 두 번 안 알린다
+      dedupe_key: dedupeKey,
     } as Parameters<typeof insertMessage>[1]);
 
     appendAudit(db, "bus_dispatcher", "expiry_notified_requester", row.message_id, {
@@ -1554,7 +1559,7 @@ function notifyRequesterOfExpiry(
  * 이번 주 이 분기 265회. (proposal prop_db4f21bcff46 · 리뷰 dex)
  *
  * 그래서 delivery_state 를 닫고 lease·claim 을 지운다. ★recipient_state 는 건드리지 않는다★ — 완료/후속보고
- * 추적은 별개다(dex 요구). 요청자 통지도 안 낸다: 답이 이미 가 있으니 "응답 없음" 통지는 거짓이 된다.
+ * 추적은 별개다(dex 요구). 일반 실패는 요청자 통지를 안 낸다. Hermes timeout은 접수 답장 뒤에도 발생하므로 별도로 알린다.
  * WHERE 는 dispatching 만 본다 — 이 분기에 올 때 행은 늘 dispatching 이다. pending 은 닿을 수 없는 값이라
  * 뺐다(리뷰 steve: 시험이 못 재는 방어 조건은 두지 않는다).
  */
@@ -1599,6 +1604,9 @@ function recordDispatchOutcome(
     // the exception path was the last retry gap; the !result.ok path below already expires no-retry).
     // Same policy: expire (no retry), leave the bus message in the inbox for next-turn/manual collection.
     if (wakeFailurePolicy(targetAgent.runtime) === "expire_no_retry") {
+      if (targetAgent.runtime === "hermes_agent" && errMsg.startsWith("hermes_timeout")) {
+        notifyRequesterOfExpiry(db, row, roster, errMsg);
+      }
       if (recipientAlreadyAnswered(db, row.message_id, row.agent_id)) {
         appendAudit(db, "bus_dispatcher", "late_wake_failure_ignored_after_reply", row.message_id, {
           agent_id: row.agent_id,
@@ -1694,6 +1702,9 @@ function recordDispatchOutcome(
     // OpenClaw gateway failures are ambiguous: the turn may already be queued or partially
     // visible to the native session. Retrying creates duplicate Codex turns, so expire and
     // leave the bus message in the inbox for manual/next-turn collection.
+    if (targetAgent.runtime === "hermes_agent" && lastError.startsWith("hermes_timeout")) {
+      notifyRequesterOfExpiry(db, row, roster, lastError);
+    }
     if (recipientAlreadyAnswered(db, row.message_id, row.agent_id)) {
       appendAudit(db, "bus_dispatcher", "late_wake_failure_ignored_after_reply", row.message_id, {
         agent_id: row.agent_id,
