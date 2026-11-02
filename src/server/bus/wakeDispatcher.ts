@@ -57,7 +57,7 @@ function ownerDmChatId(db: Database): string | undefined {
   return row?.value || undefined;
 }
 import { injectOpenclawTelegramTurn, injectOpenclawDirectedTurn } from "../lib/openclawBridge";
-import { reactTelegramAsHermes, runHermesTeamTurn, HERMES_TURN_MAX_MS } from "../lib/hermesBridge";
+import { reactTelegramAsHermes, runHermesTeamTurn, HERMES_TURN_TIMEOUT_MS } from "../lib/hermesBridge";
 import { getChannel, lineOrigin, resolveThreadKind } from "../channels/registry";
 import { coordinatorId } from "../lib/capabilities";
 import { ambientAgents } from "../lib/registry";
@@ -148,11 +148,9 @@ const IN_FLIGHT_GRACE_MS = 120_000; // default inFlight eviction: lease 60 + buf
 const OPENCLAW_LEASE_MS = OPENCLAW_ADAPTER_TIMEOUT_MS + 60_000;
 const OPENCLAW_LEASE_SEC = Math.ceil(OPENCLAW_LEASE_MS / 1000);
 const OPENCLAW_IN_FLIGHT_GRACE_MS = OPENCLAW_LEASE_MS + 60_000;
-// ★hermes: openclaw 와 같은 사다리 — 자기 turn cap(HERMES_TURN_MAX_MS)에서 파생★ (2026-07-16, 하네스 2대 검증).
-//   hermes 어댑터는 ★턴 전체(최대 cap)를 블록★ 한다 → lease/grace 가 cap 보다 길어야 recoverStaleClaims 가
-//   턴 도중 row 를 리셋하지 않는다(안 그러면 이중발사=중복보고). hermes 는 "턴 ≤90s" 라는 ★이제 거짓인 전제★
-//   때문에 60/120 빠른 레인에 방치돼 있었다(실제 cap 300s+). openclaw 가 이미 이 방식으로 해결한 그대로 미러.
-const HERMES_LEASE_MS = HERMES_TURN_MAX_MS + 60_000;
+// Hermes는 무활동 제한 + 60초를 예약하고 onAlive가 활동마다 연장한다.
+// 재시작으로 사라진 턴은 절대 상한(45분)을 기다리지 않고 마지막 활동 뒤 회수한다.
+const HERMES_LEASE_MS = HERMES_TURN_TIMEOUT_MS + 60_000;
 const HERMES_LEASE_SEC = Math.ceil(HERMES_LEASE_MS / 1000);
 const HERMES_IN_FLIGHT_GRACE_MS = HERMES_LEASE_MS + 60_000;
 const MAX_RETRIES = 3;
@@ -194,13 +192,7 @@ export function shouldReleaseInFlight(key: string, startedAt: number, graceMs: n
   return now - quietSince > graceMs;
 }
 
-/**
- * Per-runtime claim lease (seconds). ★Blocking-wake runtimes (openclaw, hermes) hold their claim
- * for the WHOLE turn, so their lease must outlive the turn cap★ — else recoverStaleClaims resets
- * the row mid-turn → double-dispatch (duplicate). Each derives lease/grace from its own turn cap
- * (openclaw from OPENCLAW_ADAPTER_TIMEOUT_MS, hermes from HERMES_TURN_MAX_MS). Non-blocking
- * runtimes (tmux/claude ~28s fast-return, codex/b3os_native detach immediately) keep the 60s default.
- */
+/** Claim lease: OpenClaw는 adapter 상한, Hermes는 활동마다 갱신하는 idle 상한 기준이다. */
 export function leaseSecForRuntime(runtime: string | undefined): number {
   if (runtime === "openclaw") return OPENCLAW_LEASE_SEC;
   if (runtime === "hermes_agent") return HERMES_LEASE_SEC;

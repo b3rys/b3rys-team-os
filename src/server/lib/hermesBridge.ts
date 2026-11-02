@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -6,7 +7,7 @@ import { fileURLToPath } from "node:url";
 /** 팀원 스크립트(_me.sh 등)가 team.db 를 찾도록 넘겨줄 경로. 서버와 같은 규칙으로 해석한다. */
 const DB_PATH_FOR_SCRIPTS =
   process.env.TEAM_DB_PATH ?? join(dirname(fileURLToPath(import.meta.url)), "../../../team.db");
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import type { AgentRecord } from "../types";
 import { pick, type Locale } from "./i18n";
 import { teamContextLabel } from "../channels/registry";
@@ -149,7 +150,7 @@ export function buildPrompt(opts: HermesTurnOptions): string {
   );
 }
 
-// 무활동은 600초, 턴 절대 상한은 45분이다. lease/grace는 절대 상한에서 파생된다.
+// 무활동은 600초, 턴 절대 상한은 45분이다. lease/grace는 무활동 제한에서 파생하고 활동마다 연장한다.
 /** 생존신호를 부르는 최소 간격 — 출력 청크마다 DB 를 쓰지 않기 위한 것. lease보다 훨씬 짧아야 한다. */
 const ALIVE_NOTIFY_MIN_INTERVAL_MS = 30_000;
 /** SIGTERM 뒤 이만큼 기다렸다 SIGKILL 로 승격한다. 정리할 틈은 주되 무한정 기다리지 않는다. */
@@ -164,18 +165,16 @@ type SpawnFn = typeof spawn;
 let spawnForBridge: SpawnFn = spawn;
 const realClock = { now: () => Date.now(), setTimeout, clearTimeout };
 let clock = realClock;
-const readMtime = (path: string): number | null => {
-  try { return statSync(path).mtimeMs; } catch { return null; }
-};
-let mtimeForBridge = readMtime;
+const openStateDb = (path: string): Database => new Database(path, { readonly: true });
+let openStateDbForBridge = openStateDb;
 export function __setHermesBridgeTestDeps(deps?: {
   spawn?: SpawnFn;
   clock?: typeof realClock;
-  mtime?: typeof readMtime;
+  openStateDb?: typeof openStateDb;
 }): void {
   spawnForBridge = deps?.spawn ?? spawn;
   clock = deps?.clock ?? realClock;
-  mtimeForBridge = deps?.mtime ?? readMtime;
+  openStateDbForBridge = deps?.openStateDb ?? openStateDb;
 }
 export const HERMES_TURN_TIMEOUT_MS = Number(process.env.HERMES_TURN_TIMEOUT_MS ?? 600_000);
 export const HERMES_TURN_MAX_MS = Number(process.env.HERMES_TURN_MAX_MS ?? 45 * 60_000);
@@ -227,9 +226,27 @@ function runHermesProcess(opts: HermesTurnOptions, resumeId: string | null): Pro
   const profileRoot = opts.agent.hermes_profile
     ? join(HERMES_ROOT, "profiles", opts.agent.hermes_profile) : HERMES_ROOT;
   const statePath = join(profileRoot, "state.db");
-  const activityMtime = (): number | null => mtimeForBridge(`${statePath}-wal`) ?? mtimeForBridge(statePath);
-  // 기동 전에 기준을 잡아 첫 poll 이전의 쓰기도 활동으로 센다.
-  let lastMtime = activityMtime();
+  const spawnedAt = clock.now() / 1000;
+  let lastActivity = spawnedAt;
+  const activityTimestamp = (): number | null => {
+    let db: Database | undefined;
+    try {
+      db = openStateDbForBridge(statePath);
+      // 읽기 잠금 때문에 poll 자체가 턴을 붙잡지 않도록 기다리지 않는다.
+      db.exec("PRAGMA busy_timeout = 0");
+      const row = db.query(`SELECT max(m.timestamp) AS activity
+        FROM messages m JOIN sessions s ON s.id = m.session_id
+        WHERE s.source = 'cli'
+          AND (s.started_at >= ? OR s.id = ?)
+          AND m.timestamp > ?`).get(spawnedAt - 3, resumeId, spawnedAt) as { activity: number | null };
+      // --resume은 started_at이 과거이므로 명시한 세션 ID의 이번 기동 이후 메시지만 센다.
+      return row.activity;
+    } catch {
+      return null;
+    } finally {
+      db?.close();
+    }
+  };
   return new Promise((resolve) => {
     const failed = (error: Error, sessionNotFound = false): void =>
       resolve({ kind: "failed", error, sessionNotFound });
@@ -246,7 +263,7 @@ function runHermesProcess(opts: HermesTurnOptions, resumeId: string | null): Pro
     });
     let stdout = "";
     let stderr = "";
-    // 출력 또는 프로필 DB 쓰기는 활동이다. 절대 상한은 활동으로 연장하지 않는다.
+    // 출력 또는 이번 CLI 세션 메시지 쓰기는 활동이다. 절대 상한은 활동으로 연장하지 않는다.
     let finished = false;
     let idleTimer: ReturnType<typeof setTimeout>;
     let maxTimer: ReturnType<typeof setTimeout>;
@@ -295,13 +312,13 @@ function runHermesProcess(opts: HermesTurnOptions, resumeId: string | null): Pro
     };
     const pollActivity = (): void => {
       if (finished) return;
-      const current = activityMtime();
+      const current = activityTimestamp();
       if (current !== null) {
-        if (lastMtime === null || current > lastMtime) {
+        if (current > lastActivity) {
           bumpIdle();
           noteAlive();
         }
-        lastMtime = current;
+        lastActivity = current;
       }
       activityTimer = clock.setTimeout(pollActivity, ALIVE_NOTIFY_MIN_INTERVAL_MS);
     };

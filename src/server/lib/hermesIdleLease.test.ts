@@ -1,5 +1,10 @@
 // 출력이 있으면 lease를 갱신하되 무응답 자식은 종료해야 한다. 한쪽만 보장하면 정상 턴 중단 또는 lease 회수 뒤 중복 실행이 생긴다.
 import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { setHermesSession } from "./hermesSessionStore";
+import { leaseSecForRuntime, inFlightGraceForRuntime, noteTurnAlive, shouldReleaseInFlight, forgetTurnAlive } from "../bus/wakeDispatcher";
 import { Database } from "bun:sqlite";
 import { EventEmitter } from "node:events";
 import type { AgentRecord } from "../types";
@@ -93,7 +98,7 @@ afterEach(() => __setHermesBridgeTestDeps());
 describe("무응답 시계 — 재는 것은 '조용한 시간' 이다", () => {
   test("★출력이 계속 오면 상한을 훨씬 넘겨도 안 죽는다★ (라이브에서 12건이 죽은 그 상황)", async () => {
     const proc = fakeProc();
-    __setHermesBridgeTestDeps({ spawn: (() => proc) as never, mtime: () => null });
+    __setHermesBridgeTestDeps({ spawn: (() => proc) as never, openStateDb: () => { throw new Error("unavailable"); } });
     const alive: number[] = [];
 
     const turn = runHermesTeamTurn({
@@ -114,7 +119,7 @@ describe("무응답 시계 — 재는 것은 '조용한 시간' 이다", () => {
 
   test("★대조군 — 아무 소식이 없으면 상한에서 끝낸다★ (상한을 없앤 게 아니다)", async () => {
     const proc = fakeProc();
-    __setHermesBridgeTestDeps({ spawn: (() => proc) as never, mtime: () => null });
+    __setHermesBridgeTestDeps({ spawn: (() => proc) as never, openStateDb: () => { throw new Error("unavailable"); } });
 
     const started = Date.now();
     const r = await runHermesTeamTurn({
@@ -131,7 +136,7 @@ describe("무응답 시계 — 재는 것은 '조용한 시간' 이다", () => {
 
   test("★SIGTERM 을 무시하면 SIGKILL 로 승격한다★ — 안 그러면 '중복 실행 방지' 가 보장이 아니라 희망이다", async () => {
     const proc = fakeProc();
-    __setHermesBridgeTestDeps({ spawn: (() => proc) as never, mtime: () => null });
+    __setHermesBridgeTestDeps({ spawn: (() => proc) as never, openStateDb: () => { throw new Error("unavailable"); } });
 
     void runHermesTeamTurn({
       agent: hermes, threadId: "t1", messageId: "m1", body: "일 시킴",
@@ -173,38 +178,63 @@ function fakeClock() {
   }, pending: () => timers.size };
 }
 
-function activityTurn(walPresent = true) {
+const cleanups: (() => void)[] = [];
+afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
+
+function activityTurn(mode = 'cli', onAlive?: () => void) {
   const timer = fakeClock();
   const proc = fakeProc();
-  let mtime = 1;
+  const dir = mkdtempSync(join(tmpdir(), 'hermes-activity-'));
+  const path = join(dir, 'state.db');
+  const writer = new Database(path);
+  writer.exec("CREATE TABLE sessions (id TEXT, source TEXT, started_at REAL); CREATE TABLE messages (session_id TEXT, timestamp REAL)");
+  writer.query("INSERT INTO sessions VALUES (?, ?, ?)").run('session', mode === 'gateway' ? 'gateway' : 'cli', mode === 'old' || mode === 'resume' ? 1 : 100);
+  cleanups.push(() => { writer.close(); rmSync(dir, { recursive: true, force: true }); });
+  if (mode === 'locked') writer.exec("BEGIN EXCLUSIVE");
+  const readers: Database[] = [];
   let alive = 0;
   const paths: string[] = [];
+  if (mode === 'resume') setHermesSession('hermes', 'activity-test', 'session');
   __setHermesBridgeTestDeps({ spawn: (() => proc) as never, clock: timer.clock,
-    mtime: (path) => {
-      paths.push(path);
-      return path.endsWith('-wal') && !walPresent ? null : mtime;
+    openStateDb: (requested) => {
+      paths.push(requested);
+      const reader = new Database(mode === 'missing' ? join(dir, 'missing.db') : path, { readonly: true });
+      readers.push(reader);
+      return reader;
     },
   });
   const turn = runHermesTeamTurn({ agent: { ...hermes, hermes_profile: 'timeout-fixture' },
-    threadId: 'activity-test', messageId: 'activity-message', body: 'work', fromLabel: 'bill',
-    replyRoute: { kind: 'teammate', to: 'bill' }, onAlive: () => { alive++; },
+    threadId: mode === 'resume' ? 'activity-test' : `activity-${mode}`, messageId: 'activity-message', body: 'work', fromLabel: 'bill',
+    replyRoute: { kind: 'teammate', to: 'bill' }, onAlive: () => { alive++; onAlive?.(); },
   }).catch((e: Error) => e.message);
-  return { timer, proc, turn, paths, alive: () => alive, write: () => { mtime++; } };
+  return { timer, proc, turn, paths, readers, missingExists: () => existsSync(join(dir, 'missing.db')), alive: () => alive,
+    write: () => writer.query('INSERT INTO messages VALUES (?, ?)').run('session', timer.clock.now() / 1000 + 1) };
 }
 
-describe('Hermes profile activity watchdog', () => {
-  for (const wal of [true, false]) {
-    test(`DB activity survives 600 seconds without output (WAL=${wal})`, async () => {
-      const t = activityTurn(wal);
+describe('Hermes session activity watchdog', () => {
+  for (const mode of ['cli', 'resume']) {
+    test(`current session activity survives 600 seconds without output (${mode})`, async () => {
+      const t = activityTurn(mode);
       for (let i = 0; i < 25; i++) { t.write(); t.timer.advance(30_000); }
       expect(t.proc.signals).toEqual([]);
       expect(t.alive()).toBe(25);
-      expect(t.paths.every(p => p.includes('/profiles/timeout-fixture/state.db'))).toBe(true);
-      if (!wal) expect(t.paths.some(p => p.endsWith('/state.db'))).toBe(true);
-      t.proc.stdout.emit('data', 'done');
-      t.proc.emit('close', 0);
+      for (const reader of t.readers) expect(() => reader.query('SELECT 1').get()).toThrow();
+      expect(t.paths.every(p => p.endsWith('/profiles/timeout-fixture/state.db'))).toBe(true);
+      t.proc.stdout.emit('data', 'done'); t.proc.emit('close', 0);
       expect(await t.turn).toBe('done');
       expect(t.timer.pending()).toBe(0);
+    });
+  }
+  for (const mode of ['gateway', 'old', 'missing', 'locked']) {
+    test(`unrelated or unavailable session kills at 600 seconds (${mode})`, async () => {
+      const t = activityTurn(mode);
+      for (let i = 0; i < 20; i++) { t.write(); t.timer.advance(30_000); }
+      expect(t.proc.signals).toEqual(['SIGTERM']);
+      expect(await t.turn).toBe('hermes_timeout (idle 600s)');
+      expect(t.alive()).toBe(0);
+      for (const reader of t.readers) expect(() => reader.query('SELECT 1').get()).toThrow();
+      if (mode === 'missing') expect(t.missingExists()).toBe(false);
+      t.proc.emit('close', 0);
     });
   }
   test('unchanged DB kills at exactly 600 seconds, then escalates; late output cannot restart clocks', async () => {
@@ -221,6 +251,18 @@ describe('Hermes profile activity watchdog', () => {
     expect(t.alive()).toBe(0);
     expect(t.timer.pending()).toBe(0);
   });
+  test('unchanged timestamp after one write does not extend idle', async () => {
+    const t = activityTurn();
+    t.write(); t.timer.advance(30_000);
+    expect(t.alive()).toBe(1);
+    t.timer.advance(599_999);
+    expect(t.proc.signals).toEqual([]);
+    t.timer.advance(1);
+    expect(t.proc.signals).toEqual(['SIGTERM']);
+    expect(await t.turn).toBe('hermes_timeout (idle 600s)');
+    expect(t.alive()).toBe(1);
+    t.proc.emit('close', 0);
+  });
   test('continuous DB activity still kills at the absolute 45 minute cap', async () => {
     const t = activityTurn();
     for (let i = 0; i < 89; i++) { t.write(); t.timer.advance(30_000); }
@@ -231,4 +273,35 @@ describe('Hermes profile activity watchdog', () => {
     t.proc.emit('close', 0);
     expect(t.timer.pending()).toBe(0);
   });
+});
+
+test('activity renews 660-second lease and idle grace; silence permits recovery', async () => {
+  const db = setupDb();
+  try {
+    const lease = leaseSecForRuntime('hermes_agent');
+    expect(lease).toBe(660);
+    expect(inFlightGraceForRuntime('hermes_agent')).toBe(720_000);
+    markDispatching(db, 'm1', 'hermes', lease);
+    let heartbeatAt = 0;
+    const t = activityTurn('cli', () => {
+      expireLease(db);
+      extendLease(db, 'm1', 'hermes', lease);
+      noteTurnAlive('m1', 'hermes');
+      heartbeatAt = Date.now();
+    });
+    for (let i = 0; i < 25; i++) {
+      t.write(); t.timer.advance(30_000);
+      expect(recoverStaleClaims(db)).toBe(0);
+      expect(stateOf(db)).toBe('dispatching');
+    }
+    expect(t.alive()).toBe(25);
+    expect(shouldReleaseInFlight('m1:hermes', heartbeatAt - 2_000_000, 720_000, heartbeatAt + 719_000)).toBe(false);
+    expect(shouldReleaseInFlight('m1:hermes', heartbeatAt - 2_000_000, 720_000, heartbeatAt + 721_000)).toBe(true);
+    // SQLite의 실제 예약값을 이동해 마지막 연장 후 659초/661초를 재현한다.
+    db.run("UPDATE message_recipient SET lease_until = datetime(lease_until, '-659 seconds')");
+    expect(recoverStaleClaims(db)).toBe(0);
+    db.run("UPDATE message_recipient SET lease_until = datetime(lease_until, '-2 seconds')");
+    expect(recoverStaleClaims(db)).toBe(1);
+    t.proc.stdout.emit('data', 'done'); t.proc.emit('close', 0); await t.turn;
+  } finally { forgetTurnAlive('m1:hermes'); db.close(); }
 });
