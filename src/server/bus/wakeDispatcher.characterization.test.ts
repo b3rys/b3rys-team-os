@@ -617,3 +617,28 @@ describe("Hermes timeout after acknowledgement", () => {
     });
   }
 });
+
+
+describe("expiry notice after acknowledgement controls", () => {
+  for (const runtime of ['hermes_agent', 'openclaw']) {
+    for (const throws of [true, false]) {
+      test(`ack then non-timeout failure stays silent (${runtime}, exception=${throws})`, async () => {
+        db.run("UPDATE agent SET runtime=? WHERE id='bill'", [runtime]);
+        const row = pendingRowFor(db, 'bill');
+        markDispatching(db, row.message_id, 'bill', 2760);
+        const adapter: WakeAdapter = { async wake() {
+          insertMessage(db, { thread_id: 't1', from_agent_id: 'bill', to_agent_id: 'steve',
+            body: '확인 중입니다', source: 'agent', type: 'dm', in_reply_to: row.message_id,
+            hop_count: 0, priority: 'normal' });
+          if (throws) throw new Error('adapter_failure');
+          return { ok: false, detail: 'adapter_failure' };
+        } };
+        await dispatch(db, row, { hermes: adapter, openclaw: adapter });
+        expect(db.query("SELECT id FROM message WHERE dedupe_key=?")
+          .all(`expiry-notice:${row.message_id}:bill`)).toHaveLength(0);
+        expect(rcpt(db, row.message_id, 'bill')?.delivery_state).toBe('expired');
+        expect(rcpt(db, row.message_id, 'bill')?.retry_count).toBe(0);
+      });
+    }
+  }
+});

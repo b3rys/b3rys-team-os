@@ -1496,8 +1496,12 @@ function notifyRequesterOfExpiry(
   row: PendingDispatchRow,
   agents: AgentRecord[],
   reason: string,
+  runtime: string,
 ): void {
   try {
+    // 접수 답장은 턴 성공을 뜻하지 않는다. Hermes timeout만 답장 이후에도 통지한다.
+    const hermesTimeout = runtime === "hermes_agent" && reason.startsWith("hermes_timeout");
+    if (recipientAlreadyAnswered(db, row.message_id, row.agent_id) && !hermesTimeout) return;
     // 팀원이 팀원에게 보낸 것만 — 팀장/시스템 발신은 통지 대상이 아니다(요청자가 사람/서버다)
     if (row.source !== "agent") return;
     const requester = row.from_agent_id;
@@ -1514,7 +1518,7 @@ function notifyRequesterOfExpiry(
     const quotaNote = quota
       ? `${row.agent_id} 는 Codex/OpenAI 한도 상태로 확인됐습니다${quota.resetHint ? ` (리셋까지 ${quota.resetHint})` : ""}. `
       : "";
-    const body = reason.startsWith("hermes_timeout")
+    const body = hermesTimeout
       ? `${row.agent_id} 의 턴이 시간 초과로 끊겨 결과가 전달되지 않았습니다 (msg ${row.message_id})`
       : quotaNote +
       `[응답 대기] ${row.agent_id} 에게서 아직 응답이 없습니다 — 대기 시간 초과 (${reason}). ` +
@@ -1535,7 +1539,7 @@ function notifyRequesterOfExpiry(
       source: "system",           // ★그 팀원이 한 말이 아니다★
       hop_count: 0,               // 시스템 통지는 hop 체인 밖
       priority: "high",
-      dedupe_key: dedupeKey,
+      dedupe_key: `expiry-notice:${row.message_id}:${row.agent_id}`,
     } as Parameters<typeof insertMessage>[1]);
 
     appendAudit(db, "bus_dispatcher", "expiry_notified_requester", row.message_id, {
@@ -1604,9 +1608,7 @@ function recordDispatchOutcome(
     // the exception path was the last retry gap; the !result.ok path below already expires no-retry).
     // Same policy: expire (no retry), leave the bus message in the inbox for next-turn/manual collection.
     if (wakeFailurePolicy(targetAgent.runtime) === "expire_no_retry") {
-      if (targetAgent.runtime === "hermes_agent" && errMsg.startsWith("hermes_timeout")) {
-        notifyRequesterOfExpiry(db, row, roster, errMsg);
-      }
+      notifyRequesterOfExpiry(db, row, roster, errMsg, targetAgent.runtime);
       if (recipientAlreadyAnswered(db, row.message_id, row.agent_id)) {
         appendAudit(db, "bus_dispatcher", "late_wake_failure_ignored_after_reply", row.message_id, {
           agent_id: row.agent_id,
@@ -1632,7 +1634,6 @@ function recordDispatchOutcome(
         agent_id: row.agent_id,
         last_error: `exception:${errMsg}`.slice(0, 200),
       });
-      notifyRequesterOfExpiry(db, row, roster, errMsg);   // ★요청자가 영원히 기다리지 않게★
       return;
     }
     const nextState = markFailed(db, row.message_id, row.agent_id, errMsg, MAX_RETRIES);
@@ -1702,9 +1703,7 @@ function recordDispatchOutcome(
     // OpenClaw gateway failures are ambiguous: the turn may already be queued or partially
     // visible to the native session. Retrying creates duplicate Codex turns, so expire and
     // leave the bus message in the inbox for manual/next-turn collection.
-    if (targetAgent.runtime === "hermes_agent" && lastError.startsWith("hermes_timeout")) {
-      notifyRequesterOfExpiry(db, row, roster, lastError);
-    }
+    notifyRequesterOfExpiry(db, row, roster, lastError, targetAgent.runtime);
     if (recipientAlreadyAnswered(db, row.message_id, row.agent_id)) {
       appendAudit(db, "bus_dispatcher", "late_wake_failure_ignored_after_reply", row.message_id, {
         agent_id: row.agent_id,
@@ -1730,7 +1729,6 @@ function recordDispatchOutcome(
       agent_id: row.agent_id,
       last_error: lastError,
     });
-    notifyRequesterOfExpiry(db, row, roster, lastError);   // ★요청자가 영원히 기다리지 않게★
     return;
   }
   if (lastError === UNKNOWN_SIDE_EFFECT_DETAIL) {
