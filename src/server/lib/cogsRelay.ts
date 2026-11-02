@@ -56,13 +56,14 @@ export class CogsDeliveryUnknown extends Error {
   constructor() { super("cogs_delivery_unknown"); }
 }
 
-export async function cogsCall(config: Pick<CogsInbox, "api_base">, token: string, method: string, body: unknown, signal?: AbortSignal): Promise<any> {
+/** timeoutMs = 응답을 기다리는 상한. 기본 8초, 서버가 일부러 붙잡아 두는 long polling getUpdates 만 길게 준다. */
+export async function cogsCall(config: Pick<CogsInbox, "api_base">, token: string, method: string, body: unknown, signal?: AbortSignal, timeoutMs = 8000): Promise<any> {
   let res: Response;
   let data: { ok?: boolean; result?: unknown };
   try {
     res = await fetch(`${config.api_base}/bot${encodeURIComponent(token)}/${method}`, {
       method: "POST", redirect: "error", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(8000)]) : AbortSignal.timeout(8000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
     });
     data = await res.json() as typeof data;
   } catch {

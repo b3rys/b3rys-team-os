@@ -25,6 +25,7 @@ const TOKEN = "fixture-cogs-secret-no-production-value";
 const KEYS = ["TEAM_AGENT_REGISTRY", "B3OS_AUDIT_LOG_DIR", "TEAMOS_AGENT_OFF_FILE", "TEAM_COLLAB_ROOT", "COGS_ATTACHMENT_DIR", "COGS_ATTACHMENT_MAX_BYTES"];
 let pulled = 0;
 let declineStatus = 200;
+let pollingNow = 0, pollingMax = 0;
 let typing: { agentId: string; chatId: string; replyToMessageId?: number }[];
 let files: Record<string, Uint8Array>, filePath: (id: string) => string, streamed: Set<string>, reportedSize: Record<string, number>;
 
@@ -40,6 +41,7 @@ beforeEach(() => {
   files = {}; filePath = (id) => `files/${id}`; streamed = new Set(); reportedSize = {};
   writeFileSync(join(dir, "token"), TOKEN, { mode: 0o600 });
   declineStatus = 200;
+  pollingNow = 0; pollingMax = 0;
   updates = []; calls = []; injected = []; typing = []; events = []; fail = false; injectOk = true; sendMode = "normal"; releaseSend = undefined;
   server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
     const pathname = new URL(req.url).pathname;
@@ -64,7 +66,14 @@ beforeEach(() => {
     // Match botValues: activity args are JSON; ordinary parameters remain scalar.
     if (Object.entries(body as object).some(([k, v]) => k !== "cogs_activity_args" && v !== null && typeof v === "object")) return Response.json({ ok: false }, { status: 400 });
     if (fail) return Response.json({ ok: false, description: `${TOKEN} ${req.url}` }, { status: 500 });
-    if (method === "getUpdates") return Response.json({ ok: true, result: updates.filter((u) => u.update_id >= (body as any).offset) });
+    if (method === "getUpdates") {
+      // 실제 cogs 서버처럼 timeout 초 동안 새 update 를 기다렸다가, 오면 바로 돌려준다. 같은 봇의 동시 요청 수도 센다.
+      const pick = () => updates.filter((u) => u.update_id >= (body as any).offset);
+      const until = Date.now() + Number((body as any).timeout ?? 0) * 1000;
+      pollingNow++; pollingMax = Math.max(pollingMax, pollingNow);
+      try { while (!pick().length && Date.now() < until) await Bun.sleep(5); } finally { pollingNow--; }
+      return Response.json({ ok: true, result: pick() });
+    }
     if (method === "getFile") {
       const id = (body as any).file_id as string;
       return Response.json({ ok: true, result: { file_id: id, file_size: reportedSize[id] ?? files[id]?.byteLength ?? 0, file_path: filePath(id) } });
@@ -744,4 +753,66 @@ test("lost complete edit ACK retries the same id through inbox without sending a
   expect(calls.filter(c => c.body.cogs_response_state === "complete").map(c => c.body.message_id)).toEqual([99, 99, 99]);
   expect(calls.filter(c => c.method === "sendMessage" && c.body.text !== "")).toHaveLength(0);
   expect(calls.some(c => c.body.cogs_response_state === "cancelled")).toBe(false);
+});
+
+// Long polling: 팀원마다 고리 하나, 서버가 새 말이 올 때까지 getUpdates 를 붙잡는다.
+test("supervise long-polls and injects as soon as the message arrives", async () => {
+  const p = poller(); p.supervise(2, 20); await Bun.sleep(50);
+  const t0 = Date.now(); updates = [update()];
+  while (!injected.length && Date.now() - t0 < 1500) await Bun.sleep(5);
+  expect(injected).toHaveLength(1);
+  expect(Date.now() - t0).toBeLessThan(1000); // timeout(2초) 전에 돌아왔다
+  expect(calls.find((c) => c.method === "getUpdates")!.body.timeout).toBe(2);
+});
+test("a member turned off during the wait gets nothing and keeps the offset", async () => {
+  const p = poller(); p.supervise(2, 20); await Bun.sleep(50);
+  writeFileSync(process.env.TEAMOS_AGENT_OFF_FILE!, "lisa\n"); updates = [update()];
+  await Bun.sleep(200); expect(injected).toHaveLength(0); p.stop();
+  writeFileSync(process.env.TEAMOS_AGENT_OFF_FILE!, ""); await poller().pollOnce(); expect(injected).toHaveLength(1);
+});
+test("two members on the same bot never poll it at the same time", async () => {
+  agents.push({ ...agents[0]!, id: "lisa2", tmux_session: "claude-lisa2" } as AgentRecord);
+  const p = poller(); p.supervise(1, 20); await Bun.sleep(300);
+  expect(pollingMax).toBe(1);
+  const dup = db.query("SELECT count(*) AS n FROM audit_event WHERE action='cogs_poll_failed' AND detail_json LIKE '%cogs_duplicate_bot%'").get() as { n: number };
+  expect(dup.n).toBeGreaterThan(0);
+});
+test("a bot token replaced at the same path during the wait rejects the old bot's updates", async () => {
+  const p = poller(); p.supervise(2, 20);
+  while (!calls.some((c) => c.method === "getUpdates")) await Bun.sleep(5);
+  writeFileSync(join(dir, "token"), "fixture-replacement-bot");
+  updates = [update()];
+  await Bun.sleep(100); p.stop();
+  expect(injected).toHaveLength(0);
+  const key = `cogs_offset:${createHash("sha256").update(`${agents[0]!.cogs_inbox!.api_base}\n${TOKEN}`).digest("hex")}`;
+  expect(db.query("SELECT value FROM setting WHERE key=?").get(key)).toBeNull();
+});
+test("a tmux session changed during the wait injects into the current one", async () => {
+  const p = poller(); p.supervise(2, 20);
+  while (!calls.some((c) => c.method === "getUpdates")) await Bun.sleep(5);
+  agents = [{ ...agents[0]!, tmux_session: "claude-lisa-new" }];
+  updates = [update()];
+  await Bun.sleep(100); p.stop();
+  expect(injected).toHaveLength(1);
+  expect(injected[0]!.session).toBe("claude-lisa-new");
+});
+test("an allow_from change during the wait filters with the new list", async () => {
+  const p = poller(); p.supervise(2, 20);
+  while (!calls.some((c) => c.method === "getUpdates")) await Bun.sleep(5);
+  agents = [{ ...agents[0]!, cogs_inbox: { ...agents[0]!.cogs_inbox!, allow_from: ["72"] } }];
+  updates = [update()];
+  await Bun.sleep(100); p.stop();
+  expect(injected).toHaveLength(0);
+});
+test("repeated supervise keeps one loop, restarts after off→on, and does nothing after stop", async () => {
+  const p = poller(); p.supervise(1, 20);
+  while (!calls.some((c) => c.method === "getUpdates")) await Bun.sleep(5);
+  p.supervise(1, 20); p.supervise(1, 20);
+  expect(pollingMax).toBe(1);
+  writeFileSync(process.env.TEAMOS_AGENT_OFF_FILE!, "lisa\n"); updates = [update()];
+  await Bun.sleep(50); expect(injected).toHaveLength(0);
+  writeFileSync(process.env.TEAMOS_AGENT_OFF_FILE!, ""); p.supervise(1, 20);
+  await Bun.sleep(50); expect(injected).toHaveLength(1);
+  p.stop(); const before = calls.length; updates.push(update(11)); p.supervise(1, 20);
+  await Bun.sleep(50); expect(injected).toHaveLength(1); expect(calls).toHaveLength(before);
 });
