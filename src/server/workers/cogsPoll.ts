@@ -135,14 +135,16 @@ export function createCogsPoller(deps: Deps) {
       const key = `cogs_offset:${identity}`;
       const row = deps.db.query("SELECT value FROM setting WHERE key = ?").get(key) as { value: string } | null;
       let offset = Number(row?.value ?? 0);
-      const updates = await cogsCall(config, token, "getUpdates", { offset, timeout: longPollSec }, abort.signal, (longPollSec + 10) * 1000);
+      const updates = await cogsCall(config, token, "getUpdates", { offset, timeout: longPollSec }, abort.signal,
+        longPollSec > 0 ? (longPollSec + 10) * 1000 : undefined);
       if (!Array.isArray(updates)) throw new Error("cogs_updates_invalid");
       if (longPollSec > 0 && updates.length) {
         const current = deps.agents().find((a) => a.id === agent.id);
         const fresh = current && !isAgentOff(agent.id) ? cogsInbox(current) : null;
-        // 같은 봇(같은 주소·토큰 파일)일 때만 넣는다. offset 을 넘기지 않아 다음에 맞는 설정으로 다시 받는다.
-        if (!fresh || fresh.api_base !== config.api_base || fresh.token_file !== config.token_file) return "stop";
-        config = fresh;
+        // 같은 봇(주소와 토큰 내용으로 만든 identity)일 때만 넣는다. 아니면 offset 을 넘기지 않아 다음에 맞는 설정으로 다시 받는다.
+        if (!fresh || createHash("sha256").update(`${fresh.api_base}\n${cogsToken(fresh)}`).digest("hex") !== identity) return "stop";
+        // 넣는 곳(tmux 세션 등)도 기다리는 사이 바뀌었을 수 있으니 지금 기록을 쓴다.
+        agent = current!; config = fresh;
       }
       for (const update of updates) {
         if (abort.signal.aborted) return "ok";

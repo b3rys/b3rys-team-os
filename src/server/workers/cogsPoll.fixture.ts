@@ -777,3 +777,42 @@ test("two members on the same bot never poll it at the same time", async () => {
   const dup = db.query("SELECT count(*) AS n FROM audit_event WHERE action='cogs_poll_failed' AND detail_json LIKE '%cogs_duplicate_bot%'").get() as { n: number };
   expect(dup.n).toBeGreaterThan(0);
 });
+test("a bot token replaced at the same path during the wait rejects the old bot's updates", async () => {
+  const p = poller(); p.supervise(2, 20);
+  while (!calls.some((c) => c.method === "getUpdates")) await Bun.sleep(5);
+  writeFileSync(join(dir, "token"), "fixture-replacement-bot");
+  updates = [update()];
+  await Bun.sleep(100); p.stop();
+  expect(injected).toHaveLength(0);
+  const key = `cogs_offset:${createHash("sha256").update(`${agents[0]!.cogs_inbox!.api_base}\n${TOKEN}`).digest("hex")}`;
+  expect(db.query("SELECT value FROM setting WHERE key=?").get(key)).toBeNull();
+});
+test("a tmux session changed during the wait injects into the current one", async () => {
+  const p = poller(); p.supervise(2, 20);
+  while (!calls.some((c) => c.method === "getUpdates")) await Bun.sleep(5);
+  agents = [{ ...agents[0]!, tmux_session: "claude-lisa-new" }];
+  updates = [update()];
+  await Bun.sleep(100); p.stop();
+  expect(injected).toHaveLength(1);
+  expect(injected[0]!.session).toBe("claude-lisa-new");
+});
+test("an allow_from change during the wait filters with the new list", async () => {
+  const p = poller(); p.supervise(2, 20);
+  while (!calls.some((c) => c.method === "getUpdates")) await Bun.sleep(5);
+  agents = [{ ...agents[0]!, cogs_inbox: { ...agents[0]!.cogs_inbox!, allow_from: ["72"] } }];
+  updates = [update()];
+  await Bun.sleep(100); p.stop();
+  expect(injected).toHaveLength(0);
+});
+test("repeated supervise keeps one loop, restarts after off→on, and does nothing after stop", async () => {
+  const p = poller(); p.supervise(1, 20);
+  while (!calls.some((c) => c.method === "getUpdates")) await Bun.sleep(5);
+  p.supervise(1, 20); p.supervise(1, 20);
+  expect(pollingMax).toBe(1);
+  writeFileSync(process.env.TEAMOS_AGENT_OFF_FILE!, "lisa\n"); updates = [update()];
+  await Bun.sleep(50); expect(injected).toHaveLength(0);
+  writeFileSync(process.env.TEAMOS_AGENT_OFF_FILE!, ""); p.supervise(1, 20);
+  await Bun.sleep(50); expect(injected).toHaveLength(1);
+  p.stop(); const before = calls.length; updates.push(update(11)); p.supervise(1, 20);
+  await Bun.sleep(50); expect(injected).toHaveLength(1); expect(calls).toHaveLength(before);
+});
