@@ -1,4 +1,5 @@
 import { reasoningSummaryOf } from "./reasoningSummary";
+import { withTeamDbPathForChild } from "../../lib/teamDbPath";
 /** 자식 app-server와 줄 단위 JSON-RPC로 통신해 진행 중 steer·interrupt와 승인 요청을 처리한다.
  * 팀 버스·텔레그램 연결은 상위 어댑터가 담당하므로 이 모듈에는 섞지 않는다. */
 import { uiText } from "./uiStrings";
@@ -100,7 +101,7 @@ interface Pending { resolve: (v: any) => void; reject: (e: any) => void; method:
 
 /** CODEX_HOME을 명시해야 자식이 호스트 ~/.codex 대신 해당 팀원의 승인정책·권한 설정을 읽는다. */
 export function appServerSpawnEnv(codexHome?: string, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const env = { ...base };
+  const env = withTeamDbPathForChild({ ...base });
   if (codexHome) env.CODEX_HOME = codexHome;
   return env;
 }

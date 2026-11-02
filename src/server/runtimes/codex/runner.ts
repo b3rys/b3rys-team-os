@@ -165,7 +165,7 @@ export async function runCodexTurn(opts: CodexTurnOptions): Promise<CodexTurnRes
   const env = { ...process.env };
   // 팀원 신원을 명시해 실행 환경에서 다른 발신자를 추측하지 않게 한다.
   if (opts.agentId) env.GD_AGENT_ID = opts.agentId;
-  env.TEAM_DB_PATH = teamDbPathForChild(env.TEAM_DB_PATH, join(dirname(fileURLToPath(import.meta.url)), "../../../../team.db"));
+  env.TEAM_DB_PATH = teamDbPathForChild(env.TEAM_DB_PATH) ?? join(dirname(fileURLToPath(import.meta.url)), "../../../../team.db");
   if (opts.codexHome) env.CODEX_HOME = opts.codexHome;
 
   return await new Promise<CodexTurnResult>((resolve) => {

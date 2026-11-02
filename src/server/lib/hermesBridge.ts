@@ -256,7 +256,7 @@ function runHermesProcess(opts: HermesTurnOptions, resumeId: string | null): Pro
       env: {
         ...process.env,
         GD_AGENT_ID: opts.agent.id,          // 나는 누구인가 (스크립트가 tmux 세션으로 추측하지 않게)
-        TEAM_DB_PATH: teamDbPathForChild(process.env.TEAM_DB_PATH, DB_PATH_FOR_SCRIPTS),
+        TEAM_DB_PATH: teamDbPathForChild(process.env.TEAM_DB_PATH) ?? DB_PATH_FOR_SCRIPTS,
         TERMINAL_CWD: runtimeCwd,
         MESSAGING_CWD: runtimeCwd,
       },

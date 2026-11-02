@@ -305,3 +305,27 @@ test('activity renews 660-second lease and idle grace; silence permits recovery'
     t.proc.stdout.emit('data', 'done'); t.proc.emit('close', 0); await t.turn;
   } finally { forgetTurnAlive('m1:hermes'); db.close(); }
 });
+
+describe("the member's scripts find the team", () => {
+  test("a relative TEAM_DB_PATH reaches the hermes process as the server's absolute path", async () => {
+    const proc = fakeProc();
+    let spawnedEnv: NodeJS.ProcessEnv | undefined;
+    __setHermesBridgeTestDeps({
+      spawn: ((_cmd: string, _args: string[], opts: { env?: NodeJS.ProcessEnv }) => { spawnedEnv = opts.env; return proc; }) as never,
+      openStateDb: () => { throw new Error("unavailable"); },
+    });
+    const before = process.env.TEAM_DB_PATH;
+    process.env.TEAM_DB_PATH = "./team.db";
+    try {
+      const turn = runHermesTeamTurn({
+        agent: hermes, threadId: "t-db", messageId: "m-db", body: "보내기",
+        fromLabel: "bill", replyRoute: { kind: "teammate", to: "bill" }, timeoutMs: 1_000,
+      }).catch(() => undefined);
+      proc.emit("close", 0);
+      await turn;
+    } finally {
+      if (before === undefined) delete process.env.TEAM_DB_PATH; else process.env.TEAM_DB_PATH = before;
+    }
+    expect(spawnedEnv?.TEAM_DB_PATH).toBe(`${process.cwd()}/team.db`);
+  });
+});
