@@ -222,7 +222,7 @@ def _cogs_detail(data):
         return ""
     if re.search(r"[\x00-\x1f\x7f/\\`$|;&<>:=]", value):
         return ""
-    if re.search(r"\.env\b|credentials?|secrets?|tokens?|password|passwd|api[-_ ]?key|private[-_ ]?key|\.pem\b|\.key\b|\bid_rsa\b|\bid_ed25519\b|\b[A-Za-z0-9_+-]{24,}\b|\b(?:authorization|basic|bearer|digest|negotiate|ntlm|oauth)\b", value, re.I):
+    if re.search(r"\.env\b|credentials?|secrets?|tokens?|password|passwd|pass[-_ ]?phrase|api[-_ ]?key|private[-_ ]?key|\.pem\b|\.key\b|\bid_rsa\b|\bid_ed25519\b|\b[A-Za-z0-9_+-]{24,}\b|\b(?:authorization|basic|bearer|digest|negotiate|ntlm|oauth)\b", value, re.I):
         return ""
     return re.sub(r"\s+", " ", value.strip())[:45]
 

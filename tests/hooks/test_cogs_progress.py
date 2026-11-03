@@ -63,6 +63,8 @@ class CogsProgressTests(unittest.TestCase):
                 self.assertNotIn('private', json.dumps(payload))
 
     def test_secret_details_fail_closed_and_length_is_bounded(self):
+        for value in ['passphrase demo', 'pass_phrase demo', 'pass-phrase demo', 'pass phrase demo']:
+            self.assertEqual(hook._cogs_detail({'tool_name': 'Bash', 'tool_input': {'description': value}}), '')
         for value in ['token=fixture', 'Bearer fixture', '.env.local', 'credentials.json', 'id_rsa', 'cert.pem', 'api_key fixture', 'sk-fixture012345678901234567890', '/private/path', 'echo $HOME', 'safe ' * 30 + 'token=fixture']:
             self.assertEqual(hook._cogs_detail({'tool_name': 'Bash', 'tool_input': {'description': value}}), '')
         self.assertEqual(len(hook._cogs_detail({'tool_name': 'Bash', 'tool_input': {'description': '시험 😀 ' * 30}})), 45)

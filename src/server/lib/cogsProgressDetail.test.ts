@@ -8,6 +8,7 @@ test("safe descriptions and Unicode length cap", () => {
 });
 
 test("secret patterns and raw command/path material fail closed before clipping", () => {
+  for (const value of ["passphrase demo", "pass_phrase demo", "pass-phrase demo", "pass phrase demo"]) expect(safeProgressDetail(value)).toBe("");
   for (const value of ["token=fixture", "Bearer fixture", "api_key: fixture", "Read .env.local", "private key fixture", "credentials.json", "id_ed25519", "cert.pem", "key.key", "sk-fixture012345678901234567890", "/Users/private/a.ts", "src/a.ts", "C:\\private\\a.ts", "curl https://fixture", "echo $HOME", "echo hi; pwd", "Read\nsecret", "safe ".repeat(30) + "token=fixture", {}, null]) {
     expect(safeProgressDetail(value)).toBe("");
   }
