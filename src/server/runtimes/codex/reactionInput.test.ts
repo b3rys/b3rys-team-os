@@ -39,11 +39,15 @@ describe('human reaction delivery',()=>{
   await routeReactionUpdate(1,r,h.deps);await h.queued[0]!();
   expect(h.turns[0]).toContain('<반응취소:OK');expect(h.turns[0]).toContain('승인=아니오');
  });
- test('bot, hop, missing contract, wrong author, Telegram and disallowed room are discarded',async()=>{
-  for(const r of [reaction('👌',{user:{id:3,is_bot:true}}),reaction('👌',{cogs_hop:1}),reaction('👌',{cogs_message_sender_id:undefined}),reaction('👌',{cogs_reactor_is_master:undefined}),reaction('👌',{cogs_message_text:undefined}),reaction('👌',{chat:{id:3}})]){
+ test('bot, hop, missing contract, wrong author and Telegram are discarded',async()=>{
+  for(const r of [reaction('👌',{user:{id:3,is_bot:true}}),reaction('👌',{cogs_hop:1}),reaction('👌',{cogs_message_sender_id:undefined}),reaction('👌',{cogs_reactor_is_master:undefined}),reaction('👌',{cogs_message_text:undefined})]){
    const h=harness();expect(await routeReactionUpdate(1,r,h.deps)).toBeNull();expect(h.queued).toHaveLength(0);
   }
   const h=harness();expect(await routeReactionUpdate(1,reaction(),{...h.deps,channel:DEFAULT_CHANNEL})).toBeNull();
+ });
+ test('a reaction in a room missing from allow_from is accepted (cogs only delivers rooms the owner added the bot to)',async()=>{
+  const h=harness();await routeReactionUpdate(1,reaction('👌',{chat:{id:3}}),h.deps);expect(h.queued).toHaveLength(1);
+  const off=harness();expect(await routeReactionUpdate(1,reaction(),{...off.deps,allowFrom:new Set()})).toBeNull();
  });
  test('same update is delivered once; unchanged reaction produces no input',async()=>{
   const h=harness();await routeReactionUpdate(8,reaction(),h.deps);await routeReactionUpdate(8,reaction(),h.deps);await routeReactionUpdate(7,reaction(),h.deps);

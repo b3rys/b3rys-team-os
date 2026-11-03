@@ -79,11 +79,20 @@ export async function cogsCall(config: Pick<CogsInbox, "api_base">, token: strin
   return data.result;
 }
 
+/**
+ * cogs rooms are gated by the cogs server: a bot only receives updates for rooms it is a member of,
+ * and only the bot's owner can add it to a room. A non-empty allow_from turns the inbox on; an
+ * explicit room list no longer has to name every new group room.
+ */
+export function cogsRoomAllowed(config: CogsInbox, chatId: unknown): boolean {
+  return config.allow_from.length > 0 && /^-?\d+$/.test(String(chatId));
+}
+
 /** Validate before either editing an existing response or sending a new one. */
 export function cogsReplyConfig(agent: AgentRecord | undefined, meta: CogsMeta): CogsInbox {
   if (!agent || agent.id !== meta.agent_id) throw new Error("cogs_reply_agent_mismatch");
   const config = cogsInbox(agent);
-  if (!config || !config.allow_from.includes(meta.chat_id)) throw new Error("cogs_reply_not_allowed");
+  if (!config || !cogsRoomAllowed(config, meta.chat_id)) throw new Error("cogs_reply_not_allowed");
   return config;
 }
 
@@ -103,7 +112,7 @@ export async function sendCogsReply(agent: AgentRecord | undefined, meta: CogsMe
 export async function setCogsReaction(agent: AgentRecord | undefined, meta: CogsMeta, emoji: string | null, noReply = false): Promise<{ declined: boolean }> {
   if (!agent || agent.id !== meta.agent_id) throw new Error("cogs_reaction_agent_mismatch");
   const config = cogsInbox(agent);
-  if (!config || !config.allow_from.includes(meta.chat_id)) throw new Error("cogs_reaction_not_allowed");
+  if (!config || !cogsRoomAllowed(config, meta.chat_id)) throw new Error("cogs_reaction_not_allowed");
   const token = cogsToken(config);
   if (emoji !== null) {
     await cogsCall(config, token, "setMessageReaction", {
