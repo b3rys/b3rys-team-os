@@ -138,6 +138,7 @@ test("only allowed private human text reaches the session", async () => {
   delete (agents[0]!.cogs_inbox as { allow_senders?: unknown }).allow_senders; // 단체방 허용 사람 없음
   const bot = update(11); bot.message.from.is_bot = true;
   const group = update(12); group.message.chat.type = "group";
+  // 1:1 rooms still have to be listed: 999 is not.
   updates = [update(10, 999), bot, group, update(13, 71, " ")];
   await poller().pollOnce(); expect(injected).toHaveLength(0); expect(rowCount()).toBe(0);
 });
@@ -313,11 +314,12 @@ test("group: the lead's message in an allowed group room is injected, marked as 
   expect(injected[0]!.body).toContain("[cogs group chat_id=90, sender_id=8, reply_to=Jane]");
   expect(findCogsMetaForThread(db, injected[0]!.threadId)).toMatchObject({ chat_id: "90", message_id: 120, chat_type: "group" });
 });
-test("group: other people, unlisted rooms, AI DM rooms and bots are not injected", async () => {
+test("group: other people, AI DM rooms and bots are not injected; a new group from an allowed sender is", async () => {
   const bot = groupUpdate(23); bot.message.from.is_bot = true;
   const aidm = groupUpdate(24); (aidm.message.chat as { type: string }).type = "ai_dm";
   updates = [groupUpdate(21, 90, 99), groupUpdate(22, 999, 8), bot, aidm];
-  await poller().pollOnce(); expect(injected).toHaveLength(0); expect(rowCount()).toBe(0);
+  await poller().pollOnce();
+  expect(injected.map((i) => i.body.split("]")[0])).toEqual(["[cogs group chat_id=999, sender_id=8"]);
 });
 test("group: without allow_senders the group is not accepted (private still works)", async () => {
   delete (agents[0]!.cogs_inbox as { allow_senders?: unknown }).allow_senders;
