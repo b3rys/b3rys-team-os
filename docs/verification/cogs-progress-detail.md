@@ -6,11 +6,15 @@
 
 Only Bash `description` and file-tool basenames are selected. Commands, file contents and other tool input fields are not forwarded. Suspect descriptions are omitted entirely. The server validates the selected detail again before sending `cogs_activity_args.target`. Unknown/absent detail retains the existing kind-only activity.
 
+Both boundaries reject short credential prefixes, mixed alphanumeric words of eight or more characters, authentication/secret marker words, address-like words and Unicode Cc/Cf controls. File targets require a permitted source/document/image extension and must not match sensitive filenames. This deliberately omits some harmless descriptions rather than forwarding ambiguous material. The shared 30-case fixture covers the review inputs and safe controls.
+
+The first progress update is immediate. Further activity updates in the same typing session are coalesced to the latest code/target, at least one second apart. Completion, no-reply, stop and cap expiry discard delayed activity; final answers do not wait for this timer.
+
 ## Verification
 
-- `bun test src/server/lib/cogsProgressDetail.test.ts src/server/lib/cogsTyping.test.ts src/server/routes/cogsProgress.test.ts`: 28 pass, 0 fail.
-- `python3 -m unittest discover -s tests/hooks -p test_cogs_progress.py`: 11 pass.
-- `python3 scripts/check-cogs-progress-detail-mutation.py`: injected `token=` passthrough produces 2 server test failures and 1 hook test failure; both mutants caught. Mutations run in temporary copies, not the working tree.
+- `bun test src/server/lib/cogsProgressDetail.test.ts src/server/lib/cogsTyping.test.ts src/server/routes/cogsProgress.test.ts`: 33 pass, 0 fail, 185 assertions.
+- `python3 -m unittest discover -s tests/hooks -p test_cogs_progress.py`: 12 pass.
+- `python3 scripts/check-cogs-progress-detail-mutation.py`: filter removal produces 4 server test failures and 27 hook assertion/subtest failures; removing the one-second interval produces 3 server test failures. All three mutants caught. Baseline and restored copies pass. Mutations run in temporary copies, not the working tree.
 
 ## Exercised examples
 

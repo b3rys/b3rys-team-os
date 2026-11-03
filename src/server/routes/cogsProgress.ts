@@ -34,7 +34,8 @@ export function createCogsProgressRoutes(agents: () => AgentRecord[]): Hono {
       const agent = agents().find(a => a.id === id);
       const config = agent && cogsInbox(agent);
       if (!config || !config.allow_from.includes(chatId)) return c.json({ ok: true, accepted: false }, 202);
-      void updateCogsProgress(id, chatId, progressCode(tool), raw.detail).catch(() => { /* Auxiliary signal. */ });
+      const file = ["Read", "Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool);
+      void updateCogsProgress(id, chatId, progressCode(tool), raw.detail, file).catch(() => { /* Auxiliary signal. */ });
       return c.json({ ok: true, accepted: true }, 202);
     } catch {
       // Neither parser details, remote errors nor raw tool data are reflected.

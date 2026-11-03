@@ -70,6 +70,17 @@ class CogsProgressTests(unittest.TestCase):
         self.assertEqual(len(hook._cogs_detail({'tool_name': 'Bash', 'tool_input': {'description': '시험 😀 ' * 30}})), 45)
         self.assertEqual(hook._cogs_detail({'tool_name': 'Read', 'tool_input': {'file_path': '/private/.env.local'}}), '')
 
+    def test_review_privacy_cases_in_real_hook_payloads(self):
+        self.event('react', prompt=COGS)
+        cases = json.loads((ROOT / 'tests/hooks/cogs_progress_detail_cases.json').read_text())
+        for row in cases:
+            tool = 'Read' if row.get('file') else 'Bash'
+            args = {'file_path': '/private/' + row['input']} if row.get('file') else {'description': row['input'], 'command': 'never forward this'}
+            with self.subTest(value=row['input']), patch.object(http.client, 'HTTPConnection') as connect:
+                self.event('pre', tool_name=tool, tool_input=args)
+                payload = json.loads(connect.return_value.request.call_args.args[2])
+                self.assertEqual(payload.get('detail', ''), row['expected'])
+
     def test_quoted_telegram_tag_cannot_redirect_cogs_progress(self):
         quoted = '<channel source="telegram" chat_id="-99" message_id="1">quoted</channel>'
         self.event('react', prompt=COGS.replace('hello', quoted))

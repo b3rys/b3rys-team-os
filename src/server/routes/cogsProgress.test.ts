@@ -15,7 +15,7 @@ const call = (async (_c: unknown, _t: string, method: string, body: any) => {
   if (method === "sendMessage") return opening ? opening() : { message_id: 99 };
   return true;
 }) as any;
-const start = (capMs = 10000, replyToMessageId?: number) => startCogsTyping("fixture", "42", config, "fixture", { call, capMs, replyToMessageId });
+const start = (capMs = 10000, replyToMessageId?: number) => startCogsTyping("fixture", "42", config, "fixture", { call, capMs, replyToMessageId, progressIntervalMs: 0 });
 const progressCalls = () => calls.filter(c => c.method !== "sendChatAction");
 const request = async (extra = {}) => {
 const response = await createCogsProgressRoutes(() => agents).request("/cogs/progress", {
@@ -66,6 +66,59 @@ test("inactive, wrong member/room, ended, unconfigured and disabled requests are
   stopCogsTyping("fixture", "42");
   expect((await request()).status).toBe(202);
   expect(progressCalls()).toEqual([]);
+});
+
+test("default one-second throttle coalesces different tools and targets to the latest value", async () => {
+  const sentAt: number[] = [];
+  const timedCall = (async (config: any, token: string, method: string, body: any) => {
+    if (body.cogs_response_state === "activity") sentAt.push(Date.now());
+    return call(config, token, method, body);
+  }) as any;
+  startCogsTyping("fixture", "42", config, "fixture", { call: timedCall });
+  await request({ detail: "a.ts" });
+  await request({ tool_name: "Edit", detail: "b.ts" });
+  await request({ detail: "latest.ts" });
+  expect(progressCalls()).toHaveLength(1);
+  await wait(1100);
+  expect(progressCalls().map(c => c.body.cogs_activity_args)).toEqual([{ target: "a.ts" }, { target: "latest.ts" }]);
+  expect(sentAt[1]! - sentAt[0]!).toBeGreaterThanOrEqual(1000);
+});
+
+test("completion and no-reply discard delayed progress without delaying the final reply", async () => {
+  for (const finish of ["complete", "decline"]) {
+    calls = [];
+    startCogsTyping("fixture", "42", config, "fixture", { call, replyToMessageId: 77 });
+    await request({ detail: "a.ts" });
+    await request({ detail: "b.ts" });
+    if (finish === "complete") await completeCogsProgress("fixture", "42", "answer");
+    else await endCogsTypingWithoutReply("fixture", "42", 77, async () => ({ declined: true }));
+    const finished = progressCalls().length;
+    await wait(1100);
+    expect(progressCalls()).toHaveLength(finished);
+    expect(progressCalls().filter(c => c.body.cogs_response_state === "activity")).toHaveLength(1);
+  }
+});
+
+test("stop and cap expiry discard coalesced progress", async () => {
+  for (const capMs of [10000, 30]) {
+    calls = [];
+    startCogsTyping("fixture", "42", config, "fixture", { call, capMs });
+    await request({ detail: "a.ts" });
+    await request({ detail: "b.ts" });
+    if (capMs === 10000) stopCogsTyping("fixture", "42");
+    await wait(1100);
+    expect(progressCalls().filter(c => c.body.cogs_response_state === "activity")).toHaveLength(1);
+    expect(progressCalls().at(-1)?.body.cogs_response_state).toBe("cancelled");
+  }
+});
+
+test("review privacy cases never appear in outgoing activity args", async () => {
+  start();
+  const cases = await Bun.file(new URL("../../../tests/hooks/cogs_progress_detail_cases.json", import.meta.url)).json();
+  for (const row of cases) {
+    await request({ tool_name: row.file ? "Read" : "Bash", detail: row.input });
+    expect(progressCalls().at(-1)?.body.cogs_activity_args).toEqual(row.expected ? { target: row.expected } : {});
+  }
 });
 
 test("safe detail updates the same tool and rejects secrets", async () => {

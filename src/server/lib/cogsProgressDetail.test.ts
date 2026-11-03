@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test";
 import { COGS_PROGRESS_DETAIL_MAX, safeProgressDetail } from "./cogsProgressDetail";
+const privacyCases = await Bun.file(new URL("../../../tests/hooks/cogs_progress_detail_cases.json", import.meta.url)).json();
+
+test("review privacy cases reject short credentials, sensitive files and Unicode controls", () => {
+  for (const row of privacyCases) expect(safeProgressDetail(row.input, row.file ?? false)).toBe(row.expected);
+});
 
 test("safe descriptions and Unicode length cap", () => {
   expect(safeProgressDetail("  Run activity tests  ")).toBe("Run activity tests");

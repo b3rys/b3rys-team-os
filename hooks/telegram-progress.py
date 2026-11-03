@@ -206,6 +206,7 @@ def handle_react(state_dir, data):
 
 
 def _cogs_detail(data):
+    import unicodedata
     tool = data.get("tool_name")
     args = data.get("tool_input")
     if not isinstance(args, dict):
@@ -220,10 +221,21 @@ def _cogs_detail(data):
         return ""
     if not isinstance(value, str) or len(value) > 4096:
         return ""
-    if re.search(r"[\x00-\x1f\x7f/\\`$|;&<>:=]", value):
+    if any(unicodedata.category(char) in ("Cc", "Cf") for char in value):
+        return ""
+    if re.search(r"[/\\`$|;&<>:=@*]", value):
+        return ""
+    if re.search(r"(?:^|[ ._-])(?:config|kubeconfig|wallet|shadow|netrc|npmrc|keystore)(?:$|[ ._-])|\.(?:p12|pfx|ppk|keystore|tfstate|dat)$", value, re.I):
+        return ""
+    if tool != "Bash" and not re.search(r"\.(?:[cm]?[jt]sx?|py|swift|go|rs|java|[ch]|cpp|hpp|cs|sh|rb|php|html|css|scss|md|txt|rst|adoc|json|ya?ml|toml|xml|csv|ipynb|png|jpe?g|gif|svg|webp|pdf)$", value, re.I):
         return ""
     if re.search(r"\.env\b|credentials?|secrets?|tokens?|password|passwd|pass[-_ ]?phrase|api[-_ ]?key|private[-_ ]?key|\.pem\b|\.key\b|\bid_rsa\b|\bid_ed25519\b|\b[A-Za-z0-9_+-]{24,}\b|\b(?:authorization|basic|bearer|digest|negotiate|ntlm|oauth)\b", value, re.I):
         return ""
+    if re.search(r"\b(?:pw|pass|key|private|BEGIN|OPENSSH|RSA)\b", value, re.I):
+        return ""
+    for word in re.findall(r"[\w+-]+", value):
+        if re.match(r"(?:gh[pousr]_|xox|sk-|AKIA|eyJ)", word, re.I) or (len(word) >= 8 and any(c.isalpha() for c in word) and any(c.isnumeric() for c in word)):
+            return ""
     return re.sub(r"\s+", " ", value.strip())[:45]
 
 
