@@ -1,10 +1,10 @@
 // rules/SKILLS.md 렌더 — 목록은 규칙 파일 밖, 파일은 원자적으로, 같으면 안 건드린다.
 import { describe, expect, it } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildSkillsCopy, buildSkillsMd, ensureSkillsCopy, refreshSkillsMd, renderSkillsMd, SKILLS_COPY_MARKER, syncSkillsCopies } from "./skillsRender";
-import { SKILLS_MD_PATH, buildSkillTable } from "./personaTemplates";
+import { REPO_ROOT, SKILLS_MD_PATH, buildSkillTable } from "./personaTemplates";
 
 describe("rules/SKILLS.md 렌더", () => {
   it("본문 = 헤더 + 자동 생성 표. 표는 personaTemplates 의 것과 같은 함수에서 나온다", () => {
@@ -149,5 +149,100 @@ describe("워크스페이스 SKILLS.md 복사본", () => {
     const r = ensureSkillsCopy(ws, source, { tmpSuffix: () => { const v = Math.random().toString(36).slice(2); seen.push(v); return v; } });
     expect(r).toBe("written");
     expect(seen.length).toBe(1);
+  });
+});
+
+// 비공개 팩 스킬 폴더 — 시험은 tmp 폴더만 쓴다.
+describe("팀 팩 스킬 폴더 (B3OS_EXTRA_SKILLS_DIR)", () => {
+  const pack = (skills: Record<string, string>) => {
+    const dir = mkdtempSync(join(tmpdir(), "pack-skills-"));
+    for (const [name, trigger] of Object.entries(skills)) {
+      mkdirSync(join(dir, name));
+      writeFileSync(join(dir, name, "SKILL.md"), `---\nname: ${name}\n${trigger ? `trigger: ${trigger}\n` : ""}---\n본문\n`);
+    }
+    return dir;
+  };
+
+  it("폴더가 없으면 공개 표 그대로 — 머리줄 + 목록 한 줄, 팩 줄 없음", () => {
+    const table = buildSkillTable(null);
+    expect(table.split("\n")).toHaveLength(2);
+    expect(table.startsWith("**Skills — pick by trigger**")).toBe(true);
+    expect(table).not.toContain("Team pack skills");
+    expect(buildSkillTable(pack({}))).toBe(table);   // 빈 팩도 같다
+  });
+
+  it("팩 스킬은 공개 목록 뒤 별도 줄로, 팩 경로와 함께 나온다", () => {
+    const dir = pack({ "b3rys-cogs-deploy": "deploy cogs", "b3rys-hidden": "" });
+    const table = buildSkillTable(dir);
+    expect(table.startsWith(buildSkillTable(null))).toBe(true);
+    expect(table).toContain("**Team pack skills**");
+    expect(table).toContain("deploy cogs → `b3rys-cogs-deploy`");
+    expect(table).not.toContain("b3rys-hidden");   // trigger 없는 스킬은 나가지 않는다 — 공개와 같은 규칙
+  });
+
+  it("팩 이름·trigger·entry 로 목록에 새 줄·코드 구간·링크를 끼워 넣지 못한다", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pack-inject-"));
+    const add = (name: string, front: string) => {
+      mkdirSync(join(dir, name));
+      writeFileSync(join(dir, name, "SKILL.md"), `---\nname: x\n${front}---\n`);
+    };
+    add("good`\n## INJECTED_NAME\n`", "trigger: name 시도\n");
+    add("b3rys-trig", "trigger: a `code` [link](http://x) <b>h</b> # head | t\n");
+    add("b3rys-entry", "trigger: entry 시도\nentry: x`](http://evil)\n");
+    const table = buildSkillTable(dir);
+    expect(table).not.toContain("INJECTED_NAME");
+    expect(table).not.toContain("name 시도");
+    const pack = table.split("\n").find((l) => l.startsWith("**Team pack skills**"))!;
+    expect(table.split("\n")).toHaveLength(4);                // 공개 2줄 + 빈 줄 + 팩 1줄
+    const trig = pack.slice(pack.indexOf("): ") + 3).split(" · ").find((x) => x.includes("→ `b3rys-trig`"))!;
+    expect(trig.slice(0, trig.indexOf(" → `b3rys-trig`"))).not.toMatch(/[`<>\[\]#|*_]/);   // 코드 구간·링크·HTML·제목·표 문자 없음
+    expect(pack).toMatch(/entry 시도 → `b3rys-entry`( ·|\.)/);   // 안전하지 않은 entry 는 빠진다
+    expect(pack).not.toContain("evil");
+  });
+
+  it("trigger 없는 공개 스킬 이름도 팩이 가져가지 못한다", () => {
+    const hidden = readdirSync(join(REPO_ROOT, "skills")).find((n) => {
+      const md = join(REPO_ROOT, "skills", n, "SKILL.md");
+      return existsSync(md) && !/^trigger:/m.test(readFileSync(md, "utf-8").slice(0, 4000));
+    });
+    expect(hidden, "trigger 없는 공개 스킬이 하나는 있어야 이 시험이 의미가 있다").toBeDefined();
+    expect(buildSkillTable(pack({ [hidden!]: "PACK_SHADOW_PUBLIC" }))).not.toContain("PACK_SHADOW_PUBLIC");
+  });
+
+  it("파일 경로를 주면 팩만 빠지고 공개 목록은 그대로 렌더된다", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "pack-file-")), "not-a-dir");
+    writeFileSync(file, "x");
+    const old = process.env.B3OS_EXTRA_SKILLS_DIR;
+    try {
+      process.env.B3OS_EXTRA_SKILLS_DIR = file;
+      expect(buildSkillTable()).toBe(buildSkillTable(null));
+      const target = join(mkdtempSync(join(tmpdir(), "skills-md-")), "SKILLS.md");
+      expect(renderSkillsMd(target).ok).toBe(true);
+      expect(buildSkillTable(file)).toBe(buildSkillTable(null));
+    } finally {
+      if (old === undefined) delete process.env.B3OS_EXTRA_SKILLS_DIR; else process.env.B3OS_EXTRA_SKILLS_DIR = old;
+    }
+  });
+
+  it("공개 스킬과 이름이 같으면 공개 것이 남고 팩 것은 빠진다", () => {
+    const dir = pack({ "b3os-verification": "덮어쓰기 시도" });
+    const table = buildSkillTable(dir);
+    expect(table).not.toContain("덮어쓰기 시도");
+    expect(table).toBe(buildSkillTable(null));
+  });
+
+  it("상대경로·없는 경로는 읽지 않는다", () => {
+    const old = process.env.B3OS_EXTRA_SKILLS_DIR;
+    try {
+      process.env.B3OS_EXTRA_SKILLS_DIR = "relative/skills";
+      expect(buildSkillTable()).toBe(buildSkillTable(null));
+      process.env.B3OS_EXTRA_SKILLS_DIR = join(tmpdir(), "no-such-pack-dir-1103");
+      expect(buildSkillTable()).toBe(buildSkillTable(null));
+      const dir = pack({ "b3rys-x": "x 할 때" });
+      process.env.B3OS_EXTRA_SKILLS_DIR = dir + "/";
+      expect(buildSkillTable()).toContain("x 할 때 → `b3rys-x`");
+    } finally {
+      if (old === undefined) delete process.env.B3OS_EXTRA_SKILLS_DIR; else process.env.B3OS_EXTRA_SKILLS_DIR = old;
+    }
   });
 });
