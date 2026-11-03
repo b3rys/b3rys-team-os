@@ -1,4 +1,5 @@
 import { CogsApiRejected, CogsDeliveryUnknown, cogsCall, type CogsInbox } from "./cogsRelay";
+import { safeProgressDetail } from "./cogsProgressDetail";
 
 /**
  * cogs 에서 받은 말을 팀원 세션에 넣은 뒤, 그 팀원이 답을 낼 때까지 그 방에 '입력 중'(sendChatAction typing)을 계속 보낸다.
@@ -28,6 +29,7 @@ interface Processing {
   messageId?: number;
   replyToMessageId?: number;
   lastCode?: string;
+  lastDetail?: string;
   uncertainOpen?: boolean;
   uncertainComplete?: boolean;
   pending: Promise<unknown>;
@@ -110,14 +112,15 @@ export async function endCogsTypingWithoutReply<T extends { declined: boolean }>
   }
 }
 
-/** Only canonical activity codes, never tool arguments, reach the response message. */
-export async function updateCogsProgress(agentId: string, chatId: string, code: string): Promise<boolean> {
+/** Only activity codes and sanitized descriptions reach the response message. */
+export async function updateCogsProgress(agentId: string, chatId: string, code: string, detail?: unknown): Promise<boolean> {
+  const target = safeProgressDetail(detail);
   const entry = active.get(key(agentId, chatId));
   if (!entry?.accepting || process.env.B3OS_COGS_PROGRESS === "0") return false;
   const next = entry.pending.then(async () => {
     if (!entry.accepting || entry.uncertainOpen) return false;
-    if (entry.lastCode === code) return true;
-    const body = { chat_id: chatId, text: "", cogs_response_state: "activity", cogs_activity_code: code, cogs_activity_args: {} };
+    if (entry.lastCode === code && entry.lastDetail === target) return true;
+    const body = { chat_id: chatId, text: "", cogs_response_state: "activity", cogs_activity_code: code, cogs_activity_args: target ? { target } : {} };
     if (entry.messageId !== undefined) {
       await entry.call(entry.config, entry.token, "editMessageText", { ...body, message_id: entry.messageId });
     } else {
@@ -131,6 +134,7 @@ export async function updateCogsProgress(agentId: string, chatId: string, code: 
       }
     }
     entry.lastCode = code;
+    entry.lastDetail = target;
     return true;
   });
   entry.pending = next.catch(() => {});

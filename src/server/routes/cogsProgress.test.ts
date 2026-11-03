@@ -68,6 +68,17 @@ test("inactive, wrong member/room, ended, unconfigured and disabled requests are
   expect(progressCalls()).toEqual([]);
 });
 
+test("safe detail updates the same tool and rejects secrets", async () => {
+  start();
+  await request({ detail: "a.ts" });
+  await request({ detail: "b.ts" });
+  await request({ detail: "b.ts" });
+  await request({ detail: "token=fixture-secret" });
+  expect(progressCalls().map(c => c.body.cogs_activity_args)).toEqual([{ target: "a.ts" }, { target: "b.ts" }, {}]);
+  expect(progressCalls().map(c => c.method)).toEqual(["sendMessage", "editMessageText", "editMessageText"]);
+  expect(JSON.stringify(calls)).not.toContain("fixture-secret");
+});
+
 test("raw tool input is absent from response, outgoing request and console on success and failure", async () => {
   const spies = [spyOn(console, "log"), spyOn(console, "warn"), spyOn(console, "error")];
   try {

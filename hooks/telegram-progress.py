@@ -205,6 +205,28 @@ def handle_react(state_dir, data):
     # 여기서 다시 저장하지 않는다. 저장을 토큰 뒤에 두면 토큰 없는 턴에 옛 방이 남는다.
 
 
+def _cogs_detail(data):
+    tool = data.get("tool_name")
+    args = data.get("tool_input")
+    if not isinstance(args, dict):
+        return ""
+    if tool == "Bash":
+        value = args.get("description", "")
+    elif tool in ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit"):
+        value = args.get("file_path", args.get("notebook_path", ""))
+        if isinstance(value, str):
+            value = value.replace("\\", "/").rsplit("/", 1)[-1]
+    else:
+        return ""
+    if not isinstance(value, str) or len(value) > 4096:
+        return ""
+    if re.search(r"[\x00-\x1f\x7f/\\`$|;&<>:=]", value):
+        return ""
+    if re.search(r"\.env\b|credentials?|secrets?|tokens?|password|passwd|api[-_ ]?key|private[-_ ]?key|\.pem\b|\.key\b|\bid_rsa\b|\bid_ed25519\b|\b[A-Za-z0-9_+-]{24,}\b|\b(?:authorization|basic|bearer|digest|negotiate|ntlm|oauth)\b", value, re.I):
+        return ""
+    return re.sub(r"\s+", " ", value.strip())[:45]
+
+
 def _post_cogs_progress(chat_id, data):
     if os.environ.get("B3OS_COGS_PROGRESS") == "0":
         return
@@ -215,8 +237,12 @@ def _post_cogs_progress(chat_id, data):
     import http.client
     conn = http.client.HTTPConnection("127.0.0.1", 7878, timeout=0.8)
     try:
-        body = json.dumps({"agent": agent, "session_id": data.get("session_id", "default"),
-                           "chat_id": chat_id, "tool_name": data.get("tool_name", "")}).encode()
+        payload = {"agent": agent, "session_id": data.get("session_id", "default"),
+                   "chat_id": chat_id, "tool_name": data.get("tool_name", "")}
+        detail = _cogs_detail(data)
+        if detail:
+            payload["detail"] = detail
+        body = json.dumps(payload).encode()
         conn.request("POST", "/team/api/cogs/progress", body, {"Content-Type": "application/json"})
         conn.getresponse()
     except Exception:
