@@ -471,8 +471,26 @@ function readSkillTriggers(dir = `${REPO_ROOT}/skills`): Array<{ name: string; t
  * Unset or missing folder: the table is exactly the public one.
  */
 function extraSkillsDir(): string | null {
-  const dir = process.env.B3OS_EXTRA_SKILLS_DIR?.trim();
-  return dir && dir.startsWith("/") && existsSync(dir) ? dir.replace(/\/+$/, "") : null;
+  const dir = process.env.B3OS_EXTRA_SKILLS_DIR?.trim().replace(/\/+$/, "");
+  if (!dir || !dir.startsWith("/") || !SAFE_PACK_PATH.test(dir)) return null;
+  try { return statSync(dir).isDirectory() ? dir : null; } catch { return null; }
+}
+
+// Pack text goes into every member's prompt list, so it may not open lines, code spans or links there.
+const SAFE_PACK_PATH = /^[^\u0000-\u001f\u007f`[\]<>]+$/;
+const SAFE_SKILL_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const SAFE_ENTRY = /^[A-Za-z0-9._\/ ·-]{1,120}$/;
+function packSkill(s: { name: string; trigger: string; script: string }): { name: string; trigger: string; script: string } | null {
+  if (!SAFE_SKILL_NAME.test(s.name)) return null;
+  const trigger = s.trigger.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").replace(/[`<>[\]#|*_]/g, "").replace(/\s+/g, " ").trim().slice(0, 160);
+  if (!trigger) return null;
+  return { name: s.name, trigger, script: SAFE_ENTRY.test(s.script) ? s.script : "" };
+}
+
+/** Every public skill folder name, with or without a trigger — a pack skill never takes one. */
+function publicSkillNames(): Set<string> {
+  const dir = `${REPO_ROOT}/skills`;
+  try { return new Set(readdirSync(dir).filter((n) => existsSync(`${dir}/${n}/SKILL.md`))); } catch { return new Set(); }
 }
 
 function skillLine(skills: Array<{ name: string; trigger: string; script: string }>): string {
@@ -484,8 +502,13 @@ function skillLine(skills: Array<{ name: string; trigger: string; script: string
 function buildSkillTable(extraDir: string | null = extraSkillsDir()): string {  // rules/SKILLS.md 본문 (skillsRender.ts 가 파일로 렌더)
   const skills = readSkillTriggers();
   const line = skillLine(skills);
-  const taken = new Set(skills.map((s) => s.name));
-  const extra = extraDir ? readSkillTriggers(extraDir).filter((s) => !taken.has(s.name)) : [];
+  const taken = publicSkillNames();
+  let extra: Array<{ name: string; trigger: string; script: string }> = [];
+  // A pack that cannot be read is left out; the public table still renders.
+  if (extraDir && SAFE_PACK_PATH.test(extraDir)) {
+    try { extra = readSkillTriggers(extraDir).filter((s) => !taken.has(s.name)).map(packSkill).filter((s) => s !== null); }
+    catch { extra = []; }
+  }
   // 경로는 맨 위 b3os= 기준 을 한 번만 선언하고 이후는 상대로 쓴다.
   return [
     // 카탈로그·스킬 경로는 절대경로로 둔다 — 기존 가드("스킬 카탈로그도 절대경로, 양 런타임")가 막는다.
