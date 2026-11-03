@@ -80,19 +80,20 @@ export async function cogsCall(config: Pick<CogsInbox, "api_base">, token: strin
 }
 
 /**
- * cogs rooms are gated by the cogs server: a bot only receives updates for rooms it is a member of,
- * and only the bot's owner can add it to a room. A non-empty allow_from turns the inbox on; an
- * explicit room list no longer has to name every new group room.
+ * Which cogs rooms the inbox takes. 1:1 rooms must be listed in allow_from. A group room the cogs server
+ * delivers is taken without being listed when allow_senders is set, because every group message is then
+ * still limited to those senders; new group rooms work without editing the registry.
  */
-export function cogsRoomAllowed(config: CogsInbox, chatId: unknown): boolean {
-  return config.allow_from.length > 0 && /^-?\d+$/.test(String(chatId));
+export function cogsRoomAllowed(config: CogsInbox, chatId: unknown, group: boolean): boolean {
+  if (!/^-?\d+$/.test(String(chatId))) return false;
+  return config.allow_from.includes(String(chatId)) || (group && config.allow_senders.length > 0);
 }
 
 /** Validate before either editing an existing response or sending a new one. */
 export function cogsReplyConfig(agent: AgentRecord | undefined, meta: CogsMeta): CogsInbox {
   if (!agent || agent.id !== meta.agent_id) throw new Error("cogs_reply_agent_mismatch");
   const config = cogsInbox(agent);
-  if (!config || !cogsRoomAllowed(config, meta.chat_id)) throw new Error("cogs_reply_not_allowed");
+  if (!config || !cogsRoomAllowed(config, meta.chat_id, meta.chat_type === "group")) throw new Error("cogs_reply_not_allowed");
   return config;
 }
 
@@ -112,7 +113,7 @@ export async function sendCogsReply(agent: AgentRecord | undefined, meta: CogsMe
 export async function setCogsReaction(agent: AgentRecord | undefined, meta: CogsMeta, emoji: string | null, noReply = false): Promise<{ declined: boolean }> {
   if (!agent || agent.id !== meta.agent_id) throw new Error("cogs_reaction_agent_mismatch");
   const config = cogsInbox(agent);
-  if (!config || !cogsRoomAllowed(config, meta.chat_id)) throw new Error("cogs_reaction_not_allowed");
+  if (!config || !cogsRoomAllowed(config, meta.chat_id, meta.chat_type === "group")) throw new Error("cogs_reaction_not_allowed");
   const token = cogsToken(config);
   if (emoji !== null) {
     await cogsCall(config, token, "setMessageReaction", {

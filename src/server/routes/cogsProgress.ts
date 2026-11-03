@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AgentRecord } from "../types";
-import { cogsInbox, cogsRoomAllowed } from "../lib/cogsRelay";
+import { cogsInbox } from "../lib/cogsRelay";
 import { isActive, updateCogsProgress } from "../lib/cogsTyping";
 import { cogsActivityCode } from "../runtimes/codex/cogsActivity";
 
@@ -33,7 +33,7 @@ export function createCogsProgressRoutes(agents: () => AgentRecord[]): Hono {
     try {
       const agent = agents().find(a => a.id === id);
       const config = agent && cogsInbox(agent);
-      if (!config || !cogsRoomAllowed(config, chatId)) return c.json({ ok: true, accepted: false }, 202);
+      if (!config || !config.allow_from.includes(chatId)) return c.json({ ok: true, accepted: false }, 202);
       void updateCogsProgress(id, chatId, progressCode(tool)).catch(() => { /* Auxiliary signal. */ });
       return c.json({ ok: true, accepted: true }, 202);
     } catch {

@@ -134,14 +134,13 @@ test("clean injection failure retries without another message row", async () => 
   updates = [update()]; const p = poller(); injectOk = false; await p.pollOnce();
   injectOk = true; await p.pollOnce(); expect(injected).toHaveLength(2); expect(rowCount()).toBe(1);
 });
-test("only private human text reaches the session; any room the cogs server delivers counts", async () => {
+test("only allowed private human text reaches the session", async () => {
   delete (agents[0]!.cogs_inbox as { allow_senders?: unknown }).allow_senders; // 단체방 허용 사람 없음
   const bot = update(11); bot.message.from.is_bot = true;
   const group = update(12); group.message.chat.type = "group";
-  // 999 is not in allow_from: cogs only delivers rooms the bot's owner put it in, so a new room is accepted.
+  // 1:1 rooms still have to be listed: 999 is not.
   updates = [update(10, 999), bot, group, update(13, 71, " ")];
-  await poller().pollOnce();
-  expect(injected.map((i) => i.body.split("]")[0])).toEqual(["[cogs chat_id=999, sender_id=8"]);
+  await poller().pollOnce(); expect(injected).toHaveLength(0); expect(rowCount()).toBe(0);
 });
 test("registry loads only the opt-in without changing primary channel loading", () => {
   agents[0]!.channel = { kind: "telegram" };
@@ -799,10 +798,10 @@ test("a tmux session changed during the wait injects into the current one", asyn
   expect(injected).toHaveLength(1);
   expect(injected[0]!.session).toBe("claude-lisa-new");
 });
-test("turning the inbox off (empty allow_from) during the wait stops injection", async () => {
+test("an allow_from change during the wait filters with the new list", async () => {
   const p = poller(); p.supervise(2, 20);
   while (!calls.some((c) => c.method === "getUpdates")) await Bun.sleep(5);
-  agents = [{ ...agents[0]!, cogs_inbox: { ...agents[0]!.cogs_inbox!, allow_from: [] } }];
+  agents = [{ ...agents[0]!, cogs_inbox: { ...agents[0]!.cogs_inbox!, allow_from: ["72"] } }];
   updates = [update()];
   await Bun.sleep(100); p.stop();
   expect(injected).toHaveLength(0);

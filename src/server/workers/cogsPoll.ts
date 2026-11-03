@@ -161,7 +161,7 @@ export function createCogsPoller(deps: Deps) {
         // 사진·영상·파일만 온 메시지도 넘긴다. 글은 text, 첨부 메시지면 caption 에 있다.
         const text = typeof m?.text === "string" ? m.text : typeof m?.caption === "string" ? m.caption : "";
         const atts = m ? cogsAttachments(m) : [];
-        if (m && cogsRoomAllowed(config, m.chat?.id) && acceptsChat(config, m.chat?.type, m.from?.id) &&
+        if (m && cogsRoomAllowed(config, m.chat?.id, m.chat?.type === "group") && acceptsChat(config, m.chat?.type, m.from?.id) &&
             !m.from?.is_bot && m.from?.id != null && (text.trim() || atts.length) && Number.isSafeInteger(m.message_id)) {
           const lines = atts.length ? await attachmentLines(deps, agent.id, config, token, identity, update.update_id, atts, abort.signal) : [];
           if (abort.signal.aborted) return "ok";

@@ -186,7 +186,7 @@ export async function routeReactionUpdate(
   updateId: number, reaction: ReactionUpdate,
   d: { channel: MemberChannel; allowFrom: Set<number>; ownBotId?: number; inbox: ReactionInbox; route: Omit<IncomingRouteDeps, "runTurnFor">; runTurn: (input: string, reactionRef?: ReactionRef) => Promise<void> },
 ): Promise<IncomingRoute | null> {
-  if (d.channel.kind !== "b3chat" || !isAllowedChannelChat(d.channel.kind, d.allowFrom, reaction.chat.id)) return null;
+  if (d.channel.kind !== "b3chat" || !isAllowedChat(d.allowFrom, reaction.chat.id)) return null;
   const input = d.inbox.accept(updateId, reaction, d.ownBotId);
   if (!input) return null;
   const ref = reactionInputs(reaction, reaction.cogs_message_text!, reaction.cogs_reactor_is_master!)
@@ -1405,12 +1405,6 @@ export function isAllowedChat(allowFrom: Set<number>, chatId: number): boolean {
   return allowFrom.size > 0 && allowFrom.has(chatId);
 }
 
-/** cogs (b3chat) rooms are gated by the cogs server: the bot only receives rooms it was added to by its owner.
- * A non-empty list keeps the channel on (explicit [] still revokes); Telegram keeps the per-chat list. */
-export function isAllowedChannelChat(channelKind: string | undefined, allowFrom: Set<number>, chatId: number): boolean {
-  return channelKind === "b3chat" ? allowFrom.size > 0 && Number.isSafeInteger(chatId) : isAllowedChat(allowFrom, chatId);
-}
-
 /**
  * 라이브 텔레그램 폴링 루프(long-poll). 봇 토큰·워크스페이스는 env로(코드 변경 없이 팀원별 구동).
 	 *   CODEX_BOT_TOKEN(필수) · CODEX_WORKDIR(페르소나 AGENTS.md) · CODEX_HOME(정체성 격리, 선택)
@@ -1633,7 +1627,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         if (chatId === undefined || !decided.handle) continue;
         const { text, hasMedia } = decided;
 	        // 발신자 게이트(fail-closed): 허용 목록이 비어 있거나 미포함이면 무시한다.
-	        if (!isAllowedChannelChat(live.channel?.kind, allowFrom, chatId)) {
+	        if (!isAllowedChat(allowFrom, chatId)) {
 	          if (allowFrom.size === 0 && !warnedNoAllowlist) {
 	          warnedNoAllowlist = true;
 	            console.warn("[codex-bridge] ⛔ CODEX_ALLOW_FROM 미설정 — fail-closed 로 모든 발신자를 차단합니다. 런처 시드 or 영입 시 오너 chat_id 확보 필요.");
