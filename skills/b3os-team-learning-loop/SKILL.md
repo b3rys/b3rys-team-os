@@ -21,7 +21,7 @@ trigger: record a team lesson
 
 - self-learning의 메인 목적은 팀 정책과 팀원 피드백 루프의 자가발전이다. 프로젝트별 운영리뷰는 그 안에 붙는 교체 가능한 서브주제다.
 - 사소한 후보를 많이 올리는 것보다 실제 팀 행동을 바꾸는 후보만 남긴다. 팀원은 자기 입장에서 작은 불편도 올릴 수 있으므로 learning-loop PM과 공동 리뷰어가 과감히 줄인다.
-- `SHARED.md`는 학습 로그, `TEAM-OS.md`는 팀 공통 규칙, `skills/b3rys-*`는 반복 절차, 팀원별 `CLAUDE.md`/`AGENTS.md`/`IDENTITY.md`/`MEMORY.md`는 개인 런타임·정체성·기억의 반영처다.
+- `SHARED.md`는 학습 로그, `TEAM-OS.md`는 팀 공통 규칙, 팀 스킬 폴더는 반복 절차(팀 팩이 있으면 `$B3OS_EXTRA_SKILLS_DIR`, 없으면 `skills/`), 팀원별 `CLAUDE.md`/`AGENTS.md`/`IDENTITY.md`/`MEMORY.md`는 개인 런타임·정체성·기억의 반영처다.
 - 정책 변경, 보안, 외부전송, 공개 가능성, 팀원 persona(정체성) 변경은 {{OWNER}} 승인 없이 반영하지 않는다.
 - **같은 지적이 두 번 나오면 글이 아니라 장치로 막는다.** 팀장·리뷰어가 같은 교정을 두 번 하면, 그 실수를 못 하게 만드는 가장 높은 단계를 고른다: 구조(주인 하나·한 가지 방법만 남기기) → 타입 → 고칠 방법을 오류 메시지로 말하는 린트·CI 검사 → 시험 → 마지막에만 문서·스킬 문장. 새 검사는 그 실수를 실제로 재현한 입력에서 실패하는지 먼저 확인한다. 프로젝트마다 "규칙 ↔ 그 규칙을 강제하는 것" 표를 두고, 강제하는 것이 '문서'뿐인 규칙은 빚으로 세어 줄여 간다. (출처: pstack `correct`·`encode-lessons-in-structure`, cursor/plugins, MIT, 2026-10-17 도입·재작성)
 - 매주 산출물은 짧아야 한다. 월간으로는 개선이 실제 측정되어야 한다.
@@ -52,7 +52,7 @@ trigger: record a team lesson
 4. 반영처 결정
    - `SHARED.md`: 사건과 교훈을 남길 가치가 있지만 아직 규칙은 아닌 것
    - `TEAM-OS.md`: 반복 확인된 팀 공통 운영 규칙
-   - `skills/b3rys-*`: 실행 절차로 재사용할 수 있는 것
+   - 팀 스킬: 실행 절차로 재사용할 수 있는 것. 팀 팩이 설정돼 있으면(`B3OS_EXTRA_SKILLS_DIR`) 새 스킬과 팀 전용 절차는 그 폴더에 만들고, 공개 `skills/` 에는 b3os 자체에 필요한 절차와 기존 스킬의 수정만 둔다
    - 팀원 설정 파일: 특정 팀원의 역할, 말투, 런타임, 기억에만 해당하는 것
    - Tasks 칸반: 실행 과제, 검증 과제, 다음 액션이 필요한 것
 
@@ -120,7 +120,7 @@ learning-loop PM과 공동 리뷰어는 매주 아래 4개를 함께 리뷰한�
 
 1. `SHARED.md` 정리 결과: 신규/중복/compact/stale/pinned 후보
 2. `TEAM-OS.md` 승격 후보: 팀 공통 규칙으로 올릴 만큼 반복·중요한 것만
-3. skill/개인 설정 반영 후보: `skills/b3rys-*`, `CLAUDE.md`, `AGENTS.md`, `IDENTITY.md`, `MEMORY.md` 등
+3. skill/개인 설정 반영 후보: 팀 스킬(팀 팩 또는 `skills/`), `CLAUDE.md`, `AGENTS.md`, `IDENTITY.md`, `MEMORY.md` 등
 4. 프로젝트 서브주제 다음 액션: 현재는 검색품질 운영리뷰의 다음 실험/유지/종료 판단
 
 ## 월간 개선 지표

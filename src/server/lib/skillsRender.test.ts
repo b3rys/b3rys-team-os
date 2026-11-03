@@ -151,3 +151,51 @@ describe("워크스페이스 SKILLS.md 복사본", () => {
     expect(seen.length).toBe(1);
   });
 });
+
+// 비공개 팩 스킬 폴더 — 시험은 tmp 폴더만 쓴다.
+describe("팀 팩 스킬 폴더 (B3OS_EXTRA_SKILLS_DIR)", () => {
+  const pack = (skills: Record<string, string>) => {
+    const dir = mkdtempSync(join(tmpdir(), "pack-skills-"));
+    for (const [name, trigger] of Object.entries(skills)) {
+      mkdirSync(join(dir, name));
+      writeFileSync(join(dir, name, "SKILL.md"), `---\nname: ${name}\n${trigger ? `trigger: ${trigger}\n` : ""}---\n본문\n`);
+    }
+    return dir;
+  };
+
+  it("폴더가 없으면 공개 표와 글자 하나까지 같다", () => {
+    expect(buildSkillTable(null)).toBe(buildSkillTable(null));
+    expect(buildSkillTable(null)).not.toContain("Team pack skills");
+  });
+
+  it("팩 스킬은 공개 목록 뒤 별도 줄로, 팩 경로와 함께 나온다", () => {
+    const dir = pack({ "b3rys-cogs-deploy": "deploy cogs", "b3rys-hidden": "" });
+    const table = buildSkillTable(dir);
+    expect(table.startsWith(buildSkillTable(null))).toBe(true);
+    expect(table).toContain("**Team pack skills**");
+    expect(table).toContain("deploy cogs → `b3rys-cogs-deploy`");
+    expect(table).not.toContain("b3rys-hidden");   // trigger 없는 스킬은 나가지 않는다 — 공개와 같은 규칙
+  });
+
+  it("공개 스킬과 이름이 같으면 공개 것이 남고 팩 것은 빠진다", () => {
+    const dir = pack({ "b3os-verification": "덮어쓰기 시도" });
+    const table = buildSkillTable(dir);
+    expect(table).not.toContain("덮어쓰기 시도");
+    expect(table).toBe(buildSkillTable(null));
+  });
+
+  it("상대경로·없는 경로는 읽지 않는다", () => {
+    const old = process.env.B3OS_EXTRA_SKILLS_DIR;
+    try {
+      process.env.B3OS_EXTRA_SKILLS_DIR = "relative/skills";
+      expect(buildSkillTable()).toBe(buildSkillTable(null));
+      process.env.B3OS_EXTRA_SKILLS_DIR = join(tmpdir(), "no-such-pack-dir-1103");
+      expect(buildSkillTable()).toBe(buildSkillTable(null));
+      const dir = pack({ "b3rys-x": "x 할 때" });
+      process.env.B3OS_EXTRA_SKILLS_DIR = dir + "/";
+      expect(buildSkillTable()).toContain("x 할 때 → `b3rys-x`");
+    } finally {
+      if (old === undefined) delete process.env.B3OS_EXTRA_SKILLS_DIR; else process.env.B3OS_EXTRA_SKILLS_DIR = old;
+    }
+  });
+});

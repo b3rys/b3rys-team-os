@@ -440,8 +440,7 @@ export function ruleLoadingBlock(runtime: string, agentId?: string): string {
  * 은퇴한 스킬에 trigger 를 달지 않는 것은 사람 책임이고, personaPathSafety 테스트가 그걸 잡는다.
  * → 스킬 추가 = SKILL.md 만 만들면 끝. 룰 파일은 안 건드린다.
  */
-function readSkillTriggers(): Array<{ name: string; trigger: string; script: string }> {
-  const dir = `${REPO_ROOT}/skills`;
+function readSkillTriggers(dir = `${REPO_ROOT}/skills`): Array<{ name: string; trigger: string; script: string }> {
   if (!existsSync(dir)) return [];
   const out: Array<{ name: string; trigger: string; script: string }> = [];
   for (const name of readdirSync(dir).sort()) {
@@ -466,17 +465,34 @@ function readSkillTriggers(): Array<{ name: string; trigger: string; script: str
   return out;
 }
 
-function buildSkillTable(): string {  // rules/SKILLS.md 본문 (skillsRender.ts 가 파일로 렌더)
-  const skills = readSkillTriggers();
-  const line = skills
+/**
+ * A private pack (e.g. the cogs product) can add skills from its own folder without putting them in the public repo.
+ * Only an absolute B3OS_EXTRA_SKILLS_DIR is read; a name that a public skill already uses stays the public one.
+ * Unset or missing folder: the table is exactly the public one.
+ */
+function extraSkillsDir(): string | null {
+  const dir = process.env.B3OS_EXTRA_SKILLS_DIR?.trim();
+  return dir && dir.startsWith("/") && existsSync(dir) ? dir.replace(/\/+$/, "") : null;
+}
+
+function skillLine(skills: Array<{ name: string; trigger: string; script: string }>): string {
+  return skills
     .map((s) => `${s.trigger} → \`${s.name}\`${s.script ? ` (\`${s.script}\`)` : ""}`)
     .join(" · ");
+}
+
+function buildSkillTable(extraDir: string | null = extraSkillsDir()): string {  // rules/SKILLS.md 본문 (skillsRender.ts 가 파일로 렌더)
+  const skills = readSkillTriggers();
+  const line = skillLine(skills);
+  const taken = new Set(skills.map((s) => s.name));
+  const extra = extraDir ? readSkillTriggers(extraDir).filter((s) => !taken.has(s.name)) : [];
   // 경로는 맨 위 b3os= 기준 을 한 번만 선언하고 이후는 상대로 쓴다.
   return [
     // 카탈로그·스킬 경로는 절대경로로 둔다 — 기존 가드("스킬 카탈로그도 절대경로, 양 런타임")가 막는다.
     //   그 가드는 상대경로를 못 푸는 런타임에서 실제로 터져서 생긴 것이라 우회하지 않는다.
     `**Skills — pick by trigger** (\`${tilde(REPO_ROOT)}/skills/<name>/SKILL.md\` · index \`${tilde(REPO_ROOT)}/docs/B3OS_SKILLS.md\`):`,
     line + ".",
+    ...(extra.length ? ["", `**Team pack skills** (\`${tilde(extraDir!)}/<name>/SKILL.md\`): ${skillLine(extra)}.`] : []),
   ].join("\n");
 }
 
