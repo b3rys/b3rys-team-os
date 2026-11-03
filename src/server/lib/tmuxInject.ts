@@ -178,10 +178,12 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
     ? pick(locale,
         `cogs 답장은 --to broadcast --thread ${opts.threadId} --in-reply-to ${opts.messageId} 로 보내세요. 원래 cogs 방으로만 게시하며 실패하면 전송 실패를 반환합니다. ` +
         `리액션은 react.sh --msg ${opts.messageId} --emoji <이모지> 로 붙입니다 — 메시지에 맞게 고르고, 리액션으로 답을 대신하지 않습니다. ` +
-        `글로 답하지 않고 끝낼 때는 react.sh 에 --no-reply 를 붙입니다(앱의 입력 중 표시를 끕니다).`,
+        `글로 답하지 않고 끝낼 때는 react.sh 에 --no-reply 를 붙입니다(앱의 입력 중 표시를 끕니다). ` +
+        `cogs 는 마크다운을 그립니다: 두 줄을 넘는 답은 굵은 제목·목록·인용으로 구조를 잡고, 여러 줄 본문은 --body-file 로 보냅니다.`,
         `Reply via --to broadcast --thread ${opts.threadId} --in-reply-to ${opts.messageId}. Posts only to the original cogs room; posting failure returns a send failure. ` +
         `React with react.sh --msg ${opts.messageId} --emoji <emoji> — pick one that fits the message; a reaction does not replace a reply. ` +
-        `If you finish without a text reply, add --no-reply to react.sh (turns off the app typing indicator).`)
+        `If you finish without a text reply, add --no-reply to react.sh (turns off the app typing indicator). ` +
+        `cogs renders Markdown: give any reply longer than two lines structure with bold headings, lists and quotes, and send multi-line bodies with --body-file.`)
     : opts.kind === "slack"
     ? pick(locale,
         `Slack 원글에 답하려면 --to broadcast --thread ${opts.threadId} --in-reply-to ${opts.messageId} 로 보내세요. ` +

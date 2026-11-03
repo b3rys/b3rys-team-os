@@ -327,3 +327,15 @@ test("Slack reply instructions specify the current message and automatic mention
     expect(prompt).toContain(locale === "ko" ? "자동 멘션" : "mentioned automatically");
   }
 });
+
+test("cogs reply instructions ask for Markdown structure by default", () => {
+  for (const locale of ["ko", "en"] as const) {
+    const prompt = buildTmuxInjectionPrompt({
+      session: "test", fromLabel: "lead", threadId: "cogs-thread",
+      messageId: "cogs-message", hopCount: 0,
+      body: "question", source: "cogs", kind: "cogs", agentId: "demo", locale,
+    });
+    expect(prompt).toContain("--body-file");
+    expect(prompt).toContain(locale === "ko" ? "굵은 제목·목록·인용" : "bold headings, lists and quotes");
+  }
+});
