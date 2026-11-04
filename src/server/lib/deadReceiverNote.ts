@@ -6,7 +6,7 @@
 // 판정: 발신 시점에 런타임 essentials 를 직접 잰다(health 틱을 기다리지 않는다). "수신이 죽었다" 는
 //   `poller:` 로 시작하는 항목만 본다 — 토큰·plist 같은 다른 항목은 수신 여부를 말하지 않고, poller 항목이
 //   없는 런타임(openclaw·hermes_agent)은 이 경고 대상이 아니다.
-// 대상: 채널이 텔레그램인 발신자만. 다른 채널(b3chat 등)은 수신 방식이 달라 이 판정·문구가 맞지 않는다.
+// 대상: 채널이 텔레그램인 발신자만.
 // 범위 밖: 수신이 살아 있을 때 보낸 보고에 팀장이 나중에 답하는 경우(그 시점엔 알 수 없다).
 import type { AgentRecord } from "../types";
 import { checkEssentialSettings, type RuntimeEssentials } from "./runtimeEssentials";

@@ -91,7 +91,7 @@ export async function downloadDmAttachments(
   opts: { store?: typeof storeTelegramMedia; mediaDir?: string; apiBase?: string } = {},
 ): Promise<DmAttachments> {
   const store = opts.store ?? storeTelegramMedia;
-  // 팀원 채널(b3chat 등)이면 그 서버에서 받는다. 텔레그램이면 옵션을 지금과 똑같이 넘긴다.
+  // 팀원 채널이 지정한 서버가 있으면 거기서 받는다. 텔레그램이면 옵션을 지금과 똑같이 넘긴다.
   const apiBase = opts.apiBase ?? channelFromEnv().apiBase;
   const storeOpts = {
     ...(opts.mediaDir ? { mediaDir: opts.mediaDir } : {}),

@@ -331,8 +331,7 @@ export function requestPermission(db: Database, op: PermissionOperation): { deci
 
 /**
  * 요청 행 하나를 pending 으로 넣는다 — 전역 grant 조회도, op 대기열도, 감사 기록도 하지 않는다.
- * requestPermission 은 이 위에 grant 조회·대기열·감사를 얹는다. cogs 승인(lib/cogsPermissions)은
- * 전역 grant 를 거치면 안 되므로 이것만 쓴다.
+ * requestPermission 은 이 위에 grant 조회·대기열·감사를 얹는다.
  */
 export function insertPendingPermissionRequest(db: Database, op: PermissionOperation): PermissionRequestRow {
   const id = `prm_${randomUUID().replace(/-/g, "").slice(0, 18)}`;

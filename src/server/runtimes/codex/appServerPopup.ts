@@ -1,8 +1,7 @@
 /** 승인 요청은 기존 permissionGate와 채널 팝업을 통해 결정으로 매핑한다. 오류·무응답은 거절하며 Tier-D는 팝업 생성 전에 requestPermission에서 거절한다.
- * 한 번·세션·지속 허용의 구분을 보존하고 삭제된 별도 판정기를 현재 방어선으로 간주하지 않는다. */
-import { sendApprovalCard, type ApprovalCardInput } from "../../lib/cogsPermissions/card";
+ * 한 번·세션·지속 허용의 구분을 보존한다. */
 import { uiText } from "./uiStrings";
-import { cogsActivityArgs, filename } from "./cogsActivity";
+import { filename } from "./activityLine";
 import { createHash, randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { requestPermission, getPermissionRequest, decidePermissionRequest, tierDReasons, type PermissionOperation } from "../../lib/permissionGate";
@@ -570,22 +569,17 @@ export async function sendApprovalToMemberRoom(
   if (!token) {
     try { token = readFileSync(paths.tokenFile, "utf-8").trim(); } catch { return false; }
   }
-  // 목적지는 해당 팀원 봇과 오너의 DM이며 b3chat은 owner_chat을 쓴다. allowFrom은 인가 목록이라 그룹이 앞에 올 수 있으므로 목적지로 사용하지 않는다.
+  // 목적지는 해당 팀원 봇과 오너의 DM이다. allowFrom은 인가 목록이라 그룹이 앞에 올 수 있으므로 목적지로 사용하지 않는다.
   // 목적지를 모르면 발송하지 않으며 해석기를 주입해 인가 목록과 DM이 다른 조건도 검증한다.
   const channel = deps.channel ?? readMemberChannel(agentId);
-  const b3chat = channel.kind === "b3chat";
   const ownerId = deps.ownerId ?? channel.ownerChat ?? (deps.resolveDestination ?? resolveOwnerDmId)();
-  const chatId = deps.chatId ?? (b3chat ? channel.ownerChat : ownerId);
-  if (deps.requireDelivery && (b3chat || !ownerId || !/^[1-9]\d*$/.test(ownerId))) return false;
-  if (!token || !chatId) {
-    if (b3chat && token) console.warn(`[codex-approval] ★b3chat owner_chat 이 없어 승인 요청을 못 띄운다★ agent=${agentId} request=${requestId}`);
-    return false;
-  }
+  const chatId = deps.chatId ?? ownerId;
+  if (deps.requireDelivery && (!ownerId || !/^[1-9]\d*$/.test(ownerId))) return false;
+  if (!token || !chatId) return false;
   if (channel.error) {
     console.warn(`[codex-approval] ★채널 설정 오류(${channel.error}) — 승인 요청을 보내지 않는다★ agent=${agentId} request=${requestId}`);
     return false;
   }
-  if (b3chat) return sendApprovalPlain(channel.apiBase, token, chatId, agentId, requestId, req, risks, deps.fetchFn ?? fetch);
 
   // 간결하게 — 사람이 폰에서 한눈에 보고 누른다. 무엇을 하려는지 한 줄, 그 아래 대상.
   const { title, detail } = approvalSummary(req);
@@ -629,30 +623,6 @@ export async function sendApprovalToMemberRoom(
     }
     return true;
   } catch { return false; }
-}
-
-/** b3chat은 parse_mode·버튼 저장을 지원하지 않을 수 있어 승인 대상을 평문으로 남기고 버튼도 함께 보낸다.
- * 버튼 전송이 거절되면 버튼 없이 한 번 재시도하고 실패를 기록한다. 팀원 방 승인은 op /approve에 없으므로 버튼 미지원이면 만료 후 미실행된다. */
-async function sendApprovalPlain(
-  apiBase: string, token: string, chatId: string, agentId: string, requestId: string,
-  req: ApprovalRequest, risks: string[], doFetch: typeof fetch,
-): Promise<boolean> {
-  // 카드 모양·512바이트 한도·버튼 재시도는 공통 카드 전송이 맡는다(cogs 클로드 승인과 같은 길).
-  const r = await sendApprovalCard(apiBase, token, chatId, cogsCardInputFor(req, requestId, risks, !risks.length), doFetch, { agentId });
-  return r.ok;
-}
-
-/** 코덱스 승인 요청 → cogs 카드 입력(무엇을·대상·폴더 전체 요청 표시). 팝업 경로와 cogs 정책 경로가 같이 쓴다. */
-export function cogsCardInputFor(req: ApprovalRequest, requestId: string, risks: string[], allowAlways: boolean): ApprovalCardInput {
-  const params=(req.params??{}) as Record<string,unknown>;
-  const operationCode=params.command ? "run_command" : params.fileChanges || params.changes || req.observedItem?.changes.length ? "edit_files" : params.reason ? "request_permission" : "approval_required";
-  const observed=req.observedItem?.changes;
-  const target=cogsActivityArgs(observed?.length ? {changes:observed} : params);
-  let detail: string | undefined;
-  if (target.target) detail=target.target;
-  if (target.count!==undefined) detail=String(target.count);
-  const root=grantRootOf(params);
-  return { requestId, operationCode, detail, grantRoot: root ? grantRootDisplay(root) : undefined, risks, allowAlways };
 }
 
 /**

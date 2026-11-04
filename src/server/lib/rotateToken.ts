@@ -119,7 +119,7 @@ export function resolveTokenStore(runtime: string, id: string, agent: AgentRecor
 }
 
 /** getMe로 살아있는 봇인지 검증. 토큰은 URL에만, 반환/로그엔 username만. */
-/** apiBase — 그 팀원 채널의 봇 API. b3chat 토큰은 "<봇 id>:<임의 43자>" 라 id 가 6자리보다 짧을 수 있다. */
+/** apiBase — 그 팀원 채널의 봇 API. 텔레그램 호환 서버의 토큰은 봇 id 가 6자리보다 짧을 수 있다. */
 export async function validateBotToken(token: string, apiBase: string = TELEGRAM_API_BASE): Promise<{ ok: true; username: string } | { ok: false; error: "bot_token_invalid" | "bot_token_dead" | "getme_failed" }> {
   const shape = apiBase === TELEGRAM_API_BASE ? /^\d{6,}:[A-Za-z0-9_-]{30,}$/ : /^[1-9]\d*:[A-Za-z0-9_-]{30,}$/;
   if (!shape.test(token)) return { ok: false, error: "bot_token_invalid" };
@@ -148,9 +148,9 @@ export async function rotateBotToken(
   newToken: string,
 ): Promise<RotateResult> {
   // 1) 새 토큰 검증(살아있는 봇). 실패 시 기존 안 건드림.
-  // 채널 설정이 틀리면 확인 요청도 보내지 않는다(새 토큰을 엉뚱한 서버로 보내지 않는다).
   const ch = memberChannel(agent);
-  if (ch.error) return { ok: false, error: "bot_token_invalid", detail: `채널 설정 오류(${ch.error}) — api_base 를 고친 뒤 다시(기존 유지).` };
+  // 채널 설정이 틀리면 확인 요청도 보내지 않는다(새 토큰을 엉뚱한 서버로 보내지 않는다).
+  if (ch.error) return { ok: false, error: "bot_token_invalid", detail: `채널 설정 오류(${ch.error}) — channel 을 고친 뒤 다시(기존 유지).` };
   const v = await validateBotToken(newToken.trim(), ch.apiBase);
   if (!v.ok) {
     const detail = v.error === "bot_token_invalid" ? "BotFather 토큰 형식이 아니에요(기존 유지)."

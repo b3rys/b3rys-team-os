@@ -59,12 +59,6 @@ export async function runViaAppServer(
   makeClient: AppServerClientFactory = defaultAppServerClientFactory,
 ): Promise<CodexTurnResult> {
   const startedAt = nowMs();
-  // cogs 정책이 깨졌거나 못 읽으면 넓혀서 돌지 않는다 — app-server 를 띄우지도 않는다.
-  //   예전 권한으로 띄워 둔 app-server(살아 있는 서브 작업 포함)도 닫는다. 남기면 그 권한으로 계속 돈다.
-  if (opts.cogsRun?.mode === "blocked") {
-    dropClient(opts.agentId);
-    return { ok: false, reply: "", detail: `cogs_policy_blocked: ${opts.cogsRun.reason}`.slice(0, 200), elapsedMs: 0 };
-  }
   let run: ReturnType<typeof runModeFor>;
   try { run = runModeFor(opts); }
   catch {
@@ -119,11 +113,6 @@ export async function runViaAppServer(
       },
       // full uses never; folder routes on-request approvals to the member room.
       onApproval: async (req) => {
-        // cogs 정책 팀원은 cogs 카드로만 묻는다. 처리기가 없거나 실패하면 거절(텔레그램 팝업·never 로 넘기지 않는다).
-        if (opts.cogsRun?.mode === "enforced") {
-          if (!opts.onCogsApproval) return "denied";
-          try { return await opts.onCogsApproval(req); } catch { return "denied"; }
-        }
         // Codex의 질문을 받으면 이 턴 주인의 방으로 전달하고 사람 결정을 반환한다. 자체 판정층·공용 op 방·고정 팀원 목적지를 사용하지 않는다.
         if (!db) return "denied";
         const folder = opts.permissionMode === "folder";
@@ -171,23 +160,13 @@ export async function runViaAppServer(
 }
 
 /**
- * 이번 턴의 실행 모드. cogs 정책이 적용된 팀원만 정책값을 쓰고, 나머지는 지금 그대로(never + danger-full-access).
+ * 이번 턴의 실행 모드. 기본은 never + danger-full-access, folder 모드는 on-request + workspace-write.
  * poolKey 가 다르면 예전 app-server 를 다시 쓰지 않는다.
  */
-export function runModeFor(opts: Pick<CodexTurnOptions, "cogsRun" | "permissionMode" | "cwd">): {
+export function runModeFor(opts: Pick<CodexTurnOptions, "permissionMode" | "cwd">): {
   approvalPolicy: string; sandbox: string; writableRoots?: string[]; networkAccess?: boolean; poolKey?: string;
   excludeTmpdirEnvVar?: boolean; excludeSlashTmp?: boolean;
 } {
-  const c = opts.cogsRun;
-  if (c?.mode === "enforced") {
-    return {
-      approvalPolicy: c.approvalPolicy,
-      sandbox: c.sandbox,
-      ...(c.sandbox === "workspace-write" ? { writableRoots: c.writableRoots } : {}),
-      ...(c.networkAccess !== undefined ? { networkAccess: c.networkAccess } : {}),
-      poolKey: `cogs:${c.stamp}`,
-    };
-  }
   if (codexPermissionMode(opts.permissionMode) === "folder") {
     if (!opts.cwd) throw new Error("folder_mode_requires_workspace");
     const root = resolve(opts.cwd);

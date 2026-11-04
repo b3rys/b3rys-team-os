@@ -1,5 +1,5 @@
 // 타임아웃 뒤에도 브리지 턴이 실행 중일 수 있어 재시도하지 않는다. 재시작 시 포트가 바뀌므로 window 파일은 호출마다 읽는다.
-import { readWindowFile, windowFilePathFor, type BridgeControlRequest, type BridgeWindowFile, type BridgeWindowRequest } from "../runtimes/codex/bridgeWindow";
+import { readWindowFile, windowFilePathFor, type BridgeWindowFile, type BridgeWindowRequest } from "../runtimes/codex/bridgeWindow";
 
 /** bridge window 호출 결과. queued 는 "접수" 지 "답했다" 가 아니다. */
 export type CodexBridgeCallResult =
@@ -44,7 +44,7 @@ function resolveWindow(agentId: string, deps: CodexBridgeCallDeps): BridgeWindow
   return file;
 }
 
-async function postWindow(file: BridgeWindowFile, path: "/turn" | "/control", body: unknown, deps: CodexBridgeCallDeps): Promise<{ status: number } | { error: "timeout" | "unreachable" }> {
+async function postWindow(file: BridgeWindowFile, path: "/turn", body: unknown, deps: CodexBridgeCallDeps): Promise<{ status: number } | { error: "timeout" | "unreachable" }> {
   const doFetch = deps.fetchImpl ?? fetch;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), deps.timeoutMs ?? BRIDGE_CALL_TIMEOUT_MS);
@@ -75,36 +75,4 @@ export async function callCodexBridge(
   if (r.status === 202) return { ok: true, duplicate: false };
   if (r.status === 200) return { ok: true, duplicate: true };
   return { ok: false, reason: "rejected", status: r.status };
-}
-
-export type CodexBridgeControlResult =
-  | { ok: true; attempts: number }
-  | { ok: false; reason: "unreachable" | "timeout" | "rejected" | "no_window"; status?: number; attempts: number };
-
-/** 제어 신호 재시도 간격. 신호는 "DB 다시 봐" 라서 여러 번 가도 안전하다 — 그래도 횟수는 제한한다. */
-export const CONTROL_RETRY_DELAYS_MS = [0, 250, 1_000];
-
-/**
- * 제어 신호를 보낸다. /turn 과 달리 재시도한다(멱등 — 받는 쪽은 DB 만 다시 읽는다).
- * 매 시도마다 window 를 다시 찾는다 — 그사이 브리지가 재시작했으면 새 포트로 간다.
- * 끝내 못 보내도 받는 쪽은 만료 타이머로 DB 를 본다. 실패는 돌려줘서 부른 쪽이 남긴다.
- */
-export async function callCodexBridgeControl(
-  req: BridgeControlRequest,
-  deps: CodexBridgeCallDeps & { sleep?: (ms: number) => Promise<void>; retryDelaysMs?: number[] },
-): Promise<CodexBridgeControlResult> {
-  const delays = deps.retryDelaysMs ?? CONTROL_RETRY_DELAYS_MS;
-  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  let last: CodexBridgeControlResult = { ok: false, reason: "no_window", attempts: 0 };
-  for (let i = 0; i < delays.length; i++) {
-    if (delays[i]! > 0) await sleep(delays[i]!);
-    const file = resolveWindow(req.agentId, deps);
-    if (!file) { last = { ok: false, reason: "no_window", attempts: i + 1 }; continue; }
-    const r = await postWindow(file, "/control", req, deps);
-    if ("error" in r) { last = { ok: false, reason: r.error, attempts: i + 1 }; continue; }
-    if (r.status === 200) return { ok: true, attempts: i + 1 };
-    // 인증·형식 거절은 다시 보내도 같다.
-    return { ok: false, reason: "rejected", status: r.status, attempts: i + 1 };
-  }
-  return last;
 }

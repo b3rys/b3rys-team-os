@@ -1,7 +1,3 @@
-import { createCogsProgressRoutes } from "./cogsProgress";
-import { createHash } from "node:crypto";
-import { CogsDeliveryUnknown, cogsReplyConfig, isSingleEmoji, sendCogsReply, setCogsReaction } from "../lib/cogsRelay";
-import { CogsProgressEditRetry, completeCogsProgress, endCogsTypingWithoutReply, stopCogsTyping } from "../lib/cogsTyping";
 import { Hono } from "hono";
 import type { Database } from "bun:sqlite";
 import { z } from "zod";
@@ -15,7 +11,6 @@ import {
   getThread,
   listThreads,
   findSlackMetaForThread,
-  findCogsMetaForThread,
   agentActivity,
   acceptInbound,
   normalizeEscapedNewlines,
@@ -46,19 +41,6 @@ interface InboxRouteDeps {
   agents?: () => AgentRecord[];
   /** direct_to_gd 릴레이 직전 발신자 텔레그램 수신 판정. 기본 = 런타임 essentials 의 poller 항목. 시험 주입용. */
   receiverDown?: (agent: AgentRecord) => boolean | Promise<boolean>;
-  /** cogs 팀원끼리 대화 중계를 깨운다(그 thread 대조·전송). 없으면 아무 일도 없다 — 버스 동작과 무관한 부가 기능. */
-  onCogsThreadActivity?: (threadId: string) => void;
-}
-
-/** 그 메시지가 이 thread 의 cogs 인입(원글)이고, 답하는 팀원 자신의 봇·이 방으로 들어온 것인가. 팀원 메시지·다른 방 원글은 아니다. */
-function isCogsOriginInThread(db: Database, messageId: string | undefined | null, threadId: string | undefined, agentId: string, chatId: string | undefined): boolean {
-  if (!messageId || !threadId || !chatId) return false;
-  const row = db.prepare("SELECT thread_id, source, meta_json FROM message WHERE id = ?").get(messageId) as { thread_id: string; source: string; meta_json: string | null } | undefined;
-  if (!row || row.thread_id !== threadId || row.source !== "user") return false;
-  try {
-    const cogs = JSON.parse(row.meta_json ?? "null")?.cogs;
-    return cogs?.agent_id === agentId && String(cogs?.chat_id) === String(chatId);
-  } catch { return false; }
 }
 
 /** 팀장 DM chat id (setting). 없으면 --direct-to-gd 릴레이 불가. */
@@ -69,49 +51,6 @@ function ownerDmChatId(db: Database): string | undefined {
 
 export function createInboxRoutes(deps: InboxRouteDeps): Hono {
   const r = new Hono();
-  r.route("/", createCogsProgressRoutes(() => deps.agents?.() ?? ambientAgents()));
-
-  // POST /api/cogs/react — 팀원이 받은 cogs 메시지(버스 id)에 자기 봇으로 리액션. emoji "" = 지우기.
-  //   no_reply: true 면 글 답 없이 끝낸다고 cogs 에 알린다(declineResponse, 앱 '입력 중' 끔). emoji 없이 no_reply 만도 된다.
-  //   그 메시지가 cogs 에서 이 팀원에게 온 원글일 때만 붙인다. 토큰은 서버 안에서만 쓴다.
-  //   agent_id 는 호출자가 밝힌 값이다(POST /inbox 의 from_agent_id 와 같다). 서버 인증이 아니므로 이 확인은
-  //   잘못 고른 메시지를 막는 것이지, 로컬 API 를 부를 수 있는 다른 팀원이 남의 이름을 대는 것까지 막지는 못한다.
-  r.post("/cogs/react", async (c) => {
-    let raw: { agent_id?: unknown; message_id?: unknown; emoji?: unknown; no_reply?: unknown };
-    try { raw = await c.req.json(); } catch { return c.json({ ok: false, error: "invalid_json" }, 400); }
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return c.json({ ok: false, error: "invalid_json" }, 400);
-    const agentId = typeof raw.agent_id === "string" ? raw.agent_id : "";
-    const messageId = typeof raw.message_id === "string" ? raw.message_id : "";
-    const emoji = typeof raw.emoji === "string" ? raw.emoji : null;
-    const noReply = raw.no_reply === true;
-    if (!agentId || !messageId || (emoji === null && !noReply)) return c.json({ ok: false, error: "missing_fields" }, 400);
-    if (emoji !== null && emoji !== "" && !isSingleEmoji(emoji)) return c.json({ ok: false, error: "emoji_invalid" }, 400);
-    const row = deps.db.prepare("SELECT to_agent_id, source, meta_json FROM message WHERE id = ?").get(messageId) as
-      { to_agent_id: string; source: string; meta_json: string | null } | undefined;
-    let meta: import("../lib/cogsRelay").CogsMeta | null = null;
-    try { meta = row?.source === "user" ? JSON.parse(row.meta_json ?? "null")?.cogs ?? null : null; } catch { meta = null; }
-    if (!row || !meta || typeof meta.chat_id !== "string" || !Number.isSafeInteger(meta.message_id)) {
-      return c.json({ ok: false, error: "not_a_cogs_message" }, 404);
-    }
-    if (row.to_agent_id !== agentId || meta.agent_id !== agentId) return c.json({ ok: false, error: "cogs_reaction_agent_mismatch" }, 403);
-    try {
-      const agent = (deps.agents?.() ?? ambientAgents()).find((a) => a.id === agentId);
-      // 글 답 없이 끝낸다 = 일이 끝났다. '입력 중'도 멈춘다. 열린 작업 줄은 decline 이 대기와 함께 지우게 두고,
-      //   decline 이 지우지 못했을 때만 취소한다(endCogsTypingWithoutReply).
-      const { declined } = noReply
-        ? await endCogsTypingWithoutReply(meta.agent_id, meta.chat_id, meta.message_id, () => setCogsReaction(agent, meta, emoji, true))
-        : await setCogsReaction(agent, meta, emoji, false);
-      appendAudit(deps.db, agentId, "cogs_reaction_set", messageId, { chat_id: meta.chat_id, cleared: emoji === "", no_reply: noReply, declined });
-      return c.json({ ok: true, cleared: emoji === "", ...(noReply ? { declined } : {}) });
-    } catch (error) {
-      const known = ["cogs_reaction_agent_mismatch", "cogs_reaction_not_allowed", "cogs_inbox_invalid", "cogs_requires_claude_tmux",
-        "cogs_bridge_polling_conflict", "cogs_token_unavailable", "cogs_api_failed"];
-      const code = error instanceof Error && known.includes(error.message) ? error.message : "cogs_reaction_failed";
-      appendAudit(deps.db, agentId, "cogs_reaction_failed", messageId, { chat_id: meta.chat_id, reason: code });
-      return c.json({ ok: false, error: code }, code === "cogs_api_failed" || code === "cogs_reaction_failed" ? 502 : 403);
-    }
-  });
-
   // POST /api/inbox — validate envelope, ensure thread, insert message
   r.post("/inbox", async (c) => {
     let raw: unknown;
@@ -195,7 +134,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     }
     // 왕복 상한은 배달 단계(checkPingpong)에서 막는데, 그때는 발신자가 이미 접수 응답을 받은 뒤라 막힌 줄 모른다.
     // 팀원에게 직접 보내는 답장은 같은 셈(countAutoRounds·MAX_AUTO_ROUNDS)으로 저장 전에 거절해 바로 알린다.
-    // broadcast(슬랙·cogs·방)와 direct_to_gd 보고는 배달 경로가 달라 여기서 막지 않고, 배달 단계 검사가 그대로 남는다.
+    // broadcast(슬랙·방)와 direct_to_gd 보고는 배달 경로가 달라 여기서 막지 않고, 배달 단계 검사가 그대로 남는다.
     {
       const replyMode = (env as { meta?: { reply_mode?: string } }).meta?.reply_mode;
       const parentId = (env as { parent_message_id?: string | null }).parent_message_id ?? env.in_reply_to ?? null;
@@ -270,21 +209,8 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
         parentSlack = slack;
       }
     } catch { /* 잘못된 원글 meta는 기존 thread 조회로 처리한다. */ }
-    const cogsMetaForGate = parentSlack ? null : findCogsMetaForThread(deps.db, env.thread_id ?? "", env.in_reply_to);
-    // cogs thread 는 원글이 Slack 을 가리켜도 cogs thread 다 — thread 메타를 원글과 따로 읽는다.
-    const threadCogs = findCogsMetaForThread(deps.db, env.thread_id ?? "");
-    if ((cogsMetaForGate || threadCogs) && env.source === "agent"
-        && (env.meta?.reply_mode === "direct_to_gd" || env.all_hands || env.to_agent_id === "user")) {
-      return c.json({ ok: false, error: "cogs_reply_mode_invalid", detail: "cogs → --to broadcast" }, 400);
-    }
-    // 단체방 답은 어느 말에 대한 답인지가 분명해야 한다 — 같은 thread 의 cogs 원글을 --in-reply-to 로 가리킬 때만.
-    //   (1:1 방처럼 thread 첫 원글로 대신 답하면 단체방에서는 엉뚱한 말에 답이 달린다. 원글이 다른 방·Slack 이어도 같은 검사.)
-    if ((cogsMetaForGate?.chat_type === "group" || threadCogs?.chat_type === "group") && env.source === "agent" && env.to_agent_id === "broadcast"
-        && !isCogsOriginInThread(deps.db, env.in_reply_to, env.thread_id, env.from_agent_id, threadCogs?.chat_id ?? cogsMetaForGate?.chat_id)) {
-      return c.json({ ok: false, error: "cogs_reply_needs_in_reply_to", detail: "단체방 답은 --in-reply-to <그 방 원글 id>" }, 400);
-    }
     const slackMetaForGate = parentSlack ?? findSlackMetaForThread(deps.db, env.thread_id ?? "");
-    if (env.source === "agent" && env.to_agent_id === "broadcast" && !slackMetaForGate && !cogsMetaForGate) {
+    if (env.source === "agent" && env.to_agent_id === "broadcast" && !slackMetaForGate) {
       // 팀원 broadcast에 broadcast로 답하는 것은 발신자의 역량·역할과 무관하게 차단해 연쇄를 끊는다.
       if (env.in_reply_to) {
         const parent = deps.db
@@ -301,31 +227,11 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       }
     }
 
-    // cogs idempotency is scoped to the original room/message, never caller-supplied keys.
-    if (cogsMetaForGate && env.source === "agent" && env.to_agent_id === "broadcast") {
-      const key = "cogs-reply:" + createHash("sha256").update(JSON.stringify([
-        env.from_agent_id, cogsMetaForGate.agent_id, cogsMetaForGate.chat_id,
-        cogsMetaForGate.message_id, normalizeEscapedNewlines(env.body),
-      ])).digest("hex");
-      const prior = deps.db.query(`SELECT id, meta_json FROM message WHERE dedupe_key = ?
-        AND (json_extract(meta_json, '$.cogs_delivery.state') IN ('pending','unknown')
-          OR created_at > datetime('now', '-60 seconds')) ORDER BY rowid DESC LIMIT 1`)
-        .get(key) as { id: string; meta_json: string } | null;
-      if (prior) {
-        const state = JSON.parse(prior.meta_json).cogs_delivery?.state;
-        return c.json({ ok: false, posted: state === "sent", existing_message_id: prior.id,
-          error: state === "unknown" ? "cogs_delivery_unknown" : state === "pending" ? "cogs_delivery_pending" : "duplicate" }, 409);
-      }
-      env = { ...env, dedupe_key: key, meta: { ...env.meta, cogs_delivery: { state: "pending" } } };
-    }
-
     // 감사 기록은 삽입 직후·방송 직전에 남겨 insert→audit→broadcast 순서를 유지한다.
     const accepted = acceptInbound(deps.db, env, {
       dedupeWindowSec: 60,
       broadcast: deps.broadcast,
       onInserted: (stored) => {
-        // 팀원끼리 대화 중계(부가): 저장 직후 빠른 길. 실패·누락은 주기 대조가 채운다.
-        try { deps.onCogsThreadActivity?.(stored.thread_id); } catch { /* 버스 저장을 막지 않는다 */ }
         const auditDetail = { thread_id: stored.thread_id, to: env.to_agent_id, type: env.type };
         appendAudit(deps.db, env.from_agent_id, "message_sent", stored.id, auditDetail);
         appendAuditFile(env.from_agent_id, "message_sent", stored.id, auditDetail);
@@ -400,36 +306,6 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
     }
 
 
-
-    // cogs threads never fall through to Telegram, including malformed reply modes.
-    if (cogsMetaForGate && env.source === "agent" && stored.to_agent_id === "broadcast") {
-      const setDelivery = (state: "sent" | "failed" | "unknown", messageId?: number) => {
-        stored.meta = { ...stored.meta, cogs_delivery: messageId !== undefined ? { state, message_id: messageId } : { state } };
-        deps.db.query("UPDATE message SET meta_json = ?, dedupe_key = CASE WHEN ? = 'failed' THEN NULL ELSE dedupe_key END WHERE id = ?")
-          .run(JSON.stringify(stored.meta), state, stored.id);
-      };
-      // Until success is durably recorded, a lost acknowledgement must not permit a resend.
-      let acknowledged = false;
-      try {
-        const agent = (deps.agents?.() ?? ambientAgents()).find((a) => a.id === env.from_agent_id);
-        cogsReplyConfig(agent, cogsMetaForGate);
-        const completedId = await completeCogsProgress(cogsMetaForGate.agent_id, cogsMetaForGate.chat_id, stored.body);
-        const postedId = completedId ?? await sendCogsReply(agent, cogsMetaForGate, stored.body);
-        acknowledged = true;
-        setDelivery("sent", postedId);
-        // 팀원끼리 대화 중계: 원래 담당의 답이 방에 올라갔다 = 종료 사건. 대조·전송을 깨운다(실패해도 답은 이미 갔다).
-        try { deps.onCogsThreadActivity?.(stored.thread_id); } catch { /* 부가 기능 */ }
-        appendAudit(deps.db, env.from_agent_id, "cogs_relay_sent", stored.id, { chat_id: cogsMetaForGate.chat_id });
-        return c.json({ ok: true, message: stored, posted: true, channel: "cogs" }, 201);
-      } catch (error) {
-        if (!(error instanceof CogsProgressEditRetry)) stopCogsTyping(cogsMetaForGate.agent_id, cogsMetaForGate.chat_id);
-        const unknown = acknowledged || error instanceof CogsDeliveryUnknown;
-        setDelivery(unknown ? "unknown" : "failed");
-        appendAudit(deps.db, env.from_agent_id, "cogs_relay_failed", stored.id, { chat_id: cogsMetaForGate.chat_id, state: unknown ? "unknown" : "failed" });
-        return c.json({ ok: false, message: stored, posted: false,
-          error: unknown ? "cogs_delivery_unknown" : "cogs_relay_failed" }, 502);
-      }
-    }
 
     // Slack 게시 완료를 확인한 뒤 성공을 반환한다. 같은 답을 Telegram으로도 보내지 않는다.
     const slackThread = slackMetaForGate ?? findSlackMetaForThread(deps.db, stored.thread_id);

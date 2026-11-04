@@ -20,12 +20,11 @@ let realTelegram: ChannelAdapter | undefined;
 const LISA = { id: "lisa", display_name: "리사", runtime: "claude_channel", capabilities: ["coordinator"] } as unknown as AgentRecord;
 const JANE = { id: "jane", display_name: "제인", runtime: "claude_channel" } as unknown as AgentRecord;
 const CLO = { id: "clo", display_name: "클로", runtime: "openclaw" } as unknown as AgentRecord;
-const CDX = { id: "cdx", display_name: "코덱", runtime: "codex", channel: { kind: "b3chat", api_base: "http://127.0.0.1:9000" } } as unknown as AgentRecord;
 
 function setup(): Database {
   const db = new Database(":memory:");
   migrate(db);
-  for (const a of [LISA, JANE, CLO, CDX]) {
+  for (const a of [LISA, JANE, CLO]) {
     db.prepare(
       `INSERT INTO agent (id, display_name, role, runtime, status_provider, workspace_path, persona_file)
        VALUES (?, ?, 'dev', ?, 'claude_tmux', '/tmp', 'p.md')`,
@@ -162,16 +161,9 @@ describe("게시 길이 상한 — 경고 줄은 항상 살아남는다", () => 
 });
 
 describe("판정 범위 — 텔레그램 채널 발신자만", () => {
-  test("채널이 b3chat 인 codex 발신자는 수신 판정이 '죽음' 이어도 경고 없음", async () => {
-    const db = setup();
-    await post(db, [LISA, JANE, CDX], new Set(["cdx"]), report("cdx", "보고"));
-    expect(sent).toHaveLength(1);
-    expect(sent[0]!.text).toBe("보고");
-  });
-
   test("채널 설정이 없는(=텔레그램) 발신자는 그대로 경고(회귀)", async () => {
     const db = setup();
-    await post(db, [LISA, JANE, CDX], new Set(["jane"]), report("jane", "보고"));
+    await post(db, [LISA, JANE], new Set(["jane"]), report("jane", "보고"));
     expect(sent[0]!.text).toContain("제인의 텔레그램 수신이 끊겨");
   });
 });
