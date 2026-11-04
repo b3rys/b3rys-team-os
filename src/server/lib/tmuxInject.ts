@@ -122,9 +122,9 @@ export interface InjectPromptOptions {
   body: string;
   attachments?: BusAttachment[];
   // bus 답은 그룹 이름의 스레드라도 버스로 돌아와야 한다. 그룹 봇 메시지는 캡처가 무시하므로 버스 답을 그룹 분기에서 제외한다.
-  source: "cogs" | "slack" | "telegram" | "user" | "bus";
+  source: "slack" | "telegram" | "user" | "bus";
   // kind는 답 목적지를 정하는 필수 입력이다. 호출부 누락을 컴파일 오류로 잡아 잘못된 주소로의 폴백을 막는다.
-  kind: "cogs" | "teammate" | "group" | "direct_to_gd" | "notice" | "slack";
+  kind: "teammate" | "group" | "direct_to_gd" | "notice" | "slack";
   agentId: string;
   teamContext?: string; // 가시성 Stage C: 공유 버스의 최근 팀 대화 (깨어날 때 동봉)
   /** case 6 (direct_to_gd): Bill 등이 위임한 GD-facing 보고. set 되면 수신자가 버스 ack 대신
@@ -174,14 +174,6 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
         `A message arrived in this group room. This room's thread is thread="${opts.threadId}".` +
         hopInstruction +
         ` If ambiguous, ask ${owner}.`)
-    : opts.kind === "cogs"
-    ? pick(locale,
-        `cogs 답장은 --to broadcast --thread ${opts.threadId} --in-reply-to ${opts.messageId} 로 보내세요. 원래 cogs 방으로만 게시하며 실패하면 전송 실패를 반환합니다. ` +
-        `리액션은 react.sh --msg ${opts.messageId} --emoji <이모지> 로 붙입니다 — 메시지에 맞게 고르고, 리액션으로 답을 대신하지 않습니다. ` +
-        `글로 답하지 않고 끝낼 때는 react.sh 에 --no-reply 를 붙입니다(앱의 입력 중 표시를 끕니다).`,
-        `Reply via --to broadcast --thread ${opts.threadId} --in-reply-to ${opts.messageId}. Posts only to the original cogs room; posting failure returns a send failure. ` +
-        `React with react.sh --msg ${opts.messageId} --emoji <emoji> — pick one that fits the message; a reaction does not replace a reply. ` +
-        `If you finish without a text reply, add --no-reply to react.sh (turns off the app typing indicator).`)
     : opts.kind === "slack"
     ? pick(locale,
         `Slack 원글에 답하려면 --to broadcast --thread ${opts.threadId} --in-reply-to ${opts.messageId} 로 보내세요. ` +

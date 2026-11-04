@@ -3,7 +3,7 @@ import { withTeamDbPathForChild } from "../../lib/teamDbPath";
 /** 자식 app-server와 줄 단위 JSON-RPC로 통신해 진행 중 steer·interrupt와 승인 요청을 처리한다.
  * 팀 버스·텔레그램 연결은 상위 어댑터가 담당하므로 이 모듈에는 섞지 않는다. */
 import { uiText } from "./uiStrings";
-import { cogsActivityLine } from "./cogsActivity";
+import { activityLine } from "./activityLine";
 import { TurnAnswerText } from "./answerText";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import {
@@ -132,7 +132,7 @@ const NOISE_ITEM_TYPES = new Set(["userMessage", "user_message", "userMessageDel
 export function activityLineOf(item: unknown): string | null {
  const type=(item as {type?:unknown}|null)?.type;
  if (typeof type!=="string" || NOISE_ITEM_TYPES.has(type) || type==="reasoning" || type==="agentMessage") return null;
- return cogsActivityLine(item);
+ return activityLine(item);
 }
 
 /** 입력 조립을 순수 함수로 분리해 프로세스 없이 이미지 누락을 검증한다.

@@ -1,29 +1,29 @@
 import { expect, test } from "bun:test";
-import { cogsActivityLine } from "./cogsActivity";
+import { activityCode, activityLine } from "./activityLine";
 
 test("hook-style tool kind and compact target", () => {
-  expect(cogsActivityLine({ command: "cat /tmp/work/bridge.ts" })).toBe("읽기 · bridge.ts");
-  expect(cogsActivityLine({ command: ["bun", "test", "src/a.test.ts"] })).toBe("테스트 · bun test");
-  expect(cogsActivityLine({ changes: [{ path: "/tmp/work/note.md", kind: { type: "add" } }] })).toBe("새로 쓰기 · note.md");
-  expect(cogsActivityLine({ fileChanges: { "/tmp/work/a.ts": {} } })).toBe("수정 · a.ts");
-  expect(cogsActivityLine({ type: "webSearch", action: { queries: ["codex config"] } })).toBe("검색 · codex config");
-  expect(cogsActivityLine({ type: "webSearch", action: { type: "openPage", url: "https://user:fixture@example.com/private?token=fixture" } })).toBe("페이지 열기 · example.com");
+  expect(activityLine({ command: "cat /tmp/work/bridge.ts" })).toBe("읽기 · bridge.ts");
+  expect(activityLine({ command: ["bun", "test", "src/a.test.ts"] })).toBe("테스트 · bun test");
+  expect(activityLine({ changes: [{ path: "/tmp/work/note.md", kind: { type: "add" } }] })).toBe("새로 쓰기 · note.md");
+  expect(activityLine({ fileChanges: { "/tmp/work/a.ts": {} } })).toBe("수정 · a.ts");
+  expect(activityLine({ type: "webSearch", action: { queries: ["codex config"] } })).toBe("검색 · codex config");
+  expect(activityLine({ type: "webSearch", action: { type: "openPage", url: "https://user:fixture@example.com/private?token=fixture" } })).toBe("페이지 열기 · example.com");
 });
 
 test("Korean activity targets cover multiple files, tools and empty targets", () => {
-  expect(cogsActivityLine({ changes: [{ path: "a.ts" }, { path: "b.ts" }, { path: "c.ts" }] })).toBe("수정 · 파일 3개");
-  expect(cogsActivityLine({ type: "mcpToolCall", name: "mcp__fixture__lookup" })).toBe("실행");
-  expect(cogsActivityLine({ type: "web_search", queries: ["판교", "오늘 날씨"] })).toBe("검색 · 판교 · 오늘 날씨");
-  expect(cogsActivityLine({ type: "webSearch", query: "" })).toBe("검색");
-  expect(cogsActivityLine({ type: "webSearch", queries: [] })).toBe("검색");
-  expect(cogsActivityLine({ type: "webSearch", action: { type: "openPage", url: "" } })).toBe("페이지 열기");
-  expect(cogsActivityLine({ command: "" })).toBe("도구");
-  expect(cogsActivityLine({ command: [] })).toBe("실행");
-  expect(cogsActivityLine({ command: "cat" })).toBe("읽기");
-  expect(cogsActivityLine({ changes: [{ kind: { type: "add" } }] })).toBe("수정");
-  expect(cogsActivityLine({ changes: [{}] })).toBe("수정");
-  expect(cogsActivityLine({ type: "mcpToolCall" })).toBe("실행");
-  expect(cogsActivityLine(null)).toBe("도구");
+  expect(activityLine({ changes: [{ path: "a.ts" }, { path: "b.ts" }, { path: "c.ts" }] })).toBe("수정 · 파일 3개");
+  expect(activityLine({ type: "mcpToolCall", name: "mcp__fixture__lookup" })).toBe("실행");
+  expect(activityLine({ type: "web_search", queries: ["판교", "오늘 날씨"] })).toBe("검색 · 판교 · 오늘 날씨");
+  expect(activityLine({ type: "webSearch", query: "" })).toBe("검색");
+  expect(activityLine({ type: "webSearch", queries: [] })).toBe("검색");
+  expect(activityLine({ type: "webSearch", action: { type: "openPage", url: "" } })).toBe("페이지 열기");
+  expect(activityLine({ command: "" })).toBe("도구");
+  expect(activityLine({ command: [] })).toBe("실행");
+  expect(activityLine({ command: "cat" })).toBe("읽기");
+  expect(activityLine({ changes: [{ kind: { type: "add" } }] })).toBe("수정");
+  expect(activityLine({ changes: [{}] })).toBe("수정");
+  expect(activityLine({ type: "mcpToolCall" })).toBe("실행");
+  expect(activityLine(null)).toBe("도구");
 });
 
 test("command arguments, assignments, credentials and full paths are withheld", () => {
@@ -38,10 +38,10 @@ test("command arguments, assignments, credentials and full paths are withheld", 
     { type: "webSearch", query: "config ABCDEFGHIJKLMNOPQRSTUVWXYZ123456" },
   ];
   for (const input of inputs) {
-    const line = cogsActivityLine(input);
+    const line = activityLine(input);
     expect(!line.includes("fixture_value") && !line.includes("/tmp/private") && !line.includes("PRIVATE_ENV") && !line.includes("ABCDEFGHIJKLMNOPQRSTUVWXYZ123456")).toBe(true);
   }
-  expect(cogsActivityLine({ command: 'API_KEY=fixture_value bun test' })).toBe("테스트 · bun test");
+  expect(activityLine({ command: 'API_KEY=fixture_value bun test' })).toBe("테스트 · bun test");
 });
 
 test("app-server start/completion notifications pass structured targets to the formatter", async () => {
@@ -55,7 +55,7 @@ test("app-server start/completion notifications pass structured targets to the f
   internal.threadId = "fixture-thread";
   internal.notify = async () => {};
   const targets: string[] = [];
-  const result = client.runTurn("fixture", { onActivity: (_line, _id, item) => targets.push(cogsActivityLine(item)) }, 1000);
+  const result = client.runTurn("fixture", { onActivity: (_line, _id, item) => targets.push(activityLine(item)) }, 1000);
   internal.handleNotification("item/started", { item: { id: "s1", type: "webSearch" } });
   internal.handleNotification("item/completed", { item: { id: "s1", type: "webSearch", action: { query: "completed query" } } });
   internal.handleNotification("turn/completed", { turn: { status: "completed" } });
@@ -74,13 +74,13 @@ test("quoted credential keys hide the complete value before activity is clipped"
     '"api-key"="fixture_value"',
   ];
   for (const query of queries) {
-    const line = cogsActivityLine({ type: "webSearch", query });
+    const line = activityLine({ type: "webSearch", query });
     expect(line).toContain("[redacted]");
     expect(line).not.toContain("fixture_value");
     expect(line).not.toContain("quotes");
     expect(line).not.toContain("commas");
   }
-  expect(cogsActivityLine({ type: "webSearch", query: JSON.stringify({ api_key: "fixture_value", topic: "docs" }) }))
+  expect(activityLine({ type: "webSearch", query: JSON.stringify({ api_key: "fixture_value", topic: "docs" }) }))
     .toBe('검색 · {[redacted],"topic":"docs"}');
 });
 
@@ -100,11 +100,18 @@ test("authentication schemes hide short credentials regardless of token length",
     JSON.stringify({ authorization: `Basic ${basic}` }),
   ];
   for (const query of queries) {
-    const line = cogsActivityLine({ type: "webSearch", query });
+    const line = activityLine({ type: "webSearch", query });
     expect(line).toContain("[redacted]");
     expect(line).not.toContain(basic);
     expect(line).not.toContain("abc");
   }
-  expect(cogsActivityLine({ type: "webSearch", query: `Authorization: Basic ${basic}` }))
+  expect(activityLine({ type: "webSearch", query: `Authorization: Basic ${basic}` }))
     .toBe("검색 · [redacted]");
+});
+
+test("activity codes classify observed tools", () => {
+  expect(activityCode({ type: "fileChange", changes: [{ path: "app.ts" }] })).toBe("code_edit");
+  expect(activityCode({ type: "fileChange", changes: [{ path: "readme.md" }] })).toBe("writing");
+  expect(activityCode({ type: "webSearch", action: { type: "openPage" } })).toBe("fetch_web");
+  expect(activityCode({ type: "mcpToolCall", name: "update_plan" })).toBe("plan");
 });

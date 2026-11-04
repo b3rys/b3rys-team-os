@@ -69,7 +69,7 @@ beforeAll(() => {
     const method = url.pathname.split("/").pop();
     if (method === "conversations.history") {
       // 최상위 글: 부모 하나(멘션 없음). 댓글은 여기 안 나온다 — Slack 실제 동작과 같게.
-      const parent = { ts: parentTs, user: "UGD", text: "[b3chat] 주제", reply_count: 2, latest_reply: newReplyTs };
+      const parent = { ts: parentTs, user: "UGD", text: "[app] 주제", reply_count: 2, latest_reply: newReplyTs };
       if (url.searchParams.get("limit") === "200") {
         // 쓰레드 훑기: 활성 쓰레드는 ★둘째 쪽★에 있다(최근 글에 밀려난 오래된 쓰레드 — 리뷰가 잡은 경로)
         if (!url.searchParams.get("cursor")) {
@@ -89,7 +89,7 @@ beforeAll(() => {
       replyCalls++;
       const oldest = Number(url.searchParams.get("oldest"));
       const all = [
-        { ts: parentTs, user: "UGD", text: "[b3chat] 주제" },
+        { ts: parentTs, user: "UGD", text: "[app] 주제" },
         { ts: oldReplyTs, thread_ts: parentTs, user: "UGD", text: `<@${BILL_UID}> 옛 댓글` },
         { ts: newReplyTs, thread_ts: parentTs, user: "UGD", text: `<@${BILL_UID}> 쓰레드 댓글` },
       ];

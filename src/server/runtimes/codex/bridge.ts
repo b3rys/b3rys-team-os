@@ -1,19 +1,6 @@
-import { currentCogsAllowlist } from "./cogsAllowlist";
 import { buildNewSessionContext, withNewSessionContext } from "./newSessionContext";
-import { handleCogsApprovalCallback } from "../../lib/cogsPermissions/bridgeCallback";
-import { createBridgeCogsApprovals } from "../../lib/cogsPermissions/waiters";
-import { readPolicy } from "../../lib/cogsPermissions/policy";
-import { resolveCogsCodexRun, type CogsCodexRun } from "./cogsRunPolicy";
-import { createCogsCodexApprover } from "./cogsApprover";
-import { createClaudeCardApprover } from "../claude/cogsCardApprover";
-import { currentCogsStamp } from "../../lib/cogsPermissions/service";
-import { sendApprovalCard } from "../../lib/cogsPermissions/card";
 import { openDb } from "../../db/migrate";
-import { reasoningSummaryOf } from "./reasoningSummary";
-import { createReactionInbox, reactionInputs, type ReactionInbox, type ReactionUpdate, type ReactionRef } from "../../lib/reactionInput";
-import { randomUUID } from "node:crypto";
-import { preserveAnswer } from "./answerText";
-import { modelLine } from "../../lib/b3chatModels";
+import { createSteerQueue, type SteerQueue } from "../../lib/steerQueue";
 /** 팀원 봇의 수신·리액션·진행표시·채널 발신은 브리지가 담당하고 모델은 답을 생성한다.
  * 채팅별 resume 세션을 보존하며 서버가 넣는 그룹 턴은 명시적 버스 발신 계약을 따른다. */
 import { codexBridgePaths } from "./launcher";
@@ -40,20 +27,21 @@ import type { PermissionContext } from "../../lib/permissionGate";
 import { codexRuntimePreflight, codexConfiguredGrants } from "./permissions";
 import { appendLine, renderBubble, fits, EDIT_MIN_INTERVAL_MS, type ProgressLine } from "./progressLines";
 
-import { cogsActivityCode, cogsActivityArgs, cogsActivityLine } from "./cogsActivity";
+import { activityLine } from "./activityLine";
 import { uiText, renderRuntimeEvent } from "./uiStrings";
 
 export interface BridgeDeps {
   permissionModeFor?: () => import("../../../shared/codexPermissionMode").CodexPermissionMode;
   /** 이 팀원의 채널(시험 주입). 없으면 런처가 넣은 env(CODEX_CHANNEL_KIND·TELEGRAM_API_BASE)에서 읽는다. */
   channel?: MemberChannel;
-  reactionInbox?: ReactionInbox;
+  /** 같은 대화로 들어오는 중간 개입을 순서대로 보낸다. */
+  steerQueue?: SteerQueue;
   /** codex 한 턴 구동(기본 runCodexTurn — 테스트 mock). */
   runTurn?: (opts: CodexTurnOptions) => Promise<CodexTurnResult>;
   /** 텔레그램 발신 → 보낸 message_id 반환(작업중 메시지 교체용). */
-  sendMessage?: (chatId: number, text: string, response?: { state: string; replyTo?: number; activity?: string; activityCode?: string; activityArgs?: Record<string, unknown>; errorCode?: string; idempotencyKey?: string; reactionRef?: ReactionRef }) => Promise<number | null>;
+  sendMessage?: (chatId: number, text: string) => Promise<number | null>;
   /** 텔레그램 메시지 편집(작업중 → 답). */
-  editMessage?: (chatId: number, messageId: number, text: string, responseState?: string, activity?: string, activityCode?: string, reactionRef?: ReactionRef, activityArgs?: Record<string, unknown>, errorCode?: string) => Promise<boolean>;
+  editMessage?: (chatId: number, messageId: number, text: string) => Promise<boolean>;
   /** 텔레그램 리액션(👀 ack). */
   reactMessage?: (chatId: number, messageId: number, emoji: string) => Promise<boolean>;
   /** 팀원 정체성 격리 루트(CODEX_HOME). */
@@ -82,18 +70,6 @@ export interface BridgeDeps {
   registerScheduleReminder?: (req: ScheduleMarkerRequest, ctx: ScheduleMarkerContext) => Promise<string>;
   /** 1:1 대화 세션을 재시작 넘어 기억한다. 미지정이면 기억하지 않는다(시험 기본값). */
   dmSessions?: DmSessionStore;
-  /** cogs 채널 브리지만: 턴마다 정책 원본을 다시 읽어 실행 설정을 정한다. 없으면 지금 동작 그대로. */
-  cogsRunFor?: () => CogsCodexRun;
-  /** cogs 정책 팀원의 승인 요청 처리(카드). */
-  onCogsApproval?: CodexTurnOptions["onCogsApproval"];
-}
-
-/** 모든 턴 진입점(1:1·그룹·인사·리액션·일정 요약)이 같은 cogs 실행 설정을 싣는다. */
-function cogsTurnOpts(deps: BridgeDeps): Pick<CodexTurnOptions, "cogsRun" | "onCogsApproval" | "permissionMode"> {
-  if (!deps.cogsRunFor) return { permissionMode: deps.permissionModeFor?.() };
-  let run: CogsCodexRun;
-  try { run = deps.cogsRunFor(); } catch (e) { run = { mode: "blocked", reason: `policy_read_failed: ${e instanceof Error ? e.message : e}` }; }
-  return { cogsRun: run, ...(run.mode === "legacy" ? { permissionMode: deps.permissionModeFor?.() } : {}), ...(deps.onCogsApproval ? { onCogsApproval: deps.onCogsApproval } : {}) };
 }
 
 /** 팀원 단위 activeTurns만으로는 대화를 구분할 수 없어 진행 중 chat도 보존한다. 같은 대화만 steer해야 다른 대화의 입력이 섞이지 않는다. */
@@ -169,51 +145,20 @@ export async function routeIncoming(
 export function captureConversationSteer(chatId: number, d: {
   isRunning: (chatId: number) => boolean;
   captureSend: () => ((text: string, imagePaths?: readonly string[]) => Promise<boolean>) | null;
-  inbox: ReactionInbox;
+  steerQueue: SteerQueue;
   fetchAttachments?: (() => Promise<DmAttachments>) | null;
 }): ((text: string) => Promise<boolean>) | null {
   const send = d.captureSend();
   if (!send) return null;
   return text => steerWithAttachments(text, {
     fetchAttachments: d.fetchAttachments ?? null,
-    steer: (body, images) => d.inbox.steer(chatId, body,
+    steer: (body, images) => d.steerQueue.steer(chatId, body,
       text => d.isRunning(chatId) ? send(text, images) : Promise.resolve(false)),
   });
 }
 
-/** Reactions use the existing serial queue/steer path without a receipt bubble. */
-export async function routeReactionUpdate(
-  updateId: number, reaction: ReactionUpdate,
-  d: { channel: MemberChannel; allowFrom: Set<number>; ownBotId?: number; inbox: ReactionInbox; route: Omit<IncomingRouteDeps, "runTurnFor">; runTurn: (input: string, reactionRef?: ReactionRef) => Promise<void> },
-): Promise<IncomingRoute | null> {
-  if (d.channel.kind !== "b3chat" || !isAllowedChat(d.allowFrom, reaction.chat.id)) return null;
-  const input = d.inbox.accept(updateId, reaction, d.ownBotId);
-  if (!input) return null;
-  const ref = reactionInputs(reaction, reaction.cogs_message_text!, reaction.cogs_reactor_is_master!)
-    .filter(row => row.wake).at(-1)?.ref;
-  return routeIncoming(reaction.chat.id, input, {
-    ...d.route,
-    runTurnFor: () => d.runTurn(input, ref),
-    receive: undefined,
-    steerText: text => text,
-    captureSteer: () => {
-      const response = d.inbox.captureResponse(reaction.chat.id);
-      const steer = captureConversationSteer(reaction.chat.id, {
-        isRunning: d.route.isRunning,
-        captureSend: () => d.route.captureSteer ? d.route.captureSteer() : d.route.steer,
-        inbox: d.inbox,
-      });
-      return steer ? async text => {
-        const sent = await steer(text);
-        if (sent && response) response.ref = ref;
-        return sent;
-      } : null;
-    },
-  });
-}
-
 export function bridgeUpdatesUrl(apiBase: string, token: string, offset: number): string {
-  return `${apiBase}/bot${token}/getUpdates?timeout=30&offset=${offset}&allowed_updates=["message","callback_query","message_reaction"]`;
+  return `${apiBase}/bot${token}/getUpdates?timeout=30&offset=${offset}&allowed_updates=["message","callback_query"]`;
 }
 
 /** 시험·진단용 — 지금 그 대화의 턴이 도는 중인가. */
@@ -626,30 +571,7 @@ async function deliverGroupReply(a: {
  * 흐름: 👀 리액션 → "작업 중…" 게시 → codex 턴 → 작업중 메시지를 답으로 교체(편집 실패 시 신규 발신).
  */
 
-// A response context belongs to one running turn; queued turns capture their own
-// initial reaction, and successful steers can update only the captured context.
 export async function handleMessage(
-  chatId: number, text: string, messageId: number | undefined, deps: BridgeDeps = {},
-  fetchAttachments?: () => Promise<DmAttachments>, ingress: "poll" | "window" = "poll",
-  isGroup?: boolean, receipt?: Promise<number | null>, reactionRef?: ReactionRef,
-): Promise<{ ok: boolean; turnOk: boolean; reply: string; detail: string }> {
-  if ((deps.channel ?? channelFromEnv()).kind !== "b3chat") {
-    return handleMessageTurn(chatId, text, messageId, deps, fetchAttachments, ingress, isGroup, receipt);
-  }
-  const lease = deps.reactionInbox?.beginResponse(chatId, reactionRef);
-  const context = lease?.context ?? { ref: reactionRef };
-  const wrapped: BridgeDeps = {
-    ...deps,
-    sendMessage: (chat, text, response) => deps.sendMessage?.(chat, text,
-      context.ref ? { ...response, state: response?.state ?? "complete", reactionRef: context.ref } : response) ?? Promise.resolve(null),
-    editMessage: (chat, id, text, state, activity, code, ref, args, errorCode) => deps.editMessage?.(chat, id, text, state, activity, code, context.ref ?? ref, args, errorCode) ?? Promise.resolve(false),
-  };
-  try {
-    return await handleMessageTurn(chatId, text, messageId, wrapped, fetchAttachments, ingress, isGroup, receipt, reactionRef !== undefined);
-  } finally { lease?.close(); }
-}
-
-async function handleMessageTurn(
   chatId: number,
   text: string,
   messageId: number | undefined,
@@ -658,10 +580,8 @@ async function handleMessageTurn(
   fetchAttachments?: () => Promise<DmAttachments>,
   /** 그룹 native 차단은 담당자 판정이 없는 폴링 입구에만 적용한다. 서버가 이미 담당자를 정해 넣은 window 입구에는 적용하지 않는다. */
   ingress: "poll" | "window" = "poll",
-  /** 그룹 여부는 chat.type으로 전달한다. b3chat 그룹 ID는 양수일 수 있어 음수 판정만으로는 부족하며 미지정 때만 기존 판정을 쓴다. */
+  /** 그룹 여부는 chat.type으로 전달한다. 미지정 때만 음수 chat ID 판정을 쓴다. */
   isGroup?: boolean,
-  receipt?: Promise<number | null>,
-  reactionOnly = false,
 ): Promise<{ ok: boolean; turnOk: boolean; reply: string; detail: string }> {
   // 직접 대화도 버스와 같은 app-server를 사용해 steer·프로세스 상주·서브에이전트 생존을 유지한다. 현재 never 정책은 승인창을 만들지 않는다.
   const runTurn = deps.runTurn ?? defaultBridgeCaller();
@@ -675,13 +595,8 @@ async function handleMessageTurn(
   // 브리지의 팀원 신원은 한 곳에서 결정해 승인 요청 주인도 다른 팀원으로 기록되지 않게 한다.
   const selfAgentId = deps.agentId ?? process.env.CODEX_AGENT_ID ?? "codex";
 
-  // b3chat 팀원은 이 차단을 지나지 않는다 — b3chat 서버가 이미 멘션·답장·1:1 만 골라 보내고,
-  //   그룹을 capture→bus 로 넘기는 길이 아직 없다(텔레그램 capture 는 텔레그램 그룹만 본다).
-  //   막으면 그 팀원은 그룹에서 영영 말을 못 듣는다.
-  const channel = deps.channel ?? channelFromEnv();
-  const isCogs = channel.kind === "b3chat";
   const group = isGroup ?? chatId < 0;
-  if (ingress === "poll" && group && channel.kind !== "b3chat" && messageId !== undefined) {
+  if (ingress === "poll" && group && messageId !== undefined) {
     const shadowOn = process.env.CODEX_GROUP_NATIVE_DENY_SHADOW === "true";
     // 그룹 native 차단은 기본 ON이며 명시적 false로만 끈다. 담당자는 capture→bus가 정하므로 별도 native 응답은 다른 팀원의 호출에도 반응할 수 있다.
     const enforceOn = (process.env.CODEX_GROUP_NATIVE_DENY ?? "true") !== "false";
@@ -709,8 +624,8 @@ async function handleMessageTurn(
     }
   }
 
-  // Telegram keeps its receipt reaction; cogs uses server-managed read receipts.
-  if (!isCogs && messageId !== undefined) void react(chatId, messageId, "👀");
+  // Receipt reaction.
+  if (messageId !== undefined) void react(chatId, messageId, "👀");
 
   const scheduleRequest = isOneShotScheduleRequest(text);
 
@@ -718,7 +633,7 @@ async function handleMessageTurn(
   // 키워드는 도구 안내 힌트로만 사용한다. 불평·질문까지 예약되지 않도록 실제 등록은 LLM이 예약 의도를 판단해 마커를 낸 경우로 제한한다.
 
 
-  const workingMsgId = reactionOnly ? null : receipt ? await receipt : await send(chatId, isCogs ? "" : workingText, isCogs ? { state: "waiting", replyTo: messageId } : undefined);
+  const workingMsgId = await send(chatId, workingText);
 
   // 메모리의 대화 지도가 재시작으로 비면 영속 세션을 조회해 1:1 맥락을 이어받는다.
   const sessions = deps.dmSessions ?? NOOP_DM_SESSION_STORE;
@@ -727,8 +642,6 @@ async function handleMessageTurn(
     prior = sessions.get(chatId);
     if (prior !== undefined) chatThreads.set(chatId, prior); // 다음 턴부터는 메모리에서 바로
   }
-  const reactionClaim = deps.reactionInbox?.claim(chatId, text);
-  text = reactionClaim?.text ?? text;
   const toolAwareText = scheduleRequest && !scheduleToolEnabled(deps)
     ? `[Tool availability: schedule_reminder unavailable. Do not wait, sleep, or claim a reservation was created.]\n${text}`
     : scheduleRequest
@@ -743,7 +656,7 @@ async function handleMessageTurn(
   //   판정은 영속 마커(재시작에도 남음) — 인메모리 prior(세션 resume용)와 분리해, 이미 합류한 팀원이
   // 재시작 후 재소개하지 않게 한다. prior는 아래 resumeSessionId 로만 쓴다.
   const greetAgentId = selfAgentId;
-  const greetedBefore = reactionOnly || hasGreetedFirstContact(greetAgentId);
+  const greetedBefore = hasGreetedFirstContact(greetAgentId);
   const promptText = greetedBefore
     ? toolAwareText
     : `[이번이 이 대화의 첫 응답입니다. 먼저 짧게 인사하고, OT(팀 미션·규칙·역할·팀 스킬)를 받아 팀에 합류했음을 한 줄로 밝힌 뒤 본론에 답하세요.]\n\n${toolAwareText}`;
@@ -753,7 +666,7 @@ async function handleMessageTurn(
   const note = attachments ? attachmentNote(attachments) : "";
   const promptWithNote = note ? `${promptText}\n\n${note}` : promptText;
   // 이 대화에 이을 세션이 없으면(새 대화·세션이 죽어 지워짐) 기억 파일·다른 대화 최근 일을 앞에 붙인다(newSessionContext.ts).
-  const promptWithMedia = prior === undefined && !reactionOnly
+  const promptWithMedia = prior === undefined
     ? withNewSessionContext(promptWithNote, newSessionContextFor(selfAgentId, deps.workdir, String(chatId)))
     : promptWithNote;
 
@@ -767,10 +680,9 @@ async function handleMessageTurn(
     deps.permissionContext,
   );
   if (preflight) {
-    reactionClaim?.rollback();
-    const errText = isCogs ? "" : toMarkdownV2(uiText("permission_denied"));
-    if (workingMsgId !== null) await edit(chatId, workingMsgId, errText, isCogs ? "error" : undefined, undefined, undefined, undefined, undefined, "permission_required");
-    else await send(chatId, errText, isCogs ? { state: "error", errorCode: "permission_required", replyTo: messageId } : undefined);
+    const errText = toMarkdownV2(uiText("permission_denied"));
+    if (workingMsgId !== null) await edit(chatId, workingMsgId, errText);
+    else await send(chatId, errText);
     return { ok: false, turnOk: false, reply: "", detail: `permission_${preflight.tier}:${preflight.rule}` };
   }
   // 창 없는 런타임의 도구 진행을 버블에 누적한다. 편집은 깜빡임과 채널 제한 여유를 위해 2초 간격으로 모아 처리한다.
@@ -782,11 +694,6 @@ async function handleMessageTurn(
   let dirty = false;                    // 아직 화면에 안 나간 줄이 있나
   let inFlightEdit: Promise<void> | null = null; // 지금 날아가 있는 편집(답을 쓰기 전에 기다린다)
 
-  let cogsActivity = "";
-  let activityCode: string | undefined;
-  let activityArgs: Record<string, unknown> | undefined;
-  let cogsBody = "";
-  let cogsState = "waiting";
   const flush = async (): Promise<void> => {
     if (editing || !dirty || bubbleId === null) return;
     editing = true;
@@ -797,14 +704,12 @@ async function handleMessageTurn(
     //   그래서 `-`·`.` 같은 예약문자가 있는 줄마다 400 이 났고(실측 156건: `-` 49 · `.` 2 …),
     //   매번 평문으로 재전송해서 같은 편집을 두 번씩 했다. 화면은 멀쩡했지만 호출이 2배였다.
     //   최종 답은 이미 `toMarkdownV2` 를 타고 있었다(:769) — 버블만 빠져 있었다.
-    const text = toMarkdownV2(isCogs ? cogsBody : renderBubble(headLine, lines));
-    const responseState = isCogs ? cogsState : undefined;
-    const activity = isCogs ? cogsActivity : undefined;
+    const text = toMarkdownV2(renderBubble(headLine, lines));
     const work = (async () => {
-      const ok = await edit(chatId, bubbleId as number, text, responseState, undefined, activityCode, undefined, activityArgs);
+      const ok = await edit(chatId, bubbleId as number, text);
       if (!ok) {
         // 편집이 안 되면 그 버블은 그대로 두고 새 버블을 연다. 이미 보낸 줄을 지우지 않는다.
-        const fresh = await send(chatId, text, isCogs ? { state: responseState!, replyTo: messageId, activityCode, activityArgs } : undefined);
+        const fresh = await send(chatId, text);
         if (fresh !== null) bubbleId = fresh;
         else bubbleId = null; // 보내기까지 막히면 진행 표시를 포기한다(턴은 계속 간다)
       }
@@ -823,8 +728,7 @@ async function handleMessageTurn(
 
   const schedule = (): void => {
     if (editTimer !== null || bubbleId === null) return;
-    if (isCogs && lastEditAt === 0) { void flush(); return; }
-    const wait = Math.max(0, (isCogs ? 400 : EDIT_MIN_INTERVAL_MS) - (Date.now() - lastEditAt));
+    const wait = Math.max(0, EDIT_MIN_INTERVAL_MS - (Date.now() - lastEditAt));
     editTimer = setTimeout(() => {
       editTimer = null;
       void flush();
@@ -832,22 +736,9 @@ async function handleMessageTurn(
   };
 
   // 상태는 한 자리에서 교체된다 — 쌓지 않는다. 실제 작업만 아래에 쌓인다.
-  let headLine = isCogs ? "" : workingText;
-  let lastReasoningSummary = "";
-  const onStatus = (line: string, item?: unknown): void => {
+  let headLine = workingText;
+  const onStatus = (line: string): void => {
     if (bubbleId === null) return;
-    if (isCogs) {
-      const head = reasoningSummaryOf(item);
-      const target = Array.from(head).slice(0, 60).join("");
-      if (!target || target === lastReasoningSummary) return;
-      lastReasoningSummary = target;
-      activityCode = "thinking";
-      activityArgs = { target };
-      cogsState = cogsBody ? "streaming" : "activity";
-      dirty = true;
-      schedule();
-      return;
-    }
     if (line === headLine) return;
     headLine = renderRuntimeEvent(line);
     dirty = true;
@@ -856,17 +747,7 @@ async function handleMessageTurn(
 
   const onActivity = (line: string, itemId?: string, item?: unknown): void => {
     if (bubbleId === null) return;
-    if (isCogs) {
-      const code = cogsActivityCode(item);
-      if (!code) return;
-      activityCode = code;
-      activityArgs = cogsActivityArgs(item);
-      cogsState = cogsBody ? "streaming" : "activity";
-      dirty = true;
-      schedule();
-      return;
-    }
-    const displayLine = item ? cogsActivityLine(item) : renderRuntimeEvent(line);
+    const displayLine = item ? activityLine(item) : renderRuntimeEvent(line);
     const next = appendLine(lines, displayLine, undefined, itemId);
     if (next === lines) return; // 빈 줄이라 담을 것이 없다
     if (!fits(headLine, next)) {
@@ -884,39 +765,18 @@ async function handleMessageTurn(
     schedule();
   };
 
-  const onDelta = isCogs ? (text: string): void => {
-    if (!text || (bubbleId === null && !reactionOnly) || scheduleRequest && scheduleToolEnabled(deps)) return;
-    cogsBody = Array.from(cogsBody + text).slice(0, 4096).join("");
-    cogsState = "streaming";
-    dirty = true;
-    schedule();
-  } : undefined;
-
-  const onAnswerText = isCogs ? (text: string): void => {
-    if (!text || (bubbleId === null && !reactionOnly) || scheduleRequest && scheduleToolEnabled(deps)) return;
-    // An earlier item can finish after a later item's delta; publish the full ordered text.
-    cogsBody = Array.from(text).slice(0, 4096).join("");
-    cogsState = "streaming";
-    dirty = true;
-    schedule();
-  } : undefined;
-
-  const executionOpts = cogsTurnOpts(deps);
+  const executionOpts = { permissionMode: deps.permissionModeFor?.() };
   runningPermissionMode = executionOpts.permissionMode ?? "full";
   runningTurnChatId = chatId;
   let result: CodexTurnResult;
   try {
     result = await runTurn({
       prompt: promptWithMedia,
-      ...(reactionOnly ? { allowEmptyReply: true } : {}),
       // 그림은 본문이 아니라 입력으로 간다 — 경로를 적어주면 codex 는 바이트로 읽을 뿐 보지 못한다.
       imagePaths: attachments?.imagePaths,
       agentId: selfAgentId, // 필수 — 승인 요청의 주인이 된다
       onActivity,
       onStatus,
-      onDelta,
-      onAnswerText,
-      model: isCogs ? configuredCogsModel(deps.codexHome ?? codexBridgePaths(selfAgentId).codexHome) : undefined,
 
       resumeSessionId: prior,
       codexHome: deps.codexHome,
@@ -926,19 +786,9 @@ async function handleMessageTurn(
       writableRoots: deps.workdir ? [deps.workdir] : [],
       ...executionOpts,
     });
-    if (result.ok) reactionClaim?.commit(); else reactionClaim?.rollback();
-  } catch (error) {
-    reactionClaim?.rollback();
-    if (!isCogs) throw error;
-    result = {ok:false,reply:"",sessionId:prior,detail:"turn_exception",elapsedMs:0};
   } finally {
     if (editTimer !== null) { clearTimeout(editTimer); editTimer = null; }
     if (inFlightEdit !== null) { try { await inFlightEdit; } catch { /* Failure must not leave a waiting reply. */ } }
-    // Deliver the last activity even when the turn finishes before its batch timer fires.
-    if (isCogs && dirty) {
-      await new Promise(resolve => setTimeout(resolve, Math.max(0, 400 - (Date.now() - lastEditAt))));
-      try { await flush(); } catch { /* Presentation must not prevent completion. */ }
-    }
     dirty = false;
     // 던지고 나가도 반드시 지운다. 안 지우면 그 대화는 영영 "도는 중" 으로 남아
     //   이후 모든 말이 끼어들기로 가고, 끼어들 턴이 없어 아무 데도 안 간다.
@@ -953,16 +803,12 @@ async function handleMessageTurn(
   //   기다리지 않으면 그 응답이 답보다 늦게 도착해 답이 진행 줄로 덮인다.
   if (inFlightEdit !== null) { try { await inFlightEdit; } catch { /* 표시 실패가 답을 막지 않는다 */ } }
 
-  if (isCogs) await new Promise(resolve => setTimeout(resolve, Math.max(0,400-(Date.now()-lastEditAt))));
   if (result.sessionId) {
     chatThreads.set(chatId, result.sessionId);
     sessions.save(chatId, result.sessionId); // 재시작 넘어 기억한다
   }
 
-  if (reactionOnly && result.ok && !result.reply.trim() && !cogsBody) {
-    return { ok: true, turnOk: true, reply: "", detail: "reaction_silent" };
-  }
-  if (!result.ok || (!result.reply && !(reactionOnly && cogsBody))) {
+  if (!result.ok || !result.reply) {
     // 턴 실패와 세션 소멸은 다르므로 thread ID가 살아 있으면 저장된 맥락을 유지한다. resume 자체가 실패하면 클라이언트가 새 thread를 만들고 그 번호로 갱신한다.
     if (!result.sessionId) {
       chatThreads.delete(chatId);
@@ -970,11 +816,9 @@ async function handleMessageTurn(
     } else {
       console.warn(`[codex-bridge] 턴 실패했지만 세션은 유지한다(thread 살아 있음): ${result.detail ?? "사유 없음"}`);
     }
-    const partial = isCogs ? preserveAnswer(cogsBody, result.reply) : "";
-    const errorCode = /timeout/.test(result.detail ?? "") ? "timeout" : /rate.limit/.test(result.detail ?? "") ? "rate_limited" : "response_failed";
-    const errText = isCogs ? toMarkdownV2(partial) : toMarkdownV2(uiText("turn_failed"));
-    if (bubbleId !== null) await edit(chatId, bubbleId, errText, isCogs ? "error" : undefined, undefined, undefined, undefined, undefined, errorCode);
-    else await send(chatId, errText, isCogs ? { state: "error", errorCode, replyTo: messageId } : undefined);
+    const errText = toMarkdownV2(uiText("turn_failed"));
+    if (bubbleId !== null) await edit(chatId, bubbleId, errText);
+    else await send(chatId, errText);
     return { ok: false, turnOk: false, reply: "", detail: `codex_turn_failed:${result.detail}` };
   }
   // 성공 턴에서 첫 인사를 했다면 영속 마커를 남긴다 → 다음부터(재시작·새 스레드 포함) 재소개 안 함.
@@ -998,7 +842,7 @@ async function handleMessageTurn(
           prompt: `[schedule_reminder tool result]\n${hostResult}\nDescribe this result to the user. Do not call the scheduler again.`,
           agentId: selfAgentId, resumeSessionId: result.sessionId, codexHome: deps.codexHome,
           cwd: deps.workdir, sandbox: deps.sandbox, networkAccess: deps.networkAccess,
-          ...cogsTurnOpts(deps),
+          permissionMode: deps.permissionModeFor?.(),
         });
       } catch {
         summary = { ok: false, reply: "", detail: "schedule_summary_exception", elapsedMs: 0 };
@@ -1008,33 +852,31 @@ async function handleMessageTurn(
         sessions.save(chatId, summary.sessionId);
       }
       if (!summary.ok || !summary.reply.trim() || extractScheduleMarker(summary.reply)) {
-        const notice = isCogs ? "" : toMarkdownV2(uiText("turn_failed"));
+        const notice = toMarkdownV2(uiText("turn_failed"));
         if (bubbleId !== null) {
-          await edit(chatId, bubbleId, notice, isCogs ? "error" : undefined, undefined, undefined, undefined, undefined, "response_failed");
+          await edit(chatId, bubbleId, notice);
         } else {
-          await send(chatId, notice, isCogs ? { state: "error", errorCode: "response_failed", replyTo: messageId } : undefined);
+          await send(chatId, notice);
         }
         return { ok: false, turnOk: false, reply: "", detail: "schedule_summary_failed" };
       }
       reply = summary.reply;
-      cogsBody = "";
     }
   }
 
   // 최종답은 현재 마지막 진행 버블에 써야 새 버블이 작업 중인 채 남지 않는다.
   // MarkdownV2 변환 후 길이가 늘 수 있으므로 변환된 UTF-16 길이로 나누고 편집 실패·대상 없음이면 새로 보낸다.
-  if (isCogs) reply = preserveAnswer(cogsBody, reply);
   const parts = splitForTelegram(toMarkdownV2(reply));
   let delivered = false;
   const first = parts[0] as string;
-  if (bubbleId !== null) delivered = await edit(chatId, bubbleId, first, isCogs ? "complete" : undefined);
+  if (bubbleId !== null) delivered = await edit(chatId, bubbleId, first);
   if (!delivered) {
-    const newId = await send(chatId, first, isCogs ? { state: "complete", replyTo: messageId } : undefined);
+    const newId = await send(chatId, first);
     delivered = newId !== null;
   }
   // 남은 조각은 이어서 보낸다 — 자르지 않는다.
   for (const rest of parts.slice(1)) {
-    const id = await send(chatId, rest, isCogs ? { state: "complete", replyTo: messageId } : undefined);
+    const id = await send(chatId, rest);
     if (id === null) { delivered = false; break; }
   }
   // ok는 채널 발신, turnOk는 턴 실행 결과다. 직접 발신을 끈 bridge window에서 ok로 실행을 판정하면 성공도 실패로 읽는다.
@@ -1049,8 +891,6 @@ export function resetChatThreads(): void {
 //  라이브 텔레그램 I/O (토큰 필요 — 봇별 CODEX_BOT_TOKEN)
 // 봇 API 주소 — 런처가 팀원 채널대로 TELEGRAM_API_BASE 를 넣는다(없으면 텔레그램).
 const TG_API = channelFromEnv().apiBase;
-/** b3chat 은 parse_mode 를 무시하고 글자를 그대로 저장한다 — MarkdownV2 로 보내면 \ 가 화면에 남는다. */
-const PLAIN_ONLY = channelFromEnv().kind === "b3chat";
 
 /** 텔레그램 발신 → 보낸 message_id 반환(작업중 메시지 교체용). */
 /**
@@ -1058,67 +898,28 @@ const PLAIN_ONLY = channelFromEnv().kind === "b3chat";
  * 주입 없이는 시험에서 한 번도 실행되지 않는다. 정말 필요한 순간에 처음 돌면 거기서 또 틀려도
  * 알 방법이 없고, 그 결과가 답이 통째로 사라짐 — 이 코드가 막으려던 바로 그 상황이다.
  */
-/** Receipt send is bounded even if a supplied transport never settles. Retries reuse one key. */
-export async function sendCogsReceipt(
-  chatId: number, messageId: number | undefined, send: NonNullable<BridgeDeps["sendMessage"]>, timeoutMs = 6000,
-): Promise<number | null> {
-  const idempotencyKey = `codex:receipt:${chatId}:${messageId ?? randomUUID()}`;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const id = await Promise.race([
-        send(chatId, "", { state: "waiting", replyTo: messageId, idempotencyKey }),
-        new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), timeoutMs); }),
-      ]);
-      if (id !== null) return id;
-    } catch { /* Keep receipt failure out of the turn queue. */ }
-    finally { clearTimeout(timer); }
-  }
-  return null;
-}
-
-export function tgSend(token: string, fetchFn: typeof fetch = fetch, opts: { apiBase?: string; plainOnly?: boolean; timeoutMs?: number } = {}): NonNullable<BridgeDeps["sendMessage"]> {
+export function tgSend(token: string, fetchFn: typeof fetch = fetch, opts: { apiBase?: string } = {}): NonNullable<BridgeDeps["sendMessage"]> {
   const apiBase = opts.apiBase ?? TG_API;
-  const plainOnly = opts.plainOnly ?? PLAIN_ONLY;
   let lastReason = "";
   const post = async (body: Record<string, unknown>): Promise<number | null> => {
     const res = await fetchFn(`${apiBase}/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      signal: plainOnly ? AbortSignal.timeout(opts.timeoutMs ?? 2500) : undefined,
     });
     const j = (await res.json()) as { ok?: boolean; result?: { message_id?: number }; description?: string; error_code?: number; parameters?: { retry_after?: number } };
     if (j.ok && j.result?.message_id != null) return j.result.message_id;
     lastReason = tgFailureReason(j); // 사유를 들고 있는다 — 없으면 왜 막혔는지 영영 모른다
     return null;
   };
-  return async (chatId, text, response) => {
+  return async (chatId, text) => {
     try {
-      if (plainOnly) {
-        const body = { chat_id: chatId, text: toPlain(text),
-          cogs_idempotency_key: response?.idempotencyKey ?? `codex:${chatId}:${randomUUID()}`,
-          ...(response?.reactionRef ? { cogs_reaction_ref: response.reactionRef } : {}),
-          ...(response ? { cogs_response_state: response.state, reply_to_message_id: response.replyTo,
-            ...(response.activityArgs ? { cogs_activity_args: response.activityArgs } : {}),
-            ...(response.errorCode ? { cogs_error_code: response.errorCode } : {}),
-            ...(response.activityCode ? { cogs_activity_code: response.activityCode } : {}) } : {}) };
-        // A retry reuses the intent key even when the first response was lost after storage.
-        for (let attempt = 0; attempt < 2; attempt++) {
-          try {
-            const id = await post(body);
-            if (id !== null) return id;
-          } catch { /* Retry the same send intent once. */ }
-        }
-        console.warn(`[codex-bridge] 전송 실패: ${lastReason}`);
-        return null;
-      }
       const id = await post({ chat_id: chatId, text, parse_mode: "MarkdownV2" });
       if (id !== null) return id;
       // 전송 실패 시 표시를 뺀 평문으로 한 번 재시도하고 실패 사유를 기록한다.
       // null은 형식 오류뿐 아니라 429·잘못된 방·비JSON에서도 오므로 원인을 Markdown으로 단정하지 않는다.
       console.warn(`[codex-bridge] 1차 전송 실패(MarkdownV2) → 순수 텍스트로 재전송: ${lastReason}`);
-      const retried = await post({ chat_id: chatId, text: toPlain(text), ...(response ? { cogs_response_state: response.state, reply_to_message_id: response.replyTo, ...(response.activityCode ? { cogs_activity_code: response.activityCode } : {}), ...(response.activityArgs ? { cogs_activity_args: response.activityArgs } : {}), ...(response.errorCode ? { cogs_error_code: response.errorCode } : {}) } : {}) });
+      const retried = await post({ chat_id: chatId, text: toPlain(text) });
       if (retried === null) console.warn(`[codex-bridge] ★재전송도 실패 — 이 답은 안 나간다★: ${lastReason}`);
       return retried;
     } catch {
@@ -1139,9 +940,8 @@ export function tgFailureReason(j: { description?: string; error_code?: number; 
   ].filter(Boolean).join(" · ") || "사유 없음(응답에 description 이 없다)";
 }
 
-export function tgEdit(token: string, fetchFn: typeof fetch = fetch, opts: { apiBase?: string; plainOnly?: boolean } = {}): NonNullable<BridgeDeps["editMessage"]> {
+export function tgEdit(token: string, fetchFn: typeof fetch = fetch, opts: { apiBase?: string } = {}): NonNullable<BridgeDeps["editMessage"]> {
   const apiBase = opts.apiBase ?? TG_API;
-  const plainOnly = opts.plainOnly ?? PLAIN_ONLY;
   const post = async (body: Record<string, unknown>): Promise<{ ok: boolean; reason: string }> => {
     const res = await fetchFn(`${apiBase}/bot${token}/editMessageText`, {
       method: "POST",
@@ -1151,17 +951,12 @@ export function tgEdit(token: string, fetchFn: typeof fetch = fetch, opts: { api
     const j = (await res.json()) as { ok?: boolean; description?: string; error_code?: number; parameters?: { retry_after?: number } };
     return j.ok === true ? { ok: true, reason: "" } : { ok: false, reason: tgFailureReason(j) };
   };
-  return async (chatId, messageId, text, responseState, activity, activityCode, reactionRef, activityArgs, errorCode) => {
+  return async (chatId, messageId, text) => {
     try {
-      if (plainOnly) {
-        const only = await post({ chat_id: chatId, message_id: messageId, text: toPlain(text), ...(reactionRef ? { cogs_reaction_ref: reactionRef } : {}), ...(responseState ? { cogs_response_state: responseState, ...(activityArgs ? { cogs_activity_args: activityArgs } : {}), ...(errorCode ? { cogs_error_code: errorCode } : {}), ...(activityCode ? { cogs_activity_code: activityCode } : {}) } : {}) });
-        if (!only.ok) console.warn(`[codex-bridge] ★편집 실패 → 새 버블로 갈라진다★: ${only.reason}`);
-        return only.ok;
-      }
       const first = await post({ chat_id: chatId, message_id: messageId, text, parse_mode: "MarkdownV2" });
       if (first.ok) return true;
       console.warn(`[codex-bridge] 1차 편집 실패(MarkdownV2) → 순수 텍스트로 재전송: ${first.reason}`);
-      const second = await post({ chat_id: chatId, message_id: messageId, text: toPlain(text), ...(responseState ? { cogs_response_state: responseState, ...(activityArgs ? { cogs_activity_args: activityArgs } : {}), ...(errorCode ? { cogs_error_code: errorCode } : {}), ...(activityCode ? { cogs_activity_code: activityCode } : {}) } : {}) });
+      const second = await post({ chat_id: chatId, message_id: messageId, text: toPlain(text) });
       // 둘 다 막히면 여기서 새 버블이 열린다 — 화면이 갈라지는 그 순간이라 반드시 남긴다.
       if (!second.ok) console.warn(`[codex-bridge] ★2차 편집도 실패 → 새 버블로 갈라진다★: ${second.reason}`);
       return second.ok;
@@ -1193,7 +988,7 @@ interface TgUpdate {
   update_id: number;
   message?: {
     message_id: number;
-    /** private | group | supergroup | channel (텔레그램) — b3chat 도 같은 값을 쓴다. */
+    /** private | group | supergroup | channel */
     chat: { id: number; type?: string };
     text?: string;
     /** 사진에 달린 설명 — 사진 메시지는 text 가 아니라 caption 으로 온다. */
@@ -1207,7 +1002,6 @@ interface TgUpdate {
     photo?: DmMessageMedia["photo"];
     document?: DmMessageMedia["document"];
   };
-  message_reaction?: ReactionUpdate;
   callback_query?: TgCallbackQuery;
 }
 
@@ -1216,9 +1010,6 @@ interface TgCallbackQuery {
   data?: string;
   from?: { id: number };
   message?: { message_id: number; chat: { id: number } };
-  /** cogs 서버만 채운다(봇 owner_id). */
-  cogs_bot_owner_id?: number;
-  cogs_bot_owner_generation?: number;
 }
 
 /** exec 폴백은 steer·서브에이전트 생존 기능을 잃으므로 app-server 준비 실패를 그대로 실패로 드러낸다.
@@ -1258,14 +1049,14 @@ export async function handleApprovalCallback(
   token: string,
   cb: TgCallbackQuery,
   _allowFrom: Set<number>,
-  deps: { dbPath?: string; fetchFn?: typeof fetch; plainOnly?: boolean; agentId?: string; apiBase?: string } = {},
+  deps: { dbPath?: string; fetchFn?: typeof fetch; agentId?: string; apiBase?: string } = {},
 ): Promise<"decided" | "ignored" | "stale" | "unauthorized"> {
   const doFetch = deps.fetchFn ?? fetch;
   const answer = (code: string, alert = false, args: Record<string, unknown> = {}) =>
     doFetch(`${deps.apiBase ?? TG_API}/bot${token}/answerCallbackQuery`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ callback_query_id: cb.id, ...((deps.plainOnly ?? PLAIN_ONLY) ? { text_code: code, text_args: args } : { text: uiText(code, args) }), show_alert: alert }),
+      body: JSON.stringify({ callback_query_id: cb.id, text: uiText(code, args), show_alert: alert }),
     }).catch(() => undefined);
 
   const m = /^(pg1|pgs|pga|pgd):((?:apr|prm)_[a-f0-9]+)$/.exec(cb.data ?? "");
@@ -1359,22 +1150,6 @@ export async function handleApprovalCallback(
   }
 }
 
-/**
- * 승인 버튼 누름을 채널에 맞는 처리로 보낸다.
- * cogs(b3chat) 방은 사람(봇 주인)으로 인가한다 — 방 id 허용 목록과 섞지 않는다. 텔레그램은 기존 handleApprovalCallback 그대로.
- */
-export async function dispatchApprovalCallback(
-  token: string,
-  cb: TgCallbackQuery,
-  ctx: { channelKind: string | undefined; allowFrom: Set<number>; apiBase: string; agentId: string; registryPath: string; dbPath: string },
-  handlers: { cogs: typeof handleCogsApprovalCallback; telegram: typeof handleApprovalCallback } = { cogs: handleCogsApprovalCallback, telegram: handleApprovalCallback },
-): Promise<string> {
-  if (ctx.channelKind === "b3chat") {
-    return handlers.cogs(token, cb, { apiBase: ctx.apiBase, agentId: ctx.agentId, registryPath: ctx.registryPath, dbPath: ctx.dbPath });
-  }
-  return handlers.telegram(token, cb, ctx.allowFrom, { dbPath: ctx.dbPath, agentId: ctx.agentId, apiBase: ctx.apiBase });
-}
-
 /** 첫 getUpdates 성공 후 ready marker를 원자적으로 쓴다. marker 존재 = 브리지가 실제 Telegram polling에 진입. */
 export function writeBridgeReadyMarker(pidFile: string, pid = process.pid, agentId = process.env.CODEX_AGENT_ID ?? ""): boolean {
   if (!pidFile) return false;
@@ -1422,8 +1197,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     console.error("[codex-bridge] CODEX_BOT_TOKEN 미설정 — 라이브 폴링 불가.");
     return;
   }
-  // 채널 설정이 틀리면 폴링하지 않는다 — b3chat 인데 주소가 없으면 텔레그램으로 떨어지지 않고 멈춘다
-  //   (그 토큰이 api.telegram.org 로 나가면 안 된다). 런처가 먼저 막지만 wrapper 를 손으로 고친 경우의 두 번째 벽.
+  // 채널 설정이 틀리면 폴링하지 않는다 — 런처가 먼저 막지만 wrapper 를 손으로 고친 경우의 두 번째 벽.
   try { assertChannelUsable(deps.channel ?? channelFromEnv(), "codex-bridge"); }
   catch (e) { console.error(`[codex-bridge] ${e instanceof Error ? e.message : String(e)}`); return; }
 	  // 발신자 게이트(allowlist, fail-closed): claude access.json allowFrom / openclaw ownerAllowFrom 와 동일 목적.
@@ -1458,53 +1232,20 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
       if (!entry) throw new Error("codex_member_configuration_unavailable");
       return entry.codex_permission_mode ?? "full";
     }),
-    reactionInbox: deps.reactionInbox ?? createReactionInbox(),
+    steerQueue: deps.steerQueue ?? createSteerQueue(),
     dmSessions: deps.dmSessions ?? makeChatSessionStore(liveAgentId, defaultTeamDbPath()),
     sendMessage: deps.sendMessage ?? tgSend(token),
     editMessage: deps.editMessage ?? tgEdit(token),
     reactMessage: deps.reactMessage ?? tgReact(token),
   };
-  // cogs 승인 대기 — DB 가 진실, 서버 신호·카드 누름·만료 타이머는 다시 보는 계기.
-  const cogsApprovals = live.channel?.kind === "b3chat"
-    ? createBridgeCogsApprovals({ agentId: liveAgentId, openDb: () => openDb(defaultTeamDbPath()) })
-    : null;
-  // cogs 채널만 정책을 본다. 턴마다 원본을 다시 읽어 축소가 다음 턴에 바로 적용된다(풀은 도장이 바뀌면 다시 띄운다).
-  if (live.channel?.kind === "b3chat" && !live.cogsRunFor) {
-    const registryPath = process.env.TEAM_AGENT_REGISTRY?.trim() || DEFAULT_AGENT_REGISTRY;
-    // 정책 팀원의 승인 요청 → 주인 1:1 방 카드 → 결정 → 응답 하나.
-    if (cogsApprovals && !live.onCogsApproval) {
-      const roomId = live.channel.ownerChat ?? null;
-      const approvalDeps = {
-        agentId: liveAgentId, roomId, processGen: cogsApprovals.processGen, cwd: workdir,
-        openDb: () => openDb(defaultTeamDbPath()),
-        currentStamp: () => currentCogsStamp(registryPath, liveAgentId),
-        waiters: cogsApprovals.waiters,
-        // 요청마다 기한을 건다 — 끝나지 않는 전송이 승인 대기를 붙잡지 않게.
-        sendCard: (input: import("../../lib/cogsPermissions/card").ApprovalCardInput) => sendApprovalCard(TG_API, token, roomId ?? "", input,
-          ((url: string, init?: RequestInit) => fetch(url, { ...init, signal: AbortSignal.timeout(10_000) })) as typeof fetch,
-          { agentId: liveAgentId }),
-      };
-      const approver = createCogsCodexApprover(approvalDeps);
-      const claudeApprove = createClaudeCardApprover({...approvalDeps, apiBase: TG_API, token});
-      live.onCogsApproval = req => req.method === "claude/permission" ? claudeApprove(req) : approver.approve(req);
-    }
-    live.cogsRunFor = () => {
-      const list = JSON.parse(readFileSync(registryPath, "utf-8")) as Array<{ id?: string; cogs_permissions?: unknown }>;
-      const entry = list.find((a) => a?.id === liveAgentId);
-      if (!entry) return { mode: "blocked", reason: "agent_not_found" };
-      return resolveCogsCodexRun(readPolicy(entry.cogs_permissions, "codex"), workdir);
-    };
-  }
   let offset = 0;
-  let ownBotId: number | undefined;
   let readyMarked = false;
   const pidFile = process.env.CODEX_BRIDGE_PID_FILE ?? "";
   console.log(`[codex-bridge] 시작(long-poll). workdir=${workdir ?? "(none)"}`);
   // 첫 getUpdates는 새 메시지가 없으면 30초 기다려 28초 활성화 한도를 넘으므로 토큰·도달성을 확인하는 getMe 직후 ready를 기록한다. 실패하면 첫 poll 응답 기록으로 폴백한다.
   try {
     const me = await fetch(`${TG_API}/bot${token}/getMe`);
-    const mj = (await me.json()) as { ok?: boolean; result?: { id?: number } };
-    if (mj.ok === true && typeof mj.result?.id === "number") ownBotId = mj.result.id;
+    const mj = (await me.json()) as { ok?: boolean };
     if (mj.ok === true && !readyMarked) {
       readyMarked = writeBridgeReadyMarker(pidFile);
       if (readyMarked) console.log(`[codex-bridge] ready marker(getMe): ${pidFile}`);
@@ -1523,7 +1264,6 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
     agentId: liveAgentId,
     pidFile,
     log: (line) => console.log(line),
-    ...(cogsApprovals ? { onControl: cogsApprovals.onControl } : {}),
     enqueue: (r) => {
       const chatId = Number(r.groupId);
       if (!Number.isFinite(chatId)) {
@@ -1544,7 +1284,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         return;
       }
       const tgMsgId = r.origTgMessageId ? Number(r.origTgMessageId) : undefined;
-      if (live.channel?.kind !== "b3chat" && tgMsgId !== undefined && Number.isFinite(tgMsgId)) {
+      if (tgMsgId !== undefined && Number.isFinite(tgMsgId)) {
         void live.reactMessage?.(chatId, tgMsgId, "👀");
       }
       turns.enqueue(() => runGroupTurn({ deps: live, agentId: liveAgentId, repoRoot: REPO_ROOT, chatId, tgMsgId, req: r }));
@@ -1560,7 +1300,6 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
       const left = turns.pendingCount();
       if (left > 0) console.log(`[codex-bridge] 종료 — ★큐에 남은 턴 ${left}건은 돌지 않는다★`);
       try {
-        cogsApprovals?.close();
         windowHandle.close();
       } catch {
         /* 정리 실패가 종료를 막지 않는다 */
@@ -1573,13 +1312,6 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
 
   for (;;) {
     try {
-      // A temporary getMe failure must not permanently disable author verification.
-      if (live.channel?.kind === "b3chat" && ownBotId === undefined) {
-        const me = await fetch(`${TG_API}/bot${token}/getMe`);
-        const identity = await me.json() as { ok?: boolean; result?: { id?: number } };
-        if (identity.ok !== true || typeof identity.result?.id !== "number") throw new Error("reaction author identity unavailable");
-        ownBotId = identity.result.id;
-      }
       const res = await fetch(bridgeUpdatesUrl(TG_API, token, offset));
       const j = (await res.json()) as { ok?: boolean; result?: TgUpdate[] };
       if (j.ok === true && !readyMarked) {
@@ -1587,34 +1319,17 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
         if (readyMarked) console.log(`[codex-bridge] ready marker: ${pidFile}`);
       }
       for (const u of j.result ?? []) {
-        const allowFrom = currentCogsAllowlist(live.channel!, seededAllowFrom, liveAgentId, process.env.TEAM_AGENT_REGISTRY);
+        const allowFrom = seededAllowFrom;
         if (u.update_id < offset) continue;
         offset = u.update_id + 1;
-        if (u.message_reaction) {
-          const reaction = u.message_reaction;
-          void routeReactionUpdate(u.update_id, reaction, {
-            channel: live.channel!, allowFrom, ownBotId, inbox: live.reactionInbox!,
-            route: {
-              isRunning: (chatId) => isTurnRunningFor(chatId, cogsTurnOpts(live).permissionMode ?? "full"),
-              captureSteer: () => captureActiveTurnSteer(liveAgentId),
-              steer: async () => false,
-              enqueue: run => turns.enqueue(run),
-            },
-            runTurn: async (input, ref) => { await handleMessage(reaction.chat.id, input, undefined, live, undefined, "poll", isGroupChat(reaction.chat), undefined, ref); },
-          }).catch(e => console.error("[codex-bridge] reaction route failed:", String(e)));
-          continue;
-        }
         // 승인 버튼은 이 방에서 처리한다. 요청은 서버가 이 봇으로 띄우고, 누르는 것은 여기서 받는다
         //   (getUpdates 는 봇당 한 프로세스만 가능하므로 폴링을 하는 브리지가 콜백도 맡는다).
         // 콜백 예외가 폴 루프를 죽이면 안 된다 — 죽으면 그 뒤 메시지도 안 받는다.
         if (u.callback_query) {
           try {
-            await dispatchApprovalCallback(token, u.callback_query, {
-              channelKind: live.channel?.kind, allowFrom, apiBase: TG_API, agentId: liveAgentId,
-              registryPath: process.env.TEAM_AGENT_REGISTRY?.trim() || DEFAULT_AGENT_REGISTRY,
-              dbPath: defaultTeamDbPath(),
+            await handleApprovalCallback(token, u.callback_query, allowFrom, {
+              dbPath: defaultTeamDbPath(), agentId: liveAgentId, apiBase: TG_API,
             });
-            cogsApprovals?.afterCallback();
           }
           catch (e) { console.error(`[codex-bridge] 승인 콜백 처리 실패: ${e instanceof Error ? e.message : e}`); }
           continue;
@@ -1638,16 +1353,14 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
 	        }
         console.log(`[codex-bridge] ← chat ${chatId}: ${text.slice(0, 60)}`);
         // 같은 대화의 실행 턴에는 steer하고 turnId가 아직 없으면 새 턴으로 폴백한다. 폴 루프는 steer도 기다리지 않아 입력·콜백 수신을 막지 않는다.
-        let receipt: Promise<number | null> | undefined;
         void routeIncoming(chatId, text, {
-          receive: live.channel?.kind === "b3chat" ? () => (receipt = sendCogsReceipt(chatId, messageId, live.sendMessage!)) : undefined,
-          isRunning: (chatId) => isTurnRunningFor(chatId, cogsTurnOpts(live).permissionMode ?? "full"),
+          isRunning: (chatId) => isTurnRunningFor(chatId, live.permissionModeFor?.() ?? "full"),
           // 도중에 붙인 그림도 그 작업 안으로 넣는다. 여기서 내려받아도 폴 루프는 안 막힌다 —
           //   위에서 routeIncoming 을 기다리지 않기 때문이다(await 를 붙이면 승인 버튼이 다시 막힌다).
           captureSteer: () => captureConversationSteer(chatId, {
-            isRunning: (chatId) => isTurnRunningFor(chatId, cogsTurnOpts(live).permissionMode ?? "full"),
+            isRunning: (chatId) => isTurnRunningFor(chatId, live.permissionModeFor?.() ?? "full"),
             captureSend: () => captureActiveTurnSteer(liveAgentId),
-            inbox: live.reactionInbox!,
+            steerQueue: live.steerQueue!,
             fetchAttachments: hasMedia && msg ? () => downloadDmAttachmentsSafe(token, msg) : null,
           }),
           steer: async () => false,
@@ -1655,7 +1368,7 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
           runTurnFor: async () => {
             const r = await handleMessage(chatId, text, messageId, live, hasMedia && msg
               ? () => downloadDmAttachmentsSafe(token, msg)
-              : undefined, "poll", isGroupChat(msg?.chat), receipt);
+              : undefined, "poll", isGroupChat(msg?.chat));
             console.log(`[codex-bridge] → ${r.detail}: ${r.reply.slice(0, 60)}`);
           },
         }).then((route) => {
@@ -1670,9 +1383,3 @@ export async function runBridge(deps: BridgeDeps = {}): Promise<void> {
 }
 
 if (import.meta.main) void runBridge();
-
-export function configuredCogsModel(home: string): string | undefined {
-  try {
-    return modelLine(readFileSync(`${home}/config.toml`, "utf-8")) ?? undefined;
-  } catch { return undefined; }
-}

@@ -22,19 +22,6 @@ export interface BridgeWindowRequest {
   kind?: "greeting";
 }
 
-/**
- * 제어 신호 한 건 — 턴이 아니다. 턴 직렬 큐에 넣지 않고 바로 처리한다(승인 대기 중인 턴 뒤에 결정이 줄 서면 서로 기다린다).
- * 받는 쪽은 이 값으로 실행하지 않는다 — DB 를 다시 읽는 계기일 뿐이다. 그래서 중복·역순·유실이 안전하다.
- */
-export interface BridgeControlRequest {
-  agentId: string;
-  kind: "cogs_permission";
-  /** 보내는 쪽이 붙이는 전달 식별자(로그용). 승인 요청 id 와 다른 값이다. */
-  eventId: string;
-  /** 바뀐 승인 요청. 없으면 그 팀원의 대기 전부를 다시 본다(정책 변경·서버 재시작). */
-  requestId?: string;
-}
-
 /** bridge window 파일에 적히는 것. 토큰은 이 파일 밖으로 나가지 않는다 — 로그·audit·에러에 안 싣는다. */
 export interface BridgeWindowFile {
   port: number;
@@ -94,7 +81,7 @@ export function tokensMatch(a: string, b: string): boolean {
   return timingSafeEqual(ba, bb);
 }
 
-/** 토큰 → content-type → 상한 → JSON 객체. /turn·/control 이 같이 쓴다. */
+/** 토큰 → content-type → 상한 → JSON 객체. */
 function decideEnvelope(
   req: unknown,
   opts: { presentedToken: string | null; expectedToken: string; contentType: string | null; byteLength: number },
@@ -134,24 +121,6 @@ export function decideWindowRequest(
   return { accept: true };
 }
 
-/** 제어 신호 판정. 인증·형식·상한은 /turn 과 같은 함수로 본다. */
-export function decideControlRequest(
-  req: Partial<BridgeControlRequest> | null,
-  opts: { selfAgentId: string; presentedToken: string | null; expectedToken: string; contentType: string | null; byteLength: number },
-): { accept: true } | { accept: false; status: number; reason: string } {
-  const head = decideEnvelope(req, opts);
-  if (!head.accept) return head;
-  for (const k of ["agentId", "eventId"] as const) {
-    if (typeof req![k] !== "string" || !(req![k] as string).trim()) return { accept: false, status: 400, reason: `missing_${k}` };
-  }
-  if (req!.agentId !== opts.selfAgentId) return { accept: false, status: 403, reason: "agent_mismatch" };
-  if (req!.kind !== "cogs_permission") return { accept: false, status: 400, reason: "bad_kind" };
-  if (req!.requestId !== undefined && (typeof req!.requestId !== "string" || !/^prm_[a-f0-9]+$/.test(req!.requestId))) {
-    return { accept: false, status: 400, reason: "bad_requestId" };
-  }
-  return { accept: true };
-}
-
 /**
  * messageId 로 중복을 막는다. 진행중과 최근 완료를 같이 본다 —
  * 끝난 직후 다시 오는 재시도도 같은 턴을 두 번 돌리면 안 된다.
@@ -178,8 +147,6 @@ export interface BridgeWindowDeps {
   pidFile: string | undefined;
   /** 턴을 큐에 넣는다. 기다리지 않는다 — bridge window 는 접수(202)까지만 책임진다. */
   enqueue: (req: BridgeWindowRequest) => void;
-  /** 제어 신호. 없으면 /control 은 404. 큐를 거치지 않고 바로 부른다 — 오래 걸리는 일을 여기서 하지 않는다. */
-  onControl?: (req: BridgeControlRequest) => void;
   log?: (line: string) => void;
   now?: () => number;
 }
@@ -209,8 +176,7 @@ export async function startBridgeWindow(deps: BridgeWindowDeps): Promise<BridgeW
         res.writeHead(status, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: false, reason }));
       };
-      const isControl = req.url === "/control" && deps.onControl !== undefined;
-      if (req.method !== "POST" || (req.url !== "/turn" && !isControl)) return reject(404, "not_found");
+      if (req.method !== "POST" || req.url !== "/turn") return reject(404, "not_found");
       const chunks: Buffer[] = [];
       let size = 0;
       for await (const c of req) {
@@ -232,17 +198,6 @@ export async function startBridgeWindow(deps: BridgeWindowDeps): Promise<BridgeW
         contentType: (req.headers["content-type"] as string | undefined) ?? null,
         byteLength: raw.length,
       };
-      if (isControl) {
-        const v = decideControlRequest(parsed as Partial<BridgeControlRequest> | null, opts);
-        if (!v.accept) {
-          deps.log?.(`[codex-bridge] 제어 거절: ${v.reason}`);
-          return reject(v.status, v.reason);
-        }
-        deps.onControl!(parsed as unknown as BridgeControlRequest);
-        // 200 = 받아서 다시 보기를 시작했다. 결정이 실행됐다는 뜻이 아니다.
-        res.writeHead(200, { "content-type": "application/json" });
-        return res.end(JSON.stringify({ ok: true }));
-      }
       const verdict = decideWindowRequest(parsed, opts);
       if (!verdict.accept) {
         // 거절 사유는 남기되 토큰은 안 남긴다.

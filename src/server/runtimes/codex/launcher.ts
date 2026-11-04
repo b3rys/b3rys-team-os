@@ -96,7 +96,7 @@ export interface CodexBridgePaths {
   log: string;
   pidFile: string; // 첫 getUpdates 성공 후 bridge.ts가 쓰는 ready marker
   allowFrom: string; // 발신자 게이트 시드(comma-sep chat_id) → wrapper 가 CODEX_ALLOW_FROM 으로 export
-  channel: MemberChannel; // 봇이 붙는 메신저(텔레그램 기본·b3chat) — lib/memberChannel.ts
+  channel: MemberChannel; // 봇이 붙는 Bot API 서버(기본 텔레그램) — lib/memberChannel.ts
 }
 
 /** channel 을 안 주면 기본(텔레그램) — 경로만 필요한 호출(pidFile·tokenFile 등)은 agents.json 을 읽지 않는다. */
@@ -111,7 +111,7 @@ export function codexBridgePaths(id: string, channel: MemberChannel = DEFAULT_CH
     codexHome: `${HOME}/.codex-agents/${id}`,
     log: `${REPO_ROOT}/var/codex-bridge/${id}.log`,
     pidFile: `${REPO_ROOT}/var/codex-bridge/${id}.pid`,
-    // 채널에 허용 방 목록이 있으면 그것(b3chat 방 id). 없으면 팀 공통 시드(팀장 DM + 팀 그룹) 그대로.
+    // 채널에 허용 방 목록이 있으면 그것. 없으면 팀 공통 시드(팀장 DM + 팀 그룹) 그대로.
     allowFrom: channel.allowFrom ? channel.allowFrom.join(",") : resolveCodexAllowFrom(),
     channel,
   };

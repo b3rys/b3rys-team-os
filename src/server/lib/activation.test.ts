@@ -17,12 +17,11 @@ import {
 } from "./activation";
 import { HERMES_BASE_PROFILE } from "./paths";
 
-test("Codex first Telegram member requires an owner before runtime startup; cogs keeps its own gate", () => {
+test("Codex first Telegram member requires an owner before runtime startup", () => {
   const db = new Database(":memory:");
   try {
     db.run("CREATE TABLE setting (key TEXT PRIMARY KEY, value TEXT)");
     expect(codexOwnerGate(db, "telegram", () => null)).toContain("owner_chat_id");
-    expect(codexOwnerGate(db, "b3chat", () => null)).toBeNull();
     expect(codexOwnerGate(db, "telegram", () => "123456789")).toBeNull();
     db.run("INSERT INTO setting VALUES ('owner_chat_id', '987654321')");
     expect(codexOwnerGate(db, "telegram", () => { throw new Error("saved owner must win"); })).toBeNull();
@@ -813,14 +812,3 @@ describe("CLAUDE_ESSENTIAL_TOLERANCE — claude 활성화 호출부의 관용 �
     expect(withOpts[0]).not.toContain("tolerateWhenPairing:"); // 인라인 리터럴 회귀 금지
   });
 });
-
- test("Claude app teardown after registry removal uses app bridge only",async()=>{
-  const calls:string[]=[];
-  const result=await teardownRuntime("testmate","claude_channel",undefined,{
-   appChannel:true,codexBridgePids:()=>[],
-   setAgentEnabled:async(id,runtime,enabled,channel)=>{calls.push(`stop:${runtime}:${channel?.kind}`);expect(enabled).toBe(false);return {ok:true,detail:""};},
-   removeClaudeCogsFiles:id=>{calls.push(`app-files:${id}`);},
-   removeClaudeBridgeFiles:()=>{throw new Error("Telegram files must not be touched");},
-  });
-  expect(result.ok).toBe(true);expect(calls).toEqual(["stop:claude_channel:b3chat","app-files:testmate"]);
- });
