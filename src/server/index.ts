@@ -166,7 +166,7 @@ const stopHealth = startHealthCheck({ db, agents: () => agents });
 // Mac 재부팅이면 coordinator 에게 op 알림 한 번(서버만 재시작한 경우는 조용히). REBOOT_OP_NOTICE=0 이면 끈다.
 try {
   const r = checkRebootNotice(db, agents);
-  if (r === "notified" || r === "no_recipient") console.log(`[reboot-notice] ${r}`);
+  if (r === "notified" || r === "no_recipient" || r === "send_failed") console.log(`[reboot-notice] ${r}`);
 } catch (e) {
   console.error("[reboot-notice] failed:", (e as Error).message);
 }

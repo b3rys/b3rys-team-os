@@ -38,7 +38,14 @@ export function buildRebootBody(bootSec: number): string {
   ].join("\n");
 }
 
-export type RebootCheckResult = "disabled" | "unknown" | "first_run" | "same_boot" | "notified" | "no_recipient";
+export type RebootCheckResult =
+  | "disabled"
+  | "unknown"
+  | "first_run"
+  | "same_boot"
+  | "notified"
+  | "no_recipient"
+  | "send_failed";
 
 /**
  * 서버 기동 때 한 번 부른다. 새 부팅 시각을 알림보다 먼저 저장해 같은 부팅에 두 번 알리지 않는다.
@@ -47,18 +54,24 @@ export type RebootCheckResult = "disabled" | "unknown" | "first_run" | "same_boo
 export function checkRebootNotice(
   db: Database,
   agents: AgentRecord[],
-  opts: { bootSec?: number | null; enabled?: boolean } = {},
+  opts: { bootSec?: number | null; enabled?: boolean; /** 시험용: 읽은 직후·저장 전 */ afterRead?: () => void } = {},
 ): RebootCheckResult {
   const enabled = opts.enabled ?? process.env.REBOOT_OP_NOTICE !== "0";
   if (!enabled) return "disabled";
   const bootSec = opts.bootSec !== undefined ? opts.bootSec : readBootTimeSec();
   if (bootSec == null) return "unknown";
 
-  const row = db.prepare("SELECT value FROM setting WHERE key = ?").get(BOOT_TIME_SETTING_KEY) as
-    | { value: string }
-    | null;
-  const prev = row ? Number(row.value) : null;
-  db.prepare("INSERT OR REPLACE INTO setting (key, value) VALUES (?, ?)").run(BOOT_TIME_SETTING_KEY, String(bootSec));
+  // 읽기와 저장을 한 IMMEDIATE transaction 으로 묶는다 — 두 서버가 같은 DB 로 겹쳐 떠도 이전 값을 읽는 쪽은 하나뿐이다.
+  const prev = db
+    .transaction((): number | null => {
+      const row = db.prepare("SELECT value FROM setting WHERE key = ?").get(BOOT_TIME_SETTING_KEY) as
+        | { value: string }
+        | null;
+      opts.afterRead?.();
+      db.prepare("INSERT OR REPLACE INTO setting (key, value) VALUES (?, ?)").run(BOOT_TIME_SETTING_KEY, String(bootSec));
+      return row ? Number(row.value) : null;
+    })
+    .immediate();
 
   if (prev == null || !Number.isFinite(prev)) return "first_run";
   if (Math.abs(bootSec - prev) <= BOOT_TIME_TOLERANCE_SEC) return "same_boot";
@@ -69,6 +82,10 @@ export function checkRebootNotice(
     return "no_recipient";
   }
   const id = emitOpNotice(db, { to, body: buildRebootBody(bootSec), threadKey: "op-reboot", priority: "normal" });
+  if (!id) {
+    auditOpNotice(db, "op_notice_failed", "reboot", { kind: "reboot", to, boot_sec: bootSec, prev_boot_sec: prev });
+    return "send_failed";
+  }
   auditOpNotice(db, "op_notice_sent", "reboot", { kind: "reboot", to, boot_sec: bootSec, prev_boot_sec: prev, message_id: id });
   return "notified";
 }

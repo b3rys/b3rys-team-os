@@ -114,3 +114,51 @@ describe("REBOOT_OP_NOTICE 환경 변수", () => {
     }
   });
 });
+
+describe("리뷰 보강", () => {
+  test("수신자는 있는데 agent 행이 없어 적재 실패면 notified 로 기록하지 않는다", () => {
+    const db = freshDb();
+    const ghost = [agent("ghost", ["coordinator"])];
+    checkRebootNotice(db, ghost, { bootSec: 1000, enabled: true });
+    expect(checkRebootNotice(db, ghost, { bootSec: 90000, enabled: true })).toBe("send_failed");
+    expect(notices(db)).toHaveLength(0);
+    const audit = db.query("SELECT action FROM audit_event WHERE target = 'reboot'").all() as { action: string }[];
+    expect(audit.map((a) => a.action)).toEqual(["op_notice_failed"]);
+  });
+
+  test("두 서버가 같은 DB 로 겹쳐 떠도 이전 값을 읽고 보내는 쪽은 하나", () => {
+    const fs = require("node:fs") as typeof import("node:fs");
+    const path = require("node:path") as typeof import("node:path");
+    const os = require("node:os") as typeof import("node:os");
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "reboot-")), "t.db");
+    const a = new Database(file);
+    migrate(a);
+    for (const m of TEAM) {
+      a.prepare(
+        `INSERT INTO agent (id, display_name, role, runtime, status_provider, workspace_path, persona_file)
+         VALUES (?, ?, 'x', 'claude_channel', 'claude_tmux', '/tmp', '/tmp/x')`,
+      ).run(m.id, m.id);
+    }
+    checkRebootNotice(a, TEAM, { bootSec: 1000, enabled: true });
+    const b = new Database(file);
+    b.run("PRAGMA busy_timeout = 0");
+    let second: string = "not_run";
+    // a 가 이전 값을 읽은 직후·저장 전에 b 가 끼어든다.
+    const first = checkRebootNotice(a, TEAM, {
+      bootSec: 90000,
+      enabled: true,
+      afterRead: () => {
+        try {
+          second = checkRebootNotice(b, TEAM, { bootSec: 90000, enabled: true });
+        } catch {
+          second = "busy";
+        }
+      },
+    });
+    expect(first).toBe("notified");
+    expect(second).toBe("busy");
+    expect(notices(a)).toHaveLength(1);
+    a.close();
+    b.close();
+  });
+});
