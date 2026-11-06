@@ -32,6 +32,7 @@ import { startSlackPoll } from "./workers/slackPoll";
 import { startSlackSocket } from "./workers/slackSocket";
 import { startTelegramCapture } from "./workers/telegramCapture";
 import { startHealthCheck } from "./workers/healthCheck";
+import { checkRebootNotice } from "./lib/rebootNotice";
 import { startProposalSweeper } from "./workers/proposalSweeper";
 import { startSchedulerWorker } from "./workers/schedulerWorker";
 import { startFollowupWorker } from "./workers/followupWorker";
@@ -162,6 +163,13 @@ const stopDmSync = startDmSyncWorker(db, () =>
   })),
 );
 const stopHealth = startHealthCheck({ db, agents: () => agents });
+// Mac 재부팅이면 coordinator 에게 op 알림 한 번(서버만 재시작한 경우는 조용히). REBOOT_OP_NOTICE=0 이면 끈다.
+try {
+  const r = checkRebootNotice(db, agents);
+  if (r === "notified" || r === "no_recipient" || r === "send_failed") console.log(`[reboot-notice] ${r}`);
+} catch (e) {
+  console.error("[reboot-notice] failed:", (e as Error).message);
+}
 const stopProposalSweeper = startProposalSweeper(db);
 const stopScheduler = startSchedulerWorker(db);
 const stopFollowupWorker = startFollowupWorker(db, broadcast);

@@ -144,7 +144,7 @@ export function buildEssentialsRecoveredBody(agentId: string): string {
 /** audit 기록 — 알림이 실제로 나갔는지(또는 못 나갔는지)를 남긴다. */
 export function auditOpNotice(
   db: Database,
-  action: "op_notice_sent" | "op_notice_no_recipient",
+  action: "op_notice_sent" | "op_notice_no_recipient" | "op_notice_failed",
   subject: string,
   detail: Record<string, unknown>,
 ): void {
