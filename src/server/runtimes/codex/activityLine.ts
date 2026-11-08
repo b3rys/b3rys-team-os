@@ -1,5 +1,5 @@
 import { uiText } from "./uiStrings";
-/** Compact tool targets for cogs; command arguments and tool output never leave this formatter. */
+/** Compact tool targets; command arguments and tool output never leave this formatter. */
 const clip = (text: string, max = 45): string => Array.from(text).slice(0, max).join("");
 export const filename = (path: string): string => safeText(path.replace(/\\/g, "/").split("/").pop() ?? "");
 
@@ -17,7 +17,7 @@ export function safeText(text: string): string {
     .replace(/[\r\n\t\x00-\x1f]/g, " "));
 }
 
-export type CogsActivityArgs = { target?: string; count?: number };
+export type ActivityArgs = { target?: string; count?: number };
 
 function commandInfo(command: string): { executable: string; target: string; reading: boolean } {
   const words = command.trim().match(/(?:[^\s"'\\]|\\.|"[^"]*"|'[^']*')+/g) ?? [];
@@ -46,7 +46,7 @@ function commandInfo(command: string): { executable: string; target: string; rea
 }
 
 /** Only sanitized tool data crosses the app boundary; apps own every label. */
-export function cogsActivityArgs(item: unknown): CogsActivityArgs {
+export function activityArgs(item: unknown): ActivityArgs {
   const it = (item ?? {}) as Record<string, any>;
   const command = it.command ?? it.cmd;
   if (command) return { target: commandInfo(Array.isArray(command) ? command.join(" ") : String(command)).target };
@@ -66,16 +66,16 @@ export function cogsActivityArgs(item: unknown): CogsActivityArgs {
   return {};
 }
 
-/** For Telegram only, which has no application code-to-label renderer. */
-export function cogsActivityLine(item: unknown): string {
-  const code = cogsActivityCode(item) ?? "tool";
-  const args = cogsActivityArgs(item);
+/** Short activity label for chat progress lines. */
+export function activityLine(item: unknown): string {
+  const code = activityCode(item) ?? "tool";
+  const args = activityArgs(item);
   const label = uiText(code, args);
   return args.target ? `${label} · ${args.target}` : args.count !== undefined ? uiText("activity_count",{label,count:args.count}) : label;
 }
 
 /** Activity codes describe observed tools; receipt/status notes have no tool code. */
-export function cogsActivityCode(item: unknown): string | undefined {
+export function activityCode(item: unknown): string | undefined {
   const it = (item ?? {}) as Record<string, any>;
   if (it.type === "webSearch" || it.type === "web_search") {
     return it.action?.type === "openPage" || it.action?.url || it.url ? "fetch_web" : "search";

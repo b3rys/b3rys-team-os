@@ -1,7 +1,3 @@
-import { createB3chatRoomLinkRoutes } from "./routes/b3chatRoomLinks";
-import { migrateCogsAidm } from "./lib/cogsAidm/store";
-import { startCogsAidmRelay } from "./lib/cogsAidm/relay";
-import { cogsIdentityOf, httpCogsAidmApi } from "./lib/cogsAidm/api";
 import { Hono } from "hono";
 import { createBunWebSocket } from "hono/bun";
 import type { ServerWebSocket } from "bun";
@@ -27,7 +23,6 @@ import { startTmuxTail } from "./workers/tmuxTail";
 import { startStatusProbe } from "./workers/statusProbe";
 import { startMetricsProbe } from "./workers/metricsProbe";
 import { startMessageMaintenance } from "./workers/messageMaintenance";
-import { startCogsPoll } from "./workers/cogsPoll";
 import { startSlackPoll } from "./workers/slackPoll";
 import { startSlackSocket } from "./workers/slackSocket";
 import { startTelegramCapture } from "./workers/telegramCapture";
@@ -70,17 +65,6 @@ import { createApprovalsApp } from "./routes/approvals";
 import { createPermissionGateRoutes } from "./routes/permissionGate";
 import { buildMcpHttpApp } from "./mcp/mcpHttpRoute";
 import { apiCfGate } from "./lib/apiCfGate";
-import { ensureLinkKey, linkKeyPath } from "./lib/b3chatLink";
-import { createB3chatTeammateRoutes } from "./routes/b3chatTeammate";
-import { createB3chatPermissionRoutes } from "./routes/b3chatPermissions";
-import { createCogsPermissionEvents } from "./lib/cogsPermissions/events";
-import { pokeBridgesWithOpenApprovals, subscribeBridgeDelivery } from "./lib/cogsPermissions/delivery";
-import { callCodexBridgeControl } from "./lib/codexBridgeClient";
-import { claudeCogsPaths } from "./runtimes/claude/cogsLauncher";
-import { subscribeCardAdapter } from "./lib/cogsPermissions/cardAdapter";
-import { createCogsPolicyService } from "./lib/cogsPermissions/service";
-import { readMemberChannel } from "./lib/memberChannel";
-import { codexBridgePaths } from "./runtimes/codex/launcher";
 import { appendAuditFile } from "./lib/auditFile";
 import { configureLeadActorDb, leadActorId, trustedActorFromRequest } from "./lib/opAuth";
 import { createHostGate } from "./lib/hostGate";
@@ -141,7 +125,6 @@ const stopTmux = startTmuxTail(db, agents, broadcast);
 const stopStatus = startStatusProbe(db, agents, broadcast, OPENCLAW_URL);
 const stopMetrics = startMetricsProbe(db, broadcast);
 const stopMaintenance = startMessageMaintenance(db);
-const stopCogsPoll = startCogsPoll({ db, broadcast, agents: () => agents });
 const stopSlackPoll = startSlackPoll({ db, broadcast, agents: () => agents });
 const stopSlackSocket = startSlackSocket({ db, broadcast, agents: () => agents });
 let stopCapture = startTelegramCapture({ agents: () => agents, db, broadcast });
@@ -494,23 +477,11 @@ api.put("/agents/:id/persona", async (c) => {
   return c.json({ ok: true, path: agent.persona_file, bytes: Buffer.byteLength(body.content, "utf-8") });
 });
 
-// cogs 팀원끼리 대화 → AI DM 중계. cogs 서버의 AI DM 2단계가 운영에 반영된 뒤 COGS_AIDM_RELAY=1 로 켠다(기본 꺼짐).
-//   꺼져 있어도 표는 만든다 — 켜면 48시간 창 안의 대화를 대조로 따라잡는다.
-migrateCogsAidm(db);
-const cogsAidmRelay = process.env.COGS_AIDM_RELAY === "1"
-  ? startCogsAidmRelay({
-      db, api: httpCogsAidmApi,
-      identityOf: (id) => cogsIdentityOf(agents.find((a) => a.id === id)),
-      roster: () => new Set(agents.map((a) => a.id)),
-      log: (line) => console.log(line),
-    })
-  : null;
 const inboxApi = createInboxRoutes({
   db,
   broadcast,
   registeredAgentIds: () => new Set(agents.map((a) => a.id)),
   agents: () => agents,   // ★[B] 텔레그램 릴레이용★ — 팀원이 직접 방/팀장께 말하려면 봇 토큰이 필요하다
-  ...(cogsAidmRelay ? { onCogsThreadActivity: (threadId: string) => cogsAidmRelay.kick(threadId) } : {}),
 });
 api.route("/", inboxApi);
 
@@ -566,31 +537,6 @@ const settingsApi = createSettingsApp({
   restartCapture, // capture 토큰/그룹 저장 시 서버 재시작 없이 즉시 적용
 });
 api.route("/", settingsApi);
-// b3chat 앱 [팀원 추가] — 같은 맥의 b3chat 서버만 부른다(같은 기계 직접 + 공유 비밀 키).
-try { ensureLinkKey(linkKeyPath(REGISTRY_PATH)); } catch (e) { console.error("[b3chat-link] 키 파일 생성 실패:", (e as Error).message); }
-api.route("/", createB3chatTeammateRoutes({ db, settings: settingsApi, registryPath: REGISTRY_PATH, onRegistryChanged: reloadRegistryFromDisk }));
-api.route("/", createB3chatRoomLinkRoutes({ registryPath: REGISTRY_PATH, onRegistryChanged: reloadRegistryFromDisk }));
-// cogs AI 팀원 권한 — 정책 API·카드 버튼 걷기·시작 때 정리. 정책 원본은 agents.json cogs_permissions.
-const cogsPermissionEvents = createCogsPermissionEvents();
-subscribeCardAdapter(cogsPermissionEvents, {
-  apiBaseOf: (id) => { try { const ch = readMemberChannel(id, REGISTRY_PATH); return ch.kind === "b3chat" && !ch.error ? ch.apiBase : null; } catch { return null; } },
-  tokenFileOf: (id) => codexBridgePaths(id).tokenFile,
-});
-// 서버에서 일어난 무효화·정책 변경을 그 팀원 브리지에 알린다(브리지는 DB 를 다시 읽는다). window 파일은 보낼 때마다 다시 읽는다.
-const cogsBridgeControl = { send: (req: Parameters<typeof callCodexBridgeControl>[0]) => {
-  let runtime: string | undefined;
-  try { runtime = (JSON.parse(readFileSync(REGISTRY_PATH, "utf-8")) as Array<{ id?: string; runtime?: string }>).find((a) => a?.id === req.agentId)?.runtime; } catch { runtime = undefined; }
-  return callCodexBridgeControl(req, { pidFile: (runtime === "claude_channel" ? claudeCogsPaths(req.agentId) : codexBridgePaths(req.agentId)).pidFile });
-} };
-subscribeBridgeDelivery(cogsPermissionEvents, cogsBridgeControl);
-api.route("/", createB3chatPermissionRoutes({ db, registryPath: REGISTRY_PATH, events: cogsPermissionEvents, onRegistryChanged: reloadRegistryFromDisk }));
-try {
-  const n = createCogsPolicyService({ registryPath: REGISTRY_PATH, db, events: cogsPermissionEvents }).reconcile();
-  if (n) console.log(`[cogs-permissions] 시작 정리: 정책 revision 이 바뀐 승인 ${n}건 무효화`);
-} catch (e) { console.error("[cogs-permissions] 시작 정리 실패:", (e as Error).message); }
-// 서버가 꺼져 있던 사이 놓친 신호 — 열린 승인이 있는 브리지마다 한 번 다시 보게 한다.
-void pokeBridgesWithOpenApprovals(db, cogsBridgeControl).catch((e) => console.error("[cogs-permissions] 시작 신호 실패:", (e as Error).message));
-
 const acceptanceApi = createAcceptanceRoutes({
   db,
   registryPath: REGISTRY_PATH,
@@ -866,7 +812,6 @@ const shutdown = () => {
   stopStatusFn();
   stopMaintenance();
   stopMetrics();
-  stopCogsPoll();
   stopSlackPoll();
   stopSlackSocket();
   stopScheduler();

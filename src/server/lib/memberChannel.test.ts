@@ -1,14 +1,12 @@
-// 팀원별 채널(kind·api_base·allow_from·owner_chat) — 기본값·검증·그룹 판정·wrapper env.
+// 팀원별 채널(api_base·allow_from·owner_chat) — 기본값·검증·그룹 판정·wrapper env.
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  B3CHAT_API_BASE_INVALID, DEFAULT_CHANNEL, assertChannelUsable, TELEGRAM_API_BASE, channelEnvLines, channelFromEnv, isGroupChat, parseMemberChannel, readMemberChannel,
+  DEFAULT_CHANNEL, TELEGRAM_API_BASE, UNSUPPORTED_CHANNEL, assertChannelUsable, channelEnvLines, channelFromEnv, isGroupChat, parseMemberChannel, readMemberChannel,
 } from "./memberChannel";
 import { codexBridgePaths, renderLaunchWrapper } from "../runtimes/codex/launcher";
-import { sendAsAgentBot } from "./telegramBotSend";
-import type { AgentRecord } from "../types";
 
 function registry(agents: unknown[]): string {
   const p = join(mkdtempSync(join(tmpdir(), "b3os-chan-")), "agents.json");
@@ -22,8 +20,8 @@ describe("isGroupChat — 텔레그램 type 은 private/group/supergroup/channel
   test("텔레그램 group(음수) → 그룹", () => expect(isGroupChat({ id: -4567, type: "group" })).toBe(true));
   test("텔레그램 private(양수) → 그룹 아님", () => expect(isGroupChat({ id: 7066867819, type: "private" })).toBe(false));
   test("channel → 그룹(private 가 아니면 그룹)", () => expect(isGroupChat({ id: -100999, type: "channel" })).toBe(true));
-  test("b3chat 그룹은 방 id 가 양수다 → type 으로 그룹", () => expect(isGroupChat({ id: 42, type: "group" })).toBe(true));
-  test("b3chat 1:1 방(양수 private) → 그룹 아님", () => expect(isGroupChat({ id: 42, type: "private" })).toBe(false));
+  test("양수 id 라도 type=group 이면 그룹", () => expect(isGroupChat({ id: 42, type: "group" })).toBe(true));
+  test("양수 private → 그룹 아님", () => expect(isGroupChat({ id: 42, type: "private" })).toBe(false));
   test("type 이 없으면 예전 판정(음수 = 그룹)", () => {
     expect(isGroupChat({ id: -5 })).toBe(true);
     expect(isGroupChat({ id: 5 })).toBe(false);
@@ -33,15 +31,15 @@ describe("isGroupChat — 텔레그램 type 은 private/group/supergroup/channel
 
 describe("parseMemberChannel", () => {
   test("없거나 모양이 틀리면 기본(텔레그램)", () => {
-    for (const raw of [undefined, null, "b3chat", [], 3]) expect(parseMemberChannel(raw)).toEqual(DEFAULT_CHANNEL);
+    for (const raw of [undefined, null, "custom", [], 3]) expect(parseMemberChannel(raw)).toEqual(DEFAULT_CHANNEL);
   });
-  test("b3chat — 끝 / 제거, allow_from·owner_chat 숫자 문자열로", () => {
-    expect(parseMemberChannel({ kind: "b3chat", api_base: "https://chat.example.com/", allow_from: [12, "40", "x"], owner_chat: 12 }))
-      .toEqual({ kind: "b3chat", apiBase: "https://chat.example.com", allowFrom: ["12", "40"], ownerChat: "12" });
+  test("api_base — 끝 / 제거, allow_from·owner_chat 숫자 문자열로", () => {
+    expect(parseMemberChannel({ api_base: "https://chat.example.com/", allow_from: [12, "40", "x"], owner_chat: 12 }))
+      .toEqual({ kind: "telegram", apiBase: "https://chat.example.com", allowFrom: ["12", "40"], ownerChat: "12" });
   });
-  test("평문 http 는 같은 기계만 — 그 밖이면 b3chat 은 오류(아래 fail-closed)", () => {
-    expect(parseMemberChannel({ kind: "b3chat", api_base: "http://127.0.0.1:8741" }).apiBase).toBe("http://127.0.0.1:8741");
-    expect(parseMemberChannel({ kind: "b3chat", api_base: "http://evil.example.com" }).error).toBe(B3CHAT_API_BASE_INVALID);
+  test("평문 http 는 같은 기계만 — 그 밖이면 기본 주소", () => {
+    expect(parseMemberChannel({ api_base: "http://127.0.0.1:8741" }).apiBase).toBe("http://127.0.0.1:8741");
+    expect(parseMemberChannel({ api_base: "http://evil.example.com" }).apiBase).toBe(TELEGRAM_API_BASE);
   });
   test("모르는 kind 는 telegram", () => expect(parseMemberChannel({ kind: "slack" }).kind).toBe("telegram"));
 });
@@ -54,13 +52,13 @@ describe("readMemberChannel / channelFromEnv", () => {
     expect(readMemberChannel("cody", join(tmpdir(), "no-such-agents.json"))).toEqual(DEFAULT_CHANNEL);
   });
   test("channel 있는 팀원 → 그 값", () => {
-    const p = registry([{ id: "bee", channel: { kind: "b3chat", api_base: "http://127.0.0.1:8741", allow_from: ["7"], owner_chat: "7" } }]);
-    expect(readMemberChannel("bee", p)).toEqual({ kind: "b3chat", apiBase: "http://127.0.0.1:8741", allowFrom: ["7"], ownerChat: "7" });
+    const p = registry([{ id: "bee", channel: { api_base: "http://127.0.0.1:8741", allow_from: ["7"], owner_chat: "7" } }]);
+    expect(readMemberChannel("bee", p)).toEqual({ kind: "telegram", apiBase: "http://127.0.0.1:8741", allowFrom: ["7"], ownerChat: "7" });
   });
   test("env 없음 → 텔레그램 기본 / env 있음 → 그 값", () => {
     expect(channelFromEnv({})).toEqual(DEFAULT_CHANNEL);
-    expect(channelFromEnv({ CODEX_CHANNEL_KIND: "b3chat", TELEGRAM_API_BASE: "http://127.0.0.1:8741/", CODEX_OWNER_CHAT: "7" }))
-      .toEqual({ kind: "b3chat", apiBase: "http://127.0.0.1:8741", allowFrom: null, ownerChat: "7" });
+    expect(channelFromEnv({ TELEGRAM_API_BASE: "http://127.0.0.1:8741/", CODEX_OWNER_CHAT: "7" }))
+      .toEqual({ kind: "telegram", apiBase: "http://127.0.0.1:8741", allowFrom: null, ownerChat: "7" });
   });
 });
 
@@ -71,53 +69,48 @@ describe("런처 wrapper", () => {
     const viaRegistry = renderLaunchWrapper(codexBridgePaths("cody", readMemberChannel("cody", p)));
     const plain = renderLaunchWrapper(codexBridgePaths("cody"));
     expect(viaRegistry).toBe(plain);
-    expect(plain).not.toContain("CODEX_CHANNEL_KIND");
     expect(plain).not.toContain("TELEGRAM_API_BASE");
     expect(plain).not.toContain("CODEX_OWNER_CHAT");
     expect(channelEnvLines(DEFAULT_CHANNEL)).toEqual([]);
   });
-  test("b3chat 팀원 → 채널 env 3줄 + 허용 목록은 allow_from(팀 공통 시드 아님)", () => {
-    const ch = parseMemberChannel({ kind: "b3chat", api_base: "http://127.0.0.1:8741", allow_from: ["7", "9"], owner_chat: "7" });
+  test("채널 지정 팀원 → 채널 env 2줄 + 허용 목록은 allow_from(팀 공통 시드 아님)", () => {
+    const ch = parseMemberChannel({ api_base: "http://127.0.0.1:8741", allow_from: ["7", "9"], owner_chat: "7" });
     const paths = codexBridgePaths("bee", ch);
     expect(paths.allowFrom).toBe("7,9");
     const w = renderLaunchWrapper(paths);
-    expect(w).toContain('export CODEX_CHANNEL_KIND="b3chat"');
     expect(w).toContain('export TELEGRAM_API_BASE="http://127.0.0.1:8741"');
     expect(w).toContain('export CODEX_OWNER_CHAT="7"');
   });
 });
 
-describe("b3chat 주소가 틀리면 fail-closed — 텔레그램으로 떨어지지 않는다", () => {
-  // 테스트에서는 실제 Telegram API로 토큰을 보내면 안 된다.
-  for (const [label, base] of [["없음", undefined], ["빈 값", ""], ["외부 http", "http://evil.example.com"], ["형식 밖", "chat.example.com"]] as const) {
-    test(`b3chat api_base ${label} → error, 주소 비움`, () => {
-      const ch = parseMemberChannel({ kind: "b3chat", api_base: base, allow_from: ["2"], owner_chat: "2" });
-      expect(ch.error).toBe(B3CHAT_API_BASE_INVALID);
-      expect(ch.apiBase).not.toBe(TELEGRAM_API_BASE);
-      expect(() => channelEnvLines(ch)).toThrow();
-    });
-  }
-  test("텔레그램은 주소가 틀려도 기본 주소 — 지금과 같다(오류 아님)", () => {
+describe("주소가 틀리면 기본 주소", () => {
+  test("텔레그램은 주소가 틀려도 기본 주소", () => {
     const ch = parseMemberChannel({ kind: "telegram", api_base: "http://evil.example.com" });
-    expect(ch.error).toBeUndefined();
     expect(ch.apiBase).toBe(TELEGRAM_API_BASE);
   });
-  test("env: b3chat 인데 TELEGRAM_API_BASE 없음 → error", () => {
-    const ch = channelFromEnv({ CODEX_CHANNEL_KIND: "b3chat" });
-    expect(ch.error).toBe(B3CHAT_API_BASE_INVALID);
-    expect(ch.apiBase).not.toBe(TELEGRAM_API_BASE);
+});
+
+describe("지원하지 않는 kind 는 막는다(fail-closed)", () => {
+  test("kind 가 telegram 이 아니면 error · 텔레그램 주소로 떨어지지 않는다", () => {
+    for (const raw of [{ kind: "other" }, { kind: "other", api_base: "https://bot.example.com" }, { kind: "other", api_base: "http://evil.example" }]) {
+      const ch = parseMemberChannel(raw);
+      expect(ch.error).toBe(UNSUPPORTED_CHANNEL);
+      expect(ch.apiBase).toBe("");
+      expect(() => assertChannelUsable(ch, "t")).toThrow();
+      expect(() => channelEnvLines(ch)).toThrow();
+    }
   });
-  // writeCodexBridgeFiles 는 부르지 않는다 — 실제 LaunchAgents·var 경로에 쓴다. 가드가 깨진 뮤턴트에서
-  //   진짜 plist 가 생겼다. 파일을 쓰기 직전에 부르는 렌더가 throw 하는지만 메모리에서 잰다.
-  test("런처: 틀린 b3chat 팀원은 wrapper 렌더가 throw(파일 쓰기 전 단계)", () => {
-    const p = registry([{ id: "zzbadchan", runtime: "codex", channel: { kind: "b3chat", api_base: "http://evil.example.com" } }]);
-    const paths = codexBridgePaths("zzbadchan", readMemberChannel("zzbadchan", p));
-    expect(paths.channel.error).toBe(B3CHAT_API_BASE_INVALID);
-    expect(() => renderLaunchWrapper(paths)).toThrow(/채널 설정 오류/);
-    expect(() => assertChannelUsable(paths.channel, "x")).toThrow();
+  test("kind 생략·telegram 은 그대로", () => {
+    expect(parseMemberChannel({}).error).toBeUndefined();
+    expect(parseMemberChannel({ kind: "telegram" }).apiBase).toBe(TELEGRAM_API_BASE);
+    expect(parseMemberChannel({ kind: "telegram", api_base: "https://bot.example.com" }).apiBase).toBe("https://bot.example.com");
   });
-  test("릴레이: 틀린 b3chat 팀원은 보내지 않는다(토큰 조회 전)", async () => {
-    const r = await sendAsAgentBot({ id: "zzbadchan", runtime: "codex", channel: { kind: "b3chat" } } as unknown as AgentRecord, "2", "x");
-    expect(r).toEqual({ ok: false, error: `channel_invalid:${B3CHAT_API_BASE_INVALID}` });
+  test("env 의 kind 도 같다", () => {
+    expect(channelFromEnv({ CODEX_CHANNEL_KIND: "other", TELEGRAM_API_BASE: "https://bot.example.com" }).error).toBe(UNSUPPORTED_CHANNEL);
+    expect(channelFromEnv({ CODEX_CHANNEL_KIND: "telegram" }).error).toBeUndefined();
+    expect(channelFromEnv({}).apiBase).toBe(TELEGRAM_API_BASE);
+  });
+  test("agents.json 에서 읽어도 막힌다(기본값으로 삼키지 않는다)", () => {
+    expect(readMemberChannel("a", registry([{ id: "a", channel: { kind: "other" } }])).error).toBe(UNSUPPORTED_CHANNEL);
   });
 });
