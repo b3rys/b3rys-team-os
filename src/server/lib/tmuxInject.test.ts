@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { ensureRenderedTeamOs } from "./testSupport";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { buildTmuxInjectionPrompt } from "./tmuxInject";
+import { buildTmuxInjectionPrompt, paneShowsPermissionPrompt } from "./tmuxInject";
 import { buildPersona } from "./personaTemplates";
 
 // 그룹 이름의 스레드라도 수집 답은 버스로 돌아와야 한다. 봇의 그룹 메시지는 캡처되지 않아 버스 기록을 남길 수 없다.
@@ -326,4 +326,42 @@ test("Slack reply instructions specify the current message and automatic mention
     expect(prompt).toContain("in_reply_to=current-slack-message");
     expect(prompt).toContain(locale === "ko" ? "자동 멘션" : "mentioned automatically");
   }
+});
+
+// 권한 창이 떠 있을 때 붙여넣기 + Enter 는 기본 선택지(1. Yes)를 눌러 도구를 실행시킨다(2.1.312 실측).
+describe("paneShowsPermissionPrompt — 권한 창이 떠 있으면 넣지 않는다", () => {
+  const prompt = [
+    "❯ Run exactly this shell command",
+    "  ⎿  $ touch probe.txt",
+    "──────────────────────────────",
+    " Bash command",
+    " │ touch probe.txt",
+    " Do you want to proceed?",
+    " ❯ 1. Yes",
+    "   2. Yes, and always allow access to /tmp/x",
+    "   3. No",
+    " Esc to cancel · Tab to amend",
+  ].join("\n");
+  test("the open prompt at the bottom of the pane is detected", () => {
+    expect(paneShowsPermissionPrompt(prompt)).toBe(true);
+  });
+  test("an idle input box is not a prompt", () => {
+    expect(paneShowsPermissionPrompt("Bill\n──────\n❯ \n──────\n  -- INSERT -- ⏸ manual mode on")).toBe(false);
+  });
+  // AskUserQuestion·계획 승인 창도 `❯ 1.` 커서가 맨 아래에 있고 Enter 가 1번을 고른다. "Esc to cancel" 이 없는 모양도 있다.
+  test("an AskUserQuestion menu without 'Esc to cancel' is detected", () => {
+    const ask = ["● 어떻게 할까요?", "──────", " ❯ 1. 지금 배포", "     바로 올립니다", "   2. 내일 배포", "   3. Type something.", "──────", " Enter to select · ↑/↓ to navigate"].join("\n");
+    expect(paneShowsPermissionPrompt(ask)).toBe(true);
+  });
+  test("a plan-approval menu is detected", () => {
+    const plan = [" Would you like to proceed?", "", " ❯ 1. Yes, and auto-accept edits", "   2. Yes, and manually approve edits", "   3. No, keep planning"].join("\n");
+    expect(paneShowsPermissionPrompt(plan)).toBe(true);
+  });
+  test("a past user message starting with '1.' (no second option) is not a menu", () => {
+    expect(paneShowsPermissionPrompt("❯ 1. 이거 해줘\n● 네, 했습니다.\n──────\n❯ \n──────")).toBe(false);
+  });
+  test("the same words higher up in the conversation do not block injection", () => {
+    const quoted = prompt + "\n" + Array.from({ length: 20 }, (_, i) => `대화 줄 ${i}`).join("\n") + "\n──────\n❯ \n──────";
+    expect(paneShowsPermissionPrompt(quoted)).toBe(false);
+  });
 });

@@ -6,7 +6,7 @@ import { setGroupOwner, getGroupOwners } from "../lib/groupOwner";
 import { callCodexBridge } from "../lib/codexBridgeClient";
 import { codexBridgePaths } from "../runtimes/codex/launcher";
 import { appendAuditFile } from "../lib/auditFile";
-import { injectPrompt } from "../lib/tmuxInject";
+import { injectOrPark, type ParkDeps } from "../lib/injectParked";
 import { injectOpenclawTelegramTurn } from "../lib/openclawBridge";
 import { recordReportDelivery } from "../bus/deliveryRecord";
 import { renderContextLine } from "../bus/wakeDispatcher";
@@ -112,6 +112,8 @@ interface CaptureDeps {
   publicBuild?: boolean;
   /** Local STT seam for isolated capture tests. */
   transcribeVoice?: (fileId: string, prompt: string) => Promise<string>;
+  /** tmux 주입·미루기 간격 seam (시험용). */
+  inject?: ParkDeps;
 }
 
 type OnoffButton = { text: string; callback_data: string };
@@ -1166,7 +1168,8 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
         const scopedTeamContext = teamContextForAgent(id, teamContext);
         const locale = getLocale(deps.db);
         if (agent.runtime === "claude_channel" && agent.tmux_session) {
-          const ok = await injectPrompt({
+          // 권한 창이 떠 있으면 넣지 않고 미룬다(창이 닫히면 같은 글을 한 번 넣는다) — 글은 위에서 이미 버스에 저장됐다.
+          const ok = await injectOrPark({
             session: agent.tmux_session,
             fromLabel: `${pick(locale, "팀장", "the team lead")} (${pick(locale, "그룹 라우터", "group router")})`,
             locale,
@@ -1179,15 +1182,20 @@ export function startTelegramCapture(deps: CaptureDeps): () => void {
             kind: "group", // ★봉투 kind★ (2026-07-15) — 단톡방 라우터 경로(팀원은 broadcast 로 답). openclaw injectOpenclawTelegramTurn kind="group" 와 대칭
             agentId: id,
             teamContext: scopedTeamContext,
-          });
+          }, (r) => {
+            console.log(`[capture] parked inject → ${id}: ${r.ok ? "ok" : r.expired ? "expired" : "fail"}`);
+            appendAuditFile("capture", r.expired ? "injection_deferred_expired" : "injection", id, {
+              mode: "tmux", ok: r.ok, maybePartial: r.maybePartial ?? false, deferred: true, text: text.slice(0, 120),
+            });
+          }, deps.inject);
           // ★★injectPrompt 는 boolean 이 아니라 {ok:boolean} ★객체★ 다 (하네스 리뷰 2026-07-14) ★★
           //   `const ok = await injectPrompt(...)` 를 `ok ? "ok" : "fail"` 로 검사했다.
           //   ★객체는 {ok:false} 여도 참★ → ★"fail" 이 영원히 안 찍혔다.★
           //   감사로그에 `"ok":{"ok":true}` 가 4번 박혀 있다 — ★주입 실패가 한 번도 기록된 적이 없다.★
           //   (같은 버그가 routes/slack.ts 에도 있어 tmux_inject_failed 가 도달 불가능이었다)
-          console.log(`[capture] injected tmux → ${id}: ${ok.ok ? "ok" : "fail(session?)"}`);
-          appendAuditFile("capture", "injection", id, {
-            mode: "tmux", ok: ok.ok, maybePartial: ok.maybePartial ?? false, text: text.slice(0, 120),
+          console.log(`[capture] injected tmux → ${id}: ${ok.parked ? "deferred(permission prompt)" : ok.ok ? "ok" : "fail(session?)"}`);
+          appendAuditFile("capture", ok.parked ? "injection_deferred_permission_prompt" : "injection", id, {
+            mode: "tmux", ok: ok.ok, maybePartial: ok.maybePartial ?? false, ...(ok.reason ? { reason: ok.reason } : {}), text: text.slice(0, 120),
           });
           continue;
         }
