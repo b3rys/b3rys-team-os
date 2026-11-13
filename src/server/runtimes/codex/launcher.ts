@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { REPO_ROOT, MEMBERS_ROOT } from "../../lib/personaTemplates";
 import { getCaptureGroupId } from "../../lib/captureConfig";
 import { DEFAULT_CHANNEL, assertChannelUsable, channelEnvLines, readMemberChannel, type MemberChannel } from "../../lib/memberChannel";
-import { renderSeededCodexConfig } from "./configSeed";
+import { codexSeedModel, hostModelDrift, renderSeededCodexConfig } from "./configSeed";
 import { Database } from "bun:sqlite";
 import { resolveCodexBin } from "../../lib/runtimeAuth";
 import { teamPathEnvLines } from "../../lib/teamDbPath";
@@ -184,8 +184,9 @@ export function renderBridgePlist(p: CodexBridgePaths): string {
 /** config에는 실행 정책을 중복하지 않는다. thread/start·turn/start가 한 곳에서 정하며 생략 시 CLI 0.147.0 기본은 readOnly·on-request로 잠긴다.
  * 현재 never는 사람 승인 경로를 만들지 않는다. 복원하려면 on-request로 바꾸고, 실행 경계가 필요하면 Codex 설정·프로토콜을 사용하며 별도 판정층을 재도입하지 않는다. */
 export function renderMinimalCodexConfig(_p: Pick<CodexBridgePaths, "workdir">): string {
-  // 기능은 상속해 새 팀원의 플러그인·MCP·모델을 기존 팀원과 맞춘다. 정책은 프로토콜, 신뢰는 자기 작업폴더만 사용하며 호스트 CODEX_HOME 참조는 격리를 깨므로 제거한다.
-  return renderSeededCodexConfig(readHostCodexConfig(), { workdir: _p.workdir, hostCodexHome: `${HOME}/.codex` });
+  // 기능은 상속해 새 팀원의 플러그인·MCP를 기존 팀원과 맞춘다. 모델·추론값은 팀 기본으로 — 호스트 값은 그 맥에서 오래 묵은 값일 수 있다.
+  // 정책은 프로토콜, 신뢰는 자기 작업폴더만 사용하며 호스트 CODEX_HOME 참조는 격리를 깨므로 제거한다.
+  return renderSeededCodexConfig(readHostCodexConfig(), { workdir: _p.workdir, hostCodexHome: `${HOME}/.codex`, model: codexSeedModel() });
 }
 
 /** 호스트 ~/.codex/config.toml 을 읽는다. 없으면 null(상속할 것이 없다). */
@@ -207,7 +208,11 @@ export function ensureCodexHome(p: CodexBridgePaths): void {
   // config.toml: 없을 때만 시드한다(이미 있는 팀원 설정을 덮지 않는다). 내용은 호스트 상속 + 팀원별 덮어쓰기.
   {
     const dst = join(p.codexHome, "config.toml");
-    if (!existsSync(dst)) writeFileSync(dst, renderMinimalCodexConfig(p), "utf-8");
+    if (!existsSync(dst)) {
+      const drift = hostModelDrift(readHostCodexConfig(), codexSeedModel());
+      if (drift) console.warn(`[codex seed] ${drift}`);
+      writeFileSync(dst, renderMinimalCodexConfig(p), "utf-8");
+    }
   }
   // ChatGPT refresh 토큰은 단일 사용·회전하므로 인증을 복사하면 호스트 갱신 뒤 사본이 만료된다. 실시간 auth.json 심링크로 같은 갱신본을 사용한다.
   // 독립 계정이 필요하면 심링크 대신 팀원별 실제 login 파일로 교체한다.

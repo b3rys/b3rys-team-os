@@ -30,6 +30,8 @@ bun $S apply --model gpt-6.1-sol --effort medium --yes   # 실제 전환
 | codex | `agents.json` 의 `runtime: codex` | `~/.codex-agents/<id>/config.toml` — 최상위 `model`·`model_reasoning_effort` | `codex exec` 1회 → 세션 기록의 실제 `model` | 그 팀원 브리지(`<prefix>.codex-bridge-<id>`) |
 | openclaw | `~/.openclaw/openclaw.json` 의 `agents.entries`(모델을 따로 정한 에이전트) | `openclaw config set agents.entries.<id>.model` | 게이트웨이 `openclaw models list` 의 `available === true` | 게이트웨이 1회(openclaw 팀원 전원 잠깐 멈춤) |
 
+새 codex 팀원이 처음 받는 모델은 `src/server/runtimes/codex/configSeed.ts` 의 `CODEX_TEAM_DEFAULT` 다(설치본별로는 env `B3OS_CODEX_DEFAULT_MODEL`·`B3OS_CODEX_DEFAULT_EFFORT`). 팀 codex 모델을 바꾸면 이 값도 같이 바꾼다 — 안 바꾸면 그 뒤 영입되는 팀원만 옛 모델로 뜬다.
+
 - **claude 런타임은 대상이 아니다** — 모델은 CLI 쪽 설정이다.
 - **codex 실행 파일**: `CODEX_BIN` 이 없으면 저장소 `.env` 의 `CODEX_BIN` 한 줄을 쓴다. 새로 받은 Homebrew 사본은 macOS 격리 표시 때문에 화면 없이 실행하면 멈출 수 있다 — 그럴 때는 격리 표시가 없는 사본을 `CODEX_BIN` 으로 준다.
 

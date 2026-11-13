@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   renderSeededCodexConfig, renderFallbackCodexConfig,
   removeTopLevelKey, removeTable, removeTablesWithPrefix, removeLinesReferencing,
+  CODEX_TEAM_DEFAULT, codexSeedModel, hostModelDrift, removeTopLevelStringKey, parsesAsToml,
 } from "./configSeed";
 
 const HOST_HOME = "/Users/host/.codex";
@@ -41,7 +42,7 @@ const seed = (host: string | null = HOST, workdir = "/tmp/newbie") =>
   renderSeededCodexConfig(host, { workdir, hostCodexHome: HOST_HOME });
 
 describe("codex config 시드 — 능력은 상속, 정책·신뢰·정체성은 제외", () => {
-  test("★능력은 물려받는다★ — 플러그인·MCP 정의·모델. 없으면 새 팀원이 기존 팀원보다 좁다", () => {
+  test("★능력은 물려받는다★ — 플러그인·MCP 정의(모델은 opts.model 이 없을 때만). 없으면 새 팀원이 기존 팀원보다 좁다", () => {
     const cfg = seed();
     expect(cfg).toContain('[plugins."gmail@openai-curated"]');
     expect(cfg).toContain("[mcp_servers.node_repl]");
@@ -151,5 +152,73 @@ describe("TOML 편집 도우미", () => {
   test("빈 needle 로는 아무것도 안 지운다 — 실수로 전체가 날아가면 안 된다", () => {
     const src = 'A = 1\nB = 2\n';
     expect(removeLinesReferencing(src, "")).toBe(src);
+  });
+});
+
+describe("codex config 시드 — 모델은 호스트가 아니라 팀 기본", () => {
+  const team = { model: "gpt-6.1-sol", effort: "medium" };
+  const OLD_HOST = `model = "gpt-5.6-sol"\nmodel_reasoning_effort = "low"\n\n[mcp_servers.node_repl]\ncommand = "x"\nmodel = "inner-keeps"\n`;
+
+  test("★호스트의 옛 모델·추론값을 물려주지 않는다★ — 맥마다 새 팀원 모델이 달라지던 원인", () => {
+    const cfg = renderSeededCodexConfig(OLD_HOST, { workdir: "/tmp/newbie", hostCodexHome: HOST_HOME, model: team });
+    expect(cfg).not.toContain('"gpt-5.6-sol"');
+    expect(cfg).not.toContain('"low"');
+    expect(cfg.split("\n").slice(0, 2)).toEqual(['model = "gpt-6.1-sol"', 'model_reasoning_effort = "medium"']);
+    expect(cfg.match(/^model\s*=/gm)?.length).toBe(2); // 최상위 하나 + 테이블 안 하나 — 중복 키 없음
+    expect(cfg).toContain('model = "inner-keeps"');    // 테이블 안의 같은 이름은 건드리지 않는다
+    expect(cfg).toContain("[mcp_servers.node_repl]");   // 능력 상속은 그대로
+  });
+
+  test("호스트 설정이 없어도 팀 기본 모델로 시드한다", () => {
+    const cfg = renderSeededCodexConfig(null, { workdir: "/tmp/newbie", hostCodexHome: HOST_HOME, model: team });
+    expect(cfg).toContain('model = "gpt-6.1-sol"');
+    expect(cfg).toContain('model_reasoning_effort = "medium"');
+  });
+
+  test("팀 기본은 gpt-6.1-sol · medium, env 로 설치본마다 덮을 수 있다", () => {
+    expect(CODEX_TEAM_DEFAULT).toEqual({ model: "gpt-6.1-sol", effort: "medium" });
+    expect(codexSeedModel({})).toEqual(team);
+    expect(codexSeedModel({ B3OS_CODEX_DEFAULT_MODEL: " gpt-x ", B3OS_CODEX_DEFAULT_EFFORT: "high" })).toEqual({ model: "gpt-x", effort: "high" });
+    expect(codexSeedModel({ B3OS_CODEX_DEFAULT_MODEL: "  " })).toEqual(team);
+  });
+
+  test("호스트 값이 팀 기본과 다르면 경고, 같거나 없으면 조용하다", () => {
+    expect(hostModelDrift(OLD_HOST, team)).toContain("gpt-5.6-sol · low");
+    expect(hostModelDrift('model = "gpt-6.1-sol"\nmodel_reasoning_effort = "medium"\n', team)).toBeNull();
+    expect(hostModelDrift('[t]\nmodel = "old"\n', team)).toBeNull(); // 테이블 안 값은 최상위 모델이 아니다
+    expect(hostModelDrift(null, team)).toBeNull();
+  });
+});
+
+describe("codex config 시드 — 호스트 TOML 표기가 달라도 결과는 읽히는 TOML", () => {
+  const team = { model: "gpt-6.1-sol", effort: "medium" };
+  const render = (host: string) => renderSeededCodexConfig(host, { workdir: "/tmp/newbie", hostCodexHome: HOST_HOME, model: team });
+  const Q = '"""', S = "\'\'\'";
+  const hosts: Record<string, string> = {
+    "따옴표 키": `"model" = "old"\n'model_reasoning_effort' = "low"\n[mcp_servers.a]\ncommand = "x"\n`,
+    "여러 줄 basic + 줄 이음": `model = ${Q}\\\nold${Q}\nmodel_reasoning_effort = "low"\n[mcp_servers.a]\ncommand = "x"\n`,
+    "여러 줄 literal": `model = ${S}\nold\n${S}\n[mcp_servers.a]\ncommand = "x"\n`,
+    "한 줄 여러 줄표기": `model = ${Q}old${Q}\n[mcp_servers.a]\ncommand = "x"\n`,
+    "주석 붙은 값": `model = "old" # 9월\n[mcp_servers.a]\ncommand = "x"\n`,
+  };
+  for (const [name, host] of Object.entries(hosts)) {
+    test(`${name}: 호스트는 읽히고, 결과도 읽히며 모델은 팀 기본`, () => {
+      expect(parsesAsToml(host)).toBe(true);
+      const cfg = render(host);
+      const parsed = Bun.TOML.parse(cfg) as Record<string, unknown>;
+      expect(parsed.model).toBe("gpt-6.1-sol");
+      expect(parsed.model_reasoning_effort).toBe("medium");
+      expect((parsed.mcp_servers as Record<string, unknown>).a).toBeDefined(); // 능력 상속은 유지
+    });
+  }
+
+  test("못 본 표기로 결과가 깨지면 빈 설정 + 팀 모델로 시드한다(깨진 config 는 재시드도 안 되므로)", () => {
+    const cfg = render('model = """\nold\n# 닫는 따옴표가 없다\n'); // 호스트 자체가 깨진 경우
+    const parsed = Bun.TOML.parse(cfg) as Record<string, unknown>;
+    expect(parsed.model).toBe("gpt-6.1-sol");
+  });
+
+  test("removeTopLevelStringKey 는 테이블 안의 같은 이름을 건드리지 않는다", () => {
+    expect(removeTopLevelStringKey('model = "a"\n[t]\nmodel = "b"\n', "model")).toBe('[t]\nmodel = "b"\n');
   });
 });
