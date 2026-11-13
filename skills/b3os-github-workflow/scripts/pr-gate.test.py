@@ -93,7 +93,7 @@ case("result Failed", "NOT_READY", lambda d: d.update(runs=[run(result="Failed")
 case("head_before 만 다름(시험 중 head 바뀜)", "NOT_READY", lambda d: d["runs"][0]["manifest"].update(head_before=OLD))
 case("승인 없음 + behind → 승인 대기가 아니라 준비 안 됨", "NOT_READY",
      lambda d: d.update(reviews=[], behind_by=2))
-# ── 같은 head 의 run 이 여럿일 때: 명령별 최신만 본다 (데본 P1) ──
+# ── 같은 head 의 run 이 여럿일 때: 명령별 최신만 본다 ──
 EARLY, LATE = "2026-11-05T10:00:00+00:00", "2026-11-05T12:00:00+00:00"
 case("이전 통과 + 최신 실패(통과가 앞)", "NOT_READY",
      lambda d: d.update(runs=[run(at=EARLY, d="r1"), run(at=LATE, d="r2", failed=2, exit_code=65, result="Failed")]), "r2")
@@ -161,7 +161,7 @@ def main():
     print(("✓" if rc == 1 else "✗") + f" 정책 없는 저장소 → exit {rc} (expect 1)")
     g.fetch = orig
 
-    # 실제 fetch→judge→main 경로: manifest 하나가 HTTP 503 이면 UNKNOWN(3), 404 면 '못 읽음'(1) (데본 P2).
+    # 실제 fetch→judge→main 경로: manifest 하나가 HTTP 503 이면 UNKNOWN(3), 404 면 '못 읽음'(1).
     import json as _json
     pr_json = {"head": {"sha": HEAD}, "state": "open", "draft": False, "base": {"ref": "main"}, "user": {"login": "author-bot"}}
     tree = {"tree": [{"path": "r1/manifest.json"}, {"path": "r2/manifest.json"}]}
