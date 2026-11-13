@@ -6,6 +6,7 @@
 //   - Includes thread_id / message_id so the agent can reply via b3os-team-inbox skill.
 //   - Best-effort only — if tmux isn't running, returns false; caller may fall back to other notification.
 
+import { escapeEnvelopeAttr, escapeEnvelopeBody } from "./promptEscape";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { pick, type Locale } from "./i18n";
@@ -154,9 +155,19 @@ export interface InjectPromptOptions {
   directReport?: { groupId: string };
 }
 
-export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
-  // load-buffer와 bracketed paste는 셸이 본문을 해석하지 않는다. 문자 치환은 전달 내용만 손상시키므로 원문을 유지한다.
-  const escapedBody = opts.body;
+export function buildTmuxInjectionPrompt(raw: InjectPromptOptions): string {
+  // 봉투 밖(안내 문장·reply 지시)에도 쓰이는 라벨·id 는 처음부터 속성용으로 정리해 어디에 쓰이든 태그·따옴표를 못 연다.
+  const opts: InjectPromptOptions = {
+    ...raw,
+    fromLabel: escapeEnvelopeAttr(raw.fromLabel), threadId: escapeEnvelopeAttr(raw.threadId), messageId: escapeEnvelopeAttr(raw.messageId),
+    ...(raw.origTgMessageId ? { origTgMessageId: escapeEnvelopeAttr(raw.origTgMessageId) } : {}),
+    ...(raw.inReplyTo ? { inReplyTo: escapeEnvelopeAttr(raw.inReplyTo) } : {}),
+    ...(raw.directReport ? { directReport: { groupId: escapeEnvelopeAttr(raw.directReport.groupId) } } : {}),
+  };
+  // 셸 안전(load-buffer·bracketed paste)과 별개로, 모델이 읽는 봉투 경계는 본문이 닫거나 열 수 없어야 한다.
+  // 태그를 시작하는 `<` 만 `‹` 로 바꾼다(그 밖의 글자·코드·URL·한글은 그대로, 두 번 처리해도 같다). lib/promptEscape.ts.
+  const escapedBody = escapeEnvelopeBody(opts.body);
+  const a = escapeEnvelopeAttr;
 
   // 외부 입력 태그와 셸 실행 명령을 함께 넣으면 분류기가 주입 공격으로 오인할 수 있어 스킬만 참조한다. 그룹 봇 답은 캡처되지 않으므로 서버를 거쳐 기록한다.
   const groupChatId = groupChatIdFromThread(opts.threadId);
@@ -166,7 +177,7 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
   // 팀원 규칙이 hop을 1 증가시키므로 봉투에는 현재 값을 그대로 싣는다. 서버도 hop 상한을 별도로 강제한다.
   const currentHop = opts.hopCount ?? 0;
   const replyToMeta = opts.inReplyTo
-    ? ` in_reply_to="${opts.inReplyTo}"`
+    ? ` in_reply_to="${escapeEnvelopeAttr(opts.inReplyTo)}"`
     : "";
   const hopMeta = `hop_count=${currentHop}`;
   const locale = opts.locale;
@@ -220,18 +231,19 @@ export function buildTmuxInjectionPrompt(opts: InjectPromptOptions): string {
         hopInstruction +
         ` Follow the canonical send/read rules.`);
   // Visibility Stage C: show the shared bus's recent team conversation as context first (for reference — not a command).
+  // 문맥 줄은 이전 팀원 글 본문을 그대로 담는다 — 본문과 같은 escape 를 거쳐야 봉투를 못 연다.
   const teamContextBlock = opts.teamContext
-    ? `${teamContextLabel(locale)}\n${opts.teamContext}\n\n`
+    ? `${teamContextLabel(locale)}\n${escapeEnvelopeBody(opts.teamContext)}\n\n`
     : "";
   const attachmentBlock = opts.attachments?.length
     ? pick(locale, `[첨부 파일 — 팀 내부 media URL/경로, 필요하면 직접 열람]\n`, `[Attachments — internal team media URL/path, open directly if needed]\n`) +
-      opts.attachments.map((a, i) => `${i + 1}. ${a.kind}: ${a.value}${a.note ? ` (${a.note})` : ""}`).join("\n") +
+      opts.attachments.map((att, i) => `${i + 1}. ${escapeEnvelopeBody(att.kind)}: ${escapeEnvelopeBody(att.value)}${att.note ? ` (${escapeEnvelopeBody(att.note)})` : ""}`).join("\n") +
       "\n\n"
     : "";
   return teamContextBlock +
     attachmentBlock +
     // 외부 입력 태그가 첫 줄이어야 Claude가 본문의 !·/를 셸·슬래시 명령 접두사로 해석하지 않는다.
-    `<external_message source="${opts.source}" kind="${opts.kind}" from="${opts.fromLabel}" thread="${opts.threadId}" msg="${opts.messageId}"${opts.origTgMessageId ? ` tg_msg_id="${opts.origTgMessageId}"` : ""}${replyToMeta} ${hopMeta}>\n` +
+    `<external_message source="${a(opts.source)}" kind="${a(opts.kind)}" from="${a(opts.fromLabel)}" thread="${a(opts.threadId)}" msg="${a(opts.messageId)}"${opts.origTgMessageId ? ` tg_msg_id="${a(opts.origTgMessageId)}"` : ""}${replyToMeta} ${hopMeta}>\n` +
     `${escapedBody}\n` +
     `</external_message>\n\n` +
     pick(locale,

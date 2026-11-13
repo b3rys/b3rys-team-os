@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { untrustedDisplay } from "../lib/promptEscape";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
@@ -45,7 +46,7 @@ export function cogsGap(value: unknown): { from: number; to: number; reason: str
 export interface CogsAttachmentRef { file_id: string; kind: string; name: string; mime: string; size: number }
 
 const FILE_ID_RE = /^[A-Za-z0-9_-]{1,200}$/;
-const clean = (v: unknown, max: number) => typeof v === "string" ? v.replace(/[\r\n\[\]]+/g, " ").trim().slice(0, max) : "";
+const clean = (v: unknown, max: number) => typeof v === "string" ? v.replace(/[\r\n\[\]<>"]+/g, " ").trim().slice(0, max) : "";
 
 /**
  * 메시지에 붙은 첨부 목록. cogs 는 `cogs_attachments` 에 전부 싣고, 텔레그램식 photo·document·voice 는 첫 첨부만 싣는다.
@@ -92,7 +93,8 @@ async function attachmentLines(deps: Deps, agentId: string, config: CogsInbox, t
   const max = Number(process.env.COGS_ATTACHMENT_MAX_BYTES ?? 50 * 1024 * 1024);
   const lines: string[] = [];
   for (const [i, a] of atts.entries()) {
-    const label = `[첨부 ${i + 1}/${atts.length}: ${[a.kind, a.mime, a.name].filter(Boolean).join(" · ")}`;
+    // 종류·mime·이름은 상대가 정한 문자열이다 — 따옴표 JSON 으로 감싸 헤더 모양을 흉내 내지 못하게 한다(lib/promptEscape.ts).
+    const label = `[첨부 ${i + 1}/${atts.length}: ${[a.kind, a.mime, a.name].filter(Boolean).map((x) => untrustedDisplay(x, 80)).join(" · ")}`;
     try {
       const dir = attachmentDir(agentId);
       mkdirSync(dir, { recursive: true });
@@ -179,7 +181,7 @@ export function createCogsPoller(deps: Deps) {
             session: agent.tmux_session!, agentId: agent.id, source: "cogs", kind: "cogs", locale: getLocale(deps.db),
             fromLabel: `cogs:${m.from.id}`, threadId: thread, messageId,
             // 단체방은 주인 판단(멘션 > 답장 원글 작성자)에 쓰도록 답장 대상 작성자를 같이 적는다.
-            body: `[cogs ${group ? "group " : ""}chat_id=${m.chat.id}, sender_id=${m.from.id}${group && m.reply_to_message?.from?.first_name ? `, reply_to=${String(m.reply_to_message.from.first_name).slice(0, 40)}` : ""}]\n${content}`, hopCount: 0,
+            body: `[cogs ${group ? "group " : ""}chat_id=${m.chat.id}, sender_id=${m.from.id}${group && m.reply_to_message?.from?.first_name ? `, reply_to=${untrustedDisplay(m.reply_to_message.from.first_name, 40)}` : ""}]\n${content}`, hopCount: 0,
           };
           const injected = await (deps.inject ?? injectPrompt)(opts);
           if (abort.signal.aborted) return "ok";
