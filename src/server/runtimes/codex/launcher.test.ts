@@ -69,6 +69,8 @@ describe("codex launcher (M4) — 순수 렌더러", () => {
     expect(sh).toContain(`export CODEX_ALLOW_FROM="${p.allowFrom}"`); // 발신자 게이트 시드 배선(P0) — 이게 있어야 게이트가 라이브에서 켜짐
     expect(sh).toContain("export B3OS_REPO_ROOT=");
     expect(sh).toContain("export TEAM_BASE_URL=");
+    expect(sh).toMatch(/export TEAM_DB_PATH="\/[^"]+"/); // 서버가 연 team.db(절대경로) — .env 옛 경로가 못 끼어들게
+    expect(sh).toMatch(/export TEAM_AGENT_REGISTRY="\/[^"]+"/);
     expect(sh).toContain("export CODEX_SCHEDULE_TOOL_ENABLED=");
     expect(sh).toContain("bridge.ts");
     expect(sh).not.toMatch(/[0-9]{8,}:[A-Za-z0-9_-]{30,}/); // 평문 토큰 없음

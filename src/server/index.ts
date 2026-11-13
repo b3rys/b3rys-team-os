@@ -87,6 +87,7 @@ import { createHostGate } from "./lib/hostGate";
 import { DEFAULT_MEDIA_DIR, contentTypeForMediaFile, resolveMediaPath } from "./lib/mediaStore";
 import { captureServerIdentity, deploymentIdentity } from "./lib/deployIdentity";
 import { assertMemberWriteBootAllowed } from "./lib/worktreeBootGuard";
+import { envFileTeamPathMismatches, serverTeamPaths } from "./lib/teamDbPath";
 import type { WsEvent } from "./types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -100,6 +101,15 @@ const OPENCLAW_URL = process.env.OPENCLAW_GATEWAY_URL ?? "http://127.0.0.1:18789
 const DIST_WEB = join(__dirname, "../../dist/web");
 const REPO_ROOT_FOR_IDENTITY = join(__dirname, "../..");
 assertMemberWriteBootAllowed(REPO_ROOT_FOR_IDENTITY);
+// 저장소 .env 의 팀 경로가 서버 값과 다르면 기동 때 이름을 댄다(옛 폴더에서 옮긴 설치). 서버가 띄우는 팀원은 서버 값을 받는다.
+try {
+  const envFile = join(REPO_ROOT_FOR_IDENTITY, ".env");
+  if (existsSync(envFile)) {
+    for (const m of envFileTeamPathMismatches(readFileSync(envFile, "utf-8"), serverTeamPaths(REPO_ROOT_FOR_IDENTITY), REPO_ROOT_FOR_IDENTITY)) {
+      console.warn(`[config] .env 의 ${m.key}=${m.envFile} 는 서버 값 ${m.server} 와 다르다 — 서버와 팀원은 서버 값을 쓴다. 저장소에서 직접 돌리는 bun 스크립트는 .env 값을 읽으니 .env 를 고쳐라.`);
+    }
+  }
+} catch (e) { console.warn(`[config] .env 팀 경로 확인 실패: ${e instanceof Error ? e.message : e}`); }
 /**
  * ★서버 층 신원은 기동 시 한 번 굳힌다.★ 이 값은 재시작해야 바뀌는 값이라(코드를 메모리에 올린 시점)
  * 요청마다 다시 읽으면 오히려 거짓말이 된다 — 트리가 먼저 앞서 나가도 ★돌고 있는 코드는 그대로다.★

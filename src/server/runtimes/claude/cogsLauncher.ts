@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { codexBridgePaths, renderBridgePlist, type CodexBridgePaths } from "../codex/launcher";
 import { assertChannelUsable, channelEnvLines, DEFAULT_CHANNEL, readMemberChannel, type MemberChannel } from "../../lib/memberChannel";
 import { REPO_ROOT } from "../../lib/personaTemplates";
+import { teamPathEnvLines } from "../../lib/teamDbPath";
 
 export function claudeCogsPaths(id: string, channel = DEFAULT_CHANNEL): CodexBridgePaths {
   if (!/^[a-z][a-z0-9_-]{1,31}$/.test(id)) throw new Error("invalid_member");
@@ -24,6 +25,7 @@ export function renderClaudeCogsWrapper(p: CodexBridgePaths, id: string): string
     `export CODEX_HOME="${p.codexHome}"`, `export CODEX_ALLOW_FROM="${p.allowFrom}"`,
     `export CODEX_BRIDGE_PID_FILE="${p.pidFile}"`,
     `export B3OS_REPO_ROOT="${REPO_ROOT}"`,
+    ...teamPathEnvLines(REPO_ROOT),
     ...channelEnvLines(p.channel),
     `export PATH="${process.env.HOME}/.bun/bin:${process.env.HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"`,
     `exec bun "${REPO_ROOT}/src/server/runtimes/claude/cogsBridge.ts"`, ""].join("\n");
