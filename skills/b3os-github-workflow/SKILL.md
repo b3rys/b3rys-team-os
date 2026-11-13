@@ -158,11 +158,78 @@ GH_TOKEN="$TOKEN" \
 - 작성 계정으로 승인하면 GitHub 이 self-approve 를 거부한다.
 - `gh auth switch` 는 쓰지 않는다. 기계 전체의 활성 계정이 바뀐 채 남아 다음 사람의 PR 이 승인 계정 작성으로 잡히고, 그 PR 은 닫고 다시 만들어야 한다.
 - `Approved-by:` 는 기록일 뿐 신원 증명이 아니고(승인 계정 공유), 같은 계정의 최종 리뷰 하나만 남아 "여러 명이 봤다" 의 근거로 쓸 수 없다. 이 한계를 문서에서 지우지 않는다(`references/rules-detail.md`).
-- 머지 직전에 게이트에 물어본다. 진입점은 preflight 하나이고 사람이 돌려야 걸린다(CI 강제 아님):
+- 머지 직전에 게이트에 물어본다. 사람이 돌려야 걸린다(CI 강제 아님). 진입점은 저장소에 따라 다르다: 정책 파일에 등록된 저장소는 `pr-gate.sh`(아래), 그 밖의 저장소는 아래 "등록되지 않은 저장소" 의 손 확인. b3os 출고 묶음은 출고 전에 `release-preflight.sh --mode merge` 도 함께 본다(`b3os-release-ops`).
+
+#### 머지 준비 확인: `pr-gate.sh`
+
+읽기 전용 확인 `pr-gate.sh` 로 머지 준비를 본다. 승인 판정은 `approver-check.py` 를 쓰되 작성 계정·승인 계정·승인자 명단은 기계마다 다른 팀 설정이 아니라 정책 파일의 `approval` 에서 읽는다(어느 기계에서 돌려도 같은 판정). 그리고 그 승인이 지금 head 에 달렸는지와 증거 브랜치 manifest 가 이 저장소·이 PR·지금 head 인지를 더 본다. 지원 저장소와 조건은 `scripts/pr-gate-policy.json` 에 있고, 없는 저장소는 판정하지 않는다.
 
 ```bash
-skills/b3os-release-ops/scripts/release-preflight.sh --mode merge
+skills/b3os-github-workflow/scripts/pr-gate.sh <owner/repo> <번호>
 ```
+
+- `WAITING_APPROVAL`(exit 2) — 승인만 빠졌다. 작성자가 이 출력을 붙여 리뷰어에게 직접 승인을 요청한다.
+- `READY`(exit 0) — 이 출력을 붙여 머지 담당에게 머지를 요청한다. 검사 통과일 뿐 머지 허가가 아니다. 팀장 승인이 필요한지는 출력의 정책 줄을 본다.
+- `NOT_READY`(exit 1) · `UNKNOWN`(exit 3) — 빠진 것을 채우거나 조회를 다시 한다. 조회 실패는 통과가 아니다.
+- 단위 전체는 판정한다: 증거 `run.log` 에 시험 스크립트가 찍은 `units passed N` 줄이 있고 N 이 정책의 `min_unit_tests` 이상이어야 한다. 범위 시험만 있으면 NOT_READY 다. manifest 의 통과 수는 붙인 결과 묶음만 세므로 UI 만일 수 있다.
+- UI 범위(어떤 UI 클래스를 돌렸나)는 기계가 판정하지 않는다. 리뷰어가 본다.
+
+#### 증거 manifest 형식
+
+`pr-gate.py` 가 읽는 필드다. 증거 브랜치 최상위에 실행마다 폴더 하나를 두고 그 안에 `manifest.json` 과 `run.log` 를 넣는다.
+
+```json
+{
+  "repo": "owner/repo", "pr": 12,
+  "head_before": "<실행 시작 때 head 전체 sha>", "head_after": "<끝났을 때 head 전체 sha>",
+  "command": "scripts/dev-check.sh", "created_at": "2026-01-15T03:04:05+00:00",
+  "exit_code": 0, "result": "Passed",
+  "tests": {"passedTests": 120, "failedTests": 0}
+}
+```
+
+- 같은 `command` 의 실행이 여럿이면 `created_at` 이 가장 나중인 것만 본다(다시 돌려 통과시킨 경우).
+- 정책에 `min_unit_tests` 가 있으면 통과한 최신 실행 가운데 하나의 `run.log` 에 `units passed N` 줄이 있고 N 이 그 값 이상이어야 한다.
+
+#### 등록되지 않은 저장소: 손 확인
+
+정책 파일에 없는 저장소는 게이트가 판정하지 않는다. 머지 담당이 같은 판정을 직접 조회한다. 승인 판정 규칙은 `pr-gate.py` 가 쓰는 `b3os-release-ops/scripts/approver-check.py` 와 같다: 계정마다 **가장 나중 리뷰**(submitted_at 순, COMMENTED 는 상태를 바꾸지 않으므로 건너뜀)만 본다. 승인 뒤에 같은 계정이 CHANGES_REQUESTED 를 냈으면 그 승인은 철회된 것이다. 하나라도 확인 못 하면 머지하지 않는다.
+
+```bash
+REPO=<owner/repo>; PR=<번호>
+HEAD=$(gh pr view $PR -R $REPO --json headRefOid --jq .headRefOid)
+# 계정별 최종 리뷰: 계정 · 상태 · commit_id · submitted_at · 본문의 마지막 비어있지 않은 줄
+gh api repos/$REPO/pulls/$PR/reviews --paginate --slurp | jq -r '
+  add | [ .[] | select(.state != "COMMENTED") ]
+  | sort_by(.submitted_at) | group_by(.user.login) | map(last)
+  | .[] | [ .user.login, .state, .commit_id, .submitted_at,
+            ((.body // "") | split("\n") | map(select(test("\\S"))) | last // "" | sub("^\\s+|\\s+$"; "")) ]
+  | @tsv'
+gh api repos/$REPO/compare/main...$HEAD --jq .behind_by        # 0 인가
+```
+
+승인으로 세는 줄은 넷 다 맞아야 한다: ① 계정이 승인 계정 ② 상태 `APPROVED` ③ commit_id 가 `$HEAD` 와 같음 ④ 마지막 줄이 정확히 `Approved-by: <이름>` 이고 이름이 승인자 명단에 있음. 이런 줄이 0개면 승인이 없는 것이다.
+
+- 리뷰가 버스·채팅에서만 "통과" 로 오고 GitHub 리뷰가 0건이면 승인이 아니다. 리뷰어에게 그 head 에 GitHub 승인을 걸어 달라고 한다.
+- 시험 증거(그 head 의 실행 기록)는 PR 본문·증거 브랜치에서 head sha 가 맞는지 본다.
+- 이 손 확인을 자주 하게 되는 저장소는 정책 파일에 등록해서 게이트가 판정하게 한다(등록은 그 저장소의 승인 규칙을 정하는 일이라 PM·팀장이 정한다).
+
+### ⑦-1 PR 닫기 — 증거 → 승인 → 최신화 → 게이트 → 머지
+
+승인과 시험 증거는 둘 다 **머지할 바로 그 head** 에 걸려 있어야 한다. head 가 바뀌면 둘 다 다시 받는다.
+
+1. **증거 (작성자)** — 그 head 에서 정해진 범위를 돌리고 결과를 PR 에 붙인다. 프로젝트의 시험 스크립트가 증거 브랜치(정책의 `evidence_branch_prefix` + `<pr>-<head 앞 7자>`)에 실행마다 폴더 하나(`<run>/manifest.json`, `<run>/run.log`)를 올린다. 이 저장소는 그 스크립트를 싣지 않는다 — 형식은 아래 "증거 manifest 형식". manifest 의 시작·끝 head 가 PR head 와 같아야 유효하다.
+2. **승인 (리뷰어)** — 리뷰어가 승인 계정으로 **그 head** 에 GitHub 승인을 건다(⑦ 형식). 채팅의 "통과" 는 승인이 아니다.
+3. **최신화** — main 대비 `behind_by` 가 0 이어야 한다. 뒤처졌으면 rebase(또는 update-branch) → 새 head 에서 시험 다시 → 변경분 재리뷰·재승인. 다른 PR 이 먼저 머지되면 다음 PR 은 다시 뒤처진다 — 머지 순서를 정해 하나씩 닫는다.
+4. **게이트** — `pr-gate.sh` 가 `READY` 거나, 등록되지 않은 저장소면 위 손 확인 세 가지가 맞는다.
+5. **머지 (머지 담당)** — 승인된 head 로 고정해서 머지한다. 그 사이 누가 push 했으면 GitHub 이 거부한다.
+
+```bash
+gh pr merge <번호> -R <owner/repo> --squash --match-head-commit <승인된 head 전체 sha>
+```
+
+- 머지 방식: 기본은 squash. **출고(릴리스) PR 은 `--merge`** — squash 하면 출고 커밋(공증·태그가 가리키는 커밋)이 main 조상에서 빠진다. **외부(fork) 기여 PR 도 `--merge`** — squash 커밋에 기여자의 비공개 이메일이 박힐 수 있다.
+- 게이트 결과와 머지 명령을 한 호출에 묶지 않는다(`;` 로 이으면 실패해도 머지가 돈다). 결과를 보고 다음 호출에서 머지한다.
 
 ### ⑧ 머지 후 확인
 

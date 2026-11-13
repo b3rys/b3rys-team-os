@@ -27,7 +27,7 @@ curl -fsS http://127.0.0.1:7878/team/api/settings | python3 -m json.tool | grep 
 - 같은 계정의 최종 리뷰 하나만 유효해서 기록에는 한 명만 남는다. 원리적으로 2명까지만 표현되므로 "3명이 봤다" 의 근거로 쓰지 않는다.
 - PR 리뷰 도장의 `Approved-by:` 와 권한 승인(`src/server/lib/approvals.ts`)의 같은 이름 트레일러는 다른 제도다.
 - 산문 대신 정해진 한 줄을 쓰는 이유: 산문에서 이름을 파싱하면 인용문·부정문·할일·조사·역할어·기술 용어(`direct-to-<역할>`)·이스케이프 개행에서 오판이 난다.
-- `release-preflight.sh --mode merge` 는 사람이 돌려야 걸리는 자발적 게이트다(CI 필수 검사 아님). `approver-check.py` 를 따로 부르지 않고 preflight 를 진입점으로 쓴다.
+- 머지 준비 확인(`pr-gate.sh`, b3os 출고 때의 `release-preflight.sh --mode merge`)은 사람이 돌려야 걸리는 자발적 게이트다(CI 필수 검사 아님). `approver-check.py` 를 따로 부르지 않고 이 진입점들을 쓴다.
 
 ## 공개 저장소
 
