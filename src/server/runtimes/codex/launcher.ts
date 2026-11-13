@@ -8,6 +8,7 @@ import { DEFAULT_CHANNEL, assertChannelUsable, channelEnvLines, readMemberChanne
 import { renderSeededCodexConfig } from "./configSeed";
 import { Database } from "bun:sqlite";
 import { resolveCodexBin } from "../../lib/runtimeAuth";
+import { teamPathEnvLines } from "../../lib/teamDbPath";
 
 const HOME = process.env.HOME ?? "";
 
@@ -141,6 +142,8 @@ export function renderLaunchWrapper(p: CodexBridgePaths): string {
     `export CODEX_AGENT_ID="${p.label.replace(/^.*\.codex-bridge-/, "")}"`,
     `export CODEX_BRIDGE_PID_FILE="${p.pidFile}"`,
     `export B3OS_REPO_ROOT="${REPO_ROOT}"`,
+    // 서버가 연 team.db·agents.json — 저장소 .env 의 옛 경로가 bun 자동 로드로 끼어들지 않게(lib/teamDbPath.ts).
+    ...teamPathEnvLines(REPO_ROOT),
     `export TEAM_BASE_URL="${process.env.TEAM_BASE_URL ?? `http://127.0.0.1:${process.env.TEAM_HTTP_PORT ?? "7878"}/team`}"`,
     `export CODEX_SCHEDULE_TOOL_ENABLED="${process.env.CODEX_SCHEDULE_TOOL_ENABLED ?? "false"}"`,
     // 서버가 찾은 실행파일을 고정해 launchd의 제한된 PATH에서도 같은 설치를 사용한다.

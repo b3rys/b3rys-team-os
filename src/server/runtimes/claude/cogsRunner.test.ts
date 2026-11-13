@@ -42,7 +42,7 @@ print(json.dumps({'type':'result','result':'완료','is_error':False,'session_id
 test("Claude app wrapper uses its app channel and no Telegram launcher",()=>{
  const channel={kind:"b3chat" as const,apiBase:"http://127.0.0.1:8741",allowFrom:["5"],ownerChat:"5"};
  const wrapper=renderClaudeCogsWrapper(claudeCogsPaths("testmate",channel),"testmate");
- expect(wrapper).toContain('unset "$cogs_env_key"');expect(wrapper).toContain("cogsBridge.ts");expect(wrapper).not.toContain("start-telegram-channel");expect(wrapper).not.toContain("TELEGRAM_BOT_TOKEN=");
+ expect(wrapper).toContain('unset "$cogs_env_key"');expect(wrapper).toContain("cogsBridge.ts");expect(wrapper).toMatch(/export TEAM_DB_PATH="\/[^"]+"/);expect(wrapper).toMatch(/export TEAM_AGENT_REGISTRY="\/[^"]+"/);expect(wrapper).not.toContain("start-telegram-channel");expect(wrapper).not.toContain("TELEGRAM_BOT_TOKEN=");
 });
 test("Claude model values are validated before spawn",()=>{
  expect(()=>claudeCogsArguments({agentId:"testmate",prompt:"x",model:"gpt-6-luna"},"")).toThrow("unsupported_model");
