@@ -26,7 +26,7 @@ function resolveTmuxBin(): string {
   }
   return "tmux"; // 최후: PATH 에 맡김
 }
-const TMUX_BIN = resolveTmuxBin();
+// 호출마다 푼다(시험이 TMUX_BIN 을 가짜 tmux 로 바꿔 끼울 수 있게). 비용은 existsSync 한 번.
 
 type BusAttachment = {
   kind: "path" | "url";
@@ -45,7 +45,7 @@ async function tmuxRun(
   timeoutMs = TMUX_CMD_TIMEOUT_MS,
 ): Promise<{ ok: boolean; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const proc = spawn(TMUX_BIN, args);
+    const proc = spawn(resolveTmuxBin(), args);
     let stdout = "";
     let stderr = "";
     // Per-command timeout: if the tmux command hangs (e.g. server unresponsive),
@@ -78,7 +78,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // Uses per-command timeout to guard against hung tmux server.
 async function tmuxLoadBuffer(name: string, content: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const proc = spawn(TMUX_BIN, ["load-buffer", "-b", name, "-"]);
+    const proc = spawn(resolveTmuxBin(), ["load-buffer", "-b", name, "-"]);
     const timer = setTimeout(() => {
       proc.kill();
       resolve(false);
@@ -104,6 +104,28 @@ export interface InjectResult {
   ok: boolean;
   /** true if the execute phase timed out — partial injection may have occurred */
   maybePartial?: boolean;
+  /**
+   * 넣지 않은 이유 — 둘 다 아무것도 쓰지 않았으니 나중에 다시 넣어도 된다(재시도 예산을 쓰지 말고 미뤄라).
+   *   "permission_prompt" = 권한·선택 창이 떠 있다 · "capture_failed" = 화면을 읽지 못해 창이 있는지 모른다(닫힌 쪽으로 가정하지 않는다).
+   */
+  reason?: "permission_prompt" | "capture_failed";
+}
+
+/** 아무것도 쓰지 않고 돌려보낸 이유인가 — 호출자는 실패로 세지 않고 나중에 다시 넣는다. */
+export function isDeferrableInjectReason(reason: InjectResult["reason"]): boolean {
+  return reason === "permission_prompt" || reason === "capture_failed";
+}
+
+/**
+ * 화면에 Claude Code 권한·선택 창(도구 승인, AskUserQuestion, 계획 승인)이 떠 있는가. 떠 있을 때 붙여넣고 Enter 를 보내면
+ * 창의 기본 선택지(`❯ 1.`)가 눌려 팀장 승인 없이 도구가 실행된다 — 그래서 이때는 넣지 않는다.
+ */
+export function paneShowsPermissionPrompt(pane: string): boolean {
+  // 창은 화면 맨 아래에 그려진다. 위쪽 대화에 같은 글이 있어도 막지 않도록 아래 줄만 본다.
+  // 창마다 안내 문구("Esc to cancel" 등)가 다르니 문구가 아니라 번호 메뉴 모양으로 본다: `❯ 1. <무엇이든>` 다음에 `2.` 줄이 이어진다.
+  //   `2.` 줄을 같이 보는 이유 — 지난 사용자 입력도 `❯ ` 로 그려져 "1. …" 로 시작한 글이 대화 아래쪽에 남아 있을 수 있다. 입력창(`❯ ` 만 있는 줄)은 메뉴가 아니다.
+  const tail = pane.split("\n").filter((l) => l.trim()).slice(-16).join("\n");
+  return /^\s*❯\s*1\.\s+\S[\s\S]*^\s*2\.\s+\S/m.test(tail);
 }
 
 export interface InjectPromptOptions {
@@ -238,6 +260,19 @@ export async function injectPrompt(opts: InjectPromptOptions): Promise<InjectRes
   if (!exists) {
     console.warn(`[tmuxInject] session ${opts.session} missing`);
     return { ok: false };
+  }
+
+  // 권한 창이 떠 있으면 붙여넣기·Enter 가 승인으로 눌린다. 아무것도 쓰지 않고 돌려보내 호출자가 나중에 다시 넣게 한다.
+  // 한계: 검사와 붙여넣기 사이(수십 ms)에 창이 새로 열리면 그 창은 여전히 눌린다 — tmux 에는 원자적 검사+붙여넣기가 없어 이 틈은 줄일 뿐 없앨 수 없다.
+  // 화면을 못 읽으면(타임아웃·tmux 오류) 창이 없다고 가정하지 않고 넣지 않는다(닫힌 쪽 실패).
+  const before = await tmuxRun(["capture-pane", "-t", opts.session, "-p"]);
+  if (!before.ok) {
+    console.warn(`[tmuxInject] capture-pane failed for ${opts.session} — not injecting`);
+    return { ok: false, reason: "capture_failed" };
+  }
+  if (paneShowsPermissionPrompt(before.stdout)) {
+    console.warn(`[tmuxInject] ${opts.session} shows a permission prompt — not injecting`);
+    return { ok: false, reason: "permission_prompt" };
   }
 
   const prompt = buildTmuxInjectionPrompt(opts);

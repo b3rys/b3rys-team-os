@@ -319,6 +319,7 @@ export function markDeferred(
   messageId: string,
   agentId: string,
   backoffSec = 2,
+  maxDefer = BUS_MAX_DEFER,
 ): "pending" | "blocked" {
   // Read current deferred_count before incrementing
   const before = db
@@ -330,7 +331,7 @@ export function markDeferred(
   const nextCount = currentCount + 1;
 
   // Hard cap: if next count >= BUS_MAX_DEFER, transition to 'blocked' (terminal)
-  if (nextCount >= BUS_MAX_DEFER) {
+  if (nextCount >= maxDefer) {
     db.prepare(
       `UPDATE message_recipient
        SET delivery_state   = 'blocked',
@@ -342,7 +343,7 @@ export function markDeferred(
        WHERE message_id = ? AND agent_id = ?`,
     ).run(nextCount, nextCount, messageId, agentId);
     console.warn(
-      `[bus] deferred hard cap: message ${messageId} → agent ${agentId} deferred ${nextCount} times (cap=${BUS_MAX_DEFER}) — transitioning to 'blocked' (terminal)`,
+      `[bus] deferred hard cap: message ${messageId} → agent ${agentId} deferred ${nextCount} times (cap=${maxDefer}) — transitioning to 'blocked' (terminal)`,
     );
     return "blocked";
   }

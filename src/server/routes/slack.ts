@@ -18,7 +18,7 @@ import {
   firstMentionedUser,
   allMentionedUsers,
 } from "../lib/slack";
-import { injectPrompt } from "../lib/tmuxInject";
+import { injectOrPark, type ParkDeps } from "../lib/injectParked";
 import { getLocale } from "../lib/captureConfig";
 import { runOpenclawSlackTurn } from "../lib/openclawBridge";
 import { runHermesTeamTurn } from "../lib/hermesBridge";
@@ -139,7 +139,7 @@ export interface SlackEvent {
 }
 
 export async function handleAppMention(
-  deps: { db: Database; broadcast: (e: WsEvent) => void; agents: AgentRecord[]; fetchFn?: typeof fetch },
+  deps: { db: Database; broadcast: (e: WsEvent) => void; agents: AgentRecord[]; fetchFn?: typeof fetch; inject?: ParkDeps },
   ev: SlackEvent,
 ): Promise<void> {
   // 봇 작성 이벤트도 협업 멘션 대상이다. 작성자를 수신 대상에서 제외해 자기 발신 재주입을 막는다.
@@ -199,7 +199,7 @@ export async function handleAppMention(
 }
 
 async function processMentionForAgent(opts: {
-  deps: { db: Database; broadcast: (e: WsEvent) => void; agents: AgentRecord[] };
+  deps: { db: Database; broadcast: (e: WsEvent) => void; agents: AgentRecord[]; inject?: ParkDeps };
   ev: SlackEvent;
   slackChannel: string;
   cleanBody: string;
@@ -255,7 +255,14 @@ async function processMentionForAgent(opts: {
 
   // Auto-inject into the target's tmux session so the running Claude Code session processes immediately.
   if (targetAgent.runtime === "claude_channel" && targetAgent.tmux_session) {
-    const injected = await injectPrompt({
+    // 권한 창이 떠 있으면 넣지 않고 미룬다(창이 닫히면 같은 글을 한 번 넣는다). 글은 위에서 이미 저장됐다.
+    const slackAudit = (r: { ok: boolean; maybePartial?: boolean; reason?: string; expired?: boolean }) =>
+      appendAudit(deps.db, "system", r.ok ? "tmux_inject_ok" : r.expired ? "tmux_inject_deferred_expired" : "tmux_inject_failed", stored.id, {
+        session: targetAgent.tmux_session,
+        maybePartial: r.maybePartial ?? false,
+        ...(r.reason ? { reason: r.reason } : {}),
+      });
+    const injected = await injectOrPark({
       session: targetAgent.tmux_session,
       fromLabel: ev.user ? `slack:${ev.user}` : "slack:user",
       locale: getLocale(deps.db),
@@ -265,12 +272,16 @@ async function processMentionForAgent(opts: {
       source: "slack",
       kind: "slack", // 슬랙 봉투 kind는 slack이다. 팀원은 broadcast로 답하고 릴레이가 원래 채널에 전달한다.
       agentId: targetAgent.id,
-    });
+    }, slackAudit, deps.inject);
     // injectPrompt는 객체를 반환하므로 객체의 참 여부가 아니라 ok를 검사해야 실패를 감지할 수 있다.
-    appendAudit(deps.db, "system", injected.ok ? "tmux_inject_ok" : "tmux_inject_failed", stored.id, {
-      session: targetAgent.tmux_session,
-      maybePartial: injected.maybePartial ?? false,
-    });
+    if (injected.parked) {
+      appendAudit(deps.db, "system", "tmux_inject_deferred_permission_prompt", stored.id, {
+        session: targetAgent.tmux_session,
+        reason: injected.reason,
+      });
+    } else {
+      slackAudit(injected);
+    }
   } else if (targetAgent.runtime === "openclaw") {
     void runOpenclawSlackTurn({
       agent: targetAgent,

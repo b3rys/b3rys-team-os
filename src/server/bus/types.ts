@@ -54,6 +54,9 @@ export interface WakeResult {
   ok: boolean;
   /** true when the lock was busy — retry_count must NOT be incremented */
   deferred?: boolean;
+  /** deferred 일 때만 — 기본(2초·BUS_MAX_DEFER 회)보다 길게 기다려야 하는 사유(권한 창이 닫히길 기다림)가 정하는 간격·상한 */
+  deferBackoffSec?: number;
+  deferMaxCount?: number;
   detail?: string;
 }
 

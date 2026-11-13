@@ -48,7 +48,7 @@ import { broadcastAudience } from "../lib/teamRouter/ownerDecision";
 import { checkPingpong } from "./antiPingpong";
 import { recordReportDelivery } from "./deliveryRecord";
 import { applySync, mirrorDeadLetter } from "./syncPolicy";
-import { injectPrompt, tmuxSessionExists, EXECUTE_HARD_LIMIT_MS } from "../lib/tmuxInject";
+import { injectPrompt, tmuxSessionExists, isDeferrableInjectReason, EXECUTE_HARD_LIMIT_MS } from "../lib/tmuxInject";
 import { getLocale } from "../lib/captureConfig";
 
 // direct_to_gd DM 릴레이용 — GD 1:1 DM chat_id(setting owner_chat_id). 미설정이면 undefined(릴레이 불가).
@@ -321,7 +321,17 @@ export function isCollectOnlyFeedbackReply(
 
 /** Claude (tmux) adapter — reuses injectPrompt from tmuxInject.ts */
 
-function makeCludeAdapter(db: Database): WakeAdapter {
+/** 권한 창이 열려 있어 넣지 못한 글을 다시 보는 간격(초)과 빠른 확인 횟수 — 10초 × 180 = 30분. 그 뒤는 holdForPrompt 가 60초 간격으로 계속 본다(버리지 않는다). */
+export const PERMISSION_PROMPT_DEFER_SEC = 10;
+export const PERMISSION_PROMPT_DEFER_MAX = 180;
+
+export function makeCludeAdapter(
+  db: Database,
+  // 시험에서 갈아 끼운다. 운영은 기본값.
+  deps: { inject?: typeof injectPrompt; sessionExists?: typeof tmuxSessionExists } = {},
+): WakeAdapter {
+  const inject = deps.inject ?? injectPrompt;
+  const sessionExists = deps.sessionExists ?? tmuxSessionExists;
   return {
     async wake(targetAgentId, row, teamContext): Promise<WakeResult> {
       // Serialize claude_channel wakes via runtime_lock (OAuth 429 guard)
@@ -348,7 +358,7 @@ function makeCludeAdapter(db: Database): WakeAdapter {
 
         // prepare phase: resolve session exists (I/O, can be cut short by timeout)
         const sessionCheckOk = await withTimeout(
-          tmuxSessionExists(session),
+          sessionExists(session),
           ADAPTER_TIMEOUT_MS,
           false,
         );
@@ -390,7 +400,7 @@ function makeCludeAdapter(db: Database): WakeAdapter {
               : claudeSys.system
                 ? (claudeSys.replyTo ? "teammate" : "notice")
                 : "teammate";
-        const injectResult = await injectPrompt({
+        const injectResult = await inject({
           session,
           fromLabel: row.from_agent_id,
           locale: getLocale(db),
@@ -409,6 +419,15 @@ function makeCludeAdapter(db: Database): WakeAdapter {
         if (injectResult.maybePartial) {
           // Partial inject — cannot assume abort. Signal to caller via special detail.
           return { ok: false, detail: "execute_timeout_maybe_partial" };
+        }
+        // 권한 창이 떠 있거나 화면을 못 읽어 아무것도 쓰지 않았다 — 실패가 아니라 lock-busy 처럼 미룬다(retry_count 를 쓰지 않는다).
+        //   창이 닫힐 때까지 기다린다. 재시도 예산으로 세면 창이 몇 분 열려 있는 동안 dead_letter 가 되어 글을 잃는다.
+        if (!injectResult.ok && isDeferrableInjectReason(injectResult.reason)) {
+          return {
+            ok: false, deferred: true,
+            detail: `tmux_inject_deferred_${injectResult.reason}`,
+            deferBackoffSec: PERMISSION_PROMPT_DEFER_SEC, deferMaxCount: PERMISSION_PROMPT_DEFER_MAX,
+          };
         }
         return { ok: injectResult.ok, detail: injectResult.ok ? "tmux_injected" : "tmux_inject_returned_false" };
       } finally {
@@ -1644,7 +1663,21 @@ function recordDispatchOutcome(
   // Handle deferred (lock-busy): reset without consuming retry_count (issue 2)
   // pre-widen: markDeferred now returns 'pending' | 'blocked' — handle hard cap.
   if (result.deferred) {
-    const deferState = markDeferred(db, row.message_id, row.agent_id, 2);
+    // 권한 창(또는 화면 읽기 실패) 때문에 못 넣은 글은 횟수 상한으로 버리지 않는다 — 창이 닫히면 넣는다.
+    //   받는 세션은 창이 열려 있는 동안 버스 글을 하나도 못 받으므로, 버리면 양쪽 다 모른 채 글이 사라진다.
+    //   이 보류는 deferred_count(lock-busy 예산)를 쓰지 않는다 — 창이 오래 열려 있었다고 그 뒤 lock-busy 한 번에 닫히지 않게.
+    if (result.detail?.startsWith("tmux_inject_deferred_")) {
+      const held = holdForPrompt(db, row);
+      if (held.state === "blocked") {
+        appendAudit(db, "bus_dispatcher", "dispatch_blocked", row.message_id, { agent_id: row.agent_id, reason: "prompt_hold_expired" });
+        notifySenderOfPromptHold(db, row, roster, true);
+      } else {
+        appendAuditFile("bus_dispatcher", result.detail, row.message_id, { agent_id: row.agent_id, detail: result.detail });
+        if (held.count >= PROMPT_HOLD_NOTICE_AFTER) notifySenderOfPromptHold(db, row, roster, false);
+      }
+      return;
+    }
+    const deferState = markDeferred(db, row.message_id, row.agent_id, result.deferBackoffSec ?? 2, result.deferMaxCount);
     if (deferState === "blocked") {
       // Hard cap hit — log as terminal block (dead session guard)
       appendAuditFile("bus_dispatcher", "deferred_cap_blocked", row.message_id, {
@@ -1784,6 +1817,7 @@ export async function dispatchRow(
     notifySenderOfQuota(db, row, agents);
     return;
   }
+  if (expirePromptHoldIfStale(db, row, agents)) return;
   const outcome = await invokeWakeAdapter(plan.adapter, row.agent_id, row, plan.teamContext);
   await observeQuota(db, row, plan.targetAgent, outcome);   // 만기 통지가 한도 사유를 쓸 수 있게 기록보다 먼저
   // 이번 wake 가 ★한도 오류로★ 실패했으면(턴이 돌지 않았다) 만기 대신 리셋 뒤로 미룬다.
@@ -1925,6 +1959,144 @@ export function notifySenderOfQuota(db: Database, row: PendingDispatchRow, agent
     });
   } catch (e) {
     appendAuditFile("bus_dispatcher", "quota_notify_failed", row.message_id, {
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
+/** 권한 창 때문에 미룬 지 이 횟수(10초 간격 → 약 1분)가 되면 보낸 사람에게 한 번 알린다. */
+export const PROMPT_HOLD_NOTICE_AFTER = 6;
+/** 빠른 확인 구간(PERMISSION_PROMPT_DEFER_MAX 회)이 지난 뒤 다시 보는 간격(초). */
+export const PROMPT_HOLD_SLOW_SEC = 60;
+/** 이보다 오래된 글은 더 붙들지 않고 blocked 로 닫는다(한도 보류와 같은 24시간). */
+export const PROMPT_HOLD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/** 같은 보낸 사람→받는 사람 쌍에는 이 시간 안에 한 번만 알린다. */
+const PROMPT_HOLD_NOTICE_GAP_MIN = 30;
+
+function rowAgeMs(row: PendingDispatchRow, now: number): number {
+  const created = String(row.created_at ?? "");
+  const ms = Date.parse(created.replace(" ", "T") + (created.includes("Z") ? "" : "Z"));
+  return Number.isFinite(ms) ? now - ms : 0;
+}
+
+/** 이 수신 행이 권한 창 때문에 보류된 횟수(prompt_hold_count). 다른 실패·재시도가 지우지 않는다. */
+export function promptHoldCount(db: Database, messageId: string, agentId: string): number {
+  const cur = db
+    .prepare(`SELECT prompt_hold_count AS n FROM message_recipient WHERE message_id = ? AND agent_id = ?`)
+    .get(messageId, agentId) as { n: number | null } | undefined;
+  return cur?.n ?? 0;
+}
+
+function closePromptHold(db: Database, row: PendingDispatchRow): void {
+  db.prepare(
+    `UPDATE message_recipient
+        SET delivery_state = 'blocked', claimed_at = NULL, lease_until = NULL,
+            last_deferred_at = datetime('now'), last_error = 'prompt_hold_expired'
+      WHERE message_id = ? AND agent_id = ?`,
+  ).run(row.message_id, row.agent_id);
+}
+
+/**
+ * 권한 창 때문에 못 넣은 글을 보류한다.
+ *   · 글 나이 24시간 이내 → pending 유지. 처음 PERMISSION_PROMPT_DEFER_MAX 회는 10초, 그 뒤는 60초 간격.
+ *   · 24시간 초과 → blocked 로 닫는다.
+ * 횟수는 prompt_hold_count 에 세고 deferred_count 는 건드리지 않는다.
+ */
+export function holdForPrompt(
+  db: Database,
+  row: PendingDispatchRow,
+  now = Date.now(),
+): { state: "pending" | "blocked"; count: number } {
+  const count = promptHoldCount(db, row.message_id, row.agent_id) + 1;
+  if (rowAgeMs(row, now) > PROMPT_HOLD_MAX_AGE_MS) {
+    closePromptHold(db, row);
+    return { state: "blocked", count };
+  }
+  const backoffSec = count < PERMISSION_PROMPT_DEFER_MAX ? PERMISSION_PROMPT_DEFER_SEC : PROMPT_HOLD_SLOW_SEC;
+  db.prepare(
+    `UPDATE message_recipient
+        SET delivery_state = 'pending', claimed_at = NULL,
+            lease_until = datetime('now', '+${backoffSec} seconds'),
+            last_deferred_at = datetime('now'), last_error = 'prompt_hold', prompt_hold_count = ?
+      WHERE message_id = ? AND agent_id = ?`,
+  ).run(count, row.message_id, row.agent_id);
+  return { state: "pending", count };
+}
+
+/**
+ * 권한 창 때문에 보류돼 있던 글이 24시간을 넘겼으면 넣어 보지 않고 닫는다(닫았으면 true).
+ * 창이 막 닫힌 순간에 하루 묵은 글이 세션에 들어가는 것을 막는다 — adapter 를 부르기 전에 본다.
+ */
+export function expirePromptHoldIfStale(
+  db: Database,
+  row: PendingDispatchRow,
+  agents: AgentRecord[],
+  now = Date.now(),
+): boolean {
+  if (rowAgeMs(row, now) <= PROMPT_HOLD_MAX_AGE_MS) return false;
+  if (promptHoldCount(db, row.message_id, row.agent_id) === 0) return false;
+  closePromptHold(db, row);
+  appendAudit(db, "bus_dispatcher", "dispatch_blocked", row.message_id, { agent_id: row.agent_id, reason: "prompt_hold_expired" });
+  notifySenderOfPromptHold(db, row, agents, true);
+  return true;
+}
+
+/**
+ * 받는 세션에 권한·선택 창이 열려 있어 글을 못 넣고 있다고 보낸 사람에게 알린다.
+ * 보낸 쪽 send 는 성공으로 보이고 받는 쪽은 아무것도 못 받아 양쪽 다 모르는 상태를 없앤다.
+ * 같은 쌍에는 PROMPT_HOLD_NOTICE_GAP_MIN 분에 한 번(여러 건을 보내도 알림이 쌓이지 않게),
+ * 닫힘(gaveUp) 알림은 글마다 한 번. insertMessage 는 dedupe_key 로 막지 않으므로 여기서 먼저 찾는다.
+ * source='system' · in_reply_to 없음 · hop 0 — notifySenderOfBlock 과 같은 이유로 가드 밖이다.
+ */
+export function notifySenderOfPromptHold(
+  db: Database,
+  row: PendingDispatchRow,
+  agents: AgentRecord[],
+  gaveUp: boolean,
+): void {
+  try {
+    if (row.source !== "agent") return;
+    const sender = row.created_by ?? row.from_agent_id;
+    if (!sender || sender === row.agent_id) return;
+    if (!agents.some((a) => a.id === sender)) return;
+    const pair = `${sender}:${row.agent_id}`;
+    let key: string;
+    if (gaveUp) {
+      key = `prompt-hold-end:${row.message_id}:${row.agent_id}`;
+      if (db.prepare(`SELECT 1 FROM message WHERE dedupe_key = ? LIMIT 1`).get(key)) return;
+    } else {
+      const recent = db
+        .prepare(
+          `SELECT 1 FROM message
+            WHERE dedupe_key LIKE ? AND created_at > datetime('now', '-${PROMPT_HOLD_NOTICE_GAP_MIN} minutes') LIMIT 1`,
+        )
+        .get(`prompt-hold:${pair}:%`);
+      if (recent) return;
+      key = `prompt-hold:${pair}:${row.message_id}`;
+    }
+    const body = gaveUp
+      ? `[전달 실패] ${row.agent_id} 세션에 권한·선택 창이 24시간 넘게 열려 있어 보낸 글을 넣지 못하고 닫았습니다. ` +
+        `글 id: ${row.message_id} · 스레드: ${row.thread_id}. 창이 닫힌 뒤 다시 보내세요.`
+      : `[전달 보류] ${row.agent_id} 세션에 권한·선택 창이 열려 있어 보낸 글을 아직 넣지 못했습니다. ` +
+        `글 id: ${row.message_id} · 스레드: ${row.thread_id}. 창이 닫히면 자동으로 넣습니다 — 다시 보내지 않아도 됩니다. ` +
+        `그 창은 사람이 답하거나 ${row.agent_id} 가 직접 닫아야 하며, 열려 있는 동안 ${row.agent_id} 는 버스 글을 받지 못합니다. ` +
+        `급한 일이면 팀장께 알리세요.`;
+    const msg = insertMessage(db, {
+      thread_id: row.thread_id,
+      from_agent_id: "system",
+      to_agent_id: sender,
+      type: "dm",
+      body,
+      source: "system",
+      hop_count: 0,
+      priority: "normal",
+      dedupe_key: key,
+    } as Parameters<typeof insertMessage>[1]);
+    appendAudit(db, "bus_dispatcher", gaveUp ? "prompt_hold_gave_up_notified" : "prompt_hold_notified_sender", row.message_id, {
+      sender, held_agent: row.agent_id, notice_id: msg.id,
+    });
+  } catch (e) {
+    appendAuditFile("bus_dispatcher", "prompt_hold_notify_failed", row.message_id, {
       error: e instanceof Error ? e.message : String(e),
     });
   }
@@ -2254,3 +2426,5 @@ export function startWakeDispatcher(deps: WakeDispatcherDeps): () => void {
     console.log("[bus_dispatcher] stopped");
   };
 }
+
+export { recordDispatchOutcome as recordDispatchOutcomeForTest };

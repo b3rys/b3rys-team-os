@@ -838,6 +838,8 @@ export function runBusMigration(db: Database): void {
     // v1.1: deferred-count columns for starvation observability (issue 2)
     "ALTER TABLE message_recipient ADD COLUMN deferred_count INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE message_recipient ADD COLUMN last_deferred_at TEXT",
+    // 권한 창 때문에 주입을 미룬 횟수. deferred_count(lock-busy 예산)·last_error 와 따로 두어 다른 실패가 덮어쓰지 않는다.
+    "ALTER TABLE message_recipient ADD COLUMN prompt_hold_count INTEGER NOT NULL DEFAULT 0",
     // v1.1: shadow_seen_at to track first shadow log per row (issue 5)
     "ALTER TABLE message_recipient ADD COLUMN shadow_seen_at TEXT",
     // message → bus metadata
