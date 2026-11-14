@@ -91,6 +91,8 @@ archiving/
 !/docs/TEAM_COLLECT_ORCHESTRATION.md
 !/docs/DEPLOY_MERGE_HOTFIX_WORKFLOW.md
 !/docs/TEAM_COMMUNICATION.md
+# 작업 기록 파일럿 규격 — 팀원이 기록·측정·rollback 판정에 쓰는 운영 문서라 추적한다.
+!/docs/WORK_RECORD_PILOT.md
 # README 가 링크한다 — 없으면 공개 README 의 Trouble Shooting 링크가 404 다.
 !/docs/TROUBLESHOOTING.md
 # 대시보드 Doc 탭(TeamOS.ts CANONICAL_DOCS)이 링크한다 — 없으면 그 링크가 404 다(2026-07-28 실측).
