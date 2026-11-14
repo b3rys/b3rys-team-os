@@ -1,0 +1,21 @@
+{
+  "_comment": "pr-gate.py 가 읽는 저장소별 머지 준비 조건. 여기에 없는 저장소는 판정하지 않는다(NOT_READY). 승인 계정·승인자 명단도 저장소마다 여기에 둔다 — 기계마다 다른 팀 설정에서 읽으면 같은 PR 이 기계마다 다르게 판정된다. 아래 example/app 은 형식 예시다: 자기 저장소 이름으로 바꾸거나 항목을 추가한다.",
+  "example/app": {
+    "base": "main",
+    "evidence": "required",
+    "evidence_branch_prefix": "evidence/app-",
+    "required_tests": "단위 전체 + 바뀐 기능의 UI 시험 (고른 UI 시험이 맞는지는 사람이 본다)",
+    "min_unit_tests": 100,
+    "_min_unit_tests_note": "증거 run.log 의 'units passed N'(단위 전체) 하한. 지금 단위 전체 수보다 조금 낮게 둔다.",
+    "merge_method": "squash",
+    "lead_approval": "필요 — 머지 전에 팀장 확인을 받는다",
+    "approval": {
+      "author_account": "author-bot",
+      "approver_account": "reviewer-bot",
+      "approvers": [
+        "reviewer"
+      ],
+      "_note": "작성 계정과 다른 승인 계정으로 GitHub 승인. 명단을 바꾸는 것은 승인 규칙 변경이다."
+    }
+  }
+}
