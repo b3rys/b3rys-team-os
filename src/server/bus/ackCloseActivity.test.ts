@@ -24,15 +24,15 @@ function freshDb(): Database {
 }
 
 // a message RECEIVED by `recipient`, `ageSec` seconds ago, with given recipient_state.
-function received(db: Database, msgId: string, recipient: string, ageSec: number, state = "open") {
+function received(db: Database, msgId: string, recipient: string, ageSec: number, state = "open", delivery = "wake_dispatched") {
   db.prepare(
     `INSERT INTO message (id, thread_id, from_agent_id, to_agent_id, type, body, source, created_at)
      VALUES (?, 't1', 'gd', ?, 'dm', 'task', 'user', datetime('now', ?))`,
   ).run(msgId, recipient, `-${ageSec} seconds`);
   db.prepare(
     `INSERT INTO message_recipient (message_id, agent_id, delivery_state, recipient_state)
-     VALUES (?, ?, 'wake_dispatched', ?)`,
-  ).run(msgId, recipient, state);
+     VALUES (?, ?, ?, ?)`,
+  ).run(msgId, recipient, delivery, state);
 }
 
 function stateOf(db: Database, msgId: string, agent: string): { recipient_state: string; close_reason: string | null } {
@@ -87,6 +87,17 @@ describe("applyActivityAutoAck", () => {
     expect(d.via).toBe("activity_auto_ack");
     expect(d.close_reason).toBe("activity_assumed");
     expect(d.to_state).toBe("acknowledged");
+  });
+
+  test("undelivered rows (blocked / dead_letter) stay open — activity is not evidence the agent saw them", () => {
+    received(db, "blk", "bill", 600, "open", "blocked");
+    received(db, "dead", "bill", 600, "open", "dead_letter");
+    received(db, "seen", "bill", 600);
+    const res = applyActivityAutoAck(db, "bill", "trigger-msg");
+    expect(res.acked).toBe(1);
+    expect(stateOf(db, "blk", "bill")).toEqual({ recipient_state: "open", close_reason: null });
+    expect(stateOf(db, "dead", "bill")).toEqual({ recipient_state: "open", close_reason: null });
+    expect(stateOf(db, "seen", "bill").recipient_state).toBe("acknowledged");
   });
 
   test("idempotent: a second activity pass does nothing (rows no longer open)", () => {

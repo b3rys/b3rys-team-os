@@ -146,7 +146,7 @@ send.sh --to steve --body "판정기 회귀 수트 어디 있어?" --thread abc1
 - `kind="direct_to_gd"` → `--direct-to-gd`
 - `kind="notice"` → `--to <about>` (about 없으면 답할 곳 없음 = 보내지 마)
 - `kind="slack"` → `--to broadcast`
-- 항상 `--thread <thread> --in-reply-to <msg> --hop <hop_count+1>` 추가.
+- 항상 `--thread <thread> --in-reply-to <msg> --hop <hop_count+1>` 추가. 답장이 아니라 새 스레드로 보낼 때는 `--in-reply-to` 와 `--hop` 을 둘 다 뺀다(hop_count 는 부모가 없어도 리셋되지 않는다).
 
 ★`kind`는 **서버가 계산**한다(멤버가 안 짐작). 왜: GD 직보면 direct_to_gd, 실 그룹 라우터면 group, `meta.reply_to` 있는 시스템알림이면 teammate(없으면 notice=블랙홀·답 X), 나머지 팀원 DM이면 teammate. 코드상 `kind`를 필수 타입으로 둬서 배선 빠지면 컴파일 에러.
 
@@ -261,7 +261,7 @@ Bill은 `kind="teammate"` → `send.sh --to demis --thread th-abc123 --in-reply-
 
 ### 4-1. 두 하드 백스톱
 
-**① hop 상한 = 16** (`MAX_HOPS_DEFAULT`). 매 답마다 `hop_count+1`. 초과 시 저장 전(ingress) + 디스패치 시 둘 다 거부 → `delivery_state='blocked'`.
+**① hop 상한 = 16** (`MAX_HOPS_DEFAULT`). 매 답마다 `hop_count+1`. `hop_count >= 16` 이면 저장 전(ingress, 400 `ttl_exceeded`)과 디스패치(`delivery_state='blocked'`) 둘 다 같은 경계로 거부한다. ingress 검사는 답장 hop 보정(부모+1) 뒤에 한다.
 
 **② auto-round 상한 = 6** (`BUS_MAX_AUTO_ROUNDS`, launchd env=6). ★실제 봇↔봇 백스톱★. `parent_message_id` 체인을 걸어 **에이전트가 보낸 링크 수**를 세서(최대 depth 10), 6 이상이면 blocked. 6 = **약 3왕복 허용** 후 차단. ★사용자/시스템 발신(GD 지시)은 면제★(`source==="agent"`만 걸림).
 

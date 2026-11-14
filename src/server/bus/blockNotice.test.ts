@@ -87,6 +87,7 @@ describe("★차단 통보 — 실제로 막히고, 실제로 통보가 나가�
     expect(n.source).toBe("system");
     expect(String(n.body)).toContain("m-blocked");       // ★차단된 메시지 id 포함★ (재전송·이관용)
     expect(String(n.body)).toContain("새 스레드");        // 실행 가능한 복구 행동
+    expect(String(n.body)).toContain("--hop");           // hop 은 새 스레드에서도 리셋되지 않으므로 빼라고 알린다
   });
 
   test("③ ★그 통보 자체는 같은 가드에 안 걸린다★ — 이게 핵심이다", () => {

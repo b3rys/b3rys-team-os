@@ -273,6 +273,9 @@ const ACTIVITY_ACK_GRACE_SECONDS = 30;
  * closes the silent-ack and answered-out-of-band (Telegram group) cases that an explicit
  * in_reply_to match never catches. Only lifts 'open' rows older than the grace window;
  * never touches in_progress/blocked/needs_match_review/terminal. Idempotent.
+ * Rows whose delivery ended undelivered (delivery_state 'blocked' or 'dead_letter') are
+ * skipped: the agent never saw them, so its activity says nothing about them, and closing
+ * them would hide the failed delivery behind an 'acknowledged' state.
  *
  * @param excludeMessageId a message just handled by applyAckClose in the same insert — skip it.
  */
@@ -288,6 +291,7 @@ export function applyActivityAutoAck(
        FROM message_recipient mr JOIN message m ON m.id = mr.message_id
        WHERE mr.agent_id = ?
          AND mr.recipient_state = 'open'
+         AND mr.delivery_state NOT IN ('blocked', 'dead_letter')
          AND mr.message_id != ?
          AND m.created_at < datetime('now', ?)`,
     )

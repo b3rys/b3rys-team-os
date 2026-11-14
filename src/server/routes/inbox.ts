@@ -174,13 +174,6 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
       }
     }
 
-    // Phase 2a: hop_count enforcement (defense-in-depth beyond zod max)
-    const maxHop = env.max_hop ?? MAX_HOPS_DEFAULT;
-    if ((env.hop_count ?? 0) > maxHop) {
-      appendAudit(deps.db, env.from_agent_id, "hop_limit_exceeded", null, { hop: env.hop_count });
-      return c.json({ error: "ttl_exceeded", max_hops: maxHop, your_hop: env.hop_count }, 400);
-    }
-
     // 답장의 hop_count는 부모+1 이상이어야 하므로 누락된 증가분을 서버에서 보정한다. 더 큰 발신 값은 유지한다.
     if (env.source === "agent" && env.in_reply_to) {
       const parentRow = deps.db
@@ -192,6 +185,21 @@ export function createInboxRoutes(deps: InboxRouteDeps): Hono {
           env = { ...env, hop_count: correctedHop };
         }
       }
+    }
+    // hop 한도는 배달 단계(checkPingpong)와 같은 경계(hop_count >= max_hop)로, 보정이 끝난 값에 검사한다.
+    // 경계가 다르면 한도 값의 메시지가 접수만 되고 배달 단계에서 막혀, 발신자는 성공 응답을 받고 수신자는 받지 못한다.
+    // hop_count 는 발신자가 넘긴 값이라 부모가 없어도 0으로 돌아가지 않는다 — 새 스레드로 옮길 때는 --hop 도 뺀다.
+    const maxHop = env.max_hop ?? MAX_HOPS_DEFAULT;
+    if ((env.hop_count ?? 0) >= maxHop) {
+      appendAudit(deps.db, env.from_agent_id, "hop_limit_exceeded", null, { hop: env.hop_count });
+      return c.json({
+        ok: false,
+        error: "ttl_exceeded",
+        max_hops: maxHop,
+        your_hop: env.hop_count,
+        detail: `✖ hop ${env.hop_count} 은 한도(${maxHop})에 닿아 배달되지 않으므로 접수하지 않았습니다.`,
+        next: `--in-reply-to 와 --hop 을 모두 빼고 새 --thread 로 다시 보내세요. 본문 첫 줄에 이어지는 스레드 이름을 적으면 받는 쪽이 맥락을 잇습니다.`,
+      }, 400);
     }
     // 왕복 상한은 배달 단계(checkPingpong)에서 막는데, 그때는 발신자가 이미 접수 응답을 받은 뒤라 막힌 줄 모른다.
     // 팀원에게 직접 보내는 답장은 같은 셈(countAutoRounds·MAX_AUTO_ROUNDS)으로 저장 전에 거절해 바로 알린다.
