@@ -44,7 +44,7 @@ lockf -k -t 1200 /Users/Shared/steno-locks/machine.lock <무거운 명령>
 
 ### 공용 맥에서 시뮬레이터 함께 쓰기
 
-아이폰 시뮬레이터 시험은 CPU·메모리를 크게 쓰므로 공용 맥에서는 아래 흐름을 지킨다(상세 증상·원인은 b3os-mac-app-shell [`references/iphone-dev-test.md`](../../b3os-mac-app-shell/references/iphone-dev-test.md) 1·8장이 정본).
+아이폰 시뮬레이터 시험은 CPU·메모리를 크게 쓰므로 공용 맥에서는 아래 흐름을 지킨다.
 
 1. 시뮬레이터 시험·빌드는 위 `machine.lock` 안에서만 돌린다.
 2. 잠금 **대기 제한**(`lockf -t`)과 **실행 제한**(예: `perl -e 'alarm N; exec @ARGV'`)을 따로 건다. 하나의 타이머로 걸면 대기만 하다 잘린다.
