@@ -1,4 +1,5 @@
 import { CogsApiRejected, CogsDeliveryUnknown, cogsCall, type CogsInbox } from "./cogsRelay";
+import { safeProgressDetail } from "./cogsProgressDetail";
 
 /**
  * cogs 에서 받은 말을 팀원 세션에 넣은 뒤, 그 팀원이 답을 낼 때까지 그 방에 '입력 중'(sendChatAction typing)을 계속 보낸다.
@@ -12,6 +13,8 @@ export interface CogsTypingOptions {
   capMs?: number;
   call?: typeof cogsCall;
   replyToMessageId?: number;
+  /** Test clock override; normal sessions coalesce activity updates for one second. */
+  progressIntervalMs?: number;
 }
 
 const DEFAULT_INTERVAL_MS = 4000;
@@ -28,6 +31,11 @@ interface Processing {
   messageId?: number;
   replyToMessageId?: number;
   lastCode?: string;
+  lastDetail?: string;
+  lastProgressAt?: number;
+  progressIntervalMs: number;
+  progressTimer?: ReturnType<typeof setTimeout>;
+  queuedProgress?: { code: string; target: string };
   uncertainOpen?: boolean;
   uncertainComplete?: boolean;
   pending: Promise<unknown>;
@@ -56,7 +64,7 @@ export function startCogsTyping(agentId: string, chatId: string, config: Pick<Co
   const cap = setTimeout(() => stopCogsTyping(agentId, chatId), opts.capMs ?? DEFAULT_CAP_MS);
   (interval as { unref?: () => void }).unref?.();
   (cap as { unref?: () => void }).unref?.();
-  active.set(k, { interval, cap, call, config, token, replyToMessageId: opts.replyToMessageId, accepting: true, pending: Promise.resolve() });
+  active.set(k, { interval, cap, call, config, token, replyToMessageId: opts.replyToMessageId, progressIntervalMs: opts.progressIntervalMs ?? 1000, accepting: true, pending: Promise.resolve() });
   send();
 }
 
@@ -67,6 +75,8 @@ function detachCogsTyping(agentId: string, chatId: string): Processing | undefin
   if (!entry) return undefined;
   clearInterval(entry.interval);
   clearTimeout(entry.cap);
+  clearTimeout(entry.progressTimer);
+  entry.queuedProgress = undefined;
   active.delete(k);
   entry.accepting = false;
   return entry;
@@ -110,14 +120,37 @@ export async function endCogsTypingWithoutReply<T extends { declined: boolean }>
   }
 }
 
-/** Only canonical activity codes, never tool arguments, reach the response message. */
-export async function updateCogsProgress(agentId: string, chatId: string, code: string): Promise<boolean> {
+/** Only activity codes and sanitized descriptions reach the response message. */
+export async function updateCogsProgress(agentId: string, chatId: string, code: string, detail?: unknown, file = false): Promise<boolean> {
+  const target = safeProgressDetail(detail, file);
   const entry = active.get(key(agentId, chatId));
   if (!entry?.accepting || process.env.B3OS_COGS_PROGRESS === "0") return false;
+  entry.queuedProgress = { code, target };
+  if (entry.progressTimer) return true;
   const next = entry.pending.then(async () => {
     if (!entry.accepting || entry.uncertainOpen) return false;
-    if (entry.lastCode === code) return true;
-    const body = { chat_id: chatId, text: "", cogs_response_state: "activity", cogs_activity_code: code, cogs_activity_args: {} };
+    const latest = entry.queuedProgress;
+    if (!latest) return true;
+    const { code, target } = latest;
+    if (entry.lastCode === code && entry.lastDetail === target) {
+      entry.queuedProgress = undefined;
+      return true;
+    }
+    const delay = entry.lastProgressAt === undefined ? 0 : entry.progressIntervalMs - (Date.now() - entry.lastProgressAt);
+    if (delay > 0) {
+      if (!entry.progressTimer) {
+        entry.progressTimer = setTimeout(() => {
+          entry.progressTimer = undefined;
+          const latest = entry.queuedProgress;
+          if (latest) void updateCogsProgress(agentId, chatId, latest.code, latest.target).catch(() => {});
+        }, delay);
+        (entry.progressTimer as { unref?: () => void }).unref?.();
+      }
+      return true;
+    }
+    entry.queuedProgress = undefined;
+    entry.lastProgressAt = Date.now();
+    const body = { chat_id: chatId, text: "", cogs_response_state: "activity", cogs_activity_code: code, cogs_activity_args: target ? { target } : {} };
     if (entry.messageId !== undefined) {
       await entry.call(entry.config, entry.token, "editMessageText", { ...body, message_id: entry.messageId });
     } else {
@@ -131,6 +164,7 @@ export async function updateCogsProgress(agentId: string, chatId: string, code: 
       }
     }
     entry.lastCode = code;
+    entry.lastDetail = target;
     return true;
   });
   entry.pending = next.catch(() => {});
@@ -155,6 +189,8 @@ export async function completeCogsProgress(agentId: string, chatId: string, text
   entry.finishing = true;
   entry.accepting = false;
   clearInterval(entry.interval);
+  clearTimeout(entry.progressTimer);
+  entry.queuedProgress = undefined;
   const next = entry.pending.then(async () => {
     if (entry.messageId !== undefined) {
       try {
