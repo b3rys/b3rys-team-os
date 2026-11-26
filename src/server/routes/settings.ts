@@ -189,6 +189,11 @@ export interface RuntimeOption {
 }
 
 // Codex를 포함한 선택지는 설치·인증 readiness를 공유한다. b3os_native는 양쪽에서 숨긴다.
+/** swap 이 넘기는 teardown 옵션(예: 마지막 hermes 멤버의 stopBaseHermesGateway)을 지우지 않고, 테스트 격리 skip 만 덧붙인다. */
+export function bindSwapTeardown(skip: boolean, td: typeof teardownRuntime = teardownRuntime): typeof teardownRuntime {
+  return (tid, runtime, agent, opts = {}) => td(tid, runtime, agent, { ...opts, skip });
+}
+
 export function publicRuntimeOptions(
   readiness: Record<string, RuntimeReadiness>,
   _publicBuild = PUBLIC_BUILD,
@@ -817,7 +822,7 @@ export function createSettingsApp(deps: SettingsDeps): Hono {
       return c.json({ ok: false, error: "confirm_name_mismatch", hint: `정확히 "${swapTarget.display_name}" 입력 필요` }, 400);
 
     // teardownRuntime 은 skipRuntimeCleanup(테스트 격리 플래그)을 그대로 물려받는다 — offboard와 동일 규약.
-    const boundTeardownRuntime: typeof teardownRuntime = (tid, runtime, agent) => teardownRuntime(tid, runtime, agent, { skip: skipRuntimeCleanup });
+    const boundTeardownRuntime = bindSwapTeardown(skipRuntimeCleanup);
 
     const result = await swapRuntime(
       db,

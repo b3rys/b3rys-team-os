@@ -18,6 +18,7 @@ import { classifyAll } from "../lib/health";
 import { quotaBlockMap } from "../lib/runtimeQuota";
 import { ambientAgents } from "../lib/registry"; // 정규 팀원 여부·별칭의 정본은 agents.json 이다 (DB 표에는 없다)
 import { isTeamOfficialMember } from "../lib/agentMembership";
+import { REPO_ROOT } from "../lib/paths";
 import { isMcpEnabled } from "../lib/captureConfig"; // ★HTTP 와 같은 스위치★ — 창구를 끄면 stdio 도 안 붙는다
 import { leadActorId } from "../lib/opAuth"; // ★이름만 재사용★ — 신뢰 규칙(루프백=리드)은 쓰지 않는다
 import { askTeammate, fetchAnswer, askProgress } from "./mcpAsk";
@@ -613,7 +614,7 @@ export function buildMcpServer(db: Database, actor: string | null, scope: McpSco
 
 /** 실제 실행 시 team.db 경로(env B3OS_MCP_DB 우선, 기본=레포 team.db). */
 function dbPath(): string {
-  return process.env.B3OS_MCP_DB ?? `${process.env.HOME}/Development/b3rys-team-os/team.db`;
+  return process.env.B3OS_MCP_DB ?? `${REPO_ROOT}/team.db`;
 }
 /** 레포 루트 = team.db가 있는 디렉터리. */
 function repoRoot(): string {

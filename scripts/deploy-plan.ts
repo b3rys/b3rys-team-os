@@ -9,7 +9,8 @@
  * ■ 판단 기준 — ★층마다 살아나는 방법이 다르다★
  *   · `src/server/**` 등 → 프로세스가 기동할 때 메모리에 올린다 → ★재시작★
  *   · `src/web/**` 등    → 빌드 결과물(`dist/web`)을 요청 시점에 읽는다 → ★빌드★ (재시작은 효과 없음)
- *   · 그 외(skills·rules·docs) → 파일이 바뀐 순간 끝. ★아무것도 안 한다.★
+ *   · `rules/TEAM-OS.template.md`·`skills/<이름>/SKILL.md` → 부팅 때 렌더본(rules/TEAM-OS.md·rules/SKILLS.md)을 만든다 → ★재시작★
+ *   · 그 외(나머지 skills·rules·docs) → 팀원이 파일을 바로 읽는다. ★아무것도 안 한다.★
  * 2026-08-06 실측: `src/web` 만 바뀐 배포에 재시작을 하면 ★화면은 그대로다.★ 반대로 `src/server`
  * 가 바뀐 배포에 빌드만 하면 ★옛 코드가 계속 돈다.★ 사람이 매번 이걸 고르고 있었고, 한 번 틀렸다.
  *
@@ -41,7 +42,20 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
  * 나머지 층이 옛 코드로 남는다. 애매하면 ★넓게 잡는 쪽이 안전하다★(불필요한 작업 < 누락).
  */
 export const LAYER_PATHS = {
-  server: ["src/server", "src/shared", "package.json", "bun.lock", "bunfig.toml", "tsconfig.json"],
+  server: [
+    "src/server",
+    "src/shared",
+    "package.json",
+    "bun.lock",
+    "bunfig.toml",
+    "tsconfig.json",
+    // ★부팅 때만 렌더되는 입력★ — rules/TEAM-OS.md(팀원이 읽는 렌더본)는 서버 기동·설정 저장 때
+    //   rules/TEAM-OS.template.md 에서 만들어지고(teamOsRender.renderAndRepoint), rules/SKILLS.md 는
+    //   skills/*/SKILL.md 의 trigger 줄에서 만들어진다(skillsRender). 템플릿만 바뀐 머지가 "할 일 없음"으로
+    //   끝나 새 룰이 팀원에게 안 닿았다 → 이 입력이 바뀌면 재시작.
+    "rules/TEAM-OS.template.md",
+    ":(glob)skills/*/SKILL.md",
+  ],
   web: [
     "src/web",
     "src/shared",

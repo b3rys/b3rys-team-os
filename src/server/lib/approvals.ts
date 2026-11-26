@@ -4,7 +4,7 @@ import type { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { appendAuditFile } from "./auditFile";
-import { MANUALS_DIR, withRuntimePath } from "./paths";
+import { MANUALS_DIR, REPO_ROOT, withRuntimePath } from "./paths";
 
 // ---------------------------------------------------------------------------
 // 액션 레지스트리 — 미리 정의된 안전 셋. (Stage 2에서 script/buildEnv 로 실행)
@@ -32,7 +32,7 @@ export interface ApprovalAction {
 
 /** 액션 실행이 기준으로 삼는 repo 루트. run.cmd 의 `${TEAM_COLLAB_DIR:-$HOME/...}` 와 같은 규칙. */
 function approvalsRepoRoot(): string {
-  return process.env.TEAM_COLLAB_DIR ?? join(process.env.HOME ?? "", "Development/b3rys-team-os");
+  return process.env.TEAM_COLLAB_DIR ?? REPO_ROOT;
 }
 
 /** 없는 필수 파일 목록(빈 배열 = 실행 가능). 호출 시점 에 본다 — 파일이 생기면 즉시 반영된다. */

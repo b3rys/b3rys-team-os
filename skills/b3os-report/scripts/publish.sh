@@ -16,7 +16,7 @@ resolve_root() {
   local script_dir; script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   local from_script; from_script="$(cd "$script_dir/../../.." 2>/dev/null && pwd || true)"
   local cand
-  for cand in "$from_script" "$HOME/b3rys-team-os" "$HOME/Development/b3rys-team-os"; do
+  for cand in "${B3OS_ROOT:-}" "$from_script" "$HOME/b3rys-team-os"; do
     [ -n "$cand" ] || continue
     if [ -f "$cand/agents.json" ] || [ -d "$cand/dist/server" ]; then echo "$cand"; return; fi
   done

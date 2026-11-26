@@ -552,8 +552,9 @@ describe("activation: swapRuntime", () => {
     }
   });
 
-  test("설정된 base hermes 스왑 시도 → teardown 호출 전 거부(code=base_hermes_guard)", async () => {
-    const { registryPath, db } = setupSwapFixture({ id: HERMES_BASE_PROFILE, runtime: "hermes_agent", status_provider: "hermes_gateway", hermes_profile: HERMES_BASE_PROFILE });
+  test("설정된 base hermes 스왑 시도(다른 hermes 멤버가 남음) → teardown 호출 전 거부(code=base_hermes_guard)", async () => {
+    const { registryPath, db, agent } = setupSwapFixture({ id: HERMES_BASE_PROFILE, runtime: "hermes_agent", status_provider: "hermes_gateway", hermes_profile: HERMES_BASE_PROFILE });
+    writeFileSync(registryPath, JSON.stringify([agent, { ...agent, id: "other", display_name: "Other", hermes_profile: "other" }], null, 2), "utf-8");
     let teardownCalls = 0;
     const result = await swapRuntime(db, { id: HERMES_BASE_PROFILE, targetRuntime: "codex", registryPath }, {
       checkRuntimeAuth: authOk, activateMember: activateOk,
@@ -562,6 +563,47 @@ describe("activation: swapRuntime", () => {
     expect(result.ok).toBe(false);
     expect(result.code).toBe("base_hermes_guard");
     expect(teardownCalls).toBe(0);
+  });
+
+  test("base hermes 가 마지막 hermes 멤버면 → 스왑 허용, teardown 에 게이트웨이만 끄라고 넘긴다", async () => {
+    const { registryPath, db } = setupSwapFixture({ id: HERMES_BASE_PROFILE, runtime: "hermes_agent", status_provider: "hermes_gateway", hermes_profile: HERMES_BASE_PROFILE });
+    const seen: any[] = [];
+    const result = await swapRuntime(db, { id: HERMES_BASE_PROFILE, targetRuntime: "codex", registryPath, bot_token: FAKE_TOKEN }, {
+      checkRuntimeAuth: authOk, activateMember: activateOk,
+      teardownRuntime: async (_id, runtime, _a, o) => { seen.push({ runtime, o }); return { ok: true, detail: "" }; },
+    });
+    expect(result.ok).toBe(true);
+    expect(seen).toEqual([{ runtime: "hermes_agent", o: { stopBaseHermesGateway: true } }]);
+  });
+
+  test("base hermes 정지 teardown: 게이트웨이 끄기·plist 삭제는 하고 프로필 dir 은 남긴다", async () => {
+    const calls: string[] = [];
+    const r = await teardownRuntime(HERMES_BASE_PROFILE, "hermes_agent", { hermes_profile: HERMES_BASE_PROFILE }, {
+      stopBaseHermesGateway: true, sleepMs: 0,
+      setAgentEnabled: (async (id: string, rt: string, en: boolean) => { calls.push(`enable:${id}:${rt}:${en}`); return { ok: true, detail: "" }; }) as any,
+      existsSync: (() => true) as any,
+      rmSync: ((p: string) => { calls.push(`rm:${p.split("/").pop()}`); }) as any,
+      removePathWithRetries: (async (p: string) => { calls.push(`rmdir:${p}`); }) as any,
+    });
+    expect(r.ok).toBe(true);
+    expect(calls).toContain(`enable:${HERMES_BASE_PROFILE}:hermes_agent:false`);
+    expect(calls).toContain(`rm:ai.hermes.gateway-${HERMES_BASE_PROFILE}.plist`);
+    expect(calls.some((c) => c.startsWith("rmdir:"))).toBe(false);
+  });
+
+  test("hermes teardown: gateway_service 라벨이 다르면 그 라벨의 plist 를 지우고, 이상한 라벨이면 지우지 않는다", async () => {
+    for (const [svc, expected] of [["ai.hermes.gateway-custom", "ai.hermes.gateway-custom.plist"], ["../../evil", null], [".hidden", null]] as const) {
+      const removed: string[] = [];
+      await teardownRuntime(HERMES_BASE_PROFILE, "hermes_agent", { hermes_profile: HERMES_BASE_PROFILE, gateway_service: svc }, {
+        stopBaseHermesGateway: true, sleepMs: 0,
+        setAgentEnabled: (async () => ({ ok: true, detail: "" })) as any,
+        existsSync: (() => true) as any,
+        rmSync: ((p: string) => { removed.push(p); }) as any,
+        removePathWithRetries: (async () => true) as any,
+      });
+      const plists = removed.filter((p) => p.includes("/Library/LaunchAgents/"));
+      expect(plists.map((p) => p.split("/").pop())).toEqual(expected ? [expected] : []);
+    }
   });
 
   test("base 이름의 비-Hermes 멤버를 Hermes로 스왑 → base 프로필 점유 전 거부", async () => {

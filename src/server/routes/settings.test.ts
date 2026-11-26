@@ -1712,3 +1712,12 @@ describe("Codex member permission mode",()=>{
   }
  });
 });
+
+import { bindSwapTeardown } from "./settings";
+test("swap 라우트의 teardown 은 swap 이 넘긴 옵션을 그대로 전하고 skip 만 덧붙인다", async () => {
+  const seen: unknown[] = [];
+  const bound = bindSwapTeardown(true, (async (_id: string, _rt: string, _a: unknown, o: unknown) => { seen.push(o); return { ok: true, detail: "" }; }) as any);
+  await bound("hermes", "hermes_agent", undefined, { stopBaseHermesGateway: true });
+  await bound("nova", "codex", undefined);
+  expect(seen).toEqual([{ stopBaseHermesGateway: true, skip: true }, { skip: true }]);
+});
