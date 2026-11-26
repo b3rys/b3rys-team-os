@@ -523,3 +523,34 @@ test("멈춘 계획은 검증을 통과하지 못한다 · 라이브 커밋을 �
   expect(verifyAfterDeploy(base, live(SHA.server, null)).ok).toBe(false);
   expect(parsePlanJson(JSON.stringify({ ...base, blocked: 3 }))).toBeNull();
 });
+
+test("★TEAM-OS 템플릿만 바뀌어도 재시작한다(빌드는 안 함)★ — 렌더본은 부팅 때만 만들어진다", () => {
+  const plan = planDeploy({
+    live: live(SHA.server, SHA.web),
+    target: SHA.target,
+    changedFiles: (_f, _t, paths) => (paths.includes("rules/TEAM-OS.template.md") ? ["rules/TEAM-OS.template.md"] : []),
+    commitExists: always,
+  });
+  expect(plan.actions).toEqual({ restart: true, build: false });
+  expect(formatFlagsLine(plan)).toBe("build=0 restart=1");
+});
+
+test("★스킬 SKILL.md 변경도 재시작한다★ — rules/SKILLS.md 는 부팅 때 렌더된다", () => {
+  const plan = planDeploy({
+    live: live(SHA.server, SHA.web),
+    target: SHA.target,
+    changedFiles: (_f, _t, paths) => (paths.includes(":(glob)skills/*/SKILL.md") ? ["skills/x/SKILL.md"] : []),
+    commitExists: always,
+  });
+  expect(plan.actions).toEqual({ restart: true, build: false });
+});
+
+test("★대조군★ — docs 만 바뀌면 여전히 build=0 restart=0", () => {
+  const plan = planDeploy({
+    live: live(SHA.server, SHA.web),
+    target: SHA.target,
+    changedFiles: (_f, _t, paths) => (paths.some((p) => p.startsWith("docs")) ? ["docs/a.md"] : []),
+    commitExists: always,
+  });
+  expect(formatFlagsLine(plan)).toBe("build=0 restart=0");
+});
