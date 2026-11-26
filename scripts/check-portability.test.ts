@@ -53,3 +53,28 @@ test("CLI fails on incident syntax injected into an isolated snapshot source", a
     expect(spawnSync(process.execPath, [script], {cwd, encoding: "utf8"}).status).toBe(0);
   } finally { rmSync(cwd, {recursive: true, force: true}); }
 });
+
+test("engine folder literals fail in source, scripts and python hooks; B3OS_ROOT-based paths pass", () => {
+  expect(scan("src/server/lib/x.ts", 'const p = `${HOME}/Development/b3rys-team-os/team.db`;')).toHaveLength(1);
+  expect(scan("src/server/lib/x.ts", 'const p = `${REPO_ROOT}/team.db`;')).toHaveLength(0);
+  expect(scan("src/server/runtimes/claude/x.py", 'P = f"{HOME}/Development/b3rys-team-os/scripts/a.sh"')).toHaveLength(1);
+  expect(scan("src/server/runtimes/claude/x.py", '# /Users/x in a comment\nP = os.environ.get("B3OS_ROOT")')).toHaveLength(0);
+  expect(scan("skills/a/scripts/x.sh", 'for c in "$HOME/Development/b3rys-team-os"; do :; done')).toHaveLength(1);
+  expect(scan("skills/a/scripts/x.sh", 'for c in "${B3OS_ROOT:-}"; do :; done')).toHaveLength(0);
+});
+
+test("no tracked non-test source file hardcodes a home path or the engine folder", () => {
+  const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+  const { readFileSync } = require("node:fs") as typeof import("node:fs");
+  const listed = execFileSync("git", ["ls-files", "-s", "-z", "--", "src", "scripts", "skills", "githooks"], { encoding: "utf8" }).split("\0").filter(Boolean).map((r) => ({ mode: r.split(" ")[0], file: r.split("\t")[1]! }));
+  // Extensionless files count only when executable (githooks/, scripts/); .md and .json are never scanned.
+  const files = listed.filter(({ mode, file }) => /\.(?:[cm]?[jt]sx?|py|sh)$/.test(file) || (mode === "100755" && /^(?:githooks|scripts)\//.test(file) && !/\.[A-Za-z0-9]+$/.test(file.split("/").pop()!))).map((r) => r.file);
+  const hits = files.flatMap((f) => scan(f, readFileSync(f, "utf8")));
+  expect(hits).toEqual([]);
+});
+
+test("extensionless executable hooks are scanned", () => {
+  expect(scan("githooks/reference-transaction", '#!/usr/bin/env bash\nDB="$HOME/Development/b3rys-team-os/team.db"')).toHaveLength(1);
+  expect(scan("githooks/reference-transaction", '#!/usr/bin/env bash\nDB="${B3OS_ROOT}/team.db"')).toHaveLength(0);
+  expect(scan("githooks/README", 'Development/b3rys-team-os')).toHaveLength(0);
+});

@@ -7,7 +7,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 const HOME = process.env.HOME ?? "";
 // 정본 경로 = team-os repo 루트 기준 (퍼블릭 포터블 — 하드코딩 금지 Q3).
 // 이 소스(.../src/server/lib/personaTemplates.ts) 기준 3단계 위 = repo 루트. install 위치 자동탐지.
-// env TEAM_COLLAB_ROOT 로 override 가능(컨테이너/심링크 환경). GD 머신에선 ~/Development/b3rys-team-os 로 해석되어 기존과 동일.
+// env TEAM_COLLAB_ROOT 또는 B3OS_ROOT 로 override 가능(컨테이너/심링크 환경). 엔진 루트의 유일한 해석 지점이다.
 // 워크트리에서 렌더한 경로가 팀원 파일에 남지 않도록 .git 포인터로 메인 워크트리를 찾는다. 명시 환경변수는 우선한다.
 function mainWorktreeRoot(start: string): string {
   let dir = start;
@@ -32,7 +32,7 @@ function mainWorktreeRoot(start: string): string {
 }
 
 export const REPO_ROOT =
-  process.env.TEAM_COLLAB_ROOT ?? mainWorktreeRoot(resolve(import.meta.dir, "../../.."));
+  process.env.TEAM_COLLAB_ROOT ?? process.env.B3OS_ROOT ?? mainWorktreeRoot(resolve(import.meta.dir, "../../.."));
 const TEAM_OS_PATH = `${REPO_ROOT}/rules/TEAM-OS.md`;
 const SHARED_PATH = `${REPO_ROOT}/rules/SHARED.md`;
 

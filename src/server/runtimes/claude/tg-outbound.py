@@ -33,9 +33,11 @@ STATE_PATH = os.environ.get("TG_OUTBOUND_STATE", f"{HOME}/.claude/hooks/.tg-outb
 LOG_PATH = os.environ.get("TG_OUTBOUND_LOG", f"{HOME}/.claude/hooks/.tg-outbound.log")
 DRYRUN = os.environ.get("TG_OUTBOUND_DRYRUN", "") == "1"
 RETRIES = int(os.environ.get("TG_OUTBOUND_RETRIES", "3"))
+# 엔진 루트 = env B3OS_ROOT, 없으면 이 파일 위치(<root>/src/server/runtimes/claude/) 기준.
+B3OS_ROOT = os.environ.get("B3OS_ROOT") or os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".."))
 TG_SEND_CANDIDATES = [
     os.environ.get("TG_SEND_SCRIPT", ""),
-    f"{HOME}/Development/b3rys-team-os/scripts/tg-send.sh",
+    f"{B3OS_ROOT}/scripts/tg-send.sh",
 ]
 
 # 마커 — persona가 답을 이 형식으로만 쓰게 강제. ★to= 옵션(Steve ②)★ + ★delimiter 충돌 완화(GD 리스크8)★:

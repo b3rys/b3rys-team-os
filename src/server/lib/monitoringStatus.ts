@@ -4,11 +4,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { botLivenessLogPath } from "./livenessMonitor";
+import { REPO_ROOT } from "./paths";
 export { readCompactionMetrics, createCompactionMetricsReader, COMPACTION_CACHE_MS } from "./compactionMetrics";
 export type { CompactionMetrics, CompactionMemberStat, CompactionReaderOptions } from "./compactionMetrics";
 const INGRESS_STATUS_FILE =
   process.env.OPENCLAW_TELEGRAM_STATUS_FILE ||
-  join(homedir(), "Development/b3rys-team-os/var/openclaw-telegram-ingress-status.json");
+  join(REPO_ROOT, "var/openclaw-telegram-ingress-status.json");
 
 export interface LivenessStatus {
   available: boolean; // 로그 파일 존재·파싱 성공

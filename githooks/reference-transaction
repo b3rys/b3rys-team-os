@@ -31,7 +31,9 @@ $inputs
 EOF
 [ "$has_main" = "1" ] || exit 0
 
-DB="${TEAM_DB:-$HOME/Development/b3rys-team-os/team.db}"
+# 엔진 루트 = env B3OS_ROOT, 없으면 이 훅 위치(<root>/githooks/) 기준.
+ROOT="${B3OS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)}"
+DB="${TEAM_DB:-$ROOT/team.db}"
 
 # ── FAIL-OPEN: 검증 불가(인프라)면 허용 ──
 command -v sqlite3 >/dev/null 2>&1 || exit 0

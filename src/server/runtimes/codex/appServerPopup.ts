@@ -413,7 +413,7 @@ function writeOperation(
 
 /** grantRoot 를 사람이 구별할 수 있게 줄인다. 열쇠 구분은 operation hash(setDigest)이 하므로
  *  여기서는 읽히는 것만 신경 쓴다 — 뿌리는 앞이 아니라 뒤가 다르다
- *  (`/Users/gdmini/Development/a` vs `…/b` 는 앞 60자가 똑같다). 그래서 길면 뒤를 남긴다. */
+ *  (`<home>/Development/a` vs `…/b` 는 앞 60자가 똑같다). 그래서 길면 뒤를 남긴다. */
 function grantRootDisplay(root: string): string {
   if (root.length <= 72) return root;
   return `…${root.slice(-71)}`;

@@ -3,6 +3,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 
+// Home paths and the engine folder name must come from settings (B3OS_ROOT / REPO_ROOT), never literals.
+export const HARDCODED_ROOT = /\/Users\/|Development\/b3rys-team-os/;
 export type Finding = { file: string; line: number; rule: string };
 export const FILE_ALLOWLIST = [
   { pattern: /(?:\.(?:test|spec)\.[jt]sx?$|\/(?:test|tests|__tests__|fixtures|testdata)\/)/, reason: "Synthetic test paths are not production configuration." },
@@ -52,7 +54,7 @@ export function scanPortability(file: string, source: string): Finding[] {
     const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
     const findings: Finding[] = [];
     function visit(node: ts.Node) {
-      if ([ts.SyntaxKind.StringLiteral, ts.SyntaxKind.NoSubstitutionTemplateLiteral, ts.SyntaxKind.TemplateHead, ts.SyntaxKind.TemplateMiddle, ts.SyntaxKind.TemplateTail].includes(node.kind) && node.getText(tree).includes("/Users/")) {
+      if ([ts.SyntaxKind.StringLiteral, ts.SyntaxKind.NoSubstitutionTemplateLiteral, ts.SyntaxKind.TemplateHead, ts.SyntaxKind.TemplateMiddle, ts.SyntaxKind.TemplateTail].includes(node.kind) && HARDCODED_ROOT.test(node.getText(tree))) {
         findings.push({ file, line: tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1, rule: "hardcoded-users-path" });
       }
       ts.forEachChild(node, visit);
@@ -60,13 +62,18 @@ export function scanPortability(file: string, source: string): Finding[] {
     visit(tree);
     return findings;
   }
-  if (!(file.startsWith("scripts/") || file.startsWith("skills/") || file === "install.sh")) return [];
-  if (file.endsWith(".sh") || /^#!.*\b(?:ba)?sh\b/.test(source)) return scanShell(file, source);
+  if (!(file.startsWith("scripts/") || file.startsWith("skills/") || file.startsWith("src/") || file.startsWith("githooks/") || file === "install.sh")) return [];
+  if ((/\.(?:py|sh)$/.test(file) || (!/\.[A-Za-z0-9]+$/.test(file.split("/").pop()!) && source.startsWith("#!"))) && !FILE_ALLOWLIST.some(entry => entry.pattern.test(file))) {
+    const rooted = source.split("\n").flatMap((row, i) => (!row.trimStart().startsWith("#") && /\/Users\/(?!Shared\b)|Development\/b3rys-team-os/.test(row)) ? [{ file, line: i + 1, rule: "hardcoded-users-path" }] : []);
+    if (rooted.length || file.endsWith(".py")) return rooted;
+  }
+  const extensionless = !/\.[A-Za-z0-9]+$/.test(file.split("/").pop()!);
+  if (file.endsWith(".sh") || (extensionless && /^#!.*\b(?:ba|z)?sh\b/.test(source)) || /^#!.*\b(?:ba)?sh\b/.test(source)) return scanShell(file, source);
   return [];
 }
 
 if (import.meta.main) {
-  const files = execFileSync("git", ["ls-files", "-z", "--", "src", "scripts", "skills", "install.sh"], { encoding: "utf8" }).split("\0").filter(Boolean);
+  const files = execFileSync("git", ["ls-files", "-z", "--", "src", "scripts", "skills", "githooks", "install.sh"], { encoding: "utf8" }).split("\0").filter(Boolean);
   const findings = files.flatMap(file => scanPortability(file, readFileSync(file, "utf8")));
   for (const f of findings) console.error(`${f.file}:${f.line}: ${f.rule}: Bash 3.2 문법과 HOME·설정 기반 경로를 사용하세요`);
   console.log(`portability violations: ${findings.length}`);
