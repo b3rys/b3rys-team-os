@@ -1,5 +1,4 @@
 import { readMemberChannel } from "./memberChannel";
-import { claudeCogsPaths, writeClaudeCogsFiles, removeClaudeCogsFiles } from "../runtimes/claude/cogsLauncher";
 // 대시보드-실행-활성화: 영입 마지막 단계 = 서버가 런타임을 활성화한다.
 // = 수동(데본·루이 손으로 AGENTS.md·런타임)이던 걸 자동화. GD 클릭 → 서버 실행 → 터미널 0.
 //
@@ -54,7 +53,7 @@ export const STATUS_BY_RUNTIME: Record<string, string> = {
   codex: "codex_cli",
 };
 
-/** Telegram 첫 팀원도 발신자 게이트를 채운 뒤에만 브리지를 시작한다. cogs는 자체 방 허용 목록을 쓴다. */
+/** Telegram 첫 팀원도 발신자 게이트를 채운 뒤에만 브리지를 시작한다. */
 export function codexOwnerGate(db: Database, channelKind: string, derive = resolveOwnerDmId): string | null {
   if (channelKind !== "telegram") return null;
   const saved = (db.query("SELECT value FROM setting WHERE key = 'owner_chat_id'").get() as { value?: string } | null)?.value?.trim();
@@ -121,8 +120,6 @@ export interface TeardownDeps {
   codexBridgePids?: (id: string) => number[];
   /** codex: 끈 뒤 그 pid 들이 사라질 때까지 기다리는 상한(기본 10초) */
   codexExitWaitMs?: number;
-  appChannel?: boolean;
-  removeClaudeCogsFiles?: typeof removeClaudeCogsFiles;
   isAlive?: (pid: number) => boolean;
 }
 
@@ -142,15 +139,14 @@ export async function teardownRuntime(
   const HH = process.env.HOME ?? "";
 
   // codex teardown: 브리지 정지(bootout) + plist/wrapper/토큰/CODEX_HOME 정리 — 고아 프로세스·잔존 시크릿 방지(best-effort).
-  if (runtime === "codex" || (runtime === "claude_channel" && (opts.appChannel ?? readMemberChannel(id).kind === "b3chat"))) {
-    const cogsClaude = runtime === "claude_channel";
+  if (runtime === "codex") {
     // 끄기 전에 브리지·자식(codex app-server) pid 를 잡고, 끈 뒤 사라질 때까지 기다렸다 지운다.
     //   바로 지우면 꺼지던 프로세스가 CODEX_HOME 잠금 폴더를 다시 만든다(실측).
     let pids: number[] = [];
-    try { pids = opts.codexBridgePids ? opts.codexBridgePids(id) : cogsClaude ? (()=>{const pid=readBridgePid(claudeCogsPaths(id).pidFile,id);return pid ? [pid,...descendantPids(pid)] : [];})() : liveCodexBridgePids(id); } catch { pids = []; }
-    try { await doSetAgentEnabled(id, runtime, false, cogsClaude ? {...readMemberChannel(id),kind:"b3chat"} : undefined); } catch { /* best-effort */ }
+    try { pids = opts.codexBridgePids ? opts.codexBridgePids(id) : liveCodexBridgePids(id); } catch { pids = []; }
+    try { await doSetAgentEnabled(id, runtime, false); } catch { /* best-effort */ }
     const exited = await waitForExit(pids, { timeoutMs: opts.codexExitWaitMs ?? 10_000, isAlive: opts.isAlive });
-    try { cogsClaude ? (opts.removeClaudeCogsFiles ?? removeClaudeCogsFiles)(id) : doRemoveCodexBridgeFiles(id, { removeToken: true, removeHome: true }); } catch { /* best-effort */ }
+    try { doRemoveCodexBridgeFiles(id, { removeToken: true, removeHome: true }); } catch { /* best-effort */ }
     return { ok: true, detail: exited ? "codex teardown 완료(브리지 종료 확인)" : "codex teardown 완료(브리지 종료 미확인 — 상한 초과, 잔여 파일 확인 필요)" };
   }
   // claude_channel teardown: 봇 LaunchAgent 정지(bootout) + plist/.env(토큰) 정리 — 고아 tmux·잔존 시크릿 방지(best-effort).
@@ -585,8 +581,7 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
 
   // 3) 런타임 활성화(self-mod — 인가된 executor에서만)
   // codex: 텔레그램 브리지 = 토큰 배치 → wrapper/plist 생성 → LaunchAgent bootstrap.
-  if (runtime === "codex" || (runtime === "claude_channel" && readMemberChannel(id,input.registryPath).kind === "b3chat")) {
-    const cogsClaude = runtime === "claude_channel";
+  if (runtime === "codex") {
     if (process.env.APPROVAL_EXECUTION_ENABLED !== "1") {
       steps.push({ step: "runtime", ok: false, detail: "실행 OFF(APPROVAL_EXECUTION_ENABLED≠1) — codex 브리지 기동 건너뜀" });
       return { ok: false, steps, error: "런타임 활성화 권한 OFF(팀장 인가 필요)" };
@@ -594,10 +589,10 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
     let activated = false;
     try {
       placeCodexToken(id, bot_token);
-      const bridgePaths = cogsClaude ? writeClaudeCogsFiles(id,readMemberChannel(id,input.registryPath)) : writeCodexBridgeFiles(id);
+      const bridgePaths = writeCodexBridgeFiles(id);
       try { rmSync(bridgePaths.pidFile, { force: true }); } catch { /* stale marker cleanup best-effort */ }
       appendAuditFile("activation", "runtime_start", id, { runtime });
-      const res = await setAgentEnabled(id, runtime, true,cogsClaude ? readMemberChannel(id,input.registryPath) : undefined); // 브리지 LaunchAgent bootstrap + off명단 해제
+      const res = await setAgentEnabled(id, runtime, true); // 브리지 LaunchAgent bootstrap + off명단 해제
       appendAuditFile("activation", res.ok ? "runtime_done" : "runtime_failed", id, { runtime });
       steps.push({ step: "runtime", ok: res.ok, detail: res.detail });
       if (!res.ok) return { ok: false, steps, error: "codex 브리지 기동 실패" };
@@ -617,7 +612,7 @@ export async function activateMember(db: Database, input: ActivateInput): Promis
     } finally {
       if (!activated) {
         try {
-          const stopped = await setAgentEnabled(id, runtime, false, cogsClaude ? readMemberChannel(id, input.registryPath) : undefined);
+          const stopped = await setAgentEnabled(id, runtime, false);
           steps.push({ step: "runtime-cleanup", ok: stopped.ok, detail: stopped.detail });
         } catch { steps.push({ step: "runtime-cleanup", ok: false, detail: "실패한 브리지 정지 실패 — 서버에서 상태를 확인하세요." }); }
       }
