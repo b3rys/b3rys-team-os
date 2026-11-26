@@ -813,4 +813,3 @@ describe("CLAUDE_ESSENTIAL_TOLERANCE — claude 활성화 호출부의 관용 �
     expect(withOpts[0]).not.toContain("tolerateWhenPairing:"); // 인라인 리터럴 회귀 금지
   });
 });
-

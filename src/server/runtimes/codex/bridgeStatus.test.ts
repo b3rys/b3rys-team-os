@@ -66,4 +66,3 @@ test("Telegram receives protocol array summary headers", async () => {
   });
   expect(requests.some(r => String(r.text).includes("첫 요약"))).toBe(true);
 });
-
