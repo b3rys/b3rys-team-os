@@ -1,9 +1,9 @@
-// 팀원별 채널(b3chat) — 그룹 판정·그룹 차단 우회·순수 텍스트 발신·파일 주소·승인 요청 대체.
+// 팀원별 채널 — 그룹 판정·발신·파일 주소·승인 요청.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { handleMessage, resetChatThreads, runBridge, tgEdit, tgSend, type BridgeDeps } from "./bridge";
+import { handleMessage, resetChatThreads, runBridge, tgSend, type BridgeDeps } from "./bridge";
 import { downloadDmAttachments } from "./dmMedia";
 import { NOOP_DM_SESSION_STORE } from "./dmSessionStore";
 import { sendApprovalToMemberRoom } from "./appServerPopup";
@@ -13,7 +13,6 @@ import { DEFAULT_CHANNEL, isGroupChat, parseMemberChannel, type MemberChannel } 
 import type { CodexTurnResult } from "./runner";
 import type { ApprovalRequest } from "./appServerClient";
 
-const B3CHAT: MemberChannel = parseMemberChannel({ kind: "b3chat", api_base: "http://127.0.0.1:8741", allow_from: ["2"], owner_chat: "2" });
 const ok = (reply: string): CodexTurnResult => ({ ok: true, reply, detail: "ok", elapsedMs: 1 });
 
 let prevFc: string | undefined;
@@ -66,23 +65,7 @@ describe("그룹 판정 → 폴링 입구 차단 (텔레그램 회귀)", () => {
   });
 });
 
-describe("b3chat 채널", () => {
-  test("그룹 글(양수 방 id, type=group) → 차단 없이 바로 처리 — 서버가 이미 멘션·답장만 골라 보낸다", async () => {
-    const { d, seen } = deps(B3CHAT);
-    const r = await handleMessage(1, "@codexmember 안녕", 55, d, undefined, "poll", isGroupChat({ id: 1, type: "group" }));
-    expect(r.detail).toBe("delivered");
-    expect(seen.turns).toBe(1);
-  });
-
-  test("1:1 → 처리", async () => {
-    const { d, seen } = deps(B3CHAT);
-    const r = await handleMessage(2, "안녕", 55, d, undefined, "poll", false);
-    expect(r.detail).toBe("delivered");
-    expect(seen.turns).toBe(1);
-  });
-});
-
-describe("발신 — b3chat 은 순수 텍스트 한 번, 텔레그램은 MarkdownV2 그대로", () => {
+describe("발신 — 텔레그램은 MarkdownV2 그대로", () => {
   function recorder(okResult = true) {
     const calls: { url: string; body: Record<string, unknown> }[] = [];
     const fetchFn = (async (url: string, init?: RequestInit) => {
@@ -91,24 +74,6 @@ describe("발신 — b3chat 은 순수 텍스트 한 번, 텔레그램은 Markdo
     }) as unknown as typeof fetch;
     return { calls, fetchFn };
   }
-
-  test("b3chat sendMessage: 그 서버 주소로, parse_mode 없이, 이스케이프 걷고 한 번", async () => {
-    const { calls, fetchFn } = recorder();
-    const id = await tgSend("T", fetchFn, { apiBase: B3CHAT.apiBase, plainOnly: true })(2, "a\\.b \\(c\\)");
-    expect(id).toBe(9);
-    expect(calls.length).toBe(1);
-    expect(calls[0]!.url).toBe("http://127.0.0.1:8741/botT/sendMessage");
-    expect(calls[0]!.body).toMatchObject({ chat_id: 2, text: "a.b (c)" });
-    expect(String(calls[0]!.body.cogs_idempotency_key)).toMatch(/^codex:/);
-  });
-
-  test("b3chat editMessageText: parse_mode 없이 한 번", async () => {
-    const { calls, fetchFn } = recorder();
-    expect(await tgEdit("T", fetchFn, { apiBase: B3CHAT.apiBase, plainOnly: true })(2, 9, "x\\!")).toBe(true);
-    expect(calls.length).toBe(1);
-    expect(calls[0]!.url).toBe("http://127.0.0.1:8741/botT/editMessageText");
-    expect(calls[0]!.body).toEqual({ chat_id: 2, message_id: 9, text: "x!" });
-  });
 
   test("텔레그램(기본): api.telegram.org · 1차 MarkdownV2 — 지금과 같다", async () => {
     const { calls, fetchFn } = recorder();
@@ -165,7 +130,7 @@ describe("파일 — 채널 주소에서 받는다", () => {
   });
 });
 
-describe("승인 요청 — b3chat 은 글자로 남긴다", () => {
+describe("승인 요청 — 채널 설정 오류와 텔레그램 기본", () => {
   const req = { method: "item/commandExecution/requestApproval", params: { command: "ls -la" } } as unknown as ApprovalRequest;
   function recorder(statuses: number[]) {
     const calls: { url: string; body: Record<string, unknown> }[] = [];
@@ -176,41 +141,6 @@ describe("승인 요청 — b3chat 은 글자로 남긴다", () => {
     }) as unknown as typeof fetch;
     return { calls, fetchFn };
   }
-
-  test("owner_chat 으로, HTML 없이, '승인 필요:' + 요청 id + 버튼 함께", async () => {
-    const { calls, fetchFn } = recorder([200]);
-    expect(await sendApprovalToMemberRoom("bee", "prm_abc", req, { token: "T", fetchFn, channel: B3CHAT })).toBe(true);
-    expect(calls.length).toBe(1);
-    expect(calls[0]!.url).toBe("http://127.0.0.1:8741/botT/sendMessage");
-    const b = calls[0]!.body;
-    expect(b.chat_id).toBe("2");
-    expect(b.parse_mode).toBeUndefined();
-    expect(b.text).toBe("");expect(b.cogs_activity_code).toBe("approval_required");
-    expect(b.cogs_activity_args).toMatchObject({request_id:"prm_abc",operation_code:"run_command",detail:"ls"});
-    expect(b.text).not.toContain("<code>");
-    expect(b.reply_markup).toBeDefined();
-  });
-
-  test("버튼째 거절(404) → 버튼 없이 글자만 재전송", async () => {
-    const { calls, fetchFn } = recorder([404, 200]);
-    expect(await sendApprovalToMemberRoom("bee", "prm_abc", req, { token: "T", fetchFn, channel: B3CHAT })).toBe(true);
-    expect(calls.length).toBe(2);
-    expect(calls[1]!.body.reply_markup).toBeUndefined();
-    expect(calls[1]!.body.text).toBe("");expect(calls[1]!.body.cogs_activity_code).toBe("approval_required");
-  });
-
-  test("둘 다 실패 → false (호출부가 감사 기록을 남긴다)", async () => {
-    const { calls, fetchFn } = recorder([404, 404]);
-    expect(await sendApprovalToMemberRoom("bee", "prm_abc", req, { token: "T", fetchFn, channel: B3CHAT })).toBe(false);
-    expect(calls.length).toBe(2);
-  });
-
-  test("owner_chat 없으면 보내지 않는다(allow_from 을 목적지로 쓰지 않는다)", async () => {
-    const { calls, fetchFn } = recorder([200]);
-    const noOwner = parseMemberChannel({ kind: "b3chat", api_base: "http://127.0.0.1:8741", allow_from: ["2"] });
-    expect(await sendApprovalToMemberRoom("bee", "prm_abc", req, { token: "T", fetchFn, channel: noOwner })).toBe(false);
-    expect(calls.length).toBe(0);
-  });
 
   test("채널 설정 오류(b3chat 주소 없음) → 보내지 않는다", async () => {
     const { calls, fetchFn } = recorder([200]);

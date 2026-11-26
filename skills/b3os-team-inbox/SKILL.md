@@ -19,7 +19,7 @@ entry: scripts/send.sh · inbox.sh
 - 팀장께 최종 보고 → 아래 `--direct-to-gd`
 - 그룹방에 말하기 → 아래 `--to broadcast`
 - 슬랙 게시·호출 → `references/slack.md`
-- cogs 리액션(`react.sh`) · 팀버스 맥락 조회(`bus-recall.sh`) · Steno 파일 보내기(`steno-send.sh`) · 응답가드(`expect-report.sh`) → `references/tools.md`
+- 팀버스 맥락 조회(`bus-recall.sh`) · Steno 파일 보내기(`steno-send.sh`) · 응답가드(`expect-report.sh`) → `references/tools.md`
 
 옵션 값은 `--thread <값>` 처럼 공백으로 쓴다. `--thread=<값>` 은 `unknown arg` 로 실패한다. 신원은 워크스페이스에서 자동 판정되고 `--from` 은 막혀 있다.
 

@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { resolve } from "node:path";
 import { envFileTeamPathMismatches, serverTeamPaths, teamDbPathForChild, teamPathEnvLines, withTeamDbPathForChild } from "./teamDbPath";
 import { appServerSpawnEnv } from "../runtimes/codex/appServerClient";
-import { claudeCogsEnvironment } from "../runtimes/claude/cogsEnvironment";
 
 // The server opens `TEAM_DB_PATH ?? default` relative to its own folder (index.ts). A child in another folder
 // must get the path of that same file.
@@ -36,9 +35,6 @@ describe("member process environments carry the absolute path", () => {
   });
   test("codex app-server", () => {
     expect(appServerSpawnEnv(undefined, base).TEAM_DB_PATH).toBe(expected);
-  });
-  test("claude cogs runner", () => {
-    expect(claudeCogsEnvironment(base).TEAM_DB_PATH).toBe(expected);
   });
 });
 

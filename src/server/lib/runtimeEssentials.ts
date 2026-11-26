@@ -1,4 +1,3 @@
-import { readMemberChannel } from "./memberChannel";
 import { existsSync, readFileSync } from "node:fs";
 import type { AgentRecord } from "../types";
 import { REPO_ROOT } from "./personaTemplates";
@@ -24,7 +23,6 @@ export interface RuntimeEssentialDeps {
   pidAlive?: (pid: number) => boolean;
   home?: string;
   repoRoot?: string;
-  channelKind?: (id:string)=>string;
 }
 
 const okResult = (): EssentialCheckResult => ({ ok: true, missing: [], canAutoFix: false });
@@ -139,23 +137,11 @@ export function createRuntimeEssentialsRegistry(deps: RuntimeEssentialDeps = {})
     pidAlive: deps.pidAlive ?? defaultPidAlive,
     home: deps.home ?? HOME,
     repoRoot: deps.repoRoot ?? REPO_ROOT,
-    channelKind:deps.channelKind ?? ((id:string)=>readMemberChannel(id).kind),
   };
 
   class ClaudeEssentials implements RuntimeEssentials {
     readonly runtime = "claude_channel";
     check(agent: Pick<AgentRecord, "id">): EssentialCheckResult {
-      if (d.channelKind(agent.id) === "b3chat") {
-        const base = `${d.repoRoot}/var/claude-cogs/${agent.id}`;
-        const missing:string[]=[];
-        if (!hasNonEmptyFile(`${d.repoRoot}/var/secrets/${agent.id}.bot-token`,d)) missing.push("token:claude app bot-token");
-        if (!fileContainsNonEmptyExport(`${base}-launch.sh`,"CODEX_ALLOW_FROM",d)) missing.push("allowFrom:claude app rooms");
-        const marker=readPidMarker(`${base}.pid`,d);
-        if (!marker || (marker.agentId && marker.agentId !== agent.id) || !d.pidAlive(marker.pid)) missing.push("poller:claude app ready pid");
-        if (!d.exists(`${d.home}/Library/LaunchAgents/${launchdPrefix()}.claude-cogs-${agent.id}.plist`) || !d.exists(`${base}-launch.sh`)) missing.push("channel:claude app plist/wrapper");
-        if (!hasNonEmptyFile(`${d.home}/.claude-agents/${agent.id}/config.toml`,d)) missing.push("model:claude app config");
-        return result(missing,missing.length>0);
-      }
       const stateDir = `${d.home}/.claude/channels/telegram-${agent.id}`;
       const paths = {
         envFile: `${stateDir}/.env`,

@@ -1,15 +1,5 @@
 # 보조 도구
 
-## cogs 메시지 리액션 (`react.sh`)
-```bash
-scripts/react.sh --msg <받은 cogs 메시지의 버스 id> --emoji 👍
-scripts/react.sh --msg <id> --emoji ""            # 지우기
-scripts/react.sh --msg <id> --emoji 👍 --no-reply  # 리액션만 하고 글 답 없이 끝낼 때
-```
-- 내 봇으로, 내가 받은 cogs 메시지에만 붙는다. 이모지는 하나이고 다시 부르면 바뀐다.
-- 리액션은 답을 대신하지 않는다. 답할 일이면 답한다.
-- 글 답 없이 끝낼 때 `--no-reply` 를 안 붙이면 팀장 앱에 "입력 중"이 4분 남았다가 "응답 시간이 초과되었어요"가 뜬다. 이미 답했으면 붙여도 무방하다.
-
 ## 팀버스 맥락 조회 (`bus-recall.sh`)
 1:1 세션에서 팀버스 맥락이 필요할 때 쓴다(1:1 방과 팀버스는 다른 세션). team.db 를 read-only 로 조회하니 SQL 을 직접 치지 말고 이걸 먼저 쓴다.
 ```bash

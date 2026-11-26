@@ -1,5 +1,5 @@
 import { uiText } from "./uiStrings";
-/** Compact tool targets for cogs; command arguments and tool output never leave this formatter. */
+/** Compact tool targets; command arguments and tool output never leave this formatter. */
 const clip = (text: string, max = 45): string => Array.from(text).slice(0, max).join("");
 export const filename = (path: string): string => safeText(path.replace(/\\/g, "/").split("/").pop() ?? "");
 
@@ -17,7 +17,7 @@ export function safeText(text: string): string {
     .replace(/[\r\n\t\x00-\x1f]/g, " "));
 }
 
-export type CogsActivityArgs = { target?: string; count?: number };
+export type ToolActivityArgs = { target?: string; count?: number };
 
 function commandInfo(command: string): { executable: string; target: string; reading: boolean } {
   const words = command.trim().match(/(?:[^\s"'\\]|\\.|"[^"]*"|'[^']*')+/g) ?? [];
@@ -30,7 +30,7 @@ function commandInfo(command: string): { executable: string; target: string; rea
     const path = words.find(word => !word.startsWith("-"));
     return { executable, reading, target: path && /^[\w./\\-]+$/.test(path) ? filename(path) : "" };
   }
-  // Only known executable/subcommand pairs may cross the app boundary.
+  // Only known executable/subcommand pairs may leave the formatter.
   const allowed: Record<string, readonly string[]> = {
     git: ["status", "diff", "log"],
     bun: ["test", "run", "build", "install"],
@@ -45,8 +45,8 @@ function commandInfo(command: string): { executable: string; target: string; rea
   return { executable, reading, target: clip(`${executable}${subcommand}`) };
 }
 
-/** Only sanitized tool data crosses the app boundary; apps own every label. */
-export function cogsActivityArgs(item: unknown): CogsActivityArgs {
+/** Only sanitized tool data is returned. */
+export function toolActivityArgs(item: unknown): ToolActivityArgs {
   const it = (item ?? {}) as Record<string, any>;
   const command = it.command ?? it.cmd;
   if (command) return { target: commandInfo(Array.isArray(command) ? command.join(" ") : String(command)).target };
@@ -66,16 +66,16 @@ export function cogsActivityArgs(item: unknown): CogsActivityArgs {
   return {};
 }
 
-/** For Telegram only, which has no application code-to-label renderer. */
-export function cogsActivityLine(item: unknown): string {
-  const code = cogsActivityCode(item) ?? "tool";
-  const args = cogsActivityArgs(item);
+/** Renders an activity code and its sanitized target as one display line. */
+export function toolActivityLine(item: unknown): string {
+  const code = toolActivityCode(item) ?? "tool";
+  const args = toolActivityArgs(item);
   const label = uiText(code, args);
   return args.target ? `${label} · ${args.target}` : args.count !== undefined ? uiText("activity_count",{label,count:args.count}) : label;
 }
 
 /** Activity codes describe observed tools; receipt/status notes have no tool code. */
-export function cogsActivityCode(item: unknown): string | undefined {
+export function toolActivityCode(item: unknown): string | undefined {
   const it = (item ?? {}) as Record<string, any>;
   if (it.type === "webSearch" || it.type === "web_search") {
     return it.action?.type === "openPage" || it.action?.url || it.url ? "fetch_web" : "search";

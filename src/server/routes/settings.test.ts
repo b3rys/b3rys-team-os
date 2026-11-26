@@ -1672,13 +1672,13 @@ describe("system-op: MCP 창구 토글", () => {
   });
 });
 
-test("cogs tool scope cannot be changed through member API", async()=>{
- const {app,registryPath}=setup(AGENTS.map(agent=>({...agent,cogs_tool_scope:"folder"})));
- const rejected=await app.request("/members/steve",patch({cogs_tool_scope:"full"}));
+test("server-file-only member fields cannot be changed through member API", async()=>{
+ const {app,registryPath}=setup(AGENTS.map(agent=>({...agent,server_file_field:"folder"})));
+ const rejected=await app.request("/members/steve",patch({server_file_field:"full"}));
  expect(rejected.status).toBe(400);
- const accepted=await app.request("/members/steve",patch({icon:"flask-conical",cogs_tool_scope:"full"}));
+ const accepted=await app.request("/members/steve",patch({icon:"flask-conical",server_file_field:"full"}));
  expect(accepted.status).toBe(200);
- expect(JSON.parse(readFileSync(registryPath,"utf8")).find((agent:any)=>agent.id==="steve").cogs_tool_scope).toBe("folder");
+ expect(JSON.parse(readFileSync(registryPath,"utf8")).find((agent:any)=>agent.id==="steve").server_file_field).toBe("folder");
 });
 
 describe("Codex member permission mode",()=>{
