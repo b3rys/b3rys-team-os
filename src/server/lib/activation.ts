@@ -32,7 +32,7 @@ function liveCodexBridgePids(id: string): number[] {
 import { ensureClaudePollerUp } from "../runtimes/claude/pollerHealth";
 import { placeClaudeToken, writeClaudeBridgeFiles, seedClaudeTrust, seedClaudeAccess, killClaudeTmux, reconnectClaudeTelegram, claudeBridgePaths, installReplyGuardHook, installOwnerGateHook, installOutboundHook, installProgressHook, uninstallOutboundHook, uninstallReplyGuardHook, uninstallRecoveryHook, removeClaudeBridgeFiles } from "../runtimes/claude/launcher";
 import { isTier2Outbound, isTier2Shadow } from "../runtimes/claude/tier2Flag";
-import { setAgentEnabled, clearAgentOff, isAgentOff } from "./agentControl";
+import { setAgentEnabled, clearAgentOff, isAgentOff, hermesLaunchdLabel } from "./agentControl";
 import { activeOfficialMemberCount, isTeamOfficialMember, MAX_OFFICIAL_TEAM_MEMBERS } from "./agentMembership";
 import { ambientAgents } from "./registry";
 import { checkRuntimeAuth } from "./runtimeAuth";
@@ -116,6 +116,8 @@ export interface TeardownDeps {
   removePathWithRetries?: typeof removePathWithRetries;
   existsSync?: typeof existsSync;
   rmSync?: typeof rmSync;
+  /** hermes: base 프로필의 마지막 hermes 멤버가 떠날 때만 true — 게이트웨이를 끄고 plist 를 지우되 프로필 dir(다른 설치의 원본)은 남긴다. */
+  stopBaseHermesGateway?: boolean;
   sleepMs?: number; // hermes teardown 전 대기(기본 1500ms, 프로필 dir 파일잠금 레이스 방지) — 테스트에서 0으로 단축
   /** codex: 끄기 전에 잡아 둘 브리지·자식 pid(시험은 가짜 프로세스) */
   codexBridgePids?: (id: string) => number[];
@@ -129,7 +131,7 @@ export interface TeardownDeps {
 export async function teardownRuntime(
   id: string,
   runtime: string,
-  agent: { hermes_profile?: string | null } | undefined,
+  agent: { hermes_profile?: string | null; gateway_service?: string | null } | undefined,
   opts: TeardownDeps = {},
 ): Promise<TeardownResult> {
   if (opts.skip) return { ok: true, detail: "teardown 건너뜀(skip — 테스트 격리 또는 skipRuntimeCleanup)", skipped: true };
@@ -165,10 +167,14 @@ export async function teardownRuntime(
   if (runtime === "hermes_agent") {
     const prof = agent?.hermes_profile ?? id;
     const isBaseHermesProfile = isHermesProfileProtected(prof);
-    try { if (!isBaseHermesProfile) await doSetAgentEnabled(id, "hermes_agent", false); } catch { /* best-effort */ }
+    const stopBase = isBaseHermesProfile && opts.stopBaseHermesGateway === true;
+    try { if (!isBaseHermesProfile || stopBase) await doSetAgentEnabled(id, "hermes_agent", false); } catch { /* best-effort */ }
     await new Promise((r) => setTimeout(r, opts.sleepMs ?? 1500)); // 게이트웨이 bootout 후 프로필 dir 해제 대기(레이스 방지)
-    if (/^[a-z0-9_-]+$/i.test(prof) && !isBaseHermesProfile) {
-      try { const hp = `${HH}/Library/LaunchAgents/ai.hermes.gateway-${prof}.plist`; if (doExistsSync(hp)) doRmSync(hp); } catch { /* best-effort */ }
+    // 끄기(setHermes)와 같은 라벨의 plist 를 지운다 — gateway_service 가 기본 라벨과 다르면 기본 이름만 지워서는
+    //   실제 plist 가 남아 다음 로그인 때 게이트웨이가 다시 뜬다. 라벨은 파일 이름 한 조각으로만 쓴다.
+    const label = hermesLaunchdLabel(agent, prof);
+    if (/^[a-z0-9_-]+$/i.test(prof) && /^[A-Za-z0-9._-]+$/.test(label) && !label.startsWith(".") && (!isBaseHermesProfile || stopBase)) {
+      try { const hp = `${HH}/Library/LaunchAgents/${label}.plist`; if (doExistsSync(hp)) doRmSync(hp); } catch { /* best-effort */ }
     }
     if (/^[a-z0-9_-]+$/i.test(id)) {
       try { const ct = `${HH}/.hermes/credentials/${id}-token.txt`; if (doExistsSync(ct)) doRmSync(ct); } catch { /* best-effort */ }
@@ -176,7 +182,8 @@ export async function teardownRuntime(
     if (/^[a-z0-9_-]+$/i.test(prof) && !isBaseHermesProfile) {
       try { const pd = `${HH}/.hermes/profiles/${prof}`; await doRemovePathWithRetries(pd, { recursive: true, force: true }); } catch { /* best-effort */ }
     }
-    return { ok: true, detail: isBaseHermesProfile ? "hermes teardown 건너뜀(base profile 보존)" : "hermes teardown 완료(best-effort)" };
+    return { ok: true, detail: stopBase ? "hermes 게이트웨이 정지(마지막 멤버, base profile dir 보존)"
+      : isBaseHermesProfile ? "hermes teardown 건너뜀(base profile 보존)" : "hermes teardown 완료(best-effort)" };
   }
   // openclaw teardown: 계정 disable(게이트웨이 restart) + 토큰/allowFrom/agent dir 정리.
   if (runtime === "openclaw") {
@@ -893,7 +900,11 @@ export async function swapRuntime(db: Database, input: SwapInput, deps: SwapDeps
   const isBaseHermesTarget = isHermesMemberProtected(target.runtime, target.hermes_profile ?? id);
   const wouldClaimConfiguredBase =
     targetRuntime === "hermes_agent" && id.toLowerCase() === HERMES_BASE_PROFILE.toLowerCase();
-  if (isBaseHermesTarget || wouldClaimConfiguredBase) {
+  // 예외: base 프로필을 쓰는 멤버가 hermes 런타임의 마지막 멤버이고 hermes 밖으로 나가면, 그 프로필을 원본으로 쓸
+  //   다른 hermes 멤버가 없다. 막으면 마지막 멤버는 영영 옮길 수 없다 → 허용하되 프로필 dir 은 지우지 않는다(teardown 이 게이트웨이만 끈다).
+  const lastHermesLeaving = isBaseHermesTarget && targetRuntime !== "hermes_agent"
+    && !list.some((a) => a.id !== id && a.runtime === "hermes_agent");
+  if ((isBaseHermesTarget && !lastHermesLeaving) || wouldClaimConfiguredBase) {
     return {
       ok: false, steps,
       error: `${HERMES_BASE_PROFILE}는 모든 hermes 멤버가 공유하는 base 프로필(auth 소스)입니다. 런타임 교체 대상이 아닙니다.`,
@@ -991,7 +1002,7 @@ export async function swapRuntime(db: Database, input: SwapInput, deps: SwapDeps
 
   // STEP2 — 구 런타임 teardown. 레지스트리는 아직 안 건드림(setHermes가 ambientAgents()로 프로필을
   //   조회하는데 먼저 지우면 profile≠id 케이스에서 엉뚱한 프로필을 건드리는 offboard와 동일 순서 교훈).
-  const teardown = await doTeardownRuntime(id, oldRuntime, target, {});
+  const teardown = await doTeardownRuntime(id, oldRuntime, target, lastHermesLeaving ? { stopBaseHermesGateway: true } : {});
   steps.push({ step: "teardown", ok: teardown.ok, detail: teardown.detail });
 
   // STEP3 — 레지스트리 원자 갱신(단일 write — runtime+status_provider가 절대 따로 안 쓰인다. 따로 쓰면
