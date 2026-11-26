@@ -29,4 +29,3 @@ test('ordinary input delayed by attachments falls back in original room when act
  expect(await call).toBe('newTurn');expect(received).toEqual([]);expect(queued).toHaveLength(1);
  await queued[0]!();expect(ran).toBe(true);unregisterActiveTurn('attachments',other);
 });
-
