@@ -172,11 +172,11 @@ describe("팀 팩 스킬 폴더 (B3OS_EXTRA_SKILLS_DIR)", () => {
   });
 
   it("팩 스킬은 공개 목록 뒤 별도 줄로, 팩 경로와 함께 나온다", () => {
-    const dir = pack({ "b3rys-cogs-deploy": "deploy cogs", "b3rys-hidden": "" });
+    const dir = pack({ "b3rys-app-deploy": "deploy app", "b3rys-hidden": "" });
     const table = buildSkillTable(dir);
     expect(table.startsWith(buildSkillTable(null))).toBe(true);
     expect(table).toContain("**Team pack skills**");
-    expect(table).toContain("deploy cogs → `b3rys-cogs-deploy`");
+    expect(table).toContain("deploy app → `b3rys-app-deploy`");
     expect(table).not.toContain("b3rys-hidden");   // trigger 없는 스킬은 나가지 않는다 — 공개와 같은 규칙
   });
 
