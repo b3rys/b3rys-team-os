@@ -6,13 +6,12 @@ import type { AgentRecord } from "../types";
 import type { ChannelAdapter, SendRequest, SendResult } from "./types";
 import { postTelegramAsHermes } from "../lib/hermesBridge";
 import { postTelegramAsOpenclaw } from "../lib/openclawBridge";
-import { canSendAsBot, sendAsAgentBot } from "../lib/telegramBotSend";
+import { canSendAsBot, sendAsAgentBot, TELEGRAM_SEND_LIMIT } from "../lib/telegramBotSend";
+import { splitForTelegram } from "../runtimes/codex/telegramMarkdown";
 
 const normTgHandle = (s: string): string => s.replace(/^@/, "").toLowerCase();
 
-export const telegramChannel: ChannelAdapter = {
-  id: "telegram",
-  async send(req: SendRequest): Promise<SendResult> {
+async function sendOne(req: SendRequest): Promise<SendResult> {
     if (!req.agent) return { ok: false, error: "telegram send requires agent" };
     if (req.agent.runtime === "openclaw") {
       const r = await postTelegramAsOpenclaw(req.agent, req.target, req.text, req.replyToMessageId);
@@ -32,6 +31,21 @@ export const telegramChannel: ChannelAdapter = {
     // 봇 토큰이 없는 런타임(hermes 계열)만 CLI 경로
     const ok = await postTelegramAsHermes(req.agent, req.target, req.text);
     return { ok };
+}
+
+export const telegramChannel: ChannelAdapter = {
+  id: "telegram",
+  // 모든 텔레그램 발신의 단일 출구. 한도(4096)를 넘는 글은 여기서 순서대로 나눠 보낸다 — 넘기면 텔레그램이 통째로 거절하거나(openclaw·hermes) 잘려 나간다(bot).
+  async send(req: SendRequest): Promise<SendResult> {
+    const parts = splitForTelegram(req.text, TELEGRAM_SEND_LIMIT);
+    if (parts.length <= 1) return sendOne(req);
+    let last: SendResult = { ok: false };
+    for (const [i, text] of parts.entries()) {
+      // 인용 답장은 첫 조각에만 붙인다.
+      last = await sendOne({ ...req, text, replyToMessageId: i === 0 ? req.replyToMessageId : undefined });
+      if (!last.ok) return last; // 앞 조각이 갔어도 실패는 숨기지 않는다
+    }
+    return last;
   },
   // 인바운드 텔레그램 bot username → 팀원 id. legacy(telegramCapture.ts:244)와 byte-동일 매칭:
   // channel_identities.telegram 우선 → telegram_bot_username 폴백, 둘 다 @·대소문자 정규화 비교.
